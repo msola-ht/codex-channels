@@ -3,13 +3,13 @@
 ## 日常模型管理
 
 WebUI 从「模型管理 → 模型配置」查看各提供商模型；CLI 从 `codexc setup → 模型与提供商 → 第三方 Provider → 模型管理` 进入。
-共享目录只显示一份，并列出全部受影响账户。连接、账户和 Key 仍在既有接入入口设置。
+每个账户按完整 Provider ID 展示自己的目录，同名模型以 `provider + model` 精确选择。连接、账户和 Key 仍在既有接入入口设置。
 
 - 自定义 Responses/Chat 目录支持添加、编辑、默认设置和独立本地移除。模型编辑只提交模型字段，保存时重新读取连接和凭据；已有 ID 不可直接改名，需先添加再移除旧 ID。
 - CCG/OCG 支持本地移除；添加和模板导入使用统一 CLI 菜单中的既有交互。CLP 增加不联网的本地移除，联网更新保留为独立显式操作。
-- DeepSeek 暂不开放单模型移除；使用官方共享目录的第三方仅展示已保存目录和已有设置。CLP Relay 仍使用独立目录及 Key 管理。
+- DeepSeek 暂不开放单模型移除；使用官方模型目录的第三方仅展示已保存目录和已有设置。CLP Relay 仍使用独立原生目录及 Key 管理。
 
-移除先预览再确认，保护全部共享账户默认值、最后一个模型和当前主提供商的 Gateway 显式默认值。
+移除先预览再确认，保护目标账户默认值、最后一个模型和当前主提供商的 Gateway 显式默认值。
 配置或目录变化后必须重新预览。旧接入编辑、启用选择和联网刷新不能通过取消旧项绕过移除流程；新增或曾移除模型需显式选择才加入。
 保存前备份原目录，保存不自动重启服务；按结果提示重启以刷新 App Server 展示。
 历史会话与任务保留，失效引用可能执行失败，不自动替换模型。
@@ -75,28 +75,47 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账�
 Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
 按账户适配器创建账户窄适配器，并以精确 Provider ID 登记。未知能力和
 重复 Provider 适配器均启动失败关闭，不回退 OpenAI。OpenCode Go 与 CCG 多账户实例继承基础定义的能力
-元数据；watcher 另保留未配置的共享模型目录，并按 Provider 合并重复定义与路径。
+元数据；watcher 按精确 Provider ID 及其账户目录监控变化。
 
 ### 3.2 模型目录与 manifest
 
-- 在 `~/.codex-connect/providers/<id>/` 生成 `models.json`，schema 与现有目录一致：每个模型必须有
+- DS、CLP、OCG、CCG 在 `~/.codex-connect/providers/<family>/accounts/<账户>/` 分别生成 `models.json`；`<family>` 为 `deepseek`、`clp`、`opencode-go` 或 `ccg`。每个 Provider ID 拥有独立目录，schema 与现有目录一致：每个模型必须有
   `context_window`、非空 `supported_reasoning_levels`、合法 `default_reasoning_level`、
   `display_name` 与输入能力；`max_context_window` 存在时作为可设置窗口的上限，上下文窗口
-  只由「受管模型目录上下文窗口」按模型名统一写入，其余字段保持下载原样；`auto_compact_token_limit`
+  由「受管模型目录上下文窗口」按精确 Provider ID 和模型写入，不向其他账户广播；`auto_compact_token_limit`
   是独立的上游压缩阈值，不换算为上下文窗口，修改窗口时也不清空该字段；
-- 同目录写入 `models.manifest.json`：目录来源与下载时间（CLP 另记 relay 提交与跟随模型，OCG 额外记录下载
+- 同目录写入 `models.manifest.json`：目录来源与下载时间（CLP 另记 relay 提交，OCG 额外记录下载
   `sha256`）；Profile（切换模式）与固定基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
 - 目录按 Provider 隔离；同名模型（如两个 Provider 都提供 `deepseek-flash`）是独立选项，
- 模型 key 为 `provider + model`；
-- 可选模型以各 Provider 生成的模型目录为准：OCG/CCG 初始以 DS 完整目录为基础，复制 Flash 内容增加 V4.1，并按 Provider 映射模型 ID；配置后可通过共享模型管理显式添加上游支持的 Responses 模型和选择启用列表。新增模型的准确 ID 与能力必须确认，不把 Cline 专属路由或 Chat 参数复制给其他提供商；
+  模型 key 为 `provider + model`，默认模型、思考等级、上下文、启用名单、移除与刷新均按账户独立；
+- 可选模型以各 Provider 生成的模型目录为准：OCG/CCG 初始从 DS 官方脚本下载完整目录，复制 Flash 内容增加 V4.1，并按 Provider 映射模型 ID；配置后可通过账户模型管理显式添加上游支持的 Responses 模型和选择启用列表。新增模型的准确 ID 与能力必须确认，不把 Cline 专属路由或 Chat 参数复制给其他提供商；
 - 默认模型写入 Profile 后，Profile 顶层 `model_reasoning_effort` 必须镜像目录默认值，
   运行时校验不一致即失败关闭。
 
-模型选择复用 `scripts/provider-model-selection.mjs`，保护默认模型并限制启用数量；OCG/CCG 共享目录事务复用 `scripts/managed-provider-model-management.mjs`。CLP 保留官方候选目录下载与 Chat 能力映射，自定义 Responses 保留模板 ID 映射与版本 5 目录格式。通用提示词由 `runtime/third-party-coding-instructions.mjs` 提供，显式写入新定义；不得直接替换版本 5 生成器缺省值，否则既有目录的逐字段一致性校验会失败。
+模型选择复用 `scripts/provider-model-selection.mjs`，保护默认模型并限制启用数量；OCG/CCG 账户目录事务复用 `scripts/managed-provider-model-management.mjs`。CLP 保留官方候选目录下载与 Chat 能力映射，自定义 Responses 保留模板 ID 映射与版本 5 目录格式。通用编程指令由 `runtime/third-party-coding-instructions.mjs` 提供。
+
+`runtime/model-template-prompts.mjs` 负责补全缺失的基础提示文本，保留显式值；`approvals: null` 按已确认规则继承基础审批提示词，缺失的 `token_budget` 整组携带必要开关与阈值。`runtime/model-template-catalog.mjs` 在显式创建或更新时读取仓库基础快照，把完整提示词固化到目录或定义的 `modelMessages`。加载已有目录只按其已保存内容生成并校验，不注入当前模板，避免模板更新改变磁盘定义／生成目录的一致性。
 
 自定义 Responses 的设置向导在能力填写后统一多选启用模型；添加与编辑保存必须保留全部已有模型，移除请使用统一模型管理的独立移除入口，当前默认模型不能移除。模板更新保留已有自定义提示词。目录写入继续使用现有备份及未完成事务恢复机制；不自动迁移或重写既有数据。
 
-自定义 Responses 出站复核与配置加载共用版本 5、允许字段及定义／生成目录一致性校验。目录 `.pending` 或全局 DS/CP 上下文同步标记存在时，普通 HTTP 和 Responses WS 均拒绝新请求；读取前后检查标记，目录或事务不可用统一返回 `503 provider_catalog_unavailable`。恢复有效目录并完成事务后，下一次请求重新复核，不缓存失败或成功名单。
+#### 旧共享目录账户升级
+
+旧代码曾让同一类型的账户共用 `providers/<family>/models.json` 和 `models.manifest.json`。源码升级到本版前，先退出 Remote TUI 和 Desktop 等连接，停止整个 App Server（含受监管账户及聚合实例），再在新源码仓库根目录执行显式拆分。服务命令及 `all` 范围见[后台服务与更新](user-guide.md#5-后台服务与更新)；可在本机终端使用以下流程，按原运行状态恢复所需服务：
+
+```sh
+codexc stop all
+node scripts/isolate-provider-catalogs.mjs             # 默认仅预览受影响 Provider
+node scripts/isolate-provider-catalogs.mjs --write     # 显式执行拆分
+codexc start all
+```
+
+拆分使用全局 Provider 管理锁，将旧目录及 manifest 原样复制到每个账户目录，并更新切换 Profile 或固定主配置的 `model_catalog_json`，保留原共享文件。它不下载模板、不合并窗口、不自动重启服务，也不由源码更新器自动执行。写入、恢复和回滚都要求整个 App Server 已停止；监管状态无法确认时拒绝操作。
+
+写入前把原值、目标值和路径保存到私有 `~/.codex-connect/private/provider-catalog-isolation.json`。该未完成记录存在时，新 runtime 拒绝加载账户配置及使用目录；成功后保存为同路径 `.backup` 并移除未完成记录。中断后先保持服务停止，再运行 `node scripts/isolate-provider-catalogs.mjs --resume` 完成，或 `--rollback` 恢复拆分前内容。恢复发现当前文件既非原值也非目标值时拒绝覆盖，应先核对恢复记录与后续修改；已有 `.backup` 也不会被新拆分覆盖。
+
+回滚仅恢复拆分时的文件和引用，须配合旧代码使用；它不会把各账户拆分后的窗口、思考等级或其他修改反向合并到旧共享目录。不要删除未完成记录来绕过保护。若旧版本已有未完成的 DS/CP 上下文事务，须先通过既有 `primary-provider recover` 或 `provider recover` 入口显式恢复，再拆分；本版不再创建新的跨目录同步事务。真实用户目录不会自动迁移。
+
+自定义 Responses 出站复核与配置加载共用版本 5、允许字段及定义／生成目录一致性校验。目录 `.pending` 或旧 DS/CP 上下文事务标记存在时，普通 HTTP 和 Responses WS 均拒绝新请求；读取前后检查标记，目录或事务不可用统一返回 `503 provider_catalog_unavailable`。恢复有效目录并完成事务后，下一次请求重新复核，不缓存失败或成功名单。受管账户的出站复核另检查账户目录拆分未完成记录；拆分不改 CP 目录。
 
 OCG/CCG 与自定义 `cp-*` 的普通代理及聚合下游均在发送前复核当前目录：HTTP 和 Responses WS 拒绝未知／已停用模型，旧会话不自动换模型。自定义固定模式与切换模式使用相同的目录保护，固定模式按实际 `cp-*` 身份选择目录，内部主实例路由键不参与模型名单判断；Chat 上游同样在转换前复核。HTTP 错误为 `409 provider_model_disabled` 或目录不可用的 `503 provider_catalog_unavailable`；WS 返回对应 error 后关闭连接。CLP 保留专属错误码，独立 Relay 沿用自己的授权。名单约束即时读取，目录展示与能力仍按原服务刷新流程应用。
 
@@ -387,9 +406,9 @@ Chat 桥以完整 Chat 数据事件计空闲，Codex 仍以实际收到的完整
 填写平台的 Responses 基础地址（例如 `https://www.zzshu.cc/v1`）、API Key 和一个或多个模型。
 自定义第三方 Provider 支持两种上游接口，在填写基础地址后选择：`Responses` 直连上游，或 `Chat Completions` 由网关的 Chat 桥转换（`function`、`namespace`、自由格式 `custom`、客户端 `tool_search` 与 `agent_message` 均由桥处理）。选 Chat Completions 时 WebSocket 强制关闭，客户端检索由用户逐项手动声明或选择探测后回填，不提供 Responses 私有能力（加密推理回放、远程压缩、Fast 档位），模型转发（Relay）对该 Provider 只宣告原生 Chat 并按 Chat 转发，不宣告 Responses；自动审批等带结构化输出的请求同时声明工具时，桥把要求的 JSON schema 追加到系统消息并省略 `response_format`，以适配不接受两者并存的 Chat 上游（托管 CLP 上游已验证接受，保持 `response_format`）。该降级只由提示词保证，桥不校验最终文本是否为 JSON，降级事实记为请求诊断 `conversion.structuredOutput=prompt`；模型仍由统计代理按 Provider 目录拒绝目录外或已停用模型。选择结果写在 `~/.codex-connect/providers/responses/<Provider ID>/provider.json`（0600，缺失按 `responses`），修改后运行 `codexc restart all`。
 CLI 新增或编辑时分别询问是否导入官方 Codex、DeepSeek 模型，勾选平台支持的条目后，逐项填写平台模型 ID，确认“模板 ID → 平台 ID”。多选时按空格勾选、回车确认；空选会提示尚未导入，并提供返回选择或跳过本类模板的选项。两类均可导入，也可跳过后手填。
-官方模板读取当前 Codex CLI 的内置目录，排除不会原样作为请求等级发送的 Codex 专用 `ultra` / `persistent` 模式；其余等级与默认值仍需通过 CP 校验，不能转换时明确报错并使用手填入口；DS 优先读取现有本地共享目录；没有时复用 DS 官方脚本下载与提取流程，不执行脚本。读取失败明确报错，不回退其他来源。
-官方 Codex 与 DS 模板均导入模型 ID、显示名称、描述、当前及最大上下文窗口、思考等级与说明、默认等级、图片能力及受支持的扩展设置。DS 模板先修正详细程度与摘要声明，再保留非空 `model_messages.instructions_template`；不复制工具支持声明、压缩兼容标识和多代理专用元数据，工具能力在填写 Key 后分别询问 `apply_patch` 与 `tool_search`，用户可手动声明或选择探测本项。模型 ID 可映射为平台实际名称；生成目录的其余必需字段使用项目统一默认值。请求使用填写的平台 ID，同一 Provider 内不允许重复。导入后选择默认模型，可调整能力并继续手动添加其他模型。编辑时，唯一已有模板映射会预填平台 ID；同 ID 须明确确认才用模板替换已有模型的名称、能力及关联，默认不覆盖，拒绝则保留原值。按 ID 合并，不重复添加已有条目；同一批导入仍禁止两个模板占用同一平台 ID，未选中的模型继续保留供后续编辑。
-模板副本独立保存。DS 模型可选择“跟随模板上下文”，须先配置本地 DS 目录；CLI 或 WebUI 修改 DS 上下文时，现有受管目录事务会同步关联的 CP 模型，平台 ID 与其他能力保持独立。CLI 编辑及 WebUI 可关闭跟随，关闭后保留当前窗口。删除最后一个 DS 账户或重建缺失的 DS 目录前，必须先关闭关联 CP 模型的跟随，避免留下失效关联；同一窗口值再次应用时也会修正跟随副本的差异。没有启用跟随的副本不受源目录变化影响；模型 ID、能力仍须符合平台实际支持情况。WebUI 可编辑保存后的能力；已有平台 ID 保持不变，改名需先添加再通过本地移除删除旧 ID。目前模板勾选入口在 CLI。
+官方模板读取当前 Codex CLI 的内置目录，排除不会原样作为请求等级发送的 Codex 专用 `ultra` / `persistent` 模式；其余等级与默认值仍需通过 CP 校验，不能转换时明确报错并使用手填入口。DS 模板读取仓库 `runtime/model-catalog-deepseek.json`，与 CLP Flash 共用，不读取账户目录或在导入时下载。读取失败明确报错，不回退其他来源。
+官方 Codex 与 DS 模板均导入模型 ID、显示名称、描述、当前及最大上下文窗口、思考等级与说明、默认等级、图片能力及受支持的扩展设置，并保留完整 `model_messages` 为 `modelMessages`。DS 模板先修正详细程度与摘要声明；工具支持声明、压缩兼容标识及其他专用能力不会因提示词导入而启用，工具能力在填写 Key 后分别询问 `apply_patch` 与 `tool_search`，用户可手动声明或选择探测本项。模型 ID 可映射为平台实际名称；生成目录的其余必需字段使用项目统一默认值。请求使用填写的平台 ID，同一 Provider 内不允许重复。导入后选择默认模型，可调整能力并继续手动添加其他模型。编辑时，唯一已有模板映射会预填平台 ID；同 ID 须明确确认才用模板替换已有模型的名称、能力及关联，默认不覆盖，拒绝则保留原值。按 ID 合并，不重复添加已有条目；同一批导入仍禁止两个模板占用同一平台 ID，未选中的模型继续保留供后续编辑。
+模板副本独立保存，后续源模板或 DS 账户窗口变化不联动 CP。旧 v5 中的 `template.followContext` 仅作为历史元数据读取，不产生跟随行为，显式保存时移除该字段。WebUI 可编辑保存后的能力；已有平台 ID 保持不变，改名需先添加再通过本地移除删除旧 ID。目前模板勾选入口在 CLI。
 每个模型声明准确 ID、显示名称、上下文窗口、图片输入能力、支持的思考等级与默认等级。
 自定义模型逐项选择能力；新模型默认不声明自由格式 `apply_patch` 或客户端 `tool_search`，已有模型保留当前值供用户确认。
 客户端 `tool_search` 在 Responses 上游默认不声明：声明后 Codex 会把 `tool_search_call` / `tool_search_output` 输入项回传上游，上游不接受时触发检索的回合会失败。
@@ -419,9 +438,9 @@ CLI 在基本的思考等级和图片输入设置之后，统一询问是否设�
 每个模型另有独立的“是否设置默认采样参数”问题，默认 No；跳过高级设置或模板能力调整也会询问。No 保留该模型已有采样设置，新模型不增加采样字段。选择 Yes 后，依次编辑 `temperature`、`top_p`、`top_k`、`min_p`、`presence_penalty`、`repetition_penalty`；已有值优先预填，没有已有值时分别填入 `1.0`、`0.95`、`20`、`0.0`、`0.0`、`1.0`。每项可清空以省略该字段，使用上游默认值；全部清空时不保存 `sampling` 对象。
 采样值须为有限数字：`temperature` 为 0–2，`top_p` 和 `min_p` 为 0–1，`top_k` 为非负安全整数，`presence_penalty` 为 -2–2，`repetition_penalty` 须大于 0。逐模型保存于定义的可选 `sampling` 对象，字段名保持上述下划线形式；不写入供 Codex 使用的生成模型字段。
 Provider Proxy 的 Responses HTTP/WebSocket、Chat 转换和独立 Relay 从当前已校验目录按精确模型补齐默认采样值；请求已带的同名字段优先，包括零值和显式 null，未配置字段不发送。重新导入同 ID 模板时保留已有采样值，仍由独立采样问题决定是否修改。设置入口目前在 CLI，WebUI 编辑其他字段时保留已保存的采样值。
-自动压缩阈值须为正整数且不超过当前上下文的 90%；留空使用 Codex 推导值。跟随 DS 上下文时，若缩小窗口导致阈值不再有效，须先调整阈值，事务不会静默截小该值。
+自动压缩阈值须为正整数且不超过当前上下文的 90%；留空使用 Codex 推导值。缩小当前模型窗口时，若阈值不再有效，须先调整阈值，保存不会静默截小该值。
 CLI 编辑模型时若缩小上下文导致已有阈值失效，会立即要求调整或清空该阈值；跳过其余高级设置不会跳过这项修正，取消则不保存本轮草稿。
-CLI 先选择当前上下文窗口（预设或自定义输入），再填写最大窗口；跟随 DS 上下文时沿用源窗口。最大窗口不得小于刚选定的当前窗口，留空表示与当前窗口相同。未填写的有效比例保持 95%，工具输出截断保持现有 Token 策略，上限为 `min(10000, floor(contextWindow/4))`。
+CLI 先选择当前上下文窗口（预设或自定义输入），再填写最大窗口。最大窗口不得小于刚选定的当前窗口，留空表示与当前窗口相同。未填写的有效比例保持 95%，工具输出截断保持现有 Token 策略，上限为 `min(10000, floor(contextWindow/4))`。
 新增声明均由用户手动确认，不增加自动探测。Shell 继续使用 `unified_exec`；锁定 Codex 将 DS 的旧名称 `shell_command` 读取为同一类型，不提供重复选择。
 
 目录继续使用 v5，新字段（含 `sampling`）均为可选；旧定义缺少新字段时保持原来的生成结果，不自动改写磁盘文件。
@@ -468,13 +487,13 @@ CLI Setup 的 Codex 兼容 Provider，新增与编辑均可在地址、模型及
 
 ### 存储、备份与恢复
 
-WebUI 模型管理按提供商或共享目录展示统一能力表格，点击模型名称查看能力和内置提示词。表格的“上下文比例”是目录的有效上下文比例，不是当前窗口占最大窗口的比例；加速与自动审批仅展示目录声明，不表示已经启用。共享范围在分组标题展示；模型 ID、模板关联和采样配置可在详情中查看。提示词按需读取，目录变化时需重新读取；未声明的能力不会按同名 OpenAI 模型补齐。
-全局上下文设置仍使用独立入口，可能影响其他受管提供商和跟随模型。第三方官方共享目录保持只读，本地移除的账户默认保护、最后一个模型保护及 CLP Relay 独立范围不变。
+WebUI 模型管理按精确 Provider ID 的账户目录展示统一能力表格，点击模型名称查看能力和内置提示词。表格的“上下文比例”是目录的有效上下文比例，不是当前窗口占最大窗口的比例；加速与自动审批仅展示目录声明，不表示已经启用。账户范围在分组标题展示；模型 ID、模板关联和采样配置可在详情中查看。提示词按需读取，目录变化时需重新读取；未声明的能力不会按同名 OpenAI 模型补齐。
+上下文设置仍使用独立入口，只修改选定 Provider ID 的模型。第三方官方模型目录保持只读，本地移除的账户默认保护、最后一个模型保护及 CLP Relay 独立范围不变。
 
 每个 Provider 的 `~/.codex-connect/providers/responses/<Provider ID>/models.json` 使用版本 5 格式，
-包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`；生成的每个模型条目声明 `multi_agent_version: v2`，由 Codex 解析为多代理 v2 运行时，不写入主配置的 `features.multi_agent_v2`。模型定义可携带 `template: { source, model, followContext }` 关联。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不再保存完整模板快照，输入旧 `snapshot` 字段会明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联；版本 4 目录在本版本失败关闭，既不自动迁移也不写回，读取该目录的 Gateway 启动与管理界面会一起失败（`codexc provider recover` 只处理未完成写入事务，不处理版本升级），移除与切回官方 OpenAI 只依赖注册表与目标 Provider 自身的材料，其他 Provider 目录不可读不阻塞本次操作，因此目录缺失或不支持时仍可 `codexc provider remove` 后按原 ID 重建。Codex 读取其中的
+包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`；生成的每个模型条目声明 `multi_agent_version: v2`，由 Codex 解析为多代理 v2 运行时，不写入主配置的 `features.multi_agent_v2`。模型定义可携带 `template: { source, model }` 来源关联及已固化的 `modelMessages` 提示词对象。旧 `followContext` 只读为历史元数据，显式保存时移除，不产生联动。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不保存旧完整 `snapshot` 字段，输入时明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联；版本 4 目录在本版本失败关闭，既不自动迁移也不写回，读取该目录的 Gateway 启动与管理界面会一起失败（`codexc provider recover` 只处理未完成写入事务，不处理版本升级），移除与切回官方 OpenAI 只依赖注册表与目标 Provider 自身的材料，其他 Provider 目录不可读不阻塞本次操作，因此目录缺失或不支持时仍可 `codexc provider remove` 后按原 ID 重建。Codex 读取其中的
 `models`，Gateway 严格核对版本与生成结果；不接受未知字段、重复 ID、任意外部路径或手写的第三方目录。
-模型目录保存为两空格缩进的 JSON，DS 上下文同步也保留该排版；账户注册表、账户初始备份与 `models.manifest.json` 同样使用两空格缩进。文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
+模型目录保存为两空格缩进的 JSON；账户注册表、账户初始备份与 `models.manifest.json` 同样使用两空格缩进。文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
 上游接口选择单独保存在同目录的 `provider.json`（版本 1，仅含 `upstreamWireApi`，取值 `responses` 或
 `chat_completions`），沿用同一私有文件工具原子写入，目录 0700、文件 0600，不含 Key。文件缺失按 `responses`
 处理以兼容既有目录，Provider ID 不是 `cp-` 前缀时不读写该文件；版本、字段或取值不受支持时失败关闭并拒绝加载，

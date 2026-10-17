@@ -7,6 +7,7 @@ import { connectHomePath, providerStorageRoot } from "./connect-home.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 
 import { compileModelDefinitions, validateModelDefinitions as validateResponsesModels } from "./model-catalog.mjs";
+import { completeDefinitionPrompts } from "./model-template-catalog.mjs";
 export { validateModelDefinitions as validateResponsesModels } from "./model-catalog.mjs";
 
 const activeCatalogWrite = new AsyncLocalStorage();
@@ -24,6 +25,10 @@ export function responsesProviderCatalogPath(environment, id) {
 }
 
 export function createResponsesModelCatalog(definitions, defaultModel, options) {
+  return compileCatalog(completeDefinitionPrompts(validateResponsesModels(definitions, defaultModel, options)), defaultModel, options);
+}
+
+function compileCatalog(definitions, defaultModel, options) {
   const compiled = compileModelDefinitions(definitions, defaultModel, options);
   const catalog = { schemaVersion: 5, defaultModel, ...compiled };
   if (Buffer.byteLength(JSON.stringify(catalog, null, 2)) + 1 > maximumBytes) throw new Error("Responses 模型目录不能超过 2 MiB");
@@ -35,7 +40,8 @@ export function parseResponsesModelCatalog(content) {
   let parsed;
   try { parsed = JSON.parse(content); } catch { throw new Error("Responses 模型目录不是有效 JSON"); }
   if (parsed?.schemaVersion !== 5 || Object.keys(parsed).some((key) => !["schemaVersion", "defaultModel", "definitions", "models"].includes(key))) throw new Error("Responses 模型目录版本或字段不受支持（仅支持版本 5）；请先保留配置与模型目录完整备份，再重新配置");
-  const expected = createResponsesModelCatalog(parsed.definitions, parsed.defaultModel);
+  // Validate the saved snapshot, without applying today's template during a read.
+  const expected = compileCatalog(parsed.definitions, parsed.defaultModel);
   if (JSON.stringify(parsed) !== JSON.stringify(expected)) throw new Error("Responses 模型目录与模型定义不一致，请重新生成");
   return expected;
 }
@@ -103,17 +109,4 @@ export function responsesContextSyncPath(environment) {
 
 export function assertResponsesContextSyncComplete(environment) {
   if (existsSync(responsesContextSyncPath(environment))) throw new Error("DS/CP 上下文同步未完成，请停止服务并执行 primary-provider recover <Provider ID> keep 或 rollback");
-}
-
-export function resolveResponsesTemplateContexts(definitions, environment) {
-  if (!definitions.some(model => model.template?.followContext)) return definitions;
-  let source;
-  try { source=JSON.parse(readPrivateFileSync(join(providerStorageRoot(environment),"deepseek","models.json"),maximumBytes)); } catch { throw new Error("跟随上下文需要可读取的本地 DS 模型目录，请先配置 DS 或关闭跟随"); }
-  return definitions.map(model=>{
-    if (!model.template?.followContext) return model;
-    const matches=source.models?.filter(entry=>entry.slug === model.template.model);
-    if (!Array.isArray(matches) || matches.length !== 1) throw new Error("跟随的 DS 模型不存在或不唯一，请重新选择模板或关闭跟随");
-    const next={...model,contextWindow:matches[0].context_window};
-    return validateResponsesModels([next],next.id)[0];
-  });
 }

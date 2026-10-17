@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { normalizeDeepseekCatalogCapabilities } from "../runtime/model-catalog.mjs";
+import { completeCatalogPrompts } from "../runtime/model-template-catalog.mjs";
 export { normalizeDeepseekCatalogCapabilities } from "../runtime/model-catalog.mjs";
 import { createManagedProviderCatalog } from "./managed-model-provider-setup.mjs";
 
@@ -143,7 +144,7 @@ export function createManagedDeepseekCatalog(
     throw new Error("DeepSeek 上下文窗口百分比无效");
   }
   return createManagedProviderCatalog(
-    normalizeDeepseekCatalogCapabilities(catalog),
+    normalizeDeepseekCatalogCapabilities(completeCatalogPrompts(catalog)),
     deepseekProviderDefinition,
     {
       previousModels,

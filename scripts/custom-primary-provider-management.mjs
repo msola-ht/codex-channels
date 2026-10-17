@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
-import { createResponsesModelCatalog, resolveResponsesTemplateContexts, isCustomCatalogProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { createResponsesModelCatalog, isCustomCatalogProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath, customProviderUpstreamWireApis, readCustomProviderUpstreamWireApi, removeCustomProviderUpstreamMetadata, writeCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { parse } from "smol-toml";
@@ -205,7 +205,6 @@ export async function applyCustomPrimaryProviderSave(input, options = {}) {
 async function applySavePlan(input, plan, options) {
   if (plan.models === undefined) return applyConnectionSavePlan(input, plan, options);
   const environment = options.environment ?? process.env;
-  if (!isDeepStrictEqual(plan.models, resolveResponsesTemplateContexts(plan.models,environment))) throw invalid("stale-preview","catalog","DS 模板上下文已变化，请重新预览");
   if (JSON.stringify(createResponsesModelCatalog(plan.models, plan.provider.model)) !== plan.validatedCatalog) throw invalid("stale-preview", "catalog", "模型目录已变化，请重新预览并校验");
   const configPath = join(codexHomePath(environment), "config.toml");
   const read = createProviderFileReader(environment);
@@ -426,7 +425,7 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   }
   if (custom && input.operation === "create" && existsSync(responsesProviderCatalogPath(environment, providerId))) throw invalid("provider-exists", "providerId", "该 Provider 已有模型目录，请先恢复或删除已有配置");
   const model = requiredString(input.model, "model", "模型 ID 不能为空");
-  const models = custom ? resolveResponsesTemplateContexts(validateResponsesModels(input.catalog.models, model),environment) : undefined;
+  const models = custom ? createResponsesModelCatalog(validateResponsesModels(input.catalog.models, model), model).definitions : undefined;
   const reasoningEffort = models?.find((entry) => entry.id === model)?.defaultReasoningEffort ?? "none";
   const officialModelIds = new Set(
     officialModels.filter((candidate) => candidate.available !== false)

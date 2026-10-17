@@ -11,7 +11,7 @@ export {
   writeManagedModelProviderCatalogSettings,
   readManagedModelProviderCatalogContent,
   restoreManagedModelProviderCatalogContent,
-  writeManagedModelWindowGlobal,
+  writeManagedModelWindow,
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,
 } from "./model-provider-managed-runtime.mjs";

@@ -94,25 +94,26 @@ export function loadManagedModelProviderSettings(
 ): ManagedModelProviderSettings[];
 
 export interface ManagedModelWindowEntry {
+  provider: string;
   model: string;
   displayName: string;
   contextWindow: number;
   maxContextWindow: number;
   windowPercent?: number;
   providers: string[];
-  perProvider?: Record<string, number | undefined>;
-  conflicts?: boolean;
-  windowConflict?: boolean;
+  reasoningEfforts: Array<{ effort: string; description: string }>;
 }
 
 export function loadManagedModelWindow(
   environment?: NodeJS.ProcessEnv,
 ): ManagedModelWindowEntry[];
 
-export function writeManagedModelWindowGlobal(options: {
+export function writeManagedModelWindow(options: {
+  provider: string;
   model: string;
   environment?: NodeJS.ProcessEnv;
 } & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never })): {
+  provider: string;
   model: string;
   windowPercent: number;
   contextWindow: number;
@@ -126,7 +127,7 @@ export function readCodexConfigModelOverride(
 
 export function managedProviderDirectory(
   environment: NodeJS.ProcessEnv | undefined,
-  definition: Pick<ModelProviderDefinition, "id" | "storageId">,
+  definition: Pick<ModelProviderDefinition, "id" | "storageId" | "accountId">,
 ): string;
 export function managedProviderMarkerPath(
   environment: NodeJS.ProcessEnv,

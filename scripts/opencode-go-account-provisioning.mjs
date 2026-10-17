@@ -9,7 +9,6 @@ import {
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import {
-  loadManagedModelWindow,
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
@@ -139,17 +138,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   } catch (error) {
     throw normalize("provider-state-unavailable", "accountId", error);
   }
-  let contextWindowByModel;
-  try {
-    contextWindowByModel = plan.downloadsCatalog
-      ? configuredContextWindowByModel(
-          environment,
-          new Set(catalogState.catalog.models.map((model) => model.slug)),
-        )
-      : {};
-  } catch (error) {
-    throw normalize("provider-state-unavailable", "accountId", error);
-  }
   let managedCatalog;
   try {
     managedCatalog = plan.downloadsCatalog ? createManagedProviderCatalog(
@@ -157,7 +145,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       definition,
       {
         previousModels: previous?.models,
-        modelContextWindowByModel: contextWindowByModel,
       },
     ) : catalogState.catalog;
     await validateModelCatalogWithCodex(managedCatalog, environment);
@@ -499,19 +486,6 @@ function normalize(code, field, error) {
     field,
     error instanceof Error ? error.message : String(error),
     error,
-  );
-}
-
-export function configuredContextWindowByModel(environment, modelSlugs) {
-  return Object.fromEntries(
-    loadManagedModelWindow(environment)
-      .filter((entry) => modelSlugs.has(entry.model) && entry.contextWindow !== undefined)
-      .map((entry) => {
-        if (entry.conflicts || entry.windowConflict) {
-          throw new Error(`同名模型的窗口设置冲突，请先统一设置：${entry.model}`);
-        }
-        return [entry.model, entry.contextWindow];
-      }),
   );
 }
 

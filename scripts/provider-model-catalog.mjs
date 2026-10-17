@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
+import { completeCatalogPrompts } from "../runtime/model-template-catalog.mjs";
 
 const settings = JSON.parse(readFileSync(new URL("../provider-model-catalog.json", import.meta.url), "utf8"));
 
 function appendFlashClone(source, slug) {
-  const catalog = structuredClone(source);
+  const catalog = completeCatalogPrompts(source);
   const matches = catalog.models.filter((entry) => entry.slug === settings.flashSourceModel);
   if (matches.length !== 1) throw new Error("DS 模型目录必须包含唯一的 Flash 模板");
   if (catalog.models.some((entry) => entry.slug === slug)) {

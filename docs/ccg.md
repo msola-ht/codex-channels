@@ -12,7 +12,7 @@ CCG 是 CommandCode 的受管 Responses Provider，支持在同一 Gateway 中�
 
 1. 选择切换模式或固定模式。
 2. 填写账户 ID 并输入该账户的 CommandCode API Key。
-3. 首个账户从 DS 官方下载完整模型目录并生成共享 CCG 目录；后续账户直接复用该目录，再分别选择默认模型。
+3. 每个账户从 DS 官方下载完整模型目录并生成自己的 CCG 目录，再选择该账户默认模型。
 4. 运行 `codexc restart all`，之后通过渠道 `/model` 选择 CCG 模型。
 
 目录以 DS 官方 `models.json` 完整内容为基础，保留 Flash、Pro，并复制 Flash 的全部字段，
@@ -24,13 +24,13 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 不请求 CommandCode `/models` 生成能力配置。写入前会在临时目录调用本机 Codex CLI 校验完整格式；
 生成目录上限为 2 MiB，校验失败不会写入受管配置。
 
-配置账户后，可用“管理共享模型（添加／启用／更新）”添加该上游实际支持的 Responses 模型、选择启用名单或显式刷新 DS 模板。手填时须确认准确模型 ID、上下文、思考等级、图片和工具能力；新增模型使用共享通用编程提示词，不从 Cline 目录猜测 CommandCode 的能力。所有账户和聚合共用最多 64 个启用模型，账户当前默认模型不可停用；须先调整默认设置。未勾选的条目从目录移除，重新启用需重新导入模板或填写模型。
+配置账户后，可用“管理账户模型（添加／启用／更新）”选择所属账户，再添加该上游实际支持的 Responses 模型、选择启用名单或显式刷新 DS 模板。模板仍从 DS 官方脚本下载并保留 CCG ID 映射，不取其他账户目录。手填时须确认准确模型 ID、上下文、思考等级、图片和工具能力；新增模型使用通用编程提示词，不从 Cline 目录猜测 CommandCode 的能力。每个账户最多启用 64 个模型，聚合读取各账户名单；该账户当前默认模型不可停用，须先调整默认设置。未勾选的条目从该账户目录移除，重新启用需重新导入模板或填写模型。
 
-保存前校验目录与所有账户默认值，备份 `models.json` 和 `models.manifest.json` 为同目录 `.backup`，再事务写入；取消、无效输入和可恢复写入失败保留原目录，并发冲突失败关闭。来源文件标记本次为用户配置。手工回退时先停止使用该目录的客户端和相关服务，成对恢复最近一次备份，再重启；按保存后的提示激活。账户增删或 Key 更新不会静默刷新目录。
+保存前校验目录与该账户默认值，备份 `models.json` 和 `models.manifest.json` 为同目录 `.backup`，再事务写入；取消、无效输入和可恢复写入失败保留原目录，并发冲突失败关闭。来源文件标记本次为用户配置。显式创建或更新时补全缺失的基础提示词并固化，读取不注入新模板。手工回退时先停止使用该目录的客户端和相关服务，成对恢复最近一次备份，再重启；按保存后的提示激活。账户增删或 Key 更新不会静默刷新其他账户目录。
 
 后续通过 CCG 菜单的“修改默认模型与思考等级”或“默认模型与思考等级”调整默认值，
-通过“模型上下文窗口”调整窗口占比。模型目录由 Setup 配置，更新器不刷新目录。
-同一目录中引用某模型的账户 Profile 同步该模型的默认思考等级；选择其他模型的账户保留各自模型等级。
+通过“模型上下文窗口”选择准确账户和模型调整窗口 Token 数。模型目录由 Setup 配置，更新器不刷新目录。
+默认模型、思考等级、上下文和启用名单按账户独立保存；仅该账户 Profile 同步其目录默认思考等级。
 新目录不再包含账户默认模型时明确失败。
 
 账户移除命令为 `codexc provider ccg remove <id>`，确认后移除该账户 Key 和运行配置，保留安装前备份及历史统计。
@@ -43,7 +43,7 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 - 切换模式 Profile：`~/.codex/sf-ccg-<账户>.config.toml`，每个账户独立保存 Key 和默认模型。
 - 账户管理标记：`~/.codex-connect/providers/ccg/accounts/<账户>/managed.toml`。
 - 账户安装前备份：`~/.codex-connect/providers/ccg/accounts/<账户>/backup/config.json`。
-- 模型目录：`~/.codex-connect/providers/ccg/models.json`。
+- 模型目录：`~/.codex-connect/providers/ccg/accounts/<账户>/models.json`。
 - 目录来源记录：同目录 `models.manifest.json`。
 
 固定模式会在明确确认后备份并修改 Codex 主配置；切换模式使用独立受管 App Server，
@@ -54,12 +54,14 @@ API Key 保存在对应账户的私有文件（Unix `0600`，Windows 私有 ACL�
 固定 Key 使用[独立私有版本与主配置 `env_key` 引用](provider-integration-guide.md#4-安全边界)，不写入共享主配置；旧明文配置须明确重新配置账户。
 删除账户会移除其 Profile 和管理标记；固定模式仅恢复相关 Provider 设置，保留备份和其他设置。
 删除前检查并停止对应 App Server；Remote TUI 正在占用、监管状态异常或停止失败时，不删除账户文件。删除后该账户历史 Thread 将不可恢复，历史统计保留。
-删除最后一个账户时清理共享模型目录。删除默认账户前需先选择其他默认账户。
+删除时仅清理该账户的模型目录和来源记录。删除默认账户前需先选择其他默认账户。
 删除后重新安装会以当时的主配置建立新备份，旧备份保留为 `backup/config-<UUID>.json`；
 切换模式账户每次进入固定模式时，都会以当时的主配置更新恢复基线并归档旧备份，避免恢复其他账户
 已经退出的固定配置。固定模式内重新配置以及退出固定模式继续使用本次进入固定模式时的恢复基线。
 原生子代理继承父线程的 Provider，不独立绑定账户；本项目不提供跨 Provider 子代理配置入口。
 已配置 CCG 的原始备份缺失时，重新配置会报错，需先恢复原始备份。
+
+旧共享目录账户升级前须按[账户目录拆分](provider-integration-guide.md#旧共享目录账户升级)停止整个 App Server，在源码仓库根目录显式拆分后再启动新版；升级不会自动修改真实用户目录。统计代理按准确 `ccg-<账户>` 独立创建。
 
 当 OpenAI 官方未登录、已配置的第三方切换实例全部属于 CCG 时，渠道新 Conversation
 使用注册表标记的默认账户；混合配置其他 Provider 时仍需显式选择。
@@ -87,7 +89,7 @@ API Key 保存在对应账户的私有文件（Unix `0600`，Windows 私有 ACL�
 查询会明确失败，不影响模型请求和本地 `/metrics`。
 
 CCG 复用现有按需启动、Provider 路由、模型设置及本地请求指标。每个账户拥有独立 App Server、
-凭据和指标 Provider；全部账户共享一个统计代理，内部账户路径负责把请求归入对应 `ccg-<账户>`。
+凭据、模型目录和统计代理，请求归入对应 `ccg-<账户>` 指标 Provider。
 配置生成与 OCG 共用 `managed-model-provider-setup.mjs`，文件事务共用
 `managed-provider-files.mjs`；账户行为与目录适配保留各自实现。
 账户 Credits 与额度窗口按账户查询；本地 Token 与请求指标按 `ccg-<账户>` 隔离。

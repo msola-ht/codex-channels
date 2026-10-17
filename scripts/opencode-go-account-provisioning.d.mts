@@ -81,8 +81,3 @@ export function applyOpencodeGoAccountConfiguration(
     catalogPath: string;
   };
 } & OpenCodeGoAccountConfigurationPreview>;
-
-export function configuredContextWindowByModel(
-  environment: NodeJS.ProcessEnv,
-  modelSlugs: ReadonlySet<string>,
-): Record<string, number>;

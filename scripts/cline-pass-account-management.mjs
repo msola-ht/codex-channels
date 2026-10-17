@@ -1,14 +1,13 @@
 import { existsSync } from "node:fs";
 import { AccountManagementError } from "./account-management-error.mjs";
-import { clinePassAccountDirectory, clinePassAccountMarkerPath, clinePassAccountsFilePath, loadClinePassAccounts, validateClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
+import { clinePassAccountDirectory, clinePassAccountMarkerPath, clinePassAccountsFilePath, clinePassAccountIdFromProvider, loadClinePassAccounts, validateClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { deepseekProviderDefinition, clinePassProviderDefinition as definition, clinePassAccountDefinition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
+import { clinePassProviderDefinition as definition, clinePassAccountDefinition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
-import { downloadDeepseekCatalog, createManagedDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
-import { loadResponsesModelTemplates, responsesModelTemplatesFromCatalog } from "./responses-model-templates.mjs";
+import { loadResponsesModelTemplates } from "./responses-model-templates.mjs";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
 import { validateEnabledModelSelection } from "./provider-model-selection.mjs";
@@ -77,6 +76,7 @@ export function createClinePassCatalog(templates, source, enabledModels) {
       defaultReasoningEffort: template.defaultReasoningEffort, supportsImages: template.supportsImages,
       applyPatchToolType: "freeform",
       ...(template.instructions === undefined ? {} : {instructions: template.instructions}),
+      ...(template.modelMessages === undefined ? {} : { modelMessages: template.modelMessages }),
       supportsSearchTool: true,
     };
     models[models.findIndex(model => model.id === flash.id)] = flash;
@@ -115,7 +115,7 @@ export function previewClinePassConfiguration(input, { environment = process.env
     effects: { writesMainConfig: mode === "exclusive" || previous?.mode === "exclusive", writesIsolatedProfile: mode === "switching" }, activation: "restart-all" };
 }
 
-export async function applyClinePassConfiguration(input, { environment = process.env, loadTemplates = loadResponsesModelTemplates, downloadCatalog = downloadDeepseekCatalog, downloadClineCatalog = downloadClineRelayCatalog, selectModels } = {}) {
+export async function applyClinePassConfiguration(input, { environment = process.env, loadTemplates = loadResponsesModelTemplates, downloadClineCatalog = downloadClineRelayCatalog, selectModels } = {}) {
   const { accountId, apiKey, mode = "switching", confirmExclusiveConfigChange = false } = input;
   const definition = clinePassAccountDefinition(accountId);
   return withModelProviderManagementTransaction(environment, async () => {
@@ -123,9 +123,6 @@ export async function applyClinePassConfiguration(input, { environment = process
     if (preview.effects.writesMainConfig && confirmExclusiveConfigChange !== true) throw new AccountManagementError("confirmation-required", "confirmExclusiveConfigChange", "修改 Codex 主配置前必须明确确认");
     const accounts = loadClinePassAccounts(environment);
     const paths = clinePassSetupPaths(environment, accountId);
-    const dsDirectory = managedProviderDirectory(environment, deepseekProviderDefinition);
-    const dsCatalogPath = join(dsDirectory, deepseekProviderDefinition.catalogFileName);
-    const dsManifestPath = join(dsDirectory, deepseekProviderDefinition.catalogManifestFileName);
     const snapshots = snapshotProviderFiles(Object.values(paths), environment);
     const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
     const current = content("config") === undefined ? {} : parsePrivateConfig(content("config"));
@@ -133,7 +130,6 @@ export async function applyClinePassConfiguration(input, { environment = process
     if (!previous && (content("profile") !== undefined || content("marker") !== undefined || hasProviderBaseConfig(current, definition))) throw new AccountManagementError("config-path-conflict", "accountId", "CLP 配置路径已被占用");
     const backup = content("backup") === undefined ? undefined : parsePrivateBackup(content("backup"));
     if (previous && !backup?.config) throw new AccountManagementError("backup-unavailable", "accountId", "CLP 初始备份缺失");
-    let downloadedDs;
     let downloadedCline;
     let catalog;
     const writesCatalog = content("catalog") === undefined;
@@ -141,20 +137,11 @@ export async function applyClinePassConfiguration(input, { environment = process
       try { catalog = JSON.parse(content("catalog")); }
       catch { throw new Error("CLP 模型目录无法安全读取"); }
     } else {
-      if (accounts.length > 0) throw new Error("CLP 共享模型目录缺失，请先恢复文件");
       downloadedCline = await downloadClineCatalog(environment);
       const selected = await selectClinePassModels(projectClinePassModels(downloadedCline).models, [], selectModels);
       if (!selected) return { ...preview, activation: "none", action: "back", excludedModels: [] };
-      let templates = [];
-      if (selected.includes(definition.defaultModel)) {
-        snapshots.push(...snapshotProviderFiles([dsCatalogPath, dsManifestPath], environment));
-        if (snapshots.find(item => item.path === dsCatalogPath).content === undefined) {
-          downloadedDs = createManagedDeepseekCatalog((await downloadCatalog(globalThis.fetch)).catalog);
-        } else templates = await loadTemplates("deepseek", environment);
-      }
-      catalog = createClinePassCatalog(downloadedDs
-        ? responsesModelTemplatesFromCatalog(downloadedDs, "deepseek")
-        : templates, downloadedCline, selected);
+      const templates = selected.includes(definition.defaultModel) ? await loadTemplates("deepseek", environment) : [];
+      catalog = createClinePassCatalog(templates, downloadedCline, selected);
     }
     await validateModelCatalogWithCodex(catalog, environment);
     const initial = previous && !(previous.mode === "switching" && mode === "exclusive") ? backup.config : current;
@@ -172,10 +159,6 @@ export async function applyClinePassConfiguration(input, { environment = process
       updates.set(paths.manifest, `${JSON.stringify(clinePassManifest(downloadedCline, catalog), null, 2)}\n`);
     }
     if (!previous) updates.set(paths.registry, `${JSON.stringify(validateClinePassAccounts([...accounts, { id: accountId, default: accounts.length === 0 }]), null, 2)}\n`);
-    if (downloadedDs) {
-      updates.set(dsCatalogPath, `${JSON.stringify(downloadedDs, null, 2)}\n`);
-      updates.set(dsManifestPath, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() }, null, 2)}\n`);
-    }
     if (content("backup") !== undefined && JSON.stringify(backup.config) !== JSON.stringify(initial)) {
       const archive = `${paths.backup}.${randomUUID()}`;
       snapshots.push(...snapshotProviderFiles([archive], environment));
@@ -194,39 +177,31 @@ function clinePassManifest(source, catalog) {
   cline: { commit: source.commit, downloadedAt: source.downloadedAt } };
 }
 
-/** Explicit shared catalog refresh; account credentials and selected models remain unchanged. */
-export async function refreshClinePassCatalog({ environment = process.env, loadTemplates = loadResponsesModelTemplates, downloadCatalog = downloadDeepseekCatalog, downloadClineCatalog = downloadClineRelayCatalog, selectModels } = {}) {
+/** Refresh only the explicitly selected account catalog. */
+export async function refreshClinePassCatalog({ provider, accountId, environment = process.env, loadTemplates = loadResponsesModelTemplates, downloadClineCatalog = downloadClineRelayCatalog, selectModels } = {}) {
   return withModelProviderManagementTransaction(environment, async () => {
     const accounts = loadClinePassAccounts(environment);
-    if (accounts.length === 0) throw new Error("请先配置 CLP 账户");
-    const paths = clinePassSetupPaths(environment, accounts[0].id);
-    const dsCatalog = join(managedProviderDirectory(environment, deepseekProviderDefinition), deepseekProviderDefinition.catalogFileName);
-    const dsManifest = join(managedProviderDirectory(environment, deepseekProviderDefinition), deepseekProviderDefinition.catalogManifestFileName);
+    const targetAccountId = provider === undefined ? accountId : clinePassAccountIdFromProvider(provider);
+    if (targetAccountId === undefined || (accountId !== undefined && accountId !== targetAccountId)
+      || !accounts.some(account => account.id === targetAccountId)) throw new Error("请明确选择已配置的 CLP 账户");
+    const targetDefinition = clinePassAccountDefinition(targetAccountId);
+    const paths = clinePassSetupPaths(environment, targetAccountId);
     const backups = [paths.catalog, paths.manifest].map(path => `${path}.backup`);
     const snapshots = snapshotProviderFiles([
-      ...accounts.flatMap(account => Object.values(clinePassSetupPaths(environment, account.id))), ...backups,
+      ...Object.values(paths), ...backups,
     ], environment);
-    const providers = loadManagedModelProviderSettings(environment).filter(provider => accounts.some(account => provider.provider === clinePassAccountDefinition(account.id).id));
-    if (providers.length !== accounts.length) throw new Error("CLP 账户配置不完整，未更新模型目录");
+    const providers = loadManagedModelProviderSettings(environment).filter(entry => entry.provider === targetDefinition.id);
+    if (providers.length !== 1) throw new Error("CLP 账户配置不完整，未更新模型目录");
     const source = await downloadClineCatalog(environment);
     const projected = projectClinePassModels(source);
     const selectedModels = await selectClinePassModels(projected.models, providers, selectModels);
     if (!selectedModels) return { action: "back", activation: "none", models: [], excludedModels: projected.excludedModels, commit: source.commit };
-    let downloadedDs, templates = [];
-    if (selectedModels.includes(definition.defaultModel)) {
-      snapshots.push(...snapshotProviderFiles([dsCatalog, dsManifest], environment));
-      if (snapshots.find(snapshot => snapshot.path === dsCatalog).content === undefined) {
-        downloadedDs = createManagedDeepseekCatalog((await downloadCatalog(globalThis.fetch)).catalog);
-      } else templates = await loadTemplates("deepseek", environment);
-    }
-    let catalog = createClinePassCatalog(downloadedDs ? responsesModelTemplatesFromCatalog(downloadedDs, "deepseek") : templates, source, selectedModels);
-    catalog = withPreservedManagedModelCatalogSettings(catalog, definition, providers[0].models.filter(model => model.model !== definition.defaultModel));
+    const templates = selectedModels.includes(definition.defaultModel) ? await loadTemplates("deepseek", environment) : [];
+    let catalog = createClinePassCatalog(templates, source, selectedModels);
+    catalog = withPreservedManagedModelCatalogSettings(catalog, targetDefinition, providers[0].models);
     for (const model of catalog.models) {
       const previous = providers[0].models.find(entry => entry.model === model.slug);
-      // Flash follows the exact DS window; unchanged maxima must not round an existing window.
-      if (model.slug === definition.defaultModel) {
-        if (model.supported_reasoning_levels.some(level => level.effort === previous?.reasoningEffort)) model.default_reasoning_level = previous.reasoningEffort;
-      } else if (previous?.maxContextWindow === model.max_context_window) model.context_window = previous.contextWindow;
+      if (previous?.maxContextWindow === model.max_context_window) model.context_window = previous.contextWindow;
     }
     for (const provider of providers) {
       const selected = catalog.models.find(model => model.slug === provider.model);
@@ -243,10 +218,6 @@ export async function refreshClinePassCatalog({ environment = process.env, loadT
     }
     updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
     updates.set(paths.manifest, `${JSON.stringify(clinePassManifest(source, catalog), null, 2)}\n`);
-    if (downloadedDs && catalog.models.some(model => model.slug === definition.defaultModel)) {
-      updates.set(dsCatalog, `${JSON.stringify(downloadedDs, null, 2)}\n`);
-      updates.set(dsManifest, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() }, null, 2)}\n`);
-    }
     await assertProviderFileSnapshots(snapshots);
     await applyProviderFileUpdates(updates, snapshots);
     return { action: "catalog-updated", activation: "restart-all", models: catalog.models.map(model => model.slug), excludedModels: projected.excludedModels, commit: source.commit };
@@ -266,10 +237,8 @@ function clinePassRemovalPlan(accountId, environment) {
   const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
   const updates = new Map([paths.profile, paths.marker].map(path => [path, undefined]));
   updates.set(paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`);
-  if (remaining.length === 0) {
-    updates.set(paths.catalog, undefined);
-    updates.set(paths.manifest, undefined);
-  }
+  updates.set(paths.catalog, undefined);
+  updates.set(paths.manifest, undefined);
   if (previous.mode === "exclusive") {
     if (content("backup") === undefined) throw new AccountManagementError("backup-unavailable", "accountId", "CLP 初始备份缺失");
     const backup = parsePrivateBackup(content("backup"));

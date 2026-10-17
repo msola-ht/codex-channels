@@ -22,19 +22,20 @@ const warningMessages = {
 export async function runProviderModelSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout, provider } = {}) {
   const { catalogs } = await loadProviderModelCatalogs({ environment });
   if (!catalogs.length) { output.write("尚未配置第三方模型，请先完成提供商接入。\n"); return { action: "back" }; }
-  const selected = provider ?? await prompts.select({ message: "模型管理（共享目录只显示一份）", options: [
-    ...catalogs.map(entry => ({ value: entry.provider, label: entry.displayName, hint: entry.providers.join("、") })),
+  const requestedFamily = managedProviderAccountFamilies.find(entry => entry.proxyKey === provider);
+  const choices = requestedFamily ? catalogs.filter(entry => requestedFamily.matches(entry.provider)) : catalogs;
+  const selected = provider !== undefined && !requestedFamily ? provider : await prompts.select({ message: "选择模型目录所属提供商账户", options: [
+    ...choices.map(entry => ({ value: entry.provider, label: entry.displayName, hint: entry.providers.join("、") })),
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
-  const catalog = catalogs.find(entry => entry.provider === selected || entry.providers.includes(selected));
+  const catalog = catalogs.find(entry => entry.provider === selected);
   if (!catalog) throw new Error("提供商目录已变化，请重新打开模型管理");
   output.write(`${catalog.displayName}：${catalog.providers.join("、")}\n${catalog.models.map(entry => `  ${entry.id}${entry.isDefault ? "（账户默认）" : ""}`).join("\n")}\n`);
   const custom = catalog.provider.startsWith("cp-");
-  const family = managedProviderAccountFamilies.find(entry => entry.proxyKey === catalog.provider)?.proxyKey;
+  const family = managedProviderAccountFamilies.find(entry => entry.matches(catalog.provider))?.proxyKey;
   if (!catalog.canRemove) output.write(catalog.unavailableReason === "deepseek-template-source"
-    ? "DeepSeek 目录是上下文与模板来源，暂不支持单模型移除。\n"
-    : catalog.unavailableReason === "shared-accounts-incomplete" ? "共享账户配置不完整，请先修复账户。\n"
+    ? "DeepSeek 暂不支持单模型移除。\n"
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
   const action = await prompts.select({ message: "模型操作", options: [
     ...(catalog.canRemove ? [{ value: "remove", label: "本地移除模型", hint: "不联网、不改账户和凭据" }] : []),
@@ -45,7 +46,7 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
-  if (action === "manage") return runManagedProviderModelSetup(family, { environment, prompts, output });
+  if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });
   if (action === "default") {
     const account = catalog.providers.length === 1 ? catalog.providers[0] : await prompts.select({ message: "选择默认设置所属账户", options: catalog.providers.map(id => ({ value: id, label: id })) });
     if (prompts.isCancel(account)) return { action: "back" };
@@ -53,7 +54,7 @@ export async function runProviderModelSetup({ environment = process.env, prompts
   }
   let result;
   if (action === "refresh") {
-    result = await refreshClinePassCatalog({ environment, selectModels: selection => promptEnabledProviderModels(prompts, output, { ...selection, label: "CLP（全部账户共享）" }) });
+    result = await refreshClinePassCatalog({ provider: catalog.provider, environment, selectModels: selection => promptEnabledProviderModels(prompts, output, { ...selection, label: catalog.displayName }) });
   } else if (action === "edit") {
     const previous = readResponsesModelCatalog(environment, catalog.provider);
     const model = await prompts.select({ message: "默认模型（添加新默认模型前请先添加并保存）", options: previous.definitions.map(entry => ({ value: entry.id, label: entry.name })), initialValue: previous.defaultModel });

@@ -1,7 +1,7 @@
 # OpenCode Go 多账户实现
 
 Codex Connect 支持在一个 Gateway 内配置多个 OpenCode Go 账户。每个账户使用独立 API Key、
-额度、Provider 路由和 App Server，模型目录与统计代理由所有账户共享。用户使用 `/model`
+额度、Provider 路由、App Server、模型目录和统计代理。用户使用 `/model`
 切换账户；`/usage` 和完成卡片只展示当前 Thread 所属账户。
 
 当前配置和常用命令见 [`OpenCode Go 使用说明`](opencode-go.md)，第三方 Provider 的通用约束见
@@ -30,12 +30,13 @@ Codex Thread 的 `modelProvider` 创建后不可变。因此：
 
 ## 账户文件
 
-账户注册表和共享模型目录位于 Gateway 数据目录，不保存 Key；注册表中的联系方式只用于本机展示：
+账户注册表和各账户模型目录位于 Gateway 数据目录，不保存 Key；注册表中的联系方式只用于本机展示：
 
 ```text
 ~/.codex-connect/providers/opencode-go/
   accounts.json                            账户注册表（id、default、email 或 phone）
-  models.json / models.manifest.json       共享模型目录
+  accounts/<account>/models.json           该账户模型目录
+  accounts/<account>/models.manifest.json  该账户目录来源
   accounts/<account>/managed.toml          管理标记（version、provider、mode）
   accounts/<account>/backup/               固定恢复基线及删除前的私有文件备份
 ```
@@ -66,11 +67,10 @@ codexc provider opencode-go release <id>
 
 `list --json` 输出账户 ID、邮箱或手机号（若有）、展示名、默认标记、Provider ID 与运行模式，不包含 API Key 或 Profile 路径。
 
-- `add` 下载或复用共享模型目录，写入账户 Profile、管理标记与注册表；失败时按写入前快照回滚；
+- `add` 为新账户下载独立模型目录，写入账户 Profile、管理标记与注册表；重配复用该账户已有目录，失败时按写入前快照回滚；
 - `codexc provider opencode-go remove <accountId>` 先预览确认，停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败
   都按删除前快照回滚；存在 Remote TUI
-  租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；删除最后一个账户时
-  同时清理共享模型目录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
+  租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；仅清理该账户模型目录和来源记录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
 - `default` 原子更新默认账户注册表；
 - `stop` 立即请求释放账户 App Server；如果对应 Remote TUI 正在持有租约，则保留实例并提示用户
   退出 TUI 后重试；
@@ -86,18 +86,20 @@ codexc provider opencode-go release <id>
 
 只接受当前多账户格式。账户删除保留其他账户、备份和历史统计，不恢复或删除无关子代理。
 
-## 共享统计代理
+默认模型、思考等级、上下文、启用名单与显式刷新均按完整 `ocg-<accountId>` 隔离，同名模型不跨账户联动。旧共享目录账户在新版启动前须停止整个 App Server，并从源码仓库根目录显式执行[账户目录拆分](provider-integration-guide.md#旧共享目录账户升级)。
 
-所有 OpenCode Go 账户共享一个 `ProviderProxy`。代理不持有账户 Key；Authorization 由各账户
+## 账户统计代理
+
+每个 OpenCode Go 账户独立创建一个 `ProviderProxy`。代理不持有账户 Key；Authorization 由各账户
 App Server 从自己的进程环境注入。
 
-账户 App Server 的 `base_url` 指向共享代理并带 `/go/<accountId>` 前缀。代理转发时剥离前缀，
-按账户选择指标 Socket，使指标库中的 `provider` 保持为对应账户 Provider id。因此现有 Provider
+账户 App Server 的 `base_url` 指向该账户代理并带 `/go/<accountId>` 前缀。每个代理仅接受其绑定的唯一账户前缀，其他账户前缀明确拒绝。转发时剥离前缀，
+使用该账户的指标 Socket，使指标库中的 `provider` 保持为对应账户 Provider id。因此现有 Provider
 过滤和 `codexc cleanup metrics prune ocg-<accountId>` 无需新增请求指标表；账户快照保存在本机指标库中。
 
 ## App Server 生命周期
 
-每个账户拥有一个按需启动的隔离 App Server。共享统计代理不随账户数量重复创建。
+每个账户拥有一个按需启动的隔离 App Server，统计代理也按 Provider ID 独立创建。
 
 Gateway 的全局空闲策略在会话解除后等待 60 秒；当确实没有任何前台或后台 Conversation 绑定、进行中的
 Provider 操作或启动任务时，只有自动解除触发的全局释放轮次会先向所有已知授权渠道发送释放通知，

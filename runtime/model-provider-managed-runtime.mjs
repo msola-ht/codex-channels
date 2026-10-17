@@ -1,8 +1,8 @@
 import { isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
 import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 import { createHash } from "node:crypto";
-import { writeResponsesContextFollowers, clinePassFollowsDeepseekContext } from "./responses-context-sync.mjs";
 import { assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
+import { assertProviderCatalogIsolationComplete, providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 import { join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
@@ -10,7 +10,6 @@ import { parse, stringify } from "smol-toml";
 import { codexHomePath } from "./codex-home.mjs";
 import { providerStorageRoot } from "./connect-home.mjs";
 import {
-  deepseekProviderDefinition,
   isManagedProviderApiKeyValid,
   loadManagedModelProviderDefinitions,
   managedProviderAccountFamilyForDefinition,
@@ -34,7 +33,8 @@ const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
 
 export function managedProviderDirectory(environment, definition) {
-  return join(providerStorageRoot(environment), definition.storageId ?? definition.id);
+  const root = join(providerStorageRoot(environment), definition.storageId ?? definition.id);
+  return definition.accountId === undefined ? root : join(root, "accounts", definition.accountId);
 }
 
 export function managedProviderMarkerPath(environment, definition) {
@@ -54,6 +54,7 @@ export function validateConfiguredModelProvider(environment = process.env) {
 }
 
 export function validateConfiguredModelProviders(environment = process.env) {
+  assertProviderCatalogIsolationComplete(environment);
   assertResponsesContextSyncComplete(environment);
   const definitions = managedProviderDefinitions(environment);
   const exclusiveProviders = definitions.filter((definition) =>
@@ -74,6 +75,7 @@ export function validateConfiguredModelProviders(environment = process.env) {
 }
 
 export function loadManagedModelProviderSettings(environment = process.env) {
+  assertProviderCatalogIsolationComplete(environment);
   assertResponsesContextSyncComplete(environment);
   return managedProviderDefinitions(environment).flatMap((definition) => {
     const marker = readManagedMarker(environment, definition);
@@ -93,62 +95,19 @@ export function loadManagedModelProviderSettings(environment = process.env) {
   });
 }
 
-// 按模型 slug 聚合所有已配置 Provider 的上下文窗口设置。
-// 同名模型在多个 Provider（如 DeepSeek 与 OpenCode Go 各账户）中存在时，
-// 只保留一份权威值：任一 Provider 设置了非空 windowPercent 即作为全局值，
-// 全部未设置时省略该字段（目录里的官方窗口保持不变）。
+// 每条记录只属于一个准确的 Provider 账户。
 export function loadManagedModelWindow(environment = process.env) {
-  const providers = loadManagedModelProviderSettings(environment);
-  const clineFollows = clinePassFollowsDeepseekContext(environment);
-  const bySlug = new Map();
-  for (const provider of providers) {
-    for (const model of provider.models ?? []) {
-      const slug = clineFollows && isClinePassAccountProvider(provider.provider)
-        && model.model === "cline-pass/deepseek-v4.1-flash" ? "deepseek-flash" : model.model;
-      if (typeof slug !== "string" || slug === "") continue;
-      const percent = model.windowPercent;
-      const existing = bySlug.get(slug);
-      if (existing === undefined) {
-        bySlug.set(slug, {
-          model: slug,
-          displayName: model.displayName ?? slug,
-          contextWindow: model.contextWindow,
-          maxContextWindow: model.maxContextWindow,
-          reasoningEfforts: model.reasoningEfforts ?? [],
-          windowPercent: percent,
-          providers: [provider.provider],
-          perProvider: { [provider.provider]: percent },
-          conflicts: false,
-          windowConflict: false,
-        });
-        continue;
-      }
-      if (
-        existing.windowPercent === undefined
-        && percent !== undefined
-      ) {
-        existing.windowPercent = percent;
-      }
-      if (!existing.providers.includes(provider.provider)) {
-        existing.providers.push(provider.provider);
-      }
-      existing.perProvider[provider.provider] = percent;
-      const committed = Object.values(existing.perProvider).filter(
-        (value) => value !== undefined,
-      );
-      if (
-        committed.some((value) => value !== committed[0])
-      ) {
-        existing.conflicts = true;
-      }
-      if (
-        existing.maxContextWindow !== model.maxContextWindow
-      ) {
-        existing.windowConflict = true;
-      }
-    }
-  }
-  return [...bySlug.values()];
+  return loadManagedModelProviderSettings(environment).flatMap(provider =>
+    (provider.models ?? []).map(model => ({
+      provider: provider.provider,
+      model: model.model,
+      displayName: model.displayName ?? model.model,
+      contextWindow: model.contextWindow,
+      maxContextWindow: model.maxContextWindow,
+      reasoningEfforts: model.reasoningEfforts ?? [],
+      windowPercent: model.windowPercent,
+      providers: [provider.provider],
+    })));
 }
 
 // 读取官方主配置的上下文窗口与自动压缩覆盖值；未设置或读取失败返回 null。
@@ -210,7 +169,7 @@ export function writeManagedModelProviderProfileDefault(
   delete document.model_auto_compact_token_limit;
   delete document.model_auto_compact_token_limit_scope;
   writeCatalogWithProfileMirrors(environment, profile.catalogPath, nextCatalog,
-    new Map([[profilePath, stringify(document)]]), new Map([[profile.catalogPath,previousCatalog],[profilePath,previousProfile]]),model);
+    new Map([[profilePath, stringify(document)]]), new Map([[profile.catalogPath,previousCatalog],[profilePath,previousProfile]]));
   readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
     environment,
@@ -229,7 +188,7 @@ export function writeManagedModelProviderCatalogSettings(
   const previousContent = readPrivateFile(path, maximumCatalogBytes);
   const previous = modelCatalogSetting(previousContent, definition, settings.model);
   writeCatalogWithProfileMirrors(environment, path,
-    updateModelCatalogSettings(previousContent, definition, settings), new Map(), new Map([[path,previousContent]]),settings.model);
+    updateModelCatalogSettings(previousContent, definition, settings), new Map(), new Map([[path,previousContent]]));
   return previous;
 }
 
@@ -248,9 +207,9 @@ export function restoreManagedModelProviderCatalogContent(
   writeCatalogWithProfileMirrors(environment, path, content);
 }
 
-function writeCatalogWithProfileMirrors(environment, catalogPath, content, updates = new Map(), originals = new Map(), targetModel) {
+function writeCatalogWithProfileMirrors(environment, catalogPath, content, updates = new Map(), originals = new Map()) {
   collectCatalogWithProfileMirrors(environment, catalogPath, content, updates, originals);
-  writeCatalogUpdates(environment, updates, originals, targetModel);
+  writeCatalogUpdates(environment, updates, originals);
 }
 
 function collectCatalogWithProfileMirrors(environment, catalogPath, content, updates, originals) {
@@ -273,9 +232,9 @@ function collectCatalogWithProfileMirrors(environment, catalogPath, content, upd
   }
 }
 
-function writeCatalogUpdates(environment, updates, originals, targetModel) {
+function writeCatalogUpdates(environment, updates, originals) {
+  assertProviderCatalogIsolationComplete(environment);
   assertResponsesContextSyncComplete(environment);
-  if (writeResponsesContextFollowers(updates, environment, originals, targetModel)) return;
   for (const path of updates.keys()) {
     if (!originals.has(path)) originals.set(path,readPrivateFile(path,maximumCatalogBytes));
     if (readPrivateFile(path,maximumCatalogBytes) !== originals.get(path)) throw new Error("模型目录或 Profile 已变化，请重新预览");
@@ -298,6 +257,7 @@ function writeCatalogUpdates(environment, updates, originals, targetModel) {
 }
 
 function managedProviderCatalogPath(provider, environment) {
+  assertProviderCatalogIsolationComplete(environment);
   const definition = findManagedProviderDefinition(environment, provider);
   if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
   return {
@@ -309,35 +269,19 @@ function managedProviderCatalogPath(provider, environment) {
   };
 }
 
-// 按模型 slug 全局写入上下文窗口：百分比相对该模型的 max_context_window 换算，
-// 把同一 context_window 广播到所有提供该模型且已配置的 Provider 目录。
-// 自动压缩阈值不再写入目录，压缩由上游按窗口默认推导。
-export function writeManagedModelWindowGlobal(
-  { model, windowPercent, contextWindow: requestedContext, environment = process.env } = {},
+export function writeManagedModelWindow(
+  { provider, model, windowPercent, contextWindow: requestedContext, environment = process.env } = {},
 ) {
   if (requestedContext !== undefined && windowPercent !== undefined) {
     throw new Error("Token 数和窗口百分比不能同时设置");
   }
   if (requestedContext === undefined) validateWindowPercent(windowPercent);
-  const providers = loadManagedModelProviderSettings(environment);
-  const clineFollows = clinePassFollowsDeepseekContext(environment);
-  const localModel = provider => clineFollows && isClinePassAccountProvider(provider.provider) && model === "deepseek-flash"
-    ? "cline-pass/deepseek-v4.1-flash" : model;
-  const matches = providers.filter((provider) =>
-    (provider.models ?? []).some((candidate) => candidate.model === localModel(provider)));
-  if (matches.length === 0) {
-    throw new Error(`未找到已配置模型：${model}`);
-  }
-  const bases = matches.map((provider) =>
-    provider.models.find((entry) => entry.model === localModel(provider))?.maxContextWindow);
-  const base = bases[0];
-  if (
-    !Number.isSafeInteger(base)
-    || base <= 0
-    || bases.some((value) => value !== base)
-  ) {
-    throw new Error(`同名模型在不同 Provider 的最大上下文窗口不一致：${model}`);
-  }
+  if (typeof provider !== "string" || !provider || typeof model !== "string" || !model) throw new Error("必须提供准确的 Provider 和模型 ID");
+  const configured = loadManagedModelProviderSettings(environment).find(entry => entry.provider === provider);
+  const modelEntry = configured?.models.find(entry => entry.model === model);
+  if (!modelEntry) throw new Error(`未找到该 Provider 的已配置模型：${provider}/${model}`);
+  const base = modelEntry.maxContextWindow;
+  if (!Number.isSafeInteger(base) || base <= 0) throw new Error(`模型最大上下文窗口无效：${provider}/${model}`);
   const contextWindow = requestedContext ?? Math.round(base * windowPercent / 100);
   if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > base) {
     throw new Error(`模型上下文窗口必须是 1024-${base} 的整数：${model}`);
@@ -345,45 +289,22 @@ export function writeManagedModelWindowGlobal(
   windowPercent = contextWindow * 100 / base;
   const updates = new Map();
   const originals = new Map();
-  const overridden = [];
-  for (const provider of matches) {
-    const modelEntry = provider.models.find((entry) => entry.model === localModel(provider));
-    if (modelEntry?.windowPercent !== undefined && modelEntry.windowPercent !== windowPercent) {
-      overridden.push({provider: provider.provider, previousPercent: modelEntry.windowPercent});
-    }
-    const { definition, path } = managedProviderCatalogPath(provider.provider, environment);
-    // 多个账户共享同一目录；每个目录及其 Profile 只计划和写入一次。
-    if (updates.has(path)) continue;
-    const settings = {
-      model: localModel(provider),
-      reasoningEffort: modelEntry?.reasoningEffort ?? provider.reasoningEffort,
-      contextWindow,
-    };
-    validateManagedModelSettings(definition, settings);
-    const previous = readPrivateFile(path, maximumCatalogBytes);
-    originals.set(path, previous);
-    collectCatalogWithProfileMirrors(environment, path,
-      updateModelCatalogSettings(previous, definition, settings), updates, originals);
-  }
-  // Cline can own the first configuration while the shared DS template has no account yet.
-  if (clineFollows && model === "deepseek-flash") {
-    const path = join(managedProviderDirectory(environment, deepseekProviderDefinition), deepseekProviderDefinition.catalogFileName);
-    if (!updates.has(path)) {
-      const previous = readPrivateFile(path, maximumCatalogBytes);
-      const sourceModel = modelCatalogSetting(previous, deepseekProviderDefinition, model);
-      originals.set(path, previous);
-      collectCatalogWithProfileMirrors(environment, path, updateModelCatalogSettings(previous, deepseekProviderDefinition, {
-        model, contextWindow, reasoningEffort: sourceModel.reasoningEffort,
-      }), updates, originals);
-    }
-  }
-  // 全部受管目录、Profile 与 CP 跟随目录共享一次提交和原始快照回滚。
-  writeCatalogUpdates(environment, updates, originals, model);
+  const overridden = modelEntry.windowPercent !== undefined && modelEntry.windowPercent !== windowPercent
+    ? [{ provider, previousPercent: modelEntry.windowPercent }] : [];
+  const { definition, path } = managedProviderCatalogPath(provider, environment);
+  const settings = { model, reasoningEffort: modelEntry.reasoningEffort ?? configured.reasoningEffort, contextWindow };
+  validateManagedModelSettings(definition, settings);
+  const previous = readPrivateFile(path, maximumCatalogBytes);
+  originals.set(path, previous);
+  collectCatalogWithProfileMirrors(environment, path,
+    updateModelCatalogSettings(previous, definition, settings), updates, originals);
+  writeCatalogUpdates(environment, updates, originals);
   return {
+    provider,
     model,
     windowPercent,
     contextWindow,
-    providers: matches.map((provider) => provider.provider),
+    providers: [provider],
     overridden,
   };
 }
@@ -413,12 +334,8 @@ export function loadManagedProviderProfileFor(
   );
   const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
     environment,
-    ...(requireLaunchConfig
-      ? {
-          expectedCatalogPath,
-          reasoningEffortPolicy: "mirror",
-        }
-      : {}),
+    expectedCatalogPath,
+    reasoningEffortPolicy: "mirror",
   });
   if (requireLaunchConfig) {
     validateModelCatalog(profile.catalogPath, definition, profile.model);
@@ -439,12 +356,8 @@ export function loadManagedProviderProfiles(environment, { requireLaunchConfig =
     );
     const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
       environment,
-      ...(requireLaunchConfig
-        ? {
-            expectedCatalogPath,
-            reasoningEffortPolicy: "mirror",
-          }
-        : {}),
+      expectedCatalogPath,
+      reasoningEffortPolicy: "mirror",
     });
     if (requireLaunchConfig) {
       validateModelCatalog(profile.catalogPath, definition, profile.model);
@@ -544,10 +457,11 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
     throw new Error("Relay Provider 账户或模式读取期间发生变化");
   }
   assertResponsesContextSyncComplete(environment);
+  assertProviderCatalogIsolationComplete(environment);
   const protocols = definition.upstreamWireApi === "chat_completions" ? ["chat"]
     : definition.storageId === "deepseek" ? ["chat", "responses"] : ["responses"];
   return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs, protocols,
-    paths: [...paths, responsesContextSyncPath(environment)], revision: before };
+    paths: [...paths, responsesContextSyncPath(environment), providerCatalogIsolationPath(environment)], revision: before };
 }
 
 export function readProviderProfile(
@@ -562,6 +476,7 @@ export function readProviderProfile(
     readCredential = true,
   } = {},
 ) {
+  assertProviderCatalogIsolationComplete(environment);
   let document;
   let fileAccess;
   try {
@@ -582,6 +497,9 @@ export function readProviderProfile(
     )
   ) {
     throw new Error(`Codex ${descriptor.definition.displayName} Profile 未选择受支持模型`);
+  }
+  if (expectedCatalogPath !== undefined && document.model_catalog_json !== expectedCatalogPath) {
+    throw new Error(`Codex ${descriptor.definition.displayName} 必须使用独立账户模型目录；请先运行 node scripts/isolate-provider-catalogs.mjs --write 显式拆分旧目录`);
   }
   const selectedModel = expectedCatalogPath === undefined
     ? undefined

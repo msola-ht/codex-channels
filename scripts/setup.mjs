@@ -312,12 +312,12 @@ async function runThirdPartyModelSetup({
         {
           value: "provider_default",
           label: "受管 Provider 默认模型与思考等级",
-          hint: "默认模型按账户设置；模型思考等级由共享目录账户共用",
+          hint: "按具体 Provider 独立设置默认模型与思考等级",
         },
         {
           value: "model_window",
           label: "受管模型目录上下文窗口",
-          hint: "按模型名统一设置，应用包含该模型的所有受管 Provider",
+          hint: "选择具体 Provider 与模型，独立设置上下文窗口",
         },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],

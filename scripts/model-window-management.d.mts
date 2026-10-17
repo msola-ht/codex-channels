@@ -1,22 +1,22 @@
-import type { writeManagedModelWindowGlobal } from "../runtime/model-provider-runtime.mjs";
+import type { writeManagedModelWindow } from "../runtime/model-provider-runtime.mjs";
 
 export type ModelWindowChangeInput = {
+  provider: string;
   model: string;
 } & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never });
 
 export interface ModelWindowImportEntry {
+  provider: string;
   model: string;
   displayName: string;
   contextWindow: number;
   maxContextWindow: number;
   windowPercent?: number;
   providers: string[];
-  perProvider?: Record<string, number | undefined>;
-  conflicts?: boolean;
-  windowConflict?: boolean;
 }
 
 export interface ModelWindowChangePreview {
+  provider: string;
   model: {
     id: string;
     displayName: string;
@@ -27,16 +27,13 @@ export interface ModelWindowChangePreview {
   contextWindow: number;
   providers: string[];
   willChange: boolean;
-  conflicts: boolean;
-  overridden: Array<{ provider: string; previousPercent: number }>;
-  windowConflict: boolean;
   activation: "restart-app-server";
 }
 
 export interface ModelWindowChangeOptions {
   environment?: NodeJS.ProcessEnv;
   loadWindow?: (environment: NodeJS.ProcessEnv) => ModelWindowImportEntry[];
-  writeWindow?: typeof writeManagedModelWindowGlobal;
+  writeWindow?: typeof writeManagedModelWindow;
   withFileLock?: typeof import("../runtime/private-file-lock.mjs").withPrivateFileLock;
 }
 
@@ -58,13 +55,11 @@ export function applyModelWindowChange(
 export function projectModelWindow(
   models: ModelWindowImportEntry[],
 ): Array<{
+  provider: string;
   id: string;
   displayName: string;
   contextWindow: number;
   maxContextWindow: number;
   providers: string[];
   windowPercent?: number;
-  conflicts?: boolean;
-  windowConflict?: boolean;
-  perProvider?: Record<string, number>;
 }>;

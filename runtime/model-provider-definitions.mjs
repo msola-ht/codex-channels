@@ -193,13 +193,7 @@ export function loadManagedModelProviderDefinitions(environment = process.env) {
 }
 
 export function loadManagedModelProviderWatcherDefinitions(environment = process.env) {
-  return Object.freeze(managedModelProviderDefinitions.flatMap((definition) => {
-    const capabilities = assertManagedModelProviderCapabilities(definition);
-    const expanded = expandManagedModelProviderDefinitions([definition], environment);
-    return capabilities.instanceAdapter === "single"
-      ? expanded
-      : [definition, ...expanded];
-  }));
+  return loadManagedModelProviderDefinitions(environment);
 }
 
 export function expandManagedModelProviderDefinitions(

@@ -1,7 +1,6 @@
-import { clinePassFollowsDeepseekContext, listResponsesContextFollowers } from "../runtime/responses-context-sync.mjs";
 import {
   loadManagedModelWindow,
-  writeManagedModelWindowGlobal,
+  writeManagedModelWindow,
 } from "../runtime/model-provider-runtime.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
@@ -21,7 +20,7 @@ export function previewModelWindowChange(
     loadWindow = loadManagedModelWindow,
   } = {},
 ) {
-  return publicPreview(withFollowers(buildPlan(input, loadWindow(environment)),environment));
+  return publicPreview(buildPlan(input, loadWindow(environment)));
 }
 
 export async function applyModelWindowChange(
@@ -29,16 +28,17 @@ export async function applyModelWindowChange(
   {
     environment = process.env,
     loadWindow = loadManagedModelWindow,
-    writeWindow = writeManagedModelWindowGlobal,
+    writeWindow = writeManagedModelWindow,
     withFileLock,
   } = {},
 ) {
   return withModelProviderManagementTransaction(
     environment,
     () => {
-      const plan = withFollowers(buildPlan(input, loadWindow(environment)),environment);
+      const plan = buildPlan(input, loadWindow(environment));
       try {
         writeWindow({
+          provider: plan.model.provider,
           model: plan.model.model,
           contextWindow: plan.contextWindow,
           environment,
@@ -70,20 +70,14 @@ function buildPlan(input, models) {
     );
   }
   const values = record(input);
+  const provider = requiredString(values.provider, "provider", "Provider ID 不能为空");
   const modelId = requiredString(values.model, "model", "模型 ID 不能为空");
-  const model = models.find((candidate) => candidate.model === modelId);
+  const model = models.find((candidate) => candidate.provider === provider && candidate.model === modelId);
   if (model === undefined) {
     throw invalid(
       "model-not-supported",
       "model",
-      `未找到已配置模型：${modelId}`,
-    );
-  }
-  if (model.windowConflict === true) {
-    throw invalid(
-      "window-conflict",
-      "model",
-      `同名模型在不同 Provider 的最大上下文窗口不一致：${model.displayName}`,
+      `未找到已配置模型：${provider}/${modelId}`,
     );
   }
   const hasContext = values.contextWindow !== undefined;
@@ -104,25 +98,17 @@ function buildPlan(input, models) {
     throw invalid("invalid-window", "contextWindow", `模型上下文窗口必须是 1024-${model.maxContextWindow} 的整数：${model.displayName}`);
   }
   const windowPercent = contextWindow * 100 / model.maxContextWindow;
-  const overridden = Object.entries(model.perProvider ?? {}).flatMap(
-    ([provider, value]) => (
-      value !== undefined && value !== windowPercent
-        ? [{ provider, previousPercent: value }]
-        : []
-    ),
-  );
   return {
     model,
     windowPercent,
     contextWindow,
-    willChange: model.contextWindow !== contextWindow || overridden.length > 0,
-    conflicts: model.conflicts === true,
-    overridden,
+    willChange: model.contextWindow !== contextWindow,
   };
 }
 
 function publicPreview(plan) {
   return {
+    provider: plan.model.provider,
     model: {
       id: plan.model.model,
       displayName: plan.model.displayName,
@@ -131,19 +117,15 @@ function publicPreview(plan) {
     },
     windowPercent: plan.windowPercent,
     contextWindow: plan.contextWindow,
-    providers: plan.model.providers,
+    providers: [plan.model.provider],
     willChange: plan.willChange,
-    conflicts: plan.conflicts,
-    overridden: plan.overridden,
-    windowConflict: plan.model.windowConflict === true,
     activation: "restart-app-server",
   };
 }
 
 function requiredString(value, field, message) {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  if (normalized === "") throw invalid("required", field, message);
-  return normalized;
+  if (typeof value !== "string" || value.trim() === "") throw invalid("required", field, message);
+  return value;
 }
 
 function record(value) {
@@ -161,30 +143,14 @@ function invalid(code, field, message, cause) {
 
 export function projectModelWindow(models) {
   return models.map((model) => ({
+    provider: model.provider,
     id: model.model,
     displayName: model.displayName,
     contextWindow: model.contextWindow,
     maxContextWindow: model.maxContextWindow,
-    providers: model.providers,
+    providers: [model.provider],
     ...(model.windowPercent === undefined
       ? {}
       : { windowPercent: model.windowPercent }),
-    conflicts: model.conflicts === true,
-    windowConflict: model.windowConflict === true,
-    ...(model.perProvider === undefined
-      ? {}
-      : {
-          perProvider: Object.fromEntries(
-            Object.entries(model.perProvider).filter(([, value]) => value !== undefined),
-          ),
-        }),
   }));
-}
-
-function withFollowers(plan,environment) {
-  const updatesDeepseek = plan.model.providers.some(provider=>provider === "deepseek" || provider.startsWith("ds-"))
-    || (plan.model.model === "deepseek-flash" && clinePassFollowsDeepseekContext(environment));
-  if (!updatesDeepseek) return plan;
-  const followers=listResponsesContextFollowers(environment,plan.model.model);
-  return {...plan, willChange:plan.willChange || followers.some(entry=>entry.contextWindow !== plan.contextWindow), model:{...plan.model,providers:[...new Set([...plan.model.providers,...followers.map(entry=>entry.providerId)])]}};
 }

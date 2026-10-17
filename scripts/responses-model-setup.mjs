@@ -14,12 +14,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
   for (let index = 0; index < ids.length; index++) {
     const id = ids[index];
     const old = previous.find((entry) => entry.id === id);
-    let template = old?.template;
-    if (template?.source === "deepseek" && !importedIds.includes(id)) {
-      const followContext = await prompts.confirm({message: `${id} 跟随 DS 模型 ${template.model} 的上下文？`, initialValue: template.followContext});
-      if (prompts.isCancel(followContext)) return undefined;
-      template = {...template, followContext: followContext === true};
-    }
+    const template = old?.template === undefined ? undefined : { source: old.template.source, model: old.template.model };
     let configure = true;
     const model = withNewModelInstructions({...structuredClone(old), ...(template ? {template} : {})}, old === undefined || importedIds.includes(id));
     if (importedIds.includes(id)) {
@@ -31,7 +26,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       if (prompts.isCancel(name)) return undefined;
       const description = await prompts.text({ message: `${id} 模型描述（留空使用目录默认描述）`, initialValue: old?.description ?? "", validate: value => String(value).length <= 4000 && !/\p{Cc}/u.test(String(value).replace(/[\t\n]/gu, "")) ? undefined : "描述不能超过 4000 字符或包含非法控制字符" });
       if (prompts.isCancel(description)) return undefined;
-      const context = template?.followContext ? old.contextWindow : await promptContextWindow(prompts, id, old?.contextWindow, 100_000_000);
+      const context = await promptContextWindow(prompts, id, old?.contextWindow, 100_000_000);
       if (context === undefined) return undefined;
       const maximumContext = await prompts.text({
         message: `${id} 最大上下文窗口（Token；留空与当前窗口相同）`,

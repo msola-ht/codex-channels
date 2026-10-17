@@ -1,4 +1,3 @@
-import { listResponsesContextFollowers } from "../runtime/responses-context-sync.mjs";
 import { AccountManagementError } from "./account-management-error.mjs";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -23,6 +22,7 @@ import { createManagedProviderConfiguration, hasProviderBaseConfig, resolveManag
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
 import { createManagedDeepseekCatalog, downloadDeepseekCatalog, deepseekSetupScriptUrl, normalizeDeepseekCatalogCapabilities } from "./deepseek-setup.mjs";
+import { completeCatalogPrompts } from "../runtime/model-template-catalog.mjs";
 
 export function deepseekAccountPaths(environment, accountId) {
   const definition = deepseekAccountDefinition(accountId);
@@ -61,7 +61,6 @@ function readBackup(path, environment) {
 
 export function previewDeepseekAccountConfiguration(input, { environment = process.env } = {}) {
   const definition = deepseekAccountDefinition(input.accountId);
-  if (!existsSync(deepseekAccountPaths(environment,input.accountId).catalog)) assertNoResponsesContextFollowers(environment,"重建 DS 目录");
   const mode = input.mode ?? "switching";
   if (!["switching", "exclusive"].includes(mode)) throw new AccountManagementError("invalid-mode", "mode", "DeepSeek 模式无效");
   const accounts = loadDeepseekAccounts(environment);
@@ -116,12 +115,11 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     let catalog;
     if (existsSync(paths.catalog)) {
       const previousCatalog = JSON.parse(createProviderFileReader(environment)(paths.catalog, 2_097_152));
-      catalog = normalizeDeepseekCatalogCapabilities(previousCatalog);
+      catalog = normalizeDeepseekCatalogCapabilities(completeCatalogPrompts(previousCatalog));
       if (JSON.stringify(catalog) !== JSON.stringify(previousCatalog)) {
         updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
       }
     } else {
-      assertNoResponsesContextFollowers(environment,"重建 DS 目录");
       const downloaded = await (options.downloadCatalog ?? downloadDeepseekCatalog)(options.fetchImpl ?? fetch);
       catalog = createManagedDeepseekCatalog(downloaded.catalog);
       updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
@@ -166,11 +164,8 @@ function deepseekAccountRemovalPlan(accountId, environment) {
   if (remaining.length > 0 && !remaining.some((account) => account.default)) throw new AccountManagementError("default-account-conflict", "accountId", "请先选择其他默认账户");
   const snapshots = snapshotProviderFiles(Object.values(paths), environment);
   const updates = new Map([[paths.profile, undefined], [paths.marker, undefined], [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`]]);
-  if (remaining.length === 0) {
-    assertNoResponsesContextFollowers(environment,"删除最后一个 DS 账户");
-    updates.set(paths.catalog, undefined);
-    updates.set(paths.manifest, undefined);
-  }
+  updates.set(paths.catalog, undefined);
+  updates.set(paths.manifest, undefined);
   if (configured.mode === "exclusive") {
     const initial = readBackup(paths.backup, environment);
     if (!initial) throw new AccountManagementError("backup-unavailable", "accountId", "DeepSeek 账户初始备份缺失");
@@ -201,9 +196,4 @@ export async function removeDeepseekAccount({ accountId, confirmRemove = false }
     await applyProviderFileUpdates(updates, snapshots);
     return { action: "removed", accountId, runtime, activation: "restart-all" };
   });
-}
-
-function assertNoResponsesContextFollowers(environment, operation) {
-  const followers=listResponsesContextFollowers(environment);
-  if (followers.length > 0) throw new AccountManagementError("context-followers-conflict", "accountId", `${operation}前，请先关闭关联 CP 模型的上下文跟随：${[...new Set(followers.map(entry=>entry.providerId))].join("、")}`);
 }

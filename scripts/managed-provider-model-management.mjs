@@ -1,10 +1,10 @@
 import { join } from "node:path";
 import * as clackPrompts from "@clack/prompts";
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { commandCodeProviderDefinition, opencodeGoProviderDefinition, loadManagedModelProviderDefinitions, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
+import { loadManagedModelProviderDefinitions, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
 import { ccgAccountsFilePath } from "../runtime/ccg-accounts.mjs";
 import { opencodeGoAccountsFilePath } from "../runtime/opencode-go-accounts.mjs";
-import { managedProviderDirectory, managedProviderMarkerPath, loadManagedModelProviderSettings, loadManagedModelWindow, withManagedModelCatalogSettings, withPreservedManagedModelCatalogSettings } from "../runtime/model-provider-runtime.mjs";
+import { managedProviderDirectory, managedProviderMarkerPath, loadManagedModelProviderSettings, withManagedModelCatalogSettings, withPreservedManagedModelCatalogSettings } from "../runtime/model-provider-runtime.mjs";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
@@ -16,32 +16,32 @@ import { createCcgCatalog, createOpencodeGoCatalog } from "./provider-model-cata
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 
-function definitionFor(provider) {
-  if (provider === "ccg") return commandCodeProviderDefinition;
-  if (provider === "ocg") return opencodeGoProviderDefinition;
-  throw new Error("此模型管理入口仅支持 CCG 或 OCG");
+function definitionFor(provider, environment) {
+  const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === provider);
+  if (definition && ["ccg", "opencode-go"].includes(definition.storageId)) return definition;
+  throw new Error("此模型管理入口必须明确选择 CCG 或 OCG 账户");
 }
 
 /** Existing catalogues remain the enabled set; no hidden candidate database. */
 export async function updateManagedProviderModels(provider, { environment = process.env, editCatalog } = {}) {
-  const definition = definitionFor(provider);
+  const definition = definitionFor(provider, environment);
   if (typeof editCatalog !== "function") throw new Error("缺少模型目录编辑操作");
   return withModelProviderManagementTransaction(environment, async () => {
-    const definitions = loadManagedModelProviderDefinitions(environment).filter(entry => (entry.storageId ?? entry.id) === (definition.storageId ?? definition.id));
-    const providers = loadManagedModelProviderSettings(environment).filter(entry => definitions.some(item => item.id === entry.provider));
-    if (!providers.length || providers.length !== definitions.length) throw new Error("请先完成所有账户配置，再管理共享模型目录");
+    const definitions = [definition];
+    const providers = loadManagedModelProviderSettings(environment).filter(entry => entry.provider === provider);
+    if (providers.length !== 1) throw new Error("请先完成该账户配置，再管理模型目录");
     const directory = managedProviderDirectory(environment, definition);
     const catalogPath = join(directory, definition.catalogFileName);
     const manifestPath = join(directory, definition.catalogManifestFileName);
     const snapshots = snapshotProviderFiles([
       catalogPath, manifestPath, `${catalogPath}.backup`, `${manifestPath}.backup`,
       join(codexHomePath(environment), "config.toml"),
-      provider === "ccg" ? ccgAccountsFilePath(environment) : opencodeGoAccountsFilePath(environment),
+      definition.storageId === "ccg" ? ccgAccountsFilePath(environment) : opencodeGoAccountsFilePath(environment),
       ...definitions.flatMap(entry => [managedProviderMarkerPath(environment, entry), join(codexHomePath(environment), entry.profileFileName)]),
     ], environment);
     const original = snapshots.find(entry => entry.path === catalogPath)?.content;
     const manifest = snapshots.find(entry => entry.path === manifestPath)?.content;
-    if (!original || !manifest) throw new Error("共享模型目录或来源文件缺失，请先恢复文件");
+    if (!original || !manifest) throw new Error("账户模型目录或来源文件缺失，请先恢复文件");
     const current = JSON.parse(original.toString("utf8"));
     const requiredModels = [...new Set(providers.map(entry => entry.model))];
     const next = await editCatalog({ catalog: structuredClone(current), requiredModels, definition, previousModels: providers[0].models });
@@ -75,9 +75,16 @@ export async function updateManagedProviderModels(provider, { environment = proc
 }
 
 export async function runManagedProviderModelSetup(provider, { environment = process.env, prompts = clackPrompts, output = process.stdout, downloadCatalog = downloadDeepseekCatalog } = {}) {
-  const definition = definitionFor(provider);
+  if (provider === "ccg" || provider === "ocg") {
+    const storageId = provider === "ccg" ? "ccg" : "opencode-go";
+    const accounts = loadManagedModelProviderDefinitions(environment).filter(entry => entry.storageId === storageId);
+    if (!accounts.length) throw new Error("请先配置账户");
+    provider = await prompts.select({ message: "选择模型目录所属账户", options: accounts.map(entry => ({ value: entry.id, label: entry.displayName })) });
+    if (prompts.isCancel(provider)) return { action: "back", activation: "none" };
+  }
+  const definition = definitionFor(provider, environment);
   const result = await updateManagedProviderModels(provider, { environment, editCatalog: async ({ catalog, requiredModels, previousModels }) => {
-    const action = await prompts.select({ message: `${definition.displayName} 共享模型目录`, options: [
+    const action = await prompts.select({ message: `${definition.displayName} 模型目录`, options: [
       { value: "select", label: "查看启用模型", hint: "移除请使用统一模型管理入口" },
       { value: "add", label: "添加第三方 Responses 模型", hint: "按上游说明填写准确 ID 和能力" },
       { value: "templates", label: "导入／刷新 DS 模板", hint: "使用该提供商的既有 ID 映射" },
@@ -95,15 +102,12 @@ export async function runManagedProviderModelSetup(provider, { environment = pro
       catalog.models.push(model);
     } else if (action === "templates") {
       const downloaded = await downloadCatalog(globalThis.fetch);
-      let templates = (provider === "ccg" ? createCcgCatalog : createOpencodeGoCatalog)(downloaded.catalog);
+      let templates = (definition.storageId === "ccg" ? createCcgCatalog : createOpencodeGoCatalog)(downloaded.catalog);
       templates = withPreservedManagedModelCatalogSettings(templates, definition, previousModels);
       const previous = new Map(catalog.models.map(entry => [entry.slug, entry]));
-      const windows = provider === "ocg" ? loadManagedModelWindow(environment) : [];
       for (const model of templates.models) {
         const old = previous.get(model.slug);
-        const window = old ? undefined : windows.find(entry => entry.model === model.slug);
-        if (window?.conflicts || window?.windowConflict) throw new Error("同名模型的窗口设置冲突，请先统一设置");
-        const contextWindow = old?.context_window ?? window?.contextWindow;
+        const contextWindow = old?.context_window;
         if (contextWindow !== undefined) {
           const maximum = model.max_context_window ?? model.context_window;
           if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > maximum) {
@@ -116,7 +120,7 @@ export async function runManagedProviderModelSetup(provider, { environment = pro
       catalog.models = [...previous.values()];
     } else if (action !== "select") throw new Error("未知模型目录操作");
     const enabled = await promptEnabledProviderModels(prompts, output, {
-      label: `${definition.displayName}（全部账户及聚合共用）`,
+      label: definition.displayName,
       models: catalog.models.map(entry => ({ id: entry.slug, name: entry.display_name, reasoningEffort: entry.default_reasoning_level })),
       enabledModels: action === "add" ? catalog.models.map(entry => entry.slug) : previousIds,
       requiredModels,

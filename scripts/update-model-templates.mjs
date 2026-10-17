@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { completeModelMessages } from "../runtime/model-template-prompts.mjs";
 import { packageDir } from "./package-path.mjs";
 import { downloadDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
@@ -33,30 +34,10 @@ function validateCatalog(catalog) {
   }
 }
 
-// Only absent prompt strings are inherited. Explicit values remain authoritative.
-function fillPrompts(target, source) {
-  for (const [key, value] of Object.entries(source)) {
-    if (["__proto__", "constructor", "prototype"].includes(key)) throw new Error("提示词包含不受支持的属性名");
-    if (Object.hasOwn(target, key)) {
-      if (object(target[key]) && object(value)) fillPrompts(target[key], value);
-    } else if (typeof value === "string" && value.length > 0) target[key] = value;
-    else if (object(value)) {
-      const nested = {};
-      fillPrompts(nested, value);
-      if (Object.keys(nested).length > 0) target[key] = nested;
-    }
-  }
-}
-
 function completeDeepseek(raw, base) {
   const completed = structuredClone(raw);
   for (const model of completed.models) {
-    const messages = model.model_messages;
-    // Agreed exception: null approvals inherit the baseline approval prompts.
-    if (messages.approvals === null) delete messages.approvals;
-    // Token-budget messages require their accompanying thresholds and switches.
-    if (!Object.hasOwn(messages, "token_budget")) messages.token_budget = structuredClone(base.model_messages.token_budget);
-    fillPrompts(messages, base.model_messages);
+    model.model_messages = completeModelMessages(model.model_messages, base.model_messages);
   }
   return completed;
 }

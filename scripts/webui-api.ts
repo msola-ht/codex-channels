@@ -792,14 +792,13 @@ export interface ManagementProviderSettingsResponse {
     }>
   }
   modelWindow: Array<{
+    provider: string
     id: string
     displayName: string
     contextWindow: number
     maxContextWindow: number
     providers: string[]
     windowPercent?: number
-    conflicts?: boolean
-    perProvider?: Record<string, number>
   }>
 }
 
@@ -834,6 +833,7 @@ export type ManagementProviderSettingsMutationInput =
     }
   | ({
       operation: "managed.window"
+      provider: string
       model: string
     } & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never }))
 
@@ -850,7 +850,7 @@ export interface ManagementProviderSettingsPreview {
     baseUrl?: string
     model?: string | null
   }
-  provider?: {
+  provider?: string | {
     id: string
     displayName?: string
     name?: string
@@ -862,11 +862,8 @@ export interface ManagementProviderSettingsPreview {
     models?: ResponsesModelDefinition[]
     apiKeyChange?: boolean
   }
-  model?: { id: string; displayName: string; contextWindow?: number }
+  model?: { id: string; displayName: string; contextWindow?: number; maxContextWindow?: number }
   providers?: string[]
-  conflicts?: boolean
-  windowConflict?: boolean
-  overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
   windowPercent?: number
   contextWindow?: number
@@ -894,9 +891,6 @@ export interface ManagementProviderSettingsMutationResponse {
   provider?: ManagementProviderSettingsPreview["provider"]
   model?: ManagementProviderSettingsPreview["model"]
   providers?: string[]
-  conflicts?: boolean
-  windowConflict?: boolean
-  overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
   windowPercent?: number
   contextWindow?: number

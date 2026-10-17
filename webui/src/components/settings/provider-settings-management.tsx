@@ -82,13 +82,13 @@ function ProviderSettingsCard({
   const [apiKey, setApiKey] = useState("")
   const [confirmRemoveBaseUrl, setConfirmRemoveBaseUrl] = useState(false)
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
-  const [windowModel, setWindowModel] = useState(settings.modelWindow[0]?.id ?? "")
+  const [windowModel, setWindowModel] = useState(settings.modelWindow[0] ? windowModelKey(settings.modelWindow[0]) : "")
   const [windowError, setWindowError] = useState<"invalid-window" | null>(null)
   const modelsOnly = section === "models"
   const editorStale = modelsOnly && editorOpen && editorRevision !== settings.resourceRevision
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
-  const windowEntry = settings.modelWindow.find((candidate) => candidate.id === windowModel) ?? settings.modelWindow[0]
+  const windowEntry = settings.modelWindow.find((candidate) => windowModelKey(candidate) === windowModel) ?? settings.modelWindow[0]
   const [managedDraft, patchManaged, resetManaged] = useSettingsDraft({ model: managed?.model ?? "", reasoning: managed?.reasoningEffort ?? "" })
   const { model: managedModel, reasoning: managedReasoning } = managedDraft
   const managedModelEntry = managed?.models.find((candidate) => candidate.id === managedModel)
@@ -104,7 +104,7 @@ function ProviderSettingsCard({
   const probe = useCustomModelCapabilityProbe(JSON.stringify({ configVersion: settings.configVersion, editingId, providerId, providerName, baseUrl, apiKey, upstreamWireApi, customModels, mode, model, supportsWebsockets, confirmRemoveBaseUrl }), editorOpen && !editorStale && catalogKind === "custom" && pending === null)
 
   const managedId = managed?.id
-  const windowId = windowEntry?.id
+  const windowId = windowEntry === undefined ? undefined : windowModelKey(windowEntry)
   useEffect(() => { resetManaged() }, [managedId, resetManaged])
   useEffect(() => { resetWindow() }, [windowId, resetWindow])
 
@@ -153,7 +153,8 @@ function ProviderSettingsCard({
     if (modelsOnly && editingId !== null) {
       const models = customModels.map(({ probeConnection: _probeConnection, ...entry }) => {
         const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts.includes(effort)))
-        return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions }
+        return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions,
+          ...(entry.template === undefined ? {} : { template: { source: entry.template.source, model: entry.template.model } }) }
       })
       const probeConnections = customModels.flatMap(entry => (["applyPatch", "toolSearch"] as const).flatMap(capability => {
         const token = entry.probeConnection?.[capability]
@@ -178,7 +179,8 @@ function ProviderSettingsCard({
         ...(catalogKind === "custom" ? {
           catalog: { kind: "custom" as const, models: customModels.map(({ probeConnection: _probeConnection, ...entry }) => {
             const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts.includes(effort)))
-            return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions }
+            return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions,
+              ...(entry.template === undefined ? {} : { template: { source: entry.template.source, model: entry.template.model } }) }
           }) },
           probeConnections: customModels.flatMap(entry => (["applyPatch", "toolSearch"] as const).flatMap(capability => {
             const token = entry.probeConnection?.[capability]
@@ -222,6 +224,7 @@ function ProviderSettingsCard({
     setWindowError(null)
     await management.mutate({
       operation: "managed.window",
+      provider: windowEntry.provider,
       model: windowEntry.id,
       contextWindow,
     })
@@ -298,8 +301,8 @@ function ProviderSettingsCard({
         </div>
         {windowEntry === undefined ? <SettingsEmpty>{t("managementUi.managedModelsEmpty")}</SettingsEmpty> : <>
           <FieldGroup>
-            <Table><TableHeader><TableRow><TableHead>{t("modelManagement.model")}</TableHead><TableHead>{t("managementUi.provider")}</TableHead><TableHead>{t("managementUi.windowTokens")}</TableHead><TableHead>{t("modelManagement.actions")}</TableHead></TableRow></TableHeader><TableBody>{settings.modelWindow.map(entry => <TableRow key={entry.id} data-state={entry.id === windowEntry.id ? "selected" : undefined}><TableCell>{entry.displayName}</TableCell><TableCell>{entry.providers.join(t("managementUi.listSeparator"))}</TableCell><TableCell>{entry.conflicts ? t("managementUi.inconsistent") : entry.contextWindow}</TableCell><TableCell><Button size="sm" variant="outline" disabled={busy || pending !== null || entry.id === windowEntry.id} onClick={() => { setWindowModel(entry.id); setWindowError(null) }}>{t("managementUi.select")}</Button></TableCell></TableRow>)}</TableBody></Table>
-            <p className="text-sm">{t("managementUi.editingModel", { model: windowEntry.displayName })}</p>
+            <Table><TableHeader><TableRow><TableHead>{t("modelManagement.model")}</TableHead><TableHead>{t("managementUi.provider")}</TableHead><TableHead>{t("managementUi.windowTokens")}</TableHead><TableHead>{t("modelManagement.actions")}</TableHead></TableRow></TableHeader><TableBody>{settings.modelWindow.map(entry => <TableRow key={windowModelKey(entry)} data-state={windowModelKey(entry) === windowId ? "selected" : undefined}><TableCell>{entry.displayName}</TableCell><TableCell>{entry.provider}</TableCell><TableCell>{entry.contextWindow}</TableCell><TableCell><Button size="sm" variant="outline" disabled={busy || pending !== null || windowModelKey(entry) === windowId} onClick={() => { setWindowModel(windowModelKey(entry)); setWindowError(null) }}>{t("managementUi.select")}</Button></TableCell></TableRow>)}</TableBody></Table>
+            <p className="text-sm">{t("managementUi.editingModel", { provider: windowEntry.provider, model: windowEntry.displayName })}</p>
             <ManagedSelect label={t("managementUi.contextPreset")} value={windowTokens} options={[
               ...contextWindowPresetTokens.filter(value => value < windowEntry.maxContextWindow).map(value => [String(value), t("managementUi.contextPresetSize", { size: value === 1048576 ? "1M" : `${value / 1024}K`, tokens: value })] as [string, string]),
               [String(windowEntry.maxContextWindow), t("managementUi.maximumWindow", { tokens: windowEntry.maxContextWindow })],
@@ -307,7 +310,6 @@ function ProviderSettingsCard({
             <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-tokens">{t("managementUi.windowTokens")}</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-tokens" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-tokens-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={1024} max={windowEntry.maxContextWindow} step={1} value={windowTokens} disabled={busy || pending !== null} onChange={(event) => { patchWindow({ tokens: event.target.value }); setWindowError(null) }} /><FieldError id="provider-window-tokens-error" className="sm:text-right">{windowError === null ? null : t("managementUi.windowInvalid", { max: windowEntry.maxContextWindow })}</FieldError></FieldContent></Field>
           </FieldGroup>
           <p className="text-xs text-muted-foreground">{t("managementUi.windowSummary", { providers: windowEntry.providers.join(t("managementUi.listSeparator")) || t("managementUi.none"), context: formatTokens(windowEntry.contextWindow), max: formatTokens(windowEntry.maxContextWindow) })}</p>
-          {windowEntry.conflicts === true ? <Alert><AlertTitle>{t("managementUi.windowConflict")}</AlertTitle><AlertDescription>{t("managementUi.windowConflictDescription", { values: Object.entries(windowEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join(t("accountConfirmation.listSeparator")) || t("managementUi.partlyUnset") })}</AlertDescription></Alert> : null}
           <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || windowEntry === undefined} onClick={() => void updateWindow()}>{t("managementUi.saveWindow")}</Button>
         </>}
       </section>}
@@ -348,9 +350,8 @@ function ProviderSettingsCard({
             return <FieldGroup key={index} className="rounded-md border p-3">
               <Field><FieldLabel htmlFor={`responses-model-${index}`}>{t("managementUi.modelId")}</FieldLabel><Input id={`responses-model-${index}`} value={entry.id} disabled={busy || pending !== null || existingModel} onChange={event => patch({ id: event.target.value })} /></Field>
               <Field><FieldLabel htmlFor={`responses-name-${index}`}>{t("managementUi.displayName")}</FieldLabel><Input id={`responses-name-${index}`} value={entry.name} disabled={busy || pending !== null} onChange={event => patch({ name: event.target.value })} /></Field>
-              {entry.template?.source === "deepseek" ? <Field orientation="horizontal"><Checkbox id={`responses-follow-${index}`} checked={entry.template.followContext} disabled={busy || pending !== null} onCheckedChange={value => patch({template: {...entry.template!, followContext: value === true}})} /><FieldLabel htmlFor={`responses-follow-${index}`}>{t("managementUi.followDsContext", { model: entry.template.model })}</FieldLabel></Field> : null}
-              <ManagedSelect label={t("managementUi.contextPreset")} value={entry.contextWindow ? String(entry.contextWindow) : ""} options={contextWindowPresetTokens.filter(value => value <= (entry.maxContextWindow ?? 100000000)).map(value => [String(value), t("managementUi.contextPresetLabel", { k: value / 1024, tokens: value })])} disabled={busy || pending !== null || entry.template?.followContext === true} onChange={value => patch({ contextWindow: Number(value) })} />
-              <Field><FieldLabel htmlFor={`responses-context-${index}`}>{t("managementUi.contextTokens")}</FieldLabel><Input id={`responses-context-${index}`} type="number" min={1024} max={entry.maxContextWindow ?? 100000000} value={entry.contextWindow || ""} disabled={busy || pending !== null || entry.template?.followContext === true} onChange={event => patch({ contextWindow: Number(event.target.value) })} /></Field>
+              <ManagedSelect label={t("managementUi.contextPreset")} value={entry.contextWindow ? String(entry.contextWindow) : ""} options={contextWindowPresetTokens.filter(value => value <= (entry.maxContextWindow ?? 100000000)).map(value => [String(value), t("managementUi.contextPresetLabel", { k: value / 1024, tokens: value })])} disabled={busy || pending !== null} onChange={value => patch({ contextWindow: Number(value) })} />
+              <Field><FieldLabel htmlFor={`responses-context-${index}`}>{t("managementUi.contextTokens")}</FieldLabel><Input id={`responses-context-${index}`} type="number" min={1024} max={entry.maxContextWindow ?? 100000000} value={entry.contextWindow || ""} disabled={busy || pending !== null} onChange={event => patch({ contextWindow: Number(event.target.value) })} /></Field>
               <Field orientation="horizontal"><Checkbox id={`responses-reasoning-supported-${index}`} checked={entry.reasoningEfforts.length > 0} disabled={busy || pending !== null} onCheckedChange={value => patch({ reasoningEfforts: value === true ? ["medium"] : [], defaultReasoningEffort: value === true ? "medium" : null, reasoningDescriptions: undefined })} /><FieldLabel htmlFor={`responses-reasoning-supported-${index}`}>{t("managementUi.supportsReasoning")}</FieldLabel></Field>
               {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-reasoning-${index}`}>{t("managementUi.reasoningList")}</FieldLabel><Input id={`responses-reasoning-${index}`} value={entry.reasoningEfforts.join(",")} placeholder="low,medium,high" disabled={busy || pending !== null} onChange={event => { const values = event.target.value === "" ? [] : event.target.value.split(","); patch({ reasoningEfforts: values, defaultReasoningEffort: values.includes(entry.defaultReasoningEffort ?? "") ? entry.defaultReasoningEffort : values[0] ?? null }) }} /></Field> : null}
               {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-default-${index}`}>{t("managementUi.defaultReasoning")}</FieldLabel><Input id={`responses-default-${index}`} value={entry.defaultReasoningEffort ?? ""} disabled={busy || pending !== null} onChange={event => patch({ defaultReasoningEffort: event.target.value })} /></Field> : null}
@@ -401,6 +402,10 @@ function ProviderSettingsCard({
   </>
 }
 
+function windowModelKey(model: { provider: string; id: string }) {
+  return JSON.stringify([model.provider, model.id])
+}
+
 function ProviderSettingsConfirmationDialog({
   pending,
   saving,
@@ -416,18 +421,16 @@ function ProviderSettingsConfirmationDialog({
 }) {
   const { t } = useTranslation()
   const localRemoval = pending.operation === "model.remove"
+  const providerDetails = typeof pending.provider === "object" ? pending.provider : undefined
   const notices: string[] = []
   const lines = localRemoval ? [] : [pending.operation === "model.custom.save" ? t("modelCatalog.editOperation") : t("accountConfirmation.operation", { value: pending.operation })]
-  if (!localRemoval && pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
-  if (pending.provider?.model !== undefined) lines.push(t("managementUi.defaultModelConfirm", { value: pending.provider.model }))
-  if (pending.provider !== undefined && "upstreamWireApi" in pending.provider) lines.push(t("managementUi.upstreamConfirm", { value: pending.provider.upstreamWireApi === "chat_completions" ? t("managementUi.upstreamChatCompletions") : t("managementUi.upstreamResponses") }))
-  if (pending.provider?.models !== undefined) for (const model of pending.provider.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: t(model.supportsImages ? "managementUi.supported" : "managementUi.unsupported"), reasoning: model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? "none", patch: model.applyPatchToolType ?? t("managementUi.unsupported"), search: t(model.supportsSearchTool ? "managementUi.supported" : "managementUi.unsupported") }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model, mode: t(model.template.followContext ? "managementUi.follow" : "managementUi.independent") }) : ""))
+  if (!localRemoval && pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: typeof pending.provider === "string" ? pending.provider : pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
+  if (providerDetails?.model !== undefined) lines.push(t("managementUi.defaultModelConfirm", { value: providerDetails.model }))
+  if (providerDetails !== undefined && "upstreamWireApi" in providerDetails) lines.push(t("managementUi.upstreamConfirm", { value: providerDetails.upstreamWireApi === "chat_completions" ? t("managementUi.upstreamChatCompletions") : t("managementUi.upstreamResponses") }))
+  if (providerDetails?.models !== undefined) for (const model of providerDetails.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: t(model.supportsImages ? "managementUi.supported" : "managementUi.unsupported"), reasoning: model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? "none", patch: model.applyPatchToolType ?? t("managementUi.unsupported"), search: t(model.supportsSearchTool ? "managementUi.supported" : "managementUi.unsupported") }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model }) : ""))
   if (pending.target !== undefined) lines.push(t("managementUi.targetConfirm", { name: pending.target.displayName, id: pending.target.id }))
   if (!localRemoval && pending.model !== undefined) lines.push(t("managementUi.modelConfirm", { name: pending.model.displayName, id: pending.model.id }))
   if (pending.providers !== undefined && pending.providers.length > 0) lines.push(t(localRemoval ? "modelCatalog.removalScope" : "managementUi.appliedProviders", { providers: pending.providers.join(t("managementUi.listSeparator")) }))
-  if (pending.overridden !== undefined && pending.overridden.length > 0) lines.push(t("managementUi.overridden", { values: pending.overridden.map(entry => t("managementUi.previousPercent", { provider: entry.provider, percent: entry.previousPercent })).join(t("managementUi.listSeparator")) }))
-  if (pending.conflicts === true) lines.push(t("managementUi.percentConflictConfirm"))
-  if (pending.windowConflict === true) lines.push(t("managementUi.maxWindowConflict"))
   if (pending.reasoningEffort !== undefined) lines.push(t("managementUi.reasoningConfirm", { value: pending.reasoningEffort }))
   if (pending.contextWindow !== undefined) lines.push(t("managementUi.windowTokensConfirm", { tokens: pending.contextWindow }))
   else if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
@@ -460,7 +463,7 @@ function ProviderSettingsConfirmationDialog({
         {notices.map((notice, index) => <p key={index}>{notice}</p>)}
       </div>
     </div> : <p className="whitespace-pre-line">{lines.join("\n")}</p>}
-    {pending.provider?.models?.map(entry => <CustomModelDetailsPreview key={entry.id} entry={entry} />)}
+    {providerDetails?.models?.map(entry => <CustomModelDetailsPreview key={entry.id} entry={entry} />)}
     {!localRemoval ? <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: pending.activation })}</p> : null}
     {!localRemoval && pending.activation === "restart-all" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart all" })}</p> : null}
   </ManagementConfirmationDialog>

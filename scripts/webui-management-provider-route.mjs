@@ -437,7 +437,7 @@ function providerSettingsAuditTarget(input) {
   if (input.operation === "model.remove" || input.operation === "model.custom.save") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
   if (input.operation === "primary.custom.save") return String(input.provider?.providerId ?? "unknown");
   if (input.operation === "managed.default") return String(input.provider ?? "unknown");
-  if (input.operation === "managed.window") return String(input.model ?? "unknown");
+  if (input.operation === "managed.window") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
   return String(input.providerId ?? "unknown");
 }
 

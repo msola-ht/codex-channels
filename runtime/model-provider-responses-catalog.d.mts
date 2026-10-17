@@ -19,4 +19,3 @@ export function responsesProviderBackupPath(environment: NodeJS.ProcessEnv | und
 
 export function responsesContextSyncPath(environment: NodeJS.ProcessEnv | undefined): string;
 export function assertResponsesContextSyncComplete(environment: NodeJS.ProcessEnv | undefined): void;
-export function resolveResponsesTemplateContexts(definitions: ResponsesModelDefinition[], environment: NodeJS.ProcessEnv): ResponsesModelDefinition[];

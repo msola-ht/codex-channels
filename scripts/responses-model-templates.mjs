@@ -1,26 +1,13 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { readOfficialModelCatalog } from "../runtime/model-provider-official-catalog.mjs";
-import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
-import { managedProviderDirectory } from "../runtime/model-provider-runtime.mjs";
-import { readPrivateFileSync } from "../runtime/private-file.mjs";
 import { validateModelDefinitions as validateResponsesModels, modelDefinitionsFromCatalog as responsesModelTemplatesFromCatalog } from "../runtime/model-catalog.mjs";
 export { modelDefinitionsFromCatalog as responsesModelTemplatesFromCatalog } from "../runtime/model-catalog.mjs";
-import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 
 export async function loadResponsesModelTemplates(source, environment = process.env) {
   let catalog;
   if (source === "official") catalog = readOfficialModelCatalog(environment);
   else if (source === "deepseek") {
-    const definition = deepseekProviderDefinition;
-    const path = join(managedProviderDirectory(environment, definition), definition.catalogFileName);
-    if (existsSync(path)) {
-      try { catalog = JSON.parse(readPrivateFileSync(path, 2 * 1024 * 1024)); } catch {
-        throw new Error("本地模型模板目录无法安全读取，请先修复目录");
-      }
-    } else {
-      catalog = (await downloadDeepseekCatalog(globalThis.fetch)).catalog;
-    }
+    catalog = JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8"));
   } else throw new Error("模型模板来源无效");
   return responsesModelTemplatesFromCatalog(catalog, source);
 }
@@ -67,10 +54,8 @@ export async function promptResponsesModelImport(prompts, previous = [], loadTem
       const error = validate(target);
       if (error) throw new Error(error);
       const existing = previous.find(model => model.id === String(target).trim());
-      const followContext = source === "deepseek" ? await prompts.confirm({ message: "跟随 DeepSeek 模板上下文设置？（通过项目修改 DS 窗口时同步）", initialValue: existing?.template?.source === source && existing.template.model === id ? existing.template.followContext : false }) : false;
-      if (prompts.isCancel(followContext)) return undefined;
-      const model = {...template, id: String(target).trim(), template: {...template.template, source, model: id, followContext: followContext === true}};
-      const confirmed = await prompts.confirm({ message: `${existing ? "用模板更新已有模型" : "复制"} ${id} → ${model.id}（${model.contextWindow} Token；图片${model.supportsImages ? "支持" : "不支持"}；思考等级 ${model.reasoningEfforts.join("/") || "none"}；上下文${model.template.followContext ? "跟随 DS" : "独立"}）？复制模板已提供的描述、等级说明、图片细节、详细程度、思考摘要及有效上下文、压缩和截断元数据；请确认平台支持这些参数。${existing ? "将替换该模型的名称、能力参数及模板关联；拒绝则保留原值。" : ""}`, initialValue: existing === undefined });
+      const model = {...template, id: String(target).trim(), template: {source, model: id}};
+      const confirmed = await prompts.confirm({ message: `${existing ? "用模板更新已有模型" : "复制"} ${id} → ${model.id}（${model.contextWindow} Token；图片${model.supportsImages ? "支持" : "不支持"}；思考等级 ${model.reasoningEfforts.join("/") || "none"}）？复制模板已提供的描述、等级说明、图片细节、详细程度、思考摘要及有效上下文、压缩和截断元数据；请确认平台支持这些参数。${existing ? "将替换该模型的名称、能力参数及模板关联；拒绝则保留原值。" : ""}`, initialValue: existing === undefined });
       if (prompts.isCancel(confirmed)) return undefined;
       if (confirmed) selected.push(model);
     }

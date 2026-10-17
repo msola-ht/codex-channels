@@ -1,5 +1,6 @@
 // Pure model-definition validation, Codex field generation and source adaptation.
 // Provider files and credentials belong to the runtime persistence owners.
+import { completeModelMessages } from "./model-template-prompts.mjs";
 export const contextWindowPresetTokens = Object.freeze([131072, 262144, 393216, 524288, 1048576]);
 const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const verbosityLevels = new Set(["low", "medium", "high"]);
@@ -34,7 +35,7 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
   const seen = new Set();
   const models = values.map((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)
-      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "maxContextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages", "applyPatchToolType", "instructions", "supportsSearchTool", "template", "description", "reasoningDescriptions", "supportsImageDetailOriginal", "supportsVerbosity", "defaultVerbosity", "supportsReasoningSummary", "defaultReasoningSummary", "effectiveContextWindowPercent", "autoCompactTokenLimit", "truncationPolicy", "sampling"].includes(key))) {
+      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "maxContextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages", "applyPatchToolType", "instructions", "modelMessages", "supportsSearchTool", "template", "description", "reasoningDescriptions", "supportsImageDetailOriginal", "supportsVerbosity", "defaultVerbosity", "supportsReasoningSummary", "defaultReasoningSummary", "effectiveContextWindowPercent", "autoCompactTokenLimit", "truncationPolicy", "sampling"].includes(key))) {
       throw new Error("自定义模型包含不受支持的字段");
     }
     const { id, name, contextWindow, maxContextWindow, reasoningEfforts, defaultReasoningEffort, supportsImages, applyPatchToolType, instructions: prompt, supportsSearchTool } = value;
@@ -70,13 +71,15 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
     if (template !== undefined && (!template || typeof template !== "object" || Array.isArray(template)
       || Object.keys(template).some(key => !["source", "model", "followContext"].includes(key)) || !["official", "deepseek"].includes(template.source)
       || typeof template.model !== "string" || template.model.trim() !== template.model || template.model.length < 1 || template.model.length > 200 || /\p{Cc}/u.test(template.model)
-      || typeof template.followContext !== "boolean" || (template.source !== "deepseek" && template.followContext))) {
-      throw new Error("模型模板关联无效；只有 DeepSeek 模板可跟随上下文");
+      || (template.followContext !== undefined && typeof template.followContext !== "boolean"))) {
+      throw new Error("模型模板来源无效");
     }
     if (maxContextWindow !== undefined && (!Number.isSafeInteger(maxContextWindow) || maxContextWindow < contextWindow || maxContextWindow > 100_000_000)) throw new Error("模型最大上下文必须为不小于当前窗口且不超过 100000000 的整数");
     const sampling = validateSamplingParameters(value.sampling);
+    const modelMessages = value.modelMessages === undefined ? undefined : completeModelMessages(value.modelMessages, {});
+    if (modelMessages !== undefined && new TextEncoder().encode(JSON.stringify(modelMessages)).length > 200_000) throw new Error("模型提示词对象超过大小限制");
     seen.add(id);
-    return { id, name: name.trim(), contextWindow, ...(maxContextWindow === undefined ? {} : {maxContextWindow}), reasoningEfforts: [...reasoningEfforts], defaultReasoningEffort, supportsImages, ...(applyPatchToolType === undefined ? {} : {applyPatchToolType}), ...(prompt === undefined ? {} : {instructions: prompt}), ...(supportsSearchTool === true ? {supportsSearchTool: true} : {}), ...(template === undefined ? {} : {template: {source: template.source, model: template.model, followContext: template.followContext}}),
+    return { id, name: name.trim(), contextWindow, ...(maxContextWindow === undefined ? {} : {maxContextWindow}), reasoningEfforts: [...reasoningEfforts], defaultReasoningEffort, supportsImages, ...(applyPatchToolType === undefined ? {} : {applyPatchToolType}), ...(prompt === undefined ? {} : {instructions: prompt}), ...(supportsSearchTool === true ? {supportsSearchTool: true} : {}), ...(template === undefined ? {} : {template: {source: template.source, model: template.model, ...(template.followContext === undefined ? {} : {followContext: template.followContext})}}),
       ...(description === undefined ? {} : {description}),
       ...(reasoningDescriptions === undefined ? {} : {reasoningDescriptions: Object.fromEntries(Object.entries(reasoningDescriptions))}),
       ...(supportsImageDetailOriginal === undefined ? {} : {supportsImageDetailOriginal}),
@@ -88,6 +91,7 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
       ...(autoCompactTokenLimit === undefined ? {} : {autoCompactTokenLimit}),
       ...(truncationPolicy === undefined ? {} : {truncationPolicy: {mode: truncationPolicy.mode, limit: truncationPolicy.limit}}),
       ...(sampling === undefined ? {} : {sampling}),
+      ...(modelMessages === undefined ? {} : {modelMessages}),
     };
   });
   if (!seen.has(defaultModel)) throw new Error("默认模型必须存在于自定义模型目录");
@@ -108,7 +112,7 @@ export function compileModelDefinitions(definitions, defaultModel, { allowReason
       shell_type: "unified_exec", visibility: "list", supported_in_api: true,
       priority: model.id === defaultModel ? 0 : index + 1,
       availability_nux: null, upgrade: null,
-      model_messages: { instructions_template: model.instructions ?? instructions },
+      model_messages: { ...model.modelMessages, instructions_template: model.instructions ?? model.modelMessages?.instructions_template ?? instructions },
       include_apps_usage_instructions: false,
       supports_reasoning_summary_parameter: model.supportsReasoningSummary ?? false,
       ...(model.defaultReasoningSummary === undefined ? {} : {default_reasoning_summary: model.defaultReasoningSummary}),
@@ -151,7 +155,8 @@ export function modelDefinitionsFromCatalog(catalog, source = "official") {
     ...(model.auto_compact_token_limit == null ? {} : {autoCompactTokenLimit: model.auto_compact_token_limit}),
     ...(model.truncation_policy === undefined ? {} : {truncationPolicy: model.truncation_policy}),
     ...(source === "deepseek" && typeof model.model_messages?.instructions_template === "string" && model.model_messages.instructions_template.length > 0 ? {instructions: model.model_messages.instructions_template} : {}),
-    ...(source === "official" ? {} : {template: {source, model: model.slug, followContext: false}}),
+    ...(model.model_messages == null ? {} : {modelMessages: model.model_messages}),
+    template: {source, model: model.slug},
   }));
   return validateModelDefinitions(models, models[0]?.id);
 }

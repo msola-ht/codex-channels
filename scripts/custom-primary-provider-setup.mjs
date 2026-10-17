@@ -470,7 +470,7 @@ export async function runCustomPrimaryProviderSetup({
           "- 认证：API Key 将明文写入当前用户私有凭据文件，主配置仅保存 env_key 引用（不回显、不进入命令行和日志）",
         ]),
     ...(custom ? preview.provider.models.flatMap((entry, index) => [
-      `- 模型 ${entry.id}：${entry.contextWindow} Token；最大窗口 ${entry.maxContextWindow ?? entry.contextWindow} Token；图片${entry.supportsImages ? "声明支持" : "不声明"}；图片 original ${entry.supportsImageDetailOriginal ? "声明支持" : "不声明"}；apply_patch ${entry.applyPatchToolType === "freeform" ? "freeform" : "不声明"}；思考 ${entry.reasoningEfforts.join("/") || "无可选等级"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`,
+      `- 模型 ${entry.id}：${entry.contextWindow} Token；最大窗口 ${entry.maxContextWindow ?? entry.contextWindow} Token；图片${entry.supportsImages ? "声明支持" : "不声明"}；图片 original ${entry.supportsImageDetailOriginal ? "声明支持" : "不声明"}；apply_patch ${entry.applyPatchToolType === "freeform" ? "freeform" : "不声明"}；思考 ${entry.reasoningEfforts.join("/") || "无可选等级"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}` : ""}`,
       `  模型描述：${JSON.stringify(previewModelDetails[index].description)}`,
       `  思考等级说明：${entry.reasoningEfforts.map(effort => `${effort}=${JSON.stringify(entry.reasoningDescriptions?.[effort] ?? effort)}`).join("；") || "无可选等级"}`,
       `  回答详细程度：${entry.supportsVerbosity ? `声明支持；默认 ${entry.defaultVerbosity}` : "不声明"}；思考摘要：${entry.supportsReasoningSummary ? `声明支持；默认 ${entry.defaultReasoningSummary ?? "Codex 默认"}` : "不声明"}`,

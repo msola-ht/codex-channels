@@ -235,10 +235,8 @@ export async function removeCcgConfiguration({ accountId, confirmRemove = false 
       [paths.marker, undefined],
       [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`],
     ]);
-    if (remaining.length === 0) {
-      updates.set(paths.catalog, undefined);
-      updates.set(paths.manifest, undefined);
-    }
+    updates.set(paths.catalog, undefined);
+    updates.set(paths.manifest, undefined);
     if (current.mode === "exclusive") {
       updates.set(paths.config, stringify(restoreProviderBaseConfig(
         await readConfig(paths.config, environment), initial.config, definition,
@@ -267,7 +265,7 @@ export async function runCcgSetup({
       ...(accounts.length === 0 ? [] : [
         { value: "reconfigure", label: "重新配置账户" },
         { value: "settings", label: "修改默认模型与思考等级" },
-        { value: "catalog", label: "管理共享模型（添加／启用／更新）" },
+        { value: "catalog", label: "管理账户模型（添加／启用／更新）" },
         { value: "default", label: "设置默认账户" },
         { value: "remove", label: "删除账户" },
       ]),
@@ -275,7 +273,7 @@ export async function runCcgSetup({
     ],
   });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
-  if (action === "catalog") return runManagedProviderModelSetup("ccg", { environment, prompts, output, downloadCatalog });
+  if (action === "catalog") return runManagedProviderModelSetup(requestedAccountId === undefined ? "ccg" : ccgProviderId(requestedAccountId), { environment, prompts, output, downloadCatalog });
   const accountId = requestedAccountId ?? (action === "add"
     ? await promptManagedAccountId(prompts, accounts)
     : await prompts.select({

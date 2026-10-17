@@ -1,10 +1,7 @@
 import * as clackPrompts from "@clack/prompts";
-import { join } from "node:path";
-import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 
 import {
   loadManagedModelProviderSettings,
-  managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   readCodexUserConfigSnapshot,
@@ -44,15 +41,7 @@ export async function runModelProviderDefaultSetup({
     if (!selectedModel) {
       throw new Error(`${selected.displayName} 不支持模型：${model}`);
     }
-    output.write("默认模型只修改所选账户；该模型的默认思考等级由共享模型目录的账户共用，其他账户使用同一模型时也会采用新等级。\n");
-    const definitions = loadManagedModelProviderDefinitions(environment);
-    const definition = definitions.find((entry) => entry.id === selected.provider);
-    if (!definition) throw new Error("Provider 定义已变化，请重新选择");
-    const catalogPath = join(managedProviderDirectory(environment, definition), definition.catalogFileName);
-    const sharedIds = new Set(definitions.filter((entry) =>
-      join(managedProviderDirectory(environment, entry), entry.catalogFileName) === catalogPath).map((entry) => entry.id));
-    output.write(`当前共享目录且包含此模型的账户：${configured.filter((entry) => sharedIds.has(entry.provider)
-      && entry.models.some((candidate) => candidate.model === model)).map((entry) => entry.displayName).join("、")}。\n`);
+    output.write(`本次默认模型与思考等级设置的 Provider：${selected.provider}。\n`);
     const reasoningEffort = await prompt.selectReasoningEffort(selected, selectedModel);
     const result = await applyManagedProviderDefaultChange({
       provider: selected.provider,
@@ -72,9 +61,9 @@ export async function runModelProviderDefaultSetup({
     });
     output.write(`${result.provider.displayName} 默认模型已设为 ${result.model.id}。\n`);
     output.write(`模型上下文：${result.model.contextWindow} tokens。\n`);
-    output.write(`共享模型目录中的默认思考等级：${reasoningEffort}。\n`);
+    output.write(`所选 Provider 的默认思考等级：${reasoningEffort}。\n`);
     output.write("新会话使用该默认值；恢复历史会话仍使用 Thread 原有模型。\n");
-    output.write("已清除当前主配置或 Provider Profile 的上下文窗口与自动压缩覆盖，恢复模型目录与上游默认规则；窗口请在「受管模型目录上下文窗口」中按模型名统一设置。\n");
+    output.write("已清除当前主配置或 Provider Profile 的上下文窗口与自动压缩覆盖，恢复模型目录与上游默认规则；窗口请在「受管模型目录上下文窗口」中选择具体 Provider 与模型设置。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
     return {
       action: "configured",

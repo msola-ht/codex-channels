@@ -17,6 +17,7 @@ import { withModelProviderManagementTransaction } from "./model-provider-managem
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { projectModelCatalogEntries, projectModelPrompts } from "../runtime/model-catalog-presentation.mjs";
+import { providerCatalogIsolationPath } from "../runtime/provider-catalog-isolation.mjs";
 
 // Revisions cover private profiles too; avoid exposing a reusable credential fingerprint.
 const revisionSecret = randomBytes(32);
@@ -37,16 +38,13 @@ export async function loadProviderModelCatalogs({ environment = process.env } = 
     const state = await readManagementState(environment, true);
     const catalogs = [];
     const definitions = loadManagedModelProviderDefinitions(environment);
-    for (const family of managedProviderAccountFamilies) {
-      const members = state.managedProviders.filter(provider => definitions.some(definition => definition.id === provider.id
-        && (definition.storageId ?? definition.id) === family.storageId));
-      if (!members.length) continue;
-      const complete = definitions.filter(definition => (definition.storageId ?? definition.id) === family.storageId).length === members.length;
-      const canRemove = family.proxyKey !== "deepseek" && complete;
-      const defaults = new Set(members.map(provider => provider.model));
-      catalogs.push({ provider: family.proxyKey, displayName: family.definition.displayName, providers: members.map(provider => provider.id),
-        models: members[0].models.map(model => ({ id: model.id, displayName: model.displayName, isDefault: defaults.has(model.id) })), canRemove,
-        ...(!canRemove ? { unavailableReason: complete ? "deepseek-template-source" : "shared-accounts-incomplete" } : {}),
+    for (const definition of definitions) {
+      const member = state.managedProviders.find(provider => provider.id === definition.id);
+      if (!member) continue;
+      const canRemove = definition.storageId !== "deepseek";
+      catalogs.push({ provider: definition.id, displayName: definition.displayName, providers: [definition.id],
+        models: member.models.map(model => ({ id: model.id, displayName: model.displayName, isDefault: member.model === model.id })), canRemove,
+        ...(!canRemove ? { unavailableReason: "deepseek-template-source" } : {}),
       });
     }
     const candidates = [...state.customProviders.fixedCandidates.filter(provider => provider.active), ...state.customProviders.switchingProviders];
@@ -111,25 +109,25 @@ export async function loadProviderModelPrompts(input, { environment = process.en
 }
 
 function readPresentationSnapshot(catalog, environment) {
-  const family = managedProviderAccountFamilies.find(entry => entry.proxyKey === catalog.provider);
+  const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === catalog.provider);
   const custom = isCustomCatalogProvider(catalog.provider);
-  const source = family ? "managed" : custom ? "custom" : "official-shared";
+  const source = definition ? "managed" : custom ? "custom" : "official-shared";
   let content, document;
   if (custom) {
     const saved = readResponsesModelCatalog(environment, catalog.provider);
     content = saved.content;
     document = saved;
   } else {
-    const path = family
-      ? join(managedProviderDirectory(environment, family.definition), family.definition.catalogFileName)
+    const path = definition
+      ? join(managedProviderDirectory(environment, definition), definition.catalogFileName)
       : customOfficialModelCatalogPath(environment);
-    try { content = createProviderFileReader(environment)(path, family ? 2_097_152 : 8_388_608); }
+    try { content = createProviderFileReader(environment)(path, definition ? 2_097_152 : 8_388_608); }
     catch (error) {
-      if (!family && error?.code === "ENOENT" && catalog.models.length === 0) content = "";
+      if (!definition && error?.code === "ENOENT" && catalog.models.length === 0) content = "";
       else throw error;
     }
     document = content === "" ? { models: [] } : parseJson(content);
-    if (family) validateManagedCatalog(document, family.definition);
+    if (definition) validateManagedCatalog(document, definition);
   }
   const models = document.models.length === 0 ? [] : projectModelCatalogEntries(document.models);
   const expected = catalog.models.map(model => model.id).sort();
@@ -176,21 +174,21 @@ export async function applyProviderModelRemoval(input, { environment = process.e
 async function buildRemovalPlan(input, environment) {
   validateInput(input);
   const definitions = loadManagedModelProviderDefinitions(environment);
-  const family = managedProviderAccountFamilies.find(candidate => candidate.proxyKey === input.provider
-    || definitions.some(definition => definition.id === input.provider && (definition.storageId ?? definition.id) === candidate.storageId));
+  const definition = definitions.find(entry => entry.id === input.provider);
+  const family = definition && managedProviderAccountFamilies.find(candidate => definition.storageId === candidate.storageId);
   if (!family && !isCustomCatalogProvider(input.provider)) throw invalid("removal-not-supported", "provider", "该提供商不支持本地模型移除");
   if (family?.proxyKey === "deepseek") throw invalid("removal-not-supported", "provider", "DeepSeek 暂不支持单模型移除");
-  const memberDefinitions = family ? definitions.filter(definition => (definition.storageId ?? definition.id) === family.storageId) : [];
+  const memberDefinitions = definition ? [definition] : [];
   const configPath = join(codexHomePath(environment), "config.toml");
-  const paths = [configPath, customSwitchingProviderRegistryPath(environment), primaryProviderBackupPath(environment), responsesContextSyncPath(environment),
-    ...managedProviderAccountFamilies.map(candidate => candidate.accountsFilePath(environment)),
+  const paths = [configPath, customSwitchingProviderRegistryPath(environment), primaryProviderBackupPath(environment), responsesContextSyncPath(environment), providerCatalogIsolationPath(environment),
+    ...(family ? [family.accountsFilePath(environment)] : []),
     ...memberDefinitions.flatMap(definition => [managedProviderMarkerPath(environment, definition), join(codexHomePath(environment), definition.profileFileName)]),
   ];
   let catalogPath, manifestPath;
   if (family) {
-    const directory = managedProviderDirectory(environment, family.definition);
-    catalogPath = join(directory, family.definition.catalogFileName);
-    manifestPath = join(directory, family.definition.catalogManifestFileName);
+    const directory = managedProviderDirectory(environment, definition);
+    catalogPath = join(directory, definition.catalogFileName);
+    manifestPath = join(directory, definition.catalogManifestFileName);
     paths.push(catalogPath, manifestPath, `${catalogPath}.backup`, `${manifestPath}.backup`);
   } else {
     catalogPath = responsesProviderCatalogPath(environment, input.provider);
@@ -201,9 +199,9 @@ async function buildRemovalPlan(input, environment) {
   snapshots.push(gateway);
   requiredContent(snapshots, configPath);
   const state = await readManagementState(environment);
-  if (family && JSON.stringify(memberDefinitions.map(definition => definition.id)) !== JSON.stringify(
-    loadManagedModelProviderDefinitions(environment).filter(definition => (definition.storageId ?? definition.id) === family.storageId).map(definition => definition.id),
-  )) throw invalid("stale-preview", "revision", "共享账户已变化，请重新预览");
+  if (family && !loadManagedModelProviderDefinitions(environment).some(entry => entry.id === definition.id)) {
+    throw invalid("stale-preview", "revision", "账户已变化，请重新预览");
+  }
   const gatewayContent = gateway.content?.toString("utf8");
   const gatewayDefault = gatewayContent === undefined ? undefined
     : validateGatewayConfigStructureDocument(parseGatewayConfig(gatewayContent)).codex?.default_model;
@@ -211,28 +209,28 @@ async function buildRemovalPlan(input, environment) {
   let providers, displayName, defaults;
   if (family) {
     const members = state.managedProviders.filter(provider => memberDefinitions.some(definition => definition.id === provider.id));
-    if (!members.length || members.length !== memberDefinitions.length) throw invalid("provider-not-configured", "provider", "请先完成全部共享账户配置");
+    if (members.length !== 1) throw invalid("provider-not-configured", "provider", "请先完成该账户配置");
     providers = members.map(provider => provider.id);
-    displayName = family.definition.displayName;
+    displayName = definition.displayName;
     defaults = members.map(provider => provider.model);
     catalog = parseJson(requiredContent(snapshots, catalogPath));
     const manifest = parseJson(requiredContent(snapshots, manifestPath));
     if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || typeof manifest.source !== "string" || !manifest.source) {
       throw invalid("provider-state-unavailable", "provider", "模型来源文件无效，未执行移除");
     }
-    validateManagedCatalog(catalog, family.definition);
+    validateManagedCatalog(catalog, definition);
     if (members.some(member => !catalog.models.some(model => model.slug === member.model
       && model.default_reasoning_level === member.reasoningEffort))) {
-      throw invalid("provider-state-unavailable", "provider", "共享账户默认模型或思考等级与目录不一致，请先修复默认设置");
+      throw invalid("provider-state-unavailable", "provider", "账户默认模型或思考等级与目录不一致，请先修复默认设置");
     }
     if (family.proxyKey === "clp") {
       if (!clineSourceMetadataSchema.safeParse(manifest.cline).success
         || !["deepseek", "cline"].includes(manifest.source)
         || (manifest.source === "deepseek" && manifest.model !== "deepseek-flash")) {
-        throw invalid("catalog-source-invalid", "provider", "CLP 模型来源信息无效，请先核对共享目录来源，未执行移除");
+        throw invalid("catalog-source-invalid", "provider", "CLP 模型来源信息无效，请先核对账户目录来源，未执行移除");
       }
-      const follows = catalog.models.some(model => model.slug === family.definition.defaultModel);
-      if (follows !== (manifest.source === "deepseek")) throw invalid("catalog-source-invalid", "provider", "CLP 目录与来源跟随关系不一致，未执行移除");
+      const hasDsTemplate = catalog.models.some(model => model.slug === family.definition.defaultModel);
+      if (hasDsTemplate !== (manifest.source === "deepseek")) throw invalid("catalog-source-invalid", "provider", "CLP 目录与模板来源不一致，未执行移除");
       nextManifest = { ...manifest };
       if (input.model === family.definition.defaultModel) {
         nextManifest.source = "cline";
@@ -348,7 +346,7 @@ function validateManagedCatalog(catalog, definition) {
   if (!Array.isArray(catalog?.models) || !catalog.models.length
     || catalog.models.some(model => !isManagedProviderModelValid(definition, model?.slug))
     || new Set(catalog.models.map(model => model.slug)).size !== catalog.models.length) {
-    throw invalid("provider-state-unavailable", "model", "共享模型目录为空或包含无效、重复的模型 ID");
+    throw invalid("provider-state-unavailable", "model", "账户模型目录为空或包含无效、重复的模型 ID");
   }
 }
 

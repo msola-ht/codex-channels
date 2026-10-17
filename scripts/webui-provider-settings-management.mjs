@@ -110,8 +110,15 @@ export function normalizeProviderSettingsMutation(input) {
           : { windowPercent: input.windowPercent }),
       };
     case "managed.window":
+      if (Object.keys(input).some(key => !["operation", "provider", "model", "contextWindow", "windowPercent", "confirmationToken"].includes(key))) {
+        throw new ManagementOperationError("invalid_provider_operation", "模型窗口请求包含不支持的字段");
+      }
+      if (typeof input.provider !== "string" || input.provider.trim() === "") {
+        throw new ManagementOperationError("required", "Provider ID 不能为空", "provider");
+      }
       return {
         operation: input.operation,
+        provider: input.provider,
         model: input.model,
         ...(input.contextWindow === undefined ? {} : { contextWindow: input.contextWindow }),
         ...(input.windowPercent === undefined ? {} : { windowPercent: input.windowPercent }),
@@ -343,6 +350,7 @@ function redactModel(model) {
     ...(model.id === undefined ? {} : { id: model.id }),
     ...(model.displayName === undefined ? {} : { displayName: model.displayName }),
     ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+    ...(model.maxContextWindow === undefined ? {} : { maxContextWindow: model.maxContextWindow }),
   };
 }
 

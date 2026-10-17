@@ -28,8 +28,10 @@ export interface ModelDefinition {
   sampling?: SamplingParameters;
   applyPatchToolType?: "freeform";
   instructions?: string;
+  modelMessages?: Record<string, unknown>;
   supportsSearchTool?: boolean;
-  template?: {source: "official" | "deepseek"; model: string; followContext: boolean};
+  /** followContext is retained only when reading historical v5 metadata; it has no runtime effect. */
+  template?: {source: "official" | "deepseek"; model: string; followContext?: boolean};
 }
 export function validateSamplingParameters(value: unknown): SamplingParameters | undefined;
 export function validateModelDefinitions(values: unknown, defaultModel: string, options?: { allowReasoningToggle?: boolean }): ModelDefinition[];

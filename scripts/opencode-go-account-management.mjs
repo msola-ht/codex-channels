@@ -263,6 +263,8 @@ async function applyOpencodeGoAccountRemovalUnlocked(
       opencodeGoAccountsFilePath(environment),
       paths.profilePath,
       paths.markerPath,
+      paths.catalogPath,
+      paths.manifestPath,
     ];
     if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
     const snapshots = snapshotProviderFiles(transactionPaths, environment);
@@ -288,6 +290,12 @@ async function applyOpencodeGoAccountRemovalUnlocked(
       guards = refreshProviderFileSnapshot(guards, paths.profilePath);
       await assertProviderFileSnapshots(guards);
       if (existsSync(paths.markerPath)) unlinkSync(paths.markerPath);
+      guards = refreshProviderFileSnapshot(guards, paths.markerPath);
+      for (const path of [paths.catalogPath, paths.manifestPath]) {
+        await assertProviderFileSnapshots(guards);
+        await removeOptionalProviderFile(path);
+        guards = refreshProviderFileSnapshot(guards, path);
+      }
     } catch (error) {
       try {
         await restoreProviderFileSnapshots(snapshots, guards);
@@ -437,7 +445,7 @@ async function buildRemovalPlan(
     removesLastAccount,
     mode,
     restoresInitialConfig: mode === "exclusive",
-    removesManagedCatalog: removesLastAccount,
+    removesManagedCatalog: true,
     stop,
     paths,
   };
