@@ -83,6 +83,7 @@
 - `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
   拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
   目录快照；公开第三方账户、Profile、目录及事务状态的源文件清单与内容指纹供安全刷新使用。
+  受管家族的 `settings-pending` 纳入去重材料清单，使用恢复记录的 16 MiB 上限；未完成事务使旧出站快照失效。
   主配置不进入材料监听和出站指纹，仅在材料加载、启动或应用时校验全局窗口与 Provider 冲突。
   设置刷新与出站复核共用同一摘要实现及私有文件读取校验。只写可重建、无密钥的运行时 `aggregate-models.json`，不改账户或存储契约。
 - `aggregate-material-guard.mjs`：聚合实例拥有的有界工作线程；按去重文件清单校验私有权限与材料摘要，

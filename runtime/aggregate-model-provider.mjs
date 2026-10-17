@@ -57,6 +57,7 @@ export function aggregateProviderMaterialFiles(environment, expectedMembers) {
       paths.set(managedProviderMarkerPath(environment, definition), 1_048_576);
       paths.set(join(codexHomePath(environment), definition.profileFileName), 1_048_576);
       paths.set(join(managedProviderDirectory(environment, definition), definition.catalogFileName), 2_097_152);
+      paths.set(`${join(managedProviderDirectory(environment, definition), definition.catalogFileName)}.settings-pending`, 16 * 1024 * 1024);
     } else if (customIds.includes(id)) {
       paths.set(customPrimaryProviderProfilePath(environment, id), 1_048_576);
       const catalogPath = isCustomCatalogProvider(id)
