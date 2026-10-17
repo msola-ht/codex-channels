@@ -9,13 +9,13 @@ import { readModelTemplateBindings } from "../runtime/model-template-bindings.mj
 import { loadManagedModelProviderDefinitions, managedProviderAccountFamilies } from "../runtime/model-provider-definitions.mjs";
 import { managedProviderDirectory, managedProviderMarkerPath, writeManagedModelProviderCatalogUpdates,
   customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath } from "../runtime/model-provider-runtime.mjs";
-import { readResponsesModelCatalog, validateResponsesModels, responsesProviderCatalogPath } from "../runtime/model-provider-responses-catalog.mjs";
+import { readResponsesModelCatalog, validateResponsesModels, responsesProviderCatalogPath, compileResponsesModelCatalog,
+  writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath } from "../runtime/model-provider-upstream-metadata.mjs";
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
 import { createClinePassCatalog } from "./cline-pass-account-management.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadResponsesModelTemplates } from "./responses-model-templates.mjs";
-import { previewCustomProviderModelsSave, applyCustomProviderModelsSave } from "./custom-primary-provider-management.mjs";
 import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
@@ -77,10 +77,23 @@ export async function applyProviderModelTemplateUpdate(input, { environment = pr
     if (!preview || preview.revision !== plan.preview.revision) throw invalid("stale-preview", "revision", "账户目录、候选模板或更新范围已变化，请重新对比");
     if (!plan.preview.willChange) return { action: "unchanged", activation: "none" };
     await assertProviderFileSnapshots(plan.snapshots);
-    if (plan.customInput) {
-      await applyCustomProviderModelsSave(plan.customInput, {
-        environment, preview: plan.customPreview, expectedCatalogContent: plan.previousContent,
-      });
+    if (plan.customCatalog) {
+      // Template updates cannot change connection selections. The catalog's
+      // default may differ from the fixed config or switching profile default.
+      try {
+        const transaction = writeResponsesModelCatalog(environment, input.provider,
+          plan.customCatalog.definitions, plan.customCatalog.defaultModel, plan.catalogRevision);
+        await withResponsesModelCatalogWrite(transaction, async () => {
+          if (readResponsesModelCatalog(environment, input.provider).content !== transaction.content) {
+            throw new Error("模板目录回读不一致");
+          }
+          const written = new Set([transaction.path, `${transaction.path}.backup`, `${transaction.path}.pending`]);
+          await assertProviderFileSnapshots(plan.snapshots.filter(snapshot => !written.has(snapshot.path)));
+          finishResponsesModelCatalogWrite(transaction);
+        });
+      } catch (error) {
+        throw invalid("readback-failed", "template", "模板目录保存未完成或结果无法确认；请核对目录、pending 与备份，勿自动重试", error);
+      }
     } else {
       writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
         new Map(plan.snapshots.filter(snapshot => !snapshot.path.endsWith(".settings-pending"))
@@ -125,7 +138,7 @@ async function buildPlan(input, environment) {
     throw invalid("template-source-expired", "sourceToken", "候选模板已过期，请重新加载模板");
   }
   const revision = authenticatedRevision({ preview, sourceToken: input.sourceToken, sourceRevision: source.sourceRevision,
-    targetRevision: state.revision, customRevision: plan.customPreview?.revision ?? null, scope: state.scope });
+    targetRevision: state.revision, scope: state.scope });
   return { ...plan, snapshots: state.snapshots, preview: { ...preview, revision } };
 }
 
@@ -291,9 +304,9 @@ async function buildCustomPlan(input, source, sections, state, environment) {
     truncation_policy: after.truncationPolicy,
   });
   const models = validateResponsesModels(previous.definitions.map(entry => entry.id === input.model ? after : entry), previous.defaultModel);
-  const customInput = { provider: input.provider, model: previous.defaultModel, models };
-  const customPreview = await previewCustomProviderModelsSave(customInput, { environment, expectedCatalogContent: previous.content });
-  return { before, after: models.find(entry => entry.id === input.model), customInput, customPreview, previousContent: previous.content };
+  const customCatalog = compileResponsesModelCatalog(models, previous.defaultModel);
+  await validateModelCatalogWithCodex(customCatalog, environment);
+  return { before, after: models.find(entry => entry.id === input.model), customCatalog, catalogRevision: previous.revision };
 }
 
 async function buildManagedPlan(input, source, sections, state, environment) {
@@ -346,6 +359,6 @@ function staleTarget() {
   return invalid("stale-preview", "revision", "账户目录或模板关联已变化，请重新加载候选模板并对比");
 }
 
-function invalid(code, field, message) {
-  return new ProviderModelManagementError(code, field, message);
+function invalid(code, field, message, cause) {
+  return new ProviderModelManagementError(code, field, message, cause === undefined ? undefined : { cause });
 }
