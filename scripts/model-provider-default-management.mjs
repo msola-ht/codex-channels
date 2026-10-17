@@ -81,20 +81,32 @@ async function applyManagedProviderDefaultChangeUnlocked(
       await assertProviderFileSnapshots(plan.snapshots);
       const previousContent = readCatalogContent(plan.provider.provider, environment);
       writeCatalogSettings(plan.provider.provider, plan.settings, environment);
+      // A failed asynchronous config write must not roll back a later edit to
+      // the catalog, its mirrored profiles, membership, or primary selection.
+      let rollbackSnapshots;
+      try {
+        rollbackSnapshots = snapshotProviderFiles(plan.snapshots.map(entry => entry.path), environment);
+      } catch (error) {
+        throw invalid("save-unconfirmed", "action", "目录已保存，但无法确认恢复材料；请核对当前配置与目录备份，勿自动重试", error);
+      }
+      let current;
       try {
         await writeConfigEdits(environment, edits, { expectedVersion: snapshot.version });
       } catch (error) {
-        let current;
         try {
           current = await readConfigSnapshot(environment);
         } catch (confirmationError) {
-          throw new AggregateError(
-            [error, confirmationError],
-            "Codex 配置写入结果无法确认，模型目录保持新设置",
-            { cause: confirmationError },
-          );
+          throw invalid("save-unconfirmed", "action", "默认模型保存结果无法确认，已保留当前配置与目录备份；请核对后处理，勿自动重试", confirmationError);
+        }
+        if (current.config.model_provider !== plan.provider.provider) {
+          throw invalid("save-unconfirmed", "action", "保存期间主 Provider 已变化，已保留当前配置与目录备份；请核对后处理，勿自动重试", error);
         }
         if (!areCodexUserConfigEditsApplied(current.config, edits)) {
+          try {
+            await assertProviderFileSnapshots(rollbackSnapshots);
+          } catch (error) {
+            throw invalid("save-unconfirmed", "action", "保存后配置或目录存在后续修改，拒绝自动回滚；请核对当前文件与目录备份", error);
+          }
           try {
             restoreCatalogContent(plan.provider.provider, previousContent, environment);
           } catch (rollbackError) {
@@ -107,13 +119,35 @@ async function applyManagedProviderDefaultChangeUnlocked(
           throw error;
         }
       }
+      try {
+        current ??= await readConfigSnapshot(environment);
+        if (current.config.model_provider !== plan.provider.provider
+          || !areCodexUserConfigEditsApplied(current.config, edits)) {
+          throw new Error("主配置回读与已确认设置不一致");
+        }
+      } catch (error) {
+        throw invalid("save-unconfirmed", "action", "默认模型保存结果无法确认，已保留当前配置与目录备份；请核对后处理，勿自动重试", error);
+      }
+    }
+    try {
+      const observed = loadProviders(environment);
+      for (const member of plan.providers) {
+        const saved = observed.find(candidate => candidate.provider === member.provider);
+        const expectedDefault = member.provider === plan.provider.provider ? plan.model.model : member.model;
+        if (!saved || saved.mode !== member.mode || saved.model !== expectedDefault
+          || saved.models.find(candidate => candidate.model === plan.model.model)?.reasoningEffort !== plan.settings.reasoningEffort) {
+          throw new Error("账户默认模型或共享思考等级回读不一致");
+        }
+      }
+    } catch (error) {
+      throw invalid("save-unconfirmed", "action", "默认模型或共享等级保存结果无法确认，已保留当前配置与目录备份；请核对后处理，勿自动重试", error);
     }
   } catch (error) {
     if (error instanceof ModelProviderDefaultManagementError) throw error;
     throw invalid(
       "operation-failed",
       "action",
-      error instanceof Error ? error.message : String(error),
+      "默认模型设置未完成；请检查提供商配置与目录备份后重新读取状态",
       error,
     );
   }
@@ -189,6 +223,7 @@ function buildPlan(input, {
   const providers = configured.filter(candidate => members.some(member => member.id === candidate.provider));
   const plan = {
     provider,
+    providers,
     model,
     settings: { model: model.model, reasoningEffort },
     effects: {
