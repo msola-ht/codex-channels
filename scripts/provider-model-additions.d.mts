@@ -1,4 +1,6 @@
 import type { ModelDefinition } from "../runtime/model-catalog.mjs";
+/** Managed catalogs do not persist custom sampling defaults or inferred bindings. */
+export type ManagedManualModelDefinition = Omit<ModelDefinition, "sampling" | "template">;
 export interface ProviderModelAdditionCandidate {
   model: string;
   displayName: string;
@@ -30,7 +32,7 @@ export interface ProviderModelAdditionPreview {
 export interface ProviderModelAdditionLoadOptions {
   environment?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
-  manualModel?: ModelDefinition;
+  manualModel?: ManagedManualModelDefinition;
   downloadCatalog?: typeof import("./deepseek-setup.mjs").downloadDeepseekCatalog;
   downloadClineCatalog?: typeof import("../runtime/cline-relay-catalog-update.mjs").downloadClineRelayCatalog;
   loadTemplates?: typeof import("./responses-model-templates.mjs").loadResponsesModelTemplates;

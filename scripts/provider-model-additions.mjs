@@ -42,6 +42,9 @@ export async function loadProviderModelAdditionOptions(provider, {
     const state = await readState(provider, environment);
     let models, bindings = {}, source;
     if (manualModel !== undefined) {
+      if (manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "sampling")) {
+        throw invalid("invalid-input", "manualModel", "受管模型手动新增不支持默认采样参数；sampling 不会保存，请移除此字段");
+      }
       if (!["ccg", "opencode-go"].includes(state.family.storageId)
         || !manualModel || typeof manualModel !== "object" || Array.isArray(manualModel)
         || !Array.isArray(manualModel.reasoningEfforts) || manualModel.reasoningEfforts.length === 0
