@@ -1,3 +1,5 @@
+import type { ModelDefinition } from "./model-catalog.mjs";
+
 export interface OpenAiModelCatalogEntry {
   model: string;
   displayName: string;
@@ -9,6 +11,8 @@ export interface OpenAiModelCatalogEntry {
   approvals: Array<{ mode: "on_request" | "on_request_auto_review" | "never" | "unless_trusted"; state: "default" | "empty" | "custom" }>;
   editable: boolean;
   details: OpenAiModelDetails;
+  /** Custom definition declarations, independent of conservative compiled defaults. */
+  declaredCapabilities?: Pick<ModelDefinition, "reasoningEfforts" | "supportsImages" | "applyPatchToolType" | "supportsSearchTool">;
 }
 export interface OpenAiModelDetails {
   include_skills_usage_instructions: boolean | null;
@@ -39,5 +43,5 @@ export interface OpenAiModelDetails {
 }
 
 export class ModelCatalogPresentationError extends Error {}
-export function projectModelCatalogEntries(models: unknown, editable?: boolean): OpenAiModelCatalogEntry[];
+export function projectModelCatalogEntries(models: unknown, editable?: boolean, definitions?: ModelDefinition[]): OpenAiModelCatalogEntry[];
 export function projectModelPrompts(messages: unknown): Array<{ group: "general" | "approvals" | "collaboration" | "review" | "permissions" | "agents" | "budget" | "confirmation" | "tools"; entries: Array<{ path: string; text: string }> }>;

@@ -13,10 +13,11 @@ export interface ModelDefinition {
   description?: string;
   contextWindow: number;
   maxContextWindow?: number;
-  reasoningEfforts: string[];
+  /** Omitted is unknown; an empty array explicitly declares no reasoning support. */
+  reasoningEfforts?: string[];
   defaultReasoningEffort: string | null;
   reasoningDescriptions?: Record<string, string>;
-  supportsImages: boolean;
+  supportsImages?: boolean;
   supportsImageDetailOriginal?: boolean;
   supportsVerbosity?: boolean;
   defaultVerbosity?: "low" | "medium" | "high" | null;
@@ -26,7 +27,8 @@ export interface ModelDefinition {
   autoCompactTokenLimit?: number;
   truncationPolicy?: {mode: "tokens" | "bytes"; limit: number};
   sampling?: SamplingParameters;
-  applyPatchToolType?: "freeform";
+  /** Omitted is unknown; null explicitly declares no apply_patch support. */
+  applyPatchToolType?: "freeform" | null;
   instructions?: string;
   modelMessages?: Record<string, unknown>;
   supportsSearchTool?: boolean;

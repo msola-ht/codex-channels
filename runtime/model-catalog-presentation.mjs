@@ -14,8 +14,9 @@ function catalogWindow(value) {
   if (!Number.isSafeInteger(value) || value <= 0) fail("invalid_catalog");
   return value;
 }
-export function projectModelCatalogEntries(models, hasIdentity = false) {
+export function projectModelCatalogEntries(models, hasIdentity = false, definitions) {
   if (!Array.isArray(models) || models.length === 0) fail("invalid_catalog");
+  const declarations = definitions === undefined ? undefined : projectDeclarations(definitions);
   const seen = new Set();
   const projected = [];
   for (const model of models) {
@@ -45,9 +46,33 @@ export function projectModelCatalogEntries(models, hasIdentity = false) {
       approvals,
       details: projectDetails(model),
       editable: hasIdentity && maxContextWindow !== null,
+      ...(declarations === undefined ? {} : { declaredCapabilities: declarations.get(slug) ?? fail("invalid_catalog") }),
     });
   }
   return projected;
+}
+
+function projectDeclarations(definitions) {
+  if (!Array.isArray(definitions)) fail("invalid_catalog");
+  const declarations = new Map();
+  for (const definition of definitions) {
+    if (!record(definition)) fail("invalid_catalog");
+    const id = catalogText(definition.id);
+    if (declarations.has(id)) fail("invalid_catalog");
+    const { reasoningEfforts, supportsImages, applyPatchToolType, supportsSearchTool } = definition;
+    if (reasoningEfforts !== undefined && (!Array.isArray(reasoningEfforts)
+      || new Set(reasoningEfforts.map(catalogText)).size !== reasoningEfforts.length)) fail("invalid_catalog");
+    if ((supportsImages !== undefined && typeof supportsImages !== "boolean")
+      || (supportsSearchTool !== undefined && typeof supportsSearchTool !== "boolean")
+      || (applyPatchToolType !== undefined && applyPatchToolType !== null && applyPatchToolType !== "freeform")) fail("invalid_catalog");
+    declarations.set(id, {
+      ...(reasoningEfforts === undefined ? {} : { reasoningEfforts: [...reasoningEfforts] }),
+      ...(supportsImages === undefined ? {} : { supportsImages }),
+      ...(applyPatchToolType === undefined ? {} : { applyPatchToolType }),
+      ...(supportsSearchTool === undefined ? {} : { supportsSearchTool }),
+    });
+  }
+  return declarations;
 }
 
 function projectDetails(model) {

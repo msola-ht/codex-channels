@@ -69,7 +69,7 @@ export function createClinePassCatalog(templates, source, enabledModels) {
     const matches = templates.filter(model => model.id === "deepseek-flash");
     if (matches.length !== 1) throw new Error("DS 模型目录必须包含唯一的 deepseek-flash 模板");
     const template = matches[0];
-    if (template.reasoningEfforts.some(effort => !["none", "low", "high", "max"].includes(effort))) throw new Error("DS 模板包含 CLP 未支持的思考等级");
+    if (!Array.isArray(template.reasoningEfforts) || template.reasoningEfforts.some(effort => !["none", "low", "high", "max"].includes(effort))) throw new Error("DS 模板缺少思考等级或包含 CLP 未支持的等级");
     const flash = {
       ...template,
       id: definition.defaultModel, name: "CLP DeepSeek V4.1 Flash",
@@ -99,7 +99,7 @@ async function selectClinePassModels(models, providers, selectModels) {
   const enabledModels = providers.length ? providers[0].models.map(model => model.model)
     : [models.find(model => model.id === definition.defaultModel)?.id ?? models[0].id];
   const selection = {
-    models: models.map(model => ({ id: model.id, name: model.name, reasoningEffort: providers[0]?.models.find(previous => previous.model === model.id && model.reasoningEfforts.includes(previous.reasoningEffort))?.reasoningEffort ?? model.defaultReasoningEffort })),
+    models: models.map(model => ({ id: model.id, name: model.name, reasoningEffort: providers[0]?.models.find(previous => previous.model === model.id && model.reasoningEfforts?.includes(previous.reasoningEffort))?.reasoningEffort ?? model.defaultReasoningEffort })),
     enabledModels, requiredModels, retainedModels: providers.length ? enabledModels : [],
   };
   const selected = selectModels ? await selectModels(selection) : providers.length ? enabledModels : models.map(model => model.id);
@@ -149,7 +149,7 @@ export async function applyClinePassConfiguration(input, { environment = process
       downloadedCline = await downloadClineCatalog(environment);
       const selected = await selectClinePassModels(projectClinePassModels(downloadedCline).models, [], selectModels);
       if (!selected) return { ...preview, activation: "none", action: "back", excludedModels: [] };
-      const templates = selected.includes(definition.defaultModel) ? await loadTemplates("deepseek", environment) : [];
+      const templates = selected.includes(definition.defaultModel) ? await loadTemplates("deepseek") : [];
       catalog = createClinePassCatalog(templates, downloadedCline, selected);
     }
     await validateModelCatalogWithCodex(catalog, environment);
@@ -228,7 +228,7 @@ export async function refreshClinePassCatalog({ provider, accountId, environment
       await assertProviderFileSnapshots(snapshots);
       return { action: "unchanged", activation: "none", models: previousIds, excludedModels: projected.excludedModels, commit: source.commit };
     }
-    const templates = addedIds.includes(definition.defaultModel) ? await loadTemplates("deepseek", environment) : [];
+    const templates = addedIds.includes(definition.defaultModel) ? await loadTemplates("deepseek") : [];
     const additions = createClinePassCatalog(templates, source, addedIds);
     const catalog = { ...current, models: [...current.models, ...additions.models] };
     for (const model of additions.models) templateBindings[model.slug] = { source: "cline", model: model.slug };

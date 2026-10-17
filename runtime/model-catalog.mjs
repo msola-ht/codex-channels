@@ -44,16 +44,16 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
     }
     if (typeof name !== "string" || name.trim() === "" || name.length > 120 || /\p{Cc}/u.test(name)) throw new Error("自定义模型显示名称无效");
     if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > 100_000_000) throw new Error("模型上下文窗口必须为 1024-100000000 的整数");
-    if (!Array.isArray(reasoningEfforts) || reasoningEfforts.some((effort) => !efforts.has(effort) && !(allowReasoningToggle && effort === "enabled")) || new Set(reasoningEfforts).size !== reasoningEfforts.length) throw new Error("模型思考等级无效或重复");
-    if (reasoningEfforts.length === 0 ? defaultReasoningEffort !== null : !reasoningEfforts.includes(defaultReasoningEffort)) throw new Error("默认思考等级必须属于模型声明的等级；不支持时必须为 null");
-    if (typeof supportsImages !== "boolean") throw new Error("模型图片能力必须为布尔值");
-    if (applyPatchToolType !== undefined && applyPatchToolType !== "freeform") throw new Error("模型 apply_patch 工具类型无效");
+    if (reasoningEfforts !== undefined && (!Array.isArray(reasoningEfforts) || reasoningEfforts.some((effort) => !efforts.has(effort) && !(allowReasoningToggle && effort === "enabled")) || new Set(reasoningEfforts).size !== reasoningEfforts.length)) throw new Error("模型思考等级无效或重复");
+    if ((reasoningEfforts?.length ?? 0) === 0 ? defaultReasoningEffort !== null : !reasoningEfforts.includes(defaultReasoningEffort)) throw new Error("默认思考等级必须属于模型声明的等级；未知或不支持时必须为 null");
+    if (supportsImages !== undefined && typeof supportsImages !== "boolean") throw new Error("模型图片能力必须为布尔值");
+    if (applyPatchToolType !== undefined && applyPatchToolType !== null && applyPatchToolType !== "freeform") throw new Error("模型 apply_patch 工具类型无效");
     if (prompt !== undefined && (typeof prompt !== "string" || prompt.trim() === "" || prompt.length > 200_000 || !controlFree(prompt))) throw new Error("模型提示词无效");
     if (supportsSearchTool !== undefined && typeof supportsSearchTool !== "boolean") throw new Error("模型检索工具能力必须为布尔值");
     const { description, reasoningDescriptions, supportsImageDetailOriginal, supportsVerbosity, defaultVerbosity, supportsReasoningSummary, defaultReasoningSummary, effectiveContextWindowPercent, autoCompactTokenLimit, truncationPolicy } = value;
     if (description !== undefined && (typeof description !== "string" || description.trim() === "" || description.length > 4000 || !descriptionControlFree(description))) throw new Error("模型描述必须为非空、无非法控制字符且不超过 4000 字符的文本");
     if (reasoningDescriptions !== undefined && (!reasoningDescriptions || typeof reasoningDescriptions !== "object" || Array.isArray(reasoningDescriptions)
-      || Object.entries(reasoningDescriptions).some(([effort, text]) => !reasoningEfforts.includes(effort) || typeof text !== "string" || text.trim() === "" || text.length > 2000 || !descriptionControlFree(text)))) throw new Error("思考等级描述必须仅包含已声明等级，文本须非空、无非法控制字符且不超过 2000 字符");
+      || Object.entries(reasoningDescriptions).some(([effort, text]) => !reasoningEfforts?.includes(effort) || typeof text !== "string" || text.trim() === "" || text.length > 2000 || !descriptionControlFree(text)))) throw new Error("思考等级描述必须仅包含已声明等级，文本须非空、无非法控制字符且不超过 2000 字符");
     if (supportsImageDetailOriginal !== undefined && typeof supportsImageDetailOriginal !== "boolean") throw new Error("模型原图细节能力必须为布尔值");
     if (supportsImageDetailOriginal === true && !supportsImages) throw new Error("支持原图细节的模型必须支持图片输入");
     if (supportsVerbosity !== undefined && typeof supportsVerbosity !== "boolean") throw new Error("模型详细程度能力必须为布尔值");
@@ -79,7 +79,7 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
     const modelMessages = value.modelMessages === undefined ? undefined : completeModelMessages(value.modelMessages, {});
     if (modelMessages !== undefined && new TextEncoder().encode(JSON.stringify(modelMessages)).length > 200_000) throw new Error("模型提示词对象超过大小限制");
     seen.add(id);
-    return { id, name: name.trim(), contextWindow, ...(maxContextWindow === undefined ? {} : {maxContextWindow}), reasoningEfforts: [...reasoningEfforts], defaultReasoningEffort, supportsImages, ...(applyPatchToolType === undefined ? {} : {applyPatchToolType}), ...(prompt === undefined ? {} : {instructions: prompt}), ...(supportsSearchTool === true ? {supportsSearchTool: true} : {}), ...(template === undefined ? {} : {template: {source: template.source, model: template.model, ...(template.followContext === undefined ? {} : {followContext: template.followContext})}}),
+    return { id, name: name.trim(), contextWindow, ...(maxContextWindow === undefined ? {} : {maxContextWindow}), ...(reasoningEfforts === undefined ? {} : {reasoningEfforts: [...reasoningEfforts]}), defaultReasoningEffort, ...(supportsImages === undefined ? {} : {supportsImages}), ...(applyPatchToolType === undefined ? {} : {applyPatchToolType}), ...(prompt === undefined ? {} : {instructions: prompt}), ...(supportsSearchTool === undefined ? {} : {supportsSearchTool}), ...(template === undefined ? {} : {template: {source: template.source, model: template.model, ...(template.followContext === undefined ? {} : {followContext: template.followContext})}}),
       ...(description === undefined ? {} : {description}),
       ...(reasoningDescriptions === undefined ? {} : {reasoningDescriptions: Object.fromEntries(Object.entries(reasoningDescriptions))}),
       ...(supportsImageDetailOriginal === undefined ? {} : {supportsImageDetailOriginal}),
@@ -106,7 +106,7 @@ export function compileModelDefinitions(definitions, defaultModel, { allowReason
     models: validated.map((model, index) => ({
       slug: model.id, display_name: model.name, description: model.description ?? "User-configured Responses model",
       default_reasoning_level: model.defaultReasoningEffort,
-      supported_reasoning_levels: model.reasoningEfforts.map((effort) => ({ effort,
+      supported_reasoning_levels: (model.reasoningEfforts ?? []).map((effort) => ({ effort,
         description: model.reasoningDescriptions?.[effort] ?? (model.reasoningEfforts.includes("enabled") && effort === "none" ? "关闭思考"
           : effort === "enabled" ? "开启思考，使用模型默认强度" : effort) })),
       shell_type: "unified_exec", visibility: "list", supported_in_api: true,
@@ -117,7 +117,7 @@ export function compileModelDefinitions(definitions, defaultModel, { allowReason
       supports_reasoning_summary_parameter: model.supportsReasoningSummary ?? false,
       ...(model.defaultReasoningSummary === undefined ? {} : {default_reasoning_summary: model.defaultReasoningSummary}),
       support_verbosity: model.supportsVerbosity ?? false, default_verbosity: model.defaultVerbosity ?? null, apply_patch_tool_type: model.applyPatchToolType ?? null,
-      ...(model.supportsSearchTool === true ? {supports_search_tool: true} : {}),
+      ...(model.supportsSearchTool === undefined ? {} : {supports_search_tool: model.supportsSearchTool}),
       truncation_policy: model.truncationPolicy ?? { mode: "tokens", limit: Math.min(10_000, Math.floor(model.contextWindow / 4)) },
       context_window: model.contextWindow, max_context_window: model.maxContextWindow ?? model.contextWindow,
       ...(model.autoCompactTokenLimit === undefined ? {} : {auto_compact_token_limit: model.autoCompactTokenLimit}),
@@ -144,7 +144,9 @@ export function modelDefinitionsFromCatalog(catalog, source = "official") {
     ...(model.supported_reasoning_levels?.some(entry => entry.effort !== "ultra" && entry.effort !== "persistent" && entry.description != null)
       ? {reasoningDescriptions: Object.fromEntries(model.supported_reasoning_levels.filter(entry => entry.effort !== "ultra" && entry.effort !== "persistent" && entry.description != null).map(entry => [entry.effort, entry.description]))} : {}),
     defaultReasoningEffort: model.default_reasoning_level ?? null,
-    supportsImages: model.input_modalities?.includes("image") === true,
+    ...(model.input_modalities === undefined ? {} : {supportsImages: model.input_modalities.includes("image")}),
+    ...(model.apply_patch_tool_type === undefined ? {} : {applyPatchToolType: model.apply_patch_tool_type}),
+    ...(model.supports_search_tool === undefined ? {} : {supportsSearchTool: model.supports_search_tool}),
     ...(model.supports_image_detail_original === undefined ? {} : {supportsImageDetailOriginal: model.supports_image_detail_original}),
     ...(model.support_verbosity === undefined ? {} : {supportsVerbosity: model.support_verbosity}),
     ...(model.default_verbosity === undefined ? {} : {defaultVerbosity: model.default_verbosity}),

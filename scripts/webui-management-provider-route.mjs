@@ -38,6 +38,7 @@ import { routeCustomModelCapabilityProbe } from "./webui-custom-model-probe.mjs"
 import { routeOfficialModelManagement } from "./webui-management-official-model-route.mjs";
 import { loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadProviderModelTemplateOptions } from "./provider-model-template-management.mjs";
+import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
 
 const activeTemplateOptionsReads = new WeakSet();
 
@@ -53,6 +54,27 @@ export async function routeProviderManagement({
   state,
 }) {
   if (await routeOfficialModelManagement({ environment, maximumBodyBytes, path, principalId, request, response, state })) return true;
+  if (path === "/provider-model-drafts" && request.method === "GET") {
+    if (new URL(request.url, "http://localhost").searchParams.size !== 0) {
+      throw new ApiError(400, "provider_models_invalid_input", "新增模型模板请求不接受参数");
+    }
+    if (activeTemplateOptionsReads.has(state)) {
+      throw new ApiError(503, "provider_templates_busy", "已有模型模板读取正在进行，请稍后重试");
+    }
+    activeTemplateOptionsReads.add(state);
+    try {
+      const templates = await loadCustomModelDraftTemplates();
+      if (Buffer.byteLength(JSON.stringify({ templates })) > 2 * 1024 * 1024) {
+        throw new ApiError(503, "provider_models_unavailable", "新增模型模板超过大小限制");
+      }
+      if (!response.destroyed) sendManagementJson(response, 200, { templates });
+    } catch (error) {
+      throw managementOperationError(error, [ProviderModelManagementError], "provider_models_unavailable");
+    } finally {
+      activeTemplateOptionsReads.delete(state);
+    }
+    return true;
+  }
   if (path === "/provider-model-templates" && request.method === "GET") {
     const params = new URL(request.url, "http://localhost").searchParams;
     if (params.size !== 1 || params.getAll("provider").length !== 1) {
@@ -234,6 +256,12 @@ export async function routeProviderManagement({
   if (path === "/provider-settings/preview" && request.method === "POST") {
     const body = await readJsonBody(request, maximumBodyBytes);
     const input = normalizeProviderSettingsMutation(body);
+    if (input.operation === "model.custom.save" || input.operation === "primary.custom.save" && input.provider.operation === "update") {
+      const current = await readProviderSettings(environment, state);
+      if (input.resourceRevision !== fingerprintManagementValue(current)) {
+        throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
+      }
+    }
     const preview = await state.previewProviderSettings(input, environment);
     const safePreview = redactProviderSettingsResult(preview);
     const resource = await readProviderSettings(environment, state);
@@ -265,14 +293,14 @@ export async function routeProviderManagement({
     }
     const input = normalizeProviderSettingsMutation(body);
     const resource = await readProviderSettings(environment, state);
-    const preview = await state.previewProviderSettings(input, environment);
-    const safePreview = redactProviderSettingsResult(preview);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
     if ((input.operation === "model.custom.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
       && input.resourceRevision !== resourceRevision) {
       throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
     }
+    const preview = await state.previewProviderSettings(input, environment);
+    const safePreview = redactProviderSettingsResult(preview);
     state.confirmations.consume(body.confirmationToken, {
       sessionId: principalId,
       operation: "provider-settings.write",

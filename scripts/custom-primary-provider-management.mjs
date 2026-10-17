@@ -6,6 +6,7 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { assertProviderModelRequestPolicy } from "../runtime/model-request-policy.mjs";
+import { withCustomBaseTemplate } from "../runtime/model-template-catalog.mjs";
 import { createResponsesModelCatalog, compileResponsesModelCatalog, isCustomCatalogProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath, customProviderUpstreamWireApis, readCustomProviderUpstreamWireApi, removeCustomProviderUpstreamMetadata, writeCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { isDeepStrictEqual } from "node:util";
@@ -474,7 +475,7 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   const existingIds = new Set(previousCatalog?.definitions.map(entry => entry.id));
   // Saved models are snapshots. Only new models receive missing base prompts.
   const models = custom ? validateResponsesModels(input.catalog.models, model).map(entry => existingIds.has(entry.id)
-    ? entry : createResponsesModelCatalog([entry], entry.id).definitions[0]) : undefined;
+    ? entry : createResponsesModelCatalog([withCustomBaseTemplate(entry)], entry.id).definitions[0]) : undefined;
   const reasoningEffort = models?.find((entry) => entry.id === model)?.defaultReasoningEffort ?? "none";
   const officialModelIds = new Set(
     officialModels.filter((candidate) => candidate.available !== false)

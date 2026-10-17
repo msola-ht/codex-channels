@@ -41,12 +41,24 @@ export function OpenAiModelDetails({ model, revision, open, loading, onClose, on
       <div className="flex flex-col gap-6 px-4 pb-6">
         {loading ? <Skeleton className="h-40 w-full" /> : !stale && model && revision && open ? <Tabs key={JSON.stringify([provider, model.model, revision])} defaultValue="capabilities">
           <TabsList><TabsTrigger value="capabilities">{t("openAiModelPrompts.capabilities")}</TabsTrigger><TabsTrigger value="prompts">{t("openAiModelPrompts.title")}</TabsTrigger></TabsList>
-          <TabsContent value="capabilities" className="flex flex-col gap-6"><ModelDetailFields details={model.details} sidebar /></TabsContent>
+          <TabsContent value="capabilities" className="flex flex-col gap-6">{model.declaredCapabilities === undefined ? null : <DeclaredModelCapabilities capabilities={model.declaredCapabilities} />}<ModelDetailFields details={model.details} sidebar /></TabsContent>
           <TabsContent value="prompts"><OpenAiModelPrompts model={model.model} revision={revision} provider={provider} onReload={onReload} /></TabsContent>
         </Tabs> : provider === undefined ? <p>{t("openAiModelDetails.unavailable")}</p> : <div className="flex flex-col items-start gap-3"><p>{t(stale ? "modelCatalog.detailsStale" : "openAiModelDetails.unavailable")}</p><Button variant="outline" onClick={onReload}>{t("modelCatalog.reload")}</Button></div>}
       </div>
     </SheetContent>
   </Sheet>
+}
+
+function DeclaredModelCapabilities({ capabilities }: { capabilities: NonNullable<Model["declaredCapabilities"]> }) {
+  const { t } = useTranslation()
+  const support = (value: boolean | undefined) => t(value === undefined ? "common.unknown" : value ? "managementUi.supported" : "managementUi.unsupported")
+  return <div className="flex flex-col gap-2 text-sm">
+    <p>{t("managementUi.supportsReasoning")}: {capabilities.reasoningEfforts === undefined ? t("common.unknown") : capabilities.reasoningEfforts.join(", ") || t("managementUi.unsupported")}</p>
+    <p>{t("managementUi.imageInput")}: {support(capabilities.supportsImages)}</p>
+    <p>{t("managementUi.freeformPatchTool")}: {support(capabilities.applyPatchToolType === undefined ? undefined : capabilities.applyPatchToolType !== null)}</p>
+    <p>{t("managementUi.toolSearchTool")}: {support(capabilities.supportsSearchTool)}</p>
+    <p className="text-muted-foreground">{t("customModel.unknownDisabled")}</p>
+  </div>
 }
 
 /** In refresh comparisons, render only detail fields that differ from the other side. */

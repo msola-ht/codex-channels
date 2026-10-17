@@ -135,7 +135,7 @@ function readPresentationSnapshot(catalog, environment) {
     document = content === "" ? { models: [] } : parseJson(content);
     if (definition) validateManagedCatalog(document, definition);
   }
-  const models = document.models.length === 0 ? [] : projectModelCatalogEntries(document.models);
+  const models = document.models.length === 0 ? [] : projectModelCatalogEntries(document.models, false, custom ? document.definitions : undefined);
   const expected = catalog.models.map(model => model.id).sort();
   if (JSON.stringify(models.map(model => model.model).sort()) !== JSON.stringify(expected)) {
     throw invalid("stale-preview", "provider", "目录模型已变化，请刷新");

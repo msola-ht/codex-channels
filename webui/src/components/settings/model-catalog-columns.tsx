@@ -65,8 +65,14 @@ export function ModelCapabilityCells({ model }: { model: OpenAiModelCatalogEntry
   const { t, language } = useTranslation()
   const numbers = new Intl.NumberFormat(language === "zh" ? "zh-CN" : "en-US")
   const context = (value: number | null) => value === null ? t("common.unknown") : numbers.format(value)
+  const declared = model.declaredCapabilities
+  const capability = (value: boolean | undefined) => t(value === undefined ? "common.unknown" : value ? "openAiModelCatalog.supported" : "openAiModelCatalog.unsupported")
+  const reasoning = declared === undefined ? model.reasoningEfforts : declared.reasoningEfforts
+  const reasoningState = declared === undefined ? t("common.unknown") : capability(reasoning === undefined ? undefined : reasoning.length > 0)
+  const search = declared === undefined ? t(model.details.supports_search_tool === null ? "openAiModelDetails.undeclared" : model.details.supports_search_tool ? "openAiModelCatalog.supported" : "openAiModelCatalog.unsupported") : capability(declared.supportsSearchTool)
+  const patch = declared === undefined ? t(model.details.apply_patch_tool_type === null ? "openAiModelDetails.undeclared" : "openAiModelCatalog.supported") : capability(declared.applyPatchToolType === undefined ? undefined : declared.applyPatchToolType !== null)
   return <>
-    <TableCell><div className="flex flex-wrap gap-1">{model.details.input_modalities === null
+    <TableCell><div className="flex flex-wrap gap-1">{declared !== undefined ? <><Badge variant="outline">{t("openAiModelDetails.text")}</Badge><span>{t("managementUi.imageInput")}: {capability(declared.supportsImages)}</span></> : model.details.input_modalities === null
       ? t("openAiModelDetails.undeclared")
       : model.details.input_modalities.length === 0 ? t("openAiModelDetails.empty")
         : model.details.input_modalities.map((modality, index) => <Badge key={`${modality}-${index}`} variant="outline">{modality === "text" ? t("openAiModelDetails.text") : modality === "image" ? t("openAiModelDetails.image") : modality}</Badge>)}</div></TableCell>
@@ -74,18 +80,18 @@ export function ModelCapabilityCells({ model }: { model: OpenAiModelCatalogEntry
     <TableCell className="text-right tabular-nums">{context(model.maxContextWindow)}</TableCell>
     <TableCell className="text-right tabular-nums">{model.details.effective_context_window_percent === null ? t("openAiModelDetails.undeclared") : `${numbers.format(model.details.effective_context_window_percent)}%`}</TableCell>
     <TableCell><Tooltip>
-      <TooltipTrigger render={<Badge variant="secondary" tabIndex={0} className="cursor-help" />}><span className="underline decoration-dotted underline-offset-2">{model.defaultReasoningEffort ?? t("common.unknown")}</span></TooltipTrigger>
+      <TooltipTrigger render={<Badge variant="secondary" tabIndex={0} className="cursor-help" />}><span className="underline decoration-dotted underline-offset-2">{model.defaultReasoningEffort ?? reasoningState}</span></TooltipTrigger>
       <TooltipContent><div className="flex flex-col gap-2"><span>{t("openAiModelCatalog.reasoning")}</span><ul className="flex flex-col gap-1">
-        {model.reasoningEfforts.length === 0 ? <li>{t("common.unknown")}</li> : model.reasoningEfforts.map(effort => <li key={effort}>{effort === model.defaultReasoningEffort ? t("openAiModelCatalog.defaultEffort", { effort }) : effort}</li>)}
+        {!reasoning?.length ? <li>{reasoningState}</li> : reasoning.map(effort => <li key={effort}>{effort === model.defaultReasoningEffort ? t("openAiModelCatalog.defaultEffort", { effort }) : effort}</li>)}
       </ul></div></TooltipContent>
     </Tooltip></TableCell>
     <TableCell><ModelServiceTiers tiers={model.serviceTiers} /></TableCell>
     <TableCell><ModelApprovals approvals={model.approvals} /></TableCell>
     <TableCell><div className="flex flex-col items-start gap-1">
-      <span>{t("openAiModelCatalog.searchTool", { value: t(model.details.supports_search_tool === null ? "openAiModelDetails.undeclared" : model.details.supports_search_tool ? "openAiModelCatalog.supported" : "openAiModelCatalog.unsupported") })}</span>
+      <span>{t("openAiModelCatalog.searchTool", { value: search })}</span>
     <Tooltip>
-      <TooltipTrigger render={<span tabIndex={0} className="cursor-help" />}>{t("openAiModelCatalog.editSupport", { value: t(model.details.apply_patch_tool_type === null ? "openAiModelDetails.undeclared" : "openAiModelCatalog.supported") })}</TooltipTrigger>
-      <TooltipContent>{t("openAiModelCatalog.patchTool", { value: model.details.apply_patch_tool_type ?? t("openAiModelDetails.undeclared") })}</TooltipContent>
+      <TooltipTrigger render={<span tabIndex={0} className="cursor-help" />}>{t("openAiModelCatalog.editSupport", { value: patch })}</TooltipTrigger>
+      <TooltipContent>{t("openAiModelCatalog.patchTool", { value: declared === undefined ? model.details.apply_patch_tool_type ?? t("openAiModelDetails.undeclared") : declared.applyPatchToolType ?? patch })}</TooltipContent>
     </Tooltip></div></TableCell>
   </>
 }

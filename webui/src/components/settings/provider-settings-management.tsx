@@ -5,6 +5,8 @@ import { useTranslation } from "@/hooks/use-translation"
 import { formatModelLabel } from "@/lib/format"
 
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
+import { useApi } from "@/hooks/use-api"
+import { fetchCustomModelDraftTemplates } from "@/lib/api"
 import { useCustomModelCapabilityProbe } from "@/hooks/use-custom-model-capability-probe"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { translateCustomModelProbeReason } from "@/lib/custom-model-probe"
@@ -14,7 +16,8 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { ManagedSelect, ManagementConfirmationDialog, SettingsMutationFeedback } from "@/components/settings/settings-controls"
@@ -156,7 +159,7 @@ function ProviderSettingsCard({
     setOriginalModelCount(candidate.models?.length ?? 0)
     setEditorOpen(true)
     setCatalogKind(candidate.catalog === "custom" ? "custom" : "official")
-    setCustomModels(candidate.models?.map(entry => ({ ...entry, reasoningEfforts: [...entry.reasoningEfforts] })) ?? [])
+    setCustomModels(candidate.models?.map(entry => ({ ...entry, reasoningEfforts: entry.reasoningEfforts === undefined ? undefined : [...entry.reasoningEfforts] })) ?? [])
     setEditingId(candidate.id)
     setProviderId(candidate.id)
     setProviderName(candidate.displayName)
@@ -176,7 +179,7 @@ function ProviderSettingsCard({
     if (editingId !== null && editorRevision === null) return
     if (modelsOnly && editingId !== null) {
       const models = customModels.map(({ probeConnection: _probeConnection, ...entry }) => {
-        const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts.includes(effort)))
+        const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts?.includes(effort)))
         return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions,
           ...(entry.template === undefined ? {} : { template: { source: entry.template.source, model: entry.template.model } }) }
       })
@@ -203,7 +206,7 @@ function ProviderSettingsCard({
         model: model.trim(),
         ...(catalogKind === "custom" ? {
           catalog: { kind: "custom" as const, models: customModels.map(({ probeConnection: _probeConnection, ...entry }) => {
-            const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts.includes(effort)))
+            const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts?.includes(effort)))
             return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions,
               ...(entry.template === undefined ? {} : { template: { source: entry.template.source, model: entry.template.model } }) }
           }) },
@@ -361,22 +364,25 @@ function ProviderSettingsCard({
           <p className="text-xs text-muted-foreground">{t("managementUi.responsesHint")}</p>
           {editingId !== null ? <p className="text-xs text-muted-foreground">{t("modelCatalog.editRequiresRemoval")}</p> : null}
           <Alert><AlertTitle>{t("modelProbe.title")}</AlertTitle><AlertDescription>{t("modelProbe.hint")}</AlertDescription></Alert>
+          {editorOpen ? <CustomModelTemplatePicker disabled={busy || pending !== null || editorStale || customModels.length >= 64 || customModels.some(entry => entry.id.trim() === "")} onAdd={draft => setCustomModels(current => current.length >= 64 || current.some(entry => entry.id.trim() === "") ? current : [...current, { ...draft, id: current.length === 0 ? model : "", name: current.length === 0 ? model : "" }])} /> : null}
           {customModels.map((entry, index) => {
             const existingModel = editingId !== null && index < originalModelCount
             const patch = (changes: Partial<typeof entry>) => setCustomModels(current => current.map((value, position) => position === index ? { ...value, ...changes } : value))
             const reasoningEffort = probeReasoningEfforts.find(effort => effort === (entry.defaultReasoningEffort ?? "none"))
             return <FieldGroup key={index} className="rounded-md border p-3">
+              {entry.template ? <p className="text-sm text-muted-foreground">{t("customModel.templateOrigin", { source: entry.template.source === "official" ? "OpenAI" : "DeepSeek", model: entry.template.model })}</p> : null}
               <Field><FieldLabel htmlFor={`responses-model-${index}`}>{t("managementUi.modelId")}</FieldLabel><Input id={`responses-model-${index}`} value={entry.id} disabled={busy || pending !== null || existingModel} onChange={event => patch({ id: event.target.value })} /></Field>
               <Field><FieldLabel htmlFor={`responses-name-${index}`}>{t("managementUi.displayName")}</FieldLabel><Input id={`responses-name-${index}`} value={entry.name} disabled={busy || pending !== null} onChange={event => patch({ name: event.target.value })} /></Field>
               <ManagedSelect label={t("managementUi.contextPreset")} value={entry.contextWindow ? String(entry.contextWindow) : ""} options={contextWindowPresetTokens.filter(value => value <= (entry.maxContextWindow ?? 100000000)).map(value => [String(value), t("managementUi.contextPresetLabel", { k: value / 1024, tokens: value })])} disabled={busy || pending !== null} onChange={value => patch({ contextWindow: Number(value) })} />
               <Field><FieldLabel htmlFor={`responses-context-${index}`}>{t("managementUi.contextTokens")}</FieldLabel><Input id={`responses-context-${index}`} type="number" min={1024} max={entry.maxContextWindow ?? 100000000} value={entry.contextWindow || ""} disabled={busy || pending !== null} onChange={event => patch({ contextWindow: Number(event.target.value) })} /></Field>
-              <Field orientation="horizontal"><Checkbox id={`responses-reasoning-supported-${index}`} checked={entry.reasoningEfforts.length > 0} disabled={busy || pending !== null} onCheckedChange={value => patch({ reasoningEfforts: value === true ? ["medium"] : [], defaultReasoningEffort: value === true ? "medium" : null, reasoningDescriptions: undefined })} /><FieldLabel htmlFor={`responses-reasoning-supported-${index}`}>{t("managementUi.supportsReasoning")}</FieldLabel></Field>
-              {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-reasoning-${index}`}>{t("managementUi.reasoningList")}</FieldLabel><Input id={`responses-reasoning-${index}`} value={entry.reasoningEfforts.join(",")} placeholder="low,medium,high" disabled={busy || pending !== null} onChange={event => { const values = event.target.value === "" ? [] : event.target.value.split(","); patch({ reasoningEfforts: values, defaultReasoningEffort: values.includes(entry.defaultReasoningEffort ?? "") ? entry.defaultReasoningEffort : values[0] ?? null }) }} /></Field> : null}
-              {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-default-${index}`}>{t("managementUi.defaultReasoning")}</FieldLabel><Input id={`responses-default-${index}`} value={entry.defaultReasoningEffort ?? ""} disabled={busy || pending !== null} onChange={event => patch({ defaultReasoningEffort: event.target.value })} /></Field> : null}
-              <Field orientation="horizontal"><Checkbox id={`responses-images-${index}`} checked={entry.supportsImages} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsImages: value === true, supportsImageDetailOriginal: value === true ? entry.supportsImageDetailOriginal : false })} /><FieldLabel htmlFor={`responses-images-${index}`}>{t("managementUi.imageInput")}</FieldLabel></Field>
+              <CapabilitySelect label={t("managementUi.supportsReasoning")} value={entry.reasoningEfforts === undefined ? undefined : entry.reasoningEfforts.length > 0} disabled={busy || pending !== null} onChange={value => patch({ reasoningEfforts: value === undefined ? undefined : value ? ["medium"] : [], defaultReasoningEffort: value ? "medium" : null, reasoningDescriptions: undefined })} />
+              {(entry.reasoningEfforts?.length ?? 0) > 0 ? <Field><FieldLabel htmlFor={`responses-reasoning-${index}`}>{t("managementUi.reasoningList")}</FieldLabel><Input id={`responses-reasoning-${index}`} value={entry.reasoningEfforts?.join(",") ?? ""} placeholder="low,medium,high" disabled={busy || pending !== null} onChange={event => { const values = event.target.value === "" ? [] : event.target.value.split(","); patch({ reasoningEfforts: values, defaultReasoningEffort: values.includes(entry.defaultReasoningEffort ?? "") ? entry.defaultReasoningEffort : values[0] ?? null }) }} /></Field> : null}
+              {(entry.reasoningEfforts?.length ?? 0) > 0 ? <Field><FieldLabel htmlFor={`responses-default-${index}`}>{t("managementUi.defaultReasoning")}</FieldLabel><Input id={`responses-default-${index}`} value={entry.defaultReasoningEffort ?? ""} disabled={busy || pending !== null} onChange={event => patch({ defaultReasoningEffort: event.target.value })} /></Field> : null}
+              <CapabilitySelect label={t("managementUi.imageInput")} value={entry.supportsImages} disabled={busy || pending !== null} onChange={value => patch({ supportsImages: value, supportsImageDetailOriginal: value === true ? entry.supportsImageDetailOriginal : undefined })} />
+              <CapabilitySelect label={t("managementUi.freeformPatchTool")} value={entry.applyPatchToolType === undefined ? undefined : entry.applyPatchToolType !== null} disabled={busy || pending !== null} onChange={value => patch({ applyPatchToolType: value === undefined ? undefined : value ? "freeform" : null, probeConnection: { ...entry.probeConnection, applyPatch: undefined } })} />
+              <CapabilitySelect label={t("managementUi.toolSearchTool")} value={entry.supportsSearchTool} disabled={busy || pending !== null} onChange={value => patch({ supportsSearchTool: value, probeConnection: { ...entry.probeConnection, toolSearch: undefined } })} />
+              <p className="text-sm text-muted-foreground">{t("customModel.unknownDisabled")}</p>
               <CustomModelDetails entry={entry} index={index} disabled={busy || pending !== null} upstreamWireApi={upstreamWireApi} patch={patch} />
-              <Field orientation="horizontal"><Checkbox id={`responses-patch-${index}`} checked={entry.applyPatchToolType === "freeform"} disabled={busy || pending !== null} onCheckedChange={value => patch({ applyPatchToolType: value === true ? "freeform" : undefined, probeConnection: { ...entry.probeConnection, applyPatch: undefined } })} /><FieldLabel htmlFor={`responses-patch-${index}`}>{t("managementUi.freeformPatchTool")}</FieldLabel></Field>
-              <Field orientation="horizontal"><Checkbox id={`responses-search-${index}`} checked={entry.supportsSearchTool === true} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsSearchTool: value === true, probeConnection: { ...entry.probeConnection, toolSearch: undefined } })} /><FieldLabel htmlFor={`responses-search-${index}`}>{t("managementUi.toolSearchTool")}</FieldLabel></Field>
               <p className="text-muted-foreground">{reasoningEffort === undefined ? t("modelProbe.invalidReasoning") : t("modelProbe.reasoningEffort", { effort: reasoningEffort })}</p>
               <div className="flex flex-wrap gap-2">
                 {(["applyPatch", "toolSearch"] as const).map(capability => <Button key={capability} variant="outline" disabled={busy || pending !== null || probe.running || reasoningEffort === undefined || !entry.id.trim() || !baseUrl.trim() || (editingId === null && !apiKey.trim())} onClick={() => { if (reasoningEffort === undefined) return; void probe.start(index, {
@@ -389,7 +395,7 @@ function ProviderSettingsCard({
                   const result = probe.state?.result
                   if (!probe.canApply || !result || result.model !== entry.id.trim()) return
                   patch({ ...(result.capability === "applyPatch"
-                    ? { applyPatchToolType: result.check.status === "supported" ? "freeform" : undefined }
+                    ? { applyPatchToolType: result.check.status === "supported" ? "freeform" : null }
                     : { supportsSearchTool: result.check.status === "supported" }), probeConnection: { ...entry.probeConnection, [result.capability]: result.connectionToken } })
                 }}>{t("modelProbe.applyTool", { tool: t(`modelProbe.capabilities.${probe.state.result.capability}`) })}</Button> : null}
               </div>
@@ -405,7 +411,6 @@ function ProviderSettingsCard({
               {!existingModel ? <Button variant="outline" disabled={busy || pending !== null} onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>{t("managementUi.removeModel")}</Button> : null}
             </FieldGroup>
           })}
-          <Button variant="outline" disabled={busy || pending !== null || customModels.length >= 64} onClick={() => setCustomModels(current => [...current, { id: current.length === 0 ? model : "", name: current.length === 0 ? model : "", contextWindow: 0, reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false }])}>{t("managementUi.addModel")}</Button>
         </div> : null}
         {!modelsOnly && mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">{t("managementUi.removeBaseUrl")}</FieldLabel></Field> : null}
         {editorStale ? <Alert variant="destructive"><AlertDescription>{t("modelCatalog.stale")}</AlertDescription></Alert> : null}
@@ -442,6 +447,43 @@ function ProviderSettingsCard({
   </>
 }
 
+function CapabilitySelect({ label, value, disabled, onChange }: { label: string; value: boolean | undefined; disabled: boolean; onChange: (value: boolean | undefined) => void }) {
+  const { t } = useTranslation()
+  return <ManagedSelect label={label} value={value === undefined ? "unknown" : value ? "supported" : "unsupported"} options={[["unknown", t("common.unknown")], ["supported", t("managementUi.supported")], ["unsupported", t("managementUi.unsupported")]]} disabled={disabled} onChange={value => onChange(value === "unknown" ? undefined : value === "supported")} />
+}
+
+function CustomModelTemplatePicker({ disabled, onAdd }: { disabled: boolean; onAdd: (draft: CustomModelDraft) => void }) {
+  const { t, language } = useTranslation()
+  const request = useApi(fetchCustomModelDraftTemplates, [], { retainDataOnError: false })
+  const [selection, setSelection] = useState<string | null>(null)
+  const templates = request.data?.templates ?? []
+  const key = (entry: typeof templates[number]) => `${entry.source}:${entry.model}`
+  const official = templates.find(entry => entry.source === "official")
+  const selectedKey = selection ?? (official === undefined ? "" : key(official))
+  const selected = templates.find(entry => key(entry) === selectedKey)
+  const suggested = selected?.suggested
+  const numbers = new Intl.NumberFormat(language === "zh" ? "zh-CN" : "en-US")
+  const support = (value: boolean | undefined) => t(value === undefined ? "common.unknown" : value ? "managementUi.supported" : "managementUi.unsupported")
+  return <FieldGroup className="rounded-md border p-3">
+    {request.loading ? <p aria-busy="true">{t("common.loading")}</p> : request.errorCode !== null || templates.length === 0 ? <Alert variant="destructive"><AlertDescription>{request.errorCode !== null ? translateApiErrorCode(t, request.errorCode) : t("customModel.templatesUnavailable")}<Button variant="outline" disabled={disabled} onClick={request.refetch}>{t("modelTemplate.retry")}</Button></AlertDescription></Alert> : <>
+      <ManagedSelect label={t("customModel.startingTemplate")} value={selectedKey} options={templates.map(entry => [key(entry), `${entry.source === "official" ? "OpenAI" : "DeepSeek"} · ${formatModelLabel(entry.model, entry.displayName)}`])} disabled={disabled} onChange={setSelection} />
+      <FieldDescription>{t("customModel.startingTemplateHint")}</FieldDescription>
+      {suggested === undefined ? null : <Collapsible>
+        <CollapsibleTrigger render={<Button variant="outline" />}>{t("customModel.templateReference")}</CollapsibleTrigger>
+        <CollapsibleContent className="pt-3"><div className="flex flex-col gap-2 text-sm">
+          <p className="text-muted-foreground">{t("customModel.templateReferenceHint")}</p>
+          <p>{t("managementUi.contextTokens")}: {numbers.format(suggested.contextWindow)}; {t("customModel.maxContext")}: {numbers.format(suggested.maxContextWindow ?? suggested.contextWindow)}</p>
+          <p>{t("managementUi.supportsReasoning")}: {suggested.reasoningEfforts === undefined ? t("common.unknown") : suggested.reasoningEfforts.join(", ") || t("managementUi.unsupported")}; {t("managementUi.defaultReasoning")}: {suggested.defaultReasoningEffort ?? t("customModel.unset")}</p>
+          <p>{t("managementUi.imageInput")}: {support(suggested.supportsImages)}</p>
+          <p>{t("managementUi.freeformPatchTool")}: {support(suggested.applyPatchToolType === undefined ? undefined : suggested.applyPatchToolType !== null)}</p>
+          <p>{t("managementUi.toolSearchTool")}: {support(suggested.supportsSearchTool)}</p>
+        </div></CollapsibleContent>
+      </Collapsible>}
+      <Button variant="outline" disabled={disabled || selected === undefined} onClick={() => { if (selected !== undefined && !disabled) onAdd(structuredClone(selected.draft)) }}>{t("managementUi.addModel")}</Button>
+    </>}
+  </FieldGroup>
+}
+
 function ProviderSettingsConfirmationDialog({
   pending,
   saving,
@@ -467,7 +509,8 @@ function ProviderSettingsConfirmationDialog({
   if (!localRemoval && pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: typeof pending.provider === "string" ? pending.provider : pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
   if (providerDetails?.model !== undefined) lines.push(t("managementUi.defaultModelConfirm", { value: providerDetails.model }))
   if (providerDetails !== undefined && "upstreamWireApi" in providerDetails) lines.push(t("managementUi.upstreamConfirm", { value: providerDetails.upstreamWireApi === "chat_completions" ? t("managementUi.upstreamChatCompletions") : t("managementUi.upstreamResponses") }))
-  if (providerDetails?.models !== undefined) for (const model of providerDetails.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: t(model.supportsImages ? "managementUi.supported" : "managementUi.unsupported"), reasoning: model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? "none", patch: model.applyPatchToolType ?? t("managementUi.unsupported"), search: t(model.supportsSearchTool ? "managementUi.supported" : "managementUi.unsupported") }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model }) : ""))
+  const capability = (value: boolean | undefined) => t(value === undefined ? "common.unknown" : value ? "managementUi.supported" : "managementUi.unsupported")
+  if (providerDetails?.models !== undefined) for (const model of providerDetails.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: capability(model.supportsImages), reasoning: model.reasoningEfforts === undefined ? t("common.unknown") : model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? t("customModel.unset"), patch: model.applyPatchToolType === undefined ? t("common.unknown") : model.applyPatchToolType ?? t("managementUi.unsupported"), search: capability(model.supportsSearchTool) }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model }) : ""))
   if (pending.target !== undefined) lines.push(t("managementUi.targetConfirm", { name: pending.target.displayName, id: pending.target.id }))
   if (!localRemoval && pending.model !== undefined) lines.push(t("managementUi.modelConfirm", { name: pending.model.displayName, id: pending.model.id }))
   if (contextChange && pending.model?.contextWindow !== undefined) lines.push(t("openAiModelCatalog.previousContext") + ": " + pending.model.contextWindow)

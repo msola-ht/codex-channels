@@ -25,6 +25,7 @@ import type {
   OpenAiModelPromptsResponse,
   ProviderModelPromptsResponse,
   ProviderModelTemplateOptionsResponse,
+  CustomModelDraftTemplatesResponse,
   OpenAiModelContextInput,
   OpenAiModelContextPreview,
   OpenAiModelContextResult,
@@ -474,6 +475,10 @@ export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<M
 
 export function fetchProviderModelTemplateOptions(provider: string, signal?: AbortSignal): Promise<ProviderModelTemplateOptionsResponse> {
   return getJson(`${API_PREFIX}/management/provider-model-templates?${new URLSearchParams({ provider })}`, signal)
+}
+
+export function fetchCustomModelDraftTemplates(signal: AbortSignal): Promise<CustomModelDraftTemplatesResponse> {
+  return getJson(`${API_PREFIX}/management/provider-model-drafts`, signal)
 }
 
 export function probeManagementCustomModel(input: ManagementCustomModelProbeInput, signal: AbortSignal): Promise<ManagementCustomModelProbeResult> {

@@ -123,7 +123,7 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     const model = await prompts.select({ message: "默认模型（添加新默认模型前请先添加并保存）", options: previous.definitions.map(entry => ({ value: entry.id, label: entry.name })), initialValue: previous.defaultModel });
     if (prompts.isCancel(model)) return { action: "back" };
     output.write("此入口添加和编辑模型；移除已有模型请返回选择本地移除。\n");
-    const models = await promptResponsesModels(prompts, model, previous.definitions, [], output, readCustomProviderUpstreamWireApi(environment, catalog.provider), previous.definitions.map(entry => entry.id));
+    const models = await promptResponsesModels(prompts, model, previous.definitions, output, readCustomProviderUpstreamWireApi(environment, catalog.provider), previous.definitions.map(entry => entry.id));
     if (!models) return { action: "back" };
     const input = { provider: catalog.provider, model, models };
     const preview = await previewCustomProviderModelsSave(input, { environment, expectedCatalogContent: previous.content });

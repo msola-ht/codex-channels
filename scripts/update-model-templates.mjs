@@ -10,7 +10,6 @@ import { packageDir } from "./package-path.mjs";
 import { downloadDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 
-const baseModel = "gpt-6.1-sol";
 const directory = join(packageDir, "runtime");
 const maximumBytes = 2 * 1024 * 1024;
 const encode = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -59,14 +58,35 @@ function differences(before, after, path = "", result = []) {
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 1 && args[0] === "--help") {
-    console.log("用法：node scripts/update-model-templates.mjs [--write]\n默认导出当前锁定 CLI 的内置 Sol 模板、下载 DS 官方目录、校验并显示字段差异；--write 更新仓库快照。不会更新账户目录。");
+    console.log("用法：node scripts/update-model-templates.mjs [--update-base] [--write]\n默认下载 DS 官方目录，用已保存公共底座补全并显示差异，不刷新底座。\n--update-base 从锁定 CLI 内置目录按原始顺序提取第一个模型作为底座，并用已保存 DS 原始目录重新补全，不下载 DS。\n两种操作默认只对比；--write 在校验后保存所选更新。不会更新账户目录。");
     return;
   }
-  if (args.length > 1 || (args.length === 1 && args[0] !== "--write")) throw new Error("仅支持 --write 或 --help；默认只对比");
+  if (args.some(arg => arg !== "--update-base" && arg !== "--write") || new Set(args).size !== args.length) {
+    throw new Error("仅支持 --update-base、--write 或单独 --help；默认只对比");
+  }
+  const updateBase = args.includes("--update-base");
   const names = ["model-catalog-base.json", "model-catalog-deepseek-source.json", "model-catalog-deepseek.json", "model-catalog-sources.json"];
   const previous = new Map(names.map(name => [name, readOptional(join(directory, name))]));
+  const saved = name => {
+    const content = previous.get(name);
+    if (content === undefined) throw new Error(`仓库模板缺失：${name}，请先恢复已保存快照`);
+    return JSON.parse(content);
+  };
+  const sources = saved(names[3]);
+  if (!object(sources) || !object(sources.official) || !object(sources.deepseek)) throw new Error("仓库模板来源记录无效");
+  let base, source;
+  if (updateBase) {
+    source = saved(names[1]);
+    if (sources.deepseek.sourceSha256 !== hash(previous.get(names[1]))) throw new Error("DS 原始目录与来源哈希不一致，请先检查仓库快照");
+    validateCatalog(source);
+  } else {
+    base = saved(names[0]);
+    validateCatalog(base);
+    if (base.models.length !== 1) throw new Error("公共底座必须仅包含一个模型");
+    if (sources.official.model !== base.models[0].slug || sources.official.sha256 !== hash(previous.get(names[0]))) throw new Error("公共底座与来源记录不一致，请先检查仓库快照");
+  }
   const temporary = mkdtempSync(join(tmpdir(), "codexc-template-export-"));
-  let base, cliVersion;
+  let cliVersion;
   try {
     const environment = { ...process.env, CODEX_HOME: temporary };
     const run = args => {
@@ -80,30 +100,36 @@ async function main() {
     cliVersion = run(["--version"]).trim();
     const expected = JSON.parse(readFileSync(join(packageDir, "src/codex-protocol/version.json"), "utf8")).codexCli;
     if (cliVersion !== expected) throw new Error(`CLI 版本与项目基线不一致：需要 ${expected}，实际 ${cliVersion}`);
-    const bundled = JSON.parse(run(["debug", "models", "--bundled"]));
-    const matches = bundled.models?.filter(model => model.slug === baseModel);
-    if (matches?.length !== 1) throw new Error(`内置目录必须包含唯一的 ${baseModel}`);
-    base = { models: [matches[0]] };
-    validateCatalog(base);
+    if (updateBase) {
+      const bundled = JSON.parse(run(["debug", "models", "--bundled"]));
+      if (!Array.isArray(bundled.models) || bundled.models.length === 0) throw new Error("内置目录缺少第一个模型");
+      base = { models: [bundled.models[0]] };
+      validateCatalog(base);
+    }
   } finally { rmSync(temporary, { recursive: true, force: true }); }
-  const downloaded = await downloadDeepseekCatalog(globalThis.fetch);
-  validateCatalog(downloaded.catalog);
-  const completed = completeDeepseek(downloaded.catalog, base.models[0]);
-  const contents = new Map([
-    [names[0], encode(base)], [names[1], encode(downloaded.catalog)], [names[2], encode(completed)],
-  ]);
-  contents.set(names[3], encode({
-    official: { cliVersion, model: baseModel, command: "codex debug models --bundled", sha256: hash(contents.get(names[0])) },
-    deepseek: { url: deepseekSetupScriptUrl, scriptSha256: downloaded.sha256, sourceSha256: hash(contents.get(names[1])), completedSha256: hash(contents.get(names[2])) },
-  }));
+  const contents = new Map(previous);
+  if (updateBase) {
+    contents.set(names[0], encode(base));
+    sources.official = { cliVersion, model: base.models[0].slug, command: "codex debug models --bundled", sha256: hash(contents.get(names[0])) };
+  } else {
+    const downloaded = await downloadDeepseekCatalog(globalThis.fetch);
+    source = downloaded.catalog;
+    validateCatalog(source);
+    contents.set(names[1], encode(source));
+    sources.deepseek = { url: deepseekSetupScriptUrl, scriptSha256: downloaded.sha256, sourceSha256: hash(contents.get(names[1])) };
+  }
+  const completed = completeDeepseek(source, base.models[0]);
+  contents.set(names[2], encode(completed));
+  sources.deepseek.completedSha256 = hash(contents.get(names[2]));
+  contents.set(names[3], encode(sources));
   for (const [name, content] of contents) {
     if (Buffer.byteLength(content) > maximumBytes) throw new Error(`${name} 超过 2 MiB`);
     const changes = differences(previous.get(name) === undefined ? undefined : JSON.parse(previous.get(name)), JSON.parse(content));
     console.log(`${name}: ${changes.length ? changes.join("；") : "无变化"}`);
   }
-  for (const catalog of [base, downloaded.catalog, completed]) await validateModelCatalogWithCodex(catalog);
+  for (const catalog of [base, source, completed]) await validateModelCatalogWithCodex(catalog);
   console.log("三份目录已通过 Codex 加载校验。");
-  if (!args.includes("--write")) { console.log("仅对比，未写入。确认差异后使用 --write 更新。"); return; }
+  if (!args.includes("--write")) { console.log(`仅对比，未写入。确认差异后使用${updateBase ? " --update-base" : ""} --write 更新。`); return; }
 
   const lock = join(directory, ".model-catalog-update.lock");
   writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });

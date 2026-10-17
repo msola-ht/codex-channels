@@ -53,29 +53,36 @@ App Server 子进程，不进入账户注册表、命令行或日志。
 以下命令用于源码仓库内的模板维护，和账户目录刷新是两个独立操作。请在仓库根目录执行：
 
 ```sh
-node scripts/update-model-templates.mjs          # 导出、下载、校验并对比，不写入
-node scripts/update-model-templates.mjs --write  # 对比后更新仓库快照
+node scripts/update-model-templates.mjs                      # 下载 DS，用已保存底座补全并对比
+node scripts/update-model-templates.mjs --write              # 校验后保存 DS 更新
+node scripts/update-model-templates.mjs --update-base        # 显式获取 CLI 底座并对比，不下载 DS
+node scripts/update-model-templates.mjs --update-base --write # 校验后保存底座和 DS 重新补全结果
 ```
 
-官方基础模板固定抽取项目锁定 CLI 的 `gpt-6.1-sol`，使用 `codex debug models --bundled`，
-不使用用户的 `models_cache.json`。CLI 版本不匹配或源模型缺失时停止，不替换成其他模型。
-DS 复用现有下载器，从官方安装脚本提取 JSON，不执行脚本。
+公共底座是已保存的固定快照，不随 CLI 升级、模型创建、账户模板对比或 DS 维护自动刷新。
+默认命令仅从 DS 官方安装脚本提取 JSON，不执行脚本；补全时复用已保存底座，保持底座文件及其来源记录不变。
+只有显式指定 `--update-base` 才使用 `codex debug models --bundled`，从项目锁定 CLI 获取
+内置目录原始顺序中的第一个模型，不按固定名称匹配；来源记录保存实际模型 ID。用已保存的 DS 原始目录重新补全，保留 DS 原始文件及其下载来源。该操作不联网下载 DS，
+也不使用用户的 `models_cache.json`。需要同时维护两种来源时，分别运行这两组命令并审查各自差异。
+两组命令都先只对比，只有另加 `--write` 才保存；版本不匹配、源模型缺失，或复用的底座／DS 原始目录
+与来源哈希不一致时停止，不替换成其他模型或隐式重新获取另一来源。
 
-仓库保留四份文件：`runtime/model-catalog-base.json`（Sol 原始模型）、
+仓库保留四份文件：`runtime/model-catalog-base.json`（提取的单模型原始快照）、
 `runtime/model-catalog-deepseek-source.json`（DS 原始目录）、
 `runtime/model-catalog-deepseek.json`（DS 补全目录）和 `runtime/model-catalog-sources.json`（来源与哈希）。
-更新会按模型 ID 和字段列出新增、删除、修改，不打印整段提示词；三份目录全部通过当前 CLI 加载校验后才允许写入。
-默认对比也会联网下载 DS 目录，但不会调用模型或产生模型推理费用。
+更新会按模型 ID 和字段列出新增、删除、修改，不打印整段提示词；三份目录全部通过当前锁定 CLI 加载校验后才允许写入。
+默认 DS 对比也会联网下载目录，但不会调用模型或产生模型推理费用。`--update-base` 只读取本机锁定 CLI 和仓库快照。
 
 补全只继承缺失的非空提示词，保留 DS 已有正文、空字符串、数组、布尔值和显式 `null`。
 唯一例外是 `model_messages.approvals: null`：按已确认规则补入基础审批提示词。
 缺失的 `token_budget` 整组复制必要开关、阈值和提示词，避免只补正文导致 CLI 解析失败；当前基础模板保持该功能关闭。
-不继承 Sol 的 Fast 档位、上下文、工具能力或 `xhigh` 子代理思考等级。补入提示词不会开启自动审批或子代理功能。
+不继承底座模型的 Fast 档位、上下文、工具能力或 `xhigh` 子代理思考等级。补入提示词不会开启自动审批或子代理功能。
 
 写入前复核原文件内容并互斥更新，单文件替换使用临时文件；普通写入失败会尝试回滚。
 进程被强制中断或掉电不保证四文件整体原子性，可能留下 `.model-catalog-update.lock`；
 确认没有维护进程后，先用 `git diff` 检查并恢复本次模板修改，再移除残留锁并重新运行。
-更新结果仍需审查后提交，不会自动提交、重启服务或覆盖账户目录。
+更新结果仍需审查后提交，不会自动提交、重启服务或覆盖账户目录。新模型使用保存后的底座；
+已有账户模型继续通过模板差异预览和显式确认更新，读取已有目录不注入新模板。
 CLP Flash 与自定义提供商导入 DS 模型时使用仓库的 DS 补全目录，不读取某个 DS 账户的设置。
 DS、OCG、CCG 仍通过官方脚本下载目录；显式创建或更新目录时使用仓库基础提示词补全缺失项并固化，读取已有目录不注入新模板。
 

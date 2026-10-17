@@ -794,6 +794,15 @@ export interface ManagementProviderSettingsResponse {
 }
 
 export type ProviderModelTemplateSource = "official" | "deepseek" | "cline"
+export interface CustomModelDraftTemplatesResponse {
+  templates: Array<{
+    source: "official" | "deepseek"
+    model: string
+    displayName: string
+    draft: ResponsesModelDefinition
+    suggested: ResponsesModelDefinition
+  }>
+}
 export type ProviderModelTemplateSection = "prompts" | "capabilities"
 export type ProviderModelTemplateValue = { present: false } | { present: true; value: unknown }
 export interface ProviderModelTemplateOptionsResponse {

@@ -224,14 +224,14 @@ async function loadSourceTemplates(state, environment, signal) {
   let result;
   if (state.custom) {
     const sources = await Promise.all(["official", "deepseek"].map(async source =>
-      completeDefinitionPrompts(await loadResponsesModelTemplates(source, environment)).map(template => ({ source,
+      completeDefinitionPrompts(await loadResponsesModelTemplates(source)).map(template => ({ source,
         model: template.id, displayName: template.name,
         template: { ...template, maxContextWindow: template.maxContextWindow ?? template.contextWindow } }))));
     result = sources.flat();
   } else if (state.family === "clp") {
     const timeout = globalThis.AbortSignal.timeout(25_000);
     const downloaded = await downloadClineRelayCatalog(environment, signal ? globalThis.AbortSignal.any([signal, timeout]) : timeout);
-    const templates = await loadResponsesModelTemplates("deepseek", environment);
+    const templates = await loadResponsesModelTemplates("deepseek");
     const catalog = createClinePassCatalog(templates, downloaded, state.targets.map(target => target.model));
     result = catalog.models.map(template => ({ source: "cline", model: template.slug, displayName: template.display_name,
       template: { ...template, max_context_window: template.max_context_window ?? template.context_window } }));
@@ -275,7 +275,7 @@ async function buildCustomPlan(input, source, sections, state, environment) {
   const before = previous.definitions.find(entry => entry.id === input.model);
   const after = { ...selectedFields(before, source.template, "custom", sections), template: { ...input.template } };
   if (after.contextWindow > (after.maxContextWindow ?? after.contextWindow)
-    || (after.reasoningEfforts.length === 0 ? after.defaultReasoningEffort !== null : !after.reasoningEfforts.includes(after.defaultReasoningEffort))) {
+    || ((after.reasoningEfforts?.length ?? 0) === 0 ? after.defaultReasoningEffort !== null : !after.reasoningEfforts.includes(after.defaultReasoningEffort))) {
     throw invalid("template-conflict", "model", "新模板不支持当前窗口或默认思考等级；请先单独调整本地设置");
   }
   const models = validateResponsesModels(previous.definitions.map(entry => entry.id === input.model ? after : entry), previous.defaultModel);

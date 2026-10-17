@@ -5,7 +5,7 @@ import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-pr
 import { promptCustomModelCapabilities } from "./custom-model-capability-setup.mjs";
 import { compileResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
-import { loadResponsesModelTemplates, promptResponsesModelImport } from "./responses-model-templates.mjs";
+import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
 import * as clackPrompts from "@clack/prompts";
 
@@ -67,7 +67,7 @@ export async function runCustomPrimaryProviderSetup({
   createClient = createCodexUserConfigClient,
   providerId: editingProviderId,
   catalogKind = "official",
-  loadModelTemplates = source => loadResponsesModelTemplates(source, environment),
+  loadDraftTemplates = loadCustomModelDraftTemplates,
   probeWebSocket,
   probeModelCapabilities,
 } = {}) {
@@ -349,50 +349,23 @@ export async function runCustomPrimaryProviderSetup({
     }
   }
 
-  if (previousCatalog?.definitions.length) {
-    output.write("模板导入仅新增模型；已有模型的模板更新请从模型管理选择“对比并更新模型模板”。本向导仍可手动编辑已有模型参数。\n");
+  let models;
+  let normalizedModel;
+  if (custom) {
+    if (previousCatalog?.definitions.length) output.write("已有模型保留现有模板与参数；模板更新请从模型管理选择“对比并更新模型模板”。新模型逐项选择起点模板。\n");
+    models = await promptResponsesModels(prompts, currentModel ?? previousCatalog?.defaultModel, previousCatalog?.definitions ?? [], output,
+      chatUpstream ? "chat_completions" : "responses", previousCatalog?.definitions.map(entry => entry.id) ?? [], { loadDraftTemplates });
+    if (models === undefined) return { action: allowBack ? "back" : "cancel" };
+    const model = await prompts.select({ message: "选择默认模型", options: models.map(entry => ({ value: entry.id, label: `${entry.name}（${entry.id}）` })), initialValue: currentModel ?? previousCatalog?.defaultModel ?? models[0].id });
+    if (prompts.isCancel(model)) return { action: allowBack ? "back" : "cancel" };
+    normalizedModel = String(model);
+    if (!models.some(entry => entry.id === normalizedModel)) throw new Error("默认模型必须存在于已选择的模型目录");
+  } else {
+    const model = await prompts.text({ message: "上游模型 ID（必须存在于 Codex 官方模型目录）", initialValue: currentModel ?? "", validate: value => officialModelIds.has(String(value).trim()) ? undefined : "模型 ID 不在 Codex 官方模型目录中" });
+    if (prompts.isCancel(model) || model === "back") return { action: allowBack ? "back" : "cancel" };
+    normalizedModel = String(model).trim();
+    if (!officialModelIds.has(normalizedModel)) throw new Error(`模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`);
   }
-  const imported = custom ? await promptResponsesModelImport(prompts, previousCatalog?.definitions, loadModelTemplates) : [];
-  if (imported === undefined) return { action: allowBack ? "back" : "cancel" };
-  const definitions = [...(previousCatalog?.definitions ?? [])];
-  const definitionIds = new Set(definitions.map(entry => entry.id));
-  for (const entry of imported) {
-    if (definitionIds.has(entry.id)) {
-      throw new Error("模板导入的平台模型 ID 与已有模型或本次导入重复；已有模型的模板更新请使用模型管理中的“对比并更新模型模板”");
-    }
-    definitionIds.add(entry.id);
-    definitions.push(entry);
-  }
-  let selectedModel;
-  if (imported.length > 0) {
-    selectedModel = await prompts.select({
-      message: "选择默认模型",
-      options: [...definitions.map(entry => ({value: entry.id, label: `${entry.name}（${entry.id}）`})), {value:"__manual__",label:"手动添加其他模型"}],
-      initialValue: currentModel ?? previousCatalog?.defaultModel ?? imported[0].id,
-    });
-    if (prompts.isCancel(selectedModel)) return { action: allowBack ? "back" : "cancel" };
-  }
-  const model = selectedModel && selectedModel !== "__manual__" ? selectedModel : await prompts.text({
-    message: custom ? "默认模型 ID（平台提供的准确名称）" : "上游模型 ID（必须存在于 Codex 官方模型目录）",
-    initialValue: currentModel ?? previousCatalog?.defaultModel ?? "",
-    validate: (value) => {
-      const normalized = String(value).trim();
-      if (normalized === "") return "模型 ID 不能为空";
-      return custom || officialModelIds.has(normalized)
-        ? undefined
-        : "模型 ID 不在 Codex 官方模型目录中";
-    },
-  });
-  if (prompts.isCancel(model) || model === "back") {
-    return { action: allowBack ? "back" : "cancel" };
-  }
-  const normalizedModel = String(model).trim();
-  if (!custom && !officialModelIds.has(normalizedModel)) {
-    throw new Error(`模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`);
-  }
-
-  const models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id), output, chatUpstream ? "chat_completions" : "responses", previousCatalog?.definitions.map(entry => entry.id) ?? []) : undefined;
-  if (custom && models === undefined) return { action: allowBack ? "back" : "cancel" };
 
   const canPreserveCurrentBearerToken = hasCurrentBearerToken
     && customPrimaryProviderUrlsShareOrigin(currentBaseUrl, normalizedBaseUrl);
@@ -420,7 +393,7 @@ export async function runCustomPrimaryProviderSetup({
     const selected = await promptCustomModelCapabilities(prompts, {
       baseUrl: normalizedBaseUrl, apiKey: replacementApiKey || currentApiKey, models,
       upstreamWireApi: chatUpstream ? "chat_completions" : "responses", environment,
-    }, { output, probe: probeModelCapabilities });
+    }, { output, probe: probeModelCapabilities, optionalProbe: true });
     if (selected === undefined) {
       output.write("已取消，未修改配置。\n");
       return { action: allowBack ? "back" : "cancel" };
@@ -490,9 +463,9 @@ export async function runCustomPrimaryProviderSetup({
           "- 认证：API Key 将明文写入当前用户私有凭据文件，主配置仅保存 env_key 引用（不回显、不进入命令行和日志）",
         ]),
     ...(custom ? preview.provider.models.flatMap((entry, index) => [
-      `- 模型 ${entry.id}：${entry.contextWindow} Token；最大窗口 ${entry.maxContextWindow ?? entry.contextWindow} Token；图片${entry.supportsImages ? "声明支持" : "不声明"}；图片 original ${entry.supportsImageDetailOriginal ? "声明支持" : "不声明"}；apply_patch ${entry.applyPatchToolType === "freeform" ? "freeform" : "不声明"}；思考 ${entry.reasoningEfforts.join("/") || "无可选等级"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}` : ""}`,
+      `- 模型 ${entry.id}：${entry.contextWindow} Token；最大窗口 ${entry.maxContextWindow ?? entry.contextWindow} Token；图片 ${capabilityLabel(entry.supportsImages)}；图片 original ${entry.supportsImageDetailOriginal ? "声明支持" : "不声明"}；apply_patch ${capabilityLabel(entry.applyPatchToolType === undefined ? undefined : entry.applyPatchToolType === "freeform")}；思考 ${entry.reasoningEfforts === undefined ? "未知（暂不启用）" : entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}` : ""}`,
       `  模型描述：${JSON.stringify(previewModelDetails[index].description)}`,
-      `  思考等级说明：${entry.reasoningEfforts.map(effort => `${effort}=${JSON.stringify(entry.reasoningDescriptions?.[effort] ?? effort)}`).join("；") || "无可选等级"}`,
+      `  思考等级说明：${entry.reasoningEfforts?.map(effort => `${effort}=${JSON.stringify(entry.reasoningDescriptions?.[effort] ?? effort)}`).join("；") || "无可选等级"}`,
       `  回答详细程度：${entry.supportsVerbosity ? `声明支持；默认 ${entry.defaultVerbosity}` : "不声明"}；思考摘要：${entry.supportsReasoningSummary ? `声明支持；默认 ${entry.defaultReasoningSummary ?? "Codex 默认"}` : "不声明"}`,
       `  默认采样参数：${entry.sampling === undefined ? "上游默认值（不发送参数）" : JSON.stringify(entry.sampling)}；请求显式参数优先`,
       `  有效上下文：${entry.effectiveContextWindowPercent ?? 95}%；自动压缩阈值：${entry.autoCompactTokenLimit === undefined ? "Codex 默认" : `${entry.autoCompactTokenLimit} Token`}；工具输出截断：${entry.truncationPolicy === undefined ? `${Math.min(10_000, Math.floor(entry.contextWindow / 4))} tokens（目录默认）` : `${entry.truncationPolicy.limit} ${entry.truncationPolicy.mode}`}`,
@@ -500,7 +473,7 @@ export async function runCustomPrimaryProviderSetup({
     ]) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
     ...(custom
-        ? preview.provider.models.map(entry => `- 模型 ${entry.id} 工具检索（tool_search）：${entry.supportsSearchTool ? chatUpstream ? "声明支持；网关转换检索输入项" : "声明支持；上游须接受 Codex 检索输入项" : "不声明；工具定义全量下发"}`)
+        ? preview.provider.models.map(entry => `- 模型 ${entry.id} 工具检索（tool_search）：${entry.supportsSearchTool ? chatUpstream ? "声明支持；网关转换检索输入项" : "声明支持；上游须接受 Codex 检索输入项" : `${capabilityLabel(entry.supportsSearchTool)}；工具定义全量下发`}`)
       : []),
     ...(preview.transport.cleartext ? ["- 传输：明文 HTTP；API Key 与请求内容不加密"] : []),
   ];
@@ -559,3 +532,5 @@ export async function runCustomPrimaryProviderSetup({
     activationResult: configActivationResult("restart-all"),
   };
 }
+
+function capabilityLabel(value) { return value === undefined ? "未知（暂不启用）" : value ? "声明支持" : "不支持"; }
