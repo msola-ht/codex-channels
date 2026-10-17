@@ -317,7 +317,7 @@ CCG 或 CLP 时使用该家注册表标记的默认账户，混合其他 Provide
 Provider ID（推荐 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`my-provider`）和注册表中精确登记的
 规范 `sf-*` Profile 名称，不通过剥除前缀推测别名。`agg` 与 `sf-agg` 都选择聚合实例，
 内部 `codexc-aggregate` 不作为公开选择值；任一保留值与注册 Provider 或 Profile 重名时，两种聚合选择均拒绝。
-新增、删除或改变切换提供商成员后，聚合目录热更新不会改变宿主成员列表。Gateway 明确提示需要重启服务，并停止本次 Gateway 生命周期内该聚合实例的自动应用重试，保留待应用状态；其他提供商继续检查，后续设置应用若触及宿主拓扑保护，同样提示重启并停止无效重试。请在方便时运行 `codexc restart all`，同时重建 App Server 和 Gateway 的成员列表。普通临时失败仍按原预算重试。
+新增、删除或改变切换提供商成员，或修改自定义提供商的 Chat／Responses 协议后，聚合目录热更新不会重建宿主成员及协议代理。聚合材料包含 CP 的 `provider.json`，协议变化使旧材料失效；宿主在指纹查询及应用前核对当前协议与启动快照，拒绝用旧协议代理报告成功。Gateway 明确提示需要重启服务，并停止本次 Gateway 生命周期内该聚合实例的自动应用重试，保留待应用状态；其他提供商继续检查。请在方便时运行 `codexc restart all`，同时重建 App Server 和 Gateway。普通临时失败仍按原预算重试。
 自定义 `agg` 可明确使用 `sf-custom-agg`。Remote 的 `--profile` 继续用于个人 Profile 或规范受管 Profile，
 与 `-p` / `--provider` 互斥；`--` 后原样透传。Desktop 仍要求主 Provider 为 OpenAI，并限于 macOS / Windows 预览入口。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
@@ -455,6 +455,10 @@ CLI 和 WebUI 仅在用户明确选择某项检测时发起请求，检测范围
 
 CLP 的发现入口、CCG／OCG 的 DS 导入入口只添加新模型，完整保留已有条目。下载候选中消失的旧模型不会被自动移除。更新已保存模型的提示词或能力须使用上述对比流程；移除继续使用独立的本地移除操作。
 
+上述新增流程在 CLI 与 WebUI 共用后端候选及计划：锁外读取来源，选择新模型，预览完整字段、来源和影响账户，明确确认后才在锁内复核修订并保存。候选最多 128 项、单份 4 MiB、有效十分钟；进程内最多 16 份及合计 16 MiB，读取来源整体限时 90 秒。执行不重新下载，过期、重复 ID、旧模型 ID 或并发修改均拒绝；保存后最多 64 个模型，无新增不写目录和备份。CCG／OCG 可手填准确模型 ID、窗口、思考等级及图片／补丁／工具搜索声明；手填模型不猜测模板关联。CLP 保留旧逐模型来源及 Cline 元数据，新增 Flash 时遵守 DS 复合目录来源约束。保存复用现有受管目录恢复记录，恢复仍从 CLI 明确选择，不自动重启。
+
+取消 DS 候选读取会中止请求、正文读取和重试等待，不按普通网络错误继续重试。CLI 在选择、预览和最终确认后复核取消信号；进入保存前取消不写目录，开始持久事务后由既有事务完成保存或恢复。
+
 #### 扩展能力与高级设置
 
 上游 Provider 级 `capabilities.external_web_access` 与 `capabilities.remote_compaction` 当前没有
@@ -559,6 +563,8 @@ WebUI 模型管理按提供商展示一组模型，受管同族账户共用目�
 随模型目录保存事务失败时按既有规则保留备份与 pending 并拒绝启动，不自动重试，修改后须执行 `codexc restart all`。
 WebUI 的 Provider 预览与保存请求上限为 2 MiB，其他管理接口仍为 64 KiB。模型数量上限仍为 64 个。模型目录（定义和生成结果）不得超过 2 MiB，超限在写入前拒绝。自定义模型的当前上下文不得超过其手动声明的最大窗口；最大窗口省略时等于当前窗口，不受来源模板窗口限制。模型文件不含 Key。Key 写入私有 Profile 或独立私有凭据版本，主配置只含引用；连接配置的恢复快照单独位于
 `~/.codex-connect/private/responses-providers/<Provider ID>.json`（0600，可能含凭据，勿分享）。
+
+已有 CP 的连接专用保存不改模型目录，也不生成模型 `.backup`／`.pending`；私有 Provider 快照仍备份配置、Profile、注册表和协议元数据。回读无法确认时返回 `save-unconfirmed`，先核对当前配置与快照，必要时人工恢复。以下目录恢复命令仅处理目录事务，不能代替连接配置恢复。
 
 预览时，先用当前锁定 Codex CLI 的 `debug models` 在隔离临时目录校验最终生成目录；校验失败不写入模型目录、Profile 或主配置，不输出原始错误内容。CLI 编辑绑定打开时的配置、Profile、注册表、上游接口及目录快照，期间变化须重新编辑。CLI 与 WebUI 确认保存均在管理锁内重新生成计划，核对预览修订，包含凭据与连接状态；修订使用进程内 HMAC，不暴露可复用的 Key 摘要。切换模式需要可读取的主 `config.toml`，尚未建立时先通过 `codexc config` 保存 Codex 配置。保存前备份受影响配置；上一目录保存在同目录 `models.json.backup`。
 `models.json.pending` 标记未完成的保存；已知写入失败且主配置未改变时恢复目录和原 Profile。

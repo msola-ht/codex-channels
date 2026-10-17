@@ -168,6 +168,8 @@ CCG/OCG 的添加、模板和选择，以及 CLP 的显式联网更新继续指�
 
 ## 自定义模型能力设置
 
+`components/settings/provider-model-addition-dialog.tsx` 为受管目录提供新增／发现、候选选择和完整字段确认；CCG／OCG 可手填或导入 DS，CLP 仅发现。读取候选与保存分离，复用后端修订、一次性确认及回读。已有 CP 连接编辑通过专用操作仅修改连接、凭据与运行模式；模型编辑仍使用模型操作，不把隐藏的旧模型草稿随连接保存。
+
 `components/settings/provider-settings-management.tsx` 按模型提供图片、思考、`apply_patch` 与
 `tool_search` 的手动声明；思考支持开关控制既有思考等级与默认值。新增模型不会预选补丁或搜索工具，
 切换 Chat Completions 也不会改变模型的工具声明。

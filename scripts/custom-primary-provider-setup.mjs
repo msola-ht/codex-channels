@@ -29,6 +29,7 @@ import {
   customPrimaryProviderIdFromBaseUrl,
   customPrimaryProviderUrlsShareOrigin,
   prepareCustomPrimaryProviderSave,
+  prepareCustomProviderConnectionSave,
   primaryProviderId,
   validCustomPrimaryProviderBaseUrl,
 } from "./custom-primary-provider-management.mjs";
@@ -435,8 +436,8 @@ export async function runCustomPrimaryProviderSetup({
     name: normalizedName,
     baseUrl: normalizedBaseUrl,
     mode,
-    model: normalizedModel,
-    ...(custom ? { catalog: { kind: "custom", models: catalogModels } } : {}),
+    ...(!editingCustom ? { model: normalizedModel } : {}),
+    ...(custom && !editingCustom ? { catalog: { kind: "custom", models: catalogModels } } : {}),
     supportsWebsockets,
     upstreamWireApi: chatUpstream ? "chat_completions" : "responses",
     ...(probeConnections?.length ? { probeConnections } : {}),
@@ -446,7 +447,7 @@ export async function runCustomPrimaryProviderSetup({
     confirmRemoveTopLevelBaseUrl: removesTopLevelBaseUrl,
   };
   await assertProviderFileSnapshots(openingFiles);
-  const prepared = await prepareCustomPrimaryProviderSave(saveInput, {
+  const prepared = await (editingCustom ? prepareCustomProviderConnectionSave : prepareCustomPrimaryProviderSave)(saveInput, {
     environment,
     createClient,
     expectedCatalogContent: previousCatalog?.content,
@@ -469,8 +470,7 @@ export async function runCustomPrimaryProviderSetup({
     ...(preview.provider.mode === "switching"
       ? [
           "- 主配置：保持官方 OpenAI",
-          `- 默认思考等级：${custom ? models.find(entry => entry.id === normalizedModel).defaultReasoningEffort ?? "none" : "medium"}`,
-          "- 服务层级：default",
+          ...(editingCustom ? [] : [`- 默认思考等级：${custom ? models.find(entry => entry.id === normalizedModel).defaultReasoningEffort ?? "none" : "medium"}`, "- 服务层级：default"]),
           "- 认证：API Key 将明文写入 0600 私有 Profile（不回显、不进入命令行和日志）",
         ]
       : [
@@ -488,7 +488,7 @@ export async function runCustomPrimaryProviderSetup({
       `  模型指令（完整内容）：${JSON.stringify(previewModelDetails[index].model_messages.instructions_template)}`,
     ]) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
-    ...(custom
+    ...(custom && !editingCustom
         ? preview.provider.models.map(entry => `- 模型 ${entry.id} 工具检索（tool_search）：${entry.supportsSearchTool ? chatUpstream ? "声明支持；网关转换检索输入项" : "声明支持；上游须接受 Codex 检索输入项" : `${capabilityLabel(entry.supportsSearchTool)}；工具定义全量下发`}`)
       : []),
     ...(preview.transport.cleartext ? ["- 传输：明文 HTTP；API Key 与请求内容不加密"] : []),

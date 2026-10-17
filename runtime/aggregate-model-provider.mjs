@@ -13,13 +13,14 @@ import { customOfficialModelCatalogPath } from "./model-provider-official-catalo
 import { isCustomCatalogProvider, responsesProviderCatalogPath, responsesContextSyncPath,
   assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
+import { customProviderUpstreamMetadataPath } from "./model-provider-upstream-metadata.mjs";
 
 export const aggregateProviderId = "codexc-aggregate";
 export const aggregateTokenEnvironmentKey = "CODEX_CONNECT_AGGREGATE_TOKEN";
 
 export class AggregateProviderTopologyChangedError extends Error {
   constructor() {
-    super("聚合账户拓扑已变化，需要显式重启 App Server 和 Gateway 服务");
+    super("聚合账户拓扑或上游协议已变化，需要显式重启 App Server 和 Gateway 服务");
     this.code = "PROVIDER_TOPOLOGY_CHANGED";
   }
 }
@@ -61,7 +62,10 @@ export function aggregateProviderMaterialFiles(environment, expectedMembers) {
       const catalogPath = isCustomCatalogProvider(id)
         ? responsesProviderCatalogPath(environment, id) : customOfficialModelCatalogPath(environment);
       paths.set(catalogPath, isCustomCatalogProvider(id) ? 2_097_152 : 8_388_608);
-      if (isCustomCatalogProvider(id)) paths.set(`${catalogPath}.pending`, 1_048_576);
+      if (isCustomCatalogProvider(id)) {
+        paths.set(`${catalogPath}.pending`, 1_048_576);
+        paths.set(customProviderUpstreamMetadataPath(environment, id), 16 * 1024);
+      }
     } else {
       throw new AggregateProviderTopologyChangedError();
     }

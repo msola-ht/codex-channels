@@ -59,6 +59,8 @@ import type {
   TrafficListResponse,
 } from "@/lib/types"
 import { getToken } from "@/lib/token-storage"
+import type { ProviderModelAdditionOptions } from "../../../scripts/provider-model-additions.mjs"
+import type { ModelDefinition } from "../../../runtime/model-catalog.mjs"
 import { metricsQueryParams } from "@/lib/metrics-query"
 
 export { getToken, setToken } from "@/lib/token-storage"
@@ -476,6 +478,12 @@ export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<M
 
 export function fetchProviderModelTemplateOptions(provider: string, signal?: AbortSignal): Promise<ProviderModelTemplateOptionsResponse> {
   return getJson(`${API_PREFIX}/management/provider-model-templates?${new URLSearchParams({ provider })}`, signal)
+}
+
+export function fetchProviderModelAdditionOptions(provider: string, manualModel: ModelDefinition | undefined, signal: AbortSignal): Promise<ProviderModelAdditionOptions> {
+  return requestJson(`${API_PREFIX}/management/provider-model-additions`, {
+    method: "POST", body: JSON.stringify({ provider, ...(manualModel ? { manualModel } : {}) }),
+  }, signal, 100_000)
 }
 
 export function fetchCustomModelDraftTemplates(signal: AbortSignal): Promise<CustomModelDraftTemplatesResponse> {

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { AccountManagementError } from "./account-management-error.mjs";
-import { clinePassAccountDirectory, clinePassAccountMarkerPath, clinePassAccountsFilePath, clinePassAccountIdFromProvider, loadClinePassAccounts, validateClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
+import { clinePassAccountDirectory, clinePassAccountMarkerPath, clinePassAccountsFilePath, loadClinePassAccounts, validateClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
@@ -13,10 +13,9 @@ import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-inst
 import { validateEnabledModelSelection } from "./provider-model-selection.mjs";
 import { clineRelayCatalogSchema, clinePassReasoningEfforts, clineRelayInputModalities } from "../runtime/cline-relay-catalog.mjs";
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
-import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider, writeManagedModelProviderCatalogUpdates } from "../runtime/model-provider-runtime.mjs";
-import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
+import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
-import { applyProviderFileUpdates, assertProviderFileSnapshots, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
+import { applyProviderFileUpdates, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
@@ -35,7 +34,7 @@ export function clinePassSetupPaths(environment, accountId) {
   };
 }
 
-function projectClinePassModels(source, { requireModels = true } = {}) {
+export function projectClinePassModels(source, { requireModels = true } = {}) {
   const catalog = clineRelayCatalogSchema.parse(source);
   const models = [], excludedModels = [];
   for (const model of catalog.models) {
@@ -180,72 +179,6 @@ function clinePassManifest(source, catalog) {
     ? { source: "deepseek", model: "deepseek-flash" } : { source: "cline" }),
   cline: { commit: source.commit, downloadedAt: source.downloadedAt },
   modelTemplates: Object.fromEntries(catalog.models.map(model => [model.slug, { source: "cline", model: model.slug }])) };
-}
-
-/** Discover additions for the shared CLP catalog without rebuilding saved model rows. */
-export async function refreshClinePassCatalog({ provider, accountId, environment = process.env, loadTemplates = loadResponsesModelTemplates, downloadClineCatalog = downloadClineRelayCatalog, selectModels } = {}) {
-  return withModelProviderManagementTransaction(environment, async () => {
-    const accounts = loadClinePassAccounts(environment);
-    const targetAccountId = provider === undefined ? accountId : clinePassAccountIdFromProvider(provider);
-    if (targetAccountId === undefined || (accountId !== undefined && accountId !== targetAccountId)
-      || !accounts.some(account => account.id === targetAccountId)) throw new Error("请明确选择已配置的 CLP 账户");
-    const targetDefinition = clinePassAccountDefinition(targetAccountId);
-    const paths = clinePassSetupPaths(environment, targetAccountId);
-    const backups = [paths.catalog, paths.manifest].map(path => `${path}.backup`);
-    const snapshots = snapshotProviderFiles([
-      ...Object.values(paths), ...backups,
-    ], environment);
-    const providers = loadManagedModelProviderSettings(environment)
-      .filter(entry => clinePassAccountIdFromProvider(entry.provider) !== undefined);
-    if (providers.length !== accounts.length || !providers.some(entry => entry.provider === targetDefinition.id)) {
-      throw new Error("CLP 账户配置不完整，未更新模型目录");
-    }
-    const previousCatalog = snapshots.find(snapshot => snapshot.path === paths.catalog)?.content;
-    const previousManifest = snapshots.find(snapshot => snapshot.path === paths.manifest)?.content;
-    if (!previousCatalog || !previousManifest) throw new Error("CLP 原模型目录或来源缺失，未更新");
-    const current = JSON.parse(previousCatalog.toString("utf8"));
-    const manifest = JSON.parse(previousManifest.toString("utf8"));
-    if (!Array.isArray(current?.models) || !manifest || typeof manifest !== "object" || Array.isArray(manifest)
-      || typeof manifest.source !== "string" || !manifest.source) throw new Error("CLP 原模型目录或来源无效，未更新");
-    const previousIds = current.models.map(model => model.slug);
-    const templateBindings = readModelTemplateBindings(manifest, previousIds);
-    const source = await downloadClineCatalog(environment);
-    const projected = projectClinePassModels(source, { requireModels: false });
-    const candidates = [
-      ...current.models.map(model => ({ id: model.slug, name: model.display_name ?? model.slug,
-        reasoningEfforts: model.supported_reasoning_levels.map(level => level.effort), defaultReasoningEffort: model.default_reasoning_level })),
-      ...projected.models.filter(model => !previousIds.includes(model.id)),
-    ];
-    const selectedModels = await selectClinePassModels(candidates, providers, selectModels);
-    if (!selectedModels) return { action: "back", activation: "none", models: [], excludedModels: projected.excludedModels, commit: source.commit };
-    const addedIds = selectedModels.filter(id => !previousIds.includes(id));
-    if (!addedIds.length) {
-      await assertProviderFileSnapshots(snapshots);
-      return { action: "unchanged", activation: "none", models: previousIds, excludedModels: projected.excludedModels, commit: source.commit };
-    }
-    const templates = addedIds.includes(definition.defaultModel) ? await loadTemplates("deepseek") : [];
-    const additions = createClinePassCatalog(templates, source, addedIds);
-    const catalog = { ...current, models: [...current.models, ...additions.models] };
-    for (const model of additions.models) templateBindings[model.slug] = { source: "cline", model: model.slug };
-    const nextManifest = { ...manifest,
-      ...(additions.models.some(model => model.slug === definition.defaultModel) ? { source: "deepseek", model: "deepseek-flash" } : {}),
-      cline: { ...manifest.cline, commit: source.commit, downloadedAt: source.downloadedAt },
-      modelTemplates: readModelTemplateBindings({ modelTemplates: templateBindings }, catalog.models.map(model => model.slug)),
-    };
-    await validateModelCatalogWithCodex(catalog, environment);
-    const updates = new Map();
-    for (const path of [paths.catalog, paths.manifest]) {
-      const previous = snapshots.find(snapshot => snapshot.path === path)?.content;
-      if (!previous) throw new Error("CLP 原模型目录或来源缺失，未更新");
-      updates.set(`${path}.backup`, previous.toString("utf8"));
-    }
-    updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
-    updates.set(paths.manifest, `${JSON.stringify(nextManifest, null, 2)}\n`);
-    await assertProviderFileSnapshots(snapshots);
-    writeManagedModelProviderCatalogUpdates(targetDefinition.id, updates,
-      new Map(snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
-    return { action: "catalog-updated", activation: "restart-all", models: catalog.models.map(model => model.slug), excludedModels: projected.excludedModels, commit: source.commit };
-  });
 }
 
 function clinePassRemovalPlan(accountId, environment) {

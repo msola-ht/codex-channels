@@ -277,6 +277,10 @@ export function writeCustomPrimaryProviderSwitchingProfile(
     catalogSource?: { kind: "official" } | { kind: "custom"; reasoningEffort: string | null };
     /** Only update the model defaults in an existing guarded custom Profile. */
     modelOnly?: boolean;
+    /** Preserve model defaults while updating a guarded custom connection. */
+    connectionOnly?: boolean;
+    /** Proposed protocol used to validate a connection before its metadata is written. */
+    upstreamWireApi?: "responses" | "chat_completions";
   },
   environment?: NodeJS.ProcessEnv,
   guards?: {

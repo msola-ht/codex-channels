@@ -5,7 +5,8 @@ import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArguments, loadAggregateModelMaterial,
-  readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
+  readAggregateProviderSettingsFingerprint, AggregateProviderTopologyChangedError } from "./aggregate-model-provider.mjs";
+import { readCustomProviderUpstreamWireApi } from "./model-provider-upstream-metadata.mjs";
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 import { ProviderModelGuard } from "./provider-model-guard.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
@@ -459,9 +460,28 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     provider.provider,
     { runtime: provider, socketPath: managedSocketPaths[index] },
   ]));
-  const providerSettingsFingerprint = provider => provider === aggregateProviderId
-    ? readAggregateProviderSettingsFingerprint(runtime.environment, appServerRuntime.aggregateMembers)
-    : readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+  const assertAggregateProtocols = (profiles) => {
+    for (const profile of profiles) {
+      if (isCustomCatalogProvider(profile.provider)
+        && profile.upstreamWireApi !== customSwitchingProvidersById.get(profile.provider)?.upstreamWireApi) {
+        // Member proxies retain the host's launch protocol, including proxies
+        // created later for a refreshed URL. Only a full host restart replaces it.
+        throw new AggregateProviderTopologyChangedError();
+      }
+    }
+  };
+  const providerSettingsFingerprint = (provider) => {
+    if (provider !== aggregateProviderId) return readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+    // Check even before the first aggregate instance exists, and before an
+    // unchanged/active result can acknowledge or defer new protocol material.
+    assertCurrentAggregateProtocols();
+    return readAggregateProviderSettingsFingerprint(runtime.environment, appServerRuntime.aggregateMembers);
+  };
+  const assertCurrentAggregateProtocols = () => assertAggregateProtocols(
+    appServerRuntime.aggregateMembers.filter(isCustomCatalogProvider).map(provider => ({
+      provider, upstreamWireApi: readCustomProviderUpstreamWireApi(runtime.environment, provider),
+    })),
+  );
   const prepareProviderSettings = (provider) => {
     const aggregate = provider === aggregateProviderId;
     if (!providerDefinitions.has(provider) && !aggregate) return undefined;
@@ -470,6 +490,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const next = resolveAppServerRuntime(runtime.document, runtime.dataDir, runtime.environment);
     const aggregateMaterial = aggregate
       ? loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers) : undefined;
+    if (aggregateMaterial) assertAggregateProtocols(aggregateMaterial.profiles);
     const defaultModel = aggregate ? aggregateMaterial.defaultModel
       : loadManagedModelProviderSettings(runtime.environment).find(value => value.provider === provider)?.model ?? null;
     if (providerSettingsFingerprint(provider) !== fingerprint || aggregateMaterial && aggregateMaterial.fingerprint !== fingerprint) {
@@ -530,6 +551,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       throw new Error("聚合模型旧资源尚未确认释放");
     }
     const material = loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers);
+    assertAggregateProtocols(material.profiles);
     if (material.fingerprint !== snapshot.fingerprint || material.defaultModel !== snapshot.defaultModel) {
       throw new Error("聚合设置在启动材料读取期间发生变化");
     }
@@ -1160,7 +1182,12 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         ensureProvider: ensureInstance,
         releaseProvider: releaseInstance,
         applyProviderSettings,
-        providerSettingsSnapshot: provider => settingsSnapshots.get(provider),
+        providerSettingsSnapshot: provider => {
+          // The supervisor skips applyProviderSettings while a native client
+          // holds a lease. A lease cannot make a protocol change hot-applicable.
+          if (provider === aggregateProviderId) assertCurrentAggregateProtocols();
+          return settingsSnapshots.get(provider);
+        },
         attachDesktopApp,
         detachDesktopApp,
         desktopAppProviderSelectionEnabled: validatedCodex.desktop_app?.enabled === true

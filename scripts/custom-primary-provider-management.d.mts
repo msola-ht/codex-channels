@@ -5,6 +5,10 @@ import type {
 } from "./codex-user-config.mjs";
 
 export const primaryProviderId: "OpenAI";
+export type CustomProviderConnectionSaveInput = Omit<CustomPrimaryProviderSaveInput, "operation" | "model" | "catalog" | "probeConnections"> & { operation: "update" };
+export function previewCustomProviderConnectionSave(input: CustomProviderConnectionSaveInput, options?: CustomPrimaryProviderSaveOptions): ReturnType<typeof previewCustomPrimaryProviderSave>;
+export function prepareCustomProviderConnectionSave(input: CustomProviderConnectionSaveInput, options?: CustomPrimaryProviderSaveOptions): Promise<{ preview: Awaited<ReturnType<typeof previewCustomPrimaryProviderSave>>; apply(): ReturnType<typeof applyCustomPrimaryProviderSave> }>;
+export function applyCustomProviderConnectionSave(input: CustomProviderConnectionSaveInput, options: CustomPrimaryProviderSaveOptions & { preview: { revision?: string } }): ReturnType<typeof applyCustomPrimaryProviderSave>;
 export interface CustomProviderModelsSaveInput {
   provider: string;
   model: string;

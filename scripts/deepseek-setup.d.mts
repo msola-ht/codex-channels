@@ -3,8 +3,9 @@ export function downloadDeepseekCatalog(
   fetchImplementation: typeof fetch,
   options?: {
     attempts?: number;
-    sleep?: (milliseconds: number) => Promise<void>;
+    sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
     timeoutMs?: number;
+    signal?: AbortSignal;
   },
 ): Promise<{
   catalog: { models: Array<Record<string, unknown>> };

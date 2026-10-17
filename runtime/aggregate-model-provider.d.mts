@@ -16,7 +16,7 @@ export interface AggregateMaterialFile {
 export interface AggregateModelMaterial {
   catalog: { models: Record<string, unknown>[] };
   routes: Map<string, { provider: string; model: string; apiKey: string }>;
-  profiles: { provider: string; baseUrl: string }[];
+  profiles: { provider: string; baseUrl: string; upstreamWireApi?: "responses" | "chat_completions" }[];
   files: AggregateMaterialFile[];
   fingerprint: string;
   defaultModel: string;

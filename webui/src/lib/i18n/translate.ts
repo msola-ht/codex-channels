@@ -25,6 +25,12 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  "addition-source-expired": "modelAddition.expired",
+  "addition-unavailable": "modelAddition.unavailable",
+  "model-exists": "modelAddition.unavailable",
+  "addition-source-too-large": "modelAddition.tooLarge",
+  "addition-source-invalid": "modelAddition.invalidSource",
+  "invalid-input": "settingsUi.invalid",
   provider_models_invalid_input: "modelCatalog.promptsInvalid",
   provider_models_stale_revision: "modelCatalog.detailsStale",
   provider_models_unavailable: "modelCatalog.promptsUnavailable",

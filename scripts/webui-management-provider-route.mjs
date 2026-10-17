@@ -39,6 +39,7 @@ import { routeOfficialModelManagement } from "./webui-management-official-model-
 import { loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadProviderModelTemplateOptions } from "./provider-model-template-management.mjs";
 import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
+import { loadProviderModelAdditionOptions } from "./provider-model-additions.mjs";
 
 const activeTemplateOptionsReads = new WeakSet();
 
@@ -54,6 +55,40 @@ export async function routeProviderManagement({
   state,
 }) {
   if (await routeOfficialModelManagement({ environment, maximumBodyBytes, path, principalId, request, response, state })) return true;
+  if (path === "/provider-model-additions" && request.method === "POST") {
+    if (new URL(request.url, "http://localhost").searchParams.size !== 0) {
+      throw new ApiError(400, "provider_models_invalid_input", "新增模型候选请求不接受查询参数");
+    }
+    const input = await readJsonBody(request, maximumBodyBytes);
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || Object.keys(input).some(key => !["provider", "manualModel"].includes(key))
+      || typeof input.provider !== "string") {
+      throw new ApiError(400, "provider_models_invalid_input", "新增模型候选参数无效");
+    }
+    if (activeTemplateOptionsReads.has(state)) {
+      throw new ApiError(503, "provider_templates_busy", "已有模型候选读取正在进行，请稍后重试");
+    }
+    const controller = new AbortController();
+    const disconnect = () => { if (!response.writableEnded) controller.abort(); };
+    activeTemplateOptionsReads.add(state);
+    response.once("close", disconnect);
+    if (response.destroyed) controller.abort();
+    try {
+      const options = await loadProviderModelAdditionOptions(input.provider, {
+        environment, signal: controller.signal,
+        ...(Object.hasOwn(input, "manualModel") ? { manualModel: input.manualModel } : {}),
+      });
+      controller.signal.throwIfAborted();
+      sendManagementJson(response, 200, options);
+    } catch (error) {
+      if (controller.signal.aborted && response.destroyed) return true;
+      throw managementOperationError(error, [ProviderModelManagementError], "provider_models_unavailable");
+    } finally {
+      response.removeListener("close", disconnect);
+      activeTemplateOptionsReads.delete(state);
+    }
+    return true;
+  }
   if (path === "/provider-model-drafts" && request.method === "GET") {
     if (new URL(request.url, "http://localhost").searchParams.size !== 0) {
       throw new ApiError(400, "provider_models_invalid_input", "新增模型模板请求不接受参数");
@@ -256,7 +291,7 @@ export async function routeProviderManagement({
   if (path === "/provider-settings/preview" && request.method === "POST") {
     const body = await readJsonBody(request, maximumBodyBytes);
     const input = normalizeProviderSettingsMutation(body);
-    if (input.operation === "model.custom.save" || input.operation === "primary.custom.save" && input.provider.operation === "update") {
+    if (input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update") {
       const current = await readProviderSettings(environment, state);
       if (input.resourceRevision !== fingerprintManagementValue(current)) {
         throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
@@ -267,7 +302,7 @@ export async function routeProviderManagement({
     const resource = await readProviderSettings(environment, state);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
-    if ((input.operation === "model.custom.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
+    if ((input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
       && input.resourceRevision !== resourceRevision) {
       throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
     }
@@ -295,7 +330,7 @@ export async function routeProviderManagement({
     const resource = await readProviderSettings(environment, state);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
-    if ((input.operation === "model.custom.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
+    if ((input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
       && input.resourceRevision !== resourceRevision) {
       throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
     }
@@ -492,8 +527,9 @@ function recordProviderAudit(state, details, failureMessage) {
 }
 
 function providerSettingsAuditTarget(input) {
+  if (input.operation === "model.add") return `models:${fingerprintManagementValue({ provider: input.provider, models: input.models })}`;
   if (input.operation === "model.remove" || input.operation === "model.custom.save" || input.operation === "model.context" || input.operation === "model.template.update") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
-  if (input.operation === "primary.custom.save") return String(input.provider?.providerId ?? "unknown");
+  if (input.operation === "primary.custom.save" || input.operation === "primary.custom.connection.save") return String(input.provider?.providerId ?? "unknown");
   if (input.operation === "managed.default") return String(input.provider ?? "unknown");
   return String(input.providerId ?? "unknown");
 }

@@ -17,9 +17,12 @@ import {
   previewCustomPrimaryProviderSave,
   previewCustomProviderModelsSave,
   applyCustomProviderModelsSave,
+  previewCustomProviderConnectionSave,
+  applyCustomProviderConnectionSave,
 } from "./custom-primary-provider-management.mjs";
 import { ManagementOperationError, managementOperationError } from "./webui-management-operations.mjs";
 import { previewProviderModelTemplateUpdate, applyProviderModelTemplateUpdate } from "./provider-model-template-management.mjs";
+import { previewProviderModelAddition, applyProviderModelAddition } from "./provider-model-additions.mjs";
 
 export async function loadProviderSettingsResource(
   environment,
@@ -44,6 +47,11 @@ export function normalizeProviderSettingsMutation(input) {
     throw new ManagementOperationError("invalid_json", "Provider 设置操作正文必须是对象");
   }
   switch (input.operation) {
+    case "model.add":
+      if (Object.keys(input).some(key => !["operation", "provider", "revision", "sourceToken", "models", "confirmationToken"].includes(key))) {
+        throw new ManagementOperationError("invalid_provider_operation", "新增模型请求包含不支持的字段");
+      }
+      return { operation: input.operation, ...additionMutationInput(input) };
     case "model.template.update":
       if (Object.keys(input).some(key => !["operation", "provider", "model", "sections", "revision", "sourceToken", "template", "confirmationToken"].includes(key))) {
         throw new ManagementOperationError("invalid_provider_operation", "模板更新请求包含不支持的字段");
@@ -77,6 +85,15 @@ export function normalizeProviderSettingsMutation(input) {
     case "primary.remove":
       return { operation: input.operation, providerId: input.providerId };
     case "primary.custom.save":
+    case "primary.custom.connection.save":
+      if (Object.keys(input).some(key => !["operation", "provider", "resourceRevision", "confirmationToken"].includes(key))
+        || !input.provider || typeof input.provider !== "object" || Array.isArray(input.provider)
+        || Object.keys(input.provider).some(key => !["operation", "providerId", "name", "baseUrl", "mode", "supportsWebsockets", "upstreamWireApi", "credential", "confirmRemoveTopLevelBaseUrl",
+          ...(input.operation === "primary.custom.save" ? ["model", "catalog", "probeConnections"] : [])].includes(key))
+        || input.operation === "primary.custom.connection.save" && input.provider.operation !== "update"
+        || input.operation === "primary.custom.save" && input.provider.operation === "update" && typeof input.provider.providerId === "string" && input.provider.providerId.trim().startsWith("cp-")) {
+        throw new ManagementOperationError("invalid_provider_operation", "提供商设置请求包含不支持的字段或操作");
+      }
       if (input.provider?.operation === "update"
         && (typeof input.resourceRevision !== "string" || !/^[a-f0-9]{64}$/u.test(input.resourceRevision))) {
         throw new ManagementOperationError("stale-preview", "请刷新提供商设置后重新编辑");
@@ -90,7 +107,7 @@ export function normalizeProviderSettingsMutation(input) {
           name: input.provider?.name,
           baseUrl: input.provider?.baseUrl,
           mode: input.provider?.mode,
-          model: input.provider?.model,
+          ...(input.operation === "primary.custom.save" ? { model: input.provider?.model } : {}),
           ...(input.provider?.catalog === undefined ? {} : { catalog: input.provider.catalog }),
           supportsWebsockets: input.provider?.supportsWebsockets,
           ...(input.provider?.upstreamWireApi === undefined
@@ -124,6 +141,8 @@ export function normalizeProviderSettingsMutation(input) {
 export async function previewProviderSettingsMutation(input, environment) {
   try {
     switch (input.operation) {
+      case "model.add":
+        return { operation: input.operation, ...await previewProviderModelAddition(additionMutationInput(input), { environment }) };
       case "model.template.update":
         return { operation: input.operation, ...await previewProviderModelTemplateUpdate(templateMutationInput(input), { environment }) };
       case "model.context":
@@ -144,6 +163,8 @@ export async function previewProviderSettingsMutation(input, environment) {
         );
       case "primary.custom.save":
         return await previewCustomPrimaryProviderSave(input.provider, { environment });
+      case "primary.custom.connection.save":
+        return await previewCustomProviderConnectionSave(input.provider, { environment });
       case "managed.default":
         return {
           operation: "managed.default",
@@ -167,6 +188,11 @@ export async function previewProviderSettingsMutation(input, environment) {
 export async function applyProviderSettingsMutation(input, environment, preview) {
   try {
     switch (input.operation) {
+      case "model.add": {
+        const additionPreview = { ...preview };
+        delete additionPreview.operation;
+        return await applyProviderModelAddition(additionMutationInput(input), { environment, preview: additionPreview });
+      }
       case "model.template.update": {
         const templatePreview = { ...preview };
         delete templatePreview.operation;
@@ -190,6 +216,8 @@ export async function applyProviderSettingsMutation(input, environment, preview)
         );
       case "primary.custom.save":
         return await applyCustomPrimaryProviderSave(input.provider, { environment, preview });
+      case "primary.custom.connection.save":
+        return await applyCustomProviderConnectionSave(input.provider, { environment, preview });
       case "managed.default":
         return await applyManagedProviderDefaultChange(
           {
@@ -209,6 +237,10 @@ export async function applyProviderSettingsMutation(input, environment, preview)
 
 export function redactProviderSettingsResult(result) {
   if (!result || typeof result !== "object") return { action: "completed" };
+  if (result.operation === "model.add") {
+    return { operation: result.operation, provider: result.provider, providers: [...result.providers],
+      additions: structuredClone(result.additions), revision: result.revision, willChange: result.willChange, activation: result.activation };
+  }
   if (result.operation === "model.template.update") {
     return {
       operation: result.operation, provider: result.provider, model: result.model,
@@ -261,6 +293,10 @@ export function redactProviderSettingsResult(result) {
     ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
     ...(result.activation !== undefined ? { activation: result.activation } : {}),
   };
+}
+
+function additionMutationInput(input) {
+  return { provider: input.provider, revision: input.revision, sourceToken: input.sourceToken, models: input.models };
 }
 
 export function projectProviderSettings(state) {
@@ -331,6 +367,7 @@ function redactProvider(provider) {
     ...(provider.model === undefined ? {} : { model: provider.model }),
     ...(provider.baseUrl === undefined ? {} : { baseUrl: provider.baseUrl }),
     ...(provider.mode === undefined ? {} : { mode: provider.mode }),
+    ...(typeof provider.supportsWebsockets === "boolean" ? { supportsWebsockets: provider.supportsWebsockets } : {}),
     ...(provider.upstreamWireApi === "responses" || provider.upstreamWireApi === "chat_completions"
       ? { upstreamWireApi: provider.upstreamWireApi }
       : {}),

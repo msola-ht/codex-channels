@@ -7,10 +7,8 @@ import { readResponsesModelCatalog } from "../runtime/model-provider-responses-c
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { previewCustomProviderModelsSave, applyCustomProviderModelsSave } from "./custom-primary-provider-management.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
-import { runManagedProviderModelSetup } from "./managed-provider-model-management.mjs";
+import { runManagedProviderModelSetup, runProviderModelAdditionSetup } from "./managed-provider-model-management.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
-import { refreshClinePassCatalog } from "./cline-pass-account-management.mjs";
-import { promptEnabledProviderModels } from "./provider-model-selection.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { managedProviderAccountFamilies } from "../runtime/model-provider-definitions.mjs";
@@ -189,15 +187,14 @@ export async function runProviderModelSetup({ environment = process.env, prompts
   if (action === "web-search") return runProviderWebSearchSetup({ environment, prompts, output, provider: selected });
   if (action === "template-update") return runProviderModelTemplateSetup(catalog.provider, { environment, prompts, output });
   if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });
+  if (action === "refresh") return runProviderModelAdditionSetup(catalog.provider, { environment, prompts, output });
   if (action === "default") {
     const account = catalog.providers.length === 1 ? catalog.providers[0] : await prompts.select({ message: "选择默认设置所属账户", options: catalog.providers.map(id => ({ value: id, label: id })) });
     if (prompts.isCancel(account)) return { action: "back" };
     return runModelProviderDefaultSetup({ environment, prompts, output, provider: account });
   }
   let result;
-  if (action === "refresh") {
-    result = await refreshClinePassCatalog({ provider: catalog.provider, environment, selectModels: selection => promptEnabledProviderModels(prompts, output, { ...selection, label: catalog.displayName }) });
-  } else if (action === "edit" || action === "tools") {
+  if (action === "edit" || action === "tools") {
     const previous = readResponsesModelCatalog(environment, catalog.provider);
     let models;
     let model = previous.defaultModel;
@@ -255,10 +252,6 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     result = await applyProviderModelRemoval(input, { environment, preview });
   } else throw new Error("不支持的模型操作");
   if (result.action !== "back") {
-    if (action === "refresh" && result.action === "unchanged") {
-      output.write("启用模型目录未变化；已有模型的模板更新请使用对比并更新模型模板。\n");
-      return result;
-    }
     output.write(["edit", "tools", "remove"].includes(action) ? "模型目录已保存并回读。\n" : "模型目录已保存。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   }

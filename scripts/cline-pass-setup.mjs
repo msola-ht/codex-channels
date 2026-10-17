@@ -1,6 +1,7 @@
 import * as clackPrompts from "@clack/prompts";
 import { runProviderModelSetup } from "./provider-model-setup.mjs";
-import { loadClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
+import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
+import { runProviderModelAdditionSetup } from "./managed-provider-model-management.mjs";
 import { clinePassProviderDefinition as definition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
 import { promptEnabledProviderModels } from "./provider-model-selection.mjs";
@@ -12,7 +13,6 @@ import {
   previewClinePassRemoval,
   removeClinePassConfiguration,
   setClinePassDefaultAccount,
-  refreshClinePassCatalog,
 } from "./cline-pass-account-management.mjs";
 
 export async function runClinePassSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout } = {}) {
@@ -26,13 +26,7 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
   if (action === "models") return runProviderModelSetup({ environment, prompts, output, provider: "clp" });
   if (action === "catalog") {
     const accountId = accounts[0].id;
-    const result = await refreshClinePassCatalog({ accountId, environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
-    if (result.action === "back") return result;
-    output.write(result.action === "unchanged" ? "没有新增模型，无需保存或重启。\n"
-      : `CLP 共用目录已添加新模型：现有 ${result.models.length} 个模型，来源 ${result.commit}。\n`);
-    writeCatalogExclusions(output, result.excludedModels);
-    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
-    return result;
+    return runProviderModelAdditionSetup(clinePassProviderId(accountId), { environment, prompts, output });
   }
   const accountId = action === "configure"
     ? await promptManagedAccountId(prompts, accounts)

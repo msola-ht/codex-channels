@@ -829,12 +829,18 @@ export interface ProviderModelTemplateUpdateInput {
 }
 
 export type ManagementProviderSettingsMutationInput =
+  | ({ operation: "model.add" } & import("./provider-model-additions.mjs").ProviderModelAdditionInput)
   | ProviderModelTemplateUpdateInput
   | { operation: "model.remove"; provider: string; model: string }
   | { operation: "model.context"; provider: string; model: string; contextWindow: number; revision: string }
   | { operation: "model.custom.save"; resourceRevision: string; provider: string; models: ResponsesModelDefinition[]; model: string; probeConnections?: Array<{ model: string; capability: "applyPatch" | "toolSearch"; token: string }> }
   | { operation: "primary.switch"; providerId: string; model?: string }
   | { operation: "primary.remove"; providerId: string }
+  | {
+      operation: "primary.custom.connection.save"
+      resourceRevision: string
+      provider: import("./custom-primary-provider-management.mjs").CustomProviderConnectionSaveInput
+    }
   | {
       operation: "primary.custom.save"
       resourceRevision?: string
@@ -881,6 +887,7 @@ export interface ManagementProviderSettingsStandardPreview {
     model?: string
     baseUrl?: string
     mode?: string
+    supportsWebsockets?: boolean
     upstreamWireApi?: "responses" | "chat_completions"
     catalog?: string
     models?: ResponsesModelDefinition[]
@@ -911,7 +918,10 @@ export interface ProviderModelTemplateUpdatePreview extends Omit<ManagementProvi
   changes: Array<{ field: string; before: ProviderModelTemplateValue; after: ProviderModelTemplateValue }>
   willChange: boolean
 }
-export type ManagementProviderSettingsPreview = ManagementProviderSettingsStandardPreview | ProviderModelTemplateUpdatePreview
+export type ProviderModelAdditionManagementPreview = Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "revision" | "activation" | "providers" | "willChange"> & import("./provider-model-additions.mjs").ProviderModelAdditionPreview & {
+  operation: "model.add"
+}
+export type ManagementProviderSettingsPreview = ManagementProviderSettingsStandardPreview | ProviderModelTemplateUpdatePreview | ProviderModelAdditionManagementPreview
 
 export interface ManagementProviderSettingsPreviewResponse {
   preview: ManagementProviderSettingsPreview

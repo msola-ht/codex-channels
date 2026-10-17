@@ -208,6 +208,7 @@
 - `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG 按提供商管理共用目录的手填模型、DS 官方发现及 ID 映射、启用选择；只添加选中的新模型及明确来源关联，已有条目不重建。保存复用受管目录／来源持久事务与恢复入口，无内容变化不写入或更新备份。保护所有同族账户默认值，目录变化不修改账户凭据。
 - `provider-model-management.mjs` / `provider-model-management.d.mts`：CLI/WebUI 共用的提供商目录能力、本地移除及单模型窗口预览和锁内保存；窗口修改绑定 Provider、模型和目录修订，自定义删除与窗口修改仅重编译已保存定义，不重新应用提示词模板。WebUI 从对应保存目录投影完整能力，按目录身份、精确模型 ID 和内容修订读取白名单提示词。列表不携带提示正文。保护账户和 Gateway 显式默认值、非空目录及文件修订；受管删除纳入账户目录／来源持久恢复，自定义写入统一前后摘要 pending 与回读校验。
 - `provider-model-template-management.mjs` / `provider-model-template-management.d.mts`：DS、CLP、CCG、OCG 和 CP 的统一模板选项、显式来源关联、分组差异预览与锁内执行。availableSections 区分提示词、运行设置及仅受管可选的能力参数；运行设置只包含有效比例、压缩阈值和截断策略，CP 请求能力更新在后端拒绝，未选择的参数保持原值。有界进程缓存绑定源快照、目标修订及有效期，CLP 仅获取选项时下载。CP 复用既有模型保存，受管账户复用目录与来源事务；无差异不写入，不自动重启。CLI 与 WebUI 复用同一计划接口。
+- `provider-model-additions.mjs` / `provider-model-additions.d.mts`：CCG／OCG 手填及 DS 导入、CLP 发现共用的新增候选、全字段预览和执行计划。锁外获取有界来源快照，绑定账户、目录及来源修订；锁内复核并追加，保留旧模型和来源关联，复用受管目录恢复事务。候选十分钟失效，确认时不重新下载，无新增不写入。CLI 与 WebUI 共用此后端。
 - `provider-model-setup.mjs` / `provider-model-setup.d.mts`：Setup 的统一模型管理菜单，复用移除、自定义模型专用保存、受管默认设置和 CLP／CCG／OCG 发现添加。已有自定义模型可单独选择工具能力探测，明确选择才发请求，采用结果仍走修订检查和预览保存。五类独立目录均可选择来源、对比并更新模板；自定义允许提示词及运行设置，受管另支持能力参数；默认仅选择提示词。逐字段预览差异，长内容显示 JSON 长度与 SHA-256 摘要并可在确认前展开，确认后保存，无差异不写入；不自动重启服务。
 - `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内校验当前配置，完成未结束的自定义模型目录保存或受管账户设置事务；受管恢复核对准确目录／Profile 路径及前后值，拒绝覆盖后续修改。
 - `isolate-provider-catalogs.mjs`：源码仓库的显式 Provider 目录整理入口，默认预览，`--write` 把嵌套或已扁平账户的模型目录整理到提供商家族共用目录，并更新配置与恢复备份引用。旧账户身份、安装备份及凭据显式复制到完整 ID 目录；旧 CP 模型、metadata 和凭据复制到各自 cp-ID 目录。源文件保留，模型、manifest 或身份目标冲突时拒绝猜测，CP 目录保持独立。`--resume`／`--rollback` 消费 v3 私有恢复记录，拒绝覆盖后续改动。使用全局管理锁，写入及恢复要求整个 App Server 停止；不由更新器自动执行。步骤与回滚限制见[目录整理](../docs/provider-integration-guide.md#旧共享目录账户升级)。
@@ -217,6 +218,7 @@
   配置事务与 Profile 回滚，切换模式在写入前复核 Codex 配置版本、私有注册表和 Profile 快照，再在
   同一文件锁内原子写入私有 Profile；整体保存绑定包含连接与凭据状态的预览修订，CLI 编辑另复核打开时的文件快照，拒绝旧草稿覆盖并发修改。切换模式在预览前要求可读取的主配置。统一返回生效动作和备份清理警告；CLI
   继续负责字段询问、危险修改确认和中文渲染。
+  已有 CP 的连接专用计划拒绝模型字段，保留目录、所选模型及独立思考默认值；CLI 与 WebUI 共用此接口。连接保存前使用现有私有 Provider 快照，回读失败返回 `save-unconfirmed`，须核对快照人工恢复，不生成模型目录 pending。
 - `model-provider-management.mjs` / `model-provider-management.d.mts`：统一返回 OpenAI 默认值、当前主
   Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选和受管模型目录的
   脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
@@ -342,7 +344,7 @@
   DS、CCG、OCG 的初建及模板更新共用按目标家族区分的来源投影；仅 DS 官方账户关闭 verbosity 与摘要声明，CCG／OCG 保留源声明，不将 DS 官方端点限制套用到其他平台。
 - `managed-provider-files.mjs` / `managed-provider-files.d.mts`：Provider 文件事务必须提供当前运行环境；统一访问器绑定文件归属，快照携带内存中的读取与写入闭包，并发复核、更新及回滚复用同一策略。固定模式先纳入不可变私有凭据再发布主配置，回滚先恢复已有文件，失败保留新增恢复资料并停止后续删除；未纳入快照的更新明确拒绝，不改变持久化备份格式。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。使用用户配置定位主 Socket，源码拆分入口直接运行时也遵守显式配置文件、用户数据目录与默认用户配置的优先级，不回退仓库配置。
-- `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，构建时复用 `runtime/model-catalog.mjs` 收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；不导入账户菜单或管理事务。
+- `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，构建时复用 `runtime/model-catalog.mjs` 收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；调用方取消覆盖请求、正文读取及重试等待，取消后不重试。拒绝响应时释放正文；不导入账户菜单或管理事务。
 - `update-model-templates.mjs`：源码仓库维护入口；默认仅下载 DS 官方目录，用已保存公共底座补全提示词并报告字段差异，保持底座及其来源不变。`--update-base` 显式从锁定 CLI 内置目录按原始顺序提取第一个模型，记录实际模型 ID，用已保存 DS 原始目录重新补全，不下载 DS；两种操作均默认只对比，`--write` 在 Codex 加载校验后才保存所选更新。复用快照须与来源哈希一致；不更新已配置账户，不执行下载脚本，不进入安装包命令入口。操作与边界见[DS 模板维护](../docs/deepseek.md#仓库模板维护)。
 - `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 多账户配置、默认账户与删除事务；新建目录记录逐模型来源关联，重新配置保留已有目录，不隐式补全模板。
 - `deepseek-account-setup.mjs` / `deepseek-account-setup.d.mts`：DS Setup 菜单与 `codexc provider deepseek` 入口，复用管理事务和既有模型设置菜单。

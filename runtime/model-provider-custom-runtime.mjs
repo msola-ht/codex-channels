@@ -438,6 +438,7 @@ function configuredCustomSwitchingProfileFromContent(
   environment,
   registeredProvider,
   profileContent,
+  proposedUpstreamWireApi,
 ) {
   let profile;
   try {
@@ -540,7 +541,7 @@ function configuredCustomSwitchingProfileFromContent(
     : id;
   if (custom && name === "OpenAI") throw new Error("自定义提供商不能使用 OpenAI 名称");
   const supportsWebsockets = provider.supports_websockets === true;
-  const upstreamWireApi = custom === undefined ? "responses" : readCustomProviderUpstreamWireApi(environment, id);
+  const upstreamWireApi = custom === undefined ? "responses" : proposedUpstreamWireApi ?? readCustomProviderUpstreamWireApi(environment, id);
   if (upstreamWireApi === "chat_completions" && supportsWebsockets) {
     throw new Error(`Codex 自定义切换 Provider ${id} 的 Chat 上游不支持 WebSocket`);
   }
@@ -597,6 +598,8 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
     supportsWebsockets = false,
     catalogSource = { kind: "official" },
     modelOnly = false,
+    connectionOnly = false,
+    upstreamWireApi,
   },
   environment = process.env,
   {
@@ -638,16 +641,31 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
   ) {
     throw customSwitchingProfileChangedError(provider);
   }
-  if (modelOnly) {
+  if (connectionOnly && (modelOnly || catalogSource.kind !== "custom"
+    || expectedProfilePresent === undefined || expectedProviderIds === undefined)) {
+    throw customSwitchingProfileChangedError(provider);
+  }
+  if (upstreamWireApi !== undefined && (!connectionOnly || !["responses", "chat_completions"].includes(upstreamWireApi))) {
+    throw new Error("连接编辑的上游接口不受支持");
+  }
+  if (modelOnly || connectionOnly && previousProfile !== undefined) {
     if (catalogSource.kind !== "custom" || previousProfile === undefined || expectedProfileContent === undefined
       || expectedProfilePresent !== true || expectedProviderIds === undefined || !ids.includes(provider)) {
       throw customSwitchingProfileChangedError(provider);
     }
     const profile = parse(previousProfile);
-    profile.model = model;
-    profile.model_reasoning_effort = catalogSource.reasoningEffort;
+    if (connectionOnly) {
+      if (modelOnly || profile.model !== model) throw customSwitchingProfileChangedError(provider);
+      Object.assign(profile.model_providers[provider], {
+        name, base_url: normalizedBaseUrl, supports_websockets: supportsWebsockets === true,
+        experimental_bearer_token: apiKey,
+      });
+    } else {
+      profile.model = model;
+      profile.model_reasoning_effort = catalogSource.reasoningEffort;
+    }
     const content = stringify(profile);
-    configuredCustomSwitchingProfileFromContent(environment, provider, content);
+    configuredCustomSwitchingProfileFromContent(environment, provider, content, upstreamWireApi);
     writePrivateFileAtomicSync(profilePath, content);
     return;
   }
