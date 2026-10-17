@@ -46,7 +46,9 @@ export function useCustomModelCapabilityProbe(draftKey: string, enabled: boolean
           || result.check?.capability !== input.capability
           || !["supported", "unsupported", "inconclusive"].includes(result.check.status)
           || !["completed", "cancelled"].includes(result.status)
-          || !/^[a-f0-9]{64}$/.test(result.connectionToken ?? "")) {
+          || (input.capability === "webSearch"
+            ? result.connectionToken !== undefined
+            : !/^[a-f0-9]{64}$/.test(result.connectionToken ?? ""))) {
           setState({ ...initial, running: false, errorCode: "custom_model_probe_failed" })
         } else {
           setState({ ...initial, running: false, result })
@@ -68,6 +70,7 @@ export function useCustomModelCapabilityProbe(draftKey: string, enabled: boolean
   const bound = enabled && state?.draftKey === draftKey ? state : null
   const result = bound?.result
   const canApply = result?.status === "completed"
+    && result.capability !== "webSearch"
     && (result.check.status === "supported" || result.check.status === "unsupported")
   return { state: bound, running: bound?.running === true, start, cancel, invalidate, canApply }
 }

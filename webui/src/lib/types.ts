@@ -1,4 +1,5 @@
 export type {
+  ManagementProviderWebSearchProbeInput, ManagementProviderWebSearchProbeResult,
   ManagementCustomModelProbeInput, ManagementCustomModelProbeResult,
   ServiceLogTarget, ServiceLogsResponse,
   DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,

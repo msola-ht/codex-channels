@@ -33,6 +33,7 @@ import { contextWindowPreset, validContextWindow, type ContextWindowPreset } fro
 import type { CustomModelDraft } from "@/components/settings/custom-model-details"
 import { contextWindowPresetTokens } from "../../../../runtime/model-catalog.mjs"
 import { ProviderModelTemplateDialog, ProviderModelTemplateConfirmation, type ProviderModelTemplateTarget } from "@/components/settings/provider-model-template-dialog"
+import { ProviderWebSearchProbeDialog, type ProviderWebSearchProbeTarget } from "@/components/settings/provider-web-search-probe-dialog"
 
 const probeReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
@@ -100,6 +101,11 @@ function ProviderSettingsCard({
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
   const [contextDraft, setContextDraft] = useState<ModelContextDraft | null>(null)
   const [templateTarget, setTemplateTarget] = useState<ProviderModelTemplateTarget | null>(null)
+  const [webSearchTarget, setWebSearchTarget] = useState<(ProviderWebSearchProbeTarget & { catalogProvider: string; resourceRevision: string }) | null>(null)
+  const webSearchCatalog = settings.modelCatalogs.find(catalog => catalog.provider === webSearchTarget?.catalogProvider)
+  const webSearchStale = webSearchTarget !== null && (webSearchCatalog?.revision !== webSearchTarget.revision
+    || settings.resourceRevision !== webSearchTarget.resourceRevision
+    || !webSearchCatalog?.models.some(entry => entry.id === webSearchTarget.model))
   const templateTriggerRef = useRef<HTMLButtonElement | null>(null)
   const contextPreviewRef = useRef<HTMLButtonElement | null>(null)
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -117,6 +123,7 @@ function ProviderSettingsCard({
   const contextValid = contextDraft !== null && validContextWindow(contextDraft.value, 1024, contextDraft.maxContextWindow)
   const modelsOnly = section === "models"
   const editorStale = editingId !== null && editorOpen && editorRevision !== settings.resourceRevision
+  const customModelContextsValid = customModels.length > 0 && customModels.every(hasCustomModelContext)
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
   const [managedDraft, patchManaged, resetManaged] = useSettingsDraft({ model: managed?.model ?? "", reasoning: managed?.reasoningEffort ?? "" })
@@ -177,12 +184,14 @@ function ProviderSettingsCard({
   const saveCustom = async () => {
     if (editorStale) return
     if (editingId !== null && editorRevision === null) return
+    const modelDrafts = catalogKind === "custom" ? customModels : []
+    if (!modelDrafts.every(hasCustomModelContext) || (catalogKind === "custom" && modelDrafts.length === 0)) return
+    const models = modelDrafts.map(({ probeConnection: _probeConnection, ...entry }) => {
+      const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts?.includes(effort)))
+      return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions,
+        ...(entry.template === undefined ? {} : { template: { source: entry.template.source, model: entry.template.model } }) }
+    })
     if (modelsOnly && editingId !== null) {
-      const models = customModels.map(({ probeConnection: _probeConnection, ...entry }) => {
-        const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts?.includes(effort)))
-        return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions,
-          ...(entry.template === undefined ? {} : { template: { source: entry.template.source, model: entry.template.model } }) }
-      })
       const probeConnections = customModels.flatMap(entry => (["applyPatch", "toolSearch"] as const).flatMap(capability => {
         const token = entry.probeConnection?.[capability]
         return token === undefined ? [] : [{ model: entry.id, capability, token }]
@@ -205,11 +214,7 @@ function ProviderSettingsCard({
         mode,
         model: model.trim(),
         ...(catalogKind === "custom" ? {
-          catalog: { kind: "custom" as const, models: customModels.map(({ probeConnection: _probeConnection, ...entry }) => {
-            const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts?.includes(effort)))
-            return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions,
-              ...(entry.template === undefined ? {} : { template: { source: entry.template.source, model: entry.template.model } }) }
-          }) },
+          catalog: { kind: "custom" as const, models },
           probeConnections: customModels.flatMap(entry => (["applyPatch", "toolSearch"] as const).flatMap(capability => {
             const token = entry.probeConnection?.[capability]
             return token === undefined ? [] : [{ model: entry.id, capability, token }]
@@ -280,19 +285,23 @@ function ProviderSettingsCard({
         <div className="flex flex-col gap-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{catalog.displayName}</h3><Badge variant="outline">{t(catalog.source === "managed" ? "modelCatalog.sourceManaged" : catalog.source === "custom" ? "modelCatalog.sourceCustom" : "modelCatalog.sourceOfficial")}</Badge></div>
           <p className="text-xs font-normal text-muted-foreground">{t("modelCatalog.scope", { providers: catalog.providers.join(t("managementUi.listSeparator")) })}</p>
         </div>
-        {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null || contextDraft !== null || templateTarget !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
+        {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null || contextDraft !== null || templateTarget !== null || webSearchTarget !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
       </div>,
       models: catalog.models.map(entry => ({ ...entry.presentation, isDefault: entry.isDefault })),
       onSelect: model => setSelectedModel({ provider: catalog.provider, model: model.model, revision: catalog.revision }),
       renderAction: model => {
         const reason = model.isDefault ? t("modelCatalog.defaultProtected") : catalog.models.length <= 1 ? t("modelCatalog.lastProtected") : !catalog.canRemove ? t("modelCatalog.unsupported") : undefined
-        const locked = busy || pending !== null || contextDraft !== null || editorOpen || templateTarget !== null
+        const locked = busy || pending !== null || contextDraft !== null || editorOpen || templateTarget !== null || webSearchTarget !== null
         return <DropdownMenu onOpenChange={(open, details) => { if (open && locked) details.cancel() }}>
           <DropdownMenuTrigger ref={node => {
             const target = templateTarget ?? templateSavedTarget.current
             if (target?.provider === catalog.provider && target.model === model.model) templateTriggerRef.current = node
           }} render={<Button variant="outline" size="sm" />} onFocus={event => { actionTriggerRef.current = event.currentTarget }} onPointerDown={event => { actionTriggerRef.current = event.currentTarget }} aria-disabled={locked}>{t("modelManagement.actions")}</DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64" finalFocus={contextDraft !== null || templateTarget !== null || pending !== null ? false : undefined}><DropdownMenuGroup>
+          <DropdownMenuContent align="end" className="w-64" finalFocus={contextDraft !== null || templateTarget !== null || webSearchTarget !== null || pending !== null ? false : undefined}><DropdownMenuGroup>
+          <DropdownMenuItem disabled={locked || catalog.providers.length === 0} onClick={() => {
+            if (locked || catalog.providers.length === 0) return
+            setWebSearchTarget({ catalogProvider: catalog.provider, resourceRevision: settings.resourceRevision, model: model.model, displayName: model.displayName, revision: catalog.revision, providers: catalog.providers })
+          }}>{t("modelProbe.detectWebSearch")}</DropdownMenuItem>
           <DropdownMenuItem disabled={locked || catalog.source === "official-shared" || model.contextWindow === null || model.maxContextWindow === null} onClick={() => {
             if (locked || model.contextWindow === null || model.maxContextWindow === null) return
             management.clearError()
@@ -317,7 +326,7 @@ function ProviderSettingsCard({
     <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
   </>
 
-  return <>{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}<Card>
+  return <>{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}{webSearchTarget && <ProviderWebSearchProbeDialog target={webSearchTarget} stale={webSearchStale} disabled={busy || pending !== null} finalFocus={actionTriggerRef} onClose={() => setWebSearchTarget(null)} />}<Card>
     <CardHeader>
       <CardTitle>{section === "providers" ? t("managementUi.customProviders") : t("managementUi.managedDefaults")}</CardTitle>
       <CardDescription>{section === "providers" ? t("managementUi.customProvidersHint") : t("managementUi.managedDefaultsDetail")}</CardDescription>
@@ -374,7 +383,7 @@ function ProviderSettingsCard({
               <Field><FieldLabel htmlFor={`responses-model-${index}`}>{t("managementUi.modelId")}</FieldLabel><Input id={`responses-model-${index}`} value={entry.id} disabled={busy || pending !== null || existingModel} onChange={event => patch({ id: event.target.value })} /></Field>
               <Field><FieldLabel htmlFor={`responses-name-${index}`}>{t("managementUi.displayName")}</FieldLabel><Input id={`responses-name-${index}`} value={entry.name} disabled={busy || pending !== null} onChange={event => patch({ name: event.target.value })} /></Field>
               <ManagedSelect label={t("managementUi.contextPreset")} value={entry.contextWindow ? String(entry.contextWindow) : ""} options={contextWindowPresetTokens.filter(value => value <= (entry.maxContextWindow ?? 100000000)).map(value => [String(value), t("managementUi.contextPresetLabel", { k: value / 1024, tokens: value })])} disabled={busy || pending !== null} onChange={value => patch({ contextWindow: Number(value) })} />
-              <Field><FieldLabel htmlFor={`responses-context-${index}`}>{t("managementUi.contextTokens")}</FieldLabel><Input id={`responses-context-${index}`} type="number" min={1024} max={entry.maxContextWindow ?? 100000000} value={entry.contextWindow || ""} disabled={busy || pending !== null} onChange={event => patch({ contextWindow: Number(event.target.value) })} /></Field>
+              <Field><FieldLabel htmlFor={`responses-context-${index}`}>{t("managementUi.contextTokens")}</FieldLabel><Input id={`responses-context-${index}`} type="number" min={1024} max={entry.maxContextWindow ?? 100000000} value={entry.contextWindow ?? ""} disabled={busy || pending !== null} onChange={event => patch({ contextWindow: event.target.value === "" ? undefined : Number(event.target.value) })} /></Field>
               <CapabilitySelect label={t("managementUi.supportsReasoning")} value={entry.reasoningEfforts === undefined ? undefined : entry.reasoningEfforts.length > 0} disabled={busy || pending !== null} onChange={value => patch({ reasoningEfforts: value === undefined ? undefined : value ? ["medium"] : [], defaultReasoningEffort: value ? "medium" : null, reasoningDescriptions: undefined })} />
               {(entry.reasoningEfforts?.length ?? 0) > 0 ? <Field><FieldLabel htmlFor={`responses-reasoning-${index}`}>{t("managementUi.reasoningList")}</FieldLabel><Input id={`responses-reasoning-${index}`} value={entry.reasoningEfforts?.join(",") ?? ""} placeholder="low,medium,high" disabled={busy || pending !== null} onChange={event => { const values = event.target.value === "" ? [] : event.target.value.split(","); patch({ reasoningEfforts: values, defaultReasoningEffort: values.includes(entry.defaultReasoningEffort ?? "") ? entry.defaultReasoningEffort : values[0] ?? null }) }} /></Field> : null}
               {(entry.reasoningEfforts?.length ?? 0) > 0 ? <Field><FieldLabel htmlFor={`responses-default-${index}`}>{t("managementUi.defaultReasoning")}</FieldLabel><Input id={`responses-default-${index}`} value={entry.defaultReasoningEffort ?? ""} disabled={busy || pending !== null} onChange={event => patch({ defaultReasoningEffort: event.target.value })} /></Field> : null}
@@ -384,16 +393,17 @@ function ProviderSettingsCard({
               <p className="text-sm text-muted-foreground">{t("customModel.unknownDisabled")}</p>
               <CustomModelDetails entry={entry} index={index} disabled={busy || pending !== null} upstreamWireApi={upstreamWireApi} patch={patch} />
               <p className="text-muted-foreground">{reasoningEffort === undefined ? t("modelProbe.invalidReasoning") : t("modelProbe.reasoningEffort", { effort: reasoningEffort })}</p>
+              <p className="text-muted-foreground">{t("modelProbe.webSearchHint")}</p>
               <div className="flex flex-wrap gap-2">
-                {(["applyPatch", "toolSearch"] as const).map(capability => <Button key={capability} variant="outline" disabled={busy || pending !== null || probe.running || reasoningEffort === undefined || !entry.id.trim() || !baseUrl.trim() || (editingId === null && !apiKey.trim())} onClick={() => { if (reasoningEffort === undefined) return; void probe.start(index, {
+                {(["applyPatch", "toolSearch", "webSearch"] as const).map(capability => <Button key={capability} variant="outline" disabled={busy || pending !== null || probe.running || reasoningEffort === undefined || !entry.id.trim() || !baseUrl.trim() || (editingId === null && !apiKey.trim())} onClick={() => { if (reasoningEffort === undefined) return; void probe.start(index, {
                   ...(editingId === null ? {} : { providerId: editingId }), baseUrl: baseUrl.trim(), model: entry.id.trim(), upstreamWireApi,
                   capability, reasoningEffort,
                   credential: apiKey.trim() === "" ? { action: "preserve" } : { action: "replace", apiKey },
-                }) }}>{probe.running && probe.state?.index === index && probe.state.capability === capability ? t("modelProbe.running") : t("modelProbe.detectTool", { tool: t(`modelProbe.capabilities.${capability}`) })}</Button>)}
+                }) }}>{probe.running && probe.state?.index === index && probe.state.capability === capability ? t("modelProbe.running") : capability === "webSearch" ? t("modelProbe.detectWebSearch") : t("modelProbe.detectTool", { tool: t(`modelProbe.capabilities.${capability}`) })}</Button>)}
                 {probe.state?.index === index && probe.running ? <Button variant="outline" onClick={probe.cancel}>{t("modelProbe.cancel")}</Button> : null}
-                {probe.state?.index === index && probe.state.result ? <Button variant="outline" disabled={busy || pending !== null || !probe.canApply} onClick={() => {
+                {probe.state?.index === index && probe.state.result && probe.state.result.capability !== "webSearch" ? <Button variant="outline" disabled={busy || pending !== null || !probe.canApply} onClick={() => {
                   const result = probe.state?.result
-                  if (!probe.canApply || !result || result.model !== entry.id.trim()) return
+                  if (!probe.canApply || !result || result.capability === "webSearch" || result.model !== entry.id.trim()) return
                   patch({ ...(result.capability === "applyPatch"
                     ? { applyPatchToolType: result.check.status === "supported" ? "freeform" : null }
                     : { supportsSearchTool: result.check.status === "supported" }), probeConnection: { ...entry.probeConnection, [result.capability]: result.connectionToken } })
@@ -403,9 +413,9 @@ function ProviderSettingsCard({
                 {probe.state.errorCode ? <Alert variant="destructive"><AlertDescription>{translateApiErrorCode(t, probe.state.errorCode)}</AlertDescription></Alert> : null}
                 {probe.state.cancelled || probe.state.result?.status === "cancelled" ? <p>{t("modelProbe.cancelled")}</p> : null}
                 {probe.state.result ? <>
-                  <p className="text-muted-foreground">{t("modelProbe.resultHint")}</p>
+                  <p className="text-muted-foreground">{t(probe.state.result.capability === "webSearch" ? "modelProbe.webSearchResultHint" : "modelProbe.resultHint")}</p>
                   <Table><TableHeader><TableRow><TableHead>{t("modelProbe.capability")}</TableHead><TableHead>{t("modelProbe.status")}</TableHead><TableHead>{t("modelProbe.evidence")}</TableHead></TableRow></TableHeader><TableBody>{[probe.state.result.check].map(check => <TableRow key={check.capability}><TableCell>{t(`modelProbe.capabilities.${check.capability}`)}</TableCell><TableCell><Badge variant={check.status === "supported" ? "secondary" : "outline"}>{t(`modelProbe.statuses.${check.status}`)}</Badge></TableCell><TableCell><p>{translateCustomModelProbeReason(t, check.reason)}</p>{check.httpStatus === undefined ? t("modelProbe.noHttpStatus") : t("modelProbe.httpStatus", { status: check.httpStatus })}</TableCell></TableRow>)}</TableBody></Table>
-                  {!probe.canApply ? <p className="text-muted-foreground">{t("modelProbe.cannotApply")}</p> : null}
+                  {!probe.canApply && probe.state.result.capability !== "webSearch" ? <p className="text-muted-foreground">{t("modelProbe.cannotApply")}</p> : null}
                 </> : null}
               </div> : null}
               {!existingModel ? <Button variant="outline" disabled={busy || pending !== null} onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>{t("managementUi.removeModel")}</Button> : null}
@@ -414,7 +424,7 @@ function ProviderSettingsCard({
         </div> : null}
         {!modelsOnly && mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">{t("managementUi.removeBaseUrl")}</FieldLabel></Field> : null}
         {editorStale ? <Alert variant="destructive"><AlertDescription>{t("modelCatalog.stale")}</AlertDescription></Alert> : null}
-        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || probe.running || editorStale || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{modelsOnly ? t("modelCatalog.saveCustom") : editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
+        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || probe.running || editorStale || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (catalogKind === "custom" && !customModelContextsValid) || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{modelsOnly ? t("modelCatalog.saveCustom") : editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
         </DialogContent></Dialog>}
       {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading} finalFocus={() => {
@@ -450,6 +460,10 @@ function ProviderSettingsCard({
 function CapabilitySelect({ label, value, disabled, onChange }: { label: string; value: boolean | undefined; disabled: boolean; onChange: (value: boolean | undefined) => void }) {
   const { t } = useTranslation()
   return <ManagedSelect label={label} value={value === undefined ? "unknown" : value ? "supported" : "unsupported"} options={[["unknown", t("common.unknown")], ["supported", t("managementUi.supported")], ["unsupported", t("managementUi.unsupported")]]} disabled={disabled} onChange={value => onChange(value === "unknown" ? undefined : value === "supported")} />
+}
+
+function hasCustomModelContext(entry: CustomModelDraft): entry is CustomModelDraft & { contextWindow: number } {
+  return entry.contextWindow !== undefined && validContextWindow(String(entry.contextWindow), 1024, entry.maxContextWindow ?? 100000000)
 }
 
 function CustomModelTemplatePicker({ disabled, onAdd }: { disabled: boolean; onAdd: (draft: CustomModelDraft) => void }) {

@@ -13,15 +13,20 @@ export async function loadResponsesModelTemplates(source) {
 }
 
 // A template is a starting point, not evidence about an arbitrary upstream.
-// Keep its prompts and context recommendations, but require explicit capability
-// declarations before enabling protocol-dependent features.
+// Copy only prompts and their source. Context and capabilities are references
+// in suggested, and must be declared separately for the actual upstream.
 export async function loadCustomModelDraftTemplates() {
   const templates = [];
   for (const source of ["official", "deepseek"]) {
     for (const suggested of await loadResponsesModelTemplates(source)) {
-      const draft = structuredClone(suggested);
-      for (const key of ["reasoningEfforts", "reasoningDescriptions", "supportsImages", "applyPatchToolType", "supportsSearchTool", "supportsImageDetailOriginal", "supportsVerbosity", "defaultVerbosity", "supportsReasoningSummary", "defaultReasoningSummary"]) delete draft[key];
-      draft.defaultReasoningEffort = null;
+      const draft = {
+        id: suggested.id,
+        name: suggested.name,
+        defaultReasoningEffort: null,
+        ...(suggested.instructions === undefined ? {} : { instructions: suggested.instructions }),
+        ...(suggested.modelMessages === undefined ? {} : { modelMessages: structuredClone(suggested.modelMessages) }),
+        template: { source, model: suggested.id },
+      };
       templates.push({ source, model: suggested.id, displayName: suggested.name, draft, suggested });
     }
   }

@@ -1,5 +1,6 @@
 import type { ResetCreditSnapshot, ResetCreditPreview, ResetCreditResult } from "./types"
 import type {
+  ManagementProviderWebSearchProbeInput, ManagementProviderWebSearchProbeResult,
   ManagementCustomModelProbeInput, ManagementCustomModelProbeResult,
   ServiceLogTarget, ServiceLogsResponse,
   QueueChangeEvent,
@@ -483,6 +484,12 @@ export function fetchCustomModelDraftTemplates(signal: AbortSignal): Promise<Cus
 
 export function probeManagementCustomModel(input: ManagementCustomModelProbeInput, signal: AbortSignal): Promise<ManagementCustomModelProbeResult> {
   return requestJson<ManagementCustomModelProbeResult>(`${API_PREFIX}/management/provider-settings/probe`, {
+    method: "POST", body: JSON.stringify(input),
+  }, signal, 50_000)
+}
+
+export function probeManagementProviderWebSearch(input: ManagementProviderWebSearchProbeInput, signal: AbortSignal): Promise<ManagementProviderWebSearchProbeResult> {
+  return requestJson<ManagementProviderWebSearchProbeResult>(`${API_PREFIX}/management/provider-settings/web-search-probe`, {
     method: "POST", body: JSON.stringify(input),
   }, signal, 50_000)
 }

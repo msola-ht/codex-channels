@@ -143,6 +143,7 @@ const helpText = {
 
 常用入口：
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
+  codexc setup → 模型与提供商 → 检测原生网页搜索（选择官方或第三方账户及模型，费用确认后仅诊断）
   codexc setup → 模型与提供商 → 第三方 Provider → DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / Cline Pass 官方
   codexc setup → 模型与提供商 → 第三方 Provider → Codex 兼容 Provider 接入 / 自定义模型 Provider 接入
   codexc setup → 模型与提供商 → 第三方 Provider → 受管 Provider 默认模型与思考等级 / 受管模型目录上下文窗口

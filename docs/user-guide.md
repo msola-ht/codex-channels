@@ -108,8 +108,9 @@ Plugin 查询与调用不再需要 Gateway 功能开关。旧配置中的 `[expe
 Setup 仅按具体操作返回的激活范围提示重启。列出账户、停止账户等操作不会因经过模型菜单而附加“重启全部服务”；需要重启的配置修改会返回对应服务目标，Setup 不自动执行重启。
 
 日常模型操作从 `setup → 模型与提供商 → 第三方 Provider → 模型管理` 或 WebUI「模型管理 → 模型配置」进入。
+原生网页搜索诊断从 `setup → 模型与提供商 → 检测原生网页搜索` 或 WebUI 模型行操作进入，覆盖官方及第三方提供商；明确选择一个账户和模型后主动发起，可能产生模型及搜索费用，仅诊断、不修改搜索策略，见[模型探测](provider-integration-guide.md#添加时探测并写入)。
 自定义目录、CCG、OCG、CLP 支持预览后本地移除；账户范围、默认保护、Relay 影响和恢复方式见[日常模型管理](provider-integration-guide.md#日常模型管理)。
-CLI 与 WebUI 模型管理均提供 DS、CLP、CCG、OCG 和自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确来源，选择提示词或能力范围，查看差异并确认后仅更新目标账户模型；旧模型缺少来源关联时须手动选择。
+CLI 与 WebUI 模型管理均提供 DS、CLP、CCG、OCG 和自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确来源，受管模型选择提示词或能力范围，自定义模型仅更新提示词及来源，查看差异并确认后更新目标模型；旧模型缺少来源关联时须手动选择。
 
 `codexc timezone` 设置服务时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`服务时区`](model-timezone.md)。
 

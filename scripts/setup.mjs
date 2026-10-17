@@ -187,10 +187,16 @@ async function runModelSetup({
           label: "第三方 Provider",
           hint: "账户与自定义接入、受管模型设置",
         },
+        { value: "web-search", label: "检测原生网页搜索", hint: "官方或第三方；选择单一账户和模型；可能计费" },
         { value: "back", label: "返回", hint: "返回设置类别" },
       ],
     });
     if (prompts.isCancel(category) || category === "back") return { action: "back" };
+    if (category === "web-search") {
+      const result = await (await import("./provider-model-setup.mjs")).runProviderWebSearchSetup({ output, prompts });
+      if (isBackResult(result)) continue;
+      return result;
+    }
     if (category === "official") {
       selection.modelCategory = category;
       const result = await runOfficialModelSetup({
@@ -243,6 +249,7 @@ async function runOfficialModelSetup({
           label: "登录并恢复官方",
           hint: "设备登录，并停用自定义固定主 Provider",
         },
+        { value: "web-search", label: "检测原生网页搜索", hint: "选择官方模型；1 次可能计费请求；仅诊断" },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],
     });
@@ -251,6 +258,8 @@ async function runOfficialModelSetup({
     if (module === "official_login") {
       selection.officialModule = module;
       result = await officialLoginSetup({ input, output, prompts });
+    } else if (module === "web-search") {
+      result = await (await import("./provider-model-setup.mjs")).runProviderWebSearchSetup({ output, prompts, provider: "openai" });
     } else {
       throw new Error(`未知官方设置：${String(module)}`);
     }

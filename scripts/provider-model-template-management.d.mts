@@ -13,6 +13,7 @@ export interface ModelTemplateTarget { model: string; displayName: string; templ
 export interface ModelTemplateOption extends ModelTemplateReference { displayName: string }
 export interface ModelTemplateOptions {
   provider: string;
+  availableSections: ModelTemplateSection[];
   revision: string;
   sourceToken: string;
   /** Unix epoch milliseconds; process exit or cache eviction can also expire a snapshot. */

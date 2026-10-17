@@ -33,6 +33,6 @@ export interface CustomPrimaryProviderSetupOptions {
 
 export function runCustomPrimaryProviderSetup(options?: CustomPrimaryProviderSetupOptions): Promise<
   | { provider: string; model: string }
-  | { action: "back" | "cancel" }
+  | { action: string; activation?: string }
   | undefined
 >;

@@ -7,6 +7,7 @@ import { compileResponsesModelCatalog, isCustomCatalogProvider, readResponsesMod
 import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
+import { runProviderModelSetup } from "./provider-model-setup.mjs";
 import * as clackPrompts from "@clack/prompts";
 
 import {
@@ -72,6 +73,16 @@ export async function runCustomPrimaryProviderSetup({
   probeModelCapabilities,
 } = {}) {
   const custom = editingProviderId === undefined ? catalogKind === "custom" : isCustomCatalogProvider(editingProviderId);
+  const editingCustom = custom && editingProviderId !== undefined;
+  if (editingCustom) {
+    const section = await prompts.select({ message: `编辑 ${editingProviderId} 的哪些设置？`, options: [
+      { value: "models", label: "模型管理", hint: "添加、按项编辑、默认模型、模板更新、移除与网页搜索检测" },
+      { value: "connection", label: "连接、凭据与运行模式", hint: "地址、协议、显示名称、API Key 和 WebSocket" },
+      { value: "back", label: "返回" },
+    ] });
+    if (prompts.isCancel(section) || section === "back") return { action: allowBack ? "back" : "cancel" };
+    if (section === "models") return runProviderModelSetup({ environment, prompts, output, provider: editingProviderId });
+  }
   const openingFiles = snapshotProviderFiles([
     join(codexHomePath(environment), "config.toml"),
     customSwitchingProviderRegistryPath(environment),
@@ -351,7 +362,11 @@ export async function runCustomPrimaryProviderSetup({
 
   let models;
   let normalizedModel;
-  if (custom) {
+  if (editingCustom) {
+    models = structuredClone(previousCatalog.definitions);
+    normalizedModel = currentModel ?? previousCatalog.defaultModel;
+    output.write("本次仅编辑连接设置，保留已有模型定义与默认模型。\n");
+  } else if (custom) {
     if (previousCatalog?.definitions.length) output.write("已有模型保留现有模板与参数；模板更新请从模型管理选择“对比并更新模型模板”。新模型逐项选择起点模板。\n");
     models = await promptResponsesModels(prompts, currentModel ?? previousCatalog?.defaultModel, previousCatalog?.definitions ?? [], output,
       chatUpstream ? "chat_completions" : "responses", previousCatalog?.definitions.map(entry => entry.id) ?? [], { loadDraftTemplates });
@@ -389,7 +404,7 @@ export async function runCustomPrimaryProviderSetup({
 
   let catalogModels = models;
   let probeConnections;
-  if (custom) {
+  if (custom && !editingCustom) {
     const selected = await promptCustomModelCapabilities(prompts, {
       baseUrl: normalizedBaseUrl, apiKey: replacementApiKey || currentApiKey, models,
       upstreamWireApi: chatUpstream ? "chat_completions" : "responses", environment,
@@ -439,7 +454,7 @@ export async function runCustomPrimaryProviderSetup({
   });
   await assertProviderFileSnapshots(openingFiles);
   const preview = prepared.preview;
-  const previewModelDetails = custom ? compileResponsesModelCatalog(preview.provider.models, preview.provider.model).models : [];
+  const previewModelDetails = custom && !editingCustom ? compileResponsesModelCatalog(preview.provider.models, preview.provider.model).models : [];
   output.write(preview.provider.mode === "switching"
     ? `\n将写入 ~/.codex/${customSwitchingProviderProfileName(normalizedId)}.config.toml：\n`
     : "\n将写入 ~/.codex/config.toml：\n");
@@ -462,7 +477,8 @@ export async function runCustomPrimaryProviderSetup({
           "- 主配置：写入并启用该固定 Provider",
           "- 认证：API Key 将明文写入当前用户私有凭据文件，主配置仅保存 env_key 引用（不回显、不进入命令行和日志）",
         ]),
-    ...(custom ? preview.provider.models.flatMap((entry, index) => [
+    ...(editingCustom ? ["- 模型定义与默认模型：保留现有设置"] : []),
+    ...(custom && !editingCustom ? preview.provider.models.flatMap((entry, index) => [
       `- 模型 ${entry.id}：${entry.contextWindow} Token；最大窗口 ${entry.maxContextWindow ?? entry.contextWindow} Token；图片 ${capabilityLabel(entry.supportsImages)}；图片 original ${entry.supportsImageDetailOriginal ? "声明支持" : "不声明"}；apply_patch ${capabilityLabel(entry.applyPatchToolType === undefined ? undefined : entry.applyPatchToolType === "freeform")}；思考 ${entry.reasoningEfforts === undefined ? "未知（暂不启用）" : entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}` : ""}`,
       `  模型描述：${JSON.stringify(previewModelDetails[index].description)}`,
       `  思考等级说明：${entry.reasoningEfforts?.map(effort => `${effort}=${JSON.stringify(entry.reasoningDescriptions?.[effort] ?? effort)}`).join("；") || "无可选等级"}`,

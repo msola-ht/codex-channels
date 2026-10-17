@@ -72,7 +72,7 @@ export function ModelCapabilityCells({ model }: { model: OpenAiModelCatalogEntry
   const search = declared === undefined ? t(model.details.supports_search_tool === null ? "openAiModelDetails.undeclared" : model.details.supports_search_tool ? "openAiModelCatalog.supported" : "openAiModelCatalog.unsupported") : capability(declared.supportsSearchTool)
   const patch = declared === undefined ? t(model.details.apply_patch_tool_type === null ? "openAiModelDetails.undeclared" : "openAiModelCatalog.supported") : capability(declared.applyPatchToolType === undefined ? undefined : declared.applyPatchToolType !== null)
   return <>
-    <TableCell><div className="flex flex-wrap gap-1">{declared !== undefined ? <><Badge variant="outline">{t("openAiModelDetails.text")}</Badge><span>{t("managementUi.imageInput")}: {capability(declared.supportsImages)}</span></> : model.details.input_modalities === null
+    <TableCell><div className="flex flex-wrap gap-1">{declared !== undefined ? <><Badge variant="outline">{t("openAiModelDetails.text")}</Badge>{declared.supportsImages === true ? <Badge variant="outline">{t("openAiModelDetails.image")}</Badge> : <span>{t("managementUi.imageInput")}: {capability(declared.supportsImages)}</span>}</> : model.details.input_modalities === null
       ? t("openAiModelDetails.undeclared")
       : model.details.input_modalities.length === 0 ? t("openAiModelDetails.empty")
         : model.details.input_modalities.map((modality, index) => <Badge key={`${modality}-${index}`} variant="outline">{modality === "text" ? t("openAiModelDetails.text") : modality === "image" ? t("openAiModelDetails.image") : modality}</Badge>)}</div></TableCell>

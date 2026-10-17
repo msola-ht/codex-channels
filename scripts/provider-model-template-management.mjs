@@ -30,7 +30,6 @@ const maximumCacheEntries = 16;
 const fields = {
   custom: {
     prompts: ["instructions", "modelMessages"],
-    capabilities: ["description", "maxContextWindow", "reasoningEfforts", "reasoningDescriptions", "supportsImages", "supportsImageDetailOriginal", "supportsVerbosity", "defaultVerbosity", "supportsReasoningSummary", "defaultReasoningSummary", "effectiveContextWindowPercent"],
   },
   managed: {
     prompts: ["base_instructions", "model_messages"],
@@ -62,6 +61,7 @@ export async function loadProviderModelTemplateOptions(provider, { environment =
   const sourceToken = randomBytes(32).toString("hex");
   sourceSnapshots.set(sourceToken, { ...snapshot, bytes });
   return { provider, revision: state.revision, sourceToken, expiresAt: snapshot.expiresAt, targets: state.targets,
+    availableSections: Object.keys(fields[state.custom ? "custom" : "managed"]),
     templates: templates.map(({ source, model, displayName }) => ({ source, model, displayName })) };
 }
 
@@ -98,6 +98,9 @@ async function buildPlan(input, environment) {
   if (source.revision !== input.revision) throw staleTarget();
   const state = await readTargetState(input.provider, environment);
   if (state.revision !== input.revision) throw staleTarget();
+  if (state.custom && input.sections.some(section => section !== "prompts")) {
+    throw invalid("invalid-input", "sections", "自定义模型模板仅可更新提示词；上下文、思考等级及其他能力须手动设置");
+  }
   if (!state.targets.some(target => target.model === input.model)) throw invalid("template-unavailable", "model", "模型不在当前账户目录中");
   const matches = source.templates.filter(template => template.source === input.template.source && template.model === input.template.model);
   if (matches.length !== 1 || !allowedTemplate(state, input.model, input.template)) {

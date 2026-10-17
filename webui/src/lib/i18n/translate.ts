@@ -36,6 +36,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   "invalid-auto-compact-limit": "customModel.invalidAutoCompact",
   invalid_custom_model_probe: "modelProbe.invalid",
   custom_model_probe_credential_required: "modelProbe.credentialRequired",
+  provider_web_search_credential_unavailable: "modelProbe.configuredCredentialUnavailable",
   custom_model_probe_busy: "modelProbe.busy",
   custom_model_probe_failed: "modelProbe.failed",
   "stale-model-probe": "modelProbe.stale",

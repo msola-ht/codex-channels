@@ -18,16 +18,23 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ModelContextWindowFields } from "@/components/settings/model-context-window-fields"
 import { ModelDetailFields, OpenAiModelDetails } from "@/components/settings/openai-model-details"
 import { ModelApprovals, ModelServiceTiers, type ModelCatalogGroup } from "@/components/settings/model-catalog-columns"
+import { ProviderWebSearchProbeDialog, type ProviderWebSearchProbeTarget } from "@/components/settings/provider-web-search-probe-dialog"
 
-export function OpenAiModelCatalogCard({ catalog, disabled = false, renderCatalog }: {
+export function OpenAiModelCatalogCard({ catalog, disabled = false, configurationRevision, renderCatalog }: {
   catalog: OpenAiModelCatalogController
   disabled?: boolean
+  configurationRevision: string | null
   renderCatalog: (group: ModelCatalogGroup) => ReactNode
 }) {
   const { t, language } = useTranslation()
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null)
   const contextPreviewRef = useRef<HTMLButtonElement | null>(null)
   const [selectedModel, setSelectedModel] = useState<{ id: string; scope: string } | null>(null)
+  const [webSearchTarget, setWebSearchTarget] = useState<(ProviderWebSearchProbeTarget & { scope: string; configurationRevision: string | null }) | null>(null)
+  const webSearchStale = webSearchTarget !== null && (catalog.data?.revision !== webSearchTarget.revision
+    || catalog.data?.scope !== webSearchTarget.scope
+    || configurationRevision !== webSearchTarget.configurationRevision
+    || !catalog.data?.models.some(model => model.model === webSearchTarget.model))
   const detailModel = !catalog.loading && !catalog.error && catalog.data?.scope === selectedModel?.scope
     ? catalog.data?.models.find(model => model.model === selectedModel?.id) ?? null : null
   const numbers = new Intl.NumberFormat(language === "zh" ? "zh-CN" : "en-US")
@@ -56,17 +63,19 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, renderCatalo
             </TooltipTrigger>
             <TooltipContent>{t("openAiModelCatalog.metadataHint")}</TooltipContent>
           </Tooltip>}
-          <Button variant="outline" disabled={disabled || catalog.locked || catalog.draft !== null || catalog.data === null} onClick={() => void catalog.previewRefresh()}>{catalog.busy && !catalog.draft && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("openAiModelCatalog.refreshConfigured")}</Button>
+          <Button variant="outline" disabled={disabled || catalog.locked || catalog.draft !== null || catalog.data === null || webSearchTarget !== null} onClick={() => void catalog.previewRefresh()}>{catalog.busy && !catalog.draft && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("openAiModelCatalog.refreshConfigured")}</Button>
         </div>
       </div>,
     models: !catalog.loading && !catalog.error ? catalog.data?.models ?? [] : [],
     onSelect: model => { if (metadata) setSelectedModel({ id: model.model, scope: metadata.scope }) },
-    renderAction: model => model.editable
-      ? <DropdownMenu><DropdownMenuTrigger render={<Button variant="outline" size="sm" />} onFocus={event => { actionTriggerRef.current = event.currentTarget }} onPointerDown={event => { actionTriggerRef.current = event.currentTarget }} disabled={disabled || catalog.locked || catalog.draft !== null}>{t("modelManagement.actions")}</DropdownMenuTrigger>
-        <DropdownMenuContent align="end" finalFocus={catalog.draft !== null ? false : undefined}><DropdownMenuGroup>
-          <DropdownMenuItem disabled={disabled || catalog.locked || catalog.draft !== null} onClick={() => catalog.startEdit(model)}>{t("openAiModelCatalog.adjustContext")}</DropdownMenuItem>
-        </DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
-      : <span className="text-muted-foreground">{t("openAiModelCatalog.notEditable")}</span>,
+    renderAction: model => <DropdownMenu><DropdownMenuTrigger render={<Button variant="outline" size="sm" />} onFocus={event => { actionTriggerRef.current = event.currentTarget }} onPointerDown={event => { actionTriggerRef.current = event.currentTarget }} disabled={disabled || catalog.locked || catalog.draft !== null || webSearchTarget !== null}>{t("modelManagement.actions")}</DropdownMenuTrigger>
+        <DropdownMenuContent align="end" finalFocus={catalog.draft !== null || webSearchTarget !== null ? false : undefined}><DropdownMenuGroup>
+          <DropdownMenuItem disabled={disabled || catalog.locked || catalog.draft !== null || metadata === null} onClick={() => {
+            if (disabled || catalog.locked || catalog.draft !== null || metadata === null) return
+            setWebSearchTarget({ model: model.model, displayName: model.displayName, revision: metadata.revision, scope: metadata.scope, configurationRevision, providers: ["openai"] })
+          }}>{t("modelProbe.detectWebSearch")}</DropdownMenuItem>
+          <DropdownMenuItem disabled={!model.editable || disabled || catalog.locked || catalog.draft !== null} onClick={() => catalog.startEdit(model)}>{t("openAiModelCatalog.adjustContext")}</DropdownMenuItem>
+        </DropdownMenuGroup></DropdownMenuContent></DropdownMenu>,
     content: catalog.loading ? <div aria-busy="true"><Skeleton className="h-28 w-full" /></div>
         : catalog.error ? <SettingsError message={catalog.error} retry={catalog.refresh} />
           : catalog.data && catalog.data.models.length === 0
@@ -91,6 +100,7 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, renderCatalo
   }
 
   return <>{renderCatalog(group)}
+    {webSearchTarget && <ProviderWebSearchProbeDialog target={webSearchTarget} stale={webSearchStale} disabled={disabled || catalog.locked} finalFocus={actionTriggerRef} onClose={() => setWebSearchTarget(null)} />}
     <OpenAiModelDetails model={detailModel} revision={catalog.data?.revision ?? null} open={selectedModel !== null} loading={catalog.loading} onClose={() => setSelectedModel(null)} onReload={catalog.refresh} />
     <Dialog open={catalog.draft !== null && pending === undefined} disablePointerDismissal onOpenChange={(open, details) => { if (catalog.busy) { details.cancel(); return }; if (!open) catalog.closeEdit() }}>
       <DialogContent finalFocus={pending === undefined ? actionTriggerRef : false} closeLabel={t("modelManagement.cancel")} showCloseButton={!catalog.busy} className="max-h-[85dvh] overflow-y-auto">

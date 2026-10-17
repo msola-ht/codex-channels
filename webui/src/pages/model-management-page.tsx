@@ -61,7 +61,7 @@ export function ModelConfigurationPage() {
   const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog])
   const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
   return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy} refresh={refresh}>
-    <OpenAiModelCatalogCard catalog={catalog} disabled={busy} renderCatalog={official =>
+    <OpenAiModelCatalogCard catalog={catalog} disabled={busy} configurationRevision={providers.settings?.resourceRevision ?? null} renderCatalog={official =>
       <ProviderSettingsManagement management={providers} section="models" onChanged={reloadCodex} renderCatalog={thirdParty =>
         <Card>
           <CardHeader><CardTitle>{t("modelCatalog.title")}</CardTitle><CardDescription>{t("modelCatalog.unifiedHint")}</CardDescription></CardHeader>

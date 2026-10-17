@@ -1,6 +1,7 @@
 import * as clackPrompts from "@clack/prompts";
 import { createHash } from "node:crypto";
-import { loadProviderModelCatalogs, previewProviderModelRemoval, applyProviderModelRemoval } from "./provider-model-management.mjs";
+import { isDeepStrictEqual } from "node:util";
+import { loadProviderModelCatalogs, loadProviderModelCatalogPresentations, ProviderModelManagementError, previewProviderModelRemoval, applyProviderModelRemoval } from "./provider-model-management.mjs";
 import { loadProviderModelTemplateOptions, previewProviderModelTemplateUpdate, applyProviderModelTemplateUpdate } from "./provider-model-template-management.mjs";
 import { readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
@@ -13,6 +14,11 @@ import { promptEnabledProviderModels } from "./provider-model-selection.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { managedProviderAccountFamilies } from "../runtime/model-provider-definitions.mjs";
+import { loadOpenAiModelCatalog, OfficialModelCatalogError } from "./webui-official-model-catalog.mjs";
+import { probeConfiguredProviderWebSearch, ProviderWebSearchProbeError } from "./provider-web-search-probe.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
+import { promptCustomModelCapabilities } from "./custom-model-capability-setup.mjs";
+import { loadConfiguredRelayProviderMaterial } from "../runtime/model-provider-runtime.mjs";
 
 const warningMessages = {
   "shared-relay-grants-retained": "Relay Key 授权保留；共用目录移除后调用受限，重新加入可能恢复旧授权。永久撤销请使用 Key 管理。",
@@ -20,6 +26,72 @@ const warningMessages = {
   "historical-references": "旧会话和计划任务保留，引用此模型时可能失败；不会自动换模型。聚合旧快照需刷新。",
   "provider-relay-inflight": "目录变更可能撤销该提供商的其他 Relay 在途请求。",
 };
+
+/** Diagnostics use one selected account and never change model declarations or search policy. */
+export async function runProviderWebSearchSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout, provider } = {}) {
+  try {
+    let catalogs = [];
+    if (provider !== "openai") {
+      try { catalogs = (await loadProviderModelCatalogPresentations({ environment })).catalogs; }
+      catch (error) {
+        if (provider !== undefined) throw error;
+        output.write("第三方模型目录暂不可读取，请检查配置后重试；仍可选择 OpenAI 官方检测。\n");
+      }
+    }
+    let selected = provider;
+    if (selected === undefined) {
+      selected = await prompts.select({ message: "选择原生网页搜索检测的提供商", options: [
+        { value: "openai", label: "OpenAI 官方", hint: "使用当前官方登录凭据与本地模型缓存" },
+        ...catalogs.map(entry => ({ value: entry.provider, label: entry.displayName, hint: entry.providers.join("、") })),
+        { value: "back", label: "返回" },
+      ] });
+      if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
+    }
+    let revision;
+    let models;
+    if (selected === "openai") {
+      const catalog = await loadOpenAiModelCatalog(environment);
+      revision = catalog.revision;
+      models = catalog.models.map(entry => ({ id: entry.model, displayName: entry.displayName }));
+    } else {
+      const catalog = catalogs.find(entry => entry.providers.includes(selected));
+      if (!catalog) throw new Error("所选提供商不在当前模型目录中，请重新打开检测");
+      selected = await prompts.select({ message: "选择本次检测的单一账户", options: catalog.providers.map(id => ({ value: id, label: id })), initialValue: selected });
+      if (prompts.isCancel(selected)) return { action: "back" };
+      if (!catalog.providers.includes(selected)) throw new Error("检测账户选择无效");
+      revision = catalog.revision;
+      models = catalog.models;
+    }
+    if (!models.length) { output.write("此提供商没有可检测的已配置模型，请先获取模型目录。\n"); return { action: "back" }; }
+    const model = await prompts.select({ message: "选择原生网页搜索检测的模型", options: models.map(entry => ({ value: entry.id, label: `${entry.displayName}（${entry.id}）` })) });
+    if (prompts.isCancel(model)) return { action: "back" };
+    if (!models.some(entry => entry.id === model)) throw new Error("检测模型选择无效");
+    output.write(`检测目标：${JSON.stringify(selected)} / ${JSON.stringify(model)}。\n仅向所选账户发送 1 次请求，最长 45 秒；上游可能实际搜索并产生模型及搜索费用。\n结果仅供诊断，不修改模型能力声明或搜索启用策略。\n`);
+    if (await prompts.confirm({ message: "确认向上述账户发送一次可能计费的原生网页搜索请求？", initialValue: false }) !== true) return { action: "back" };
+    output.write("正在检测；Ctrl+C 取消。\n");
+    let result;
+    try {
+      result = await withCliProgress("检测原生网页搜索", progress =>
+        probeConfiguredProviderWebSearch({ provider: selected, model, revision }, { environment, signal: progress.signal }),
+      { output, delayMs: 150 });
+    } catch (error) {
+      if (error?.name === "AbortError" || error?.exitCode === 130 || error?.exitCode === 143) return { action: "back" };
+      throw error;
+    }
+    if (result.status === "cancelled") { output.write("原生网页搜索检测已取消。\n"); return { action: "back" }; }
+    if (result.provider !== selected || result.model !== model || result.capability !== "webSearch" || result.check.capability !== "webSearch") {
+      throw new Error("原生网页搜索检测结果与所选账户或模型不匹配");
+    }
+    const statuses = { supported: "通过", unsupported: "未通过", inconclusive: "无法确认" };
+    output.write(`原生网页搜索：${statuses[result.check.status]}；${result.check.reason}${result.check.httpStatus === undefined ? "" : `（HTTP ${result.check.httpStatus}）`}\n`);
+    return { action: "web-search-diagnosed", activation: "none" };
+  } catch (error) {
+    const message = error instanceof ProviderWebSearchProbeError || error instanceof OfficialModelCatalogError || error instanceof ProviderModelManagementError
+      ? error.message : "原生网页搜索检测未完成，请重新读取模型目录并检查账户、连接与凭据";
+    output.write(`${message}。\n`);
+    return { action: "back" };
+  }
+}
 
 function templateDifferenceValue(value, full = false) {
   if (!value.present) return "未设置";
@@ -52,12 +124,14 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   const sections = await prompts.multiselect({ message: "选择本次更新内容（空格勾选，回车确认）", options: [
     { value: "prompts", label: "提示词" },
     { value: "capabilities", label: "能力参数", hint: "请确认平台支持模板中的参数" },
-  ], initialValues: ["prompts"], required: true });
+  ].filter(entry => options.availableSections.includes(entry.value)), initialValues: ["prompts"], required: true });
   if (prompts.isCancel(sections)) return { action: "back" };
   const input = { provider, model, sections, revision: options.revision, sourceToken: options.sourceToken, template: { source: template.source, model: template.model } };
   const preview = await previewProviderModelTemplateUpdate(input, { environment });
   output.write(`模板对比：${JSON.stringify(preview.provider)} / ${JSON.stringify(preview.model)}\n来源：${JSON.stringify(preview.source)} / ${JSON.stringify(preview.sourceModel)}\n修订：${JSON.stringify(preview.revision)}\n`);
-  output.write("保留本地模型 ID、显示名称、当前上下文、默认思考等级、工具支持、采样及压缩/截断设置；能力更新可改变最大上下文。\n");
+  output.write(provider.startsWith("cp-")
+    ? "自定义模型仅更新提示词和来源关联；上下文、最大窗口、思考等级、图片及其他能力和参数全部保留手动值。\n"
+    : "保留本地模型 ID、显示名称、当前上下文、默认思考等级、工具支持、采样及压缩/截断设置；能力更新可改变最大上下文。\n");
   for (const change of preview.changes) {
     output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before)}\n  更新后：${templateDifferenceValue(change.after)}\n`);
   }
@@ -99,8 +173,10 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     ? "DeepSeek 暂不支持单模型移除。\n"
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
   const action = await prompts.select({ message: "模型操作", options: [
+    { value: "web-search", label: "检测原生网页搜索", hint: "选择单一账户；1 次可能计费请求；仅诊断" },
     ...(catalog.canRemove ? [{ value: "remove", label: "本地移除模型", hint: "不联网、不改账户和凭据" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
+    ...(custom && catalog.canRemove ? [{ value: "tools", label: "探测单个模型的工具能力", hint: "apply_patch、tool_search；明确选择才发请求，可能计费" }] : []),
     ...(family && catalog.providers.length ? [{ value: "default", label: "设置账户默认模型" }] : []),
     ...(family === "ccg" || family === "ocg" ? [{ value: "manage", label: "选择启用／添加／导入模板" }] : []),
     ...(family === "clp" ? [{ value: "refresh", label: "联网发现模型并选择启用", hint: "不更新已启用模型的模板内容" }] : []),
@@ -108,6 +184,7 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (action === "web-search") return runProviderWebSearchSetup({ environment, prompts, output, provider: selected });
   if (action === "template-update") return runProviderModelTemplateSetup(catalog.provider, { environment, prompts, output });
   if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });
   if (action === "default") {
@@ -118,16 +195,48 @@ export async function runProviderModelSetup({ environment = process.env, prompts
   let result;
   if (action === "refresh") {
     result = await refreshClinePassCatalog({ provider: catalog.provider, environment, selectModels: selection => promptEnabledProviderModels(prompts, output, { ...selection, label: catalog.displayName }) });
-  } else if (action === "edit") {
+  } else if (action === "edit" || action === "tools") {
     const previous = readResponsesModelCatalog(environment, catalog.provider);
-    const model = await prompts.select({ message: "默认模型（添加新默认模型前请先添加并保存）", options: previous.definitions.map(entry => ({ value: entry.id, label: entry.name })), initialValue: previous.defaultModel });
-    if (prompts.isCancel(model)) return { action: "back" };
-    output.write("此入口添加和编辑模型；移除已有模型请返回选择本地移除。\n");
-    const models = await promptResponsesModels(prompts, model, previous.definitions, output, readCustomProviderUpstreamWireApi(environment, catalog.provider), previous.definitions.map(entry => entry.id));
-    if (!models) return { action: "back" };
-    const input = { provider: catalog.provider, model, models };
+    let models;
+    let model = previous.defaultModel;
+    let probeConnections;
+    if (action === "tools") {
+      const target = await prompts.select({ message: "选择工具能力探测的模型", options: previous.definitions.map(entry => ({ value: entry.id, label: `${entry.name}（${entry.id}）` })) });
+      if (prompts.isCancel(target)) return { action: "back" };
+      const definition = previous.definitions.find(entry => entry.id === target);
+      if (!definition) throw new Error("探测模型选择无效");
+      const material = loadConfiguredRelayProviderMaterial(catalog.provider, environment);
+      const selected = await promptCustomModelCapabilities(prompts, {
+        baseUrl: material.baseUrl, apiKey: material.apiKey, models: [definition],
+        upstreamWireApi: readCustomProviderUpstreamWireApi(environment, catalog.provider), environment,
+      }, { output });
+      if (!selected) return { action: "back" };
+      if (loadConfiguredRelayProviderMaterial(catalog.provider, environment).revision !== material.revision) {
+        throw new Error("探测期间模型或连接配置已变化，请重新打开模型管理");
+      }
+      models = previous.definitions.map(entry => entry.id === target ? selected.models[0] : entry);
+      probeConnections = selected.probeConnections;
+    } else {
+      output.write("此入口添加和编辑模型；移除已有模型请返回选择本地移除。\n");
+      models = await promptResponsesModels(prompts, previous.defaultModel, previous.definitions, output, readCustomProviderUpstreamWireApi(environment, catalog.provider), previous.definitions.map(entry => entry.id));
+      if (!models) return { action: "back" };
+      model = await prompts.select({ message: "选择默认模型", options: models.map(entry => ({ value: entry.id, label: `${entry.name}（${entry.id}）` })), initialValue: previous.defaultModel });
+      if (prompts.isCancel(model)) return { action: "back" };
+    }
+    const input = { provider: catalog.provider, model, models, ...(probeConnections?.length ? { probeConnections } : {}) };
     const preview = await previewCustomProviderModelsSave(input, { environment, expectedCatalogContent: previous.content });
-    output.write(`${JSON.stringify(preview.provider.models, null, 2)}\n默认模型：${model}；连接与凭据保持当前值。\n`);
+    for (const entry of preview.provider.models) {
+      const old = previous.definitions.find(candidate => candidate.id === entry.id);
+      if (!old) {
+        output.write(`新增模型：${JSON.stringify(entry, null, 2)}\n`);
+        continue;
+      }
+      const changes = [...new Set([...Object.keys(old), ...Object.keys(entry)])]
+        .filter(key => !isDeepStrictEqual(old[key], entry[key]))
+        .map(key => `  ${key}：${JSON.stringify(old[key]) ?? "未设置"} → ${JSON.stringify(entry[key]) ?? "未设置"}`);
+      if (changes.length) output.write(`修改模型 ${entry.id}：\n${changes.join("\n")}\n`);
+    }
+    output.write(`默认模型：${previous.defaultModel} → ${model}；未列出的模型字段、连接与凭据保持当前值。\n`);
     if (await prompts.confirm({ message: "备份并保存模型设置？", initialValue: false }) !== true) return { action: "back" };
     result = await applyCustomProviderModelsSave(input, { environment, expectedCatalogContent: previous.content, preview });
   } else if (action === "remove") {
@@ -148,7 +257,7 @@ export async function runProviderModelSetup({ environment = process.env, prompts
       output.write("启用模型目录未变化；已有模型的模板更新请使用对比并更新模型模板。\n");
       return result;
     }
-    output.write(action === "edit" || action === "remove" ? "模型目录已保存并回读。\n" : "模型目录已保存。\n");
+    output.write(["edit", "tools", "remove"].includes(action) ? "模型目录已保存并回读。\n" : "模型目录已保存。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   }
   return result;

@@ -3,18 +3,22 @@ import type { GenerationTiming } from "../runtime/request-timing.mjs"
 import type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 import type { CustomModelCapabilityProbeResult } from "./custom-model-capability-probe.mjs"
+export type { ProviderWebSearchProbeInput as ManagementProviderWebSearchProbeInput, ProviderWebSearchProbeResult as ManagementProviderWebSearchProbeResult } from "./provider-web-search-probe.mjs"
 import type { RelayModelReasoning } from "../runtime/chat-reasoning.mjs";
 export type { RelayModelReasoning } from "../runtime/chat-reasoning.mjs";
 import type { RelayReasoningProbeInput, RelayReasoningProbeResult } from "./relay-reasoning-probe.mjs";
 export type { RelayReasoningProbeInput, RelayReasoningProbeResult, RelayReasoningProbeEvent } from "./relay-reasoning-probe.mjs";
 
-export type ManagementCustomModelProbeResult = CustomModelCapabilityProbeResult & { connectionToken: string }
+export type ManagementCustomModelProbeResult = CustomModelCapabilityProbeResult & (
+  | { capability: "webSearch"; connectionToken?: never }
+  | { capability: "applyPatch" | "toolSearch"; connectionToken: string }
+)
 export interface ManagementCustomModelProbeInput {
   providerId?: string
   baseUrl: string
   model: string
   upstreamWireApi: "responses" | "chat_completions"
-  capability: "applyPatch" | "toolSearch"
+  capability: "applyPatch" | "toolSearch" | "webSearch"
   reasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
   credential: { action: "preserve" } | { action: "replace"; apiKey: string }
 }
@@ -799,7 +803,7 @@ export interface CustomModelDraftTemplatesResponse {
     source: "official" | "deepseek"
     model: string
     displayName: string
-    draft: ResponsesModelDefinition
+    draft: import("./responses-model-templates.mjs").CustomModelDraftDefinition
     suggested: ResponsesModelDefinition
   }>
 }
@@ -810,6 +814,7 @@ export interface ProviderModelTemplateOptionsResponse {
   revision: string
   sourceToken: string
   expiresAt: number
+  availableSections: ProviderModelTemplateSection[]
   targets: Array<{ model: string; displayName: string; template: { source: ProviderModelTemplateSource; model: string } | null }>
   templates: Array<{ source: ProviderModelTemplateSource; model: string; displayName: string }>
 }
