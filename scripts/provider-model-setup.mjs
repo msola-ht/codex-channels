@@ -223,7 +223,8 @@ export async function runProviderModelSetup({ environment = process.env, prompts
       if (prompts.isCancel(model)) return { action: "back" };
     }
     const input = { provider: catalog.provider, model, models, ...(probeConnections?.length ? { probeConnections } : {}) };
-    const preview = await previewCustomProviderModelsSave(input, { environment, expectedCatalogContent: previous.content });
+    const saveOptions = { environment, expectedCatalogContent: previous.content, preserveDefaults: action === "tools" };
+    const preview = await previewCustomProviderModelsSave(input, saveOptions);
     for (const entry of preview.provider.models) {
       const old = previous.definitions.find(candidate => candidate.id === entry.id);
       if (!old) {
@@ -235,9 +236,10 @@ export async function runProviderModelSetup({ environment = process.env, prompts
         .map(key => `  ${key}：${JSON.stringify(old[key]) ?? "未设置"} → ${JSON.stringify(entry[key]) ?? "未设置"}`);
       if (changes.length) output.write(`修改模型 ${entry.id}：\n${changes.join("\n")}\n`);
     }
-    output.write(`默认模型：${previous.defaultModel} → ${model}；未列出的模型字段、连接与凭据保持当前值。\n`);
+    output.write(action === "tools" ? "目录及连接的默认模型、思考等级保持当前值；仅保存所选工具能力。\n"
+      : `默认模型：${previous.defaultModel} → ${model}；未列出的模型字段、连接与凭据保持当前值。\n`);
     if (await prompts.confirm({ message: "备份并保存模型设置？", initialValue: false }) !== true) return { action: "back" };
-    result = await applyCustomProviderModelsSave(input, { environment, expectedCatalogContent: previous.content, preview });
+    result = await applyCustomProviderModelsSave(input, { ...saveOptions, preview });
   } else if (action === "remove") {
     const candidates = catalog.models.filter(entry => !entry.isDefault);
     if (!candidates.length || catalog.models.length < 2) throw new Error("没有可移除的模型；请先调整账户默认模型，并保留至少一个模型");

@@ -41,6 +41,8 @@ export interface CustomPrimaryProviderSaveOptions {
   environment?: NodeJS.ProcessEnv;
   preview?: { revision?: string };
   expectedCatalogContent?: string;
+  /** Internal capability-only saves preserve both catalog and connection selections. */
+  preserveDefaults?: boolean;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CodexUserConfigTransactionClient & {

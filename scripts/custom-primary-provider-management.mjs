@@ -220,7 +220,14 @@ async function buildModelOnlySavePlan(input, options) {
   plan.modelOnly = true;
   plan.modelOnlyFixedProvider = switching ? undefined : fixed;
   plan.credential = undefined;
-  plan.edits = switching ? [] : [
+  plan.preserveDefaults = options.preserveDefaults === true;
+  if (plan.preserveDefaults) {
+    if (input.model !== previous.defaultModel) throw invalid("invalid-input", "model", "工具能力保存不能改变目录默认模型");
+    const selection = switching ? parse(switching.profileContent) : config;
+    plan.sourceState.modelDefaults = { model: selection.model, model_reasoning_effort: selection.model_reasoning_effort };
+    plan.effects = { ...plan.effects, removesTopLevelBaseUrl: false, convertsSwitchingProfile: false, consumesBackupCandidate: false };
+  }
+  plan.edits = switching || plan.preserveDefaults ? [] : [
     { keyPath: "model", value: plan.provider.model },
     { keyPath: "model_reasoning_effort", value: plan.reasoningEffort },
   ];
@@ -311,9 +318,11 @@ async function applySavePlan(input, plan, options) {
   const beforeProfile = existsSync(profilePath) ? read(profilePath) : undefined;
   const transaction = writeResponsesModelCatalog(environment, plan.provider.id, plan.models, plan.provider.model, plan.catalogRevision);
   try {
-    writeProviderRecoveryBackup(plan, environment);
+    if (!plan.preserveDefaults) writeProviderRecoveryBackup(plan, environment);
     const result = await withResponsesModelCatalogWrite(transaction, async () => {
-      const result = await applyConnectionSavePlan(input, plan, options);
+      const result = plan.preserveDefaults
+        ? { action: "updated", provider: plan.provider, activation: "restart-all", effects: plan.effects, warnings: [] }
+        : await applyConnectionSavePlan(input, plan, options);
       await confirmProviderSave(plan, options, transaction);
       return result;
     });
@@ -323,7 +332,7 @@ async function applySavePlan(input, plan, options) {
     if (error?.code === "save-unconfirmed") throw error;
     const afterConfig = existsSync(configPath) ? read(configPath) : undefined;
     const afterProfile = existsSync(profilePath) ? read(profilePath) : undefined;
-    if (beforeConfig === afterConfig && (afterProfile === beforeProfile || (plan.switchingProvider && afterProfile === undefined))) {
+    if (beforeConfig === afterConfig && (afterProfile === beforeProfile || (!plan.preserveDefaults && plan.switchingProvider && afterProfile === undefined))) {
       finishResponsesModelCatalogWrite(transaction, true);
       if (plan.switchingProvider && !existsSync(customPrimaryProviderProfilePath(environment, plan.provider.id))) {
         restoreCustomPrimaryProviderSwitchingProfile(environment, plan.provider.id, plan.switchingProvider.profileContent);
@@ -366,15 +375,19 @@ async function confirmProviderSave(plan, options, transaction) {
       const actual = profiles.find(entry => entry.id === plan.provider.id);
       if (!isDeepStrictEqual(config.model_provider, "openai") && config.model_provider !== undefined) throw new Error("主提供商已变化");
       const expectedIds = [...new Set([...plan.registeredProviderIds, plan.provider.id])].sort();
+      const expectedModel = plan.preserveDefaults ? plan.sourceState.modelDefaults.model : plan.provider.model;
+      const expectedEffort = plan.preserveDefaults ? plan.sourceState.modelDefaults.model_reasoning_effort : plan.reasoningEffort;
       if (!actual || actual.name !== plan.provider.displayName || actual.baseUrl !== plan.provider.baseUrl
-        || actual.apiKey !== plan.apiKey || actual.model !== plan.provider.model
+        || actual.apiKey !== plan.apiKey || actual.model !== expectedModel
         || actual.supportsWebsockets !== plan.provider.supportsWebsockets || actual.upstreamWireApi !== plan.upstreamWireApi
-        || plan.models && actual.reasoningEffort !== plan.reasoningEffort
+        || plan.models && actual.reasoningEffort !== expectedEffort
         || !isDeepStrictEqual(profiles.map(entry => entry.id).sort(), expectedIds)) throw new Error("模型默认值或连接配置回读不一致");
       if (plan.modelOnly) {
         const expected = parse(plan.switchingProvider.profileContent);
-        expected.model = plan.provider.model;
-        expected.model_reasoning_effort = plan.reasoningEffort;
+        if (!plan.preserveDefaults) {
+          expected.model = plan.provider.model;
+          expected.model_reasoning_effort = plan.reasoningEffort;
+        }
         if (!isDeepStrictEqual(parse(actual.profileContent), expected)) throw new Error("模型专用保存改变了连接配置");
       }
       if (plan.connectionOnly) {
@@ -396,7 +409,7 @@ async function confirmProviderSave(plan, options, transaction) {
         || primary.upstreamWireApi !== plan.upstreamWireApi
         || loadConfiguredCustomPrimaryCredential(environment, primary)?.apiKey !== plan.apiKey
         || loadCustomSwitchingProviderIds(environment).length !== 0
-        || plan.connectionOnly && (!isDeepStrictEqual(config.model, plan.sourceState.modelDefaults.model)
+        || (plan.connectionOnly || plan.preserveDefaults) && (!isDeepStrictEqual(config.model, plan.sourceState.modelDefaults.model)
           || !isDeepStrictEqual(config.model_reasoning_effort, plan.sourceState.modelDefaults.model_reasoning_effort))
         || plan.modelOnly && !isDeepStrictEqual(provider, plan.modelOnlyFixedProvider)) throw new Error("模型默认值或连接配置回读不一致");
     }

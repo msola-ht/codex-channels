@@ -219,6 +219,7 @@
   同一文件锁内原子写入私有 Profile；整体保存绑定包含连接与凭据状态的预览修订，CLI 编辑另复核打开时的文件快照，拒绝旧草稿覆盖并发修改。切换模式在预览前要求可读取的主配置。统一返回生效动作和备份清理警告；CLI
   继续负责字段询问、危险修改确认和中文渲染。
   已有 CP 的连接专用计划拒绝模型字段，保留目录、所选模型及独立思考默认值；CLI 与 WebUI 共用此接口。连接保存前使用现有私有 Provider 快照，回读失败返回 `save-unconfirmed`，须核对快照人工恢复，不生成模型目录 pending。
+  CLI 单模型工具能力保存使用内部 `preserveDefaults` 选项，只保存目录并回读原连接选择；不重写 Profile／主配置或连接恢复快照。普通整表模型编辑仍可明确修改默认模型。
 - `model-provider-management.mjs` / `model-provider-management.d.mts`：统一返回 OpenAI 默认值、当前主
   Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选和受管模型目录的
   脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
