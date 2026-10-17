@@ -438,6 +438,7 @@ CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，读�
 App Server 服务在确认实例就绪前也通过带启动 Workspace CWD 的 `config/read` 核对 Provider 与统一请求策略；第三方和聚合必须保留显式注入的 300 秒完整事件空闲、15 秒 WebSocket 建连、HTTP 重试 4 次及流重试 5 次，匹配锁定 Codex 默认。受管 Provider 覆盖冲突或缺失必要响应会阻止就绪。内置 OpenAI 保留官方默认，不把原始同名 TOML 块当作已覆盖生效。所有实例的网络重连开关与 WS→HTTP 降级交由 Codex 原生配置和要求控制，不施加第三方专属覆盖。
 WebUI 的 Codex 和 Provider 配置读取通过 `scripts/codex-user-config.mjs` 的共享 Client 连接已有主 App Server，关闭连接不停止服务，也不在服务不可用时启动临时进程。
 Codex 设置读取沿用 `model/list` 查询已有目录；每次读取后立即断开连接，不获取 Supervisor 保活租约或唤醒已释放实例，模型相关保存仍执行原有目录校验。
+WebUI 的 OpenAI 缓存卡片独立通过 `scripts/webui-official-model-catalog.mjs` 读写当前 Codex Home 的 `models_cache.json`；逐模型上下文编辑保留其他字段，刷新仅在确认后运行 `debug models` 并对比缓存实际变化，不保证远程刷新，不提供内置目录覆盖。预览确认、备份与覆盖风险见 [WebUI 指南](webui.md)，此文件视图不代表 App Server 内存中的 `model/list` 结果，不增加 RPC 能力。
 
 Auto-review 用户层偏好只写入稳定 `approvals_reviewer` 字段，并用 `configRequirements/read`
 读取受控实验 `allowedApprovalsReviewers` 及稳定 `featureRequirements` 的相关限制；`ConfigRequirementsReadResponse`

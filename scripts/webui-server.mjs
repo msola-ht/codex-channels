@@ -95,6 +95,7 @@ import { routeStatusManagement } from "./webui-management-status-route.mjs";
 import { routeTaskManagement } from "./webui-management-task-route.mjs";
 import { routeLogsApi } from "./webui-logs-route.mjs";
 import { webuiLogger } from "./webui-logger.mjs";
+import { closeOfficialModelOperations } from "./webui-management-official-model-route.mjs";
 
 const logger = webuiLogger.child({ module: "http" });
 
@@ -189,10 +190,11 @@ export function createWebuiServer({
     const results = await Promise.allSettled([
       Promise.resolve().then(() => closeQueueStreams(management)),
       metricsExports.close(), closeDeliveryReaders(), closeDeliveryJournals(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
+      closeOfficialModelOperations(management),
     ]);
     if (results.some(result => result.status === "rejected")) throw new Error("WebUI 后台资源退出未确认");
   }, waitForNotificationsExit: async () => {
-    await Promise.all([metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit()]);
+    await Promise.all([metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management)]);
   } };
 }
 

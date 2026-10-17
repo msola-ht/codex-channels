@@ -5,10 +5,12 @@ import { useAccountSettingsManagement } from "@/hooks/use-account-settings-manag
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { useModelDisplayRefresh } from "@/hooks/use-model-display-settings"
+import { useOpenAiModelCatalog } from "@/hooks/use-openai-model-catalog"
 import { ModelDisplayGroups } from "@/components/settings/model-display-groups"
 import { useTranslation } from "@/hooks/use-translation"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { fetchManagementProviders, fetchSettingsSummary } from "@/lib/api"
+import { OpenAiModelCatalogCard } from "@/components/settings/openai-model-catalog-card"
 import { ProviderSettingsManagement } from "@/components/settings/provider-settings-management"
 import { AccountSettingsManagement } from "@/components/settings/account-settings-management"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
@@ -48,14 +50,17 @@ export function ModelAccountsPage() {
 
 export function ModelConfigurationPage() {
   const { t } = useTranslation()
+  const catalog = useOpenAiModelCatalog()
+  const reloadCatalog = catalog.refresh
   const codex = useCodexSettingsManagement()
   const providers = useProviderSettingsManagement()
   const gateway = useSettingsManagement()
   const refreshModelDisplay = useModelDisplayRefresh()
   const reloadCodex = codex.refetch, reloadProviders = providers.refetch, reloadGateway = gateway.refetch
-  const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway() }, [reloadCodex, reloadProviders, reloadGateway])
+  const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog])
   const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
-  return <SettingsPageFrame title="modelManagement.models" busy={busy} refresh={refresh}>
+  return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy} refresh={refresh}>
+    <OpenAiModelCatalogCard catalog={catalog} disabled={busy} />
     <ProviderSettingsManagement management={providers} section="models" onChanged={reloadCodex} />
     <AppServerSettingsCard management={codex} section="models" onChanged={reloadProviders} />
     <ModelDisplayGroups management={gateway} providers={providers.settings} disabled={busy || gateway.error !== null} />

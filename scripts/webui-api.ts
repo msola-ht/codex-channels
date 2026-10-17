@@ -592,6 +592,56 @@ export interface ManagementSettingMutationResponse {
   confirmationExpiresAt?: number
 }
 
+export interface OpenAiModelCatalogResponse {
+  source: "codex-cache"
+  revision: string
+  scope: string
+  fetchedAt: string
+  clientVersion: string | null
+  models: Array<{
+    model: string
+    displayName: string
+    contextWindow: number | null
+    maxContextWindow: number | null
+    reasoningEfforts: string[]
+    defaultReasoningEffort: string | null
+    serviceTiers: Array<{ id: string; name: string; description: string | null; speedMultiplier: number | null }>
+    approvals: Array<{ mode: "on_request" | "on_request_auto_review" | "never" | "unless_trusted"; state: "default" | "empty" | "custom" }>
+    editable: boolean
+    details: import("./webui-official-model-catalog.mjs").OpenAiModelDetails
+  }>
+}
+
+export interface OpenAiModelContextInput {
+  revision: string
+  model: string
+  contextWindow: number
+}
+
+export interface OpenAiModelContextPreview extends OpenAiModelContextInput {
+  scope: string
+  displayName: string
+  previousContextWindow: number | null
+  maxContextWindow: number | null
+}
+
+export interface OpenAiModelContextResult {
+  revision: string | null
+  scope: string
+  model: string
+  contextWindow: number
+  consistency: "confirmed" | "unknown"
+  backupCreated: true
+  auditStatus: "recorded" | "degraded"
+}
+
+export interface OpenAiModelRefreshInput { revision: string }
+export type OpenAiModelPromptsResponse = import("./webui-official-model-catalog.mjs").OpenAiModelPrompts
+export type OpenAiModelRefreshPreview = import("./webui-official-model-catalog.mjs").OpenAiModelRefreshPreview
+export type OpenAiModelRefreshResult = import("./webui-official-model-catalog.mjs").OpenAiModelRefreshResult & {
+  auditStatus: "recorded" | "degraded"
+}
+
 export interface CodexUserSettingsResponse {
   toolSettings: import("./codex-tool-settings.mjs").CodexToolSettings
   version: string

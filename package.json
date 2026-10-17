@@ -202,6 +202,8 @@
     "scripts/webui-management-task-route.mjs",
     "scripts/webui-management-tasks.mjs",
     "scripts/webui-provider-settings-management.mjs",
+    "scripts/webui-official-model-catalog.mjs",
+    "scripts/webui-management-official-model-route.mjs",
     "scripts/webui-custom-model-probe.mjs",
     "scripts/webui-server.mjs",
     "scripts/webui-queue-events.mjs",
