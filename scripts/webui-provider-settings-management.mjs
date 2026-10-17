@@ -1,5 +1,5 @@
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
-import { loadProviderModelCatalogs, previewProviderModelRemoval, applyProviderModelRemoval, ProviderModelManagementError } from "./provider-model-management.mjs";
+import { loadProviderModelCatalogPresentations, previewProviderModelRemoval, applyProviderModelRemoval, ProviderModelManagementError } from "./provider-model-management.mjs";
 import {
   applyManagedProviderDefaultChange,
   previewManagedProviderDefaultChange,
@@ -37,7 +37,7 @@ export async function loadProviderSettingsResource(
     const state = await loadProviderState({ environment });
     return {
       ...projectProviderSettings(state),
-      modelCatalogs: (await loadProviderModelCatalogs({ environment })).catalogs,
+      modelCatalogs: (await loadProviderModelCatalogPresentations({ environment })).catalogs,
       modelWindow: projectModelWindow(
         loadManagedModelWindow(environment),
       ),

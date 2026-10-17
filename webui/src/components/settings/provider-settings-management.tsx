@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useTranslation } from "@/hooks/use-translation"
 import { formatModelLabel } from "@/lib/format"
 
@@ -23,17 +23,27 @@ import type { ManagementProviderSettingsResponse } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 import type { MessageKey } from "@/lib/i18n/messages"
 import { CustomModelDetails, CustomModelDetailsPreview } from "@/components/settings/custom-model-details"
+import type { ModelCatalogGroup } from "@/components/settings/model-catalog-columns"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { OpenAiModelDetails } from "@/components/settings/openai-model-details"
 import type { CustomModelDraft } from "@/components/settings/custom-model-details"
 import { contextWindowPresetTokens } from "../../../../runtime/model-catalog.mjs"
 
 const probeReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
-export function ProviderSettingsManagement({ management, onChanged, section }: { management: ProviderSettingsController; onChanged?: () => void; section: "providers" | "models" | "context" }) {
+type ProviderSettingsManagementProps = {
+  management: ProviderSettingsController
+  onChanged?: () => void
+} & ({ section: "models"; renderCatalog: (groups: ModelCatalogGroup[]) => ReactNode } | { section: "providers" | "context"; renderCatalog?: never })
+
+export function ProviderSettingsManagement({ management, onChanged, section, renderCatalog }: ProviderSettingsManagementProps) {
   const { t } = useTranslation()
   const settings = management.settings
-  if (management.loading && settings === null) return <LoadingSettingsCard title={t("managementUi.providerSettings")} />
-  if (settings === null) return <SettingsError message={management.error ?? t("managementUi.providerSettingsUnavailable")} retry={management.refetch} />
-  return <>{management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : null}<ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} section={section} /></>
+  if (settings === null) {
+    const content = management.loading ? renderCatalog ? <p aria-busy="true">{t("common.loading")}</p> : <LoadingSettingsCard title={t("managementUi.providerSettings")} /> : <SettingsError message={management.error ?? t("managementUi.providerSettingsUnavailable")} retry={management.refetch} />
+    return renderCatalog ? renderCatalog([{ id: "third-party-status", header: t("modelCatalog.title"), models: [], onSelect: () => {}, renderAction: () => null, content }]) : content
+  }
+  return <>{management.error !== null && !renderCatalog ? <SettingsError message={management.error} retry={management.refetch} /> : null}<ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} section={section} renderCatalog={renderCatalog} /></>
 }
 
 function ProviderSettingsCard({
@@ -41,14 +51,21 @@ function ProviderSettingsCard({
   management,
   onChanged,
   section,
+  renderCatalog,
 }: {
   section: "providers" | "models" | "context"
   settings: ManagementProviderSettingsResponse
   management: ProviderSettingsController
   onChanged?: () => void
+  renderCatalog?: (groups: ModelCatalogGroup[]) => ReactNode
 }) {
   const { t } = useTranslation()
   const [editorOpen, setEditorOpen] = useState(false)
+  const [selectedModel, setSelectedModel] = useState<{ provider: string; model: string; revision: string } | null>(null)
+  const selectedCatalog = settings.modelCatalogs.find(catalog => catalog.provider === selectedModel?.provider)
+  const detailsStale = selectedModel !== null && selectedCatalog?.revision !== selectedModel.revision
+  const detailModel = !management.loading && management.error === null && !detailsStale
+    ? selectedCatalog?.models.find(entry => entry.id === selectedModel?.model)?.presentation ?? null : null
   const [editorRevision, setEditorRevision] = useState<string | null>(null)
   const [originalModelCount, setOriginalModelCount] = useState(0)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -226,31 +243,45 @@ function ProviderSettingsCard({
     if (result !== null) onChanged?.()
   }
 
-  return <Card>
+  const catalogGroups: ModelCatalogGroup[] = settings.modelCatalogs.map(catalog => {
+    const custom = candidates.find(candidate => candidate.id === catalog.provider && candidate.catalog === "custom" && (("mode" in candidate && candidate.mode === "switching") || ("active" in candidate && candidate.active)))
+    return {
+      id: `provider:${catalog.provider}`,
+      header: <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col gap-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{catalog.displayName}</h3><Badge variant="outline">{t(catalog.source === "managed" ? "modelCatalog.sourceManaged" : catalog.source === "custom" ? "modelCatalog.sourceCustom" : "modelCatalog.sourceOfficial")}</Badge></div>
+          <p className="text-xs font-normal text-muted-foreground">{t("modelCatalog.scope", { providers: catalog.providers.join(t("managementUi.listSeparator")) })}</p>
+        </div>
+        {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
+      </div>,
+      models: catalog.models.map(entry => ({ ...entry.presentation, isDefault: entry.isDefault })),
+      onSelect: model => setSelectedModel({ provider: catalog.provider, model: model.model, revision: catalog.revision }),
+      renderAction: model => {
+        const reason = model.isDefault ? t("modelCatalog.defaultProtected") : catalog.models.length <= 1 ? t("modelCatalog.lastProtected") : !catalog.canRemove ? t("modelCatalog.unsupported") : undefined
+        const action = <Button variant="outline" size="sm" disabled={busy || pending !== null || reason !== undefined} onClick={() => void management.mutate({ operation: "model.remove", provider: catalog.provider, model: model.model })}>{t("modelCatalog.remove")}</Button>
+        return reason ? <Tooltip><TooltipTrigger render={<span tabIndex={0} className="inline-flex cursor-help" aria-label={reason} />}>{action}</TooltipTrigger><TooltipContent>{reason}</TooltipContent></Tooltip> : action
+      },
+      content: management.loading ? <p>{t("common.loading")}</p> : management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : catalog.models.length === 0 ? <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty> : undefined,
+      footer: !catalog.canRemove ? <p className="text-muted-foreground">{catalog.unavailableReason === "deepseek-template-source" ? t("modelCatalog.deepseek") : catalog.unavailableReason === "shared-accounts-incomplete" ? t("modelCatalog.accountsIncomplete") : catalog.unavailableReason === "official-catalog-unavailable" ? t("modelCatalog.officialUnavailable") : catalog.unavailableReason === "official-shared-catalog" ? t("modelCatalog.official") : t("modelCatalog.unsupported")}</p> : undefined,
+    }
+  })
+  if (catalogGroups.length === 0) catalogGroups.push({
+    id: "third-party-status", header: t("modelCatalog.title"), models: [], onSelect: () => {}, renderAction: () => null,
+    content: management.loading ? <p>{t("common.loading")}</p> : management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty>,
+  })
+
+  const feedback = <>
+    {management.actionError !== null && <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert>}
+    <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
+  </>
+
+  return <>{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}<Card>
     <CardHeader>
-      <CardTitle>{section === "providers" ? t("managementUi.customProviders") : section === "models" ? t("modelCatalog.title") : t("managementUi.managedWindows")}</CardTitle>
-      <CardDescription>{section === "providers" ? t("managementUi.customProvidersHint") : section === "models" ? t("modelCatalog.hint") : t("managementUi.managedWindowsHint")}</CardDescription>
+      <CardTitle>{section === "providers" ? t("managementUi.customProviders") : section === "models" ? t("managementUi.managedDefaults") : t("managementUi.managedWindows")}</CardTitle>
+      <CardDescription>{section === "providers" ? t("managementUi.customProvidersHint") : section === "models" ? t("managementUi.managedDefaultsDetail") : t("managementUi.managedWindowsHint")}</CardDescription>
     </CardHeader>
     <CardContent className="flex flex-col gap-6 text-sm">
+      {section === "models" && <Alert><AlertDescription>{t("modelCatalog.cliManaged")} <code>codexc setup</code></AlertDescription></Alert>}
       {section === "models" && <section className="flex flex-col gap-3">
-        {settings.modelCatalogs.length === 0 ? <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty> : settings.modelCatalogs.map(catalog => {
-          const custom = candidates.find(candidate => candidate.id === catalog.provider && candidate.catalog === "custom" && (("mode" in candidate && candidate.mode === "switching") || ("active" in candidate && candidate.active)))
-          return <section key={catalog.provider} className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center justify-between gap-2"><div><h4 className="font-medium">{catalog.displayName}</h4><p className="text-xs text-muted-foreground">{t("modelCatalog.scope", { providers: catalog.providers.join(t("managementUi.listSeparator")) })}</p></div>{custom ? <Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button> : null}</div>
-            {!catalog.canRemove ? <p className="text-muted-foreground">{catalog.unavailableReason === "deepseek-template-source" ? t("modelCatalog.deepseek") : catalog.unavailableReason === "shared-accounts-incomplete" ? t("modelCatalog.accountsIncomplete") : catalog.unavailableReason === "official-catalog-unavailable" ? t("modelCatalog.officialUnavailable") : catalog.unavailableReason === "official-shared-catalog" ? t("modelCatalog.official") : t("modelCatalog.unsupported")}</p> : null}
-            <Table><TableHeader><TableRow><TableHead>{t("modelManagement.model")}</TableHead><TableHead>{t("channelSettings.state")}</TableHead><TableHead>{t("modelManagement.actions")}</TableHead></TableRow></TableHeader><TableBody>{catalog.models.map(entry => {
-              const reason = entry.isDefault ? t("modelCatalog.defaultProtected") : catalog.models.length <= 1 ? t("modelCatalog.lastProtected") : !catalog.canRemove ? t("modelCatalog.unsupported") : undefined
-              return <TableRow key={entry.id}><TableCell><div className="flex flex-col gap-1"><span>{entry.displayName}</span><span className="text-xs text-muted-foreground">{entry.id}</span></div></TableCell><TableCell>{entry.isDefault ? <Badge variant="secondary">{t("managementUi.defaultModel")}</Badge> : "—"}</TableCell><TableCell><div className="flex flex-col items-start gap-1"><Button variant="destructive" size="sm" disabled={busy || pending !== null || reason !== undefined} onClick={() => void management.mutate({ operation: "model.remove", provider: catalog.provider, model: entry.id })}>{t("modelCatalog.remove")}</Button>{reason ? <span className="text-xs text-muted-foreground">{reason}</span> : null}</div></TableCell></TableRow>
-            })}</TableBody></Table>
-          </section>
-        })}
-        <Alert><AlertDescription>{t("modelCatalog.cliManaged")} <code>codexc setup</code></AlertDescription></Alert>
-      </section>}
-      {section === "models" && <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <div><h3 className="font-medium">{t("managementUi.managedDefaults")}</h3><p className="text-xs text-muted-foreground">{t("managementUi.managedDefaultsDetail")}</p></div>
-          <Badge variant="outline">{t("managementUi.count", { count: settings.managedProviders.length })}</Badge>
-        </div>
         {managed === undefined ? <SettingsEmpty>{t("managementUi.managedProvidersEmpty")}</SettingsEmpty> : <>
           <FieldGroup>
             <ManagedSelect label={t("managementUi.provider")} value={managed.id} options={settings.managedProviders.map((provider) => [provider.id, provider.displayName])} disabled={busy || pending !== null} onChange={setManagedProvider} />
@@ -363,10 +394,11 @@ function ProviderSettingsCard({
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
         </DialogContent></Dialog>}
       {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
-      {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
-      <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
+      {section !== "models" && feedback}
     </CardContent>
   </Card>
+    {section === "models" && <OpenAiModelDetails model={detailModel} revision={selectedModel?.revision ?? null} provider={selectedModel?.provider} stale={detailsStale} open={selectedModel !== null} loading={management.loading} onClose={() => setSelectedModel(null)} onReload={() => { setSelectedModel(null); management.refetch() }} />}
+  </>
 }
 
 function ProviderSettingsConfirmationDialog({

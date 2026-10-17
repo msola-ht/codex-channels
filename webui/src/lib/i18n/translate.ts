@@ -25,6 +25,9 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  provider_models_invalid_input: "modelCatalog.promptsInvalid",
+  provider_models_stale_revision: "modelCatalog.detailsStale",
+  provider_models_unavailable: "modelCatalog.promptsUnavailable",
   "invalid-auto-compact-limit": "customModel.invalidAutoCompact",
   invalid_custom_model_probe: "modelProbe.invalid",
   custom_model_probe_credential_required: "modelProbe.credentialRequired",

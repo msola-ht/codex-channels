@@ -11,6 +11,7 @@ import { useTranslation } from "@/hooks/use-translation"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { fetchManagementProviders, fetchSettingsSummary } from "@/lib/api"
 import { OpenAiModelCatalogCard } from "@/components/settings/openai-model-catalog-card"
+import { ModelCatalogTable } from "@/components/settings/model-catalog-columns"
 import { ProviderSettingsManagement } from "@/components/settings/provider-settings-management"
 import { AccountSettingsManagement } from "@/components/settings/account-settings-management"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
@@ -60,8 +61,14 @@ export function ModelConfigurationPage() {
   const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog])
   const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
   return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy} refresh={refresh}>
-    <OpenAiModelCatalogCard catalog={catalog} disabled={busy} />
-    <ProviderSettingsManagement management={providers} section="models" onChanged={reloadCodex} />
+    <OpenAiModelCatalogCard catalog={catalog} disabled={busy} renderCatalog={official =>
+      <ProviderSettingsManagement management={providers} section="models" onChanged={reloadCodex} renderCatalog={thirdParty =>
+        <Card>
+          <CardHeader><CardTitle>{t("modelCatalog.title")}</CardTitle><CardDescription>{t("modelCatalog.unifiedHint")}</CardDescription></CardHeader>
+          <CardContent><ModelCatalogTable label={t("modelCatalog.title")} groups={[official, ...thirdParty]} /></CardContent>
+        </Card>
+      } />
+    } />
     <AppServerSettingsCard management={codex} section="models" onChanged={reloadProviders} />
     <ModelDisplayGroups management={gateway} providers={providers.settings} disabled={busy || gateway.error !== null} />
     <Card><CardHeader><CardTitle>{t("modelManagement.channelModel")}</CardTitle><CardDescription>{t("modelManagement.channelModelHint")}</CardDescription></CardHeader><CardContent>

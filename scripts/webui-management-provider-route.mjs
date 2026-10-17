@@ -36,6 +36,7 @@ import { invalidateServiceStatusSummary } from "./webui-service-status.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
 import { routeCustomModelCapabilityProbe } from "./webui-custom-model-probe.mjs";
 import { routeOfficialModelManagement } from "./webui-management-official-model-route.mjs";
+import { loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
 
 export async function routeProviderManagement({
   configPath,
@@ -49,6 +50,25 @@ export async function routeProviderManagement({
   state,
 }) {
   if (await routeOfficialModelManagement({ environment, maximumBodyBytes, path, principalId, request, response, state })) return true;
+  if (path === "/provider-model-prompts" && request.method === "GET") {
+    const params = new URL(request.url, "http://localhost").searchParams;
+    if (params.size !== 3 || ["provider", "model", "revision"].some(key => params.getAll(key).length !== 1)) {
+      throw new ApiError(400, "provider_models_invalid_input", "模型提示词请求参数无效");
+    }
+    try {
+      const result = await loadProviderModelPrompts(Object.fromEntries(params), { environment });
+      sendManagementJson(response, 200, result);
+    } catch (error) {
+      if (error instanceof ProviderModelManagementError && error.code === "stale-preview") {
+        throw new ApiError(409, "provider_models_stale_revision", "模型目录已变化，请刷新");
+      }
+      if (error instanceof ProviderModelManagementError && error.code === "invalid-input") {
+        throw new ApiError(400, "provider_models_invalid_input", "模型提示词请求参数无效");
+      }
+      throw new ApiError(503, "provider_models_unavailable", "模型目录无法安全读取");
+    }
+    return true;
+  }
   if (await routeCustomModelCapabilityProbe({ environment, maximumBodyBytes, path, request, response, state })) return true;
   if (await routeResetCredits({ configPath, maximumBodyBytes, path, principalId, request, response, state })) return true;
   if (path === "/accounts/sources" && request.method === "GET") {

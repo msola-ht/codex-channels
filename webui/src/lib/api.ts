@@ -23,6 +23,7 @@ import type {
   ManagementProvidersResponse,
   OpenAiModelCatalogResponse,
   OpenAiModelPromptsResponse,
+  ProviderModelPromptsResponse,
   OpenAiModelContextInput,
   OpenAiModelContextPreview,
   OpenAiModelContextResult,
@@ -403,6 +404,10 @@ export function fetchOpenAiModelCatalog(signal?: AbortSignal): Promise<OpenAiMod
 
 export function fetchOpenAiModelPrompts(model: string, revision: string, signal?: AbortSignal): Promise<OpenAiModelPromptsResponse> {
   return getJson(`${API_PREFIX}/management/models/official/prompts?${new URLSearchParams({ model, revision })}`, signal)
+}
+
+export function fetchProviderModelPrompts(provider: string, model: string, revision: string, signal?: AbortSignal): Promise<ProviderModelPromptsResponse> {
+  return getJson(`${API_PREFIX}/management/provider-model-prompts?${new URLSearchParams({ provider, model, revision })}`, signal)
 }
 
 export function previewOpenAiModelContext(input: OpenAiModelContextInput, signal?: AbortSignal): Promise<{ preview: OpenAiModelContextPreview; confirmationToken: string; confirmationExpiresAt: number }> {

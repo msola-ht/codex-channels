@@ -12,9 +12,11 @@ import { createResponsesModelCatalog, isCustomCatalogProvider, readResponsesMode
 import { validateGatewayConfigStructureDocument, parseGatewayConfig } from "../runtime/gateway-config.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
-import { snapshotProviderFiles, assertProviderFileSnapshots, applyProviderFileUpdates, readOptionalProviderFile } from "./managed-provider-files.mjs";
+import { snapshotProviderFiles, assertProviderFileSnapshots, applyProviderFileUpdates } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
+import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
+import { projectModelCatalogEntries, projectModelPrompts } from "../runtime/model-catalog-presentation.mjs";
 
 // Revisions cover private profiles too; avoid exposing a reusable credential fingerprint.
 const revisionSecret = randomBytes(32);
@@ -60,6 +62,83 @@ export async function loadProviderModelCatalogs({ environment = process.env } = 
     }
     return { catalogs };
   } catch (error) { throw stateError(error); }
+}
+
+/** Presentation is derived from the saved source, never from global window aggregates. */
+export async function loadProviderModelCatalogPresentations({ environment = process.env } = {}) {
+  try {
+    const { catalogs } = await loadProviderModelCatalogs({ environment });
+    const result = catalogs.map(catalog => {
+      const snapshot = readPresentationSnapshot(catalog, environment);
+      return { ...catalog, source: snapshot.source, revision: snapshot.revision,
+        models: snapshot.models.map(presentation => ({
+          id: presentation.model, displayName: presentation.displayName,
+          isDefault: catalog.models.some(model => model.id === presentation.model && model.isDefault),
+          presentation,
+        })) };
+    });
+    // Account defaults and membership must not change between the discovery and projection.
+    const current = await loadProviderModelCatalogs({ environment });
+    if (JSON.stringify(current.catalogs) !== JSON.stringify(catalogs)) {
+      throw invalid("stale-preview", "provider", "模型目录或账户已变化，请刷新");
+    }
+    return { catalogs: result };
+  } catch (error) { throw stateError(error); }
+}
+
+export async function loadProviderModelPrompts(input, { environment = process.env } = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || Object.keys(input).some(key => !["provider", "model", "revision"].includes(key))
+    || typeof input.revision !== "string" || !/^[a-f0-9]{64}$/u.test(input.revision)) {
+    throw invalid("invalid-input", "revision", "模型提示词请求参数无效");
+  }
+  validateInput({ provider: input.provider, model: input.model });
+  try {
+    const { catalogs } = await loadProviderModelCatalogs({ environment });
+    const catalog = catalogs.find(entry => entry.provider === input.provider);
+    if (!catalog) throw invalid("stale-preview", "provider", "提供商目录已变化，请刷新");
+    const snapshot = readPresentationSnapshot(catalog, environment);
+    if (snapshot.revision !== input.revision) throw invalid("stale-preview", "revision", "模型目录已变化，请刷新");
+    if (!snapshot.models.some(model => model.model === input.model)) {
+      throw invalid("invalid-input", "model", "模型不在当前可见目录中");
+    }
+    const model = snapshot.document.models.find(entry => entry.slug === input.model);
+    const definition = snapshot.document.definitions?.find(entry => entry.id === input.model);
+    return { revision: snapshot.revision, model: input.model, groups: projectModelPrompts(model.model_messages),
+      ...(definition?.template === undefined ? {} : { template: definition.template }),
+      ...(definition?.sampling === undefined ? {} : { sampling: definition.sampling }) };
+  } catch (error) { throw stateError(error); }
+}
+
+function readPresentationSnapshot(catalog, environment) {
+  const family = managedProviderAccountFamilies.find(entry => entry.proxyKey === catalog.provider);
+  const custom = isCustomCatalogProvider(catalog.provider);
+  const source = family ? "managed" : custom ? "custom" : "official-shared";
+  let content, document;
+  if (custom) {
+    const saved = readResponsesModelCatalog(environment, catalog.provider);
+    content = saved.content;
+    document = saved;
+  } else {
+    const path = family
+      ? join(managedProviderDirectory(environment, family.definition), family.definition.catalogFileName)
+      : customOfficialModelCatalogPath(environment);
+    try { content = createProviderFileReader(environment)(path, family ? 2_097_152 : 8_388_608); }
+    catch (error) {
+      if (!family && error?.code === "ENOENT" && catalog.models.length === 0) content = "";
+      else throw error;
+    }
+    document = content === "" ? { models: [] } : parseJson(content);
+    if (family) validateManagedCatalog(document, family.definition);
+  }
+  const models = document.models.length === 0 ? [] : projectModelCatalogEntries(document.models);
+  const expected = catalog.models.map(model => model.id).sort();
+  if (JSON.stringify(models.map(model => model.model).sort()) !== JSON.stringify(expected)) {
+    throw invalid("stale-preview", "provider", "目录模型已变化，请刷新");
+  }
+  const revision = createHmac("sha256", revisionSecret)
+    .update(JSON.stringify([catalog.provider, catalog.providers, catalog.models, content])).digest("hex");
+  return { source, revision, document, models };
 }
 
 export async function previewProviderModelRemoval(input, { environment = process.env } = {}) {
@@ -256,8 +335,9 @@ function gatewaySnapshot(environment) {
 }
 
 async function savedOfficialModels(environment) {
-  const content = await readOptionalProviderFile(customOfficialModelCatalogPath(environment), environment);
-  if (content === undefined) return [];
+  let content;
+  try { content = createProviderFileReader(environment)(customOfficialModelCatalogPath(environment), 8_388_608); }
+  catch (error) { if (error?.code === "ENOENT") return []; throw error; }
   const catalog = parseJson(content);
   if (!Array.isArray(catalog.models)) throw invalid("provider-state-unavailable", "provider", "官方共享模型目录无效");
   return catalog.models.filter(model => model.supported_in_api && model.visibility === "list")

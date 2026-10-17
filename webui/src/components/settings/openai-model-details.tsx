@@ -20,27 +20,30 @@ const groups = [
   { title: "runtime", fields: ["effective_context_window_percent", "auto_compact_token_limit", "supports_experimental_context", "supports_reasoning_effort_updates", "node_repl_disabled", "node_repl_auto_review_required", "multi_agent_version", "multi_agent_reasoning_effort", "use_responses_lite"] },
 ] as const
 
-export function OpenAiModelDetails({ model, revision, open, loading, onClose, onReload }: {
+export function OpenAiModelDetails({ model, revision, open, loading, onClose, onReload, provider, stale = false }: {
   model: Model | null
   revision: string | null
   open: boolean
   loading: boolean
   onClose: () => void
   onReload: () => void
+  provider?: string
+  stale?: boolean
 }) {
   const { t } = useTranslation()
   return <Sheet open={open} onOpenChange={value => { if (!value) onClose() }}>
     <SheetContent closeLabel={t("common.close")} className="overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-xl">
       <SheetHeader>
         <SheetTitle>{model?.displayName ?? t("openAiModelDetails.title")}</SheetTitle>
-        <SheetDescription>{t("openAiModelDetails.hint")}</SheetDescription>
+        <SheetDescription>{t(provider === undefined ? "openAiModelDetails.hint" : "modelCatalog.detailsHint")}</SheetDescription>
+        {provider !== undefined && model && <code className="break-all text-xs text-muted-foreground">{provider} · {model.model}</code>}
       </SheetHeader>
       <div className="flex flex-col gap-6 px-4 pb-6">
-        {loading ? <Skeleton className="h-40 w-full" /> : model && revision && open ? <Tabs key={`${model.model}:${revision}`} defaultValue="capabilities">
+        {loading ? <Skeleton className="h-40 w-full" /> : !stale && model && revision && open ? <Tabs key={JSON.stringify([provider, model.model, revision])} defaultValue="capabilities">
           <TabsList><TabsTrigger value="capabilities">{t("openAiModelPrompts.capabilities")}</TabsTrigger><TabsTrigger value="prompts">{t("openAiModelPrompts.title")}</TabsTrigger></TabsList>
           <TabsContent value="capabilities" className="flex flex-col gap-6"><ModelDetailFields details={model.details} sidebar /></TabsContent>
-          <TabsContent value="prompts"><OpenAiModelPrompts model={model.model} revision={revision} onReload={onReload} /></TabsContent>
-        </Tabs> : <p>{t("openAiModelDetails.unavailable")}</p>}
+          <TabsContent value="prompts"><OpenAiModelPrompts model={model.model} revision={revision} provider={provider} onReload={onReload} /></TabsContent>
+        </Tabs> : provider === undefined ? <p>{t("openAiModelDetails.unavailable")}</p> : <div className="flex flex-col items-start gap-3"><p>{t(stale ? "modelCatalog.detailsStale" : "openAiModelDetails.unavailable")}</p><Button variant="outline" onClick={onReload}>{t("modelCatalog.reload")}</Button></div>}
       </div>
     </SheetContent>
   </Sheet>
