@@ -13,6 +13,7 @@ import {
   loadCustomSwitchingProviderIds,
   loadConfiguredCustomSwitchingModelProviders,
   loadConfiguredCustomPrimaryModelProvider,
+  loadConfiguredCustomPrimaryCredential,
   readPrimaryProviderBackup,
   recoverManagedCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
@@ -74,7 +75,11 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
       writePrivateFileAtomicSync(path, candidate);
       try {
         await withResponsesModelCatalogWrite({path}, async () => {
-          if (config.model_provider === id) loadConfiguredCustomPrimaryModelProvider(environment);
+          if (config.model_provider === id) {
+            const primary = loadConfiguredCustomPrimaryModelProvider(environment);
+            if (primary?.id !== id) throw new Error("固定提供商已变化，请重新核对恢复配置");
+            loadConfiguredCustomPrimaryCredential(environment, primary);
+          }
           if (registered) loadConfiguredCustomSwitchingModelProviders(environment, id);
         });
       } catch (error) {

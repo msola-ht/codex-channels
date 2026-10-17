@@ -254,7 +254,6 @@ function ProviderSettingsCard({
 
   const cancelPending = () => {
     management.cancel()
-    setApiKey("")
   }
 
   const confirmPending = async () => {

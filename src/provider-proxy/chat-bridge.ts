@@ -11,6 +11,7 @@ import type { ProviderProxyOptions } from "./proxy.js";
 import { readChatBody, readModelFrames, waitForChatOperation, writeChatData } from "./chat-io.js";
 import { pinClinePassRouting } from "./cline-pass-routing.js";
 import { ChatGenerationTimingObserver } from "./generation-timing.js";
+import { forwardedRequestHeaders } from "./request-routing.js";
 import type { UpstreamTiming } from "./response-metrics-observer.js";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 
@@ -138,9 +139,10 @@ export class ChatCompletionsBridge {
         ? { ...parameters, ...clinePassChatReasoningControl(body.model, reasoning.effort) }
         : body;
       const payload = JSON.stringify(this.options.clinePass ? pinClinePassRouting(outbound) : outbound);
-      const headers: Record<string, string> = { "content-type": "application/json", accept: "text/event-stream", "accept-encoding": "identity", "content-length": String(Buffer.byteLength(payload)) };
-      if (typeof request.headers.authorization === "string") headers.authorization = request.headers.authorization;
-      if (this.options.upstreamUserAgent) headers["user-agent"] = this.options.upstreamUserAgent;
+      const headers = forwardedRequestHeaders(request.headers, upstream.host, upstream.port, this.options.upstreamUserAgent);
+      delete headers[chatDiagnosticsHeader];
+      delete headers["content-encoding"];
+      Object.assign(headers, { "content-type": "application/json", accept: "text/event-stream", "accept-encoding": "identity", "content-length": String(Buffer.byteLength(payload)) });
       status = 502;
       clearTimeout(timer);
       upstreamRequest = (upstream.protocol === "http" ? httpRequest : httpsRequest)({

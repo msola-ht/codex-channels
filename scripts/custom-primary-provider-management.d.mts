@@ -35,6 +35,7 @@ export interface CustomPrimaryProviderSaveInput {
 
 export interface CustomPrimaryProviderSaveOptions {
   environment?: NodeJS.ProcessEnv;
+  preview?: { revision?: string };
   expectedCatalogContent?: string;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
@@ -72,6 +73,7 @@ export function previewCustomPrimaryProviderSave(
   options?: CustomPrimaryProviderSaveOptions,
 ): Promise<{
   operation: "create" | "update";
+  revision: string;
   provider: CustomPrimaryProviderSaveSummary;
   transport: { scheme: "http" | "https"; cleartext: boolean };
   activation: "restart-all";
@@ -98,7 +100,7 @@ export function prepareCustomPrimaryProviderSave(
 
 export function applyCustomPrimaryProviderSave(
   input: CustomPrimaryProviderSaveInput,
-  options?: CustomPrimaryProviderSaveOptions,
+  options: CustomPrimaryProviderSaveOptions & { preview: { revision?: string } },
 ): Promise<{
   action: "created" | "updated";
   provider: CustomPrimaryProviderSaveSummary;

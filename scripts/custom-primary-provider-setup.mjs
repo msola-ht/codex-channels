@@ -1,7 +1,10 @@
 import { promptResponsesWebSocket } from "./responses-websocket-setup.mjs";
+import { join } from "node:path";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { promptCustomModelCapabilities } from "./custom-model-capability-setup.mjs";
 import { compileResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
-import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
+import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { loadResponsesModelTemplates, promptResponsesModelImport } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
 import * as clackPrompts from "@clack/prompts";
@@ -13,6 +16,9 @@ import {
   readPrimaryProviderBackup,
   validateCustomPrimaryModelProviderId,
   readCustomPrimaryProviderApiKey,
+  customPrimaryProviderProfilePath,
+  customSwitchingProviderRegistryPath,
+  primaryProviderBackupPath,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   createCodexUserConfigClient,
@@ -66,6 +72,13 @@ export async function runCustomPrimaryProviderSetup({
   probeModelCapabilities,
 } = {}) {
   const custom = editingProviderId === undefined ? catalogKind === "custom" : isCustomCatalogProvider(editingProviderId);
+  const openingFiles = snapshotProviderFiles([
+    join(codexHomePath(environment), "config.toml"),
+    customSwitchingProviderRegistryPath(environment),
+    primaryProviderBackupPath(environment),
+    ...(editingProviderId === undefined ? [] : [customPrimaryProviderProfilePath(environment, editingProviderId)]),
+    ...(editingProviderId !== undefined && custom ? [customProviderUpstreamMetadataPath(environment, editingProviderId)] : []),
+  ], environment);
   const previousCatalog = editingProviderId && custom ? readResponsesModelCatalog(environment, editingProviderId) : undefined;
   const client = await createClient({ environment });
   let snapshot;
@@ -444,11 +457,14 @@ export async function runCustomPrimaryProviderSetup({
       : { action: "replace", apiKey: replacementApiKey },
     confirmRemoveTopLevelBaseUrl: removesTopLevelBaseUrl,
   };
+  await assertProviderFileSnapshots(openingFiles);
   const prepared = await prepareCustomPrimaryProviderSave(saveInput, {
     environment,
     createClient,
+    expectedCatalogContent: previousCatalog?.content,
     loadContext: async () => ({ snapshot, officialModels }),
   });
+  await assertProviderFileSnapshots(openingFiles);
   const preview = prepared.preview;
   const previewModelDetails = custom ? compileResponsesModelCatalog(preview.provider.models, preview.provider.model).models : [];
   output.write(preview.provider.mode === "switching"

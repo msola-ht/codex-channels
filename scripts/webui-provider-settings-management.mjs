@@ -182,7 +182,7 @@ export async function applyProviderSettingsMutation(input, environment, preview)
       case "primary.switch":
         return await applyPrimaryProviderSwitch(
           { providerId: input.providerId, model: input.model },
-          { environment },
+          { environment, switchPreview: preview },
         );
       case "primary.remove":
         return await applyPrimaryProviderRemoval(
@@ -190,7 +190,7 @@ export async function applyProviderSettingsMutation(input, environment, preview)
           { environment, preview },
         );
       case "primary.custom.save":
-        return await applyCustomPrimaryProviderSave(input.provider, { environment });
+        return await applyCustomPrimaryProviderSave(input.provider, { environment, preview });
       case "managed.default":
         return await applyManagedProviderDefaultChange(
           {

@@ -1,15 +1,22 @@
 import { readOfficialModelCatalog } from "../runtime/model-provider-official-catalog.mjs";
 import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import { isCustomCatalogProvider, responsesModelSettings, responsesProviderCatalogPath, responsesProviderBackupPath, removeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
-import { removeCustomProviderUpstreamMetadata } from "../runtime/model-provider-upstream-metadata.mjs";
-import { readPrivateFileSync } from "../runtime/private-file.mjs";
-import { existsSync } from "node:fs";
+import { customProviderUpstreamMetadataPath, removeCustomProviderUpstreamMetadata } from "../runtime/model-provider-upstream-metadata.mjs";
+import { assertPrivateDirectoryAccessSync, readPrivateFileSync } from "../runtime/private-file.mjs";
+import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { createHmac, randomBytes } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { parse } from "smol-toml";
 
 import {
   backupPrimaryProviderCandidates,
   customPrimaryProviderProfilePath,
+  customSwitchingProviderRegistryPath,
+  primaryProviderBackupPath,
+  customPrimaryProviderCredentialPath,
   listCustomPrimaryProviderCandidates,
   loadConfiguredCustomSwitchingModelProviders,
   loadCustomSwitchingProviderIds,
@@ -33,6 +40,8 @@ import {
   writePrimaryProviderConfigEditsWithProfileRemoval,
 } from "./primary-provider-config-transaction.mjs";
 
+const sourceRevisionSecret = randomBytes(32);
+
 export class PrimaryProviderManagementError extends Error {
   constructor(code, field, message, options) {
     super(message, options);
@@ -46,7 +55,11 @@ export async function previewPrimaryProviderSwitch(
   input,
   options = {},
 ) {
-  return publicSwitchPreview(await buildSwitchPlan(input, options));
+  const environment = options.environment ?? process.env;
+  const revision = providerSourceRevision(input.providerId, environment);
+  const preview = publicSwitchPreview(await buildSwitchPlan(input, options));
+  assertSourceRevision(input.providerId, environment, revision);
+  return { ...preview, revision };
 }
 
 export async function applyPrimaryProviderSwitch(
@@ -55,8 +68,10 @@ export async function applyPrimaryProviderSwitch(
 ) {
   const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
+    const revision = providerSourceRevision(input.providerId, environment);
     const plan = await buildSwitchPlan(input, options);
-    if (options.switchPreview !== undefined && !isDeepStrictEqual(options.switchPreview, publicSwitchPreview(plan))) {
+    assertSourceRevision(input.providerId, environment, revision);
+    if (options.switchPreview !== undefined && !isDeepStrictEqual(options.switchPreview, { ...publicSwitchPreview(plan), revision })) {
       throw invalid("stale-preview", "preview", "Provider 状态已变化，请重新生成切换预览并确认");
     }
     return applyPrimaryProviderSwitchPlan(plan, options);
@@ -106,7 +121,11 @@ export async function previewPrimaryProviderRemoval(
   input,
   options = {},
 ) {
-  return publicRemovalPreview(await buildRemovalPlan(input, options));
+  const environment = options.environment ?? process.env;
+  const revision = providerSourceRevision(input.providerId, environment);
+  const preview = publicRemovalPreview(await buildRemovalPlan(input, options));
+  assertSourceRevision(input.providerId, environment, revision);
+  return { ...preview, revision };
 }
 
 export async function applyPrimaryProviderRemoval(
@@ -115,7 +134,14 @@ export async function applyPrimaryProviderRemoval(
 ) {
   const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
-    const plan = await removalPlanForExecution(input, options.preview, options);
+    const revision = providerSourceRevision(input.providerId, environment);
+    const preview = options.preview && { ...options.preview };
+    if (preview) {
+      if (preview.revision !== revision) throw invalid("stale-preview", "preview", "Provider 源配置已变化，请重新生成删除预览");
+      delete preview.revision;
+    }
+    const plan = await removalPlanForExecution(input, preview, options);
+    assertSourceRevision(input.providerId, environment, revision);
     return applyPrimaryProviderRemovalPlan(plan, options);
   });
 }
@@ -609,6 +635,53 @@ function publicRemovalPreview(plan) {
     activation: plan.activation,
     effects: plan.effects,
   };
+}
+
+function assertSourceRevision(providerId, environment, expected) {
+  if (providerSourceRevision(providerId, environment) !== expected) {
+    throw invalid("stale-preview", "preview", "Provider 源配置已变化，请重新预览");
+  }
+}
+
+function providerSourceRevision(providerId, environment) {
+  const id = normalizeProviderId(providerId, { allowOfficial: true });
+  const paths = [join(codexHomePath(environment), "config.toml"), primaryProviderBackupPath(environment),
+    customSwitchingProviderRegistryPath(environment)];
+  if (id !== "openai") {
+    paths.push(customPrimaryProviderProfilePath(environment, id));
+    const credentialDirectory = dirname(customPrimaryProviderCredentialPath(environment, id,
+      customPrimaryProviderCredentialEnvironmentKey(id, "0".repeat(32))));
+    paths.push(credentialDirectory);
+    try {
+      if (lstatSync(credentialDirectory).isDirectory()) {
+        assertPrivateDirectoryAccessSync(credentialDirectory);
+        paths.push(...readdirSync(credentialDirectory).filter(name => /^[a-f0-9]{32}\.json$/u.test(name)).sort().map(name => join(credentialDirectory, name)));
+      }
+    } catch (error) { if (error?.code !== "ENOENT") throw error; }
+  }
+  if (isCustomCatalogProvider(id)) {
+    const catalog = responsesProviderCatalogPath(environment, id);
+    paths.push(catalog, `${catalog}.backup`, `${catalog}.pending`, responsesProviderBackupPath(environment, id), customProviderUpstreamMetadataPath(environment, id));
+  }
+  const hash = createHmac("sha256", sourceRevisionSecret).update(id);
+  const read = createProviderFileReader(environment);
+  for (const path of paths) {
+    let stat;
+    try { stat = lstatSync(path, { bigint: true }); }
+    catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      hash.update(JSON.stringify([path, null]));
+      continue;
+    }
+    hash.update(JSON.stringify([path, ...[stat.dev, stat.ino, stat.mode, stat.uid, stat.size, stat.mtimeNs, stat.ctimeNs].map(String)]));
+    // Invalid catalogs must remain removable. Bind unreadable objects by identity
+    // without following unsafe links or parsing an unsupported storage format.
+    if (stat.isFile()) {
+      try { hash.update(read(path, 2_097_152)); }
+      catch { hash.update("unreadable"); }
+    }
+  }
+  return hash.digest("hex");
 }
 
 function removeBackupCandidateSafely(providerId, environment) {
