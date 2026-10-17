@@ -86,12 +86,7 @@ export function createClinePassCatalog(templates, source, enabledModels) {
   }
   const defaultModel = models.find(model => model.id === definition.defaultModel)?.id ?? models[0]?.id;
   const catalog = createResponsesModelCatalog(models, defaultModel, { allowReasoningToggle: true });
-  return { models: catalog.models.map(model => model.slug === definition.defaultModel ? { ...model,
-    service_tiers: [
-      { id: "priority", name: "Priority", description: "Forward priority to CLP; upstream acceptance does not guarantee faster processing." },
-      { id: "flex", name: "Flex", description: "Forward flex to CLP; upstream acceptance does not guarantee different pricing or latency." },
-    ],
-  } : model) };
+  return { models: catalog.models };
 }
 
 async function selectClinePassModels(models, providers, selectModels) {

@@ -104,14 +104,14 @@ export function normalizeProviderSettingsMutation(input) {
         },
       };
     case "managed.default":
+      if (Object.keys(input).some(key => !["operation", "provider", "model", "reasoningEffort", "confirmationToken"].includes(key))) {
+        throw new ManagementOperationError("invalid_provider_operation", "默认模型请求包含不支持的字段");
+      }
       return {
         operation: input.operation,
         provider: input.provider,
         model: input.model,
         reasoningEffort: input.reasoningEffort,
-        ...(input.windowPercent === undefined
-          ? {}
-          : { windowPercent: input.windowPercent }),
       };
     default:
       throw new ManagementOperationError(
@@ -152,7 +152,6 @@ export async function previewProviderSettingsMutation(input, environment) {
               provider: input.provider,
               model: input.model,
               reasoningEffort: input.reasoningEffort,
-              windowPercent: input.windowPercent,
             },
             { environment },
           ),
@@ -197,9 +196,8 @@ export async function applyProviderSettingsMutation(input, environment, preview)
             provider: input.provider,
             model: input.model,
             reasoningEffort: input.reasoningEffort,
-            windowPercent: input.windowPercent,
           },
-          { environment },
+          { environment, preview },
         );
       default:
         throw new ManagementOperationError("invalid_provider_operation", "Provider 设置操作不受支持");
@@ -234,6 +232,7 @@ export function redactProviderSettingsResult(result) {
     ...(result.contextWindow !== undefined ? { contextWindow: result.contextWindow } : {}),
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),
     ...(result.effects !== undefined ? { effects: result.effects } : {}),
+    ...(result.before !== undefined ? { before: result.before } : {}),
     ...(result.transport && typeof result.transport === "object"
       ? {
           transport: {

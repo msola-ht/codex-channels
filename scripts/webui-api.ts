@@ -807,7 +807,7 @@ export interface CustomModelDraftTemplatesResponse {
     suggested: ResponsesModelDefinition
   }>
 }
-export type ProviderModelTemplateSection = "prompts" | "capabilities"
+export type ProviderModelTemplateSection = "prompts" | "capabilities" | "settings"
 export type ProviderModelTemplateValue = { present: false } | { present: true; value: unknown }
 export interface ProviderModelTemplateOptionsResponse {
   provider: string
@@ -858,12 +858,12 @@ export type ManagementProviderSettingsMutationInput =
       provider: string
       model: string
       reasoningEffort: string
-      windowPercent?: number
     }
 
 export interface ManagementProviderSettingsStandardPreview {
   operation: "switch" | "remove" | "create" | "update" | "managed.default" | "model.remove" | "model.context" | "model.custom.save"
   revision?: string
+  before?: { defaultModel: string; reasoningEffort: string }
   warnings?: Array<{ code: string }>
   activation: string
   target?: {

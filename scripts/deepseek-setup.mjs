@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
-import { normalizeDeepseekCatalogCapabilities } from "../runtime/model-catalog.mjs";
-import { completeCatalogPrompts } from "../runtime/model-template-catalog.mjs";
+import { createDeepseekTemplateCatalog } from "./provider-model-catalog.mjs";
 import { createManagedProviderCatalog } from "./managed-model-provider-setup.mjs";
 
 export const deepseekSetupScriptUrl = "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";
@@ -143,7 +142,7 @@ export function createManagedDeepseekCatalog(
     throw new Error("DeepSeek 上下文窗口百分比无效");
   }
   return createManagedProviderCatalog(
-    normalizeDeepseekCatalogCapabilities(completeCatalogPrompts(catalog)),
+    createDeepseekTemplateCatalog(catalog, "deepseek"),
     deepseekProviderDefinition,
     {
       previousModels,

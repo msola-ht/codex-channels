@@ -145,7 +145,6 @@
     "scripts/model-provider-default-setup.mjs",
     "scripts/model-provider-management-transaction.mjs",
     "scripts/model-provider-management.mjs",
-    "scripts/model-window-management.mjs",
     "scripts/model-window-setup.mjs",
     "scripts/official-login-setup.mjs",
     "scripts/opencode-go-account-files.mjs",

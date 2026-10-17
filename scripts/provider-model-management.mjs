@@ -135,7 +135,12 @@ function readPresentationSnapshot(catalog, environment) {
     document = content === "" ? { models: [] } : parseJson(content);
     if (definition) validateManagedCatalog(document, definition);
   }
-  const models = document.models.length === 0 ? [] : projectModelCatalogEntries(document.models, false, custom ? document.definitions : undefined);
+  // Managed catalogs allow an omitted maximum: managed-model-catalog uses the
+  // current window as the upper bound until an explicit maximum is saved.
+  const entries = definition ? document.models.map(model => ({
+    ...model, max_context_window: model.max_context_window ?? model.context_window,
+  })) : document.models;
+  const models = entries.length === 0 ? [] : projectModelCatalogEntries(entries, false, custom ? document.definitions : undefined);
   const expected = catalog.models.map(model => model.id).sort();
   if (JSON.stringify(models.map(model => model.model).sort()) !== JSON.stringify(expected)) {
     throw invalid("stale-preview", "provider", "目录模型已变化，请刷新");

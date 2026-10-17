@@ -124,14 +124,16 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   const sections = await prompts.multiselect({ message: "选择本次更新内容（空格勾选，回车确认）", options: [
     { value: "prompts", label: "提示词" },
     { value: "capabilities", label: "能力参数", hint: "请确认平台支持模板中的参数" },
+    { value: "settings", label: "上下文与压缩设置", hint: "仅有效上下文比例、自动压缩阈值、截断策略；主动勾选才覆盖本地值" },
   ].filter(entry => options.availableSections.includes(entry.value)), initialValues: ["prompts"], required: true });
   if (prompts.isCancel(sections)) return { action: "back" };
   const input = { provider, model, sections, revision: options.revision, sourceToken: options.sourceToken, template: { source: template.source, model: template.model } };
   const preview = await previewProviderModelTemplateUpdate(input, { environment });
   output.write(`模板对比：${JSON.stringify(preview.provider)} / ${JSON.stringify(preview.model)}\n来源：${JSON.stringify(preview.source)} / ${JSON.stringify(preview.sourceModel)}\n修订：${JSON.stringify(preview.revision)}\n`);
   output.write(provider.startsWith("cp-")
-    ? "自定义模型仅更新提示词和来源关联；上下文、最大窗口、思考等级、图片及其他能力和参数全部保留手动值。\n"
-    : "保留本地模型 ID、显示名称、当前上下文、默认思考等级、工具支持、采样及压缩/截断设置；能力更新可改变最大上下文。\n");
+    ? "自定义模型可更新提示词和来源关联，以及主动勾选的有效上下文比例、自动压缩阈值和截断策略；当前上下文、最大窗口、思考等级、图片、工具支持及采样保留本地值。\n"
+    : "保留本地模型 ID、显示名称、当前上下文、默认思考等级、工具支持和采样；能力更新可改变最大上下文。\n");
+  output.write("有效上下文比例、自动压缩阈值和截断策略默认保留本地值；仅主动选择「上下文与压缩设置」并确认差异后覆盖。\n");
   for (const change of preview.changes) {
     output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before)}\n  更新后：${templateDifferenceValue(change.after)}\n`);
   }

@@ -51,6 +51,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       if (template === undefined) throw new Error("模型起点模板选择无效");
       model = structuredClone(template.draft);
       const suggested = template.suggested;
+      output.write(`已带入模板提示词及运行设置：有效上下文比例 ${model.effectiveContextWindowPercent ?? 95}%；自动压缩阈值 ${model.autoCompactTokenLimit ?? "Codex 默认"}；截断策略 ${model.truncationPolicy === undefined ? "项目默认" : `${model.truncationPolicy.mode} ${model.truncationPolicy.limit}`}。可在高级设置中修改。\n`);
       output.write(`模板参考：${template.displayName}；上下文 ${suggested.contextWindow} Token；思考 ${suggested.reasoningEfforts?.join("/") || "未声明"}；图片 ${capabilityLabel(suggested.supportsImages)}；apply_patch ${capabilityLabel(suggested.applyPatchToolType === undefined ? undefined : suggested.applyPatchToolType === "freeform")}；tool_search ${capabilityLabel(suggested.supportsSearchTool)}。请按上游平台说明逐项确认，未知暂不启用。\n`);
       const typedId = await prompts.text({
         message: "上游模型 ID（必填，使用平台提供的准确名称）", initialValue: id ?? "",
@@ -224,7 +225,7 @@ async function promptResponsesTextCapabilities(prompts, model) {
 
 async function promptAdvancedCapabilities(prompts, model, selectedGroups) {
   const groups = selectedGroups ?? await prompts.multiselect({
-    message: `${model.id} 选择高级设置（可不选，使用默认值）`,
+    message: `${model.id} 选择高级设置（可不选，保留已带入的模板设置）`,
     options: advancedSettingGroups.filter(group => (group.value !== "image-detail" || model.supportsImages)
       && (group.value !== "reasoning-descriptions" || (model.reasoningEfforts?.length ?? 0) > 0)),
     initialValues: [],

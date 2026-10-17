@@ -1,4 +1,11 @@
+import { createHmac, randomBytes } from "node:crypto";
+import { join, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import { loadManagedModelProviderDefinitions, managedProviderAccountFamilyForDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
+  managedProviderDirectory,
+  managedProviderMarkerPath,
   readManagedModelProviderCatalogContent,
   restoreManagedModelProviderCatalogContent,
   loadManagedModelProviderSettings,
@@ -11,6 +18,9 @@ import {
   writeCodexUserConfigEdits,
 } from "./codex-user-config.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
+
+const revisionSecret = randomBytes(32);
 
 export class ModelProviderDefaultManagementError extends Error {
   constructor(code, field, message, options) {
@@ -23,12 +33,9 @@ export class ModelProviderDefaultManagementError extends Error {
 
 export function previewManagedProviderDefaultChange(
   input,
-  {
-    environment = process.env,
-    loadProviders = loadManagedModelProviderSettings,
-  } = {},
+  options = {},
 ) {
-  return publicPreview(buildPlan(input, loadProviders(environment)));
+  return publicPreview(buildPlan(input, options));
 }
 
 export async function applyManagedProviderDefaultChange(
@@ -54,15 +61,24 @@ async function applyManagedProviderDefaultChangeUnlocked(
     restoreCatalogContent = restoreManagedModelProviderCatalogContent,
     writeConfigEdits = writeCodexUserConfigEdits,
     readConfigSnapshot = readCodexUserConfigSnapshot,
+    loadDefinitions = loadManagedModelProviderDefinitions,
+    preview,
   } = {},
 ) {
-  const plan = buildPlan(input, loadProviders(environment));
+  const plan = buildPlan(input, { environment, loadProviders, loadDefinitions });
+  const confirmed = { ...preview };
+  delete confirmed.operation;
+  if (!preview || !isDeepStrictEqual(confirmed, publicPreview(plan))) {
+    throw invalid("stale-preview", "revision", "账户模型、共享目录或相关配置已变化，请重新预览并确认");
+  }
   try {
+    await assertProviderFileSnapshots(plan.snapshots);
     if (plan.provider.mode === "switching") {
       writeProfileDefault(plan.provider.provider, plan.settings, environment);
     } else {
       const edits = exclusiveConfigEdits(plan.model.model);
       const snapshot = await readConfigSnapshot(environment);
+      await assertProviderFileSnapshots(plan.snapshots);
       const previousContent = readCatalogContent(plan.provider.provider, environment);
       writeCatalogSettings(plan.provider.provider, plan.settings, environment);
       try {
@@ -107,7 +123,33 @@ async function applyManagedProviderDefaultChangeUnlocked(
   };
 }
 
-function buildPlan(input, configured) {
+function buildPlan(input, {
+  environment = process.env,
+  loadProviders = loadManagedModelProviderSettings,
+  loadDefinitions = loadManagedModelProviderDefinitions,
+} = {}) {
+  const values = record(input);
+  if (Object.keys(values).some(key => !["provider", "model", "reasoningEffort"].includes(key))) {
+    throw invalid("invalid-input", "action", "默认模型设置包含不支持的字段；上下文请使用模型目录管理入口");
+  }
+  const providerId = requiredString(values.provider, "provider", "Provider 不能为空");
+  const definitions = loadDefinitions(environment);
+  const definition = definitions.find(candidate => candidate.id === providerId);
+  if (!definition) throw invalid("provider-not-configured", "provider", `第三方 Provider 未配置：${providerId}`);
+  const family = managedProviderAccountFamilyForDefinition(definition);
+  const members = definitions.filter(candidate => (candidate.storageId ?? candidate.id) === (definition.storageId ?? definition.id));
+  const catalogPath = join(managedProviderDirectory(environment, definition), definition.catalogFileName);
+  const snapshots = snapshotProviderFiles([
+    catalogPath, join(managedProviderDirectory(environment, definition), definition.catalogManifestFileName),
+    `${catalogPath}.settings-pending`,
+    join(codexHomePath(environment), "config.toml"),
+    ...members.flatMap(member => [join(codexHomePath(environment), member.profileFileName), managedProviderMarkerPath(environment, member)]),
+    ...(family ? [family.accountsFilePath(environment)] : []),
+  ], environment);
+  const configured = loadProviders(environment);
+  if (!isDeepStrictEqual(definitions, loadDefinitions(environment))) {
+    throw invalid("stale-preview", "revision", "账户注册表在预览期间发生变化，请重新预览");
+  }
   if (!Array.isArray(configured) || configured.length === 0) {
     throw invalid(
       "provider-not-configured",
@@ -115,8 +157,6 @@ function buildPlan(input, configured) {
       "尚未配置受管 Provider，请先在 Setup 中完成第三方账户接入",
     );
   }
-  const values = record(input);
-  const providerId = requiredString(values.provider, "provider", "Provider 不能为空");
   const provider = configured.find((candidate) => candidate.provider === providerId);
   if (provider === undefined) {
     throw invalid(
@@ -146,33 +186,33 @@ function buildPlan(input, configured) {
       `${model.displayName} 不支持思考等级：${reasoningEffort}`,
     );
   }
-  const windowPercent = values.windowPercent;
-  if (
-    windowPercent !== undefined
-    && (!Number.isInteger(windowPercent)
-      || windowPercent < 10
-      || windowPercent > 100)
-  ) {
-    throw invalid(
-      "invalid-window-percent",
-      "windowPercent",
-      `${provider.displayName} 模型上下文窗口百分比无效`,
-    );
-  }
-  const contextWindow = windowPercent === undefined
-    ? undefined
-    : Math.round(model.maxContextWindow * windowPercent / 100);
-  return {
+  const providers = configured.filter(candidate => members.some(member => member.id === candidate.provider));
+  const plan = {
     provider,
     model,
-    settings: contextWindow === undefined
-      ? { model: model.model, reasoningEffort }
-      : { model: model.model, reasoningEffort, contextWindow },
-    windowPercent,
+    settings: { model: model.model, reasoningEffort },
+    effects: {
+      defaultModelProviders: [provider.provider],
+      reasoningEffortProviders: providers.map(candidate => candidate.provider),
+      profileReasoningEffortProviders: providers.filter(candidate => candidate.mode === "switching"
+        && (candidate.provider === provider.provider || candidate.model === model.model)).map(candidate => candidate.provider),
+    },
     willChange: provider.model !== model.model
-      || provider.reasoningEffort !== reasoningEffort
-      || (windowPercent !== undefined && model.windowPercent !== windowPercent),
+      || model.reasoningEffort !== reasoningEffort,
+    snapshots,
   };
+  for (const snapshot of snapshots) {
+    const current = snapshot.readCurrent();
+    if (current === undefined || snapshot.content === undefined
+      ? current !== snapshot.content : !current.equals(snapshot.content)) {
+      throw invalid("stale-preview", "revision", "账户配置在预览期间发生变化，请重新预览");
+    }
+  }
+  plan.revision = createHmac("sha256", revisionSecret).update(JSON.stringify({
+    scope: resolve(codexHomePath(environment)), provider: providerId, model: modelId, reasoningEffort,
+    providers, snapshots: snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("base64") ?? null]),
+  })).digest("hex");
+  return plan;
 }
 
 function publicPreview(plan) {
@@ -189,12 +229,12 @@ function publicPreview(plan) {
       maxContextWindow: plan.model.maxContextWindow,
     },
     reasoningEffort: plan.settings.reasoningEffort,
-    ...(plan.windowPercent === undefined
-      ? {}
-      : { windowPercent: plan.windowPercent }),
-    ...(plan.settings.contextWindow === undefined
-      ? {}
-      : { contextWindow: plan.settings.contextWindow }),
+    revision: plan.revision,
+    effects: structuredClone(plan.effects),
+    before: {
+      defaultModel: plan.provider.model,
+      reasoningEffort: plan.model.reasoningEffort,
+    },
     willChange: plan.willChange,
     activation: "restart-app-server",
   };

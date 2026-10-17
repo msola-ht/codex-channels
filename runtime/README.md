@@ -115,7 +115,7 @@
 - `managed-model-catalog.mjs`：受管目录的纯数据校验、单模型设置读取、窗口与思考等级更新及刷新时保留设置；窗口按精确 Token 数保留，百分比仅派生、不取整后反向还原；新上限小于原窗口或不再支持原思考等级时拒绝刷新，不静默替换非默认模型的等级。DS、OCG、CCG、CLP 共用，完整保留未修改的上游元数据，不执行文件读写。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile，复用 `managed-model-catalog` 处理目录数据；
   管理各受管提供商家族的共用模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
-  设置写入、单模型移除与 CLP 账户目录更新共用私有 `.settings-backup`／`.settings-pending`，记录共用目录、相关 Profile 或来源文件及旧备份的前后快照，并保存只读前置条件，复核所有相关配置并回读一致后结束事务；未完成时阻止读取及出站，显式恢复严格限定同一家族路径，拒绝覆盖后续修改并复核目录来源与当前模型选择。
+  设置写入、单模型移除与 CLP 账户目录更新共用私有 `.settings-backup`／`.settings-pending`，记录共用目录、相关 Profile 或来源文件及旧备份的前后快照，并保存只读前置条件，复核所有相关配置并回读一致后结束事务；未完成时阻止读取及出站，显式恢复严格限定同一家族路径，拒绝覆盖后续修改并复核目录来源与当前模型选择。固定模式允许保留原始目录中已经缺失的选择，以便默认模型入口随后修复主配置；不得移除原本有效的选择，恢复也按事务原始目录判断。
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
   镜像所选模型的默认思考等级。Profile 位于 `~/.codex`，模型目录、清单与管理标记位于
   `~/.codex-connect/providers/<id>/`。
@@ -135,7 +135,7 @@
 - `model-catalog.mjs` / `model-catalog.d.mts`：模型定义与 Codex 字段转换的纯数据层，集中校验基础及扩展能力、生成默认字段、导入官方／DS 模板及修正 DS 能力声明；CP、CLP 和 CLI 模板入口复用。CP 保留思考、图片、文件编辑和工具搜索的未知／不支持／支持声明；未知在 Codex 执行字段中暂不启用，目录投影另保留声明状态。导出 `SamplingParameters` 与严格数值校验，逐模型可选 `sampling` 仅保留于定义，空对象归一为省略，不进入 Codex 生成字段。完整官方及受管目录不经过 CP 白名单往返，避免丢失专用元数据。
 - `model-template-prompts.mjs` / `model-template-prompts.d.mts`：纯 JSON 提示词补全，保留显式值，补缺失文本及必要 token-budget 配套字段；`approvals: null` 是继承基础审批提示词的例外。
 - `model-template-bindings.mjs` / `model-template-bindings.d.mts`：校验受管目录 manifest 的显式模型来源关联；缺少关联保持未关联，拒绝无效或孤立引用，不按名称推断。
-- `model-template-catalog.mjs` / `model-template-catalog.d.mts`：读取固定仓库底座，在显式新增模型时补全并固化 `model_messages`／`modelMessages`。自定义入口共享 `withCustomBaseTemplate`，仅为新模型记录缺省底座来源；`readCustomBaseModelCatalog` 仅投影通用助手身份，保留原始快照。显式模板更新重新读取已保存底座；读取、普通编辑、删除及调整已有模型窗口不执行模板补全。
+- `model-template-catalog.mjs` / `model-template-catalog.d.mts`：读取固定仓库底座，在显式新增模型时补全并固化 `model_messages`／`modelMessages`。自定义入口共享 `withCustomBaseTemplate`，仅为新模型记录缺省底座来源；官方底座读取和目录模板投影将已知来源模型身份改为通用助手身份，保留原始快照及用户显式指令。显式模板更新重新读取已保存底座；读取、普通编辑、删除及调整已有模型窗口不执行模板补全。
 - `model-catalog-base.json`：按项目锁定 Codex CLI 内置目录的原始顺序抽取第一个模型，保存为单模型固定快照，并记录实际模型 ID；不依赖固定名称。只有维护脚本显式 `--update-base --write` 才更新，不随 CLI 升级或 DS 维护刷新。源模型的上下文、思考等级、加速和工具声明不能视为第三方实际能力。
 - `model-catalog-deepseek-source.json` / `model-catalog-deepseek.json`：分别保存 DS 官方原始目录与提示词补全目录。保留 DS 已有字段，仅补缺失提示词及必要的 token-budget 配套结构；`approvals: null` 是明确允许继承基础审批提示词的例外。
 - `model-catalog-sources.json`：上述模板的 CLI 版本、来源和 SHA-256。四份快照由 `scripts/update-model-templates.mjs` 显式对比、校验、更新；基础快照供显式目录生成补全提示词，DS 补全目录供 CLP Flash 与 CP 导入，不采用某个 DS 账户设置。维护步骤见[DS 模板维护](../docs/deepseek.md#仓库模板维护)。

@@ -1,4 +1,4 @@
-export type ModelTemplateSection = "prompts" | "capabilities";
+export type ModelTemplateSection = "prompts" | "settings" | "capabilities";
 export type ModelTemplateSource = "official" | "deepseek" | "cline";
 export interface ModelTemplateReference { source: ModelTemplateSource; model: string }
 export interface ModelTemplateUpdateInput {

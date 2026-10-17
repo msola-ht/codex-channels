@@ -60,6 +60,7 @@ export function ProviderModelTemplateDialog({ target, open, stale, management, p
         <FieldSet disabled={busy || catalogStale}><FieldLegend>{t("modelTemplate.sections")}</FieldLegend><FieldGroup>
           {options.availableSections.map(section => <Field key={section} orientation="horizontal"><Checkbox id={`template-${section}`} checked={selectedSections.includes(section)} disabled={busy || catalogStale} onCheckedChange={checked => setSections(previous => checked ? [...previous.filter(value => value !== section), section] : previous.filter(value => value !== section))} /><FieldLabel htmlFor={`template-${section}`}>{t(`modelTemplate.${section}`)}</FieldLabel></Field>)}
         </FieldGroup></FieldSet>
+        <p className="text-sm text-muted-foreground">{t("modelTemplate.settingsHint")}</p>
         {selectedSections.includes("capabilities") ? <p className="text-sm text-muted-foreground">{t("modelTemplate.capabilityHint")}</p> : null}
       </FieldGroup> : null}
       {catalogStale ? <Alert variant="destructive"><AlertDescription>{t("modelCatalog.stale")}</AlertDescription></Alert> : null}

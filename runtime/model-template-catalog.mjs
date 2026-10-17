@@ -1,6 +1,17 @@
 import { readFileSync } from "node:fs";
 import { completeModelMessages } from "./model-template-prompts.mjs";
 
+const sourceModelIdentity = /^You are Codex, an agent based on [^\r\n]+?\.(?=\s|$)/u;
+
+function neutralizeSourceIdentity(model) {
+  if (typeof model.model_messages?.instructions_template === "string") {
+    model.model_messages.instructions_template = model.model_messages.instructions_template.replace(sourceModelIdentity, "You are a coding assistant.");
+  }
+  if (typeof model.base_instructions === "string") {
+    model.base_instructions = model.base_instructions.replace(sourceModelIdentity, "You are a coding assistant.");
+  }
+}
+
 function readBaseModelCatalog() {
   const catalog = JSON.parse(readFileSync(new URL("./model-catalog-base.json", import.meta.url), "utf8"));
   if (!Array.isArray(catalog.models) || catalog.models.length !== 1
@@ -12,11 +23,10 @@ function readBaseModelCatalog() {
 export function readCustomBaseModelCatalog() {
   const catalog = readBaseModelCatalog();
   const messages = catalog.models[0].model_messages;
-  const identity = /^You are Codex, an agent based on [^\r\n]+?\.(?=\s|$)/u;
-  if (typeof messages?.instructions_template !== "string" || !identity.test(messages.instructions_template)) {
+  if (typeof messages?.instructions_template !== "string" || !sourceModelIdentity.test(messages.instructions_template)) {
     throw new Error("固定底座的身份声明已变化，请先审核并更新自定义模板投影");
   }
-  messages.instructions_template = messages.instructions_template.replace(identity, "You are a coding assistant.");
+  neutralizeSourceIdentity(catalog.models[0]);
   return catalog;
 }
 
@@ -32,15 +42,16 @@ export function withCustomBaseTemplate(definition) {
 export function completeCatalogPrompts(source) {
   if (!source || !Array.isArray(source.models)) throw new Error("模型目录缺少 models");
   const result = structuredClone(source);
-  const baseMessages = readBaseModelCatalog().models[0].model_messages;
+  const baseMessages = readCustomBaseModelCatalog().models[0].model_messages;
   for (const model of result.models) {
     model.model_messages = completeModelMessages(model.model_messages ?? {}, baseMessages);
+    neutralizeSourceIdentity(model);
   }
   return result;
 }
 
 export function completeDefinitionPrompts(definitions) {
-  const baseMessages = readBaseModelCatalog().models[0].model_messages;
+  const baseMessages = readCustomBaseModelCatalog().models[0].model_messages;
   return definitions.map(definition => {
     const modelMessages = completeModelMessages(definition.modelMessages ?? {}, baseMessages);
     return { ...definition, modelMessages,

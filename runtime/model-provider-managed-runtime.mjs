@@ -243,7 +243,7 @@ function collectCatalogWithProfileMirrors(environment, catalogPath, content, upd
       readCredential: false,
     });
     if (marker.mode === "exclusive") {
-      validateSettingsSelection(originals.get(path), content, sibling, marker.mode, catalogPath);
+      validateSettingsSelection(originals.get(path), content, sibling, marker.mode, catalogPath, originals.get(catalogPath));
       continue;
     }
     const previous = updates.get(path) ?? originals.get(path);
@@ -275,11 +275,18 @@ function validateSettingsCatalog(content, definition) {
   for (const slug of slugs) modelCatalogSetting(content, definition, slug);
 }
 
-function validateSettingsSelection(content, catalogContent, definition, mode, catalogPath) {
+function validateSettingsSelection(content, catalogContent, definition, mode, catalogPath, previousCatalogContent) {
   let document;
   try { document = record(parse(content)); }
   catch { throw new Error("恢复模型选择配置无法安全解析"); }
-  const model = modelCatalogSetting(catalogContent, definition, document.model);
+  // A fixed account may already select a delisted model. Preserve that state
+  // while its default is repaired via config/batchWrite, but never delist a
+  // previously valid selection. Recovery uses the same original catalog guard.
+  const missingFixedSelection = mode === "exclusive" && typeof document.model === "string"
+    && previousCatalogContent !== undefined
+    && !readCatalogSlugSet(previousCatalogContent, definition).has(document.model)
+    && !readCatalogSlugSet(catalogContent, definition).has(document.model);
+  const model = missingFixedSelection ? undefined : modelCatalogSetting(catalogContent, definition, document.model);
   if (document.model_provider !== definition.id || document.model_catalog_json !== catalogPath
     || reasoningEffortMismatch(document, model, mode === "switching" ? "mirror" : "absent")
     || document.model_context_window !== undefined || document.model_auto_compact_token_limit !== undefined
@@ -508,7 +515,8 @@ export function recoverManagedCatalogSettings(provider, action, environment = pr
   for (const selection of scope.selections) {
     const profile = journal.files.find(file => file.path === selection.path);
     const selectionContent = profile?.[selected] ?? guards.get(selection.path);
-    validateSettingsSelection(selectionContent, catalogContent, selection.definition, selection.mode, catalogPath);
+    validateSettingsSelection(selectionContent, catalogContent, selection.definition, selection.mode, catalogPath,
+      journal.files.find(file => file.path === catalogPath).previous);
   }
   for (const file of journal.files) assertSettingsSnapshot(file, environment);
   const files = action === "rollback" ? [...journal.files].reverse() : journal.files;

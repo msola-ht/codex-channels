@@ -1,4 +1,14 @@
-import type { ModelWindowImportEntry } from "./model-window-management.mjs";
+import type { ProviderModelContextPreview } from "./provider-model-management.mjs";
+
+export interface ModelWindowImportEntry {
+  provider: string;
+  providers: string[];
+  revision: string;
+  model: string;
+  displayName: string;
+  contextWindow: number | null;
+  maxContextWindow: number | null;
+}
 
 export interface ModelWindowSetupOptions {
   allowBack?: boolean;
@@ -9,6 +19,7 @@ export interface ModelWindowSetupOptions {
     /** JSON.stringify([provider, model]); provider and model are never inferred from a slug. */
     selectModel(): Promise<string | "back">;
     selectContextWindow(model: ModelWindowImportEntry): Promise<number>;
+    confirmSave(preview: ProviderModelContextPreview): Promise<boolean>;
   };
 }
 

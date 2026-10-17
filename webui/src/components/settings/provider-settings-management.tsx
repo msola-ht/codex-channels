@@ -531,6 +531,16 @@ function ProviderSettingsConfirmationDialog({
   if (contextChange && pending.model?.maxContextWindow !== undefined) lines.push(t("openAiModelCatalog.maxContext") + ": " + pending.model.maxContextWindow)
   if (pending.providers !== undefined && pending.providers.length > 0) lines.push(t(localRemoval ? "modelCatalog.removalScope" : "managementUi.appliedProviders", { providers: pending.providers.join(t("managementUi.listSeparator")) }))
   if (pending.reasoningEffort !== undefined) lines.push(t("managementUi.reasoningConfirm", { value: pending.reasoningEffort }))
+  if (pending.operation === "managed.default") {
+    const scope = (field: string) => {
+      const values = pending.effects?.[field]
+      return Array.isArray(values) ? values.join(t("managementUi.listSeparator")) : ""
+    }
+    lines.push(t("managementUi.defaultAccountScope", { providers: scope("defaultModelProviders") }))
+    lines.push(t("managementUi.sharedReasoningScope", { providers: scope("reasoningEffortProviders") }))
+    if (pending.before) lines.push(t("managementUi.defaultBefore", { model: pending.before.defaultModel, reasoning: pending.before.reasoningEffort }))
+    lines.push(t("managementUi.defaultOverrideCleanup"))
+  }
   if (pending.contextWindow !== undefined) lines.push(t("managementUi.windowTokensConfirm", { tokens: pending.contextWindow }))
   else if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
   if (pending.credential?.action !== undefined) lines.push(t("managementUi.credentialConfirm", { action: t(pending.credential.action === "replace" ? "managementUi.replaceCredential" : "managementUi.preserveCredential") }))

@@ -5,7 +5,6 @@ export interface ManagedProviderDefaultChangeInput {
   provider: string;
   model: string;
   reasoningEffort: string;
-  windowPercent?: number;
 }
 
 export interface ManagedProviderDefaultChangePreview {
@@ -21,8 +20,13 @@ export interface ManagedProviderDefaultChangePreview {
     maxContextWindow: number;
   };
   reasoningEffort: string;
-  windowPercent?: number;
-  contextWindow?: number;
+  revision: string;
+  before: { defaultModel: string; reasoningEffort: string };
+  effects: {
+    defaultModelProviders: string[];
+    reasoningEffortProviders: string[];
+    profileReasoningEffortProviders: string[];
+  };
   willChange: boolean;
   activation: "restart-app-server";
 }
@@ -30,6 +34,8 @@ export interface ManagedProviderDefaultChangePreview {
 export interface ManagedProviderDefaultChangeOptions {
   environment?: NodeJS.ProcessEnv;
   loadProviders?: (environment: NodeJS.ProcessEnv) => ManagedModelProviderSettings[];
+  loadDefinitions?: typeof import("../runtime/model-provider-definitions.mjs").loadManagedModelProviderDefinitions;
+  preview?: ManagedProviderDefaultChangePreview;
   writeProfileDefault?: typeof import("../runtime/model-provider-runtime.mjs")
     .writeManagedModelProviderProfileDefault;
   writeCatalogSettings?: typeof import("../runtime/model-provider-runtime.mjs")
@@ -54,10 +60,10 @@ export class ModelProviderDefaultManagementError extends Error {
 
 export function previewManagedProviderDefaultChange(
   input: ManagedProviderDefaultChangeInput,
-  options?: Pick<ManagedProviderDefaultChangeOptions, "environment" | "loadProviders">,
+  options?: Pick<ManagedProviderDefaultChangeOptions, "environment" | "loadProviders" | "loadDefinitions">,
 ): ManagedProviderDefaultChangePreview;
 
 export function applyManagedProviderDefaultChange(
   input: ManagedProviderDefaultChangeInput,
-  options?: ManagedProviderDefaultChangeOptions,
+  options: ManagedProviderDefaultChangeOptions & { preview: ManagedProviderDefaultChangePreview },
 ): Promise<{ action: "updated" } & ManagedProviderDefaultChangePreview>;

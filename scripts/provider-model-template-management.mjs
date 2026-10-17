@@ -4,8 +4,7 @@ import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { connectHomePath } from "../runtime/connect-home.mjs";
-import { normalizeDeepseekCatalogCapabilities } from "../runtime/model-catalog.mjs";
-import { completeCatalogPrompts, completeDefinitionPrompts } from "../runtime/model-template-catalog.mjs";
+import { completeDefinitionPrompts } from "../runtime/model-template-catalog.mjs";
 import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
 import { loadManagedModelProviderDefinitions, managedProviderAccountFamilies } from "../runtime/model-provider-definitions.mjs";
 import { managedProviderDirectory, managedProviderMarkerPath, writeManagedModelProviderCatalogUpdates,
@@ -20,6 +19,7 @@ import { previewCustomProviderModelsSave, applyCustomProviderModelsSave } from "
 import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
+import { createDeepseekTemplateCatalog } from "./provider-model-catalog.mjs";
 
 const revisionSecret = randomBytes(32);
 const sourceSnapshots = new Map();
@@ -30,10 +30,12 @@ const maximumCacheEntries = 16;
 const fields = {
   custom: {
     prompts: ["instructions", "modelMessages"],
+    settings: ["effectiveContextWindowPercent", "autoCompactTokenLimit", "truncationPolicy"],
   },
   managed: {
     prompts: ["base_instructions", "model_messages"],
-    capabilities: ["description", "max_context_window", "supported_reasoning_levels", "input_modalities", "supports_image_detail_original", "support_verbosity", "default_verbosity", "supports_reasoning_summary_parameter", "default_reasoning_summary", "effective_context_window_percent"],
+    settings: ["effective_context_window_percent", "auto_compact_token_limit", "truncation_policy"],
+    capabilities: ["description", "max_context_window", "supported_reasoning_levels", "input_modalities", "supports_image_detail_original", "support_verbosity", "default_verbosity", "supports_reasoning_summary_parameter", "default_reasoning_summary"],
   },
 };
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -98,15 +100,15 @@ async function buildPlan(input, environment) {
   if (source.revision !== input.revision) throw staleTarget();
   const state = await readTargetState(input.provider, environment);
   if (state.revision !== input.revision) throw staleTarget();
-  if (state.custom && input.sections.some(section => section !== "prompts")) {
-    throw invalid("invalid-input", "sections", "自定义模型模板仅可更新提示词；上下文、思考等级及其他能力须手动设置");
+  if (state.custom && input.sections.includes("capabilities")) {
+    throw invalid("invalid-input", "sections", "自定义模型模板仅可更新提示词和模板设置；上下文窗口、思考等级及其他能力须手动设置");
   }
   if (!state.targets.some(target => target.model === input.model)) throw invalid("template-unavailable", "model", "模型不在当前账户目录中");
   const matches = source.templates.filter(template => template.source === input.template.source && template.model === input.template.model);
   if (matches.length !== 1 || !allowedTemplate(state, input.model, input.template)) {
     throw invalid("template-unavailable", "template", "所选源模板不适用于当前账户模型，请明确选择可用模板");
   }
-  const sections = ["prompts", "capabilities"].filter(section => input.sections.includes(section));
+  const sections = ["prompts", "settings", "capabilities"].filter(section => input.sections.includes(section));
   const plan = state.custom
     ? await buildCustomPlan(input, matches[0], sections, state, environment)
     : await buildManagedPlan(input, matches[0], sections, state, environment);
@@ -137,9 +139,9 @@ function validateInput(input) {
     || Object.keys(input.template).some(key => !["source", "model"].includes(key))
     || !["official", "deepseek", "cline"].includes(input.template.source)
     || typeof input.template.model !== "string" || !input.template.model
-    || !Array.isArray(input.sections) || input.sections.length < 1 || input.sections.length > 2
+    || !Array.isArray(input.sections) || input.sections.length < 1 || input.sections.length > 3
     || new Set(input.sections).size !== input.sections.length
-    || input.sections.some(section => !["prompts", "capabilities"].includes(section))) {
+    || input.sections.some(section => !["prompts", "settings", "capabilities"].includes(section))) {
     throw invalid("invalid-input", "template", "请选择准确账户、模型、候选源模板与非空更新范围");
   }
 }
@@ -239,7 +241,8 @@ async function loadSourceTemplates(state, environment, signal) {
     result = catalog.models.map(template => ({ source: "cline", model: template.slug, displayName: template.display_name,
       template: { ...template, max_context_window: template.max_context_window ?? template.context_window } }));
   } else {
-    const catalog = normalizeDeepseekCatalogCapabilities(completeCatalogPrompts(JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8"))));
+    const catalog = createDeepseekTemplateCatalog(
+      JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8")), state.family);
     result = catalog.models.map(template => ({ source: "deepseek", model: template.slug, displayName: template.display_name,
       template: { ...template, max_context_window: template.max_context_window ?? template.context_window } }));
   }
@@ -281,6 +284,12 @@ async function buildCustomPlan(input, source, sections, state, environment) {
     || ((after.reasoningEfforts?.length ?? 0) === 0 ? after.defaultReasoningEffort !== null : !after.reasoningEfforts.includes(after.defaultReasoningEffort))) {
     throw invalid("template-conflict", "model", "新模板不支持当前窗口或默认思考等级；请先单独调整本地设置");
   }
+  validateTemplateSettings({
+    context_window: after.contextWindow,
+    effective_context_window_percent: after.effectiveContextWindowPercent,
+    auto_compact_token_limit: after.autoCompactTokenLimit,
+    truncation_policy: after.truncationPolicy,
+  });
   const models = validateResponsesModels(previous.definitions.map(entry => entry.id === input.model ? after : entry), previous.defaultModel);
   const customInput = { provider: input.provider, model: previous.defaultModel, models };
   const customPreview = await previewCustomProviderModelsSave(customInput, { environment, expectedCatalogContent: previous.content });
@@ -292,14 +301,16 @@ async function buildManagedPlan(input, source, sections, state, environment) {
   const before = catalog.models.find(entry => entry.slug === input.model);
   const after = selectedFields(before, source.template, "managed", sections);
   if (state.family === "clp" && sections.includes("capabilities")) {
-    if (Object.hasOwn(source.template, "service_tiers")) after.service_tiers = structuredClone(source.template.service_tiers);
-    else delete after.service_tiers;
+    delete after.service_tiers;
   }
   if (after.context_window > (after.max_context_window ?? after.context_window)
     || (after.supported_reasoning_levels?.length === 0 ? after.default_reasoning_level !== null
       : !after.supported_reasoning_levels?.some(level => level.effort === after.default_reasoning_level))) {
     throw invalid("template-conflict", "model", "新模板不支持当前窗口或默认思考等级；请先单独调整本地设置");
   }
+  // Only imported settings need the template conflict check. Existing managed
+  // compaction thresholds are preserved and Codex clamps them to the window.
+  if (sections.includes("settings")) validateTemplateSettings(after);
   const nextCatalog = { ...catalog, models: catalog.models.map(entry => entry.slug === input.model ? after : entry) };
   await validateModelCatalogWithCodex(nextCatalog, environment);
   if (manifest.templateUpdates !== undefined && (!manifest.templateUpdates || typeof manifest.templateUpdates !== "object" || Array.isArray(manifest.templateUpdates))) {
@@ -312,6 +323,23 @@ async function buildManagedPlan(input, source, sections, state, environment) {
     [`${manifestPath}.backup`, snapshotContent(state.snapshots, manifestPath)],
     [catalogPath, `${JSON.stringify(nextCatalog, null, 2)}\n`], [manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`]]);
   return { before, after, updates };
+}
+
+function validateTemplateSettings(model) {
+  const percent = model.effective_context_window_percent;
+  if (percent !== undefined && (!Number.isSafeInteger(percent) || percent < 1 || percent > 100)) {
+    throw invalid("template-conflict", "effective_context_window_percent", "模板有效上下文百分比必须为 1-100 的整数");
+  }
+  const compact = model.auto_compact_token_limit;
+  if (compact != null && (!Number.isSafeInteger(compact) || compact < 1 || compact > Math.floor(model.context_window * 9 / 10))) {
+    throw invalid("template-conflict", "auto_compact_token_limit", "模板自动压缩阈值必须为正整数且不能超过当前上下文窗口的 90%；请先调整本地窗口或缩小更新范围");
+  }
+  const truncation = model.truncation_policy;
+  if (truncation !== undefined && (!truncation || typeof truncation !== "object" || Array.isArray(truncation)
+    || Object.keys(truncation).some(key => !["mode", "limit"].includes(key)) || !["tokens", "bytes"].includes(truncation.mode)
+    || !Number.isSafeInteger(truncation.limit) || truncation.limit < 1)) {
+    throw invalid("template-conflict", "truncation_policy", "模板截断策略必须使用 tokens 或 bytes，limit 必须为正安全整数");
+  }
 }
 
 function staleTarget() {
