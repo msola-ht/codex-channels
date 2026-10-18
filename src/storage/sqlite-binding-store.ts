@@ -1,11 +1,5 @@
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-
-import {
-  securePrivateDirectorySync,
-  securePrivateFileSync,
-} from "../../runtime/private-file.mjs";
+import type { DatabaseSync } from "node:sqlite";
+import { openPrivateDatabase } from "./open-private-database.js";
 
 import {
   conversationTargetKey,
@@ -105,41 +99,15 @@ export class SqliteBindingStore implements BindingStore {
   private closed = false;
 
   constructor(readonly path: string) {
-    // Reject existing unsupported data before changing either its permissions or journal mode.
-    const existed = existsSync(path);
-    if (existed) {
-      const existing = new DatabaseSync(path, { readOnly: true });
-      try {
-        assertStateDatabaseSchema(existing, { allowEmpty: true });
-      } finally {
-        existing.close();
-      }
-    }
-    const parent = dirname(path);
-    mkdirSync(parent, { recursive: true, mode: 0o700 });
-    if (!existed) securePrivateDirectorySync(parent);
-    this.database = new DatabaseSync(path);
-    try {
-      // Recheck the actual writable connection, not only the earlier path snapshot.
-      assertStateDatabaseSchema(this.database, { allowEmpty: true });
-      if (existed) securePrivateDirectorySync(parent);
-      securePrivateFileSync(path);
-      // Binding writes stay synchronous and atomic; a competing writer must not stall the Reader.
-      this.database.exec("PRAGMA busy_timeout = 0; PRAGMA journal_mode = DELETE;");
-      this.initializeSchema();
-      this.load();
-    } catch (error) {
-      try {
-        this.database.close();
-      } catch (closeError) {
-        throw new AggregateError(
-          [error, closeError],
-          "状态数据库初始化和清理均失败",
-          { cause: closeError },
-        );
-      }
-      throw error;
-    }
+    this.database = openPrivateDatabase(
+      path,
+      database => assertStateDatabaseSchema(database, { allowEmpty: true }),
+      database => {
+        this.initializeSchema(database);
+        this.load(database);
+      },
+      "状态数据库初始化和清理均失败",
+    );
   }
 
   modelPreference(target: ConversationTarget): ConversationModelPreference | undefined {
@@ -641,24 +609,24 @@ export class SqliteBindingStore implements BindingStore {
       .run(target.surface, target.accountId, target.conversationId, workspaceId, Date.now());
   }
 
-  private initializeSchema(): void {
-    if (this.database.prepare("PRAGMA user_version").get()?.user_version === schemaVersion) return;
-    this.database.exec("BEGIN IMMEDIATE");
+  private initializeSchema(database: DatabaseSync): void {
+    if (database.prepare("PRAGMA user_version").get()?.user_version === schemaVersion) return;
+    database.exec("BEGIN IMMEDIATE");
     try {
-      assertStateDatabaseSchema(this.database, { allowEmpty: true });
-      if (this.database.prepare("PRAGMA user_version").get()?.user_version === 0) {
-        this.createSchema();
-        this.database.exec(`PRAGMA user_version = ${schemaVersion};`);
+      assertStateDatabaseSchema(database, { allowEmpty: true });
+      if (database.prepare("PRAGMA user_version").get()?.user_version === 0) {
+        this.createSchema(database);
+        database.exec(`PRAGMA user_version = ${schemaVersion};`);
       }
-      this.database.exec("COMMIT");
+      database.exec("COMMIT");
     } catch (error) {
-      this.database.exec("ROLLBACK");
+      database.exec("ROLLBACK");
       throw error;
     }
   }
 
-  private createSchema(): void {
-    this.database.exec(`
+  private createSchema(database: DatabaseSync): void {
+    database.exec(`
       CREATE TABLE conversation_model_preferences (
         surface TEXT NOT NULL CHECK (length(surface) > 0),
         account_id TEXT NOT NULL CHECK (length(account_id) > 0),
@@ -709,11 +677,11 @@ export class SqliteBindingStore implements BindingStore {
         PRIMARY KEY (surface, account_id, conversation_id)
       ) STRICT;
     `);
-    this.createActorSchema();
+    this.createActorSchema(database);
   }
 
-  private createActorSchema(): void {
-    this.database.exec(`
+  private createActorSchema(database: DatabaseSync): void {
+    database.exec(`
       CREATE TABLE conversation_actors (
         surface TEXT NOT NULL CHECK (length(surface) > 0),
         account_id TEXT NOT NULL CHECK (length(account_id) > 0),
@@ -725,8 +693,8 @@ export class SqliteBindingStore implements BindingStore {
     `);
   }
 
-  private load(): void {
-    const workspaces = this.database
+  private load(database: DatabaseSync): void {
+    const workspaces = database
       .prepare(`
         SELECT surface, account_id, conversation_id, workspace_id
         FROM conversation_workspaces
@@ -743,7 +711,7 @@ export class SqliteBindingStore implements BindingStore {
         row.workspace_id,
       );
     }
-    const rows = this.database
+    const rows = database
       .prepare(`
         SELECT surface, account_id, conversation_id, workspace_id, thread_id, session_id
         FROM conversation_bindings
@@ -762,7 +730,7 @@ export class SqliteBindingStore implements BindingStore {
         sessionId: row.session_id,
       });
     }
-    const backgroundRows = this.database
+    const backgroundRows = database
       .prepare(`
         SELECT surface, account_id, conversation_id, workspace_id, thread_id, session_id
         FROM conversation_background_bindings
@@ -780,7 +748,7 @@ export class SqliteBindingStore implements BindingStore {
         this.memory.demote(binding.target);
       }
     }
-    const idleStateRows = this.database
+    const idleStateRows = database
       .prepare(`
         SELECT surface, account_id, conversation_id, last_activity_at, force_new
         FROM conversation_idle_state
@@ -803,7 +771,7 @@ export class SqliteBindingStore implements BindingStore {
         row.last_activity_at,
       );
     }
-    const preferences = this.database.prepare(`SELECT surface, account_id, conversation_id,
+    const preferences = database.prepare(`SELECT surface, account_id, conversation_id,
       model, model_provider, effort, service_tier FROM conversation_model_preferences`).all();
     for (const row of preferences) {
       this.memory.setModelPreference({
@@ -816,7 +784,7 @@ export class SqliteBindingStore implements BindingStore {
         serviceTier: row.service_tier === null ? null : String(row.service_tier),
       });
     }
-    const actors = this.database
+    const actors = database
       .prepare(`
         SELECT surface, account_id, conversation_id, actor_id
         FROM conversation_actors

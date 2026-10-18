@@ -11,7 +11,7 @@
 | U01 | 统一自定义 Provider API Key 纯校验规则 | 中 | 已修复；隔离凭据写读与 HTTP 拒绝已观察 |
 | U02 | 统一 Application 短期选择快照的容器操作 | 低 | 关联复核完成，缩小范围；未实施 |
 | U03 | 收敛渠道文本附件取得明文后的公共处理 | 低 | 已实施；清理解码、真实暂存与异步错误转换已观察 |
-| U04 | 收敛 Storage 内两个同步 SQLite Store 的打开流程 | 低 | 关联复核完成，保留窄范围；未实施 |
+| U04 | 收敛 Storage 内两个同步 SQLite Store 的打开流程 | 低 | 已实施；真实库写读、兼容拒绝与失败关闭已观察 |
 | U05 | 统一 WebUI 写入结果未知与权威回读门禁 | 中 | 已修复；浏览器保存及 503 回读门禁已观察 |
 | U06 | 统一两个模型能力检测 Hook 的请求归属与取消机制 | 中 | 已实施；调用链及构建检查完成，检测竞态未实测 |
 | U07 | 统一两个 Runtime 材料 Reader 的单 Worker 所有权机制 | 中 | 已修复；Linux 真实 Worker 读取、恢复与退出已观察 |
@@ -97,6 +97,8 @@
 建议只收敛取得合法明文字节后的公共尾段，优先扩展现有共享模块。平台下载、微信解密和 MD5/长度完整性校验、文件名长度单位、平台错误边界与引用消息拼装继续独立。不得改变 1,000,000 字节输入上限、清理后 32 KiB 内联阈值及暂存文件生命周期。
 
 ## U04 Storage 内同步数据库打开流程
+
+**实施与证据。** 两 Store 已使用 Storage 内部 `openPrivateDatabase`，Schema 校验、建表及绑定加载仍由各 Store 提供，初始化和加载全部成功才转移连接所有权。公开只读预检及磁盘合同未变。隔离 SQLite 中保存 Workspace 后重新打开读到 local-workspace；缓存 put/get 返回完整原记录。Schema 999 被拒绝，文件内容与 0644 权限均未改变；注入初始化失败后捕获连接 isOpen=false。初次手工回读误用不存在的 workspaceId 方法，随后按公开 getWorkspace 完成回读。类型及构建通过；未观察 Windows ACL、实际 Gateway 构造失败或归档 CLI 的完整运行链路。
 
 证据入口：[`sqlite-binding-store.ts`](../src/storage/sqlite-binding-store.ts) 的构造函数和 [`sqlite-session-display-cache.ts`](../src/storage/sqlite-session-display-cache.ts) 的构造函数。二者由 [`gateway-component-graph.ts`](../src/bootstrap/gateway-component-graph.ts) 分别创建并登记关闭；展示缓存还被 [`session-cleanup.mjs`](../scripts/session-cleanup.mjs) 用于已确认归档后的缓存移除。
 
