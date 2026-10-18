@@ -72,8 +72,6 @@
     "scripts/config-system-menu.mjs",
     "scripts/config-webui-management.mjs",
     "scripts/config-webui-menu.mjs",
-    "scripts/config-workspace-management.mjs",
-    "scripts/config-workspace-menu.mjs",
     "scripts/config.mjs",
     "scripts/custom-primary-provider-management.mjs",
     "scripts/custom-primary-provider-setup.mjs",

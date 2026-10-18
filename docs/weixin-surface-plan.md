@@ -133,7 +133,7 @@ Policy / Application / Core / Approval / Routing
 新增微信能力时：
 
 1. 先确认本地 `upstream/openclaw-weixin` 与固定基线一致。
-2. 查阅固定源码和现有合同探针，不从官方 `main` 猜测协议。
+2. 查阅固定源码、现行实现及仍保留的二维码诊断入口，不从官方 `main` 猜测协议；已退役的历史收发探针不作为当前入口。
 3. 更新模块 README 与实现。
 4. 真实平台结论只更新 [`channel-acceptance-matrix.md`](channel-acceptance-matrix.md)。
 5. 运行相关静态检查、`npm run docs:check` 和受影响的提交门禁。

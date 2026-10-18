@@ -775,7 +775,7 @@ export function readProviderProfile(
     throw new Error(`Codex ${descriptor.definition.displayName} Profile 未选择受支持模型`);
   }
   if (expectedCatalogPath !== undefined && document.model_catalog_json !== expectedCatalogPath) {
-    throw new Error(`Codex ${descriptor.definition.displayName} 必须使用提供商家族共享模型目录；请先运行 node scripts/isolate-provider-catalogs.mjs --write 显式整理目录`);
+    throw new Error(`Codex ${descriptor.definition.displayName} 必须使用提供商家族共享模型目录；当前版本不支持旧目录布局或目录迁移，请保留配置与目录完整备份，使用对应原版本处理旧配置`);
   }
   const selectedModel = expectedCatalogPath === undefined
     ? undefined
@@ -942,7 +942,7 @@ export function readManagedMarker(environment, definition) {
         join(providerStorageRoot(environment), definition.storageId ?? definition.id, "accounts", definition.accountId),
         join(providerStorageRoot(environment), definition.id),
       ].some(directory => existsSync(join(directory, definition.managedMarkerFileName)))) {
-        throw new Error(`Provider ${definition.id} 仍使用旧账户目录；请先停止 App Server 并显式执行目录整理`, { cause: error });
+        throw new Error(`Provider ${definition.id} 仍使用不受支持的旧账户目录；请保留配置与目录完整备份，停止相关服务后使用对应原版本处理，当前版本不提供目录迁移`, { cause: error });
       }
       return undefined;
     }
