@@ -4,7 +4,7 @@
 
 ## 文件
 
-- `ci.yml`：在 Pull Request 和手动触发时，使用 Ubuntu 与 macOS、Node.js 22.13.0 执行
+- `ci.yml`：在 Pull Request 和手动触发时，使用 Ubuntu 与 macOS、Node.js 22.22.0 执行
   `npm run verify:ci` 静态检查与构建，并使用 Windows latest 执行独立的构建、类型、文档和
   PowerShell 语法检查。Windows Job 不运行 Unix 专属服务检查。Branch Protection 要求 PR 的当前
   merge ref 通过全部门禁并禁止直接写入 `main`，因此 push 不再重复运行同一检查。检查覆盖提交

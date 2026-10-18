@@ -14,7 +14,7 @@ Linux、macOS 与 Windows 可以把 Codex Connect 官方 `main` 分支作为完�
 
 ## 安装
 
-先安装 Node.js 22.13 或更高版本、Git 和 npm，然后运行：
+先安装 Node.js 22.22.0 或更高版本、Git 和 npm，然后运行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
@@ -41,7 +41,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 | iex
 ```
 
-该脚本要求 Git、Node.js 22.13+ 和 npm；Codex CLI 缺失或版本不符时会通过 `npm.cmd`
+该脚本要求 Git、Node.js 22.22.0+ 和 npm；Codex CLI 缺失或版本不符时会通过 `npm.cmd`
 同步为项目锁定的精确版本，随后重新检查版本与 PATH。它只使用当前用户目录，不要求管理员权限；安装失败会清理临时目录和不完整源码。
 默认克隆官方 `main`；本地开发验证可显式传入 `-Repository <本地仓库路径> -Branch <分支>`，该参数不改变
 正式安装默认值。安装器会在 Git checkout 时启用长路径支持，以覆盖 Windows 深层源码目录。

@@ -233,7 +233,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.22.0"
   },
   "scripts": {
     "prebuild": "node scripts/clean-dist.mjs",
