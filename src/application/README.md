@@ -47,6 +47,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   当前 Thread Auto-review 写入则在同一锁内要求已有绑定、空闲且无待处理交互，未知或 Guardian 实际值只读；已确认的相同值不写。等待 Client 的权威通知确认后再核对绑定，返回 Router 的实际值，不创建 Thread、启动 Turn 或乐观修改缓存。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；
   通过 Core 跟踪恢复期间的 Turn 通知，在绑定成功后恢复仍有效的活动状态。
+  普通新 Turn 在 `ensureSession` 等待旧绑定恢复期间同样跟踪活动通知；未加载 Thread 恢复成功后继续
+  原次输入。只读快照报告活动但不含 Turn ID 时拒绝启动新 Turn，不把缺少本地活动缓存解释为空闲。
   恢复已由其他渠道绑定的空闲 Thread 时，同时锁定新旧 Conversation，确认双方无活动 Turn、
   排队消息或待处理交互后调用路由层原子转移，并向原渠道发布关键解绑通知；
   扩展与账户查询分别委托给独立组件，通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile 均使用稳定结果。

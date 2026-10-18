@@ -70,6 +70,7 @@ interface ThreadReleaseCondition {
 }
 
 const maximumBackgroundThreadsPerConversation = 3;
+const foregroundThreadSources = new Set(["cli", "vscode", "appServer"]);
 class SupersededRestoreError extends Error {}
 
 export class SessionRouter {
@@ -78,7 +79,7 @@ export class SessionRouter {
   private readonly backgroundReservations = new Map<string, number>();
   private readonly threadLifecycleQueues = new Map<string, Promise<void>>();
   private readonly approvalResolutions = new Set<ApprovalResolution>();
-  // An existing binding is not usable until a failed detach restores its subscription.
+  // Bindings survive unloads and failed detaches, but need a subscription before use.
   private readonly unsubscribedBindings = new Set<string>();
   // 模型设置保留到进程结束：thread/list 不返回 model，
   // 会话列表需要借助本缓存标注已知模型的会话。
@@ -396,24 +397,52 @@ export class SessionRouter {
   async ensure(
     target: ConversationTarget,
     startOptions: ThreadStartOptions = {},
+    onRestored?: (binding: ConversationBinding, thread: ThreadSnapshot) => void,
   ): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
     if (current) {
       const pending = this.threadLifecycleQueues.get(current.threadId);
       if (pending) {
         await pending;
-        return this.ensure(target, startOptions);
+        return this.ensure(target, startOptions, onRestored);
       }
+      const thread = await this.codex.readThread(current.threadId);
+      if (!this.sameBinding(current, this.bindings.get(target))
+        || this.threadLifecycleQueues.has(current.threadId)) {
+        return this.ensure(target, startOptions, onRestored);
+      }
+      const workspace = this.workspaces.require(current.workspaceId);
+      if (thread.id !== current.threadId || thread.cwd !== workspace.cwd
+        || !foregroundThreadSources.has(thread.source)) {
+        await this.withThreadLifecycle([current.threadId], async () => {
+          if (!this.sameBinding(current, this.bindings.get(target))) return;
+          const latest = await this.codex.readThread(current.threadId);
+          if (!this.sameBinding(current, this.bindings.get(target))) return;
+          const latestWorkspace = this.workspaces.require(current.workspaceId);
+          if (latest.id !== current.threadId || latest.cwd !== latestWorkspace.cwd
+            || !foregroundThreadSources.has(latest.source)) {
+            await this.rejectIncompatibleThread(current.threadId, new UserFacingError(
+              "thread.takeover.changed", "当前会话与授权工作区或可恢复来源不一致，已解除绑定",
+            ), true);
+          }
+        });
+        return this.ensure(target, startOptions, onRestored);
+      }
+      if (thread.status.type === "notLoaded") this.unsubscribedBindings.add(current.threadId);
       if (this.unsubscribedBindings.has(current.threadId)) {
-        if (this.onSubscriptionRestoreRequired) {
+        if (!onRestored && this.onSubscriptionRestoreRequired) {
           this.onSubscriptionRestoreRequired(current);
           throw new UserFacingError("conversation.busy", "会话订阅正在恢复，请稍后重试", { reason: "subscription-restoring" });
         }
         const failures = await this.restoreSubscriptions((_target, binding) =>
-          this.sameBinding(current, binding));
+          this.sameBinding(current, binding), onRestored);
         if (failures[0]) throw failures[0].error;
-        return this.ensure(target, startOptions);
+        const restored = this.bindings.get(target);
+        if (restored && this.sameBinding(current, restored)
+          && !this.unsubscribedBindings.has(restored.threadId)) return restored;
+        return this.ensure(target, startOptions, onRestored);
       }
+      onRestored?.(current, thread);
       return current;
     }
     const workspace = this.workspace(target);
@@ -423,6 +452,7 @@ export class SessionRouter {
       const candidate = sessions.find(
         (thread) =>
           thread.status.type !== "active"
+          && foregroundThreadSources.has(thread.source)
           && !this.bindings.getByThread(thread.id)
           && (
             startOptions.modelProvider === undefined
@@ -473,6 +503,13 @@ export class SessionRouter {
     this.clearForceNew(target, Date.now());
     this.notifyBindingsChanged();
     return binding;
+  }
+
+  markThreadClosed(threadId: string): void {
+    const binding = this.bindings.getByThread(threadId);
+    if (!binding) return;
+    this.unsubscribedBindings.add(threadId);
+    this.onSubscriptionRestoreRequired?.(binding);
   }
 
   /**
@@ -622,7 +659,7 @@ export class SessionRouter {
     if (thread.cwd !== workspace.cwd) {
       throw new UserFacingError("thread.takeover.workspace", "不允许跨工作区恢复历史，请先切换工作区");
     }
-    if (!["cli", "vscode", "appServer"].includes(thread.source)) {
+    if (!foregroundThreadSources.has(thread.source)) {
       throw new UserFacingError("session.selector.not-found", "找不到已授权工作区中的可恢复会话");
     }
     const resumed = await this.resumeInWorkspace(thread, workspace);

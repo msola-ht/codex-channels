@@ -1335,7 +1335,7 @@ export class ConversationService implements
   compact(target: ConversationTarget): Promise<void> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const binding = await this.ensureSession(target);
+      const binding = await this.ensureSession(target, true);
       this.requireIdle(target);
       await this.codex.compactThread(binding.threadId);
     });
@@ -1344,7 +1344,7 @@ export class ConversationService implements
   fork(target: ConversationTarget): Promise<string> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const current = await this.ensureSession(target);
+      const current = await this.ensureSession(target, true);
       if (await this.probeNativeQueueItems(current.threadId)) {
         throw new UserFacingError(
           "conversation.background-queued",
@@ -1402,7 +1402,7 @@ export class ConversationService implements
   review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const binding = await this.ensureSession(target);
+      const binding = await this.ensureSession(target, true);
       this.requireIdle(target);
       const result = await this.codex.startReview(binding.threadId, reviewTarget);
       this.core.markTurnStarted(target, result.threadId, result.turnId);
@@ -1652,15 +1652,26 @@ export class ConversationService implements
     return gitBranch ? { ...status, gitBranch } : status;
   }
 
-  private async ensureSession(target: ConversationTarget) {
+  private async ensureSession(target: ConversationTarget, requireIdle = false) {
     await this.models.validateUnboundPreference?.(target);
     const preference = !this.router.current?.(target) ? this.models.capturePreference?.(target) : undefined;
     const options = this.models.threadStartOptions?.(target) ?? {};
-    const binding = Object.keys(options).length > 0
-      ? await this.router.ensure(target, options)
-      : await this.router.ensure(target);
-    if (preference) this.models.restorePreference?.(target, preference);
-    return binding;
+    const current = this.router.current(target);
+    const activity = current ? this.core.trackThreadActivity(current.threadId) : undefined;
+    try {
+      const binding = await this.router.ensure(target, options, (restored, thread) => {
+        if (requireIdle && thread.status.type === "active" && thread.activeTurnId === null) {
+          throw new UserFacingError("conversation.busy", "会话仍有运行中的任务，请稍后重试或显式恢复会话", { reason: "activity-restored" });
+        }
+        if (restored.threadId === current?.threadId) {
+          activity?.restore(restored.target, thread.activeTurnId);
+        }
+      });
+      if (preference) this.models.restorePreference?.(target, preference);
+      return binding;
+    } finally {
+      activity?.stop();
+    }
   }
 
   private async startNewTurn(
@@ -1671,7 +1682,7 @@ export class ConversationService implements
     assertCurrent?: (threadId: string) => void,
   ): Promise<Submission> {
     this.touchActivity(target);
-    const binding = await this.ensureSession(target);
+    const binding = await this.ensureSession(target, true);
     // Subscription restoration can publish an active Turn while ensure waits.
     // Do not start a new Turn using the idle decision made before that await.
     if (this.core.activeTurn(target)) {

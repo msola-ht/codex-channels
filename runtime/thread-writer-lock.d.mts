@@ -7,7 +7,8 @@ export interface ThreadWriterLockHolder {
 
 export type ThreadWriterLockInspection =
   | { held: false }
-  | { held: true; holder: ThreadWriterLockHolder | null };
+  | { held: true; holder: ThreadWriterLockHolder }
+  | { held: true; holder: null; reason: "unsupported-platform" | "inspection-unavailable" };
 
 export function threadWriterLockPath(
   threadId: string,

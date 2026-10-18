@@ -24,23 +24,30 @@ foreach ($relativePath in @('app\ChatGPT.exe', 'app\Codex.exe')) {
     }
 }
 
-$running = $false
+$running = $null
 if ($executablePath) {
     try {
         $executableName = [IO.Path]::GetFileName($executablePath).Replace("'", "''")
-        $running = @(Get-CimInstance Win32_Process -Filter "Name = '$executableName'" -ErrorAction Stop |
-            Where-Object {
-                if ([string]::IsNullOrWhiteSpace([string]$_.ExecutablePath)) { return $false }
-                try {
-                    return [string]::Equals(
-                        [IO.Path]::GetFullPath([string]$_.ExecutablePath),
-                        $executablePath,
-                        [StringComparison]::OrdinalIgnoreCase
-                    )
-                } catch {
-                    return $false
-                }
-            }).Count -gt 0
+        $processes = @(Get-CimInstance Win32_Process -Filter "Name = '$executableName'" -ErrorAction Stop)
+        $running = $false
+        foreach ($process in $processes) {
+            $processPath = [string]$process.ExecutablePath
+            if ([string]::IsNullOrWhiteSpace($processPath) -or
+                -not [IO.Path]::IsPathFullyQualified($processPath)) {
+                $running = $null
+                continue
+            }
+            try {
+                $processPath = [IO.Path]::GetFullPath($processPath)
+            } catch {
+                $running = $null
+                continue
+            }
+            if ([string]::Equals($processPath, $executablePath, [StringComparison]::OrdinalIgnoreCase)) {
+                $running = $true
+                break
+            }
+        }
     } catch {
         $running = $null
     }
