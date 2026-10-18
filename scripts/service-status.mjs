@@ -23,6 +23,9 @@ import { packageDir } from "./package-path.mjs";
 import { serviceControlDefinitions, serviceSnapshotHealthy } from "./service-selection.mjs";
 
 const ANSI_SGR_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu");
+const JOURNAL_LINE_PREFIX_PATTERN = /^\S+\s+\S+\s+[^\s:]+(?:\[\d+\])?:\s+/u;
+const TRACING_ERROR_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})\s+ERROR\s+([A-Za-z_][\w:.-]*):\s?(.*)$/u;
 
 export function inspectManagedServiceStatus({
   environment = process.env,
@@ -116,12 +119,14 @@ export async function inspectManagedServiceStatusAsync({
 }
 
 /**
- * Read the latest bounded stderr line for a managed service.
+ * Read the latest bounded actionable errors for a managed service.
  *
  * Service installers keep stderr logs in the private runtime directory on
  * macOS and Windows. Linux journald is handled by the async wrapper below.
  * This helper deliberately reads only known paths; it never accepts a
- * caller-provided path or returns the file name.
+ * caller-provided path or returns the file name. Stderr also carries progress
+ * and timing notes, so only explicit CLI failures, error-level structured
+ * records and non-tool tracing errors qualify.
  */
 export function readManagedServiceError({
   environment = process.env,
@@ -158,11 +163,7 @@ export function readManagedServiceError({
     } finally {
       closeSync(fd);
     }
-    const lines = content
-      .split(/\r?\n/u)
-      .map((line) => sanitizeServiceError(line))
-      .filter((line) => line.length > 0);
-    const message = lines.slice(-3).join("；").slice(-600);
+    const message = managedServiceErrorMessage(content);
     if (!message) return null;
     return {
       message,
@@ -190,21 +191,67 @@ export async function readManagedServiceErrorAsync({
     [
       `--user-unit=${definition.systemd}`,
       "--priority=err",
-      "--lines=3",
+      "--lines=20",
       "--no-pager",
       "--output=short-iso",
     ],
     { encoding: "utf8", env: environment },
   );
   if (result.error || result.status !== 0) return null;
-  const message = String(result.stdout ?? "")
+  const message = managedServiceErrorMessage(result.stdout);
+  return message ? { message, observedAt: null } : null;
+}
+
+function managedServiceErrorMessage(value) {
+  const classified = String(value ?? "")
     .split(/\r?\n/u)
-    .map((line) => sanitizeServiceError(line))
-    .filter((line) => line.length > 0 && line !== "-- No entries --")
-    .slice(-3)
+    .map((line) => classifyManagedServiceError(line));
+  let end = classified.length - 1;
+  while (end >= 0 && classified[end] === null) end -= 1;
+  if (end < 0) return "";
+  let start = end;
+  while (start > 0 && classified[start - 1] !== null) start -= 1;
+  const messages = [];
+  for (const message of classified.slice(Math.max(start, end - 2), end + 1)) {
+    if (message !== null && message !== messages.at(-1)) messages.push(message);
+  }
+  return messages
     .join("；")
     .slice(-600);
-  return message ? { message, observedAt: null } : null;
+}
+
+function classifyManagedServiceError(value) {
+  const line = String(value ?? "").trim();
+  if (line.length === 0 || line === "-- No entries --") return null;
+  const body = line
+    .replace(ANSI_SGR_PATTERN, "")
+    .replace(JOURNAL_LINE_PREFIX_PATTERN, "");
+  try {
+    const record = JSON.parse(body);
+    if (record !== null && typeof record === "object" && !Array.isArray(record)
+      && typeof record.level === "number" && record.level >= 50
+      && typeof record.msg === "string" && record.msg.trim().length > 0) {
+      const module = typeof record.module === "string" && record.module.trim().length > 0
+        ? `${record.module.trim()}: `
+        : "";
+      return sanitizeServiceError(`${module}${record.msg}`);
+    }
+  } catch {
+    // Plain text and partial JSON continue through the line classifiers below.
+  }
+  const tracing = TRACING_ERROR_PATTERN.exec(body);
+  if (tracing !== null) {
+    // Tool invocation failures belong to a turn, not to the managed service.
+    if (/^codex_core::tools(?:\b|::)/u.test(tracing[1])) return null;
+    return sanitizeServiceError(body);
+  }
+  if (/^\[失败\]\s+\S/u.test(body)
+    || /^(?:FATAL|PANIC)\b/u.test(body)
+    || /^panic:/u.test(body)
+    || /^Error:\s+\S/u.test(body)) {
+    return sanitizeServiceError(body);
+  }
+  return null;
 }
 
 function sanitizeServiceError(value) {

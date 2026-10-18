@@ -6,6 +6,7 @@ import { invalidSetting } from "./config-management-error.mjs";
 import { RequestMetricsQueryService } from "../dist/observability/index.js";
 import { metricsRange } from "./metrics-database-access.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
+import { serviceSnapshotHealthy } from "./service-selection.mjs";
 import { readManagedServiceErrorAsync } from "./service-status.mjs";
 import { sendManagementJson } from "./webui-http.mjs";
 import {
@@ -70,7 +71,7 @@ async function handleServices(
     observedAt: new Date().toISOString(),
     available: platform !== null,
     platform,
-    healthy: platform === null ? null : entries.every((service) => service.running),
+    healthy: platform === null ? null : serviceSnapshotHealthy(entries, "all", environment),
     entries,
   });
 }

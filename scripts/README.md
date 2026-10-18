@@ -100,7 +100,9 @@
   服务入口同时接收终端信号与父进程 `codexc-stop`，统一关闭 HTTP 监听、通知连接与尚未发送请求的浏览器预连接，并取消导出和投递只读 Worker；活动请求按共享停止预算收尾。超时关闭剩余连接并记录非零状态，后台读取或 Windows ACL 辅助进程未确认退出时保留归属，实际退出后再结束服务。Windows CLI 包装层异步转发停止消息。
   主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
-  `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
+  `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。正常页面和未构建回退页统一设置
+  同源脚本 CSP、`frame-ancestors 'none'`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`
+  与 `no-store`；内联样式仅为现有组件渲染所需放行，脚本不开放内联。
   请求列表、错误汇总与单次运行详情的相关查询共享同一只读数据库快照，避免并发写入造成响应内部不一致。
   `/api/v1/settings/model-display` 返回只读模型显示映射，概览按该映射合并并提供原始模型成员明细；
   概览、显示映射与调用采集开关共用可取消的进行中私有配置读取，不缓存配置或权限判断。
@@ -600,6 +602,8 @@
 - `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性、launchd Job 字段或 Windows 计划任务
   生成统一基础 JSON 服务状态；Windows 额外核对受管进程和核心 RPC 端点。目标异常时保留可解析输出
   并返回非零状态，查询器故障则失败关闭。
+  管理接口的最近错误只提取显式 CLI 失败、error/fatal 级结构化记录和非工具类 tracing 错误，
+  忽略进度、耗时提示、告警及 Codex 工具调用错误，继续按三行或 600 字截断并脱敏。
   macOS 文本状态也复用该解析，区分已加载与实际运行。
   Windows 异步查询的整体预算为 25 秒，包含 Job 宿主、ACL 冷启动、内部查询与宿主 IPC 阶段；超时只回收本次查询的 Job 子树，回收失败明确报告退出未确认。
 - `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
