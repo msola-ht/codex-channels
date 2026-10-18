@@ -25,7 +25,7 @@
 | U15 | 收敛源码取得后的安装构建阶段 | 中 | 关联复核完成，排除生命周期合并；未实施 |
 | U16 | 收敛一次性私有 IPC 交换的底层收尾 | 低 | 关联复核完成，降级为条件性提取；未实施 |
 | U17 | 统一自有子进程退出观察的窄操作 | 低 | 关联复核完成，保留所有者决策；未实施 |
-| U18 | 统一待生效选择与原生 Queue 的互斥操作 | 中 | 关联复核完成，明确非原子边界；未实施 |
+| U18 | 统一待生效选择与原生 Queue 的互斥操作 | 中 | 已实施；后查冲突清理已观察，真实跨端并发未实测 |
 | U19 | 将 Queue 官方错误识别收回 Client 边界 | 中 | 已实施；分类及伪造文本拒绝已观察，真实 Queue 链路未实测 |
 
 19 项均已完成下述关联链路的源码复核及 Astra 独立复查；实施状态逐项列明。优先级表示维护收益与风险的相对顺序，不表示已发生故障的严重程度。“复核完成”仅覆盖各项列出的调用链与合同，运行证据和未穷尽分支仍受文末限制。
@@ -272,6 +272,8 @@ Supervisor 的 inspect/ensure/release/apply 一次请求另行维护连接、写
 **关联复核结论。** Windows host 的 control.send 成功只是停止请求已交付，随后仍等待子进程退出，失败才调用 terminateChildProcess；Supervisor 的 Proxy 先关闭 stdin，等待 1 秒后升级终止；process-lifecycle 在 TERM 和 KILL 后分别观察。故统一操作只能返回是否观察到 child 退出，不应自己发信号或清除进程树所有权。Supervisor 外层 stopProxyChild 已检查 exitCode 与 signalCode，其内层 helper 只检查 exitCode，不能据此单独宣称信号退出一定导致错误升级；需要结合调用间竞态观察。timer.unref 差异影响宿主是否继续存活，保留为所有者决定。无需把输出管道 close 当成 exit，同样不能因 exit 成功就证明整棵进程树消失。
 
 ## U18 待生效选择与原生 Queue 的互斥操作
+
+**实施与证据。** 四入口已共用 ConversationService 私有 `withGuardedSelection`，保留锁内空闲检查、前后 Queue 读取，仅受控冲突清理本地待生效选择。Fast status 仍走锁外只读分支，Fast 默认设置写入、startPlan 与最终 Turn 的 Provider/活动状态守卫均未改变。手工调用编译产物并注入选择期间 Queue 冲突，观察顺序为 lock→idle→queue→selected→queue→clear，返回 queue.pending-overrides；目录普通失败仅执行 lock→idle→queue，原错返回且未清理。类型及构建通过。该观察仅覆盖局部保护，未使用真实模型目录、创建 Turn 或运行原生客户端并发，不能证明跨端原子性。
 
 证据入口：[`conversation-service.ts`](../src/application/conversation-service.ts) 的 `togglePlanMode`、`selectModel`、`selectEffort`、`selectFastMode`（约 1362、1433、1450、1467 行），以及 [`thread-queue-service.ts`](../src/application/thread-queue-service.ts) 的 `rejectPendingOverrideChange`。
 

@@ -1360,20 +1360,7 @@ export class ConversationService implements
   }
 
   togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target);
-      try {
-        const state = await this.requireCollaborationModes().toggle(target);
-        await this.rejectQueueWhenPendingOverrideChanges(target);
-        return state;
-      } catch (error) {
-        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
-          this.clearPendingSelections(target);
-        }
-        throw error;
-      }
-    });
+    return this.withGuardedSelection(target, () => this.requireCollaborationModes().toggle(target));
   }
 
   startPlan(target: ConversationTarget, prompt: string): Promise<Submission> {
@@ -1431,57 +1418,18 @@ export class ConversationService implements
   }
 
   selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity): Promise<ModelSelectionState> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target);
-      try {
-        const state = await this.models.selectModel(target, selector);
-        await this.rejectQueueWhenPendingOverrideChanges(target);
-        return state;
-      } catch (error) {
-        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
-          this.clearPendingSelections(target);
-        }
-        throw error;
-      }
-    });
+    return this.withGuardedSelection(target, () => this.models.selectModel(target, selector));
   }
 
   selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target);
-      try {
-        const state = await this.models.selectEffort(target, selector);
-        await this.rejectQueueWhenPendingOverrideChanges(target);
-        return state;
-      } catch (error) {
-        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
-          this.clearPendingSelections(target);
-        }
-        throw error;
-      }
-    });
+    return this.withGuardedSelection(target, () => this.models.selectEffort(target, selector));
   }
 
   selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
     if (selector.trim().toLowerCase() === "status") {
       return this.models.selectFastMode(target, selector);
     }
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target);
-      try {
-        const state = await this.models.selectFastMode(target, selector);
-        await this.rejectQueueWhenPendingOverrideChanges(target);
-        return state;
-      } catch (error) {
-        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
-          this.clearPendingSelections(target);
-        }
-        throw error;
-      }
-    });
+    return this.withGuardedSelection(target, () => this.models.selectFastMode(target, selector));
   }
 
   listSkills(target: ConversationTarget): Promise<InstalledSkill[]> {
@@ -1757,6 +1705,24 @@ export class ConversationService implements
       ...this.models.turnOverrides(target),
       ...(collaborationMode ? { collaborationMode } : {}),
     };
+  }
+
+  /** Local selection guard; native clients can still change Queue concurrently. */
+  private withGuardedSelection<T>(target: ConversationTarget, select: () => Promise<T>): Promise<T> {
+    return this.locked(target, async () => {
+      this.requireIdle(target);
+      await this.rejectQueueWhenPendingOverrideChanges(target);
+      try {
+        const state = await select();
+        await this.rejectQueueWhenPendingOverrideChanges(target);
+        return state;
+      } catch (error) {
+        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
+          this.clearPendingSelections(target);
+        }
+        throw error;
+      }
+    });
   }
 
   private clearPendingSelections(target: ConversationTarget): void {
