@@ -35,6 +35,12 @@ export function assertSynchronousChildSuccess(
 export function childProcessIsRunning(
   child: Pick<ChildProcess, "exitCode" | "signalCode"> | undefined,
 ): boolean;
+/** Observe exit only; the caller retains process/tree ownership and termination policy. */
+export function childExitedWithin(
+  child: Pick<ChildProcess, "exitCode" | "signalCode" | "once" | "off">,
+  timeoutMs: number,
+  options?: { unref?: boolean },
+): Promise<boolean>;
 /** Register a Unix child spawned with detached:true as a dedicated group leader. */
 export function registerChildProcessGroup(child: ChildProcess): void;
 export function signalChildProcesses(

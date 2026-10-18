@@ -24,7 +24,7 @@
 | U14 | 统一 Gateway 与 Codex 基础版本兼容谓词 | 中 | 已修复；门禁、更新器导出与打包清单已检查 |
 | U15 | 收敛源码取得后的安装构建阶段 | 中 | 关联复核完成，排除生命周期合并；未实施 |
 | U16 | 收敛一次性私有 IPC 交换的底层收尾 | 低 | 关联复核完成，降级为条件性提取；未实施 |
-| U17 | 统一自有子进程退出观察的窄操作 | 低 | 关联复核完成，保留所有者决策；未实施 |
+| U17 | 统一自有子进程退出观察的窄操作 | 低 | 已实施；Linux 超时、EOF 与信号退出已观察 |
 | U18 | 统一待生效选择与原生 Queue 的互斥操作 | 中 | 已实施；后查冲突清理已观察，真实跨端并发未实测 |
 | U19 | 将 Queue 官方错误识别收回 Client 边界 | 中 | 已实施；分类及伪造文本拒绝已观察，真实 Queue 链路未实测 |
 
@@ -268,6 +268,8 @@ Supervisor 的 inspect/ensure/release/apply 一次请求另行维护连接、写
 **关联复核结论：降为低优先级，暂不直接替换 helper。** Supervisor 服务端返回换行 JSON 并结束连接，但 inspect 消费端还区分无响应（允许就绪所有者按原预算重试）与有内容但拓扑无效（incompatible）；ensure/release 校验 Provider，apply 校验设置协议及拓扑变更。Relay 控制则另绑定 requestId、digest、动作与字段白名单。公共 JSON helper 当前把解析失败和传输未确认合为拒绝，直接替换会抹掉 Supervisor 的就绪决策。只有先证明可保留这类分类且不增加宽泛选项，才值得提取底层收尾；不要求为去重先建传输框架。Windows 端点验证预算差异仍未实机观察，U07 的 Worker 关闭及 U17 的进程退出不纳入此 IPC 合同。
 
 ## U17 自有子进程退出观察
+
+**实施与证据。** process-lifecycle 公开 `childExitedWithin`，Windows host 和 Supervisor 删除重复观察函数；Supervisor 显式 unref，其他所有者保持引用 timer。终止升级、stdin EOF、预算与进程树归属均由原调用方决定。Linux 自有 Node 子进程观察：20 ms 未退出返回 false 且 exit 监听数为 0；关闭 stdin 后返回 true/exitCode=0；经现有 terminateChildProcess 后识别 SIGTERM，重复观察立即返回 true，监听数为 0。所有任务子进程已退出。类型与边界检查通过；未运行 Windows 服务、macOS 宿主或真实 Supervisor Proxy 停机。
 
 [`process-lifecycle.mjs`](../runtime/process-lifecycle.mjs) 约 262 行、[`windows-service-host.mjs`](../scripts/windows-service-host.mjs) 约 203 行的 `childExitedWithin`，以及 [`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 约 1119 行的 `waitForChildExit`，重复退出状态检查、exit 监听、超时和监听清理。消费者分别是终止升级、Windows 服务停止和 Proxy 收尾。
 

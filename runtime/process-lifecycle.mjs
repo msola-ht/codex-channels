@@ -259,7 +259,7 @@ export function installProcessSignalHandlers(handlers, source = process) {
   };
 }
 
-function childExitedWithin(child, timeoutMs) {
+export function childExitedWithin(child, timeoutMs, { unref = false } = {}) {
   if (!childProcessIsRunning(child)) return Promise.resolve(true);
   return new Promise((resolveWait) => {
     let timer;
@@ -278,6 +278,7 @@ function childExitedWithin(child, timeoutMs) {
       return;
     }
     timer = setTimeout(() => finish(!childProcessIsRunning(child)), timeoutMs);
+    if (unref) timer.unref();
   });
 }
 

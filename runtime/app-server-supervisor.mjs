@@ -20,7 +20,7 @@ import {
   securePrivateDirectorySync,
   secureAppServerSocketDirectorySync,
 } from "./private-file.mjs";
-import { terminateChildProcess } from "./process-lifecycle.mjs";
+import { childExitedWithin, terminateChildProcess } from "./process-lifecycle.mjs";
 import { inspectAppServerUnixSocket } from "./app-server-unix-socket.mjs";
 import { codexHomePath } from "./codex-home.mjs";
 import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
@@ -1112,22 +1112,6 @@ class AppServerProxyDuplex extends Duplex {
 async function stopProxyChild(child) {
   if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
   child.stdin.end();
-  if (await waitForChildExit(child, 1_000)) return;
+  if (await childExitedWithin(child, 1_000, { unref: true })) return;
   await terminateChildProcess(child, { gracePeriodMs: 0, forcePeriodMs: 1_000 });
-}
-
-function waitForChildExit(child, timeoutMs) {
-  if (child.exitCode !== null) return Promise.resolve(true);
-  return new Promise((resolveWait) => {
-    const timer = setTimeout(() => {
-      child.off("exit", onExit);
-      resolveWait(false);
-    }, timeoutMs);
-    timer.unref();
-    const onExit = () => {
-      clearTimeout(timer);
-      resolveWait(true);
-    };
-    child.once("exit", onExit);
-  });
 }
