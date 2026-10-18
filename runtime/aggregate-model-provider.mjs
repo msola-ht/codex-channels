@@ -119,6 +119,9 @@ export function loadAggregateModelMaterial(environment, expectedMembers) {
   if (config.model_context_window !== undefined || config.model_auto_compact_token_limit !== undefined) {
     throw new Error("聚合模式需要使用各模型自己的窗口；请先移除 Codex 全局 model_context_window 与 model_auto_compact_token_limit 覆盖");
   }
+  if (Object.hasOwn(config.model_providers ?? {}, aggregateProviderId)) {
+    throw new Error("codexc-aggregate 是自动派生的保留 Provider；请移除 Codex 主配置中的 model_providers.codexc-aggregate 配置块后重试");
+  }
   // Deduplicate shared catalogues; request-time checks use the worker, never the
   // service loop. Custom profiles use their existing independent-key validator.
   const configuredProfiles = [

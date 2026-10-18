@@ -461,7 +461,8 @@ Desktop 共享仍要求主 Provider 为 OpenAI。执行 `codexc app --provider a
 显示名称为 `Provider ID · 模型名称`。例如账户均名为 `main` 时，精确模型 ID 分别是
 `ds-main/deepseek-flash` 和 `clp-main/cline-pass/deepseek-v4.1-flash`。
 聚合使用一个 App Server 和现有工具 Host，各请求按选择的模型送至对应账户；网页搜索、模型 API
-WebSocket 和自动重试关闭，独立 Relay 保持其原有模型目录和路由。
+WebSocket 关闭。聚合代理本身不重放请求，Codex 使用统一的 HTTP 重试次数 4、流重试次数 5；
+独立 Relay 保持其原有模型目录和路由。
 
 安装新代码后，旧 App Server 服务须按常规执行 `codexc restart appserver` 才能加载聚合能力；
 Gateway 运行时会检测现有成员的 Key、配置和模型目录变更，并在活动 Thread 与客户端租约均允许时重建聚合实例、更新渠道模型菜单。
@@ -470,7 +471,9 @@ Gateway 运行时会检测现有成员的 Key、配置和模型目录变更，�
 退出 Desktop 本身不会创建模型更新，只会释放租约、允许已有更新应用。Codex 主配置
 `~/.codex/config.toml` 不属于聚合模型材料，不参与聚合设置监听或出站材料指纹校验。
 聚合监听第三方账户注册、Profile、凭据、模型目录及其事务状态；主配置中的窗口覆盖与 Provider
-冲突仍在材料加载、启动或应用时校验。主配置修改不会由聚合机制自动刷新；需按对应设置的生效方式
+冲突仍在材料加载、启动或应用时校验：主配置不得声明自动派生的 `model_providers.codexc-aggregate`
+配置块；启动就绪前也会核对有效路由、凭据变量和传输配置与本次启动一致，并拒绝额外查询参数、请求头、认证或模型目录 URL。
+主配置修改不会由聚合机制自动刷新；需按对应设置的生效方式
 处理，要求重启 App Server 的配置仍须显式重启。
 新增、移除切换成员属于拓扑变更，仍须重启 App Server 和 Gateway。生成文件保存在
 `<dataDir>/runtime/aggregate-models.json`，是可重建的派生目录；应修改各提供商的源目录，不要直接编辑它。
@@ -486,8 +489,9 @@ Remote、Desktop 启动和 `app status` 的 `-p` / `--provider` 共用完整 Pro
 自动采用目标模型的默认思考等级；`-m`/`--model` 优先于 `-c model=...`，重复配置覆盖以最后一项为准。
 显式 `-c model_reasoning_effort=...` 优先；`--` 后的内容只作为原生 Codex 输入，不参与模型或思考等级选择。
 渠道通过 `/model` 的 `AGG` 目录选择同一组精确模型 ID，模型项显示实际成员提供商的短标签，
-在聚合 Thread 内换模型保留历史；从单账户切入聚合则创建新 Thread。聚合审批 reviewer 固定为
-`user`，Remote 拒绝显式 `auto_review`。聚合 `/account`、`/limits` 明确返回不支持，
+在聚合 Thread 内换模型保留历史；从单账户切入聚合则创建新 Thread。聚合实例启动时默认审批 reviewer 为
+`user`，各入口允许按现有设置规则选择 `auto_review`；Remote 沿用工作区或显式审批参数，恢复保留历史实际审批方式。
+聚合 `/account`、`/limits` 明确返回不支持，
 请求指标仍按真实成员账户记录，不生成虚拟账户快照。
 会话清理只在发现聚合会话后才连接该实例，无法连接时明确跳过对应会话组。聚合纳入 Supervisor
 与账户空闲回收；Remote 退出释放租约，其他客户端租约或活动仍可阻止回收，退出 Desktop 不保证立即停止实例。

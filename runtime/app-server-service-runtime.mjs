@@ -515,6 +515,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   const instanceLaunches = new Map();
   let aggregateProxy;
   let aggregateGuard;
+  let aggregateLaunchPolicy;
   let aggregateClosing;
   let aggregateCleanupRequired = false;
   const aggregateProxyKeys = new Set();
@@ -539,6 +540,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       }));
       const errors = [...results, ...proxyResults].filter(result => result.status === "rejected").map(result => result.reason);
       if (errors.length) throw new AggregateError(errors, "聚合模型资源未能完全关闭");
+      aggregateLaunchPolicy = undefined;
       aggregateCleanupRequired = false;
     })().finally(() => { if (aggregateClosing === closure) aggregateClosing = undefined; });
     aggregateClosing = closure;
@@ -660,7 +662,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     await retryTemporaryClientCleanup(targetSocket);
     const expectedProvider = provider === primaryProvider ? customPrimaryProvider?.id ?? provider : provider;
     await verifyAppServerRequestPolicy(targetSocket, expectedProvider, defaultWorkspace.cwd, runtime.environment,
-      ownTemporaryClient, closeTemporaryClient);
+      ownTemporaryClient, closeTemporaryClient, aggregateLaunchPolicy);
     assertRunning();
   };
   const ensureInstance = (provider) => {
@@ -818,6 +820,15 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         const [[environmentKey, apiKey]] = credentials;
         const managedLaunch = isolateProviderCredential(provider, argumentsList,
           withoutManagedProviderApiKeys(runtime.environment, customPrimaryCredential?.environmentKey), { environmentKey, apiKey });
+        if (aggregate) {
+          aggregateLaunchPolicy = {
+            base_url: providerBaseUrl,
+            env_key: managedLaunch.credentialEnvironmentKey,
+            wire_api: "responses",
+            requires_openai_auth: false,
+            supports_websockets: false,
+          };
+        }
         const managedAppServerArguments = [
           ...managedLaunch.arguments,
           ...(attachment ? ["-c", `${macDesktopAppPluginEnabledConfigKey}=${attachment.toolsEnabled}`] : []),
@@ -1322,7 +1333,7 @@ function spawnCodexProcess(codexBinary, args, options, environment) {
  * Built-in OpenAI ignores same-name provider overlays in the locked version;
  * third-party providers must retain the explicit policy injected at launch.
  */
-async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environment, ownClient, closeClient) {
+async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environment, ownClient, closeClient, aggregateLaunchPolicy) {
   const { createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
   const rpc = new JsonRpcClient(createAppServerTransport(
     { kind: "local-app-server", socketPath },
@@ -1345,6 +1356,17 @@ async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environme
       const configured = config.model_providers?.[provider];
       assertProviderModelRequestPolicy(configured, true);
       assertProviderModelRetryPolicy(configured);
+      if (provider === aggregateProviderId && (!aggregateLaunchPolicy
+        || typeof aggregateLaunchPolicy.env_key !== "string"
+        || Object.entries(aggregateLaunchPolicy).some(([key, value]) => configured[key] !== value))) {
+        throw new Error("聚合 Provider 的有效路由或认证配置与本次启动不一致；请移除用户、项目或受管配置中的 model_providers.codexc-aggregate 覆盖");
+      }
+      if (provider === aggregateProviderId && [
+        "query_params", "http_headers", "env_http_headers", "experimental_bearer_token",
+        "auth", "gateway_oauth", "aws", "model_catalog_url",
+      ].some(key => configured[key] !== undefined && configured[key] !== null)) {
+        throw new Error("聚合 Provider 存在额外路由或认证配置；请移除用户、项目或受管配置中的 model_providers.codexc-aggregate 覆盖");
+      }
     }
   } catch (error) {
     operationFailure = { error };

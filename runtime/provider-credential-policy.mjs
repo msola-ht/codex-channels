@@ -27,5 +27,6 @@ export function isolateProviderCredential(provider, argumentsList, environment, 
       "-c", `shell_environment_policy.set.${environmentKey}=""`,
     ],
     childEnvironment,
+    credentialEnvironmentKey: environmentKey,
   };
 }
