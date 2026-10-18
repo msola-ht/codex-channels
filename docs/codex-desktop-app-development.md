@@ -32,9 +32,13 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 
 ## 实现与验收状态
 
+- 2026-10-18 操作者确认当前功能可以使用，尚未归档实际平台、Desktop 构建及能力范围。
+  本轮任务是补齐记录，不将缺少记录判定为功能不可用。当前代码标识、CLI 0.163.0 的 Linux
+  隔离运行证据和两平台操作表见 [跨平台验收与交接](codex-desktop-app-acceptance.md)。
+  以下保留历史版本的成功与失败记录；当前组合由新验收记录确认，不直接套用历史结论。
 - 2026-10-08 的 macOS ChatGPT `26.1002.52244` 聚合实例实机日志确认：共享连接和 Host
   租约附加成功，但 Desktop 工具 Pipe 返回 `untrusted-process-ancestry`，随后 `codex_app`
-  MCP 启动报 `Codex app tools pipe closed` / `write EPIPE`。当前签名 Host 路径未通过该次
+  MCP 启动报 `Codex app tools pipe closed` / `write EPIPE`。当时的签名 Host 路径未通过该次
   进程祖先链校验；日志没有确定被拒绝的具体祖先进程，也不能证明所有构建均存在同一问题。
   `compatible` 只验证入口标记，`toolHostAttached` 只表示租约连接，二者均不是工具可用性验收。
   本地缺少该 Desktop 构建及 macOS 环境，尚未验证可接受的替代启动链；不能以关闭通知或重试

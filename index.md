@@ -28,6 +28,8 @@
   当前边界、实现入口、验证范围与正式发布门槛。
 - [`docs/codex-desktop-app-development.md`](docs/codex-desktop-app-development.md)：Codex Desktop App
   与 Gateway 共享主 OpenAI App Server 的桥接架构、安全合同、跨平台边界与实机验收限制。
+- [`docs/codex-desktop-app-acceptance.md`](docs/codex-desktop-app-acceptance.md)：当前可用反馈、Linux
+  已有证据、macOS 与 Windows 分平台验收步骤及结果记录。
 - [`docs/index.md`](docs/index.md)：Codex 协议基线、支持矩阵和实现入口。
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：Codex、飞书与微信的上游源码基线及待升级候选。

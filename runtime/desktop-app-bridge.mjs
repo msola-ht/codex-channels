@@ -204,6 +204,7 @@ export class DesktopAppBridge {
   #started = false;
   #closing = false;
   #closePromise;
+  #serverClosePromise;
 
   constructor({ port, token, primaryProvider = "openai", providers = [primaryProvider], createTransport, acquireLease, onEvent = () => undefined }) {
     if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -270,7 +271,10 @@ export class DesktopAppBridge {
   close() {
     if (this.#closePromise) return this.#closePromise;
     this.#closing = true;
-    this.#closePromise = this.#close();
+    this.#closePromise = this.#close().catch(error => {
+      this.#closePromise = undefined;
+      throw error;
+    });
     return this.#closePromise;
   }
 
@@ -310,6 +314,8 @@ export class DesktopAppBridge {
       leaseClosed: false,
       task: undefined,
       abortTask: undefined,
+      finished: false,
+      closeTask: undefined,
     };
     this.#pending.add(attempt);
     attempt.task = this.#acceptUpgrade(attempt, request, head);
@@ -322,6 +328,7 @@ export class DesktopAppBridge {
       attempt.lease = await this.#acquireLease(attempt.provider);
       if (this.#closing || attempt.socket.destroyed) return;
       attempt.transport = await this.#createTransport(attempt.provider);
+      if (this.#closing || attempt.socket.destroyed) return;
       await attempt.transport.connect();
       if (this.#closing || attempt.socket.destroyed) return;
       this.#webSocketServer.handleUpgrade(
@@ -339,9 +346,14 @@ export class DesktopAppBridge {
       }
       this.#onEvent({ type: "connection-error", stage: "upstream" });
     } finally {
-      this.#pending.delete(attempt);
-      if (!handedOff) {
-        await closeAttempt(attempt);
+      try {
+        if (!handedOff) {
+          await attempt.abortTask;
+          await closeAttempt(attempt);
+        }
+        this.#pending.delete(attempt);
+      } finally {
+        attempt.finished = true;
       }
     }
   }
@@ -351,6 +363,8 @@ export class DesktopAppBridge {
       webSocket,
       transport,
       lease,
+      transportClosed: false,
+      leaseClosed: false,
       closePromise: undefined,
       close: undefined,
       removeTransportMessage: undefined,
@@ -366,16 +380,20 @@ export class DesktopAppBridge {
         session.removeTransportMessage?.();
         session.removeTransportClose?.();
         await closeWebSocket(webSocket, code, reason, terminate ? 250 : 0);
-        try {
+        if (!session.transportClosed) {
           await transport.close();
-        } finally {
-          try { await lease.close(); }
-          finally {
-            this.#sessions.delete(session);
-            this.#onEvent({ type: "disconnected", connections: this.#sessions.size });
-          }
+          session.transportClosed = true;
         }
-      })();
+        if (!session.leaseClosed) {
+          await lease.close();
+          session.leaseClosed = true;
+        }
+        this.#sessions.delete(session);
+        this.#onEvent({ type: "disconnected", connections: this.#sessions.size });
+      })().catch(error => {
+        session.closePromise = undefined;
+        throw error;
+      });
       void session.closePromise.catch(() => this.#onEvent({ type: "connection-error", stage: "upstream" }));
       return session.closePromise;
     };
@@ -409,22 +427,31 @@ export class DesktopAppBridge {
   }
 
   async #close() {
-    for (const attempt of this.#pending) {
+    const attemptCloses = [...this.#pending].map(async (attempt) => {
       attempt.socket.destroy();
-      attempt.abortTask = closeAttempt(attempt);
-      void attempt.abortTask;
-    }
-    const serverClosed = !this.#started
+      if (!attempt.finished) {
+        // Interrupt an existing handshake, but let setup settle before releasing
+        // its lease: an awaited factory can still deliver a new Transport.
+        if (attempt.transport && !attempt.abortTask) {
+          attempt.abortTask = Promise.resolve().then(() => attempt.transport.close());
+          void attempt.abortTask.catch(() => undefined);
+        }
+        await attempt.task;
+      } else {
+        await closeAttempt(attempt);
+        this.#pending.delete(attempt);
+      }
+    });
+    this.#serverClosePromise ??= !this.#started
       ? Promise.resolve()
       : new Promise((resolvePromise) => this.#server.close(() => resolvePromise()));
     const sessionCloses = [...this.#sessions].map((session) =>
       session.close(serviceRestartCloseCode, "Service restarting", true));
     this.#webSocketServer.close();
     const cleanup = Promise.allSettled([
-      serverClosed,
+      this.#serverClosePromise,
       ...sessionCloses,
-      ...[...this.#pending].map((attempt) => attempt.task),
-      ...[...this.#pending].map((attempt) => attempt.abortTask),
+      ...attemptCloses,
     ]);
     let timer;
     try {
@@ -665,17 +692,18 @@ function decodeTextMessage(data) {
   return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
 }
 
-async function closeAttempt(attempt) {
+function closeAttempt(attempt) {
+  if (attempt.closeTask) return attempt.closeTask;
   attempt.socket.destroy();
-  try {
+  attempt.closeTask = (async () => {
     if (attempt.transport !== undefined && !attempt.transportClosed) {
-      attempt.transportClosed = true;
       await attempt.transport.close();
+      attempt.transportClosed = true;
     }
-  } finally {
     if (attempt.lease !== undefined && !attempt.leaseClosed) {
-      attempt.leaseClosed = true;
       await attempt.lease.close();
+      attempt.leaseClosed = true;
     }
-  }
+  })().finally(() => { attempt.closeTask = undefined; });
+  return attempt.closeTask;
 }
