@@ -145,5 +145,5 @@ export function responsesContextSyncPath(environment) {
 }
 
 export function assertResponsesContextSyncComplete(environment) {
-  if (existsSync(responsesContextSyncPath(environment))) throw new Error("DS/CP 上下文同步未完成，请停止服务并执行 primary-provider recover <Provider ID> keep 或 rollback");
+  if (existsSync(responsesContextSyncPath(environment))) throw new Error("DS/CP 上下文同步未完成，请停止服务并执行 codexc provider recover <Provider ID> keep 或 rollback");
 }

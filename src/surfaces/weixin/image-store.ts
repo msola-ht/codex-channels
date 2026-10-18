@@ -16,7 +16,7 @@ import {
   decryptWeixinMedia,
   parseWeixinMediaAesKey,
 } from "./media-crypto.js";
-import type { WeixinImageReference } from "./protocol-client.js";
+import type { WeixinImageReference } from "./protocol-types.js";
 
 export const maximumWeixinImageBytes = maximumManagedImageBytes;
 

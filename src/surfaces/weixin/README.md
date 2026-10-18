@@ -30,8 +30,8 @@
 - `quoted-reference.ts`：授权后组合平台正文、当前进程缓存和摘要；依据官方局部引用位置与可选
   `quotemd5` 校验选中文字，无法还原或缓存未命中时明确提示，不用整段原文代替所选片段。
   引用正文或不可用提示优先于摘要，避免摘要占满共享引用长度预算。
-- `protocol-types.ts`：保存协议稳定错误类型、入站消息可辨识联合和媒体引用结构；`protocol-client.ts`
-  继续兼容导出这些公开类型。
+- `protocol-types.ts`：保存协议稳定错误类型、入站消息可辨识联合和媒体引用结构；内部消费方
+  直接引用该边界，公开类型由 `index.ts` 统一导出。
 - `response-validation.ts`：复用 JSON 对象、数组、受限字符串、整数与微信 API 返回码校验；只产生
   稳定 `WeixinProtocolError`，不保留上游响应正文。
 - `request-abort.ts`：统一微信 JSON API、CDN 下载与二进制上传的请求超时、外部取消、监听器清理

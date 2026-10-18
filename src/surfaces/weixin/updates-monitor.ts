@@ -2,12 +2,12 @@ import { setImmediate as yieldToPolling } from "node:timers/promises";
 import { isWeixinInteractionCommand } from "./interactions.js";
 import { isEmergencyStopCommand } from "../slash-command.js";
 import { validateWeixinAccountId } from "./credential-store.js";
+import type { WeixinProtocolClient } from "./protocol-client.js";
 import {
   WeixinProtocolError,
   type WeixinInboundMessage,
-  type WeixinProtocolClient,
   type WeixinProtocolErrorCode,
-} from "./protocol-client.js";
+} from "./protocol-types.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 
 export interface WeixinUpdatesRetryEvent {

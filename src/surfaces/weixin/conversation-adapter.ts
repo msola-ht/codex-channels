@@ -1,7 +1,6 @@
 import { textAttachmentBody } from "../text-attachment-store.js";
 import { videoAttachmentBody } from "../video-attachment-store.js";
 import type { WeixinVideoStore } from "./video-store.js";
-import type { WeixinVideoReference } from "./protocol-types.js";
 import type { Logger } from "pino";
 
 import {
@@ -58,7 +57,8 @@ import type {
   WeixinAudioReference,
   WeixinFileReference,
   WeixinImageReference,
-} from "./protocol-client.js";
+  WeixinVideoReference,
+} from "./protocol-types.js";
 
 const maximumInboundImageBatchBytes = 20 * 1024 * 1024;
 

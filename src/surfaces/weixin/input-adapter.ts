@@ -15,12 +15,12 @@ import type {
 } from "../../policy/index.js";
 import { maximumQuotedTextCharacters } from "../quoted-input.js";
 import { resolveWeixinQuotedText, type WeixinCachedQuote } from "./quoted-reference.js";
+import type { WeixinProtocolClient } from "./protocol-client.js";
 import {
   WeixinProtocolError,
   type WeixinInboundMessage,
-  type WeixinProtocolClient,
   type WeixinProtocolErrorCode,
-} from "./protocol-client.js";
+} from "./protocol-types.js";
 import { WeixinConversationAdapter } from "./conversation-adapter.js";
 import type { WeixinAudioPort } from "./audio-store.js";
 import type { WeixinFilePort } from "./file-input.js";

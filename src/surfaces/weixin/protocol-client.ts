@@ -28,17 +28,6 @@ import {
   throwForApiError,
 } from "./response-validation.js";
 
-export { WeixinProtocolError } from "./protocol-types.js";
-export type {
-  WeixinAudioReference,
-  WeixinFileReference,
-  WeixinIgnoredMessageReason,
-  WeixinImageReference,
-  WeixinInboundMessage,
-  WeixinProtocolErrorCode,
-  WeixinUpdatesBatch,
-} from "./protocol-types.js";
-
 export interface WeixinProtocolClient {
   getUpdates(
     cursor: string,

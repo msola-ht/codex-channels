@@ -35,11 +35,11 @@ import {
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
   maximumWeixinOutboundFileBytes,
-  WeixinProtocolError,
   type WeixinFileSendProtocolClient,
   type WeixinImageSendProtocolClient,
   type WeixinProtocolClient,
 } from "./protocol-client.js";
+import { WeixinProtocolError } from "./protocol-types.js";
 import {
   readWeixinOutboundImage,
   WeixinOutboundImageError,

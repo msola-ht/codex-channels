@@ -16,7 +16,7 @@ import {
   decryptWeixinMedia,
   parseWeixinMediaAesKey,
 } from "./media-crypto.js";
-import type { WeixinAudioReference } from "./protocol-client.js";
+import type { WeixinAudioReference } from "./protocol-types.js";
 
 export const maximumWeixinAudioBytes = maximumManagedAudioBytes;
 export const maximumWeixinAudioDurationMs = 5 * 60 * 1_000;

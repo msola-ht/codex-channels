@@ -39,7 +39,7 @@ import type {
   WeixinLifecycleProtocolClient,
   WeixinProtocolClient,
 } from "./protocol-client.js";
-import { WeixinProtocolError } from "./protocol-client.js";
+import { WeixinProtocolError } from "./protocol-types.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
 import type { WeixinReplyContextPersistence } from "./reply-context-persistence.js";
 import {

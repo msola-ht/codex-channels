@@ -467,9 +467,8 @@ export function recoverManagedCatalogSettings(provider, action, environment = pr
   try { journal = JSON.parse(content); } catch { throw new Error("模型设置恢复记录无法安全解析"); }
   const scope = managedSettingsScope(environment, catalogPath);
   const { manifestPath, backupPaths } = scope;
-  const hasGuards = journal?.schemaVersion === 2;
-  if (![1, 2].includes(journal?.schemaVersion)
-    || Object.keys(journal).some(key => !(hasGuards ? ["schemaVersion", "files", "guards"] : ["schemaVersion", "files"]).includes(key))
+  if (journal?.schemaVersion !== 2) throw new Error("模型设置恢复记录仅支持版本 2；请保留记录与备份，旧版记录须使用对应原版本恢复");
+  if (Object.keys(journal).some(key => !["schemaVersion", "files", "guards"].includes(key))
     || !Array.isArray(journal.files) || journal.files.length < 1
     || journal.files.length > scope.allowedUpdates.size || new Set(journal.files.map(file => file?.path)).size !== journal.files.length
     || !journal.files.some(file => file?.path === catalogPath)
@@ -479,24 +478,17 @@ export function recoverManagedCatalogSettings(provider, action, environment = pr
       || Buffer.byteLength(file.next) > settingsFileLimit(file.path, scope))) {
     throw new Error("模型设置恢复记录字段或路径无效");
   }
-  if (hasGuards && (!Array.isArray(journal.guards) || journal.guards.length > scope.allowedGuards.size
+  if (!Array.isArray(journal.guards) || journal.guards.length > scope.allowedGuards.size
     || new Set(journal.guards.map(file => file?.path)).size !== journal.guards.length
     || journal.guards.some(file => !file || Object.keys(file).some(key => !["path", "content"].includes(key))
       || !scope.allowedGuards.has(file.path) || journal.files.some(update => update.path === file.path)
       || !(typeof file.content === "string" || file.content === null)
       || file.content !== null && Buffer.byteLength(file.content) > settingsFileLimit(file.path, scope))
     || scope.requiredSnapshots.some(path => !journal.files.some(file => file.path === path)
-      && !journal.guards.some(file => file.path === path)))) {
+      && !journal.guards.some(file => file.path === path))) {
     throw new Error("模型设置恢复记录缺少同家族账户快照，或包含不受支持的守卫路径");
   }
-  const guards = new Map((hasGuards ? journal.guards : []).map(file => [file.path, file.content ?? undefined]));
-  // Historical records did not store guards. Freeze every current family selection
-  // for this recovery and still reject a snapshot that invalidates another account.
-  if (!hasGuards) {
-    for (const path of scope.requiredSnapshots) {
-      if (!journal.files.some(file => file.path === path)) rememberSettingsSnapshot(guards, path, environment);
-    }
-  }
+  const guards = new Map(journal.guards.map(file => [file.path, file.content ?? undefined]));
   assertCatalogUpdateSnapshots(environment, guards);
   const manifest = journal.files.find(file => file.path === manifestPath);
   if (manifest || journal.files.some(file => backupPaths.has(file.path))) {

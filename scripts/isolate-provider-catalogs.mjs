@@ -202,6 +202,7 @@ function rewriteInstallationBackup(content, path, layout) {
 
 function rewriteSettingsBackup(content, sourceDirectory, account, layout) {
   const backup = parseJson(content, `家族 ${account.family} 模型设置备份`);
+  if (backup?.schemaVersion !== 2) throw new Error(`家族 ${account.family} 模型设置备份仅支持版本 2；请保留记录与备份，旧版材料须使用对应原版本处理`);
   const filePaths = new Map(account.names.filter(name => !name.endsWith(".settings-backup"))
     .map(name => [join(sourceDirectory, name), join(account.targetDirectory, name)]));
   const siblings = layout.accounts.filter(sibling => sibling.family === account.family);
@@ -213,39 +214,36 @@ function rewriteSettingsBackup(content, sourceDirectory, account, layout) {
     ...siblings.flatMap(sibling => [...sibling.markers, sibling.profile]),
     ...account.names.filter(name => name === account.definition.catalogManifestFileName || name.endsWith(".backup"))
       .map(name => join(sourceDirectory, name))]);
-  if (![1, 2].includes(backup?.schemaVersion)
-    || Object.keys(backup).some(key => !(backup.schemaVersion === 2 ? ["schemaVersion", "files", "guards"] : ["schemaVersion", "files"]).includes(key))
+  if (Object.keys(backup).some(key => !["schemaVersion", "files", "guards"].includes(key))
     || !Array.isArray(backup.files) || backup.files.length < 1
     || backup.files.length > filePaths.size || new Set(backup.files.map(file => file?.path)).size !== backup.files.length
     || !backup.files.some(file => file?.path === join(sourceDirectory, account.definition.catalogFileName))
     || backup.files.some(file => !filePaths.has(file?.path) || Object.keys(file).some(key => !["path", "previous", "next"].includes(key))
       || typeof file.next !== "string" || !(typeof file.previous === "string" || file.previous === null && file.path.endsWith(".backup")))
-    || backup.schemaVersion === 2 && (!Array.isArray(backup.guards) || new Set(backup.guards.map(file => file?.path)).size !== backup.guards.length
+    || !Array.isArray(backup.guards) || new Set(backup.guards.map(file => file?.path)).size !== backup.guards.length
       || backup.guards.some(file => !guardPaths.has(file?.path) || Object.keys(file).some(key => !["path", "content"].includes(key))
-        || backup.files.some(update => update.path === file.path) || file.content !== null && typeof file.content !== "string"))) {
+        || backup.files.some(update => update.path === file.path) || file.content !== null && typeof file.content !== "string")) {
     throw new Error(`家族 ${account.family} 模型设置备份路径或结构无效`);
   }
-  if (backup.schemaVersion === 2) {
-    const required = [join(sourceDirectory, account.definition.catalogManifestFileName),
+  const required = [join(sourceDirectory, account.definition.catalogManifestFileName),
       ...managedProviderAccountFamilies.filter(family => (family.definition.storageId ?? family.definition.id) === account.family)
         .map(family => family.accountsFilePath(layout.environment)),
       ...siblings.map(sibling => sibling.mode === "exclusive" ? layout.config : sibling.profile)];
-    if (required.some(path => !backup.files.some(file => file.path === path) && !backup.guards.some(file => file.path === path))) {
-      throw new Error(`家族 ${account.family} 模型设置备份缺少完整账户守卫快照`);
-    }
-    if (siblings.some(sibling => !backup.guards.some(file => sibling.markers.includes(file.path)))) throw new Error(`家族 ${account.family} 模型设置备份缺少账户管理标记守卫`);
+  if (required.some(path => !backup.files.some(file => file.path === path) && !backup.guards.some(file => file.path === path))) {
+    throw new Error(`家族 ${account.family} 模型设置备份缺少完整账户守卫快照`);
   }
+  if (siblings.some(sibling => !backup.guards.some(file => sibling.markers.includes(file.path)))) throw new Error(`家族 ${account.family} 模型设置备份缺少账户管理标记守卫`);
   for (const file of backup.files) {
     if (siblings.some(sibling => sibling.profile === file.path)) {
       for (const field of ["previous", "next"]) if (file[field] !== null) file[field] = rewriteConfig(file[field], layout);
     }
     file.path = filePaths.get(file.path);
   }
-  for (const guard of backup.guards ?? []) {
+  for (const guard of backup.guards) {
     if (guard.content !== null && (guard.path === layout.config || siblings.some(sibling => sibling.profile === guard.path))) guard.content = rewriteConfig(guard.content, layout);
     guard.path = filePaths.get(guard.path) ?? markerPaths.get(guard.path) ?? guard.path;
   }
-  if (new Set((backup.guards ?? []).map(file => file.path)).size !== (backup.guards ?? []).length) throw new Error(`家族 ${account.family} 模型设置备份目标守卫重复`);
+  if (new Set(backup.guards.map(file => file.path)).size !== backup.guards.length) throw new Error(`家族 ${account.family} 模型设置备份目标守卫重复`);
   return encode(backup);
 }
 
@@ -383,12 +381,17 @@ function buildPlan(environment, layout) {
     for (const selection of selected) if (chosen.catalog.models.filter(model => model.slug === selection.model).length !== 1) throw new Error(`家族 ${family} 当前选择模型缺失或重复`);
     const targets = new Map([[account.target, chosen.content], [join(account.targetDirectory, account.definition.catalogManifestFileName), chosen.manifest]]);
     for (const name of account.names.slice(2)) {
+      const target = join(account.targetDirectory, name);
+      const existing = original(target);
+      if (name.endsWith(".settings-backup") && existing !== undefined
+        && parseJson(existing, `家族 ${family} 目标模型设置备份`)?.schemaVersion !== 2) {
+        throw new Error(`家族 ${family} 目标模型设置备份仅支持版本 2；请保留记录与备份，旧版材料须使用对应原版本处理`);
+      }
       const available = sources.flatMap(source => {
         const path = join(dirname(source), name), content = original(path);
         return content === undefined ? [] : [{ path, content: name.endsWith(".settings-backup")
           ? rewriteSettingsBackup(content, dirname(source), account, layout) : content }];
       });
-      const target = join(account.targetDirectory, name);
       const different = available.some(file => !equalJson(file.content, available[0].content, `家族 ${family} 模型备份`));
       if (different && name.endsWith(".settings-backup")) throw new Error(`家族 ${family} 有多个不同的模型设置恢复备份，拒绝选择；请先核对并归档冲突备份：${available.map(file => file.path).join(", ")}`);
       if (different) retainedSourceBackups.push(...available.map(file => file.path));
@@ -486,7 +489,7 @@ function summary(action, journal) {
 export async function isolateProviderCatalogs(action = "preview", environment = process.env) {
   if (!["preview", "write", "resume", "rollback"].includes(action)) throw new Error("模型目录合并操作无效");
   return withModelProviderManagementTransaction(environment, async () => {
-    if (existsSync(responsesContextSyncPath(environment))) throw new Error("旧上下文事务尚未恢复，请先使用 primary-provider recover 完成恢复");
+    if (existsSync(responsesContextSyncPath(environment))) throw new Error("旧上下文事务尚未恢复，请先使用 codexc provider recover <Provider ID> keep 或 rollback 完成恢复");
     const path = providerCatalogIsolationPath(environment), backup = `${path}.v4.backup`;
     if (["preview", "write"].includes(action) && existsSync(path)) throw new Error("已有未完成目录事务，请使用对应版本的 --resume 或 --rollback");
     if (["resume", "rollback"].includes(action) && !existsSync(path) && !existsSync(backup) && existsSync(`${path}.v3.backup`)) {
