@@ -1,3 +1,6 @@
+import type { OpenAiModelCatalogEntry } from "../runtime/model-catalog-presentation.mjs";
+import type { OpenAiModelPrompts } from "./webui-official-model-catalog.mjs";
+import type { ModelDefinition } from "../runtime/model-catalog.mjs";
 export interface ProviderModelCatalog {
   provider: string;
   displayName: string;
@@ -6,6 +9,30 @@ export interface ProviderModelCatalog {
   canRemove: boolean;
   unavailableReason?: string;
 }
+export interface ProviderModelCatalogPresentation extends Omit<ProviderModelCatalog, "models"> {
+  source: "managed" | "custom" | "official-shared";
+  revision: string;
+  models: Array<{ id: string; displayName: string; isDefault: boolean; presentation: OpenAiModelCatalogEntry }>;
+}
+export function loadProviderModelCatalogPresentations(options?: { environment?: NodeJS.ProcessEnv }): Promise<{ catalogs: ProviderModelCatalogPresentation[] }>;
+export function loadProviderModelPrompts(input: unknown, options?: { environment?: NodeJS.ProcessEnv }): Promise<OpenAiModelPrompts & Pick<ModelDefinition, "template" | "sampling">>;
+
+export interface ProviderModelContextInput { provider: string; model: string; contextWindow: number; revision: string }
+export interface ProviderModelContextPreview {
+  operation: "model.context";
+  provider: string;
+  model: { id: string; displayName: string; contextWindow: number | null; maxContextWindow: number };
+  contextWindow: number;
+  providers: string[];
+  revision: string;
+  willChange: boolean;
+  activation: "restart-app-server";
+}
+export function previewProviderModelContextChange(input: ProviderModelContextInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ProviderModelContextPreview>;
+export function applyProviderModelContextChange(input: ProviderModelContextInput, options: {
+  environment?: NodeJS.ProcessEnv;
+  preview: ProviderModelContextPreview;
+}): Promise<ProviderModelContextPreview & { action: "updated" }>;
 
 export interface ProviderModelRemovalInput { provider: string; model: string }
 export interface ProviderModelRemovalPreview {

@@ -1,5 +1,6 @@
 import type { ResetCreditSnapshot, ResetCreditPreview, ResetCreditResult } from "./types"
 import type {
+  ManagementProviderWebSearchProbeInput, ManagementProviderWebSearchProbeResult,
   ManagementCustomModelProbeInput, ManagementCustomModelProbeResult,
   ServiceLogTarget, ServiceLogsResponse,
   QueueChangeEvent,
@@ -21,6 +22,17 @@ import type {
   ManagementSettingsResponse,
   ManagementServicesResponse,
   ManagementProvidersResponse,
+  OpenAiModelCatalogResponse,
+  OpenAiModelPromptsResponse,
+  ProviderModelPromptsResponse,
+  ProviderModelTemplateOptionsResponse,
+  CustomModelDraftTemplatesResponse,
+  OpenAiModelContextInput,
+  OpenAiModelContextPreview,
+  OpenAiModelContextResult,
+  OpenAiModelRefreshInput,
+  OpenAiModelRefreshPreview,
+  OpenAiModelRefreshResult,
   UpstreamUserAgentResponse,
   ManagementSettingInput,
   ManagementSettingMutationResponse,
@@ -47,6 +59,7 @@ import type {
   TrafficListResponse,
 } from "@/lib/types"
 import { getToken } from "@/lib/token-storage"
+import type { ManagedManualModelDefinition, ProviderModelAdditionOptions } from "../../../scripts/provider-model-additions.mjs"
 import { metricsQueryParams } from "@/lib/metrics-query"
 
 export { getToken, setToken } from "@/lib/token-storage"
@@ -389,6 +402,34 @@ export function fetchManagementProviders(signal?: AbortSignal): Promise<Manageme
   return getJson<ManagementProvidersResponse>(`${API_PREFIX}/management/providers`, signal)
 }
 
+export function fetchOpenAiModelCatalog(signal?: AbortSignal): Promise<OpenAiModelCatalogResponse> {
+  return getJson<OpenAiModelCatalogResponse>(`${API_PREFIX}/management/models/official`, signal)
+}
+
+export function fetchOpenAiModelPrompts(model: string, revision: string, signal?: AbortSignal): Promise<OpenAiModelPromptsResponse> {
+  return getJson(`${API_PREFIX}/management/models/official/prompts?${new URLSearchParams({ model, revision })}`, signal)
+}
+
+export function fetchProviderModelPrompts(provider: string, model: string, revision: string, signal?: AbortSignal): Promise<ProviderModelPromptsResponse> {
+  return getJson(`${API_PREFIX}/management/provider-model-prompts?${new URLSearchParams({ provider, model, revision })}`, signal)
+}
+
+export function previewOpenAiModelContext(input: OpenAiModelContextInput, signal?: AbortSignal): Promise<{ preview: OpenAiModelContextPreview; confirmationToken: string; confirmationExpiresAt: number }> {
+  return requestJson(`${API_PREFIX}/management/models/official/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+
+export function updateOpenAiModelContext(input: OpenAiModelContextInput, confirmationToken: string, signal?: AbortSignal): Promise<OpenAiModelContextResult> {
+  return requestJson(`${API_PREFIX}/management/models/official/context`, { method: "POST", body: JSON.stringify({ ...input, confirmationToken }) }, signal)
+}
+
+export function previewOpenAiModelRefresh(input: OpenAiModelRefreshInput, signal?: AbortSignal): Promise<{ preview: OpenAiModelRefreshPreview; confirmationToken: string; confirmationExpiresAt: number }> {
+  return requestJson(`${API_PREFIX}/management/models/official/refresh/preview`, { method: "POST", body: JSON.stringify(input) }, signal, 45_000)
+}
+
+export function refreshOpenAiModelCatalog(input: OpenAiModelRefreshInput, confirmationToken: string, signal?: AbortSignal): Promise<OpenAiModelRefreshResult> {
+  return requestJson(`${API_PREFIX}/management/models/official/refresh`, { method: "POST", body: JSON.stringify({ ...input, confirmationToken }) }, signal, 45_000)
+}
+
 export function fetchCodexUserSettings(signal?: AbortSignal): Promise<CodexUserSettingsResponse> {
   return getJson<CodexUserSettingsResponse>(`${API_PREFIX}/management/codex/settings`, signal)
 }
@@ -434,8 +475,28 @@ export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<M
   return getJson<ManagementProviderSettingsResponse>(`${API_PREFIX}/management/provider-settings`, signal)
 }
 
+export function fetchProviderModelTemplateOptions(provider: string, signal?: AbortSignal): Promise<ProviderModelTemplateOptionsResponse> {
+  return getJson(`${API_PREFIX}/management/provider-model-templates?${new URLSearchParams({ provider })}`, signal)
+}
+
+export function fetchProviderModelAdditionOptions(provider: string, manualModel: ManagedManualModelDefinition | undefined, signal: AbortSignal): Promise<ProviderModelAdditionOptions> {
+  return requestJson(`${API_PREFIX}/management/provider-model-additions`, {
+    method: "POST", body: JSON.stringify({ provider, ...(manualModel ? { manualModel } : {}) }),
+  }, signal, 100_000)
+}
+
+export function fetchCustomModelDraftTemplates(signal: AbortSignal): Promise<CustomModelDraftTemplatesResponse> {
+  return getJson(`${API_PREFIX}/management/provider-model-drafts`, signal)
+}
+
 export function probeManagementCustomModel(input: ManagementCustomModelProbeInput, signal: AbortSignal): Promise<ManagementCustomModelProbeResult> {
   return requestJson<ManagementCustomModelProbeResult>(`${API_PREFIX}/management/provider-settings/probe`, {
+    method: "POST", body: JSON.stringify(input),
+  }, signal, 50_000)
+}
+
+export function probeManagementProviderWebSearch(input: ManagementProviderWebSearchProbeInput, signal: AbortSignal): Promise<ManagementProviderWebSearchProbeResult> {
+  return requestJson<ManagementProviderWebSearchProbeResult>(`${API_PREFIX}/management/provider-settings/web-search-probe`, {
     method: "POST", body: JSON.stringify(input),
   }, signal, 50_000)
 }

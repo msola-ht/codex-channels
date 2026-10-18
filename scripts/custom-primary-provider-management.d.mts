@@ -5,6 +5,10 @@ import type {
 } from "./codex-user-config.mjs";
 
 export const primaryProviderId: "OpenAI";
+export type CustomProviderConnectionSaveInput = Omit<CustomPrimaryProviderSaveInput, "operation" | "model" | "catalog" | "probeConnections"> & { operation: "update" };
+export function previewCustomProviderConnectionSave(input: CustomProviderConnectionSaveInput, options?: CustomPrimaryProviderSaveOptions): ReturnType<typeof previewCustomPrimaryProviderSave>;
+export function prepareCustomProviderConnectionSave(input: CustomProviderConnectionSaveInput, options?: CustomPrimaryProviderSaveOptions): Promise<{ preview: Awaited<ReturnType<typeof previewCustomPrimaryProviderSave>>; apply(): ReturnType<typeof applyCustomPrimaryProviderSave> }>;
+export function applyCustomProviderConnectionSave(input: CustomProviderConnectionSaveInput, options: CustomPrimaryProviderSaveOptions & { preview: { revision?: string } }): ReturnType<typeof applyCustomPrimaryProviderSave>;
 export interface CustomProviderModelsSaveInput {
   provider: string;
   model: string;
@@ -35,7 +39,10 @@ export interface CustomPrimaryProviderSaveInput {
 
 export interface CustomPrimaryProviderSaveOptions {
   environment?: NodeJS.ProcessEnv;
+  preview?: { revision?: string };
   expectedCatalogContent?: string;
+  /** Internal capability-only saves preserve both catalog and connection selections. */
+  preserveDefaults?: boolean;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CodexUserConfigTransactionClient & {
@@ -72,6 +79,7 @@ export function previewCustomPrimaryProviderSave(
   options?: CustomPrimaryProviderSaveOptions,
 ): Promise<{
   operation: "create" | "update";
+  revision: string;
   provider: CustomPrimaryProviderSaveSummary;
   transport: { scheme: "http" | "https"; cleartext: boolean };
   activation: "restart-all";
@@ -98,7 +106,7 @@ export function prepareCustomPrimaryProviderSave(
 
 export function applyCustomPrimaryProviderSave(
   input: CustomPrimaryProviderSaveInput,
-  options?: CustomPrimaryProviderSaveOptions,
+  options: CustomPrimaryProviderSaveOptions & { preview: { revision?: string } },
 ): Promise<{
   action: "created" | "updated";
   provider: CustomPrimaryProviderSaveSummary;

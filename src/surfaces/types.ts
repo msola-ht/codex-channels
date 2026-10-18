@@ -21,6 +21,7 @@ export interface SurfaceConfigurationChange {
     | "provider-settings-scheduled"
     | "provider-settings-restarting"
     | "provider-settings-applied"
+    | "provider-settings-restart-required"
     | "provider-settings-failed";
   changes: readonly ConfigChange[];
   addedWorkspaces: readonly (Workspace & { readonly listNumber: number })[];

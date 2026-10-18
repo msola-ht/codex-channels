@@ -1,7 +1,7 @@
 # DeepSeek 多账户
 
-DeepSeek 账户使用独立 API Key、Profile 和按需启动的 App Server。同一批 DS 账户共用
-DS 官方模型目录，OCG、CCG 的目录及增量模型保持独立。官方 `deepseek-flash` 已指向 V4.1 Flash，
+DeepSeek 账户使用独立 API Key、Profile 和按需启动的 App Server，所有 DS 账户共用一份模型目录。
+OCG、CCG 的目录及增量模型保持独立。官方 `deepseek-flash` 已指向 V4.1 Flash，
 DS 不另造 `deepseek-v4.1-flash` 模型 ID。
 
 ## 配置与移除
@@ -21,6 +21,7 @@ codexc restart all                 # 应用配置变化
 账户 ID 必须由用户填写，使用 1–32 位小写字母、数字、`-` 或 `_`，不自动创建 `main`。
 首个账户标记为默认，后续可手动修改。不同 ID 不能生成相同的凭据环境变量名。
 仅支持当前多账户格式。删除固定模式账户时只恢复该 Provider 管理的主配置字段，保留安装前备份与历史统计；Remote TUI 正在使用该实例时须先退出。写入失败会回滚本次文件变更。
+新增及重新配置账户均在写入前用当前 Codex CLI 校验完整模型目录，包括复用已有共享目录的情况；无效目录或超过 2 MiB 的目录会拒绝接入，不能只凭默认模型可解析就报告成功。
 
 请求与指标按精确的 `ds-<账户>` 身份归属，只恢复能映射到当前账户的 Thread。
 
@@ -30,38 +31,75 @@ codexc restart all                 # 应用配置变化
 | --- | --- |
 | `~/.codex-connect/providers/deepseek/accounts.json` | 账户 ID 与默认标记，不含凭据 |
 | `~/.codex/sf-ds-<账户>.config.toml` | 切换账户的模型、Provider 与私有 Key |
-| `~/.codex-connect/providers/deepseek/accounts/<账户>/managed.toml` | 账户运行模式 |
-| `~/.codex-connect/providers/deepseek/accounts/<账户>/backup/config.json` | 本次安装前的基础配置 |
-| `~/.codex-connect/providers/deepseek/models.json` | 全部 DS 账户共用的官方模型目录 |
-| `~/.codex-connect/providers/deepseek/models.manifest.json` | 目录来源和更新时间 |
+| `~/.codex-connect/providers/ds-<账户>/managed.toml` | 账户运行模式 |
+| `~/.codex-connect/providers/ds-<账户>/backup/config.json` | 本次安装前的基础配置 |
+| `~/.codex-connect/providers/deepseek/models.json` | 所有 DS 账户共用的模型目录 |
+| `~/.codex-connect/providers/deepseek/models.manifest.json` | 共用目录来源和更新时间 |
 
 切换模式保留 OpenAI 主配置，每个账户使用独立私有 Profile；固定模式在确认后修改 Codex
 主配置，同一时刻只能有一个固定主 Provider。切换账户 Key 保存在私有 Profile（Unix `0600`，Windows 私有 ACL），固定账户使用独立私有版本与主配置 `env_key` 引用，仅进入目标
 App Server 子进程，不进入账户注册表、命令行或日志。
 固定凭据重配、旧配置失败恢复与原生终端边界见[Provider 凭据安全说明](provider-integration-guide.md#4-安全边界)。
 
-删除账户保留历史统计和备份；仍有账户时保留共享模型目录，删除最后一个账户时清理目录。删除前检查并停止对应 App Server；Remote TUI
+删除账户移除其 Profile、运行模式标记和注册信息，保留共享模型目录、来源记录、历史统计和备份；删除最后一个账户也不自动清理共享目录。删除前检查并停止对应 App Server；Remote TUI
 正在占用、监管状态异常或停止失败时，不删除账户文件。删除后该账户历史 Thread 将不可恢复。
-若 CP 模型仍跟随 DS 上下文，删除最后一个账户前须先在 CP 设置关闭跟随；预览会列出阻止删除的 CP 提供商。
 删除默认账户前需先选择其他默认账户；删除最后一个账户无需选择。
 原生子代理继承父线程的 Provider，不独立绑定账户。固定账户删除或改为切换模式时
 仅恢复受管 Provider 字段，保留其他主配置修改。删除后重新添加会建立新的恢复基线，旧备份归档保留。
 切换账户每次进入固定模式时都会以当时主配置更新该账户的恢复基线，并把旧基线归档；固定模式内
 重新配置继续使用本次进入时的基线。同一时刻仍只允许一个固定主 Provider，其他 DS 账户可保持切换模式。
 
+## 仓库模板维护
+
+以下命令用于源码仓库内的模板维护，和账户目录刷新是两个独立操作。请在仓库根目录执行：
+
+```sh
+node scripts/update-model-templates.mjs                      # 下载 DS，用已保存底座补全并对比
+node scripts/update-model-templates.mjs --write              # 校验后保存 DS 更新
+node scripts/update-model-templates.mjs --update-base        # 显式获取 CLI 底座并对比，不下载 DS
+node scripts/update-model-templates.mjs --update-base --write # 校验后保存底座和 DS 重新补全结果
+```
+
+公共底座是已保存的固定快照，不随 CLI 升级、模型创建、账户模板对比或 DS 维护自动刷新。
+默认命令仅从 DS 官方安装脚本提取 JSON，不执行脚本；补全时复用已保存底座，保持底座文件及其来源记录不变。
+只有显式指定 `--update-base` 才使用 `codex debug models --bundled`，从项目锁定 CLI 获取
+内置目录原始顺序中的第一个模型，不按固定名称匹配；来源记录保存实际模型 ID。用已保存的 DS 原始目录重新补全，保留 DS 原始文件及其下载来源。该操作不联网下载 DS，
+也不使用用户的 `models_cache.json`。需要同时维护两种来源时，分别运行这两组命令并审查各自差异。
+两组命令都先只对比，只有另加 `--write` 才保存；版本不匹配、源模型缺失，或复用的底座／DS 原始目录
+与来源哈希不一致时停止，不替换成其他模型或隐式重新获取另一来源。
+
+仓库保留四份文件：`runtime/model-catalog-base.json`（提取的单模型原始快照）、
+`runtime/model-catalog-deepseek-source.json`（DS 原始目录）、
+`runtime/model-catalog-deepseek.json`（DS 补全目录）和 `runtime/model-catalog-sources.json`（来源与哈希）。
+更新会按模型 ID 和字段列出新增、删除、修改，不打印整段提示词；三份目录全部通过当前锁定 CLI 加载校验后才允许写入。
+默认 DS 对比也会联网下载目录，但不会调用模型或产生模型推理费用。`--update-base` 只读取本机锁定 CLI 和仓库快照。
+
+补全只继承缺失的非空提示词，保留 DS 已有正文、空字符串、数组、布尔值和显式 `null`。
+唯一例外是 `model_messages.approvals: null`：按已确认规则补入基础审批提示词。
+缺失的 `token_budget` 整组复制必要开关、阈值和提示词，避免只补正文导致 CLI 解析失败；当前基础模板保持该功能关闭。
+不继承底座模型的 Fast 档位、上下文、工具能力或 `xhigh` 子代理思考等级。补入提示词不会开启自动审批或子代理功能。
+
+写入前复核原文件内容并互斥更新，单文件替换使用临时文件；普通写入失败会尝试回滚。
+进程被强制中断或掉电不保证四文件整体原子性，可能留下 `.model-catalog-update.lock`；
+确认没有维护进程后，先用 `git diff` 检查并恢复本次模板修改，再移除残留锁并重新运行。
+更新结果仍需审查后提交，不会自动提交、重启服务或覆盖账户目录。新模型使用保存后的底座；
+已有账户模型继续通过模板差异预览和显式确认更新，读取已有目录不注入新模板。
+CLP Flash 与自定义提供商导入 DS 模型时使用仓库的 DS 补全目录，不读取某个 DS 账户的设置。
+DS、OCG、CCG 仍通过官方脚本下载目录；显式创建或更新目录时使用仓库基础提示词补全缺失项并固化，读取已有目录不注入新模板。
+
 ## 模型与设置
 
 DS 目录从官方安装脚本提取，不执行下载脚本。当前目录为 `deepseek-flash` 与
-`deepseek-v4-pro`；实际选项以下载目录为准。新增账户复用已有 DS 目录，首次配置才下载；
+`deepseek-v4-pro`；实际选项以下载目录为准。首次接入生成 DS 目录，新增账户复用已有目录；
 模型目录由 Setup 配置，更新器不刷新目录。
 已下线模型会切到目录默认模型，同时更新对应账户配置。
 导入 DS 模板到自定义提供商或 CLP 时，目录自带的提示词（`model_messages.instructions_template`）随模型定义携带；deprecated 的顶层 `base_instructions` 只是旧客户端镜像，不单独保留。
 
-通过账户菜单选择默认模型和思考等级，通过“模型上下文窗口”按模型名设置窗口 Token 数。
+通过账户菜单选择默认模型和思考等级，通过“模型上下文窗口”选择提供商和模型设置窗口 Token 数。
 可选 128K、256K、384K、512K、1M 预设（仅显示不超过模型最大窗口的值），
 也可选择最大窗口或自定义输入 1024 至模型最大值之间的整数；K 为 1024，M 为 1048576。
-账户分别选择默认模型；思考等级、上下文和能力字段存放在共享目录，同一模型的这些设置会影响
-所有 DS 账户。切换 Profile 同步目录默认思考等级；原生角色独立保存自己的思考等级，目录更新不覆盖角色选择。
+账户独立选择默认模型；思考等级、上下文和能力字段按 DS 模型共用，修改一个模型会影响所有使用该模型的 DS 账户，不影响其他提供商。相关 Profile 的默认思考等级同步保持一致。
+选择该模型的切换 Profile 同步目录默认思考等级；原生角色独立保存自己的思考等级，目录更新不覆盖角色选择。
 压缩使用上游默认，不写入独立自动压缩阈值。
 
 DS 自动审查不再受本地审批模型白名单限制；模型仍须符合正常目录与路由要求。
@@ -82,7 +120,7 @@ Remote 保留 `--profile sf-ds-personal`；两个入口默认连接主实例，�
 
 聊天使用 `/model` 选择 `DS <账户>` 下的模型。同账户切模型保持 Thread，跨账户选择会保留并
 解绑旧 Thread，下一条消息在目标账户新建 Thread，不复制历史。每个账户的 App Server 按需启动，
-DS 账户共用一个统计代理，通过内部账户路径区分请求并上报到各账户指标 Socket。
+每个 DS 账户使用自己的统计代理，按准确 Provider ID 上报到对应账户指标 Socket。
 
 ## 网页搜索
 
@@ -112,8 +150,11 @@ DS 目录生成时明确设置 `support_verbosity: false`、`default_verbosity: 
 `supports_reasoning_summary_parameter: false` 和 `default_reasoning_summary: "none"`，
 移除锁定 Codex 已不使用的 `supports_reasoning_summaries` 声明。保留完整思考正文、工具能力与提示词。
 已有账户可通过 Setup 的“重新配置账户”或 `codexc provider deepseek reconfigure <账户>` 应用；
-复用本地目录，不重新下载，不重置模型、思考等级或上下文设置。共享目录会惠及同机所有 DS 账户，
+复用该账户的本地目录，不重新下载，不重置模型、思考等级或上下文设置；只更新所选账户，
 写入失败按现有配置事务恢复原文件；完成后重启 App Server 生效。启动、Doctor 和源码更新器不隐式改写目录。
+
+旧嵌套或扁平账户目录升级前须先停止整个 App Server，并在源码仓库根目录显式执行
+[提供商模型目录合并](provider-integration-guide.md#旧共享目录账户升级)，完成后再启动新版；升级不会自动迁移真实用户目录。
 
 2026-09-26 隔离线上验证：`deepseek-flash`、`low` 思考等级连续 4 次 Responses 请求均成功，
 依次覆盖客户端 `tool_search`、检索结果回传与命名空间函数调用、固定工具结果回传、下一轮用户输入。

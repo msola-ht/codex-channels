@@ -39,11 +39,13 @@ const providerSettingsAction: Record<
   | "provider-settings-scheduled"
   | "provider-settings-restarting"
   | "provider-settings-applied"
+  | "provider-settings-restart-required"
   | "provider-settings-failed"
 > = {
   scheduled: "provider-settings-scheduled",
   restarting: "provider-settings-restarting",
   applied: "provider-settings-applied",
+  "restart-required": "provider-settings-restart-required",
   failed: "provider-settings-failed",
 };
 

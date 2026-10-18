@@ -1,146 +1,94 @@
-import { join } from "node:path";
 import * as clackPrompts from "@clack/prompts";
-import { codexHomePath } from "../runtime/codex-home.mjs";
-import { commandCodeProviderDefinition, opencodeGoProviderDefinition, loadManagedModelProviderDefinitions, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
-import { ccgAccountsFilePath } from "../runtime/ccg-accounts.mjs";
-import { opencodeGoAccountsFilePath } from "../runtime/opencode-go-accounts.mjs";
-import { managedProviderDirectory, managedProviderMarkerPath, loadManagedModelProviderSettings, loadManagedModelWindow, withManagedModelCatalogSettings, withPreservedManagedModelCatalogSettings } from "../runtime/model-provider-runtime.mjs";
-import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
-import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
-import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
-import { snapshotProviderFiles, applyProviderFileUpdates, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
-import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
-import { validateEnabledModelSelection, promptEnabledProviderModels } from "./provider-model-selection.mjs";
+import { loadManagedModelProviderDefinitions, isManagedProviderModelValid, managedProviderAccountFamilyForDefinition } from "../runtime/model-provider-definitions.mjs";
+import { loadProviderModelCatalogs } from "./provider-model-management.mjs";
+import { loadProviderModelAdditionOptions, previewProviderModelAddition, applyProviderModelAddition } from "./provider-model-additions.mjs";
 import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import { createCcgCatalog, createOpencodeGoCatalog } from "./provider-model-catalog.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
+import { promptContextWindow } from "./responses-model-setup.mjs";
 
-function definitionFor(provider) {
-  if (provider === "ccg") return commandCodeProviderDefinition;
-  if (provider === "ocg") return opencodeGoProviderDefinition;
-  throw new Error("此模型管理入口仅支持 CCG 或 OCG");
+function definitionFor(provider, environment) {
+  const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === provider);
+  if (definition && ["ccg", "opencode-go", "clp"].includes(definition.storageId)) return definition;
+  throw new Error("此模型新增入口必须明确选择 CCG、OCG 或 CLP 账户");
 }
 
-/** Existing catalogues remain the enabled set; no hidden candidate database. */
-export async function updateManagedProviderModels(provider, { environment = process.env, editCatalog } = {}) {
-  const definition = definitionFor(provider);
-  if (typeof editCatalog !== "function") throw new Error("缺少模型目录编辑操作");
-  return withModelProviderManagementTransaction(environment, async () => {
-    const definitions = loadManagedModelProviderDefinitions(environment).filter(entry => (entry.storageId ?? entry.id) === (definition.storageId ?? definition.id));
-    const providers = loadManagedModelProviderSettings(environment).filter(entry => definitions.some(item => item.id === entry.provider));
-    if (!providers.length || providers.length !== definitions.length) throw new Error("请先完成所有账户配置，再管理共享模型目录");
-    const directory = managedProviderDirectory(environment, definition);
-    const catalogPath = join(directory, definition.catalogFileName);
-    const manifestPath = join(directory, definition.catalogManifestFileName);
-    const snapshots = snapshotProviderFiles([
-      catalogPath, manifestPath, `${catalogPath}.backup`, `${manifestPath}.backup`,
-      join(codexHomePath(environment), "config.toml"),
-      provider === "ccg" ? ccgAccountsFilePath(environment) : opencodeGoAccountsFilePath(environment),
-      ...definitions.flatMap(entry => [managedProviderMarkerPath(environment, entry), join(codexHomePath(environment), entry.profileFileName)]),
-    ], environment);
-    const original = snapshots.find(entry => entry.path === catalogPath)?.content;
-    const manifest = snapshots.find(entry => entry.path === manifestPath)?.content;
-    if (!original || !manifest) throw new Error("共享模型目录或来源文件缺失，请先恢复文件");
-    const current = JSON.parse(original.toString("utf8"));
-    const requiredModels = [...new Set(providers.map(entry => entry.model))];
-    const next = await editCatalog({ catalog: structuredClone(current), requiredModels, definition, previousModels: providers[0].models });
-    if (next === undefined) return { action: "back", activation: "none" };
-    if (!Array.isArray(next?.models)) throw new Error("模型目录缺少 models");
-    if (current.models.some(model => !next.models.some(candidate => candidate?.slug === model.slug))) {
-      throw new Error("启用选择不能移除已保存模型；请从统一模型管理入口预览并移除");
-    }
-    validateEnabledModelSelection(next.models.map(entry => entry?.slug), {
-      models: next.models.map(entry => ({ id: entry?.slug })), requiredModels,
-    });
-    for (const model of next.models) {
-      if (!isManagedProviderModelValid(definition, model.slug)) throw new Error("模型 ID 不符合该提供商约束");
-      // Reuse the runtime capability validation without changing any settings.
-      withManagedModelCatalogSettings(next, definition, { model: model.slug, reasoningEffort: model.default_reasoning_level });
-    }
-    for (const account of providers) {
-      if (next.models.find(entry => entry.slug === account.model)?.default_reasoning_level !== account.reasoningEffort) {
-        throw new Error("不能更改账户默认模型的思考等级；请使用默认模型设置入口");
-      }
-    }
-    await validateModelCatalogWithCodex(next, environment);
-    await assertProviderFileSnapshots(snapshots);
-    await applyProviderFileUpdates(new Map([
-      [`${catalogPath}.backup`, original], [`${manifestPath}.backup`, manifest],
-      [catalogPath, `${JSON.stringify(next, null, 2)}\n`],
-      [manifestPath, `${JSON.stringify({ source: "user-configured", updatedAt: new Date().toISOString() }, null, 2)}\n`],
-    ]), snapshots);
-    return { action: "catalog-updated", activation: "restart-all", models: next.models.map(entry => entry.slug) };
-  });
-}
-
-export async function runManagedProviderModelSetup(provider, { environment = process.env, prompts = clackPrompts, output = process.stdout, downloadCatalog = downloadDeepseekCatalog } = {}) {
-  const definition = definitionFor(provider);
-  const result = await updateManagedProviderModels(provider, { environment, editCatalog: async ({ catalog, requiredModels, previousModels }) => {
-    const action = await prompts.select({ message: `${definition.displayName} 共享模型目录`, options: [
-      { value: "select", label: "查看启用模型", hint: "移除请使用统一模型管理入口" },
-      { value: "add", label: "添加第三方 Responses 模型", hint: "按上游说明填写准确 ID 和能力" },
-      { value: "templates", label: "导入／刷新 DS 模板", hint: "使用该提供商的既有 ID 映射" },
-      { value: "back", label: "返回" },
-    ] });
-    if (prompts.isCancel(action) || action === "back") return undefined;
-    if (action === "select") {
-      output.write(`${catalog.models.map(entry => `  ${entry.slug}${requiredModels.includes(entry.slug) ? "（账户默认）" : ""}`).join("\n")}\n移除请使用统一模型管理入口。\n`);
-      return undefined;
-    }
-    const previousIds = catalog.models.map(entry => entry.slug);
-    if (action === "add") {
-      const model = await promptAdditionalModel(prompts, definition, previousIds);
-      if (!model) return undefined;
-      catalog.models.push(model);
-    } else if (action === "templates") {
-      const downloaded = await downloadCatalog(globalThis.fetch);
-      let templates = (provider === "ccg" ? createCcgCatalog : createOpencodeGoCatalog)(downloaded.catalog);
-      templates = withPreservedManagedModelCatalogSettings(templates, definition, previousModels);
-      const previous = new Map(catalog.models.map(entry => [entry.slug, entry]));
-      const windows = provider === "ocg" ? loadManagedModelWindow(environment) : [];
-      for (const model of templates.models) {
-        const old = previous.get(model.slug);
-        const window = old ? undefined : windows.find(entry => entry.model === model.slug);
-        if (window?.conflicts || window?.windowConflict) throw new Error("同名模型的窗口设置冲突，请先统一设置");
-        const contextWindow = old?.context_window ?? window?.contextWindow;
-        if (contextWindow !== undefined) {
-          const maximum = model.max_context_window ?? model.context_window;
-          if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > maximum) {
-            throw new Error(`${definition.displayName} 模型上下文窗口必须是 1024-${maximum} 的整数：${model.slug}`);
-          }
-          model.context_window = contextWindow;
-        }
-        previous.set(model.slug, model);
-      }
-      catalog.models = [...previous.values()];
-    } else if (action !== "select") throw new Error("未知模型目录操作");
-    const enabled = await promptEnabledProviderModels(prompts, output, {
-      label: `${definition.displayName}（全部账户及聚合共用）`,
-      models: catalog.models.map(entry => ({ id: entry.slug, name: entry.display_name, reasoningEffort: entry.default_reasoning_level })),
-      enabledModels: action === "add" ? catalog.models.map(entry => entry.slug) : previousIds,
-      requiredModels,
-      retainedModels: previousIds,
-    });
-    if (!enabled) return undefined;
-    return { ...catalog, models: catalog.models.filter(entry => enabled.includes(entry.slug)) };
-  } });
-  if (result.action !== "back") {
-    output.write(`${definition.displayName} 已保存 ${result.models.length} 个启用模型，并备份原目录。\n`);
-    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+/** All interaction and source acquisition precede the short write transaction. */
+export async function runManagedProviderModelSetup(provider, { environment = process.env, prompts = clackPrompts, output = process.stdout, downloadCatalog = downloadDeepseekCatalog, signal } = {}) {
+  if (provider === "ccg" || provider === "ocg") {
+    const storageId = provider === "ccg" ? "ccg" : "opencode-go";
+    const accounts = loadManagedModelProviderDefinitions(environment).filter(entry => entry.storageId === storageId);
+    if (!accounts.length) throw new Error("请先配置账户");
+    provider = accounts[0].id;
   }
+  const definition = definitionFor(provider, environment);
+  const displayName = managedProviderAccountFamilyForDefinition(definition).definition.displayName;
+  const { catalogs } = await loadProviderModelCatalogs({ environment });
+  const current = catalogs.find(catalog => catalog.providers.includes(provider));
+  if (!current) throw new Error("请先完成账户配置");
+  const action = await prompts.select({ message: `${displayName} 模型目录`, options: [
+    { value: "select", label: "查看启用模型", hint: "移除请使用统一模型管理入口" },
+    { value: "add", label: "添加第三方 Responses 模型", hint: "按上游说明填写准确 ID 和能力" },
+    { value: "templates", label: "发现／导入 DS 新模型", hint: "只添加选中的新模型，已有模型使用统一模板更新" },
+    { value: "back", label: "返回" },
+  ] });
+  if (prompts.isCancel(action) || action === "back") return { action: "back", activation: "none" };
+  if (action === "select") {
+    output.write(`${current.models.map(model => `  ${model.id}${model.isDefault ? "（账户默认）" : ""}`).join("\n")}\n移除请使用统一模型管理入口。\n`);
+    return { action: "back", activation: "none" };
+  }
+  let manualModel;
+  if (action === "add") {
+    manualModel = await promptAdditionalModel(prompts, definition, current.models.map(model => model.id));
+    if (!manualModel) return { action: "back", activation: "none" };
+  } else if (action !== "templates") throw new Error("未知模型目录操作");
+  return runProviderModelAdditionSetup(provider, { environment, prompts, output, downloadCatalog, signal, ...(manualModel ? { manualModel } : {}) });
+}
+
+/** Shared CLI discovery, full-field preview and explicit confirmation for CLP/CCG/OCG. */
+export async function runProviderModelAdditionSetup(provider, {
+  environment = process.env, prompts = clackPrompts, output = process.stdout, manualModel, signal,
+  downloadCatalog = downloadDeepseekCatalog, downloadClineCatalog, loadTemplates,
+} = {}) {
+  definitionFor(provider, environment);
+  const options = await loadProviderModelAdditionOptions(provider, { environment, manualModel, downloadCatalog, downloadClineCatalog, loadTemplates, signal });
+  let models;
+  if (!options.candidates.length) models = [];
+  else if (manualModel) models = options.candidates.map(candidate => candidate.model);
+  else {
+    models = await prompts.multiselect({ message: "选择要新增的模型（已有模型保持当前内容）", required: false,
+      initialValues: [], options: options.candidates.map(candidate => ({ value: candidate.model, label: `${candidate.displayName}（${candidate.model}）` })) });
+    if (prompts.isCancel(models)) return { action: "back", activation: "none" };
+  }
+  signal?.throwIfAborted();
+  const input = { provider, sourceToken: options.sourceToken, revision: options.revision, models };
+  const preview = await previewProviderModelAddition(input, { environment });
+  signal?.throwIfAborted();
+  if (preview.willChange) {
+    output.write(`影响账户：${preview.providers.join("、")}。\n`);
+    for (const candidate of preview.additions) output.write(`新增模型 ${candidate.model}：\n${JSON.stringify({ fields: candidate.fields, ...(candidate.template ? { template: candidate.template } : {}) }, null, 2)}\n`);
+    output.write("保存前备份原目录及来源；保存不会自动重启服务。\n");
+    if (await prompts.confirm({ message: "确认按上述完整内容新增模型？", initialValue: false }) !== true) return { action: "back", activation: "none" };
+  }
+  // Cancellation before committing must not become a confirmed write. Once
+  // apply starts, the existing transaction owns completion and recovery.
+  signal?.throwIfAborted();
+  const result = await applyProviderModelAddition(input, { environment, preview });
+  output.write(result.action === "unchanged" ? "模型目录没有变化，无需保存或重启。\n" : `模型目录已保存并回读，现有 ${result.models.length} 个模型。\n`);
+  if (result.action === "catalog-updated") writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
 async function promptAdditionalModel(prompts, definition, existing) {
+  if (!["ccg", "opencode-go"].includes(definition.storageId)) throw new Error("此提供商不支持手动新增模型");
   const confirmed = await prompts.confirm({ message: "已确认此提供商以 Responses 接口支持该模型及工具调用？", initialValue: false });
   if (confirmed !== true) return undefined;
   const id = await prompts.text({ message: "上游模型 ID（准确名称）", validate: value => isManagedProviderModelValid(definition, value) && !existing.includes(value) ? undefined : "请输入有效且未加入目录的模型 ID" });
   if (prompts.isCancel(id)) return undefined;
   const name = await prompts.text({ message: "显示名称", initialValue: id });
   if (prompts.isCancel(name)) return undefined;
-  const window = await prompts.text({ message: "上下文窗口（Token，按上游说明填写）", validate: value => Number.isSafeInteger(Number(value)) && Number(value) >= 1024 && Number(value) <= 100_000_000 ? undefined : "请输入 1024–100000000 的整数" });
-  if (prompts.isCancel(window)) return undefined;
+  const window = await promptContextWindow(prompts, id, undefined, 100_000_000);
+  if (window === undefined) return undefined;
   const efforts = await prompts.multiselect({ message: "支持的思考等级（不支持思考时仅选 none）", options: ["none", "minimal", "low", "medium", "high", "xhigh", "max"].map(value => ({ value, label: value })), required: true });
   if (prompts.isCancel(efforts)) return undefined;
   if (!Array.isArray(efforts) || !efforts.length) throw new Error("至少选择一个思考等级");
@@ -152,7 +100,6 @@ async function promptAdditionalModel(prompts, definition, existing) {
   if (prompts.isCancel(patch)) return undefined;
   const search = await prompts.confirm({ message: "支持 Codex 客户端 tool_search 工具？", initialValue: false });
   if (prompts.isCancel(search)) return undefined;
-  return createResponsesModelCatalog([{ id, name, contextWindow: Number(window), reasoningEfforts: efforts, defaultReasoningEffort: effort,
-    supportsImages: images, ...(patch ? { applyPatchToolType: "freeform" } : {}), supportsSearchTool: search,
-    instructions: thirdPartyCodingInstructions }], id).models[0];
+  return { id, name, contextWindow: Number(window), reasoningEfforts: efforts, defaultReasoningEffort: effort,
+    supportsImages: images, applyPatchToolType: patch ? "freeform" : null, supportsSearchTool: search };
 }

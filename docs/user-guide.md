@@ -108,7 +108,10 @@ Plugin 查询与调用不再需要 Gateway 功能开关。旧配置中的 `[expe
 Setup 仅按具体操作返回的激活范围提示重启。列出账户、停止账户等操作不会因经过模型菜单而附加“重启全部服务”；需要重启的配置修改会返回对应服务目标，Setup 不自动执行重启。
 
 日常模型操作从 `setup → 模型与提供商 → 第三方 Provider → 模型管理` 或 WebUI「模型管理 → 模型配置」进入。
-自定义目录、CCG、OCG、CLP 支持预览后本地移除；共享范围、默认保护、Relay 影响和恢复方式见[日常模型管理](provider-integration-guide.md#日常模型管理)。
+受管模型上下文窗口在 CLI 和 WebUI 均先读取目录修订，编辑后查看窗口差异与同一提供商的受影响账户，再确认保存；中途取消不写入，目录或账户已变化时须重新打开编辑。
+原生网页搜索诊断从 `setup → 模型与提供商 → 检测原生网页搜索` 或 WebUI 模型行操作进入，覆盖官方及第三方提供商；明确选择一个账户和模型后主动发起，可能产生模型及搜索费用，仅诊断、不修改搜索策略，见[模型探测](provider-integration-guide.md#添加时探测并写入)。
+自定义目录、CCG、OCG、CLP 支持预览后本地移除；账户范围、默认保护、Relay 影响和恢复方式见[日常模型管理](provider-integration-guide.md#日常模型管理)。
+CLI 与 WebUI 模型管理均提供 DS、CLP、CCG、OCG 和自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确来源，受管模型选择提示词或能力范围，自定义模型可更新提示词及来源；两类模型均可另行选择有效上下文比例、压缩阈值和截断策略，查看差异并确认后更新目标模型；旧模型缺少来源关联时须手动选择。
 
 `codexc timezone` 设置服务时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`服务时区`](model-timezone.md)。
 
@@ -379,7 +382,7 @@ Codex 主配置的 `model_provider` / `model`；`switch` 与 `recover` 可用 `-
 
 Provider 新增、需要确认的受管账户删除与重配要求标准输入、标准输出均为终端；非交互调用会明确报错。`list`、默认账户设置和实例释放保留各自的脚本调用方式。
 受管账户进入固定模式会修改 Codex 主配置，从固定模式改为切换模式会恢复主配置；这两种操作都需要明确确认，保存时也会在管理锁内重新检查实际影响。
-受管 Provider 的默认模型按账户设置，模型思考等级由共享目录的账户共用，最后选择前会列出当前共享账户；窗口设置也会提前展示上下文跟随者。保存默认模型前会重读 Provider 模式，防止交互期间切换模式后写到错误范围。
+模型管理按提供商展示一组模型。DS、CLP、CCG、OCG 分别共用 `providers/deepseek|clp|ccg|opencode-go/models.json`，自定义提供商各自使用 `providers/<cp-ID>/models.json`。同族账户共用模型窗口、思考等级、提示词和启用名单，修改单模型不影响其他模型或提供商；账户凭据、默认模型选择和会话仍独立。共享模型等级改变时相关 Profile 在同一事务中同步，移除保护所有账户的默认模型，删除账户不删除共用模型。此前独立账户模型目录须在停服后显式执行[目录整理](provider-integration-guide.md#旧共享目录账户升级)，安装新版再启动；不自动迁移。
 
 添加账户时，Setup 与 WebUI 已有的多账户配置入口均提供 `main`（主账户）、`work`（工作账户）、`other`（其他账户）和“自定义”；已占用的预设不再显示。名称仅作账户 ID，不决定默认账户或自动切换行为。
 
@@ -458,7 +461,8 @@ Desktop 共享仍要求主 Provider 为 OpenAI。执行 `codexc app --provider a
 显示名称为 `Provider ID · 模型名称`。例如账户均名为 `main` 时，精确模型 ID 分别是
 `ds-main/deepseek-flash` 和 `clp-main/cline-pass/deepseek-v4.1-flash`。
 聚合使用一个 App Server 和现有工具 Host，各请求按选择的模型送至对应账户；网页搜索、模型 API
-WebSocket 和自动重试关闭，独立 Relay 保持其原有模型目录和路由。
+WebSocket 关闭。聚合代理本身不重放请求，Codex 使用统一的 HTTP 重试次数 4、流重试次数 5；
+独立 Relay 保持其原有模型目录和路由。
 
 安装新代码后，旧 App Server 服务须按常规执行 `codexc restart appserver` 才能加载聚合能力；
 Gateway 运行时会检测现有成员的 Key、配置和模型目录变更，并在活动 Thread 与客户端租约均允许时重建聚合实例、更新渠道模型菜单。
@@ -467,7 +471,9 @@ Gateway 运行时会检测现有成员的 Key、配置和模型目录变更，�
 退出 Desktop 本身不会创建模型更新，只会释放租约、允许已有更新应用。Codex 主配置
 `~/.codex/config.toml` 不属于聚合模型材料，不参与聚合设置监听或出站材料指纹校验。
 聚合监听第三方账户注册、Profile、凭据、模型目录及其事务状态；主配置中的窗口覆盖与 Provider
-冲突仍在材料加载、启动或应用时校验。主配置修改不会由聚合机制自动刷新；需按对应设置的生效方式
+冲突仍在材料加载、启动或应用时校验：主配置不得声明自动派生的 `model_providers.codexc-aggregate`
+配置块；启动就绪前也会核对有效路由、凭据变量和传输配置与本次启动一致，并拒绝额外查询参数、请求头、认证或模型目录 URL。
+主配置修改不会由聚合机制自动刷新；需按对应设置的生效方式
 处理，要求重启 App Server 的配置仍须显式重启。
 新增、移除切换成员属于拓扑变更，仍须重启 App Server 和 Gateway。生成文件保存在
 `<dataDir>/runtime/aggregate-models.json`，是可重建的派生目录；应修改各提供商的源目录，不要直接编辑它。
@@ -483,8 +489,9 @@ Remote、Desktop 启动和 `app status` 的 `-p` / `--provider` 共用完整 Pro
 自动采用目标模型的默认思考等级；`-m`/`--model` 优先于 `-c model=...`，重复配置覆盖以最后一项为准。
 显式 `-c model_reasoning_effort=...` 优先；`--` 后的内容只作为原生 Codex 输入，不参与模型或思考等级选择。
 渠道通过 `/model` 的 `AGG` 目录选择同一组精确模型 ID，模型项显示实际成员提供商的短标签，
-在聚合 Thread 内换模型保留历史；从单账户切入聚合则创建新 Thread。聚合审批 reviewer 固定为
-`user`，Remote 拒绝显式 `auto_review`。聚合 `/account`、`/limits` 明确返回不支持，
+在聚合 Thread 内换模型保留历史；从单账户切入聚合则创建新 Thread。聚合实例启动时默认审批 reviewer 为
+`user`，各入口允许按现有设置规则选择 `auto_review`；Remote 沿用工作区或显式审批参数，恢复保留历史实际审批方式。
+聚合 `/account`、`/limits` 明确返回不支持，
 请求指标仍按真实成员账户记录，不生成虚拟账户快照。
 会话清理只在发现聚合会话后才连接该实例，无法连接时明确跳过对应会话组。聚合纳入 Supervisor
 与账户空闲回收；Remote 退出释放租约，其他客户端租约或活动仍可阻止回收，退出 Desktop 不保证立即停止实例。

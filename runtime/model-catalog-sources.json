@@ -1,0 +1,14 @@
+{
+  "official": {
+    "cliVersion": "codex-cli 0.163.0",
+    "model": "gpt-6.1-sol",
+    "command": "codex debug models --bundled",
+    "sha256": "1e0e33e57e20e8f4762f0c8d1c6cc025f2b644ad9e12a22bdf835448f35cf22b"
+  },
+  "deepseek": {
+    "url": "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh",
+    "scriptSha256": "712b3882af578a239393b1152c3d619c1a699614ee3f461c1f367af42b89415b",
+    "sourceSha256": "bce20f679495809f4fa6e48672b6dcbab84b6adff5251890b6e6a21eddb9c12f",
+    "completedSha256": "4062f04d5206a04b192e00f9fcc20fcbd49b232d78af47d252c06996dd2673a6"
+  }
+}

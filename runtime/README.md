@@ -63,27 +63,29 @@
   共同使用。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
-  账户家族登记同时拥有实例展开、账户身份、共享代理键和注册表／管理标记路径；账户路由、服务代理、
+  账户家族登记同时拥有实例展开、账户身份和注册表／管理标记路径；账户路由、服务代理、
   Relay 与聚合材料读取共用这份登记。未登记家族或能力与身份不一致时明确拒绝，不回退到其他账户家族。
   `webSearch` 声明受管实例是否在启动参数中关闭内置网页搜索，不改写基础配置或模型目录的客户端工具检索能力。
   CCG 采用显式多账户实例与 DS 来源目录，通过 Command Code 账户接口
   查询 Credits 与 5 小时/7 天窗口；模型 ID
   支持上游命名空间，凭据按 Bearer 格式校验。
   `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 DS、OpenCode
-  Go、CCG 与 CLP 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>`、`ccg-<账户>` 与 `clp-<账户>` 实例；能力元数据声明实例展开与账户能力。CLP 显式声明 Chat 上游，各账户共享服务拥有的本地转换桥；账户实例继承共享定义，共享代理键不在展开结果中，`sharedManagedProviderDefinition` 是回退到基础定义的唯一入口；CLP 接受合法 `cline-pass/` 模型 ID，并按共享目录校验成员身份；
-  共享定义只描述目录与能力，不包含单账户 Profile；`loadManagedModelProviderWatcherDefinitions`
-  保留共享目录及当前账户，watcher 只为实际账户监听 Profile 和管理标记，再按 Provider ID 合并并去重路径。
-- `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
-- `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，共享模型目录和 Chat 转换代理。
+  Go、CCG 与 CLP 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>`、`ccg-<账户>` 与 `clp-<账户>` 实例；能力元数据声明实例展开与账户能力。CLP 显式声明 Chat 上游，各账户拥有服务创建的独立本地转换桥；账户实例继承基础定义，`sharedManagedProviderDefinition` 是取得基础定义的唯一入口；CLP 接受合法 `cline-pass/` 模型 ID，并按 CLP 共用目录校验模型成员身份；
+  基础定义只描述能力，不包含单账户 Profile；`loadManagedModelProviderWatcherDefinitions`
+  为当前账户监听目录、Profile 和管理标记，按 Provider ID 合并并去重路径。
+- `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，账户目录独立。
+- `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，模型目录按 CLP 家族共用，Chat 转换代理与凭据按账户独立。
 - `provider-model-guard.mjs` / `provider-model-guard.d.mts`：CLP Chat 桥、OCG/CCG 与自定义提供商代理共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。
   CP 从同次已校验目录的精确模型定义读取默认采样，和启用状态共同交给代理；采样不进入编译后的 Codex 模型字段。
   CLP 在同一次目录读取中取得模型的思考选项，出站同时验证启用名单和思考能力，不为能力检查重复执行 ACL 读取。
-  自定义提供商注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和全局上下文同步标记；任一未完成事务均拒绝出站，不复用管理事务内部的读取豁免。
+  自定义提供商注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和旧上下文事务标记；受管账户另检查账户目录拆分记录。未完成事务拒绝对应出站，不复用管理事务内部的读取豁免。
 - `third-party-coding-instructions.mjs`：非 Flash CLP、新增 OCG/CCG 手填模型与新增非 DS 自定义提供商模型共用的编程提示词；显式写入模型定义，不改变既有目录缺省值，不声明模型身份或授予工具权限，不依赖 DS 下载。
 - `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
   拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
   目录快照；公开第三方账户、Profile、目录及事务状态的源文件清单与内容指纹供安全刷新使用。
-  主配置不进入材料监听和出站指纹，仅在材料加载、启动或应用时校验全局窗口与 Provider 冲突。
+  受管家族的 `settings-pending` 纳入去重材料清单，使用恢复记录的 16 MiB 上限；未完成事务使旧出站快照失效。
+  主配置不进入材料监听和出站指纹，仅在材料加载、启动或应用时校验全局窗口与 Provider 冲突；
+  拒绝主配置声明保留的 `model_providers.codexc-aggregate`，服务就绪前复核路由、隔离凭据变量和传输配置与本次启动一致，且无额外查询参数、请求头、认证或模型目录 URL。
   设置刷新与出站复核共用同一摘要实现及私有文件读取校验。只写可重建、无密钥的运行时 `aggregate-models.json`，不改账户或存储契约。
 - `aggregate-material-guard.mjs`：聚合实例拥有的有界工作线程；按去重文件清单校验私有权限与材料摘要，
   避免 Windows ACL 子进程阻塞模型转发和 Supervisor。最多保留 16 项，每次只派发一项并从执行开始计时；
@@ -96,7 +98,7 @@
 - `managed-provider-account-registry.mjs` / `managed-provider-account-registry.d.mts`：复用 DS、OCG、
   CCG 的单一默认账户约束，并集中 DS/CCG 同构注册表记录与凭据变量冲突校验。
 - `managed-provider-account-routing.mjs` / `managed-provider-account-routing.d.mts`：集中 DS、OCG、CCG、CLP 四家账户
-  Provider 的账户 ID、共享统计代理键和同一家多账户默认选择，消费定义模块的家族登记；混合 Provider 不推断默认值。
+  Provider 的账户 ID 和同一家多账户默认选择，消费定义模块的家族登记；混合 Provider 不推断默认值。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
   config 编辑映射；重试值消费 `model-request-policy.mjs`，新建第三方 Profile 写入 Codex 默认 `4/5`。
@@ -110,11 +112,12 @@
   取消信号，快照随请求指标写入指标库供账户用量按周期归属本地 Token。
 - `model-provider-runtime.mjs` / `model-provider-runtime.d.mts`：保留受控模型 Provider 运行时的稳定
   导出门面与 TypeScript 接口；`readManagedMarker` 提供单个 Provider 管理标记的只读查询，不读取其他账户注册表。门面不承载具体读取、写入或启动逻辑。
-- `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录读取；提供原生协议集合、目录输入能力、CLP 独立转发目录与模型覆盖与思考声明、依赖路径和修订摘要，不读取 OAuth 或创建 App Server。
+- `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录读取；提供原生协议集合、目录输入能力、CLP 独立转发目录与模型覆盖与思考声明、依赖路径和修订摘要。CP 协议元数据即使缺失也参与摘要和依赖路径，按 16 KiB 上限读取，防止读取期间新增文件逃过前后修订核对；不读取 OAuth 或创建 App Server。
   受管及自定义 Provider 材料复用 `provider-file-access` 的文件归属判断，指纹不自行选择 ACL 策略。
-- `managed-model-catalog.mjs`：受管目录的纯数据校验、单模型设置读取、窗口与思考等级更新及刷新时保留设置；窗口按精确 Token 数保留，百分比仅派生、不取整后反向还原；新上限小于原窗口时拒绝刷新。DS、OCG、CCG、CLP 共用，完整保留未修改的上游元数据，不执行文件读写。
+- `managed-model-catalog.mjs`：受管目录的纯数据校验、单模型设置读取、窗口与思考等级更新及刷新时保留设置；窗口按精确 Token 数保留，百分比仅派生、不取整后反向还原；窗口变更与原自动压缩阈值冲突时拒绝，不截小阈值；新上限小于原窗口或不再支持原思考等级时拒绝刷新，不静默替换非默认模型的等级。DS、OCG、CCG、CLP 共用，完整保留未修改的上游元数据，不执行文件读写。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile，复用 `managed-model-catalog` 处理目录数据；
-  管理每个受管 Provider 的独立模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
+  管理各受管提供商家族的共用模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
+  设置写入、单模型移除与 CLP 账户目录更新共用私有 `.settings-backup`／`.settings-pending`，记录共用目录、相关 Profile 或来源文件及旧备份的前后快照，并保存只读前置条件，复核所有相关配置并回读一致后结束事务；未完成时阻止读取及出站，显式恢复严格限定同一家族路径，拒绝覆盖后续修改并复核目录来源与当前模型选择。固定模式允许保留原始目录中已经缺失的选择，以便默认模型入口随后修复主配置；不得移除原本有效的选择，恢复也按事务原始目录判断。
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
   镜像所选模型的默认思考等级。Profile 位于 `~/.codex`，模型目录、清单与管理标记位于
   `~/.codex-connect/providers/<id>/`。
@@ -129,9 +132,17 @@
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
-- `responses-context-sync.mjs` / `responses-context-sync.d.mts`：扩展现有 DS 目录与 Profile 事务，按模板关联同步 CP 与 CLP 上下文，保留私有恢复记录并提供整批恢复与预览目标。
-- `model-catalog.mjs` / `model-catalog.d.mts`：模型定义与 Codex 字段转换的纯数据层，集中校验基础及扩展能力、生成默认字段、导入官方／DS 模板及修正 DS 能力声明；CP、CLP 和 CLI 模板入口复用。导出 `SamplingParameters` 与严格数值校验，逐模型可选 `sampling` 仅保留于定义，空对象归一为省略，不进入 Codex 生成字段。完整官方及受管目录不经过 CP 白名单往返，避免丢失专用元数据。
-- `model-provider-responses-catalog.mjs` / `model-provider-responses-catalog.d.mts`：复用 `model-catalog` 编译定义，保留 CP v5 包装及大小限制、生成一致性、修订、私有备份与未完成写入标记；旧字段顺序与缺省结果保持不变，不保存凭据。CLP 暂保留既有编译入口与相同大小边界，不改变其磁盘格式。
+- `responses-context-sync.mjs` / `responses-context-sync.d.mts`：仅保留旧版跨目录上下文事务的私有记录读取、校验及显式整批恢复；不再创建同步事务或提供跟随联动。
+- `provider-catalog-isolation.mjs` / `provider-catalog-isolation.d.mts`：Provider 目录整理私有记录路径和未完成保护；pending 时拒绝 runtime 使用受管及 CP 目录、CP 首次写入及统一模型恢复，显式整理由 `scripts/isolate-provider-catalogs.mjs` 执行。受管模型按家族放在 `providers/deepseek|clp|ccg|opencode-go/`；账户身份材料仍按完整 ID 保存，自定义 cp 模型保持各自目录。
+- `model-catalog.mjs` / `model-catalog.d.mts`：模型定义与 Codex 字段转换的纯数据层，集中校验基础及扩展能力、生成默认字段、导入官方／DS 模板及修正 DS 能力声明；CP、CLP 和 CLI 模板入口复用。CP 保留思考、图片、文件编辑和工具搜索的未知／不支持／支持声明；未知在 Codex 执行字段中暂不启用，目录投影另保留声明状态。导出 `SamplingParameters` 与严格数值校验，逐模型可选 `sampling` 仅保留于定义，空对象归一为省略，不进入 Codex 生成字段。完整官方及受管目录不经过 CP 白名单往返，避免丢失专用元数据。
+- `model-template-prompts.mjs` / `model-template-prompts.d.mts`：纯 JSON 提示词补全，保留显式值，补缺失文本及必要 token-budget 配套字段；`approvals: null` 是继承基础审批提示词的例外。
+- `model-template-bindings.mjs` / `model-template-bindings.d.mts`：校验受管目录 manifest 的显式模型来源关联；缺少关联保持未关联，拒绝无效或孤立引用，不按名称推断。
+- `model-template-catalog.mjs` / `model-template-catalog.d.mts`：读取固定仓库底座，在显式新增模型时补全并固化 `model_messages`／`modelMessages`。自定义入口共享 `withCustomBaseTemplate`，仅为新模型记录缺省底座来源；官方底座读取和目录模板投影将已知来源模型身份改为通用助手身份，保留原始快照及用户显式指令。显式模板更新重新读取已保存底座；读取、普通编辑、删除及调整已有模型窗口不执行模板补全。
+- `model-catalog-base.json`：按项目锁定 Codex CLI 内置目录的原始顺序抽取第一个模型，保存为单模型固定快照，并记录实际模型 ID；不依赖固定名称。只有维护脚本显式 `--update-base --write` 才更新，不随 CLI 升级或 DS 维护刷新。源模型的上下文、思考等级、加速和工具声明不能视为第三方实际能力。
+- `model-catalog-deepseek-source.json` / `model-catalog-deepseek.json`：分别保存 DS 官方原始目录与提示词补全目录。保留 DS 已有字段，仅补缺失提示词及必要的 token-budget 配套结构；`approvals: null` 是明确允许继承基础审批提示词的例外。
+- `model-catalog-sources.json`：上述模板的 CLI 版本、来源和 SHA-256。四份快照由 `scripts/update-model-templates.mjs` 显式对比、校验、更新；基础快照供显式目录生成补全提示词，DS 补全目录供 CLP Flash 与 CP 导入，不采用某个 DS 账户设置。维护步骤见[DS 模板维护](../docs/deepseek.md#仓库模板维护)。
+- `model-catalog-presentation.mjs` / `model-catalog-presentation.d.mts`：OpenAI 缓存与第三方保存目录共用的纯展示投影；白名单能力、加速倍率、审批声明与按需提示词分组，不执行文件读写、不推断未声明能力。
+- `model-provider-responses-catalog.mjs` / `model-provider-responses-catalog.d.mts`：复用 `model-catalog` 编译定义，保留 CP v5 包装及大小限制、生成一致性、修订、私有备份与未完成写入标记；`createResponsesModelCatalog` 仅为新增模型补全模板，`compileResponsesModelCatalog` 纯编译已保存快照，编辑、删除及窗口修改保留其余模型原值，旧 `followContext` 只作历史元数据，不保存凭据。全部写入使用 v2 前后摘要 pending，首次创建记录 `previous=false`／`previousDigest=null`；历史 v1 记录仍支持显式恢复。CLP 保留既有编译入口与相同大小边界。
 - `model-provider-upstream-metadata.mjs` / `model-provider-upstream-metadata.d.mts`：自定义第三方 Provider 的网关侧元数据（当前只有上游接口 `responses` / `chat_completions`），与模型目录同目录、0600 写入；缺失按 `responses`，版本、字段或枚举不合法时失败关闭。
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
   为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只把当前 Provider 的 Key 注入目标
@@ -220,15 +231,17 @@
   租约／任务占用。调用方断开会取消准备，已经释放的实例仍由 Owner 完成恢复；旧宿主缺少能力时
   明确失败，不回退到全局重启。租约在排队前登记，异步检查期间的新租约同样阻止应用。
   应用及占用结果可附宿主已确认的 `snapshot`（指纹与默认模型）；未确认时省略，不从新磁盘设置推断旧实例默认值。
+  提供商拓扑变化或 CP 上游协议与启动快照不同，以白名单错误码 `PROVIDER_TOPOLOGY_CHANGED` 跨监管 IPC 传递，调用方据此提示显式重启；未知错误不返回内部正文。聚合材料包含 CP `provider.json`，协议变化使旧出站材料失效；指纹查询与应用准备均复核协议，避免旧代理错误宣称已应用。
+  原生 TUI 租约阻止设置应用时，返回宿主快照前仍只读核对聚合协议，避免把必须重启的变化长期报告为等待租约释放；不会因此释放或重建被租约占用的实例。
   `readAppServerProviderSettingsFingerprint` 提供同源只读指纹比较，供调用方关联一次捕获的目录；IPC 不保存或返回目录副本。
   Gateway 还据此避免把主动释放
   误判为意外断线。入口集中检查真实 WebSocket 健康状态，拒绝
   未受监管的活动 App Server；Windows 通过官方 `app-server proxy` 检查 UDS 健康并把失效 rendezvous
   留给固定版 App Server 原地恢复，Unix 继续安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
   保持连接而阻塞服务退出，同时等待已经开始的 Provider 生命周期操作收尾且拒绝启动排队操作。
-- `provider-proxy-runtime-registry.mjs` / `provider-proxy-runtime-registry.d.mts`：按共享代理键合并并发
+- `provider-proxy-runtime-registry.mjs` / `provider-proxy-runtime-registry.d.mts`：按精确 Provider ID 合并并发
   启动，保存构造中与已启动代理及其 Provider 使用者；关闭成功后才移除登记，失败保留资源并允许再次清理，
-  清理未确认时拒绝复用或替换，避免多账户同时启动时重复创建或过早关闭共享代理。
+  清理未确认时拒绝复用或替换，避免同一 Provider 并发启动时重复创建或过早关闭代理。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
@@ -290,7 +303,7 @@
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup 与 Runtime 复用。
 - `provider-file-access.mjs` / `provider-file-access.d.mts`：在创建访问器时绑定当前环境的 Codex Home，通过 `isMainConfig` 精确规范化匹配唯一共享主配置；其他路径（包括同名备份）保持严格私有。Provider 的读取、凭据认证选择、指纹、事务写入和回滚使用同一归属判断，不由业务入口选择权限标记；不改变磁盘路径或格式。
-- `provider-settings-snapshot-reader.mjs` / `provider-settings-snapshot-reader.d.mts` / `provider-settings-snapshot-worker.mjs`：Provider 设置观察器拥有的单 Worker，读取有界材料指纹并校验完整配置；初始化与单次读取分别限时，关闭确认线程退出，源正文和凭据不跨线程返回。Windows 协作关闭先等待 ACL 子进程实际退出，再关闭外层线程；2 秒关闭等待超时仍保留旧代及引用，不启动替代线程。
+- `provider-settings-snapshot-reader.mjs` / `provider-settings-snapshot-reader.d.mts` / `provider-settings-snapshot-worker.mjs`：Provider 设置观察器拥有的单 Worker，读取有界材料指纹并校验完整配置；聚合成员变化单独返回需重启状态，不阻断其他提供商指纹读取。初始化与单次读取分别限时，关闭确认线程退出，源正文和凭据不跨线程返回。Windows 协作关闭先等待 ACL 子进程实际退出，再关闭外层线程；2 秒关闭等待超时仍保留旧代及引用，不启动替代线程。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，

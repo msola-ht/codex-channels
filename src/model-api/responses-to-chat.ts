@@ -35,6 +35,10 @@ export interface ChatRequest extends ChatSamplingParameters {
   tool_choice?: unknown;
   parallel_tool_calls?: boolean;
   max_completion_tokens?: number;
+  prompt_cache_key?: string;
+  verbosity?: unknown;
+  service_tier?: unknown;
+  client_metadata?: unknown;
   reasoning?: { effort: ChatReasoningEffort };
   response_format?: JsonObject;
 }
@@ -42,6 +46,8 @@ export interface ChatRequest extends ChatSamplingParameters {
 /** Stateless conversion: the caller supplies complete Responses input on every request. */
 export interface ChatToolIdentity { name: string; namespace?: string; kind: ChatToolKind }
 export interface ChatConversionOptions {
+  /** CLP accepts these provider controls; forward values for upstream validation. */
+  clinePass?: boolean;
   /**
    * `response_format` 与 tools 并存时的表达方式。默认保持 `response_format`；
    * 上游不接受两者并存时用 `prompt`，把 schema 写进系统消息并省略 `response_format`，
@@ -60,13 +66,13 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
   const allowed = new Set(["model", "instructions", "input", "tools", "tool_choice", "parallel_tool_calls", "stream", "stream_options", "store", "include", "reasoning", "text", "service_tier", "prompt_cache_key", "client_metadata", "max_output_tokens", ...samplingKeys]);
   if (Object.keys(source).some(key => !allowed.has(key))) throw new ModelConversionError("Unsupported Responses request field");
   if (source.stream !== true || source.store === true) throw new ModelConversionError("Only stateless streaming Responses requests are supported");
-  if (source.service_tier != null && source.service_tier !== "default" && source.service_tier !== "auto") throw new ModelConversionError("Unsupported service tier");
+  if (!options.clinePass && source.service_tier != null && source.service_tier !== "default" && source.service_tier !== "auto") throw new ModelConversionError("Unsupported service tier");
   let responseFormat: JsonObject | undefined;
   if (source.text != null) {
     const text = object(source.text);
     if (Object.keys(text).some(key => !["format", "verbosity"].includes(key))) throw new ModelConversionError("Unsupported Responses text controls");
-    // Chat 上游没有 verbosity 等价字段；Codex 仅在目录声明支持时携带，取值校验后忽略。
-    if (text.verbosity != null && (typeof text.verbosity !== "string" || !["low", "medium", "high"].includes(text.verbosity))) throw new ModelConversionError("Unsupported Responses text verbosity");
+    // CLP forwards verbosity; other Chat providers retain validation without forwarding.
+    if (!options.clinePass && text.verbosity != null && (typeof text.verbosity !== "string" || !["low", "medium", "high"].includes(text.verbosity))) throw new ModelConversionError("Unsupported Responses text verbosity");
     if (text.format != null) responseFormat = chatResponseFormat(text.format);
   }
   let reasoningControl: ChatRequest["reasoning"];
@@ -195,6 +201,15 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
   if (pendingCalls.size) throw new ModelConversionError("Missing tool results");
   flushToolImages();
   const result: ChatRequest = { model: string(source.model), messages, stream: true, stream_options: { include_usage: true } };
+  if (options.clinePass) {
+    if (source.prompt_cache_key != null) {
+      if (typeof source.prompt_cache_key !== "string") throw new ModelConversionError("Invalid prompt cache key");
+      result.prompt_cache_key = source.prompt_cache_key;
+    }
+    if (source.service_tier != null) result.service_tier = source.service_tier;
+    if (source.client_metadata != null) result.client_metadata = source.client_metadata;
+    if (source.text != null && object(source.text).verbosity != null) result.verbosity = object(source.text).verbosity;
+  }
   if (reasoningControl) result.reasoning = reasoningControl;
   const convertTool = (raw: unknown, namespace?: string, loaded = false): JsonObject => {
     const tool = object(raw);

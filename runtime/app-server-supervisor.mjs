@@ -315,7 +315,8 @@ export class AppServerSupervisorOwner {
           ? error.code : "PROVIDER_SETTINGS_FAILED";
         console.error(JSON.stringify({ event: "provider-settings-apply-failed", provider: request.provider, code }));
         if (!socket.destroyed) socket.end(`${JSON.stringify({ version: protocolVersion,
-          settingsProtocolVersion: providerSettingsProtocolVersion, ok: false, provider: request.provider })}\n`);
+          settingsProtocolVersion: providerSettingsProtocolVersion, ok: false, provider: request.provider,
+          ...(code === "PROVIDER_TOPOLOGY_CHANGED" ? { code } : {}) })}\n`);
       } finally {
         clearTimeout(timer);
         socket.removeListener("close", cancel);
@@ -772,6 +773,10 @@ export async function applyAppServerProviderSettings(primarySocketPath, provider
   if (value?.version !== protocolVersion || value.settingsProtocolVersion !== providerSettingsProtocolVersion) {
     throw new Error("App Server 监管入口不支持定向设置应用，请运行 codexc restart appserver 后重试");
   }
+  if (value.provider === provider && value.ok === false && value.code === "PROVIDER_TOPOLOGY_CHANGED"
+    && Object.keys(value).every(key => ["version", "settingsProtocolVersion", "provider", "ok", "code"].includes(key))) {
+    throw Object.assign(new Error("提供商拓扑已变化，需要显式重启 App Server 和 Gateway 服务"), { code: value.code });
+  }
   if (value.provider !== provider || value.ok !== true
     || Object.keys(value).some(key => !["version", "settingsProtocolVersion", "provider", "ok", "applied", "reason", "changed", "snapshot"].includes(key))) {
     throw new Error("Provider 设置应用失败");
@@ -794,10 +799,17 @@ export function readAppServerProviderSettingsFingerprint(provider, environment =
   const marker = readManagedMarker(environment, definition);
   if (!marker) throw new Error("Provider 管理标记不可用");
   const profilePath = join(codexHomePath(environment), marker.mode === "exclusive" ? "config.toml" : definition.profileFileName);
+  const catalogPath = join(managedProviderDirectory(environment, definition), definition.catalogFileName);
+  const assertComplete = () => {
+    if (lstatSync(`${catalogPath}.settings-pending`, { throwIfNoEntry: false })) {
+      throw new Error("提供商模型设置尚未完成，请先恢复目录事务");
+    }
+  };
+  assertComplete();
   const parts = [
     readPrivateFileSync(managedProviderMarkerPath(environment, definition)),
     marker.mode === "exclusive" ? readCodexConfigFile(profilePath) : readPrivateFileSync(profilePath),
-    readPrivateFileSync(join(managedProviderDirectory(environment, definition), definition.catalogFileName), 2_097_152),
+    readPrivateFileSync(catalogPath, 2_097_152),
   ];
   if (marker.mode === "exclusive") {
     let block;
@@ -807,6 +819,7 @@ export function readAppServerProviderSettingsFingerprint(provider, environment =
       parts.push(readPrivateFileSync(managedPrimaryCredentialPath(environment, definition, block.env_key), maximumProviderCredentialBytes));
     }
   }
+  assertComplete();
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 }
 

@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
-import { createResponsesModelCatalog, resolveResponsesTemplateContexts, isCustomCatalogProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { assertProviderModelRequestPolicy } from "../runtime/model-request-policy.mjs";
+import { withCustomBaseTemplate } from "../runtime/model-template-catalog.mjs";
+import { createResponsesModelCatalog, compileResponsesModelCatalog, isCustomCatalogProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath, customProviderUpstreamWireApis, readCustomProviderUpstreamWireApi, removeCustomProviderUpstreamMetadata, writeCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { parse } from "smol-toml";
@@ -14,6 +16,9 @@ import { createHmac, randomBytes } from "node:crypto";
 import {
   listCustomPrimaryProviderCandidates,
   loadConfiguredCustomPrimaryModelProvider,
+  loadConfiguredCustomPrimaryCredential,
+  loadCustomSwitchingProviderIds,
+  assertCustomPrimaryProviderAuthentication,
   loadConfiguredCustomSwitchingModelProviders,
   readPrimaryProviderBackup,
   removePrimaryProviderBackupCandidate,
@@ -30,7 +35,7 @@ import {
   createCustomPrimaryProviderConfig,
   modelProviderBlockEdits,
 } from "../runtime/model-provider-profile.mjs";
-import { createCodexUserConfigClient } from "./codex-user-config.mjs";
+import { areCodexUserConfigEditsApplied, createCodexUserConfigClient } from "./codex-user-config.mjs";
 import {
   writePrimaryProviderConfigEditsWithProfileRemoval,
 } from "./primary-provider-config-transaction.mjs";
@@ -87,8 +92,65 @@ export function customPrimaryProviderUrlsShareOrigin(left, right) {
 }
 
 export async function previewCustomPrimaryProviderSave(input, options = {}) {
+  assertCompleteSaveScope(input);
   const plan = await buildSavePlan(input, options, { requireConfirmation: false });
   return publicSavePreview(input, plan);
+}
+
+/** Connection edits never accept model definitions or defaults from the caller. */
+export async function previewCustomProviderConnectionSave(input, options = {}) {
+  const { saveInput, plan } = await buildConnectionOnlySavePlan(input, options, false);
+  return publicSavePreview(saveInput, plan);
+}
+
+export async function prepareCustomProviderConnectionSave(input, options = {}) {
+  const { saveInput, plan } = await buildConnectionOnlySavePlan(input, options, true);
+  const preview = publicSavePreview(saveInput, plan);
+  return { preview, apply: () => applyCustomProviderConnectionSave(input, { ...options, loadContext: undefined, preview }) };
+}
+
+export async function applyCustomProviderConnectionSave(input, options = {}) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(environment, async () => {
+    const { saveInput, plan } = await buildConnectionOnlySavePlan(input, options, true);
+    if (typeof options.preview?.revision !== "string" || options.preview.revision !== savePlanRevision(plan)) {
+      throw invalid("stale-preview", "operation", "提供商或模型配置已变化，请重新预览后再保存");
+    }
+    return applySavePlan(saveInput, plan, options);
+  });
+}
+
+async function buildConnectionOnlySavePlan(input, options, requireConfirmation) {
+  const fields = ["operation", "providerId", "name", "baseUrl", "mode", "supportsWebsockets", "upstreamWireApi", "credential", "confirmRemoveTopLevelBaseUrl"];
+  if (!input || typeof input !== "object" || Array.isArray(input) || input.operation !== "update"
+    || Object.keys(input).some(key => !fields.includes(key)) || !isCustomCatalogProvider(input.providerId)) {
+    throw invalid("invalid-operation", "operation", "连接编辑仅接受已有自定义提供商的连接字段");
+  }
+  const environment = options.environment ?? process.env;
+  const context = await loadSaveContext(options, false);
+  const config = record(context.snapshot.config);
+  const switching = loadConfiguredCustomSwitchingModelProviders(environment).find(entry => entry.id === input.providerId);
+  const catalog = readResponsesModelCatalog(environment, input.providerId);
+  const active = config.model_provider === input.providerId;
+  const model = switching?.model ?? (active ? optionalString(config.model) : undefined) ?? catalog.defaultModel;
+  const saveInput = { ...input, model, catalog: { kind: "custom", models: catalog.definitions } };
+  const plan = await buildSavePlan(saveInput, { ...options, loadContext: async () => context }, { requireConfirmation, connectionOnly: true });
+  plan.connectionOnly = true;
+  plan.sourceState.catalogContent = catalog.content;
+  plan.sourceState.modelDefaults = switching ? {
+    model: parse(switching.profileContent).model,
+    model_reasoning_effort: parse(switching.profileContent).model_reasoning_effort,
+  } : active ? { model: config.model, model_reasoning_effort: config.model_reasoning_effort } : {
+    model: catalog.defaultModel, model_reasoning_effort: plan.reasoningEffort,
+  };
+  // Keep the selected model and its independent default; the catalog may have a different default.
+  plan.reasoningEffort = plan.sourceState.modelDefaults.model_reasoning_effort;
+  plan.edits = plan.edits.filter(edit => !["model", "model_reasoning_effort"].includes(edit.keyPath));
+  if (!active && input.mode === "exclusive") plan.edits.push(
+    { keyPath: "model", value: model },
+    { keyPath: "model_reasoning_effort", value: plan.reasoningEffort ?? null },
+  );
+  return { saveInput, plan };
 }
 
 /** Model-only edits resolve connection settings again, never accept them from a stale form. */
@@ -156,10 +218,16 @@ async function buildModelOnlySavePlan(input, options) {
   };
   const plan = await buildSavePlan(saveInput, { ...options, loadContext: async () => context }, { requireConfirmation: true });
   plan.modelOnly = true;
-  plan.modelOnlyPreviousCatalogContent = previous.content;
   plan.modelOnlyFixedProvider = switching ? undefined : fixed;
   plan.credential = undefined;
-  plan.edits = switching ? [] : [
+  plan.preserveDefaults = options.preserveDefaults === true;
+  if (plan.preserveDefaults) {
+    if (input.model !== previous.defaultModel) throw invalid("invalid-input", "model", "工具能力保存不能改变目录默认模型");
+    const selection = switching ? parse(switching.profileContent) : config;
+    plan.sourceState.modelDefaults = { model: selection.model, model_reasoning_effort: selection.model_reasoning_effort };
+    plan.effects = { ...plan.effects, removesTopLevelBaseUrl: false, convertsSwitchingProfile: false, consumesBackupCandidate: false };
+  }
+  plan.edits = switching || plan.preserveDefaults ? [] : [
     { keyPath: "model", value: plan.provider.model },
     { keyPath: "model_reasoning_effort", value: plan.reasoningEffort },
   ];
@@ -167,14 +235,13 @@ async function buildModelOnlySavePlan(input, options) {
 }
 
 export async function prepareCustomPrimaryProviderSave(input, options = {}) {
+  assertCompleteSaveScope(input);
   const plan = await buildSavePlan(input, options, { requireConfirmation: true });
-  const environment = options.environment ?? process.env;
+  const preview = publicSavePreview(input, plan);
   return {
-    preview: publicSavePreview(input, plan),
-    apply: () => withModelProviderManagementTransaction(
-      environment,
-      () => applySavePlan(input, plan, options),
-    ),
+    preview,
+    // A CLI draft may have supplied its opening snapshot. Execution must read again.
+    apply: () => applyCustomPrimaryProviderSave(input, { ...options, loadContext: undefined, preview }),
   };
 }
 
@@ -182,6 +249,7 @@ function publicSavePreview(input, plan) {
   const cleartext = new URL(plan.provider.baseUrl).protocol === "http:";
   return {
     operation: input.operation,
+    revision: savePlanRevision(plan),
     provider: plan.provider,
     transport: { scheme: cleartext ? "http" : "https", cleartext },
     activation: "restart-all",
@@ -195,43 +263,76 @@ function publicSavePreview(input, plan) {
 }
 
 export async function applyCustomPrimaryProviderSave(input, options = {}) {
+  assertCompleteSaveScope(input);
   const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
     const plan = await buildSavePlan(input, options, { requireConfirmation: true });
+    if (typeof options.preview?.revision !== "string" || options.preview.revision !== savePlanRevision(plan)) {
+      throw invalid("stale-preview", "operation", "提供商或模型配置已变化，请重新预览后再保存");
+    }
     return applySavePlan(input, plan, options);
   });
 }
 
+function assertCompleteSaveScope(input) {
+  if (input?.operation === "update" && isCustomCatalogProvider(typeof input.providerId === "string" ? input.providerId.trim() : input.providerId)) {
+    throw invalid("invalid-operation", "operation", "已有自定义提供商请分别使用连接编辑或模型管理入口");
+  }
+}
+
+function savePlanRevision(plan) {
+  // Credential version IDs are freshly allocated per plan, not source revisions.
+  // Bind the effective secret with a process-local HMAC, never a reusable key hash.
+  return createHmac("sha256", probeConnectionSecret).update(JSON.stringify({
+    provider: plan.provider, apiKey: plan.apiKey, expectedVersion: plan.expectedVersion,
+    catalogRevision: plan.catalogRevision, switchingProvider: plan.switchingProvider,
+    registeredProviderIds: plan.registeredProviderIds, effects: plan.effects,
+    sourceState: plan.sourceState,
+  })).digest("hex");
+}
+
 async function applySavePlan(input, plan, options) {
-  if (plan.models === undefined) return applyConnectionSavePlan(input, plan, options);
+  if (plan.models === undefined || plan.connectionOnly) {
+    const environment = options.environment ?? process.env;
+    const recovery = plan.connectionOnly ? writeProviderRecoveryBackup(plan, environment) : undefined;
+    try {
+      const result = await applyConnectionSavePlan(input, plan, options);
+      await confirmProviderSave(plan, options);
+      return result;
+    } catch (error) {
+      if (!recovery || error?.code === "save-unconfirmed") throw error;
+      const read = createProviderFileReader(environment);
+      let unchanged = false;
+      try { unchanged = recovery.files.every(({ path, content }) => (existsSync(path) ? read(path) : null) === content); }
+      catch { /* Unreadable state cannot establish that the write was rolled back. */ }
+      if (unchanged) throw error;
+      throw invalid("save-unconfirmed", "operation", "连接保存结果无法确认；已保留配置与 Profile 备份，请核对后恢复，勿自动重试", error);
+    }
+  }
   const environment = options.environment ?? process.env;
-  if (!isDeepStrictEqual(plan.models, resolveResponsesTemplateContexts(plan.models,environment))) throw invalid("stale-preview","catalog","DS 模板上下文已变化，请重新预览");
-  if (JSON.stringify(createResponsesModelCatalog(plan.models, plan.provider.model)) !== plan.validatedCatalog) throw invalid("stale-preview", "catalog", "模型目录已变化，请重新预览并校验");
+  if (JSON.stringify(compileResponsesModelCatalog(plan.models, plan.provider.model)) !== plan.validatedCatalog) throw invalid("stale-preview", "catalog", "模型目录已变化，请重新预览并校验");
   const configPath = join(codexHomePath(environment), "config.toml");
   const read = createProviderFileReader(environment);
   const beforeConfig = existsSync(configPath) ? read(configPath) : undefined;
   const profilePath = customPrimaryProviderProfilePath(environment, plan.provider.id);
   const beforeProfile = existsSync(profilePath) ? read(profilePath) : undefined;
-  const backupPaths = [configPath, customPrimaryProviderProfilePath(environment, plan.provider.id), customSwitchingProviderRegistryPath(environment),
-    ...(isCustomCatalogProvider(plan.provider.id) ? [customProviderUpstreamMetadataPath(environment, plan.provider.id)] : [])];
   const transaction = writeResponsesModelCatalog(environment, plan.provider.id, plan.models, plan.provider.model, plan.catalogRevision);
   try {
-    writePrivateFileAtomicSync(responsesProviderBackupPath(environment, plan.provider.id), `${JSON.stringify({
-      schemaVersion: 1,
-      files: backupPaths.map(path => ({ path, content: existsSync(path) ? read(path) : null })),
-    }, null, 2)}\n`);
+    if (!plan.preserveDefaults) writeProviderRecoveryBackup(plan, environment);
     const result = await withResponsesModelCatalogWrite(transaction, async () => {
-      const result = await applyConnectionSavePlan(input, plan, options);
-      if (plan.modelOnly) await confirmModelOnlySave(plan, options, transaction);
+      const result = plan.preserveDefaults
+        ? { action: "updated", provider: plan.provider, activation: "restart-all", effects: plan.effects, warnings: [] }
+        : await applyConnectionSavePlan(input, plan, options);
+      await confirmProviderSave(plan, options, transaction);
       return result;
     });
     finishResponsesModelCatalogWrite(transaction);
     return result;
   } catch (error) {
-    if (plan.modelOnly && error?.code === "save-unconfirmed") throw error;
+    if (error?.code === "save-unconfirmed") throw error;
     const afterConfig = existsSync(configPath) ? read(configPath) : undefined;
     const afterProfile = existsSync(profilePath) ? read(profilePath) : undefined;
-    if (beforeConfig === afterConfig && (afterProfile === beforeProfile || (plan.switchingProvider && afterProfile === undefined))) {
+    if (beforeConfig === afterConfig && (afterProfile === beforeProfile || (!plan.preserveDefaults && plan.switchingProvider && afterProfile === undefined))) {
       finishResponsesModelCatalogWrite(transaction, true);
       if (plan.switchingProvider && !existsSync(customPrimaryProviderProfilePath(environment, plan.provider.id))) {
         restoreCustomPrimaryProviderSwitchingProfile(environment, plan.provider.id, plan.switchingProvider.profileContent);
@@ -244,35 +345,79 @@ async function applySavePlan(input, plan, options) {
   }
 }
 
-async function confirmModelOnlySave(plan, options, transaction) {
+function writeProviderRecoveryBackup(plan, environment) {
+  const read = createProviderFileReader(environment);
+  const paths = [join(codexHomePath(environment), "config.toml"), customPrimaryProviderProfilePath(environment, plan.provider.id), customSwitchingProviderRegistryPath(environment),
+    ...(isCustomCatalogProvider(plan.provider.id) ? [customProviderUpstreamMetadataPath(environment, plan.provider.id)] : [])];
+  const recovery = { schemaVersion: 1, files: paths.map(path => ({ path, content: existsSync(path) ? read(path) : null })) };
+  writePrivateFileAtomicSync(responsesProviderBackupPath(environment, plan.provider.id), `${JSON.stringify(recovery, null, 2)}\n`);
+  return recovery;
+}
+
+async function confirmProviderSave(plan, options, transaction) {
   const environment = options.environment ?? process.env;
   try {
-    const { snapshot } = await loadSaveContext(options, false);
+    const { snapshot } = await loadSaveContext({ ...options, loadContext: undefined }, false);
     const config = record(snapshot.config);
     const read = createProviderFileReader(environment);
-    const catalog = readResponsesModelCatalog(environment, plan.provider.id);
-    if (catalog.content !== `${JSON.stringify(createResponsesModelCatalog(plan.models, plan.provider.model), null, 2)}\n`
-      || read(`${transaction.path}.backup`) !== plan.modelOnlyPreviousCatalogContent
-      || read(`${transaction.path}.pending`) !== JSON.stringify({ schemaVersion: 1, previous: true })
-      || readCustomProviderUpstreamWireApi(environment, plan.provider.id) !== plan.upstreamWireApi) throw new Error("模型目录或恢复材料已变化");
+    if (plan.connectionOnly && readResponsesModelCatalog(environment, plan.provider.id).content !== plan.sourceState.catalogContent) {
+      throw new Error("连接保存期间模型目录已变化");
+    }
+    if (transaction) {
+      const catalog = readResponsesModelCatalog(environment, plan.provider.id);
+      if (catalog.content !== transaction.content
+        || transaction.previous && read(`${transaction.path}.backup`, 2_097_152) !== transaction.previous.content
+        || read(`${transaction.path}.pending`, 1024) !== transaction.pendingContent
+        || readCustomProviderUpstreamWireApi(environment, plan.provider.id) !== plan.upstreamWireApi) throw new Error("模型目录或恢复材料已变化");
+    }
     if (plan.provider.mode === "switching") {
-      const expected = parse(plan.switchingProvider.profileContent);
-      expected.model = plan.provider.model;
-      expected.model_reasoning_effort = plan.reasoningEffort;
       const profiles = loadConfiguredCustomSwitchingModelProviders(environment);
       const actual = profiles.find(entry => entry.id === plan.provider.id);
       if (!isDeepStrictEqual(config.model_provider, "openai") && config.model_provider !== undefined) throw new Error("主提供商已变化");
-      if (!actual || !isDeepStrictEqual(parse(actual.profileContent), expected)
-        || !isDeepStrictEqual(profiles.map(entry => entry.id), plan.registeredProviderIds)) throw new Error("模型默认值或连接配置回读不一致");
+      const expectedIds = [...new Set([...plan.registeredProviderIds, plan.provider.id])].sort();
+      const expectedModel = plan.preserveDefaults ? plan.sourceState.modelDefaults.model : plan.provider.model;
+      const expectedEffort = plan.preserveDefaults ? plan.sourceState.modelDefaults.model_reasoning_effort : plan.reasoningEffort;
+      if (!actual || actual.name !== plan.provider.displayName || actual.baseUrl !== plan.provider.baseUrl
+        || actual.apiKey !== plan.apiKey || actual.model !== expectedModel
+        || actual.supportsWebsockets !== plan.provider.supportsWebsockets || actual.upstreamWireApi !== plan.upstreamWireApi
+        || plan.models && actual.reasoningEffort !== expectedEffort
+        || !isDeepStrictEqual(profiles.map(entry => entry.id).sort(), expectedIds)) throw new Error("模型默认值或连接配置回读不一致");
+      if (plan.modelOnly) {
+        const expected = parse(plan.switchingProvider.profileContent);
+        if (!plan.preserveDefaults) {
+          expected.model = plan.provider.model;
+          expected.model_reasoning_effort = plan.reasoningEffort;
+        }
+        if (!isDeepStrictEqual(parse(actual.profileContent), expected)) throw new Error("模型专用保存改变了连接配置");
+      }
+      if (plan.connectionOnly) {
+        const expected = plan.switchingProvider ? parse(plan.switchingProvider.profileContent) : undefined;
+        const observed = parse(actual.profileContent);
+        if (expected) {
+          expected.model_providers[plan.provider.id] = observed.model_providers[plan.provider.id];
+          if (!isDeepStrictEqual(observed, expected)) throw new Error("连接保存改变了模型或默认设置");
+        } else if (!isDeepStrictEqual(observed.model, plan.sourceState.modelDefaults.model)
+          || !isDeepStrictEqual(observed.model_reasoning_effort, plan.sourceState.modelDefaults.model_reasoning_effort)) {
+          throw new Error("连接保存改变了模型默认设置");
+        }
+      }
     } else {
       const provider = record(record(config.model_providers)[plan.provider.id]);
-      if (config.model_provider !== plan.provider.id || config.model !== plan.provider.model
-        || config.model_reasoning_effort !== plan.reasoningEffort
-        || !isDeepStrictEqual(provider, plan.modelOnlyFixedProvider)
-        || readCustomPrimaryProviderApiKey(plan.provider.id, provider, environment) !== plan.apiKey) throw new Error("模型默认值或连接配置回读不一致");
+      const primary = loadConfiguredCustomPrimaryModelProvider(environment);
+      if (!areCodexUserConfigEditsApplied(config, plan.edits)
+        || primary?.id !== plan.provider.id || primary.baseUrl !== plan.provider.baseUrl
+        || primary.upstreamWireApi !== plan.upstreamWireApi
+        || loadConfiguredCustomPrimaryCredential(environment, primary)?.apiKey !== plan.apiKey
+        || loadCustomSwitchingProviderIds(environment).length !== 0
+        || (plan.connectionOnly || plan.preserveDefaults) && (!isDeepStrictEqual(config.model, plan.sourceState.modelDefaults.model)
+          || !isDeepStrictEqual(config.model_reasoning_effort, plan.sourceState.modelDefaults.model_reasoning_effort))
+        || plan.modelOnly && !isDeepStrictEqual(provider, plan.modelOnlyFixedProvider)) throw new Error("模型默认值或连接配置回读不一致");
     }
   } catch (error) {
-    throw invalid("save-unconfirmed", "catalog", "模型保存结果无法确认；已保留 pending 和备份，请核对后恢复，勿自动重试", error);
+    throw invalid("save-unconfirmed", "catalog", transaction
+      ? "提供商保存结果无法确认；已保留 pending 和备份，请核对后恢复，勿自动重试"
+      : plan.connectionOnly ? "连接保存结果无法确认；已保留配置与 Profile 备份，请核对后恢复，勿自动重试"
+      : "提供商保存结果无法确认；请核对配置与凭据，勿自动重试", error);
   }
 }
 
@@ -299,6 +444,7 @@ async function applyConnectionSavePlan(input, plan, options) {
         supportsWebsockets: plan.provider.supportsWebsockets,
         catalogSource: plan.models === undefined ? { kind: "official" } : { kind: "custom", reasoningEffort: plan.reasoningEffort },
         ...(plan.modelOnly ? { modelOnly: true } : {}),
+        ...(plan.connectionOnly ? { connectionOnly: true, upstreamWireApi: plan.upstreamWireApi } : {}),
       }, environment, {
         expectedProfilePresent: plan.switchingProvider !== undefined,
         expectedProfileContent: plan.switchingProvider?.profileContent,
@@ -353,7 +499,7 @@ async function applyConnectionSavePlan(input, plan, options) {
   };
 }
 
-async function buildSavePlan(input, options, { requireConfirmation }) {
+async function buildSavePlan(input, options, { requireConfirmation, connectionOnly = false }) {
   if (input?.operation !== "create" && input?.operation !== "update") {
     throw invalid("invalid-operation", "operation", "Provider 保存操作必须是 create 或 update");
   }
@@ -387,6 +533,9 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
           experimental_bearer_token: switchingProvider.apiKey,
         })
     : {};
+  const metadataPath = isCustomCatalogProvider(providerId) ? customProviderUpstreamMetadataPath(environment, providerId) : undefined;
+  const sourceState = { existing, backup, upstreamMetadataContent: metadataPath && existsSync(metadataPath)
+    ? createProviderFileReader(environment)(metadataPath) : null };
   if (
     input.operation === "update"
     && (typeof existing.base_url !== "string" || existing.wire_api !== "responses")
@@ -400,6 +549,12 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   const mode = input.mode;
   if (mode !== "switching" && mode !== "exclusive") {
     throw invalid("invalid-mode", "mode", "运行模式必须是 switching 或 exclusive");
+  }
+  if (mode === "switching") {
+    try { createProviderFileReader(environment)(join(codexHomePath(environment), "config.toml")); }
+    catch (error) {
+      throw invalid("primary-config-unavailable", "mode", "切换模式需要可读取的 Codex 主配置；请先通过 codexc config 保存配置后重试", error);
+    }
   }
   if (typeof input.supportsWebsockets !== "boolean") {
     throw invalid("invalid-websocket-setting", "supportsWebsockets", "WebSocket 设置必须是布尔值");
@@ -421,12 +576,18 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   if (custom !== isCustomCatalogProvider(providerId)) throw invalid("invalid-provider-id", "providerId", "自定义提供商必须使用 cp- 前缀；Codex 兼容 Provider 不使用该前缀");
   if (custom && displayName === "OpenAI") throw invalid("reserved-provider-name", "name", "自定义提供商不能使用 OpenAI 显示名称，以免启用官方专用协议能力");
   const previousCatalog = custom && input.operation === "update" ? readResponsesModelCatalog(environment, providerId) : undefined;
+  if (options.expectedCatalogContent !== undefined && previousCatalog?.content !== options.expectedCatalogContent) {
+    throw invalid("stale-preview", "catalog", "模型目录已变化，请重新打开模型管理");
+  }
   if (previousCatalog && (!Array.isArray(input.catalog.models) || previousCatalog.definitions.some(entry => !input.catalog.models.some(next => next?.id === entry.id)))) {
     throw invalid("invalid-catalog", "catalog", "移除已有模型请使用模型管理的本地移除入口");
   }
   if (custom && input.operation === "create" && existsSync(responsesProviderCatalogPath(environment, providerId))) throw invalid("provider-exists", "providerId", "该 Provider 已有模型目录，请先恢复或删除已有配置");
   const model = requiredString(input.model, "model", "模型 ID 不能为空");
-  const models = custom ? resolveResponsesTemplateContexts(validateResponsesModels(input.catalog.models, model),environment) : undefined;
+  const existingIds = new Set(previousCatalog?.definitions.map(entry => entry.id));
+  // Saved models are snapshots. Only new models receive missing base prompts.
+  const models = custom ? validateResponsesModels(input.catalog.models, model).map(entry => existingIds.has(entry.id)
+    ? entry : createResponsesModelCatalog([withCustomBaseTemplate(entry)], entry.id).definitions[0]) : undefined;
   const reasoningEffort = models?.find((entry) => entry.id === model)?.defaultReasoningEffort ?? "none";
   const officialModelIds = new Set(
     officialModels.filter((candidate) => candidate.available !== false)
@@ -543,8 +704,18 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     envKey: customPrimaryProviderCredentialEnvironmentKey(providerId),
     supportsWebsockets: input.supportsWebsockets,
   });
-  const catalog = models ? createResponsesModelCatalog(models, model) : undefined;
-  if (catalog) await validateModelCatalogWithCodex(catalog, environment);
+  if (mode === "exclusive") {
+    const effectiveProvider = { ...record(currentProviders[providerId]), ...providerBlock };
+    delete effectiveProvider.experimental_bearer_token;
+    try {
+      assertCustomPrimaryProviderAuthentication(effectiveProvider);
+      assertProviderModelRequestPolicy(effectiveProvider);
+    } catch (error) {
+      throw invalid("unsupported-provider-config", "providerId", "固定提供商包含不受支持的认证或请求策略配置；请先修正已有配置，未执行保存", error);
+    }
+  }
+  const catalog = models ? compileResponsesModelCatalog(models, model) : undefined;
+  if (catalog && !connectionOnly) await validateModelCatalogWithCodex(catalog, environment);
   const provider = {
     id: providerId,
     displayName,
@@ -554,10 +725,11 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     supportsWebsockets: input.supportsWebsockets,
     upstreamWireApi,
     catalog: custom ? "custom" : "official",
-    ...(models ? { models } : {}),
+    ...(!connectionOnly && models ? { models } : {}),
     hasApiKey: true,
   };
   return {
+    sourceState,
     provider,
     upstreamWireApi,
     models,

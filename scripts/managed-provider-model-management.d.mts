@@ -1,15 +1,7 @@
-import type { ModelProviderDefinition } from "../runtime/model-provider-definitions.mjs";
-export interface ManagedEditableCatalog { models: Array<Record<string, unknown>>; [key: string]: unknown }
+import type { ProviderModelAdditionLoadOptions } from "./provider-model-additions.mjs";
 export type ManagedCatalogUpdateResult = { action: "back"; activation: "none" }
-  | { action: "catalog-updated"; activation: "restart-all"; models: string[] };
-export function updateManagedProviderModels(provider: "ccg" | "ocg", options: {
-  environment?: NodeJS.ProcessEnv;
-  editCatalog: (input: { catalog: ManagedEditableCatalog; requiredModels: string[]; definition: ModelProviderDefinition;
-    previousModels: Parameters<typeof import("../runtime/model-provider-runtime.mjs").withPreservedManagedModelCatalogSettings>[2];
-  }) => Promise<ManagedEditableCatalog | undefined>;
-}): Promise<ManagedCatalogUpdateResult>;
-export function runManagedProviderModelSetup(provider: "ccg" | "ocg", options?: {
-  environment?: NodeJS.ProcessEnv;
+  | { action: "unchanged" | "catalog-updated"; activation: "none" | "restart-all"; models: string[] };
+export interface ManagedProviderModelSetupOptions extends ProviderModelAdditionLoadOptions {
   prompts?: {
     select(options: unknown): Promise<unknown>;
     text(options: unknown): Promise<unknown>;
@@ -18,5 +10,6 @@ export function runManagedProviderModelSetup(provider: "ccg" | "ocg", options?: 
     isCancel(value: unknown): boolean;
   };
   output?: { write(value: string): unknown };
-  downloadCatalog?: typeof import("./deepseek-setup.mjs").downloadDeepseekCatalog;
-}): Promise<ManagedCatalogUpdateResult>;
+}
+export function runManagedProviderModelSetup(provider: string, options?: ManagedProviderModelSetupOptions): Promise<ManagedCatalogUpdateResult>;
+export function runProviderModelAdditionSetup(provider: string, options?: ManagedProviderModelSetupOptions): Promise<ManagedCatalogUpdateResult>;

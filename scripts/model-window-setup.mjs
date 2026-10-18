@@ -1,15 +1,14 @@
 import * as clackPrompts from "@clack/prompts";
 
 import {
-  loadManagedModelWindow,
-} from "../runtime/model-provider-runtime.mjs";
-import {
-  applyModelWindowChange,
-  previewModelWindowChange,
-} from "./model-window-management.mjs";
+  loadProviderModelCatalogPresentations,
+  previewProviderModelContextChange,
+  applyProviderModelContextChange,
+} from "./provider-model-management.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { promptContextWindow } from "./responses-model-setup.mjs";
+import { managedProviderAccountFamilies } from "../runtime/model-provider-definitions.mjs";
 
 class ModelWindowSetupCancelled extends Error {}
 
@@ -20,37 +19,48 @@ export async function runModelWindowSetup({
   prompts = clackPrompts,
   prompter,
 } = {}) {
-  const models = loadManagedModelWindow(environment);
+  const { catalogs } = await loadProviderModelCatalogPresentations({ environment });
+  const models = catalogs.filter(catalog => catalog.source === "managed").flatMap(catalog =>
+    catalog.models.filter(model => Number.isSafeInteger(model.presentation.maxContextWindow)).map(model => ({
+      provider: catalog.provider,
+      providers: catalog.providers,
+      revision: catalog.revision,
+      model: model.id,
+      displayName: model.displayName,
+      contextWindow: model.presentation.contextWindow,
+      maxContextWindow: model.presentation.maxContextWindow,
+    })));
   if (models.length === 0) {
-    throw new Error("尚未配置受管第三方模型，请先在 Setup 中完成第三方账户接入");
+    throw new Error("没有可编辑上下文窗口的受管模型，请先完成接入并确认目录声明了最大窗口");
   }
   const prompt = prompter ?? createPrompter(prompts, models, { allowBack });
   try {
     const model = await prompt.selectModel();
     if (model === "back") return { action: "back" };
-    const selected = models.find((candidate) => candidate.model === model);
+    const selected = models.find((candidate) => modelKey(candidate) === model);
     if (!selected) throw new Error(`未找到已配置模型：${model}`);
-    const preview = previewModelWindowChange({ model: selected.model, contextWindow: selected.contextWindow }, { environment });
-    output.write(`本次窗口设置影响的 Provider（含上下文跟随者）：${preview.providers.join("、")}。\n`);
-    if (preview.conflicts) {
-      output.write(`保存将统一当前不一致的窗口：${preview.overridden.map((entry) => `${entry.provider} ${entry.previousPercent}%`).join("；")}。\n`);
-    }
+    output.write(`本次窗口设置影响同一提供商账户：${selected.providers.join("、")}。\n`);
     const contextWindow = await prompt.selectContextWindow(selected);
-    const result = await applyModelWindowChange({
+    const input = {
+      provider: selected.provider,
       model: selected.model,
       contextWindow,
-    }, { environment });
+      revision: selected.revision,
+    };
+    const preview = await previewProviderModelContextChange(input, { environment });
+    output.write(`${preview.model.displayName} 上下文窗口：${preview.model.contextWindow} → ${preview.contextWindow} Token。\n`);
+    output.write(`影响同一提供商账户：${preview.providers.join("、")}；既有自动压缩阈值保持不变。\n`);
+    if (await prompt.confirmSave(preview) !== true) return { action: "back" };
+    const result = await applyProviderModelContextChange(input, { environment, preview });
     output.write(`${selected.displayName} 上下文窗口：${result.contextWindow} Token（模型最大值 ${result.model.maxContextWindow} Token）。\n`);
     output.write(`应用 Provider：${result.providers.join("、")}。\n`);
-    if (result.conflicts === true) {
-      output.write(`注意：已覆盖不同 Provider 上不一致的窗口占比（${result.overridden.map((entry) => `${entry.provider} ${entry.previousPercent}%`).join("；")}）。\n`);
-    }
-    output.write("已统一上述 Provider 的模型窗口及上下文跟随设置；既有自动压缩阈值保持不变。\n");
+    output.write("已设置所选 Provider 的模型窗口；既有自动压缩阈值保持不变。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
     return {
       action: "configured",
+      provider: result.provider,
       model: result.model.id,
-      windowPercent: result.windowPercent,
+      windowPercent: result.contextWindow * 100 / result.model.maxContextWindow,
       contextWindow: result.contextWindow,
       providers: result.providers,
       activation: "restart-app-server",
@@ -68,16 +78,15 @@ function createPrompter(prompts, models, { allowBack }) {
   return {
     selectModel: async () => {
       const value = await prompts.select({
-        message: "选择模型（按模型名全局统一）",
+        message: "选择提供商与模型",
         options: [
           ...models.map((model) => ({
-            value: model.model,
-            label: model.displayName,
+            value: modelKey(model),
+            label: `${model.displayName}（${managedProviderAccountFamilies.find(family => family.matches(model.provider))?.definition.displayName ?? model.provider}）`,
             hint: [
-              `Provider：${model.providers.join("、") || "无"}`,
+              `影响账户：${model.providers.join("、")}`,
               `最大窗口：${model.maxContextWindow.toLocaleString()} tokens`,
               `当前窗口：${model.contextWindow.toLocaleString()} tokens`,
-              model.conflicts === true ? "窗口大小不一致" : "",
             ].filter(Boolean).join(" · "),
           })),
           ...(allowBack ? [{ value: "back", label: "返回上一级" }] : []),
@@ -91,7 +100,15 @@ function createPrompter(prompts, models, { allowBack }) {
       if (value === undefined) throw new ModelWindowSetupCancelled("模型上下文窗口设置已取消");
       return value;
     },
+    confirmSave: async () => requirePromptValue(prompts, await prompts.confirm({
+      message: "确认保存上述模型上下文窗口？",
+      initialValue: false,
+    })),
   };
+}
+
+function modelKey(model) {
+  return JSON.stringify([model.provider, model.model]);
 }
 
 function requirePromptValue(prompts, value) {

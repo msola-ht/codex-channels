@@ -1,6 +1,7 @@
 import * as clackPrompts from "@clack/prompts";
 import { runProviderModelSetup } from "./provider-model-setup.mjs";
-import { loadClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
+import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
+import { runProviderModelAdditionSetup } from "./managed-provider-model-management.mjs";
 import { clinePassProviderDefinition as definition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
 import { promptEnabledProviderModels } from "./provider-model-selection.mjs";
@@ -12,25 +13,20 @@ import {
   previewClinePassRemoval,
   removeClinePassConfiguration,
   setClinePassDefaultAccount,
-  refreshClinePassCatalog,
 } from "./cline-pass-account-management.mjs";
 
 export async function runClinePassSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout } = {}) {
   const accounts = loadClinePassAccounts(environment);
   const action = await prompts.select({ message: "Cline Pass 官方", options: [
     { value: "configure", label: "添加账户" },
-    ...(accounts.length ? [{ value: "reconfigure", label: "重新配置账户" }, { value: "models", label: "模型管理／本地移除" }, { value: "catalog", label: "选择新增模型／更新共享目录" }, { value: "default", label: "设置默认账户" }, { value: "remove", label: "移除账户" }] : []),
+    ...(accounts.length ? [{ value: "reconfigure", label: "重新配置账户" }, { value: "models", label: "模型管理／本地移除" }, { value: "catalog", label: "发现／添加新模型" }, { value: "default", label: "设置默认账户" }, { value: "remove", label: "移除账户" }] : []),
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
   if (action === "models") return runProviderModelSetup({ environment, prompts, output, provider: "clp" });
   if (action === "catalog") {
-    const result = await refreshClinePassCatalog({ environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
-    if (result.action === "back") return result;
-    output.write(`CLP 共享模型目录已更新：${result.models.length} 个模型，来源 ${result.commit}。\n`);
-    writeCatalogExclusions(output, result.excludedModels);
-    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
-    return result;
+    const accountId = accounts[0].id;
+    return runProviderModelAdditionSetup(clinePassProviderId(accountId), { environment, prompts, output });
   }
   const accountId = action === "configure"
     ? await promptManagedAccountId(prompts, accounts)
@@ -69,7 +65,7 @@ function writeCatalogExclusions(output, excludedModels) {
 
 async function promptEnabledModels(prompts, output, { models, enabledModels, requiredModels, retainedModels }) {
   return promptEnabledProviderModels(prompts, output, {
-    models, enabledModels, requiredModels, retainedModels, label: "CLP（全部账户共享）",
+    models, enabledModels, requiredModels, retainedModels, label: "CLP 当前账户",
     defaultModelWhenUnrequired: definition.defaultModel,
   });
 }
