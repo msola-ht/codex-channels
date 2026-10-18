@@ -111,7 +111,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
         <SortableHeader column={column}>{t("metrics.requests")}</SortableHeader>
       ),
       cell: ({ row }) => (
-        <span className="tabular-nums">{row.original.requestCount}</span>
+        <span className="tabular-nums">{row.original.requestCount || ""}</span>
       ),
     },
     {
@@ -132,20 +132,18 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: ({ column }) => (
         <SortableHeader column={column} hint={t("metrics.input")}>{t("metrics.inputColumn")}</SortableHeader>
       ),
-      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} requestCount={row.original.requestCount} usageCoverage={row.original.usageCoverage} />,
+      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} requestCount={row.original.requestCount} />,
     },
     {
       id: "cacheHitRate",
       enableSorting: false,
-      header: () => <TableHint hint={t("metrics.observedCacheHitRateHint")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
+      header: () => <TableHint hint={t("metrics.cacheScopeHint")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
       cell: ({ row }) => {
         const turn = row.original
-        const rate = turn.inputTokens > 0 && turn.cachedInputTokens !== null
+        const rate = turn.inputTokens > 0 && turn.cachedInputTokens !== null && turn.cachedInputTokens > 0
           ? `${(turn.cachedInputTokens / turn.inputTokens * 100).toFixed(1)}%`
-          : "—"
-        return <span className="whitespace-nowrap tabular-nums">{rate !== "—" && turn.usageCoverage.inputMissingRequestCount > 0
-          ? <TableHint hint={t("metrics.observedCacheHitRateHint")}>{rate}</TableHint>
-          : rate}</span>
+          : ""
+        return <span className="whitespace-nowrap tabular-nums">{rate}</span>
       },
     },
     {
@@ -154,7 +152,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: ({ column }) => (
         <SortableHeader column={column} hint={t("metrics.output")}>{t("metrics.outputColumn")}</SortableHeader>
       ),
-      cell: ({ row }) => <OutputTokenTooltip outputTokens={row.original.outputTokens} reasoningOutputTokens={row.original.reasoningOutputTokens} requestCount={row.original.requestCount} usageCoverage={row.original.usageCoverage} />,
+      cell: ({ row }) => <OutputTokenTooltip outputTokens={row.original.outputTokens} reasoningOutputTokens={row.original.reasoningOutputTokens} requestCount={row.original.requestCount} />,
     },
     {
       id: "compact",
@@ -164,8 +162,8 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">
-          {row.original.compact === null
-            ? "—"
+          {!row.original.compact?.requestCount
+            ? ""
             : t("metrics.times", { count: row.original.compact.requestCount })}
         </span>
       ),
@@ -176,7 +174,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       accessorFn: (turn) => turn.requestOutcomes.interrupted,
       header: () => <TableHint hint={t("metrics.clientInterruption")}>{t("metrics.interruptedColumn")}</TableHint>,
       cell: ({ row }) => <TableHint hint={row.original.requestOutcomes.interrupted > 0 ? formatInterruptionSummary(row.original.interruptionSummary, t) : null}>
-        <span className="tabular-nums">{row.original.requestOutcomes.interrupted}</span>
+        <span className="tabular-nums">{row.original.requestOutcomes.interrupted || ""}</span>
       </TableHint>,
     },
     {
@@ -184,13 +182,13 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       enableSorting: false,
       accessorFn: (turn) => turn.requestOutcomes.incomplete,
       header: () => <TableHint hint={t("metrics.incompleteObservation")}>{t("metrics.incompleteColumn")}</TableHint>,
-      cell: ({ row }) => <span className="tabular-nums">{row.original.requestOutcomes.incomplete}</span>,
+      cell: ({ row }) => <span className="tabular-nums">{row.original.requestOutcomes.incomplete || ""}</span>,
     },
     {
       id: "duration",
       enableSorting: false,
       header: () => <TableHint hint={t("threads.turnDuration")}>{t("metrics.durationColumn")}</TableHint>,
-      cell: ({ row }) => row.original.durationMs == null ? "—" : formatElapsedDuration(row.original.durationMs),
+      cell: ({ row }) => !row.original.durationMs ? "" : formatElapsedDuration(row.original.durationMs),
     },
     {
       id: "subagents",
@@ -201,7 +199,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
         to={`/threads/${encodeURIComponent(threadId)}/subagents?parentTurnId=${encodeURIComponent(row.original.turnId)}`}
         className="tabular-nums hover:underline"
         aria-label={t("threads.subagentsForTurn", { id: shortThreadId(row.original.turnId), count: row.original.directSubagentCount })}
-      >{row.original.directSubagentCount}</Link> : <span className="tabular-nums">0</span>,
+      >{row.original.directSubagentCount}</Link> : null,
     },
   ], [threadId, query, t])
 

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useThreadSubagents } from "@/hooks/use-thread-subagents"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatCacheUsage, formatElapsedDuration, formatModelName, formatRequestTime, formatTimestamp, getServerTimeZone, formatUsageTokens, shortThreadId } from "@/lib/format"
+import { formatCacheUsage, formatElapsedDuration, formatModelName, formatRequestTime, formatTimestamp, getServerTimeZone, formatTokens, shortThreadId } from "@/lib/format"
 import { translateApiError } from "@/lib/i18n/translate"
 import { metricsLink } from "@/lib/metrics-query"
 import type { SubagentListItem } from "@/lib/types"
@@ -75,35 +75,31 @@ export function ThreadSubagents({ threadId, parentTurnId }: { threadId?: string;
     { id: "provider", enableSorting: false, header: t("metrics.provider"), cell: ({ row }) => <ProviderBadge provider={row.original.provider} /> },
     { id: "model", enableSorting: false, header: t("metrics.model"), cell: ({ row }) => <TruncatedText text={formatModelName(row.original.model, row.original.provider)} className="max-w-40" /> },
     { id: "reasoningEffort", enableSorting: false, header: t("metrics.reasoningEffort"), cell: ({ row }) => row.original.reasoningEffort ?? "—" },
-    { id: "turns", enableSorting: false, header: t("metrics.turn"), cell: ({ row }) => row.original.turnCount },
-    { id: "requests", enableSorting: false, header: t("metrics.requests"), cell: ({ row }) => row.original.requestCount },
+    { id: "turns", enableSorting: false, header: t("metrics.turn"), cell: ({ row }) => row.original.turnCount || "" },
+    { id: "requests", enableSorting: false, header: t("metrics.requests"), cell: ({ row }) => row.original.requestCount || "" },
     { id: "duration", enableSorting: false, header: () => <TableHint hint={t("threads.subagentDurationHint")}>{t("threads.subagentDuration")}</TableHint>, cell: ({ row }) => {
       const timing = row.original.executionTiming
-      const partial = !timing.historyComplete || timing.missingDurationTurnCount > 0
       const hint = [
         t("threads.subagentDurationHint"),
-        t("threads.subagentObservedTurns", { count: timing.observedTurnCount }),
-        ...(timing.missingDurationTurnCount > 0 ? [t("threads.missingDurations", { count: timing.missingDurationTurnCount })] : []),
-        ...(partial ? [t("threads.subagentDurationPartial")] : []),
-      ].join(" ")
-      return <TableHint hint={hint}><span className="tabular-nums">{timing.durationMs === null ? "—" : `${formatElapsedDuration(timing.durationMs)}${partial ? " *" : ""}`}</span></TableHint>
+        timing.observedTurnCount > 0 ? t("threads.subagentObservedTurns", { count: timing.observedTurnCount }) : "",
+      ].filter(Boolean).join(" ")
+      return timing.durationMs ? <TableHint hint={hint}><span className="tabular-nums">{formatElapsedDuration(timing.durationMs)}</span></TableHint> : null
     } },
     { id: "input", enableSorting: false, header: () => <TableHint hint={t("metrics.input")}>{t("metrics.inputColumn")}</TableHint>, cell: ({ row }) => <InputTokenTooltip
       inputTokens={row.original.inputTokens}
       cachedInputTokens={row.original.cacheUsage.missingRequestCount > 0 ? null : row.original.cacheUsage.cachedInputTokens}
       cacheUsage={row.original.cacheUsage}
       requestCount={row.original.requestCount}
-      usageCoverage={row.original.usageCoverage}
     /> },
     { id: "cacheHitRate", enableSorting: false, header: () => <TableHint hint={t("metrics.cacheScopeHint")}>{t("metrics.cacheHitRateColumn")}</TableHint>, cell: ({ row }) => formatCacheUsage(row.original.cacheUsage).rate },
-    { id: "output", enableSorting: false, header: () => <TableHint hint={t("metrics.output")}>{t("metrics.outputColumn")}</TableHint>, cell: ({ row }) => <TokenHint value={formatUsageTokens(row.original.outputTokens, row.original.requestCount, row.original.usageCoverage.outputMissingRequestCount)} /> },
+    { id: "output", enableSorting: false, header: () => <TableHint hint={t("metrics.output")}>{t("metrics.outputColumn")}</TableHint>, cell: ({ row }) => <TokenHint value={formatTokens(row.original.outputTokens)} /> },
     { id: "last", accessorFn: agent => agent.lastRecordedAtMs, sortDescFirst: true,
       header: ({ column }) => <SortableHeader column={column}>{t("metrics.last")}</SortableHeader>,
       cell: ({ row }) => row.original.lastRecordedAtMs == null ? "—" : <span className="whitespace-nowrap tabular-nums" title={`${formatTimestamp(row.original.lastRecordedAtMs)} · ${getServerTimeZone()}`}>{formatRequestTime(row.original.lastRecordedAtMs)}</span> },
     { id: "subagents", enableSorting: false, header: t("threads.directSubagents"), cell: ({ row }) => row.original.directSubagentCount > 0 ? <Link
       to={`/threads/${encodeURIComponent(row.original.threadId)}/subagents`} className="hover:underline">
       <Badge variant="secondary" size="sm">{t("threads.subagentsCount", { count: row.original.directSubagentCount })}</Badge>
-    </Link> : "—" },
+    </Link> : "" },
   ], [global, parentTurnId, t])
 
   return <section aria-label={t(global ? "threads.allSubagents" : "threads.relatedSubagents")} aria-busy={refreshing} className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
@@ -120,7 +116,7 @@ export function ThreadSubagents({ threadId, parentTurnId }: { threadId?: string;
       loading={loading}
       title={t(global ? "threads.allSubagents" : "threads.relatedSubagents")}
       description={({ total }) => <QuerySummary
-        label={t("threads.subagentsTotal", { total })}
+        label={total > 0 ? t("threads.subagentsTotal", { total }) : undefined}
         range="all"
         scopeLabel={parentTurnId === undefined ? undefined : t("threads.subagentScopedSummary")}
         aggregate={summary ?? null}

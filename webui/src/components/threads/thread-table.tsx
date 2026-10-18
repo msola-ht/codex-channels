@@ -23,9 +23,7 @@ import {
   formatTimestamp,
   getServerTimeZone,
   formatTokens,
-  formatUsageTokens,
   formatTotalUsage,
-  mergeUsageCoverage,
   shortThreadId,
 } from "@/lib/format"
 import type { MetricsQuery, ThreadListItem } from "@/lib/types"
@@ -42,15 +40,15 @@ function ThreadTokenTotal({ thread }: { thread: ThreadListItem }) {
     ? formatTokens(usage.cacheUsage.cachedInputTokens)
     : formatTokens(usage.cachedInputTokens)
   const rows = [
-    [t("threads.tokenInput"), formatUsageTokens(usage.inputTokens, usage.requestCount, usage.usageCoverage.inputMissingRequestCount)],
+    [t("threads.tokenInput"), formatTokens(usage.inputTokens)],
     [t("threads.tokenCached"), cached],
     [t("metrics.cacheHitRate"), formatCacheUsage(usage.cacheUsage).rate],
-    [t("threads.tokenOutput"), formatUsageTokens(usage.outputTokens, usage.requestCount, usage.usageCoverage.outputMissingRequestCount)],
+    [t("threads.tokenOutput"), formatTokens(usage.outputTokens)],
     [t("threads.tokenSubtotal"), formatTotalUsage(usage)],
-  ]
-  const total = formatTotalUsage({ inputTokens: thread.inputTokens + usage.inputTokens, outputTokens: thread.outputTokens + usage.outputTokens, requestCount: thread.requestCount + usage.requestCount, usageCoverage: mergeUsageCoverage(thread.usageCoverage, usage.usageCoverage) })
+  ].filter(([, value]) => value !== "")
+  const total = formatTotalUsage({ inputTokens: thread.inputTokens + usage.inputTokens, outputTokens: thread.outputTokens + usage.outputTokens })
   const description = `${t("threads.tokenSubagents")}: ${rows.map(([label, value]) => `${label}: ${value}`).join(", ")}. ${t("threads.totalTokens")}: ${total}`
-  if (usage.requestCount === 0) return <span className="tabular-nums">{total}</span>
+  if (usage.requestCount === 0 || !total || rows.length === 0) return <span className="tabular-nums">{total}</span>
 
   return (
     <Tooltip>
@@ -161,7 +159,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         <SortableHeader column={column}>{t("metrics.turn")}</SortableHeader>
       ),
       cell: ({ row }) => (
-        <span className="tabular-nums">{row.original.turnCount}</span>
+        <span className="tabular-nums">{row.original.turnCount || ""}</span>
       ),
     },
     {
@@ -171,14 +169,14 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         <SortableHeader column={column}>{t("metrics.requests")}</SortableHeader>
       ),
       cell: ({ row }) => (
-        <span className="tabular-nums">{row.original.requestCount}</span>
+        <span className="tabular-nums">{row.original.requestCount || ""}</span>
       ),
     },
     {
       id: "input",
       accessorFn: (thread) => thread.inputTokens,
       header: ({ column }) => <SortableHeader column={column} hint={t("metrics.input")}>{t("metrics.inputColumn")}</SortableHeader>,
-      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} cacheUsage={row.original.cacheUsage} requestCount={row.original.requestCount} usageCoverage={row.original.usageCoverage} />,
+      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} cacheUsage={row.original.cacheUsage} requestCount={row.original.requestCount} />,
     },
     {
       id: "cacheHitRate",
@@ -190,7 +188,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "output",
       accessorFn: (thread) => thread.outputTokens,
       header: ({ column }) => <SortableHeader column={column} hint={t("metrics.output")}>{t("metrics.outputColumn")}</SortableHeader>,
-      cell: ({ row }) => <TokenHint value={formatUsageTokens(row.original.outputTokens, row.original.requestCount, row.original.usageCoverage.outputMissingRequestCount)} />,
+      cell: ({ row }) => <TokenHint value={formatTokens(row.original.outputTokens)} />,
     },
     {
       id: "totalTokens",
@@ -206,15 +204,8 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       header: () => <TableHint hint={t("threads.totalDurationHint")}>{t("metrics.totalDurationColumn")}</TableHint>,
       cell: ({ row }) => {
         const timing = row.original.sessionTiming
-        if (timing.knownDurationMs === null) return "—"
-        const partial = !timing.historyComplete || timing.missingTurnCount > 0
-        const notes = [
-          ...(partial ? [t("threads.knownDuration")] : []),
-          ...(timing.missingTurnCount > 0 ? [t("threads.missingDurations", { count: timing.missingTurnCount })] : []),
-          ...(!timing.historyComplete ? [t("threads.durationHistoryIncomplete")] : []),
-          t("threads.totalDurationHint"),
-        ].join(" ")
-        return <TableHint hint={notes}><span className="tabular-nums">{formatElapsedDuration(timing.knownDurationMs)}{partial ? " *" : ""}</span></TableHint>
+        if (!timing.knownDurationMs) return ""
+        return <TableHint hint={t("threads.totalDurationHint")}><span className="tabular-nums">{formatElapsedDuration(timing.knownDurationMs)}</span></TableHint>
       },
     },
     {
@@ -238,7 +229,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         to={`/threads/${encodeURIComponent(row.original.threadId)}/subagents`}
         className="tabular-nums hover:underline"
         aria-label={t("threads.subagentsForThread", { id: shortThreadId(row.original.threadId), count: row.original.directSubagentCount })}
-      >{row.original.directSubagentCount}</Link> : <span className="tabular-nums">0</span>,
+      >{row.original.directSubagentCount}</Link> : null,
     },
     {
       id: "compact",
@@ -247,8 +238,8 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         <SortableHeader column={column}>{t("metrics.compact")}</SortableHeader>
       ),
       cell: ({ row }) =>
-        row.original.compact === null
-          ? "—"
+        !row.original.compact?.requestCount
+          ? ""
           : t("metrics.times", { count: row.original.compact.requestCount }),
     },
   ], [query, t])
@@ -259,7 +250,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       loading={loading}
       title={t("threads.list")}
       description={({ total }) =>
-        t("threads.description", { total })
+        total > 0 ? t("threads.description", { total }) : ""
       }
       columns={columns}
       data={threads}

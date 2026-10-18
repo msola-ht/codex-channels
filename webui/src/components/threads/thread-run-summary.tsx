@@ -36,8 +36,8 @@ export function ThreadPeriodSummary({ aggregate, subagentAggregate, treeAggregat
             <dl className="grid grid-cols-2 gap-3">
               {[{ label: t("metrics.thread"), value: aggregate, unavailable: false, right: false }, { label: t("threads.tokenSubagents"), value: subagentAggregate, unavailable: descendantsUnavailable, right: true }].map(({ label, value, unavailable, right }) => (
                 <div key={label} className={cn("min-w-0", right && "text-right")}>
-                  <dt className="whitespace-nowrap text-sm text-muted-foreground">{label}<span className="ml-2 tabular-nums"><TableHint hint={t("metrics.cacheScopeHint")}>{formatCacheUsage(unavailable ? null : value?.cacheUsage ?? null).rate}</TableHint></span></dt>
-                  <dd className="break-words text-2xl font-semibold tabular-nums">{unavailable ? "—" : <InputTokenTooltip inputTokens={value?.inputTokens ?? 0} cachedInputTokens={value?.cachedInputTokens ?? null} cacheUsage={value?.cacheUsage} requestCount={value?.requestCount} usageCoverage={value?.usageCoverage} />}</dd>
+                  <dt className="whitespace-nowrap text-sm text-muted-foreground">{label}{formatCacheUsage(unavailable ? null : value?.cacheUsage ?? null).rate ? <span className="ml-2 tabular-nums"><TableHint hint={t("metrics.cacheScopeHint")}>{formatCacheUsage(value?.cacheUsage ?? null).rate}</TableHint></span> : null}</dt>
+                  <dd className="break-words text-2xl font-semibold tabular-nums">{unavailable ? "" : <InputTokenTooltip inputTokens={value?.inputTokens ?? 0} cachedInputTokens={value?.cachedInputTokens ?? null} cacheUsage={value?.cacheUsage} requestCount={value?.requestCount} />}</dd>
                 </div>
               ))}
             </dl>
@@ -47,8 +47,8 @@ export function ThreadPeriodSummary({ aggregate, subagentAggregate, treeAggregat
           <CardHeader><CardTitle>{t("metrics.output")}</CardTitle></CardHeader>
           <CardContent>
             <dl className="grid grid-cols-2 gap-3">
-              <div className="min-w-0"><dt className="text-sm text-muted-foreground">{t("metrics.thread")}</dt><dd className="break-words text-2xl font-semibold tabular-nums"><OutputTokenTooltip outputTokens={aggregate?.outputTokens ?? 0} reasoningOutputTokens={aggregate?.reasoningOutputTokens ?? 0} requestCount={aggregate?.requestCount} usageCoverage={aggregate?.usageCoverage} /></dd></div>
-              <div className="min-w-0 text-right"><dt className="text-sm text-muted-foreground">{t("threads.tokenSubagents")}</dt><dd className="break-words text-2xl font-semibold tabular-nums">{descendantsUnavailable ? "—" : <OutputTokenTooltip outputTokens={subagentAggregate?.outputTokens ?? 0} reasoningOutputTokens={subagentAggregate?.reasoningOutputTokens ?? 0} requestCount={subagentAggregate?.requestCount} usageCoverage={subagentAggregate?.usageCoverage} />}</dd></div>
+              <div className="min-w-0"><dt className="text-sm text-muted-foreground">{t("metrics.thread")}</dt><dd className="break-words text-2xl font-semibold tabular-nums"><OutputTokenTooltip outputTokens={aggregate?.outputTokens ?? 0} reasoningOutputTokens={aggregate?.reasoningOutputTokens ?? 0} requestCount={aggregate?.requestCount} /></dd></div>
+              <div className="min-w-0 text-right"><dt className="text-sm text-muted-foreground">{t("threads.tokenSubagents")}</dt><dd className="break-words text-2xl font-semibold tabular-nums">{descendantsUnavailable ? "" : <OutputTokenTooltip outputTokens={subagentAggregate?.outputTokens ?? 0} reasoningOutputTokens={subagentAggregate?.reasoningOutputTokens ?? 0} requestCount={subagentAggregate?.requestCount} />}</dd></div>
             </dl>
           </CardContent>
         </Card>
@@ -58,26 +58,25 @@ export function ThreadPeriodSummary({ aggregate, subagentAggregate, treeAggregat
           </CardHeader>
           <CardContent>
             <dl className="grid grid-cols-3 gap-3">
-              <div className="min-w-0"><dt className="text-sm text-muted-foreground">{t("metrics.thread")}</dt><dd className="break-words text-2xl font-semibold tabular-nums"><TokenHint value={aggregate ? formatTotalUsage(aggregate) : "0"} /></dd></div>
-              <div className="min-w-0 text-center"><dt className="text-sm text-muted-foreground">{t("threads.tokenSubagents")}</dt><dd className="break-words text-2xl font-semibold tabular-nums">{descendantsUnavailable ? "—" : <TokenHint value={subagentAggregate ? formatTotalUsage(subagentAggregate) : "0"} />}</dd></div>
-              <div className="min-w-0 text-right"><dt className="text-sm text-muted-foreground">{t("threads.periodTotal")}</dt><dd className="break-words text-2xl font-semibold tabular-nums">{descendantsUnavailable ? "—" : <TokenHint value={treeAggregate ? formatTotalUsage(treeAggregate) : "0"} />}</dd></div>
+              <div className="min-w-0"><dt className="text-sm text-muted-foreground">{t("metrics.thread")}</dt><dd className="break-words text-2xl font-semibold tabular-nums"><TokenHint value={aggregate ? formatTotalUsage(aggregate) : ""} /></dd></div>
+              <div className="min-w-0 text-center"><dt className="text-sm text-muted-foreground">{t("threads.tokenSubagents")}</dt><dd className="break-words text-2xl font-semibold tabular-nums">{descendantsUnavailable ? "" : <TokenHint value={subagentAggregate ? formatTotalUsage(subagentAggregate) : ""} />}</dd></div>
+              <div className="min-w-0 text-right"><dt className="text-sm text-muted-foreground">{t("threads.periodTotal")}</dt><dd className="break-words text-2xl font-semibold tabular-nums">{descendantsUnavailable ? "" : <TokenHint value={treeAggregate ? formatTotalUsage(treeAggregate) : ""} />}</dd></div>
             </dl>
           </CardContent>
         </Card>
       </div>
-      <p className="text-sm text-muted-foreground tabular-nums" aria-label={t(descendantsUnavailable ? "threads.periodOwnActivitySummary" : "threads.periodActivitySummary")}>
+      <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground tabular-nums" aria-label={t(descendantsUnavailable ? "threads.periodOwnActivitySummary" : "threads.periodActivitySummary")}>
         {[
           { label: t("metrics.turn"), thread: turnCount, subagents: descendantsUnavailable ? null : subagentTurnCount },
           { label: t("metrics.requests"), thread: aggregate?.requestCount ?? 0, subagents: descendantsUnavailable ? null : subagentAggregate?.requestCount ?? 0 },
-        ].map(({ label, thread, subagents }) => (
+        ].filter(({ thread, subagents }) => thread + (subagents ?? 0) > 0).map(({ label, thread, subagents }) => (
           <span key={label}>
-            <TableHint hint={t("threads.periodCountBreakdown", { thread: formatCount(thread), subagents: subagents === null ? "—" : formatCount(subagents) })}>
-              <span className="whitespace-nowrap">{label} {subagents === null ? "—" : formatCount(thread + subagents)}</span>
+            <TableHint hint={t("threads.periodCountBreakdown", { thread: formatCount(thread), subagents: formatCount(subagents ?? 0) }).split(" + ").filter((_, index) => (index === 0 ? thread : subagents ?? 0) > 0).join(" + ")}>
+              <span className="whitespace-nowrap">{label} {formatCount(thread + (subagents ?? 0))}</span>
             </TableHint>
-            {" · "}
           </span>
         ))}
-        {formatRequestOutcomes((descendantsUnavailable ? aggregate : treeAggregate)?.requestOutcomes ?? null, t)}
+        <span>{formatRequestOutcomes((descendantsUnavailable ? aggregate : treeAggregate)?.requestOutcomes ?? null, t)}</span>
       </p>
       {descendantsUnavailable ? <p className="text-sm text-muted-foreground">{t("threads.turnDescendantsUnavailable")}</p> : null}
       <p className="text-sm text-muted-foreground">{t("metrics.conversationUsageScope")}</p>

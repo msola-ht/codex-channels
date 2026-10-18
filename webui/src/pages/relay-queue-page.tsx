@@ -19,7 +19,7 @@ export function RelayQueuePage() {
     { accessorKey: "model", header: ({ column }) => <SortableHeader column={column}>{t("relay.queueModel")}</SortableHeader>, cell: ({ row: { original: row } }) => <div className="flex max-w-56 flex-col gap-1"><TruncatedText text={row.model ?? t("relay.queueModelPending")} /><TruncatedText text={`${row.provider} · ${row.protocol === "chat" ? "Chat" : "Responses"}`} className="text-xs text-muted-foreground" /></div> },
     { id: "reasoningEffort", enableSorting: false, header: t("metrics.reasoningEffort"), cell: ({ row }) => row.original.reasoningEffort ?? "—" },
     { accessorKey: "phase", header: ({ column }) => <SortableHeader column={column}>{t("relay.queuePhase")}</SortableHeader>, cell: ({ row: { original: row } }) => <Badge variant={row.phase === "queue" ? "outline" : "secondary"}>{t(`relay.queuePhases.${row.phase}`)}</Badge> },
-    { accessorKey: "elapsedMs", header: ({ column }) => <SortableHeader column={column}>{t("relay.queueElapsed")}</SortableHeader>, cell: ({ row: { original: row } }) => formatElapsedDuration(row.elapsedMs) },
+    { accessorKey: "elapsedMs", header: ({ column }) => <SortableHeader column={column}>{t("relay.queueElapsed")}</SortableHeader>, cell: ({ row: { original: row } }) => row.elapsedMs > 0 ? formatElapsedDuration(row.elapsedMs) : "" },
   ]
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
     <div><h1 tabIndex={-1} className="text-xl font-semibold">{t("relay.queueDetails")}</h1><p className="text-sm text-muted-foreground">{t("relay.queueLiveHint")}</p></div>

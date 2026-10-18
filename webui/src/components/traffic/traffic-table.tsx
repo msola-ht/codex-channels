@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge"
-import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
+import { formatGenerationSpeed } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { DataTable, TableHint, TruncatedText, type DataTableColumn, type DataTableProps } from "@/components/metrics/data-table"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -59,13 +59,13 @@ export function TrafficTable({
       return <>{stateLabel(t, exchange.state)}</>
     } },
     { id: "first", enableSorting: false, header: () => <><TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint></>, cell: ({ row: { original: exchange } }) => {
-      return <>{exchange.firstTokenMs == null ? "—" : formatElapsedDuration(exchange.firstTokenMs)}</>
+      return <>{!exchange.firstTokenMs ? "" : formatElapsedDuration(exchange.firstTokenMs)}</>
     } },
     { id: "generationSpeed", enableSorting: false, header: () => <TableHint hint={t("requests.speedHint")}>{t("requests.speedColumn")}</TableHint>, cell: ({ row: { original: exchange } }) => {
       return <>{formatGenerationSpeed({ ...exchange, status: exchange.state, totalDurationMs: exchange.durationMs })}</>
     } },
     { id: "duration", enableSorting: false, header: t("requests.durationColumn"), cell: ({ row: { original: exchange } }) => {
-      return <>{exchange.durationMs == null ? "—" : formatElapsedDuration(exchange.durationMs)}</>
+      return <>{!exchange.durationMs ? "" : formatElapsedDuration(exchange.durationMs)}</>
     } },
     { id: "type", enableSorting: false, header: () => <>{t("metrics.type")}</>, cell: ({ row: { original: exchange } }) => {
       return <>{exchange.category === "models" ? t("traffic.categoryModels")

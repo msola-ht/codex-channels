@@ -107,37 +107,34 @@ export function GlobalCards({ global, threadCount, turnCount }: { global: Aggreg
     )
   }
   const cache = formatCacheUsage(global.cacheUsage)
+  const outcomes = formatRequestOutcomes(global.requestOutcomes, t)
   return (
     <div className="flex flex-col gap-2"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
         title={t("overview.totalTokens")}
         value={<TokenHint value={formatTotalUsage(global)} />}
         description={
-          <Tooltip>
-            <TooltipTrigger aria-description={formatRequestOutcomes(global.requestOutcomes, t)} render={<span tabIndex={0} className="cursor-help whitespace-nowrap underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>
+          global.requestCount > 0 ? outcomes ? <Tooltip>
+            <TooltipTrigger aria-description={outcomes} render={<span tabIndex={0} className="cursor-help whitespace-nowrap underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>
               {t("metrics.requestsTotal", { count: formatCount(global.requestCount) })}
             </TooltipTrigger>
-            <TooltipContent>
-              <ul className="flex flex-col gap-1">
-                {formatRequestOutcomes(global.requestOutcomes, t).split(" · ").map((detail) => <li key={detail} className="whitespace-nowrap">{detail}</li>)}
-              </ul>
-            </TooltipContent>
-          </Tooltip>
+            <TooltipContent><ul className="flex flex-col gap-1">{outcomes.split(" · ").map(detail => <li key={detail} className="whitespace-nowrap">{detail}</li>)}</ul></TooltipContent>
+          </Tooltip> : t("metrics.requestsTotal", { count: formatCount(global.requestCount) }) : undefined
         }
       />
       <StatCard
         title={t("metrics.input")}
-        value={<InputTokenTooltip inputTokens={global.inputTokens} cachedInputTokens={global.cachedInputTokens} cacheUsage={global.cacheUsage} requestCount={global.requestCount} usageCoverage={global.usageCoverage} />}
-        description={t("overview.cacheSummary", { cached: cache.cached, rate: cache.rate })}
+        value={<InputTokenTooltip inputTokens={global.inputTokens} cachedInputTokens={global.cachedInputTokens} cacheUsage={global.cacheUsage} requestCount={global.requestCount} />}
+        description={cache.cached ? t("overview.cacheSummary", { cached: cache.cached, rate: cache.rate }).split(" · ").filter((_, index) => index === 0 || cache.rate).join(" · ") : undefined}
       />
       <StatCard
         title={t("metrics.output")}
-        value={<OutputTokenTooltip outputTokens={global.outputTokens} reasoningOutputTokens={global.reasoningOutputTokens} requestCount={global.requestCount} usageCoverage={global.usageCoverage} />}
+        value={<OutputTokenTooltip outputTokens={global.outputTokens} reasoningOutputTokens={global.reasoningOutputTokens} requestCount={global.requestCount} />}
       />
       <StatCard
         title={t("overview.threads")}
-        value={<TableHint hint={t("metrics.executionThreadsHint")}>{formatCount(threadCount)}</TableHint>}
-        description={t("overview.turnCount", { count: formatCount(turnCount) })}
+        value={threadCount > 0 ? <TableHint hint={t("metrics.executionThreadsHint")}>{formatCount(threadCount)}</TableHint> : null}
+        description={turnCount > 0 ? t("overview.turnCount", { count: formatCount(turnCount) }) : undefined}
       />
     </div></div>
   )
@@ -170,16 +167,15 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
             {providers.map((group) => (
               <TableRow key={group.provider ?? "unknown"}>
                 <TableCell><ProviderBadge provider={group.provider} /></TableCell>
-                <TableCell className="tabular-nums">{group.threadCount.toLocaleString("zh-CN")}</TableCell>
-                <TableCell className="tabular-nums">{group.turnCount.toLocaleString("zh-CN")}</TableCell>
-                <TableCell className="tabular-nums">{group.aggregate.requestCount.toLocaleString("zh-CN")}</TableCell>
+                <TableCell className="tabular-nums">{group.threadCount === 0 ? "" : group.threadCount.toLocaleString("zh-CN")}</TableCell>
+                <TableCell className="tabular-nums">{group.turnCount === 0 ? "" : group.turnCount.toLocaleString("zh-CN")}</TableCell>
+                <TableCell className="tabular-nums">{group.aggregate.requestCount === 0 ? "" : group.aggregate.requestCount.toLocaleString("zh-CN")}</TableCell>
                 <TableCell className="tabular-nums">
                   <InputTokenTooltip
                     inputTokens={group.aggregate.inputTokens}
                     cachedInputTokens={group.aggregate.cachedInputTokens}
                     cacheUsage={group.aggregate.cacheUsage}
                     requestCount={group.aggregate.requestCount}
-                    usageCoverage={group.aggregate.usageCoverage}
                   />
                 </TableCell>
                 <TableCell className="tabular-nums">
@@ -190,12 +186,11 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
                     outputTokens={group.aggregate.outputTokens}
                     reasoningOutputTokens={group.aggregate.reasoningOutputTokens}
                     requestCount={group.aggregate.requestCount}
-                    usageCoverage={group.aggregate.usageCoverage}
                   />
                 </TableCell>
                 <TableCell className="tabular-nums">
-                  {group.aggregate.compact === null
-                    ? t("overview.none")
+                  {!group.aggregate.compact?.requestCount
+                    ? ""
                     : t("metrics.times", { count: group.aggregate.compact.requestCount })}
                 </TableCell>
                 <TableCell className="whitespace-nowrap tabular-nums">
@@ -563,9 +558,7 @@ function QuotaWindowCards({ windows }: { windows: OpencodeGoQuotaWindow[] }) {
           <p className="text-xs leading-relaxed text-muted-foreground">
             {window.resetsAt === null ? t("overview.resetUnknown") : t("overview.resetAt", { time: formatTime(window.resetsAt) })}
           </p>
-          {window.localTokens !== null && window.localTokens !== undefined ? (
-            <p className="text-xs text-muted-foreground">{t("overview.localTokens", { count: formatTokens(window.localTokens) })}</p>
-          ) : null}
+          {window.localTokens !== null && window.localTokens !== undefined && window.localTokens > 0 ? <p className="text-xs text-muted-foreground">{t("overview.localTokens", { count: formatTokens(window.localTokens) })}</p> : null}
         </CardContent>
       </Card>
     )
@@ -590,7 +583,7 @@ export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <CardTitle>{t("overview.errorsTitle")}</CardTitle>
         <CardDescription className="ml-auto">
-          {t("overview.failureRate", { rate: formatFailureRate(errors.requestCount, errors.requestOutcomes.failed) })}
+          {errors.requestOutcomes.failed > 0 ? t("overview.failureRate", { rate: formatFailureRate(errors.requestCount, errors.requestOutcomes.failed) }) : null}
         </CardDescription>
       </CardHeader>
       <CardContent>

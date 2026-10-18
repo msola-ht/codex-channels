@@ -13,7 +13,6 @@ import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatCodexProviderLabel, formatModelDisplayName } from "./provider-format.js";
 import {
   formatCacheHitRate,
-  formatObservedTokens,
   formatObservedTotal,
   formatRequestCount,
   formatTokenCount,
@@ -33,61 +32,35 @@ export function formatConversationMetrics(
   }
   const lines = [
     "## 请求指标",
-    "任务执行统计排除明确标记的自动审查；Token 为保留记录中的已知累计，≥ 表示字段缺失。",
+    "任务执行统计排除明确标记的自动审查；Token 为保留记录中的已知累计。",
     `Session ID：${formatThreadId(summary.threadId)}`,
   ];
   if (summary.latestTurn) {
     const turn = summary.latestTurn;
-    lines.push(
-      "",
-      "### 最近运行聚合",
-      `模型请求：${formatRequestCount(turn.requestCount)} 次`,
-      formatRequestOutcomes(turn.requestOutcomes),
+    const details = [
+      ...(turn.requestCount > 0 ? [`模型请求：${formatRequestCount(turn.requestCount)} 次`] : []),
+      ...nonemptyLine(formatRequestOutcomes(turn.requestOutcomes)),
       ...formatInterruptionSummary(turn.interruptionSummary),
-      `- **已记录 Token**：${formatObservedTotal(turn)}`,
-      ...(turn.cachedInputTokens === null
-        ? ["  - 缓存：上游未提供完整数据"]
-        : [
-            `  - 缓存：${formatTokenCount(turn.cachedInputTokens)}`,
-            `  - 无缓存：${formatTokenCount(Math.max(0, turn.inputTokens - turn.cachedInputTokens))}`,
-            `  - 缓存命中率：${formatCacheHitRate(turn.inputTokens, turn.cachedInputTokens)}`,
-          ]),
-      `  - 输出：${formatObservedTokens(turn.outputTokens, turn.requestCount, turn.usageCoverage.outputMissingRequestCount)}`,
-      ...(turn.reasoningOutputTokens > 0
-        ? [`  - 其中推理输出：${formatObservedTokens(turn.reasoningOutputTokens, turn.requestCount, turn.usageCoverage.reasoningMissingRequestCount)}`]
-        : []),
+      ...formatMetricsUsage(turn),
       ...(turn.compact
-        ? [formatCompactMetrics(turn.compact)]
+        ? nonemptyLine(formatCompactMetrics(turn.compact))
         : []),
-    );
-  } else {
-    lines.push("", "### 最近运行聚合", "暂无已记录请求");
+    ];
+    if (details.length > 0) lines.push("", "### 最近运行聚合", ...details);
   }
   if (summary.threadAggregate) {
     const aggregate = summary.threadAggregate;
-    lines.push(
-      "",
-      "### 当前会话指标累计",
-      `Turn：${aggregate.turnCount} 次`,
-      `模型请求：${formatRequestCount(aggregate.requestCount)} 次`,
-      formatRequestOutcomes(aggregate.requestOutcomes),
+    const details = [
+      ...(aggregate.turnCount > 0 ? [`Turn：${aggregate.turnCount} 次`] : []),
+      ...(aggregate.requestCount > 0 ? [`模型请求：${formatRequestCount(aggregate.requestCount)} 次`] : []),
+      ...nonemptyLine(formatRequestOutcomes(aggregate.requestOutcomes)),
       ...formatInterruptionSummary(aggregate.interruptionSummary),
-      `- **已记录 Token**：${formatObservedTotal(aggregate)}`,
-      ...(aggregate.cachedInputTokens === null
-        ? ["  - 缓存：上游未提供完整数据"]
-        : [
-            `  - 缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
-            `  - 无缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
-            `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
-          ]),
-      `  - 输出：${formatObservedTokens(aggregate.outputTokens, aggregate.requestCount, aggregate.usageCoverage.outputMissingRequestCount)}`,
-      ...(aggregate.reasoningOutputTokens > 0
-        ? [`  - 其中推理输出：${formatObservedTokens(aggregate.reasoningOutputTokens, aggregate.requestCount, aggregate.usageCoverage.reasoningMissingRequestCount)}`]
-        : []),
+      ...formatMetricsUsage(aggregate),
       ...(aggregate.compact
-        ? [formatCompactMetrics(aggregate.compact)]
+        ? nonemptyLine(formatCompactMetrics(aggregate.compact))
         : []),
-    );
+    ];
+    if (details.length > 0) lines.push("", "### 当前会话指标累计", ...details);
   }
   return toStructuredMarkdownList(lines.join("\n"));
 }
@@ -106,9 +79,9 @@ function formatErrorMetricsReport(
     formatTimezoneLine(),
     `范围：${formatMetricsRange(report.range)}`,
     "",
-    `模型请求：${formatRequestCount(report.requestCount)} 次`,
-    formatRequestOutcomes(report.requestOutcomes),
-    `其他失败率：${formatPercent(failureRate)}`,
+    ...(report.requestCount > 0 ? [`模型请求：${formatRequestCount(report.requestCount)} 次`] : []),
+    ...nonemptyLine(formatRequestOutcomes(report.requestOutcomes)),
+    ...(failureRate > 0 ? [`其他失败率：${formatPercent(failureRate)}`] : []),
   ];
   if (report.groups.length === 0) {
     lines.push("", "本时间范围未记录中断、失败或未完整观测请求。");
@@ -126,7 +99,8 @@ function formatErrorMetricsReport(
         ? ""
         : ` · HTTP ${group.httpStatus}`;
       const code = group.errorCode === null ? "" : ` · 错误码：${/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/u.test(group.errorCode) ? group.errorCode : "未识别"}`;
-      return `${index + 1}. ${group.source === "relay" ? "Relay" : "原生代理"} · ${provider} / ${group.model === null ? "未知模型" : formatModelDisplayName(group.model)} · ${formatMetricsErrorType(group.errorType)}${code} · ${status}${httpStatus} · ${formatRequestCount(group.requestCount)} 次 · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
+      const count = group.requestCount > 0 ? ` · ${formatRequestCount(group.requestCount)} 次` : "";
+      return `${index + 1}. ${group.source === "relay" ? "Relay" : "原生代理"} · ${provider} / ${group.model === null ? "未知模型" : formatModelDisplayName(group.model)} · ${formatMetricsErrorType(group.errorType)}${code} · ${status}${httpStatus}${count} · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
     }),
   );
   const hidden = report.totalGroupCount - report.groups.length;
@@ -202,11 +176,8 @@ function formatAggregateMetricsReport(
     lines.push("", "本时间范围暂无已记录请求。");
     return toStructuredMarkdownList(lines.join("\n"));
   }
-  lines.push(
-    "",
-    "### 本时间范围累计",
-    ...formatMetricsAggregate(report.aggregate),
-  );
+  const details = formatMetricsAggregate(report.aggregate);
+  if (details.length > 0) lines.push("", "### 本时间范围累计", ...details);
   if (report.view !== "global" && report.groups.length > 0) {
     const groupView = report.view === "providers" ? "providers" : "models";
     lines.push(
@@ -241,23 +212,12 @@ function formatMetricsAggregate(
   },
 ): string[] {
   return [
-    `模型请求：${formatRequestCount(aggregate.requestCount)} 次`,
-    formatRequestOutcomes(aggregate.requestOutcomes),
-    `- **已记录 Token**：${formatObservedTotal(aggregate)}`,
-    ...(aggregate.reviewUsage ? [`  - 其中自动审查：${formatRequestCount(aggregate.reviewUsage.requestCount)} 次请求 · ${formatObservedTotal(aggregate.reviewUsage)} Token`] : []),
-    ...(aggregate.cachedInputTokens === null
-      ? ["  - 缓存：上游未提供完整数据"]
-      : [
-          `  - 缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
-          `  - 无缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
-          `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
-        ]),
-    `  - 输出：${formatObservedTokens(aggregate.outputTokens, aggregate.requestCount, aggregate.usageCoverage.outputMissingRequestCount)}`,
-    ...(aggregate.reasoningOutputTokens > 0
-      ? [`  - 其中推理输出：${formatObservedTokens(aggregate.reasoningOutputTokens, aggregate.requestCount, aggregate.usageCoverage.reasoningMissingRequestCount)}`]
-      : []),
+    ...(aggregate.requestCount > 0 ? [`模型请求：${formatRequestCount(aggregate.requestCount)} 次`] : []),
+    ...nonemptyLine(formatRequestOutcomes(aggregate.requestOutcomes)),
+    ...formatMetricsUsage(aggregate),
+    ...formatReviewUsage(aggregate.reviewUsage),
     ...(aggregate.compact
-      ? [formatCompactMetrics(aggregate.compact)]
+      ? nonemptyLine(formatCompactMetrics(aggregate.compact))
       : []),
   ];
 }
@@ -278,26 +238,14 @@ function formatMetricsGroup(
     ? `${provider} / ${group.model === null ? "未知模型" : formatModelDisplayName(group.model)}`
     : provider;
   const aggregate = group.aggregate;
-  const reasoning = aggregate.reasoningOutputTokens > 0
-    ? `  - 其中推理输出：${formatObservedTokens(aggregate.reasoningOutputTokens, aggregate.requestCount, aggregate.usageCoverage.reasoningMissingRequestCount)}`
-    : "";
   return [
     `${index + 1}. ${label}`,
-    `  - 请求：${formatRequestCount(aggregate.requestCount)} 次`,
-    `  - ${formatRequestOutcomes(aggregate.requestOutcomes)}`,
-    ...(aggregate.cachedInputTokens === null
-      ? []
-      : [
-          `  - 缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
-          `  - 无缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
-          `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
-        ]),
-    `  - 输出：${formatObservedTokens(aggregate.outputTokens, aggregate.requestCount, aggregate.usageCoverage.outputMissingRequestCount)}`,
-    ...(reasoning === "" ? [] : [reasoning]),
-    `  - 已记录合计：${formatObservedTotal(aggregate)}`,
-    ...(aggregate.reviewUsage ? [`  - 其中自动审查：${formatRequestCount(aggregate.reviewUsage.requestCount)} 次请求 · ${formatObservedTotal(aggregate.reviewUsage)} Token`] : []),
+    ...(aggregate.requestCount > 0 ? [`  - 请求：${formatRequestCount(aggregate.requestCount)} 次`] : []),
+    ...nonemptyLine(formatRequestOutcomes(aggregate.requestOutcomes)).map((line) => `  - ${line}`),
+    ...formatMetricsUsage(aggregate).map((line) => line.startsWith("- ") ? `  ${line}` : line),
+    ...formatReviewUsage(aggregate.reviewUsage),
     ...(aggregate.compact
-      ? [`  - ${formatCompactMetrics(aggregate.compact)}`]
+      ? nonemptyLine(formatCompactMetrics(aggregate.compact)).map((line) => `  - ${line}`)
       : []),
   ].join("\n");
 }
@@ -305,7 +253,41 @@ function formatMetricsGroup(
 function formatCompactMetrics(
   compact: Parameters<typeof formatCompactMetricsValue>[0],
 ): string {
-  return `其中上下文压缩：${formatCompactMetricsValue(compact)}`;
+  const value = formatCompactMetricsValue(compact);
+  return value === "" ? "" : `其中上下文压缩：${value}`;
+}
+
+function nonemptyLine(value: string): string[] {
+  return value === "" ? [] : [value];
+}
+
+function formatMetricsUsage(usage: {
+  inputTokens: number; cachedInputTokens: number | null;
+  outputTokens: number; reasoningOutputTokens: number;
+}): string[] {
+  const uncached = usage.cachedInputTokens === null
+    ? 0 : Math.max(0, usage.inputTokens - usage.cachedInputTokens);
+  return [
+    ...(usage.inputTokens + usage.outputTokens > 0 ? [`- **已记录 Token**：${formatObservedTotal(usage)}`] : []),
+    ...(usage.cachedInputTokens === null && usage.inputTokens > 0
+      ? [`  - 输入：${formatTokenCount(usage.inputTokens)}`] : []),
+    ...(usage.cachedInputTokens !== null && usage.cachedInputTokens > 0
+      ? [`  - 缓存：${formatTokenCount(usage.cachedInputTokens)}`] : []),
+    ...(uncached > 0 ? [`  - 无缓存：${formatTokenCount(uncached)}`] : []),
+    ...(usage.inputTokens > 0 && usage.cachedInputTokens !== null && usage.cachedInputTokens > 0
+      ? [`  - 缓存命中率：${formatCacheHitRate(usage.inputTokens, usage.cachedInputTokens)}`] : []),
+    ...(usage.outputTokens > 0 ? [`  - 输出：${formatTokenCount(usage.outputTokens)}`] : []),
+    ...(usage.reasoningOutputTokens > 0 ? [`  - 其中推理输出：${formatTokenCount(usage.reasoningOutputTokens)}`] : []),
+  ];
+}
+
+function formatReviewUsage(usage: { requestCount: number; inputTokens: number; outputTokens: number } | undefined): string[] {
+  if (!usage) return [];
+  const parts = [
+    ...(usage.requestCount > 0 ? [`${formatRequestCount(usage.requestCount)} 次请求`] : []),
+    ...(usage.inputTokens + usage.outputTokens > 0 ? [`${formatObservedTotal(usage)} Token`] : []),
+  ];
+  return parts.length > 0 ? [`  - 其中自动审查：${parts.join(" · ")}`] : [];
 }
 
 export function formatCompactMetricsValue(
@@ -321,15 +303,16 @@ export function formatCompactMetricsValue(
   },
   options: { concise?: boolean; currentModel?: string | undefined } = {},
 ): string {
+  if (compact.requestCount === 0 && compact.inputTokens + compact.outputTokens === 0) return "";
   const model = compact.hasMixedModels
     ? "混合模型"
     : compact.model === null ? "模型未知" : formatModelDisplayName(compact.model);
   if (options.concise) {
-    const parts = [`${formatRequestCount(compact.requestCount)} 次`];
+    const parts = compact.requestCount > 0 ? [`${formatRequestCount(compact.requestCount)} 次`] : [];
     if (compact.hasMixedModels || !compact.model || compact.model !== options.currentModel) {
       parts.push(model);
     }
-    parts.push(`${formatObservedTotal(compact)} Token`);
+    if (compact.inputTokens + compact.outputTokens > 0) parts.push(`${formatObservedTotal(compact)} Token`);
     if (compact.requestOutcomes) {
       for (const [label, count] of [
         ["客户端中断", compact.requestOutcomes.interrupted],
@@ -344,22 +327,31 @@ export function formatCompactMetricsValue(
     return parts.join(" · ");
   }
   const outcomes = compact.requestOutcomes
-    ? ` · ${formatRequestOutcomes(compact.requestOutcomes)}`
+    ? formatRequestOutcomes(compact.requestOutcomes)
     : compact.unsuccessfulRequestCount > 0
-      ? ` · 未完成 ${formatRequestCount(compact.unsuccessfulRequestCount)} 次（结果分类未提供）`
+      ? `未完成 ${formatRequestCount(compact.unsuccessfulRequestCount)} 次（结果分类未提供）`
       : "";
-  return `${formatRequestCount(compact.requestCount)} 次 · ${model} · ${formatObservedTotal(compact)} Token${outcomes}`;
+  return [
+    ...(compact.requestCount > 0 ? [`${formatRequestCount(compact.requestCount)} 次`] : []),
+    model,
+    ...(compact.inputTokens + compact.outputTokens > 0 ? [`${formatObservedTotal(compact)} Token`] : []),
+    ...nonemptyLine(outcomes),
+  ].join(" · ");
 }
 
 function formatRequestOutcomes(outcomes: RequestOutcomeCounts): string {
-  return `完成：${formatRequestCount(outcomes.completed)} · 客户端中断：${formatRequestCount(outcomes.interrupted)} · 其他失败：${formatRequestCount(outcomes.failed)} · 未完整观测：${formatRequestCount(outcomes.incomplete)}`;
+  return ([["完成", outcomes.completed], ["客户端中断", outcomes.interrupted], ["其他失败", outcomes.failed], ["未完整观测", outcomes.incomplete]] as const)
+    .filter(([, count]) => count > 0).map(([label, count]) => `${label}：${formatRequestCount(count)}`).join(" · ");
 }
 
 function formatInterruptionSummary(summary: RequestInterruptionSummary): string[] {
   if (summary.followedByCompletion + summary.noObservedCompletion === 0) return [];
+  const observations = [
+    ...(summary.followedByCompletion > 0 ? [`同一 Turn 后续有完成 ${formatRequestCount(summary.followedByCompletion)} 次`] : []),
+    ...(summary.noObservedCompletion > 0 ? [`未观测到后续完成 ${formatRequestCount(summary.noObservedCompletion)} 次`] : []),
+  ];
   return [
-    `客户端中断后：同一 Turn 后续有完成 ${formatRequestCount(summary.followedByCompletion)} 次 · 未观测到后续完成 ${formatRequestCount(summary.noObservedCompletion)} 次`,
-    `中断请求用量未完整观测：${formatRequestCount(summary.usageUnobserved)} 次（Token 仅含已观测用量）`,
+    `客户端中断后：${observations.join(" · ")}`,
     "后续完成仅表示时间顺序，不代表重试或恢复因果。",
   ];
 }

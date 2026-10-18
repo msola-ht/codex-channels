@@ -1,5 +1,5 @@
 import * as React from "react"
-import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
+import { formatGenerationSpeed } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -225,7 +225,7 @@ export function RequestsTable({
       id: "cacheHitRate",
       enableSorting: false,
       header: () => <TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.cacheHitRate == null ? "—" : `${(row.original.cacheHitRate * 100).toFixed(1)}%`}</span>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{!row.original.cacheHitRate ? "" : `${(row.original.cacheHitRate * 100).toFixed(1)}%`}</span>,
     },
     {
       id: "output",
@@ -242,7 +242,7 @@ export function RequestsTable({
       header: () => <TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint>,
       cell: ({ row }) => (
         <span className="tabular-nums">
-          {row.original.firstTokenMs == null ? "—"
+          {!row.original.firstTokenMs ? ""
             : formatElapsedDuration(row.original.firstTokenMs)}
         </span>
       ),
@@ -256,7 +256,7 @@ export function RequestsTable({
     {
       id: "duration", enableSorting: false,
       header: t("requests.durationColumn"),
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{!row.original.totalDurationMs ? "" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
       id: "traffic", header: t("requests.detailColumn"), enableSorting: false, enableHiding: false,
