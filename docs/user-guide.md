@@ -519,8 +519,10 @@ Windows 状态不建立桥连接；共享启用且令牌可读取时 `bridgeRead
 内置工具仍按 Desktop 传入的工具开关启用，不根据模型 Provider 或登录状态推断工具可用性。
 如果 Desktop 日志出现 `dynamic_app_tools_peer_rejected reason=untrusted-process-ancestry`，
 表示工具 Pipe 拒绝了进程祖先链，重复启用共享不能修复。2026-10-08 在 `26.1002.52244` 的聚合共享路径
-曾观察到这一故障；不据此推断其他版本组合的工具状态。2026-10-18 操作者确认当前功能可用，
-平台和版本结果待补录，步骤见 [Desktop 跨平台验收](codex-desktop-app-acceptance.md)；历史记录见
+曾观察到这一故障；不据此推断其他版本组合的工具状态。2026-10-18 新实测确认 macOS
+`26.1013.40934 / 20770` 配合 CLI `0.163.0` 的主 OpenAI 基础会话可用，但 `codex_app`
+启动被同类祖先链校验拒绝；App Server 重启后确认人工退出重开能恢复，未证明自动恢复。
+具体范围见 [Desktop 跨平台验收](codex-desktop-app-acceptance.md)；历史记录见
 [Desktop 验收状态](codex-desktop-app-development.md#实现与验收状态)。
 共享功能要求主 Provider 为 OpenAI，第三方通过切换模式的账户实例或聚合实例接入；不接入
 Remote Control 或手机配对。Desktop 的连接环境属于未公开兼容入口，当前功能是

@@ -32,7 +32,37 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 
 ## 实现与验收状态
 
-- 2026-10-18 操作者确认当前功能可以使用，尚未归档实际平台、Desktop 构建及能力范围。
+- 2026-10-18 20:23 起（UTC+8）更新后续验收：全局安装两项交接修复哈希及共同存在的 467 个
+  运行文件与交接源码一致。macOS ChatGPT `26.1013.40934 / 20770`、CLI `0.163.0` 的主
+  OpenAI 实例已观察到 Desktop 实际标记回复、重复启动拒绝、Gateway 重启后共享进程保留，
+  以及 App Server 重启后人工退出重开恢复原 Thread；两次退出重开均能保留历史并继续，未证明自动恢复。
+  专用文本任务通过官方接口取消后读回 `interrupted`，Desktop 停止按钮的自动化操作未完成。
+  **当前内置工具启动失败**：精确验收 Thread 的 `codex_app` 状态为 `failed`、工具为空，
+  错误为 `Codex app tools pipe closed`；本次 Desktop 进程日志明确记录
+  `dynamic_app_tools_peer_rejected reason=untrusted-process-ancestry`。
+  这是当前主实例的新观察，不是将 10 月 8 日的聚合历史失败推广到当前版本。基础会话与工具
+  状态分别记录；私有校验拒绝的具体祖先进程尚未确定，未修改信任链或引入替代桥接。
+  详见[更新后续验收](codex-desktop-app-acceptance.md#2026-10-18-macos-更新后续验收)。
+- 同日继续完成 macOS 原生 TUI 租约专项：真实 `codexc remote` 连接期间 Desktop 启动明确拒绝，
+  Ctrl-D 正常退出 Remote 后允许重新打开，Host 恢复附加。进一步只读核查确认当前安装包调用
+  原生 peer-authorizer；签名匹配不足以证明祖先链受信任。另发现 Desktop 的 `CODEX_CLI_PATH`
+  同时传入 Node REPL，与受管 Proxy 只接受 App Server 的入口存在冲突线索；尚未验证独立修复，
+  不与 `codex_app` 祖先链拒绝混为一谈。上游相关 Issue 仍无维护者确认的修复合同，未改变架构。
+  详见[继续核查与 Remote 专项](codex-desktop-app-acceptance.md#2026-10-18-2055-继续核查与-remote-租约专项)。
+- 同日用户交互补录：用户在原验收 Thread 点击 Desktop 停止按钮，代理仅只读核对对应
+  `UI-CANCEL` Turn 为 `interrupted`、Thread 为 `idle`。本机停止路径通过，补齐此前自动化
+  未完成的操作。用户随后确认飞书交互此前实测无问题，同意 C3/C4 按用户确认通过记录；本轮
+  未重新取得双向续接证据，另一渠道的事件一致性仍未验证。飞书 `/thread` 请求的
+  `rpc:-32600` 异常另行保留，未确认根因；不据此否定此前交互，也不覆盖内置工具失败。
+  详见[用户交互补录](codex-desktop-app-acceptance.md#2026-10-18-用户交互补录)。
+- 2026-10-18 更新前的 macOS 无人值守补录（后续结果见本节上方）：macOS 15.8.1 / 24H32 arm64，ChatGPT
+  `26.1013.40934` / `20770`（Bundle 信息），Codex CLI `0.163.0`，Node `v24.19.0`。
+  源码为交接提交 `23f9907578213e75ee302498b341031bc38c359e`，但全局安装包尚缺两项交接修复。
+  真实主 OpenAI 实例只读查询确认 1 个活动 Thread，因此没有停服更新、打开 Desktop 或重启服务；
+  当前会话桌面自动化入口也未能初始化。状态查询与 macOS 端口参数拒绝已观察，当前版本的
+  双向共享、明确命名的 `codex_app` 工具、清理和恢复仍未观察，不据此判定当前功能不可用。
+  详细安装证据和逐项原因见[本轮 macOS 记录](codex-desktop-app-acceptance.md#2026-10-18-macos-无人值守核查)。
+- 2026-10-18 验收开始时，操作者确认当前功能可以使用，当时尚未归档实际平台、Desktop 构建及能力范围。
   本轮任务是补齐记录，不将缺少记录判定为功能不可用。当前代码标识、CLI 0.163.0 的 Linux
   隔离运行证据和两平台操作表见 [跨平台验收与交接](codex-desktop-app-acceptance.md)。
   以下保留历史版本的成功与失败记录；当前组合由新验收记录确认，不直接套用历史结论。
