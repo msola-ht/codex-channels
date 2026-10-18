@@ -4,7 +4,7 @@
 
 审查基线：`2ac1f25b`，2026-10-18。结论来自源码与调用链检查；没有使用真实凭据、启动服务或执行外部写操作。维护性重复不等同于已发生的用户故障。
 
-## 待处理清单
+## 问题处理状态
 
 | 编号 | 建议 | 优先级 | 审查状态 |
 | --- | --- | --- | --- |
@@ -82,7 +82,7 @@
 - 计划任务按 Actor 和 Conversation 隔离，并从 Store 重新检查归属。
 - Hooks 绑定 Workspace、Provider、Thread 和配置版本。
 
-确认令牌的消费时机、失效范围和主动清理不同，不建立通用确认服务。尤其不能将 Surface 的审批交互注册表引入 Application，以免倒置依赖方向。与 U18/U19 只共享 Queue 的业务背景，不共享选择事务或错误适配。以上已核对源码，尚未观察过期、容量淘汰、重新列举、切换绑定与授权变化的运行行为。
+确认令牌的消费时机、失效范围和主动清理不同，不建立通用确认服务。尤其不能将 Surface 的审批交互注册表引入 Application，以免倒置依赖方向。与 U18/U19 只共享 Queue 的业务背景，不共享选择事务或错误适配。以上已核对源码，容量裁剪已有局部观察，过期、重新列举、切换绑定与授权变化尚未运行观察。
 
 ## U03 渠道文本附件公共处理
 
@@ -90,25 +90,25 @@
 
 证据入口：三个渠道的 [`Telegram file-input`](../src/surfaces/telegram/file-input.ts)、[`飞书 file-input`](../src/surfaces/feishu/file-input.ts)、[`微信 file-input`](../src/surfaces/weixin/file-input.ts)，以及共享 [`text-file-input.ts`](../src/surfaces/text-file-input.ts)、[`text-attachment-store.ts`](../src/surfaces/text-attachment-store.ts)。
 
-三个渠道已经复用 UTF-8 校验和暂存库，但各自重复“解码明文字节、暂存、组装文件名和正文或路径及字节数”的处理。结果随后经各渠道输入适配器和 `textAttachmentBody` 提交共享输入队列。未来增加附件结果字段或修改该流程时仍需三处同步。
+三个渠道原已复用 UTF-8 校验和暂存库，但各自重复“解码明文字节、暂存、组装文件名和正文或路径及字节数”的处理。结果随后经各渠道输入适配器和 `textAttachmentBody` 提交共享输入队列。未来增加附件结果字段或修改该流程时仍需三处同步。
 
 **关联复核结论。** 下载→明文完整性→decodeUtf8TextFile→TextAttachmentStore.prepare→textAttachmentBody→渠道输入提交的共同尾段成立，但收益仅限数行组装。Telegram/飞书先限制下载流，微信先限制密文、解密并核对明文长度/MD5；不能把所有下载前置判断移入公共尾段。decode 会移除 BOM/终端样式，返回 bytes 仍是原始明文字节数，而 32 KiB 内联阈值按清理后的文本 UTF-8 长度计算，二者含义不可合并。
 
-暂存库已集中串行写入、50 文件容量、24 小时保留和托管路径；共享函数应接收现有 Store，不创建第二个实例或清理计时器。三渠道 catch 各自转换 TextFileValidationError 并保留 UserFacingError，提取须置于这些错误边界内。无 Store 时仍直接返回文本。U10 仅涉及后续聚合入口，U11 涉及关闭所有权，均不要求改变本文本处理规则。未观察真实下载或暂存；未发现当前三份结果已漂移。
+暂存库集中串行写入、50 文件容量、24 小时保留和托管路径；共享函数接收现有 Store，不创建第二个实例或计时器。三渠道 catch 保留各自的 TextFileValidationError 转换和 UserFacingError，异步共享调用仍在错误边界内。无 Store 时直接返回文本。U10 的后续聚合入口和 U11 的关闭所有权不改变这些规则；真实暂存已观察，平台下载未观察。
 
-建议只收敛取得合法明文字节后的公共尾段，优先扩展现有共享模块。平台下载、微信解密和 MD5/长度完整性校验、文件名长度单位、平台错误边界与引用消息拼装继续独立。不得改变 1,000,000 字节输入上限、清理后 32 KiB 内联阈值及暂存文件生命周期。
+实施仅收敛取得合法明文字节后的尾段。平台下载、微信解密和 MD5/长度校验、文件名长度单位、平台错误边界与引用消息拼装继续独立，1,000,000 字节输入上限、清理后 32 KiB 内联阈值及文件生命周期保持不变。
 
 ## U04 Storage 内同步数据库打开流程
 
-**实施与证据。** 两 Store 已使用 Storage 内部 `openPrivateDatabase`，Schema 校验、建表及绑定加载仍由各 Store 提供，初始化和加载全部成功才转移连接所有权。公开只读预检及磁盘合同未变。隔离 SQLite 中保存 Workspace 后重新打开读到 local-workspace；缓存 put/get 返回完整原记录。Schema 999 被拒绝，文件内容与 0644 权限均未改变；注入初始化失败后捕获连接 isOpen=false。初次手工回读误用不存在的 workspaceId 方法，随后按公开 getWorkspace 完成回读。类型及构建通过；未观察 Windows ACL、实际 Gateway 构造失败或归档 CLI 的完整运行链路。
+**实施与证据。** 两 Store 已使用 Storage 内部 `openPrivateDatabase`，Schema 校验、建表及绑定加载仍由各 Store 提供，初始化和加载全部成功才转移连接所有权。公开只读预检及磁盘合同未变。隔离 SQLite 中保存 Workspace 后重新打开读到 local-workspace；缓存 put/get 返回完整原记录。Schema 999 被拒绝，文件内容与 0644 权限均未改变；注入初始化失败后捕获连接 isOpen=false。类型及构建通过；未观察 Windows ACL、实际 Gateway 构造失败或归档 CLI 的完整运行链路。
 
 证据入口：[`sqlite-binding-store.ts`](../src/storage/sqlite-binding-store.ts) 的构造函数和 [`sqlite-session-display-cache.ts`](../src/storage/sqlite-session-display-cache.ts) 的构造函数。二者由 [`gateway-component-graph.ts`](../src/bootstrap/gateway-component-graph.ts) 分别创建并登记关闭；展示缓存还被 [`session-cleanup.mjs`](../scripts/session-cleanup.mjs) 用于已确认归档后的缓存移除。
 
-两者重复同一顺序：已有文件先只读校验、创建父目录、打开写连接、再次校验实际连接、保护权限、设置 `busy_timeout=0` 与 DELETE 日志模式、初始化；失败时关闭连接，同时保留初始化和清理双重异常。该顺序体现“不支持的已有库不能先被修改”的共享合同，以后调整打开或失败清理时需同步两份代码。
+原先两者重复同一顺序：已有文件先只读校验、创建父目录、打开写连接、再次校验实际连接、保护权限、设置 `busy_timeout=0` 与 DELETE 日志模式、初始化；失败时关闭连接，同时保留初始化和清理双重异常。该顺序体现“不支持的已有库不能先被修改”的共享合同，以后调整打开或失败清理时需同步两份代码。
 
-建议仅在 Storage 内提取窄的同步连接初始化辅助函数，让两个 Store 继续拥有各自 Schema 校验、建表、加载和错误上下文。辅助函数必须覆盖初始化回调失败时的连接清理，返回成功连接后再由各 Store 拥有生命周期。优先级低，不为两处重复建立可配置数据库框架。
+Storage 内的共享函数只处理同步打开与初始化清理，两个 Store 继续拥有各自 Schema、建表、加载和错误上下文；成功返回后才移交生命周期，没有扩成可配置数据库框架。
 
-Schema 版本、只读预检导出及安装预检消费保持不变。已有库只读预检与写连接复核不可合并为一次；不能把首次建库与已有库的权限处理时机改成统一前置。后续检查需覆盖 Gateway 构造失败清理、CLI 缓存清理和安装预检，且不改变磁盘合同。
+Schema 版本、只读预检导出及安装预检消费保持不变。已有库只读预检与写连接复核仍分两次；首次建库与已有库的权限处理时机保留。Gateway 构造清理、CLI 缓存清理和安装预检的调用关系已核对，运行覆盖见本条证据。
 
 不扩展到投递箱或计划任务库：投递箱有单写者锁、密钥与认证载荷及 maintenance 模式，计划任务库另有文件校验、内存库入口、外键和等待策略。这些实际差别不适合通过大量选项塞进同一打开函数。
 
@@ -217,13 +217,13 @@ Schema 版本、只读预检导出及安装预检消费保持不变。已有库�
 
 证据入口：[`chat-io.ts`](../src/provider-proxy/chat-io.ts) 的 `writeChatData`（约 50 行），以及 [`proxy-delivery.ts`](../src/provider-proxy/proxy-delivery.ts) 的 `writeResponseChunk` / `waitForDelivery`（约 21、33 行）。消费者分别是 Chat Bridge、原生 Proxy 和 Model Relay Server。
 
-两处重复检查响应和取消状态、注册 drain/close/error/abort、调用 response.write、等待背压解除，并清理监听和超时。以后修正同步 write 异常或关闭竞争，需要维护两份机制。目前未确认实际交付故障。
+原先两处重复检查响应和取消状态、注册 drain/close/error/abort、调用 response.write、等待背压解除，并清理监听和超时。以后修正同步 write 异常或关闭竞争，需要维护两份机制。目前未确认实际交付故障。
 
-建议仅复用支持 string 与 Buffer 的 HTTP chunk 写入原语，保留调用入口及默认预算。Chat 实现在确认背压后启动 timer，另一实现在调用写入前启动并于同步成功后清除；提取前明确实际交付等待的预算合同，保留调用方使生成计时失效的回调。
+两个入口共用 string/Buffer 写入原语和原有默认预算；drain 超时从确认背压后开始，原生 Proxy 外层总预算继续覆盖整个交付操作。调用方使生成计时失效的回调保持原位。
 
 不得合并普通交付与终态预算、协议收尾、指标与转储状态、WebSocket send 回调或 pipeline。Relay 带正文的 endResponse 和错误响应独立 signal 也不纳入本项。实施后需沿三个消费者核对取消、同步失败、背压、关闭与终态交付，不能只检查共享函数。
 
-**关联复核结论。** 原生 Proxy 在 chunk 到达时暂停上游，串行 forwarding 中交付成功才 resume；Chat Bridge 按转换事件逐条 await；Relay 又有终态专用 controller/timer。因此原语只能承诺本次 write 的接受/背压等待，不能承诺整次响应结束或上游取消。原生 Proxy 还在原语外用 waitForProxyOperation 限制等待，不能因“重复超时”删掉外层预算：它也覆盖忽略取消的在途操作。两个实现错误文案和 settled 防重不同，提取时保留受控阶段类型及防重收尾，不统一整条指标状态机。未观察实际断连或背压。
+原生 Proxy 在 chunk 到达时暂停上游，串行 forwarding 交付成功才 resume；Chat Bridge 按转换事件逐条 await；Relay 保留终态专用 controller/timer。共享原语只承诺本次 write 的接受或背压等待，不承诺整次响应结束或上游取消。外层 waitForProxyOperation 继续覆盖忽略取消的在途操作；统一实现保留受控阶段类型和 settled 防重。背压超时已观察，实际断连尚未观察。
 
 ## U13 审查运行树的选择规则
 
@@ -279,7 +279,7 @@ Supervisor 的 inspect/ensure/release/apply 一次请求另行维护连接、写
 
 [`process-lifecycle.mjs`](../runtime/process-lifecycle.mjs) 约 262 行、[`windows-service-host.mjs`](../scripts/windows-service-host.mjs) 约 203 行的 `childExitedWithin`，以及 [`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 约 1119 行的 `waitForChildExit`，重复退出状态检查、exit 监听、超时和监听清理。消费者分别是终止升级、Windows 服务停止和 Proxy 收尾。
 
-建议在 process-lifecycle 公开窄的退出观察能力；各所有者决定预算、timer 是否维持事件循环和失败后的资源处理。现有实现对于 signalCode、注册后复查、超时后二次检查与 unref 有差别，统一前必须逐项明确，不能当作完全等价直接替换。
+公开操作统一使用 exitCode/signalCode 判断、注册后复核、超时后二次检查和监听清理；各所有者决定预算、timer 引用与失败后的处理。Supervisor 保留 unref，Windows host 与终止升级保留 timer 引用。
 
 该项优先级低。IPC 优雅停止、stdin EOF、TERM/KILL 升级、Unix 进程组消失、输出管道 close 与更新/卸载安全边界均不等价，继续由原所有者处理。没有观察跨平台进程停止故障。
 
@@ -291,9 +291,9 @@ Supervisor 的 inspect/ensure/release/apply 一次请求另行维护连接、写
 
 证据入口：[`conversation-service.ts`](../src/application/conversation-service.ts) 的 `togglePlanMode`、`selectModel`、`selectEffort`、`selectFastMode`（约 1362、1433、1450、1467 行），以及 [`thread-queue-service.ts`](../src/application/thread-queue-service.ts) 的 `rejectPendingOverrideChange`。
 
-四处重复取得 Conversation 锁、要求空闲、选择前读取 Queue、执行异步选择、选择后再次读取 Queue，并在受控 queue.pending-overrides 冲突时清除待生效选择。后查必须保留：读取模型目录或预设期间，原生客户端可以改变 Queue，本地锁无法阻止。待生效选择最终经 startNewTurn/turnOverrides 传给 Client，维护的是同一“原生 Queue 与渠道待生效覆盖互斥”不变量。
+原先四处重复取得 Conversation 锁、要求空闲、选择前读取 Queue、执行异步选择、选择后再次读取 Queue，并在受控 queue.pending-overrides 冲突时清除待生效选择。后查必须保留：读取模型目录或预设期间，原生客户端可以改变 Queue，本地锁无法阻止。待生效选择最终经 startNewTurn/turnOverrides 传给 Client，维护的是同一“原生 Queue 与渠道待生效覆盖互斥”不变量。
 
-建议只在 ConversationService 内提取私有受保护选择操作，让四入口提供具体选择动作，不新增跨模块事务框架或 Gateway Queue 副本。当前未确认冲突行为失效。
+ConversationService 已提取私有受保护选择操作，四入口提供具体动作；没有新增跨模块事务框架或 Gateway Queue 副本。
 
 保留 fast status 的锁外只读分支；startPlan 还会启动 Turn，不能机械套入只返回状态的函数。Provider 切换和用户默认 Fast 设置仍由具体选择实现负责，冲突不能反向补偿已写入默认设置，也不能把任意异常当作需要撤销选择。实施需核对四个入口和最终 Turn 覆盖消费。
 
@@ -305,7 +305,7 @@ Supervisor 的 inspect/ensure/release/apply 一次请求另行维护连接、写
 
 证据入口：[`thread-queue-service.ts`](../src/application/thread-queue-service.ts) 的 `queueUserFacingError`（约 349 行）和 `hasItems`；[`conversation-service.ts`](../src/application/conversation-service.ts) 的 `dispatchNativeQueueBeforeRelease`（约 1861 行）；[`client.ts`](../src/codex-client/client.ts) 的 Queue 请求和 [`provider-routing-client.ts`](../src/codex-client/provider-routing-client.ts) 的转发。
 
-Application 通过官方英文异常正文识别 unavailable、empty、full、busy、not-found 与 reorder-conflict；后台释放又单独匹配 queue is empty。普通命令、释放和 Revert Queue 读取因此依赖协议文字。官方证据来自锁定源码 83086188ae0614bd882818ff1aa23f3194962012，路径相对于其 codex-rs 目录：
+原先 Application 通过官方英文异常正文识别 unavailable、empty、full、busy、not-found 与 reorder-conflict；后台释放又单独匹配 queue is empty。普通命令、释放和 Revert Queue 读取因此依赖协议文字。官方证据来自锁定源码 83086188ae0614bd882818ff1aa23f3194962012，路径相对于其 codex-rs 目录：
 
 - app-server/src/request_processors/thread_queue_processor.rs 的活动 Turn、Queue 不可用分支，以及 ext/queue/src/service.rs 的空队列、条目不存在分支。
 - thread-store/src/queue_store.rs 的 LocalQueueStore.enqueue（约 103 行）将存储 RowNotFound 转为 InvalidRequest，生成队列容量超限文字。
@@ -314,7 +314,7 @@ Application 通过官方英文异常正文识别 unavailable、empty、full、bu
 
 以上已核对本地锁定源码；未获取其他版本或运行上游测试。分类实现需要同时考虑错误结构和文字，不能仅凭任意异常包含同一英文片段就认定来源。
 
-建议由 Application 的窄 Queue 端口定义稳定失败分类，Client 在 RPC 适配处按锁定错误结构与文字转换，Provider Routing 原样传播。Application 保留分类到用户文案、后台释放行为的映射，不再识别官方英文。不要扩成所有 RPC 的通用错误框架。
+Application 的窄 Queue 端口定义稳定失败分类，Client 仅在 RPC 拒绝处按锁定错误结构与文字转换，Provider Routing 原样传播。Application 保留用户文案与后台释放策略，不再识别官方英文；该适配没有扩成所有 RPC 的通用错误框架。
 
 用户 queue start 遇 empty 应反馈，后台释放遇 empty 继续协调；hasItems 对 unavailable 的既有策略不能扩展到未知错误。读取的有界重试与写操作不重试保持不变，写结果未知及本地响应裁剪失败不能伪装成确定未写入。Revert 和 Routing 其他英文分类属于不同业务，不纳入 Queue 提取。实施需核对命令、释放、回退与 Provider 转发四条消费路径。
 
@@ -332,9 +332,9 @@ Application 通过官方英文异常正文识别 unavailable、empty、full、bu
 - 服务选择和顺序已有共享定义；all 在安装、启动、停止、状态查询中的含义不同。Unix 模板、Windows Job/IPC、launchd 与 systemd 的外观相似不能抹平进程所有权。
 - [`logger.ts`](../src/observability/logger.ts) 的 `safeErrorMetadata` 与 [`surfaces/error-metadata.ts`](../src/surfaces/error-metadata.ts) 有相似异常类型裁剪，但允许输出的字段不同：前者不保留 message，后者可呈现明确的 `UserFacingError` 和白名单业务分类。Telegram 还基于 SDK 错误追加安全分类。当前不建议用同一个宽松序列化器替换，以免扩大日志或外部错误的暴露范围。
 
-## 集中处理建议
+## 关联边界与后续验证
 
-优先处理 U09 的输入错误出口分叉和 U11 的关闭失败短路。随后按边界分别处理 U01/U08/U14 的共享规则、U05/U06 的前端状态、U13 的统计范围。Queue 先稳定 U19 的错误分类，再处理 U18 的局部选择保护。U07 涉及资源所有权，应独立评审；U15 涉及安装事务，单独安排真实安装/更新观察。U02/U03/U04/U10/U12/U17 为低优先级局部去重；U16 仅在保留错误分类且不增加宽泛传输框架的前提下考虑，不作为必须实施项。
+已按问题边界分批实施 18 项，Queue 错误分类先于选择保护提交，Worker、指标范围、安装构建分别形成独立批次。U16 保留不同失败语义的实现。后续运行验证优先关注真实模型检测竞态、Queue/后台释放、跨平台权限与停止，以及完整安装恢复；具体限制以各条目为准。
 
 修复以逐项状态为准。凭据规范化、存储格式、审批策略和检测副作用仍须遵守每项已明确的边界，不随去重扩张。
 
