@@ -140,7 +140,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
 - `thread-occupancy-port.ts`：定义渠道 `/release` 使用的 Thread 占用查询与释放窄端口；只返回
   稳定占用状态、持锁进程摘要和释放结果，不暴露进程级实现。
-- `thread-queue-port.ts`：定义原生 Thread Queue 的六个稳定用例；Application 只接收纯文本写入，
+- `thread-queue-port.ts`：定义原生 Thread Queue 的六个稳定用例及已知拒绝分类；Application 按分类映射反馈与释放策略，不识别官方英文异常。Application 只接收纯文本写入，
   通过 Client 返回条目种类、可编辑标记和有界安全预览，不传播官方 `UserInput` 或本地路径。
   切换到已有 Queue 的 Thread 时沿用该 Thread 自身设置并清除当前会话待生效偏好；后台完成释放前
   重新查询 Queue、按 Thread 活动 Turn 和待结算子代理运行，避免自动派发或子代理仍在运行时解除绑定。

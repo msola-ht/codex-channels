@@ -26,7 +26,7 @@
 | U16 | 收敛一次性私有 IPC 交换的底层收尾 | 低 | 关联复核完成，降级为条件性提取；未实施 |
 | U17 | 统一自有子进程退出观察的窄操作 | 低 | 关联复核完成，保留所有者决策；未实施 |
 | U18 | 统一待生效选择与原生 Queue 的互斥操作 | 中 | 关联复核完成，明确非原子边界；未实施 |
-| U19 | 将 Queue 官方错误识别收回 Client 边界 | 中 | 关联复核完成，明确适配位置；未实施 |
+| U19 | 将 Queue 官方错误识别收回 Client 边界 | 中 | 已实施；分类及伪造文本拒绝已观察，真实 Queue 链路未实测 |
 
 19 项均已完成下述关联链路的源码复核及 Astra 独立复查；实施状态逐项列明。优先级表示维护收益与风险的相对顺序，不表示已发生故障的严重程度。“复核完成”仅覆盖各项列出的调用链与合同，运行证据和未穷尽分支仍受文末限制。
 
@@ -284,6 +284,8 @@ Supervisor 的 inspect/ensure/release/apply 一次请求另行维护连接、写
 **关联复核结论。** 四入口确实重复相同局部保护，但不是跨 App Server 的原子事务：两次 Queue 读取之间及之后仍允许原生客户端活动。selectFastMode 在设置 pending 前可能已写入官方默认速度；冲突后 clearPendingSelections 只清本地模型与协作模式选择，不能声称回滚整个选择操作。最终 startNewTurn 在 ensureSession 后复核活动状态和 Provider 一致性，调用 startTurn 成功后才 markApplied，这些下游守卫必须保留。建议把提取命名为“受保护的选择操作”，不包装成保证跨端原子性的事务。U02 的页面快照不参与此保护，U19 的 unavailable 分类会影响 hasItems 的结果，实施顺序宜先稳定错误分类再提取四入口。未运行原生客户端并发场景。
 
 ## U19 Queue 官方错误识别边界
+
+**实施与证据。** Application 端口已定义 `ThreadQueueError`，六个 Client Queue RPC 只在请求拒绝处适配 `JsonRpcError(-32600)` 与锁定版本的精确文字（条目不存在保留官方动态 ID 后缀），响应转换及 Provider 路由失败不进入分类。命令、Revert、hasItems 与后台释放消费同一分类；后台 empty/unavailable 之后的活动与路由空闲复核保留。手工操作编译产物观察到官方 empty → queue.empty；同文普通 Error、错误码 -32603、附加未知后缀均原样传播并映射 queue.failed。类型、边界检查及构建通过。未连接用户 App Server、创建真实 Queue 或触发后台释放，真实 RPC 至渠道反馈尚未观察。
 
 证据入口：[`thread-queue-service.ts`](../src/application/thread-queue-service.ts) 的 `queueUserFacingError`（约 349 行）和 `hasItems`；[`conversation-service.ts`](../src/application/conversation-service.ts) 的 `dispatchNativeQueueBeforeRelease`（约 1861 行）；[`client.ts`](../src/codex-client/client.ts) 的 Queue 请求和 [`provider-routing-client.ts`](../src/codex-client/provider-routing-client.ts) 的转发。
 

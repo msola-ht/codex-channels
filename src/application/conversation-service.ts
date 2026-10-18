@@ -1871,11 +1871,8 @@ export class ConversationService implements
       await queue.startQueueItem(threadId);
       return "started";
     } catch (error) {
-      const message = error instanceof Error ? error.message.toLowerCase() : "";
-      if (message.includes("queue is empty")) {
-        return "empty";
-      }
       const mapped = queueUserFacingError(error, "start");
+      if (mapped.code === "queue.empty") return "empty";
       if (mapped.code === "queue.unavailable") return "unavailable";
       if (mapped.code === "queue.busy") return "busy";
       if (mapped.code === "queue.item-not-found") return "busy";

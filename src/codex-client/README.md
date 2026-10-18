@@ -57,7 +57,7 @@ RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 
 - `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `queue-adapter.ts`：把官方 Queue 条目裁剪为 Application 的稳定种类、可编辑标记和有界文本预览；
-  本地媒体、Skill、Mention 与其他非文本输入只返回安全摘要，不传播原始值或绝对路径。
+  本地媒体、Skill、Mention 与其他非文本输入只返回安全摘要，不传播原始值或绝对路径。仅在六个 Queue RPC 拒绝处将锁定版本的错误码与已知文字映射为稳定失败分类；传输及响应转换失败原样传播。
 - `history-adapter.ts`：把官方分页 Turn 与 Revert 响应裁剪为有界摘要和稳定 Thread 快照；只提取
   `userMessage` 的安全输入摘要，拒绝残缺游标、非空 Revert 历史和越界字段。
 - `user-input-summary.ts`：为 Queue 与分页历史共用的 Client 内部 UserInput 安全摘要工具；摘要有界，

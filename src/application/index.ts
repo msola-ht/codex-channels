@@ -198,6 +198,8 @@ export {
   type TurnStarted,
 } from "./turn-port.js";
 export {
+  ThreadQueueError,
+  type ThreadQueueFailure,
   type ThreadQueueInputType,
   type ThreadQueueItem,
   type ThreadQueueListOptions,

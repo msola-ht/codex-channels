@@ -10,6 +10,7 @@ import {
 import type { CollaborationModeSelectionService } from "./collaboration-mode-service.js";
 import type { ConversationLockCoordinator } from "./conversation-lock-coordinator.js";
 import type { ModelSelectionService } from "./model-selection-service.js";
+import { ThreadQueueError } from "./thread-queue-port.js";
 import type {
   ThreadQueueItem,
   ThreadQueuePage,
@@ -351,29 +352,29 @@ export function queueUserFacingError(
   operation: "add" | "list" | "update" | "delete" | "reorder" | "start",
 ): UserFacingError {
   if (error instanceof UserFacingError) return error;
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-  if (message.includes("user message queue is unavailable")) {
+  const failure = error instanceof ThreadQueueError ? error.failure : undefined;
+  if (failure === "unavailable") {
     return new UserFacingError("queue.unavailable", "当前 App Server 不提供持久队列");
   }
-  if (message.includes("queue is empty")) {
+  if (failure === "empty") {
     return new UserFacingError("queue.empty", "App Server Queue 为空");
   }
-  if (message.includes("cannot contain more than 100")) {
+  if (failure === "full") {
     return new UserFacingError("queue.full", "原生 Queue 已达到 100 条上限");
   }
-  if (message.includes("active or pending turn")) {
+  if (failure === "busy") {
     return new UserFacingError(
       "queue.busy",
       "当前 Session 有活动或待触发 Turn，请稍后重试",
     );
   }
-  if (message.includes("queued submission not found")) {
+  if (failure === "item-not-found") {
     return new UserFacingError(
       "queue.item-not-found",
       "找不到指定 Queue 条目，请刷新 /queue list",
     );
   }
-  if (message.includes("reorder must include every")) {
+  if (failure === "reorder-conflict") {
     return new UserFacingError(
       "queue.reorder-conflict",
       "Queue 已发生变化，请刷新 /queue list 后重试排序",

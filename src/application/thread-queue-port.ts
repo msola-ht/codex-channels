@@ -13,6 +13,22 @@ export type ThreadQueueInputType =
   | "mention"
   | "other";
 
+export type ThreadQueueFailure =
+  | "unavailable"
+  | "empty"
+  | "full"
+  | "busy"
+  | "item-not-found"
+  | "reorder-conflict";
+
+/** A known rejection from the Queue authority, never a transport failure. */
+export class ThreadQueueError extends Error {
+  constructor(readonly failure: ThreadQueueFailure) {
+    super(`Thread Queue: ${failure}`);
+    this.name = "ThreadQueueError";
+  }
+}
+
 export interface ThreadQueueItem {
   id: string;
   clientUserMessageId: string;

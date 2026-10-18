@@ -162,6 +162,7 @@ import {
 import { toPermissionProfilePage } from "./permission-adapter.js";
 import { toHookCatalog, toHookStateWrite } from "./hook-adapter.js";
 import {
+  rethrowThreadQueueError,
   toProtocolQueueText,
   toThreadQueueAddResult,
   toThreadQueueDeleteResult,
@@ -626,7 +627,7 @@ export class CodexAppServerClient implements
         input: toProtocolQueueText(text),
         clientUserMessageId,
       } satisfies ThreadQueueAddParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false }).catch(rethrowThreadQueueError);
     return toThreadQueueAddResult(response);
   }
 
@@ -645,7 +646,7 @@ export class CodexAppServerClient implements
         ...(options.cursor ? { cursor: options.cursor } : {}),
         limit,
       } satisfies ThreadQueueListParams,
-    }, { retryOverload: true });
+    }, { retryOverload: true }).catch(rethrowThreadQueueError);
     const page = toThreadQueuePage(response);
     if (page.items.length > limit) {
       throw new Error("Codex Queue 列表响应超过请求页大小");
@@ -665,7 +666,7 @@ export class CodexAppServerClient implements
         queuedSubmissionId,
         input: toProtocolQueueText(text),
       } satisfies ThreadQueueUpdateParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false }).catch(rethrowThreadQueueError);
     return toThreadQueueUpdateResult(response);
   }
 
@@ -676,7 +677,7 @@ export class CodexAppServerClient implements
     const response = await this.rpc.request<ThreadQueueDeleteResponse>({
       method: "thread/queue/delete",
       params: { threadId, queuedSubmissionId } satisfies ThreadQueueDeleteParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false }).catch(rethrowThreadQueueError);
     return toThreadQueueDeleteResult(response);
   }
 
@@ -684,7 +685,7 @@ export class CodexAppServerClient implements
     await this.rpc.request<ThreadQueueReorderResponse>({
       method: "thread/queue/reorder",
       params: { threadId, queuedSubmissionIds } satisfies ThreadQueueReorderParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false }).catch(rethrowThreadQueueError);
   }
 
   async startQueueItem(
@@ -697,7 +698,7 @@ export class CodexAppServerClient implements
         threadId,
         ...(queuedSubmissionId === undefined ? {} : { queuedSubmissionId }),
       } satisfies ThreadQueueStartParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false }).catch(rethrowThreadQueueError);
     return toThreadQueueStartResult(response);
   }
 

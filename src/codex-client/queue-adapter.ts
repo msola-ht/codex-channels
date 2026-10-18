@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { ThreadQueueError, type ThreadQueueFailure } from "../application/index.js";
+import { JsonRpcError } from "./json-rpc.js";
 
 import type {
   QueuedSubmission,
@@ -15,6 +17,26 @@ import type {
 } from "../application/index.js";
 import { toTurnStarted } from "./turn-adapter.js";
 import { summarizeUserInput } from "./user-input-summary.js";
+
+/** Only attach to Queue RPC rejection, before response conversion. */
+export function rethrowThreadQueueError(error: unknown): never {
+  if (error instanceof JsonRpcError && error.code === -32600) {
+    const known: Readonly<Record<string, ThreadQueueFailure>> = {
+      "user message queue is unavailable": "unavailable",
+      "queue is empty": "empty",
+      "queue cannot contain more than 100 submissions": "full",
+      "thread already has an active or pending turn": "busy",
+      "queue reorder must include every queued submission exactly once": "reorder-conflict",
+    };
+    const failure = Object.hasOwn(known, error.message)
+      ? known[error.message]
+      : error.message.startsWith("queued submission not found: ")
+        ? "item-not-found"
+        : undefined;
+    if (failure) throw new ThreadQueueError(failure);
+  }
+  throw error;
+}
 
 /** Convert the official Queue response to the safe Application summary. */
 export function toThreadQueueItem(value: QueuedSubmission): ThreadQueueItem {
