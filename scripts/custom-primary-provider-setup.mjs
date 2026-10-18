@@ -258,16 +258,17 @@ export async function runCustomPrimaryProviderSetup({
       return { action: allowBack ? "back" : "cancel" };
     }
     if (providerId === "__custom__") {
+      const toProviderId = value => custom ? `cp-${String(value ?? "").trim()}` : String(value ?? "").trim();
       const customId = await prompts.text({
-        message: custom ? "Provider ID（必须以 cp- 开头）" : "自定义 Provider ID",
-        validate: (value) => validateCustomPrimaryModelProviderId(String(value).trim(), environment)
-          ?? (custom !== isCustomCatalogProvider(String(value).trim())
+        message: custom ? "提供商名称（固定前缀 cp-，只填写后面的名称）" : "自定义 Provider ID",
+        validate: (value) => validateCustomPrimaryModelProviderId(toProviderId(value), environment)
+          ?? (custom !== isCustomCatalogProvider(toProviderId(value))
             ? "自定义提供商必须使用 cp- 前缀；Codex 兼容 Provider 不使用该前缀" : undefined),
       });
-      if (prompts.isCancel(customId) || customId === "back") {
+      if (prompts.isCancel(customId) || (!custom && customId === "back")) {
         return { action: allowBack ? "back" : "cancel" };
       }
-      normalizedId = String(customId).trim();
+      normalizedId = toProviderId(customId);
     } else {
       normalizedId = String(providerId);
     }

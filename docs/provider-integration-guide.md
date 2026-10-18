@@ -413,7 +413,7 @@ JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行�
 `codexc setup → 模型与提供商 → 第三方 Provider → 自定义第三方` 与
 `codexc provider add --custom-models` 提供相同的新增入口；编辑、列表、切换、删除复用
 `provider` 管理链路。WebUI 的 Provider 设置中选择“自定义提供商”。
-此类型使用 `cp-` 开头的 Provider ID（其后 1-61 位 ASCII 字母、数字、`-` 或 `_`）。
+此类型使用 `cp-` 开头的 Provider ID（其后 1-61 位 ASCII 字母、数字、`-` 或 `_`）。CLI 添加时选择自定义标识符、或在 WebUI 添加此类型时，`cp-` 前缀固定，只填写后面的名称；例如输入 `llm`，保存为 `cp-llm`。编辑已有提供商时 ID 不变。
 例如 `cp-llm`，终端使用 `codexc remote -p cp-llm` 或 `codexc app -p cp-llm`，规范 Profile 与文件分别为 `sf-cp-llm` 和 `sf-cp-llm.config.toml`。`cp-` 表示自定义提供商，与上游协议无关；协议独立选择 Responses 或 Chat Completions。
 所有 Provider 的固定、切换和聚合模式以及独立 Relay 共用统一请求策略。完整协议事件空闲为 300 秒，WebSocket 建连为 15 秒，对齐锁定 Codex 0.163.0 的有效默认值；生成没有固定总期限。HTTP 首响应头额外保留 300 秒网络等待，错误正文最多 5 秒，非流式正文最多 300 秒；下游交付受阻最多 30 秒，终态和关闭收尾最多 5 秒。聚合与 Chat 桥外层不重复启动内层模型计时器。
 
