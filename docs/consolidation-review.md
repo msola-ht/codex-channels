@@ -1,0 +1,391 @@
+# 项目重复实现与统一边界审查
+
+本记录按问题维护当前结论、关联链路、调整边界与证据限制，不保留逐轮工作日志。目前只审查和记录，不改变运行行为、配置或存储格式。
+
+审查基线：`2ac1f25b`，2026-10-18。结论来自源码与调用链检查；没有使用真实凭据、启动服务或执行外部写操作。维护性重复不等同于已发生的用户故障。
+
+## 待处理清单
+
+| 编号 | 建议 | 优先级 | 审查状态 |
+| --- | --- | --- | --- |
+| U01 | 统一自定义 Provider API Key 纯校验规则 | 中 | 关联复核完成，范围已修订；未实施 |
+| U02 | 统一 Application 短期选择快照的容器操作 | 低 | 关联复核完成，缩小范围；未实施 |
+| U03 | 收敛渠道文本附件取得明文后的公共处理 | 低 | 关联复核完成，保留窄范围；未实施 |
+| U04 | 收敛 Storage 内两个同步 SQLite Store 的打开流程 | 低 | 关联复核完成，保留窄范围；未实施 |
+| U05 | 统一 WebUI 写入结果未知与权威回读门禁 | 中 | 关联复核完成，补充回读语义；未实施 |
+| U06 | 统一两个模型能力检测 Hook 的请求归属与取消机制 | 中 | 关联复核完成，保留窄范围；未实施 |
+| U07 | 统一两个 Runtime 材料 Reader 的单 Worker 所有权机制 | 中 | 关联复核完成，明确所有权；未实施 |
+| U08 | 统一配置管理与 CLI 总览的有效默认值投影 | 中 | 关联复核完成，保留双视图；未实施 |
+| U09 | 统一设置输入校验失败的领域错误适配 | 中 | 关联复核完成，错误出口成立；未实施 |
+| U10 | 移除渠道输入聚合的等价转发层 | 低 | 关联复核完成，保留局部简化；未实施 |
+| U11 | 统一渠道关闭时继续清理并汇总失败的约定 | 中 | 关联复核完成，条件性风险成立；未实施 |
+| U12 | 收敛 HTTP chunk 背压写入原语 | 低 | 关联复核完成，排除终态状态机；未实施 |
+| U13 | 统一审查统计与写入失败归属的运行树选择 | 中 | 关联复核完成，范围一致；未实施 |
+| U14 | 统一 Gateway 与 Codex 基础版本兼容谓词 | 中 | 关联复核完成，区分版本策略；未实施 |
+| U15 | 收敛源码取得后的安装构建阶段 | 中 | 关联复核完成，排除生命周期合并；未实施 |
+| U16 | 收敛一次性私有 IPC 交换的底层收尾 | 低 | 关联复核完成，降级为条件性提取；未实施 |
+| U17 | 统一自有子进程退出观察的窄操作 | 低 | 关联复核完成，保留所有者决策；未实施 |
+| U18 | 统一待生效选择与原生 Queue 的互斥操作 | 中 | 关联复核完成，明确非原子边界；未实施 |
+| U19 | 将 Queue 官方错误识别收回 Client 边界 | 中 | 关联复核完成，明确适配位置；未实施 |
+
+19 项均已完成下述关联链路的源码复核及 Astra 独立复查，尚未实施。优先级表示维护收益与风险的相对顺序，不表示已发生故障的严重程度。“复核完成”仅覆盖各项列出的调用链与合同，运行证据和未穷尽分支仍受文末限制。
+
+## U01 自定义 Provider API Key 校验
+
+**结论：保留为维护性建议，扩大证据范围到能力检测，限定提取为格式规则。** 未发现当前格式规则已漂移或认证故障。跨输入、磁盘读取和出站边界的再次校验有必要；需要统一的是规则定义，不是删掉检查次数。
+
+**共享合同。** 合法 Key 必须是字符串、非全空白、length 不超过 4096 个 UTF-16 代码单元且不含 Unicode Cc 控制字符。录入替换先 trim，再校验；保留已有凭据、Runtime 读取和内部检测保留原值。不能把上限改成 UTF-8 字节数，也不能自动 trim 已有数据。
+
+| 关联链路 | 已核对证据 | 影响与必须保留的约束 |
+| --- | --- | --- |
+| CLI/WebUI 录入→保存预览→确认应用 | [CLI setup](../scripts/custom-primary-provider-setup.mjs) 约 402、451 行；[WebUI 管理分发](../scripts/webui-provider-settings-management.mjs)；[管理服务](../scripts/custom-primary-provider-management.mjs) 的 buildSavePlan、prepare/preview/apply | replace 经 requiredString 裁剪；preserve 仅在同 Origin 且能取得旧 Key 时成立。apply 在管理事务内重建计划并比对预览 revision，不能复用旧校验结果绕过复核 |
+| 保存计划→固定模式私有凭据→配置引用→回读确认 | [配置事务](../scripts/primary-provider-config-transaction.mjs)；[Runtime](../runtime/model-provider-custom-runtime.mjs) 的 writeCustomPrimaryProviderCredential；管理服务 confirmProviderSave | 先写新凭据版本，再写配置；结果未知或仍被引用时保留凭据。格式提取不能改变备份、回滚、旧版本保留或 save-unconfirmed 分类 |
+| 保存计划→切换 Profile→回读确认 | 管理服务 applyConnectionSavePlan；Runtime writeCustomPrimaryProviderSwitchingProfile、切换 Profile 读取；confirmProviderSave | 切换写入也调用 validateCustomApiKey，回读比较实际 apiKey。固定与切换模式落盘合同不同，不合并事务 |
+| 配置/环境/私有凭据→启动消费 | Runtime readCustomPrimaryProviderApiKey、readCustomPrimaryCredential、loadConfiguredCustomPrimaryCredential；[App Server 服务](../runtime/app-server-service-runtime.mjs) 约 160、690–707 行 | token 与 env_key 同时存在会拒绝；私有文件还校验格式版本、Provider 和 Origin。服务对启动捕获凭据再次比对，不能被通用 Key 校验取代 |
+| 主 Provider→Relay 材料 | Runtime loadConfiguredCustomPrimaryRelayProfile；[Relay 材料](../runtime/model-provider-relay-material.mjs) 的 Profile 读取与两次 fingerprint | Key 读取已完成内容校验，Relay 再写长度/控制字符判断属于重复规则；仍须拒绝缺失 Key、OAuth/额外 Header，以及读取期间材料变化。切换 Provider 使用独立 Profile 读取链 |
+| 草稿能力检测→连接 token→保存复核 | [检测路由](../scripts/webui-custom-model-probe.mjs) 的 inputSchema、routeCustomModelCapabilityProbe；[检测实现](../scripts/custom-model-capability-probe.mjs) 约 59、113 行；管理服务 customModelProbeConnection 与 probeConnections 验证 | WebUI 替换 Key 的 Schema 先 trim；检测内部再校验原值并用于 Authorization。CLI 也先 trim 新 Key。连接 token 和保存预览 HMAC 都绑定实际 Key；规范化变化须同时核对检测和保存 |
+
+**原因与后果。** Runtime 私有 validateCustomApiKey、管理保存计划、检测实现、WebUI 检测 Schema 分别编码相同格式约束。Relay 还在已校验的返回值上重复部分条件。未来单处调整长度或字符集，可能出现检测、保存与启动接受范围不同。这是潜在漂移，当前代码未证实发生这种不一致；HMAC 与 fingerprint 提供了现有一致性保护。
+
+**最小调整。** 在现有 Runtime Provider 边界公开不做 I/O、不规范化输入的校验能力，联动 model-provider-runtime.mjs 的公开导出及 .d.mts 声明。管理和检测层分别保留受控字段错误、HTTP 错误和安全文案；WebUI Schema 仍拥有输入结构与录入 trim。不能直接把 Runtime 普通 Error 透传到管理边界，否则可能引入类似 U09 的错误分类分叉。Relay 只收敛格式检查，继续拥有凭据存在与独立认证约束。
+
+**联动范围。** 与 U06 的检测作用域不同，本项只涉及检测输入及 token 的同值约束；不改变主动检测次数、收费副作用或回填权限。与 U07 的材料 Reader 不同，本项不改变读取新鲜度、Worker 所有权或超时。受管 Provider 的专有格式校验不纳入本项。
+
+**证据限制。** 已沿上述读写与消费路径核对源码；未读取用户配置或 Key，未发起模型检测、保存、认证或重启。字符边界、写入失败恢复、启动与 Relay 认证仍需实施时通过授权的实际路径观察，不能把本项关联复核当作这些行为已验证。
+
+## U02 Application 短期选择快照
+
+证据入口：
+
+- [`thread-queue-service.ts`](../src/application/thread-queue-service.ts)：`rememberSelectionSnapshot` 与数字选择器读取。
+- [`thread-revert-service.ts`](../src/application/thread-revert-service.ts)：`rememberSelectionSnapshot`、`rememberConfirmation` 与页面选择校验。
+- [`conversation-hook-service.ts`](../src/application/conversation-hook-service.ts)：`prune`、选择与确认上下文。
+- [`scheduled-task-service.ts`](../src/application/scheduled-task-service.ts)：`rememberSnapshot`、`trimMap`、Task/Run 选择读取。
+
+**结论：保留局部容器去重，优先级降为低，排除通用确认机制。** 四个服务都维护有界 Map，但保护的业务对象及消费顺序不同，不能将相似容器理解为同一个确认合同。未确认用户故障。
+
+| 关联链路 | 消费前复核与失效 | 提取限制 |
+| --- | --- | --- |
+| Queue list→数字选择→readSnapshot→更新/删除/排序/启动 | 数字先绑定旧列表 ID，再读权威列表查 ID；完整 ID 不依赖旧页面。写入及绑定变化另行失效 | 不能缓存权威列表替代再次读取，不能把完整 ID 强制绑定快照 |
+| Revert list→preview→confirm→revertThread | confirm 先消费令牌，再校验 Actor、绑定、页面、活动/最新 Turn 与 Queue 指纹；重新列举会撤销该目标确认 | 同一快照替换还涉及确认撤销，副作用留在服务内；无效调用也消费令牌的顺序不可改 |
+| Hooks list→selector→preview→confirm→writeHookState→回读 | context 包含 Actor/Workspace/Provider/Thread；先核对归属再消费确认，写入尝试结束即清空所有快照和确认，因为 Provider 共用 CODEX_HOME | 不可替换成仅清当前 Conversation；与 Revert 的令牌消费顺序不同 |
+| Schedule list/runs→数字选择→Store→修改；preview→confirm→创建/删除 | Task/Run 快照按 Conversation+Actor 隔离，数字解析后重新查 Store 归属；确认校验归属后消费，并有独立计时器 | 不能让普通 Map delete 跳过 confirmationTimers 清理；注入时钟和到期边界仍由服务定义 |
+
+共同部分仅是按插入顺序有界淘汰、更新键位置及可选的过期清理。Queue/Revert 使用 Date.now，Schedule 使用注入的 now；Schedule 选择快照写入仅淘汰容量，读取才判过期，不能强行统一成一个后台 TTL 生命周期。
+
+建议先提取 Application 内部的小型快照容器操作，复用现有 [`pagination.ts`](../src/application/pagination.ts) 的窄工具组织方式。容量和有效期仍由调用方明确给出，不增加通用缓存框架。
+
+不能合并的业务差别：
+
+- Queue 数字选择最终重新核对权威列表；完整 ID 不要求来自旧页面。
+- Revert 的完整 ID 也必须属于最近页面，并需复核活动 Turn、最新 Turn 与 Queue 指纹。
+- 计划任务按 Actor 和 Conversation 隔离，并从 Store 重新检查归属。
+- Hooks 绑定 Workspace、Provider、Thread 和配置版本。
+
+确认令牌的消费时机、失效范围和主动清理不同，不建立通用确认服务。尤其不能将 Surface 的审批交互注册表引入 Application，以免倒置依赖方向。与 U18/U19 只共享 Queue 的业务背景，不共享选择事务或错误适配。以上已核对源码，尚未观察过期、容量淘汰、重新列举、切换绑定与授权变化的运行行为。
+
+## U03 渠道文本附件公共处理
+
+证据入口：三个渠道的 [`Telegram file-input`](../src/surfaces/telegram/file-input.ts)、[`飞书 file-input`](../src/surfaces/feishu/file-input.ts)、[`微信 file-input`](../src/surfaces/weixin/file-input.ts)，以及共享 [`text-file-input.ts`](../src/surfaces/text-file-input.ts)、[`text-attachment-store.ts`](../src/surfaces/text-attachment-store.ts)。
+
+三个渠道已经复用 UTF-8 校验和暂存库，但各自重复“解码明文字节、暂存、组装文件名和正文或路径及字节数”的处理。结果随后经各渠道输入适配器和 `textAttachmentBody` 提交共享输入队列。未来增加附件结果字段或修改该流程时仍需三处同步。
+
+**关联复核结论。** 下载→明文完整性→decodeUtf8TextFile→TextAttachmentStore.prepare→textAttachmentBody→渠道输入提交的共同尾段成立，但收益仅限数行组装。Telegram/飞书先限制下载流，微信先限制密文、解密并核对明文长度/MD5；不能把所有下载前置判断移入公共尾段。decode 会移除 BOM/终端样式，返回 bytes 仍是原始明文字节数，而 32 KiB 内联阈值按清理后的文本 UTF-8 长度计算，二者含义不可合并。
+
+暂存库已集中串行写入、50 文件容量、24 小时保留和托管路径；共享函数应接收现有 Store，不创建第二个实例或清理计时器。三渠道 catch 各自转换 TextFileValidationError 并保留 UserFacingError，提取须置于这些错误边界内。无 Store 时仍直接返回文本。U10 仅涉及后续聚合入口，U11 涉及关闭所有权，均不要求改变本文本处理规则。未观察真实下载或暂存；未发现当前三份结果已漂移。
+
+建议只收敛取得合法明文字节后的公共尾段，优先扩展现有共享模块。平台下载、微信解密和 MD5/长度完整性校验、文件名长度单位、平台错误边界与引用消息拼装继续独立。不得改变 1,000,000 字节输入上限、清理后 32 KiB 内联阈值及暂存文件生命周期。
+
+## U04 Storage 内同步数据库打开流程
+
+证据入口：[`sqlite-binding-store.ts`](../src/storage/sqlite-binding-store.ts) 的构造函数和 [`sqlite-session-display-cache.ts`](../src/storage/sqlite-session-display-cache.ts) 的构造函数。二者由 [`gateway-component-graph.ts`](../src/bootstrap/gateway-component-graph.ts) 分别创建并登记关闭；展示缓存还被 [`session-cleanup.mjs`](../scripts/session-cleanup.mjs) 用于已确认归档后的缓存移除。
+
+两者重复同一顺序：已有文件先只读校验、创建父目录、打开写连接、再次校验实际连接、保护权限、设置 `busy_timeout=0` 与 DELETE 日志模式、初始化；失败时关闭连接，同时保留初始化和清理双重异常。该顺序体现“不支持的已有库不能先被修改”的共享合同，以后调整打开或失败清理时需同步两份代码。
+
+建议仅在 Storage 内提取窄的同步连接初始化辅助函数，让两个 Store 继续拥有各自 Schema 校验、建表、加载和错误上下文。辅助函数必须覆盖初始化回调失败时的连接清理，返回成功连接后再由各 Store 拥有生命周期。优先级低，不为两处重复建立可配置数据库框架。
+
+Schema 版本、只读预检导出及安装预检消费保持不变。已有库只读预检与写连接复核不可合并为一次；不能把首次建库与已有库的权限处理时机改成统一前置。后续检查需覆盖 Gateway 构造失败清理、CLI 缓存清理和安装预检，且不改变磁盘合同。
+
+不扩展到投递箱或计划任务库：投递箱有单写者锁、密钥与认证载荷及 maintenance 模式，计划任务库另有文件校验、内存库入口、外键和等待策略。这些实际差别不适合通过大量选项塞进同一打开函数。
+
+**关联复核结论。** Gateway 创建 Binding Store 后立即登记构造清理，再创建展示缓存并登记；共享初始化必须连同 Binding Store 的 load 失败一起关闭连接，不能在建表成功后提前转移所有权。CLI 归档仅在 App Server 核验 archivedIds 后打开缓存并删除派生项，finally 关闭；缓存失败单独报告，不回滚已确认归档。安装预检则直接创建只读连接并调用公开 Schema 校验，绝不能为了复用构造器而打开写连接。U15 的安装构建只影响这些 dist 导出可用性，不改变只读预检合同。源码重复成立，无实测数据库故障，收益仍为低。
+
+## U05 WebUI 写入结果未知与权威回读门禁
+
+证据入口：[`use-versioned-settings-management.ts`](../webui/src/hooks/use-versioned-settings-management.ts) 与 [`use-management-confirmed-mutation.ts`](../webui/src/hooks/use-management-confirmed-mutation.ts)。Gateway/Codex 设置使用前者，Provider 设置和官方模型目录使用后者并显式开启 `trackReadback`。
+
+两个 Hook 都保存写前快照，成功写入后要求刷新；遇到非受控异常，或除 `management_audit_unavailable` 外的 5xx 时，将结果标为未知并等待新的成功读取。新的快照成功返回前，继续修改受到门禁限制。错误例外并非普通显示文案：[`webui-management-gateway-route.mjs`](../scripts/webui-management-gateway-route.mjs) 在写入前审计失败时明确返回该错误且不写入；Provider 路由也消费同一管理审计合同。
+
+后续增加明确未写入的错误分类、调整回读完成条件时，两份状态和分支都需要修改。当前核心规则一致，尚未确认运行故障。
+
+建议提取写入错误的结果未知判定，以及写后快照基线、回读门禁和 `writeUnconfirmed` 的窄状态能力。现有 `useApi` 已共享读取和错误保存，两类业务各自也已有公共 Hook，不再建立覆盖所有管理操作的新框架。
+
+保留预览对象、revision 提取、确认令牌要求、成功返回值和 `stale-revision` 处理差异；保持下游 `actionResult`、`writeUnconfirmed`、`readbackRequired` 接口。消费入口包括 [`use-provider-settings-management.ts`](../webui/src/hooks/use-provider-settings-management.ts)、[`use-openai-model-catalog.ts`](../webui/src/hooks/use-openai-model-catalog.ts) 以及 [`settings-controls.tsx`](../webui/src/components/settings/settings-controls.tsx) 的反馈。
+
+不能顺势对账户、Relay Key、任务、投递队列和重置券一律开启 `trackReadback`。这些入口的异步执行、读取与副作用合同不同，现有证据不足以要求使用同一策略。实施时需分别检查明确未写入、写入响应未知、写入成功但回读失败、再次成功回读，以及过期 revision 的反馈和继续操作条件。
+
+**关联复核结论。** 预览→一次性确认→写请求→API 错误→refetch→控件准入这条链上，两 Hook 的共同门禁成立。解除条件是获得不同对象引用、读取结束且无错误，不是 revision 必须变化，也不是证明先前写请求成功：失败未写入时 revision 可以不变。writeUnconfirmed 的历史反馈与 readbackRequired 的继续操作门禁是不同状态，不能合成一个布尔值。ApiClientError 以外异常和受控 5xx 的保守判定只应用于写入阶段；预览失败不能进入未知写入状态。保持 U09 的输入错误适配与本项一致，避免把确定未写入输入错误误送进 5xx 门禁。页面卸载取消与取消后服务端可能已经写入仍非同一事实；本项不承诺前端 abort 能回滚写入。尚无浏览器运行观察。
+
+## U06 模型能力检测的请求归属与取消
+
+证据入口：[`use-custom-model-capability-probe.ts`](../webui/src/hooks/use-custom-model-capability-probe.ts) 与 [`use-provider-web-search-probe.ts`](../webui/src/hooks/use-provider-web-search-probe.ts)。前者由 Provider 编辑器的草稿和配置版本决定作用域，后者由已配置 Provider、模型和修订决定作用域。
+
+两个 Hook 重复维护活动 AbortController、最新作用域与 enabled 状态，在作用域变化时取消并清空，阻止重复发起，返回时核对请求归属，并在 finally 中只释放自身请求。修复关闭弹窗、切换模型或取消后再发起时的迟到响应问题，需要同步两份近乎相同的控制逻辑。此类检测由用户主动发起且可能计费，建议统一生命周期规则；没有实际发起检测，也未确认旧结果串入故障。
+
+后端两个接口已共用 [`webui-custom-model-probe.mjs`](../scripts/webui-custom-model-probe.mjs) 的 `routeCustomModelCapabilityProbe`，统一并发名额、断连取消、正文限制与清理。前端 API 请求和超时也已有共享基础设施；`useApi` 的依赖驱动读取并不直接覆盖这些主动操作状态。
+
+建议只提取由作用域 key 和 enabled 约束的单次异步操作生命周期。两个业务 Hook 继续拥有输入、结果校验、错误映射和回填权限，保留现有调用接口。
+
+- 草稿工具检测的连接绑定 token 必须匹配，只有 `applyPatch` / `toolSearch` 的明确结论允许回填。
+- 已配置网页搜索检测由后端解析凭据和协议，结果不得携带 `connectionToken`，仅供诊断展示。
+- [`use-relay-reasoning-probe.ts`](../webui/src/hooks/use-relay-reasoning-probe.ts) 另有流式阶段、部分结果、历史缓存和有效期，不纳入此次提取。
+
+后续联动检查 Provider 编辑器与网页搜索弹窗的关闭、切换目标、取消和重新发起，以及旧请求的成功、失败和 finally 均不能覆盖新请求。这里只安排生命周期复用，不改变检测发起条件或新增自动检测。
+
+**关联复核结论。** 两 Hook 的 owns 同时检查控制器身份、当前 enabled 和作用域，finally 仅释放自己的控制器。取消先撤销所有权，所以重新发起后旧响应不能覆盖新结果；公共能力必须保留这一顺序，而非只在响应后检查 signal。结果校验和 canApply 留在业务 Hook：已配置检测拒绝任何 connectionToken 字段，草稿工具检测要求有效 token，webSearch 不可回填。后端使用同一实例并发名额和断连 signal，但前端取消不等同于后端已释放名额，不能自动重试 409。U01 的凭据规范化决定 token 同值，U05 的持久写入回读不适用于本检测。源码未确认迟到响应串入；没有发起检测或观察浏览器竞态。
+
+## U07 Runtime 材料 Reader 的单 Worker 所有权
+
+证据入口：[`provider-settings-snapshot-reader.mjs`](../runtime/provider-settings-snapshot-reader.mjs) 的 `ProviderSettingsSnapshotReader`，以及 [`model-relay-material-reader.mjs`](../runtime/model-relay-material-reader.mjs) 的 `ModelRelayMaterialReader`。
+
+二者几乎逐段重复惰性创建一个 Worker、共享正在进行的读取、等待 ready、切换初始化与读取时限、清理消息监听，以及带超时的 close。超时、Worker error/exit 和关闭取消通过 failure 分支触发终止流程；Worker 正常返回 ok:false 的业务/校验否定结果只结束当前读取并 reject，保留可复用的 Worker。关闭都发送协作关闭消息；非 Windows 在 100 毫秒后可终止自己的线程，Windows 必须等待内层 ACL helper 真实退出。2 秒关闭等待到期不释放旧 Worker 所有权，也不能允许替代 Worker 绕过未完成清理。
+
+两份实现分别被 [`provider-settings-watcher.ts`](../src/bootstrap/provider-settings-watcher.ts)、[`model-relay-service.mjs`](../runtime/model-relay-service.mjs) 和 [`model-relay-metrics-authorization.mjs`](../runtime/model-relay-metrics-authorization.mjs) 消费。以后修复超时后监听清理、关闭与读取竞争或旧线程退出归属时，需要同步修改同一套机制；未确认这些路径已经发生运行故障。
+
+建议仅为这两个 Reader 提取单 Worker 读取与关闭的窄宿主能力，两个公开 Reader 继续拥有数据合同与错误映射。Worker 内部的配置校验、材料读取、指纹计算和业务结果不合并，也不扩大可跨线程返回的数据范围。
+
+必须保留的差异：
+
+- 设置快照只返回指纹和安全状态，并有 `readFresh`：先等待已有读取，再请求新快照；不能改成始终复用旧在途读取。
+- Relay 按 Provider 材料和指标身份两种用途返回不同数据。普通预算分别为 2 秒和 750 毫秒，不能统一成宽松默认值。
+- 两者初始化最多 5 秒，Windows 首次读取含 ACL 冷启动最多 7 秒；首次与后续读取不能共用同一宽预算。
+- 设置读取失败带初始化、读取或校验阶段信息；Relay 保留自身安全错误，不透传任意 Worker 异常。
+- 通道/超时失败与业务否定结果的处理分流必须保留；不能把配置校验失败统一改成终止并重建 Worker，否则会改变后续恢复、初始化开销和 Windows ACL helper 生命周期。
+- 指标授权先等待早于样本发起的旧读取，再取得新快照；不能用通用缓存替代新鲜度要求。
+
+后续检查需覆盖设置观察器停止、Relay 整体关闭和指标授权关闭，包括构造中关闭、读取超时、关闭等待超时后再次等待，以及物理退出之前禁止替代实例。现有两个 Worker 都先关闭 ACL helper，预算失败则继续等待真实退出，再关闭 parentPort；不能用外层 Promise 超时替代该资源归属合同。
+
+不将数据库写者、投递只读 Worker 或进程监管器一起迁入该能力。它们的已发送写入、队列容量、确认与终止语义不同，U07 只针对上述两个单读取宿主的已确认重复。
+
+**关联复核结论。** 设置 watcher 的读取失败保留原配置并报告阶段，Relay 刷新失败走 unavailable，指标授权失败返回 invalid_sample；同一读取宿主失败不能强制给三个消费者同一恢复策略。指标样本到达后先等待旧 reading，再启动/共享新的 reading，这个外层因果约束不能由普通 read 合并代替。两个 Worker 在 ACL 关闭等待失败后仍等待真实 helper 退出，再关闭 parentPort；外层 close 的 2 秒拒绝不等于线程已退出。共享能力需同时保留终止中的禁止替换和再次等待，而非 Promise 超时后清空 worker 字段。U16/U17 的 socket/子进程机制不能直接代替 Worker 协议。源码重复成立，未观察物理退出或 Windows ACL 行为。
+
+## U08 配置管理与 CLI 总览的有效默认值投影
+
+证据入口：[`gateway-config.mjs`](../runtime/gateway-config.mjs) 的共享 Schema 与 `validateGatewayConfigStructureDocument`；[`config-management.mjs`](../scripts/config-management.mjs) 的 `readConfigSnapshot`、`loadGatewaySettings`；[`config-metrics-management.mjs`](../scripts/config-metrics-management.mjs)、[`config-webui-management.mjs`](../scripts/config-webui-management.mjs) 的投影函数，以及 [`config-summary.mjs`](../scripts/config-summary.mjs) 的 `gatewayConfigSummary`。
+
+Schema 已定义审批 900 秒、空闲释放 15 分钟、显示 compact、日志 info、指标 365 天与 1,000,000 行等默认值和范围；管理投影、指标/WebUI 投影与 CLI 总览又自行定义这些默认规则。WebUI GET settings、CLI 指标表单和总览消费这些投影，Gateway 则直接从 Schema 默认化结果构造运行配置。目前核查值一致，但以后只调整 Schema 会使展示和运行消费出现漂移风险。
+
+`readConfigSnapshot` 明确只验证、不接收 Schema 返回文档，是为保留原文来源、注释与未配置字段的有意合同，不能视为错误或直接删除。
+
+建议快照同时保留原始文档和 Schema 返回的有效只读文档。有效值投影从后者读取，CLI 总览复用同一投影或同一字段规则；写操作仍修改原始文档，保留 `sourceByDocument`、注释、修订校验和缺省字段不主动写回的语义。
+
+必须保留未配置与显式配置的区别，例如 WebUI 表整体缺失时的“使用命令行默认值”、`enabled: undefined` 以及 `tokenConfigured` 脱敏结果；不能将原始文档整体替换为填满默认值的文档，也不能以要求至少启用一个渠道的启动校验替代管理结构校验。
+
+后续核对路径包括 WebUI 设置查询、CLI 总览与表单预填、Gateway 运行配置，以及管理预览/写入后注释和未配置字段的保留。此次不改变配置文件格式或默认值本身。
+
+**关联复核结论。** readConfigSnapshot 的原文与代理配置原文共同形成 revision，Schema 默认化结果只能作为另一个只读视图，不能替换 revision 输入。loadGatewaySettings 同时消费原始存在性（如是否配置）和有效值；不能直接把整个 document 切换为默认化结果，而应逐字段选择来源。CLI 总览的“跟随默认值/未配置”等文案也依赖缺省事实。结构校验已经拒绝非法原始值，因此展示层默认分支当前不是放宽非法配置的证据；风险是未来默认规则漂移。U09 应单独处理候选字段错误，不能靠删除结构预检解决。本项尚未运行真实配置读写，原文保留和 revision 不变要求须在实施时观察。
+
+## U09 设置输入校验失败的领域错误适配
+
+证据入口：[`config-management.mjs`](../scripts/config-management.mjs) 的身份设置分支和 `optionalStrictString`；[`gateway-config.mjs`](../runtime/gateway-config.mjs) 的 `terminalIdentitySchema`、`codexSchema.superRefine` 与 `validateCodexConfigDocument`；[`webui-management-gateway-route.mjs`](../scripts/webui-management-gateway-route.mjs) 和 [`webui-server.mjs`](../scripts/webui-server.mjs) 的调用与异常出口。
+
+身份设置分支手动校验部分长度、跟随 CLI 版本时的名称和 UA 联动，随后调用共享 Codex Schema。手动失败使用 `ConfigManagementError`，共享 Schema 失败则抛普通 Error。同一联动规则已有两处实现，而错误类型决定了 WebUI 的 HTTP 状态和字段反馈。
+
+具体源码推导：在身份请求其他字段、现有配置、修订和授权均有效时，`terminalIdentity: "bad terminal"` 通过管理层长度判断，被共享正则拒绝；普通 Error 落入 WebUI 顶层的 500 `internal_error`。65 字符的标识则先触发管理层 400 `too-long`。管理白名单只检查设置种类，不提前检查该字段格式；预览、确认重演和最终应用均消费相同设置入口。没有实际发起 HTTP 请求，以上为完整调用链推导，非实测状态码。
+
+这使用户输入格式错误被当作内部故障，缺少可修正的字段反馈。失败发生在配置写入前，不表示非法配置已经落盘。CLI 身份表单也消费同一设置入口，其即时长度提示不能覆盖共享格式规则。
+
+建议共享配置校验暴露受控的校验失败类型与字段路径；管理边界仅将本次输入构造出的候选字段失败映射为 `ConfigManagementError`。长度、格式和联动约束统一遵循共享规则，再删除管理分支的重复联动判断；CLI 可以保留即时输入提示。对既有配置损坏、IO 故障、并发冲突和未知异常保持各自分类，不能一律改成 400，也不能向用户透传原始异常内容。
+
+后续检查需覆盖合法身份、不合法格式、超长输入、跟随版本联动、旧配置损坏及冲突，并区分预览拒绝、写入前拒绝与写入结果未知。U09 比单纯样板代码去重更值得优先处理，因为已经有可从源码确认的错误出口分叉。
+
+**关联复核结论。** updateGatewaySetting 先读取并校验旧配置、核对 revision，再 applySetting、复核完整结构，最后才持久化。必须区分这几个阶段：只能把本次候选输入导致的受控校验失败映射到字段错误，不能捕获整个 updateGatewaySetting 的任意 Schema/IO 异常一律转 400。WebUI preview 注入空写函数、PATCH 高风险确认重演和最终写入均调用此入口，因此问题不限于最终 PATCH。前端正常操作通常在预览阶段就被阻止；只有写入阶段收到该 500 才会触发 U05 的未知写入门禁，不能声称所有非法输入都会锁住前端。除空格格式外，optionalStrictString 对非字符串也原样返回，类型错误同样会交给 Schema；共同修复应覆盖格式与类型。上述均为源码推导，没有发 HTTP 或修改配置。
+
+## U10 渠道输入聚合的等价转发层
+
+[`surface-input-coalescer.ts`](../src/surfaces/surface-input-coalescer.ts) 只创建 [`SurfaceInputBatcher`](../src/surfaces/surface-input-batcher.ts)，将 `enqueue`、`flushPending`、`close` 原样转发，并为选项和结果类型增加别名。真正的 Actor 隔离、图片容量、聚合键、提交顺序与关闭规则均在 Batcher 内。
+
+Telegram Bot、飞书 Adapter 和微信 Conversation Adapter 都通过 Coalescer 调用；Surface 根入口又导出它。当前包装层没有独立调度或错误语义，容易让后续维护者误以为存在两种聚合算法。
+
+建议保留一个明确命名的实现和公开入口，同时调整三个渠道的类型与导入，不保留新的兼容包装层。Batcher 当前还暴露图片容量只读属性，统一入口时应明确是否仍属公开能力，避免无意扩大接口。这是低收益收尾项，不应借机改聚合时机、取消或普通消息提交行为。
+
+**关联复核结论。** Telegram Bot、飞书 Adapter、微信 Conversation Adapter 的 enqueue 和 flushPending 均经过此包装，命令前 flush 按 target+actor 而非整个 Conversation 刷新。Batcher.close 会停止接收、刷新 pending 并等待在途集合；包装 close 只 await 同一行为。去掉包装不能顺带把 close 改成丢弃 pending 或改写错误汇总。U03 的附件处理只是上游输入来源，U11 的 Surface 关闭只是生命周期调用方，二者不要求合并到 Batcher。调整清单包括 Surface index 的类型导出、三渠道字段类型/构造和模块文件索引；不需新增聚合算法。未观察实际消息聚合。
+
+## U11 渠道关闭时继续清理与失败汇总
+
+证据入口：[`telegram/bot.ts`](../src/surfaces/telegram/bot.ts) 的 `stop`、[`feishu/surface.ts`](../src/surfaces/feishu/surface.ts) 的 `stopOnce`、[`weixin/surface.ts`](../src/surfaces/weixin/surface.ts) 的 `stopOnce`，以及 [`surface-manager.ts`](../src/bootstrap/surface-manager.ts) 的 `stop` / `stopSurface`。
+
+三个渠道分别手写多项关闭。飞书依次 await 连接、启动任务、Inbox、Adapter、视频、OAuth、媒体、交互、命令中心和输出；任一前项拒绝便跳过后项。Telegram 的 finally 只保证代理 Agent 销毁，前面关闭失败仍会跳过其他清理。微信虽在 input.stop 的 finally 中清理，但 finally 内部仍是可短路的 await 序列。
+
+外层 SurfaceManager 已对各渠道逐一捕获并汇总失败，因此一个渠道不会阻止其他渠道停止；它无法替代渠道内部未执行的资源清理。飞书和微信还缓存 stopPromise，失败后再次调用会返回同一拒绝结果，不能据此认为跳过的资源已经得到再次清理。此处描述的是某个关闭步骤抛错时的源码控制流，没有观察真实 SDK 关闭失败或资源泄漏。
+
+建议统一关闭约定：先撤销准入、取消生产者，按实际依赖顺序尝试剩余自有资源清理，收集所有失败并向外报告；保留未确认资源归属。可复用窄的顺序清理与失败收集工具，但不创建通用 Surface 基类，也不把全部操作直接改成并发 Promise.allSettled。
+
+实施时分别核对 TG 轮询/在途输入、飞书连接/卡片/OAuth、微信回复上下文与输入关闭的顺序，既有总预算和部分启动状态不能改变。共享 Gateway 构造清理已有逐项尝试与 AggregateError 模式，可参照其约定；不能吞掉失败来伪造停止成功。该项是跨渠道失败处理一致性问题，不是三种平台生命周期可以整体合并的证据。
+
+**关联复核结论。** 从 SurfaceManager.stop→各 Surface.stop→输入/媒体/交互/输出 close 追踪，外层失败后保留 attempted，飞书/微信却缓存已拒绝 stopPromise：再次停止可以再次报告失败，但不能补跑被跳过的步骤。需同时定义“已完成步骤”和“仍拥有资源”，不能仅把外层再调 stop 当成恢复。视频关闭和 Telegram lifecycleStop 还在 await 前已启动，后续其他步骤抛错时仍要收集这些在途结果，避免遗留未观察的拒绝。并非每个 close 都易失败：例如 ApplicationSetup 使用 allSettled/有界等待，不能把所有 await 都描述为已证实故障源。本项证明的是抛错分支会短路，未证明真实泄漏；实施应对实际可拒绝的关闭来源定向观察，并保持依赖顺序、总预算及共享 App Server 的非所有权。
+
+## U12 HTTP chunk 背压写入
+
+证据入口：[`chat-io.ts`](../src/provider-proxy/chat-io.ts) 的 `writeChatData`（约 50 行），以及 [`proxy-delivery.ts`](../src/provider-proxy/proxy-delivery.ts) 的 `writeResponseChunk` / `waitForDelivery`（约 21、33 行）。消费者分别是 Chat Bridge、原生 Proxy 和 Model Relay Server。
+
+两处重复检查响应和取消状态、注册 drain/close/error/abort、调用 response.write、等待背压解除，并清理监听和超时。以后修正同步 write 异常或关闭竞争，需要维护两份机制。目前未确认实际交付故障。
+
+建议仅复用支持 string 与 Buffer 的 HTTP chunk 写入原语，保留调用入口及默认预算。Chat 实现在确认背压后启动 timer，另一实现在调用写入前启动并于同步成功后清除；提取前明确实际交付等待的预算合同，保留调用方使生成计时失效的回调。
+
+不得合并普通交付与终态预算、协议收尾、指标与转储状态、WebSocket send 回调或 pipeline。Relay 带正文的 endResponse 和错误响应独立 signal 也不纳入本项。实施后需沿三个消费者核对取消、同步失败、背压、关闭与终态交付，不能只检查共享函数。
+
+**关联复核结论。** 原生 Proxy 在 chunk 到达时暂停上游，串行 forwarding 中交付成功才 resume；Chat Bridge 按转换事件逐条 await；Relay 又有终态专用 controller/timer。因此原语只能承诺本次 write 的接受/背压等待，不能承诺整次响应结束或上游取消。原生 Proxy 还在原语外用 waitForProxyOperation 限制等待，不能因“重复超时”删掉外层预算：它也覆盖忽略取消的在途操作。两个实现错误文案和 settled 防重不同，提取时保留受控阶段类型及防重收尾，不统一整条指标状态机。未观察实际断连或背压。
+
+## U13 审查运行树的选择规则
+
+证据入口：[`sqlite-request-metrics-store.ts`](../src/observability/sqlite-request-metrics-store.ts) 的 `metricsWriteScopes`（约 233 行），以及 [`sqlite-auto-approval-review-metrics.ts`](../src/observability/sqlite-auto-approval-review-metrics.ts) 的 task/session summary 与私有 `summary`（约 59–82 行）。[`request-metrics-writer.ts`](../src/observability/request-metrics-writer.ts) 的 `waitForCurrentWritesInScope` 消费前者；Bootstrap 完成卡先等待该写入范围，再读取后者的审查统计。
+
+两处分别维护审查会话的四来源根 Turn：审查轮次、官方执行轮次、有 Turn 的模型请求、子代理关系的父轮次；随后按精确 parent_thread_id 与 parent_turn_id 递归，用 UNION 去重。Task 模式也重复精确根 Thread/Turn 的后代规则。将来只调整一边，会使汇总记录与判断写入缺口的范围不同，进而影响 usage.coverage。目前源码范围一致，没有确认统计错误。
+
+建议仅在 Observability 内共享纯 seed/CTE 片段，不建立通用 SQL 构造器或物化运行树。保留 sessionReview 根 Thread 通配值，以覆盖没有留下数据库行的失败；普通 session 的线程树、pendingParentTurns、历史完整性、事件和用量覆盖率各自独立。写入失败只计算初始 watermark 内的任务，取消等待不能取消 SQL 写入。
+
+实施需同时核对写入水位、失败归属、任务/会话审查摘要和完成卡降级路径，不能把普通请求统计排除审查用途的规则改掉。
+
+**关联复核结论。** Writer 先捕获 enqueuedCount，等待写入，再通过数据库解析范围并检查该水位内失败；Bootstrap 只在 persisted 为 false 时降低 summary.usage.coverage。摘要自身的 coverage 另由已观察轮次、连续性、完成标志、待定父轮次和历史完整性计算，不能用写入水位成功替代。两个查询需要共享的是根和后代选择，不是输出结果：sessionReview 的写入失败匹配保留根 Thread 通配，摘要仍逐 Turn 聚合。共享 CTE 应保证参数顺序及 UNION 去重，不要顺手改成 UNION ALL 导致菱形/循环关系重复累计。关联范围当前一致，属于预防漂移，没有实测指标遗漏。
+
+## U14 Gateway 与 Codex 版本兼容谓词
+
+[`check-gateway-version.mjs`](../scripts/check-gateway-version.mjs) 约 35 行与 [`source-update.mjs`](../scripts/source-update.mjs) 约 999 行分别定义 `isGatewayVersionCompatible` 和配套 `escapeRegExp`。二者实现相同规则：基础版本相等，或追加受控的 -fixN / -rc.N 后缀。
+
+开发静态门禁和用户更新器 validate-candidate 阶段分别消费这两份规则。以后版本政策改变，可能出现门禁接受而更新器拒绝的漂移；当前表达式一致。
+
+建议提取 scripts 内无 I/O 的纯谓词，核对现有导出消费者和 npm 文件清单。官方升级仅接受稳定版、Gateway 后缀和候选防降级阶段排序是不同规则，不得用一个宽松 SemVer 判断替代。实施时覆盖静态门禁与更新候选判定，版本同步脚本的解析规则只在确认同一合同后复用。
+
+**关联复核结论。** npm check 在 TypeScript 检查后调用版本检查器；更新器在构建候选前直接调用本地谓词。前者还核对 package.json 与 src/version.json 相等，后者另核对候选提交和降级限制，这些不是同一纯谓词能承担的职责。共享模块应无顶层读文件副作用，不能让更新器 import 会立即读取当前 package 的 check 脚本。更新器随 npm 包交付，新增直接依赖须进入 package files；仅源码 check 能找到文件不足以证明已安装更新入口可用。U15 的构建阶段复用独立于本版本策略。当前两个表达式一致，未确认兼容故障。
+
+## U15 源码取得后的安装构建阶段
+
+证据入口：[`install.sh`](../install.sh) 约 158 行、[`install.ps1`](../install.ps1) 约 132 行，以及 [`source-update.mjs`](../scripts/source-update.mjs) 的 `buildCheckout`（约 853 行）。三处维护相同顺序：确认 npm ignore-scripts、安装根依赖、按设置安装 Hook、Gateway build/check、WebUI 安装/build、检查两个产物入口。
+
+这使必要构建步骤及脚本禁用政策需要跨 Shell、PowerShell、JavaScript 同步。建议仅收敛仓库取得后的阶段定义和执行入口；入口必须能在依赖未安装时加载，不能依赖 dist 或尚未安装的包。
+
+安装器继续拥有工具检查、克隆、平台操作与本次 checkout 的失败清理；更新器继续拥有候选身份、取消、备份、切换和恢复。构建执行须保留更新取消信号、既有进度/错误反馈和命令运行方式。`install:global --prepared` 只消费已有产物，不得借去重重新安装或构建。显式 CODEX_BINARY 处理也不应被改写。
+
+后续实施需联动首装、更新、install-global-source、prepare-package 与 npm 生命周期，并按 CI 固定 Node/npm 观察实际路径。没有运行安装或确认构建产物。
+
+**关联复核结论。** 更新链先验证候选版本/提交/快进关系，再 buildCheckout，再 inspectStagedInstallation；提取构建不能把安装预检提前到 dist 尚未生成时，也不能把运行入口改成加载未安装依赖。首装与更新的三份阶段序列确实一致，但 prepare-package 先检查已有依赖、仅在必要时安装，且显式 ignore-scripts 时不构建；它不是第四份等价的全量构建流程。install-global-source 的 prepared 分支只校验并消费产物，还拥有 Codex 与原生产物检查。建议仅共享三份相同阶段，保留这些相邻入口的不同合同。与 U14 关联的是候选构建中的 check，不是版本与安装事务应整体合并；源码读取可确认依赖顺序，尚未观察任一平台安装恢复。
+
+## U16 一次性私有 IPC 交换的底层收尾
+
+证据入口：[`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 的 `readSupervisorResponse`（约 917 行），以及 [`private-ipc.mjs`](../runtime/private-ipc.mjs) 的 `requestPrivateIpcJson`（约 233 行）；Model Relay 控制已使用后者。
+
+Supervisor 的 inspect/ensure/release/apply 一次请求另行维护连接、写入、字节上限、超时、取消与 socket 销毁。现有差异不能直接抹平：Supervisor 在创建连接后计时，等 EOF 返回原文；共享 helper 将异步端点校验纳入预算，以换行完成 JSON 交换，失败拒绝为未确认。协议不兼容与传输结果未知也不是同一种错误。
+
+建议先在现有 private-ipc 边界收敛有界连接、收帧和取消收尾，明确帧边界、无效 JSON、端点验证预算后再复用。Supervisor 继续负责版本、Provider 身份、拓扑和领域分类。本项是条件性重构建议，尚无运行故障证据。
+
+租约必须保持活连接，Gateway 状态由服务端主动推送，Delivery 必须区分确定未发送与发送后结果未知；这些不能套入完成即销毁或统一返回 undefined 的机制。实施需核对 Windows 描述符/ACL 路径及调用方失败分支，而不能仅替换 helper 名称。
+
+**关联复核结论：降为低优先级，暂不直接替换 helper。** Supervisor 服务端返回换行 JSON 并结束连接，但 inspect 消费端还区分无响应（允许就绪所有者按原预算重试）与有内容但拓扑无效（incompatible）；ensure/release 校验 Provider，apply 校验设置协议及拓扑变更。Relay 控制则另绑定 requestId、digest、动作与字段白名单。公共 JSON helper 当前把解析失败和传输未确认合为拒绝，直接替换会抹掉 Supervisor 的就绪决策。只有先证明可保留这类分类且不增加宽泛选项，才值得提取底层收尾；不要求为去重先建传输框架。Windows 端点验证预算差异仍未实机观察，U07 的 Worker 关闭及 U17 的进程退出不纳入此 IPC 合同。
+
+## U17 自有子进程退出观察
+
+[`process-lifecycle.mjs`](../runtime/process-lifecycle.mjs) 约 262 行、[`windows-service-host.mjs`](../scripts/windows-service-host.mjs) 约 203 行的 `childExitedWithin`，以及 [`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 约 1119 行的 `waitForChildExit`，重复退出状态检查、exit 监听、超时和监听清理。消费者分别是终止升级、Windows 服务停止和 Proxy 收尾。
+
+建议在 process-lifecycle 公开窄的退出观察能力；各所有者决定预算、timer 是否维持事件循环和失败后的资源处理。现有实现对于 signalCode、注册后复查、超时后二次检查与 unref 有差别，统一前必须逐项明确，不能当作完全等价直接替换。
+
+该项优先级低。IPC 优雅停止、stdin EOF、TERM/KILL 升级、Unix 进程组消失、输出管道 close 与更新/卸载安全边界均不等价，继续由原所有者处理。没有观察跨平台进程停止故障。
+
+**关联复核结论。** Windows host 的 control.send 成功只是停止请求已交付，随后仍等待子进程退出，失败才调用 terminateChildProcess；Supervisor 的 Proxy 先关闭 stdin，等待 1 秒后升级终止；process-lifecycle 在 TERM 和 KILL 后分别观察。故统一操作只能返回是否观察到 child 退出，不应自己发信号或清除进程树所有权。Supervisor 外层 stopProxyChild 已检查 exitCode 与 signalCode，其内层 helper 只检查 exitCode，不能据此单独宣称信号退出一定导致错误升级；需要结合调用间竞态观察。timer.unref 差异影响宿主是否继续存活，保留为所有者决定。无需把输出管道 close 当成 exit，同样不能因 exit 成功就证明整棵进程树消失。
+
+## U18 待生效选择与原生 Queue 的互斥操作
+
+证据入口：[`conversation-service.ts`](../src/application/conversation-service.ts) 的 `togglePlanMode`、`selectModel`、`selectEffort`、`selectFastMode`（约 1362、1433、1450、1467 行），以及 [`thread-queue-service.ts`](../src/application/thread-queue-service.ts) 的 `rejectPendingOverrideChange`。
+
+四处重复取得 Conversation 锁、要求空闲、选择前读取 Queue、执行异步选择、选择后再次读取 Queue，并在受控 queue.pending-overrides 冲突时清除待生效选择。后查必须保留：读取模型目录或预设期间，原生客户端可以改变 Queue，本地锁无法阻止。待生效选择最终经 startNewTurn/turnOverrides 传给 Client，维护的是同一“原生 Queue 与渠道待生效覆盖互斥”不变量。
+
+建议只在 ConversationService 内提取私有受保护选择操作，让四入口提供具体选择动作，不新增跨模块事务框架或 Gateway Queue 副本。当前未确认冲突行为失效。
+
+保留 fast status 的锁外只读分支；startPlan 还会启动 Turn，不能机械套入只返回状态的函数。Provider 切换和用户默认 Fast 设置仍由具体选择实现负责，冲突不能反向补偿已写入默认设置，也不能把任意异常当作需要撤销选择。实施需核对四个入口和最终 Turn 覆盖消费。
+
+**关联复核结论。** 四入口确实重复相同局部保护，但不是跨 App Server 的原子事务：两次 Queue 读取之间及之后仍允许原生客户端活动。selectFastMode 在设置 pending 前可能已写入官方默认速度；冲突后 clearPendingSelections 只清本地模型与协作模式选择，不能声称回滚整个选择操作。最终 startNewTurn 在 ensureSession 后复核活动状态和 Provider 一致性，调用 startTurn 成功后才 markApplied，这些下游守卫必须保留。建议把提取命名为“受保护的选择操作”，不包装成保证跨端原子性的事务。U02 的页面快照不参与此保护，U19 的 unavailable 分类会影响 hasItems 的结果，实施顺序宜先稳定错误分类再提取四入口。未运行原生客户端并发场景。
+
+## U19 Queue 官方错误识别边界
+
+证据入口：[`thread-queue-service.ts`](../src/application/thread-queue-service.ts) 的 `queueUserFacingError`（约 349 行）和 `hasItems`；[`conversation-service.ts`](../src/application/conversation-service.ts) 的 `dispatchNativeQueueBeforeRelease`（约 1861 行）；[`client.ts`](../src/codex-client/client.ts) 的 Queue 请求和 [`provider-routing-client.ts`](../src/codex-client/provider-routing-client.ts) 的转发。
+
+Application 通过官方英文异常正文识别 unavailable、empty、full、busy、not-found 与 reorder-conflict；后台释放又单独匹配 queue is empty。普通命令、释放和 Revert Queue 读取因此依赖协议文字。官方证据来自锁定源码 83086188ae0614bd882818ff1aa23f3194962012，路径相对于其 codex-rs 目录：
+
+- app-server/src/request_processors/thread_queue_processor.rs 的活动 Turn、Queue 不可用分支，以及 ext/queue/src/service.rs 的空队列、条目不存在分支。
+- thread-store/src/queue_store.rs 的 LocalQueueStore.enqueue（约 103 行）将存储 RowNotFound 转为 InvalidRequest，生成队列容量超限文字。
+- state/src/runtime/queued_items.rs 的 reorder（约 181 行）在条目集合不匹配时生成 InvalidInput；thread-store/src/queue_store.rs 的 reorder（约 141 行）将其转换为 ThreadStoreError::InvalidRequest。
+- thread_queue_processor.rs 的 queue_error（约 325 行）将上述存储 InvalidRequest 转为 RPC invalid request，使 full/reorder-conflict 的文字到达 Client。
+
+以上已核对本地锁定源码；未获取其他版本或运行上游测试。分类实现需要同时考虑错误结构和文字，不能仅凭任意异常包含同一英文片段就认定来源。
+
+建议由 Application 的窄 Queue 端口定义稳定失败分类，Client 在 RPC 适配处按锁定错误结构与文字转换，Provider Routing 原样传播。Application 保留分类到用户文案、后台释放行为的映射，不再识别官方英文。不要扩成所有 RPC 的通用错误框架。
+
+用户 queue start 遇 empty 应反馈，后台释放遇 empty 继续协调；hasItems 对 unavailable 的既有策略不能扩展到未知错误。读取的有界重试与写操作不重试保持不变，写结果未知及本地响应裁剪失败不能伪装成确定未写入。Revert 和 Routing 其他英文分类属于不同业务，不纳入 Queue 提取。实施需核对命令、释放、回退与 Provider 转发四条消费路径。
+
+**关联复核结论。** 六个 Client 请求中 list 允许 overload 重试，其余写操作关闭；RPC 返回后还有 toThreadQueue* 裁剪/验证，list 另有页数限制。稳定错误适配应限定在能证明来自 Queue RPC 的错误边界，不能把响应转换失败、Provider 路由失败或任意 Error 文本都分类成官方 empty/unavailable。Provider Routing 按 Thread 转发，Application 的 Queue、Revert 读取共用映射；后台释放另将 item-not-found 视为 busy，只有 empty/unavailable 才进入后续本地活动与路由空闲复核，不能把分类成功理解为可以直接释放。关联 U18 时须保留 unavailable 的现有政策，不扩大为所有连接失败均视空。锁定官方错误来源沿用同一基线的已读证据，未新增协议支持或观察真实 RPC 失败。
+
+## 已检查且不建议合并的部分
+
+- 渠道命令名称与说明已有 Application 命令目录和 Surface 共享帮助入口；不能仅为减少菜单文件而将平台交互形式合并。
+- 投递策略已有共享判定入口；平台 Outbox 的正文流状态机有不同语义，保留独立实现。
+- 受管 Provider Key 校验已复用 [`model-provider-definitions.mjs`](../runtime/model-provider-definitions.mjs) 的 `isManagedProviderApiKeyValid`。DS/OCG 与 CCG/CLP 的格式规则不同，自定义 Provider 又有不同支持范围。
+- 绑定库、展示缓存、指标库、计划任务库与投递箱拥有不同数据、事务和恢复合同；文件同为 SQLite 不构成合并存储的理由。
+- 不将有界 Worker 或异步 Hook 的相似结构作为统一生命周期框架的充分理由。写者、只读 Worker、流式检测和普通读取的取消、未知结果及实际退出要求不同。
+- Core 的断线、Revert、解绑/归档清理集合不同，不能机械合并。生产重连路径传 affectedThreadIds；断线保留 phase/消息去重可能服务于重放，Revert 明确保留活动 Turn 等待官方完成。目前不足以判定清理遗漏，未列为已确认缺陷。
+- Approval 的原始 RPC 拒绝、业务归属拒绝、平台交互安全默认值位于不同信任边界；不因 switch 相似合并。Event Bus 容量队列也不能代替审批期限与取消协调。
+- 服务选择和顺序已有共享定义；all 在安装、启动、停止、状态查询中的含义不同。Unix 模板、Windows Job/IPC、launchd 与 systemd 的外观相似不能抹平进程所有权。
+- [`logger.ts`](../src/observability/logger.ts) 的 `safeErrorMetadata` 与 [`surfaces/error-metadata.ts`](../src/surfaces/error-metadata.ts) 有相似异常类型裁剪，但允许输出的字段不同：前者不保留 message，后者可呈现明确的 `UserFacingError` 和白名单业务分类。Telegram 还基于 SDK 错误追加安全分类。当前不建议用同一个宽松序列化器替换，以免扩大日志或外部错误的暴露范围。
+
+## 集中处理建议
+
+优先处理 U09 的输入错误出口分叉和 U11 的关闭失败短路。随后按边界分别处理 U01/U08/U14 的共享规则、U05/U06 的前端状态、U13 的统计范围。Queue 先稳定 U19 的错误分类，再处理 U18 的局部选择保护。U07 涉及资源所有权，应独立评审；U15 涉及安装事务，单独安排真实安装/更新观察。U02/U03/U04/U10/U12/U17 为低优先级局部去重；U16 仅在保留错误分类且不增加宽泛传输框架的前提下考虑，不作为必须实施项。
+
+实施前重新核对证据对应的源码版本与调用方；审查结论不构成改变凭据规范化、存储格式、审批策略或检测副作用的授权。当前仅完成审查和文档整理，尚未调整这些实现。
+
+| 关联项 | 共同边界 | 实施时必须联动的部分 |
+| --- | --- | --- |
+| U01、U06、U09 | 凭据输入、检测与错误适配 | Key 规范化、连接 token、保存预览 HMAC 保持同值；共享校验不能泄漏普通内部异常 |
+| U05、U08、U09 | 设置读取→预览→写入→回读 | 原始配置与有效默认值分开；revision 不变不等于回读失败；确定未写入与结果未知分开 |
+| U03、U10、U11 | 附件→输入聚合→渠道关闭 | 原始明文字节数与清理后大小分开；关闭仍刷新已接收输入并处理自有资源 |
+| U07、U11、U16、U17 | 取消与资源释放 | 共享的是明确相同的窄操作，Worker、Surface、Socket、子进程的所有权及成功证据不统一 |
+| U02、U18、U19 | Queue 选择、互斥与失败分类 | 页面快照不替代权威列表；分类不改变释放决策；本地锁不承诺跨端原子性 |
+| U04、U14、U15 | 安装/更新与运行前检查 | 无依赖入口、npm 文件清单、候选构建和只读数据库预检顺序保持完整 |
+| U12、U13 | 交付状态与指标完整性 | 背压等待、生成完成、写入水位和统计 coverage 各自承担不同证据，不能互相替代 |
+
+## 审查覆盖与证据限制
+
+初审覆盖全部 18 个 src 一级模块与主要工程入口。会话链、数据链、平台工具链由只读协作审查完成，主代理审查 Bootstrap、Config、Surfaces、WebUI 与管理后端并核对关键发现。下表说明模块职责、公开接口及主要链路的覆盖，逐项关联复核状态以问题清单为准；两者均不代表所有文件和所有分支逐行审计。
+
+Astra 独立复查覆盖 U01–U19 的重复实现、关键调用方、下游消费与建议边界，主代理核对其指出的修正并合入对应条目。该独立复查未重新执行全仓初审或静态检查，不为下表全部模块覆盖提供第二份独立证明。
+
+| 范围 | 已检查的主要链路 | 结论与剩余限制 |
+| --- | --- | --- |
+| application | 命令/输入→Conversation→选择与 Turn；Queue/Revert/Hook/任务用例、后台释放 | U02/U18/U19；未穷举模型目录、Reserve 全状态和全部命令反馈 |
+| conversation-core | 通知归约、恢复、文本与终态、计时、断线/回退/Thread 生命周期 | 归约已有集中边界；清理差异见上，未完整审计长期缓存上界 |
+| session-routing | ensure/resume、新建、前后台容量、转移、解绑/归档、订阅恢复、派生缓存 | 生命周期锁和 Workspace 校验已有共享；未穷举接管失败与存储异常组合 |
+| approval | 请求登记→祖先归属→交互排队→决定；超时、取消、迟到决定 | 状态机已有共享；未观察真实平台送达和取消 |
+| policy | Actor/允许名单校验、Workspace 整体替换与冻结、选择器 | 现有小型策略保持独立，无新增项 |
+| codex-client | Transport/RPC、Provider 路由、Thread/Turn/Queue/History、通知、审批适配 | U19；未逐分支审计全部 Plugin/MCP/Hook 字段、图片上传和 Windows Duplex |
+| codex-protocol | 受控导出、版本、公开 CLI 合同、Queue 锁定错误来源 | 未重新生成或逐个比较生成文件，不把类型存在视作支持证明 |
+| event-bus | 有界队列→独立消费者→预算释放→drain/close | 容器与跨订阅预算分工明确；未观察拥塞场景 |
+| model-api | 原生 Chat/Responses 校验、思考策略、双向转换、私有项与用量尾帧 | 已有共享规则；未穷举所有图片/工具组合 |
+| provider-proxy | HTTP/WS 出站→响应观察→背压→终态指标；Chat Bridge 与转储接口 | U12；协议收尾保留独立，未逐项审计全部 Header/正文捕获 |
+| model-relay | 鉴权/预留→模型解析→公平等待→材料复核→出站→生成与交付收尾 | 租约、执行许可、指标槽不同；未观察撤销、计费和网络交付 |
+| observability | 指标 Writer/Worker/SQLite→范围查询→审查摘要；额度与用量汇总 | U13；未穷举 Schema、保留裁剪、排序和额度估算数学 |
+| delivery | 接受→Journal/Worker→授权派发→ACK/未知结果；维护与只读查看 | 编解码与读取已有共享；未逐条审计 SQL 状态转换或实际重启恢复 |
+| scheduled-tasks | 规范化/时间计算→自动/手动领取事务→派发→结果/恢复→清理 | 业务领取入口已复用；未运行 DST/崩溃或穷举更新 SQL |
+| storage | Memory/SQLite binding、提交后内存更新、启动加载、展示缓存 | U04；未观察损坏、并发写入和跨平台权限 |
+| bootstrap | 组件装配、Surface 注册/停止、重连/恢复、账户查询、持久交互、完成卡 | U11/U13 消费已核对；装配所有权不宜变成通用基类 |
+| config | Schema→运行投影、管理投影/CLI 总览、热加载分类 | U08/U09；未逐个字段审计完整配置与所有向导 |
+| surfaces | 三渠道输入/附件/聚合、命令、审批身份复核、投递策略、停止链 | U03/U10/U11；平台下载、加密、卡片、reply window 保持独立 |
+| WebUI 前端 | 路由/导航/页面主要请求链、API/AuthGate、管理与检测 Hook、Queue/流量读取、组件复用边界 | U05/U06；未逐行审查所有视觉组件、全部文案及无障碍，也未运行浏览器 |
+| WebUI 后端 | 服务入口→来源/Token/限流→管理确认→设置/Provider 路由→审计与异常出口 | 已核对 U05/U09 的错误合同；未穷举每个管理动作和字段 |
+| Runtime | App Server/Gateway 所有权、停止预算、私有 IPC/路径、Supervisor、Provider 材料/凭据入口 | U01/U07/U16/U17；未完整展开 Provider 启停、账户事务、ACL/TOCTOU 和原生宿主 |
+| CLI/bin/服务模板 | 命令分发→服务选择→平台控制；Unix 八份模板与 Windows host | 服务顺序已集中；未逐一审计非服务子命令、全部 Doctor 项或运行服务管理器 |
+| 安装/更新/卸载/npm | 两安装器、源码候选/构建/切换入口、prepared 生命周期、卸载身份与取消 | U14/U15；未运行安装/删除，未穷举所有恢复分支 |
+| 生成/静态检查/Hook/CI | 协议生成与比较共享引擎、边界检查、verify 计划、Hook、三个工作流和升级验证入口 | 未完整审计检查器解析与 PR 生成算法，未验证远端保护或运行 CI |
+| 文档与独立筹备目录 | 根索引、模块职责与主题文档；im 的独立筹备定位 | im 尚无当前 Gateway 实现可合并；未扩展审查旧快照、备份、依赖目录或技能目录 |
+
+在上述源码基线上，模块与运行时边界静态检查通过，其允许表、公开入口、无循环、Surface 隔离和目录依赖检查没有报错；这不是功能或安全通过的证据。文档检查只核对文档结构与引用。没有运行功能测试、真实 HTTP、浏览器、服务或三平台关闭场景，没有读取真实配置/凭据，也没有宣称用户路径已通过。
+
+至此全部一级模块与主要工程入口均有上述覆盖记录；仍未穷尽的分支已在表中标明。本记录是用于集中治理重复规则的架构审查，不是全仓安全审计或逐行缺陷清单。后续新增建议仍需给出实际调用方、共享合同、下游影响和应保留的差异。

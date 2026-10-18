@@ -20,6 +20,7 @@
 
 ## 协议与设计
 
+- [`docs/consolidation-review.md`](docs/consolidation-review.md)：重复实现与统一边界的审查记录、待处理建议及覆盖限制；实现暂不调整。
 - [`docs/unified-model-management-design.md`](docs/unified-model-management-design.md)：第三方模型统一管理的现行合同、设计取舍、关联审查结论与证据边界，明确默认保护、调用影响与暂不支持范围。
 - [`docs/rust-migration-retrospective.md`](docs/rust-migration-retrospective.md)：Rust 迁移暂停结论、问题复盘、已有成果与网关重写建议；不是现行实施计划。
 - [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。
