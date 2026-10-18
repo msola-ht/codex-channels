@@ -1,6 +1,6 @@
 import { DeliveryReceipt } from "../delivery-receipt.js";
 import type { Logger } from "pino";
-import type { MessagePhase, OutputEvent } from "../../conversation-core/index.js";
+import type { OutputEvent } from "../../conversation-core/index.js";
 import type { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { surfaceDiagnosticContext } from "../diagnostics.js";
 import type { TurnReplyTargets } from "../turn-reply-targets.js";
@@ -15,14 +15,12 @@ import {
 
 const feishuStreamFlushDelayMs = 300;
 const maximumFeishuActiveStreams = 100;
-const maximumFeishuFinishedStreams = 100;
 
 interface FeishuStreamState {
   chatId: string;
   threadId: string;
   turnId: string;
   itemId: string;
-  phase?: MessagePhase | null;
   text: string;
   cardText: string;
   flushGeneration: number;
@@ -34,24 +32,14 @@ interface FeishuStreamState {
   timer?: NodeJS.Timeout;
   failed: boolean;
   deliveryUncertain?: boolean;
-  completionFooter?: string;
-  confirmedFooter?: string;
   terminalOutcome?: "confirmed" | "failed";
+  terminalSettled?: Promise<void>;
   truncationNotice?: string;
-}
-
-interface FinishedFeishuStream {
-  chatId: string;
-  threadId: string;
-  cardId: string;
-  sequence: number;
-  summary: string;
 }
 
 /** 正文流状态由此组件独占；共享 Outbox 的投递队列、关闭边界与降级发送。 */
 export class FeishuTextStreams {
   private readonly streams = new Map<string, FeishuStreamState>();
-  private readonly finishedStreams = new Map<string, FinishedFeishuStream>();
   private streamCapacityWarningIssued = false;
 
   constructor(
@@ -79,13 +67,13 @@ export class FeishuTextStreams {
         state.chatId,
         (signal) => this.flushStream(key, true, false, signal),
         true,
+        { settled: () => { if (this.streams.get(key) === state) this.streams.delete(key); } },
       );
     }
   }
 
   clear(): void {
     this.streams.clear();
-    this.finishedStreams.clear();
   }
 
   clearThread(threadId: string): void {
@@ -93,9 +81,6 @@ export class FeishuTextStreams {
       if (state.threadId !== threadId) continue;
       if (state.timer) clearTimeout(state.timer);
       if (this.streams.get(key) === state) this.streams.delete(key);
-    }
-    for (const [key, state] of this.finishedStreams) {
-      if (state.threadId === threadId) this.finishedStreams.delete(key);
     }
   }
 
@@ -126,7 +111,6 @@ export class FeishuTextStreams {
       threadId: event.threadId,
       turnId: event.turnId,
       itemId: event.itemId,
-      ...(event.phase === undefined ? {} : { phase: event.phase }),
       text: "",
       cardText: "",
       flushGeneration: 0,
@@ -135,9 +119,6 @@ export class FeishuTextStreams {
       cardCount: 0,
       failed: false,
     };
-    if (event.phase !== undefined) {
-      state.phase = event.phase;
-    }
     const previousText = state.text;
     const appended = appendBoundedStreamText(state.text, event.text);
     state.text = appended.text;
@@ -176,9 +157,6 @@ export class FeishuTextStreams {
     }
     state.truncationNotice = completeFilePlanned ? feishuPreviewNotice : feishuTruncationNotice;
     const bounded = boundedStreamText(event.text);
-    if (event.phase !== undefined) {
-      state.phase = event.phase;
-    }
     const completedText = bounded.text;
     state.truncated = bounded.truncated;
     if (completedText.startsWith(state.text)) {
@@ -197,12 +175,15 @@ export class FeishuTextStreams {
       delete state.timer;
     }
     state.flushGeneration += 1;
+    let resolveTerminal!: () => void;
+    state.terminalSettled = new Promise<void>((resolve) => { resolveTerminal = resolve; });
     let released = false;
     const settled = (): void => {
       if (released) return;
       released = true;
       if (state.terminalOutcome === undefined) state.terminalOutcome = "failed";
       if (this.streams.get(key) === state) this.streams.delete(key);
+      resolveTerminal();
     };
     const accepted = this.delivery.enqueue(
       state.chatId,
@@ -240,102 +221,57 @@ export class FeishuTextStreams {
     chatId: string,
     threadId: string,
     turnId: string,
-    footer: string,
-    onSettled: () => void,
-  ): boolean {
+    onSettled: (failed: boolean) => void,
+  ): void {
     const matching = [...this.streams].filter(([, state]) =>
       state.chatId === chatId && state.threadId === threadId && state.turnId === turnId
     );
-    const footerTarget = matching.findLast(([, state]) =>
-      state.phase !== "commentary" && state.phase !== "partial_answer"
-    );
     let pending = matching.length;
-    for (const [key, state] of matching) {
-      let released = false;
-      const settled = footerTarget === undefined ? undefined : (): void => {
-        if (released) return;
-        released = true;
-        if (--pending === 0) onSettled();
-      };
-      if (footerTarget?.[0] === key) {
-        state.completionFooter = footer;
-      }
-      if (state.timer) {
-        clearTimeout(state.timer);
-        delete state.timer;
-      }
-      state.flushGeneration += 1;
-      const accepted = this.delivery.enqueue(
-        state.chatId,
-        async (signal) => {
-          if (state.terminalOutcome !== "failed") await this.flushStream(key, true, true, signal, state);
-          if (footerTarget?.[0] === key && state.confirmedFooter !== footer) {
-            await this.sendMarkdown(state.chatId, footer, maximumFeishuMessageChunks, undefined, undefined, signal);
-            state.confirmedFooter = footer;
-          }
-        },
-        true,
-        settled === undefined ? undefined : { settled },
-      );
-      if (!accepted) settled?.();
+    if (pending === 0) {
+      onSettled(false);
+      return;
     }
-    if (footerTarget !== undefined) {
-      return true;
-    }
-    const key = finishedStreamKey(chatId, threadId, turnId);
-    const completed = this.finishedStreams.get(key);
-    if (!completed) {
-      return false;
-    }
-    let released = false;
-    const settled = (): void => {
-      if (released) return;
-      released = true;
-      onSettled();
-    };
-    const accepted = this.delivery.enqueue(
-      chatId,
-      async (signal) => {
-        if (this.finishedStreams.get(key) !== completed) {
-          await this.sendMarkdown(chatId, footer, maximumFeishuMessageChunks, undefined, undefined, signal);
-          return;
+    let failed = false;
+    const completionReceipt = DeliveryReceipt.current();
+    // 正文平台失败只取消自身；授权、持久检查点和关闭仍沿完成事件的边界处理。
+    DeliveryReceipt.without(() => {
+      for (const [key, state] of matching) {
+        let released = false;
+        const settled = (): void => {
+          if (released) return;
+          released = true;
+          if (state.terminalOutcome === undefined) state.terminalOutcome = "failed";
+          failed ||= state.terminalOutcome === "failed";
+          if (this.streams.get(key) === state) this.streams.delete(key);
+          if (--pending === 0) onSettled(failed);
+        };
+        if (state.terminalSettled !== undefined) {
+          // 已入队的完整正文由原回执拥有；等待其实际结束，不能因完成卡取消提前释放回复目标。
+          void state.terminalSettled.then(settled);
+          continue;
         }
-        try {
-          await this.messagePort.finishStreamingCard(
-            completed.cardId,
-            completed.sequence + 1,
-            completed.summary,
-            footer,
-            signal,
-          );
-        } catch (error) {
-          await this.sendMarkdown(chatId, footer, maximumFeishuMessageChunks, undefined, undefined, signal);
-          throw error;
-        } finally {
-          if (this.finishedStreams.get(key) === completed) this.finishedStreams.delete(key);
+        if (state.timer) {
+          clearTimeout(state.timer);
+          delete state.timer;
         }
-      },
-      true,
-      { settled },
-    );
-    if (!accepted) settled();
-    return true;
-  }
-
-  private async withStreamFooter(
-    state: FeishuStreamState,
-    signal: AbortSignal | undefined,
-    sendBody: () => Promise<void>,
-  ): Promise<void> {
-    try {
-      await sendBody();
-    } finally {
-      if (!this.isClosed() && !signal?.aborted && state.completionFooter !== undefined) {
-        const footer = state.completionFooter;
-        await this.sendMarkdown(state.chatId, footer, maximumFeishuMessageChunks, undefined, undefined, signal);
-        state.confirmedFooter = footer;
+        state.flushGeneration += 1;
+        const receipt = completionReceipt === undefined ? undefined : new DeliveryReceipt(async (checkpoint) => {
+          try { await completionReceipt.checkpoint(checkpoint); }
+          catch (error) { completionReceipt.fail(error); throw error; }
+        }, completionReceipt.controller.signal, true);
+        const enqueue = (): boolean => this.delivery.enqueue(
+          state.chatId,
+          async (signal) => {
+            if (state.terminalOutcome === undefined) await this.flushStream(key, true, true, signal, state);
+          },
+          true,
+          { settled },
+        );
+        const accepted = receipt === undefined ? enqueue() : receipt.run(enqueue);
+        receipt?.release();
+        if (!accepted) settled();
       }
-    }
+    });
   }
 
   private async flushStream(
@@ -350,20 +286,17 @@ export class FeishuTextStreams {
     if (terminal && state.terminalOutcome === "confirmed") return;
     if (terminal && state.terminalOutcome === "failed") throw new Error("飞书正文终态未确认，禁止自动重发");
     try {
-      await this.flushStreamState(key, state, terminal, fallbackPost, signal);
+      await this.flushStreamState(state, terminal, fallbackPost, signal);
       if (terminal) state.terminalOutcome = "confirmed";
     } catch (error) {
       if (terminal) {
         state.terminalOutcome = "failed";
-        // A retained failed result cannot own a later Turn's completion feedback.
-        if (this.streams.get(key) === state) this.streams.delete(key);
       }
       throw error;
     }
   }
 
   private async flushStreamState(
-    key: string,
     state: FeishuStreamState,
     terminal: boolean,
     fallbackPost: boolean,
@@ -371,41 +304,35 @@ export class FeishuTextStreams {
   ): Promise<void> {
     if (state.failed) {
       if (terminal && !signal?.aborted) {
-        await this.recoverFailedStream(key, state, fallbackPost, signal);
+        await this.recoverFailedStream(state, fallbackPost, signal);
       }
       return;
     }
     if (!state.cardId && terminal) {
-      if (this.streams.get(key) === state) this.streams.delete(key);
-      await this.withStreamFooter(state, signal, async () => {
-        const remainingMessageBudget =
-          maximumFeishuMessageChunks - state.cardCount;
-        if (fallbackPost && remainingMessageBudget <= 0) DeliveryReceipt.current()?.markContentIncomplete();
-        if (fallbackPost && remainingMessageBudget > 0) {
-          const markdown = state.truncated
-            ? `${state.cardText}${state.truncationNotice ?? feishuTruncationNotice}`
-            : state.cardText;
-          const replyKey = turnKey(state.threadId, state.turnId);
-          const replyTo = this.replyTargets.get(state.chatId, replyKey);
-          await this.sendMarkdown(
-            state.chatId,
-            markdown,
-            remainingMessageBudget,
-            replyTo,
-            undefined,
-            signal,
-            state.truncationNotice,
-          );
-        }
-      });
+      const remainingMessageBudget =
+        maximumFeishuMessageChunks - state.cardCount;
+      if (fallbackPost && remainingMessageBudget <= 0) DeliveryReceipt.current()?.markContentIncomplete();
+      if (fallbackPost && remainingMessageBudget > 0) {
+        const markdown = state.truncated
+          ? `${state.cardText}${state.truncationNotice ?? feishuTruncationNotice}`
+          : state.cardText;
+        const replyKey = turnKey(state.threadId, state.turnId);
+        const replyTo = this.replyTargets.get(state.chatId, replyKey);
+        await this.sendMarkdown(
+          state.chatId,
+          markdown,
+          remainingMessageBudget,
+          replyTo,
+          undefined,
+          signal,
+          state.truncationNotice,
+        );
+      }
       return;
     }
     try {
       const ready = await this.rollStreamingCards(state, terminal, signal);
       if (!ready || this.isClosed() || signal?.aborted) {
-        if (terminal && !ready && DeliveryReceipt.current() && this.streams.get(key) === state) {
-          this.streams.delete(key);
-        }
         return;
       }
       if (!terminal && state.lastSentText !== state.cardText) {
@@ -432,7 +359,7 @@ export class FeishuTextStreams {
     } catch (error) {
       state.failed = true;
       if (terminal && !signal?.aborted) {
-        await this.recoverFailedStream(key, state, fallbackPost, signal);
+        await this.recoverFailedStream(state, fallbackPost, signal);
         if (error instanceof FeishuMarkdownSplitError && fallbackPost
           && state.cardCount < maximumFeishuMessageChunks && !this.isClosed() && !signal?.aborted) {
           this.logger.warn({
@@ -445,36 +372,18 @@ export class FeishuTextStreams {
     }
     if (terminal) {
       try {
-        const footerAtStart = state.completionFooter;
-        await this.finishStreamCard(state, state.cardText, footerAtStart, signal);
-        if (footerAtStart === undefined && state.completionFooter !== undefined) {
-          await this.finishStreamCard(state, state.cardText, state.completionFooter, signal);
-        }
+        await this.finishStreamCard(state, state.cardText, signal);
       } catch (error) {
-        if (this.streams.get(key) === state) this.streams.delete(key);
-        await this.withStreamFooter(state, signal, async () => {
-          if (!this.isClosed() && !signal?.aborted && fallbackPost && !state.deliveryUncertain
-            && state.lastSentText !== state.cardText) {
-            const remaining = maximumFeishuMessageChunks - state.cardCount;
-            if (remaining > 0) {
-              const replyTo = this.replyTargets.get(state.chatId, turnKey(state.threadId, state.turnId));
-              await this.sendPost(state.chatId, state.cardText, remaining, signal, replyTo, state.truncationNotice);
-            }
+        if (!this.isClosed() && !signal?.aborted && fallbackPost && !state.deliveryUncertain
+          && state.lastSentText !== state.cardText) {
+          const remaining = maximumFeishuMessageChunks - state.cardCount;
+          if (remaining > 0) {
+            const replyTo = this.replyTargets.get(state.chatId, turnKey(state.threadId, state.turnId));
+            await this.sendPost(state.chatId, state.cardText, remaining, signal, replyTo, state.truncationNotice);
           }
-        });
+        }
         throw error;
       }
-      if (state.completionFooter === undefined && state.phase !== "commentary"
-        && state.phase !== "partial_answer" && this.streams.get(key) === state) {
-        this.rememberFinishedStream(finishedStreamKey(state.chatId, state.threadId, state.turnId), {
-          chatId: state.chatId,
-          threadId: state.threadId,
-          cardId: state.cardId!,
-          sequence: state.sequence,
-          summary: state.cardText,
-        });
-      }
-      if (this.streams.get(key) === state) this.streams.delete(key);
     }
   }
 
@@ -482,7 +391,6 @@ export class FeishuTextStreams {
   private async finishStreamCard(
     state: FeishuStreamState,
     body: string,
-    footer: string | undefined,
     signal?: AbortSignal,
   ): Promise<void> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -491,14 +399,11 @@ export class FeishuTextStreams {
       state.sequence += 1;
       try {
         if (signal !== undefined) {
-          await this.messagePort.finishStreamingCard(state.cardId!, state.sequence, body, footer, signal);
-        } else if (footer !== undefined) {
-          await this.messagePort.finishStreamingCard(state.cardId!, state.sequence, body, footer);
+          await this.messagePort.finishStreamingCard(state.cardId!, state.sequence, body, signal);
         } else {
           await this.messagePort.finishStreamingCard(state.cardId!, state.sequence, body);
         }
         state.lastSentText = body;
-        if (footer !== undefined) state.confirmedFooter = footer;
         state.deliveryUncertain = false;
         return;
       } catch (error) {
@@ -509,22 +414,6 @@ export class FeishuTextStreams {
         if (rejected || attempt === 1) throw error;
       }
     }
-  }
-
-  private rememberFinishedStream(
-    key: string,
-    stream: FinishedFeishuStream,
-  ): void {
-    if (
-      !this.finishedStreams.has(key)
-      && this.finishedStreams.size >= maximumFeishuFinishedStreams
-    ) {
-      const oldest = this.finishedStreams.keys().next().value;
-      if (oldest !== undefined) {
-        this.finishedStreams.delete(oldest);
-      }
-    }
-    this.finishedStreams.set(key, stream);
   }
 
   private async rollStreamingCards(
@@ -557,7 +446,7 @@ export class FeishuTextStreams {
         ? appendFeishuStreamingTruncation(rawHead, maximumCharacters, state.truncationNotice)
         : rawHead;
       await this.ensureStreamingCard(state, head, signal);
-      await this.finishStreamCard(state, head, undefined, signal);
+      await this.finishStreamCard(state, head, signal);
       delete state.cardId;
       delete state.lastSentText;
       state.sequence = 0;
@@ -627,18 +516,16 @@ export class FeishuTextStreams {
   }
 
   private async recoverFailedStream(
-    key: string,
     state: FeishuStreamState,
     fallbackPost: boolean,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (this.streams.get(key) === state) this.streams.delete(key);
     let finishError: unknown;
     if (state.cardId && !state.deliveryUncertain && !this.isClosed()) {
       state.sequence += 1;
       try {
         if (signal) {
-          await this.messagePort.finishStreamingCard(state.cardId, state.sequence, state.lastSentText ?? state.cardText, undefined, signal);
+          await this.messagePort.finishStreamingCard(state.cardId, state.sequence, state.lastSentText ?? state.cardText, signal);
         } else {
           await this.messagePort.finishStreamingCard(state.cardId, state.sequence, state.lastSentText ?? state.cardText);
         }
@@ -646,26 +533,24 @@ export class FeishuTextStreams {
         finishError = error;
       }
     }
-    await this.withStreamFooter(state, signal, async () => {
-      const remainingMessageBudget =
-        maximumFeishuMessageChunks - state.cardCount;
-      if (fallbackPost && remainingMessageBudget <= 0) DeliveryReceipt.current()?.markContentIncomplete();
-      if (!this.isClosed() && !signal?.aborted && fallbackPost && !state.deliveryUncertain && remainingMessageBudget > 0) {
-        const markdown = state.truncated
-          ? `${state.text}${state.truncationNotice ?? feishuTruncationNotice}`
-          : state.text;
-        const replyKey = turnKey(state.threadId, state.turnId);
-        const replyTo = this.replyTargets.get(state.chatId, replyKey);
-        await this.sendPost(
-          state.chatId,
-          markdown,
-          remainingMessageBudget,
-          signal,
-          replyTo,
-          state.truncationNotice,
-        );
-      }
-    });
+    const remainingMessageBudget =
+      maximumFeishuMessageChunks - state.cardCount;
+    if (fallbackPost && remainingMessageBudget <= 0) DeliveryReceipt.current()?.markContentIncomplete();
+    if (!this.isClosed() && !signal?.aborted && fallbackPost && !state.deliveryUncertain && remainingMessageBudget > 0) {
+      const markdown = state.truncated
+        ? `${state.text}${state.truncationNotice ?? feishuTruncationNotice}`
+        : state.text;
+      const replyKey = turnKey(state.threadId, state.turnId);
+      const replyTo = this.replyTargets.get(state.chatId, replyKey);
+      await this.sendPost(
+        state.chatId,
+        markdown,
+        remainingMessageBudget,
+        signal,
+        replyTo,
+        state.truncationNotice,
+      );
+    }
     if (state.deliveryUncertain) {
       throw new FeishuMessageError("send-failed", "飞书正文投递结果未确认，未重播正文");
     }
@@ -683,8 +568,4 @@ function streamKey(chatId: string, threadId: string, turnId: string, itemId: str
 
 function turnKey(threadId: string, turnId: string): string {
   return `${threadId}:${turnId}`;
-}
-
-function finishedStreamKey(chatId: string, threadId: string, turnId: string): string {
-  return JSON.stringify([chatId, threadId, turnId]);
 }

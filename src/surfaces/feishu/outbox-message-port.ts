@@ -35,7 +35,6 @@ export interface FeishuMessagePort {
     cardId: string,
     sequence: number,
     summary: string,
-    footer?: string,
     signal?: AbortSignal,
   ): Promise<void>;
 }
@@ -60,7 +59,7 @@ export function bindOutboxMessagePort(port: FeishuMessagePort, closed: AbortSign
     updateCard: (id, card, signal) => send((active) => port.updateCard(id, card, active), signal),
     createStreamingCard: (chatId, text, signal) => send((active) => port.createStreamingCard(chatId, text, active), signal),
     updateStreamingCard: (id, text, sequence, signal) => send((active) => port.updateStreamingCard(id, text, sequence, active), signal),
-    finishStreamingCard: (id, sequence, text, footer, signal) => send((active) => port.finishStreamingCard(id, sequence, text, footer, active), signal),
+    finishStreamingCard: (id, sequence, text, signal) => send((active) => port.finishStreamingCard(id, sequence, text, active), signal),
     ...(port.sendImage === undefined ? {} : {
       sendImage: (chatId: string, bytes: Buffer, signal?: AbortSignal) => send((active) => port.sendImage!(chatId, bytes, active), signal),
     }),

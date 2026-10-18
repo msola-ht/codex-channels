@@ -717,6 +717,9 @@ export function createTurnCompletedPresentation(
     value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs),
     fields: performanceFields(event.timing?.performance),
   });
+  if (event.runningSubagentCount !== undefined && event.runningSubagentCount > 0) {
+    runFields.push({ label: "后台子代理", value: `${event.runningSubagentCount} 个尚未结束` });
+  }
   if (isAutoApprovalReviewer(event.approvalsReviewer) && event.autoApprovalReview) {
     runFields.push(autoApprovalReviewField(event.autoApprovalReview));
   }
@@ -1010,6 +1013,9 @@ function formatResponseUsage(usage: ResponseUsageSummary | null | undefined): st
 }
 
 function formatSessionExecutionTiming(event: Extract<OutputEvent, { type: "turn.completed" }>): string {
+  if (event.executionTimingStatus === "timeout") return "统计查询超时";
+  if (event.executionTimingStatus === "failed") return "统计查询失败";
+  if (event.executionTimingStatus === "notReady") return "统计暂未就绪";
   const timing = event.sessionTiming;
   if (!timing) return event.sessionDurationMs === undefined ? "未提供" : formatElapsedDuration(event.sessionDurationMs);
   const incomplete = !timing.historyComplete || timing.missingTurnCount > 0;

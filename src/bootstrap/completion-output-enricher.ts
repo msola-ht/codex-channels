@@ -12,6 +12,12 @@ import type {
  */
 const completionEnrichmentTimeoutMs = 250;
 
+type CompletedEvent = Extract<OutputEvent, { type: "turn.completed" }>;
+type ExecutionTimingResult = {
+  value?: Awaited<ReturnType<NonNullable<CompletionOutputEnricherOptions["executionTiming"]>>>;
+  status?: CompletedEvent["executionTimingStatus"];
+};
+
 export interface CompletionOutputEnricherOptions {
   autoApprovalReview?(threadId: string, turnId: string, signal: AbortSignal): Promise<Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"]>;
   sessionAutoApprovalReview?(threadId: string, signal: AbortSignal): Promise<Extract<OutputEvent, { type: "turn.completed" }>["sessionAutoApprovalReview"]>;
@@ -84,9 +90,9 @@ export class CompletionOutputEnricher {
     const accountStatusResult = this.readCompletionAccountStatus(event, signal);
     const enrichmentDeadline = Date.now() + completionEnrichmentTimeoutMs;
     const metricsSignal = AbortSignal.any([signal, AbortSignal.timeout(completionEnrichmentTimeoutMs)]);
+    // 耗时先进入 Worker；其余独立读取各自保留入库屏障，共享同一次总预算。
+    const executionResult = this.readExecutionTiming(event, enrichmentDeadline, metricsSignal);
     const gitBranchResult = this.readGitBranch(event, enrichmentDeadline, signal);
-    // Keep unexpected callback failures observed while the ordered metrics settle.
-    void gitBranchResult.catch(() => undefined);
     const timingResult = this.resolveCompletionMetrics(
       event,
       "turn",
@@ -99,55 +105,30 @@ export class CompletionOutputEnricher {
       enrichmentDeadline,
       event.timing,
     );
-    const timing = timingResult instanceof Promise
-      ? await timingResult
-      : timingResult;
     const taskAggregateResult = this.resolveCompletionMetrics(
       event,
       "task",
       () => this.options.taskAggregate?.(event.threadId, event.turnId, metricsSignal),
       enrichmentDeadline,
     );
-    const taskAggregate = taskAggregateResult instanceof Promise
-      ? await taskAggregateResult
-      : taskAggregateResult;
     const sessionAggregateResult = this.resolveCompletionMetrics(
       event,
       "session",
       () => this.options.sessionAggregate?.(event.threadId, metricsSignal),
       enrichmentDeadline,
     );
-    const sessionAggregate = sessionAggregateResult instanceof Promise
-      ? await sessionAggregateResult
-      : sessionAggregateResult;
-    let execution: Awaited<ReturnType<NonNullable<CompletionOutputEnricherOptions["executionTiming"]>>> | undefined;
     const unknownReview = { approved: 0, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 0, coverage: "unknown" as const };
-    let autoApprovalReview: Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"];
-    try {
-      autoApprovalReview = await this.resolveCompletionMetrics(event, "turn",
-        () => this.options.autoApprovalReview?.(event.threadId, event.turnId, metricsSignal), enrichmentDeadline,
-        this.options.autoApprovalReview ? unknownReview : undefined);
-    } catch {
-      autoApprovalReview = { approved: 0, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 0, coverage: "unknown" };
-      this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡自动审查统计读取失败");
-    }
-    let sessionAutoApprovalReview: typeof autoApprovalReview;
-    try {
-      sessionAutoApprovalReview = await this.resolveCompletionMetrics(event, "session",
-        () => this.options.sessionAutoApprovalReview?.(event.threadId, metricsSignal), enrichmentDeadline,
-        this.options.sessionAutoApprovalReview ? unknownReview : undefined);
-    } catch {
-      sessionAutoApprovalReview = { approved: 0, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 0, coverage: "unknown" };
-      this.logger.warn({ threadId: event.threadId }, "完成卡会话自动审查统计读取失败");
-    }
-    try {
-      execution = await this.resolveCompletionMetrics(event, "turn",
-        () => this.options.executionTiming?.(event.threadId, event.turnId, metricsSignal), enrichmentDeadline);
-    } catch {
-      this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡轮次耗时读取失败");
-    }
-    const accountStatus = await accountStatusResult;
-    const gitBranch = await gitBranchResult;
+    const autoApprovalReviewResult = this.resolveCompletionMetrics(event, "turn",
+      () => this.options.autoApprovalReview?.(event.threadId, event.turnId, metricsSignal), enrichmentDeadline,
+      this.options.autoApprovalReview ? unknownReview : undefined);
+    const sessionAutoApprovalReviewResult = this.resolveCompletionMetrics(event, "session",
+      () => this.options.sessionAutoApprovalReview?.(event.threadId, metricsSignal), enrichmentDeadline,
+      this.options.sessionAutoApprovalReview ? unknownReview : undefined);
+    const [executionRead, timing, taskAggregate, sessionAggregate, autoApprovalReview, sessionAutoApprovalReview, accountStatus, gitBranch] = await Promise.all([
+      executionResult, timingResult, taskAggregateResult, sessionAggregateResult,
+      autoApprovalReviewResult, sessionAutoApprovalReviewResult, accountStatusResult, gitBranchResult,
+    ]);
+    const execution = executionRead.value;
     return {
       ...event,
       ...(autoApprovalReview === undefined ? {} : { autoApprovalReview }),
@@ -157,10 +138,38 @@ export class CompletionOutputEnricher {
       ...(timing === undefined ? {} : { timing }),
       ...(taskAggregate === undefined ? {} : { taskAggregate }),
       ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
-      ...(execution?.durationMs == null ? {} : { durationMs: execution.durationMs }),
+      ...(event.durationMs !== undefined || execution?.durationMs == null ? {} : { durationMs: execution.durationMs }),
       sessionDurationMs: execution?.sessionDurationMs ?? undefined,
       sessionTiming: execution?.sessionTiming,
+      executionTimingStatus: executionRead.status,
     };
+  }
+
+  private async readExecutionTiming(
+    event: CompletedEvent,
+    deadlineAtMs: number,
+    signal: AbortSignal,
+  ): Promise<ExecutionTimingResult> {
+    if (!this.options.executionTiming) return {};
+    if (this.stopping || signal.aborted) return { status: "notReady" };
+    try {
+      const query = this.options.executionTiming(event.threadId, event.turnId, signal).then(
+        (value): ExecutionTimingResult => value === undefined ? { status: "notReady" } : { value },
+        (): ExecutionTimingResult => {
+          const timeout = Date.now() >= deadlineAtMs;
+          this.logger.warn({ threadId: event.threadId, turnId: event.turnId },
+            timeout ? "完成卡轮次耗时读取超时" : "完成卡轮次耗时读取失败");
+          return { status: timeout ? "timeout" : signal.aborted ? "notReady" : "failed" };
+        },
+      );
+      return await withDeadline(query, Math.max(0, deadlineAtMs - Date.now()), () => {
+        this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡轮次耗时读取超时");
+        return { status: "timeout" };
+      });
+    } catch {
+      this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡轮次耗时读取失败");
+      return { status: "failed" };
+    }
   }
 
   private async readGitBranch(
