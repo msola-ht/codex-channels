@@ -296,7 +296,8 @@
   （`~/.codex/thread-writer-locks/<thread>.lock`）的本地进程；Linux 通过 `/proc` 按打开描述符
   与命令行识别持锁方，Windows 通过 PowerShell 7 调用 Restart Manager 按文件句柄取得 PID 与进程
   启动时间，并只展示可执行路径；`/release force` 只放行入口可执行文件为 `codex`、且发送终止前
-  二次核验 PID 与启动时间均未变化的持锁方，供恢复诊断复用且不删除锁文件。
+  二次核验 PID 的持锁方，Windows 还核验启动时间；供恢复诊断复用且不删除锁文件。
+  macOS 尚不支持持锁进程识别；无法识别时区分平台不支持与诊断不可用，锁文件存在不作为占用已确认的证据。
 - `windows-thread-writer-lock.ps1`：Windows Thread Writer Lock 的 Restart Manager 适配器；返回文件
   持有进程的 PID、启动时间和可执行路径，并在终止前通过同一进程对象复核启动时间。
 - `connect-home.mjs` / `connect-home.d.mts`：统一解析 Gateway 数据目录（`CODEX_CONNECT_HOME`

@@ -443,6 +443,51 @@ MCP Server，不能仅凭模型称其为“MCP 搜索工具”确定工具归属
 故障限定为验收 Thread 的 `codex_app` 启动失败，不能扩大为所有 MCP 或搜索工具不可用；
 `Web run` 搜索成功与该内置工具启动失败可以同时成立。
 
+### 2026-10-18 Linux 关联审查（暂停平台验收）
+
+本轮沿用已提交的 macOS 结果，不重复 Desktop 验收。对启动入口的代码复核确认：
+`scripts/desktop-app-command.mjs` 将 Desktop 的 `CODEX_CLI_PATH` 设置为
+`scripts/desktop-app-proxy.mjs`；Proxy 只接受 macOS App Server 调用。Supervisor 的 Host
+路径另将其子进程环境中的该变量设置为锁定的原生 CLI，不能据此推断 Desktop 自身的 Node REPL
+环境也已修正。结合前述 macOS 安装包观察，这是入口复用冲突线索；本机没有该 Desktop 包和
+失败子进程的完整调用参数，锁定 CLI 源码也没有这条私有 Node REPL 启动合同。
+因此本轮未把 Proxy 放宽为任意 CLI 转发，未改变 Host 签名、工具 Pipe 或共享实例的归属；
+Node REPL 初始化和 `codex_app` 祖先链拒绝仍分别作为未解决问题，不记为已修复。
+
+渠道恢复链发现并修复独立缺口：`SessionRouter.ensure` 原先直接复用已有绑定，
+`thread.closed` 不登记恢复；Thread 从 App Server 内存卸载后，绑定仍在，下一次 `turn/start`
+会访问未加载 Thread。现先读取不含历史的权威快照并核对 Workspace 与允许来源，遇到
+`notLoaded` 复用既有串行订阅恢复；Application 同步合并恢复期间的活动通知，成功后继续
+同一次输入。要求空闲的操作遇到权威活动状态时拒绝执行，不在 Turn 请求失败后重发。
+这修复了可复现的 `-32600` 原因之一，不能据此断定此前 macOS 飞书记录中的错误必定同源。
+
+隔离真实 CLI `0.163.0` 的观察：卸载后的 Thread 直接 `turn/start` 返回
+`-32600: thread not found`，没有执行模型请求。全新且从未材料化的空 Thread 恢复也被上游拒绝，
+未将此误写成恢复成功。随后通过官方 `thread/name/set` 命名另一条任务自有 Thread，再卸载，
+权威状态为 `notLoaded`；修复后的 `router.ensure` 返回相同 Thread ID、恢复回调为 `idle`，
+回读也为 `idle`。进一步经 Application 的只读 `getGoal` 路径，同次调用从 `notLoaded`
+恢复后返回 `null`（没有 Goal），回读为 `idle` 且绑定未变。没有模型请求、内部 Session 文件
+读写或真实渠道消息；任务自有进程和临时目录已清理。新 Turn 的实际模型执行、macOS 飞书现场
+故障是否同源以及 Windows 行为仍未观察。
+
+提交前关联复核补齐失配清理的串行边界：工作区或来源不匹配时，先取得 Thread 生命周期锁，
+再复核绑定与权威快照，之后才解除绑定和取消订阅，避免与其他本地恢复路径交错。
+隔离真实 App Server 上将任务自有 Thread 绑定到另一任务工作区，`router.ensure` 实际返回
+`thread.takeover.changed`，原绑定已移除，查询活动 Thread 数为 0；自有客户端与临时目录已清理。
+此观察覆盖失配拒绝路径，不代表已运行并发交错场景；此前成功恢复路径的实现未变。
+
+用户补充 macOS 飞书“释放占用”返回平台不支持。关联追踪确认该按钮执行只读 `/release`，
+Runtime 只实现 Linux 与 Windows 进程诊断；macOS 在锁文件存在时返回未知，不曾识别到真实
+持锁进程，`/release force` 也不会在未知状态结束进程。本轮区分“平台不支持”和“诊断不可用”
+的返回原因，修正三个渠道共用提示，不再将锁文件存在表述成已确认占用或直接建议重启服务。
+未新增 macOS 强制释放能力，未结束用户进程，也未操作用户提供的 Session。
+
+Linux 手动调用当前 Runtime，使用任务专用临时 Codex Home，实际观察：没有锁文件返回
+`held: false`；创建无人打开的空锁文件后仍返回 `held: false`；将进程表入口指向不存在的目录
+返回 `held: true, holder: null, reason: inspection-unavailable`，该内部保守值对外展示为未知。
+临时目录随后删除。分别调用三个渠道共用的格式化入口，已观察两种原因生成不同提示，均说明
+未执行释放且占用尚未确认；这不是飞书消息发送或 macOS 进程诊断实测。
+
 ### 后续验收记录模板
 
 以下为空白模板，不代表上方已记录项目的最新结果。每个 Provider 复制一张表，并在表前填写

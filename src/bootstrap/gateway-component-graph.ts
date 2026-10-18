@@ -2223,7 +2223,7 @@ export abstract class GatewayComponentGraph {
       return { status: "free", threadId };
     }
     if (inspection.holder === null) {
-      return { status: "unidentifiable", threadId };
+      return { status: "unidentifiable", threadId, reason: inspection.reason };
     }
     const holder = inspection.holder;
     const releasable = isReleaseableThreadWriterHolder(holder);
@@ -2242,18 +2242,19 @@ export abstract class GatewayComponentGraph {
       this.retryPendingBindingRestore(threadId);
       return { status: "released", threadId, holder };
     }
-    const recheckedReleasable = recheck.holder !== null
-      && isReleaseableThreadWriterHolder(recheck.holder);
+    if (recheck.holder === null) {
+      return { status: "unidentifiable", threadId, reason: recheck.reason };
+    }
+    const recheckedReleasable = isReleaseableThreadWriterHolder(recheck.holder);
     if (
-      recheck.holder === null
-      || recheck.holder.pid !== holder.pid
+      recheck.holder.pid !== holder.pid
       || recheck.holder.startedAt !== holder.startedAt
       || !recheckedReleasable
     ) {
       return {
         status: "held",
         threadId,
-        holder: recheck.holder ?? holder,
+        holder: recheck.holder,
         releasable: recheckedReleasable,
         stuck,
       };

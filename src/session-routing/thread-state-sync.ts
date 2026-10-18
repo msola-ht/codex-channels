@@ -29,6 +29,7 @@ export class ThreadStateSynchronizer {
         this.router.forgetDeletedThread(event.threadId);
         return;
       case "thread.closed":
+        this.router.markThreadClosed(event.threadId);
         return;
     }
   }
