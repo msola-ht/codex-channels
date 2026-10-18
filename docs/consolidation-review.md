@@ -22,13 +22,13 @@
 | U12 | 收敛 HTTP chunk 背压写入原语 | 低 | 已实施；真实本地 HTTP 交付与背压超时已观察 |
 | U13 | 统一审查统计与写入失败归属的运行树选择 | 中 | 已修复；隔离 SQLite 汇总与失败归属已观察 |
 | U14 | 统一 Gateway 与 Codex 基础版本兼容谓词 | 中 | 已修复；门禁、更新器导出与打包清单已检查 |
-| U15 | 收敛源码取得后的安装构建阶段 | 中 | 关联复核完成，排除生命周期合并；未实施 |
-| U16 | 收敛一次性私有 IPC 交换的底层收尾 | 低 | 关联复核完成，降级为条件性提取；未实施 |
+| U15 | 收敛源码取得后的安装构建阶段 | 中 | 已实施；固定 Node/npm 的隔离完整构建已观察 |
+| U16 | 收敛一次性私有 IPC 交换的底层收尾 | 低 | 已评估并保留独立实现；分类差异不宜强行提取 |
 | U17 | 统一自有子进程退出观察的窄操作 | 低 | 已实施；Linux 超时、EOF 与信号退出已观察 |
 | U18 | 统一待生效选择与原生 Queue 的互斥操作 | 中 | 已实施；后查冲突清理已观察，真实跨端并发未实测 |
 | U19 | 将 Queue 官方错误识别收回 Client 边界 | 中 | 已实施；分类及伪造文本拒绝已观察，真实 Queue 链路未实测 |
 
-19 项均已完成下述关联链路的源码复核及 Astra 独立复查；实施状态逐项列明。优先级表示维护收益与风险的相对顺序，不表示已发生故障的严重程度。“复核完成”仅覆盖各项列出的调用链与合同，运行证据和未穷尽分支仍受文末限制。
+19 项均已完成下述关联链路的源码复核及 Astra 独立复查；其中 18 项已按明确边界实施，U16 保留不同实现。优先级表示维护收益与风险的相对顺序，不表示已发生故障的严重程度。实现、局部运行观察及真实全路径覆盖分别列明，未穷尽分支仍受文末限制。
 
 ## U01 自定义 Provider API Key 校验
 
@@ -73,7 +73,7 @@
 
 共同部分仅是按插入顺序有界淘汰、更新键位置及可选的过期清理。Queue/Revert 使用 Date.now，Schedule 使用注入的 now；Schedule 选择快照写入仅淘汰容量，读取才判过期，不能强行统一成一个后台 TTL 生命周期。
 
-建议先提取 Application 内部的小型快照容器操作，复用现有 [`pagination.ts`](../src/application/pagination.ts) 的窄工具组织方式。容量和有效期仍由调用方明确给出，不增加通用缓存框架。
+实际仅提取容量裁剪，沿用 [`pagination.ts`](../src/application/pagination.ts) 的窄工具组织方式。容量和有效期仍由调用方明确给出，不增加通用缓存框架。
 
 不能合并的业务差别：
 
@@ -245,17 +245,23 @@ Schema 版本、只读预检导出及安装预检消费保持不变。已有库�
 
 ## U15 源码取得后的安装构建阶段
 
+**实施与证据。** 新增无第三方加载依赖的 `scripts/source-build.mjs`，Shell、PowerShell 与更新器共用同一阶段执行器，保留各自命令执行、取消、失败清理和切换事务。npm ignore-scripts 先严格确认为 true/false；依赖安装始终显式禁用生命周期，Hook 仅 false 时执行；两个最终入口须为普通文件。prepare-package 与 install-global-source --prepared 合同未改变，打包白名单已加入新模块。
+
+Linux 隔离源码副本使用官方校验和匹配的 Node 22.13.0 / npm 10.9.2，从无依赖状态、ignore-scripts=true 执行真实共享入口，根依赖安装、Gateway 构建/check、WebUI 依赖安装/构建全部完成，两个产物均为文件。最终普通文件检查另对这两个产物直接观察为 true。未知 ignore-scripts 手工输入在零阶段执行时被拒绝；更新 buildCheckout 收到已取消 signal 后返回原取消错误。源码入口加载、Shell 语法、类型/边界检查及 npm dry-run 打包清单已检查。未执行真实全局安装、服务切换恢复、ignore-scripts=false 的完整首装或 PowerShell/macOS 安装；本机无 pwsh。安装期间的既有 Node 引擎警告见文末独立问题。
+
 证据入口：[`install.sh`](../install.sh) 约 158 行、[`install.ps1`](../install.ps1) 约 132 行，以及 [`source-update.mjs`](../scripts/source-update.mjs) 的 `buildCheckout`（约 853 行）。三处维护相同顺序：确认 npm ignore-scripts、安装根依赖、按设置安装 Hook、Gateway build/check、WebUI 安装/build、检查两个产物入口。
 
 这使必要构建步骤及脚本禁用政策需要跨 Shell、PowerShell、JavaScript 同步。建议仅收敛仓库取得后的阶段定义和执行入口；入口必须能在依赖未安装时加载，不能依赖 dist 或尚未安装的包。
 
 安装器继续拥有工具检查、克隆、平台操作与本次 checkout 的失败清理；更新器继续拥有候选身份、取消、备份、切换和恢复。构建执行须保留更新取消信号、既有进度/错误反馈和命令运行方式。`install:global --prepared` 只消费已有产物，不得借去重重新安装或构建。显式 CODEX_BINARY 处理也不应被改写。
 
-后续实施需联动首装、更新、install-global-source、prepare-package 与 npm 生命周期，并按 CI 固定 Node/npm 观察实际路径。没有运行安装或确认构建产物。
+首装、更新、install-global-source、prepare-package 与 npm 生命周期的关联合同已核对；固定 Node/npm 的构建产物观察见本条实施证据，完整安装与恢复仍未观察。
 
 **关联复核结论。** 更新链先验证候选版本/提交/快进关系，再 buildCheckout，再 inspectStagedInstallation；提取构建不能把安装预检提前到 dist 尚未生成时，也不能把运行入口改成加载未安装依赖。首装与更新的三份阶段序列确实一致，但 prepare-package 先检查已有依赖、仅在必要时安装，且显式 ignore-scripts 时不构建；它不是第四份等价的全量构建流程。install-global-source 的 prepared 分支只校验并消费产物，还拥有 Codex 与原生产物检查。建议仅共享三份相同阶段，保留这些相邻入口的不同合同。与 U14 关联的是候选构建中的 check，不是版本与安装事务应整体合并；源码读取可确认依赖顺序，尚未观察任一平台安装恢复。
 
 ## U16 一次性私有 IPC 交换的底层收尾
+
+**处理决定。** 保留现有两条实现。本项是条件性建议，统一所需的失败分类与预算选项会扩大公共 helper，而没有已确认故障需要这种改动；本轮不为形式去重引入传输框架。
 
 证据入口：[`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 的 `readSupervisorResponse`（约 917 行），以及 [`private-ipc.mjs`](../runtime/private-ipc.mjs) 的 `requestPrivateIpcJson`（约 233 行）；Model Relay 控制已使用后者。
 
@@ -379,3 +385,7 @@ Astra 独立复查覆盖 U01–U19 的重复实现、关键调用方、下游消
 审查基线上的模块与运行时边界静态检查通过，其允许表、公开入口、无循环、Surface 隔离和目录依赖检查没有报错；这不是功能或安全通过的证据。后续修复的静态检查、实际链路观察与未验证范围分别记在对应条目；未读取真实配置/凭据，未执行功能测试或三平台关闭场景。
 
 至此全部一级模块与主要工程入口均有上述覆盖记录；仍未穷尽的分支已在表中标明。本记录是用于集中治理重复规则的架构审查，不是全仓安全审计或逐行缺陷清单。后续新增建议仍需给出实际调用方、共享合同、下游影响和应保留的差异。
+
+## 另发现的独立问题
+
+U15 隔离构建的 npm 输出显示：锁定依赖 react-router@8.3.0 声明 Node >=22.22.0，但当前 CI 固定 Node 22.13.0、根包仍声明 >=22.13.0。该次构建成功，不能据此消除依赖引擎合同不一致。此问题并非本轮去重引入；本轮未升级 Node 基线、调整依赖或压制警告，需另行确定支持基线并联动安装文档和 CI。

@@ -51,6 +51,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 `codex-channels`。已有同名目录时不会覆盖。安装前会显示 npm 版本和全局目录，并检测已有的 npm
 全局版 `@hegenai/codexc` 及当前 `codexc` 命令来源；源码构建完成后会用当前 `main` 构建结果替换
 当前 Node.js 环境中的同名全局包。
+构建阶段由两个安装器及更新器共用 `scripts/source-build.mjs`，命令取消与源码切换仍由各入口负责。
 两个安装器均禁用依赖安装时的隐式生命周期，再显式构建一次 Gateway；仅在有效 npm
 `ignore-scripts` 设置为 `false` 时安装 Git hooks。设置为 `true` 时仍执行显式构建，
 但不会运行隐式的 `prebuild` / `postbuild`，Windows 原生产物限制见下文。

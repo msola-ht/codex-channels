@@ -128,21 +128,7 @@ try {
   $loginState = if ($LASTEXITCODE -eq 0) { '已登录' } else { '未登录或登录状态不可用' }
   Write-Output "[提示] Codex CLI 检测通过：$($codexCommand.Source) · $codexVersion · $loginState"
 
-  $installationCommand = Join-Path $repositoryRoot 'scripts\installation-command.mjs'
-  $ignoreScripts = Invoke-Captured $npm @('config', 'get', 'ignore-scripts') $repositoryRoot
-  if ($ignoreScripts -cnotin @('true', 'false')) { throw '无法确认 npm ignore-scripts 设置，拒绝构建源码' }
-  Invoke-Checked $node @($installationCommand, '安装 Gateway 依赖', '--', $npm, 'ci', '--ignore-scripts', '--no-audit', '--no-fund') $repositoryRoot
-  if ($ignoreScripts -ceq 'false') {
-    Invoke-Checked $npm @('run', 'hooks:install') $repositoryRoot
-  }
-  Invoke-Checked $node @($installationCommand, '构建 Gateway', '--', $npm, 'run', 'build') $repositoryRoot
-  Invoke-Checked $node @($installationCommand, '检查 Gateway', '--', $npm, 'run', 'check') $repositoryRoot
-  $webui = Join-Path $repositoryRoot 'webui'
-  Invoke-Checked $node @($installationCommand, '安装 WebUI 依赖', '--', $npm, 'ci', '--ignore-scripts', '--no-audit', '--no-fund') $webui
-  Invoke-Checked $node @($installationCommand, '构建 WebUI', '--', $npm, 'run', 'build') $webui
-  if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot 'dist\main.js')) -or -not (Test-Path -LiteralPath (Join-Path $webui 'dist\index.html'))) {
-    throw '构建结果不完整'
-  }
+  Invoke-Checked $node @((Join-Path $repositoryRoot 'scripts\source-build.mjs'), $npm) $repositoryRoot
 
   Invoke-Checked $git @('config', '--local', 'codex-connect.managed-source', 'true') $repositoryRoot
   Invoke-Checked $git @('config', '--local', 'codex-connect.npm-prefix', $npmPrefix) $repositoryRoot

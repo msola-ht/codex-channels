@@ -156,25 +156,8 @@ fi
 node "$staging/repository/scripts/sandbox-dependencies.mjs" \
   || fail "沙盒运行依赖检查或安装失败"
 
-(cd "$staging/repository" \
-  && ignore_scripts="$(npm config get ignore-scripts)" \
-  && case "$ignore_scripts" in
-    true|false) ;;
-    *) fail "无法确认 npm ignore-scripts 设置，拒绝构建源码" ;;
-  esac \
-  && node scripts/installation-command.mjs '安装 Gateway 依赖' -- npm ci --ignore-scripts --no-audit --no-fund \
-  && { [ "$ignore_scripts" = true ] || npm run hooks:install; } \
-  && node scripts/installation-command.mjs '构建 Gateway' -- npm run build \
-  && node scripts/installation-command.mjs '检查 Gateway' -- npm run check) \
-  || fail "Gateway 依赖安装或构建失败"
-(cd "$staging/repository/webui" \
-  && node ../scripts/installation-command.mjs '安装 WebUI 依赖' -- npm ci --ignore-scripts --no-audit --no-fund \
-  && node ../scripts/installation-command.mjs '构建 WebUI' -- npm run build) \
-  || fail "WebUI 依赖安装或构建失败"
-
-[ -f "$staging/repository/dist/main.js" ] || fail "构建结果缺少 dist/main.js"
-[ -f "$staging/repository/webui/dist/index.html" ] \
-  || fail "构建结果缺少 webui/dist/index.html"
+(cd "$staging/repository" && node scripts/source-build.mjs) \
+  || fail "源码依赖安装或构建失败"
 
 git -C "$staging/repository" config --local codex-connect.managed-source true \
   || fail "无法标记受管源码安装"

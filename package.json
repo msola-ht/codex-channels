@@ -173,6 +173,7 @@
     "scripts/source-install-summary.mjs",
     "scripts/source-uninstall.mjs",
     "scripts/source-update.mjs",
+    "scripts/source-build.mjs",
     "scripts/gateway-version-policy.mjs",
     "scripts/systemd-control.sh",
     "scripts/telegram-setup-session.mjs",
