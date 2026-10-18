@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { trimOldestEntries } from "./bounded-map.js";
 import { conversationTargetKey, UserFacingError, type ConversationTarget } from "../conversation-core/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { ConversationLockCoordinator } from "./conversation-lock-coordinator.js";
@@ -195,7 +196,7 @@ export class ConversationHookService {
 
   private prune<T extends { capturedAt: number }>(map: Map<string, T>, reserve = false): void {
     for (const [key, value] of map) if (Date.now() - value.capturedAt > lifetimeMs) map.delete(key);
-    while (reserve && map.size >= maximumSnapshots) map.delete(map.keys().next().value!);
+    if (reserve) trimOldestEntries(map, maximumSnapshots - 1);
   }
 }
 

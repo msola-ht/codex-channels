@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { trimOldestEntries } from "./bounded-map.js";
 
 import {
   UserFacingError,
@@ -656,7 +657,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
   ): void {
     snapshots.delete(key);
     snapshots.set(key, { capturedAt: this.now(), ids });
-    trimMap(snapshots, maximumSnapshots);
+    trimOldestEntries(snapshots, maximumSnapshots);
   }
 
   private invalidateTarget(target: ConversationTarget, actorId: string): void {
@@ -768,14 +769,6 @@ function boundedPreview(value: string): string {
 
 function snapshotKey(target: ConversationTarget, actorId: string): string {
   return `${conversationTargetKey(target)}:${actorId}`;
-}
-
-function trimMap<K, V>(map: Map<K, V>, maximum: number): void {
-  while (map.size > maximum) {
-    const oldest = map.keys().next().value;
-    if (oldest === undefined) return;
-    map.delete(oldest);
-  }
 }
 
 function scheduledError(

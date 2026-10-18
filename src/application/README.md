@@ -33,6 +33,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
 - `conversation-event-coordinator.ts`：在稳定输入事件归约前失效选择快照与展示缓存、处理待生效偏好和 Reserve 标记，归约后执行 Reserve 收尾；子代理跟踪和后台释放调度通过注入端口保持原顺序，不等待 RPC 或渠道输出。
 - `turn-errors.ts`：把单次 Turn 失败归约为稳定的错误类型、错误码与安全文案；只读取已归约的错误对象，不执行 RPC、不生成平台输出。
 - `pagination.ts`：提供 Application 层共用的分页总数、页码校验、偏移/切片与一基序号；错误类型与文案仍由各调用点提供，不持有列表状态。
+- `bounded-map.ts`：只提供按插入顺序裁剪 Map 容量的内部操作；过期、键刷新、确认消费及计时器清理由服务保留。
 - `conversation-service.ts`：按 Turn、Session/Workspace、Queue/Revert、扩展与账户指标五类稳定能力接口公开用例，
   新建与恢复切换将仍有活动 Turn、子代理或交互的旧会话保留在后台；释放前核验已加载后代的权威状态，
   包括冷启动后尚无本地活动记录的子代理。后台释放与恢复清理共用 Queue、交互、父子活动复核，无法确认时保留绑定。

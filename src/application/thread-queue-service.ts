@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { trimOldestEntries } from "./bounded-map.js";
 
 import type { SessionRouter } from "../session-routing/index.js";
 import {
@@ -331,11 +332,7 @@ export class ThreadQueueService {
       itemIds,
       capturedAtMs: now,
     });
-    while (this.selectionSnapshots.size > maximumSelectionSnapshots) {
-      const oldest = this.selectionSnapshots.keys().next().value;
-      if (oldest === undefined) break;
-      this.selectionSnapshots.delete(oldest);
-    }
+    trimOldestEntries(this.selectionSnapshots, maximumSelectionSnapshots);
   }
 }
 

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { trimOldestEntries } from "./bounded-map.js";
 
 import type { SessionRouter } from "../session-routing/index.js";
 import {
@@ -468,11 +469,7 @@ export class ThreadRevertService {
     }
     this.selectionSnapshots.delete(key);
     this.selectionSnapshots.set(key, snapshot);
-    while (this.selectionSnapshots.size > maximumSelectionSnapshots) {
-      const oldest = this.selectionSnapshots.keys().next().value;
-      if (oldest === undefined) break;
-      this.selectionSnapshots.delete(oldest);
-    }
+    trimOldestEntries(this.selectionSnapshots, maximumSelectionSnapshots);
   }
 
   private rememberConfirmation(
@@ -497,11 +494,7 @@ export class ThreadRevertService {
       }
     }
     this.confirmations.set(token, confirmation);
-    while (this.confirmations.size > maximumConfirmations) {
-      const oldest = this.confirmations.keys().next().value;
-      if (oldest === undefined) break;
-      this.confirmations.delete(oldest);
-    }
+    trimOldestEntries(this.confirmations, maximumConfirmations);
   }
 }
 
