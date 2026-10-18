@@ -27,7 +27,7 @@ import {
 } from "../output-copy.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { sanitizeWeixinMarkdownText } from "./markdown-sanitize.js";
-import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { SurfaceInputBatcher } from "../surface-input-batcher.js";
 import {
   formatWeixinCommandText,
   renderWeixinCommandResult,
@@ -105,7 +105,7 @@ export type WeixinConversationMessage =
     };
 
 export class WeixinConversationAdapter {
-  private readonly inputs: SurfaceInputCoalescer;
+  private readonly inputs: SurfaceInputBatcher;
   private readonly handlingLocks = new Map<string, Promise<void>>();
   private nextSequence = 0;
 
@@ -130,7 +130,7 @@ export class WeixinConversationAdapter {
     private readonly audios?: Pick<WeixinAudioPort, "download">,
     private readonly videos?: Pick<WeixinVideoStore, "download" | "retain" | "discard">,
   ) {
-    this.inputs = new SurfaceInputCoalescer(
+    this.inputs = new SurfaceInputBatcher(
       (target, input) => conversations.submit(target, input),
       inputOptions,
     );

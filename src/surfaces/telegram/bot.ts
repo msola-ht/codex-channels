@@ -43,7 +43,7 @@ import {
   interactionStoppedText,
 } from "../output-copy.js";
 import { formatTextFileTooLarge } from "../text-file-copy.js";
-import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { SurfaceInputBatcher } from "../surface-input-batcher.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { surfaceCommandAliases } from "../slash-command.js";
@@ -187,7 +187,7 @@ export class TelegramSurface {
   private readonly videoInput: TelegramVideoInput | undefined;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandExecutor;
-  private readonly inputs: SurfaceInputCoalescer;
+  private readonly inputs: SurfaceInputBatcher;
   private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
   private readonly now: () => number;
   private readonly autoReviewSelections = new Map<string, {
@@ -269,7 +269,7 @@ export class TelegramSurface {
       debugEnabled: this.debugEnabled,
     });
     this.output = this.outbox;
-    this.inputs = new SurfaceInputCoalescer(
+    this.inputs = new SurfaceInputBatcher(
       (inputTarget, input) => service.submit(inputTarget, input),
       {
         quietWindowMs: options.inputQuietWindowMs ?? 1_000,

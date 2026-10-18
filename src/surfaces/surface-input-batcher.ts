@@ -64,8 +64,8 @@ interface PendingBatch {
 }
 
 export class SurfaceInputBatcher {
-  readonly maximumImages: number;
-  readonly maximumImageBytes: number;
+  private readonly maximumImages: number;
+  private readonly maximumImageBytes: number;
   private readonly quietWindowMs: number;
   private readonly pending = new Map<string, PendingBatch>();
   private readonly inFlight = new Set<Promise<void>>();

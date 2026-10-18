@@ -130,7 +130,7 @@ Thread/Turn/Item、事件类型及输入/投递标识；输出队列、输入处
 不保留事件正文。公开的 `withPersistentDeliveryDiagnostics` 供组合根注入持久记录 ID，各层通过 `persistentDeliveryId` 关联同一记录，单次操作的 `deliveryId` 独立保留。终态相关任务在 `info` 留痕，任务成功与正文投递成功分别记录，慢操作与失败在 `warn` 留痕；阶段明细、合并与取消
 使用 `debug`。诊断不修改平台调用、重试或排队顺序，日志口径与排障步骤见
 [`渠道展示与调试模式`](../../docs/display.md#调试模式)。
-`surface-input-coalescer.ts` 是已授权 Surface 输入门面；`surface-input-batcher.ts` 只合并 Surface
+`surface-input-batcher.ts` 是已授权 Surface 输入的唯一聚合实现，三个渠道直接调用；只合并 Surface
 明确标识的图片批次，普通文字、单图和无批次标识的消息立即提交。图片落盘后仍由渠道管理，批次
 flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非动画 GIF 签名、单张 10 MiB 与整批 20 MiB，转换为
 有界 Base64 Data URL 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，

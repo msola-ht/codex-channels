@@ -17,7 +17,7 @@
 | U07 | 统一两个 Runtime 材料 Reader 的单 Worker 所有权机制 | 中 | 已修复；Linux 真实 Worker 读取、恢复与退出已观察 |
 | U08 | 统一配置管理与 CLI 总览的有效默认值投影 | 中 | 已修复；默认展示、原文写回与修订拒绝已观察 |
 | U09 | 统一设置输入校验失败的领域错误适配 | 中 | 已修复；隔离 HTTP/CLI 链路已观察 |
-| U10 | 移除渠道输入聚合的等价转发层 | 低 | 关联复核完成，保留局部简化；未实施 |
+| U10 | 移除渠道输入聚合的等价转发层 | 低 | 已实施；Actor 刷新隔离与关闭排空已观察 |
 | U11 | 统一渠道关闭时继续清理并汇总失败的约定 | 中 | 已修复；部分构造关闭与注入失败已观察 |
 | U12 | 收敛 HTTP chunk 背压写入原语 | 低 | 关联复核完成，排除终态状态机；未实施 |
 | U13 | 统一审查统计与写入失败归属的运行树选择 | 中 | 已修复；隔离 SQLite 汇总与失败归属已观察 |
@@ -187,13 +187,11 @@ Schema 版本、只读预检导出及安装预检消费保持不变。已有库�
 
 ## U10 渠道输入聚合的等价转发层
 
-[`surface-input-coalescer.ts`](../src/surfaces/surface-input-coalescer.ts) 只创建 [`SurfaceInputBatcher`](../src/surfaces/surface-input-batcher.ts)，将 `enqueue`、`flushPending`、`close` 原样转发，并为选项和结果类型增加别名。真正的 Actor 隔离、图片容量、聚合键、提交顺序与关闭规则均在 Batcher 内。
+**实施与证据。** 手工使用编译后的 Surface 公开入口，在同一 Conversation、同一批次键加入 Actor a/b 两份输入，刷新 a 后只提交 alpha；close 后才提交 beta，并等待两份结果，关闭后新增输入返回“输入聚合器已关闭”。类型、边界与构建通过。未连接平台账号，未观察真实图片批次下载与最终 Turn。
 
-Telegram Bot、飞书 Adapter 和微信 Conversation Adapter 都通过 Coalescer 调用；Surface 根入口又导出它。当前包装层没有独立调度或错误语义，容易让后续维护者误以为存在两种聚合算法。
+原 surface-input-coalescer 转发层已移除，Telegram、飞书和微信直接调用 [`SurfaceInputBatcher`](../src/surfaces/surface-input-batcher.ts)。Surface 根入口同步导出实现和原生类型；图片容量字段改为私有，避免移除门面后扩大公开能力。Actor 隔离、图片容量、聚合键、提交顺序与关闭规则仍在 Batcher 内。
 
-建议保留一个明确命名的实现和公开入口，同时调整三个渠道的类型与导入，不保留新的兼容包装层。Batcher 当前还暴露图片容量只读属性，统一入口时应明确是否仍属公开能力，避免无意扩大接口。这是低收益收尾项，不应借机改聚合时机、取消或普通消息提交行为。
-
-**关联复核结论。** Telegram Bot、飞书 Adapter、微信 Conversation Adapter 的 enqueue 和 flushPending 均经过此包装，命令前 flush 按 target+actor 而非整个 Conversation 刷新。Batcher.close 会停止接收、刷新 pending 并等待在途集合；包装 close 只 await 同一行为。去掉包装不能顺带把 close 改成丢弃 pending 或改写错误汇总。U03 的附件处理只是上游输入来源，U11 的 Surface 关闭只是生命周期调用方，二者不要求合并到 Batcher。调整清单包括 Surface index 的类型导出、三渠道字段类型/构造和模块文件索引；不需新增聚合算法。未观察实际消息聚合。
+**关联边界。** 三渠道的 enqueue、命令前 flush 和关闭入口均使用同一 Batcher。flush 仍按 target+actor 而非整个 Conversation 刷新；close 停止接收、刷新 pending 并等待在途集合。已同步 Surface index、三渠道字段类型/构造及模块索引，没有兼容包装或第二种聚合算法。U03 的附件取得和 U11 的 Surface 关闭继续各自拥有上游输入与资源生命周期，不合并到 Batcher。
 
 ## U11 渠道关闭时继续清理与失败汇总
 

@@ -19,7 +19,7 @@ import {
   gatewayRequestFailedText,
   interactionStoppedText,
 } from "../output-copy.js";
-import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { SurfaceInputBatcher } from "../surface-input-batcher.js";
 import { formatQuotedInput } from "../quoted-input.js";
 
 import type {
@@ -79,7 +79,7 @@ const unsupportedMessageLinkText = [
 ].join("\n");
 
 export class FeishuConversationAdapter {
-  private readonly inputs: SurfaceInputCoalescer;
+  private readonly inputs: SurfaceInputBatcher;
   private nextInputSequence = 0;
   private readonly videoCancellation = new AbortController();
 
@@ -127,7 +127,7 @@ export class FeishuConversationAdapter {
       debugEnabled?: boolean;
     } = { quietWindowMs: 0 },
   ) {
-    this.inputs = new SurfaceInputCoalescer(
+    this.inputs = new SurfaceInputBatcher(
       (target, input) => conversations.submit(target, input),
       inputOptions,
     );
