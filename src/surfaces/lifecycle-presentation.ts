@@ -829,7 +829,7 @@ function visibleCompletionStatistics(fields: readonly LifecyclePresentationField
   const statistics = new Set([
     "Token", "输入", "输出", "缓存", "无缓存", "其中推理输出", "模型请求", "推理次数",
     "缓存命中率", "最近请求缓存命中率", "本轮耗时", "总耗时", "首 Token", "速度",
-    "OpenAI Credits", "已记录审查请求", "已记录审查 Token", "压缩请求", "上下文压缩",
+    "OpenAI Credits", "压缩请求", "上下文压缩",
   ]);
   const hasValue = (label: string, value: string | undefined): boolean => !statistics.has(label)
     || (value !== undefined && !["", "—", "未知", "未提供", "统计查询超时", "统计查询失败", "统计暂未就绪"].includes(value)
@@ -873,12 +873,11 @@ function autoApprovalReviewField(
   ] as const;
   return {
     label: "自动审批",
-    value: `${review.total} 次（含子代理）`,
+    value: [`请求 ${review.total}`, ...outcomes.filter(([, count]) => count > 0)
+      .map(([label, count]) => `${label} ${count}`)].join(" · "),
     subfields: [
-      ...outcomes.filter(([, count]) => count > 0).map(([label, count]) => ({ label, value: `${count} 次` })),
-      ...(review.usage === undefined ? [] : [{ label: "已记录审查请求", value: `${formatRequestCount(review.usage.requestCount)} 次` }]),
       ...(review.usage === undefined ? [] : [{
-        label: "已记录审查 Token",
+        label: "Token",
         value: formatTokenCount((review.usage.inputTokens ?? 0) + (review.usage.outputTokens ?? 0)),
       }]),
     ],
