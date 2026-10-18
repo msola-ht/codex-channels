@@ -237,7 +237,7 @@ export function readOpencodeGoAccountMarker(environment, accountId) {
       join(providerStorageRoot(environment), "opencode-go", "accounts", accountId),
       join(providerStorageRoot(environment), provider),
     ].some(directory => existsSync(join(directory, "managed.toml")))) {
-      throw new Error(`Provider ${provider} 仍使用旧账户目录；请先停止 App Server 并显式执行目录整理`);
+      throw new Error(`Provider ${provider} 仍使用不受支持的旧账户目录；请保留配置与目录完整备份，停止相关服务后使用对应原版本处理，当前版本不提供目录迁移`);
     }
     return undefined;
   }

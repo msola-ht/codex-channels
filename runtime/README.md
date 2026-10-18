@@ -78,7 +78,7 @@
 - `provider-model-guard.mjs` / `provider-model-guard.d.mts`：CLP Chat 桥、OCG/CCG 与自定义提供商代理共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。
   CP 从同次已校验目录的精确模型定义读取默认采样，和启用状态共同交给代理；采样不进入编译后的 Codex 模型字段。
   CLP 在同一次目录读取中取得模型的思考选项，出站同时验证启用名单和思考能力，不为能力检查重复执行 ACL 读取。
-  自定义提供商注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和旧上下文事务标记；受管账户另检查账户目录拆分记录。未完成事务拒绝对应出站，不复用管理事务内部的读取豁免。
+  自定义提供商注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和旧上下文事务标记；自定义及受管账户均检查旧版目录整理未完成记录。未完成事务拒绝对应出站，不复用管理事务内部的读取豁免。
 - `third-party-coding-instructions.mjs`：非 Flash CLP、新增 OCG/CCG 手填模型与新增非 DS 自定义提供商模型共用的编程提示词；显式写入模型定义，不改变既有目录缺省值，不声明模型身份或授予工具权限，不依赖 DS 下载。
 - `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
   拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
@@ -133,7 +133,7 @@
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
 - `responses-context-sync.mjs` / `responses-context-sync.d.mts`：仅保留旧版跨目录上下文事务的私有记录读取、校验及显式整批恢复；不再创建同步事务或提供跟随联动。
-- `provider-catalog-isolation.mjs` / `provider-catalog-isolation.d.mts`：Provider 目录整理私有记录路径和未完成保护；pending 时拒绝 runtime 使用受管及 CP 目录、CP 首次写入及统一模型恢复，显式整理由 `scripts/isolate-provider-catalogs.mjs` 执行。受管模型按家族放在 `providers/deepseek|clp|ccg|opencode-go/`；账户身份材料按完整 ID 放在对应家族子目录，自定义 cp 模型保持各自目录。
+- `provider-catalog-isolation.mjs` / `provider-catalog-isolation.d.mts`：旧版 Provider 目录整理未完成记录的只读拒绝保护；记录存在时拒绝 runtime 使用受管及 CP 目录、CP 首次写入及统一模型恢复。当前版本不提供目录迁移，不修改或删除旧记录；须保留记录与备份，并使用产生事务的原版本恢复。受管模型按家族放在 `providers/deepseek|clp|ccg|opencode-go/`；账户身份材料按完整 ID 放在对应家族子目录，自定义 cp 模型保持各自目录。
 - `model-catalog.mjs` / `model-catalog.d.mts`：模型定义与 Codex 字段转换的纯数据层，集中校验基础及扩展能力、生成默认字段、导入官方／DS 模板及修正 DS 能力声明；CP、CLP 和 CLI 模板入口复用。CP 保留思考、图片、文件编辑和工具搜索的未知／不支持／支持声明；未知在 Codex 执行字段中暂不启用，目录投影另保留声明状态。导出 `SamplingParameters` 与严格数值校验，逐模型可选 `sampling` 仅保留于定义，空对象归一为省略，不进入 Codex 生成字段。完整官方及受管目录不经过 CP 白名单往返，避免丢失专用元数据。
 - `model-template-prompts.mjs` / `model-template-prompts.d.mts`：纯 JSON 提示词补全，保留显式值，补缺失文本及必要 token-budget 配套字段；`approvals: null` 是继承基础审批提示词的例外。
 - `model-template-bindings.mjs` / `model-template-bindings.d.mts`：校验受管目录 manifest 的显式模型来源关联；缺少关联保持未关联，拒绝无效或孤立引用，不按名称推断。

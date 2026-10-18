@@ -7,5 +7,5 @@ export function providerCatalogIsolationPath(environment) {
 }
 
 export function assertProviderCatalogIsolationComplete(environment) {
-  if (existsSync(providerCatalogIsolationPath(environment))) throw new Error("账户模型目录拆分尚未完成；停止服务后使用 node scripts/isolate-provider-catalogs.mjs --resume 或 --rollback 恢复");
+  if (existsSync(providerCatalogIsolationPath(environment))) throw new Error("检测到旧版 Provider 目录整理未完成记录；当前版本不提供目录迁移，请保留记录与备份，停止相关服务后使用产生该事务的原版本恢复，勿删除记录绕过保护");
 }

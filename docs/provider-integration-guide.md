@@ -110,29 +110,21 @@ WebUI 编辑已有自定义提供商与仅编辑模型均须携带打开编辑�
 
 自定义提供商编辑先选择“模型管理”或“连接、凭据与运行模式”。模型管理复用统一模型入口，只修改模型字段；连接编辑保留已有模型及默认模型，不重新询问模型能力或发起工具探测。添加与编辑保存保留全部已有模型，移除请使用独立移除入口，当前默认模型不能移除。模型填写完成后选择默认模型，新增模型可在同次保存中设为默认；最后查看预览并确认才写入，没有中途保存。普通编辑不会重新补全已有提示词；专用模板更新入口在明确选择“提示词”后替换目标模型的提示词。目录写入继续使用现有备份及未完成事务恢复机制；不自动迁移或重写既有数据。
 
-#### 旧共享目录账户升级
+#### 当前目录布局与旧版本恢复
 
-当前模型目录按提供商共用：`providers/deepseek/models.json`、`providers/clp/models.json`、`providers/ccg/models.json`、`providers/opencode-go/models.json`，manifest 和模型设置备份在同目录。账户管理标记、安装备份及私有凭据位于家族下的完整账户 ID 目录，例如 `providers/clp/clp-main/`、`providers/deepseek/ds-main/`、`providers/ccg/ccg-main/` 和 `providers/opencode-go/ocg-main/`。自定义 `cp-` 各自表示不同提供商，保留 `providers/<cp-ID>/models.json`。整理入口支持此前的 `providers/<家族>/accounts/<账户>/` 和平级 `providers/<完整账户 Provider ID>/` 布局：按实际配置引用将模型合并到家族根目录，将账户身份材料、安装备份和私有凭据显式复制到家族下的完整账户 ID 目录；旧 CP 模型及凭据显式复制到各自 cp-ID 目录。即使模型已经共用，平级账户材料仍须整理。升级前先用旧版本完成未结束事务，再退出 Remote TUI 和 Desktop 等客户端，停止整个 App Server（含受监管账户及聚合实例）。服务命令及 `all` 范围见[后台服务与更新](user-guide.md#5-后台服务与更新)，按原运行状态恢复所需服务：
+当前仅支持以下目录布局：
 
-```sh
-codexc stop all
-node scripts/isolate-provider-catalogs.mjs             # 默认仅预览受影响 Provider
-node scripts/isolate-provider-catalogs.mjs --write     # 显式整理为提供商共用模型目录
-node scripts/isolate-provider-catalogs.mjs             # 确认 changedFiles 为 0
-npm run install:global                               # 安装当前源码，不能直接运行旧版启动
-codexc start all
-```
+- DS、CLP、CCG、OCG 各自在 `providers/deepseek|clp|ccg|opencode-go/models.json` 保存一份共用模型目录，manifest 和模型设置备份位于同目录。
+- 账户管理标记、安装备份及私有凭据位于家族下的完整账户 ID 目录，例如 `providers/clp/clp-main/`、`providers/deepseek/ds-main/`、`providers/ccg/ccg-main/` 和 `providers/opencode-go/ocg-main/`。
+- 自定义 `cp-*` 各自表示不同提供商，使用 `providers/<cp-ID>/models.json`，不并入受管家族共用目录。
 
-整理使用全局 Provider 管理锁，以当前配置实际引用的模型文件为来源，拒绝同族账户间目录或 manifest 内容冲突，不按名称或时间猜选。预览列出源、目标、修改文件及内容摘要；明确 `--write` 后可替换家族根目录的陈旧文件，原目标内容写入私有恢复记录。普通旧备份有多个版本时保留源并列出不合并项，设置恢复备份冲突则拒绝。同步更新主配置、Profile 和已知配置备份内的目录引用，模型正文、提示词、上下文不改；凭据内容和不可变版本不变，源文件保留；目标身份或凭据文件冲突时拒绝覆盖，不下载模板、不自动重启。写入和恢复要求整个 App Server 停止。安装代码和整理数据是两步，不能跳过任一步直接启动。
+旧 `providers/<家族>/accounts/<账户>/`、平级 `providers/<完整账户 Provider ID>/` 布局及旧目录引用不受支持。新版保留检测并拒绝加载，不迁移、合并或删除用户文件；即使模型已经共用，也不能沿用旧账户身份材料路径。当前版本不提供旧布局迁移入口，程序安装与更新不处理此类历史数据。
 
-脚本直接运行时默认读取 `~/.codex-connect/config.toml` 检查主 App Server Socket；设置了 `CODEX_CONNECT_HOME` 时使用该用户数据目录，显式 `CODEX_CONNECT_CONFIG_FILE` 优先。请与服务使用相同的环境设置；不会读取仓库根目录的 `config.toml`。
+历史目录迁移的未完成记录为 `~/.codex-connect/private/provider-catalog-isolation.json`。该记录存在时，账户配置加载、目录使用、自定义目录首次创建及 `codexc provider recover` 的所有恢复分支均拒绝继续。应先保持相关服务和客户端停止，保留全部原文件、备份和标记，使用产生该事务的对应旧版本及其恢复入口处理；不要删除标记、改写引用或套用当前模型设置恢复命令绕过保护。历史恢复须核对后续修改和对应代码，不能用旧备份覆盖现有数据；当前版本不承诺替旧版恢复或反向合并后续模型修改。
 
-写入前把原值、目标值和路径保存到私有 `~/.codex-connect/private/provider-catalog-isolation.json`。该未完成记录存在时，新 runtime 拒绝加载账户配置及使用目录；成功后保存为同路径 `.v4.backup` 并移除未完成记录，旧版 `.v3.backup` 保留且不阻止本次整理。中断后保持服务停止，运行 `node scripts/isolate-provider-catalogs.mjs --resume` 完成，或 `--rollback` 恢复整理前内容。当前文件既非原值也非目标值时拒绝覆盖；已有 `.v4.backup` 不覆盖。旧版 schema 1/2/3 未完成记录必须先用原版本恢复，不能删除记录绕过保护。旧源文件保留用于核对和恢复，因此整理不会自动删除原来的平级目录。
-同一未完成记录也阻止自定义目录首次创建及 `codexc provider recover` 的所有恢复分支；先处理目录整理事务，再恢复模型设置，避免两个恢复过程交叉修改文件。
+模型设置恢复与上述历史目录迁移不同：当前 CP 目录 pending、受管共用目录 settings-pending 及历史上下文恢复入口仍按各自合同保留。共用目录设置在同一事务中保存模型、来源和相关 Profile，schema 2 guards 记录同族注册表、管理标记等只读前置条件；任一同族账户均可发起受控恢复，不覆盖其他家族或后续修改。只有历史目录迁移保护解除且当前布局有效，才能继续相应模型设置恢复。
 
-回滚仅恢复此次整理记录中的文件和引用，须配合对应旧代码；后续模型修改不会自动反向合并。若旧版本已有未完成的 DS/CP 上下文或模型设置事务，先使用旧版本的恢复入口处理。共享目录设置采用同一事务保存模型、来源和相关 Profile，schema 2 guards 记录同族注册表、管理标记等只读前置条件；任一同族账户均可发起受控恢复，不覆盖其他家族或后续修改。真实用户目录不会自动迁移。
-
-自定义 Responses 出站复核与配置加载共用版本 5、允许字段及定义／生成目录一致性校验。目录 `.pending`、旧 DS/CP 上下文事务或目录整理未完成标记存在时，普通 HTTP 和 Responses WS 均拒绝新请求；读取前后检查标记，目录或事务不可用统一返回 `503 provider_catalog_unavailable`。恢复有效目录并完成事务后，下一次请求重新复核，不缓存失败或成功名单。受管账户出站同样检查目录整理未完成记录。
+自定义 Responses 出站复核与配置加载共用版本 5、允许字段及定义／生成目录一致性校验。目录 `.pending`、旧 DS/CP 上下文事务或历史目录迁移未完成标记存在时，普通 HTTP 和 Responses WS 均拒绝新请求；读取前后检查标记，目录或事务不可用统一返回 `503 provider_catalog_unavailable`。恢复有效目录并完成事务后，下一次请求重新复核，不缓存失败或成功名单。受管账户出站同样检查历史目录迁移未完成记录。
 
 OCG/CCG 与自定义 `cp-*` 的普通代理及聚合下游均在发送前复核当前目录：HTTP 和 Responses WS 拒绝未知／已停用模型，旧会话不自动换模型。自定义固定模式与切换模式使用相同的目录保护，固定模式按实际 `cp-*` 身份选择目录，内部主实例路由键不参与模型名单判断；Chat 上游同样在转换前复核。HTTP 错误为 `409 provider_model_disabled` 或目录不可用的 `503 provider_catalog_unavailable`；WS 返回对应 error 后关闭连接。CLP 保留专属错误码，独立 Relay 沿用自己的授权。名单约束即时读取，目录展示与能力仍按原服务刷新流程应用。
 
@@ -580,7 +572,7 @@ WebUI 的 Provider 预览与保存请求上限为 2 MiB，其他管理接口仍�
 预览时，先用当前锁定 Codex CLI 的 `debug models` 在隔离临时目录校验最终生成目录；校验失败不写入模型目录、Profile 或主配置，不输出原始错误内容。CLI 编辑绑定打开时的配置、Profile、注册表、上游接口及目录快照，期间变化须重新编辑。CLI 与 WebUI 确认保存均在管理锁内重新生成计划，核对预览修订，包含凭据与连接状态；修订使用进程内 HMAC，不暴露可复用的 Key 摘要。切换模式需要可读取的主 `config.toml`，尚未建立时先通过 `codexc config` 保存 Codex 配置。保存前备份受影响配置；上一目录保存在同目录 `models.json.backup`。
 `models.json.pending` 标记未完成的保存；已知写入失败且主配置未改变时恢复目录和原 Profile。
 无法确认配置写入结果或发生进程中断时保留备份和 pending，拒绝启动，不自动重发写入。
-恢复入口的自定义目录 `.pending` 与受管家族 `.settings-pending` 仅接受版本 2：前者必须包含前后摘要，后者必须包含完整的账户守卫快照。新建目录整理计划（默认预览或 `--write`）也只接受版本 2 的模型设置备份 `.settings-backup`，包括已存在的目标备份。这些入口遇到旧版材料时原样保留并拒绝处理，不自动补齐快照、迁移或删除；请先备份配置、目录和恢复材料，再使用生成记录的对应原版本完成恢复。已有目录整理的 v4 事务是独立格式，`--resume`／`--rollback` 仍在校验路径、账户清单和当前内容后按原事务快照续作或回滚，不重新生成计划或转换其中的备份格式。代码回退不会转换恢复记录，须使用与记录格式匹配的版本。普通设置保存仍按既有规则轮换上次成功事务的 `.settings-backup`。
+恢复入口的自定义目录 `.pending` 与受管家族 `.settings-pending` 仅接受版本 2：前者必须包含前后摘要，后者必须包含完整的账户守卫快照。遇到旧版材料时原样保留并拒绝处理，不自动补齐快照、迁移或删除；请先备份配置、目录和恢复材料，再使用生成记录的对应原版本完成恢复。历史目录迁移记录属于独立事务，当前版本只保留拒绝保护，其恢复边界见[当前目录布局与旧版本恢复](#当前目录布局与旧版本恢复)，不能用下方模型设置命令处理。代码回退不会转换恢复记录，须使用与记录格式匹配的版本。普通设置保存仍按既有规则轮换上次成功事务的 `.settings-backup`。
 当前修改不再创建 DS/CP 窗口联动事务。历史未完成事务的 `~/.codex-connect/private/responses-context-sync.json` 及 `.backup` 保留显式恢复入口，记录可能含 Profile 凭据，不可分享。恢复命令指定该历史事务内任一 CP ID，会整批恢复记录中的关联文件，拒绝覆盖后来修改的内容。
 先停止服务、核对或恢复私有快照中的配置，再明确选择目录恢复方向：
 

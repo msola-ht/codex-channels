@@ -213,7 +213,6 @@
 - `provider-model-additions.mjs` / `provider-model-additions.d.mts`：CCG／OCG 手填及 DS 导入、CLP 发现共用的新增候选、全字段预览和执行计划。锁外获取有界来源快照，绑定账户、目录及来源修订；锁内复核并追加，保留旧模型和来源关联，复用受管目录恢复事务。候选十分钟失效，确认时不重新下载，无新增不写入。CLI 与 WebUI 共用此后端；手填定义不接受受管目录无法保存和消费的 `sampling`。
 - `provider-model-setup.mjs` / `provider-model-setup.d.mts`：Setup 的统一模型管理菜单，复用移除、自定义模型专用保存、受管默认设置和 CLP／CCG／OCG 发现添加。已有自定义模型可单独选择工具能力探测，明确选择才发请求，采用结果仍走修订检查和预览保存。五类独立目录均可选择来源、对比并更新模板；自定义允许提示词及运行设置，受管另支持能力参数；默认仅选择提示词。逐字段预览差异，长内容显示 JSON 长度与 SHA-256 摘要并可在确认前展开，确认后保存，无差异不写入；不自动重启服务。
 - `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内先拒绝未完成的目录整理，再校验当前配置，完成未结束的自定义模型目录保存或受管账户设置事务；两种记录仅接受 v2，旧版记录保留并提示使用对应原版本恢复。固定 CP 允许未设置或候选模型支持的独立思考等级，切换 Profile 仍须匹配目录默认等级；受管恢复核对准确目录／Profile 路径及前后值，拒绝覆盖后续修改。
-- `isolate-provider-catalogs.mjs`：源码仓库的显式 Provider 目录整理入口，默认预览，`--write` 把旧 `accounts/<账户>` 或平级账户的模型目录整理到提供商家族共用目录，并更新配置与恢复备份引用。旧账户身份、安装备份及凭据显式复制到家族下的完整 ID 子目录；旧 CP 模型、metadata 和凭据复制到各自 cp-ID 目录。源文件保留，模型、manifest 或身份目标冲突时拒绝猜测，CP 目录保持独立。`--resume`／`--rollback` 消费 v4 私有恢复记录，拒绝覆盖后续改动；旧版未完成记录须先用原版本恢复，已完成 v3 备份保留且不阻塞 v4 整理。使用全局管理锁，写入及恢复要求整个 App Server 停止；不由更新器自动执行。步骤与回滚限制见[目录整理](../docs/provider-integration-guide.md#旧共享目录账户升级)。
 - `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主
   Provider 新增与编辑的无终端校验、脱敏预览和执行接口；用 `preserve` / `replace` 明确表达 Key
   操作，现有 Key 只在内部计划闭包中用于同 Origin 保留，不进入预览或执行结果。固定模式复用 Codex
@@ -466,34 +465,6 @@
   并有限取消；不注册 Surface、不写配置或凭据，也不属于公开 `codexc` 命令。
   该文件同时导出正式 `weixin-setup.mjs` 与 `weixin-setup-session.mjs` 使用的二维码客户端和
   登录流程，随 npm 包分发；导入不会执行独立探针入口，不能按无调用的历史脚本删除。
-- `weixin-updates-contract-probe.mjs`：从已验证的微信安全凭据执行一次显式 `once --live`
-  `getupdates` 长轮询，只报告消息数量、字段形状、项目类型、上下文令牌存在性和
-  `message_id` 精度；`sequence --live` 只在内存把首轮游标传给第二轮并比较重放数量和游标推进；
-  `replay --live` 再次复用首轮游标，判断第二批消息是否重放及返回游标是否一致；
-  不输出或保存正文、完整身份、Token、上下文令牌和游标。
-- 微信 `*-contract-probe.mjs` 是冻结的历史资产，保留当时 `v2.4.6` 的隔离探测基线，不扩张、不维护；其结果不能作为功能验证或完成证据。整批删除须明确点名授权，执行真实发送仍需明确授权。
-- `weixin-send-contract-probe.mjs`：显式 `reply --live` 后从一条已授权完成态微信文本中仅在
-  内存取得回复目标和 `context_token`，按固定 `v2.4.6` 合同发送一条短文本；不接受命令行
-  Token、用户 ID 或正文；`sequence --live` 使用同一上下文连续发送两条固定短文本，第二条
-  包含 Unicode、emoji 和 Markdown 符号；不输出或保存消息、游标、回复上下文、`client_id`
-  或完整身份，首条发送失败时不继续；`limit --live` 只发送一条固定 4000 字符中文消息，
-  验证官方宿主分片值而不探测未知最大上限；`echo --live` 发送固定回复后再轮询一次，只检查
-  服务端消息 ID 与 `client_id` 形状，不把回送内容写入日志或 Fixture；`reject --live` 仅在
-  内存把上下文令牌改成同长度无效值后调用一次发送接口，预期返回 `ret: -2`，不应产生可见消息。
-- `weixin-image-contract-probe.mjs`：显式 `download --live` 后从一条已授权完成态微信图片中
-  仅在内存取得固定 `v2.4.6` CDN 下载参数，限定官方 CDN、响应正文和 10 MiB 明文上限，
-  按消息提供的 key 执行 AES-128-ECB 解密并验证 PNG/JPEG 签名；不输出或保存图片、下载地址、
-  查询参数、key、Token、游标或完整身份，不注册常驻 Surface。
-- `weixin-file-contract-probe.mjs`：显式 `download --live` 后从一条已授权完成态微信文件中
-  仅在内存取得固定 `v2.4.6` CDN 下载参数，限定官方 CDN，并以 20 MiB 作为本探针的明文内存
-  安全上限；按消息提供的 key 执行 AES-128-ECB 解密，只报告大小、声明长度和 MD5 是否匹配、
-  文件名形状及由扩展名推断的 MIME，不输出或保存文件名、文件正文、MD5、下载地址、查询参数、
-  key、Token、游标或完整身份，不注册常驻 Surface。
-- `weixin-image-send-contract-probe.mjs`：显式 `send --live` 或 `file --live` 后从一条已授权
-  完成态微信文本中仅在内存取得回复上下文；前者生成固定 PNG，后者生成固定 UTF-8 文本文件，
-  均按固定 `v2.4.6` 合同申请官方 CDN 上传地址、AES-128-ECB 加密并以二进制 `POST` 上传，
-  再发送单张图片或单个一般文件消息；上传缺少下载参数时有限重试，4xx 立即失败；不输出或保存
-  媒体正文、上传地址、参数、key、Token、游标或完整身份，不注册常驻 Surface。
 - `check-gateway-version.mjs`：校验 npm 包与 Gateway 运行时版本一致，并要求正式版本、`-rc.N`
   候选版或 `-fixN` 修复版使用与 Codex CLI 协议相同的基础版本。
 - `check-runtime-boundaries.mjs`：静态校验源码模块允许依赖、公开入口、循环、Surface 隔离、协议受控导出
@@ -633,10 +604,6 @@
 - `windows-scheduled-task.ps1`：创建、启动、查询和删除当前用户计划任务；任务通过
   `wscript.exe` 以隐藏窗口运行对应 VBS 启动器，避免服务进程占用可见终端窗口。
 - `windows-log-follow.ps1`：按服务目标跟随读取用户级运行日志，供 `codexc logs` 使用。
-- `windows-app-server-proxy-probe.mjs`：Windows App Server 代理连接的历史探针；默认 `readonly`
-  场景只查询代理端点、初始化握手和 RPC。`peer` 创建临时 Thread；`turn`、`approval`、`interrupt`
-  会启动模型轮次，其中 `approval` 请求执行命令；`message-limit` 发送大消息并可能断开连接。
-  非默认场景须按实际副作用取得授权，不能作为只读诊断执行；按冻结历史资产保留，不作为功能完成证据。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。
 
