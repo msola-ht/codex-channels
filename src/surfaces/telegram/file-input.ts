@@ -1,12 +1,11 @@
 import { UserFacingError } from "../../conversation-core/index.js";
-import { TextAttachmentStore, type PreparedTextAttachment } from "../text-attachment-store.js";
+import { prepareTextFile, TextAttachmentStore, type PreparedTextAttachment } from "../text-attachment-store.js";
 import {
   formatTextFileDownloadFailed,
   formatTextFileTooLarge,
   formatUnsupportedTextFile,
 } from "../text-file-copy.js";
 import {
-  decodeUtf8TextFile,
   maximumTextFileBytes,
   normalizeTextFileName,
   readBoundedTextFile,
@@ -102,13 +101,7 @@ export class TelegramTextFileInput implements TelegramTextFilePort {
         throw tooLarge();
       }
       const content = await readBoundedTextFile(response.stream);
-      const text = decodeUtf8TextFile(content);
-      const prepared = this.attachments === undefined ? { text } : await this.attachments.prepare(text);
-      return {
-        fileName: normalizedName,
-        ...prepared,
-        bytes: content.length,
-      };
+      return await prepareTextFile(content, normalizedName, this.attachments);
     } catch (error) {
       if (error instanceof UserFacingError) throw error;
       if (error instanceof TelegramTextFileInputError) {

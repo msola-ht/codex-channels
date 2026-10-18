@@ -1,5 +1,5 @@
 import { UserFacingError } from "../../conversation-core/index.js";
-import { TextAttachmentStore, type PreparedTextAttachment } from "../text-attachment-store.js";
+import { prepareTextFile, TextAttachmentStore, type PreparedTextAttachment } from "../text-attachment-store.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -8,7 +8,6 @@ import {
   formatUnsupportedTextFile,
 } from "../text-file-copy.js";
 import {
-  decodeUtf8TextFile,
   maximumTextFileBytes,
   normalizeTextFileName,
   TextFileValidationError,
@@ -99,13 +98,7 @@ export class WeixinFileInput implements WeixinFilePort {
       ) {
         throw integrityFailure();
       }
-      const text = decodeUtf8TextFile(plaintext);
-      const prepared = this.attachments === undefined ? { text } : await this.attachments.prepare(text);
-      return {
-        fileName,
-        ...prepared,
-        bytes: plaintext.length,
-      };
+      return await prepareTextFile(plaintext, fileName, this.attachments);
     } catch (error) {
       if (error instanceof UserFacingError) throw error;
       if (error instanceof WeixinFileInputError) {

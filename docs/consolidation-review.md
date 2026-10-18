@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | U01 | 统一自定义 Provider API Key 纯校验规则 | 中 | 已修复；隔离凭据写读与 HTTP 拒绝已观察 |
 | U02 | 统一 Application 短期选择快照的容器操作 | 低 | 关联复核完成，缩小范围；未实施 |
-| U03 | 收敛渠道文本附件取得明文后的公共处理 | 低 | 关联复核完成，保留窄范围；未实施 |
+| U03 | 收敛渠道文本附件取得明文后的公共处理 | 低 | 已实施；清理解码、真实暂存与异步错误转换已观察 |
 | U04 | 收敛 Storage 内两个同步 SQLite Store 的打开流程 | 低 | 关联复核完成，保留窄范围；未实施 |
 | U05 | 统一 WebUI 写入结果未知与权威回读门禁 | 中 | 已修复；浏览器保存及 503 回读门禁已观察 |
 | U06 | 统一两个模型能力检测 Hook 的请求归属与取消机制 | 中 | 已实施；调用链及构建检查完成，检测竞态未实测 |
@@ -83,6 +83,8 @@
 确认令牌的消费时机、失效范围和主动清理不同，不建立通用确认服务。尤其不能将 Surface 的审批交互注册表引入 Application，以免倒置依赖方向。与 U18/U19 只共享 Queue 的业务背景，不共享选择事务或错误适配。以上已核对源码，尚未观察过期、容量淘汰、重新列举、切换绑定与授权变化的运行行为。
 
 ## U03 渠道文本附件公共处理
+
+**实施与证据。** 共同尾段已收敛为现有 text-attachment-store 模块的 `prepareTextFile`；三渠道在原 catch 内 await 该函数，继续复用现有 Store。手工操作编译产物：含 BOM/样式的 17 字节输入返回 hello 且 bytes=17；33,000 字节中文写入隔离暂存目录，回读 11,000 字符，提交正文含托管路径；非法 UTF-8 返回 invalid-utf8。关闭 Store 后经 Telegram 文件入口（本地替代下载）调用，异步失败仍转换为 TelegramTextFileInputError/download-failed，没有暴露底层异常。类型及构建通过；未调用平台网络下载或真实 Turn。
 
 证据入口：三个渠道的 [`Telegram file-input`](../src/surfaces/telegram/file-input.ts)、[`飞书 file-input`](../src/surfaces/feishu/file-input.ts)、[`微信 file-input`](../src/surfaces/weixin/file-input.ts)，以及共享 [`text-file-input.ts`](../src/surfaces/text-file-input.ts)、[`text-attachment-store.ts`](../src/surfaces/text-attachment-store.ts)。
 
