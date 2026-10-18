@@ -45,8 +45,12 @@ export function customPrimaryProviderCredentialPath(environment, provider, envir
   return join(providerStorageRoot(environment), ...(isCustomCatalogProvider(provider) ? [provider] : ["custom", provider]), "primary-credentials", `${version}.json`);
 }
 
+export function isValidCustomProviderApiKey(apiKey) {
+  return typeof apiKey === "string" && apiKey.trim() !== "" && apiKey.length <= 4096 && !/\p{Cc}/u.test(apiKey);
+}
+
 function validateCustomApiKey(apiKey) {
-  if (typeof apiKey !== "string" || apiKey.trim() === "" || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) throw new Error("自定义 Provider API Key 缺失或无效");
+  if (!isValidCustomProviderApiKey(apiKey)) throw new Error("自定义 Provider API Key 缺失或无效");
   return apiKey;
 }
 
@@ -318,7 +322,7 @@ export function loadConfiguredCustomPrimaryRelayProfile(providerId, environment 
     throw new Error("Relay requires unambiguous independent API credentials");
   }
   const apiKey = readCustomPrimaryProviderApiKey(providerId, provider, environment);
-  if (typeof apiKey !== "string" || !apiKey.length || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) {
+  if (apiKey === undefined) {
     throw new Error("Relay Provider has no usable independent API credentials");
   }
   return { ...primary, apiKey, apiKeyEnvironmentKey: provider.env_key };

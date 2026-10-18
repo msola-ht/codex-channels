@@ -31,6 +31,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   "addition-source-too-large": "modelAddition.tooLarge",
   "addition-source-invalid": "modelAddition.invalidSource",
   "invalid-input": "settingsUi.invalid",
+  "invalid-value": "settingsUi.invalid",
   provider_models_invalid_input: "modelCatalog.promptsInvalid",
   provider_models_stale_revision: "modelCatalog.detailsStale",
   provider_models_unavailable: "modelCatalog.promptsUnavailable",
@@ -205,6 +206,7 @@ const integerSettingKeys: Record<string, MessageKey> = {
 
 /** 设置上下文只用于选择受控文案；不插入设置值、字段名或原始异常。 */
 export function translateSettingErrorCode(t: Translate, code: string, kind?: string): string {
+  if (code === "invalid-value" && kind === "system.official-tui-identity") return t("settingsUi.validation.identityFormat")
   if (code === "required" && kind === "webui.host") return t("settingsUi.validation.publicToken")
   if (code === "required" && kind === "webui.token") return t("settingsUi.validation.tokenRequired")
   if (code === "invalid-integer" && kind !== undefined && Object.hasOwn(integerSettingKeys, kind)) {

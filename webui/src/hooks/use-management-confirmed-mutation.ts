@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import { ApiClientError } from "@/lib/api"
 import { useApi } from "@/hooks/use-api"
+import { isUnconfirmedManagementWrite, useManagementReadback } from "@/hooks/use-management-readback"
 import { useTranslation } from "@/hooks/use-translation"
 import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
 
@@ -33,16 +34,12 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
   const [actionErrorCode, setActionErrorCode] = useState<string | null>(null)
   const [pendingPreview, setPendingPreview] = useState<PendingManagementMutation<Input, Preview> | null>(null)
   const [actionResult, setActionResult] = useState<Result | null>(null)
-  const [writeUnconfirmed, setWriteUnconfirmed] = useState(false)
-  const [readbackBaseline, setReadbackBaseline] = useState<Snapshot | null>(null)
+  const { writeUnconfirmed, readbackRequired, requireReadback } = useManagementReadback(request)
 
   useEffect(() => { if (request.error !== null && operation.current === null) setPendingPreview(null) }, [request.error, busy])
-  useEffect(() => {
-    if (readbackBaseline !== null && request.data !== null && request.data !== readbackBaseline && !request.loading && request.error === null) setReadbackBaseline(null)
-  }, [readbackBaseline, request.data, request.loading, request.error])
 
   const mutate = useCallback(async (input: Input) => {
-    if (readbackBaseline !== null || pendingPreview !== null || operation.current !== null || busy || request.loading || request.error !== null) return null
+    if (readbackRequired || pendingPreview !== null || operation.current !== null || busy || request.loading || request.error !== null) return null
     const controller = new AbortController()
     operation.current = controller
     setBusy(true)
@@ -63,11 +60,11 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
         if (!controller.signal.aborted) setBusy(false)
       }
     }
-  }, [pendingPreview, preview, busy, request.loading, request.error, readbackBaseline])
+  }, [pendingPreview, preview, busy, request.loading, request.error, readbackRequired])
 
   const confirm = useCallback(async () => {
     const pending = pendingPreview
-    if (readbackBaseline !== null || pending === null || operation.current !== null || busy || request.loading || request.error !== null) return null
+    if (readbackRequired || pending === null || operation.current !== null || busy || request.loading || request.error !== null) return null
     const controller = new AbortController()
     operation.current = controller
     setBusy(true)
@@ -79,8 +76,7 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
       setPendingPreview(null)
       if (trackReadback) {
         setActionResult(result)
-        setWriteUnconfirmed(false)
-        setReadbackBaseline(request.data)
+        requireReadback(request.data, false)
       }
       refetch()
       return result
@@ -88,9 +84,8 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
       if (controller.signal.aborted) return null
       setPendingPreview(null)
       setActionErrorCode(error instanceof ApiClientError ? error.code ?? "unknown" : "unknown")
-      if (trackReadback && (!(error instanceof ApiClientError) || (error.status >= 500 && error.code !== "management_audit_unavailable"))) {
-        setWriteUnconfirmed(true)
-        setReadbackBaseline(request.data)
+      if (trackReadback && isUnconfirmedManagementWrite(error)) {
+        requireReadback(request.data, true)
         refetch()
       }
       return null
@@ -100,7 +95,7 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
         if (!controller.signal.aborted) setBusy(false)
       }
     }
-  }, [apply, pendingPreview, refetch, busy, request.loading, request.error, request.data, readbackBaseline, trackReadback])
+  }, [apply, pendingPreview, refetch, busy, request.loading, request.error, request.data, readbackRequired, trackReadback, requireReadback])
 
   const cancel = useCallback(() => {
     if (operation.current !== null || busy) return
@@ -115,7 +110,7 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
     busy,
     actionResult,
     writeUnconfirmed,
-    readbackRequired: readbackBaseline !== null,
+    readbackRequired,
     pendingPreview,
     actionError: actionErrorCode === null ? null : translateApiErrorCode(t, actionErrorCode),
     actionErrorCode,

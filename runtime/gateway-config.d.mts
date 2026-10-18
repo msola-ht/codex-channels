@@ -82,6 +82,10 @@ export interface GatewayConfigDocument {
 }
 
 export class GatewayConfigConflictError extends Error {}
+export class GatewayConfigValidationError extends Error {
+  constructor(message: string, issues: readonly { path: readonly PropertyKey[]; code: string }[]);
+  readonly issues: { path: PropertyKey[]; code: string }[];
+}
 
 export function parseGatewayConfig(content: string, source?: string): TomlTable;
 export const terminalIdentityPattern: RegExp;

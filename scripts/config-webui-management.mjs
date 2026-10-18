@@ -1,13 +1,14 @@
 import { invalidSetting } from "./config-management-error.mjs";
+import { validateWebuiConfigDocument } from "../runtime/gateway-config.mjs";
 
 const hosts = ["127.0.0.1", "::1", "0.0.0.0"];
 
 export function projectWebuiSettings(document) {
-  const webui = table(document.webui);
+  const webui = validateWebuiConfigDocument(document);
   return {
-    enabled: typeof webui.enabled === "boolean" ? webui.enabled : undefined,
-    host: hosts.includes(webui.host) ? webui.host : "127.0.0.1",
-    port: integerInRange(webui.port, 1, 65_535) ?? 8_787,
+    enabled: webui.enabled,
+    host: webui.host,
+    port: webui.port,
     tokenConfigured: nonEmptyString(webui.token),
   };
 }
@@ -89,10 +90,6 @@ function nullableInteger(value, minimum, maximum, field, label) {
     throw invalidSetting(field, "invalid-integer", `${label}必须为 ${minimum}–${maximum} 之间的整数`);
   }
   return value;
-}
-
-function integerInRange(value, minimum, maximum) {
-  return Number.isInteger(value) && value >= minimum && value <= maximum ? value : undefined;
 }
 
 function nonEmptyString(value) {

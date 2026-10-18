@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { TextAttachmentStore, textAttachmentBody } from "../text-attachment-store.js";
 import { videoAttachmentBody } from "../video-attachment-store.js";
+import { SurfaceShutdown } from "../surface-shutdown.js";
 import { Bot, type Context } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
@@ -198,6 +199,7 @@ export class TelegramSurface {
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
   private stopping = false;
+  private stopPromise: Promise<void> | undefined;
 
   constructor(
     token: string,
@@ -364,24 +366,28 @@ export class TelegramSurface {
     this.lifecycle.start();
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    this.stopPromise ??= this.stopOnce();
+    return this.stopPromise;
+  }
+
+  private async stopOnce(): Promise<void> {
+    const shutdown = new SurfaceShutdown();
     this.stopping = true;
-    const videoClose = this.videoInput?.close();
-    try {
-      const lifecycleStop = this.lifecycle.stop();
-      await videoClose;
-      await this.inputs.close();
-      await this.textFileInput.close?.();
-      this.imageStore.close();
-      this.audioStore.close();
-      this.pluginTaskPrompts.clear();
-      this.autoReviewSelections.clear();
-      await this.interactions.close();
-      await this.outbox.close();
-      await lifecycleStop;
-    } finally {
-      this.proxyAgent?.destroy();
-    }
+    const videoClose = shutdown.run("videos", () => this.videoInput?.close());
+    const lifecycleStop = shutdown.run("lifecycle", () => this.lifecycle.stop());
+    await videoClose;
+    await shutdown.run("inputs", () => this.inputs.close());
+    await shutdown.run("files", () => this.textFileInput.close?.());
+    await shutdown.run("images", () => this.imageStore.close());
+    await shutdown.run("audios", () => this.audioStore.close());
+    this.pluginTaskPrompts.clear();
+    this.autoReviewSelections.clear();
+    await shutdown.run("interactions", () => this.interactions.close());
+    await shutdown.run("outbox", () => this.outbox.close());
+    await lifecycleStop;
+    await shutdown.run("proxy agent", () => this.proxyAgent?.destroy());
+    shutdown.finish();
   }
 
   replaceNotificationRecipients(recipients: ReadonlySet<number>): void {

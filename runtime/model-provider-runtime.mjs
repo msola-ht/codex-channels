@@ -21,6 +21,7 @@ export {
   customPrimaryProviderProfileName,
   customSwitchingProviderProfileName,
   validateCustomPrimaryModelProviderId,
+  isValidCustomProviderApiKey,
   assertCustomPrimaryProviderAuthentication,
   listCustomPrimaryProviderCandidates,
   primaryProviderBackupPath,

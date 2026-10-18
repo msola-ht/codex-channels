@@ -5,7 +5,7 @@ import { DirectChatResponse, clinePassChatReasoningControl, responsesToChat } fr
 import { pinClinePassRouting } from "../dist/provider-proxy/index.js";
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { createRefreshableHttpProxySelector } from "../runtime/network-proxy.mjs";
-import { validProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
+import { isValidCustomProviderApiKey, validProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
 
 const capabilityNames = ["applyPatch", "toolSearch", "webSearch"];
 const reasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -56,7 +56,7 @@ async function probeModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, 
   let endpoint;
   try { endpoint = new URL(validProviderBaseUrl(baseUrl, "模型能力检测")); }
   catch { throw new Error("模型能力检测需要有效的 Provider Base URL"); }
-  if (typeof apiKey !== "string" || !apiKey.trim() || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) throw new Error("模型能力检测需要有效 API Key");
+  if (!isValidCustomProviderApiKey(apiKey)) throw new Error("模型能力检测需要有效 API Key");
   if (!validModelId(model)) throw new Error("模型能力检测需要有效模型 ID");
   if (upstreamWireApi !== "responses" && upstreamWireApi !== "chat_completions") throw new Error("模型能力检测不支持此上游协议");
   if (!capabilityNames.includes(capability)) throw new Error("模型能力检测仅支持 apply_patch、tool_search 或 web_search 单项探测");

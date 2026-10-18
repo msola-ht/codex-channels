@@ -1,4 +1,7 @@
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
+import { validateDebugConfigDocument, validateGatewayConfigStructureDocument } from "../runtime/gateway-config.mjs";
+import { projectWebuiSettings } from "./config-webui-management.mjs";
+import { projectMetricsSettings } from "./config-metrics-management.mjs";
 
 export function writeGatewayConfigSummary(output, document, configPath, environment = process.env) {
   const summary = gatewayConfigSummary(document, configPath, environment);
@@ -26,16 +29,17 @@ export function writeGatewayConfigSummary(output, document, configPath, environm
 }
 
 export function gatewayConfigSummary(document, configPath, environment = process.env) {
+  const effective = validateGatewayConfigStructureDocument(document);
   const codex = table(document.codex);
-  const display = table(document.display);
-  const conversation = table(document.conversation);
-  const debug = table(document.debug);
-  const scheduledTasks = table(document.scheduled_tasks);
-  const logging = table(document.logging);
+  const display = effective.display;
+  const conversation = effective.conversation;
+  const debug = effective.debug ?? validateDebugConfigDocument({});
+  const scheduledTasks = effective.scheduled_tasks;
+  const logging = effective.logging;
   const network = readCodexProxySettings(environment);
-  const metrics = table(document.metrics);
-  const metricsStorage = table(metrics.storage);
+  const metrics = projectMetricsSettings(effective);
   const webui = table(document.webui);
+  const webuiSettings = projectWebuiSettings(document);
   const workspaces = Array.isArray(document.workspaces) ? document.workspaces : [];
   const defaultWorkspaceId = stringValue(document.default_workspace);
   const defaultWorkspace = workspaces
@@ -49,16 +53,14 @@ export function gatewayConfigSummary(document, configPath, environment = process
       : defaultWorkspaceId || "未配置",
     defaultModel: stringValue(codex.default_model) || "跟随当前 Provider 默认值",
     channels: channelLabels(document),
-    operationUpdates: ["full", "compact", "hidden"].includes(display.operation_updates)
-      ? display.operation_updates
-      : "compact",
-    planUpdates: display.plan_updates !== false,
-    reasoning: display.reasoning === true,
-    idleReleaseMinutes: numberValue(conversation.idle_release_minutes) ?? 15,
-    scheduledTasks: scheduledTasks.enabled === true,
-    modelTrafficDump: debug.model_traffic_dump === true,
-    modelTrafficRetentionDays: numberValue(debug.model_traffic_retention_days) ?? 30,
-    logLevel: stringValue(logging.level) || "info",
+    operationUpdates: display.operation_updates,
+    planUpdates: display.plan_updates,
+    reasoning: display.reasoning,
+    idleReleaseMinutes: conversation.idle_release_minutes,
+    scheduledTasks: scheduledTasks.enabled,
+    modelTrafficDump: debug.model_traffic_dump,
+    modelTrafficRetentionDays: debug.model_traffic_retention_days,
+    logLevel: logging.level,
     networkFields: ["http_proxy", "https_proxy", "all_proxy", "no_proxy"]
       .filter((field) => stringValue(network[field])),
     webui: webui.enabled === false
@@ -66,11 +68,11 @@ export function gatewayConfigSummary(document, configPath, environment = process
       : Object.keys(webui).length === 0
         ? "使用命令行默认值"
         : formatHostPort(
-            stringValue(webui.host) || "127.0.0.1",
-            numberValue(webui.port) || 8787,
+            webuiSettings.host,
+            webuiSettings.port,
           ),
-    metricsRetentionDays: numberValue(metricsStorage.retention_days) ?? 365,
-    metricsMaxRows: numberValue(metricsStorage.max_rows) ?? 1_000_000,
+    metricsRetentionDays: metrics.storage.retentionDays,
+    metricsMaxRows: metrics.storage.maxRows,
   };
 }
 
@@ -124,10 +126,6 @@ function enabledLabel(value) {
 
 function formatHostPort(host, port) {
   return `${host.includes(":") ? `[${host}]` : host}:${port}`;
-}
-
-function numberValue(value) {
-  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
 }
 
 function stringValue(value) {

@@ -33,6 +33,15 @@ export class GatewayConfigConflictError extends Error {
   }
 }
 
+/** Structured validation metadata; never carries rejected input values. */
+export class GatewayConfigValidationError extends Error {
+  constructor(message, issues) {
+    super(message);
+    this.name = "GatewayConfigValidationError";
+    this.issues = issues.map(({ path, code }) => ({ path: [...path], code }));
+  }
+}
+
 const workspaceSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
   name: z.string().trim().min(1).max(64),
@@ -324,7 +333,7 @@ export function validateGatewayConfigStructureDocument(document) {
 export function validateCodexConfigDocument(document) {
   const parsed = codexSchema.safeParse(document);
   if (!parsed.success) {
-    throw new Error(`config.toml 的 [codex] 配置无效：\n${z.prettifyError(parsed.error)}`);
+    throw new GatewayConfigValidationError(`config.toml 的 [codex] 配置无效：\n${z.prettifyError(parsed.error)}`, parsed.error.issues);
   }
   return parsed.data;
 }
@@ -332,7 +341,7 @@ export function validateCodexConfigDocument(document) {
 export function validateGatewayProcessConfigDocument(document) {
   const parsed = gatewaySchema.safeParse(document);
   if (!parsed.success) {
-    throw new Error(`config.toml 的 [gateway] 配置无效：\n${z.prettifyError(parsed.error)}`);
+    throw new GatewayConfigValidationError(`config.toml 的 [gateway] 配置无效：\n${z.prettifyError(parsed.error)}`, parsed.error.issues);
   }
   return parsed.data;
 }

@@ -35,6 +35,9 @@ import { withCliProgress, writeCliSection } from "./cli-operation-progress.mjs";
 import { installCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
 import { supervisedCliInvocation } from "./cli-command-worker.mjs";
 import { formatCliMessage } from "../runtime/cli-presentation.mjs";
+import { isGatewayVersionCompatible } from "./gateway-version-policy.mjs";
+
+export { isGatewayVersionCompatible } from "./gateway-version-policy.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
@@ -994,19 +997,6 @@ function versionParts(value) {
     ? Number(suffix.slice(3))
     : suffix?.startsWith("fix") ? Number(suffix.slice(3)) : 0;
   return [...stable.split(".").map(Number), stage, sequence];
-}
-
-export function isGatewayVersionCompatible(gatewayVersion, expectedCodexVersion) {
-  return gatewayVersion === expectedCodexVersion
-    || new RegExp(
-      `^${escapeRegExp(expectedCodexVersion)}-(?:fix[1-9]\\d*|rc\\.[1-9]\\d*)$`,
-      "u",
-    )
-      .test(gatewayVersion);
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function capture(command, args, cwd, environment, implementation, options = {}) {

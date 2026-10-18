@@ -9,6 +9,7 @@ import {
   readCustomPrimaryProviderApiKey,
   readPrimaryProviderBackup,
   validateCustomPrimaryModelProviderId,
+  isValidCustomProviderApiKey,
 } from "../runtime/model-provider-runtime.mjs";
 import { customModelProbeConnection, customPrimaryProviderUrlsShareOrigin, validCustomPrimaryProviderBaseUrl } from "./custom-primary-provider-management.mjs";
 import { probeCustomModelCapabilities } from "./custom-model-capability-probe.mjs";
@@ -25,7 +26,7 @@ const inputSchema = z.strictObject({
   reasoningEffort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
   credential: z.discriminatedUnion("action", [
     z.strictObject({ action: z.literal("preserve") }),
-    z.strictObject({ action: z.literal("replace"), apiKey: text(4096) }),
+    z.strictObject({ action: z.literal("replace"), apiKey: z.string().trim().refine(isValidCustomProviderApiKey) }),
   ]),
 });
 // One bounded operation per WebUI instance; management already owns rate limiting.
