@@ -100,7 +100,9 @@
   服务入口同时接收终端信号与父进程 `codexc-stop`，统一关闭 HTTP 监听、通知连接与尚未发送请求的浏览器预连接，并取消导出和投递只读 Worker；活动请求按共享停止预算收尾。超时关闭剩余连接并记录非零状态，后台读取或 Windows ACL 辅助进程未确认退出时保留归属，实际退出后再结束服务。Windows CLI 包装层异步转发停止消息。
   主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
-  `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
+  `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。正常页面和未构建回退页统一设置
+  同源脚本 CSP、`frame-ancestors 'none'`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`
+  与 `no-store`；内联样式仅为现有组件渲染所需放行，脚本不开放内联。
   请求列表、错误汇总与单次运行详情的相关查询共享同一只读数据库快照，避免并发写入造成响应内部不一致。
   `/api/v1/settings/model-display` 返回只读模型显示映射，概览按该映射合并并提供原始模型成员明细；
   概览、显示映射与调用采集开关共用可取消的进行中私有配置读取，不缓存配置或权限判断。
@@ -210,7 +212,7 @@
 - `provider-model-template-management.mjs` / `provider-model-template-management.d.mts`：DS、CLP、CCG、OCG 和 CP 的统一模板选项、显式来源关联、分组差异预览与锁内执行。availableSections 区分提示词、运行设置及仅受管可选的能力参数；运行设置只包含有效比例、压缩阈值和截断策略，CP 请求能力更新在后端拒绝，未选择的参数保持原值。有界进程缓存绑定源快照、目标修订及有效期，CLP 仅获取选项时下载。CP 仅执行既有目录 pending／backup 事务并回读，不调用连接与默认模型保存，保留 Profile／主配置及目录独立默认值；受管账户复用目录与来源事务。无差异不写入，不自动重启。CLI 与 WebUI 复用同一计划接口。
 - `provider-model-additions.mjs` / `provider-model-additions.d.mts`：CCG／OCG 手填及 DS 导入、CLP 发现共用的新增候选、全字段预览和执行计划。锁外获取有界来源快照，绑定账户、目录及来源修订；锁内复核并追加，保留旧模型和来源关联，复用受管目录恢复事务。候选十分钟失效，确认时不重新下载，无新增不写入。CLI 与 WebUI 共用此后端；手填定义不接受受管目录无法保存和消费的 `sampling`。
 - `provider-model-setup.mjs` / `provider-model-setup.d.mts`：Setup 的统一模型管理菜单，复用移除、自定义模型专用保存、受管默认设置和 CLP／CCG／OCG 发现添加。已有自定义模型可单独选择工具能力探测，明确选择才发请求，采用结果仍走修订检查和预览保存。五类独立目录均可选择来源、对比并更新模板；自定义允许提示词及运行设置，受管另支持能力参数；默认仅选择提示词。逐字段预览差异，长内容显示 JSON 长度与 SHA-256 摘要并可在确认前展开，确认后保存，无差异不写入；不自动重启服务。
-- `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内先拒绝未完成的目录整理，再校验当前配置，完成未结束的自定义模型目录保存或受管账户设置事务；固定 CP 允许未设置或候选模型支持的独立思考等级，切换 Profile 仍须匹配目录默认等级；受管恢复核对准确目录／Profile 路径及前后值，拒绝覆盖后续修改。
+- `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内先拒绝未完成的目录整理，再校验当前配置，完成未结束的自定义模型目录保存或受管账户设置事务；两种记录仅接受 v2，旧版记录保留并提示使用对应原版本恢复。固定 CP 允许未设置或候选模型支持的独立思考等级，切换 Profile 仍须匹配目录默认等级；受管恢复核对准确目录／Profile 路径及前后值，拒绝覆盖后续修改。
 - `isolate-provider-catalogs.mjs`：源码仓库的显式 Provider 目录整理入口，默认预览，`--write` 把旧 `accounts/<账户>` 或平级账户的模型目录整理到提供商家族共用目录，并更新配置与恢复备份引用。旧账户身份、安装备份及凭据显式复制到家族下的完整 ID 子目录；旧 CP 模型、metadata 和凭据复制到各自 cp-ID 目录。源文件保留，模型、manifest 或身份目标冲突时拒绝猜测，CP 目录保持独立。`--resume`／`--rollback` 消费 v4 私有恢复记录，拒绝覆盖后续改动；旧版未完成记录须先用原版本恢复，已完成 v3 备份保留且不阻塞 v4 整理。使用全局管理锁，写入及恢复要求整个 App Server 停止；不由更新器自动执行。步骤与回滚限制见[目录整理](../docs/provider-integration-guide.md#旧共享目录账户升级)。
 - `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主
   Provider 新增与编辑的无终端校验、脱敏预览和执行接口；用 `preserve` / `replace` 明确表达 Key
@@ -600,6 +602,11 @@
 - `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性、launchd Job 字段或 Windows 计划任务
   生成统一基础 JSON 服务状态；Windows 额外核对受管进程和核心 RPC 端点。目标异常时保留可解析输出
   并返回非零状态，查询器故障则失败关闭。
+  管理接口的最近错误只提取显式 CLI 失败、error/fatal 级结构化记录和非工具类 tracing 错误，
+  忽略进度、耗时提示、告警及 Codex 工具调用错误，继续按三行或 600 字截断并脱敏。
+  macOS/Windows 同时检查受管 stdout/stderr 日志的有界尾部，按文件更新时间选择含错误的日志；
+  Linux 从最近 100 条 journal 记录中按应用日志级别分类，不以 journal 的流优先级替代应用级别。
+  journal 时间戳前缀只在 journal 读取边界移除，普通文件日志中的错误正文保持完整。
   macOS 文本状态也复用该解析，区分已加载与实际运行。
   Windows 异步查询的整体预算为 25 秒，包含 Job 宿主、ACL 冷启动、内部查询与宿主 IPC 阶段；超时只回收本次查询的 Job 子树，回收失败明确报告退出未确认。
 - `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、

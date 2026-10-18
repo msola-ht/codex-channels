@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { requestFailureReason } from "@/lib/request-failure"
 import { formatTrafficFailureStage } from "@/lib/format"
-import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
+import { formatGenerationSpeed } from "@/lib/format"
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
 import { TrafficParameterComparison, TrafficRequestContent } from "@/components/traffic/traffic-request-content"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -276,21 +276,22 @@ function CallSummary({ detail }: { detail: TrafficExchangeDetail }) {
   const { t } = useTranslation()
   const usage = detail.response?.usage
   const isModel = detail.category !== "models" && detail.category !== "prewarm"
-  const rate = usage?.inputTokens !== undefined && usage.inputTokens > 0 && usage.cachedTokens !== undefined
-    ? `${(usage.cachedTokens / usage.inputTokens * 100).toFixed(1)}%` : "—"
-  const elapsed = (value: number | undefined) => value === undefined ? "—" : formatElapsedDuration(value)
+  const rate = usage?.inputTokens !== undefined && usage.inputTokens > 0 && usage.cachedTokens !== undefined && usage.cachedTokens > 0
+    ? `${(usage.cachedTokens / usage.inputTokens * 100).toFixed(1)}%` : ""
+  const elapsed = (value: number | undefined) => !value ? "" : formatElapsedDuration(value)
   return <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
     {isModel ? <SummaryMetric label={<TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint>} value={elapsed(detail.response?.firstTokenMs)} /> : null}
     {isModel ? <SummaryMetric label={<TableHint hint={t("requests.speedHint")}>{t("requests.speedColumn")}</TableHint>} value={formatGenerationSpeed({ ...detail.response, status: detail.response?.state, totalDurationMs: detail.response?.durationMs })} /> : null}
     <SummaryMetric label={t("requests.durationColumn")} value={elapsed(detail.response?.durationMs)} />
     {isModel ? <>
-      <SummaryMetric label={t("metrics.input")} value={usage?.inputTokens?.toLocaleString() ?? "—"} description={usage?.cachedTokens === undefined ? undefined : t("traffic.cachedTokens", { count: usage.cachedTokens.toLocaleString(), rate })} />
-      <SummaryMetric label={t("metrics.output")} value={usage?.outputTokens?.toLocaleString() ?? "—"} description={usage?.reasoningTokens === undefined ? undefined : t("traffic.reasoningTokens", { count: usage.reasoningTokens.toLocaleString() })} />
+      <SummaryMetric label={t("metrics.input")} value={usage?.inputTokens ? usage.inputTokens.toLocaleString() : ""} description={!usage?.cachedTokens ? undefined : t("traffic.cachedTokens", { count: usage.cachedTokens.toLocaleString(), rate })} />
+      <SummaryMetric label={t("metrics.output")} value={usage?.outputTokens ? usage.outputTokens.toLocaleString() : ""} description={!usage?.reasoningTokens ? undefined : t("traffic.reasoningTokens", { count: usage.reasoningTokens.toLocaleString() })} />
     </> : null}
   </dl>
 }
 
 function SummaryMetric({ label, value, description }: { label: ReactNode; value: string; description?: string }) {
+  if (!value && !description) return null
   return <div className="flex min-w-0 flex-col gap-1">
     <dt className="text-muted-foreground">{label}</dt>
     <dd className="tabular-nums">{value}</dd>

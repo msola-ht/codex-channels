@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router"
-import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
+import { formatGenerationSpeed } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -17,7 +17,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
   const location = useLocation()
   const interrupted = isClientInterruption(record)
   const autoReview = record.requestPurpose === "autoApprovalReview"
-  const formatCount = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString(language === "zh" ? "zh-CN" : "en-US")
+  const formatCount = (value: number | null | undefined) => !value ? "" : value.toLocaleString(language === "zh" ? "zh-CN" : "en-US")
   const uncached = record.inputTokens === null || record.cachedInputTokens === null
     ? null : Math.max(0, record.inputTokens - record.cachedInputTokens)
   const fields = [
@@ -40,13 +40,13 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     [t("metrics.input"), formatCount(record.inputTokens)],
     [t("requestDetail.cached"), formatCount(record.cachedInputTokens)],
     [t("requestDetail.uncached"), formatCount(uncached)],
-    [t("metrics.cacheHitRate"), record.cacheHitRate == null ? null : `${(record.cacheHitRate * 100).toFixed(1)}%`],
+    [t("metrics.cacheHitRate"), !record.cacheHitRate ? "" : `${(record.cacheHitRate * 100).toFixed(1)}%`],
     [t("metrics.output"), formatCount(record.outputTokens)],
     [t("requests.reasoningColumn"), formatCount(record.reasoningOutputTokens)],
     [t("overview.totalTokens"), formatCount(record.totalTokens)],
-    [t("requests.firstColumn"), record.firstTokenMs == null ? null : formatElapsedDuration(record.firstTokenMs)],
+    [t("requests.firstColumn"), !record.firstTokenMs ? "" : formatElapsedDuration(record.firstTokenMs)],
     [t("requests.speedColumn"), formatGenerationSpeed(record)],
-    [t("requests.durationColumn"), record.totalDurationMs == null ? null : formatElapsedDuration(record.totalDurationMs)],
+    [t("requests.durationColumn"), !record.totalDurationMs ? "" : formatElapsedDuration(record.totalDurationMs)],
     [t("requestDetail.reasoningEffort"), record.reasoningEffort],
     [t("requestDetail.requestTier"), record.requestServiceTier],
     [t("requestDetail.responseTier"), record.serviceTier],
@@ -75,7 +75,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
       {record.errorCode ? <p>{t("common.errorCode", { code: record.errorCode })}</p> : null}
     </div> : null}
     <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-x-4 gap-y-2">
-      {fields.map(([label, value]) => <div key={label} className="contents">
+      {fields.filter(([, value]) => value !== "").map(([label, value]) => <div key={label} className="contents">
         <dt className="text-muted-foreground">{label}</dt><dd className="min-w-0 whitespace-pre-wrap break-all tabular-nums">{value ?? "—"}</dd>
       </div>)}
     </dl>

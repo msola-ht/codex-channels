@@ -16,22 +16,10 @@ export function formatTokenCount(value: number): string {
   return value.toLocaleString("zh-CN");
 }
 
-export function formatObservedTokens(value: number, requestCount: number, missing: number | undefined): string {
-  if (requestCount === 0) return "0";
-  if (missing === undefined) return `${formatTokenCount(value)}（覆盖未知）`;
-  if (missing === requestCount) return "未观测";
-  return `${missing > 0 ? "≥ " : ""}${formatTokenCount(value)}`;
-}
-
 export function formatObservedTotal(usage: {
-  requestCount: number; inputTokens: number; outputTokens: number;
-  usageCoverage?: { inputMissingRequestCount: number; outputMissingRequestCount: number } | undefined;
+  inputTokens: number; outputTokens: number;
 }): string {
-  const coverage = usage.usageCoverage;
-  if (usage.requestCount === 0) return "0";
-  if (!coverage) return `${formatTokenCount(usage.inputTokens + usage.outputTokens)}（覆盖未知）`;
-  if (coverage.inputMissingRequestCount === usage.requestCount && coverage.outputMissingRequestCount === usage.requestCount) return "未观测";
-  return `${coverage.inputMissingRequestCount + coverage.outputMissingRequestCount > 0 ? "≥ " : ""}${formatTokenCount(usage.inputTokens + usage.outputTokens)}`;
+  return formatTokenCount(usage.inputTokens + usage.outputTokens);
 }
 
 export function formatRequestCount(value: number): string {

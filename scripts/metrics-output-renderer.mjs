@@ -6,7 +6,6 @@ import {
   formatLocalTimeZone,
   formatRequestCount,
   formatTokenCount,
-  formatObservedTokens as formatCoveredTokens,
   formatObservedTotal as formatUsageTotal,
   markdownCell,
 } from "./metrics-export-format.mjs";
@@ -29,7 +28,8 @@ export function printStatus(result, { json = false, output = process.stdout } = 
   }
   console.log(`Schema：${result.schemaVersion ?? "无法识别"}`);
   console.log(`兼容：${result.compatible ? "是" : "否"}`);
-  console.log(`记录：${result.count ?? "无法读取"}`);
+  if (result.count == null) console.log("记录：无法读取");
+  else if (result.count > 0) console.log(`记录：${formatRequestCount(result.count)}`);
   if (!result.compatible) {
     console.log("处理：停止 Gateway 后运行 codexc cleanup metrics reset");
   }
@@ -55,10 +55,15 @@ export function printQuotaHistory(result, format = "markdown") {
   for (const period of result.periods) {
     const start = period.periodStartAtMs === null ? "未知" : formatLocalTime(period.periodStartAtMs);
     const reset = formatLocalTime(period.periodEndAtMs);
-    const used = period.latestUsedPercentMillionths === null
-      ? "未记录历史百分比"
+    const used = !(period.latestUsedPercentMillionths > 0)
+      ? ""
       : `${(period.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%`;
-    console.log(`- ${period.provider} · ${period.windowId} · 周期 ${start} ～ ${reset} · 最新使用 ${used} · 请求 ${formatRequestCount(period.requestCount)} · Token ${formatTokenCount(period.totalTokens)}`);
+    console.log(`- ${[
+      period.provider, period.windowId, `周期 ${start} ～ ${reset}`,
+      ...(used ? [`最新使用 ${used}`] : []),
+      ...(period.requestCount > 0 ? [`请求 ${formatRequestCount(period.requestCount)}`] : []),
+      ...(period.totalTokens > 0 ? [`Token ${formatTokenCount(period.totalTokens)}`] : []),
+    ].join(" · ")}`);
   }
 }
 
@@ -167,14 +172,15 @@ export function printMetricsReport(result, format) {
     console.log("本时间范围没有请求记录。");
     return;
   }
-  console.log(`- 模型请求：${formatRequestCount(aggregate.requestCount)}`);
-  console.log(`- ${formatRequestOutcomes(aggregate.requestOutcomes)}`);
-  console.log(`- 总 Token：${formatUsageTotal(aggregate)}`);
-  console.log(`- 输入 Token：${formatUsageField(aggregate, "input")}`);
-  console.log(`- 其中缓存：${formatObservedTokens(aggregate.cachedInputTokens)}`);
-  console.log(`- 输出 Token：${formatUsageField(aggregate, "output")}`);
-  console.log(`- 其中推理输出 Token：${formatUsageField(aggregate, "reasoning")}`);
-  console.log(`- 其中自动审批审查：${formatReviewUsage(aggregate.reviewUsage)}`);
+  printMetric("模型请求", formatPositiveCount(aggregate.requestCount));
+  const outcomes = formatRequestOutcomes(aggregate.requestOutcomes);
+  if (outcomes) console.log(`- ${outcomes}`);
+  printMetric("总 Token", formatPositiveUsageTotal(aggregate));
+  printMetric("输入 Token", formatUsageField(aggregate, "input"));
+  printMetric("其中缓存", formatObservedTokens(aggregate.cachedInputTokens));
+  printMetric("输出 Token", formatUsageField(aggregate, "output"));
+  printMetric("其中推理输出 Token", formatUsageField(aggregate, "reasoning"));
+  printMetric("其中自动审批审查", formatReviewUsage(aggregate.reviewUsage));
   printCompactSummary(aggregate.compact);
   if (result.report.groups.length > 0) {
     console.log("");
@@ -184,7 +190,7 @@ export function printMetricsReport(result, format) {
     console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |");
     for (const group of result.report.groups) {
       const value = group.aggregate;
-      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${formatRequestOutcomes(value.requestOutcomes)} | ${formatUsageField(value, "input")} | ${formatObservedTokens(value.cachedInputTokens)} | ${formatUsageField(value, "output")} | ${markdownCell(formatReviewUsage(value.reviewUsage))} | ${markdownCell(formatCompactSummary(value.compact) ?? "无")} |`);
+      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${formatPositiveCount(value.requestCount)} | ${formatRequestOutcomes(value.requestOutcomes)} | ${formatUsageField(value, "input")} | ${formatObservedTokens(value.cachedInputTokens)} | ${formatUsageField(value, "output")} | ${markdownCell(formatReviewUsage(value.reviewUsage))} | ${markdownCell(formatCompactSummary(value.compact) ?? "")} |`);
     }
     const hidden = result.report.totalGroupCount - result.report.groups.length;
     if (hidden > 0) console.log(`\n仅显示请求量最高的 ${result.report.groups.length} 组，另有 ${hidden} 组。`);
@@ -199,7 +205,7 @@ export function printMetricsReport(result, format) {
   console.log("| 来源 | 提供商 | 模型 | 状态 | 类型 | 错误码 | HTTP | 次数 |");
   console.log("| --- | --- | --- | --- | --- | --- | ---: | ---: |");
   for (const group of result.errors.groups) {
-    console.log(`| ${markdownCell(group.source)} | ${markdownCell(group.provider)} | ${markdownCell(group.model ?? "未观测")} | ${formatRequestStatus(group)} | ${markdownCell(group.errorType ?? "未提供")} | ${markdownCell(group.errorCode ?? "未提供")} | ${group.httpStatus ?? ""} | ${group.requestCount} |`);
+    console.log(`| ${markdownCell(group.source)} | ${markdownCell(group.provider)} | ${markdownCell(group.model ?? "未观测")} | ${formatRequestStatus(group)} | ${markdownCell(group.errorType ?? "未提供")} | ${markdownCell(group.errorCode ?? "未提供")} | ${group.httpStatus ?? ""} | ${formatPositiveCount(group.requestCount)} |`);
   }
 }
 
@@ -239,7 +245,13 @@ function* renderMetricsExportBody(iterator, result, format) {
   if (format === "markdown") {
     yield `# Codex Connect 请求明细\n\n- 时区：${formatLocalTimeZone()}\n- 生成时间：${formatLocalTime(Date.parse(result.generatedAt))}\n- 时间范围：${result.range.name}\n\n${usageNote}\n`;
     if (result.aggregate !== null) {
-      yield `\n- 模型请求：${formatRequestCount(result.aggregate.requestCount)}\n- 总 Token：${formatUsageTotal(result.aggregate)}\n- 其中自动审批审查：${formatReviewUsage(result.aggregate.reviewUsage)}\n`;
+      for (const [label, value] of [
+        ["模型请求", formatPositiveCount(result.aggregate.requestCount)],
+        ["总 Token", formatPositiveUsageTotal(result.aggregate)],
+        ["其中自动审批审查", formatReviewUsage(result.aggregate.reviewUsage)],
+      ]) {
+        if (value) yield `\n- ${label}：${value}\n`;
+      }
     }
     yield* weeklyQuotaMarkdownLines(result.weeklyQuota);
     const first = iterator.next();
@@ -260,11 +272,11 @@ function* renderMetricsExportBody(iterator, result, format) {
           markdownCell(record.requestPurpose === "autoApprovalReview" ? "自动审批审查" : "未标记（含历史未知）"),
           markdownCell(record.reasoningEffort ?? "模型默认"),
           markdownCell(formatRequestStatus(record)),
-          markdownCell(record.inputTokens == null ? "未观测" : formatTokenCount(record.inputTokens)),
-          markdownCell(record.cachedInputTokens == null ? "未观测" : formatTokenCount(record.cachedInputTokens)),
-          markdownCell(record.outputTokens == null ? "未观测" : formatTokenCount(record.outputTokens)),
-          markdownCell(record.firstTokenMs == null ? "—" : formatElapsedDuration(record.firstTokenMs)),
-          markdownCell(formatGenerationSpeed(record)),
+          markdownCell(formatObservedTokens(record.inputTokens)),
+          markdownCell(formatObservedTokens(record.cachedInputTokens)),
+          markdownCell(formatObservedTokens(record.outputTokens)),
+          markdownCell(record.firstTokenMs > 0 ? formatElapsedDuration(record.firstTokenMs) : ""),
+          markdownCell(generationSpeed(record) > 0 ? formatGenerationSpeed(record) : ""),
           markdownCell(record.requestModel ?? "未知"),
           markdownCell(record.responseModel ?? "未回显"),
           markdownCell(record.traffic == null ? "未关联"
@@ -297,17 +309,17 @@ function printWeeklyQuotaMarkdown(quota) {
 }
 
 function* weeklyQuotaMarkdownLines(quota) {
+  if (quota === null) return;
   yield "\n## 当前周额度区间\n\n";
-  if (quota === null) {
-    yield "暂无统计代理捕获的周额度快照。\n";
-    return;
+  if (quota.usedPercent > 0) yield `- 已用：${quota.usedPercent}%\n`;
+  if (quota.remainingPercent > 0) yield `- 剩余：${quota.remainingPercent}%\n`;
+  yield `- 重置时间：${formatLocalTime(quota.resetsAt * 1_000)}\n- 观测时间：${formatLocalTime(quota.observedAtMs)}\n`;
+  if (quota.estimate === null) return;
+  if (quota.estimate.observedDeltaPercent > 0) {
+    const intervals = quota.estimate.intervalCount > 0 ? `（${quota.estimate.intervalCount} 个区间）` : "";
+    yield `- 观测变化：${quota.estimate.observedDeltaPercent}%${intervals}\n`;
   }
-  yield `- 已用：${quota.usedPercent}%\n- 剩余：${quota.remainingPercent}%\n- 重置时间：${formatLocalTime(quota.resetsAt * 1_000)}\n- 观测时间：${formatLocalTime(quota.observedAtMs)}\n`;
-  if (quota.estimate === null) {
-    yield "- 每 1% 估算：正在采样，尚未观测到额度增长\n";
-    return;
-  }
-  yield `- 观测变化：${quota.estimate.observedDeltaPercent}%（${quota.estimate.intervalCount} 个区间）\n- 每 1%：约 ${quota.estimate.totalTokensPerPercent} Token\n`;
+  if (quota.estimate.totalTokensPerPercent > 0) yield `- 每 1%：约 ${quota.estimate.totalTokensPerPercent} Token\n`;
 }
 
 function flattenWeeklyQuota(quota) {
@@ -385,30 +397,46 @@ function reviewUsageCsvColumns() {
   ];
 }
 
-const usageNote = "Token 总量为输入加输出；缓存已包含在输入中，推理已包含在输出中，压缩与自动审批审查均为其中项。未观测不等于 0，≥ 表示已知用量下界。历史数据可能包含旧版本合成的 Turn 错误记录，保留原样且不推断用途。";
+const usageNote = "Token 总量为已记录的输入加输出；缓存已包含在输入中，推理已包含在输出中，压缩与自动审批审查均为其中项。历史数据可能包含旧版本合成的 Turn 错误记录，保留原样且不推断用途。";
 
 function printUsageNote() {
   console.log(`\n${usageNote}`);
 }
 
 function formatObservedTokens(value) {
-  return value == null ? "未观测" : formatTokenCount(value);
+  return value > 0 ? formatTokenCount(value) : "";
+}
+
+function formatPositiveCount(value) {
+  return value > 0 ? formatRequestCount(value) : "";
+}
+
+function formatPositiveUsageTotal(summary) {
+  return summary.inputTokens + summary.outputTokens > 0 ? formatUsageTotal(summary) : "";
+}
+
+function printMetric(label, value, indent = "") {
+  if (value) console.log(`${indent}- ${label}：${value}`);
 }
 
 function formatUsageField(summary, field) {
-  const missing = summary.usageCoverage[`${field}MissingRequestCount`];
   const value = summary[field === "reasoning" ? "reasoningOutputTokens" : `${field}Tokens`];
-  return formatCoveredTokens(value, summary.requestCount, missing);
+  return formatObservedTokens(value);
 }
 
 function formatReviewUsage(summary) {
-  return `${formatRequestCount(summary.requestCount)} 次 · 输入 ${formatUsageField(summary, "input")} · 输出 ${formatUsageField(summary, "output")} · 总 Token ${formatUsageTotal(summary)}`;
+  if (summary == null) return "";
+  return [
+    ...(summary.requestCount > 0 ? [`${formatRequestCount(summary.requestCount)} 次`] : []),
+    ...(summary.inputTokens > 0 ? [`输入 ${formatUsageField(summary, "input")}`] : []),
+    ...(summary.outputTokens > 0 ? [`输出 ${formatUsageField(summary, "output")}`] : []),
+    ...(summary.inputTokens + summary.outputTokens > 0 ? [`总 Token ${formatUsageTotal(summary)}`] : []),
+  ].join(" · ");
 }
 
 function formatCacheRate(summary) {
-  if (summary.requestCount === 0) return "0%";
-  if (summary.cachedInputTokens === null || summary.usageCoverage.inputMissingRequestCount > 0) return "未观测";
-  return summary.inputTokens === 0 ? "0%" : `${((summary.cachedInputTokens / summary.inputTokens) * 100).toFixed(2)}%`;
+  return summary.inputTokens > 0 && summary.cachedInputTokens > 0
+    ? `${((summary.cachedInputTokens / summary.inputTokens) * 100).toFixed(2)}%` : "";
 }
 
 function printCompactSummary(compact) {
@@ -418,15 +446,21 @@ function printCompactSummary(compact) {
 }
 
 function formatCompactSummary(compact) {
-  if (compact == null) return null;
+  if (compact == null || (compact.requestCount === 0 && compact.inputTokens + compact.outputTokens === 0)) return null;
   const model = compact.hasMixedModels
     ? "混合模型"
     : compact.model ?? "模型未知";
-  return `${formatRequestCount(compact.requestCount)} 次 · ${model} · ${formatUsageTotal(compact)} Token · ${formatRequestOutcomes(compact.requestOutcomes)}`;
+  return [
+    ...(compact.requestCount > 0 ? [`${formatRequestCount(compact.requestCount)} 次`] : []),
+    model,
+    ...(compact.inputTokens + compact.outputTokens > 0 ? [`${formatUsageTotal(compact)} Token`] : []),
+    formatRequestOutcomes(compact.requestOutcomes),
+  ].filter(Boolean).join(" · ");
 }
 
 function formatRequestOutcomes(outcomes) {
-  return `完成：${formatRequestCount(outcomes.completed)} · 客户端中断：${formatRequestCount(outcomes.interrupted)} · 其他失败：${formatRequestCount(outcomes.failed)} · 未完整观测：${formatRequestCount(outcomes.incomplete)}`;
+  return [["完成", outcomes.completed], ["客户端中断", outcomes.interrupted], ["其他失败", outcomes.failed], ["未完整观测", outcomes.incomplete]]
+    .filter(([, count]) => count > 0).map(([label, count]) => `${label}：${formatRequestCount(count)}`).join(" · ");
 }
 
 function formatRequestStatus(record) {
@@ -450,7 +484,10 @@ function interruptionCsvColumns() {
 }
 
 function formatInterruptionSummary(summary) {
-  return `同一 Turn 后续有完成 ${formatRequestCount(summary.followedByCompletion)} 次 · 未观测到后续完成 ${formatRequestCount(summary.noObservedCompletion)} 次 · 中断用量未完整观测 ${formatRequestCount(summary.usageUnobserved)} 次`;
+  return [
+    ...(summary.followedByCompletion > 0 ? [`同一 Turn 后续有完成 ${formatRequestCount(summary.followedByCompletion)} 次`] : []),
+    ...(summary.noObservedCompletion > 0 ? [`未观测到后续完成 ${formatRequestCount(summary.noObservedCompletion)} 次`] : []),
+  ].join(" · ");
 }
 
 export function printMetricsRun(result, format) {
@@ -477,21 +514,12 @@ export function printMetricsRun(result, format) {
   console.log(`- 时区：${formatLocalTimeZone()}`);
   console.log(`- 生成时间：${formatLocalTime(Date.parse(result.generatedAt))}`);
   printUsageNote();
-  console.log("");
-  console.log("## 最近运行聚合");
-  console.log("");
-  if (latestTurn === null) {
-    console.log("该 Thread 暂无已记录请求。");
-  } else {
-    printTurnSummary(latestTurn);
-  }
-  console.log("");
-  console.log("## 当前会话指标累计");
-  console.log("");
-  if (threadAggregate === null) {
-    console.log("该 Thread 暂无累计记录。");
-  } else {
-    printTurnSummary(threadAggregate);
+  for (const [title, summary] of [["最近运行聚合", latestTurn], ["当前会话指标累计", threadAggregate]]) {
+    if (summary === null || !hasTurnSummary(summary)) continue;
+    console.log("");
+    console.log(`## ${title}`);
+    console.log("");
+    printTurnSummary(summary);
   }
 }
 
@@ -551,16 +579,18 @@ export function printMetricsTurns(result, format) {
         markdownCell(formatLocalTime(turn.recordedAtMs)),
         markdownCell(turn.model ?? "未观测"),
         markdownCell(turn.reasoningEffort ?? "模型默认"),
-        String(turn.requestCount),
+        formatPositiveCount(turn.requestCount),
         formatRequestOutcomes(turn.requestOutcomes),
         formatInterruptionSummary(turn.interruptionSummary),
-        formatUsageTotal(turn),
+        formatPositiveUsageTotal(turn),
         formatCacheRate(turn),
-        markdownCell(formatCompactSummary(turn.compact) ?? "无"),
+        markdownCell(formatCompactSummary(turn.compact) ?? ""),
       ].join(" | "),
     );
   }
-  console.log("后续完成仅表示时间顺序，不代表重试或恢复因果。");
+  if (result.turns.some((turn) => formatInterruptionSummary(turn.interruptionSummary) !== "")) {
+    console.log("后续完成仅表示时间顺序，不代表重试或恢复因果。");
+  }
 }
 
 export function printMetricsThreads(result, format) {
@@ -616,17 +646,24 @@ export function printMetricsThreads(result, format) {
         markdownCell(thread.agentPath === null
           ? "主会话"
           : `子代理 · ${thread.agentPath}`),
-        String(thread.turnCount),
-        String(thread.requestCount),
+        formatPositiveCount(thread.turnCount),
+        formatPositiveCount(thread.requestCount),
         formatRequestOutcomes(thread.requestOutcomes),
-        formatUsageTotal(thread),
-        markdownCell(formatCompactSummary(thread.compact) ?? "无"),
+        formatPositiveUsageTotal(thread),
+        markdownCell(formatCompactSummary(thread.compact) ?? ""),
         markdownCell(formatLocalTime(thread.lastRecordedAtMs)),
       ].join(" | "),
     );
   }
   console.log("");
   console.log("导出某会话每次对话：codexc metrics turns <Thread ID>");
+}
+
+function hasTurnSummary(summary) {
+  return summary.model != null || summary.reasoningEffort != null
+    || summary.requestCount > 0 || formatRequestOutcomes(summary.requestOutcomes) !== ""
+    || summary.inputTokens + summary.outputTokens > 0 || summary.cachedInputTokens > 0
+    || summary.reasoningOutputTokens > 0 || formatCompactSummary(summary.compact) !== null;
 }
 
 function printTurnSummary(summary) {
@@ -636,27 +673,25 @@ function printTurnSummary(summary) {
   if (summary.reasoningEffort !== undefined && summary.reasoningEffort !== null) {
     console.log(`- 思考等级：${summary.reasoningEffort}`);
   }
-  console.log(
-    `- 模型请求：${formatRequestCount(summary.requestCount)} 次`,
-  );
-  console.log(`- ${formatRequestOutcomes(summary.requestOutcomes)}`);
+  printMetric("模型请求", summary.requestCount > 0 ? `${formatRequestCount(summary.requestCount)} 次` : "");
+  const outcomes = formatRequestOutcomes(summary.requestOutcomes);
+  if (outcomes) console.log(`- ${outcomes}`);
   if (summary.requestOutcomes.interrupted > 0) {
-    console.log(`- 中断后续观测：${formatInterruptionSummary(summary.interruptionSummary)}`);
-    console.log("- 后续完成仅表示时间顺序，不代表重试或恢复因果。");
+    const observations = formatInterruptionSummary(summary.interruptionSummary);
+    if (observations) {
+      printMetric("中断后续观测", observations);
+      console.log("- 后续完成仅表示时间顺序，不代表重试或恢复因果。");
+    }
   }
-  console.log(`- 总 Token：${formatUsageTotal(summary)}`);
-  console.log(`  - 输入：${formatUsageField(summary, "input")}`);
-  if (summary.cachedInputTokens === null) {
-    console.log("    - 其中缓存：未观测");
-  } else {
-    console.log(`    - 其中缓存：${formatTokenCount(summary.cachedInputTokens)}`);
-    console.log(
-      `    - 无缓存：${summary.usageCoverage.inputMissingRequestCount > 0 ? "未观测" : formatTokenCount(Math.max(0, summary.inputTokens - summary.cachedInputTokens))}`,
-    );
+  printMetric("总 Token", formatPositiveUsageTotal(summary));
+  printMetric("输入", formatUsageField(summary, "input"), "  ");
+  if (summary.cachedInputTokens !== null) {
+    printMetric("其中缓存", formatObservedTokens(summary.cachedInputTokens), "    ");
+    printMetric("无缓存", formatObservedTokens(Math.max(0, summary.inputTokens - summary.cachedInputTokens)), "    ");
   }
-  console.log(`    - 缓存命中率：${formatCacheRate(summary)}`);
-  console.log(`  - 输出：${formatUsageField(summary, "output")}`);
-  console.log(`    - 其中推理输出：${formatUsageField(summary, "reasoning")}`);
+  printMetric("缓存命中率", formatCacheRate(summary), "    ");
+  printMetric("输出", formatUsageField(summary, "output"), "  ");
+  printMetric("其中推理输出", formatUsageField(summary, "reasoning"), "    ");
   printCompactSummary(summary.compact);
 }
 

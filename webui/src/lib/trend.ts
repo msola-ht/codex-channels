@@ -53,11 +53,11 @@ export function usageTrendRows(trend: UsageTrendResponse): UsageTrendRow[] {
 
 export function toUsageTrend(rows: (DailyUsageRow | HourlyUsageRow)[]): UsageTrendRow[] {
   return rows.map((row) => {
-    const inputTokens = row.requestCount > 0 && row.usageCoverage.inputMissingRequestCount === row.requestCount ? null : Math.max(0, row.inputTokens)
+    const inputTokens = Math.max(0, row.inputTokens)
     const cachedInputTokens = row.cacheUsage.cachedInputTokens === null
       ? null
       : Math.max(0, row.cacheUsage.cachedInputTokens)
-    const outputTokens = row.requestCount > 0 && row.usageCoverage.outputMissingRequestCount === row.requestCount ? null : Math.max(0, row.outputTokens)
+    const outputTokens = Math.max(0, row.outputTokens)
     return {
       period: "hour" in row ? row.hour : row.day,
       requestCount: row.requestCount,

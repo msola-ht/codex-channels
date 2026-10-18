@@ -1,11 +1,10 @@
 import {
   formatRequestCount,
   formatTokenCount,
-  formatObservedTokens,
   formatObservedTotal,
 } from "../dist/surfaces/token-format.js";
 
-export { formatRequestCount, formatTokenCount, formatObservedTokens, formatObservedTotal };
+export { formatRequestCount, formatTokenCount, formatObservedTotal };
 export { formatElapsedDuration } from "../dist/surfaces/elapsed-duration.js";
 
 export function isRecord(value) {

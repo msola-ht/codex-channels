@@ -1,8 +1,9 @@
-import type { CacheUsage, UsageCoverage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
+import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
 import { messages, type Translate } from "./i18n/messages"
 import { translate } from "./i18n/translate"
 import { failureLabelKeys, recordedRequestFailure } from "./request-failure"
 import { modelDisplayName } from "../../../runtime/model-display-name.mjs"
+import { formatGenerationSpeed as requestGenerationSpeed } from "../../../runtime/request-timing.mjs"
 
 let modelDisplayAliases: Readonly<Record<string, string>> = {}
 
@@ -83,35 +84,24 @@ const compactThreeDecimalFormatter = new Intl.NumberFormat("en-US", {
 })
 
 export function formatTokens(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—"
+  if (value == null || value === 0) return ""
   return Math.abs(value) >= 1_000_000_000
     ? compactThreeDecimalFormatter.format(value)
     : compactTwoDecimalFormatter.format(value)
 }
 
-/** Aggregates retain known sums; missingness is independent for every token field. */
-export function formatUsageTokens(value: number, requestCount: number, missingRequestCount: number): string {
-  if (requestCount === 0) return formatTokens(0)
-  if (missingRequestCount === requestCount) return "—"
-  return formatTokens(value)
-}
-
-export function formatTotalUsage(value: { inputTokens: number; outputTokens: number; requestCount: number; usageCoverage: UsageCoverage }): string {
-  const { inputMissingRequestCount: input, outputMissingRequestCount: output } = value.usageCoverage
-  if (value.requestCount > 0 && input === value.requestCount && output === value.requestCount) return "—"
+/** Display recorded aggregate sums independently of coverage metadata. */
+export function formatTotalUsage(value: { inputTokens: number; outputTokens: number }): string {
   return formatTokens(value.inputTokens + value.outputTokens)
 }
 
-export function mergeUsageCoverage(left: UsageCoverage, right: UsageCoverage): UsageCoverage {
-  return {
-    inputMissingRequestCount: left.inputMissingRequestCount + right.inputMissingRequestCount,
-    outputMissingRequestCount: left.outputMissingRequestCount + right.outputMissingRequestCount,
-    reasoningMissingRequestCount: left.reasoningMissingRequestCount + right.reasoningMissingRequestCount,
-  }
+export function formatCount(value: number): string {
+  return value === 0 ? "" : compactTwoDecimalFormatter.format(value)
 }
 
-export function formatCount(value: number): string {
-  return compactTwoDecimalFormatter.format(value)
+export function formatGenerationSpeed(value: Parameters<typeof requestGenerationSpeed>[0]): string {
+  const display = requestGenerationSpeed(value)
+  return display === "—" || display === "0.0 /s" ? "" : display
 }
 
 export function formatBytes(value: number | null | undefined): string {
@@ -226,22 +216,24 @@ export function formatErrorMessage(value: string, language: DisplayLanguage): st
 }
 
 export function formatSuccessRate(requestCount: number, unsuccessful: number): string {
-  if (requestCount <= 0) return "—"
+  if (requestCount <= 0 || requestCount === unsuccessful) return ""
   return `${((requestCount - unsuccessful) / requestCount * 100).toFixed(1)}%`
 }
 
 export function formatFailureRate(requestCount: number, unsuccessful: number): string {
-  if (requestCount <= 0) return "—"
+  if (requestCount <= 0 || unsuccessful === 0) return ""
   return `${(unsuccessful / requestCount * 100).toFixed(1)}%`
 }
 
 export function formatRequestOutcomes(outcomes: RequestOutcomeCounts | null, t: Translate): string {
-  return t("metrics.requestOutcomes", {
-    completed: formatCount(outcomes?.completed ?? 0),
-    interrupted: formatCount(outcomes?.interrupted ?? 0),
-    failed: formatCount(outcomes?.failed ?? 0),
-    incomplete: formatCount(outcomes?.incomplete ?? 0),
-  })
+  if (outcomes === null) return ""
+  const categories: [string, number][] = [
+    [t("filters.completed"), outcomes.completed],
+    [t("metrics.interrupted"), outcomes.interrupted],
+    [t("filters.failed"), outcomes.failed],
+    [t("filters.incomplete"), outcomes.incomplete],
+  ]
+  return categories.filter(([, count]) => count !== 0).map(([label, count]) => `${label} ${formatCount(count)}`).join(" · ")
 }
 
 export function isClientInterruption(record: Pick<RequestRecord, "source" | "status" | "deliveryStatus" | "errorCode" | "errorType" | "httpStatus">): boolean {
@@ -253,7 +245,7 @@ export function formatInterruptionSummary(summary: RequestInterruptionSummary, t
     completed: formatCount(summary.followedByCompletion),
     unobserved: formatCount(summary.noObservedCompletion),
     usage: formatCount(summary.usageUnobserved),
-  })
+  }).split(" · ").filter((_, index) => [summary.followedByCompletion, summary.noObservedCompletion, summary.usageUnobserved][index] !== 0).join(" · ")
 }
 
 export function shortThreadId(threadId: string): string {
@@ -263,9 +255,9 @@ export { formatElapsedDuration } from "../../../src/surfaces/elapsed-duration.js
 
 export function formatCacheUsage(usage: CacheUsage | null) {
   const cached = formatTokens(usage?.cachedInputTokens)
-  const rate = usage !== null && usage.inputTokens > 0 && usage.cachedInputTokens !== null
+  const rate = usage !== null && usage.inputTokens > 0 && usage.cachedInputTokens !== null && usage.cachedInputTokens > 0
     ? `${(usage.cachedInputTokens / usage.inputTokens * 100).toFixed(1)}%`
-    : "—"
+    : ""
   return {
     cached,
     rate,

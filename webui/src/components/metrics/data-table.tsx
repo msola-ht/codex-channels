@@ -70,7 +70,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useRender } from "@base-ui/react/use-render"
 
 export function TableHint({ hint, children }: { hint: string | null; children: React.ReactNode }) {
-  if (hint === null) return <>{children}</>
+  if (!hint) return <>{children}</>
   return (
     <Tooltip>
       <TooltipTrigger aria-description={hint} render={<span tabIndex={0} className="inline-flex min-w-0 max-w-full cursor-help focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>

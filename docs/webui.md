@@ -192,7 +192,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 模型转发 / API Key | `#/relay` | `GET /api/v1/management/relay`（脱敏 Key 与账户模型能力）；`POST /api/v1/management/relay/preview`、`POST /api/v1/management/relay/apply`（版本化预览与一次性确认写入） |
 | 模型转发 / 请求队列 | `#/relay/queue` | `GET /api/v1/management/relay/queue`（当前请求快照）；`GET /api/v1/management/relay/queue/events`（SSE 变化通知） |
-| 设置与管理 | `#/settings`、`#/settings/permissions`、`#/settings/network`、`#/settings/data`、`#/settings/services`；模型管理见下文 | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/调用记录维护任务） |
+| 设置与管理 | `#/settings`、`#/settings/permissions`、`#/settings/network`、`#/settings/data`、`#/settings/services`；模型管理见下文 | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和最近可操作错误；界面仅在服务停止时提示）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/调用记录维护任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 | 渠道投递队列 | `#/delivery`（左侧导航） | `GET /api/v1/management/delivery/queue?before=&state=`；`GET /api/v1/management/delivery/events`（SSE 变化通知）；`POST /api/v1/management/delivery/content-batch`（批量摘要）；`GET /api/v1/management/delivery/content?id=&revision=`（单条内容预览）；`POST /api/v1/management/delivery/batch-preview`、`POST /api/v1/management/delivery/batch-apply`（批量重试/忽略）；`POST /api/v1/management/delivery/preview`、`POST /api/v1/management/delivery/retry`（单条重试） |
 
@@ -210,7 +210,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 [`codex.timezone`](model-timezone.md) 覆盖；该接口同样受访问令牌鉴权，不接受浏览器覆盖时区。
 加载失败时明确报错，不按浏览器时区显示。请求、转储、额度重置和更新时间等统一按服务端时区格式化，
 页头显示服务端当前日期、时间（精确到秒）、时区及 UTC 偏移；窄屏在导航栏下方显示。时钟基于服务端返回时间在本地逐秒推进，页面隐藏时暂停显示更新，重新可见时按包含休眠的经过时间推进，并在恢复可见或窗口重新获得焦点时合并请求服务端校准；校准失败保留时钟并提示“时间待校准”，不逐秒请求接口；夏令时按该时区在各时间点的规则计算。
-设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
+设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有 stdout/stderr 日志）；最近错误只采用显式失败、error/fatal 结构化记录或非工具类 tracing 错误，不把耗时提示、告警和 Codex 工具调用错误当作服务故障。文件日志的观察时间是文件更新时间，不冒充具体错误的发生时间。服务摘要与 `codexc status all` 共用预期运行服务集合：未安装的可选服务不计入聚合健康，未启用的 Relay 和配置中关闭的 WebUI 可以保持停止，核心服务停止或已安装的可选服务本应运行却停止时仍报告不健康；单条服务状态仍展示其实际运行情况。高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
 
 请求明细是日常主视图，独立读取指标数据库；关闭调用采集、调用目录不可用或记录清理后，列表、统计、错误记录和请求详情仍可查看。点击行或“详情”列的“查看”打开所选指标快照的侧栏，展示模型、思考等级、请求/响应服务层级、Token 与缓存、耗时、安全错误说明、调用方、交付状态及关联 ID，不请求转储、不新增单条指标 API。请求与响应模型均未采集、但指标保留 `model` 时，侧栏单列“记录模型”，不冒充请求或响应模型；全空时不补推。筛选或翻页会关闭旧选择。只有存在记录关联时，侧栏提供“查看调用详情”；报文页提供返回原请求筛选与分页的入口。关联存在不保证文件仍保留，不根据当前采集开关推断历史缺失原因。
 
@@ -504,7 +504,8 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 - 默认只监听回环地址；绑定非回环地址（`0.0.0.0`）时必须启用访问令牌，否则拒绝启动，
   令牌比较使用常数时间算法，令牌存浏览器 `localStorage`，重新打开浏览器仍可复用；
 - 指标数据库以只读模式打开；设置修改只经过 Config 结构化写入口，不直接写数据库；
-- 静态资源按白名单扩展名提供，路径限制在 `webui/dist` 内。
+- 静态资源按白名单扩展名提供，路径限制在 `webui/dist` 内；HTML 页面及未构建回退页设置同源脚本 CSP、
+  禁止 iframe 嵌入与 Referrer 泄露，主题初始化脚本作为同源静态文件加载。
 
 边界约束：
 

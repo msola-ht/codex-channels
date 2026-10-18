@@ -32,7 +32,9 @@ Bearer Token，不建立第二套浏览器登录。
   监听端口不同；不得从 `Host`、`X-Forwarded-Host` 或任意转发头自动扩展可信来源。
 - Bearer 令牌不通过 Cookie 自动附带；Origin 检查始终阻止跨站管理请求。
 - 管理响应统一设置 `Cache-Control: no-store`、严格 CSP、`frame-ancestors 'none'`、
-  `X-Content-Type-Options: nosniff` 和禁止 Referrer 泄露的策略。
+  `X-Content-Type-Options: nosniff` 和禁止 Referrer 泄露的策略。WebUI 正常页面与未构建回退页也设置
+  同源脚本 CSP、`frame-ancestors 'none'`、`X-Frame-Options: DENY` 和 `Referrer-Policy: no-referrer`；
+  页面所需内联样式仍在 `style-src` 中显式放行，不因此放宽脚本来源。
 - 不接受表单编码、跨站简单请求或通过 GET 触发修改；管理 API 只接受明确的 JSON Content-Type。
 
 ## 修订、防重放与确认

@@ -426,7 +426,14 @@ export abstract class GatewayComponentGraph {
       },
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
-    this.core = new ConversationCore(this.router, this.output);
+    this.core = new ConversationCore(this.router, {
+      publish: (event, critical) => {
+        if (event.type === "turn.completed" && event.status !== "inProgress") {
+          const runningSubagentCount = this.subagentCompletion.flushCompletedForParent(event.threadId, event.turnId);
+          this.output.publish({ ...event, ...(runningSubagentCount > 0 ? { runningSubagentCount } : {}) }, critical);
+        } else this.output.publish(event, critical);
+      },
+    });
     this.metricsDatabase = new AsyncMetricsStore(
       modelRequestMetricsDatabasePath(config.stateDatabasePath),
       {
@@ -597,6 +604,7 @@ export abstract class GatewayComponentGraph {
         );
       },
     });
+    this.output.observe((event) => this.subagentCompletion.handle(event));
     this.output.subscribe("subagent-metrics", async (event) => {
       if (event.type === "subagent.spawned") {
         try {
@@ -622,7 +630,6 @@ export abstract class GatewayComponentGraph {
           "子代理活动已登记，等待官方终态",
         );
       }
-      this.subagentCompletion.handle(event);
     });
     this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(

@@ -58,7 +58,7 @@ export class ConversationCore {
 
   constructor(
     private readonly router: ConversationRoutingPort,
-    private readonly output: EventBus<OutputEvent>,
+    private readonly output: Pick<EventBus<OutputEvent>, "publish">,
   ) {}
 
   trackThreadActivity(threadId: string): {

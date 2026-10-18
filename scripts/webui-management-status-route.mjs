@@ -11,6 +11,7 @@ import { sendManagementJson } from "./webui-http.mjs";
 import {
   loadServiceStatusSummary,
   serviceVersion,
+  serviceSummaryHealthy,
 } from "./webui-service-status.mjs";
 
 const appServerUserAgentCacheTtlMs = 5_000;
@@ -70,7 +71,7 @@ async function handleServices(
     observedAt: new Date().toISOString(),
     available: platform !== null,
     platform,
-    healthy: platform === null ? null : entries.every((service) => service.running),
+    healthy: serviceSummaryHealthy(entries, platform, environment),
     entries,
   });
 }

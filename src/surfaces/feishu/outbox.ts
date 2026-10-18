@@ -234,7 +234,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         const buffered = this.operationUpdates.flushTurn(event);
         if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
       }
-    }, signal, checkpoint, { requireConfirmation: event.type === "text.completed" });
+    }, signal, checkpoint, { requireConfirmation: event.type === "text.completed" || event.type === "turn.completed" });
   }
 
   private handleEvent(event: OutputEvent): void {
@@ -422,15 +422,37 @@ export class FeishuOutbox implements SurfaceOutputPort {
         this.options.debugEnabled ?? false,
         this.options.autoCompactPercent,
       );
-      if (
-        completion !== null
-        && this.textStreams.finishStreamsForTurn(
-          event.target.conversationId, event.threadId, event.turnId, completion,
-          () => this.replyTargets.delete(event.target.conversationId, turnKey(event.threadId, event.turnId)),
-        )
-      ) {
-        return;
+      let streamsSettled = false;
+      let streamFinalizationFailed = false;
+      let completionSettled = completion === null;
+      const releaseReplyTarget = (): void => {
+        if (streamsSettled && completionSettled) {
+          this.replyTargets.delete(event.target.conversationId, turnKey(event.threadId, event.turnId));
+        }
+      };
+      this.textStreams.finishStreamsForTurn(
+        event.target.conversationId, event.threadId, event.turnId,
+        (failed) => {
+          streamFinalizationFailed = failed;
+          streamsSettled = true;
+          releaseReplyTarget();
+        },
+      );
+      if (completion !== null) {
+        const settled = (): void => { completionSettled = true; releaseReplyTarget(); };
+        const accepted = this.delivery.enqueue(
+          event.target.conversationId,
+          (signal) => this.sendMarkdown(
+            event.target.conversationId,
+            streamFinalizationFailed ? `${completion}\n\n**投递状态：本轮部分输出未确认，请核对正文。**` : completion,
+            maximumFeishuMessageChunks, undefined, undefined, signal,
+          ),
+          true,
+          { purpose: "turn-completion", settled },
+        );
+        if (!accepted) settled();
       }
+      return;
     }
     if (event.type === "thread.status") {
       this.delivery.enqueue(
@@ -496,7 +518,6 @@ export class FeishuOutbox implements SurfaceOutputPort {
         ? this.sendMarkdown(event.target.conversationId, rendered, maximumFeishuMessageChunks, undefined, undefined, signal)
         : event.type === "turn.started"
           || event.type === "text.completed"
-          || event.type === "turn.completed"
         ? this.sendTurnMarkdown(event, rendered, signal)
         : this.sendText(event.target.conversationId, rendered, signal),
       event.type === "turn.started" || isCriticalOutputEvent(event),
@@ -664,7 +685,6 @@ export class FeishuOutbox implements SurfaceOutputPort {
               existing.cardId,
               existing.sequence,
               rendered,
-              undefined,
               signal,
             );
             this.logger.info(
@@ -974,7 +994,6 @@ export class FeishuOutbox implements SurfaceOutputPort {
           state.cardId!,
           state.sequence,
           state.lastText!.replace(/^思考中…/u, "思考完成"),
-          undefined,
           signal,
         );
       },
@@ -1079,7 +1098,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private async sendTurnMarkdown(
     event: Extract<
       OutputEvent,
-      { type: "turn.started" | "text.completed" | "turn.completed" }
+      { type: "turn.started" | "text.completed" }
     >,
     markdown: string,
     signal?: AbortSignal,
@@ -1207,22 +1226,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
       );
       return;
     }
-    try {
-      await this.sendMarkdown(
-        event.target.conversationId,
-        markdown,
-        maximumFeishuMessageChunks,
-        replyTo,
-        undefined,
-        signal,
-        event.type === "text.completed" && DeliveryReceipt.current() && canSendCompleteContentFile(this.hasAnswerFileDelivery, event.text)
-          ? feishuPreviewNotice : undefined,
-      );
-    } finally {
-      if (event.type === "turn.completed") {
-        this.replyTargets.delete(event.target.conversationId, key);
-      }
-    }
+    await this.sendMarkdown(
+      event.target.conversationId,
+      markdown,
+      maximumFeishuMessageChunks,
+      replyTo,
+      undefined,
+      signal,
+      DeliveryReceipt.current() && canSendCompleteContentFile(this.hasAnswerFileDelivery, event.text)
+        ? feishuPreviewNotice : undefined,
+    );
   }
 
   private get hasAnswerFileDelivery(): boolean {

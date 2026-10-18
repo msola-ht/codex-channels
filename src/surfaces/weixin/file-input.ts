@@ -22,7 +22,7 @@ import {
   decryptWeixinMedia,
   parseWeixinMediaAesKey,
 } from "./media-crypto.js";
-import type { WeixinFileReference } from "./protocol-client.js";
+import type { WeixinFileReference } from "./protocol-types.js";
 
 export const maximumWeixinTextFileBytes = maximumTextFileBytes;
 

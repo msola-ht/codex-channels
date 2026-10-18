@@ -45,7 +45,7 @@ import {
 } from "./config-management.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { createSharedCodexUserConfigClient, readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
-import { invalidateServiceStatusSummary, loadServiceStatusSummary } from "./webui-service-status.mjs";
+import { invalidateServiceStatusSummary, loadServiceStatusSummary, serviceSummaryHealthy } from "./webui-service-status.mjs";
 import {
   ApiError,
   authorized,
@@ -121,6 +121,11 @@ const SOURCE_GATEWAY_VERSION = readJsonMetadata(join(PACKAGE_DIR, "src", "versio
 const GATEWAY_VERSION = PACKAGE_VERSION ?? SOURCE_GATEWAY_VERSION;
 const CODEX_CLI_VERSION = (readJsonMetadata(join(PACKAGE_DIR, "src", "codex-protocol", "version.json"))?.codexCli ?? null)
   ?.replace(/^codex-cli\s+/u, "") ?? null;
+const WEBUI_DOCUMENT_SECURITY_HEADERS = Object.freeze({
+  "content-security-policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; media-src 'self'; worker-src 'none'",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+});
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -953,7 +958,7 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
   const services = {
     available: platform !== null,
     platform,
-    healthy: platform === null ? null : entries.every((service) => service.running),
+    healthy: serviceSummaryHealthy(entries, platform, environment),
     entries,
   };
   sendJson(response, 200, {
@@ -1115,15 +1120,19 @@ function serveStatic(staticDir, pathname, response) {
     if (!stats.isFile()) throw new Error("not a file");
     const type = contentTypes[extname(resolved)] ?? "application/octet-stream";
     response.writeHead(200, {
+      ...(type.startsWith("text/html") ? WEBUI_DOCUMENT_SECURITY_HEADERS : {}),
       "content-type": type,
       "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
     });
     response.end(readFileSync(resolved));
   } catch {
     if (pathname === "/") {
       response.writeHead(200, {
+        ...WEBUI_DOCUMENT_SECURITY_HEADERS,
         "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
         "x-content-type-options": "nosniff",
       });
       response.end(

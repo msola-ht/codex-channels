@@ -10,15 +10,15 @@ import {
 
 runGatewayProcess().catch((error) => {
   if (error instanceof ConfigurationError) {
-    console.error(`配置错误：${error.message}`);
+    console.error(`[失败] 配置错误：${error.message}`);
   } else if (error instanceof GatewayOwnershipError) {
-    console.error(error.message);
+    console.error(`[失败] ${error.message}`);
   } else if (error instanceof ModelRequestMetricsSchemaError) {
-    console.error(error.message);
+    console.error(`[失败] ${error.message}`);
   } else {
     const metadata = safeErrorMetadata(error);
     const code = metadata.code === undefined ? "" : ` (${String(metadata.code)})`;
-    console.error(`Gateway 启动失败：${String(metadata.type)}${code}`);
+    console.error(`[失败] Gateway 启动失败：${String(metadata.type)}${code}`);
   }
   process.exitCode = 1;
 });

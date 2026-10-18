@@ -31,18 +31,16 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
     try { pendingContent = readPrivateFileSync(`${path}.pending`); pending = JSON.parse(pendingContent); } catch {
       throw new Error("没有可安全读取的 Responses 目录恢复记录");
     }
-    const guarded = pending?.schemaVersion === 2;
-    if (guarded
-      ? typeof pending.previous !== "boolean" || Object.keys(pending).length !== 4
+    if (pending?.schemaVersion !== 2) throw new Error("Responses 目录恢复记录仅支持版本 2；请保留记录与备份，旧版记录须使用对应原版本恢复");
+    if (typeof pending.previous !== "boolean" || Object.keys(pending).length !== 4
         || (pending.previous ? typeof pending.previousDigest !== "string" || !/^[a-f0-9]{64}$/u.test(pending.previousDigest) : pending.previousDigest !== null)
-        || typeof pending.nextDigest !== "string" || !/^[a-f0-9]{64}$/u.test(pending.nextDigest)
-      : pending?.schemaVersion !== 1 || typeof pending.previous !== "boolean" || Object.keys(pending).length !== 2) throw new Error("Responses 目录恢复记录格式无效");
+        || typeof pending.nextDigest !== "string" || !/^[a-f0-9]{64}$/u.test(pending.nextDigest)) throw new Error("Responses 目录恢复记录格式无效");
     const previous = pending.previous ? readPrivateFileSync(`${path}.backup`, 2 * 1024 * 1024) : undefined;
     const current = existsSync(path) ? readPrivateFileSync(path, 2 * 1024 * 1024) : undefined;
     const digest = value => typeof value === "string" ? createHash("sha256").update(value).digest("hex") : null;
-    if (guarded && (digest(previous) !== pending.previousDigest
-      || ![pending.previousDigest, pending.nextDigest].includes(digest(current)))) throw new Error("模型目录或备份存在后续修改，拒绝覆盖；请核对恢复记录");
-    if (guarded && action === "keep" && digest(current) !== pending.nextDigest) throw new Error("新目录尚未完整写入，请选择 rollback");
+    if (digest(previous) !== pending.previousDigest
+      || ![pending.previousDigest, pending.nextDigest].includes(digest(current))) throw new Error("模型目录或备份存在后续修改，拒绝覆盖；请核对恢复记录");
+    if (action === "keep" && digest(current) !== pending.nextDigest) throw new Error("新目录尚未完整写入，请选择 rollback");
     const candidate = action === "rollback" ? previous : current;
     if (action === "keep" && candidate === undefined) throw new Error("新目录尚未写入，请选择 rollback");
     const home = codexHomePath(environment);
@@ -79,7 +77,7 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
           throw new Error("所选目录与当前配置不一致，请先恢复对应配置");
         }
       }
-      if (guarded) assertRecoveryMaterials(current);
+      assertRecoveryMaterials(current);
       writePrivateFileAtomicSync(path, candidate);
       try {
         await withResponsesModelCatalogWrite({path}, async () => {
@@ -91,17 +89,17 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
           if (registered) loadConfiguredCustomSwitchingModelProviders(environment, id);
         });
       } catch (error) {
-        if (guarded) assertRecoveryMaterials(candidate);
+        assertRecoveryMaterials(candidate);
         if (current !== undefined) writePrivateFileAtomicSync(path, current);
         else unlinkSync(path);
         throw error;
       }
     }
     if (candidate === undefined && existsSync(path)) {
-      if (guarded) assertRecoveryMaterials(current);
+      assertRecoveryMaterials(current);
       unlinkSync(path);
     }
-    if (guarded) assertRecoveryMaterials(candidate);
+    assertRecoveryMaterials(candidate);
     unlinkSync(`${path}.pending`);
     return { providerId: id, action };
   });
