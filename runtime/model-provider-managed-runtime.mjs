@@ -944,8 +944,12 @@ export function readManagedMarker(environment, definition) {
     marker = record(parse(readPrivateFile(markerPath)));
   } catch (error) {
     if (error?.code === "ENOENT") {
-      if (definition.accountId !== undefined && existsSync(join(providerStorageRoot(environment),
-        definition.storageId ?? definition.id, "accounts", definition.accountId, definition.managedMarkerFileName))) {
+      if (definition.accountId !== undefined
+        && managedProviderAccountFamilyForDefinition(definition).loadAccounts(environment)
+          .some(account => account.id === definition.accountId) && [
+        join(providerStorageRoot(environment), definition.storageId ?? definition.id, "accounts", definition.accountId),
+        join(providerStorageRoot(environment), definition.id),
+      ].some(directory => existsSync(join(directory, definition.managedMarkerFileName)))) {
         throw new Error(`Provider ${definition.id} 仍使用旧账户目录；请先停止 App Server 并显式执行目录整理`, { cause: error });
       }
       return undefined;

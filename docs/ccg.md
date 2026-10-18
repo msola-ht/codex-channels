@@ -41,8 +41,8 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 
 - 账户注册表：`~/.codex-connect/providers/ccg/accounts.json`。
 - 切换模式 Profile：`~/.codex/sf-ccg-<账户>.config.toml`，每个账户独立保存 Key 和默认模型。
-- 账户管理标记：`~/.codex-connect/providers/ccg-<账户>/managed.toml`。
-- 账户安装前备份：`~/.codex-connect/providers/ccg-<账户>/backup/config.json`。
+- 账户管理标记：`~/.codex-connect/providers/ccg/ccg-<账户>/managed.toml`。
+- 账户安装前备份：`~/.codex-connect/providers/ccg/ccg-<账户>/backup/config.json`。
 - 模型目录：`~/.codex-connect/providers/ccg/models.json`，所有 CCG 账户共用。
 - 目录来源记录：同目录 `models.manifest.json`。
 
