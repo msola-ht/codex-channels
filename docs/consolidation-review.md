@@ -19,7 +19,7 @@
 | U09 | 统一设置输入校验失败的领域错误适配 | 中 | 已修复；隔离 HTTP/CLI 链路已观察 |
 | U10 | 移除渠道输入聚合的等价转发层 | 低 | 已实施；Actor 刷新隔离与关闭排空已观察 |
 | U11 | 统一渠道关闭时继续清理并汇总失败的约定 | 中 | 已修复；部分构造关闭与注入失败已观察 |
-| U12 | 收敛 HTTP chunk 背压写入原语 | 低 | 关联复核完成，排除终态状态机；未实施 |
+| U12 | 收敛 HTTP chunk 背压写入原语 | 低 | 已实施；真实本地 HTTP 交付与背压超时已观察 |
 | U13 | 统一审查统计与写入失败归属的运行树选择 | 中 | 已修复；隔离 SQLite 汇总与失败归属已观察 |
 | U14 | 统一 Gateway 与 Codex 基础版本兼容谓词 | 中 | 已修复；门禁、更新器导出与打包清单已检查 |
 | U15 | 收敛源码取得后的安装构建阶段 | 中 | 关联复核完成，排除生命周期合并；未实施 |
@@ -212,6 +212,8 @@ Schema 版本、只读预检导出及安装预检消费保持不变。已有库�
 **观察与限制。** Linux 上使用编译后的真实 WeixinSurface 构造及 stop 入口，未 start、无平台网络调用：正常部分构造实例连续停止均完成。Hack 经可注入的媒体端口同时触发视频异步拒绝、文件同步抛错，观察到 AggregateError 含两项，后续 images/audios 均执行，真实 Outbox.closed 为 true，重复 stop 返回同一 Promise，未观察拒绝数为 0。此证据只覆盖本地关闭控制流；没有真实 SDK 关闭故障、在途平台请求、macOS/Windows 服务停机或泄漏观察。TypeScript、模块依赖检查和构建通过；ESLint 指出的冗余 unknown 联合类型已修正。
 
 ## U12 HTTP chunk 背压写入
+
+**实施与证据。** `writeResponseChunk` 统一 string/Buffer 的单次写入、drain、取消与监听清理，writeChatData 仅保留原参数顺序和默认预算。统一在 write 返回背压后计时；原生 Proxy 的外层总预算保留，普通/terminal 阶段继续由调用方传入。finish、WS、Relay endResponse 及指标状态机未合并。Linux 本地真实 HTTP 连接依次写入文本和 Buffer，客户端收到 alphabeta；暂停读取 16 MiB 响应后触发背压与 ModelRequestTimeoutError，stage=terminal，drain 监听数归零。服务与客户端均已关闭。类型及构建通过；未观察真实模型上游、同步 write 异常或渠道链路。
 
 证据入口：[`chat-io.ts`](../src/provider-proxy/chat-io.ts) 的 `writeChatData`（约 50 行），以及 [`proxy-delivery.ts`](../src/provider-proxy/proxy-delivery.ts) 的 `writeResponseChunk` / `waitForDelivery`（约 21、33 行）。消费者分别是 Chat Bridge、原生 Proxy 和 Model Relay Server。
 

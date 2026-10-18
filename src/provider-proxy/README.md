@@ -81,7 +81,7 @@
   共享代理解析结果选择传入上游 Agent（Codex `.env` 优先，不读取旧 TOML `[network]`）。OpenCode Go、DeepSeek 与 CCG 的共享代理额外接受
   `/go/<账户>/responses` 与 `/go/<账户>/models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
   携带账户标识供服务侧按具体账户 Provider Socket 上报。
-- `proxy-delivery.ts`：HTTP/WS 写入、背压与关闭等待的有界交付；取消、断连和错误结束当前等待，模型等待与下游交付停滞分别计时。
+- `proxy-delivery.ts`：HTTP/WS 写入、背压与关闭等待的有界交付；HTTP chunk 共用 string/Buffer 写入原语，write 返回背压后开始 drain 等待预算，保留调用方外层总预算。取消、断连和错误结束当前等待，模型等待与下游交付停滞分别计时。
 - `response-metrics-observer.ts`：从 HTTP Header、SSE/JSON 终态与 WebSocket 完成或关闭信息中
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID

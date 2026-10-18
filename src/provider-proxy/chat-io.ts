@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { ModelConversionError } from "../model-api/index.js";
 import { ChatUpstreamError, ModelRequestTimeoutError } from "./chat-errors.js";
+import { writeResponseChunk } from "./proxy-delivery.js";
 
 export class ChatBodyTooLargeError extends ModelConversionError {}
 export class ChatBodyEncodingError extends ModelConversionError {}
@@ -47,33 +48,8 @@ export function readModelBody(request: IncomingMessage, signal: AbortSignal, max
   });
 }
 
-export async function writeChatData(response: ServerResponse, data: string, signal: AbortSignal, backpressure?: () => void, timeoutMs: number = modelRequestPolicy.deliveryTimeoutMs, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
-  signal.throwIfAborted();
-  if (response.destroyed || response.writableEnded) throw new Error("Response disconnected");
-  await new Promise<void>((resolve, reject) => {
-    let timer: NodeJS.Timeout | undefined;
-    let settled = false;
-    const cleanup = (): void => {
-      clearTimeout(timer); response.off("drain", drain); response.off("close", close); response.off("error", error);
-      signal.removeEventListener("abort", abort);
-    };
-    const error = (reason: unknown): void => {
-      if (settled) return;
-      settled = true; cleanup(); reject(reason instanceof Error ? reason : new Error("Response disconnected"));
-    };
-    const drain = (): void => { if (!settled) { settled = true; cleanup(); resolve(); } };
-    const close = (): void => error(new Error("Response disconnected"));
-    const abort = (): void => error(signal.reason);
-    response.once("drain", drain); response.once("close", close); response.once("error", error);
-    signal.addEventListener("abort", abort, { once: true });
-    try {
-      if (response.write(data)) drain();
-      else {
-        backpressure?.();
-        if (!settled) timer = setTimeout(() => error(new ModelRequestTimeoutError(stage)), timeoutMs);
-      }
-    } catch (reason) { error(reason); }
-  });
+export function writeChatData(response: ServerResponse, data: string, signal: AbortSignal, backpressure?: () => void, timeoutMs: number = modelRequestPolicy.deliveryTimeoutMs, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
+  return writeResponseChunk(response, data, signal, timeoutMs, backpressure, stage);
 }
 
 export interface ChatStreamBounds {
