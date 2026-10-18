@@ -24,7 +24,7 @@ const encode = value => `${JSON.stringify(value, null, 2)}\n`;
 const digest = content => content === null ? null : createHash("sha256").update(content).digest("hex");
 const customId = /^cp-[A-Za-z0-9_-]{1,61}$/u;
 const archiveId = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
-const journalLayout = "family-models-account-materials-v1";
+const journalLayout = "family-models-family-account-materials-v1";
 
 function parseConfig(content) {
   try { return parse(content); } catch { throw new Error("Provider 配置无法安全解析，未执行模型目录合并"); }
@@ -77,23 +77,25 @@ function snapshotProviderFiles(paths, environment) {
   });
 }
 
-function materials(environment, legacyFlat = false) {
+function materials(environment) {
   const root = providerStorageRoot(environment), home = codexHomePath(environment);
   const config = join(home, "config.toml");
   directoryNames(root);
   const definitions = loadManagedModelProviderDefinitions(environment).filter(definition => definition.accountId !== undefined);
   const accounts = definitions.map(definition => {
-    const directory = join(root, definition.id), family = definition.storageId ?? definition.id;
+    const family = definition.storageId ?? definition.id;
+    const directory = join(root, family, definition.id), flatDirectory = join(root, definition.id);
     const legacyDirectory = join(root, family, "accounts", definition.accountId);
-    const directories = legacyFlat ? [directory] : [legacyDirectory, directory];
+    const directories = [legacyDirectory, flatDirectory, directory];
     for (const parent of directories) directoryNames(parent);
     const targetDirectory = join(root, family);
     directoryNames(targetDirectory);
     const names = [definition.catalogFileName, definition.catalogManifestFileName,
       `${definition.catalogFileName}.backup`, `${definition.catalogManifestFileName}.backup`, `${definition.catalogFileName}.settings-backup`];
-    const source = join(directory, definition.catalogFileName), target = join(targetDirectory, definition.catalogFileName);
+    const source = join(flatDirectory, definition.catalogFileName), target = join(targetDirectory, definition.catalogFileName);
     const backups = pairedFiles(directories.map(parent => join(parent, definition.backupDirectoryName)), parent => backupFiles(parent, definition));
-    const credentials = legacyFlat ? [] : pairedFiles([join(root, family, "primary-credentials", definition.id), join(directory, "primary-credentials")], credentialFiles);
+    const credentials = pairedFiles([join(root, family, "primary-credentials", definition.id),
+      ...directories.map(parent => join(parent, "primary-credentials"))], credentialFiles);
     return { provider: definition.id, definition, family, directory, directories, targetDirectory, names, source, target,
       sources: [...directories, targetDirectory].map(parent => join(parent, definition.catalogFileName)),
       marker: join(directory, definition.managedMarkerFileName), profile: join(home, definition.profileFileName),
@@ -121,19 +123,18 @@ function materials(environment, legacyFlat = false) {
   }
   for (const provider of [...customIds].sort()) {
     const directory = join(root, provider);
-    const legacyDirectory = join(root, "responses", provider), directories = legacyFlat ? [directory] : [legacyDirectory, directory];
+    const legacyDirectory = join(root, "responses", provider), directories = [legacyDirectory, directory];
     for (const parent of directories) directoryNames(parent);
     const profile = join(home, `sf-${provider}.config.toml`);
     profiles.add(profile);
-    const credentials = legacyFlat ? [] : pairedFiles([join(root, "custom", provider, "primary-credentials"), join(directory, "primary-credentials")], credentialFiles);
+    const credentials = pairedFiles([join(root, "custom", provider, "primary-credentials"), join(directory, "primary-credentials")], credentialFiles);
     accounts.push({ provider, custom: true, directory, directories, profile,
       source: join(legacyDirectory, "models.json"), target: join(directory, "models.json"),
       sources: directories.map(parent => join(parent, "models.json")),
       recoveryBackup: responsesProviderBackupPath(environment, provider),
       names: ["models.json", "models.json.backup", "provider.json"],
       paths: directories.flatMap(parent => ["models.json", "models.json.backup", "provider.json"].map(name => join(parent, name))), backups: [], credentials,
-      pending: legacyFlat ? [join(directory, "models.json.pending"), join(legacyDirectory, "models.json.pending")]
-        : directories.flatMap(parent => [".pending", ".settings-pending"].map(suffix => join(parent, `models.json${suffix}`))) });
+      pending: directories.flatMap(parent => [".pending", ".settings-pending"].map(suffix => join(parent, `models.json${suffix}`))) });
   }
   for (const account of accounts) for (const pending of account.pending) {
     if (existsSync(pending)) throw new Error(`Provider ${account.provider} 有未完成模型事务，请先在原版本恢复`);
@@ -146,19 +147,6 @@ function materials(environment, legacyFlat = false) {
     ...(account.custom ? [account.recoveryBackup, ...account.names.map(name => join(account.directory, name))]
       : [account.marker, ...account.names.map(name => join(account.targetDirectory, name))])])]);
   return { accounts, config, profiles: [...profiles], registryPaths, paths, writable };
-}
-
-function flatJournalScope(layout) {
-  // The already shipped v3 journal froze only flat account files, not nested sources or credentials.
-  const backups = layout.accounts.flatMap(account => account.custom ? []
-    : backupFiles(join(account.directory, account.definition.backupDirectoryName), account.definition));
-  const paths = new Set([...layout.profiles, ...layout.registryPaths, ...backups,
-    ...layout.accounts.flatMap(account => account.custom
-      ? [...account.names.map(name => join(account.directory, name)), account.recoveryBackup]
-      : [...new Set([account.directory, account.targetDirectory])].flatMap(directory => account.names.map(name => join(directory, name))).concat(account.marker))]);
-  const writable = new Set([...layout.profiles, ...backups, ...layout.accounts.flatMap(account => account.custom
-    ? [account.recoveryBackup] : account.names.map(name => join(account.targetDirectory, name)))]);
-  return { paths, writable };
 }
 
 function selections(document) {
@@ -338,12 +326,11 @@ function buildPlan(environment, layout) {
     }
     if (!account.custom) {
       const ownerSelections = selected.filter(selection => [layout.config, account.profile].includes(selection.path));
-      const nestedSource = join(account.directories[0], account.definition.catalogFileName);
-      const referencesNested = ownerSelections.some(selection => selection.catalog === nestedSource);
-      const referencesFlat = ownerSelections.some(selection => selection.catalog === account.source);
-      if (referencesNested && referencesFlat) throw new Error(`账户 ${account.provider} 同时引用不同账户布局，拒绝猜测管理材料来源`);
-      account.activeDirectory = referencesNested ? account.directories[0]
-        : referencesFlat || original(account.marker) !== undefined ? account.directory : account.directories[0];
+      const referencedDirectories = account.directories.filter(directory => ownerSelections.some(selection => selection.catalog === join(directory, account.definition.catalogFileName)));
+      if (referencedDirectories.length > 1) throw new Error(`账户 ${account.provider} 同时引用不同账户布局，拒绝猜测管理材料来源`);
+      account.activeDirectory = referencedDirectories[0]
+        ?? [...account.directories].reverse().find(directory => original(join(directory, account.definition.managedMarkerFileName)) !== undefined);
+      if (account.activeDirectory === undefined) throw new Error(`账户 ${account.provider} 缺少管理标记`);
       const activeMarker = join(account.activeDirectory, account.definition.managedMarkerFileName);
       const markerText = original(activeMarker);
       if (markerText === undefined) throw new Error(`账户 ${account.provider} 缺少管理标记`);
@@ -354,7 +341,7 @@ function buildPlan(environment, layout) {
       if (original(ownerPath) === undefined || parseConfig(original(ownerPath)).model_provider !== account.provider) throw new Error(`账户 ${account.provider} 配置归属不一致`);
       const allowed = new Set(layout.accounts.filter(sibling => sibling.family === account.family).flatMap(sibling => sibling.sources));
       if (selected.some(selection => !allowed.has(selection.catalog))) throw new Error(`账户 ${account.provider} 引用了非预期模型目录`);
-      copy({ sources: [...new Set([activeMarker, account.marker])], target: account.marker }, account);
+      copy({ sources: account.markers, target: account.marker }, account);
     } else {
       if (selected.some(selection => !account.sources.includes(selection.catalog))) throw new Error(`Provider ${account.provider} 引用了非预期模型目录`);
       const sources = [...new Set(selected.map(selection => selection.catalog))];
@@ -398,7 +385,7 @@ function buildPlan(environment, layout) {
     for (const name of account.names.slice(2)) {
       const available = sources.flatMap(source => {
         const path = join(dirname(source), name), content = original(path);
-        return content === undefined ? [] : [{ path, content: name.endsWith(".settings-backup") && dirname(source) !== account.targetDirectory
+        return content === undefined ? [] : [{ path, content: name.endsWith(".settings-backup")
           ? rewriteSettingsBackup(content, dirname(source), account, layout) : content }];
       });
       const target = join(account.targetDirectory, name);
@@ -429,9 +416,7 @@ function buildPlan(environment, layout) {
   }
   for (const account of layout.accounts) {
     for (const file of account.backups) {
-      const source = file.sources.find(path => dirname(dirname(path)) === account.activeDirectory);
-      if (source === undefined || original(source) === undefined) continue;
-      copy({ sources: [...new Set([source, file.target])], target: file.target }, account, (content, path) => rewriteInstallationBackup(content, path, layout));
+      copy(file, account, (content, path) => rewriteInstallationBackup(content, path, layout));
     }
     for (const file of account.credentials) copy(file, account, content => { validateCredential(content, account); return content; });
     const content = account.recoveryBackup && original(account.recoveryBackup);
@@ -449,12 +434,12 @@ function buildPlan(environment, layout) {
 function readJournal(path, environment) {
   let journal;
   try { journal = JSON.parse(readPrivateFileSync(path, maximumBytes)); } catch { throw new Error("模型目录合并恢复记录无法安全读取"); }
-  if (journal?.schemaVersion !== 3 || !Array.isArray(journal.files) || !Array.isArray(journal.order)
+  if (journal?.schemaVersion !== 4 || !Array.isArray(journal.files) || !Array.isArray(journal.order)
     || !Array.isArray(journal.providers) || !Array.isArray(journal.families) || !Array.isArray(journal.references)
     || !Array.isArray(journal.retainedSourceBackups)) throw new Error("模型目录合并恢复记录格式无效；旧版本未完成事务须先使用原版本恢复");
-  if (journal.layout !== undefined && journal.layout !== journalLayout) throw new Error("模型目录合并恢复记录布局不受支持");
-  const layout = materials(environment, journal.layout === undefined);
-  const scope = journal.layout === journalLayout ? { paths: layout.paths, writable: layout.writable } : flatJournalScope(layout);
+  if (journal.layout !== journalLayout) throw new Error("模型目录合并恢复记录布局不受支持");
+  const layout = materials(environment);
+  const scope = { paths: layout.paths, writable: layout.writable };
   const allowed = new Set(scope.paths), seen = new Set();
   for (const file of journal.files) {
     if (!file || !allowed.has(file.path) || seen.has(file.path)
@@ -502,10 +487,13 @@ export async function isolateProviderCatalogs(action = "preview", environment = 
   if (!["preview", "write", "resume", "rollback"].includes(action)) throw new Error("模型目录合并操作无效");
   return withModelProviderManagementTransaction(environment, async () => {
     if (existsSync(responsesContextSyncPath(environment))) throw new Error("旧上下文事务尚未恢复，请先使用 primary-provider recover 完成恢复");
-    const path = providerCatalogIsolationPath(environment), backup = `${path}.v3.backup`;
+    const path = providerCatalogIsolationPath(environment), backup = `${path}.v4.backup`;
     if (["preview", "write"].includes(action) && existsSync(path)) throw new Error("已有未完成目录事务，请使用对应版本的 --resume 或 --rollback");
+    if (["resume", "rollback"].includes(action) && !existsSync(path) && !existsSync(backup) && existsSync(`${path}.v3.backup`)) {
+      throw new Error("已有旧版 v3 目录备份，须使用对应原版本恢复；当前版本仅恢复 v4 事务");
+    }
     const journal = ["resume", "rollback"].includes(action)
-      ? readJournal(existsSync(path) ? path : backup, environment) : { schemaVersion: 3, layout: journalLayout, ...buildPlan(environment, materials(environment)) };
+      ? readJournal(existsSync(path) ? path : backup, environment) : { schemaVersion: 4, layout: journalLayout, ...buildPlan(environment, materials(environment)) };
     if (action === "preview") return summary(action, journal);
     if (action === "write" && journal.order.length === 0) return summary("unchanged", journal);
     const supervisor = await inspectAppServerSupervisorState(managedAccountPrimarySocket(environment));
@@ -513,13 +501,13 @@ export async function isolateProviderCatalogs(action = "preview", environment = 
     const content = encode(journal);
     if (Buffer.byteLength(content) > maximumBytes) throw new Error("模型目录合并恢复记录超过大小限制");
     const previousBackup = existsSync(backup) ? readPrivateFileSync(backup, maximumBytes) : undefined;
-    if (action === "write" && previousBackup !== undefined) throw new Error("已有模型目录合并 v3 备份，请先核对并另行归档，拒绝覆盖");
-    if (previousBackup !== undefined && previousBackup !== content) throw new Error("模型目录合并 v3 备份与当前事务不一致，拒绝覆盖");
+    if (action === "write" && previousBackup !== undefined) throw new Error("已有模型目录合并 v4 备份，请先核对并另行归档，拒绝覆盖");
+    if (previousBackup !== undefined && previousBackup !== content) throw new Error("模型目录合并 v4 备份与当前事务不一致，拒绝覆盖");
     if (existsSync(path) && readPrivateFileSync(path, maximumBytes) !== content) throw new Error("模型目录合并恢复记录已变化，拒绝覆盖");
     journalSnapshots(journal, environment);
     await writePrivateFileAtomic(path, content);
     await applyJournal(journal, action, environment);
-    if ((existsSync(backup) ? readPrivateFileSync(backup, maximumBytes) : undefined) !== previousBackup) throw new Error("模型目录合并 v3 备份在恢复期间变化，保留事务记录");
+    if ((existsSync(backup) ? readPrivateFileSync(backup, maximumBytes) : undefined) !== previousBackup) throw new Error("模型目录合并 v4 备份在恢复期间变化，保留事务记录");
     await writePrivateFileAtomic(backup, content);
     if (createProviderFileAccess(environment).read(path, maximumBytes) !== content) throw new Error("目录恢复记录在操作期间发生变化，未清除记录");
     unlinkSync(path);
@@ -529,7 +517,7 @@ export async function isolateProviderCatalogs(action = "preview", environment = 
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
-  if (args.length === 1 && ["-h", "--help"].includes(args[0])) console.log("用法：node scripts/isolate-provider-catalogs.mjs [--write|--resume|--rollback]\n默认预览；写入前须停止 App Server。按当前配置实际引用，将 nested 或 flat 受管账户模型合并到 providers/deepseek|clp|ccg|opencode-go/；账户标记、安装备份和固定凭据复制到完整 Provider ID 目录。旧 CP 模型、上游元数据和固定凭据复制到 providers/cp-ID/。同步全部 Profile 及安装/恢复备份引用。来源、账户目标或 CP 目标冲突拒绝猜测；陈旧家族模型目标仅显式 --write 并以私有 v3 journal 完整备份后替换。保留全部旧源，不自动重启服务。旧未完成事务须先使用原版本恢复。");
+  if (args.length === 1 && ["-h", "--help"].includes(args[0])) console.log("用法：node scripts/isolate-provider-catalogs.mjs [--write|--resume|--rollback]\n默认预览；写入前须停止 App Server。按当前配置实际引用，将 nested 或 flat 受管账户模型合并到 providers/deepseek|clp|ccg|opencode-go/；账户标记、安装备份和固定凭据复制到对应家族下的完整 Provider ID 目录。旧 CP 模型、上游元数据和固定凭据复制到 providers/cp-ID/。同步全部 Profile 及安装/恢复备份引用。来源、账户目标或 CP 目标冲突拒绝猜测；陈旧家族模型目标仅显式 --write 并以私有 v4 journal 完整备份后替换。保留全部旧源和 v3 备份，不自动重启服务。旧未完成事务须先使用原版本恢复，当前版本仅恢复 v4 事务。");
   else if (args.length > 1 || (args.length === 1 && !["--write", "--resume", "--rollback"].includes(args[0]))) {
     console.error("不支持的参数；使用 --help 查看用法"); process.exitCode = 1;
   } else isolateProviderCatalogs(args[0]?.slice(2) ?? "preview").then(result => console.log(JSON.stringify(result))).catch(error => {

@@ -29,7 +29,7 @@ export function clinePassAccountsFilePath(environment = process.env) {
 }
 
 export function clinePassAccountDirectory(environment, id) {
-  return join(providerStorageRoot(environment), clinePassProviderId(id));
+  return join(providerStorageRoot(environment), "clp", clinePassProviderId(id));
 }
 
 export function clinePassAccountMarkerPath(environment, id) {

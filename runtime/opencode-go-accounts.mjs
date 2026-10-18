@@ -126,7 +126,7 @@ export function opencodeGoAccountsFilePath(environment = process.env) {
 }
 
 export function opencodeGoAccountDirectory(environment, accountId) {
-  return join(providerStorageRoot(environment), opencodeGoProviderId(accountId));
+  return join(providerStorageRoot(environment), "opencode-go", opencodeGoProviderId(accountId));
 }
 
 export function opencodeGoAccountMarkerPath(environment, accountId) {
@@ -231,7 +231,16 @@ export function loadOpencodeGoDefaultAccount(environment = process.env) {
 
 export function readOpencodeGoAccountMarker(environment, accountId) {
   const path = opencodeGoAccountMarkerPath(environment, accountId);
-  if (!existsSync(path)) return undefined;
+  if (!existsSync(path)) {
+    const provider = opencodeGoProviderId(accountId);
+    if (loadOpencodeGoAccounts(environment).some(account => account.id === accountId) && [
+      join(providerStorageRoot(environment), "opencode-go", "accounts", accountId),
+      join(providerStorageRoot(environment), provider),
+    ].some(directory => existsSync(join(directory, "managed.toml")))) {
+      throw new Error(`Provider ${provider} 仍使用旧账户目录；请先停止 App Server 并显式执行目录整理`);
+    }
+    return undefined;
+  }
   let marker;
   try {
     marker = parse(readPrivateFile(path));

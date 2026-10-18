@@ -29,11 +29,11 @@ CLP 自动审查不再受本地审批模型白名单限制；模型仍须符合�
 切换模式按账户使用 `sf-clp-<账户>.config.toml` Profile 和独立 App Server；固定模式修改 Codex 主配置并保留该账户的初始备份。
 固定 Key 使用[独立私有版本与主配置 `env_key` 引用](provider-integration-guide.md#4-安全边界)，App Server 与独立 Relay 复用同一引用；旧明文配置须明确重新配置账户。
 Key 使用现有私有文件机制保存，不写入 Gateway TOML 或命令行。配置文件位于 Codex Home，目录与管理标记
-位于 `~/.codex-connect/providers/clp-<账户>/`。配置变更后按 Setup 提示重启服务；切换模式通过
+位于 `~/.codex-connect/providers/clp/clp-<账户>/`。配置变更后按 Setup 提示重启服务；切换模式通过
 现有 Provider 选择入口使用 `clp-<账户>`，终端使用 `codexc remote -p clp-<账户>`，
 Desktop 使用 `codexc app -p clp-<账户>`。两个入口也接受已登记的 `sf-clp-<账户>` Profile 名，
 Remote 保留 `--profile sf-clp-<账户>`；两个入口默认连接主实例。
-家族索引 `providers/clp/accounts.json` 只保存 ID 和默认标记；各 Provider 的管理标记和备份位于 `providers/clp-<账户>/`。
+家族索引 `providers/clp/accounts.json` 只保存 ID 和默认标记；各 Provider 的管理标记和备份位于 `providers/clp/clp-<账户>/`。
 默认账户用于渠道默认选择，已有会话不自动更换账户，也不因额度不足轮换密钥。删除账户前须先把默认标记交给其他账户（仅剩一个账户时可直接删除）。
 删除会停止对应受管实例并移除账户配置与管理标记，保留共用模型目录、来源清单、初始配置备份和历史统计；该账户的历史会话不再可用。
 

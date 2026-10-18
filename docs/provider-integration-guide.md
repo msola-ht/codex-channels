@@ -33,7 +33,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账�
 
 | 决策点 | 选项 | 说明 |
 | --- | --- | --- |
-| Provider id | 小写字母/数字/`-`/`_`，1–64 位 | 决定 `sf-<id>.config.toml` Profile、`~/.codex-connect/providers/<id>/` 目录、`modelProvider`、环境变量名 |
+| Provider id | 小写字母/数字/`-`/`_`，1–64 位 | 决定 `sf-<id>.config.toml` Profile、`modelProvider`、环境变量名；受管账户材料位于 `providers/<家族>/<id>/`，自定义 CP 位于 `providers/<id>/` |
 | 显示名称 | 1–64 字符 | 出现在 `/model`、WebUI 与完成卡片 |
 | wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 与上游接口为 `chat_completions` 的自定义第三方 Provider 使用 `model-api` 模块与 Chat 桥，不把 Chat 写入 Codex `wire_api`。转换覆盖 `function`、`namespace`、自由格式 `custom`、客户端 `tool_search` 与 multi-agent v2 的 `agent_message` 输入项；模型目录可用 `applyPatchToolType: freeform` 与 `supportsSearchTool` 开启自由格式 `apply_patch` 与客户端检索；未映射的顶层工具声明原样交给上游，不注册本地执行身份，也不承诺托管工具执行与回程；第三方 `wire_api = "responses"` 上游由 ProviderProxy 在提交前归一化 Codex 私有输入项，`agent_message` 降级为普通 `user` 消息、工具参数 schema 的 `encrypted` 布尔标记被删除，HTTP 与 Responses WS 一致，官方 OpenAI 端点保持原文透传；受管 DeepSeek 入口仍关闭内置网页搜索 |
 | WebSocket | 支持 / 不支持 | 不支持时必须显式声明 `supports_websockets = false` |
@@ -112,7 +112,7 @@ WebUI 编辑已有自定义提供商与仅编辑模型均须携带打开编辑�
 
 #### 旧共享目录账户升级
 
-当前模型目录按提供商共用：`providers/deepseek/models.json`、`providers/clp/models.json`、`providers/ccg/models.json`、`providers/opencode-go/models.json`，manifest 和模型设置备份在同目录。账户管理标记、安装备份及私有凭据仍在 `providers/<完整账户 Provider ID>/`，自定义 `cp-` 各自表示不同提供商，保留 `providers/<cp-ID>/models.json`。整理入口支持此前的嵌套账户布局和已部署的扁平布局，按实际配置引用将模型合并到提供商目录；嵌套账户的身份材料、安装备份和私有凭据显式复制到完整账户 ID 目录，旧 CP 模型及凭据显式复制到各自 cp-ID 目录。升级前先用旧版本完成未结束事务，再退出 Remote TUI 和 Desktop 等客户端，停止整个 App Server（含受监管账户及聚合实例）。服务命令及 `all` 范围见[后台服务与更新](user-guide.md#5-后台服务与更新)，按原运行状态恢复所需服务：
+当前模型目录按提供商共用：`providers/deepseek/models.json`、`providers/clp/models.json`、`providers/ccg/models.json`、`providers/opencode-go/models.json`，manifest 和模型设置备份在同目录。账户管理标记、安装备份及私有凭据位于家族下的完整账户 ID 目录，例如 `providers/clp/clp-main/`、`providers/deepseek/ds-main/`、`providers/ccg/ccg-main/` 和 `providers/opencode-go/ocg-main/`。自定义 `cp-` 各自表示不同提供商，保留 `providers/<cp-ID>/models.json`。整理入口支持此前的 `providers/<家族>/accounts/<账户>/` 和平级 `providers/<完整账户 Provider ID>/` 布局：按实际配置引用将模型合并到家族根目录，将账户身份材料、安装备份和私有凭据显式复制到家族下的完整账户 ID 目录；旧 CP 模型及凭据显式复制到各自 cp-ID 目录。即使模型已经共用，平级账户材料仍须整理。升级前先用旧版本完成未结束事务，再退出 Remote TUI 和 Desktop 等客户端，停止整个 App Server（含受监管账户及聚合实例）。服务命令及 `all` 范围见[后台服务与更新](user-guide.md#5-后台服务与更新)，按原运行状态恢复所需服务：
 
 ```sh
 codexc stop all
@@ -127,7 +127,7 @@ codexc start all
 
 脚本直接运行时默认读取 `~/.codex-connect/config.toml` 检查主 App Server Socket；设置了 `CODEX_CONNECT_HOME` 时使用该用户数据目录，显式 `CODEX_CONNECT_CONFIG_FILE` 优先。请与服务使用相同的环境设置；不会读取仓库根目录的 `config.toml`。
 
-写入前把原值、目标值和路径保存到私有 `~/.codex-connect/private/provider-catalog-isolation.json`。该未完成记录存在时，新 runtime 拒绝加载账户配置及使用目录；成功后保存为同路径 `.v3.backup` 并移除未完成记录，旧备份保留。中断后保持服务停止，运行 `node scripts/isolate-provider-catalogs.mjs --resume` 完成，或 `--rollback` 恢复整理前内容。当前文件既非原值也非目标值时拒绝覆盖；已有 `.v3.backup` 不覆盖。旧版 schema 1/2 未完成记录必须先用原版本恢复，不能删除记录绕过保护。
+写入前把原值、目标值和路径保存到私有 `~/.codex-connect/private/provider-catalog-isolation.json`。该未完成记录存在时，新 runtime 拒绝加载账户配置及使用目录；成功后保存为同路径 `.v4.backup` 并移除未完成记录，旧版 `.v3.backup` 保留且不阻止本次整理。中断后保持服务停止，运行 `node scripts/isolate-provider-catalogs.mjs --resume` 完成，或 `--rollback` 恢复整理前内容。当前文件既非原值也非目标值时拒绝覆盖；已有 `.v4.backup` 不覆盖。旧版 schema 1/2/3 未完成记录必须先用原版本恢复，不能删除记录绕过保护。旧源文件保留用于核对和恢复，因此整理不会自动删除原来的平级目录。
 同一未完成记录也阻止自定义目录首次创建及 `codexc provider recover` 的所有恢复分支；先处理目录整理事务，再恢复模型设置，避免两个恢复过程交叉修改文件。
 
 回滚仅恢复此次整理记录中的文件和引用，须配合对应旧代码；后续模型修改不会自动反向合并。若旧版本已有未完成的 DS/CP 上下文或模型设置事务，先使用旧版本的恢复入口处理。共享目录设置采用同一事务保存模型、来源和相关 Profile，schema 2 guards 记录同族注册表、管理标记等只读前置条件；任一同族账户均可发起受控恢复，不覆盖其他家族或后续修改。真实用户目录不会自动迁移。
@@ -198,7 +198,7 @@ OCG/CCG 与自定义 `cp-*` 的普通代理及聚合下游均在发送前复核�
 ## 4. 安全边界
 
 DS、OCG、CCG 与 CLP 固定模式的主 `~/.codex/config.toml` 只保存带随机版本的 `env_key`，Key 位于
-`~/.codex-connect/providers/<provider-id>/primary-credentials/<版本>.json`。
+`~/.codex-connect/providers/<家族>/<provider-id>/primary-credentials/<版本>.json`。
 JSON 使用版本 1，字段限于 `schemaVersion`、`providerId`、`origin`、`apiKey`，私有读取严格核对版本、Provider 和固定上游 Origin；
 Unix 文件/目录分别为 `0600`/`0700`，Windows 使用私有 ACL，主配置可供 Codex 沙盒读取且不包含 Key。
 每次明确重配先写新私有版本，再在同一文件事务内发布引用；旧版本与现有初始备份、归档保留，避免旧引用失效。
@@ -558,7 +558,7 @@ WebUI 模型管理按提供商展示一组模型，受管同族账户共用目�
 
 自定义模型的新建条目补齐基础提示词；已有条目的普通编辑、删除和窗口修改只编译已保存或明确提交的定义，不重新套用基础模板。删除不会改变保留模型的提示词。模板导入仅新增；已有模型使用明确来源、选定范围及差异确认的模板更新入口，模板快照更新不会自动修改提供商目录。
 
-每个 Provider 的 `~/.codex-connect/providers/<Provider ID>/models.json` 使用版本 5 格式，
+每个自定义 CP Provider 的 `~/.codex-connect/providers/<cp-ID>/models.json` 使用版本 5 格式，
 包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`；生成的每个模型条目声明 `multi_agent_version: v2`，由 Codex 解析为多代理 v2 运行时，不写入主配置的 `features.multi_agent_v2`。模型定义可携带 `template: { source, model }` 来源关联及已固化的 `modelMessages` 提示词对象。旧 `followContext` 仅作为历史元数据，不产生联动；普通编译不主动清理它。`maxContextWindow` 可选，用于记录用户为该上游模型声明的最大窗口，省略时等于当前窗口；不保存旧完整 `snapshot` 字段，输入时明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联；版本 4 目录在本版本失败关闭，既不自动迁移也不写回，读取该目录的 Gateway 启动与管理界面会一起失败（`codexc provider recover` 只处理未完成写入事务，不处理版本升级），移除与切回官方 OpenAI 只依赖注册表与目标 Provider 自身的材料，其他 Provider 目录不可读不阻塞本次操作，因此目录缺失或不支持时仍可 `codexc provider remove` 后按原 ID 重建。Codex 读取其中的
 `models`，Gateway 严格核对版本与生成结果；不接受未知字段、重复 ID、任意外部路径或手写的第三方目录。
 模型目录保存为两空格缩进的 JSON；账户注册表、账户初始备份与 `models.manifest.json` 同样使用两空格缩进。文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。

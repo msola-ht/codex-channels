@@ -31,8 +31,8 @@ codexc restart all                 # 应用配置变化
 | --- | --- |
 | `~/.codex-connect/providers/deepseek/accounts.json` | 账户 ID 与默认标记，不含凭据 |
 | `~/.codex/sf-ds-<账户>.config.toml` | 切换账户的模型、Provider 与私有 Key |
-| `~/.codex-connect/providers/ds-<账户>/managed.toml` | 账户运行模式 |
-| `~/.codex-connect/providers/ds-<账户>/backup/config.json` | 本次安装前的基础配置 |
+| `~/.codex-connect/providers/deepseek/ds-<账户>/managed.toml` | 账户运行模式 |
+| `~/.codex-connect/providers/deepseek/ds-<账户>/backup/config.json` | 本次安装前的基础配置 |
 | `~/.codex-connect/providers/deepseek/models.json` | 所有 DS 账户共用的模型目录 |
 | `~/.codex-connect/providers/deepseek/models.manifest.json` | 共用目录来源和更新时间 |
 
