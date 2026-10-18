@@ -36,6 +36,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   provider_models_unavailable: "modelCatalog.promptsUnavailable",
   provider_templates_busy: "modelTemplate.busy",
   "template-source-expired": "modelTemplate.expired",
+  "template-source-unavailable": "modelTemplate.sourceUnavailable",
   "template-source-too-large": "modelTemplate.tooLarge",
   "template-unavailable": "modelTemplate.unavailable",
   "template-conflict": "modelTemplate.conflict",
