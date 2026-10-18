@@ -13,7 +13,7 @@
 | U03 | 收敛渠道文本附件取得明文后的公共处理 | 低 | 关联复核完成，保留窄范围；未实施 |
 | U04 | 收敛 Storage 内两个同步 SQLite Store 的打开流程 | 低 | 关联复核完成，保留窄范围；未实施 |
 | U05 | 统一 WebUI 写入结果未知与权威回读门禁 | 中 | 已修复；浏览器保存及 503 回读门禁已观察 |
-| U06 | 统一两个模型能力检测 Hook 的请求归属与取消机制 | 中 | 关联复核完成，保留窄范围；未实施 |
+| U06 | 统一两个模型能力检测 Hook 的请求归属与取消机制 | 中 | 已实施；调用链及构建检查完成，检测竞态未实测 |
 | U07 | 统一两个 Runtime 材料 Reader 的单 Worker 所有权机制 | 中 | 关联复核完成，明确所有权；未实施 |
 | U08 | 统一配置管理与 CLI 总览的有效默认值投影 | 中 | 已修复；默认展示、原文写回与修订拒绝已观察 |
 | U09 | 统一设置输入校验失败的领域错误适配 | 中 | 已修复；隔离 HTTP/CLI 链路已观察 |
@@ -124,19 +124,19 @@ Schema 版本、只读预检导出及安装预检消费保持不变。已有库�
 
 证据入口：[`use-custom-model-capability-probe.ts`](../webui/src/hooks/use-custom-model-capability-probe.ts) 与 [`use-provider-web-search-probe.ts`](../webui/src/hooks/use-provider-web-search-probe.ts)。前者由 Provider 编辑器的草稿和配置版本决定作用域，后者由已配置 Provider、模型和修订决定作用域。
 
-两个 Hook 重复维护活动 AbortController、最新作用域与 enabled 状态，在作用域变化时取消并清空，阻止重复发起，返回时核对请求归属，并在 finally 中只释放自身请求。修复关闭弹窗、切换模型或取消后再发起时的迟到响应问题，需要同步两份近乎相同的控制逻辑。此类检测由用户主动发起且可能计费，建议统一生命周期规则；没有实际发起检测，也未确认旧结果串入故障。
+**当前实现。** 两 Hook 共用 [use-scoped-probe-request.ts](../webui/src/hooks/use-scoped-probe-request.ts)，集中活动 AbortController、最新作用域及 enabled、重复发起限制和自身请求释放。begin 拒绝旧作用域回调，owns 同时检查控制器、取消信号和当前作用域；cancel 先撤销所有权再 abort，旧 finally 只在仍拥有控制器时释放。业务状态及结果校验留在原 Hook。
 
 后端两个接口已共用 [`webui-custom-model-probe.mjs`](../scripts/webui-custom-model-probe.mjs) 的 `routeCustomModelCapabilityProbe`，统一并发名额、断连取消、正文限制与清理。前端 API 请求和超时也已有共享基础设施；`useApi` 的依赖驱动读取并不直接覆盖这些主动操作状态。
 
-建议只提取由作用域 key 和 enabled 约束的单次异步操作生命周期。两个业务 Hook 继续拥有输入、结果校验、错误映射和回填权限，保留现有调用接口。
+两个业务 Hook 保持原有调用接口，继续拥有输入、结果校验、错误映射和回填权限。
 
 - 草稿工具检测的连接绑定 token 必须匹配，只有 `applyPatch` / `toolSearch` 的明确结论允许回填。
 - 已配置网页搜索检测由后端解析凭据和协议，结果不得携带 `connectionToken`，仅供诊断展示。
 - [`use-relay-reasoning-probe.ts`](../webui/src/hooks/use-relay-reasoning-probe.ts) 另有流式阶段、部分结果、历史缓存和有效期，不纳入此次提取。
 
-后续联动检查 Provider 编辑器与网页搜索弹窗的关闭、切换目标、取消和重新发起，以及旧请求的成功、失败和 finally 均不能覆盖新请求。这里只安排生命周期复用，不改变检测发起条件或新增自动检测。
+已按引用核对 Provider 编辑器 resetForm、草稿变化及单模型按钮，网页搜索弹窗关闭、账号选择、目录修订失效和取消入口；两个 API 仍透传相同 signal，不改变请求、结果结构或主动检测次数，不新增自动检测。
 
-**关联复核结论。** 两 Hook 的 owns 同时检查控制器身份、当前 enabled 和作用域，finally 仅释放自己的控制器。取消先撤销所有权，所以重新发起后旧响应不能覆盖新结果；公共能力必须保留这一顺序，而非只在响应后检查 signal。结果校验和 canApply 留在业务 Hook：已配置检测拒绝任何 connectionToken 字段，草稿工具检测要求有效 token，webSearch 不可回填。后端使用同一实例并发名额和断连 signal，但前端取消不等同于后端已释放名额，不能自动重试 409。U01 的凭据规范化决定 token 同值，U05 的持久写入回读不适用于本检测。源码未确认迟到响应串入；没有发起检测或观察浏览器竞态。
+**关联约束与限制。** 已配置检测仍拒绝任何 connectionToken 字段，草稿工具检测仍要求有效 token，webSearch 不可回填。后端共用并发名额与断连 signal，前端取消不承诺后端已释放，不自动重试 409。U01 的凭据规范化与 token 同值、U05 的持久写入回读均保持独立。WebUI 正式 TypeScript/Vite 构建与 oxlint 通过。隔离环境没有可用 Provider/模型目录，未使用真实凭据或发送可能计费的检测；关闭/取消/重新发起及迟到回调竞态只有源码控制流证据，尚无实际浏览器检测观察，不把它列为运行验证完成。
 
 ## U07 Runtime 材料 Reader 的单 Worker 所有权
 
