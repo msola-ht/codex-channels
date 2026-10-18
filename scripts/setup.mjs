@@ -321,7 +321,7 @@ async function runThirdPartyModelSetup({
         {
           value: "provider_default",
           label: "受管 Provider 默认模型与思考等级",
-          hint: "按具体 Provider 独立设置默认模型与思考等级",
+          hint: "账户默认模型独立设置；同族模型思考等级共用",
         },
         {
           value: "model_window",

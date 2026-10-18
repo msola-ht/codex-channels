@@ -17,6 +17,8 @@ import { resolveCodexUserConfigBinary } from "./codex-user-config.mjs";
 
 const maximumBytes = 8 * 1024 * 1024;
 const exportTimeoutMs = 30_000;
+// Retain ownership after a failed termination; no later cache write may race it.
+const activeExports = new Map();
 const messages = {
   cache_missing: "Codex 模型缓存不存在，请先通过 Codex 获取模型目录",
   invalid_catalog: "Codex 模型缓存内容无效或不受支持",
@@ -332,7 +334,21 @@ function revisionText(value) { return typeof value === "string" && /^[a-f0-9]{64
 function record(value) { return value !== null && typeof value === "object" && !Array.isArray(value); }
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 function fail(code, reason) { throw new OfficialModelCatalogError(code, reason); }
-function assertActive(signal) { if (signal?.aborted) fail("export_failed", "cancelled"); }
+function assertActive(signal) {
+  if (signal?.aborted) fail("export_failed", "cancelled");
+  if (activeExports.size) fail("export_failed", "termination-unconfirmed");
+}
+
+export async function closeOpenAiModelExports() {
+  const results = await Promise.allSettled([...activeExports.keys()].map(child => terminateChildProcess(child)));
+  if (activeExports.size || results.some(result => result.status === "rejected")) {
+    fail("export_failed", "termination-unconfirmed");
+  }
+}
+
+export async function waitForOpenAiModelExportsExit() {
+  await Promise.all([...activeExports.values()]);
+}
 function hasControlCharacters(value) { return [...value].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127); }
 function optionalMetadataText(value) { return typeof value === "string" && value.length > 0 && value.length <= 256 && !hasControlCharacters(value); }
 
@@ -355,9 +371,13 @@ async function readConfiguredCatalog(environment, signal) {
   if (process.platform !== "win32") registerChildProcessGroup(child);
   let failure;
   let stopping;
+  let stopped;
+  const stopFinished = new Promise(resolve => { stopped = resolve; });
   const stop = (reason) => {
     failure ??= reason;
-    stopping ??= terminateChildProcess(child).catch(() => { failure = "termination-unconfirmed"; });
+    stopping ??= terminateChildProcess(child)
+      .catch(() => { failure = "termination-unconfirmed"; })
+      .finally(() => stopped(null));
   };
   let bytes = 0;
   const chunks = [];
@@ -369,14 +389,20 @@ async function readConfiguredCatalog(environment, signal) {
   child.stdout.on("data", chunk => collect(chunk, true));
   child.stderr.on("data", chunk => collect(chunk, false));
   child.once("error", () => { failure ??= "launch"; });
-  const closed = new Promise(resolve => child.once("close", (code, exitSignal) => resolve({ code, exitSignal })));
+  const closed = new Promise(resolve => child.once("close", (code, exitSignal) => {
+    activeExports.delete(child);
+    resolve({ code, exitSignal });
+  }));
+  activeExports.set(child, closed);
   const timer = setTimeout(() => stop("timeout"), exportTimeoutMs);
   const abort = () => stop("cancelled");
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
   try {
-    const { code, exitSignal } = await closed;
+    const result = await Promise.race([closed, stopFinished]);
     await stopping;
+    if (result === null) fail("export_failed", activeExports.has(child) ? "termination-unconfirmed" : failure);
+    const { code, exitSignal } = result;
     if (failure || code !== 0 || exitSignal) fail("export_failed", failure ?? "exit");
     try {
       const content = Buffer.concat(chunks);
@@ -390,5 +416,6 @@ async function readConfiguredCatalog(environment, signal) {
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
+    chunks.length = 0;
   }
 }

@@ -194,7 +194,7 @@ export function createWebuiServer({
     ]);
     if (results.some(result => result.status === "rejected")) throw new Error("WebUI 后台资源退出未确认");
   }, waitForNotificationsExit: async () => {
-    await Promise.all([metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management)]);
+    await Promise.all([metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management, { waitForExit: true })]);
   } };
 }
 

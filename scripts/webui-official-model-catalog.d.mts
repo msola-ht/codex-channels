@@ -43,6 +43,8 @@ export type OpenAiModelRefreshResult = OpenAiModelCacheWriteResult & {
   differences: OpenAiModelDifference[];
 };
 export function loadOpenAiModelCatalog(environment?: NodeJS.ProcessEnv): Promise<OpenAiModelCatalog>;
+export function closeOpenAiModelExports(): Promise<void>;
+export function waitForOpenAiModelExportsExit(): Promise<void>;
 export interface OpenAiModelPrompts {
   revision: string;
   model: string;

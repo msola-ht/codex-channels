@@ -6,6 +6,8 @@ import {
   applyOpenAiModelContext,
   previewOpenAiModelRefresh,
   applyOpenAiModelRefresh,
+  closeOpenAiModelExports,
+  waitForOpenAiModelExportsExit,
 } from "./webui-official-model-catalog.mjs";
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
 import { assertManagementAuditWritable } from "./webui-management-operations.mjs";
@@ -120,11 +122,13 @@ export async function routeOfficialModelManagement({ environment, maximumBodyByt
   return true;
 }
 
-export async function closeOfficialModelOperations(state) {
+export async function closeOfficialModelOperations(state, { waitForExit = false } = {}) {
   state.officialModelOperationsClosed = true;
   const pending = [...(state.officialModelOperations ?? [])];
   for (const entry of pending) entry.controller.abort();
   await Promise.allSettled(pending.map(entry => entry.promise));
+  if (waitForExit) await waitForOpenAiModelExportsExit();
+  else await closeOpenAiModelExports();
 }
 
 function catalogApiError(error, phase, signal) {
