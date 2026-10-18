@@ -14,7 +14,7 @@
 | U04 | 收敛 Storage 内两个同步 SQLite Store 的打开流程 | 低 | 关联复核完成，保留窄范围；未实施 |
 | U05 | 统一 WebUI 写入结果未知与权威回读门禁 | 中 | 已修复；浏览器保存及 503 回读门禁已观察 |
 | U06 | 统一两个模型能力检测 Hook 的请求归属与取消机制 | 中 | 已实施；调用链及构建检查完成，检测竞态未实测 |
-| U07 | 统一两个 Runtime 材料 Reader 的单 Worker 所有权机制 | 中 | 关联复核完成，明确所有权；未实施 |
+| U07 | 统一两个 Runtime 材料 Reader 的单 Worker 所有权机制 | 中 | 已修复；Linux 真实 Worker 读取、恢复与退出已观察 |
 | U08 | 统一配置管理与 CLI 总览的有效默认值投影 | 中 | 已修复；默认展示、原文写回与修订拒绝已观察 |
 | U09 | 统一设置输入校验失败的领域错误适配 | 中 | 已修复；隔离 HTTP/CLI 链路已观察 |
 | U10 | 移除渠道输入聚合的等价转发层 | 低 | 关联复核完成，保留局部简化；未实施 |
@@ -142,11 +142,11 @@ Schema 版本、只读预检导出及安装预检消费保持不变。已有库�
 
 证据入口：[`provider-settings-snapshot-reader.mjs`](../runtime/provider-settings-snapshot-reader.mjs) 的 `ProviderSettingsSnapshotReader`，以及 [`model-relay-material-reader.mjs`](../runtime/model-relay-material-reader.mjs) 的 `ModelRelayMaterialReader`。
 
-二者几乎逐段重复惰性创建一个 Worker、共享正在进行的读取、等待 ready、切换初始化与读取时限、清理消息监听，以及带超时的 close。超时、Worker error/exit 和关闭取消通过 failure 分支触发终止流程；Worker 正常返回 ok:false 的业务/校验否定结果只结束当前读取并 reject，保留可复用的 Worker。关闭都发送协作关闭消息；非 Windows 在 100 毫秒后可终止自己的线程，Windows 必须等待内层 ACL helper 真实退出。2 秒关闭等待到期不释放旧 Worker 所有权，也不能允许替代 Worker 绕过未完成清理。
+**当前实现。** 二者共用 [single-worker-reader.mjs](../runtime/single-worker-reader.mjs)，集中惰性 Worker、在途读取合并、ready、初始化/读取时限、监听清理与 close。通信失败/超时/关闭取消进入终止流程；ok:false 仅拒绝本次读取，保留 Worker。关闭消息发送失败也继续持有退出 Promise；非 Windows 100 毫秒后可终止自有线程，Windows 继续等待 ACL helper 退出。2 秒关闭等待到期不释放物理所有权，重复 close 可继续等待。
 
-两份实现分别被 [`provider-settings-watcher.ts`](../src/bootstrap/provider-settings-watcher.ts)、[`model-relay-service.mjs`](../runtime/model-relay-service.mjs) 和 [`model-relay-metrics-authorization.mjs`](../runtime/model-relay-metrics-authorization.mjs) 消费。以后修复超时后监听清理、关闭与读取竞争或旧线程退出归属时，需要同步修改同一套机制；未确认这些路径已经发生运行故障。
+调用方 [`provider-settings-watcher.ts`](../src/bootstrap/provider-settings-watcher.ts)、[`model-relay-service.mjs`](../runtime/model-relay-service.mjs)、[`model-relay-metrics-authorization.mjs`](../runtime/model-relay-metrics-authorization.mjs) 保持原接口与恢复策略。
 
-建议仅为这两个 Reader 提取单 Worker 读取与关闭的窄宿主能力，两个公开 Reader 继续拥有数据合同与错误映射。Worker 内部的配置校验、材料读取、指纹计算和业务结果不合并，也不扩大可跨线程返回的数据范围。
+两个公开 Reader 继续拥有 workerData、读取预算和安全错误工厂；Worker 内的配置校验、材料读取、指纹和业务结果不改，不扩大跨线程数据。
 
 必须保留的差异：
 
@@ -157,11 +157,13 @@ Schema 版本、只读预检导出及安装预检消费保持不变。已有库�
 - 通道/超时失败与业务否定结果的处理分流必须保留；不能把配置校验失败统一改成终止并重建 Worker，否则会改变后续恢复、初始化开销和 Windows ACL helper 生命周期。
 - 指标授权先等待早于样本发起的旧读取，再取得新快照；不能用通用缓存替代新鲜度要求。
 
-后续检查需覆盖设置观察器停止、Relay 整体关闭和指标授权关闭，包括构造中关闭、读取超时、关闭等待超时后再次等待，以及物理退出之前禁止替代实例。现有两个 Worker 都先关闭 ACL helper，预算失败则继续等待真实退出，再关闭 parentPort；不能用外层 Promise 超时替代该资源归属合同。
+已核对设置观察器停止、Relay 整体清理和指标授权 close 的所有权及异常消费。两个 Worker 仍先关闭 ACL helper，预算失败后等待真实退出再关闭 parentPort；宿主不以 Promise 超时替代物理退出。
 
 不将数据库写者、投递只读 Worker 或进程监管器一起迁入该能力。它们的已发送写入、队列容量、确认与终止语义不同，U07 只针对上述两个单读取宿主的已确认重复。
 
-**关联复核结论。** 设置 watcher 的读取失败保留原配置并报告阶段，Relay 刷新失败走 unavailable，指标授权失败返回 invalid_sample；同一读取宿主失败不能强制给三个消费者同一恢复策略。指标样本到达后先等待旧 reading，再启动/共享新的 reading，这个外层因果约束不能由普通 read 合并代替。两个 Worker 在 ACL 关闭等待失败后仍等待真实 helper 退出，再关闭 parentPort；外层 close 的 2 秒拒绝不等于线程已退出。共享能力需同时保留终止中的禁止替换和再次等待，而非 Promise 超时后清空 worker 字段。U16/U17 的 socket/子进程机制不能直接代替 Worker 协议。源码重复成立，未观察物理退出或 Windows ACL 行为。
+**关联约束。** watcher 读取失败保留原配置并报告阶段，Relay 走 unavailable，指标授权返回 invalid_sample。指标样本到达后先等待旧 reading，再取得新 reading 的因果约束不变；U16/U17 的 Socket/子进程机制不混入此宿主。
+
+**观察与限制。** Linux 使用真实设置 Worker：并发 read 返回同一 Promise，readFresh 返回不同快照对象，async_hooks 观察仅创建一个 Worker；关闭后读取拒绝。真实 Relay Worker 对无渠道配置返回 invalid，修正隔离配置后读取成功，Worker 创建数不增加，证明业务否定未重建；metrics 用途返回安全空身份快照。初始化期间 close 导致 pending 以 initialization/worker-unavailable 拒绝，重复关闭完成；全部关闭后观察 WORKER 资源数为 0。TypeScript、模块边界及相关 ESLint 通过。未人为制造 Windows ACL 卡住或 2 秒关闭超时，Windows/macOS、超时后二次等待仍为源码关联证据；未启动实际 Relay Listener 或共享 App Server。
 
 ## U08 配置管理与 CLI 总览的有效默认值投影
 
