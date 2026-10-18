@@ -45,8 +45,7 @@ import {
 } from "./config-management.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { createSharedCodexUserConfigClient, readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
-import { invalidateServiceStatusSummary, loadServiceStatusSummary } from "./webui-service-status.mjs";
-import { serviceSnapshotHealthy } from "./service-selection.mjs";
+import { invalidateServiceStatusSummary, loadServiceStatusSummary, serviceSummaryHealthy } from "./webui-service-status.mjs";
 import {
   ApiError,
   authorized,
@@ -959,7 +958,7 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
   const services = {
     available: platform !== null,
     platform,
-    healthy: platform === null ? null : serviceSnapshotHealthy(entries, "all", environment),
+    healthy: serviceSummaryHealthy(entries, platform, environment),
     entries,
   };
   sendJson(response, 200, {

@@ -6,12 +6,12 @@ import { invalidSetting } from "./config-management-error.mjs";
 import { RequestMetricsQueryService } from "../dist/observability/index.js";
 import { metricsRange } from "./metrics-database-access.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
-import { serviceSnapshotHealthy } from "./service-selection.mjs";
 import { readManagedServiceErrorAsync } from "./service-status.mjs";
 import { sendManagementJson } from "./webui-http.mjs";
 import {
   loadServiceStatusSummary,
   serviceVersion,
+  serviceSummaryHealthy,
 } from "./webui-service-status.mjs";
 
 const appServerUserAgentCacheTtlMs = 5_000;
@@ -71,7 +71,7 @@ async function handleServices(
     observedAt: new Date().toISOString(),
     available: platform !== null,
     platform,
-    healthy: platform === null ? null : serviceSnapshotHealthy(entries, "all", environment),
+    healthy: serviceSummaryHealthy(entries, platform, environment),
     entries,
   });
 }

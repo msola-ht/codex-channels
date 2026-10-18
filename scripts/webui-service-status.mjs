@@ -1,7 +1,14 @@
 import { inspectManagedServiceStatusAsync } from "./service-status.mjs"
 import { serviceDefinitions } from "../runtime/service-targets.mjs"
+import { serviceStatusRequiredDefinitions } from "./service-selection.mjs"
 
 const SERVICE_STATUS_CACHE_TTL_MS = 2_000
+
+export function serviceSummaryHealthy(entries, platform, environment) {
+  if (platform === null) return null
+  const required = serviceStatusRequiredDefinitions(platform, "all", environment)
+  return required.every(definition => entries.some(entry => entry.target === definition.target && entry.running))
+}
 
 export function serviceVersion(target, { gatewayVersion, codexCliVersion }) {
   return target === "app-server" ? codexCliVersion : gatewayVersion
