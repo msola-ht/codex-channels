@@ -78,6 +78,7 @@ import {
   supportedCodexCliVersion,
   toAutoApprovalReviewEvent,
   toConversationInputEvent,
+  toReasoningGuardInput,
   toThreadQueueChangedEvent,
   toThreadStateEvent,
   type CodexTransport,
@@ -95,6 +96,7 @@ import {
   CollaborationModeSelectionService,
   ConversationCommandService,
   ConversationEventCoordinator,
+  ReasoningRepeatGuard,
   ConversationService,
   ModelSelectionService,
   ProviderAccountService,
@@ -110,6 +112,7 @@ import {
   ConversationCore,
   UserFacingError,
   isCriticalOutputEvent,
+  usesOpenAiAccount,
   type ConversationTarget,
   type OutputEvent,
   type TurnErrorCode,
@@ -179,6 +182,7 @@ export abstract class GatewayComponentGraph {
   private readonly metricsReady: Promise<void>;
   private readonly autoApprovalReview: AutoApprovalReviewTracker;
   private readonly autoApprovalReviewNotifications: AutoApprovalReviewNotifications;
+  private readonly reasoningRepeatGuard: ReasoningRepeatGuard;
   private readonly primaryProvider: string;
   private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
@@ -410,6 +414,7 @@ export abstract class GatewayComponentGraph {
       config.scheduledTasksEnabled ? [scheduledTaskToolSpec] : [],
       () => {
         this.core?.pruneUnboundTurns();
+        this.reasoningRepeatGuard?.prune();
         this.asyncQuestions?.cancelStale();
         this.approval?.cancelStale();
         void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
@@ -469,6 +474,23 @@ export abstract class GatewayComponentGraph {
         logger.error({ err: error, ...metricsWorkerFailureMetadata(error) }, "轮次耗时覆盖无法持久降级，Gateway 正在停止");
         void this.requestStop().catch(() => logger.error("指标故障后的 Gateway 清理失败"));
       });
+    this.reasoningRepeatGuard = new ReasoningRepeatGuard({
+      route: (threadId) => {
+        if (this.stopping) return undefined;
+        const provider = this.codex.knownProvider(threadId);
+        const target = this.router.targetForThread(threadId);
+        const official = usesOpenAiAccount(provider) && this.customPrimaryProviderId === undefined;
+        return provider && !official && target
+          ? { target, provider } : undefined;
+      },
+      active: (threadId, turnId) => this.core.activeTurnForThread(threadId)?.turnId === turnId,
+      interrupt: async (threadId, turnId, beforeSubmit) => {
+        await this.trackQueueLifecycleTask(() => this.codex.interruptTurn(threadId, turnId, beforeSubmit));
+      },
+      notify: (route, threadId, message) => this.output.publish({ type: "warning", target: route.target,
+        threadId, message, ...(this.router.isBackgroundThread(threadId) ? { background: true } : {}) }, true),
+    });
+    registerConstructionCleanup("Reasoning Repeat Guard", () => this.reasoningRepeatGuard.close());
     this.autoApprovalReview = new AutoApprovalReviewTracker(metricsStore,
       (threadId) => this.codex.knownProvider(threadId),
       (error, threadId) => logger.warn({ module: "metrics", event: "auto_review.write_failed", err: error, threadId, ...metricsWorkerFailureMetadata(error) }, "自动审查统计记录失败，统计覆盖不完整"),
@@ -1649,6 +1671,24 @@ export abstract class GatewayComponentGraph {
         // Revoke live tools before bounded asynchronous notification consumers.
         const toolEvent = toConversationInputEvent(notification);
         if (toolEvent) this.scheduledTasks?.toolHandler.handleInput(toolEvent);
+        // Guard input precedes the lossy presentation queue; raw text never enters that queue via Core.
+        if (toolEvent && "threadId" in toolEvent && toolEvent.threadId
+          && provider === this.codex.knownProvider(toolEvent.threadId)) {
+          if (toolEvent.type === "turn.completed") {
+            this.reasoningRepeatGuard.completed(toolEvent.threadId, toolEvent.turnId, toolEvent.status);
+          } else if (toolEvent.type === "turn.started") {
+            this.reasoningRepeatGuard.started(toolEvent.threadId, toolEvent.turnId);
+          } else if (toolEvent.type === "turn.error") {
+            this.reasoningRepeatGuard.requestFailed(toolEvent.threadId, toolEvent.turnId);
+          } else if (toolEvent.type === "thread.closed" || toolEvent.type === "thread.archived"
+            || toolEvent.type === "thread.deleted" || toolEvent.type === "thread.reverted") {
+            this.reasoningRepeatGuard.reset(toolEvent.threadId);
+          }
+        }
+        const reasoningInput = toReasoningGuardInput(notification);
+        if (reasoningInput && provider === this.codex.knownProvider(reasoningInput.threadId)) {
+          this.reasoningRepeatGuard.observe(reasoningInput);
+        }
         if (notification.method === "serverRequest/resolved" && typeof notification.params === "object"
           && notification.params !== null && !Array.isArray(notification.params)) {
           const params = notification.params as { requestId?: unknown; threadId?: unknown };
@@ -1661,6 +1701,8 @@ export abstract class GatewayComponentGraph {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        // A reconnect has no delta sequence numbers: never join text across connections.
+        this.reasoningRepeatGuard.resetProvider(provider);
         this.providerNotificationGenerations.set(provider, (this.providerNotificationGenerations.get(provider) ?? 0) + 1);
         this.scheduledTasks?.toolHandler.cancelThreads((threadId) => this.codex.knownProvider(threadId) === provider);
         this.conversationIdleReleaser?.cancelPending(new Set(this.router.allBindings()
@@ -1897,6 +1939,7 @@ export abstract class GatewayComponentGraph {
     for (const [component, close] of [
       ["Startup Network Recovery", () => this.startupNetworkRecovery?.stop()],
       ["Scheduled Task Scheduler", () => this.scheduledTasks?.stop()],
+      ["Reasoning Repeat Guard", () => this.reasoningRepeatGuard.close()],
       ["Queue Lifecycle", () => this.closeQueueLifecycleTasks()],
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],

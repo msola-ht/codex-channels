@@ -2,8 +2,10 @@
 
 本目录封装 Codex App Server Transport、JSON-RPC 会话和类型化 API，是 Gateway 访问 App Server 的唯一底层入口。
 
-Thread/Turn 启动的本地 `beforeSubmit` 守卫透过 Provider 准备保留到 RPC 发送前同步执行，不编码为
+Thread/Turn 启动及 Turn 中断的本地 `beforeSubmit` 守卫透过 Provider 准备保留到 RPC 发送前同步执行，不编码为
 协议字段；守卫拒绝时不发请求，已经发出的写请求仍等待实际响应，不以取消丢弃写入结果。
+
+Provider 路由层为所有转发通知附上实际连接的 Provider 路由键，覆盖上游同名字段；固定自定义主 Provider 的路由键仍为 `openai`，实际账户身份由组合根区分。
 
 Luna Reserve 设置写入也在 Provider 准备后执行最终提交守卫，并与当前 Thread 审批方式更新复用
 RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 失效、重连或关闭会清理等待。
@@ -107,6 +109,7 @@ RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 
   校验 Turn、Item、Diff、Plan、Goal 与 Token 字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
   只识别 `misalignmentPolicyViolation`、Luna Reserve 触发所需的 `usageLimitExceeded` 与登录或刷新令牌失效的 `unauthorized` 结构化错误分类，Turn 错误在此统一脱敏并限长，
   残缺或无关通知不进入业务模块。
+- `notification-reasoning-guard.ts`：将锁定协议的 `item/reasoning/textDelta` 与 `summaryTextDelta` 投影为 Application 重复保护的瞬时输入，保留 Thread／Turn／Item／段索引及原始思考／摘要来源隔离；Item 起止只标记边界，不把完成快照重放为增量。内容不转为渠道事件或指标。
 - `notification-account-events.ts`：映射账户、额度、MCP OAuth 完成、MCP 启动状态与 warning 事件，统一脱敏并限长，残缺字段省略而不推断。
 - `notification-thread-state.ts`：映射 Routing 侧线程设置、线程名、生命周期与 Queue 变更事件；Queue 变化只让本地选择快照失效，不触发读取。
 - `notification-review.ts`：把受控 `item/autoApprovalReview/started|completed` 裁剪为 Thread、Turn、review ID、阶段、状态和 agent 来源的批准标志，供 Bootstrap 继续采集开始与完成指标。仅 agent 完成事件附加 `AutoApprovalReviewDetails`：七种官方动作类别、最多 1,024 个字符串条目的文件数量、白名单网络协议与 u16 端口；按动作提取操作与工作目录、审查理由，经共享凭据脱敏、控制字符清理及 320 字符限长后传递，execve 参数按原始边界脱敏后才格式化；保留文本标点，由 Surface 处理富文本呈现。合法起止时间投影为耗时，不采集风险与授权等级。未知或畸形摘要字段省略，超大文件列表只保留动作类别，不传递 stdin 正文或完整网络 target URL，非法来源和终态明确排除。

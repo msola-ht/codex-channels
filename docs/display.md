@@ -647,6 +647,8 @@ Turn 推理期间，Gateway 消费官方 `item/reasoning/summaryTextDelta`、`su
 回复窗口预算。`display.reasoning = false` 时关闭支持渠道的思考状态；摘要与原始思维链内容不进入
 渠道；首个回复增量、Turn 错误或完成时结束本段。
 
+第三方通用的[重复思考保护](provider-integration-guide.md#重复思考保护)独立于思考显示开关：三渠道通过既有 warning 展示检测原因、中断请求失败或确认后的停止结果，不展示命中的思考原文。检测中断不等于终态，只有收到官方 `interrupted` 才显示已停止。
+
 Turn 的 `misalignmentPolicyViolation` 结构化错误只在边界和 Core 中保留窄分类，完成卡片统一显示
 “请求因安全策略不一致而终止，请调整请求内容或目标后重试。”；上游自由文本和额外细节不直接作为
 该分类文案，Turn 指标使用独立的 `misalignment_policy_violation` 分类并保留原协议代码，

@@ -71,7 +71,7 @@ export interface TurnExecutionPort {
     input: TurnInput[],
     clientUserMessageId: string,
   ): Promise<TurnStarted>;
-  interruptTurn(threadId: string, turnId: string): Promise<void>;
+  interruptTurn(threadId: string, turnId: string, beforeSubmit?: () => void): Promise<void>;
   setThreadName(threadId: string, name: string): Promise<void>;
   setThreadPinned(threadId: string, pinned: boolean): Promise<boolean>;
   compactThread(threadId: string): Promise<void>;
