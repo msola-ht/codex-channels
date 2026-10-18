@@ -48,6 +48,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
 - `sqlite-request-metrics-row-codec.ts`：集中保存指标明细、Turn、Thread、聚合与压缩摘要的 SQLite
   Row 类型和纯领域映射，包括请求结果与额度窗口解析；不重解释历史完成状态。
 - `sqlite-auto-approval-review-metrics.ts`：在同一指标连接保存官方自动审查 ID、通过/拒绝/超时/中止/进行中状态与轮次连续观测标记；按精确 `subagent_turns` 递归去重汇总本轮任务和当前会话累计，各分类、总次数与覆盖独立返回。无法区分的历史终态明确保留 unknown，不推成拒绝。不保存审查内容；重启、断线、写入失败和保留裁剪降级覆盖，不能从官方历史补齐缺失审查。Gateway 是唯一写入方，只读访问、清理、Provider prune 和 reset 沿用指标库边界。
+- `sqlite-review-run-scope.ts`：共享任务精确根、会话四来源根及按父 Thread/Turn 递归的 UNION 去重片段，供审查摘要和指标写入失败归属使用；不持有数据库，不合并覆盖率判定或会话根 Thread 通配规则。
 - `sqlite-quota-queries.ts`：封装周额度估算、最新额度与历史窗口归约；通过 Store 的同一连接和受跟踪迭代器读取，不创建连接或事务，不承担 Store 关闭及 Schema 生命周期。
 - `sqlite-request-metrics-query-base.ts`：请求、Thread 与子代理查询共用的只读 Reader 端口、SQL 聚合片段及分页、范围、ID 校验；不依赖查询组件或组合根，不持有连接、事务或写入口。ID 校验同时供 Store 与自动审查写入使用。
   中断统计共用来源感知判定：未生成完成时，Relay 使用 `error_code`、原生代理使用 `error_type` 的 `client_disconnected`；缺失原因不视为中断。已完成生成的交付异常不改写生成结果，查询不回写历史记录。

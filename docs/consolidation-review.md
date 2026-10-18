@@ -20,7 +20,7 @@
 | U10 | 移除渠道输入聚合的等价转发层 | 低 | 关联复核完成，保留局部简化；未实施 |
 | U11 | 统一渠道关闭时继续清理并汇总失败的约定 | 中 | 已修复；部分构造关闭与注入失败已观察 |
 | U12 | 收敛 HTTP chunk 背压写入原语 | 低 | 关联复核完成，排除终态状态机；未实施 |
-| U13 | 统一审查统计与写入失败归属的运行树选择 | 中 | 关联复核完成，范围一致；未实施 |
+| U13 | 统一审查统计与写入失败归属的运行树选择 | 中 | 已修复；隔离 SQLite 汇总与失败归属已观察 |
 | U14 | 统一 Gateway 与 Codex 基础版本兼容谓词 | 中 | 已修复；门禁、更新器导出与打包清单已检查 |
 | U15 | 收敛源码取得后的安装构建阶段 | 中 | 关联复核完成，排除生命周期合并；未实施 |
 | U16 | 收敛一次性私有 IPC 交换的底层收尾 | 低 | 关联复核完成，降级为条件性提取；未实施 |
@@ -221,13 +221,11 @@ Telegram Bot、飞书 Adapter 和微信 Conversation Adapter 都通过 Coalescer
 
 证据入口：[`sqlite-request-metrics-store.ts`](../src/observability/sqlite-request-metrics-store.ts) 的 `metricsWriteScopes`（约 233 行），以及 [`sqlite-auto-approval-review-metrics.ts`](../src/observability/sqlite-auto-approval-review-metrics.ts) 的 task/session summary 与私有 `summary`（约 59–82 行）。[`request-metrics-writer.ts`](../src/observability/request-metrics-writer.ts) 的 `waitForCurrentWritesInScope` 消费前者；Bootstrap 完成卡先等待该写入范围，再读取后者的审查统计。
 
-两处分别维护审查会话的四来源根 Turn：审查轮次、官方执行轮次、有 Turn 的模型请求、子代理关系的父轮次；随后按精确 parent_thread_id 与 parent_turn_id 递归，用 UNION 去重。Task 模式也重复精确根 Thread/Turn 的后代规则。将来只调整一边，会使汇总记录与判断写入缺口的范围不同，进而影响 usage.coverage。目前源码范围一致，没有确认统计错误。
+**当前实现。** 两处共用 [sqlite-review-run-scope.ts](../src/observability/sqlite-review-run-scope.ts)：任务以精确 Thread/Turn 为根；会话保留审查轮次、官方执行轮次、有 Turn 的模型请求、子代理父轮次四来源，再按 parent_thread_id + parent_turn_id 递归。SQL 片段及参数顺序统一，仍使用 UNION 去重，不持有连接或物化运行树。
 
-建议仅在 Observability 内共享纯 seed/CTE 片段，不建立通用 SQL 构造器或物化运行树。保留 sessionReview 根 Thread 通配值，以覆盖没有留下数据库行的失败；普通 session 的线程树、pendingParentTurns、历史完整性、事件和用量覆盖率各自独立。写入失败只计算初始 watermark 内的任务，取消等待不能取消 SQL 写入。
+**关联合同。** Writer 捕获初始 enqueuedCount→等待写入→数据库解析范围→检查该水位内失败；Bootstrap 只在 persisted 为 false 时降级 usage.coverage。sessionReview 写入失败匹配仍保留根 Thread 通配，以覆盖没有数据库记录的失败；普通 session 线程树不改。摘要的 pendingParentTurns、历史完整性、事件覆盖率与 Token 缺失判定仍独立；普通请求仍排除审查用途，取消等待不取消实际写入。没有改变表、索引或持久格式。
 
-实施需同时核对写入水位、失败归属、任务/会话审查摘要和完成卡降级路径，不能把普通请求统计排除审查用途的规则改掉。
-
-**关联复核结论。** Writer 先捕获 enqueuedCount，等待写入，再通过数据库解析范围并检查该水位内失败；Bootstrap 只在 persisted 为 false 时降低 summary.usage.coverage。摘要自身的 coverage 另由已观察轮次、连续性、完成标志、待定父轮次和历史完整性计算，不能用写入水位成功替代。两个查询需要共享的是根和后代选择，不是输出结果：sessionReview 的写入失败匹配保留根 Thread 通配，摘要仍逐 Turn 聚合。共享 CTE 应保证参数顺序及 UNION 去重，不要顺手改成 UNION ALL 导致菱形/循环关系重复累计。关联范围当前一致，属于预防漂移，没有实测指标遗漏。
+**观察与限制。** 隔离 SQLite 通过真实 Store 写入根轮次、子轮次关系及一项 approved 审查；task 范围返回两轮，task/session 总数均为 1，无关父 Turn 总数为 0，session 写入范围保留根 Thread 通配。Hack 加入根↔子循环后仍返回两轮且只统计一次。真实 BufferedModelRequestMetricsWriter 将缺字段样本交给 Store 拒绝，尚无记录的 empty 根会话范围返回 persisted=false，无关范围返回 true。连接经 Writer 正常关闭。TypeScript、模块边界、相关 ESLint 和 Gateway 构建通过。未生成真实平台完成卡，IPC 及平台渲染未实测，跨边界降级路径为源码核对。
 
 ## U14 Gateway 与 Codex 版本兼容谓词
 
