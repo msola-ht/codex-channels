@@ -2,6 +2,17 @@ import { readFileSync } from "node:fs";
 import { completeModelMessages } from "./model-template-prompts.mjs";
 
 const sourceModelIdentity = /^You are Codex, an agent based on [^\r\n]+?\.(?=\s|$)/u;
+const autoReviewReplyLanguage = "请使用中文回复用户，包括自动审批结果、拒绝原因和后续操作说明；保留命令、路径及技术标识符原文。";
+
+function localizeAutoReviewMessages(messages) {
+  for (const [group, field] of [["approvals", "on_request_auto_review"], ["auto_review", "rejection_instructions"]]) {
+    const prompt = messages?.[group]?.[field];
+    if (typeof prompt === "string" && prompt.trim() && !prompt.includes(autoReviewReplyLanguage)) {
+      messages[group][field] = `${prompt}\n\n${autoReviewReplyLanguage}`;
+    }
+  }
+  return messages;
+}
 
 function neutralizeSourceIdentity(model) {
   if (typeof model.model_messages?.instructions_template === "string") {
@@ -27,6 +38,7 @@ export function readCustomBaseModelCatalog() {
     throw new Error("固定底座的身份声明已变化，请先审核并更新自定义模板投影");
   }
   neutralizeSourceIdentity(catalog.models[0]);
+  localizeAutoReviewMessages(catalog.models[0].model_messages);
   return catalog;
 }
 
@@ -35,7 +47,7 @@ export function withCustomBaseTemplate(definition) {
   const base = readCustomBaseModelCatalog().models[0];
   return { ...definition,
     template: definition.template ?? { source: "official", model: base.slug },
-    modelMessages: completeModelMessages(definition.modelMessages ?? {}, base.model_messages) };
+    modelMessages: localizeAutoReviewMessages(completeModelMessages(definition.modelMessages ?? {}, base.model_messages)) };
 }
 
 /** Snapshot messages at explicit creation/update time; never inject them while reading user files. */
@@ -44,7 +56,7 @@ export function completeCatalogPrompts(source) {
   const result = structuredClone(source);
   const baseMessages = readCustomBaseModelCatalog().models[0].model_messages;
   for (const model of result.models) {
-    model.model_messages = completeModelMessages(model.model_messages ?? {}, baseMessages);
+    model.model_messages = localizeAutoReviewMessages(completeModelMessages(model.model_messages ?? {}, baseMessages));
     neutralizeSourceIdentity(model);
   }
   return result;
@@ -53,7 +65,7 @@ export function completeCatalogPrompts(source) {
 export function completeDefinitionPrompts(definitions) {
   const baseMessages = readCustomBaseModelCatalog().models[0].model_messages;
   return definitions.map(definition => {
-    const modelMessages = completeModelMessages(definition.modelMessages ?? {}, baseMessages);
+    const modelMessages = localizeAutoReviewMessages(completeModelMessages(definition.modelMessages ?? {}, baseMessages));
     return { ...definition, modelMessages,
       ...(definition.template === undefined ? {} : {template: {source: definition.template.source, model: definition.template.model}}) };
   });

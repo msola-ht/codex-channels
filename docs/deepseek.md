@@ -221,6 +221,10 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 
+## 重复思考保护
+
+DS 使用第三方通用的[重复思考保护](provider-integration-guide.md#重复思考保护)：同一段 200–4096 字的片段连续重复三次时，请求停止当前轮次。具体检测条件、内存限制和中断范围见该说明。
+
 ## 推理历史回传
 
 DeepSeek 官方账户使用原生 Responses API。Gateway 代理透传请求和响应，由 Codex 保存并在工具续跑及后续用户轮次的 `input` 中带回 `reasoning.content`，无需转换成 Chat 字段。

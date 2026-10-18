@@ -223,3 +223,4 @@ export {
 export { OpenAiResetCreditService, ResetCreditError, type OpenAiResetCredit, type OpenAiResetCreditSnapshot, type OpenAiResetCreditPort, type ResetCreditOutcome } from "./openai-reset-credit-service.js";
 
 export { ConversationResetCreditService, resetCreditCommandUsage, type ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
+export { ReasoningRepeatGuard, type ReasoningGuardInput } from "./reasoning-repeat-guard.js";

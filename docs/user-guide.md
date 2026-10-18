@@ -375,7 +375,10 @@ codexc work list [--json]
 codexc setup
 codexc provider list [--json]
 codexc provider switch <Provider ID> [模型] [--yes]
+codexc provider clp refresh-templates
 ```
+
+`codexc provider clp refresh-templates` 独立联网刷新 CLP 的本地模板来源，备份后保存，不修改已配置模型。CLI／WebUI 的模板更新只读缓存，缺失或损坏时先执行此命令，再重新打开模板更新。来源目录、恢复与应用步骤见 [CLP 使用说明](cline-pass.md)。
 
 `codexc provider switch` 会把主实例切换到目标 Provider，执行前会二次确认，并提示将改写
 Codex 主配置的 `model_provider` / `model`；`switch` 与 `recover` 可用 `--yes` 显式跳过确认（适合脚本化调用）；交互式 Setup 菜单仍会确认。确认期间切换目标或影响范围发生变化时拒绝执行，需重新确认。

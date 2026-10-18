@@ -1148,17 +1148,8 @@ function routeNotification(
   ) {
     return provider === "openai" ? { ...routed, provider } : undefined;
   }
-  if (
-    (
-      routed.method === "mcpServer/oauthLogin/completed"
-      || routed.method === "mcpServer/startupStatus/updated"
-      || routed.method === "warning"
-    )
-    && typeof asRecord(routed.params)?.threadId !== "string"
-  ) {
-    return { ...routed, provider };
-  }
-  return routed;
+  // Source is connection-owned metadata, never an upstream-provided claim.
+  return { ...routed, provider };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

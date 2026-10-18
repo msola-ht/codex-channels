@@ -69,3 +69,4 @@ export {
   WindowsProxyTransport,
   type WindowsProxyTransportOptions,
 } from "./windows-proxy-transport.js";
+export { toReasoningGuardInput } from "./notification-reasoning-guard.js";

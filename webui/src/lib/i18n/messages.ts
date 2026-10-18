@@ -23,7 +23,8 @@ const zh = {
     reasoning: "支持的思考等级（不支持思考时仅选 none）",
   },
   modelTemplate: {
-    title: "更新模板", hint: "选择模板来源与更新内容，核对差异后保存。CLP 会读取远程模板。",
+    title: "更新模板", hint: "选择模板来源与更新内容，核对差异后保存。CLP 读取本地模板来源，需要最新来源时请先运行 codexc provider clp refresh-templates。",
+    sourceUnavailable: "CLP 本地模板来源缺失或无效。请运行 codexc provider clp refresh-templates，再重新读取模板。",
     customHint: "可更新模板提示词与来源，并可主动选择上下文与压缩设置。当前上下文、最大窗口、思考等级、图片、工具支持和采样保留手动值。",
     source: "模板来源与模型", selectSource: "请选择模板", sections: "更新内容", prompts: "提示词", capabilities: "能力参数", settings: "上下文与压缩设置",
     settingsHint: "有效上下文比例、自动压缩阈值和截断策略默认保留本地值；仅主动勾选「上下文与压缩设置」并确认差异后覆盖。当前上下文、默认思考等级、工具支持和采样保持不变。",
@@ -1668,7 +1669,8 @@ const en: Messages = {
     reasoning: "Supported reasoning efforts (select only none when reasoning is unsupported)",
   },
   modelTemplate: {
-    title: "Update template", hint: "Choose a template and the sections to update, then review the differences. CLP loads remote templates.",
+    title: "Update template", hint: "Choose a template and the sections to update, then review the differences. CLP reads a local source snapshot. Run codexc provider clp refresh-templates first when you need the latest source.",
+    sourceUnavailable: "The local CLP template source is missing or invalid. Run codexc provider clp refresh-templates, then reload templates.",
     customHint: "Update template prompts and provenance, with an optional context and compaction settings update. The current context, maximum window, reasoning efforts, image and tool support, and sampling keep their manual values.",
     source: "Template source and model", selectSource: "Choose a template", sections: "Sections to update", prompts: "Prompts", capabilities: "Capabilities", settings: "Context and compaction settings",
     settingsHint: "Effective context percentage, automatic compaction threshold, and truncation policy keep their local values by default. They are replaced only after you select Context and compaction settings and confirm the differences. The current context, default reasoning effort, tool support, and sampling stay unchanged.",

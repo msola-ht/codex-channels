@@ -735,7 +735,8 @@ export class CodexAppServerClient implements
     return this.imageUpload.submit(threadId, protocolInput, submit);
   }
 
-  async interruptTurn(threadId: string, turnId: string): Promise<void> {
+  async interruptTurn(threadId: string, turnId: string, beforeSubmit?: () => void): Promise<void> {
+    beforeSubmit?.();
     this.cancelPendingInput(threadId);
     await this.rpc.request({
       method: "turn/interrupt",

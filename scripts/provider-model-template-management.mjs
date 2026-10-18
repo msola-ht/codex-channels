@@ -12,8 +12,8 @@ import { managedProviderDirectory, managedProviderMarkerPath, writeManagedModelP
 import { readResponsesModelCatalog, validateResponsesModels, responsesProviderCatalogPath, compileResponsesModelCatalog,
   writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath } from "../runtime/model-provider-upstream-metadata.mjs";
-import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
-import { createClinePassCatalog } from "./cline-pass-account-management.mjs";
+import { readClinePassTemplateSourceSnapshot } from "./cline-pass-template-source.mjs";
+import { createClinePassCatalog, projectClinePassModels } from "./cline-pass-account-management.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadResponsesModelTemplates } from "./responses-model-templates.mjs";
 import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
@@ -41,7 +41,7 @@ const fields = {
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const authenticatedRevision = value => createHmac("sha256", revisionSecret).update(JSON.stringify(value)).digest("hex");
 
-/** Fetch sources once; previews and writes consume only this bounded process-local snapshot. */
+/** Load local sources once; previews and writes consume this bounded process-local snapshot. */
 export async function loadProviderModelTemplateOptions(provider, { environment = process.env, signal } = {}) {
   signal?.throwIfAborted();
   const state = await readTargetState(provider, environment);
@@ -190,10 +190,18 @@ async function readTargetState(provider, environment) {
   const members = loadManagedModelProviderDefinitions(environment).filter(entry => entry.storageId === definition.storageId);
   const catalogPath = join(directory, definition.catalogFileName);
   const manifestPath = join(directory, definition.catalogManifestFileName);
+  let clineSource;
+  if (family.storageId === "clp") {
+    try { clineSource = readClinePassTemplateSourceSnapshot(environment); }
+    catch (error) {
+      throw invalid("template-source-unavailable", "template", "CLP 本地模板来源缺失或无效，请运行 codexc provider clp refresh-templates 后重新读取", error);
+    }
+  }
   const snapshots = snapshotProviderFiles([catalogPath, manifestPath, `${catalogPath}.backup`, `${manifestPath}.backup`,
     `${catalogPath}.settings-pending`, join(codexHomePath(environment), "config.toml"),
     ...members.flatMap(entry => [join(codexHomePath(environment), entry.profileFileName), managedProviderMarkerPath(environment, entry)]),
     family.accountsFilePath(environment)], environment);
+  if (clineSource) snapshots.push(clineSource.snapshot);
   let catalog, manifest;
   try { catalog = JSON.parse(snapshotContent(snapshots, catalogPath)); manifest = JSON.parse(snapshotContent(snapshots, manifestPath)); }
   catch { throw invalid("provider-state-unavailable", "provider", "账户目录或来源清单无法安全解析"); }
@@ -209,7 +217,7 @@ async function readTargetState(provider, environment) {
   try { bindings = readModelTemplateBindings(manifest, ids); }
   catch { throw invalid("provider-state-unavailable", "template", "账户模型模板关联无效，请先修复来源清单"); }
   const state = { provider, custom: false, family: family.storageId, scope, definition, catalogPath, manifestPath,
-    catalog, manifest, bindings, snapshots, revision: targetRevision(provider, scope, visible, snapshots) };
+    catalog, manifest, bindings, snapshots, clineSource: clineSource?.catalog, revision: targetRevision(provider, scope, visible, snapshots) };
   if (Object.entries(bindings).some(([model, template]) => !allowedTemplate(state, model, template))) {
     throw invalid("provider-state-unavailable", "template", "账户模型模板关联超出支持的来源或模型范围");
   }
@@ -247,10 +255,13 @@ async function loadSourceTemplates(state, environment, signal) {
         template: { ...template, maxContextWindow: template.maxContextWindow ?? template.contextWindow } }))));
     result = sources.flat();
   } else if (state.family === "clp") {
-    const timeout = globalThis.AbortSignal.timeout(25_000);
-    const downloaded = await downloadClineRelayCatalog(environment, signal ? globalThis.AbortSignal.any([signal, timeout]) : timeout);
-    const templates = await loadResponsesModelTemplates("deepseek");
-    const catalog = createClinePassCatalog(templates, downloaded, state.targets.map(target => target.model));
+    signal?.throwIfAborted();
+    const downloaded = state.clineSource;
+    const enabledModels = projectClinePassModels(downloaded, { requireModels: false }).models
+      .filter(model => state.targets.some(target => target.model === model.id)).map(model => model.id);
+    if (!enabledModels.length) throw invalid("template-unavailable", "template", "本地来源中没有适用于当前目录的 CLP 模型，请刷新来源并检查模型范围");
+    const templates = enabledModels.includes(state.definition.defaultModel) ? await loadResponsesModelTemplates("deepseek") : [];
+    const catalog = createClinePassCatalog(templates, downloaded, enabledModels);
     result = catalog.models.map(template => ({ source: "cline", model: template.slug, displayName: template.display_name,
       template: { ...template, max_context_window: template.max_context_window ?? template.context_window } }));
   } else {
