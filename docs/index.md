@@ -456,6 +456,9 @@ Auto-review 用户层偏好只写入稳定 `approvals_reviewer` 字段，并用 
 [`browser_use.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/browser_use.rs)、
 [`mcp_types.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/mcp_types.rs) 和
 [`types.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/types.rs) 的插件覆盖白名单。
+用户 MCP 的添加、逐项编辑与删除由 [`mcp-setup.mjs`](../scripts/mcp-setup.mjs) 复用同一配置事务，
+仅操作当前用户层 `mcp_servers`；键路径逐段引用，`null` 删除字段或条目，写入后回读确认。
+插件及其他配置来源不进入编辑/删除列表，使用入口与限制见[使用指南](user-guide.md#4-workspaceprovider-与终端)。
 渠道选择 OpenAI 官方模型时不继承当前 Thread 或用户配置中的 Fast，下一 Turn 显式使用标准服务层级；
 Fast 只在用户之后通过 `/fast on` 明确开启时生效。
 模型、思考等级、Fast、计划清单工具、
