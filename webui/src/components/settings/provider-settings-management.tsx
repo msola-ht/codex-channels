@@ -11,6 +11,7 @@ import { useCustomModelCapabilityProbe } from "@/hooks/use-custom-model-capabili
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { translateCustomModelProbeReason } from "@/lib/custom-model-probe"
 import { Badge } from "@/components/ui/badge"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -232,7 +233,7 @@ function ProviderSettingsCard({
       ...(editingId !== null && editorRevision !== null ? { resourceRevision: editorRevision } : {}),
       provider: {
         operation: editingId === null ? "create" : "update",
-        providerId: providerId.trim(),
+        providerId: editingId === null && catalogKind === "custom" ? `cp-${providerId.trim()}` : providerId.trim(),
         name: providerName.trim(),
         baseUrl: baseUrl.trim(),
         mode,
@@ -386,9 +387,15 @@ function ProviderSettingsCard({
       </section>}
       {(section === "providers" || modelsOnly) && <Dialog open={editorOpen} onOpenChange={open => { if (!open && !management.busy && pending === null) resetForm() }}><DialogContent closeLabel={t("common.close")} showCloseButton={!management.busy && pending === null} className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{modelsOnly ? t("modelCatalog.editCustom") : editingId === null ? t("managementUi.addProvider") : t("managementUi.editProvider")}</DialogTitle><DialogDescription>{t(modelsOnly ? "modelCatalog.customHint" : connectionOnly ? "managementUi.connectionEditorHint" : "managementUi.providerEditorHint")}</DialogDescription></DialogHeader>
         {!modelsOnly && <>
-        <ManagedSelect label={t("managementUi.providerType")} value={catalogKind} options={[["official", t("managementUi.compatibleProvider")], ["custom", t("managementUi.responsesProvider")]]} disabled={busy || pending !== null || editingId !== null} onChange={(value) => { setCatalogKind(value); setProviderId(value === "custom" ? "cp-" : ""); setModel(""); setCustomModels([]) }} />
+        <ManagedSelect label={t("managementUi.providerType")} value={catalogKind} options={[["official", t("managementUi.compatibleProvider")], ["custom", t("managementUi.responsesProvider")]]} disabled={busy || pending !== null || editingId !== null} onChange={(value) => { setCatalogKind(value); setProviderId(""); setModel(""); setCustomModels([]) }} />
         <FieldGroup className="grid gap-3 md:grid-cols-2">
-          <Field data-disabled={busy || pending !== null || editingId !== null}><FieldLabel htmlFor="custom-provider-id">{catalogKind === "custom" ? t("managementUi.responsesProviderId") : t("managementUi.providerId")}</FieldLabel><Input id="custom-provider-id" placeholder={t("managementUi.providerIdExample")} value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} /></Field>
+          <Field data-disabled={busy || pending !== null || editingId !== null}>
+            <FieldLabel htmlFor="custom-provider-id">{catalogKind === "custom" && editingId === null ? t("managementUi.responsesProviderId") : t("managementUi.providerId")}</FieldLabel>
+            {catalogKind === "custom" && editingId === null ? <InputGroup>
+              <InputGroupInput id="custom-provider-id" placeholder={t("managementUi.providerIdExample")} maxLength={61} value={providerId} disabled={busy || pending !== null} onChange={(event) => setProviderId(event.target.value)} />
+              <InputGroupAddon>cp-</InputGroupAddon>
+            </InputGroup> : <Input id="custom-provider-id" placeholder={t("managementUi.providerIdExample")} value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} />}
+          </Field>
           <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-name">{t("managementUi.displayName")}</FieldLabel><Input id="custom-provider-name" placeholder={t("managementUi.displayName")} value={providerName} disabled={busy || pending !== null} onChange={(event) => setProviderName(event.target.value)} /></Field>
           <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-endpoint">{t("managementUi.responsesBaseUrl")}</FieldLabel><Input id="custom-provider-endpoint" placeholder="https://example.com/v1" value={baseUrl} disabled={busy || pending !== null} onChange={(event) => setBaseUrl(event.target.value)} /></Field>
           {!connectionOnly && <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-model">{catalogKind === "custom" ? t("managementUi.defaultModelId") : t("managementUi.officialModelId")}</FieldLabel><Input id="custom-provider-model" placeholder={t("managementUi.modelId")} value={model} disabled={busy || pending !== null} onChange={(event) => setModel(event.target.value)} /></Field>}
