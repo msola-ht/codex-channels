@@ -179,7 +179,6 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `plugin.not-found` | 指定的 Plugin 不存在 | Plugin 选择器无匹配 |
 | `plugin.ambiguous` | Plugin 名称不唯一，请使用序号或完整 ID | Plugin 名称匹配多个 |
 | `plugin.unavailable` | 指定的 Plugin 未启用、被管理员禁用或暂不可调用 | Plugin 未启用或被禁用 |
-| `plugin.provider.unsupported` | Plugin 调用当前只支持 OpenAI Thread | 非 OpenAI Thread 调用 Plugin |
 | `agents.usage` | 需要提供子代理角色名称或序号及任务内容 | /agents 缺少角色或任务 |
 | `agents.not-found` | 指定的子代理角色不存在；使用 /agents 查看可用角色 | 子代理角色不存在 |
 | `agents.config-unreadable` | Codex 子代理角色配置无法安全读取；请检查 ~/.codex/config.toml | 角色配置无法安全读取 |

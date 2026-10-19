@@ -1229,13 +1229,14 @@ export class CodexAppServerClient implements
     return toMcpResourceReadResult(server, uri, response);
   }
 
-  async listPlugins(cwd: string, beforeSubmit?: () => void): Promise<InstalledPluginCatalog> {
+  async listPlugins(cwd: string, _modelProvider: string, beforeSubmit?: () => void): Promise<InstalledPluginCatalog> {
     return toInstalledPlugins(await this.readInstalledPlugins(cwd, beforeSubmit));
   }
 
   async resolvePlugin(
     cwd: string,
     id: string,
+    _modelProvider: string,
     beforeSubmit?: () => void,
   ): Promise<InvocablePlugin | undefined> {
     return resolveInvocablePlugin(await this.readInstalledPlugins(cwd, beforeSubmit), id);

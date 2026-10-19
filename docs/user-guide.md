@@ -799,7 +799,9 @@ codexc uninstall
 
 `/plugin` 查询当前 Workspace 的已安装 Plugin；`/plugin list search <关键词>` 只搜索已安装目录，
 `/plugin <名称或序号>` 查看详情，`/plugin health` 查看需要处理的状态。
-`/plugin <名称或序号> <任务>` 在 OpenAI Thread 中调用已启用且可用的 Plugin，仍需满足当前 Actor 与 Workspace 授权。
+`/plugin <名称或序号> <任务>` 在当前 Provider 的 Thread 中调用已启用且可用的 Plugin，包括第三方 Responses 和 Chat 会话，仍需满足当前 Actor 与 Workspace 授权。
+列表、详情、健康状态与调用前解析均查询当前 Provider 的实例；自动恢复会话后若 Provider 已变化，会拒绝沿用旧目录结果并提示重发。
+开放 mention 不保证插件背后的 App、MCP 或 Skill 可用；需要官方账户或特定连接的能力仍受上游认证和配置限制。
 渠道命令不提供市场搜索、安装或卸载；请通过 Codex 原生入口管理安装。
 已有 Plugin 所属 MCP 的工具审批、允许／禁用工具和输出预算可在 CLI／WebUI 的工具设置中管理；
 这些设置不提供 Plugin 安装、卸载或统一执行禁用开关。

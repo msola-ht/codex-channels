@@ -128,7 +128,6 @@ export type UserFacingErrorCode =
   | "plugin.not-found"
   | "plugin.ambiguous"
   | "plugin.unavailable"
-  | "plugin.provider.unsupported"
   | "agents.usage"
   | "agents.not-found"
   | "agents.config-unreadable"
