@@ -475,14 +475,18 @@ export class SessionRouter {
               "conversation.busy", "历史会话已有运行中的任务，请显式恢复会话",
             ));
           }
+          const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
+          try {
+            this.bindings.bind(binding);
+          } catch (error) {
+            await this.cleanupFailedResume(resumed.thread.id, error);
+          }
           this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
           this.namesByThread.set(resumed.thread.id, resumed.thread.name);
           this.contextCompactionItemIdsByThread.set(
             resumed.thread.id,
             resumed.contextCompactionItemIds,
           );
-          const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
-          this.bindings.bind(binding);
           this.clearForceNew(target, Date.now());
           this.notifyBindingsChanged();
           return binding;
@@ -498,14 +502,18 @@ export class SessionRouter {
     });
     try { startOptions.beforeSubmit?.(); }
     catch (error) { await this.cleanupFailedResume(started.thread.id, error, false); }
+    const binding = { target, workspaceId: workspace.id, threadId: started.thread.id, sessionId: started.thread.sessionId };
+    try {
+      this.bindings.bind(binding);
+    } catch (error) {
+      await this.cleanupFailedResume(started.thread.id, error);
+    }
     this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier, "default", started.approvalsReviewer);
     this.namesByThread.set(started.thread.id, started.thread.name);
     this.contextCompactionItemIdsByThread.set(
       started.thread.id,
       started.contextCompactionItemIds,
     );
-    const binding = { target, workspaceId: workspace.id, threadId: started.thread.id, sessionId: started.thread.sessionId };
-    this.bindings.bind(binding);
     this.clearForceNew(target, Date.now());
     this.notifyBindingsChanged();
     return binding;
@@ -596,8 +604,7 @@ export class SessionRouter {
       try {
         this.bindings.bindBackground(binding);
       } catch (error) {
-        await this.codex.unsubscribeThread(session.thread.id).catch(() => undefined);
-        throw error;
+        await this.cleanupFailedResume(session.thread.id, error);
       }
       this.captureModelSettings(
         session.thread.id,

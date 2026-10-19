@@ -525,3 +525,57 @@ close 约 5001 ms 返回，SDK 信号已中止，交互决定也返回拒绝。�
 三渠道清理消费，修复权限预览与 Telegram 端口关闭缺口。真实渠道送达/撤回、实际 App Server
 审批执行及 Windows/macOS 行为未观察；相关平台结论限于源码和隔离端口。没有新增或运行测试。
 本项修复和记录提交后，按顺序进入 L05 Thread 绑定、订阅与恢复。
+
+### L05 Thread 绑定、订阅与恢复
+
+**状态：已审查（附证据限制），修复订阅补偿、后台恢复和事务错误覆盖。**
+本项按 ensure/resume/接管→唯一归属→持久化→订阅与活动恢复→输入消费追踪。
+主代理负责 Router 与消费链；Sol 独立只读审查 Memory/SQLite Store 事务和重开，不触及真实数据库。
+不变量是一个 Thread 只有一个 Conversation 归属，后台历史目录不覆盖用户工作区选择，
+失败写入不发布成功，App Server 权威活动必须先恢复再决定是否提交新 Turn。
+
+**L05-F1 绑定失败后的订阅补偿。** 原 ensure 新建和自动恢复在绑定写入抛错后没有取消新订阅；
+后台创建虽取消，却吞掉取消失败。主代理内联调用生产 Router，隔离生命周期端口返回合法会话，
+Store 写入故意失败：修复前两条前台路径 `unsub=0`；后台清理失败只返回原存储错误。
+修复复用已有 cleanupFailedResume，绑定成功后才写新建/自动恢复缓存；保留已有合法归属的订阅。
+修复后新建、自动恢复、后台三条路径各观察清理成功/失败：均 `unsub=1/binding=null`，
+清理成功保留原始存储错误，清理失败 AggregateError 同时包含存储和清理错误。未调用真实 App Server。
+
+**L05-F2 后台绑定加载改变选择与活动。** 原 SQLite load 用前台 bind/demote 还原后台，
+仅有后台时覆盖先加载的工作区，并把重开时刻当作活动。Sol 在任务自有数据库复现：选择
+workspace-new，重开变成后台 workspace-a，活动时间也变大。下游 ensure 消费该选择，可能在旧目录新建。
+修复直接使用既有 memory.bindBackground；不改 Schema、不迁移或写入用户数据。
+主代理用生产 SQLite Store 重开临时库，后台仍归 old，已选工作区保持 selected；活动时间读取
+数据库原值，不再合成重开活动。demote 的内存与落盘时刻存在毫秒差，未将内存值当作持久化原值。
+
+**L05-F3 事务开始失败掩盖原因。** switchForeground 在 BEGIN IMMEDIATE 失败后仍 ROLLBACK，
+Sol 持有另一个写事务时观察到 cannot rollback，原始锁争用被覆盖。改为事务开始成功后才进入回滚区。
+主代理持有临时库写锁后实际 bind 返回 `database is locked`，新绑定不存在；释放锁后同一 Store
+成功绑定 fresh 到 selected。其他事务的 BEGIN 已在 try 前，未扩大修改。
+
+**存储独立审查证据。** 跨 Conversation 后台绑定拒绝且原归属不变；后台变化不改前台偏好和
+force-new；转移后旧主 forceNew=true、新主=false，双方偏好清空，重开一致。事务中途 sessionId
+违反 NOT NULL，Workspace、偏好、前后台写入完整回滚，内存未提前改变。解绑、撤权与 force-new
+重开一致。v5、非空未知 v0、缺表 v6 均拒绝且主库哈希未变，空 v0 正常初始化 v6。
+这些证据来自生产 Store 与临时数据库；临时材料已清理，没有新增或维护测试。
+
+**输入消费与恢复。** 主代理运行生产 ConversationService.submit→SessionRouter→SQLite→
+ConversationCore，生命周期/Turn 和模型设置使用隔离窄端口。先保留 old 后台、选择 selected 并重开库，
+再提交文本：实际 startThread 的 cwd=/selected，startTurn 收到 fresh 与同目录和原文，返回
+threadId=fresh/turnId=turn-fresh；前台归 selected，后台仍归 old。此为生产用例到可控执行端的观察，
+不表示真实渠道或 App Server 已执行 Turn。随后模拟同一 Thread 卸载，恢复返回 native-active：
+Core 恢复活动 Turn，submit 返回 conversation.busy，startTurn 总调用数仍为 1，没有重复启动。
+
+4 个并发后台创建只调用 startThread 三次，第四个 conversation.background-limit，剩余容量 0。
+绑定已提交但随后清除 force-new 写入失败时，本次明确报错，原绑定保留；重试 ensure 消费原绑定，
+startThread 总调用数仍为 1。持久标记属于后续无绑定时的保守选择，不把单独清标记失败当作绑定回滚。
+
+源码已关联 resume/fork 的旧订阅恢复与新订阅清理、接管的双 Thread 锁与空闲复核、共享后台容量、
+restoreSubscriptions 的暂时失败保留和永久不可用清除，以及 BindingRestoreCoordinator 的 Provider
+断线代数、活动跟踪和后台释放。Provider 选择复用 L03 的精确 Provider/模型边界：自动候选必须匹配
+显式 Provider 且仍可配置，最终 Turn 另行拒绝覆盖到不同 Provider。L03 已记录的撤权、目录替换与
+生命周期守卫输入未改变；L04 的审批归属读取继续消费同一绑定接口，本项没有改变其接口或有效期。
+
+**完成边界。** 临时 SQLite 重开、失败补偿、容量并发和生产输入用例已观察；真实 App Server
+断线重连、真实 Provider 实例路由、渠道发送及 Windows/macOS 未观察，不能把隔离端口结果视为这些
+环境通过。没有新增或运行测试。提交本项后按顺序进入 L18，普通归约、Reserve、重复思考三个子链分别记录。

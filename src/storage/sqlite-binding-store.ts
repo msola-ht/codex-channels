@@ -376,8 +376,8 @@ export class SqliteBindingStore implements BindingStore {
       throw new Error("该 Codex Thread 已绑定到其他会话");
     }
     const previous = this.memory.get(binding.target);
+    this.database.exec("BEGIN IMMEDIATE");
     try {
-      this.database.exec("BEGIN IMMEDIATE");
       this.writeModelPreference(binding.target, undefined);
       this.database
         .prepare("DELETE FROM conversation_background_bindings WHERE thread_id = ?")
@@ -738,15 +738,7 @@ export class SqliteBindingStore implements BindingStore {
       `)
       .all() as unknown as BindingRow[];
     for (const row of backgroundRows) {
-      const binding = bindingFromRow(row);
-      const foreground = this.memory.get(binding.target);
-      if (foreground) {
-        this.memory.switchForeground(binding, true);
-        this.memory.switchForeground(foreground, true);
-      } else {
-        this.memory.bind(binding);
-        this.memory.demote(binding.target);
-      }
+      this.memory.bindBackground(bindingFromRow(row));
     }
     const idleStateRows = database
       .prepare(`
