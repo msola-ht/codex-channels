@@ -2,10 +2,10 @@ import { join } from "node:path";
 import { ensurePrivateDirectorySync, readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumBytes = 8 * 1024 * 1024;
-const asyncQuestionTool = "request_user_input_async";
+const localTools = ["request_user_input_async", "clock"];
 
-/** Runtime policy only; never rewrite authoritative provider model snapshots. */
-export function withThirdPartyAsyncQuestions(catalog) {
+/** Shared by explicit template projections and runtime snapshots; never mutate the source. */
+export function withThirdPartyLocalTools(catalog) {
   if (!catalog || !Array.isArray(catalog.models) || catalog.models.length === 0) {
     throw new Error("第三方运行模型目录缺少模型");
   }
@@ -18,7 +18,7 @@ export function withThirdPartyAsyncQuestions(catalog) {
       if (!Array.isArray(tools) || tools.some(tool => typeof tool !== "string" || !tool.trim())) {
         throw new Error("第三方模型工具声明无效");
       }
-      return { ...model, experimental_supported_tools: [...new Set([...tools, asyncQuestionTool])] };
+      return { ...model, experimental_supported_tools: [...new Set([...tools, ...localTools])] };
     }),
   };
 }
@@ -33,7 +33,7 @@ export function writeThirdPartyRuntimeModelCatalog(sourcePath, dataDir, provider
   } catch {
     throw new Error("无法安全读取第三方模型目录");
   }
-  const content = `${JSON.stringify(withThirdPartyAsyncQuestions(catalog))}\n`;
+  const content = `${JSON.stringify(withThirdPartyLocalTools(catalog))}\n`;
   if (Buffer.byteLength(content) > maximumBytes) throw new Error("第三方运行模型目录超过 8 MiB");
   const runtimeDirectory = join(dataDir, "runtime");
   ensurePrivateDirectorySync(runtimeDirectory);

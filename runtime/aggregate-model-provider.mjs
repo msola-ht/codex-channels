@@ -14,7 +14,7 @@ import { isCustomCatalogProvider, responsesProviderCatalogPath, responsesContext
   assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 import { customProviderUpstreamMetadataPath } from "./model-provider-upstream-metadata.mjs";
-import { withThirdPartyAsyncQuestions } from "./third-party-model-catalog.mjs";
+import { withThirdPartyLocalTools } from "./third-party-model-catalog.mjs";
 
 export const aggregateProviderId = "codexc-aggregate";
 export const aggregateTokenEnvironmentKey = "CODEX_CONNECT_AGGREGATE_TOKEN";
@@ -176,7 +176,7 @@ export function loadAggregateModelMaterial(environment, expectedMembers) {
   }
   assertResponsesContextSyncComplete(environment);
   const first = profiles[0];
-  return { catalog: withThirdPartyAsyncQuestions({ models }), routes, profiles, files, fingerprint,
+  return { catalog: withThirdPartyLocalTools({ models }), routes, profiles, files, fingerprint,
     defaultModel: `${first.provider}/${first.model}`, reasoningEffort: first.reasoningEffort };
 }
 

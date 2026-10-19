@@ -221,6 +221,13 @@ OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请�
 Codex 0.163.0 的隔离人工验证中，DS 官方 Flash 经 Responses 与项目 Chat 桥均实际产生异步问题、
 继续执行并接收原 Thread 的回答；Responses 还观察到运行中 `turn/steer` 回答与过期追加拒绝。
 其他第三方模型、实际渠道卡片交互及跨平台服务启动尚未逐项实测。
+同一第三方运行目录与模板投影还追加 `clock`，供上游注册 `clock.curr_time` 与可中断的 `clock.sleep`，
+保留上游 Feature 与配置条件。固定版官方依据为
+[`spec_plan.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/spec_plan.rs)、
+[`sleep.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/handlers/sleep.rs)。
+DS Flash 的 Responses／Chat 实际返回当前 UTC 时间，2 秒等待耗时分别为 2.0011／2.0008 秒；
+20 秒等待在新输入到达后分别于 1.0021／1.0030 秒结束，工具明确返回被新输入打断。
+Responses 的 0 毫秒等待被明确拒绝。`sleep` Item 沿用现有过程事件映射，不新增 RPC 或调度器。
 组合根在同一入站通知处理链路调用异步问题协调器的 `handleInput`，统一登记问题和处理失效，
 不通过输出队列延迟登记；断线前连接代次的迟到通知不能重新打开问题，取消事件仍被消费。
 Core 只抑制重复正文及最终答复标记。回答提交失败独立于问题取消状态报告。
