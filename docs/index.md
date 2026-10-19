@@ -213,9 +213,17 @@ OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请�
 [`request_user_input_async.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/handlers/request_user_input_async.rs)、
 [`spec_plan.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/spec_plan.rs) 和
 [`questions.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/tui/src/chatwidget/questions.rs)。
-工具由模型目录决定是否开放，Gateway 不注入工具、不重放历史问题、不推断其他客户端已经回答。
+工具由 App Server 的有效模型目录决定是否开放。第三方固定、切换及聚合实例在启动时为各模型追加
+`request_user_input_async` 声明，覆盖 Responses 和 Chat Completions；复用上游本地工具，
+不通过动态工具注入，不改源模型目录或官方 OpenAI 目录，不重放历史问题、不推断其他客户端已经回答。
+运行目录由 [`third-party-model-catalog.mjs`](../runtime/third-party-model-catalog.mjs) 生成，
+显式关闭用户输入工具的 Codex 配置及上游主代理限制仍然有效；开放不保证模型主动调用。
+Codex 0.163.0 的隔离人工验证中，DS 官方 Flash 经 Responses 与项目 Chat 桥均实际产生异步问题、
+继续执行并接收原 Thread 的回答；Responses 还观察到运行中 `turn/steer` 回答与过期追加拒绝。
+其他第三方模型、实际渠道卡片交互及跨平台服务启动尚未逐项实测。
 组合根在同一入站通知处理链路调用异步问题协调器的 `handleInput`，统一登记问题和处理失效，
-不通过输出队列延迟登记；Core 只抑制重复正文及最终答复标记。回答提交失败独立于问题取消状态报告。
+不通过输出队列延迟登记；断线前连接代次的迟到通知不能重新打开问题，取消事件仍被消费。
+Core 只抑制重复正文及最终答复标记。回答提交失败独立于问题取消状态报告。
 
 Default 执行模式的等待提问只作隔离能力探测，不属于 Gateway 自动启用范围：固定版
 [`request_user_input.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/handlers/request_user_input.rs)

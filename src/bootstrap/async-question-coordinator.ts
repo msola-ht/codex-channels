@@ -41,13 +41,15 @@ export class AsyncQuestionCoordinator {
 
   constructor(private readonly options: AsyncQuestionOptions) {}
 
-  handleInput(event: ConversationInputEvent): void {
+  handleInput(event: ConversationInputEvent, streamIsCurrent = true): void {
     if ((event.type === "turn.completed" && event.status !== "completed")
       || event.type === "thread.reverted" || event.type === "thread.closed"
       || event.type === "thread.archived" || event.type === "thread.deleted") {
       this.cancelThread(event.threadId);
       return;
     }
+    // Queued notifications from a disconnected stream must not reopen cancelled questions.
+    if (!streamIsCurrent) return;
     if (event.type !== "item.agentMessage.completed" || event.delivery !== "async" || !event.questions) return;
     const target = this.options.targetForThread(event.threadId);
     if (target) this.handle({ ...event, target, questions: event.questions });

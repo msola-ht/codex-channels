@@ -10,6 +10,7 @@ import { readCustomProviderUpstreamWireApi } from "./model-provider-upstream-met
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 import { ProviderModelGuard } from "./provider-model-guard.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
+import { writeThirdPartyRuntimeModelCatalog } from "./third-party-model-catalog.mjs";
 import { assertProviderModelRequestPolicy, assertProviderModelRetryPolicy } from "./model-request-policy.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -455,6 +456,21 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   const goProxyOptions = () =>
     proxyOptionsForUrl(new URL(opencodeGoProviderDefinition.baseUrl));
   let primaryArguments = [];
+  const withThirdPartyCatalog = (provider, argumentsList) => {
+    if (provider === aggregateProviderId || (provider === "openai" && !customPrimaryProvider)) return argumentsList;
+    const definition = providerDefinitions.get(provider);
+    const sourcePath = provider === primaryProvider && customPrimaryProvider
+      ? customPrimaryProvider.catalogPath ?? officialCatalogPath
+      : definition
+        ? join(managedProviderDirectory(runtime.environment, definition), definition.catalogFileName)
+        : isCustomCatalogProvider(provider)
+          ? responsesProviderCatalogPath(runtime.environment, provider)
+          : officialCatalogPath;
+    if (!sourcePath) throw new Error("第三方 App Server 缺少模型目录");
+    const path = writeThirdPartyRuntimeModelCatalog(sourcePath, runtime.dataDir, customPrimaryProvider && provider === primaryProvider
+      ? customPrimaryProvider.id : provider);
+    return withOfficialModelCatalog(argumentsList, path);
+  };
   let desktopAppAttachment;
   const managedByProvider = new Map(managedProviders.map((provider, index) => [
     provider.provider,
@@ -710,7 +726,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         }
         const primaryLaunch = isolateProviderCredential(
           customPrimaryProvider?.id ?? primaryProvider,
-          primaryArguments,
+          withThirdPartyCatalog(provider, primaryArguments),
           primaryChildEnvironment,
           primaryCredential,
         );
@@ -818,7 +834,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         const credentials = Object.entries(managed.runtime.childEnvironment);
         if (credentials.length !== 1) throw new Error("隔离 App Server 必须使用唯一 Provider 凭据");
         const [[environmentKey, apiKey]] = credentials;
-        const managedLaunch = isolateProviderCredential(provider, argumentsList,
+        const managedLaunch = isolateProviderCredential(provider, withThirdPartyCatalog(provider, argumentsList),
           withoutManagedProviderApiKeys(runtime.environment, customPrimaryCredential?.environmentKey), { environmentKey, apiKey });
         if (aggregate) {
           aggregateLaunchPolicy = {

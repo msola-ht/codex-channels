@@ -1296,7 +1296,7 @@ export abstract class GatewayComponentGraph {
           const timingProvider = this.codex.knownProvider(coreEvent.threadId);
           if (timingProvider) this.turnExecution.handle(coreEvent, timingProvider);
         }
-        this.asyncQuestions.handleInput(coreEvent);
+        this.asyncQuestions.handleInput(coreEvent, !stale);
         if (coreEvent.type === "mcp.status.updated"
           && (coreEvent.modelProvider === "openai"
             || (coreEvent.threadId !== null && this.codex.knownProvider(coreEvent.threadId) === "openai"))) {
