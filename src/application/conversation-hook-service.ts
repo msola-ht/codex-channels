@@ -46,29 +46,33 @@ export class ConversationHookService {
     private readonly reviewPolicy: HookReviewPolicy = () => false,
   ) {}
 
-  execute(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView> {
+  async execute(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView> {
+    const context = this.context(target, actorId);
+    const beforeSubmit = () => {
+      if (!sameContext(this.context(target, actorId), context)) throw expired();
+    };
     return this.locks.forConversation(target, async () => {
+      beforeSubmit();
       this.prune(this.snapshots);
       this.prune(this.confirmations);
-      const context = this.context(target, actorId);
-      const view = await this.run(target, context, input);
-      if (!sameContext(this.context(target, actorId), context)) throw expired();
+      const view = await this.run(context, input, beforeSubmit);
+      beforeSubmit();
       return view;
     });
   }
 
-  private async run(target: ConversationTarget, context: Context, input: string): Promise<HookCommandView> {
+  private async run(context: Context, input: string, beforeSubmit: () => void): Promise<HookCommandView> {
     const parts = input.trim().split(/\s+/u).filter(Boolean);
     if (parts.length === 0 || (parts.length === 2 && parts[0] === "page" && /^[1-9]\d*$/u.test(parts[1]!))) {
-      return this.list(context, parts.length === 0 ? 1 : Number(parts[1]));
+      return this.list(context, parts.length === 0 ? 1 : Number(parts[1]), beforeSubmit);
     }
     if (parts.length === 2 && parts[0] === "confirm") {
-      return this.confirm(target, context, parts[1]!);
+      return this.confirm(context, parts[1]!, beforeSubmit);
     }
     const action = parts[0];
-    if (parts.length === 1) return this.detail(context, parts[0]!);
+    if (parts.length === 1) return this.detail(context, parts[0]!, beforeSubmit);
     if (parts.length === 2 && (action === "trust" || action === "enable" || action === "disable")) {
-      return this.preview(context, parts[1]!, action);
+      return this.preview(context, parts[1]!, action, beforeSubmit);
     }
     throw new UserFacingError("hooks.usage", "用法：/hooks [page 页码|选择编号|trust 选择编号|enable 选择编号|disable 选择编号|confirm 确认码]");
   }
@@ -86,8 +90,8 @@ export class ConversationHookService {
       cwd: workspace.cwd, provider, threadId: binding?.threadId };
   }
 
-  private async list(context: Context, page: number): Promise<HookCommandView> {
-    const catalog = await this.read(context);
+  private async list(context: Context, page: number, beforeSubmit: () => void): Promise<HookCommandView> {
+    const catalog = await this.read(context, beforeSubmit);
     const pageCount = pageCountFor(catalog.hooks.length, pageSize);
     requirePage(page, pageCount, () => {
       throw new UserFacingError("hooks.page-invalid", "Hook 页码不存在，请执行 /hooks");
@@ -113,16 +117,16 @@ export class ConversationHookService {
     return { view: snapshot.view, hook: entry.hook };
   }
 
-  private async detail(context: Context, selector: string): Promise<HookCommandView> {
+  private async detail(context: Context, selector: string, beforeSubmit: () => void): Promise<HookCommandView> {
     const selection = this.selection(context, selector);
-    const hook = await this.recheck(context, selection.hook);
+    const hook = await this.recheck(context, selection.hook, beforeSubmit);
     return { ...selection.view, detail: { selector, hook } };
   }
 
-  private async preview(context: Context, selector: string, action: HookAction): Promise<HookCommandView> {
+  private async preview(context: Context, selector: string, action: HookAction, beforeSubmit: () => void): Promise<HookCommandView> {
     const selection = this.selection(context, selector);
-    const version = await this.version(context);
-    const hook = await this.recheck(context, selection.hook);
+    const version = await this.version(context, beforeSubmit);
+    const hook = await this.recheck(context, selection.hook, beforeSubmit);
     requireAction(hook, action);
     const token = randomBytes(16).toString("hex");
     const view = { ...selection.view, detail: { selector, hook } };
@@ -131,27 +135,41 @@ export class ConversationHookService {
     return { ...view, confirmation: { token, action } };
   }
 
-  private async confirm(target: ConversationTarget, context: Context, token: string): Promise<HookCommandView> {
+  private async confirm(context: Context, token: string, beforeSubmit: () => void): Promise<HookCommandView> {
     const pending = this.confirmations.get(token);
     if (!pending || !sameContext(pending, context)) throw expired();
     this.confirmations.delete(token);
     if (Date.now() - pending.capturedAt > lifetimeMs) throw expired();
-    if (await this.version(context) !== pending.version) throw expired();
-    const hook = await this.recheck(context, pending.hook);
+    if (await this.version(context, beforeSubmit) !== pending.version) throw expired();
+    const hook = await this.recheck(context, pending.hook, beforeSubmit);
     requireAction(hook, pending.action);
-    if (Date.now() - pending.capturedAt > lifetimeMs
-      || !sameContext(this.context(target, context.actorId), context)) throw expired();
+    beforeSubmit();
+    if (Date.now() - pending.capturedAt > lifetimeMs) throw expired();
     let refreshFailedProviders: string[];
+    let submissionDenied = false;
+    const beforeWrite = () => {
+      try {
+        beforeSubmit();
+        if (Date.now() - pending.capturedAt > lifetimeMs) throw expired();
+        requireAction({ ...hook, reviewable: hook.reviewable && this.reviewPolicy(context.surface, hook) }, pending.action);
+      } catch (error) {
+        submissionDenied = true;
+        throw error;
+      }
+    };
     try {
       ({ refreshFailedProviders } = await this.port.writeHookState(context.provider, {
         key: hook.key, currentHash: hook.currentHash, action: pending.action, expectedVersion: pending.version,
-      }));
-    } catch {
+      }, beforeWrite));
+    } catch (error) {
+      if (submissionDenied) throw error;
       throw new UserFacingError("hooks.write-unconfirmed", "Hook 设置未确认保存，可能发生配置冲突或连接中断。请重新执行 /hooks 核对；不会自动重试");
     } finally {
       // Provider instances share CODEX_HOME. Even an unknown write outcome invalidates every review.
-      this.snapshots.clear();
-      this.confirmations.clear();
+      if (!submissionDenied) {
+        this.snapshots.clear();
+        this.confirmations.clear();
+      }
     }
     // A successful write does not prove that every loaded Thread refreshed or ran the Hook.
     let catalog: HookCatalog;
@@ -168,8 +186,8 @@ export class ConversationHookService {
       refreshFailedProviders };
   }
 
-  private async recheck(context: Context, expected: HookEntry): Promise<HookEntry> {
-    const catalog = await this.read(context);
+  private async recheck(context: Context, expected: HookEntry, beforeSubmit: () => void): Promise<HookEntry> {
+    const catalog = await this.read(context, beforeSubmit);
     const hook = catalog.hooks.find(entry => entry.key === expected.key);
     if (catalog.errorCount || !hook || hook.currentHash !== expected.currentHash
       || hook.isManaged !== expected.isManaged || hook.enabled !== expected.enabled
@@ -177,19 +195,36 @@ export class ConversationHookService {
     return hook;
   }
 
-  private async read(context: Context): Promise<HookCatalog> {
+  private async read(context: Context, beforeSubmit?: () => void): Promise<HookCatalog> {
+    let submissionDenied = false;
+    const guard = beforeSubmit && (() => {
+      try { beforeSubmit(); } catch (error) { submissionDenied = true; throw error; }
+    });
     try {
-      const catalog = await this.port.listHooks(context.cwd, context.provider);
+      guard?.();
+      const catalog = await this.port.listHooks(context.cwd, context.provider, guard);
+      guard?.();
       return { ...catalog, hooks: catalog.hooks.map(hook => ({
         ...hook, reviewable: hook.reviewable && this.reviewPolicy(context.surface, hook),
       })) };
-    } catch {
+    } catch (error) {
+      if (submissionDenied) throw error;
       throw new UserFacingError("hooks.read-failed", "无法读取目标实例的 Hook 列表，请检查该实例连接和配置");
     }
   }
 
-  private async version(context: Context): Promise<string> {
-    try { return await this.port.readHookConfigVersion(context.provider); } catch {
+  private async version(context: Context, beforeSubmit: () => void): Promise<string> {
+    let submissionDenied = false;
+    const guard = () => {
+      try { beforeSubmit(); } catch (error) { submissionDenied = true; throw error; }
+    };
+    try {
+      guard();
+      const version = await this.port.readHookConfigVersion(context.provider, guard);
+      guard();
+      return version;
+    } catch (error) {
+      if (submissionDenied) throw error;
       throw new UserFacingError("hooks.version-unavailable", "无法读取目标实例的用户配置版本，本次不能修改 Hook");
     }
   }

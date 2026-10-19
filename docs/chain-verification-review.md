@@ -304,6 +304,18 @@ runs 查询均为零。创建确认权限读取撤权未创建任务；运行容
 没有实际 App Server Thread/Turn 或平台消息观察，执行完成来自隔离端口；真实 Executor 后续提交仅作源码
 关联检查。权限读取内部的 Provider/RPC 等待继续随共用只读查询边界审查，完整调度业务仍归 L08。
 
+**Hooks 授权子链（基线 `89bec395`）。** Sol 修复锁后才捕获上下文的问题，锁前固定 Actor、Workspace/目录、
+Provider 与 Thread；列表、版本读取、定义复核、最终写入贯穿实时守卫，写前重查确认期限与无损审查能力。
+主代理核对全部差异、窄端口、共享配置读取和 Provider 修订失效；本地拒绝保留授权分类，已提交写入的
+跨 Provider 刷新和权威回读独立结算，最终结果展示仍检查授权。
+Sol 内联运行生产 HookService→ProviderRouting→Client→JsonRpc、隔离内存 Transport：列表/详情/预览/确认
+返回 `listCount=1/updated=trust/trustStatus=trusted`，双 Provider 刷新与回读完成。锁等待换 Thread 零 RPC；
+列表过载后撤权只发一次读取；配置版本响应后撤权不再读取 Hook 或写入。最终 Provider 等待撤权与失去
+Surface 审查能力分别返回 `hooks.forbidden` 和 `hooks.local-review-required`，均无写、`revision=0`。
+输入编码时撤权也被最后 RPC 守卫拒绝，无 RPC、`revision=0`。写入发出后撤权，权威状态仍变为 trusted、
+`revision=1`，双 Provider 刷新和回读完成，结果出口返回 forbidden。没有真实用户配置、Hook 执行或平台消息观察；
+Hook hash/version 与实际执行的完整业务验收留给 L16。
+
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。
 当前记录没有真实平台撤权或 Windows/macOS 观察。L03-F3、输入关联异步交互及最终整项验收未完成，

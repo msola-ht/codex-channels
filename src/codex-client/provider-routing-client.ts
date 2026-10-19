@@ -797,33 +797,49 @@ export class ProviderRoutingClient {
   listHooks(
     ...args: Parameters<ProviderClientInstance["listHooks"]>
   ): ReturnType<ProviderClientInstance["listHooks"]> {
-    const [, modelProvider] = args;
-    return this.withProviderActivity(modelProvider, async () =>
-      (await this.ensureClient(modelProvider)).listHooks(...args)
-    );
+    const [, modelProvider, beforeSubmit] = args;
+    beforeSubmit?.();
+    return this.withProviderActivity(modelProvider, async () => {
+      beforeSubmit?.();
+      const client = await this.ensureClient(modelProvider);
+      beforeSubmit?.();
+      return client.listHooks(...args);
+    });
   }
 
   readHookConfigVersion(
     ...args: Parameters<ProviderClientInstance["readHookConfigVersion"]>
   ): ReturnType<ProviderClientInstance["readHookConfigVersion"]> {
-    const [modelProvider] = args;
-    return this.withProviderActivity(modelProvider, async () =>
-      (await this.ensureClient(modelProvider)).readHookConfigVersion(...args)
-    );
+    const [modelProvider, beforeSubmit] = args;
+    beforeSubmit?.();
+    return this.withProviderActivity(modelProvider, async () => {
+      beforeSubmit?.();
+      const client = await this.ensureClient(modelProvider);
+      beforeSubmit?.();
+      return client.readHookConfigVersion(...args);
+    });
   }
 
   async writeHookState(
     ...args: Parameters<ProviderClientInstance["writeHookState"]>
   ): ReturnType<ProviderClientInstance["writeHookState"]> {
-    const [modelProvider] = args;
+    const [modelProvider, input, beforeSubmit] = args;
+    beforeSubmit?.();
+    let mayHaveSubmitted = false;
     try {
-      await this.withProviderActivity(modelProvider, async () =>
-        (await this.ensureClient(modelProvider)).writeHookState(...args)
-      );
+      await this.withProviderActivity(modelProvider, async () => {
+        beforeSubmit?.();
+        const client = await this.ensureClient(modelProvider);
+        beforeSubmit?.();
+        return client.writeHookState(modelProvider, input, () => {
+          beforeSubmit?.();
+          mayHaveSubmitted = true;
+        });
+      });
     } finally {
       // Even a lost response may have persisted the shared user configuration.
       // Disconnected instances must refresh before their next admitted operation.
-      this.hookConfigRevision++;
+      if (mayHaveSubmitted) this.hookConfigRevision++;
     }
     const providers = [...new Set([...this.connectedProviders, ...this.providerConnections.keys()])];
     const results = await Promise.allSettled(providers.map(provider =>

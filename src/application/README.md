@@ -37,7 +37,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
 - `reasoning-repeat-guard.ts`：第三方当前已绑定轮次的重复思考保护；按推理 Item 与内容段分隔，原始思考和摘要各持有独立检测器，用有界内存比较 200–4096 个 Unicode 码点片段的连续三次重复。检测分批让出事件循环，不读历史、不保存正文；通过注入端口精确中断原 Turn，收到官方中断终态才报告已停止，失败与确认超时可见。对应连接变化、绑定失效、轮次结束及关闭清理缓冲，不自动继续或修改 Queue／Goal。
 
 - `hook-port.ts`：定义 Hook 列表、安全审查摘要和精确版本信任/启停的窄端口；不暴露任意配置写入。
-- `conversation-hook-service.ts`：在会话锁内执行 `/hooks` 列表、详情、预览和一次性确认；查询、写入和回读固定到同一 Provider，运行配置刷新由 Client 协调共享配置的实例。选择快照与确认仅在内存保留五分钟，绑定 Actor、渠道会话、Workspace、Thread、Hook key/hash 和配置版本；写入尝试后使各 Provider 的旧交互失效，复核 Surface 的无损审查能力，明确展示部分刷新失败，不把保存成功当作实际执行成功。
+- `conversation-hook-service.ts`：锁前捕获 `/hooks` 的 Actor、Workspace/目录、Provider 和 Thread，锁内执行列表、详情、预览和一次性确认；读取与最终写入均保留实时守卫，写前复核确认期限及 Surface 无损审查能力。查询、写入和回读固定到同一 Provider，运行配置刷新由 Client 协调共享配置的实例。选择快照与确认仅在内存保留五分钟，绑定 Hook key/hash 和配置版本；已提交写入继续失效旧交互、刷新与权威回读，不因撤权中断结算；本地守卫拒绝不误报写入结果未知，不把保存成功当作实际执行成功。
 
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。

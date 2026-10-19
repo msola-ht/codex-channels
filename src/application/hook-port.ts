@@ -28,14 +28,14 @@ export interface HookCatalog {
 export type HookReviewPolicy = (surface: string, hook: HookEntry) => boolean;
 
 export interface HookConfigPort {
-  listHooks(cwd: string, modelProvider: string): Promise<HookCatalog>;
-  readHookConfigVersion(modelProvider: string): Promise<string>;
+  listHooks(cwd: string, modelProvider: string, beforeSubmit?: () => void): Promise<HookCatalog>;
+  readHookConfigVersion(modelProvider: string, beforeSubmit?: () => void): Promise<string>;
   writeHookState(modelProvider: string, input: {
     key: string;
     currentHash: string;
     action: HookAction;
     expectedVersion: string;
-  }): Promise<{ refreshFailedProviders: string[] }>;
+  }, beforeSubmit?: () => void): Promise<{ refreshFailedProviders: string[] }>;
 }
 
 export interface HookCommandView {

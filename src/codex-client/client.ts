@@ -996,17 +996,21 @@ export class CodexAppServerClient implements
     }, { retryOverload: false, ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) });
   }
 
-  async readUserConfigSnapshot(options: { includeApprovalsReviewerPolicy?: boolean; includeAcceleration?: boolean } = {}): Promise<{
+  async readUserConfigSnapshot(options: { includeApprovalsReviewerPolicy?: boolean; includeAcceleration?: boolean; beforeSubmit?: () => void } = {}): Promise<{
     config: Record<string, JsonValue | undefined>;
     version: string;
     toolConfig: Record<string, JsonValue | undefined>;
     approvalsReviewerPolicy?: { allowedReviewers: string[] | null; autoReviewDisabled: boolean };
     acceleration?: { fastEnabled: boolean; ultrafastEnabled: boolean };
   }> {
+    let submissionDenied = false;
+    const beforeSubmit = options.beforeSubmit && (() => {
+      try { options.beforeSubmit!(); } catch (error) { submissionDenied = true; throw error; }
+    });
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
       params: { includeLayers: true },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     const userLayer = response.layers?.find((layer) =>
       layer.name.type === "user" && layer.name.profile === null
     );
@@ -1029,7 +1033,7 @@ export class CodexAppServerClient implements
         const { requirements } = await this.rpc.request<ConfigRequirementsReadResponse>({
           method: "configRequirements/read",
           params: undefined,
-        }, { retryOverload: true });
+        }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
         if (requirements === undefined || (requirements !== null
           && (typeof requirements !== "object" || Array.isArray(requirements)
             || requirements.allowedApprovalsReviewers === undefined
@@ -1046,7 +1050,8 @@ export class CodexAppServerClient implements
           autoReviewDisabled: requirements?.featureRequirements?.auto_review === false
             || requirements?.featureRequirements?.guardian_approval === false,
         };
-      } catch {
+      } catch (error) {
+        if (submissionDenied) throw error;
         // The optional policy is unavailable; retain the valid user snapshot.
         // Settings projection exposes this as read-only and rejects writes.
         approvalsReviewerPolicy = undefined;
@@ -1062,23 +1067,23 @@ export class CodexAppServerClient implements
         plugins: response.config.plugins,
       },
       ...(approvalsReviewerPolicy === undefined ? {} : { approvalsReviewerPolicy }),
-      ...(options.includeAcceleration ? { acceleration: await this.readAccelerationFlags(response.config.features) } : {}),
+      ...(options.includeAcceleration ? { acceleration: await this.readAccelerationFlags(response.config.features, beforeSubmit) } : {}),
     };
   }
 
-  async listHooks(cwd: string, _modelProvider: string): Promise<HookCatalog> {
+  async listHooks(cwd: string, _modelProvider: string, beforeSubmit?: () => void): Promise<HookCatalog> {
     void _modelProvider;
     const params: HooksListParams = { cwds: [cwd] };
     const response = await this.rpc.request<HooksListResponse>({
       method: "hooks/list",
       params,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toHookCatalog(response, cwd);
   }
 
-  async readHookConfigVersion(_modelProvider: string): Promise<string> {
+  async readHookConfigVersion(_modelProvider: string, beforeSubmit?: () => void): Promise<string> {
     void _modelProvider;
-    return (await this.readUserConfigSnapshot()).version;
+    return (await this.readUserConfigSnapshot({ ...(beforeSubmit ? { beforeSubmit } : {}) })).version;
   }
 
   async writeHookState(_modelProvider: string, input: {
@@ -1086,11 +1091,11 @@ export class CodexAppServerClient implements
     currentHash: string;
     action: HookAction;
     expectedVersion: string;
-  }): Promise<{ refreshFailedProviders: string[] }> {
+  }, beforeSubmit?: () => void): Promise<{ refreshFailedProviders: string[] }> {
     await this.rpc.request({
       method: "config/batchWrite",
       params: toHookStateWrite(input),
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return { refreshFailedProviders: [] };
   }
 
