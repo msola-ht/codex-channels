@@ -21,6 +21,7 @@
 ## 协议与设计
 
 - [`docs/consolidation-review.md`](docs/consolidation-review.md)：重复实现与统一边界的关联审查、逐项修复状态及证据限制。
+- [`docs/chain-verification-review.md`](docs/chain-verification-review.md)：全项目下一阶段链路验证清单、文档独立审查、逐项关联审查与修复记录。
 - [`docs/provider-transaction-review.md`](docs/provider-transaction-review.md)：Provider 配置与凭据事务的失败恢复审查、逐项修复及验证记录。
 - [`docs/unified-model-management-design.md`](docs/unified-model-management-design.md)：第三方模型统一管理的现行合同、设计取舍、关联审查结论与证据边界，明确默认保护、调用影响与暂不支持范围。
 - [`docs/rust-migration-retrospective.md`](docs/rust-migration-retrospective.md)：Rust 迁移暂停结论、问题复盘、已有成果与网关重写建议；不是现行实施计划。
