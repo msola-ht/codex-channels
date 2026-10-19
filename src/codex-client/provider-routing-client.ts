@@ -985,6 +985,10 @@ export class ProviderRoutingClient {
   private clientForProvider(provider: string): ProviderClientInstance {
     const client = this.clients.get(this.canonicalProvider(provider));
     if (!client) {
+      if (provider === "codexc-aggregate") {
+        // Temporary unavailability must not classify existing bindings as deleted.
+        throw new Error("聚合模式暂时关闭，请选择独立 Provider；已有聚合会话和数据保留");
+      }
       throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
     }
     return client;

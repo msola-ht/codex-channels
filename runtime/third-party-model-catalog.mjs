@@ -1,14 +1,30 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ensurePrivateDirectorySync, readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumBytes = 8 * 1024 * 1024;
-const localTools = ["request_user_input_async", "clock"];
+const localToolNames = ["send_user_message_async", "clock"];
+
+function readLocalTools() {
+  const catalog = JSON.parse(readFileSync(new URL("./model-catalog-base.json", import.meta.url), "utf8"));
+  if (!catalog || !Array.isArray(catalog.models) || catalog.models.length !== 1
+    || typeof catalog.models[0]?.slug !== "string" || !catalog.models[0].slug.trim()) {
+    throw new Error("基础模型模板缺失、无效或不唯一");
+  }
+  const tools = catalog.models[0].experimental_supported_tools;
+  if (!Array.isArray(tools) || tools.some(tool => typeof tool !== "string" || !tool.trim())
+    || localToolNames.some(tool => !tools.includes(tool))) {
+    throw new Error("固定底座缺少有效的本地工具声明");
+  }
+  return tools.filter(tool => localToolNames.includes(tool));
+}
 
 /** Shared by explicit template projections and runtime snapshots; never mutate the source. */
 export function withThirdPartyLocalTools(catalog) {
   if (!catalog || !Array.isArray(catalog.models) || catalog.models.length === 0) {
     throw new Error("第三方运行模型目录缺少模型");
   }
+  const localTools = readLocalTools();
   return {
     models: catalog.models.map(model => {
       if (!model || typeof model.slug !== "string" || !model.slug.trim()) {

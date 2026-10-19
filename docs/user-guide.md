@@ -30,7 +30,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 所有 CLI 命令在结束或失败时显示“命令总耗时”，单位为秒并保留两位小数。计时统一写入 stderr，stdout 的 JSON、JSONL、版本号和导出内容不混入计时文本；主菜单每次执行的命令也单独计时。前台服务、日志跟随和交互命令的耗时包含运行及等待输入的时间，在命令返回时显示；强制终止进程时不保证输出。使用单调时钟，从命令分派开始，不包含 Node 加载 CLI 静态模块之前的启动时间。
 
-在交互终端直接运行 `codexc` 打开主菜单，依次为运行与连接、工作区、日常设置、接入与账户、状态与服务、数据与维护、程序维护和退出。主帮助采用同一分类；现有子命令保持不变。“运行与连接”提供 Codex TUI、工作区与 Provider 选择、WebUI 和前台核心服务，macOS/Windows 另显示 Desktop App；工作区列表按 ID 排序并标注默认项，Provider 只列当前配置可用的实例，隔离实例按 ID 排序，聚合条件或选择别名不满足时不提供聚合项。“状态与服务”先列状态、日志与诊断，再列启停和安装；“数据与维护”集中指标、额度、调用记录、投递核对、Relay 查询与清理；“程序维护”包含版本、初始化与配置向导、更新与卸载，Windows 另显示权限修复。更新、修复和卸载需确认。
+在交互终端直接运行 `codexc` 打开主菜单，依次为运行与连接、工作区、日常设置、接入与账户、状态与服务、数据与维护、程序维护和退出。主帮助采用同一分类；现有子命令保持不变。“运行与连接”提供 Codex TUI、工作区与 Provider 选择、WebUI 和前台核心服务，macOS/Windows 另显示 Desktop App；工作区列表按 ID 排序并标注默认项，Provider 只列当前配置可用的实例，隔离实例按 ID 排序，当前不提供聚合项。“状态与服务”先列状态、日志与诊断，再列启停和安装；“数据与维护”集中指标、额度、调用记录、投递核对、Relay 查询与清理；“程序维护”包含版本、初始化与配置向导、更新与卸载，Windows 另显示权限修复。更新、修复和卸载需确认。
 
 菜单在同一次调用的循环内保留上次选择，方便连续操作；该选择不写入配置，也不跨进程保存。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 显示帮助，`timezone` 仅显示当前时区。配置路径查询明确使用 `codexc config paths [--json]`，返回绝对路径且不创建配置，终端与管道中的行为一致。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。需指定参数的图片发送、投递处理和重置券消费仍使用对应直接命令。
 
@@ -110,9 +110,9 @@ Setup 仅按具体操作返回的激活范围提示重启。列出账户、停�
 日常模型操作从 `setup → 模型与提供商 → 第三方 Provider → 模型管理` 或 WebUI「模型管理 → 模型配置」进入。
 受管模型上下文窗口在 CLI 和 WebUI 均先读取目录修订，编辑后查看窗口差异与同一提供商的受影响账户，再确认保存；中途取消不写入，目录或账户已变化时须重新打开编辑。
 原生网页搜索诊断从 `setup → 模型与提供商 → 检测原生网页搜索` 或 WebUI 模型行操作进入，覆盖官方及第三方提供商；明确选择一个账户和模型后主动发起，可能产生模型及搜索费用，仅诊断、不修改搜索策略，见[模型探测](provider-integration-guide.md#添加时探测并写入)。
-使用可编辑目录的第三方模型可从 CLI 模型管理或 WebUI 模型行操作中的“声明原生网页搜索能力”选择支持、不支持或未声明，预览后保存。仅声明支持才向该模型放行原生 `web_search`，仍遵守用户全局搜索开关；“工具搜索”是另一项能力。Codex 兼容 Provider 的共享官方目录只读，原生网页搜索保留工具透传与上游策略，也遵守用户全局搜索开关；需要独立声明时使用自定义模型目录。受管家族共享文件会列出受影响账户，保存不自动重启服务，完整生效按预览提示重启 App Server。
+内置搜索读取主配置文件的 `web_search` 及精确 Provider ID 的独立覆盖；第三方账户可在 WebUI「模型管理 → 提供商」预览并确认搜索设置，缺项跟随全局，见[独立提供商的搜索模式](provider-integration-guide.md#独立提供商的搜索模式)。模型搜索能力元数据不参与请求过滤；搜索是否执行仍取决于上游接口和模型。搜索诊断保留，不自动修改配置。
 自定义目录、CCG、OCG、CLP 支持预览后本地移除；账户范围、默认保护、Relay 影响和恢复方式见[日常模型管理](provider-integration-guide.md#日常模型管理)。
-CLI 与 WebUI 模型管理均提供 DS、CLP、CCG、OCG 和自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确来源，受管模型选择提示词或能力范围，自定义模型可更新提示词及来源；两类模型均可另行选择有效上下文比例、压缩阈值和截断策略，查看差异并确认后更新目标模型；旧模型缺少来源关联时须手动选择。
+CLI 与 WebUI 模型管理均提供 DS、CLP、CCG、OCG 和自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确来源，受管模型选择提示词或能力范围，自定义模型可更新提示词及来源，并独立选择“本地工具”以合并异步提问和时钟声明；两类模型均可另行选择有效上下文比例、压缩阈值和截断策略，查看差异并确认后更新目标模型；旧模型缺少来源关联时须手动选择。
 
 `codexc timezone` 设置服务时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`服务时区`](model-timezone.md)。
 
@@ -134,7 +134,7 @@ Codex 默认审批方式入口为 `codexc config → Codex 新会话与用户偏
 当前用户配置修订。此操作只修改默认审批方式，沙盒、审批策略和网络权限继续独立设置。
 
 Auto-review 由 Codex 审核需要审批的操作，并按其政策批准或拒绝；它不会把每项请求自动批准。
-Gateway 不再按 Provider 或模型白名单限制自动审查；已配置的第三方和聚合 `agg` 均可选择。
+Gateway 不再按 Provider 或模型白名单限制自动审查；已配置的独立第三方 Provider 均可选择。
 审查请求继续由 Codex 原生机制处理，审查失败不会自动放行。开放本地选项不代表所有远端模型
 都已验证兼容，实际执行仍取决于上游接口与模型能力。
 页面显示的是全局用户偏好，未设置时保留继承状态；上游无覆盖时默认由用户审批。新建 Thread
@@ -378,10 +378,9 @@ codexc work list [--json]
 codexc setup
 codexc provider list [--json]
 codexc provider switch <Provider ID> [模型] [--yes]
-codexc provider clp refresh-templates
 ```
 
-`codexc provider clp refresh-templates` 独立联网刷新 CLP 的本地模板来源，备份后保存，不修改已配置模型。CLI／WebUI 的模板更新只读缓存，缺失或损坏时先执行此命令，再重新打开模板更新。来源目录、恢复与应用步骤见 [CLP 使用说明](cline-pass.md)。
+CLP 的 CLI／WebUI 模板更新在读取候选时下载一次官方目录，下载整体限时 25 秒并支持取消；无需先执行独立刷新命令。候选仅在当前进程保留 10 分钟，预览和确认复用该快照，不重新联网；失败、过期或目标目录修订变化后重新读取。操作及保存步骤见 [CLP 使用说明](cline-pass.md)。
 
 `codexc provider switch` 会把主实例切换到目标 Provider，执行前会二次确认，并提示将改写
 Codex 主配置的 `model_provider` / `model`；`switch` 与 `recover` 可用 `--yes` 显式跳过确认（适合脚本化调用）；交互式 Setup 菜单仍会确认。确认期间切换目标或影响范围发生变化时拒绝执行，需重新确认。
@@ -425,10 +424,9 @@ Remote 的 `--profile` 继续支持原生个人 Profile 和已登记的规范受
 直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
 共享 App Server 的 TUI 请统一使用 `codexc remote`。
 `codexc remote` 不注入网关权限参数，原生配置、Profile 和显式参数由 Codex 处理。
-选择 CP 自定义目录 Provider 时，Remote 复用已校验的启动参数与子进程凭据环境，保留磁盘 Profile 合同，避免加载其中的内部搜索禁用字段。CP 与聚合 Remote 均不覆盖搜索模式，沿用原生用户、项目配置和显式参数的优先级。
+选择 CP 自定义目录 Provider 时，Remote 复用已校验的启动参数与子进程凭据环境，保留磁盘 Profile 合同。
 可用 `--workspace` 选择登记目录，或用一次 `-C DIR` / `--cd DIR` 指定目录；两者不能同时使用。原生 `resume` / `fork` 上的目录参数同样参与选择，重复目录参数被拒绝。不能透传 `--remote` 或 `--remote-auth-token-env` 替换受管连接；原生 `--` 之后的内容按字面参数保留。
 Remote 不按 Provider 或模型限制自动审查，也不为审批资格固定模型或限制个人 Profile。
-聚合入口仍保护其 Provider 与模型目录，防止透传参数替换路由。
 Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.163.0 不应用启动参数中的 reviewer 覆盖；
 恢复后应核对实际模型与审批方式。
 
@@ -443,7 +441,6 @@ PowerShell 7 和当前用户安装的 `OpenAI.Codex` 包：
 ```bash
 codexc app
 codexc app -p ds-main
-codexc app --provider agg
 ```
 
 首次运行会询问是否启用共享，并说明重启 App Server 可能中断现有连接与任务；默认拒绝。
@@ -451,57 +448,17 @@ codexc app --provider agg
 不再询问或执行启用步骤；从 Dock 或开始菜单直接打开不会继承本次共享端点。
 `-p` / `--provider` 接受上面的完整 Provider ID 或已登记的规范 `sf-*` Profile 名称；省略时连接主 OpenAI 实例，
 不记住上次选择，也不修改用户配置。切换 App Server 实例前必须完全退出 Desktop，再执行对应命令。
-一次桌面连接固定到一个实例；聚合实例中的已加载模型可在 Desktop 模型选择器中切换，无需退出 App。
+一次桌面连接固定到一个实例。
 本项目不转移会话历史。上游恢复历史可能沿用历史 Provider，
 桌面缓存和模型覆盖仍待实机验证；应在目标实例新建会话，不能认为旧会话已转换 Provider。选择目标不重启整个服务；
 macOS 需要附加工具 Host 时只短暂重启目标实例。旧服务缺少选择能力时会提示先重启服务。
 
-当至少有两个已配置的 API Key 切换提供商时，服务自动派生按需启动的
-`codexc-aggregate`。两个公开入口都接受 `-p agg` / `--provider agg` 或 `-p sf-agg` / `--provider sf-agg`，
-不接受内部 ID `codexc-aggregate`；状态 JSON、Thread 与绑定
-仍使用 `codexc-aggregate`，无需迁移已有会话。无需添加同名账户或修改 Provider 配置；首次使用仍走上面的共享启用确认流程。
-若任一已登记的 Provider ID 或 Profile 名与 `agg` / `sf-agg` 重名，两种聚合选择均明确报冲突；
-ID 为 `agg` 的自定义切换 Provider 可明确使用 `codexc remote -p sf-custom-agg` 或
-`codexc app -p sf-custom-agg`，Remote 也可使用 `--profile sf-custom-agg`。
-聚合成员包含 DS、CLP、OCG、CCG 和自定义切换提供商，不包含官方 OAuth 主账户；多个同类账户也可以聚合。
-Desktop 共享仍要求主 Provider 为 OpenAI。执行 `codexc app --provider agg` 后，同一模型目录包含这些成员的模型，
-显示名称为 `Provider ID · 模型名称`。例如账户均名为 `main` 时，精确模型 ID 分别是
-`ds-main/deepseek-flash` 和 `clp-main/cline-pass/deepseek-v4.1-flash`。
-聚合使用一个 App Server 和现有工具 Host，各请求按选择的模型送至对应账户；网页搜索遵循该成员精确模型声明，模型 API
-WebSocket 关闭。聚合代理本身不重放请求，Codex 使用统一的 HTTP 重试次数 4、流重试次数 5；
-独立 Relay 保持其原有模型目录和路由。
-
-安装新代码后，旧 App Server 服务须按常规执行 `codexc restart appserver` 才能加载聚合能力；
-Gateway 运行时会检测现有成员的 Key、配置和模型目录变更，并在活动 Thread 与客户端租约均允许时重建聚合实例、更新渠道模型菜单。
-因此修改 DS 模型文件也会更新聚合目录；有活动或租约时先等待，快照变化后旧实例拒绝后续出站请求。
-关闭占用的 Remote/Desktop 客户端并等待活动结束后可完成刷新；Gateway 未运行时需重启 App Server。
-退出 Desktop 本身不会创建模型更新，只会释放租约、允许已有更新应用。Codex 主配置
-`~/.codex/config.toml` 不属于聚合模型材料，不参与聚合设置监听或出站材料指纹校验。
-聚合监听第三方账户注册、Profile、凭据、模型目录及其事务状态；主配置中的窗口覆盖与 Provider
-冲突仍在材料加载、启动或应用时校验：主配置不得声明自动派生的 `model_providers.codexc-aggregate`
-配置块；启动就绪前也会核对有效路由、凭据变量和传输配置与本次启动一致，并拒绝额外查询参数、请求头、认证或模型目录 URL。
-主配置修改不会由聚合机制自动刷新；需按对应设置的生效方式
-处理，要求重启 App Server 的配置仍须显式重启。
-新增、移除切换成员属于拓扑变更，仍须重启 App Server 和 Gateway。生成文件保存在
-`<dataDir>/runtime/aggregate-models.json`，是可重建的派生目录；应修改各提供商的源目录，不要直接编辑它。
-聚合拒绝 Codex 主 `config.toml` 中全局 `model_context_window` 和 `model_auto_compact_token_limit`，
-请先移除这两个覆盖，让每个模型采用自身目录设置；项目级同名配置仍可能覆盖目录值，使用前应检查。
-请在聚合实例新建 Thread，旧单账户 Thread 不会迁移。本地可控上游已观察同一 Thread 跨模型
-继续历史与命令工具结果回程；另已观察自定义提供商间切换及目录刷新后的同一 Thread 继续。真实云端提供商及 Desktop 内置工具仍待实机验收。
-终端使用 `codexc remote --provider agg`，不能同时指定 `--profile`；也可简写为 `codexc remote -p agg`。
-Desktop 启动和 `app status` 同样支持 `-p agg`。
-Remote、Desktop 启动和 `app status` 的 `-p` / `--provider` 共用完整 Provider ID、已登记的规范
-`sf-*` 名称及 `agg` / `sf-agg` 映射；两种命令均不允许重复或冲突选择。
-启动时读取聚合服务端的默认模型与思考等级。使用 `-m`/`--model` 或 `-c model=...` 选择其他目录模型时，
-自动采用目标模型的默认思考等级；`-m`/`--model` 优先于 `-c model=...`，重复配置覆盖以最后一项为准。
-显式 `-c model_reasoning_effort=...` 优先；`--` 后的内容只作为原生 Codex 输入，不参与模型或思考等级选择。
-渠道通过 `/model` 的 `AGG` 目录选择同一组精确模型 ID，模型项显示实际成员提供商的短标签，
-在聚合 Thread 内换模型保留历史；从单账户切入聚合则创建新 Thread。聚合实例启动时默认审批 reviewer 为
-`user`，各入口允许按现有设置规则选择 `auto_review`；Remote 沿用工作区或显式审批参数，恢复保留历史实际审批方式。
-聚合 `/account`、`/limits` 明确返回不支持，
-请求指标仍按真实成员账户记录，不生成虚拟账户快照。
-会话清理只在发现聚合会话后才连接该实例，无法连接时明确跳过对应会话组。聚合纳入 Supervisor
-与账户空闲回收；Remote 退出释放租约，其他客户端租约或活动仍可阻止回收，退出 Desktop 不保证立即停止实例。
+聚合模式暂时关闭：单个聚合 App Server 无法为成员提供商分别应用网页搜索模式。
+服务不再派生 `codexc-aggregate`，渠道 `/model` 和 CLI 菜单不再提供聚合目录；
+Remote、Desktop 启动和 `app status` 明确拒绝 `agg`、`sf-agg` 与 `codexc-aggregate`。
+请选择独立 Provider。已有聚合 Thread、绑定及派生目录保留；旧聚合绑定因 Provider 不可用而拒绝执行，
+不会转到其他 Provider，也不迁移或删除历史。安装新代码后，正在运行的旧服务仍须由操作者按常规重启
+App Server 和 Gateway 后加载关闭状态；更新代码本身不会停止现有客户端或任务。
 
 需要诊断时使用 `codexc app status [--provider <Provider-ID>]`；非交互启用或指定 Windows 桥端口时，
 使用 `codexc app enable [--port <端口>]`，再执行 `codexc app`。
@@ -528,7 +485,7 @@ Windows 状态不建立桥连接；共享启用且令牌可读取时 `bridgeRead
 启动被同类祖先链校验拒绝；App Server 重启后确认人工退出重开能恢复，未证明自动恢复。
 具体范围见 [Desktop 跨平台验收](codex-desktop-app-acceptance.md)；历史记录见
 [Desktop 验收状态](codex-desktop-app-development.md#实现与验收状态)。
-共享功能要求主 Provider 为 OpenAI，第三方通过切换模式的账户实例或聚合实例接入；不接入
+共享功能要求主 Provider 为 OpenAI，第三方通过切换模式的独立账户实例接入；不接入
 Remote Control 或手机配对。Desktop 的连接环境属于未公开兼容入口，当前功能是
 预览；构建不兼容时命令会拒绝启用。
 
@@ -564,9 +521,11 @@ Windows 先以临时 Provider 租约等待目标实例就绪，再检查桥并�
 审批和输出 token 上限。插件 MCP 只开放这些策略覆盖，不修改插件清单里的启动命令、环境和超时。
 新增 MCP 使用 `codexc config → 工具与 MCP → 新增 MCP`：支持本地 stdio、远程 Streamable HTTP、AnySearch 搜索和 Strata 视频预设。统一按“选择类型 → 填写必要信息 → 查看脱敏摘要 → 确认保存”执行；预设采用固定默认参数，仅询问服务必需信息，通用类型保留自定义配置。stdio 逐项输入命令、参数 JSON 数组、工作目录、环境变量和继承变量；HTTP 输入 URL、Bearer Token 环境变量名、固定 Header 和环境变量 Header。通用类型可设置启动/调用超时及启用状态，默认 10 秒、60 秒和启用；Strata 预设调用超时为 960 秒。预设 API Key 与密钥类 JSON 均隐藏输入，固定值写入 Codex 用户配置；环境变量引用需由实际启动 Codex 的宿主提供。保存前显示脱敏摘要及目标路径，确认后按配置修订写入；同名服务器拒绝覆盖，配置冲突不自动重试。此入口不安装 MCP 包、不执行命令探测、不自动重启服务，OAuth 登录仍使用 Codex 原生入口。Strata 预设详见[视频分析 MCP](video-analysis-mcp.md)。
 
-AnySearch 预设只询问 API Key（隐藏输入，仅填密钥，不含 `Bearer ` 前缀），随后显示脱敏摘要并确认保存。名称固定为 `anysearch`，Streamable HTTP 地址为 `https://api.anysearch.com/mcp`，启动超时 10 秒、调用超时 60 秒，默认启用。密钥以 `http_headers.Authorization = "Bearer <API Key>"` 保存到 Codex 用户配置，不回显，无需设置 `ANYSEARCH_API_KEY` 环境变量；空值、空白和控制字符会被拒绝。
+所有新增类型（含 AnySearch 和 Strata 预设）在保存前统一选择工具调用审批：跟随其他来源或默认值（不写用户覆盖）、`auto`、`prompt`、`writes` 或 `approve`。选择写入 `mcp_servers.<名称>.default_tools_approval_mode`，摘要明确显示所选策略；未确认不保存。编辑 MCP 也提供“工具调用审批”，可修改或移除用户层覆盖，其他字段与已有单工具策略保持不变。单工具 `tools.<工具>.approval_mode` 优先于服务器默认值，其他权限限制仍然生效。
 
-`codexc config → 工具与 MCP` 同时提供“编辑 MCP”和“删除 MCP”，只列出当前 Codex Home 用户配置中的条目，不修改插件清单或其他来源的配置。编辑先选 MCP，再选字段；支持启用状态、超时，以及用户条目自身定义的 stdio 命令、参数、工作目录、环境变量，或 HTTP 地址、Key、Header 和环境变量引用。不重命名、不切换传输类型；未选字段及密钥保留。新值隐藏输入，不回填旧值；JSON 字段明确按整组替换，可选字段可显式移除以恢复其他来源或默认值。HTTP 的“API Key”会设置 Bearer Authorization Header，并移除用户层冲突的 Authorization Header 和 Bearer 环境变量引用；Strata 已有 Key 可单独更新，不必重填整个环境变量对象。工具允许/禁用列表和审批策略继续使用“电脑、浏览器与已有 MCP”。
+AnySearch 预设询问 API Key（隐藏输入，仅填密钥，不含 `Bearer ` 前缀）和工具调用审批，随后显示脱敏摘要并确认保存。名称固定为 `anysearch`，Streamable HTTP 地址为 `https://api.anysearch.com/mcp`，启动超时 10 秒、调用超时 60 秒，默认启用。密钥以 `http_headers.Authorization = "Bearer <API Key>"` 保存到 Codex 用户配置，不回显，无需设置 `ANYSEARCH_API_KEY` 环境变量；空值、空白和控制字符会被拒绝。
+
+`codexc config → 工具与 MCP` 同时提供“编辑 MCP”和“删除 MCP”，只列出当前 Codex Home 用户配置中的条目，不修改插件清单或其他来源的配置。编辑先选 MCP，再选字段；支持启用状态、工具调用审批、超时，以及用户条目自身定义的 stdio 命令、参数、工作目录、环境变量，或 HTTP 地址、Key、Header 和环境变量引用。不重命名、不切换传输类型；未选字段及密钥保留。连接类新值隐藏输入，不回填旧值；审批策略通过选项选择并在摘要展示。JSON 字段明确按整组替换，可选字段可显式移除以恢复其他来源或默认值。HTTP 的“API Key”会设置 Bearer Authorization Header，并移除用户层冲突的 Authorization Header 和 Bearer 环境变量引用；Strata 已有 Key 可单独更新，不必重填整个环境变量对象。工具允许/禁用列表和单工具审批覆盖继续使用“电脑、浏览器与已有 MCP”。
 
 设置新的 Bearer 环境变量引用，或在固定/环境变量 Header 中设置 Authorization 时，也会移除用户层其他冲突认证来源；确认前会说明。HTTP Header 名称不允许用不同大小写重复设置，通用 HTTP 添加也会拒绝并存的认证来源。其他来源的认证配置仍可能影响合并后的结果；认证写入后会检查合并配置，若仍有冲突则明确报告用户层已经写入但认证检查未通过，不自动回滚或重试。Header Helper 或企业认证模式须通过原生配置修改认证。
 

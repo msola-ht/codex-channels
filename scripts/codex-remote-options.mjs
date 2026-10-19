@@ -7,7 +7,7 @@ import {
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
 import { resolveProviderSelection } from "./provider-selection.mjs";
 
-export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID | -C DIR | --cd DIR] [-p Provider-ID | --provider Provider-ID | --profile Profile] [Codex 参数...]\n-p / --provider 接受完整 Provider ID（如 cp-llm）、已配置的规范 sf- 名称（如 sf-cp-llm），以及 agg / sf-agg；省略时连接主实例。个人 Profile 使用 --profile。";
+export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID | -C DIR | --cd DIR] [-p Provider-ID | --provider Provider-ID | --profile Profile] [Codex 参数...]\n-p / --provider 接受完整 Provider ID（如 cp-llm）或已配置的规范 sf- 名称（如 sf-cp-llm）；省略时连接主实例。个人 Profile 使用 --profile。聚合模式暂时关闭。";
 
 export function parseCodexRemoteOptions(
   args,

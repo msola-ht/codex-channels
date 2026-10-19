@@ -45,7 +45,7 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
   const seen = new Set();
   const models = values.map((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)
-      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "maxContextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages", "applyPatchToolType", "instructions", "modelMessages", "supportsSearchTool", "supportsWebSearch", "template", "description", "reasoningDescriptions", "supportsImageDetailOriginal", "supportsVerbosity", "defaultVerbosity", "supportsReasoningSummary", "defaultReasoningSummary", "effectiveContextWindowPercent", "autoCompactTokenLimit", "truncationPolicy", "sampling"].includes(key))) {
+      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "maxContextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages", "applyPatchToolType", "instructions", "modelMessages", "experimentalSupportedTools", "supportsSearchTool", "supportsWebSearch", "template", "description", "reasoningDescriptions", "supportsImageDetailOriginal", "supportsVerbosity", "defaultVerbosity", "supportsReasoningSummary", "defaultReasoningSummary", "effectiveContextWindowPercent", "autoCompactTokenLimit", "truncationPolicy", "sampling"].includes(key))) {
       throw new Error("自定义模型包含不受支持的字段");
     }
     const { id, name, contextWindow, maxContextWindow, reasoningEfforts, defaultReasoningEffort, supportsImages, applyPatchToolType, instructions: prompt, supportsSearchTool } = value;
@@ -60,7 +60,7 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
     if (applyPatchToolType !== undefined && applyPatchToolType !== null && applyPatchToolType !== "freeform") throw new Error("模型 apply_patch 工具类型无效");
     if (prompt !== undefined && (typeof prompt !== "string" || prompt.trim() === "" || prompt.length > 200_000 || !controlFree(prompt))) throw new Error("模型提示词无效");
     if (supportsSearchTool !== undefined && typeof supportsSearchTool !== "boolean") throw new Error("模型检索工具能力必须为布尔值");
-    if (value.supportsWebSearch !== undefined && typeof value.supportsWebSearch !== "boolean") throw new Error("模型原生网页搜索能力必须为布尔值，未知时省略字段");
+    if (value.supportsWebSearch !== undefined && typeof value.supportsWebSearch !== "boolean") throw new Error("历史模型原生网页搜索元数据必须为布尔值，未知时省略字段");
     const { description, reasoningDescriptions, supportsImageDetailOriginal, supportsVerbosity, defaultVerbosity, supportsReasoningSummary, defaultReasoningSummary, effectiveContextWindowPercent, autoCompactTokenLimit, truncationPolicy } = value;
     if (description !== undefined && (typeof description !== "string" || description.trim() === "" || description.length > 4000 || !descriptionControlFree(description))) throw new Error("模型描述必须为非空、无非法控制字符且不超过 4000 字符的文本");
     if (reasoningDescriptions !== undefined && (!reasoningDescriptions || typeof reasoningDescriptions !== "object" || Array.isArray(reasoningDescriptions)
@@ -87,6 +87,10 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
     }
     if (maxContextWindow !== undefined && (!Number.isSafeInteger(maxContextWindow) || maxContextWindow < contextWindow || maxContextWindow > 100_000_000)) throw new Error("模型最大上下文必须为不小于当前窗口且不超过 100000000 的整数");
     const sampling = validateSamplingParameters(value.sampling);
+    const tools = value.experimentalSupportedTools;
+    if (tools !== undefined && (!Array.isArray(tools) || tools.some(tool => typeof tool !== "string" || !tool.trim() || tool.trim() !== tool || /\p{Cc}/u.test(tool)) || new Set(tools).size !== tools.length)) {
+      throw new Error("模型本地工具声明必须为不重复的非空工具名数组");
+    }
     const modelMessages = value.modelMessages === undefined ? undefined : completeModelMessages(value.modelMessages, {});
     if (modelMessages !== undefined && new TextEncoder().encode(JSON.stringify(modelMessages)).length > 200_000) throw new Error("模型提示词对象超过大小限制");
     seen.add(id);
@@ -104,6 +108,7 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
       ...(truncationPolicy === undefined ? {} : {truncationPolicy: {mode: truncationPolicy.mode, limit: truncationPolicy.limit}}),
       ...(sampling === undefined ? {} : {sampling}),
       ...(modelMessages === undefined ? {} : {modelMessages}),
+      ...(tools === undefined ? {} : {experimentalSupportedTools: [...tools]}),
     };
   });
   if (!seen.has(defaultModel)) throw new Error("默认模型必须存在于自定义模型目录");
@@ -130,11 +135,12 @@ export function compileModelDefinitions(definitions, defaultModel, { allowReason
       ...(model.defaultReasoningSummary === undefined ? {} : {default_reasoning_summary: model.defaultReasoningSummary}),
       support_verbosity: model.supportsVerbosity ?? false, default_verbosity: model.defaultVerbosity ?? null, apply_patch_tool_type: model.applyPatchToolType ?? null,
       ...(model.supportsSearchTool === undefined ? {} : {supports_search_tool: model.supportsSearchTool}),
+      // Preserve the v5 saved snapshot; search policy never reads this metadata.
       ...(model.supportsWebSearch === undefined ? {} : {supports_web_search: model.supportsWebSearch}),
       truncation_policy: model.truncationPolicy ?? { mode: "tokens", limit: Math.min(10_000, Math.floor(model.contextWindow / 4)) },
       context_window: model.contextWindow, max_context_window: model.maxContextWindow ?? model.contextWindow,
       ...(model.autoCompactTokenLimit === undefined ? {} : {auto_compact_token_limit: model.autoCompactTokenLimit}),
-      effective_context_window_percent: model.effectiveContextWindowPercent ?? 95, experimental_supported_tools: [],
+      effective_context_window_percent: model.effectiveContextWindowPercent ?? 95, experimental_supported_tools: [...(model.experimentalSupportedTools ?? [])],
       input_modalities: model.supportsImages ? ["text", "image"] : ["text"],
       ...(model.supportsImageDetailOriginal === undefined ? {} : {supports_image_detail_original: model.supportsImageDetailOriginal}),
       multi_agent_version: "v2",
@@ -160,7 +166,6 @@ export function modelDefinitionsFromCatalog(catalog, source = "official") {
     ...(model.input_modalities === undefined ? {} : {supportsImages: model.input_modalities.includes("image")}),
     ...(model.apply_patch_tool_type === undefined ? {} : {applyPatchToolType: model.apply_patch_tool_type}),
     ...(model.supports_search_tool === undefined ? {} : {supportsSearchTool: model.supports_search_tool}),
-    ...(model.supports_web_search === undefined ? {} : {supportsWebSearch: model.supports_web_search}),
     ...(model.supports_image_detail_original === undefined ? {} : {supportsImageDetailOriginal: model.supports_image_detail_original}),
     ...(model.support_verbosity === undefined ? {} : {supportsVerbosity: model.support_verbosity}),
     ...(model.default_verbosity === undefined ? {} : {defaultVerbosity: model.default_verbosity}),
@@ -172,6 +177,7 @@ export function modelDefinitionsFromCatalog(catalog, source = "official") {
     ...(model.truncation_policy === undefined ? {} : {truncationPolicy: model.truncation_policy}),
     ...(source === "deepseek" && typeof model.model_messages?.instructions_template === "string" && model.model_messages.instructions_template.length > 0 ? {instructions: model.model_messages.instructions_template} : {}),
     ...(model.model_messages == null ? {} : {modelMessages: model.model_messages}),
+    ...(model.experimental_supported_tools === undefined ? {} : {experimentalSupportedTools: model.experimental_supported_tools}),
     template: {source, model: model.slug},
   }));
   return validateModelDefinitions(models, models[0]?.id);

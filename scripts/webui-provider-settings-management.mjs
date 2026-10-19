@@ -1,5 +1,5 @@
-import { loadModelProviderManagementState } from "./model-provider-management.mjs";
-import { loadProviderModelCatalogPresentations, previewProviderModelRemoval, applyProviderModelRemoval, previewProviderModelContextChange, applyProviderModelContextChange, previewProviderModelWebSearchChange, applyProviderModelWebSearchChange, ProviderModelManagementError } from "./provider-model-management.mjs";
+import { loadModelProviderManagementState, loadProviderWebSearchSettings } from "./model-provider-management.mjs";
+import { loadProviderModelCatalogPresentations, previewProviderModelRemoval, applyProviderModelRemoval, previewProviderModelContextChange, applyProviderModelContextChange, ProviderModelManagementError } from "./provider-model-management.mjs";
 import {
   applyManagedProviderDefaultChange,
   previewManagedProviderDefaultChange,
@@ -23,6 +23,7 @@ import {
 import { ManagementOperationError, managementOperationError } from "./webui-management-operations.mjs";
 import { previewProviderModelTemplateUpdate, applyProviderModelTemplateUpdate } from "./provider-model-template-management.mjs";
 import { previewProviderModelAddition, applyProviderModelAddition } from "./provider-model-additions.mjs";
+import { applyProviderWebSearchChange, previewProviderWebSearchChange, ProviderWebSearchManagementError } from "./provider-web-search-management.mjs";
 
 export async function loadProviderSettingsResource(
   environment,
@@ -32,6 +33,7 @@ export async function loadProviderSettingsResource(
     const state = await loadProviderState({ environment });
     return {
       ...projectProviderSettings(state),
+      webSearchSettings: loadProviderWebSearchSettings(state, environment),
       modelCatalogs: (await loadProviderModelCatalogPresentations({ environment })).catalogs,
     };
   } catch {
@@ -47,9 +49,13 @@ export function normalizeProviderSettingsMutation(input) {
     throw new ManagementOperationError("invalid_json", "Provider 设置操作正文必须是对象");
   }
   switch (input.operation) {
-    case "model.web-search":
-      if (Object.keys(input).some(key => !["operation", "provider", "model", "supportsWebSearch", "revision", "confirmationToken"].includes(key))) {
-        throw new ManagementOperationError("invalid_provider_operation", "网页搜索声明请求包含不支持的字段");
+    case "provider.web-search":
+      if (Object.keys(input).some(key => !["operation", "provider", "mode", "resourceRevision", "confirmationToken"].includes(key))
+        || typeof input.provider !== "string" || ![null, "disabled", "cached", "indexed", "live"].includes(input.mode)) {
+        throw new ManagementOperationError("invalid_provider_operation", "Provider 搜索设置请求参数无效");
+      }
+      if (typeof input.resourceRevision !== "string" || !/^[a-f0-9]{64}$/u.test(input.resourceRevision)) {
+        throw new ManagementOperationError("stale-preview", "请刷新提供商设置后重新编辑");
       }
       return { operation: input.operation, ...webSearchMutationInput(input) };
     case "model.add":
@@ -152,8 +158,8 @@ export function normalizeProviderSettingsMutation(input) {
 export async function previewProviderSettingsMutation(input, environment) {
   try {
     switch (input.operation) {
-      case "model.web-search":
-        return await previewProviderModelWebSearchChange(webSearchMutationInput(input), { environment });
+      case "provider.web-search":
+        return await previewProviderWebSearchChange(webSearchMutationInput(input), { environment });
       case "model.add":
         return { operation: input.operation, ...await previewProviderModelAddition(additionMutationInput(input), { environment }) };
       case "model.template.update":
@@ -201,8 +207,8 @@ export async function previewProviderSettingsMutation(input, environment) {
 export async function applyProviderSettingsMutation(input, environment, preview) {
   try {
     switch (input.operation) {
-      case "model.web-search":
-        return await applyProviderModelWebSearchChange(webSearchMutationInput(input), { environment, preview });
+      case "provider.web-search":
+        return await applyProviderWebSearchChange(webSearchMutationInput(input), { environment, preview });
       case "model.add": {
         const additionPreview = { ...preview };
         delete additionPreview.operation;
@@ -252,6 +258,11 @@ export async function applyProviderSettingsMutation(input, environment, preview)
 
 export function redactProviderSettingsResult(result) {
   if (!result || typeof result !== "object") return { action: "completed" };
+  if (result.operation === "provider.web-search") {
+    return { operation: result.operation, provider: result.provider, before: { mode: result.before.mode }, mode: result.mode,
+      revision: result.revision, willChange: result.willChange, activation: result.activation, effects: { clearsProfileOverride: result.effects.clearsProfileOverride },
+      ...(result.action === undefined ? {} : { action: result.action }) };
+  }
   if (result.operation === "model.add") {
     return { operation: result.operation, provider: result.provider, providers: [...result.providers],
       additions: structuredClone(result.additions), revision: result.revision, willChange: result.willChange, activation: result.activation };
@@ -277,7 +288,6 @@ export function redactProviderSettingsResult(result) {
     ...(result.reasoningEffort !== undefined ? { reasoningEffort: result.reasoningEffort } : {}),
     ...(result.windowPercent !== undefined ? { windowPercent: result.windowPercent } : {}),
     ...(result.contextWindow !== undefined ? { contextWindow: result.contextWindow } : {}),
-    ...(result.supportsWebSearch !== undefined ? { supportsWebSearch: result.supportsWebSearch } : {}),
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),
     ...(result.effects !== undefined ? { effects: result.effects } : {}),
     ...(result.before !== undefined ? { before: result.before } : {}),
@@ -399,20 +409,19 @@ function redactModel(model) {
     ...(model.displayName === undefined ? {} : { displayName: model.displayName }),
     ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
     ...(model.maxContextWindow === undefined ? {} : { maxContextWindow: model.maxContextWindow }),
-    ...(model.supportsWebSearch === undefined ? {} : { supportsWebSearch: model.supportsWebSearch }),
   };
 }
 
 function toManagementError(error) {
-  return managementOperationError(error, [PrimaryProviderManagementError, ModelProviderDefaultManagementError, ProviderModelManagementError], "provider_settings_failed");
+  return managementOperationError(error, [PrimaryProviderManagementError, ModelProviderDefaultManagementError, ProviderModelManagementError, ProviderWebSearchManagementError], "provider_settings_failed");
+}
+
+function webSearchMutationInput(input) {
+  return { provider: input.provider, mode: input.mode, resourceRevision: input.resourceRevision };
 }
 
 function contextMutationInput(input) {
   return { provider: input.provider, model: input.model, contextWindow: input.contextWindow, revision: input.revision };
-}
-
-function webSearchMutationInput(input) {
-  return { provider: input.provider, model: input.model, supportsWebSearch: input.supportsWebSearch, revision: input.revision };
 }
 
 function templateMutationInput(input) {

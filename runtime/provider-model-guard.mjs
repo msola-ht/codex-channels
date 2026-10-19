@@ -91,10 +91,7 @@ export class ProviderModelGuard {
     // Custom catalogue parsing validates definitions and their compiled models
     // together. Read defaults from that same snapshot, never a second file read.
     const sampling = catalog.definitions?.find(definition => definition.id === model)?.sampling;
-    if (entry.supports_web_search !== undefined && typeof entry.supports_web_search !== "boolean") {
-      throw new Error("Provider 模型原生网页搜索声明无效");
-    }
-    return { reasoningEfforts: levels.map(level => level.effort), supportsWebSearch: entry.supports_web_search === true,
+    return { reasoningEfforts: levels.map(level => level.effort),
       ...(sampling === undefined ? {} : { sampling }) };
   }
 

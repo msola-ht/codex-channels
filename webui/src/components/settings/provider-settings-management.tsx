@@ -36,6 +36,7 @@ import { contextWindowPresetTokens, contextWindowPresetLabel } from "../../../..
 import { ProviderModelTemplateDialog, ProviderModelTemplateConfirmation, type ProviderModelTemplateTarget } from "@/components/settings/provider-model-template-dialog"
 import { ProviderModelAdditionDialog, ProviderModelAdditionConfirmation, type ProviderModelAdditionTarget } from "@/components/settings/provider-model-addition-dialog"
 import { ProviderWebSearchProbeDialog, type ProviderWebSearchProbeTarget } from "@/components/settings/provider-web-search-probe-dialog"
+import { ProviderWebSearchSettings, ProviderWebSearchConfirmation } from "@/components/settings/provider-web-search-settings"
 
 const probeReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
@@ -102,10 +103,6 @@ function ProviderSettingsCard({
   const [confirmRemoveBaseUrl, setConfirmRemoveBaseUrl] = useState(false)
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
   const [contextDraft, setContextDraft] = useState<ModelContextDraft | null>(null)
-  const [webSearchDraft, setWebSearchDraft] = useState<{ provider: string; model: string; revision: string; displayName: string; previous: boolean | undefined; value: boolean | undefined } | null>(null)
-  const webSearchDraftCatalog = settings.modelCatalogs.find(catalog => catalog.provider === webSearchDraft?.provider)
-  const webSearchDraftStale = webSearchDraft !== null && (webSearchDraftCatalog?.revision !== webSearchDraft.revision || webSearchDraftCatalog.source === "official-shared")
-  const webSearchPreviewRef = useRef<HTMLButtonElement | null>(null)
   const [templateTarget, setTemplateTarget] = useState<ProviderModelTemplateTarget | null>(null)
   const [additionTarget, setAdditionTarget] = useState<ProviderModelAdditionTarget | null>(null)
   const additionTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -289,11 +286,6 @@ function ProviderSettingsCard({
 
 
 
-  const updateWebSearch = async () => {
-    if (busy || pending !== null || webSearchDraft === null || webSearchDraftStale || webSearchDraft.value === webSearchDraft.previous) return
-    await management.mutate({ operation: "model.web-search", provider: webSearchDraft.provider, model: webSearchDraft.model, revision: webSearchDraft.revision, supportsWebSearch: webSearchDraft.value ?? null })
-  }
-
   const cancelPending = () => {
     management.cancel()
   }
@@ -304,7 +296,6 @@ function ProviderSettingsCard({
     if (result !== null && (operation === "primary.custom.save" || operation === "primary.custom.connection.save" || operation === "model.custom.save")) resetForm()
     if (result !== null && operation === "managed.default") resetManaged()
     if (result !== null && operation === "model.context") setContextDraft(null)
-    if (result !== null && operation === "model.web-search") setWebSearchDraft(null)
     if (result !== null && operation === "model.add") {
       additionSavedTarget.current = additionTarget?.provider ?? null
       setAdditionTarget(null)
@@ -324,30 +315,25 @@ function ProviderSettingsCard({
         <div className="flex flex-col gap-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{catalog.displayName}</h3><Badge variant="outline">{t(catalog.source === "managed" ? "modelCatalog.sourceManaged" : catalog.source === "custom" ? "modelCatalog.sourceCustom" : "modelCatalog.sourceOfficial")}</Badge></div>
           <p className="text-xs font-normal text-muted-foreground">{t("modelCatalog.scope", { providers: catalog.providers.join(t("managementUi.listSeparator")) })}</p>
         </div>
-        {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null || contextDraft !== null || webSearchDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
-        {catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) ? <Button variant="outline" size="sm" ref={node => { if ((additionTarget?.provider ?? additionSavedTarget.current) === catalog.provider) additionTriggerRef.current = node }} disabled={busy || pending !== null || contextDraft !== null || webSearchDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null || editorOpen} onClick={event => { additionTriggerRef.current = event.currentTarget; management.clearError(); setAdditionTarget({ provider: catalog.provider, revision: settings.resourceRevision }) }}>{t("modelAddition.title")}</Button> : null}
+        {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null || contextDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
+        {catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) ? <Button variant="outline" size="sm" ref={node => { if ((additionTarget?.provider ?? additionSavedTarget.current) === catalog.provider) additionTriggerRef.current = node }} disabled={busy || pending !== null || contextDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null || editorOpen} onClick={event => { additionTriggerRef.current = event.currentTarget; management.clearError(); setAdditionTarget({ provider: catalog.provider, revision: settings.resourceRevision }) }}>{t("modelAddition.title")}</Button> : null}
       </div>,
       models: catalog.models.map(entry => ({ ...entry.presentation, isDefault: entry.isDefault })),
+      webSearchSettings: settings.webSearchSettings.filter(entry => catalog.providers.includes(entry.provider)),
       onSelect: model => setSelectedModel({ provider: catalog.provider, model: model.model, revision: catalog.revision }),
       renderAction: model => {
         const reason = model.isDefault ? t("modelCatalog.defaultProtected") : catalog.models.length <= 1 ? t("modelCatalog.lastProtected") : !catalog.canRemove ? t("modelCatalog.unsupported") : undefined
-        const locked = busy || pending !== null || contextDraft !== null || webSearchDraft !== null || editorOpen || templateTarget !== null || additionTarget !== null || webSearchTarget !== null
+        const locked = busy || pending !== null || contextDraft !== null || editorOpen || templateTarget !== null || additionTarget !== null || webSearchTarget !== null
         return <DropdownMenu onOpenChange={(open, details) => { if (open && locked) details.cancel() }}>
           <DropdownMenuTrigger ref={node => {
             const target = templateTarget ?? templateSavedTarget.current
             if (target?.provider === catalog.provider && target.model === model.model) templateTriggerRef.current = node
           }} render={<Button variant="outline" size="sm" />} onFocus={event => { actionTriggerRef.current = event.currentTarget }} onPointerDown={event => { actionTriggerRef.current = event.currentTarget }} aria-disabled={locked}>{t("modelManagement.actions")}</DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64" finalFocus={contextDraft !== null || webSearchDraft !== null || templateTarget !== null || webSearchTarget !== null || pending !== null ? false : undefined}><DropdownMenuGroup>
+          <DropdownMenuContent align="end" className="w-64" finalFocus={contextDraft !== null || templateTarget !== null || webSearchTarget !== null || pending !== null ? false : undefined}><DropdownMenuGroup>
           <DropdownMenuItem disabled={locked || catalog.providers.length === 0} onClick={() => {
             if (locked || catalog.providers.length === 0) return
             setWebSearchTarget({ catalogProvider: catalog.provider, resourceRevision: settings.resourceRevision, model: model.model, displayName: model.displayName, revision: catalog.revision, providers: catalog.providers })
           }}>{t("modelProbe.detectWebSearch")}</DropdownMenuItem>
-          {catalog.source !== "official-shared" ? <DropdownMenuItem disabled={locked} onClick={() => {
-            if (locked) return
-            management.clearError()
-            const value = model.declaredCapabilities === undefined ? model.details.supports_web_search ?? undefined : model.declaredCapabilities.supportsWebSearch
-            setWebSearchDraft({ provider: catalog.provider, model: model.model, revision: catalog.revision, displayName: model.displayName, previous: value, value })
-          }}>{t("managementUi.editNativeWebSearch")}</DropdownMenuItem> : null}
           <DropdownMenuItem disabled={locked || catalog.source === "official-shared" || model.contextWindow === null || model.maxContextWindow === null} onClick={() => {
             if (locked || model.contextWindow === null || model.maxContextWindow === null) return
             management.clearError()
@@ -372,7 +358,7 @@ function ProviderSettingsCard({
     <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
   </>
 
-  return <>{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}{webSearchTarget && <ProviderWebSearchProbeDialog target={webSearchTarget} stale={webSearchStale} disabled={busy || pending !== null} finalFocus={actionTriggerRef} onClose={() => setWebSearchTarget(null)} />}<Card>
+  return <>{section === "providers" && <ProviderWebSearchSettings settings={settings} management={management} />}{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}{webSearchTarget && <ProviderWebSearchProbeDialog target={webSearchTarget} stale={webSearchStale} disabled={busy || pending !== null} finalFocus={actionTriggerRef} onClose={() => setWebSearchTarget(null)} />}<Card>
     <CardHeader>
       <CardTitle>{section === "providers" ? t("managementUi.customProviders") : t("managementUi.managedDefaults")}</CardTitle>
       <CardDescription>{section === "providers" ? t("managementUi.customProvidersHint") : t("managementUi.managedDefaultsDetail")}</CardDescription>
@@ -442,8 +428,6 @@ function ProviderSettingsCard({
               <CapabilitySelect label={t("managementUi.imageInput")} value={entry.supportsImages} disabled={busy || pending !== null} onChange={value => patch({ supportsImages: value, supportsImageDetailOriginal: value === true ? entry.supportsImageDetailOriginal : undefined })} />
               <CapabilitySelect label={t("managementUi.freeformPatchTool")} value={entry.applyPatchToolType === undefined ? undefined : entry.applyPatchToolType !== null} disabled={busy || pending !== null} onChange={value => patch({ applyPatchToolType: value === undefined ? undefined : value ? "freeform" : null, probeConnection: { ...entry.probeConnection, applyPatch: undefined } })} />
               <CapabilitySelect label={t("managementUi.toolSearchTool")} value={entry.supportsSearchTool} disabled={busy || pending !== null} onChange={value => patch({ supportsSearchTool: value, probeConnection: { ...entry.probeConnection, toolSearch: undefined } })} />
-              <CapabilitySelect label={t("managementUi.nativeWebSearch")} value={entry.supportsWebSearch} disabled={busy || pending !== null} onChange={value => patch({ supportsWebSearch: value })} />
-              <p className="text-muted-foreground">{t("managementUi.nativeWebSearchHint")}</p>
               <p className="text-sm text-muted-foreground">{t("customModel.unknownDisabled")}</p>
               <CustomModelDetails entry={entry} index={index} disabled={busy || pending !== null} upstreamWireApi={upstreamWireApi} patch={patch} />
               <p className="text-muted-foreground">{reasoningEffort === undefined ? t("modelProbe.invalidReasoning") : t("modelProbe.reasoningEffort", { effort: reasoningEffort })}</p>
@@ -481,28 +465,15 @@ function ProviderSettingsCard({
         <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || probe.running || editorStale || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || (!connectionOnly && (model.trim() === "" || (catalogKind === "custom" && !customModelContextsValid))) || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{modelsOnly ? t("modelCatalog.saveCustom") : editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
         </DialogContent></Dialog>}
-      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading} finalFocus={() => {
+      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading || management.error !== null || management.readbackRequired} finalFocus={() => {
         if (pending.preview.operation === "model.add") return additionPreviewRef.current?.disabled ? false : additionPreviewRef.current ?? additionTriggerRef.current ?? true
-        const preview = pending.preview.operation === "model.template.update" ? templatePreviewRef.current : pending.preview.operation === "model.context" ? contextPreviewRef.current : pending.preview.operation === "model.web-search" ? webSearchPreviewRef.current : null
-        if (!["model.template.update", "model.context", "model.web-search", "model.remove"].includes(pending.preview.operation)) return true
+        const preview = pending.preview.operation === "model.template.update" ? templatePreviewRef.current : pending.preview.operation === "model.context" ? contextPreviewRef.current : null
+        if (!["model.template.update", "model.context", "model.remove"].includes(pending.preview.operation)) return true
         return preview === null ? (pending.preview.operation === "model.template.update" ? templateTriggerRef.current : actionTriggerRef.current) ?? true : preview.disabled ? false : preview
       }} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {section !== "models" && feedback}
     </CardContent>
   </Card>
-    <Dialog open={webSearchDraft !== null && pending === null} disablePointerDismissal onOpenChange={(open, details) => { if (management.busy) { details.cancel(); return }; if (!open) setWebSearchDraft(null) }}>
-      <DialogContent finalFocus={pending === null ? actionTriggerRef : false} closeLabel={t("common.close")} showCloseButton={!management.busy}>
-        <DialogHeader><DialogTitle>{t("managementUi.editNativeWebSearch")}</DialogTitle><DialogDescription>{t("managementUi.nativeWebSearchHint")}</DialogDescription></DialogHeader>
-        {webSearchDraft ? <FieldGroup>
-          <p>{webSearchDraft.displayName}</p>
-          <code className="break-all">{webSearchDraft.provider} · {webSearchDraft.model}</code>
-          <CapabilitySelect label={t("managementUi.nativeWebSearch")} value={webSearchDraft.value} disabled={busy || webSearchDraftStale} onChange={value => setWebSearchDraft(current => current === null ? null : { ...current, value })} />
-          {webSearchDraftStale ? <Alert variant="destructive"><AlertDescription>{t("modelCatalog.stale")}</AlertDescription></Alert> : null}
-          {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
-          <Button ref={webSearchPreviewRef} disabled={busy || webSearchDraftStale || webSearchDraft.value === webSearchDraft.previous} onClick={() => void updateWebSearch()}>{t("managementUi.previewNativeWebSearch")}</Button>
-        </FieldGroup> : null}
-      </DialogContent>
-    </Dialog>
     <Dialog open={contextDraft !== null && pending === null} disablePointerDismissal onOpenChange={(open, details) => { if (management.busy) { details.cancel(); return }; if (!open) setContextDraft(null) }}>
       <DialogContent finalFocus={pending === null ? actionTriggerRef : false} closeLabel={t("modelManagement.cancel")} showCloseButton={!management.busy} className="max-h-[85dvh] overflow-y-auto">
         <DialogHeader><DialogTitle>{t("modelCatalog.editContext")}</DialogTitle><DialogDescription>{t("modelCatalog.editContextHint")}</DialogDescription></DialogHeader>
@@ -560,7 +531,6 @@ function CustomModelTemplatePicker({ disabled, onAdd }: { disabled: boolean; onA
           <p>{t("managementUi.imageInput")}: {support(suggested.supportsImages)}</p>
           <p>{t("managementUi.freeformPatchTool")}: {support(suggested.applyPatchToolType === undefined ? undefined : suggested.applyPatchToolType !== null)}</p>
           <p>{t("managementUi.toolSearchTool")}: {support(suggested.supportsSearchTool)}</p>
-          <p>{t("managementUi.nativeWebSearch")}: {support(suggested.supportsWebSearch)}</p>
         </div></CollapsibleContent>
       </Collapsible>}
       <Button variant="outline" disabled={disabled || selected === undefined} onClick={() => { if (selected !== undefined && !disabled) onAdd(structuredClone(selected.draft)) }}>{t("managementUi.addModel")}</Button>
@@ -586,12 +556,12 @@ function ProviderSettingsConfirmationDialog({
   const { t } = useTranslation()
   if (pending.operation === "model.add") return <ProviderModelAdditionConfirmation preview={pending} saving={saving} loading={loading ?? false} finalFocus={finalFocus} onConfirm={onConfirm} onCancel={onCancel} />
   if (pending.operation === "model.template.update") return <ProviderModelTemplateConfirmation preview={pending} saving={saving} loading={loading} finalFocus={finalFocus} onConfirm={onConfirm} onCancel={onCancel} />
+  if (pending.operation === "provider.web-search") return <ProviderWebSearchConfirmation preview={pending} saving={saving} loading={loading} finalFocus={finalFocus} onConfirm={onConfirm} onCancel={onCancel} />
   const localRemoval = pending.operation === "model.remove"
   const providerDetails = typeof pending.provider === "object" ? pending.provider : undefined
   const notices: string[] = []
   const contextChange = pending.operation === "model.context"
-  const webSearchChange = pending.operation === "model.web-search"
-  const lines = localRemoval ? [] : [pending.operation === "model.custom.save" ? t("modelCatalog.editOperation") : contextChange ? t("modelCatalog.contextOperation") : webSearchChange ? t("managementUi.editNativeWebSearch") : t("accountConfirmation.operation", { value: pending.operation })]
+  const lines = localRemoval ? [] : [pending.operation === "model.custom.save" ? t("modelCatalog.editOperation") : contextChange ? t("modelCatalog.contextOperation") : t("accountConfirmation.operation", { value: pending.operation })]
   if (!localRemoval && pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: typeof pending.provider === "string" ? pending.provider : pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
   if (providerDetails?.model !== undefined) lines.push(t("managementUi.defaultModelConfirm", { value: providerDetails.model }))
   if (providerDetails?.baseUrl !== undefined) lines.push(t("managementUi.baseUrlConfirm", { value: providerDetails.baseUrl }))
@@ -602,10 +572,9 @@ function ProviderSettingsConfirmationDialog({
   if (pending.effects?.consumesBackupCandidate === true) lines.push(t("managementUi.consumesBackupCandidateConfirm"))
   if (providerDetails !== undefined && "upstreamWireApi" in providerDetails) lines.push(t("managementUi.upstreamConfirm", { value: providerDetails.upstreamWireApi === "chat_completions" ? t("managementUi.upstreamChatCompletions") : t("managementUi.upstreamResponses") }))
   const capability = (value: boolean | undefined) => t(value === undefined ? "common.unknown" : value ? "managementUi.supported" : "managementUi.unsupported")
-  if (providerDetails?.models !== undefined) for (const model of providerDetails.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: capability(model.supportsImages), reasoning: model.reasoningEfforts === undefined ? t("common.unknown") : model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? t("customModel.unset"), patch: model.applyPatchToolType === undefined ? t("common.unknown") : model.applyPatchToolType ?? t("managementUi.unsupported"), search: capability(model.supportsSearchTool), webSearch: capability(model.supportsWebSearch) }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model }) : ""))
+  if (providerDetails?.models !== undefined) for (const model of providerDetails.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: capability(model.supportsImages), reasoning: model.reasoningEfforts === undefined ? t("common.unknown") : model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? t("customModel.unset"), patch: model.applyPatchToolType === undefined ? t("common.unknown") : model.applyPatchToolType ?? t("managementUi.unsupported"), search: capability(model.supportsSearchTool) }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model }) : ""))
   if (pending.target !== undefined) lines.push(t("managementUi.targetConfirm", { name: pending.target.displayName, id: pending.target.id }))
   if (!localRemoval && pending.model !== undefined) lines.push(t("managementUi.modelConfirm", { name: pending.model.displayName, id: pending.model.id }))
-  if (webSearchChange) lines.push(t("managementUi.nativeWebSearchChange", { before: capability(pending.model.supportsWebSearch ?? undefined), after: capability(pending.supportsWebSearch ?? undefined) }), t("managementUi.nativeWebSearchHint"))
   if (contextChange && pending.model?.contextWindow !== undefined) lines.push(t("openAiModelCatalog.previousContext") + ": " + pending.model.contextWindow)
   if (contextChange && pending.model?.maxContextWindow !== undefined) lines.push(t("openAiModelCatalog.maxContext") + ": " + pending.model.maxContextWindow)
   if (pending.providers !== undefined && pending.providers.length > 0) lines.push(t(localRemoval ? "modelCatalog.removalScope" : "managementUi.appliedProviders", { providers: pending.providers.join(t("managementUi.listSeparator")) }))
@@ -652,8 +621,8 @@ function ProviderSettingsConfirmationDialog({
       </div>
     </div> : <p className="whitespace-pre-line">{lines.join("\n")}</p>}
     {providerDetails?.models?.map(entry => <CustomModelDetailsPreview key={entry.id} entry={entry} />)}
-    {!localRemoval ? <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: (contextChange || webSearchChange) && pending.activation === "restart-app-server" ? t("settingsUi.restartAppServer") : pending.activation })}</p> : null}
-    {(contextChange || webSearchChange) && pending.activation === "restart-app-server" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart appserver" })}</p> : null}
+    {!localRemoval ? <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: contextChange && pending.activation === "restart-app-server" ? t("settingsUi.restartAppServer") : pending.activation })}</p> : null}
+    {contextChange && pending.activation === "restart-app-server" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart appserver" })}</p> : null}
     {!localRemoval && pending.activation === "restart-all" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart all" })}</p> : null}
   </ManagementConfirmationDialog>
 }

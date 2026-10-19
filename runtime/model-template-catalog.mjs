@@ -4,16 +4,6 @@ import { withThirdPartyLocalTools } from "./third-party-model-catalog.mjs";
 
 const sourceModelIdentity = /^You are Codex, an agent based on [^\r\n]+?\.(?=\s|$)/u;
 const autoReviewReplyLanguage = "请使用中文回复用户，包括自动审批结果、拒绝原因和后续操作说明；保留命令、路径及技术标识符原文。";
-const clockUsage = "需要准确的当前时间时，使用可用的 clock.curr_time。等待外部事件或用户回复且没有可独立推进的工作时，优先使用可被新输入打断的 clock.sleep，单次等待不超过 60 秒；收到新输入后及时处理，不反复继续原等待。时间流逝不代表用户已回答或授权。工具未提供时不得声称已经调用。";
-
-function includeClockUsage(model) {
-  for (const [container, field] of [[model.model_messages, "instructions_template"], [model, "base_instructions"]]) {
-    const prompt = container?.[field];
-    if (typeof prompt === "string" && prompt.trim() && !prompt.includes(clockUsage)) {
-      container[field] = `${prompt}\n\n${clockUsage}`;
-    }
-  }
-}
 
 function localizeAutoReviewMessages(messages) {
   for (const [group, field] of [["approvals", "on_request_auto_review"], ["auto_review", "rejection_instructions"]]) {
@@ -50,7 +40,6 @@ export function readCustomBaseModelCatalog() {
   }
   neutralizeSourceIdentity(catalog.models[0]);
   localizeAutoReviewMessages(catalog.models[0].model_messages);
-  includeClockUsage(catalog.models[0]);
   return { ...catalog, ...withThirdPartyLocalTools(catalog) };
 }
 
@@ -58,6 +47,7 @@ export function readCustomBaseModelCatalog() {
 export function withCustomBaseTemplate(definition) {
   const base = readCustomBaseModelCatalog().models[0];
   return { ...definition,
+    experimentalSupportedTools: [...new Set([...(definition.experimentalSupportedTools ?? []), ...base.experimental_supported_tools.filter(tool => ["send_user_message_async", "clock"].includes(tool))])],
     template: definition.template ?? { source: "official", model: base.slug },
     modelMessages: localizeAutoReviewMessages(completeModelMessages(definition.modelMessages ?? {}, base.model_messages)) };
 }
@@ -70,7 +60,6 @@ export function completeCatalogPrompts(source) {
   for (const model of result.models) {
     model.model_messages = localizeAutoReviewMessages(completeModelMessages(model.model_messages ?? {}, baseMessages));
     neutralizeSourceIdentity(model);
-    includeClockUsage(model);
   }
   return { ...result, ...withThirdPartyLocalTools(result) };
 }

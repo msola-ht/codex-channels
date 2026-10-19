@@ -58,10 +58,10 @@ export function ProviderModelTemplateDialog({ target, open, stale, management, p
       {options && !request.loading && !request.error && !unavailable ? <FieldGroup>
         <ManagedSelect fullWidth label={t("modelTemplate.source")} value={selection} placeholder={t("modelTemplate.selectSource")} disabled={busy || catalogStale} options={templates.map((entry, index) => [String(index), `${t(`modelTemplate.${entry.source}`)} · ${entry.displayName} (${entry.model})`])} onChange={setSelected} />
         <FieldSet disabled={busy || catalogStale}><FieldLegend>{t("modelTemplate.sections")}</FieldLegend><FieldGroup>
-          {options.availableSections.map(section => <Field key={section} orientation="horizontal"><Checkbox id={`template-${section}`} checked={selectedSections.includes(section)} disabled={busy || catalogStale} onCheckedChange={checked => setSections(previous => checked ? [...previous.filter(value => value !== section), section] : previous.filter(value => value !== section))} /><FieldLabel htmlFor={`template-${section}`}>{t(`modelTemplate.${section}`)}</FieldLabel></Field>)}
+          {options.availableSections.map(section => <Field key={section} orientation="horizontal"><Checkbox id={`template-${section}`} checked={selectedSections.includes(section)} disabled={busy || catalogStale} onCheckedChange={checked => setSections(previous => checked ? [...previous.filter(value => value !== section), section] : previous.filter(value => value !== section))} /><FieldLabel htmlFor={`template-${section}`}>{t(custom && section === "capabilities" ? "modelTemplate.localTools" : `modelTemplate.${section}`)}</FieldLabel></Field>)}
         </FieldGroup></FieldSet>
         <p className="text-sm text-muted-foreground">{t("modelTemplate.settingsHint")}</p>
-        {selectedSections.includes("capabilities") ? <p className="text-sm text-muted-foreground">{t("modelTemplate.capabilityHint")}</p> : null}
+        {selectedSections.includes("capabilities") ? <p className="text-sm text-muted-foreground">{t(custom ? "modelTemplate.localToolsHint" : "modelTemplate.capabilityHint")}</p> : null}
       </FieldGroup> : null}
       {catalogStale ? <Alert variant="destructive"><AlertDescription>{t("modelCatalog.stale")}</AlertDescription></Alert> : null}
       {management.error ? <Alert variant="destructive"><AlertDescription>{management.error}</AlertDescription></Alert> : null}
@@ -89,7 +89,7 @@ export function ProviderModelTemplateConfirmation({ preview, saving, loading, fi
   return <ManagementConfirmationDialog open saving={saving} loading={loading} finalFocus={finalFocus} title={t("modelTemplate.confirmTitle")} description={t(preview.provider.startsWith("cp-") ? "modelTemplate.customConfirmHint" : "modelTemplate.confirmHint")} confirmDisabled={!preview.willChange} onConfirm={onConfirm} onCancel={onCancel}>
     <code className="break-all">{preview.provider} · {preview.model}</code>
     <p>{t("modelTemplate.sourceSummary", { source: t(`modelTemplate.${preview.source}`), model: preview.sourceModel })}</p>
-    <p>{t("modelTemplate.sectionSummary", { sections: preview.sections.map(section => t(`modelTemplate.${section}`)).join(t("managementUi.listSeparator")) })}</p>
+    <p>{t("modelTemplate.sectionSummary", { sections: preview.sections.map(section => t(preview.provider.startsWith("cp-") && section === "capabilities" ? "modelTemplate.localTools" : `modelTemplate.${section}`)).join(t("managementUi.listSeparator")) })}</p>
     {!preview.willChange ? <p>{t("modelTemplate.unchanged")}</p> : null}
     {preview.changes.map(change => <section key={change.field} className="flex min-w-0 flex-col gap-2 py-2">
       <h4 className="font-medium break-all">{change.field}</h4>

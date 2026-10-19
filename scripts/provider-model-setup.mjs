@@ -1,7 +1,7 @@
 import * as clackPrompts from "@clack/prompts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { loadProviderModelCatalogs, loadProviderModelCatalogPresentations, ProviderModelManagementError, previewProviderModelRemoval, applyProviderModelRemoval, previewProviderModelWebSearchChange, applyProviderModelWebSearchChange } from "./provider-model-management.mjs";
+import { loadProviderModelCatalogs, loadProviderModelCatalogPresentations, ProviderModelManagementError, previewProviderModelRemoval, applyProviderModelRemoval } from "./provider-model-management.mjs";
 import { loadProviderModelTemplateOptions, previewProviderModelTemplateUpdate, applyProviderModelTemplateUpdate } from "./provider-model-template-management.mjs";
 import { readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
@@ -98,36 +98,10 @@ function templateDifferenceValue(value, full = false) {
   return JSON.stringify({ jsonLength: json.length, sha256: createHash("sha256").update(json).digest("hex"), content: "长内容摘要，可在确认前展开完整差异" });
 }
 
-async function runProviderModelWebSearchDeclarationSetup(provider, { environment, prompts, output }) {
-  const { catalogs } = await loadProviderModelCatalogPresentations({ environment });
-  const catalog = catalogs.find(entry => entry.providers.includes(provider));
-  if (!catalog || catalog.source === "official-shared") throw new Error("此模型目录不支持网页搜索能力声明");
-  const model = await prompts.select({ message: "选择要声明原生网页搜索能力的模型", options: catalog.models.map(entry => ({
-    value: entry.id, label: `${entry.displayName}（${entry.id}）`,
-  })) });
-  if (prompts.isCancel(model)) return { action: "back" };
-  const selected = catalog.models.find(entry => entry.id === model);
-  if (!selected) throw new Error("模型选择无效");
-  const before = selected.presentation.details.supports_web_search;
-  const value = await prompts.select({ message: "上游服务端原生网页搜索 web_search 能力", options: [
-    { value: "unknown", label: "未知（删除声明）" }, { value: "yes", label: "支持（按平台说明手动声明）" }, { value: "no", label: "不支持" },
-  ], initialValue: before === null ? "unknown" : before ? "yes" : "no" });
-  if (prompts.isCancel(value)) return { action: "back" };
-  if (!["unknown", "yes", "no"].includes(value)) throw new Error("网页搜索能力选择无效");
-  const input = { provider, model, revision: catalog.revision, supportsWebSearch: value === "unknown" ? null : value === "yes" };
-  const preview = await previewProviderModelWebSearchChange(input, { environment });
-  const label = state => state === null ? "未知" : state ? "支持" : "不支持";
-  output.write(`模型 ${preview.model.id}：${label(preview.model.supportsWebSearch)} → ${label(preview.supportsWebSearch)}。\n影响账户：${preview.providers.join("、")}。\n仅声明支持才放行原生搜索，仍遵守全局搜索开关；手动声明不代表上游实测支持。\n`);
-  if (!preview.willChange) { output.write("网页搜索声明没有变化，无需保存。\n"); return { action: "unchanged", activation: "none" }; }
-  if (await prompts.confirm({ message: "备份并保存上述网页搜索声明？", initialValue: false }) !== true) return { action: "back" };
-  const result = await applyProviderModelWebSearchChange(input, { environment, preview });
-  output.write("网页搜索能力声明已保存并回读。\n");
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
-  return result;
-}
-
 async function runProviderModelTemplateSetup(provider, { environment, prompts, output }) {
-  const options = await loadProviderModelTemplateOptions(provider, { environment });
+  const options = provider.startsWith("clp-")
+    ? await withCliProgress("读取 CLP 远程模板", progress => loadProviderModelTemplateOptions(provider, { environment, signal: progress.signal }), { output, delayMs: 150 })
+    : await loadProviderModelTemplateOptions(provider, { environment });
   if (!options.targets.length) {
     output.write("此账户没有可更新模板的模型。\n");
     return { action: "back" };
@@ -149,7 +123,7 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   if (!template) throw new Error("模板选项已变化，请重新打开模型管理");
   const sections = await prompts.multiselect({ message: "选择本次更新内容（空格勾选，回车确认）", options: [
     { value: "prompts", label: "提示词" },
-    { value: "capabilities", label: "能力参数", hint: "请确认平台支持模板中的参数" },
+    { value: "capabilities", label: provider.startsWith("cp-") ? "本地工具" : "能力参数", hint: provider.startsWith("cp-") ? "同步异步提问与时钟声明，保留其他工具和模型能力" : "含基座异步提问与时钟声明；请确认平台支持模板中的参数" },
     { value: "settings", label: "上下文与压缩设置", hint: "仅有效上下文比例、自动压缩阈值、截断策略；主动勾选才覆盖本地值" },
   ].filter(entry => options.availableSections.includes(entry.value)), initialValues: ["prompts"], required: true });
   if (prompts.isCancel(sections)) return { action: "back" };
@@ -157,8 +131,8 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   const preview = await previewProviderModelTemplateUpdate(input, { environment });
   output.write(`模板对比：${JSON.stringify(preview.provider)} / ${JSON.stringify(preview.model)}\n来源：${JSON.stringify(preview.source)} / ${JSON.stringify(preview.sourceModel)}\n修订：${JSON.stringify(preview.revision)}\n`);
   output.write(provider.startsWith("cp-")
-    ? "自定义模型可更新提示词和来源关联，以及主动勾选的有效上下文比例、自动压缩阈值和截断策略；当前上下文、最大窗口、思考等级、图片、工具支持及采样保留本地值。\n"
-    : "保留本地模型 ID、显示名称、当前上下文、默认思考等级、工具支持和采样；能力更新可改变最大上下文。\n");
+    ? "自定义模型按勾选范围更新提示词、本地工具或上下文与压缩设置，并记录来源关联；模型自身能力、其他工具声明及采样保留本地值。\n"
+    : "保留本地模型 ID、显示名称、当前上下文、默认思考等级和采样；能力更新可改变最大上下文，并补入基座异步提问与时钟声明，保留其他已有工具声明。\n");
   output.write("有效上下文比例、自动压缩阈值和截断策略默认保留本地值；仅主动选择「上下文与压缩设置」并确认差异后覆盖。\n");
   for (const change of preview.changes) {
     output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before)}\n  更新后：${templateDifferenceValue(change.after)}\n`);
@@ -202,7 +176,6 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
   const action = await prompts.select({ message: "模型操作", options: [
     { value: "web-search", label: "检测原生网页搜索", hint: "选择单一账户；1 次可能计费请求；仅诊断" },
-    ...(custom || family ? [{ value: "web-search-declaration", label: "声明原生网页搜索能力", hint: "逐模型设置未知／不支持／支持；预览确认后保存" }] : []),
     ...(catalog.canRemove ? [{ value: "remove", label: "本地移除模型", hint: "不联网、不改账户和凭据" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "tools", label: "探测单个模型的工具能力", hint: "apply_patch、tool_search；明确选择才发请求，可能计费" }] : []),
@@ -214,7 +187,6 @@ export async function runProviderModelSetup({ environment = process.env, prompts
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
   if (action === "web-search") return runProviderWebSearchSetup({ environment, prompts, output, provider: selected });
-  if (action === "web-search-declaration") return runProviderModelWebSearchDeclarationSetup(selected, { environment, prompts, output });
   if (action === "template-update") return runProviderModelTemplateSetup(catalog.provider, { environment, prompts, output });
   if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });
   if (action === "refresh") return runProviderModelAdditionSetup(catalog.provider, { environment, prompts, output });

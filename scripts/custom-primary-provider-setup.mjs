@@ -482,6 +482,7 @@ export async function runCustomPrimaryProviderSetup({
     ...(custom && !editingCustom ? preview.provider.models.flatMap((entry, index) => [
       `- 模型 ${entry.id}：${entry.contextWindow} Token；最大窗口 ${entry.maxContextWindow ?? entry.contextWindow} Token；图片 ${capabilityLabel(entry.supportsImages)}；图片 original ${entry.supportsImageDetailOriginal ? "声明支持" : "不声明"}；apply_patch ${capabilityLabel(entry.applyPatchToolType === undefined ? undefined : entry.applyPatchToolType === "freeform")}；思考 ${entry.reasoningEfforts === undefined ? "未知（暂不启用）" : entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}` : ""}`,
       `  模型描述：${JSON.stringify(previewModelDetails[index].description)}`,
+      `  本地工具声明：${JSON.stringify(entry.experimentalSupportedTools ?? [])}`,
       `  思考等级说明：${entry.reasoningEfforts?.map(effort => `${effort}=${JSON.stringify(entry.reasoningDescriptions?.[effort] ?? effort)}`).join("；") || "无可选等级"}`,
       `  回答详细程度：${entry.supportsVerbosity ? `声明支持；默认 ${entry.defaultVerbosity}` : "不声明"}；思考摘要：${entry.supportsReasoningSummary ? `声明支持；默认 ${entry.defaultReasoningSummary ?? "Codex 默认"}` : "不声明"}`,
       `  默认采样参数：${entry.sampling === undefined ? "上游默认值（不发送参数）" : JSON.stringify(entry.sampling)}；请求显式参数优先`,

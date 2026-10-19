@@ -477,7 +477,7 @@ export class TelegramInteractionPort implements InteractionPort {
         }
         if (question.allowOther) {
           keyboard.text(
-            "其他内容",
+            "输入回答",
             `ix:q${questionIndex}.o:${token}`,
           ).row();
         }
@@ -568,16 +568,16 @@ export class TelegramInteractionPort implements InteractionPort {
     }
     if (answerIndex === "o") {
       if (!question.allowOther) {
-        await context.answerCallbackQuery({ text: "该问题不支持其他内容" });
+        await context.answerCallbackQuery({ text: "该问题不支持文字回答" });
         return;
       }
-      await context.answerCallbackQuery({ text: "请回复其他内容" });
+      await context.answerCallbackQuery({ text: "请在接下来的回复栏中输入回答" });
       await this.tryMoveToUserInputQuestion(
         pending,
         token,
         questionIndex,
         true,
-        "已选择其他内容",
+        "已选择输入回答，请回复新的提示消息",
       );
       return;
     }
@@ -866,8 +866,10 @@ function formatAsynchronousInputChunks(
   const question = request.questions[questionIndex]!;
   const title = question.header.trim() || `问题 ${questionIndex + 1}`;
   const instruction = awaitingOther
-    ? "请输入其他内容并回复本消息。"
-    : question.options.length > 0 ? "请选择下方按钮。" : "请回复本消息。";
+    ? "请在底部回复栏输入回答并发送，保持回复本消息。"
+    : question.options.length > 0
+      ? question.allowOther ? "点击下方选项，或点「输入回答」填写文字。" : "请选择下方按钮。"
+      : "请在底部回复栏输入回答并发送，保持回复本消息。";
   const footer = `${instruction}\n发送 /stop 可停止当前请求。`
     + (request.questions.some((question) => question.secret)
       ? "\n\n安全提示：Telegram 回复会保留在聊天记录中，请勿发送密钥、Token 或其他敏感凭据。"
@@ -949,10 +951,10 @@ function formatInteraction(
     const question = request.questions[questionIndex]!;
     const title = question.header.trim() || `问题 ${questionIndex + 1}`;
     const instruction = awaitingOther
-      ? "请输入其他内容并回复本消息。"
+      ? "请在底部回复栏输入回答并发送，保持回复本消息。"
       : question.options.length > 0
-        ? "请选择下方按钮。"
-        : "请回复本消息。";
+        ? question.allowOther ? "点击下方选项，或点「输入回答」填写文字。" : "请选择下方按钮。"
+        : "请在底部回复栏输入回答并发送，保持回复本消息。";
     const secretWarning = request.questions.some((question) => question.secret)
       ? "\n\n安全提示：Telegram 回复会保留在聊天记录中，请勿发送密钥、Token 或其他敏感凭据。"
       : "";

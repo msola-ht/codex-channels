@@ -9,6 +9,7 @@ import { clinePassProviderDefinition as definition, clinePassAccountDefinition, 
 import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
 import { loadResponsesModelTemplates } from "./responses-model-templates.mjs";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { withThirdPartyLocalTools } from "../runtime/third-party-model-catalog.mjs";
 import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
 import { validateEnabledModelSelection } from "./provider-model-selection.mjs";
 import { clineRelayCatalogSchema, clinePassReasoningEfforts, clineRelayInputModalities } from "../runtime/cline-relay-catalog.mjs";
@@ -81,12 +82,11 @@ export function createClinePassCatalog(templates, source, enabledModels) {
     };
     // Managed CLP binds the projected composite in its manifest, not the DS definition.
     delete flash.template;
-    delete flash.supportsWebSearch;
     models[models.findIndex(model => model.id === flash.id)] = flash;
   }
   const defaultModel = models.find(model => model.id === definition.defaultModel)?.id ?? models[0]?.id;
   const catalog = createResponsesModelCatalog(models, defaultModel, { allowReasoningToggle: true });
-  return { models: catalog.models };
+  return withThirdPartyLocalTools(catalog);
 }
 
 async function selectClinePassModels(models, providers, selectModels) {

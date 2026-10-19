@@ -34,8 +34,10 @@ export interface ModelDefinition {
   applyPatchToolType?: "freeform" | null;
   instructions?: string;
   modelMessages?: Record<string, unknown>;
+  /** Local Codex tool declarations; omission preserves historical v5 compilation. */
+  experimentalSupportedTools?: string[];
   supportsSearchTool?: boolean;
-  /** Native web_search at this upstream; omitted means unknown. */
+  /** Historical v5 metadata retained for snapshot consistency; no search policy effect. */
   supportsWebSearch?: boolean;
   /** followContext is retained only when reading historical v5 metadata; it has no runtime effect. */
   template?: {source: "official" | "deepseek"; model: string; followContext?: boolean};

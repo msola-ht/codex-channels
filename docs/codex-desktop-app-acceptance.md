@@ -17,6 +17,9 @@ macOS 和 Windows 的实际版本、操作结果及恢复记录，不把“缺�
 
 ## 当前代码与实现边界
 
+- 聚合提供商当前关闭，不登记 `codexc-aggregate` 实例，Desktop、Remote、渠道和旧绑定的聚合
+  请求均明确拒绝。代码、派生材料与历史记录保留；下文 2026-10-18 及更早的聚合观察仍只表示当时
+  基线。旧服务需正常重启 App Server 与 Gateway 加载关闭策略，不自动停止服务。
 - 主体仍是独立受监管的 App Server。Desktop、渠道、原生 TUI 连接同一目标实例；
   Gateway 不复制会话历史，退出 Desktop 不主动终止共享实例。
 - macOS：通过单次启动环境选择受管 CLI Proxy，转换 JSONL stdio 与 UDS WebSocket；
@@ -76,7 +79,8 @@ Transport，客户端是交互式 WebSocket 客户端，不是 Windows Desktop �
 
 ## 开始前记录
 
-macOS、Windows 分别填写一份，主实例与隔离/聚合实例分别标结果。操作使用专门的验收
+macOS、Windows 分别填写一份，主实例与独立 Provider 隔离实例分别标结果。聚合当前只检查拒绝，
+不重复关闭前的可用性验收。操作使用专门的验收
 Workspace 和无敏感内容的 Thread；所有重启、禁用步骤先完成或停止已有任务。
 
 | 项目 | macOS | Windows |
@@ -117,7 +121,7 @@ Get-AppxPackage -Name OpenAI.Codex | Select-Object Name, Version, Architecture
 ## 两平台共同验收顺序
 
 每项填写“通过 / 失败 / 未执行 / 不适用”，并注明实际行为；依赖条件不满足时停止该分支，
-不反复重启碰运气。先完成主 OpenAI，再对已配置的单个 Provider 和 `agg` 重复相关步骤。
+不反复重启碰运气。先完成主 OpenAI，再对已配置的单个独立 Provider 重复相关步骤。
 
 | 编号 | 操作 | 通过依据 |
 | --- | --- | --- |
@@ -132,7 +136,7 @@ Get-AppxPackage -Name OpenAI.Codex | Select-Object Name, Version, Architecture
 | C9 | 无活动任务时保持 Desktop 打开，执行 `codexc restart gateway` | Desktop 当前共享连接和后续会话不因 Gateway 重启丢失 |
 | C10 | 无活动任务时执行 `codexc restart appserver` | 分别记录自动恢复情况；若必须退出后重新 `codexc app`，记为人工恢复，不能记自动恢复通过 |
 | C11 | 退出 Desktop，执行 `codexc app --provider <已配置ID>`；之后退出并用无参数 `codexc app` | 所选实例实际可用；无参数回到主实例，不沿用上次选择。不要在跨 Provider 旧 Thread 上证明转换成功 |
-| C12 | 满足聚合前提时退出 Desktop，执行 `codexc app --provider agg`，新建验收 Thread，依次使用两个成员模型 | 目录显示预期成员、模型选择和回复成立；另记内置工具结果。只有一个成员则不适用 |
+| C12 | 退出 Desktop，执行 `codexc app --provider agg` 及 `--provider sf-agg` | 明确报告聚合关闭，不启动、登记聚合实例或改动已有 Thread／绑定；关闭前的模型切换验收保留为历史记录 |
 | C13 | 记录初始设置后，在停机窗口退出 Desktop，执行 `codexc app disable`，检查状态，再按原设置启用 | 禁用/恢复有明确结果；Thread 历史仍在。Windows 曾使用自定义端口时恢复原端口 |
 
 `C3/C4` 使用渠道现有的 Thread 选择/续接功能，不直接编辑绑定或会话文件。
@@ -515,7 +519,7 @@ Provider ID。没有执行的项保持未执行，不留空白
 | C9 | Gateway 重启 | 未执行 | 未执行 | 待填 |
 | C10 | App Server 重启恢复 | 未执行 | 未执行 | 待填 |
 | C11 | Provider 选择不持久化 | 未执行 | 未执行 | 待填 |
-| C12 | 聚合成员切换 | 未执行 | 未执行 | 待填 |
+| C12 | 拒绝已关闭的聚合入口 | 未执行 | 未执行 | 待填 |
 | C13 | 禁用并恢复原设置 | 未执行 | 未执行 | 待填 |
 | 专项 | 分别展开平台专项 | 未执行 | 未执行 | 待填 |
 

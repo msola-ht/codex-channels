@@ -87,6 +87,14 @@ node scripts/update-model-templates.mjs --update-base --write # 校验后保存�
 CLP Flash 与自定义提供商导入 DS 模型时使用仓库的 DS 补全目录，不读取某个 DS 账户的设置。
 DS、OCG、CCG 仍通过官方脚本下载目录；显式创建或更新目录时使用仓库基础提示词补全缺失项并固化，读取已有目录不注入新模板。
 
+上述是仓库补全快照的维护合同。用于第三方账户的显式模板投影另从固定底座
+`experimental_supported_tools` 仅补齐 `send_user_message_async`、`clock` 两项本地工具声明；
+异步提问实际工具名仍是 `request_user_input_async`。保留 DS 原有主提示词及显式空值，执行来源身份中性化，
+缺失辅助提示词沿用既有补全，保留独立审批中文回复要求，不再追加额外中文时钟指导。
+DS 官方能力限制不变；运行副本仍关闭 Responses Lite，来源 Lite 元数据不改。
+已有账户须在“更新模板”中选择能力参数才合并这两项声明，其他工具能力保留；
+清除旧版主提示词中的中文时钟尾段须另选提示词并确认，读取和能力更新均不改提示词。
+
 ## 模型与设置
 
 DS 目录从官方安装脚本提取，不执行下载脚本。当前目录为 `deepseek-flash` 与
@@ -128,14 +136,12 @@ Remote 保留 `--profile sf-ds-personal`；两个入口默认连接主实例，�
 将内置 `web_search` 列为忽略，[Codex 接入配置](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)
 也明确设置 `web_search = "disabled"`。早期版本的搜索实测不能代表当前模型支持。
 
-Gateway 按当前 Provider 的精确模型目录声明 `supports_web_search` 放行原生网页搜索，
-不再按 DS／OCG／CCG／CLP 家族统一禁用。只有显式 true 才保留请求中的 `web_search`；
-false 和未声明均不发送该工具，且不会覆盖用户全局 `web_search = "disabled"`。
-CLI 或 WebUI 可先做单账户诊断，再手动声明并预览保存；一次账户的成功不能证明其他账户支持。
-同家族账户共享模型文件，预览会列出受影响账户；DS 模板不会替其他上游声明搜索支持。
-固定、切换和聚合实例以及渠道、`codexc remote` 共用此出站策略。安装新代码后须重启 App Server，
-能力声明的完整激活也以预览提示的重启为准；本操作不自动重启服务或把搜索转交 OpenAI。
-官方 OpenAI 与独立 Relay 保留各自合同，绕过受管服务的独立 Codex 进程不受此策略控制。
+内置网页搜索使用全局 Codex `web_search` 及按精确 `ds-<账户>` ID 保存的独立覆盖，缺项跟随全局；
+可在 WebUI `#/models/providers` 预览并确认保存，设置不联动其他 DS 账户，见[独立提供商的搜索模式](provider-integration-guide.md#独立提供商的搜索模式)。Gateway 保留请求中的 `web_search` 工具与选择，
+不增加模型目录能力声明。CLI 或 WebUI 可做单账户诊断，结果仅反映所选账户与模型的本次响应，
+一次成功不能证明其他账户支持。DS 上游是否执行仍以上游实际响应为准。
+固定、切换实例以及渠道、`codexc remote` 共用此出站合同；聚合入口当前关闭。安装新代码后须重启 App Server，
+本次代码更新不自动重启服务或把搜索转交 OpenAI。官方 OpenAI 与独立 Relay 保留各自合同。
 
 目录中的 `supports_search_tool` 是客户端工具检索能力，和内置网页搜索不同，继续保留官方值。
 普通函数工具及 Codex 本地管理的 MCP 工具不因关闭网页搜索而被禁用。
@@ -179,15 +185,11 @@ App Server。该账户 API Key 只进入需要它的 App Server 子进程环境�
 日志；其他 Provider 的 Key 不会随之注入。
 
 桌面入口要求主 Provider 仍为 OpenAI，单账户入口使用账户对应的精确 Provider ID；更换实例前必须完全退出桌面。
-单账户连接只使用目标实例；跨实例切换仍须退出桌面。主 Provider 为 OpenAI 且至少有两个 API Key
-切换提供商时，也可用 `codexc app --provider agg`，在同一桌面模型目录选择 DS、CLP、OCG、CCG
-及自定义切换提供商的模型。DS 的精确聚合模型 ID 形如 `ds-main/deepseek-flash`，显示名称包含账户 Provider ID。
-聚合不迁移单账户历史，须在聚合实例新建 Thread；已加载模型间切换无需退出桌面。安装新代码或
-增删成员后须重启相关服务；现有成员的 Key、模型目录变更由运行中的 Gateway 检测，待活动和租约释放后安全刷新，等待期间旧聚合快照拒绝后续出站请求。
-聚合网页搜索遵循各成员精确模型的声明；模型 API WebSocket 关闭，不影响独立 Relay 的原有路径。
-终端使用 `codexc remote --provider agg`，渠道通过 `/model` 的“聚合提供商”目录选择；
-聚合 Thread 内切换模型保留历史，账户额度查询不合并，模型请求指标归属真实账户。
-第三方桌面及聚合跨模型历史、工具路径仍待实机验收，
+单账户连接只使用目标实例；跨实例切换仍须退出桌面。聚合提供商当前关闭，
+`codexc app --provider agg`、`codexc remote --provider agg` 与聚合渠道选择均拒绝，
+不登记聚合实例。原聚合代码、派生目录、历史与旧绑定保留，不自动迁移；已有绑定须显式选择独立
+提供商后新建会话。旧服务需正常重启 App Server 与 Gateway 加载关闭策略，不自动停止服务。
+第三方桌面及工具路径仍按各自实际证据验收，
 具体边界见 [Desktop 共享说明](codex-desktop-app-development.md)。
 
 Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review、Goal、MCP 和审批请求。

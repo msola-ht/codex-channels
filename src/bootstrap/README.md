@@ -3,7 +3,7 @@
 子代理开始通知使用 0.162.0 官方活动中的启动模型与思考等级；元数据补充只读取并核验 Provider 归属，不用稍后 Thread 设置覆盖启动快照。继续通知仍展示读取时的 Thread 设置。
 
 本目录是模块化单体的组合根，负责创建具体依赖并管理 Gateway 进程生命周期。
-`gateway-component-graph.ts` 在有损展示队列之前接入第三方重复思考保护，仅为已绑定、当前活动且 Provider 已知并非 OpenAI 官方的 Thread 提供中断端口，包含第三方聚合路由。原始思考与摘要增量由 Client 适配后交给 Application 的有界异步检测，不等待 RPC；中断任务纳入既有生命周期任务集合，对应 Provider 断线或绑定失效清空检测窗口，关闭先停检测再等待已发出的中断。提示走现有 warning 投递链，不传出思考内容。
+`gateway-component-graph.ts` 在有损展示队列之前接入第三方重复思考保护，仅为已绑定、当前活动且 Provider 已知并非 OpenAI 官方的 Thread 提供中断端口。原始思考与摘要增量由 Client 适配后交给 Application 的有界异步检测，不等待 RPC；中断任务纳入既有生命周期任务集合，对应 Provider 断线或绑定失效清空检测窗口，关闭先停检测再等待已发出的中断。提示走现有 warning 投递链，不传出思考内容。
 当前页 Thread 状态由组件图以最多 4 个并发只读查询已连接 Provider；配置生命周期在应用启动成功后发布独立私有 IPC，
 停止先撤销入口和查询再停止应用，不接管共享 App Server 的进程生命周期。
 
@@ -48,9 +48,9 @@
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；
   对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；按 Setup 管理
-  标记装配主 Client 与可选 Provider Client，并通过 Provider 路由复用其余业务模块；沿用 Runtime 中
-  至少两个 API Key 切换提供商的派生条件装配 `codexc-aggregate` Client；聚合源变更复用设置 watcher、活动/租约门禁与确认快照刷新目录，运行中通过 `model/list` 确认，空闲时使用已确认的本地派生目录而不启动实例；
-  聚合 Thread、恢复、订阅、审批与空闲释放沿用共享协调器，人工审批能力不因聚合扩展；请求指标仍只接收真实成员账户的样本，聚合不增加指标 Socket 或账户适配器。
+  标记装配主 Client 与可选 Provider Client，并通过 Provider 路由复用其余业务模块；
+  聚合可用性由 Runtime 的共享门禁决定；当前聚合暂时关闭，不装配 `codexc-aggregate` Client、模型目录或设置监听，旧聚合绑定因 Provider 不可用而拒绝执行，保留会话与数据；
+  请求指标仍只接收真实成员账户的样本，聚合不增加指标 Socket 或账户适配器。
   按已启用 Provider 装配模型指标组件，不持有模型转发数据通路；通过 `request-metrics-query-adapter.ts`
   把同一指标库的精确 Thread 查询映射为 Application `/metrics` 窄端口，并为 OpenAI `/limits`
   提供当前周窗口的精确 Provider 聚合；
@@ -192,7 +192,7 @@
   构造与轮询不在 Gateway 主线程读文件；单个有界 Runtime Worker 安全读取、散列并完整校验稳定快照，
   同时最多一项读取，应用与模型刷新后的确认使用新读取。Worker 初始化、普通读取与停止分别有独立时限，
   限制单文件、文件数与整批字节预算，私有访问校验保持当前平台语义，跨线程仅返回指纹和安全失败阶段。
-  聚合使用 Runtime 提供的第三方成员材料指纹捕获成员配置、目录及源路径变化，复用同一待应用流程；
+  保留的聚合实现使用 Runtime 提供的第三方成员材料指纹捕获成员配置、目录及源路径变化，复用同一待应用流程；当前关闭状态不注册聚合监听。
   主 Codex 配置不参与聚合变化监听，必要的主配置校验留在材料加载与实例启动／应用边界。
   校验后逐 Provider 调用监管设置应用端口，原生 TUI/Desktop 租约或权威活动 Thread 保留待应用状态。
   组合根在同一 Provider RPC 准入入口排空请求并阻止新请求；监管重新派生启动材料并只更新目标实例，

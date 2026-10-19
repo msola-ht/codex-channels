@@ -111,7 +111,7 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
       onCancel={onCancel}
     >
       {pending !== null ? <>
-          <p>{t("settingsUi.change", { label: typeof pending.label === "string" ? pending.label : t(pending.label.key, pending.label.params), before: formatPreviewValue(pending.before), after: formatPreviewValue(pending.value) })}</p>
+          <p>{t("settingsUi.change", { label: typeof pending.label === "string" ? pending.label : t(pending.label.key, pending.label.params), before: formatPreviewValue(pending.before, pending.kind, t), after: formatPreviewValue(pending.value, pending.kind, t) })}</p>
           <p className="text-muted-foreground">{t("settingsUi.activation", { value: formatActivation(pending.activation, t) })}</p>
           {pending.activation.commands.length > 0
             ? <p className="text-muted-foreground">{t(pending.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: pending.activation.commands.join("; ") })}</p>
@@ -153,7 +153,16 @@ export function ManagedSelect({ label, value, options, disabled, disabledValues 
   </Field>
 }
 
-function formatPreviewValue(value: unknown): string {
+function formatPreviewValue(value: unknown, kind: string, t: Translate): string {
+  if (kind === "web-search" && value !== null && typeof value === "object" && "mode" in value) {
+    switch (value.mode) {
+      case null: return t("openAiModelCatalog.searchDefault")
+      case "disabled": return t("settingsFields.off")
+      case "cached": return t("settingsFields.cached")
+      case "indexed": return t("settingsFields.indexed")
+      case "live": return t("settingsFields.live")
+    }
+  }
   if (value !== null && typeof value === "object") return JSON.stringify(value)
   return String(value)
 }

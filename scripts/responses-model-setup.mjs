@@ -74,7 +74,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
           { value: "name", label: "显示名称" },
           { value: "context", label: "当前上下文窗口" },
           { value: "reasoning", label: "思考能力、等级与默认值" },
-          { value: "tools", label: "图片输入、apply_patch、tool_search 与原生网页搜索能力" },
+          { value: "tools", label: "图片输入、apply_patch 与 tool_search 能力" },
           ...advancedSettingGroups,
         ],
         initialValues: [],
@@ -124,7 +124,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       }
     }
     if (old === undefined || groups.includes("tools")) {
-      for (const [key, label] of [["supportsImages", "图片输入"], ["applyPatchToolType", "apply_patch"], ["supportsSearchTool", "tool_search"], ["supportsWebSearch", "原生网页搜索 web_search（上游服务端工具）"]]) {
+      for (const [key, label] of [["supportsImages", "图片输入"], ["applyPatchToolType", "apply_patch"], ["supportsSearchTool", "tool_search"]]) {
         const current = key === "applyPatchToolType" ? model[key] === undefined ? undefined : model[key] === "freeform" : model[key];
         const value = await promptCapability(prompts, `${id} 是否支持 ${label}？`, current);
         if (value === undefined) return undefined;

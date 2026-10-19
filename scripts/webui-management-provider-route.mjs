@@ -291,7 +291,7 @@ export async function routeProviderManagement({
   if (path === "/provider-settings/preview" && request.method === "POST") {
     const body = await readJsonBody(request, maximumBodyBytes);
     const input = normalizeProviderSettingsMutation(body);
-    if (input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update") {
+    if (input.operation === "provider.web-search" || input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update") {
       const current = await readProviderSettings(environment, state);
       if (input.resourceRevision !== fingerprintManagementValue(current)) {
         throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
@@ -302,7 +302,7 @@ export async function routeProviderManagement({
     const resource = await readProviderSettings(environment, state);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
-    if ((input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
+    if ((input.operation === "provider.web-search" || input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
       && input.resourceRevision !== resourceRevision) {
       throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
     }
@@ -330,7 +330,7 @@ export async function routeProviderManagement({
     const resource = await readProviderSettings(environment, state);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
-    if ((input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
+    if ((input.operation === "provider.web-search" || input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
       && input.resourceRevision !== resourceRevision) {
       throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
     }
@@ -530,7 +530,7 @@ function providerSettingsAuditTarget(input) {
   if (input.operation === "model.add") return `models:${fingerprintManagementValue({ provider: input.provider, models: input.models })}`;
   if (input.operation === "model.remove" || input.operation === "model.custom.save" || input.operation === "model.context" || input.operation === "model.template.update") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
   if (input.operation === "primary.custom.save" || input.operation === "primary.custom.connection.save") return String(input.provider?.providerId ?? "unknown");
-  if (input.operation === "managed.default") return String(input.provider ?? "unknown");
+  if (input.operation === "managed.default" || input.operation === "provider.web-search") return String(input.provider ?? "unknown");
   return String(input.providerId ?? "unknown");
 }
 

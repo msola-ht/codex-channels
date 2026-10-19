@@ -28,6 +28,8 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
 
 ## 文件
 
+- `provider-web-search.mjs` / `provider-web-search.d.mts`：在 Codex Home 的私有 `codexc-provider-search.toml` 保存 version=1 的精确第三方 Provider 搜索覆盖表；官方 `openai` 始终返回无覆盖，使用原生全局配置，不读取覆盖文件。第三方缺键表示跟随全局，支持 `disabled`／`cached`／`indexed`／`live`，内部聚合标识 `codexc-aggregate` 和未知格式失败关闭；已登记的真实账户 ID `agg`、`sf-agg` 仍合法，CLI 聚合别名入口保持关闭。既有受管切换 Profile 的搜索偏好在首次显式保存前继续读取；旧 CP 内部禁用值不作为偏好。提供 Provider 专属指纹及启动参数，不因其他账户的覆盖变更重建实例；检测未完成 `.pending` 事务时拒绝读取，文件保护复用 Unix 权限和 Windows ACL 适配器。
+
 - `codex-request-identity.mjs` / `codex-request-identity.d.mts`：仅在 `follow_cli_version = true` 时从当前锁定 CLI 版本解析官方客户端身份及 UA 的生效版本，保留系统和终端信息；无标记或 false 时保留显式值。Gateway、App Server 服务、CLI 与 WebUI 共用，不改写读取的配置。
 
 - `workspace-directory.mjs` / `workspace-directory.d.mts`：CLI 诊断、工作区管理和 Gateway 配置校验共用的只读目录检查，区分不存在、非目录和无法访问，不移除注册或修改目录。
@@ -76,7 +78,7 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
   账户家族登记同时拥有实例展开、账户身份和注册表／管理标记路径；账户路由、服务代理、
   Relay 与聚合材料读取共用这份登记。未登记家族或能力与身份不一致时明确拒绝，不回退到其他账户家族。
-  原生网页搜索不再由 Provider 家族常量禁用，按精确模型目录声明交给出站守卫处理。
+  原生网页搜索遵循精确 Provider 的搜索配置与上游工具合同，不由家族常量或历史模型元数据门控。
   CCG 采用显式多账户实例与 DS 来源目录，通过 Command Code 账户接口
   查询 Credits 与 5 小时/7 天窗口；模型 ID
   支持上游命名空间，凭据按 Bearer 格式校验。
@@ -87,12 +89,11 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，账户目录独立。
 - `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，模型目录按 CLP 家族共用，Chat 转换代理与凭据按账户独立。
 - `provider-model-guard.mjs` / `provider-model-guard.d.mts`：DS/OCG/CCG、自定义目录提供商代理与 CLP Chat 桥共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。读取上限为 2 MiB；Codex 兼容 Provider 的共享官方只读目录不注入此复核。
-  同次快照读取 `supports_web_search`，省略或 false 均返回不放行；非布尔拒绝。HTTP、WS 每次提交及 CLP 桥转换前应用，不通过 Provider 名称推断模型支持。
   CP 从同次已校验目录的精确模型定义读取默认采样，和启用状态共同交给代理；采样不进入编译后的 Codex 模型字段。
   CLP 在同一次目录读取中取得模型的思考选项，出站同时验证启用名单和思考能力，不为能力检查重复执行 ACL 读取。
   自定义提供商注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和旧上下文事务标记；自定义及受管账户均检查旧版目录整理未完成记录。未完成事务拒绝对应出站，不复用管理事务内部的读取豁免。
 - `third-party-coding-instructions.mjs`：非 Flash CLP、新增 OCG/CCG 手填模型与新增非 DS 自定义提供商模型共用的编程提示词；显式写入模型定义，不改变既有目录缺省值，不声明模型身份或授予工具权限，不依赖 DS 下载。
-- `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
+- `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：共享 `aggregateProviderEnabled=false` 门禁暂停聚合入口，Runtime／Gateway 不再派生或注册聚合实例，保留账户与既有数据。内部实现从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
   拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
   目录快照；公开第三方账户、Profile、目录及事务状态的源文件清单与内容指纹供安全刷新使用。
   受管家族的 `settings-pending` 纳入去重材料清单，使用恢复记录的 16 MiB 上限；未完成事务使旧出站快照失效。
@@ -146,13 +147,13 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
-- `third-party-model-catalog.mjs` / `third-party-model-catalog.d.mts`：第三方模板投影与 App Server 运行目录共用的本地工具策略，为每个模型追加 `request_user_input_async` 和 `clock`。`withThirdPartyRuntimeTools` 另在运行副本将 `use_responses_lite` 设为 false，配合第三方启动参数 `features.standalone_web_search=false`，使原生网页搜索采用模型 API 的 hosted 工具合同，不走 OpenAI 独立搜索执行器。固定与切换实例每次启动从原目录生成私有 `runtime/model-catalogs/<Provider>.json`，聚合复用运行转换及既有摘要守卫。覆盖 Responses 与 Chat，不改源目录、模板的 Lite 元数据或官方 OpenAI 实例；无效工具声明及超过 8 MiB 的运行目录结果明确拒绝。
+- `third-party-model-catalog.mjs` / `third-party-model-catalog.d.mts`：第三方模板投影与 App Server 运行目录共用的本地工具策略，从固定底座 `experimental_supported_tools` 为每个模型仅补齐 `send_user_message_async` 和 `clock`，保留原有其他工具声明；异步提问实际工具名仍为 `request_user_input_async`，上游 Feature、配置及角色限制继续生效。`withThirdPartyRuntimeTools` 另在运行副本将 `use_responses_lite` 设为 false，配合第三方启动参数 `features.standalone_web_search=false`，使原生网页搜索采用模型 API 的 hosted 工具合同，不走 OpenAI 独立搜索执行器。固定与切换实例每次启动从原目录生成私有 `runtime/model-catalogs/<Provider>.json`，聚合复用运行转换及既有摘要守卫。覆盖 Responses 与 Chat，不改源目录、模板的 Lite 元数据或官方 OpenAI 实例；无效工具声明及超过 8 MiB 的运行目录结果明确拒绝。CLP 在定义编译后补齐这两项；CP 可显式保存工具声明，运行副本仍补齐两项，不迁移用户文件。
 - `responses-context-sync.mjs` / `responses-context-sync.d.mts`：仅保留旧版跨目录上下文事务的私有记录读取、校验及显式整批恢复；不再创建同步事务或提供跟随联动。
 - `provider-catalog-isolation.mjs` / `provider-catalog-isolation.d.mts`：旧版 Provider 目录整理未完成记录的只读拒绝保护；记录存在时拒绝 runtime 使用受管及 CP 目录、CP 首次写入及统一模型恢复。当前版本不提供目录迁移，不修改或删除旧记录；须保留记录与备份，并使用产生事务的原版本恢复。受管模型按家族放在 `providers/deepseek|clp|ccg|opencode-go/`；账户身份材料按完整 ID 放在对应家族子目录，自定义 cp 模型保持各自目录。
-- `model-catalog.mjs` / `model-catalog.d.mts`：模型定义与 Codex 字段转换的纯数据层，集中校验基础及扩展能力、生成默认字段、导入官方／DS 模板及修正 DS 能力声明；CP、CLP 和 CLI 模板入口复用。CP 保留思考、图片、文件编辑、工具搜索及原生网页搜索的未知／不支持／支持声明；网页搜索定义使用可选布尔 `supportsWebSearch`，目录扩展字段为 `supports_web_search`，省略表示未知，不接受 null。未声明时不增加生成字段，保持旧 CP v5 编译顺序和内容；声明字段不替代搜索启用策略。目录投影另保留声明状态。导出 `SamplingParameters` 与严格数值校验，逐模型可选 `sampling` 仅保留于定义，空对象归一为省略，不进入 Codex 生成字段。完整官方及受管目录不经过 CP 白名单往返，避免丢失专用元数据。
+- `model-catalog.mjs` / `model-catalog.d.mts`：模型定义与 Codex 字段转换的纯数据层，集中校验基础及扩展能力、生成默认字段、导入官方／DS 模板及修正 DS 能力声明；CP、CLP 和 CLI 模板入口复用。CP 保留思考、图片、文件编辑及工具搜索的未知／不支持／支持声明；内置网页搜索使用 Codex 配置。历史 v5 `supportsWebSearch` 仍按布尔类型保留，并按原字段顺序编译为 `supports_web_search` 以维持保存快照一致性；它不参与搜索门控，新模板不导入该字段。可选 `experimentalSupportedTools` 严格校验非空、无首尾空白或控制字符且不重复的工具名，编译为 `experimental_supported_tools`；缺省仍按原字节生成 `[]`，不自动补齐或迁移。目录投影另保留声明状态。导出 `SamplingParameters` 与严格数值校验，逐模型可选 `sampling` 仅保留于定义，空对象归一为省略，不进入 Codex 生成字段。完整官方及受管目录不经过 CP 白名单往返，避免丢失专用元数据。
 - `model-template-prompts.mjs` / `model-template-prompts.d.mts`：纯 JSON 提示词补全，保留显式值，补缺失文本及必要 token-budget 配套字段；`approvals: null` 是继承基础审批提示词的例外。
 - `model-template-bindings.mjs` / `model-template-bindings.d.mts`：校验受管目录 manifest 的显式模型来源关联；缺少关联保持未关联，拒绝无效或孤立引用，不按名称推断。
-- `model-template-catalog.mjs` / `model-template-catalog.d.mts`：读取固定仓库底座，在显式新增模型时补全并固化 `model_messages`／`modelMessages`。自定义入口共享 `withCustomBaseTemplate`，仅为新模型记录缺省底座来源；官方底座读取和目录模板投影将已知来源模型身份改为通用助手身份，追加取时间与可中断等待指导，并复用第三方本地工具声明，保留原始快照及用户显式指令。显式模板更新重新读取已保存底座；读取、普通编辑、删除及调整已有模型窗口不执行模板补全。
+- `model-template-catalog.mjs` / `model-template-catalog.d.mts`：读取固定仓库底座，在显式新增模型时补全并固化 `model_messages`／`modelMessages`。自定义入口共享 `withCustomBaseTemplate`，仅为新模型记录缺省底座来源，并合并固定底座的 `send_user_message_async`、`clock` 到 `experimentalSupportedTools`，保留已有其他声明；官方底座读取和目录模板投影将已知来源模型身份改为通用助手身份，并保留独立审批中文回复要求及两项受控本地工具声明。主提示词保留来源正文与显式空值，不追加中文时钟指导；缺失辅助提示词沿用 `completeModelMessages`，原始快照及用户显式指令保留。`tool_mode`、`node_repl_auto_review_required`、`web_search_tool_type` 分别涉及执行架构、Guardian 审核策略及托管搜索格式，不作为本地工具前提自动继承。显式模板更新重新读取已保存底座；读取、普通编辑、删除及调整已有模型窗口不执行模板补全。
 - `model-catalog-base.json`：按项目锁定 Codex CLI 内置目录的原始顺序抽取第一个模型，保存为单模型固定快照，并记录实际模型 ID；不依赖固定名称。只有维护脚本显式 `--update-base --write` 才更新，不随 CLI 升级或 DS 维护刷新。源模型的上下文、思考等级、加速和工具声明不能视为第三方实际能力。
 - `model-catalog-deepseek-source.json` / `model-catalog-deepseek.json`：分别保存 DS 官方原始目录与提示词补全目录。保留 DS 已有字段，仅补缺失提示词及必要的 token-budget 配套结构；`approvals: null` 是明确允许继承基础审批提示词的例外。
 - `model-catalog-sources.json`：上述模板的 CLI 版本、来源和 SHA-256。四份快照由 `scripts/update-model-templates.mjs` 显式对比、校验、更新；基础快照供显式目录生成补全提示词，DS 补全目录供 CLP Flash 与 CP 导入，不采用某个 DS 账户设置。维护步骤见[DS 模板维护](../docs/deepseek.md#仓库模板维护)。

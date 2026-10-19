@@ -1,4 +1,4 @@
-import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
+import { aggregateProviderEnabled, aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
 import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import {
   loadConfiguredCustomPrimaryModelProvider,
@@ -16,7 +16,10 @@ export function resolveProviderSelection(value, {
     .map(({ provider, profileName }) => ({ providerId: provider, profileName })),
 } = {}) {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(value)) {
-    throw new Error("-p / --provider 必须指定 Provider ID、已配置的 sf- 名称或 agg");
+    throw new Error("-p / --provider 必须指定 Provider ID 或已配置的 sf- 名称");
+  }
+  if (!aggregateProviderEnabled && [aggregateProviderId, "agg", "sf-agg"].includes(value)) {
+    throw new Error("聚合模式暂时关闭，请选择独立 Provider；已有聚合会话和数据保留");
   }
   const profiles = [
     ...managedProfileDefinitions.map(({ id, profileName }) => ({ provider: id, profileName })),

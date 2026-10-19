@@ -478,7 +478,7 @@ function configuredCustomSwitchingProfileFromContent(
     Object.keys(profile).some((key) => !supportedProfileKeys.has(key))
     || profile.service_tier !== "default"
     || profile.model_reasoning_effort !== (reasoningEffort ?? undefined)
-    || (custom && profile.web_search !== "disabled")
+    || (custom && profile.web_search !== undefined && profile.web_search !== "disabled")
   ) {
     throw new Error("Codex 自定义切换 Provider Profile 包含不受支持的配置");
   }
@@ -689,7 +689,6 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
       model_provider: provider,
       ...(catalogSource.kind === "custom" ? {
         model_catalog_json: responsesProviderCatalogPath(environment, provider),
-        web_search: "disabled",
         model_reasoning_effort: catalogSource.reasoningEffort ?? "none",
       } : { model_reasoning_effort: customSwitchingDefaultReasoningEffort }),
       service_tier: "default",

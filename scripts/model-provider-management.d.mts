@@ -1,6 +1,15 @@
+export type ProviderWebSearchSetting = {
+  provider: string;
+  source: "provider" | "global";
+} & ({ status: "ready"; mode: "disabled" | "live" | "cached" | "indexed" | null }
+  | { status: "error"; error: "unreadable" | "invalid-document" | "invalid-mode" });
+
+export function loadProviderWebSearchSettings(state: ModelProviderManagementState, environment?: NodeJS.ProcessEnv): ProviderWebSearchSetting[];
+export function configuredWebSearchProviders(state: ModelProviderManagementState): string[];
+
 export interface ModelProviderManagementState {
   configVersion: string | number | null | undefined;
-  defaults: { model: string | null; reasoningEffort: string | null };
+  defaults: { model: string | null; reasoningEffort: string | null; webSearch: "disabled" | "cached" | "indexed" | "live" | null };
   primary: {
     id: string;
     displayName: string;
