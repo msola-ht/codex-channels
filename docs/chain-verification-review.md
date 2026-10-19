@@ -848,3 +848,49 @@ L03 已观察的渠道身份、目录/Thread、最终授权守卫继续适用。
 终端 SIGINT。WebUI 浏览器未启动，最终对话框、审计降级和取消清理失败仅核对源码；Windows/macOS
 IPC 未运行。以上隔离观察不等同于真实资产消费验收。本项修复同步用户指南与 Application 职责说明，
 不新增文档；正常提交执行既有静态门禁，提交后按既定顺序进入 L07。
+
+### L07 持久投递、确认与恢复
+
+**状态：已审查（附证据限制）。** L17 已提交 `2b587798`，类型、边界、Lint、文档索引及构建门禁通过（11.4 秒）。
+本项按清单追踪输出事件→投递箱事务→实时授权→平台确认→本地确认→重启恢复，另核对批量管理
+修订冲突与审批顺序屏障。复用 L03/L04 已有身份及审批证据；生产 Journal 使用隔离临时数据，
+不读取或修改用户投递箱，不发送真实平台消息。未完成的检查不计为已验收。
+
+**主代理链路核对与观察。** 已追踪 SurfaceManager 输出观察器→PersistentSurfaceOutput 快照及
+会话尾链→Coordinator→Journal，并检查平台调用前及 started 检查点后的授权复核。
+组合根 owner v2 同时绑定 Actor、所选/绑定 Workspace 目录和 Provider；正常释放 Thread 的有限例外
+不允许跨目标重绑。PersistentInteractionPort 等待前序投递占用原期限；L04 未变化的超时/失效证据继续适用。
+
+- 生产 PersistentSurfaceOutput、真实临时 Worker/SQLite 和本机 HTTP 接收端：正常正文收到 1 次并完成
+  confirmed 检查点及本地删除。HTTP 已收到但消费端报告响应丢失时，记录保留 uncertain；在 started
+  检查点前撤权时 HTTP 收到次数不增加，记录也保留 uncertain。重开实际数据库留下两条 uncertain、
+  attempt=1、只有 started 检查点，成功记录已移除。该观察使用隔离授权回调，不代表真实渠道送达。
+- 生产 Coordinator/Journal，单独将本地 acknowledge 结果设为 false：发送端调用 1 次，故障分类 storage，
+  执行准入 unavailable，记录仍 sending；重开转 uncertain，未再次调用发送端。显式允许保留记录释放
+  屏障后，后续同会话结果正常送达，旧记录仍计费保留。
+- 暂挂同会话第一条投递时，调用顺序为 first、其他会话 parallel，第二条尚未派发且屏障为 true；
+  释放后才调用 second。派发前撤权返回 blocked、authorization-changed，不调用发送端。
+  管理 ignore 用旧修订返回 false 且记录存在，用当前修订返回 true 后记录数/字节数均为 0。
+- 首次内联运行携带 `--input-type=module` 时 Worker 启动失败；改为 Node 原生 stdin 模块识别后运行成功。
+  没有据此改产品代码。各轮均关闭 Coordinator/Worker/HTTP 并删除本轮临时数据，未写验证脚本或测试。
+
+**存储独立审查。** Sol 只读覆盖 SQLite submit/ACK/recovery/resolveBatch、共用修订及密文认证、
+Journal 邮箱与 Worker 串行写入；主代理复核事务及状态转换关键位置。当前范围未发现新增必修问题。
+生产存储和真实 Worker 的隔离观察：
+
+- 账号、单条、全局容量分别拒绝 account-capacity、record-too-large、capacity，原 2 条/131082 bytes 不变。
+  pending ACK=false，sending ACK=true 后降为 1 条/65541 bytes；maintenance 保留 sending，runtime 重开
+  为 uncertain、attempt=1、started 检查点保留且 next=null。
+- reader/writer 修订一致；第二条修订改变后，整批 confirm=false，第一条仍存在且检查点不变；
+  重复 ID 批次 conflict。当前修订 retry=true，两条 pending、attempt 保留、检查点清空；旧修订再次失败，
+  旧修订读取正文返回 null。GCM AAD 绑定 schema/ID/账号/会话；隔离篡改账号后正文读取 null、writer 启动
+  storage，sending 不被恢复改写。
+- 公共 Journal→真实 Worker：第二写者启动 conflict；128 次提交成功，第 129 次 mailbox-full，
+  预留控制槽 summary 仍读到 128 条，available=true、故障回调 0；ACK 后剩 127 条，关闭后 available=false。
+  未知 schema 99 启动 storage，主库 SHA-256 和预设目录权限 750 不变。
+- 相关六个 dist 模块与当前 TypeScript 即时编译内容一致；观察用临时数据，所有读写连接、Worker
+  和临时目录均已关闭清理，未修改生产存储代码、未运行历史测试。
+
+**限制与交付。** 真实平台、断电/磁盘满、Worker 硬终止、Windows ACL 尚未实际观察；事务提交异常
+与部分取消边界仅据源码判断。平台 ACK 与本地事务没有跨系统原子性，不承诺恰好一次。记录既有链路
+证据并提交本项文档，不为没有确认缺陷的实现添加改动；随后进入 L08。
