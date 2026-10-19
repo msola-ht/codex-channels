@@ -614,7 +614,7 @@ export class CodexAppServerClient implements
         },
       }, { retryOverload: false });
       return toTurnStarted(response);
-    });
+    }, overrides.beforeSubmit);
   }
 
   async addQueueItem(
@@ -732,7 +732,7 @@ export class CodexAppServerClient implements
         },
       }, { retryOverload: false });
       return toTurnStarted(response);
-    });
+    }, beforeSubmit);
   }
 
   cancelPendingInput(threadId: string): boolean {
@@ -743,10 +743,11 @@ export class CodexAppServerClient implements
     threadId: string,
     input: TurnInput[],
     submit: (input: ReturnType<typeof toProtocolTurnInput>) => Promise<TurnStarted>,
+    beforeSubmit?: () => void,
   ): Promise<TurnStarted> {
     const protocolInput = toProtocolTurnInput(input);
     if (!this.imageUpload || !input.some(item => item.type === "image")) return submit(protocolInput);
-    return this.imageUpload.submit(threadId, protocolInput, submit);
+    return this.imageUpload.submit(threadId, protocolInput, submit, beforeSubmit);
   }
 
   async interruptTurn(threadId: string, turnId: string, beforeSubmit?: () => void): Promise<void> {

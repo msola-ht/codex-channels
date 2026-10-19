@@ -33,13 +33,22 @@ export class ImageReferenceUpload {
     for (const pending of this.pending.values()) pending.controller.abort(failure("图片发送已因连接关闭而取消。", "disconnected"));
   }
 
-  async submit<T>(threadId: string, input: UserInput[], submit: (input: UserInput[]) => Promise<T>): Promise<T> {
+  async submit<T>(threadId: string, input: UserInput[], submit: (input: UserInput[]) => Promise<T>, beforeSubmit?: () => void): Promise<T> {
     if (this.pending.has(threadId) || this.pending.size >= 4) {
       throw failure("图片上传繁忙，请稍后重试。");
     }
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]);
-    const pending: PendingUpload = { controller, signal, dirty: false,
+    let guardRejected = false;
+    const assertAllowed = () => {
+      try {
+        beforeSubmit?.();
+      } catch (error) {
+        guardRejected = true;
+        throw error;
+      }
+    };
+    const pending: PendingUpload = { controller, signal, assertAllowed, dirty: false,
       stage: "thread-read", startedAt: performance.now(), stageStartedAt: performance.now(), diagnosticId: randomUUID() };
     this.pending.set(threadId, pending);
     let dispatched = false;
@@ -107,7 +116,7 @@ export class ImageReferenceUpload {
       pending.signal.throwIfAborted();
       return await dispatch(converted);
     } catch (error) {
-      if (dispatched) throw error;
+      if (dispatched || guardRejected) throw error;
       const reason: unknown = pending.signal.aborted ? pending.signal.reason : error;
       const classified = classifyFailure(reason, pending.stage);
       throw new UserFacingError("image.reference.failed", classified.message, {
@@ -201,7 +210,7 @@ export class ImageReferenceUpload {
     const base = `${origin}/backend-api/files`;
     const created = await this.json(base, headers, {
       file_name: `image.${extension}`, file_size: bytes.length, use_case: "codex",
-    }, pending.signal);
+    }, pending);
     if (typeof created.file_id !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(created.file_id)
       || typeof created.upload_url !== "string") throw failure("图片上传服务返回无效编号或地址。", "invalid-response");
     let uploadUrl: URL;
@@ -218,7 +227,7 @@ export class ImageReferenceUpload {
     stage(pending, "file-finalize");
     const deadline = Date.now() + 30_000;
     for (;;) {
-      const finalized = await this.json(`${base}/${created.file_id}/uploaded`, headers, {}, pending.signal);
+      const finalized = await this.json(`${base}/${created.file_id}/uploaded`, headers, {}, pending);
       if (finalized.status === "success" && typeof finalized.download_url === "string") return created.file_id;
       if (finalized.status !== "retry") throw failure("图片上传完成确认响应无效。", "invalid-response");
       if (Date.now() >= deadline) throw failure("图片上传尚未完成，请稍后重新发送。");
@@ -232,6 +241,7 @@ export class ImageReferenceUpload {
     // Replay only the same blob PUT, never file creation or Turn submission.
     for (let attempt = 1; attempt <= 5; attempt++) {
       signal.throwIfAborted();
+      pending.assertAllowed();
       const clientRequestId = randomUUID();
       pending.transferDiagnostics = { host: url.hostname, attempt: String(attempt), clientRequestId };
       let retryAfter: number | undefined;
@@ -261,7 +271,10 @@ export class ImageReferenceUpload {
     }
   }
 
-  private async json(url: string, headers: Record<string, string>, body: object, signal: AbortSignal): Promise<Record<string, unknown>> {
+  private async json(url: string, headers: Record<string, string>, body: object, pending: PendingUpload): Promise<Record<string, unknown>> {
+    const { signal } = pending;
+    signal.throwIfAborted();
+    pending.assertAllowed();
     const response = await this.fetchImpl(url, { method: "POST", headers, body: JSON.stringify(body), redirect: "error", signal });
     return this.readJson(response);
   }
@@ -296,6 +309,7 @@ export class ImageReferenceUpload {
 interface PendingUpload {
   controller: AbortController;
   signal: AbortSignal;
+  assertAllowed(): void;
   identity?: { route: Routing; token: string };
   stage: UploadStage;
   startedAt: number;
