@@ -232,9 +232,9 @@ export async function removeCcgConfiguration({ accountId, confirmRemove = false 
     const current = loadManagedModelProviderSettings(environment)
       .find((item) => item.provider === definition.id);
     if (current === undefined) throw new Error("CCG 账户配置不完整");
+    const snapshots = snapshotProviderFiles(Object.values(paths), environment);
     const initial = await readInitialConfig(paths.backup, environment);
     if (!initial) throw new Error("CCG 账户初始配置备份缺失");
-    const snapshots = snapshotProviderFiles(Object.values(paths), environment);
     const updates = new Map([
       [paths.profile, undefined],
       [paths.marker, undefined],

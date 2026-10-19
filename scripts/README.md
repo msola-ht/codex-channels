@@ -369,9 +369,11 @@
 - `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go
   默认账户切换、运行实例停止与当前账户删除的无终端预览和执行接口；默认切换只更新注册表，
   停止明确区分未运行、Remote TUI 占用和已停止，删除在明确确认后保留私有备份并执行多文件回滚；
+  删除计划在监管器等待前捕获注册表、Profile、标记及固定模式恢复材料，停止前和写入前复核，拒绝覆盖等待期间的外部修改；
   删除默认账户前必须先指定其他默认账户；删除时仅清理账户配置与管理标记，保留共用模型目录与来源记录，固定模式账户只恢复其管理的主配置字段，保留无关子代理。
 - `opencode-go-account-provisioning.mjs` / `opencode-go-account-provisioning.d.mts`：提供 OpenCode Go
   账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、每个账户进入固定模式时的恢复基线更新与旧基线归档、Key 写入、切换/固定模式配置和多文件事务回滚；同一家可保留一个固定账户与其他切换账户。
+  执行计划在首次异步等待前捕获既有文件快照，目录下载和 CLI 校验后仍使用原快照，外部修改不会成为旧计划的新回滚基线。
   首次接入从官方模板生成共用目录，新增账户和重配均复用已有目录，不继承其他 Provider 的同名模型窗口。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
   （add/list/remove/default/stop，供 `codexc provider opencode-go` 调用）与 Setup 菜单；`list --json`

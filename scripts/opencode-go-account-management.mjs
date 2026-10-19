@@ -215,6 +215,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
   }
   let stopResult;
   try {
+    await assertProviderFileSnapshots(plan.snapshots);
     stopResult = await stopAccount(plan.account.id, {
       environment,
       loadAccounts: () => plan.accounts,
@@ -240,6 +241,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
   }
   const paths = plan.paths;
   try {
+    await assertProviderFileSnapshots(plan.snapshots);
     mkdirSync(paths.backupDirectory, { recursive: true, mode: 0o700 });
     const profile = await readOptionalProviderFile(paths.profilePath, environment);
     if (profile !== undefined) {
@@ -259,13 +261,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
         runtime: stopResult.action,
       });
     }
-    const transactionPaths = [
-      opencodeGoAccountsFilePath(environment),
-      paths.profilePath,
-      paths.markerPath,
-    ];
-    if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
-    const snapshots = snapshotProviderFiles(transactionPaths, environment);
+    const snapshots = plan.snapshots;
     let guards = snapshots;
     try {
       await assertProviderFileSnapshots(guards);
@@ -413,6 +409,17 @@ async function buildRemovalPlan(
     );
   }
   const mode = marker.mode;
+  // Capture the files that produced the plan before any supervisor/baseline wait.
+  // A later snapshot must not legitimize overwriting an externally changed registry.
+  const transactionPaths = [
+    opencodeGoAccountsFilePath(environment),
+    paths.profilePath,
+    paths.markerPath,
+  ];
+  if (mode === "exclusive") {
+    transactionPaths.push(paths.configPath, join(paths.backupDirectory, "config.toml"));
+  }
+  const snapshots = snapshotProviderFiles(transactionPaths, environment);
   if (mode === "exclusive") {
     const initialConfig = await readOpencodeGoRestoreBaseline(paths, environment);
     if (initialConfig === undefined) {
@@ -440,6 +447,7 @@ async function buildRemovalPlan(
     restoresInitialConfig: mode === "exclusive",
     stop,
     paths,
+    snapshots,
   };
 }
 
@@ -458,13 +466,7 @@ async function applyLastAccountRemovalFiles(
       "删除最后一个 OpenCode Go 固定账户需要安装前配置备份；未找到备份，无法安全恢复官方主配置",
     );
   }
-  const transactionPaths = [
-    opencodeGoAccountsFilePath(environment),
-    paths.profilePath,
-    paths.markerPath,
-  ];
-  if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
-  const snapshots = snapshotProviderFiles(transactionPaths, environment);
+  const snapshots = plan.snapshots;
   let guards = snapshots;
   try {
     await assertProviderFileSnapshots(guards);
