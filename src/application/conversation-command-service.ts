@@ -494,7 +494,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         return {
           kind: "workspaces",
           workspaces: this.conversations.listWorkspaces(),
-          currentWorkspaceId: this.conversations.status(target).workspaceId,
+          currentWorkspaceId: this.conversations.selectedWorkspaceId(target),
         };
       }
       case "stop": {

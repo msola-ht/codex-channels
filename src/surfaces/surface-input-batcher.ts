@@ -47,6 +47,7 @@ export interface SurfaceInputBatcherOptions {
 type SubmitConversationInput = (
   target: ConversationTarget,
   input: string | ConversationInput,
+  actorId: string,
 ) => Promise<Submission>;
 
 interface PendingPart extends SurfaceInputPart {
@@ -260,7 +261,7 @@ export class SurfaceInputBatcher {
             text,
             images: images.map(({ url }) => ({ url })),
           };
-      const submission = await this.submit(batch.target, value);
+      const submission = await this.submit(batch.target, value, parts[0]!.actorId);
       parts.forEach((part, index) => {
         part.resolve({
           submission,

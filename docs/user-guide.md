@@ -161,6 +161,8 @@ Codex 原生审批方式不依赖 Gateway 的 Provider 或模型资格白名单�
 未确认时不会自动重试，应重新用 `/autoreview` 核对实际状态。
 
 Workspace 只保存目录身份，不另存沙箱、审批策略、Permission Profile 或审批方式。
+已选择的 Workspace 被移除后，渠道输入会明确拒绝，不自动切换到默认目录；使用 `/workspace` 查看列表，
+再用 `/workspace <序号、ID 或名称>` 显式选择当前注册的工作区。
 渠道新会话由目标 App Server 按授权目录加载原生配置；恢复、重连和分叉遵循原生 Thread 权限继承规则，
 不会强制重置为当前项目默认。当前会话实际审批方式仍由 `/status`、`/autoreview` 及生命周期卡片展示。
 本机 CLI 与 WebUI 的 Codex 权限设置修改原生用户层配置；项目级差异使用受信任的 `.codex/config.toml`。

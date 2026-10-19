@@ -145,3 +145,35 @@ Astra 已对基线 `1b198105` 上的初稿完成只读文档审查，确认四�
 不把取消排队任务等同服务执行成功。修改不涉及持久 Schema 或用户数据迁移。
 本项提交主题为 `fix(webui): 补齐管理确认与任务审计边界`，静态检查由提交钩子执行。
 下一项按顺序为 L03；其余 L02–L19 尚未在本轮完成。
+
+### L03 Actor、Workspace 与异步授权
+
+状态：进行中。L03-F1/F2 已修复，命令链 L03-F3 尚待修复与验收，不能视为整项通过。
+基线 `15e3322b`。主代理检查 Registry、Router、Application、Client 与热加载分类；
+Sol 子代理只读检查三个 Surface 到 Application 的输入授权，并负责限定四个 Surface 文件的授权传递修复。
+
+| 发现 | 触发与影响 | 修复或剩余工作 |
+| --- | --- | --- |
+| L03-F1 失效工作区静默回退 | 保存的 Workspace ID 已移除，`Router.workspace` 自动改选默认目录，后续请求改变执行范围 | 改为 `workspace.missing` 且不改原选择；列表只读显示保存的 ID，显式选择有效项后恢复 |
+| L03-F2 普通输入授权丢失 | 聚合回调丢弃 Actor；下载、锁等待或 Provider/图片准备期间撤权，旧请求仍可提交 | 批次保留 Actor，三个渠道五处普通提交传实时授权；Application 固定 Workspace 并在锁内复核，Thread 新建/恢复及 Turn start/steer 保留最终守卫；迟到新订阅清理，不写回失效绑定 |
+| L03-F3 命令授权未贯穿 | 部分 Telegram 按钮未传 Actor，通用命令即使传 Actor 也未统一约束后续等待、RPC 和本地偏好写入 | 待处理；须逐个关联 Queue、模型选择、恢复/接管等副作用与补偿，不能用入口一次检查代替 |
+
+**已观察的隔离路径。** 使用生产 Router、内存 BindingStore、Application 和指定注入端口，无真实用户数据：
+
+- 修复前保存 `removed`，调用 `workspace` 得到默认 `safe`，保存值也变为 `safe`。
+  修复后返回 `workspace.missing`，保存值仍为 `removed`；生产命令 `/workspace` 返回有效列表及
+  原选择 ID，生产 `selectWorkspace('safe')` 成功；任意绝对目录选择被 `workspace.selector.not-found` 拒绝，原选择不变。
+- 生产 ConversationService 使用受控 Turn 端口，在一个请求进入提交等待、另一个请求排队后撤权：
+  两者均以 `input.authorization-changed` 拒绝，写入次数 `0`；重新授权的同一入口取得 `threadId=t/turnId=turn/steered=true`，写入一次。
+  这是 Application 等待边界观察，不代表真实上游网络已验收。
+- 生产微信 Adapter→ConversationService→Codex Client→隔离 RPC 端口：合法文字产生一次 `turn/steer`，
+  撤权后的文字不增加 RPC；Client 的 start/steer/resume 最终守卫拒绝时均不调用 RPC。
+  撤权提示实际为“输入授权或工作区已变化，本次输入未继续提交”，不再误报没有会话。
+  不发送平台消息、不调用真实模型。
+- 生产 Router 的新建请求已发出后才撤权：受控响应返回时执行一次新订阅取消，返回撤权错误，
+  BindingStore 无新绑定。没有重发创建或删除官方 Thread。
+
+**已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
+Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。
+当前记录没有真实平台撤权或 Windows/macOS 观察。L03-F3、输入关联异步交互及最终整项验收未完成，
+后续仍留在 L03，不跳到 L02。

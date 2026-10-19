@@ -59,6 +59,8 @@ export function formatSurfaceUserFacingError(
       return "文本附件暂存空间已满，请稍后重试或发送较小片段";
     case "message.empty":
       return "消息不能为空";
+    case "input.authorization-changed":
+      return "输入授权或工作区已变化，本次输入未继续提交；请核对权限和工作区后重新发送";
     case "oauth.closing":
       return "飞书用户授权正在关闭，请稍后重试";
     case "conversation.name.invalid":

@@ -270,7 +270,11 @@ export class TelegramSurface {
     });
     this.output = this.outbox;
     this.inputs = new SurfaceInputBatcher(
-      (inputTarget, input) => service.submit(inputTarget, input),
+      (inputTarget, input, actorId) => service.submit(
+        inputTarget,
+        input,
+        () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
+      ),
       {
         quietWindowMs: options.inputQuietWindowMs ?? 1_000,
       },

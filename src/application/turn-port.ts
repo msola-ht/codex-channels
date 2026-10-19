@@ -70,6 +70,7 @@ export interface TurnExecutionPort {
     turnId: string,
     input: TurnInput[],
     clientUserMessageId: string,
+    beforeSubmit?: () => void,
   ): Promise<TurnStarted>;
   interruptTurn(threadId: string, turnId: string, beforeSubmit?: () => void): Promise<void>;
   setThreadName(threadId: string, name: string): Promise<void>;

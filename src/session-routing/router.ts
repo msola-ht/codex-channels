@@ -97,12 +97,11 @@ export class SessionRouter {
   ) {}
 
   workspace(target: ConversationTarget): Workspace {
-    const workspaceId = this.bindings.getWorkspace(target) ?? this.workspaces.defaultWorkspaceId;
-    const workspace = this.workspaces.get(workspaceId) ?? this.workspaces.default();
-    if (workspace.id !== workspaceId) {
-      this.bindings.selectWorkspace(target, workspace.id);
-    }
-    return workspace;
+    return this.workspaces.require(this.selectedWorkspaceId(target));
+  }
+
+  selectedWorkspaceId(target: ConversationTarget): string {
+    return this.bindings.getWorkspace(target) ?? this.workspaces.defaultWorkspaceId;
   }
 
   listWorkspaces(): Workspace[] {
@@ -399,6 +398,7 @@ export class SessionRouter {
     startOptions: ThreadStartOptions = {},
     onRestored?: (binding: ConversationBinding, thread: ThreadSnapshot) => void,
   ): Promise<ConversationBinding> {
+    startOptions.beforeSubmit?.();
     const current = this.bindings.get(target);
     if (current) {
       const pending = this.threadLifecycleQueues.get(current.threadId);
@@ -407,6 +407,7 @@ export class SessionRouter {
         return this.ensure(target, startOptions, onRestored);
       }
       const thread = await this.codex.readThread(current.threadId);
+      startOptions.beforeSubmit?.();
       if (!this.sameBinding(current, this.bindings.get(target))
         || this.threadLifecycleQueues.has(current.threadId)) {
         return this.ensure(target, startOptions, onRestored);
@@ -435,7 +436,8 @@ export class SessionRouter {
           throw new UserFacingError("conversation.busy", "会话订阅正在恢复，请稍后重试", { reason: "subscription-restoring" });
         }
         const failures = await this.restoreSubscriptions((_target, binding) =>
-          this.sameBinding(current, binding), onRestored);
+          this.sameBinding(current, binding), onRestored,
+        () => startOptions.beforeSubmit ? { beforeSubmit: startOptions.beforeSubmit } : {});
         if (failures[0]) throw failures[0].error;
         const restored = this.bindings.get(target);
         if (restored && this.sameBinding(current, restored)
@@ -449,6 +451,7 @@ export class SessionRouter {
     this.bindings.selectWorkspace(target, workspace.id);
     if (!this.shouldForceNew(target)) {
       const sessions = await this.list(target);
+      startOptions.beforeSubmit?.();
       const candidate = sessions.find(
         (thread) =>
           thread.status.type !== "active"
@@ -492,6 +495,8 @@ export class SessionRouter {
         ? { dynamicTools: this.dynamicTools }
         : {}),
     });
+    try { startOptions.beforeSubmit?.(); }
+    catch (error) { await this.cleanupFailedResume(started.thread.id, error, false); }
     this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier, "default", started.approvalsReviewer);
     this.namesByThread.set(started.thread.id, started.thread.name);
     this.contextCompactionItemIdsByThread.set(
@@ -725,6 +730,8 @@ export class SessionRouter {
     }
     const threadId = thread.id;
     const session = await this.codex.resumeThread(threadId, workspace.cwd, options);
+    try { options.beforeSubmit?.(); }
+    catch (error) { await this.cleanupFailedResume(threadId, error, preserveSubscription); }
     if (isCurrent && !isCurrent()) {
       await this.cleanupFailedResume(threadId, new SupersededRestoreError(), this.bindings.getByThread(threadId) !== undefined);
     }
@@ -986,7 +993,7 @@ export class SessionRouter {
     return this.withThreadLifecycle(current ? [current.threadId] : [], async () => {
       this.assertLifecycleCurrent(target, current);
       const workspace = this.workspaces.require(workspaceId);
-      if (this.workspace(target).id === workspace.id) {
+      if (this.selectedWorkspaceId(target) === workspace.id) {
         return workspace;
       }
       await this.detachUnlocked(target, preference);

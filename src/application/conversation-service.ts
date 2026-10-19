@@ -225,7 +225,7 @@ export interface PreparedAttachmentSubmission {
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
   prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio"): PreparedAttachmentSubmission;
-  submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission>;
+  submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean): Promise<Submission>;
   stop(target: ConversationTarget): Promise<boolean>;
   rename(target: ConversationTarget, name: string): Promise<void>;
   setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean>;
@@ -331,6 +331,7 @@ export interface ConversationSessionUseCases {
   unarchive(target: ConversationTarget, selector: string): Promise<string>;
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
   listWorkspaces(): Workspace[];
+  selectedWorkspaceId(target: ConversationTarget): string;
   selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace>;
   releaseThread(
     target: ConversationTarget,
@@ -592,7 +593,7 @@ export class ConversationService implements
     return this.accountMetrics.requestMetrics(target, query);
   }
 
-  submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
+  async submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean): Promise<Submission> {
     let input: TurnInput[];
     try {
       input = normalizeInput(value);
@@ -604,7 +605,18 @@ export class ConversationService implements
     if (input.length === 0) {
       return Promise.reject(new UserFacingError("message.empty", "消息不能为空"));
     }
-    return this.submitInput(target, input);
+    const workspace = this.router.workspace(target);
+    const assertAllowed = () => {
+      const current = this.router.workspace(target);
+      if (isAllowed?.() === false || current.id !== workspace.id || current.cwd !== workspace.cwd) {
+        throw new UserFacingError("input.authorization-changed", "输入授权或工作区已变化，请重新发送。");
+      }
+    };
+    assertAllowed();
+    return this.locked(target, () => {
+      assertAllowed();
+      return this.submitInputLocked(target, input, undefined, assertAllowed, assertAllowed);
+    });
   }
 
   closeSessionQueries(): void {
@@ -680,7 +692,7 @@ export class ConversationService implements
           }
           // Once the RPC may start, a lost acknowledgment must not delete its file.
           mayHaveSubmitted = true;
-        });
+        }, assertAllowed);
       }),
     };
   }
@@ -697,7 +709,7 @@ export class ConversationService implements
       if (input.length === 0) {
         throw new UserFacingError("message.empty", "回答不能为空");
       }
-      return this.submitInputLocked(target, input, undefined, assertCurrent);
+      return this.submitInputLocked(target, input, undefined, assertCurrent, assertCurrent);
     });
   }
 
@@ -862,7 +874,9 @@ export class ConversationService implements
     input: TurnInput[],
     identity?: TurnStartIdentity,
     assertCurrent?: (threadId: string) => void,
+    assertAuthorized?: () => void,
   ): Promise<Submission> {
+    assertAuthorized?.();
     this.touchActivity(target);
     if (input.some((item) => item.type === "image")) {
       await this.models.requireInputModality(target, "image");
@@ -876,14 +890,15 @@ export class ConversationService implements
       assertCurrent?.(active.threadId);
       this.sessionQueries.invalidateSessionDisplayCache(active.threadId);
       try {
-        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
+        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId,
+          () => { assertAuthorized?.(); assertCurrent?.(active.threadId); });
       } catch (error) {
         this.recordTurnError("steer", target, active.threadId, active.turnId, error);
         throw error;
       }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
-    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent);
+    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized);
   }
 
   queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem> {
@@ -1218,6 +1233,10 @@ export class ConversationService implements
     return this.router.listWorkspaces();
   }
 
+  selectedWorkspaceId(target: ConversationTarget): string {
+    return this.router.selectedWorkspaceId(target);
+  }
+
   selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace> {
     return this.locked(target, async () => {
       this.requireIdle(target);
@@ -1228,7 +1247,7 @@ export class ConversationService implements
         );
       }
       const selected = this.router.resolveWorkspace(selector);
-      const currentWorkspaceId = this.router.workspace(target).id;
+      const currentWorkspaceId = this.router.selectedWorkspaceId(target);
       const current = this.router.current?.(target);
       if (current && currentWorkspaceId !== selected.id
         && await this.probeNativeQueueItems(current.threadId)) {
@@ -1600,10 +1619,13 @@ export class ConversationService implements
     return gitBranch ? { ...status, gitBranch } : status;
   }
 
-  private async ensureSession(target: ConversationTarget, requireIdle = false) {
+  private async ensureSession(target: ConversationTarget, requireIdle = false, assertAuthorized?: () => void) {
+    assertAuthorized?.();
     await this.models.validateUnboundPreference?.(target);
+    assertAuthorized?.();
     const preference = !this.router.current?.(target) ? this.models.capturePreference?.(target) : undefined;
-    const options = this.models.threadStartOptions?.(target) ?? {};
+    const options = { ...this.models.threadStartOptions?.(target),
+      ...(assertAuthorized ? { beforeSubmit: assertAuthorized } : {}) };
     const current = this.router.current(target);
     const activity = current ? this.core.trackThreadActivity(current.threadId) : undefined;
     try {
@@ -1628,9 +1650,10 @@ export class ConversationService implements
     clientUserMessageId: string,
     identity?: TurnStartIdentity,
     assertCurrent?: (threadId: string) => void,
+    assertAuthorized?: () => void,
   ): Promise<Submission> {
     this.touchActivity(target);
-    const binding = await this.ensureSession(target, true);
+    const binding = await this.ensureSession(target, true, assertAuthorized);
     // Subscription restoration can publish an active Turn while ensure waits.
     // Do not start a new Turn using the idle decision made before that await.
     if (this.core.activeTurn(target)) {
@@ -1661,7 +1684,7 @@ export class ConversationService implements
         input,
         clientUserMessageId,
         workspace.cwd,
-        overrides,
+        { ...overrides, beforeSubmit: () => { assertAuthorized?.(); assertCurrent?.(binding.threadId); } },
       );
     } catch (error) {
       this.recordTurnError("start", target, binding.threadId, null, error);

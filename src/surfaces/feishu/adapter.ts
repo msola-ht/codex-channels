@@ -128,7 +128,12 @@ export class FeishuConversationAdapter {
     } = { quietWindowMs: 0 },
   ) {
     this.inputs = new SurfaceInputBatcher(
-      (target, input) => conversations.submit(target, input),
+      (target, input, actorId) => conversations.submit(
+        target,
+        input,
+        () => !this.videoCancellation.signal.aborted
+          && this.inputOptions.access?.isAllowed({ target, actorId }) === true,
+      ),
       inputOptions,
     );
   }
@@ -278,6 +283,8 @@ export class FeishuConversationAdapter {
         () => this.conversations.submit(
           message.target,
           formatQuotedInput(message.text, quotedText),
+          () => !this.videoCancellation.signal.aborted
+            && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
         ),
       );
       this.settleTurnReplyTarget(

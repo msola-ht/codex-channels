@@ -6,6 +6,10 @@
 
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 
+普通消息的 `submit` 接收 Surface 提供的实时授权闭包，在等待会话锁、Thread 准备及最终 Turn 写入前复核；
+输入同时固定接收时的 Workspace ID 与目录，变化时拒绝。图片准备后的 start/steer 也保留最终守卫。
+已经提交的请求仍按实际结果结算，不因后续撤权自动重试或丢弃响应。
+
 Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的禁用档位回到 Standard，保存偏好与显式待生效覆盖在提交前复核，失效时拒绝并要求用户重新选择，不清除保存数据或重解释已有 Thread 的实际设置。
 
 ## 文件

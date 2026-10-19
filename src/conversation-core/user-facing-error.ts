@@ -13,6 +13,7 @@ export type UserFacingErrorCode =
   | "hooks.review-expired"
   | "hooks.forbidden"
   | "message.empty"
+  | "input.authorization-changed"
   | "oauth.closing"
   | "attachment.too-many"
   | "attachment.too-large"

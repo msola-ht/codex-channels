@@ -108,6 +108,7 @@ export class WeixinConversationAdapter {
   private readonly inputs: SurfaceInputBatcher;
   private readonly handlingLocks = new Map<string, Promise<void>>();
   private nextSequence = 0;
+  private closed = false;
 
   constructor(
     private readonly conversations: Pick<
@@ -131,7 +132,11 @@ export class WeixinConversationAdapter {
     private readonly videos?: Pick<WeixinVideoStore, "download" | "retain" | "discard">,
   ) {
     this.inputs = new SurfaceInputBatcher(
-      (target, input) => conversations.submit(target, input),
+      (target, input, actorId) => conversations.submit(
+        target,
+        input,
+        () => !this.closed && this.inputOptions.isAllowed?.(target, actorId) === true,
+      ),
       inputOptions,
     );
   }
@@ -342,6 +347,8 @@ export class WeixinConversationAdapter {
         await this.conversations.submit(
           message.target,
           formatQuotedInput(message.text, message.quotedText),
+          () => !this.closed && !signal?.aborted
+            && this.inputOptions.isAllowed?.(message.target, message.actorId) === true,
         );
         return;
       }
@@ -446,6 +453,7 @@ export class WeixinConversationAdapter {
   }
 
   close(): Promise<void> {
+    this.closed = true;
     return this.inputs.close();
   }
 

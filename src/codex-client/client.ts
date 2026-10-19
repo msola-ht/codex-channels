@@ -526,6 +526,7 @@ export class CodexAppServerClient implements
     cwd: string,
     options: ThreadStartOptions = {},
   ): Promise<ThreadResumeSession> {
+    options.beforeSubmit?.();
     const settings = {
       cwd,
       ...(options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy }),
@@ -707,8 +708,10 @@ export class CodexAppServerClient implements
     turnId: string,
     input: TurnInput[],
     clientUserMessageId: string,
+    beforeSubmit?: () => void,
   ): Promise<TurnStarted> {
     return this.submitTurnInput(threadId, input, async (protocolInput) => {
+      beforeSubmit?.();
       const response = await this.rpc.request<TurnSteerResponse>({
         method: "turn/steer",
         params: {
