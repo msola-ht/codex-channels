@@ -977,3 +977,50 @@ recheck→指标收尾的调用链；真实本机 Relay HTTP 与本机合成上�
 **限制与交付。** 不穷举所有 custom/namespace/tool_search/reasoning/图片组合；合成图片仅验证
 转换形状，不验证解码或模型理解；未等待生产 300 秒空闲期限，未调用真实模型。两个独立观察 HTTP
 服务已关闭，无待收集作业。本项只提交既有文档证据，后续按顺序进入 L10。
+
+### L10 指标接收、写入与范围消费
+
+**状态：已审查（附证据限制）。** L09 已提交 `bdec8d48`，文档与索引门禁通过。本项沿指标 IPC→有界 Writer→
+SQLite→范围查询/完成卡核对，复用 U13 未变化的运行树选择与 L09 单次出站指标证据。隔离数据观察
+不得操作真实指标库，接收确认不得写成持久化成功。
+
+**L10-F1，已修复。** Writer 将入队拒绝统一记为 sequence=0；统计固定初始水位后、等待数据库
+范围解析期间的新拒绝，也会被视为水位内失败。生产 Writer 隔离存储观察：初始无写入的范围查询
+等待期间，同范围超预算样本被拒绝，原查询和后续查询均 false；原查询应不受后来输入影响。
+现分别记录接收序号和拒绝观察序号，等待起点捕获二者；同范围失败仍按最早证据合并，
+容量溢出的保守失败也按两类水位归属。没有改持久格式、IPC 或范围查询合同。
+
+修复后生产 Writer 隔离 Store 实际输出：late-rejection 的 initial=true/later=false；初始已接收
+批次写入失败 initial/later 均 false；无关 Thread 和审查用途失败不污染普通范围（均 true）。
+取消等待返回 cancelled，实际写入仍完成、后续水位 true。10001 个不同失败范围超过容量后，
+更早已固定水位仍 true，之后的查询保守 false；未扩大内存上限。
+已核对 Bootstrap 完成卡消费者：审查用途未持久化降级 usage.coverage，普通 task/session 未持久化
+不返回伪完整汇总；U13 的父子 Turn 范围/循环去重证据继续适用，相关查询实现没有变化。
+
+私有 IPC→Writer→SQLite 的独立报告已收集并与当前改动核对；未观察真实平台完成卡或用户指标库。
+
+**L10-F2，已修复。** Relay 指标 IPC 将 responseFormat/status/deliveryStatus/traffic.label
+用 String 强转检查枚举，却保留原值入队。Sol 用真实私有 IPC 同时发 status=["completed"] 的畸形
+Relay、正常 Relay、正常 Provider，得到 accepted/accepted/ok；同一批三条 SQLite 全回滚、rows=0，
+正常 Provider 轮次水位 false，报参数 10 无法绑定。现四字段均先要求 string，再检查枚举，
+在跨进程输入边界拒绝畸形值，不通过弱化 SQLite 或拆分重试掩盖坏批次。
+
+修复后 Sol 分别经生产 RelayMetricsServer 和 RelayMetricsComposition 发送四种数组，全部
+rejected/invalid_sample，receiveCount=0、authorizationCount=0；正常及重复 UUID 均 accepted，
+真实 SQLite 仅 1 行、outputTokens=1、后台错误为空。主代理核对了四处差异、组合根投影与
+Owned/shared diagnostics 同类校验，后者本已严格检查类型，不传播无必要改动。
+
+**其他独立实际证据。** 使用当前 Writer、真实私有 IPC/SQLite 和固定材料快照执行生产鉴权：
+
+- 暂缓 SQLite 提交时，全部接收确认已返回但库仍 0 行；放行后为 3 行。accepted/ok 只证明入队。
+- Provider 帧伪造 provider/source/callerId/relayRequestId/recordedAtMs，落库仍为组合根 provider p、
+  source=owned、Relay 身份列为空和实际记录时间。Relay envelope/sample Provider 不一致拒绝；
+  当前上限 3 的未来代次 4 拒绝，当前旧代次 2 和 retired 旧代次 1 按已签发历史结算合同受理，
+  未注册 Provider 返回 unknown_provider。
+- 多个独立连接重复同 UUID，后发样本把输出 Token 7 改为 999，提交前后重复均受理但最终仍只有
+  首条 outputTokens=7，不覆盖或重复计数。唯一索引及 ON CONFLICT DO NOTHING 语义未变。
+
+**限制与交付。** 材料 Reader 用进程内固定快照，未读取用户配置；未实机观察 Windows ACL、
+材料 Worker 读取或真实平台完成卡。Worker 致命故障/退出归属续由 L12 核对，不以当前隔离 Store
+失败观察代替真实 Worker 故障。自有接收器、Writer、SQLite 和临时目录均已关闭清理。本项同步
+两模块说明，仅提交两处修复及证据；下一项 L11。
