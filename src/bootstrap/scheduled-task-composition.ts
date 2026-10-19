@@ -142,8 +142,8 @@ export class ScheduledTaskComposition {
         && options.bindings.actors(target).includes(actorId),
       isProviderConfigured: (provider) => options.codex.isProviderConfigured(provider),
       creationContext: (target) => options.creationContext(target),
-      readPermissionSettings: (cwd, provider, signal) =>
-        options.codex.readUnattendedPermissionSettings(cwd, provider, signal),
+      readPermissionSettings: (cwd, provider, signal, beforeSubmit) =>
+        options.codex.readUnattendedPermissionSettings(cwd, provider, signal, beforeSubmit),
       runTaskNow: (taskId, operation) => this.scheduler.runTaskNow(taskId, undefined, operation),
       retryRun: (runId, operation) => this.scheduler.retryRun(runId, undefined, operation),
     }, Date.now);

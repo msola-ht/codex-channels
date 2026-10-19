@@ -55,7 +55,7 @@ export interface ScheduledTaskCreationContext {
 export interface ScheduledTaskApplicationPort {
   isActorAuthorized(target: ConversationTarget, actorId: string): boolean;
   creationContext(target: ConversationTarget): ScheduledTaskCreationContext;
-  readPermissionSettings(cwd: string, modelProvider: string, signal?: AbortSignal): Promise<{
+  readPermissionSettings(cwd: string, modelProvider: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<{
     readonly sandbox: ScheduledTaskSandbox;
     readonly permissions: null;
   }>;
@@ -249,6 +249,14 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       context.cwd,
       modelSelection.modelProvider,
       operation?.signal,
+      () => {
+        operation?.assertCurrent();
+        this.requireActor(target, actorId);
+        if (!sameCreationContext(context, this.requireCreationContext(target))
+          || !this.application.isProviderConfigured(modelSelection.modelProvider)) {
+          throw scheduledError("scheduled-task.state.invalid", "计划任务创建上下文已变化，请重新预览");
+        }
+      },
     );
     operation?.assertCurrent();
     this.requireActor(target, actorId);
@@ -347,6 +355,15 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
         current.cwd,
         confirmation.input.modelProvider,
         operation?.signal,
+        () => {
+          operation?.assertCurrent();
+          this.requireActor(target, actorId);
+          if (confirmation.expiresAt < this.now()
+            || !sameCreationContext(current, this.requireCreationContext(target))
+            || !this.application.isProviderConfigured(confirmation.input.modelProvider)) {
+            throw scheduledError("scheduled-task.confirmation.invalid", "计划任务创建上下文已变化，请重新预览");
+          }
+        },
       );
       operation?.assertCurrent();
       this.requireActor(target, actorId);

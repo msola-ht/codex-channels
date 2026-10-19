@@ -325,14 +325,29 @@ export class ProviderRoutingClient {
   async listThreads(
     ...args: Parameters<ProviderClientInstance["listThreads"]>
   ): ReturnType<ProviderClientInstance["listThreads"]> {
+    const beforeSubmit = args[1]?.beforeSubmit;
+    let guardFailure: { error: unknown } | undefined;
+    const checkCurrent = beforeSubmit ? () => {
+      if (guardFailure) throw guardFailure.error;
+      try { beforeSubmit(); }
+      catch (error) {
+        guardFailure = { error };
+        throw error;
+      }
+    } : undefined;
+    checkCurrent?.();
+    const options = { ...args[1], ...(checkCurrent ? { beforeSubmit: checkCurrent } : {}) };
     const providers = [...this.clients.keys()].filter((provider) =>
       provider === this.primaryProvider || this.connectedProviders.has(provider));
     const results = await Promise.allSettled(providers.map((provider) =>
-      this.withProviderOperation(provider, async () => ({
-        provider,
-        threads: await (await this.ensureClient(provider)).listThreads(...args),
-      }))
+      this.withProviderOperation(provider, async () => {
+        checkCurrent?.();
+        const client = await this.ensureClient(provider);
+        checkCurrent?.();
+        return { provider, threads: await client.listThreads(args[0], options) };
+      })
     ));
+    checkCurrent?.();
     const pages = results.flatMap((result) =>
       result.status === "fulfilled" ? [result.value] : []
     );
@@ -773,13 +788,17 @@ export class ProviderRoutingClient {
     cwd: string,
     modelProvider = this.primaryProvider,
     signal?: AbortSignal,
+    beforeSubmit?: () => void,
   ): ReturnType<ProviderClientInstance["readUnattendedPermissionSettings"]> {
     signal?.throwIfAborted();
+    beforeSubmit?.();
     return this.withProviderActivity(modelProvider, async () => {
       signal?.throwIfAborted();
+      beforeSubmit?.();
       const client = await this.untilClosed(() => this.ensureClient(modelProvider), signal);
       signal?.throwIfAborted();
-      return client.readUnattendedPermissionSettings(cwd, signal);
+      beforeSubmit?.();
+      return client.readUnattendedPermissionSettings(cwd, signal, beforeSubmit);
     }, signal);
   }
 
@@ -882,7 +901,7 @@ export class ProviderRoutingClient {
   accountUsage(
     ...args: Parameters<ProviderClientInstance["accountUsage"]>
   ): ReturnType<ProviderClientInstance["accountUsage"]> {
-    return this.withPrimaryActivity((client) => client.accountUsage(...args));
+    return this.withPrimaryActivity((client) => client.accountUsage(...args), args[0]);
   }
 
   openAiAccountRoute(
@@ -894,13 +913,13 @@ export class ProviderRoutingClient {
   accountThreadUsage(
     ...args: Parameters<ProviderClientInstance["accountThreadUsage"]>
   ): ReturnType<ProviderClientInstance["accountThreadUsage"]> {
-    return this.callForThread(args[0], (client) => client.accountThreadUsage(...args));
+    return this.callForThread(args[0], (client) => client.accountThreadUsage(...args), args[1]);
   }
 
   accountRateLimits(
     ...args: Parameters<ProviderClientInstance["accountRateLimits"]>
   ): ReturnType<ProviderClientInstance["accountRateLimits"]> {
-    return this.withPrimaryActivity((client) => client.accountRateLimits(...args));
+    return this.withPrimaryActivity((client) => client.accountRateLimits(...args), args[0]?.beforeSubmit);
   }
 
   lunaReserveModel(
@@ -927,7 +946,7 @@ export class ProviderRoutingClient {
   listPermissionProfiles(
     ...args: Parameters<ProviderClientInstance["listPermissionProfiles"]>
   ): ReturnType<ProviderClientInstance["listPermissionProfiles"]> {
-    return this.withPrimaryActivity((client) => client.listPermissionProfiles(...args));
+    return this.withPrimaryActivity((client) => client.listPermissionProfiles(...args), args[1]);
   }
 
   private withPrimaryActivity<T>(
@@ -1085,13 +1104,13 @@ export class ProviderRoutingClient {
             .find((item) => item.id === threadId);
         }
         return candidate;
-      });
+      }, beforeSubmit);
       if (thread) {
         this.rememberThread(thread);
         return thread.modelProvider;
       }
     }
-    const thread = await this.withPrimaryActivity((client) => client.readThread(threadId, undefined, beforeSubmit));
+    const thread = await this.withPrimaryActivity((client) => client.readThread(threadId, undefined, beforeSubmit), beforeSubmit);
     this.rememberThread(thread);
     return thread.modelProvider;
   }
@@ -1104,6 +1123,7 @@ export class ProviderRoutingClient {
     const provider = await this.resolveThreadProvider(threadId, undefined, beforeSubmit);
     beforeSubmit?.();
     return this.withProviderActivity(provider, async () => {
+      beforeSubmit?.();
       const client = await this.ensureClient(provider);
       beforeSubmit?.();
       return operation(client);

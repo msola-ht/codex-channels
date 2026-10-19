@@ -36,8 +36,8 @@ export function createOpencodeGoAccountAdapter(
   const provider = options.provider ?? defaultOpencodeGoProvider(environment);
   return {
     provider,
-    async accountUsage(signal) {
-      const query = new AccountQuery("OpenCode Go", signal);
+    async accountUsage(signal, beforeSubmit) {
+      const query = new AccountQuery("OpenCode Go", signal, beforeSubmit);
       return query.run(async () => {
         const apiKey = loadOpencodeGoAccountCredentialFor(provider, environment);
         const { body: parsed, status } = await query.json(fetchImpl, opencodeGoUsageUrl, apiKey, "usage", { allowForbidden: true });
@@ -75,6 +75,7 @@ export function createOpencodeGoAccountAdapter(
         }
         query.stage = "local";
         query.operation = "local-tokens";
+        query.assertCurrent();
         const localTokens = options.metricsDatabasePath === undefined && options.metricsQuery === undefined
           ? null
           : await readWindowLocalTokens(

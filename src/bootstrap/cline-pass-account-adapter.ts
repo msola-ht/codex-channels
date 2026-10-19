@@ -19,8 +19,8 @@ export function createClinePassAccountAdapter(options: {
   if (!isClinePassAccountProvider(options.provider)) throw new Error("CLP 账户 Provider 无效");
   return {
     provider: options.provider,
-    async accountUsage(signal) {
-      const query = new AccountQuery("CLP", signal);
+    async accountUsage(signal, beforeSubmit) {
+      const query = new AccountQuery("CLP", signal, beforeSubmit);
       return query.run(async () => {
         const { apiKey } = loadConfiguredProviderCredential(options.provider, options.environment ?? process.env);
         const { body } = await query.json(options.fetchImpl ?? fetch, usageUrl, apiKey, "usage", { redirect: "error" });

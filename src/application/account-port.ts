@@ -131,9 +131,9 @@ export interface AccountWeeklyLimitEstimate {
 }
 
 export interface AccountQueryPort {
-  accountUsage(): Promise<AccountUsage>;
-  accountRateLimits(options?: { background?: boolean; signal?: AbortSignal }): Promise<AccountRateLimits>;
-  accountThreadUsage(threadId: string): Promise<AccountThreadUsage>;
+  accountUsage(beforeSubmit?: () => void): Promise<AccountUsage>;
+  accountRateLimits(options?: { background?: boolean; signal?: AbortSignal; beforeSubmit?: () => void }): Promise<AccountRateLimits>;
+  accountThreadUsage(threadId: string, beforeSubmit?: () => void): Promise<AccountThreadUsage>;
 }
 
 export interface ProviderBalance {
@@ -192,14 +192,14 @@ export type ProviderAccountLimits =
 
 export interface ProviderAccountAdapter {
   provider: string;
-  accountUsage(signal?: AbortSignal): Promise<ProviderAccountUsage>;
-  accountThreadUsage?(threadId: string): Promise<AccountThreadUsage>;
-  accountLimits?(signal?: AbortSignal): Promise<ProviderAccountLimits>;
+  accountUsage(signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountUsage>;
+  accountThreadUsage?(threadId: string, beforeSubmit?: () => void): Promise<AccountThreadUsage>;
+  accountLimits?(signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountLimits>;
 }
 
 export interface ProviderAccountQueryPort {
-  accountUsage(modelProvider: string, threadId?: string, signal?: AbortSignal): Promise<ProviderAccountUsage>;
-  accountLimits(modelProvider: string, signal?: AbortSignal): Promise<ProviderAccountLimits>;
+  accountUsage(modelProvider: string, threadId?: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountUsage>;
+  accountLimits(modelProvider: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountLimits>;
 }
 
 export interface OfficialAccountSnapshotWriter {

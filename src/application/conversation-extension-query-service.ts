@@ -325,10 +325,14 @@ export class ConversationExtensionQueryService {
     return matches[0]!;
   }
 
-  listPermissionProfiles(
+  async listPermissionProfiles(
     target: ConversationTarget,
+    assertAuthorized?: () => void,
   ): Promise<PermissionProfileOption[]> {
-    return this.queries.listPermissionProfiles(this.router.workspace(target).cwd);
+    assertAuthorized?.();
+    const profiles = await this.queries.listPermissionProfiles(this.router.workspace(target).cwd, assertAuthorized);
+    assertAuthorized?.();
+    return profiles;
   }
 
   private mcpThreadGuard(

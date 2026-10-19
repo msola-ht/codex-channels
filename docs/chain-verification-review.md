@@ -327,7 +327,31 @@ Application 锁内、最终 start/steer 复核。飞书/微信仅允许原用户
 错用户答复未解决问题，按钮返回“该请求已失效”，关闭返回空决定。首次手工观察的清理端口错误地把关闭的空决定
 当作接受而抛错，修正隔离端口后关闭完成；不是产品失败。未观察真实平台交互、完整 Gateway 启动或真实 App Server。
 
+**纯查询授权子链（基线 `eade4374`）。** Sol 独立只读审查确认会话列表在等待后重新读取当前工作区，
+可能把 A 目录 Thread 写成 B 工作区的展示缓存；权限分页和账户后续 HTTP/RPC 也缺少实时守卫。
+主代理固定列表查询初始工作区，贯穿目录、搜索、轮数查询及缓存写入，并接通命令/权限与计划任务权限读取上游。
+主代理经生产 Command→SessionQuery、隔离 Router/指标/缓存观察：正常返回两条会话，缓存工作区均为 A；
+首轮列表返回时改工作区或撤权，只查询一次、无后续查询/缓存写入。首个轮数指标返回时撤权只读取一个指标；
+显式历史扫描首个分页后撤权只发一页。后两场景保留撤权前合法写入的 A 工作区缓存，不声称自动回滚。
+生产 Command→Extension→Provider→Client 的隔离 RPC 端口观察：权限列表正常两页返回两个 Profile；
+第一页后撤权只发一页。生产计划任务 Service→Provider→Client：正常预览读取一次配置；最终请求前撤权或
+改目录均无配置 RPC，分别返回 `command.authorization-changed` 和 `scheduled-task.state.invalid`。
+另一 Sol 负责账户服务/适配器及 Client/Provider 守卫，主代理核对全部差异和上游接线。带守卫的第三方查询
+不与后台共享请求；后台仍用既有生命周期，已派发快照独立结算。Provider 列表部分故障继续降级，但首次授权
+拒绝锁存并原样抛出，不能被 allSettled 或 Thread 用量失败降级吞掉。
+Sol 运行 metrics→ProviderAccountService→OpenAI adapter→Client→JsonRpc、内存 Transport，正常得到
+`token-usage/123 tokens/thread unavailable`，两个 usage RPC。usage/Thread usage/limits/权限列表/无人值守
+预检在过载后撤权均只发一次业务 RPC；权限正常两页，分页撤权只发一页。三类查询在 Provider 活动排队时
+撤权均 `ensures=0`；账户额度返回后撤权未查周估算，换 Thread 返回 `command.authorization-changed`。
+生产 AccountQuery 模拟 CCG whoami→credits，首个响应后撤权只发一次 HTTP；显式与后台并发独立两调用，
+前者拒绝、后者完成。快照写入已派发后撤权仍写一次并结算；瞬时 Thread usage/Thread 列表守卫拒绝均保留原异常。
+真正 Provider 列表一成功一失败仍返回成功部分。正常 Client 额度和无人值守权限分别得到 codex 和 workspace-write。
+这部分没有真实 App Server、账户或数据库文件观察；CCG 使用生产 AccountQuery，未加载真实适配器凭据；
+OpenCode Go 后续本地 Token 分支仅核查源码接线。`/metrics` 单次固定范围数据库查询、`/status` 单次固定目录
+git 查询，以及 `/diff`、审批/工作区本地投影复用已有入口/出口守卫，没有证据需要把 Actor 注入数据库层。
+
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。
-当前记录没有真实平台撤权或 Windows/macOS 观察。L03-F3 的纯查询内部授权及最终整项验收未完成，
+当前记录没有真实平台撤权或 Windows/macOS 观察。末轮独立审查发现模型选择等待期间官方归档/删除可解除原绑定，
+旧模型 Fast 偏好仍可能落到下一模型；该补充修复及 L03 最终整项验收未完成，
 后续仍留在 L03，不跳到 L02。

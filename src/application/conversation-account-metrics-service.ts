@@ -1,4 +1,5 @@
 import {
+  UserFacingError,
   usesOpenAiAccount,
   type ConversationTarget,
 } from "../conversation-core/index.js";
@@ -37,8 +38,10 @@ export class ConversationAccountMetricsService {
     return this.accounts.accountRateLimits();
   }
 
-  providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage> {
+  async providerAccountUsage(target: ConversationTarget, beforeSubmit?: () => void): Promise<ProviderAccountUsage> {
+    beforeSubmit?.();
     const binding = this.router.current(target);
+    const guard = this.accountThreadGuard(target, binding?.threadId, beforeSubmit);
     const model = this.models.status(target);
     const provider = model.modelProvider ?? "openai";
     const threadProvider = binding
@@ -48,20 +51,24 @@ export class ConversationAccountMetricsService {
       ? binding?.threadId
       : undefined;
     if (!this.providerAccounts) {
-      return Promise.resolve({ kind: "unsupported", provider });
+      return { kind: "unsupported", provider };
     }
-    return threadId === undefined
-      ? this.providerAccounts.accountUsage(provider)
-      : this.providerAccounts.accountUsage(provider, threadId);
+    const usage = await this.providerAccounts.accountUsage(provider, threadId, undefined, guard);
+    guard?.();
+    return usage;
   }
 
   async providerAccountLimits(
     target: ConversationTarget,
+    beforeSubmit?: () => void,
   ): Promise<ProviderAccountLimits> {
+    beforeSubmit?.();
+    const guard = this.accountThreadGuard(target, this.router.current(target)?.threadId, beforeSubmit);
     const provider = this.models.status(target).modelProvider ?? "openai";
     const resolved: ProviderAccountLimits = this.providerAccounts
-      ? await this.providerAccounts.accountLimits(provider)
+      ? await this.providerAccounts.accountLimits(provider, undefined, guard)
       : { kind: "unsupported", provider };
+    guard?.();
     if (resolved.kind !== "rate-limits" || !this.requestMetricsQuery) {
       return resolved;
     }
@@ -72,6 +79,7 @@ export class ConversationAccountMetricsService {
         (candidate) => candidate?.windowDurationMins === 10_080,
       );
       if (!window || window.resetsAt === null) return [];
+      guard?.();
       const observation = await this.requestMetricsQuery?.weeklyQuotaEstimate(
         "openai",
         limit.limitId,
@@ -81,9 +89,20 @@ export class ConversationAccountMetricsService {
       const estimate = estimateWeeklyLimit(limit, observation);
       return estimate === null ? [] : [estimate];
     }))).flat();
+    guard?.();
     return weeklyEstimates.length === 0
       ? resolved
       : { ...resolved, weeklyEstimates };
+  }
+
+  private accountThreadGuard(target: ConversationTarget, threadId: string | undefined, beforeSubmit?: () => void): (() => void) | undefined {
+    if (!beforeSubmit) return undefined;
+    return () => {
+      beforeSubmit();
+      if (this.router.current(target)?.threadId !== threadId) {
+        throw new UserFacingError("command.authorization-changed", "命令目标会话已变化，请重新查询账户");
+      }
+    };
   }
 
   async requestMetrics(

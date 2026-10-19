@@ -41,49 +41,66 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     modelProvider: string,
     threadId?: string,
     signal?: AbortSignal,
+    beforeSubmit?: () => void,
   ): Promise<ProviderAccountUsage> {
     signal?.throwIfAborted();
+    beforeSubmit?.();
     const adapter = this.adapters.get(modelProvider);
     if (!adapter) {
       // 未注册的聚合或自定义 Provider 没有独立账户，不创建占位账户快照。
       return { kind: "unsupported", provider: modelProvider };
     }
-    const accountUsage = adapter.provider === "openai"
-      ? adapter.accountUsage(signal)
+    const accountUsage = adapter.provider === "openai" || beforeSubmit
+      ? adapter.accountUsage(signal, beforeSubmit)
       : this.managedUsage(adapter, signal);
     if (!threadId || adapter.provider !== "openai" || !adapter.accountThreadUsage) {
       const result = await accountUsage;
       signal?.throwIfAborted();
       await this.persist(result, undefined, signal);
+      beforeSubmit?.();
       return result;
     }
+    let threadGuardFailure: { error: unknown } | undefined;
+    const beforeThreadUsage = beforeSubmit ? () => {
+      try { beforeSubmit(); }
+      catch (error) {
+        threadGuardFailure = { error };
+        throw error;
+      }
+    } : undefined;
     const [usage, threadUsage]: [ProviderAccountUsage, AccountThreadUsage] = await Promise.all([
       accountUsage,
-      adapter.accountThreadUsage(threadId).catch((): AccountThreadUsage => ({
-        kind: "failed",
-      })),
+      adapter.accountThreadUsage(threadId, beforeThreadUsage).catch((): AccountThreadUsage => {
+        if (threadGuardFailure) throw threadGuardFailure.error;
+        beforeSubmit?.();
+        return { kind: "failed" };
+      }),
     ]);
     signal?.throwIfAborted();
     const result = usage.kind === "token-usage" ? { ...usage, threadUsage } : usage;
     await this.persist(result, undefined, signal);
+    beforeSubmit?.();
     return result;
   }
 
-  async accountLimits(modelProvider: string, signal?: AbortSignal): Promise<ProviderAccountLimits> {
+  async accountLimits(modelProvider: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountLimits> {
     signal?.throwIfAborted();
+    beforeSubmit?.();
     const adapter = this.adapters.get(modelProvider);
     // 不支持的能力没有新的账户观测，不能覆盖进程重启前保存的状态。
     if (!adapter?.accountLimits) return { kind: "unsupported", provider: modelProvider };
     const sequence = ++this.limitsQuerySequence;
-    const result = await adapter.accountLimits(signal);
+    const result = await adapter.accountLimits(signal, beforeSubmit);
     signal?.throwIfAborted();
     if (sequence >= (this.savedLimitsSequence.get(modelProvider) ?? 0)) {
       await this.persist(undefined, result, signal, sequence);
     }
+    beforeSubmit?.();
     if (result.kind !== "rate-limits" || !this.readCredentialRefreshTime) return result;
     // Login metadata is presentation-only; never persist it as an official quota snapshot.
     const credentialRefreshedAt = await this.readCredentialRefreshTime(result.limits.accountId);
     signal?.throwIfAborted();
+    beforeSubmit?.();
     return { ...result, credentialRefreshedAt };
   }
 
@@ -219,21 +236,21 @@ export function createOpenAiAccountAdapter(
 ): ProviderAccountAdapter {
   return {
     provider: "openai",
-    async accountUsage() {
+    async accountUsage(_signal, beforeSubmit) {
       return {
         kind: "token-usage",
         provider: "openai",
-        usage: await query.accountUsage(),
+        usage: await query.accountUsage(beforeSubmit),
       };
     },
-    async accountThreadUsage(threadId) {
-      return await query.accountThreadUsage(threadId);
+    async accountThreadUsage(threadId, beforeSubmit) {
+      return await query.accountThreadUsage(threadId, beforeSubmit);
     },
-    async accountLimits(signal) {
+    async accountLimits(signal, beforeSubmit) {
       return {
         kind: "rate-limits",
         provider: "openai",
-        limits: await query.accountRateLimits(signal ? { signal } : {}),
+        limits: await query.accountRateLimits({ ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) }),
       };
     },
   };

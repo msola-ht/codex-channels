@@ -27,8 +27,8 @@ export function createCcgAccountAdapter(
   }
   return {
     provider: options.provider,
-    async accountUsage(signal) {
-      const query = new AccountQuery("CCG", signal);
+    async accountUsage(signal, beforeSubmit) {
+      const query = new AccountQuery("CCG", signal, beforeSubmit);
       return query.run(async () => {
         const apiKey = loadConfiguredProviderCredential(options.provider, environment).apiKey;
         const { body: whoami } = await query.json(fetchImpl, `${commandCodeApiBaseUrl}/alpha/whoami?limits=1`, apiKey, "identity");

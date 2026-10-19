@@ -441,7 +441,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         const sessions = await this.conversations.listSessions(target, {
           page: view.page,
           turnCountMode: "cached",
-        });
+        }, assertAuthorized);
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return sessionListResult(sessions, view, {
@@ -455,7 +455,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         const sessions = await this.conversations.listSessions(target, {
           ...toSessionQuery(view),
           turnCountMode: "cached",
-        });
+        }, assertAuthorized);
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return sessionListResult(sessions, view, {
@@ -470,7 +470,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           archived: true,
           ...toSessionQuery(view),
           turnCountMode: "cached",
-        });
+        }, assertAuthorized);
         return sessionListResult(sessions, view, { archived: true });
       }
       case "new": {
@@ -697,7 +697,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "usage":
         return {
           kind: "usage",
-          result: await this.conversations.providerAccountUsage(target),
+          result: await this.conversations.providerAccountUsage(target, assertAuthorized),
         };
       case "metrics":
         return {
@@ -714,7 +714,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
         return {
           kind: "limits",
-          result: await this.conversations.providerAccountLimits(target),
+          result: await this.conversations.providerAccountLimits(target, assertAuthorized),
         };
       case "permissions":
         {
@@ -724,7 +724,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           );
           return {
             kind: "permissions",
-            profiles: await this.conversations.listPermissionProfiles(target),
+            profiles: await this.conversations.listPermissionProfiles(target, assertAuthorized),
             ...(workspace ? { workspace } : {}),
           };
         }

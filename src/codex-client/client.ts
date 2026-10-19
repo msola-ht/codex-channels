@@ -915,11 +915,12 @@ export class CodexAppServerClient implements
   async readUnattendedPermissionSettings(
     cwd: string,
     signal?: AbortSignal,
+    beforeSubmit?: () => void,
   ): Promise<{ sandbox: "read-only" | "workspace-write"; permissions: null }> {
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
       params: { cwd, includeLayers: false } satisfies ConfigReadParams,
-    }, { retryOverload: true, ...(signal === undefined ? {} : { signal }) });
+    }, { retryOverload: true, ...(signal === undefined ? {} : { signal }), ...(beforeSubmit ? { beforeSubmit } : {}) });
     const sandbox = response.config.sandbox_mode;
     if (response.config.default_permissions != null || (sandbox !== "read-only" && sandbox !== "workspace-write")) {
       throw new UserFacingError("scheduled-task.state.invalid",
@@ -1253,11 +1254,11 @@ export class CodexAppServerClient implements
     }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
-  async accountUsage(): Promise<AccountUsage> {
+  async accountUsage(beforeSubmit?: () => void): Promise<AccountUsage> {
     const response = await this.rpc.request<GetAccountTokenUsageResponse>({
       method: "account/usage/read",
       params: undefined,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toAccountUsage(response);
   }
 
@@ -1269,19 +1270,19 @@ export class CodexAppServerClient implements
     return toOpenAiAccountRoute(response);
   }
 
-  async accountThreadUsage(threadId: string): Promise<AccountThreadUsage> {
+  async accountThreadUsage(threadId: string, beforeSubmit?: () => void): Promise<AccountThreadUsage> {
     if (threadId.length === 0) {
       throw new Error("Codex Thread 用量查询缺少 threadId");
     }
     const response = await this.rpc.request<GetAccountTokenUsageResponse>({
       method: "account/usage/read",
       params: { threadId } satisfies GetAccountTokenUsageParams,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toAccountThreadUsage(response, threadId);
   }
 
   async accountRateLimits(
-    options: { background?: boolean; signal?: AbortSignal } = {},
+    options: { background?: boolean; signal?: AbortSignal; beforeSubmit?: () => void } = {},
   ): Promise<AccountRateLimits> {
     const params = {
       supportsLunaReserve: true,
@@ -1290,7 +1291,7 @@ export class CodexAppServerClient implements
     const response = await this.rpc.request<GetAccountRateLimitsResponse>({
       method: "account/rateLimits/read",
       params,
-    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}) });
+    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}), ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) });
     return toAccountRateLimits(response);
   }
 
@@ -1437,7 +1438,7 @@ export class CodexAppServerClient implements
     });
   }
 
-  async listPermissionProfiles(cwd: string): Promise<PermissionProfileOption[]> {
+  async listPermissionProfiles(cwd: string, beforeSubmit?: () => void): Promise<PermissionProfileOption[]> {
     const profiles: PermissionProfileOption[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -1446,7 +1447,7 @@ export class CodexAppServerClient implements
         await this.rpc.request<PermissionProfileListResponse>({
           method: "permissionProfile/list",
           params: { cwd, limit: 100, ...(cursor ? { cursor } : {}) },
-        }, { retryOverload: true });
+        }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
       const page = toPermissionProfilePage(response);
       profiles.push(...page.profiles);
       cursor = page.nextCursor;

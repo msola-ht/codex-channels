@@ -283,7 +283,7 @@ export interface ConversationExtensionUseCases {
   listPlugins(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledPluginCatalog>;
   pluginHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<PluginHealthReport>;
   pluginDetail(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<InstalledPlugin>;
-  listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]>;
+  listPermissionProfiles(target: ConversationTarget, assertAuthorized?: () => void): Promise<PermissionProfileOption[]>;
 }
 
 /** Stable native Queue and paginated Revert boundary. */
@@ -326,6 +326,7 @@ export interface ConversationSessionUseCases {
   listSessions(
     target: ConversationTarget,
     options?: ConversationSessionQuery,
+    assertAuthorized?: () => void,
   ): Promise<ConversationSession[]>;
   backgroundThreadIds?(target: ConversationTarget): string[];
   resume(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ConversationResumeResult>;
@@ -357,8 +358,8 @@ export interface ConversationSessionUseCases {
 export interface ConversationAccountMetricsUseCases {
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
-  providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
-  providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits>;
+  providerAccountUsage(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountUsage>;
+  providerAccountLimits(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountLimits>;
   requestMetrics(
     target: ConversationTarget,
     query?: RequestMetricsCommandQuery,
@@ -1005,8 +1006,9 @@ export class ConversationService implements
   listSessions(
     target: ConversationTarget,
     options: ConversationSessionQuery = {},
+    assertAuthorized?: () => void,
   ): Promise<ConversationSession[]> {
-    return this.sessionQueries.listSessions(target, options);
+    return this.sessionQueries.listSessions(target, options, assertAuthorized);
   }
 
   backgroundThreadIds(target: ConversationTarget): string[] {
@@ -1567,16 +1569,16 @@ export class ConversationService implements
     return this.accountMetrics.accountRateLimits();
   }
 
-  providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage> {
-    return this.accountMetrics.providerAccountUsage(target);
+  providerAccountUsage(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountUsage> {
+    return this.accountMetrics.providerAccountUsage(target, assertAuthorized);
   }
 
-  providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits> {
-    return this.accountMetrics.providerAccountLimits(target);
+  providerAccountLimits(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountLimits> {
+    return this.accountMetrics.providerAccountLimits(target, assertAuthorized);
   }
 
-  listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]> {
-    return this.extensionQueries.listPermissionProfiles(target);
+  listPermissionProfiles(target: ConversationTarget, assertAuthorized?: () => void): Promise<PermissionProfileOption[]> {
+    return this.extensionQueries.listPermissionProfiles(target, assertAuthorized);
   }
 
   getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null> {
