@@ -10,6 +10,7 @@
 - `bot.ts`：提供 Bootstrap 使用的单一选项工厂，注册 Telegram SDK 处理器，执行访问检查，
   把标准命令或普通输入提交给 Application；模型按钮以精确 Provider 与模型身份提交，
   不因回调等待期间的订阅变化重新选择其他账户的同名模型；
+  模型、Provider 与思考按钮在平台等待后复核原 Workspace/Thread/Session，失效按钮不将选择保存给新会话。
   同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；静态 GIF 无论作为文档还是
   `animation` 消息到达都进入相同内容校验，真正的动画 GIF 会被拒绝；共享输入批处理器在提交时
   将已校验的 PNG/JPEG/WebP/非动画 GIF 暂存文件读取为 Data URL，不把本地路径交给 App Server；
@@ -28,8 +29,9 @@
   同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
   版本字符串和当前 Workspace Git 分支，不读取生成协议。
-- `command-renderer.ts`：复用共享命令结果映射，负责 Telegram 专属展示、按钮和消息发送；模型按钮绑定当前模型、
-  浏览范围与有序选项的随机令牌，最多保留 1000 份菜单状态。列表变化或状态淘汰后旧按钮明确失效，
+- `command-renderer.ts`：复用共享命令结果映射，负责 Telegram 专属展示、按钮和消息发送；模型按钮的随机令牌
+  绑定当前模型、浏览范围、有序选项、页面所属 Conversation/Workspace/Thread/Session 与 Actor，
+  不能跨目标或操作者复用；最多保留 1000 份菜单状态。列表变化或状态淘汰后旧按钮明确失效，
   不按新列表重新解释旧序号。
   模型与提供商菜单复用共享速度档位展示；速度命令及能力提示复用共享命令格式器。
   思考按钮依据目录能力将 `enabled` / `none` 显示为开启/关闭思考，其他等级原样显示，回调仍引用原始目录选项；

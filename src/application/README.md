@@ -92,12 +92,15 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
 - `conversation-lock-coordinator.ts`：为同一 Conversation、多个 Conversation 的有序加锁；Queue、Revert
   与主会话生命周期共用同一实例。
 - `thread-queue-service.ts`：维护原生 Thread Queue 的增删改查、启动、分页选择快照、错误映射和待生效设置冲突检查；
+  只有列表发布更新数字选择，内部复核不重排或续期旧页；读取期间的失效不允许重新发布旧快照。
   不负责 Thread 绑定切换或后台释放。
   用户命令固定接收时的 Thread，异步读取与提交前复核 Actor、Workspace 和 Thread；写入响应仍正常结算，
   不因后续撤权重发或回滚。内部生命周期查询继续使用其所属生命周期约束。
 - `thread-revert-service.ts`：维护分页历史选择快照、一次性确认令牌、Queue 指纹与执行前并发复核；
+  通知失效贯穿在途列表、预览和最终提交，确认成功或失败均清理同会话其他令牌和快照。
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
+  模型状态带不透明的 Conversation/Workspace/Thread/Session 页面身份；选择等待期间新 Turn 开始会取消在途选择。
   加速档位的纯目录匹配复用 `runtime/service-tier.mjs`，与 CLI/WebUI 使用相同的 Fast、Ultrafast 能力判断；回到 Standard 不受当前目录项的不可用标记阻断。
   无 Thread 且无显式档位偏好时从目标 Provider 的 Workspace 有效配置读取服务层级，保留 null，不以目录默认层级推断已启用加速；开启加速前经窄端口核对同一作用域的 `features.fast_mode`，写入前后复核订阅。
   模型目录明确不可用时，浏览保留目录的不可用原因与未知档位，不为显示档位重新连接故障实例；启用加速仍严格检查目录和有效配置。
@@ -139,6 +142,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
 - `collaboration-mode-port.ts`：定义 Default/Plan 预设的稳定查询边界，不向 Application
   暴露完整实验协议。
 - `collaboration-mode-service.ts`：把官方预设与当前模型设置组合为下一 Turn 的协作模式覆盖；
+  取得 Turn 覆盖时合入后续明确选择的模型和思考等级，避免模式快照覆盖较新的用户选择。
   模式按 Thread 同步，只在内存保存尚未生效的选择。
 - `model-port.ts`：定义项目拥有的 Provider、`text/image/audio` 输入能力、思考等级、服务层级、
   Codex 多代理运行时与可选模型替代提示，以及

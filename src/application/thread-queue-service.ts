@@ -40,6 +40,7 @@ export interface ThreadQueueReorderResult {
 }
 
 export class ThreadQueueService {
+  private readonly pendingLists = new Set<{ threadId: string; targetKey: string; invalidated: boolean }>();
   private readonly selectionSnapshots = new Map<string, {
     threadId: string;
     itemIds: string[];
@@ -96,17 +97,27 @@ export class ThreadQueueService {
       requirePage(page, maximumNativeQueuePages, () => {
         throw new UserFacingError("queue.usage", "Queue 页码无效");
       });
-      const snapshot = await this.readSnapshot(target, threadId, beforeSubmit);
-      beforeSubmit();
-      const pageCount = pageCountFor(snapshot.items.length, nativeQueuePageSize);
-      const items = pageSlice(snapshot.items, page, nativeQueuePageSize, pageCount);
-      return {
-        items,
-        selectors: items.map((_item, index) => pageSelector(page, index, nativeQueuePageSize)),
-        page,
-        pageCount,
-        totalItemCount: snapshot.items.length,
-      };
+      const pending = { threadId, targetKey: conversationTargetKey(target), invalidated: false };
+      this.pendingLists.add(pending);
+      try {
+        const snapshot = await this.readSnapshot(threadId, beforeSubmit);
+        beforeSubmit();
+        if (pending.invalidated) {
+          throw new UserFacingError("queue.snapshot.required", "Queue 列表读取期间已变化，请重新执行 /queue list");
+        }
+        const pageCount = pageCountFor(snapshot.items.length, nativeQueuePageSize);
+        const items = pageSlice(snapshot.items, page, nativeQueuePageSize, pageCount);
+        this.rememberSelectionSnapshot(target, threadId, snapshot.items.map((item) => item.id));
+        return {
+          items,
+          selectors: items.map((_item, index) => pageSelector(page, index, nativeQueuePageSize)),
+          page,
+          pageCount,
+          totalItemCount: snapshot.items.length,
+        };
+      } finally {
+        this.pendingLists.delete(pending);
+      }
     });
   }
 
@@ -225,6 +236,9 @@ export class ThreadQueueService {
   }
 
   invalidateSnapshot(threadId: string): void {
+    for (const pending of this.pendingLists) {
+      if (pending.threadId === threadId) pending.invalidated = true;
+    }
     for (const [key, snapshot] of this.selectionSnapshots) {
       if (snapshot.threadId === threadId) {
         this.selectionSnapshots.delete(key);
@@ -233,7 +247,11 @@ export class ThreadQueueService {
   }
 
   clearSnapshot(target: ConversationTarget): void {
-    this.selectionSnapshots.delete(conversationTargetKey(target));
+    const key = conversationTargetKey(target);
+    this.selectionSnapshots.delete(key);
+    for (const pending of this.pendingLists) {
+      if (pending.targetKey === key) pending.invalidated = true;
+    }
   }
 
   async rejectPendingOverrideChange(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
@@ -307,7 +325,6 @@ export class ThreadQueueService {
   }
 
   private async readSnapshot(
-    target: ConversationTarget,
     threadId: string,
     beforeSubmit: () => void,
   ): Promise<{ items: ThreadQueueItem[] }> {
@@ -327,7 +344,6 @@ export class ThreadQueueService {
       );
     }
     const items = response.items;
-    this.rememberSelectionSnapshot(target, threadId, items.map((item) => item.id));
     return { items };
   }
 
@@ -340,8 +356,9 @@ export class ThreadQueueService {
     beforeSubmit();
     const normalized = selector.trim();
     let selectedId = normalized;
-    if (/^\d+$/u.test(normalized)) {
-      const selection = this.selectionSnapshots.get(conversationTargetKey(target));
+    const numeric = /^\d+$/u.test(normalized);
+    const selection = numeric ? this.selectionSnapshots.get(conversationTargetKey(target)) : undefined;
+    if (numeric) {
       if (
         !selection
         || selection.threadId !== threadId
@@ -357,8 +374,12 @@ export class ThreadQueueService {
         ? selection.itemIds[index] ?? ""
         : "";
     }
-    const snapshot = await this.readSnapshot(target, threadId, beforeSubmit);
+    const snapshot = await this.readSnapshot(threadId, beforeSubmit);
     beforeSubmit();
+    if (selection && (this.selectionSnapshots.get(conversationTargetKey(target)) !== selection
+      || Date.now() - selection.capturedAtMs > selectionSnapshotLifetimeMs)) {
+      throw new UserFacingError("queue.snapshot.required", "Queue 列表已失效，请重新执行 /queue list");
+    }
     const item = snapshot.items.find((candidate) => candidate.id === selectedId);
     if (!item) {
       throw new UserFacingError(

@@ -646,3 +646,68 @@ interrupted 才提示。原始两次加摘要一次、跨 Item 两次加一次�
 展示、保留活动到官方终态；绑定恢复复用 L05 活动跟踪证据。修复后的局部缓存释放不代表所有长期运行
 内存峰值都已实测；模型请求统计后续仍由 L10 审查。真实 App Server、Reserve 账户授权与模型可用性、
 原生客户端人工操作及三渠道投递未观察。没有新增、维护或运行测试。提交后按顺序进入 L06。
+
+### L06 Queue、Revert 与模型选择快照
+
+**状态：已审查（附证据限制）。** 审查基线为 L18 提交 `1ecf4f67`。
+本项从页面选择与 Actor/Workspace/Thread 身份追到权威 Queue/历史、确认写入及通知失效；
+主代理审查 Queue，Sol 分别只读审查 Revert 和模型/模式选择快照。App Server 持有唯一 Queue 与
+历史，不建立平行队列、不将多步本地复核宣称为跨客户端原子性。复用 L03/L05/L18 未变化证据。
+
+**发现与修复**
+
+- **L06-F1，Queue 内部读取覆盖用户序号。** `readSnapshot` 原来同时保存数字选择快照，
+  未向用户展示的写前读取也会重排旧页。实际复现：列表显示 `[a,b]`，权威顺序变为 `[b,a]`，
+  对不可编辑 a 的更新失败后，删除 `1` 错删 b。现在只有列表成功返回才建立数字映射；
+  修复后同一操作删除 a。列表等待期间失效不再重新发布快照，数字操作等待期间检查原快照身份及期限。
+- **L06-F2，Revert 在途引用绕过通知失效。** 原来通知只删除 Map，确认仍持有局部历史与令牌引用；
+  最后一次 Queue/提交等待期间原生 Turn 开始，旧确认仍可回退未经预览的新 Turn。
+  列表和预览等待也可能重新发布已失效页面。现为整个操作登记失效标记，贯穿最终提交守卫；
+  已写出请求按真实响应结算。确认成功或失败都清除同会话其他令牌和页面，防止结果未知后使用兄弟令牌重试。
+- **L06-F3，Plan 快照压过后续模型选择。** Plan 缓存 a/medium 后选择 b/high，原 Turn 同时携带
+  顶层 b/high 和模式 a/medium；锁定官方 `step_settings.rs` 优先应用模式字段，导致旧值生效。
+  `turnOverride` 现在合入较新的显式模型和思考等级，保留模式其他设置。
+- **L06-F4，原生 Turn 开始后在途模型选择复活。** 目录等待之前的空闲检查不足；通知清空待选值后，
+  旧选择仍可能保存。现把通知失效标记传入选择及 Queue 复核的守卫，永久取消这一在途操作，
+  即使原生 Turn 随后完成也不能复活。跨 Provider 选择自身执行的解绑仍由模型服务更新预期 Thread，
+  外层守卫不将这个合法转换误判为外部改绑；此边界按调用源码复核，未单独做修复后运行观察。
+- **L06-F5，Telegram 旧模型页作用到新 Session。** 原令牌未绑定目标与 Actor，平台应答/清按钮等待后
+  重新调用命令会捕获新绑定。实际以官方归档/删除对应的 `forgetThread` 解绑模拟等待期变化，
+  原路径仍保存新模型。现模型状态携带不透明的 Conversation/Workspace/cwd/Thread/Session 身份，
+  按钮令牌再绑定 Actor；模型、Provider、思考回调在平台等待后复核授权和原身份。
+  普通 Telegram 命令已有 Conversation 串行化，此发现不声称并行 `/new` 可插入同一处理队列。
+
+**关联范围与实际观察**
+
+- Queue 生产 Service→Client→隔离 RPC 依次添加 first/second，列出 q1/q2，更新 q1 为 updated、
+  q2 排首、再列出 q2/second 与 q1/updated、删除 q1、启动返回 turn-q2，最终列表为空。
+  请求 Thread 均为目标 thread；列表允许 overload 重试，所有写操作禁止重试。
+  在列表等待注入失效返回 `queue.snapshot.required`，待处理标记与快照均归零；数字删除等待注入失效也拒绝，
+  删除记录未增加。隔离 RPC 使用内存实现，不能证明真实 App Server 持久化或自动派发。
+- Revert 生产 Service 配合隔离端口，正常 list→preview→confirm 写入 1 次并返回成功；
+  列表、预览、确认 Queue 读取和最终提交守卫处注入失效均返回 `revert.concurrent`、写入 0 次，
+  标记、快照、令牌归零。写出后才失效仍结算成功，写入 1 次。
+  两份预览中第一份写出后断连返回 `revert.result-unknown`，第二份返回 `revert.confirmation-invalid`，总写入保持 1 次。
+- Revert 只读独立审查另观察 Actor 错配、Queue 指纹变化、等待期撤权/改绑拒绝写入；
+  legacy Thread、循环游标、第 21 页分别拒绝为 legacy-thread/unavailable/usage。
+  Queue 输入仅在第 160 字符之后变化仍产生不同完整指纹；历史 Skill 输入只投影类型，预览不泄露路径。
+  Provider 包装与 Client 保留最终守卫，Revert 不启用自动重试。
+- 生产 ConversationService→模型/模式服务→Router/Core→隔离 Turn 端口执行 Plan、选择 b、选择 high、提交输入：
+  最终顶层与 collaborationMode 都为 b/high，模式为 plan，原输入到达 Turn 并返回结果。
+  目录等待期间由生产协调器注入原生 Turn 开始，及开始后完成两种情况，均返回
+  `command.authorization-changed`，pending 为 false，在途标记归零。
+- Telegram 生产回调→真实命令/会话/模型服务→Router/Core/内存存储配合本地 SDK 端口：
+  正常模型按钮写入 1 次、回复 1 次并得到待选 b；应答等待期间解绑、同 Thread 更换 Session、
+  使用旧 Session 页面、其他 Actor 使用按钮，均返回 `model.selection.expired`，模型写入与回复均为 0。
+  未连接 Telegram 网络或发送外部消息。
+- 对照锁定官方 `83086188ae0614bd882818ff1aa23f3194962012` 的 Queue 处理、模式优先级及 Revert 设置恢复，
+  修正文档原有超出实现的表述：当前只在预览/写前复核 Queue，未做写后回读；
+  Client 虽投影 Revert 返回的 Thread，Application 不据此更新 Router 或额外读取。
+  官方内部恢复设置并保留 Thread ID/订阅，后续依靠通知与既有读取收敛；没有据此声称观察到设置恢复故障。
+
+**证据限制与交接**
+
+以上运行观察均使用生产模块与隔离端口；没有操作真实用户 Thread、调用模型或连接平台服务。
+真实 App Server 的 Queue 持久化/自动派发、真实回退与通知时序、Telegram 平台交互仍未观察；
+最终本地守卫之后的跨客户端变化不具有原子保证。未新增、维护或运行测试。
+提交门禁结果单独报告，不代替上述行为证据；本项提交后按清单进入 L16。

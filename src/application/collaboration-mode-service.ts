@@ -60,7 +60,17 @@ export class CollaborationModeSelectionService {
   }
 
   turnOverride(target: ConversationTarget): TurnCollaborationMode | undefined {
-    return this.pendingByConversation.get(this.key(target));
+    const pending = this.pendingByConversation.get(this.key(target));
+    if (!pending) return undefined;
+    const overrides = this.models.turnOverrides(target);
+    return {
+      ...pending,
+      settings: {
+        ...pending.settings,
+        model: overrides.model ?? pending.settings.model,
+        effort: overrides.effort ?? pending.settings.effort,
+      },
+    };
   }
 
   hasPending(target: ConversationTarget): boolean {

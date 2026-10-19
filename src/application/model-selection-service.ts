@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { acceleratedServiceTierId, normalizeServiceTier } from "../../runtime/service-tier.mjs";
 import {
   UserFacingError,
@@ -13,6 +14,8 @@ import type { TurnOverrides } from "./turn-port.js";
 import type { SessionRouter } from "../session-routing/index.js";
 
 export interface ModelSelectionState {
+  /** Opaque identity for short-lived selection pages; contains no model input. */
+  selectionScope?: string;
   models: ModelOption[];
   model: string;
   modelProvider?: string;
@@ -488,6 +491,7 @@ export class ModelSelectionService {
     const provider = pending?.modelProvider ?? this.normalizeProvider(current?.modelProvider)
       ?? fallback?.provider ?? (this.officialUnavailable() ? undefined : this.primaryProvider);
     return {
+      selectionScope: this.selectionScope(target),
       model: pending?.model ?? current?.model ?? fallback?.model
         ?? (this.officialUnavailable() ? "请选择模型" : this.configuredDefaultModel ?? "默认模型"),
       ...(provider === undefined ? {} : { modelProvider: provider }),
@@ -556,6 +560,7 @@ export class ModelSelectionService {
       : null;
     assertAuthorized?.();
     return {
+      selectionScope: this.selectionScope(target),
       models,
       ...(filter === undefined ? {} : { providerFilter: filter }),
       model,
@@ -582,6 +587,16 @@ export class ModelSelectionService {
     return current
       ? this.normalizeProvider(selected) !== this.normalizeProvider(current.modelProvider ?? this.primaryProvider)
       : this.pendingProviderSwitches.has(key);
+  }
+
+  private selectionScope(target: ConversationTarget): string {
+    const workspaceId = this.router.selectedWorkspaceId(target);
+    const cwd = this.router.listWorkspaces().find(workspace => workspace.id === workspaceId)?.cwd;
+    const binding = this.router.current(target);
+    return createHash("sha256").update(JSON.stringify([
+      conversationTargetKey(target), workspaceId, cwd ?? null,
+      binding?.threadId ?? null, binding?.sessionId ?? null,
+    ])).digest("base64url");
   }
 
   private requireAvailableModel(model: ModelOption): void {

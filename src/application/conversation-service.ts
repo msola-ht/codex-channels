@@ -184,6 +184,7 @@ const builtInAgentRoles: AgentRoleEntry[] = [
 ];
 
 export interface ConversationStatus {
+  selectionScope?: string;
   threadId?: string;
   threadName?: string | null;
   turnId?: string;
@@ -374,6 +375,7 @@ export class ConversationService implements
   ConversationAccountMetricsUseCases {
   private readonly locks = new ConversationLockCoordinator();
   private readonly attachmentInputs = new Map<string, Set<AbortController>>();
+  private readonly pendingSelections = new Set<{ threadId: string | undefined; invalidated: boolean }>();
   private readonly hookUseCases: ConversationHookService;
   private readonly queueUseCases: ThreadQueueService;
   private readonly revertUseCases: ThreadRevertService;
@@ -1003,6 +1005,9 @@ export class ConversationService implements
   clearPendingSelectionsForThread(threadId: string): void {
     const target = this.router.targetForThread(threadId);
     if (target && this.router.current(target)?.threadId === threadId) {
+      for (const pending of this.pendingSelections) {
+        if (pending.threadId === threadId) pending.invalidated = true;
+      }
       this.clearPendingSelections(target);
     }
   }
@@ -1433,7 +1438,7 @@ export class ConversationService implements
   }
 
   togglePlanMode(target: ConversationTarget, assertAuthorized?: () => void): Promise<CollaborationModeState> {
-    return this.withGuardedSelection(target, () => this.requireCollaborationModes().toggle(target, assertAuthorized), assertAuthorized);
+    return this.withGuardedSelection(target, (guard) => this.requireCollaborationModes().toggle(target, guard), assertAuthorized);
   }
 
   startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void): Promise<Submission> {
@@ -1493,18 +1498,18 @@ export class ConversationService implements
   }
 
   selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity, assertAuthorized?: () => void): Promise<ModelSelectionState> {
-    return this.withGuardedSelection(target, () => this.models.selectModel(target, selector, assertAuthorized), assertAuthorized);
+    return this.withGuardedSelection(target, (guard) => this.models.selectModel(target, selector, guard), assertAuthorized);
   }
 
   selectEffort(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
-    return this.withGuardedSelection(target, () => this.models.selectEffort(target, selector, assertAuthorized), assertAuthorized);
+    return this.withGuardedSelection(target, (guard) => this.models.selectEffort(target, selector, guard), assertAuthorized);
   }
 
   selectFastMode(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
     if (selector.trim().toLowerCase() === "status") {
       return this.models.selectFastMode(target, selector, assertAuthorized);
     }
-    return this.withGuardedSelection(target, () => this.models.selectFastMode(target, selector, assertAuthorized), assertAuthorized);
+    return this.withGuardedSelection(target, (guard) => this.models.selectFastMode(target, selector, guard), assertAuthorized);
   }
 
   listSkills(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledSkill[]> {
@@ -1648,6 +1653,7 @@ export class ConversationService implements
       workspaceId: workspace.id,
       workspaceName: workspace.name,
       cwd: workspace.cwd,
+      ...(model.selectionScope ? { selectionScope: model.selectionScope } : {}),
       model: model.model,
       ...(model.modelProvider ? { modelProvider: model.modelProvider } : {}),
       effort: model.effort,
@@ -1793,32 +1799,41 @@ export class ConversationService implements
   }
 
   /** Local selection guard; native clients can still change Queue concurrently. */
-  private withGuardedSelection<T>(target: ConversationTarget, select: () => Promise<T>, assertAuthorized?: () => void): Promise<T> {
+  private withGuardedSelection<T>(target: ConversationTarget, select: (guard: () => void) => Promise<T>, assertAuthorized?: () => void): Promise<T> {
     const threadId = this.router.current(target)?.threadId;
-    return this.locked(target, async () => {
+    const pending = { threadId, invalidated: false };
+    this.pendingSelections.add(pending);
+    const guard = () => {
       assertAuthorized?.();
+      if (pending.invalidated) {
+        throw new UserFacingError("command.authorization-changed", "模型选择期间已有新轮次开始，请重新选择");
+      }
+      this.requireIdle(target);
+    };
+    return this.locked(target, async () => {
+      guard();
       if (this.router.current(target)?.threadId !== threadId) {
         throw new UserFacingError("command.authorization-changed", "模型选择期间会话已变化");
       }
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target, assertAuthorized);
-      assertAuthorized?.();
+      await this.rejectQueueWhenPendingOverrideChanges(target, guard);
+      guard();
       if (this.router.current(target)?.threadId !== threadId) {
         throw new UserFacingError("command.authorization-changed", "模型选择期间会话已变化");
       }
       try {
-        const state = await select();
-        assertAuthorized?.();
-        await this.rejectQueueWhenPendingOverrideChanges(target, assertAuthorized);
-        assertAuthorized?.();
+        const state = await select(guard);
+        guard();
+        await this.rejectQueueWhenPendingOverrideChanges(target, guard);
+        guard();
         return state;
       } catch (error) {
-        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
+        if (pending.invalidated || error instanceof UserFacingError
+          && (error.code === "queue.pending-overrides" || error.code === "conversation.busy")) {
           this.clearPendingSelections(target);
         }
         throw error;
       }
-    });
+    }).finally(() => this.pendingSelections.delete(pending));
   }
 
   private clearPendingSelections(target: ConversationTarget): void {

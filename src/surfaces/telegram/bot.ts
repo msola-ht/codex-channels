@@ -520,9 +520,11 @@ export class TelegramSurface {
       /^mp:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget, this.queryGuard(modelTarget, String(context.from.id)));
+        const guard = this.queryGuard(modelTarget, String(context.from.id));
+        const selectionScope = this.service.status(modelTarget).selectionScope;
+        const state = await this.service.modelState(modelTarget, guard);
         if (
-          telegramModelSelectionToken(state) !== context.match[2]
+          telegramModelSelectionToken(state, String(context.from.id)) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -541,6 +543,10 @@ export class TelegramSurface {
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
+        guard();
+        if (this.service.status(modelTarget).selectionScope !== selectionScope) {
+          throw new UserFacingError("model.selection.expired", "会话已变化，请重新发送 /model 选择");
+        }
         const result = await this.commands.execute(
           modelTarget,
           "model",
@@ -557,9 +563,11 @@ export class TelegramSurface {
       /^ms:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget, this.queryGuard(modelTarget, String(context.from.id)));
+        const guard = this.queryGuard(modelTarget, String(context.from.id));
+        const selectionScope = this.service.status(modelTarget).selectionScope;
+        const state = await this.service.modelState(modelTarget, guard);
         if (
-          telegramModelSelectionToken(state) !== context.match[2]
+          telegramModelSelectionToken(state, String(context.from.id)) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -577,6 +585,10 @@ export class TelegramSurface {
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
+        guard();
+        if (this.service.status(modelTarget).selectionScope !== selectionScope) {
+          throw new UserFacingError("model.selection.expired", "会话已变化，请重新发送 /model 选择");
+        }
         const result = await this.commands.selectModel(modelTarget, {
           provider: selected.provider ?? "openai",
           model: selected.model,
@@ -591,9 +603,11 @@ export class TelegramSurface {
       /^me:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget, this.queryGuard(modelTarget, String(context.from.id)));
+        const guard = this.queryGuard(modelTarget, String(context.from.id));
+        const selectionScope = this.service.status(modelTarget).selectionScope;
+        const state = await this.service.modelState(modelTarget, guard);
         if (
-          telegramModelSelectionToken(state) !== context.match[2]
+          telegramModelSelectionToken(state, String(context.from.id)) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -614,6 +628,10 @@ export class TelegramSurface {
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
+        guard();
+        if (this.service.status(modelTarget).selectionScope !== selectionScope) {
+          throw new UserFacingError("model.selection.expired", "会话已变化，请重新发送 /model 选择");
+        }
         const result = await this.commands.execute(
           modelTarget,
           "effort",

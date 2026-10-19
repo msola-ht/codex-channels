@@ -35,6 +35,7 @@ interface RevertPage {
 }
 
 export class ThreadRevertService {
+  private readonly pendingOperations = new Set<{ threadId: string; targetKey: string; invalidated: boolean }>();
   private readonly selectionSnapshots = new Map<string, {
     threadId: string;
     workspaceId: string;
@@ -71,8 +72,7 @@ export class ThreadRevertService {
   ): Promise<ThreadRevertListResult> {
     assertAuthorized?.();
     const binding = this.requireCurrentBinding(target);
-    const beforeSubmit = this.bindingGuard(target, binding, assertAuthorized);
-    return this.locks.forConversation(target, async () => {
+    return this.withSnapshotOperation(target, binding, assertAuthorized, async (beforeSubmit) => {
       beforeSubmit();
       requirePage(page, maximumPages, () => {
         throw new UserFacingError("revert.usage", "Revert 页码无效");
@@ -109,8 +109,7 @@ export class ThreadRevertService {
   ): Promise<ThreadRevertPreview> {
     assertAuthorized?.();
     const binding = this.requireCurrentBinding(target);
-    const beforeSubmit = this.bindingGuard(target, binding, assertAuthorized);
-    return this.locks.forConversation(target, async () => {
+    return this.withSnapshotOperation(target, binding, assertAuthorized, async (beforeSubmit) => {
       beforeSubmit();
       await this.requirePaginatedThread(binding.threadId, beforeSubmit);
       const selection = this.resolveSelection(target, binding.threadId, selector);
@@ -179,8 +178,7 @@ export class ThreadRevertService {
   ): Promise<{ threadId: string; beforeTurnId: string }> {
     assertAuthorized?.();
     const binding = this.requireCurrentBinding(target);
-    const beforeSubmit = this.bindingGuard(target, binding, assertAuthorized);
-    return this.locks.forConversation(target, async () => {
+    return this.withSnapshotOperation(target, binding, assertAuthorized, async (beforeSubmit) => {
       beforeSubmit();
       const confirmation = this.confirmations.get(token);
       if (!confirmation) {
@@ -252,13 +250,19 @@ export class ThreadRevertService {
         threadId: confirmation.threadId,
         beforeTurnId: confirmation.beforeTurnId,
       };
-    });
+    }).finally(() => this.invalidate(target));
   }
 
   invalidate(threadId: string): void;
   invalidate(target: ConversationTarget): void;
   invalidate(value: string | ConversationTarget): void;
   invalidate(value: string | ConversationTarget): void {
+    const targetKey = typeof value === "string" ? undefined : conversationTargetKey(value);
+    for (const pending of this.pendingOperations) {
+      if (typeof value === "string" ? pending.threadId === value : pending.targetKey === targetKey) {
+        pending.invalidated = true;
+      }
+    }
     if (typeof value !== "string") {
       const targetKey = conversationTargetKey(value);
       this.selectionSnapshots.delete(targetKey);
@@ -313,6 +317,27 @@ export class ThreadRevertService {
         );
       }
     };
+  }
+
+  private async withSnapshotOperation<T>(
+    target: ConversationTarget,
+    binding: { threadId: string; workspaceId: string },
+    assertAuthorized: (() => void) | undefined,
+    action: (beforeSubmit: () => void) => Promise<T>,
+  ): Promise<T> {
+    const pending = { threadId: binding.threadId, targetKey: conversationTargetKey(target), invalidated: false };
+    this.pendingOperations.add(pending);
+    const beforeSubmit = this.bindingGuard(target, binding, () => {
+      assertAuthorized?.();
+      if (pending.invalidated) {
+        throw new UserFacingError("revert.concurrent", "Session 历史或 Queue 已变化，请重新执行 /revert list");
+      }
+    });
+    try {
+      return await this.locks.forConversation(target, () => action(beforeSubmit));
+    } finally {
+      this.pendingOperations.delete(pending);
+    }
   }
 
   private async requirePaginatedThread(threadId: string, beforeSubmit: () => void): Promise<void> {
