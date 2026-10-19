@@ -128,6 +128,7 @@
   模型专用保存仅在完整 Profile 与注册表守卫通过后修改默认模型和思考等级，保留连接块、已有超时参数及其他已校验字段。
   Gateway 新增或替换的固定 Key 使用不可变的当前用户私有凭据版本，主配置只引用独立 `env_key`；普通切换保留既有环境变量引用、OAuth 或无认证语义。提供私有凭据读取、创建及显式删除端口，
   校验 Provider、Origin、版本与文件私有性，拒绝旧主配置明文凭据启动。配置写入结果未知时保留新旧凭据供实际引用选择。
+  普通 `env_key` 在 Windows 按名称忽略大小写读取，复制后的环境对象若有多个已定义同名变体则拒绝；Unix 精确匹配。私有版本引用不回退环境变量。
   `assertCustomPrimaryProviderAuthentication` 由切换计划和运行时共同消费，在切换写入前拒绝不支持的认证字段。
   `isValidCustomProviderApiKey` 是不执行 I/O、不裁剪原值的格式谓词，经 Provider 门面公开；管理保存与能力检测复用该规则，各入口保留自己的录入裁剪和错误分类。
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的

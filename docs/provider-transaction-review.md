@@ -6,7 +6,7 @@
 | 编号 | 问题 | 状态 |
 | --- | --- | --- |
 | P01 | 切换 Profile 转固定模式前缺少本次持久恢复快照 | 已修复；隔离故障与真实 CLI 路径已观察 |
-| P02 | Windows 普通环境变量凭据读取丢失大小写不敏感语义 | 待修复与验证 |
+| P02 | Windows 普通环境变量凭据读取丢失大小写不敏感语义 | 已修复；分支与 Linux CLI 已观察，Windows 实机未验 |
 
 ## P01 转换失败时保留完整连接配置
 
@@ -45,7 +45,8 @@ Profile、注册表与快照：存在后续修改或同名条目时停止，不�
 
 未执行真实进程崩溃/断电、远程模型请求、Windows ACL、macOS 服务或完整 Setup 交互；
 共享 Setup 覆盖来自调用链核对。快照供人工核对恢复，不新增自动恢复命令；不宣称原子写入已验证断电持久性。
-本项代码与记录随 `fix(provider): 转固定模式前保留私有恢复快照` 提交，静态检查由提交钩子执行。
+本项提交为 `52b94f0f`（`fix(provider): 转固定模式前保留私有恢复快照`）。提交钩子的
+类型/版本、模块边界、变更文件 Lint、文档索引及 Gateway 构建通过。
 
 ## P02 Windows 环境变量凭据读取
 
@@ -57,7 +58,24 @@ Profile、注册表与快照：存在后续修改或同名条目时停止，不�
 歧义环境不得任意挑选凭据。Gateway 私有版本引用保留现有 Provider、Origin 和版本检查，
 不得回退到普通环境变量。没有持久化格式变化。
 
-**验证记录。** 待实施后记录实际输出、提交与未观察边界。
+**实现。** 在原凭据读取函数内增加 Windows 普通变量名称匹配，不新建配置字段或公共工具。
+零匹配仍表示缺失；多个已定义变体明确拒绝，即使存在精确拼写也不任意选择。值为 `undefined`
+的属性不代表已设置变量。私有版本分支仍先执行原来的文件、Provider、Origin 校验。
+
+**验证记录。** Linux Node 24.21.0，使用合成环境对象和实际导出函数；仅临时切换当前进程的
+平台标识以观察纯读取分支，随后恢复，不把它作为 Windows 操作系统实测：
+
+- 修改前 Windows 分支输出 `windowsBranchMixedCaseAvailable=false`；修改后
+  `mixedCaseAvailable=true`、`missingRejected=true`、`undefinedVariantIgnored=true`。
+- 两个大小写变体、控制字符 Key、空 Key 均被拒绝。Unix 输出 `mixedCaseMissing=true`、
+  `exactCaseAvailable=true`，保留原有匹配语义。
+- 缺少私有版本文件且存在同名环境变量时，输出 `privateReferenceFallbackRejected=true`。
+- 在隔离 Codex/Gateway Home 中，通过真实 App Server 将固定 Provider 设为普通 `env_key` 引用，
+  再执行实际 `bin/codexc.mjs provider switch review-blocked --yes`；退出码 `0`，
+  `keyReadable=true`、`referencePreserved=true`。没有模型请求或服务重启。
+
+Windows 完整服务启动、原生环境继承及 ACL 未实测，Linux CLI 只验证共享调用链与 Unix 语义。
+本项代码和记录随 `fix(provider): 按 Windows 语义读取环境凭据` 提交；静态检查由提交钩子执行。
 
 ## 审查覆盖与限制
 

@@ -299,6 +299,7 @@ stream_max_retries = 5
 未声明独立凭据时，`requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；已有 Provider 也可按 Codex 官方配置使用
 `env_key`，普通切换保留该引用。两者共存时，锁定上游优先读取 `env_key`，缺失时不回退官方认证；`requires_openai_auth` 仍影响账户语义，切换不能据此将其清为 `false`。经 Gateway 新增或替换的自定义固定 Key 只把凭据环境变量名称写入主配置，实际 Key 保存在
 `~/.codex-connect/providers/custom/<ID>/primary-credentials/<版本>.json` 的当前用户私有文件中；使用独立模型目录的 `cp-` Provider 则归入 `providers/<ID>/primary-credentials/`。
+普通环境变量引用在 Windows 忽略名称大小写，在 Unix 精确匹配；复制后的环境对象若含多个已定义的同名大小写变体，Gateway 拒绝使用歧义凭据。Gateway 私有版本引用仍严格读取对应文件，不回退环境变量。
 Windows 的主配置允许上游沙箱只读访问，其所有权与写入完整性检查不保证内容机密性，所以不能在其中保存
 `experimental_bearer_token`。已有明文候选仍可列表查看、显式编辑或切回官方，但 Gateway 拒绝启动该固定实例；
 在 `codexc setup` 中编辑并保存，或显式切换该明文候选，会转为私有凭据，启动不会自动迁移或删除原文件。通过 Setup 新建只使用独立 Key 的 Provider 时

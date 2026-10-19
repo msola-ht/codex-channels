@@ -78,7 +78,16 @@ export function readCustomPrimaryProviderApiKey(provider, block, environment = p
   if (block.env_key.startsWith("CODEX_CONNECT_CUSTOM_") && block.env_key.includes("_PRIMARY_")) {
     return readCustomPrimaryCredential(environment, provider, block.base_url, block.env_key);
   }
-  return environment[block.env_key] === undefined ? undefined : validateCustomApiKey(environment[block.env_key]);
+  let key = block.env_key;
+  if (process.platform === "win32") {
+    // A copied process.env is a plain object, without Windows' case-insensitive lookup.
+    const matches = Object.keys(environment).filter(name => name.toLowerCase() === key.toLowerCase()
+      && environment[name] !== undefined);
+    if (matches.length > 1) throw new Error("自定义 Provider 凭据环境变量存在大小写歧义");
+    if (matches.length === 0) return undefined;
+    key = matches[0];
+  }
+  return environment[key] === undefined ? undefined : validateCustomApiKey(environment[key]);
 }
 
 export function writeCustomPrimaryProviderCredential({ providerId, baseUrl, apiKey, environmentKey }, environment = process.env) {
