@@ -37,6 +37,8 @@ export interface ModelDefinition {
   /** Local Codex tool declarations; omission preserves historical v5 compilation. */
   experimentalSupportedTools?: string[];
   supportsSearchTool?: boolean;
+  /** Historical v5 metadata retained for snapshot consistency; no search policy effect. */
+  supportsWebSearch?: boolean;
   /** followContext is retained only when reading historical v5 metadata; it has no runtime effect. */
   template?: {source: "official" | "deepseek"; model: string; followContext?: boolean};
 }

@@ -19,10 +19,10 @@ export function providerWebSearchSettingsPath(environment = process.env) {
   return join(codexHomePath(environment), "codexc-provider-search.toml");
 }
 
-/** IDs are exact keys, never paths or aggregate aliases. Membership is checked by management. */
+/** Validate exact key syntax, excluding the internal aggregate ID; management checks membership. */
 export function isProviderWebSearchId(provider) {
   return typeof provider === "string" && /^[A-Za-z0-9_-]{1,64}$/u.test(provider)
-    && !["agg", "sf-agg", "codexc-aggregate"].includes(provider);
+    && provider !== "codexc-aggregate";
 }
 
 export function decodeProviderWebSearchSettings(content) {

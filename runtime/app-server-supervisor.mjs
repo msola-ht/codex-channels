@@ -815,15 +815,16 @@ export function readAppServerProviderSettingsFingerprint(provider, environment =
     }
   };
   assertComplete();
+  const profileContent = marker.mode === "exclusive" ? readCodexConfigFile(profilePath) : readPrivateFileSync(profilePath);
   const parts = [
     readProviderWebSearchFingerprint(provider, environment),
     readPrivateFileSync(managedProviderMarkerPath(environment, definition)),
-    marker.mode === "exclusive" ? readCodexConfigFile(profilePath) : readPrivateFileSync(profilePath),
+    profileContent,
     readPrivateFileSync(catalogPath, 2_097_152),
   ];
   if (marker.mode === "exclusive") {
     let block;
-    try { block = parse(parts[1]).model_providers?.[definition.id]; }
+    try { block = parse(profileContent).model_providers?.[definition.id]; }
     catch { throw new Error("受管主 Provider 凭据引用无法安全读取"); }
     if (block?.env_key !== undefined) {
       parts.push(readPrivateFileSync(managedPrimaryCredentialPath(environment, definition, block.env_key), maximumProviderCredentialBytes));
