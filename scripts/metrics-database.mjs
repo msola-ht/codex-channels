@@ -4,7 +4,7 @@ import {
   constants,
   copyFileSync,
   existsSync,
-  renameSync,
+  unlinkSync,
 } from "node:fs";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -20,7 +20,7 @@ import {
   ForwardedChildSignalError,
   ReportedChildExitError,
 } from "../runtime/process-lifecycle.mjs";
-import { serviceCommandTarget, serviceIdentifiers } from "../runtime/service-targets.mjs";
+import { serviceCommandTarget } from "../runtime/service-targets.mjs";
 import {
   acquireRequestMetricsDatabaseLock,
   requireCurrentModelRequestMetricsSchema,
@@ -34,6 +34,7 @@ import {
   readMetricsTurns,
   requireCompatibleMetricsDatabase,
   resolveMetricsDatabaseContext,
+  validateMetricsDatabaseStructure,
 } from "./metrics-database-access.mjs";
 import { inspectManagedServiceStatus } from "./service-status.mjs";
 import { withCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
@@ -100,9 +101,10 @@ export function resetMetricsDatabase(
       previousSchemaVersion: null,
     };
   }
+  validateMetricsDatabaseStructure(environment);
   const lock = acquireRequestMetricsDatabaseLock(databasePath);
   try {
-    const status = inspectMetricsDatabase(environment);
+    const status = validateMetricsDatabaseStructure(environment);
     if (!status.exists) {
       return {
         backupPath: null,
@@ -119,8 +121,9 @@ export function resetMetricsDatabase(
     if (existsSync(backupPath)) {
       throw new Error(`指标数据库备份已存在：${backupPath}`);
     }
-    renameSync(status.databasePath, backupPath);
+    copyFileSync(status.databasePath, backupPath, constants.COPYFILE_EXCL);
     securePrivateFileSync(backupPath);
+    unlinkSync(status.databasePath);
     return {
       backupPath,
       changed: true,
@@ -495,38 +498,19 @@ function isGatewayRunning(environment) {
   ) {
     return true;
   }
-  if (process.platform === "linux") {
-    const gatewayUnit = serviceIdentifiers("systemd", "gateway")[0];
-    const result = spawnSync(
-      environment.SYSTEMCTL_BINARY || "systemctl",
-      ["--user", "show", "--property=ActiveState", "--value", gatewayUnit],
-      { encoding: "utf8", env: environment },
-    );
-    if (result.error) throw result.error;
-    if (result.status !== 0) {
-      throw new Error("无法确认 Gateway 服务状态；为保护指标数据库，已拒绝重置");
-    }
-    const state = result.stdout.trim();
-    return state !== "inactive";
-  }
-  if (process.platform === "darwin") {
-    const uid = typeof process.getuid === "function" ? process.getuid() : 0;
-    const gatewayLabel = serviceIdentifiers("launchd", "gateway")[0];
-    const result = spawnSync(
-      environment.LAUNCHCTL_BINARY || "launchctl",
-      ["print", `gui/${uid}/${gatewayLabel}`],
-      { stdio: "ignore", env: environment },
-    );
-    if (result.error) throw result.error;
-    return result.status === 0;
-  }
-  return false;
+  return isManagedServiceRunning("gateway", environment);
 }
 
 function isManagedServiceRunning(target, environment) {
   if (environment.CODEX_CONNECT_SERVICE_ROLE === target) return true;
-  const status = inspectManagedServiceStatus({ environment, target });
-  return status.services.some((service) => service.running);
+  const status = inspectManagedServiceStatus({ environment: {
+    ...environment, CODEX_CONNECT_HOME: resolveMetricsDatabaseContext(environment).dataDir,
+  }, target });
+  const service = status.services.find(entry => entry.target === target);
+  if (!service || (!service.running && !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state))) {
+    throw new Error("无法确认 Gateway 服务状态；为保护指标数据库，已拒绝维护");
+  }
+  return service.running;
 }
 
 function metricsSocketIsActive(socketPath) {
