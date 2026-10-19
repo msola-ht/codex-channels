@@ -222,6 +222,25 @@ Sol 实现 Queue Service/Port/Client/RPC 四文件，主代理实现命令入口
 发送后撤权时，实际设置保留 `auto_review`、RPC 仅一次，命令出口拒绝展示；每轮结束后临时设置监听均移除，
 仅保留 Client 原有监听。没有真实平台交互、Provider 启动或上游审批行为观察。
 
+**Revert 授权子链（基线 `e9a02b7b`）。** Sol 实现 Revert Service/History Port，主代理核对其 diff 并贯穿
+命令、Application、Router、Provider Client 和 RPC。确认令牌原先只核对 Actor 身份，历史/Queue 读取期间
+撤权仍可提交回退；现固定锁前绑定，每次读取、分页及最终写入前复核实时授权。明确授权错误不再误报结果未知。
+主代理经生产 CommandService→ConversationService→RevertService 使用隔离历史/Queue 端口，完整执行
+`list → 1 → confirm` 返回 `thread.reverted/t/turn`，回退一次；下一次确认的历史读取后撤权返回
+`command.authorization-changed`，总回退次数保持 `1`。生产 Client 的 read/turns-list/revert 守卫拒绝时，
+隔离 RPC 端口记录均为零次发送。
+Sol 的补充生产入口观察覆盖锁等待期间切换 Thread、第一页返回撤权、Queue 返回撤权和最终端口准备后撤权，
+均未发回退；已发送后撤权仍返回实际结果，并使旧选择快照失效。没有真实用户历史回退或真实上游网络观察。
+
+**剩余命令清单。** 独立 Sol 只读追踪后确认以下仍需修复与观察，不能由已完成子链推定通过：
+
+- Skill/Plugin/Agent：解析目录和锁等待后的 Turn 提交，以及原 Thread 变化。
+- rename/pin/compact/review/Goal：锁、自动创建 Thread、Provider 等待和多阶段 pin 写入。
+- Plan：等待后保存模式偏好及带参数 Plan 的 Turn 提交。
+- MCP login/reload/resource：目录与 Provider 准备后的新请求、捕获 Thread 归属。
+- stop：保留即时本地取消，在 Provider 等待后的 interrupt 前核对授权与原 Thread 归属。
+- 普通查询输出的 Workspace 范围复核，以及 Hooks/Schedule/重置券和异步交互的独立授权合同。
+
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。
 当前记录没有真实平台撤权或 Windows/macOS 观察。L03-F3、输入关联异步交互及最终整项验收未完成，

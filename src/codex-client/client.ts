@@ -353,11 +353,11 @@ export class CodexAppServerClient implements
     });
   }
 
-  async readThread(threadId: string, signal?: AbortSignal): Promise<ThreadSnapshot> {
+  async readThread(threadId: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ThreadSnapshot> {
     const result = await this.rpc.request<ThreadReadResponse>({
       method: "thread/read",
       params: { threadId, includeTurns: false },
-    }, { retryOverload: true, ...(signal ? { signal } : {}) });
+    }, { retryOverload: true, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
     if (result.thread.parentThreadId !== null
       && (typeof result.thread.parentThreadId !== "string" || !result.thread.parentThreadId.trim())) {
       throw new Error("Codex Thread 响应缺少有效 parentThreadId");
@@ -505,7 +505,7 @@ export class CodexAppServerClient implements
         sortDirection: options.sortDirection ?? "desc",
         itemsView: "summary",
       } satisfies ThreadTurnsListParams,
-    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}) });
+    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}), ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) });
     const page = toThreadTurnsPage(response);
     if (page.turns.length > limit) {
       throw new Error("Codex Turn 列表响应超过请求页大小");
@@ -513,11 +513,11 @@ export class CodexAppServerClient implements
     return page;
   }
 
-  async revertThread(threadId: string, beforeTurnId: string): Promise<ThreadRevertResult> {
+  async revertThread(threadId: string, beforeTurnId: string, beforeSubmit?: () => void): Promise<ThreadRevertResult> {
     const response = await this.rpc.request<ThreadRevertResponse>({
       method: "thread/revert",
       params: { threadId, beforeTurnId } satisfies ThreadRevertParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toThreadRevertResult(response);
   }
 

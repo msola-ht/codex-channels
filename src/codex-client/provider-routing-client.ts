@@ -382,8 +382,9 @@ export class ProviderRoutingClient {
   async readThread(
     ...args: Parameters<ProviderClientInstance["readThread"]>
   ): ReturnType<ProviderClientInstance["readThread"]> {
-    const [threadId, signal] = args;
+    const [threadId, signal, beforeSubmit] = args;
     const read = async (): Promise<ThreadSnapshot> => {
+      beforeSubmit?.();
       signal?.throwIfAborted();
       const provider = this.threadProviders.get(threadId);
       if (provider) {
@@ -401,6 +402,7 @@ export class ProviderRoutingClient {
         signal?.throwIfAborted();
         return client.readThread(...args);
       });
+      beforeSubmit?.();
       signal?.throwIfAborted();
       this.assertReadThread(canonical, threadId);
       this.rememberThread(canonical);
@@ -583,13 +585,13 @@ export class ProviderRoutingClient {
   listThreadTurns(
     ...args: Parameters<ProviderClientInstance["listThreadTurns"]>
   ): ReturnType<ProviderClientInstance["listThreadTurns"]> {
-    return this.callForThread(args[0], (client) => client.listThreadTurns(...args));
+    return this.callForThread(args[0], (client) => client.listThreadTurns(...args), args[1]?.beforeSubmit);
   }
 
   revertThread(
     ...args: Parameters<ProviderClientInstance["revertThread"]>
   ): ReturnType<ProviderClientInstance["revertThread"]> {
-    return this.callForThread(args[0], (client) => client.revertThread(...args));
+    return this.callForThread(args[0], (client) => client.revertThread(...args), args[2]);
   }
 
   cancelPendingInput(threadId: string): boolean {
@@ -899,7 +901,7 @@ export class ProviderRoutingClient {
   updateThreadApprovalsReviewer(
     ...args: Parameters<ProviderClientInstance["updateThreadApprovalsReviewer"]>
   ): ReturnType<ProviderClientInstance["updateThreadApprovalsReviewer"]> {
-    return this.callForThread(args[0], client => client.updateThreadApprovalsReviewer(...args));
+    return this.callForThread(args[0], client => client.updateThreadApprovalsReviewer(...args), args[2]);
   }
 
   listPermissionProfiles(
@@ -1043,17 +1045,18 @@ export class ProviderRoutingClient {
     return this.aliasProviders.has(provider) ? this.primaryProvider : provider;
   }
 
-  private async resolveThreadProvider(threadId: string, cwd?: string): Promise<string> {
+  private async resolveThreadProvider(threadId: string, cwd?: string, beforeSubmit?: () => void): Promise<string> {
+    beforeSubmit?.();
     const known = this.threadProviders.get(threadId);
     if (known) {
       return known;
     }
     if (cwd) {
       const thread = await this.withPrimaryActivity(async (client) => {
-        let candidate = (await client.listThreads(cwd))
+        let candidate = (await client.listThreads(cwd, { ...(beforeSubmit ? { beforeSubmit } : {}) }))
           .find((item) => item.id === threadId);
         if (!candidate) {
-          candidate = (await client.listThreads(cwd, { fullScan: true }))
+          candidate = (await client.listThreads(cwd, { fullScan: true, ...(beforeSubmit ? { beforeSubmit } : {}) }))
             .find((item) => item.id === threadId);
         }
         return candidate;
@@ -1063,7 +1066,7 @@ export class ProviderRoutingClient {
         return thread.modelProvider;
       }
     }
-    const thread = await this.withPrimaryActivity((client) => client.readThread(threadId));
+    const thread = await this.withPrimaryActivity((client) => client.readThread(threadId, undefined, beforeSubmit));
     this.rememberThread(thread);
     return thread.modelProvider;
   }
@@ -1071,11 +1074,15 @@ export class ProviderRoutingClient {
   private async callForThread<T>(
     threadId: string,
     operation: (client: ProviderClientInstance) => Promise<T>,
+    beforeSubmit?: () => void,
   ): Promise<T> {
-    const provider = await this.resolveThreadProvider(threadId);
-    return this.withProviderActivity(provider, async () =>
-      operation(await this.ensureClient(provider))
-    );
+    const provider = await this.resolveThreadProvider(threadId, undefined, beforeSubmit);
+    beforeSubmit?.();
+    return this.withProviderActivity(provider, async () => {
+      const client = await this.ensureClient(provider);
+      beforeSubmit?.();
+      return operation(client);
+    });
   }
 
   private withProviderActivity<T>(

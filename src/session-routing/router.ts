@@ -219,8 +219,8 @@ export class SessionRouter {
     return workspace ? { id: workspace.id, name: workspace.name } : undefined;
   }
 
-  readThread(threadId: string, signal?: AbortSignal): Promise<ThreadSnapshot> {
-    return this.codex.readThread(threadId, signal);
+  readThread(threadId: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ThreadSnapshot> {
+    return this.codex.readThread(threadId, signal, beforeSubmit);
   }
 
   hasActiveDescendants(threadId: string, signal?: AbortSignal): Promise<boolean> {
@@ -663,7 +663,7 @@ export class SessionRouter {
     if (owner && this.key(owner.target) !== this.key(target)) {
       throw new UserFacingError("thread.bound", "该 Codex Thread 已绑定到其他会话");
     }
-    const thread = await this.codex.readThread(threadId);
+    const thread = await this.codex.readThread(threadId, undefined, assertCurrent);
     assertCurrent();
     if (owner && thread.cwd !== this.workspaces.require(owner.workspaceId).cwd) {
       await this.rejectIncompatibleThread(threadId, new UserFacingError(
@@ -844,9 +844,9 @@ export class SessionRouter {
     }
     const replaced = this.bindings.get(target);
     const threads = await Promise.all([
-      this.codex.readThread(threadId),
+      this.codex.readThread(threadId, undefined, assertAuthorized),
       ...(replaced && replaced.threadId !== threadId
-        ? [this.codex.readThread(replaced.threadId)]
+        ? [this.codex.readThread(replaced.threadId, undefined, assertAuthorized)]
         : []),
     ]);
     assertAuthorized?.();

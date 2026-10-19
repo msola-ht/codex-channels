@@ -105,7 +105,7 @@ export interface ThreadLifecyclePort {
    */
   isProviderConfigured?(provider: string): boolean;
   listThreads(cwd: string, options?: ThreadQueryOptions): Promise<ThreadSnapshot[]>;
-  readThread(threadId: string, signal?: AbortSignal): Promise<ThreadSnapshot>;
+  readThread(threadId: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ThreadSnapshot>;
   /** Authoritative loaded descendants, including ephemeral threads; uncertainty rejects. */
   hasActiveDescendants(threadId: string, signal?: AbortSignal): Promise<boolean>;
   startThread(cwd: string, options?: ThreadStartOptions): Promise<ThreadSession>;

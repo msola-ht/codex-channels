@@ -300,16 +300,18 @@ export interface ConversationQueueRevertUseCases {
     assertAuthorized?: () => void,
   ): Promise<ThreadQueueReorderResult>;
   queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void): Promise<{ turnId: string }>;
-  revertList(target: ConversationTarget, page?: number): Promise<ThreadRevertListResult>;
+  revertList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadRevertListResult>;
   revertPreview(
     target: ConversationTarget,
     selector: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<ThreadRevertPreview>;
   revertConfirm(
     target: ConversationTarget,
     token: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<{ threadId: string; beforeTurnId: string }>;
 }
 
@@ -937,24 +939,26 @@ export class ConversationService implements
     return this.queueUseCases.start(target, selector, assertAuthorized);
   }
 
-  revertList(target: ConversationTarget, page = 1): Promise<ThreadRevertListResult> {
-    return this.revertUseCases.list(target, page);
+  revertList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadRevertListResult> {
+    return this.revertUseCases.list(target, page, assertAuthorized);
   }
 
   revertPreview(
     target: ConversationTarget,
     selector: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<ThreadRevertPreview> {
-    return this.revertUseCases.preview(target, selector, actorId);
+    return this.revertUseCases.preview(target, selector, actorId, assertAuthorized);
   }
 
   revertConfirm(
     target: ConversationTarget,
     token: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<{ threadId: string; beforeTurnId: string }> {
-    return this.revertUseCases.confirm(target, token, actorId);
+    return this.revertUseCases.confirm(target, token, actorId, assertAuthorized);
   }
 
   invalidateQueueSnapshot(threadId: string): void {

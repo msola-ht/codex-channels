@@ -213,6 +213,7 @@ RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 
 Queue 的六个请求也按 Thread Provider 路由；只有 `thread/queue/list` 使用有界只读过载重试，
 其余五个写请求不自动重试。
 `thread/turns/list` 是有界只读查询，可按协议安全重试；`thread/revert` 是破坏性写请求，禁止自动重试。
+两者及 Revert 前置 `thread/read` 保留本地提交守卫；Provider 查询与准备后仍复核，读请求每次过载重试前复核。
 Queue 复核摘要由 Client 对完整有序原始输入计算不可逆指纹，Application 不使用截断预览自行重算。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自

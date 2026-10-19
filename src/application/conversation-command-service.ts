@@ -546,7 +546,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "queue":
         return this.executeQueueCommand(target, argumentsText, assertAuthorized);
       case "revert":
-        return this.executeRevertCommand(target, argumentsText, actorId);
+        return this.executeRevertCommand(target, argumentsText, actorId, assertAuthorized);
       case "rename":
         await this.conversations.rename(target, argumentsText);
         return {
@@ -831,12 +831,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     target: ConversationTarget,
     input: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<ConversationCommandResult> {
     const operation = parseThreadRevertOperation(input);
     if (operation.type === "list") {
       return {
         kind: "thread-revert",
-        result: await this.conversations.revertList(target, operation.page),
+        result: await this.conversations.revertList(target, operation.page, assertAuthorized),
       };
     }
     if (operation.type === "preview") {
@@ -846,6 +847,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           target,
           operation.selector,
           actorId,
+          assertAuthorized,
         ),
       };
     }
@@ -853,6 +855,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       target,
       operation.token,
       actorId,
+      assertAuthorized,
     );
     return {
       kind: "outcome",
