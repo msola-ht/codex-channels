@@ -59,19 +59,17 @@ function projectDeclarations(definitions) {
     if (!record(definition)) fail("invalid_catalog");
     const id = catalogText(definition.id);
     if (declarations.has(id)) fail("invalid_catalog");
-    const { reasoningEfforts, supportsImages, applyPatchToolType, supportsSearchTool, supportsWebSearch } = definition;
+    const { reasoningEfforts, supportsImages, applyPatchToolType, supportsSearchTool } = definition;
     if (reasoningEfforts !== undefined && (!Array.isArray(reasoningEfforts)
       || new Set(reasoningEfforts.map(catalogText)).size !== reasoningEfforts.length)) fail("invalid_catalog");
     if ((supportsImages !== undefined && typeof supportsImages !== "boolean")
       || (supportsSearchTool !== undefined && typeof supportsSearchTool !== "boolean")
-      || (supportsWebSearch !== undefined && typeof supportsWebSearch !== "boolean")
       || (applyPatchToolType !== undefined && applyPatchToolType !== null && applyPatchToolType !== "freeform")) fail("invalid_catalog");
     declarations.set(id, {
       ...(reasoningEfforts === undefined ? {} : { reasoningEfforts: [...reasoningEfforts] }),
       ...(supportsImages === undefined ? {} : { supportsImages }),
       ...(applyPatchToolType === undefined ? {} : { applyPatchToolType }),
       ...(supportsSearchTool === undefined ? {} : { supportsSearchTool }),
-      ...(supportsWebSearch === undefined ? {} : { supportsWebSearch }),
     });
   }
   return declarations;
@@ -79,9 +77,8 @@ function projectDeclarations(definitions) {
 
 function projectDetails(model) {
   const details = {};
-  if (Object.hasOwn(model, "supports_web_search") && typeof model.supports_web_search !== "boolean") fail("invalid_catalog");
   for (const key of ["include_skills_usage_instructions", "include_plugin_usage_instructions", "include_apps_usage_instructions",
-    "supports_reasoning_summary_parameter", "support_verbosity", "supports_image_detail_original", "supports_search_tool", "supports_web_search",
+    "supports_reasoning_summary_parameter", "support_verbosity", "supports_image_detail_original", "supports_search_tool",
     "supports_experimental_context", "supports_reasoning_effort_updates", "node_repl_auto_review_required", "node_repl_disabled", "use_responses_lite"]) {
     const value = model[key];
     if (value != null && typeof value !== "boolean") fail("invalid_catalog");

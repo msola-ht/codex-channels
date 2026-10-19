@@ -12,7 +12,7 @@ export interface OpenAiModelCatalogEntry {
   editable: boolean;
   details: OpenAiModelDetails;
   /** Custom definition declarations, independent of conservative compiled defaults. */
-  declaredCapabilities?: Pick<ModelDefinition, "reasoningEfforts" | "supportsImages" | "applyPatchToolType" | "supportsSearchTool" | "supportsWebSearch">;
+  declaredCapabilities?: Pick<ModelDefinition, "reasoningEfforts" | "supportsImages" | "applyPatchToolType" | "supportsSearchTool">;
 }
 export interface OpenAiModelDetails {
   include_skills_usage_instructions: boolean | null;
@@ -33,7 +33,6 @@ export interface OpenAiModelDetails {
   tool_mode: string | null;
   experimental_supported_tools: string[] | null;
   supports_search_tool: boolean | null;
-  supports_web_search: boolean | null;
   supports_experimental_context: boolean | null;
   supports_reasoning_effort_updates: boolean | null;
   node_repl_auto_review_required: boolean | null;

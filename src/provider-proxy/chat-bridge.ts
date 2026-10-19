@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { ChatToResponses, ModelConversionError, applyWebSearchCapability, clinePassChatReasoningControl, responsesToChat } from "../model-api/index.js";
+import { ChatToResponses, ModelConversionError, clinePassChatReasoningControl, responsesToChat } from "../model-api/index.js";
 import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "./chat-diagnostics.js";
 import { ChatUpstreamError, ModelRequestTimeoutError, type ModelRequestStage, chatStreamError } from "./chat-errors.js";
 import { parseDirectModelJson, validateDirectModelResponse } from "./direct-model-http.js";
@@ -22,7 +22,7 @@ export class ChatCompletionsBridge {
   private readonly server = createServer((request, response) => { void this.handle(request, response); });
   constructor(private readonly options: ProviderProxyOptions & {
     clinePass?: boolean;
-    readClinePassModelCapabilities?: (model: string, signal: AbortSignal) => Promise<{ reasoningEfforts: readonly string[]; supportsWebSearch: boolean } | undefined>;
+    readClinePassModelCapabilities?: (model: string, signal: AbortSignal) => Promise<{ reasoningEfforts: readonly string[] } | undefined>;
   }) {}
   async start(): Promise<void> {
     this.server.listen(0, "127.0.0.1");
@@ -105,7 +105,7 @@ export class ChatCompletionsBridge {
       phaseTimeout(modelRequestPolicy.preparationTimeoutMs, "prepare");
       const source: unknown = JSON.parse(payloadBody);
       const requestedModel = source && typeof source === "object" && "model" in source ? source.model : undefined;
-      let modelCapabilities: { reasoningEfforts: readonly string[]; supportsWebSearch: boolean } | undefined;
+      let modelCapabilities: { reasoningEfforts: readonly string[] } | undefined;
       status = 502;
       const upstream = this.options.resolveUpstream
         ? await waitForChatOperation(Promise.resolve(this.options.resolveUpstream(request.headers, controller.signal)), controller.signal)
@@ -130,8 +130,7 @@ export class ChatCompletionsBridge {
       if (controller.signal.aborted) throw new Error("aborted");
       status = 400;
       // 自定义 Chat 上游可能不接受 response_format 与 tools 并存（托管 CLP 上游已验证接受，保持原样）。
-      const permittedSource = modelCapabilities ? applyWebSearchCapability(source, modelCapabilities.supportsWebSearch).body : source;
-      const { request: body, toolNames, structuredOutput } = responsesToChat(permittedSource, modelCapabilities?.reasoningEfforts,
+      const { request: body, toolNames, structuredOutput } = responsesToChat(source, modelCapabilities?.reasoningEfforts,
         this.options.clinePass ? { clinePass: true } : { structuredOutputWithTools: "prompt" });
       // 结构化输出降级只由提示词保证，记录有界事实以便与“模型没按 JSON 输出”区分。
       if (structuredOutput !== undefined) diagnostics.conversion({ structuredOutput });

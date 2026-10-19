@@ -1,4 +1,5 @@
 import { useCallback } from "react"
+import { Link } from "react-router"
 import { useApi } from "@/hooks/use-api"
 import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
 import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
@@ -64,8 +65,8 @@ export function ModelConfigurationPage() {
     <OpenAiModelCatalogCard catalog={catalog} disabled={busy} configurationRevision={providers.settings?.resourceRevision ?? null} renderCatalog={official =>
       <ProviderSettingsManagement management={providers} section="models" onChanged={reloadCodex} renderCatalog={thirdParty =>
         <Card>
-          <CardHeader><CardTitle>{t("modelCatalog.title")}</CardTitle><CardDescription>{t("modelCatalog.unifiedHint")}</CardDescription></CardHeader>
-          <CardContent><ModelCatalogTable label={t("modelCatalog.title")} groups={[official, ...thirdParty]} /></CardContent>
+          <CardHeader><CardTitle>{t("modelCatalog.title")}</CardTitle><CardDescription>{t("modelCatalog.unifiedHint")} {t("openAiModelCatalog.searchReadOnlyHint")} <Link className="underline underline-offset-4" to="/settings">{t("openAiModelCatalog.editGlobalSearch")}</Link></CardDescription></CardHeader>
+          <CardContent><ModelCatalogTable label={t("modelCatalog.title")} groups={[{ ...official, webSearchSettings: providers.settings?.webSearchSettings.filter(entry => entry.provider === "openai"), webSearchState: providers.loading ? "loading" : providers.error !== null ? "error" : undefined }, ...thirdParty]} /></CardContent>
         </Card>
       } />
     } />

@@ -82,7 +82,6 @@ export function createClinePassCatalog(templates, source, enabledModels) {
     };
     // Managed CLP binds the projected composite in its manifest, not the DS definition.
     delete flash.template;
-    delete flash.supportsWebSearch;
     models[models.findIndex(model => model.id === flash.id)] = flash;
   }
   const defaultModel = models.find(model => model.id === definition.defaultModel)?.id ?? models[0]?.id;

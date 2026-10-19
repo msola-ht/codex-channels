@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "@/hooks/use-translation"
-import type { OpenAiModelCatalogEntry } from "@/lib/types"
+import type { OpenAiModelCatalogEntry, ManagementProviderSettingsResponse } from "@/lib/types"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -12,6 +13,8 @@ export interface ModelCatalogGroup {
   id: string
   header: ReactNode
   models: CatalogModel[]
+  webSearchSettings?: ManagementProviderSettingsResponse["webSearchSettings"]
+  webSearchState?: "loading" | "error"
   onSelect: (model: CatalogModel) => void
   renderAction: (model: CatalogModel) => ReactNode
   content?: ReactNode
@@ -40,6 +43,7 @@ export function ModelCatalogTable({ label, groups }: {
         <Button variant="link" size="sm" className="min-w-0 shrink justify-start px-0" aria-label={t("openAiModelDetails.open", { model: model.displayName })} onClick={() => group.onSelect(model)}><span className="truncate">{model.displayName}</span></Button>
       </div></TableCell>
       <ModelCapabilityCells model={model} />
+      <TableCell><ModelWebSearchSettings settings={group.webSearchSettings} state={group.webSearchState} /></TableCell>
       <TableCell className="text-right">{group.renderAction(model)}</TableCell>
     </TableRow>)}
       {group.footer && <TableRow><TableCell colSpan={10} className="whitespace-normal py-4">{group.footer}</TableCell></TableRow>}
@@ -56,9 +60,37 @@ export function ModelCapabilityHeaders() {
     <TableHead className="text-right">{t("openAiModelDetails.fields.effective_context_window_percent")}</TableHead>
     <TableHead>{t("openAiModelCatalog.preferredEffort")}</TableHead>
     <TableHead>{t("openAiModelCatalog.acceleration")}</TableHead>
-    <TableHead>{t("openAiModelCatalog.approvals")}</TableHead>
     <TableHead>{t("openAiModelCatalog.tools")}</TableHead>
+    <TableHead>{t("openAiModelCatalog.builtinSearch")}</TableHead>
   </>
+}
+
+function ModelWebSearchSettings({ settings, state }: { settings?: ManagementProviderSettingsResponse["webSearchSettings"]; state?: "loading" | "error" }) {
+  const { t } = useTranslation()
+  if (state === "loading") return <span aria-busy="true">{t("common.loading")}</span>
+  if (state === "error") return <span>{t("openAiModelCatalog.searchReadFailed")}</span>
+  if (!settings?.length) return <span>{t("common.unknown")}</span>
+  const options = [
+    { value: "default", label: t("openAiModelCatalog.searchDefault") },
+    { value: "disabled", label: t("settingsFields.off") },
+    { value: "cached", label: t("settingsFields.cached") },
+    { value: "indexed", label: t("settingsFields.indexed") },
+    { value: "live", label: t("settingsFields.live") },
+  ]
+  return <div className="flex flex-col gap-2">{settings.map(setting => {
+    const mode = setting.status === "ready" ? setting.mode ?? "default" : undefined
+    const error = setting.status === "error" ? t(setting.error === "invalid-mode" ? "openAiModelCatalog.searchInvalidMode" : setting.error === "invalid-document" ? "openAiModelCatalog.searchInvalidDocument" : "openAiModelCatalog.searchReadFailed") : null
+    return <Tooltip key={setting.provider}>
+      <TooltipTrigger render={<span tabIndex={0} className="flex items-center gap-2" />}>
+        {error ? <span>{error}</span> : <Select items={options} value={mode} readOnly>
+          <SelectTrigger size="sm" aria-label={`${setting.provider} · ${t("openAiModelCatalog.builtinSearch")}`}><SelectValue /></SelectTrigger>
+          <SelectContent><SelectGroup>{options.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent>
+        </Select>}
+        {settings.length > 1 ? <span>{setting.provider}</span> : null}
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm"><p>{t(setting.source === "global" ? "openAiModelCatalog.globalSearchSource" : "openAiModelCatalog.providerSearchSource", { provider: setting.provider })}</p><p>{t("openAiModelCatalog.searchDefaultHint")}</p></TooltipContent>
+    </Tooltip>
+  })}</div>
 }
 
 export function ModelCapabilityCells({ model }: { model: OpenAiModelCatalogEntry }) {
@@ -70,7 +102,6 @@ export function ModelCapabilityCells({ model }: { model: OpenAiModelCatalogEntry
   const reasoning = declared === undefined ? model.reasoningEfforts : declared.reasoningEfforts
   const reasoningState = declared === undefined ? t("common.unknown") : capability(reasoning === undefined ? undefined : reasoning.length > 0)
   const search = declared === undefined ? t(model.details.supports_search_tool === null ? "openAiModelDetails.undeclared" : model.details.supports_search_tool ? "openAiModelCatalog.supported" : "openAiModelCatalog.unsupported") : capability(declared.supportsSearchTool)
-  const webSearch = capability(declared === undefined ? model.details.supports_web_search ?? undefined : declared.supportsWebSearch)
   const patch = declared === undefined ? t(model.details.apply_patch_tool_type === null ? "openAiModelDetails.undeclared" : "openAiModelCatalog.supported") : capability(declared.applyPatchToolType === undefined ? undefined : declared.applyPatchToolType !== null)
   return <>
     <TableCell><div className="flex flex-wrap gap-1">{declared !== undefined ? <><Badge variant="outline">{t("openAiModelDetails.text")}</Badge>{declared.supportsImages === true ? <Badge variant="outline">{t("openAiModelDetails.image")}</Badge> : <span>{t("managementUi.imageInput")}: {capability(declared.supportsImages)}</span>}</> : model.details.input_modalities === null
@@ -87,10 +118,8 @@ export function ModelCapabilityCells({ model }: { model: OpenAiModelCatalogEntry
       </ul></div></TooltipContent>
     </Tooltip></TableCell>
     <TableCell><ModelServiceTiers tiers={model.serviceTiers} /></TableCell>
-    <TableCell><ModelApprovals approvals={model.approvals} /></TableCell>
     <TableCell><div className="flex flex-col items-start gap-1">
       <span>{t("openAiModelCatalog.searchTool", { value: search })}</span>
-      <span>{t("managementUi.nativeWebSearch")}: {webSearch}</span>
     <Tooltip>
       <TooltipTrigger render={<span tabIndex={0} className="cursor-help" />}>{t("openAiModelCatalog.editSupport", { value: patch })}</TooltipTrigger>
       <TooltipContent>{t("openAiModelCatalog.patchTool", { value: declared === undefined ? model.details.apply_patch_tool_type ?? t("openAiModelDetails.undeclared") : declared.applyPatchToolType ?? patch })}</TooltipContent>

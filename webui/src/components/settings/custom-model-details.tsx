@@ -68,7 +68,6 @@ export function CustomModelDetailsPreview({ entry }: { entry: CustomModel }) {
     <p>{t("managementUi.imageInput")}: {capability(entry.supportsImages)}</p>
     <p>{t("managementUi.freeformPatchTool")}: {capability(entry.applyPatchToolType === undefined ? undefined : entry.applyPatchToolType !== null)}</p>
     <p>{t("managementUi.toolSearchTool")}: {capability(entry.supportsSearchTool)}</p>
-    <p>{t("managementUi.nativeWebSearch")}: {capability(entry.supportsWebSearch)}</p>
     {entry.experimentalSupportedTools !== undefined ? <p>{t("modelTemplate.localTools")}: {entry.experimentalSupportedTools.join(", ") || t("modelTemplate.absent")}</p> : null}
     <p className="text-muted-foreground">{t("customModel.unknownDisabled")}</p>
     <p>{t("customModel.description")}: {entry.description ?? t("customModel.defaultValue")}</p>

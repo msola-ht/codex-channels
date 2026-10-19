@@ -136,14 +136,11 @@ Remote 保留 `--profile sf-ds-personal`；两个入口默认连接主实例，�
 将内置 `web_search` 列为忽略，[Codex 接入配置](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)
 也明确设置 `web_search = "disabled"`。早期版本的搜索实测不能代表当前模型支持。
 
-Gateway 按当前 Provider 的精确模型目录声明 `supports_web_search` 放行原生网页搜索，
-不再按 DS／OCG／CCG／CLP 家族统一禁用。只有显式 true 才保留请求中的 `web_search`；
-false 和未声明均不发送该工具，且不会覆盖用户全局 `web_search = "disabled"`。
-CLI 或 WebUI 可先做单账户诊断，再手动声明并预览保存；一次账户的成功不能证明其他账户支持。
-同家族账户共享模型文件，预览会列出受影响账户；DS 模板不会替其他上游声明搜索支持。
-固定、切换和聚合实例以及渠道、`codexc remote` 共用此出站策略。安装新代码后须重启 App Server，
-能力声明的完整激活也以预览提示的重启为准；本操作不自动重启服务或把搜索转交 OpenAI。
-官方 OpenAI 与独立 Relay 保留各自合同，绕过受管服务的独立 Codex 进程不受此策略控制。
+内置网页搜索沿用 Codex 的 `web_search` 配置；Gateway 保留请求中的 `web_search` 工具与选择，
+不增加模型目录能力声明。CLI 或 WebUI 可做单账户诊断，结果仅反映所选账户与模型的本次响应，
+一次成功不能证明其他账户支持。DS 上游是否执行仍以上游实际响应为准。
+固定、切换和聚合实例以及渠道、`codexc remote` 共用此出站合同；安装新代码后须重启 App Server，
+本次代码更新不自动重启服务或把搜索转交 OpenAI。官方 OpenAI 与独立 Relay 保留各自合同。
 
 目录中的 `supports_search_tool` 是客户端工具检索能力，和内置网页搜索不同，继续保留官方值。
 普通函数工具及 Codex 本地管理的 MCP 工具不因关闭网页搜索而被禁用。

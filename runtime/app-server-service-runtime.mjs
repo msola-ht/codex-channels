@@ -282,8 +282,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
             providerCatalogIsolationPath(runtime.environment),
           ],
         })
-        // Codex 兼容 Provider 共用的官方目录只读，不含可配置的第三方扩展能力声明。
-        // 保留其工具透传及上游策略，不能把官方字段缺失当作第三方明确禁用。
+        // Codex 兼容 Provider 共用的官方目录只读，不启用可编辑目录的模型名单复核。
         : undefined;
     if (modelGuard) ownedResources.add(modelGuard);
     // 官方 OpenAI 端点理解 Codex 私有输入项；自定义固定 Provider 复用 openai 路由键但换成第三方上游。

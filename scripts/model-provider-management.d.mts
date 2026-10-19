@@ -1,3 +1,11 @@
+export type ProviderWebSearchSetting = {
+  provider: string;
+  source: "global" | "provider";
+} & ({ status: "ready"; mode: "disabled" | "live" | "cached" | "indexed" | null }
+  | { status: "error"; error: "unreadable" | "invalid-document" | "invalid-mode" });
+
+export function loadProviderWebSearchSettings(state: ModelProviderManagementState, environment?: NodeJS.ProcessEnv): ProviderWebSearchSetting[];
+
 export interface ModelProviderManagementState {
   configVersion: string | number | null | undefined;
   defaults: { model: string | null; reasoningEffort: string | null };
