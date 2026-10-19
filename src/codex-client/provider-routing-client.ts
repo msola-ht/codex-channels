@@ -608,19 +608,19 @@ export class ProviderRoutingClient {
   setThreadName(
     ...args: Parameters<ProviderClientInstance["setThreadName"]>
   ): ReturnType<ProviderClientInstance["setThreadName"]> {
-    return this.callForThread(args[0], (client) => client.setThreadName(...args));
+    return this.callForThread(args[0], (client) => client.setThreadName(...args), args[2]);
   }
 
   setThreadPinned(
     ...args: Parameters<ProviderClientInstance["setThreadPinned"]>
   ): ReturnType<ProviderClientInstance["setThreadPinned"]> {
-    return this.callForThread(args[0], (client) => client.setThreadPinned(...args));
+    return this.callForThread(args[0], (client) => client.setThreadPinned(...args), args[2]);
   }
 
   compactThread(
     ...args: Parameters<ProviderClientInstance["compactThread"]>
   ): ReturnType<ProviderClientInstance["compactThread"]> {
-    return this.callForThread(args[0], (client) => client.compactThread(...args));
+    return this.callForThread(args[0], (client) => client.compactThread(...args), args[1]);
   }
 
   async forkThread(
@@ -652,7 +652,7 @@ export class ProviderRoutingClient {
   startReview(
     ...args: Parameters<ProviderClientInstance["startReview"]>
   ): ReturnType<ProviderClientInstance["startReview"]> {
-    return this.callForThread(args[0], (client) => client.startReview(...args));
+    return this.callForThread(args[0], (client) => client.startReview(...args), args[2]);
   }
 
   listMcpServers(
@@ -710,19 +710,19 @@ export class ProviderRoutingClient {
   getGoal(
     ...args: Parameters<ProviderClientInstance["getGoal"]>
   ): ReturnType<ProviderClientInstance["getGoal"]> {
-    return this.callForThread(args[0], (client) => client.getGoal(...args));
+    return this.callForThread(args[0], (client) => client.getGoal(...args), args[1]);
   }
 
   setGoal(
     ...args: Parameters<ProviderClientInstance["setGoal"]>
   ): ReturnType<ProviderClientInstance["setGoal"]> {
-    return this.callForThread(args[0], (client) => client.setGoal(...args));
+    return this.callForThread(args[0], (client) => client.setGoal(...args), args[2]);
   }
 
   clearGoal(
     ...args: Parameters<ProviderClientInstance["clearGoal"]>
   ): ReturnType<ProviderClientInstance["clearGoal"]> {
-    return this.callForThread(args[0], (client) => client.clearGoal(...args));
+    return this.callForThread(args[0], (client) => client.clearGoal(...args), args[1]);
   }
 
   listCollaborationModes(

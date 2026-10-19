@@ -409,7 +409,7 @@ export class SessionRouter {
         await pending;
         return this.ensure(target, startOptions, onRestored);
       }
-      const thread = await this.codex.readThread(current.threadId);
+      const thread = await this.codex.readThread(current.threadId, undefined, startOptions.beforeSubmit);
       startOptions.beforeSubmit?.();
       if (!this.sameBinding(current, this.bindings.get(target))
         || this.threadLifecycleQueues.has(current.threadId)) {
@@ -420,7 +420,7 @@ export class SessionRouter {
         || !foregroundThreadSources.has(thread.source)) {
         await this.withThreadLifecycle([current.threadId], async () => {
           if (!this.sameBinding(current, this.bindings.get(target))) return;
-          const latest = await this.codex.readThread(current.threadId);
+          const latest = await this.codex.readThread(current.threadId, undefined, startOptions.beforeSubmit);
           if (!this.sameBinding(current, this.bindings.get(target))) return;
           const latestWorkspace = this.workspaces.require(current.workspaceId);
           if (latest.id !== current.threadId || latest.cwd !== latestWorkspace.cwd
@@ -453,7 +453,7 @@ export class SessionRouter {
     const workspace = this.workspace(target);
     this.bindings.selectWorkspace(target, workspace.id);
     if (!this.shouldForceNew(target)) {
-      const sessions = await this.list(target);
+      const sessions = await this.list(target, { ...(startOptions.beforeSubmit ? { beforeSubmit: startOptions.beforeSubmit } : {}) });
       startOptions.beforeSubmit?.();
       const candidate = sessions.find(
         (thread) =>
@@ -471,7 +471,7 @@ export class SessionRouter {
           if (this.bindings.getByThread(candidate.id)) {
             throw new UserFacingError("thread.bound", "该 Codex Thread 已绑定到其他会话");
           }
-          const resumed = await this.resumeInWorkspace(await this.codex.readThread(candidate.id), workspace, startOptions);
+          const resumed = await this.resumeInWorkspace(await this.codex.readThread(candidate.id, undefined, startOptions.beforeSubmit), workspace, startOptions);
           if (resumed.thread.status.type === "active") {
             await this.cleanupFailedResume(candidate.id, new UserFacingError(
               "conversation.busy", "历史会话已有运行中的任务，请显式恢复会话",

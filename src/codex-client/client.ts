@@ -758,18 +758,18 @@ export class CodexAppServerClient implements
     }, { retryOverload: false });
   }
 
-  async setThreadName(threadId: string, name: string): Promise<void> {
+  async setThreadName(threadId: string, name: string, beforeSubmit?: () => void): Promise<void> {
     await this.rpc.request({
       method: "thread/name/set",
       params: { threadId, name },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
-  async setThreadPinned(threadId: string, pinned: boolean): Promise<boolean> {
+  async setThreadPinned(threadId: string, pinned: boolean, beforeSubmit?: () => void): Promise<boolean> {
     const observed = await this.rpc.request<ThreadReadResponse>({
       method: "thread/read",
       params: { threadId, includeTurns: false },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     const current = toThreadSnapshot(observed.thread);
     if (current.id !== threadId) {
       throw new Error("Codex Thread 固定状态更新目标不一致");
@@ -781,6 +781,8 @@ export class CodexAppServerClient implements
       threadId,
       observed,
       pinned ? PINNED_THREAD_SECTION_ID : null,
+      undefined,
+      beforeSubmit,
     );
     if (updated.id !== threadId || updated.isPinned !== pinned) {
       throw new Error("Codex Thread 固定状态更新结果不一致");
@@ -793,6 +795,7 @@ export class CodexAppServerClient implements
     observed: ThreadReadResponse,
     sectionId: string | null,
     beforeThreadId?: string,
+    beforeSubmit?: () => void,
   ): Promise<ThreadSnapshot> {
     const materialized = await this.rpc.request<ThreadMetadataUpdateResponse>({
       method: "thread/metadata/update",
@@ -800,7 +803,7 @@ export class CodexAppServerClient implements
         threadId,
         gitInfo: { sha: observed.thread.gitInfo?.sha ?? null },
       },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     const stored = toThreadSnapshot(materialized.thread);
     if (stored.id !== threadId) {
       throw new Error("Codex Thread 分区元数据更新目标不一致");
@@ -812,15 +815,16 @@ export class CodexAppServerClient implements
         sectionId,
         beforeThreadId: beforeThreadId ?? null,
       },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
+    // Reconcile a submitted move even if authorization changes after the write.
     return this.readThread(threadId);
   }
 
-  async compactThread(threadId: string): Promise<void> {
+  async compactThread(threadId: string, beforeSubmit?: () => void): Promise<void> {
     await this.rpc.request({
       method: "thread/compact/start",
       params: { threadId },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
   async listModels(beforeSubmit?: () => void): Promise<ModelOption[]> {
@@ -1120,11 +1124,11 @@ export class CodexAppServerClient implements
     return toThreadSession(response);
   }
 
-  async startReview(threadId: string, target: ReviewTarget): Promise<ReviewStarted> {
+  async startReview(threadId: string, target: ReviewTarget, beforeSubmit?: () => void): Promise<ReviewStarted> {
     const response = await this.rpc.request<ReviewStartResponse>({
       method: "review/start",
       params: { threadId, target: toProtocolReviewTarget(target), delivery: "inline" },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toReviewStarted(response);
   }
 
@@ -1444,27 +1448,27 @@ export class CodexAppServerClient implements
     return profiles;
   }
 
-  async getGoal(threadId: string): Promise<ThreadGoal | null> {
+  async getGoal(threadId: string, beforeSubmit?: () => void): Promise<ThreadGoal | null> {
     const response = await this.rpc.request<ThreadGoalGetResponse>({
       method: "thread/goal/get",
       params: { threadId },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return response.goal ? toThreadGoal(response.goal) : null;
   }
 
-  async setGoal(threadId: string, objective: string): Promise<ThreadGoal> {
+  async setGoal(threadId: string, objective: string, beforeSubmit?: () => void): Promise<ThreadGoal> {
     const response = await this.rpc.request<ThreadGoalSetResponse>({
       method: "thread/goal/set",
       params: { threadId, objective, status: "active", origin: "user" },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toThreadGoal(response.goal);
   }
 
-  async clearGoal(threadId: string): Promise<void> {
+  async clearGoal(threadId: string, beforeSubmit?: () => void): Promise<void> {
     await this.rpc.request({
       method: "thread/goal/clear",
       params: { threadId, origin: "user" },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 }
 

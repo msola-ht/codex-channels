@@ -227,16 +227,16 @@ export interface ConversationTurnUseCases {
   prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio"): PreparedAttachmentSubmission;
   submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean): Promise<Submission>;
   stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean>;
-  rename(target: ConversationTarget, name: string): Promise<void>;
-  setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean>;
-  compact(target: ConversationTarget): Promise<void>;
+  rename(target: ConversationTarget, name: string, assertAuthorized?: () => void): Promise<void>;
+  setPinned(target: ConversationTarget, pinned: boolean, assertAuthorized?: () => void): Promise<boolean>;
+  compact(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
   fork(target: ConversationTarget, assertAuthorized?: () => void): Promise<string>;
   togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState>;
   startPlan(target: ConversationTarget, prompt: string): Promise<Submission>;
-  review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission>;
-  getGoal(target: ConversationTarget): Promise<ThreadGoal | null>;
-  setGoal(target: ConversationTarget, objective: string): Promise<ThreadGoal>;
-  clearGoal(target: ConversationTarget): Promise<void>;
+  review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void): Promise<Submission>;
+  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null>;
+  setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal>;
+  clearGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
 }
 
 /** Stable model and installed-extension boundary. */
@@ -1354,39 +1354,37 @@ export class ConversationService implements
     return true;
   }
 
-  rename(target: ConversationTarget, name: string): Promise<void> {
+  rename(target: ConversationTarget, name: string, assertAuthorized?: () => void): Promise<void> {
     const normalized = name.trim();
     if (!normalized || normalized.length > 64) {
       return Promise.reject(
         new UserFacingError("conversation.name.invalid", "会话名称必须为 1–64 个字符"),
       );
     }
-    return this.locked(target, async () => {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       this.requireIdle(target);
       const binding = this.router.current(target);
       if (!binding) {
         throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
       }
-      await this.codex.setThreadName(binding.threadId, normalized);
+      await this.codex.setThreadName(binding.threadId, normalized, this.commandThreadGuard(target, binding.threadId, assertAuthorized, true));
     });
   }
 
-  setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean> {
-    return this.locked(target, async () => {
+  setPinned(target: ConversationTarget, pinned: boolean, assertAuthorized?: () => void): Promise<boolean> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       const binding = this.router.current(target);
       if (!binding) {
         throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
       }
-      return this.codex.setThreadPinned(binding.threadId, pinned);
+      return this.codex.setThreadPinned(binding.threadId, pinned, this.commandThreadGuard(target, binding.threadId, assertAuthorized));
     });
   }
 
-  compact(target: ConversationTarget): Promise<void> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      const binding = await this.ensureSession(target, true);
-      this.requireIdle(target);
-      await this.codex.compactThread(binding.threadId);
+  compact(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized, true);
+      await this.codex.compactThread(binding.threadId, beforeSubmit);
     });
   }
 
@@ -1435,12 +1433,10 @@ export class ConversationService implements
     });
   }
 
-  review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      const binding = await this.ensureSession(target, true);
-      this.requireIdle(target);
-      const result = await this.codex.startReview(binding.threadId, reviewTarget);
+  review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void): Promise<Submission> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized, true);
+      const result = await this.codex.startReview(binding.threadId, reviewTarget, beforeSubmit);
       this.core.markTurnStarted(target, result.threadId, result.turnId);
       return { threadId: result.threadId, turnId: result.turnId, steered: false };
     });
@@ -1555,21 +1551,21 @@ export class ConversationService implements
     return this.extensionQueries.listPermissionProfiles(target);
   }
 
-  getGoal(target: ConversationTarget): Promise<ThreadGoal | null> {
-    return this.locked(target, async () => {
-      const binding = await this.ensureSession(target);
-      return this.codex.getGoal(binding.threadId);
+  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
+      return this.codex.getGoal(binding.threadId, beforeSubmit);
     });
   }
 
-  setGoal(target: ConversationTarget, objective: string): Promise<ThreadGoal> {
+  setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal> {
     const normalized = objective.trim();
     if (!normalized) {
       return Promise.reject(new UserFacingError("goal.empty", "目标不能为空"));
     }
-    return this.locked(target, async () => {
-      const binding = await this.ensureSession(target);
-      const goal = await this.codex.setGoal(binding.threadId, normalized);
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
+      const goal = await this.codex.setGoal(binding.threadId, normalized, beforeSubmit);
       this.core.handle({
         type: "thread.goal.updated",
         threadId: binding.threadId,
@@ -1579,10 +1575,10 @@ export class ConversationService implements
     });
   }
 
-  clearGoal(target: ConversationTarget): Promise<void> {
-    return this.locked(target, async () => {
-      const binding = await this.ensureSession(target);
-      await this.codex.clearGoal(binding.threadId);
+  clearGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
+      await this.codex.clearGoal(binding.threadId, beforeSubmit);
       this.core.handle({
         type: "thread.goal.cleared",
         threadId: binding.threadId,
@@ -1959,6 +1955,25 @@ export class ConversationService implements
       }
       return action();
     });
+  }
+
+  private commandThreadGuard(target: ConversationTarget, threadId: string | undefined,
+    assertAuthorized?: () => void, requireIdle = false): () => void {
+    return () => {
+      assertAuthorized?.();
+      if (this.router.current(target)?.threadId !== threadId) {
+        throw new UserFacingError("command.authorization-changed", "命令目标会话已变化");
+      }
+      if (requireIdle) this.requireIdle(target);
+    };
+  }
+
+  private async prepareCommandThread(target: ConversationTarget, assertAuthorized?: () => void, requireIdle = false) {
+    const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized, requireIdle);
+    const binding = await this.ensureSession(target, requireIdle, beforePrepare);
+    const beforeSubmit = this.commandThreadGuard(target, binding.threadId, assertAuthorized, requireIdle);
+    beforeSubmit();
+    return { binding, beforeSubmit };
   }
 
   private lockedTargets<T>(

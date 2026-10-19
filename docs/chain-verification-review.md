@@ -235,7 +235,6 @@ Sol 的补充生产入口观察覆盖锁等待期间切换 Thread、第一页返
 **剩余命令清单。** 独立 Sol 只读追踪后确认以下仍需修复与观察，不能由已完成子链推定通过：
 
 - Skill/Plugin/Agent：解析目录和锁等待后的 Turn 提交，以及原 Thread 变化。
-- rename/pin/compact/review/Goal：锁、自动创建 Thread、Provider 等待和多阶段 pin 写入。
 - Plan：等待后保存模式偏好及带参数 Plan 的 Turn 提交。
 - MCP login/reload/resource：目录与 Provider 准备后的新请求、捕获 Thread 归属。
 - Hooks/Schedule/重置券和异步交互的独立授权合同，以及普通只读查询内部的分页/Provider 等待。
@@ -248,6 +247,19 @@ Sol 的补充生产入口观察覆盖锁等待期间切换 Thread、第一页返
 `command.authorization-changed`，本地取消仍一次、RPC 为零。同一归属仍允许发送；后台状态不额外限制是代码合同，
 本次未驱动真实前台转后台生命周期。另经命令 sessions 入口在列表读取时更改工作区目录，结果出口明确拒绝。
 本次没有真实平台停止、上游 Turn 终态或操作系统差异观察。
+
+**普通 Thread/Goal 命令子链（基线 `2ef96283`）。** 主代理贯穿命令与 Application 守卫，固定锁前 Thread，
+Thread 准备和最终请求前复核；Sol 负责 Turn Port、Client、Provider 与输出准入的透传。
+原本 `getGoal` 等看似查询的入口也可能创建 Thread，因此 Thread 准备同样受守卫约束。
+主代理运行生产 CommandService→ConversationService、隔离 Thread 准备与 Turn 端口：rename、pin、compact、
+review、Goal set/get/clear 均返回对应命令结果，各调用一次；Review 和 Goal 的已知结果进入 Core 归约。
+Thread 准备期间撤权时不建立隔离绑定；最终发送等待期间撤权或换成其他 Thread 时，新业务调用均为零。
+Sol 内联运行生产输出准入→ProviderRoutingClient→Client→JSON-RPC，使用内存 Transport：正常七方法返回
+对应结果，调用前撤权时七项 RPC 均为零。pin 初始读取后撤权只读取一次；metadata/update 后撤权保留已写
+元数据、不发送 move；move 后撤权继续唯一权威读回并返回固定成功；move 返回上游错误时也不自动回滚元数据。
+pin/Goal 读取的首个过载响应后撤权均阻止重试；输出准入等待撤权不发送 compact，Provider 准备等待撤权不发送 rename。
+已提交 rename 正常结算；三个原固定参数包装均保留最终守卫。捕获请求中没有本地 `beforeSubmit` 协议字段。
+这些证据来自隔离生产调用链，未连接真实 App Server、平台账号或执行跨操作系统路径。
 
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。

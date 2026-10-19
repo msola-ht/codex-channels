@@ -500,7 +500,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       }
       case "pin":
         {
-          const changed = await this.conversations.setPinned(target, true);
+          const changed = await this.conversations.setPinned(target, true, assertAuthorized);
           return {
             kind: "outcome",
             outcome: { type: "thread.pin-updated", pinned: true, changed },
@@ -508,7 +508,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
       case "unpin":
         {
-          const changed = await this.conversations.setPinned(target, false);
+          const changed = await this.conversations.setPinned(target, false, assertAuthorized);
           return {
             kind: "outcome",
             outcome: { type: "thread.pin-updated", pinned: false, changed },
@@ -549,13 +549,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "revert":
         return this.executeRevertCommand(target, argumentsText, actorId, assertAuthorized);
       case "rename":
-        await this.conversations.rename(target, argumentsText);
+        await this.conversations.rename(target, argumentsText, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "thread.renamed", name: argumentsText },
         };
       case "compact":
-        await this.conversations.compact(target);
+        await this.conversations.compact(target, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "thread.compaction-requested" },
@@ -571,6 +571,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         const submission = await this.conversations.review(
           target,
           parseReviewTarget(argumentsText),
+          assertAuthorized,
         );
         return {
           kind: "outcome",
@@ -738,7 +739,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           state: await this.conversations.togglePlanMode(target),
         };
       case "goal":
-        return this.goal(target, argumentsText);
+        return this.goal(target, argumentsText, assertAuthorized);
       case "release": {
         const force = argumentsText === "force";
         if (argumentsText !== "" && !force) {
@@ -1047,16 +1048,17 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async goal(
     target: ConversationTarget,
     input: string,
+    assertAuthorized?: () => void,
   ): Promise<ConversationCommandResult> {
     if (input === "clear") {
-      await this.conversations.clearGoal(target);
+      await this.conversations.clearGoal(target, assertAuthorized);
       return {
         kind: "outcome",
         outcome: { type: "goal.cleared" },
       };
     }
     if (input.startsWith("set ")) {
-      const goal = await this.conversations.setGoal(target, input.slice(4));
+      const goal = await this.conversations.setGoal(target, input.slice(4), assertAuthorized);
       return {
         kind: "outcome",
         outcome: { type: "goal.updated", goal },
@@ -1068,7 +1070,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         "Goal 参数无效",
       );
     }
-    const goal = await this.conversations.getGoal(target);
+    const goal = await this.conversations.getGoal(target, assertAuthorized);
     return { kind: "goal", goal };
   }
 }
