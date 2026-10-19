@@ -1,8 +1,10 @@
 # 项目重复实现与统一边界审查
 
-本记录按问题维护当前结论、关联链路、调整边界与实施证据，不保留逐轮工作日志。修复按条目推进；未完成条目仍保留建议与限制。
+**文档职责：已完成治理阶段的审查证据，以及按问题维护的边界决策与补证限制。** U01–U19 已完成评估和约定范围内的实施，阶段实现已随 PR #268 合并；U16 保留独立实现，不是待实施重构。
+本页继续维护 U16 等决策的理由、重新评估条件及未观察事项，不作为新一轮执行清单。
+后续工作遵循[开发规则](development-rules.md#development-workflow)，现行接口以各项引用的专题和模块文档为准；补证仅更新受影响条目并注明适用基线，不重写历史观察。
 
-审查基线：`2ac1f25b`，2026-10-18。结论来自源码与调用链检查；没有使用真实凭据、启动服务或执行外部写操作。维护性重复不等同于已发生的用户故障。
+初始审查基线：`2ac1f25b`，2026-10-18。初审结论来自源码与调用链检查；初审没有使用真实凭据、启动服务或执行外部写操作。后续实际观察及其限制分别记录在各条目中。维护性重复不等同于已发生的用户故障。
 
 ## 问题处理状态
 
@@ -261,17 +263,25 @@ Linux 隔离源码副本使用官方校验和匹配的 Node 22.13.0 / npm 10.9.2
 
 ## U16 一次性私有 IPC 交换的底层收尾
 
-**处理决定。** 保留现有两条实现。本项是条件性建议，统一所需的失败分类与预算选项会扩大公共 helper，而没有已确认故障需要这种改动；本轮不为形式去重引入传输框架。
+**处理决定。** 保留两段一次性请求实现，本项已评估关闭，不作为待实施重构。重复集中在连接、收包限额、超时、取消和销毁连接；项目并非存在两套完整 IPC 系统。双方服务监听、端点发布与清理已使用 `PrivateIpcServer`，Windows 连接也复用私有端点校验与认证。进一步统一所需的失败分类与预算选项会扩大公共接口，目前没有确认必须靠合并解决的缺陷。
 
-证据入口：[`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 的 `readSupervisorResponse`（约 917 行），以及 [`private-ipc.mjs`](../runtime/private-ipc.mjs) 的 `requestPrivateIpcJson`（约 233 行）；Model Relay 控制已使用后者。
+证据入口：[`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 的 `readSupervisorResponse` 与 inspect/ensure/release/apply 调用方，以及 [`private-ipc.mjs`](../runtime/private-ipc.mjs) 的 `requestPrivateIpcJson`。后者由 [`model-relay-control.mjs`](../runtime/model-relay-control.mjs) 和 [`relay-metrics-channel.ts`](../src/provider-proxy/relay-metrics-channel.ts) 消费。
 
 Supervisor 的 inspect/ensure/release/apply 一次请求另行维护连接、写入、字节上限、超时、取消与 socket 销毁。现有差异不能直接抹平：Supervisor 在创建连接后计时，等 EOF 返回原文；共享 helper 将异步端点校验纳入预算，以换行完成 JSON 交换，失败拒绝为未确认。协议不兼容与传输结果未知也不是同一种错误。
 
-建议先在现有 private-ipc 边界收敛有界连接、收帧和取消收尾，明确帧边界、无效 JSON、端点验证预算后再复用。Supervisor 继续负责版本、Provider 身份、拓扑和领域分类。本项是条件性重构建议，尚无运行故障证据。
+两边服务端实际都发送换行 JSON 并结束连接，协议格式没有根本冲突；但将 Supervisor 改为收到换行即完成，仍会改变客户端完成时点及异常响应处理，不能当作纯代码提取。Supervisor 设置应用还通过连接关闭传播取消，服务端负责在释放前撤销工作及在需要时恢复实例；通用请求同时取消异步端点连接过程，不能只共享一个销毁 Socket 的回调便宣称取消语义等价。
+
+| 方案 | 评估结论 |
+| --- | --- |
+| Supervisor 直接调用 `requestPrivateIpcJson` | 不采用。现有接口把无效 JSON 和传输失败合为拒绝，不能保留 Supervisor 对有响应但不兼容的判断；直接替换还改变完成时点和端点校验预算。 |
+| 增加支持原文/JSON、EOF/换行、不同连接与失败模式的通用交换层 | 当前不采用。为两段较短实现增加模式、适配和公共合同，维护收益不足。 |
+| 保留请求层差异，继续共享端点、认证和服务生命周期 | 采用。版本、Provider 身份、拓扑、确认与失败处理继续归各业务调用方所有。 |
 
 租约必须保持活连接，Gateway 状态由服务端主动推送，Delivery 必须区分确定未发送与发送后结果未知；这些不能套入完成即销毁或统一返回 undefined 的机制。实施需核对 Windows 描述符/ACL 路径及调用方失败分支，而不能仅替换 helper 名称。
 
-**关联复核结论：降为低优先级，暂不直接替换 helper。** Supervisor 服务端返回换行 JSON 并结束连接，但 inspect 消费端还区分无响应（允许就绪所有者按原预算重试）与有内容但拓扑无效（incompatible）；ensure/release 校验 Provider，apply 校验设置协议及拓扑变更。Relay 控制则另绑定 requestId、digest、动作与字段白名单。公共 JSON helper 当前把解析失败和传输未确认合为拒绝，直接替换会抹掉 Supervisor 的就绪决策。只有先证明可保留这类分类且不增加宽泛选项，才值得提取底层收尾；不要求为去重先建传输框架。Windows 端点验证预算差异仍未实机观察，U07 的 Worker 关闭及 U17 的进程退出不纳入此 IPC 合同。
+**关联复核。** inspect 区分无响应与有内容但拓扑无效（incompatible）；[`local-installation.mjs`](../scripts/local-installation.mjs) 的就绪等待对连接失败继续按原预算等待，对协议不兼容立即报错。ensure/release 校验 Provider，apply 校验设置协议及拓扑变更。Relay 控制另绑定 requestId、digest、动作与字段白名单；指标发送不自动重试，断连与超时不能视为确定丢失。不能为共享底层代码抹掉这些下游决策。
+
+**重新评估条件与证据限制。** 出现第三个相同合同的消费者，或确认两处存在同一种收尾缺陷时，再评估提取窄的公共操作；仍须证明保留各调用方的失败分类、超时与取消范围，无需扩张为通用传输框架。本次结论来自客户端、服务端和相关消费者的只读源码检查，未运行服务；Windows 端点校验耗时及实际断连没有新增实机证据。U07 的 Worker 关闭及 U17 的进程退出不纳入此 IPC 合同。
 
 ## U17 自有子进程退出观察
 

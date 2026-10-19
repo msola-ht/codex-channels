@@ -11,6 +11,19 @@ links resolve relative to this document. This file is a referenced document, not
 automatically discovered `AGENTS.md`. Its applicable rules supplement the root rules
 and remain subject to higher-priority instructions and user authorization.
 
+## Development Workflow
+
+Use this sequence at the scale of the task; a short explanation is sufficient for small changes. Do not require a new plan, report or per-file checklist for every task.
+
+1. Establish the problem, intended behavior, scope, non-goals and authorization. Define an observable completion condition.
+2. Before editing, trace the relevant entry points through processing to final consumption or persistence. Check affected callers, readers/writers and alternative paths sharing the same contract; distinguish confirmed defects, hypotheses and optional improvements.
+3. Choose the responsible module and necessary interface, configuration and documentation changes. Plan the verification inputs, expected results and required environment before implementation, including relevant failure, cancellation, concurrency or recovery paths. Consolidate implementations only when their responsibilities and behavior agree; repeated checks across asynchronous waits or trust boundaries may be necessary.
+4. Implement the complete related fix, including downstream assumptions and error handling. Do not defer necessary related repairs merely to keep a patch local. Record unrelated issues separately; if necessary work exceeds authorization, identify the outstanding work and obtain the required authorization before performing it.
+5. Verify the affected behavior and inspect the final diff. Account for identified paths as checked without changes, adjusted and rechecked, or unverified with reasons and risks. Follow [Verification](#verification) and the root evidence rules; reuse evidence whose inputs remain unchanged. Distinguish necessary work not completed from behavior not observed, and do not report either as resolved or functionally verified.
+6. Update the applicable documents and report results and limitations. Commit or perform remote delivery only when requested and ready under [Git and Delivery](#git-and-delivery).
+
+When scope or evidence changes, update the affected plan and conclusions rather than restarting a project-wide investigation. For rules and documentation, inspect the actual content and its loading or consumption path instead of exercising unrelated runtime behavior.
+
 ## Consulting Official Sources
 
 - Before changing WeChat or Feishu API calls, event interpretation, authentication or platform lifecycle behavior, locate the relevant sources through `docs/upstream-sources.md`.
@@ -229,6 +242,14 @@ This section specifies verification entry points and workflow controls.
 
 Determine the document's responsibility before adding or changing content. Do not accumulate topic details in the root README.
 
+Distinguish document roles throughout the task:
+
+- **Working record:** when needed, keep one primary record per task for scope, decisions, evidence tied to inputs and a code/artifact baseline, and outstanding work. Link supporting material rather than copying it; small tasks may use the conversation instead of a new file.
+- **Current documentation:** maintain the applicable user guide, module contract or topic document with behavior changes. This is the final authoritative documentation; do not create a second comprehensive "final report" that duplicates it.
+- **Historical record:** retain useful completed-task decisions and evidence with their baseline, delivery commit or artifact identity, limitations and links to current documentation. Mark the record and its index entry as historical; moving files is optional, and any move must preserve references. Correct evidence errors with a clearly identified correction rather than silently changing the historical baseline.
+
+Before closing a task, reconcile current documentation and give outstanding items an explicit status and next action. Archiving a record does not resolve its unfinished items or replace an active task's primary record. Do not create an archive without useful material to retain, or reorganize unrelated historical documents as routine cleanup.
+
 - Root `README.md` is the user entry point: installation, configuration, common operations, troubleshooting and upgrade conclusions with topic links.
   Protocol methods, internal state, data definitions, security checks, channel differences and complete parameter descriptions belong in their topic documents, not a feature changelog in the README.
 - `docs/display.md`: channel presentation conventions, completion cards, `/metrics` behavior, information-command formatting and debug mode.
@@ -248,13 +269,14 @@ Determine the document's responsibility before adding or changing content. Do no
 - Preserve Git history. Do not delete or reinitialize the repository to avoid review.
 - Before committing, review the staged scope and affected README sections, module documentation and indexes against the diff;
   reuse completed review evidence and follow the documentation responsibilities above without traversing unrelated topics.
+- Commit a complete, explainable logical change, independently reversible where practical, rather than splitting mechanically by file or checklist item. Necessary related implementation and documentation must be complete; identify behavioral evidence and any unobserved boundaries. Apply the checks and Hook as specified in [Verification](#verification). Technical readiness does not grant commit or remote-write authorization.
 - Fix index gaps, orphaned links, old names and inconsistent behavior descriptions introduced or directly affected by this change.
   Record unrelated existing issues separately without automatically broadening cleanup. Report workflow failures honestly; do not repair frozen tests or treat their failures as product defects. Never claim a failed check passed.
 - Do not commit, push, rewrite history or perform other remote writes unless explicitly requested by the user.
 - Before creating a PR or pushing updates to an existing PR, refresh the target branch (normally `main`) and review the complete branch diff from its merge base, not only the latest commit.
   Trace affected call chains across module boundaries, including authorization, concurrency, failure recovery, public behavior and documentation.
   Fix confirmed in-scope issues and run the relevant verification before pushing. Record the reviewed base and head commits, findings, verification results and remaining limitations in the PR description.
-  If the branch changes after review, inspect the new changes and their interactions with the full diff before updating the PR. Automated CI checks do not replace this assistant-performed review.
+  Reuse completed review and verification evidence whose inputs remain valid. If the branch or evidence changes after review, inspect its impact and interactions with the full diff, expanding coverage where needed; do not automatically repeat a full review or unchanged observations. Honor any explicitly required additional review. Automated CI checks do not replace this assistant-performed review.
 - Use the PR categories “新增” (Added), “修复” (Fixed) and “改动” (Changed) as applicable. Empty categories may be omitted;
   at least one must describe a concrete change, and retained sections must not be empty or contain only placeholders.
   Formal Codex CLI upgrade PRs must also explain project benefits, adopted changes, excluded changes, risks and verification.

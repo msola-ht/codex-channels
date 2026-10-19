@@ -20,9 +20,9 @@
 
 ## 协议与设计
 
-- [`docs/consolidation-review.md`](docs/consolidation-review.md)：重复实现与统一边界的关联审查、逐项修复状态及证据限制。
-- [`docs/chain-verification-review.md`](docs/chain-verification-review.md)：全项目下一阶段链路验证清单、文档独立审查、逐项关联审查与修复记录。
-- [`docs/provider-transaction-review.md`](docs/provider-transaction-review.md)：Provider 配置与凭据事务的失败恢复审查、逐项修复及验证记录。
+- [`docs/consolidation-review.md`](docs/consolidation-review.md)：已完成统一治理的历史审查证据，以及持续维护的边界决策和补证限制。
+- [`docs/chain-verification-review.md`](docs/chain-verification-review.md)：已完成 L01–L19 阶段的历史审查、修复与证据记录；保留未观察边界，不作为新一轮计划。
+- [`docs/provider-transaction-review.md`](docs/provider-transaction-review.md)：Provider 事务修复的历史证据与仍开放的 V03/V04 环境补证清单。
 - [`docs/unified-model-management-design.md`](docs/unified-model-management-design.md)：第三方模型统一管理的现行合同、设计取舍、关联审查结论与证据边界，明确默认保护、调用影响与暂不支持范围。
 - [`docs/rust-migration-retrospective.md`](docs/rust-migration-retrospective.md)：Rust 迁移暂停结论、问题复盘、已有成果与网关重写建议；不是现行实施计划。
 - [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。
@@ -82,7 +82,7 @@
 ## 工程约束
 
 - [`AGENTS.md`](AGENTS.md)：常驻项目边界、安全与交付约束，以及按任务触发的规则入口。
-- [`docs/development-rules.md`](docs/development-rules.md)：按需读取的协议、存储、授权、服务、验证与发布开发规则。
+- [`docs/development-rules.md`](docs/development-rules.md)：按需读取的开发流程、关联修复、文档生命周期，以及协议、存储、授权、服务、验证与交付规则。
 - [`.githooks/README.md`](.githooks/README.md)：提交前检查。
 - [`.github/workflows/README.md`](.github/workflows/README.md)：CI 与升级提案工作流。
 - [`.codex/rules/default.rules`](.codex/rules/default.rules)：项目安全命令预设。
