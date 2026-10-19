@@ -602,7 +602,7 @@ export class ProviderRoutingClient {
   interruptTurn(
     ...args: Parameters<ProviderClientInstance["interruptTurn"]>
   ): ReturnType<ProviderClientInstance["interruptTurn"]> {
-    return this.callForThread(args[0], (client) => client.interruptTurn(...args));
+    return this.callForThread(args[0], (client) => client.interruptTurn(...args), args[2]);
   }
 
   setThreadName(

@@ -226,7 +226,7 @@ export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
   prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio"): PreparedAttachmentSubmission;
   submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean): Promise<Submission>;
-  stop(target: ConversationTarget): Promise<boolean>;
+  stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean>;
   rename(target: ConversationTarget, name: string): Promise<void>;
   setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean>;
   compact(target: ConversationTarget): Promise<void>;
@@ -1332,7 +1332,8 @@ export class ConversationService implements
     });
   }
 
-  async stop(target: ConversationTarget): Promise<boolean> {
+  async stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean> {
+    assertAuthorized?.();
     const attachments = this.attachmentInputs.get(conversationTargetKey(target));
     const cancelledAttachments = (attachments?.size ?? 0) > 0;
     for (const controller of [...attachments ?? []]) controller.abort();
@@ -1342,7 +1343,14 @@ export class ConversationService implements
     if (!active) {
       return cancelled || cancelledAttachments;
     }
-    await this.codex.interruptTurn(active.threadId, active.turnId);
+    const beforeSubmit = () => {
+      assertAuthorized?.();
+      const owner = this.router.targetForThread(active.threadId);
+      if (!owner || conversationTargetKey(owner) !== conversationTargetKey(target)) {
+        throw new UserFacingError("command.authorization-changed", "停止目标的会话归属已变化");
+      }
+    };
+    await this.codex.interruptTurn(active.threadId, active.turnId, beforeSubmit);
     return true;
   }
 

@@ -348,7 +348,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     const assertAuthorized = this.commandGuard(target, actorId, false);
     this.conversations.touchActivity?.(target);
     const state = await this.conversations.selectModel(target, selection, assertAuthorized);
-    this.authorize(target, actorId);
+    assertAuthorized();
     return modelSelectionResult(state);
   }
 
@@ -356,7 +356,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     const assertAuthorized = this.commandGuard(target, actorId, false);
     this.conversations.touchActivity?.(target);
     const state = await this.conversations.updateAutoReview(target, selection.enabled, selection.threadId, assertAuthorized);
-    this.authorize(target, actorId);
+    assertAuthorized();
     return { kind: "auto-review", state };
   }
 
@@ -368,7 +368,8 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   ): Promise<ConversationCommandResult> {
     const assertAuthorized = this.commandGuard(target, actorId, command === "workspace");
     const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
-    this.authorize(target, actorId);
+    if (command === "workspace" && input.trim()) this.authorize(target, actorId);
+    else assertAuthorized();
     return result;
   }
 
@@ -537,7 +538,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "stop": {
-        const stopped = await this.conversations.stop(target);
+        const stopped = await this.conversations.stop(target, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "turn.stop-requested", stopped },

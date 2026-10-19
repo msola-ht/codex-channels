@@ -238,8 +238,16 @@ Sol 的补充生产入口观察覆盖锁等待期间切换 Thread、第一页返
 - rename/pin/compact/review/Goal：锁、自动创建 Thread、Provider 等待和多阶段 pin 写入。
 - Plan：等待后保存模式偏好及带参数 Plan 的 Turn 提交。
 - MCP login/reload/resource：目录与 Provider 准备后的新请求、捕获 Thread 归属。
-- stop：保留即时本地取消，在 Provider 等待后的 interrupt 前核对授权与原 Thread 归属。
-- 普通查询输出的 Workspace 范围复核，以及 Hooks/Schedule/重置券和异步交互的独立授权合同。
+- Hooks/Schedule/重置券和异步交互的独立授权合同，以及普通只读查询内部的分页/Provider 等待。
+
+**停止与结果范围子链（基线 `4dbeba79`）。** `/stop` 不进入会话锁，仍立即取消本地附件/输入准备；
+原 Thread 的中断通过 Provider 准备前后守卫，只有实时授权有效且原 Thread 仍归属同一 Conversation 才发送。
+所有命令结果重新核对原 Workspace ID/cwd，显式 Workspace 切换除外；模型和审批按钮使用相同出口守卫。
+主代理运行生产 CommandService→ConversationService→Client、隔离 Provider 等待与 RPC：合法停止返回
+`turn.stop-requested/stopped=true`，本地取消和 RPC 各一次；等待时撤权或改变原 Thread 归属，返回
+`command.authorization-changed`，本地取消仍一次、RPC 为零。同一归属仍允许发送；后台状态不额外限制是代码合同，
+本次未驱动真实前台转后台生命周期。另经命令 sessions 入口在列表读取时更改工作区目录，结果出口明确拒绝。
+本次没有真实平台停止、上游 Turn 终态或操作系统差异观察。
 
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。
