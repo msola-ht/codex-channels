@@ -579,3 +579,70 @@ restoreSubscriptions 的暂时失败保留和永久不可用清除，以及 Bind
 **完成边界。** 临时 SQLite 重开、失败补偿、容量并发和生产输入用例已观察；真实 App Server
 断线重连、真实 Provider 实例路由、渠道发送及 Windows/macOS 未观察，不能把隔离端口结果视为这些
 环境通过。没有新增或运行测试。提交本项后按顺序进入 L18，普通归约、Reserve、重复思考三个子链分别记录。
+
+### L18 会话归约、Reserve 与重复思考保护
+
+**状态：已审查（附证据限制），修复归约清理、Goal 身份与 Reserve 手动抢占。** L05 已提交
+`3d21ba43`，本项按既定顺序推进。
+主代理追踪 Client 投影→Core Turn/Item/Goal 归约→状态与呈现消费，含旧轮次迟到、partial answer、
+Revert 清理、Goal 写入确认与取消、长期缓存边界。两个 Sol 子代理分别独立只读审查 Reserve
+账户授权→设置写入与双确认→恢复，以及重复思考检测→精确中断→官方终态→清理。
+三条子链各自记录实际证据和环境限制；不把 Turn 完成当作 Goal 或自动干预成功，不自动重放输入。
+
+**L18-F1 旧轮次完成清除新统计。** Core 原先在任意 turn.completed 后删除按 Thread 保存的
+统计累加器，虽 output 已按 Turn 拒绝错配，清理仍没有核对 Turn。内联先开始 new 并记一条模型请求，
+再完成 old/new，修复前 newTiming=null。现在只删除身份匹配的累加器，未绑定完成也清理该轮次错误。
+修复后生产通知投影→Core→输出得到 new 的 modelRequestCount=1、input=10、output=3、reasoning=1，
+旧完成仍保持自己的 Turn 身份。此观察是对抗乱序输入，不声称已在真实上游观察到同一乱序。
+
+**L18-F2 生命周期缓存释放。** 全连接断开原先保留 artifacts，直接调用后仍可读取 isolated-diff；
+按 Provider 的定向断开则未清理 errorsByTurn 与 phaseByItem，观察各残留 1。现在全断开清空产物，
+错误采用 Thread/Turn 复合键，既有 clearTurnResponseState 同步清理错误、消息去重与阶段缓存。
+修复后 artifacts=null；同时存在 a/b 两个 Thread 时只断开 a，保留的键恰为 b:failed 与 b:failed:i。
+定向断开是现有 Gateway 重连路径；全断开补齐 Core 公开合同，不把该支路描述为当前重连接线。
+读取端已追到 ConversationService.artifacts 与 diff 命令，清理后不返回失效产物。
+
+**L18-F3 Goal 响应身份。** 通知已有内外 Thread ID 一致性校验，但 get/set 响应只校验字段格式。
+主代理运行生产 Client，给 selected 请求返回 other Goal，修复前 get/set 都接受。现在响应转换核对
+请求 Thread，错配明确报错，不能按请求 Thread 写入别的 Goal。锁定官方源码 HEAD 为
+83086188ae0614bd882818ff1aa23f3194962012；get/set 按请求 Thread 返回 Goal，set/clear 保留
+origin=user，写入无重试，未增加协议能力。
+
+生产 ConversationService→Router→Client→隔离 RPC 的正常路径观察：set 修剪目标文本后返回并同步 Core，
+get 取得相同目标，clear 后缓存为空；错配 get/set 均拒绝，缓存保持空。已提交响应期间撤权仍归约真实
+已发生结果；撤权后再 clear 的 additionalCalls=0。只读 get 的 overload 重试允许，set/clear 均 false。
+没有创建真实 Goal 或执行外部 Thread。通知投影→Core 的 partial_answer 保持可展示，但成功终态仍标记
+missingFinalResponse=true；final_answer 不标记。早先一轮手工输入缺少 clientId 被正确拒绝，补齐 null 后
+才观察用户消息对应判定；未将畸形输入当作正常链路通过。
+
+**L18-F4 Reserve 手动往返抢占。** Sol 复现进入 Reserve high 后手动 low→high，下一次轮询仍写
+ordinary，覆盖用户选择。原实现只比较最终快照，丢失等待/轮询间变更。现组合根在 ThreadStateSynchronizer
+同步归约后调用 Application 观察器；Reserve 记录刷新起始设置和最终提交时的目标，自己的匹配通知推进
+确认，其他偏离立即清除返回状态并使刷新代次失效，改回原值不复活操作。观察器不等待 RPC、不取得会话锁。
+本次未改 Client 的共享双确认实现，不影响 L04 审批方式确认。
+
+主代理修复后运行生产 Reserve、通知投影、ThreadStateSynchronizer、Router 与内存 Store：正常流程写
+[gpt-reserve, ordinary] 并分别提示；手动往返只写 [gpt-reserve]，returnState=false，不提示切回；
+进入时查询模型期间手动往返 writes=[]；恢复时查询期间往返只保留第一次 gpt-reserve 写入。
+端口按真正提交前守卫→设置通知→返回顺序驱动，关闭后所有定时器和操作收尾。
+协议没有版本条件或写入关联号，仍不能识别完全同值的其他客户端写入或保证跨客户端原子性。
+
+Reserve 独立审查还覆盖账户/受限模型/精确隐藏模型、相同 Turn 错误配对、活动延后、pending 选择、
+最终 RPC 守卫、无未知 Banner/剩余阻断的恢复条件及关闭。修复前未变的 Client 双确认观察可复用：
+仅 RPC ACK 或不匹配通知保持 pending，最新匹配通知后 confirmed，临时监听数 0；断线前确认失败并清理。
+账户清理中止额度读取，writes=0；未确认写入只尝试一次、returnStates=0、timer=false，后续轮询不重试。
+这些结果是独立生产模块与隔离端口证据，60 秒定时器自然轮询未观察，恢复调用由隔离运行主动触发。
+
+**重复思考独立审查。** Sol 未确认缺陷；主代理复核精确提交守卫、终态处理及组合根路由结论。
+锁定原始/摘要段索引映射，完成快照只分隔边界；固定第三方与聚合进入保护，官方 OpenAI 排除。
+200 个 Unicode 码点同段重复三次只对捕获的 Thread/Turn 中断一次，RPC 成功不提示停止，只有官方
+interrupted 才提示。原始两次加摘要一次、跨 Item 两次加一次及旧 Turn 增量不触发；触发后解绑使迟到
+守卫明确拒绝。10 万字符增量显示缓冲降级，只检测有界尾段；第 33 个并发窗口显示降级。
+拒绝、实际等待超过 10 秒无确认、普通 completed/failed 均不伪称已停止。缓存边界为 32768 UTF-16
+单元、200–4096 码点周期、32 Run、128 排队块/边界及 128 终结标记，关闭释放自有状态。
+不递归中断子代理，不删除 Queue、不改 Goal、不自动继续；所有隔离作业已结束。
+
+**覆盖与限制。** 普通归约/Goal、Reserve、重复思考分别完成源码追踪与上述观察，Revert 仍只清派生
+展示、保留活动到官方终态；绑定恢复复用 L05 活动跟踪证据。修复后的局部缓存释放不代表所有长期运行
+内存峰值都已实测；模型请求统计后续仍由 L10 审查。真实 App Server、Reserve 账户授权与模型可用性、
+原生客户端人工操作及三渠道投递未观察。没有新增、维护或运行测试。提交后按顺序进入 L06。

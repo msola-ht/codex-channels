@@ -232,6 +232,7 @@ export class ConversationCore {
     this.turnsWithUserMessage.clear();
     this.turnsWithFinalResponse.clear();
     this.phaseByItem.clear();
+    this.artifactsByThread.clear();
     this.timingByThread.clear();
     for (const state of this.reasoningByThread.values()) {
       if (state.timer !== undefined) {
@@ -451,7 +452,7 @@ export class ConversationCore {
           this.startRetry(event.threadId, event.turnId);
         } else {
           this.finishRetry(event.threadId, event.turnId, "failed");
-          this.errorsByTurn.set(event.turnId, {
+          this.errorsByTurn.set(this.turnKey(event.threadId, event.turnId), {
             message: event.message,
             ...(event.errorCode ? { errorCode: event.errorCode } : {}),
           });
@@ -467,16 +468,20 @@ export class ConversationCore {
         this.turnsWithFinalResponse.delete(responseKey);
         this.clearSeenUserMessages(event.threadId, event.turnId);
         this.clearItemPhases(event.threadId, event.turnId);
+        const accumulator = this.timingByThread.get(event.threadId);
+        if (accumulator?.turnId === event.turnId) {
+          this.timingByThread.delete(event.threadId);
+        }
         const target = this.router.targetForThread(event.threadId);
         if (!target) {
-          this.timingByThread.delete(event.threadId);
+          this.errorsByTurn.delete(responseKey);
           return;
         }
         const active = this.activeByThread.get(event.threadId);
         if (active?.turnId === event.turnId) {
           this.activeByThread.delete(event.threadId);
         }
-        const storedError = this.errorsByTurn.get(event.turnId);
+        const storedError = this.errorsByTurn.get(responseKey);
         const resolvedError = event.error === null
           ? storedError
           : {
@@ -493,12 +498,11 @@ export class ConversationCore {
           : undefined;
         const goal = this.goalsByThread.get(event.threadId);
         const contextCompactionCount = this.contextCompactionCount(event.threadId);
-        const timing = this.timingByThread.get(event.threadId)?.output(
+        const timing = accumulator?.output(
           event.turnId,
           tokenUsage?.last,
         );
-        this.timingByThread.delete(event.threadId);
-        this.errorsByTurn.delete(event.turnId);
+        this.errorsByTurn.delete(responseKey);
         this.publish({
           type: "turn.completed",
           target,
@@ -793,7 +797,12 @@ export class ConversationCore {
 
   private clearTurnResponseState(threadId: string): void {
     this.invalidateRetry(threadId);
+    this.clearSeenUserMessages(threadId);
+    this.clearItemPhases(threadId);
     const prefix = `${threadId}:`;
+    for (const key of this.errorsByTurn.keys()) {
+      if (key.startsWith(prefix)) this.errorsByTurn.delete(key);
+    }
     for (const key of this.turnsWithUserMessage) {
       if (key.startsWith(prefix)) {
         this.turnsWithUserMessage.delete(key);

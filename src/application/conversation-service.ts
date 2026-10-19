@@ -474,6 +474,10 @@ export class ConversationService implements
     this.lunaReserve?.clearThread(threadId);
   }
 
+  observeLunaReserveSettings(threadId: string): void {
+    this.lunaReserve?.observeSettings(threadId);
+  }
+
   clearLunaReserveAccountState(): void {
     this.lunaReserve?.clearAccountState();
   }

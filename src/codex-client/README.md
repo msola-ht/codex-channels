@@ -23,6 +23,7 @@ RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 
 空 RPC 响应不等于设置已经应用，组合根须等待共享入站归约后由 Application 核对实际设置。
 
 0.162.0 引入的 `partial_answer` 在通知边界继续保留，Goal set/clear 的渠道用户操作显式携带 `origin: "user"`。
+Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结果不进入当前会话缓存。
 子代理 started 活动保留官方 `model` 与 `reasoningEffort`，空值不推断；其他活动不复用启动快照。
 
 遵循[跨平台变更规则](../../docs/development-rules.md#cross-platform-changes)：Unix UDS 与 Windows 官方 Proxy 是同一本机 App Server 合同的适配方式，不能各自放宽认证、消息边界或生命周期语义。Transport 只拥有本次连接及显式创建的子进程；关闭、连接中取消和回收失败都不得扩大为终止共享 App Server。修改共享 Transport 接口时同时核对 UDS、Proxy、stdio 的调用与关闭路径，具体进程及文件保护由注入的 Runtime 能力承担。

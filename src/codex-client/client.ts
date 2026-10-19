@@ -1461,7 +1461,7 @@ export class CodexAppServerClient implements
       method: "thread/goal/get",
       params: { threadId },
     }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
-    return response.goal ? toThreadGoal(response.goal) : null;
+    return response.goal ? toThreadGoal(response.goal, threadId) : null;
   }
 
   async setGoal(threadId: string, objective: string, beforeSubmit?: () => void): Promise<ThreadGoal> {
@@ -1469,7 +1469,7 @@ export class CodexAppServerClient implements
       method: "thread/goal/set",
       params: { threadId, objective, status: "active", origin: "user" },
     }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
-    return toThreadGoal(response.goal);
+    return toThreadGoal(response.goal, threadId);
   }
 
   async clearGoal(threadId: string, beforeSubmit?: () => void): Promise<void> {

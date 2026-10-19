@@ -1319,6 +1319,9 @@ export abstract class GatewayComponentGraph {
       const threadStateEvent = toThreadStateEvent(notification);
       if (threadStateEvent) {
         this.threadState.handle(threadStateEvent);
+        if (threadStateEvent.type === "thread.settings.updated") {
+          this.conversations.observeLunaReserveSettings(threadStateEvent.threadId);
+        }
       }
       if (
         !coreEvent

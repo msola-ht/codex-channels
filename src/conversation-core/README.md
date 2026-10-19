@@ -47,6 +47,8 @@ Conversation 目标由 `surface + accountId + conversationId` 唯一标识；Cor
 当前 Goal、上下文压缩实时增量和最近 Diff/Plan 仅为进程内界面缓存，Thread 关闭、归档、删除
 或连接断开时清理，不属于持久化事实来源。压缩总次数通过 Router 持有的 `thread/resume` 派生
 Item ID 与实时完成 Item 合并并去重。
+Turn 完成只释放同一 Turn 的请求统计，不删除随后轮次的累计；错误按 Thread/Turn 保存。
+绑定失效、Thread 生命周期和对应连接断开同时释放错误、用户消息去重和消息阶段缓存。
 收到 `thread.reverted` 时 Core 清除该 Thread 的 artifacts/diff/plan、Goal、上下文压缩、用量与计时
 等派生展示状态，并释放推理段；活动 Turn 保留到官方 `turn.completed: interrupted` 正常收尾，Core 不伪造
 被回退历史的保留内容。
