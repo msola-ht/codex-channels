@@ -1,9 +1,11 @@
 # Codex 0.156.1 图片文件引用探测记录
 
-本记录保存原生图片引用需求的脱敏证据与复现步骤，不是 Gateway 功能入口或自动验收脚本。
+本记录保存 `0.156.1` 图片引用需求的历史脱敏证据与复现步骤，不是 Gateway 功能入口或自动验收脚本。
 用户最终明确的目标为避免后续请求重复携带 Base64；其中下载和生命周期研究不代表要求文件管理入口。
-当前采用范围见[升级决策](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界)，
-源码定位见[协议索引](index.md#固定版本官方源码)。
+当前采用范围见[升级决策](../codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界)，
+日常使用见[正常发图与图片引用](../user-guide.md#正常发图与图片引用)，源码定位见
+[协议索引](../index.md#固定版本官方源码)。其他渠道等尚未验收项继续由
+[渠道验收矩阵](../channel-acceptance-matrix.md#尚待实机验收)跟踪，不因本记录转为历史依据而关闭。
 
 ## 环境与结论
 
@@ -295,4 +297,4 @@ Platform 提供[文件内容下载](https://developers.openai.com/api/reference/
 
 未新增 Platform 凭据配置或生产文件管理入口。Client 已为符合账户与路由约束的 OpenAI ChatGPT
 图片执行自动上传并提交官方引用；API Key、第三方 Provider 和独立自定义 OpenAI 后端继续使用
-内联图片。当前决定和剩余限制见[升级决策](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界)。
+内联图片。当前决定和剩余限制见[升级决策](../codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界)。

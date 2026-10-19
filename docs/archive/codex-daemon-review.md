@@ -1,5 +1,9 @@
 # 原生 Codex daemon 接入审查
 
+本文保留 `0.160.0` 专项审查与隔离实测的历史依据；当前是否采用 daemon 以
+[升级决策](../codex-cli-upgrade-decisions.md)为准。接入已暂缓，重新启动时先复核下文迁移条件，
+不能将这份历史记录作为当前版本接管或验收完成的依据。
+
 ## 决策与范围
 
 基于官方 `codex-cli 0.160.0`，固定源码提交
@@ -8,8 +12,8 @@
 
 当前项目基线已更新为 `0.163.0`，固定源码提交为
 `83086188ae0614bd882818ff1aa23f3194962012`；只读参考目录为 `upstream/openai-codex-0.163.0`，
-本机副本状态见[上游来源](upstream-sources.md)。
-本次未接管官方 daemon；升级取舍见[升级决策](codex-cli-upgrade-decisions.md)。
+本机副本状态见[上游来源](../upstream-sources.md)。
+本次未接管官方 daemon；升级取舍见[升级决策](../codex-cli-upgrade-decisions.md)。
 下文的固定链接、隔离实测和关闭自动启动验收保留原版本与范围；未将它们记作 0.163.0 实机重测。
 
 **当前决定：暂不实施官方 daemon 接管，继续使用项目现有服务管理。**
@@ -21,8 +25,8 @@
 更新器复用 `config/read` 与带 `expectedVersion` 的 `config/batchWrite`，不增加 RPC；
 缺失或显式 `true` 均设为 `false`，已有 `false` 不重复写，冲突直接报错。
 
-升级总体采用范围见[升级决策](codex-cli-upgrade-decisions.md)，版本升级仍遵守
-[升级流程](codex-cli-upgrade.md)。以下区分源码结论、隔离实测与尚未验收的迁移合同。
+升级总体采用范围见[升级决策](../codex-cli-upgrade-decisions.md)，版本升级仍遵守
+[升级流程](../codex-cli-upgrade.md)。以下区分源码结论、隔离实测与尚未验收的迁移合同。
 
 ## 原生能力的收益与边界
 
@@ -42,8 +46,8 @@
 
 ### 1. Provider 配置与 Codex Home 不能直接互换
 
-当前 [App Server Runtime](../runtime/app-server-service-runtime.mjs) 为主实例和 Provider 实例
-启动独立子进程；[模型启动参数](../runtime/model-provider-startup-runtime.mjs) 通过 `-c` 注入
+当前 [App Server Runtime](../../runtime/app-server-service-runtime.mjs) 为主实例和 Provider 实例
+启动独立子进程；[模型启动参数](../../runtime/model-provider-startup-runtime.mjs) 通过 `-c` 注入
 模型、Provider、目录、代理地址、重试与搜索设置，并通过子进程环境仅传入所选凭据。
 当前隔离主要依赖不同实例与 Socket，不是为每个 Provider 建立独立 Codex Home。
 
@@ -67,7 +71,7 @@ daemon 则以 Codex Home 为管理单元。隔离实测中，在启动命令加 
 
 因此原生化之前必须解决代理重建、地址变更、配置生效、后台就绪和失败恢复的顺序。
 不能仅把 `spawn` 换成 `daemon start`，也不能把两套生命周期所有者同时用于同一实例。
-继续保留 [Supervisor](../runtime/app-server-supervisor.mjs) 中的 Provider 租约、拓扑与
+继续保留 [Supervisor](../../runtime/app-server-supervisor.mjs) 中的 Provider 租约、拓扑与
 Desktop 协调责任；只有职责实际移交后，才删除对应进程管理代码。
 
 ### 3. 原生恢复会自动开始新 Turn
@@ -104,7 +108,7 @@ Gateway 的全部业务归属信息，因此迁移必须决定后台离线续做
 ### 5. 操作系统、桌面桥与状态探测仍需保留边界
 
 原生 PID 后台启动后脱离调用进程，不等同于本项目 systemd 的 `Restart=always`、开机启动和
-Runtime 依赖恢复。当前 [服务模板](../systemd/codex-connect-app-server.service.template)
+Runtime 依赖恢复。当前 [服务模板](../../systemd/codex-connect-app-server.service.template)
 是前台长期运行入口；不能直接改成执行后退出的 daemon 启动命令，而不重新设计监管关系。
 自动更新器也不等于进程崩溃守护或开机服务。
 

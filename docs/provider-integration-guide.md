@@ -1,5 +1,9 @@
 # 第三方模型 Provider 接入指南
 
+本指南维护受管第三方模型 Provider 的现行接入合同、模型管理和恢复边界，并规定新增 Provider
+的决策、实现与验收要求。通用执行顺序遵循[开发流程](development-rules.md#development-workflow)；
+新增通讯渠道走 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)。
+
 ## 日常模型管理
 
 WebUI 从「模型管理 → 模型配置」查看各提供商模型；CLI 从 `codexc setup → 模型与提供商 → 第三方 Provider → 模型管理` 进入。
@@ -18,10 +22,6 @@ DS、CLP、CCG、OCG 按提供商各展示一组共用模型，自定义提供�
 目录变化也可能撤销该提供商其他 Relay 在途请求，聚合旧快照需要刷新。CLP Codex 移除不会限制独立 CLP Relay 调用。
 移除没有回收站；恢复需明确重新添加、导入或核对备份，不能用旧备份覆盖后续变更。
 写入或回读结果不确定时停止修改，核对目录和备份；自定义目录保留 pending 时使用既有恢复入口。
-
-本指南定义新增“受管第三方模型 Provider”（例如 OpenCode Go 套餐形态的第三方 DeepSeek
-服务商）的标准流程、决策点、实现清单、安全边界与验收要求。新增通讯渠道（飞书、Telegram、
-微信）不适用本指南，走 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)。
 
 当前受管第三方 Provider 是编译期注册的：DeepSeek、OpenCode Go、CCG 与 CLP 共用同一套受管管道，
 Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账户和 Setup。
@@ -230,7 +230,9 @@ Gateway 自定义固定 Provider 的独立 API 凭据入口不接受 `auth`、`g
 
 ## 5. 验收流程
 
-开发时先运行受影响的静态检查与构建；普通提交由 pre-commit 执行按范围选择的 `verify:commit`，PR CI 使用 `verify:ci` 完整静态检查与构建，不提前重复。下列源码安装、服务重启及线上检查只用于已获授权的部署验收：
+静态检查与提交门禁遵循[验证规则](development-rules.md#verification)。功能验收应覆盖受影响的
+拒绝、失败和恢复路径，并观察真实用户入口到结果；下列源码安装、服务重启及线上检查只用于
+已获授权的部署验收：
 
 ```bash
 npm run install:global

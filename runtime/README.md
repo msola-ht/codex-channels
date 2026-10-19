@@ -15,6 +15,17 @@
 
 本表划分责任，不扩大平台支持承诺。模块接口变化须核对 `.d.mts`、公开导出和实际调用方；具体启动方式及升级步骤见[用户指南](../docs/user-guide.md)与[源码安装](../docs/source-install.md)。
 
+## 私有 IPC 请求边界
+
+Supervisor 与 Relay 控制、指标请求共享私有端点、认证和服务生命周期，保留各自的一次性请求实现。
+Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；通用 JSON 请求以换行完成交换，
+将异步端点校验纳入总预算。完成时点、失败分类及取消范围不同，不能直接互换。
+租约长连接、状态推送和投递结果未知也不能套用一次性请求收尾。
+
+出现第三个相同合同的消费者，或确认两处存在同一种收尾缺陷时，再评估窄的公共操作；
+须保留各调用方的失败分类、超时与取消范围。历史论证和当时的实机限制见
+[U16 审查记录](../docs/archive/consolidation-review.md#u16-一次性私有-ipc-交换的底层收尾)。
+
 ## 文件
 
 - `codex-request-identity.mjs` / `codex-request-identity.d.mts`：仅在 `follow_cli_version = true` 时从当前锁定 CLI 版本解析官方客户端身份及 UA 的生效版本，保留系统和终端信息；无标记或 false 时保留显式值。Gateway、App Server 服务、CLI 与 WebUI 共用，不改写读取的配置。

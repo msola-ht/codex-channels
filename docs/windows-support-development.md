@@ -55,7 +55,9 @@ npm run docs:check
 PowerShell 脚本语法（包含根目录 install.ps1）
 ```
 
-这些检查证明当前提交可在托管 Windows Runner 构建，安装、服务恢复与真实渠道行为仍需实机验收。
+这些检查用于核对托管 Windows Runner 的静态兼容与构建状态；某次结果只适用于对应提交，不是本文
+对当前提交的通过声明。安装、服务恢复与真实渠道行为仍需实机验收；通用检查选择与结果复用遵循
+[验证规则](development-rules.md#verification)。
 
 ## 正式支持门槛
 

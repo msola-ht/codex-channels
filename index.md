@@ -1,5 +1,8 @@
 # 项目索引
 
+按文档职责查阅：使用指南与现行合同说明当前行为；验收记录维护观察及缺口；待实施方案和历史记录不作为功能已支持或任务已获授权的依据。
+文档维护方式见[文档生命周期](docs/development-rules.md#documentation-placement)。历史记录统一放入 `docs/archive/`；现行合同、活动方案和开放验收记录保留在现行目录。
+
 ## 使用与配置
 
 - [`README.md`](README.md)：最短安装入口、常用命令和专题导航。
@@ -18,29 +21,19 @@
 - [`docs/video-analysis-mcp.md`](docs/video-analysis-mcp.md)：独立视频分析 MCP、授权目录、Strata 接口及 Codex 配置。
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
 
-## 协议与设计
+## 协议与现行设计
 
-- [`docs/consolidation-review.md`](docs/consolidation-review.md)：重复实现与统一边界的关联审查、逐项修复状态及证据限制。
-- [`docs/chain-verification-review.md`](docs/chain-verification-review.md)：全项目下一阶段链路验证清单、文档独立审查、逐项关联审查与修复记录。
-- [`docs/provider-transaction-review.md`](docs/provider-transaction-review.md)：Provider 配置与凭据事务的失败恢复审查、逐项修复及验证记录。
 - [`docs/unified-model-management-design.md`](docs/unified-model-management-design.md)：第三方模型统一管理的现行合同、设计取舍、关联审查结论与证据边界，明确默认保护、调用影响与暂不支持范围。
-- [`docs/rust-migration-retrospective.md`](docs/rust-migration-retrospective.md)：Rust 迁移暂停结论、问题复盘、已有成果与网关重写建议；不是现行实施计划。
 - [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。
 - [`docs/windows-support-development.md`](docs/windows-support-development.md)：Windows 开发预览的
   当前边界、实现入口、验证范围与正式发布门槛。
 - [`docs/codex-desktop-app-development.md`](docs/codex-desktop-app-development.md)：Codex Desktop App
   与 Gateway 共享主 OpenAI App Server 的桥接架构、安全合同、跨平台边界与实机验收限制。
-- [`docs/codex-desktop-app-acceptance.md`](docs/codex-desktop-app-acceptance.md)：当前可用反馈、Linux
-  已有证据、macOS 与 Windows 分平台验收步骤及结果记录。
 - [`docs/index.md`](docs/index.md)：Codex 协议基线、支持矩阵和实现入口。
-- [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：Codex、飞书与微信的上游源码基线及待升级候选。
-- [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：Codex CLI 升级流程。
 - [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：当前项目的采用范围、
   不采用原因、重新评估条件与基线升级影响。
-- [`docs/codex-daemon-review.md`](docs/codex-daemon-review.md)：原生 daemon 的链路审查、隔离实测、轻量化收益及生产替换条件。
-- [`docs/codex-image-fileid-probe.md`](docs/codex-image-fileid-probe.md)：原生图片引用的离线与在线脱敏证据、夹具、复现步骤及验收限制。
 - [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：原生 Thread Queue、
   分页历史与 Revert 的授权边界和验收链路。
 - [`docs/thread-usage-development.md`](docs/thread-usage-development.md)：
@@ -50,11 +43,8 @@
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
   Provider 的标准流程、安全边界、当前目录布局与旧版本恢复边界、用户配置主 Provider 支持和验收清单。
-- [`docs/custom-provider-capability-probe.md`](docs/custom-provider-capability-probe.md)：自定义提供商的实际能力探测记录、思考参数观察、配置建议与验证边界。
 - [`docs/provider-api-relay-development.md`](docs/provider-api-relay-development.md)：Provider 模型 API
   当前转发合同：独立服务、原生 Chat/Responses、提供商接入、鉴权与队列、指标与转储、数据格式及验收边界。
-- [`docs/relay-codex-auth-development.md`](docs/relay-codex-auth-development.md)：Model Relay 只读
-  复用本机 Codex 登录态的转发设计（未实施）、WSS 上游、头部对齐及待决边界。
 - [`docs/user-agent-customization.md`](docs/user-agent-customization.md)：默认官方 TUI 客户端
   身份、App Server 上报终端标识与模型上游 User-Agent 覆盖的配置、生命周期、安全边界和验证方案。
 - [`docs/model-timezone.md`](docs/model-timezone.md)：模型请求里 environment context 的时区与日期
@@ -64,6 +54,26 @@
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 当前设计决策与停止条件。
 - [`docs/feishu-reference-index.md`](docs/feishu-reference-index.md)：飞书资料与实现映射。
 - [`docs/weixin-surface-plan.md`](docs/weixin-surface-plan.md)：微信 Surface 当前设计决策与停止条件。
+
+## 验收与开放补证
+
+- [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信的持续验收入口，分别记录已观察能力与未完成平台边界。
+- [`docs/codex-desktop-app-acceptance.md`](docs/codex-desktop-app-acceptance.md)：Desktop 专项验收主记录，保留 Linux 证据及 macOS、Windows 等开放事项。
+- [`docs/provider-transaction-review.md`](docs/provider-transaction-review.md)：Provider 事务修复的历史证据与仍开放的 V03/V04 环境补证清单。
+
+## 待实施方案
+
+- [`docs/relay-codex-auth-development.md`](docs/relay-codex-auth-development.md)：Model Relay 复用本机 Codex 登录态的候选设计，尚未实施；保留 WSS、头部与授权等待决边界。
+
+## 历史审查与研究记录
+
+以下记录保留原基线、结论及未观察限制；其中的旧执行顺序不是当前开发流程，重新使用证据前须确认适用范围。
+
+- [`docs/archive/consolidation-review.md`](docs/archive/consolidation-review.md)：已完成统一治理的历史审查、决策依据和证据限制；U16 的现行 IPC 边界维护在 Runtime 文档。
+- [`docs/archive/chain-verification-review.md`](docs/archive/chain-verification-review.md)：已完成 L01–L19 阶段的历史审查、修复与证据记录；保留未观察边界，不作为新一轮计划。
+- [`docs/archive/codex-daemon-review.md`](docs/archive/codex-daemon-review.md)：原生 daemon 的历史研究与隔离观察，保留未采用原因和重新评估条件。
+- [`docs/archive/codex-image-fileid-probe.md`](docs/archive/codex-image-fileid-probe.md)：原生图片引用的历史脱敏观察、复现条件及验收限制；现行使用入口见记录内链接。
+- [`docs/archive/custom-provider-capability-probe.md`](docs/archive/custom-provider-capability-probe.md)：特定提供商在记录时的能力与思考参数观察，不代表当前服务或所有提供商的支持保证。
 
 ## 源码与运行
 
@@ -82,7 +92,8 @@
 ## 工程约束
 
 - [`AGENTS.md`](AGENTS.md)：常驻项目边界、安全与交付约束，以及按任务触发的规则入口。
-- [`docs/development-rules.md`](docs/development-rules.md)：按需读取的协议、存储、授权、服务、验证与发布开发规则。
+- [`docs/development-rules.md`](docs/development-rules.md)：按需读取的开发流程、关联修复、文档生命周期，以及协议、存储、授权、服务、验证与交付规则。
+- [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：Codex CLI 升级与发布的专题流程，保留版本、协议及发布授权要求。
 - [`.githooks/README.md`](.githooks/README.md)：提交前检查。
 - [`.github/workflows/README.md`](.github/workflows/README.md)：CI 与升级提案工作流。
 - [`.codex/rules/default.rules`](.codex/rules/default.rules)：项目安全命令预设。

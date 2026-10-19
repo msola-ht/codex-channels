@@ -8,6 +8,10 @@
 `codex-client` 集中处理协议请求与通知，其他业务模块只依赖公开类型。升级通常不需要新增模块或
 兼容旧协议；需要做的是重新生成协议，然后由 Codex 逐层审查受影响的公开类型和实现。
 
+本页维护升级工具、协议适配和发行的专题流程；通用范围确认、实现、证据与交付规则见
+[开发流程](development-rules.md#development-workflow)。各次升级的工作记录放在对应 PR 或任务
+记录中，当前采用范围维护在[升级决策](codex-cli-upgrade-decisions.md)，不在本页追加逐版流水。
+
 ## 1. 准备目标 CLI
 
 只采用 [`openai/codex` GitHub Releases](https://github.com/openai/codex/releases) 中非 Draft、
@@ -100,7 +104,8 @@ GitHub Actions `Codex upgrade proposal` 每日检查一次，也可以手动触�
 
 Codex 应按以下顺序处理，操作者不需要人工阅读协议文件：
 
-1. 先读取 `AGENTS.md`、`docs/index.md`、本页和相关模块 README。
+1. 按 `AGENTS.md` 的任务边界选择适用规则，读取 `docs/index.md`、本页和受影响模块的公开合同；
+   已在上下文且未改变的材料继续复用。
 2. 执行 `git status -sb`，拒绝在不明来源的未提交改动上生成协议；尚未生成时先运行
    `npm run codex:upgrade -- <正式版本> --dry-run`，通过后再运行正式升级命令。
 3. 先阅读目标版本官方 Release 的 New Features、Bug Fixes 和 Chores，按 CLI/TUI、App Server
@@ -125,7 +130,7 @@ Codex 应按以下顺序处理，操作者不需要人工阅读协议文件：
    `docs/codex-cli-upgrade-decisions.md` 更新当前取舍与基线影响，不追加重复的逐版本清单；
    本次变更与验证结果记录在升级 PR 和对应发布说明中，并更新所有受影响 README。
 12. 协议、Transport 或共享 App Server 行为变化时，记录源码核对与所需人工验证的范围和结果。
-13. 运行本页完整验证，重新审查规则文件、文档索引和最终 Git 差异；未经用户明确要求不提交、
+13. 运行本页升级验证，核对受本次升级影响的规则、文档索引和最终 Git 差异；未经用户明确要求不提交、
     推送、发布或重建服务。
 
 若类型生成没有业务差异，Codex 仍需确认版本、文档索引和行为边界，而不是仅凭 TypeScript
@@ -162,9 +167,10 @@ plutil -lint \
   launchd/com.hegenai.codex-webui.plist.template
 ```
 
-获得提交授权后，正常提交由 pre-commit hook 执行按范围选择的 `verify:commit`，PR CI
-执行完整静态检查与构建的 `verify:ci`。全部检查通过并经差异审查后，才可以按用户
-明确指示提交、推送、重新全局安装并重建服务。
+以上是升级专用静态检查，普通提交与 PR CI 的门禁按[验证规则](development-rules.md#verification)
+执行。升级涉及的行为还须按[证据要求](../AGENTS.md#evidence-and-completion)完成 Hack 与真实用户
+路径观察，记录对应的代码/CLI 基线、实际输出和未观察范围；缺少平台、凭据或授权时明确保留该边界。
+提交、推送、重新全局安装与重建服务仍需相应授权。
 
 升级 PR 转为 Ready 或合并前，把自动提案的通用描述更新为实际审查结果，至少写明：
 
