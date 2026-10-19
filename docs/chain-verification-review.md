@@ -280,6 +280,16 @@ Sol 运行生产 Extension→Provider→Client→JSON-RPC、内存 Transport：�
 下一轮首分支提交后撤权，累计 `[2,1]`，首分支正常结算、后分支拒绝，未回滚或重发。
 主代理直接运行 Telegram 按钮查询守卫：原目录接受，同 ID 目录替换或 Actor 撤权均拒绝；这不是实际平台按钮交互观察。
 
+**重置券授权子链（基线 `8962788f`）。** 渠道预览原有 Actor/Conversation/Workspace/Thread 绑定继续复用，
+实时上下文复核贯穿共用服务、Provider 准备、账户路由和券明细读取，到消费最终发送前。
+本地守卫明确拒绝时保留原失败分类；请求已发送后的未知结果仍为 `reset_unknown`，不自动重试。
+主代理内联运行生产 ConversationResetCreditService→共用服务→ProviderRoutingClient→Client，隔离 RPC 端口：
+正常列表、预览、确认返回 `consumed/reset/refreshed=true`，消费一次、刷新一次；账户响应期间撤权仅发账户读取，
+不继续读券。最终消费等待期间撤权或换 Thread 时消费为零，后者返回 `reset_stale`；已发送消费后撤权仍返回
+实际成功并刷新一次。模拟消费响应丢失只发送一次、返回 `reset_unknown`、未刷新。
+这些观察未连接真实 App Server 或消费真实资产，RPC 发送等待由隔离端口模拟；CLI/WebUI 的账户 IPC
+继续省略渠道守卫，取消信号和已有管理授权合同保持不变，其完整业务验收留给 L17。
+
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。
 当前记录没有真实平台撤权或 Windows/macOS 观察。L03-F3、输入关联异步交互及最终整项验收未完成，

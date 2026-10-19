@@ -1256,13 +1256,11 @@ export class CodexAppServerClient implements
     return toAccountUsage(response);
   }
 
-  async openAiAccountRoute(signal?: AbortSignal): Promise<OpenAiAccountRoute> {
+  async openAiAccountRoute(signal?: AbortSignal, beforeSubmit?: () => void): Promise<OpenAiAccountRoute> {
     const response = await this.rpc.request<GetAccountResponse>({
       method: "account/read",
       params: { refreshToken: false } satisfies GetAccountParams,
-    }, signal === undefined
-      ? { retryOverload: true }
-      : { retryOverload: true, signal });
+    }, { retryOverload: true, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toOpenAiAccountRoute(response);
   }
 
@@ -1291,11 +1289,11 @@ export class CodexAppServerClient implements
     return toAccountRateLimits(response);
   }
 
-  async readResetCredits(signal?: AbortSignal): Promise<OpenAiResetCreditSnapshot> {
-    if (await this.openAiAccountRoute(signal) !== "chatgpt") throw new Error("ChatGPT account required");
+  async readResetCredits(signal?: AbortSignal, beforeSubmit?: () => void): Promise<OpenAiResetCreditSnapshot> {
+    if (await this.openAiAccountRoute(signal, beforeSubmit) !== "chatgpt") throw new Error("ChatGPT account required");
     const response = await this.rpc.request<GetAccountRateLimitsResponse>({
       method: "account/rateLimits/read", params: { supportsLunaReserve: true, excludeResetCreditDetails: false },
-    }, { retryOverload: true, ...(signal ? { signal } : {}) });
+    }, { retryOverload: true, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
     const summary = response.rateLimitResetCredits;
     if (typeof response.accountId !== "string" || !response.accountId || !summary
       || !((typeof summary.availableCount === "bigint" && summary.availableCount >= 0n)
@@ -1313,11 +1311,11 @@ export class CodexAppServerClient implements
       }).sort((a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity)) };
   }
 
-  async consumeResetCredit(creditId: string, idempotencyKey: string, signal?: AbortSignal): Promise<ResetCreditOutcome> {
+  async consumeResetCredit(creditId: string, idempotencyKey: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ResetCreditOutcome> {
     const response = await this.rpc.request<ConsumeAccountRateLimitResetCreditResponse>({
       method: "account/rateLimitResetCredit/consume",
       params: { creditId, idempotencyKey } satisfies ConsumeAccountRateLimitResetCreditParams,
-    }, { retryOverload: false, ...(signal ? { signal } : {}) });
+    }, { retryOverload: false, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
     if (!["reset", "nothingToReset", "noCredit", "alreadyRedeemed"].includes(response.outcome)) throw new Error("Invalid reset outcome");
     return response.outcome;
   }

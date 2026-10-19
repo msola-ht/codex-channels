@@ -18,6 +18,9 @@ export class ConversationResetCreditService {
     try {
       if (!actorId) throw failure("forbidden");
       const context = this.authorizedContext(target, actorId);
+      const validateAuthorization = () => {
+        if (this.authorizedContext(target, actorId) !== context) throw failure("reset_stale");
+      };
       const owner = JSON.stringify([conversationTargetKey(target), actorId]);
       for (const [token, pending] of this.pending) if (pending.expiresAt <= Date.now()) {
         this.pending.delete(token); this.credits.cancel(token);
@@ -26,7 +29,7 @@ export class ConversationResetCreditService {
       if (parts[0] !== "reset") throw failure("usage");
       if (parts.length === 1 || (parts.length === 2 && /^[1-9]\d{0,3}$/u.test(parts[1]!))) {
         const page = Number(parts[1] ?? "1");
-        const snapshot = await this.credits.list();
+        const snapshot = await this.credits.list(undefined, validateAuthorization);
         if (this.authorizedContext(target, actorId) !== context) throw failure("reset_stale");
         const pageCount = Math.max(1, Math.ceil(snapshot.credits.length / 8));
         if (page > pageCount) throw failure("usage");
@@ -38,7 +41,7 @@ export class ConversationResetCreditService {
       if (action === "use") {
         if (!value || value.length > 256) throw failure("usage");
         if (this.pending.size >= 128) throw failure("reset_busy");
-        const preview = await this.credits.preview(value);
+        const preview = await this.credits.preview(value, undefined, validateAuthorization);
         try {
           if (this.authorizedContext(target, actorId) !== context) throw failure("reset_stale");
           if (this.pending.size >= 128) throw failure("reset_busy");
@@ -52,9 +55,7 @@ export class ConversationResetCreditService {
       this.pending.delete(value!);
       if (pending.context !== context) { this.credits.cancel(value!); throw failure("reset_stale"); }
       if (action === "cancel") { this.credits.cancel(value!); return { type: "cancelled" }; }
-      const result = await this.credits.consume(value!, undefined, () => {
-        if (this.authorizedContext(target, actorId) !== context) throw failure("reset_stale");
-      });
+      const result = await this.credits.consume(value!, undefined, validateAuthorization);
       return { type: "consumed", ...result };
     } catch (error) {
       if (error instanceof UserFacingError) throw error;

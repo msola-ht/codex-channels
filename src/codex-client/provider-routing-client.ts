@@ -857,10 +857,10 @@ export class ProviderRoutingClient {
   }
 
   readResetCredits(...args: Parameters<ProviderClientInstance["readResetCredits"]>): ReturnType<ProviderClientInstance["readResetCredits"]> {
-    return this.withPrimaryActivity(client => client.readResetCredits(...args));
+    return this.withPrimaryActivity(client => client.readResetCredits(...args), args[1]);
   }
   consumeResetCredit(...args: Parameters<ProviderClientInstance["consumeResetCredit"]>): ReturnType<ProviderClientInstance["consumeResetCredit"]> {
-    return this.withPrimaryActivity(client => client.consumeResetCredit(...args));
+    return this.withPrimaryActivity(client => client.consumeResetCredit(...args), args[3]);
   }
 
   accountUsage(
@@ -872,7 +872,7 @@ export class ProviderRoutingClient {
   openAiAccountRoute(
     ...args: Parameters<ProviderClientInstance["openAiAccountRoute"]>
   ): ReturnType<ProviderClientInstance["openAiAccountRoute"]> {
-    return this.withPrimaryActivity((client) => client.openAiAccountRoute(...args));
+    return this.withPrimaryActivity((client) => client.openAiAccountRoute(...args), args[1]);
   }
 
   accountThreadUsage(
