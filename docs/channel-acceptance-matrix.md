@@ -7,6 +7,9 @@
 [`src/surfaces/feishu/README.md`](../src/surfaces/feishu/README.md) 和
 [`src/surfaces/weixin/README.md`](../src/surfaces/weixin/README.md)。
 
+本表持续维护验收状态与后续方向，已有证据保留各自版本和范围，不因后续代码已实现或文档整理
+升级为实机通过。下一行动见[尚待实机验收](#尚待实机验收)，专题记录保留对应详细证据。
+
 ## 状态定义
 
 - **实机通过**：操作者已经在真实平台客户端观察到完整生产链路结果。

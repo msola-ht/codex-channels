@@ -128,7 +128,7 @@ OpenAI 且存在当前 Thread 时，账户摘要和 Thread 估算是两个独立
    Thread 结果失败时返回上述稳定降级状态。
 5. 两个请求都属于安全只读查询，可复用现有有界过载重试；不增加业务层轮询或无界重试。
 
-官方 TUI 会在 Turn 完成后按结算窗口再次读取，但 Gateway 首期不复制后台轮询。用户主动执行
+官方 TUI 会在 Turn 完成后按结算窗口再次读取，但 Gateway 不复制后台轮询。用户主动执行
 `/usage` 时读取当时权威快照；需要刷新时再次执行同一命令。这样不会给每个 Turn 增加额外网络
 请求，也不会让后台任务长期占用生命周期。
 
@@ -178,7 +178,7 @@ OpenAI 且存在当前 Thread 时，账户摘要和 Thread 估算是两个独立
 ## 子代理边界
 
 `account/usage/read` 的 App Server 参数一次只接受一个 Thread ID，当前固定文档和测试没有声明父
-Thread 的结果递归包含子代理。首期必须按“当前精确 Thread 官方估算”展示，不能标为“会话总账”。
+Thread 的结果递归包含子代理。当前必须按“当前精确 Thread 官方估算”展示，不能标为“会话总账”。
 
 不使用本地 `subagent_threads` 关系逐个调用官方接口并自行求和，原因是：
 
@@ -191,7 +191,7 @@ Thread 的结果递归包含子代理。首期必须按“当前精确 Thread �
 
 ## 验证链路
 
-实现至少覆盖：
+修改此合同涉及的实现时，按受影响路径选择以下观察范围；不将清单或静态检查视为真实计费结果：
 
 1. Client 请求参数：账户摘要仍为 `undefined`，Thread 查询精确发送 `{ threadId }`，两者只读过载
    重试行为一致。
@@ -201,11 +201,13 @@ Thread 的结果递归包含子代理。首期必须按“当前精确 Thread �
    OpenAI Thread 查询。
 4. Application：账户主查询失败保持失败；Thread 可选查询失败收敛为 `failed`，不丢账户摘要。
 5. Formatter：可用、不可用、失败、缺失美元、Token 部分缺失、8 组截断和三渠道一致文案。
-6. 真实 App Server 合同：在条件式 `RUN_CODEX_INTEGRATION=1` 环境验证精确 0.163.0 接受规范
-   `threadId`、非法 ID 失败关闭，以及认证环境允许时返回 `unavailable` 或匹配请求 ID 的结构化结果；
-   未配置 ChatGPT 认证或计费路由时必须明确记为跳过/不可用，不能伪报成功结果。
-7. 按改动运行 `npm run check`、`npm run lint`、`npm run docs:check` 和协议检查；提交时由
-   pre-commit 统一运行 `npm run verify:commit`。
+6. 真实 App Server 合同：在获授权的隔离环境连接精确 0.163.0，观察规范 `threadId`、非法 ID
+   失败关闭，以及认证环境允许时的 `unavailable` 或匹配请求 ID 的结构化结果；再通过现有
+   `/usage` 观察账户摘要和 Thread 区块。未配置真实渠道、ChatGPT 认证或计费路由时明确记录
+   未观察/不可用的范围，不能伪报成功结果。
+
+通用执行方式、静态检查与提交门禁见[开发流程](development-rules.md#development-workflow)和
+[验证规则](development-rules.md#verification)。
 
 ## 完成标准与停止条件
 

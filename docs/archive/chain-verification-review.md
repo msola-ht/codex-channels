@@ -3,7 +3,7 @@
 **文档状态：已完成阶段的历史审查与证据记录。** L01–L19 的审查及确认问题修复已随 `ee39c1f7`
 交付，并通过 PR #268 合入 `main`（`8d6dc9d5`）。下文保留当时的计划、执行顺序、阶段状态和观察；
 Astra 前置审查、逐项单独提交及“可开启／下一项”等表述仅说明当时安排，不是后续任务的执行要求。
-当前开发与交付遵循[开发规则](development-rules.md#development-workflow)，现行功能合同见各条目引用的专题与模块文档。
+当前开发与交付遵循[开发规则](../development-rules.md#development-workflow)，现行功能合同见各条目引用的专题与模块文档。
 未观察事项仍保留在各条目的限制中；后续补证在具备对应环境和授权后按具体边界开展，引用本页证据，
 不重新启动整份清单，也不因本页转为历史记录而视为已验收。
 
@@ -12,7 +12,7 @@ Astra 前置审查、逐项单独提交及“可开启／下一项”等表述�
 及交付工程入口；它是待审查范围，不是缺陷清单或全项目已经通过的声明。
 
 沿用 [U01–U19](consolidation-review.md) 的逐项记录方式，不重复提取已完成的共享实现。
-[Provider 事务记录](provider-transaction-review.md) 保留 P01/P02 与 V01/V02 的原始证据，
+[Provider 事务记录](../provider-transaction-review.md) 保留 P01/P02 与 V01/V02 的原始证据，
 本页只引用尚未覆盖的边界。既有证据须核对代码和输入是否仍适用，不能由局部成功推断全路径成功。
 
 ## 执行与完成标准
@@ -46,25 +46,25 @@ Astra 前置审查、逐项单独提交及“可开启／下一项”等表述�
 
 | 编号 | 优先级 | 链路与关键不变量 | 待验证失败场景与成功证据 | 源码/合同入口及关联项 |
 | --- | --- | --- | --- | --- |
-| L01 | 高 | WebUI 请求→回环/Token/Origin→预览确认→管理服务→审计/响应；确认绑定主体、输入和修订，写前只消费一次 | 错误主体、输入替换、过期、并发重复、审计失败不能执行写入；合法隔离管理请求可完成并权威回读 | [管理接口安全](management-interface-security.md)、`scripts/webui-server.mjs`、`scripts/management-access.mjs`、`scripts/management-confirmations.mjs`、`scripts/webui-provider-settings-management.mjs`；L02/L03/L11 消费此边界 |
-| L02 | 高 | CLI Setup/WebUI Provider 预览→检测归属→确认→事务→启动材料；凭据身份与 Origin 不漂移，旧预览不能写新资源 | 取消、重复确认、预览后修改、迟到检测回填、目录 pending/backup 恢复；隔离完整 Setup 保存后运行时可读；Windows 名称与 ACL 待原生系统 | [Provider 事务记录](provider-transaction-review.md)、[Provider 接入](provider-integration-guide.md)、`scripts/custom-primary-provider-setup.mjs`、`scripts/custom-primary-provider-management.mjs`、`runtime/model-provider-custom-runtime.mjs`；复用 P01/P02/V01/V02，关联 U06/U07 |
-| L03 | 高 | Surface Actor→Workspace→命令/异步等待→最终能力调用；撤权后无新写入，未知 Workspace 不回退 | 账号错配、撤权/Workspace 替换发生于异步等待中、路径伪造；受授权的隔离入口可到达预期能力，无关会话不受影响 | [Policy](../src/policy/README.md)、[Surface](../src/surfaces/README.md)、`src/application/`、`src/bootstrap/config-lifecycle.ts`；L04–L08 共用授权链 |
-| L04 | 高 | Server Request→归属/祖先查询→交互排队→用户决定→Client 响应；一次批准不升级，迟到决定失效 | 查询中解绑、同值重绑、排队到期、批量取消、平台发送迟到、跨端已解决；本地生产协调器/路由可准确派发并安全拒绝；真实渠道送达另记 | [Approval](../src/approval/README.md)、`src/approval/coordinator.ts`、`src/approval/interaction-router.ts`、[协议矩阵](index.md)；L03/L05/L07 |
-| L05 | 高 | Thread ensure/resume/接管→绑定存储→订阅/活动状态→Turn；一 Thread 单归属，App Server 是权威状态 | 订阅成功但存储失败、断线重连、活动变化、后台容量并发预留、Provider 错路由；隔离新建/恢复后实际输入落到正确绑定 | [Routing](../src/session-routing/README.md)、[Storage](../src/storage/README.md)、`src/bootstrap/`、[协议矩阵](index.md)；L03/L04/L06 |
-| L06 | 高 | Queue/Revert/模型选择→页面快照→权威列表/历史→确认写入→通知失效；无平行队列，不承诺跨端原子性 | 过期页、循环游标、原生端更改、冲突排序、部分失败、通知与确认竞态；隔离 App Server Queue 链路及只对任务自有 Thread 的回退 | [Queue/Revert](thread-queue-revert-development.md)、`src/application/thread-queue-service.ts`、`src/application/thread-revert-service.ts`；复用 U02/U18/U19，关联 L05 |
-| L07 | 高 | 输出事件→投递箱提交→授权复核→平台 ACK→持久结果→重启恢复；生成完成不等于已送达，未知结果不盲目重发 | ACK 丢失、提交失败、sending 恢复、撤权、会话顺序、管理批量修订冲突；临时 Journal 重开与生产 Coordinator 到本机投递端的可用路径 | [Delivery](../src/delivery/README.md)、[投递运维](delivery.md)、`src/bootstrap/persistent-interaction-port.ts`；L03/L04/L10 |
-| L08 | 高 | Schedule→领取事务→执行端口→Thread/Turn→结果恢复；同 occurrence 不重复，未知结果阻止后续自动执行 | DST/月份缺日、手动与自动竞争、取消落在领取/派发之间、Run 缺 Turn ID、崩溃后重领；隔离 Store/Scheduler 可完成一次任务，外部平台输出不强求 | [计划任务](scheduled-tasks-development.md)、[模块合同](../src/scheduled-tasks/README.md)、`src/application/scheduled-task-service.ts`；L03/L05/L07 |
-| L09 | 高 | Relay 鉴权/队列→材料复核→模型出站→流解析→交付→指标；撤销后不新出站，生成与交付状态分离 | 等待撤销、迟到材料、客户端断开、背压、缺终态、畸形流、工具/图片转换；本机 HTTP/流式请求可完成并释放许可，不调用收费模型 | [Relay](../src/model-relay/README.md)、[模型 API](../src/model-api/README.md)、[Proxy](../src/provider-proxy/README.md)、[Relay 合同](provider-api-relay-development.md)；L02/L10/L12 |
-| L10 | 中 | 请求/审查指标→IPC→有界 Writer→SQLite→查询/完成卡；写入范围与统计范围一致，缺失不冒充完整 | Worker 失败、缓冲溢出、父子 Turn 混淆、取消等待、单条写失败、重连重复；隔离真实写入和查询正确降级，卡片平台送达另记 | [Observability](../src/observability/README.md)、`src/observability/request-metrics-writer.ts`、`src/bootstrap/`；复用 U13，关联 L07/L09 |
-| L11 | 中 | Gateway 配置读取→默认投影→预览修订→保存→热加载→各消费者；原文与有效默认值不混淆，失败不扩大授权 | 缺字段/未知字段、部分初始化、热加载失败、并行保存、浏览器过期响应；隔离 CLI/HTTP 保存及消费者读取，Doctor 保持只读 | [Config](../src/config/README.md)、`scripts/webui-management-settings.mjs`、`webui/src/hooks/use-versioned-settings-management.ts`、`src/bootstrap/config-lifecycle.ts`；复用 U05/U08/U09，关联 L01/L03 |
-| L12 | 高 | 服务/Worker/Socket 启动→就绪→取消/故障→嵌套清理→真实退出；共享 App Server 不被 Gateway 清理 | 初始化中停止、清理一项失败、退出超时、假就绪、私有路径链接/替换；任务自有进程观察，Windows helper/Job 与 macOS/Linux 服务实机分开 | [Runtime](../runtime/README.md)、`runtime/app-server-supervisor.mjs`、`runtime/process-lifecycle.mjs`、`runtime/private-file.mjs`、[Windows](windows-support-development.md)；复用 U07/U11/U16/U17，IPC 两实现保留职责差异 |
-| L13 | 中 | 三渠道事件/附件→Actor→解密/大小限制→聚合→Turn→文本/卡片投递；身份和字节语义不丢失，Reader 不等平台网络 | 超限/坏编码/解密失败、聚合中撤权、关闭排空、平台限流、慢消费者/事件总线容量；生产适配器隔离入口到消费端；真实平台单独列缺口 | [渠道矩阵](channel-acceptance-matrix.md)、[Surface](../src/surfaces/README.md)、[Event Bus](../src/event-bus/README.md)、[显示合同](display.md)；复用 U03/U10/U11/U12，关联 L03/L07 |
-| L14 | 中 | 安装/更新候选→构建/版本门禁→只读数据预检→切换→激活/回退；代码替换不等于服务已激活 | 不兼容库、构建失败、取消、替换失败、ignore-scripts、打包遗漏；优先隔离候选与产物核对，不执行用户全局安装/卸载 | [源码安装](source-install.md)、`scripts/source-update.mjs`、`scripts/source-build.mjs`、[CI](../.github/workflows/README.md)；复用 U14/U15/Node 最低版本观察，关联 L12 |
-| L15 | 高 | 受管账户预览→租约/停止→注册表/文件事务→固定基线恢复；聚合成员→目录/材料快照→刷新→逐次出站复核→成员指标 | 默认账户删除、租约占用、停止未知、部分删除/恢复冲突；材料变化、pending、迟到 Worker、模型移除；隔离账户写读不破坏其他账户/共享目录，聚合请求落到精确成员 | [多账户合同](opencode-go-multi-account.md)、[Provider 接入](provider-integration-guide.md)、`scripts/opencode-go-account-management.mjs`、`scripts/deepseek-account-management.mjs`、`scripts/cline-pass-account-management.mjs`、`runtime/aggregate-model-provider.mjs`、`runtime/aggregate-material-guard.mjs`；L01/L02/L05/L09/L10/L12 |
-| L16 | 高 | Skill/Plugin 实时解析→绑定/Provider→Turn；MCP 状态/资源/OAuth/刷新；Hook 精确 hash/version 审查→确认→写入→跨实例刷新/回读 | 路径/Provider 错配、同名内容替换、旧确认、资源超限、OAuth 迟到、部分刷新失败；隔离生产入口取得受限结果并拒绝错配，不把保存当执行成功 | [协议矩阵](index.md)、[Application](../src/application/README.md)、`src/application/conversation-extension-query-service.ts`、`src/application/conversation-hook-service.ts`、`scripts/mcp-setup.mjs`；L01/L03/L04/L05；不执行真实 OAuth 或 Hook，不开放市场安装/任意 MCP Tool Call |
-| L17 | 高 | CLI/WebUI/渠道重置券预览→私有账户 IPC→账户/券复核→单次消费→额度刷新；资产不重复消费，未知结果不重试 | 账户切换、并发忙碌、重复确认、取消、响应丢失及消费后刷新失败；隔离端口观察单次调用与明确未知/刷新失败分类，不使用真实重置券 | [用户指南](user-guide.md#openai-重置券-cli)、`src/application/openai-reset-credit-service.ts`、`src/application/conversation-reset-credit-service.ts`、`scripts/reset-credit-command.mjs`、`scripts/webui-reset-credit-route.mjs`；L01/L03/L10/L12 |
-| L18 | 高 | Turn/Item/Goal→Client 投影→Core 归约→生命周期/呈现；Reserve 错误→账户→设置→权威确认/恢复；重复思考→精确中断→终态→清理 | 旧轮次迟到、断线恢复、partial answer、Revert 清理、手动设置抢占、写出但缺确认、错误轮次中断、长期缓存上限；生产归约器/用例输出与官方状态一致，不伪造停止或自动重发 | [Core](../src/conversation-core/README.md)、[Application](../src/application/README.md)、`src/application/luna-reserve-service.ts`、`src/application/reasoning-repeat-guard.ts`；L04/L05/L06/L10/L13 |
-| L19 | 高 | cleanup sessions/metrics/traffic→各自预览/前置检查→确认→按各自合同修改→逐项核验；诊断读取/导出有界且不越权 | 状态未知、活动后代、Schema 不兼容、备份失败、锁竞争、部分归档、未知转储格式、payload 路径逃逸、导出取消/背压；仅临时库/文件及任务自有 Thread 验证，拒绝时原数据不变 | [用户指南](user-guide.md#本机清理与归档)、[Scripts](../scripts/README.md)、`scripts/session-cleanup.mjs`、`scripts/metrics-database.mjs`、`scripts/traffic-cleanup.mjs`、`scripts/traffic-dump-reader.mjs`；L01/L05/L10/L12/L14；真实用户维护不获授权 |
+| L01 | 高 | WebUI 请求→回环/Token/Origin→预览确认→管理服务→审计/响应；确认绑定主体、输入和修订，写前只消费一次 | 错误主体、输入替换、过期、并发重复、审计失败不能执行写入；合法隔离管理请求可完成并权威回读 | [管理接口安全](../management-interface-security.md)、`scripts/webui-server.mjs`、`scripts/management-access.mjs`、`scripts/management-confirmations.mjs`、`scripts/webui-provider-settings-management.mjs`；L02/L03/L11 消费此边界 |
+| L02 | 高 | CLI Setup/WebUI Provider 预览→检测归属→确认→事务→启动材料；凭据身份与 Origin 不漂移，旧预览不能写新资源 | 取消、重复确认、预览后修改、迟到检测回填、目录 pending/backup 恢复；隔离完整 Setup 保存后运行时可读；Windows 名称与 ACL 待原生系统 | [Provider 事务记录](../provider-transaction-review.md)、[Provider 接入](../provider-integration-guide.md)、`scripts/custom-primary-provider-setup.mjs`、`scripts/custom-primary-provider-management.mjs`、`runtime/model-provider-custom-runtime.mjs`；复用 P01/P02/V01/V02，关联 U06/U07 |
+| L03 | 高 | Surface Actor→Workspace→命令/异步等待→最终能力调用；撤权后无新写入，未知 Workspace 不回退 | 账号错配、撤权/Workspace 替换发生于异步等待中、路径伪造；受授权的隔离入口可到达预期能力，无关会话不受影响 | [Policy](../../src/policy/README.md)、[Surface](../../src/surfaces/README.md)、`src/application/`、`src/bootstrap/config-lifecycle.ts`；L04–L08 共用授权链 |
+| L04 | 高 | Server Request→归属/祖先查询→交互排队→用户决定→Client 响应；一次批准不升级，迟到决定失效 | 查询中解绑、同值重绑、排队到期、批量取消、平台发送迟到、跨端已解决；本地生产协调器/路由可准确派发并安全拒绝；真实渠道送达另记 | [Approval](../../src/approval/README.md)、`src/approval/coordinator.ts`、`src/approval/interaction-router.ts`、[协议矩阵](../index.md)；L03/L05/L07 |
+| L05 | 高 | Thread ensure/resume/接管→绑定存储→订阅/活动状态→Turn；一 Thread 单归属，App Server 是权威状态 | 订阅成功但存储失败、断线重连、活动变化、后台容量并发预留、Provider 错路由；隔离新建/恢复后实际输入落到正确绑定 | [Routing](../../src/session-routing/README.md)、[Storage](../../src/storage/README.md)、`src/bootstrap/`、[协议矩阵](../index.md)；L03/L04/L06 |
+| L06 | 高 | Queue/Revert/模型选择→页面快照→权威列表/历史→确认写入→通知失效；无平行队列，不承诺跨端原子性 | 过期页、循环游标、原生端更改、冲突排序、部分失败、通知与确认竞态；隔离 App Server Queue 链路及只对任务自有 Thread 的回退 | [Queue/Revert](../thread-queue-revert-development.md)、`src/application/thread-queue-service.ts`、`src/application/thread-revert-service.ts`；复用 U02/U18/U19，关联 L05 |
+| L07 | 高 | 输出事件→投递箱提交→授权复核→平台 ACK→持久结果→重启恢复；生成完成不等于已送达，未知结果不盲目重发 | ACK 丢失、提交失败、sending 恢复、撤权、会话顺序、管理批量修订冲突；临时 Journal 重开与生产 Coordinator 到本机投递端的可用路径 | [Delivery](../../src/delivery/README.md)、[投递运维](../delivery.md)、`src/bootstrap/persistent-interaction-port.ts`；L03/L04/L10 |
+| L08 | 高 | Schedule→领取事务→执行端口→Thread/Turn→结果恢复；同 occurrence 不重复，未知结果阻止后续自动执行 | DST/月份缺日、手动与自动竞争、取消落在领取/派发之间、Run 缺 Turn ID、崩溃后重领；隔离 Store/Scheduler 可完成一次任务，外部平台输出不强求 | [计划任务](../scheduled-tasks-development.md)、[模块合同](../../src/scheduled-tasks/README.md)、`src/application/scheduled-task-service.ts`；L03/L05/L07 |
+| L09 | 高 | Relay 鉴权/队列→材料复核→模型出站→流解析→交付→指标；撤销后不新出站，生成与交付状态分离 | 等待撤销、迟到材料、客户端断开、背压、缺终态、畸形流、工具/图片转换；本机 HTTP/流式请求可完成并释放许可，不调用收费模型 | [Relay](../../src/model-relay/README.md)、[模型 API](../../src/model-api/README.md)、[Proxy](../../src/provider-proxy/README.md)、[Relay 合同](../provider-api-relay-development.md)；L02/L10/L12 |
+| L10 | 中 | 请求/审查指标→IPC→有界 Writer→SQLite→查询/完成卡；写入范围与统计范围一致，缺失不冒充完整 | Worker 失败、缓冲溢出、父子 Turn 混淆、取消等待、单条写失败、重连重复；隔离真实写入和查询正确降级，卡片平台送达另记 | [Observability](../../src/observability/README.md)、`src/observability/request-metrics-writer.ts`、`src/bootstrap/`；复用 U13，关联 L07/L09 |
+| L11 | 中 | Gateway 配置读取→默认投影→预览修订→保存→热加载→各消费者；原文与有效默认值不混淆，失败不扩大授权 | 缺字段/未知字段、部分初始化、热加载失败、并行保存、浏览器过期响应；隔离 CLI/HTTP 保存及消费者读取，Doctor 保持只读 | [Config](../../src/config/README.md)、`scripts/webui-management-settings.mjs`、`webui/src/hooks/use-versioned-settings-management.ts`、`src/bootstrap/config-lifecycle.ts`；复用 U05/U08/U09，关联 L01/L03 |
+| L12 | 高 | 服务/Worker/Socket 启动→就绪→取消/故障→嵌套清理→真实退出；共享 App Server 不被 Gateway 清理 | 初始化中停止、清理一项失败、退出超时、假就绪、私有路径链接/替换；任务自有进程观察，Windows helper/Job 与 macOS/Linux 服务实机分开 | [Runtime](../../runtime/README.md)、`runtime/app-server-supervisor.mjs`、`runtime/process-lifecycle.mjs`、`runtime/private-file.mjs`、[Windows](../windows-support-development.md)；复用 U07/U11/U16/U17，IPC 两实现保留职责差异 |
+| L13 | 中 | 三渠道事件/附件→Actor→解密/大小限制→聚合→Turn→文本/卡片投递；身份和字节语义不丢失，Reader 不等平台网络 | 超限/坏编码/解密失败、聚合中撤权、关闭排空、平台限流、慢消费者/事件总线容量；生产适配器隔离入口到消费端；真实平台单独列缺口 | [渠道矩阵](../channel-acceptance-matrix.md)、[Surface](../../src/surfaces/README.md)、[Event Bus](../../src/event-bus/README.md)、[显示合同](../display.md)；复用 U03/U10/U11/U12，关联 L03/L07 |
+| L14 | 中 | 安装/更新候选→构建/版本门禁→只读数据预检→切换→激活/回退；代码替换不等于服务已激活 | 不兼容库、构建失败、取消、替换失败、ignore-scripts、打包遗漏；优先隔离候选与产物核对，不执行用户全局安装/卸载 | [源码安装](../source-install.md)、`scripts/source-update.mjs`、`scripts/source-build.mjs`、[CI](../../.github/workflows/README.md)；复用 U14/U15/Node 最低版本观察，关联 L12 |
+| L15 | 高 | 受管账户预览→租约/停止→注册表/文件事务→固定基线恢复；聚合成员→目录/材料快照→刷新→逐次出站复核→成员指标 | 默认账户删除、租约占用、停止未知、部分删除/恢复冲突；材料变化、pending、迟到 Worker、模型移除；隔离账户写读不破坏其他账户/共享目录，聚合请求落到精确成员 | [多账户合同](../opencode-go-multi-account.md)、[Provider 接入](../provider-integration-guide.md)、`scripts/opencode-go-account-management.mjs`、`scripts/deepseek-account-management.mjs`、`scripts/cline-pass-account-management.mjs`、`runtime/aggregate-model-provider.mjs`、`runtime/aggregate-material-guard.mjs`；L01/L02/L05/L09/L10/L12 |
+| L16 | 高 | Skill/Plugin 实时解析→绑定/Provider→Turn；MCP 状态/资源/OAuth/刷新；Hook 精确 hash/version 审查→确认→写入→跨实例刷新/回读 | 路径/Provider 错配、同名内容替换、旧确认、资源超限、OAuth 迟到、部分刷新失败；隔离生产入口取得受限结果并拒绝错配，不把保存当执行成功 | [协议矩阵](../index.md)、[Application](../../src/application/README.md)、`src/application/conversation-extension-query-service.ts`、`src/application/conversation-hook-service.ts`、`scripts/mcp-setup.mjs`；L01/L03/L04/L05；不执行真实 OAuth 或 Hook，不开放市场安装/任意 MCP Tool Call |
+| L17 | 高 | CLI/WebUI/渠道重置券预览→私有账户 IPC→账户/券复核→单次消费→额度刷新；资产不重复消费，未知结果不重试 | 账户切换、并发忙碌、重复确认、取消、响应丢失及消费后刷新失败；隔离端口观察单次调用与明确未知/刷新失败分类，不使用真实重置券 | [用户指南](../user-guide.md#openai-重置券-cli)、`src/application/openai-reset-credit-service.ts`、`src/application/conversation-reset-credit-service.ts`、`scripts/reset-credit-command.mjs`、`scripts/webui-reset-credit-route.mjs`；L01/L03/L10/L12 |
+| L18 | 高 | Turn/Item/Goal→Client 投影→Core 归约→生命周期/呈现；Reserve 错误→账户→设置→权威确认/恢复；重复思考→精确中断→终态→清理 | 旧轮次迟到、断线恢复、partial answer、Revert 清理、手动设置抢占、写出但缺确认、错误轮次中断、长期缓存上限；生产归约器/用例输出与官方状态一致，不伪造停止或自动重发 | [Core](../../src/conversation-core/README.md)、[Application](../../src/application/README.md)、`src/application/luna-reserve-service.ts`、`src/application/reasoning-repeat-guard.ts`；L04/L05/L06/L10/L13 |
+| L19 | 高 | cleanup sessions/metrics/traffic→各自预览/前置检查→确认→按各自合同修改→逐项核验；诊断读取/导出有界且不越权 | 状态未知、活动后代、Schema 不兼容、备份失败、锁竞争、部分归档、未知转储格式、payload 路径逃逸、导出取消/背压；仅临时库/文件及任务自有 Thread 验证，拒绝时原数据不变 | [用户指南](../user-guide.md#本机清理与归档)、[Scripts](../../scripts/README.md)、`scripts/session-cleanup.mjs`、`scripts/metrics-database.mjs`、`scripts/traffic-cleanup.mjs`、`scripts/traffic-dump-reader.mjs`；L01/L05/L10/L12/L14；真实用户维护不获授权 |
 
 以下子范围是对应条目的完成条件，不能仅通过通用链路检查代替：
 
@@ -390,7 +390,7 @@ L03 已识别的输入、命令、查询、异步回答及恢复分支均有上�
 未确认新的代码缺陷，本项提交补充证据。受管账户租约、删除及聚合另由 L15 覆盖。
 
 **复用证据。** 比较 `ceb54a22` 至本基线，Setup、共享自定义 Provider 管理、主配置转换事务、
-自定义运行时、模型目录和凭据文档模块没有差异，沿用 [Provider 事务记录](provider-transaction-review.md)
+自定义运行时、模型目录和凭据文档模块没有差异，沿用 [Provider 事务记录](../provider-transaction-review.md)
 P01/P02/V01/V02 的适用结论和限制，不重复宣称完成真实断电、Windows ACL 或 macOS 服务观察。
 
 **Setup 完整保存。** Linux 临时私有 Home 中调用生产 `runCustomPrimaryProviderSetup`，注入提示答案与
@@ -1160,7 +1160,7 @@ PUT 503 或确认 retry 后撤权均无下一次请求、无 Turn，原 `authori
 Outbox、私有文件工具与最终差异；同时限制同编号 png/jpg，避免归档处理错拿领取记录或其他请求。
 恢复计划在修改前明确：停 Gateway 后备份整个 spool 并保留权限；无法归档时保留文件和领取状态，
 修复文件系统后只重试归档。回退旧版前隔离 `.sending` 及同编号图片，人工核对，不能改回 json
-自动重发；详细步骤已更新 [渠道图片发送](channel-image.md#恢复与回退)，本轮没有操作真实 spool。
+自动重发；详细步骤已更新 [渠道图片发送](../channel-image.md#恢复与回退)，本轮没有操作真实 spool。
 
 隔离真实 `initializeUserData → SqliteBindingStore → submitChannelImage → ChannelImageSpool`
 到本机接收端：68 字节 PNG 原样到达一次，pending 清空、done 两文件、version 1 和 0600 保持。

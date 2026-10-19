@@ -14,6 +14,9 @@ Turn、Item、Goal 和历史的唯一事实来源。
 Surface 证明当前公开合同不足，应先单独评审合同和依赖方向变更，再同步更新本指南，不能让
 平台模块通过内部导入或复制核心逻辑绕过合同。
 
+通用执行顺序遵循[开发流程](development-rules.md#development-workflow)；本指南只补充 Surface
+接入所需的合同、实施切片和验收边界。
+
 具体平台设计必须继续服从本指南。当前飞书的组合工厂、身份、输入队列、配置和停止条件见
 [`飞书 Surface 设计决策`](feishu-surface-plan.md)；微信 ClawBot 的官方协议基线、凭据边界和
 停止条件见 [`微信 Surface 设计决策`](weixin-surface-plan.md)。
@@ -268,7 +271,7 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 - 未识别、畸形、过期或无法路由的高权限请求默认拒绝或取消。
 
 平台不支持安全交互控件时，不得用宽松的文本解析代替按钮或表单。该阶段应明确拒绝，直到有
-经过测试的一次性交互方案。
+经实际验证的一次性交互方案。
 
 ## 配置与设置
 
@@ -321,7 +324,8 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 
 ## 分阶段实施
 
-每次只完成一个可验证的纵向切片：
+可按以下顺序组织可验证的纵向切片；按实际依赖调整切片范围，必要的关联实现和文档应在同一逻辑
+变更中完成，不按阶段机械拆分提交：
 
 ### 阶段 1：最小文本闭环
 
@@ -333,7 +337,8 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 - 立即返回安全决定的失败关闭 `InteractionPort`，不展示或等待审批交互。
 - 组合工厂和恢复绑定过滤。
 
-这一阶段不同时实现其他 Conversation 类型、图片、文件、全部命令、富卡片和可操作的审批界面。
+最小文本闭环可以先不实现其他 Conversation 类型、图片、文件、全部命令、富卡片和可操作的审批
+界面；尚未实现的能力必须明确拒绝，不能以占位实现宣称支持。
 
 ### 阶段 2：命令与审批
 
@@ -349,7 +354,8 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 - 平台卡片、降噪通知和输入表单。
 - 其余命令与平台体验优化。
 
-只有前一阶段的边界、失败路径和关闭语义通过审查后才进入下一阶段。
+每个实际交付切片都须核对边界、失败路径和关闭语义；后续能力依赖的已有观察可以复用，输入或
+合同变化时重新核对受影响部分。
 
 ## 验证要求
 
@@ -373,7 +379,9 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 - 敏感字段、平台错误和未知内部异常不进入日志或外部消息。
 - 模块依赖静态检查通过，不新增协议或具体 Client 泄漏。
 
-开发阶段运行受影响的静态检查与 `npm run docs:check`；普通提交由 pre-commit 执行一次按范围选择的 `verify:commit`，PR CI 使用 `verify:ci` 完整静态检查与构建，不提前重复。
+静态门禁、Hack 与真实路径证据遵循[验证规则](development-rules.md#verification)和
+[证据要求](../AGENTS.md#evidence-and-completion)。真实平台验收记录注明代码与 SDK/协议基线、
+授权使用的账号和 Conversation 类型、实际观察及未执行原因，不把静态通过当成平台可用。
 
 并同步更新`index.md` 文档索引、`src/README.md`、`src/surfaces/README.md`、新渠道目录 README、
 配置示例与公开 Setup/Doctor 说明。
@@ -401,4 +409,5 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 5. 平台网络不会阻塞 App Server Reader，关闭与失败路径有界。
 6. 不新增协议泄漏、平行会话状态或平台专属核心分支。
 7. 文档、索引和配置示例与实现一致。
-8. `npm run verify:commit` 全部通过。
+8. 已观察授权用户从真实平台输入到可用回复的完整路径，以及受影响的拒绝、失败和关闭边界；
+   未观察的范围明确保留，静态门禁另按[验证规则](development-rules.md#verification)报告。

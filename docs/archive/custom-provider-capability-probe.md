@@ -2,6 +2,10 @@
 
 本文记录用户授权的实际请求与观测结果，不代表所有模型、所有时间或整个提供商的能力保证。探测不修改提供商配置，不执行模型返回的工具，不发送仓库或现有会话内容。没有进行上下文极限测试、并发负载测试或自动重试压测。
 
+本页作为下述端点、模型及请求形态的历史证据保留；现行配置与探测操作以
+[提供商接入指南](../provider-integration-guide.md)为准。末节建议仅适用于所记录的观测条件，
+未覆盖项不记为通过；需要采用相应能力时，再按当前配置和生产探测结果确认。
+
 ## 对象与方法
 
 - 日期：2026-10-11（UTC）。
@@ -27,7 +31,7 @@
 | Responses WebSocket | 未连接 | 不适用 | 握手 HTTP 404；当前地址不建议启用 WS，不泛化为模型本身不支持 |
 | 客户端 `tool_search` 输入项 | 接受 | 未直接探测 | 现有兼容性探测返回 HTTP 200；完整检索、发现及调用链另见后续阶段 |
 
-工具检索与 WS 请求复用 [tool_search 探测](../scripts/responses-tool-search-probe.mjs) 和 [WS 探测](../scripts/responses-websocket-probe.mjs)。自由格式工具声明对照只读锁定源码中的 `core/src/tools/handlers/apply_patch_spec.rs` 和 `core/assets/tools/apply_patch.lark`；本记录不新增探测脚本或自动化测试。
+工具检索与 WS 请求复用 [tool_search 探测](../../scripts/responses-tool-search-probe.mjs) 和 [WS 探测](../../scripts/responses-websocket-probe.mjs)。自由格式工具声明对照只读锁定源码中的 `core/src/tools/handlers/apply_patch_spec.rs` 和 `core/assets/tools/apply_patch.lark`；本记录不新增探测脚本或自动化测试。
 
 ## 第二阶段：思考参数
 
@@ -143,7 +147,7 @@ Responses 参数为 `reasoning.effort`，Chat Completions 为 `reasoning_effort`
 
 - Chat 的 `usage` 只有 `prompt_tokens`、`completion_tokens`、`total_tokens`、`prompt_tokens_details`，没有 `completion_tokens_details.reasoning_tokens`，也没有顶层 `usage.reasoning_tokens`。因此当前端点的 Chat 可以传思考内容，却没有提供单独的思考 Token 数；缺失不能记为 0。
 - Responses 返回 `usage.output_tokens_details.reasoning_tokens: 65`。同题两接口的输入、输出和总量一致，符合 Chat 输出总数可能包含思考的情况，但不能仅凭数值一致证明所有请求的计费或 Token 分类方式。
-- 项目 [Chat 转 Responses](../src/model-api/chat-to-responses.ts) 已将 `completion_tokens_details.reasoning_tokens` 映射到 `output_tokens_details.reasoning_tokens`；[Chat 直接响应解析](../src/model-api/chat-response.ts) 也读取该字段。[请求转换](../src/model-api/responses-to-chat.ts) 已请求流式用量，[响应指标观察](../src/provider-proxy/response-metrics-observer.ts) 从转换后的字段读取思考用量。当前实测缺失发生在上游 Chat 响应，不是这些映射遗漏。
+- 项目 [Chat 转 Responses](../../src/model-api/chat-to-responses.ts) 已将 `completion_tokens_details.reasoning_tokens` 映射到 `output_tokens_details.reasoning_tokens`；[Chat 直接响应解析](../../src/model-api/chat-response.ts) 也读取该字段。[请求转换](../../src/model-api/responses-to-chat.ts) 已请求流式用量，[响应指标观察](../../src/provider-proxy/response-metrics-observer.ts) 从转换后的字段读取思考用量。当前实测缺失发生在上游 Chat 响应，不是这些映射遗漏。
 - 本轮直接检查 API 与相关代码，没有运行 WebUI、渠道展示或完整持久化链路，不据此确认缺失用量在每个展示入口都被正确标记。未按字符数估算或伪造思考 Token 数。
 
 ## 第七阶段：默认采样参数与本地请求链路
@@ -168,7 +172,7 @@ Responses 参数为 `reasoning.effort`，Chat Completions 为 `reasoning_effort`
 
 这些观察确认失败与取消不会被判为支持，不能证明修正后的完整发现链路在此上游通过；本轮没有重试、执行模型工具或新增测试文件。
 
-## 当前配置建议与未覆盖范围
+## 基于本次观测的配置建议与未覆盖范围
 
 - 优先选择 Responses + HTTP/SSE；当前 WS 握手未通过，保持关闭。
 - 当前端点的 Chat 未返回单独思考 Token 用量，Responses 有返回；需要准确统计该字段时优先 Responses。此限制只针对本次端点与模型，不是所有 Chat 提供商的限制。
@@ -180,4 +184,4 @@ Responses 参数为 `reasoning.effort`，Chat Completions 为 `reasoning_effort`
 - 按用户要求不测上下文上限和并发容量。尚未覆盖最大输出长度、联网搜索、Chat 图片工具结果转换、复杂视觉、完整 JSON Schema 关键字、断流取消恢复或长时间稳定性。
 - 直接 API 请求通过不等于原生 Codex 完整任务、渠道投递或生产服务已经验收。服务端、模型、地址、凭据或协议变化后，原证据可能不再适用。
 
-相关合同见 [第三方提供商接入指南](provider-integration-guide.md)。
+相关合同见 [第三方提供商接入指南](../provider-integration-guide.md)。

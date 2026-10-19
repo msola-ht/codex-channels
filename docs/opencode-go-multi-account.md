@@ -1,7 +1,7 @@
 # OpenCode Go 多账户实现
 
 Codex Connect 支持在一个 Gateway 内配置多个 OpenCode Go 账户。每个账户使用独立 API Key、
-额度、Provider 路由、App Server、模型目录和统计代理。用户使用 `/model`
+额度、Provider 路由、App Server、默认模型选择和统计代理；同族账户共用模型目录。用户使用 `/model`
 切换账户；`/usage` 和完成卡片只展示当前 Thread 所属账户。
 
 当前配置和常用命令见 [`OpenCode Go 使用说明`](opencode-go.md)，第三方 Provider 的通用约束见
@@ -37,8 +37,8 @@ Codex Thread 的 `modelProvider` 创建后不可变。因此：
   opencode-go/accounts.json                家族注册表（id、default、email 或 phone）
   opencode-go/models.json                  所有 OCG 账户共用模型目录
   opencode-go/models.manifest.json         共用目录来源
-  ocg-<account>/managed.toml               管理标记（version、provider、mode）
-  ocg-<account>/backup/                    固定恢复基线及删除前的私有文件备份
+  opencode-go/ocg-<account>/managed.toml    管理标记（version、provider、mode）
+  opencode-go/ocg-<account>/backup/         固定恢复基线及删除前的私有文件备份
 ```
 
 切换模式下，每个账户使用独立的 0600 Profile：
@@ -73,7 +73,7 @@ codexc provider opencode-go release <id>
   租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；清理账户配置与管理标记，保留共用模型目录和来源记录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
   删除计划在等待监管器前固定文件快照，期间注册表、账户文件或固定恢复基线被外部修改时拒绝继续，保留外部修改；
 - `default` 原子更新默认账户注册表；
-- `stop` 立即请求释放账户 App Server；如果对应 Remote TUI 正在持有租约，则保留实例并提示用户
+- `release` 立即请求释放账户 App Server；如果对应 Remote TUI 正在持有租约，则保留实例并提示用户
   退出 TUI 后重试；
 - 删除账户后，该账户历史 Thread 因 Provider 不再存在而不可恢复，CLI 会要求明确确认。
 

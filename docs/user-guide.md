@@ -1099,9 +1099,9 @@ npm ci
 npm run check
 ```
 
-开发阶段按影响选择类型、Lint、文档检查或构建。提交 Hook 自动运行 `npm run verify:commit`
-选择必要检查，PR CI 使用 `npm run verify:ci` 执行完整静态检查与构建。
-具体入口见[CI 流程](../.github/workflows/README.md)，无需每次修改都手动运行全部检查。
+开发顺序、关联修复、提交条件和文档维护遵循[开发流程](development-rules.md#development-workflow)。
+检查选择、提交 Hook 和证据复用见[验证规则](development-rules.md#verification)，
+CI 的具体任务见[CI 流程](../.github/workflows/README.md)，无需每次修改都手动运行全部检查。
 
 协议升级必须先查阅 [`docs/index.md`](index.md)、官方固定 Tag 和 [`上游源码维护规则`](upstream-sources.md)，不得把生成类型存在误认为 Gateway 已支持。完整项目文档索引见 [`index.md`](../index.md)。
 

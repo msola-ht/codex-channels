@@ -108,7 +108,7 @@ Windows/macOS 运行及 Desktop 私有连接。本次不新增测试或测试脚
 | 更准确保留审批限制和动作归属 | 随 CLI 获得 Guardian 用户限制保留、检查点恢复和评分对应动作修复 | 不扩展 Gateway 自动授权；不宣称保证中文输出，不接入额外 Decisions 服务或其凭据 |
 | CP 接收新版提示词形状 | 既有 Responses 透传和 Chat 桥继续接收 `input` 内 developer 消息 | 基础提示词从顶层 `instructions` 移入 input；0.162.0 隔离 CLI 的标准 Responses 请求已观察到 developer→system 映射。自定义目录默认不启用 Responses Lite，其专属 reasoning context 和工具注入不纳入 Chat 桥支持范围，不通过放宽校验冒充兼容 |
 | 原生终端和工具执行更可靠 | 随 CLI 获得模型默认值、Retry-After、CRLF、Linux/Windows 沙箱及 MCP 修复 | 不改变 Gateway 重试、OS 权限和服务所有权；非当前平台仍需实机确认 |
-| 官方 daemon 生命周期 | 继续暂缓接管，现有服务管理与更新器维持职责；更新器已有关闭 `features.daemon_auto_start` 的护栏 | [专项审查](codex-daemon-review.md)的 0.160.0 隔离实测保留原版本；操作者部署 `0.163.0` 不代表接管了官方 daemon |
+| 官方 daemon 生命周期 | 继续暂缓接管，现有服务管理与更新器维持职责；更新器已有关闭 `features.daemon_auto_start` 的护栏 | [专项审查](archive/codex-daemon-review.md)的 0.160.0 隔离实测保留原版本；操作者部署 `0.163.0` 不代表接管了官方 daemon |
 
 本次不新增 Thread prediction、附件所属 Thread 反查、Bedrock GovCloud、浏览器扩展请求头、
 环境必需 Skill、远程环境或 worktree 管理入口；这些能力没有当前渠道需求或超出现有授权边界。
@@ -170,7 +170,7 @@ JSON 转义表示，合计超过 3000 UTF-8 字节即中止。审批绑定 Threa
 | 上游上传重试与超时 | Gateway 图片引用上传是独立 HTTP 链路，不能宣称自动获得该修复；保留账户/路由核验、分阶段超时、取消及既有同一 Blob PUT 的有界重试，不重试文件创建或 Turn 提交 |
 
 daemon 的固定源码、完整调用链、双实例与持久 Thread 恢复实测，以及生产替换验收条件见
-[原生 daemon 接入审查](codex-daemon-review.md)。已确认重启可在 Gateway 重连前自动发起
+[原生 daemon 接入审查](archive/codex-daemon-review.md)。已确认重启可在 Gateway 重连前自动发起
 续做模型请求，启动命令的普通 `-c` 覆盖不能直接代替当前 Provider 参数注入；本次不切换服务。`codexc update` 统一将用户层 `features.daemon_auto_start` 设为 `false`，
 包括版本无需更新的路径；已有官方后台不停止，其他偏好保留，避免原生终端自动另起后台。
 
@@ -253,7 +253,7 @@ Base64；不要求文件管理、下载入口或单独命令。此前上传与�
 后续获授权使用 512×256 图时，两种方式均正确识别左红右蓝，证实当前账户的上传编号可用于
 该模型的图片输入。小图误识别的根因仍未确定，不据此推导尺寸阈值或全部图片支持保证。
 这些请求未经过 Gateway 或 `0.156.1` App Server；未验证独立按编号取回、地址刷新和跨账户拒绝。
-脱敏响应、夹具、复现步骤与未执行项见[图片文件引用探测记录](codex-image-fileid-probe.md)。
+脱敏响应、夹具、复现步骤与未执行项见[图片文件引用探测记录](archive/codex-image-fileid-probe.md)。
 
 本需求的验收以模型出站请求为准：首次取得图片引用后，请求应携带 `input_image.file_id` 而不是
 `image_url` Base64。后续工具循环和普通文本 Turn 可以在完整历史中继续携带同一 `file_id`，也可以
@@ -292,7 +292,7 @@ Base64；不要求文件管理、下载入口或单独命令。此前上传与�
 
 按编号下载、签名地址刷新和文件管理不再作为本需求的交付条件。内部上传仍须说明远端保留风险，
 引用过期或失效须明确失败，不能盲目重传产生新文件。Platform 文件 API 不作为 ChatGPT 文件
-引用的隐式替代；此前认证与取回研究保留在[探测记录](codex-image-fileid-probe.md)。
+引用的隐式替代；此前认证与取回研究保留在[探测记录](archive/codex-image-fileid-probe.md)。
 
 ### 验收边界
 
@@ -350,7 +350,7 @@ Base64；不要求文件管理、下载入口或单独命令。此前上传与�
 | Plugin 市场搜索、安装、卸载、发布与分享 | 不调用官方 `plugin/search` 等市场管理接口；现有 `/plugin list … search …` 只过滤已安装目录。CLI／WebUI 已有 Plugin 所属 MCP 的工具审批、允许／禁用工具及输出预算设置，不等于市场管理或 Plugin 执行总开关 |
 | 直接注入工具输出与原生 TUI 专用动态任务工具 | 不调用 `thread/inject_items`，不新增无归属执行入口。已有 Hook 列表及受控启停、Gateway `schedule_task` 动态工具属于上节列明的范围，不能笼统声称 Hook 管理或所有动态工具均未接入；MCP 输出预算配置继续支持 |
 | Bedrock、远程执行 Host 与独立第三方搜索 | 上游有 Bedrock 设置和 Environment 接口，本项目未接入这些专用认证与执行管理入口；已有 Bedrock 账户类型与认证通知识别仅用于状态解析，不构成专用接入支持。现有通用 Provider 配置不等于已验证这些专用能力，也不新增独立搜索 API |
-| 官方 daemon 生命周期 | 当前暂缓接入，保留研究结论；须满足[专项审查](codex-daemon-review.md)的配置、代理、恢复与版本验收条件，不同时维护两个进程所有者 |
+| 官方 daemon 生命周期 | 当前暂缓接入，保留研究结论；须满足[专项审查](archive/codex-daemon-review.md)的配置、代理、恢复与版本验收条件，不同时维护两个进程所有者 |
 | 任意目录／配置覆盖 | 渠道只选择授权 Workspace 和受控设置，不因后台原生化开放任意主机操作 |
 | Gateway 自动代批、企业管控写入与应用网络要求管理 | 不自动替用户批准高权限请求，不提供组织策略写入；已有 Config 的显式审批策略选择、单次/会话/协议支持的持久授权继续保留。`never` 表示不请求审批，不代表 Gateway 自动批准 |
 | Memory 管理、Thread 附件记录、反馈上传与尚未采用的模型／用量元数据 | 上游有 `memory/status|reset`、`thread/attachment/*`、`feedback/upload`，本项目无对应调用；附件记录不是文件上传。已有模型能力、生命周期、服务层级和账户／Thread 用量继续支持，不能把所有元数据一并列为未采用 |

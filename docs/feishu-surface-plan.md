@@ -99,8 +99,10 @@ Feishu 有界输出队列
 
 新增飞书能力时：
 
-1. 先查阅 [`feishu-reference-index.md`](feishu-reference-index.md) 和锁定 SDK 源码。
-2. 更新模块 README 与实现。
-3. 真实平台结论只更新 [`channel-acceptance-matrix.md`](channel-acceptance-matrix.md)。
-4. 运行相关静态检查、`npm run docs:check` 和受影响的提交门禁。
-5. 未经用户明确要求，不发送真实平台消息、提交、推送、发布或部署。
+先按[开发流程](development-rules.md#development-workflow)确认受影响链路，查阅
+[`feishu-reference-index.md`](feishu-reference-index.md) 和锁定 SDK 源码；专题合同变化同步本页，
+文件职责变化同步模块 README。真实平台结论只更新
+[`channel-acceptance-matrix.md`](channel-acceptance-matrix.md)，不在本页另建逐项验收记录。
+
+静态检查与提交门禁遵循[验证规则](development-rules.md#verification)。未经用户明确要求，不发送
+真实平台消息、提交、推送、发布或部署。

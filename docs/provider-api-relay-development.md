@@ -212,7 +212,9 @@ Relay 与 Codex 共用全局 debug 转储开关与 production/debug 模式。V2 
 
 ## 验证范围与剩余限制
 
-本地提交走按范围选择的 `verify:commit`，PR CI 通过 `verify:ci` 执行完整静态检查与构建。
+后续修改按[开发流程](development-rules.md#development-workflow)核对受影响的请求、交付和指标链路；
+静态门禁及证据复用遵循[验证规则](development-rules.md#verification)。以下为限于明确基线的历史
+观察，不构成当前全部合同的验收声明。
 
 2026-09-29 部署后只读核查已确认 DS Responses SSE/JSON、CLP Chat SSE/JSON 的既有成功调用，
 实际指标库为 v23，提供商、状态、用量与转储可关联，Thread/Turn 为空。此证据限于当时部署与样本，

@@ -27,7 +27,7 @@ V03/V04 的真实环境缺口仍由下方清单维护，不因修复交付而关
 
 真实断电的存储持久性不由进程终止代替证明；远程模型调用不属于本轮配置事务验证。
 
-V04 的新增隔离证据见[全项目链路记录 L02](chain-verification-review.md#l02-provider-setup预览与启动材料)：
+V04 的新增隔离证据见[全项目链路记录 L02](archive/chain-verification-review.md#l02-provider-setup预览与启动材料)：
 Codex 兼容类型与自定义模型类型均从提示输入走到切换 Profile/目录保存和生产运行时读取，
 并观察取消、修订变化、Origin 与 Key 约束。提示输入及配置 Client 为注入端口，不能据此关闭真实环境缺口。
 

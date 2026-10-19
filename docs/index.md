@@ -131,7 +131,7 @@ OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请�
 | 查询目标 | 官方源码 | 主要内容 |
 | --- | --- | --- |
 | App Server 程序入口 | [`app-server/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/src/lib.rs) | App Server 模块、启动参数与 Transport 装配入口 |
-| 原生 daemon 生命周期与包管理 | [`app-server-daemon/README.md`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-daemon/README.md)、[`src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-daemon/src/lib.rs) | 生命周期替代研究，当前暂缓接入；配置、代理、固定版本与隔离实测见[专项审查](codex-daemon-review.md)，不增加 RPC 支持范围 |
+| 原生 daemon 生命周期与包管理 | [`app-server-daemon/README.md`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-daemon/README.md)、[`src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-daemon/src/lib.rs) | 生命周期替代研究，当前暂缓接入；配置、代理、固定版本与隔离实测见[专项审查](archive/codex-daemon-review.md)，不增加 RPC 支持范围 |
 | 原生 daemon 恢复合同 | [`daemon_update_recovery.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/tests/suite/v2/daemon_update_recovery.rs) | 官方后台加载与中断续做合同；不能将恢复等同于历史读取，也不能代替 Gateway 归属和审批验收 |
 | JSON-RPC 消息总表 | [`rpc.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/rpc.rs) | Client Request、Server Notification、Server Request |
 | 协议公共类型 | [`common.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/common.rs) | 初始化、ID、通用协议结构 |
