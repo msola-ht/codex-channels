@@ -33,6 +33,7 @@ import {
   parseScheduledTaskOperation,
 } from "./scheduled-task-command.js";
 import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
+import type { ScheduledTaskOperationContext } from "../scheduled-tasks/index.js";
 import { resolveProvider, type ModelSelectionIdentity, type ModelSelectionState } from "./model-selection-service.js";
 import { pageCountFor, pageSlice } from "./pagination.js";
 
@@ -368,8 +369,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   ): Promise<ConversationCommandResult> {
     const assertAuthorized = this.commandGuard(target, actorId, command === "workspace");
     const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
-    if (command === "workspace" && input.trim()) this.authorize(target, actorId);
-    else assertAuthorized();
+    try {
+      if (command === "workspace" && input.trim()) this.authorize(target, actorId);
+      else assertAuthorized();
+    } catch (error) {
+      if (result.kind === "scheduled-confirmation") this.scheduledTasks?.cancelConfirmation(result.preview.token);
+      throw error;
+    }
     return result;
   }
 
@@ -756,7 +762,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "schedule":
-        return this.executeScheduledTaskCommand(target, argumentsText, actorId);
+        return this.executeScheduledTaskCommand(target, argumentsText, actorId, assertAuthorized);
     }
     throw new UserFacingError(
       "command.unsupported",
@@ -960,7 +966,8 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async executeScheduledTaskCommand(
     target: ConversationTarget,
     input: string,
-    actorId?: string,
+    actorId: string,
+    assertAuthorized: () => void,
   ): Promise<ConversationCommandResult> {
     const scheduled = this.scheduledTasks;
     if (!scheduled) {
@@ -975,39 +982,53 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         "无法确认当前渠道用户身份",
       );
     }
+    const controller = new AbortController();
+    const context: ScheduledTaskOperationContext = {
+      signal: controller.signal,
+      assertCurrent() {
+        controller.signal.throwIfAborted();
+        try {
+          assertAuthorized();
+        } catch (error) {
+          controller.abort(error);
+          throw error;
+        }
+      },
+    };
+    context.assertCurrent();
     const operation = parseScheduledTaskOperation(input);
     switch (operation.type) {
       case "natural":
         return {
           kind: "scheduled-confirmation",
-          preview: await scheduled.previewNaturalLanguage(target, actorId, operation.description),
+          preview: await scheduled.previewNaturalLanguage(target, actorId, operation.description, context),
         };
       case "create":
         return {
           kind: "scheduled-confirmation",
-          preview: await scheduled.previewCreate(target, actorId, operation.request),
+          preview: await scheduled.previewCreate(target, actorId, operation.request, context),
         };
       case "list":
         return {
           kind: "scheduled-tasks",
-          result: await scheduled.list(target, actorId, operation.page),
+          result: await scheduled.list(target, actorId, operation.page, context),
         };
       case "runs":
         return {
           kind: "scheduled-runs",
-          result: await scheduled.runs(target, actorId, operation.selector, operation.page),
+          result: await scheduled.runs(target, actorId, operation.selector, operation.page, context),
         };
       case "rename":
         return {
           kind: "outcome",
           outcome: {
             type: "scheduled-task.renamed",
-            task: await scheduled.rename(target, actorId, operation.selector, operation.name),
+            task: await scheduled.rename(target, actorId, operation.selector, operation.name, context),
           },
         };
       case "pause":
       case "resume": {
-        const task = await scheduled[operation.type](target, actorId, operation.selector);
+        const task = await scheduled[operation.type](target, actorId, operation.selector, context);
         return {
           kind: "outcome",
           outcome: {
@@ -1020,7 +1041,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       }
       case "run":
       case "retry": {
-        const run = await scheduled[operation.type](target, actorId, operation.selector);
+        const run = await scheduled[operation.type](target, actorId, operation.selector, context);
         return {
           kind: "outcome",
           outcome: {
@@ -1034,10 +1055,10 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "delete":
         return {
           kind: "scheduled-confirmation",
-          preview: await scheduled.previewDelete(target, actorId, operation.selector),
+          preview: await scheduled.previewDelete(target, actorId, operation.selector, context),
         };
       case "confirm": {
-        const confirmed = await scheduled.confirm(target, actorId, operation.token);
+        const confirmed = await scheduled.confirm(target, actorId, operation.token, context);
         return {
           kind: "outcome",
           outcome: {

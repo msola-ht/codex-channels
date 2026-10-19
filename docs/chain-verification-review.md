@@ -290,6 +290,20 @@ Sol 运行生产 Extension→Provider→Client→JSON-RPC、内存 Transport：�
 这些观察未连接真实 App Server 或消费真实资产，RPC 发送等待由隔离端口模拟；CLI/WebUI 的账户 IPC
 继续省略渠道守卫，取消信号和已有管理授权合同保持不变，其完整业务验收留给 L17。
 
+**计划任务授权子链（基线 `8f3070dc`）。** Sol 将渠道命令的 Actor/Workspace 守卫接入既有 operation，
+贯穿任务/Run 读取、创建和删除确认、Scheduler 领取与派发；创建上下文提前到容量等待前捕获，删除确认在
+异步读取后再次核对有效期。主代理核对命令、Service 与 Scheduler 的现有领取/收敛合同；未把任务管理
+错误限制到当前前台 Thread，也未修改已经提交的写入结算。
+Sol 使用生产 Command→Service→Scheduler 和内存 SQLite，隔离权限/执行端口：创建确认、list、rename、
+pause/resume、run/runs、删除确认均返回对应结果，名称回读 `usable-name`，Run 回读 `completed`，删除后可见任务为零。
+容量等待改变模型，返回 `scheduled-task.state.invalid`、新增权限读取为零；Task 读取撤权后 rename 写入及
+runs 查询均为零。创建确认权限读取撤权未创建任务；运行容量等待撤权未创建 Run；重试期间改变 cwd 未创建 Run、
+原 `uncertain` 保留。已领取后撤权回读 `interrupted`、执行端口调用为零；执行端口返回完成后撤权虽不展示命令
+结果，数据库仍结算 `completed`。删除确认等待期间改变 cwd 或超时 300001ms 均不删除；末端失权未展示的预览
+已取消，重复确认返回 `scheduled-task.confirmation.invalid`。自然语言创建返回预览后已取消隔离令牌。
+没有实际 App Server Thread/Turn 或平台消息观察，执行完成来自隔离端口；真实 Executor 后续提交仅作源码
+关联检查。权限读取内部的 Provider/RPC 等待继续随共用只读查询边界审查，完整调度业务仍归 L08。
+
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。
 当前记录没有真实平台撤权或 Windows/macOS 观察。L03-F3、输入关联异步交互及最终整项验收未完成，
