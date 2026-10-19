@@ -10,7 +10,15 @@ Flash 的上下文、图片、思考等级与提示词复用仓库 `runtime/mode
 
 已有账户通过 `codexc setup → 模型与提供商 → 第三方 Provider → Cline Pass 官方` 的发现／添加模型入口扩展共用模型名单，无需删除账户、重新输入 Key。只列出尚未加入本地目录的候选，默认不勾选；空格勾选、回车确认，再预览所选新增模型的完整内容及影响账户并保存。发现只添加新模型，已有条目完整保留；下载目录缺失的旧模型也不会自动移除，没有新增时不写文件和备份。更新已有模型请在 CLI 模型管理或 WebUI 选择“更新模板”，明确提示词／能力范围后对比保存，见[账户模板更新](provider-integration-guide.md#对比并更新账户模型模板)。首次在 CLI 配置时也提供多选，Flash 可用时默认勾选它，但允许只选择其他模型；更换 Key 沿用共用名单。聚合入口当前关闭。移除使用独立的本地移除入口；任何 CLP 账户的当前默认模型均须先切换再移除。取消操作不写入配置。WebUI 首次配置仍生成完整的受支持目录。
 
-未启用 Flash 时，新增账户和刷新目录不要求 DS 模板，也不要求 Cline 目录包含 Flash。重新启用 Flash 时校验仓库 DS 模板；失败保留原目录。
+CLI 的“发现／添加新模型”也提供“手动添加 Cline 模型 ID”；WebUI 模型管理的“添加／发现模型”中选择“按平台说明手动填写”。可填写官方目录尚未收录的完整 ID，例如 `cline-pass/deepseek-v4.1-flash-1017`，并明确填写显示名称、上下文、思考等级及默认值、图片、`apply_patch` 和 `tool_search` 能力。仅支持思考开关时选择 `none` 和 `enabled`。须确认该 ID 通过 Cline Chat Completions 支持文本及工具调用；保存不发推理请求，不证明上游可用。
+
+手填默认“独立填写”，使用通用编程提示词和本地工具声明；也可选择“继承已有模型”，从当前 CLP 共用目录选择来源。继承一次性复制来源当前保存的提示词、上下文、压缩／截断、思考等级和工具等模型能力，同时固化来源的请求参数格式和路由：Flash 模式保留 `reasoning.effort` 并固定 DeepSeek，标准模式使用通用 Cline 映射并由 Cline 选择上游。发送的模型 ID 始终是新填写的 ID，不改成来源 ID；来源后续修改或删除不影响副本，也不复制账户凭据或模板更新关联。继承前须确认新模型支持这些能力，预览会显示来源、完整字段及请求处理方式。
+
+不选择继承时不会按名称相似程度推断 Flash 行为；未显式保存请求处理方式的条目（包括独立手填）仍仅对精确 ID `cline-pass/deepseek-v4.1-flash` 应用特殊映射。独立填写拒绝 Chat 桥不支持的原图细节和思考摘要控制。手填和继承均不下载官方目录、不自动关联模板，远端未收录的 ID 没有可用的官方模板更新；后续发现保留其已保存内容。新增前预览完整字段及影响账户，确认后沿用共享目录的备份、事务保存及回读；重复 ID 明确拒绝，取消不写入。Relay 独立目录不受影响。
+
+继承的请求行为保存在模型条目的可选 `cline_request_profile` 字段，仅支持 `standard` 和 `deepseek-flash`，未知值拒绝读取和转发。已有目录无需迁移；本地设置和模板更新保留该字段。保存失败沿用目录事务恢复；回退到不识别此字段的旧代码前，须成对恢复新增前的 `models.json.backup` 和 `models.manifest.json.backup`，避免旧代码忽略请求行为。备份只保留最近一次目录修改。
+
+未启用 Flash 时，新增账户和发现目录不要求 DS 模板，也不要求 Cline 目录包含 Flash。通过官方发现重新启用 Flash 时校验仓库 DS 模板；失败保留原目录。手填始终使用显式声明的能力。
 
 CLI／WebUI 的“更新模板”在读取候选时下载一次 Cline 官方目录，下载整体限时 25 秒并支持取消；下载或校验失败时明确报错，重新读取候选后再操作，无需先运行独立 CLI 命令。只为当前已配置且远端仍受支持的模型生成候选，其中包含 Flash 时才读取仓库 DS 模板。候选快照仅保存在当前进程内，有效期 10 分钟；预览和确认复用同一快照，不重新联网，也不调用模型。候选过期、被淘汰、进程退出或目标目录修订变化后须重新读取。读取候选不修改已配置模型、不重启服务；首次接入、“发现／添加新模型”和独立 Relay 仍使用各自的目录流程。旧版本遗留的 `template-source.json` 及其备份不再读取，也不自动删除。
 
@@ -75,7 +83,7 @@ Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘�
 工具结果中的内联图片不能放进 Chat 的 `tool` 消息，转换时按原顺序收集，在该组工具结果之后作为紧随的一条 `user` 消息图片段写出，并用相同的调用 ID 与图片序号标记关联原 `tool` 文本位置和图片；并行结果只写出一条，结果文本仍留在对应 `tool` 消息里，因此上下文中的截图不会再让整次请求失败。
 不支持图片文件引用、远程图片 URL 或 `detail: original`；`auto`、`low`、`high` 原样传递。
 新账户从模板生成自己的图片能力和思考等级。
-Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；等级通过 Chat `reasoning.effort` 原样传递，包括 `none`；不因一次观察自动改成其他关闭格式。其他模型按官方目录声明生成选项：普通等级使用 `reasoning_effort`，`none` 使用 `reasoning.enabled=false`，开关选项 `enabled` 使用 `reasoning.enabled=true`，不发送 `reasoning_effort=enabled`。桥在出站前按当前启用目录复核选项，未声明的选项明确拒绝。优先默认 `high`，没有时使用目录投影的第一个合法等级；仅有开关时默认 `none`。只有精确 Flash 模型请求限定 DeepSeek 上游路由，其他模型由 Cline 按模型 ID 路由。
+Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；Flash 请求配置将等级通过 Chat `reasoning.effort` 原样传递，包括 `none`，并限定 DeepSeek 上游路由；不因一次观察自动改成其他关闭格式。标准请求配置普通等级使用 `reasoning_effort`，`none` 使用 `reasoning.enabled=false`，由 Cline 按模型 ID 路由。两种配置的开关选项 `enabled` 均使用 `reasoning.enabled=true`，不发送 `reasoning_effort=enabled`。没有显式请求配置时，仅精确 Flash ID 使用 Flash 分支；继承副本按其保存的 `cline_request_profile` 处理。桥在出站前按当前启用目录复核选项，未声明的选项明确拒绝。官方发现优先默认 `high`，没有时使用目录投影的第一个合法等级；仅有开关时默认 `none`，手填及继承使用其明确保存的等级。
 
 当前关闭限制：历史记录中，相同的 `reasoning.effort=none` 和 `gateway.only=["deepseek"]` 在 2026-10-14 04:56 UTC 返回 `deepseek` 路由、0 推理 Token；12:22 UTC 返回的路由已变为 `openai-compatible-private`、模型为 `private/deepseek-v4p1-flash-contributor`，报告 145 推理 Token。这是路由变化与失效同时出现的证据，不能据此确定服务端变更机制或某次本地提交为根因。2026-10-15 12:27 UTC 经授权直接请求同一 Cline 上游，固定文本、模型、路由限定及 `max_tokens=64`，各执行一次：旧 `none` 返回思考正文和 15 推理 Token；`enabled=false` 不返回思考正文但报告 27 推理 Token；不设控制返回思考正文和 16 推理 Token。三次均为上述私有路由、HTTP 200、`finish_reason=stop`，收到流终帧。该对比支持新参数影响正文返回，但不证明内部推理已关闭，也不替代部署后完整客户端链路验证。
 

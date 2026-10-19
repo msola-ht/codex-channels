@@ -5,6 +5,8 @@
 
 自定义模型添加时的能力探测通过公开入口复用 `responsesToChat`，确保短请求的工具与思考参数编码和运行时通用 Chat 桥一致；探测的网络、凭据及配置写入仍归 Scripts 管理入口负责。
 
+`clinePassChatReasoningControl` 的第三个可选参数接收受管 CLP 的独立请求快照 `standard`／`deepseek-flash`。省略时按精确 Flash ID 选择下述默认映射；显式 `deepseek-flash` 为新增 ID 复用 Flash 格式，显式 `standard` 可覆盖精确 Flash 默认，未知值拒绝。`enabled` 在两种快照下均映射为 `reasoning.enabled=true`。独立 Relay 不传入该参数，保持现有行为。
+
 - `index.ts`：公开 `responsesToChat`、`ChatToResponses`、`normalizeResponsesRequest` 与安全错误类型。
 - `responses-to-chat.ts`：Responses 文本、用户内联图片、函数与自由格式工具定义、调用、文本结果、Codex multi-agent v2 的 `agent_message` 输入项，以及工具结果内联图片到紧随 user 消息的映射。
 - `codex-private-items.ts`：Codex 私有输入项与参数标记的共享语义；`agentMessageText` 按可读正文拼接信封与载荷，`stripEncryptedMarker` 只删除 schema 节点的布尔 `encrypted` 标记并报告是否发生改写。

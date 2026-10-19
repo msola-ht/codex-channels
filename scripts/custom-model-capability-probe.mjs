@@ -102,7 +102,7 @@ async function probeModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, 
         payload = {...converted.request, stream};
         if (requestContext?.clinePass) {
           const {reasoning, ...parameters} = payload;
-          payload = pinClinePassRouting(reasoning ? {...parameters, ...clinePassChatReasoningControl(model, reasoning.effort)} : parameters);
+          payload = pinClinePassRouting(reasoning ? {...parameters, ...clinePassChatReasoningControl(model, reasoning.effort, requestContext.clineRequestProfile)} : parameters, requestContext.clineRequestProfile);
         }
         if (!stream) delete payload.stream_options;
         identities = converted.toolNames;

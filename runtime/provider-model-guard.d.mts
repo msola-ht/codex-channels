@@ -1,4 +1,5 @@
 import type { SamplingParameters } from "./model-catalog.mjs";
+import type { ClinePassRequestProfile } from "./chat-reasoning.mjs";
 
 export class ProviderModelGuard {
   constructor(path: string, isModelValid: (model: unknown) => boolean, options?: {
@@ -6,6 +7,6 @@ export class ProviderModelGuard {
     blockedPaths?: readonly string[];
   });
   isEnabled(model: string, signal?: AbortSignal): Promise<boolean>;
-  modelCapabilities(model: string, signal?: AbortSignal): Promise<{ reasoningEfforts: string[]; sampling?: SamplingParameters } | undefined>;
+  modelCapabilities(model: string, signal?: AbortSignal): Promise<{ reasoningEfforts: string[]; sampling?: SamplingParameters; clineRequestProfile?: ClinePassRequestProfile } | undefined>;
   close(): Promise<void>;
 }

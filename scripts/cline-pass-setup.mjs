@@ -1,7 +1,7 @@
 import * as clackPrompts from "@clack/prompts";
 import { runProviderModelSetup } from "./provider-model-setup.mjs";
 import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
-import { runProviderModelAdditionSetup } from "./managed-provider-model-management.mjs";
+import { runManagedProviderModelSetup } from "./managed-provider-model-management.mjs";
 import { clinePassProviderDefinition as definition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
 import { promptEnabledProviderModels } from "./provider-model-selection.mjs";
@@ -26,7 +26,7 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
   if (action === "models") return runProviderModelSetup({ environment, prompts, output, provider: "clp" });
   if (action === "catalog") {
     const accountId = accounts[0].id;
-    return runProviderModelAdditionSetup(clinePassProviderId(accountId), { environment, prompts, output });
+    return runManagedProviderModelSetup(clinePassProviderId(accountId), { environment, prompts, output });
   }
   const accountId = action === "configure"
     ? await promptManagedAccountId(prompts, accounts)

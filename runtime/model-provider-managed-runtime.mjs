@@ -1,5 +1,6 @@
 import { isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
 import { clineRelayCatalogSchema } from "./cline-relay-catalog.mjs";
+import { resolveClinePassRequestProfile } from "./chat-reasoning.mjs";
 import { readModelTemplateBindings } from "./model-template-bindings.mjs";
 import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 import { createHash } from "node:crypto";
@@ -893,7 +894,15 @@ function readCatalogSlugSet(content, definition) {
   } catch {
     throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
   }
+  validateClinePassRequestProfiles(catalog, definition);
   return catalogSlugSet(catalog, definition);
+}
+
+function validateClinePassRequestProfiles(catalog, definition) {
+  if ((definition.storageId ?? definition.id) !== "clp" || !Array.isArray(catalog?.models)) return;
+  for (const entry of catalog.models) {
+    resolveClinePassRequestProfile(entry?.slug, entry?.cline_request_profile);
+  }
 }
 
 export function catalogHasModel(path, definition, model) {
@@ -905,8 +914,10 @@ export function catalogHasModel(path, definition, model) {
 
 export function readModelCatalogSetting(path, definition, model) {
   try {
+    const content = readPrivateFile(path, maximumCatalogBytes);
+    validateClinePassRequestProfiles(JSON.parse(content), definition);
     return modelCatalogSetting(
-      readPrivateFile(path, maximumCatalogBytes),
+      content,
       definition,
       model,
     );
@@ -924,6 +935,7 @@ function readOptionalModelCatalogSetting(path, definition, model) {
   } catch {
     throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
   }
+  validateClinePassRequestProfiles(catalog, definition);
   if (!catalogSlugSet(catalog, definition).has(model)) return undefined;
   return modelCatalogSetting(content, definition, model);
 }

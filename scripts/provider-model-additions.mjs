@@ -7,6 +7,8 @@ import { loadManagedModelProviderDefinitions, managedProviderAccountFamilies, is
 import { managedProviderDirectory, managedProviderMarkerPath, withManagedModelCatalogSettings, writeManagedModelProviderCatalogUpdates } from "../runtime/model-provider-runtime.mjs";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
+import { withThirdPartyLocalTools } from "../runtime/third-party-model-catalog.mjs";
+import { resolveClinePassRequestProfile } from "../runtime/chat-reasoning.mjs";
 import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
@@ -41,19 +43,44 @@ export async function loadProviderModelAdditionOptions(provider, {
     operationSignal.throwIfAborted();
     const state = await readState(provider, environment);
     let models, bindings = {}, source;
-    if (manualModel !== undefined) {
+    if (manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "inheritFrom")) {
+      if (state.family.storageId !== "clp" || Array.isArray(manualModel)
+        || Object.keys(manualModel).some(key => !["id", "name", "inheritFrom"].includes(key))
+        || !isManagedProviderModelValid(state.definition, manualModel.id)
+        || !isManagedProviderModelValid(state.definition, manualModel.inheritFrom)
+        || typeof manualModel.name !== "string" || !manualModel.name.trim() || manualModel.name.length > 120 || /\p{Cc}/u.test(manualModel.name)) {
+        throw invalid("invalid-input", "manualModel", "继承仅支持同一 CLP 目录的已有模型；请提供有效的新 ID、名称及来源，不混入独立能力字段");
+      }
+      if (state.catalog.models.some(model => model.slug === manualModel.id)) throw invalid("model-exists", "manualModel", "模型 ID 已存在，新增不能覆盖已有模型");
+      const original = state.catalog.models.find(model => model.slug === manualModel.inheritFrom);
+      if (!original) throw invalid("invalid-input", "manualModel", "继承来源不在当前 CLP 目录中，请重新选择");
+      const profile = resolveClinePassRequestProfile(original.slug, original.cline_request_profile);
+      models = [{ ...structuredClone(original), slug: manualModel.id, display_name: manualModel.name.trim(), cline_request_profile: profile }];
+      source = { kind: "inherited", model: original.slug, clineRequestProfile: profile };
+    } else if (manualModel !== undefined) {
       if (manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "sampling")) {
         throw invalid("invalid-input", "manualModel", "受管模型手动新增不支持默认采样参数；sampling 不会保存，请移除此字段");
       }
-      if (!["ccg", "opencode-go"].includes(state.family.storageId)
+      if (!["ccg", "opencode-go", "clp"].includes(state.family.storageId)
         || !manualModel || typeof manualModel !== "object" || Array.isArray(manualModel)
         || !Array.isArray(manualModel.reasoningEfforts) || manualModel.reasoningEfforts.length === 0
         || typeof manualModel.supportsImages !== "boolean" || typeof manualModel.supportsSearchTool !== "boolean"
         || ![null, "freeform"].includes(manualModel.applyPatchToolType) || manualModel.template !== undefined) {
-        throw invalid("invalid-input", "manualModel", "手动新增仅支持 CCG／OCG；须明确声明思考等级、图片、apply_patch 和 tool_search 能力，不自动关联模板");
+        throw invalid("invalid-input", "manualModel", "手动新增仅支持 CCG／OCG／CLP；须明确声明思考等级、图片、apply_patch 和 tool_search 能力，不自动关联模板");
+      }
+      const clinePass = state.family.storageId === "clp";
+      if (clinePass && manualModel.supportsImageDetailOriginal !== undefined && manualModel.supportsImageDetailOriginal !== false) {
+        throw invalid("invalid-input", "manualModel", "CLP Chat 桥不支持 original 图片细节");
+      }
+      if (clinePass && (manualModel.supportsReasoningSummary === true
+        || manualModel.defaultReasoningSummary !== undefined && manualModel.defaultReasoningSummary !== "none")) {
+        throw invalid("invalid-input", "manualModel", "CLP Chat 桥不支持思考摘要控制");
       }
       try {
-        models = createResponsesModelCatalog([{ ...manualModel, instructions: manualModel.instructions ?? thirdPartyCodingInstructions }], manualModel.id).models;
+        const catalog = createResponsesModelCatalog([{ ...manualModel, instructions: manualModel.instructions ?? thirdPartyCodingInstructions,
+          ...(clinePass ? { supportsImageDetailOriginal: false } : {}),
+        }], manualModel.id, { allowReasoningToggle: clinePass });
+        models = (clinePass ? withThirdPartyLocalTools(catalog) : catalog).models;
         validateModel(models[0], state.definition);
       } catch (error) {
         throw invalid("invalid-input", "manualModel", "手动模型 ID、上下文、默认思考等级或能力定义无效", error);
@@ -84,6 +111,7 @@ export async function loadProviderModelAdditionOptions(provider, {
     const candidates = models.filter(model => !state.catalog.models.some(saved => saved.slug === model.slug)).map(model => {
       validateModel(model, state.definition);
       return { model: model.slug, displayName: model.display_name ?? model.slug, fields: model,
+        ...(source.kind === "inherited" ? { inheritedFrom: source.model, clineRequestProfile: source.clineRequestProfile } : {}),
         ...(Object.hasOwn(bindings, model.slug) ? { template: bindings[model.slug] } : {}) };
     });
     if (candidates.length > maximumCandidates) throw invalid("addition-source-too-large", "models", "新增候选超过 128 个，请缩小源目录后重试");

@@ -14,22 +14,23 @@ function definitionFor(provider, environment) {
 }
 
 /** All interaction and source acquisition precede the short write transaction. */
-export async function runManagedProviderModelSetup(provider, { environment = process.env, prompts = clackPrompts, output = process.stdout, downloadCatalog = downloadDeepseekCatalog, signal } = {}) {
-  if (provider === "ccg" || provider === "ocg") {
-    const storageId = provider === "ccg" ? "ccg" : "opencode-go";
+export async function runManagedProviderModelSetup(provider, { environment = process.env, prompts = clackPrompts, output = process.stdout, downloadCatalog = downloadDeepseekCatalog, downloadClineCatalog, loadTemplates, signal } = {}) {
+  if (["ccg", "ocg", "clp"].includes(provider)) {
+    const storageId = provider === "ocg" ? "opencode-go" : provider;
     const accounts = loadManagedModelProviderDefinitions(environment).filter(entry => entry.storageId === storageId);
     if (!accounts.length) throw new Error("请先配置账户");
     provider = accounts[0].id;
   }
   const definition = definitionFor(provider, environment);
+  const clinePass = definition.storageId === "clp";
   const displayName = managedProviderAccountFamilyForDefinition(definition).definition.displayName;
   const { catalogs } = await loadProviderModelCatalogs({ environment });
   const current = catalogs.find(catalog => catalog.providers.includes(provider));
   if (!current) throw new Error("请先完成账户配置");
   const action = await prompts.select({ message: `${displayName} 模型目录`, options: [
     { value: "select", label: "查看启用模型", hint: "移除请使用统一模型管理入口" },
-    { value: "add", label: "添加第三方 Responses 模型", hint: "按上游说明填写准确 ID 和能力" },
-    { value: "templates", label: "发现／导入 DS 新模型", hint: "只添加选中的新模型，已有模型使用统一模板更新" },
+    { value: "add", label: clinePass ? "手动添加 Cline 模型 ID" : "添加第三方 Responses 模型", hint: "按上游说明填写准确 ID 和能力" },
+    { value: "templates", label: clinePass ? "发现 Cline 新模型" : "发现／导入 DS 新模型", hint: "只添加选中的新模型，已有模型使用统一模板更新" },
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back", activation: "none" };
@@ -39,10 +40,10 @@ export async function runManagedProviderModelSetup(provider, { environment = pro
   }
   let manualModel;
   if (action === "add") {
-    manualModel = await promptAdditionalModel(prompts, definition, current.models.map(model => model.id));
+    manualModel = await promptAdditionalModel(prompts, definition, current.models);
     if (!manualModel) return { action: "back", activation: "none" };
   } else if (action !== "templates") throw new Error("未知模型目录操作");
-  return runProviderModelAdditionSetup(provider, { environment, prompts, output, downloadCatalog, signal, ...(manualModel ? { manualModel } : {}) });
+  return runProviderModelAdditionSetup(provider, { environment, prompts, output, downloadCatalog, downloadClineCatalog, loadTemplates, signal, ...(manualModel ? { manualModel } : {}) });
 }
 
 /** Shared CLI discovery, full-field preview and explicit confirmation for CLP/CCG/OCG. */
@@ -66,7 +67,10 @@ export async function runProviderModelAdditionSetup(provider, {
   signal?.throwIfAborted();
   if (preview.willChange) {
     output.write(`影响账户：${preview.providers.join("、")}。\n`);
-    for (const candidate of preview.additions) output.write(`新增模型 ${candidate.model}：\n${JSON.stringify({ fields: candidate.fields, ...(candidate.template ? { template: candidate.template } : {}) }, null, 2)}\n`);
+    for (const candidate of preview.additions) {
+      if (candidate.inheritedFrom) output.write(`继承来源：${candidate.inheritedFrom}（一次性复制，后续独立修改）。请求处理：${candidate.clineRequestProfile === "deepseek-flash" ? "Flash 思考参数格式；固定 DeepSeek 路由" : "通用 Cline 思考参数格式；由 Cline 选择上游"}。发送模型 ID 仍为 ${candidate.model}。\n`);
+      output.write(`新增模型 ${candidate.model}：\n${JSON.stringify({ fields: candidate.fields, ...(candidate.template ? { template: candidate.template } : {}) }, null, 2)}\n`);
+    }
     output.write("保存前备份原目录及来源；保存不会自动重启服务。\n");
     if (await prompts.confirm({ message: "确认按上述完整内容新增模型？", initialValue: false }) !== true) return { action: "back", activation: "none" };
   }
@@ -80,16 +84,30 @@ export async function runProviderModelAdditionSetup(provider, {
 }
 
 async function promptAdditionalModel(prompts, definition, existing) {
-  if (!["ccg", "opencode-go"].includes(definition.storageId)) throw new Error("此提供商不支持手动新增模型");
-  const confirmed = await prompts.confirm({ message: "已确认此提供商以 Responses 接口支持该模型及工具调用？", initialValue: false });
+  if (!["ccg", "opencode-go", "clp"].includes(definition.storageId)) throw new Error("此提供商不支持手动新增模型");
+  const clinePass = definition.storageId === "clp";
+  const confirmed = await prompts.confirm({ message: clinePass ? "已确认 Cline Pass 以 Chat Completions 接口支持该模型的文本及工具调用？" : "已确认此提供商以 Responses 接口支持该模型及工具调用？", initialValue: false });
   if (confirmed !== true) return undefined;
-  const id = await prompts.text({ message: "上游模型 ID（准确名称）", validate: value => isManagedProviderModelValid(definition, value) && !existing.includes(value) ? undefined : "请输入有效且未加入目录的模型 ID" });
+  const id = await prompts.text({ message: "上游模型 ID（准确名称）", validate: value => isManagedProviderModelValid(definition, value) && !existing.some(model => model.id === value) ? undefined : "请输入有效且未加入目录的模型 ID" });
   if (prompts.isCancel(id)) return undefined;
   const name = await prompts.text({ message: "显示名称", initialValue: id });
   if (prompts.isCancel(name)) return undefined;
+  if (clinePass) {
+    const mode = await prompts.select({ message: "模型配置方式", options: [
+      { value: "manual", label: "独立填写能力" },
+      { value: "inherit", label: "继承已有模型", hint: "复制提示词、上下文、能力、思考参数格式与固定路由；后续独立修改" },
+    ] });
+    if (prompts.isCancel(mode)) return undefined;
+    if (mode === "inherit") {
+      const inheritFrom = await prompts.select({ message: "选择当前 Cline 目录中的继承来源", options: existing.map(model => ({ value: model.id, label: `${model.displayName}（${model.id}）` })) });
+      if (prompts.isCancel(inheritFrom)) return undefined;
+      return { id, name, inheritFrom };
+    }
+    if (mode !== "manual") throw new Error("未知模型配置方式");
+  }
   const window = await promptContextWindow(prompts, id, undefined, 100_000_000);
   if (window === undefined) return undefined;
-  const efforts = await prompts.multiselect({ message: "支持的思考等级（不支持思考时仅选 none）", options: ["none", "minimal", "low", "medium", "high", "xhigh", "max"].map(value => ({ value, label: value })), required: true });
+  const efforts = await prompts.multiselect({ message: "支持的思考等级（不支持思考时仅选 none）", options: ["none", ...(clinePass ? ["enabled"] : []), "minimal", "low", "medium", "high", "xhigh", "max"].map(value => ({ value, label: value })), required: true });
   if (prompts.isCancel(efforts)) return undefined;
   if (!Array.isArray(efforts) || !efforts.length) throw new Error("至少选择一个思考等级");
   const effort = await prompts.select({ message: "默认思考等级", options: efforts.map(value => ({ value, label: value })) });

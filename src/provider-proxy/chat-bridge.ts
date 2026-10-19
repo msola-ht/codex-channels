@@ -14,6 +14,12 @@ import { ChatGenerationTimingObserver } from "./generation-timing.js";
 import { forwardedRequestHeaders } from "./request-routing.js";
 import type { UpstreamTiming } from "./response-metrics-observer.js";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
+import type { ClinePassRequestProfile } from "../../runtime/chat-reasoning.mjs";
+
+interface ClinePassModelCapabilities {
+  reasoningEfforts: readonly string[];
+  clineRequestProfile?: ClinePassRequestProfile;
+}
 
 /** HTTP lifecycle adapter. Pure model conversion lives in model-api. */
 export class ChatCompletionsBridge {
@@ -22,7 +28,7 @@ export class ChatCompletionsBridge {
   private readonly server = createServer((request, response) => { void this.handle(request, response); });
   constructor(private readonly options: ProviderProxyOptions & {
     clinePass?: boolean;
-    readClinePassModelCapabilities?: (model: string, signal: AbortSignal) => Promise<{ reasoningEfforts: readonly string[] } | undefined>;
+    readClinePassModelCapabilities?: (model: string, signal: AbortSignal) => Promise<ClinePassModelCapabilities | undefined>;
   }) {}
   async start(): Promise<void> {
     this.server.listen(0, "127.0.0.1");
@@ -105,7 +111,7 @@ export class ChatCompletionsBridge {
       phaseTimeout(modelRequestPolicy.preparationTimeoutMs, "prepare");
       const source: unknown = JSON.parse(payloadBody);
       const requestedModel = source && typeof source === "object" && "model" in source ? source.model : undefined;
-      let modelCapabilities: { reasoningEfforts: readonly string[] } | undefined;
+      let modelCapabilities: ClinePassModelCapabilities | undefined;
       status = 502;
       const upstream = this.options.resolveUpstream
         ? await waitForChatOperation(Promise.resolve(this.options.resolveUpstream(request.headers, controller.signal)), controller.signal)
@@ -136,9 +142,9 @@ export class ChatCompletionsBridge {
       if (structuredOutput !== undefined) diagnostics.conversion({ structuredOutput });
       const { reasoning, ...parameters } = body;
       const outbound = this.options.clinePass && reasoning
-        ? { ...parameters, ...clinePassChatReasoningControl(body.model, reasoning.effort) }
+        ? { ...parameters, ...clinePassChatReasoningControl(body.model, reasoning.effort, modelCapabilities?.clineRequestProfile) }
         : body;
-      const payload = JSON.stringify(this.options.clinePass ? pinClinePassRouting(outbound) : outbound);
+      const payload = JSON.stringify(this.options.clinePass ? pinClinePassRouting(outbound, modelCapabilities?.clineRequestProfile) : outbound);
       const headers = forwardedRequestHeaders(request.headers, upstream.host, upstream.port, this.options.upstreamUserAgent);
       delete headers[chatDiagnosticsHeader];
       delete headers["content-encoding"];

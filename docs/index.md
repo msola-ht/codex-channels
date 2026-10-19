@@ -670,7 +670,7 @@ Config 文案说明：协议索引中的“Codex 用户设置”“一键配置�
 ### CLP Chat 转换
 
 CLP 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由，不增加 RPC。
-CLP 共用 Codex 目录由 [`cline-pass-account-management.mjs`](../scripts/cline-pass-account-management.mjs) 从 Cline 官方元数据独立生成；仅 Flash 复制仓库 DS 模板，其余模型独立声明能力，模型窗口由所有 CLP 账户共用，不影响其他提供商。桥接受七种普通思考等级；目录声明开关时额外使用 `enabled`，基于锁定 Codex `protocol/src/openai_models.rs` 的 `ReasoningEffort::Custom` 和 `ReasoningEffortPreset`，沿用目录、模型选择及 Turn 既有字段，不新增 RPC。Flash 保留 `reasoning.effort`，其他 CLP 模型普通等级使用 `reasoning_effort`，关闭/开启使用 `reasoning.enabled=false/true`；出站选项必须属于当前启用目录。真实云端新增模型仍需分别验收。
+CLP 共用 Codex 目录由 [`cline-pass-account-management.mjs`](../scripts/cline-pass-account-management.mjs) 从 Cline 官方元数据独立生成；仅 Flash 复制仓库 DS 模板，其余模型独立声明能力，模型窗口由所有 CLP 账户共用，不影响其他提供商。[手填新增](cline-pass.md)可选择从当前目录一次性继承完整配置及请求行为，仍向上游发送新模型 ID；请求配置通过本地目录条目的 `cline_request_profile` 明确保存，不添加 RPC 字段。桥接受七种普通思考等级；目录声明开关时额外使用 `enabled`，基于锁定 Codex `protocol/src/openai_models.rs` 的 `ReasoningEffort::Custom` 和 `ReasoningEffortPreset`，沿用目录、模型选择及 Turn 既有字段。Flash 请求配置保留 `reasoning.effort` 和固定 DeepSeek 路由，标准配置普通等级使用 `reasoning_effort`，关闭/开启使用 `reasoning.enabled=false/true`；没有显式配置时保留精确 Flash ID 的默认分支，出站选项必须属于当前启用目录。真实云端新增模型仍需分别验收。
 未映射的顶层工具声明及其 `tool_choice` 原样交给 CLP，不注册本地执行身份；不宣称支持托管工具的执行或回程。声明形态依据锁定源码 `tools/src/tool_spec.rs`、`tool_spec_tests.rs` 和 `core/tests/suite/web_search.rs`。
 账户用量由 [`cline-pass-account-adapter.ts`](../src/bootstrap/cline-pass-account-adapter.ts) 查询 Cline 官方套餐额度接口，复用账户快照和窗口展示；
 [`cline-pass-setup.mjs`](../scripts/cline-pass-setup.mjs) 按账户创建受管 Profile，注册表和默认账户复用共享校验与路由，模型目录和 Chat 代理按 Provider ID 独立；

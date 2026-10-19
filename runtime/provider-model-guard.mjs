@@ -1,4 +1,5 @@
 import { readPrivateConfigFile } from "./private-file.mjs";
+import { resolveClinePassRequestProfile } from "./chat-reasoning.mjs";
 import { lstat } from "node:fs/promises";
 
 /** Re-read the provider's enabled Codex catalogue before each outbound request. */
@@ -68,6 +69,7 @@ export class ProviderModelGuard {
         || !this.isModelValid(entry.slug) || enabled.has(entry.slug)) {
         throw new Error("Provider 模型目录无效");
       }
+      resolveClinePassRequestProfile(entry.slug, entry.cline_request_profile);
       enabled.add(entry.slug);
     }
     const entry = catalog.models.find(entry => entry.slug === model);
@@ -92,6 +94,7 @@ export class ProviderModelGuard {
     // together. Read defaults from that same snapshot, never a second file read.
     const sampling = catalog.definitions?.find(definition => definition.id === model)?.sampling;
     return { reasoningEfforts: levels.map(level => level.effort),
+      ...(entry.cline_request_profile === undefined ? {} : { clineRequestProfile: entry.cline_request_profile }),
       ...(sampling === undefined ? {} : { sampling }) };
   }
 

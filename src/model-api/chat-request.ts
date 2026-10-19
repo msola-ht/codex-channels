@@ -1,6 +1,6 @@
-import type { RelayModelCapability, RelayReasoningEffort, RelayModelReasoning } from "../../runtime/chat-reasoning.mjs";
+import type { ClinePassRequestProfile, RelayModelCapability, RelayReasoningEffort, RelayModelReasoning } from "../../runtime/chat-reasoning.mjs";
 export type { RelayModelCapability, RelayReasoningEffort, RelayModelReasoning } from "../../runtime/chat-reasoning.mjs";
-import { supportsChatReasoningOff } from "../../runtime/chat-reasoning.mjs";
+import { resolveClinePassRequestProfile, supportsChatReasoningOff } from "../../runtime/chat-reasoning.mjs";
 import { ModelConversionError } from "./validation.js";
 import { applyExplicitReasoningPolicy, clearReasoningControls, isRequestObject, validateDirectModel, validateDirectStream } from "./direct-request.js";
 
@@ -56,10 +56,11 @@ export function applyChatReasoningPolicy(request: DirectChatRequest, provider: s
 
 /** Shared CLP wire mapping; preserve the established per-model defaults. */
 export type ChatReasoningEffort = RelayReasoningEffort | "enabled";
-export function clinePassChatReasoningControl(model: string, effort: ChatReasoningEffort):
+export function clinePassChatReasoningControl(model: string, effort: ChatReasoningEffort, profile?: ClinePassRequestProfile):
   { reasoning: { effort: RelayReasoningEffort } | { enabled: boolean } } | { reasoning_effort: RelayReasoningEffort } {
+  const resolvedProfile = resolveClinePassRequestProfile(model, profile);
   if (effort === "enabled") return { reasoning: { enabled: true } };
-  if (model === "cline-pass/deepseek-v4.1-flash") return { reasoning: { effort } };
+  if (resolvedProfile === "deepseek-flash") return { reasoning: { effort } };
   if (effort === "none") return { reasoning: { enabled: false } };
   return { reasoning_effort: effort };
 }

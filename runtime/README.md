@@ -54,7 +54,7 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
   拒绝并发覆盖；写入者可指定 `maximumBytes`，在保留注释后、原子替换前检查完整文件大小，
   并以 `0600` 权限写入 CLI、脚本和 Gateway 共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
-- `chat-reasoning.mjs` / `chat-reasoning.d.mts`：无 I/O 的默认 Chat 关闭能力表、Relay 逐模型思考策略枚举及模型思考声明类型，供配置、管理和模型 API 共用；显式参数方式不声明上游一定支持。
+- `chat-reasoning.mjs` / `chat-reasoning.d.mts`：无 I/O 的默认 Chat 关闭能力表、Relay 逐模型思考策略枚举及模型思考声明类型，供配置、管理和模型 API 共用；`resolveClinePassRequestProfile` 校验受管 CLP 的 `standard`／`deepseek-flash` 请求快照，未指定时保留精确 Flash ID 默认分支，显式 `standard` 可覆盖该默认。显式参数方式不声明上游一定支持。
 - `model-relay-config.mjs` / `model-relay-config.d.mts`：可选 Relay 严格配置、可选中文用途名称、仅结算使用的历史身份摘要、每 Key 多提供商模型授权、逐模型思考映射及仅全局限流策略投影；服务默认关闭和回环监听，允许显式 IPv4 内网/通配绑定、保留停用身份，不生成凭据；不接受旧 Relay 配置字段。
 - `network-proxy.mjs`：按 Codex `.env`、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
@@ -88,7 +88,7 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
   为当前账户监听目录、Profile 和管理标记，按 Provider ID 合并并去重路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，账户目录独立。
 - `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，模型目录按 CLP 家族共用，Chat 转换代理与凭据按账户独立。
-- `provider-model-guard.mjs` / `provider-model-guard.d.mts`：DS/OCG/CCG、自定义目录提供商代理与 CLP Chat 桥共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。读取上限为 2 MiB；Codex 兼容 Provider 的共享官方只读目录不注入此复核。
+- `provider-model-guard.mjs` / `provider-model-guard.d.mts`：DS/OCG/CCG、自定义目录提供商代理与 CLP Chat 桥共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。逐条校验可选 `cline_request_profile`，并从同次目录读取向 CLP 桥返回 `clineRequestProfile`；未知值失败关闭。读取上限为 2 MiB；Codex 兼容 Provider 的共享官方只读目录不注入此复核。
   CP 从同次已校验目录的精确模型定义读取默认采样，和启用状态共同交给代理；采样不进入编译后的 Codex 模型字段。
   CLP 在同一次目录读取中取得模型的思考选项，出站同时验证启用名单和思考能力，不为能力检查重复执行 ACL 读取。
   自定义提供商注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和旧上下文事务标记；自定义及受管账户均检查旧版目录整理未完成记录。未完成事务拒绝对应出站，不复用管理事务内部的读取豁免。
@@ -130,6 +130,7 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
 - `managed-model-catalog.mjs`：受管目录的纯数据校验、单模型设置读取、窗口与思考等级更新及刷新时保留设置；窗口按精确 Token 数保留，百分比仅派生、不取整后反向还原；窗口变更与原自动压缩阈值冲突时拒绝，不截小阈值；新上限小于原窗口或不再支持原思考等级时拒绝刷新，不静默替换非默认模型的等级。DS、OCG、CCG、CLP 共用，完整保留未修改的上游元数据，不执行文件读写。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile，复用 `managed-model-catalog` 处理目录数据；
   管理各受管提供商家族的共用模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
+  CLP 单模型可保存 `cline_request_profile: standard | deepseek-flash`，作为一次性继承的独立请求格式与固定路由快照；读取入口拒绝未知值，不保存源模型引用，源删除或后续修改不影响快照。
   设置写入、单模型移除与 CLP 账户目录更新共用私有 `.settings-backup`／`.settings-pending`，记录共用目录、相关 Profile 或来源文件及旧备份的前后快照，并保存只读前置条件，复核所有相关配置并回读一致后结束事务；未完成时阻止读取及出站，显式恢复严格限定同一家族路径，拒绝覆盖后续修改并复核目录来源与当前模型选择。固定模式允许保留原始目录中已经缺失的选择，以便默认模型入口随后修复主配置；不得移除原本有效的选择，恢复也按事务原始目录判断。
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
   镜像所选模型的默认思考等级。Profile 位于 `~/.codex`，模型目录与清单位于
