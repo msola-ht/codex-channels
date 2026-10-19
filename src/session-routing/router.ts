@@ -360,10 +360,8 @@ export class SessionRouter {
           } else if (bindingRemoved) {
             this.bindings.removeThread(binding.threadId);
             this.contextCompactionItemIdsByThread.delete(binding.threadId);
-            const workspace = this.workspaces.get(binding.workspaceId) ?? this.workspaces.default();
-            if (!this.bindings.get(binding.target)) {
-              this.bindings.selectWorkspace(binding.target, workspace.id);
-            }
+            // Removing an unavailable Thread must not replace the saved Workspace
+            // selection, including an ID absent from the current configuration.
             this.notifyBindingsChanged();
           }
           return {

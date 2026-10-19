@@ -350,6 +350,14 @@ Sol 运行 metrics→ProviderAccountService→OpenAI adapter→Client→JsonRpc�
 OpenCode Go 后续本地 Token 分支仅核查源码接线。`/metrics` 单次固定范围数据库查询、`/status` 单次固定目录
 git 查询，以及 `/diff`、审批/工作区本地投影复用已有入口/出口守卫，没有证据需要把 Actor 注入数据库层。
 
+**恢复分支的工作区补充（基线 `88470dc3`）。** 主代理复查 L03-F1 时发现订阅恢复清理不可用绑定后仍会
+把缺失工作区替换成默认目录，且后台绑定失败可能覆盖会话已选工作区。移除该重选分支，复用 BindingStore
+删除 Thread 时保留工作区的既有合同；不改变绑定清理或持久格式。
+主代理运行生产 SessionRouter→MemoryBindingStore/WorkspaceRegistry、隔离生命周期端口：缺失工作区恢复
+返回 `workspace.missing/bindingRemoved=true`、零 RPC，保存的选择仍为 missing，后续 workspace 查询继续拒绝；
+显式选择 A 后恢复到 `/A`。有效 A 目录的 Thread 不存在和其他目录后台 Thread 不存在，均读取一次后清理绑定，
+会话选择仍为 A。SQLite 同一删除接口保留选择经源码核对，本次没有实际持久数据库重开或真实重连观察。
+
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。
 当前记录没有真实平台撤权或 Windows/macOS 观察。末轮独立审查发现模型选择等待期间官方归档/删除可解除原绑定，
