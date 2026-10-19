@@ -246,17 +246,20 @@ export interface ConversationExtensionUseCases {
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { skillName: string }>;
   invokePlugin(
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { pluginName: string }>;
   listAgentRoles(): AgentRoleEntry[];
   invokeAgent(
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { roleName: string }>;
   modelState(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   clearModelBrowse(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
@@ -265,20 +268,21 @@ export interface ConversationExtensionUseCases {
   selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   selectEffort(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   selectFastMode(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState>;
-  listSkills(target: ConversationTarget): Promise<InstalledSkill[]>;
-  listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]>;
-  mcpServerDetail(target: ConversationTarget, selector: string): Promise<McpServerDetail>;
-  mcpHealth(target: ConversationTarget): Promise<McpHealthReport>;
-  reloadMcpServers(target: ConversationTarget): Promise<void>;
-  loginMcpServer(target: ConversationTarget, selector: string): Promise<McpLoginResult>;
+  listSkills(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledSkill[]>;
+  listMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpServerSummary[]>;
+  mcpServerDetail(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<McpServerDetail>;
+  mcpHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpHealthReport>;
+  reloadMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
+  loginMcpServer(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<McpLoginResult>;
   readMcpResource(
     target: ConversationTarget,
     selector: string,
     uri: string,
+    assertAuthorized?: () => void,
   ): Promise<McpResourceReadResult>;
-  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog>;
-  pluginHealth(target: ConversationTarget): Promise<PluginHealthReport>;
-  pluginDetail(target: ConversationTarget, selector: string): Promise<InstalledPlugin>;
+  listPlugins(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledPluginCatalog>;
+  pluginHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<PluginHealthReport>;
+  pluginDetail(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<InstalledPlugin>;
   listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]>;
 }
 
@@ -721,6 +725,7 @@ export class ConversationService implements
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { skillName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -730,13 +735,17 @@ export class ConversationService implements
         "需要提供 Skill 名称或序号及任务内容",
       );
     }
-    return this.locked(target, async () => {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
       const workspace = this.router.workspace(target);
       const skillName = await this.extensionQueries.resolveSkillName(
         workspace.cwd,
         normalizedSelector,
+        beforePrepare,
       );
-      const skill = await this.queries.resolveSkill(workspace.cwd, skillName);
+      beforePrepare();
+      const skill = await this.queries.resolveSkill(workspace.cwd, skillName, beforePrepare);
+      beforePrepare();
       if (!skill) {
         throw new UserFacingError(
           "skill.not-found",
@@ -753,7 +762,8 @@ export class ConversationService implements
           name: skill.name,
           path: skill.path,
         },
-      ], { kind: "skill", name: skill.name });
+      ], { kind: "skill", name: skill.name },
+      threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized);
       return { ...submission, skillName: skill.name };
     });
   }
@@ -762,6 +772,7 @@ export class ConversationService implements
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { pluginName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -771,7 +782,8 @@ export class ConversationService implements
         "需要提供 Plugin 名称或序号及任务内容",
       );
     }
-    return this.locked(target, async () => {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
       if ((this.models.status(target).modelProvider ?? "openai") !== "openai") {
         throw new UserFacingError(
           "plugin.provider.unsupported",
@@ -782,8 +794,11 @@ export class ConversationService implements
       const plugin = await this.extensionQueries.resolvePlugin(
         workspace.cwd,
         normalizedSelector,
+        beforePrepare,
       );
-      const resolved = await this.queries.resolvePlugin(workspace.cwd, plugin.id);
+      beforePrepare();
+      const resolved = await this.queries.resolvePlugin(workspace.cwd, plugin.id, beforePrepare);
+      beforePrepare();
       if (!resolved) {
         throw new UserFacingError(
           "plugin.unavailable",
@@ -800,7 +815,8 @@ export class ConversationService implements
           name: resolved.displayName,
           path: resolved.path,
         },
-      ], { kind: "plugin", name: resolved.displayName });
+      ], { kind: "plugin", name: resolved.displayName },
+      threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized);
       return { ...submission, pluginName: resolved.displayName };
     });
   }
@@ -835,6 +851,7 @@ export class ConversationService implements
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { roleName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -857,7 +874,7 @@ export class ConversationService implements
         type: "text",
         text: `请使用 agent_type="${role.name}"、fork_turns="1" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
       },
-    ], { kind: "agent", name: role.name });
+    ], { kind: "agent", name: role.name }, assertAuthorized);
     return { ...submission, roleName: role.name };
   }
 
@@ -865,11 +882,14 @@ export class ConversationService implements
     target: ConversationTarget,
     input: TurnInput[],
     identity?: TurnStartIdentity,
+    assertAuthorized?: () => void,
   ): Promise<Submission> {
     this.touchActivity(target);
-    return this.locked(
+    return this.authorizedLocked(
       target,
-      () => this.submitInputLocked(target, input, identity),
+      assertAuthorized,
+      () => this.submitInputLocked(target, input, identity,
+        threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized),
     );
   }
 
@@ -1481,58 +1501,62 @@ export class ConversationService implements
     return this.withGuardedSelection(target, () => this.models.selectFastMode(target, selector, assertAuthorized), assertAuthorized);
   }
 
-  listSkills(target: ConversationTarget): Promise<InstalledSkill[]> {
-    return this.extensionQueries.listSkills(target);
+  listSkills(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledSkill[]> {
+    return this.extensionQueries.listSkills(target, assertAuthorized);
   }
 
-  listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]> {
-    return this.extensionQueries.listMcpServers(target);
+  listMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpServerSummary[]> {
+    return this.extensionQueries.listMcpServers(target, assertAuthorized);
   }
 
-  mcpHealth(target: ConversationTarget): Promise<McpHealthReport> {
-    return this.extensionQueries.mcpHealth(target);
+  mcpHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpHealthReport> {
+    return this.extensionQueries.mcpHealth(target, assertAuthorized);
   }
 
-  reloadMcpServers(target: ConversationTarget): Promise<void> {
+  reloadMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
     void target;
-    return this.extensionQueries.reloadMcpServers();
+    return this.extensionQueries.reloadMcpServers(assertAuthorized);
   }
 
   mcpServerDetail(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<McpServerDetail> {
-    return this.extensionQueries.mcpServerDetail(target, selector);
+    return this.extensionQueries.mcpServerDetail(target, selector, assertAuthorized);
   }
 
   loginMcpServer(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<McpLoginResult> {
-    return this.extensionQueries.loginMcpServer(target, selector);
+    return this.extensionQueries.loginMcpServer(target, selector, assertAuthorized);
   }
 
   readMcpResource(
     target: ConversationTarget,
     selector: string,
     uri: string,
+    assertAuthorized?: () => void,
   ): Promise<McpResourceReadResult> {
-    return this.extensionQueries.readMcpResource(target, selector, uri);
+    return this.extensionQueries.readMcpResource(target, selector, uri, assertAuthorized);
   }
 
-  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog> {
-    return this.extensionQueries.listPlugins(target);
+  listPlugins(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledPluginCatalog> {
+    return this.extensionQueries.listPlugins(target, assertAuthorized);
   }
 
-  pluginHealth(target: ConversationTarget): Promise<PluginHealthReport> {
-    return this.extensionQueries.pluginHealth(target);
+  pluginHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<PluginHealthReport> {
+    return this.extensionQueries.pluginHealth(target, assertAuthorized);
   }
 
   pluginDetail(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<InstalledPlugin> {
-    return this.extensionQueries.pluginDetail(target, selector);
+    return this.extensionQueries.pluginDetail(target, selector, assertAuthorized);
   }
 
   accountUsage(): Promise<AccountUsage> {

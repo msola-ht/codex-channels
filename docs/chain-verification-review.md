@@ -234,8 +234,6 @@ Sol 的补充生产入口观察覆盖锁等待期间切换 Thread、第一页返
 
 **剩余命令清单。** 独立 Sol 只读追踪后确认以下仍需修复与观察，不能由已完成子链推定通过：
 
-- Skill/Plugin/Agent：解析目录和锁等待后的 Turn 提交，以及原 Thread 变化。
-- MCP login/reload/resource：目录与 Provider 准备后的新请求、捕获 Thread 归属。
 - Hooks/Schedule/重置券和异步交互的独立授权合同，以及普通只读查询内部的分页/Provider 等待。
 
 **停止与结果范围子链（基线 `4dbeba79`）。** `/stop` 不进入会话锁，仍立即取消本地附件/输入准备；
@@ -266,6 +264,21 @@ pin/Goal 读取的首个过载响应后撤权均阻止重试；输出准入等�
 正常切换返回 `mode=plan/pending=true`，无 Turn；正常带参数调用返回 `plan.started/plan-turn`、发送一次、待生效状态清空。
 模型读取期间撤权返回 `command.authorization-changed`，无偏好、无 Turn；发送等待期间撤权或 Thread 被替换，
 同样拒绝且发送为零，但此前授权有效时已保存的模式仍为待生效，不声称回滚。没有真实模型调用或平台交互观察。
+
+**扩展命令子链（基线 `4ea0b796`）。** 主代理贯穿 Command/Application 的 Skill、Plugin、Agent 与 MCP 守卫，
+固定扩展调用的锁前目标；Sol 负责扩展查询服务、窄端口、Client 与 Provider 路由。Telegram 直接模型/Plugin
+按钮预查询另捕获实时 Actor 与工作区 ID/cwd，返回前复核，不依赖仅在命令出口才执行的校验。
+主代理经生产 CommandService→ConversationService→ExtensionQueryService、隔离目录与 Turn 端口观察：
+Skill、Plugin、Agent 正常各追加一次 Turn，并返回对应名称及 `steered=true`；Skill/Plugin 的目录解析期间撤权，
+三类命令的提交等待期间撤权或换 Thread，均返回 `command.authorization-changed`，未发 Turn。
+MCP 登录和资源读取正常各调用一次下游端口；目录响应期间撤权或换 Thread，均在 OAuth/资源调用前拒绝，后续调用为零。
+没有访问真实插件目录、OAuth 账号或 MCP 资源，也没有发送真实平台消息。
+Sol 运行生产 Extension→Provider→Client→JSON-RPC、内存 Transport：合法列表/解析、MCP 详情、OAuth 与资源读取
+返回可用结果；Plugin 列表返回前撤权被拒绝，已提交 OAuth 仍结算。Skill/Plugin/MCP 概览/资源读取首个过载
+响应后撤权，各只发送一次；MCP 概览和详情分页撤权后不取下一页。Provider 准备期间撤权时未发 skills/list，
+但已有内部 initialize/config 写入，不能声称整个生命周期零调用。双 Provider 正常刷新计数 `[1,1]`；
+下一轮首分支提交后撤权，累计 `[2,1]`，首分支正常结算、后分支拒绝，未回滚或重发。
+主代理直接运行 Telegram 按钮查询守卫：原目录接受，同 ID 目录替换或 Actor 撤权均拒绝；这不是实际平台按钮交互观察。
 
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。

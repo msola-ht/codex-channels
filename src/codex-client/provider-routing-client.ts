@@ -660,8 +660,8 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["listMcpServers"]> {
     const threadId = args[0];
     return threadId
-      ? this.callForThread(threadId, (client) => client.listMcpServers(...args))
-      : this.withPrimaryActivity((client) => client.listMcpServers(...args));
+      ? this.callForThread(threadId, (client) => client.listMcpServers(...args), args[2])
+      : this.withPrimaryActivity((client) => client.listMcpServers(...args), args[2]);
   }
 
   listMcpServerDetails(
@@ -669,17 +669,21 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["listMcpServerDetails"]> {
     const threadId = args[0];
     return threadId
-      ? this.callForThread(threadId, (client) => client.listMcpServerDetails(...args))
-      : this.withPrimaryActivity((client) => client.listMcpServerDetails(...args));
+      ? this.callForThread(threadId, (client) => client.listMcpServerDetails(...args), args[1])
+      : this.withPrimaryActivity((client) => client.listMcpServerDetails(...args), args[1]);
   }
 
-  async reloadMcpServers(): Promise<void> {
+  async reloadMcpServers(signal?: AbortSignal, beforeSubmit?: () => void): Promise<void> {
+    beforeSubmit?.();
     const providers = [...this.clients.keys()].filter((provider) =>
       this.connectedProviders.has(provider));
     const results = await Promise.allSettled(
-      providers.map((provider) => this.withProviderOperation(provider, async () =>
-        (await this.ensureClient(provider)).reloadMcpServers()
-      )),
+      providers.map((provider) => this.withProviderOperation(provider, async () => {
+        beforeSubmit?.();
+        const client = await this.ensureClient(provider);
+        beforeSubmit?.();
+        return client.reloadMcpServers(signal, beforeSubmit);
+      })),
     );
     const failure = results.find(
       (result): result is PromiseRejectedResult => result.status === "rejected",
@@ -694,8 +698,8 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["startMcpOAuthLogin"]> {
     const threadId = args[1];
     return threadId
-      ? this.callForThread(threadId, (client) => client.startMcpOAuthLogin(...args))
-      : this.withPrimaryActivity((client) => client.startMcpOAuthLogin(...args));
+      ? this.callForThread(threadId, (client) => client.startMcpOAuthLogin(...args), args[2])
+      : this.withPrimaryActivity((client) => client.startMcpOAuthLogin(...args), args[2]);
   }
 
   readMcpResource(
@@ -703,8 +707,8 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["readMcpResource"]> {
     const threadId = args[2];
     return threadId
-      ? this.callForThread(threadId, (client) => client.readMcpResource(...args))
-      : this.withPrimaryActivity((client) => client.readMcpResource(...args));
+      ? this.callForThread(threadId, (client) => client.readMcpResource(...args), args[3])
+      : this.withPrimaryActivity((client) => client.readMcpResource(...args), args[3]);
   }
 
   getGoal(
@@ -831,25 +835,25 @@ export class ProviderRoutingClient {
   listSkills(
     ...args: Parameters<ProviderClientInstance["listSkills"]>
   ): ReturnType<ProviderClientInstance["listSkills"]> {
-    return this.withPrimaryActivity((client) => client.listSkills(...args));
+    return this.withPrimaryActivity((client) => client.listSkills(...args), args[1]);
   }
 
   resolveSkill(
     ...args: Parameters<ProviderClientInstance["resolveSkill"]>
   ): ReturnType<ProviderClientInstance["resolveSkill"]> {
-    return this.withPrimaryActivity((client) => client.resolveSkill(...args));
+    return this.withPrimaryActivity((client) => client.resolveSkill(...args), args[2]);
   }
 
   listPlugins(
     ...args: Parameters<ProviderClientInstance["listPlugins"]>
   ): ReturnType<ProviderClientInstance["listPlugins"]> {
-    return this.withPrimaryActivity((client) => client.listPlugins(...args));
+    return this.withPrimaryActivity((client) => client.listPlugins(...args), args[1]);
   }
 
   resolvePlugin(
     ...args: Parameters<ProviderClientInstance["resolvePlugin"]>
   ): ReturnType<ProviderClientInstance["resolvePlugin"]> {
-    return this.withPrimaryActivity((client) => client.resolvePlugin(...args));
+    return this.withPrimaryActivity((client) => client.resolvePlugin(...args), args[2]);
   }
 
   readResetCredits(...args: Parameters<ProviderClientInstance["readResetCredits"]>): ReturnType<ProviderClientInstance["readResetCredits"]> {
@@ -912,10 +916,15 @@ export class ProviderRoutingClient {
 
   private withPrimaryActivity<T>(
     operation: (client: ProviderClientInstance) => Promise<T>,
+    beforeSubmit?: () => void,
   ): Promise<T> {
-    return this.withProviderActivity(this.primaryProvider, async () =>
-      operation(await this.ensureClient(this.primaryProvider))
-    );
+    beforeSubmit?.();
+    return this.withProviderActivity(this.primaryProvider, async () => {
+      beforeSubmit?.();
+      const client = await this.ensureClient(this.primaryProvider);
+      beforeSubmit?.();
+      return operation(client);
+    });
   }
 
   private clientForProvider(provider: string): ProviderClientInstance {

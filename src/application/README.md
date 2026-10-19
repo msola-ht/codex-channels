@@ -26,6 +26,9 @@ rename、pin、compact、review 和 Goal 命令固定锁前目标，Thread 准�
 Plan 预设/模型读取、模式保存、Queue 复核与 Turn 提交均保留实时守卫；模式保存前还核对原 Thread。
 授权有效时已经保存的模式不因稍后 Turn 提交失败自动回滚，仍以待生效状态查询；成功 Turn 才消费它。
 新 Turn 准备固定原绑定，创建成功后最终提交守卫改为核对新绑定，防止后续 Provider 等待把输入发到过期目标。
+Skill、Plugin、Agent 命令固定锁前目标，目录解析后复核，并将守卫传到最终 start/steer；扩展列表返回前也复核。
+MCP 登录与资源读取固定捕获的 Thread，目录查询后不得转向其他绑定；刷新各 Provider 的新请求分别守卫，
+已经提交的 OAuth/刷新结果仍照实际结算。
 
 Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的禁用档位回到 Standard，保存偏好与显式待生效覆盖在提交前复核，失效时拒绝并要求用户重新选择，不清除保存数据或重解释已有 Thread 的实际设置。
 

@@ -1132,19 +1132,20 @@ export class CodexAppServerClient implements
     return toReviewStarted(response);
   }
 
-  async listSkills(cwd: string): Promise<InstalledSkill[]> {
-    const response = await this.readSkills(cwd);
+  async listSkills(cwd: string, beforeSubmit?: () => void): Promise<InstalledSkill[]> {
+    const response = await this.readSkills(cwd, beforeSubmit);
     return toInstalledSkills(response, cwd);
   }
 
   async resolveSkill(
     cwd: string,
     name: string,
+    beforeSubmit?: () => void,
   ): Promise<InvocableSkill | undefined> {
-    return resolveInvocableSkill(await this.readSkills(cwd), cwd, name);
+    return resolveInvocableSkill(await this.readSkills(cwd, beforeSubmit), cwd, name);
   }
 
-  async listMcpServers(threadId?: string, signal?: AbortSignal): Promise<McpServerSummary[]> {
+  async listMcpServers(threadId?: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<McpServerSummary[]> {
     const servers: McpServerSummary[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -1158,7 +1159,7 @@ export class CodexAppServerClient implements
             ...(threadId ? { threadId } : {}),
             ...(cursor ? { cursor } : {}),
           },
-        }, { retryOverload: true, ...(signal ? { signal } : {}) });
+        }, { retryOverload: true, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
       const page = toMcpServerSummaryPage(response);
       servers.push(...page.servers);
       cursor = page.nextCursor;
@@ -1167,7 +1168,7 @@ export class CodexAppServerClient implements
     return servers;
   }
 
-  async listMcpServerDetails(threadId?: string): Promise<McpServerDetail[]> {
+  async listMcpServerDetails(threadId?: string, beforeSubmit?: () => void): Promise<McpServerDetail[]> {
     const servers: McpServerDetail[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -1180,7 +1181,7 @@ export class CodexAppServerClient implements
           ...(threadId ? { threadId } : {}),
           ...(cursor ? { cursor } : {}),
         },
-      }, { retryOverload: true });
+      }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
       const page = toMcpServerDetailPage(response);
       servers.push(...page.servers);
       cursor = page.nextCursor;
@@ -1189,21 +1190,22 @@ export class CodexAppServerClient implements
     return servers;
   }
 
-  async reloadMcpServers(signal?: AbortSignal): Promise<void> {
+  async reloadMcpServers(signal?: AbortSignal, beforeSubmit?: () => void): Promise<void> {
     await this.rpc.request<Record<string, never>>({
       method: "config/mcpServer/reload",
       params: undefined,
-    }, { retryOverload: false, ...(signal ? { signal } : {}) });
+    }, { retryOverload: false, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
   async startMcpOAuthLogin(
     name: string,
     threadId?: string,
+    beforeSubmit?: () => void,
   ): Promise<McpOAuthLogin> {
     const response = await this.rpc.request<McpServerOauthLoginResponse>({
       method: "mcpServer/oauth/login",
       params: { name, ...(threadId ? { threadId } : {}) },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toMcpOAuthLogin(name, response);
   }
 
@@ -1211,37 +1213,39 @@ export class CodexAppServerClient implements
     server: string,
     uri: string,
     threadId?: string,
+    beforeSubmit?: () => void,
   ): Promise<McpResourceReadResult> {
     const response = await this.rpc.request<McpResourceReadResponse>({
       method: "mcpServer/resource/read",
       params: { server, uri, ...(threadId ? { threadId } : {}) },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toMcpResourceReadResult(server, uri, response);
   }
 
-  async listPlugins(cwd: string): Promise<InstalledPluginCatalog> {
-    return toInstalledPlugins(await this.readInstalledPlugins(cwd));
+  async listPlugins(cwd: string, beforeSubmit?: () => void): Promise<InstalledPluginCatalog> {
+    return toInstalledPlugins(await this.readInstalledPlugins(cwd, beforeSubmit));
   }
 
   async resolvePlugin(
     cwd: string,
     id: string,
+    beforeSubmit?: () => void,
   ): Promise<InvocablePlugin | undefined> {
-    return resolveInvocablePlugin(await this.readInstalledPlugins(cwd), id);
+    return resolveInvocablePlugin(await this.readInstalledPlugins(cwd, beforeSubmit), id);
   }
 
-  private readInstalledPlugins(cwd: string): Promise<PluginInstalledResponse> {
+  private readInstalledPlugins(cwd: string, beforeSubmit?: () => void): Promise<PluginInstalledResponse> {
     return this.rpc.request<PluginInstalledResponse>({
       method: "plugin/installed",
       params: { cwds: [cwd] },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
-  private readSkills(cwd: string): Promise<SkillsListResponse> {
+  private readSkills(cwd: string, beforeSubmit?: () => void): Promise<SkillsListResponse> {
     return this.rpc.request<SkillsListResponse>({
       method: "skills/list",
       params: { cwds: [cwd], forceReload: false },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
   async accountUsage(): Promise<AccountUsage> {

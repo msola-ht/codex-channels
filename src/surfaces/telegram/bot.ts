@@ -151,7 +151,7 @@ export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
 
 export type TelegramConversationUseCases =
   & Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">
-  & Pick<ConversationSessionUseCases, "status" | "statusForDisplay" | "listWorkspaces">
+  & Pick<ConversationSessionUseCases, "status" | "statusForDisplay" | "listWorkspaces" | "selectedWorkspaceId">
   & Pick<ConversationExtensionUseCases, "modelState" | "listPlugins">;
 
 export function createTelegramSurface(
@@ -339,9 +339,14 @@ export class TelegramSurface {
     return this.output.sendChannelImage(conversationId, imagePath);
   }
 
-  private modelQueryGuard(target: ConversationTarget, actorId: string): () => void {
+  private queryGuard(target: ConversationTarget, actorId: string): () => void {
+    const workspaceId = this.service.selectedWorkspaceId(target);
+    const cwd = this.service.listWorkspaces().find(workspace => workspace.id === workspaceId)?.cwd;
     return () => {
-      if (this.stopping || !this.access.isAllowed({ target, actorId })) {
+      const currentId = this.service.selectedWorkspaceId(target);
+      const currentCwd = this.service.listWorkspaces().find(workspace => workspace.id === currentId)?.cwd;
+      if (this.stopping || !this.access.isAllowed({ target, actorId })
+        || cwd === undefined || currentId !== workspaceId || currentCwd !== cwd) {
         throw new UserFacingError("command.authorization-changed", "命令授权已变化，请重新发起操作");
       }
     };
@@ -515,7 +520,7 @@ export class TelegramSurface {
       /^mp:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget, this.modelQueryGuard(modelTarget, String(context.from.id)));
+        const state = await this.service.modelState(modelTarget, this.queryGuard(modelTarget, String(context.from.id)));
         if (
           telegramModelSelectionToken(state) !== context.match[2]
         ) {
@@ -552,7 +557,7 @@ export class TelegramSurface {
       /^ms:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget, this.modelQueryGuard(modelTarget, String(context.from.id)));
+        const state = await this.service.modelState(modelTarget, this.queryGuard(modelTarget, String(context.from.id)));
         if (
           telegramModelSelectionToken(state) !== context.match[2]
         ) {
@@ -586,7 +591,7 @@ export class TelegramSurface {
       /^me:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget, this.modelQueryGuard(modelTarget, String(context.from.id)));
+        const state = await this.service.modelState(modelTarget, this.queryGuard(modelTarget, String(context.from.id)));
         if (
           telegramModelSelectionToken(state) !== context.match[2]
         ) {
@@ -706,7 +711,7 @@ export class TelegramSurface {
       async (context) => {
         await context.answerCallbackQuery({ text: "正在选择 Plugin" });
         const pluginTarget = target(context);
-        const matches = (await this.service.listPlugins(pluginTarget)).plugins.filter(
+        const matches = (await this.service.listPlugins(pluginTarget, this.queryGuard(pluginTarget, String(context.from.id)))).plugins.filter(
           (plugin) => telegramPluginSelectionToken(plugin.id) === context.match[1],
         );
         if (matches.length !== 1) {

@@ -640,7 +640,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         if (!argumentsText) {
           return {
             kind: "skills",
-            entries: await this.conversations.listSkills(target),
+            entries: await this.conversations.listSkills(target, assertAuthorized),
           };
         }
         const invocation = parseSkillInvocation(argumentsText);
@@ -648,6 +648,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           target,
           invocation.selector,
           invocation.task,
+          assertAuthorized,
         );
         return {
           kind: "outcome",
@@ -671,6 +672,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           target,
           invocation.selector,
           invocation.task,
+          assertAuthorized,
         );
         return {
           kind: "outcome",
@@ -683,9 +685,9 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "mcp":
-        return this.executeMcpCommand(target, argumentsText);
+        return this.executeMcpCommand(target, argumentsText, assertAuthorized);
       case "plugin":
-        return this.executePluginCommand(target, argumentsText);
+        return this.executePluginCommand(target, argumentsText, assertAuthorized);
       case "usage":
         return {
           kind: "usage",
@@ -872,36 +874,37 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async executeMcpCommand(
     target: ConversationTarget,
     input: string,
+    assertAuthorized?: () => void,
   ): Promise<ConversationCommandResult> {
     if (!input) {
       return {
         kind: "mcp",
-        servers: await this.conversations.listMcpServers(target),
+        servers: await this.conversations.listMcpServers(target, assertAuthorized),
       };
     }
     const operation = parseMcpOperation(input);
     if (operation.type === "health") {
       return {
         kind: "mcp-health",
-        report: await this.conversations.mcpHealth(target),
+        report: await this.conversations.mcpHealth(target, assertAuthorized),
       };
     }
     if (operation.type === "reload") {
-      await this.conversations.reloadMcpServers(target);
+      await this.conversations.reloadMcpServers(target, assertAuthorized);
       return { kind: "mcp-reload" };
     }
     if (operation.type === "detail") {
       return {
         kind: "mcp-detail",
         selector: operation.selector,
-        server: await this.conversations.mcpServerDetail(target, operation.selector),
+        server: await this.conversations.mcpServerDetail(target, operation.selector, assertAuthorized),
         ...(operation.view ? { view: operation.view } : {}),
       };
     }
     if (operation.type === "login") {
       return {
         kind: "mcp-login",
-        login: await this.conversations.loginMcpServer(target, operation.selector),
+        login: await this.conversations.loginMcpServer(target, operation.selector, assertAuthorized),
       };
     }
     return {
@@ -910,6 +913,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         target,
         operation.selector,
         operation.uri,
+        assertAuthorized,
       ),
     };
   }
@@ -917,28 +921,30 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async executePluginCommand(
     target: ConversationTarget,
     input: string,
+    assertAuthorized?: () => void,
   ): Promise<ConversationCommandResult> {
     const operation = parsePluginOperation(input);
     if (operation.type === "list") {
-      const catalog = await this.conversations.listPlugins(target);
+      const catalog = await this.conversations.listPlugins(target, assertAuthorized);
       return pluginListResult(catalog, operation.view);
     }
     if (operation.type === "health") {
       return {
         kind: "plugin-health",
-        report: await this.conversations.pluginHealth(target),
+        report: await this.conversations.pluginHealth(target, assertAuthorized),
       };
     }
     if (operation.type === "detail") {
       return {
         kind: "plugin-detail",
-        plugin: await this.conversations.pluginDetail(target, operation.selector),
+        plugin: await this.conversations.pluginDetail(target, operation.selector, assertAuthorized),
       };
     }
     const submission = await this.conversations.invokePlugin(
       target,
       operation.selector,
       operation.task,
+      assertAuthorized,
     );
     return {
       kind: "outcome",

@@ -117,13 +117,14 @@ export interface McpResourceReadResult {
 }
 
 export interface McpQueryPort {
-  listMcpServers(threadId?: string): Promise<McpServerSummary[]>;
-  listMcpServerDetails(threadId?: string): Promise<McpServerDetail[]>;
-  reloadMcpServers(): Promise<void>;
-  startMcpOAuthLogin(name: string, threadId?: string): Promise<McpOAuthLogin>;
+  listMcpServers(threadId?: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<McpServerSummary[]>;
+  listMcpServerDetails(threadId?: string, beforeSubmit?: () => void): Promise<McpServerDetail[]>;
+  reloadMcpServers(signal?: AbortSignal, beforeSubmit?: () => void): Promise<void>;
+  startMcpOAuthLogin(name: string, threadId?: string, beforeSubmit?: () => void): Promise<McpOAuthLogin>;
   readMcpResource(
     server: string,
     uri: string,
     threadId?: string,
+    beforeSubmit?: () => void,
   ): Promise<McpResourceReadResult>;
 }
