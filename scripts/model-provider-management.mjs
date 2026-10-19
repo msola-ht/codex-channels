@@ -13,16 +13,16 @@ import { ProviderWebSearchSettingsError, readProviderWebSearchOverride } from ".
 
 /** Display each exact provider's override; null explicitly means follow global. */
 export function loadProviderWebSearchSettings(state, environment = process.env) {
-  return configuredWebSearchProviders(state).map(provider => {
+  return [{ provider: "openai", source: "global", status: "ready", mode: state.defaults.webSearch }, ...configuredWebSearchProviders(state).map(provider => {
     try { return { provider, source: "provider", status: "ready", mode: readProviderWebSearchOverride(provider, environment) }; }
     catch (error) {
       return { provider, source: "provider", status: "error", error: error instanceof ProviderWebSearchSettingsError ? error.code : "unreadable" };
     }
-  });
+  })];
 }
 
 export function configuredWebSearchProviders(state) {
-  return [...new Set(["openai", ...state.managedProviders.map(provider => provider.id),
+  return [...new Set([...state.managedProviders.map(provider => provider.id),
     ...state.customProviders.fixedCandidates.map(provider => provider.id),
     ...state.customProviders.switchingProviders.map(provider => provider.id)])];
 }
@@ -106,6 +106,7 @@ export async function loadModelProviderManagementState({
   return {
     configVersion: snapshot.version,
     defaults: {
+      webSearch: config.web_search ?? null,
       model: optionalString(config.model) ?? null,
       reasoningEffort: optionalString(config.model_reasoning_effort) ?? null,
     },

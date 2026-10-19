@@ -46,6 +46,8 @@ export function decodeProviderWebSearchSettings(content) {
 
 export function readProviderWebSearchOverride(provider, environment = process.env) {
   if (!isProviderWebSearchId(provider)) throw new ProviderWebSearchSettingsError("invalid-document", "Provider 搜索设置的 Provider ID 无效");
+  // Official accounts always use native global configuration, never this overlay.
+  if (provider === "openai") return null;
   assertNoPending(environment);
   const mode = readReadyOverride(provider, environment);
   assertNoPending(environment);

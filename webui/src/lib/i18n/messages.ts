@@ -92,7 +92,9 @@ const zh = {
   },
   providerWebSearch: {
     title: "提供商联网搜索",
-    hint: "按提供商账户独立保存搜索模式，适用于官方、受管和自定义提供商的固定与切换模式。跟随全局会移除此账户的覆盖，不修改全局设置。",
+    hint: "第三方受管和自定义提供商的固定与切换模式可按账户保存搜索设置。跟随全局会移除此账户的覆盖。OpenAI 官方使用全局设置，请在通用设置中修改。",
+    globalSource: "只读显示全局 config.toml 的 web_search；OpenAI 官方账户统一使用此设置。",
+    globalDefault: "跟随默认",
     followGlobal: "跟随全局",
     providerLabel: "{name} · {provider}",
     empty: "暂无可配置搜索的提供商账户。",
@@ -1764,7 +1766,9 @@ const en: Messages = {
   },
   providerWebSearch: {
     title: "Provider web search",
-    hint: "Save search modes independently for each official, managed, or custom provider account in fixed and switching modes. Follow global removes this account's override and leaves the global setting unchanged.",
+    hint: "Save search modes per third-party managed or custom provider account in fixed and switching modes. Follow global removes the account override. Official OpenAI accounts use the global setting, edited in General settings.",
+    globalSource: "Read-only global config.toml web_search value, shared by official OpenAI accounts.",
+    globalDefault: "Follow default",
     followGlobal: "Follow global",
     providerLabel: "{name} · {provider}",
     empty: "No provider accounts are available for search configuration.",

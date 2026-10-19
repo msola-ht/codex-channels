@@ -456,11 +456,13 @@ JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行�
 ## 独立提供商的搜索模式
 
 WebUI `#/models/providers` 的“提供商联网搜索”卡片为每个已配置的独立提供商设置搜索模式。
-支持官方 OpenAI、受管账户的固定／切换模式、Codex 兼容提供商和自定义提供商的固定／切换模式；
+支持第三方受管账户的固定／切换模式、Codex 兼容提供商和自定义提供商的固定／切换模式；
 按精确 Provider ID 隔离，不按家族、显示名称或共享模型目录联动。模型目录搜索列保持只读，
 全局模式仍在通用设置中管理。选择“跟随全局”或 `disabled`、`cached`、`indexed`、`live` 后，
 先查看预览，再明确确认保存；保存后回读配置，并提示 `restart-app-server`，WebUI 不直接执行重启。
-运行中的 Gateway 可按现有活动与租约条件安全应用受管账户变更；官方与自定义实例须按提示重启 App Server。
+运行中的 Gateway 可按现有活动与租约条件安全应用受管账户变更；自定义实例须按提示重启 App Server。
+OpenAI 官方账户统一读取主配置 `config.toml` 的全局 `web_search`，在通用设置中修改，
+不提供账户级覆盖。覆盖文件中已有的 `openai` 键不参与运行，也不在读取时删除。
 
 覆盖文件位于 `$CODEX_HOME/codexc-provider-search.toml`（默认 `~/.codex/codexc-provider-search.toml`）：
 
@@ -468,7 +470,6 @@ WebUI `#/models/providers` 的“提供商联网搜索”卡片为每个已配�
 version = 1
 
 [providers]
-openai = "cached"
 ds-work = "disabled"
 cp-work = "live"
 ```

@@ -28,7 +28,7 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
 
 ## 文件
 
-- `provider-web-search.mjs` / `provider-web-search.d.mts`：在 Codex Home 的私有 `codexc-provider-search.toml` 保存 version=1 的精确 Provider 搜索覆盖表；缺键表示跟随全局，支持 `disabled`／`cached`／`indexed`／`live`，聚合标识和未知格式失败关闭。既有受管切换 Profile 的搜索偏好在首次显式保存前继续读取；旧 CP 内部禁用值不作为偏好。提供 Provider 专属指纹及启动参数，不因其他账户的覆盖变更重建实例；检测未完成 `.pending` 事务时拒绝读取，文件保护复用 Unix 权限和 Windows ACL 适配器。
+- `provider-web-search.mjs` / `provider-web-search.d.mts`：在 Codex Home 的私有 `codexc-provider-search.toml` 保存 version=1 的精确第三方 Provider 搜索覆盖表；官方 `openai` 始终返回无覆盖，使用原生全局配置，不读取覆盖文件。第三方缺键表示跟随全局，支持 `disabled`／`cached`／`indexed`／`live`，聚合标识和未知格式失败关闭。既有受管切换 Profile 的搜索偏好在首次显式保存前继续读取；旧 CP 内部禁用值不作为偏好。提供 Provider 专属指纹及启动参数，不因其他账户的覆盖变更重建实例；检测未完成 `.pending` 事务时拒绝读取，文件保护复用 Unix 权限和 Windows ACL 适配器。
 
 - `codex-request-identity.mjs` / `codex-request-identity.d.mts`：仅在 `follow_cli_version = true` 时从当前锁定 CLI 版本解析官方客户端身份及 UA 的生效版本，保留系统和终端信息；无标记或 false 时保留显式值。Gateway、App Server 服务、CLI 与 WebUI 共用，不改写读取的配置。
 

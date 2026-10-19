@@ -79,7 +79,7 @@ export async function applyProviderWebSearchChange(input, options = {}) {
 async function buildPlan(input, { environment = process.env, loadProviderState = loadModelProviderManagementState } = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)
     || Object.keys(input).some(key => !["provider", "mode", "resourceRevision"].includes(key))
-    || !isProviderWebSearchId(input.provider) || !modes.has(input.mode)
+    || !isProviderWebSearchId(input.provider) || input.provider === "openai" || !modes.has(input.mode)
     || typeof input.resourceRevision !== "string" || !/^[a-f0-9]{64}$/u.test(input.resourceRevision)) {
     throw invalid("invalid-input", "mode", "Provider 搜索设置参数无效；请选择精确 Provider 与支持的模式");
   }

@@ -21,10 +21,11 @@ export function ProviderWebSearchSettings({ settings, management }: { settings: 
   const { t } = useTranslation()
   const locked = management.busy || management.loading || management.error !== null || management.readbackRequired || management.pendingPreview !== null
   const providers = [...settings.managedProviders, ...settings.customProviders.fixedCandidates, ...settings.customProviders.switchingProviders, ...settings.customProviders.backupCandidates]
+  const searchSettings = settings.webSearchSettings.filter(setting => setting.source === "provider")
   return <Card>
     <CardHeader><CardTitle>{t("providerWebSearch.title")}</CardTitle><CardDescription>{t("providerWebSearch.hint")}</CardDescription></CardHeader>
     <CardContent className="flex flex-col gap-4">
-      {settings.webSearchSettings.length === 0 ? <SettingsEmpty>{t("providerWebSearch.empty")}</SettingsEmpty> : <FieldGroup>{settings.webSearchSettings.map(setting => {
+      {searchSettings.length === 0 ? <SettingsEmpty>{t("providerWebSearch.empty")}</SettingsEmpty> : <FieldGroup>{searchSettings.map(setting => {
         const knownMode = setting.status === "ready" && (setting.mode === null || ["disabled", "cached", "indexed", "live"].includes(setting.mode))
         const label = setting.provider === "openai" ? "OpenAI" : providers.find(provider => provider.id === setting.provider)?.displayName ?? setting.provider
         const error = setting.status === "error" ? t(setting.error === "invalid-mode" ? "openAiModelCatalog.searchInvalidMode" : setting.error === "invalid-document" ? "openAiModelCatalog.searchInvalidDocument" : "openAiModelCatalog.searchReadFailed") : t("common.unknown")

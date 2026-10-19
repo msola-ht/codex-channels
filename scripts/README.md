@@ -231,7 +231,7 @@
   脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
   Provider CLI 列表共同复用；同时按 `CODEX_HOME/auth.json` 是否存在返回 OpenAI 官方登录状态，
   未检测到鉴权文件时按未登录处理。
-  `loadProviderWebSearchSettings` 只读投影官方、受管及已配置自定义 Provider 的独立搜索覆盖，统一使用 `source=provider` 和 `ready`／`error`；缺省值为跟随全局，首次显式保存前保留既有受管切换 Profile 偏好。不推断会话实际模式，核心配置校验仍由原管理状态加载负责。
+  `loadProviderWebSearchSettings` 只读投影官方全局搜索值（`source=global`）及第三方受管、自定义 Provider 的独立覆盖（`source=provider`），使用 `ready`／`error` 状态；第三方缺省值为跟随全局，首次显式保存前保留既有受管切换 Profile 偏好。不推断会话实际模式，核心配置校验仍由原管理状态加载负责。
 - `provider-web-search-management.mjs` / `provider-web-search-management.d.mts`：精确已配置 Provider 的独立搜索模式预览与确认保存；复用 Provider 事务锁、资源修订及一次性确认，聚合与路径输入拒绝。显式保存同步移除对应已有独立 Profile 的顶层搜索值，其他字段保留；预览列明清理动作。写前生成唯一私有备份和 `.pending`，逐文件快照保护、原子写及失败回滚，成功回读后移除记录；不确定结果保留恢复材料，不自动重试或重启服务。
 - `model-provider-management-transaction.mjs` / `model-provider-management-transaction.d.mts`：统一
   串行 DeepSeek、OpenCode Go、自定义主 Provider 与默认模型设置的跨文件管理
@@ -445,7 +445,7 @@
   Codex Client 读取服务端默认模型与目录，投影启动设置，避免本地 OpenAI 默认模型覆盖聚合目录。
   透传 `-m`/`--model` 或 `-c model=...` 选择目录内精确模型时，按 Codex 的最终模型优先级使用目标模型的默认思考等级；
   服务端默认模型保留服务端思考等级，显式 `-c model_reasoning_effort=...` 优先，并尊重 `--` 参数边界。
-  官方、受管及自定义 Provider 统一读取独立搜索覆盖并注入启动默认值；跟随全局时不注入，用户显式透传参数继续按原生优先级处理。
+  第三方受管及自定义 Provider 读取独立搜索覆盖并注入启动默认值；官方及跟随全局时不注入，用户显式透传参数继续按原生优先级处理。
   自动审查沿用原生配置或用户显式设置，不按 Provider 或模型过滤、降级，也不为此固定请求模型。
   Remote 恢复及继承式分叉保留历史实际模型和 reviewer。
   聚合目录和 Provider 不允许由透传参数替换；
