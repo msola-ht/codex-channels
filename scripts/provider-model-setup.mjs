@@ -151,7 +151,7 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   if (!template) throw new Error("模板选项已变化，请重新打开模型管理");
   const sections = await prompts.multiselect({ message: "选择本次更新内容（空格勾选，回车确认）", options: [
     { value: "prompts", label: "提示词" },
-    { value: "capabilities", label: "能力参数", hint: "含基座异步提问与时钟声明；请确认平台支持模板中的参数" },
+    { value: "capabilities", label: provider.startsWith("cp-") ? "本地工具" : "能力参数", hint: provider.startsWith("cp-") ? "同步异步提问与时钟声明，保留其他工具和模型能力" : "含基座异步提问与时钟声明；请确认平台支持模板中的参数" },
     { value: "settings", label: "上下文与压缩设置", hint: "仅有效上下文比例、自动压缩阈值、截断策略；主动勾选才覆盖本地值" },
   ].filter(entry => options.availableSections.includes(entry.value)), initialValues: ["prompts"], required: true });
   if (prompts.isCancel(sections)) return { action: "back" };
@@ -159,7 +159,7 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   const preview = await previewProviderModelTemplateUpdate(input, { environment });
   output.write(`模板对比：${JSON.stringify(preview.provider)} / ${JSON.stringify(preview.model)}\n来源：${JSON.stringify(preview.source)} / ${JSON.stringify(preview.sourceModel)}\n修订：${JSON.stringify(preview.revision)}\n`);
   output.write(provider.startsWith("cp-")
-    ? "自定义模型可更新提示词和来源关联，以及主动勾选的有效上下文比例、自动压缩阈值和截断策略；当前上下文、最大窗口、思考等级、图片、工具支持及采样保留本地值。\n"
+    ? "自定义模型按勾选范围更新提示词、本地工具或上下文与压缩设置，并记录来源关联；模型自身能力、其他工具声明及采样保留本地值。\n"
     : "保留本地模型 ID、显示名称、当前上下文、默认思考等级和采样；能力更新可改变最大上下文，并补入基座异步提问与时钟声明，保留其他已有工具声明。\n");
   output.write("有效上下文比例、自动压缩阈值和截断策略默认保留本地值；仅主动选择「上下文与压缩设置」并确认差异后覆盖。\n");
   for (const change of preview.changes) {

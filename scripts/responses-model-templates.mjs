@@ -28,6 +28,7 @@ export async function loadCustomModelDraftTemplates() {
         sampling: { ...customModelSamplingDefaults },
         ...(suggested.instructions === undefined ? {} : { instructions: suggested.instructions }),
         ...(suggested.modelMessages === undefined ? {} : { modelMessages: structuredClone(suggested.modelMessages) }),
+        ...(suggested.experimentalSupportedTools === undefined ? {} : { experimentalSupportedTools: suggested.experimentalSupportedTools.filter(tool => ["send_user_message_async", "clock"].includes(tool)) }),
         ...(suggested.effectiveContextWindowPercent === undefined ? {} : { effectiveContextWindowPercent: suggested.effectiveContextWindowPercent }),
         ...(suggested.autoCompactTokenLimit === undefined ? {} : { autoCompactTokenLimit: suggested.autoCompactTokenLimit }),
         ...(suggested.truncationPolicy === undefined ? {} : { truncationPolicy: structuredClone(suggested.truncationPolicy) }),

@@ -34,6 +34,8 @@ export interface ModelDefinition {
   applyPatchToolType?: "freeform" | null;
   instructions?: string;
   modelMessages?: Record<string, unknown>;
+  /** Local Codex tool declarations; omission preserves historical v5 compilation. */
+  experimentalSupportedTools?: string[];
   supportsSearchTool?: boolean;
   /** Native web_search at this upstream; omitted means unknown. */
   supportsWebSearch?: boolean;

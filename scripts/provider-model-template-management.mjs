@@ -31,6 +31,7 @@ const fields = {
   custom: {
     prompts: ["instructions", "modelMessages"],
     settings: ["effectiveContextWindowPercent", "autoCompactTokenLimit", "truncationPolicy"],
+    capabilities: [],
   },
   managed: {
     prompts: ["base_instructions", "model_messages"],
@@ -113,9 +114,6 @@ async function buildPlan(input, environment) {
   if (source.revision !== input.revision) throw staleTarget();
   const state = await readTargetState(input.provider, environment);
   if (state.revision !== input.revision) throw staleTarget();
-  if (state.custom && input.sections.includes("capabilities")) {
-    throw invalid("invalid-input", "sections", "自定义模型模板仅可更新提示词和模板设置；上下文窗口、思考等级及其他能力须手动设置");
-  }
   if (!state.targets.some(target => target.model === input.model)) throw invalid("template-unavailable", "model", "模型不在当前账户目录中");
   const matches = source.templates.filter(template => template.source === input.template.source && template.model === input.template.model);
   if (matches.length !== 1 || !allowedTemplate(state, input.model, input.template)) {
@@ -302,6 +300,10 @@ async function buildCustomPlan(input, source, sections, state, environment) {
   const previous = state.previous;
   const before = previous.definitions.find(entry => entry.id === input.model);
   const after = { ...selectedFields(before, source.template, "custom", sections), template: { ...input.template } };
+  if (sections.includes("capabilities")) {
+    after.experimentalSupportedTools = [...new Set([...(before.experimentalSupportedTools ?? []),
+      ...(source.template.experimentalSupportedTools ?? []).filter(tool => ["send_user_message_async", "clock"].includes(tool))])];
+  }
   if (after.contextWindow > (after.maxContextWindow ?? after.contextWindow)
     || ((after.reasoningEfforts?.length ?? 0) === 0 ? after.defaultReasoningEffort !== null : !after.reasoningEfforts.includes(after.defaultReasoningEffort))) {
     throw invalid("template-conflict", "model", "新模板不支持当前窗口或默认思考等级；请先单独调整本地设置");

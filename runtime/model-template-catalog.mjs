@@ -47,6 +47,7 @@ export function readCustomBaseModelCatalog() {
 export function withCustomBaseTemplate(definition) {
   const base = readCustomBaseModelCatalog().models[0];
   return { ...definition,
+    experimentalSupportedTools: [...new Set([...(definition.experimentalSupportedTools ?? []), ...base.experimental_supported_tools.filter(tool => ["send_user_message_async", "clock"].includes(tool))])],
     template: definition.template ?? { source: "official", model: base.slug },
     modelMessages: localizeAutoReviewMessages(completeModelMessages(definition.modelMessages ?? {}, base.model_messages)) };
 }
