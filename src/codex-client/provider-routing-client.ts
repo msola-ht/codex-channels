@@ -708,13 +708,19 @@ export class ProviderRoutingClient {
     }
   }
 
-  startMcpOAuthLogin(
+  async startMcpOAuthLogin(
     ...args: Parameters<ProviderClientInstance["startMcpOAuthLogin"]>
   ): ReturnType<ProviderClientInstance["startMcpOAuthLogin"]> {
     const threadId = args[1];
-    return threadId
-      ? this.callForThread(threadId, (client) => client.startMcpOAuthLogin(...args), args[2])
-      : this.withPrimaryActivity((client) => client.startMcpOAuthLogin(...args), args[2]);
+    const provider = this.canonicalProvider(threadId
+      ? await this.resolveThreadProvider(threadId, undefined, args[2]) : this.primaryProvider);
+    args[2]?.();
+    return this.withProviderActivity(provider, async () => {
+      args[2]?.();
+      const client = await this.ensureClient(provider);
+      args[2]?.();
+      return { ...await client.startMcpOAuthLogin(...args), provider };
+    });
   }
 
   readMcpResource(

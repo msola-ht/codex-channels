@@ -85,6 +85,9 @@ export interface McpHealthReport {
 export interface McpOAuthLogin {
   server: string;
   authorizationUrl: string;
+  loginId: string;
+  /** Local App Server routing key, not an upstream OAuth field. */
+  provider: string;
 }
 
 export type McpLoginResult =

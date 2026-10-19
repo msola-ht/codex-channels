@@ -1730,9 +1730,11 @@ export abstract class GatewayComponentGraph {
         this.reasoningRepeatGuard.resetProvider(provider);
         this.providerNotificationGenerations.set(provider, (this.providerNotificationGenerations.get(provider) ?? 0) + 1);
         this.scheduledTasks?.toolHandler.cancelThreads((threadId) => this.codex.knownProvider(threadId) === provider);
-        this.conversationIdleReleaser?.cancelPending(new Set(this.router.allBindings()
+        const affectedThreads = new Set(this.router.allBindings()
           .filter((binding) => this.codex.knownProvider(binding.threadId) === provider)
-          .map((binding) => binding.threadId)));
+          .map((binding) => binding.threadId));
+        this.conversationIdleReleaser?.cancelPending(affectedThreads);
+        for (const threadId of affectedThreads) this.conversations.clearMcpLoginThread(threadId);
         this.turnExecution.reset(provider);
         this.autoApprovalReview.reset(provider);
         this.autoApprovalReviewNotifications.reset(provider);

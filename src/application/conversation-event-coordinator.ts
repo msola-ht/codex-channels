@@ -10,6 +10,8 @@ type ConversationEventUseCases = Pick<ConversationService,
   | "clearLunaReserveThread"
   | "clearLunaReserveAccountState"
   | "recoverLunaReserveAfterTurn"
+  | "handleMcpOAuthCompleted"
+  | "clearMcpLoginThread"
 >;
 
 interface ConversationEventEffects {
@@ -33,6 +35,10 @@ export class ConversationEventCoordinator {
   }
 
   handle(event: ConversationInputEvent): void {
+    if (event.type === "mcp.oauth.completed") {
+      this.conversations.handleMcpOAuthCompleted(event);
+      return;
+    }
     if (
       event.type === "turn.started"
       || event.type === "turn.completed"
@@ -78,6 +84,7 @@ export class ConversationEventCoordinator {
       || event.type === "thread.deleted"
     ) {
       this.conversations.clearLunaReserveThread(event.threadId);
+      this.conversations.clearMcpLoginThread(event.threadId);
     }
     if (
       event.type === "account.updated"

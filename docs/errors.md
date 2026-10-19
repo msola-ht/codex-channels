@@ -172,6 +172,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `mcp.server.usage` | 需要提供 MCP Server 名称或序号 | 未提供 MCP Server 名称 |
 | `mcp.server.not-found` | 指定的 MCP Server 不存在 | MCP Server 不存在 |
 | `mcp.oauth.unsupported` | 该 MCP Server 不支持 OAuth 登录 | 对不支持 OAuth 的 Server 执行 login |
+| `mcp.oauth.unavailable` | MCP 登录跟踪暂不可用，请先查询实际认证状态 | 登录处理已关闭、待处理容量或响应前通知超限 |
 | `mcp.thread.required` | 请先发送消息创建 Thread，或使用 /resume 恢复 Thread 后再登录 MCP Server | 未绑定 Thread 时执行 MCP login |
 | `mcp.resource.usage` | 需要提供有效的 MCP Resource URI | MCP resource 参数无效 |
 | `plugin.usage` | /plugin 用法提示 | 参数格式错误 |

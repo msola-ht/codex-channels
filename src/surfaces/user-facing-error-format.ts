@@ -17,6 +17,8 @@ export function formatSurfaceUserFacingError(
   surfaceLabel: "Telegram" | "飞书" | "微信",
 ): string {
   switch (error.code) {
+    case "mcp.oauth.unavailable":
+      return "MCP 登录跟踪暂不可用，请先用 /mcp 核对实际认证状态，再决定是否重新登录";
     case "hooks.usage":
       return "用法：/hooks [page N|列表选择标识|trust <标识>|enable <标识>|disable <标识>|confirm <一次性令牌>]";
     case "hooks.actor-required":

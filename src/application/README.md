@@ -30,7 +30,8 @@ Plan 预设/模型读取、模式保存、Queue 复核与 Turn 提交均保留�
 新 Turn 准备固定原绑定，创建成功后最终提交守卫改为核对新绑定，防止后续 Provider 等待把输入发到过期目标。
 Skill、Plugin、Agent 命令固定锁前目标，目录解析后复核，并将守卫传到最终 start/steer；扩展列表返回前也复核。
 MCP 登录与资源读取固定捕获的 Thread，目录查询后不得转向其他绑定；刷新各 Provider 的新请求分别守卫，
-已经提交的 OAuth/刷新结果仍照实际结算。
+已经提交的 OAuth/刷新结果仍照实际结算。OAuth 完成仅匹配本 Gateway 发起的最新登录：精确核对
+loginId、实际连接 Provider、Thread/server、原绑定与 Workspace 及授权；迟到、重复、转移后的结果不投递。
 会话列表固定查询开始时的工作区 ID/目录，目录搜索、轮数读取和缓存写入前复核，避免旧目录结果被记到新工作区。
 Permission Profile 分页与计划任务权限预检同样将实时守卫传到 Provider 等待及每次 RPC 尝试。
 显式账户查询携带原用户授权，后续 HTTP/RPC 与本地估算分别复核；带守卫的第三方请求独立执行，
@@ -61,8 +62,10 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   参数校验后映射到 `ScheduledTaskApplicationService`；将工具请求的取消和当前归属复核传到预览、写入及手动调度边界，失效请求不展示预览并撤销未交付确认令牌。创建和删除仍返回待确认预览，不直接改写 Store；已提交的写入不因取消而回滚。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标异步查询；`ConversationService` 作为统一用例入口委托执行。`/metrics`、可见会话页的本地 Turn 计数与周额度估算等待数据库 Worker，不在调用线程执行 SQL；账户快照按 Provider 排队，执行前拒绝取消及早于已确认额度序号的结果。只有写入成功才推进序号，较新观测保存失败不阻断旧有效结果；调用方取消等待后，已派发写入仍按实际确认结果更新缓存与序号。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
+  OAuth 关联最多保留 128 个、各十分钟；响应前每次请求暂存至多 8 条完成通知，每条错误上限 4,096 字符。
+  超限且无法匹配结果时明确要求查询实际状态；失败、Thread 关闭、断线及服务关闭清理关联，不撤销已提交登录。
 - `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态，并提供会话选择器 `resolveThread`（序号、精确 ID/名称或唯一 ID 前缀，歧义与缺失明确失败）；不修改绑定，不建立独立会话索引。派生轮数扫描每轮最多 10 秒、100 页，同 Thread 后台刷新合并，后台最多 3 个并发；关闭取消扫描和本地指标等待，拒绝迟到列表结果及缓存写入，超限时轮数保持未知。本地轮数指标读取失败降级为展示缓存或未知，不阻止权威列表返回。缓存读写、失效或删除失败后，本实例停止使用该缓存并报告固定操作分类；不返回旧缓存，不阻止权威事件归约或用户输入。失效和删除先更新代次，迟到扫描与本地指标结果既不回写也不展示。
-- `conversation-event-coordinator.ts`：在稳定输入事件归约前失效选择快照与展示缓存、处理待生效偏好和 Reserve 标记，归约后执行 Reserve 收尾；子代理跟踪和后台释放调度通过注入端口保持原顺序，不等待 RPC 或渠道输出。
+- `conversation-event-coordinator.ts`：在稳定输入事件归约前失效选择快照与展示缓存、处理待生效偏好和 Reserve 标记；OAuth 完成先经过 Application 登录关联，再交 Core 呈现。归约后执行 Reserve 收尾；子代理跟踪和后台释放调度通过注入端口保持原顺序，不等待 RPC 或渠道输出。
 - `turn-errors.ts`：把单次 Turn 失败归约为稳定的错误类型、错误码与安全文案；只读取已归约的错误对象，不执行 RPC、不生成平台输出。
 - `pagination.ts`：提供 Application 层共用的分页总数、页码校验、偏移/切片与一基序号；错误类型与文案仍由各调用点提供，不持有列表状态。
 - `bounded-map.ts`：只提供按插入顺序裁剪 Map 容量的内部操作；过期、键刷新、确认消费及计时器清理由服务保留。
@@ -222,12 +225,14 @@ Conversation，数字选择器只使用最近五分钟的内存快照，完整 I
 Thread 返回稳定概览与详情；命令结果携带工具、资源或模板的有界分页搜索视图，OAuth 登录不自动
 重试、要求当前会话已经绑定 Thread，且只对共享能力判断允许的认证状态开放；详情结果保留用户本次使用的原始选择器，供 Surface
 生成可继续执行的登录、浏览和资源读取命令；Bearer Token 返回结构化认证结果并明确提示无需 OAuth，
-资源读取只展示已经隐藏常见凭据的有界文本或二进制元数据。
+资源读取只展示已经隐藏常见凭据的有界文本或二进制元数据；请求/内容/目录/模板 URI 也在 Client 输出投影脱敏，
+实际读取仍使用用户提交的原 URI，展示值不能用作新的读取身份。
 Plugin 列表与详情只查询当前 Workspace 已安装项，
 详情只使用同一次 `plugin/installed` 返回的安全摘要，能力与适用套餐有界展示，不读取本机路径或远端 URL；
 Application 对同一已安装目录提供每页 8 项的本地分页过滤和只含需处理项的健康归约，保留原目录全局
 数字选择器，不调用 `plugin/search`；同时保留 Marketplace 加载失败计数，并仅在互斥区内确认仍为
-OpenAI Thread 后发送官方 mention；
+OpenAI Thread 后发送官方 mention；自动恢复确定实际 Thread 后与最终 start/steer 提交前再次复核 Provider，
+不把未绑定时的默认 OpenAI 身份用于放行其他 Provider 的历史会话；
 三个 Surface 共用同一 Application 边界。
 成功启动 Turn 后，模型、思考等级、服务层级和协作模式以 App Server 的 Thread 设置为准；
 Gateway 重启时通过恢复 Thread 和设置通知重新取得这些设置。`/plan` 无参数切换

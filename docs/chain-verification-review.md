@@ -711,3 +711,90 @@ interrupted 才提示。原始两次加摘要一次、跨 Item 两次加一次�
 真实 App Server 的 Queue 持久化/自动派发、真实回退与通知时序、Telegram 平台交互仍未观察；
 最终本地守卫之后的跨客户端变化不具有原子保证。未新增、维护或运行测试。
 提交门禁结果单独报告，不代替上述行为证据；本项提交后按清单进入 L16。
+
+### L16 Skill/Plugin、MCP 与 Hook
+
+**状态：已审查（附证据限制）。** 审查基线为 L06 提交 `111857e6`。
+本项分别验收 Skill/Plugin 实时解析与 Turn 引用、MCP 配置/资源/OAuth/刷新、Hook 精确内容与版本确认；
+主代理负责 Skill/Plugin，Sol 分别只读审查 MCP 和 Hook，复用 L03 未变化的授权证据。
+不运行真实 OAuth 或 Hook，不操作用户配置，不开放市场安装或任意 MCP Tool Call。
+
+**Skill/Plugin 子链。** 主代理已追踪命令解析→Workspace 目录→精确解析→自动恢复/绑定→Turn 编码与最终守卫。
+发现 **L16-F1**：未绑定时 `models.status` 默认 OpenAI，Plugin 初查放行后 `ensure` 可能自动恢复到其他
+Provider 的历史 Thread，原路径仍发送 mention。生产 ConversationService→真实 Router/模型服务、隔离
+目录与执行端口复现：入口 Provider 为 openai，最终提交记录为 other，返回了成功提交结果。
+现同时按实际 Thread 设置判断，并在自动恢复后的消费点和最终 start/steer 守卫复核，不修改通用恢复策略。
+修复后生产 CommandService→ConversationService→Client/适配器、隔离 RPC/Thread 端口观察：
+
+- OpenAI 正常返回 plugin.started，原任务文本与 `plugin://demo@local` mention 到达 history Thread，写入一次；
+  自动恢复 other、最终提交守卫前 Provider 变为 other 均返回 `plugin.provider.unsupported`，Turn 写入为零。
+- 两次 Plugin 目录读取之间停用插件，返回 `plugin.unavailable`，不发 Turn；两次查询均限定 `/isolated`。
+  Skill 正常返回 skill.started，实际协议输入为 `$demo hello` 文本和解析得到的绝对 SKILL.md 路径；
+  同名两个启用 Skill 明确拒绝，错误 cwd 返回 `skill.not-found`，均不发 Turn。
+- 生产适配器观察：系统 Skill、插件 Skill、禁用 Skill 不进入直接安装列表；相对路径和非 SKILL.md 拒绝调用。
+  Plugin 受管禁用不产生 invocable，ID 与 name/marketplace 不一致拒绝；摘要只保留来源类型和加载错误计数，
+  未传播来源路径或原始诊断。未改变目录数字选择器按本次权威目录解析的既有合同。
+- 锁定源码 `request_processors/catalog_processor.rs` 与 `plugins.rs` 确认 cwd 查询、Skill 官方缓存及
+  Plugin 已安装目录语义；本地每次调用重新查询不等于强制磁盘重扫，Skill 当前仍传 `forceReload: false`。
+  引用也不是文件内容哈希承诺；未观察真实目录文件替换与模型实际执行。
+
+**Hook 子链。** Sol 在源码定位阶段因模型容量中断，未交付完整结果；以下由主代理接手，不能计作独立审查通过。
+复用 L03 Actor/Workspace/Provider 等待守卫证据，补查适配器→Service 精确 key/hash/version→Client 单次
+batchWrite→Provider 修订与刷新→权威回读→共享格式器/渠道无损策略，未发现新增需修复问题。
+主代理内联生产 HookService→ProviderRouting→Client→隔离 RPC 实际观察：
+
+- 正常列表、信任预览与确认返回 trusted，写入 1 次，openai/second 各刷新一次；令牌重放返回
+  `hooks.review-expired`，写入保持 1 次。同 key 改 command/hash 或改变用户配置版本后确认均拒绝，写入 0 次。
+- second 刷新失败仍回读 trusted，结果明确携带 `refreshFailedProviders=[second]`；共享呈现包含“刷新未确认”，
+  不把其他实例运行状态当成成功。回读失败返回 `hooks.readback-failed`，写入仍为 1；
+  写出后响应丢失返回 `hooks.write-unconfirmed`，不重试且旧令牌失效。
+- 501 字符 command 无法无损展示，预览返回 `hooks.local-review-required`、写入 0 次。
+  适配器对 prompt/agent/MCP 缺完整内容不提供信任能力；实际投影 prompt 为 reviewable=false，
+  凭据脱敏或换行清理改变 command 也为 false。微信含下划线文本经生产无损策略拒绝，普通 command 可审查。
+- 官方 `hooks/src/engine/discovery.rs` 的哈希覆盖规范化事件、matcher/group 与处理器配置，
+  `trusted_hash == current_hash` 才是 trusted，不覆盖脚本文件内容。现有呈现已说明这个限制及信任不等于执行成功。
+  用户配置版本用于冲突保护，项目 Hook 在最终检查后仍可被外部改动；保存旧 hash 不会把新 hash 自动信任。
+  Provider 刷新失败保留落后修订，后续操作需成功刷新才能获准；此后续补刷路径按源码复核，未额外运行。
+
+**MCP 子链。** Sol 完成配置保存、OAuth 结果路由、资源读取与运行刷新四项只读审查；
+主代理核对报告对应源码，并修复确认问题、观察改动后的关联入口。
+
+- **L16-F2，OAuth 结果未关联登录尝试。** 原响应与通知都丢弃 loginId，Core 只按当前 Thread 绑定投递。
+  Sol 通过生产适配器/Core/格式器观察新登录成功后旧登录失败仍输出 `[true,false]`，旧结果投给转移后的
+  new-owner，第三方 Provider 的同 Thread 通知也投给 OpenAI 会话。固定官方响应/通知携带相同 loginId；
+  完成任务可在响应前运行，默认 OAuth 超时 300 秒，不能只在响应返回后登记。
+  现 Client 必须取得有效 loginId，ProviderRouting 返回实际连接路由键；Application 发起前登记有界关联，
+  响应前暂存、响应后精确匹配 Provider/Thread/server/loginId，并复核原绑定、Session、Workspace 与授权。
+  同会话同 server 的新尝试替换旧代次，成功/失败完成只消费一次；命令响应未知不自动重试。
+  事件协调器先关联后归约；无本 Gateway 登录、过期、转移、关闭或断线后的结果不直接按新绑定投递。
+  关联上限 128 个、期限十分钟，覆盖官方五分钟及调度余量；响应前上限 8 条，每条错误最多 4,096 字符，
+  超限且无法匹配时明确要求查询实际认证状态，关闭清空。不把关联取消解释为撤销服务端登录。
+- 主代理修复后生产 Command→Conversation/Extension→ProviderRouting→Client 与通知适配器→事件协调器→Core，
+  配合隔离 RPC、真实 Router/内存绑定观察：正常与通知早于响应均只投递 1 次；重复完成不重发；
+  旧失败与错 Provider 通知均不覆盖匹配的新成功。转移归属、同 Thread 更换 Session、撤权、Thread 关闭
+  都为完成输出 0、pending 0；缺 loginId 响应和 RPC 失败同样清理为 0。
+  两个重叠请求中旧响应或旧失败都不删除新占位，最终只投递 new；响应前九条不匹配通知返回
+  `mcp.oauth.unavailable` 并清空。推进关联期限、调用断线清理、服务关闭后完成均不投递且 pending 0。
+  断线实际 Socket 与十分钟墙钟等待未运行；观察通过设置该次关联期限和调用生产清理入口完成。
+- **L16-F3，资源 URI 绕过正文脱敏。** Sol 输入内容 URI 的 `api_key=placeholder-resource-key`，
+  正文同类字段已隐藏，生产格式器仍原样显示 URI。主代理将请求/内容/资源目录/模板 URI 的输出投影
+  统一使用现有凭据脱敏，RPC 输入保持原始含义。修复后生产 Client→适配器→格式器观察文本和二进制
+  内容、请求 URI、完整详情及 resources/templates 分页均不含占位凭据，显示 `[REDACTED]`；
+  捕获的实际 RPC URI 与原输入完全相同。没有把展示字符串用于自动重读，也没有新增通用元数据清洗。
+- **配置保存独立证据（Sol）。** `runMcpSetup`→真实 Client→隔离 RPC 新增成功 reads=2/writes=1，
+  expectedVersion=v1、replace、reloadUserConfig=true，关闭一次；取消 writes=0，版本冲突写一次且不重试。
+  回读不一致与合并认证冲突在 saved=true 后返回明确未确认，没有误报连接成功。编辑/删除共享保存函数
+  已按源码追踪，实际入口仅观察新增；未写真实用户文件。
+- **资源读取独立证据（Sol）。** 生产 Extension→ProviderRouting→Client→隔离 RPC，目录和资源请求均落在
+  third/thread-cp，格式器取得 usable resource text；目录响应期间换 Thread 后不读资源，坏 URI/撤权调用数为零。
+  10 项响应保留 7 项，文本合计 8,000 字符、首项 truncated=true、omitted=3，不含 Base64 正文；
+  1,000,001 字符文本及非法 Base64 拒绝。主代理 URI 修复未改变上述限额/调用守卫，复用对应证据。
+- **运行刷新独立证据（Sol）。** openai 慢成功、third 快失败，慢分支释放前整体仍未结束；
+  实际顺序为 openai-start→third-failed→openai-done→returned-error，等待已启动分支后传播失败。
+  未把配置保存、OAuth 完成、资源可读或刷新响应互相替代为就绪证据。
+
+**限制与交接。** 本项没有执行真实 OAuth、Hook、模型、App Server 或平台消息，未修改真实用户配置；
+真实认证结果、远端资源、刷新后 health 与平台呈现仍未观察。未新增、维护或运行测试；未新增文档。
+OAuth 关联与清理是各 OS 共用的进程内合同，未修改 Transport、服务模板或进程所有权；Windows/macOS 未运行观察。
+类型与边界检查先发现新增错误码尚未登记，补齐稳定错误码和呈现后已通过；提交门禁状态另行报告。
+提交后按既定顺序进入 L17，不据此宣布全项目验收完成。

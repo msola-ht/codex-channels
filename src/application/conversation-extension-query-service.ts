@@ -1,5 +1,7 @@
 import {
   UserFacingError,
+  conversationTargetKey,
+  type ConversationInputEvent,
   type ConversationTarget,
 } from "../conversation-core/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
@@ -35,11 +37,25 @@ export type ConversationExtensionQueryPort =
   & PluginQueryPort
   & PermissionQueryPort;
 
+type McpOAuthCompletion = Extract<ConversationInputEvent, { type: "mcp.oauth.completed" }>;
+interface PendingMcpLogin {
+  threadId: string;
+  server: string;
+  expiresAt: number;
+  isCurrent: () => void;
+  identity?: { loginId: string; provider: string };
+  early: McpOAuthCompletion[];
+  earlyOverflow?: boolean;
+}
+
 export class ConversationExtensionQueryService {
+  private readonly pendingMcpLogins = new Map<string, PendingMcpLogin>();
+  private mcpLoginsClosed = false;
   constructor(
     private readonly router: SessionRouter,
     private readonly models: ModelSelectionService,
     private readonly queries: ConversationExtensionQueryPort,
+    private readonly publishMcpCompletion: (event: McpOAuthCompletion) => void,
   ) {}
 
   modelState(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
@@ -195,6 +211,9 @@ export class ConversationExtensionQueryService {
   ): Promise<McpLoginResult> {
     assertAuthorized?.();
     const threadId = this.router.current(target)?.threadId;
+    const binding = this.router.current(target);
+    const sessionId = binding?.sessionId;
+    const workspace = this.router.workspace(target);
     const beforeSubmit = this.mcpThreadGuard(target, threadId, assertAuthorized);
     beforeSubmit();
     const server = resolveMcpServer(
@@ -217,10 +236,81 @@ export class ConversationExtensionQueryService {
         "请先发送消息创建 Session，或使用 /resume 恢复 Session 后再登录 MCP Server",
       );
     }
-    return {
-      type: "oauth",
-      ...await this.queries.startMcpOAuthLogin(server.name, threadId, beforeSubmit),
+    if (this.mcpLoginsClosed) throw new UserFacingError("mcp.oauth.unavailable", "MCP 登录处理已关闭");
+    this.pruneMcpLogins();
+    const key = JSON.stringify([conversationTargetKey(target), server.name]);
+    if (!this.pendingMcpLogins.has(key) && this.pendingMcpLogins.size >= 128) {
+      throw new UserFacingError("mcp.oauth.unavailable", "待处理 MCP 登录过多，请稍后重试");
+    }
+    const pending: PendingMcpLogin = {
+      threadId, server: server.name, expiresAt: Date.now() + 10 * 60_000, early: [],
+      isCurrent: () => {
+        beforeSubmit();
+        const current = this.router.current(target);
+        const currentWorkspace = this.router.workspace(target);
+        if (current !== binding || current?.sessionId !== sessionId
+          || currentWorkspace.id !== workspace.id || currentWorkspace.cwd !== workspace.cwd) {
+          throw new UserFacingError("command.authorization-changed", "MCP 登录所属会话已变化");
+        }
+      },
     };
+    this.pendingMcpLogins.set(key, pending);
+    try {
+      const login = await this.queries.startMcpOAuthLogin(server.name, threadId, () => {
+        pending.isCurrent();
+        if (this.pendingMcpLogins.get(key) !== pending || Date.now() >= pending.expiresAt) {
+          throw new UserFacingError("command.authorization-changed", "MCP 登录请求已失效");
+        }
+      });
+      if (this.pendingMcpLogins.get(key) === pending) {
+        pending.identity = { loginId: login.loginId, provider: login.provider };
+        const early = pending.early;
+        pending.early = [];
+        for (const event of early) this.handleMcpOAuthCompleted(event);
+        if (pending.earlyOverflow && this.pendingMcpLogins.get(key) === pending) {
+          throw new UserFacingError("mcp.oauth.unavailable", "MCP 登录完成通知超限，请查询实际认证状态");
+        }
+      }
+      return { type: "oauth", ...login };
+    } catch (error) {
+      if (this.pendingMcpLogins.get(key) === pending) this.pendingMcpLogins.delete(key);
+      throw error;
+    }
+  }
+
+  handleMcpOAuthCompleted(event: McpOAuthCompletion): void {
+    this.pruneMcpLogins();
+    for (const [key, pending] of this.pendingMcpLogins) {
+      if (pending.threadId !== event.threadId || pending.server !== event.name) continue;
+      try { pending.isCurrent(); } catch { this.pendingMcpLogins.delete(key); continue; }
+      if (!pending.identity) {
+        // Completion may precede the RPC response. Never buffer unbounded upstream text.
+        if (pending.early.length < 8 && (event.error?.length ?? 0) <= 4_096) pending.early.push(event);
+        else pending.earlyOverflow = true;
+        continue;
+      }
+      if (pending.identity.loginId !== event.loginId
+        || pending.identity.provider !== event.modelProvider) continue;
+      this.pendingMcpLogins.delete(key);
+      this.publishMcpCompletion(event);
+    }
+  }
+
+  closeMcpLogins(): void {
+    this.mcpLoginsClosed = true;
+    this.pendingMcpLogins.clear();
+  }
+
+  clearMcpLoginThread(threadId: string): void {
+    for (const [key, pending] of this.pendingMcpLogins) {
+      if (pending.threadId === threadId) this.pendingMcpLogins.delete(key);
+    }
+  }
+
+  private pruneMcpLogins(): void {
+    for (const [key, pending] of this.pendingMcpLogins) {
+      if (Date.now() >= pending.expiresAt) this.pendingMcpLogins.delete(key);
+    }
   }
 
   async readMcpResource(

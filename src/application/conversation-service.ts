@@ -49,6 +49,7 @@ import {
   gatewayUserMessageClientIdPrefix,
   usesOpenAiAccount,
   type ConversationTarget,
+  type ConversationInputEvent,
   type RateLimitSnapshot,
   type SurfaceId,
   type ThreadGoal,
@@ -429,6 +430,7 @@ export class ConversationService implements
       router,
       models,
       queries,
+      event => this.core.handle(event),
     );
     this.accountMetrics = new ConversationAccountMetricsService(
       queries,
@@ -636,6 +638,7 @@ export class ConversationService implements
 
   closeSessionQueries(): void {
     this.sessionQueries.close();
+    this.extensionQueries.closeMcpLogins();
   }
 
   prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" = "video"): PreparedAttachmentSubmission {
@@ -791,12 +794,17 @@ export class ConversationService implements
     }
     return this.authorizedLocked(target, assertAuthorized, async () => {
       const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
-      if ((this.models.status(target).modelProvider ?? "openai") !== "openai") {
-        throw new UserFacingError(
-          "plugin.provider.unsupported",
-          "Plugin 调用当前只支持 OpenAI Session",
-        );
-      }
+      const requirePluginProvider = () => {
+        const provider = this.router.modelSettings(target)?.modelProvider
+          ?? this.models.status(target).modelProvider ?? "openai";
+        if (provider !== "openai") {
+          throw new UserFacingError(
+            "plugin.provider.unsupported",
+            "Plugin 调用当前只支持 OpenAI Session",
+          );
+        }
+      };
+      requirePluginProvider();
       const workspace = this.router.workspace(target);
       const plugin = await this.extensionQueries.resolvePlugin(
         workspace.cwd,
@@ -823,7 +831,10 @@ export class ConversationService implements
           path: resolved.path,
         },
       ], { kind: "plugin", name: resolved.displayName },
-      threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized);
+      threadId => {
+        this.commandThreadGuard(target, threadId, assertAuthorized)();
+        requirePluginProvider();
+      }, assertAuthorized);
       return { ...submission, pluginName: resolved.displayName };
     });
   }
@@ -1543,6 +1554,14 @@ export class ConversationService implements
     assertAuthorized?: () => void,
   ): Promise<McpLoginResult> {
     return this.extensionQueries.loginMcpServer(target, selector, assertAuthorized);
+  }
+
+  handleMcpOAuthCompleted(event: Extract<ConversationInputEvent, { type: "mcp.oauth.completed" }>): void {
+    this.extensionQueries.handleMcpOAuthCompleted(event);
+  }
+
+  clearMcpLoginThread(threadId: string): void {
+    this.extensionQueries.clearMcpLoginThread(threadId);
   }
 
   readMcpResource(

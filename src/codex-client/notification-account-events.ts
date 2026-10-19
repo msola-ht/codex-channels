@@ -81,11 +81,13 @@ export function toMcpOAuthCompletedEvent(
   const params = asRecord(value);
   const threadId = strictNullableString(params?.threadId);
   const name = nonEmptyString(params?.name);
+  const loginId = nonEmptyString(params?.loginId);
   const success = params?.success;
   const rawError = params?.error;
   if (
     !threadId.valid
     || !name
+    || !loginId || loginId.length > 256
     || typeof success !== "boolean"
     || (rawError !== undefined && typeof rawError !== "string")
   ) {
@@ -94,6 +96,7 @@ export function toMcpOAuthCompletedEvent(
   return {
     type: "mcp.oauth.completed",
     threadId: threadId.value,
+    loginId,
     name,
     success,
     error: typeof rawError === "string"
