@@ -309,6 +309,9 @@ export class SurfaceManager {
         `未找到渠道账号：${surfaceAccountKey(target.surface, target.accountId)}`,
       );
     }
+    if (!this.active.has(surface)) {
+      throw new Error("渠道账号尚未就绪，无法发送渠道图片");
+    }
     if (surface.sendChannelImage === undefined) {
       throw new Error(`${target.surface} 渠道不支持发送图片`);
     }

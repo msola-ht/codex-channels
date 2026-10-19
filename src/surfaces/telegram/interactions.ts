@@ -67,7 +67,10 @@ export class TelegramInteractionPort implements InteractionPort {
     Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined
   >>();
   private readonly statusUpdates = new Set<Promise<void>>();
+  private readonly statusAbort = new AbortController();
   private closed = false;
+  private cleanupClosed = false;
+  private closePromise?: Promise<void>;
 
   constructor(
     private readonly bot: Bot,
@@ -295,6 +298,8 @@ export class TelegramInteractionPort implements InteractionPort {
       return false;
     }
     if (pending.request.type === "user-input") {
+      if (pending.request.expectedActorId !== undefined
+        && pending.request.expectedActorId !== String(context.from?.id)) return true;
       const completeAnswers = parseAnswers(pending.request, text);
       if (completeAnswers) {
         this.finish(
@@ -394,14 +399,20 @@ export class TelegramInteractionPort implements InteractionPort {
     return true;
   }
 
-  async close(): Promise<void> {
-    if (!this.closed) {
-      this.closed = true;
-    }
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
     this.cancelAll("Gateway 已停止");
+    this.closePromise = this.drainClose();
+    return this.closePromise;
+  }
+
+  private async drainClose(): Promise<void> {
     await waitAtMost(Promise.allSettled([...this.preparations]), 5_000);
+    this.cleanupClosed = true;
     const updates = Promise.allSettled([...this.statusUpdates]);
     await waitAtMost(updates, 5_000);
+    this.statusAbort.abort();
   }
 
   cancelAll(outcome = "连接已断开"): void {
@@ -487,7 +498,9 @@ export class TelegramInteractionPort implements InteractionPort {
     }
     const [, action, token] = data.split(":");
     const pending = token ? this.pending.get(token) : undefined;
-    if (!pending || String(context.chat?.id) !== pending.target.conversationId) {
+    if (!pending || String(context.chat?.id) !== pending.target.conversationId
+      || (pending.request.type === "user-input" && pending.request.expectedActorId !== undefined
+        && pending.request.expectedActorId !== String(context.from?.id))) {
       await context.answerCallbackQuery({ text: "该请求已失效" });
       return;
     }
@@ -789,22 +802,28 @@ export class TelegramInteractionPort implements InteractionPort {
     messageText: string,
     outcome: string,
   ): Promise<void> {
-    return this.queue.runOrdered(target.conversationId, (signal) =>
+    if (this.cleanupClosed) return Promise.resolve();
+    const update = this.queue.runOrdered(target.conversationId, (signal) =>
       this.executor.editMessageText(
         { chatId: target.conversationId, critical: true },
-        (requestSignal) => this.bot.api.editMessageText(
-          target.conversationId,
-          messageId,
-          `${messageText}\n\n处理结果：${escapeTelegramHtml(limitInteractionOutcome(messageText, outcome))}`,
-          {
-            parse_mode: "HTML",
-            reply_markup: { inline_keyboard: [] },
-          },
-          telegramAbortSignal(requestSignal),
-        ),
+        (requestSignal) => {
+          requestSignal.throwIfAborted();
+          return this.bot.api.editMessageText(
+            target.conversationId,
+            messageId,
+            `${messageText}\n\n处理结果：${escapeTelegramHtml(limitInteractionOutcome(messageText, outcome))}`,
+            {
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: [] },
+            },
+            telegramAbortSignal(requestSignal),
+          );
+        },
         signal,
-      )
-    ).then(() => undefined).catch((error) => {
+      ),
+      this.statusAbort.signal,
+    );
+    return waitForInteractionPreparation(this.statusAbort.signal, update).then(() => undefined).catch((error) => {
       this.logger.warn(
         {
           chatId: target.conversationId,

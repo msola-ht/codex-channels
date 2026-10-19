@@ -814,8 +814,8 @@ export abstract class GatewayComponentGraph {
         },
       },
       {
-        updateThreadApprovalsReviewer: (threadId, reviewer) =>
-          this.updateThreadApprovalsReviewer(threadId, reviewer),
+        updateThreadApprovalsReviewer: (threadId, reviewer, beforeSubmit) =>
+          this.updateThreadApprovalsReviewer(threadId, reviewer, beforeSubmit),
       },
       (target, actorId) => {
         this.requireRunning();
@@ -1004,6 +1004,9 @@ export abstract class GatewayComponentGraph {
       ? new ScheduledTaskComposition({
           stateDatabasePath: config.stateDatabasePath,
           registerConstructionCleanup,
+          releaseRecoveredThread: (threadId, isCurrent) => service.releaseBackgroundIfComplete(threadId, {
+            dispatchQueued: false, isCurrent,
+          }),
           router: this.router,
           codex: this.codex,
           turns: execution,
@@ -1049,7 +1052,12 @@ export abstract class GatewayComponentGraph {
       const workspace = this.workspaces.require(status.workspaceId);
       return JSON.stringify([workspace.id, workspace.cwd, status.threadId]);
     });
-    const commands = new ConversationCommandService(service, scheduledTaskUseCases, channelResetCredits);
+    const commands = new ConversationCommandService(service, scheduledTaskUseCases, channelResetCredits, (target, actorId) => {
+      this.requireRunning();
+      if (!actorId || !this.accessPolicy(target)?.isAllowed({ target, actorId })) {
+        throw new UserFacingError("command.authorization-changed", "当前命令操作者未获授权");
+      }
+    });
     const constructedSurfaces = new Set<SurfaceAdapter>();
     this.surfaceModules = createSurfaceModules({
       config,
@@ -1204,6 +1212,23 @@ export abstract class GatewayComponentGraph {
       timeoutMs: config.approvalTimeoutMs,
       targetForThread: (threadId) => this.router.targetForThread(threadId),
       currentThread: (target) => this.router.current(target)?.threadId,
+      captureAuthorization: (target) => {
+        const actors = this.bindings.actors(target).filter(actorId => this.accessPolicy(target)?.isAllowed({ target, actorId }));
+        if (this.stopping || actors.length !== 1) return undefined;
+        const actorId = actors[0]!;
+        let workspace: ReturnType<SessionRouter["workspace"]>;
+        try { workspace = this.router.workspace(target); } catch { return undefined; }
+        const workspaceId = workspace.id;
+        const cwd = workspace.cwd;
+        return { actorId, isCurrent: () => {
+          if (this.stopping || !this.bindings.actors(target).includes(actorId)
+            || !this.accessPolicy(target)?.isAllowed({ target, actorId })) return false;
+          try {
+            const current = this.router.workspace(target);
+            return current.id === workspaceId && current.cwd === cwd;
+          } catch { return false; }
+        } };
+      },
       submit: (target, threadId, text, isCurrent) => service.submitAsyncAnswer(target, threadId, text, isCurrent),
       warn: (event, message) => this.output.publish({
         type: "warning", target: event.target, threadId: event.threadId, message,
@@ -1297,6 +1322,9 @@ export abstract class GatewayComponentGraph {
       const threadStateEvent = toThreadStateEvent(notification);
       if (threadStateEvent) {
         this.threadState.handle(threadStateEvent);
+        if (threadStateEvent.type === "thread.settings.updated") {
+          this.conversations.observeLunaReserveSettings(threadStateEvent.threadId);
+        }
       }
       if (
         !coreEvent
@@ -1349,8 +1377,8 @@ export abstract class GatewayComponentGraph {
     this.bindingRestoreCoordinator();
   }
 
-  private async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review"): Promise<void> {
-    await this.codex.updateThreadApprovalsReviewer(threadId, reviewer);
+  private async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review", beforeSubmit?: () => void): Promise<void> {
+    await this.codex.updateThreadApprovalsReviewer(threadId, reviewer, beforeSubmit);
     // RPC confirmation observes notifications before the asynchronous inbound
     // consumers reduce them. Wait for the shared reducer before Application
     // reads the actual reviewer or the next command checks a same-value no-op.
@@ -1705,9 +1733,11 @@ export abstract class GatewayComponentGraph {
         this.reasoningRepeatGuard.resetProvider(provider);
         this.providerNotificationGenerations.set(provider, (this.providerNotificationGenerations.get(provider) ?? 0) + 1);
         this.scheduledTasks?.toolHandler.cancelThreads((threadId) => this.codex.knownProvider(threadId) === provider);
-        this.conversationIdleReleaser?.cancelPending(new Set(this.router.allBindings()
+        const affectedThreads = new Set(this.router.allBindings()
           .filter((binding) => this.codex.knownProvider(binding.threadId) === provider)
-          .map((binding) => binding.threadId)));
+          .map((binding) => binding.threadId));
+        this.conversationIdleReleaser?.cancelPending(affectedThreads);
+        for (const threadId of affectedThreads) this.conversations.clearMcpLoginThread(threadId);
         this.turnExecution.reset(provider);
         this.autoApprovalReview.reset(provider);
         this.autoApprovalReviewNotifications.reset(provider);

@@ -226,7 +226,8 @@ export class FeishuInteractionPort implements InteractionPort {
     const authorizedActors = this.actorRegistry.actors(target).filter(
       (actorId) => this.access!.isAllowed({ target, actorId }),
     );
-    if (authorizedActors.length !== 1) {
+    if (authorizedActors.length !== 1 || (request.type === "user-input"
+      && request.expectedActorId !== undefined && request.expectedActorId !== authorizedActors[0])) {
       return safeInteractionDecision(request);
     }
 

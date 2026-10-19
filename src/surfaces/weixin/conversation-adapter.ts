@@ -27,7 +27,7 @@ import {
 } from "../output-copy.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { sanitizeWeixinMarkdownText } from "./markdown-sanitize.js";
-import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { SurfaceInputBatcher } from "../surface-input-batcher.js";
 import {
   formatWeixinCommandText,
   renderWeixinCommandResult,
@@ -105,9 +105,10 @@ export type WeixinConversationMessage =
     };
 
 export class WeixinConversationAdapter {
-  private readonly inputs: SurfaceInputCoalescer;
+  private readonly inputs: SurfaceInputBatcher;
   private readonly handlingLocks = new Map<string, Promise<void>>();
   private nextSequence = 0;
+  private closed = false;
 
   constructor(
     private readonly conversations: Pick<
@@ -130,8 +131,12 @@ export class WeixinConversationAdapter {
     private readonly audios?: Pick<WeixinAudioPort, "download">,
     private readonly videos?: Pick<WeixinVideoStore, "download" | "retain" | "discard">,
   ) {
-    this.inputs = new SurfaceInputCoalescer(
-      (target, input) => conversations.submit(target, input),
+    this.inputs = new SurfaceInputBatcher(
+      (target, input, actorId) => conversations.submit(
+        target,
+        input,
+        () => !this.closed && this.inputOptions.isAllowed?.(target, actorId) === true,
+      ),
       inputOptions,
     );
   }
@@ -342,6 +347,8 @@ export class WeixinConversationAdapter {
         await this.conversations.submit(
           message.target,
           formatQuotedInput(message.text, message.quotedText),
+          () => !this.closed && !signal?.aborted
+            && this.inputOptions.isAllowed?.(message.target, message.actorId) === true,
         );
         return;
       }
@@ -446,6 +453,7 @@ export class WeixinConversationAdapter {
   }
 
   close(): Promise<void> {
+    this.closed = true;
     return this.inputs.close();
   }
 

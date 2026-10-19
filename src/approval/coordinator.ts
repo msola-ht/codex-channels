@@ -232,6 +232,17 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
         };
       }
       case "permissions": {
+        const detail = [
+          request.reason ? `原因：${approvalPreview(request.reason)}` : undefined,
+          "请求权限（完整 JSON；仅本次 Turn 有效）：",
+          // Escape string values before Surface Markdown sanitizers can alter paths/globs.
+          JSON.stringify(request.permissions, null, 2).replace(/"(?:\\.|[^"\\])*"/gu,
+            value => approvalPreview(JSON.parse(value) as string)),
+        ].filter(Boolean).join("\n\n");
+        if (Buffer.byteLength(detail, "utf8") > 3_000) {
+          this.logger?.warn({ ...metadata, reason: "permissions-preview-too-large" }, "临时权限审批无法完整展示，已安全拒绝");
+          return safeDecline(request);
+        }
         const decision = await requestInteraction({
           type: "approval",
           requestId,
@@ -240,7 +251,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           turnId: request.turnId,
           itemId: request.itemId,
           title: title("Codex 请求临时权限"),
-          detail: request.reason ?? JSON.stringify(request.permissions, null, 2),
+          detail,
           allowSession: false,
           expiresInMs: this.timeoutMs,
         });

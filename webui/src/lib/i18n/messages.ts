@@ -716,6 +716,7 @@ const zh = {
       metrics: "指标保留天数必须为 1–3650 之间的整数，最大行数必须为 1000–10000000 之间的整数。",
       modelLength: "模型 ID 不得超过 256 个字符。",
       identityLength: "客户端名称、版本与终端标识不得超过 64 个字符，标题不得超过 128 个字符，上游 User-Agent 不得超过 512 个字符。",
+      identityFormat: "身份字段格式无效。名称、版本和终端标识不能包含空白或控制字符；终端标识使用终端名或终端名/版本。跟随 CLI 版本时请使用官方 TUI 名称与完整 User-Agent。",
     },
     unavailable: "管理操作暂不可用，请检查服务状态后重试。",
     taskMissing: "管理任务已不存在，请刷新列表。",
@@ -1168,6 +1169,7 @@ const zh = {
   common: {
     notifications: "通知",
     taskNotificationsUnavailable: "任务通知暂不可用，请手动刷新核对状态。",
+    taskAuditDegraded: "部分任务的审计记录不完整；任务结果保持不变。请检查数据目录权限和磁盘空间，不要为补写审计重复执行任务。",
     close: "关闭",
     sidebar: "侧栏导航",
     sidebarDescription: "浏览页面与本地服务信息。",
@@ -2362,6 +2364,7 @@ const en: Messages = {
       metrics: "Metrics retention days must be an integer between 1 and 3650; maximum rows must be an integer between 1000 and 10000000.",
       modelLength: "The model ID must be at most 256 characters.",
       identityLength: "Client name, version, and terminal identity must be at most 64 characters; title at most 128 characters; upstream User-Agent at most 512 characters.",
+      identityFormat: "Invalid identity fields. Name, version, and terminal identity must not contain whitespace or control characters; use a terminal name or name/version. When following the CLI version, use the official TUI name and complete User-Agent.",
     },
     unavailable: "Management is temporarily unavailable. Check the service status and try again.",
     taskMissing: "This management task no longer exists. Refresh the list.",
@@ -2814,6 +2817,7 @@ const en: Messages = {
   common: {
     notifications: "Notifications",
     taskNotificationsUnavailable: "Task notifications are unavailable. Refresh manually to check the status.",
+    taskAuditDegraded: "Audit records for some tasks are incomplete; task results are unchanged. Check data directory permissions and disk space. Do not rerun tasks to repair audit records.",
     close: "Close",
     sidebar: "Sidebar navigation",
     sidebarDescription: "Browse pages and local service information.",

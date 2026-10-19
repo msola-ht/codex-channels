@@ -19,7 +19,7 @@ import {
   gatewayRequestFailedText,
   interactionStoppedText,
 } from "../output-copy.js";
-import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { SurfaceInputBatcher } from "../surface-input-batcher.js";
 import { formatQuotedInput } from "../quoted-input.js";
 
 import type {
@@ -79,7 +79,7 @@ const unsupportedMessageLinkText = [
 ].join("\n");
 
 export class FeishuConversationAdapter {
-  private readonly inputs: SurfaceInputCoalescer;
+  private readonly inputs: SurfaceInputBatcher;
   private nextInputSequence = 0;
   private readonly videoCancellation = new AbortController();
 
@@ -127,8 +127,13 @@ export class FeishuConversationAdapter {
       debugEnabled?: boolean;
     } = { quietWindowMs: 0 },
   ) {
-    this.inputs = new SurfaceInputCoalescer(
-      (target, input) => conversations.submit(target, input),
+    this.inputs = new SurfaceInputBatcher(
+      (target, input, actorId) => conversations.submit(
+        target,
+        input,
+        () => !this.videoCancellation.signal.aborted
+          && this.inputOptions.access?.isAllowed({ target, actorId }) === true,
+      ),
       inputOptions,
     );
   }
@@ -278,6 +283,8 @@ export class FeishuConversationAdapter {
         () => this.conversations.submit(
           message.target,
           formatQuotedInput(message.text, quotedText),
+          () => !this.videoCancellation.signal.aborted
+            && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
         ),
       );
       this.settleTurnReplyTarget(
@@ -363,7 +370,7 @@ export class FeishuConversationAdapter {
         const result = await this.commands.selectAutoReview(target, {
           threadId: match[2]!,
           enabled: match[1] === "on",
-        });
+        }, actorId);
         const rendered = renderFeishuCommandResult(result);
         if (rendered !== null) this.notifyMarkdown(target.conversationId, rendered);
         return;

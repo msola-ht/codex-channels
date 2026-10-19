@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { TextAttachmentStore, textAttachmentBody } from "../text-attachment-store.js";
 import { videoAttachmentBody } from "../video-attachment-store.js";
+import { SurfaceShutdown } from "../surface-shutdown.js";
 import { Bot, type Context } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
@@ -42,7 +43,7 @@ import {
   interactionStoppedText,
 } from "../output-copy.js";
 import { formatTextFileTooLarge } from "../text-file-copy.js";
-import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { SurfaceInputBatcher } from "../surface-input-batcher.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { surfaceCommandAliases } from "../slash-command.js";
@@ -150,7 +151,7 @@ export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
 
 export type TelegramConversationUseCases =
   & Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">
-  & Pick<ConversationSessionUseCases, "status" | "statusForDisplay" | "listWorkspaces">
+  & Pick<ConversationSessionUseCases, "status" | "statusForDisplay" | "listWorkspaces" | "selectedWorkspaceId">
   & Pick<ConversationExtensionUseCases, "modelState" | "listPlugins">;
 
 export function createTelegramSurface(
@@ -186,7 +187,7 @@ export class TelegramSurface {
   private readonly videoInput: TelegramVideoInput | undefined;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandExecutor;
-  private readonly inputs: SurfaceInputCoalescer;
+  private readonly inputs: SurfaceInputBatcher;
   private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
   private readonly now: () => number;
   private readonly autoReviewSelections = new Map<string, {
@@ -198,6 +199,7 @@ export class TelegramSurface {
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
   private stopping = false;
+  private stopPromise: Promise<void> | undefined;
 
   constructor(
     token: string,
@@ -267,8 +269,12 @@ export class TelegramSurface {
       debugEnabled: this.debugEnabled,
     });
     this.output = this.outbox;
-    this.inputs = new SurfaceInputCoalescer(
-      (inputTarget, input) => service.submit(inputTarget, input),
+    this.inputs = new SurfaceInputBatcher(
+      (inputTarget, input, actorId) => service.submit(
+        inputTarget,
+        input,
+        () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
+      ),
       {
         quietWindowMs: options.inputQuietWindowMs ?? 1_000,
       },
@@ -333,6 +339,19 @@ export class TelegramSurface {
     return this.output.sendChannelImage(conversationId, imagePath);
   }
 
+  private queryGuard(target: ConversationTarget, actorId: string): () => void {
+    const workspaceId = this.service.selectedWorkspaceId(target);
+    const cwd = this.service.listWorkspaces().find(workspace => workspace.id === workspaceId)?.cwd;
+    return () => {
+      const currentId = this.service.selectedWorkspaceId(target);
+      const currentCwd = this.service.listWorkspaces().find(workspace => workspace.id === currentId)?.cwd;
+      if (this.stopping || !this.access.isAllowed({ target, actorId })
+        || cwd === undefined || currentId !== workspaceId || currentCwd !== cwd) {
+        throw new UserFacingError("command.authorization-changed", "命令授权已变化，请重新发起操作");
+      }
+    };
+  }
+
   async presentScheduledTaskConfirmation(
     target: ConversationTarget,
     actorId: string,
@@ -364,24 +383,28 @@ export class TelegramSurface {
     this.lifecycle.start();
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    this.stopPromise ??= this.stopOnce();
+    return this.stopPromise;
+  }
+
+  private async stopOnce(): Promise<void> {
+    const shutdown = new SurfaceShutdown();
     this.stopping = true;
-    const videoClose = this.videoInput?.close();
-    try {
-      const lifecycleStop = this.lifecycle.stop();
-      await videoClose;
-      await this.inputs.close();
-      await this.textFileInput.close?.();
-      this.imageStore.close();
-      this.audioStore.close();
-      this.pluginTaskPrompts.clear();
-      this.autoReviewSelections.clear();
-      await this.interactions.close();
-      await this.outbox.close();
-      await lifecycleStop;
-    } finally {
-      this.proxyAgent?.destroy();
-    }
+    const videoClose = shutdown.run("videos", () => this.videoInput?.close());
+    const lifecycleStop = shutdown.run("lifecycle", () => this.lifecycle.stop());
+    await videoClose;
+    await shutdown.run("inputs", () => this.inputs.close());
+    await shutdown.run("files", () => this.textFileInput.close?.());
+    await shutdown.run("images", () => this.imageStore.close());
+    await shutdown.run("audios", () => this.audioStore.close());
+    this.pluginTaskPrompts.clear();
+    this.autoReviewSelections.clear();
+    await shutdown.run("interactions", () => this.interactions.close());
+    await shutdown.run("outbox", () => this.outbox.close());
+    await lifecycleStop;
+    await shutdown.run("proxy agent", () => this.proxyAgent?.destroy());
+    shutdown.finish();
   }
 
   replaceNotificationRecipients(recipients: ReadonlySet<number>): void {
@@ -466,7 +489,7 @@ export class TelegramSurface {
       const result = await this.commands.selectAutoReview(callbackTarget, {
         threadId: pending.threadId,
         enabled: context.match[1] === "on",
-      });
+      }, String(context.from.id));
       try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
       catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "当前会话审批按钮清理失败"); }
       await renderTelegramCommandResult(context, result);
@@ -485,6 +508,7 @@ export class TelegramSurface {
         target(context),
         "workspace",
         workspace.id,
+        String(context.from.id),
       );
       await context.answerCallbackQuery({ text: `已切换到 ${workspace.id}` });
       await renderTelegramCommandResult(
@@ -496,9 +520,11 @@ export class TelegramSurface {
       /^mp:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget);
+        const guard = this.queryGuard(modelTarget, String(context.from.id));
+        const selectionScope = this.service.status(modelTarget).selectionScope;
+        const state = await this.service.modelState(modelTarget, guard);
         if (
-          telegramModelSelectionToken(state) !== context.match[2]
+          telegramModelSelectionToken(state, String(context.from.id)) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -517,10 +543,15 @@ export class TelegramSurface {
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
+        guard();
+        if (this.service.status(modelTarget).selectionScope !== selectionScope) {
+          throw new UserFacingError("model.selection.expired", "会话已变化，请重新发送 /model 选择");
+        }
         const result = await this.commands.execute(
           modelTarget,
           "model",
           provider,
+          String(context.from.id),
         );
         await renderTelegramCommandResult(
           context,
@@ -532,9 +563,11 @@ export class TelegramSurface {
       /^ms:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget);
+        const guard = this.queryGuard(modelTarget, String(context.from.id));
+        const selectionScope = this.service.status(modelTarget).selectionScope;
+        const state = await this.service.modelState(modelTarget, guard);
         if (
-          telegramModelSelectionToken(state) !== context.match[2]
+          telegramModelSelectionToken(state, String(context.from.id)) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -552,10 +585,14 @@ export class TelegramSurface {
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
+        guard();
+        if (this.service.status(modelTarget).selectionScope !== selectionScope) {
+          throw new UserFacingError("model.selection.expired", "会话已变化，请重新发送 /model 选择");
+        }
         const result = await this.commands.selectModel(modelTarget, {
           provider: selected.provider ?? "openai",
           model: selected.model,
-        });
+        }, String(context.from.id));
         await renderTelegramCommandResult(
           context,
           result,
@@ -566,9 +603,11 @@ export class TelegramSurface {
       /^me:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget);
+        const guard = this.queryGuard(modelTarget, String(context.from.id));
+        const selectionScope = this.service.status(modelTarget).selectionScope;
+        const state = await this.service.modelState(modelTarget, guard);
         if (
-          telegramModelSelectionToken(state) !== context.match[2]
+          telegramModelSelectionToken(state, String(context.from.id)) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -589,10 +628,15 @@ export class TelegramSurface {
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
+        guard();
+        if (this.service.status(modelTarget).selectionScope !== selectionScope) {
+          throw new UserFacingError("model.selection.expired", "会话已变化，请重新发送 /model 选择");
+        }
         const result = await this.commands.execute(
           modelTarget,
           "effort",
           effort,
+          String(context.from.id),
         );
         await renderTelegramCommandResult(
           context,
@@ -658,6 +702,7 @@ export class TelegramSurface {
         target(context),
         "plugin",
         `list ${context.match[1]}`,
+        String(context.from.id),
       );
       await renderTelegramCommandResult(
         context,
@@ -684,7 +729,7 @@ export class TelegramSurface {
       async (context) => {
         await context.answerCallbackQuery({ text: "正在选择 Plugin" });
         const pluginTarget = target(context);
-        const matches = (await this.service.listPlugins(pluginTarget)).plugins.filter(
+        const matches = (await this.service.listPlugins(pluginTarget, this.queryGuard(pluginTarget, String(context.from.id)))).plugins.filter(
           (plugin) => telegramPluginSelectionToken(plugin.id) === context.match[1],
         );
         if (matches.length !== 1) {
@@ -865,6 +910,7 @@ export class TelegramSurface {
           target(context),
           "plugin",
           `${pluginPrompt.pluginId} ${context.message.text.trim()}`,
+          String(context.from.id),
         );
         await renderTelegramCommandResult(
           context,
@@ -1311,11 +1357,12 @@ export class TelegramSurface {
     context: Context,
     command: ConversationCommandName,
   ): Promise<void> {
+    if (!context.from) throw new UserFacingError("command.authorization-changed", "无法确认命令操作者");
     const result = await this.commands.execute(
       target(context),
       command,
       commandArguments(context),
-      context.from ? String(context.from.id) : undefined,
+      String(context.from.id),
     );
     if (result.kind === "auto-review") {
       await this.renderAutoReviewResult(context, result);

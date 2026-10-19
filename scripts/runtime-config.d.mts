@@ -23,6 +23,7 @@ export function initializeUserData(options?: {
 
 export function requireUserConfig(
   environment?: NodeJS.ProcessEnv,
+  options?: { readOnly?: boolean },
 ): RuntimeConfigLocation;
 
 export function locateUserConfig(

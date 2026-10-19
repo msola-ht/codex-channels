@@ -37,7 +37,7 @@ export class ScheduleValidationError extends Error {
 }
 
 export function isValidIanaTimeZone(timezone: unknown): timezone is string {
-  if (typeof timezone !== "string" || !timezone.trim()) return false;
+  if (typeof timezone !== "string" || !timezone.trim() || /^[+-]/u.test(timezone.trim())) return false;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format();
     return true;

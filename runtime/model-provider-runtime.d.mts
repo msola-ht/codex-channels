@@ -223,6 +223,7 @@ export interface ConfiguredCustomPrimaryModelProvider {
 }
 
 export const customPrimaryProviderProfileName: "sf-custom";
+export function isValidCustomProviderApiKey(value: unknown): value is string;
 export function customSwitchingProviderProfileName(provider: string): string;
 export function customPrimaryProviderCredentialEnvironmentKey(provider: string, version?: string): string;
 export function customPrimaryProviderCredentialPath(environment: NodeJS.ProcessEnv | undefined, provider: string, environmentKey: string): string;

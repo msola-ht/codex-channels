@@ -305,9 +305,10 @@ export class ProviderRoutingClient {
     return this.clients.has(this.canonicalProvider(provider));
   }
 
-  listModelsForProvider(provider: string): ReturnType<ProviderClientInstance["listModels"]> {
+  listModelsForProvider(provider: string, beforeSubmit?: () => void): ReturnType<ProviderClientInstance["listModels"]> {
+    beforeSubmit?.();
     return this.withProviderActivity(provider, async () =>
-      (await this.ensureClient(provider)).listModels());
+      (await this.ensureClient(provider)).listModels(beforeSubmit));
   }
 
   /**
@@ -324,14 +325,29 @@ export class ProviderRoutingClient {
   async listThreads(
     ...args: Parameters<ProviderClientInstance["listThreads"]>
   ): ReturnType<ProviderClientInstance["listThreads"]> {
+    const beforeSubmit = args[1]?.beforeSubmit;
+    let guardFailure: { error: unknown } | undefined;
+    const checkCurrent = beforeSubmit ? () => {
+      if (guardFailure) throw guardFailure.error;
+      try { beforeSubmit(); }
+      catch (error) {
+        guardFailure = { error };
+        throw error;
+      }
+    } : undefined;
+    checkCurrent?.();
+    const options = { ...args[1], ...(checkCurrent ? { beforeSubmit: checkCurrent } : {}) };
     const providers = [...this.clients.keys()].filter((provider) =>
       provider === this.primaryProvider || this.connectedProviders.has(provider));
     const results = await Promise.allSettled(providers.map((provider) =>
-      this.withProviderOperation(provider, async () => ({
-        provider,
-        threads: await (await this.ensureClient(provider)).listThreads(...args),
-      }))
+      this.withProviderOperation(provider, async () => {
+        checkCurrent?.();
+        const client = await this.ensureClient(provider);
+        checkCurrent?.();
+        return { provider, threads: await client.listThreads(args[0], options) };
+      })
     ));
+    checkCurrent?.();
     const pages = results.flatMap((result) =>
       result.status === "fulfilled" ? [result.value] : []
     );
@@ -381,8 +397,9 @@ export class ProviderRoutingClient {
   async readThread(
     ...args: Parameters<ProviderClientInstance["readThread"]>
   ): ReturnType<ProviderClientInstance["readThread"]> {
-    const [threadId, signal] = args;
+    const [threadId, signal, beforeSubmit] = args;
     const read = async (): Promise<ThreadSnapshot> => {
+      beforeSubmit?.();
       signal?.throwIfAborted();
       const provider = this.threadProviders.get(threadId);
       if (provider) {
@@ -400,6 +417,7 @@ export class ProviderRoutingClient {
         signal?.throwIfAborted();
         return client.readThread(...args);
       });
+      beforeSubmit?.();
       signal?.throwIfAborted();
       this.assertReadThread(canonical, threadId);
       this.rememberThread(canonical);
@@ -582,13 +600,13 @@ export class ProviderRoutingClient {
   listThreadTurns(
     ...args: Parameters<ProviderClientInstance["listThreadTurns"]>
   ): ReturnType<ProviderClientInstance["listThreadTurns"]> {
-    return this.callForThread(args[0], (client) => client.listThreadTurns(...args));
+    return this.callForThread(args[0], (client) => client.listThreadTurns(...args), args[1]?.beforeSubmit);
   }
 
   revertThread(
     ...args: Parameters<ProviderClientInstance["revertThread"]>
   ): ReturnType<ProviderClientInstance["revertThread"]> {
-    return this.callForThread(args[0], (client) => client.revertThread(...args));
+    return this.callForThread(args[0], (client) => client.revertThread(...args), args[2]);
   }
 
   cancelPendingInput(threadId: string): boolean {
@@ -599,25 +617,25 @@ export class ProviderRoutingClient {
   interruptTurn(
     ...args: Parameters<ProviderClientInstance["interruptTurn"]>
   ): ReturnType<ProviderClientInstance["interruptTurn"]> {
-    return this.callForThread(args[0], (client) => client.interruptTurn(...args));
+    return this.callForThread(args[0], (client) => client.interruptTurn(...args), args[2]);
   }
 
   setThreadName(
     ...args: Parameters<ProviderClientInstance["setThreadName"]>
   ): ReturnType<ProviderClientInstance["setThreadName"]> {
-    return this.callForThread(args[0], (client) => client.setThreadName(...args));
+    return this.callForThread(args[0], (client) => client.setThreadName(...args), args[2]);
   }
 
   setThreadPinned(
     ...args: Parameters<ProviderClientInstance["setThreadPinned"]>
   ): ReturnType<ProviderClientInstance["setThreadPinned"]> {
-    return this.callForThread(args[0], (client) => client.setThreadPinned(...args));
+    return this.callForThread(args[0], (client) => client.setThreadPinned(...args), args[2]);
   }
 
   compactThread(
     ...args: Parameters<ProviderClientInstance["compactThread"]>
   ): ReturnType<ProviderClientInstance["compactThread"]> {
-    return this.callForThread(args[0], (client) => client.compactThread(...args));
+    return this.callForThread(args[0], (client) => client.compactThread(...args), args[1]);
   }
 
   async forkThread(
@@ -649,7 +667,7 @@ export class ProviderRoutingClient {
   startReview(
     ...args: Parameters<ProviderClientInstance["startReview"]>
   ): ReturnType<ProviderClientInstance["startReview"]> {
-    return this.callForThread(args[0], (client) => client.startReview(...args));
+    return this.callForThread(args[0], (client) => client.startReview(...args), args[2]);
   }
 
   listMcpServers(
@@ -657,8 +675,8 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["listMcpServers"]> {
     const threadId = args[0];
     return threadId
-      ? this.callForThread(threadId, (client) => client.listMcpServers(...args))
-      : this.withPrimaryActivity((client) => client.listMcpServers(...args));
+      ? this.callForThread(threadId, (client) => client.listMcpServers(...args), args[2])
+      : this.withPrimaryActivity((client) => client.listMcpServers(...args), args[2]);
   }
 
   listMcpServerDetails(
@@ -666,17 +684,21 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["listMcpServerDetails"]> {
     const threadId = args[0];
     return threadId
-      ? this.callForThread(threadId, (client) => client.listMcpServerDetails(...args))
-      : this.withPrimaryActivity((client) => client.listMcpServerDetails(...args));
+      ? this.callForThread(threadId, (client) => client.listMcpServerDetails(...args), args[1])
+      : this.withPrimaryActivity((client) => client.listMcpServerDetails(...args), args[1]);
   }
 
-  async reloadMcpServers(): Promise<void> {
+  async reloadMcpServers(signal?: AbortSignal, beforeSubmit?: () => void): Promise<void> {
+    beforeSubmit?.();
     const providers = [...this.clients.keys()].filter((provider) =>
       this.connectedProviders.has(provider));
     const results = await Promise.allSettled(
-      providers.map((provider) => this.withProviderOperation(provider, async () =>
-        (await this.ensureClient(provider)).reloadMcpServers()
-      )),
+      providers.map((provider) => this.withProviderOperation(provider, async () => {
+        beforeSubmit?.();
+        const client = await this.ensureClient(provider);
+        beforeSubmit?.();
+        return client.reloadMcpServers(signal, beforeSubmit);
+      })),
     );
     const failure = results.find(
       (result): result is PromiseRejectedResult => result.status === "rejected",
@@ -686,13 +708,19 @@ export class ProviderRoutingClient {
     }
   }
 
-  startMcpOAuthLogin(
+  async startMcpOAuthLogin(
     ...args: Parameters<ProviderClientInstance["startMcpOAuthLogin"]>
   ): ReturnType<ProviderClientInstance["startMcpOAuthLogin"]> {
     const threadId = args[1];
-    return threadId
-      ? this.callForThread(threadId, (client) => client.startMcpOAuthLogin(...args))
-      : this.withPrimaryActivity((client) => client.startMcpOAuthLogin(...args));
+    const provider = this.canonicalProvider(threadId
+      ? await this.resolveThreadProvider(threadId, undefined, args[2]) : this.primaryProvider);
+    args[2]?.();
+    return this.withProviderActivity(provider, async () => {
+      args[2]?.();
+      const client = await this.ensureClient(provider);
+      args[2]?.();
+      return { ...await client.startMcpOAuthLogin(...args), provider };
+    });
   }
 
   readMcpResource(
@@ -700,26 +728,26 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["readMcpResource"]> {
     const threadId = args[2];
     return threadId
-      ? this.callForThread(threadId, (client) => client.readMcpResource(...args))
-      : this.withPrimaryActivity((client) => client.readMcpResource(...args));
+      ? this.callForThread(threadId, (client) => client.readMcpResource(...args), args[3])
+      : this.withPrimaryActivity((client) => client.readMcpResource(...args), args[3]);
   }
 
   getGoal(
     ...args: Parameters<ProviderClientInstance["getGoal"]>
   ): ReturnType<ProviderClientInstance["getGoal"]> {
-    return this.callForThread(args[0], (client) => client.getGoal(...args));
+    return this.callForThread(args[0], (client) => client.getGoal(...args), args[1]);
   }
 
   setGoal(
     ...args: Parameters<ProviderClientInstance["setGoal"]>
   ): ReturnType<ProviderClientInstance["setGoal"]> {
-    return this.callForThread(args[0], (client) => client.setGoal(...args));
+    return this.callForThread(args[0], (client) => client.setGoal(...args), args[2]);
   }
 
   clearGoal(
     ...args: Parameters<ProviderClientInstance["clearGoal"]>
   ): ReturnType<ProviderClientInstance["clearGoal"]> {
-    return this.callForThread(args[0], (client) => client.clearGoal(...args));
+    return this.callForThread(args[0], (client) => client.clearGoal(...args), args[1]);
   }
 
   listCollaborationModes(
@@ -743,18 +771,22 @@ export class ProviderRoutingClient {
   async readDefaultReasoningEffort(
     cwd: string,
     modelProvider = this.primaryProvider,
+    beforeSubmit?: () => void,
   ): ReturnType<ProviderClientInstance["readDefaultReasoningEffort"]> {
+    beforeSubmit?.();
     return this.withProviderActivity(modelProvider, async () =>
-      (await this.ensureClient(modelProvider)).readDefaultReasoningEffort(cwd)
+      (await this.ensureClient(modelProvider)).readDefaultReasoningEffort(cwd, modelProvider, beforeSubmit)
     );
   }
 
   async readDefaultServiceTier(
     cwd: string,
     modelProvider = this.primaryProvider,
+    beforeSubmit?: () => void,
   ): ReturnType<ProviderClientInstance["readDefaultServiceTier"]> {
+    beforeSubmit?.();
     return this.withProviderActivity(modelProvider, async () =>
-      (await this.ensureClient(modelProvider)).readDefaultServiceTier(cwd)
+      (await this.ensureClient(modelProvider)).readDefaultServiceTier(cwd, modelProvider, beforeSubmit)
     );
   }
 
@@ -762,55 +794,77 @@ export class ProviderRoutingClient {
     cwd: string,
     modelProvider = this.primaryProvider,
     signal?: AbortSignal,
+    beforeSubmit?: () => void,
   ): ReturnType<ProviderClientInstance["readUnattendedPermissionSettings"]> {
     signal?.throwIfAborted();
+    beforeSubmit?.();
     return this.withProviderActivity(modelProvider, async () => {
       signal?.throwIfAborted();
+      beforeSubmit?.();
       const client = await this.untilClosed(() => this.ensureClient(modelProvider), signal);
       signal?.throwIfAborted();
-      return client.readUnattendedPermissionSettings(cwd, signal);
+      beforeSubmit?.();
+      return client.readUnattendedPermissionSettings(cwd, signal, beforeSubmit);
     }, signal);
   }
 
   async readModelAccelerationSettings(
     cwd: string,
     modelProvider = this.primaryProvider,
+    beforeSubmit?: () => void,
   ): ReturnType<ProviderClientInstance["readModelAccelerationSettings"]> {
+    beforeSubmit?.();
     return this.withProviderActivity(modelProvider, async () =>
-      (await this.ensureClient(modelProvider)).readModelAccelerationSettings(cwd)
+      (await this.ensureClient(modelProvider)).readModelAccelerationSettings(cwd, modelProvider, beforeSubmit)
     );
   }
 
   listHooks(
     ...args: Parameters<ProviderClientInstance["listHooks"]>
   ): ReturnType<ProviderClientInstance["listHooks"]> {
-    const [, modelProvider] = args;
-    return this.withProviderActivity(modelProvider, async () =>
-      (await this.ensureClient(modelProvider)).listHooks(...args)
-    );
+    const [, modelProvider, beforeSubmit] = args;
+    beforeSubmit?.();
+    return this.withProviderActivity(modelProvider, async () => {
+      beforeSubmit?.();
+      const client = await this.ensureClient(modelProvider);
+      beforeSubmit?.();
+      return client.listHooks(...args);
+    });
   }
 
   readHookConfigVersion(
     ...args: Parameters<ProviderClientInstance["readHookConfigVersion"]>
   ): ReturnType<ProviderClientInstance["readHookConfigVersion"]> {
-    const [modelProvider] = args;
-    return this.withProviderActivity(modelProvider, async () =>
-      (await this.ensureClient(modelProvider)).readHookConfigVersion(...args)
-    );
+    const [modelProvider, beforeSubmit] = args;
+    beforeSubmit?.();
+    return this.withProviderActivity(modelProvider, async () => {
+      beforeSubmit?.();
+      const client = await this.ensureClient(modelProvider);
+      beforeSubmit?.();
+      return client.readHookConfigVersion(...args);
+    });
   }
 
   async writeHookState(
     ...args: Parameters<ProviderClientInstance["writeHookState"]>
   ): ReturnType<ProviderClientInstance["writeHookState"]> {
-    const [modelProvider] = args;
+    const [modelProvider, input, beforeSubmit] = args;
+    beforeSubmit?.();
+    let mayHaveSubmitted = false;
     try {
-      await this.withProviderActivity(modelProvider, async () =>
-        (await this.ensureClient(modelProvider)).writeHookState(...args)
-      );
+      await this.withProviderActivity(modelProvider, async () => {
+        beforeSubmit?.();
+        const client = await this.ensureClient(modelProvider);
+        beforeSubmit?.();
+        return client.writeHookState(modelProvider, input, () => {
+          beforeSubmit?.();
+          mayHaveSubmitted = true;
+        });
+      });
     } finally {
       // Even a lost response may have persisted the shared user configuration.
       // Disconnected instances must refresh before their next admitted operation.
-      this.hookConfigRevision++;
+      if (mayHaveSubmitted) this.hookConfigRevision++;
     }
     const providers = [...new Set([...this.connectedProviders, ...this.providerConnections.keys()])];
     const results = await Promise.allSettled(providers.map(provider =>
@@ -822,56 +876,56 @@ export class ProviderRoutingClient {
   listSkills(
     ...args: Parameters<ProviderClientInstance["listSkills"]>
   ): ReturnType<ProviderClientInstance["listSkills"]> {
-    return this.withPrimaryActivity((client) => client.listSkills(...args));
+    return this.withPrimaryActivity((client) => client.listSkills(...args), args[1]);
   }
 
   resolveSkill(
     ...args: Parameters<ProviderClientInstance["resolveSkill"]>
   ): ReturnType<ProviderClientInstance["resolveSkill"]> {
-    return this.withPrimaryActivity((client) => client.resolveSkill(...args));
+    return this.withPrimaryActivity((client) => client.resolveSkill(...args), args[2]);
   }
 
   listPlugins(
     ...args: Parameters<ProviderClientInstance["listPlugins"]>
   ): ReturnType<ProviderClientInstance["listPlugins"]> {
-    return this.withPrimaryActivity((client) => client.listPlugins(...args));
+    return this.withPrimaryActivity((client) => client.listPlugins(...args), args[1]);
   }
 
   resolvePlugin(
     ...args: Parameters<ProviderClientInstance["resolvePlugin"]>
   ): ReturnType<ProviderClientInstance["resolvePlugin"]> {
-    return this.withPrimaryActivity((client) => client.resolvePlugin(...args));
+    return this.withPrimaryActivity((client) => client.resolvePlugin(...args), args[2]);
   }
 
   readResetCredits(...args: Parameters<ProviderClientInstance["readResetCredits"]>): ReturnType<ProviderClientInstance["readResetCredits"]> {
-    return this.withPrimaryActivity(client => client.readResetCredits(...args));
+    return this.withPrimaryActivity(client => client.readResetCredits(...args), args[1]);
   }
   consumeResetCredit(...args: Parameters<ProviderClientInstance["consumeResetCredit"]>): ReturnType<ProviderClientInstance["consumeResetCredit"]> {
-    return this.withPrimaryActivity(client => client.consumeResetCredit(...args));
+    return this.withPrimaryActivity(client => client.consumeResetCredit(...args), args[3]);
   }
 
   accountUsage(
     ...args: Parameters<ProviderClientInstance["accountUsage"]>
   ): ReturnType<ProviderClientInstance["accountUsage"]> {
-    return this.withPrimaryActivity((client) => client.accountUsage(...args));
+    return this.withPrimaryActivity((client) => client.accountUsage(...args), args[0]);
   }
 
   openAiAccountRoute(
     ...args: Parameters<ProviderClientInstance["openAiAccountRoute"]>
   ): ReturnType<ProviderClientInstance["openAiAccountRoute"]> {
-    return this.withPrimaryActivity((client) => client.openAiAccountRoute(...args));
+    return this.withPrimaryActivity((client) => client.openAiAccountRoute(...args), args[1]);
   }
 
   accountThreadUsage(
     ...args: Parameters<ProviderClientInstance["accountThreadUsage"]>
   ): ReturnType<ProviderClientInstance["accountThreadUsage"]> {
-    return this.callForThread(args[0], (client) => client.accountThreadUsage(...args));
+    return this.callForThread(args[0], (client) => client.accountThreadUsage(...args), args[1]);
   }
 
   accountRateLimits(
     ...args: Parameters<ProviderClientInstance["accountRateLimits"]>
   ): ReturnType<ProviderClientInstance["accountRateLimits"]> {
-    return this.withPrimaryActivity((client) => client.accountRateLimits(...args));
+    return this.withPrimaryActivity((client) => client.accountRateLimits(...args), args[0]?.beforeSubmit);
   }
 
   lunaReserveModel(
@@ -892,21 +946,26 @@ export class ProviderRoutingClient {
   updateThreadApprovalsReviewer(
     ...args: Parameters<ProviderClientInstance["updateThreadApprovalsReviewer"]>
   ): ReturnType<ProviderClientInstance["updateThreadApprovalsReviewer"]> {
-    return this.callForThread(args[0], client => client.updateThreadApprovalsReviewer(...args));
+    return this.callForThread(args[0], client => client.updateThreadApprovalsReviewer(...args), args[2]);
   }
 
   listPermissionProfiles(
     ...args: Parameters<ProviderClientInstance["listPermissionProfiles"]>
   ): ReturnType<ProviderClientInstance["listPermissionProfiles"]> {
-    return this.withPrimaryActivity((client) => client.listPermissionProfiles(...args));
+    return this.withPrimaryActivity((client) => client.listPermissionProfiles(...args), args[1]);
   }
 
   private withPrimaryActivity<T>(
     operation: (client: ProviderClientInstance) => Promise<T>,
+    beforeSubmit?: () => void,
   ): Promise<T> {
-    return this.withProviderActivity(this.primaryProvider, async () =>
-      operation(await this.ensureClient(this.primaryProvider))
-    );
+    beforeSubmit?.();
+    return this.withProviderActivity(this.primaryProvider, async () => {
+      beforeSubmit?.();
+      const client = await this.ensureClient(this.primaryProvider);
+      beforeSubmit?.();
+      return operation(client);
+    });
   }
 
   private clientForProvider(provider: string): ProviderClientInstance {
@@ -1036,27 +1095,28 @@ export class ProviderRoutingClient {
     return this.aliasProviders.has(provider) ? this.primaryProvider : provider;
   }
 
-  private async resolveThreadProvider(threadId: string, cwd?: string): Promise<string> {
+  private async resolveThreadProvider(threadId: string, cwd?: string, beforeSubmit?: () => void): Promise<string> {
+    beforeSubmit?.();
     const known = this.threadProviders.get(threadId);
     if (known) {
       return known;
     }
     if (cwd) {
       const thread = await this.withPrimaryActivity(async (client) => {
-        let candidate = (await client.listThreads(cwd))
+        let candidate = (await client.listThreads(cwd, { ...(beforeSubmit ? { beforeSubmit } : {}) }))
           .find((item) => item.id === threadId);
         if (!candidate) {
-          candidate = (await client.listThreads(cwd, { fullScan: true }))
+          candidate = (await client.listThreads(cwd, { fullScan: true, ...(beforeSubmit ? { beforeSubmit } : {}) }))
             .find((item) => item.id === threadId);
         }
         return candidate;
-      });
+      }, beforeSubmit);
       if (thread) {
         this.rememberThread(thread);
         return thread.modelProvider;
       }
     }
-    const thread = await this.withPrimaryActivity((client) => client.readThread(threadId));
+    const thread = await this.withPrimaryActivity((client) => client.readThread(threadId, undefined, beforeSubmit), beforeSubmit);
     this.rememberThread(thread);
     return thread.modelProvider;
   }
@@ -1064,11 +1124,16 @@ export class ProviderRoutingClient {
   private async callForThread<T>(
     threadId: string,
     operation: (client: ProviderClientInstance) => Promise<T>,
+    beforeSubmit?: () => void,
   ): Promise<T> {
-    const provider = await this.resolveThreadProvider(threadId);
-    return this.withProviderActivity(provider, async () =>
-      operation(await this.ensureClient(provider))
-    );
+    const provider = await this.resolveThreadProvider(threadId, undefined, beforeSubmit);
+    beforeSubmit?.();
+    return this.withProviderActivity(provider, async () => {
+      beforeSubmit?.();
+      const client = await this.ensureClient(provider);
+      beforeSubmit?.();
+      return operation(client);
+    });
   }
 
   private withProviderActivity<T>(

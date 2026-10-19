@@ -17,6 +17,8 @@ export function formatSurfaceUserFacingError(
   surfaceLabel: "Telegram" | "飞书" | "微信",
 ): string {
   switch (error.code) {
+    case "mcp.oauth.unavailable":
+      return "MCP 登录跟踪暂不可用，请先用 /mcp 核对实际认证状态，再决定是否重新登录";
     case "hooks.usage":
       return "用法：/hooks [page N|列表选择标识|trust <标识>|enable <标识>|disable <标识>|confirm <一次性令牌>]";
     case "hooks.actor-required":
@@ -59,6 +61,10 @@ export function formatSurfaceUserFacingError(
       return "文本附件暂存空间已满，请稍后重试或发送较小片段";
     case "message.empty":
       return "消息不能为空";
+    case "input.authorization-changed":
+      return "输入授权或工作区已变化，本次输入未继续提交；请核对权限和工作区后重新发送";
+    case "command.authorization-changed":
+      return "命令授权或工作区已变化，未继续后续操作；已提交的操作不会自动撤销，请重新查询实际状态";
     case "oauth.closing":
       return "飞书用户授权正在关闭，请稍后重试";
     case "conversation.name.invalid":

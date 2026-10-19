@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AutoApprovalReviewStore, AutoApprovalReviewSummary } from "./request-metrics.js";
 import { validateThreadId } from "./sqlite-request-metrics-query-base.js";
+import { reviewRunScope } from "./sqlite-review-run-scope.js";
 
 /** Minimal review identity and observation facts; no approval content or history. */
 export class SqliteAutoApprovalReviewMetrics implements AutoApprovalReviewStore {
@@ -60,17 +61,13 @@ export class SqliteAutoApprovalReviewMetrics implements AutoApprovalReviewStore 
     pendingParentTurns: readonly { threadId: string; turnId: string }[] = []): AutoApprovalReviewSummary {
     validateThreadId(threadId, "Thread ID");
     validateThreadId(turnId, "Turn ID");
-    return this.summary("SELECT ? AS thread_id, ? AS turn_id", [threadId, turnId], pendingParentTurns);
+    return this.summary(reviewRunScope(threadId, turnId), pendingParentTurns);
   }
 
   sessionAutoApprovalReviewSummary(threadId: string,
     pendingParentTurns: readonly { threadId: string; turnId: string }[] = []): AutoApprovalReviewSummary {
     validateThreadId(threadId, "Thread ID");
-    const summary = this.summary(`SELECT thread_id, turn_id FROM auto_approval_review_turns WHERE thread_id = ?
-      UNION SELECT thread_id, turn_id FROM turn_execution_metrics WHERE thread_id = ?
-      UNION SELECT thread_id, turn_id FROM model_request_metrics WHERE thread_id = ? AND turn_id IS NOT NULL
-      UNION SELECT parent_thread_id, parent_turn_id FROM subagent_turns WHERE parent_thread_id = ?`,
-    [threadId, threadId, threadId, threadId], pendingParentTurns);
+    const summary = this.summary(reviewRunScope(threadId), pendingParentTurns);
     // Complete observations of the known turns cannot prove that no older turns are missing.
     const historyComplete = this.database.prepare("SELECT history_complete FROM thread_execution_state WHERE thread_id = ?")
       .get(threadId)?.history_complete === 1;
@@ -78,15 +75,9 @@ export class SqliteAutoApprovalReviewMetrics implements AutoApprovalReviewStore 
       ? { ...summary, coverage: "partial" } : summary;
   }
 
-  private summary(seed: string, parameters: string[], pendingParentTurns: readonly { threadId: string; turnId: string }[]): AutoApprovalReviewSummary {
-    // UNION de-duplicates exact runs, including diamonds and malformed cycles.
+  private summary({ cte, parameters }: ReturnType<typeof reviewRunScope>, pendingParentTurns: readonly { threadId: string; turnId: string }[]): AutoApprovalReviewSummary {
     const row = this.database.prepare(`
-      WITH RECURSIVE task_turns(thread_id, turn_id) AS (
-        ${seed} UNION
-        SELECT child.thread_id, child.turn_id FROM subagent_turns child
-        JOIN task_turns parent ON child.parent_thread_id = parent.thread_id
-          AND child.parent_turn_id = parent.turn_id
-      ), review_counts AS (
+      WITH RECURSIVE ${cte}, review_counts AS (
         SELECT COUNT(*) AS total,
           COALESCE(SUM(status = 'approved'), 0) AS approved,
           COALESCE(SUM(status = 'denied'), 0) AS denied,
@@ -94,13 +85,13 @@ export class SqliteAutoApprovalReviewMetrics implements AutoApprovalReviewStore 
           COALESCE(SUM(status = 'aborted'), 0) AS aborted,
           COALESCE(SUM(status = 'inProgress'), 0) AS inProgress,
           COALESCE(SUM(status = 'unknown'), 0) AS unknown
-        FROM auto_approval_reviews JOIN task_turns USING (thread_id, turn_id)
+        FROM auto_approval_reviews JOIN review_runs USING (thread_id, turn_id)
       ), review_usage AS (
         SELECT COUNT(*) AS request_count,
           SUM(input_tokens) AS input_tokens,
           SUM(output_tokens) AS output_tokens,
           COUNT(*) FILTER (WHERE input_tokens IS NULL OR output_tokens IS NULL) AS missing_token_request_count
-        FROM model_request_metrics JOIN task_turns USING (thread_id, turn_id)
+        FROM model_request_metrics JOIN review_runs USING (thread_id, turn_id)
         WHERE request_purpose = 'autoApprovalReview'
       )
       SELECT
@@ -116,7 +107,7 @@ export class SqliteAutoApprovalReviewMetrics implements AutoApprovalReviewStore 
             WHERE pending.thread_id = task.thread_id AND pending.turn_id = task.turn_id
               AND (pending.completed = 0 OR pending.status = 'unknown'))
           THEN 1 ELSE 0 END), 0) AS complete
-      FROM task_turns task LEFT JOIN auto_approval_review_turns state USING (thread_id, turn_id)
+      FROM review_runs task LEFT JOIN auto_approval_review_turns state USING (thread_id, turn_id)
         CROSS JOIN review_counts CROSS JOIN review_usage
     `).get(...parameters, JSON.stringify(pendingParentTurns)) as Omit<AutoApprovalReviewSummary, "coverage" | "usage"> & {
       observed: number; expected: number; complete: number;

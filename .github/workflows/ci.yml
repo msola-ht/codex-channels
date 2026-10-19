@@ -33,7 +33,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22.13.0
+          node-version: 22.22.0
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -73,7 +73,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22.13.0
+          node-version: 22.22.0
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -85,10 +85,11 @@ jobs:
       - name: Install WebUI dependencies
         run: npm ci --ignore-scripts --prefix webui
 
-      - name: Build and type-check
-        run: |
-          npm run build
-          npm run check
+      - name: Type-check and validate boundaries
+        run: npm run check
+
+      - name: Build
+        run: npm run build
 
       - name: Check documentation
         run: npm run docs:check

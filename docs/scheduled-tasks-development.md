@@ -102,6 +102,8 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
 - 执行权限使用目标 Provider 按 Workspace cwd 解析的当前原生配置；历史任务快照不作为运行时权限上限。
 - 新 Thread 作为当前 Conversation 的后台绑定；不替换前台绑定。完成后沿用现有后台释放逻辑，
   Thread 历史仍由 App Server 保存，用户可显式 `/resume`。
+- 离线终态写入后再次核对原后台绑定身份，归属变化不再发布旧恢复通知或清理新绑定；释放复用
+  当前 Turn、子代理和 Queue 的完成检查，恢复流程不自动启动积压 Queue。
 
 后台绑定仍受每个 Conversation 最多三个的既有上限约束。没有空位时不抢占前台或其他后台任务，
 本次运行记为 `skipped_capacity`，并显示在运行记录中。
@@ -122,6 +124,7 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
 
 每个任务必须保存有效 IANA 时区，例如 `Asia/Shanghai`。不得静默采用 Gateway 主机时区；创建命令
 没有提供时区时必须要求补充。`time` 固定为 `HH:mm`，工作日使用 `MO` 至 `SU`。
+不接受 `+01:00` 等固定偏移字符串，即使当前 JavaScript Intl 可以解析它们。
 
 `interval.anchorAt` 是确认创建成功的 UTC 时间，后续 occurrence 始终由上一计划时间增加固定分钟数，
 不因 DST 改变间隔；固定版插件摘要允许 Hourly 附带可选工作日，但当前明确拒绝该组合。`once` 只计算

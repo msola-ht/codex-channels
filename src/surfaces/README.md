@@ -46,6 +46,9 @@ DPAPI 主密钥 + AES-256-GCM 字符串记录机制；平台模块仍各自拥�
 和错误语义。macOS Keychain 命令失败在记录存储边界转换为安全错误，不传播含凭据参数的原始命令、标准输出或标准错误；读取和删除的记录不存在语义保持不变。
 Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录串行、总容量 16 项和 15 秒取消预算，物理操作结算前保留槽位。凭据格式、作用域与 OAuth 关闭时的在途回滚归属不变。
 
+`surface-shutdown.ts` 收集各渠道关闭步骤的同步和异步失败；渠道仍决定启动与等待各步骤的顺序，
+保留各资源原有预算，全部清理尝试完成后统一抛出失败。停止结果由实例缓存，失败不伪装为成功，也不隐式重新启动资源。
+
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
 只通过编译期内置插件注册表显式注册。
@@ -127,7 +130,9 @@ Thread/Turn/Item、事件类型及输入/投递标识；输出队列、输入处
 不保留事件正文。公开的 `withPersistentDeliveryDiagnostics` 供组合根注入持久记录 ID，各层通过 `persistentDeliveryId` 关联同一记录，单次操作的 `deliveryId` 独立保留。终态相关任务在 `info` 留痕，任务成功与正文投递成功分别记录，慢操作与失败在 `warn` 留痕；阶段明细、合并与取消
 使用 `debug`。诊断不修改平台调用、重试或排队顺序，日志口径与排障步骤见
 [`渠道展示与调试模式`](../../docs/display.md#调试模式)。
-`surface-input-coalescer.ts` 是已授权 Surface 输入门面；`surface-input-batcher.ts` 只合并 Surface
+`surface-input-batcher.ts` 是已授权 Surface 输入的唯一聚合实现，三个渠道直接调用；只合并同一 Surface
+会话与 Actor 的输入，提交回调保留 Actor 身份；各渠道把停止状态与实时允许名单的守卫传至 Application，
+等待聚合、下载、会话锁或图片准备后仍需复核，缺失授权接口失败关闭。批次仍只合并 Surface
 明确标识的图片批次，普通文字、单图和无批次标识的消息立即提交。图片落盘后仍由渠道管理，批次
 flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非动画 GIF 签名、单张 10 MiB 与整批 20 MiB，转换为
 有界 Base64 Data URL 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，
@@ -240,7 +245,7 @@ Markdown、纯文本布局和发送方式。
 `text-file-copy.ts` 统一三个渠道文本文件下载失败、1,000,000 字节上限以及编码、空内容、文件名和控制字符拒绝文案，
 同时保留渠道名称以便定位来源。`text-file-input.ts` 统一文件名安全校验、UTF-8 严格解码、
 BOM 与常见终端转义序列清理、残留控制字符拒绝和有界流读取（流读取总时限 30 秒，不因持续到达数据而延长）；平台下载与错误类型仍留在各自 Surface。
-`text-attachment-store.ts` 复用私有媒体存储：清理后不超过 32 KiB 的文本内联提交，更大文本保存为随机命名的私有文件并提交路径与到期时间。每个渠道暂存目录最多 50 个文件、50,000,000 字节，保留 24 小时，每分钟及启动时清理过期文件；关闭停止清理计时器但保留尚未到期文件。文件内容不写入 StateStore，工具读取仍受当前 App Server 权限约束。
+`text-attachment-store.ts` 的 `prepareTextFile` 统一三渠道下载及完整性检查之后的解码、暂存与结果组装，复用各渠道原有 Store；返回 bytes 保留原始明文字节数。清理后不超过 32 KiB 的文本内联提交，更大文本保存为随机命名的私有文件并提交路径与到期时间。每个渠道暂存目录最多 50 个文件、50,000,000 字节，保留 24 小时，每分钟及启动时清理过期文件；关闭停止清理计时器但保留尚未到期文件。文件内容不写入 StateStore，工具读取仍受当前 App Server 权限约束。
 `runtime-status-format.ts` 统一账户、额度与 MCP Server 运行状态的稳定中文语义和脱敏；
 Core 只把 MCP 启动失败、取消及异常恢复投递给 Surface，首次启动中和正常就绪保持静默；
 Telegram、飞书与微信分别通过 HTML 面板、CardKit Markdown 或按会话排序的纯文本气泡发送。

@@ -697,7 +697,7 @@ export interface ManagementTask {
   updatedAt: string
   error: string | null
   result: { output: string | null } | null
-  auditStatus?: "recorded" | "degraded"
+  auditStatus: "recorded" | "degraded" | null
 }
 
 export type ManagementTaskInput =

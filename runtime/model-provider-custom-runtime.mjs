@@ -45,8 +45,12 @@ export function customPrimaryProviderCredentialPath(environment, provider, envir
   return join(providerStorageRoot(environment), ...(isCustomCatalogProvider(provider) ? [provider] : ["custom", provider]), "primary-credentials", `${version}.json`);
 }
 
+export function isValidCustomProviderApiKey(apiKey) {
+  return typeof apiKey === "string" && apiKey.trim() !== "" && apiKey.length <= 4096 && !/\p{Cc}/u.test(apiKey);
+}
+
 function validateCustomApiKey(apiKey) {
-  if (typeof apiKey !== "string" || apiKey.trim() === "" || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) throw new Error("自定义 Provider API Key 缺失或无效");
+  if (!isValidCustomProviderApiKey(apiKey)) throw new Error("自定义 Provider API Key 缺失或无效");
   return apiKey;
 }
 
@@ -74,7 +78,16 @@ export function readCustomPrimaryProviderApiKey(provider, block, environment = p
   if (block.env_key.startsWith("CODEX_CONNECT_CUSTOM_") && block.env_key.includes("_PRIMARY_")) {
     return readCustomPrimaryCredential(environment, provider, block.base_url, block.env_key);
   }
-  return environment[block.env_key] === undefined ? undefined : validateCustomApiKey(environment[block.env_key]);
+  let key = block.env_key;
+  if (process.platform === "win32") {
+    // A copied process.env is a plain object, without Windows' case-insensitive lookup.
+    const matches = Object.keys(environment).filter(name => name.toLowerCase() === key.toLowerCase()
+      && environment[name] !== undefined);
+    if (matches.length > 1) throw new Error("自定义 Provider 凭据环境变量存在大小写歧义");
+    if (matches.length === 0) return undefined;
+    key = matches[0];
+  }
+  return environment[key] === undefined ? undefined : validateCustomApiKey(environment[key]);
 }
 
 export function writeCustomPrimaryProviderCredential({ providerId, baseUrl, apiKey, environmentKey }, environment = process.env) {
@@ -318,7 +331,7 @@ export function loadConfiguredCustomPrimaryRelayProfile(providerId, environment 
     throw new Error("Relay requires unambiguous independent API credentials");
   }
   const apiKey = readCustomPrimaryProviderApiKey(providerId, provider, environment);
-  if (typeof apiKey !== "string" || !apiKey.length || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) {
+  if (apiKey === undefined) {
     throw new Error("Relay Provider has no usable independent API credentials");
   }
   return { ...primary, apiKey, apiKeyEnvironmentKey: provider.env_key };

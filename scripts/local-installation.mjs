@@ -15,7 +15,7 @@ import { requireUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
 
 export function inspectGatewayConfiguration(environment = process.env) {
-  const { configPath } = requireUserConfig(environment);
+  const { configPath } = requireUserConfig(environment, { readOnly: true });
   loadConfigDocument(readFileSync(configPath, "utf8"), dirname(configPath), {
     environment,
     detectSystemProxy: true,
@@ -111,7 +111,7 @@ function serviceDefinitionContext(environment, platform) {
   }
   if (platform === "win32") {
     return {
-      definitionsDirectory: join(requireUserConfig(environment).dataDir, "services"),
+      definitionsDirectory: join(requireUserConfig(environment, { readOnly: true }).dataDir, "services"),
       identifierKey: "windows",
     };
   }
@@ -128,7 +128,7 @@ export async function waitForCoreServiceTarget(
   }
   const requiresAppServer = target === "app-server" || target === "all";
   const requiresGateway = target === "gateway" || target === "all";
-  const { configPath, dataDir } = requireUserConfig(environment);
+  const { configPath, dataDir } = requireUserConfig(environment, { readOnly: true });
   const document = readGatewayConfig(configPath);
   const descriptor = resolveAppServerRuntime(document, dataDir, environment);
   const timeoutMs = options.timeoutMs ?? defaultCoreServiceReadinessTimeoutMs;
@@ -214,7 +214,7 @@ export async function waitForCoreServiceTarget(
 }
 
 function resolveSessionDisplayCachePath(environment) {
-  const { configPath, dataDir } = requireUserConfig(environment);
+  const { configPath, dataDir } = requireUserConfig(environment, { readOnly: true });
   const document = readGatewayConfig(configPath);
   const storage = isRecord(document.storage) ? document.storage : {};
   const databasePath = resolveConfiguredPath(

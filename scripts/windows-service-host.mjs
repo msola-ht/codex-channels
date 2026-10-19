@@ -11,6 +11,7 @@ import {
 } from "../runtime/private-ipc.mjs";
 import {
   childProcessIsRunning,
+  childExitedWithin,
   createChildServiceControl,
   installProcessSignalHandlers,
   terminateChildProcess,
@@ -197,21 +198,6 @@ function childResult(child) {
   return new Promise((resolveResult) => {
     child.once("error", (error) => resolveResult({ error }));
     child.once("exit", (code, signal) => resolveResult({ code, signal }));
-  });
-}
-
-function childExitedWithin(child, timeoutMs) {
-  if (!childProcessIsRunning(child)) return Promise.resolve(true);
-  return new Promise((resolveWait) => {
-    const timer = setTimeout(() => {
-      child.off("exit", onExit);
-      resolveWait(!childProcessIsRunning(child));
-    }, timeoutMs);
-    const onExit = () => {
-      clearTimeout(timer);
-      resolveWait(true);
-    };
-    child.once("exit", onExit);
   });
 }
 

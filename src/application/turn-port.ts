@@ -52,7 +52,7 @@ export type { GoalStatus, ThreadGoal };
  * reached the shared routing reducer; it never optimistically writes state.
  */
 export interface ThreadApprovalsReviewerPort {
-  updateThreadApprovalsReviewer(threadId: string, reviewer: Extract<ThreadApprovalsReviewer, "user" | "auto_review">): Promise<void>;
+  updateThreadApprovalsReviewer(threadId: string, reviewer: Extract<ThreadApprovalsReviewer, "user" | "auto_review">, beforeSubmit?: () => void): Promise<void>;
 }
 
 export interface TurnExecutionPort {
@@ -70,13 +70,14 @@ export interface TurnExecutionPort {
     turnId: string,
     input: TurnInput[],
     clientUserMessageId: string,
+    beforeSubmit?: () => void,
   ): Promise<TurnStarted>;
   interruptTurn(threadId: string, turnId: string, beforeSubmit?: () => void): Promise<void>;
-  setThreadName(threadId: string, name: string): Promise<void>;
-  setThreadPinned(threadId: string, pinned: boolean): Promise<boolean>;
-  compactThread(threadId: string): Promise<void>;
-  startReview(threadId: string, target: ReviewTarget): Promise<ReviewStarted>;
-  getGoal(threadId: string): Promise<ThreadGoal | null>;
-  setGoal(threadId: string, objective: string): Promise<ThreadGoal>;
-  clearGoal(threadId: string): Promise<void>;
+  setThreadName(threadId: string, name: string, beforeSubmit?: () => void): Promise<void>;
+  setThreadPinned(threadId: string, pinned: boolean, beforeSubmit?: () => void): Promise<boolean>;
+  compactThread(threadId: string, beforeSubmit?: () => void): Promise<void>;
+  startReview(threadId: string, target: ReviewTarget, beforeSubmit?: () => void): Promise<ReviewStarted>;
+  getGoal(threadId: string, beforeSubmit?: () => void): Promise<ThreadGoal | null>;
+  setGoal(threadId: string, objective: string, beforeSubmit?: () => void): Promise<ThreadGoal>;
+  clearGoal(threadId: string, beforeSubmit?: () => void): Promise<void>;
 }

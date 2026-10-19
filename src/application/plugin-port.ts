@@ -49,6 +49,6 @@ export interface InvocablePlugin {
 }
 
 export interface PluginQueryPort {
-  listPlugins(cwd: string): Promise<InstalledPluginCatalog>;
-  resolvePlugin(cwd: string, id: string): Promise<InvocablePlugin | undefined>;
+  listPlugins(cwd: string, beforeSubmit?: () => void): Promise<InstalledPluginCatalog>;
+  resolvePlugin(cwd: string, id: string, beforeSubmit?: () => void): Promise<InvocablePlugin | undefined>;
 }

@@ -27,6 +27,8 @@ export type InteractionRequest = {
   | {
       type: "user-input";
       asynchronous?: true;
+      /** Local recipient identity captured before an asynchronous question waits. */
+      expectedActorId?: string;
       requestId: string;
       threadId: string;
       turnId: string;

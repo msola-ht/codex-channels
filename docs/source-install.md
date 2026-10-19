@@ -14,7 +14,7 @@ Linux、macOS 与 Windows 可以把 Codex Connect 官方 `main` 分支作为完�
 
 ## 安装
 
-先安装 Node.js 22.13 或更高版本、Git 和 npm，然后运行：
+先安装 Node.js 22.22.0 或更高版本、Git 和 npm，然后运行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
@@ -41,8 +41,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 | iex
 ```
 
-该脚本要求 Git、Node.js 22.13+ 和 npm；Codex CLI 缺失或版本不符时会通过 `npm.cmd`
-同步为项目锁定的精确版本，随后重新检查版本与 PATH。它只使用当前用户目录，不要求管理员权限；安装失败会清理临时目录和不完整源码。
+该脚本要求 Git、Node.js 22.22.0+ 和 npm；Codex CLI 缺失或版本不符时会通过 `npm.cmd`
+同步为项目锁定的精确版本，显式包含平台原生可选依赖，随后重新检查版本与 PATH。它只使用当前用户目录，不要求管理员权限；安装失败会清理本次临时目录。
 默认克隆官方 `main`；本地开发验证可显式传入 `-Repository <本地仓库路径> -Branch <分支>`，该参数不改变
 正式安装默认值。安装器会在 Git checkout 时启用长路径支持，以覆盖 Windows 深层源码目录。
 
@@ -51,9 +51,13 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 `codex-channels`。已有同名目录时不会覆盖。安装前会显示 npm 版本和全局目录，并检测已有的 npm
 全局版 `@hegenai/codexc` 及当前 `codexc` 命令来源；源码构建完成后会用当前 `main` 构建结果替换
 当前 Node.js 环境中的同名全局包。
+源码一旦移动到正式目录，后续打包、全局安装或来源记录失败均保留该目录，避免删除已被安装结果引用的来源。
+修复错误后在保留的源码目录运行 `npm run install:global`；不要再次运行首装器覆盖目录。安装期间出现的其他同名目录也不会被失败清理删除。
+构建阶段由两个安装器及更新器共用 `scripts/source-build.mjs`，命令取消与源码切换仍由各入口负责。
 两个安装器均禁用依赖安装时的隐式生命周期，再显式构建一次 Gateway；仅在有效 npm
 `ignore-scripts` 设置为 `false` 时安装 Git hooks。设置为 `true` 时仍执行显式构建，
-但不会运行隐式的 `prebuild` / `postbuild`，Windows 原生产物限制见下文。
+但不会运行隐式的 `prebuild` / `postbuild`。Windows 首装必须为 `false`：克隆后先用现有 PowerShell
+生成目录保护所需的原生组件，再校验并保护安装目录，随后执行完整构建；禁用生命周期时会提前拒绝。
 Codex CLI 是 Gateway 的必需运行时。安装器找不到 `codex` 时，会通过 npm 安装与 `main` 项目版本
 一致的 `@openai/codex`；已有版本不匹配时也同步到锁定版本，可能升级或降级。同步失败或 PATH 仍指向其他版本时停止安装。安装器使用固定版本官方
 `codex login status` 检查登录状态；未登录或状态检查错误不阻止源码安装，用户需先运行该命令诊断，
@@ -136,7 +140,7 @@ hook；操作者的有效 npm `ignore-scripts=true` 设置会跳过 hook，显�
 新安装完成配置后也可运行 `codexc update` 应用此设置；以输出“已关闭 Codex 原生 daemon 自动启动”为已执行依据。
 
 以全新安装为基准，状态数据库只接受 Schema v6，指标数据库只接受 Schema v31；新库由正常启动创建。
-安装预检只读校验当前版本及结构，其他版本明确拒绝。更新不迁移、重置或删除数据库，也不提供数据库回退入口。
+安装预检只读校验当前版本及结构，其他版本明确拒绝；配置文件权限不安全时明确失败，不在只读预检中修改权限或内容。更新不迁移、重置或删除数据库，也不提供数据库回退入口。
 App Server 的会话历史不在这些数据库中。
 
 当前全局包来自该受管源码目录，且更新器已使用当前扁平命令时，直接使用 `codexc update`，不要重复运行安装器。
@@ -152,6 +156,7 @@ App Server 的会话历史不在这些数据库中。
 从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库。该入口（包括内部 `--prepared`）在注册 Gateway 全局命令前检测 Codex CLI：默认 `codex` 缺失或版本不符时通过 npm 同步为 `src/codex-protocol/version.json` 锁定的正式版本，并检查安装后的版本和 PATH，无需初始化或渠道配置。显式 `CODEX_BINARY` 无效或版本不符时明确失败，不替换指定二进制。CLI 无法执行、安装失败或安装后仍不可见时也明确失败。安装不自动登录或启动服务。
 
 本地源码安装分别报告构建（或复用已有产物）、依赖检查、打包、全局安装；只有 npm 安装及来源记录成功后才报告程序安装完成。依赖检查不表示安装或服务就绪。`npm run build` 只构建产物；`codexc update` 的最终结果及服务恢复情况由更新流程报告，不因复用构建产物而判断为首次安装或升级。
+复用预构建产物时，Gateway 与 WebUI 入口必须是实际普通文件，缺失、目录或符号链接均在外部安装前拒绝；不会为补齐产物而隐式重新构建或安装源码依赖。
 
 交互终端中，依赖可用后的耗时安装和构建阶段使用转圈进度，完成后保留阶段与耗时；失败时显示命令诊断。重定向输出、CI、dumb 终端及依赖尚未安装时保留纯文本进度和日志。安装命令取消后先收尾其子进程，再退出，不报告成功；安装后的服务是否就绪仍需单独检查。
 

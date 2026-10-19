@@ -39,6 +39,7 @@ export interface ScheduledTaskCompositionOptions {
   codex: ProviderRoutingClient;
   turns?: TurnExecutionPort;
   acceptsExecution: (target: ConversationTarget) => boolean;
+  releaseRecoveredThread: (threadId: string, isCurrent: () => boolean) => Promise<boolean>;
   bindings: SqliteBindingStore;
   workspaces: WorkspaceRegistry;
   core: ConversationCore;
@@ -105,6 +106,7 @@ export class ScheduledTaskComposition {
       options.codex,
       {
         validateRun: (task, signal) => executor.validateRun(task, signal),
+        releaseRecoveredThread: options.releaseRecoveredThread,
         logger: options.logger,
         onRecovered: (run, target) => {
           const status = run.state === "completed" ? "已完成"
@@ -142,8 +144,8 @@ export class ScheduledTaskComposition {
         && options.bindings.actors(target).includes(actorId),
       isProviderConfigured: (provider) => options.codex.isProviderConfigured(provider),
       creationContext: (target) => options.creationContext(target),
-      readPermissionSettings: (cwd, provider, signal) =>
-        options.codex.readUnattendedPermissionSettings(cwd, provider, signal),
+      readPermissionSettings: (cwd, provider, signal, beforeSubmit) =>
+        options.codex.readUnattendedPermissionSettings(cwd, provider, signal, beforeSubmit),
       runTaskNow: (taskId, operation) => this.scheduler.runTaskNow(taskId, undefined, operation),
       retryRun: (runId, operation) => this.scheduler.retryRun(runId, undefined, operation),
     }, Date.now);

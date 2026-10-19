@@ -1,5 +1,5 @@
 import { UserFacingError } from "../../conversation-core/index.js";
-import { TextAttachmentStore, type PreparedTextAttachment } from "../text-attachment-store.js";
+import { prepareTextFile, TextAttachmentStore, type PreparedTextAttachment } from "../text-attachment-store.js";
 import type { Readable } from "node:stream";
 
 import {
@@ -8,7 +8,6 @@ import {
   formatUnsupportedTextFile,
 } from "../text-file-copy.js";
 import {
-  decodeUtf8TextFile,
   isSafeTextFileName,
   maximumTextFileBytes,
   normalizeTextFileName,
@@ -97,13 +96,7 @@ export class FeishuFileInput implements FeishuFilePort {
         throw tooLarge();
       }
       const content = await readBoundedTextFile(resource.stream);
-      const text = decodeUtf8TextFile(content);
-      const prepared = this.attachments === undefined ? { text } : await this.attachments.prepare(text);
-      return {
-        fileName: normalizedName,
-        ...prepared,
-        bytes: content.length,
-      };
+      return await prepareTextFile(content, normalizedName, this.attachments);
     } catch (error) {
       if (error instanceof UserFacingError) throw error;
       if (error instanceof FeishuFileInputError) {

@@ -112,7 +112,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     environment,
     loadAccounts,
     loadPrimaryProvider,
-  });
+  }, true);
   if ((plan.mode === "exclusive" || plan.previousMode === "exclusive") && confirmExclusiveConfigChange !== true) {
     throw invalid(
       "confirmation-required",
@@ -171,19 +171,12 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   const archivedBaselinePath = capturesExclusiveBaseline && existsSync(exclusiveBaselinePath)
     ? join(plan.paths.backupDirectory, `config-${randomUUID()}.toml`)
     : undefined;
-  const transactionPaths = [
-    plan.paths.configPath,
-    plan.paths.profilePath,
-    plan.paths.markerPath,
-    plan.paths.catalogPath,
-    plan.paths.manifestPath,
-    exclusiveBaselinePath,
-    ...(archivedBaselinePath === undefined ? [] : [archivedBaselinePath]),
-    opencodeGoAccountsFilePath(environment),
-  ];
-  let snapshots;
+  const snapshots = plan.snapshots;
   try {
-    snapshots = snapshotProviderFiles(transactionPaths, environment);
+    if (archivedBaselinePath !== undefined) {
+      snapshots.push(...snapshotProviderFiles([archivedBaselinePath], environment));
+    }
+    await assertProviderFileSnapshots(snapshots);
   } catch (error) {
     throw normalize("operation-failed", "action", error);
   }
@@ -224,10 +217,12 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     if (archivedBaselinePath !== undefined) {
       const previousBaseline = await readOptionalProviderFile(exclusiveBaselinePath, environment);
       if (previousBaseline === undefined) throw new Error("OpenCode Go 固定账户恢复基线缺失");
+      await assertProviderFileSnapshots(guards);
       await writePrivateFileAtomic(archivedBaselinePath, previousBaseline);
       guards = refreshProviderFileSnapshot(guards, archivedBaselinePath);
     }
     if (capturesExclusiveBaseline) {
+      await assertProviderFileSnapshots(guards);
       await writePrivateFileAtomic(exclusiveBaselinePath, stringify(initialConfig));
       guards = refreshProviderFileSnapshot(guards, exclusiveBaselinePath);
     }
@@ -287,6 +282,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
 async function buildPlan(
   { accountId, email, phone, contact, mode, reconfigure },
   { environment, loadAccounts, loadPrimaryProvider },
+  captureSnapshots = false,
 ) {
   try {
     validateOpencodeGoAccountId(accountId);
@@ -361,6 +357,24 @@ async function buildPlan(
     }
   }
   const paths = opencodeGoAccountPaths(environment, accountId);
+  let snapshots;
+  if (captureSnapshots) {
+    try {
+      // Keep the files that produced this plan across every asynchronous wait.
+      // A later snapshot must not accept external changes as the rollback baseline.
+      snapshots = snapshotProviderFiles([
+        paths.configPath,
+        paths.profilePath,
+        paths.markerPath,
+        paths.catalogPath,
+        paths.manifestPath,
+        join(paths.backupDirectory, "config.toml"),
+        opencodeGoAccountsFilePath(environment),
+      ], environment);
+    } catch (error) {
+      throw normalize("operation-failed", "action", error);
+    }
+  }
   try {
     await assertProfileOwnership(paths, accountId, environment);
   } catch (error) {
@@ -401,6 +415,7 @@ async function buildPlan(
     reconfigure,
     previousMode,
     paths,
+    snapshots,
     downloadsCatalog: !existsSync(paths.catalogPath),
     updatesExternalAgent: false,
   };

@@ -31,7 +31,7 @@ export function printStatus(result, { json = false, output = process.stdout } = 
   if (result.count == null) console.log("记录：无法读取");
   else if (result.count > 0) console.log(`记录：${formatRequestCount(result.count)}`);
   if (!result.compatible) {
-    console.log("处理：停止 Gateway 后运行 codexc cleanup metrics reset");
+    console.log("处理：请核对数据库版本及备份；不支持的 Schema 不会被清理或重置。");
   }
 }
 

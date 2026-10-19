@@ -19,6 +19,7 @@ import type {
   SurfaceConfigurationChange,
 } from "../types.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
+import { SurfaceShutdown } from "../surface-shutdown.js";
 import { FeishuConversationAdapter } from "./adapter.js";
 import {
   FeishuApplicationHttpApi,
@@ -557,23 +558,25 @@ export class FeishuSurface implements SurfaceAdapter {
   }
 
   private async stopOnce(): Promise<void> {
+    const shutdown = new SurfaceShutdown();
     this.startupAbort?.abort();
     this.connectionReady = false;
-    this.adapter.stopVideoInputs();
-    const videosClosing = this.videos?.close();
-    await this.connection.stop();
-    await this.startupTask;
-    await this.inbox.close();
-    await this.adapter.close();
+    await shutdown.run("video inputs", () => this.adapter.stopVideoInputs());
+    const videosClosing = shutdown.run("videos", () => this.videos?.close());
+    await shutdown.run("connection", () => this.connection.stop());
+    await shutdown.run("startup notifications", () => this.startupTask);
+    await shutdown.run("inbox", () => this.inbox.close());
+    await shutdown.run("adapter", () => this.adapter.close());
     await videosClosing;
-    await this.applicationSetup.close();
-    await this.oauth.close();
-    await this.files?.close?.();
-    this.images.close();
-    this.audios.close();
-    await this.interactions.close();
-    await this.commandCenter.close();
-    await this.output.close();
+    await shutdown.run("application setup", () => this.applicationSetup.close());
+    await shutdown.run("oauth", () => this.oauth.close());
+    await shutdown.run("files", () => this.files?.close?.());
+    await shutdown.run("images", () => this.images.close());
+    await shutdown.run("audios", () => this.audios.close());
+    await shutdown.run("interactions", () => this.interactions.close());
+    await shutdown.run("command center", () => this.commandCenter.close());
+    await shutdown.run("output", () => this.output.close());
+    shutdown.finish();
     this.logger.info(this.lifecycleContext(), "飞书 Surface 已停止");
   }
 

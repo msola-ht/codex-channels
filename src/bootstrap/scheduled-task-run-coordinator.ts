@@ -35,6 +35,7 @@ export interface ScheduledTaskRunCoordinatorOptions {
   ) => Promise<ScheduledTaskRunValidation | undefined>;
   logger?: Logger;
   onRecovered?: (run: ScheduledRun, target: ConversationTarget) => void;
+  releaseRecoveredThread: (threadId: string, isCurrent: () => boolean) => Promise<boolean>;
 }
 
 export interface ScheduledTaskRunValidation {
@@ -57,6 +58,7 @@ export class ScheduledTaskRunCoordinator {
   private readonly validateRun: ScheduledTaskRunCoordinatorOptions["validateRun"];
   private readonly logger: Logger | undefined;
   private readonly onRecovered: ScheduledTaskRunCoordinatorOptions["onRecovered"];
+  private readonly releaseRecoveredThread: ScheduledTaskRunCoordinatorOptions["releaseRecoveredThread"];
 
   constructor(
     private readonly store: ScheduledTaskStorePort,
@@ -64,12 +66,13 @@ export class ScheduledTaskRunCoordinator {
     private readonly history: ThreadHistoryPort,
     options: ScheduledTaskRunCoordinatorOptions,
   ) {
-    if (typeof options.validateRun !== "function") {
+    if (typeof options.validateRun !== "function" || typeof options.releaseRecoveredThread !== "function") {
       throw new Error("计划任务恢复校验依赖不完整");
     }
     this.validateRun = options.validateRun;
     this.logger = options.logger;
     this.onRecovered = options.onRecovered;
+    this.releaseRecoveredThread = options.releaseRecoveredThread;
   }
 
   async initialize(signal?: AbortSignal): Promise<void> {
@@ -292,6 +295,8 @@ export class ScheduledTaskRunCoordinator {
         await this.markUncertainIfRunning(run.runId, signal);
         continue;
       }
+      const backgroundBinding = this.router.backgroundBindings(binding).find(entry => entry.threadId === reference.threadId);
+      if (!backgroundBinding) continue;
       const settings = this.router.modelSettingsForThread(reference.threadId);
       if (
         task.modelProvider != null
@@ -316,19 +321,18 @@ export class ScheduledTaskRunCoordinator {
         }
         if (turn.status === "inProgress") continue;
         const liveCompletionObserved = this.pendingTerminalByRun.has(run.runId);
-        const currentTarget = this.router.targetForThread(reference.threadId);
-        const stillOwned = currentTarget?.surface === binding.surface
-          && currentTarget.accountId === binding.accountId
-          && currentTarget.conversationId === binding.conversationId
-          && currentTarget.surface === task.surface
-          && currentTarget.accountId === task.accountId
-          && currentTarget.conversationId === task.conversationId
+        const stillOwned = (): boolean => !signal?.aborted
+          && this.router.targetForThread(reference.threadId) === binding
+          && this.router.backgroundBindings(binding).includes(backgroundBinding)
+          && binding.surface === task.surface
+          && binding.accountId === task.accountId
+          && binding.conversationId === task.conversationId
           && this.router.isBackgroundThread(reference.threadId);
         const recovered = await this.applyTerminal(run.runId, turn.status, signal);
         if (signal?.aborted) return;
-        if (!stillOwned) continue;
-        if (recovered && !liveCompletionObserved) this.onRecovered?.(recovered, currentTarget);
-        await this.router.releaseBackground(reference.threadId).catch((error) => {
+        if (!stillOwned()) continue;
+        if (recovered && !liveCompletionObserved) this.onRecovered?.(recovered, binding);
+        await this.releaseRecoveredThread(reference.threadId, stillOwned).catch((error) => {
           if (signal?.aborted) return;
           this.logger?.warn({ err: error, threadId: reference.threadId }, "恢复计划任务后台绑定清理失败");
         });

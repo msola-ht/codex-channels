@@ -1,22 +1,24 @@
 import { validRequestTiming } from "../runtime/request-timing.mjs";
 import {
   closeSync,
+  constants,
   createReadStream,
   existsSync,
   fstatSync,
   openSync,
-  readFileSync,
+  lstatSync,
   readSync,
   readdirSync,
-  statSync,
 } from "node:fs";
-import { basename, join, resolve } from "node:path";
-import { createInterface } from "node:readline";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { callTiming, createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestClientName, requestContent, requestMetadata, requestParameters, requestProtocol, responseFacts } from "./traffic-dump-presentation.mjs";
 
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
+const maximumManifestBytes = 1_048_576;
+// Production writers admit at most 14 MiB per pending batch (trace: 4 MiB).
+const maximumLineBytes = 16 * 1_048_576;
 
 export function listDumpFiles(directory) {
   return dumpCatalog(directory).files;
@@ -24,6 +26,7 @@ export function listDumpFiles(directory) {
 
 export function dumpCatalog(directory) {
   if (!existsSync(directory)) return { files: [], labels: [], sessions: [] };
+  assertDumpDirectory(directory);
   const sessions = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
@@ -33,7 +36,7 @@ export function dumpCatalog(directory) {
     if (manifest.version !== 2) {
       throw new Error(`不支持的模型流量转储版本：${manifest.version}`);
     }
-    sessions.push({ path, ...manifest });
+    sessions.push({ ...manifest, path });
   }
   sessions.sort((left, right) => left.createdAtMs - right.createdAtMs);
   const labels = [...new Set(sessions.map((entry) => entry.label))]
@@ -73,9 +76,8 @@ export async function forEachDumpRecord(paths, visit) {
   for (const directory of sessionDirectories(paths)) {
     const path = join(directory, interactionFileName);
     if (!existsSync(path)) continue;
-    const lines = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
     let pendingLine;
-    for await (const line of lines) {
+    for await (const line of dumpLines(path)) {
       if (line.length === 0) continue;
       if (pendingLine !== undefined) await visitIndexLine(pendingLine, directory, visit, false);
       pendingLine = line;
@@ -279,18 +281,32 @@ function readManifest(directory) {
   if (!existsSync(path)) return undefined;
   let value;
   try {
-    value = JSON.parse(readFileSync(path, "utf8"));
+    const descriptor = openDumpFile(path);
+    try {
+      const size = fstatSync(descriptor).size;
+      if (size > maximumManifestBytes) throw new Error("manifest exceeds read limit");
+      const buffer = Buffer.alloc(size);
+      let read = 0;
+      while (read < size) {
+        const count = readSync(descriptor, buffer, read, size - read, read);
+        if (count === 0) break;
+        read += count;
+      }
+      value = JSON.parse(buffer.subarray(0, read).toString("utf8"));
+    } finally { closeSync(descriptor); }
   } catch {
     throw new Error(`模型流量 manifest 无效：${directory}`);
   }
   if (typeof value !== "object" || value === null
+    || Array.isArray(value)
+    || Object.keys(value).some(key => !["createdAtMs", "label", "session", "version"].includes(key))
     || typeof value.createdAtMs !== "number" || !Number.isFinite(value.createdAtMs)
     || typeof value.label !== "string" || value.label.length === 0
     || typeof value.session !== "string" || value.session.length === 0
     || typeof value.version !== "number" || !Number.isFinite(value.version)) {
     throw new Error(`模型流量 manifest 无效：${directory}`);
   }
-  return value;
+  return { createdAtMs: value.createdAtMs, label: value.label, session: value.session, version: value.version };
 }
 
 async function visitIndexLine(line, directory, visit, allowTornTail) {
@@ -304,10 +320,14 @@ async function visitIndexLine(line, directory, visit, allowTornTail) {
 
 function sessionDirectoryOf(path) {
   const resolved = resolve(path);
-  const stats = statSync(resolved, { throwIfNoEntry: false });
-  return stats?.isDirectory() || basename(resolved) !== interactionFileName
+  const stats = lstatSync(resolved, { throwIfNoEntry: false });
+  const directory = stats?.isDirectory() || basename(resolved) !== interactionFileName
     ? resolved
     : resolve(resolved, "..");
+  assertDumpDirectory(directory);
+  const manifest = readManifest(directory);
+  if (manifest?.version !== 2) throw new Error("仅支持 V2 模型流量 session");
+  return directory;
 }
 
 function sessionDirectories(paths) {
@@ -510,7 +530,7 @@ function assertPayloadPart(part) {
 
 function readFileSlice(path, offset, length, allowUnavailable = false) {
   let descriptor;
-  try { descriptor = openSync(path, "r"); }
+  try { descriptor = openDumpFile(path); }
   catch (error) {
     if (allowUnavailable && error.code === "ENOENT") return undefined;
     throw error;
@@ -539,11 +559,57 @@ async function* traceRecords(directory) {
     .filter((name) => /^trace-[1-9][0-9]*\.jsonl$/u.test(name))
     .sort((left, right) => numericSuffix(left) - numericSuffix(right));
   for (const path of paths) {
-    const lines = createInterface({ input: createReadStream(join(directory, path)), crlfDelay: Infinity });
-    for await (const line of lines) {
+    for await (const line of dumpLines(join(directory, path))) {
       yield parseJson(line);
     }
   }
+}
+
+function assertDumpDirectory(path) {
+  const metadata = lstatSync(path);
+  if (!metadata.isDirectory()) throw new Error("模型流量目录类型无效，不能使用符号链接");
+  return metadata;
+}
+
+function openDumpFile(path) {
+  const parent = assertDumpDirectory(dirname(path));
+  const before = lstatSync(path);
+  if (!before.isFile()) throw new Error("模型流量文件类型无效，不能使用符号链接");
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const opened = fstatSync(descriptor);
+    const current = lstatSync(path);
+    const currentParent = assertDumpDirectory(dirname(path));
+    if (!opened.isFile() || !current.isFile()
+      || before.dev !== opened.dev || before.ino !== opened.ino
+      || current.dev !== opened.dev || current.ino !== opened.ino
+      || parent.dev !== currentParent.dev || parent.ino !== currentParent.ino) {
+      throw new Error("模型流量文件在读取时被替换");
+    }
+    return descriptor;
+  } catch (error) { closeSync(descriptor); throw error; }
+}
+
+async function* dumpLines(path) {
+  const stream = createReadStream(path, { fd: openDumpFile(path), autoClose: true });
+  let chunks = [];
+  let bytes = 0;
+  try {
+    for await (const chunk of stream) {
+      let start = 0;
+      while (start < chunk.length) {
+        const newline = chunk.indexOf(10, start);
+        const end = newline < 0 ? chunk.length : newline;
+        bytes += end - start;
+        if (bytes > maximumLineBytes) throw new Error("模型流量记录超过 16 MiB 读取上限");
+        chunks.push(chunk.subarray(start, end));
+        if (newline < 0) break;
+        yield Buffer.concat(chunks, bytes).toString("utf8").replace(/\r$/u, "");
+        chunks = []; bytes = 0; start = newline + 1;
+      }
+    }
+    if (bytes > 0) yield Buffer.concat(chunks, bytes).toString("utf8");
+  } finally { stream.destroy(); }
 }
 
 async function readTrace(directory, id, offset, limit, maxBytes, output, interaction) {

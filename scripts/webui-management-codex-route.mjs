@@ -11,7 +11,8 @@ import {
   ManagementSecurityError,
 } from "./management-security.mjs";
 
-const highRiskCodexSettingKinds = new Set(["permissions", "tool-access", "approvals-reviewer"]);
+// Bulk settings can include permission edits and must use the same confirmation gate.
+const highRiskCodexSettingKinds = new Set(["all", "permissions", "tool-access", "approvals-reviewer"]);
 
 export async function routeCodexSettingsManagement({
   environment,

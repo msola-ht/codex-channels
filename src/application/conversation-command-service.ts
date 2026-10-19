@@ -33,6 +33,7 @@ import {
   parseScheduledTaskOperation,
 } from "./scheduled-task-command.js";
 import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
+import type { ScheduledTaskOperationContext } from "../scheduled-tasks/index.js";
 import { resolveProvider, type ModelSelectionIdentity, type ModelSelectionState } from "./model-selection-service.js";
 import { pageCountFor, pageSlice } from "./pagination.js";
 
@@ -321,13 +322,13 @@ function modelSelectionResult(state: ModelSelectionState): ConversationCommandRe
 }
 
 export interface ConversationCommandExecutor {
-  selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }): Promise<ConversationCommandResult>;
-  selectModel(target: ConversationTarget, selection: ModelSelectionIdentity): Promise<ConversationCommandResult>;
+  selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult>;
+  selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult>;
   execute(
     target: ConversationTarget,
     command: ConversationCommandName,
-    input?: string,
-    actorId?: string,
+    input: string,
+    actorId: string,
   ): Promise<ConversationCommandResult>;
 }
 
@@ -337,25 +338,70 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     private readonly conversations: ConversationCommandUseCases,
     scheduledTasks?: ScheduledTaskUseCases,
     private readonly resetCredits?: ConversationResetCreditService,
+    private readonly authorize: (target: ConversationTarget, actorId: string) => void = () => {
+      throw new UserFacingError("command.authorization-changed", "命令授权不可用");
+    },
   ) {
     this.scheduledTasks = scheduledTasks;
   }
 
-  async selectModel(target: ConversationTarget, selection: ModelSelectionIdentity): Promise<ConversationCommandResult> {
+  async selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult> {
+    const assertAuthorized = this.commandGuard(target, actorId, false);
     this.conversations.touchActivity?.(target);
-    return modelSelectionResult(await this.conversations.selectModel(target, selection));
+    const state = await this.conversations.selectModel(target, selection, assertAuthorized);
+    assertAuthorized();
+    return modelSelectionResult(state);
   }
 
-  async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }): Promise<ConversationCommandResult> {
+  async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult> {
+    const assertAuthorized = this.commandGuard(target, actorId, false);
     this.conversations.touchActivity?.(target);
-    return { kind: "auto-review", state: await this.conversations.updateAutoReview(target, selection.enabled, selection.threadId) };
+    const state = await this.conversations.updateAutoReview(target, selection.enabled, selection.threadId, assertAuthorized);
+    assertAuthorized();
+    return { kind: "auto-review", state };
   }
 
   async execute(
     target: ConversationTarget,
     command: ConversationCommandName,
-    input = "",
-    actorId?: string,
+    input: string,
+    actorId: string,
+  ): Promise<ConversationCommandResult> {
+    const assertAuthorized = this.commandGuard(target, actorId, command === "workspace");
+    const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
+    try {
+      if (command === "workspace" && input.trim()) this.authorize(target, actorId);
+      else assertAuthorized();
+    } catch (error) {
+      if (result.kind === "scheduled-confirmation") this.scheduledTasks?.cancelConfirmation(result.preview.token);
+      throw error;
+    }
+    return result;
+  }
+
+  private commandGuard(target: ConversationTarget, actorId: string, allowMissingWorkspace: boolean): () => void {
+    this.authorize(target, actorId);
+    const workspaceId = this.conversations.selectedWorkspaceId(target);
+    const workspace = this.conversations.listWorkspaces().find(entry => entry.id === workspaceId);
+    if (!workspace && !allowMissingWorkspace) {
+      throw new UserFacingError("workspace.missing", "Workspace 不存在或未获授权", { workspaceId });
+    }
+    return () => {
+      this.authorize(target, actorId);
+      const currentId = this.conversations.selectedWorkspaceId(target);
+      const current = this.conversations.listWorkspaces().find(entry => entry.id === currentId);
+      if (currentId !== workspaceId || current?.cwd !== workspace?.cwd) {
+        throw new UserFacingError("command.authorization-changed", "命令工作区已变化");
+      }
+    };
+  }
+
+  private async executeAuthorized(
+    target: ConversationTarget,
+    command: ConversationCommandName,
+    input: string,
+    actorId: string,
+    assertAuthorized: () => void,
   ): Promise<ConversationCommandResult> {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
@@ -367,11 +413,11 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         if (argumentsText !== "on" && argumentsText !== "off") {
           throw new UserFacingError("autoreview.usage", "用法：/autoreview [on|off]");
         }
-        return { kind: "auto-review", state: await this.conversations.updateAutoReview(target, argumentsText === "on") };
+        return { kind: "auto-review", state: await this.conversations.updateAutoReview(target, argumentsText === "on", undefined, assertAuthorized) };
       }
       case "resume": {
         if (argumentsText) {
-          const resumed = await this.conversations.resume(target, argumentsText);
+          const resumed = await this.conversations.resume(target, argumentsText, assertAuthorized);
           const model = toConversationModelSummary(this.conversations.status(target));
           return {
             kind: "outcome",
@@ -395,7 +441,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         const sessions = await this.conversations.listSessions(target, {
           page: view.page,
           turnCountMode: "cached",
-        });
+        }, assertAuthorized);
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return sessionListResult(sessions, view, {
@@ -409,7 +455,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         const sessions = await this.conversations.listSessions(target, {
           ...toSessionQuery(view),
           turnCountMode: "cached",
-        });
+        }, assertAuthorized);
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return sessionListResult(sessions, view, {
@@ -424,11 +470,11 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           archived: true,
           ...toSessionQuery(view),
           turnCountMode: "cached",
-        });
+        }, assertAuthorized);
         return sessionListResult(sessions, view, { archived: true });
       }
       case "new": {
-        const sessionSwitch = await this.conversations.newSession(target);
+        const sessionSwitch = await this.conversations.newSession(target, assertAuthorized);
         const nextModel = toConversationModelSummary(this.conversations.status(target));
         return {
           kind: "outcome",
@@ -445,14 +491,14 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "archive": {
-        const threadId = await this.conversations.archive(target);
+        const threadId = await this.conversations.archive(target, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "thread.archived", threadId },
         };
       }
       case "unarchive": {
-        const threadId = await this.conversations.unarchive(target, argumentsText);
+        const threadId = await this.conversations.unarchive(target, argumentsText, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "thread.unarchived", threadId },
@@ -460,7 +506,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       }
       case "pin":
         {
-          const changed = await this.conversations.setPinned(target, true);
+          const changed = await this.conversations.setPinned(target, true, assertAuthorized);
           return {
             kind: "outcome",
             outcome: { type: "thread.pin-updated", pinned: true, changed },
@@ -468,7 +514,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
       case "unpin":
         {
-          const changed = await this.conversations.setPinned(target, false);
+          const changed = await this.conversations.setPinned(target, false, assertAuthorized);
           return {
             kind: "outcome",
             outcome: { type: "thread.pin-updated", pinned: false, changed },
@@ -481,7 +527,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "workspace": {
         if (argumentsText) {
-          const workspace = await this.conversations.selectWorkspace(target, argumentsText);
+          const workspace = await this.conversations.selectWorkspace(target, argumentsText, assertAuthorized);
           return {
             kind: "outcome",
             outcome: {
@@ -494,34 +540,34 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         return {
           kind: "workspaces",
           workspaces: this.conversations.listWorkspaces(),
-          currentWorkspaceId: this.conversations.status(target).workspaceId,
+          currentWorkspaceId: this.conversations.selectedWorkspaceId(target),
         };
       }
       case "stop": {
-        const stopped = await this.conversations.stop(target);
+        const stopped = await this.conversations.stop(target, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "turn.stop-requested", stopped },
         };
       }
       case "queue":
-        return this.executeQueueCommand(target, argumentsText);
+        return this.executeQueueCommand(target, argumentsText, assertAuthorized);
       case "revert":
-        return this.executeRevertCommand(target, argumentsText, actorId);
+        return this.executeRevertCommand(target, argumentsText, actorId, assertAuthorized);
       case "rename":
-        await this.conversations.rename(target, argumentsText);
+        await this.conversations.rename(target, argumentsText, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "thread.renamed", name: argumentsText },
         };
       case "compact":
-        await this.conversations.compact(target);
+        await this.conversations.compact(target, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "thread.compaction-requested" },
         };
       case "fork": {
-        const threadId = await this.conversations.fork(target);
+        const threadId = await this.conversations.fork(target, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "thread.forked", threadId },
@@ -531,6 +577,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         const submission = await this.conversations.review(
           target,
           parseReviewTarget(argumentsText),
+          assertAuthorized,
         );
         return {
           kind: "outcome",
@@ -543,11 +590,11 @@ export class ConversationCommandService implements ConversationCommandExecutor {
             kind: "models",
             view: "model",
             state: argumentsText === "clear"
-              ? await this.conversations.clearModelSelection(target)
-              : await this.conversations.clearModelBrowse(target),
+              ? await this.conversations.clearModelSelection(target, assertAuthorized)
+              : await this.conversations.clearModelBrowse(target, assertAuthorized),
             };
         }
-        const browseState = await this.conversations.modelState(target);
+        const browseState = await this.conversations.modelState(target, assertAuthorized);
         if (
           browseState.providerFilter === undefined
           && (/^\d+$/u.test(argumentsText)
@@ -556,12 +603,12 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           return {
             kind: "models",
             view: "model",
-            state: await this.conversations.browseProviderModels(target, argumentsText),
+            state: await this.conversations.browseProviderModels(target, argumentsText, assertAuthorized),
           };
         }
         let state: Awaited<ReturnType<ConversationCommandUseCases["selectModel"]>>;
         try {
-          state = await this.conversations.selectModel(target, argumentsText);
+          state = await this.conversations.selectModel(target, argumentsText, assertAuthorized);
         } catch (error) {
           if (
             error instanceof UserFacingError
@@ -573,6 +620,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
               state: await this.conversations.browseProviderModels(
                 target,
                 argumentsText,
+                assertAuthorized,
               ),
             };
           }
@@ -585,20 +633,20 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           kind: "models",
           view: "effort",
           state: argumentsText
-            ? await this.conversations.selectEffort(target, argumentsText)
-            : await this.conversations.modelState(target),
+            ? await this.conversations.selectEffort(target, argumentsText, assertAuthorized)
+            : await this.conversations.modelState(target, assertAuthorized),
         };
       case "fast":
         return {
           kind: "models",
           view: "fast",
-          state: await this.conversations.selectFastMode(target, argumentsText),
+          state: await this.conversations.selectFastMode(target, argumentsText, assertAuthorized),
         };
       case "skill": {
         if (!argumentsText) {
           return {
             kind: "skills",
-            entries: await this.conversations.listSkills(target),
+            entries: await this.conversations.listSkills(target, assertAuthorized),
           };
         }
         const invocation = parseSkillInvocation(argumentsText);
@@ -606,6 +654,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           target,
           invocation.selector,
           invocation.task,
+          assertAuthorized,
         );
         return {
           kind: "outcome",
@@ -629,6 +678,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           target,
           invocation.selector,
           invocation.task,
+          assertAuthorized,
         );
         return {
           kind: "outcome",
@@ -641,13 +691,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "mcp":
-        return this.executeMcpCommand(target, argumentsText);
+        return this.executeMcpCommand(target, argumentsText, assertAuthorized);
       case "plugin":
-        return this.executePluginCommand(target, argumentsText);
+        return this.executePluginCommand(target, argumentsText, assertAuthorized);
       case "usage":
         return {
           kind: "usage",
-          result: await this.conversations.providerAccountUsage(target),
+          result: await this.conversations.providerAccountUsage(target, assertAuthorized),
         };
       case "metrics":
         return {
@@ -664,7 +714,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
         return {
           kind: "limits",
-          result: await this.conversations.providerAccountLimits(target),
+          result: await this.conversations.providerAccountLimits(target, assertAuthorized),
         };
       case "permissions":
         {
@@ -674,7 +724,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           );
           return {
             kind: "permissions",
-            profiles: await this.conversations.listPermissionProfiles(target),
+            profiles: await this.conversations.listPermissionProfiles(target, assertAuthorized),
             ...(workspace ? { workspace } : {}),
           };
         }
@@ -686,7 +736,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "plan":
         if (argumentsText) {
-          const submission = await this.conversations.startPlan(target, argumentsText);
+          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized);
           return {
             kind: "outcome",
             outcome: { type: "plan.started", turnId: submission.turnId },
@@ -694,10 +744,10 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
         return {
           kind: "collaboration-mode",
-          state: await this.conversations.togglePlanMode(target),
+          state: await this.conversations.togglePlanMode(target, assertAuthorized),
         };
       case "goal":
-        return this.goal(target, argumentsText);
+        return this.goal(target, argumentsText, assertAuthorized);
       case "release": {
         const force = argumentsText === "force";
         if (argumentsText !== "" && !force) {
@@ -712,7 +762,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "schedule":
-        return this.executeScheduledTaskCommand(target, argumentsText, actorId);
+        return this.executeScheduledTaskCommand(target, argumentsText, actorId, assertAuthorized);
     }
     throw new UserFacingError(
       "command.unsupported",
@@ -724,12 +774,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async executeQueueCommand(
     target: ConversationTarget,
     input: string,
+    assertAuthorized: () => void,
   ): Promise<ConversationCommandResult> {
     const operation = parseThreadQueueOperation(input);
     if (operation.type === "list") {
       return {
         kind: "thread-queue",
-        result: await this.conversations.queueList(target, operation.page),
+        result: await this.conversations.queueList(target, operation.page, assertAuthorized),
       };
     }
     if (operation.type === "add") {
@@ -737,7 +788,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         kind: "outcome",
         outcome: {
           type: "thread-queue.added",
-          item: await this.conversations.queueAdd(target, operation.text),
+          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized),
         },
       };
     }
@@ -750,12 +801,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
             target,
             operation.selector,
             operation.text,
+            assertAuthorized,
           ),
         },
       };
     }
     if (operation.type === "delete") {
-      const result = await this.conversations.queueDelete(target, operation.selector);
+      const result = await this.conversations.queueDelete(target, operation.selector, assertAuthorized);
       return {
         kind: "outcome",
         outcome: { type: "thread-queue.deleted", deleted: result.deleted },
@@ -766,6 +818,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         target,
         operation.selector,
         operation.position,
+        assertAuthorized,
       );
       return {
         kind: "outcome",
@@ -777,7 +830,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         },
       };
     }
-    const result = await this.conversations.queueStart(target, operation.selector);
+    const result = await this.conversations.queueStart(target, operation.selector, assertAuthorized);
     return {
       kind: "outcome",
       outcome: { type: "thread-queue.started", turnId: result.turnId },
@@ -788,12 +841,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     target: ConversationTarget,
     input: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<ConversationCommandResult> {
     const operation = parseThreadRevertOperation(input);
     if (operation.type === "list") {
       return {
         kind: "thread-revert",
-        result: await this.conversations.revertList(target, operation.page),
+        result: await this.conversations.revertList(target, operation.page, assertAuthorized),
       };
     }
     if (operation.type === "preview") {
@@ -803,6 +857,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           target,
           operation.selector,
           actorId,
+          assertAuthorized,
         ),
       };
     }
@@ -810,6 +865,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       target,
       operation.token,
       actorId,
+      assertAuthorized,
     );
     return {
       kind: "outcome",
@@ -824,36 +880,37 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async executeMcpCommand(
     target: ConversationTarget,
     input: string,
+    assertAuthorized?: () => void,
   ): Promise<ConversationCommandResult> {
     if (!input) {
       return {
         kind: "mcp",
-        servers: await this.conversations.listMcpServers(target),
+        servers: await this.conversations.listMcpServers(target, assertAuthorized),
       };
     }
     const operation = parseMcpOperation(input);
     if (operation.type === "health") {
       return {
         kind: "mcp-health",
-        report: await this.conversations.mcpHealth(target),
+        report: await this.conversations.mcpHealth(target, assertAuthorized),
       };
     }
     if (operation.type === "reload") {
-      await this.conversations.reloadMcpServers(target);
+      await this.conversations.reloadMcpServers(target, assertAuthorized);
       return { kind: "mcp-reload" };
     }
     if (operation.type === "detail") {
       return {
         kind: "mcp-detail",
         selector: operation.selector,
-        server: await this.conversations.mcpServerDetail(target, operation.selector),
+        server: await this.conversations.mcpServerDetail(target, operation.selector, assertAuthorized),
         ...(operation.view ? { view: operation.view } : {}),
       };
     }
     if (operation.type === "login") {
       return {
         kind: "mcp-login",
-        login: await this.conversations.loginMcpServer(target, operation.selector),
+        login: await this.conversations.loginMcpServer(target, operation.selector, assertAuthorized),
       };
     }
     return {
@@ -862,6 +919,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         target,
         operation.selector,
         operation.uri,
+        assertAuthorized,
       ),
     };
   }
@@ -869,28 +927,30 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async executePluginCommand(
     target: ConversationTarget,
     input: string,
+    assertAuthorized?: () => void,
   ): Promise<ConversationCommandResult> {
     const operation = parsePluginOperation(input);
     if (operation.type === "list") {
-      const catalog = await this.conversations.listPlugins(target);
+      const catalog = await this.conversations.listPlugins(target, assertAuthorized);
       return pluginListResult(catalog, operation.view);
     }
     if (operation.type === "health") {
       return {
         kind: "plugin-health",
-        report: await this.conversations.pluginHealth(target),
+        report: await this.conversations.pluginHealth(target, assertAuthorized),
       };
     }
     if (operation.type === "detail") {
       return {
         kind: "plugin-detail",
-        plugin: await this.conversations.pluginDetail(target, operation.selector),
+        plugin: await this.conversations.pluginDetail(target, operation.selector, assertAuthorized),
       };
     }
     const submission = await this.conversations.invokePlugin(
       target,
       operation.selector,
       operation.task,
+      assertAuthorized,
     );
     return {
       kind: "outcome",
@@ -906,7 +966,8 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async executeScheduledTaskCommand(
     target: ConversationTarget,
     input: string,
-    actorId?: string,
+    actorId: string,
+    assertAuthorized: () => void,
   ): Promise<ConversationCommandResult> {
     const scheduled = this.scheduledTasks;
     if (!scheduled) {
@@ -921,39 +982,53 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         "无法确认当前渠道用户身份",
       );
     }
+    const controller = new AbortController();
+    const context: ScheduledTaskOperationContext = {
+      signal: controller.signal,
+      assertCurrent() {
+        controller.signal.throwIfAborted();
+        try {
+          assertAuthorized();
+        } catch (error) {
+          controller.abort(error);
+          throw error;
+        }
+      },
+    };
+    context.assertCurrent();
     const operation = parseScheduledTaskOperation(input);
     switch (operation.type) {
       case "natural":
         return {
           kind: "scheduled-confirmation",
-          preview: await scheduled.previewNaturalLanguage(target, actorId, operation.description),
+          preview: await scheduled.previewNaturalLanguage(target, actorId, operation.description, context),
         };
       case "create":
         return {
           kind: "scheduled-confirmation",
-          preview: await scheduled.previewCreate(target, actorId, operation.request),
+          preview: await scheduled.previewCreate(target, actorId, operation.request, context),
         };
       case "list":
         return {
           kind: "scheduled-tasks",
-          result: await scheduled.list(target, actorId, operation.page),
+          result: await scheduled.list(target, actorId, operation.page, context),
         };
       case "runs":
         return {
           kind: "scheduled-runs",
-          result: await scheduled.runs(target, actorId, operation.selector, operation.page),
+          result: await scheduled.runs(target, actorId, operation.selector, operation.page, context),
         };
       case "rename":
         return {
           kind: "outcome",
           outcome: {
             type: "scheduled-task.renamed",
-            task: await scheduled.rename(target, actorId, operation.selector, operation.name),
+            task: await scheduled.rename(target, actorId, operation.selector, operation.name, context),
           },
         };
       case "pause":
       case "resume": {
-        const task = await scheduled[operation.type](target, actorId, operation.selector);
+        const task = await scheduled[operation.type](target, actorId, operation.selector, context);
         return {
           kind: "outcome",
           outcome: {
@@ -966,7 +1041,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       }
       case "run":
       case "retry": {
-        const run = await scheduled[operation.type](target, actorId, operation.selector);
+        const run = await scheduled[operation.type](target, actorId, operation.selector, context);
         return {
           kind: "outcome",
           outcome: {
@@ -980,10 +1055,10 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "delete":
         return {
           kind: "scheduled-confirmation",
-          preview: await scheduled.previewDelete(target, actorId, operation.selector),
+          preview: await scheduled.previewDelete(target, actorId, operation.selector, context),
         };
       case "confirm": {
-        const confirmed = await scheduled.confirm(target, actorId, operation.token);
+        const confirmed = await scheduled.confirm(target, actorId, operation.token, context);
         return {
           kind: "outcome",
           outcome: {
@@ -1000,16 +1075,17 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async goal(
     target: ConversationTarget,
     input: string,
+    assertAuthorized?: () => void,
   ): Promise<ConversationCommandResult> {
     if (input === "clear") {
-      await this.conversations.clearGoal(target);
+      await this.conversations.clearGoal(target, assertAuthorized);
       return {
         kind: "outcome",
         outcome: { type: "goal.cleared" },
       };
     }
     if (input.startsWith("set ")) {
-      const goal = await this.conversations.setGoal(target, input.slice(4));
+      const goal = await this.conversations.setGoal(target, input.slice(4), assertAuthorized);
       return {
         kind: "outcome",
         outcome: { type: "goal.updated", goal },
@@ -1021,7 +1097,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         "Goal 参数无效",
       );
     }
-    const goal = await this.conversations.getGoal(target);
+    const goal = await this.conversations.getGoal(target, assertAuthorized);
     return { kind: "goal", goal };
   }
 }

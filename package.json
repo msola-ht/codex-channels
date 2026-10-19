@@ -173,6 +173,8 @@
     "scripts/source-install-summary.mjs",
     "scripts/source-uninstall.mjs",
     "scripts/source-update.mjs",
+    "scripts/source-build.mjs",
+    "scripts/gateway-version-policy.mjs",
     "scripts/systemd-control.sh",
     "scripts/telegram-setup-session.mjs",
     "scripts/telegram-setup.mjs",
@@ -231,7 +233,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.22.0"
   },
   "scripts": {
     "prebuild": "node scripts/clean-dist.mjs",

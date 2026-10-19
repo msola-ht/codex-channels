@@ -48,7 +48,8 @@ export function useManagementTasks(): ManagementTaskController {
     notificationError: notificationStatus === "reconnecting" || notificationStatus === "stale" ? t("common.taskNotificationsUnavailable") : null,
     run: (input) => { setCancelError(null); return mutation.mutate(input) },
     confirm: mutation.confirm, cancelPending: mutation.cancel, cancel,
-    actionError: cancelError === null ? mutation.actionError : translateApiErrorCode(t, cancelError),
+    actionError: (cancelError === null ? mutation.actionError : translateApiErrorCode(t, cancelError))
+      ?? (data?.tasks.some(task => task.auditStatus === "degraded") ? t("common.taskAuditDegraded") : null),
   }
 }
 

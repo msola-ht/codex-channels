@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { trimOldestEntries } from "./bounded-map.js";
 
 import type { SessionRouter } from "../session-routing/index.js";
 import {
@@ -34,6 +35,7 @@ interface RevertPage {
 }
 
 export class ThreadRevertService {
+  private readonly pendingOperations = new Set<{ threadId: string; targetKey: string; invalidated: boolean }>();
   private readonly selectionSnapshots = new Map<string, {
     threadId: string;
     workspaceId: string;
@@ -63,17 +65,21 @@ export class ThreadRevertService {
     private readonly history?: ThreadHistoryPort,
   ) {}
 
-  list(
+  async list(
     target: ConversationTarget,
     page = 1,
+    assertAuthorized?: () => void,
   ): Promise<ThreadRevertListResult> {
-    return this.locks.forConversation(target, async () => {
+    assertAuthorized?.();
+    const binding = this.requireCurrentBinding(target);
+    return this.withSnapshotOperation(target, binding, assertAuthorized, async (beforeSubmit) => {
+      beforeSubmit();
       requirePage(page, maximumPages, () => {
         throw new UserFacingError("revert.usage", "Revert 页码无效");
       });
-      const binding = this.requireCurrentBinding(target);
-      await this.requirePaginatedThread(binding.threadId);
-      const result = await this.readPage(binding.threadId, page);
+      await this.requirePaginatedThread(binding.threadId, beforeSubmit);
+      const result = await this.readPage(binding.threadId, page, beforeSubmit);
+      beforeSubmit();
       this.rememberSelectionSnapshot(target, {
         threadId: binding.threadId,
         workspaceId: binding.workspaceId,
@@ -95,14 +101,17 @@ export class ThreadRevertService {
     });
   }
 
-  preview(
+  async preview(
     target: ConversationTarget,
     selector: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<ThreadRevertPreview> {
-    return this.locks.forConversation(target, async () => {
-      const binding = this.requireCurrentBinding(target);
-      await this.requirePaginatedThread(binding.threadId);
+    assertAuthorized?.();
+    const binding = this.requireCurrentBinding(target);
+    return this.withSnapshotOperation(target, binding, assertAuthorized, async (beforeSubmit) => {
+      beforeSubmit();
+      await this.requirePaginatedThread(binding.threadId, beforeSubmit);
       const selection = this.resolveSelection(target, binding.threadId, selector);
       if (selection.workspaceId !== binding.workspaceId) {
         this.invalidate(target);
@@ -111,7 +120,8 @@ export class ThreadRevertService {
           "Workspace 已发生变化，请重新执行 /revert list",
         );
       }
-      const currentPage = await this.readPage(binding.threadId, selection.page);
+      const currentPage = await this.readPage(binding.threadId, selection.page, beforeSubmit);
+      beforeSubmit();
       if (
         !sameTurnIds(currentPage.turns, selection.turns)
         || currentPage.latestTurnId !== selection.latestTurnId
@@ -132,7 +142,8 @@ export class ThreadRevertService {
           "找不到指定 Turn，请重新执行 /revert list",
         );
       }
-      const queue = await this.readQueue(binding.threadId);
+      const queue = await this.readQueue(binding.threadId, beforeSubmit);
+      beforeSubmit();
       const token = randomUUID();
       this.rememberConfirmation(token, {
         targetKey: conversationTargetKey(target),
@@ -159,12 +170,16 @@ export class ThreadRevertService {
     });
   }
 
-  confirm(
+  async confirm(
     target: ConversationTarget,
     token: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<{ threadId: string; beforeTurnId: string }> {
-    return this.locks.forConversation(target, async () => {
+    assertAuthorized?.();
+    const binding = this.requireCurrentBinding(target);
+    return this.withSnapshotOperation(target, binding, assertAuthorized, async (beforeSubmit) => {
+      beforeSubmit();
       const confirmation = this.confirmations.get(token);
       if (!confirmation) {
         throw confirmationInvalidError();
@@ -179,10 +194,8 @@ export class ThreadRevertService {
       ) {
         throw confirmationInvalidError();
       }
-      const binding = this.router.current(target);
       if (
-        !binding
-        || binding.threadId !== confirmation.threadId
+        binding.threadId !== confirmation.threadId
         || binding.workspaceId !== confirmation.workspaceId
       ) {
         this.invalidate(target);
@@ -191,7 +204,7 @@ export class ThreadRevertService {
           "当前 Session 或 Workspace 已发生变化，请重新生成 Revert 预览",
         );
       }
-      await this.requirePaginatedThread(confirmation.threadId);
+      await this.requirePaginatedThread(confirmation.threadId, beforeSubmit);
       const selection = this.selectionSnapshots.get(conversationTargetKey(target));
       if (
         !selection
@@ -204,8 +217,9 @@ export class ThreadRevertService {
           "Revert 列表已失效，请重新生成预览",
         );
       }
-      const currentPage = await this.readPage(confirmation.threadId, confirmation.page);
-      const queue = await this.readQueue(confirmation.threadId);
+      const currentPage = await this.readPage(confirmation.threadId, confirmation.page, beforeSubmit);
+      const queue = await this.readQueue(confirmation.threadId, beforeSubmit);
+      beforeSubmit();
       const currentTurn = currentPage.turns.find(
         (turn) => turn.id === confirmation.beforeTurnId,
       );
@@ -226,6 +240,7 @@ export class ThreadRevertService {
         await this.requireHistory().revertThread(
           confirmation.threadId,
           confirmation.beforeTurnId,
+          beforeSubmit,
         );
       } catch (error) {
         throw revertUserFacingError(error);
@@ -235,13 +250,19 @@ export class ThreadRevertService {
         threadId: confirmation.threadId,
         beforeTurnId: confirmation.beforeTurnId,
       };
-    });
+    }).finally(() => this.invalidate(target));
   }
 
   invalidate(threadId: string): void;
   invalidate(target: ConversationTarget): void;
   invalidate(value: string | ConversationTarget): void;
   invalidate(value: string | ConversationTarget): void {
+    const targetKey = typeof value === "string" ? undefined : conversationTargetKey(value);
+    for (const pending of this.pendingOperations) {
+      if (typeof value === "string" ? pending.threadId === value : pending.targetKey === targetKey) {
+        pending.invalidated = true;
+      }
+    }
     if (typeof value !== "string") {
       const targetKey = conversationTargetKey(value);
       this.selectionSnapshots.delete(targetKey);
@@ -278,8 +299,51 @@ export class ThreadRevertService {
     return this.history;
   }
 
-  private async requirePaginatedThread(threadId: string): Promise<void> {
-    const thread = await this.router.readThread(threadId);
+  private bindingGuard(
+    target: ConversationTarget,
+    expected: { threadId: string; workspaceId: string },
+    assertAuthorized?: () => void,
+  ): () => void {
+    return () => {
+      assertAuthorized?.();
+      const current = this.router.current(target);
+      if (
+        current?.threadId !== expected.threadId
+        || current.workspaceId !== expected.workspaceId
+      ) {
+        throw new UserFacingError(
+          "revert.concurrent",
+          "当前 Session 或 Workspace 已发生变化，请重新执行 /revert list",
+        );
+      }
+    };
+  }
+
+  private async withSnapshotOperation<T>(
+    target: ConversationTarget,
+    binding: { threadId: string; workspaceId: string },
+    assertAuthorized: (() => void) | undefined,
+    action: (beforeSubmit: () => void) => Promise<T>,
+  ): Promise<T> {
+    const pending = { threadId: binding.threadId, targetKey: conversationTargetKey(target), invalidated: false };
+    this.pendingOperations.add(pending);
+    const beforeSubmit = this.bindingGuard(target, binding, () => {
+      assertAuthorized?.();
+      if (pending.invalidated) {
+        throw new UserFacingError("revert.concurrent", "Session 历史或 Queue 已变化，请重新执行 /revert list");
+      }
+    });
+    try {
+      return await this.locks.forConversation(target, () => action(beforeSubmit));
+    } finally {
+      this.pendingOperations.delete(pending);
+    }
+  }
+
+  private async requirePaginatedThread(threadId: string, beforeSubmit: () => void): Promise<void> {
+    beforeSubmit();
+    const thread = await this.router.readThread(threadId, undefined, beforeSubmit);
+    beforeSubmit();
     if (thread.historyMode !== "paginated") {
       throw new UserFacingError(
         "revert.legacy-thread",
@@ -288,7 +352,8 @@ export class ThreadRevertService {
     }
   }
 
-  private async readPage(threadId: string, page: number): Promise<RevertPage> {
+  private async readPage(threadId: string, page: number, beforeSubmit: () => void): Promise<RevertPage> {
+    beforeSubmit();
     const history = this.requireHistory();
     let cursor: string | null = null;
     let latestTurnId: string | null = null;
@@ -296,6 +361,7 @@ export class ThreadRevertService {
     const seenCursors = new Set<string>();
     const seenTurnIds = new Set<string>();
     for (let currentPage = 1; currentPage <= page; currentPage += 1) {
+      beforeSubmit();
       if (cursor !== null) {
         if (seenCursors.has(cursor)) {
           throw new UserFacingError(
@@ -311,10 +377,12 @@ export class ThreadRevertService {
           cursor,
           limit: pageSize,
           sortDirection: "desc",
+          beforeSubmit,
         });
       } catch (error) {
         throw revertListUserFacingError(error);
       }
+      beforeSubmit();
       for (const turn of result.turns) {
         if (seenTurnIds.has(turn.id)) {
           throw new UserFacingError(
@@ -417,7 +485,9 @@ export class ThreadRevertService {
 
   private async readQueue(
     threadId: string,
+    beforeSubmit: () => void,
   ): Promise<{ count: number; fingerprint: string }> {
+    beforeSubmit();
     if (!this.queue) {
       throw new UserFacingError(
         "revert.queue-unknown",
@@ -426,10 +496,11 @@ export class ThreadRevertService {
     }
     let page: ThreadQueuePage;
     try {
-      page = await this.queue.listQueue(threadId, { limit: maximumNativeQueueItems });
+      page = await this.queue.listQueue(threadId, { limit: maximumNativeQueueItems, beforeSubmit });
     } catch (error) {
       throw queueUserFacingError(error, "list");
     }
+    beforeSubmit();
     if (
       page.nextCursor !== null
       || page.items.length > maximumNativeQueueItems
@@ -468,11 +539,7 @@ export class ThreadRevertService {
     }
     this.selectionSnapshots.delete(key);
     this.selectionSnapshots.set(key, snapshot);
-    while (this.selectionSnapshots.size > maximumSelectionSnapshots) {
-      const oldest = this.selectionSnapshots.keys().next().value;
-      if (oldest === undefined) break;
-      this.selectionSnapshots.delete(oldest);
-    }
+    trimOldestEntries(this.selectionSnapshots, maximumSelectionSnapshots);
   }
 
   private rememberConfirmation(
@@ -497,11 +564,7 @@ export class ThreadRevertService {
       }
     }
     this.confirmations.set(token, confirmation);
-    while (this.confirmations.size > maximumConfirmations) {
-      const oldest = this.confirmations.keys().next().value;
-      if (oldest === undefined) break;
-      this.confirmations.delete(oldest);
-    }
+    trimOldestEntries(this.confirmations, maximumConfirmations);
   }
 }
 
@@ -521,6 +584,7 @@ function confirmationInvalidError(): UserFacingError {
 }
 
 function revertUserFacingError(error: unknown): UserFacingError {
+  if (error instanceof UserFacingError) return error;
   const message = error instanceof Error ? error.message : "";
   if (message.includes("turn not found")) {
     return new UserFacingError("revert.turn-not-found", "指定 Turn 不存在，Revert 未执行");
@@ -538,6 +602,7 @@ function revertUserFacingError(error: unknown): UserFacingError {
 }
 
 function revertListUserFacingError(error: unknown): UserFacingError {
+  if (error instanceof UserFacingError) return error;
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (message.includes("before first user message") || message.includes("not materialized")) {
     return new UserFacingError("revert.empty-history", "当前 Session 还没有可回退的 Turn");

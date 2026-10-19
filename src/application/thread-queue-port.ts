@@ -13,6 +13,22 @@ export type ThreadQueueInputType =
   | "mention"
   | "other";
 
+export type ThreadQueueFailure =
+  | "unavailable"
+  | "empty"
+  | "full"
+  | "busy"
+  | "item-not-found"
+  | "reorder-conflict";
+
+/** A known rejection from the Queue authority, never a transport failure. */
+export class ThreadQueueError extends Error {
+  constructor(readonly failure: ThreadQueueFailure) {
+    super(`Thread Queue: ${failure}`);
+    this.name = "ThreadQueueError";
+  }
+}
+
 export interface ThreadQueueItem {
   id: string;
   clientUserMessageId: string;
@@ -31,18 +47,22 @@ export interface ThreadQueuePage {
 export interface ThreadQueueListOptions {
   cursor?: string | null;
   limit?: number;
+  beforeSubmit?: () => void;
 }
 
 /**
  * Narrow Application-owned Queue contract.  Writes are intentionally
  * expressed as text-only operations; other clients' non-text entries remain
  * manageable through their safe summaries, but cannot be edited here.
+ * Local beforeSubmit guards run after asynchronous preparation and before
+ * each RPC attempt; they never become protocol fields or cancel sent writes.
  */
 export interface ThreadQueuePort {
   addQueueItem(
     threadId: string,
     text: string,
     clientUserMessageId: string,
+    beforeSubmit?: () => void,
   ): Promise<ThreadQueueItem>;
   listQueue(
     threadId: string,
@@ -52,8 +72,21 @@ export interface ThreadQueuePort {
     threadId: string,
     queuedSubmissionId: string,
     text: string,
+    beforeSubmit?: () => void,
   ): Promise<ThreadQueueItem>;
-  deleteQueueItem(threadId: string, queuedSubmissionId: string): Promise<{ deleted: boolean }>;
-  reorderQueue(threadId: string, queuedSubmissionIds: string[]): Promise<void>;
-  startQueueItem(threadId: string, queuedSubmissionId?: string): Promise<{ turnId: string }>;
+  deleteQueueItem(
+    threadId: string,
+    queuedSubmissionId: string,
+    beforeSubmit?: () => void,
+  ): Promise<{ deleted: boolean }>;
+  reorderQueue(
+    threadId: string,
+    queuedSubmissionIds: string[],
+    beforeSubmit?: () => void,
+  ): Promise<void>;
+  startQueueItem(
+    threadId: string,
+    queuedSubmissionId?: string,
+    beforeSubmit?: () => void,
+  ): Promise<{ turnId: string }>;
 }

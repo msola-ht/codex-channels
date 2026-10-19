@@ -16,6 +16,8 @@ export interface ThreadTurnSummary {
 export interface ThreadTurnsListOptions {
   /** Cancels local waiting; never sent as an App Server protocol field. */
   signal?: AbortSignal;
+  /** Rechecks local authorization immediately before each RPC attempt. */
+  beforeSubmit?: () => void;
   cursor?: string | null;
   limit?: number;
   sortDirection?: ThreadHistorySortDirection;
@@ -48,11 +50,19 @@ export interface ThreadRevertPreview {
   token: string;
 }
 
-/** Narrow application boundary for paginated history and destructive revert. */
+/**
+ * Narrow application boundary for paginated history and destructive revert.
+ * Local guards run before each RPC attempt and never become protocol fields;
+ * an already-sent revert still settles using its actual response.
+ */
 export interface ThreadHistoryPort {
   listThreadTurns(
     threadId: string,
     options?: ThreadTurnsListOptions,
   ): Promise<ThreadTurnsPage>;
-  revertThread(threadId: string, beforeTurnId: string): Promise<ThreadRevertResult>;
+  revertThread(
+    threadId: string,
+    beforeTurnId: string,
+    beforeSubmit?: () => void,
+  ): Promise<ThreadRevertResult>;
 }

@@ -4,10 +4,10 @@ import { readFileSync, unlinkSync } from "node:fs";
 
 import {
   GatewayConfigConflictError,
-  officialTuiUserAgentPattern,
+  GatewayConfigValidationError,
   parseGatewayConfig,
-  timezonePattern,
   validateCodexConfigDocument,
+  validateDebugConfigDocument,
   validateGatewayConfigStructureDocument,
   validateGatewayProcessConfigDocument,
   writeGatewayConfig,
@@ -40,16 +40,17 @@ export function loadGatewaySettings(environment = process.env) {
   const { configPath } = requireUserConfig(environment);
   const snapshot = readConfigSnapshot(configPath, readFileSync, environment);
   const document = snapshot.document;
-  const display = table(document.display);
+  const effective = snapshot.effective;
+  const display = effective.display;
   const codex = table(document.codex);
   const gateway = table(document.gateway);
   const requestIdentity = resolveCodexRequestIdentity(codex);
   const clientIdentity = table(requestIdentity.clientIdentity);
-  const approval = table(document.approval);
-  const conversation = table(document.conversation);
-  const scheduledTasks = table(document.scheduled_tasks);
-  const logging = table(document.logging);
-  const debug = table(document.debug);
+  const approval = effective.approval;
+  const conversation = effective.conversation;
+  const scheduledTasks = effective.scheduled_tasks;
+  const logging = effective.logging;
+  const debug = effective.debug ?? validateDebugConfigDocument({});
   const network = snapshot.proxy.settings;
   const telegram = table(document.telegram);
   const workspaces = workspaceOptions(document);
@@ -57,29 +58,19 @@ export function loadGatewaySettings(environment = process.env) {
     configPath,
     revision: snapshot.revision,
     display: {
-      operationUpdates: operationUpdateValues.includes(display.operation_updates)
-        ? display.operation_updates
-        : "compact",
-      planUpdatesEnabled: display.plan_updates !== false,
-      reasoningEnabled: display.reasoning === true,
-      modelAliases: validateModelDisplayAliases(display.model_aliases === undefined ? {} : display.model_aliases),
+      operationUpdates: display.operation_updates,
+      planUpdatesEnabled: display.plan_updates,
+      reasoningEnabled: display.reasoning,
+      modelAliases: display.model_aliases ?? {},
     },
     system: {
-      approvalTimeoutSeconds: integerInRange(approval.timeout_seconds, 30, 3_600) ?? 900,
-      idleReleaseMinutes: integerInRange(
-        conversation.idle_release_minutes,
-        0,
-        1_440,
-      ) ?? 15,
+      approvalTimeoutSeconds: approval.timeout_seconds,
+      idleReleaseMinutes: conversation.idle_release_minutes,
       defaultWorkspace: stringValue(document.default_workspace) || null,
       defaultModel: stringValue(codex.default_model) || null,
       modelTrafficMode: debug.model_traffic_input_items === 0 && debug.model_traffic_item_max_bytes === 0 ? "debug" : "production",
-      modelTrafficDumpEnabled: debug.model_traffic_dump === true,
-      modelTrafficRetentionDays: integerInRange(
-        debug.model_traffic_retention_days,
-        0,
-        36_500,
-      ) ?? 30,
+      modelTrafficDumpEnabled: debug.model_traffic_dump,
+      modelTrafficRetentionDays: debug.model_traffic_retention_days,
       officialTuiIdentity: {
         followCliVersion: codex.follow_cli_version === true,
         clientIdentity: {
@@ -98,21 +89,21 @@ export function loadGatewaySettings(environment = process.env) {
       workspaces,
     },
     automation: {
-      scheduledTasksEnabled: scheduledTasks.enabled === true,
+      scheduledTasksEnabled: scheduledTasks.enabled,
     },
     network: Object.fromEntries(proxyFields.map((field) => [
       field,
       { configured: stringValue(network[field]) !== "" },
     ])),
     advanced: {
-      loggingLevel: loggingLevelValues.includes(logging.level) ? logging.level : "info",
+      loggingLevel: logging.level,
     },
     telegram: {
       configured: stringValue(telegram.bot_token) !== "",
-      messageFormat: telegram.message_format === "rich" ? "rich" : "html",
+      messageFormat: effective.telegram?.message_format ?? "html",
     },
     webui: projectWebuiSettings(document),
-    metrics: projectMetricsSettings(document),
+    metrics: projectMetricsSettings(effective),
     channels: gatewayChannelStates(document),
   };
 }
@@ -392,19 +383,19 @@ function applySetting(document, input) {
       );
       const codex = { ...table(document.codex) };
       codex.follow_cli_version = followCliVersion;
-      if (followCliVersion && name !== null && name !== "codex-tui") {
-        throw invalid("value.clientIdentity.name", "invalid-value", "跟随 CLI 版本时客户端名称必须为 codex-tui");
-      }
-      if (followCliVersion && typeof upstreamUserAgent === "string" && !officialTuiUserAgentPattern.test(upstreamUserAgent)) {
-        throw invalid("value.upstreamUserAgent", "invalid-value", "跟随 CLI 版本需要两处版本一致的完整官方 TUI UA，请重新一键设置或关闭跟随");
-      }
       if (clientIdentity === null) delete codex.client_identity;
       else codex.client_identity = clientIdentity;
       if (upstreamUserAgent === null) delete codex.upstream_user_agent;
       else codex.upstream_user_agent = upstreamUserAgent;
       if (terminalIdentity === null) delete codex.terminal_identity;
       else codex.terminal_identity = terminalIdentity;
-      document.codex = validateCodexConfigDocument(codex);
+      document.codex = validateSettingDocument(codex, validateCodexConfigDocument, {
+        "client_identity.name": ["value.clientIdentity.name", "客户端名称格式无效；跟随 CLI 版本时必须为 codex-tui"],
+        "client_identity.title": ["value.clientIdentity.title", "客户端标题格式无效"],
+        "client_identity.version": ["value.clientIdentity.version", "客户端版本格式无效"],
+        upstream_user_agent: ["value.upstreamUserAgent", "上游 User-Agent 格式无效；跟随 CLI 版本时请使用完整官方 TUI UA"],
+        terminal_identity: ["value.terminalIdentity", "终端标识须为终端名或终端名/版本，仅允许字母、数字、.、_、-，且以字母或数字开头"],
+      });
       const effective = resolveCodexRequestIdentity(document.codex);
       if (effective.upstreamUserAgent !== undefined && effective.upstreamUserAgent.length > 512) {
         throw invalid("value.upstreamUserAgent", "too-long", "上游 User-Agent 更新 Codex 版本后超过 512 个字符，请缩短系统或终端信息");
@@ -428,17 +419,12 @@ function applySetting(document, input) {
         "value",
         "时区",
       );
-      if (timezone !== null && !timezonePattern.test(timezone)) {
-        throw invalid(
-          "value",
-          "invalid-value",
-          "时区必须是 IANA 名称（如 Asia/Shanghai、America/Los_Angeles）",
-        );
-      }
       const codex = { ...table(document.codex) };
       if (timezone === null) delete codex.timezone;
       else codex.timezone = timezone;
-      document.codex = validateCodexConfigDocument(codex);
+      document.codex = validateSettingDocument(codex, validateCodexConfigDocument, {
+        timezone: ["value", "时区必须是有效的 IANA 名称"],
+      });
       return changed(timezone, "restart-app-server-gateway-webui");
     }
     case "system.gateway-timezone": {
@@ -446,7 +432,9 @@ function applySetting(document, input) {
       const gateway = { ...table(document.gateway) };
       if (timezone === null) delete gateway.timezone;
       else gateway.timezone = timezone;
-      const validated = validateGatewayProcessConfigDocument(gateway);
+      const validated = validateSettingDocument(gateway, validateGatewayProcessConfigDocument, {
+        timezone: ["value", "网关时区必须是 system 或 Node.js 支持的 IANA 名称"],
+      });
       if (timezone === null) delete document.gateway;
       else document.gateway = validated;
       return changed(timezone, "restart-gateway");
@@ -463,6 +451,20 @@ function applySetting(document, input) {
     }
     default:
       throw invalid("kind", "unknown-setting", `未知 Gateway 设置：${String(input.kind)}`);
+  }
+}
+
+// Only candidate fields owned by this operation become user input errors.
+// Existing-document validation and I/O remain outside this boundary.
+function validateSettingDocument(document, validate, fields) {
+  try {
+    return validate(document);
+  } catch (error) {
+    if (!(error instanceof GatewayConfigValidationError) || error.issues.length === 0
+      || error.issues.some(issue => !Object.hasOwn(fields, issue.path.join(".")))) throw error;
+    const issue = error.issues[0];
+    const [field, message] = fields[issue.path.join(".")];
+    throw invalid(field, issue.code === "too_big" ? "too-long" : "invalid-value", message);
   }
 }
 
@@ -525,13 +527,14 @@ function changed(value, activation) {
 function readConfigSnapshot(configPath, readConfig = readFileSync, environment = process.env) {
   const content = readConfig(configPath, "utf8");
   const document = parseGatewayConfig(content, configPath);
-  // 校验不接收补入默认值的返回文档，以保留原文来源、注释和未配置字段。
-  validateGatewayConfigStructureDocument(document);
+  // 有效视图仅供读取；写入和 revision 仍使用原文及其来源信息。
+  const effective = validateGatewayConfigStructureDocument(document);
   const proxy = readCodexProxySnapshot(environment);
   return {
     content,
     proxy,
     document,
+    effective,
     revision: createHash("sha256").update(JSON.stringify([content, proxy.content])).digest("hex"),
   };
 }
@@ -619,10 +622,6 @@ function optionalStrictString(value, maximum, field, label) {
 
 function invalid(field, code, message) {
   return invalidSetting(field, code, message);
-}
-
-function integerInRange(value, minimum, maximum) {
-  return Number.isInteger(value) && value >= minimum && value <= maximum ? value : undefined;
 }
 
 function stringValue(value) {

@@ -299,6 +299,7 @@ stream_max_retries = 5
 未声明独立凭据时，`requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；已有 Provider 也可按 Codex 官方配置使用
 `env_key`，普通切换保留该引用。两者共存时，锁定上游优先读取 `env_key`，缺失时不回退官方认证；`requires_openai_auth` 仍影响账户语义，切换不能据此将其清为 `false`。经 Gateway 新增或替换的自定义固定 Key 只把凭据环境变量名称写入主配置，实际 Key 保存在
 `~/.codex-connect/providers/custom/<ID>/primary-credentials/<版本>.json` 的当前用户私有文件中；使用独立模型目录的 `cp-` Provider 则归入 `providers/<ID>/primary-credentials/`。
+普通环境变量引用在 Windows 忽略名称大小写，在 Unix 精确匹配；复制后的环境对象若含多个已定义的同名大小写变体，Gateway 拒绝使用歧义凭据。Gateway 私有版本引用仍严格读取对应文件，不回退环境变量。
 Windows 的主配置允许上游沙箱只读访问，其所有权与写入完整性检查不保证内容机密性，所以不能在其中保存
 `experimental_bearer_token`。已有明文候选仍可列表查看、显式编辑或切回官方，但 Gateway 拒绝启动该固定实例；
 在 `codexc setup` 中编辑并保存，或显式切换该明文候选，会转为私有凭据，启动不会自动迁移或删除原文件。通过 Setup 新建只使用独立 Key 的 Provider 时
@@ -395,6 +396,14 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 不支持的版本、Provider 或 Origin 不匹配、非私有文件均拒绝读取，不回退到进程中同名变量。新增或替换固定 Key，以及将明文凭据或切换 Profile 转为固定模式时，
 先创建新的不可变凭据版本，再提交 `config/batchWrite`；旧版本保持不变。普通切换及备份恢复保留完整 Provider 配置、已有 `env_key` 引用和 `requires_openai_auth` 标志，不强制 OAuth 或无认证 Provider 提供独立 Key。已声明的 `env_key` 缺失时仍拒绝切换，不回退其他认证方式。明确确认配置未引用新版本时仅删除本次新文件，
 响应丢失且无法确认时保留新旧版本，由实际主配置的 `env_key` 决定读取哪份，不自动重试或覆盖旧 Key。
+切换 Profile 转固定模式前，共享事务还在 Gateway 数据目录的 `providers/profile-conversion-backups/<随机 ID>.json`
+保存本次主配置、旧 Profile、注册表、目标 Provider、配置修订及预期修改；私有备份写入并回读确认后才删除 Profile。
+每次转换独立保存，成功或失败都保留，不覆盖旧快照、不自动清理。它包含凭据，不得提交或公开。
+结果未知时先停止后续修改并重新读取主配置：完整转换成功则保留当前状态；需要回退时先另存当前材料，
+确认主配置仍为转换前状态且不引用目标固定 Provider，再恢复快照中的目标 Profile 与注册项。
+不得整份覆盖主配置或注册表；有后续修改、同名条目、部分提交或无法读取时保留材料并人工核对。
+此快照供人工恢复，`codexc provider recover` 仍只处理其既有目录恢复合同。
+具体审查与验证见 [Provider 事务审查](provider-transaction-review.md#p01-转换失败时保留完整连接配置)。
 切回官方时备份候选的凭据引用也保留；显式删除 Provider 时才删除该 Provider 已验证归属的凭据版本。
 切换预览、执行和备份恢复共用运行时的认证校验；`auth`、`gateway_oauth`、`aws` 和 `env_http_headers` 不受自定义固定模式支持，写入前明确拒绝，保留原主配置、备份和凭据。固定模式编辑也校验合并后的实际 Provider 配置，包括请求期限约束，不会静默删除不支持的字段。普通非认证 `http_headers` 仍保留，Chat 桥同样转发端到端附加头，并重写目标 Host、正文长度和内容协商字段，过滤跳级头及本地诊断关联头。
 凭据版本损坏或无法安全读取时保留文件，并以 `credential-cleanup-failed` 报告 Provider 已删除但凭据清理未完成。

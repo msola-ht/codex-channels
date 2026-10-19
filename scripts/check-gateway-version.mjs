@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { isGatewayVersionCompatible } from "./gateway-version-policy.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const packageMetadata = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
@@ -30,16 +31,4 @@ function codexPackageVersion(value) {
     throw new Error(`无法从协议版本解析 npm 版本：${value}`);
   }
   return match[1];
-}
-
-function isGatewayVersionCompatible(gatewayVersion, codexVersion) {
-  return gatewayVersion === codexVersion
-    || new RegExp(
-      `^${escapeRegExp(codexVersion)}-(?:fix[1-9]\\d*|rc\\.[1-9]\\d*)$`,
-      "u",
-    ).test(gatewayVersion);
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

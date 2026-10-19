@@ -30,11 +30,11 @@ export {
   supersedesSurfaceSnapshot,
 } from "./delivery-policy.js";
 export {
-  SurfaceInputCoalescer,
-  type SurfaceInputBatchResult,
-  type SurfaceInputCoalescerOptions,
+  SurfaceInputBatcher,
+  type SurfaceInputSubmissionResult,
+  type SurfaceInputBatcherOptions,
   type SurfaceInputPart,
-} from "./surface-input-coalescer.js";
+} from "./surface-input-batcher.js";
 export {
   ManagedAudioStore,
   maximumManagedAudioBytes,

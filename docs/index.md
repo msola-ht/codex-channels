@@ -456,6 +456,9 @@ Auto-review 用户层偏好只写入稳定 `approvals_reviewer` 字段，并用 
 [`browser_use.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/browser_use.rs)、
 [`mcp_types.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/mcp_types.rs) 和
 [`types.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/types.rs) 的插件覆盖白名单。
+用户 MCP 的添加、逐项编辑与删除由 [`mcp-setup.mjs`](../scripts/mcp-setup.mjs) 复用同一配置事务，
+仅操作当前用户层 `mcp_servers`；键路径逐段引用，`null` 删除字段或条目，写入后回读确认。
+插件及其他配置来源不进入编辑/删除列表，使用入口与限制见[使用指南](user-guide.md#4-workspaceprovider-与终端)。
 渠道选择 OpenAI 官方模型时不继承当前 Thread 或用户配置中的 Fast，下一 Turn 显式使用标准服务层级；
 Fast 只在用户之后通过 `/fast on` 明确开启时生效。
 模型、思考等级、Fast、计划清单工具、
@@ -581,7 +584,7 @@ Provider 文档未列出该接口。
 | 模型、思考等级和 Fast 如何隔离并同步 | [`model-port.ts`](../src/application/model-port.ts)、[`model-adapter.ts`](../src/codex-client/model-adapter.ts)、[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts) |
 | 原生与第三方账户指标如何隔离和扩展 | [`account-port.ts`](../src/application/account-port.ts)、[`provider-account-service.ts`](../src/application/provider-account-service.ts)、[`account-adapter.ts`](../src/codex-client/account-adapter.ts)、[`deepseek-account-adapter.ts`](../src/bootstrap/deepseek-account-adapter.ts)、[`opencode-go-account-adapter.ts`](../src/bootstrap/opencode-go-account-adapter.ts) |
 | 直接安装 Skill 查询与显式调用如何隔离 | [`skill-port.ts`](../src/application/skill-port.ts)、[`turn-port.ts`](../src/application/turn-port.ts)、[`skill-adapter.ts`](../src/codex-client/skill-adapter.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) |
-| MCP 状态、OAuth 与资源读取如何隔离 | [`mcp-port.ts`](../src/application/mcp-port.ts)、[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`notification-account-events.ts`](../src/codex-client/notification-account-events.ts)、[`core.ts`](../src/conversation-core/core.ts)；运行状态只读取当前 Thread 已发布连接快照，不触发探测或重连 |
+| MCP 状态、OAuth 与资源读取如何隔离 | [`mcp-port.ts`](../src/application/mcp-port.ts)、[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`notification-account-events.ts`](../src/codex-client/notification-account-events.ts)、[`conversation-extension-query-service.ts`](../src/application/conversation-extension-query-service.ts)、[`core.ts`](../src/conversation-core/core.ts)；运行状态只读取当前 Thread 已发布连接快照，不触发探测或重连。OAuth 以当前基线 loginId、实际 Provider 与原会话关联完成，未关联通知不进入渠道；资源 URI 展示脱敏不改变读取参数 |
 | Plugin 查询与 mention 调用如何隔离 | [`plugin-port.ts`](../src/application/plugin-port.ts)、[`plugin-adapter.ts`](../src/codex-client/plugin-adapter.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) |
 | Permission Profile 查询如何隔离 | [`permission-port.ts`](../src/application/permission-port.ts)、[`permission-adapter.ts`](../src/codex-client/permission-adapter.ts) |
 | Server Request 如何适配并协调 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`approval/`](../src/approval/README.md)、各 Surface 的 `interactions.ts`；批量取消先撤销全部匹配请求再推进队列，准备中的交互立即释放身份和容量，取消信号贯穿 Surface 与发送队列，取消不等待平台清理，迟到决定不能恢复已取消请求 |

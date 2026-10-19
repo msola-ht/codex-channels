@@ -34,7 +34,7 @@
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
 - `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置；只读设置入口复用完整当前版本和结构 Schema，不要求 Gateway 启动前至少启用一个渠道，原启动校验仍保留该前置条件。提供复用同一
-  子 Schema 的严格 `[codex]`、`[gateway]` 局部校验；网关时区接受 `system` 或 Node.js 支持的 IANA 名称。
+  子 Schema 的严格 `[codex]`、`[gateway]` 局部校验，失败以 `GatewayConfigValidationError` 携带不含输入值的字段路径和错误码；网关时区接受 `system` 或 Node.js 支持的 IANA 名称。
   在保留已有注释的前提下合并缺失的 Schema 安全默认值，
   所有基于已读取文档的写入在同一同步配置文件锁内复核原文后再执行私有文件原子替换；需要同时
   更新 Gateway 配置与直接 API 凭据的同步管理事务复用该可重入锁，异步操作必须使用独立事务锁，
@@ -128,7 +128,9 @@
   模型专用保存仅在完整 Profile 与注册表守卫通过后修改默认模型和思考等级，保留连接块、已有超时参数及其他已校验字段。
   Gateway 新增或替换的固定 Key 使用不可变的当前用户私有凭据版本，主配置只引用独立 `env_key`；普通切换保留既有环境变量引用、OAuth 或无认证语义。提供私有凭据读取、创建及显式删除端口，
   校验 Provider、Origin、版本与文件私有性，拒绝旧主配置明文凭据启动。配置写入结果未知时保留新旧凭据供实际引用选择。
+  普通 `env_key` 在 Windows 按名称忽略大小写读取，复制后的环境对象若有多个已定义同名变体则拒绝；Unix 精确匹配。私有版本引用不回退环境变量。
   `assertCustomPrimaryProviderAuthentication` 由切换计划和运行时共同消费，在切换写入前拒绝不支持的认证字段。
+  `isValidCustomProviderApiKey` 是不执行 I/O、不裁剪原值的格式谓词，经 Provider 门面公开；管理保存与能力检测复用该规则，各入口保留自己的录入裁剪和错误分类。
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
@@ -164,6 +166,9 @@
   Codex 原生可执行文件，实际验证签名有效性及可信身份，并用签名 Node 托管选中的 App Server；
   Host 与原生子进程使用专属进程组，终止信号和超时强杀覆盖该组。只接受 Desktop 明确传入的内置插件
   布尔启用值，动态 Pipe 与附加状态不落盘。
+  原生子进程退出时先记录其退出码/信号，再由仍存活的 Host 强杀自己的组，避免遗留忽略 TERM 的后代；
+  因此 Host 的可见退出信号为 SIGKILL，不等同于原生子进程失败原因。终止器另确认登记组消失，
+  组长退出后只读检查、不向旧 PGID 补发信号；未确认则保留实例与代理归属，确认成功后缓存结果。
   签名与私有路径校验不等于 Desktop 已接受进程祖先链，Host 附加状态不表示 MCP 工具就绪。
 - `terminal-identity.mjs`：按当前锁定 Codex CLI 的终端探测顺序从进程环境推导模型上游
   `User-Agent` 的终端标识（`TERM_PROGRAM[/版本]` 优先，其次各终端专有变量，最后 `TERM`），
@@ -204,6 +209,7 @@
 - `app-server-unix-socket.mjs` / `app-server-unix-socket.d.mts`：校验固定 CLI 的 Unix rendezvous 链接、规范路径 SHA-256、受保护目录及真实 Socket 的权限和属主；Transport 与监管探测共用，连接仅使用校验后的物理路径，失效链接保留时不操作其目标。
 - `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、账户操作、Delivery 控制、Relay 控制与指标、
   队列通知、Provider Metrics 和 App Server Supervisor 提供共享的当前用户私有 IPC。
+  启动复用私有目录能力，先拒绝链接、错误类型及非当前所有者，再收紧目录权限，不能跟随链接 chmod 目标。
   Unix 在同目录临时名字上监听，设置 `0600` 后通过独占硬链接发布原端点；绑定名保留到监听关闭，
   防止其他实例提前复用该名字后被旧监听删除。正常关闭清理绑定名与仍归自身所有的公开端点，
   避免 Node/libuv 关闭时按公开路径自动删除替代文件；公开端点仍按属主与 inode 检查管理。
@@ -212,6 +218,7 @@
   异常退出可能留下绑定名及公开端点；公开端点沿既有占用探测恢复，不扫描删除无法证明归属的随机名字。
   Windows 使用默认仅创建用户与管理员可访问的命名管道，并在当前 SID 私有描述文件中保存随机管道名和随机
   认证令牌，连接首帧必须认证，关闭时只删除当前所有者发布的描述文件。
+  独占创建时即登记文件身份；写入或 ACL 失败可清理仍属于本次、尚未发布的文件，已发布文件继续复核令牌。
   公共层从接受连接起管理全部 Socket，包括尚未认证的连接；认证受绝对期限限制，停止监听时统一关闭连接。
   Relay 指标与控制查询共用单次 JSON 请求生命周期：调用方指定回应字节上限、绝对截止时间及可选取消信号，
   统一关闭连接和清理等待，不重试；业务版本、关联 ID、确认结果和持久化含义由调用方验证。
@@ -219,6 +226,10 @@
 - `app-server-supervisor.mjs`：以当前用户私有 IPC 持有 App Server 监管入口互斥锁，
   监管检查将无响应或连接失败作为不可用错误交给启动等待重试，不将其误报为协议不兼容；已收到但不合法的响应仍拒绝使用。
   各平台监听与端点清理统一委托 `private-ipc.mjs`；关闭仍先销毁租约连接，再等待在途 Provider 操作，关闭后拒绝重启同一 Owner。
+  端点清理失败也等待 Desktop/Provider 操作排空，失败关闭可重试。Unix 健康探测终止其自有连接并观察 close 后才返回，
+  不把已完成握手但仍在关闭的连接遗留给调用方，也不终止被探测的 App Server。
+  Windows 健康探测的自有 Proxy 关闭失败保留登记，下次探测先重试回收，失败时不再创建新 Proxy；
+  CLI 退出的最终后代回收仍由原生父进程句柄与 Job 负责，不能以 unref 视作已退出。
   对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供主 App Server 与受控 Provider 的按需
   启动、释放与 Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`），
   并为 macOS Desktop 受管 stdio Proxy 提供带独立能力版本的可信 Host 租约；全局串行附加到选中的 Provider，该租约阻止目标实例被
@@ -261,6 +272,7 @@
   label、Windows 计划任务名称、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor
   复用。
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
+  通过 `childExitedWithin` 有界观察 exit（含 signalCode、注册后复核与监听清理），调用方决定 timer 是否 unref；观察成功不代表整个进程树或输出管道已关闭。
   父子服务 IPC 控制监听就绪握手和有界发送；控制就绪不代表服务业务就绪，停止优先于尚未发送的重载，
   停止确认表示交付 IPC；重载按请求标识逐层等待最终接收确认，截止或断开撤销未接受的请求，
   并发请求独立取消且在途数量有上限。停止幂等并拒绝后续重载；仅生成该服务的父进程 IPC 断开也进入停止，普通 App Server 客户端断开不触发此行为。重载确认不代表配置已经应用，确认丢失只能报告结果未确认；
@@ -304,6 +316,7 @@
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup 与 Runtime 复用。
 - `provider-file-access.mjs` / `provider-file-access.d.mts`：在创建访问器时绑定当前环境的 Codex Home，通过 `isMainConfig` 精确规范化匹配唯一共享主配置；其他路径（包括同名备份）保持严格私有。Provider 的读取、凭据认证选择、指纹、事务写入和回滚使用同一归属判断，不由业务入口选择权限标记；不改变磁盘路径或格式。
+- `single-worker-reader.mjs`：设置快照与 Relay 材料 Reader 共用的单 Worker 宿主；集中读取合并、ready/读取时限、监听清理和物理退出归属。业务否定结果保留线程，通信失败进入协作关闭；各 Reader 提供自身数据、预算和安全错误。`readFresh` 等待已有读取后重新请求，不是缓存。
 - `provider-settings-snapshot-reader.mjs` / `provider-settings-snapshot-reader.d.mts` / `provider-settings-snapshot-worker.mjs`：Provider 设置观察器拥有的单 Worker，读取有界材料指纹并校验完整配置；聚合成员变化单独返回需重启状态，不阻断其他提供商指纹读取。初始化与单次读取分别限时，关闭确认线程退出，源正文和凭据不跨线程返回。Windows 协作关闭先等待 ACL 子进程实际退出，再关闭外层线程；2 秒关闭等待超时仍保留旧代及引用，不启动替代线程。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时

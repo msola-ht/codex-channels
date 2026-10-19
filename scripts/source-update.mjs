@@ -35,6 +35,10 @@ import { withCliProgress, writeCliSection } from "./cli-operation-progress.mjs";
 import { installCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
 import { supervisedCliInvocation } from "./cli-command-worker.mjs";
 import { formatCliMessage } from "../runtime/cli-presentation.mjs";
+import { isGatewayVersionCompatible } from "./gateway-version-policy.mjs";
+import { buildSourceCheckout } from "./source-build.mjs";
+
+export { isGatewayVersionCompatible } from "./gateway-version-policy.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
@@ -851,26 +855,10 @@ async function installCodexCli(version, checkout, environment, options) {
 }
 
 export async function buildCheckout(checkout, environment, options) {
-  const ignoreScripts = (await captureAsync("npm", ["config", "get", "ignore-scripts"], checkout, environment, options.captureCommand, options.getCommandSignal?.())).trim();
-  if (ignoreScripts !== "true" && ignoreScripts !== "false") {
-    throw new Error("无法确认 npm ignore-scripts 设置，拒绝构建候选源码");
-  }
-  for (const [cwd, args] of [
-    [checkout, ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]],
-    ...(ignoreScripts === "false" ? [[checkout, ["run", "hooks:install"]]] : []),
-    [checkout, ["run", "build"]],
-    [checkout, ["run", "check"]],
-    [join(checkout, "webui"), ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]],
-    [join(checkout, "webui"), ["run", "build"]],
-  ]) {
-    await runQuiet("npm", args, cwd, environment, options.runCommand, options.getCommandSignal?.());
-  }
-  if (
-    !existsSync(join(checkout, "dist", "main.js"))
-    || !existsSync(join(checkout, "webui", "dist", "index.html"))
-  ) {
-    throw new Error("候选源码构建结果不完整");
-  }
+  await buildSourceCheckout(checkout, {
+    readIgnoreScripts: () => captureAsync("npm", ["config", "get", "ignore-scripts"], checkout, environment, options.captureCommand, options.getCommandSignal?.()),
+    runStage: (_label, args, cwd) => runQuiet("npm", args, cwd, environment, options.runCommand, options.getCommandSignal?.()),
+  });
 }
 
 async function runQuiet(command, args, cwd, environment, implementation, signal) {
@@ -994,19 +982,6 @@ function versionParts(value) {
     ? Number(suffix.slice(3))
     : suffix?.startsWith("fix") ? Number(suffix.slice(3)) : 0;
   return [...stable.split(".").map(Number), stage, sequence];
-}
-
-export function isGatewayVersionCompatible(gatewayVersion, expectedCodexVersion) {
-  return gatewayVersion === expectedCodexVersion
-    || new RegExp(
-      `^${escapeRegExp(expectedCodexVersion)}-(?:fix[1-9]\\d*|rc\\.[1-9]\\d*)$`,
-      "u",
-    )
-      .test(gatewayVersion);
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function capture(command, args, cwd, environment, implementation, options = {}) {

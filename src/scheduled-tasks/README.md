@@ -22,6 +22,7 @@ Schedule 目前支持 `interval`（每 N 分钟，UTC anchor 加固定分钟间�
 `monthly`（每月指定日，月份无该日时跳过）、`daily`、`weekdays` 和 `weekly`。`monthly`、`daily`、`weekdays`、`weekly` 按任务时区的
 `HH:mm` 计算。不存在的 DST 本地时间跳过，重复的本地时间只选择较早的 UTC occurrence。相对延时以
 固定 UTC 分钟数计算，不随 DST 改变。时间计算不会读取或改变进程的 `TZ`。
+时区校验拒绝 Intl 额外支持的 `+01:00` 等固定偏移输入，只接受已文档化的 IANA 时区合同。
 
 SQLite 只保存任务定义和最小 Run 元数据，目录、文件与备份在 Unix 使用 owner-only 权限、在 Windows
 使用当前 SID 私有 ACL；运行时从不隐式迁移 Schema，

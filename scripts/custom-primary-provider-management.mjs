@@ -24,6 +24,7 @@ import {
   removePrimaryProviderBackupCandidate,
   validProviderBaseUrl,
   validateCustomPrimaryModelProviderId,
+  isValidCustomProviderApiKey,
   writeCustomPrimaryProviderSwitchingProfile,
   customPrimaryProviderProfilePath,
   customSwitchingProviderRegistryPath,
@@ -683,7 +684,7 @@ async function buildSavePlan(input, options, { requireConfirmation, connectionOn
   } else {
     throw invalid("invalid-credential-action", "credential", "凭据操作必须是 preserve 或 replace");
   }
-  if (apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) throw invalid("invalid-api-key", "credential.apiKey", "API Key 不能超过 4096 字符或包含控制字符");
+  if (!isValidCustomProviderApiKey(apiKey)) throw invalid("invalid-api-key", "credential.apiKey", "API Key 不能超过 4096 字符或包含控制字符");
   if (input.probeConnections !== undefined) {
     if (!Array.isArray(input.probeConnections) || input.probeConnections.length > 128
       || input.probeConnections.some(entry => !entry || typeof entry !== "object"

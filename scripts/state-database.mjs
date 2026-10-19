@@ -66,7 +66,7 @@ export function validateStateDatabaseStructure(environment = process.env) {
 }
 
 function resolveStateDatabaseContext(environment) {
-  const { configPath, dataDir } = requireUserConfig(environment);
+  const { configPath, dataDir } = requireUserConfig(environment, { readOnly: true });
   const document = readGatewayConfig(configPath);
   const storage = isRecord(document.storage) ? document.storage : {};
   return {

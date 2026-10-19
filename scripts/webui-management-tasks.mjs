@@ -15,6 +15,8 @@ const metricsRequireStoppedGateway = new Set(["cleanup", "reset"]);
 const maximumTaskHistory = 32;
 const defaultCancellationGraceMs = 10_000;
 
+export class ManagementTaskInputError extends Error {}
+
 export class WebuiManagementTaskRunner {
   #tasks = new Map();
   #now;
@@ -70,9 +72,9 @@ export class WebuiManagementTaskRunner {
   start(input, { owner, environment = process.env, auditMetadata = null } = {}) {
     const normalized = normalizeTaskInput(input);
     this.#pruneTerminalTasks();
-    if (this.#tasks.size >= maximumTaskHistory) throw new Error("管理任务数量已达上限，请先等待当前任务结束");
+    if (this.#tasks.size >= maximumTaskHistory) throw new ManagementTaskInputError("管理任务数量已达上限，请先等待当前任务结束");
     if ([...this.#tasks.values()].some((task) => task.owner === owner && ["queued", "running", "cancelling"].includes(task.state))) {
-      throw new Error("已有管理任务运行中，请等待完成或取消后重试");
+      throw new ManagementTaskInputError("已有管理任务运行中，请等待完成或取消后重试");
     }
     const id = randomUUID();
     const task = {
@@ -90,8 +92,10 @@ export class WebuiManagementTaskRunner {
       cancelTask: null,
       cancelFailed: false,
       auditMetadata,
+      auditStatus: null,
     };
     this.#tasks.set(id, task);
+    this.#emitAudit(task, "started", "queued", "retry-task");
     this.#notify(task);
     // The runner must never leak a rejected promise into the WebUI process.
     // Resolution failures (missing executable, invalid Windows shell, etc.)
@@ -230,19 +234,26 @@ export class WebuiManagementTaskRunner {
     task.cancelTask = null;
     task.process = null;
     task.state = "failed";
-    task.error = sanitizeTaskText(error instanceof Error ? error.message : error);
+    task.error = "任务启动失败，请检查服务状态及运行环境";
+    webuiLogger.error({ event: "task.start_failed", taskId: task.id, err: error }, "管理任务启动失败");
     task.result = null;
     task.updatedAt = new Date(this.#now()).toISOString();
     this.#emitTerminal(task, "failed", "failed", "retry-task");
   }
 
   #emitTerminal(task, state, resultCode, recovery) {
+    this.#emitAudit(task, state, resultCode, recovery);
     this.#notify(task);
+  }
+
+  #emitAudit(task, phase, resultCode, recovery) {
     if (this.#onEvent === null || task.auditMetadata === null) return;
     try {
-      this.#onEvent({ ...task.auditMetadata, task: publicTask(task), phase: state, resultCode, recovery });
+      this.#onEvent({ ...task.auditMetadata, task: publicTask(task), phase, resultCode, recovery });
+      if (task.auditStatus !== "degraded") task.auditStatus = "recorded";
     } catch (error) {
-      webuiLogger.error({ module: "audit", event: "task.terminal_audit_failed", taskId: task.id, err: error }, "管理任务终态审计失败");
+      task.auditStatus = "degraded";
+      webuiLogger.error({ module: "audit", event: "task.audit_failed", taskId: task.id, phase, err: error }, "管理任务审计失败");
     }
   }
 
@@ -268,36 +279,40 @@ function serviceTaskArguments(input) {
 }
 
 export function normalizeTaskInput(input) {
-  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("任务输入必须是对象");
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new ManagementTaskInputError("任务输入必须是对象");
+  if (Object.keys(input).some(key => !["operation", "action", "target", "confirmationToken"].includes(key))) throw new ManagementTaskInputError("任务请求包含不支持的字段");
   if (input.operation === "service") {
-    if (!serviceActions.has(input.action)) throw new Error("服务任务动作无效");
-    if (input.action === "uninstall") throw new Error("此操作会停止当前 WebUI 管理任务，请在本机终端执行 codexc uninstall --services");
-    if (input.action === "install") return { operation: "service", action: input.action, target: undefined };
-    if (input.action === "reload") {
-      if (input.target !== undefined) throw new Error("服务重载不接受服务目标");
+    if (!serviceActions.has(input.action)) throw new ManagementTaskInputError("服务任务动作无效");
+    if (input.action === "uninstall") throw new ManagementTaskInputError("此操作会停止当前 WebUI 管理任务，请在本机终端执行 codexc uninstall --services");
+    if (input.action === "install") {
+      if (input.target !== undefined) throw new ManagementTaskInputError("服务安装不接受服务目标");
       return { operation: "service", action: input.action, target: undefined };
     }
-    if (!targets.has(input.target)) throw new Error("服务任务目标无效");
+    if (input.action === "reload") {
+      if (input.target !== undefined) throw new ManagementTaskInputError("服务重载不接受服务目标");
+      return { operation: "service", action: input.action, target: undefined };
+    }
+    if (!targets.has(input.target)) throw new ManagementTaskInputError("服务任务目标无效");
     if (["restart", "stop"].includes(input.action) && (input.target === "all" || input.target === "webui")) {
-      throw new Error(`此操作会停止当前 WebUI 管理任务，请在本机终端执行 codexc ${input.action} ${input.target}`);
+      throw new ManagementTaskInputError(`此操作会停止当前 WebUI 管理任务，请在本机终端执行 codexc ${input.action} ${input.target}`);
     }
     return { operation: "service", action: input.action, target: input.target };
   }
   if (input.operation === "metrics") {
-    if (!maintenanceActions.has(input.action)) throw new Error("指标维护动作无效");
+    if (!maintenanceActions.has(input.action)) throw new ManagementTaskInputError("指标维护动作无效");
     if (input.action === "prune") {
-      if (!isPrunableMetricsProviderId(input.target)) throw new Error("指标清理任务必须指定有效提供商");
+      if (!isPrunableMetricsProviderId(input.target)) throw new ManagementTaskInputError("指标清理任务必须指定有效提供商");
       return { operation: "metrics", action: input.action, target: input.target };
     }
-    if (input.target !== undefined) throw new Error("该指标维护动作不接受提供商目标");
+    if (input.target !== undefined) throw new ManagementTaskInputError("该指标维护动作不接受提供商目标");
     return { operation: "metrics", action: input.action };
   }
   if (input.operation === "traffic") {
-    if (input.action !== "cleanup") throw new Error("调用记录维护动作无效");
-    if (input.target !== undefined) throw new Error("调用记录清理不接受目标");
+    if (input.action !== "cleanup") throw new ManagementTaskInputError("调用记录维护动作无效");
+    if (input.target !== undefined) throw new ManagementTaskInputError("调用记录清理不接受目标");
     return { operation: "traffic", action: "cleanup", target: undefined };
   }
-  throw new Error("任务类型无效");
+  throw new ManagementTaskInputError("任务类型无效");
 }
 
 function publicTask(task) {
@@ -311,6 +326,7 @@ function publicTask(task) {
     updatedAt: task.updatedAt,
     error: task.error,
     result: task.result,
+    auditStatus: task.auditStatus,
   };
 }
 

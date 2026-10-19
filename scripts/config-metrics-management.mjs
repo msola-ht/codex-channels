@@ -1,11 +1,12 @@
 import { invalidSetting } from "./config-management-error.mjs";
 
+/** document carries Schema defaults, or the fully validated metrics mutation. */
 export function projectMetricsSettings(document) {
-  const storage = table(table(document.metrics).storage);
+  const storage = document.metrics.storage;
   return {
     storage: {
-      retentionDays: integerInRange(storage.retention_days, 1, 3_650) ?? 365,
-      maxRows: integerInRange(storage.max_rows, 1_000, 10_000_000) ?? 1_000_000,
+      retentionDays: storage.retention_days,
+      maxRows: storage.max_rows,
     },
   };
 }
@@ -33,10 +34,6 @@ function integer(value, minimum, maximum, field, label) {
     throw invalidSetting(field, "invalid-integer", `${label}必须为 ${minimum}–${maximum} 之间的整数`);
   }
   return value;
-}
-
-function integerInRange(value, minimum, maximum) {
-  return Number.isInteger(value) && value >= minimum && value <= maximum ? value : undefined;
 }
 
 function table(value) {

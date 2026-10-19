@@ -49,6 +49,10 @@ export class LunaReserveService {
   private readonly pendingRefreshes = new Set<string>();
   private readonly deferredUntilTurnCompletion = new Set<string>();
   private readonly operations = new Map<string, Promise<void>>();
+  private readonly observedSettings = new Map<string, {
+    current: ThreadModelSettings;
+    submitted?: ThreadModelSettings;
+  }>();
   private readonly threadGenerations = new Map<string, number>();
   private accountGeneration = 0;
   private limitsRead: { controller: AbortController; promise: Promise<AccountRateLimits> } | undefined;
@@ -56,6 +60,21 @@ export class LunaReserveService {
   private closed = false;
 
   constructor(private readonly options: LunaReserveServiceOptions) {}
+
+  observeSettings(threadId: string): void {
+    const observed = this.observedSettings.get(threadId);
+    const expected = observed?.current ?? this.returnByThread.get(threadId)?.reserveSettings;
+    if (!expected) return;
+    const current = this.options.router.modelSettingsForThread(threadId);
+    if (sameModelSettings(current, expected)) return;
+    if (observed?.submitted && sameModelSettings(current, observed.submitted)) {
+      observed.current = observed.submitted;
+      delete observed.submitted;
+      return;
+    }
+    // A later return to the same value must not revive an invalidated refresh.
+    this.clearThread(threadId);
+  }
 
   markUsageLimit(threadId: string, turnId: string): void {
     const settings = this.options.router.modelSettingsForThread(threadId);
@@ -90,6 +109,7 @@ export class LunaReserveService {
     this.pendingRefreshes.delete(threadId);
     this.deferredUntilTurnCompletion.delete(threadId);
     this.returnByThread.delete(threadId);
+    this.observedSettings.delete(threadId);
     this.stopTimerWhenIdle();
   }
 
@@ -100,6 +120,7 @@ export class LunaReserveService {
     this.pendingRefreshes.clear();
     this.deferredUntilTurnCompletion.clear();
     this.returnByThread.clear();
+    this.observedSettings.clear();
     for (const threadId of this.threadGenerations.keys()) {
       if (!this.operations.has(threadId)) this.threadGenerations.delete(threadId);
     }
@@ -114,6 +135,7 @@ export class LunaReserveService {
     this.pendingRefreshes.clear();
     this.deferredUntilTurnCompletion.clear();
     this.returnByThread.clear();
+    this.observedSettings.clear();
     this.threadGenerations.clear();
     if (this.timer) {
       clearInterval(this.timer);
@@ -133,6 +155,8 @@ export class LunaReserveService {
       account: this.accountGeneration,
       thread: this.threadGenerations.get(threadId) ?? 0,
     };
+    const settings = this.options.router.modelSettingsForThread(threadId);
+    if (settings) this.observedSettings.set(threadId, { current: settings });
     const operation = this.options.locks.forConversation(target, async () => {
       if (!this.isCurrentRefresh(threadId, generation)) return;
       const binding = this.options.router.current(target);
@@ -150,6 +174,7 @@ export class LunaReserveService {
     }).finally(() => {
       if (this.operations.get(threadId) === operation) {
         this.operations.delete(threadId);
+        this.observedSettings.delete(threadId);
         if (this.pendingRefreshes.delete(threadId)) {
           this.startRefresh(threadId);
           return;
@@ -302,6 +327,8 @@ export class LunaReserveService {
         || this.hasPendingSelection(target)
         || this.deferWhileActive(threadId)
       ) throw invalidated;
+      const observed = this.observedSettings.get(threadId);
+      if (observed) observed.submitted = { ...settings, modelProvider: "openai" };
     };
     try {
       await this.options.port.updateLunaReserveThreadSettings(threadId, settings, beforeSubmit);

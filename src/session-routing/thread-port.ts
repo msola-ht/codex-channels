@@ -72,7 +72,7 @@ export interface ThreadDynamicToolSpec {
 }
 
 export interface ThreadStartOptions {
-  /** Local start-only guard, called after preparation immediately before the RPC write. */
+  /** Local lifecycle guard, called after preparation immediately before the RPC write. */
   beforeSubmit?: () => void;
   model?: string;
   modelProvider?: string;
@@ -89,6 +89,7 @@ export interface ThreadStartOptions {
 }
 
 export interface ThreadQueryOptions {
+  beforeSubmit?: () => void;
   fullScan?: boolean;
   archived?: boolean;
   searchTerm?: string;
@@ -104,7 +105,7 @@ export interface ThreadLifecyclePort {
    */
   isProviderConfigured?(provider: string): boolean;
   listThreads(cwd: string, options?: ThreadQueryOptions): Promise<ThreadSnapshot[]>;
-  readThread(threadId: string, signal?: AbortSignal): Promise<ThreadSnapshot>;
+  readThread(threadId: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ThreadSnapshot>;
   /** Authoritative loaded descendants, including ephemeral threads; uncertainty rejects. */
   hasActiveDescendants(threadId: string, signal?: AbortSignal): Promise<boolean>;
   startThread(cwd: string, options?: ThreadStartOptions): Promise<ThreadSession>;
@@ -118,7 +119,7 @@ export interface ThreadLifecyclePort {
     cwd: string,
     options?: ThreadStartOptions,
   ): Promise<ThreadSession>;
-  archiveThread(threadId: string): Promise<void>;
-  unarchiveThread(threadId: string): Promise<ThreadSnapshot>;
-  unsubscribeThread(threadId: string): Promise<void>;
+  archiveThread(threadId: string, beforeSubmit?: () => void): Promise<void>;
+  unarchiveThread(threadId: string, beforeSubmit?: () => void): Promise<ThreadSnapshot>;
+  unsubscribeThread(threadId: string, beforeSubmit?: () => void): Promise<void>;
 }

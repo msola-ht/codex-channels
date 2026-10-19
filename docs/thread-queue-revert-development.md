@@ -29,6 +29,8 @@ App Server 是待提交用户消息和 Thread 历史的唯一事实来源。Gate
 - Application 分别持有有界的页面选择快照和一次性确认注册表；二者都不持久化正文。
   `thread/queue/changed`、`thread/reverted`、Thread 解绑/切换以及成功或失败的确认消费都会使相关
   快照失效。Surface 只解析规范命令和渲染结构化结果，不保存历史镜像。
+  失效同时作用于正在等待的列表、预览与确认，最终 RPC 守卫也检查它；已提交请求按实际响应结算。
+  Queue 内部写前读取不更新数字选择快照，只有成功返回给列表调用方的页面建立新序号。
 - Queue 复核使用 Client 从完整有序 Queue 原始输入计算的不可逆摘要；摘要覆盖条目 ID、
   `clientUserMessageId`、输入类型与完整输入值，但 Application 只接收摘要和条目数量。
   不得用有界展示预览计算摘要，否则预览截断可能隐藏并发变化。
@@ -197,7 +199,8 @@ Turn ID 与数字序号都必须来自最近一次 `/revert list` 的同一页�
 固定版本源码中 Revert 与 Queue 使用独立存储，Revert 请求没有清空 Queue；官方 0.148 测试没有
 覆盖二者同时存在的合同。升级前的真实 App Server 联合合同实测已确认：Revert 后 Queue 条目和顺序保留，
 Revert 本身不自动派发；显式启动队首后，后续条目继续按原生顺序派发。因此 Gateway 允许 Queue
-非空时预览和执行 Revert，执行前后都用完整有序输入摘要复核，不自行清空、重放或启动 Queue。
+非空时预览和执行 Revert，在预览与执行前用完整有序输入摘要复核，不自行清空、重放或启动 Queue。
+当前没有执行后 Queue 回读；不能把回退响应成功解释为事后 Queue 状态已经再次核验。
 
 ### 状态协调
 
@@ -205,7 +208,8 @@ Revert 成功后：
 
 - 先正常处理 App Server 对活动 Turn 发出的 `turn/completed: interrupted`，使相关审批、用户输入和 MCP 交互失效。
 - 校验并消费 `thread/reverted`，只使用 `threadId` 触发状态校正，不伪造被保留的历史。
-- 重新 `thread/read` 或使用 Revert 返回的 Thread 元数据校正模型设置、状态和绑定；Thread ID 不变。
+- 锁定 App Server 在内部恢复 Thread 设置并保留 ID 与订阅；Client 投影返回的 Thread 元数据，
+  当前 Application 不据此改写 Router，也没有额外 `thread/read`，后续仍由权威通知和既有读取收敛。
 - 清除只属于被删除 Turn 的 Core 界面缓存，包括最近 Diff、Plan、Goal 展示和操作摘要；权威 Goal 是否保留以回退后的 App Server 读取结果为准。
 - 不自动启动新的 Turn，不重放被中断输入，不重试 Revert。
 - 其他客户端并发执行 Revert 时，以通知和下一次权威读取收敛；本地过期确认全部失效。

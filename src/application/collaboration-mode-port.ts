@@ -8,5 +8,5 @@ export interface CollaborationModePreset {
 }
 
 export interface CollaborationModeQueryPort {
-  listCollaborationModes(): Promise<CollaborationModePreset[]>;
+  listCollaborationModes(beforeSubmit?: () => void): Promise<CollaborationModePreset[]>;
 }

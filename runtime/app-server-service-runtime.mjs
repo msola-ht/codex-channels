@@ -608,7 +608,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const errors = [];
     try { await terminateChildProcess(child); }
     catch (error) { errors.push(error); }
-    if (childProcessIsRunning(child)) {
+    if (errors.length > 0 || childProcessIsRunning(child)) {
       // A healthy socket cannot turn an unconfirmed launch into readiness.
       // Keep both ownership indexes so release and service shutdown can retry.
       watchChild(child);
@@ -863,7 +863,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         console.log(`${provider} App Server 已按需启动：${managed.socketPath}`);
       } catch (error) {
         const cleanupErrors = child ? await cleanFailedInstance(provider, child) : [];
-        const childSurvives = child && childProcessIsRunning(child);
+        const childSurvives = child && childrenByProvider.get(provider) === child;
         if (!childSurvives) providerProxyRuntimes.removeUser(proxyKey, provider);
         if (!childSurvives && proxy && !providerProxyIsInUse(proxyKey)) {
           try {

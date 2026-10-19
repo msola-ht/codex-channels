@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 
 import { UserFacingError } from "../conversation-core/index.js";
 import { ManagedMediaStore } from "./managed-media-store.js";
-import { maximumTextFileBytes } from "./text-file-input.js";
+import { decodeUtf8TextFile, maximumTextFileBytes } from "./text-file-input.js";
 
 const inlineBytes = 32 * 1024;
 const retentionMs = 24 * 60 * 60 * 1000;
@@ -85,6 +85,17 @@ export class TextAttachmentStore {
     this.writes = write.catch(() => undefined);
     return write;
   }
+}
+
+/** Complete the shared tail after platform download/integrity validation. */
+export async function prepareTextFile(
+  content: Buffer,
+  fileName: string,
+  attachments?: TextAttachmentStore,
+): Promise<PreparedTextAttachment & { fileName: string; bytes: number }> {
+  const text = decodeUtf8TextFile(content);
+  const prepared = attachments === undefined ? { text } : await attachments.prepare(text);
+  return { fileName, ...prepared, bytes: content.length };
 }
 
 export function textAttachmentBody(file: PreparedTextAttachment): string {

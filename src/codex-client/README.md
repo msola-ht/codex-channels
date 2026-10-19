@@ -2,8 +2,21 @@
 
 本目录封装 Codex App Server Transport、JSON-RPC 会话和类型化 API，是 Gateway 访问 App Server 的唯一底层入口。
 
-Thread/Turn 启动及 Turn 中断的本地 `beforeSubmit` 守卫透过 Provider 准备保留到 RPC 发送前同步执行，不编码为
+Thread 启动/恢复、Turn 启动/追加及中断的本地 `beforeSubmit` 守卫透过 Provider 准备保留到 RPC 发送前同步执行，不编码为
 协议字段；守卫拒绝时不发请求，已经发出的写请求仍等待实际响应，不以取消丢弃写入结果。
+图片引用准备同样在创建文件、每次字节上传及完成确认前复核该守卫；撤权后不再新出站，
+守卫错误保留原分类，既有上传失败处理不会将其吞掉或重试。
+Queue 的本地守卫由 JSON-RPC 在每次请求尝试前执行，读请求遇过载后的重试也复核授权；写请求仍不重试。
+模型与 Thread 列表分页、模型默认配置读取/写入、派生、归档和取消订阅同样保留调用方的本地守卫，
+不把闭包编码进协议；已提交的默认配置写入不会因响应期间撤权自动回滚。
+Thread 命名、固定、压缩、Review 和 Goal 同样接受提交守卫；固定状态的初始读取、元数据写入及分区移动
+分别复核。移动已提交后的权威读回用于结算实际结果，不因随后撤权跳过，也不回滚已经提交的元数据。
+Skill/Plugin 目录解析和 MCP 列表、资源读取、OAuth、刷新保留调用方提交守卫；分页与过载重试逐次复核，
+MCP 刷新各 Provider 分支分别复核并等待已启动分支结算。取消信号与授权闭包是独立的本地参数。
+重置券查询的账户路由、券明细读取及单次消费保留提交守卫；读取重试复核，消费不重试。
+Hook 列表、配置版本与状态写入也保留提交守卫；最终写守卫通过后才使共享配置修订失效，
+已经提交的写入继续完成跨实例刷新，避免撤权阻断结果结算。
+Permission Profile 分页、无人值守权限预检和账户查询接受本地提交守卫，Provider 准备和过载重试均复核。
 
 Provider 路由层为所有转发通知附上实际连接的 Provider 路由键，覆盖上游同名字段；固定自定义主 Provider 的路由键仍为 `openai`，实际账户身份由组合根区分。
 
@@ -12,6 +25,7 @@ RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 
 空 RPC 响应不等于设置已经应用，组合根须等待共享入站归约后由 Application 核对实际设置。
 
 0.162.0 引入的 `partial_answer` 在通知边界继续保留，Goal set/clear 的渠道用户操作显式携带 `origin: "user"`。
+Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结果不进入当前会话缓存。
 子代理 started 活动保留官方 `model` 与 `reasoningEffort`，空值不推断；其他活动不复用启动快照。
 
 遵循[跨平台变更规则](../../docs/development-rules.md#cross-platform-changes)：Unix UDS 与 Windows 官方 Proxy 是同一本机 App Server 合同的适配方式，不能各自放宽认证、消息边界或生命周期语义。Transport 只拥有本次连接及显式创建的子进程；关闭、连接中取消和回收失败都不得扩大为终止共享 App Server。修改共享 Transport 接口时同时核对 UDS、Proxy、stdio 的调用与关闭路径，具体进程及文件保护由注入的 Runtime 能力承担。
@@ -57,7 +71,7 @@ RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 
 - `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `queue-adapter.ts`：把官方 Queue 条目裁剪为 Application 的稳定种类、可编辑标记和有界文本预览；
-  本地媒体、Skill、Mention 与其他非文本输入只返回安全摘要，不传播原始值或绝对路径。
+  本地媒体、Skill、Mention 与其他非文本输入只返回安全摘要，不传播原始值或绝对路径。仅在六个 Queue RPC 拒绝处将锁定版本的错误码与已知文字映射为稳定失败分类；传输及响应转换失败原样传播。
 - `history-adapter.ts`：把官方分页 Turn 与 Revert 响应裁剪为有界摘要和稳定 Thread 快照；只提取
   `userMessage` 的安全输入摘要，拒绝残缺游标、非空 Revert 历史和越界字段。
 - `user-input-summary.ts`：为 Queue 与分页历史共用的 Client 内部 UserInput 安全摘要工具；摘要有界，
@@ -86,11 +100,12 @@ RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 
 - `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，严格映射当前 Thread
   已发布连接的七种 `runtimeStatus`，把官方 `null` 映射为稳定“未知”且不据此启动或重连 Server；并把工具
   `annotations.readOnlyHint` 归约为只读、可能写入或未知；校验 OAuth
-  授权 URL，将说明字段的多行空白归一化并限为 2,000 字符，并把资源响应限为前 8 项、文本展示
+  授权 URL 和当前基线必需的 loginId，完成通知保留同一 ID；Provider 路由层返回实际连接路由键，供 Application 精确关联。
+  将说明字段的多行空白归一化并限为 2,000 字符，并把资源响应限为前 8 项、文本展示
   合计 8,000 字符且隐藏常见凭据，二进制裁剪为元数据；保留可空、长度受限且符合固定上游
   `<plugin>@<marketplace>` 字符规则的 `pluginId`，
   仅供 `/mcp` 详情展示来源 Plugin；工具发现错误只归约为布尔状态，不传播上游错误正文、工具 Schema
-  或 Base64 正文。
+  或 Base64 正文。资源请求、内容、目录与模板 URI 的展示投影也隐藏常见凭据，不改变 RPC 请求 URI。
 - `plugin-adapter.ts`：只映射已安装 Plugin，校验 Plugin ID、Marketplace、启用与管理员可用状态，
   裁剪版本、来源类型、安装时间、开发者、分类、能力、认证时机、不可用原因和适用套餐标识，
   不传播来源路径或 URL；保留 Marketplace 加载失败计数，
@@ -210,6 +225,7 @@ RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 
 Queue 的六个请求也按 Thread Provider 路由；只有 `thread/queue/list` 使用有界只读过载重试，
 其余五个写请求不自动重试。
 `thread/turns/list` 是有界只读查询，可按协议安全重试；`thread/revert` 是破坏性写请求，禁止自动重试。
+两者及 Revert 前置 `thread/read` 保留本地提交守卫；Provider 查询与准备后仍复核，读请求每次过载重试前复核。
 Queue 复核摘要由 Client 对完整有序原始输入计算不可逆指纹，Application 不使用截断预览自行重算。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
@@ -231,6 +247,8 @@ Server Request 适配只把已校验的稳定请求交给 Approval；Approval �
 `thread/settings/updated`；该通知用于同步共享 Thread 的模型、思考等级、服务层级、实际审批审查方式和
 Default/Plan 协作模式；其中 `approvalsReviewer` 是稳定字段。Client 仅按[受控协议边界](../../docs/index.md#受控协议边界)采用 Plan、Queue、Revert、计划任务动态工具、图片上传账户路由和 Auto-review 策略读取及审查状态投影六类明确列出的受控例外，并映射到业务窄类型；生成类型不自动开放其他实验能力。启用这些能力
 同时出现的实验审批字段必须在 `approval` 边界显式展示或默认拒绝，不能静默扩大授权。
+自动审批设置的本地提交守卫在 Provider 准备后、设置 RPC 发送前执行；守卫拒绝不发请求，
+保留明确的授权或 Thread 变化错误，并释放本次确认等待。已提交请求继续按设置通知和响应结算。
 
 固定协议的一次性 `localAudio` 已由 Application 的封闭 `TurnInput` 受控接入；Surface 只能提交
 经过格式、大小和私有临时文件边界验证的绝对路径，Application 还必须在 Turn 前确认当前模型目录

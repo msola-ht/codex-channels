@@ -20,8 +20,8 @@
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
   不污染最终完成状态；当前活动 Turn 的可重试错误发布 `turn.retry` 临时状态，同一连续重试段去重，收到模型文本或推理进展后转为继续处理，最终错误和官方完成状态结束展示；不携带上游错误正文，也不由 Gateway 重发模型请求。新 Turn、解绑、Thread 生命周期和连接断开发布本地 `unavailable` 状态并清理跟踪，不将展示失效解释为官方 Turn 终态；bootstrap 在绑定变化时调用 `pruneUnboundTurns()`，防止等到后续查询才清理旧状态。Thread 与全局 warning 分开路由；MCP 状态通知按 Provider、Thread 与服务去重，
   重试的 `starting` 不清除持续故障指纹，错误内容或原因变化仍通知，官方 `ready` 只在故障后通知恢复；
-  MCP OAuth 完成结果按 Thread 精确投递，
-  无 Thread 的结果只广播给相同 Provider 的会话。
+  MCP OAuth 完成结果须先由 Application 关联到本 Gateway 发起的登录及原绑定，再按 Thread 投递；
+  无 Thread 或无法关联的 OAuth 完成不进入渠道。其他全局 MCP 状态与 warning 只广播给相同 Provider 的会话。
 - `turn-timing-accumulator.ts`：按单个 Turn 累加模型请求结果、Token 与压缩摘要；不追踪文本增量时间，
   不路由 Thread、不发布事件、不读取数据库或 Provider 配置。各 Token 字段独立记录缺失请求数，压缩为其中项。
   有模型请求观测时只累计其已知用量，不用最近单次官方 Token 快照填补本轮缺口；缓存全请求字段齐全才提供完整累计。
@@ -47,6 +47,8 @@ Conversation 目标由 `surface + accountId + conversationId` 唯一标识；Cor
 当前 Goal、上下文压缩实时增量和最近 Diff/Plan 仅为进程内界面缓存，Thread 关闭、归档、删除
 或连接断开时清理，不属于持久化事实来源。压缩总次数通过 Router 持有的 `thread/resume` 派生
 Item ID 与实时完成 Item 合并并去重。
+Turn 完成只释放同一 Turn 的请求统计，不删除随后轮次的累计；错误按 Thread/Turn 保存。
+绑定失效、Thread 生命周期和对应连接断开同时释放错误、用户消息去重和消息阶段缓存。
 收到 `thread.reverted` 时 Core 清除该 Thread 的 artifacts/diff/plan、Goal、上下文压缩、用量与计时
 等派生展示状态，并释放推理段；活动 Turn 保留到官方 `turn.completed: interrupted` 正常收尾，Core 不伪造
 被回退历史的保留内容。

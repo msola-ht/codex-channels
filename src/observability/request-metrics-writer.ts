@@ -8,8 +8,10 @@ const flushDelayMs = 10;
 
 interface WriteScope { threadId: string | null; turnId: string | null; requestPurpose?: "autoApprovalReview" | null }
 interface WriteEntry { sample: ModelRequestMetricSample; sequence: number; bytes: number }
+interface FailureWatermark { sequence: number; rejection?: number }
 interface WriteCheckpoint {
   target: number;
+  rejectedTarget: number;
   matches: (scope: WriteScope) => boolean;
   resolve: (succeeded: boolean) => void;
 }
@@ -22,8 +24,9 @@ interface WriterStore {
 export class BufferedModelRequestMetricsWriter<Store extends WriterStore = WriterStore> implements ModelRequestMetricsWriter {
   private readonly pending: WriteEntry[] = [];
   private readonly checkpoints: WriteCheckpoint[] = [];
-  private readonly failures: { sample: WriteScope; sequence: number }[] = [];
-  private failureOverflow = false;
+  private readonly failures: (FailureWatermark & { sample: WriteScope })[] = [];
+  private readonly failureOverflow: FailureWatermark = { sequence: Infinity };
+  private rejectedCount = 0;
   private active: WriteEntry[] = [];
   private task: Promise<void> | undefined;
   private closeTask: Promise<void> | undefined;
@@ -77,22 +80,24 @@ export class BufferedModelRequestMetricsWriter<Store extends WriterStore = Write
     signal?: AbortSignal,
   ): Promise<boolean> {
     const target = this.enqueuedCount;
+    const rejectedTarget = this.rejectedCount;
     // Only completion of this watermark matters here; failures are checked
     // against the database's authoritative task/session scope below.
     await this.waitForMatchingWrites(() => true, signal);
     signal?.throwIfAborted();
     const scopes = await resolveScopes();
     signal?.throwIfAborted();
-    return this.succeeded(target, scopeMatcher(scopes, requestPurpose));
+    return this.succeeded(target, scopeMatcher(scopes, requestPurpose), rejectedTarget);
   }
 
   private waitForMatchingWrites(matchesScope: (scope: WriteScope) => boolean, signal?: AbortSignal): Promise<boolean> {
     if (signal?.aborted) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("模型请求指标等待已取消"));
     let target = this.processedCount;
+    const rejectedTarget = this.rejectedCount;
     for (const entry of [...this.active, ...this.pending]) {
       if (matchesScope(entry.sample)) target = entry.sequence;
     }
-    if (target <= this.processedCount) return Promise.resolve(this.succeeded(target, matchesScope));
+    if (target <= this.processedCount) return Promise.resolve(this.succeeded(target, matchesScope, rejectedTarget));
     if (this.checkpoints.length >= 1_024) return Promise.reject(new Error("模型请求指标等待队列已满"));
     return new Promise((resolve, reject) => {
       const cleanup = (): void => {
@@ -104,7 +109,7 @@ export class BufferedModelRequestMetricsWriter<Store extends WriterStore = Write
         cleanup();
         reject(signal?.reason instanceof Error ? signal.reason : new Error("模型请求指标等待已取消"));
       };
-      const checkpoint: WriteCheckpoint = { target, matches: matchesScope,
+      const checkpoint: WriteCheckpoint = { target, rejectedTarget, matches: matchesScope,
         resolve: succeeded => { cleanup(); resolve(succeeded); } };
       this.checkpoints.push(checkpoint);
       signal?.addEventListener("abort", abort, { once: true });
@@ -186,7 +191,7 @@ export class BufferedModelRequestMetricsWriter<Store extends WriterStore = Write
         const checkpoint = this.checkpoints[index]!;
         if (checkpoint.target > this.processedCount) continue;
         this.checkpoints.splice(index, 1);
-        checkpoint.resolve(this.succeeded(checkpoint.target, checkpoint.matches));
+        checkpoint.resolve(this.succeeded(checkpoint.target, checkpoint.matches, checkpoint.rejectedTarget));
       }
     }
     if (committed) {
@@ -199,15 +204,26 @@ export class BufferedModelRequestMetricsWriter<Store extends WriterStore = Write
   }
 
   private recordFailure(scope: WriteScope, sequence: number): void {
+    // Rejected input never entered the write sequence. Keep its own watermark
+    // so a later rejection cannot contaminate an already captured read scope.
+    const rejection = sequence === 0 ? ++this.rejectedCount : undefined;
+    const update = (failure: FailureWatermark): void => {
+      if (rejection !== undefined) failure.rejection = Math.min(failure.rejection ?? Infinity, rejection);
+      else failure.sequence = Math.min(failure.sequence, sequence);
+    };
     const existing = this.failures.find(entry => entry.sample.threadId === scope.threadId && entry.sample.turnId === scope.turnId
       && (entry.sample.requestPurpose ?? null) === (scope.requestPurpose ?? null));
-    if (existing) { existing.sequence = Math.min(existing.sequence, sequence); return; }
-    if (this.failures.length >= maximumPendingRecords) { this.failureOverflow = true; return; }
-    this.failures.push({ sequence, sample: { threadId: scope.threadId, turnId: scope.turnId, requestPurpose: scope.requestPurpose ?? null } });
+    if (existing) { update(existing); return; }
+    if (this.failures.length >= maximumPendingRecords) { update(this.failureOverflow); return; }
+    const failure = { sequence: Infinity, sample: { threadId: scope.threadId, turnId: scope.turnId, requestPurpose: scope.requestPurpose ?? null } };
+    update(failure);
+    this.failures.push(failure);
   }
 
-  private succeeded(target: number, matchesScope: (scope: WriteScope) => boolean): boolean {
-    return !this.failureOverflow && !this.failures.some(entry => entry.sequence <= target && matchesScope(entry.sample));
+  private succeeded(target: number, matchesScope: (scope: WriteScope) => boolean, rejectedTarget: number): boolean {
+    const included = (entry: FailureWatermark): boolean => entry.sequence <= target
+      || entry.rejection !== undefined && entry.rejection <= rejectedTarget;
+    return !included(this.failureOverflow) && !this.failures.some(entry => included(entry) && matchesScope(entry.sample));
   }
 
   private report(error: unknown): void {

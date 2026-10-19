@@ -60,8 +60,11 @@ export function toReviewStarted(response: ReviewStartResponse): ReviewStarted {
   };
 }
 
-export function toThreadGoal(goal: ProtocolThreadGoal): ThreadGoal {
+export function toThreadGoal(goal: ProtocolThreadGoal, expectedThreadId?: string): ThreadGoal {
   requireString(goal.threadId, "goal thread id");
+  if (expectedThreadId !== undefined && goal.threadId !== expectedThreadId) {
+    throw new Error("Codex Goal 响应与请求 Thread 不一致");
+  }
   requireString(goal.objective, "goal objective");
   requireNumber(goal.tokensUsed, "goal tokens used");
   requireNumber(goal.timeUsedSeconds, "goal time used");

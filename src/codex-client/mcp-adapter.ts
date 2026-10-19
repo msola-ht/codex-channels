@@ -89,18 +89,18 @@ export function toMcpServerDetailPage(
           }];
         }),
         resources: server.resources.map((resource) => ({
-          uri: requiredText(resource.uri, "MCP resource uri", 4_096),
+          uri: redactCredentialText(requiredText(resource.uri, "MCP resource uri", 4_096)),
           name: requiredText(resource.name, "MCP resource name"),
           title: optionalText(resource.title, "MCP resource title"),
           description: optionalDescription(resource.description, "MCP resource description"),
           mimeType: optionalText(resource.mimeType, "MCP resource mime type"),
         })),
         resourceTemplates: server.resourceTemplates.map((template) => ({
-          uriTemplate: requiredText(
+          uriTemplate: redactCredentialText(requiredText(
             template.uriTemplate,
             "MCP resource template uri",
             4_096,
-          ),
+          )),
           name: requiredText(template.name, "MCP resource template name"),
           title: optionalText(template.title, "MCP resource template title"),
           description: optionalDescription(
@@ -148,7 +148,8 @@ export function toMcpOAuthLogin(
   if ((parsed.protocol !== "https:" && !loopbackHttp) || parsed.username || parsed.password) {
     throw new Error("Codex 响应缺少安全的 MCP OAuth authorization URL");
   }
-  return { server, authorizationUrl };
+  const loginId = requiredText(response.loginId, "MCP OAuth login ID", 256);
+  return { server, authorizationUrl, loginId, provider: "openai" };
 }
 
 export function toMcpResourceReadResult(
@@ -162,7 +163,7 @@ export function toMcpResourceReadResult(
   const contents: McpResourceReadResult["contents"] = [];
   let remainingTextCharacters = maximumResourceTextCharacters;
   for (const content of response.contents.slice(0, maximumResourceContentEntries)) {
-    const uri = requiredText(content.uri, "MCP resource content uri", 4_096);
+    const uri = redactCredentialText(requiredText(content.uri, "MCP resource content uri", 4_096));
     const mimeType = optionalText(content.mimeType, "MCP resource content mime type");
     if ("text" in content) {
       if (
@@ -201,7 +202,7 @@ export function toMcpResourceReadResult(
   }
   return {
     server,
-    requestedUri,
+    requestedUri: redactCredentialText(requestedUri),
     contents,
     omittedContentCount: response.contents.length - contents.length,
   };
