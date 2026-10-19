@@ -156,7 +156,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
 - `conversation-reset-credit-service.ts`：`/limits reset` 的分页查询、预览和确认归属，绑定 Actor、Conversation、Workspace 与当前 Thread；查询、预览和消费的实时授权贯穿 Provider 等待及最终 RPC，已发送消费按真实结果结算。
-- `openai-reset-credit-service.ts`：OpenAI 重置券查询、短期选券确认与单次消费；复核账户/券修订、过期及并发，消费结果与额度刷新分离，不保存凭据或自动重试写操作。
+- `openai-reset-credit-service.ts`：OpenAI 重置券查询、短期选券确认与单次消费；复核账户/券修订、过期及并发，预览与券期限贯穿最终消费提交守卫；本地明确拒绝保留 stale/授权分类，消费结果与额度刷新分离，不保存凭据或自动重试写操作。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未注册的聚合或自定义 Provider 返回不支持，不创建占位账户快照，不回退到 OpenAI。
   OpenAI 额度可在快照保存后附加由组合根提供的凭证刷新时间，仅供展示，不写入官方账户快照。

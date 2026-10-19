@@ -798,3 +798,53 @@ batchWrite→Provider 修订与刷新→权威回读→共享格式器/渠道无
 OAuth 关联与清理是各 OS 共用的进程内合同，未修改 Transport、服务模板或进程所有权；Windows/macOS 未运行观察。
 类型与边界检查先发现新增错误码尚未登记，补齐稳定错误码和呈现后已通过；提交门禁状态另行报告。
 提交后按既定顺序进入 L17，不据此宣布全项目验收完成。
+
+### L17 重置券预览、消费与刷新
+
+**状态：已审查（附证据限制）。** L16 已提交 `f3c61af6`，类型、边界、Lint、文档索引与构建门禁通过。
+主代理审查共用重置券服务、渠道包装与 Client 消费；Sol 只读审查 CLI/WebUI→私有账户 IPC→最终呈现。
+复用 L01/L03 未变化的授权与传输证据；单独核对账户变化、忙碌、重复确认、取消、未知结果与刷新失败，
+不使用真实重置券，不修改真实账户状态。
+
+**共用消费与渠道子链。** 主代理发现 **L17-F1**：预览/券期限只在读取后检查，Provider 等待后最终
+`beforeSubmit` 仅复核授权，可能消费已经过期的确认。内联生产共用服务、隔离消费端口推进时钟，
+分别在最终提交前超过预览五分钟及券到期时间，原实现两种情况均 writes=1 并返回 reset/refreshed=true。
+现最终守卫同时复核两种期限，本地明确拒绝保留 `reset_stale`，不误分类为已经发出但结果未知。
+
+修复后生产渠道包装→共用服务、隔离账户/消费/刷新端口观察：
+
+- 正常预览→确认返回 consumed/reset/refreshed=true，写 1 次、刷新 1 次；再次确认 stale。
+  预览或券在最终等待期间过期、账户变更、券说明修订均 stale，写入/刷新为 0。
+- 消费响应丢失返回 reset_unknown，写入 1、刷新 0，不重试；消费成功但刷新失败返回
+  consumed/reset/refreshed=false，写入/刷新各 1，不将刷新失败改成消费失败。
+- 取消后确认 stale、写入 0；上述场景结束时 busy=false，共用 attempts 与渠道 pending 均为 0。
+  两份预览并发确认，第二份返回 reset_busy 且已消费令牌，第一份结束后第二份重试 stale，总消费仍为 1。
+- 另经生产共用服务→ProviderRouting→Client→隔离 RPC，reset/nothingToReset/noCredit/alreadyRedeemed
+  四种官方结果均原样结算并单独刷新；消费携带精确 coupon ID 和该预览 UUID、retryOverload=false。
+  明细读取明确 `excludeResetCreditDetails=false`；最终 RPC 前推进到预览期限外，消费请求记录为空、返回 stale。
+  时限观察使用内联可控时钟，不宣称实际等待五分钟。
+
+已核对锁定官方 `rate_limit_resets.rs` 与生成 Consume 参数：后端在处理消费时获取认证，只有 creditId 和
+idempotencyKey，没有预期 accountId 的条件写入字段。Gateway 读取后复核账户/券身份并单次提交，
+不能保证最后复核之后原生客户端切换账户的跨端原子性；不添加未支持的协议字段或自动重试。
+L03 已观察的渠道身份、目录/Thread、最终授权守卫继续适用。
+
+**CLI/WebUI 独立审查。** Sol 只读追踪 CLI 命令和 WebUI 管理路由，经私有账户 IPC、组合根调度
+至共用服务，以及 WebUI API、确认状态与结果文案；该范围未发现新增必修问题。主代理核对路由的
+一次性确认、成功后审计降级、独立取消清理和 CLI 单次消费/刷新提示，与共用服务修复一致。
+沿用生产入口、临时私有 Socket 和隔离业务端口实际观察：
+
+- CLI 取消仅 preview/cancel，提示未消费；正常确认只 consume 一次并显示用量已重置。
+  刷新失败保留操作已确认及稍后查询提示；nothingToReset 使用无窗口可重置文案。
+  响应未知仅消费一次后取消清理，明确要求用 list 核对、不直接重复消费；stale/busy 不追加消费。
+  非交互消费在 IPC 前拒绝；券名称 ANSI 被清除、描述换行归一，JSON 保留转义原文。
+- 生产 WebUI Server 的 HTTP→私有 IPC：预览和正常消费 200，reset/refreshed=true/auditRecorded=true；
+  刷新失败仍 200、refreshed=false；未知消费 503/reset_unknown，随后仅 cancel 清理；取消 200 且未消费。
+  上述四类重复管理确认令牌均 409/management.confirmation-invalid，无额外消费。
+- 首次 CLI 隔离环境缺配置报 ENOENT 且无 IPC 调用，使用生产初始化入口准备临时配置后完成观察；
+  这是环境准备修正，不列为产品缺陷。临时 HTTP/Socket 已关闭、临时目录已清理。
+
+**证据限制与交付。** 未使用真实券、真实上游账户或外部渠道；CLI 提示/输入为注入端口，未观察真实
+终端 SIGINT。WebUI 浏览器未启动，最终对话框、审计降级和取消清理失败仅核对源码；Windows/macOS
+IPC 未运行。以上隔离观察不等同于真实资产消费验收。本项修复同步用户指南与 Application 职责说明，
+不新增文档；正常提交执行既有静态门禁，提交后按既定顺序进入 L07。

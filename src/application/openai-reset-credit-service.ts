@@ -71,15 +71,20 @@ export class OpenAiResetCreditService {
       signal?.throwIfAborted();
       validateAuthorization?.();
       let outcome: ResetCreditOutcome;
-      let authorizationRejected = false;
+      let submissionRejected = false;
       const beforeSubmit = () => {
-        try { validateAuthorization?.(); }
-        catch (error) { authorizationRejected = true; throw error; }
+        try {
+          validateAuthorization?.();
+          if (attempt.expiresAt <= Date.now()
+            || (credit.expiresAt !== null && credit.expiresAt * 1000 <= Date.now())) {
+            throw new ResetCreditError("reset_stale");
+          }
+        } catch (error) { submissionRejected = true; throw error; }
       };
       try { outcome = await this.port.consumeResetCredit(credit.id, attemptId, signal, beforeSubmit); }
       catch (error) {
         // A local guard rejection proves that this consumption was not sent.
-        if (authorizationRejected) throw error;
+        if (submissionRejected) throw error;
         throw new ResetCreditError("reset_unknown");
       }
       // 消费结果与快照刷新分开，刷新失败不能把已消费改成失败。
