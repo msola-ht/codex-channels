@@ -1,5 +1,5 @@
 const access = ["allow", "deny"];
-const approvals = ["auto", "prompt", "writes", "approve"];
+export const mcpToolApprovalModes = ["auto", "prompt", "writes", "approve"];
 const originFields = ["access", "downloads", "uploads", "full_cdp_access"];
 
 /** Project only editable policy fields, never MCP transport or credentials. */
@@ -28,7 +28,7 @@ export function projectToolSettings(config, merged) {
   }
   const addServer = (prefix, label, plugin) => {
     add([...prefix, "enabled"], `${label}：启用`, "boolean");
-    add([...prefix, "default_tools_approval_mode"], `${label}：工具审批`, "choice", approvals);
+    add([...prefix, "default_tools_approval_mode"], `${label}：工具审批`, "choice", mcpToolApprovalModes);
     add([...prefix, "enabled_tools"], `${label}：允许的工具`, "list");
     add([...prefix, "disabled_tools"], `${label}：禁用的工具`, "list");
     if (!plugin) {
@@ -36,7 +36,7 @@ export function projectToolSettings(config, merged) {
       add([...prefix, "tool_timeout_sec"], `${label}：调用超时（秒）`, "number");
     }
     for (const tool of keys(config, merged, [...prefix, "tools"])) {
-      add([...prefix, "tools", tool, "approval_mode"], `${label} / ${tool}：审批`, "choice", approvals);
+      add([...prefix, "tools", tool, "approval_mode"], `${label} / ${tool}：审批`, "choice", mcpToolApprovalModes);
       add([...prefix, "tools", tool, "output_token_limit"], `${label} / ${tool}：输出 token 上限`, "integer");
     }
   };

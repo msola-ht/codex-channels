@@ -265,7 +265,7 @@
   避免两份文案漂移。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的官方设备登录入口；登录前预览共享 Provider 切换计划，受管固定模式须先改为切换模式。登录完成后重新核对确认范围与配置修订，再提交官方恢复；自定义候选备份、第三方默认模型、模型目录和思考设置清理与 `codexc provider switch openai` 保持一致。
   登录子进程异步运行，输出跟随交互输出流，不混入 Setup JSONL；失败、信号取消或输出异常均停止后续配置写入，并清理自有进程。
-- `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与校验；插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
+- `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与校验；导出共用 MCP 审批模式供新增和编辑向导使用；插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
   Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Standard/Fast/Ultrafast、计划清单工具、TUI 空闲总结，
   一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入默认值与用户偏好（已有 Permission Profile 时保留权限）；加速档位仅作为

@@ -27,3 +27,4 @@ export function toolSettingEdits(
   merged: Record<string, CodexUserConfigValue | undefined> | undefined,
   invalid: (field: string, code: string, message: string) => Error,
 ): { edits: CodexUserConfigEdit[]; value: Record<string, unknown> };
+export const mcpToolApprovalModes: readonly ["auto", "prompt", "writes", "approve"];

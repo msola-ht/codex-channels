@@ -139,7 +139,7 @@ async function runMcpSettings(options) {
     showInstructions: false,
     options: [
       { value: "add", label: "新增 MCP", hint: "本地 stdio、远程 HTTP、AnySearch 搜索或 Strata 视频预设" },
-      { value: "edit", label: "编辑 MCP", hint: "修改用户 MCP 的连接、密钥、超时与启用状态" },
+      { value: "edit", label: "编辑 MCP", hint: "修改用户 MCP 的连接、密钥、超时、启用与工具审批" },
       { value: "delete", label: "删除 MCP", hint: "确认后移除用户配置中的 MCP 条目" },
       { value: "manage", label: "电脑、浏览器与已有 MCP", hint: "查看并设置启用状态、工具开关与调用审批" },
       { value: "back", label: "返回配置菜单" },

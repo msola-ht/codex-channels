@@ -521,9 +521,11 @@ Windows 先以临时 Provider 租约等待目标实例就绪，再检查桥并�
 审批和输出 token 上限。插件 MCP 只开放这些策略覆盖，不修改插件清单里的启动命令、环境和超时。
 新增 MCP 使用 `codexc config → 工具与 MCP → 新增 MCP`：支持本地 stdio、远程 Streamable HTTP、AnySearch 搜索和 Strata 视频预设。统一按“选择类型 → 填写必要信息 → 查看脱敏摘要 → 确认保存”执行；预设采用固定默认参数，仅询问服务必需信息，通用类型保留自定义配置。stdio 逐项输入命令、参数 JSON 数组、工作目录、环境变量和继承变量；HTTP 输入 URL、Bearer Token 环境变量名、固定 Header 和环境变量 Header。通用类型可设置启动/调用超时及启用状态，默认 10 秒、60 秒和启用；Strata 预设调用超时为 960 秒。预设 API Key 与密钥类 JSON 均隐藏输入，固定值写入 Codex 用户配置；环境变量引用需由实际启动 Codex 的宿主提供。保存前显示脱敏摘要及目标路径，确认后按配置修订写入；同名服务器拒绝覆盖，配置冲突不自动重试。此入口不安装 MCP 包、不执行命令探测、不自动重启服务，OAuth 登录仍使用 Codex 原生入口。Strata 预设详见[视频分析 MCP](video-analysis-mcp.md)。
 
-AnySearch 预设只询问 API Key（隐藏输入，仅填密钥，不含 `Bearer ` 前缀），随后显示脱敏摘要并确认保存。名称固定为 `anysearch`，Streamable HTTP 地址为 `https://api.anysearch.com/mcp`，启动超时 10 秒、调用超时 60 秒，默认启用。密钥以 `http_headers.Authorization = "Bearer <API Key>"` 保存到 Codex 用户配置，不回显，无需设置 `ANYSEARCH_API_KEY` 环境变量；空值、空白和控制字符会被拒绝。
+所有新增类型（含 AnySearch 和 Strata 预设）在保存前统一选择工具调用审批：跟随其他来源或默认值（不写用户覆盖）、`auto`、`prompt`、`writes` 或 `approve`。选择写入 `mcp_servers.<名称>.default_tools_approval_mode`，摘要明确显示所选策略；未确认不保存。编辑 MCP 也提供“工具调用审批”，可修改或移除用户层覆盖，其他字段与已有单工具策略保持不变。单工具 `tools.<工具>.approval_mode` 优先于服务器默认值，其他权限限制仍然生效。
 
-`codexc config → 工具与 MCP` 同时提供“编辑 MCP”和“删除 MCP”，只列出当前 Codex Home 用户配置中的条目，不修改插件清单或其他来源的配置。编辑先选 MCP，再选字段；支持启用状态、超时，以及用户条目自身定义的 stdio 命令、参数、工作目录、环境变量，或 HTTP 地址、Key、Header 和环境变量引用。不重命名、不切换传输类型；未选字段及密钥保留。新值隐藏输入，不回填旧值；JSON 字段明确按整组替换，可选字段可显式移除以恢复其他来源或默认值。HTTP 的“API Key”会设置 Bearer Authorization Header，并移除用户层冲突的 Authorization Header 和 Bearer 环境变量引用；Strata 已有 Key 可单独更新，不必重填整个环境变量对象。工具允许/禁用列表和审批策略继续使用“电脑、浏览器与已有 MCP”。
+AnySearch 预设询问 API Key（隐藏输入，仅填密钥，不含 `Bearer ` 前缀）和工具调用审批，随后显示脱敏摘要并确认保存。名称固定为 `anysearch`，Streamable HTTP 地址为 `https://api.anysearch.com/mcp`，启动超时 10 秒、调用超时 60 秒，默认启用。密钥以 `http_headers.Authorization = "Bearer <API Key>"` 保存到 Codex 用户配置，不回显，无需设置 `ANYSEARCH_API_KEY` 环境变量；空值、空白和控制字符会被拒绝。
+
+`codexc config → 工具与 MCP` 同时提供“编辑 MCP”和“删除 MCP”，只列出当前 Codex Home 用户配置中的条目，不修改插件清单或其他来源的配置。编辑先选 MCP，再选字段；支持启用状态、工具调用审批、超时，以及用户条目自身定义的 stdio 命令、参数、工作目录、环境变量，或 HTTP 地址、Key、Header 和环境变量引用。不重命名、不切换传输类型；未选字段及密钥保留。连接类新值隐藏输入，不回填旧值；审批策略通过选项选择并在摘要展示。JSON 字段明确按整组替换，可选字段可显式移除以恢复其他来源或默认值。HTTP 的“API Key”会设置 Bearer Authorization Header，并移除用户层冲突的 Authorization Header 和 Bearer 环境变量引用；Strata 已有 Key 可单独更新，不必重填整个环境变量对象。工具允许/禁用列表和单工具审批覆盖继续使用“电脑、浏览器与已有 MCP”。
 
 设置新的 Bearer 环境变量引用，或在固定/环境变量 Header 中设置 Authorization 时，也会移除用户层其他冲突认证来源；确认前会说明。HTTP Header 名称不允许用不同大小写重复设置，通用 HTTP 添加也会拒绝并存的认证来源。其他来源的认证配置仍可能影响合并后的结果；认证写入后会检查合并配置，若仍有冲突则明确报告用户层已经写入但认证检查未通过，不自动回滚或重试。Header Helper 或企业认证模式须通过原生配置修改认证。
 

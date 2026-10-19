@@ -9,8 +9,29 @@ import { packageDir } from "./package-path.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import { videoConfiguration } from "./video-analysis-client.mjs";
+import { mcpToolApprovalModes } from "./codex-tool-settings.mjs";
 
 const cancelled = Symbol("cancelled");
+const approvalLabels = {
+  auto: "按工具属性判断（auto）",
+  prompt: "每次调用询问（prompt）",
+  writes: "非只读工具询问（writes）",
+  approve: "免除此层工具审批（approve）",
+};
+
+async function askMcpApproval(ask, current, output) {
+  if (current !== undefined && !mcpToolApprovalModes.includes(current)) {
+    throw new Error("现有 MCP 工具审批模式不受支持，请通过原生配置核对，未保存");
+  }
+  output.write("此设置是 MCP 服务器的默认工具审批策略；已有单工具覆盖及其他权限限制继续生效。\n");
+  const value = await ask("select", { message: "MCP 工具调用审批", initialValue: current ?? "inherit", options: [
+    { value: "inherit", label: "跟随其他配置来源或默认值（不设置用户覆盖）" },
+    ...mcpToolApprovalModes.map(mode => ({ value: mode, label: approvalLabels[mode] })),
+  ] });
+  if (value === "inherit") return null;
+  if (!mcpToolApprovalModes.includes(value)) throw new Error("不支持的 MCP 工具审批模式，未保存");
+  return value;
+}
 const envName = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const clean = value => typeof value === "string" && !/[\0\r\n]/u.test(value);
 const required = value => clean(value) && value.trim() ? undefined : "请输入非空单行文本";
@@ -189,6 +210,7 @@ async function manageExistingMcp({ operation, snapshot, client, ask, apiKey, env
     if (!server || typeof server !== "object" || Array.isArray(server)) throw new Error("MCP 配置结构无效，请使用 Codex 原生配置修复");
     const fields = [
       { value: "enabled", label: "启用状态" },
+      { value: "default_tools_approval_mode", label: "工具调用审批" },
       { value: "startup_timeout_sec", label: "启动超时（秒）" },
       { value: "tool_timeout_sec", label: "调用超时（秒）" },
     ];
@@ -222,6 +244,8 @@ async function manageExistingMcp({ operation, snapshot, client, ask, apiKey, env
           ...authCleanupEdits(path, server, "http_headers", "Authorization")];
         output.write("将使用直接保存的 Bearer Key，并移除用户层其他 Authorization Header 与 Bearer 环境变量引用。\n");
       }
+    } else if (field === "default_tools_approval_mode") {
+      value = await askMcpApproval(ask, server.default_tools_approval_mode, output);
     } else if (field === "enabled") {
       value = await ask("confirm", { message: "启用此 MCP？", initialValue: server.enabled !== false });
     } else {
@@ -259,9 +283,9 @@ async function manageExistingMcp({ operation, snapshot, client, ask, apiKey, env
       edits.push(...authCleanupEdits(path, server, field));
       output.write("将采用本次设置的认证来源，并移除用户层其他冲突的 Authorization Header 或 Bearer 环境变量引用；引用变量须由 Codex 宿主提供。\n");
     }
-    const summary = value === null ? "移除用户层字段" : typeof value === "boolean" || typeof value === "number" ? `设置为 ${value}` : "设置新值（隐藏）";
+    const summary = value === null ? "移除用户层字段" : field === "default_tools_approval_mode" ? approvalLabels[value] : typeof value === "boolean" || typeof value === "number" ? `设置为 ${value}` : "设置新值（隐藏）";
     output.write(`修改字段：${descriptor.label}；${summary}。其余未修改字段与密钥保留。\n`);
-    output.write("工具允许/禁用列表和审批策略仍在“电脑、浏览器与已有 MCP”管理；其他配置来源可能影响最终生效值。\n");
+    output.write("工具允许/禁用列表和单工具审批覆盖仍在“电脑、浏览器与已有 MCP”管理；其他配置来源可能影响最终生效值。\n");
   }
   if (await ask("confirm", { message: operation === "delete" ? "确认删除上述 MCP 用户配置？" : "确认保存上述 MCP 修改？", initialValue: false }) !== true) return { action: "back" };
   await saveMcpEdits(client, snapshot, edits, output);
@@ -359,6 +383,9 @@ export async function runMcpSetup({ environment = process.env, dataDir, configPa
       server.tool_timeout_sec = Number(await text("MCP 调用超时（秒）", String(server.tool_timeout_sec), positive));
       server.enabled = await ask("confirm", { message: "保存后启用此 MCP？", initialValue: true });
     }
+    const approval = await askMcpApproval(ask, undefined, output);
+    if (approval !== null) server.default_tools_approval_mode = approval;
+    output.write(`工具调用审批：${approval === null ? "跟随其他配置来源或默认值" : approvalLabels[approval]}\n`);
     // Do not print launch arguments, URL queries, header values or environment values.
     output.write(`写入：${join(codexHomePath(environment), "config.toml")}\n作用范围：该 Codex Home 的用户配置\nMCP：${name}；类型：${type.label}；连接：${server.command ? "stdio" : "Streamable HTTP"}；启用：${server.enabled}\n启动超时：${server.startup_timeout_sec} 秒；调用超时：${server.tool_timeout_sec} 秒\n`);
     if (kind === "strata") output.write(`本机视频范围：任意本机绝对路径（STRATA_VIDEO_ROOT=${server.env.STRATA_VIDEO_ROOT}；任何可使用此 MCP 的会话都能指定本机视频路径）\n渠道附件目录（确认后创建并设置私有权限）：${server.env.STRATA_VIDEO_CHANNEL_ROOT}\n视频传输：${server.env.STRATA_VIDEO_TRANSPORT}\n思考默认 medium；可选 none、low、medium、xhigh；预算由 Strata 管理。\n`);
