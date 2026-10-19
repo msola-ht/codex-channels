@@ -141,7 +141,10 @@
   管理错误仅映射显式领域类型的稳定代码与安全文案；未知异常返回 500，不将其消息、代码或字段直接公开。冲突返回 409，目标缺失返回 404，明确依赖不可用返回 503。
 - `account-management-error.mjs`：DeepSeek、CLP 及账户运行状态适配器共享的输入、冲突与恢复失败分类；WebUI 只消费其受控代码和字段，不公开底层异常。
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标和调用记录维护异步任务；
-  只接受固定动作，任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或回环 Origin 隔离，输出不回传且支持取消；Windows 取消复用共享的有界进程树回收，避免只终止 npm 包装进程。回收失败保留任务归属、错误及再次取消入口，不放行重叠任务；退出与取消完成协调后才发布终态。变更订阅按相同所有者隔离，仅通知状态变化与心跳，终态审计失败不阻断通知。
+  只接受固定动作和字段，显式输入/占用错误使用 `ManagementTaskInputError`，未知异常不公开原文。
+  任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或归一化回环 Origin 隔离，输出不回传且支持取消；Windows 取消复用共享的有界进程树回收，避免只终止 npm 包装进程。回收失败保留任务归属、错误及再次取消入口，不放行重叠任务；退出与取消完成协调后才发布终态。
+  Runner 通过同一回调记录启动和终态审计，`auditStatus` 保留任何阶段的降级；列表、详情及 WebUI
+  任务反馈均消费该状态。变更订阅在审计结果确定后通知，审计失败不阻断通知或覆盖任务结果。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/time`（服务端时区与当前时间）、
   `/api/v1/overview`、`/api/v1/daily`、`/api/v1/threads`、
   `/api/v1/threads/:id/run|turns|subagents`、`/api/v1/requests`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；

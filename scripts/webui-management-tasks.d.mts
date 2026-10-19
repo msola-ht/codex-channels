@@ -14,12 +14,14 @@ export interface ManagementTask {
   createdAt: string;
   updatedAt: string;
   error: string | null;
+  auditStatus: "recorded" | "degraded" | null;
   result: { output: string | null } | null;
 }
+export class ManagementTaskInputError extends Error {}
 export class WebuiManagementTaskRunner {
   constructor(options?: { now?: () => number; onEvent?: (event: {
     task: Omit<ManagementTask, "owner">;
-    phase: "failed" | "cancelled" | "completed";
+    phase: "started" | "failed" | "cancelled" | "completed";
     resultCode: string;
     recovery: string;
     sessionId?: string;

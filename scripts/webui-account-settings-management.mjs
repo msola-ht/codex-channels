@@ -78,6 +78,14 @@ export async function loadAccountSettingsResource(
 }
 
 export function normalizeAccountSettingsMutation(input) {
+  const normalized = accountSettingsMutation(input);
+  if (Object.keys(input).some(key => key !== "confirmationToken" && !Object.hasOwn(normalized, key))) {
+    throw new ManagementOperationError("invalid_account_operation", "账户设置请求包含不支持的字段");
+  }
+  return normalized;
+}
+
+function accountSettingsMutation(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new ManagementOperationError("invalid_json", "账户设置操作正文必须是对象");
   }

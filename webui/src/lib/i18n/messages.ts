@@ -1169,6 +1169,7 @@ const zh = {
   common: {
     notifications: "通知",
     taskNotificationsUnavailable: "任务通知暂不可用，请手动刷新核对状态。",
+    taskAuditDegraded: "部分任务的审计记录不完整；任务结果保持不变。请检查数据目录权限和磁盘空间，不要为补写审计重复执行任务。",
     close: "关闭",
     sidebar: "侧栏导航",
     sidebarDescription: "浏览页面与本地服务信息。",
@@ -2816,6 +2817,7 @@ const en: Messages = {
   common: {
     notifications: "Notifications",
     taskNotificationsUnavailable: "Task notifications are unavailable. Refresh manually to check the status.",
+    taskAuditDegraded: "Audit records for some tasks are incomplete; task results are unchanged. Check data directory permissions and disk space. Do not rerun tasks to repair audit records.",
     close: "Close",
     sidebar: "Sidebar navigation",
     sidebarDescription: "Browse pages and local service information.",

@@ -77,12 +77,18 @@ export function normalizeProviderSettingsMutation(input) {
       }
       return { operation: input.operation, provider: input.provider, model: input.model };
     case "primary.switch":
+      if (Object.keys(input).some(key => !["operation", "providerId", "model", "confirmationToken"].includes(key))) {
+        throw new ManagementOperationError("invalid_provider_operation", "Provider 切换请求包含不支持的字段");
+      }
       return {
         operation: input.operation,
         providerId: input.providerId,
         ...(input.model === undefined ? {} : { model: input.model }),
       };
     case "primary.remove":
+      if (Object.keys(input).some(key => !["operation", "providerId", "confirmationToken"].includes(key))) {
+        throw new ManagementOperationError("invalid_provider_operation", "Provider 移除请求包含不支持的字段");
+      }
       return { operation: input.operation, providerId: input.providerId };
     case "primary.custom.save":
     case "primary.custom.connection.save":
