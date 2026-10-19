@@ -321,13 +321,13 @@ function modelSelectionResult(state: ModelSelectionState): ConversationCommandRe
 }
 
 export interface ConversationCommandExecutor {
-  selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }): Promise<ConversationCommandResult>;
-  selectModel(target: ConversationTarget, selection: ModelSelectionIdentity): Promise<ConversationCommandResult>;
+  selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult>;
+  selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult>;
   execute(
     target: ConversationTarget,
     command: ConversationCommandName,
-    input?: string,
-    actorId?: string,
+    input: string,
+    actorId: string,
   ): Promise<ConversationCommandResult>;
 }
 
@@ -337,25 +337,64 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     private readonly conversations: ConversationCommandUseCases,
     scheduledTasks?: ScheduledTaskUseCases,
     private readonly resetCredits?: ConversationResetCreditService,
+    private readonly authorize: (target: ConversationTarget, actorId: string) => void = () => {
+      throw new UserFacingError("command.authorization-changed", "命令授权不可用");
+    },
   ) {
     this.scheduledTasks = scheduledTasks;
   }
 
-  async selectModel(target: ConversationTarget, selection: ModelSelectionIdentity): Promise<ConversationCommandResult> {
+  async selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult> {
+    this.authorize(target, actorId);
     this.conversations.touchActivity?.(target);
-    return modelSelectionResult(await this.conversations.selectModel(target, selection));
+    const state = await this.conversations.selectModel(target, selection);
+    this.authorize(target, actorId);
+    return modelSelectionResult(state);
   }
 
-  async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }): Promise<ConversationCommandResult> {
+  async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult> {
+    this.authorize(target, actorId);
     this.conversations.touchActivity?.(target);
-    return { kind: "auto-review", state: await this.conversations.updateAutoReview(target, selection.enabled, selection.threadId) };
+    const state = await this.conversations.updateAutoReview(target, selection.enabled, selection.threadId);
+    this.authorize(target, actorId);
+    return { kind: "auto-review", state };
   }
 
   async execute(
     target: ConversationTarget,
     command: ConversationCommandName,
-    input = "",
-    actorId?: string,
+    input: string,
+    actorId: string,
+  ): Promise<ConversationCommandResult> {
+    const assertAuthorized = this.commandGuard(target, actorId, command === "workspace");
+    const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
+    this.authorize(target, actorId);
+    return result;
+  }
+
+  private commandGuard(target: ConversationTarget, actorId: string, allowMissingWorkspace: boolean): () => void {
+    this.authorize(target, actorId);
+    const workspaceId = this.conversations.selectedWorkspaceId(target);
+    const workspace = this.conversations.listWorkspaces().find(entry => entry.id === workspaceId);
+    if (!workspace && !allowMissingWorkspace) {
+      throw new UserFacingError("workspace.missing", "Workspace 不存在或未获授权", { workspaceId });
+    }
+    return () => {
+      this.authorize(target, actorId);
+      const currentId = this.conversations.selectedWorkspaceId(target);
+      const current = this.conversations.listWorkspaces().find(entry => entry.id === currentId);
+      if (currentId !== workspaceId || current?.cwd !== workspace?.cwd) {
+        throw new UserFacingError("command.authorization-changed", "命令工作区已变化");
+      }
+    };
+  }
+
+  private async executeAuthorized(
+    target: ConversationTarget,
+    command: ConversationCommandName,
+    input: string,
+    actorId: string,
+    assertAuthorized: () => void,
   ): Promise<ConversationCommandResult> {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
@@ -505,7 +544,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "queue":
-        return this.executeQueueCommand(target, argumentsText);
+        return this.executeQueueCommand(target, argumentsText, assertAuthorized);
       case "revert":
         return this.executeRevertCommand(target, argumentsText, actorId);
       case "rename":
@@ -724,12 +763,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   private async executeQueueCommand(
     target: ConversationTarget,
     input: string,
+    assertAuthorized: () => void,
   ): Promise<ConversationCommandResult> {
     const operation = parseThreadQueueOperation(input);
     if (operation.type === "list") {
       return {
         kind: "thread-queue",
-        result: await this.conversations.queueList(target, operation.page),
+        result: await this.conversations.queueList(target, operation.page, assertAuthorized),
       };
     }
     if (operation.type === "add") {
@@ -737,7 +777,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         kind: "outcome",
         outcome: {
           type: "thread-queue.added",
-          item: await this.conversations.queueAdd(target, operation.text),
+          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized),
         },
       };
     }
@@ -750,12 +790,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
             target,
             operation.selector,
             operation.text,
+            assertAuthorized,
           ),
         },
       };
     }
     if (operation.type === "delete") {
-      const result = await this.conversations.queueDelete(target, operation.selector);
+      const result = await this.conversations.queueDelete(target, operation.selector, assertAuthorized);
       return {
         kind: "outcome",
         outcome: { type: "thread-queue.deleted", deleted: result.deleted },
@@ -766,6 +807,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         target,
         operation.selector,
         operation.position,
+        assertAuthorized,
       );
       return {
         kind: "outcome",
@@ -777,7 +819,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         },
       };
     }
-    const result = await this.conversations.queueStart(target, operation.selector);
+    const result = await this.conversations.queueStart(target, operation.selector, assertAuthorized);
     return {
       kind: "outcome",
       outcome: { type: "thread-queue.started", turnId: result.turnId },

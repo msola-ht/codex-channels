@@ -54,17 +54,26 @@ export class ThreadQueueService {
     private readonly queue?: ThreadQueuePort,
   ) {}
 
-  add(target: ConversationTarget, value: string): Promise<ThreadQueueItem> {
+  async add(
+    target: ConversationTarget,
+    value: string,
+    assertAuthorized?: () => void,
+  ): Promise<ThreadQueueItem> {
+    assertAuthorized?.();
+    const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const threadId = this.requireCurrentThread(target);
+      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      beforeSubmit();
       const queue = this.requireQueue();
       this.rejectPendingOverrides(target);
       const text = normalizeQueueText(value);
+      beforeSubmit();
       try {
         const item = await queue.addQueueItem(
           threadId,
           text,
           `${gatewayUserMessageClientIdPrefix}${randomUUID()}`,
+          beforeSubmit,
         );
         this.invalidateSnapshot(threadId);
         return item;
@@ -74,13 +83,21 @@ export class ThreadQueueService {
     });
   }
 
-  list(target: ConversationTarget, page = 1): Promise<ThreadQueueListResult> {
+  async list(
+    target: ConversationTarget,
+    page = 1,
+    assertAuthorized?: () => void,
+  ): Promise<ThreadQueueListResult> {
+    assertAuthorized?.();
+    const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
+      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      beforeSubmit();
       requirePage(page, maximumNativeQueuePages, () => {
         throw new UserFacingError("queue.usage", "Queue 页码无效");
       });
-      const threadId = this.requireCurrentThread(target);
-      const snapshot = await this.readSnapshot(target, threadId);
+      const snapshot = await this.readSnapshot(target, threadId, beforeSubmit);
+      beforeSubmit();
       const pageCount = pageCountFor(snapshot.items.length, nativeQueuePageSize);
       const items = pageSlice(snapshot.items, page, nativeQueuePageSize, pageCount);
       return {
@@ -93,15 +110,20 @@ export class ThreadQueueService {
     });
   }
 
-  update(
+  async update(
     target: ConversationTarget,
     selector: string,
     value: string,
+    assertAuthorized?: () => void,
   ): Promise<ThreadQueueItem> {
+    assertAuthorized?.();
+    const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const threadId = this.requireCurrentThread(target);
+      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      beforeSubmit();
       const queue = this.requireQueue();
-      const item = await this.resolveSelector(target, threadId, selector);
+      const item = await this.resolveSelector(target, threadId, selector, beforeSubmit);
+      beforeSubmit();
       if (!item.editable) {
         throw new UserFacingError(
           "queue.item-not-editable",
@@ -110,7 +132,7 @@ export class ThreadQueueService {
       }
       const text = normalizeQueueText(value);
       try {
-        const updated = await queue.updateQueueItem(threadId, item.id, text);
+        const updated = await queue.updateQueueItem(threadId, item.id, text, beforeSubmit);
         this.invalidateSnapshot(threadId);
         return updated;
       } catch (error) {
@@ -119,16 +141,21 @@ export class ThreadQueueService {
     });
   }
 
-  delete(
+  async delete(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<{ deleted: boolean }> {
+    assertAuthorized?.();
+    const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const threadId = this.requireCurrentThread(target);
+      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      beforeSubmit();
       const queue = this.requireQueue();
-      const item = await this.resolveSelector(target, threadId, selector);
+      const item = await this.resolveSelector(target, threadId, selector, beforeSubmit);
+      beforeSubmit();
       try {
-        const result = await queue.deleteQueueItem(threadId, item.id);
+        const result = await queue.deleteQueueItem(threadId, item.id, beforeSubmit);
         this.invalidateSnapshot(threadId);
         return result;
       } catch (error) {
@@ -137,15 +164,20 @@ export class ThreadQueueService {
     });
   }
 
-  reorder(
+  async reorder(
     target: ConversationTarget,
     selector: string,
     position: number,
+    assertAuthorized?: () => void,
   ): Promise<ThreadQueueReorderResult> {
+    assertAuthorized?.();
+    const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const threadId = this.requireCurrentThread(target);
+      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      beforeSubmit();
       const queue = this.requireQueue();
-      const resolved = await this.resolveSelectorSnapshot(target, threadId, selector);
+      const resolved = await this.resolveSelectorSnapshot(target, threadId, selector, beforeSubmit);
+      beforeSubmit();
       const { snapshot, item } = resolved;
       if (!Number.isSafeInteger(position) || position < 1 || position > snapshot.items.length) {
         throw new UserFacingError("queue.position.invalid", "Queue 目标位置超出当前队列范围");
@@ -153,7 +185,7 @@ export class ThreadQueueService {
       const ids = snapshot.items.map((entry) => entry.id).filter((id) => id !== item.id);
       ids.splice(position - 1, 0, item.id);
       try {
-        await queue.reorderQueue(threadId, ids);
+        await queue.reorderQueue(threadId, ids, beforeSubmit);
         this.invalidateSnapshot(threadId);
         return { itemId: item.id, position, totalItemCount: snapshot.items.length };
       } catch (error) {
@@ -163,22 +195,27 @@ export class ThreadQueueService {
     });
   }
 
-  start(
+  async start(
     target: ConversationTarget,
     selector?: string,
+    assertAuthorized?: () => void,
   ): Promise<{ turnId: string }> {
+    assertAuthorized?.();
+    const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const threadId = this.requireCurrentThread(target);
+      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      beforeSubmit();
       const queue = this.requireQueue();
       this.rejectPendingOverrides(target);
       let queuedSubmissionId: string | undefined;
       if (selector?.trim()) {
         queuedSubmissionId = (
-          await this.resolveSelectorSnapshot(target, threadId, selector)
+          await this.resolveSelectorSnapshot(target, threadId, selector, beforeSubmit)
         ).item.id;
       }
+      beforeSubmit();
       try {
-        const result = await queue.startQueueItem(threadId, queuedSubmissionId);
+        const result = await queue.startQueueItem(threadId, queuedSubmissionId, beforeSubmit);
         this.invalidateSnapshot(threadId);
         return result;
       } catch (error) {
@@ -230,6 +267,22 @@ export class ThreadQueueService {
     return binding.threadId;
   }
 
+  private threadGuard(
+    target: ConversationTarget,
+    threadId: string,
+    assertAuthorized?: () => void,
+  ): () => void {
+    return () => {
+      assertAuthorized?.();
+      if (this.router.current(target)?.threadId !== threadId) {
+        throw new UserFacingError(
+          "command.authorization-changed",
+          "当前会话已切换，请重新执行 Queue 命令",
+        );
+      }
+    };
+  }
+
   private requireQueue(): ThreadQueuePort {
     if (!this.queue) {
       throw new UserFacingError(
@@ -252,14 +305,17 @@ export class ThreadQueueService {
   private async readSnapshot(
     target: ConversationTarget,
     threadId: string,
+    beforeSubmit: () => void,
   ): Promise<{ items: ThreadQueueItem[] }> {
+    beforeSubmit();
     const queue = this.requireQueue();
     let response: ThreadQueuePage;
     try {
-      response = await queue.listQueue(threadId, { limit: maximumNativeQueueItems });
+      response = await queue.listQueue(threadId, { limit: maximumNativeQueueItems, beforeSubmit });
     } catch (error) {
       throw queueUserFacingError(error, "list");
     }
+    beforeSubmit();
     if (response.items.length > maximumNativeQueueItems || response.nextCursor !== null) {
       throw new UserFacingError(
         "queue.unavailable",
@@ -275,7 +331,9 @@ export class ThreadQueueService {
     target: ConversationTarget,
     threadId: string,
     selector: string,
+    beforeSubmit: () => void,
   ): Promise<{ snapshot: { items: ThreadQueueItem[] }; item: ThreadQueueItem }> {
+    beforeSubmit();
     const normalized = selector.trim();
     let selectedId = normalized;
     if (/^\d+$/u.test(normalized)) {
@@ -295,7 +353,8 @@ export class ThreadQueueService {
         ? selection.itemIds[index] ?? ""
         : "";
     }
-    const snapshot = await this.readSnapshot(target, threadId);
+    const snapshot = await this.readSnapshot(target, threadId, beforeSubmit);
+    beforeSubmit();
     const item = snapshot.items.find((candidate) => candidate.id === selectedId);
     if (!item) {
       throw new UserFacingError(
@@ -310,8 +369,11 @@ export class ThreadQueueService {
     target: ConversationTarget,
     threadId: string,
     selector: string,
+    beforeSubmit: () => void,
   ): Promise<ThreadQueueItem> {
-    return (await this.resolveSelectorSnapshot(target, threadId, selector)).item;
+    const resolved = await this.resolveSelectorSnapshot(target, threadId, selector, beforeSubmit);
+    beforeSubmit();
+    return resolved.item;
   }
 
   private rememberSelectionSnapshot(

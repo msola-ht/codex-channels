@@ -14,6 +14,7 @@ export type UserFacingErrorCode =
   | "hooks.forbidden"
   | "message.empty"
   | "input.authorization-changed"
+  | "command.authorization-changed"
   | "oauth.closing"
   | "attachment.too-many"
   | "attachment.too-large"

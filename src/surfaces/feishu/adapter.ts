@@ -370,7 +370,7 @@ export class FeishuConversationAdapter {
         const result = await this.commands.selectAutoReview(target, {
           threadId: match[2]!,
           enabled: match[1] === "on",
-        });
+        }, actorId);
         const rendered = renderFeishuCommandResult(result);
         if (rendered !== null) this.notifyMarkdown(target.conversationId, rendered);
         return;

@@ -476,7 +476,7 @@ export class TelegramSurface {
       const result = await this.commands.selectAutoReview(callbackTarget, {
         threadId: pending.threadId,
         enabled: context.match[1] === "on",
-      });
+      }, String(context.from.id));
       try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
       catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "当前会话审批按钮清理失败"); }
       await renderTelegramCommandResult(context, result);
@@ -495,6 +495,7 @@ export class TelegramSurface {
         target(context),
         "workspace",
         workspace.id,
+        String(context.from.id),
       );
       await context.answerCallbackQuery({ text: `已切换到 ${workspace.id}` });
       await renderTelegramCommandResult(
@@ -531,6 +532,7 @@ export class TelegramSurface {
           modelTarget,
           "model",
           provider,
+          String(context.from.id),
         );
         await renderTelegramCommandResult(
           context,
@@ -565,7 +567,7 @@ export class TelegramSurface {
         const result = await this.commands.selectModel(modelTarget, {
           provider: selected.provider ?? "openai",
           model: selected.model,
-        });
+        }, String(context.from.id));
         await renderTelegramCommandResult(
           context,
           result,
@@ -603,6 +605,7 @@ export class TelegramSurface {
           modelTarget,
           "effort",
           effort,
+          String(context.from.id),
         );
         await renderTelegramCommandResult(
           context,
@@ -668,6 +671,7 @@ export class TelegramSurface {
         target(context),
         "plugin",
         `list ${context.match[1]}`,
+        String(context.from.id),
       );
       await renderTelegramCommandResult(
         context,
@@ -875,6 +879,7 @@ export class TelegramSurface {
           target(context),
           "plugin",
           `${pluginPrompt.pluginId} ${context.message.text.trim()}`,
+          String(context.from.id),
         );
         await renderTelegramCommandResult(
           context,
@@ -1321,11 +1326,12 @@ export class TelegramSurface {
     context: Context,
     command: ConversationCommandName,
   ): Promise<void> {
+    if (!context.from) throw new UserFacingError("command.authorization-changed", "无法确认命令操作者");
     const result = await this.commands.execute(
       target(context),
       command,
       commandArguments(context),
-      context.from ? String(context.from.id) : undefined,
+      String(context.from.id),
     );
     if (result.kind === "auto-review") {
       await this.renderAutoReviewResult(context, result);

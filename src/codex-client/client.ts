@@ -620,6 +620,7 @@ export class CodexAppServerClient implements
     threadId: string,
     text: string,
     clientUserMessageId: string,
+    beforeSubmit?: () => void,
   ): Promise<ThreadQueueItem> {
     const response = await this.rpc.request<ThreadQueueAddResponse>({
       method: "thread/queue/add",
@@ -628,7 +629,7 @@ export class CodexAppServerClient implements
         input: toProtocolQueueText(text),
         clientUserMessageId,
       } satisfies ThreadQueueAddParams,
-    }, { retryOverload: false }).catch(rethrowThreadQueueError);
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
     return toThreadQueueAddResult(response);
   }
 
@@ -647,7 +648,8 @@ export class CodexAppServerClient implements
         ...(options.cursor ? { cursor: options.cursor } : {}),
         limit,
       } satisfies ThreadQueueListParams,
-    }, { retryOverload: true }).catch(rethrowThreadQueueError);
+    }, { retryOverload: true, ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) })
+      .catch(rethrowThreadQueueError);
     const page = toThreadQueuePage(response);
     if (page.items.length > limit) {
       throw new Error("Codex Queue 列表响应超过请求页大小");
@@ -659,6 +661,7 @@ export class CodexAppServerClient implements
     threadId: string,
     queuedSubmissionId: string,
     text: string,
+    beforeSubmit?: () => void,
   ): Promise<ThreadQueueItem> {
     const response = await this.rpc.request<ThreadQueueUpdateResponse>({
       method: "thread/queue/update",
@@ -667,31 +670,37 @@ export class CodexAppServerClient implements
         queuedSubmissionId,
         input: toProtocolQueueText(text),
       } satisfies ThreadQueueUpdateParams,
-    }, { retryOverload: false }).catch(rethrowThreadQueueError);
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
     return toThreadQueueUpdateResult(response);
   }
 
   async deleteQueueItem(
     threadId: string,
     queuedSubmissionId: string,
+    beforeSubmit?: () => void,
   ): Promise<{ deleted: boolean }> {
     const response = await this.rpc.request<ThreadQueueDeleteResponse>({
       method: "thread/queue/delete",
       params: { threadId, queuedSubmissionId } satisfies ThreadQueueDeleteParams,
-    }, { retryOverload: false }).catch(rethrowThreadQueueError);
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
     return toThreadQueueDeleteResult(response);
   }
 
-  async reorderQueue(threadId: string, queuedSubmissionIds: string[]): Promise<void> {
+  async reorderQueue(
+    threadId: string,
+    queuedSubmissionIds: string[],
+    beforeSubmit?: () => void,
+  ): Promise<void> {
     await this.rpc.request<ThreadQueueReorderResponse>({
       method: "thread/queue/reorder",
       params: { threadId, queuedSubmissionIds } satisfies ThreadQueueReorderParams,
-    }, { retryOverload: false }).catch(rethrowThreadQueueError);
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
   }
 
   async startQueueItem(
     threadId: string,
     queuedSubmissionId?: string,
+    beforeSubmit?: () => void,
   ): Promise<{ turnId: string }> {
     const response = await this.rpc.request<ThreadQueueStartResponse>({
       method: "thread/queue/start",
@@ -699,7 +708,7 @@ export class CodexAppServerClient implements
         threadId,
         ...(queuedSubmissionId === undefined ? {} : { queuedSubmissionId }),
       } satisfies ThreadQueueStartParams,
-    }, { retryOverload: false }).catch(rethrowThreadQueueError);
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
     return toThreadQueueStartResult(response);
   }
 

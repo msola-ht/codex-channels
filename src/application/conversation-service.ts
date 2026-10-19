@@ -284,20 +284,22 @@ export interface ConversationExtensionUseCases {
 
 /** Stable native Queue and paginated Revert boundary. */
 export interface ConversationQueueRevertUseCases {
-  queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem>;
-  queueList(target: ConversationTarget, page?: number): Promise<ThreadQueueListResult>;
+  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem>;
+  queueList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadQueueListResult>;
   queueUpdate(
     target: ConversationTarget,
     selector: string,
     value: string,
+    assertAuthorized?: () => void,
   ): Promise<ThreadQueueItem>;
-  queueDelete(target: ConversationTarget, selector: string): Promise<{ deleted: boolean }>;
+  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<{ deleted: boolean }>;
   queueReorder(
     target: ConversationTarget,
     selector: string,
     position: number,
+    assertAuthorized?: () => void,
   ): Promise<ThreadQueueReorderResult>;
-  queueStart(target: ConversationTarget, selector?: string): Promise<{ turnId: string }>;
+  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void): Promise<{ turnId: string }>;
   revertList(target: ConversationTarget, page?: number): Promise<ThreadRevertListResult>;
   revertPreview(
     target: ConversationTarget,
@@ -901,36 +903,38 @@ export class ConversationService implements
     return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized);
   }
 
-  queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem> {
-    return this.queueUseCases.add(target, value);
+  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem> {
+    return this.queueUseCases.add(target, value, assertAuthorized);
   }
 
-  queueList(target: ConversationTarget, page = 1): Promise<ThreadQueueListResult> {
-    return this.queueUseCases.list(target, page);
+  queueList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadQueueListResult> {
+    return this.queueUseCases.list(target, page, assertAuthorized);
   }
 
   queueUpdate(
     target: ConversationTarget,
     selector: string,
     value: string,
+    assertAuthorized?: () => void,
   ): Promise<ThreadQueueItem> {
-    return this.queueUseCases.update(target, selector, value);
+    return this.queueUseCases.update(target, selector, value, assertAuthorized);
   }
 
-  queueDelete(target: ConversationTarget, selector: string): Promise<{ deleted: boolean }> {
-    return this.queueUseCases.delete(target, selector);
+  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<{ deleted: boolean }> {
+    return this.queueUseCases.delete(target, selector, assertAuthorized);
   }
 
   queueReorder(
     target: ConversationTarget,
     selector: string,
     position: number,
+    assertAuthorized?: () => void,
   ): Promise<ThreadQueueReorderResult> {
-    return this.queueUseCases.reorder(target, selector, position);
+    return this.queueUseCases.reorder(target, selector, position, assertAuthorized);
   }
 
-  queueStart(target: ConversationTarget, selector?: string): Promise<{ turnId: string }> {
-    return this.queueUseCases.start(target, selector);
+  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void): Promise<{ turnId: string }> {
+    return this.queueUseCases.start(target, selector, assertAuthorized);
   }
 
   revertList(target: ConversationTarget, page = 1): Promise<ThreadRevertListResult> {

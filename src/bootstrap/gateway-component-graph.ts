@@ -1049,7 +1049,12 @@ export abstract class GatewayComponentGraph {
       const workspace = this.workspaces.require(status.workspaceId);
       return JSON.stringify([workspace.id, workspace.cwd, status.threadId]);
     });
-    const commands = new ConversationCommandService(service, scheduledTaskUseCases, channelResetCredits);
+    const commands = new ConversationCommandService(service, scheduledTaskUseCases, channelResetCredits, (target, actorId) => {
+      this.requireRunning();
+      if (!actorId || !this.accessPolicy(target)?.isAllowed({ target, actorId })) {
+        throw new UserFacingError("command.authorization-changed", "当前命令操作者未获授权");
+      }
+    });
     const constructedSurfaces = new Set<SurfaceAdapter>();
     this.surfaceModules = createSurfaceModules({
       config,

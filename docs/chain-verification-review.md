@@ -148,7 +148,8 @@ Astra 已对基线 `1b198105` 上的初稿完成只读文档审查，确认四�
 
 ### L03 Actor、Workspace 与异步授权
 
-状态：进行中。L03-F1/F2 已修复，命令链 L03-F3 尚待修复与验收，不能视为整项通过。
+状态：进行中。L03-F1/F2 已在 `6032c7a1` 提交；L03-F3 的命令身份与 Queue 子链已修复，
+其他命令链尚待修复与验收，不能视为整项通过。
 基线 `15e3322b`。主代理检查 Registry、Router、Application、Client 与热加载分类；
 Sol 子代理只读检查三个 Surface 到 Application 的输入授权，并负责限定四个 Surface 文件的授权传递修复。
 
@@ -156,7 +157,7 @@ Sol 子代理只读检查三个 Surface 到 Application 的输入授权，并负
 | --- | --- | --- |
 | L03-F1 失效工作区静默回退 | 保存的 Workspace ID 已移除，`Router.workspace` 自动改选默认目录，后续请求改变执行范围 | 改为 `workspace.missing` 且不改原选择；列表只读显示保存的 ID，显式选择有效项后恢复 |
 | L03-F2 普通输入授权丢失 | 聚合回调丢弃 Actor；下载、锁等待或 Provider/图片准备期间撤权，旧请求仍可提交 | 批次保留 Actor，三个渠道五处普通提交传实时授权；Application 固定 Workspace 并在锁内复核，Thread 新建/恢复及 Turn start/steer 保留最终守卫；迟到新订阅清理，不写回失效绑定 |
-| L03-F3 命令授权未贯穿 | 部分 Telegram 按钮未传 Actor，通用命令即使传 Actor 也未统一约束后续等待、RPC 和本地偏好写入 | 待处理；须逐个关联 Queue、模型选择、恢复/接管等副作用与补偿，不能用入口一次检查代替 |
+| L03-F3 命令授权未贯穿 | 部分 Telegram 按钮未传 Actor，通用命令即使传 Actor 也未统一约束后续等待、RPC 和本地偏好写入 | 入口与按钮强制传 Actor，组合根注入实时策略；Queue 贯穿接收、锁、读取及每次 RPC；模型选择、恢复/接管等副作用与补偿仍待处理 |
 
 **已观察的隔离路径。** 使用生产 Router、内存 BindingStore、Application 和指定注入端口，无真实用户数据：
 
@@ -172,6 +173,24 @@ Sol 子代理只读检查三个 Surface 到 Application 的输入授权，并负
   不发送平台消息、不调用真实模型。
 - 生产 Router 的新建请求已发出后才撤权：受控响应返回时执行一次新订阅取消，返回撤权错误，
   BindingStore 无新绑定。没有重发创建或删除官方 Thread。
+
+**命令身份与 Queue 子链。** Astra 对代表性 Queue、模型选择和恢复/接管给出只读设计评估；
+确认应显式传递授权闭包，并把后续新副作用与已提交结果结算、生命周期补偿分开。
+Sol 实现 Queue Service/Port/Client/RPC 四文件，主代理实现命令入口、组合根和 Surface Actor 传递，
+核对合并 diff 并运行统一类型/边界检查及构建，均通过。
+
+- 主代理经生产 CommandService→ConversationService→QueueService，使用隔离 Queue 端口执行
+  `queue add` 再 `queue list`，结果含同一 `q1`、正文和数字选择器；撤权后 add 被拒绝，条目数仍为 `1`，
+  空 Actor 同样被 `command.authorization-changed` 拒绝。
+- Sol 直接运行当前源码 Service→Client→JSON-RPC，使用内存 Transport：列表响应期间撤权或切换 Thread，
+  分别阻止 update/delete 的后续 RPC；首次列表收到 `-32001` 后撤权，没有第二次发送。
+- 六种 Queue 请求在会话锁等待期间切换 Thread，全部拒绝，端口调用数 `0`。
+- 更新 RPC 已发送后撤权，生产 Queue Service 仍返回实际更新条目，保留快照失效处理，不重发或回滚；
+  命令结果出口会再次检查 Actor，拒绝展示时明确提示已提交操作不会自动撤销，应重新查询。
+
+以上是隔离生产入口观察，没有真实平台投递、真实 Provider 启动或 App Server Queue 服务的观察。
+命令入口和结果出口的检查不等于其他命令内部已安全；下一步仍在 L03 处理模型偏好、会话生命周期、
+其他写命令与只读结果的等待边界，再核对异步交互输入，完成后才进入 L02。
 
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。

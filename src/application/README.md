@@ -21,6 +21,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
 
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
+  命令和模型/审批按钮必须传原 Actor，由组合根注入当前 Surface 账号策略；缺少授权实现失败关闭。
+  Queue 命令把当前 Workspace 作用域的授权闭包传到锁、选择器和最终请求边界，拒绝后不自动撤销已提交写入。
   按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。
   `/autoreview [on|off]` 查询或修改当前 Thread 实际审批方式；审批方式不受本地 Provider 与模型白名单限制；`selectAutoReview` 的按钮固定原 Thread ID，由会话用例在锁内复核。
   会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；
@@ -65,6 +67,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   与主会话生命周期共用同一实例。
 - `thread-queue-service.ts`：维护原生 Thread Queue 的增删改查、启动、分页选择快照、错误映射和待生效设置冲突检查；
   不负责 Thread 绑定切换或后台释放。
+  用户命令固定接收时的 Thread，异步读取与提交前复核 Actor、Workspace 和 Thread；写入响应仍正常结算，
+  不因后续撤权重发或回滚。内部生命周期查询继续使用其所属生命周期约束。
 - `thread-revert-service.ts`：维护分页历史选择快照、一次性确认令牌、Queue 指纹与执行前并发复核；
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
