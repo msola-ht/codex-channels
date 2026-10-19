@@ -274,11 +274,21 @@ export async function runGatewayProcess(): Promise<void> {
         && weixinCredentialChange !== undefined
         && await weixinCredentialChange() === "changed";
       if (stopping) return;
-      const result = application.reloadConfig(
-        next.config,
-        applicableEvents.map((event) => event.workspace),
-        credentialsChanged,
-      );
+      let result: ReturnType<GatewayApplication["reloadConfig"]>;
+      try {
+        result = application.reloadConfig(
+          next.config,
+          applicableEvents.map((event) => event.workspace),
+          credentialsChanged,
+        );
+      } catch (error) {
+        // Applying a validated config can already have changed access policies
+        // before a later persistence operation fails. Do not keep serving with
+        // consumers that no longer match the configuration snapshot.
+        logger.error({ err: error }, "Gateway 配置应用失败，运行状态可能已部分更新；停止 Gateway");
+        stop(1);
+        return;
+      }
       if (result.action === "reinstall") {
         logger.error(
           { changes: result.changes.map((change) => change.code) },
