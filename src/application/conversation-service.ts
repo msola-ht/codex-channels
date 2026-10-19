@@ -231,8 +231,8 @@ export interface ConversationTurnUseCases {
   setPinned(target: ConversationTarget, pinned: boolean, assertAuthorized?: () => void): Promise<boolean>;
   compact(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
   fork(target: ConversationTarget, assertAuthorized?: () => void): Promise<string>;
-  togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState>;
-  startPlan(target: ConversationTarget, prompt: string): Promise<Submission>;
+  togglePlanMode(target: ConversationTarget, assertAuthorized?: () => void): Promise<CollaborationModeState>;
+  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void): Promise<Submission>;
   review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void): Promise<Submission>;
   getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null>;
   setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal>;
@@ -1406,21 +1406,22 @@ export class ConversationService implements
     });
   }
 
-  togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState> {
-    return this.withGuardedSelection(target, () => this.requireCollaborationModes().toggle(target));
+  togglePlanMode(target: ConversationTarget, assertAuthorized?: () => void): Promise<CollaborationModeState> {
+    return this.withGuardedSelection(target, () => this.requireCollaborationModes().toggle(target, assertAuthorized), assertAuthorized);
   }
 
-  startPlan(target: ConversationTarget, prompt: string): Promise<Submission> {
+  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void): Promise<Submission> {
     const normalized = prompt.trim();
     if (!normalized) {
       return Promise.reject(new UserFacingError("plan.prompt.empty", "Plan 需求不能为空"));
     }
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target);
-      await this.requireCollaborationModes().select(target, "plan");
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const beforeSelection = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized, true);
+      beforeSelection();
+      await this.rejectQueueWhenPendingOverrideChanges(target, beforeSelection);
+      await this.requireCollaborationModes().select(target, "plan", beforeSelection);
       try {
-        await this.rejectQueueWhenPendingOverrideChanges(target);
+        await this.rejectQueueWhenPendingOverrideChanges(target, beforeSelection);
       } catch (error) {
         this.clearPendingSelections(target);
         throw error;
@@ -1429,6 +1430,9 @@ export class ConversationService implements
         target,
         [{ type: "text", text: normalized }],
         `${gatewayUserMessageClientIdPrefix}${randomUUID()}`,
+        undefined,
+        undefined,
+        assertAuthorized,
       );
     });
   }
@@ -1679,7 +1683,9 @@ export class ConversationService implements
     assertAuthorized?: () => void,
   ): Promise<Submission> {
     this.touchActivity(target);
-    const binding = await this.ensureSession(target, true, assertAuthorized);
+    const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
+    const binding = await this.ensureSession(target, true, beforePrepare);
+    const beforeSubmit = this.commandThreadGuard(target, binding.threadId, assertAuthorized);
     // Subscription restoration can publish an active Turn while ensure waits.
     // Do not start a new Turn using the idle decision made before that await.
     if (this.core.activeTurn(target)) {
@@ -1710,7 +1716,7 @@ export class ConversationService implements
         input,
         clientUserMessageId,
         workspace.cwd,
-        { ...overrides, beforeSubmit: () => { assertAuthorized?.(); assertCurrent?.(binding.threadId); } },
+        { ...overrides, beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); } },
       );
     } catch (error) {
       this.recordTurnError("start", target, binding.threadId, null, error);

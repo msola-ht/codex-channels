@@ -235,7 +235,6 @@ Sol 的补充生产入口观察覆盖锁等待期间切换 Thread、第一页返
 **剩余命令清单。** 独立 Sol 只读追踪后确认以下仍需修复与观察，不能由已完成子链推定通过：
 
 - Skill/Plugin/Agent：解析目录和锁等待后的 Turn 提交，以及原 Thread 变化。
-- Plan：等待后保存模式偏好及带参数 Plan 的 Turn 提交。
 - MCP login/reload/resource：目录与 Provider 准备后的新请求、捕获 Thread 归属。
 - Hooks/Schedule/重置券和异步交互的独立授权合同，以及普通只读查询内部的分页/Provider 等待。
 
@@ -260,6 +259,13 @@ Sol 内联运行生产输出准入→ProviderRoutingClient→Client→JSON-RPC�
 pin/Goal 读取的首个过载响应后撤权均阻止重试；输出准入等待撤权不发送 compact，Provider 准备等待撤权不发送 rename。
 已提交 rename 正常结算；三个原固定参数包装均保留最终守卫。捕获请求中没有本地 `beforeSubmit` 协议字段。
 这些证据来自隔离生产调用链，未连接真实 App Server、平台账号或执行跨操作系统路径。
+
+**Plan 子链（基线 `b95deca9`）。** 模式预设查询、模型读取和本地偏好保存贯穿守卫，并固定模式选择时的 Thread；
+带参数 Plan 的 Queue 复核和 Turn 发送继续传递守卫。共享新 Turn 入口固定准备前绑定，成功准备后核对实际新绑定。
+主代理运行生产 CommandService→ConversationService→CollaborationModeSelectionService、隔离模型/预设和 Turn 端口：
+正常切换返回 `mode=plan/pending=true`，无 Turn；正常带参数调用返回 `plan.started/plan-turn`、发送一次、待生效状态清空。
+模型读取期间撤权返回 `command.authorization-changed`，无偏好、无 Turn；发送等待期间撤权或 Thread 被替换，
+同样拒绝且发送为零，但此前授权有效时已保存的模式仍为待生效，不声称回滚。没有真实模型调用或平台交互观察。
 
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。

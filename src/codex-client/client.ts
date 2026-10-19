@@ -335,11 +335,11 @@ export class CodexAppServerClient implements
     return activeThreadIds.size;
   }
 
-  async listCollaborationModes(): Promise<CollaborationModePreset[]> {
+  async listCollaborationModes(beforeSubmit?: () => void): Promise<CollaborationModePreset[]> {
     const response = await this.rpc.request<CollaborationModeListResponse>({
       method: "collaborationMode/list",
       params: {},
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return response.data.flatMap((preset) => {
       if (preset.mode !== "default" && preset.mode !== "plan") {
         return [];

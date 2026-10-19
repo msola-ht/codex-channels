@@ -728,7 +728,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "plan":
         if (argumentsText) {
-          const submission = await this.conversations.startPlan(target, argumentsText);
+          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized);
           return {
             kind: "outcome",
             outcome: { type: "plan.started", turnId: submission.turnId },
@@ -736,7 +736,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
         return {
           kind: "collaboration-mode",
-          state: await this.conversations.togglePlanMode(target),
+          state: await this.conversations.togglePlanMode(target, assertAuthorized),
         };
       case "goal":
         return this.goal(target, argumentsText, assertAuthorized);
