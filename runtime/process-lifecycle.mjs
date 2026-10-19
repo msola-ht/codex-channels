@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 // Only children spawned as detached process-group leaders may be registered.
 // Callers check that the leader is still running before signaling its group.
-const childProcessGroups = new WeakSet();
+const childProcessGroups = new WeakMap();
 
 // Control readiness is separate from service readiness: even a starting service
 // must be able to accept cancellation. Parents retain commands until this handshake.
@@ -150,7 +150,7 @@ export function registerChildProcessGroup(child) {
   if (process.platform === "win32") {
     throw new Error("独立子进程组只支持 Unix");
   }
-  childProcessGroups.add(child);
+  childProcessGroups.set(child, { pid: child.pid, exited: false });
 }
 
 export class ReportedChildExitError extends Error {
@@ -211,6 +211,32 @@ export async function terminateChildProcess(child, {
   gracePeriodMs = 5_000,
   forcePeriodMs = 1_000,
 } = {}) {
+  const group = childProcessGroups.get(child);
+  if (group) {
+    if (group.exited) return;
+    if (group.pid === undefined) { group.exited = true; return; }
+    // Only a still-owned, live leader permits signaling. Once it exits, the
+    // numeric group ID may be reused: subsequent checks must stay read-only.
+    if (childProcessIsRunning(child)) {
+      signalChildProcess(child, "SIGTERM");
+      await childExitedWithin(child, gracePeriodMs);
+      if (childProcessIsRunning(child)) signalChildProcess(child, "SIGKILL");
+    }
+    const deadline = Date.now() + forcePeriodMs;
+    if (!(await childExitedWithin(child, forcePeriodMs))) {
+      throw new Error("自有进程组的组长尚未退出");
+    }
+    while (true) {
+      try { process.kill(-group.pid, 0); }
+      catch (error) {
+        if (error?.code !== "ESRCH") throw error;
+        group.exited = true;
+        return;
+      }
+      if (Date.now() >= deadline) throw new Error("自有进程组清理未确认，保留资源归属");
+      await new Promise(resolve => setTimeout(resolve, Math.min(20, deadline - Date.now())));
+    }
+  }
   if (!childProcessIsRunning(child)) return;
   if (process.platform === "win32") {
     const signaled = signalWindowsProcessTree(child, false);

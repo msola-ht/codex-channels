@@ -2,9 +2,9 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   chmodSync,
   closeSync,
+  fstatSync,
   lstatSync,
   linkSync,
-  mkdirSync,
   openSync,
   unlinkSync,
   writeFileSync,
@@ -16,7 +16,7 @@ import { basename, dirname, join } from "node:path";
 import {
   readPrivateFileSync,
   readPrivateConfigFile,
-  securePrivateDirectorySync,
+  ensurePrivateDirectorySync,
   securePrivateFileSync,
 } from "./private-file.mjs";
 
@@ -28,6 +28,7 @@ const tokenPattern = /^[a-f0-9]{64}$/u;
 
 export class PrivateIpcServer {
   #descriptorIdentity;
+  #descriptorPublished = false;
   #descriptor;
   #logicalPath;
   #server;
@@ -71,8 +72,7 @@ export class PrivateIpcServer {
   }
 
   async #start(occupiedMessage) {
-    mkdirSync(dirname(this.#logicalPath), { recursive: true, mode: 0o700 });
-    securePrivateDirectorySync(dirname(this.#logicalPath));
+    ensurePrivateDirectorySync(dirname(this.#logicalPath));
     if (process.platform === "win32") {
       await this.#startWindows(occupiedMessage);
       return;
@@ -133,13 +133,18 @@ export class PrivateIpcServer {
         continue;
       }
       try {
+        const status = fstatSync(descriptor);
+        this.#descriptorIdentity = { dev: status.dev, ino: status.ino };
         writeFileSync(descriptor, `${JSON.stringify(this.#descriptor)}\n`, "utf8");
       } finally {
         closeSync(descriptor);
       }
       securePrivateFileSync(this.#logicalPath);
       const status = lstatSync(this.#logicalPath);
-      this.#descriptorIdentity = { dev: status.dev, ino: status.ino };
+      if (!status.isFile() || status.dev !== this.#descriptorIdentity.dev || status.ino !== this.#descriptorIdentity.ino) {
+        throw new Error("Windows 私有 IPC 描述文件在发布期间发生变化");
+      }
+      this.#descriptorPublished = true;
       return;
     }
     throw new Error("Windows 私有 IPC 端点竞争失败");
@@ -168,6 +173,7 @@ export class PrivateIpcServer {
         this.#logicalPath,
         this.#descriptorIdentity,
         this.#descriptor,
+        this.#descriptorPublished,
       );
       return;
     }
@@ -435,10 +441,16 @@ function unlinkOwnedUnixEndpoint(path, identity) {
   }
 }
 
-function unlinkOwnedWindowsDescriptor(path, identity, descriptor) {
+function unlinkOwnedWindowsDescriptor(path, identity, descriptor, published) {
   if (!identity || !descriptor) return;
   const status = lstatSync(path, { throwIfNoEntry: false });
   if (status?.dev !== identity.dev || status.ino !== identity.ino) return;
+  if (!published) {
+    // A failed write or ACL operation may leave an unreadable descriptor. Only
+    // remove the regular file created by this attempt, never a replacement.
+    if (status.isFile()) unlinkSync(path);
+    return;
+  }
   const current = readWindowsDescriptor(path);
   if (current.pipe === descriptor.pipe && sameToken(current.token, descriptor.token)) {
     unlinkSync(path);

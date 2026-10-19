@@ -40,6 +40,7 @@ const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 4_096;
 const connectionTimeoutMs = 1_000;
 const providerIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
+const failedHealthCheckProxies = new Set();
 
 export class AppServerSupervisorOwner {
   #server;
@@ -479,16 +480,23 @@ export class AppServerSupervisorOwner {
   close() {
     if (!this.#closePromise) {
       this.#closing = true;
-      this.#closePromise = this.#closeInternal();
+      const closing = this.#closeInternal().catch(error => {
+        if (this.#closePromise === closing) this.#closePromise = undefined;
+        throw error;
+      });
+      this.#closePromise = closing;
     }
     return this.#closePromise;
   }
 
   async #closeInternal() {
     for (const socket of this.#sockets) socket.destroy();
-    await this.#server.close();
-    await Promise.allSettled([this.#desktopAppOperation]);
-    await Promise.allSettled([...this.#providerOperations.values()]);
+    try {
+      await this.#server.close();
+    } finally {
+      await Promise.allSettled([this.#desktopAppOperation]);
+      await Promise.allSettled([...this.#providerOperations.values()]);
+    }
   }
 }
 
@@ -901,12 +909,14 @@ export async function appServerSocketAcceptsWebSocket(socketPath, environment = 
       clearTimeout(timer);
       socket.removeAllListeners();
       socket.once("error", () => undefined);
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.close();
-      } else {
-        socket.terminate();
+      if (socket.readyState === WebSocket.CLOSED) {
+        resolveCheck(healthy);
+        return;
       }
-      resolveCheck(healthy);
+      // A health check owns only this disposable connection. Do not leave a
+      // close handshake alive beyond the check's lifetime when a peer stalls.
+      socket.once("close", () => resolveCheck(healthy));
+      socket.terminate();
     };
     const timer = setTimeout(() => finish(false), 1_500);
     socket.once("open", () => finish(true));
@@ -1019,6 +1029,12 @@ function preserveStaleSocket(socketPath) {
 }
 
 async function windowsAppServerProxyAcceptsWebSocket(socketPath, environment) {
+  const cleanup = await Promise.allSettled([...failedHealthCheckProxies].map(async child => {
+    await stopProxyChild(child);
+    failedHealthCheckProxies.delete(child);
+  }));
+  const failures = cleanup.filter(result => result.status === "rejected").map(result => result.reason);
+  if (failures.length > 0) throw new AggregateError(failures, "先前的健康检查 Proxy 尚未退出");
   const invocation = codexProcessInvocation(
     environment.CODEX_BINARY || "codex",
     ["app-server", "proxy", "--sock", socketPath],
@@ -1050,7 +1066,12 @@ async function windowsAppServerProxyAcceptsWebSocket(socketPath, environment) {
       socket.terminate();
       connection.destroy();
       void stopProxyChild(child).then(() => resolveCheck(healthy), (error) => {
-        // Cleanup failure is observable, but must not keep the checking CLI alive.
+        // Keep the failed owner for subsequent checks. A short-lived CLI can
+        // still exit; its native parent/Job owns the final process-tree cleanup.
+        if (child.exitCode === null && child.signalCode === null) {
+          failedHealthCheckProxies.add(child);
+          child.once("exit", () => failedHealthCheckProxies.delete(child));
+        }
         child.stderr.destroy();
         child.unref();
         rejectCheck(error);

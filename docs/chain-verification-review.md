@@ -1068,3 +1068,60 @@ Telegram 名单及变更时区均分类为 `restart`；二进制路径及代理�
 **限制与交付。** 未重跑浏览器竞态、全部设置组合及交互菜单，没有实际用户配置重载、平台连接或
 Windows/macOS 运行观察。全部任务子进程和 HTTP/IPC 已结束，临时材料已清理；没有新增测试、脚本或
 文档。仅修复生命周期失败分流，同步 Bootstrap 职责与用户排障说明；提交门禁另行记录，下一项 L12。
+
+### L12 服务、Worker、Socket 与嵌套退出
+
+**状态：已审查（附证据限制）。** L11 已提交 `d80b9a29`，类型、边界、Lint、文档及构建门禁通过（11.7 秒）。
+本项按启动→就绪→取消/故障→嵌套清理→退出核对资源所有权，复用 U07/U11/U16/U17 未变化证据；
+重点补初始化中停止、清理失败、超时与私有路径替换，不启动用户服务、不终止共享 App Server。
+
+**已确认问题与修复。**
+
+- L12-F1：GatewayOwner 的 `runtime` 为链接时仍可发布就绪并 chmod 目标；共享 PrivateIpcServer
+  改用既有 `ensurePrivateDirectorySync`，校验最终目录类型/属主后收紧。安装入口同类用法留到 L14
+  沿其实际合同复核。正常目录可继续创建，Delivery 自有更严格预检保留。
+- L12-F2：Windows 独占创建描述文件后，写入/ACL 失败发生在登记身份之前，清理会遗漏本次文件。
+  现从已打开描述符登记身份，区分未发布清理和已发布的 token/身份保护；Windows 实机观察尚缺。
+- L12-F3：Supervisor 端点清理异常跳过在途操作等待，且永久缓存失败关闭结果。已改为 finally 排空，
+  失败后允许重试清理但仍拒绝重新启动。真实私有 IPC 发起阻塞 ensure，将任务目录暂替普通文件：
+  关闭仍等待工作，解除后返回 ENOTDIR；恢复目录后取得新的关闭 Promise 并成功删除端点，start 仍拒绝。
+- L12-F4：Unix WebSocket 健康检查成功即返回，仅发 close，慢对端留下默认约 30 秒握手。已改为
+  terminate 并等待 close；本机私有 UDS 的不响应关闭对端，修复后 `healthy=true` 且连接数为 0。
+- L12-F5：生产 Desktop Host 的自有 Unix 组中，组长收到 TERM 退出后，忽略 TERM 的后代仍存活，
+  `terminateChildProcess` 却返回成功。Sol 复现后由 Astra 独立评估组长寿命、PGID 重用及僵尸语义，
+  主代理采用仍存活的 Host 在原生退出时强杀自身组的方案；原生状态先记日志，Host 可见状态改为 SIGKILL。
+  终止器只对存活组长发信号，随后有界只读确认组消失；组长已退出不向旧 PGID 发信号，成功缓存，
+  未确认保留实例及其 Proxy 归属。普通非组子进程行为不改。此方案不终止主动脱离专属组的进程。
+- L12-F6：Windows 健康探测 Proxy 关闭失败后原来只 unref，没有同进程重试归属。现保留失败对象，
+  下次探测先等待清理，失败不再新建，exit 才解除登记；短命 CLI 的最终退出仍依赖既有原生 Job。
+  此边界为源码确认，尚无 Windows helper 关闭失败的实机观察。
+
+**已有补充观察。** Gateway 生产 start/stop 配合隔离组件，在初始化等待时停止，start 拒绝“正在停止”，
+后续 prepareStore 没有执行；重复 stop 返回同一 Promise。Surface 关闭注入异常后仍执行指标、输出、
+Client、Binding 与计划存储清理，最终报告资源未完全关闭；正常场景关闭成功。此处是生产生命周期
+与隔离端口控制流观察，不是实际 SDK/服务停机。U07 单读取 Worker 实现自 `8b5d8414` 未变，复用其
+真实 Worker 初始化取消、重复 close、资源归零证据，Windows 嵌套 ACL 退出仍只具源码证据。
+
+**路径与进程实测。** 主代理对修复后的 GatewayOwner 观察链接父目录被拒绝，链接目标保持 0755、
+没有新文件；正常 Owner 可就绪且关闭无残留。Sol 的私有 JSON 交换得到 usable，Socket 为 0600；
+公开端点被替换为普通文件后关闭保留 replacement，启动中立即关闭拒绝启动且没有残留，陈旧 Socket
+可以恢复，普通文件与任意 rendezvous 目标被拒绝。无响应请求返回 unconfirmed，预取消连接返回
+AbortError；这些未变化路径的证据保留，不推断真实平台成功。
+
+主代理直接调用修复后的生产 Desktop Host 入口，以自有 Node 代替原生 Codex，在 Linux 上观察：
+普通停止、忽略 TERM 的后代、原生进程自然 exit=0，均得到组清理 confirmed，相关 `/proc` 进程消失；
+Host 为 SIGKILL，日志保留原生 SIGTERM 或 exit=0，重复终止完成。另先外部强杀任务 Host、保留原生
+子进程，终止器明确返回“进程组清理未确认”，没有追杀旧 PGID，原生子进程仍在；随后任务按已捕获
+PID 和启动身份清理，确认进程消失。该观察覆盖 Unix 算法，不等于 macOS 签名 Host 实机验收。
+
+**所有权关联覆盖。** Sol 分别审查私有路径/IPC 和监管/进程退出，主代理整合后核对最终实现。
+Supervisor 正常停止等待在途 ensure、拒绝第二项排队工作、关闭后拒绝 start；服务失败清理以终止
+确认结果保留 children/Provider/Proxy，不能只看组长 exit。Gateway 只关闭 Client 连接，Windows
+临时 Transport 只拥有自己的 proxy；共享 App Server 的进程归独立服务所有。Windows 服务 Host
+发送停止后仍观察 exit，原生 helper 通过父进程句柄、创建时间和 Job 保有最终回收职责；这些属于
+源码覆盖，没有运行 Windows 服务。两类 IPC 的 EOF/换行、预算和错误分类差异继续保留。
+
+**限制与交付。** Windows 描述文件写入/ACL 失败清理和健康 Proxy 失败后重试均未实机观察；
+Windows helper/Job、macOS 签名 Host、三平台正式服务管理器停机均未运行。组存在性观察遇到僵尸或
+组号复用会保守报未确认，不将其当作可以追杀的证据。所有任务自有进程、HTTP/UDS 与临时目录已清理；
+没有测试、探针脚本、新依赖或真实用户资源操作。修复及证据同步 Runtime 职责文档，下一项 L13。
