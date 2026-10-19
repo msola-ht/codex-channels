@@ -282,10 +282,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
             providerCatalogIsolationPath(runtime.environment),
           ],
         })
-        : upstreamProvider !== "openai" && officialCatalogPath
-          ? new ProviderModelGuard(officialCatalogPath, model => typeof model === "string" && model.length > 0,
-            { maximumBytes: 8_388_608 })
-          : undefined;
+        // Codex 兼容 Provider 共用的官方目录只读，不含可配置的第三方扩展能力声明。
+        // 保留其工具透传及上游策略，不能把官方字段缺失当作第三方明确禁用。
+        : undefined;
     if (modelGuard) ownedResources.add(modelGuard);
     // 官方 OpenAI 端点理解 Codex 私有输入项；自定义固定 Provider 复用 openai 路由键但换成第三方上游。
     // 聚合快照可能派生带摘要的代理键，固定自定义 Provider 则复用 openai 路由键。

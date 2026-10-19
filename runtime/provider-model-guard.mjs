@@ -6,12 +6,11 @@ export class ProviderModelGuard {
   #controller = new AbortController();
   #pending = new Set();
 
-  constructor(path, isModelValid, { parseCatalog = JSON.parse, blockedPaths = [], maximumBytes = 2_097_152 } = {}) {
+  constructor(path, isModelValid, { parseCatalog = JSON.parse, blockedPaths = [] } = {}) {
     this.path = path;
     this.isModelValid = isModelValid;
     this.parseCatalog = parseCatalog;
     this.blockedPaths = [...blockedPaths];
-    this.maximumBytes = maximumBytes;
   }
 
   async assertNoPendingWrite(signal) {
@@ -29,7 +28,7 @@ export class ProviderModelGuard {
 
   async readCatalog(signal) {
     await this.assertNoPendingWrite(signal);
-    const content = await readPrivateConfigFile(this.path, { signal, maximumBytes: this.maximumBytes });
+    const content = await readPrivateConfigFile(this.path, { signal, maximumBytes: 2_097_152 });
     await this.assertNoPendingWrite(signal);
     return content;
   }

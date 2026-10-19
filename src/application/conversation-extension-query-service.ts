@@ -359,8 +359,12 @@ export class ConversationExtensionQueryService {
   }
 
   pluginProvider(target: ConversationTarget): string {
-    return this.router.modelSettings(target)?.modelProvider
-      ?? this.models.status(target).modelProvider ?? "openai";
+    const provider = this.router.modelSettings(target)?.modelProvider
+      ?? this.models.status(target).modelProvider;
+    if (provider === undefined) {
+      throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
+    }
+    return provider;
   }
 
   async pluginHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<PluginHealthReport> {

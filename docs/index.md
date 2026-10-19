@@ -667,9 +667,10 @@ CLP 共用 Codex 目录由 [`cline-pass-account-management.mjs`](../scripts/clin
 依据锁定官方 `core/src/client.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs` 的请求、条目和事件合同，
 接受文本、用户内联图片、函数与自由格式工具、客户端 `tool_search`；工具结果里的内联图片不放进 Chat `tool` 消息，转成该组工具结果之后紧随的一条 `user` 消息图片段，并用相同的调用 ID 与图片序号标记关联原 `tool` 文本位置和图片；自由格式语法保留在 Chat 工具说明，CLP 模型目录声明 `apply_patch_tool_type: freeform` 与 `supports_search_tool`，检索结果按锁定 `tools/src/tool_search.rs` 的命名空间和 `defer_loading` 形态显式加载。`reasoning_content` 通过 `reasoning.content` 原文往返，Cline `reasoning` 通过摘要往返。图片沿用稳定 `UserInput.image` 与模型目录 `input_modalities`，不伪造加密推理或远程压缩语义；不完整终态保留已生成文本并拒绝执行部分工具调用。Chat 上游诊断通过请求级进程内回调写独立调用记录，不增加协议事件；HTTP 与流内错误经 [`chat-errors.ts`](../src/provider-proxy/chat-errors.ts) 映射为固定文案和白名单分类，`context_length_exceeded` 沿用锁定上游 SSE 的上下文错误语义。用户边界见 [`CLP`](cline-pass.md)。
 原生 Responses 推理回传
-第三方固定、切换和聚合入口按精确 Provider／模型声明原生网页搜索：Gateway 扩展字段 `supports_web_search`
+使用可编辑模型目录的第三方固定、切换和聚合入口按精确 Provider／模型声明原生网页搜索：Gateway 扩展字段 `supports_web_search`
 由 [`provider-model-guard.mjs`](../runtime/provider-model-guard.mjs) 同次目录读取交给 HTTP／WS 出站处理和 CLP Chat 桥，
 仅 true 放行已存在的 hosted `web_search`，不注入工具、不改历史或用户全局禁用。
+Codex 兼容 Provider 的共享官方目录只读，不应用此扩展声明守卫，保留工具透传和上游搜索策略。
 锁定 CLI 的 `ModelInfo` 没有该布尔；其 `web_search_tool_type` 只选形态，`supports_search_tool` 是客户端工具检索。
 [`third-party-model-catalog.mjs`](../runtime/third-party-model-catalog.mjs) 仅在运行投影中关闭 Responses Lite，
 启动同时关闭 standalone 搜索，确保使用模型 API 的 hosted 合同而非 OpenAI `/alpha/search`。

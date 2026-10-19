@@ -437,12 +437,15 @@
   不根据 OpenAI 登录状态自动选择第三方，不修改主配置。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；未显式选择时连接主实例，
   显式 Provider 通过共享映射选择相应 Socket 和规范 `sf-*` Profile，连接对应隔离实例并供 Remote TUI
-  完成第三方 Provider 认证；当前目录或显式 `--workspace` 只决定执行目录，第三方 Profile 不复制权限，
+  完成第三方 Provider 认证；CP 自定义目录 Provider 复用已验证的启动参数投影，不加载磁盘 Profile 中的
+  搜索禁用设置，凭据仅通过该 TUI 子进程的私有环境变量传入，磁盘 Profile 合同保持不变。
+  当前目录或显式 `--workspace` 只决定执行目录，第三方 Profile 不复制权限，
   不注入 Gateway 权限；原生显式参数与个人 Profile 由 Codex 自行处理；
   聚合选择复用共享 Runtime 拓扑与 Supervisor 按需租约，不生成磁盘 Profile；启动前通过已有
   Codex Client 读取服务端默认模型与目录，投影启动设置，避免本地 OpenAI 默认模型覆盖聚合目录。
   透传 `-m`/`--model` 或 `-c model=...` 选择目录内精确模型时，按 Codex 的最终模型优先级使用目标模型的默认思考等级；
   服务端默认模型保留服务端思考等级，显式 `-c model_reasoning_effort=...` 优先，并尊重 `--` 参数边界。
+  CP 与聚合 Remote 均不注入 `web_search`，搜索模式沿用原生用户与项目配置及显式参数的优先级。
   自动审查沿用原生配置或用户显式设置，不按 Provider 或模型过滤、降级，也不为此固定请求模型。
   Remote 恢复及继承式分叉保留历史实际模型和 reviewer。
   聚合目录和 Provider 不允许由透传参数替换；

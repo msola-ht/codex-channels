@@ -63,7 +63,7 @@ Gateway 对已绑定、已订阅的第三方提供商会话启用重复思考保
 | --- | --- | --- |
 | Provider id | 小写字母/数字/`-`/`_`，1–64 位 | 决定 `sf-<id>.config.toml` Profile、`modelProvider`、环境变量名；受管账户材料位于 `providers/<家族>/<id>/`，自定义 CP 位于 `providers/<id>/` |
 | 显示名称 | 1–64 字符 | 出现在 `/model`、WebUI 与完成卡片 |
-| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 与上游接口为 `chat_completions` 的自定义第三方 Provider 使用 `model-api` 模块与 Chat 桥，不把 Chat 写入 Codex `wire_api`。转换覆盖 `function`、`namespace`、自由格式 `custom`、客户端 `tool_search` 与 multi-agent v2 的 `agent_message` 输入项；模型目录可用 `applyPatchToolType: freeform` 与 `supportsSearchTool` 开启自由格式 `apply_patch` 与客户端检索；未映射的顶层工具声明原样交给上游，不注册本地执行身份，也不承诺托管工具执行与回程；第三方 `wire_api = "responses"` 上游由 ProviderProxy 在提交前归一化 Codex 私有输入项，`agent_message` 降级为普通 `user` 消息、工具参数 schema 的 `encrypted` 布尔标记被删除，HTTP 与 Responses WS 一致，官方 OpenAI 端点保持原文透传；第三方原生网页搜索按精确模型声明放行 |
+| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 与上游接口为 `chat_completions` 的自定义第三方 Provider 使用 `model-api` 模块与 Chat 桥，不把 Chat 写入 Codex `wire_api`。转换覆盖 `function`、`namespace`、自由格式 `custom`、客户端 `tool_search` 与 multi-agent v2 的 `agent_message` 输入项；模型目录可用 `applyPatchToolType: freeform` 与 `supportsSearchTool` 开启自由格式 `apply_patch` 与客户端检索；未映射的顶层工具声明原样交给上游，不注册本地执行身份，也不承诺托管工具执行与回程；第三方 `wire_api = "responses"` 上游由 ProviderProxy 在提交前归一化 Codex 私有输入项，`agent_message` 降级为普通 `user` 消息、工具参数 schema 的 `encrypted` 布尔标记被删除，HTTP 与 Responses WS 一致，官方 OpenAI 端点保持原文透传；可编辑第三方目录的原生网页搜索按精确模型声明放行，共享官方只读目录保留工具透传与上游策略 |
 | WebSocket | 支持 / 不支持 | 不支持时必须显式声明 `supports_websockets = false` |
 | 认证 | 按 Provider 校验的 API Key | 编译期受管 Provider 的 Key 只进入子进程环境或专用私有凭据文件，不写入命令行、日志或 Gateway 配置 |
 | 模型目录来源 | 官方目录下载器 / `/models` / 审查后的 JSON | 与 DeepSeek 官方目录一致时可复用现有下载器 |
@@ -393,7 +393,7 @@ Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort =
 Codex 兼容 Provider 不接受用户自定义模型目录、第三方 `models.json` 或第三方 `/models` 刷新。服务启动时会用
 配置的 Codex CLI 执行 `debug models --bundled`，把 Codex 官方目录原子写入
 `~/.codex-connect/providers/custom/official-models.json`（0600），并通过 `model_catalog_json`
-注入固定/切换自定义 App Server；目录只随本机锁定的 Codex CLI 版本更新。
+注入固定/切换自定义 App Server；目录只随本机锁定的 Codex CLI 版本更新。该只读目录不接受第三方扩展能力声明，Codex 兼容 Provider 的原生网页搜索保留工具透传与上游策略，仍受用户全局搜索设置约束。
 自定义 Provider 切换模式可以与受管切换模式
 共存，但不能与任何受管固定模式同时启用。需要手填模型时使用下面的自定义提供商；需要账户能力时，仍按本指南前述的编译期
 受管 Provider 流程接入。
@@ -514,9 +514,9 @@ CLI／WebUI 设置入口；它们不同于用户的 `web_search` 偏好，也不
 
 已有自定义模型的 CLI 模型管理保留“探测单个模型的工具能力”入口：先选择精确模型，再分别决定是否探测 `apply_patch`、`tool_search`，只有明确选择才发起可能计费的请求。采用结果后仍须预览并确认保存，探测期间连接或目录变化会拒绝继续保存；原生网页搜索仍仅作诊断。
 
-原生网页搜索按模型文件显式声明：自定义定义使用可选布尔 `supportsWebSearch`，编译目录及受管目录使用 `supports_web_search`。省略为未知，false 为不支持，true 为支持；持久文件不接受 null。CLI 模型管理与 WebUI 行操作提供三态声明，预览中的 null 仅表示删除字段。保存复用既有修订、备份和事务回读；受管家族共用目录，预览列出全部影响账户。共享官方目录不提供第三方声明编辑，需独立声明时使用自定义目录。旧 CP v5 未声明字段时编译字节不变，读取不自动迁移；新增字段后若回退旧程序，先恢复保存前的目录备份。未完成事务须按原恢复流程处理，不能删除 pending 绕过检查。
+可编辑的第三方模型目录按模型文件显式声明原生网页搜索：自定义定义使用可选布尔 `supportsWebSearch`，编译目录及受管目录使用 `supports_web_search`。省略为未知，false 为不支持，true 为支持；持久文件不接受 null。CLI 模型管理与 WebUI 行操作提供三态声明，预览中的 null 仅表示删除字段。保存复用既有修订、备份和事务回读；受管家族共用目录，预览列出全部影响账户。Codex 兼容 Provider 的共享官方目录只读，不应用该声明过滤，沿用工具透传与上游策略；需独立声明时使用自定义目录。旧 CP v5 未声明字段时编译字节不变，读取不自动迁移；新增字段后若回退旧程序，先恢复保存前的目录备份。未完成事务须按原恢复流程处理，不能删除 pending 绕过检查。
 
-App Server 的第三方固定、切换、聚合入口在每次出站时按当前 Provider 和精确模型读取该声明：只有 true 保留已有的顶层 `web_search`，false 或未知删除该工具。强制选择被禁用的搜索，或过滤后没有工具却要求必须调用时，明确拒绝请求；同名函数、MCP 工具和 Responses 历史 `web_search_call` 不删除。声明不会注入工具，用户全局 `web_search="disabled"` 仍然有效。源目录不变，临时运行投影使用普通 Responses 工具编码（`use_responses_lite=false`），实例关闭 `features.standalone_web_search`，防止切换到独立 `/alpha/search` 执行器。CP Profile 的内部 `web_search="disabled"` 字段保留原有磁盘合同，但受管启动不再将其作为搜索策略注入；用户主配置中的搜索偏好照常消费。
+App Server 使用可编辑第三方目录的固定、切换、聚合入口在每次出站时按当前 Provider 和精确模型读取该声明：只有 true 保留已有的顶层 `web_search`，false 或未知删除该工具。强制选择被禁用的搜索，或过滤后没有工具却要求必须调用时，明确拒绝请求；同名函数、MCP 工具和 Responses 历史 `web_search_call` 不删除。声明不会注入工具，用户全局 `web_search="disabled"` 仍然有效。源目录不变，临时运行投影使用普通 Responses 工具编码（`use_responses_lite=false`），实例关闭 `features.standalone_web_search`，防止切换到独立 `/alpha/search` 执行器。CP Profile 的内部 `web_search="disabled"` 字段保留原有磁盘合同，但 App Server 及选择 CP 的 `codexc remote` 均复用受控启动参数与子进程凭据环境，不再将其作为搜索策略注入；CP 与聚合 Remote 的搜索模式沿用原生用户、项目配置和显式参数的优先级。
 
 声明需按预览提示重启 App Server 才完整激活；操作不自动重启。HTTP、Responses WebSocket 和 Chat 桥复用该策略，官方 OpenAI 与独立 Model Relay 保留自己的合同。Chat 对放行的 hosted 声明仅透传，尚无原生 `web_search_call` 回程映射，包含这种历史的跨模型续聊仍会明确拒绝，不能把勾选支持视为 Chat 搜索全链路可用。模板更新保留本地网页声明，DS 向 OCG／CCG／CLP 的模板投影不继承 DS 端点声明。
 

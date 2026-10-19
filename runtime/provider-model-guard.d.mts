@@ -4,7 +4,6 @@ export class ProviderModelGuard {
   constructor(path: string, isModelValid: (model: unknown) => boolean, options?: {
     parseCatalog?: (content: string) => unknown;
     blockedPaths?: readonly string[];
-    maximumBytes?: number;
   });
   isEnabled(model: string, signal?: AbortSignal): Promise<boolean>;
   modelCapabilities(model: string, signal?: AbortSignal): Promise<{ reasoningEfforts: string[]; supportsWebSearch: boolean; sampling?: SamplingParameters } | undefined>;
