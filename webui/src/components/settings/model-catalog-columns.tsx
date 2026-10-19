@@ -1,7 +1,6 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "@/hooks/use-translation"
 import type { OpenAiModelCatalogEntry, ManagementProviderSettingsResponse } from "@/lib/types"
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -70,22 +69,18 @@ function ModelWebSearchSettings({ settings, state }: { settings?: ManagementProv
   if (state === "loading") return <span aria-busy="true">{t("common.loading")}</span>
   if (state === "error") return <span>{t("openAiModelCatalog.searchReadFailed")}</span>
   if (!settings?.length) return <span>{t("common.unknown")}</span>
-  const options = [
-    { value: "default", label: t("openAiModelCatalog.searchDefault") },
-    { value: "disabled", label: t("settingsFields.off") },
-    { value: "cached", label: t("settingsFields.cached") },
-    { value: "indexed", label: t("settingsFields.indexed") },
-    { value: "live", label: t("settingsFields.live") },
-  ]
+  const labels = {
+    default: t("openAiModelCatalog.searchDefault"),
+    disabled: t("settingsFields.off"),
+    cached: t("settingsFields.cached"),
+    indexed: t("settingsFields.indexed"),
+    live: t("settingsFields.live"),
+  }
   return <div className="flex flex-col gap-2">{settings.map(setting => {
-    const mode = setting.status === "ready" ? setting.mode ?? "default" : undefined
-    const error = setting.status === "error" ? t(setting.error === "invalid-mode" ? "openAiModelCatalog.searchInvalidMode" : setting.error === "invalid-document" ? "openAiModelCatalog.searchInvalidDocument" : "openAiModelCatalog.searchReadFailed") : null
+    const label = setting.status === "ready" ? labels[setting.mode ?? "default"] : t(setting.error === "invalid-mode" ? "openAiModelCatalog.searchInvalidMode" : setting.error === "invalid-document" ? "openAiModelCatalog.searchInvalidDocument" : "openAiModelCatalog.searchReadFailed")
     return <Tooltip key={setting.provider}>
       <TooltipTrigger render={<span tabIndex={0} className="flex items-center gap-2" />}>
-        {error ? <span>{error}</span> : <Select items={options} value={mode} readOnly>
-          <SelectTrigger size="sm" aria-label={`${setting.provider} · ${t("openAiModelCatalog.builtinSearch")}`}><SelectValue /></SelectTrigger>
-          <SelectContent><SelectGroup>{options.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent>
-        </Select>}
+        <span>{label}</span>
         {settings.length > 1 ? <span>{setting.provider}</span> : null}
       </TooltipTrigger>
       <TooltipContent className="max-w-sm"><p>{t(setting.source === "global" ? "openAiModelCatalog.globalSearchSource" : "openAiModelCatalog.providerSearchSource", { provider: setting.provider })}</p><p>{t("openAiModelCatalog.searchDefaultHint")}</p></TooltipContent>
