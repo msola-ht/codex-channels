@@ -375,3 +375,45 @@ Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能�
 当前记录没有真实平台撤权或 Windows/macOS 观察，也没有替代 L04–L08、L16–L18 的独立业务验收。
 L03 已识别的输入、命令、查询、异步回答及恢复分支均有上文源码关联、修复与对应隔离证据；
 已提交子链正常门禁通过，未运行或新增测试。保留真实服务观察限制，下一项按顺序进入 L02。
+
+### L02 Provider Setup、预览与启动材料
+
+**审查基线：`aa4bb8e7`；状态：已审查（附证据限制）。** CLI Setup→共享保存计划→事务锁→配置/Profile/目录写入→
+回读→运行时消费已补充隔离观察；Sol 子代理完成 WebUI 检测归属与确认链独立只读审查，主代理复核关键消费点。
+未确认新的代码缺陷，本项提交补充证据。受管账户租约、删除及聚合另由 L15 覆盖。
+
+**复用证据。** 比较 `ceb54a22` 至本基线，Setup、共享自定义 Provider 管理、主配置转换事务、
+自定义运行时、模型目录和凭据文档模块没有差异，沿用 [Provider 事务记录](provider-transaction-review.md)
+P01/P02/V01/V02 的适用结论和限制，不重复宣称完成真实断电、Windows ACL 或 macOS 服务观察。
+
+**Setup 完整保存。** Linux 临时私有 Home 中调用生产 `runCustomPrimaryProviderSetup`，注入提示答案与
+只读配置 Client；保存和运行时读取使用实际生产实现。Codex 兼容类型新增切换 Provider 后，读取返回
+`review-provider/review-model/https://example.invalid/v1`，凭据匹配，Profile 为 `0600`，主配置原文未变，
+Client `connect=4/close=4`，输出不含 Key。自定义类型从生产模板选择、模型声明、最终确认走到目录保存，
+当前已安装 CLI 实际执行隔离 `debug models` 校验；运行时读回 `cp-review/review-model`，目录包含该模型，
+`pending=false/backup=false/close=4`，输出不含 Key。没有发送远程模型请求或启动服务，临时目录均已清理。
+
+**Hack 与取消。** 最终取消后 `profiles=0/connect=1/close=1`，主配置未变；最终确认时将 Client 修订从
+v1 改为 v2，返回 `stale-preview/profiles=0/connect=2/close=2`。同 Origin 改 URL 路径并留空 Key 可保存且
+保留原 Key；更换 Origin 留空返回 `API Key 不能为空`，原 URL/Key 不变；更换 Origin 显式输入新 Key 后
+运行时读取新 URL/Key。输入期间通过生产文件写入器修改主配置，Setup 拒绝文件快照变化，保留外部修改和
+原 Profile。这些都是隔离输入/Client 下的生产交互函数观察，未验证真实 TTY 的按键、信号或真实 App Server RPC。
+
+**检测归属。** 生产 CLI 能力交互在检测结果匹配模型/协议/思考等级/能力后，用户选择采用才生成连接证明；
+隔离匹配结果得到 `applyPatch=freeform/receipts=1`，错模型结果在首次检测后拒绝，未进入采用提示。
+生产 WS 交互收到取消结果时返回空结果，`calls=1/questions=1`，没有进入后续采用步骤。
+此处检测响应由隔离端口提供，不代表第三方实际上支持对应能力。
+
+**WebUI 关联审查。** `use-scoped-probe-request.ts` 以草稿标识、enabled、活动 Controller 和取消信号
+约束结果回填，取消先清除所有权，旧请求 finally 不会清理新请求。Provider 编辑器将配置版本、连接、Key、
+模型定义等纳入草稿标识；能力采用检查模型行和结果身份。后端连接 HMAC 在保存时重新计算，子代理内联调用
+生产函数观察到 URL 路径、Origin、Key、模型、思考等级、能力或协议任何一项变化均改变证明。
+Provider 路由预览前后检查资源修订，确认绑定主体/输入/修订/预览；整段确认路由持有共享管理锁，
+底层保存仍重建计划。生产确认 Store 的首次消费成功，重复消费、修改输入、错误输入消费后重试均为
+`management.confirmation-invalid`。固定凭据读取及启动材料再次核对 Provider、Origin 和版本引用；
+未知保存结果进入回读门禁，不能把下一次读取成功改写为上次保存成功。
+
+**限制与下一项。** 未观察真实浏览器的迟到响应、取消后立即重发、跨标签修改及 WebUI 完整保存；
+相关前端结论来自源码链路，不是浏览器实测。真实 TTY、App Server RPC、付费模型探测、网络断连、
+Windows 原生环境/ACL 与 macOS 服务均保留未验证状态；P01/V01 的进程终止证据不证明断电持久性。
+没有运行或新增测试。完成正常文档提交门禁后，按顺序进入 L15。
