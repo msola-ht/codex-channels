@@ -1004,6 +1004,9 @@ export abstract class GatewayComponentGraph {
       ? new ScheduledTaskComposition({
           stateDatabasePath: config.stateDatabasePath,
           registerConstructionCleanup,
+          releaseRecoveredThread: (threadId, isCurrent) => service.releaseBackgroundIfComplete(threadId, {
+            dispatchQueued: false, isCurrent,
+          }),
           router: this.router,
           codex: this.codex,
           turns: execution,

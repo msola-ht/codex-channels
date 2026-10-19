@@ -894,3 +894,50 @@ Journal 邮箱与 Worker 串行写入；主代理复核事务及状态转换关�
 **限制与交付。** 真实平台、断电/磁盘满、Worker 硬终止、Windows ACL 尚未实际观察；事务提交异常
 与部分取消边界仅据源码判断。平台 ACK 与本地事务没有跨系统原子性，不承诺恰好一次。记录既有链路
 证据并提交本项文档，不为没有确认缺陷的实现添加改动；随后进入 L08。
+
+### L08 计划任务领取、派发与恢复
+
+**状态：已审查（附证据限制）。** L07 已提交 `181f8914`，文档与索引门禁通过。本项沿 Schedule→领取事务→
+执行端口→Thread/Turn→恢复状态核对，不扩展到新调度能力。复用 L03 已有管理授权证据；独立核对
+DST/月份缺日、手动/自动竞争、领取后取消、缺失 Turn ID 和重开恢复，不调用真实 App Server 或外部渠道。
+
+**L08-F1，已修复。** 恢复协调器在写入 Run 终态前计算 stillOwned，等待 Store 后沿用它通知和直接释放
+后台 Thread。生产协调器隔离 Store/Router/历史端口观察：markCompleted 等待期间目标由 original 改为
+new-owner，结果 state=completed、通知 original、释放 new-owner。现持久化结束后复核原后台绑定对象，
+并由组合根注入 Application 的后台完成释放检查，保留新 Turn、Queue 或子代理活动的保护；
+恢复本身不派发 Queue。修复后转移目标、复用同一 target 对象但更换绑定，均保留已确认 Run 终态，
+通知/释放为 0；正常路径通知/释放各 1。清理等待期间再换绑定，传入守卫拒绝释放。
+缺 Turn ID 时保持 uncertain、拒绝归属仍登记，不用其他轮次结算；已有 uncertain 的精确终态只释放
+运行期归属，不改历史状态、不发成功通知。以上是生产协调器与隔离 Store/Router/历史/清理端口观察，
+实际 Application 完成释放的当前 Turn/Queue/子代理检查复用既有实现和源码证据。
+
+**L08-F2，已修复。** Sol 独立发现共享时区校验把 Intl 可解析值全部当作 IANA。生产命令解析→
+Application previewCreate→confirm→内存 SQLite 实际保存 `+01:00`，得到 created 和次日 09:00Z，
+违背文档只支持 IANA 的合同。现共享 validator 拒绝正负号偏移，命令、自然语言、动态工具和 Store
+读取/写入共同生效，不迁移历史数据。修复后 `+01:00`、`-05:00` 及前后空格变体均返回
+scheduled-task.schedule.invalid；America/New_York、UTC、Etc/GMT+8 仍可持久化。
+
+**调度及执行链实际观察。** 主代理直接运行生产 Scheduler→Executor→真实内存 SQLite，隔离
+Thread/Turn/权限端口：正常只创建 Thread/Turn 各 1 次并保存 running 及两个 ID；领取后取消为
+interrupted、写入 0；创建 Thread 后取消和最终 Turn 前撤权均 interrupted、仅 Thread 写入 1 次、
+清理 1 次；Turn 响应丢失为 uncertain，保留 Thread、Turn ID 为 null，不重试、不伪造已取消。
+此前 L03 的选择、管理授权及原请求取消守卫保持不变。
+
+**Schedule/Store 独立观察。** Sol 直接调用当前源码，主代理核对报告和共用校验调用链：
+
+- NY 春季 02:30 跳到 2026-03-09T06:30Z；秋季 01:30 取 2026-11-01T05:30Z，两个重复时刻之间
+  计算则跳次日。Lord Howe 半小时缺口跳过当日；monthly 31 跳过四月、monthly 29 跳过非闰年二月。
+  once 落入 DST 缺口明确失败，相对 120 分钟跨 DST 仍增加固定 UTC 120 分钟。
+- manual 与 automatic 同毫秒申请被分为相邻 occurrence，手动不推进自动计划；dispatching 时自动
+  skipped_overlap，重复自动领取被拒绝，完成后下一次正常领取。uncertain 同时阻止手动与自动；
+  retry 容量不足保留旧 uncertain，成功才原子改旧 Run 为 failed 并领取新 Run；finished once 仅允许显式 retry。
+- 领取插入后故意触发时间戳倒退，事务回滚、Run 数 0、nextRunAt 不变；retry 无法分配可表示时间戳
+  时旧 uncertain 与记录数保持不变。私有文件库重开后 dispatching→uncertain/gateway_crash，
+  已知 Thread 缺 Turn 的 running 保持待恢复；第二次 crash recovery 返回空。超过 90 天清理仍保留
+  uncertain/running。独立报告未发现其他 Store/Schedule 必修问题。
+
+**限制。** 无真实 App Server、平台通知、断电或多进程持锁竞争；文件重开覆盖已提交状态恢复。
+新清理组合路径的真实上游空闲查询未运行，不将隔离端口称为真实 Thread 验收。临时连接/目录均已清理，
+无新测试、脚本或文档，相关模块说明和计划任务专题已同步；静态检查结果单列为交付门禁。
+首次提交门禁在新增回调的 unbound-method Lint 失败；将接口方法签名改为无接收者的函数属性，
+保持回调调用行为不变后重新提交，不绕过门禁。

@@ -39,6 +39,7 @@ export interface ScheduledTaskCompositionOptions {
   codex: ProviderRoutingClient;
   turns?: TurnExecutionPort;
   acceptsExecution: (target: ConversationTarget) => boolean;
+  releaseRecoveredThread: (threadId: string, isCurrent: () => boolean) => Promise<boolean>;
   bindings: SqliteBindingStore;
   workspaces: WorkspaceRegistry;
   core: ConversationCore;
@@ -105,6 +106,7 @@ export class ScheduledTaskComposition {
       options.codex,
       {
         validateRun: (task, signal) => executor.validateRun(task, signal),
+        releaseRecoveredThread: options.releaseRecoveredThread,
         logger: options.logger,
         onRecovered: (run, target) => {
           const status = run.state === "completed" ? "已完成"
