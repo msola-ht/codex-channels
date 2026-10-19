@@ -49,6 +49,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   custom_model_probe_failed: "modelProbe.failed",
   "stale-model-probe": "modelProbe.stale",
   "removal-not-supported": "modelCatalog.unsupported",
+  "web-search-not-supported": "modelCatalog.unsupported",
   "model-not-found": "settingsUi.targetMissing",
   "default-model-protected": "modelCatalog.defaultProtected",
   "last-model-protected": "modelCatalog.lastProtected",

@@ -76,7 +76,7 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
   账户家族登记同时拥有实例展开、账户身份和注册表／管理标记路径；账户路由、服务代理、
   Relay 与聚合材料读取共用这份登记。未登记家族或能力与身份不一致时明确拒绝，不回退到其他账户家族。
-  `webSearch` 声明受管实例是否在启动参数中关闭内置网页搜索，不改写基础配置或模型目录的客户端工具检索能力。
+  原生网页搜索不再由 Provider 家族常量禁用，按精确模型目录声明交给出站守卫处理。
   CCG 采用显式多账户实例与 DS 来源目录，通过 Command Code 账户接口
   查询 Credits 与 5 小时/7 天窗口；模型 ID
   支持上游命名空间，凭据按 Bearer 格式校验。
@@ -86,7 +86,8 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
   为当前账户监听目录、Profile 和管理标记，按 Provider ID 合并并去重路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，账户目录独立。
 - `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，模型目录按 CLP 家族共用，Chat 转换代理与凭据按账户独立。
-- `provider-model-guard.mjs` / `provider-model-guard.d.mts`：CLP Chat 桥、OCG/CCG 与自定义提供商代理共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。
+- `provider-model-guard.mjs` / `provider-model-guard.d.mts`：DS/OCG/CCG、自定义提供商代理与 CLP Chat 桥共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。默认读取上限 2 MiB，共享官方目录使用其 8 MiB 合同。
+  同次快照读取 `supports_web_search`，省略或 false 均返回不放行；非布尔拒绝。HTTP、WS 每次提交及 CLP 桥转换前应用，不通过 Provider 名称推断模型支持。
   CP 从同次已校验目录的精确模型定义读取默认采样，和启用状态共同交给代理；采样不进入编译后的 Codex 模型字段。
   CLP 在同一次目录读取中取得模型的思考选项，出站同时验证启用名单和思考能力，不为能力检查重复执行 ACL 读取。
   自定义提供商注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和旧上下文事务标记；自定义及受管账户均检查旧版目录整理未完成记录。未完成事务拒绝对应出站，不复用管理事务内部的读取豁免。
@@ -145,10 +146,10 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
-- `third-party-model-catalog.mjs` / `third-party-model-catalog.d.mts`：第三方模板投影与 App Server 运行目录共用的本地工具策略，为每个模型追加 `request_user_input_async` 和 `clock`，保留其他模型字段和工具声明；固定与切换实例每次启动从原目录生成私有 `runtime/model-catalogs/<Provider>.json`，聚合目录复用同一转换并保留既有摘要守卫。覆盖 Responses 与 Chat，不改源目录、CP v5 编译合同或官方 OpenAI 实例；无效工具声明及超过 8 MiB 的运行目录结果明确拒绝。
+- `third-party-model-catalog.mjs` / `third-party-model-catalog.d.mts`：第三方模板投影与 App Server 运行目录共用的本地工具策略，为每个模型追加 `request_user_input_async` 和 `clock`。`withThirdPartyRuntimeTools` 另在运行副本将 `use_responses_lite` 设为 false，配合第三方启动参数 `features.standalone_web_search=false`，使原生网页搜索采用模型 API 的 hosted 工具合同，不走 OpenAI 独立搜索执行器。固定与切换实例每次启动从原目录生成私有 `runtime/model-catalogs/<Provider>.json`，聚合复用运行转换及既有摘要守卫。覆盖 Responses 与 Chat，不改源目录、模板的 Lite 元数据或官方 OpenAI 实例；无效工具声明及超过 8 MiB 的运行目录结果明确拒绝。
 - `responses-context-sync.mjs` / `responses-context-sync.d.mts`：仅保留旧版跨目录上下文事务的私有记录读取、校验及显式整批恢复；不再创建同步事务或提供跟随联动。
 - `provider-catalog-isolation.mjs` / `provider-catalog-isolation.d.mts`：旧版 Provider 目录整理未完成记录的只读拒绝保护；记录存在时拒绝 runtime 使用受管及 CP 目录、CP 首次写入及统一模型恢复。当前版本不提供目录迁移，不修改或删除旧记录；须保留记录与备份，并使用产生事务的原版本恢复。受管模型按家族放在 `providers/deepseek|clp|ccg|opencode-go/`；账户身份材料按完整 ID 放在对应家族子目录，自定义 cp 模型保持各自目录。
-- `model-catalog.mjs` / `model-catalog.d.mts`：模型定义与 Codex 字段转换的纯数据层，集中校验基础及扩展能力、生成默认字段、导入官方／DS 模板及修正 DS 能力声明；CP、CLP 和 CLI 模板入口复用。CP 保留思考、图片、文件编辑和工具搜索的未知／不支持／支持声明；未知在 Codex 执行字段中暂不启用，目录投影另保留声明状态。导出 `SamplingParameters` 与严格数值校验，逐模型可选 `sampling` 仅保留于定义，空对象归一为省略，不进入 Codex 生成字段。完整官方及受管目录不经过 CP 白名单往返，避免丢失专用元数据。
+- `model-catalog.mjs` / `model-catalog.d.mts`：模型定义与 Codex 字段转换的纯数据层，集中校验基础及扩展能力、生成默认字段、导入官方／DS 模板及修正 DS 能力声明；CP、CLP 和 CLI 模板入口复用。CP 保留思考、图片、文件编辑、工具搜索及原生网页搜索的未知／不支持／支持声明；网页搜索定义使用可选布尔 `supportsWebSearch`，目录扩展字段为 `supports_web_search`，省略表示未知，不接受 null。未声明时不增加生成字段，保持旧 CP v5 编译顺序和内容；声明字段不替代搜索启用策略。目录投影另保留声明状态。导出 `SamplingParameters` 与严格数值校验，逐模型可选 `sampling` 仅保留于定义，空对象归一为省略，不进入 Codex 生成字段。完整官方及受管目录不经过 CP 白名单往返，避免丢失专用元数据。
 - `model-template-prompts.mjs` / `model-template-prompts.d.mts`：纯 JSON 提示词补全，保留显式值，补缺失文本及必要 token-budget 配套字段；`approvals: null` 是继承基础审批提示词的例外。
 - `model-template-bindings.mjs` / `model-template-bindings.d.mts`：校验受管目录 manifest 的显式模型来源关联；缺少关联保持未关联，拒绝无效或孤立引用，不按名称推断。
 - `model-template-catalog.mjs` / `model-template-catalog.d.mts`：读取固定仓库底座，在显式新增模型时补全并固化 `model_messages`／`modelMessages`。自定义入口共享 `withCustomBaseTemplate`，仅为新模型记录缺省底座来源；官方底座读取和目录模板投影将已知来源模型身份改为通用助手身份，追加取时间与可中断等待指导，并复用第三方本地工具声明，保留原始快照及用户显式指令。显式模板更新重新读取已保存底座；读取、普通编辑、删除及调整已有模型窗口不执行模板补全。

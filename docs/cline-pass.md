@@ -46,7 +46,7 @@ Remote 保留 `--profile sf-clp-<账户>`；两个入口默认连接主实例。
 该按需实例的桌面目录包含 DS、CLP、OCG、CCG 和自定义切换提供商；CLP 的精确模型 ID 形如
 `clp-main/cline-pass/deepseek-v4.1-flash`，显示名称包含账户 Provider ID。已加载模型间切换无需退出
 Desktop，更换 App Server 实例仍须完全退出。聚合请求复用现有 CLP Chat 桥，每次用目标账户真实 Key
-替换本地令牌；关闭网页搜索和模型 API WebSocket，经过 Codex 的请求统一采用原生重试策略，不改变独立 Relay 的目录及路由；Relay 自身不自动重试。
+替换本地令牌；网页搜索按精确模型声明放行，模型 API WebSocket 关闭，经过 Codex 的请求统一采用原生重试策略，不改变独立 Relay 的目录及路由；Relay 自身不自动重试。
 终端也可用 `codexc remote --provider agg`，渠道从 `/model` 的“聚合提供商”目录选择；
 同一聚合 Thread 内切换保留历史，账户额度查询不合并，请求指标按真实账户记录。
 安装新代码或增删成员后须重启相关服务；现有成员的 Key、模型目录变更由运行中的 Gateway 检测，待活动和租约释放后刷新，旧快照在等待期间拒绝
@@ -64,7 +64,7 @@ Flash 投影继承 DS 模型定义中的说明、思考等级说明、提示词�
 把完整请求转换后发送至 `https://api.cline.bot/api/v1/chat/completions`，再把 Chat SSE 转换回 Responses。
 Gateway 重启不会终止该桥或共享 App Server。转换逻辑独立在 `src/model-api`，可以供其他 Chat Provider 复用。
 
-支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，声明 `grammar`（lark）格式时其语法原文保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。CLP 共用目录声明 `apply_patch_tool_type: freeform`，模型改用自由格式 `apply_patch` 工具修改文件，渠道据此显示「修改文件」卡片；CLP 共用目录同时开启 `supports_search_tool`，客户端 `tool_search` 可检索并按需加载命名空间工具。已有模型须按模板更新的保留规则查看差异；工具配置不在模板能力覆盖范围内，无需删除账户。`text.format` 的 `json_schema` 按原样映射为 Chat `response_format`，因此 TUI 的线程标题生成等结构化请求无需关闭。未映射的顶层工具声明（含服务端 `tool_search`、`web_search`）及其 `tool_choice` 原样交给 CLP 判断，本地不丢弃也不提前拒绝；这不表示 CLP 或模型支持其执行。不为这些声明注册客户端工具，回程不支持的工具调用仍明确失败。远程 compaction、加密或带签名的推理和 WebSocket 仍不支持；外部函数形式的工具仍按函数调用处理。
+支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，声明 `grammar`（lark）格式时其语法原文保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。CLP 共用目录声明 `apply_patch_tool_type: freeform`，模型改用自由格式 `apply_patch` 工具修改文件，渠道据此显示「修改文件」卡片；CLP 共用目录同时开启 `supports_search_tool`，客户端 `tool_search` 可检索并按需加载命名空间工具。已有模型须按模板更新的保留规则查看差异；工具配置不在模板能力覆盖范围内，无需删除账户。`text.format` 的 `json_schema` 按原样映射为 Chat `response_format`，因此 TUI 的线程标题生成等结构化请求无需关闭。未映射的顶层工具声明及其 `tool_choice` 交给 CLP 判断，其中 hosted `web_search` 先按精确模型的 `supports_web_search` 声明过滤；其他声明如服务端 `tool_search` 保留。放行不表示 CLP 或模型支持执行，不为这些声明注册客户端工具；回程不支持的工具调用和历史 `web_search_call` 仍明确失败。远程 compaction、加密或带签名的推理和 WebSocket 仍不支持；外部函数形式的工具仍按函数调用处理。
 边界案例可对照 [CLIProxyAPI 的 Responses 转换器（固定提交 9bdde54）](https://github.com/router-for-me/CLIProxyAPI/tree/9bdde54b59d1af70ae0534a0ef61b2c3361a1257/internal/translator/openai/openai/responses)，仅作实现参考，不作为 Codex 协议来源或运行时依赖。
 CLP 按上游不拒绝的标准开放参数透传：`text.verbosity` 映射为 Chat 顶层 `verbosity`，`service_tier` 与 `client_metadata` 原值传递，由上游判断，不再由桥按值提前拒绝或丢弃。精确 Flash 模板声明详细程度可选、默认 `medium`，不声明 `priority`、`flex` 等加速或服务档位；参数允许透传不能作为服务档位能力证据。其他 CLP 模型仍沿用各自目录声明，不因 Flash 的探测结果自动增加这些选项。旧目录中曾注入的服务档位通过“更新模板 → 能力”展示删除差异，明确确认后清除；只更新提示词或运行设置不清除其他声明。新建及发现新增使用同一投影，默认服务档位仍保持标准。
 

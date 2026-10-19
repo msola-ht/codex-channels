@@ -63,7 +63,7 @@ Gateway 对已绑定、已订阅的第三方提供商会话启用重复思考保
 | --- | --- | --- |
 | Provider id | 小写字母/数字/`-`/`_`，1–64 位 | 决定 `sf-<id>.config.toml` Profile、`modelProvider`、环境变量名；受管账户材料位于 `providers/<家族>/<id>/`，自定义 CP 位于 `providers/<id>/` |
 | 显示名称 | 1–64 字符 | 出现在 `/model`、WebUI 与完成卡片 |
-| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 与上游接口为 `chat_completions` 的自定义第三方 Provider 使用 `model-api` 模块与 Chat 桥，不把 Chat 写入 Codex `wire_api`。转换覆盖 `function`、`namespace`、自由格式 `custom`、客户端 `tool_search` 与 multi-agent v2 的 `agent_message` 输入项；模型目录可用 `applyPatchToolType: freeform` 与 `supportsSearchTool` 开启自由格式 `apply_patch` 与客户端检索；未映射的顶层工具声明原样交给上游，不注册本地执行身份，也不承诺托管工具执行与回程；第三方 `wire_api = "responses"` 上游由 ProviderProxy 在提交前归一化 Codex 私有输入项，`agent_message` 降级为普通 `user` 消息、工具参数 schema 的 `encrypted` 布尔标记被删除，HTTP 与 Responses WS 一致，官方 OpenAI 端点保持原文透传；受管 DeepSeek 入口仍关闭内置网页搜索 |
+| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 与上游接口为 `chat_completions` 的自定义第三方 Provider 使用 `model-api` 模块与 Chat 桥，不把 Chat 写入 Codex `wire_api`。转换覆盖 `function`、`namespace`、自由格式 `custom`、客户端 `tool_search` 与 multi-agent v2 的 `agent_message` 输入项；模型目录可用 `applyPatchToolType: freeform` 与 `supportsSearchTool` 开启自由格式 `apply_patch` 与客户端检索；未映射的顶层工具声明原样交给上游，不注册本地执行身份，也不承诺托管工具执行与回程；第三方 `wire_api = "responses"` 上游由 ProviderProxy 在提交前归一化 Codex 私有输入项，`agent_message` 降级为普通 `user` 消息、工具参数 schema 的 `encrypted` 布尔标记被删除，HTTP 与 Responses WS 一致，官方 OpenAI 端点保持原文透传；第三方原生网页搜索按精确模型声明放行 |
 | WebSocket | 支持 / 不支持 | 不支持时必须显式声明 `supports_websockets = false` |
 | 认证 | 按 Provider 校验的 API Key | 编译期受管 Provider 的 Key 只进入子进程环境或专用私有凭据文件，不写入命令行、日志或 Gateway 配置 |
 | 模型目录来源 | 官方目录下载器 / `/models` / 审查后的 JSON | 与 DeepSeek 官方目录一致时可复用现有下载器 |
@@ -514,6 +514,12 @@ CLI／WebUI 设置入口；它们不同于用户的 `web_search` 偏好，也不
 
 已有自定义模型的 CLI 模型管理保留“探测单个模型的工具能力”入口：先选择精确模型，再分别决定是否探测 `apply_patch`、`tool_search`，只有明确选择才发起可能计费的请求。采用结果后仍须预览并确认保存，探测期间连接或目录变化会拒绝继续保存；原生网页搜索仍仅作诊断。
 
+原生网页搜索按模型文件显式声明：自定义定义使用可选布尔 `supportsWebSearch`，编译目录及受管目录使用 `supports_web_search`。省略为未知，false 为不支持，true 为支持；持久文件不接受 null。CLI 模型管理与 WebUI 行操作提供三态声明，预览中的 null 仅表示删除字段。保存复用既有修订、备份和事务回读；受管家族共用目录，预览列出全部影响账户。共享官方目录不提供第三方声明编辑，需独立声明时使用自定义目录。旧 CP v5 未声明字段时编译字节不变，读取不自动迁移；新增字段后若回退旧程序，先恢复保存前的目录备份。未完成事务须按原恢复流程处理，不能删除 pending 绕过检查。
+
+App Server 的第三方固定、切换、聚合入口在每次出站时按当前 Provider 和精确模型读取该声明：只有 true 保留已有的顶层 `web_search`，false 或未知删除该工具。强制选择被禁用的搜索，或过滤后没有工具却要求必须调用时，明确拒绝请求；同名函数、MCP 工具和 Responses 历史 `web_search_call` 不删除。声明不会注入工具，用户全局 `web_search="disabled"` 仍然有效。源目录不变，临时运行投影使用普通 Responses 工具编码（`use_responses_lite=false`），实例关闭 `features.standalone_web_search`，防止切换到独立 `/alpha/search` 执行器。CP Profile 的内部 `web_search="disabled"` 字段保留原有磁盘合同，但受管启动不再将其作为搜索策略注入；用户主配置中的搜索偏好照常消费。
+
+声明需按预览提示重启 App Server 才完整激活；操作不自动重启。HTTP、Responses WebSocket 和 Chat 桥复用该策略，官方 OpenAI 与独立 Model Relay 保留自己的合同。Chat 对放行的 hosted 声明仅透传，尚无原生 `web_search_call` 回程映射，包含这种历史的跨模型续聊仍会明确拒绝，不能把勾选支持视为 Chat 搜索全链路可用。模板更新保留本地网页声明，DS 向 OCG／CCG／CLP 的模板投影不继承 DS 端点声明。
+
 CLI 的思考等级使用多选菜单，提供 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，空格勾选、回车确认；声明支持思考参数时至少选择一项，再从已选等级中选择默认值。编辑已有模型时预选原有等级。
 CLI 与 WebUI 可逐模型填写描述、各思考等级说明、最大上下文窗口，并声明图片 `original` 精度、输出详细程度参数及思考摘要参数。
 图片原始精度要求同时声明图片输入；详细程度支持开启时必须选择默认 `low/medium/high`。
@@ -553,7 +559,7 @@ Responses 使用对应工具协议，Chat 使用当前网关桥的请求转换�
 CLI 单模型工具能力入口保留目录默认模型、Profile／主配置默认选择及固定模式的独立思考等级；连接配置不重新保存。整份模型编辑中的默认模型选择仍由用户明确确认。
 
 CLI 另提供默认跳过的原生网页搜索诊断，WebUI 通过“检测原生网页搜索”显式发起。它使用一次最长 45 秒的流式请求，声明 `web_search` 与 `external_web_access: true`；上游可能实际搜索并产生模型及搜索费用。只有完整 Responses 响应中的已完成 `web_search_call` 搜索才算取得执行证据；HTTP 200、文字自称搜索或回答带链接都不算。完成但没有搜索证据时显示“无法确认”；明确拒绝仅针对本次原生工具声明，不推断其他搜索接口。Chat 请求经过现有桥转换，普通 Chat 文本不算原生搜索证据。
-原生网页搜索结果仅诊断，不回填 `supports_search_tool`、不改 `web_search_tool_type`，也不改变启动链路的网页搜索禁用策略；与发现外部工具的 `tool_search` 是不同路径。此诊断不生成用于保存回填的关联标识。
+原生网页搜索结果仅诊断，不回填 `supportsWebSearch` 或 `supports_search_tool`、不改 `web_search_tool_type`；用户可参考证据另行手动声明并预览保存。它与发现外部工具的 `tool_search` 是不同路径，不生成用于保存回填的关联标识。
 
 已保存模型也可从 WebUI 模型目录行操作中的“检测原生网页搜索”进入，覆盖官方 OpenAI、DS／CLP／CCG／OCG、Codex 兼容及自定义提供商。CLI 在 `codexc setup → 模型与提供商 → 检测原生网页搜索` 提供统一入口，官方子菜单与第三方模型管理也可进入。同一目录有多个账户时须明确选择一个账户，不广播检测。后端按目录修订读取所选账户的实际协议、凭据及模型映射；CLP 复用专用路由和思考转换。未配置、凭据不可用或目录已变化时明确拒绝，不启动服务或刷新登录。
 官方独立诊断支持文件存储的 API Key 和 ChatGPT 登录；系统钥匙串、临时认证、OpenAI Provider 覆写及无法安全执行的登录约束会明确拒绝，不回退使用旧凭据。模型缓存仅提供待检测 ID，不能证明其所属上游或实际可用性，因此官方诊断不继承缓存中的思考默认值。其他已配置模型使用对应目录的默认值；诊断不验证思考控制本身。请求发出后若配置或凭据改变，旧结果被拒绝，但已经发出的请求可能计费。
@@ -566,7 +572,7 @@ WebUI 保存回填结果时显式使用探测协议；保留 Key 仅用于原 Or
 选择 Responses 时，上游必须兼容锁定版 Codex 的 Responses 流式事件、函数调用、工具结果接续及其请求字段；
 “提供 Responses 地址”不代表所有模型均兼容。此入口只按所选上游接口使用直连 Responses 或网关 Chat 桥转换，
 不为具体平台添加专用协议补丁。
-这些实例仍关闭网页搜索；模板中的能力元数据不代替上游接口兼容性验证，也不自动启用 WS 或改变审批策略。CLI 与 WebUI 新增手填模型共用固定底座提示词，不再注入另一份自编指令；抽取的原始快照保持不变，官方底座和 DS 来源的模板投影均将已知格式的来源模型身份声明改为通用编程助手，不绑定具体模型名称，自动审批模式与拒绝后的提示会追加中文回复要求，其他提示词结构保留。官方底座身份声明格式改变时明确拒绝，需先审核投影。用户明确填写的指令保留原文；DS 专用指令除来源身份与上述审批语言要求外保留。已有模型仍须预览并确认模板更新才会改变提示词。手填模型不复制底座的上下文或能力声明；工具和请求参数继续采用项目的保守配置。当前目录合同没有可独立设置的最大输出 Token 字段。
+这些实例按逐模型声明放行原生网页搜索；模板中的能力元数据不代替上游接口兼容性验证，也不自动启用 WS 或改变审批策略。CLI 与 WebUI 新增手填模型共用固定底座提示词，不再注入另一份自编指令；抽取的原始快照保持不变，官方底座和 DS 来源的模板投影均将已知格式的来源模型身份声明改为通用编程助手，不绑定具体模型名称，自动审批模式与拒绝后的提示会追加中文回复要求，其他提示词结构保留。官方底座身份声明格式改变时明确拒绝，需先审核投影。用户明确填写的指令保留原文；DS 专用指令除来源身份与上述审批语言要求外保留。已有模型仍须预览并确认模板更新才会改变提示词。手填模型不复制底座的上下文或能力声明；工具和请求参数继续采用项目的保守配置。当前目录合同没有可独立设置的最大输出 Token 字段。
 
 固定模式把 Provider、默认模型、思考等级及目录引用写入主配置；切换模式保持官方主配置，写入独立的
 `sf-cp-<标识符>` Profile，并由现有监管服务启动。渠道 `/model` 从各自真实 App Server

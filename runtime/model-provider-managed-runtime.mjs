@@ -845,7 +845,6 @@ export function readProviderProfile(
     wireApi: descriptor.wireApi,
     apiKeyEnvironmentKey: isMain && provider.env_key !== undefined ? provider.env_key : descriptor.definition.apiKeyEnvironmentKey,
     supportsWebsockets: descriptor.definition.supportsWebsockets,
-    ...(descriptor.definition.webSearch ? { webSearch: descriptor.definition.webSearch } : {}),
     apiKey,
   };
 }

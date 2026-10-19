@@ -14,7 +14,7 @@ import { isCustomCatalogProvider, responsesProviderCatalogPath, responsesContext
   assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 import { customProviderUpstreamMetadataPath } from "./model-provider-upstream-metadata.mjs";
-import { withThirdPartyLocalTools } from "./third-party-model-catalog.mjs";
+import { withThirdPartyRuntimeTools } from "./third-party-model-catalog.mjs";
 
 export const aggregateProviderId = "codexc-aggregate";
 export const aggregateTokenEnvironmentKey = "CODEX_CONNECT_AGGREGATE_TOKEN";
@@ -176,7 +176,7 @@ export function loadAggregateModelMaterial(environment, expectedMembers) {
   }
   assertResponsesContextSyncComplete(environment);
   const first = profiles[0];
-  return { catalog: withThirdPartyLocalTools({ models }), routes, profiles, files, fingerprint,
+  return { catalog: withThirdPartyRuntimeTools({ models }), routes, profiles, files, fingerprint,
     defaultModel: `${first.provider}/${first.model}`, reasoningEffort: first.reasoningEffort };
 }
 
@@ -191,7 +191,7 @@ export function aggregateLaunchArguments(material, dataDir, baseUrl) {
     model_catalog_json: catalogPath,
     model_reasoning_effort: material.reasoningEffort,
     service_tier: "default",
-    web_search: "disabled",
+    "features.standalone_web_search": false,
     approvals_reviewer: "user",
     [`model_providers.${aggregateProviderId}.name`]: "聚合提供商",
     [`model_providers.${aggregateProviderId}.base_url`]: baseUrl,

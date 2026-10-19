@@ -33,7 +33,7 @@ export function writeThirdPartyRuntimeModelCatalog(sourcePath, dataDir, provider
   } catch {
     throw new Error("无法安全读取第三方模型目录");
   }
-  const content = `${JSON.stringify(withThirdPartyLocalTools(catalog))}\n`;
+  const content = `${JSON.stringify(withThirdPartyRuntimeTools(catalog))}\n`;
   if (Buffer.byteLength(content) > maximumBytes) throw new Error("第三方运行模型目录超过 8 MiB");
   const runtimeDirectory = join(dataDir, "runtime");
   ensurePrivateDirectorySync(runtimeDirectory);
@@ -42,4 +42,10 @@ export function writeThirdPartyRuntimeModelCatalog(sourcePath, dataDir, provider
   const path = join(directory, `${provider}.json`);
   writePrivateFileAtomicSync(path, content);
   return path;
+}
+
+/** Responses Lite suppresses hosted tools and selects OpenAI's standalone executor. */
+export function withThirdPartyRuntimeTools(catalog) {
+  const projected = withThirdPartyLocalTools(catalog);
+  return { models: projected.models.map(model => ({ ...model, use_responses_lite: false })) };
 }

@@ -6,11 +6,12 @@ export class ProviderModelGuard {
   #controller = new AbortController();
   #pending = new Set();
 
-  constructor(path, isModelValid, { parseCatalog = JSON.parse, blockedPaths = [] } = {}) {
+  constructor(path, isModelValid, { parseCatalog = JSON.parse, blockedPaths = [], maximumBytes = 2_097_152 } = {}) {
     this.path = path;
     this.isModelValid = isModelValid;
     this.parseCatalog = parseCatalog;
     this.blockedPaths = [...blockedPaths];
+    this.maximumBytes = maximumBytes;
   }
 
   async assertNoPendingWrite(signal) {
@@ -28,7 +29,7 @@ export class ProviderModelGuard {
 
   async readCatalog(signal) {
     await this.assertNoPendingWrite(signal);
-    const content = await readPrivateConfigFile(this.path, { signal, maximumBytes: 2_097_152 });
+    const content = await readPrivateConfigFile(this.path, { signal, maximumBytes: this.maximumBytes });
     await this.assertNoPendingWrite(signal);
     return content;
   }
@@ -91,7 +92,11 @@ export class ProviderModelGuard {
     // Custom catalogue parsing validates definitions and their compiled models
     // together. Read defaults from that same snapshot, never a second file read.
     const sampling = catalog.definitions?.find(definition => definition.id === model)?.sampling;
-    return { reasoningEfforts: levels.map(level => level.effort), ...(sampling === undefined ? {} : { sampling }) };
+    if (entry.supports_web_search !== undefined && typeof entry.supports_web_search !== "boolean") {
+      throw new Error("Provider 模型原生网页搜索声明无效");
+    }
+    return { reasoningEfforts: levels.map(level => level.effort), supportsWebSearch: entry.supports_web_search === true,
+      ...(sampling === undefined ? {} : { sampling }) };
   }
 
   async close() {

@@ -578,7 +578,7 @@ function configuredCustomSwitchingProfileFromContent(
       "-c", `model_provider=${JSON.stringify(id)}`,
       "-c", 'service_tier="default"',
       ...(reasoningEffort === null ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`]),
-      ...(custom ? ["-c", `model_catalog_json=${JSON.stringify(custom.catalog.path)}`, "-c", 'web_search="disabled"'] : []),
+      ...(custom ? ["-c", `model_catalog_json=${JSON.stringify(custom.catalog.path)}`] : []),
       "-c", `model_providers.${id}.name=${JSON.stringify(name)}`,
       "-c", `model_providers.${id}.base_url=${JSON.stringify(validProviderBaseUrl(provider.base_url, `Codex 自定义切换 Provider ${id}`))}`,
       "-c", `model_providers.${id}.wire_api="responses"`,

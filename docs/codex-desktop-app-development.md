@@ -272,8 +272,8 @@ Remote 通过 `--provider agg` 取得实例租约，不能同时指定 Profile�
 
 目录包含当前全部受管及自定义 API Key 切换提供商，账户内模型不另造别名。聚合 HTTP 代理按精确 slug 白名单
 还原原模型 ID，路由至原 ProviderProxy；CLP 继续通过现有 Chat 桥转换。每次请求用目标账户
-真实 Key 替换本地随机认证令牌，不维护对话历史。聚合关闭模型 API WebSocket、网页搜索及
-自动重试；审批 reviewer 使用 `user`，Remote 拒绝显式 `auto_review`；独立 Relay 不接入聚合路由。
+真实 Key 替换本地随机认证令牌，不维护对话历史。聚合关闭模型 API WebSocket，网页搜索按目标模型声明放行；
+审批 reviewer 使用 `user`，Remote 拒绝显式 `auto_review`；独立 Relay 不接入聚合路由。
 
 唯一新增磁盘材料为 `<dataDir>/runtime/aggregate-models.json`，它是无密钥、可重建的派生目录；
 账户注册表、私有 Profile、Gateway TOML 和数据库格式均不变。源目录仍由各提供商拥有。

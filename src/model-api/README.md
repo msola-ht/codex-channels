@@ -5,10 +5,11 @@
 
 自定义模型添加时的能力探测通过公开入口复用 `responsesToChat`，确保短请求的工具与思考参数编码和运行时通用 Chat 桥一致；探测的网络、凭据及配置写入仍归 Scripts 管理入口负责。
 
-- `index.ts`：公开 `responsesToChat`、`ChatToResponses`、`normalizeResponsesRequest` 与安全错误类型。
+- `index.ts`：公开 `responsesToChat`、`ChatToResponses`、`normalizeResponsesRequest`、`applyWebSearchCapability` 与安全错误类型。
 - `responses-to-chat.ts`：Responses 文本、用户内联图片、函数与自由格式工具定义、调用、文本结果、Codex multi-agent v2 的 `agent_message` 输入项，以及工具结果内联图片到紧随 user 消息的映射。
 - `codex-private-items.ts`：Codex 私有输入项与参数标记的共享语义；`agentMessageText` 按可读正文拼接信封与载荷，`stripEncryptedMarker` 只删除 schema 节点的布尔 `encrypted` 标记并报告是否发生改写。
 - `responses-normalize.ts`：面向第三方 Responses 上游的正文归一化；把 `agent_message` 降级为普通 `user` 消息并删除工具参数 schema 中的 `encrypted` 标记，未改写时报告 `changed: false`。
+  `applyWebSearchCapability` 仅按传入声明过滤顶层 hosted `web_search`，不注入工具、不删除历史或同名函数。强制选中被禁用搜索、或过滤后工具为空但 `tool_choice=required` 时明确失败；放行只代表保持原声明，不证明上游执行成功。
 - `chat-to-responses.ts`：单选择 Chat 流转换为 Responses 文本、推理摘要与正文、函数调用、自由格式调用、客户端检索调用和用量事件。
 - `validation.ts`：模型 API 信任边界的结构验证和不含报文的错误；转换错误可选携带有界的诊断事实（如工具参数的长度与 `empty`/`invalid_json`/`not_object` 形态分类），只描述形态，不含参数正文或用户内容。
 - `direct-request.ts`：原生请求共用的模型、流式字段校验、思考控制字段冲突定位及显式关闭字段覆盖；协议专属等级映射留在各请求模块。

@@ -16,7 +16,7 @@ type Details = Model["details"]
 const groups = [
   { title: "instructions", fields: ["include_skills_usage_instructions", "include_plugin_usage_instructions", "include_apps_usage_instructions"] },
   { title: "output", fields: ["supports_reasoning_summary_parameter", "default_reasoning_summary", "support_verbosity", "default_verbosity"] },
-  { title: "tools", fields: ["input_modalities", "supports_image_detail_original", "apply_patch_tool_type", "web_search_tool_type", "truncation_policy", "shell_type", "tool_mode", "supports_search_tool", "experimental_supported_tools"] },
+  { title: "tools", fields: ["input_modalities", "supports_image_detail_original", "apply_patch_tool_type", "web_search_tool_type", "supports_web_search", "truncation_policy", "shell_type", "tool_mode", "supports_search_tool", "experimental_supported_tools"] },
   { title: "runtime", fields: ["effective_context_window_percent", "auto_compact_token_limit", "supports_experimental_context", "supports_reasoning_effort_updates", "node_repl_disabled", "node_repl_auto_review_required", "multi_agent_version", "multi_agent_reasoning_effort", "use_responses_lite"] },
 ] as const
 
@@ -41,7 +41,7 @@ export function OpenAiModelDetails({ model, revision, open, loading, onClose, on
       <div className="flex flex-col gap-6 px-4 pb-6">
         {loading ? <Skeleton className="h-40 w-full" /> : !stale && model && revision && open ? <Tabs key={JSON.stringify([provider, model.model, revision])} defaultValue="capabilities">
           <TabsList><TabsTrigger value="capabilities">{t("openAiModelPrompts.capabilities")}</TabsTrigger><TabsTrigger value="prompts">{t("openAiModelPrompts.title")}</TabsTrigger></TabsList>
-          <TabsContent value="capabilities" className="flex flex-col gap-6">{model.declaredCapabilities === undefined ? null : <DeclaredModelCapabilities capabilities={model.declaredCapabilities} />}<ModelDetailFields details={model.details} sidebar /></TabsContent>
+          <TabsContent value="capabilities" className="flex flex-col gap-6">{model.declaredCapabilities === undefined ? null : <DeclaredModelCapabilities capabilities={model.declaredCapabilities} />}<ModelDetailFields details={model.details} sidebar hideWebSearchDeclaration={model.declaredCapabilities !== undefined} /></TabsContent>
           <TabsContent value="prompts"><OpenAiModelPrompts model={model.model} revision={revision} provider={provider} onReload={onReload} /></TabsContent>
         </Tabs> : provider === undefined ? <p>{t("openAiModelDetails.unavailable")}</p> : <div className="flex flex-col items-start gap-3"><p>{t(stale ? "modelCatalog.detailsStale" : "openAiModelDetails.unavailable")}</p><Button variant="outline" onClick={onReload}>{t("modelCatalog.reload")}</Button></div>}
       </div>
@@ -57,12 +57,14 @@ function DeclaredModelCapabilities({ capabilities }: { capabilities: NonNullable
     <p>{t("managementUi.imageInput")}: {support(capabilities.supportsImages)}</p>
     <p>{t("managementUi.freeformPatchTool")}: {support(capabilities.applyPatchToolType === undefined ? undefined : capabilities.applyPatchToolType !== null)}</p>
     <p>{t("managementUi.toolSearchTool")}: {support(capabilities.supportsSearchTool)}</p>
+    <p>{t("managementUi.nativeWebSearch")}: {support(capabilities.supportsWebSearch)}</p>
+    <p className="text-muted-foreground">{t("managementUi.nativeWebSearchHint")}</p>
     <p className="text-muted-foreground">{t("customModel.unknownDisabled")}</p>
   </div>
 }
 
 /** In refresh comparisons, render only detail fields that differ from the other side. */
-export function ModelDetailFields({ details, compareWith, sidebar = false }: { details: Details; compareWith?: Details; sidebar?: boolean }) {
+export function ModelDetailFields({ details, compareWith, sidebar = false, hideWebSearchDeclaration = false }: { details: Details; compareWith?: Details; sidebar?: boolean; hideWebSearchDeclaration?: boolean }) {
   const { t, language } = useTranslation()
   const numbers = new Intl.NumberFormat(language === "zh" ? "zh-CN" : "en-US")
   const format = (key: keyof Details, value: Details[keyof Details]): string => {
@@ -87,7 +89,7 @@ export function ModelDetailFields({ details, compareWith, sidebar = false }: { d
     }
   }
   return <>{groups.map(group => {
-    const fields = group.fields.filter(key => !(sidebar && (key === "effective_context_window_percent" || key === "input_modalities" || key === "supports_search_tool" || key === "apply_patch_tool_type"))
+    const fields = group.fields.filter(key => !(sidebar && (key === "effective_context_window_percent" || key === "input_modalities" || key === "supports_search_tool" || key === "apply_patch_tool_type" || key === "supports_web_search" && hideWebSearchDeclaration))
       && (compareWith === undefined || JSON.stringify(details[key]) !== JSON.stringify(compareWith[key])))
     if (fields.length === 0) return null
     const content = <dl className="flex flex-col gap-3">{fields.map(key => <div key={key} className="flex items-start justify-between gap-4">
