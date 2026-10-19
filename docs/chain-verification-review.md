@@ -477,3 +477,51 @@ Profile、标记、目录、manifest、固定基线及注册表；只为新分�
 隔离生产路径证据。未重复执行 DS/CLP 全套账户配置，相关路径以源码核对为依据。快照检查和文件原子替换
 不等于跨进程多文件原子事务，本轮修复已确认的等待后重新认可旧计划基线问题。没有新增或运行测试。
 本项记录与修复提交后，下一项为 L04 审批归属、交互排队及迟到决定。
+
+### L04 审批归属、交互队列与迟到决定
+
+**审查基线：`9158af12`；状态：已审查（附证据限制）。** L15 已提交，正常类型、边界、Lint、文档和构建门禁通过。
+本项按 Server Request→Client 解码→祖先/绑定归属→交互排队→用户决定→原请求响应追踪，
+复用 L03 授权边界；子代理独立核对 Router 排队/批量取消和 Surface 清理消费。
+
+**L04-F1 权限原因遮蔽实际范围。** 临时权限审批原来使用 `reason ?? JSON.stringify(permissions)`，
+有原因就不展示权限。生产协调器隔离观察显示 detail 仅为“读取报告”，批准后却返回 network.enabled=true、
+`/sensitive` 写权限及 root 写规则。三渠道消费同一 detail，没有其他权限明细来源。
+修复始终组合转义原因与完整权限 JSON，保持 Turn 范围；超过共同的 3000 UTF-8 字节上限时安全拒绝，
+不让渠道截断后保留批准按钮。官方固定源码 HEAD 已核对为 `83086188ae0614bd882818ff1aa23f3194962012`，
+权限 Params 的 reason 与 permissions 独立，项目仅批准 Turn 范围；没有新增协议字段或授权方式。
+
+**权限与归属观察。** 以内联调用实际 Client 适配器→ApprovalCoordinator→SessionRouter/MemoryBindingStore/
+WorkspaceRegistry→InteractionRouter→隔离 Surface。有/无原因均显示完整网络、root 和带换行路径的 JSON
+转义表示，`allowSession=false`，一次批准返回完整权限及 `scope=turn`。超长清单 `Surface calls=0`、返回
+空权限。同值解绑/重绑、Workspace 目录变化后，迟到批准均为空权限；已解决通知在 Thread 读取中到达时，
+不调用 Surface。合法子代理沿两次 Thread 读取投递父绑定且保留原请求身份，不同 cwd 的祖先链拒绝。
+这些观察使用隔离 Thread/Surface 端口，没有真实 App Server 或渠道平台权限授予。
+补充含下划线、方括号、星号、双引号、换行与双向控制字符的路径：JSON 字符串值先经过现有审批转义，
+解析回原权限 `roundTrip=true`，微信 Markdown 清理后仍保留路径转义，批准返回的权限对象不变。
+生产 Client/协调器/共享按钮映射的命令观察：一次选择仅返回 accept，显式会话选择才返回 acceptForSession，
+未提供会话选项时拒绝；命令前缀提议与允许决定精确匹配时原样返回 git/status，不匹配时拒绝。
+
+**队列独立审查。** Sol 内联运行生产 Router，排队请求 25 ms 到期不调用 Surface；阻塞事件循环后在超时
+回调前返回批准，仍由消费时截止复核拒绝。同一会话 a/b 同属 Thread t、c 属于另一个 Thread，批量取消 t
+后仅派发 a/c，不派发 b，c 仍可批准一次。注销取消活动和排队请求，新请求也拒绝；跨端 resolved 后迟到
+批准失效。不同会话与异步问题队列独立。PersistentInteractionPort 前序等待超时后，不调用底层 request。
+飞书准备阶段超时先撤销令牌，清理窗口内迟到取得消息 ID 后进行一次终态更新，不重新批准。
+
+**L04-F2 Telegram 交互端口关闭边界。** 原端口只等待准备与状态更新，没有自有清理截止栅栏。
+子代理运行生产端口和隔离 deferred API，close 约 5004 ms 返回后才给出消息 ID，仍记录
+`edit.afterCloseReturned=true`，决定保持拒绝。完整 Gateway 在随后关闭的 Outbox 中另有拒绝栅栏，
+所以此证据仅证明端口自身合同缺口，不能声称整机关闭后仍出网。
+修复缓存关闭 Promise，在准备窗口结束后禁止新状态清理，状态排空后中止自有取消信号；清理排队与 SDK
+调用继承该信号，等待也能从不响应取消的端口返回。原请求的失效决定保持不变，不重发未知发送。
+完整服务关闭顺序仍归 L12，本项只修复交互端口的迟到准备与清理所有权。
+
+主代理修复后运行生产 TelegramInteractionPort 与隔离 API：close 约 5007 ms 返回后迟到消息 ID
+`edits=0/lateEdit=false`；窗口内 25 ms 返回消息 ID 时 `edits=1` 并完成清理；状态编辑一直不返回时，
+close 约 5001 ms 返回，SDK 信号已中止，交互决定也返回拒绝。三项重复 close 均复用同一 Promise。
+隔离 API 的等待均已释放，无遗留异步任务；不代表真实 Telegram 已接受的消息一定被撤回。
+
+**完成边界。** 已核对请求归属、单次/持久范围映射、队列有效期、批量取消、跨端解决、祖先路由和
+三渠道清理消费，修复权限预览与 Telegram 端口关闭缺口。真实渠道送达/撤回、实际 App Server
+审批执行及 Windows/macOS 行为未观察；相关平台结论限于源码和隔离端口。没有新增或运行测试。
+本项修复和记录提交后，按顺序进入 L05 Thread 绑定、订阅与恢复。
