@@ -234,6 +234,8 @@ Server Request 适配只把已校验的稳定请求交给 Approval；Approval �
 `thread/settings/updated`；该通知用于同步共享 Thread 的模型、思考等级、服务层级、实际审批审查方式和
 Default/Plan 协作模式；其中 `approvalsReviewer` 是稳定字段。Client 仅按[受控协议边界](../../docs/index.md#受控协议边界)采用 Plan、Queue、Revert、计划任务动态工具、图片上传账户路由和 Auto-review 策略读取及审查状态投影六类明确列出的受控例外，并映射到业务窄类型；生成类型不自动开放其他实验能力。启用这些能力
 同时出现的实验审批字段必须在 `approval` 边界显式展示或默认拒绝，不能静默扩大授权。
+自动审批设置的本地提交守卫在 Provider 准备后、设置 RPC 发送前执行；守卫拒绝不发请求，
+保留明确的授权或 Thread 变化错误，并释放本次确认等待。已提交请求继续按设置通知和响应结算。
 
 固定协议的一次性 `localAudio` 已由 Application 的封闭 `TurnInput` 受控接入；Surface 只能提交
 经过格式、大小和私有临时文件边界验证的绝对路径，Application 还必须在 Turn 前确认当前模型目录

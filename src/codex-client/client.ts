@@ -1350,14 +1350,18 @@ export class CodexAppServerClient implements
     );
   }
 
-  async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review"): Promise<void> {
+  async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review", beforeSubmit?: () => void): Promise<void> {
+    beforeSubmit?.();
     await this.confirmThreadSettings(
       threadId,
       settings => settings.approvalsReviewer === reviewer,
-      signal => this.rpc.request<ThreadSettingsUpdateResponse>({
+      signal => {
+        beforeSubmit?.();
+        return this.rpc.request<ThreadSettingsUpdateResponse>({
         method: "thread/settings/update",
         params: { threadId, approvalsReviewer: reviewer } satisfies ThreadSettingsUpdateParams,
-      }, { retryOverload: false, signal }),
+        }, { retryOverload: false, signal });
+      },
       () => new UserFacingError("autoreview.update-unconfirmed", "会话审批方式更新结果尚未确认，请重新查询状态"),
       () => new UserFacingError("autoreview.update-failed", "会话审批方式更新失败，请重新查询状态"),
     );

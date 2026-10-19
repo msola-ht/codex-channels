@@ -316,7 +316,7 @@ export interface ConversationQueueRevertUseCases {
 /** Stable Session, Workspace and local project boundary. */
 export interface ConversationSessionUseCases {
   autoReview(target: ConversationTarget): ConversationAutoReviewState;
-  updateAutoReview(target: ConversationTarget, enabled: boolean, expectedThreadId?: string): Promise<ConversationAutoReviewState>;
+  updateAutoReview(target: ConversationTarget, enabled: boolean, expectedThreadId?: string, assertAuthorized?: () => void): Promise<ConversationAutoReviewState>;
   listSessions(
     target: ConversationTarget,
     options?: ConversationSessionQuery,
@@ -1282,8 +1282,8 @@ export class ConversationService implements
     return { threadId, reviewer: threadId ? this.router.modelSettingsForThread(threadId)?.approvalsReviewer ?? null : null, updated: false };
   }
 
-  updateAutoReview(target: ConversationTarget, enabled: boolean, expectedThreadId?: string): Promise<ConversationAutoReviewState> {
-    return this.locked(target, async () => {
+  updateAutoReview(target: ConversationTarget, enabled: boolean, expectedThreadId?: string, assertAuthorized?: () => void): Promise<ConversationAutoReviewState> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       const state = this.autoReview(target);
       if (expectedThreadId !== undefined && expectedThreadId !== state.threadId) {
         throw new UserFacingError("autoreview.stale-selection", "当前会话已变化，请重新发送 /autoreview");
@@ -1299,10 +1299,20 @@ export class ConversationService implements
       const reviewer = enabled ? "auto_review" : "user";
       if (state.reviewer === reviewer) return state;
       if (!this.threadApprovalsReviewer) throw new UserFacingError("autoreview.unavailable", "当前 Gateway 不支持修改会话审批方式");
+      const beforeSubmit = () => {
+        assertAuthorized?.();
+        if (this.router.current(target)?.threadId !== state.threadId) {
+          throw new UserFacingError("autoreview.stale-selection", "当前会话已变化，请重新发送 /autoreview");
+        }
+        this.requireIdle(target);
+        if (this.transfers?.hasPendingInteraction(state.threadId)) {
+          throw new UserFacingError("conversation.busy", "当前会话有待处理审批，请先处理审批", { reason: "pending-interaction" });
+        }
+      };
       try {
-        await this.threadApprovalsReviewer.updateThreadApprovalsReviewer(state.threadId, reviewer);
+        await this.threadApprovalsReviewer.updateThreadApprovalsReviewer(state.threadId, reviewer, beforeSubmit);
       } catch (error) {
-        if (error instanceof UserFacingError && (error.code === "autoreview.update-failed" || error.code === "autoreview.update-unconfirmed")) throw error;
+        if (error instanceof UserFacingError && ["autoreview.update-failed", "autoreview.update-unconfirmed", "autoreview.stale-selection", "command.authorization-changed", "conversation.busy"].includes(error.code)) throw error;
         throw new UserFacingError("autoreview.update-failed", "会话审批方式更新失败，请重新查询状态");
       }
       // The injected port waits for both Client confirmation and shared inbound

@@ -814,8 +814,8 @@ export abstract class GatewayComponentGraph {
         },
       },
       {
-        updateThreadApprovalsReviewer: (threadId, reviewer) =>
-          this.updateThreadApprovalsReviewer(threadId, reviewer),
+        updateThreadApprovalsReviewer: (threadId, reviewer, beforeSubmit) =>
+          this.updateThreadApprovalsReviewer(threadId, reviewer, beforeSubmit),
       },
       (target, actorId) => {
         this.requireRunning();
@@ -1354,8 +1354,8 @@ export abstract class GatewayComponentGraph {
     this.bindingRestoreCoordinator();
   }
 
-  private async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review"): Promise<void> {
-    await this.codex.updateThreadApprovalsReviewer(threadId, reviewer);
+  private async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review", beforeSubmit?: () => void): Promise<void> {
+    await this.codex.updateThreadApprovalsReviewer(threadId, reviewer, beforeSubmit);
     // RPC confirmation observes notifications before the asynchronous inbound
     // consumers reduce them. Wait for the shared reducer before Application
     // reads the actual reviewer or the next command checks a same-value no-op.

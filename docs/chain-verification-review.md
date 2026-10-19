@@ -210,8 +210,17 @@ Sol 实现 Queue Service/Port/Client/RPC 四文件，主代理实现命令入口
   加速配置读取后撤权不发后续 requirements 请求；默认配置已提交后撤权仍正常结算。
   这些观察核对 Client 的守卫传递，不代表真实 App Server 或平台网络观察。
 
-当前子链没有真实 Provider、平台账号或跨操作系统执行；自动审批设置、其他 Turn/Goal/扩展命令与异步交互
+当前子链没有真实 Provider、平台账号或跨操作系统执行；其他 Turn/Goal/扩展命令与异步交互
 仍属 L03 待验收内容。不能据此宣称整项授权已通过。
+
+**自动审批设置子链（基线 `f0480a25`）。** 命令与按钮传入同一 Workspace/Actor 守卫，Application
+固定锁前 Thread，并将空闲、交互与 Thread 身份检查经 Bootstrap/Provider 路由传至 Client 最终发送前。
+提交前失败保留结构化原因，已发设置仍执行原有权威确认，不回滚或重试。
+主代理运行生产 CommandService→ConversationService→Client，Provider 等待和 RPC/通知采用隔离端口：
+合法选择返回 `reviewer=auto_review/updated=true`、一次 `thread/settings/update`；等待期间撤权返回
+`command.authorization-changed`，切换 Thread 返回 `autoreview.stale-selection`，两者 RPC 均为 `0`、原设置为 `user`。
+发送后撤权时，实际设置保留 `auto_review`、RPC 仅一次，命令出口拒绝展示；每轮结束后临时设置监听均移除，
+仅保留 Client 原有监听。没有真实平台交互、Provider 启动或上游审批行为观察。
 
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。

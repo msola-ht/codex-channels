@@ -52,7 +52,7 @@ export type { GoalStatus, ThreadGoal };
  * reached the shared routing reducer; it never optimistically writes state.
  */
 export interface ThreadApprovalsReviewerPort {
-  updateThreadApprovalsReviewer(threadId: string, reviewer: Extract<ThreadApprovalsReviewer, "user" | "auto_review">): Promise<void>;
+  updateThreadApprovalsReviewer(threadId: string, reviewer: Extract<ThreadApprovalsReviewer, "user" | "auto_review">, beforeSubmit?: () => void): Promise<void>;
 }
 
 export interface TurnExecutionPort {

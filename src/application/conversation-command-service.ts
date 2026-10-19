@@ -353,9 +353,9 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   }
 
   async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult> {
-    this.authorize(target, actorId);
+    const assertAuthorized = this.commandGuard(target, actorId, false);
     this.conversations.touchActivity?.(target);
-    const state = await this.conversations.updateAutoReview(target, selection.enabled, selection.threadId);
+    const state = await this.conversations.updateAutoReview(target, selection.enabled, selection.threadId, assertAuthorized);
     this.authorize(target, actorId);
     return { kind: "auto-review", state };
   }
@@ -406,7 +406,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         if (argumentsText !== "on" && argumentsText !== "off") {
           throw new UserFacingError("autoreview.usage", "用法：/autoreview [on|off]");
         }
-        return { kind: "auto-review", state: await this.conversations.updateAutoReview(target, argumentsText === "on") };
+        return { kind: "auto-review", state: await this.conversations.updateAutoReview(target, argumentsText === "on", undefined, assertAuthorized) };
       }
       case "resume": {
         if (argumentsText) {
