@@ -12,7 +12,7 @@ Flash 的上下文、图片、思考等级与提示词复用仓库 `runtime/mode
 
 未启用 Flash 时，新增账户和刷新目录不要求 DS 模板，也不要求 Cline 目录包含 Flash。重新启用 Flash 时校验仓库 DS 模板；失败保留原目录。
 
-模板更新与来源刷新分开：运行 `codexc provider clp refresh-templates`，或在上述 Cline Pass 官方菜单选择“联网刷新模板来源（保存到本地）”，将官方目录的提交号、下载时间和模型元数据保存为 `~/.codex-connect/providers/clp/template-source.json`。已有文件先备份为 `.backup`；下载或校验失败保留旧文件，保存使用管理锁和并发修订复核，普通写入失败尝试回滚。需手动恢复时先停止刷新操作，核对当前文件与备份再恢复，避免覆盖后续刷新。缓存采用现有 Cline 来源 schema 1，不迁移其他目录；旧版本不读取此新文件，回退代码不会自动应用缓存。CLI／WebUI 的“更新模板”只读这份缓存，不因打开弹窗、预览或保存而联网；缓存缺失或损坏时提示先刷新。来源变化会使已打开的更新候选失效，须重新读取。缓存不自动过期，需要最新来源时手动刷新。首次接入和“发现／添加新模型”仍是独立的联网操作，不改写此模板来源缓存；独立 Relay 的目录也保持独立。刷新来源不修改已配置模型、不重启服务。
+CLI／WebUI 的“更新模板”在读取候选时下载一次 Cline 官方目录，下载整体限时 25 秒并支持取消；下载或校验失败时明确报错，重新读取候选后再操作，无需先运行独立 CLI 命令。只为当前已配置且远端仍受支持的模型生成候选，其中包含 Flash 时才读取仓库 DS 模板。候选快照仅保存在当前进程内，有效期 10 分钟；预览和确认复用同一快照，不重新联网，也不调用模型。候选过期、被淘汰、进程退出或目标目录修订变化后须重新读取。读取候选不修改已配置模型、不重启服务；首次接入、“发现／添加新模型”和独立 Relay 仍使用各自的目录流程。旧版本遗留的 `template-source.json` 及其备份不再读取，也不自动删除。
 
 CLP 自动审查不再受本地审批模型白名单限制；模型仍须符合正常目录与路由要求。
 审查沿用现有 Chat 桥和 Codex 审批机制，失败不会自动放行；各远端模型的兼容性须以实际执行为准。
@@ -58,13 +58,15 @@ Desktop，更换 App Server 实例仍须完全退出。聚合请求复用现有 
 
 Flash 投影继承 DS 模型定义中的说明、思考等级说明、提示词、上下文及压缩／截断默认值等受支持字段，再覆盖 CLP 的 ID、名称、`none` 思考等级、自由格式补丁和工具检索声明。图片输入仍可用，但 `supports_image_detail_original` 明确为 `false`，因为 Chat 桥只接受 `auto`、`low`、`high`；不把 DS Responses 的原图能力声明为 CLP 可用。该投影不是原始 DS JSON 的逐字段复制：旧字段沿用当前 Codex 的规范表示，未证实适用于 CLP 的 DS 压缩兼容标识 `comp_hash` 不继承。
 
-首次生成 CLP 共用目录时采用当前模板；已有账户需在模型管理中执行“更新模板”，选择提示词或能力范围，预览后保存，沿用目录备份与激活流程。能力更新可补齐模型说明、思考等级说明和摘要默认值等元数据；当前上下文、默认思考等级、工具、采样及压缩／截断设置仍保留本地值。发现模型、更新代码或重新配置 Key 不会覆盖现有条目；旧会话是否采用新的基础提示词还取决于客户端的会话恢复行为，不能只凭目录已更新就认定生效。Chat 桥仅转换请求中实际携带的指令，不再次追加这份提示词。
+首次生成 CLP 共用目录时采用当前模板；定义编译后从固定底座 `experimental_supported_tools` 补齐 `send_user_message_async`、`clock` 两项本地声明，异步提问实际工具名仍为 `request_user_input_async`。Flash 主提示词保留 DS 来源正文和显式空值，执行来源身份中性化、缺失辅助提示词补全与独立审批中文要求，不追加额外中文时钟指导；源 JSON 快照不改。
+
+已有账户需在模型管理中执行“更新模板”，选择提示词或能力范围，预览后保存，沿用目录备份与激活流程。能力更新可补齐模型说明、思考等级说明和摘要默认值等元数据，并仅合并来源的上述两项本地工具声明；其他工具能力、当前上下文、默认思考等级、采样及压缩／截断设置仍保留本地值。仅更新提示词不改工具声明，清除旧中文时钟尾段须明确选择提示词；未选范围保持原值。发现模型、更新代码或重新配置 Key 不会覆盖现有条目；旧会话是否采用新的基础提示词还取决于客户端的会话恢复行为，不能只凭目录已更新就认定生效。Chat 桥仅转换请求中实际携带的指令，不再次追加这份提示词。
 
 锁定 Codex 仅支持 Responses。App Server 仍配置 `wire_api = "responses"`，服务拥有的本地回环代理
 把完整请求转换后发送至 `https://api.cline.bot/api/v1/chat/completions`，再把 Chat SSE 转换回 Responses。
 Gateway 重启不会终止该桥或共享 App Server。转换逻辑独立在 `src/model-api`，可以供其他 Chat Provider 复用。
 
-支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，声明 `grammar`（lark）格式时其语法原文保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。CLP 共用目录声明 `apply_patch_tool_type: freeform`，模型改用自由格式 `apply_patch` 工具修改文件，渠道据此显示「修改文件」卡片；CLP 共用目录同时开启 `supports_search_tool`，客户端 `tool_search` 可检索并按需加载命名空间工具。已有模型须按模板更新的保留规则查看差异；工具配置不在模板能力覆盖范围内，无需删除账户。`text.format` 的 `json_schema` 按原样映射为 Chat `response_format`，因此 TUI 的线程标题生成等结构化请求无需关闭。未映射的顶层工具声明及其 `tool_choice` 交给 CLP 判断，其中 hosted `web_search` 先按精确模型的 `supports_web_search` 声明过滤；其他声明如服务端 `tool_search` 保留。放行不表示 CLP 或模型支持执行，不为这些声明注册客户端工具；回程不支持的工具调用和历史 `web_search_call` 仍明确失败。远程 compaction、加密或带签名的推理和 WebSocket 仍不支持；外部函数形式的工具仍按函数调用处理。
+支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，声明 `grammar`（lark）格式时其语法原文保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。CLP 共用目录声明 `apply_patch_tool_type: freeform`，模型改用自由格式 `apply_patch` 工具修改文件，渠道据此显示「修改文件」卡片；CLP 共用目录同时开启 `supports_search_tool`，客户端 `tool_search` 可检索并按需加载命名空间工具。已有模型须按模板更新的保留规则查看差异；除上述两项本地声明外，其他工具配置不在模板能力覆盖范围内，无需删除账户。`text.format` 的 `json_schema` 按原样映射为 Chat `response_format`，因此 TUI 的线程标题生成等结构化请求无需关闭。未映射的顶层工具声明及其 `tool_choice` 交给 CLP 判断，其中 hosted `web_search` 先按精确模型的 `supports_web_search` 声明过滤；其他声明如服务端 `tool_search` 保留。放行不表示 CLP 或模型支持执行，不为这些声明注册客户端工具；回程不支持的工具调用和历史 `web_search_call` 仍明确失败。远程 compaction、加密或带签名的推理和 WebSocket 仍不支持；外部函数形式的工具仍按函数调用处理。
 边界案例可对照 [CLIProxyAPI 的 Responses 转换器（固定提交 9bdde54）](https://github.com/router-for-me/CLIProxyAPI/tree/9bdde54b59d1af70ae0534a0ef61b2c3361a1257/internal/translator/openai/openai/responses)，仅作实现参考，不作为 Codex 协议来源或运行时依赖。
 CLP 按上游不拒绝的标准开放参数透传：`text.verbosity` 映射为 Chat 顶层 `verbosity`，`service_tier` 与 `client_metadata` 原值传递，由上游判断，不再由桥按值提前拒绝或丢弃。精确 Flash 模板声明详细程度可选、默认 `medium`，不声明 `priority`、`flex` 等加速或服务档位；参数允许透传不能作为服务档位能力证据。其他 CLP 模型仍沿用各自目录声明，不因 Flash 的探测结果自动增加这些选项。旧目录中曾注入的服务档位通过“更新模板 → 能力”展示删除差异，明确确认后清除；只更新提示词或运行设置不清除其他声明。新建及发现新增使用同一投影，默认服务档位仍保持标准。
 

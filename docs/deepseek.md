@@ -87,6 +87,14 @@ node scripts/update-model-templates.mjs --update-base --write # 校验后保存�
 CLP Flash 与自定义提供商导入 DS 模型时使用仓库的 DS 补全目录，不读取某个 DS 账户的设置。
 DS、OCG、CCG 仍通过官方脚本下载目录；显式创建或更新目录时使用仓库基础提示词补全缺失项并固化，读取已有目录不注入新模板。
 
+上述是仓库补全快照的维护合同。用于第三方账户的显式模板投影另从固定底座
+`experimental_supported_tools` 仅补齐 `send_user_message_async`、`clock` 两项本地工具声明；
+异步提问实际工具名仍是 `request_user_input_async`。保留 DS 原有主提示词及显式空值，执行来源身份中性化，
+缺失辅助提示词沿用既有补全，保留独立审批中文回复要求，不再追加额外中文时钟指导。
+DS 官方能力限制不变；运行副本仍关闭 Responses Lite，来源 Lite 元数据不改。
+已有账户须在“更新模板”中选择能力参数才合并这两项声明，其他工具能力保留；
+清除旧版主提示词中的中文时钟尾段须另选提示词并确认，读取和能力更新均不改提示词。
+
 ## 模型与设置
 
 DS 目录从官方安装脚本提取，不执行下载脚本。当前目录为 `deepseek-flash` 与
