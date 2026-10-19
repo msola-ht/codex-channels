@@ -148,16 +148,18 @@ Astra 已对基线 `1b198105` 上的初稿完成只读文档审查，确认四�
 
 ### L03 Actor、Workspace 与异步授权
 
-状态：进行中。L03-F1/F2 已在 `6032c7a1` 提交；L03-F3 的命令身份与 Queue 子链已在 `ee685e50` 提交，模型和会话生命周期子链已修复，
-其他命令链尚待修复与验收，不能视为整项通过。
-基线 `15e3322b`。主代理检查 Registry、Router、Application、Client 与热加载分类；
+状态：已审查（附下述证据限制），确认问题已修复并完成隔离生产路径观察；真实平台与跨操作系统观察缺口保留。
+起始基线 `15e3322b`。主代理检查 Registry、Router、Application、Client 与热加载分类；
 Sol 子代理只读检查三个 Surface 到 Application 的输入授权，并负责限定四个 Surface 文件的授权传递修复。
 
 | 发现 | 触发与影响 | 修复或剩余工作 |
 | --- | --- | --- |
-| L03-F1 失效工作区静默回退 | 保存的 Workspace ID 已移除，`Router.workspace` 自动改选默认目录，后续请求改变执行范围 | 改为 `workspace.missing` 且不改原选择；列表只读显示保存的 ID，显式选择有效项后恢复 |
+| L03-F1 失效工作区静默回退 | 保存的 Workspace ID 已移除，普通解析及订阅恢复清理会自动改选默认目录，后续请求改变执行范围 | 改为 `workspace.missing` 且不改原选择；恢复清理也保留选择；列表只读显示保存的 ID，显式选择有效项后恢复 |
 | L03-F2 普通输入授权丢失 | 聚合回调丢弃 Actor；下载、锁等待或 Provider/图片准备期间撤权，旧请求仍可提交 | 批次保留 Actor，三个渠道五处普通提交传实时授权；Application 固定 Workspace 并在锁内复核，Thread 新建/恢复及 Turn start/steer 保留最终守卫；迟到新订阅清理，不写回失效绑定 |
-| L03-F3 命令授权未贯穿 | 部分 Telegram 按钮未传 Actor，通用命令即使传 Actor 也未统一约束后续等待、RPC 和本地偏好写入 | 入口与按钮强制传 Actor，组合根注入实时策略；Queue、模型选择、恢复/接管及生命周期贯穿后续提交守卫；其他命令与异步交互仍待处理 |
+| L03-F3 命令授权未贯穿 | 部分 Telegram 按钮未传 Actor，通用命令即使传 Actor 也未统一约束后续等待、RPC 和本地偏好写入 | 入口与按钮强制传 Actor，组合根注入实时策略；下述全部命令子链贯穿后续提交守卫，已提交结果独立结算 |
+| L03-F4 异步回答丢失授权上下文 | 问题保留 Thread/取消状态，等待后失去原 Actor/Workspace 约束 | 提问前捕获原用户与工作区，三渠道限定回答者，交互与最终 Turn 共享守卫 |
+| L03-F5 查询结果错误归属 | 会话目录返回后改读当前工作区，可能把 A 目录 Thread 缓存为 B 工作区 | 固定初始工作区，后续查询与缓存写前复核；已合法提交的缓存不回滚 |
+| L03-F6 原模型目标消失后写偏好 | 官方归档/删除在模型配置等待期间解除绑定，旧模型 Fast 选择可流入下一默认模型 | 模型服务固定原 Thread，唯有自身跨 Provider 解绑成功才更新预期目标 |
 
 **已观察的隔离路径。** 使用生产 Router、内存 BindingStore、Application 和指定注入端口，无真实用户数据：
 
@@ -189,8 +191,7 @@ Sol 实现 Queue Service/Port/Client/RPC 四文件，主代理实现命令入口
   命令结果出口会再次检查 Actor，拒绝展示时明确提示已提交操作不会自动撤销，应重新查询。
 
 以上是隔离生产入口观察，没有真实平台投递、真实 Provider 启动或 App Server Queue 服务的观察。
-命令入口和结果出口的检查不等于其他命令内部已安全；下一步仍在 L03 处理其他写命令与只读结果的
-等待边界，再核对异步交互输入，完成后才进入 L02。
+命令入口和结果出口的检查不代表其他命令内部安全；其他写命令、只读结果与异步交互的补充证据见后文。
 
 **模型与会话生命周期子链（基线 `ee685e50`）。** 两个 Sol 分别实现模型窄端口/选择服务和 Router/Thread
 窄端口；主代理整合 CommandService、ConversationService、Provider Client 与 Telegram 模型按钮预查询。
@@ -210,8 +211,7 @@ Sol 实现 Queue Service/Port/Client/RPC 四文件，主代理实现命令入口
   加速配置读取后撤权不发后续 requirements 请求；默认配置已提交后撤权仍正常结算。
   这些观察核对 Client 的守卫传递，不代表真实 App Server 或平台网络观察。
 
-当前子链没有真实 Provider、平台账号或跨操作系统执行；其他 Turn/Goal/扩展命令与异步交互
-仍属 L03 待验收内容。不能据此宣称整项授权已通过。
+当前子链没有真实 Provider、平台账号或跨操作系统执行；其他 Turn/Goal/扩展命令与异步交互的证据独立记录如下。
 
 **自动审批设置子链（基线 `f0480a25`）。** 命令与按钮传入同一 Workspace/Actor 守卫，Application
 固定锁前 Thread，并将空闲、交互与 Thread 身份检查经 Bootstrap/Provider 路由传至 Client 最终发送前。
@@ -232,9 +232,8 @@ Sol 实现 Queue Service/Port/Client/RPC 四文件，主代理实现命令入口
 Sol 的补充生产入口观察覆盖锁等待期间切换 Thread、第一页返回撤权、Queue 返回撤权和最终端口准备后撤权，
 均未发回退；已发送后撤权仍返回实际结果，并使旧选择快照失效。没有真实用户历史回退或真实上游网络观察。
 
-**剩余命令清单。** 独立 Sol 只读追踪后确认以下仍需修复与观察，不能由已完成子链推定通过：
-
-- Hooks/Schedule/重置券和异步交互的独立授权合同，以及普通只读查询内部的分页/Provider 等待。
+**补充命令范围。** 独立 Sol 只读追踪后补入 Hooks/Schedule/重置券、异步交互的独立授权合同和
+普通只读查询内部分页/Provider 等待；各自修复与观察记录如下，没有由前述子链推定通过。
 
 **停止与结果范围子链（基线 `4dbeba79`）。** `/stop` 不进入会话锁，仍立即取消本地附件/输入准备；
 原 Thread 的中断通过 Provider 准备前后守卫，只有实时授权有效且原 Thread 仍归属同一 Conversation 才发送。
@@ -358,8 +357,21 @@ git 查询，以及 `/diff`、审批/工作区本地投影复用已有入口/出
 显式选择 A 后恢复到 `/A`。有效 A 目录的 Thread 不存在和其他目录后台 Thread 不存在，均读取一次后清理绑定，
 会话选择仍为 A。SQLite 同一删除接口保留选择经源码核对，本次没有实际持久数据库重开或真实重连观察。
 
+**模型原目标补充（基线 `04ed5150`）。** 独立 Sol 只读核实 Conversation 锁不能阻止官方通知直接解除绑定，
+给出 `/fast` 从支持 Fast 的旧模型流入不支持 Fast 的默认模型的完整因果链；没有证据表明锁内能插入另一已绑定
+前台，也没有把 `/resume` 两阶段锁本身认定为错误目标。后者始终固定显式选择 ID，第二阶段复核当前绑定/归属。
+另一 Sol 在模型服务组合原 Thread 与授权守卫；主代理核对 state/browse、模型/effort/速度及 Router 自身解绑
+合同。跨 Provider 仅在自身 newSession 成功后接受未绑定，已发送默认配置保存不回滚。
+Sol 运行生产 ModelSelectionService→SessionRouter→MemoryBindingStore/WorkspaceRegistry、隔离模型端口：
+正常 Fast 返回 fast、一次默认保存；effort 返回 high；同 Provider 模型选择和跨 Provider 切换均返回可用状态，
+后者解绑后保存 third/vendor/medium/fast，`providerPending=true`。目录、加速配置、默认 effort/tier、解绑等待中
+调用实际 Router.forgetThread，均 `command.authorization-changed`、无新偏好。默认保存前失目标零写入，
+已保存后失目标保留一次 fast/default 写入、无后续偏好。共 17 个隔离场景；最末核对原 Fast 模型消失后，
+下一默认 plain 模型 `serviceTiers=[]/serviceTier=null/pending=false`，Turn overrides 和 Thread options 均为空。
+没有真实平台或 App Server 模型执行观察，结论限于生产模型选择/路由和隔离能力端口。
+
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。
-当前记录没有真实平台撤权或 Windows/macOS 观察。末轮独立审查发现模型选择等待期间官方归档/删除可解除原绑定，
-旧模型 Fast 偏好仍可能落到下一模型；该补充修复及 L03 最终整项验收未完成，
-后续仍留在 L03，不跳到 L02。
+当前记录没有真实平台撤权或 Windows/macOS 观察，也没有替代 L04–L08、L16–L18 的独立业务验收。
+L03 已识别的输入、命令、查询、异步回答及恢复分支均有上文源码关联、修复与对应隔离证据；
+已提交子链正常门禁通过，未运行或新增测试。保留真实服务观察限制，下一项按顺序进入 L02。

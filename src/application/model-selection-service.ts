@@ -79,6 +79,7 @@ export class ModelSelectionService {
   }
 
   async state(target: ConversationTarget, requireSelection = false, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    assertAuthorized = this.selectionGuard(target, assertAuthorized);
     assertAuthorized?.();
     let filter = this.providerFilterByConversation.get(this.key(target));
     if (filter !== undefined && this.providersWithoutSubscription().has(filter)) {
@@ -101,6 +102,7 @@ export class ModelSelectionService {
   }
 
   async browseProvider(target: ConversationTarget, provider: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    assertAuthorized = this.selectionGuard(target, assertAuthorized);
     const models = await this.listModels(/^\d+$/.test(provider.trim()) ? undefined : provider.trim(), assertAuthorized);
     const resolvedProvider = resolveProvider(this.selectableModels(models), provider);
     if (resolvedProvider === undefined) {
@@ -174,6 +176,8 @@ export class ModelSelectionService {
   }
 
   async selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    const expected = { threadId: this.router.current(target)?.threadId };
+    assertAuthorized = this.selectionGuard(target, assertAuthorized, expected);
     const providerFilter = this.providerFilterByConversation.get(this.key(target));
     const models = await this.listModels(typeof selector === "string" ? providerFilter : selector.provider, assertAuthorized);
     const eligible = this.selectableModels(models);
@@ -268,6 +272,9 @@ export class ModelSelectionService {
         model: selected.model, modelProvider: selectedProvider,
         effort, serviceTier: nextPending.serviceTier ?? null,
       }, undefined, assertAuthorized);
+      // Only our completed provider switch may replace the original target
+      // with an unbound conversation. External removal must fail the guard.
+      expected.threadId = undefined;
     }
     assertAuthorized?.();
     this.requireSubscribedProvider(selectedProvider);
@@ -279,6 +286,7 @@ export class ModelSelectionService {
   }
 
   async selectEffort(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    assertAuthorized = this.selectionGuard(target, assertAuthorized);
     const models = await this.listModels(this.status(target).modelProvider, assertAuthorized);
     const current = await this.resolveState(target, models, undefined, assertAuthorized);
     assertAuthorized?.();
@@ -299,6 +307,7 @@ export class ModelSelectionService {
   }
 
   async selectFastMode(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    assertAuthorized = this.selectionGuard(target, assertAuthorized);
     const normalized = selector.trim().toLowerCase();
     if (normalized && !new Set(["on", "ultrafast", "off", "status"]).has(normalized)) {
       throw new UserFacingError("fast.usage", "加速参数必须是 on、ultrafast、off 或 status");
@@ -704,6 +713,19 @@ export class ModelSelectionService {
 
   private key(target: ConversationTarget): string {
     return conversationTargetKey(target);
+  }
+
+  private selectionGuard(
+    target: ConversationTarget,
+    assertAuthorized?: () => void,
+    expected = { threadId: this.router.current(target)?.threadId },
+  ): () => void {
+    return () => {
+      assertAuthorized?.();
+      if (this.router.current(target)?.threadId !== expected.threadId) {
+        throw new UserFacingError("command.authorization-changed", "模型选择期间会话已变化");
+      }
+    };
   }
 
   private normalizeProvider(provider: string | undefined): string | undefined {
