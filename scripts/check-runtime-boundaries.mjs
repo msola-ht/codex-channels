@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import ts from "typescript";
 
 const root = resolve(import.meta.dirname, "..");
 const sourceDirectories = ["runtime", "scripts", "bin"];
@@ -242,11 +243,22 @@ function sourceFiles(directory) {
 }
 
 function importSpecifiers(source) {
-  return [
-    ...source.matchAll(/\bfrom\s+["']([^"']+)["']/gu),
-    ...source.matchAll(/\bimport\s+["']([^"']+)["']/gu),
-    ...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']/gu),
-  ].map((match) => match[1]).filter(Boolean);
+  const specifiers = [];
+  const parsed = ts.createSourceFile("source.ts", source, ts.ScriptTarget.Latest);
+  visit(parsed);
+  return specifiers;
+
+  function visit(node) {
+    const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
+      ? node.moduleSpecifier
+      : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+        ? node.arguments[0]
+        : ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
+          ? node.argument.literal
+          : undefined;
+    if (specifier && ts.isStringLiteralLike(specifier)) specifiers.push(specifier.text);
+    ts.forEachChild(node, visit);
+  }
 }
 
 function display(file) {

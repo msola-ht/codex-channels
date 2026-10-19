@@ -1,10 +1,10 @@
-import { mkdirSync, realpathSync, statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { resolveExecutable } from "../runtime/executable.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { securePrivateDirectorySync } from "../runtime/private-file.mjs";
+import { ensurePrivateDirectorySync } from "../runtime/private-file.mjs";
 import { packageDir, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -67,8 +67,7 @@ export function resolveServiceInstallContext(
 }
 
 export function ensureServiceInstallRuntimeDirectory(context) {
-  mkdirSync(context.runtimeDir, { recursive: true, mode: 0o700 });
-  securePrivateDirectorySync(context.runtimeDir);
+  ensurePrivateDirectorySync(context.runtimeDir);
 }
 
 function uniquePaths(paths) {

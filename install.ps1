@@ -55,7 +55,7 @@ function Invoke-Captured([string]$File, [string[]]$Arguments, [string]$WorkingDi
 }
 
 function Protect-Directory([string]$Path, [string]$WorkingDirectory) {
-  Invoke-Checked 'node.exe' @('--input-type=module', '--eval', "import { securePrivateDirectorySync } from './runtime/private-file.mjs'; securePrivateDirectorySync(process.argv[1]);", $Path) $WorkingDirectory
+  Invoke-Checked 'node.exe' @('--input-type=module', '--eval', "import { ensurePrivateDirectorySync } from './runtime/private-file.mjs'; ensurePrivateDirectorySync(process.argv[1]);", $Path) $WorkingDirectory
 }
 
 function Read-CodexVersion($Command) {
@@ -70,7 +70,7 @@ function Ensure-CodexCli($Command, [string]$ExpectedVersion, [string]$Npm, [stri
   if ($actual -ne $ExpectedVersion) {
     $currentVersion = if ($actual) { $actual } else { '未安装' }
     Write-Host "[提示] Codex CLI 当前 $currentVersion，正在同步为项目锁定版本 $ExpectedVersion"
-    Invoke-Checked $Npm @('install', '--global', '--no-audit', '--no-fund', "@openai/codex@$ExpectedVersion") $WorkingDirectory | Out-Host
+    Invoke-Checked $Npm @('install', '--global', '--include=optional', '--no-audit', '--no-fund', "@openai/codex@$ExpectedVersion") $WorkingDirectory | Out-Host
     $Command = Get-Command codex -ErrorAction Stop
   }
   $actual = Read-CodexVersion $Command
@@ -108,15 +108,24 @@ if (-not [System.IO.Path]::IsPathRooted($installRoot)) { throw 'CODEX_CONNECT_HO
 $installRoot = [System.IO.Path]::GetFullPath($installRoot)
 $checkout = Join-Path $installRoot 'codex-channels'
 if (Test-Path -LiteralPath $checkout) { throw "源码目录已存在：$checkout；已有源码安装请使用 codexc update" }
+if ((Test-Path -LiteralPath $installRoot) -and ((Get-Item -LiteralPath $installRoot -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+  throw "安装根目录不能是链接或重解析点：$installRoot"
+}
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 
 $staging = Join-Path $installRoot ('.codex-channels-install.' + [guid]::NewGuid().ToString('N'))
 $repositoryRoot = Join-Path $staging 'repository'
-$completed = $false
+$sourcePlaced = $false
 try {
   New-Item -ItemType Directory -Path $staging -Force | Out-Null
   Write-Output "[提示] 正在克隆 Codex Connect $Branch 到 $checkout"
   Invoke-Checked $git @('-c', 'core.longpaths=true', 'clone', '--quiet', '--branch', $Branch, '--single-branch', $repository, $repositoryRoot) $installRoot
+  $ignoreScripts = Invoke-Captured $npm @('config', 'get', 'ignore-scripts') $repositoryRoot
+  if ($ignoreScripts -ne 'false') {
+    throw 'Windows 源码安装需要生成原生组件；请将 npm ignore-scripts 设置为 false 后重试'
+  }
+  Invoke-Checked $node @((Join-Path $repositoryRoot 'scripts\build-windows-native.mjs')) $repositoryRoot
+  Protect-Directory $installRoot $repositoryRoot
   Protect-Directory $staging $repositoryRoot
 
   $versionDocument = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src\codex-protocol\version.json') -Raw -Encoding utf8 | ConvertFrom-Json
@@ -132,7 +141,8 @@ try {
 
   Invoke-Checked $git @('config', '--local', 'codex-connect.managed-source', 'true') $repositoryRoot
   Invoke-Checked $git @('config', '--local', 'codex-connect.npm-prefix', $npmPrefix) $repositoryRoot
-  Move-Item -LiteralPath $repositoryRoot -Destination $checkout
+  Invoke-Checked $node @('--input-type=module', '--eval', "import { lstatSync, renameSync } from 'node:fs'; if (lstatSync(process.argv[2], { throwIfNoEntry: false })) { throw new Error('源码目录在安装期间出现，拒绝覆盖'); } renameSync(process.argv[1], process.argv[2]);", $repositoryRoot, $checkout) $installRoot
+  $sourcePlaced = $true
   $packageDirectory = Join-Path $staging 'package'
   New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
   Write-Output '[提示] 正在打包 Codex Connect 源码'
@@ -142,7 +152,7 @@ try {
   Invoke-Checked $node @((Join-Path $checkout 'scripts\installation-command.mjs'), '安装 npm 全局命令', '--', $npm, 'install', '--global', '--ignore-scripts', '--loglevel=error', '--no-audit', '--no-fund', (Join-Path $packageDirectory $packEntry.filename)) $checkout
   Invoke-Checked $node @((Join-Path $checkout 'scripts\source-install-metadata.mjs'), 'record', $checkout, $npmPrefix) $checkout
   if (-not (Test-Path -LiteralPath (Join-Path $npmPrefix 'codexc.cmd'))) { throw "npm 全局命令入口不存在：$npmPrefix\codexc.cmd" }
-  $completed = $true
+  $sourcePlaced = $false
   Write-Output "[成功] Codex Connect Git 源码已安装：$checkout"
   if ($loginState -ne '已登录') {
     Write-Output '[提示] 请先运行 codex login status 检查登录状态；如未登录，运行 codex login。'
@@ -154,5 +164,5 @@ try {
   }
 } finally {
   if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
-  if (-not $completed -and (Test-Path -LiteralPath $checkout)) { Remove-Item -LiteralPath $checkout -Recurse -Force }
+  if ($sourcePlaced) { Write-Output "[提示] 安装未完成；源码已保留在 $checkout。请修复错误后在该目录运行 npm run install:global。" }
 }

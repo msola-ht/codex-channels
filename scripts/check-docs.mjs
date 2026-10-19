@@ -55,15 +55,15 @@ function repositoryFiles() {
     { cwd: root, encoding: "utf8" },
   ).trim();
   const args = staged
-    ? ["ls-files", "--cached"]
-    : ["ls-files", "--cached", "--others", "--exclude-standard"];
+    ? ["ls-files", "--cached", "-z"]
+    : ["ls-files", "--cached", "--others", "--exclude-standard", "-z"];
   const output = execFileSync(
     "git",
     args,
     { cwd: root, encoding: "utf8" },
   );
   return output
-    .split(/\r?\n/)
+    .split("\0")
     .filter(Boolean)
     .filter((file) => existsSync(join(root, file)));
 }

@@ -1,8 +1,9 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
+import ts from "typescript";
 
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
@@ -42,10 +43,11 @@ export function createVerificationPlan(changes, { ci = false, root = process.cwd
     args: ["node_modules/eslint/bin/eslint.js", ...lintFiles] });
   if (paths.some(path => path.endsWith(".md")) || code.some(path => /^(?:src|scripts|bin|runtime|\.github)\//u.test(path))) checks.push(docs);
   const webui = code.some(path => path.startsWith("webui/"));
-  const webuiShared = code.some(path => path === "scripts/webui-api.ts"
-    || /^runtime\/model-display-name\.(?:mjs|d\.mts)$/u.test(path));
   const sharedBuild = code.some(path => /^(?:package(?:-lock)?\.json|tsconfig(?:\.build)?\.json|scripts\/(?:verify-commit|verification-scope|prepare-package)\.mjs)$/u.test(path));
+  const sharedInputs = !webui && !sharedBuild && code.length > 0 ? webuiInputFiles(root) : new Set();
+  const webuiShared = code.some(path => sharedInputs.has(path));
   if (webui || webuiShared || sharedBuild) checks.push(webuiBuild, webuiLint, dictionary);
+  else if (code.includes("scripts/webui-i18n.mjs")) checks.push(dictionary);
   if (code.some(path => /\.(?:sh|ps1)$/u.test(path) || /^(?:launchd|systemd)\//u.test(path)
     || /^(?:runtime\/(?:shutdown-budget|service-targets)|scripts\/(?:service-install-management|verify-commit))\.mjs$/u.test(path))) {
     if (platform !== "win32") checks.push(...shell);
@@ -57,6 +59,72 @@ export function createVerificationPlan(changes, { ci = false, root = process.cwd
     checks.push(gatewayBuild);
   }
   return { reason, checks };
+}
+
+function webuiInputFiles(root) {
+  const inputs = new Set();
+  const configurations = new Set();
+  visitConfiguration(join(root, "webui/tsconfig.json"));
+  return inputs;
+
+  function visitConfiguration(path) {
+    if (configurations.has(path)) return;
+    configurations.add(path);
+    const config = ts.getParsedCommandLineOfConfigFile(path, {}, {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic: diagnostic => { throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")); },
+    });
+    if (config.errors.length) throw new Error(ts.formatDiagnosticsWithColorAndContext(config.errors, {
+      getCanonicalFileName: path => path, getCurrentDirectory: () => root, getNewLine: () => "\n",
+    }));
+    for (const file of config.fileNames) visitSource(file, config.options);
+    for (const reference of config.projectReferences ?? []) visitConfiguration(ts.resolveProjectReferencePath(reference));
+  }
+
+  function visitSource(file, options) {
+    const path = relative(root, file).replaceAll("\\", "/");
+    if (isAbsolute(path) || path.startsWith("../") || path.split("/").includes("node_modules") || inputs.has(path)) return;
+    inputs.add(path);
+    if (!/\.(?:[cm]?ts|tsx|[cm]?js)$/u.test(file)) return;
+    const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest);
+    visit(source);
+
+    function visit(node) {
+      const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
+        ? node.moduleSpecifier
+        : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+          ? node.arguments[0]
+          : ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
+            ? node.argument.literal
+            : undefined;
+      if (specifier && ts.isStringLiteralLike(specifier)
+        && (specifier.text.startsWith(".") || specifier.text.startsWith("@/"))) {
+        const resolved = ts.resolveModuleName(specifier.text, file, options, ts.sys).resolvedModule;
+        const asset = resolve(dirname(file), specifier.text);
+        if (!resolved && !(specifier.text.startsWith(".") && existsSync(asset))) {
+          throw new Error(`无法确定 WebUI 依赖：${path} -> ${specifier.text}`);
+        }
+        visitSource(resolved?.resolvedFileName ?? asset, options);
+        // Declaration resolution alone cannot observe changes to browser-loaded JS.
+        const typeOnly = source.isDeclarationFile || ts.isImportTypeNode(node)
+          || (ts.isImportDeclaration(node) && (node.importClause?.isTypeOnly
+            || (!node.importClause?.name && node.importClause?.namedBindings
+              && ts.isNamedImports(node.importClause.namedBindings)
+              && node.importClause.namedBindings.elements.length > 0
+              && node.importClause.namedBindings.elements.every(element => element.isTypeOnly))))
+          || (ts.isExportDeclaration(node) && (node.isTypeOnly
+            || (node.exportClause && ts.isNamedExports(node.exportClause)
+              && node.exportClause.elements.length > 0
+              && node.exportClause.elements.every(element => element.isTypeOnly))));
+        if (!typeOnly && /\.mjs$/u.test(specifier.text)) {
+          const implementation = resolve(dirname(file), specifier.text);
+          if (!existsSync(implementation)) throw new Error(`WebUI 运行时依赖不存在：${path} -> ${specifier.text}`);
+          visitSource(implementation, options);
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+  }
 }
 
 function runChecks(checks) {

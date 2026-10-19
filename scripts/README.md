@@ -21,7 +21,7 @@
 - `runtime-config.mjs` / `runtime-config.d.mts`：解析并声明用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断和
   独立项目命令提供不修改配置权限的必需/可选路径定位，可选定位只把文件不存在视为未初始化，
   但显式指定的配置文件缺失及其他文件系统错误仍失败；首次创建配置前初始化默认 Workspace 的 Git 仓库，
-  保留已有 `.git` 且不创建提交，初始化失败不写入配置；启动与写入流程显式收紧目录和配置文件权限。
+  保留已有 `.git` 且不创建提交，初始化失败不写入配置；`requireUserConfig` 的只读模式校验现有权限但不修复，用于安装预检与就绪查询；启动与写入流程显式收紧目录和配置文件权限。
 - `runtime-environment.mjs`：在已定位的用户配置上统一装配 Gateway、App Server 与管理脚本使用的
   `CODEX_CONNECT_HOME`、配置路径、Codex 可执行文件和代理环境；同时保留未合并系统代理的环境，供
   前台监管与 Gateway 服务子进程自行解析，避免自动发现结果变成固定环境覆盖。需要在配置损坏时仍可运行的服务恢复
@@ -487,10 +487,10 @@
 - `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
 - `webui-i18n.mjs`：静态读取 WebUI 中英文文案字典，检查键与占位符，并按 Git 基线输出包含术语表的增量翻译任务 JSON；不执行字典代码、不调用翻译服务、不写回译文。
 - `verification-scope.mjs`：读取本地提交或指定 Git 基线的改动文件，供检查入口选择静态检查范围。
-- `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行必要静态检查与构建，`verify:ci` 执行完整静态检查与构建。
+- `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行必要静态检查与构建；从 WebUI TypeScript 配置及源码导入追踪共享声明、浏览器实际加载的实现和传递依赖，避免漏掉 WebUI 构建。`verify:ci` 执行完整静态检查与构建。
   Unix 平台对安装脚本及两个服务控制脚本逐文件执行 `bash -n`，任一文件失败即阻止后续检查。
-  WebUI 共享 API 类型 `webui-api.ts` 纳入根 TypeScript 与 ESLint 类型检查；单独变更该文件或
-  `runtime/model-display-name.mjs` 及其声明时，也触发 WebUI 构建、Lint 和翻译字典检查，包括删除这些文件的变更。
+  WebUI 共享 API 类型 `webui-api.ts` 纳入根 TypeScript 与 ESLint 类型检查；共享输入变更触发
+  WebUI 构建、Lint 和翻译字典检查，字典检查脚本自身变更也触发字典检查。共享依赖缺失或配置无法解析时直接拒绝继续。
   macOS 枚举四类 launchd 模板，替换共享停止预算的整数占位符后通过标准输入交给 `plutil`；预算、服务清单或模板渲染入口变化也触发此检查。模板检查不代替安装和服务运行观察。
   输出选中范围、每个阶段及全部检查的累计耗时。类型检查使用 TypeScript 原生增量缓存，覆盖源码及其依赖；
   缓存位于 `node_modules/.cache/codexc/check.tsbuildinfo`，可删除后重建，不缓存后续版本和边界检查。
@@ -522,12 +522,12 @@
   并检查登录状态；随后完成依赖、Gateway/WebUI 构建和 npm 全局命令注册。不覆盖现有源码目录、
   配置或数据，也不写入 Shell PATH。
 - `clean-dist.mjs`：构建前清理 `dist/`。
-- `build-windows-native.mjs` / `build-windows-native.ps1`：Windows 的 `postbuild` 使用现有 PowerShell 7 将共享 C# 编译为 `dist/windows-native/CodexcWindows.dll` 并生成一致性清单；其他平台及显式禁用生命周期脚本时不编译。产物随 `dist/` 打包，运行时只加载。编译失败不留下有效清单。
+- `build-windows-native.mjs` / `build-windows-native.ps1`：Windows 的 `postbuild` 使用现有 PowerShell 7 将共享 C# 编译为 `dist/windows-native/CodexcWindows.dll` 并生成一致性清单；首装器确认生命周期启用后也先调用该生成器，以便在完整构建前保护安装目录。其他平台及显式禁用生命周期脚本时不编译。产物随 `dist/` 打包，运行时只加载。编译失败不留下有效清单。
 - `sandbox-dependencies.mjs` / `sandbox-dependencies.d.mts`：`install.sh` 与本地源码全局安装共用的沙盒系统依赖检查；macOS 检查固定系统 Seatbelt 入口，Linux 缺少 `bwrap` 时通过 apt-get/dnf 补装，并检查锁定 Codex 所需的 `--perms`。不改变 Codex 权限或系统安全策略；普通用户仅使用非交互 sudo，无授权时给出人工处理步骤。
 - `install-global-source.mjs`：显式准备干净源码、自动执行 webui 子项目依赖安装与前端构建
   （`webui/dist`），再生成临时 npm tarball 并通过禁用隐式生命周期脚本的 npm 全局安装；安装结果
   不链接或依赖源码目录，并避免 npm 12 脚本策略跳过构建；源码更新可用内部 `--prepared` 复用已
-  验证的 Gateway/WebUI 构建结果，避免重复构建。Windows 在两条路径打包前均验证原生 DLL 与当前源码、宿主环境匹配且可加载；缺失时失败，不隐式重建。注册全局 Gateway 前按协议元数据同步缺失或版本不符的默认 Codex CLI；CLI 安装显式包含平台可选依赖，执行失败与版本不符分别报告。显式二进制无效或版本不符时失败关闭，不依赖渠道配置。
+  验证的 Gateway/WebUI 构建结果，避免重复构建；入口产物必须是非符号链接的普通文件。Windows 在两条路径打包前均验证原生 DLL 与当前源码、宿主环境匹配且可加载；缺失时失败，不隐式重建。注册全局 Gateway 前按协议元数据同步缺失或版本不符的默认 Codex CLI；CLI 安装显式包含平台可选依赖，执行失败与版本不符分别报告。显式二进制无效或版本不符时失败关闭，不依赖渠道配置。
 - `source-install-summary.mjs`：安装成功后共用的只读下一步指引；区分配置不存在、已有普通配置文件和无法确认状态，不把配置存在视为服务就绪，不修改配置或启动服务。构建、依赖检查阶段不加载该模块或输出初始化建议；指引生成失败不改变已完成安装的结果。
 - `webui-dev.mjs`：仓库根目录 `npm run webui:dev` 的一键开发入口，并行启动
   `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
@@ -554,7 +554,7 @@
   上游响应或敏感配置内容。
 - `service-install-context.mjs` / `service-install-context.d.mts`：后台服务安装器共用的配置、
   默认 Workspace、主 Socket、Codex/Node 可执行文件及服务 PATH 解析；读取计划不修改磁盘，执行时才把
-  运行目录创建为 `0700`。显式 `CODEX_HOME` 按锁定上游规则校验为已存在的目录并规范化；Windows 服务定义保存该目录，未设置时保留上游默认目录语义。
+  运行目录创建为 `0700`；已有目录也须先通过类型、链接与属主校验，再应用共享平台私有保护。显式 `CODEX_HOME` 按锁定上游规则校验为已存在的目录并规范化；Windows 服务定义保存该目录，未设置时保留上游默认目录语义。
 - `service-install-management.mjs` / `service-install-management.d.mts`：把服务安装拆成配置校验、平台
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自

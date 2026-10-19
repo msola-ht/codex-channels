@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { runInstallationCommand } from "./installation-command.mjs";
@@ -21,7 +21,7 @@ export async function buildSourceCheckout(checkout, { readIgnoreScripts, runStag
     await runStage(label, args, cwd);
   }
   if ([join(checkout, "dist", "main.js"), join(webui, "dist", "index.html")]
-    .some(path => !existsSync(path) || !statSync(path).isFile())) {
+    .some(path => !lstatSync(path, { throwIfNoEntry: false })?.isFile())) {
     throw new Error("源码构建结果不完整");
   }
 }

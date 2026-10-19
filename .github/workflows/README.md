@@ -6,7 +6,8 @@
 
 - `ci.yml`：在 Pull Request 和手动触发时，使用 Ubuntu 与 macOS、Node.js 22.22.0 执行
   `npm run verify:ci` 静态检查与构建，并使用 Windows latest 执行独立的构建、类型、文档和
-  PowerShell 语法检查。Windows Job 不运行 Unix 专属服务检查。Branch Protection 要求 PR 的当前
+  PowerShell 语法检查。Windows 的完整类型与边界检查、独立构建分成两个步骤，任一步失败均阻止后续步骤，
+  Job 不运行 Unix 专属服务检查。Branch Protection 要求 PR 的当前
   merge ref 通过全部门禁并禁止直接写入 `main`，因此 push 不再重复运行同一检查。检查覆盖提交
   差异、类型和版本、生产 Lint、文档链接和索引、Shell
   及平台模板检查；macOS 通过现有验证入口枚举四类 launchd 模板，替换共享停止预算的整数占位符后交给 `plutil` 校验，不直接将未渲染的整数占位符当作 plist 值。此检查不注册或启动服务。WebUI 字典检查通过 `npm run i18n:check` 校验键与占位符。
@@ -43,7 +44,9 @@ hook 配置；随后直接调用 `npm run verify:ci`。本地 `npm ci`、`npm in
 `npm run hooks:install` 则启用仓库内 `.githooks/pre-commit`。
 
 本地 Hook 使用 `verify:commit`，按本次提交范围执行必要静态检查与构建。
-改动文件由 `scripts/verification-scope.mjs` 读取，PR CI 通过 `verify:ci` 执行完整静态检查与构建。
+改动文件由 `scripts/verification-scope.mjs` 读取；WebUI 的共享输入按其 TypeScript 配置和源码导入追踪，
+包含声明、浏览器实际加载的 JavaScript 实现及传递依赖，依赖无法确定时拒绝继续。
+PR CI 通过 `verify:ci` 执行完整静态检查与构建。
 
 项目不维护独立基础版本号；`@hegenai/codexc`、Gateway 和发布 Tag 使用锁定的 Codex CLI
 正式发行版本，候选版和修复版只允许增加受控的 `-rc.N` 或 `-fixN` 后缀。升级提案只认
