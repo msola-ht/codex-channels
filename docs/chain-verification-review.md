@@ -941,3 +941,39 @@ interrupted、写入 0；创建 Thread 后取消和最终 Turn 前撤权均 inte
 无新测试、脚本或文档，相关模块说明和计划任务专题已同步；静态检查结果单列为交付门禁。
 首次提交门禁在新增回调的 unbound-method Lint 失败；将接口方法签名改为无接收者的函数属性，
 保持回调调用行为不变后重新提交，不绕过门禁。
+
+### L09 Relay 准入、出站、流与交付
+
+**状态：已审查（附证据限制）。** L08 已提交 `81b5194e`，重新提交的类型、边界、Lint、文档及构建门禁通过
+（13.0 秒）。本项沿鉴权/排队→材料复核→模型出站→流解析→客户端交付→指标追踪；使用本机 HTTP
+与合成模型结果，不调用收费模型。复用 L15 未变化的聚合材料快照证据，未知流终态不得视为生成成功。
+
+**主入口实际观察。** 主代理核对 Server→Admission→材料/采集器准备→Direct Model HTTP 最终
+recheck→指标收尾的调用链；真实本机 Relay HTTP 与本机合成上游观察：
+
+- JSON 和 SSE 各返回 200/hello，上游各收到一次，指标分别 completed/finished；材料复核失败返回
+  503/upstream_error，Key 在准备期间撤销返回 503/request_revoked，二者均无新增上游调用或指标。
+- 一条 SSE 已出站、第二条排队时撤销 Key：第一条已发 200 的流结束为错误结果，第二条 503，
+  上游总共只有第一条调用，单条指标 failed/failed；不能从已发送的 HTTP 200 推断模型成功。
+- 准备期间撤销后迟到的材料返回，503、出站 0、指标 0；迟到采集器返回亦不出站，finish 仅调用一次，
+  参数 failed/failed/preparation_cancelled。每轮 active、pending、waiting、bytes 均为 0，metricFailures=0。
+- 全部请求使用合成 Key 与本机上游，未读取用户凭据；Relay 和 HTTP 上游已关闭，无遗留监听或文件。
+
+**出站与流独立审查。** Sol 核对 Direct Chat/Responses、共享 HTTP/SSE、协议观察和工具/图片
+转换，未确认新增必修缺陷；主代理复核发送前守卫、终态与交付顺序等关键位置。实际观察：
+
+- Chat 缺 DONE、缺 finish、畸形 JSON、结束后追加正文及非法 UTF-8 均明确失败，不发布追加或非法
+  帧；合法相同 finish 的空 assistant usage 尾帧完成且 outputTokens=2。Responses 缺终态、event/type
+  不同、terminal output=null 均拒绝；failed 合成秘密正文被替换为受控错误，observer=failed。
+- 两协议有效终态后 emit 抛错，交付异常独立传播，observer 仍 completed；中途取消 observer=unknown。
+  CLP 支持的 JSON 包装得到 json-ok/completed，Responses JSON 长度截断保持 incomplete。
+- 生产 sendDirectChat 的首次 emit 挂起 25ms 时 delivered=1/status=unknown；释放后才到
+  delivered=3/status=completed，后续终态没有越过交付等待。U12 的 16MiB 真实 HTTP 背压超时和监听
+  清理证据复用：相关生产文件仍为 e035adeb 对应内容，未重复运行。
+- 原生 Chat 畸形工具参数按其原样转发合同保留；Chat→Responses 转换在 finish 校验失败，不发布工具。
+  同样参数遇到 length 只发布 incomplete、terminalOutput=[]。并行工具 b/a 图片按结果顺序保留归属，
+  两条 tool 后只补一条 user 图片消息；缺结果、不匹配结果、远程 URL 和 file_id 明确拒绝。
+
+**限制与交付。** 不穷举所有 custom/namespace/tool_search/reasoning/图片组合；合成图片仅验证
+转换形状，不验证解码或模型理解；未等待生产 300 秒空闲期限，未调用真实模型。两个独立观察 HTTP
+服务已关闭，无待收集作业。本项只提交既有文档证据，后续按顺序进入 L10。
