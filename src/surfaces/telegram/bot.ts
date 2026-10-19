@@ -339,6 +339,14 @@ export class TelegramSurface {
     return this.output.sendChannelImage(conversationId, imagePath);
   }
 
+  private modelQueryGuard(target: ConversationTarget, actorId: string): () => void {
+    return () => {
+      if (this.stopping || !this.access.isAllowed({ target, actorId })) {
+        throw new UserFacingError("command.authorization-changed", "命令授权已变化，请重新发起操作");
+      }
+    };
+  }
+
   async presentScheduledTaskConfirmation(
     target: ConversationTarget,
     actorId: string,
@@ -507,7 +515,7 @@ export class TelegramSurface {
       /^mp:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget);
+        const state = await this.service.modelState(modelTarget, this.modelQueryGuard(modelTarget, String(context.from.id)));
         if (
           telegramModelSelectionToken(state) !== context.match[2]
         ) {
@@ -544,7 +552,7 @@ export class TelegramSurface {
       /^ms:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget);
+        const state = await this.service.modelState(modelTarget, this.modelQueryGuard(modelTarget, String(context.from.id)));
         if (
           telegramModelSelectionToken(state) !== context.match[2]
         ) {
@@ -578,7 +586,7 @@ export class TelegramSurface {
       /^me:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget);
+        const state = await this.service.modelState(modelTarget, this.modelQueryGuard(modelTarget, String(context.from.id)));
         if (
           telegramModelSelectionToken(state) !== context.match[2]
         ) {

@@ -78,14 +78,16 @@ export class ModelSelectionService {
     ];
   }
 
-  async state(target: ConversationTarget, requireSelection = false): Promise<ModelSelectionState> {
+  async state(target: ConversationTarget, requireSelection = false, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    assertAuthorized?.();
     let filter = this.providerFilterByConversation.get(this.key(target));
     if (filter !== undefined && this.providersWithoutSubscription().has(filter)) {
       this.providerFilterByConversation.delete(this.key(target));
       filter = undefined;
     }
-    const models = await this.listModels(requireSelection ? this.status(target).modelProvider : filter);
-    const state = await this.selectionState(target, models, filter);
+    const models = await this.listModels(requireSelection ? this.status(target).modelProvider : filter, assertAuthorized);
+    const state = await this.selectionState(target, models, filter, assertAuthorized);
+    assertAuthorized?.();
     if (requireSelection && state.modelProvider === undefined) {
       throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
     }
@@ -98,8 +100,8 @@ export class ModelSelectionService {
     return state;
   }
 
-  async browseProvider(target: ConversationTarget, provider: string): Promise<ModelSelectionState> {
-    const models = await this.listModels(/^\d+$/.test(provider.trim()) ? undefined : provider.trim());
+  async browseProvider(target: ConversationTarget, provider: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    const models = await this.listModels(/^\d+$/.test(provider.trim()) ? undefined : provider.trim(), assertAuthorized);
     const resolvedProvider = resolveProvider(this.selectableModels(models), provider);
     if (resolvedProvider === undefined) {
       throw new UserFacingError(
@@ -116,19 +118,25 @@ export class ModelSelectionService {
         { provider: resolvedProvider },
       );
     }
+    assertAuthorized?.();
     this.providerFilterByConversation.set(this.key(target), resolvedProvider);
-    return this.selectionState(target, models, resolvedProvider);
+    return this.selectionState(target, models, resolvedProvider, assertAuthorized);
   }
 
-  clearProviderBrowse(target: ConversationTarget): void {
+  clearProviderBrowse(target: ConversationTarget, assertAuthorized?: () => void): void {
+    assertAuthorized?.();
     this.providerFilterByConversation.delete(this.key(target));
   }
 
   async requireInputModality(
     target: ConversationTarget,
     modality: ModelInputModality,
+    assertAuthorized?: () => void,
   ): Promise<void> {
-    const current = await this.resolveState(target, await this.listModels(this.status(target).modelProvider));
+    const current = await this.resolveState(
+      target, await this.listModels(this.status(target).modelProvider, assertAuthorized), undefined, assertAuthorized,
+    );
+    assertAuthorized?.();
     if (current.modelProvider === undefined) {
       throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
     }
@@ -165,9 +173,9 @@ export class ModelSelectionService {
     );
   }
 
-  async selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity): Promise<ModelSelectionState> {
+  async selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity, assertAuthorized?: () => void): Promise<ModelSelectionState> {
     const providerFilter = this.providerFilterByConversation.get(this.key(target));
-    const models = await this.listModels(typeof selector === "string" ? providerFilter : selector.provider);
+    const models = await this.listModels(typeof selector === "string" ? providerFilter : selector.provider, assertAuthorized);
     const eligible = this.selectableModels(models);
     const selectableModels = providerFilter === undefined
       ? eligible
@@ -179,7 +187,8 @@ export class ModelSelectionService {
       throw new UserFacingError("model.selection.expired", "模型选项已失效，请重新发送 /model 选择");
     }
     this.requireAvailableModel(selected);
-    const current = await this.resolveState(target, models);
+    const current = await this.resolveState(target, models, undefined, assertAuthorized);
+    assertAuthorized?.();
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
     const leavesThread = providerChanged && this.router.modelSettings(target) !== undefined;
@@ -190,18 +199,23 @@ export class ModelSelectionService {
       ? await this.codex.readDefaultReasoningEffort(
           this.router.workspace(target).cwd,
           selectedProvider,
+          assertAuthorized,
         )
       : undefined;
+    assertAuthorized?.();
     const providerDefaultTier = providerChanged && (selectedFastTier || selectedUltrafastTier) && !resetOfficialFast
       ? await this.codex.readDefaultServiceTier(
           this.router.workspace(target).cwd,
           selectedProvider,
+          assertAuthorized,
         )
       : undefined;
+    assertAuthorized?.();
     this.requireSubscribedProvider(selectedProvider);
     if (resetOfficialFast) {
       // 与显式 /fast off 使用同一用户默认值，避免 App Server 重启后重新加载旧 Fast 偏好。
-      await this.codex.writeDefaultServiceTier("default");
+      await this.codex.writeDefaultServiceTier("default", assertAuthorized);
+      assertAuthorized?.();
     }
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
     const effort = !providerChanged && current.effort && supported.includes(current.effort)
@@ -241,27 +255,33 @@ export class ModelSelectionService {
             : {}),
     };
     if (nextPending.serviceTier && nextPending.serviceTier !== standardServiceTierRequestValue) {
-      const acceleration = await this.codex.readModelAccelerationSettings(this.router.workspace(target).cwd, selectedProvider);
+      assertAuthorized?.();
+      const acceleration = await this.codex.readModelAccelerationSettings(this.router.workspace(target).cwd, selectedProvider, assertAuthorized);
+      assertAuthorized?.();
       if (!(nextPending.serviceTier === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
         nextPending.serviceTier = standardServiceTierRequestValue;
       }
     }
     if (providerChanged) {
+      assertAuthorized?.();
       await this.router.newSession(target, false, {
         model: selected.model, modelProvider: selectedProvider,
         effort, serviceTier: nextPending.serviceTier ?? null,
-      });
+      }, undefined, assertAuthorized);
     }
+    assertAuthorized?.();
     this.requireSubscribedProvider(selectedProvider);
-    this.setPending(target, nextPending);
+    this.setPending(target, nextPending, assertAuthorized);
+    assertAuthorized?.();
     if (leavesThread) this.pendingProviderSwitches.add(this.key(target));
     this.providerFilterByConversation.set(this.key(target), selectedProvider);
-    return this.selectionState(target, models, selectedProvider);
+    return this.selectionState(target, models, selectedProvider, assertAuthorized);
   }
 
-  async selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
-    const models = await this.listModels(this.status(target).modelProvider);
-    const current = await this.resolveState(target, models);
+  async selectEffort(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    const models = await this.listModels(this.status(target).modelProvider, assertAuthorized);
+    const current = await this.resolveState(target, models, undefined, assertAuthorized);
+    assertAuthorized?.();
     const model = findModel(models, current.model, current.modelProvider);
     if (!model) {
       throw new UserFacingError(
@@ -274,17 +294,18 @@ export class ModelSelectionService {
     const options = model.supportedReasoningEfforts.map((option) => option.effort);
     const effort = resolveEffort(options, selector);
     const pending = this.pending(target);
-    this.setPending(target, { ...pending, effort });
-    return this.resolveState(target, models);
+    this.setPending(target, { ...pending, effort }, assertAuthorized);
+    return this.resolveState(target, models, undefined, assertAuthorized);
   }
 
-  async selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
+  async selectFastMode(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
     const normalized = selector.trim().toLowerCase();
     if (normalized && !new Set(["on", "ultrafast", "off", "status"]).has(normalized)) {
       throw new UserFacingError("fast.usage", "加速参数必须是 on、ultrafast、off 或 status");
     }
-    const models = await this.listModels(this.status(target).modelProvider);
-    const current = await this.resolveState(target, models);
+    const models = await this.listModels(this.status(target).modelProvider, assertAuthorized);
+    const current = await this.resolveState(target, models, undefined, assertAuthorized);
+    assertAuthorized?.();
     const model = findModel(models, current.model, current.modelProvider);
     const currentFast = isFastServiceTier(current.serviceTier, model);
     if (normalized === "status") {
@@ -305,21 +326,27 @@ export class ModelSelectionService {
       );
     }
     if (requested !== "off") {
+      assertAuthorized?.();
       const acceleration = await this.codex.readModelAccelerationSettings(
         this.router.workspace(target).cwd,
         current.modelProvider ?? this.primaryProvider,
+        assertAuthorized,
       );
+      assertAuthorized?.();
       if (!(requested === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
         throw new UserFacingError("fast.disabled", `Codex ${requested === "ultrafast" ? "Ultrafast" : "Fast"} 已关闭或受策略限制，不能启用该档位`);
       }
     }
     const selectedTier = requested === "off" ? standardServiceTierRequestValue : tierId!;
     this.requireSubscribedProvider(current.modelProvider ?? this.primaryProvider);
+    assertAuthorized?.();
     if (current.modelProvider === this.primaryProvider) {
       await this.codex.writeDefaultServiceTier(
         requested === "off" ? "default" : requested === "ultrafast" ? "ultrafast" : "fast",
+        assertAuthorized,
       );
     }
+    assertAuthorized?.();
     this.requireSubscribedProvider(current.modelProvider ?? this.primaryProvider);
     if (current.serviceTier === selectedTier) {
       return current;
@@ -328,8 +355,8 @@ export class ModelSelectionService {
     this.setPending(target, {
       ...pending,
       serviceTier: selectedTier,
-    });
-    return this.resolveState(target, models);
+    }, assertAuthorized);
+    return this.resolveState(target, models, undefined, assertAuthorized);
   }
 
   turnOverrides(target: ConversationTarget): TurnOverrides {
@@ -434,7 +461,8 @@ export class ModelSelectionService {
     this.pendingProviderSwitches.delete(key);
   }
 
-  clear(target: ConversationTarget): void {
+  clear(target: ConversationTarget, assertAuthorized?: () => void): void {
+    assertAuthorized?.();
     this.router.setModelPreference?.(target, undefined);
     this.pendingByConversation.delete(this.key(target));
     this.pendingProviderSwitches.delete(this.key(target));
@@ -468,7 +496,9 @@ export class ModelSelectionService {
     target: ConversationTarget,
     models: ModelOption[],
     filter?: string,
+    assertAuthorized?: () => void,
   ): Promise<ModelSelectionState> {
+    assertAuthorized?.();
     if (models.length === 0) {
       throw new Error("App Server 没有返回可用模型");
     }
@@ -513,8 +543,9 @@ export class ModelSelectionService {
     const serviceTierPending = hasServiceTierOverride(pending);
     const defaultServiceTier = !serviceTierPending && !current && provider !== undefined
       && catalogModel !== undefined && catalogModel.available !== false
-      ? await this.codex.readDefaultServiceTier(this.router.workspace(target).cwd, provider)
+      ? await this.codex.readDefaultServiceTier(this.router.workspace(target).cwd, provider, assertAuthorized)
       : null;
+    assertAuthorized?.();
     return {
       models,
       ...(filter === undefined ? {} : { providerFilter: filter }),
@@ -594,10 +625,12 @@ export class ModelSelectionService {
     return models.filter((model) => !blocked.has(model.provider ?? "openai"));
   }
 
-  private async selectionState(target: ConversationTarget, models: ModelOption[], filter?: string): Promise<ModelSelectionState> {
+  private async selectionState(target: ConversationTarget, models: ModelOption[], filter?: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
     const selectable = this.selectableModels(models);
+    const state = await this.resolveState(target, models, filter, assertAuthorized);
+    assertAuthorized?.();
     return {
-      ...await this.resolveState(target, models, filter),
+      ...state,
       models: filter === undefined ? selectable : filterModelsByProvider(selectable, filter),
     };
   }
@@ -613,7 +646,8 @@ export class ModelSelectionService {
     } : undefined;
   }
 
-  private setPending(target: ConversationTarget, pending: TurnOverrides): void {
+  private setPending(target: ConversationTarget, pending: TurnOverrides, assertAuthorized?: () => void): void {
+    assertAuthorized?.();
     if (this.router.setModelPreference && !this.router.current(target) && pending.model && pending.modelProvider) {
       this.router.setModelPreference(target, {
         model: pending.model, modelProvider: pending.modelProvider,
@@ -626,20 +660,23 @@ export class ModelSelectionService {
   }
 
   /** Recheck saved identities and explicit pending speed choices before submission. */
-  async validateUnboundPreference(target: ConversationTarget): Promise<void> {
+  async validateUnboundPreference(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
+    assertAuthorized?.();
     const preference = this.router.modelPreference?.(target);
     if (!preference) {
       const pending = this.pendingByConversation.get(this.key(target));
       if (pending?.serviceTier && pending.serviceTier !== standardServiceTierRequestValue) {
         const provider = pending.modelProvider ?? this.router.modelSettings(target)?.modelProvider ?? this.primaryProvider;
-        const acceleration = await this.codex.readModelAccelerationSettings(this.router.workspace(target).cwd, provider);
+        const acceleration = await this.codex.readModelAccelerationSettings(this.router.workspace(target).cwd, provider, assertAuthorized);
+        assertAuthorized?.();
         if (!(pending.serviceTier === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
           throw new UserFacingError("model.selection.expired", "待生效的加速档位已关闭或受策略限制，请发送 /fast off 或重新选择档位");
         }
       }
       return;
     }
-    const models = await this.listModels(preference.modelProvider);
+    const models = await this.listModels(preference.modelProvider, assertAuthorized);
+    assertAuthorized?.();
     const model = findModel(models, preference.model, preference.modelProvider);
     if (!model) {
       throw new UserFacingError("model.selection.expired", "保存的模型已不可用，请重新发送 /model 选择");
@@ -656,8 +693,9 @@ export class ModelSelectionService {
     }
     if (preference.serviceTier && preference.serviceTier !== standardServiceTierRequestValue) {
       const acceleration = await this.codex.readModelAccelerationSettings(
-        this.router.workspace(target).cwd, preference.modelProvider,
+        this.router.workspace(target).cwd, preference.modelProvider, assertAuthorized,
       );
+      assertAuthorized?.();
       if (!(preference.serviceTier === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
         throw new UserFacingError("model.selection.expired", "保存的加速档位已关闭或受策略限制，请发送 /fast off 或重新选择档位");
       }
@@ -675,12 +713,14 @@ export class ModelSelectionService {
       : provider;
   }
 
-  private async listModels(targetProvider?: string): Promise<ModelOption[]> {
-    const primary = (await this.codex.listModels()).map((model) => {
+  private async listModels(targetProvider?: string, assertAuthorized?: () => void): Promise<ModelOption[]> {
+    assertAuthorized?.();
+    const primary = (await this.codex.listModels(assertAuthorized)).map((model) => {
       if (this.primaryProvider === "openai") return model;
       const providerModel = withoutProviderUpgrade(model);
       return { ...providerModel, provider: this.primaryProvider };
     });
+    assertAuthorized?.();
     const combined = new Map<string, ModelOption>();
     if (this.primaryProvider !== "openai" || this.openaiAuthenticated()) {
       for (const model of primary) {
@@ -708,8 +748,10 @@ export class ModelSelectionService {
     for (let offset = 0; offset < providers.length; offset += 4) {
       const catalogs = await Promise.all(providers.slice(offset, offset + 4).map(async provider => {
         try {
+          assertAuthorized?.();
           if (!this.codex.listModelsForProvider) throw new Error("Provider catalog port unavailable");
-          const models = await this.codex.listModelsForProvider(provider.provider);
+          const models = await this.codex.listModelsForProvider(provider.provider, assertAuthorized);
+          assertAuthorized?.();
           if (!models.some(model => model.available !== false)) throw new Error("Provider catalog empty");
           const defaultModel = provider.defaultModel
             ?? models.find(model => model.isDefault && model.available !== false)?.model;
@@ -720,6 +762,7 @@ export class ModelSelectionService {
             isDefault: model.model === defaultModel,
           }));
         } catch {
+          assertAuthorized?.();
           this.independentCatalogDefaults.delete(provider.provider);
           // Only expose configured identity; never invent capabilities or disclose upstream errors.
           return [{
@@ -732,6 +775,7 @@ export class ModelSelectionService {
           } satisfies ModelOption];
         }
       }));
+      assertAuthorized?.();
       for (const models of catalogs) for (const model of models) combined.set(modelKey(model), model);
     }
     if (

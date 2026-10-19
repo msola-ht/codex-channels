@@ -305,9 +305,10 @@ export class ProviderRoutingClient {
     return this.clients.has(this.canonicalProvider(provider));
   }
 
-  listModelsForProvider(provider: string): ReturnType<ProviderClientInstance["listModels"]> {
+  listModelsForProvider(provider: string, beforeSubmit?: () => void): ReturnType<ProviderClientInstance["listModels"]> {
+    beforeSubmit?.();
     return this.withProviderActivity(provider, async () =>
-      (await this.ensureClient(provider)).listModels());
+      (await this.ensureClient(provider)).listModels(beforeSubmit));
   }
 
   /**
@@ -743,18 +744,22 @@ export class ProviderRoutingClient {
   async readDefaultReasoningEffort(
     cwd: string,
     modelProvider = this.primaryProvider,
+    beforeSubmit?: () => void,
   ): ReturnType<ProviderClientInstance["readDefaultReasoningEffort"]> {
+    beforeSubmit?.();
     return this.withProviderActivity(modelProvider, async () =>
-      (await this.ensureClient(modelProvider)).readDefaultReasoningEffort(cwd)
+      (await this.ensureClient(modelProvider)).readDefaultReasoningEffort(cwd, modelProvider, beforeSubmit)
     );
   }
 
   async readDefaultServiceTier(
     cwd: string,
     modelProvider = this.primaryProvider,
+    beforeSubmit?: () => void,
   ): ReturnType<ProviderClientInstance["readDefaultServiceTier"]> {
+    beforeSubmit?.();
     return this.withProviderActivity(modelProvider, async () =>
-      (await this.ensureClient(modelProvider)).readDefaultServiceTier(cwd)
+      (await this.ensureClient(modelProvider)).readDefaultServiceTier(cwd, modelProvider, beforeSubmit)
     );
   }
 
@@ -775,9 +780,11 @@ export class ProviderRoutingClient {
   async readModelAccelerationSettings(
     cwd: string,
     modelProvider = this.primaryProvider,
+    beforeSubmit?: () => void,
   ): ReturnType<ProviderClientInstance["readModelAccelerationSettings"]> {
+    beforeSubmit?.();
     return this.withProviderActivity(modelProvider, async () =>
-      (await this.ensureClient(modelProvider)).readModelAccelerationSettings(cwd)
+      (await this.ensureClient(modelProvider)).readModelAccelerationSettings(cwd, modelProvider, beforeSubmit)
     );
   }
 

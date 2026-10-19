@@ -148,7 +148,7 @@ Astra 已对基线 `1b198105` 上的初稿完成只读文档审查，确认四�
 
 ### L03 Actor、Workspace 与异步授权
 
-状态：进行中。L03-F1/F2 已在 `6032c7a1` 提交；L03-F3 的命令身份与 Queue 子链已修复，
+状态：进行中。L03-F1/F2 已在 `6032c7a1` 提交；L03-F3 的命令身份与 Queue 子链已在 `ee685e50` 提交，模型和会话生命周期子链已修复，
 其他命令链尚待修复与验收，不能视为整项通过。
 基线 `15e3322b`。主代理检查 Registry、Router、Application、Client 与热加载分类；
 Sol 子代理只读检查三个 Surface 到 Application 的输入授权，并负责限定四个 Surface 文件的授权传递修复。
@@ -157,7 +157,7 @@ Sol 子代理只读检查三个 Surface 到 Application 的输入授权，并负
 | --- | --- | --- |
 | L03-F1 失效工作区静默回退 | 保存的 Workspace ID 已移除，`Router.workspace` 自动改选默认目录，后续请求改变执行范围 | 改为 `workspace.missing` 且不改原选择；列表只读显示保存的 ID，显式选择有效项后恢复 |
 | L03-F2 普通输入授权丢失 | 聚合回调丢弃 Actor；下载、锁等待或 Provider/图片准备期间撤权，旧请求仍可提交 | 批次保留 Actor，三个渠道五处普通提交传实时授权；Application 固定 Workspace 并在锁内复核，Thread 新建/恢复及 Turn start/steer 保留最终守卫；迟到新订阅清理，不写回失效绑定 |
-| L03-F3 命令授权未贯穿 | 部分 Telegram 按钮未传 Actor，通用命令即使传 Actor 也未统一约束后续等待、RPC 和本地偏好写入 | 入口与按钮强制传 Actor，组合根注入实时策略；Queue 贯穿接收、锁、读取及每次 RPC；模型选择、恢复/接管等副作用与补偿仍待处理 |
+| L03-F3 命令授权未贯穿 | 部分 Telegram 按钮未传 Actor，通用命令即使传 Actor 也未统一约束后续等待、RPC 和本地偏好写入 | 入口与按钮强制传 Actor，组合根注入实时策略；Queue、模型选择、恢复/接管及生命周期贯穿后续提交守卫；其他命令与异步交互仍待处理 |
 
 **已观察的隔离路径。** 使用生产 Router、内存 BindingStore、Application 和指定注入端口，无真实用户数据：
 
@@ -189,8 +189,29 @@ Sol 实现 Queue Service/Port/Client/RPC 四文件，主代理实现命令入口
   命令结果出口会再次检查 Actor，拒绝展示时明确提示已提交操作不会自动撤销，应重新查询。
 
 以上是隔离生产入口观察，没有真实平台投递、真实 Provider 启动或 App Server Queue 服务的观察。
-命令入口和结果出口的检查不等于其他命令内部已安全；下一步仍在 L03 处理模型偏好、会话生命周期、
-其他写命令与只读结果的等待边界，再核对异步交互输入，完成后才进入 L02。
+命令入口和结果出口的检查不等于其他命令内部已安全；下一步仍在 L03 处理其他写命令与只读结果的
+等待边界，再核对异步交互输入，完成后才进入 L02。
+
+**模型与会话生命周期子链（基线 `ee685e50`）。** 两个 Sol 分别实现模型窄端口/选择服务和 Router/Thread
+窄端口；主代理整合 CommandService、ConversationService、Provider Client 与 Telegram 模型按钮预查询。
+模型目录、配置读取和写入守卫透传至每次 RPC 尝试；生命周期固定原绑定和工作区，失效后阻止新副作用，
+已有操作结算和恢复订阅补偿独立于用户授权。
+
+- 主代理运行生产 CommandService→ConversationService→ModelSelectionService，使用隔离模型端口：
+  选择 `openai/second` 返回可显示的模型结果和待生效 Standard，默认写入为 `[default]`；
+  下一次目录读取期间撤权，返回 `command.authorization-changed`，写入仍为 `[default]`，选择保持 `second`。
+- Sol 运行生产模型服务，分别在目录、默认速度、加速配置、独立 Provider 目录和目标 Provider 思考读取期间撤权，
+  后续写入/解绑为 `0`。默认速度写入完成后撤权，保留一次 `default`，不解绑、不更新覆盖，也不自动回滚。
+  合法模型→思考→速度操作返回对应设置；未绑定偏好保存和生命周期偏好恢复仍可完成。
+- Sol 运行生产 Router 与内存 BindingStore/Registry：合法恢复依次读取新 Thread、订阅新 Thread、取消旧订阅并绑定新 Thread。
+  恢复、接管、派生或条件解绑在取消旧订阅后撤权，保留旧绑定、恢复旧订阅，并按需取消新订阅。
+  锁等待中原绑定消失或无绑定等待中出现新绑定时拒绝，保留新状态；失效旧 Workspace 仍允许显式选择有效项。
+- 主代理运行生产 Client 与隔离 RPC 端口：模型和 Thread 分页的首个响应撤权后各只发一次请求；
+  加速配置读取后撤权不发后续 requirements 请求；默认配置已提交后撤权仍正常结算。
+  这些观察核对 Client 的守卫传递，不代表真实 App Server 或平台网络观察。
+
+当前子链没有真实 Provider、平台账号或跨操作系统执行；自动审批设置、其他 Turn/Goal/扩展命令与异步交互
+仍属 L03 待验收内容。不能据此宣称整项授权已通过。
 
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。

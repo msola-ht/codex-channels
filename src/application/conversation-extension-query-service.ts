@@ -42,25 +42,26 @@ export class ConversationExtensionQueryService {
     private readonly queries: ConversationExtensionQueryPort,
   ) {}
 
-  modelState(target: ConversationTarget): Promise<ModelSelectionState> {
-    return this.models.state(target);
+  modelState(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    return this.models.state(target, false, assertAuthorized);
   }
 
-  clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState> {
-    this.models.clearProviderBrowse(target);
-    return this.models.state(target);
+  clearModelBrowse(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    this.models.clearProviderBrowse(target, assertAuthorized);
+    return this.models.state(target, false, assertAuthorized);
   }
 
   browseProviderModels(
     target: ConversationTarget,
     provider: string,
+    assertAuthorized?: () => void,
   ): Promise<ModelSelectionState> {
-    return this.models.browseProvider(target, provider);
+    return this.models.browseProvider(target, provider, assertAuthorized);
   }
 
-  clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState> {
-    this.models.clear(target);
-    return this.models.state(target);
+  clearModelSelection(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    this.models.clear(target, assertAuthorized);
+    return this.models.state(target, false, assertAuthorized);
   }
 
   listSkills(target: ConversationTarget): Promise<InstalledSkill[]> {

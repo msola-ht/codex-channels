@@ -260,7 +260,7 @@ export class CodexAppServerClient implements
       archived: options.archived ?? false,
       ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
       ...(options.sectionId ? { sectionId: options.sectionId } : {}),
-    });
+    }, options.beforeSubmit);
   }
 
   /** CLI archive preview: include descendants across cwd and source boundaries. */
@@ -277,7 +277,7 @@ export class CodexAppServerClient implements
     });
   }
 
-  private async listThreadPages(params: ThreadListParams): Promise<ThreadSnapshot[]> {
+  private async listThreadPages(params: ThreadListParams, beforeSubmit?: () => void): Promise<ThreadSnapshot[]> {
     const threads: ThreadSnapshot[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -289,7 +289,7 @@ export class CodexAppServerClient implements
           limit: 100,
           ...(cursor ? { cursor } : {}),
         },
-      }, { retryOverload: true });
+      }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
       threads.push(...result.data.map(toThreadSnapshot));
       cursor = result.nextCursor;
       if (cursor) {
@@ -545,13 +545,14 @@ export class CodexAppServerClient implements
     return toThreadResumeSession(response, settings);
   }
 
-  async unsubscribeThread(threadId: string): Promise<void> {
+  async unsubscribeThread(threadId: string, beforeSubmit?: () => void): Promise<void> {
+    beforeSubmit?.();
     this.fileChanges.clearThread(threadId);
     this.cancelPendingInput(threadId);
     await this.rpc.request<ThreadUnsubscribeResponse>({
       method: "thread/unsubscribe",
       params: { threadId },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
   async deleteThread(threadId: string): Promise<void> {
@@ -561,18 +562,18 @@ export class CodexAppServerClient implements
     }, { retryOverload: false });
   }
 
-  async archiveThread(threadId: string): Promise<void> {
+  async archiveThread(threadId: string, beforeSubmit?: () => void): Promise<void> {
     await this.rpc.request<ThreadArchiveResponse>({
       method: "thread/archive",
       params: { threadId },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
-  async unarchiveThread(threadId: string): Promise<ThreadSnapshot> {
+  async unarchiveThread(threadId: string, beforeSubmit?: () => void): Promise<ThreadSnapshot> {
     const response = await this.rpc.request<ThreadUnarchiveResponse>({
       method: "thread/unarchive",
       params: { threadId },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toThreadSnapshot(response.thread);
   }
 
@@ -822,8 +823,8 @@ export class CodexAppServerClient implements
     }, { retryOverload: false });
   }
 
-  async listModels(): Promise<ModelOption[]> {
-    return this.listModelCatalog(false);
+  async listModels(beforeSubmit?: () => void): Promise<ModelOption[]> {
+    return this.listModelCatalog(false, false, beforeSubmit);
   }
 
   async lunaReserveModel(): Promise<ModelOption | null> {
@@ -834,6 +835,7 @@ export class CodexAppServerClient implements
   private async listModelCatalog(
     includeHidden: boolean,
     hiddenOnly = false,
+    beforeSubmit?: () => void,
   ): Promise<ModelOption[]> {
     const models: ModelOption[] = [];
     const cursors = new Set<string>();
@@ -842,7 +844,7 @@ export class CodexAppServerClient implements
       const result: ModelListResponse = await this.rpc.request<ModelListResponse>({
         method: "model/list",
         params: { limit: 100, includeHidden, ...(cursor ? { cursor } : {}) },
-      }, { retryOverload: true });
+      }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
       for (const model of result.data) {
         const mapped = toModelOption(model, includeHidden);
         if (mapped && (!hiddenOnly || model.hidden)) {
@@ -855,11 +857,11 @@ export class CodexAppServerClient implements
     return models;
   }
 
-  async writeDefaultServiceTier(tier: "fast" | "ultrafast" | "default"): Promise<void> {
+  async writeDefaultServiceTier(tier: "fast" | "ultrafast" | "default", beforeSubmit?: () => void): Promise<void> {
     await this.writeUserConfigEdits([{
       keyPath: "service_tier",
       value: tier,
-    }]);
+    }], { ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
   async writeDefaultModelSettings(model: string, effort: string): Promise<void> {
@@ -892,12 +894,12 @@ export class CodexAppServerClient implements
     return { model, effort };
   }
 
-  async readDefaultReasoningEffort(cwd: string): Promise<string | null> {
+  async readDefaultReasoningEffort(cwd: string, _modelProvider?: string, beforeSubmit?: () => void): Promise<string | null> {
     const params: ConfigReadParams = { cwd, includeLayers: false };
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
       params,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     const effort = response.config.model_reasoning_effort;
     if (effort !== null && (typeof effort !== "string" || effort.trim() === "")) {
       throw new Error("Codex 响应缺少有效 config model_reasoning_effort");
@@ -922,27 +924,27 @@ export class CodexAppServerClient implements
     return { sandbox, permissions: null };
   }
 
-  async readDefaultServiceTier(cwd: string): Promise<string | null> {
-    const settings = await this.readModelAccelerationSettings(cwd);
+  async readDefaultServiceTier(cwd: string, modelProvider?: string, beforeSubmit?: () => void): Promise<string | null> {
+    const settings = await this.readModelAccelerationSettings(cwd, modelProvider, beforeSubmit);
     if (settings.serviceTier === "ultrafast" && !settings.ultrafastEnabled) return null;
     if ((settings.serviceTier === "fast" || settings.serviceTier === "priority") && !settings.fastEnabled) return null;
     return settings.serviceTier;
   }
 
-  async readModelAccelerationSettings(cwd: string): Promise<{ fastEnabled: boolean; ultrafastEnabled: boolean; serviceTier: string | null }> {
+  async readModelAccelerationSettings(cwd: string, _modelProvider?: string, beforeSubmit?: () => void): Promise<{ fastEnabled: boolean; ultrafastEnabled: boolean; serviceTier: string | null }> {
     const params: ConfigReadParams = { cwd, includeLayers: false };
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
       params,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     const serviceTier = response.config.service_tier;
     if (serviceTier !== null && typeof serviceTier !== "string") {
       throw new Error("Codex 响应缺少有效 config service_tier");
     }
-    return { serviceTier, ...await this.readAccelerationFlags(response.config.features) };
+    return { serviceTier, ...await this.readAccelerationFlags(response.config.features, beforeSubmit) };
   }
 
-  private async readAccelerationFlags(features: unknown): Promise<{ fastEnabled: boolean; ultrafastEnabled: boolean }> {
+  private async readAccelerationFlags(features: unknown, beforeSubmit?: () => void): Promise<{ fastEnabled: boolean; ultrafastEnabled: boolean }> {
     if (features !== undefined && (features === null || typeof features !== "object" || Array.isArray(features))) {
       throw new Error("Codex 响应包含无效 config features");
     }
@@ -950,7 +952,7 @@ export class CodexAppServerClient implements
     const { requirements, supportsIndependentSpeedModes } = await this.rpc.request<ConfigRequirementsReadResponse>({
       method: "configRequirements/read",
       params: undefined,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     if (supportsIndependentSpeedModes !== true || requirements === undefined || (requirements !== null
       && (typeof requirements !== "object" || Array.isArray(requirements)
         || requirements.featureRequirements === undefined
@@ -973,7 +975,7 @@ export class CodexAppServerClient implements
 
   async writeUserConfigEdits(
     edits: Array<{ keyPath: string; value: JsonValue }>,
-    options: { expectedVersion?: string } = {},
+    options: { expectedVersion?: string; beforeSubmit?: () => void } = {},
   ): Promise<void> {
     await this.rpc.request({
       method: "config/batchWrite",
@@ -987,7 +989,7 @@ export class CodexAppServerClient implements
           : { expectedVersion: options.expectedVersion }),
         reloadUserConfig: true,
       },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) });
   }
 
   async readUserConfigSnapshot(options: { includeApprovalsReviewerPolicy?: boolean; includeAcceleration?: boolean } = {}): Promise<{
@@ -1114,7 +1116,7 @@ export class CodexAppServerClient implements
         ...(options.model ? { model: options.model } : {}),
         ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) });
     return toThreadSession(response);
   }
 

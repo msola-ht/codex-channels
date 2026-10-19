@@ -39,6 +39,7 @@ export interface SubscriptionRestoreFailure {
 }
 
 export interface ThreadListOptions {
+  beforeSubmit?: () => void;
   fullScan?: boolean;
   archived?: boolean;
   searchTerm?: string;
@@ -386,8 +387,10 @@ export class SessionRouter {
   }
 
   async list(target: ConversationTarget, options: ThreadListOptions = {}): Promise<ThreadSnapshot[]> {
+    options.beforeSubmit?.();
     const workspace = this.workspace(target);
     const fast = await this.codex.listThreads(workspace.cwd, options);
+    options.beforeSubmit?.();
     return fast.length > 0
       ? fast
       : this.codex.listThreads(workspace.cwd, { ...options, fullScan: true });
@@ -629,14 +632,16 @@ export class SessionRouter {
       restoredPrevious?: (thread: ThreadSnapshot) => void;
       restorePreviousFailed?: () => void;
     },
+    assertAuthorized?: () => void,
   ): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
+    const assertCurrent = this.lifecycleGuard(target, current, assertAuthorized);
     return this.withThreadLifecycle([threadId, ...(current ? [current.threadId] : [])], () => {
-      this.assertLifecycleCurrent(target, current);
+      assertCurrent();
       const additional = preserveCurrent && current && current.threadId !== threadId
         && !this.bindings.isBackground(threadId) ? 1 : 0;
       return this.withBackgroundCapacity(target, additional,
-        () => this.resumeUnlocked(target, threadId, preserveCurrent, expectedCwd, transition));
+        () => this.resumeUnlocked(target, threadId, preserveCurrent, expectedCwd, transition, assertCurrent));
     });
   }
 
@@ -646,12 +651,20 @@ export class SessionRouter {
     preserveCurrent = false,
     expectedCwd?: string,
     transition?: Parameters<SessionRouter["resume"]>[4],
+    assertAuthorized?: () => void,
   ): Promise<ConversationBinding> {
+    const current = this.bindings.get(target);
+    const assertCurrent = (): void => {
+      assertAuthorized?.();
+      transition?.assertCurrent();
+    };
+    assertCurrent();
     const owner = this.bindings.getByThread(threadId);
     if (owner && this.key(owner.target) !== this.key(target)) {
       throw new UserFacingError("thread.bound", "该 Codex Thread 已绑定到其他会话");
     }
     const thread = await this.codex.readThread(threadId);
+    assertCurrent();
     if (owner && thread.cwd !== this.workspaces.require(owner.workspaceId).cwd) {
       await this.rejectIncompatibleThread(threadId, new UserFacingError(
         "thread.takeover.changed", "历史目录与现有绑定不一致，已解除绑定",
@@ -667,28 +680,27 @@ export class SessionRouter {
     if (!foregroundThreadSources.has(thread.source)) {
       throw new UserFacingError("session.selector.not-found", "找不到已授权工作区中的可恢复会话");
     }
-    const resumed = await this.resumeInWorkspace(thread, workspace);
-    const current = this.bindings.get(target);
+    const resumed = await this.resumeInWorkspace(thread, workspace, { beforeSubmit: assertCurrent });
     let previousUnsubscribed = false;
     try {
-      transition?.assertCurrent();
+      assertCurrent();
       if (current && current.threadId !== resumed.thread.id && !preserveCurrent) {
         if (transition?.verifyPreviousIdle && !await transition.verifyPreviousIdle()) {
           throw new UserFacingError("thread.takeover.changed", "原会话仍有活动，请重新选择会话");
         }
-        transition?.assertCurrent();
-        await this.codex.unsubscribeThread(current.threadId);
+        assertCurrent();
+        await this.codex.unsubscribeThread(current.threadId, assertCurrent);
         previousUnsubscribed = true;
         if (transition?.verifyPreviousIdle && !await transition.verifyPreviousIdle()) {
           throw new UserFacingError("thread.takeover.changed", "原会话活动已变化，请重新选择会话");
         }
       }
-      transition?.assertCurrent();
+      assertCurrent();
       const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
       this.bindings.switchForeground(binding, preserveCurrent);
     } catch (error) {
       let failure = error;
-      if (previousUnsubscribed && current) {
+      if (previousUnsubscribed && current && this.sameBinding(current, this.bindings.get(target))) {
         try {
           const restored = await this.resumeInWorkspace(
             await this.codex.readThread(current.threadId), this.workspaces.require(current.workspaceId),
@@ -789,15 +801,24 @@ export class SessionRouter {
   async transferBinding(
     target: ConversationTarget,
     threadId: string,
+    assertAuthorized?: () => void,
   ): Promise<BindingTransfer> {
     const current = this.bindings.get(target);
+    const owner = this.bindings.getByThread(threadId);
+    const assertCurrent = this.lifecycleGuard(target, current, assertAuthorized);
+    const assertTransferCurrent = (): void => {
+      assertCurrent();
+      if (!owner || !this.sameBinding(owner, this.bindings.getByThread(threadId))) {
+        throw new UserFacingError("thread.takeover.changed", "Codex Thread 绑定已变化，请重新选择");
+      }
+    };
     return this.withThreadLifecycle([threadId, ...(current ? [current.threadId] : [])], () => {
-      this.assertLifecycleCurrent(target, current);
-      return this.transferBindingUnlocked(target, threadId);
+      assertTransferCurrent();
+      return this.transferBindingUnlocked(target, threadId, assertTransferCurrent);
     });
   }
 
-  private async transferBindingUnlocked(target: ConversationTarget, threadId: string): Promise<BindingTransfer> {
+  private async transferBindingUnlocked(target: ConversationTarget, threadId: string, assertAuthorized?: () => void): Promise<BindingTransfer> {
     const owner = this.bindings.getByThread(threadId);
     if (!owner) {
       throw new UserFacingError(
@@ -828,6 +849,7 @@ export class SessionRouter {
         ? [this.codex.readThread(replaced.threadId)]
         : []),
     ]);
+    assertAuthorized?.();
     if (threads[0]?.cwd !== workspace.cwd) {
       await this.rejectIncompatibleThread(threadId, new UserFacingError(
         "thread.takeover.changed", "Codex Thread 工作目录与绑定已不一致，请重新选择",
@@ -840,13 +862,15 @@ export class SessionRouter {
       );
     }
     if (replaced && replaced.threadId !== threadId) {
-      await this.codex.unsubscribeThread(replaced.threadId);
+      assertAuthorized?.();
+      await this.codex.unsubscribeThread(replaced.threadId, assertAuthorized);
     }
     let transfer: BindingTransfer;
     try {
+      assertAuthorized?.();
       transfer = this.bindings.transfer(threadId, target);
     } catch (error) {
-      if (replaced && replaced.threadId !== threadId) {
+      if (replaced && replaced.threadId !== threadId && this.sameBinding(replaced, this.bindings.get(target))) {
         try {
           await this.resumeInWorkspace(await this.codex.readThread(replaced.threadId), workspace, {}, false);
         } catch (restoreError) {
@@ -869,24 +893,29 @@ export class SessionRouter {
   }
 
   async newSession(target: ConversationTarget, preserveCurrent = false, preference?: ConversationModelPreference,
-    condition?: ThreadReleaseCondition): Promise<void> {
+    condition?: ThreadReleaseCondition, assertAuthorized?: () => void): Promise<void> {
     const current = this.bindings.get(target);
+    const assertCurrent = this.lifecycleGuard(target, current, assertAuthorized);
     return this.withThreadLifecycle(current ? [current.threadId] : [], async () => {
-      this.assertLifecycleCurrent(target, current);
+      assertCurrent();
       if (preserveCurrent) {
         if (this.bindings.get(target)) this.requireBackgroundCapacity(target, 1);
         this.bindings.demote(target, preference);
       } else if (current && condition) {
         const snapshot = await this.codex.readThread(current.threadId);
+        assertCurrent();
         if (!condition.isCurrent() || !await condition.verifyIdle()
-          || !await this.releaseIdleUnlocked(target, current, snapshot, condition, preference)) {
+          || !await this.releaseIdleUnlocked(target, current, snapshot, condition, preference, assertCurrent)) {
           throw new UserFacingError("thread.takeover.changed", "当前会话活动已变化，请重新新建会话");
         }
       } else {
-        await this.detachUnlocked(target, preference);
+        await this.detachUnlocked(target, preference, assertCurrent);
       }
       // Both unbind and demote persist the marker with the binding change.
-      if (!current) this.markForceNew(target, Date.now());
+      if (!current) {
+        assertCurrent();
+        this.markForceNew(target, Date.now());
+      }
     });
   }
 
@@ -907,10 +936,12 @@ export class SessionRouter {
     snapshot: ThreadSnapshot,
     condition: ThreadReleaseCondition,
     preference?: ConversationModelPreference,
+    assertAuthorized?: () => void,
   ): Promise<boolean> {
     const ownsBinding = () => this.sameBinding(expected, this.bindings.get(target));
     if (!ownsBinding() || !condition.isCurrent()) return false;
-    await this.codex.unsubscribeThread(expected.threadId);
+    assertAuthorized?.();
+    await this.codex.unsubscribeThread(expected.threadId, assertAuthorized);
     this.unsubscribedBindings.add(expected.threadId);
     let verified = false;
     try {
@@ -927,6 +958,7 @@ export class SessionRouter {
       return false;
     }
     try {
+      assertAuthorized?.();
       this.bindings.unbind(target, preference);
     } catch (error) {
       try {
@@ -988,15 +1020,30 @@ export class SessionRouter {
     });
   }
 
-  async selectWorkspace(target: ConversationTarget, workspaceId: string, preference?: ConversationModelPreference): Promise<Workspace> {
+  async selectWorkspace(target: ConversationTarget, workspaceId: string, preference?: ConversationModelPreference,
+    assertAuthorized?: () => void): Promise<Workspace> {
     const current = this.bindings.get(target);
+    const workspace = this.workspaces.require(workspaceId);
+    const assertCurrent = this.lifecycleGuard(target, current, assertAuthorized);
+    const assertDetached = this.lifecycleGuard(target, undefined, assertAuthorized);
+    const assertSelectionCurrent = (): void => {
+      assertCurrent();
+      if (this.workspaces.get(workspaceId)?.cwd !== workspace.cwd) {
+        throw new UserFacingError("thread.takeover.changed", "Workspace 已变化，请重新选择");
+      }
+    };
     return this.withThreadLifecycle(current ? [current.threadId] : [], async () => {
-      this.assertLifecycleCurrent(target, current);
-      const workspace = this.workspaces.require(workspaceId);
+      assertSelectionCurrent();
       if (this.selectedWorkspaceId(target) === workspace.id) {
         return workspace;
       }
-      await this.detachUnlocked(target, preference);
+      await this.detachUnlocked(target, preference, assertSelectionCurrent);
+      // The previous detach may have committed. Require its resulting empty
+      // foreground instead of accepting a newer binding after the await.
+      assertDetached();
+      if (this.workspaces.get(workspaceId)?.cwd !== workspace.cwd) {
+        throw new UserFacingError("thread.takeover.changed", "Workspace 已变化，请重新选择");
+      }
       this.bindings.selectWorkspace(target, workspace.id);
       // Workspace changes start a fresh conversation.  Keep the marker until
       // ensure() creates the first Thread so it cannot auto-resume history from
@@ -1009,15 +1056,17 @@ export class SessionRouter {
   async fork(
     target: ConversationTarget,
     startOptions: ThreadStartOptions = {},
+    assertAuthorized?: () => void,
   ): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
+    const assertCurrent = this.lifecycleGuard(target, current, assertAuthorized);
     return this.withThreadLifecycle(current ? [current.threadId] : [], () => {
-      this.assertLifecycleCurrent(target, current);
-      return this.forkUnlocked(target, startOptions);
+      assertCurrent();
+      return this.forkUnlocked(target, startOptions, assertCurrent);
     });
   }
 
-  private async forkUnlocked(target: ConversationTarget, startOptions: ThreadStartOptions): Promise<ConversationBinding> {
+  private async forkUnlocked(target: ConversationTarget, startOptions: ThreadStartOptions, assertAuthorized?: () => void): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
     if (!current) {
       throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
@@ -1027,6 +1076,10 @@ export class SessionRouter {
       current.threadId,
       workspace.cwd,
       {
+        beforeSubmit: () => {
+          assertAuthorized?.();
+          startOptions.beforeSubmit?.();
+        },
         ...(startOptions.model === undefined ? {} : { model: startOptions.model }),
         ...(startOptions.modelProvider === undefined
           ? {}
@@ -1041,13 +1094,15 @@ export class SessionRouter {
     };
     let previousUnsubscribed = false;
     const assertCurrent = (): void => {
+      assertAuthorized?.();
+      startOptions.beforeSubmit?.();
       if (!this.sameBinding(current, this.bindings.get(target))) {
         throw new UserFacingError("thread.takeover.changed", "等待期间会话绑定已变化，请重新选择");
       }
     };
     try {
       assertCurrent();
-      await this.codex.unsubscribeThread(current.threadId);
+      await this.codex.unsubscribeThread(current.threadId, assertCurrent);
       previousUnsubscribed = true;
       assertCurrent();
       this.bindings.switchForeground(binding, false);
@@ -1072,34 +1127,40 @@ export class SessionRouter {
     return binding;
   }
 
-  async archive(target: ConversationTarget): Promise<string> {
+  async archive(target: ConversationTarget, assertAuthorized?: () => void): Promise<string> {
     const expected = this.bindings.get(target);
+    const assertCurrent = this.lifecycleGuard(target, expected, assertAuthorized);
     return this.withThreadLifecycle(expected ? [expected.threadId] : [], async () => {
-      this.assertLifecycleCurrent(target, expected);
+      assertCurrent();
       const current = this.bindings.get(target);
       if (!current) {
         throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
       }
-      await this.codex.archiveThread(current.threadId);
+      await this.codex.archiveThread(current.threadId, assertCurrent);
+      // Archive has committed remotely. Reconcile the known Thread even if
+      // authorization changes before its response; do not retry the write.
       this.forgetThread(current.threadId);
-      this.markForceNew(target, Date.now());
+      if (!this.bindings.get(target)) this.markForceNew(target, Date.now());
       return current.threadId;
     });
   }
 
-  async archiveThread(threadId: string): Promise<void> {
+  async archiveThread(threadId: string, assertAuthorized?: () => void): Promise<void> {
     return this.withThreadLifecycle([threadId], async () => {
-      await this.codex.archiveThread(threadId);
+      assertAuthorized?.();
+      await this.codex.archiveThread(threadId, assertAuthorized);
       this.forgetThread(threadId);
     });
   }
 
-  async unarchive(target: ConversationTarget, threadId: string): Promise<ConversationBinding> {
+  async unarchive(target: ConversationTarget, threadId: string, assertAuthorized?: () => void): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
+    const assertCurrent = this.lifecycleGuard(target, current, assertAuthorized);
     return this.withThreadLifecycle([threadId, ...(current ? [current.threadId] : [])], async () => {
-      this.assertLifecycleCurrent(target, current);
-      await this.codex.unarchiveThread(threadId);
-      return this.resumeUnlocked(target, threadId);
+      assertCurrent();
+      await this.codex.unarchiveThread(threadId, assertCurrent);
+      assertCurrent();
+      return this.resumeUnlocked(target, threadId, false, undefined, undefined, assertCurrent);
     });
   }
 
@@ -1120,20 +1181,24 @@ export class SessionRouter {
     return this.forgetThread(threadId);
   }
 
-  async detach(target: ConversationTarget): Promise<void> {
+  async detach(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
     const current = this.bindings.get(target);
+    const assertCurrent = this.lifecycleGuard(target, current, assertAuthorized);
     return this.withThreadLifecycle(current ? [current.threadId] : [], () => {
-      this.assertLifecycleCurrent(target, current);
-      return this.detachUnlocked(target);
+      assertCurrent();
+      return this.detachUnlocked(target, undefined, assertCurrent);
     });
   }
 
-  private async detachUnlocked(target: ConversationTarget, preference?: ConversationModelPreference): Promise<void> {
+  private async detachUnlocked(target: ConversationTarget, preference?: ConversationModelPreference,
+    assertAuthorized?: () => void): Promise<void> {
     const current = this.bindings.get(target);
+    assertAuthorized?.();
     if (current) {
-      await this.codex.unsubscribeThread(current.threadId);
+      await this.codex.unsubscribeThread(current.threadId, assertAuthorized);
       this.unsubscribedBindings.add(current.threadId);
       try {
+        assertAuthorized?.();
         this.bindings.unbind(target, preference);
       } catch (error) {
         try {
@@ -1233,9 +1298,27 @@ export class SessionRouter {
 
   private assertLifecycleCurrent(target: ConversationTarget, expected: ConversationBinding | undefined): void {
     const current = this.bindings.get(target);
-    if (current && (!expected || !this.sameBinding(expected, current))) {
+    if (expected ? !this.sameBinding(expected, current) : current !== undefined) {
       throw new UserFacingError("thread.takeover.changed", "等待期间会话绑定已变化，请重新选择");
     }
+  }
+
+  private lifecycleGuard(
+    target: ConversationTarget,
+    expected: ConversationBinding | undefined,
+    assertAuthorized?: () => void,
+  ): () => void {
+    const workspaceId = this.selectedWorkspaceId(target);
+    // A removed old selection may still be explicitly replaced. Preserve its
+    // identity without requiring it to resolve to a registered Workspace.
+    const cwd = this.workspaces.get(workspaceId)?.cwd;
+    return () => {
+      assertAuthorized?.();
+      this.assertLifecycleCurrent(target, expected);
+      if (this.selectedWorkspaceId(target) !== workspaceId || this.workspaces.get(workspaceId)?.cwd !== cwd) {
+        throw new UserFacingError("thread.takeover.changed", "等待期间 Workspace 已变化，请重新选择");
+      }
+    };
   }
 
   private requireBackgroundCapacity(target: ConversationTarget, additional: number): void {

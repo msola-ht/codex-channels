@@ -236,10 +236,11 @@ export class ThreadQueueService {
     this.selectionSnapshots.delete(conversationTargetKey(target));
   }
 
-  async rejectPendingOverrideChange(target: ConversationTarget): Promise<void> {
+  async rejectPendingOverrideChange(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
+    assertAuthorized?.();
     const threadId = this.router.current?.(target)?.threadId;
     if (!threadId || !this.queue) return;
-    if (await this.hasItems(threadId)) {
+    if (await this.hasItems(threadId, assertAuthorized)) {
       throw new UserFacingError(
         "queue.pending-overrides",
         "Queue 与待生效的模型、思考、速度或 Plan 选择不能同时存在；请先让其中一方处理完成",
@@ -247,12 +248,15 @@ export class ThreadQueueService {
     }
   }
 
-  async hasItems(threadId: string): Promise<boolean> {
+  async hasItems(threadId: string, assertAuthorized?: () => void): Promise<boolean> {
+    assertAuthorized?.();
     if (!this.queue) return false;
     try {
-      const page = await this.queue.listQueue(threadId, { limit: 1 });
+      const page = await this.queue.listQueue(threadId, { limit: 1, ...(assertAuthorized ? { beforeSubmit: assertAuthorized } : {}) });
+      assertAuthorized?.();
       return page.items.length > 0 || page.nextCursor !== null;
     } catch (error) {
+      assertAuthorized?.();
       const mapped = queueUserFacingError(error, "list");
       if (mapped.code === "queue.unavailable") return false;
       throw mapped;

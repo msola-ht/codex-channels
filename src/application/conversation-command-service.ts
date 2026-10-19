@@ -345,9 +345,9 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   }
 
   async selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult> {
-    this.authorize(target, actorId);
+    const assertAuthorized = this.commandGuard(target, actorId, false);
     this.conversations.touchActivity?.(target);
-    const state = await this.conversations.selectModel(target, selection);
+    const state = await this.conversations.selectModel(target, selection, assertAuthorized);
     this.authorize(target, actorId);
     return modelSelectionResult(state);
   }
@@ -410,7 +410,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       }
       case "resume": {
         if (argumentsText) {
-          const resumed = await this.conversations.resume(target, argumentsText);
+          const resumed = await this.conversations.resume(target, argumentsText, assertAuthorized);
           const model = toConversationModelSummary(this.conversations.status(target));
           return {
             kind: "outcome",
@@ -467,7 +467,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         return sessionListResult(sessions, view, { archived: true });
       }
       case "new": {
-        const sessionSwitch = await this.conversations.newSession(target);
+        const sessionSwitch = await this.conversations.newSession(target, assertAuthorized);
         const nextModel = toConversationModelSummary(this.conversations.status(target));
         return {
           kind: "outcome",
@@ -484,14 +484,14 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "archive": {
-        const threadId = await this.conversations.archive(target);
+        const threadId = await this.conversations.archive(target, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "thread.archived", threadId },
         };
       }
       case "unarchive": {
-        const threadId = await this.conversations.unarchive(target, argumentsText);
+        const threadId = await this.conversations.unarchive(target, argumentsText, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "thread.unarchived", threadId },
@@ -520,7 +520,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "workspace": {
         if (argumentsText) {
-          const workspace = await this.conversations.selectWorkspace(target, argumentsText);
+          const workspace = await this.conversations.selectWorkspace(target, argumentsText, assertAuthorized);
           return {
             kind: "outcome",
             outcome: {
@@ -560,7 +560,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           outcome: { type: "thread.compaction-requested" },
         };
       case "fork": {
-        const threadId = await this.conversations.fork(target);
+        const threadId = await this.conversations.fork(target, assertAuthorized);
         return {
           kind: "outcome",
           outcome: { type: "thread.forked", threadId },
@@ -582,11 +582,11 @@ export class ConversationCommandService implements ConversationCommandExecutor {
             kind: "models",
             view: "model",
             state: argumentsText === "clear"
-              ? await this.conversations.clearModelSelection(target)
-              : await this.conversations.clearModelBrowse(target),
+              ? await this.conversations.clearModelSelection(target, assertAuthorized)
+              : await this.conversations.clearModelBrowse(target, assertAuthorized),
             };
         }
-        const browseState = await this.conversations.modelState(target);
+        const browseState = await this.conversations.modelState(target, assertAuthorized);
         if (
           browseState.providerFilter === undefined
           && (/^\d+$/u.test(argumentsText)
@@ -595,12 +595,12 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           return {
             kind: "models",
             view: "model",
-            state: await this.conversations.browseProviderModels(target, argumentsText),
+            state: await this.conversations.browseProviderModels(target, argumentsText, assertAuthorized),
           };
         }
         let state: Awaited<ReturnType<ConversationCommandUseCases["selectModel"]>>;
         try {
-          state = await this.conversations.selectModel(target, argumentsText);
+          state = await this.conversations.selectModel(target, argumentsText, assertAuthorized);
         } catch (error) {
           if (
             error instanceof UserFacingError
@@ -612,6 +612,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
               state: await this.conversations.browseProviderModels(
                 target,
                 argumentsText,
+                assertAuthorized,
               ),
             };
           }
@@ -624,14 +625,14 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           kind: "models",
           view: "effort",
           state: argumentsText
-            ? await this.conversations.selectEffort(target, argumentsText)
-            : await this.conversations.modelState(target),
+            ? await this.conversations.selectEffort(target, argumentsText, assertAuthorized)
+            : await this.conversations.modelState(target, assertAuthorized),
         };
       case "fast":
         return {
           kind: "models",
           view: "fast",
-          state: await this.conversations.selectFastMode(target, argumentsText),
+          state: await this.conversations.selectFastMode(target, argumentsText, assertAuthorized),
         };
       case "skill": {
         if (!argumentsText) {
