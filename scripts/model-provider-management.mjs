@@ -9,47 +9,22 @@ import {
   readPrimaryProviderBackup,
 } from "../runtime/model-provider-runtime.mjs";
 import { readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
-import { join } from "node:path";
-import { parse } from "smol-toml";
-import { codexHomePath } from "../runtime/codex-home.mjs";
-import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
-import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
-import { customPrimaryProviderProfilePath } from "../runtime/model-provider-runtime.mjs";
+import { ProviderWebSearchSettingsError, readProviderWebSearchOverride } from "../runtime/provider-web-search.mjs";
 
-/** Display saved main-file preferences, not model capabilities or runtime defaults. */
+/** Display each exact provider's override; null explicitly means follow global. */
 export function loadProviderWebSearchSettings(state, environment = process.env) {
-  const home = codexHomePath(environment);
-  const read = createProviderFileReader(environment);
-  const modes = new Set(["disabled", "live", "cached", "indexed"]);
-  const fromFile = (path, optional = false) => {
-    let content;
-    try { content = read(path, 1_048_576); }
+  return configuredWebSearchProviders(state).map(provider => {
+    try { return { provider, source: "provider", status: "ready", mode: readProviderWebSearchOverride(provider, environment) }; }
     catch (error) {
-      if (optional && error?.code === "ENOENT") return { status: "ready", mode: null };
-      return { status: "error", error: "unreadable" };
+      return { provider, source: "provider", status: "error", error: error instanceof ProviderWebSearchSettingsError ? error.code : "unreadable" };
     }
-    let document;
-    try { document = parse(content); }
-    catch { return { status: "error", error: "invalid-document" }; }
-    if (document.web_search === undefined) return { status: "ready", mode: null };
-    if (!modes.has(document.web_search)) return { status: "error", error: "invalid-mode" };
-    return { status: "ready", mode: document.web_search };
-  };
-  const globalMode = fromFile(join(home, "config.toml"), true);
-  const entries = [{ provider: "openai", source: "global", ...globalMode }];
-  const definitions = loadManagedModelProviderDefinitions(environment);
-  for (const provider of state.managedProviders) {
-    const definition = definitions.find(entry => entry.id === provider.id);
-    entries.push({ provider: provider.id, source: provider.mode === "exclusive" ? "global" : "provider",
-      ...(provider.mode === "exclusive" ? globalMode : definition ? fromFile(join(home, definition.profileFileName)) : { status: "error", error: "unreadable" }) });
-  }
-  for (const provider of state.customProviders.fixedCandidates.filter(entry => entry.active)) {
-    entries.push({ provider: provider.id, source: "global", ...globalMode });
-  }
-  for (const provider of state.customProviders.switchingProviders) {
-    entries.push({ provider: provider.id, source: "provider", ...fromFile(customPrimaryProviderProfilePath(environment, provider.id)) });
-  }
-  return entries;
+  });
+}
+
+export function configuredWebSearchProviders(state) {
+  return [...new Set(["openai", ...state.managedProviders.map(provider => provider.id),
+    ...state.customProviders.fixedCandidates.map(provider => provider.id),
+    ...state.customProviders.switchingProviders.map(provider => provider.id)])];
 }
 
 export async function loadModelProviderManagementState({

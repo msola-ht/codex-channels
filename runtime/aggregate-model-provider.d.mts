@@ -1,5 +1,6 @@
 export const aggregateProviderId: "codexc-aggregate";
 export const aggregateTokenEnvironmentKey: "CODEX_CONNECT_AGGREGATE_TOKEN";
+export const aggregateProviderEnabled: boolean;
 export class AggregateProviderTopologyChangedError extends Error {
   readonly code: "PROVIDER_TOPOLOGY_CHANGED";
 }

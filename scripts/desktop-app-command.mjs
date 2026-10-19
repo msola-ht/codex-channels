@@ -619,7 +619,7 @@ function parseDesktopAppArgs(args) {
       } else if ((flags[index] === "--provider" || flags[index] === "-p") && parsed.provider === undefined) {
         const provider = flags[index + 1];
         if (typeof provider !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(provider)) {
-          throw new Error("-p / --provider 必须指定 Provider ID、已配置的 sf- 名称或 agg");
+          throw new Error("-p / --provider 必须指定 Provider ID 或已配置的 sf- 名称");
         }
         parsed.provider = provider;
         index += 1;
@@ -1167,7 +1167,7 @@ function resolveDesktopAppSocketPath(appServer, provider) {
   const socketPath = index < 0 ? undefined : appServer.socketPaths[index + 1];
   if (typeof socketPath !== "string" || socketPath.length === 0) {
     if (provider === aggregateProviderId) {
-      throw new Error("聚合模式需要至少两个已配置的 API Key 切换提供商；Desktop 共享另要求主 Provider 为 OpenAI");
+      throw new Error("聚合模式暂时关闭，请选择独立 Provider；已有聚合会话和数据保留");
     }
     throw new Error("Desktop Provider 未配置；请使用完整、已配置的 Provider ID");
   }

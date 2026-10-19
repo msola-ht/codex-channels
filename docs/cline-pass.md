@@ -8,7 +8,7 @@ Flash 的上下文、图片、思考等级与提示词复用仓库 `runtime/mode
 通过模型管理选择 CLP 与模型修改窗口。所有 CLP 账户共用模型目录、思考等级及上下文；账户各自选择默认模型，凭据和请求统计仍独立。不联动 DS 或其他提供商。
 所有 Cline 账户共用一份 Codex 模型目录。独立 Relay 保持自己的原生 Cline 目录，可下载／更新模型文件，并在每把 Key 下逐模型设置[思考策略](provider-api-relay-development.md#clp-转发模型目录与设置)，不写入 Codex 目录。更新密钥保留共用模型的上下文及默认思考等级。
 
-已有账户通过 `codexc setup → 模型与提供商 → 第三方 Provider → Cline Pass 官方` 的发现／添加模型入口扩展共用模型名单，无需删除账户、重新输入 Key。只列出尚未加入本地目录的候选，默认不勾选；空格勾选、回车确认，再预览所选新增模型的完整内容及影响账户并保存。发现只添加新模型，已有条目完整保留；下载目录缺失的旧模型也不会自动移除，没有新增时不写文件和备份。更新已有模型请在 CLI 模型管理或 WebUI 选择“更新模板”，明确提示词／能力范围后对比保存，见[账户模板更新](provider-integration-guide.md#对比并更新账户模型模板)。首次在 CLI 配置时也提供多选，Flash 可用时默认勾选它，但允许只选择其他模型；更换 Key 沿用共用名单。聚合从同一目录读取启用模型。移除使用独立的本地移除入口；任何 CLP 账户的当前默认模型均须先切换再移除。取消操作不写入配置。WebUI 首次配置仍生成完整的受支持目录。
+已有账户通过 `codexc setup → 模型与提供商 → 第三方 Provider → Cline Pass 官方` 的发现／添加模型入口扩展共用模型名单，无需删除账户、重新输入 Key。只列出尚未加入本地目录的候选，默认不勾选；空格勾选、回车确认，再预览所选新增模型的完整内容及影响账户并保存。发现只添加新模型，已有条目完整保留；下载目录缺失的旧模型也不会自动移除，没有新增时不写文件和备份。更新已有模型请在 CLI 模型管理或 WebUI 选择“更新模板”，明确提示词／能力范围后对比保存，见[账户模板更新](provider-integration-guide.md#对比并更新账户模型模板)。首次在 CLI 配置时也提供多选，Flash 可用时默认勾选它，但允许只选择其他模型；更换 Key 沿用共用名单。聚合入口当前关闭。移除使用独立的本地移除入口；任何 CLP 账户的当前默认模型均须先切换再移除。取消操作不写入配置。WebUI 首次配置仍生成完整的受支持目录。
 
 未启用 Flash 时，新增账户和刷新目录不要求 DS 模板，也不要求 Cline 目录包含 Flash。重新启用 Flash 时校验仓库 DS 模板；失败保留原目录。
 
@@ -18,7 +18,7 @@ CLP 自动审查不再受本地审批模型白名单限制；模型仍须符合�
 审查沿用现有 Chat 桥和 Codex 审批机制，失败不会自动放行；各远端模型的兼容性须以实际执行为准。
 默认设置见[审批方式](user-guide.md#审批方式手动审批与自动审查auto-review)。
 
-停用会约束所有 CLP 账户及聚合的后续请求。普通 CLP 桥每次出站前安全读取 CLP 共用目录：模型不在启用名单中返回 `409 clp_model_disabled`，目录缺失、模型集合结构无效或无法安全读取时返回 `503 clp_catalog_unavailable`，均不请求上游。旧 Thread 或原生客户端显式指定停用模型也会被拒绝，须重新选择已启用模型，不自动换模型。已经发往上游的请求不强行中断；聚合另保留已有快照变更拒绝与安全刷新机制。重新启用后普通桥无需重启即可读取新名单，菜单和模型能力仍按原刷新生命周期应用。Relay 独立目录与授权不受本名单影响。
+停用会约束所有 CLP 账户的后续请求。普通 CLP 桥每次出站前安全读取 CLP 共用目录：模型不在启用名单中返回 `409 clp_model_disabled`，目录缺失、模型集合结构无效或无法安全读取时返回 `503 clp_catalog_unavailable`，均不请求上游。旧 Thread 或原生客户端显式指定停用模型也会被拒绝，须重新选择已启用模型，不自动换模型。已经发往上游的请求不强行中断；聚合入口当前关闭。重新启用后普通桥无需重启即可读取新名单，菜单和模型能力仍按原刷新生命周期应用。Relay 独立目录与授权不受本名单影响。
 
 隔离实际 App Server 观察：启用模型完成一轮；停用后，当前 Thread 继续和 App Server 重启后恢复同一 Thread 均返回明确的 409，未调用上游；重新启用、重新加载模型能力后，同一 Thread 再次完成。上游为本地回环服务，本观察不代表 Windows 或云端模型验收。
 
@@ -26,7 +26,7 @@ CLP 自动审查不再受本地审批模型白名单限制；模型仍须符合�
 
 仅加入明确声明文本、工具能力、有效上下文及可映射思考控制的模型；暂不支持的条目在 CLI 输出原因。最多启用 64 个模型，候选目录超过 64 个时仍可选择其中的子集。声明思考开关的模型提供 `none`（关闭）和 `enabled`（开启），同时声明等级时保留对应等级；仅有开关的新模型默认关闭。不按模型名称推断能力，没有可映射控制或只有预算控制的模型暂不加入。图片仅声明桥支持的图片输入，不把官方目录中的音频、视频、PDF 声明为 Codex 可用能力。目录可被 Codex 加载不等同于每个云端模型已经完成工具续跑验收。
 
-生成文件位于 `~/.codex-connect/providers/clp/models.json`，同目录保存 `models.manifest.json`；所有 CLP 账户与聚合读取同一份模型内容。运行中的 Gateway 会在活动与租约允许后应用目录变化；未运行 Gateway 时按菜单提示重启服务。新增账户、重新配置 Key 和更新 Relay 目录均不会覆盖已有 Codex 模型目录。旧账户布局与未完成的历史目录迁移会被当前版本拒绝；保留原文件及标记，处理边界见[当前目录布局与旧版本恢复](provider-integration-guide.md#当前目录布局与旧版本恢复)。
+生成文件位于 `~/.codex-connect/providers/clp/models.json`，同目录保存 `models.manifest.json`；所有 CLP 账户读取同一份模型内容，聚合入口当前关闭。运行中的 Gateway 会在活动与租约允许后应用目录变化；未运行 Gateway 时按菜单提示重启服务。新增账户、重新配置 Key 和更新 Relay 目录均不会覆盖已有 Codex 模型目录。旧账户布局与未完成的历史目录迁移会被当前版本拒绝；保留原文件及标记，处理边界见[当前目录布局与旧版本恢复](provider-integration-guide.md#当前目录布局与旧版本恢复)。
 
 切换模式按账户使用 `sf-clp-<账户>.config.toml` Profile 和独立 App Server；固定模式修改 Codex 主配置并保留该账户的初始备份。
 固定 Key 使用[独立私有版本与主配置 `env_key` 引用](provider-integration-guide.md#4-安全边界)，App Server 与独立 Relay 复用同一引用；旧明文配置须明确重新配置账户。
@@ -42,15 +42,12 @@ Remote 保留 `--profile sf-clp-<账户>`；两个入口默认连接主实例。
 仅支持当前多账户结构。遇到不支持的管理标记或 Profile 会明确拒绝读取，不自动删除数据。
 配置写入复用受管事务和失败回滚，不迁移已有 Provider 数据或数据库。
 
-主 Provider 为 OpenAI，且至少有两个 API Key 切换提供商时，可使用 `codexc app --provider agg`。
-该按需实例的桌面目录包含 DS、CLP、OCG、CCG 和自定义切换提供商；CLP 的精确模型 ID 形如
-`clp-main/cline-pass/deepseek-v4.1-flash`，显示名称包含账户 Provider ID。已加载模型间切换无需退出
-Desktop，更换 App Server 实例仍须完全退出。聚合请求复用现有 CLP Chat 桥，每次用目标账户真实 Key
-替换本地令牌；网页搜索按精确模型声明放行，模型 API WebSocket 关闭，经过 Codex 的请求统一采用原生重试策略，不改变独立 Relay 的目录及路由；Relay 自身不自动重试。
-终端也可用 `codexc remote --provider agg`，渠道从 `/model` 的“聚合提供商”目录选择；
-同一聚合 Thread 内切换保留历史，账户额度查询不合并，请求指标按真实账户记录。
-安装新代码或增删成员后须重启相关服务；现有成员的 Key、模型目录变更由运行中的 Gateway 检测，待活动和租约释放后刷新，旧快照在等待期间拒绝
-后续出站。旧单账户 Thread 不迁移，请在聚合实例新建 Thread。隔离观察已通过实际 Codex App Server、聚合代理与 Chat 桥完成同一 Thread 的 GLM → 另一 CLP 账户 MiMo 切换，两轮均完成且第二轮保留历史；上游响应来自本地回环服务，不能据此认定真实云端模型或 Desktop 工具已完成验收。窗口覆盖与共享前提见 [Desktop 共享说明](user-guide.md#codex-desktop-app-共享macos--windows-预览)。
+聚合提供商当前关闭：Desktop、Remote 和渠道入口均明确拒绝，不登记聚合实例。
+原聚合代码、派生目录、历史 Thread 与旧绑定保留，不自动迁移；请显式选择独立 `clp-<账户>`
+并新建会话。已运行的旧服务需正常重启 App Server 与 Gateway 加载关闭策略，不自动停止服务。
+此前隔离观察曾通过实际 Codex App Server、聚合代理与 Chat 桥完成同一 Thread 的 GLM →
+另一 CLP 账户 MiMo 切换，两轮完成且第二轮保留历史；这是关闭前的历史证据，上游响应来自本地
+回环服务，不代表真实云端模型或 Desktop 工具验收。当前共享边界见 [Desktop 共享说明](user-guide.md#codex-desktop-app-共享macos--windows-预览)。
 
 ## Chat 转换边界
 
@@ -84,7 +81,7 @@ Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high
 
 2026-10-16 00:45:40–00:46:02 UTC，通过 WebUI 共用的 `probeRelayReasoning` 入口对 `clp-main/deepseek-v4.1-flash` 原生 Chat 执行九项检测，每项一次、固定文本 `Reply with exactly OK.`、`max_tokens=64`，沿用 Flash 路由限定。所有项目均为 HTTP 200、completed，整组未提前停止；响应模型均为 `vmc/deepseek-v4p1-flash-contributor-fallbacks`。基线、`reasoning.effort=none`、`reasoning_effort=none`、`thinking.type=disabled` 均报告推理/输出 13/16 并返回思考正文；`reasoning.enabled=false` 为 13/16、不返回思考正文；顶层 `enable_thinking=false` 为 24/27；模板 `chat_template_kwargs.enable_thinking=false` 为 15/18；Google 零预算为 24/27，后三项均返回思考正文。新增组合 `reasoning.enabled=false` 加 `thinking.type=disabled` 为 15/18、不返回思考正文，仍未观察到推理用量归零。组合对应 [Cline 官方参数规则](https://github.com/cline/cline/blob/23791b9323aadd91d7dbaea8a8fa262cd2f7ad0b/sdk/packages/llms/src/providers/routing/provider-option-rules.ts) 中通用关闭与 DeepSeek 家族规则的合并；源码依据不证明云端执行了关闭。此次直接调用检测后端，未操作浏览器保存或修改账户设置；没有采集路由元数据，不能仅凭响应模型名称判定实际 Provider。
 
-已有目录需通过“更新模板”明确选择能力参数，预览后保存才会增加开关选项；安装代码和发现新模型不改写已有条目，默认选择保留。聚合继承同一目录，仍按已有活动和租约条件刷新。回退到不支持 `enabled` 的旧版本前，先把相关默认值和会话选择改为 `none`，再按上述成对目录备份流程回退。此开关适配仅用于受管 CLP 的 Responses→Chat 桥；不自动改写其他提供商的原生 Responses 参数或独立 Relay 的客户端参数。
+已有目录需通过“更新模板”明确选择能力参数，预览后保存才会增加开关选项；安装代码和发现新模型不改写已有条目，默认选择保留。聚合入口当前关闭。回退到不支持 `enabled` 的旧版本前，先把相关默认值和会话选择改为 `none`，再按上述成对目录备份流程回退。此开关适配仅用于受管 CLP 的 Responses→Chat 桥；不自动改写其他提供商的原生 Responses 参数或独立 Relay 的客户端参数。
 未传入思考选项时沿用上游默认值；需要开启思考时，选择目录提供的 `enabled` 或非 `none` 等级。
 非 OpenAI Provider 的上下文压缩沿用锁定 Codex 的本地压缩路径，不伪造远程压缩结果。
 

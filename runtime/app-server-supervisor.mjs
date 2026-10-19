@@ -28,6 +28,7 @@ import { managedProviderDirectory, managedProviderMarkerPath, readManagedMarker 
 import { managedPrimaryCredentialPath } from "./managed-provider-credentials.mjs";
 import { maximumProviderCredentialBytes } from "./provider-credential-document.mjs";
 import { readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
+import { readProviderWebSearchFingerprint } from "./provider-web-search.mjs";
 
 const protocolVersion = 5;
 // Includes child readiness, policy connect/initialize/read and owned Proxy cleanup.
@@ -815,6 +816,7 @@ export function readAppServerProviderSettingsFingerprint(provider, environment =
   };
   assertComplete();
   const parts = [
+    readProviderWebSearchFingerprint(provider, environment),
     readPrivateFileSync(managedProviderMarkerPath(environment, definition)),
     marker.mode === "exclusive" ? readCodexConfigFile(profilePath) : readPrivateFileSync(profilePath),
     readPrivateFileSync(catalogPath, 2_097_152),

@@ -36,6 +36,7 @@ import { contextWindowPresetTokens, contextWindowPresetLabel } from "../../../..
 import { ProviderModelTemplateDialog, ProviderModelTemplateConfirmation, type ProviderModelTemplateTarget } from "@/components/settings/provider-model-template-dialog"
 import { ProviderModelAdditionDialog, ProviderModelAdditionConfirmation, type ProviderModelAdditionTarget } from "@/components/settings/provider-model-addition-dialog"
 import { ProviderWebSearchProbeDialog, type ProviderWebSearchProbeTarget } from "@/components/settings/provider-web-search-probe-dialog"
+import { ProviderWebSearchSettings, ProviderWebSearchConfirmation } from "@/components/settings/provider-web-search-settings"
 
 const probeReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
@@ -357,7 +358,7 @@ function ProviderSettingsCard({
     <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
   </>
 
-  return <>{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}{webSearchTarget && <ProviderWebSearchProbeDialog target={webSearchTarget} stale={webSearchStale} disabled={busy || pending !== null} finalFocus={actionTriggerRef} onClose={() => setWebSearchTarget(null)} />}<Card>
+  return <>{section === "providers" && <ProviderWebSearchSettings settings={settings} management={management} />}{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}{webSearchTarget && <ProviderWebSearchProbeDialog target={webSearchTarget} stale={webSearchStale} disabled={busy || pending !== null} finalFocus={actionTriggerRef} onClose={() => setWebSearchTarget(null)} />}<Card>
     <CardHeader>
       <CardTitle>{section === "providers" ? t("managementUi.customProviders") : t("managementUi.managedDefaults")}</CardTitle>
       <CardDescription>{section === "providers" ? t("managementUi.customProvidersHint") : t("managementUi.managedDefaultsDetail")}</CardDescription>
@@ -464,7 +465,7 @@ function ProviderSettingsCard({
         <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || probe.running || editorStale || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || (!connectionOnly && (model.trim() === "" || (catalogKind === "custom" && !customModelContextsValid))) || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{modelsOnly ? t("modelCatalog.saveCustom") : editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
         </DialogContent></Dialog>}
-      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading} finalFocus={() => {
+      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading || management.error !== null || management.readbackRequired} finalFocus={() => {
         if (pending.preview.operation === "model.add") return additionPreviewRef.current?.disabled ? false : additionPreviewRef.current ?? additionTriggerRef.current ?? true
         const preview = pending.preview.operation === "model.template.update" ? templatePreviewRef.current : pending.preview.operation === "model.context" ? contextPreviewRef.current : null
         if (!["model.template.update", "model.context", "model.remove"].includes(pending.preview.operation)) return true
@@ -555,6 +556,7 @@ function ProviderSettingsConfirmationDialog({
   const { t } = useTranslation()
   if (pending.operation === "model.add") return <ProviderModelAdditionConfirmation preview={pending} saving={saving} loading={loading ?? false} finalFocus={finalFocus} onConfirm={onConfirm} onCancel={onCancel} />
   if (pending.operation === "model.template.update") return <ProviderModelTemplateConfirmation preview={pending} saving={saving} loading={loading} finalFocus={finalFocus} onConfirm={onConfirm} onCancel={onCancel} />
+  if (pending.operation === "provider.web-search") return <ProviderWebSearchConfirmation preview={pending} saving={saving} loading={loading} finalFocus={finalFocus} onConfirm={onConfirm} onCancel={onCancel} />
   const localRemoval = pending.operation === "model.remove"
   const providerDetails = typeof pending.provider === "object" ? pending.provider : undefined
   const notices: string[] = []

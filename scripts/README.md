@@ -86,7 +86,7 @@
 - `cli-command-usage.mjs`：共享纯帮助文案与服务动作目录，不加载命令执行实现。
 - `cli-help.mjs`：校验公开命令的精确帮助路径，拒绝未知子命令和多余参数。
 - `delivery-command.mjs`：仅执行 status/list 时从 Surface 窄诊断入口加载载荷解码与屏障策略，避免帮助及其他 CLI 命令加载平台 SDK；通过 Surface 公开入口复用持久输出分类，离线查看独立投递箱的计数、事件身份、阻塞策略与检查点，并根据明确参数重发或确认送达；不输出正文、不自动清理未确认记录。
-- `cli-menu.mjs` / `cli-menu.d.mts`：八项顶层导航及运行连接、状态服务、数据维护、程序维护子菜单；与主帮助共用分类口径。连接菜单列出已注册工作区和实际可用的 Provider 拓扑，普通隔离实例使用规范 Profile 名分派，聚合项另校验选择别名；按平台隐藏不可用的 Desktop 与权限修复。循环保留上次选择，维护写操作需确认；只分派现有命令，保留进程终止信号语义。
+- `cli-menu.mjs` / `cli-menu.d.mts`：八项顶层导航及运行连接、状态服务、数据维护、程序维护子菜单；与主帮助共用分类口径。连接菜单列出已注册工作区和实际可用的 Provider 拓扑，普通隔离实例使用规范 Profile 名分派，聚合项受共享暂停门禁隐藏；按平台隐藏不可用的 Desktop 与权限修复。循环保留上次选择，维护写操作需确认；只分派现有命令，保留进程终止信号语义。
 - `cleanup-menu.mjs` / `cleanup-menu.d.mts`：统一清理交互入口，复用会话参数菜单、指标维护菜单和现有执行命令；转储先预览再确认删除，Provider 指标按精确 ID 确认清理，单项完成后返回菜单。
 - `maintenance-services.mjs` / `maintenance-services.d.mts`：交互清理共用的服务状态检查、停服确认与逆序恢复；取消覆盖停止、维护和恢复全程，子命令通过私有 IPC 在安全边界收尾，恢复后才返回取消状态，不停止非受管进程。
 - `session-menu.mjs` / `session-menu.d.mts`：统一清理菜单使用的会话归档参数收集；收集 Turn 上限和空闲天数后调用
@@ -231,7 +231,8 @@
   脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
   Provider CLI 列表共同复用；同时按 `CODEX_HOME/auth.json` 是否存在返回 OpenAI 官方登录状态，
   未检测到鉴权文件时按未登录处理。
-  `loadProviderWebSearchSettings` 只读投影全局和独立主文件的搜索保存值，使用 `ready`／`error` 区分模式、缺省与脱敏读取失败；不推断会话实际模式，不改写配置。新增展示读取失败按账户隔离，核心配置校验仍由原管理状态加载负责。
+  `loadProviderWebSearchSettings` 只读投影官方、受管及已配置自定义 Provider 的独立搜索覆盖，统一使用 `source=provider` 和 `ready`／`error`；缺省值为跟随全局，首次显式保存前保留既有受管切换 Profile 偏好。不推断会话实际模式，核心配置校验仍由原管理状态加载负责。
+- `provider-web-search-management.mjs` / `provider-web-search-management.d.mts`：精确已配置 Provider 的独立搜索模式预览与确认保存；复用 Provider 事务锁、资源修订及一次性确认，聚合与路径输入拒绝。显式保存同步移除对应已有独立 Profile 的顶层搜索值，其他字段保留；预览列明清理动作。写前生成唯一私有备份和 `.pending`，逐文件快照保护、原子写及失败回滚，成功回读后移除记录；不确定结果保留恢复材料，不自动重试或重启服务。
 - `model-provider-management-transaction.mjs` / `model-provider-management-transaction.d.mts`：统一
   串行 DeepSeek、OpenCode Go、自定义主 Provider 与默认模型设置的跨文件管理
   事务；同一异步调用链中的嵌套操作复用事务，避免 Provider 设置与账户删除交叉提交。
@@ -428,8 +429,7 @@
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `provider-selection.mjs` / `provider-selection.d.mts`：Remote 与 Desktop 共用的纯 Provider 选择映射；
   配置读取由默认参数提供，可注入已读取的定义。完整 Provider ID 与已登记的规范 `sf-*` Profile 名精确匹配，
-  不剥除前缀推测目标；`agg` / `sf-agg` 映射到内部 `codexc-aggregate`，内部 ID 输入拒绝，
-  任一聚合选择值与 Provider 或 Profile 重名时两种聚合选择均拒绝。返回 Provider 与可选规范 Profile，不修改配置。
+  不剥除前缀推测目标；当前共享门禁关闭聚合，`agg`／`sf-agg`／`codexc-aggregate` 明确拒绝。返回 Provider 与可选规范 Profile，不修改配置。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace、Provider 与 Profile 参数；`-p` / `--provider` 使用共享选择映射，
   与 `--profile` 互斥，重复选择失败关闭。`--profile` 保留原生个人 Profile 与已登记规范受管 Profile；
@@ -437,15 +437,15 @@
   不根据 OpenAI 登录状态自动选择第三方，不修改主配置。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；未显式选择时连接主实例，
   显式 Provider 通过共享映射选择相应 Socket 和规范 `sf-*` Profile，连接对应隔离实例并供 Remote TUI
-  完成第三方 Provider 认证；CP 自定义目录 Provider 复用已验证的启动参数投影，不加载磁盘 Profile 中的
-  搜索禁用设置，凭据仅通过该 TUI 子进程的私有环境变量传入，磁盘 Profile 合同保持不变。
+  完成第三方 Provider 认证；CP 自定义目录 Provider 复用已验证的启动参数投影，旧磁盘 Profile 中的
+  内部搜索禁用值不作为用户偏好，凭据仅通过该 TUI 子进程的私有环境变量传入。
   当前目录或显式 `--workspace` 只决定执行目录，第三方 Profile 不复制权限，
   不注入 Gateway 权限；原生显式参数与个人 Profile 由 Codex 自行处理；
-  聚合选择复用共享 Runtime 拓扑与 Supervisor 按需租约，不生成磁盘 Profile；启动前通过已有
+  聚合入口当前关闭，内部实现保留：聚合选择复用共享 Runtime 拓扑与 Supervisor 按需租约，不生成磁盘 Profile；启动前通过已有
   Codex Client 读取服务端默认模型与目录，投影启动设置，避免本地 OpenAI 默认模型覆盖聚合目录。
   透传 `-m`/`--model` 或 `-c model=...` 选择目录内精确模型时，按 Codex 的最终模型优先级使用目标模型的默认思考等级；
   服务端默认模型保留服务端思考等级，显式 `-c model_reasoning_effort=...` 优先，并尊重 `--` 参数边界。
-  CP 与聚合 Remote 均不注入 `web_search`，搜索模式沿用原生用户与项目配置及显式参数的优先级。
+  官方、受管及自定义 Provider 统一读取独立搜索覆盖并注入启动默认值；跟随全局时不注入，用户显式透传参数继续按原生优先级处理。
   自动审查沿用原生配置或用户显式设置，不按 Provider 或模型过滤、降级，也不为此固定请求模型。
   Remote 恢复及继承式分叉保留历史实际模型和 reviewer。
   聚合目录和 Provider 不允许由透传参数替换；

@@ -9,8 +9,10 @@
 台电脑上的 Codex Desktop App 与 `codex-channels` 同时连接本项目监管的同一个 App Server。
 默认连接主 OpenAI 实例；切换模式可在启动时指定已配置的 Provider 隔离实例，使 Desktop、渠道和
 `codexc remote` 共享该实例的 Thread、Turn、Item 与实时通知。
-至少有两个 API Key 切换提供商时，还派生按需启动的虚拟 Provider
-`codexc-aggregate`，把这些成员的模型提供给同一个模型选择器；Desktop 共享另要求主 Provider 为 OpenAI。
+聚合提供商当前关闭，不派生或登记虚拟 Provider `codexc-aggregate`；`agg`、`sf-agg` 与内部 ID
+选择均明确拒绝。Desktop 继续支持独立切换提供商，主 Provider 仍须为 OpenAI。
+原聚合代码、派生材料、历史 Thread 和旧绑定保留；旧服务需正常重启 App Server 与 Gateway
+加载关闭策略，代码更新不会自动停止服务。下文标明的聚合设计及历史观察不表示当前功能可用。
 
 当前锁定的 Codex CLI 0.163.0 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
 包含未公开的 WebSocket 与强制 CLI 启动入口。macOS 使用强制 CLI 与受管 stdio Proxy，Windows
@@ -85,8 +87,8 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 - Windows 使用当前用户包探测、受认证回环桥与隔离启动环境，仍为开发预览，未完成实机双向验收。
 - 启动时选择 Provider 隔离实例是新增能力，尚未完成 macOS 或 Windows 实机验收；下述主 OpenAI
   实例的历史验收不覆盖第三方模型目录、会话继续或内置工具兼容性。
-- 聚合模式复用同一个受监管 App Server 与工具 Host；聚合 Thread 的跨模型历史兼容及
-  Desktop 内置工具尚未完成实机观察。现有主实例验收不覆盖此路径。
+- 关闭前的聚合设计复用同一个受监管 App Server 与工具 Host；跨模型历史兼容及
+  Desktop 内置工具未完成实机观察，当前停止该路径验收。现有主实例验收不覆盖此路径。
 - Linux 隔离观察使用真实 CLI 0.160.1、聚合 HTTP 出口、原 ProviderProxy 和 CLP Chat 桥，
   上游为本地可控服务而非真实账户。同一 Thread 完成 DS→CLP→DS，后续请求保留前轮历史，
   两家均完成 `pwd` 工具调用及结果回程，指标保留 Thread/Turn 和实际账户。
@@ -174,11 +176,9 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 ### 非目标
 
 - 不接入 Remote Control、移动端、二维码、配对码或云端 Environment。
-- 不支持第三方主 Provider；主 Provider 仍必须为 `openai`，第三方通过切换模式的已配置账户实例
-  或聚合实例连接。
-- 聚合范围包含 DS、CLP、OCG、CCG 和自定义 API Key 切换提供商，不合并官方 OAuth 主账户或独立 Relay 目录。
-  更换 App Server 实例必须完全退出 Desktop，再用 `codexc app --provider <ID>` 启动；
-  聚合实例内已加载模型间切换无需退出。
+- 不支持第三方主 Provider；主 Provider 仍必须为 `openai`，第三方通过切换模式的已配置账户实例连接。
+  更换 App Server 实例必须完全退出 Desktop，再用 `codexc app --provider <ID>` 启动。
+- 聚合入口当前关闭，不合并任何第三方目录、官方 OAuth 主账户或独立 Relay 目录。
 - 不复制 Desktop UI，不让渠道模拟 Desktop 的审批界面，不跨连接转发审批决定。
 - 不支持两端同时向同一活动 Thread 写入。App Server 的活动状态仍是唯一依据；发现活动 Turn 时
   另一端只能观察、排队或等待完成。
@@ -250,7 +250,11 @@ Windows 使用独立的私有凭据文件，不改变 StateStore、指标库或�
 本次 Provider 选择不持久化只描述 `codexc app` 启动行为。各实例仍使用共享 Codex Home；
 Desktop 经上游配置 RPC 保存设置时可能写入共享用户配置，而非 Provider 私有 Profile，须纳入实机验收。
 
-### 聚合模型目录
+### 聚合模型目录（已关闭的设计）
+
+本节保留关闭前的设计边界，供后续评估参考。当前共享开关为 `enabled=false`，
+Supervisor 不登记聚合实例，Desktop、Remote、渠道模型选择和旧绑定的聚合请求均明确拒绝。
+以下按需启动、目录刷新及跨模型切换流程当前不执行，不应按本节操作或重新启用聚合验收。
 
 聚合拓扑由至少两个当前 API Key 切换提供商派生，允许同类多个账户，不增加账户或 TOML 配置字段。
 `desktop_app.enabled` 仍控制 Desktop 共享；首次选择聚合时沿用既有启用确认流程。服务启动时
@@ -342,9 +346,8 @@ codexc app status [--provider <Provider ID>] [--json]
 ### `codexc app`
 
 - `-p` / `--provider` 与 Remote 共用选择映射，接受已配置的精确 Provider ID（包含账户隔离 ID）
-  和已登记的规范 `sf-*` Profile 名称；缺省连接主 OpenAI。至少两个 API Key 切换提供商已配置时可选聚合。
-  `agg` / `sf-agg` 在公开命令解析时映射为内部 `codexc-aggregate`；命令不接受内部 ID，状态 JSON、Thread、租约与绑定仍使用内部 ID。
-  聚合选择值与已配置 Provider 或 Profile 重名时明确拒绝。Remote 的个人 Profile 使用 `--profile`，与 Provider 选择互斥。
+  和已登记的规范 `sf-*` Profile 名称；缺省连接主 OpenAI。聚合已关闭，`agg`、`sf-agg` 和内部
+  `codexc-aggregate` 选择均拒绝。Remote 的个人 Profile 使用 `--profile`，与 Provider 选择互斥。
   参数仅对本次启动生效，不写入 TOML、Desktop 配置或系统环境；普通模型名称和任意 Socket 路径均不接受。
   选择其他实例不重启整个服务，macOS 需要替换子进程时只处理目标实例。
   旧服务不支持 Provider 选择能力时拒绝启动并提示重启服务，不静默连接主实例。
@@ -381,9 +384,8 @@ codexc app status [--provider <Provider ID>] [--json]
   `thread/list` 显式请求多个 Provider，`thread/resume` 也可能沿用历史的 Provider。Desktop
   是否会从缓存恢复其他 Provider 的 Thread、传入模型覆盖，以及第三方是否能使用内置工具，均须实机确认。
   使用时应在目标实例新建会话，不以连接参数推断历史会话已转换 Provider。
-- 聚合实例的目录由各成员提供商目录派生，在上游仍归属同一个 `codexc-aggregate` Provider。
-  旧单账户 Thread 不迁移，必须新建聚合 Thread 再用；目录内模型切换的实现依据不证明历史中的
-  reasoning 或工具内容跨模型兼容，尚无该路径及聚合 Desktop 内置工具的实机验收。
+- 聚合实例当前不登记；旧聚合 Thread 与绑定保留但不自动迁移或继续执行。用户须显式选择独立
+  Provider 后新建会话。关闭前目录内切换的实现和隔离观察不证明跨模型历史及 Desktop 内置工具兼容。
 - Desktop 创建、恢复、归档、改名或更新 Thread 后，Gateway 只根据官方通知和后续
   `thread/list` / `thread/read` 观察结果，不从桥连接事件推断业务状态。
 - 渠道自动接续仍执行现有来源、Workspace、活动状态和绑定独占检查；桥不绕过这些检查。

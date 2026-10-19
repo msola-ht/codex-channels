@@ -18,6 +18,9 @@ import { withThirdPartyRuntimeTools } from "./third-party-model-catalog.mjs";
 
 export const aggregateProviderId = "codexc-aggregate";
 export const aggregateTokenEnvironmentKey = "CODEX_CONNECT_AGGREGATE_TOKEN";
+// One aggregate App Server cannot apply each member's independent search mode.
+// Keep its implementation and existing data while withholding derived instances.
+export const aggregateProviderEnabled = false;
 
 export class AggregateProviderTopologyChangedError extends Error {
   constructor() {
@@ -32,7 +35,7 @@ export function aggregateProviderMembers(primaryProvider, providers) {
   // own API credentials. The primary instance (including OAuth) is never added.
   const members = [...new Set(providers.map(entry => entry.provider))]
     .filter(id => id !== primaryProvider && id !== "openai" && id !== aggregateProviderId);
-  return members.length >= 2 ? members : [];
+  return aggregateProviderEnabled && members.length >= 2 ? members : [];
 }
 
 /** Source paths only: safe for watchers, with no credential material returned. */

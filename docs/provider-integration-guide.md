@@ -4,6 +4,9 @@
 的决策、实现与验收要求。通用执行顺序遵循[开发流程](development-rules.md#development-workflow)；
 新增通讯渠道走 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)。
 
+聚合提供商当前关闭，本文只将独立提供商列为可用入口；保留的聚合实现及材料保护合同只用于
+说明停用代码的边界，不表示支持启动或续接。关闭策略与旧服务加载要求见[用户配置的主 Provider](#6-用户配置的主-provider)。
+
 ## 日常模型管理
 
 WebUI 从「模型管理 → 模型配置」查看各提供商模型；CLI 从 `codexc setup → 模型与提供商 → 第三方 Provider → 模型管理` 进入。
@@ -19,7 +22,7 @@ DS、CLP、CCG、OCG 按提供商各展示一组共用模型，自定义提供�
 历史会话与任务保留，失效引用可能执行失败，不自动替换模型。
 
 共用目录的 Relay Key 授权不会被删除：移除后调用受目录约束，重新加入可能恢复旧授权；永久撤销应在 Key 管理操作。
-目录变化也可能撤销该提供商其他 Relay 在途请求，聚合旧快照需要刷新。CLP Codex 移除不会限制独立 CLP Relay 调用。
+目录变化也可能撤销该提供商其他 Relay 在途请求；关闭的聚合入口不参与刷新。CLP Codex 移除不会限制独立 CLP Relay 调用。
 移除没有回收站；恢复需明确重新添加、导入或核对备份，不能用旧备份覆盖后续变更。
 写入或回读结果不确定时停止修改，核对目录和备份；自定义目录保留 pending 时使用既有恢复入口。
 
@@ -30,7 +33,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账�
 ## 异步提问与时钟工具
 
 所有第三方提供商默认开放 Codex 的 `request_user_input_async`，覆盖 Responses、Chat Completions、
-固定模式、切换模式和聚合模式。目录声明使用固定底座 `experimental_supported_tools` 中的
+固定模式和切换模式；聚合模式当前关闭。目录声明使用固定底座 `experimental_supported_tools` 中的
 `send_user_message_async`，实际工具名仍为 `request_user_input_async`。模型发出问题后可继续执行，用户回答送回原 Thread；
 任务仍在执行时追加到当前轮，已结束时开启下一轮。模型是否主动提问由其行为决定。
 该工具由 Codex 本地执行，不需要上游提供专用异步提问 API；仍需模型正确调用函数工具。
@@ -49,7 +52,7 @@ Codex 显式关闭用户输入工具的配置和主代理限制继续生效。
 
 ## 重复思考保护
 
-Gateway 对已绑定、已订阅的第三方提供商会话启用重复思考保护，包括 DS、CLP、CCG、OCG、自定义 CP 及仅聚合第三方账户的聚合 Provider，覆盖固定与切换模式；OpenAI 官方不启用。只依赖 App Server 实际返回的原始思考或思考摘要文本增量，不按模型名称猜测能力。只返回加密内容、没有推理增量的模型无法检测，与渠道“思考状态显示”开关无关。
+Gateway 对已绑定、已订阅的第三方提供商会话启用重复思考保护，包括 DS、CLP、CCG、OCG及自定义 CP，覆盖固定与切换模式；OpenAI 官方不启用。只依赖 App Server 实际返回的原始思考或思考摘要文本增量，不按模型名称猜测能力。只返回加密内容、没有推理增量的模型无法检测，与渠道“思考状态显示”开关无关。
 
 同一 Thread／Turn／推理 Item／内容段内，200–4096 个 Unicode 码点的逐字相同片段连续出现三次时，请求中断该 Thread 的当前轮次。原始思考与摘要各自检测，交错返回也不拼接或重复计算；空白、标点参与比较，不做近义或跨段判断，不把完成快照和历史重新计入。
 
@@ -355,9 +358,11 @@ CCG 或 CLP 时使用该家注册表标记的默认账户，混合其他 Provide
 `codexc remote` 与 `codexc app` 默认都连接主实例，不根据官方登录状态自动选择第三方；Remote 显式受管 `--profile` 仍选择对应实例。
 上述自动选择只用于渠道未绑定会话。两个 CLI 入口的 `-p` / `--provider` 均接受已配置的完整
 Provider ID（推荐 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`my-provider`）和注册表中精确登记的
-规范 `sf-*` Profile 名称，不通过剥除前缀推测别名。`agg` 与 `sf-agg` 都选择聚合实例，
-内部 `codexc-aggregate` 不作为公开选择值；任一保留值与注册 Provider 或 Profile 重名时，两种聚合选择均拒绝。
-新增、删除或改变切换提供商成员，或修改自定义提供商的 Chat／Responses 协议后，聚合目录热更新不会重建宿主成员及协议代理。聚合材料包含 CP 的 `provider.json`，协议变化使旧材料失效；宿主在指纹查询及应用前核对当前协议与启动快照，拒绝用旧协议代理报告成功。Gateway 明确提示需要重启服务，并停止本次 Gateway 生命周期内该聚合实例的自动应用重试，保留待应用状态；其他提供商继续检查。请在方便时运行 `codexc restart all`，同时重建 App Server 和 Gateway。普通临时失败仍按原预算重试。
+规范 `sf-*` Profile 名称，不通过剥除前缀推测别名。聚合提供商当前关闭，`agg`、`sf-agg` 和内部
+`codexc-aggregate` 选择均明确拒绝；渠道不注册聚合目录，Supervisor 不登记聚合实例。
+聚合代码、派生目录、历史 Thread 和旧绑定保留，不自动迁移或删除；旧绑定不能继续调用聚合实例，
+须显式选择一个独立提供商后新建会话。已运行的旧服务需在任务结束后正常重启 App Server 和 Gateway
+才能加载关闭策略；代码更新本身不会自动停止服务。
 自定义 `agg` 可明确使用 `sf-custom-agg`。Remote 的 `--profile` 继续用于个人 Profile 或规范受管 Profile，
 与 `-p` / `--provider` 互斥；`--` 后原样透传。Desktop 仍要求主 Provider 为 OpenAI，并限于 macOS / Windows 预览入口。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
@@ -367,11 +372,11 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 
 修改后运行 `codexc restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
-所有通过 Codex 的 Provider（官方、第三方固定、切换及聚合）统一采用锁定 Codex 0.163.0 的重试语义：HTTP 失败最多重试 4 次、流失败最多重试 5 次。第三方和聚合启动显式注入 `4/5`；代理和 Chat 桥不叠加重发。新建受管 Profile 写入相同值，已有配置文件不自动改写，启动覆盖统一实际行为；Profile 中已有重试字段仍按非负安全整数读取。
+所有通过 Codex 的 Provider（官方、第三方固定及切换）统一采用锁定 Codex 0.163.0 的重试语义：HTTP 失败最多重试 4 次、流失败最多重试 5 次。第三方启动显式注入 `4/5`；代理和 Chat 桥不叠加重发。新建受管 Profile 写入相同值，已有配置文件不自动改写，启动覆盖统一实际行为；Profile 中已有重试字段仍按非负安全整数读取。
 
 所有 Codex 实例保留原生网络重连、取消和 WebSocket→HTTP 降级，不注入第三方专属的 `unbounded_connection_retries` 开关。该功能由 Codex 的默认值、用户设置及受管要求共同决定；锁定版本默认开启，符合条件的普通采样连接失败可能持续退避重连。HTTP、流重试和传输降级是不同层，因此不承诺整个 Turn 的固定发送次数或总时长。HTTP 重试针对可恢复的 5xx 和传输错误，使用 Codex 退避及上游等待建议；Chat 桥保留经过校验的 `Retry-After`。独立 Relay 不经过 Codex，不自行重试，由调用方决定。
 
-启动就绪前通过 `config/read` 核验实际第三方及聚合 Provider 的 `4/5`，受管 Provider 覆盖冲突或核验失败会拒绝就绪。官方 OpenAI 保持内置默认；不把同名原始配置块误认为已覆盖内置 Provider。更新程序后重启 App Server 激活进程策略。
+启动就绪前通过 `config/read` 核验实际第三方 Provider 的 `4/5`，受管 Provider 覆盖冲突或核验失败会拒绝就绪。官方 OpenAI 保持内置默认；不把同名原始配置块误认为已覆盖内置 Provider。更新程序后重启 App Server 激活进程策略。
 
 已存在的 Thread 在 Codex 中保留创建时的 Provider：恢复旧会话时，官方实现会用线程保存的
 `model_provider` 覆盖当前配置。因此切换 `model_provider` 后，旧会话仍走原 Provider（例如内置
@@ -448,6 +453,60 @@ JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行�
 
 自定义固定 Provider 的代理目标和凭据绑定到同一次服务启动；修改 Provider、上游地址或凭据后，旧服务拒绝按需重建主实例，须执行 `codexc restart all`。空闲释放后恢复也遵守此限制，不会将新 Key 注入旧代理。
 
+## 独立提供商的搜索模式
+
+WebUI `#/models/providers` 的“提供商联网搜索”卡片为每个已配置的独立提供商设置搜索模式。
+支持官方 OpenAI、受管账户的固定／切换模式、Codex 兼容提供商和自定义提供商的固定／切换模式；
+按精确 Provider ID 隔离，不按家族、显示名称或共享模型目录联动。模型目录搜索列保持只读，
+全局模式仍在通用设置中管理。选择“跟随全局”或 `disabled`、`cached`、`indexed`、`live` 后，
+先查看预览，再明确确认保存；保存后回读配置，并提示 `restart-app-server`，WebUI 不直接执行重启。
+运行中的 Gateway 可按现有活动与租约条件安全应用受管账户变更；官方与自定义实例须按提示重启 App Server。
+
+覆盖文件位于 `$CODEX_HOME/codexc-provider-search.toml`（默认 `~/.codex/codexc-provider-search.toml`）：
+
+```toml
+version = 1
+
+[providers]
+openai = "cached"
+ds-work = "disabled"
+cp-work = "live"
+```
+
+`[providers]` 的键必须是精确 Provider ID，值只允许上述四种模式；缺项跟随全局，保存“跟随全局”
+会移除该键。文件结构、版本或模式无效时明确拒绝，不回退到其他账户或更宽松搜索模式。
+读取不自动迁移。没有新覆盖时，既有受管切换 Profile 顶层 `web_search` 仍作为该账户的用户偏好读取；
+首次显式保存该账户的设置，会同步清除其 Profile 顶层 `web_search`，保留其他 Profile 字段。
+CP 旧 Profile 的固定 `disabled` 是内部 pin，不视作用户搜索偏好；继续兼容读取，
+新建 CP Profile 不再写入该 pin。
+
+保存前预览并复核相关文件修订，配置并发变化时拒绝提交。涉及覆盖文件和 Profile 的同步清除时，
+使用私有事务记录 `codexc-provider-search.toml.pending` 及本事务独立的
+`<原文件>.search-backup-<transactionId>` 备份，不覆盖历史备份。成功回读全部写入并完成修订复核后
+才清除 pending；普通写入失败尝试回滚，无法确认结果时保留材料并拒绝后续读取和保存。
+本功能不改写主配置的全局 `web_search`，也不在读取时改写用户文件。
+
+未完成的搜索设置事务没有自动恢复入口，须按以下顺序人工核对：
+
+1. 停止相关配置编辑，保留 pending 及本事务全部备份；不要删除标记后直接重试保存。
+2. 按 pending 的 `files` 逐项核对 `path`、`existed`、`expectedSha256` 和可选 `backup`。
+   当前文件必须仍是本事务输出（SHA-256 等于 `expectedSha256`），或已恢复为该项备份的内容；
+   原本不存在且已回滚的文件应保持不存在。内容不符可能表示后续编辑，须停止覆盖和清理并保留现场。
+3. 对 `existed=true` 的文件，从该项 `backup` 成套恢复原内容，保留原有私有权限；
+   对 `existed=false` 的文件，仅在校验其确为本事务输出后移除，不删除其他文件。
+4. 核对所有项的原内容或原不存在状态均已完整恢复后，才删除本次 pending，保留备份。
+   重新启动配置读取并确认结果，再恢复编辑；运行中的实例不会因文件恢复自动重启。
+
+回退程序前保留覆盖文件、关联 Profile、pending 及备份的成套副本，未完成事务须先按上述流程处理；
+不能只覆盖其中一个配置文件或用不匹配的事务材料恢复。旧版本不读取新增覆盖文件；
+回退前须核对原全局和 Profile 搜索值。要求 CP Profile 必须含 `web_search="disabled"` 的旧版本，
+还需要匹配该版本的 Profile 备份；不要把新建或已清理字段的 Profile 直接交给旧版加载。
+
+搜索覆盖由新启动的 App Server 消费，适用于其新建和冷恢复的 Thread；已运行实例或已加载会话不会
+即时更新。保存后应在现有任务结束后正常重启 App Server；Gateway 的旧代码也须重启才能加载新行为。
+原生 `codexc remote` 显式传入的 `--search` 或 `-c web_search=...` 继续优先。
+搜索模式只是请求策略，不证明上游模型会执行搜索；诊断结果也不会自动修改该设置。
+
 ## 7. 自定义提供商
 
 `codexc setup → 模型与提供商 → 第三方 Provider → 自定义第三方` 与
@@ -455,11 +514,11 @@ JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行�
 `provider` 管理链路。WebUI 的 Provider 设置中选择“自定义提供商”。
 此类型使用 `cp-` 开头的 Provider ID（其后 1-61 位 ASCII 字母、数字、`-` 或 `_`）。CLI 添加时选择自定义标识符、或在 WebUI 添加此类型时，`cp-` 前缀固定，只填写后面的名称；例如输入 `llm`，保存为 `cp-llm`。编辑已有提供商时 ID 不变。
 例如 `cp-llm`，终端使用 `codexc remote -p cp-llm` 或 `codexc app -p cp-llm`，规范 Profile 与文件分别为 `sf-cp-llm` 和 `sf-cp-llm.config.toml`。`cp-` 表示自定义提供商，与上游协议无关；协议独立选择 Responses 或 Chat Completions。
-所有 Provider 的固定、切换和聚合模式以及独立 Relay 共用统一请求策略。完整协议事件空闲为 300 秒，WebSocket 建连为 15 秒，对齐锁定 Codex 0.163.0 的有效默认值；生成没有固定总期限。HTTP 首响应头额外保留 300 秒网络等待，错误正文最多 5 秒，非流式正文最多 300 秒；下游交付受阻最多 30 秒，终态和关闭收尾最多 5 秒。聚合与 Chat 桥外层不重复启动内层模型计时器。
+所有 Provider 的固定、切换模式以及独立 Relay 共用统一请求策略。完整协议事件空闲为 300 秒，WebSocket 建连为 15 秒，对齐锁定 Codex 0.163.0 的有效默认值；生成没有固定总期限。HTTP 首响应头额外保留 300 秒网络等待，错误正文最多 5 秒，非流式正文最多 300 秒；下游交付受阻最多 30 秒，终态和关闭收尾最多 5 秒。聚合与 Chat 桥外层不重复启动内层模型计时器。
 
 代理本地期限使用同一套错误分类：上传 408 `upload_timeout`、准备 504 `preparation_timeout`、上游等待 504 `upstream_timeout`、交付与收尾 504 `delivery_timeout`。可发送结构化错误时，用 `timeout_stage` 区分 `upload/prepare/headers/body/stream/delivery/terminal`；响应头已经发送时不改写 HTTP 状态。上游已返回的错误及安全 `Retry-After` 不因诊断正文读取失败而被替换。Chat 桥和 Relay 的直接适配器显式请求 `Accept-Encoding: identity`，成功响应只接受缺省或 `identity` 编码，并精确校验 JSON/SSE 媒体类型；透明 Responses 代理仍保留上游传输合同。
 
-第三方与聚合 App Server 启动时显式注入统一的 `stream_idle_timeout_ms=300000`、`websocket_connect_timeout_ms=15000`，已有显式冲突值会被拒绝，用户文件不自动改写。启动后通过 `config/read` 复核合并后的 Provider 配置，受管层覆盖导致的不一致不会被当成已就绪。Provider 启动、租约、设置应用及 Desktop 附加等可能启动实例的监管操作统一等待最多 60 秒，包含实例就绪、配置核验及连接收尾；这是控制面等待，不是模型请求总期限。当前锁定版内置 OpenAI 不接受同名 Provider 块替换，使用内置默认，不提供一个实际上无法覆盖官方行为的全局可调超时选项。
+第三方 App Server 启动时显式注入统一的 `stream_idle_timeout_ms=300000`、`websocket_connect_timeout_ms=15000`，已有显式冲突值会被拒绝，用户文件不自动改写。启动后通过 `config/read` 复核合并后的 Provider 配置，受管层覆盖导致的不一致不会被当成已就绪。Provider 启动、租约、设置应用及 Desktop 附加等可能启动实例的监管操作统一等待最多 60 秒，包含实例就绪、配置核验及连接收尾；这是控制面等待，不是模型请求总期限。当前锁定版内置 OpenAI 不接受同名 Provider 块替换，使用内置默认，不提供一个实际上无法覆盖官方行为的全局可调超时选项。
 
 Chat 桥以完整 Chat 数据事件计空闲，Codex 仍以实际收到的完整 Responses 事件计空闲；注释心跳、零碎字节以及桥内尚未通过完整校验的工具参数不会伪造客户端进展。上传、目录复核、排队和服务停止继续使用各自的资源预算。更新程序后分别重启 App Server 和 Relay 生效；Gateway 重启不会替代这两个独立服务的策略激活。
 模型目录缺失时明确报错，不回退到官方目录。显示名称禁止使用上游具有特殊语义的 `OpenAI`，
@@ -519,9 +578,9 @@ CLI／WebUI 设置入口；它们不同于用户的 `web_search` 偏好，也不
 
 已有自定义模型的 CLI 模型管理保留“探测单个模型的工具能力”入口：先选择精确模型，再分别决定是否探测 `apply_patch`、`tool_search`，只有明确选择才发起可能计费的请求。采用结果后仍须预览并确认保存，探测期间连接或目录变化会拒绝继续保存；原生网页搜索仍仅作诊断。
 
-内置网页搜索沿用 Codex 的 `web_search` 配置，不提供模型级搜索支持声明或保存入口。模型目录中的 `supports_search_tool` 仍表示客户端工具检索，`web_search_tool_type` 仍只选择 hosted 工具形态。
+内置网页搜索使用 Codex 的 `web_search` 模式，不提供模型级搜索支持声明。模型目录中的 `supports_search_tool` 仍表示客户端工具检索，`web_search_tool_type` 仍只选择 hosted 工具形态。
 
-App Server 的固定、切换、聚合入口保留已有的顶层 `web_search`、`tool_choice` 和 Responses 历史 `web_search_call`，由上游判断执行支持。源目录不变，临时运行投影使用普通 Responses 工具编码（`use_responses_lite=false`），实例关闭 `features.standalone_web_search`，防止切换到独立 `/alpha/search` 执行器。CP Profile 的内部 `web_search="disabled"` 字段保留原有磁盘合同，但 App Server 及选择 CP 的 `codexc remote` 均复用受控启动参数与子进程凭据环境，不再将其作为搜索策略注入；CP 与聚合 Remote 的搜索模式沿用原生用户、项目配置和显式参数的优先级。
+App Server 的固定、切换入口保留已有的顶层 `web_search`、`tool_choice` 和 Responses 历史 `web_search_call`，由上游判断执行支持。源目录不变，临时运行投影使用普通 Responses 工具编码（`use_responses_lite=false`），实例关闭 `features.standalone_web_search`，防止切换到独立 `/alpha/search` 执行器。App Server 及选择 CP 的 `codexc remote` 复用受控启动参数与子进程凭据环境，并按上述独立提供商设置选择搜索模式。聚合入口当前关闭。
 
 HTTP、Responses WebSocket 和 Chat 桥复用工具透传合同，官方 OpenAI 与独立 Model Relay 保留自己的合同。Chat 对 hosted 声明仅透传，尚无原生 `web_search_call` 回程映射，包含这种历史的跨模型续聊仍会明确拒绝；透传本身不能证明搜索执行或回程可用。
 

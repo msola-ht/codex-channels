@@ -28,6 +28,8 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
 
 ## 文件
 
+- `provider-web-search.mjs` / `provider-web-search.d.mts`：在 Codex Home 的私有 `codexc-provider-search.toml` 保存 version=1 的精确 Provider 搜索覆盖表；缺键表示跟随全局，支持 `disabled`／`cached`／`indexed`／`live`，聚合标识和未知格式失败关闭。既有受管切换 Profile 的搜索偏好在首次显式保存前继续读取；旧 CP 内部禁用值不作为偏好。提供 Provider 专属指纹及启动参数，不因其他账户的覆盖变更重建实例；检测未完成 `.pending` 事务时拒绝读取，文件保护复用 Unix 权限和 Windows ACL 适配器。
+
 - `codex-request-identity.mjs` / `codex-request-identity.d.mts`：仅在 `follow_cli_version = true` 时从当前锁定 CLI 版本解析官方客户端身份及 UA 的生效版本，保留系统和终端信息；无标记或 false 时保留显式值。Gateway、App Server 服务、CLI 与 WebUI 共用，不改写读取的配置。
 
 - `workspace-directory.mjs` / `workspace-directory.d.mts`：CLI 诊断、工作区管理和 Gateway 配置校验共用的只读目录检查，区分不存在、非目录和无法访问，不移除注册或修改目录。
@@ -91,7 +93,7 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
   CLP 在同一次目录读取中取得模型的思考选项，出站同时验证启用名单和思考能力，不为能力检查重复执行 ACL 读取。
   自定义提供商注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和旧上下文事务标记；自定义及受管账户均检查旧版目录整理未完成记录。未完成事务拒绝对应出站，不复用管理事务内部的读取豁免。
 - `third-party-coding-instructions.mjs`：非 Flash CLP、新增 OCG/CCG 手填模型与新增非 DS 自定义提供商模型共用的编程提示词；显式写入模型定义，不改变既有目录缺省值，不声明模型身份或授予工具权限，不依赖 DS 下载。
-- `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
+- `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：共享 `aggregateProviderEnabled=false` 门禁暂停聚合入口，Runtime／Gateway 不再派生或注册聚合实例，保留账户与既有数据。内部实现从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
   拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
   目录快照；公开第三方账户、Profile、目录及事务状态的源文件清单与内容指纹供安全刷新使用。
   受管家族的 `settings-pending` 纳入去重材料清单，使用恢复记录的 16 MiB 上限；未完成事务使旧出站快照失效。

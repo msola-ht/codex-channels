@@ -124,8 +124,9 @@ WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示官方配额窗口�
 - `deepseek-flash` 声明文字和图片输入，图片按官方规则折算为输入 Token；`deepseek-v4-pro` 只声明
   文字输入。文字模型收到图片或音频时，Gateway 会在 Turn 前拒绝；官方目录中的模型目前都不声明音频输入。
 - OpenCode Go 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
-- 原生网页搜索按 OCG 共用目录中的精确模型声明放行，不从 DS 来源模板推断支持。
-  固定、切换和聚合复用该策略；普通函数及 MCP 工具不受影响，见 [网页搜索边界](deepseek.md#网页搜索)。
+- 原生网页搜索使用全局 Codex `web_search` 及精确 OCG 账户的独立覆盖，不从 DS 来源模板推断支持，
+  也不按模型目录声明过滤。固定与切换模式复用该策略，聚合入口当前关闭；普通函数及 MCP 工具不受影响，
+  见[独立提供商的搜索模式](provider-integration-guide.md#独立提供商的搜索模式)与[网页搜索边界](deepseek.md#网页搜索)。
 - 当前按 HTTP/SSE 接入（`supports_websockets = false`），流式文本、工具调用和上下文压缩走
   HTTP/SSE，不建立 Responses WebSocket。
 - Setup 对 API Key 只校验格式；官方账户额度由接入后的 `/usage` 查询；首次请求失败时从模型指标和日志中

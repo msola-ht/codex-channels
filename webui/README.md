@@ -173,6 +173,14 @@ CCG/OCG 的添加、模板和选择，以及 CLP 的显式联网更新继续指�
 
 ## 自定义模型能力设置
 
+提供商页面的联网搜索卡按后端返回的独立 Provider ID 配置官方、受管及自定义账户，覆盖固定与切换模式。
+`components/settings/provider-web-search-settings.tsx` 提供跟随全局、关闭、缓存、索引和实时五种选择，
+通过 `provider.web-search` 携带资源修订进行预览、确认及权威回读；跟随全局只移除账户覆盖。
+读取失败、未知模式、忙碌或等待回读时不允许修改，不把错误显示成跟随全局。确认弹窗明确展示账户和保存前后值，
+并在预览声明需要时提示清除独立配置文件中原有的 `web_search` 覆盖。
+保存不改变运行中的会话，安全应用配置或重建对应 App Server 后，新建或冷恢复会话才采用新设置。
+模型目录的内置搜索列保持只读，显示相同账户覆盖，空覆盖显示跟随全局；通用设置中的空搜索值仍显示跟随默认。
+
 `components/settings/provider-model-addition-dialog.tsx` 为受管目录提供新增／发现、候选选择和完整字段确认；CCG／OCG 可手填或导入 DS，CLP 仅发现。读取候选与保存分离，复用后端修订、一次性确认及回读。已有 CP 连接编辑通过专用操作仅修改连接、凭据与运行模式；模型编辑仍使用模型操作，不把隐藏的旧模型草稿随连接保存。
 
 `components/settings/provider-settings-management.tsx` 按模型提供图片、思考、`apply_patch` 与

@@ -68,14 +68,12 @@ codexc remote -p ds-main     # 用已配置的完整 Provider ID 连接隔离实
 codexc remote -p cp-llm      # 连接自定义提供商，协议独立选择 Responses 或 Chat Completions
 codexc app      # 启动共享 Desktop App；首次确认后自动启用（预览）
 codexc app -p ds-main # 本次连接已配置的隔离实例；切换前退出 Desktop（预览）
-codexc app --provider agg # API Key 切换提供商聚合到同一桌面模型目录（预览）
-codexc remote --provider agg # 终端使用相同聚合目录；渠道从 /model 选择
 ```
 
 首次安装使用 `init` 完整向导，之后补充接入使用 `setup`，日常设置使用 `config`，数据维护使用 `cleanup`。清理菜单的五项操作、服务启停要求和会话归档示例见[本机清理与归档](docs/user-guide.md#本机清理与归档)。在聊天渠道发送 `/help` 查看可用命令。
-Desktop 聚合模式的账户前提、重启要求和会话限制见 [Desktop 共享说明](docs/user-guide.md#codex-desktop-app-共享macos--windows-预览)。
-`remote` 与 `app` 的 `-p` / `--provider` 共用 Provider ID、已登记的规范 `sf-*` Profile 名称及
-`agg` / `sf-agg` 选择；两个入口默认连接主实例。完整规则与 Remote 的个人 `--profile` 用法见[用户指南](docs/user-guide.md)。
+Desktop 共享的账户前提、重启要求和会话限制见 [Desktop 共享说明](docs/user-guide.md#codex-desktop-app-共享macos--windows-预览)。聚合模式暂时关闭，已有聚合会话和数据保留。
+`remote` 与 `app` 的 `-p` / `--provider` 共用 Provider ID 或已登记的规范 `sf-*` Profile 名称；
+两个入口默认连接主实例。完整规则与 Remote 的个人 `--profile` 用法见[用户指南](docs/user-guide.md)。
 
 ## 配置位置
 

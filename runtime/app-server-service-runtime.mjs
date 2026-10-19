@@ -12,6 +12,7 @@ import { ProviderModelGuard } from "./provider-model-guard.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 import { writeThirdPartyRuntimeModelCatalog } from "./third-party-model-catalog.mjs";
 import { assertProviderModelRequestPolicy, assertProviderModelRetryPolicy } from "./model-request-policy.mjs";
+import { providerWebSearchArguments } from "./provider-web-search.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -456,6 +457,10 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     proxyOptionsForUrl(new URL(opencodeGoProviderDefinition.baseUrl));
   let primaryArguments = [];
   const withThirdPartyCatalog = (provider, argumentsList) => {
+    argumentsList = [...argumentsList, ...providerWebSearchArguments(
+      provider === primaryProvider ? customPrimaryProvider?.id ?? provider : provider,
+      runtime.environment,
+    )];
     if (provider === aggregateProviderId || (provider === "openai" && !customPrimaryProvider)) return argumentsList;
     const definition = providerDefinitions.get(provider);
     const sourcePath = provider === primaryProvider && customPrimaryProvider

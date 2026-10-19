@@ -20,6 +20,7 @@ Hook 列表、配置版本与状态写入也保留提交守卫；最终写守卫
 Permission Profile 分页、无人值守权限预检和账户查询接受本地提交守卫，Provider 准备和过载重试均复核。
 
 Provider 路由层为所有转发通知附上实际连接的 Provider 路由键，覆盖上游同名字段；固定自定义主 Provider 的路由键仍为 `openai`，实际账户身份由组合根区分。
+聚合暂时关闭时，缺失 `codexc-aggregate` Client 返回专用不可用错误，保留旧绑定供后续恢复；不会回退主实例或把临时关闭分类为会话删除。
 
 Luna Reserve 设置写入也在 Provider 准备后执行最终提交守卫，并与当前 Thread 审批方式更新复用
 RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 失效、重连或关闭会清理等待。

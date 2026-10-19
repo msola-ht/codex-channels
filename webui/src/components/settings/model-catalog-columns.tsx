@@ -70,20 +70,20 @@ function ModelWebSearchSettings({ settings, state }: { settings?: ManagementProv
   if (state === "error") return <span>{t("openAiModelCatalog.searchReadFailed")}</span>
   if (!settings?.length) return <span>{t("common.unknown")}</span>
   const labels = {
-    default: t("openAiModelCatalog.searchDefault"),
+    default: t("providerWebSearch.followGlobal"),
     disabled: t("settingsFields.off"),
     cached: t("settingsFields.cached"),
     indexed: t("settingsFields.indexed"),
     live: t("settingsFields.live"),
   }
   return <div className="flex flex-col gap-2">{settings.map(setting => {
-    const label = setting.status === "ready" ? labels[setting.mode ?? "default"] : t(setting.error === "invalid-mode" ? "openAiModelCatalog.searchInvalidMode" : setting.error === "invalid-document" ? "openAiModelCatalog.searchInvalidDocument" : "openAiModelCatalog.searchReadFailed")
+    const label = setting.status === "ready" ? labels[setting.mode === null ? "default" : setting.mode] ?? t("common.unknown") : t(setting.error === "invalid-mode" ? "openAiModelCatalog.searchInvalidMode" : setting.error === "invalid-document" ? "openAiModelCatalog.searchInvalidDocument" : "openAiModelCatalog.searchReadFailed")
     return <Tooltip key={setting.provider}>
       <TooltipTrigger render={<span tabIndex={0} className="flex items-center gap-2" />}>
         <span>{label}</span>
         {settings.length > 1 ? <span>{setting.provider}</span> : null}
       </TooltipTrigger>
-      <TooltipContent className="max-w-sm"><p>{t(setting.source === "global" ? "openAiModelCatalog.globalSearchSource" : "openAiModelCatalog.providerSearchSource", { provider: setting.provider })}</p><p>{t("openAiModelCatalog.searchDefaultHint")}</p></TooltipContent>
+      <TooltipContent className="max-w-sm"><p>{t("openAiModelCatalog.providerSearchSource", { provider: setting.provider })}</p><p>{t("openAiModelCatalog.searchDefaultHint")}</p></TooltipContent>
     </Tooltip>
   })}</div>
 }
