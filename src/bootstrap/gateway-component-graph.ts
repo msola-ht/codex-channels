@@ -1209,6 +1209,23 @@ export abstract class GatewayComponentGraph {
       timeoutMs: config.approvalTimeoutMs,
       targetForThread: (threadId) => this.router.targetForThread(threadId),
       currentThread: (target) => this.router.current(target)?.threadId,
+      captureAuthorization: (target) => {
+        const actors = this.bindings.actors(target).filter(actorId => this.accessPolicy(target)?.isAllowed({ target, actorId }));
+        if (this.stopping || actors.length !== 1) return undefined;
+        const actorId = actors[0]!;
+        let workspace: ReturnType<SessionRouter["workspace"]>;
+        try { workspace = this.router.workspace(target); } catch { return undefined; }
+        const workspaceId = workspace.id;
+        const cwd = workspace.cwd;
+        return { actorId, isCurrent: () => {
+          if (this.stopping || !this.bindings.actors(target).includes(actorId)
+            || !this.accessPolicy(target)?.isAllowed({ target, actorId })) return false;
+          try {
+            const current = this.router.workspace(target);
+            return current.id === workspaceId && current.cwd === cwd;
+          } catch { return false; }
+        } };
+      },
       submit: (target, threadId, text, isCurrent) => service.submitAsyncAnswer(target, threadId, text, isCurrent),
       warn: (event, message) => this.output.publish({
         type: "warning", target: event.target, threadId: event.threadId, message,

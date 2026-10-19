@@ -295,6 +295,8 @@ export class TelegramInteractionPort implements InteractionPort {
       return false;
     }
     if (pending.request.type === "user-input") {
+      if (pending.request.expectedActorId !== undefined
+        && pending.request.expectedActorId !== String(context.from?.id)) return true;
       const completeAnswers = parseAnswers(pending.request, text);
       if (completeAnswers) {
         this.finish(
@@ -487,7 +489,9 @@ export class TelegramInteractionPort implements InteractionPort {
     }
     const [, action, token] = data.split(":");
     const pending = token ? this.pending.get(token) : undefined;
-    if (!pending || String(context.chat?.id) !== pending.target.conversationId) {
+    if (!pending || String(context.chat?.id) !== pending.target.conversationId
+      || (pending.request.type === "user-input" && pending.request.expectedActorId !== undefined
+        && pending.request.expectedActorId !== String(context.from?.id))) {
       await context.answerCallbackQuery({ text: "该请求已失效" });
       return;
     }

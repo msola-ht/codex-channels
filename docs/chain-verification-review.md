@@ -316,7 +316,18 @@ Surface 审查能力分别返回 `hooks.forbidden` 和 `hooks.local-review-requi
 `revision=1`，双 Provider 刷新和回读完成，结果出口返回 forbidden。没有真实用户配置、Hook 执行或平台消息观察；
 Hook hash/version 与实际执行的完整业务验收留给 L16。
 
+**异步回答授权子链（基线 `06eec831`）。** 问题在首次等待前捕获唯一授权 Actor、Workspace ID/目录；
+每批交互携带本地 `expectedActorId` 和组合 `isCurrent`，经 InteractionRouter/PersistentInteractionPort 及
+Application 锁内、最终 start/steer 复核。飞书/微信仅允许原用户接收该交互，Telegram 文字和按钮回答核对
+原用户；字段不进 App Server 协议或持久化。具体授权闭包在组合根绑定当前名单、Actor Registry、工作区与停止状态。
+主代理运行生产 AsyncQuestionCoordinator→InteractionRouter→ConversationService，隔离交互与 Turn 端口：
+正常回答原用户 `actor-original` 的问题追加一次；交互答复时撤权、锁等待撤权、最终提交等待撤权或换 Thread
+均未发 Turn，锁后拒绝保留一次未确认提示。已发送后撤权仍完成一次发送、不新增警告；六场景 pending 均清空。
+飞书/微信生产端口接收与原用户不符的 Registry 时返回空决定、无投递；Telegram 隔离 pending 的文字/按钮
+错用户答复未解决问题，按钮返回“该请求已失效”，关闭返回空决定。首次手工观察的清理端口错误地把关闭的空决定
+当作接受而抛错，修正隔离端口后关闭完成；不是产品失败。未观察真实平台交互、完整 Gateway 启动或真实 App Server。
+
 **已核对和未观察。** 三渠道 Policy 复核 Surface 与账号；飞书错误 App ID、微信错误接收账号有拒绝入口。
 Workspace 删除/改目录及 Telegram/微信名单缩减要求重启，不能声称它们可任意热替换；飞书名单支持热撤权。
-当前记录没有真实平台撤权或 Windows/macOS 观察。L03-F3、输入关联异步交互及最终整项验收未完成，
+当前记录没有真实平台撤权或 Windows/macOS 观察。L03-F3 的纯查询内部授权及最终整项验收未完成，
 后续仍留在 L03，不跳到 L02。
