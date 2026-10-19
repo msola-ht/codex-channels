@@ -1,5 +1,5 @@
 import { agentMessageText, stripEncryptedMarker } from "./codex-private-items.js";
-import { object } from "./validation.js";
+import { ModelConversionError, object } from "./validation.js";
 import type { JsonObject } from "./validation.js";
 
 export interface NormalizedResponsesRequest {
@@ -10,6 +10,25 @@ export interface NormalizedResponsesRequest {
 
 function isRecord(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Apply a model's hosted-search declaration without rewriting history or adding tools. */
+export function applyWebSearchCapability(value: unknown, supported: boolean): NormalizedResponsesRequest {
+  const source = object(value);
+  if (supported) return { body: source, changed: false };
+  const choice = source.tool_choice;
+  if (isRecord(choice) && (choice.type === "web_search"
+    || (choice.type === "allowed_tools" && Array.isArray(choice.tools)
+      && choice.tools.some(tool => isRecord(tool) && tool.type === "web_search")))) {
+    throw new ModelConversionError("当前模型未声明原生网页搜索能力，不能强制选择 web_search");
+  }
+  if (!Array.isArray(source.tools)) return { body: source, changed: false };
+  const tools = source.tools.filter(tool => !isRecord(tool) || tool.type !== "web_search");
+  if (tools.length === source.tools.length) return { body: source, changed: false };
+  if (tools.length === 0 && choice === "required") {
+    throw new ModelConversionError("当前模型未声明原生网页搜索能力，过滤后没有可强制调用的工具");
+  }
+  return { body: { ...source, tools }, changed: true };
 }
 
 /**

@@ -196,7 +196,8 @@ Chat 桥与直接模型适配器共用 `direct-model-http.ts` 的成功响应校
 
 自定义 `cp-*` 的 Runtime 守卫还复用配置读取器的版本 5 和完整目录一致性校验，并拒绝目录 `.pending` 与全局上下文同步未完成状态；HTTP/WS 复用相同回调，不把合法 slug 单独视为有效目录。
 
-OCG/CCG 和自定义 `cp-*` 由 Runtime 向 `ProviderProxy` 注入同源目录复核。HTTP 在路由解析后、有界读取正文并复核模型再提交原始字节；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 16 MiB、上传预算 30 秒，目录复核预算 30 秒；全代理最多 16 项授权准备，WS 单帧与连接队列各限制 16 MiB、队列最多 16 帧。官方 OpenAI、DS 与独立 Relay 不注入目录复核，不推断无目录提供商的模型授权。
+DS/OCG/CCG 和自定义目录提供商由 Runtime 向 `ProviderProxy` 注入同源目录复核；CLP 在桥内执行。HTTP 在路由解析后、有界读取正文并复核模型再提交；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 16 MiB、上传预算 30 秒，目录复核预算 30 秒；全代理最多 16 项授权准备，WS 单帧与连接队列各限制 16 MiB、队列最多 16 帧。官方 OpenAI、Codex 兼容 Provider 的共享官方只读目录与独立 Relay 不注入此目录复核。
+可编辑第三方目录同次读取的 `supportsWebSearch` 控制 hosted `web_search`：仅 true 放行，false 或未知过滤。Codex 兼容 Provider 的共享官方目录只读，不注入该能力复核，保留工具透传与上游策略。HTTP／WS 在采样与私有项归一化后调用 `model-api` 纯转换；CLP 桥在转换前消费同次能力。强制选择被过滤工具返回请求错误，普通函数、历史及其他工具不变，不注入原本没有的搜索。聚合先恢复真实模型 ID，再经过对应 Provider 代理判断。Chat 透传放行的声明不代表支持 hosted 搜索回程；历史 `web_search_call` 在 Responses 保留，Chat 仍按既有转换限制明确拒绝。
 除官方 OpenAI 端点外的 Responses 上游（受管 DS/OCG/CCG、自定义 Provider 与自定义 `cp-*`）在提交前归一化 Codex 私有输入项：`agent_message` 降级为普通 `user` 消息，工具参数 schema 中的布尔 `encrypted` 标记被删除，无法转换的私有项按 `400 provider_model_request_invalid` 失败关闭，不退回透传（与 Chat 桥一致）。HTTP 与 Responses WS 都只替换发往上游的字节，转储与指标仍记录客户端原始报文；未发生改写时沿用原始字节。正文改写后按实际字节重写 `content-length`；没有目录守卫的第三方上游沿用同一 16 MiB 正文上限、30 秒上传预算与 16 项准备上限，压缩正文仍拒绝。
 Responses WS 归一化同样要求文本 JSON 消息且单条不超过 16 MiB；无守卫上游也在 WebSocket 接收层限制消息大小（含分片累计），并受同一等待队列上限约束。HTTP 目录复核与归一化共用一次正文解析。官方 `openai` 路由（含 `openai_base_url` 覆盖）不归一化，该端点理解 Codex 私有输入项；独立 Relay 的出站请求来自外部调用方自带报文，同样不归一化。
 

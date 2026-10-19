@@ -35,6 +35,8 @@ export interface ModelDefinition {
   instructions?: string;
   modelMessages?: Record<string, unknown>;
   supportsSearchTool?: boolean;
+  /** Native web_search at this upstream; omitted means unknown. */
+  supportsWebSearch?: boolean;
   /** followContext is retained only when reading historical v5 metadata; it has no runtime effect. */
   template?: {source: "official" | "deepseek"; model: string; followContext?: boolean};
 }

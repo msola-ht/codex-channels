@@ -1,7 +1,7 @@
 import { modelRequestDiagnostics, chatDiagnosticsHeader, type ChatDiagnosticsChannel } from "./chat-diagnostics.js";
 import { autoReviewMetadata } from "../../runtime/auto-review-metadata.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
-import { ModelConversionError, normalizeResponsesRequest, type SamplingParameters } from "../model-api/index.js";
+import { ModelConversionError, normalizeResponsesRequest, applyWebSearchCapability, type SamplingParameters } from "../model-api/index.js";
 import {
   createServer,
   request as httpRequest,
@@ -112,8 +112,8 @@ export interface ProviderProxyOptions {
   resolveUpstream?: (headers: IncomingHttpHeaders, signal: AbortSignal) => ProviderProxyUpstream | Promise<ProviderProxyUpstream>;
   /** Re-read this provider's enabled model catalogue before sending Responses requests. */
   isModelEnabled?: (model: string, signal: AbortSignal) => Promise<boolean>;
-  /** Read enablement and gateway sampling defaults from one validated catalogue snapshot. */
-  readModelCapabilities?: (model: string, signal: AbortSignal) => Promise<{ sampling?: SamplingParameters } | undefined>;
+  /** Read enablement, hosted search and sampling from one validated catalogue snapshot. */
+  readModelCapabilities?: (model: string, signal: AbortSignal) => Promise<{ supportsWebSearch?: boolean; sampling?: SamplingParameters } | undefined>;
   /**
    * 第三方 Responses 上游不认识 Codex 私有输入项时改写发往上游的正文：
    * `agent_message` 降级为普通 user 消息，并删除工具参数 schema 里的 `encrypted` 标记。
@@ -144,6 +144,7 @@ interface BufferedResponsesBody {
   body: Buffer;
   parsed: unknown;
   sampling?: SamplingParameters;
+  supportsWebSearch?: boolean;
 }
 
 export class ProviderProxy {
@@ -647,12 +648,14 @@ export class ProviderProxy {
    * 归一化第三方 Responses 正文并补齐当前模型的默认采样。未发生改写时沿用原始字节，
    * 避免无意义的重新序列化；`agent_message` 内容非法时按请求错误失败关闭。
    */
-  private prepareResponsesBody({ body, parsed, sampling }: BufferedResponsesBody, response: ServerResponse): Buffer | null {
+  private prepareResponsesBody({ body, parsed, sampling, supportsWebSearch }: BufferedResponsesBody, response: ServerResponse): Buffer | null {
     try {
       const normalized = this.normalizeResponsesInput
         ? normalizeResponsesRequest(parsed) : { body: parsed, changed: false };
       const sampled = applySamplingDefaults(normalized.body, sampling);
-      return normalized.changed || sampled.changed ? Buffer.from(JSON.stringify(sampled.body)) : body;
+      const searched = supportsWebSearch === undefined ? { body: sampled.body, changed: false }
+        : applyWebSearchCapability(sampled.body, supportsWebSearch);
+      return normalized.changed || sampled.changed || searched.changed ? Buffer.from(JSON.stringify(searched.body)) : body;
     } catch (error) {
       const message = error instanceof ModelConversionError
         ? error.message
@@ -696,6 +699,7 @@ export class ProviderProxy {
       clearTimeout(timer);
       const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
       let sampling: SamplingParameters | undefined;
+      let supportsWebSearch: boolean | undefined;
       if (isModelEnabled !== undefined || readModelCapabilities !== undefined) {
         const model = asRecord(parsed)?.model;
         if (typeof model !== "string" || !model.length) {
@@ -710,8 +714,10 @@ export class ProviderProxy {
         controller.signal.throwIfAborted();
         if (!enabled) return reject(409, "provider_model_disabled", "该模型已停用或不在当前目录中，请重新选择已启用的模型。");
         sampling = capabilities?.sampling;
+        supportsWebSearch = capabilities?.supportsWebSearch;
       }
-      return { body, parsed, ...(sampling === undefined ? {} : { sampling }) };
+      return { body, parsed, ...(sampling === undefined ? {} : { sampling }),
+        ...(supportsWebSearch === undefined ? {} : { supportsWebSearch }) };
     } catch (error) {
       if (response.destroyed || this.stopped) return null;
       const reason: unknown = controller.signal.reason;
@@ -977,6 +983,7 @@ export class ProviderProxy {
         const isModelEnabled = this.isModelEnabled;
         const readModelCapabilities = this.readModelCapabilities;
         let sampling: SamplingParameters | undefined;
+        let supportsWebSearch: boolean | undefined;
         if (isModelEnabled !== undefined || readModelCapabilities !== undefined) {
           if (typeof source.model !== "string" || !source.model.length) {
             rejectModelFrame(400, "provider_model_request_invalid", "模型请求必须包含明确的 response.create 和 model ID。");
@@ -1004,17 +1011,20 @@ export class ProviderProxy {
               return;
             }
             sampling = capabilities?.sampling;
+            supportsWebSearch = capabilities?.supportsWebSearch;
           } finally {
             this.modelAuthorizations.delete(controller);
           }
         }
         let payload: RawData | string = data;
-        if (this.normalizeResponsesInput || sampling !== undefined) {
+        if (this.normalizeResponsesInput || sampling !== undefined || supportsWebSearch !== undefined) {
           try {
             const normalized = this.normalizeResponsesInput
               ? normalizeResponsesRequest(parsed) : { body: parsed, changed: false };
             const sampled = applySamplingDefaults(normalized.body, sampling);
-            if (normalized.changed || sampled.changed) payload = JSON.stringify(sampled.body);
+            const searched = supportsWebSearch === undefined ? { body: sampled.body, changed: false }
+              : applyWebSearchCapability(sampled.body, supportsWebSearch);
+            if (normalized.changed || sampled.changed || searched.changed) payload = JSON.stringify(searched.body);
           } catch (error) {
             rejectModelFrame(400, "provider_model_request_invalid", error instanceof ModelConversionError
               ? error.message

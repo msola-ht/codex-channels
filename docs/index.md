@@ -47,10 +47,16 @@ Workspace 与上游 Project 的职责、共享范围及重新评估条件见
   不展示 stdin 正文或完整 network target URL。指标与 StateStore 不增加审查正文，现有加密投递箱只暂存安全摘要，
   details 可选且不改变结构版本。
   不消费 `autoApprovalReview/strictReviewRequired`，不扩大协商。
-  Plugin 仅使用稳定 `plugin/installed` 查询当前 Workspace 已安装项（搜索仅在该目录内本地过滤），
-  并通过 `turn/start` / `turn/steer` 的官方 `mention` 输入在 OpenAI Thread 中调用。
+  Plugin 仅使用稳定 `plugin/installed` 查询目标 Provider 在当前 Workspace 的已安装项（搜索仅在该目录内本地过滤），
+  并通过 `turn/start` / `turn/steer` 的官方 `mention` 输入在官方或第三方 Thread 中调用；解析与最终提交的 Provider 必须一致。
   不接入市场搜索、安装、卸载或分享；这项本地支持不表示全部上游 Plugin API 已稳定，
   也不得借这些例外或 Plugin 入口接入、暴露其他实验方法、字段或通知。
+
+  隔离只读观察中，DS 官方 Flash 经 Responses 与 Chat 均接受已安装 GitHub 插件的 `mention`；共享渠道
+  命令入口经目标 DS 实例完成列表、两次解析和 `turn/start`，收到真实答复。该缓存插件在隔离环境中没有
+  可用 App、MCP 或 Skill，模型明确报告不可用，不能据此声明插件连接器已可用。实际平台消息投递未观测。
+  人工异常观察覆盖不存在的插件、未授权 Actor、查询期间 Provider 变化、未知 Provider 拒绝及调用准备
+  期间 Provider 变化后提交数为 0；上游插件认证、套餐和可用性限制继续生效。
 
 ## 版本与数字
 
@@ -213,9 +219,24 @@ OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请�
 [`request_user_input_async.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/handlers/request_user_input_async.rs)、
 [`spec_plan.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/spec_plan.rs) 和
 [`questions.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/tui/src/chatwidget/questions.rs)。
-工具由模型目录决定是否开放，Gateway 不注入工具、不重放历史问题、不推断其他客户端已经回答。
+工具由 App Server 的有效模型目录决定是否开放。第三方固定、切换及聚合实例在启动时为各模型追加
+`request_user_input_async` 声明，覆盖 Responses 和 Chat Completions；复用上游本地工具，
+不通过动态工具注入，不改源模型目录或官方 OpenAI 目录，不重放历史问题、不推断其他客户端已经回答。
+运行目录由 [`third-party-model-catalog.mjs`](../runtime/third-party-model-catalog.mjs) 生成，
+显式关闭用户输入工具的 Codex 配置及上游主代理限制仍然有效；开放不保证模型主动调用。
+Codex 0.163.0 的隔离人工验证中，DS 官方 Flash 经 Responses 与项目 Chat 桥均实际产生异步问题、
+继续执行并接收原 Thread 的回答；Responses 还观察到运行中 `turn/steer` 回答与过期追加拒绝。
+其他第三方模型、实际渠道卡片交互及跨平台服务启动尚未逐项实测。
+同一第三方运行目录与模板投影还追加 `clock`，供上游注册 `clock.curr_time` 与可中断的 `clock.sleep`，
+保留上游 Feature 与配置条件。固定版官方依据为
+[`spec_plan.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/spec_plan.rs)、
+[`sleep.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/handlers/sleep.rs)。
+DS Flash 的 Responses／Chat 实际返回当前 UTC 时间，2 秒等待耗时分别为 2.0011／2.0008 秒；
+20 秒等待在新输入到达后分别于 1.0021／1.0030 秒结束，工具明确返回被新输入打断。
+Responses 的 0 毫秒等待被明确拒绝。`sleep` Item 沿用现有过程事件映射，不新增 RPC 或调度器。
 组合根在同一入站通知处理链路调用异步问题协调器的 `handleInput`，统一登记问题和处理失效，
-不通过输出队列延迟登记；Core 只抑制重复正文及最终答复标记。回答提交失败独立于问题取消状态报告。
+不通过输出队列延迟登记；断线前连接代次的迟到通知不能重新打开问题，取消事件仍被消费。
+Core 只抑制重复正文及最终答复标记。回答提交失败独立于问题取消状态报告。
 
 Default 执行模式的等待提问只作隔离能力探测，不属于 Gateway 自动启用范围：固定版
 [`request_user_input.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/tools/handlers/request_user_input.rs)
@@ -327,7 +348,7 @@ Remote 沿用工作区或显式审批参数，恢复与继承式分叉保留历�
 | Goal | `thread/goal/get`、`thread/goal/set`、`thread/goal/clear`、`thread/goal/updated`、`thread/goal/cleared` | [`turn-port.ts`](../src/application/turn-port.ts) 定义执行端口，[`client.ts`](../src/codex-client/client.ts) 为用户 set/clear 显式发送 `origin: "user"`，写入不重试；[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 映射请求结果，[`conversation-service.ts`](../src/application/conversation-service.ts) 在 set/clear 成功后立即同步 Core，[`notification-conversation-events.ts`](../src/codex-client/notification-conversation-events.ts) 把外部变更与恢复通知转换为稳定 Core 事件 |
 | 审批和用户输入 | 命令、文件、权限、用户输入、MCP elicitation 共 5 类审批 Server Request；命令审批接受缺省或明确的 `kind=command`；`writeStdin` 通过同一 `item/commandExecution/requestApproval` 方法解码为独立 stdin 审批，完整转义预览且仅一次批准或中止，缺失合同、过长预览与未知种类失败关闭；MCP 工具审批按 form 的 `mcp_tool_call` 元数据区分，并只返回上游提供的 `session` / `always` 范围；0.163.0 的 `openai/userVerification` 高权限模式未声明初始化扩展、未导出五个用户验证 Client RPC，收到请求时显式取消；前台 `thread/start`、`thread/resume`、`thread/fork` 不传 Gateway 权限默认值；权限归 App Server 原生配置与 Thread 状态，后台单独约束无人值守审批和受限沙箱 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts) 负责协议解码与编码，[`approval/`](../src/approval/README.md) 负责稳定授权语义，各 Surface 只实现平台交互；[`scheduled-task-server-request.ts`](../src/bootstrap/scheduled-task-server-request.ts) 对无人值守 `writeStdin` 返回 `cancel` 中止本轮，由任务协调器持久保留审批失败归因；[`router.ts`](../src/session-routing/router.ts) 保留授权目录、身份及恢复状态校验；[`scheduled-task-executor.ts`](../src/bootstrap/scheduled-task-executor.ts) 根据目标 Provider/cwd 的原生配置预检，并核对创建响应后才提交后台 Turn |
 | 计划任务动态工具 | 实验 `thread/start.dynamicTools`、`item/tool/call` | Gateway 前台新 Thread 注册 `schedule_task`；Bootstrap 的 [`scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) 将模型参数解码后交给 Application [`ScheduledTaskToolService`](../src/application/scheduled-task-tool.ts) 复用现有创建预览/列表/生命周期用例；工具不暴露 `confirm`，用户仍必须通过 `/schedule confirm` 确认创建或删除。后台计划任务 Thread 不注册工具，`createScheduledTaskServerRequestHandler` 也拒绝递归工具调用。官方只允许在 `thread/start` 注入工具，因此旧 Thread 保持当前 Provider、模型和上下文，Gateway 不为工具注入自动替换前台 Thread；旧 Thread 继续使用 `/schedule`，用户显式新建的 Thread 才注册工具 |
-| Skill、MCP 与 Plugin | `skills/list`、`turn/start` / `turn/steer` 的 `input.skill` 和 `mention`、`mcpServerStatus/list`、`config/mcpServer/reload`、`mcpServer/oauth/login`、`mcpServer/oauthLogin/completed`、`mcpServer/resource/read`、MCP 状态通知与 Tool Item `readOnlyHint`、`plugin/installed` | Skill、MCP 与 Plugin 分别由 [`skill-port.ts`](../src/application/skill-port.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`plugin-port.ts`](../src/application/plugin-port.ts) 及对应 Client 适配器隔离。MCP 按当前 Thread 提供有界详情、健康摘要、刷新、OAuth 与只读 Resource；工具目录和实际 Tool Item 的读写提示统一归约为只读、可能写入或未知，但不替代审批或执行结果，也不暴露直接 Tool Call。Plugin 列出或查看当前 Workspace 已安装项，并可在 OpenAI Thread 中发送官方 `mention`，继续校验 Actor、Workspace、启用与可用状态；Application 对同一次 `plugin/installed` 响应提供每页 8 项的本地分页过滤和只含需处理项的健康摘要，保留全局序号且不调用实验 `plugin/search`；详情使用响应中的版本、来源类型、安装时间、开发者、分类、能力、认证时机、不可用原因和适用套餐标识，能力与套餐各有界展示 8 项，不传播来源路径、URL、图标、截图、默认提示词或原始 Marketplace 错误。Marketplace 搜索、安装、卸载和分享仍禁止。三个 Surface 共用解析与输出 |
+| Skill、MCP 与 Plugin | `skills/list`、`turn/start` / `turn/steer` 的 `input.skill` 和 `mention`、`mcpServerStatus/list`、`config/mcpServer/reload`、`mcpServer/oauth/login`、`mcpServer/oauthLogin/completed`、`mcpServer/resource/read`、MCP 状态通知与 Tool Item `readOnlyHint`、`plugin/installed` | Skill、MCP 与 Plugin 分别由 [`skill-port.ts`](../src/application/skill-port.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`plugin-port.ts`](../src/application/plugin-port.ts) 及对应 Client 适配器隔离。MCP 按当前 Thread 提供有界详情、健康摘要、刷新、OAuth 与只读 Resource；工具目录和实际 Tool Item 的读写提示统一归约为只读、可能写入或未知，但不替代审批或执行结果，也不暴露直接 Tool Call。Plugin 列出或查看目标 Provider 在当前 Workspace 的已安装项，并可在官方或第三方 Thread 中发送官方 `mention`，继续校验 Actor、Workspace、启用与可用状态，解析与最终提交的 Provider 必须一致；Application 对同一次 `plugin/installed` 响应提供每页 8 项的本地分页过滤和只含需处理项的健康摘要，保留全局序号且不调用实验 `plugin/search`；详情使用响应中的版本、来源类型、安装时间、开发者、分类、能力、认证时机、不可用原因和适用套餐标识，能力与套餐各有界展示 8 项，不传播来源路径、URL、图标、截图、默认提示词或原始 Marketplace 错误。Marketplace 搜索、安装、卸载和分享仍禁止。三个 Surface 共用解析与输出 |
 | MCP 与扩展任务通知口径 | MCP 启动状态通知、`turn/started` | MCP 首次 `starting` / `ready` 状态保持静默，[`core.ts`](../src/conversation-core/core.ts) 只投递失败、取消和异常恢复，避免与主动查询或认证结果重复。Skill、Plugin 和子代理新建 Turn 时只由共享生命周期确认，并在该事件中保留具体类型和名称；追加到活动 Turn 时保留命令确认 |
 | OpenAI 重置券使用 | `account/rateLimits/read` 完整券明细、`account/rateLimitResetCredit/consume` | `openai-reset-credit-service.ts` 保存短期选券确认，绑定账户与券、复核状态并以同一幂等键单次消费；取消释放预览，确认即使因并发忙碌被拒绝也消耗该预览；消息渠道 `/limits reset` 通过 `conversation-reset-credit-service.ts` 绑定 Actor、Conversation |
 | 用量、额度与权限 | OpenAI：`account/read`（不刷新凭据的当前认证路由）、`account/usage/read`（账户摘要与可选 `threadId` 官方估算）、`account/rateLimits/read`、账户通知；DeepSeek：`GET /user/balance`；OpenCode Go：`GET /zen/go/v1/usage`；CCG：`GET /alpha/whoami?limits=1`、`GET /alpha/billing/credits`；权限：`permissionProfile/list` | Gateway 启动时若当前 Codex Home 缺少 `auth.json` 则跳过 OpenAI 连通探测；存在鉴权文件时只把 `account/read` 的认证类型投影为 API、ChatGPT 或无需 OpenAI 认证，据此选择 [`openai-connectivity.ts`](../src/bootstrap/openai-connectivity.ts) 的官方活动线路，不读取或传播凭据；API 与自定义 Base URL 按官方 Doctor 规则检查 `/responses` 和 `/models`，ChatGPT 检查 `/backend-api/codex/responses`；`account/read` 与 HTTP 探测共同受总计 12 秒的截止时间约束且不阻断启动。系统代理在服务启动后变化时，[`network-proxy-watcher.ts`](../src/bootstrap/network-proxy-watcher.ts) 仅提示在所有客户端任务结束后按前台或后台入口重新启动 Gateway 与 App Server，不自动重启共享进程。[`account-port.ts`](../src/application/account-port.ts) 与 [`provider-account-service.ts`](../src/application/provider-account-service.ts) 按当前 Thread 的 `modelProvider` 返回 Token 用量、精确 Thread 官方估算、额度、第三方余额、配额窗口或明确不支持；OpenAI [`account-adapter.ts`](../src/codex-client/account-adapter.ts) 接受固定版本完整 `PlanType`，其中 `ent26` 显示为 Enterprise，并严格校验官方 Thread ID、整数单位、分组字段及每张重置券的可空到期时间；`/usage` 保留账户摘要为主结果，当前 OpenAI Thread 的估算查询并行且失败隔离，不缓存、轮询或聚合子代理；`/limits` 展示官方重置券数量，按到期时间合并明细并明确标识无到期时间或服务端未返回的明细，仅在官方响应包含 10,080 分钟窗口与有效重置时间，且本机统计代理在相同重置周期观测到额度正向变化时，用 [`request-metrics-port.ts`](../src/application/request-metrics-port.ts) 按相邻快照区间估算每 1% Token；DeepSeek [`deepseek-account-adapter.ts`](../src/bootstrap/deepseek-account-adapter.ts) 通过共享 [`model-provider-runtime.mjs`](../runtime/model-provider-runtime.mjs) 从切换 Profile 或固定基础配置读取 Key、复用统一代理并裁剪官方余额；OpenCode Go [`opencode-go-account-adapter.ts`](../src/bootstrap/opencode-go-account-adapter.ts) 通过同一运行时读取凭据，把官方 `/usage` 的 5 小时/7 天/月度三个窗口归约为通用 `quota-windows` 形态（已用百分比与重置时间），命令与 WebUI 按窗口展示；5 小时本地 Token 按滚动时间范围汇总，7 天/月度按请求记录的固定周期快照汇总；CCG [`ccg-account-adapter.ts`](../src/bootstrap/ccg-account-adapter.ts) 使用当前官方 CLI 的账户身份与 Credits 接口，展示月度、充值和赠送余额及 5 小时/7 天窗口；CLP [`cline-pass-account-adapter.ts`](../src/bootstrap/cline-pass-account-adapter.ts) 按独立账户 Key 查询套餐使用比例和重置时间，多账户复用 Provider 路由，Chat 转换代理与 Codex 模型目录按账户独立；WebUI 账户快照按 DS、OCG、CCG、CLP 注册表补齐多账户元数据并支持逐账户刷新；控制台首次进入、恢复可见和页头刷新只读取本地快照，成功保存后由 Gateway 独立通知；各账户手动刷新才主动查询，OpenAI 复用已有 `account/rateLimits/read`，旧快照读取失败不阻止手动查询，账户清单独立读取注册表并按来源隔离异常，单账户查询不依赖整份模型配置；OpenAI 快照时间仅随额度查询成功推进，较早额度请求的迟到结果不覆盖较新的成功观测；Thread Token/上下文统计保持 Provider 通用，OpenAI 周限不附加到第三方 Thread；账户通知仍由 [`notification-account-events.ts`](../src/codex-client/notification-account-events.ts) 映射，Permission Profile 由 [`permission-port.ts`](../src/application/permission-port.ts) 与 [`permission-adapter.ts`](../src/codex-client/permission-adapter.ts) 隔离 |
@@ -646,10 +667,15 @@ CLP 共用 Codex 目录由 [`cline-pass-account-management.mjs`](../scripts/clin
 依据锁定官方 `core/src/client.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs` 的请求、条目和事件合同，
 接受文本、用户内联图片、函数与自由格式工具、客户端 `tool_search`；工具结果里的内联图片不放进 Chat `tool` 消息，转成该组工具结果之后紧随的一条 `user` 消息图片段，并用相同的调用 ID 与图片序号标记关联原 `tool` 文本位置和图片；自由格式语法保留在 Chat 工具说明，CLP 模型目录声明 `apply_patch_tool_type: freeform` 与 `supports_search_tool`，检索结果按锁定 `tools/src/tool_search.rs` 的命名空间和 `defer_loading` 形态显式加载。`reasoning_content` 通过 `reasoning.content` 原文往返，Cline `reasoning` 通过摘要往返。图片沿用稳定 `UserInput.image` 与模型目录 `input_modalities`，不伪造加密推理或远程压缩语义；不完整终态保留已生成文本并拒绝执行部分工具调用。Chat 上游诊断通过请求级进程内回调写独立调用记录，不增加协议事件；HTTP 与流内错误经 [`chat-errors.ts`](../src/provider-proxy/chat-errors.ts) 映射为固定文案和白名单分类，`context_length_exceeded` 沿用锁定上游 SSE 的上下文错误语义。用户边界见 [`CLP`](cline-pass.md)。
 原生 Responses 推理回传
-DS 官方、OCG、CCG、CLP 四类受管入口的内置网页搜索在启动参数中关闭；固定与切换模式由
-[`app-server-service-runtime.mjs`](../runtime/app-server-service-runtime.mjs)、
-[`model-provider-startup-runtime.mjs`](../runtime/model-provider-startup-runtime.mjs) 统一消费 Provider 定义；
-来源和边界见 [DeepSeek](deepseek.md#网页搜索)。
+使用可编辑模型目录的第三方固定、切换和聚合入口按精确 Provider／模型声明原生网页搜索：Gateway 扩展字段 `supports_web_search`
+由 [`provider-model-guard.mjs`](../runtime/provider-model-guard.mjs) 同次目录读取交给 HTTP／WS 出站处理和 CLP Chat 桥，
+仅 true 放行已存在的 hosted `web_search`，不注入工具、不改历史或用户全局禁用。
+Codex 兼容 Provider 的共享官方目录只读，不应用此扩展声明守卫，保留工具透传和上游搜索策略。
+锁定 CLI 的 `ModelInfo` 没有该布尔；其 `web_search_tool_type` 只选形态，`supports_search_tool` 是客户端工具检索。
+[`third-party-model-catalog.mjs`](../runtime/third-party-model-catalog.mjs) 仅在运行投影中关闭 Responses Lite，
+启动同时关闭 standalone 搜索，确保使用模型 API 的 hosted 合同而非 OpenAI `/alpha/search`。
+依据 `core/src/tools/spec_plan.rs`、`core/src/tools/hosted_spec.rs` 与 `ext/web-search/src/extension.rs`；
+官方 OpenAI 和独立 Relay 不套用此策略，Chat 声明不保证托管搜索的执行或回程，见 [DeepSeek](deepseek.md#网页搜索)。
 DS 官方目录的无效 verbosity/摘要声明由 [`deepseek-setup.mjs`](../scripts/deepseek-setup.mjs) 调用共享纯数据层 [`model-catalog.mjs`](../runtime/model-catalog.mjs) 收紧，
 已有目录经 [`deepseek-account-management.mjs`](../scripts/deepseek-account-management.mjs) 的显式配置事务更新。
 客户端工具检索与跨轮推理的线上验证范围见

@@ -100,6 +100,12 @@ async function promptAdditionalModel(prompts, definition, existing) {
   if (prompts.isCancel(patch)) return undefined;
   const search = await prompts.confirm({ message: "支持 Codex 客户端 tool_search 工具？", initialValue: false });
   if (prompts.isCancel(search)) return undefined;
+  const webSearch = await prompts.select({ message: "原生网页搜索 web_search（上游服务端工具）能力", options: [
+    { value: "unknown", label: "未知（不写声明）" }, { value: "yes", label: "支持（按平台说明手动声明）" }, { value: "no", label: "不支持" },
+  ], initialValue: "unknown" });
+  if (prompts.isCancel(webSearch)) return undefined;
+  if (!["yes", "no", "unknown"].includes(webSearch)) throw new Error("网页搜索能力选择无效");
   return { id, name, contextWindow: Number(window), reasoningEfforts: efforts, defaultReasoningEffort: effort,
-    supportsImages: images, applyPatchToolType: patch ? "freeform" : null, supportsSearchTool: search };
+    supportsImages: images, applyPatchToolType: patch ? "freeform" : null, supportsSearchTool: search,
+    ...(webSearch === "unknown" ? {} : { supportsWebSearch: webSearch === "yes" }) };
 }

@@ -70,6 +70,7 @@ export function ModelCapabilityCells({ model }: { model: OpenAiModelCatalogEntry
   const reasoning = declared === undefined ? model.reasoningEfforts : declared.reasoningEfforts
   const reasoningState = declared === undefined ? t("common.unknown") : capability(reasoning === undefined ? undefined : reasoning.length > 0)
   const search = declared === undefined ? t(model.details.supports_search_tool === null ? "openAiModelDetails.undeclared" : model.details.supports_search_tool ? "openAiModelCatalog.supported" : "openAiModelCatalog.unsupported") : capability(declared.supportsSearchTool)
+  const webSearch = capability(declared === undefined ? model.details.supports_web_search ?? undefined : declared.supportsWebSearch)
   const patch = declared === undefined ? t(model.details.apply_patch_tool_type === null ? "openAiModelDetails.undeclared" : "openAiModelCatalog.supported") : capability(declared.applyPatchToolType === undefined ? undefined : declared.applyPatchToolType !== null)
   return <>
     <TableCell><div className="flex flex-wrap gap-1">{declared !== undefined ? <><Badge variant="outline">{t("openAiModelDetails.text")}</Badge>{declared.supportsImages === true ? <Badge variant="outline">{t("openAiModelDetails.image")}</Badge> : <span>{t("managementUi.imageInput")}: {capability(declared.supportsImages)}</span>}</> : model.details.input_modalities === null
@@ -89,6 +90,7 @@ export function ModelCapabilityCells({ model }: { model: OpenAiModelCatalogEntry
     <TableCell><ModelApprovals approvals={model.approvals} /></TableCell>
     <TableCell><div className="flex flex-col items-start gap-1">
       <span>{t("openAiModelCatalog.searchTool", { value: search })}</span>
+      <span>{t("managementUi.nativeWebSearch")}: {webSearch}</span>
     <Tooltip>
       <TooltipTrigger render={<span tabIndex={0} className="cursor-help" />}>{t("openAiModelCatalog.editSupport", { value: patch })}</TooltipTrigger>
       <TooltipContent>{t("openAiModelCatalog.patchTool", { value: declared === undefined ? model.details.apply_patch_tool_type ?? t("openAiModelDetails.undeclared") : declared.applyPatchToolType ?? patch })}</TooltipContent>

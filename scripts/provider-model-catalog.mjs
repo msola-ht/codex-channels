@@ -12,6 +12,8 @@ export function createDeepseekTemplateCatalog(source, family) {
   for (const model of catalog.models) {
     delete model.service_tiers;
     delete model.additional_speed_tiers;
+    // A DS endpoint declaration cannot establish another endpoint's support.
+    if (family !== "deepseek") delete model.supports_web_search;
   }
   return family === "deepseek" ? normalizeDeepseekCatalogCapabilities(catalog) : catalog;
 }

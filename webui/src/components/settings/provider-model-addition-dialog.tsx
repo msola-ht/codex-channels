@@ -40,6 +40,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const [images, setImages] = useState("unknown")
   const [patch, setPatch] = useState("unknown")
   const [search, setSearch] = useState("unknown")
+  const [webSearch, setWebSearch] = useState("unknown")
   const request = useRef<AbortController | null>(null)
   useEffect(() => () => request.current?.abort(), [])
   const busy = management.busy || management.loading || management.error !== null || management.readbackRequired
@@ -58,6 +59,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
       ...(images === "unknown" ? {} : { supportsImages: images === "yes" }),
       ...(patch === "unknown" ? {} : { applyPatchToolType: patch === "yes" ? "freeform" : null }),
       ...(search === "unknown" ? {} : { supportsSearchTool: search === "yes" }),
+      ...(webSearch === "unknown" ? {} : { supportsWebSearch: webSearch === "yes" }),
     } : undefined
     try {
       const result = await fetchProviderModelAdditionOptions(target.provider, manualModel, controller.signal)
@@ -88,6 +90,8 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
           <ManagedSelect label={t("managementUi.imageInput")} value={images} disabled={locked} options={capabilityOptions} onChange={setImages} />
           <ManagedSelect label="apply_patch" value={patch} disabled={locked} options={capabilityOptions} onChange={setPatch} />
           <ManagedSelect label="tool_search" value={search} disabled={locked} options={capabilityOptions} onChange={setSearch} />
+          <ManagedSelect label={t("managementUi.nativeWebSearch")} value={webSearch} disabled={locked} options={capabilityOptions} onChange={setWebSearch} />
+          <p className="text-muted-foreground">{t("managementUi.nativeWebSearchHint")}</p>
         </> : null}
         <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{t(loading ? "common.loading" : "modelAddition.load")}</Button>
       </FieldGroup> : <FieldGroup>

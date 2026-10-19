@@ -34,8 +34,8 @@ DeepSeek 由 Bootstrap 具体适配器查询官方余额；未知 Provider 不�
 查询也已在 Client 边界完成路径与 Scope 裁剪；显式调用只把
 实时解析且通过校验的 Skill 引用交给 Application，Surface 不接触本机路径。MCP 按当前 Thread
 提供裁剪后的概览、详情、OAuth 和只读资源内容，Permission Profile 查询只输出稳定目录选项。
-Plugin 通过 `plugin/installed` 提供当前 Workspace 的已安装列表、本地搜索、详情与健康摘要，
-并允许 OpenAI Thread mention 调用；市场搜索、安装、卸载、分享和直接 MCP Tool Call 仍不进入业务边界。
+Plugin 通过目标 Provider 实例的 `plugin/installed` 提供当前 Workspace 的已安装列表、本地搜索、详情与健康摘要，
+并允许官方与第三方 Thread mention 调用，提交前保持解析 Provider 一致；市场搜索、安装、卸载、分享和直接 MCP Tool Call 仍不进入业务边界。
 
 切换模式复用完整 `CodexAppServerClient`，由 Provider 路由层按官方 Thread `modelProvider` 选择
 OpenAI 主 App Server 或独立 Provider App Server；Session Routing、Application、Core、Approval、

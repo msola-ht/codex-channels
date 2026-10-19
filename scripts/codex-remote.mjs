@@ -77,6 +77,12 @@ async function runRemoteCli() {
   const customSwitchingProvider = customSwitchingProviders.find(
     ({ profileName }) => profileName === selectedProfile,
   );
+  // CP's on-disk Profile retains its standalone search pin. Remote must leave
+  // search to native user/project config and explicit flags, so reuse the
+  // validated provider launch projection instead of selecting that Profile.
+  const projectedProvider = customSwitchingProvider?.catalogSource.kind === "custom"
+    ? customSwitchingProvider
+    : undefined;
   const selectedDefinition = customSwitchingProvider !== undefined
     ? {
         id: customSwitchingProvider.provider,
@@ -128,7 +134,9 @@ async function runRemoteCli() {
       `unix://${socketPath}`,
       "-C",
       workdir,
-      ...(selectedDefinition
+      ...(projectedProvider
+        ? projectedProvider.arguments
+        : selectedDefinition
         ? ["--profile", selectedDefinition.profileName]
         : []),
       ...modelArguments,
@@ -137,6 +145,9 @@ async function runRemoteCli() {
     const result = spawnSync(invocation.file, invocation.args, {
       stdio: "inherit",
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+      ...(projectedProvider
+        ? { env: { ...process.env, ...projectedProvider.childEnvironment } }
+        : {}),
     });
     assertSynchronousChildSuccess(result, {
       failureReportedByChild: true,
@@ -223,7 +234,6 @@ async function aggregateModelArguments(socketPath, codexBinary, passthrough) {
       "-c", `model=${JSON.stringify(selectedModel.model)}`,
       ...(overrides.effort ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(selectedEffort)}`]),
       "-c", "service_tier=\"default\"",
-      "-c", "web_search=\"disabled\"",
     ];
   } finally {
     await client.close();

@@ -341,9 +341,30 @@ export class ConversationExtensionQueryService {
 
   async listPlugins(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledPluginCatalog> {
     assertAuthorized?.();
-    const catalog = await this.queries.listPlugins(this.router.workspace(target).cwd, assertAuthorized);
-    assertAuthorized?.();
+    const workspace = this.router.workspace(target);
+    const threadId = this.router.current(target)?.threadId;
+    const provider = this.pluginProvider(target);
+    const beforeSubmit = () => {
+      assertAuthorized?.();
+      const currentWorkspace = this.router.workspace(target);
+      if (this.router.current(target)?.threadId !== threadId
+        || this.pluginProvider(target) !== provider
+        || currentWorkspace.id !== workspace.id || currentWorkspace.cwd !== workspace.cwd) {
+        throw new UserFacingError("command.authorization-changed", "Plugin 查询所属会话已变化，请重新查询");
+      }
+    };
+    const catalog = await this.queries.listPlugins(workspace.cwd, provider, beforeSubmit);
+    beforeSubmit();
     return catalog;
+  }
+
+  pluginProvider(target: ConversationTarget): string {
+    const provider = this.router.modelSettings(target)?.modelProvider
+      ?? this.models.status(target).modelProvider;
+    if (provider === undefined) {
+      throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
+    }
+    return provider;
   }
 
   async pluginHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<PluginHealthReport> {
@@ -383,13 +404,11 @@ export class ConversationExtensionQueryService {
     assertAuthorized?: () => void,
   ): Promise<InstalledPlugin> {
     assertAuthorized?.();
-    return this.resolvePlugin(this.router.workspace(target).cwd, selector, assertAuthorized);
+    return this.resolvePlugin(target, selector, assertAuthorized);
   }
 
-  async resolvePlugin(cwd: string, selector: string, assertAuthorized?: () => void): Promise<InstalledPlugin> {
-    assertAuthorized?.();
-    const { plugins } = await this.queries.listPlugins(cwd, assertAuthorized);
-    assertAuthorized?.();
+  async resolvePlugin(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<InstalledPlugin> {
+    const { plugins } = await this.listPlugins(target, assertAuthorized);
     if (/^[1-9]\d*$/u.test(selector)) {
       const index = Number(selector);
       const plugin = Number.isSafeInteger(index) ? plugins[index - 1] : undefined;

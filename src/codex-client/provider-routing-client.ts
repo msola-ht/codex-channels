@@ -888,13 +888,27 @@ export class ProviderRoutingClient {
   listPlugins(
     ...args: Parameters<ProviderClientInstance["listPlugins"]>
   ): ReturnType<ProviderClientInstance["listPlugins"]> {
-    return this.withPrimaryActivity((client) => client.listPlugins(...args), args[1]);
+    const [, provider, beforeSubmit] = args;
+    beforeSubmit?.();
+    return this.withProviderActivity(provider, async () => {
+      beforeSubmit?.();
+      const client = await this.ensureClient(provider);
+      beforeSubmit?.();
+      return client.listPlugins(...args);
+    });
   }
 
   resolvePlugin(
     ...args: Parameters<ProviderClientInstance["resolvePlugin"]>
   ): ReturnType<ProviderClientInstance["resolvePlugin"]> {
-    return this.withPrimaryActivity((client) => client.resolvePlugin(...args), args[2]);
+    const [, , provider, beforeSubmit] = args;
+    beforeSubmit?.();
+    return this.withProviderActivity(provider, async () => {
+      beforeSubmit?.();
+      const client = await this.ensureClient(provider);
+      beforeSubmit?.();
+      return client.resolvePlugin(...args);
+    });
   }
 
   readResetCredits(...args: Parameters<ProviderClientInstance["readResetCredits"]>): ReturnType<ProviderClientInstance["readResetCredits"]> {

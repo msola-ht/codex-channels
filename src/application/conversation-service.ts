@@ -793,26 +793,22 @@ export class ConversationService implements
       );
     }
     return this.authorizedLocked(target, assertAuthorized, async () => {
-      const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
+      const threadGuard = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
+      const provider = this.extensionQueries.pluginProvider(target);
       const requirePluginProvider = () => {
-        const provider = this.router.modelSettings(target)?.modelProvider
-          ?? this.models.status(target).modelProvider ?? "openai";
-        if (provider !== "openai") {
-          throw new UserFacingError(
-            "plugin.provider.unsupported",
-            "Plugin 调用当前只支持 OpenAI Session",
-          );
+        if (this.extensionQueries.pluginProvider(target) !== provider) {
+          throw new UserFacingError("command.authorization-changed", "Plugin 调用所属 Provider 已变化，请重新发送任务");
         }
       };
-      requirePluginProvider();
+      const beforePrepare = () => { threadGuard(); requirePluginProvider(); };
       const workspace = this.router.workspace(target);
       const plugin = await this.extensionQueries.resolvePlugin(
-        workspace.cwd,
+        target,
         normalizedSelector,
         beforePrepare,
       );
       beforePrepare();
-      const resolved = await this.queries.resolvePlugin(workspace.cwd, plugin.id, beforePrepare);
+      const resolved = await this.queries.resolvePlugin(workspace.cwd, plugin.id, provider, beforePrepare);
       beforePrepare();
       if (!resolved) {
         throw new UserFacingError(

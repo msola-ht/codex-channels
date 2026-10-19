@@ -179,7 +179,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   能力判断、登录结果和有界只读资源内容；Plugin 来源只供 `/mcp` 详情展示，不用于授权或 OAuth；不向 Surface 暴露工具 Schema、二进制正文或完整官方响应。
 - `plugin-port.ts`：定义 Plugin 的已安装摘要、版本、来源、安装时间、开发者、分类、能力、
   认证时机、可用原因、适用套餐标识、Marketplace 加载失败计数与只供 Turn 调用的官方 mention 引用；
-  不提供市场搜索、安装、卸载或分享能力；已安装目录的本地搜索由命令层处理。
+  查询显式携带目标 Provider，不提供市场搜索、安装、卸载或分享能力；已安装目录的本地搜索由命令层处理。
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
 - `thread-occupancy-port.ts`：定义渠道 `/release` 使用的 Thread 占用查询与释放窄端口；只返回
@@ -227,12 +227,13 @@ Thread 返回稳定概览与详情；命令结果携带工具、资源或模板�
 生成可继续执行的登录、浏览和资源读取命令；Bearer Token 返回结构化认证结果并明确提示无需 OAuth，
 资源读取只展示已经隐藏常见凭据的有界文本或二进制元数据；请求/内容/目录/模板 URI 也在 Client 输出投影脱敏，
 实际读取仍使用用户提交的原 URI，展示值不能用作新的读取身份。
-Plugin 列表与详情只查询当前 Workspace 已安装项，
+Plugin 列表与详情只查询当前 Provider 实例在当前 Workspace 的已安装项，
+会话尚未解析出 Provider 时要求先通过 `/model` 选择，不回退到官方实例；
 详情只使用同一次 `plugin/installed` 返回的安全摘要，能力与适用套餐有界展示，不读取本机路径或远端 URL；
 Application 对同一已安装目录提供每页 8 项的本地分页过滤和只含需处理项的健康归约，保留原目录全局
-数字选择器，不调用 `plugin/search`；同时保留 Marketplace 加载失败计数，并仅在互斥区内确认仍为
-OpenAI Thread 后发送官方 mention；自动恢复确定实际 Thread 后与最终 start/steer 提交前再次复核 Provider，
-不把未绑定时的默认 OpenAI 身份用于放行其他 Provider 的历史会话；
+数字选择器，不调用 `plugin/search`；同时保留 Marketplace 加载失败计数，在互斥区内解析并发送官方 mention，
+支持官方与第三方；自动恢复确定实际 Thread 后与最终 start/steer 提交前再次复核 Provider 与解析时一致，
+变化时拒绝并要求重发，不借用主实例的账户可用状态放行其他 Provider；
 三个 Surface 共用同一 Application 边界。
 成功启动 Turn 后，模型、思考等级、服务层级和协作模式以 App Server 的 Thread 设置为准；
 Gateway 重启时通过恢复 Thread 和设置通知重新取得这些设置。`/plan` 无参数切换
@@ -264,7 +265,7 @@ Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安
 MCP 查询与配置刷新只依赖 `McpQueryPort`；Application 从官方详情归约只含需处理项与提示的健康
 摘要，连接失败、取消或工具发现失败只建议显式刷新，并把刷新交给 Client，不把运行状态读取冒充远端网络探测，也不接收工具发现错误正文。官方状态分页、Thread 配置上下文、OAuth
 URL 校验、资源限长与响应裁剪由 Client 适配器处理，渠道查询分页与搜索由共享命令结果表达。Plugin 查询与调用只依赖
-`PluginQueryPort`，Workspace、可用性与调用时的 Provider 限制由 Application 执行。
+`PluginQueryPort`，Workspace、可用性与调用时的 Provider 一致性由 Application 执行。
 Permission Profile 查询只依赖 `PermissionQueryPort`；CWD、分页和官方响应裁剪由 Client 处理。
 命令成功文案、命令菜单说明和平台交互形式由各 Surface 维护，并通过类型穷尽检查保持完整。
 `/whoami`、交互取消、图片下载等平台能力不属于通用会话命令，继续由具体 Surface 实现。

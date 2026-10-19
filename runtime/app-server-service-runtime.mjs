@@ -10,6 +10,7 @@ import { readCustomProviderUpstreamWireApi } from "./model-provider-upstream-met
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 import { ProviderModelGuard } from "./provider-model-guard.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
+import { writeThirdPartyRuntimeModelCatalog } from "./third-party-model-catalog.mjs";
 import { assertProviderModelRequestPolicy, assertProviderModelRetryPolicy } from "./model-request-policy.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -264,8 +265,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       if (errors.length) throw new AggregateError(errors, "模型代理资源未能完全关闭");
     } } };
     retain(proxyRuntime);
-    const guardedDefinition = definition?.accountId !== undefined
-      ? definition : undefined;
+    const guardedDefinition = definition;
     const modelGuard = guardedDefinition
       ? new ProviderModelGuard(join(managedProviderDirectory(runtime.environment, guardedDefinition),
         guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model), {
@@ -282,6 +282,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
             providerCatalogIsolationPath(runtime.environment),
           ],
         })
+        // Codex 兼容 Provider 共用的官方目录只读，不含可配置的第三方扩展能力声明。
+        // 保留其工具透传及上游策略，不能把官方字段缺失当作第三方明确禁用。
         : undefined;
     if (modelGuard) ownedResources.add(modelGuard);
     // 官方 OpenAI 端点理解 Codex 私有输入项；自定义固定 Provider 复用 openai 路由键但换成第三方上游。
@@ -338,9 +340,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
       // CLP 桥在桥内按目录校验模型；通用 Chat 桥没有该校验，继续由统计代理拒绝目录外或已停用模型。
-      ...(modelGuard && !bridgedClinePass ? isCustomCatalogProvider(upstreamProvider)
-        ? { readModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) }
-        : { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
+      ...(modelGuard && !bridgedClinePass
+        ? { readModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) } : {}),
       // 除官方 OpenAI 端点外的 Responses 上游都不理解 Codex 私有输入项与参数标记，
       // 必须在上游收到正文前归一化；Chat 上游由桥转换，不在此处改写。
       ...(!bridge && !officialOpenAiRoute ? { normalizeResponsesInput: true } : {}),
@@ -455,6 +456,22 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   const goProxyOptions = () =>
     proxyOptionsForUrl(new URL(opencodeGoProviderDefinition.baseUrl));
   let primaryArguments = [];
+  const withThirdPartyCatalog = (provider, argumentsList) => {
+    if (provider === aggregateProviderId || (provider === "openai" && !customPrimaryProvider)) return argumentsList;
+    const definition = providerDefinitions.get(provider);
+    const sourcePath = provider === primaryProvider && customPrimaryProvider
+      ? customPrimaryProvider.catalogPath ?? officialCatalogPath
+      : definition
+        ? join(managedProviderDirectory(runtime.environment, definition), definition.catalogFileName)
+        : isCustomCatalogProvider(provider)
+          ? responsesProviderCatalogPath(runtime.environment, provider)
+          : officialCatalogPath;
+    if (!sourcePath) throw new Error("第三方 App Server 缺少模型目录");
+    const path = writeThirdPartyRuntimeModelCatalog(sourcePath, runtime.dataDir, customPrimaryProvider && provider === primaryProvider
+      ? customPrimaryProvider.id : provider);
+    // Third-party model APIs use hosted search, not OpenAI's separate /alpha/search executor.
+    return withOfficialModelCatalog([...argumentsList, "-c", "features.standalone_web_search=false"], path);
+  };
   let desktopAppAttachment;
   const managedByProvider = new Map(managedProviders.map((provider, index) => [
     provider.provider,
@@ -710,7 +727,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         }
         const primaryLaunch = isolateProviderCredential(
           customPrimaryProvider?.id ?? primaryProvider,
-          primaryArguments,
+          withThirdPartyCatalog(provider, primaryArguments),
           primaryChildEnvironment,
           primaryCredential,
         );
@@ -818,7 +835,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         const credentials = Object.entries(managed.runtime.childEnvironment);
         if (credentials.length !== 1) throw new Error("隔离 App Server 必须使用唯一 Provider 凭据");
         const [[environmentKey, apiKey]] = credentials;
-        const managedLaunch = isolateProviderCredential(provider, argumentsList,
+        const managedLaunch = isolateProviderCredential(provider, withThirdPartyCatalog(provider, argumentsList),
           withoutManagedProviderApiKeys(runtime.environment, customPrimaryCredential?.environmentKey), { environmentKey, apiKey });
         if (aggregate) {
           aggregateLaunchPolicy = {
@@ -1128,7 +1145,6 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         localBaseUrl,
       );
       primaryArguments = withOfficialModelCatalog(primaryArguments, customPrimaryProvider.catalogPath ?? officialCatalogPath);
-      if (customPrimaryProvider.catalogPath) primaryArguments.push("-c", 'web_search="disabled"');
     } else if (primaryProvider === "openai") {
       const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
       const configuredOpenAiUrl = configuredOpenAiBaseUrl
@@ -1168,7 +1184,6 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
-      if (definition.webSearch === "disabled") primaryArguments.push("-c", 'web_search="disabled"');
       const providerKey = definition.id;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,

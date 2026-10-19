@@ -110,6 +110,7 @@ Setup 仅按具体操作返回的激活范围提示重启。列出账户、停�
 日常模型操作从 `setup → 模型与提供商 → 第三方 Provider → 模型管理` 或 WebUI「模型管理 → 模型配置」进入。
 受管模型上下文窗口在 CLI 和 WebUI 均先读取目录修订，编辑后查看窗口差异与同一提供商的受影响账户，再确认保存；中途取消不写入，目录或账户已变化时须重新打开编辑。
 原生网页搜索诊断从 `setup → 模型与提供商 → 检测原生网页搜索` 或 WebUI 模型行操作进入，覆盖官方及第三方提供商；明确选择一个账户和模型后主动发起，可能产生模型及搜索费用，仅诊断、不修改搜索策略，见[模型探测](provider-integration-guide.md#添加时探测并写入)。
+使用可编辑目录的第三方模型可从 CLI 模型管理或 WebUI 模型行操作中的“声明原生网页搜索能力”选择支持、不支持或未声明，预览后保存。仅声明支持才向该模型放行原生 `web_search`，仍遵守用户全局搜索开关；“工具搜索”是另一项能力。Codex 兼容 Provider 的共享官方目录只读，原生网页搜索保留工具透传与上游策略，也遵守用户全局搜索开关；需要独立声明时使用自定义模型目录。受管家族共享文件会列出受影响账户，保存不自动重启服务，完整生效按预览提示重启 App Server。
 自定义目录、CCG、OCG、CLP 支持预览后本地移除；账户范围、默认保护、Relay 影响和恢复方式见[日常模型管理](provider-integration-guide.md#日常模型管理)。
 CLI 与 WebUI 模型管理均提供 DS、CLP、CCG、OCG 和自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确来源，受管模型选择提示词或能力范围，自定义模型可更新提示词及来源；两类模型均可另行选择有效上下文比例、压缩阈值和截断策略，查看差异并确认后更新目标模型；旧模型缺少来源关联时须手动选择。
 
@@ -424,6 +425,7 @@ Remote 的 `--profile` 继续支持原生个人 Profile 和已登记的规范受
 直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
 共享 App Server 的 TUI 请统一使用 `codexc remote`。
 `codexc remote` 不注入网关权限参数，原生配置、Profile 和显式参数由 Codex 处理。
+选择 CP 自定义目录 Provider 时，Remote 复用已校验的启动参数与子进程凭据环境，保留磁盘 Profile 合同，避免加载其中的内部搜索禁用字段。CP 与聚合 Remote 均不覆盖搜索模式，沿用原生用户、项目配置和显式参数的优先级。
 可用 `--workspace` 选择登记目录，或用一次 `-C DIR` / `--cd DIR` 指定目录；两者不能同时使用。原生 `resume` / `fork` 上的目录参数同样参与选择，重复目录参数被拒绝。不能透传 `--remote` 或 `--remote-auth-token-env` 替换受管连接；原生 `--` 之后的内容按字面参数保留。
 Remote 不按 Provider 或模型限制自动审查，也不为审批资格固定模型或限制个人 Profile。
 聚合入口仍保护其 Provider 与模型目录，防止透传参数替换路由。
@@ -465,7 +467,7 @@ ID 为 `agg` 的自定义切换 Provider 可明确使用 `codexc remote -p sf-cu
 Desktop 共享仍要求主 Provider 为 OpenAI。执行 `codexc app --provider agg` 后，同一模型目录包含这些成员的模型，
 显示名称为 `Provider ID · 模型名称`。例如账户均名为 `main` 时，精确模型 ID 分别是
 `ds-main/deepseek-flash` 和 `clp-main/cline-pass/deepseek-v4.1-flash`。
-聚合使用一个 App Server 和现有工具 Host，各请求按选择的模型送至对应账户；网页搜索、模型 API
+聚合使用一个 App Server 和现有工具 Host，各请求按选择的模型送至对应账户；网页搜索遵循该成员精确模型声明，模型 API
 WebSocket 关闭。聚合代理本身不重放请求，Codex 使用统一的 HTTP 重试次数 4、流重试次数 5；
 独立 Relay 保持其原有模型目录和路由。
 
@@ -799,7 +801,9 @@ codexc uninstall
 
 `/plugin` 查询当前 Workspace 的已安装 Plugin；`/plugin list search <关键词>` 只搜索已安装目录，
 `/plugin <名称或序号>` 查看详情，`/plugin health` 查看需要处理的状态。
-`/plugin <名称或序号> <任务>` 在 OpenAI Thread 中调用已启用且可用的 Plugin，仍需满足当前 Actor 与 Workspace 授权。
+`/plugin <名称或序号> <任务>` 在当前 Provider 的 Thread 中调用已启用且可用的 Plugin，包括第三方 Responses 和 Chat 会话，仍需满足当前 Actor 与 Workspace 授权。
+列表、详情、健康状态与调用前解析均查询当前 Provider 的实例；自动恢复会话后若 Provider 已变化，会拒绝沿用旧目录结果并提示重发。
+开放 mention 不保证插件背后的 App、MCP 或 Skill 可用；需要官方账户或特定连接的能力仍受上游认证和配置限制。
 渠道命令不提供市场搜索、安装或卸载；请通过 Codex 原生入口管理安装。
 已有 Plugin 所属 MCP 的工具审批、允许／禁用工具和输出预算可在 CLI／WebUI 的工具设置中管理；
 这些设置不提供 Plugin 安装、卸载或统一执行禁用开关。

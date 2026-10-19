@@ -285,8 +285,6 @@ export function formatSurfaceUserFacingError(
       return "Plugin 名称不唯一，请使用序号或完整 ID";
     case "plugin.unavailable":
       return "指定的 Plugin 未启用、被管理员禁用或暂不可调用";
-    case "plugin.provider.unsupported":
-      return "Plugin 调用当前只支持 OpenAI Session";
     case "agents.usage":
       return "用法：/agents <角色名称或序号> <任务>";
     case "agents.not-found":

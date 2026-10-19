@@ -18,6 +18,21 @@ export function loadProviderModelCatalogPresentations(options?: { environment?: 
 export function loadProviderModelPrompts(input: unknown, options?: { environment?: NodeJS.ProcessEnv }): Promise<OpenAiModelPrompts & Pick<ModelDefinition, "template" | "sampling">>;
 
 export interface ProviderModelContextInput { provider: string; model: string; contextWindow: number; revision: string }
+export interface ProviderModelWebSearchInput { provider: string; model: string; supportsWebSearch: boolean | null; revision: string }
+export interface ProviderModelWebSearchPreview {
+  operation: "model.web-search";
+  provider: string;
+  model: { id: string; displayName: string; supportsWebSearch: boolean | null };
+  supportsWebSearch: boolean | null;
+  providers: string[];
+  revision: string;
+  willChange: boolean;
+  activation: "restart-app-server";
+}
+export function previewProviderModelWebSearchChange(input: ProviderModelWebSearchInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ProviderModelWebSearchPreview>;
+export function applyProviderModelWebSearchChange(input: ProviderModelWebSearchInput, options: {
+  environment?: NodeJS.ProcessEnv; preview: ProviderModelWebSearchPreview;
+}): Promise<ProviderModelWebSearchPreview & { action: "updated" }>;
 export interface ProviderModelContextPreview {
   operation: "model.context";
   provider: string;
