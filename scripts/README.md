@@ -239,6 +239,8 @@
   Provider 固定模式写入事务；切换与新增/编辑共同复用 Profile 移除、Codex 配置版本写入、响应丢失
   只读确认和安全回滚，避免两条管理链路复制高风险事务逻辑。
   固定保存先创建不可变私有凭据版本，成功后主配置引用该版本；明确未引用时删除本次新文件，未知结果保留新旧版本。
+  移除切换 Profile 前另将本次主配置、Profile、注册表与预期修改保存到 Provider 数据目录的
+  `profile-conversion-backups/<随机 ID>.json`，校验私有目录及备份回读后才继续。快照不覆盖、不自动清理或恢复，结果未知时供人工核对。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc provider` 的
   list / add / switch / remove / recover 子命令；`list --json` 复用统一 Provider 管理状态并返回不含凭据的稳定主实例与候选摘要；
   switch / remove 复用 Provider 管理接口并负责中文确认与结果渲染；所有 switch（含恢复官方、从备份恢复、

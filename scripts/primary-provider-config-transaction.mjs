@@ -1,4 +1,12 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import { providerStorageRoot } from "../runtime/connect-home.mjs";
+import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
+import { ensurePrivateDirectorySync, readPrivateFileSync, writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import {
+  customPrimaryProviderProfilePath,
+  customSwitchingProviderRegistryPath,
   loadConfiguredCustomSwitchingModelProviders,
   loadCustomSwitchingProviderIds,
   removeCustomPrimaryProviderSwitchingProfile,
@@ -23,6 +31,9 @@ export async function writePrimaryProviderConfigEditsWithProfileRemoval({
   const client = await createClient({ environment });
   try {
     await client.connect();
+    if (switchingProvider !== undefined) {
+      preserveSwitchingProfileConversion(environment, switchingProvider, expectedVersion, edits);
+    }
     if (credential !== undefined) writeCustomPrimaryProviderCredential(credential, environment);
     try {
       if (switchingProvider !== undefined) {
@@ -48,7 +59,9 @@ export async function writePrimaryProviderConfigEditsWithProfileRemoval({
       } catch (confirmationError) {
         throw new AggregateError(
           [error, confirmationError],
-          "Codex 配置写入结果无法确认；私有凭据新旧版本均保留，自定义切换 Provider Profile 保持移除，请检查主配置后再操作",
+          "Codex 配置写入结果无法确认；私有凭据新旧版本均保留；"
+          + (switchingProvider === undefined ? "" : "转换前快照位于 Provider 数据目录的 profile-conversion-backups；")
+          + "请检查主配置后再操作",
           { cause: confirmationError },
         );
       }
@@ -79,6 +92,39 @@ export async function writePrimaryProviderConfigEditsWithProfileRemoval({
     }
   } finally {
     await client.close().catch(() => undefined);
+  }
+}
+
+/** Preserve the destructive conversion's inputs independently of its RPC outcome. */
+function preserveSwitchingProfileConversion(environment, provider, expectedVersion, edits) {
+  const read = createProviderFileReader(environment);
+  const profilePath = customPrimaryProviderProfilePath(environment, provider.id);
+  const registryPath = customSwitchingProviderRegistryPath(environment);
+  const profileContent = read(profilePath);
+  if (profileContent !== provider.profileContent || !loadCustomSwitchingProviderIds(environment).includes(provider.id)) {
+    throw new Error("切换 Provider 在备份前已变化，未执行转换");
+  }
+  const snapshot = {
+    schemaVersion: 1,
+    providerId: provider.id,
+    expectedVersion,
+    edits,
+    files: [
+      { path: join(codexHomePath(environment), "config.toml"), content: read(join(codexHomePath(environment), "config.toml")) },
+      { path: profilePath, content: profileContent },
+      { path: registryPath, content: read(registryPath) },
+    ],
+  };
+  const content = `${JSON.stringify(snapshot, null, 2)}\n`;
+  const root = providerStorageRoot(environment);
+  ensurePrivateDirectorySync(root);
+  const directory = join(root, "profile-conversion-backups");
+  ensurePrivateDirectorySync(directory);
+  const path = join(directory, `${randomUUID()}.json`);
+  writePrivateFileAtomicSync(path, content);
+  if (readPrivateFileSync(path, Buffer.byteLength(content)) !== content
+    || snapshot.files.some(file => read(file.path) !== file.content)) {
+    throw new Error("转换前备份或配置回读不一致，未执行转换；保留备份供核对");
   }
 }
 
