@@ -10,7 +10,7 @@ import type {
 import {
   listProviders,
 } from "../../application/index.js";
-import { formatCodexProviderLabel, formatModelDisplayName, formatProviderModelSummary, formatServiceTier, modelListDisplayName, modelListEntry } from "../provider-format.js";
+import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTier, modelListDisplayName, modelListEntry } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
@@ -217,7 +217,7 @@ function modelProviderSelectionText(
     && (model.provider ?? "openai") === current);
   // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
   const currentModelName = currentModel === undefined
-    ? formatModelDisplayName(result.state.model)
+    ? result.state.model
     : modelListEntry(currentModel.displayName, currentModel.provider, currentModel.model).modelName;
   return toStructuredMarkdownList([
     `当前模型：${currentModelName}（Provider：${formatCodexProviderLabel(current)}）`,

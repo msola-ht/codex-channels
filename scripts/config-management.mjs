@@ -283,7 +283,7 @@ function applySetting(document, input) {
         throw Object.assign(invalid("value", "invalid-model-aliases", error.message), { cause: error });
       }
       document.display = { ...table(document.display), model_aliases: value };
-      return { value, activation: "restart-gateway", backupRequired: true };
+      return { value, activation: "next-read", backupRequired: true };
     }
     case "telegram.message-format": {
       const value = enumValue(input.value, messageFormatValues, "value", "Telegram 消息格式");

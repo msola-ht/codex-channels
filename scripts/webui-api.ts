@@ -454,10 +454,6 @@ export interface ModelTrafficSettingsResponse {
   modelTrafficDumpEnabled: boolean
 }
 
-export interface ModelDisplaySettingsResponse {
-  modelAliases: Record<string, string>
-}
-
 export interface SettingsSummaryResponse {
   observedAt: string
   revision: string

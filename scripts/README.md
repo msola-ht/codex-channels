@@ -106,8 +106,8 @@
   同源脚本 CSP、`frame-ancestors 'none'`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`
   与 `no-store`；内联样式仅为现有组件渲染所需放行，脚本不开放内联。
   请求列表、错误汇总与单次运行详情的相关查询共享同一只读数据库快照，避免并发写入造成响应内部不一致。
-  `/api/v1/settings/model-display` 返回只读模型显示映射，概览按该映射合并并提供原始模型成员明细；
-  概览、显示映射与调用采集开关共用可取消的进行中私有配置读取，不缓存配置或权限判断。
+  概览读取模型统计分组配置，按原始模型 ID 合并并提供原始模型成员明细，不向展示层注入映射；
+  概览与调用采集开关共用可取消的进行中私有配置读取，不缓存配置或权限判断。
 - `webui-official-model-catalog.mjs` / `webui-official-model-catalog.d.mts`：读写当前 Codex Home 的 `models_cache.json`，按精确模型修改上下文；目录列表只投影展示字段、25 项白名单详情、加速说明及明确的速度倍率，审批仅返回模式和文本来源状态；提示正文通过独立的可见模型与修订校验入口读取。预览修订、私有备份、锁内复核及保存后回读共用存储边界。刷新仅执行当前 CLI 的 `debug models`，由上游决定缓存复用、联网获取与写回，不将可能回退的 stdout 覆盖缓存，执行后对比可见模型字段。导出子进程受超时、输出预算与取消管理；终止失败有界返回错误，仍保留进程归属并拒绝后续缓存写入，服务关闭先尝试有界清理，失败后等待实际退出。
 - `webui-management-official-model-route.mjs`：OpenAI 缓存读取、上下文修改和当前配置目录刷新的预览/确认路由；独立 prompts GET 按可见模型 ID 与缓存修订返回白名单提示正文，最多 512 项，不返回任意配置或缓存归属元数据，正文不写日志。当前配置命令只在确认、备份后执行，展示真实缓存前后差异。复用管理鉴权、限速、一次性确认及审计，同一服务内操作互斥，关闭服务时取消并等待自有导出进程与写入收尾。
 - `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /
@@ -332,7 +332,7 @@
   保存 Config 管理接口的共享稳定错误，以及 WebUI、指标的脱敏投影、输入校验与文档修改语义；
   CLI 菜单不直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理与日志等级；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
-- `config-display-menu.mjs`：独立管理模型显示组、操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；
+- `config-display-menu.mjs`：独立管理模型统计分组、操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；模型分组仅用于控制台汇总，保留原模型明细，重新读取即生效；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs` / `config-system-menu.d.mts`：以受控分组分别提供 Gateway 会话、身份与时区、调用记录入口，分组越界选择明确拒绝；向 Workspace 菜单公开默认项设置，复用配置修订与生效通知。管理模型请求转储及其保留天数、审批超时、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与服务时区；模型请求转储独立写入

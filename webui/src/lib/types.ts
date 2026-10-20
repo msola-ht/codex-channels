@@ -12,7 +12,6 @@ export type {
   RequestInterruptionSummary,
   CacheUsage,
   ServerTimeResponse,
-  ModelDisplaySettingsResponse,
   MetricsQuery,
   MetricsProvidersResponse,
   MetricsRangeQuery,

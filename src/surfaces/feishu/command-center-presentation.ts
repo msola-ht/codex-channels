@@ -21,7 +21,7 @@ import {
   formatConversationAutoReview,
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
-import { formatCodexProviderLabel, formatModelDisplayName, formatModelDisplayNameWithId, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListDisplayName, modelListEntry } from "../provider-format.js";
+import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListDisplayName, modelListEntry } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import type {
   FeishuCommandCenterAction,
@@ -452,7 +452,7 @@ export function renderCommandCenterChoices(
         "**执行配置**",
         `- Workspace：${escapeFeishuCardMarkdown(task.workspaceId)}`,
         `- Provider：${escapeFeishuCardMarkdown(formatCodexProviderLabel(task.modelProvider))}`,
-        `- 模型：${escapeFeishuCardMarkdown(task.model ? formatModelDisplayNameWithId(task.model) : "默认")}`,
+        `- 模型：${escapeFeishuCardMarkdown(task.model || "默认")}`,
         `- ${reasoningEffortSettingName(task.reasoningEffort)}：${escapeFeishuCardMarkdown(formatReasoningEffort(task.reasoningEffort, "默认"))}`,
         `- Sandbox：${escapeFeishuCardMarkdown(task.sandbox)}`,
         `- 权限 Profile：${escapeFeishuCardMarkdown(task.permissions ?? "未配置")}`,
@@ -546,7 +546,7 @@ export function renderCommandCenterChoices(
         },
         ...sessionNavigationChoices(result, "sessions"),
         ...result.sessions.map((session) => ({
-          label: `${session.id === result.currentThreadId ? "✓ " : backgroundThreadIds.has(session.id) ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${formatModelDisplayName(session.model)}` : ""}`,
+          label: `${session.id === result.currentThreadId ? "✓ " : backgroundThreadIds.has(session.id) ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "resume" as const,
           input: session.id,
         })),
@@ -568,7 +568,7 @@ export function renderCommandCenterChoices(
         },
         ...sessionNavigationChoices(result, "archived"),
         ...result.sessions.map((session) => ({
-          label: `${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${formatModelDisplayName(session.model)}` : ""}`,
+          label: `${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "unarchive" as const,
           input: session.id,
         })),
@@ -641,7 +641,7 @@ export function renderCommandCenterChoices(
   );
   // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
   const currentModelName = currentModel === undefined
-    ? formatModelDisplayName(result.state.model)
+    ? result.state.model
     : modelListEntry(currentModel.displayName, currentModel.provider, currentModel.model).modelName;
   if (action === "model") {
     if (result.state.models.length === 0) {

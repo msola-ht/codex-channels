@@ -15,7 +15,7 @@ import {
   formatConversationModel,
   formatNextMessageModel,
 } from "./conversation-model-account-command-format.js";
-import { formatDisplayedProvider, formatModelDisplayNameWithId } from "./provider-format.js";
+import { formatDisplayedProvider } from "./provider-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
@@ -211,7 +211,7 @@ export function formatConversationCommandOutcome(
         `状态：${formatScheduledTaskStatusLabel(outcome.task.status)}`,
         `计划：${formatSchedule(outcome.task.schedule, outcome.task.timezone)}`,
         `下次运行：${formatScheduledAt(outcome.task.nextRunAt)}`,
-        `模型：${formatDisplayedProvider(outcome.task.modelProvider)}/${outcome.task.model ? formatModelDisplayNameWithId(outcome.task.model) : "默认"}`,
+        `模型：${formatDisplayedProvider(outcome.task.modelProvider)}/${outcome.task.model || "默认"}`,
         `${reasoningEffortSettingName(outcome.task.reasoningEffort)}：${formatReasoningEffort(outcome.task.reasoningEffort, "默认")}`,
       ].join("\n"));
     case "scheduled-task.run-requested":

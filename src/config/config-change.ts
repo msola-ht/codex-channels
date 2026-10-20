@@ -12,7 +12,6 @@ export type GlobalConfigChangeCode =
   | "display.operation-updates"
   | "display.plan-updates"
   | "display.reasoning"
-  | "display.model-aliases"
   | "scheduled-tasks.enabled"
   | "metrics.storage"
   | "model-relay.policy"
