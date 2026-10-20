@@ -18,8 +18,8 @@ export async function readManagementSnapshot(request, response, state, read) {
   const deadline = Date.now() + 20_000;
   const disconnect = () => { if (!response.writableEnded) controller.abort(); };
   const timer = setTimeout(() => controller.abort(), 20_000);
-  response.once("close", disconnect);
-  if (request.aborted || response.destroyed || state.snapshotReadsClosed) controller.abort();
+  response?.once("close", disconnect);
+  if (request?.aborted || response?.destroyed || state.snapshotReadsClosed) controller.abort();
   const entry = { controller, settled: undefined };
   state.snapshotReads.add(entry);
   const task = Promise.resolve().then(async () => {
@@ -34,7 +34,7 @@ export async function readManagementSnapshot(request, response, state, read) {
     return await task;
   } finally {
     clearTimeout(timer);
-    response.removeListener("close", disconnect);
+    response?.removeListener("close", disconnect);
     state.snapshotReads.delete(entry);
   }
 }
@@ -104,26 +104,52 @@ export function assertManagedSetting(input) {
 
 const PROVIDER_STATE_CACHE_TTL_MS = 5_000;
 
-export function loadProviderManagementSummary(environment, cache, loadProviderState) {
+export async function loadProviderManagementSummary(environment, state, signal) {
+  signal.throwIfAborted();
+  const cache = state.providerStateCache;
   const now = Date.now();
-  if (cache.value !== null && cache.expiresAtMs > now) return Promise.resolve(cache.value);
-  if (cache.pending !== null) return cache.pending;
-  const generation = cache.generation ?? 0;
-  let pending;
-  pending = loadProviderState({ environment })
-    .then(projectProviderManagementState)
-    .then((value) => {
+  if (cache.value !== null && cache.expiresAtMs > now) return cache.value;
+  if (cache.pending === null) {
+    const generation = cache.generation ?? 0;
+    const entry = { controller: new AbortController(), subscribers: 0, promise: undefined };
+    entry.promise = readManagementSnapshot(undefined, undefined, state, async budgetSignal => {
+      const sharedSignal = globalThis.AbortSignal.any([budgetSignal, entry.controller.signal]);
+      const loaded = await state.loadProviderState({ environment, signal: sharedSignal });
+      sharedSignal.throwIfAborted();
+      return projectProviderManagementState(loaded);
+    }).then(value => {
+      entry.controller.signal.throwIfAborted();
+      if (state.snapshotReadsClosed) throw new Error("管理快照读取正在关闭");
       if ((cache.generation ?? 0) === generation) {
         cache.value = value;
         cache.expiresAtMs = Date.now() + PROVIDER_STATE_CACHE_TTL_MS;
       }
       return value;
-    })
-    .finally(() => {
-      if (cache.pending === pending) cache.pending = null;
+    }).finally(() => {
+      if (cache.pending === entry) cache.pending = null;
     });
-  cache.pending = pending;
-  return pending;
+    cache.pending = entry;
+  }
+  const entry = cache.pending;
+  entry.subscribers += 1;
+  let abort;
+  try {
+    return await Promise.race([
+      entry.promise,
+      new Promise((_, reject) => {
+        abort = () => reject(signal.reason);
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+      }),
+    ]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+    entry.subscribers -= 1;
+    if (entry.subscribers === 0) {
+      entry.controller.abort();
+      if (cache.pending === entry) cache.pending = null;
+    }
+  }
 }
 
 export function invalidateProviderManagementSummary(cache) {

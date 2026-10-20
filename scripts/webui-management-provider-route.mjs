@@ -387,12 +387,10 @@ export async function routeProviderManagement({
   if (path === "/providers" && request.method === "GET") {
     let providers;
     try {
-      providers = await loadProviderManagementSummary(
-        environment,
-        state.providerStateCache,
-        state.loadProviderState,
-      );
+      providers = await readManagementSnapshot(request, response, state,
+        signal => loadProviderManagementSummary(environment, state, signal));
     } catch {
+      if (response.destroyed) return true;
       throw new ApiError(503, "provider_state_unavailable", "Provider 状态暂不可用，请使用 codexc setup 查看");
     }
     sendManagementJson(response, 200, providers);

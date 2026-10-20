@@ -739,6 +739,11 @@ function supervisorLease(socket, unconfirmedMessage) {
         // Continue reading so the peer's FIN can complete a graceful release.
         socket.resume();
         if (!socket.destroyed) socket.end();
+      }).catch(error => {
+        // A timed-out close destroys the socket but still reports uncertainty.
+        // Let the resource owner retry and confirm the subsequent physical close.
+        closePromise = undefined;
+        throw error;
       });
       return closePromise;
     },
