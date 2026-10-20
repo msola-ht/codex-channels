@@ -158,7 +158,7 @@ export function createWebuiServer({
   resetGatewayCredits = requestGatewayResetCredits,
 } = {}) {
   assertWebuiHost(host);
-  if (host === "0.0.0.0" && token === null) {
+  if (host === "0.0.0.0" && (typeof token !== "string" || token.trim() === "")) {
     throw new Error(
       "WebUI 绑定非回环地址时必须提供访问令牌（请通过 codexc config 或配置 [webui] token 设置）",
     );
@@ -336,8 +336,9 @@ function createManagementState(
     },
   });
   return {
-    // 管理请求始终只接受回环连接；即使 WebUI 绑定 0.0.0.0，也允许通过 SSH
-    // 隧道访问 127.0.0.1，再由下面的 socket 检查拒绝公网直连管理接口。
+    // 只有显式全网卡监听才开放令牌保护的远程管理；回环模式保持本机边界。
+    remoteManagement: host === "0.0.0.0",
+    configuredOrigin,
     origin: configuredOrigin ?? `http://${originHost}:${port}`,
     appServerUserAgentCache: { expiresAtMs: 0, value: null },
     serviceStatusCache,
@@ -361,7 +362,11 @@ function createManagementState(
 }
 
 async function routeManagement(environment, url, request, response, state, token, managementLockHeld = false) {
-  if (!isLoopbackAddress(request.socket.remoteAddress)) {
+  const loopback = isLoopbackAddress(request.socket.remoteAddress);
+  if (token !== null && !authorized(request, token)) {
+    throw new ApiError(401, "unauthorized", "需要有效的访问令牌");
+  }
+  if (!loopback && (!state.remoteManagement || token === null)) {
     throw new ApiError(503, "management_unavailable", "管理接口只允许回环访问");
   }
   const origin = request.headers.origin ?? (request.method === "GET" ? state.origin : undefined);
@@ -373,23 +378,27 @@ async function routeManagement(environment, url, request, response, state, token
     .reduce((total, [key, value]) => total + Buffer.byteLength(key) + Buffer.byteLength(String(value ?? "")), 0);
   // SSH 隧道用户可能使用与服务器不同的本机端口；只要 Origin 使用同协议和
   // 固定回环主机名即可归一化，不读取 Host 或转发头。
-  const normalizedOrigin = normalizeLoopbackOrigin(
+  let normalizedOrigin = normalizeLoopbackOrigin(
     origin,
     state.origin,
   );
+  let expectedOrigin = state.origin;
+  if (state.remoteManagement && !(loopback && normalizedOrigin === state.origin)) {
+    // 此分支只能在已验证 Bearer 后使用请求 Host 作同站点约束，
+    // 不能将 Host 或转发头作为匿名管理的可信来源。
+    expectedOrigin = state.configuredOrigin ?? authenticatedManagementOrigin(request);
+    normalizedOrigin = request.headers.origin ?? (request.method === "GET" ? expectedOrigin : undefined);
+  }
   const validation = validateManagementJsonRequest({
     method: request.method,
     origin: normalizedOrigin,
-    expectedOrigin: state.origin ?? "http://127.0.0.1",
+    expectedOrigin: expectedOrigin ?? "http://127.0.0.1",
     contentType: request.headers["content-type"],
     contentLength,
     requestLineBytes,
     headerBytes,
     path: url.pathname.slice(`${API_PREFIX}/management`.length) || "/",
   });
-  if (token !== null && !authorized(request, token)) {
-    throw new ApiError(401, "unauthorized", "需要有效的访问令牌");
-  }
   const principalId = fingerprintManagementValue(token ?? normalizedOrigin);
   const path = url.pathname.slice(`${API_PREFIX}/management`.length) || "/";
   if (!managementLockHeld
@@ -444,11 +453,28 @@ async function routeManagement(environment, url, request, response, state, token
   throw new ApiError(404, "not_found", `未知管理 API：${path}`);
 }
 
+function authenticatedManagementOrigin(request) {
+  try {
+    const origin = request.headers.origin;
+    const source = origin === undefined ? null : new URL(origin);
+    if (source !== null && (!["http:", "https:"].includes(source.protocol)
+      || source.origin !== origin || source.username || source.password)) throw new Error("invalid origin");
+    const host = request.headers.host;
+    if (typeof host !== "string" || !host || /[\s/@\\?#,]/u.test(host)) throw new Error("invalid host");
+    // HTTPS 可由反向代理终止；只使用已认证请求的 Host，不读取 Forwarded 头。
+    const target = new URL(`${source?.protocol ?? "http:"}//${host}`);
+    return target.origin;
+  } catch {
+    throw new ApiError(403, "management.origin-invalid", "管理请求来源无效");
+  }
+}
+
 function normalizeLoopbackOrigin(value, expectedOrigin) {
   if (typeof value !== "string" || typeof expectedOrigin !== "string") return value;
   try {
     const candidate = new URL(value);
     const expected = new URL(expectedOrigin);
+    if (candidate.origin !== value || candidate.username || candidate.password) return value;
     const loopback = candidate.hostname === "127.0.0.1"
       || candidate.hostname === "localhost"
       || candidate.hostname === "[::1]"

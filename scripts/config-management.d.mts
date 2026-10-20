@@ -157,4 +157,5 @@ export function updateGatewaySetting(
   value: unknown;
   activation: GatewaySettingActivation;
   activationResult: ConfigActivationResult;
+  generatedWebuiToken?: string;
 };

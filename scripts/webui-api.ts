@@ -591,6 +591,7 @@ export interface ManagementSettingMutationResponse {
   confirmationRequired?: boolean
   confirmationToken?: string
   confirmationExpiresAt?: number
+  generatedWebuiToken?: string
 }
 
 export type OpenAiModelCatalogEntry = import("./webui-official-model-catalog.mjs").OpenAiModelCatalogEntry

@@ -132,6 +132,7 @@ export async function routeGatewaySettingsManagement({
       activation: result.activationResult,
       auditStatus,
       consistency: current === null ? "unknown" : "confirmed",
+      ...(result.generatedWebuiToken === undefined ? {} : { generatedWebuiToken: result.generatedWebuiToken }),
     });
     return true;
   }
