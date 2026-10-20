@@ -103,6 +103,8 @@ Plugin 查询与调用不再需要 Gateway 功能开关。旧配置中的 `[expe
 
 `codexc setup` 要求标准输入与提示输出均连接终端；不满足时在初始化用户目录前报错。`setup --jsonl` 仍需交互输入及终端 stderr，stdout 输出脱敏 JSON Lines，适合将操作结果重定向到文件，不是无人值守配置接口。
 
+权限设置的保存范围跟随入口：`codexc config → Codex 新会话与用户偏好 → 沙盒、审批与网络` 会逐项询问并确认完整组合；WebUI 的三个独立控件只保存各自修改项，其他未配置权限继续继承默认值。两端共用修订检查与写入规则，启用 Permission Profile 时不能从这些控件改写传统 Sandbox 设置。
+
 命令只接受当前入口：Provider 管理集中为 `codexc provider`，受管账户使用 `provider deepseek`、`provider opencode-go`、`provider ccg`；各家的可用操作以子命令帮助为准。OpenCode Go 的 `release` 只释放实例，后续请求可重新拉起，不禁用账户。会话归档、转储删除与指标维护集中为 `cleanup sessions`、`cleanup traffic`、`cleanup metrics`（含 `prune`、`reset`）。旧独立 Provider 命令、`sessions`、原领域下的清理命令、`setup --json` 和 `config --json` 均被移除，没有兼容别名。脚本读取配置路径使用 `config paths --json`；诊断使用 `doctor --json`。
 
 Setup 仅按具体操作返回的激活范围提示重启。列出账户、停止账户等操作不会因经过模型菜单而附加“重启全部服务”；需要重启的配置修改会返回对应服务目标，Setup 不自动执行重启。
@@ -110,6 +112,7 @@ Setup 仅按具体操作返回的激活范围提示重启。列出账户、停�
 日常模型操作从 `setup → 模型与提供商 → 第三方 Provider → 模型管理` 或 WebUI「模型管理 → 模型配置」进入。
 受管模型上下文窗口在 CLI 和 WebUI 均先读取目录修订，编辑后查看窗口差异与同一提供商的受影响账户，再确认保存；中途取消不写入，目录或账户已变化时须重新打开编辑。
 原生网页搜索诊断从 `setup → 模型与提供商 → 检测原生网页搜索` 或 WebUI 模型行操作进入，覆盖官方及第三方提供商；明确选择一个账户和模型后主动发起，可能产生模型及搜索费用，仅诊断、不修改搜索策略，见[模型探测](provider-integration-guide.md#添加时探测并写入)。
+CLI 按提供商修改搜索使用 `codexc config → 提供商联网搜索`，或 `codexc setup → 模型与提供商 → 提供商联网搜索`。选择账户与模式后预览并确认保存；支持跟随全局、关闭、缓存、索引和实时，CLP 独立搜索应选实时（live）。官方和固定提供商共用全局设置，菜单会提示对应修改路径；配置不可安全读取时拒绝写入。
 内置搜索读取主配置及各提供商 config 顶层的 `web_search`；有独立 config 的第三方账户可在 WebUI「模型管理 → 提供商」预览并确认搜索设置，缺项跟随全局。使用主 `config.toml` 的固定提供商在通用设置中修改，见[独立提供商的搜索模式](provider-integration-guide.md#独立提供商的搜索模式)。模型搜索能力元数据不参与请求过滤；搜索是否执行仍取决于上游接口和模型。受管 CLP 的独立搜索适配需选择 `live`，不支持 cached/indexed，详见 [CLP 网页搜索适配](cline-pass.md#网页搜索适配)。搜索诊断仍检查上游原生工具，不检测该适配线路，也不自动修改配置。
 自定义目录、CCG、OCG、CLP 支持预览后本地移除；账户范围、默认保护、Relay 影响和恢复方式见[日常模型管理](provider-integration-guide.md#日常模型管理)。
 CLI 与 WebUI 模型管理均提供 DS、CLP、CCG、OCG 和自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确来源，受管模型选择提示词或能力范围，自定义模型可更新提示词及来源，并独立选择“本地工具”以合并异步提问和时钟声明；两类模型均可另行选择有效上下文比例、压缩阈值和截断策略，查看差异并确认后更新目标模型；旧模型缺少来源关联时须手动选择。

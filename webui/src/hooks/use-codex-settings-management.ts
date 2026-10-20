@@ -25,11 +25,11 @@ function currentValue(settings: CodexUserSettingsResponse, setting: CodexUserSet
   if (setting.kind === "defaults") return { model: settings.defaults.model, reasoningEffort: settings.defaults.reasoningEffort }
   if (setting.kind === "service-tier") return { serviceTier: settings.defaults.serviceTier }
   if (setting.kind === "approvals-reviewer") return { value: settings.approvalsReviewer.value }
-  if (setting.kind === "permissions") return {
-    sandboxMode: settings.permissions.sandboxMode ?? "read-only",
-    approvalPolicy: settings.permissions.approvalPolicy ?? "on-request",
-    networkAccess: settings.permissions.networkAccess ?? false,
-  }
+  if (setting.kind === "permissions") return Object.fromEntries(
+    (["sandboxMode", "approvalPolicy", "networkAccess"] as const)
+      .filter(field => Object.hasOwn(setting, field))
+      .map(field => [field, settings.permissions.unsupportedFields.includes(field) ? "unsupported" : settings.permissions[field]]),
+  )
   if (setting.kind === "web-search") return { mode: settings.defaults.webSearch }
   if (setting.kind === "update-plan") return { enabled: settings.defaults.updatePlanEnabled }
   if (setting.kind === "auto-recap") return { enabled: settings.defaults.autoRecapEnabled }

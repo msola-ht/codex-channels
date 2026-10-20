@@ -118,7 +118,7 @@ async function buildPlan(input, { environment = process.env, loadProviderState =
   ])).digest("hex");
   return { path, pendingPath, snapshots, updates, preview: { operation: "provider.web-search", provider: input.provider,
     before: { mode: before.mode }, mode: input.mode, revision, willChange: before.mode !== input.mode,
-    activation: "restart-app-server" } };
+    activation: before.mode === input.mode ? "none" : "restart-app-server" } };
 }
 
 function invalid(code, field, message, cause) {

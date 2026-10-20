@@ -670,6 +670,7 @@ export interface CodexUserSettingsResponse {
   permissions: {
     editable: boolean
     defaultPermissions: string | null
+    unsupportedFields: Array<"sandboxMode" | "approvalPolicy" | "networkAccess">
     sandboxMode: "read-only" | "workspace-write" | null
     approvalPolicy: "on-request" | "never" | null
     networkAccess: boolean | null

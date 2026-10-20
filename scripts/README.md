@@ -2,7 +2,7 @@
 
 本目录保存 npm CLI 和开发流程调用的 Node.js、Shell 脚本。脚本处理本机配置、构建、协议生成和服务管理，不承载 Gateway 的会话业务逻辑。
 
-涉及 Provider、进程控制或服务安装时遵循[跨平台变更规则](../docs/development-rules.md#cross-platform-changes)。CLI、Setup、WebUI 必须复用同一管理计划与执行合同，平台控制脚本只处理服务管理器差异；预览通过不能代替执行前状态校验，写入成功不能代替运行时可消费或服务就绪。模板变化须同步核对全新安装、既有定义重装、失败恢复及 WebUI/Relay 状态，不能只验证当前主机平台。
+涉及 Provider、进程控制或服务安装时遵循[跨平台变更规则](../docs/development-rules.md#cross-platform-changes)。CLI、Setup、WebUI 的等价配置操作遵循[多入口配置管理规则](../docs/development-rules.md#multi-entry-configuration-management)，复用所属业务模块的管理计划与执行契约；平台控制脚本只处理服务管理器差异。预览通过不能代替执行前状态校验，写入成功不能代替运行时可消费或服务就绪。模板变化须同步核对全新安装、既有定义重装、失败恢复及 WebUI/Relay 状态，不能只验证当前主机平台。
 
 ## 配置与 Workspace
 
@@ -206,6 +206,7 @@
 - `custom-model-capability-probe.mjs` / `custom-model-capability-probe.d.mts`：CLI 与 WebUI 共用的单项工具探测；按用户选择验证 apply_patch 或 tool_search 的调用及模拟结果接续，不执行返回的工具。另支持一次有界流式原生 web_search 诊断，上游可能实际搜索并计费，仅完整结构化搜索证据算通过；结构化工具拒绝复用 Provider Proxy 分类器及实际出站工具索引，覆盖 HTTP、顶层和选择项流错误；使用手填思考等级和安全结果，不写配置。
 - `custom-model-capability-setup.mjs` / `custom-model-capability-setup.d.mts`：CLI 逐模型、逐项询问 apply_patch 和 tool_search，支持手动选择或显式探测本项；用户选择采用结果后才回填草稿，最终复用 Provider 预览和目录事务。原生网页搜索默认跳过，仅诊断，不回填工具能力或改变搜索策略。
 - `provider-web-search-probe.mjs` / `provider-web-search-probe.d.mts`：已配置提供商共用的原生网页搜索诊断，按目录修订和明确账户解析模型、协议及凭据；CLP 读取已保存的请求配置，使继承模型的思考参数与固定路由和正常桥一致。复用单请求探测引擎，不写目录或搜索策略，不自动刷新登录或启动服务。CLI 和 WebUI 共用同一执行入口。
+- `provider-web-search-setup.mjs`：Config 与 Setup 共用的提供商联网搜索菜单，按精确账户选择并展示当前模式，复用 `provider-web-search-management.mjs` 的预览确认、备份事务和回读；共用全局配置的提供商提示转到用户偏好菜单。取消或无变化不写入，不执行搜索探测或服务重启。
 - `responses-websocket-probe.mjs` / `responses-websocket-probe.d.mts`：按锁定 Codex 协议探测第三方 Responses WS 握手、预热及可选文字请求；复用代理，限制超时与响应大小，取消时释放连接，不保存凭据或原始响应。
 - `responses-websocket-setup.mjs` / `responses-websocket-setup.d.mts`：新增、编辑 Codex 兼容 Provider 时选择自动检测或手动 WS 开关，模型请求须确认可能计费，结果只进入最终保存预览；CP 自定义提供商仅手动选择 WS 开关。
 - `responses-tool-search-probe.mjs` / `responses-tool-search-probe.d.mts`：用一次极短 Responses 请求探测第三方上游是否接受 Codex 的 `tool_search` 输入项；复用代理与 WSS/HTTP 同源设置，限制超时与响应大小，只回结构化结论，不回传上游正文。
@@ -268,7 +269,7 @@
 - `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与校验；导出共用 MCP 审批模式供新增和编辑向导使用；插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
   Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Standard/Fast/Ultrafast、计划清单工具、TUI 空闲总结，
-  一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入默认值与用户偏好（已有 Permission Profile 时保留权限）；加速档位仅作为
+  按显式字段修改 Sandbox、审批和 Workspace Sandbox 网络权限，省略字段保留原值与继承状态；CLI 整组确认仍提交完整三项，一键批量配置仍要求完整权限，或一次原子写入默认值与用户偏好（已有 Permission Profile 时保留权限）；加速档位仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
   第三方固定模式不开放官方默认模型、思考等级和加速档位；已有 `default_permissions` 时不混写传统 Sandbox 字段。
   Fast 按模型目录精确 `priority`/`fast` ID、Ultrafast 按 `ultrafast` ID 开放，纯目录匹配与 Application、WebUI 共用 `runtime/service-tier.mjs`，预览和写入前重新校验所选模型及 Client 投影的独立开关；`fast_mode` / `ultrafast_mode` 分别结合合并配置与受管策略，不自动修改开关。设置页保留原始配置档位，关闭档位仍可退出到 Standard。

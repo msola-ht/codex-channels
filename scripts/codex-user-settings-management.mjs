@@ -210,6 +210,11 @@ function projectSettings(snapshot, provider, rawModels) {
     permissions: {
       editable: optionalString(config.default_permissions) === null,
       defaultPermissions: optionalString(config.default_permissions),
+      unsupportedFields: [
+        ...(config.sandbox_mode != null && sandboxMode === null ? ["sandboxMode"] : []),
+        ...(config.approval_policy != null && approvalPolicy === null ? ["approvalPolicy"] : []),
+        ...(workspaceSandbox.network_access != null && typeof workspaceSandbox.network_access !== "boolean" ? ["networkAccess"] : []),
+      ],
       sandboxMode,
       approvalPolicy,
       networkAccess: typeof workspaceSandbox.network_access === "boolean"
@@ -252,7 +257,7 @@ function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, accel
       assertOfficialDefaults(provider);
       return serviceTierEdit(input.serviceTier, config, models, acceleration);
     case "permissions":
-      return permissionEdits(input, config);
+      return permissionEdits(input, config, true);
     case "approvals-reviewer":
       return approvalsReviewerEdits(input, config, approvalsReviewerPolicy);
     case "web-search":
@@ -489,7 +494,7 @@ function serviceTierEdit(serviceTier, config, models, acceleration, selectedMode
   };
 }
 
-function permissionEdits(input, config) {
+function permissionEdits(input, config, partial = false) {
   const defaultPermissions = optionalString(record(config).default_permissions);
   if (defaultPermissions !== null) {
     throw invalid(
@@ -498,33 +503,32 @@ function permissionEdits(input, config) {
       `当前使用 Permission Profile（${defaultPermissions}），不能同时写入传统 Sandbox 设置`,
     );
   }
-  if (!sandboxModes.has(input.sandboxMode)) {
+  const keys = ["sandboxMode", "approvalPolicy", "networkAccess"];
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || Object.keys(input).some(key => !keys.includes(key) && !(partial && key === "kind"))) {
+    throw invalid("permissions", "invalid-input", "权限设置包含不支持的字段");
+  }
+  const fields = keys.filter(key => Object.hasOwn(input, key));
+  if (fields.length === 0 || !partial && fields.length !== keys.length) {
+    throw invalid("permissions", "missing-permissions", partial ? "请选择至少一项权限设置" : "批量配置必须明确选择完整权限默认值");
+  }
+  if (fields.includes("sandboxMode") && !sandboxModes.has(input.sandboxMode)) {
     throw invalid("sandboxMode", "invalid-sandbox", `Sandbox 无效：${String(input.sandboxMode)}`);
   }
-  if (!approvalPolicies.has(input.approvalPolicy)) {
+  if (fields.includes("approvalPolicy") && !approvalPolicies.has(input.approvalPolicy)) {
     throw invalid(
       "approvalPolicy",
       "invalid-approval-policy",
       `审批策略无效：${String(input.approvalPolicy)}`,
     );
   }
-  if (typeof input.networkAccess !== "boolean") {
+  if (fields.includes("networkAccess") && typeof input.networkAccess !== "boolean") {
     throw invalid("networkAccess", "invalid-boolean", "网络权限必须是布尔值");
   }
+  const paths = { sandboxMode: "sandbox_mode", approvalPolicy: "approval_policy", networkAccess: "sandbox_workspace_write.network_access" };
   return {
-    edits: [
-      { keyPath: "sandbox_mode", value: input.sandboxMode },
-      { keyPath: "approval_policy", value: input.approvalPolicy },
-      {
-        keyPath: "sandbox_workspace_write.network_access",
-        value: input.networkAccess,
-      },
-    ],
-    value: {
-      sandboxMode: input.sandboxMode,
-      approvalPolicy: input.approvalPolicy,
-      networkAccess: input.networkAccess,
-    },
+    edits: fields.map(field => ({ keyPath: paths[field], value: input[field] })),
+    value: Object.fromEntries(fields.map(field => [field, input[field]])),
   };
 }
 
