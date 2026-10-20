@@ -2,7 +2,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatModelLabel } from "@/lib/format"
 
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { useApi } from "@/hooks/use-api"
@@ -369,7 +368,7 @@ function ProviderSettingsCard({
         {managed === undefined ? <SettingsEmpty>{t("managementUi.managedProvidersEmpty")}</SettingsEmpty> : <>
           <FieldGroup>
             <ManagedSelect label={t("managementUi.provider")} value={managed.id} options={settings.managedProviders.map((provider) => [provider.id, provider.displayName])} disabled={busy || pending !== null} onChange={setManagedProvider} />
-            <ManagedSelect label={t("managementUi.defaultModel")} value={managedModel} options={managed.models.map((candidate) => [candidate.id, formatModelLabel(candidate.id, candidate.displayName)])} disabled={busy || pending !== null} onChange={(value) => patchManaged({ model: value })} />
+            <ManagedSelect label={t("managementUi.defaultModel")} value={managedModel} options={managed.models.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={(value) => patchManaged({ model: value })} />
             <ManagedSelect label={t("managementUi.reasoning")} value={managedReasoning} options={(managedModelEntry?.reasoningEfforts ?? []).map((candidate) => [candidate.effort, candidate.effort])} disabled={busy || pending !== null} onChange={(value) => patchManaged({ reasoning: value })} />
           </FieldGroup>
           <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || managedModelEntry === undefined} onClick={() => void updateManagedDefault()}>{t("managementUi.saveManagedDefaults")}</Button>
@@ -406,7 +405,7 @@ function ProviderSettingsCard({
           <ManagedSelect label="WebSocket" value={supportsWebsockets} options={[["true", t("managementUi.supported")], ["false", t("managementUi.unsupported")]]} disabled={busy || pending !== null || upstreamWireApi === "chat_completions"} onChange={setSupportsWebsockets} />
           <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-api-key">API Key</FieldLabel><Input id="custom-provider-api-key" type="password" autoComplete="new-password" placeholder={t("managementUi.preserveCredentials")} value={apiKey} disabled={busy || pending !== null} onChange={(event) => setApiKey(event.target.value)} /></Field>
         </FieldGroup></>}
-        {modelsOnly && <FieldGroup><ManagedSelect label={t("managementUi.defaultModelId")} value={model} options={customModels.map(entry => [entry.id, formatModelLabel(entry.id, entry.name)])} disabled={busy || pending !== null} onChange={setModel} /></FieldGroup>}
+        {modelsOnly && <FieldGroup><ManagedSelect label={t("managementUi.defaultModelId")} value={model} options={customModels.map(entry => [entry.id, entry.name])} disabled={busy || pending !== null} onChange={setModel} /></FieldGroup>}
         {catalogKind === "custom" && !connectionOnly ? <div className="flex flex-col gap-3">
           <p className="text-xs text-muted-foreground">{t("managementUi.responsesHint")}</p>
           {editingId !== null ? <p className="text-xs text-muted-foreground">{t("modelCatalog.editRequiresRemoval")}</p> : null}
@@ -519,7 +518,7 @@ function CustomModelTemplatePicker({ disabled, onAdd }: { disabled: boolean; onA
   const support = (value: boolean | undefined) => t(value === undefined ? "common.unknown" : value ? "managementUi.supported" : "managementUi.unsupported")
   return <FieldGroup className="rounded-md border p-3">
     {request.loading ? <p aria-busy="true">{t("common.loading")}</p> : request.errorCode !== null || templates.length === 0 ? <Alert variant="destructive"><AlertDescription>{request.errorCode !== null ? translateApiErrorCode(t, request.errorCode) : t("customModel.templatesUnavailable")}<Button variant="outline" disabled={disabled} onClick={request.refetch}>{t("modelTemplate.retry")}</Button></AlertDescription></Alert> : <>
-      <ManagedSelect label={t("customModel.startingTemplate")} value={selectedKey} options={templates.map(entry => [key(entry), `${entry.source === "official" ? "OpenAI" : "DeepSeek"} · ${formatModelLabel(entry.model, entry.displayName)}`])} disabled={disabled} onChange={setSelection} />
+      <ManagedSelect label={t("customModel.startingTemplate")} value={selectedKey} options={templates.map(entry => [key(entry), `${entry.source === "official" ? "OpenAI" : "DeepSeek"} · ${entry.displayName}`])} disabled={disabled} onChange={setSelection} />
       <FieldDescription>{t("customModel.startingTemplateHint")}</FieldDescription>
       {suggested === undefined ? null : <Collapsible>
         <CollapsibleTrigger render={<Button variant="outline" />}>{t("customModel.templateReference")}</CollapsibleTrigger>

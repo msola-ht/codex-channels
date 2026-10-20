@@ -87,11 +87,6 @@ function restartRequiredReasons(
     [configChange("surface.feishu.enabled", "feishu"), current.feishu !== undefined, next.feishu !== undefined],
     [configChange("surface.weixin.enabled", "weixin"), current.weixin !== undefined, next.weixin !== undefined],
     [configChange("codex.default-model"), current.codexModel, next.codexModel],
-    [
-      configChange("display.model-aliases"),
-      JSON.stringify(Object.entries(current.modelDisplayAliases ?? {}).sort(([a], [b]) => a.localeCompare(b))),
-      JSON.stringify(Object.entries(next.modelDisplayAliases ?? {}).sort(([a], [b]) => a.localeCompare(b))),
-    ],
     [configChange("gateway.timezone"), current.gatewayTimezone, next.gatewayTimezone],
     [configChange("codex.timezone"), current.codexTimezone, next.codexTimezone],
     [

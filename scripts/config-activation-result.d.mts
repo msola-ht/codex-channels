@@ -1,5 +1,6 @@
 export type ConfigActivationStatus =
   | "none"
+  | "next-read"
   | "reload"
   | "next-thread"
   | "next-tui"

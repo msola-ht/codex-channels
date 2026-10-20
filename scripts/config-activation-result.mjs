@@ -7,6 +7,8 @@ export function configActivationResult(activation) {
   switch (activation) {
     case "none":
       return result("none", "none", []);
+    case "next-read":
+      return result("next-read", "none", []);
     case "reload":
       return result("reload", "gateway", ["codexc reload"]);
     case "next-thread":

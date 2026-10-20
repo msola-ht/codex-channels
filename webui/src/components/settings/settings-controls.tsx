@@ -181,6 +181,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
 
 function formatActivation(activation: PendingSetting["activation"], t: Translate): string {
   if (activation.status === "none") return t("settingsUi.unchanged")
+  if (activation.status === "next-read" && activation.target === "none") return t("settingsUi.nextRead")
   if (activation.status === "next-thread" && activation.target === "codex") {
     return t("settingsUi.nextThread")
   }

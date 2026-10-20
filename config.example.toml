@@ -61,7 +61,8 @@ timeout_seconds = 900
 idle_release_minutes = 15
 
 [display]
-# 可通过 codexc config → 显示设置 → 模型显示组维护；只改展示和控制台模型分组。
+# 可通过 codexc config → Gateway 显示设置 → 模型统计分组维护；仅合并控制台按模型统计。
+# 模型选择和明细保留原模型；重新读取即生效，无需重启服务。
 # model_aliases = { "cline-pass/deepseek-v4.1-flash" = "deepseek-flash", "deepseek-v4.1-flash" = "deepseek-flash" }
 # full：完整详情；compact：单行摘要；hidden：隐藏操作过程。
 operation_updates = "compact"

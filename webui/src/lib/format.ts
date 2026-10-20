@@ -2,19 +2,7 @@ import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, Requ
 import { messages, type Translate } from "./i18n/messages"
 import { translate } from "./i18n/translate"
 import { failureLabelKeys, recordedRequestFailure } from "./request-failure"
-import { modelDisplayName } from "../../../runtime/model-display-name.mjs"
 import { formatGenerationSpeed as requestGenerationSpeed } from "../../../runtime/request-timing.mjs"
-
-let modelDisplayAliases: Readonly<Record<string, string>> = {}
-
-export function setModelDisplayAliases(aliases: Readonly<Record<string, string>>): void {
-  modelDisplayAliases = aliases
-}
-
-export function formatModelLabel(model: string, displayName: string): string {
-  const name = modelDisplayName(model, modelDisplayAliases, displayName)
-  return Object.hasOwn(modelDisplayAliases, model) && name !== model ? `${name}（${model}）` : name
-}
 
 export function requestMethodDisplay(record: RequestRecord | TrafficExchangeSummary, t: Translate): { label: string; variant: "secondary" | "outline" } {
   if (record.requestPurpose === "autoApprovalReview") return { label: t("requestMethod.review"), variant: "secondary" }
@@ -29,7 +17,7 @@ export function isClinePassProvider(provider: string | null | undefined): boolea
 
 export function formatModelName(model: string | null | undefined, provider: string | null | undefined): string | null {
   if (model == null) return null
-  return modelDisplayName(model, modelDisplayAliases, isClinePassProvider(provider) ? model.replace(/^cline-pass\//, "") : model)
+  return isClinePassProvider(provider) ? model.replace(/^cline-pass\//, "") : model
 }
 
 export type DisplayLanguage = "zh" | "en"

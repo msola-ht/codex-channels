@@ -28,7 +28,6 @@ import { useTranslation } from "@/hooks/use-translation"
 import { ServerTimeContext, useServerTime } from "@/hooks/use-server-time"
 import { useApi, useApiPolling } from "@/hooks/use-api"
 import { ModelTrafficSettingsContext } from "@/hooks/use-model-traffic-settings"
-import { ModelDisplayRefreshContext, useModelDisplaySettings } from "@/hooks/use-model-display-settings"
 import { fetchModelTrafficSettings } from "@/lib/api"
 import type { Translate } from "@/lib/i18n/messages"
 import { observeServerClock, type ServerClockSnapshot } from "@/lib/server-time"
@@ -139,8 +138,6 @@ function Layout() {
   const { t, language, setLanguage } = useTranslation()
   const [consoleRange, setConsoleRange] = useState<MetricsRangeQuery>({ range: "30d" })
   const time = useServerTime()
-  const modelDisplay = useModelDisplaySettings()
-  useApiPolling(modelDisplay.refetch, modelDisplay.loading, true, 10_000)
   const settings = useApi(fetchModelTrafficSettings, [], { retainDataOnError: false })
   useApiPolling(settings.refetch, settings.loading, true, 10_000)
 
@@ -157,7 +154,6 @@ function Layout() {
   return (
     <ServerTimeContext.Provider value={time.data}>
       <ModelTrafficSettingsContext.Provider value={settings}>
-      <ModelDisplayRefreshContext.Provider value={modelDisplay.refetch}>
       <AppSidebarProvider>
         <AppSidebar />
         <SidebarInset className="min-w-0">
@@ -185,7 +181,6 @@ function Layout() {
               <ServerClock snapshot={time.data} syncFailed={time.error !== null} />
             </p>
             <PageErrorBoundary key={pathname}>
-            {modelDisplay.error && <ErrorBanner error={translateApiError(t, modelDisplay.error, modelDisplay.errorCode)} />}
             <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">{t("common.loading")}</div>}>
               {invalidThreadPath ? <PageRecovery invalidAddress /> :
               <Routes>
@@ -219,7 +214,6 @@ function Layout() {
           </div>
         </SidebarInset>
       </AppSidebarProvider>
-      </ModelDisplayRefreshContext.Provider>
       </ModelTrafficSettingsContext.Provider>
     </ServerTimeContext.Provider>
   )

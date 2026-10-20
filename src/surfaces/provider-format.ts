@@ -12,22 +12,6 @@ import { deepseekAccountIdFromProvider } from "../../runtime/deepseek-accounts.m
 import { clinePassAccountIdFromProvider } from "../../runtime/cline-pass-accounts.mjs";
 import { ccgAccountIdFromProvider } from "../../runtime/ccg-accounts.mjs";
 import { ccgAccountDefinition, clinePassAccountDefinition, deepseekAccountDefinition } from "../../runtime/model-provider-definitions.mjs";
-import { modelDisplayName } from "../../runtime/model-display-name.mjs";
-
-let modelDisplayAliases: Readonly<Record<string, string>> = {};
-
-export function setModelDisplayAliases(aliases: Readonly<Record<string, string>> = {}): void {
-  modelDisplayAliases = { ...aliases };
-}
-
-export function formatModelDisplayName(model: string, fallback = model): string {
-  return modelDisplayName(model, modelDisplayAliases, fallback);
-}
-
-export function formatModelDisplayNameWithId(model: string): string {
-  const name = formatModelDisplayName(model);
-  return name === model ? model : `${name}（${model}）`;
-}
 
 export function formatProviderLabel(provider: string): string {
   if (provider === "openai") return "OpenAI";
@@ -80,16 +64,14 @@ export function formatModelSpeedSupport(model: ModelOption | undefined): string 
 export interface ModelListEntry {
   /** 渠道列表项：`提供商 · 模型名`。 */
   name: string;
-  /** 只有模型名（显示组名或去掉提供商前缀的目录名），供已单独展示提供商的位置使用。 */
+  /** 去掉提供商前缀的原目录名称，供已单独展示提供商的位置使用。 */
   modelName: string;
-  /** 模型名来自显示组映射，调用方不要再用原始 ID 补充。 */
-  grouped: boolean;
 }
 
 /**
- * 渠道模型项统一为“提供商 · 模型名”。显示组名优先。
+ * 渠道模型项统一为“提供商 · 原目录模型名”，统计分组不参与展示。
  * 受管账户目录自带的前缀按渠道标签归一（`Cline Pass main · ` → `CLP main · `）；
- * 聚合目录改显示成员提供商标签与模型名（成员模型名套用显示组），自定义目录已有的限定
+ * 聚合目录改显示成员提供商标签与原模型名，自定义目录已有的限定
  * 前缀保持原样，官方主 Provider 沿用模型自身的展示名。
  */
 export function modelListEntry(
@@ -97,40 +79,29 @@ export function modelListEntry(
   provider: string | undefined,
   model = displayName,
 ): ModelListEntry {
-  const aliased = Object.hasOwn(modelDisplayAliases, model);
   if (provider === "codexc-aggregate") {
     const member = aggregateMemberDisplay(displayName, model);
     if (member !== undefined) {
-      // 完整聚合 ID 的显示组优先；未配置时沿用成员模型自己的显示组。
-      const memberAliased = Object.hasOwn(modelDisplayAliases, member.model);
-      const grouped = aliased || memberAliased;
-      const memberName = grouped
-        ? formatModelDisplayName(aliased ? model : member.model)
-        : member.name;
-      return { name: `${formatProviderLabel(member.provider)} · ${memberName}`, modelName: memberName, grouped };
+      return { name: `${formatProviderLabel(member.provider)} · ${member.name}`, modelName: member.name };
     }
   }
-  // 显示组名代替模型名，名称里不会再出现原始 ID。
-  const name = aliased ? formatModelDisplayName(model) : displayName;
+  const name = displayName;
   // 官方主 Provider 的目录展示名不带提供商前缀，沿用原有显示。
-  if (provider === undefined || provider === "openai") return { name, modelName: name, grouped: aliased };
+  if (provider === undefined || provider === "openai") return { name, modelName: name };
   const label = formatProviderLabel(provider);
-  // 显示组名不可能带提供商前缀，按来源直接补齐。
-  if (aliased) return { name: `${label} · ${name}`, modelName: name, grouped: true };
   const catalogLabel = providerCatalogLabel(provider);
   // 目录尚未确认时占位模型的展示名就是提供商本身，不再叠加前缀。
   if (name === label || name === catalogLabel || name === provider) {
-    return { name: label, modelName: label, grouped: false };
+    return { name: label, modelName: label };
   }
   const scoped = stripProviderPrefix(name, [catalogLabel, label, provider]);
   return {
     name: scoped.includes(" · ") ? scoped : `${label} · ${scoped}`,
     modelName: scoped,
-    grouped: false,
   };
 }
 
-/** 渠道选项与按钮文案：在名称前保留选择编号，防止同一提供商内多个模型映射同名后无法区分。 */
+/** 渠道选项与按钮文案：保留原目录模型名和选择编号。 */
 export function modelListDisplayName(
   displayName: string,
   provider: string | undefined,

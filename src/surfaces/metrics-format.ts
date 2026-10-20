@@ -10,7 +10,7 @@ import {
   formatTimezoneLine,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
-import { formatCodexProviderLabel, formatModelDisplayName } from "./provider-format.js";
+import { formatCodexProviderLabel } from "./provider-format.js";
 import {
   formatCacheHitRate,
   formatObservedTotal,
@@ -100,7 +100,7 @@ function formatErrorMetricsReport(
         : ` · HTTP ${group.httpStatus}`;
       const code = group.errorCode === null ? "" : ` · 错误码：${/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/u.test(group.errorCode) ? group.errorCode : "未识别"}`;
       const count = group.requestCount > 0 ? ` · ${formatRequestCount(group.requestCount)} 次` : "";
-      return `${index + 1}. ${group.source === "relay" ? "Relay" : "原生代理"} · ${provider} / ${group.model === null ? "未知模型" : formatModelDisplayName(group.model)} · ${formatMetricsErrorType(group.errorType)}${code} · ${status}${httpStatus}${count} · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
+      return `${index + 1}. ${group.source === "relay" ? "Relay" : "原生代理"} · ${provider} / ${group.model === null ? "未知模型" : group.model} · ${formatMetricsErrorType(group.errorType)}${code} · ${status}${httpStatus}${count} · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
     }),
   );
   const hidden = report.totalGroupCount - report.groups.length;
@@ -235,7 +235,7 @@ function formatMetricsGroup(
     ? "未知提供商"
     : formatCodexProviderLabel(group.provider);
   const label = view === "models"
-    ? `${provider} / ${group.model === null ? "未知模型" : formatModelDisplayName(group.model)}`
+    ? `${provider} / ${group.model === null ? "未知模型" : group.model}`
     : provider;
   const aggregate = group.aggregate;
   return [
@@ -306,7 +306,7 @@ export function formatCompactMetricsValue(
   if (compact.requestCount === 0 && compact.inputTokens + compact.outputTokens === 0) return "";
   const model = compact.hasMixedModels
     ? "混合模型"
-    : compact.model === null ? "模型未知" : formatModelDisplayName(compact.model);
+    : compact.model === null ? "模型未知" : compact.model;
   if (options.concise) {
     const parts = compact.requestCount > 0 ? [`${formatRequestCount(compact.requestCount)} 次`] : [];
     if (compact.hasMixedModels || !compact.model || compact.model !== options.currentModel) {

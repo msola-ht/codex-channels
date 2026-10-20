@@ -138,7 +138,6 @@ import {
   canReviewConversationHook,
   canPreserveWeixinHookReviewText,
   formatProviderIdleReleaseNotice,
-  setModelDisplayAliases,
   type SurfaceAdapter,
   SurfaceOutputCoalescer,
 } from "../surfaces/index.js";
@@ -310,7 +309,6 @@ export abstract class GatewayComponentGraph {
     this.transport = createTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
     this.customPrimaryProviderId = customPrimaryProvider?.id;
-    setModelDisplayAliases(config.modelDisplayAliases);
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger, 64, config.codexClientIdentity),

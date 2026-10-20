@@ -61,6 +61,9 @@ function activationNotice(activation) {
   if (activation.status === "none") {
     return "当前值未变化，配置文件未写入，无需重启服务。";
   }
+  if (activation.status === "next-read") {
+    return "配置已保存。下次读取时生效，无需重启服务；控制台可刷新后查看模型统计分组。";
+  }
   if (activation.status === "reinstall-required") {
     return "配置已保存。\n该设置会改变 App Server 服务环境；运行中的服务继续使用旧值，请执行 codexc install 重新生成并启动服务。";
   }

@@ -25,7 +25,6 @@ import {
 } from "./elapsed-duration.js";
 import {
   formatCodexProviderLabel,
-  formatModelDisplayName,
   formatServiceTier,
 } from "./provider-format.js";
 import {
@@ -249,7 +248,7 @@ export function createStartupPresentation(
           },
           {
             label: "模型",
-            value: `${formatModelDisplayName(status.model)}${pendingSuffix(status.modelPending)}`,
+            value: `${status.model}${pendingSuffix(status.modelPending)}`,
           },
           {
             label: "提供商",
@@ -367,7 +366,7 @@ export function createSubagentStartedPresentation(
     title: `子代理开始 · ${subagentTaskName(event.agentPath)}`,
     fields: [
       { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
-      { label: "模型设置", value: event.model ? formatModelDisplayName(event.model) : "未提供" },
+      { label: "模型设置", value: event.model || "未提供" },
       { label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort, "未提供") },
     ],
   };
@@ -380,7 +379,7 @@ export function createSubagentContactedPresentation(
     title: `子代理继续 · ${subagentTaskName(event.agentPath)}`,
     fields: [
       { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
-      { label: "模型设置", value: event.model ? formatModelDisplayName(event.model) : "未提供" },
+      { label: "模型设置", value: event.model || "未提供" },
       { label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort, "未提供") },
     ],
   };
@@ -392,7 +391,7 @@ export function createSubagentCompletedPresentation(
 ): LifecyclePresentation {
   const fields: LifecyclePresentationField[] = [];
   if (event.model) {
-    fields.push({ label: "模型", value: formatModelDisplayName(event.model) });
+    fields.push({ label: "模型", value: event.model });
   }
   if (event.modelProvider) {
     fields.push({
@@ -558,7 +557,7 @@ export function createTurnCompletedPresentation(
   if (event.model) {
     runFields.push({
       label: "模型",
-      value: `${formatModelDisplayName(event.model)} · ${formatReasoningEffort(event.effort)} · ${formatServiceTier(event.serviceTier)}`,
+      value: `${event.model} · ${formatReasoningEffort(event.effort)} · ${formatServiceTier(event.serviceTier)}`,
     });
     runFields.push({
       label: "提供商",

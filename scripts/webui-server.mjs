@@ -546,12 +546,6 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     await handleTrafficSettings(environment, response, gatewayConfigRead);
     return;
   }
-  if (apiPath === "/settings/model-display") {
-    if (url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "模型显示设置不接受查询参数");
-    const document = await readAvailableGatewayConfig(environment, response, gatewayConfigRead);
-    if (document !== null) sendJson(response, 200, { modelAliases: document.display.model_aliases ?? {} });
-    return;
-  }
   if (apiPath === "/health") {
     sendJson(response, 200, { ok: true, service: "webui", pid: process.pid, parentPid: process.ppid });
     return;

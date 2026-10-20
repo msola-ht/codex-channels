@@ -18,7 +18,7 @@ import {
   formatTimeRemaining,
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
-import { formatCodexProviderLabel, formatDisplayedProvider, formatModelDisplayName, formatModelDisplayNameWithId, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListEntry } from "./provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListEntry } from "./provider-format.js";
 import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
@@ -107,14 +107,12 @@ export function formatConversationModels(
     `当前 Provider：${formatCodexProviderLabel(state.providerFilter ?? state.modelProvider ?? providers[0])}`,
     `模型列表（${scopedModels.length}）：`,
     ...scopedModels.map((model, index) => {
-      // 列表项统一为提供商 + 模型名，不附带原始 ID；同名选项按序号区分。
+      // 列表项使用提供商与原目录名称，统计分组不参与模型选择。
       const entry = modelListEntry(model.displayName, model.provider, model.model);
       return `${index + 1}. ${entry.name}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`;
     }),
     "",
-    scopedModels.some((model) => modelListEntry(model.displayName, model.provider, model.model).grouped)
-      ? `切换：${formatCommand("/model <模型序号>")}（显示组名不用于选择）`
-      : "切换：/model <模型序号>",
+    "切换：/model <模型序号>",
   ].join("\n"));
 }
 
@@ -131,7 +129,7 @@ function formatCurrentModelNotices(model: ModelOption | undefined): string[] {
   }
   if (model.upgrade) {
     notices.push([
-      `官方模型提示：建议切换到 ${formatModelDisplayNameWithId(model.upgrade.model)}`,
+      `官方模型提示：建议切换到 ${model.upgrade.model}`,
       ...(model.upgrade.retirementAtSeconds === null
         ? []
         : [`退役时间：${formatUtcDate(model.upgrade.retirementAtSeconds)}（UTC）`]),
@@ -145,7 +143,7 @@ function formatModelUpgradeBadge(model: ModelOption): string {
   const retirement = model.upgrade.retirementAtSeconds === null
     ? ""
     : ` · 退役 ${formatUtcDate(model.upgrade.retirementAtSeconds)} UTC`;
-  return ` · 官方建议替代 ${formatModelDisplayNameWithId(model.upgrade.model)}${retirement}`;
+  return ` · 官方建议替代 ${model.upgrade.model}${retirement}`;
 }
 
 function formatUtcDate(timestampSeconds: number): string {
@@ -159,7 +157,7 @@ export function formatNextMessageModel(value: { model: string; modelProvider?: s
 export function formatConversationModel(
   label: string,
   value: { model: string; modelProvider?: string },
-  name = formatModelDisplayName(value.model),
+  name = value.model,
 ): string {
   return `${label}：${name}${value.modelProvider ? ` · Provider：${formatDisplayedProvider(value.modelProvider)}` : ""}`;
 }
@@ -172,7 +170,7 @@ function formatModelStateLine(
     && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
   // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
   const name = current === undefined
-    ? formatModelDisplayName(state.model)
+    ? state.model
     : modelListEntry(current.displayName, current.provider, current.model).modelName;
   return state.modelPending
     ? formatConversationModel("下一条消息模型", state, name)
@@ -288,7 +286,7 @@ function appendThreadUsage(
   const visibleGroups = threadUsage.groups.slice(0, maximumThreadUsageGroups);
   lines.push(
     ...visibleGroups.map((group) =>
-      `${group.model === null ? "其他" : formatModelDisplayName(group.model)} · ${formatReasoningEffort(group.reasoningEffort, "其他")} · ${group.speed ?? "其他"}`
+      `${group.model === null ? "其他" : group.model} · ${formatReasoningEffort(group.reasoningEffort, "其他")} · ${group.speed ?? "其他"}`
       + `：${formatMicros(group.estimatedUsageCreditsMicros)} Credits`),
   );
   if (threadUsage.groups.length > visibleGroups.length) {

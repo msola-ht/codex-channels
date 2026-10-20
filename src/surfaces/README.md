@@ -189,7 +189,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `conversation-model-account-command-format.ts` 为三个渠道渲染 `/limits reset` 选券预览、确认命令和消费结果，并在 OpenAI `/limits` 中展示重置券可用数量，并按相同
 到期时间合并服务端返回的明细；`null` 到期时间明确显示为“无到期时间”，明细少于可用数量时标出
 未返回明细的剩余张数。
-`provider-format.ts` 统一已知 Provider 显示名（DS、CLP、CCG、OCG、CP 短标签及 AGG；OpenAI 保留原规则）、命令中的 Provider 文案，并把渠道模型项归一为“提供商 · 模型名”，对后续 Provider 标识做有界展示；`setModelDisplayAliases` 接收 Bootstrap 注入的显示映射，`formatModelDisplayName` 按原始模型 ID 复用 Runtime 的精确映射，`modelListEntry` 同时返回列表文案、模型名与是否来自显示组，供列表与“当前模型”行共用；`formatDisplayedProvider` 在会话、模型行和定时任务中复用同一套短标签，官方标识保留原规则。模型项以显示组名代替模型名并保留选择编号，选项、按钮与文本列表都不附带原始 ID。受管账户目录自带的前缀按渠道标签归一；聚合模型按模型 ID 拆出成员 Provider，显示成员标签与成员模型名（成员沿用自身显示组，完整聚合 ID 的显示组优先）；自定义目录已有的限定前缀与官方主 Provider 的展示名保持原样。映射只作用于最终文案，不改 Application 模型目录、文本选择输入、按钮载荷或出站 ID。提供商摘要统一统计可用与暂不可用模型，不改变目录排序或选择编号。同时按实际服务档位格式化速度，并依据当前模型目录展示 Fast、Ultrafast 支持情况，供模型、状态与生命周期展示共用。
+`provider-format.ts` 统一已知 Provider 显示名（DS、CLP、CCG、OCG、CP 短标签及 AGG；OpenAI 保留原规则）、命令中的 Provider 文案，并把渠道模型项归一为“提供商 · 原目录模型名”，对后续 Provider 标识做有界展示。`modelListEntry` 返回列表文案与模型名，供列表与“当前模型”行共用；`formatDisplayedProvider` 在会话、模型行和定时任务中复用同一套短标签，官方标识保留原规则。受管账户目录自带的前缀按渠道标签归一；聚合模型按模型 ID 拆出成员 Provider，显示成员标签与原模型名；自定义目录已有的限定前缀与官方主 Provider 的展示名保持原样。统计分组不进入 Surface，模型列表、按钮、状态、会话、计划任务及请求统计明细均保留原模型身份，选择编号、Application 模型目录、文本选择输入、按钮载荷或出站 ID 不变。提供商摘要统一统计可用与暂不可用模型，不改变目录排序或选择编号。同时按实际服务档位格式化速度，并依据当前模型目录展示 Fast、Ultrafast 支持情况，供模型、状态与生命周期展示共用。
 `markdown-fence.ts` 只识别反引号或波浪号围栏、合法开头与匹配结束并推进纯状态；共享列表、渠道命令、问题预览及最终正文复用它，字符预算、分片、截断和转义仍由各渠道负责。
 `reasoning-effort-format.ts` 统一模型菜单、状态与运行结果的思考设置文案；目录声明 `enabled` 时使用思考模式选择，`enabled` / `none` 分别显示开启/关闭思考，其余等级原样显示，提交给 Application 的控制值保持不变。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的

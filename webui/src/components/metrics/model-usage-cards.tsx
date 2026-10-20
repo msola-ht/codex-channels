@@ -6,27 +6,27 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatCacheUsage, formatModelName, formatRequestOutcomes, formatTokens } from "@/lib/format"
+import { formatCacheUsage, formatRequestOutcomes, formatTokens } from "@/lib/format"
 import type { ModelUsage } from "@/lib/types"
 
 type CardUsage = Pick<ModelUsage, "model" | "requestCount" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage" | "usageCoverage">
   & Partial<Pick<ModelUsage, "requestOutcomes" | "members" | "reviewUsage">>
 
 /** 只展示调用方提供的汇总；不在卡片内计算或合并不同统计范围。 */
-export function ModelUsageCards({ usage, grouped = false }: { usage: readonly CardUsage[]; grouped?: boolean }) {
+export function ModelUsageCards({ usage }: { usage: readonly CardUsage[] }) {
   const { t, language } = useTranslation()
   const formatCount = (value: number) => value === 0 ? "" : value.toLocaleString(language === "zh" ? "zh-CN" : "en-US")
   // 每张卡片至少 21rem（窄容器除外），断点包含卡片间距，最多四列。
   return <section aria-label={t("metrics.model")} className="@container/model-usage min-w-0 shrink-0">
     <div className="grid grid-cols-1 gap-2 @[42.5rem]/model-usage:grid-cols-2 @[64rem]/model-usage:grid-cols-3 @[85.5rem]/model-usage:grid-cols-4">
-    {usage.map(item => <ModelUsageCard key={JSON.stringify(item.model)} item={item} grouped={grouped} formatCount={formatCount} />)}
+    {usage.map(item => <ModelUsageCard key={JSON.stringify(item.model)} item={item} formatCount={formatCount} />)}
     </div>
   </section>
 }
 
-function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; grouped: boolean; formatCount: (value: number) => string }) {
+function ModelUsageCard({ item, formatCount }: { item: CardUsage; formatCount: (value: number) => string }) {
   const { t } = useTranslation()
-  const name = (grouped ? item.model : formatModelName(item.model, null)) ?? t("threads.unknownModel")
+  const name = item.model ?? t("threads.unknownModel")
   const members = item.members ?? []
   const hasDetails = members.length > 0
   const card = <Card size="sm" className="relative min-w-0 gap-1 ring-0">

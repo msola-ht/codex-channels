@@ -22,7 +22,7 @@ export async function runDisplaySettings({
         { value: "operation_updates", label: "操作详情显示", hint: "full / compact / hidden" },
         { value: "plan_updates", label: "计划更新显示", hint: "是否显示 Codex 计划" },
         { value: "reasoning", label: "思考状态显示", hint: "默认关闭；是否显示“思考中”状态卡" },
-        { value: "model_aliases", label: "模型显示组", hint: "WebUI 与频道的组名及原始模型 ID" },
+        { value: "model_aliases", label: "模型统计分组", hint: "仅合并控制台按模型统计，保留原始模型明细" },
         ...(telegramConfigured ? [{ value: "message_format", label: "Telegram 消息格式", hint: "HTML 或富文本" }] : []),
         { value: "back", label: "返回", hint: "返回配置菜单" },
       ],
@@ -55,24 +55,24 @@ async function runModelDisplayGroups({ environment, output, prompts, writeConfig
     const groups = [...new Set(Object.values(aliases))];
     writeModelDisplayGroups(output, aliases);
     const selected = await prompts.select({
-      message: "模型显示组",
+      message: "模型统计分组",
       showInstructions: false,
       options: [
         ...groups.map((group, index) => ({ value: `group:${index}`, label: group,
           hint: Object.keys(aliases).filter((model) => aliases[model] === group).join("、") })),
-        { value: "add", label: "新增显示组", hint: "设置组名并逐个添加原始模型 ID" },
+        { value: "add", label: "新增统计组", hint: "设置组名并逐个添加原始模型 ID" },
         { value: "back", label: "返回上一级" },
       ],
     });
     if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
     const group = selected === "add" ? null : groups[Number(String(selected).slice(6))];
-    if (group === undefined) throw new Error("未知模型显示组");
+    if (group === undefined) throw new Error("未知模型统计组");
     const action = group === null ? "edit" : await prompts.select({
-      message: `显示组：${group}`,
+      message: `统计组：${group}`,
       showInstructions: false,
       options: [
         { value: "edit", label: "编辑组名与成员" },
-        { value: "delete", label: "删除显示组", hint: "该组模型恢复原显示名" },
+        { value: "delete", label: "删除统计组", hint: "该组模型恢复按原始模型 ID 分别统计" },
         { value: "back", label: "返回上一级" },
       ],
     });
@@ -83,7 +83,7 @@ async function runModelDisplayGroups({ environment, output, prompts, writeConfig
     }
     if (action === "delete") {
       const confirmed = await prompts.confirm({
-        message: `删除显示组“${group}”及其全部成员映射？原始模型 ID 保持不变。`,
+        message: `删除统计组“${group}”及其全部成员映射？保留原始记录与模型明细。`,
         initialValue: false,
       });
       if (prompts.isCancel(confirmed) || !confirmed) continue;
@@ -98,19 +98,21 @@ async function runModelDisplayGroups({ environment, output, prompts, writeConfig
       if (edited === null) continue;
       for (const model of edited.models) next[model] = edited.name;
     } else {
-      throw new Error(`未知模型显示组操作：${String(action)}`);
+      throw new Error(`未知模型统计组操作：${String(action)}`);
     }
     validateModelDisplayAliases(next);
     writeModelDisplayGroups(output, next);
     const save = await prompts.confirm({
-      message: "保存以上显示组？只改 WebUI 与频道显示及统计分组，保留原始模型 ID。",
+      message: "保存以上统计组？仅合并控制台按模型统计，模型选择与各项明细保留原模型。",
       initialValue: false,
     });
     if (prompts.isCancel(save) || !save) continue;
     const result = updateGatewaySetting({ kind: "display.model-aliases", value: next }, {
       environment, expectedRevision: settings.revision, writeConfig,
     });
-    output.write(`模型显示组已保存：${result.configPath}；WebUI 刷新页面生效，原始模型 ID 保持不变。\n`);
+    if (result.activation !== "none") {
+      output.write(`模型统计分组已保存：${result.configPath}；控制台重新读取后生效，模型选择与明细保留原模型。\n`);
+    }
     if (result.backupPath) output.write(`原配置备份：${result.backupPath}\n`);
     writeGatewayConfigActivationNotice(output, environment, result.activationResult);
     return { modelAliases: next, configPath: result.configPath,
@@ -126,10 +128,10 @@ async function editModelDisplayGroup({ aliases, group, providers, output, prompt
   let targetModel;
   if (deepseekModels.length) {
     const selected = await prompts.select({
-      message: "选择 DeepSeek 模型名作为显示组，或手填组名",
+      message: "选择 DeepSeek 模型名作为统计组名，或手填组名",
       showInstructions: false,
       options: [...deepseekModels.map((model, index) => ({ value: `name:${index}`, label: model })),
-        { value: "custom", label: "手填组名", hint: group ?? "自定义显示组" }],
+        { value: "custom", label: "手填组名", hint: group ?? "自定义统计组" }],
     });
     if (prompts.isCancel(selected)) return null;
     if (selected !== "custom") {
@@ -139,28 +141,28 @@ async function editModelDisplayGroup({ aliases, group, providers, output, prompt
     }
   }
   const name = await prompts.text({
-    message: "显示组名（1–120 字符）",
+    message: "统计组名（1–120 字符）",
     ...(suggestedName === null ? {} : { initialValue: suggestedName }),
     validate: (value) => {
       const error = modelDisplayAliasesError({ "display-name-validation": value });
       if (error) return error;
       return value !== group && Object.values(aliases).includes(value)
-        ? "此显示组已存在，请返回并编辑该组" : undefined;
+        ? "此统计组已存在，请返回并编辑该组" : undefined;
     },
   });
   if (prompts.isCancel(name)) return null;
   validateModelDisplayAliases({ "display-name-validation": name });
-  if (name !== group && Object.values(aliases).includes(name)) throw new Error("显示组名已存在");
+  if (name !== group && Object.values(aliases).includes(name)) throw new Error("统计组名已存在");
   const models = Object.keys(aliases).filter((model) => aliases[model] === group);
   if (targetModel !== undefined && !models.includes(targetModel)) {
     if (Object.hasOwn(aliases, targetModel) && aliases[targetModel] !== group) {
-      output.write("所选 DS 模型已属于其他显示组，请先编辑原组。\n");
+      output.write("所选 DS 模型已属于其他统计组，请先编辑原组。\n");
       return null;
     }
     models.push(targetModel);
   }
   while (true) {
-    output.write(`显示组“${name}”成员：${models.length ? models.join("、") : "暂无"}\n`);
+    output.write(`统计组“${name}”成员：${models.length ? models.join("、") : "暂无"}\n`);
     const action = await prompts.select({
       message: "编辑原始模型 ID 成员",
       showInstructions: false,
@@ -197,8 +199,8 @@ async function editModelDisplayGroup({ aliases, group, providers, output, prompt
       const validate = (model) => {
         const error = modelDisplayAliasesError({ [model]: name });
         if (error) return error;
-        if (models.includes(model)) return "该模型已在此显示组中";
-        if (Object.hasOwn(aliases, model) && aliases[model] !== group) return "该模型已在其他显示组中，请先从原组移除";
+        if (models.includes(model)) return "该模型已在此统计组中";
+        if (Object.hasOwn(aliases, model) && aliases[model] !== group) return "该模型已在其他统计组中，请先从原组移除";
         const next = { ...aliases };
         for (const member of Object.keys(next)) if (next[member] === group) delete next[member];
         for (const member of models) next[member] = name;
@@ -244,8 +246,8 @@ function modelDisplayAliasesError(value) {
 
 function writeModelDisplayGroups(output, aliases) {
   const groups = [...new Set(Object.values(aliases))];
-  output.write("模型显示组（原始模型 ID → 显示组名）：\n");
-  if (!groups.length) output.write("  暂无映射，默认使用原显示名。\n");
+  output.write("模型统计分组（原始模型 ID → 统计组名；仅合并控制台按模型统计，保留明细）：\n");
+  if (!groups.length) output.write("  暂无映射，默认按原始模型 ID 分别统计。\n");
   for (const group of groups) {
     for (const model of Object.keys(aliases)) if (aliases[model] === group) output.write(`  ${model} → ${group}\n`);
   }
