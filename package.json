@@ -107,6 +107,7 @@
     "scripts/provider-model-setup.mjs",
     "scripts/provider-model-selection.mjs",
     "scripts/managed-provider-files.mjs",
+    "scripts/managed-provider-account-plan.mjs",
     "scripts/managed-provider-account-runtime.mjs",
     "scripts/provider-model-catalog.mjs",
     "scripts/model-catalog-validation.mjs",

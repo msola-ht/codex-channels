@@ -14,12 +14,13 @@ import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-inst
 import { validateEnabledModelSelection } from "./provider-model-selection.mjs";
 import { clineRelayCatalogSchema, clinePassReasoningEfforts, clineRelayInputModalities } from "../runtime/cline-relay-catalog.mjs";
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
-import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
+import { managedProviderDirectory, loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { applyProviderFileUpdates, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
+import { assertManagedAccountMode, snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision } from "./managed-provider-account-plan.mjs";
 
 export function clinePassSetupPaths(environment, accountId) {
   const definition = clinePassAccountDefinition(accountId);
@@ -114,8 +115,8 @@ export function previewClinePassConfiguration(input, { environment = process.env
   validateClinePassAccounts(account ? accounts : [...accounts, { id: input.accountId, default: accounts.length === 0 }]);
   const previous = loadManagedModelProviderSettings(environment).find(item => item.provider === definition.id);
   if (account && !previous) throw new AccountManagementError("provider-state-unavailable", "accountId", "CLP 账户配置不完整，请先恢复缺失文件");
-  if (mode === "exclusive" && !["openai", definition.id].includes(loadPrimaryModelProvider(environment))) throw new AccountManagementError("primary-provider-conflict", "mode", "请先恢复当前固定 Provider");
-  return { operation: account ? "reconfigure" : "add", account: { id: input.accountId, provider: definition.id, default: account?.default ?? accounts.length === 0 }, mode,
+  assertManagedAccountMode(mode, definition, environment);
+  return { revision: managedAccountRevision(snapshotManagedAccountFiles(Object.values(clinePassSetupPaths(environment, input.accountId)), definition, environment)), operation: account ? "reconfigure" : "add", account: { id: input.accountId, provider: definition.id, default: account?.default ?? accounts.length === 0 }, mode,
     effects: { writesMainConfig: mode === "exclusive" || previous?.mode === "exclusive", writesIsolatedProfile: mode === "switching" }, activation: "restart-all" };
 }
 
@@ -124,10 +125,12 @@ export async function applyClinePassConfiguration(input, { environment = process
   const definition = clinePassAccountDefinition(accountId);
   return withModelProviderManagementTransaction(environment, async () => {
     const preview = previewClinePassConfiguration(input, { environment });
+    assertManagedAccountRevision(input.expectedRevision, preview.revision);
     if (preview.effects.writesMainConfig && confirmExclusiveConfigChange !== true) throw new AccountManagementError("confirmation-required", "confirmExclusiveConfigChange", "修改 Codex 主配置前必须明确确认");
     const accounts = loadClinePassAccounts(environment);
     const paths = clinePassSetupPaths(environment, accountId);
-    const snapshots = snapshotProviderFiles(Object.values(paths), environment);
+    const snapshots = snapshotManagedAccountFiles(Object.values(paths), definition, environment);
+    assertManagedAccountRevision(preview.revision, managedAccountRevision(snapshots));
     const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
     const current = content("config") === undefined ? {} : parsePrivateConfig(content("config"));
     const previous = loadManagedModelProviderSettings(environment).find(item => item.provider === definition.id);
@@ -192,7 +195,7 @@ function clinePassRemovalPlan(accountId, environment) {
   const paths = clinePassSetupPaths(environment, accountId);
   const previous = loadManagedModelProviderSettings(environment).find(item => item.provider === definition.id);
   if (!previous) throw new AccountManagementError("provider-state-unavailable", "accountId", "CLP 账户配置不完整，请先恢复缺失文件");
-  const snapshots = snapshotProviderFiles(Object.values(paths), environment);
+  const snapshots = snapshotManagedAccountFiles(Object.values(paths), definition, environment);
   const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
   const updates = new Map([paths.profile, paths.marker].map(path => [path, undefined]));
   updates.set(paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`);
@@ -207,15 +210,16 @@ function clinePassRemovalPlan(accountId, environment) {
 export async function previewClinePassRemoval(accountId, options = {}) {
   const plan = clinePassRemovalPlan(accountId, options.environment ?? process.env);
   const runtime = await inspectManagedAccountRuntime(plan.definition.id, options);
-  return { operation: "remove", account: { id: accountId, provider: plan.definition.id },
-    effects: { stopsRunningAppServer: runtime.running, historyThreadsBecomeUnavailable: true, preservesPrivateBackup: true, restoresInitialConfig: plan.restoresInitialConfig }, activation: "restart-all" };
+  return { revision: managedAccountRevision(plan.snapshots), operation: "remove", account: { id: accountId, provider: plan.definition.id },
+    effects: { stopsRunningAppServer: runtime.registered, historyThreadsBecomeUnavailable: true, preservesPrivateBackup: true, restoresInitialConfig: plan.restoresInitialConfig }, activation: "restart-all" };
 }
 
-export async function removeClinePassConfiguration({ accountId, confirmRemove = false }, options = {}) {
+export async function removeClinePassConfiguration({ accountId, confirmRemove = false, expectedRevision }, options = {}) {
   if (!confirmRemove) throw new AccountManagementError("confirmation-required", "confirmRemove", "移除 CLP 前必须确认");
   const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
     const plan = clinePassRemovalPlan(accountId, environment);
+    assertManagedAccountRevision(expectedRevision, managedAccountRevision(plan.snapshots));
     await stopManagedAccountForRemoval(plan.definition.id, options);
     await applyProviderFileUpdates(plan.updates, plan.snapshots);
     return { action: "removed", accountId, activation: "restart-all" };
@@ -223,17 +227,22 @@ export async function removeClinePassConfiguration({ accountId, confirmRemove = 
 }
 
 export function previewClinePassDefaultAccount(accountId, { environment = process.env } = {}) {
+  const revision = managedAccountRevision(snapshotProviderFiles([clinePassAccountsFilePath(environment)], environment));
   const account = loadClinePassAccounts(environment).find(item => item.id === accountId);
   if (!account) throw new AccountManagementError("account-not-found", "accountId", "CLP 账户不存在");
-  return { operation: "default", account: { ...account, provider: clinePassAccountDefinition(accountId).id }, activation: "restart-all" };
+  return { revision, operation: "default", account: { ...account, provider: clinePassAccountDefinition(accountId).id }, willChange: !account.default, activation: account.default ? "none" : "restart-all" };
 }
 
-export async function setClinePassDefaultAccount(accountId, { environment = process.env } = {}) {
+export async function setClinePassDefaultAccount(accountId, { environment = process.env, expectedRevision } = {}) {
   return withModelProviderManagementTransaction(environment, async () => {
     const preview = previewClinePassDefaultAccount(accountId, { environment });
-    const accounts = loadClinePassAccounts(environment).map(account => ({ ...account, default: account.id === accountId }));
+    assertManagedAccountRevision(expectedRevision, preview.revision);
     const path = clinePassAccountsFilePath(environment);
-    await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(validateClinePassAccounts(accounts), null, 2)}\n`]]), snapshotProviderFiles([path], environment));
+    const snapshots = snapshotProviderFiles([path], environment);
+    assertManagedAccountRevision(preview.revision, managedAccountRevision(snapshots));
+    if (!preview.willChange) return { ...preview, action: "unchanged" };
+    const accounts = loadClinePassAccounts(environment).map(account => ({ ...account, default: account.id === accountId }));
+    await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(validateClinePassAccounts(accounts), null, 2)}\n`]]), snapshots);
     return { ...preview, account: { ...preview.account, default: true }, action: "default-set" };
   });
 }

@@ -10,8 +10,10 @@ export interface DeepseekAccountConfigurationInput {
   reconfigure?: boolean;
   apiKey: string;
   confirmExclusiveConfigChange?: boolean;
+  expectedRevision?: string;
 }
 export function previewDeepseekAccountConfiguration(input: Omit<DeepseekAccountConfigurationInput, "apiKey">, options?: Options): {
+  revision: string;
   operation: "add" | "reconfigure";
   account: { id: string; provider: string; exists: boolean; default: boolean };
   mode: "switching" | "exclusive";
@@ -23,10 +25,15 @@ export function applyDeepseekAccountConfiguration(input: DeepseekAccountConfigur
   downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{ catalog: Catalog }>;
   fetchImpl?: typeof fetch;
 }): Promise<ReturnType<typeof previewDeepseekAccountConfiguration> & { action: "configured"; model: string }>;
-export function setDeepseekDefaultAccount(accountId: string, options?: Options): Promise<{ action: "default-set"; accountId: string; activation: "restart-all" }>;
+export function previewDeepseekDefaultAccount(accountId: string, options?: Options): {
+  revision: string; operation: "default"; account: { id: string; provider: string; default: boolean };
+  willChange: boolean; activation: "none" | "restart-all";
+};
+export function setDeepseekDefaultAccount(accountId: string, options?: Options & { expectedRevision?: string }): Promise<{ action: "default-set"; accountId: string; activation: "restart-all" } | { action: "unchanged"; accountId: string; activation: "none" }>;
 export function previewDeepseekAccountRemoval(accountId: string, options?: ManagedAccountRuntimeOptions): Promise<{
+  revision: string;
   operation: "remove"; account: { id: string; provider: string };
   effects: { stopsRunningAppServer: boolean; historyThreadsBecomeUnavailable: true; preservesPrivateBackup: true; restoresInitialConfig: boolean };
   activation: "restart-all";
 }>;
-export function removeDeepseekAccount(input: { accountId: string; confirmRemove?: boolean }, options?: ManagedAccountRuntimeOptions): Promise<{ action: "removed"; accountId: string; runtime: "stopped" | "not-running"; activation: "restart-all" }>;
+export function removeDeepseekAccount(input: { accountId: string; confirmRemove?: boolean; expectedRevision?: string }, options?: ManagedAccountRuntimeOptions): Promise<{ action: "removed"; accountId: string; runtime: "stopped" | "not-running"; activation: "restart-all" }>;

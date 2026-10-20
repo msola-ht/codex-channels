@@ -13,7 +13,7 @@ import {
 import { deepseekAccountDefinition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
 import {
-  loadManagedModelProviderSettings, loadPrimaryModelProvider,
+  loadManagedModelProviderSettings,
   managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
@@ -24,6 +24,7 @@ import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./ma
 import { createManagedDeepseekCatalog, downloadDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
 import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
+import { assertManagedAccountMode, snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision } from "./managed-provider-account-plan.mjs";
 
 export function deepseekAccountPaths(environment, accountId) {
   const definition = deepseekAccountDefinition(accountId);
@@ -73,10 +74,9 @@ export function previewDeepseekAccountConfiguration(input, { environment = proce
   const configured = previous ? loadManagedModelProviderSettings(environment)
     .find((provider) => provider.provider === definition.id) : undefined;
   if (previous && !configured) throw new AccountManagementError("provider-state-unavailable", "accountId", "DeepSeek 账户配置不完整，请先恢复缺失文件");
-  if (mode === "exclusive" && !["openai", definition.id].includes(loadPrimaryModelProvider(environment))) {
-    throw new AccountManagementError("primary-provider-conflict", "mode", "请先移除当前固定 Provider");
-  }
+  assertManagedAccountMode(mode, definition, environment);
   return {
+    revision: managedAccountRevision(snapshotManagedAccountFiles(Object.values(deepseekAccountPaths(environment, input.accountId)), definition, environment)),
     operation: previous ? "reconfigure" : "add",
     account: { id: input.accountId, provider: definition.id, exists: Boolean(previous), default: previous?.default ?? accounts.length === 0 },
     mode,
@@ -90,11 +90,13 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
   const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
     const preview = previewDeepseekAccountConfiguration(input, { environment });
+    assertManagedAccountRevision(input.expectedRevision, preview.revision);
     const definition = deepseekAccountDefinition(input.accountId);
     if (!isManagedProviderApiKeyValid(definition, input.apiKey)) throw new AccountManagementError("invalid-api-key", "apiKey", "DeepSeek API Key 无效");
     if (preview.effects.writesMainConfig && input.confirmExclusiveConfigChange !== true) throw new AccountManagementError("confirmation-required", "confirmExclusiveConfigChange", "修改 Codex 主配置前必须明确确认");
     const paths = deepseekAccountPaths(environment, input.accountId);
-    const snapshots = snapshotProviderFiles(Object.values(paths), environment);
+    const snapshots = snapshotManagedAccountFiles(Object.values(paths), definition, environment);
+    assertManagedAccountRevision(preview.revision, managedAccountRevision(snapshots));
     const accounts = loadDeepseekAccounts(environment);
     const providers = loadManagedModelProviderSettings(environment);
     const previous = providers.find((provider) => provider.provider === definition.id);
@@ -145,14 +147,25 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
   });
 }
 
-export async function setDeepseekDefaultAccount(accountId, { environment = process.env } = {}) {
+export function previewDeepseekDefaultAccount(accountId, { environment = process.env } = {}) {
+  const snapshots = snapshotProviderFiles([deepseekAccountsFilePath(environment)], environment);
+  const account = loadDeepseekAccounts(environment).find(entry => entry.id === accountId);
+  if (!account) throw new AccountManagementError("account-not-found", "accountId", "DeepSeek 账户不存在");
+  return { operation: "default", account: { ...account, provider: deepseekAccountDefinition(accountId).id },
+    revision: managedAccountRevision(snapshots), willChange: !account.default, activation: account.default ? "none" : "restart-all" };
+}
+
+export async function setDeepseekDefaultAccount(accountId, { environment = process.env, expectedRevision } = {}) {
   return withModelProviderManagementTransaction(environment, async () => {
+    const path = deepseekAccountsFilePath(environment);
+    const snapshots = snapshotProviderFiles([path], environment);
+    assertManagedAccountRevision(expectedRevision, managedAccountRevision(snapshots));
     const accounts = loadDeepseekAccounts(environment);
     if (!accounts.some((account) => account.id === accountId)) throw new AccountManagementError("account-not-found", "accountId", "DeepSeek 账户不存在");
-    const path = deepseekAccountsFilePath(environment);
+    if (accounts.find(account => account.id === accountId).default) return { action: "unchanged", accountId, activation: "none" };
     await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(
       accounts.map((account) => ({ ...account, default: account.id === accountId })), null, 2,
-    )}\n`]]), snapshotProviderFiles([path], environment));
+    )}\n`]]), snapshots);
     return { action: "default-set", accountId, activation: "restart-all" };
   });
 }
@@ -166,7 +179,7 @@ function deepseekAccountRemovalPlan(accountId, environment) {
   if (!configured) throw new AccountManagementError("provider-state-unavailable", "accountId", "DeepSeek 账户配置不完整，请先恢复缺失文件");
   const remaining = accounts.filter((account) => account.id !== accountId);
   if (remaining.length > 0 && !remaining.some((account) => account.default)) throw new AccountManagementError("default-account-conflict", "accountId", "请先选择其他默认账户");
-  const snapshots = snapshotProviderFiles(Object.values(paths), environment);
+  const snapshots = snapshotManagedAccountFiles(Object.values(paths), definition, environment);
   const updates = new Map([[paths.profile, undefined], [paths.marker, undefined], [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`]]);
   if (configured.mode === "exclusive") {
     const initial = readBackup(paths.backup, environment);
@@ -181,19 +194,21 @@ export async function previewDeepseekAccountRemoval(accountId, options = {}) {
   const plan = deepseekAccountRemovalPlan(accountId, environment);
   const runtime = await inspectManagedAccountRuntime(plan.definition.id, options);
   return {
+    revision: managedAccountRevision(plan.snapshots),
     operation: "remove",
     account: { id: accountId, provider: plan.definition.id },
-    effects: { stopsRunningAppServer: runtime.running, historyThreadsBecomeUnavailable: true,
+    effects: { stopsRunningAppServer: runtime.registered, historyThreadsBecomeUnavailable: true,
       preservesPrivateBackup: true, restoresInitialConfig: plan.restoresInitialConfig },
     activation: "restart-all",
   };
 }
 
-export async function removeDeepseekAccount({ accountId, confirmRemove = false }, options = {}) {
+export async function removeDeepseekAccount({ accountId, confirmRemove = false, expectedRevision }, options = {}) {
   const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
     if (!confirmRemove) throw new AccountManagementError("confirmation-required", "confirmRemove", "删除账户必须明确确认");
     const { definition, updates, snapshots } = deepseekAccountRemovalPlan(accountId, environment);
+    assertManagedAccountRevision(expectedRevision, managedAccountRevision(snapshots));
     const runtime = await stopManagedAccountForRemoval(definition.id, options);
     await applyProviderFileUpdates(updates, snapshots);
     return { action: "removed", accountId, runtime, activation: "restart-all" };

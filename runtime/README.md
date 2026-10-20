@@ -159,7 +159,7 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
 - `model-catalog-deepseek-source.json` / `model-catalog-deepseek.json`：分别保存 DS 官方原始目录与提示词补全目录。保留 DS 已有字段，仅补缺失提示词及必要的 token-budget 配套结构；`approvals: null` 是明确允许继承基础审批提示词的例外。
 - `model-catalog-sources.json`：上述模板的 CLI 版本、来源和 SHA-256。四份快照由 `scripts/update-model-templates.mjs` 显式对比、校验、更新；基础快照供显式目录生成补全提示词，DS 补全目录供 CLP Flash 与 CP 导入，不采用某个 DS 账户设置。维护步骤见[DS 模板维护](../docs/deepseek.md#仓库模板维护)。
 - `model-catalog-presentation.mjs` / `model-catalog-presentation.d.mts`：OpenAI 缓存与第三方保存目录共用的纯展示投影；白名单能力、加速倍率、审批声明与按需提示词分组，不执行文件读写、不推断未声明能力。
-- `model-provider-responses-catalog.mjs` / `model-provider-responses-catalog.d.mts`：复用 `model-catalog` 编译定义，保留 CP v5 包装及大小限制、生成一致性、修订、私有备份与未完成写入标记；`createResponsesModelCatalog` 仅为新增模型补全模板，`compileResponsesModelCatalog` 纯编译已保存快照，编辑、删除及窗口修改保留其余模型原值，旧 `followContext` 只作历史元数据，不保存凭据。全部写入使用 v2 前后摘要 pending，首次创建记录 `previous=false`／`previousDigest=null`；历史 v1 记录仍支持显式恢复。CLP 保留既有编译入口与相同大小边界。
+- `model-provider-responses-catalog.mjs` / `model-provider-responses-catalog.d.mts`：复用 `model-catalog` 编译定义，保留 CP v5 包装及大小限制、生成一致性、修订、私有备份与未完成写入标记；`createResponsesModelCatalog` 仅为新增模型补全模板，`compileResponsesModelCatalog` 纯编译已保存快照，编辑、删除及窗口修改保留其余模型原值，旧 `followContext` 只作历史元数据，不保存凭据。全部写入使用 v2 前后摘要 pending，首次创建记录 `previous=false`／`previousDigest=null`；恢复仅接受 v2，历史 v1 记录须保留记录与备份并使用产生它的原版本恢复。CLP 保留既有编译入口与相同大小边界。
 - `model-provider-upstream-metadata.mjs` / `model-provider-upstream-metadata.d.mts`：自定义第三方 Provider 的网关侧元数据（当前只有上游接口 `responses` / `chat_completions`），与模型目录同目录、0600 写入；缺失按 `responses`，版本、字段或枚举不合法时失败关闭。
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
   为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，包括实际 Profile 中显式保存的 `web_search`，并只把当前 Provider 的 Key 注入目标

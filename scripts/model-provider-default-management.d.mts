@@ -28,7 +28,7 @@ export interface ManagedProviderDefaultChangePreview {
     profileReasoningEffortProviders: string[];
   };
   willChange: boolean;
-  activation: "restart-app-server";
+  activation: "restart-app-server" | "none";
 }
 
 export interface ManagedProviderDefaultChangeOptions {
@@ -66,4 +66,4 @@ export function previewManagedProviderDefaultChange(
 export function applyManagedProviderDefaultChange(
   input: ManagedProviderDefaultChangeInput,
   options: ManagedProviderDefaultChangeOptions & { preview: ManagedProviderDefaultChangePreview },
-): Promise<{ action: "updated" } & ManagedProviderDefaultChangePreview>;
+): Promise<{ action: "updated" | "unchanged" } & ManagedProviderDefaultChangePreview>;

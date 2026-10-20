@@ -582,6 +582,7 @@ export interface ManagementSettingsResponse {
 
 export interface ManagementSettingInput { kind: string; value: unknown; [key: string]: unknown }
 export interface ManagementSettingMutationResponse {
+  action?: string
   revision: string | null
   value: unknown
   activation: { status: string; target: string; commands: readonly string[] }
@@ -870,6 +871,13 @@ export interface ManagementProviderSettingsStandardPreview {
   operation: "switch" | "remove" | "create" | "update" | "managed.default" | "model.remove" | "model.context" | "model.rename" | "model.custom.save"
   revision?: string
   before?: { defaultModel: string; reasoningEffort: string }
+  modelDefaults?: {
+    catalog: { before: string; after: string }
+    selection: {
+      before: { model: string | null; reasoningEffort: string | null }
+      after: { model: string | null; reasoningEffort: string | null }
+    }
+  }
   warnings?: Array<{ code: string }>
   activation: string
   target?: {
@@ -1005,6 +1013,7 @@ export type ManagementAccountSettingsMutationInput =
 
 export interface ManagementAccountSettingsPreview {
   operation: string
+  revision?: string
   activation?: string
   account?: {
     id?: string

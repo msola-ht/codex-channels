@@ -73,6 +73,9 @@ async function applyManagedProviderDefaultChangeUnlocked(
   }
   try {
     await assertProviderFileSnapshots(plan.snapshots);
+    if (!plan.willChange) {
+      return { action: "unchanged", ...publicPreview(plan) };
+    }
     if (plan.provider.mode === "switching") {
       writeProfileDefault(plan.provider.provider, plan.settings, environment);
     } else {
@@ -271,7 +274,7 @@ function publicPreview(plan) {
       reasoningEffort: plan.model.reasoningEffort,
     },
     willChange: plan.willChange,
-    activation: "restart-app-server",
+    activation: plan.willChange ? "restart-app-server" : "none",
   };
 }
 

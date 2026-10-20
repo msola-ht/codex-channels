@@ -269,7 +269,7 @@ export async function applyProviderModelContextChange(input, { environment = pro
         throw invalid("operation-failed", "contextWindow", "模型上下文保存未完成；请检查目录与备份，勿自动重试", error);
       }
     }
-    return { ...plan.preview, action: "updated" };
+    return { ...plan.preview, action: plan.preview.willChange ? "updated" : "unchanged" };
   });
 }
 
@@ -301,7 +301,8 @@ async function buildContextPlan(input, environment) {
   return { snapshot, preview: { operation: "model.context", provider: input.provider,
     model: { id: model.model, displayName: model.displayName, contextWindow: model.contextWindow, maxContextWindow: model.maxContextWindow },
     contextWindow: input.contextWindow, providers: catalog.providers, revision: snapshot.revision,
-    willChange: model.contextWindow !== input.contextWindow, activation: "restart-app-server" } };
+    willChange: model.contextWindow !== input.contextWindow,
+    activation: model.contextWindow !== input.contextWindow ? "restart-app-server" : "none" } };
 }
 
 export async function previewProviderModelRemoval(input, { environment = process.env } = {}) {
@@ -338,7 +339,9 @@ export async function applyProviderModelRemoval(input, { environment = process.e
 }
 
 async function buildRemovalPlan(input, environment) {
-  validateInput(input);
+  // Existing v5 catalogs may contain format characters accepted at creation.
+  // Permit only exact lookup for removal; never normalize or rename that ID.
+  validateInput(input, { allowStoredCustomModel: isCustomCatalogProvider(input?.provider) });
   const definitions = loadManagedModelProviderDefinitions(environment);
   const definition = definitions.find(entry => entry.id === input.provider);
   const family = definition && managedProviderAccountFamilies.find(candidate => definition.storageId === candidate.storageId);
@@ -528,11 +531,12 @@ function validateManagedCatalog(catalog, definition) {
   }
 }
 
-function validateInput(input) {
+function validateInput(input, { allowStoredCustomModel = false } = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !["provider", "model"].includes(key))
     || typeof input.provider !== "string" || !input.provider.length || input.provider.trim() !== input.provider || input.provider.length > 100
     || typeof input.model !== "string" || !input.model.length || input.model.trim() !== input.model || input.model.length > 200
-    || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(input.provider + input.model)) throw invalid("invalid-input", "model", "必须提供准确的 provider 和 model ID，不能包含额外字段");
+    || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(input.provider)
+    || (allowStoredCustomModel ? /\p{Cc}/u : /[\p{Cc}\p{Cf}\p{Cs}]/u).test(input.model)) throw invalid("invalid-input", "model", "必须提供准确的 provider 和 model ID，不能包含额外字段");
 }
 
 function requiredContent(snapshots, path) {

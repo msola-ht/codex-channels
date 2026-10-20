@@ -259,8 +259,12 @@ export async function runProviderModelSetup({ environment = process.env, prompts
         .map(key => `  ${key}：${JSON.stringify(old[key]) ?? "未设置"} → ${JSON.stringify(entry[key]) ?? "未设置"}`);
       if (changes.length) output.write(`修改模型 ${entry.id}：\n${changes.join("\n")}\n`);
     }
-    output.write(action === "tools" ? "目录及连接的默认模型、思考等级保持当前值；仅保存所选工具能力。\n"
-      : `默认模型：${previous.defaultModel} → ${model}；未列出的模型字段、连接与凭据保持当前值。\n`);
+    const defaults = preview.modelDefaults;
+    output.write(`目录默认模型：${JSON.stringify(defaults.catalog.before)} → ${JSON.stringify(defaults.catalog.after)}\n`);
+    output.write(`提供商实际默认模型：${JSON.stringify(defaults.selection.before.model)} → ${JSON.stringify(defaults.selection.after.model)}\n`);
+    output.write(`提供商实际默认思考等级：${JSON.stringify(defaults.selection.before.reasoningEffort)} → ${JSON.stringify(defaults.selection.after.reasoningEffort)}\n`);
+    output.write(action === "tools" ? "仅保存所选工具能力。\n" : "保存以上目录及提供商默认设置；未列出的模型字段、连接与凭据保持当前值。\n");
+    if (!preview.willChange) { output.write("模型目录及默认设置未变化，无需保存。\n"); return { action: "unchanged", activation: "none" }; }
     if (await prompts.confirm({ message: "备份并保存模型设置？", initialValue: false }) !== true) return { action: "back" };
     result = await applyCustomProviderModelsSave(input, { ...saveOptions, preview });
   } else if (action === "remove") {
@@ -276,7 +280,9 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     if (await prompts.confirm({ message: "确认本地移除？", initialValue: false }) !== true) return { action: "back" };
     result = await applyProviderModelRemoval(input, { environment, preview });
   } else throw new Error("不支持的模型操作");
-  if (result.action !== "back") {
+  if (result.action === "unchanged") {
+    output.write("模型目录及默认设置未变化，无需保存。\n");
+  } else if (result.action !== "back") {
     output.write(["edit", "tools", "remove"].includes(action) ? "模型目录已保存并回读。\n" : "模型目录已保存。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   }

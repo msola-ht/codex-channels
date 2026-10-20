@@ -85,14 +85,10 @@ export async function runOpenCodeGoSetup({
     if (action === "account-default") {
       const accountId = await prompt.selectAccount(accounts);
       if (accountId === undefined) return { action: "back" };
-      await setOpencodeGoDefaultAccount(accountId, { environment });
-      output.write(`默认 OpenCode Go 账户已设置为 ${accountId}。\n`);
-      writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
-      return {
-        action: "default-set",
-        activation: "restart-all",
-        activationResult: configActivationResult("restart-all"),
-      };
+      const result = await setOpencodeGoDefaultAccount(accountId, { environment });
+      output.write(result.action === "unchanged" ? `默认 OpenCode Go 账户仍为 ${accountId}，无需修改。\n` : `默认 OpenCode Go 账户已设置为 ${accountId}。\n`);
+      writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+      return { ...result, activationResult: configActivationResult(result.activation) };
     }
     if (action === "account-stop") {
       const accountId = await prompt.selectAccount(accounts);
@@ -193,6 +189,7 @@ export async function addOpencodeGoAccount(accountId, {
     reconfigure,
     apiKey,
     confirmExclusiveConfigChange,
+    expectedRevision: preview.revision,
   }, { environment, fetchImpl, downloadCatalog });
   const paths = result.paths;
   output.write(mode === "switching"
@@ -261,6 +258,7 @@ export async function removeOpencodeGoAccount(accountId, {
   const result = await applyOpencodeGoAccountRemoval({
     accountId: preview.account.id,
     confirmHistoryLoss: true,
+    expectedRevision: preview.revision,
   }, {
     environment,
   });
@@ -288,7 +286,7 @@ export async function setOpencodeGoDefaultAccount(accountId, {
     accountId,
     { environment },
   );
-  return { action: result.action, accountId };
+  return { action: result.action, accountId, activation: result.activation };
 }
 
 export async function stopOpencodeGoAccount(accountId, {
@@ -369,11 +367,11 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
       environment: options.environment ?? process.env,
     });
     const output = options.output ?? process.stdout;
-    output.write(`默认 OpenCode Go 账户已设置为 ${id}。\n`);
+    output.write(result.action === "unchanged" ? `默认 OpenCode Go 账户仍为 ${id}，无需修改。\n` : `默认 OpenCode Go 账户已设置为 ${id}。\n`);
     writeGatewayConfigActivationNotice(
       output,
       options.environment ?? process.env,
-      configActivationResult("restart-all"),
+      configActivationResult(result.activation),
     );
     return result;
   }

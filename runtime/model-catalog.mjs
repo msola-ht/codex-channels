@@ -6,6 +6,21 @@ export const openAiContextWindowPresetTokens = Object.freeze([272000, 372000, 50
 export function contextWindowPresetLabel(tokens) {
   return tokens === 1048576 ? "1M" : `${tokens / 1024}K`;
 }
+
+/** New custom IDs use the same strict contract as single-model management. */
+export function isValidCustomModelId(id) {
+  return typeof id === "string" && id.trim() === id && id.length > 0 && id.length <= 200
+    && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(id);
+}
+
+/** A context-only edit preserves the previous effective maximum and truncation. */
+export function withModelContextWindow(model, contextWindow) {
+  if (model.contextWindow === contextWindow) return { ...model };
+  return { ...model, contextWindow,
+    maxContextWindow: model.maxContextWindow ?? model.contextWindow,
+    truncationPolicy: model.truncationPolicy ?? { mode: "tokens", limit: Math.min(10_000, Math.floor(model.contextWindow / 4)) },
+  };
+}
 const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const verbosityLevels = new Set(["low", "medium", "high"]);
 const reasoningSummaries = new Set(["auto", "concise", "detailed", "none"]);

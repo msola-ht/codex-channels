@@ -22,6 +22,9 @@ export async function inspectManagedAccountRuntime(provider, {
   return {
     provider,
     primarySocketPath,
+    registered: inspection.status === "ready" && (
+      inspection.topology.primaryProvider === provider || inspection.topology.managedProviders.includes(provider)
+    ),
     running: inspection.status === "ready" && inspection.topology.runningProviders.includes(provider),
   };
 }
@@ -29,7 +32,7 @@ export async function inspectManagedAccountRuntime(provider, {
 export async function releaseManagedAccountRuntime(plan, {
   releaseProvider = releaseAppServerProvider,
 } = {}) {
-  if (!plan.running) return "not-running";
+  if (!plan.registered) return "not-running";
   const release = await releaseProvider(plan.primarySocketPath, plan.provider);
   return release.reason === "released" ? "stopped"
     : release.reason === "leased" ? "in-use" : "not-running";

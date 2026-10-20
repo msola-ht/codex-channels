@@ -56,7 +56,9 @@ export async function runModelProviderDefaultSetup({
     output.write(`默认模型仅设置账户：${preview.effects.defaultModelProviders.join("、")}；${preview.before.defaultModel} → ${model}。\n`);
     output.write(`共享模型 ${model} 的默认思考等级：${preview.before.reasoningEffort} → ${reasoningEffort}；影响账户：${preview.effects.reasoningEffortProviders.join("、")}。\n`);
     output.write(`默认选择此模型的 Profile 等级同步账户：${preview.effects.profileReasoningEffortProviders.join("、") || "无"}。\n`);
-    output.write("保存时清除所选账户的上下文窗口与自动压缩覆盖，恢复目录与上游默认规则。\n");
+    if (!preview.willChange) {
+      output.write("当前默认模型与共享思考等级未变化；确认后仅复核配置，不写入文件。\n");
+    }
     if (await prompt.confirm(preview) !== true) return { action: "back" };
     const result = await applyManagedProviderDefaultChange(input, {
       environment,
@@ -71,20 +73,33 @@ export async function runModelProviderDefaultSetup({
       readConfigSnapshot,
       writeConfigEdits,
     });
+    const activationResult = configActivationResult(result.activation);
+    if (result.action === "unchanged") {
+      writeGatewayConfigActivationNotice(output, environment, activationResult);
+      return {
+        action: "unchanged",
+        provider: selected.provider,
+        model,
+        reasoningEffort,
+        mode: result.provider.mode,
+        activation: result.activation,
+        activationResult,
+      };
+    }
     output.write(`${result.provider.displayName} 默认模型已设为 ${result.model.id}。\n`);
     output.write(`模型上下文：${result.model.contextWindow} tokens。\n`);
     output.write(`共享模型 ${model} 的默认思考等级：${reasoningEffort}；影响账户：${result.effects.reasoningEffortProviders.join("、")}。\n`);
     output.write("新会话使用该默认值；恢复历史会话仍使用 Thread 原有模型。\n");
-    output.write("已清除当前主配置或 Provider Profile 的上下文窗口与自动压缩覆盖，恢复模型目录与上游默认规则；窗口请在「受管模型目录上下文窗口」中选择具体 Provider 与模型设置。\n");
-    writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
+    output.write("窗口请在「受管模型目录上下文窗口」中选择具体 Provider 与模型设置。\n");
+    writeGatewayConfigActivationNotice(output, environment, activationResult);
     return {
       action: "configured",
       provider: selected.provider,
       model,
       reasoningEffort,
       mode: result.provider.mode,
-      activation: "restart-app-server",
-      activationResult: configActivationResult("restart-app-server"),
+      activation: result.activation,
+      activationResult,
     };
   } catch (error) {
     if (allowBack && error instanceof ModelProviderDefaultSetupCancelled) {

@@ -356,6 +356,7 @@
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录及显式来源关联，保留原模型并复制 Flash 增加 V4.1。模型 ID 与显示名来自根目录 `provider-model-catalog.json`，V4.1 的来源绑定指向 Flash。
   DS、CCG、OCG 的初建及模板更新共用按目标家族区分的来源投影；仅 DS 官方账户关闭 verbosity 与摘要声明，CCG／OCG 保留源声明，不将 DS 官方端点限制套用到其他平台。
 - `managed-provider-files.mjs` / `managed-provider-files.d.mts`：Provider 文件事务必须提供当前运行环境；统一访问器绑定文件归属，快照携带内存中的读取与写入闭包，并发复核、更新及回滚复用同一策略。固定模式先纳入不可变私有凭据再发布主配置，回滚先恢复已有文件，失败保留新增恢复资料并停止后续删除；未纳入快照的更新明确拒绝，不改变持久化备份格式。
+- `managed-provider-account-plan.mjs` / `managed-provider-account-plan.d.mts`：受管账户固定模式与自定义切换注册表的兼容性检查；账户计划快照包含相关配置、注册表及当前固定凭据版本，以私有 HMAC 修订绑定预览，执行时拒绝过期确认，不公开凭据摘要。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。使用用户配置定位主 Socket，源码拆分入口直接运行时也遵守显式配置文件、用户数据目录与默认用户配置的优先级，不回退仓库配置。
 - `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，构建时复用 `runtime/model-catalog.mjs` 收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；调用方取消覆盖请求、正文读取及重试等待，取消后不重试。拒绝响应时释放正文；不导入账户菜单或管理事务。
 - `update-model-templates.mjs`：源码仓库维护入口；默认仅下载 DS 官方目录，用已保存公共底座补全提示词并报告字段差异，保持底座及其来源不变。`--update-base` 显式从锁定 CLI 内置目录按原始顺序提取第一个模型，记录实际模型 ID，用已保存 DS 原始目录重新补全，不下载 DS；两种操作均默认只对比，`--write` 在 Codex 加载校验后才保存所选更新。复用快照须与来源哈希一致；不更新已配置账户，不执行下载脚本，不进入安装包命令入口。操作与边界见[DS 模板维护](../docs/deepseek.md#仓库模板维护)。

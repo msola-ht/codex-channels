@@ -1,4 +1,4 @@
-import { contextWindowPresetTokens, contextWindowPresetLabel, customModelSamplingDefaults, validateModelDefinitions as validateResponsesModels, validateSamplingParameters } from "../runtime/model-catalog.mjs";
+import { contextWindowPresetTokens, contextWindowPresetLabel, customModelSamplingDefaults, validateModelDefinitions as validateResponsesModels, validateSamplingParameters, isValidCustomModelId, withModelContextWindow } from "../runtime/model-catalog.mjs";
 import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
 
 const contextWindowPresets = contextWindowPresetTokens.map(tokens => ({
@@ -20,7 +20,7 @@ const advancedSettingGroups = [
 export async function promptResponsesModels(prompts, defaultModel, previous = [], output = process.stdout, upstreamWireApi = "responses", retainedModels = [], { loadDraftTemplates = loadCustomModelDraftTemplates } = {}) {
   if (!["responses", "chat_completions"].includes(upstreamWireApi)) throw new Error("自定义模型上游接口不受支持");
   if (upstreamWireApi === "chat_completions") output.write("Chat 上游仍可逐项声明所有模型能力；当前转换不传递 verbosity，并拒绝 original 图片精度和非 none 摘要参数，声明不会改变转换规则。\n");
-  const ids = [...(defaultModel === undefined ? [] : [defaultModel]), ...previous.map((entry) => entry.id).filter((id) => id !== defaultModel)];
+  const ids = previous.length > 0 ? previous.map(entry => entry.id) : defaultModel === undefined ? [] : [defaultModel];
   if (ids.length === 0) ids.push(undefined);
   let selectedModels = [];
   if (previous.length > 0) {
@@ -56,10 +56,10 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       output.write(`模板参考：${template.displayName}；上下文 ${suggested.contextWindow} Token；思考 ${suggested.reasoningEfforts?.join("/") || "未声明"}；图片 ${capabilityLabel(suggested.supportsImages)}；apply_patch ${capabilityLabel(suggested.applyPatchToolType === undefined ? undefined : suggested.applyPatchToolType === "freeform")}；tool_search ${capabilityLabel(suggested.supportsSearchTool)}。请按上游平台说明逐项确认，未知暂不启用。\n`);
       const typedId = await prompts.text({
         message: "上游模型 ID（必填，使用平台提供的准确名称）", initialValue: id ?? "",
-        validate: value => validModelId(String(value).trim(), [...previous, ...models]) ? undefined : "请输入 1-200 字符且不重复、无控制字符的模型 ID",
+        validate: value => validModelId(String(value), [...previous, ...models]) ? undefined : "请输入 1-200 字符且不重复、无首尾空白、控制字符、格式字符或代理字符的模型 ID",
       });
       if (prompts.isCancel(typedId)) return undefined;
-      id = String(typedId).trim();
+      id = String(typedId);
       if (!validModelId(id, [...previous, ...models])) throw new Error("自定义模型 ID 无效或重复");
       ids[index] = id;
       model.id = id;
@@ -92,7 +92,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
     if (old === undefined || groups.includes("context")) {
       const context = await promptContextWindow(prompts, id, model.contextWindow, 100_000_000);
       if (context === undefined) return undefined;
-      model.contextWindow = Number(context);
+      model = old === undefined ? { ...model, contextWindow: Number(context) } : withModelContextWindow(model, Number(context));
       if (model.maxContextWindow !== undefined && model.maxContextWindow < context) {
         output.write(`${id} 当前窗口 ${context} Token 超过已保存的最大窗口 ${model.maxContextWindow} Token；请按上游说明明确新的最大窗口。\n`);
         const maximum = await prompts.text({ message: `${id} 新最大上下文窗口（Token，必填）`, initialValue: String(context), validate: value => Number.isSafeInteger(Number(value)) && Number(value) >= context && Number(value) <= 100_000_000 ? undefined : `请输入 ${context}-100000000 的整数` });
@@ -149,7 +149,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
 }
 
 function validModelId(id, models) {
-  return id.length > 0 && id.length <= 200 && !/\p{Cc}/u.test(id) && !models.some(model => model.id === id);
+  return isValidCustomModelId(id) && !models.some(model => model.id === id);
 }
 
 function capabilityLabel(value) { return value === undefined ? "未知" : value ? "支持" : "不支持"; }

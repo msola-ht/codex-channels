@@ -96,6 +96,9 @@ export interface ProviderSettingsController {
 }
 
 export interface AccountSettingsController {
+  actionResult: ManagementSettingMutationResponse | null
+  writeUnconfirmed: boolean
+  readbackRequired: boolean
   settings: ManagementAccountSettingsResponse | null
   loading: boolean
   error: string | null

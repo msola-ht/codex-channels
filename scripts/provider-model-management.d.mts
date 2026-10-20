@@ -39,13 +39,13 @@ export interface ProviderModelContextPreview {
   providers: string[];
   revision: string;
   willChange: boolean;
-  activation: "restart-app-server";
+  activation: "restart-app-server" | "none";
 }
 export function previewProviderModelContextChange(input: ProviderModelContextInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ProviderModelContextPreview>;
 export function applyProviderModelContextChange(input: ProviderModelContextInput, options: {
   environment?: NodeJS.ProcessEnv;
   preview: ProviderModelContextPreview;
-}): Promise<ProviderModelContextPreview & { action: "updated" }>;
+}): Promise<ProviderModelContextPreview & { action: "updated" | "unchanged" }>;
 
 export interface ProviderModelRemovalInput { provider: string; model: string }
 export interface ProviderModelRemovalPreview {

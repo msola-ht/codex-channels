@@ -28,11 +28,13 @@ export function runModelWindowSetup(
 ): Promise<
   | { action: "back" }
   | {
-      action: "configured";
+      action: "configured" | "unchanged";
       provider: string;
       model: string;
       windowPercent: number;
       contextWindow: number;
       providers: string[];
+      activation: "restart-app-server" | "none";
+      activationResult: ReturnType<typeof import("./config-activation-result.mjs").configActivationResult>;
     }
 >;

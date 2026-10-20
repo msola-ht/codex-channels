@@ -302,6 +302,13 @@ export function redactProviderSettingsResult(result) {
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),
     ...(result.effects !== undefined ? { effects: result.effects } : {}),
     ...(result.before !== undefined ? { before: result.before } : {}),
+    ...(result.modelDefaults !== undefined ? { modelDefaults: {
+      catalog: { before: result.modelDefaults.catalog.before, after: result.modelDefaults.catalog.after },
+      selection: {
+        before: { model: result.modelDefaults.selection.before.model, reasoningEffort: result.modelDefaults.selection.before.reasoningEffort },
+        after: { model: result.modelDefaults.selection.after.model, reasoningEffort: result.modelDefaults.selection.after.reasoningEffort },
+      },
+    } } : {}),
     ...(result.transport && typeof result.transport === "object"
       ? {
           transport: {

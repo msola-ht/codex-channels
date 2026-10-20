@@ -10,6 +10,7 @@ export interface ManagedAccountRuntimePlan {
   provider: string;
   primarySocketPath: string;
   running: boolean;
+  registered: boolean;
 }
 export function managedAccountPrimarySocket(environment: NodeJS.ProcessEnv): string;
 export function inspectManagedAccountRuntime(provider: string, options?: ManagedAccountRuntimeOptions): Promise<ManagedAccountRuntimePlan>;

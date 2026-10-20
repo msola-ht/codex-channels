@@ -7,7 +7,7 @@ import { loadDeepseekAccounts, deepseekProviderId, validateDeepseekAccountId } f
 import {
   applyDeepseekAccountConfiguration,
   previewDeepseekAccountConfiguration,
-  removeDeepseekAccount, setDeepseekDefaultAccount,
+  removeDeepseekAccount, previewDeepseekAccountRemoval, setDeepseekDefaultAccount,
 } from "./deepseek-account-management.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
@@ -36,8 +36,9 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
   validateDeepseekAccountId(accountId);
   let result;
   if (action === "remove") {
+    const preview = await previewDeepseekAccountRemoval(accountId, { environment });
     if (await prompts.confirm({ message: `删除 DS 账户 ${accountId}？将停止对应 App Server，历史 Thread 将不可恢复；保留历史统计和安装前备份。`, initialValue: false }) !== true) return { action: "back" };
-    result = await removeDeepseekAccount({ accountId, confirmRemove: true }, { environment });
+    result = await removeDeepseekAccount({ accountId, confirmRemove: true, expectedRevision: preview.revision }, { environment });
   } else if (action === "default") {
     result = await setDeepseekDefaultAccount(accountId, { environment });
   } else if (action === "settings") {
@@ -53,7 +54,7 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
     }
     const apiKey = await prompts.password({ message: "DeepSeek API Key" });
     if (prompts.isCancel(apiKey)) return { action: "back" };
-    result = await applyDeepseekAccountConfiguration({ accountId, apiKey, mode, reconfigure: action === "reconfigure", confirmExclusiveConfigChange }, { environment });
+    result = await applyDeepseekAccountConfiguration({ accountId, apiKey, mode, reconfigure: action === "reconfigure", confirmExclusiveConfigChange, expectedRevision: preview.revision }, { environment });
   } else throw new Error("未知 DeepSeek 账户操作");
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;

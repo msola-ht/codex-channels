@@ -7,6 +7,7 @@ import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { assertProviderModelRequestPolicy } from "../runtime/model-request-policy.mjs";
 import { withCustomBaseTemplate } from "../runtime/model-template-catalog.mjs";
+import { isValidCustomModelId } from "../runtime/model-catalog.mjs";
 import { createResponsesModelCatalog, compileResponsesModelCatalog, isCustomCatalogProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath, customProviderUpstreamWireApis, readCustomProviderUpstreamWireApi, removeCustomProviderUpstreamMetadata, writeCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { isDeepStrictEqual } from "node:util";
@@ -175,6 +176,7 @@ export async function applyCustomProviderModelsSave(input, options = {}) {
 function modelOnlyPreview(input, plan) {
   return {
     ...publicSavePreview(input, plan), operation: "model.custom.save",
+    modelDefaults: plan.modelDefaults,
     // Includes credentials without disclosing a reusable digest of a stored secret.
     revision: createHmac("sha256", probeConnectionSecret).update(JSON.stringify(plan)).digest("hex"),
   };
@@ -222,16 +224,21 @@ async function buildModelOnlySavePlan(input, options) {
   plan.modelOnlyFixedProvider = switching ? undefined : fixed;
   plan.credential = undefined;
   plan.preserveDefaults = options.preserveDefaults === true;
+  const selection = switching ? parse(switching.profileContent) : config;
+  plan.sourceState.modelDefaults = { model: selection.model, model_reasoning_effort: selection.model_reasoning_effort };
   if (plan.preserveDefaults) {
     if (input.model !== previous.defaultModel) throw invalid("invalid-input", "model", "工具能力保存不能改变目录默认模型");
-    const selection = switching ? parse(switching.profileContent) : config;
-    plan.sourceState.modelDefaults = { model: selection.model, model_reasoning_effort: selection.model_reasoning_effort };
     plan.effects = { ...plan.effects, removesTopLevelBaseUrl: false, convertsSwitchingProfile: false, consumesBackupCandidate: false };
   }
   plan.edits = switching || plan.preserveDefaults ? [] : [
     { keyPath: "model", value: plan.provider.model },
     { keyPath: "model_reasoning_effort", value: plan.reasoningEffort },
   ];
+  plan.catalogWillChange = JSON.stringify(compileResponsesModelCatalog(previous.definitions, previous.defaultModel)) !== plan.validatedCatalog;
+  const before = { model: selection.model ?? null, reasoningEffort: selection.model_reasoning_effort ?? null };
+  const after = plan.preserveDefaults ? { ...before } : { model: plan.provider.model, reasoningEffort: plan.reasoningEffort };
+  plan.modelDefaults = { catalog: { before: previous.defaultModel, after: input.model }, selection: { before, after } };
+  plan.willChange = plan.catalogWillChange || !isDeepStrictEqual(before, after);
   return { saveInput, plan };
 }
 
@@ -253,7 +260,8 @@ function publicSavePreview(input, plan) {
     revision: savePlanRevision(plan),
     provider: plan.provider,
     transport: { scheme: cleartext ? "http" : "https", cleartext },
-    activation: "restart-all",
+    willChange: plan.willChange ?? true,
+    activation: plan.willChange === false ? "none" : "restart-all",
     effects: plan.effects,
     credential: {
       action: input.credential.action,
@@ -293,9 +301,12 @@ function savePlanRevision(plan) {
 }
 
 async function applySavePlan(input, plan, options) {
-  if (plan.models === undefined || plan.connectionOnly) {
+  if (plan.willChange === false) {
+    return { action: "unchanged", provider: plan.provider, activation: "none", effects: plan.effects, warnings: [] };
+  }
+  if (plan.models === undefined || plan.connectionOnly || plan.modelOnly && !plan.catalogWillChange) {
     const environment = options.environment ?? process.env;
-    const recovery = plan.connectionOnly ? writeProviderRecoveryBackup(plan, environment) : undefined;
+    const recovery = plan.connectionOnly || plan.modelOnly ? writeProviderRecoveryBackup(plan, environment) : undefined;
     try {
       const result = await applyConnectionSavePlan(input, plan, options);
       await confirmProviderSave(plan, options);
@@ -307,7 +318,7 @@ async function applySavePlan(input, plan, options) {
       try { unchanged = recovery.files.every(({ path, content }) => (existsSync(path) ? read(path) : null) === content); }
       catch { /* Unreadable state cannot establish that the write was rolled back. */ }
       if (unchanged) throw error;
-      throw invalid("save-unconfirmed", "operation", "连接保存结果无法确认；已保留配置与 Profile 备份，请核对后恢复，勿自动重试", error);
+      throw invalid("save-unconfirmed", "operation", "提供商保存结果无法确认；已保留配置与 Profile 备份，请核对后恢复，勿自动重试", error);
     }
   }
   const environment = options.environment ?? process.env;
@@ -588,6 +599,16 @@ async function buildSavePlan(input, options, { requireConfirmation, connectionOn
   if (custom && input.operation === "create" && existsSync(responsesProviderCatalogPath(environment, providerId))) throw invalid("provider-exists", "providerId", "该 Provider 已有模型目录，请先恢复或删除已有配置");
   const model = requiredString(input.model, "model", "模型 ID 不能为空");
   const existingIds = new Set(previousCatalog?.definitions.map(entry => entry.id));
+  if (custom && Array.isArray(input.catalog.models) && input.catalog.models.some(entry => !existingIds.has(entry?.id) && !isValidCustomModelId(entry?.id))) {
+    throw invalid("invalid-catalog", "catalog", "新增模型 ID 必须为 1-200 字符且无首尾空白、控制字符、格式字符或代理字符");
+  }
+  if (previousCatalog && Array.isArray(input.catalog.models) && input.catalog.models.some(entry => !isValidCustomModelId(entry.id)
+    && !isDeepStrictEqual(entry, previousCatalog.definitions.find(previous => previous.id === entry.id)))) {
+    throw invalid("invalid-catalog", "catalog", "包含格式字符或代理字符的已有模型仅能保留原值或通过独立移除入口删除");
+  }
+  if (custom && !connectionOnly && !isValidCustomModelId(model) && model !== previousCatalog?.defaultModel) {
+    throw invalid("invalid-catalog", "model", "默认模型 ID 不能包含控制字符、格式字符或代理字符");
+  }
   // Saved models are snapshots. Only new models receive missing base prompts.
   const models = custom ? validateResponsesModels(input.catalog.models, model).map(entry => existingIds.has(entry.id)
     ? entry : createResponsesModelCatalog([withCustomBaseTemplate(entry)], entry.id).definitions[0]) : undefined;
@@ -718,7 +739,9 @@ async function buildSavePlan(input, options, { requireConfirmation, connectionOn
     }
   }
   const catalog = models ? compileResponsesModelCatalog(models, model) : undefined;
-  if (catalog && !connectionOnly) await validateModelCatalogWithCodex(catalog, environment);
+  if (catalog && !connectionOnly && JSON.stringify(catalog) !== (previousCatalog && JSON.stringify(compileResponsesModelCatalog(previousCatalog.definitions, previousCatalog.defaultModel)))) {
+    await validateModelCatalogWithCodex(catalog, environment);
+  }
   const provider = {
     id: providerId,
     displayName,

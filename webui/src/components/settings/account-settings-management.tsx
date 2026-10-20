@@ -10,7 +10,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectItem } from "@/components/ui/select"
 import { DataTable, TruncatedText, type DataTableColumn } from "@/components/metrics/data-table"
-import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
+import { ManagedSelect, ManagementConfirmationDialog, SettingsMutationFeedback } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { AccountSettingsController } from "@/lib/settings-management"
 
@@ -36,7 +36,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   const [mode, setMode] = useState<"switching" | "exclusive">("switching")
   const [key, setKey] = useState("")
   const pending = management.pendingPreview
-  const disabled = management.busy || management.loading || management.error !== null || pending !== null
+  const disabled = management.busy || management.loading || management.error !== null || management.readbackRequired || pending !== null
   const rows: AccountRow[] = [
     ...settings.opencodeGo.accounts.map(account => ({ id: account.id, platform: "opencodeGo" as const, name: account.displayName, contact: account.email ?? account.phone ?? "", model: "", mode: account.mode ?? "switching" as const, default: account.default })),
     ...settings.deepseek.accounts.map(account => ({ id: account.id, platform: "deepseek" as const, name: account.id, contact: "", model: account.model ?? "", mode: account.mode ?? "switching" as const, default: account.default })),
@@ -77,6 +77,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
     </div> },
   ]
   return <>
+    <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
     <div className="flex flex-wrap items-center gap-2">
       <Select items={[{ value: "all", label: t("modelManagement.allPlatforms") }, ...Object.entries(platforms).map(([value, label]) => ({ value, label }))]} value={filter} onValueChange={value => { if (value !== null) setFilter(value) }}><SelectTrigger aria-label={t("modelManagement.platform")}><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t("modelManagement.allPlatforms")}</SelectItem>{Object.entries(platforms).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectGroup></SelectContent></Select>
       {(Object.keys(platforms) as Platform[]).map(platform => <Button key={platform} variant="outline" disabled={disabled} onClick={() => open(platform)}>{t("modelManagement.addAccount", { platform: platforms[platform] })}</Button>)}
@@ -136,6 +137,6 @@ export function AccountSettingsConfirmationDialog({
     {removing ? <p>{t("accountConfirmation.historyWarning")}</p> : null}
     {pending.input.operation === "opencode.account.remove" ? <p>{t("accountConfirmation.subscriptionWarning")}</p> : null}
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
-    <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: preview.activation ?? t("accountConfirmation.activationFallback") })}</p>
+    <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: preview.activation === "none" ? t(preview.willChange === false ? "settingsUi.unchanged" : "settingsUi.noActivationRequired") : preview.activation === "restart-all" ? t("settingsUi.restartAll") : preview.activation ?? t("accountConfirmation.activationFallback") })}</p>
   </ManagementConfirmationDialog>
 }

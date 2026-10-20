@@ -592,6 +592,14 @@ function ProviderSettingsConfirmationDialog({
   const lines = localRemoval ? [] : [pending.operation === "model.custom.save" ? t("modelCatalog.editOperation") : rename ? t("modelCatalog.rename") : contextChange ? t("modelCatalog.contextOperation") : t("accountConfirmation.operation", { value: pending.operation })]
   if (!localRemoval && pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: typeof pending.provider === "string" ? pending.provider : pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
   if (providerDetails?.model !== undefined) lines.push(t("managementUi.defaultModelConfirm", { value: providerDetails.model }))
+  if (pending.modelDefaults !== undefined) {
+    const { catalog, selection } = pending.modelDefaults
+    const value = (entry: string | null) => entry ?? t("customModel.unset")
+    lines.push(t("managementUi.catalogDefaultChange", { before: catalog.before, after: catalog.after }))
+    lines.push(t("managementUi.providerDefaultChange", { before: value(selection.before.model), after: value(selection.after.model) }))
+    lines.push(t("managementUi.providerReasoningChange", { before: value(selection.before.reasoningEffort), after: value(selection.after.reasoningEffort) }))
+  }
+  if (pending.willChange === false) lines.push(t("settingsUi.unchanged"))
   if (providerDetails?.baseUrl !== undefined) lines.push(t("managementUi.baseUrlConfirm", { value: providerDetails.baseUrl }))
   if (providerDetails?.mode !== undefined) lines.push(t("managementUi.modeConfirm", { value: t(providerDetails.mode === "switching" ? "modelManagement.switching" : "modelManagement.exclusive") }))
   if (providerDetails?.supportsWebsockets !== undefined) lines.push(t("managementUi.websocketsConfirm", { value: t(providerDetails.supportsWebsockets ? "managementUi.supported" : "managementUi.unsupported") }))
@@ -616,7 +624,7 @@ function ProviderSettingsConfirmationDialog({
     lines.push(t("managementUi.defaultAccountScope", { providers: scope("defaultModelProviders") }))
     lines.push(t("managementUi.sharedReasoningScope", { providers: scope("reasoningEffortProviders") }))
     if (pending.before) lines.push(t("managementUi.defaultBefore", { model: pending.before.defaultModel, reasoning: pending.before.reasoningEffort }))
-    lines.push(t("managementUi.defaultOverrideCleanup"))
+    if (pending.willChange) lines.push(t("managementUi.defaultOverrideCleanup"))
   }
   if (pending.contextWindow !== undefined) lines.push(t("managementUi.windowTokensConfirm", { tokens: pending.contextWindow }))
   else if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
@@ -650,7 +658,7 @@ function ProviderSettingsConfirmationDialog({
       </div>
     </div> : <p className="whitespace-pre-line">{lines.join("\n")}</p>}
     {providerDetails?.models?.map(entry => <CustomModelDetailsPreview key={entry.id} entry={entry} />)}
-    {!localRemoval ? <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: (contextChange || rename) && pending.activation === "restart-app-server" ? t("settingsUi.restartAppServer") : pending.activation })}</p> : null}
+    {!localRemoval ? <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: pending.activation === "none" ? t("settingsUi.unchanged") : pending.activation === "restart-app-server" ? t("settingsUi.restartAppServer") : pending.activation === "restart-all" ? t("settingsUi.restartAll") : pending.activation })}</p> : null}
     {(contextChange || rename) && pending.activation === "restart-app-server" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart appserver" })}</p> : null}
     {!localRemoval && pending.activation === "restart-all" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart all" })}</p> : null}
   </ManagementConfirmationDialog>

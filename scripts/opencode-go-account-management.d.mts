@@ -11,12 +11,13 @@ export class OpenCodeGoAccountManagementError extends Error {
 }
 
 export interface OpenCodeGoDefaultAccountPreview {
+  revision: string;
   operation: "set-default";
   account: { id: string; default: true; email?: string; phone?: string };
   currentDefaultAccountId: string | null;
   updatesExternalAgent: boolean;
   willChange: boolean;
-  activation: "restart-all";
+  activation: "restart-all" | "none";
 }
 
 export interface OpenCodeGoAccountStopPreview {
@@ -28,6 +29,7 @@ export interface OpenCodeGoAccountStopPreview {
 }
 
 export interface OpenCodeGoAccountRemovalPreview {
+  revision: string;
   operation: "remove";
   account: { id: string; provider: string; default: boolean; email?: string; phone?: string };
   effects: {
@@ -60,12 +62,13 @@ export function previewOpencodeGoDefaultAccountChange(
 export function applyOpencodeGoDefaultAccountChange(
   accountId: string,
   options?: AccountManagementOptions & {
+    expectedRevision?: string;
     writeAccounts?: (
       environment: NodeJS.ProcessEnv,
       accounts: Array<{ id: string; default: boolean; email?: string; phone?: string }>,
     ) => void;
   },
-): Promise<{ action: "default-set" } & OpenCodeGoDefaultAccountPreview>;
+): Promise<{ action: "default-set" | "unchanged" } & OpenCodeGoDefaultAccountPreview>;
 
 interface StopOptions extends AccountManagementOptions {
   resolvePrimarySocket?: (environment: NodeJS.ProcessEnv) => string;
@@ -110,6 +113,7 @@ export function applyOpencodeGoAccountRemoval(
   input: {
     accountId: string;
     confirmHistoryLoss?: boolean;
+    expectedRevision?: string;
   },
   options?: RemovalOptions & {
     writeAccounts?: (

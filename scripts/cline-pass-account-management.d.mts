@@ -6,6 +6,7 @@ export interface ClinePassConfigurationInput {
   reconfigure?: boolean;
   mode?: "switching" | "exclusive";
   confirmExclusiveConfigChange?: boolean;
+  expectedRevision?: string;
 }
 export interface ClinePassConfigurationOptions {
   environment?: NodeJS.ProcessEnv;
@@ -21,9 +22,9 @@ export interface ClinePassConfigurationOptions {
 export function clinePassSetupPaths(environment: NodeJS.ProcessEnv, accountId: string): Record<"config" | "profile" | "marker" | "catalog" | "manifest" | "backup" | "registry", string>;
 export function createClinePassCatalog(templates: ResponsesModelDefinition[], source: import("../runtime/cline-relay-catalog.mjs").ClineRelayCatalog, enabledModels?: string[]): { models: Array<Record<string, unknown>> };
 export function projectClinePassModels(source: import("../runtime/cline-relay-catalog.mjs").ClineRelayCatalog, options?: { requireModels?: boolean }): { models: ResponsesModelDefinition[]; excludedModels: Array<{ model: string; reason: string }> };
-export function previewClinePassConfiguration(input: ClinePassConfigurationInput, options?: ClinePassConfigurationOptions): { operation: string; account: { id: string; provider: string; default: boolean }; mode: string; effects: { writesMainConfig: boolean; writesIsolatedProfile: boolean }; activation: string };
+export function previewClinePassConfiguration(input: ClinePassConfigurationInput, options?: ClinePassConfigurationOptions): { revision: string; operation: string; account: { id: string; provider: string; default: boolean }; mode: string; effects: { writesMainConfig: boolean; writesIsolatedProfile: boolean }; activation: string };
 export function applyClinePassConfiguration(input: ClinePassConfigurationInput, options?: ClinePassConfigurationOptions): Promise<ReturnType<typeof previewClinePassConfiguration> & { action: string; excludedModels: Array<{ model: string; reason: string }> }>;
-export function previewClinePassRemoval(accountId: string, options?: ManagedAccountRuntimeOptions): Promise<{ operation: string; account: { id: string; provider: string }; activation: string }>;
-export function removeClinePassConfiguration(input: { accountId: string; confirmRemove?: boolean }, options?: ManagedAccountRuntimeOptions): Promise<{ action: string; activation: string }>;
-export function previewClinePassDefaultAccount(accountId: string, options?: { environment?: NodeJS.ProcessEnv }): { operation: string; account: { id: string; provider: string; default: boolean }; activation: string };
-export function setClinePassDefaultAccount(accountId: string, options?: { environment?: NodeJS.ProcessEnv }): Promise<ReturnType<typeof previewClinePassDefaultAccount> & { action: string }>;
+export function previewClinePassRemoval(accountId: string, options?: ManagedAccountRuntimeOptions): Promise<{ revision: string; operation: string; account: { id: string; provider: string }; activation: string }>;
+export function removeClinePassConfiguration(input: { accountId: string; confirmRemove?: boolean; expectedRevision?: string }, options?: ManagedAccountRuntimeOptions): Promise<{ action: string; activation: string }>;
+export function previewClinePassDefaultAccount(accountId: string, options?: { environment?: NodeJS.ProcessEnv }): { revision: string; operation: string; account: { id: string; provider: string; default: boolean }; willChange: boolean; activation: "none" | "restart-all" };
+export function setClinePassDefaultAccount(accountId: string, options?: { environment?: NodeJS.ProcessEnv; expectedRevision?: string }): Promise<ReturnType<typeof previewClinePassDefaultAccount> & { action: string }>;

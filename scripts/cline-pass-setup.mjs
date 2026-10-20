@@ -34,9 +34,9 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
   if (prompts.isCancel(accountId)) return { action: "back" };
   let result;
   if (action === "remove") {
-    await previewClinePassRemoval(accountId, { environment });
+    const preview = await previewClinePassRemoval(accountId, { environment });
     if (await prompts.confirm({ message: "移除账户配置与 Key 后，该账户历史会话将不可用；保留备份和历史统计，是否继续？", initialValue: false }) !== true) return { action: "back" };
-    result = await removeClinePassConfiguration({ accountId, confirmRemove: true }, { environment });
+    result = await removeClinePassConfiguration({ accountId, confirmRemove: true, expectedRevision: preview.revision }, { environment });
   } else if (action === "default") {
     result = await setClinePassDefaultAccount(accountId, { environment });
   } else {
@@ -51,7 +51,7 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
       confirmExclusiveConfigChange = await prompts.confirm({ message: "此操作会修改或恢复 Codex 主配置，是否继续？", initialValue: false }) === true;
       if (!confirmExclusiveConfigChange) return { action: "back" };
     }
-    result = await applyClinePassConfiguration({ ...input, confirmExclusiveConfigChange }, { environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
+    result = await applyClinePassConfiguration({ ...input, confirmExclusiveConfigChange, expectedRevision: preview.revision }, { environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
     if (result.action === "back") return result;
   }
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));

@@ -7,7 +7,7 @@ import { connectHomePath, providerStorageRoot } from "./connect-home.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 import { assertProviderCatalogIsolationComplete } from "./provider-catalog-isolation.mjs";
 
-import { compileModelDefinitions, validateModelDefinitions as validateResponsesModels } from "./model-catalog.mjs";
+import { compileModelDefinitions, validateModelDefinitions as validateResponsesModels, withModelContextWindow } from "./model-catalog.mjs";
 import { completeDefinitionPrompts } from "./model-template-catalog.mjs";
 export { validateModelDefinitions as validateResponsesModels } from "./model-catalog.mjs";
 
@@ -96,12 +96,7 @@ export function writeResponsesModelContextWindow(environment, id, model, context
   if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > compiled.max_context_window) {
     throw new Error(`模型上下文窗口必须是 1024-${compiled.max_context_window} 的整数`);
   }
-  const definitions = previous.definitions.map(entry => entry.id !== model ? entry : {
-    ...entry, contextWindow,
-    // Materialize implicit defaults so narrowing the window preserves their meaning.
-    ...(entry.maxContextWindow === undefined ? { maxContextWindow: compiled.max_context_window } : {}),
-    ...(entry.truncationPolicy === undefined ? { truncationPolicy: compiled.truncation_policy } : {}),
-  });
+  const definitions = previous.definitions.map(entry => entry.id !== model ? entry : withModelContextWindow(entry, contextWindow));
   return writeResponsesModelCatalog(environment, id, definitions, previous.defaultModel, expectedRevision);
 }
 

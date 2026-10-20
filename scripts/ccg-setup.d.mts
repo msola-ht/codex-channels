@@ -16,6 +16,7 @@ export function applyCcgConfiguration(input: {
   mode?: "switching" | "exclusive";
   reconfigure?: boolean;
   confirmExclusiveConfigChange?: boolean;
+  expectedRevision?: string;
 }, options?: {
   environment?: NodeJS.ProcessEnv;
 }): Promise<{
@@ -27,8 +28,8 @@ export function applyCcgConfiguration(input: {
 }>;
 export function setCcgDefaultAccount(accountId: string, options?: {
   environment?: NodeJS.ProcessEnv;
-}): Promise<{ action: "default-set"; accountId: string; activation: "restart-all" }>;
-export function removeCcgConfiguration(input: { accountId: string; confirmRemove?: boolean }, options?: ManagedAccountRuntimeOptions): Promise<{ action: "removed"; accountId: string; runtime: "stopped" | "not-running"; activation: "restart-all" }>;
+}): Promise<{ action: "default-set"; accountId: string; activation: "restart-all" } | { action: "unchanged"; accountId: string; activation: "none" }>;
+export function removeCcgConfiguration(input: { accountId: string; confirmRemove?: boolean; expectedRevision?: string }, options?: ManagedAccountRuntimeOptions): Promise<{ action: "removed"; accountId: string; runtime: "stopped" | "not-running"; activation: "restart-all" }>;
 export function runCcgSetup(options?: {
   environment?: NodeJS.ProcessEnv;
   output?: { write(value: string): unknown };
