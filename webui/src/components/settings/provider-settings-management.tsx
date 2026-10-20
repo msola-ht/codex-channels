@@ -358,7 +358,7 @@ function ProviderSettingsCard({
     <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
   </>
 
-  return <>{section === "providers" && <ProviderWebSearchSettings settings={settings} management={management} />}{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}{webSearchTarget && <ProviderWebSearchProbeDialog target={webSearchTarget} stale={webSearchStale} disabled={busy || pending !== null} finalFocus={actionTriggerRef} onClose={() => setWebSearchTarget(null)} />}<Card>
+  return <>{section === "providers" && <><ProviderWebSearchSettings settings={settings} management={management} />{feedback}</>}{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}{webSearchTarget && <ProviderWebSearchProbeDialog target={webSearchTarget} stale={webSearchStale} disabled={busy || pending !== null} finalFocus={actionTriggerRef} onClose={() => setWebSearchTarget(null)} />}<Card>
     <CardHeader>
       <CardTitle>{section === "providers" ? t("managementUi.customProviders") : t("managementUi.managedDefaults")}</CardTitle>
       <CardDescription>{section === "providers" ? t("managementUi.customProvidersHint") : t("managementUi.managedDefaultsDetail")}</CardDescription>
@@ -471,7 +471,6 @@ function ProviderSettingsCard({
         if (!["model.template.update", "model.context", "model.remove"].includes(pending.preview.operation)) return true
         return preview === null ? (pending.preview.operation === "model.template.update" ? templateTriggerRef.current : actionTriggerRef.current) ?? true : preview.disabled ? false : preview
       }} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
-      {section !== "models" && feedback}
     </CardContent>
   </Card>
     <Dialog open={contextDraft !== null && pending === null} disablePointerDismissal onOpenChange={(open, details) => { if (management.busy) { details.cancel(); return }; if (!open) setContextDraft(null) }}>

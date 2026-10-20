@@ -171,7 +171,7 @@ export class ChatCompletionsBridge {
       await validateDirectModelResponse(incoming, true, { value: value => {
           diagnostics.push(value);
           if (chatStreamError(value)) observeFirstResponse(performance.now());
-        }, invalid: () => {} }, controller.signal);
+        }, invalid: () => {} }, controller.signal, outbound.tools);
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       const converter = new ChatToResponses(`resp_${randomUUID()}`, body.model, toolNames);
       const emit = async (events: Record<string, unknown>[]): Promise<void> => {
@@ -195,7 +195,7 @@ export class ChatCompletionsBridge {
         if (data === "[DONE]") { done = true; break; }
         const chunk: unknown = parseDirectModelJson(data);
         diagnostics.push(chunk);
-        const upstreamError = chatStreamError(chunk);
+        const upstreamError = chatStreamError(chunk, outbound.tools);
         if (upstreamError) { observeFirstResponse(receivedAt); throw upstreamError; }
         const events = converter.push(chunk);
         observeFirstResponse(receivedAt);

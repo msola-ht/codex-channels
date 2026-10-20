@@ -1394,7 +1394,7 @@ const zh = {
     viewDetail: "查看",
     historyUpdatesPaused: "浏览历史页时暂停自动更新",
     "noTrafficReason": "没有转储关联，原因未记录；不能据此判断当时是否开启采集。已有转储也可能因保留期限或手动清理而不可用。",
-    "relayReasons": {"disconnected": "客户端连接已断开", "revoked": "请求因撤销或关闭被取消", "timeout": "请求或上游响应超时", "rateLimited": "上游限流", "invalidResponse": "上游响应格式不符合协议", "authentication": "上游认证失败", "payment": "上游额度不足", "permission": "上游权限不足", "context": "输入超过上下文限制", "filtered": "上游内容过滤", "rejected": "上游拒绝请求", "upstreamFailed": "上游调用失败", "requestFailed": "请求失败，原因未细分", "deliveryFailed": "响应交付失败", "incomplete": "上游生成未完整结束", "unknown": "现有记录不足以确定请求结果或原因"},
+    "relayReasons": {"webSearch": "原生网页搜索不受支持；请关闭请求中的 web_search。Codex 用户可将“提供商联网搜索”设为 disabled，并检查是否跟随全局。", "disconnected": "客户端连接已断开", "revoked": "请求因撤销或关闭被取消", "timeout": "请求或上游响应超时", "rateLimited": "上游限流", "invalidResponse": "上游响应格式不符合协议", "authentication": "上游认证失败", "payment": "上游额度不足", "permission": "上游权限不足", "context": "输入超过上下文限制", "filtered": "上游内容过滤", "rejected": "上游拒绝请求", "upstreamFailed": "上游调用失败", "requestFailed": "请求失败，原因未细分", "deliveryFailed": "响应交付失败", "incomplete": "上游生成未完整结束", "unknown": "现有记录不足以确定请求结果或原因"},
     "title": "请求明细",
     "export": "导出全部匹配请求（JSON）",
     "exporting": "正在导出…",
@@ -1599,6 +1599,7 @@ const zh = {
     },
     "deliveryIncomplete": "生成已完成，交付未完成",
     "failureReasons": {
+      "webSearch": "原生网页搜索不受支持；请关闭请求中的 web_search。Codex 用户可将“提供商联网搜索”设为 disabled，并检查是否跟随全局。",
       "invalidResponse": "上游响应的编码、媒体类型或正文结构不符合协议，无法继续处理。",
       "disconnected": "客户端连接已断开，响应交付中断。",
       "delivery": "响应交付失败，不能确认响应完整送达。",
@@ -3081,7 +3082,7 @@ const en: Messages = {
     viewDetail: "View",
     historyUpdatesPaused: "Automatic updates paused on history pages",
     "noTrafficReason": "No dump reference; the reason was not recorded. This does not indicate whether capture was enabled then. Existing dumps may also become unavailable through retention or manual cleanup.",
-    "relayReasons": {"disconnected": "Client disconnected", "revoked": "Cancelled by revocation or shutdown", "timeout": "Request or upstream timed out", "rateLimited": "Upstream rate limited", "invalidResponse": "Invalid upstream response format", "authentication": "Upstream authentication failed", "payment": "Upstream quota exhausted", "permission": "Upstream permission denied", "context": "Context limit exceeded", "filtered": "Upstream content filter", "rejected": "Upstream rejected the request", "upstreamFailed": "Upstream call failed", "requestFailed": "Request failed; reason not classified", "deliveryFailed": "Response delivery failed", "incomplete": "Upstream generation ended incomplete", "unknown": "The recorded information does not establish the request outcome or cause"},
+    "relayReasons": {"webSearch": "Native web search is unsupported. Remove web_search from the request. Codex users can set Provider web search to disabled and check whether it follows global settings.", "disconnected": "Client disconnected", "revoked": "Cancelled by revocation or shutdown", "timeout": "Request or upstream timed out", "rateLimited": "Upstream rate limited", "invalidResponse": "Invalid upstream response format", "authentication": "Upstream authentication failed", "payment": "Upstream quota exhausted", "permission": "Upstream permission denied", "context": "Context limit exceeded", "filtered": "Upstream content filter", "rejected": "Upstream rejected the request", "upstreamFailed": "Upstream call failed", "requestFailed": "Request failed; reason not classified", "deliveryFailed": "Response delivery failed", "incomplete": "Upstream generation ended incomplete", "unknown": "The recorded information does not establish the request outcome or cause"},
     "title": "Request details",
     "export": "Export all matching requests (JSON)",
     "exporting": "Exporting…",
@@ -3286,6 +3287,7 @@ const en: Messages = {
     },
     "deliveryIncomplete": "Generation completed; delivery incomplete",
     "failureReasons": {
+      "webSearch": "Native web search is unsupported. Remove web_search from the request. Codex users can set Provider web search to disabled and check whether it follows global settings.",
       "invalidResponse": "The upstream response encoding, media type, or body structure does not match the protocol and cannot be processed.",
       "disconnected": "The client disconnected and response delivery was interrupted.",
       "delivery": "Response delivery failed. Complete delivery is not confirmed.",

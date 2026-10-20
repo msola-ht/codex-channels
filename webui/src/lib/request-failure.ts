@@ -7,6 +7,7 @@ const codeReasons = {
   upstream_timeout: "timeout", request_timeout: "timeout", upload_timeout: "timeout",
   preparation_timeout: "timeout", delivery_timeout: "timeout",
   invalid_request_error: "invalid", not_found: "notFound",
+  web_search_unsupported: "webSearch",
   invalid_upstream_encoding: "invalidResponse", invalid_upstream_content_type: "invalidResponse",
   invalid_upstream_json: "invalidResponse", invalid_upstream_envelope: "invalidResponse", invalid_upstream_response: "invalidResponse",
   invalid_upstream_metadata: "invalidResponse", invalid_upstream_choices: "invalidResponse", invalid_upstream_message: "invalidResponse",
@@ -22,6 +23,7 @@ const httpReasons = {
 /** Only controlled codes and actual HTTP status are classification evidence; raw upstream text is not. */
 export function requestFailureReason(codes: readonly unknown[], httpStatus?: number | null) {
   for (const code of codes) {
+    if (code === "web_search_unsupported" && httpStatus != null && httpStatus !== 200 && httpStatus !== 400) continue
     if (typeof code === "string" && Object.hasOwn(codeReasons, code)) return codeReasons[code as keyof typeof codeReasons]
   }
   if (typeof httpStatus === "number" && Object.hasOwn(httpReasons, httpStatus)) return httpReasons[httpStatus as keyof typeof httpReasons]
@@ -34,6 +36,7 @@ export const failureLabelKeys = {
   rateLimit: "rateLimited", authentication: "authentication", permission: "permission", payment: "payment",
   context: "context", content: "filtered", server: "upstreamFailed", upstream: "upstreamFailed", timeout: "timeout",
   invalid: "rejected", notFound: "rejected", invalidResponse: "invalidResponse",
+  webSearch: "webSearch",
   disconnected: "disconnected", delivery: "deliveryFailed", revoked: "revoked",
 } as const
 
@@ -46,6 +49,8 @@ export function recordedRequestFailure(record: Pick<RequestRecord, "source" | "s
   if (["upload_timeout", "preparation_timeout", "upstream_timeout", "delivery_timeout", "client_delivery_error", "client_disconnected"].includes(record.errorType ?? "")) {
     return requestFailureReason([record.errorType])
   }
+  // A confirmed input-error subtype refines 400, but cannot override auth/rate-limit failures.
+  if (record.errorCode === "web_search_unsupported" && (record.httpStatus == null || record.httpStatus === 200 || record.httpStatus === 400)) return "webSearch"
   const httpReason = requestFailureReason([], record.httpStatus)
   if (httpReason) return httpReason
   return requestFailureReason([record.errorCode === "client_disconnected" ? undefined : record.errorCode, record.errorType], record.httpStatus)

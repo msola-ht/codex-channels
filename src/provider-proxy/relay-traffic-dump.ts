@@ -120,6 +120,7 @@ export class RelayTrafficDump {
       const id = storage.nextInteractionId(session);
       const reference = storage.reference(session, id);
       let requestSaved = false;
+      let requestTools: { type: unknown }[] | undefined;
       let status: number | undefined;
       let responseHeaders: Record<string, unknown> = {};
       let complete = false;
@@ -152,6 +153,9 @@ export class RelayTrafficDump {
         } : {}),
         submitted: (request, headers, path) => safe(() => {
           submittedAt = performance.now(); streaming = request.stream;
+          requestTools = Array.isArray(request.tools) ? request.tools.map((tool: unknown) => ({
+            type: tool !== null && typeof tool === "object" && "type" in tool ? tool.type : undefined,
+          })) : undefined;
           if (debug && inboundHead) {
             const content = new RelayDumpPayload(storage, session, MiB / 2); content.value(inboundBody, false);
             inbound = { headers: inboundHead.headers, headersTruncated: inboundHead.truncated, payload: content.finish() };
@@ -173,7 +177,7 @@ export class RelayTrafficDump {
           const envelope = value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
           diagnostics.push(!stream && envelope?.success === true && !Object.hasOwn(envelope, "choices") ? envelope.data : value);
           if (protocol === "chat") {
-            const error = status !== undefined && status !== 200 ? chatUpstreamError(envelope?.error, status) : chatStreamError(value);
+            const error = status !== undefined && status !== 200 ? chatUpstreamError(envelope?.error, status, requestTools) : chatStreamError(value, requestTools);
             if (error) diagnostics.error(error.code, stream ? "stream" : "http", error.retryable);
           }
         }),

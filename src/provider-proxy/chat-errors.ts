@@ -52,8 +52,31 @@ const httpErrors: Record<number, readonly [string, string, boolean]> = {
   504: ["upstream_timeout", "上游响应超时，请稍后重试。", true],
 };
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-export function chatUpstreamError(value: unknown, status?: number): ChatUpstreamError {
+/** Classify only a rejected type at the exact outbound tool index, never arbitrary error prose. */
+function rejectedWebSearch(value: unknown, tools: unknown): boolean {
+  let error = object(value);
+  if (error.code === "stream_initialization_failed" && typeof error.message === "string") {
+    if (Buffer.byteLength(error.message) > 64 * 1024 || !error.message.startsWith("Failed to create stream:")) return false;
+    const marker = "request failed with status 400: ";
+    const start = error.message.indexOf(marker);
+    if (start < 0) return false;
+    try { error = object(object(JSON.parse(error.message.slice(start + marker.length))).error); }
+    catch { return false; }
+  }
+  if (error.code !== "invalid_request_error" || error.type !== "invalid_request_error"
+    || typeof error.param !== "string" || typeof error.message !== "string" || error.message.length > 4096
+    || !/^Invalid discriminator value\. Expected '[A-Za-z0-9_:.-]+'(?: \| '[A-Za-z0-9_:.-]+')*$/u.test(error.message)
+    || error.message.includes("'web_search'")) return false;
+  const match = /^tools\.(0|[1-9]\d{0,5})\.type$/u.exec(error.param);
+  return match !== null && Array.isArray(tools) && object(tools[Number(match[1])]).type === "web_search";
+}
+
+export function chatUpstreamError(value: unknown, status?: number, tools?: unknown): ChatUpstreamError {
   const code = object(value).code;
+  if ((status === undefined || status === 400) && rejectedWebSearch(value, tools)) {
+    return new ChatUpstreamError("web_search_unsupported",
+      "当前模型上游不接受原生网页搜索（web_search）工具声明，请关闭当前请求的原生网页搜索。Codex 用户可在 WebUI“模型管理 → 提供商 → 提供商联网搜索”设为 disabled；未单独开启时也可能跟随全局。保存后按页面提示应用，再重试。", false, undefined, status);
+  }
   if (status !== undefined) {
     // HTTP determines authentication, availability and retryability. Only refine
     // 400 with compatible, non-retryable input errors from the bounded body.
@@ -74,19 +97,19 @@ export function chatUpstreamError(value: unknown, status?: number): ChatUpstream
   const info = numeric === undefined ? undefined : httpErrors[numeric];
   return info ? new ChatUpstreamError(...info) : new ChatUpstreamError("chat_upstream_error", "Chat 上游请求失败。", false);
 }
-export function chatStreamError(value: unknown): ChatUpstreamError | undefined {
+export function chatStreamError(value: unknown, tools?: unknown): ChatUpstreamError | undefined {
   const chunk = object(value);
-  if (chunk.error != null) return chatUpstreamError(chunk.error);
+  if (chunk.error != null) return chatUpstreamError(chunk.error, undefined, tools);
   for (const entry of Array.isArray(chunk.choices) ? chunk.choices : []) {
     const choice = object(entry);
-    if (choice.error != null || choice.finish_reason === "error") return chatUpstreamError(choice.error);
+    if (choice.error != null || choice.finish_reason === "error") return chatUpstreamError(choice.error, undefined, tools);
   }
   return undefined;
 }
-export async function readChatHttpError(incoming: IncomingMessage, capture?: { value(value: unknown, stream: boolean): void; invalid(bytes: number): void }, signal?: AbortSignal): Promise<ChatUpstreamError> {
+export async function readChatHttpError(incoming: IncomingMessage, capture?: { value(value: unknown, stream: boolean): void; invalid(bytes: number): void }, signal?: AbortSignal, tools?: unknown): Promise<ChatUpstreamError> {
   const retryAfter = incoming.statusCode === 429 || incoming.statusCode === 503 ? safeRetryAfter(incoming.headers["retry-after"]) : undefined;
   const classify = (value: unknown): ChatUpstreamError => {
-    const error = chatUpstreamError(value, incoming.statusCode);
+    const error = chatUpstreamError(value, incoming.statusCode, tools);
     return new ChatUpstreamError(error.code, error.message, error.retryable, retryAfter, error.upstreamStatus);
   };
   signal?.throwIfAborted();
