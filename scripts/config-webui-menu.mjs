@@ -85,6 +85,11 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
         showInstructions: false,
         options: [
           {
+            value: "generate",
+            label: webui.tokenConfigured ? "重新生成随机令牌" : "生成随机令牌",
+            hint: "保存后重启 WebUI 生效，请妥善保存新令牌",
+          },
+          {
             value: "set",
             label: webui.tokenConfigured ? "重新设置令牌" : "设置令牌",
             hint: webui.tokenConfigured ? "替换现有令牌" : "绑定 0.0.0.0 时必须设置",
@@ -96,7 +101,14 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
         ],
       });
       if (prompts.isCancel(action) || action === "back") continue;
-      if (action === "clear") {
+      if (action === "generate") {
+        const confirmed = await prompts.confirm({
+          message: "生成并保存新随机令牌？重启 WebUI 后须使用新令牌，旧令牌将失效。",
+          initialValue: false,
+        });
+        if (prompts.isCancel(confirmed) || confirmed !== true) continue;
+        input = { kind: "webui.token", action: "generate" };
+      } else if (action === "clear") {
         if (webui.host === "0.0.0.0") {
           output.write("绑定 0.0.0.0 时必须保留访问令牌，请先改回仅本机。\n");
           continue;

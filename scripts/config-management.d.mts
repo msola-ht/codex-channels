@@ -125,7 +125,7 @@ export type GatewaySettingInput =
   | { kind: "webui.enabled"; value: boolean }
   | { kind: "webui.host"; value: "127.0.0.1" | "::1" | "0.0.0.0" | null; token?: string }
   | { kind: "webui.port"; value: number | null }
-  | { kind: "webui.token"; action: "set" | "clear"; value?: string }
+  | { kind: "webui.token"; action: "set" | "clear" | "generate"; value?: string }
   | { kind: "metrics.storage"; retentionDays: number; maxRows: number };
 
 export function loadGatewaySettings(environment?: NodeJS.ProcessEnv): GatewaySettings;

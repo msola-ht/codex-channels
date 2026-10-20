@@ -49,12 +49,15 @@ export function applyWebuiSetting(document, input) {
       break;
     }
     case "webui.token": {
-      const action = choice(input.action, ["set", "clear"], "action", "WebUI 令牌操作");
+      const action = choice(input.action, ["set", "clear", "generate"], "action", "WebUI 令牌操作");
       if (action === "clear") {
         if (webui.host === "0.0.0.0") {
           throw invalidSetting("action", "public-token-required", "WebUI 绑定 0.0.0.0 时必须保留访问令牌");
         }
         delete webui.token;
+      } else if (action === "generate") {
+        generatedWebuiToken = randomBytes(32).toString("hex");
+        webui.token = generatedWebuiToken;
       } else {
         webui.token = requiredSecret(input.value, "value", "WebUI 访问令牌");
       }
@@ -65,7 +68,10 @@ export function applyWebuiSetting(document, input) {
   }
   document.webui = webui;
   return {
-    value: projectWebuiSettings(document),
+    value: {
+      ...projectWebuiSettings(document),
+      ...(input.kind === "webui.token" && input.action === "generate" ? { action: "generate" } : {}),
+    },
     activation,
     ...(generatedWebuiToken === undefined ? {} : { generatedWebuiToken }),
   };

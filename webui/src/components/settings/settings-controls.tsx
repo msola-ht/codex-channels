@@ -99,6 +99,9 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
     && typeof pending.value === "object"
     && "action" in pending.value
     && pending.value.action === "clear"
+  const regeneratingToken = pending?.kind === "webui.token"
+    && pending.value !== null && typeof pending.value === "object"
+    && "action" in pending.value && pending.value.action === "generate"
   return (
     <ManagementConfirmationDialog
       open={pending !== null}
@@ -111,7 +114,7 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
       onCancel={onCancel}
     >
       {pending !== null ? <>
-          <p>{t("settingsUi.change", { label: typeof pending.label === "string" ? pending.label : t(pending.label.key, pending.label.params), before: formatPreviewValue(pending.before, pending.kind, t), after: formatPreviewValue(pending.value, pending.kind, t) })}</p>
+          <p>{regeneratingToken ? t("settingsFields.regenerateTokenConfirmation") : t("settingsUi.change", { label: typeof pending.label === "string" ? pending.label : t(pending.label.key, pending.label.params), before: formatPreviewValue(pending.before, pending.kind, t), after: formatPreviewValue(pending.value, pending.kind, t) })}</p>
           <p className="text-muted-foreground">{t("settingsUi.activation", { value: formatActivation(pending.activation, t) })}</p>
           {pending.activation.commands.length > 0
             ? <p className="text-muted-foreground">{t(pending.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: pending.activation.commands.join("; ") })}</p>
