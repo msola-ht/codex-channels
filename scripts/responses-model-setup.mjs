@@ -17,15 +17,18 @@ const advancedSettingGroups = [
   { value: "sampling", label: "默认采样参数（temperature、top_p 等）" },
 ];
 
-export async function promptResponsesModels(prompts, defaultModel, previous = [], output = process.stdout, upstreamWireApi = "responses", retainedModels = [], { loadDraftTemplates = loadCustomModelDraftTemplates } = {}) {
+export async function promptResponsesModels(prompts, defaultModel, previous = [], output = process.stdout, upstreamWireApi = "responses", retainedModels = [], { loadDraftTemplates = loadCustomModelDraftTemplates, allowAdd = true, managedClinePass = false } = {}) {
   if (!["responses", "chat_completions"].includes(upstreamWireApi)) throw new Error("自定义模型上游接口不受支持");
+  if (!allowAdd && previous.length === 0) throw new Error("本地编辑必须选择已保存的模型");
+  const editableAdvancedGroups = advancedSettingGroups.filter(group => !managedClinePass || !["sampling", "image-detail"].includes(group.value))
+    .map(group => managedClinePass && group.value === "text" ? { ...group, label: "回答详细程度" } : group);
   if (upstreamWireApi === "chat_completions") output.write("Chat 上游仍可逐项声明所有模型能力；当前转换不传递 verbosity，并拒绝 original 图片精度和非 none 摘要参数，声明不会改变转换规则。\n");
   const ids = previous.length > 0 ? previous.map(entry => entry.id) : defaultModel === undefined ? [] : [defaultModel];
   if (ids.length === 0) ids.push(undefined);
   let selectedModels = [];
   if (previous.length > 0) {
     selectedModels = await prompts.multiselect({
-      message: "选择要编辑的已有模型（可不选，直接添加模型或继续默认设置）",
+      message: allowAdd ? "选择要编辑的已有模型（可不选，直接添加模型或继续默认设置）" : "选择要编辑的已有模型（可不选，保留原值）",
       options: previous.map(model => ({ value: model.id, label: `${model.name}（${model.id}）` })),
       initialValues: [],
       required: false,
@@ -75,13 +78,13 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
           { value: "context", label: "当前上下文窗口" },
           { value: "reasoning", label: "思考能力、等级与默认值" },
           { value: "tools", label: "图片输入、apply_patch 与 tool_search 能力" },
-          ...advancedSettingGroups,
+          ...editableAdvancedGroups,
         ],
         initialValues: [],
         required: false,
       }) : [];
       if (prompts.isCancel(groups)) return undefined;
-      const allowed = new Set(["name", "context", "reasoning", "tools", ...advancedSettingGroups.map(group => group.value)]);
+      const allowed = new Set(["name", "context", "reasoning", "tools", ...editableAdvancedGroups.map(group => group.value)]);
       if (!Array.isArray(groups) || groups.some(group => !allowed.has(group)) || new Set(groups).size !== groups.length) throw new Error("模型设置分组选择无效");
     }
     if (old === undefined || groups.includes("name")) {
@@ -105,14 +108,15 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       }
     }
     if (old === undefined || groups.includes("reasoning")) {
-      const supportsReasoning = await promptCapability(prompts, `${id} 是否支持思考参数？`, model.reasoningEfforts === undefined ? undefined : model.reasoningEfforts.length > 0);
+      const supportsReasoning = await promptCapability(prompts, `${id} 是否支持思考参数？`, model.reasoningEfforts === undefined ? undefined : managedClinePass ? model.reasoningEfforts.some(effort => effort !== "none") : model.reasoningEfforts.length > 0, !managedClinePass);
       if (supportsReasoning === undefined) return undefined;
       const reasoningEfforts = supportsReasoning === "yes" ? await prompts.multiselect({
         message: `${id} 支持的思考等级（空格勾选，回车确认；按平台说明选择）`,
-        options: ["none", "minimal", "low", "medium", "high", "xhigh", "max"].map(value => ({value, label: value})),
+        options: ["none", ...(managedClinePass ? ["enabled"] : []), "minimal", "low", "medium", "high", "xhigh", "max"].map(value => ({value, label: value})),
         initialValues: model.reasoningEfforts ?? [],
         required: true,
-      }) : [];
+      }) : managedClinePass ? ["none"] : [];
+      if (managedClinePass && supportsReasoning === "unknown") throw new Error("受管 CLP 模型须明确声明思考等级；不支持思考时使用 none");
       if (prompts.isCancel(reasoningEfforts)) return undefined;
       const defaultReasoning = reasoningEfforts.length === 0 ? null : await prompts.select({ message: "默认思考等级", options: reasoningEfforts.map(value => ({ value, label: value })), initialValue: reasoningEfforts.includes(model.defaultReasoningEffort) ? model.defaultReasoningEffort : reasoningEfforts[0] });
       if (prompts.isCancel(defaultReasoning)) return undefined;
@@ -133,9 +137,9 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       }
       if (!model.supportsImages) delete model.supportsImageDetailOriginal;
     }
-    if (await promptAdvancedCapabilities(prompts, model, groups) === undefined) return undefined;
+    if (await promptAdvancedCapabilities(prompts, model, groups, { allowSummary: !managedClinePass, allowInstructionReset: !managedClinePass }) === undefined) return undefined;
     models.push(model);
-    if (index === ids.length - 1 && ids.length < 64) {
+    if (allowAdd && index === ids.length - 1 && ids.length < 64) {
       const add = await prompts.confirm({ message: "继续添加模型？", initialValue: false });
       if (prompts.isCancel(add)) return undefined;
       if (add) {
@@ -145,7 +149,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
   }
   // Existing models stay in the catalog; removal has its own protected flow.
   if (retainedModels.some(id => !models.some(model => model.id === id))) throw new Error("候选目录缺少已保存模型；请先使用模型管理处理缺失模型，原目录未修改");
-  return validateResponsesModels(models, defaultModel ?? models[0]?.id);
+  return validateResponsesModels(models, defaultModel ?? models[0]?.id, { allowReasoningToggle: managedClinePass });
 }
 
 function validModelId(id, models) {
@@ -154,8 +158,8 @@ function validModelId(id, models) {
 
 function capabilityLabel(value) { return value === undefined ? "未知" : value ? "支持" : "不支持"; }
 
-async function promptCapability(prompts, message, current) {
-  const value = await prompts.select({ message, options: [{value: "yes", label: "支持（按平台说明手动声明）"}, {value: "no", label: "不支持"}, {value: "unknown", label: "未知（保存但暂不启用）"}], initialValue: current === undefined ? "unknown" : current ? "yes" : "no" });
+async function promptCapability(prompts, message, current, allowUnknown = true) {
+  const value = await prompts.select({ message, options: [{value: "yes", label: "支持（按平台说明手动声明）"}, {value: "no", label: "不支持"}, ...(allowUnknown ? [{value: "unknown", label: "未知（保存但暂不启用）"}] : [])], initialValue: current === undefined && allowUnknown ? "unknown" : current ? "yes" : "no" });
   if (prompts.isCancel(value)) return undefined;
   if (!["yes", "no", "unknown"].includes(value)) throw new Error("模型能力选择无效");
   return value;
@@ -212,7 +216,7 @@ async function promptReasoningDescriptions(prompts, model) {
   return model;
 }
 
-async function promptResponsesTextCapabilities(prompts, model) {
+async function promptResponsesTextCapabilities(prompts, model, allowSummary) {
   const verbosity = await prompts.confirm({ message: `${model.id} 是否支持 text.verbosity（回答详细程度）？`, initialValue: model.supportsVerbosity ?? false });
   if (prompts.isCancel(verbosity)) return undefined;
   model.supportsVerbosity = verbosity;
@@ -221,6 +225,7 @@ async function promptResponsesTextCapabilities(prompts, model) {
     if (prompts.isCancel(value)) return undefined;
     model.defaultVerbosity = value;
   } else delete model.defaultVerbosity;
+  if (!allowSummary) return model;
   const summary = await prompts.confirm({ message: `${model.id} 是否支持 reasoning.summary（思考摘要；与思考等级独立）？`, initialValue: model.supportsReasoningSummary ?? false });
   if (prompts.isCancel(summary)) return undefined;
   model.supportsReasoningSummary = summary;
@@ -233,7 +238,7 @@ async function promptResponsesTextCapabilities(prompts, model) {
 }
 
 
-async function promptAdvancedCapabilities(prompts, model, selectedGroups) {
+async function promptAdvancedCapabilities(prompts, model, selectedGroups, { allowSummary = true, allowInstructionReset = true } = {}) {
   const groups = selectedGroups ?? await prompts.multiselect({
     message: `${model.id} 选择高级设置（可不选，保留已带入的模板设置）`,
     options: advancedSettingGroups.filter(group => (group.value !== "image-detail" || model.supportsImages)
@@ -263,10 +268,10 @@ async function promptAdvancedCapabilities(prompts, model, selectedGroups) {
     if (prompts.isCancel(original)) return undefined;
     model.supportsImageDetailOriginal = original;
   }
-  if (groups.includes("text") && await promptResponsesTextCapabilities(prompts, model) === undefined) return undefined;
+  if (groups.includes("text") && await promptResponsesTextCapabilities(prompts, model, allowSummary) === undefined) return undefined;
   if (groups.includes("reasoning-descriptions") && (model.reasoningEfforts?.length ?? 0) > 0 && await promptReasoningDescriptions(prompts, model) === undefined) return undefined;
   if (groups.includes("instructions")) {
-    const instructions = await prompts.select({ message: `${model.id} 模型指令`, options: [{value: "keep", label: "保留现有指令"}, {value: "edit", label: "编辑模型指令"}, {value: "default", label: "恢复目录默认指令"}], initialValue: "keep" });
+    const instructions = await prompts.select({ message: `${model.id} 模型指令`, options: [{value: "keep", label: "保留现有指令"}, {value: "edit", label: "编辑模型指令"}, ...(allowInstructionReset ? [{value: "default", label: "恢复目录默认指令"}] : [])], initialValue: "keep" });
     if (prompts.isCancel(instructions)) return undefined;
     if (instructions === "default") delete model.instructions;
     if (instructions === "edit") {

@@ -99,6 +99,8 @@
     "scripts/local-installation.mjs",
     "scripts/managed-model-provider-setup.mjs",
     "scripts/managed-provider-model-management.mjs",
+    "scripts/managed-provider-model-edit.mjs",
+    "scripts/managed-provider-model-edit-setup.mjs",
     "scripts/provider-model-management.mjs",
     "scripts/provider-web-search-probe.mjs",
     "scripts/provider-web-search-setup.mjs",

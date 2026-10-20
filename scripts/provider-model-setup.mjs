@@ -9,6 +9,7 @@ import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-ups
 import { previewCustomProviderModelsSave, applyCustomProviderModelsSave } from "./custom-primary-provider-management.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
 import { runManagedProviderModelSetup, runProviderModelAdditionSetup } from "./managed-provider-model-management.mjs";
+import { runManagedProviderModelEditSetup } from "./managed-provider-model-edit-setup.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
@@ -180,6 +181,7 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     { value: "web-search", label: "检测原生网页搜索", hint: "选择单一账户；1 次可能计费请求；仅诊断" },
     ...(catalog.canRemove ? [{ value: "remove", label: "本地移除模型", hint: "不联网、不改账户和凭据" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
+    ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求路由" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "tools", label: "探测单个模型的工具能力", hint: "apply_patch、tool_search；明确选择才发请求，可能计费" }] : []),
     ...(family && catalog.providers.length ? [{ value: "default", label: "设置账户默认模型" }] : []),
     ...(family === "ccg" || family === "ocg" ? [{ value: "manage", label: "查看／添加／导入新模型" }] : []),
@@ -208,6 +210,7 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     return result;
   }
   if (action === "web-search") return runProviderWebSearchSetup({ environment, prompts, output, provider: selected });
+  if (action === "local-edit") return runManagedProviderModelEditSetup(selected, { environment, prompts, output });
   if (action === "template-update") return runProviderModelTemplateSetup(catalog.provider, { environment, prompts, output });
   if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });
   if (action === "refresh") return runProviderModelAdditionSetup(catalog.provider, { environment, prompts, output });

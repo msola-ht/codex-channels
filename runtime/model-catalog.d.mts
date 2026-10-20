@@ -47,5 +47,5 @@ export interface ModelDefinition {
 export function validateSamplingParameters(value: unknown): SamplingParameters | undefined;
 export function validateModelDefinitions(values: unknown, defaultModel: string, options?: { allowReasoningToggle?: boolean }): ModelDefinition[];
 export function compileModelDefinitions(definitions: ModelDefinition[], defaultModel: string, options?: { allowReasoningToggle?: boolean }): { definitions: ModelDefinition[]; models: Record<string, unknown>[] };
-export function modelDefinitionsFromCatalog(catalog: unknown, source?: "official" | "deepseek"): ModelDefinition[];
+export function modelDefinitionsFromCatalog(catalog: unknown, source?: "official" | "deepseek", options?: { allowReasoningToggle?: boolean }): ModelDefinition[];
 export function normalizeDeepseekCatalogCapabilities(catalog: { models: Record<string, unknown>[] }): { models: Record<string, unknown>[] };

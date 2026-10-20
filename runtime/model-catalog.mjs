@@ -164,7 +164,7 @@ export function compileModelDefinitions(definitions, defaultModel, { allowReason
   return catalog;
 }
 
-export function modelDefinitionsFromCatalog(catalog, source = "official") {
+export function modelDefinitionsFromCatalog(catalog, source = "official", { allowReasoningToggle = false } = {}) {
   if (!["official", "deepseek"].includes(source)) throw new Error("模型模板来源无效");
   if (!Array.isArray(catalog?.models)) throw new Error("模型模板目录缺少 models");
   const normalized = source === "deepseek" ? normalizeDeepseekCatalogCapabilities(catalog) : catalog;
@@ -195,7 +195,7 @@ export function modelDefinitionsFromCatalog(catalog, source = "official") {
     ...(model.experimental_supported_tools === undefined ? {} : {experimentalSupportedTools: model.experimental_supported_tools}),
     template: {source, model: model.slug},
   }));
-  return validateModelDefinitions(models, models[0]?.id);
+  return validateModelDefinitions(models, models[0]?.id, { allowReasoningToggle });
 }
 
 // DS Responses accepts these controls but does not implement them. Keep the
