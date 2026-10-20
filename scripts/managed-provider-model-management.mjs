@@ -6,6 +6,7 @@ import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { promptContextWindow } from "./responses-model-setup.mjs";
+import { defaultModelDisplayName } from "../runtime/model-catalog.mjs";
 
 function definitionFor(provider, environment) {
   const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === provider);
@@ -90,7 +91,8 @@ async function promptAdditionalModel(prompts, definition, existing) {
   if (confirmed !== true) return undefined;
   const id = await prompts.text({ message: "上游模型 ID（准确名称）", validate: value => isManagedProviderModelValid(definition, value) && !existing.some(model => model.id === value) ? undefined : "请输入有效且未加入目录的模型 ID" });
   if (prompts.isCancel(id)) return undefined;
-  const name = await prompts.text({ message: "显示名称", initialValue: id });
+  const name = await prompts.text({ message: "显示名称", initialValue: defaultModelDisplayName(id),
+    validate: value => typeof value === "string" && value.trim().length > 0 && value.length <= 120 && !/\p{Cc}/u.test(value) ? undefined : "请输入 1-120 字符且无控制字符的名称" });
   if (prompts.isCancel(name)) return undefined;
   if (clinePass) {
     const mode = await prompts.select({ message: "模型配置方式", options: [

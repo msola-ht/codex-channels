@@ -31,7 +31,7 @@ import { OpenAiModelDetails } from "@/components/settings/openai-model-details"
 import { ModelContextWindowFields } from "@/components/settings/model-context-window-fields"
 import { contextWindowPreset, validContextWindow, type ContextWindowPreset } from "@/lib/model-context-window"
 import type { CustomModelDraft } from "@/components/settings/custom-model-details"
-import { contextWindowPresetTokens, contextWindowPresetLabel } from "../../../../runtime/model-catalog.mjs"
+import { contextWindowPresetTokens, contextWindowPresetLabel, defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
 import { ProviderModelTemplateDialog, ProviderModelTemplateConfirmation, type ProviderModelTemplateTarget } from "@/components/settings/provider-model-template-dialog"
 import { ProviderModelAdditionDialog, ProviderModelAdditionConfirmation, type ProviderModelAdditionTarget } from "@/components/settings/provider-model-addition-dialog"
 import { ProviderWebSearchProbeDialog, type ProviderWebSearchProbeTarget } from "@/components/settings/provider-web-search-probe-dialog"
@@ -422,7 +422,7 @@ function ProviderSettingsCard({
           <p className="text-xs text-muted-foreground">{t("managementUi.responsesHint")}</p>
           {editingId !== null ? <p className="text-xs text-muted-foreground">{t("modelCatalog.editRequiresRemoval")}</p> : null}
           <Alert><AlertTitle>{t("modelProbe.title")}</AlertTitle><AlertDescription>{t("modelProbe.hint")}</AlertDescription></Alert>
-          {editorOpen ? <CustomModelTemplatePicker disabled={busy || pending !== null || editorStale || customModels.length >= 64 || customModels.some(entry => entry.id.trim() === "")} onAdd={draft => setCustomModels(current => current.length >= 64 || current.some(entry => entry.id.trim() === "") ? current : [...current, { ...draft, id: current.length === 0 ? model : "", name: current.length === 0 ? model : "" }])} /> : null}
+          {editorOpen ? <CustomModelTemplatePicker disabled={busy || pending !== null || editorStale || customModels.length >= 64 || customModels.some(entry => entry.id.trim() === "")} onAdd={draft => setCustomModels(current => current.length >= 64 || current.some(entry => entry.id.trim() === "") ? current : [...current, { ...draft, id: current.length === 0 ? model : "", name: current.length === 0 ? defaultModelDisplayName(model) : "" }])} /> : null}
           {customModels.map((entry, index) => {
             const existingModel = editingId !== null && index < originalModelCount
             const patch = (changes: Partial<typeof entry>) => setCustomModels(current => current.map((value, position) => position === index ? { ...value, ...changes } : value))

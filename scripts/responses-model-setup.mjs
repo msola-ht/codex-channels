@@ -1,4 +1,4 @@
-import { contextWindowPresetTokens, contextWindowPresetLabel, customModelSamplingDefaults, validateModelDefinitions as validateResponsesModels, validateSamplingParameters, isValidCustomModelId, withModelContextWindow } from "../runtime/model-catalog.mjs";
+import { contextWindowPresetTokens, contextWindowPresetLabel, customModelSamplingDefaults, validateModelDefinitions as validateResponsesModels, validateSamplingParameters, isValidCustomModelId, withModelContextWindow, defaultModelDisplayName } from "../runtime/model-catalog.mjs";
 import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
 
 const contextWindowPresets = contextWindowPresetTokens.map(tokens => ({
@@ -88,7 +88,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       if (!Array.isArray(groups) || groups.some(group => !allowed.has(group)) || new Set(groups).size !== groups.length) throw new Error("模型设置分组选择无效");
     }
     if (old === undefined || groups.includes("name")) {
-      const name = await prompts.text({ message: `${id} 显示名称（必填）`, initialValue: old?.name ?? id, validate: value => String(value).trim() !== "" && String(value).length <= 120 && !/\p{Cc}/u.test(String(value)) ? undefined : "请输入 1-120 字符且无控制字符的名称" });
+      const name = await prompts.text({ message: `${id} 显示名称（必填）`, initialValue: old?.name ?? defaultModelDisplayName(id), validate: value => String(value).trim() !== "" && String(value).length <= 120 && !/\p{Cc}/u.test(String(value)) ? undefined : "请输入 1-120 字符且无控制字符的名称" });
       if (prompts.isCancel(name)) return undefined;
       model.name = String(name).trim();
     }
