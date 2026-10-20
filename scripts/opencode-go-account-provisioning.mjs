@@ -38,6 +38,7 @@ import {
   resolveManagedCatalogModel,
 } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { assertManagedAccountMode, snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision } from "./managed-provider-account-plan.mjs";
 import {
   opencodeGoAccountPaths,
 } from "./opencode-go-account-files.mjs";
@@ -98,6 +99,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     phone,
     contact,
     apiKey,
+    expectedRevision,
     confirmExclusiveConfigChange = false,
   },
   {
@@ -112,7 +114,8 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     environment,
     loadAccounts,
     loadPrimaryProvider,
-  }, true);
+  });
+  assertManagedAccountRevision(expectedRevision, plan.revision);
   if ((plan.mode === "exclusive" || plan.previousMode === "exclusive") && confirmExclusiveConfigChange !== true) {
     throw invalid(
       "confirmation-required",
@@ -283,7 +286,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
 async function buildPlan(
   { accountId, email, phone, contact, mode, reconfigure },
   { environment, loadAccounts, loadPrimaryProvider },
-  captureSnapshots = false,
 ) {
   try {
     validateOpencodeGoAccountId(accountId);
@@ -346,35 +348,23 @@ async function buildPlan(
   if (normalizedEmail === undefined && normalizedPhone === undefined) {
     throw invalid("invalid-contact", "contact", "OpenCode Go 账户必须提供邮箱或手机号码");
   }
-  if (mode === "exclusive") {
-    let primary;
-    try {
-      primary = loadPrimaryProvider(environment);
-    } catch (error) {
-      throw normalize("provider-state-unavailable", "mode", error);
-    }
-    if (primary !== "openai" && primary !== opencodeGoProviderId(accountId)) {
-      throw invalid("primary-provider-conflict", "mode", `请先恢复当前固定 Provider：${primary}`);
-    }
-  }
+  assertManagedAccountMode(mode, opencodeGoAccountDefinition(accountId), environment, loadPrimaryProvider);
   const paths = opencodeGoAccountPaths(environment, accountId);
   let snapshots;
-  if (captureSnapshots) {
-    try {
-      // Keep the files that produced this plan across every asynchronous wait.
-      // A later snapshot must not accept external changes as the rollback baseline.
-      snapshots = snapshotProviderFiles([
-        paths.configPath,
-        paths.profilePath,
-        paths.markerPath,
-        paths.catalogPath,
-        paths.manifestPath,
-        join(paths.backupDirectory, "config.toml"),
-        opencodeGoAccountsFilePath(environment),
-      ], environment);
-    } catch (error) {
-      throw normalize("operation-failed", "action", error);
-    }
+  try {
+    // Keep the files that produced this plan across every asynchronous wait.
+    // A later snapshot must not accept external changes as the rollback baseline.
+    snapshots = snapshotManagedAccountFiles([
+      paths.configPath,
+      paths.profilePath,
+      paths.markerPath,
+      paths.catalogPath,
+      paths.manifestPath,
+      join(paths.backupDirectory, "config.toml"),
+      opencodeGoAccountsFilePath(environment),
+    ], opencodeGoAccountDefinition(accountId), environment);
+  } catch (error) {
+    throw normalize("operation-failed", "action", error);
   }
   try {
     await assertProfileOwnership(paths, accountId, environment);
@@ -417,6 +407,7 @@ async function buildPlan(
     previousMode,
     paths,
     snapshots,
+    revision: managedAccountRevision(snapshots),
     downloadsCatalog: !existsSync(paths.catalogPath),
     updatesExternalAgent: false,
   };
@@ -449,6 +440,7 @@ async function loadCatalog(plan, { fetchImpl, downloadCatalog }) {
 
 function publicPreview(plan) {
   return {
+    revision: plan.revision,
     operation: plan.account.exists ? "reconfigure" : "add",
     account: plan.account,
     mode: plan.mode,

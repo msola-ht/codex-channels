@@ -6,6 +6,7 @@ export class OpenCodeGoAccountProvisioningError extends Error {
 }
 
 export interface OpenCodeGoAccountConfigurationPreview {
+  revision: string;
   operation: "add" | "reconfigure";
   account: {
     id: string;
@@ -63,6 +64,7 @@ export function applyOpencodeGoAccountConfiguration(
     reconfigure?: boolean;
     apiKey: string;
     confirmExclusiveConfigChange?: boolean;
+    expectedRevision?: string;
   },
   options?: ProvisioningOptions & {
     fetchImpl?: typeof fetch;

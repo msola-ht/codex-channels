@@ -1,4 +1,5 @@
 import * as clackPrompts from "@clack/prompts";
+import { previewProviderModelRename, applyProviderModelRename } from "./provider-model-management.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { loadProviderModelCatalogs, loadProviderModelCatalogPresentations, ProviderModelManagementError, previewProviderModelRemoval, applyProviderModelRemoval } from "./provider-model-management.mjs";
@@ -8,6 +9,7 @@ import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-ups
 import { previewCustomProviderModelsSave, applyCustomProviderModelsSave } from "./custom-primary-provider-management.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
 import { runManagedProviderModelSetup, runProviderModelAdditionSetup } from "./managed-provider-model-management.mjs";
+import { runManagedProviderModelEditSetup } from "./managed-provider-model-edit-setup.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
@@ -175,9 +177,11 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     ? "DeepSeek 暂不支持单模型移除。\n"
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
   const action = await prompts.select({ message: "模型操作", options: [
+    ...(custom || family ? [{ value: "rename", label: "编辑模型显示名称", hint: "模型 ID 保持不变" }] : []),
     { value: "web-search", label: "检测原生网页搜索", hint: "选择单一账户；1 次可能计费请求；仅诊断" },
     ...(catalog.canRemove ? [{ value: "remove", label: "本地移除模型", hint: "不联网、不改账户和凭据" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
+    ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求路由" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "tools", label: "探测单个模型的工具能力", hint: "apply_patch、tool_search；明确选择才发请求，可能计费" }] : []),
     ...(family && catalog.providers.length ? [{ value: "default", label: "设置账户默认模型" }] : []),
     ...(family === "ccg" || family === "ocg" ? [{ value: "manage", label: "查看／添加／导入新模型" }] : []),
@@ -186,7 +190,27 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (action === "rename") {
+    const current = (await loadProviderModelCatalogPresentations({ environment })).catalogs.find(entry => entry.provider === catalog.provider);
+    if (!current) throw new Error("模型目录已变化，请重新打开模型管理");
+    const model = await prompts.select({ message: "选择模型", options: current.models.map(entry => ({ value: entry.id, label: `${entry.displayName}（${entry.id}）` })) });
+    if (prompts.isCancel(model)) return { action: "back" };
+    const selectedModel = current.models.find(entry => entry.id === model);
+    if (!selectedModel) throw new Error("模型选择无效");
+    const name = await prompts.text({ message: "显示名称", initialValue: selectedModel.displayName });
+    if (prompts.isCancel(name)) return { action: "back" };
+    const input = { provider: current.provider, model, displayName: name.trim(), revision: current.revision };
+    const preview = await previewProviderModelRename(input, { environment });
+    if (!preview.willChange) { output.write("显示名称未变化。\n"); return { action: "unchanged", activation: "none" }; }
+    output.write(`模型 ID：${JSON.stringify(model)}（保持不变）\n显示名称：${JSON.stringify(preview.model.displayName)} → ${JSON.stringify(preview.displayName)}\n影响账户：${preview.providers.join("、")}\n`);
+    if (await prompts.confirm({ message: "确认保存显示名称？", initialValue: false }) !== true) return { action: "back" };
+    const result = await applyProviderModelRename(input, { environment, preview });
+    output.write("模型显示名称已保存并回读。\n");
+    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+    return result;
+  }
   if (action === "web-search") return runProviderWebSearchSetup({ environment, prompts, output, provider: selected });
+  if (action === "local-edit") return runManagedProviderModelEditSetup(selected, { environment, prompts, output });
   if (action === "template-update") return runProviderModelTemplateSetup(catalog.provider, { environment, prompts, output });
   if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });
   if (action === "refresh") return runProviderModelAdditionSetup(catalog.provider, { environment, prompts, output });
@@ -238,8 +262,12 @@ export async function runProviderModelSetup({ environment = process.env, prompts
         .map(key => `  ${key}：${JSON.stringify(old[key]) ?? "未设置"} → ${JSON.stringify(entry[key]) ?? "未设置"}`);
       if (changes.length) output.write(`修改模型 ${entry.id}：\n${changes.join("\n")}\n`);
     }
-    output.write(action === "tools" ? "目录及连接的默认模型、思考等级保持当前值；仅保存所选工具能力。\n"
-      : `默认模型：${previous.defaultModel} → ${model}；未列出的模型字段、连接与凭据保持当前值。\n`);
+    const defaults = preview.modelDefaults;
+    output.write(`目录默认模型：${JSON.stringify(defaults.catalog.before)} → ${JSON.stringify(defaults.catalog.after)}\n`);
+    output.write(`提供商实际默认模型：${JSON.stringify(defaults.selection.before.model)} → ${JSON.stringify(defaults.selection.after.model)}\n`);
+    output.write(`提供商实际默认思考等级：${JSON.stringify(defaults.selection.before.reasoningEffort)} → ${JSON.stringify(defaults.selection.after.reasoningEffort)}\n`);
+    output.write(action === "tools" ? "仅保存所选工具能力。\n" : "保存以上目录及提供商默认设置；未列出的模型字段、连接与凭据保持当前值。\n");
+    if (!preview.willChange) { output.write("模型目录及默认设置未变化，无需保存。\n"); return { action: "unchanged", activation: "none" }; }
     if (await prompts.confirm({ message: "备份并保存模型设置？", initialValue: false }) !== true) return { action: "back" };
     result = await applyCustomProviderModelsSave(input, { ...saveOptions, preview });
   } else if (action === "remove") {
@@ -255,7 +283,9 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     if (await prompts.confirm({ message: "确认本地移除？", initialValue: false }) !== true) return { action: "back" };
     result = await applyProviderModelRemoval(input, { environment, preview });
   } else throw new Error("不支持的模型操作");
-  if (result.action !== "back") {
+  if (result.action === "unchanged") {
+    output.write("模型目录及默认设置未变化，无需保存。\n");
+  } else if (result.action !== "back") {
     output.write(["edit", "tools", "remove"].includes(action) ? "模型目录已保存并回读。\n" : "模型目录已保存。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   }

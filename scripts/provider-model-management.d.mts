@@ -18,6 +18,19 @@ export function loadProviderModelCatalogPresentations(options?: { environment?: 
 export function loadProviderModelPrompts(input: unknown, options?: { environment?: NodeJS.ProcessEnv }): Promise<OpenAiModelPrompts & Pick<ModelDefinition, "template" | "sampling">>;
 
 export interface ProviderModelContextInput { provider: string; model: string; contextWindow: number; revision: string }
+export interface ProviderModelRenameInput { provider: string; model: string; displayName: string; revision: string }
+export interface ProviderModelRenamePreview {
+  operation: "model.rename";
+  provider: string;
+  model: { id: string; displayName: string };
+  displayName: string;
+  providers: string[];
+  revision: string;
+  willChange: boolean;
+  activation: "restart-app-server" | "none";
+}
+export function previewProviderModelRename(input: ProviderModelRenameInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ProviderModelRenamePreview>;
+export function applyProviderModelRename(input: ProviderModelRenameInput, options: { environment?: NodeJS.ProcessEnv; preview: ProviderModelRenamePreview }): Promise<ProviderModelRenamePreview & { action: "updated" | "unchanged" }>;
 export interface ProviderModelContextPreview {
   operation: "model.context";
   provider: string;
@@ -26,13 +39,13 @@ export interface ProviderModelContextPreview {
   providers: string[];
   revision: string;
   willChange: boolean;
-  activation: "restart-app-server";
+  activation: "restart-app-server" | "none";
 }
 export function previewProviderModelContextChange(input: ProviderModelContextInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ProviderModelContextPreview>;
 export function applyProviderModelContextChange(input: ProviderModelContextInput, options: {
   environment?: NodeJS.ProcessEnv;
   preview: ProviderModelContextPreview;
-}): Promise<ProviderModelContextPreview & { action: "updated" }>;
+}): Promise<ProviderModelContextPreview & { action: "updated" | "unchanged" }>;
 
 export interface ProviderModelRemovalInput { provider: string; model: string }
 export interface ProviderModelRemovalPreview {

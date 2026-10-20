@@ -1,6 +1,8 @@
 export const contextWindowPresetTokens: readonly [131072, 262144, 393216, 524288, 1048576];
 export const openAiContextWindowPresetTokens: readonly [272000, 372000, 500000];
 export function contextWindowPresetLabel(tokens: number): string;
+export function isValidCustomModelId(id: unknown): id is string;
+export function withModelContextWindow(model: ModelDefinition, contextWindow: number): ModelDefinition;
 export interface SamplingParameters {
   temperature?: number;
   top_p?: number;
@@ -45,5 +47,5 @@ export interface ModelDefinition {
 export function validateSamplingParameters(value: unknown): SamplingParameters | undefined;
 export function validateModelDefinitions(values: unknown, defaultModel: string, options?: { allowReasoningToggle?: boolean }): ModelDefinition[];
 export function compileModelDefinitions(definitions: ModelDefinition[], defaultModel: string, options?: { allowReasoningToggle?: boolean }): { definitions: ModelDefinition[]; models: Record<string, unknown>[] };
-export function modelDefinitionsFromCatalog(catalog: unknown, source?: "official" | "deepseek"): ModelDefinition[];
+export function modelDefinitionsFromCatalog(catalog: unknown, source?: "official" | "deepseek", options?: { allowReasoningToggle?: boolean }): ModelDefinition[];
 export function normalizeDeepseekCatalogCapabilities(catalog: { models: Record<string, unknown>[] }): { models: Record<string, unknown>[] };

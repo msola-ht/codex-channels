@@ -32,6 +32,7 @@ import {
 } from "./managed-provider-files.mjs";
 import { restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision } from "./managed-provider-account-plan.mjs";
 import {
   managedAccountPrimarySocket as defaultPrimarySocket,
   inspectManagedAccountRuntime,
@@ -77,9 +78,13 @@ async function applyOpencodeGoDefaultAccountChangeUnlocked(
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
     writeAccounts = writeOpencodeGoAccounts,
+    expectedRevision,
   } = {},
 ) {
   const plan = buildDefaultPlan(accountId, { environment, loadAccounts });
+  assertManagedAccountRevision(expectedRevision, plan.revision);
+  await assertProviderFileSnapshots(plan.snapshots);
+  if (!plan.willChange) return { action: "unchanged", ...publicDefaultPreview(plan) };
   try {
     writeAccounts(environment, plan.nextAccounts);
   } catch (error) {
@@ -130,7 +135,7 @@ export async function applyOpencodeGoAccountStop(
     resolvePrimarySocket,
     inspectSupervisor,
   });
-  if (!plan.running) {
+  if (!plan.registered) {
     return { action: "not-running", ...publicStopPreview(plan) };
   }
   let action;
@@ -186,6 +191,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
   {
     accountId,
     confirmHistoryLoss = false,
+    expectedRevision,
   },
   {
     environment = process.env,
@@ -213,6 +219,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
       "删除 OpenCode Go 账户前必须确认历史 Thread 将不可恢复",
     );
   }
+  assertManagedAccountRevision(expectedRevision, managedAccountRevision(plan.snapshots));
   let stopResult;
   try {
     await assertProviderFileSnapshots(plan.snapshots);
@@ -316,6 +323,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
 
 function buildDefaultPlan(accountId, { environment, loadAccounts }) {
   const normalizedId = validAccountId(accountId);
+  const snapshots = snapshotProviderFiles([opencodeGoAccountsFilePath(environment)], environment);
   const accounts = loadAccountsSafely(loadAccounts, environment);
   const account = accounts.find((candidate) => candidate.id === normalizedId);
   if (account === undefined) {
@@ -327,6 +335,8 @@ function buildDefaultPlan(accountId, { environment, loadAccounts }) {
   }
   const currentDefault = accounts.find((candidate) => candidate.default);
   return {
+    snapshots,
+    revision: managedAccountRevision(snapshots),
     account,
     accounts,
     nextAccounts: accounts.map((candidate) => ({
@@ -419,7 +429,7 @@ async function buildRemovalPlan(
   if (mode === "exclusive") {
     transactionPaths.push(paths.configPath, join(paths.backupDirectory, "config.toml"));
   }
-  const snapshots = snapshotProviderFiles(transactionPaths, environment);
+  const snapshots = snapshotManagedAccountFiles(transactionPaths, opencodeGoAccountDefinition(normalizedId), environment);
   if (mode === "exclusive") {
     const initialConfig = await readOpencodeGoRestoreBaseline(paths, environment);
     if (initialConfig === undefined) {
@@ -546,6 +556,7 @@ function parseConfig(content) {
 
 function publicDefaultPreview(plan) {
   return {
+    revision: plan.revision,
     operation: "set-default",
     account: {
       id: plan.account.id,
@@ -556,7 +567,7 @@ function publicDefaultPreview(plan) {
     currentDefaultAccountId: plan.currentDefaultAccountId,
     updatesExternalAgent: plan.updatesExternalAgent,
     willChange: plan.willChange,
-    activation: "restart-all",
+    activation: plan.willChange ? "restart-all" : "none",
   };
 }
 
@@ -568,14 +579,14 @@ function publicStopPreview(plan) {
       provider: plan.provider,
     },
     status: plan.running ? "running" : "not-running",
-    willChange: plan.running,
+    willChange: plan.registered,
     activation: "none",
   };
 }
 
 function publicRemovalPreview(plan) {
   const effects = {
-    stopsRunningAppServer: plan.stop.status === "running",
+    stopsRunningAppServer: plan.stop.willChange,
     promotesDefaultAccountId: plan.promotedDefaultAccountId,
     preservesPrivateBackup: true,
     historyThreadsBecomeUnavailable: true,
@@ -585,6 +596,7 @@ function publicRemovalPreview(plan) {
   }
   if (plan.restoresInitialConfig) effects.restoresInitialConfig = true;
   return {
+    revision: managedAccountRevision(plan.snapshots),
     operation: "remove",
     account: {
       id: plan.account.id,

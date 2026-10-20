@@ -15,7 +15,14 @@ export interface CustomProviderModelsSaveInput {
   models: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[];
   probeConnections?: CustomPrimaryProviderSaveInput["probeConnections"];
 }
-export function previewCustomProviderModelsSave(input: CustomProviderModelsSaveInput, options?: CustomPrimaryProviderSaveOptions): Promise<Omit<Awaited<ReturnType<typeof previewCustomPrimaryProviderSave>>, "operation"> & { operation: "model.custom.save"; revision: string }>;
+export interface CustomProviderModelDefaultsPreview {
+  catalog: { before: string; after: string };
+  selection: {
+    before: { model: string | null; reasoningEffort: string | null };
+    after: { model: string | null; reasoningEffort: string | null };
+  };
+}
+export function previewCustomProviderModelsSave(input: CustomProviderModelsSaveInput, options?: CustomPrimaryProviderSaveOptions): Promise<Omit<Awaited<ReturnType<typeof previewCustomPrimaryProviderSave>>, "operation"> & { operation: "model.custom.save"; revision: string; modelDefaults: CustomProviderModelDefaultsPreview }>;
 export function applyCustomProviderModelsSave(input: CustomProviderModelsSaveInput, options: CustomPrimaryProviderSaveOptions & { preview: { revision?: string } }): Promise<Awaited<ReturnType<typeof applyCustomPrimaryProviderSave>> & { operation: "model.custom.save" }>;
 export function customModelProbeConnection(input: { baseUrl: string; upstreamWireApi: "responses" | "chat_completions"; apiKey: string; model: string; reasoningEffort: string; capability: "applyPatch" | "toolSearch" }): string;
 
@@ -82,7 +89,8 @@ export function previewCustomPrimaryProviderSave(
   revision: string;
   provider: CustomPrimaryProviderSaveSummary;
   transport: { scheme: "http" | "https"; cleartext: boolean };
-  activation: "restart-all";
+  willChange: boolean;
+  activation: "restart-all" | "none";
   effects: {
     removesTopLevelBaseUrl: boolean;
     convertsSwitchingProfile: boolean;
@@ -108,9 +116,9 @@ export function applyCustomPrimaryProviderSave(
   input: CustomPrimaryProviderSaveInput,
   options: CustomPrimaryProviderSaveOptions & { preview: { revision?: string } },
 ): Promise<{
-  action: "created" | "updated";
+  action: "created" | "updated" | "unchanged";
   provider: CustomPrimaryProviderSaveSummary;
-  activation: "restart-all";
+  activation: "restart-all" | "none";
   effects: {
     removesTopLevelBaseUrl: boolean;
     convertsSwitchingProfile: boolean;

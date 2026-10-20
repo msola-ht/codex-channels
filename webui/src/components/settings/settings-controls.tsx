@@ -130,7 +130,11 @@ export function SettingsMutationFeedback({ result, writeUnconfirmed, readbackReq
   if (result === null && !writeUnconfirmed) return null
   return <Alert><AlertDescription className="flex flex-col gap-2">
     {writeUnconfirmed ? <p>{t("settingsUi.writeUnconfirmed")}</p> : result !== null ? <>
-      <p>{t("settingsUi.savedActivation", { value: formatActivation(result.activation, t) })}</p>
+      <p>{result.action === "stopped" ? t("settingsUi.instanceStopped")
+        : result.action === "in-use" ? t("settingsUi.instanceInUse")
+        : result.action === "not-running" ? t("settingsUi.instanceNotRunning")
+          : result.action === "unchanged" || result.action === undefined && result.activation.status === "none" ? t("settingsUi.unchanged")
+            : t("settingsUi.savedActivation", { value: formatActivation(result.activation, t) })}</p>
       {result.activation.commands.length > 0 && <p>{t(result.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: result.activation.commands.join("; ") })}</p>}
       {result.auditStatus === "degraded" && <p>{t("settingsUi.auditDegraded")}</p>}
     </> : null}
@@ -180,7 +184,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
 }
 
 function formatActivation(activation: PendingSetting["activation"], t: Translate): string {
-  if (activation.status === "none") return t("settingsUi.unchanged")
+  if (activation.status === "none") return t("settingsUi.noActivationRequired")
   if (activation.status === "next-read" && activation.target === "none") return t("settingsUi.nextRead")
   if (activation.status === "next-thread" && activation.target === "codex") {
     return t("settingsUi.nextThread")

@@ -31,7 +31,7 @@ export function runOpenCodeGoSetup(options?: {
   | { action: "back" }
   | { action: "cancelled" }
   | { action: "configured"; mode: "switching" | "exclusive"; accountId: string }
-  | { action: "default-set" }
+  | { action: "default-set" | "unchanged" }
   | { action: "stopped" | "not-running" | "in-use"; accountId: string }
   | { action: "listed" }
   | { action: "catalog-updated"; activation: "restart-all"; models: string[] }
@@ -78,7 +78,7 @@ export function setOpencodeGoDefaultAccount(
   options?: {
     environment?: NodeJS.ProcessEnv;
   },
-): Promise<{ action: string; accountId: string }>;
+): Promise<{ action: string; accountId: string; activation: "none" | "restart-all" }>;
 
 export function stopOpencodeGoAccount(
   accountId: string,

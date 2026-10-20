@@ -150,6 +150,88 @@ function readPresentationSnapshot(catalog, environment) {
   return { source, revision, document, models, content };
 }
 
+export async function previewProviderModelRename(input, { environment = process.env } = {}) {
+  try { return (await buildRenamePlan(input, environment)).preview; }
+  catch (error) { throw stateError(error); }
+}
+
+export async function applyProviderModelRename(input, { environment = process.env, preview } = {}) {
+  return withModelProviderManagementTransaction(environment, async () => {
+    let plan;
+    try { plan = await buildRenamePlan(input, environment); }
+    catch (error) { throw stateError(error); }
+    if (!preview || preview.operation !== "model.rename" || preview.provider !== plan.preview.provider
+      || preview.model?.id !== input.model || preview.displayName !== input.displayName
+      || preview.revision !== plan.preview.revision) {
+      throw invalid("stale-preview", "revision", "模型目录已变化，请重新预览");
+    }
+    if (!plan.preview.willChange) return { ...plan.preview, action: "unchanged" };
+    try {
+      await assertProviderFileSnapshots(plan.snapshots);
+      if (plan.snapshot.source === "managed") {
+        writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
+          new Map(plan.snapshots.map(entry => [entry.path, entry.content?.toString("utf8")])), environment);
+      } else {
+        const previous = plan.snapshot.document;
+        const definitions = previous.definitions.map(entry => entry.id === input.model ? { ...entry, name: input.displayName } : entry);
+        const transaction = writeResponsesModelCatalog(environment, input.provider, definitions, previous.defaultModel, previous.revision);
+        await withResponsesModelCatalogWrite(transaction, async () => {
+          const read = createProviderFileReader(environment);
+          if (readResponsesModelCatalog(environment, input.provider).content !== transaction.content
+            || read(`${transaction.path}.backup`, 2_097_152) !== transaction.previous.content
+            || read(`${transaction.path}.pending`, 1024) !== transaction.pendingContent) {
+            throw invalid("readback-failed", "displayName", "模型名称保存结果无法确认，已保留备份和 pending；勿自动重试");
+          }
+          finishResponsesModelCatalogWrite(transaction);
+        });
+      }
+    } catch (error) {
+      if (error instanceof ProviderModelManagementError) throw error;
+      throw invalid("operation-failed", "displayName", "模型名称保存未完成；请检查目录与备份，勿自动重试", error);
+    }
+    return { ...plan.preview, action: "updated" };
+  });
+}
+
+async function buildRenamePlan(input, environment) {
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || Object.keys(input).some(key => !["provider", "model", "displayName", "revision"].includes(key))
+    || typeof input.revision !== "string" || !/^[a-f0-9]{64}$/u.test(input.revision)) {
+    throw invalid("invalid-input", "revision", "模型名称请求参数无效，请刷新后重新编辑");
+  }
+  validateInput({ provider: input.provider, model: input.model });
+  if (typeof input.displayName !== "string" || input.displayName.trim() !== input.displayName
+    || !input.displayName || input.displayName.length > 120 || /\p{Cc}/u.test(input.displayName)) {
+    throw invalid("invalid-display-name", "displayName", "显示名称须为 1–120 个字符，且不能包含控制字符");
+  }
+  const { catalogs } = await loadProviderModelCatalogs({ environment });
+  const catalog = catalogs.find(entry => entry.provider === input.provider);
+  if (!catalog) throw invalid("stale-preview", "provider", "提供商目录已变化，请刷新");
+  const snapshot = readPresentationSnapshot(catalog, environment);
+  if (snapshot.revision !== input.revision) throw invalid("stale-preview", "revision", "模型目录已变化，请刷新");
+  if (snapshot.source === "official-shared") throw invalid("rename-not-supported", "provider", "官方共享目录只读");
+  const model = snapshot.models.find(entry => entry.model === input.model);
+  if (!model) throw invalid("model-not-found", "model", "模型不在当前目录中");
+  let snapshots = [], updates;
+  if (snapshot.source === "managed") {
+    const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === input.provider);
+    const directory = managedProviderDirectory(environment, definition);
+    const path = join(directory, definition.catalogFileName);
+    const manifest = join(directory, definition.catalogManifestFileName);
+    snapshots = snapshotProviderFiles([path, manifest, `${path}.backup`, `${manifest}.backup`], environment);
+    if (requiredContent(snapshots, path).toString("utf8") !== snapshot.content) throw invalid("stale-preview", "revision", "模型目录已变化，请刷新");
+    const source = requiredContent(snapshots, manifest).toString("utf8");
+    const next = { ...snapshot.document, models: snapshot.document.models.map(entry => entry.slug === input.model ? { ...entry, display_name: input.displayName } : entry) };
+    validateManagedCatalog(next, definition);
+    updates = new Map([[path, `${JSON.stringify(next, null, 2)}\n`], [manifest, source],
+      [`${path}.backup`, snapshot.content], [`${manifest}.backup`, source]]);
+  }
+  const willChange = model.displayName !== input.displayName;
+  return { snapshot, snapshots, updates, preview: { operation: "model.rename", provider: input.provider,
+    model: { id: input.model, displayName: model.displayName }, displayName: input.displayName,
+    providers: catalog.providers, revision: snapshot.revision, willChange, activation: willChange ? "restart-app-server" : "none" } };
+}
+
 export async function previewProviderModelContextChange(input, { environment = process.env } = {}) {
   try { return (await buildContextPlan(input, environment)).preview; }
   catch (error) { throw stateError(error); }
@@ -187,7 +269,7 @@ export async function applyProviderModelContextChange(input, { environment = pro
         throw invalid("operation-failed", "contextWindow", "模型上下文保存未完成；请检查目录与备份，勿自动重试", error);
       }
     }
-    return { ...plan.preview, action: "updated" };
+    return { ...plan.preview, action: plan.preview.willChange ? "updated" : "unchanged" };
   });
 }
 
@@ -219,7 +301,8 @@ async function buildContextPlan(input, environment) {
   return { snapshot, preview: { operation: "model.context", provider: input.provider,
     model: { id: model.model, displayName: model.displayName, contextWindow: model.contextWindow, maxContextWindow: model.maxContextWindow },
     contextWindow: input.contextWindow, providers: catalog.providers, revision: snapshot.revision,
-    willChange: model.contextWindow !== input.contextWindow, activation: "restart-app-server" } };
+    willChange: model.contextWindow !== input.contextWindow,
+    activation: model.contextWindow !== input.contextWindow ? "restart-app-server" : "none" } };
 }
 
 export async function previewProviderModelRemoval(input, { environment = process.env } = {}) {
@@ -256,7 +339,9 @@ export async function applyProviderModelRemoval(input, { environment = process.e
 }
 
 async function buildRemovalPlan(input, environment) {
-  validateInput(input);
+  // Existing v5 catalogs may contain format characters accepted at creation.
+  // Permit only exact lookup for removal; never normalize or rename that ID.
+  validateInput(input, { allowStoredCustomModel: isCustomCatalogProvider(input?.provider) });
   const definitions = loadManagedModelProviderDefinitions(environment);
   const definition = definitions.find(entry => entry.id === input.provider);
   const family = definition && managedProviderAccountFamilies.find(candidate => definition.storageId === candidate.storageId);
@@ -446,11 +531,12 @@ function validateManagedCatalog(catalog, definition) {
   }
 }
 
-function validateInput(input) {
+function validateInput(input, { allowStoredCustomModel = false } = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !["provider", "model"].includes(key))
     || typeof input.provider !== "string" || !input.provider.length || input.provider.trim() !== input.provider || input.provider.length > 100
     || typeof input.model !== "string" || !input.model.length || input.model.trim() !== input.model || input.model.length > 200
-    || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(input.provider + input.model)) throw invalid("invalid-input", "model", "必须提供准确的 provider 和 model ID，不能包含额外字段");
+    || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(input.provider)
+    || (allowStoredCustomModel ? /\p{Cc}/u : /[\p{Cc}\p{Cf}\p{Cs}]/u).test(input.model)) throw invalid("invalid-input", "model", "必须提供准确的 provider 和 model ID，不能包含额外字段");
 }
 
 function requiredContent(snapshots, path) {

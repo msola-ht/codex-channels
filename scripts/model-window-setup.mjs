@@ -54,17 +54,17 @@ export async function runModelWindowSetup({
     const result = await applyProviderModelContextChange(input, { environment, preview });
     output.write(`${selected.displayName} 上下文窗口：${result.contextWindow} Token（模型最大值 ${result.model.maxContextWindow} Token）。\n`);
     output.write(`应用 Provider：${result.providers.join("、")}。\n`);
-    output.write("已设置所选 Provider 的模型窗口；既有自动压缩阈值保持不变。\n");
-    writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
+    output.write(result.action === "unchanged" ? "模型窗口未变化，无需保存或重启。\n" : "已设置所选 Provider 的模型窗口；既有自动压缩阈值保持不变。\n");
+    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
     return {
-      action: "configured",
+      action: result.action === "unchanged" ? "unchanged" : "configured",
       provider: result.provider,
       model: result.model.id,
       windowPercent: result.contextWindow * 100 / result.model.maxContextWindow,
       contextWindow: result.contextWindow,
       providers: result.providers,
-      activation: "restart-app-server",
-      activationResult: configActivationResult("restart-app-server"),
+      activation: result.activation,
+      activationResult: configActivationResult(result.activation),
     };
   } catch (error) {
     if (allowBack && error instanceof ModelWindowSetupCancelled) {

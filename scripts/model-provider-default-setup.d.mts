@@ -43,10 +43,12 @@ export function runModelProviderDefaultSetup(
 ): Promise<
   | { action: "back" }
   | {
-      action: "configured";
+      action: "configured" | "unchanged";
       provider: ManagedModelProviderId;
       model: string;
       reasoningEffort: string;
       mode: "switching" | "exclusive";
+      activation: "restart-app-server" | "none";
+      activationResult: import("./config-activation-result.mjs").ConfigActivationResult;
     }
 >;

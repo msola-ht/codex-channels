@@ -102,6 +102,8 @@ function ProviderSettingsCard({
   const [confirmRemoveBaseUrl, setConfirmRemoveBaseUrl] = useState(false)
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
   const [contextDraft, setContextDraft] = useState<ModelContextDraft | null>(null)
+  const [renameDraft, setRenameDraft] = useState<{ provider: string; model: string; displayName: string; previousName: string; revision: string } | null>(null)
+  const renamePreviewRef = useRef<HTMLButtonElement | null>(null)
   const [templateTarget, setTemplateTarget] = useState<ProviderModelTemplateTarget | null>(null)
   const [additionTarget, setAdditionTarget] = useState<ProviderModelAdditionTarget | null>(null)
   const additionTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -131,6 +133,10 @@ function ProviderSettingsCard({
   const contextCatalog = settings.modelCatalogs.find(catalog => catalog.provider === contextDraft?.provider)
   const contextStale = contextDraft !== null && (contextCatalog?.revision !== contextDraft.revision || contextCatalog.source === "official-shared")
   const contextValid = contextDraft !== null && validContextWindow(contextDraft.value, 1024, contextDraft.maxContextWindow)
+  const renameCatalog = settings.modelCatalogs.find(catalog => catalog.provider === renameDraft?.provider)
+  const renameStale = renameDraft !== null && (renameCatalog?.revision !== renameDraft.revision || renameCatalog.source === "official-shared")
+  const renameValid = renameDraft !== null && renameDraft.displayName.trim().length > 0 && renameDraft.displayName.trim().length <= 120
+    && renameDraft.displayName.trim() !== renameDraft.previousName
   const modelsOnly = section === "models"
   const connectionOnly = !modelsOnly && editingId !== null && catalogKind === "custom"
   const editorStale = editingId !== null && editorOpen && editorRevision !== settings.resourceRevision
@@ -295,6 +301,7 @@ function ProviderSettingsCard({
     if (result !== null && (operation === "primary.custom.save" || operation === "primary.custom.connection.save" || operation === "model.custom.save")) resetForm()
     if (result !== null && operation === "managed.default") resetManaged()
     if (result !== null && operation === "model.context") setContextDraft(null)
+    if (result !== null && operation === "model.rename") setRenameDraft(null)
     if (result !== null && operation === "model.add") {
       additionSavedTarget.current = additionTarget?.provider ?? null
       setAdditionTarget(null)
@@ -314,21 +321,26 @@ function ProviderSettingsCard({
         <div className="flex flex-col gap-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{catalog.displayName}</h3><Badge variant="outline">{t(catalog.source === "managed" ? "modelCatalog.sourceManaged" : catalog.source === "custom" ? "modelCatalog.sourceCustom" : "modelCatalog.sourceOfficial")}</Badge></div>
           <p className="text-xs font-normal text-muted-foreground">{t("modelCatalog.scope", { providers: catalog.providers.join(t("managementUi.listSeparator")) })}</p>
         </div>
-        {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null || contextDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
-        {catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) ? <Button variant="outline" size="sm" ref={node => { if ((additionTarget?.provider ?? additionSavedTarget.current) === catalog.provider) additionTriggerRef.current = node }} disabled={busy || pending !== null || contextDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null || editorOpen} onClick={event => { additionTriggerRef.current = event.currentTarget; management.clearError(); setAdditionTarget({ provider: catalog.provider, revision: settings.resourceRevision, models: catalog.models.map(entry => ({ id: entry.id, displayName: entry.displayName })) }) }}>{t("modelAddition.title")}</Button> : null}
+        {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
+        {catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) ? <Button variant="outline" size="sm" ref={node => { if ((additionTarget?.provider ?? additionSavedTarget.current) === catalog.provider) additionTriggerRef.current = node }} disabled={busy || pending !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null || editorOpen} onClick={event => { additionTriggerRef.current = event.currentTarget; management.clearError(); setAdditionTarget({ provider: catalog.provider, revision: settings.resourceRevision, models: catalog.models.map(entry => ({ id: entry.id, displayName: entry.displayName })) }) }}>{t("modelAddition.title")}</Button> : null}
       </div>,
       models: catalog.models.map(entry => ({ ...entry.presentation, isDefault: entry.isDefault })),
       webSearchSettings: settings.webSearchSettings.filter(entry => catalog.providers.includes(entry.provider)),
       onSelect: model => setSelectedModel({ provider: catalog.provider, model: model.model, revision: catalog.revision }),
       renderAction: model => {
         const reason = model.isDefault ? t("modelCatalog.defaultProtected") : catalog.models.length <= 1 ? t("modelCatalog.lastProtected") : !catalog.canRemove ? t("modelCatalog.unsupported") : undefined
-        const locked = busy || pending !== null || contextDraft !== null || editorOpen || templateTarget !== null || additionTarget !== null || webSearchTarget !== null
+        const locked = busy || pending !== null || contextDraft !== null || renameDraft !== null || editorOpen || templateTarget !== null || additionTarget !== null || webSearchTarget !== null
         return <DropdownMenu onOpenChange={(open, details) => { if (open && locked) details.cancel() }}>
           <DropdownMenuTrigger ref={node => {
             const target = templateTarget ?? templateSavedTarget.current
             if (target?.provider === catalog.provider && target.model === model.model) templateTriggerRef.current = node
           }} render={<Button variant="outline" size="sm" />} onFocus={event => { actionTriggerRef.current = event.currentTarget }} onPointerDown={event => { actionTriggerRef.current = event.currentTarget }} aria-disabled={locked}>{t("modelManagement.actions")}</DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64" finalFocus={contextDraft !== null || templateTarget !== null || webSearchTarget !== null || pending !== null ? false : undefined}><DropdownMenuGroup>
+          <DropdownMenuContent align="end" className="w-64" finalFocus={contextDraft !== null || renameDraft !== null || templateTarget !== null || webSearchTarget !== null || pending !== null ? false : undefined}><DropdownMenuGroup>
+          {catalog.source !== "official-shared" ? <DropdownMenuItem disabled={locked} onClick={() => {
+            if (locked) return
+            management.clearError()
+            setRenameDraft({ provider: catalog.provider, model: model.model, displayName: model.displayName, previousName: model.displayName, revision: catalog.revision })
+          }}>{t("modelCatalog.rename")}</DropdownMenuItem> : null}
           <DropdownMenuItem disabled={locked || catalog.providers.length === 0} onClick={() => {
             if (locked || catalog.providers.length === 0) return
             setWebSearchTarget({ catalogProvider: catalog.provider, resourceRevision: settings.resourceRevision, model: model.model, displayName: model.displayName, revision: catalog.revision, providers: catalog.providers })
@@ -466,12 +478,29 @@ function ProviderSettingsCard({
         </DialogContent></Dialog>}
       {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading || management.error !== null || management.readbackRequired} finalFocus={() => {
         if (pending.preview.operation === "model.add") return additionPreviewRef.current?.disabled ? false : additionPreviewRef.current ?? additionTriggerRef.current ?? true
-        const preview = pending.preview.operation === "model.template.update" ? templatePreviewRef.current : pending.preview.operation === "model.context" ? contextPreviewRef.current : null
-        if (!["model.template.update", "model.context", "model.remove"].includes(pending.preview.operation)) return true
+        const preview = pending.preview.operation === "model.template.update" ? templatePreviewRef.current : pending.preview.operation === "model.context" ? contextPreviewRef.current : pending.preview.operation === "model.rename" ? renamePreviewRef.current : null
+        if (!["model.template.update", "model.context", "model.rename", "model.remove"].includes(pending.preview.operation)) return true
         return preview === null ? (pending.preview.operation === "model.template.update" ? templateTriggerRef.current : actionTriggerRef.current) ?? true : preview.disabled ? false : preview
       }} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
     </CardContent>
   </Card>
+    <Dialog open={renameDraft !== null && pending === null} disablePointerDismissal onOpenChange={(open, details) => { if (management.busy) { details.cancel(); return }; if (!open) setRenameDraft(null) }}>
+      <DialogContent finalFocus={pending === null ? actionTriggerRef : false} closeLabel={t("modelManagement.cancel")} showCloseButton={!management.busy}>
+        <DialogHeader><DialogTitle>{t("modelCatalog.rename")}</DialogTitle><DialogDescription>{t("modelCatalog.renameHint")}</DialogDescription></DialogHeader>
+        {renameDraft && <FieldGroup>
+          <code className="break-all">{renameDraft.provider} · {renameDraft.model}</code>
+          <Field><FieldLabel htmlFor="rename-model-name">{t("managementUi.displayName")}</FieldLabel><Input id="rename-model-name" value={renameDraft.displayName} maxLength={120} disabled={busy || renameStale} onChange={event => setRenameDraft({ ...renameDraft, displayName: event.target.value })} /></Field>
+          {renameStale && <Alert variant="destructive"><AlertDescription>{t("modelCatalog.stale")}</AlertDescription></Alert>}
+          {management.actionError && <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert>}
+          {management.error && <Alert variant="destructive"><AlertDescription>{management.error}</AlertDescription></Alert>}
+          {management.readbackRequired && <Alert><AlertDescription>{t("settingsUi.readbackUnknown")}</AlertDescription></Alert>}
+        </FieldGroup>}
+        <DialogFooter><Button variant="outline" disabled={management.busy} onClick={() => setRenameDraft(null)}>{t("modelManagement.cancel")}</Button><Button ref={renamePreviewRef} disabled={busy || renameStale || !renameValid} onClick={() => {
+          if (!renameDraft || busy || renameStale || !renameValid) return
+          void management.mutate({ operation: "model.rename", provider: renameDraft.provider, model: renameDraft.model, displayName: renameDraft.displayName.trim(), revision: renameDraft.revision })
+        }}>{t("modelManagement.preview")}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog open={contextDraft !== null && pending === null} disablePointerDismissal onOpenChange={(open, details) => { if (management.busy) { details.cancel(); return }; if (!open) setContextDraft(null) }}>
       <DialogContent finalFocus={pending === null ? actionTriggerRef : false} closeLabel={t("modelManagement.cancel")} showCloseButton={!management.busy} className="max-h-[85dvh] overflow-y-auto">
         <DialogHeader><DialogTitle>{t("modelCatalog.editContext")}</DialogTitle><DialogDescription>{t("modelCatalog.editContextHint")}</DialogDescription></DialogHeader>
@@ -559,9 +588,18 @@ function ProviderSettingsConfirmationDialog({
   const providerDetails = typeof pending.provider === "object" ? pending.provider : undefined
   const notices: string[] = []
   const contextChange = pending.operation === "model.context"
-  const lines = localRemoval ? [] : [pending.operation === "model.custom.save" ? t("modelCatalog.editOperation") : contextChange ? t("modelCatalog.contextOperation") : t("accountConfirmation.operation", { value: pending.operation })]
+  const rename = pending.operation === "model.rename"
+  const lines = localRemoval ? [] : [pending.operation === "model.custom.save" ? t("modelCatalog.editOperation") : rename ? t("modelCatalog.rename") : contextChange ? t("modelCatalog.contextOperation") : t("accountConfirmation.operation", { value: pending.operation })]
   if (!localRemoval && pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: typeof pending.provider === "string" ? pending.provider : pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
   if (providerDetails?.model !== undefined) lines.push(t("managementUi.defaultModelConfirm", { value: providerDetails.model }))
+  if (pending.modelDefaults !== undefined) {
+    const { catalog, selection } = pending.modelDefaults
+    const value = (entry: string | null) => entry ?? t("customModel.unset")
+    lines.push(t("managementUi.catalogDefaultChange", { before: catalog.before, after: catalog.after }))
+    lines.push(t("managementUi.providerDefaultChange", { before: value(selection.before.model), after: value(selection.after.model) }))
+    lines.push(t("managementUi.providerReasoningChange", { before: value(selection.before.reasoningEffort), after: value(selection.after.reasoningEffort) }))
+  }
+  if (pending.willChange === false) lines.push(t("settingsUi.unchanged"))
   if (providerDetails?.baseUrl !== undefined) lines.push(t("managementUi.baseUrlConfirm", { value: providerDetails.baseUrl }))
   if (providerDetails?.mode !== undefined) lines.push(t("managementUi.modeConfirm", { value: t(providerDetails.mode === "switching" ? "modelManagement.switching" : "modelManagement.exclusive") }))
   if (providerDetails?.supportsWebsockets !== undefined) lines.push(t("managementUi.websocketsConfirm", { value: t(providerDetails.supportsWebsockets ? "managementUi.supported" : "managementUi.unsupported") }))
@@ -573,6 +611,7 @@ function ProviderSettingsConfirmationDialog({
   if (providerDetails?.models !== undefined) for (const model of providerDetails.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: capability(model.supportsImages), reasoning: model.reasoningEfforts === undefined ? t("common.unknown") : model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? t("customModel.unset"), patch: model.applyPatchToolType === undefined ? t("common.unknown") : model.applyPatchToolType ?? t("managementUi.unsupported"), search: capability(model.supportsSearchTool) }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model }) : ""))
   if (pending.target !== undefined) lines.push(t("managementUi.targetConfirm", { name: pending.target.displayName, id: pending.target.id }))
   if (!localRemoval && pending.model !== undefined) lines.push(t("managementUi.modelConfirm", { name: pending.model.displayName, id: pending.model.id }))
+  if (rename && pending.displayName !== undefined) lines.push(t("modelCatalog.renameAfter", { name: pending.displayName }))
   if (contextChange && pending.model?.contextWindow !== undefined) lines.push(t("openAiModelCatalog.previousContext") + ": " + pending.model.contextWindow)
   if (contextChange && pending.model?.maxContextWindow !== undefined) lines.push(t("openAiModelCatalog.maxContext") + ": " + pending.model.maxContextWindow)
   if (pending.providers !== undefined && pending.providers.length > 0) lines.push(t(localRemoval ? "modelCatalog.removalScope" : "managementUi.appliedProviders", { providers: pending.providers.join(t("managementUi.listSeparator")) }))
@@ -585,7 +624,7 @@ function ProviderSettingsConfirmationDialog({
     lines.push(t("managementUi.defaultAccountScope", { providers: scope("defaultModelProviders") }))
     lines.push(t("managementUi.sharedReasoningScope", { providers: scope("reasoningEffortProviders") }))
     if (pending.before) lines.push(t("managementUi.defaultBefore", { model: pending.before.defaultModel, reasoning: pending.before.reasoningEffort }))
-    lines.push(t("managementUi.defaultOverrideCleanup"))
+    if (pending.willChange) lines.push(t("managementUi.defaultOverrideCleanup"))
   }
   if (pending.contextWindow !== undefined) lines.push(t("managementUi.windowTokensConfirm", { tokens: pending.contextWindow }))
   else if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
@@ -619,8 +658,8 @@ function ProviderSettingsConfirmationDialog({
       </div>
     </div> : <p className="whitespace-pre-line">{lines.join("\n")}</p>}
     {providerDetails?.models?.map(entry => <CustomModelDetailsPreview key={entry.id} entry={entry} />)}
-    {!localRemoval ? <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: contextChange && pending.activation === "restart-app-server" ? t("settingsUi.restartAppServer") : pending.activation })}</p> : null}
-    {contextChange && pending.activation === "restart-app-server" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart appserver" })}</p> : null}
+    {!localRemoval ? <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: pending.activation === "none" ? t("settingsUi.unchanged") : pending.activation === "restart-app-server" ? t("settingsUi.restartAppServer") : pending.activation === "restart-all" ? t("settingsUi.restartAll") : pending.activation })}</p> : null}
+    {(contextChange || rename) && pending.activation === "restart-app-server" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart appserver" })}</p> : null}
     {!localRemoval && pending.activation === "restart-all" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart all" })}</p> : null}
   </ManagementConfirmationDialog>
 }
