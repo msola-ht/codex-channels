@@ -202,6 +202,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       {
         mode,
         previousMode,
+        previousProfile: snapshots.find(item => item.path === plan.paths.profilePath)?.content?.toString("utf8"),
         apiKey, catalogPath: plan.paths.catalogPath, catalog: managedCatalog, model: selectedModel,
       },
     );

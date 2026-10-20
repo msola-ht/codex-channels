@@ -8,7 +8,7 @@ import { loadManagedModelProviderDefinitions, loadManagedModelProviderWatcherDef
 import { managedProviderDirectory, managedProviderMarkerPath, readManagedMarker, validateConfiguredModelProviders } from "./model-provider-runtime.mjs";
 import { readCodexConfigFile } from "./provider-file-access.mjs";
 import { readPrivateFileSync } from "./private-file.mjs";
-import { providerWebSearchSettingsPath, readProviderWebSearchFingerprint } from "./provider-web-search.mjs";
+import { readProviderWebSearchFingerprint } from "./provider-web-search.mjs";
 import { withWindowsAclDeadline, closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "./windows-acl-bridge.mjs";
 
 if (!parentPort) throw new Error("Provider settings worker requires a parent");
@@ -30,15 +30,13 @@ function fingerprints() {
   const files = new Map();
   const groups = new Map();
   const home = codexHomePath(environment);
-  const searchPath = providerWebSearchSettingsPath(environment);
-  files.set(searchPath, { path: searchPath, maximumBytes: 1_048_576 });
-  files.set(`${searchPath}.pending`, { path: `${searchPath}.pending`, maximumBytes: 4096 });
   for (const definition of loadManagedModelProviderWatcherDefinitions(environment)) {
     const paths = [join(managedProviderDirectory(environment, definition), definition.catalogFileName)];
     if ("profileFileName" in definition) paths.push(
       join(home, readManagedMarker(environment, definition)?.mode === "exclusive" ? "config.toml" : definition.profileFileName),
       managedProviderMarkerPath(environment, definition),
     );
+    if ("profileFileName" in definition) paths.push(`${paths[1]}.search-pending`);
     groups.set(definition.id, [...new Set([...(groups.get(definition.id) ?? []), ...paths])]);
     for (const path of paths) files.set(path, { path, maximumBytes: path === paths[0] ? 2_097_152 : 1_048_576 });
   }

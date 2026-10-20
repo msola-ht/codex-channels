@@ -131,6 +131,7 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     const model = resolveManagedCatalogModel(catalog, definition, previous?.model);
     const configured = createManagedProviderConfiguration(current, initial.config, definition, {
       mode: preview.mode, previousMode: previous?.mode, apiKey: input.apiKey,
+      previousProfile: snapshots.find(item => item.path === paths.profile)?.content?.toString("utf8"),
       catalogPath: paths.catalog, catalog, model,
     });
     updates.set(paths.backup, `${JSON.stringify(initial, null, 2)}\n`);

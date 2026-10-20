@@ -60,7 +60,6 @@ export function ProviderWebSearchConfirmation({ preview, ...props }: {
     <p>{t("managementUi.providerConfirm", { name: preview.provider })}</p>
     <p>{t("providerWebSearch.before", { mode: searchLabel(t, preview.before.mode) })}</p>
     <p>{t("providerWebSearch.after", { mode: searchLabel(t, preview.mode) })}</p>
-    {preview.effects?.clearsProfileOverride === true ? <p className="text-muted-foreground">{t("providerWebSearch.clearProfileOverride")}</p> : null}
     <p className="text-muted-foreground">{t("providerWebSearch.activationHint")}</p>
     {preview.activation === "restart-app-server" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart appserver" })}</p> : null}
   </ManagementConfirmationDialog>

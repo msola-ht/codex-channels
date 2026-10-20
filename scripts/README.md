@@ -231,8 +231,8 @@
   脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
   Provider CLI 列表共同复用；同时按 `CODEX_HOME/auth.json` 是否存在返回 OpenAI 官方登录状态，
   未检测到鉴权文件时按未登录处理。
-  `loadProviderWebSearchSettings` 只读投影官方全局搜索值（`source=global`）及第三方受管、自定义 Provider 的独立覆盖（`source=provider`），使用 `ready`／`error` 状态；第三方缺省值为跟随全局，首次显式保存前保留既有受管切换 Profile 偏好。不推断会话实际模式，核心配置校验仍由原管理状态加载负责。
-- `provider-web-search-management.mjs` / `provider-web-search-management.d.mts`：精确已配置 Provider 的独立搜索模式预览与确认保存；复用 Provider 事务锁、资源修订及一次性确认，聚合与路径输入拒绝。显式保存同步移除对应已有独立 Profile 的顶层搜索值，其他字段保留；预览列明清理动作。写前生成唯一私有备份和 `.pending`，逐文件快照保护、原子写及失败回滚，成功回读后移除记录；不确定结果保留恢复材料，不自动重试或重启服务。
+  `loadProviderWebSearchSettings` 只读投影主 config 的搜索值（`source=global`，包括固定提供商）及切换 Provider 各自 config 的顶层值（`source=provider`），使用 `ready`／`error` 状态；独立 config 缺项为跟随全局。不推断会话实际模式，核心配置校验仍由原管理状态加载负责。
+- `provider-web-search-management.mjs` / `provider-web-search-management.d.mts`：精确已配置切换 Provider 的搜索模式预览与确认保存，直接更新其 config 顶层 `web_search`，跟随全局只删除该字段；固定提供商共用主配置，要求在通用设置修改。复用 Provider 事务锁、资源修订及一次性确认，聚合与路径输入拒绝。写前生成唯一私有备份和 `<config>.search-pending`，逐文件快照保护、原子写及失败回滚，成功回读后移除记录；不确定结果保留恢复材料，不自动重试或重启服务。旧独立搜索文件不读取、不迁移、不删除。
 - `model-provider-management-transaction.mjs` / `model-provider-management-transaction.d.mts`：统一
   串行 DeepSeek、OpenCode Go、自定义主 Provider 与默认模型设置的跨文件管理
   事务；同一异步调用链中的嵌套操作复用事务，避免 Provider 设置与账户删除交叉提交。
@@ -437,15 +437,14 @@
   不根据 OpenAI 登录状态自动选择第三方，不修改主配置。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；未显式选择时连接主实例，
   显式 Provider 通过共享映射选择相应 Socket 和规范 `sf-*` Profile，连接对应隔离实例并供 Remote TUI
-  完成第三方 Provider 认证；CP 自定义目录 Provider 复用已验证的启动参数投影，旧磁盘 Profile 中的
-  内部搜索禁用值不作为用户偏好，凭据仅通过该 TUI 子进程的私有环境变量传入。
+  完成第三方 Provider 认证；受管及自定义切换 Provider 统一使用原生 Profile 加载，包括其中的搜索设置。
   当前目录或显式 `--workspace` 只决定执行目录，第三方 Profile 不复制权限，
   不注入 Gateway 权限；原生显式参数与个人 Profile 由 Codex 自行处理；
   聚合入口当前关闭，内部实现保留：聚合选择复用共享 Runtime 拓扑与 Supervisor 按需租约，不生成磁盘 Profile；启动前通过已有
   Codex Client 读取服务端默认模型与目录，投影启动设置，避免本地 OpenAI 默认模型覆盖聚合目录。
   透传 `-m`/`--model` 或 `-c model=...` 选择目录内精确模型时，按 Codex 的最终模型优先级使用目标模型的默认思考等级；
   服务端默认模型保留服务端思考等级，显式 `-c model_reasoning_effort=...` 优先，并尊重 `--` 参数边界。
-  第三方受管及自定义 Provider 读取独立搜索覆盖并注入启动默认值；官方及跟随全局时不注入，用户显式透传参数继续按原生优先级处理。
+  不再追加独立搜索覆盖参数；搜索值随对应 Profile 加载，用户显式透传参数继续按原生优先级处理。
   自动审查沿用原生配置或用户显式设置，不按 Provider 或模型过滤、降级，也不为此固定请求模型。
   Remote 恢复及继承式分叉保留历史实际模型和 reviewer。
   聚合目录和 Provider 不允许由透传参数替换；
