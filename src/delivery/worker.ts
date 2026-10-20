@@ -49,9 +49,12 @@ port.on("message", ({ id, command }: WorkerRequest) => {
   }
 });
 try {
-  store = new SqliteDeliveryJournal(options.directory, options.limits, options.mode);
   if (Atomics.load(options.cancellation, 0) !== 0) void close(-1);
-  else port.postMessage({ id: 0, ok: true, result: null } satisfies WorkerReply);
+  else {
+    store = new SqliteDeliveryJournal(options.directory, options.limits, options.mode);
+    if (Atomics.load(options.cancellation, 0) !== 0) void close(-1);
+    else port.postMessage({ id: 0, ok: true, result: null } satisfies WorkerReply);
+  }
 } catch (error) {
   port.postMessage({ id: 0, ok: false, code: error instanceof DeliveryError ? error.code : "storage", failure: { phase: "startup", reason: failureReason(error) } } satisfies WorkerReply);
   void close(-1);

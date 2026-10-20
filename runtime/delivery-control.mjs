@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { z } from "zod";
-import { PrivateIpcServer, createPrivateIpcConnection } from "./private-ipc.mjs";
+import { PrivateIpcServer, createPrivateIpcConnectionAsync } from "./private-ipc.mjs";
 
 const entry = z.strictObject({ id: z.string().min(1).max(4096), revision: z.string().regex(/^[a-f0-9]{64}$/u) });
 const requestSchema = z.strictObject({ version: z.literal(1), action: z.enum(["retry", "ignore"]),
@@ -99,29 +99,45 @@ export async function watchDeliveryChanges(directory, signal, receive) {
 }
 
 /** null proves no command was sent; after writing, any connection loss is unconfirmed. */
-export async function requestDeliveryResolution(directory, entries, action) {
+export async function requestDeliveryResolution(directory, entries, action, signal) {
   const request = requestSchema.parse({ version: 1, entries, action });
-  let socket;
-  try {
-    const path = deliveryControlSocketPath(directory);
-    validateParent(path);
-    socket = createPrivateIpcConnection(path);
-  }
-  catch (error) { if (error?.code === "ENOENT") return null; throw error; }
-  let sent = false;
-  const timer = setTimeout(() => socket.destroy(), timeoutMs);
-  try {
-    await new Promise((resolve, reject) => {
-      socket.once("connect", resolve);
-      socket.once("error", reject);
-      socket.once("close", () => reject(new Error("Delivery control connection closed")));
-    });
-    const response = readFrame(socket);
-    sent = true;
-    socket.write(`${JSON.stringify(request)}\n`);
-    return responseSchema.parse(await response).result;
-  } catch (error) {
-    if (!sent && error?.code === "ECONNREFUSED") return null;
-    return "unconfirmed";
-  } finally { clearTimeout(timer); socket.destroy(); }
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    let socket;
+    let sent = false;
+    let settled = false;
+    const cancellation = new AbortController();
+    const finish = (result, error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      cancellation.abort();
+      socket?.destroy();
+      if (error) reject(error); else resolve(result);
+    };
+    const abort = () => finish("unconfirmed");
+    const timer = setTimeout(abort, timeoutMs);
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
+      const path = deliveryControlSocketPath(directory);
+      validateParent(path);
+      void createPrivateIpcConnectionAsync(path, { signal: cancellation.signal }).then(connection => {
+        socket = connection;
+        socket.on("error", error => finish(!sent && error?.code === "ECONNREFUSED" ? null : "unconfirmed"));
+        if (settled) { socket.destroy(); return; }
+        socket.once("close", abort);
+        socket.once("connect", () => {
+          if (settled) return;
+          const response = readFrame(socket);
+          sent = true;
+          socket.write(`${JSON.stringify(request)}\n`);
+          void response.then(value => finish(responseSchema.parse(value).result)).catch(abort);
+        });
+      }).catch(error => finish(error?.code === "ENOENT" ? null : undefined, error?.code === "ENOENT" ? undefined : error));
+    } catch (error) {
+      finish(error?.code === "ENOENT" ? null : undefined, error?.code === "ENOENT" ? undefined : error);
+    }
+    if (signal?.aborted) abort();
+  });
 }

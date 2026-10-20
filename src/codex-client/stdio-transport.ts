@@ -3,6 +3,7 @@ import { createInterface, type Interface } from "node:readline";
 
 import type {
   CreateCodexProcessInvocation,
+  RegisterCodexProcess,
   TerminateCodexProcess,
 } from "./codex-process.js";
 import { BaseTransport } from "./transport.js";
@@ -10,6 +11,7 @@ import { BaseTransport } from "./transport.js";
 export interface StdioTransportOptions {
   createCodexProcessInvocation: CreateCodexProcessInvocation;
   terminateCodexProcess: TerminateCodexProcess;
+  registerCodexProcess: RegisterCodexProcess;
   cwd: string;
   environment?: NodeJS.ProcessEnv;
   onStderr?: (text: string) => void;
@@ -39,10 +41,12 @@ export class StdioTransport extends BaseTransport {
       cwd: this.options.cwd,
       env: this.options.environment,
       stdio: ["pipe", "pipe", "pipe"],
+      detached: process.platform !== "win32",
       windowsHide: process.platform === "win32",
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
     this.process = child;
+    this.options.registerCodexProcess(child);
     this.lines = createInterface({ input: child.stdout });
     this.lines.on("line", (line) => { if (this.process === child) this.emitMessage(line); });
     child.stderr.setEncoding("utf8");
@@ -58,10 +62,11 @@ export class StdioTransport extends BaseTransport {
     });
     child.on("exit", (code, signal) => {
       if (this.process !== child) return;
-      this.process = undefined;
       this.lines?.close();
       this.lines = undefined;
-      if (!this.closing) this.emitClose(new Error(`Codex App Server 已退出：code=${code} signal=${signal}`));
+      const unexpected = !this.closing;
+      this.closing = true;
+      if (unexpected) this.emitClose(new Error(`Codex App Server 已退出：code=${code} signal=${signal}`));
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -72,7 +77,7 @@ export class StdioTransport extends BaseTransport {
 
   async send(message: string): Promise<void> {
     const child = this.process;
-    if (this.closing || !child || child.stdin.destroyed) {
+    if (this.closing || !child || child.stdin.destroyed || child.exitCode !== null || child.signalCode !== null) {
       throw new Error("Codex stdio Transport 尚未连接");
     }
     await new Promise<void>((resolve, reject) => {
@@ -97,9 +102,8 @@ export class StdioTransport extends BaseTransport {
     this.lines = undefined;
     const child = this.process;
     if (!child) return;
-    if (child.exitCode === null && child.signalCode === null) {
-      await this.options.terminateCodexProcess(child);
-    }
+    // The wrapper's exit does not establish that the owned native subtree exited.
+    await this.options.terminateCodexProcess(child);
     if (this.process === child) this.process = undefined;
   }
 }

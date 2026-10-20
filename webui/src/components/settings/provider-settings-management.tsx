@@ -42,6 +42,7 @@ const probeReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhig
 type ProviderSettingsManagementProps = {
   management: ProviderSettingsController
   onChanged?: () => void
+  catalogReadOnly?: boolean
 } & ({ section: "models"; renderCatalog: (groups: ModelCatalogGroup[]) => ReactNode } | { section: "providers"; renderCatalog?: never })
 
 interface ModelContextDraft {
@@ -55,14 +56,14 @@ interface ModelContextDraft {
   preset: ContextWindowPreset
 }
 
-export function ProviderSettingsManagement({ management, onChanged, section, renderCatalog }: ProviderSettingsManagementProps) {
+export function ProviderSettingsManagement({ management, onChanged, section, renderCatalog, catalogReadOnly = false }: ProviderSettingsManagementProps) {
   const { t } = useTranslation()
   const settings = management.settings
   if (settings === null) {
-    const content = management.loading ? renderCatalog ? <p aria-busy="true">{t("common.loading")}</p> : <LoadingSettingsCard title={t("managementUi.providerSettings")} /> : <SettingsError message={management.error ?? t("managementUi.providerSettingsUnavailable")} retry={management.refetch} />
+    const content = management.loading ? renderCatalog ? <p aria-busy="true">{t("common.loading")}</p> : <LoadingSettingsCard title={t("managementUi.providerSettings")} /> : <SettingsError title={t("settingsUi.providerLoadFailed")} message={management.error ?? t("managementUi.providerSettingsUnavailable")} retry={management.refetch} />
     return renderCatalog ? renderCatalog([{ id: "third-party-status", header: t("modelCatalog.title"), models: [], onSelect: () => {}, renderAction: () => null, content }]) : content
   }
-  return <>{management.error !== null && !renderCatalog ? <SettingsError message={management.error} retry={management.refetch} /> : null}<ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} section={section} renderCatalog={renderCatalog} /></>
+  return <>{management.error !== null ? <SettingsError title={t("settingsUi.providerLoadFailed")} message={`${management.error} ${t("settingsUi.previousSnapshot")}`} retry={management.refetch} /> : null}<ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} section={section} renderCatalog={renderCatalog} catalogReadOnly={catalogReadOnly} /></>
 }
 
 function ProviderSettingsCard({
@@ -71,19 +72,21 @@ function ProviderSettingsCard({
   onChanged,
   section,
   renderCatalog,
+  catalogReadOnly,
 }: {
   section: "providers" | "models"
   settings: ManagementProviderSettingsResponse
   management: ProviderSettingsController
   onChanged?: () => void
   renderCatalog?: (groups: ModelCatalogGroup[]) => ReactNode
+  catalogReadOnly: boolean
 }) {
   const { t } = useTranslation()
   const [editorOpen, setEditorOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState<{ provider: string; model: string; revision: string } | null>(null)
   const selectedCatalog = settings.modelCatalogs.find(catalog => catalog.provider === selectedModel?.provider)
   const detailsStale = selectedModel !== null && selectedCatalog?.revision !== selectedModel.revision
-  const detailModel = !management.loading && management.error === null && !detailsStale
+  const detailModel = !catalogReadOnly && !management.loading && management.error === null && !detailsStale
     ? selectedCatalog?.models.find(entry => entry.id === selectedModel?.model)?.presentation ?? null : null
   const [editorRevision, setEditorRevision] = useState<string | null>(null)
   const [originalModelCount, setOriginalModelCount] = useState(0)
@@ -151,9 +154,9 @@ function ProviderSettingsCard({
     ...settings.customProviders.switchingProviders,
     ...settings.customProviders.backupCandidates,
   ], [settings.customProviders])
-  const busy = management.busy || management.loading || management.error !== null || management.readbackRequired
+  const busy = catalogReadOnly || management.busy || management.loading || management.error !== null || management.readbackRequired
   const pending = management.pendingPreview
-  const probe = useCustomModelCapabilityProbe(JSON.stringify({ configVersion: settings.configVersion, editingId, providerId, providerName, baseUrl, apiKey, upstreamWireApi, customModels, mode, model, supportsWebsockets, confirmRemoveBaseUrl }), editorOpen && !editorStale && !connectionOnly && catalogKind === "custom" && pending === null)
+  const probe = useCustomModelCapabilityProbe(JSON.stringify({ configVersion: settings.configVersion, editingId, providerId, providerName, baseUrl, apiKey, upstreamWireApi, customModels, mode, model, supportsWebsockets, confirmRemoveBaseUrl }), editorOpen && !catalogReadOnly && !editorStale && !connectionOnly && catalogKind === "custom" && pending === null)
 
   const managedId = managed?.id
   useEffect(() => { resetManaged() }, [managedId, resetManaged])
@@ -199,7 +202,7 @@ function ProviderSettingsCard({
   }
 
   const saveCustom = async () => {
-    if (editorStale) return
+    if (busy || pending !== null || editorStale) return
     if (editingId !== null && editorRevision === null) return
     if (connectionOnly && editorRevision !== null) {
       const result = await management.mutate({
@@ -269,7 +272,7 @@ function ProviderSettingsCard({
   }
 
   const updateManagedDefault = async () => {
-    if (managed === undefined || managedModelEntry === undefined) return
+    if (busy || pending !== null || managed === undefined || managedModelEntry === undefined) return
     await management.mutate({
       operation: "managed.default",
       provider: managed.id,
@@ -296,6 +299,7 @@ function ProviderSettingsCard({
   }
 
   const confirmPending = async () => {
+    if (catalogReadOnly) return
     const operation = management.pendingPreview?.input.operation
     const result = await management.confirm()
     if (result !== null && (operation === "primary.custom.save" || operation === "primary.custom.connection.save" || operation === "model.custom.save")) resetForm()
@@ -326,6 +330,7 @@ function ProviderSettingsCard({
       </div>,
       models: catalog.models.map(entry => ({ ...entry.presentation, isDefault: entry.isDefault })),
       webSearchSettings: settings.webSearchSettings.filter(entry => catalog.providers.includes(entry.provider)),
+      webSearchState: management.loading ? "loading" : management.error !== null ? "error" : undefined,
       onSelect: model => setSelectedModel({ provider: catalog.provider, model: model.model, revision: catalog.revision }),
       renderAction: model => {
         const reason = model.isDefault ? t("modelCatalog.defaultProtected") : catalog.models.length <= 1 ? t("modelCatalog.lastProtected") : !catalog.canRemove ? t("modelCatalog.unsupported") : undefined
@@ -355,13 +360,13 @@ function ProviderSettingsCard({
           </DropdownMenuGroup></DropdownMenuContent>
         </DropdownMenu>
       },
-      content: management.loading ? <p>{t("common.loading")}</p> : management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : catalog.models.length === 0 ? <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty> : undefined,
+      content: catalog.models.length === 0 ? <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty> : undefined,
       footer: !catalog.canRemove ? <p className="text-muted-foreground">{catalog.unavailableReason === "deepseek-template-source" ? t("modelCatalog.deepseek") : catalog.unavailableReason === "shared-accounts-incomplete" ? t("modelCatalog.accountsIncomplete") : catalog.unavailableReason === "official-catalog-unavailable" ? t("modelCatalog.officialUnavailable") : catalog.unavailableReason === "official-shared-catalog" ? t("modelCatalog.official") : t("modelCatalog.unsupported")}</p> : undefined,
     }
   })
   if (catalogGroups.length === 0) catalogGroups.push({
     id: "third-party-status", header: t("modelCatalog.title"), models: [], onSelect: () => {}, renderAction: () => null,
-    content: management.loading ? <p>{t("common.loading")}</p> : management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty>,
+    content: <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty>,
   })
 
   const feedback = <>
@@ -476,7 +481,7 @@ function ProviderSettingsCard({
         <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || probe.running || editorStale || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || (!connectionOnly && (model.trim() === "" || (catalogKind === "custom" && !customModelContextsValid))) || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{modelsOnly ? t("modelCatalog.saveCustom") : editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
         </DialogContent></Dialog>}
-      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading || management.error !== null || management.readbackRequired} finalFocus={() => {
+      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={catalogReadOnly || management.loading || management.error !== null || management.readbackRequired} finalFocus={() => {
         if (pending.preview.operation === "model.add") return additionPreviewRef.current?.disabled ? false : additionPreviewRef.current ?? additionTriggerRef.current ?? true
         const preview = pending.preview.operation === "model.template.update" ? templatePreviewRef.current : pending.preview.operation === "model.context" ? contextPreviewRef.current : pending.preview.operation === "model.rename" ? renamePreviewRef.current : null
         if (!["model.template.update", "model.context", "model.rename", "model.remove"].includes(pending.preview.operation)) return true
@@ -518,8 +523,8 @@ function ProviderSettingsCard({
         <DialogFooter><Button variant="outline" disabled={management.busy} onClick={() => setContextDraft(null)}>{t("modelManagement.cancel")}</Button><Button ref={contextPreviewRef} disabled={busy || contextStale || !contextValid || contextDraft?.value === String(contextDraft?.previousContextWindow)} onClick={() => void updateContext()}>{t("modelManagement.preview")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
-    {additionTarget !== null ? <ProviderModelAdditionDialog key={`${additionTarget.provider}:${additionTarget.revision}`} target={additionTarget} open={pending === null} stale={settings.resourceRevision !== additionTarget.revision} management={management} previewRef={additionPreviewRef} finalFocus={additionTriggerRef} onClose={() => setAdditionTarget(null)} /> : null}
-    {templateTarget !== null ? <ProviderModelTemplateDialog key={`${templateTarget.provider}:${templateTarget.model}:${templateTarget.revision}`} target={templateTarget} open={pending === null} stale={settings.modelCatalogs.find(catalog => catalog.provider === templateTarget.provider)?.revision !== templateTarget.revision} management={management} previewRef={templatePreviewRef} finalFocus={templateTriggerRef} onClose={() => setTemplateTarget(null)} /> : null}
+    {additionTarget !== null ? <ProviderModelAdditionDialog key={`${additionTarget.provider}:${additionTarget.revision}`} target={additionTarget} open={pending === null} stale={catalogReadOnly || settings.resourceRevision !== additionTarget.revision} management={management} previewRef={additionPreviewRef} finalFocus={additionTriggerRef} onClose={() => setAdditionTarget(null)} /> : null}
+    {templateTarget !== null ? <ProviderModelTemplateDialog key={`${templateTarget.provider}:${templateTarget.model}:${templateTarget.revision}`} target={templateTarget} open={pending === null} stale={catalogReadOnly || settings.modelCatalogs.find(catalog => catalog.provider === templateTarget.provider)?.revision !== templateTarget.revision} management={management} previewRef={templatePreviewRef} finalFocus={templateTriggerRef} onClose={() => setTemplateTarget(null)} /> : null}
     {section === "models" && <OpenAiModelDetails model={detailModel} revision={selectedModel?.revision ?? null} provider={selectedModel?.provider} stale={detailsStale} open={selectedModel !== null} loading={management.loading} onClose={() => setSelectedModel(null)} onReload={() => { setSelectedModel(null); management.refetch() }} />}
   </>
 }

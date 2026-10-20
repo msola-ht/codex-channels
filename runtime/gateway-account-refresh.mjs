@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 
 import {
-  createPrivateIpcConnection,
+  createPrivateIpcConnectionAsync,
   PrivateIpcServer,
 } from "./private-ipc.mjs";
 
@@ -153,16 +153,7 @@ function requestGatewayAccountOperation(configPath, request, signal) {
   try { parseRefreshRequest({ ...request, version: protocolVersion }); } catch (error) { return Promise.reject(error); }
   return new Promise((resolve, reject) => {
     let socket;
-    try {
-      socket = createPrivateIpcConnection(gatewayAccountRefreshSocketPath(configPath));
-    } catch (error) {
-      reject(new GatewayAccountRefreshError(
-        "gateway_unavailable",
-        "Gateway 未运行或账户刷新接口不可用",
-        { cause: error },
-      ));
-      return;
-    }
+    const cancellation = new AbortController();
     const chunks = [];
     let bytes = 0;
     let settled = false;
@@ -171,8 +162,9 @@ function requestGatewayAccountOperation(configPath, request, signal) {
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
-      socket.destroy();
-      if (error) reject(error);
+      cancellation.abort();
+      socket?.destroy();
+      if (error !== undefined) reject(error);
       else resolve(value);
     };
     const timer = setTimeout(() => finish(new GatewayAccountRefreshError(
@@ -181,47 +173,55 @@ function requestGatewayAccountOperation(configPath, request, signal) {
     )), requestTimeoutMs);
     const abort = () => finish(signal.reason);
     signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) abort();
-    socket.once("connect", () => {
-      socket.write(`${JSON.stringify({
-        version: protocolVersion,
-        ...request,
-      })}\n`);
-    });
-    socket.on("data", (chunk) => {
-      bytes += chunk.length;
-      if (bytes > maximumResponseBytes) {
-        finish(new GatewayAccountRefreshError(
-          "invalid_response",
-          "Gateway 账户刷新响应过大",
-        ));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    socket.once("end", () => {
-      let response;
-      try {
-        response = parseRefreshResponse(Buffer.concat(chunks).toString("utf8"));
-      } catch (error) {
-        finish(error);
-        return;
-      }
-      if (!response.ok) {
-        finish(new GatewayAccountRefreshError(response.error.code, response.error.message));
-        return;
-      }
-      finish(undefined, request.method === "account/refresh" ? { provider: response.provider } : response.result);
-    });
-    socket.once("error", (error) => finish(new GatewayAccountRefreshError(
+    void createPrivateIpcConnectionAsync(gatewayAccountRefreshSocketPath(configPath), { signal: cancellation.signal }).then(connection => {
+      socket = connection;
+      socket.on("error", (error) => finish(new GatewayAccountRefreshError(
+        "gateway_unavailable",
+        "Gateway 未运行或账户刷新接口不可用",
+        { cause: error },
+      )));
+      if (settled) { socket.destroy(); return; }
+      socket.once("connect", () => {
+        socket.write(`${JSON.stringify({
+          version: protocolVersion,
+          ...request,
+        })}\n`);
+      });
+      socket.on("data", (chunk) => {
+        bytes += chunk.length;
+        if (bytes > maximumResponseBytes) {
+          finish(new GatewayAccountRefreshError(
+            "invalid_response",
+            "Gateway 账户刷新响应过大",
+          ));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      socket.once("end", () => {
+        let response;
+        try {
+          response = parseRefreshResponse(Buffer.concat(chunks).toString("utf8"));
+        } catch (error) {
+          finish(error);
+          return;
+        }
+        if (!response.ok) {
+          finish(new GatewayAccountRefreshError(response.error.code, response.error.message));
+          return;
+        }
+        finish(undefined, request.method === "account/refresh" ? { provider: response.provider } : response.result);
+      });
+      socket.once("close", () => finish(new GatewayAccountRefreshError(
+        "gateway_unavailable",
+        "Gateway 账户刷新连接已关闭",
+      )));
+    }).catch(error => finish(new GatewayAccountRefreshError(
       "gateway_unavailable",
       "Gateway 未运行或账户刷新接口不可用",
       { cause: error },
     )));
-    socket.once("close", () => finish(new GatewayAccountRefreshError(
-      "gateway_unavailable",
-      "Gateway 账户刷新连接已关闭",
-    )));
+    if (signal?.aborted) abort();
   });
 }
 

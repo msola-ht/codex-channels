@@ -139,6 +139,7 @@
 - `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置校验、管理错误、高风险路径分类、Provider 状态缓存，以及
   WebUI HTTP 响应、JSON 请求体、令牌鉴权和回环地址校验；主服务组合共享访问与错误边界并完成分派，
   具体资源处理留在对应管理路由。
+  Codex／Provider 只读管理快照共享 20 秒取消期限与 HTTP 断开处理，关闭 WebUI 会取消并等待其自有连接清理；预览、确认与写入保持各自事务边界。本地模型目录另由 Provider 路由直接投影文件，不依赖完整管理快照。
   管理错误仅映射显式领域类型的稳定代码与安全文案；未知异常返回 500，不将其消息、代码或字段直接公开。冲突返回 409，目标缺失返回 404，明确依赖不可用返回 503。
 - `account-management-error.mjs`：DeepSeek、CLP 及账户运行状态适配器共享的输入、冲突与恢复失败分类；WebUI 只消费其受控代码和字段，不公开底层异常。
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标和调用记录维护异步任务；
@@ -308,6 +309,8 @@
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：WebUI 只读配置连接已有主 App Server，连接失败不启动临时进程；CLI 事务创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` 普通键级修改及更新器关闭 daemon 自动启动作为官方 `config/batchWrite` 事务写入用户配置；
   用户设置修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
+  读取、预览和写入共用临时客户端归属；只读生命周期接受取消信号，关闭自有连接及 Proxy，不终止共享服务。关闭失败保留客户端，由后续操作或 WebUI 关闭重试，未确认前不能创建替代客户端。已确认写入不因清理失败改判为写入失败；输出固定清理告警，不自动重复写入。Unix stdio 创建并登记独立进程组，包装器退出不等于整组退出。
+  WebUI 最终关闭通过 `closeCodexUserConfigClients` 禁止新客户端操作，等待已准入操作结算后再处理残留清理；不取消已提交写入，也不在写入仍持有客户端时确认后台退出。
   所有 CLI 用户设置、MCP 与官方登录统一解析 Gateway 显式 Codex binary，配置为默认 `codex` 时才采用 `CODEX_BINARY`；默认 Codex Home 尚不存在时
   从用户主目录启动并由 Codex 初始化默认目录，显式 `CODEX_HOME` 仍要求已存在且为目录。
 - `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“项目技能”类别；列出项目 `.codex/skills` 下带
@@ -631,6 +634,7 @@
 Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决定资格。后代通过 `ancestorThreadId`
 查询未归档与已归档成员，执行前重新检查会话组及绑定；仅在交互终端 `--confirm` 确认后向父会话
 发送一次官方归档。根会话只扫描一份共享历史，轮数超过阈值时不再扫描后代；扫描与执行显示进度。结果核验在写入批次后集中读取各 Workspace 的已归档/未归档根列表，各组再独立读取后代。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
+扫描连接在建连前登记，连接失败也进入清理；关闭未确认时保留客户端并输出独立告警，不覆盖归档结果。同进程再次扫描前先重试旧连接清理，仍失败时不创建替代连接。
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户交互菜单、模型多选、名单预览与确认；保留账户默认模型，委托账户管理模块执行后显示激活提示。
 - `cline-pass-account-management.mjs` / `cline-pass-account-management.d.mts`：CLI/WebUI 共用的 CLP 固定/切换配置、默认账户与移除预览及私有写入事务；从 Cline 官方元数据投影多模型目录，`createClinePassCatalog` 在定义编译后补齐固定底座的 `send_user_message_async`、`clock` 两项本地工具声明。CLI 显式更新时备份与保留账户默认值，仅 Flash 复制仓库 DS 模板，窗口由全部 CLP 账户共用，不影响 DS，不依赖终端交互。
@@ -641,7 +645,7 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `model-relay-management.mjs` / `model-relay-management.d.mts`：CLI/WebUI 共享 Relay 管理，脱敏资源、Key 多提供商模型授权与思考策略管理、目录输入能力与策略能力、只读预览、版本检查、配置锁/备份/原子保存及 IPC 生效确认；只在实际保存后返回一次新秘密；Relay 专用事务保留已保存结果并单独标记锁清理失败。
 - `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 与队列 SSE 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
 - `relay-reasoning-probe.mjs` / `relay-reasoning-probe.d.mts`：WebUI 按目录版本与公开模型 ID 发起一次基线及八种关闭参数对比；复用真实 Provider 材料、代理、出站策略和 Chat/Responses 观察器，顺序请求、不重试，限制单次/总预算及真实响应字节，以有界 NDJSON 流逐项返回进度、思考可见性、用量和受控状态，不保存服务器配置或正文。
-- `webui-queue-events.mjs`：账户快照、请求指标、Relay、渠道投递与管理任务共用的鉴权后 SSE 转接、订阅总量限制及 WebUI 关闭清理；通知不携带指标、队列或任务内容。
+- `webui-queue-events.mjs`：账户快照、请求指标、Relay、渠道投递与管理任务共用的鉴权后 SSE 转接、订阅总量限制及 WebUI 关闭清理；通知不携带指标、队列或任务内容。`closeQueueStreams` 禁止新订阅并等待已有 watch 结束，收尾完成前继续占用八个订阅名额之一。
 - `webui-management-delivery-route.mjs`：渠道投递箱鉴权 SSE 变化通知、只读分页查询、按需限定内容预览及单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，在线操作通过投递私有 IPC 交给 Gateway 单写者，确认未发送命令且 Gateway 不可连接时才使用 Journal 维护模式独占锁，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。
   只读查询交给有界 Worker，连接断开取消读取；批量正文先记录修订基线，再逐条在短事务内核对修订并读取，解密和消费确认不持有数据库读锁。管理写入的确认、审计和结果未知处理仍由原接口负责。
 - `service-selection.mjs` / `service-selection.d.mts`：统一三平台服务定义路径，将已安装的可选 WebUI、Relay 纳入 all；启动 all 时排除配置中关闭的 WebUI 与未启用的 Relay，停止、状态与日志仍包含已安装的可选服务，健康判定同样允许关闭的可选服务保持停止；状态查询经容错的 `status-required` 顺序取预期运行集合，配置不可读时退回“已安装即可选服务必需”并在 stderr 说明降级，使诊断不因配置损坏中断；安装动作排除 WebUI，服务顺序由 Runtime 服务目录定义。

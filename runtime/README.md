@@ -22,6 +22,11 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
 将异步端点校验纳入总预算。完成时点、失败分类及取消范围不同，不能直接互换。
 租约长连接、状态推送和投递结果未知也不能套用一次性请求收尾。
 
+账户刷新、Gateway 所有权、Supervisor 操作与租约获取、Delivery 管理均通过异步端点准备连接；
+Windows 描述符及 ACL 读取纳入各自期限，不缓存授权判断。取消或期限到达后不得迟到连接。
+租约取得后仍由显式 `close()` 释放，获取阶段的取消信号不撤销已取得租约。
+Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取消、超时及发送后失联均不证明未写入。
+
 出现第三个相同合同的消费者，或确认两处存在同一种收尾缺陷时，再评估窄的公共操作；
 须保留各调用方的失败分类、超时与取消范围。历史论证和当时的实机限制见
 [U16 审查记录](../docs/archive/consolidation-review.md#u16-一次性私有-ipc-交换的底层收尾)。
@@ -167,8 +172,9 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
   OpenCode Go、CCG 的凭据读取。全部第三方 Provider 启动采用锁定 Codex 的
   HTTP 重试 4 次、流重试 5 次，原生网络重连与传输降级不另行覆盖。
 - `app-server-read.mjs`：连接本机 Codex App Server 并完成 `initialize` 握手，返回 App Server
-  生成的完整 `User-Agent`；供 Doctor 的版本核验复用，Windows 使用已构建的 `codex-client`
-  传输，其余平台走私有 Unix WebSocket，不承担会话业务。Doctor 以官方非全局客户端身份
+  生成的完整 `User-Agent`；Doctor 与 WebUI 共用已构建的跨平台 `codex-client` Transport，
+  Unix 同样校验私有 Socket 与 rendezvous。默认 3 秒总读取期限与调用方取消覆盖连接和初始化，
+  连接失败也回收自有资源；清理未确认保留 Transport，由 `closePendingAppServerReads` 重试，不承担会话业务。Doctor 以官方非全局客户端身份
   `codex_app_server_daemon` 握手，不改变 App Server 进程级 originator 或 UA 后缀。
 - `desktop-app-bridge.mjs` / `desktop-app-bridge.d.mts`：在 Windows 功能显式启用时，为 Codex Desktop App
   提供只绑定 `127.0.0.1` 的受令牌保护 WebSocket 桥；每个下游连接复用现有跨平台 App Server
@@ -273,7 +279,8 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
   建立与应用就绪使用不同状态，应用开始停止时立即撤销就绪；公开同源健康探针供本地更新确认
   Gateway 已完成应用启动且尚未进入关闭流程。
-- `queue-events.mjs` / `queue-events.d.mts`：投递箱、Relay、账户快照与请求指标共用的有界私有变化通知流；独立订阅连接、首次失效通知、100 毫秒合并、心跳、取消与背压清理，只传变化类型。
+  维护用活动探测仅在端点缺失或明确拒绝连接时返回 false；准备／连接超时和校验失败报告状态未确认，归档与更新入口因此停止，不把未知当作已经停机。
+- `queue-events.mjs` / `queue-events.d.mts`：投递箱、Relay、账户快照与请求指标共用的有界私有变化通知流；独立订阅连接、首次失效通知、100 毫秒合并、心跳、取消与背压清理，只传变化类型。异步端点／ACL 准备和连接共用 20 秒期限，连接后改用独立 35 秒空闲期限；关闭等待准备任务结束，取消后不建立迟到连接。
 - `metrics-events.mjs` / `metrics-events.d.mts`：按配置文件路径派生相互独立的请求指标与账户快照通知端点，供 Gateway 写入器与 WebUI 订阅共用；不携带指标或账户数据。
 - `delivery-control.mjs` / `delivery-control.d.mts`：投递箱私有在线管理与变化通知 IPC（`watchDeliveryChanges`）；Unix 使用系统 `/tmp` 规范目录下的当前用户私有短目录，以投递目录规范路径的 SHA-256 确定端点，连接前校验父目录及 Socket 所有者和权限；Windows 继续使用私有描述文件及认证管道。最多 50 条修订绑定的重试/忽略请求，限制连接数、报文大小和等待时间；只输出受控结果，已发送请求的响应丢失不允许离线回退或自动重试。
 - `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供 v2 私有账户 IPC，支持 Provider 刷新及 OpenAI 重置券列表、预览、取消和消费；
@@ -331,7 +338,7 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup 与 Runtime 复用。
 - `provider-file-access.mjs` / `provider-file-access.d.mts`：在创建访问器时绑定当前环境的 Codex Home，通过 `isMainConfig` 精确规范化匹配唯一共享主配置；其他路径（包括同名备份）保持严格私有。Provider 的读取、凭据认证选择、指纹、事务写入和回滚使用同一归属判断，不由业务入口选择权限标记；不改变磁盘路径或格式。
-- `single-worker-reader.mjs`：设置快照与 Relay 材料 Reader 共用的单 Worker 宿主；集中读取合并、ready/读取时限、监听清理和物理退出归属。业务否定结果保留线程，通信失败进入协作关闭；各 Reader 提供自身数据、预算和安全错误。`readFresh` 等待已有读取后重新请求，不是缓存。
+- `single-worker-reader.mjs` / `single-worker-reader.d.mts`：设置快照与 Relay 材料 Reader 共用的单 Worker 宿主；集中读取合并、ready/读取时限、监听清理和物理退出归属。业务否定结果保留线程，通信失败进入协作关闭；各 Reader 提供自身数据、预算和安全错误。`readFresh` 等待已有读取后重新请求，不是缓存。`closeSingleWorkerReaders` 永久关闭当前进程的准入；有界关闭失败后，`waitForSingleWorkerReadersExit` 及 Reader 的 `waitForExit` 仍等待物理线程退出，包含嵌套 Windows ACL 清理。
 - `provider-settings-snapshot-reader.mjs` / `provider-settings-snapshot-reader.d.mts` / `provider-settings-snapshot-worker.mjs`：Provider 设置观察器拥有的单 Worker，读取有界材料指纹并校验完整配置；聚合成员变化单独返回需重启状态，不阻断其他提供商指纹读取。初始化与单次读取分别限时，关闭确认线程退出，源正文和凭据不跨线程返回。Windows 协作关闭先等待 ACL 子进程实际退出，再关闭外层线程；2 秒关闭等待超时仍保留旧代及引用，不启动替代线程。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
@@ -373,7 +380,7 @@ Supervisor 等 EOF 后解释原文，并区分协议不兼容与传输失败；�
 - `model-relay-listen-host.mjs` / `model-relay-listen-host.d.mts`：配置与 HTTP 服务共用的纯监听地址校验，接受回环、RFC1918 IPv4 和显式 IPv4 通配地址，不解析 DNS 或选择网卡。
 - `model-relay-paths.mjs` / `model-relay-paths.d.mts`：按配置路径派生控制与指标端点。
 - `model-relay-material-reader.mjs` / `model-relay-material-worker.mjs`：单 Worker 按固定用途读取 Provider 材料或指标身份快照；串行、可取消、有界，不阻塞调用线程；关闭须确认 Worker 退出，Windows 先协作关闭 ACL 子进程，2 秒等待超时保留归属及引用并允许重试等待。线程初始化最多 5 秒，Windows 首次读取含 ACL 冷启动最多 7 秒；随后 Provider 材料限时 2 秒，指标身份准备限时 750 毫秒，不返回凭据或身份哈希。同一个绝对截止时间传到 Windows ACL 请求，内层冷启动和排队预算不能超过外层操作剩余时间。配置两次读取间发生原子替换时丢弃快照并完整重读一次，持续变化或校验失败则拒绝，不延长原有截止时间。
-- `model-relay-metrics-authorization.mjs` / `model-relay-metrics-authorization.d.mts`：Gateway 指标身份异步鉴权，最多保留 8 个检查；读取当前配置中的活动/历史身份，校验提供商和已签发代次；取消或关闭后的迟到鉴权结果不得通过。
+- `model-relay-metrics-authorization.mjs` / `model-relay-metrics-authorization.d.mts`：Gateway 指标身份异步鉴权，最多保留 8 个检查；`prepare()` 在接收入口发布前完成材料首读并丢弃快照，失败不自动重试。样本继续读取当前配置中的活动/历史身份，校验提供商和已签发代次；取消或关闭后的迟到鉴权结果不得通过。运行中 Worker 退出仍沿原读取器重建，触发重建的样本可能超过传输期限而被取消，不扩大普通样本预算。
 - `model-relay-service.mjs` / `model-relay-service.d.mts`：独立进程组合与生命周期、材料刷新/撤销、共享网络出口选择和可选 V2 Relay 转储 owner；启动接受取消信号，停止后不再发布监听；全部清理共用 `shutdown-budget` 的绝对期限，单项失败继续清理其他资源，失败或未完成操作保留归属；未变化配置不重复发布准入策略，代理连接池跟随全局并发上限；复用全局 debug 开关、裁剪模式和保留天数；不复用 App Server 的代理实例。
   服务诊断通过 `dist/observability/index.js` 的安全 Logger 输出服务、模块、事件和受限错误字段，不输出原始异常正文。
 

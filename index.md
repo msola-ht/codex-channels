@@ -57,6 +57,7 @@
 
 ## 验收与开放补证
 
+- [`docs/ipc-readiness-development.md`](docs/ipc-readiness-development.md)：IPC 读取与启动恢复改造的阶段计划、关联审查、观察证据及平台限制。
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信的持续验收入口，分别记录已观察能力与未完成平台边界。
 - [`docs/codex-desktop-app-acceptance.md`](docs/codex-desktop-app-acceptance.md)：Desktop 专项验收主记录，保留 Linux 证据及 macOS、Windows 等开放事项。
 - [`docs/provider-transaction-review.md`](docs/provider-transaction-review.md)：Provider 事务修复的历史证据与仍开放的 V03/V04 环境补证清单。

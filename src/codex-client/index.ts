@@ -10,6 +10,7 @@ export {
 export type {
   CodexProcessInvocation,
   CreateCodexProcessInvocation,
+  RegisterCodexProcess,
   TerminateCodexProcess,
 } from "./codex-process.js";
 export {

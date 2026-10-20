@@ -44,7 +44,8 @@ import {
   loadGatewaySettings,
 } from "./config-management.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
-import { createSharedCodexUserConfigClient, readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
+import { closeCodexUserConfigClients, createSharedCodexUserConfigClient, readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
+import { closeAppServerUserAgentReads } from "./webui-management-status-route.mjs";
 import { invalidateServiceStatusSummary, loadServiceStatusSummary, serviceSummaryHealthy } from "./webui-service-status.mjs";
 import {
   ApiError,
@@ -71,6 +72,7 @@ import { WebuiManagementTaskRunner } from "./webui-management-tasks.mjs";
 import {
   isHighRiskManagementPath,
   ManagementOperationError,
+  closeManagementSnapshotReads,
 } from "./webui-management-operations.mjs";
 import { routeTrafficApi, routeTrafficEvents } from "./webui-traffic-route.mjs";
 import {
@@ -144,7 +146,9 @@ export function createWebuiServer({
   port = DEFAULT_PORT,
   managementOrigin = null,
   loadProviderState = (options) => loadModelProviderManagementState({ ...options,
-    readUserConfig: (env) => readCodexUserConfigSnapshot(env, { createClient: createSharedCodexUserConfigClient }),
+    readUserConfig: (env) => readCodexUserConfigSnapshot(env, {
+      createClient: createSharedCodexUserConfigClient, signal: options.signal,
+    }),
   }),
   loadCodexSettings = (options) => loadCodexUserSettings({ ...options, createClient: createSharedCodexUserConfigClient }),
   previewCodexSetting = previewCodexUserSetting,
@@ -196,10 +200,13 @@ export function createWebuiServer({
       Promise.resolve().then(() => closeQueueStreams(management)),
       metricsExports.close(), closeDeliveryReaders(), closeDeliveryJournals(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
       closeOfficialModelOperations(management),
+      closeAppServerUserAgentReads(management.appServerUserAgentCache),
+      closeManagementSnapshotReads(management).then(() => closeCodexUserConfigClients()),
     ]);
     if (results.some(result => result.status === "rejected")) throw new Error("WebUI 后台资源退出未确认");
   }, waitForNotificationsExit: async () => {
-    await Promise.all([metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management, { waitForExit: true })]);
+    await Promise.all([closeQueueStreams(management), closeAppServerUserAgentReads(management.appServerUserAgentCache), metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management, { waitForExit: true }),
+      closeManagementSnapshotReads(management).then(() => closeCodexUserConfigClients())]);
   } };
 }
 
@@ -341,6 +348,8 @@ function createManagementState(
     configuredOrigin,
     origin: configuredOrigin ?? `http://${originHost}:${port}`,
     appServerUserAgentCache: { expiresAtMs: 0, value: null },
+    snapshotReads: new Set(),
+    snapshotReadsClosed: false,
     serviceStatusCache,
     providerStateCache,
     loadProviderState,

@@ -719,6 +719,10 @@ export interface ManagementTaskPreview {
   requiresConfirmation: true
 }
 
+export interface ManagementProviderModelCatalogsResponse {
+  catalogs: ManagementProviderSettingsResponse["modelCatalogs"]
+}
+
 export interface ManagementProviderSettingsResponse {
   observedAt: string
   resourceRevision: string

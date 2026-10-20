@@ -1,5 +1,20 @@
 import { Worker } from "node:worker_threads";
 
+const readers = new Set();
+let closing = false;
+
+/** Final process shutdown closes admission before waiting for existing owners. */
+export async function closeSingleWorkerReaders() {
+  closing = true;
+  const results = await Promise.allSettled([...readers].map(reader => reader.close()));
+  const failures = results.filter(result => result.status === "rejected").map(result => result.reason);
+  if (failures.length) throw new AggregateError(failures, "Material workers shutdown unconfirmed");
+}
+
+export function waitForSingleWorkerReadersExit() {
+  return Promise.all([...readers].map(reader => reader.waitForExit())).then(() => undefined);
+}
+
 /** One owned material Worker; caller timeout never releases physical ownership. */
 export class SingleWorkerReader {
   #worker;
@@ -9,13 +24,13 @@ export class SingleWorkerReader {
   #readyWorker;
   #workerExit;
   #closed = false;
-  constructor(options) { this.options = options; }
+  constructor(options) { this.options = options; readers.add(this); }
   async readFresh() {
     await this.#pending?.promise.catch(() => undefined);
     return this.read();
   }
   read() {
-    if (this.#closed || this.#terminating) return Promise.reject(this.options.errors.unavailable());
+    if (closing || this.#closed || this.#terminating) return Promise.reject(this.options.errors.unavailable());
     if (this.#pending) return this.#pending.promise;
     if (!this.#worker) {
       const worker = new Worker(this.options.workerUrl, {
@@ -28,6 +43,7 @@ export class SingleWorkerReader {
         if (this.#worker === worker) {
           this.#worker = undefined;
           this.#terminating = undefined;
+          if (this.#closed) readers.delete(this);
         }
       });
       this.#worker = worker;
@@ -107,11 +123,14 @@ export class SingleWorkerReader {
     this.#pending?.cancel();
     if (this.#closeTask) return this.#closeTask;
     const task = this.#terminating ?? (this.#worker ? this.#terminate(this.#worker) : undefined);
-    if (!task) return Promise.resolve();
+    if (!task) { readers.delete(this); return Promise.resolve(); }
     let timer;
     this.#closeTask = Promise.race([task, new Promise((_, reject) => {
       timer = setTimeout(() => reject(this.options.errors.shutdown()), 2_000);
     })]).finally(() => { clearTimeout(timer); this.#closeTask = undefined; });
     return this.#closeTask;
+  }
+  waitForExit() {
+    return this.#workerExit?.then(() => undefined) ?? Promise.resolve();
   }
 }

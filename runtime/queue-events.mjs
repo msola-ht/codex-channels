@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PrivateIpcServer, createPrivateIpcConnection } from "./private-ipc.mjs";
+import { PrivateIpcServer, createPrivateIpcConnectionAsync } from "./private-ipc.mjs";
 
 /** Isolated notification capacity; never carries queue contents or write commands. */
 export class QueueEventsServer {
@@ -43,19 +43,27 @@ export class QueueEventsServer {
 
 export async function watchQueueChanges(path, signal, receive) {
   signal.throwIfAborted();
-  const socket = createPrivateIpcConnection(path);
+  const cancellation = new AbortController();
+  let socket;
+  const abort = () => { cancellation.abort(); socket?.destroy(); };
+  // Endpoint/ACL preparation and connecting have their own bounded allowance;
+  // a live subscription is governed only by the heartbeat idle timeout below.
+  const preparation = setTimeout(abort, 20_000);
+  signal.addEventListener("abort", abort, { once: true });
   try {
+    socket = await createPrivateIpcConnectionAsync(path, { signal: cancellation.signal });
     await new Promise((resolve, reject) => {
       let buffer = "";
-      const abort = () => socket.destroy();
-      signal.addEventListener("abort", abort, { once: true });
-      socket.setTimeout(35_000, abort);
-      socket.once("error", reject);
+      socket.on("error", () => socket.destroy());
       socket.once("close", () => {
-        signal.removeEventListener("abort", abort);
         if (signal.aborted) resolve(); else reject(new Error("Queue notifications disconnected"));
       });
-      socket.once("connect", () => socket.write('{"version":1,"action":"watch"}\n'));
+      socket.once("connect", () => {
+        if (cancellation.signal.aborted) { socket.destroy(); return; }
+        clearTimeout(preparation);
+        socket.setTimeout(35_000, () => socket.destroy());
+        socket.write('{"version":1,"action":"watch"}\n');
+      });
       socket.on("data", chunk => {
         buffer += chunk.toString();
         if (buffer.length > 4096) { socket.destroy(); return; }
@@ -69,9 +77,15 @@ export async function watchQueueChanges(path, signal, receive) {
           } catch { socket.destroy(); return; }
         }
       });
-      if (signal.aborted) abort();
+      if (signal.aborted || cancellation.signal.aborted) abort();
     });
-  } finally { socket.destroy(); }
+  } catch (error) {
+    if (!signal.aborted) throw error;
+  } finally {
+    clearTimeout(preparation);
+    signal.removeEventListener("abort", abort);
+    abort();
+  }
 }
 
 function readWatch(socket) {

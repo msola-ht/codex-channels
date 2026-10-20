@@ -9,4 +9,5 @@ export class ProviderSettingsSnapshotReader {
   read(): Promise<ProviderSettingsSnapshot>;
   readFresh(): Promise<ProviderSettingsSnapshot>;
   close(): Promise<void>;
+  waitForExit(): Promise<void>;
 }

@@ -39,7 +39,7 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
   }, [management.lastAppliedSetting, resetCompact, resetPreferences])
 
   if (management.loading && settings === null) return <LoadingSettingsCard title={t("settingsFields.appServerTitle")} />
-  if (settings === null) return <SettingsError message={management.error ?? t("settingsFields.appServerUnavailable")} retry={management.refetch} />
+  if (settings === null) return <SettingsError title={t("settingsUi.codexLoadFailed")} message={management.error ?? t("settingsFields.appServerUnavailable")} retry={management.refetch} />
 
   const confirmSetting = async () => {
     if (await management.confirmSetting()) onChanged?.()
@@ -108,7 +108,7 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
     <Card>
       <CardHeader><CardTitle>{t(section === "models" ? "settingsFields.modelDefaults" : section === "context" ? "settingsFields.codexContext" : section === "permissions" ? "navigation.codexPermissions" : "navigation.codexGeneral")}</CardTitle><CardDescription>{t("navigation.configurationHint")}</CardDescription></CardHeader>
       <CardContent className="flex flex-col gap-5 text-sm">
-      {management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : null}
+      {management.error !== null ? <SettingsError title={t("settingsUi.codexLoadFailed")} message={`${management.error} ${t("settingsUi.previousSnapshot")}`} retry={management.refetch} /> : null}
         {section !== "context" && <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
           <SettingsRow label={t("settingsFields.currentProvider")} value={settings.provider} badge />
           {section === "models" && <>

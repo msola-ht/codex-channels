@@ -21,4 +21,5 @@ export class ModelRelayMaterialReader {
   }
   read() { return this.#reader.read(); }
   close() { return this.#reader.close(); }
+  waitForExit() { return this.#reader.waitForExit(); }
 }

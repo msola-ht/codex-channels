@@ -20,9 +20,11 @@ const invalid = message => new ConfigManagementError("relay_invalid", "relay", m
 const conflict = () => new ConfigManagementError("stale-revision", "relay", "Relay 配置或模型目录已变化，请刷新后重新预览");
 
 /** Read-only runtime snapshot, independent of provider catalogs and edit revisions. */
-export async function readRelayQueue(environment = process.env) {
+export async function readRelayQueue(environment = process.env, { signal } = {}) {
+  signal?.throwIfAborted();
   const { configPath } = locateUserConfig(environment);
-  const result = await queryModelRelayControl(modelRelayPaths(configPath).control, "queue");
+  const result = await queryModelRelayControl(modelRelayPaths(configPath).control, "queue", undefined, { signal });
+  signal?.throwIfAborted();
   return result.result === "queue" ? { state: "running", configurationValid: result.configurationValid, enabled: result.enabled,
     listening: result.listening, requests: result.requests }
     : { state: result.result === "not_running" ? "stopped" : "unknown" };
@@ -131,7 +133,7 @@ async function executeModelRelay(input, environment, options) {
   const modelReasoning = input.modelReasoning;
   const { configPath } = locateUserConfig(environment);
   const endpoint = modelRelayPaths(configPath).control;
-  if (input.command === "status") return { ...await queryModelRelayControl(endpoint, "status"),
+  if (input.command === "status") return { ...await queryModelRelayControl(endpoint, "status", undefined, { signal: options.signal }),
     metricsNotice: "指标计数仅覆盖当前进程；accepted 仅表示接收队列确认，unconfirmed 可能已落盘，崩溃后的计数与样本不完整。" };
   assertPrivateConfigAccessSync(configPath);
   if (input.command === "providers") return { providers: readRelayManagement(environment).providers };

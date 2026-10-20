@@ -9,8 +9,7 @@ import WebSocket from "ws";
 import { parse } from "smol-toml";
 
 import {
-  assertPrivateIpcEndpointSync,
-  createPrivateIpcConnection,
+  createPrivateIpcConnectionAsync,
   PrivateIpcServer,
 } from "./private-ipc.mjs";
 import { codexProcessInvocation } from "./owned-process.mjs";
@@ -507,20 +506,15 @@ export function appServerSupervisorSocketPath(primarySocketPath) {
   return resolve(dirname(primarySocketPath), `${stem}-supervisor${extension}`);
 }
 
-export async function inspectAppServerSupervisor(primarySocketPath) {
-  const inspection = await inspectAppServerSupervisorState(primarySocketPath);
+export async function inspectAppServerSupervisor(primarySocketPath, signal) {
+  const inspection = await inspectAppServerSupervisorState(primarySocketPath, signal);
   return inspection.status === "ready" ? inspection.topology : undefined;
 }
 
-export async function inspectAppServerSupervisorState(primarySocketPath) {
+export async function inspectAppServerSupervisorState(primarySocketPath, signal) {
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
-  // Windows createPrivateIpcConnection validates the descriptor immediately before
-  // use. Do not spawn PowerShell a second time just to check existence here.
-  const status = process.platform === "win32"
-    ? lstatSync(socketPath, { throwIfNoEntry: false })
-    : assertSafeSupervisorSocket(socketPath);
-  if (!status) return { status: "missing" };
-  const response = await readSupervisorResponse(socketPath, { action: "inspect" });
+  const response = await readSupervisorResponse(socketPath, { action: "inspect" }, connectionTimeoutMs, signal);
+  if (response === null) return { status: "missing" };
   // A timeout or connection failure establishes no protocol version. Let the
   // readiness owner retry within its existing startup budget instead of
   // reporting a version mismatch and aborting installation immediately.
@@ -533,14 +527,13 @@ export async function inspectAppServerSupervisorState(primarySocketPath) {
     : { status: "ready", topology };
 }
 
-export async function ensureAppServerProvider(primarySocketPath, provider) {
+export async function ensureAppServerProvider(primarySocketPath, provider, signal) {
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
-  assertSafeSupervisorSocket(socketPath);
   const response = await readSupervisorResponse(socketPath, {
     action: "ensureProvider",
     provider,
-  }, providerOperationTimeoutMs);
-  if (response === undefined) {
+  }, providerOperationTimeoutMs, signal);
+  if (response === undefined || response === null) {
     throw new Error(
       `无法连接 App Server 监管入口：${socketPath}；`
       + "请运行 codexc status appserver 确认服务正在运行",
@@ -563,143 +556,164 @@ export async function ensureAppServerProvider(primarySocketPath, provider) {
   }
 }
 
-export async function acquireAppServerProviderLease(primarySocketPath, provider) {
+export async function acquireAppServerProviderLease(primarySocketPath, provider, signal) {
+  signal?.throwIfAborted();
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
-  assertSafeSupervisorSocket(socketPath);
   return new Promise((resolveLease, rejectLease) => {
-    const socket = process.platform === "win32"
-      ? createPrivateIpcConnection(socketPath)
-      : createConnection(socketPath);
+    let socket;
+    const cancellation = new AbortController();
     let response = Buffer.alloc(0);
     let settled = false;
-    const fail = (message) => {
+    const fail = (message, cause) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      socket.destroy();
-      rejectLease(new Error(message));
+      signal?.removeEventListener("abort", abort);
+      cancellation.abort();
+      socket?.destroy();
+      rejectLease(new Error(message, { cause }));
     };
     const timer = setTimeout(
       () => fail(`模型 Provider 租约请求超时：${provider}`),
       providerOperationTimeoutMs,
     );
-    socket.once("connect", () => {
-      socket.write(`${JSON.stringify({ action: "leaseProvider", provider })}\n`);
-    });
-    const onData = (chunk) => {
-      response = Buffer.concat([response, chunk]);
-      if (response.length > maximumResponseBytes) {
-        fail(`模型 Provider 租约响应过大：${provider}`);
-        return;
-      }
-      const newline = response.indexOf(0x0a);
-      if (newline < 0) return;
-      let value;
-      try {
-        value = JSON.parse(response.subarray(0, newline).toString("utf8"));
-      } catch {
-        fail(`模型 Provider 租约请求没有有效响应：${provider}`);
-        return;
-      }
-      if (value?.version !== protocolVersion || value.provider !== provider || value.ok !== true) {
-        fail(
-          supervisorVersionMismatch(value)
-            ? supervisorVersionMismatchMessage(value)
-            : typeof value?.error === "string" && value.error
-              ? value.error
-              : `模型 Provider 租约获取失败：${provider}`,
-        );
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      socket.removeListener("data", onData);
-      socket.on("error", () => undefined);
-      resolveLease(supervisorLease(socket, `模型 Provider 租约释放未获确认：${provider}`));
-    };
-    socket.on("data", onData);
-    socket.once("error", () => fail(`模型 Provider 租约连接失败：${provider}`));
-    socket.once("end", () => fail(`模型 Provider 租约连接提前关闭：${provider}`));
-    socket.once("close", () => fail(`模型 Provider 租约连接提前关闭：${provider}`));
+    const abort = () => fail(`模型 Provider 租约请求已取消：${provider}`);
+    signal?.addEventListener("abort", abort, { once: true });
+    void createPrivateIpcConnectionAsync(socketPath, { signal: cancellation.signal }).then(connection => {
+      socket = connection;
+      socket.on("error", () => fail(`模型 Provider 租约连接失败：${provider}`));
+      if (settled) { socket.destroy(); return; }
+      socket.once("connect", () => {
+        socket.write(`${JSON.stringify({ action: "leaseProvider", provider })}\n`);
+      });
+      const onData = (chunk) => {
+        response = Buffer.concat([response, chunk]);
+        if (response.length > maximumResponseBytes) {
+          fail(`模型 Provider 租约响应过大：${provider}`);
+          return;
+        }
+        const newline = response.indexOf(0x0a);
+        if (newline < 0) return;
+        let value;
+        try {
+          value = JSON.parse(response.subarray(0, newline).toString("utf8"));
+        } catch {
+          fail(`模型 Provider 租约请求没有有效响应：${provider}`);
+          return;
+        }
+        if (value?.version !== protocolVersion || value.provider !== provider || value.ok !== true) {
+          fail(
+            supervisorVersionMismatch(value)
+              ? supervisorVersionMismatchMessage(value)
+              : typeof value?.error === "string" && value.error
+                ? value.error
+                : `模型 Provider 租约获取失败：${provider}`,
+          );
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        socket.removeListener("data", onData);
+        socket.on("error", () => undefined);
+        resolveLease(supervisorLease(socket, `模型 Provider 租约释放未获确认：${provider}`));
+      };
+      socket.on("data", onData);
+      socket.once("end", () => fail(`模型 Provider 租约连接提前关闭：${provider}`));
+      socket.once("close", () => fail(`模型 Provider 租约连接提前关闭：${provider}`));
+    }).catch(error => fail(`模型 Provider 租约连接失败：${provider}`, error));
+    if (signal?.aborted) abort();
   });
 }
 
 export async function acquireMacDesktopAppHostLease(
   primarySocketPath,
   { provider, pipePath, appPath, toolsEnabled },
+  signal,
 ) {
+  signal?.throwIfAborted();
   if (process.platform !== "darwin") {
     throw new Error("Codex Desktop App 可信 Host 只支持 macOS");
   }
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
-  assertSafeSupervisorSocket(socketPath);
   return new Promise((resolveLease, rejectLease) => {
-    const socket = createConnection(socketPath);
+    let socket;
+    const cancellation = new AbortController();
     let response = Buffer.alloc(0);
     let settled = false;
-    const fail = (message) => {
+    const fail = (message, cause) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      socket.destroy();
-      rejectLease(new Error(message));
+      signal?.removeEventListener("abort", abort);
+      cancellation.abort();
+      socket?.destroy();
+      rejectLease(new Error(message, { cause }));
     };
     const timer = setTimeout(
       () => fail("Codex Desktop App Host 附加超时"),
       providerOperationTimeoutMs,
     );
-    socket.once("connect", () => {
-      socket.write(`${JSON.stringify({
-        action: "leaseDesktopApp",
-        desktopAppHostProtocolVersion,
-        provider,
-        pipePath,
-        appPath,
-        toolsEnabled,
-      })}\n`);
-    });
-    const onData = (chunk) => {
-      response = Buffer.concat([response, chunk]);
-      if (response.length > maximumResponseBytes) {
-        fail("Codex Desktop App Host 响应过大");
-        return;
-      }
-      const newline = response.indexOf(0x0a);
-      if (newline < 0) return;
-      let value;
-      try {
-        value = JSON.parse(response.subarray(0, newline).toString("utf8"));
-      } catch {
-        fail("Codex Desktop App Host 没有有效响应");
-        return;
-      }
-      if (
-        value?.version !== protocolVersion
-        || value.desktopAppHostProtocolVersion !== desktopAppHostProtocolVersion
-        || value.provider !== provider
-        || value.ok !== true
-      ) {
-        fail(
-          supervisorVersionMismatch(value)
-            ? supervisorVersionMismatchMessage(value)
-            : value?.desktopAppHostProtocolVersion !== desktopAppHostProtocolVersion
-              ? "App Server 服务不支持当前 Desktop Host；请重启 App Server 服务后重试"
-              : typeof value?.error === "string" && value.error
-                ? value.error
-                : "Codex Desktop App Host 附加失败",
-        );
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      socket.removeListener("data", onData);
-      socket.on("error", () => undefined);
-      resolveLease(supervisorLease(socket, "Codex Desktop App Host 租约释放未获确认"));
-    };
-    socket.on("data", onData);
-    socket.once("error", () => fail("Codex Desktop App Host 连接失败"));
-    socket.once("end", () => fail("Codex Desktop App Host 连接提前关闭"));
-    socket.once("close", () => fail("Codex Desktop App Host 连接提前关闭"));
+    const abort = () => fail("Codex Desktop App Host 附加已取消");
+    signal?.addEventListener("abort", abort, { once: true });
+    void createPrivateIpcConnectionAsync(socketPath, { signal: cancellation.signal }).then(connection => {
+      socket = connection;
+      socket.on("error", () => fail("Codex Desktop App Host 连接失败"));
+      if (settled) { socket.destroy(); return; }
+      socket.once("connect", () => {
+        socket.write(`${JSON.stringify({
+          action: "leaseDesktopApp",
+          desktopAppHostProtocolVersion,
+          provider,
+          pipePath,
+          appPath,
+          toolsEnabled,
+        })}\n`);
+      });
+      const onData = (chunk) => {
+        response = Buffer.concat([response, chunk]);
+        if (response.length > maximumResponseBytes) {
+          fail("Codex Desktop App Host 响应过大");
+          return;
+        }
+        const newline = response.indexOf(0x0a);
+        if (newline < 0) return;
+        let value;
+        try {
+          value = JSON.parse(response.subarray(0, newline).toString("utf8"));
+        } catch {
+          fail("Codex Desktop App Host 没有有效响应");
+          return;
+        }
+        if (
+          value?.version !== protocolVersion
+          || value.desktopAppHostProtocolVersion !== desktopAppHostProtocolVersion
+          || value.provider !== provider
+          || value.ok !== true
+        ) {
+          fail(
+            supervisorVersionMismatch(value)
+              ? supervisorVersionMismatchMessage(value)
+              : value?.desktopAppHostProtocolVersion !== desktopAppHostProtocolVersion
+                ? "App Server 服务不支持当前 Desktop Host；请重启 App Server 服务后重试"
+                : typeof value?.error === "string" && value.error
+                  ? value.error
+                  : "Codex Desktop App Host 附加失败",
+          );
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        socket.removeListener("data", onData);
+        socket.on("error", () => undefined);
+        resolveLease(supervisorLease(socket, "Codex Desktop App Host 租约释放未获确认"));
+      };
+      socket.on("data", onData);
+      socket.once("end", () => fail("Codex Desktop App Host 连接提前关闭"));
+      socket.once("close", () => fail("Codex Desktop App Host 连接提前关闭"));
+    }).catch(error => fail("Codex Desktop App Host 连接失败", error));
+    if (signal?.aborted) abort();
   });
 }
 
@@ -731,14 +745,13 @@ function supervisorLease(socket, unconfirmedMessage) {
   };
 }
 
-export async function releaseAppServerProvider(primarySocketPath, provider) {
+export async function releaseAppServerProvider(primarySocketPath, provider, signal) {
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
-  assertSafeSupervisorSocket(socketPath);
   const response = await readSupervisorResponse(socketPath, {
     action: "releaseProvider",
     provider,
-  }, providerOperationTimeoutMs);
-  if (response === undefined) {
+  }, providerOperationTimeoutMs, signal);
+  if (response === undefined || response === null) {
     throw new Error(
       `无法连接 App Server 监管入口：${socketPath}；`
       + "请运行 codexc status appserver 确认服务正在运行",
@@ -772,7 +785,6 @@ export async function releaseAppServerProvider(primarySocketPath, provider) {
 export async function applyAppServerProviderSettings(primarySocketPath, provider, signal) {
   signal?.throwIfAborted();
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
-  assertSafeSupervisorSocket(socketPath);
   const response = await readSupervisorResponse(socketPath, {
     action: "applyProviderSettings", settingsProtocolVersion: providerSettingsProtocolVersion, provider,
   }, providerOperationTimeoutMs, signal);
@@ -841,20 +853,6 @@ function supervisorVersionMismatch(value) {
 function supervisorVersionMismatchMessage(value) {
   return `App Server 监管协议版本不匹配（服务 ${value.version}，客户端 ${protocolVersion}）；`
     + "请运行 codexc restart all 后重试";
-}
-
-function assertSafeSupervisorSocket(socketPath) {
-  if (process.platform === "win32") return assertPrivateIpcEndpointSync(socketPath);
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (!status) return undefined;
-  if (
-    !status.isSocket()
-    || status.uid !== process.getuid?.()
-    || (status.mode & 0o077) !== 0
-  ) {
-    throw new Error(`App Server 监管 Socket 路径不安全：${socketPath}`);
-  }
-  return status;
 }
 
 export function sameAppServerTopology(actual, expected) {
@@ -928,37 +926,45 @@ export async function appServerSocketAcceptsWebSocket(socketPath, environment = 
 }
 
 function readSupervisorResponse(socketPath, request, timeoutMs = 1_000, signal) {
-  return new Promise((resolveResponse) => {
-    const socket = process.platform === "win32"
-      ? createPrivateIpcConnection(socketPath)
-      : createConnection(socketPath);
+  signal?.throwIfAborted();
+  return new Promise((resolveResponse, rejectResponse) => {
+    let socket;
+    const cancellation = new AbortController();
     const chunks = [];
     let bytes = 0;
     let settled = false;
-    const finish = (value) => {
+    const finish = (value, error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
-      socket.destroy();
-      resolveResponse(value);
+      cancellation.abort();
+      socket?.destroy();
+      if (error !== undefined) rejectResponse(error);
+      else resolveResponse(value);
     };
     const timer = setTimeout(() => finish(undefined), timeoutMs);
-    const abort = () => finish(undefined);
+    const abort = () => finish(undefined, signal.reason);
     signal?.addEventListener("abort", abort, { once: true });
-    socket.once("connect", () => {
-      socket.write(`${JSON.stringify(request)}\n`);
-    });
-    socket.on("data", (chunk) => {
-      bytes += chunk.length;
-      if (bytes > maximumResponseBytes) {
-        finish(undefined);
-        return;
-      }
-      chunks.push(chunk);
-    });
-    socket.once("end", () => finish(Buffer.concat(chunks).toString("utf8")));
-    socket.once("error", () => finish(undefined));
+    void createPrivateIpcConnectionAsync(socketPath, { signal: cancellation.signal }).then(connection => {
+      socket = connection;
+      socket.on("error", () => finish(undefined));
+      if (settled) { socket.destroy(); return; }
+      socket.once("connect", () => {
+        socket.write(`${JSON.stringify(request)}\n`);
+      });
+      socket.on("data", (chunk) => {
+        bytes += chunk.length;
+        if (bytes > maximumResponseBytes) {
+          finish(undefined);
+          return;
+        }
+        chunks.push(chunk);
+      });
+      socket.once("end", () => finish(Buffer.concat(chunks).toString("utf8")));
+      socket.once("close", () => finish(undefined));
+      // null means the descriptor itself was absent, not a failed exchange.
+    }).catch(error => finish(error?.code === "ENOENT" ? null : undefined, error?.code === "ENOENT" ? undefined : error));
     if (signal?.aborted) abort();
   });
 }

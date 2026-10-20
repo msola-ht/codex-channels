@@ -55,6 +55,24 @@ export interface CodexUserConfigTransactionClient extends CodexUserConfigClientL
 export interface CodexUserConfigClient
   extends CodexDefaultSettingsClient, CodexUserConfigTransactionClient {}
 
+export function closePendingCodexUserConfigReads(): Promise<void>;
+export function closeCodexUserConfigClients(): Promise<void>;
+
+export function withCodexUserConfigClient<T extends CodexUserConfigClientLifecycle, R>(
+  environment: NodeJS.ProcessEnv,
+  createClient: (options: { environment: NodeJS.ProcessEnv }) => Promise<T>,
+  signal: AbortSignal | undefined,
+  operation: (client: T) => Promise<R>,
+  options?: { preserveOperationResult?: boolean },
+): Promise<R>;
+
+export function readWithCodexUserConfigClient<T extends CodexUserConfigClientLifecycle, R>(
+  environment: NodeJS.ProcessEnv,
+  createClient: (options: { environment: NodeJS.ProcessEnv }) => Promise<T>,
+  signal: AbortSignal | undefined,
+  read: (client: T) => Promise<R>,
+): Promise<R>;
+
 export function createSharedCodexUserConfigClient(options?: { environment?: NodeJS.ProcessEnv }): Promise<CodexUserConfigClient>;
 export function resolveCodexUserConfigBinary(environment?: NodeJS.ProcessEnv): string;
 
@@ -93,6 +111,7 @@ export function updateCodexUserConfig(
 export function readCodexUserConfigSnapshot(
   environment: NodeJS.ProcessEnv,
   dependencies?: {
+    signal?: AbortSignal;
     createClient?: (options: {
       environment: NodeJS.ProcessEnv;
     }) => Promise<CodexUserConfigTransactionClient>;

@@ -23,6 +23,7 @@ import WebSocket, {
 
 import {
   endToEndHeaders,
+  chatBridgeAuthorizationHeader,
   forwardedRequestHeaders,
   forwardedWebSocketHeaders,
   isSupportedHttpRoute,
@@ -95,6 +96,8 @@ export interface ProviderProxyOptions {
   upstreamUserAgent?: string;
   /** Only enable for the local Chat conversion bridge. Never forwarded to App Server. */
   chatDiagnostics?: ChatDiagnosticsChannel;
+  /** Private local-hop identity; never replaces upstream Authorization. */
+  localChatBridgeToken?: string;
   /**
    * 模型请求与响应的完整报文转储；缺省时不记录。
    * 仅在 `[debug].model_traffic_dump` 开启时由组合层传入。
@@ -164,6 +167,7 @@ export class ProviderProxy {
   private readonly upstreamUserAgent: string | undefined;
   private readonly allowOpenAiApiPaths: boolean;
   private readonly chatDiagnostics: ChatDiagnosticsChannel | undefined;
+  private readonly localChatBridgeToken: string | undefined;
   private readonly trafficDump: ModelTrafficDump | undefined;
   private readonly quotaWindowsProvider:
     | ((
@@ -211,6 +215,7 @@ export class ProviderProxy {
     this.defaultAccountId = options.defaultAccountId;
     this.upstreamUserAgent = options.upstreamUserAgent;
     this.chatDiagnostics = options.chatDiagnostics;
+    this.localChatBridgeToken = options.localChatBridgeToken;
     this.allowOpenAiApiPaths = options.allowOpenAiApiPaths ?? false;
     this.onError = options.onError;
     this.trafficDump = options.trafficDump === undefined
@@ -443,6 +448,7 @@ export class ProviderProxy {
     const upstreamHeaders = forwardedRequestHeaders(request.headers, upstreamTarget.host, upstreamTarget.port, this.upstreamUserAgent);
     delete upstreamHeaders[chatDiagnosticsHeader];
     if (diagnosticObserver) upstreamHeaders[chatDiagnosticsHeader] = diagnosticObserver.id;
+    if (this.localChatBridgeToken !== undefined) upstreamHeaders[chatBridgeAuthorizationHeader] = this.localChatBridgeToken;
     // 归一化会改变正文长度；按实际提交字节重写，避免沿用客户端长度造成上游等待或截断。
     if (upstreamBody !== undefined) upstreamHeaders["content-length"] = String(upstreamBody.length);
     let closingRejectedUpload = false;

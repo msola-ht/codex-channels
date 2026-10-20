@@ -5,6 +5,7 @@ import {
   codexManagementError,
   assertManagementAuditWritable,
   invalidateProviderManagementSummary,
+  readManagementSnapshot,
 } from "./webui-management-operations.mjs";
 import {
   fingerprintManagementValue,
@@ -26,8 +27,11 @@ export async function routeCodexSettingsManagement({
 }) {
   if (path === "/codex/settings" && request.method === "GET") {
     try {
-      sendManagementJson(response, 200, await state.loadCodexSettings({ environment }));
+      const settings = await readManagementSnapshot(request, response, state,
+        signal => state.loadCodexSettings({ environment, signal }));
+      sendManagementJson(response, 200, settings);
     } catch {
+      if (response.destroyed) return true;
       throw new ApiError(503, "codex_settings_unavailable", "App Server 用户设置暂不可用，请检查 App Server 状态");
     }
     return true;

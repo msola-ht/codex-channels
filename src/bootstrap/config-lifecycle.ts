@@ -19,6 +19,8 @@ import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { installProcessSignalHandlers, installServiceControlHandler } from "../../runtime/process-lifecycle.mjs";
 import { serviceShutdownTimeoutMs } from "../../runtime/shutdown-budget.mjs";
+import { closeSingleWorkerReaders, waitForSingleWorkerReadersExit } from "../../runtime/single-worker-reader.mjs";
+import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "../../runtime/windows-acl-bridge.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { ResetCreditError } from "../application/index.js";
@@ -50,6 +52,19 @@ const providerSettingsAction: Record<
 };
 
 export async function runGatewayProcess(): Promise<void> {
+  try { await startGatewayProcess(); }
+  catch (error) {
+    // Configuration/construction can already have created the main-thread ACL
+    // bridge, even before the normal shutdown controls have been installed.
+    const closed = await Promise.allSettled([closeSingleWorkerReaders(), closeWindowsAclBridge()]);
+    await Promise.all([waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit()]);
+    const failures = closed.filter(result => result.status === "rejected").map(result => result.reason as unknown);
+    if (failures.length) throw new AggregateError([error, ...failures], "Gateway 启动失败且资源关闭曾超时", { cause: error });
+    throw error;
+  }
+}
+
+async function startGatewayProcess(): Promise<void> {
   const runtime = loadRuntimeConfig();
   const config = runtime.config;
   if (config.gatewayTimezone !== undefined) {
@@ -59,18 +74,20 @@ export async function runGatewayProcess(): Promise<void> {
   const eventQueuePath = configEventQueuePath(dirname(runtime.configPath));
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config, { service: "gateway", module: "lifecycle" });
-  const closeStorageOwners = async (): Promise<boolean> => {
-    const components = ["Delivery", "Metrics", "Scheduled Tasks"];
+  const closeResourceOwners = async (): Promise<boolean> => {
+    const components = ["Delivery", "Metrics", "Scheduled Tasks", "Material Readers", "Windows ACL"];
     const results = await Promise.allSettled([
       closeDeliveryJournals(), closeMetricsStores(), closeScheduledTaskStores(),
+      closeSingleWorkerReaders(), closeWindowsAclBridge(),
     ]);
     for (const [index, result] of results.entries()) {
       if (result.status === "rejected") {
-        logger.error({ err: result.reason, component: components[index] }, "Gateway 存储关闭未确认");
+        logger.error({ err: result.reason, component: components[index] }, "Gateway 资源关闭未确认");
       }
     }
     await Promise.all([
       waitForDeliveryJournalsExit(), waitForMetricsStoresExit(), waitForScheduledTaskStoresExit(),
+      waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit(),
     ]);
     return results.every(result => result.status === "fulfilled");
   };
@@ -83,8 +100,8 @@ export async function runGatewayProcess(): Promise<void> {
     // an early stop must stay bounded even before controls.stop is installed.
     shutdownTimer = setTimeout(() => {
       shutdownTimedOut = true;
-      logger.error({ timeoutMs: serviceShutdownTimeoutMs }, "Gateway 停止等待超时，等待存储资源退出后以故障状态退出");
-      void closeStorageOwners().then(() => process.exit(1));
+      logger.error({ timeoutMs: serviceShutdownTimeoutMs }, "Gateway 停止等待超时，等待自有资源退出后以故障状态退出");
+      void closeResourceOwners().then(() => process.exit(1));
     }, serviceShutdownTimeoutMs);
   };
   const clearShutdownDeadline = (): void => { clearTimeout(shutdownTimer); };
@@ -107,13 +124,19 @@ export async function runGatewayProcess(): Promise<void> {
     SIGINT: requestStop, SIGTERM: requestStop, SIGHUP: requestReload,
   });
   const cleanupHandlers = (): void => { cleanupControl(); cleanupSignals(); };
+  const finishEarlyStop = async (): Promise<void> => {
+    await gatewayOwner.close();
+    if (!(await closeResourceOwners())) process.exitCode = 1;
+    cleanupHandlers();
+    clearShutdownDeadline();
+  };
   let application: GatewayApplication;
   let weixinCredentialChange: (() => Promise<"changed" | "unchanged" | "unavailable">) | undefined;
   try {
     await gatewayOwner.start();
-    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
+    if (earlyStop) { await finishEarlyStop(); return; }
     const surfacePlugins = await loadBuiltInSurfacePlugins(config);
-    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
+    if (earlyStop) { await finishEarlyStop(); return; }
     if (config.weixin) {
       weixinCredentialChange = await createWeixinCredentialChangeCheck(
         createWeixinCredentialStore(join(config.credentialsDirectory, "weixin")),
@@ -121,7 +144,7 @@ export async function runGatewayProcess(): Promise<void> {
         () => logger.warn({ surface: "weixin" }, "微信凭据检查失败；其他渠道继续运行，下次配置重载重新检查"),
       );
     }
-    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
+    if (earlyStop) { await finishEarlyStop(); return; }
     application = await GatewayApplication.create(
       config,
       logger,
@@ -253,7 +276,7 @@ export async function runGatewayProcess(): Promise<void> {
           reportCloseFailure(error, "Gateway 所有权 Socket 关闭失败");
         }
         clearShutdownDeadline();
-        if (!(await closeStorageOwners())) finalExitCode = 1;
+        if (!(await closeResourceOwners())) finalExitCode = 1;
         process.exit(shutdownTimedOut ? 1 : finalExitCode);
       });
   };

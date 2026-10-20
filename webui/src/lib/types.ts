@@ -76,6 +76,7 @@ export type {
   ManagementTaskInput,
   ManagementTaskPreview,
   ManagementProviderSettingsResponse,
+  ManagementProviderModelCatalogsResponse,
   ManagementProviderSettingsMutationInput,
   ManagementProviderSettingsPreview,
   ManagementProviderSettingsPreviewResponse,
