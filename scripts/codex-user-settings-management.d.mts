@@ -2,6 +2,15 @@ import type { CodexUserConfigClient } from "./codex-user-config.mjs";
 import type { CodexUserConfigValue } from "./codex-user-config.mjs";
 import type { CodexToolSettings } from "./codex-tool-settings.mjs";
 
+export interface CodexPermissionValues {
+  sandboxMode: "read-only" | "workspace-write";
+  approvalPolicy: "on-request" | "never";
+  networkAccess: boolean;
+}
+export type CodexPermissionChange = { kind: "permissions" } & Partial<CodexPermissionValues> & (
+  Pick<CodexPermissionValues, "sandboxMode"> | Pick<CodexPermissionValues, "approvalPolicy"> | Pick<CodexPermissionValues, "networkAccess">
+);
+
 export type CodexUserSettingInput =
   | { kind: "tool-access"; path: string[]; value: CodexUserConfigValue }
   | {
@@ -39,12 +48,7 @@ export type CodexUserSettingInput =
       checkForUpdateOnStartup: boolean;
       historyPersistence: "save-all" | "none";
     }
-  | {
-      kind: "permissions";
-      sandboxMode: "read-only" | "workspace-write";
-      approvalPolicy: "on-request" | "never";
-      networkAccess: boolean;
-    };
+  | CodexPermissionChange;
 
 export interface CodexUserSettingsState {
   toolSettings: CodexToolSettings;
@@ -82,6 +86,7 @@ export interface CodexUserSettingsState {
   permissions: {
     editable: boolean;
     defaultPermissions: string | null;
+    unsupportedFields: Array<keyof CodexPermissionValues>;
     sandboxMode: "read-only" | "workspace-write" | null;
     approvalPolicy: "on-request" | "never" | null;
     networkAccess: boolean | null;

@@ -65,6 +65,7 @@ export async function runConfig({
           hint: "模型、思考等级、Fast、权限与用户偏好",
         },
         { value: "mcp", label: "工具与 MCP", hint: "添加、编辑、删除 MCP，以及电脑、浏览器与工具访问管理" },
+        { value: "provider_web_search", label: "提供商联网搜索", hint: "按账户修改搜索模式，预览确认后保存" },
         { value: "display", label: "Gateway 显示设置", hint: "渠道操作详情、计划更新、思考状态" },
         {
           value: "system",
@@ -93,6 +94,7 @@ export async function runConfig({
     selected = section;
     const handlers = {
       codex_user: () => codexUserSettingsSetup({ environment, output, prompts }),
+      provider_web_search: async (options) => (await import("./provider-web-search-setup.mjs")).runProviderWebSearchSettingsSetup(options),
       mcp: runMcpSettings,
       display: async (options) => (await import("./config-display-menu.mjs")).runDisplaySettings(options),
       system: async (options) => (await import("./config-system-menu.mjs")).runSystemSettings(options),
@@ -108,7 +110,7 @@ export async function runConfig({
       throw new Error(`未知 Config 类别：${String(section)}`);
     }
     try {
-      if (!["codex_user", "mcp", "paths"].includes(section) && gatewayConfigError !== undefined) {
+      if (!["codex_user", "provider_web_search", "mcp", "paths"].includes(section) && gatewayConfigError !== undefined) {
         throw gatewayConfigError;
       }
       if (section === "paths") {

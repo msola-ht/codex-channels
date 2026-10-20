@@ -154,6 +154,18 @@ export function ManagedSelect({ label, value, options, disabled, disabledValues 
 }
 
 function formatPreviewValue(value: unknown, kind: string, t: Translate): string {
+  if (kind === "permissions" && value !== null && typeof value === "object") {
+    const labels = { sandboxMode: "settingsFields.sandbox", approvalPolicy: "settingsFields.approvalPolicy", networkAccess: "settingsFields.networkAccess" } as const
+    return (Object.keys(labels) as Array<keyof typeof labels>).filter(field => Object.hasOwn(value, field)).map(field => {
+      const current = (value as Record<string, unknown>)[field]
+      const display = current === null ? t("settingsFields.permissionInherited")
+        : current === "unsupported" ? t("settingsFields.permissionUnsupported")
+          : current === true ? t("settingsFields.allowed") : current === false ? t("settingsFields.denied")
+            : current === "read-only" ? t("settingsFields.readOnly") : current === "workspace-write" ? t("settingsFields.workspaceWrite")
+              : current === "on-request" ? t("settingsFields.onRequest") : current === "never" ? t("settingsFields.never") : t("common.unknown")
+      return `${t(labels[field])}：${display}`
+    }).join(" · ")
+  }
   if (kind === "web-search" && value !== null && typeof value === "object" && "mode" in value) {
     switch (value.mode) {
       case null: return t("openAiModelCatalog.searchDefault")

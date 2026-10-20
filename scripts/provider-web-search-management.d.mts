@@ -8,7 +8,7 @@ export interface ProviderWebSearchChangePreview {
   mode: ProviderWebSearchMode | null;
   revision: string;
   willChange: boolean;
-  activation: "restart-app-server";
+  activation: "none" | "restart-app-server";
 }
 export class ProviderWebSearchManagementError extends Error { code: string; field: string; constructor(code: string, field: string, message: string, options?: ErrorOptions) }
 interface Options { environment?: NodeJS.ProcessEnv; loadProviderState?: (options: { environment: NodeJS.ProcessEnv }) => Promise<ModelProviderManagementState> }

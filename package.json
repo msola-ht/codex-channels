@@ -101,6 +101,7 @@
     "scripts/managed-provider-model-management.mjs",
     "scripts/provider-model-management.mjs",
     "scripts/provider-web-search-probe.mjs",
+    "scripts/provider-web-search-setup.mjs",
     "scripts/provider-model-template-management.mjs",
     "scripts/provider-model-additions.mjs",
     "scripts/provider-model-setup.mjs",
