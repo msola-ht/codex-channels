@@ -100,7 +100,7 @@
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务、共享 API 类型与管理路由组合入口；
   服务入口同时接收终端信号与父进程 `codexc-stop`，统一关闭 HTTP 监听、通知连接与尚未发送请求的浏览器预连接，并取消导出和投递只读 Worker；活动请求按共享停止预算收尾。超时关闭剩余连接并记录非零状态，后台读取或 Windows ACL 辅助进程未确认退出时保留归属，实际退出后再结束服务。Windows CLI 包装层异步转发停止消息。
-  主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
+  主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行监听模式对应的管理访问边界（回环连接，或 `0.0.0.0` 下强制 Bearer）、精确 Origin、Bearer 鉴权、JSON 请求
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。正常页面和未构建回退页统一设置
   同源脚本 CSP、`frame-ancestors 'none'`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`
@@ -332,7 +332,7 @@
   结果预填，由用户确认后写入。
 - `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`：
   保存 Config 管理接口的共享稳定错误，以及 WebUI、指标的脱敏投影、输入校验与文档修改语义；
-  CLI 菜单不直接读写这些配置段。
+  切换 WebUI 为全网卡监听且尚无令牌时，共享逻辑生成随机令牌并与地址一起保存；也支持经确认显式重新生成。预览仅返回脱敏状态，写入响应只提供本次生成的令牌。CLI 菜单不直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理与日志等级；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
 - `config-display-menu.mjs`：独立管理模型统计分组、操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；模型分组仅用于控制台汇总，保留原模型明细，重新读取即生效；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。

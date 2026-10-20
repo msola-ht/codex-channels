@@ -27,6 +27,11 @@ export function WebuiDataSettingsCard({ management, section = "network" }: { man
   const { retentionDays, maxRows } = metrics
   const { port } = webui
   const [webuiToken, setWebuiToken] = useState("")
+  const generatedToken = !management.writeUnconfirmed && management.actionResult?.revision === settings?.revision
+    ? management.actionResult?.generatedWebuiToken
+    : undefined
+  const [showGeneratedToken, setShowGeneratedToken] = useState(false)
+  useEffect(() => setShowGeneratedToken(false), [generatedToken])
   const [proxyValues, setProxyValues] = useState<Record<string, string>>({})
   const [localError, setLocalError] = useState<{ key: MessageKey; params?: TranslateParams } | null>(null)
   useEffect(() => {
@@ -101,8 +106,19 @@ export function WebuiDataSettingsCard({ management, section = "network" }: { man
           <FieldLabel htmlFor="webui-token">{t("settingsFields.accessToken")}</FieldLabel>
           <div className="flex flex-wrap gap-2"><Input id="webui-token" className="min-w-0 flex-[1_1_240px]" type="password" autoComplete="new-password" value={webuiToken} placeholder={t(settings.webui.tokenConfigured ? "settingsFields.replaceTokenPlaceholder" : "settingsFields.newTokenPlaceholder")} disabled={disabled} onChange={(event) => setWebuiToken(event.target.value)} /><Button variant="outline" disabled={disabled || webuiToken.trim() === ""} onClick={() => void management.previewSetting("webui.token", { action: "set", value: webuiToken }, { key: "settingsFields.webuiToken" })}>{t(settings.webui.tokenConfigured ? "settingsFields.replaceToken" : "settingsFields.setToken")}</Button>{settings.webui.tokenConfigured ? <Button variant="destructive" disabled={disabled || settings.webui.host === "0.0.0.0"} onClick={() => void management.previewSetting("webui.token", { action: "clear" }, { key: "settingsFields.webuiToken" })}>{t("settingsFields.clearToken")}</Button> : null}</div>
           <FieldDescription>{t("settingsFields.tokenHint")}</FieldDescription>
+          <Button className="self-start" variant="outline" disabled={disabled} onClick={() => void management.previewSetting("webui.token", { action: "generate" }, { key: "settingsFields.webuiToken" })}>{t(settings.webui.tokenConfigured ? "settingsFields.regenerateToken" : "settingsFields.generateToken")}</Button>
         </Field>
         <SettingsRow label={t("settingsFields.currentState")} value={t(settings.webui.tokenConfigured ? "settingsFields.configured" : "settingsFields.notConfigured")} />
+        {generatedToken !== undefined && (
+          <Field>
+            <FieldLabel htmlFor="generated-webui-token">{t("settingsFields.generatedToken")}</FieldLabel>
+            <FieldContent className="flex-row gap-2">
+              <Input id="generated-webui-token" type={showGeneratedToken ? "text" : "password"} readOnly autoComplete="off" value={generatedToken} onFocus={(event) => event.target.select()} />
+              <Button variant="outline" onClick={() => setShowGeneratedToken((value) => !value)}>{t(showGeneratedToken ? "settingsFields.hideGeneratedToken" : "settingsFields.showGeneratedToken")}</Button>
+            </FieldContent>
+            <FieldDescription>{t("settingsFields.generatedTokenHint")}</FieldDescription>
+          </Field>
+        )}
       </section>
 
       <Separator />

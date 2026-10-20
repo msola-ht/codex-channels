@@ -204,6 +204,7 @@ export function updateGatewaySetting(
     value: result.value,
     activation: result.activation,
     activationResult: configActivationResult(result.activation),
+    ...(result.generatedWebuiToken === undefined ? {} : { generatedWebuiToken: result.generatedWebuiToken }),
     ...(result.generatedTokens === undefined ? {} : { generatedTokens: result.generatedTokens }),
     ...(backupPath === null ? {} : { backupPath }),
   };
