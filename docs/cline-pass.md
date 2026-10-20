@@ -1,5 +1,21 @@
 # CLP（Cline Pass）
 
+## 网页搜索适配
+
+受管 CLP 的模型代理把 Codex `web_search` 转成内部普通函数调用，再以同一账户凭据请求 Cline `/search/websearch`，把返回的标题和 URL 交给模型续答。只在请求声明搜索且模型实际调用时执行；`disabled` 不声明搜索，也不会发出搜索请求。请在提供商联网搜索中选择 `live`；`cached`、`indexed`、地域、上下文档位及图片搜索控制不能映射，明确拒绝而不扩大联网范围。支持 `filters.allowed_domains` 的普通域名名单，模型不能覆盖名单。
+
+搜索和模型续答共享一个 Responses 响应，返回原生 `web_search_call` 生命周期，并累计各轮模型用量。请求指定 `tool_choice: none` 或强制其他工具时，即使上游错误返回搜索调用也会在联网前拒绝。答复使用模型生成的 Markdown 来源链接，不伪造字符范围引用。锁定 Codex 的历史只保留搜索查询，原始结果不会持久化为另一套历史；后续完整输入可继续转换。`open_page`、`find_in_page` 和加密搜索历史尚不支持。
+
+每个模型请求最多搜索 4 次，单次搜索期限 45 秒，正文最多 256 KiB、最多 50 个结果；整条响应保留 16 MiB 转换预算，并扣减显式输出 Token 预算。搜索失败、无效响应或预算耗尽均明确失败，不伪装成成功；用户取消或代理关闭会取消当前搜索和后续模型调用。关闭并行工具声明；上游若仍在同轮混合返回搜索与客户端工具，在执行搜索前拒绝，避免缺少客户端结果或丢失搜索结果。
+
+搜索认证、额度、权限、限流、超时和协议错误分别用 `clp_search_*` 错误码记录，WebUI 用固定的中英文文案展示，不记录原始错误正文。永久流内失败使用 Codex 可识别的非重试码，细分原因保留在错误类型中；搜索后空续答也不会被标记为成功。独立搜索可在 Cline 用量页单列为 `Web Search`；是否计费由当前账户和上游决定。
+
+该适配只用于受管 CLP 的 Responses→Chat 桥，不改写独立 Relay 或通用 Chat 提供商。WebUI“检测原生网页搜索”仍检测上游原生工具格式，不检测此适配，原生格式被拒绝不代表独立搜索不可用。升级代码后需按现有流程重启 App Server 才加载新桥；代码修改不自动重启服务或修改搜索设置。
+
+接口依据：[Cline SDK 独立搜索实现](https://github.com/cline/cline/blob/c269dbb7f97256d53d4aedabb6c245b9ec54b1b6/sdk/packages/llms/src/providers/vendors/cline.ts)。其他 `vercel:*` 搜索及 Browserbase Fetch 虽可由上游内部执行，但 Chat 回包不含原始工具结果，本适配不自动回退至这些工具。
+
+## 账户配置
+
 通过 `codexc setup` → 模型与提供商 → 第三方 Provider → Cline Pass 官方配置。
 支持多个 CLP 账户，各账户使用独立 API Key，支持固定与切换模式。首次配置从 Cline 官方目录生成 Codex 多模型目录；勾选 Flash 时优先作为默认，否则以所选模型在官方目录中的第一项作为默认，CLI 保存前明确显示。
 Setup 和 WebUI 设置页均可添加、重新配置、设置默认及移除账户。账户 ID 为 1–32 位小写字母、数字、`-` 或 `_`；映射后凭据变量名相同的 ID 不可同时使用，例如 `a-b` 与 `a_b`。
@@ -10,7 +26,15 @@ Flash 的上下文、图片、思考等级与提示词复用仓库 `runtime/mode
 
 已有账户通过 `codexc setup → 模型与提供商 → 第三方 Provider → Cline Pass 官方` 的发现／添加模型入口扩展共用模型名单，无需删除账户、重新输入 Key。只列出尚未加入本地目录的候选，默认不勾选；空格勾选、回车确认，再预览所选新增模型的完整内容及影响账户并保存。发现只添加新模型，已有条目完整保留；下载目录缺失的旧模型也不会自动移除，没有新增时不写文件和备份。更新已有模型请在 CLI 模型管理或 WebUI 选择“更新模板”，明确提示词／能力范围后对比保存，见[账户模板更新](provider-integration-guide.md#对比并更新账户模型模板)。首次在 CLI 配置时也提供多选，Flash 可用时默认勾选它，但允许只选择其他模型；更换 Key 沿用共用名单。聚合入口当前关闭。移除使用独立的本地移除入口；任何 CLP 账户的当前默认模型均须先切换再移除。取消操作不写入配置。WebUI 首次配置仍生成完整的受支持目录。
 
-未启用 Flash 时，新增账户和刷新目录不要求 DS 模板，也不要求 Cline 目录包含 Flash。重新启用 Flash 时校验仓库 DS 模板；失败保留原目录。
+CLI 的“发现／添加新模型”也提供“手动添加 Cline 模型 ID”；WebUI 模型管理的“添加／发现模型”中选择“按平台说明手动填写”。可填写官方目录尚未收录的完整 ID，例如 `cline-pass/deepseek-v4.1-flash-1017`，并明确填写显示名称、上下文、思考等级及默认值、图片、`apply_patch` 和 `tool_search` 能力。仅支持思考开关时选择 `none` 和 `enabled`。须确认该 ID 通过 Cline Chat Completions 支持文本及工具调用；保存不发推理请求，不证明上游可用。
+
+手填默认“独立填写”，使用通用编程提示词和本地工具声明；也可选择“继承已有模型”，从当前 CLP 共用目录选择来源。继承一次性复制来源当前保存的提示词、上下文、压缩／截断、思考等级和工具等模型能力，同时固化来源的请求参数格式和路由：Flash 模式保留 `reasoning.effort` 并固定 DeepSeek，标准模式使用通用 Cline 映射并由 Cline 选择上游。发送的模型 ID 始终是新填写的 ID，不改成来源 ID；来源后续修改或删除不影响副本，也不复制账户凭据或模板更新关联。继承前须确认新模型支持这些能力，预览会显示来源、完整字段及请求处理方式。
+
+不选择继承时不会按名称相似程度推断 Flash 行为；未显式保存请求处理方式的条目（包括独立手填）仍仅对精确 ID `cline-pass/deepseek-v4.1-flash` 应用特殊映射。独立填写拒绝 Chat 桥不支持的原图细节和思考摘要控制。手填和继承均不下载官方目录、不自动关联模板，远端未收录的 ID 没有可用的官方模板更新；后续发现保留其已保存内容。新增前预览完整字段及影响账户，确认后沿用共享目录的备份、事务保存及回读；重复 ID 明确拒绝，取消不写入。Relay 独立目录不受影响。
+
+继承的请求行为保存在模型条目的可选 `cline_request_profile` 字段，仅支持 `standard` 和 `deepseek-flash`，未知值拒绝读取和转发。已有目录无需迁移；本地设置和模板更新保留该字段。保存失败沿用目录事务恢复；回退到不识别此字段的旧代码前，须成对恢复新增前的 `models.json.backup` 和 `models.manifest.json.backup`，避免旧代码忽略请求行为。备份只保留最近一次目录修改。
+
+未启用 Flash 时，新增账户和发现目录不要求 DS 模板，也不要求 Cline 目录包含 Flash。通过官方发现重新启用 Flash 时校验仓库 DS 模板；失败保留原目录。手填始终使用显式声明的能力。
 
 CLI／WebUI 的“更新模板”在读取候选时下载一次 Cline 官方目录，下载整体限时 25 秒并支持取消；下载或校验失败时明确报错，重新读取候选后再操作，无需先运行独立 CLI 命令。只为当前已配置且远端仍受支持的模型生成候选，其中包含 Flash 时才读取仓库 DS 模板。候选快照仅保存在当前进程内，有效期 10 分钟；预览和确认复用同一快照，不重新联网，也不调用模型。候选过期、被淘汰、进程退出或目标目录修订变化后须重新读取。读取候选不修改已配置模型、不重启服务；首次接入、“发现／添加新模型”和独立 Relay 仍使用各自的目录流程。旧版本遗留的 `template-source.json` 及其备份不再读取，也不自动删除。
 
@@ -63,7 +87,7 @@ Flash 投影继承 DS 模型定义中的说明、思考等级说明、提示词�
 把完整请求转换后发送至 `https://api.cline.bot/api/v1/chat/completions`，再把 Chat SSE 转换回 Responses。
 Gateway 重启不会终止该桥或共享 App Server。转换逻辑独立在 `src/model-api`，可以供其他 Chat Provider 复用。
 
-支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，声明 `grammar`（lark）格式时其语法原文保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。CLP 共用目录声明 `apply_patch_tool_type: freeform`，模型改用自由格式 `apply_patch` 工具修改文件，渠道据此显示「修改文件」卡片；CLP 共用目录同时开启 `supports_search_tool`，客户端 `tool_search` 可检索并按需加载命名空间工具。已有模型须按模板更新的保留规则查看差异；除上述两项本地声明外，其他工具配置不在模板能力覆盖范围内，无需删除账户。`text.format` 的 `json_schema` 按原样映射为 Chat `response_format`，因此 TUI 的线程标题生成等结构化请求无需关闭。未映射的顶层工具声明及其 `tool_choice` 原样交给 CLP 判断，包括 hosted `web_search` 与服务端 `tool_search`。内置网页搜索沿用 Codex 的 `web_search` 配置；透传不表示 CLP 或模型支持执行，不为这些声明注册客户端工具，回程不支持的工具调用和历史 `web_search_call` 仍明确失败。远程 compaction、加密或带签名的推理和 WebSocket 仍不支持；外部函数形式的工具仍按函数调用处理。
+支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，声明 `grammar`（lark）格式时其语法原文保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。CLP 共用目录声明 `apply_patch_tool_type: freeform`，模型改用自由格式 `apply_patch` 工具修改文件，渠道据此显示「修改文件」卡片；CLP 共用目录同时开启 `supports_search_tool`，客户端 `tool_search` 可检索并按需加载命名空间工具。已有模型须按模板更新的保留规则查看差异；除上述两项本地声明外，其他工具配置不在模板能力覆盖范围内，无需删除账户。`text.format` 的 `json_schema` 按原样映射为 Chat `response_format`，因此 TUI 的线程标题生成等结构化请求无需关闭。受管 CLP 的 hosted `web_search` 由桥适配为普通函数，并调用同账户的独立 `/search/websearch`；仅支持 live 文本查询及域名过滤，详见下节。其他未映射工具（如服务端 `tool_search`）仍原样交给上游判断，不承诺执行或回程支持。远程 compaction、加密或带签名的推理和 WebSocket 仍不支持；外部函数形式的工具仍按函数调用处理。
 边界案例可对照 [CLIProxyAPI 的 Responses 转换器（固定提交 9bdde54）](https://github.com/router-for-me/CLIProxyAPI/tree/9bdde54b59d1af70ae0534a0ef61b2c3361a1257/internal/translator/openai/openai/responses)，仅作实现参考，不作为 Codex 协议来源或运行时依赖。
 CLP 按上游不拒绝的标准开放参数透传：`text.verbosity` 映射为 Chat 顶层 `verbosity`，`service_tier` 与 `client_metadata` 原值传递，由上游判断，不再由桥按值提前拒绝或丢弃。精确 Flash 模板声明详细程度可选、默认 `medium`，不声明 `priority`、`flex` 等加速或服务档位；参数允许透传不能作为服务档位能力证据。其他 CLP 模型仍沿用各自目录声明，不因 Flash 的探测结果自动增加这些选项。旧目录中曾注入的服务档位通过“更新模板 → 能力”展示删除差异，明确确认后清除；只更新提示词或运行设置不清除其他声明。新建及发现新增使用同一投影，默认服务档位仍保持标准。
 
@@ -75,7 +99,7 @@ Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘�
 工具结果中的内联图片不能放进 Chat 的 `tool` 消息，转换时按原顺序收集，在该组工具结果之后作为紧随的一条 `user` 消息图片段写出，并用相同的调用 ID 与图片序号标记关联原 `tool` 文本位置和图片；并行结果只写出一条，结果文本仍留在对应 `tool` 消息里，因此上下文中的截图不会再让整次请求失败。
 不支持图片文件引用、远程图片 URL 或 `detail: original`；`auto`、`low`、`high` 原样传递。
 新账户从模板生成自己的图片能力和思考等级。
-Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；等级通过 Chat `reasoning.effort` 原样传递，包括 `none`；不因一次观察自动改成其他关闭格式。其他模型按官方目录声明生成选项：普通等级使用 `reasoning_effort`，`none` 使用 `reasoning.enabled=false`，开关选项 `enabled` 使用 `reasoning.enabled=true`，不发送 `reasoning_effort=enabled`。桥在出站前按当前启用目录复核选项，未声明的选项明确拒绝。优先默认 `high`，没有时使用目录投影的第一个合法等级；仅有开关时默认 `none`。只有精确 Flash 模型请求限定 DeepSeek 上游路由，其他模型由 Cline 按模型 ID 路由。
+Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；Flash 请求配置将等级通过 Chat `reasoning.effort` 原样传递，包括 `none`，并限定 DeepSeek 上游路由；不因一次观察自动改成其他关闭格式。标准请求配置普通等级使用 `reasoning_effort`，`none` 使用 `reasoning.enabled=false`，由 Cline 按模型 ID 路由。两种配置的开关选项 `enabled` 均使用 `reasoning.enabled=true`，不发送 `reasoning_effort=enabled`。没有显式请求配置时，仅精确 Flash ID 使用 Flash 分支；继承副本按其保存的 `cline_request_profile` 处理。桥在出站前按当前启用目录复核选项，未声明的选项明确拒绝。官方发现优先默认 `high`，没有时使用目录投影的第一个合法等级；仅有开关时默认 `none`，手填及继承使用其明确保存的等级。
 
 当前关闭限制：历史记录中，相同的 `reasoning.effort=none` 和 `gateway.only=["deepseek"]` 在 2026-10-14 04:56 UTC 返回 `deepseek` 路由、0 推理 Token；12:22 UTC 返回的路由已变为 `openai-compatible-private`、模型为 `private/deepseek-v4p1-flash-contributor`，报告 145 推理 Token。这是路由变化与失效同时出现的证据，不能据此确定服务端变更机制或某次本地提交为根因。2026-10-15 12:27 UTC 经授权直接请求同一 Cline 上游，固定文本、模型、路由限定及 `max_tokens=64`，各执行一次：旧 `none` 返回思考正文和 15 推理 Token；`enabled=false` 不返回思考正文但报告 27 推理 Token；不设控制返回思考正文和 16 推理 Token。三次均为上述私有路由、HTTP 200、`finish_reason=stop`，收到流终帧。该对比支持新参数影响正文返回，但不证明内部推理已关闭，也不替代部署后完整客户端链路验证。
 
@@ -150,7 +174,7 @@ WebUI 调用详情的“Chat 上游信息”展示上述字段；受长度或条
 
 错误处理依据 [Cline 官方错误文档](https://docs.cline.bot/api/errors)：HTTP 400/401/402/403/404/429/500/502/503 返回固定的安全说明，读取错误正文最多 64 KiB，未知或不可解析正文按 HTTP 状态归类。HTTP 200 中的顶层 `error` 或 `choices[].error` / `finish_reason: error` 转为失败终态，保留已知 `context_length_exceeded`、`content_filter`、`rate_limit`、`server_error` 分类；HTTP 200 但不是 SSE 响应按服务异常归类且不读取正文；桥自身的 300 秒请求预算在正文接收阶段耗尽时返回 HTTP 408 `request_timeout` 并关闭未完成的请求连接；正文接收完成后耗尽按 `upstream_timeout` 归类并给出重试建议。请求 ID、HTTP 状态、错误阶段和是否适合稍后重试进入诊断记录，不保留任意错误原文或 metadata。生成桥不自动重试；认证、权限和额度错误需先处理配置或账户，临时限流和服务异常仅提供重试建议。Codex 仍使用既有有限重试策略。
 
-调用详情的 `chat_diagnostics` 同时保留受限的 `upstreamError.code/type/request_id`，与本地归类的 `error.code/stage/retryable` 分开。Chat 桥与原生 Chat Relay 共用采集逻辑。对于已观测到的 `stream_initialization_failed`，仅当说明以 `Failed to create stream:` 开头且不超过 64 KiB 时，解析其首个 `{` 起的完整 JSON 尾部，白名单提取 `error.code/type`、`error.param.type/statusCode` 到 `upstreamError.cause.*`；不记录说明原文、其他 metadata 或凭据，不根据嵌入字段改变错误归类和重试行为。畸形或超限说明不解析；保留真实 HTTP 状态，内部 429 不覆盖 HTTP 200。此诊断依赖模型流量转储开启，不追溯改写历史记录。
+调用详情的 `chat_diagnostics` 同时保留受限的 `upstreamError.code/type/request_id`，与本地归类的 `error.code/stage/retryable` 分开。Chat 桥与原生 Chat Relay 共用采集逻辑。对于已观测到的 `stream_initialization_failed`，仅当说明以 `Failed to create stream:` 开头且不超过 64 KiB 时，解析其首个 `{` 起的完整 JSON 尾部，白名单提取 `error.code/type`、`error.param.type/statusCode` 到 `upstreamError.cause.*`；不记录说明原文、其他 metadata 或凭据。诊断采集本身不改变分类；错误分类器仅对固定包装中的 HTTP 400、精确工具索引和明确类型拒绝识别为 `web_search_unsupported`，规则见[错误说明](errors.md)。主动搜索诊断复用该分类及实际出站工具，明确拒绝显示“不支持”。畸形或超限说明不解析；保留真实 HTTP 状态，内部 429 不覆盖 HTTP 200。调用详情诊断依赖模型流量转储开启，不追溯改写历史记录。
 
 WebUI 调用详情在响应区直接展示错误摘要及已记录的上游错误码、内部错误类型/状态和请求 ID，无需展开原始 JSON。限流、认证、权限、额度、上下文、内容过滤、服务异常和超时使用固定说明；未知错误明确显示原因未确定，不根据 HTTP 200 判定生成成功。
 

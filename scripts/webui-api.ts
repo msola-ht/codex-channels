@@ -928,7 +928,6 @@ export interface ProviderWebSearchManagementPreview extends Omit<ManagementProvi
   provider: string
   before: { mode: import("../runtime/provider-web-search.mjs").ProviderWebSearchMode | null }
   mode: import("../runtime/provider-web-search.mjs").ProviderWebSearchMode | null
-  effects: { clearsProfileOverride: boolean }
 }
 export type ManagementProviderSettingsPreview = ManagementProviderSettingsStandardPreview | ProviderModelTemplateUpdatePreview | ProviderModelAdditionManagementPreview | ProviderWebSearchManagementPreview
 

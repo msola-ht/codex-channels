@@ -110,7 +110,7 @@ Setup 仅按具体操作返回的激活范围提示重启。列出账户、停�
 日常模型操作从 `setup → 模型与提供商 → 第三方 Provider → 模型管理` 或 WebUI「模型管理 → 模型配置」进入。
 受管模型上下文窗口在 CLI 和 WebUI 均先读取目录修订，编辑后查看窗口差异与同一提供商的受影响账户，再确认保存；中途取消不写入，目录或账户已变化时须重新打开编辑。
 原生网页搜索诊断从 `setup → 模型与提供商 → 检测原生网页搜索` 或 WebUI 模型行操作进入，覆盖官方及第三方提供商；明确选择一个账户和模型后主动发起，可能产生模型及搜索费用，仅诊断、不修改搜索策略，见[模型探测](provider-integration-guide.md#添加时探测并写入)。
-内置搜索读取主配置文件的 `web_search` 及精确 Provider ID 的独立覆盖；第三方账户可在 WebUI「模型管理 → 提供商」预览并确认搜索设置，缺项跟随全局，见[独立提供商的搜索模式](provider-integration-guide.md#独立提供商的搜索模式)。模型搜索能力元数据不参与请求过滤；搜索是否执行仍取决于上游接口和模型。搜索诊断保留，不自动修改配置。
+内置搜索读取主配置及各提供商 config 顶层的 `web_search`；有独立 config 的第三方账户可在 WebUI「模型管理 → 提供商」预览并确认搜索设置，缺项跟随全局。使用主 `config.toml` 的固定提供商在通用设置中修改，见[独立提供商的搜索模式](provider-integration-guide.md#独立提供商的搜索模式)。模型搜索能力元数据不参与请求过滤；搜索是否执行仍取决于上游接口和模型。受管 CLP 的独立搜索适配需选择 `live`，不支持 cached/indexed，详见 [CLP 网页搜索适配](cline-pass.md#网页搜索适配)。搜索诊断仍检查上游原生工具，不检测该适配线路，也不自动修改配置。
 自定义目录、CCG、OCG、CLP 支持预览后本地移除；账户范围、默认保护、Relay 影响和恢复方式见[日常模型管理](provider-integration-guide.md#日常模型管理)。
 CLI 与 WebUI 模型管理均提供 DS、CLP、CCG、OCG 和自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确来源，受管模型选择提示词或能力范围，自定义模型可更新提示词及来源，并独立选择“本地工具”以合并异步提问和时钟声明；两类模型均可另行选择有效上下文比例、压缩阈值和截断策略，查看差异并确认后更新目标模型；旧模型缺少来源关联时须手动选择。
 
@@ -424,7 +424,7 @@ Remote 的 `--profile` 继续支持原生个人 Profile 和已登记的规范受
 直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
 共享 App Server 的 TUI 请统一使用 `codexc remote`。
 `codexc remote` 不注入网关权限参数，原生配置、Profile 和显式参数由 Codex 处理。
-选择 CP 自定义目录 Provider 时，Remote 复用已校验的启动参数与子进程凭据环境，保留磁盘 Profile 合同。
+受管及自定义切换 Provider（包括 CP）统一通过原生 `--profile` 加载对应配置，其中显式的搜索值覆盖主配置；App Server 仍由受管启动器从同一配置生成必要参数。
 可用 `--workspace` 选择登记目录，或用一次 `-C DIR` / `--cd DIR` 指定目录；两者不能同时使用。原生 `resume` / `fork` 上的目录参数同样参与选择，重复目录参数被拒绝。不能透传 `--remote` 或 `--remote-auth-token-env` 替换受管连接；原生 `--` 之后的内容按字面参数保留。
 Remote 不按 Provider 或模型限制自动审查，也不为审批资格固定模型或限制个人 Profile。
 Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.163.0 不应用启动参数中的 reviewer 覆盖；

@@ -7,6 +7,10 @@
 
 ## 日志字段约定
 
+受管 CLP 独立搜索适配使用 `clp_search_authentication_error`、`clp_search_payment_required`、`clp_search_permission_denied`、`clp_search_rate_limit`、`clp_search_timeout`、`clp_search_invalid_response`、`clp_search_upstream_error` 和 `clp_search_cancelled` 区分搜索接口故障。`clp_search_unsupported_controls` 提示改用 live 并移除不支持的控制；`clp_search_mixed_tools` 表示上游同轮混合了搜索与客户端工具；`clp_search_limit` 和 `clp_search_output_limit` 表示次数或输出预算不足。错误列表及调用详情按精确代码显示固定中英文文案，外层 HTTP 200/502 不掩盖搜索原因，本地断连仍优先。原生诊断的 `web_search_unsupported` 与适配错误不同，见 [CLP 网页搜索适配](cline-pass.md#网页搜索适配)。
+
+`clp_search_tool_choice` 表示上游搜索调用违反本轮工具选择限制，联网前已阻止。CLP 永久流内失败对 Codex 返回非重试码 `invalid_prompt`，细分原因保留在 `error.type` 与诊断码中；错误记录同时读取 code/type。可重试流内失败保留分类，并透传经校验的 `Retry-After`，避免永久搜索失败引发整轮自动重试。
+
 渠道输入、输出和生命周期失败统一使用以下字段（能拿到时才出现）：
 
 | 字段 | 含义 | 示例 |
@@ -31,6 +35,8 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 三个渠道都会让精确停止命令绕过普通输入排队。
 
 CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模型不存在、限流、服务异常和桥自身的请求超时使用固定安全文案；流内上下文超限、内容过滤、限流、服务异常和上游响应超时保留白名单错误码。调用详情同时记录可用的上游请求 ID、错误阶段和重试建议，不记录原始错误正文。具体口径见 [CLP](cline-pass.md)。
+
+`web_search_unsupported` 表示上游明确拒绝了当前出站请求中 `web_search` 的工具类型。失败文案会提示关闭当前请求的原生网页搜索，并提示 Codex 用户检查 WebUI 的“提供商联网搜索”：未单独开启也可能跟随全局；可为该提供商设为 `disabled`，保存后按页面提示应用。仅在上游错误指向实际网页搜索工具索引且明确拒绝该类型时分类，不把认证、限流或其他参数错误归到搜索，也不自动删除工具或修改配置。HTTP 200 内的流错误同样适用；外层 Codex 仍可能先显示重试通知，最终失败展示具体原因。
 
 ## 用户可见错误码字典
 

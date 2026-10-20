@@ -5,6 +5,10 @@
 
 ## 文件
 
+- `cline-web-search.ts`：受管 CLP 桥的同源独立搜索 HTTP 执行器，复用账户认证和代理 Agent，45 秒总期限、256 KiB 正文及 50 条结果边界，返回校验后的标题和 URL；取消关闭连接，无自动重试，错误仅输出固定 `clp_search_*` 分类。
+
+受管 CLP 的 live 搜索由 `chat-bridge.ts` 在同一请求内执行普通函数→独立搜索→模型续答。搜索最多 4 次、显式输出预算逐轮扣减；每次续模型前复核目录，原始响应 ID、事件序号与输出索引连续，用量按已知各轮累计。多轮调用不发布将搜索等待计入解码时间的生成速率。混合搜索与客户端调用在执行前拒绝；cached/indexed/未知控制不降级为 live。通用 Chat、原生搜索诊断与 Relay 不启用此适配。
+
 - `aggregate-proxy.ts`：单 App Server 的无状态 HTTP 聚合模型出口；以精确 `provider/model` slug
   选择主进程授权快照中的已启动本地 ProviderProxy（可带 `/go/<账户>`），出站改为真实模型和账户认证，
   Provider 前缀后的模型 ID 按源目录契约作为不透明 JSON 字段保留，不按 URL 路径解释。
@@ -153,7 +157,7 @@
 - `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压；`readModelBody` 供启用名单复核保留原始 Buffer，`readChatBody` 保持文本返回。
 - `direct-model-http.ts`：直接模型请求共用的 HTTP 出站生命周期、响应状态/Content-Type 校验与安全 JSON 解码，保留普通应用请求头并复用跳级头清理，覆盖凭据和传输头、剔除 Cookie/伪造身份；同步出站复核、实际 UA 观测、首包/空闲超时、取消和关闭清理，不负责协议转换、重试或指标发送。
 - `direct-responses.ts`：原生 Responses JSON/SSE 交付，复用 HTTP 生命周期和 Responses 指标归约；非流式通过共享白名单识别首个非空输出，观测时间为整包解析校验后；保留事件、用量、终态与扩展字段，不生成 Chat DONE，断流不伪造成功；独立诊断回调仅提交有证据的错误阶段与内层错误，不推断 Chat 专属路由或结束原因。
-- `cline-pass-routing.ts`：CLP 专属出站副本投影，仅对精确 Flash 模型固定 `providerOptions.gateway.only` 为 `deepseek`，保留其他对象字段并拒绝畸形容器；其他模型保持原请求。桥与 Relay 共用，不处理网络或重试。
+- `cline-pass-routing.ts`：CLP 专属出站副本投影，按可选 `deepseek-flash` 请求快照固定 `providerOptions.gateway.only` 为 `deepseek`，保留请求模型 ID 和其他对象字段并拒绝畸形容器。未传快照时保留精确 Flash 模型默认分支，显式 `standard` 不固定路由。桥与 Relay 共用，独立 Relay 不读取受管快照，不处理网络或重试。
 - `direct-chat.ts`：单次直接 Chat JSON/SSE 协议处理，复用公共 HTTP 生命周期；识别 CLP 显式成功的单层 JSON 包装后复用响应校验，可向注入的有界采集器提交已解析 Chat 报文；另经独立诊断回调提交受限请求指标摘要，关闭转储仍采集。
 
 - `generation-timing.ts`：有界原生 Responses 与原始 Chat 生成区间观察器，不保留内容；区间完整时提供思考、正文、工具与并集毫秒摘要。Chat 在转换前采集，经已有请求级进程内通道传回指标，不依赖转储或改变转换器工具校验。共享 `runtime/request-timing.mjs` 负责入库前校验与显示速度计算。
@@ -185,8 +189,12 @@ Chat 桥复用公共端到端请求头过滤器，保留 Provider 的普通附�
 
 `chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码；HTTP 错误可携带经验证的 Retry-After，由 Chat 桥及原生 Relay 交付，不自动重试。桥将上游 429/503 的受限整数秒或规范 HTTP 日期交给外层 Codex，错误正文超时或使用不支持的压缩编码时不丢失该建议，畸形值不转发。
 
+公开入口导出 `chatUpstreamError` 与 `chatStreamError`，供 Scripts 的主动搜索诊断复用结构化错误分类；调用方传入实际出站工具及真实 HTTP 状态，诊断不另行解析固定包装或改变状态优先级。
+
+Chat 桥与直接 Chat 调用将实际出站工具声明交给错误分类器。HTTP 400 或流内 `invalid_request_error` 明确拒绝 `tools.N.type`，且该位置实际为 `web_search` 时，返回固定 `web_search_unsupported` 文案与关闭原生搜索的建议；同时支持实测 Cline `stream_initialization_failed` 固定包装内的有界 HTTP 400 JSON 原因。不转发原始错误正文，不从工具名称相似度或任意错误文本推断能力，不改写请求或自动重试；其他 HTTP 状态仍优先决定认证、限流及服务错误分类。
+
 本地模型请求期限统一使用 `ModelRequestTimeoutError`：上传为 HTTP 408 `upload_timeout`，准备为 HTTP 504 `preparation_timeout`，上游响应头/正文/完整事件为 HTTP 504 `upstream_timeout`，交付/收尾为 HTTP 504 `delivery_timeout`。可发送结构化错误时附带 `timeout_stage`（`upload/prepare/headers/body/stream/delivery/terminal`）；已发送 HTTP 响应头时不改写状态，透明转发中断仅关闭连接并记录受控错误。已完成生成的指标不被交付失败覆盖。
-HTTP 错误保存实际 `upstreamStatus`，状态优先确定错误类别及重试性质；400 只允许上下文超限或内容过滤细分，不让正文覆盖认证和可用性。原生 HTTP/WS 交付失败先记录明确原因再关闭，后续清理保留首次失败及其时间。流量转储复用 `errorScope` 的 `timeout_<stage>` 值记录本地超时，读取端仅映射已知阶段；指标数据库与既有转储结构不变，不回填历史。
+HTTP 错误保存实际 `upstreamStatus`，状态优先确定错误类别及重试性质；400 只允许上下文超限、内容过滤或上述已确认的原生搜索拒绝细分，不让正文覆盖认证和可用性。原生 HTTP/WS 交付失败先记录明确原因再关闭，后续清理保留首次失败及其时间。流量转储复用 `errorScope` 的 `timeout_<stage>` 值记录本地超时，读取端仅映射已知阶段；指标数据库与既有转储结构不变，不回填历史。
 Relay 转储的最终模型结果由请求宿主传入，与同一请求的指标共用一次投影；采集器只保存报文、诊断与终态时间，不维护另一套结果推断。`completed` 与交付 `failed/disconnected` 可以同时成立，详情分别解释生成结果和交付状态。
 `chat-io.ts` 的 JSON 正文及 SSE 增量读取使用严格 UTF-8 解码，跨分片字符保留解码状态；入站编码错误为受控请求失败，直接上游编码错误为 `invalid_upstream_encoding`。错误诊断正文解码失败仍保留 HTTP 分类与安全退避头。消费者在协议终态停止读取，不继续等待终态后的尾流。
 
@@ -197,13 +205,13 @@ Chat 桥与直接模型适配器共用 `direct-model-http.ts` 的成功响应校
 自定义 `cp-*` 的 Runtime 守卫还复用配置读取器的版本 5 和完整目录一致性校验，并拒绝目录 `.pending` 与全局上下文同步未完成状态；HTTP/WS 复用相同回调，不把合法 slug 单独视为有效目录。
 
 DS/OCG/CCG 和自定义目录提供商由 Runtime 向 `ProviderProxy` 注入同源目录复核；CLP 在桥内执行。HTTP 在路由解析后、有界读取正文并复核模型再提交；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 16 MiB、上传预算 30 秒，目录复核预算 30 秒；全代理最多 16 项授权准备，WS 单帧与连接队列各限制 16 MiB、队列最多 16 帧。官方 OpenAI、Codex 兼容 Provider 的共享官方只读目录与独立 Relay 不注入此目录复核。
-HTTP／WS 保留请求中的 hosted `web_search` 与 `tool_choice`，不依赖模型目录的扩展声明；搜索是否启用由 Codex 配置决定，执行支持由上游判断。采样与私有项归一化不改变该合同。聚合先恢复真实模型 ID，再经过对应 Provider 代理。Chat 桥同样透传未映射的顶层声明；透传不代表支持 hosted 搜索回程，历史 `web_search_call` 在 Responses 保留，Chat 仍按既有转换限制明确拒绝。
+HTTP／WS 保留请求中的 hosted `web_search` 与 `tool_choice`，不依赖模型目录的扩展声明；搜索是否启用由 Codex 配置决定，执行支持由上游判断。采样与私有项归一化不改变该合同。聚合先恢复真实模型 ID，再经过对应 Provider 代理。通用 Chat 桥透传未映射的顶层声明；受管 CLP 对 live `web_search` 使用独立搜索适配，并接受 search 查询历史，其他 hosted 历史仍按转换边界拒绝。
 除官方 OpenAI 端点外的 Responses 上游（受管 DS/OCG/CCG、自定义 Provider 与自定义 `cp-*`）在提交前归一化 Codex 私有输入项：`agent_message` 降级为普通 `user` 消息，工具参数 schema 中的布尔 `encrypted` 标记被删除，无法转换的私有项按 `400 provider_model_request_invalid` 失败关闭，不退回透传（与 Chat 桥一致）。HTTP 与 Responses WS 都只替换发往上游的字节，转储与指标仍记录客户端原始报文；未发生改写时沿用原始字节。正文改写后按实际字节重写 `content-length`；没有目录守卫的第三方上游沿用同一 16 MiB 正文上限、30 秒上传预算与 16 项准备上限，压缩正文仍拒绝。
 Responses WS 归一化同样要求文本 JSON 消息且单条不超过 16 MiB；无守卫上游也在 WebSocket 接收层限制消息大小（含分片累计），并受同一等待队列上限约束。HTTP 目录复核与归一化共用一次正文解析。官方 `openai` 路由（含 `openai_base_url` 覆盖）不归一化，该端点理解 Codex 私有输入项；独立 Relay 的出站请求来自外部调用方自带报文，同样不归一化。
 
-`chat-bridge.ts` 按 Runtime 的受管 CLP 身份映射模型思考参数，并仅对精确 Flash 模型限定 DeepSeek 上游；其他 Chat Provider 不注入。它管理 Chat HTTP 连接、SSE 分帧、背压、取消和有限超时，通过 `model-api/index.ts` 调用纯转换模块。转换覆盖 Responses 的 `function`、`namespace`、自由格式 `custom` 工具、执行位置为 `client` 的 `tool_search`（含其结果带回的工具声明）与 Codex multi-agent v2 的 `agent_message` 输入项；`agent_message` 降级为普通 `user` 消息，Responses 私有的 `encrypted` 参数标记不下发；未映射的顶层工具声明及其 `tool_choice` 原样交给上游判断，不为它们注册客户端执行身份；回程不支持的工具调用仍明确失败。`text.format` 的 `json_schema` 映射为 Chat `response_format`，`text.verbosity` 校验后忽略。
+`chat-bridge.ts` 按 Runtime 的受管 CLP 身份映射模型思考参数，并仅对精确 Flash 模型限定 DeepSeek 上游；其他 Chat Provider 不注入。它管理 Chat HTTP 连接、SSE 分帧、背压、取消和有限超时，通过 `model-api/index.ts` 调用纯转换模块。转换覆盖 Responses 的 `function`、`namespace`、自由格式 `custom` 工具、执行位置为 `client` 的 `tool_search`（含其结果带回的工具声明）与 Codex multi-agent v2 的 `agent_message` 输入项；`agent_message` 降级为普通 `user` 消息，Responses 私有的 `encrypted` 参数标记不下发；除受管 CLP 的 live 网页搜索适配外，未映射的顶层工具声明及其 `tool_choice` 原样交给上游判断，不为它们注册客户端执行身份；回程不支持的工具调用仍明确失败。`text.format` 的 `json_schema` 映射为 Chat `response_format`，`text.verbosity` 校验后忽略。
 上游接口为 `chat_completions` 的自定义第三方 Provider 复用同一桥，按通用分支运行（不 pin CLP 路由、不读 CLP 目录、思考等级按通用形状发送）；这类 Provider 的 WebSocket 关闭，客户端检索与连接器工具由桥转换。通用分支在请求同时带工具时把 `text.format` 的 schema 追加到首条 system 消息并省略 `response_format`，因为部分 Chat 上游拒绝两者并存；托管 CLP 已验证接受，继续使用 `response_format`。该降级只由提示词保证，桥不校验最终文本，`conversion.structuredOutput=prompt` 记录在请求诊断中；模型侧仍由统计代理按 Provider 目录拒绝目录外或已停用模型。
-受管 CLP 通过同次启用目录读取取得思考选项，所有显式选项须属于当前模型；只有声明开关的目录允许 `enabled`，出站转换为 `reasoning.enabled=true`。未知选项在出站前拒绝，目录不可读时失败关闭；直接 Chat/Responses Relay 保留自己的参数合同，不套用此目录或转换。
+上述按精确 Flash ID 选择格式和路由是未保存请求快照时的默认行为。受管 CLP 通过同次启用目录读取取得思考选项和可选 `clineRequestProfile`：`deepseek-flash` 使用 Flash 格式并限定 DeepSeek 上游，`standard` 使用通用格式且不固定路由，出站始终保留用户新增的模型 ID。所有显式思考选项须属于当前模型；只有声明开关的目录允许 `enabled`，出站转换为 `reasoning.enabled=true`。未知选项或请求快照在出站前拒绝，目录不可读时失败关闭；直接 Chat/Responses Relay 保留自己的参数合同，不套用此目录或转换。
 Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。统一阶段预算来自 `runtime/model-request-policy.mjs`：上传 30 秒、准备 30 秒、真实上游首响应头 300 秒、完整 Chat 数据事件空闲 300 秒；没有生成总期限。正文接收超时返回 408 `upload_timeout`；上游等待超时返回 504 `upstream_timeout`。交付受阻最多 30 秒，终态与失败交付使用独立 5 秒预算，外层统计代理不再以 305 秒计时抢先截断。完整数据事件空闲不因注释心跳或不完整字节续期；下游背压期间暂停上游事件等待。工具转换仍保留完整校验后发布的合同；转换前有 Chat 帧不等于 Codex 已看到 Responses 事件，长时间没有可交付事件时仍受 Codex 自身的 300 秒空闲限制，不伪造保活事件。
 
 - `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在其后复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 复核取消后立即尝试采集，首次容量初始化期间跳过并报告 initializing，不等待磁盘；共享存储报告实际接受的写入量，在途调用单独预留预算；后台单任务清理历史并保护活动及新建批次，整理期间继续采集；维护与关闭各有 5 秒预算，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。

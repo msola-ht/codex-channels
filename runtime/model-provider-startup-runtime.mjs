@@ -55,6 +55,7 @@ function providerAppServerRuntime(profile) {
       "-c", `model_provider=${JSON.stringify(profile.provider)}`,
       "-c", 'service_tier="default"',
       "-c", `model_catalog_json=${JSON.stringify(profile.catalogPath)}`,
+      ...(profile.webSearch === undefined ? [] : ["-c", `web_search=${JSON.stringify(profile.webSearch)}`]),
       ...(profile.reasoningEffort === undefined
         ? []
         : ["-c", `model_reasoning_effort=${JSON.stringify(profile.reasoningEffort)}`]),

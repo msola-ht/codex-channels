@@ -12,7 +12,6 @@ import {
 import {
   loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviders,
-  loadConfiguredCustomPrimaryModelProvider,
   providerAppServerSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -29,7 +28,6 @@ import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import { parseCodexRemoteOptions } from "./codex-remote-options.mjs";
 import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
-import { providerWebSearchArguments } from "../runtime/provider-web-search.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -79,11 +77,6 @@ async function runRemoteCli() {
   const customSwitchingProvider = customSwitchingProviders.find(
     ({ profileName }) => profileName === selectedProfile,
   );
-  // CP's old standalone search pin is not a user preference. Use its validated
-  // projection; explicit provider defaults are appended below for every mode.
-  const projectedProvider = customSwitchingProvider?.catalogSource.kind === "custom"
-    ? customSwitchingProvider
-    : undefined;
   const selectedDefinition = customSwitchingProvider !== undefined
     ? {
         id: customSwitchingProvider.provider,
@@ -135,22 +128,15 @@ async function runRemoteCli() {
       `unix://${socketPath}`,
       "-C",
       workdir,
-      ...(projectedProvider
-        ? projectedProvider.arguments
-        : selectedDefinition
+      ...(selectedDefinition
         ? ["--profile", selectedDefinition.profileName]
         : []),
       ...modelArguments,
-      ...providerWebSearchArguments(selectedDefinition?.id
-        ?? loadConfiguredCustomPrimaryModelProvider()?.id ?? appServer.primaryProvider),
       ...passthrough,
     ]);
     const result = spawnSync(invocation.file, invocation.args, {
       stdio: "inherit",
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-      ...(projectedProvider
-        ? { env: { ...process.env, ...projectedProvider.childEnvironment } }
-        : {}),
     });
     assertSynchronousChildSuccess(result, {
       failureReportedByChild: true,

@@ -260,7 +260,7 @@ export function redactProviderSettingsResult(result) {
   if (!result || typeof result !== "object") return { action: "completed" };
   if (result.operation === "provider.web-search") {
     return { operation: result.operation, provider: result.provider, before: { mode: result.before.mode }, mode: result.mode,
-      revision: result.revision, willChange: result.willChange, activation: result.activation, effects: { clearsProfileOverride: result.effects.clearsProfileOverride },
+      revision: result.revision, willChange: result.willChange, activation: result.activation,
       ...(result.action === undefined ? {} : { action: result.action }) };
   }
   if (result.operation === "model.add") {

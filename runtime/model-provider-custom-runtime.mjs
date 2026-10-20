@@ -447,12 +447,26 @@ function loadCustomSwitchingProfile(environment, registeredProvider) {
   );
 }
 
+function assertCustomProfileSearchComplete(environment, registeredProvider) {
+  let searchPending = true;
+  try { readPrivateFileSync(`${customPrimaryProviderProfilePath(environment, registeredProvider)}.search-pending`, 4096); }
+  catch (error) {
+    if (error?.code !== "ENOENT") {
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error("Provider 搜索设置事务记录无法安全读取");
+    }
+    searchPending = false;
+  }
+  if (searchPending) throw new Error("Provider 搜索设置保存尚未完成；请保留事务记录及备份并核对文件，勿自动重试");
+}
+
 function configuredCustomSwitchingProfileFromContent(
   environment,
   registeredProvider,
   profileContent,
   proposedUpstreamWireApi,
 ) {
+  assertCustomProfileSearchComplete(environment, registeredProvider);
   let profile;
   try {
     profile = record(parse(profileContent));
@@ -467,7 +481,8 @@ function configuredCustomSwitchingProfileFromContent(
   const reasoningEffort = custom ? custom.reasoningEffort ?? "none" : customSwitchingDefaultReasoningEffort;
   if (custom && profile.model_catalog_json !== custom.catalog.path) throw new Error("自定义提供商模型目录引用无效");
   const supportedProfileKeys = new Set([
-    ...(custom ? ["model_catalog_json", "web_search"] : []),
+    ...(custom ? ["model_catalog_json"] : []),
+    "web_search",
     "model",
     "model_provider",
     "model_reasoning_effort",
@@ -478,7 +493,7 @@ function configuredCustomSwitchingProfileFromContent(
     Object.keys(profile).some((key) => !supportedProfileKeys.has(key))
     || profile.service_tier !== "default"
     || profile.model_reasoning_effort !== (reasoningEffort ?? undefined)
-    || (custom && profile.web_search !== undefined && profile.web_search !== "disabled")
+    || (profile.web_search !== undefined && !["disabled", "cached", "indexed", "live"].includes(profile.web_search))
   ) {
     throw new Error("Codex 自定义切换 Provider Profile 包含不受支持的配置");
   }
@@ -577,6 +592,7 @@ function configuredCustomSwitchingProfileFromContent(
       "-c", `model=${JSON.stringify(model.trim())}`,
       "-c", `model_provider=${JSON.stringify(id)}`,
       "-c", 'service_tier="default"',
+      ...(profile.web_search === undefined ? [] : ["-c", `web_search=${JSON.stringify(profile.web_search)}`]),
       ...(reasoningEffort === null ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`]),
       ...(custom ? ["-c", `model_catalog_json=${JSON.stringify(custom.catalog.path)}`] : []),
       "-c", `model_providers.${id}.name=${JSON.stringify(name)}`,
@@ -641,6 +657,7 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
   }
   const ids = loadCustomSwitchingProviderIds(environment);
   const profilePath = customPrimaryProviderProfilePath(environment, provider);
+  assertCustomProfileSearchComplete(environment, provider);
   let previousProfile;
   try {
     previousProfile = readPrivateFileSync(profilePath);
@@ -660,6 +677,15 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
   }
   if (upstreamWireApi !== undefined && (!connectionOnly || !["responses", "chat_completions"].includes(upstreamWireApi))) {
     throw new Error("连接编辑的上游接口不受支持");
+  }
+  // Connection edits must retain the search preference now owned by this Profile.
+  let previousWebSearch;
+  if (previousProfile !== undefined) {
+    try { previousWebSearch = parse(previousProfile).web_search; }
+    catch { throw new Error("原 Provider Profile 无法安全解析"); }
+    if (previousWebSearch !== undefined && !["disabled", "cached", "indexed", "live"].includes(previousWebSearch)) {
+      throw new Error("原 Provider 搜索设置无效");
+    }
   }
   if (modelOnly || connectionOnly && previousProfile !== undefined) {
     if (catalogSource.kind !== "custom" || previousProfile === undefined || expectedProfileContent === undefined
@@ -687,6 +713,7 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
     stringify({
       model: model.trim(),
       model_provider: provider,
+      ...(previousWebSearch === undefined ? {} : { web_search: previousWebSearch }),
       ...(catalogSource.kind === "custom" ? {
         model_catalog_json: responsesProviderCatalogPath(environment, provider),
         model_reasoning_effort: catalogSource.reasoningEffort ?? "none",

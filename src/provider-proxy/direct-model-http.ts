@@ -11,8 +11,8 @@ import { endToEndHeaders } from "./request-routing.js";
 
 export interface DirectModelTarget extends ProviderProxyUpstream { authorization: string }
 
-export async function validateDirectModelResponse(incoming: IncomingMessage, stream: boolean, capture?: Pick<DirectChatCapture, "value" | "invalid">, signal?: AbortSignal): Promise<void> {
-  if (incoming.statusCode !== 200) throw await readChatHttpError(incoming, capture, signal);
+export async function validateDirectModelResponse(incoming: IncomingMessage, stream: boolean, capture?: Pick<DirectChatCapture, "value" | "invalid">, signal?: AbortSignal, tools?: unknown): Promise<void> {
+  if (incoming.statusCode !== 200) throw await readChatHttpError(incoming, capture, signal, tools);
   const encoding = incoming.headers["content-encoding"];
   if (encoding !== undefined && encoding.trim().toLowerCase() !== "identity") {
     throw new ChatUpstreamError("invalid_upstream_encoding", "Upstream response uses an unsupported Content-Encoding.", false);

@@ -1,11 +1,7 @@
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
-import { codexHomePath } from "../runtime/codex-home.mjs";
-import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
-import { customPrimaryProviderProfilePath } from "../runtime/model-provider-runtime.mjs";
-import { decodeProviderWebSearchSettings, isProviderWebSearchId, providerWebSearchSettingsPath, readProviderWebSearchOverride } from "../runtime/provider-web-search.mjs";
+import { isProviderWebSearchId, readProviderWebSearchConfig, resolveProviderWebSearchConfig } from "../runtime/provider-web-search.mjs";
 import { configuredWebSearchProviders, loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { applyProviderFileUpdates, assertProviderFileSnapshots, snapshotProviderFiles } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
@@ -37,7 +33,7 @@ export async function applyProviderWebSearchChange(input, options = {}) {
       throw invalid("stale-preview", "resourceRevision", "Provider 或搜索设置已变化，请重新预览并确认");
     }
     if (!plan.preview.willChange) return { ...plan.preview, action: "unchanged" };
-    // A crash between these files leaves a marker; runtime readers fail closed.
+    // A crash between these files leaves a marker beside the actual config.
     const transactionId = randomUUID();
     const backups = plan.snapshots.filter(snapshot => plan.updates.has(snapshot.path) && snapshot.content !== undefined)
       .map(snapshot => ({ sourcePath: snapshot.path, path: `${snapshot.path}.search-backup-${transactionId}`, content: snapshot.content }));
@@ -67,8 +63,13 @@ export async function applyProviderWebSearchChange(input, options = {}) {
       const guards = snapshots.map(snapshot => updates.has(snapshot.path)
         ? { ...snapshot, content: Buffer.from(updates.get(snapshot.path)) } : snapshot);
       await assertProviderFileSnapshots(guards);
+      const target = resolveProviderWebSearchConfig(input.provider, environment);
+      if (target.path !== plan.path || target.source !== "provider") throw new Error("Provider 搜索配置来源已变化");
+      const document = parse(updates.get(plan.path));
+      if ((document.web_search ?? null) !== input.mode) throw new Error("搜索设置回读不一致");
       await guards.find(snapshot => snapshot.path === plan.pendingPath).writeCurrent(undefined);
-      if (readProviderWebSearchOverride(input.provider, environment) !== input.mode) throw new Error("搜索设置回读不一致");
+      const saved = readProviderWebSearchConfig(input.provider, environment);
+      if (saved.path !== plan.path || saved.source !== "provider" || saved.mode !== input.mode) throw new Error("搜索设置回读不一致");
     } catch (error) {
       throw invalid("save-unconfirmed", "mode", "Provider 搜索设置保存结果无法确认，已保留当前文件及备份；请核对后处理，勿自动重试", error);
     }
@@ -83,57 +84,41 @@ async function buildPlan(input, { environment = process.env, loadProviderState =
     || typeof input.resourceRevision !== "string" || !/^[a-f0-9]{64}$/u.test(input.resourceRevision)) {
     throw invalid("invalid-input", "mode", "Provider 搜索设置参数无效；请选择精确 Provider 与支持的模式");
   }
-  const path = providerWebSearchSettingsPath(environment);
-  const pendingPath = `${path}.pending`;
-  // This also rejects incomplete transactions before reading or modifying profiles.
-  readProviderWebSearchOverride(input.provider, environment);
-  const [snapshot, pendingSnapshot] = snapshotProviderFiles([path, pendingPath], environment);
-  if (pendingSnapshot.content !== undefined) throw invalid("provider-state-unavailable", "mode", "Provider 搜索设置存在未完成保存记录，请先核对备份");
-  const document = decodeProviderWebSearchSettings(snapshot.content?.toString("utf8"));
   const state = await loadProviderState({ environment });
   if (!configuredWebSearchProviders(state).includes(input.provider)) {
     throw invalid("provider-not-configured", "provider", "Provider 未配置；聚合 Provider 不支持独立搜索设置");
   }
+  const target = readProviderWebSearchConfig(input.provider, environment);
+  if (target.source !== "provider") {
+    throw invalid("invalid-input", "provider", "固定 Provider 与全局共用主配置搜索值，请在通用设置中修改");
+  }
+  const path = target.path;
+  const pendingPath = `${path}.search-pending`;
+  const [snapshot, pendingSnapshot] = snapshotProviderFiles([path, pendingPath], environment);
+  if (pendingSnapshot.content !== undefined) throw invalid("provider-state-unavailable", "mode", "Provider 搜索设置存在未完成保存记录，请先核对备份");
+  if (snapshot.content === undefined) throw invalid("provider-state-unavailable", "provider", "Provider Profile 不存在，未执行搜索设置保存");
+  let document;
+  try { document = parse(snapshot.content.toString("utf8")); }
+  catch { throw invalid("provider-state-unavailable", "provider", "Provider Profile 无法安全解析，未执行搜索设置保存"); }
   const snapshots = [snapshot, pendingSnapshot];
-  const definition = state.managedProviders.some(provider => provider.id === input.provider)
-    ? loadManagedModelProviderDefinitions(environment).find(provider => provider.id === input.provider) : undefined;
-  if (state.managedProviders.some(provider => provider.id === input.provider) && definition === undefined) {
-    throw invalid("stale-preview", "provider", "受管 Provider 注册表已变化，请重新读取并预览");
-  }
-  const profilePath = definition ? join(codexHomePath(environment), definition.profileFileName)
-    : state.customProviders.switchingProviders.some(provider => provider.id === input.provider)
-      ? customPrimaryProviderProfilePath(environment, input.provider) : undefined;
-  const updates = new Map();
-  let clearsProfileOverride = false;
-  if (profilePath !== undefined) {
-    const [profileSnapshot] = snapshotProviderFiles([profilePath], environment);
-    snapshots.push(profileSnapshot);
-    if (profileSnapshot.content !== undefined) {
-      let profile;
-      try { profile = parse(profileSnapshot.content.toString("utf8")); }
-      catch { throw invalid("provider-state-unavailable", "provider", "Provider Profile 无法安全解析，未执行搜索设置保存"); }
-      if (Object.hasOwn(profile, "web_search")) {
-        delete profile.web_search;
-        updates.set(profilePath, stringify(profile));
-        clearsProfileOverride = true;
-      }
-    }
+  await assertProviderFileSnapshots(snapshots);
+  const before = readProviderWebSearchConfig(input.provider, environment);
+  if (before.path !== path || before.source !== "provider" || document.model_provider !== input.provider
+    || (document.web_search ?? null) !== before.mode) {
+    throw invalid("stale-preview", "provider", "Provider 配置来源或搜索值已变化，请重新读取并预览");
   }
   await assertProviderFileSnapshots(snapshots);
-  const before = readProviderWebSearchOverride(input.provider, environment);
-  await assertProviderFileSnapshots(snapshots);
-  const providers = { ...document.providers };
-  if (input.mode === null) delete providers[input.provider];
-  else Object.defineProperty(providers, input.provider, { value: input.mode, enumerable: true, configurable: true, writable: true });
-  const content = stringify({ version: 1, providers });
+  if (input.mode === null) delete document.web_search;
+  else document.web_search = input.mode;
+  const content = stringify(document);
   if (Buffer.byteLength(content, "utf8") > 1_048_576) throw invalid("invalid-input", "mode", "Provider 搜索设置超过大小上限");
-  updates.set(path, content);
+  const updates = new Map([[path, content]]);
   const revision = createHmac("sha256", revisionSecret).update(JSON.stringify([
     input, state, snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("utf8") ?? null]),
   ])).digest("hex");
   return { path, pendingPath, snapshots, updates, preview: { operation: "provider.web-search", provider: input.provider,
-    before: { mode: before }, mode: input.mode, revision, willChange: before !== input.mode || clearsProfileOverride,
-    effects: { clearsProfileOverride }, activation: "restart-app-server" } };
+    before: { mode: before.mode }, mode: input.mode, revision, willChange: before.mode !== input.mode,
+    activation: "restart-app-server" } };
 }
 
 function invalid(code, field, message, cause) {
@@ -142,5 +127,5 @@ function invalid(code, field, message, cause) {
 
 function stateError(error) {
   return error instanceof ProviderWebSearchManagementError ? error
-    : invalid("provider-state-unavailable", "provider", "Provider 或独立搜索设置无法安全读取，未执行写入", error);
+    : invalid("provider-state-unavailable", "provider", "Provider 配置或搜索设置无法安全读取，未执行写入");
 }

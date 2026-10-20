@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { fetch as undiciFetch, ProxyAgent } from "undici";
 
 import { DirectChatResponse, clinePassChatReasoningControl, responsesToChat } from "../dist/model-api/index.js";
-import { pinClinePassRouting } from "../dist/provider-proxy/index.js";
+import { pinClinePassRouting, chatUpstreamError, chatStreamError } from "../dist/provider-proxy/index.js";
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { createRefreshableHttpProxySelector } from "../runtime/network-proxy.mjs";
 import { isValidCustomProviderApiKey, validProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
@@ -102,7 +102,7 @@ async function probeModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, 
         payload = {...converted.request, stream};
         if (requestContext?.clinePass) {
           const {reasoning, ...parameters} = payload;
-          payload = pinClinePassRouting(reasoning ? {...parameters, ...clinePassChatReasoningControl(model, reasoning.effort)} : parameters);
+          payload = pinClinePassRouting(reasoning ? {...parameters, ...clinePassChatReasoningControl(model, reasoning.effort, requestContext.clineRequestProfile)} : parameters, requestContext.clineRequestProfile);
         }
         if (!stream) delete payload.stream_options;
         identities = converted.toolNames;
@@ -119,10 +119,10 @@ async function probeModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, 
         httpStatus === 200 && stream && /^text\/event-stream(?:\s*;|\s*$)/iu.test(response.headers.get("content-type") ?? "") ? upstreamWireApi : undefined);
       requestController.signal.throwIfAborted();
       if (body === undefined) return {status: "inconclusive", reason: "上游响应超过模型能力检测大小限制", httpStatus};
-      if (httpStatus === 200 && stream) return {...parseWebSearchStream(body, response.headers.get("content-type"), upstreamWireApi, model), httpStatus};
+      if (httpStatus === 200 && stream) return {...parseWebSearchStream(body, response.headers.get("content-type"), upstreamWireApi, model, payload.tools), httpStatus};
       let parsed;
       try { parsed = JSON.parse(body); } catch { return {status: "inconclusive", reason: "上游未返回有效 JSON", httpStatus}; }
-      if (httpStatus !== 200) return classifyHttp(httpStatus, parsed, capability);
+      if (httpStatus !== 200) return classifyHttp(httpStatus, parsed, capability, payload.tools);
       const output = upstreamWireApi === "responses" ? parseResponses(parsed) : parseChat(parsed, identities);
       if (!output) return {status: "inconclusive", reason: "上游未返回完整且可验证的模型响应", httpStatus};
       return {...output, httpStatus};
@@ -257,11 +257,14 @@ async function readBoundedBody(response, controller, streamProtocol) {
   } finally { reader.releaseLock(); }
 }
 
-function classifyHttp(httpStatus, parsed, capability) {
+function classifyHttp(httpStatus, parsed, capability, tools) {
   if (httpStatus === 401 || httpStatus === 403) return {status: "inconclusive", reason: "模型能力检测认证或权限失败", httpStatus};
   if (httpStatus === 429) return {status: "inconclusive", reason: "模型能力检测受到上游限流", httpStatus};
-  if (capability === "webSearch") return {status: [400, 404, 422].includes(httpStatus) && rejectsWebSearch(parsed) ? "unsupported" : "inconclusive",
-    reason: [400, 404, 422].includes(httpStatus) && rejectsWebSearch(parsed) ? "上游明确拒绝原生 web_search 工具或参数" : "上游拒绝请求，无法确认本项能力", httpStatus};
+  if (capability === "webSearch") {
+    const rejected = [400, 404, 422].includes(httpStatus) && rejectsWebSearch(parsed, tools, httpStatus);
+    return {status: rejected ? "unsupported" : "inconclusive",
+      reason: rejected ? "上游明确拒绝原生 web_search 工具或参数" : "上游拒绝请求，无法确认本项能力", httpStatus};
+  }
   const error = isObject(parsed) ? parsed.error : undefined;
   const context = typeof error === "string" ? error : isObject(error) ? [error.param, error.code, error.message].filter(value => typeof value === "string").join(" ") : "";
   const relevant = {applyPatch: /\b(?:apply_patch|custom|grammar|freeform)\b/iu,
@@ -270,8 +273,9 @@ function classifyHttp(httpStatus, parsed, capability) {
     reason: [400, 404, 422].includes(httpStatus) && relevant.test(context) ? "上游明确拒绝本项检测使用的输入或参数" : "上游拒绝请求，无法确认本项能力", httpStatus};
 }
 
-function rejectsWebSearch(value) {
+function rejectsWebSearch(value, tools, httpStatus) {
   const error = isObject(value) ? value.error ?? value.response?.error ?? value : value;
+  if (chatUpstreamError(error, httpStatus, tools).code === "web_search_unsupported") return true;
   const context = typeof error === "string" ? error : isObject(error)
     ? [error.param, error.code, error.message].filter(part => typeof part === "string").join(" ") : "";
   // 必须明确指向原生工具；例如额度、思考参数或认证错误中提及 web_search 不代表工具不受支持。
@@ -304,7 +308,7 @@ function readProbeEvents(body) {
   return data.length || event ? undefined : events;
 }
 
-function parseWebSearchStream(body, contentType, upstreamWireApi, requestedModel) {
+function parseWebSearchStream(body, contentType, upstreamWireApi, requestedModel, tools) {
   const invalid = () => ({status: "inconclusive", reason: "上游未返回完整且可验证的流式响应"});
   if (!/^text\/event-stream(?:\s*;|\s*$)/iu.test(contentType ?? "")) return invalid();
   const events = readProbeEvents(body);
@@ -323,9 +327,10 @@ function parseWebSearchStream(body, contentType, upstreamWireApi, requestedModel
       let value;
       try { value = JSON.parse(frame.data); } catch { return invalid(); }
       if (!isObject(value)) return invalid();
+      const chatError = chat ? chatStreamError(value, tools) : undefined;
       if (["error", "stream_error", "response.failed"].includes(frame.event)
-        || ["error", "stream_error", "response.failed"].includes(value.type) || value.error != null || value.response?.error != null) {
-        return rejectsWebSearch(value)
+        || ["error", "stream_error", "response.failed"].includes(value.type) || value.error != null || value.response?.error != null || chatError) {
+        return chatError?.code === "web_search_unsupported" || rejectsWebSearch(value, tools)
           ? {status: "unsupported", reason: "上游明确拒绝原生 web_search 工具或参数"}
           : {status: "inconclusive", reason: "上游返回流内错误，无法确认原生 web_search 能力"};
       }

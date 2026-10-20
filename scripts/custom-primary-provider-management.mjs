@@ -383,6 +383,8 @@ async function confirmProviderSave(plan, options, transaction) {
         || actual.supportsWebsockets !== plan.provider.supportsWebsockets || actual.upstreamWireApi !== plan.upstreamWireApi
         || plan.models && actual.reasoningEffort !== expectedEffort
         || !isDeepStrictEqual(profiles.map(entry => entry.id).sort(), expectedIds)) throw new Error("模型默认值或连接配置回读不一致");
+      const expectedSearch = plan.switchingProvider === undefined ? undefined : parse(plan.switchingProvider.profileContent).web_search;
+      if (!isDeepStrictEqual(parse(actual.profileContent).web_search, expectedSearch)) throw new Error("提供商搜索设置回读不一致");
       if (plan.modelOnly) {
         const expected = parse(plan.switchingProvider.profileContent);
         if (!plan.preserveDefaults) {

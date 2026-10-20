@@ -9,12 +9,15 @@ import {
   readPrimaryProviderBackup,
 } from "../runtime/model-provider-runtime.mjs";
 import { readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
-import { ProviderWebSearchSettingsError, readProviderWebSearchOverride } from "../runtime/provider-web-search.mjs";
+import { ProviderWebSearchSettingsError, readProviderWebSearchConfig } from "../runtime/provider-web-search.mjs";
 
 /** Display each exact provider's override; null explicitly means follow global. */
 export function loadProviderWebSearchSettings(state, environment = process.env) {
   return [{ provider: "openai", source: "global", status: "ready", mode: state.defaults.webSearch }, ...configuredWebSearchProviders(state).map(provider => {
-    try { return { provider, source: "provider", status: "ready", mode: readProviderWebSearchOverride(provider, environment) }; }
+    try {
+      const { source, mode } = readProviderWebSearchConfig(provider, environment);
+      return { provider, source, status: "ready", mode };
+    }
     catch (error) {
       return { provider, source: "provider", status: "error", error: error instanceof ProviderWebSearchSettingsError ? error.code : "unreadable" };
     }

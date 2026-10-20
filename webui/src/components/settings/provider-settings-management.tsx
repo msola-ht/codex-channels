@@ -316,7 +316,7 @@ function ProviderSettingsCard({
           <p className="text-xs font-normal text-muted-foreground">{t("modelCatalog.scope", { providers: catalog.providers.join(t("managementUi.listSeparator")) })}</p>
         </div>
         {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null || contextDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
-        {catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) ? <Button variant="outline" size="sm" ref={node => { if ((additionTarget?.provider ?? additionSavedTarget.current) === catalog.provider) additionTriggerRef.current = node }} disabled={busy || pending !== null || contextDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null || editorOpen} onClick={event => { additionTriggerRef.current = event.currentTarget; management.clearError(); setAdditionTarget({ provider: catalog.provider, revision: settings.resourceRevision }) }}>{t("modelAddition.title")}</Button> : null}
+        {catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) ? <Button variant="outline" size="sm" ref={node => { if ((additionTarget?.provider ?? additionSavedTarget.current) === catalog.provider) additionTriggerRef.current = node }} disabled={busy || pending !== null || contextDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null || editorOpen} onClick={event => { additionTriggerRef.current = event.currentTarget; management.clearError(); setAdditionTarget({ provider: catalog.provider, revision: settings.resourceRevision, models: catalog.models.map(entry => ({ id: entry.id, displayName: entry.displayName })) }) }}>{t("modelAddition.title")}</Button> : null}
       </div>,
       models: catalog.models.map(entry => ({ ...entry.presentation, isDefault: entry.isDefault })),
       webSearchSettings: settings.webSearchSettings.filter(entry => catalog.providers.includes(entry.provider)),
@@ -358,7 +358,7 @@ function ProviderSettingsCard({
     <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
   </>
 
-  return <>{section === "providers" && <ProviderWebSearchSettings settings={settings} management={management} />}{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}{webSearchTarget && <ProviderWebSearchProbeDialog target={webSearchTarget} stale={webSearchStale} disabled={busy || pending !== null} finalFocus={actionTriggerRef} onClose={() => setWebSearchTarget(null)} />}<Card>
+  return <>{section === "providers" && <><ProviderWebSearchSettings settings={settings} management={management} />{feedback}</>}{section === "models" && <>{renderCatalog?.(catalogGroups)}{feedback}</>}{webSearchTarget && <ProviderWebSearchProbeDialog target={webSearchTarget} stale={webSearchStale} disabled={busy || pending !== null} finalFocus={actionTriggerRef} onClose={() => setWebSearchTarget(null)} />}<Card>
     <CardHeader>
       <CardTitle>{section === "providers" ? t("managementUi.customProviders") : t("managementUi.managedDefaults")}</CardTitle>
       <CardDescription>{section === "providers" ? t("managementUi.customProvidersHint") : t("managementUi.managedDefaultsDetail")}</CardDescription>
@@ -471,7 +471,6 @@ function ProviderSettingsCard({
         if (!["model.template.update", "model.context", "model.remove"].includes(pending.preview.operation)) return true
         return preview === null ? (pending.preview.operation === "model.template.update" ? templateTriggerRef.current : actionTriggerRef.current) ?? true : preview.disabled ? false : preview
       }} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
-      {section !== "models" && feedback}
     </CardContent>
   </Card>
     <Dialog open={contextDraft !== null && pending === null} disablePointerDismissal onOpenChange={(open, details) => { if (management.busy) { details.cancel(); return }; if (!open) setContextDraft(null) }}>

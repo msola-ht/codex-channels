@@ -160,6 +160,7 @@ export async function applyCcgConfiguration({
     const { config: nextConfig, profile, credential } = createManagedProviderConfiguration(
       current, initial.config, definition, {
         mode, previousMode: previous?.mode,
+        previousProfile: snapshots.find(item => item.path === paths.profile)?.content?.toString("utf8"),
         apiKey, catalogPath: paths.catalog, catalog, model: selectedModel,
       },
     );

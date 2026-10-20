@@ -31,6 +31,7 @@ export function createManagedProviderConfiguration(
   options: {
     mode: "switching" | "exclusive";
     previousMode?: "switching" | "exclusive";
+    previousProfile?: string;
     apiKey: string;
     catalogPath: string;
     catalog: { models: Array<Record<string, unknown>> };

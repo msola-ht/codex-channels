@@ -7,6 +7,7 @@ import {
   withPreservedManagedModelCatalogSettings,
 } from "../runtime/managed-model-catalog.mjs";
 import { createManagedPrimaryCredential } from "../runtime/managed-provider-credentials.mjs";
+import { parse } from "smol-toml";
 
 const managedRootKeys = Object.freeze([
   "model",
@@ -51,6 +52,7 @@ export function createManagedProviderConfiguration(current, initial, definition,
   catalogPath,
   catalog,
   model,
+  previousProfile,
 }) {
   if (mode === "exclusive") {
     const credential = createManagedPrimaryCredential(definition, apiKey);
@@ -73,11 +75,19 @@ export function createManagedProviderConfiguration(current, initial, definition,
   if (typeof reasoningEffort !== "string") {
     throw new Error(`${definition.displayName} 模型目录缺少默认思考等级`);
   }
+  let webSearch;
+  if (previousMode === "switching" && previousProfile !== undefined) {
+    try { webSearch = parse(previousProfile).web_search; }
+    catch { throw new Error("原 Provider Profile 无法安全解析"); }
+    if (webSearch !== undefined && !["disabled", "cached", "indexed", "live"].includes(webSearch)) {
+      throw new Error("原 Provider 搜索设置无效");
+    }
+  }
   return {
     config,
-    profile: createSwitchingProviderProfile(definition, {
+    profile: { ...createSwitchingProviderProfile(definition, {
       apiKey, catalogPath, model, reasoningEffort,
-    }),
+    }), ...(webSearch === undefined ? {} : { web_search: webSearch }) },
   };
 }
 

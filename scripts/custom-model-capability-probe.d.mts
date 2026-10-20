@@ -36,6 +36,7 @@ export interface NativeModelWebSearchProbeInput extends Omit<CustomModelCapabili
   /** 可信配置解析结果，禁止直接接受浏览器字段。 */
   requestContext: {
     clinePass?: boolean;
+    clineRequestProfile?: import("../runtime/chat-reasoning.mjs").ClinePassRequestProfile;
     chatgpt?: boolean;
     reasoningEfforts?: string[];
     headers?: Record<string, string>;

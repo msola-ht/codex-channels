@@ -8,7 +8,6 @@ export interface ProviderWebSearchChangePreview {
   mode: ProviderWebSearchMode | null;
   revision: string;
   willChange: boolean;
-  effects: { clearsProfileOverride: boolean };
   activation: "restart-app-server";
 }
 export class ProviderWebSearchManagementError extends Error { code: string; field: string; constructor(code: string, field: string, message: string, options?: ErrorOptions) }

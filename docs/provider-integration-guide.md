@@ -456,36 +456,30 @@ JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行�
 ## 独立提供商的搜索模式
 
 WebUI `#/models/providers` 的“提供商联网搜索”卡片为每个已配置的独立提供商设置搜索模式。
-支持第三方受管账户的固定／切换模式、Codex 兼容提供商和自定义提供商的固定／切换模式；
+支持具有独立 config 的第三方受管账户、Codex 兼容提供商和自定义切换提供商；
 按精确 Provider ID 隔离，不按家族、显示名称或共享模型目录联动。模型目录搜索列保持只读，
 全局模式仍在通用设置中管理。选择“跟随全局”或 `disabled`、`cached`、`indexed`、`live` 后，
 先查看预览，再明确确认保存；保存后回读配置，并提示 `restart-app-server`，WebUI 不直接执行重启。
 运行中的 Gateway 可按现有活动与租约条件安全应用受管账户变更；自定义实例须按提示重启 App Server。
-OpenAI 官方账户统一读取主配置 `config.toml` 的全局 `web_search`，在通用设置中修改，
-不提供账户级覆盖。覆盖文件中已有的 `openai` 键不参与运行，也不在读取时删除。
+OpenAI 官方账户和使用主配置的固定提供商读取 `config.toml` 的全局 `web_search`，在通用设置中修改，
+不在提供商卡片中提供另一份覆盖。
 
-覆盖文件位于 `$CODEX_HOME/codexc-provider-search.toml`（默认 `~/.codex/codexc-provider-search.toml`）：
+搜索值直接保存在对应提供商 config 的顶层，例如 `$CODEX_HOME/sf-clp-main.config.toml`：
 
 ```toml
-version = 1
-
-[providers]
-ds-work = "disabled"
-cp-work = "live"
+web_search = "disabled"
 ```
 
-`[providers]` 的键必须是精确 Provider ID，值只允许上述四种模式；缺项跟随全局，保存“跟随全局”
-会移除该键。文件结构、版本或模式无效时明确拒绝，不回退到其他账户或更宽松搜索模式。
-读取不自动迁移。没有新覆盖时，既有受管切换 Profile 顶层 `web_search` 仍作为该账户的用户偏好读取；
-首次显式保存该账户的设置，会同步清除其 Profile 顶层 `web_search`，保留其他 Profile 字段。
-CP 旧 Profile 的固定 `disabled` 是内部 pin，不视作用户搜索偏好；继续兼容读取，
-新建 CP Profile 不再写入该 pin。
+文件由已登记的精确 Provider ID 解析，不接受用户输入任意路径。`web_search` 只允许上述四种模式；
+缺项跟随主配置，保存“跟随全局”会移除该字段，保留其他配置。文件或模式无效时明确拒绝。
+不再读取、写入或兼容 `codexc-provider-search.toml`，也不自动删除或迁移旧文件；升级后须重新设置
+此前仅保存在旧文件中的搜索值。现有提供商 config 中的合法值直接作为该提供商的设置。
 
-保存前预览并复核相关文件修订，配置并发变化时拒绝提交。涉及覆盖文件和 Profile 的同步清除时，
-使用私有事务记录 `codexc-provider-search.toml.pending` 及本事务独立的
+保存前预览并复核相关文件修订，配置并发变化时拒绝提交。写入对应提供商 config 时，
+使用私有事务记录 `<提供商配置文件>.search-pending` 及本事务独立的
 `<原文件>.search-backup-<transactionId>` 备份，不覆盖历史备份。成功回读全部写入并完成修订复核后
 才清除 pending；普通写入失败尝试回滚，无法确认结果时保留材料并拒绝后续读取和保存。
-本功能不改写主配置的全局 `web_search`，也不在读取时改写用户文件。
+本功能不改写主配置的全局 `web_search`，也不在读取时改写用户文件。同一切换提供商编辑连接、模型或重新配置账户时保留 Profile 的搜索值；切换到固定模式后使用主配置的全局值。
 
 未完成的搜索设置事务没有自动恢复入口，须按以下顺序人工核对：
 
@@ -498,12 +492,14 @@ CP 旧 Profile 的固定 `disabled` 是内部 pin，不视作用户搜索偏好�
 4. 核对所有项的原内容或原不存在状态均已完整恢复后，才删除本次 pending，保留备份。
    重新启动配置读取并确认结果，再恢复编辑；运行中的实例不会因文件恢复自动重启。
 
-回退程序前保留覆盖文件、关联 Profile、pending 及备份的成套副本，未完成事务须先按上述流程处理；
-不能只覆盖其中一个配置文件或用不匹配的事务材料恢复。旧版本不读取新增覆盖文件；
-回退前须核对原全局和 Profile 搜索值。要求 CP Profile 必须含 `web_search="disabled"` 的旧版本，
-还需要匹配该版本的 Profile 备份；不要把新建或已清理字段的 Profile 直接交给旧版加载。
+回退程序前保留关联 config、pending 及备份的成套副本，未完成事务须先按上述流程处理；
+不能用不匹配的事务材料恢复。旧版本可能优先读取旧独立文件，回退前须核对该版本实际读取的搜索值，
+不能据新版本界面推断回退后的状态。
 
-搜索覆盖由新启动的 App Server 消费，适用于其新建和冷恢复的 Thread；已运行实例或已加载会话不会
+原生 TUI 通过 `--profile` 加载提供商 config。锁定 Codex 的 `app-server` 不支持这个入口，项目仍从
+同一 config 的已校验字段生成必要的启动参数，包括显式的 `web_search`；不再从另一份搜索文件追加覆盖。
+CLP 等 Chat 上游仍须通过 `codexc remote -p <提供商>` 连接受管转换桥，直接原生 Profile 不会启动转换桥。
+搜索设置由新启动的 App Server 消费，适用于其新建和冷恢复的 Thread；已运行实例或已加载会话不会
 即时更新。保存后应在现有任务结束后正常重启 App Server；Gateway 的旧代码也须重启才能加载新行为。
 原生 `codexc remote` 显式传入的 `--search` 或 `-c web_search=...` 继续优先。
 搜索模式只是请求策略，不证明上游模型会执行搜索；诊断结果也不会自动修改该设置。
@@ -581,9 +577,9 @@ CLI／WebUI 设置入口；它们不同于用户的 `web_search` 偏好，也不
 
 内置网页搜索使用 Codex 的 `web_search` 模式，不提供模型级搜索支持声明。模型目录中的 `supports_search_tool` 仍表示客户端工具检索，`web_search_tool_type` 仍只选择 hosted 工具形态。
 
-App Server 的固定、切换入口保留已有的顶层 `web_search`、`tool_choice` 和 Responses 历史 `web_search_call`，由上游判断执行支持。源目录不变，临时运行投影使用普通 Responses 工具编码（`use_responses_lite=false`），实例关闭 `features.standalone_web_search`，防止切换到独立 `/alpha/search` 执行器。App Server 及选择 CP 的 `codexc remote` 复用受控启动参数与子进程凭据环境，并按上述独立提供商设置选择搜索模式。聚合入口当前关闭。
+App Server 的固定、切换入口保留已有的顶层 `web_search`、`tool_choice` 和 Responses 历史 `web_search_call`，由上游判断执行支持。源目录不变，临时运行投影使用普通 Responses 工具编码（`use_responses_lite=false`），实例关闭 `features.standalone_web_search`，防止切换到独立 `/alpha/search` 执行器。App Server 从对应配置生成受控启动参数并隔离子进程凭据；`codexc remote` 通过原生 Profile 选择连接同一实例。聚合入口当前关闭。
 
-HTTP、Responses WebSocket 和 Chat 桥复用工具透传合同，官方 OpenAI 与独立 Model Relay 保留自己的合同。Chat 对 hosted 声明仅透传，尚无原生 `web_search_call` 回程映射，包含这种历史的跨模型续聊仍会明确拒绝；透传本身不能证明搜索执行或回程可用。
+HTTP 与 Responses WebSocket 保持工具透传，官方 OpenAI 与独立 Model Relay 保留自己的合同。受管 CLP Chat 桥将 live `web_search` 适配至同账户独立搜索接口，映射搜索事件并处理 search 查询历史，详见 [CLP 网页搜索适配](cline-pass.md#网页搜索适配)。其他 Chat 对 hosted 声明仍仅透传，不承诺执行或历史转换。
 
 已保存的 CP v5 `supportsWebSearch` 作为历史布尔元数据保留，并按原字段顺序编译为 `supports_web_search`，既有定义与编译快照仍可一致性校验和读取。普通读取不迁移、删字段或改写目录，编辑后保存仍保留该元数据；它不参与搜索门控，也不再从新模板导入。非法类型、未知字段、定义与编译快照不一致及未完成事务仍明确拒绝，不能删除 pending 绕过检查。受管或官方完整目录同样保留原文件内容，搜索策略不解释该扩展字段。
 

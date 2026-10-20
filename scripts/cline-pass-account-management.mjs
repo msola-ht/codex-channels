@@ -151,6 +151,7 @@ export async function applyClinePassConfiguration(input, { environment = process
     const initial = previous && !(previous.mode === "switching" && mode === "exclusive") ? backup.config : current;
     const { config, profile, credential } = createManagedProviderConfiguration(current, initial, definition, {
       mode, previousMode: previous?.mode, apiKey, catalogPath: paths.catalog, catalog,
+      previousProfile: content("profile"),
       model: previous?.model ?? (catalog.models.some(model => model.slug === definition.defaultModel) ? definition.defaultModel : catalog.models[0]?.slug),
     });
     const updates = new Map([

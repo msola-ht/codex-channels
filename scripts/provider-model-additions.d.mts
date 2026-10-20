@@ -1,10 +1,14 @@
 import type { ModelDefinition } from "../runtime/model-catalog.mjs";
-/** Managed catalogs do not persist custom sampling defaults or inferred bindings. */
-export type ManagedManualModelDefinition = Omit<ModelDefinition, "sampling" | "template">;
+/** Managed catalogs do not persist custom sampling defaults or inferred bindings.
+ * CLP accepts enabled reasoning but rejects original image detail and reasoning-summary controls. */
+export type ManagedManualModelDefinition = Omit<ModelDefinition, "sampling" | "template">
+  | { id: string; name: string; inheritFrom: string };
 export interface ProviderModelAdditionCandidate {
   model: string;
   displayName: string;
   fields: Record<string, unknown>;
+  inheritedFrom?: string;
+  clineRequestProfile?: import("../runtime/chat-reasoning.mjs").ClinePassRequestProfile;
   template?: { source: "deepseek" | "cline"; model: string };
 }
 export interface ProviderModelAdditionOptions {

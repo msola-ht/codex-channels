@@ -1,8 +1,10 @@
 import { DirectChatRequestError } from "../model-api/index.js";
+import { resolveClinePassRequestProfile, type ClinePassRequestProfile } from "../../runtime/chat-reasoning.mjs";
 
 /** CLP-only outbound policy; never mutate the caller's request or fall back to other providers. */
-export function pinClinePassRouting<T extends object>(request: T): T {
-  if ((request as Record<string, unknown>).model !== "cline-pass/deepseek-v4.1-flash") return request;
+export function pinClinePassRouting<T extends object>(request: T, profile?: ClinePassRequestProfile): T {
+  const model = (request as Record<string, unknown>).model;
+  if (resolveClinePassRequestProfile(typeof model === "string" ? model : "", profile) !== "deepseek-flash") return request;
   const options = routingObject((request as Record<string, unknown>).providerOptions, "providerOptions");
   const gateway = routingObject(options.gateway, "providerOptions.gateway");
   if (Array.isArray(gateway.only) && gateway.only.length === 1 && gateway.only[0] === "deepseek") return request;

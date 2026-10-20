@@ -5,15 +5,16 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import { useTranslation } from "@/hooks/use-translation"
 import { ApiClientError, fetchProviderModelAdditionOptions } from "@/lib/api"
 import { translateApiError } from "@/lib/i18n/translate"
 import type { ProviderSettingsController } from "@/lib/settings-management"
-import type { ProviderModelAdditionOptions, ProviderModelAdditionPreview } from "../../../../scripts/provider-model-additions.mjs"
-import { contextWindowPresetLabel, contextWindowPresetTokens, type ModelDefinition } from "../../../../runtime/model-catalog.mjs"
+import type { ManagedManualModelDefinition, ProviderModelAdditionOptions, ProviderModelAdditionPreview } from "../../../../scripts/provider-model-additions.mjs"
+import { contextWindowPresetLabel, contextWindowPresetTokens } from "../../../../runtime/model-catalog.mjs"
 
-export interface ProviderModelAdditionTarget { provider: string; revision: string }
+export interface ProviderModelAdditionTarget { provider: string; revision: string; models: Array<{ id: string; displayName: string }> }
 
 const reasoningLevels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
@@ -27,6 +28,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const clinePass = target.provider.startsWith("clp-")
   const [mode, setMode] = useState("discover")
   const [options, setOptions] = useState<ProviderModelAdditionOptions | null>(null)
   const [selected, setSelected] = useState<string[]>([])
@@ -34,6 +36,8 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const [error, setError] = useState<{ message: string; code: string } | null>(null)
   const [id, setId] = useState("")
   const [name, setName] = useState("")
+  const [manualSource, setManualSource] = useState("independent")
+  const [inheritFrom, setInheritFrom] = useState("")
   const [window, setWindow] = useState("")
   const [efforts, setEfforts] = useState<string[]>([])
   const [effort, setEffort] = useState("")
@@ -44,21 +48,26 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   useEffect(() => () => request.current?.abort(), [])
   const busy = management.busy || management.loading || management.error !== null || management.readbackRequired
   const locked = busy || loading || stale
-  const manualValid = id.trim().length > 0 && name.trim().length > 0 && /^\d+$/u.test(window)
+  const inheriting = clinePass && manualSource === "inherit"
+  const capabilitiesValid = /^\d+$/u.test(window)
     && Number.isSafeInteger(Number(window)) && Number(window) >= 1024 && Number(window) <= 100_000_000
     && efforts.length > 0 && efforts.includes(effort) && [images, patch, search].every(value => value !== "unknown")
+  const manualValid = id.trim().length > 0 && name.trim().length > 0
+    && (inheriting ? target.models.some(entry => entry.id === inheritFrom) : capabilitiesValid)
   const load = async () => {
     if (locked || !open || mode === "manual" && !manualValid) return
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
     setLoading(true); setError(null); setOptions(null); setSelected([]); management.clearError()
-    const manualModel: ModelDefinition | undefined = mode === "manual" ? {
+    const manualModel: ManagedManualModelDefinition | undefined = mode !== "manual" ? undefined : inheriting ? {
+      id: id.trim(), name: name.trim(), inheritFrom,
+    } : {
       id: id.trim(), name: name.trim(), contextWindow: Number(window), reasoningEfforts: efforts, defaultReasoningEffort: effort,
       ...(images === "unknown" ? {} : { supportsImages: images === "yes" }),
       ...(patch === "unknown" ? {} : { applyPatchToolType: patch === "yes" ? "freeform" : null }),
       ...(search === "unknown" ? {} : { supportsSearchTool: search === "yes" }),
-    } : undefined
+    }
     try {
       const result = await fetchProviderModelAdditionOptions(target.provider, manualModel, controller.signal)
       if (!controller.signal.aborted) { setOptions(result); setSelected(mode === "manual" ? result.candidates.map(entry => entry.model) : []) }
@@ -74,13 +83,24 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
       <DialogHeader><DialogTitle>{t("modelAddition.title")}</DialogTitle><DialogDescription>{t("modelAddition.hint")}</DialogDescription></DialogHeader>
       <code className="break-all">{target.provider}</code>
       {!options ? <FieldGroup>
-        {!target.provider.startsWith("clp-") ? <ManagedSelect label={t("modelAddition.method")} value={mode} disabled={locked} options={[["discover", t("modelAddition.discover")], ["manual", t("modelAddition.manual")]]} onChange={value => { setMode(value); setError(null) }} /> : null}
+        <ManagedSelect label={t("modelAddition.method")} value={mode} disabled={locked} options={[["discover", t("modelAddition.discover")], ["manual", t("modelAddition.manual")]]} onChange={value => { setMode(value); setError(null) }} />
         {mode === "manual" ? <>
+          {clinePass ? <>
+            <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.manualSource")}</FieldLegend><ToggleGroup variant="outline" size="sm" value={[manualSource]} disabled={locked} aria-label={t("modelAddition.manualSource")} onValueChange={values => { if (values[0]) { setManualSource(values[0]); setError(null) } }}>
+              <ToggleGroupItem value="independent">{t("modelAddition.independent")}</ToggleGroupItem>
+              <ToggleGroupItem value="inherit">{t("modelAddition.inherit")}</ToggleGroupItem>
+            </ToggleGroup></FieldSet>
+            <p className="text-sm text-muted-foreground">{t(inheriting ? "modelAddition.clineInheritHint" : "modelAddition.clineManualHint")}</p>
+          </> : null}
           <Field><FieldLabel htmlFor="addition-id">{t("managementUi.modelId")}</FieldLabel><Input id="addition-id" value={id} disabled={locked} onChange={event => setId(event.target.value)} /></Field>
           <Field><FieldLabel htmlFor="addition-name">{t("managementUi.displayName")}</FieldLabel><Input id="addition-name" value={name} disabled={locked} onChange={event => setName(event.target.value)} /></Field>
+          {inheriting ? <>
+            <ManagedSelect fullWidth label={t("modelAddition.inheritFrom")} placeholder={t("modelAddition.selectInheritSource")} value={inheritFrom} disabled={locked} options={target.models.map(entry => [entry.id, `${entry.displayName} (${entry.id})`])} onChange={setInheritFrom} />
+            {target.models.length === 0 ? <p>{t("modelAddition.noInheritSource")}</p> : null}
+          </> : <>
           <ManagedSelect label={t("managementUi.contextPreset")} value={window} disabled={locked} options={contextWindowPresetTokens.map(value => [String(value), `${contextWindowPresetLabel(value)} (${value})`])} onChange={setWindow} />
           <Field><FieldLabel htmlFor="addition-window">{t("managementUi.contextTokens")}</FieldLabel><Input id="addition-window" type="number" min={1024} max={100000000} value={window} disabled={locked} onChange={event => setWindow(event.target.value)} /></Field>
-          <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.reasoning")}</FieldLegend><FieldGroup>{reasoningLevels.map(value => <Field key={value} orientation="horizontal"><Checkbox id={`addition-${value}`} checked={efforts.includes(value)} disabled={locked} onCheckedChange={checked => {
+          <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.reasoning")}</FieldLegend><FieldGroup>{(clinePass ? ["none", "enabled", ...reasoningLevels.slice(1)] : reasoningLevels).map(value => <Field key={value} orientation="horizontal"><Checkbox id={`addition-${value}`} checked={efforts.includes(value)} disabled={locked} onCheckedChange={checked => {
             const next = checked ? [...efforts, value] : efforts.filter(entry => entry !== value)
             setEfforts(next); if (!next.includes(effort)) setEffort(next[0] ?? "")
           }} /><FieldLabel htmlFor={`addition-${value}`}>{value}</FieldLabel></Field>)}</FieldGroup></FieldSet>
@@ -88,6 +108,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
           <ManagedSelect label={t("managementUi.imageInput")} value={images} disabled={locked} options={capabilityOptions} onChange={setImages} />
           <ManagedSelect label="apply_patch" value={patch} disabled={locked} options={capabilityOptions} onChange={setPatch} />
           <ManagedSelect label="tool_search" value={search} disabled={locked} options={capabilityOptions} onChange={setSearch} />
+          </>}
         </> : null}
         <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{t(loading ? "common.loading" : "modelAddition.load")}</Button>
       </FieldGroup> : <FieldGroup>
@@ -118,6 +139,8 @@ export function ProviderModelAdditionConfirmation({ preview, saving, loading, fi
   return <ManagementConfirmationDialog open saving={saving} loading={loading} finalFocus={finalFocus} title={t("modelAddition.confirm")} description={t("modelAddition.hint")} confirmDisabled={!preview.willChange} onConfirm={onConfirm} onCancel={onCancel}>
     <p>{t("modelCatalog.scope", { providers: preview.providers.join(t("managementUi.listSeparator")) })}</p>
     {preview.additions.map(entry => <section key={entry.model} className="flex min-w-0 flex-col gap-2"><p>{entry.displayName} ({entry.model})</p>
+      {entry.inheritedFrom ? <><p>{t("modelAddition.inheritedSummary", { model: entry.inheritedFrom })}</p><p>{t("modelAddition.inheritedConfirmation")}</p></> : null}
+      {entry.clineRequestProfile ? <p>{t("modelAddition.requestProfileSummary", { profile: t(entry.clineRequestProfile === "deepseek-flash" ? "modelAddition.deepseekFlashProfile" : "modelAddition.standardProfile") })}</p> : null}
       {entry.template ? <p>{t("modelTemplate.sourceSummary", { source: t(`modelTemplate.${entry.template.source}`), model: entry.template.model })}</p> : null}
       <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">{JSON.stringify(entry.fields, null, 2)}</pre>
     </section>)}

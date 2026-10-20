@@ -1,5 +1,6 @@
 import { isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
 import { clineRelayCatalogSchema } from "./cline-relay-catalog.mjs";
+import { resolveClinePassRequestProfile } from "./chat-reasoning.mjs";
 import { readModelTemplateBindings } from "./model-template-bindings.mjs";
 import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 import { createHash } from "node:crypto";
@@ -753,6 +754,16 @@ export function readProviderProfile(
 ) {
   assertProviderCatalogIsolationComplete(environment);
   if (expectedCatalogPath !== undefined) assertManagedCatalogSettingsComplete(expectedCatalogPath);
+  let searchPending = true;
+  try { readPrivateFileSync(`${path}.search-pending`, 4096); }
+  catch (error) {
+    if (error?.code !== "ENOENT") {
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error("Provider 搜索设置事务记录无法安全读取");
+    }
+    searchPending = false;
+  }
+  if (searchPending) throw new Error("Provider 搜索设置保存尚未完成；请保留事务记录及备份并核对文件，勿自动重试");
   let document;
   let fileAccess;
   try {
@@ -773,6 +784,9 @@ export function readProviderProfile(
     )
   ) {
     throw new Error(`Codex ${descriptor.definition.displayName} Profile 未选择受支持模型`);
+  }
+  if (document.web_search !== undefined && !["disabled", "cached", "indexed", "live"].includes(document.web_search)) {
+    throw new Error("Codex 模型提供商搜索模式无效");
   }
   if (expectedCatalogPath !== undefined && document.model_catalog_json !== expectedCatalogPath) {
     throw new Error(`Codex ${descriptor.definition.displayName} 必须使用提供商家族共享模型目录；当前版本不支持旧目录布局或目录迁移，请保留配置与目录完整备份，使用对应原版本处理旧配置`);
@@ -836,6 +850,7 @@ export function readProviderProfile(
   return {
     provider: descriptor.id,
     model: document.model,
+    webSearch: document.web_search,
     reasoningEffort: reasoningEffortPolicy === "mirror"
       ? document.model_reasoning_effort
       : selectedModel?.reasoningEffort,
@@ -893,7 +908,15 @@ function readCatalogSlugSet(content, definition) {
   } catch {
     throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
   }
+  validateClinePassRequestProfiles(catalog, definition);
   return catalogSlugSet(catalog, definition);
+}
+
+function validateClinePassRequestProfiles(catalog, definition) {
+  if ((definition.storageId ?? definition.id) !== "clp" || !Array.isArray(catalog?.models)) return;
+  for (const entry of catalog.models) {
+    resolveClinePassRequestProfile(entry?.slug, entry?.cline_request_profile);
+  }
 }
 
 export function catalogHasModel(path, definition, model) {
@@ -905,8 +928,10 @@ export function catalogHasModel(path, definition, model) {
 
 export function readModelCatalogSetting(path, definition, model) {
   try {
+    const content = readPrivateFile(path, maximumCatalogBytes);
+    validateClinePassRequestProfiles(JSON.parse(content), definition);
     return modelCatalogSetting(
-      readPrivateFile(path, maximumCatalogBytes),
+      content,
       definition,
       model,
     );
@@ -924,6 +949,7 @@ function readOptionalModelCatalogSetting(path, definition, model) {
   } catch {
     throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
   }
+  validateClinePassRequestProfiles(catalog, definition);
   if (!catalogSlugSet(catalog, definition).has(model)) return undefined;
   return modelCatalogSetting(content, definition, model);
 }
