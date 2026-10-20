@@ -64,8 +64,14 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   缺少必需字段时失败关闭。`parentThreadId` 只映射官方派生关系；`listThreadDescendants` 以明确祖先查询所有来源及指定归档状态，不用父目录截断后代，供本机归档预览和核验。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
   `hasActiveDescendants` 在目标 Provider 内通过 `thread/loaded/list` 枚举包括 ephemeral 的已加载
-  Thread，再用不含历史的 `thread/read` 沿官方 `parentThreadId` 核验活动后代；只把明确的 idle/notLoaded
-  视为空闲，根 Thread 本身不计入后代。查询共享调用方取消信号和 10 秒总预算，最多 20 页、
+  Thread，再用不含历史的 `thread/read` 沿官方 `parentThreadId` 核验活动后代；使用共享执行结算判定，
+  idle/notLoaded 必须没有活动 Turn，systemError 还必须有本连接按同一 Turn 观察到的 started → completed
+  终态证据，未知状态保守阻挡，根 Thread 本身不计入后代。证据只在 Client 内存中最多保留 2,000 个
+  Thread，不从历史或元数据中的空 Turn 补证；旧 Turn 完成不能覆盖新活动，active、旁路错误、
+  Thread 失效、重新订阅、取消订阅、断线及关闭会使相关证据失效，淘汰后也不以孤立 completed 重建。
+  取消订阅发送及结算时均清理证据，取消订阅后的读取不能沿用旧终态证明新活动不存在。
+  Queue 启动屏障只有明确返回空队列、且等待期间没有通知或连接/提交变化时才恢复原证据；其他拒绝保持未知，不把失败写入当成已完成执行。
+  查询共享调用方取消信号和 10 秒总预算，最多 20 页、
   2,000 个唯一节点及 64 层祖先；身份或 Provider 不匹配、缺字段、循环、越限、超时和断线均拒绝，
   不以持久 `thread/list` 或内存活动缓存替代权威查询。覆盖范围遵循官方 loaded/list，包含标准
   SubAgent 与 ephemeral，但不宣称枚举上游主动隐藏的 Internal Thread。

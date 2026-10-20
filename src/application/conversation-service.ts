@@ -34,8 +34,9 @@ import type {
 import type {
   PermissionProfileOption,
 } from "./permission-port.js";
-import type {
-  SessionRouter,
+import {
+  isThreadExecutionSettled,
+  type SessionRouter,
 } from "../session-routing/index.js";
 import type {
   ThreadOccupancyPort,
@@ -384,7 +385,11 @@ export class ConversationService implements
   private readonly accountMetrics: ConversationAccountMetricsService;
   private readonly lunaReserve: LunaReserveService | undefined;
   private readonly pendingBackgroundReleases = new Map<string, boolean>();
-  private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
+  private readonly backgroundReleaseAttempts = new Map<string, {
+    promise: Promise<boolean>;
+    retryRequested: boolean;
+    latestGuard: (() => boolean) | undefined;
+  }>();
   private idleReleaseEnabled = true;
   private idleReleaseGeneration = 0;
   private readonly sessionQueries: ConversationSessionQueryService;
@@ -556,10 +561,7 @@ export class ConversationService implements
       if (!isCurrent() || isLocallyBusy()) return busy();
       const snapshot = await this.router.readThread(current.threadId, condition?.signal);
       if (!isCurrent() || isLocallyBusy()) return busy();
-      if (
-        snapshot.status.type !== "idle"
-        && snapshot.status.type !== "notLoaded"
-      ) {
+      if (!isThreadExecutionSettled(snapshot)) {
         this.touchActivity(target);
         return { status: "busy", threadId: current.threadId };
       }
@@ -582,11 +584,12 @@ export class ConversationService implements
             if (!isCurrent() || isLocallyBusy()) return false;
             const latest = await this.router.readThread(current.threadId, condition?.signal);
             return isCurrent() && !isLocallyBusy()
-              && (latest.status.type === "idle" || latest.status.type === "notLoaded")
+              && isThreadExecutionSettled(latest)
               && !await this.router.hasActiveDescendants(current.threadId, condition?.signal)
               && isCurrent() && !isLocallyBusy();
           },
           canRestore: () => !condition?.signal.aborted && (condition?.canRestore() ?? true),
+          verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
           restored: (thread) => activity?.restore(target, thread.activeTurnId),
         }, modelPreference);
         if (!released) return busy();
@@ -1165,6 +1168,7 @@ export class ConversationService implements
             restored: (restored, thread) => activity.restore(restored.target, thread.activeTurnId),
             ...(leavesCurrent && current ? {
               verifyPreviousIdle: () => this.isThreadIdle(current.threadId),
+              verifyPreviousAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
               restoredPrevious: (thread: Awaited<ReturnType<SessionRouter["readThread"]>>) => previousActivity?.restore(target, thread.activeTurnId),
               restorePreviousFailed: () => this.bindingLifecycle?.restoreRequired(current.threadId),
             } : {}),
@@ -1210,6 +1214,7 @@ export class ConversationService implements
         await this.router.newSession(target, preserveCurrent, modelPreference, current ? {
           isCurrent: () => this.router.current(target)?.threadId === current.threadId && !this.hasLocalThreadWork(current.threadId),
           verifyIdle: () => this.isThreadIdle(current.threadId),
+          verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
           canRestore: () => this.router.current(target)?.threadId === current.threadId,
           restored: thread => activity?.restore(target, thread.activeTurnId),
           restoreRequired: () => this.bindingLifecycle?.restoreRequired(current.threadId),
@@ -1872,11 +1877,34 @@ export class ConversationService implements
     // preserves Queue entries even when subagent settlement delays release.
     this.pendingBackgroundReleases.set(threadId, options.dispatchQueued !== false);
     const current = this.backgroundReleaseAttempts.get(threadId);
-    if (current) return current;
-    const attempt = this.performBackgroundRelease(threadId, options.isCurrent);
+    if (current) {
+      current.retryRequested = true;
+      if (options.isCurrent) current.latestGuard = options.isCurrent;
+      return current.promise;
+    }
+    const attempt = {
+      promise: Promise.resolve(false),
+      retryRequested: false,
+      latestGuard: options.isCurrent,
+    };
+    // Register before starting asynchronous work so a terminal event cannot be
+    // folded into an obsolete observation without requesting another pass.
     this.backgroundReleaseAttempts.set(threadId, attempt);
+    attempt.promise = Promise.resolve().then(async () => {
+      const deadline = performance.now() + 10_000;
+      const canRelease = () => (options.isCurrent?.() ?? true) && (attempt.latestGuard?.() ?? true);
+      do {
+        attempt.retryRequested = false;
+        if (await this.performBackgroundRelease(threadId, canRelease)) return true;
+        if (!attempt.retryRequested || !canRelease()) return false;
+        // Only a new lifecycle event requests another pass; never poll. Bound
+        // event storms and let the lifecycle owner handle recovery on failure.
+        if (performance.now() >= deadline) throw new Error("后台释放复核超过时间预算，需要重新恢复绑定");
+      } while (attempt.retryRequested);
+      return false;
+    });
     try {
-      return await attempt;
+      return await attempt.promise;
     } finally {
       if (this.backgroundReleaseAttempts.get(threadId) === attempt) {
         this.backgroundReleaseAttempts.delete(threadId);
@@ -1912,6 +1940,7 @@ export class ConversationService implements
       released = await this.router.releaseBackground(threadId, {
         isCurrent: () => canRelease() && !this.hasLocalThreadWork(threadId),
         verifyIdle: () => this.isThreadIdle(threadId),
+        verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(threadId, true),
         canRestore: canRelease,
         restored: thread => activity.restore(target, thread.activeTurnId),
       });
@@ -1927,11 +1956,15 @@ export class ConversationService implements
       || this.transfers?.hasPendingInteraction(threadId) === true;
   }
 
-  private async isThreadIdle(threadId: string): Promise<boolean> {
+  private async isThreadIdle(threadId: string, terminalUnsubscribed = false): Promise<boolean> {
     if (this.hasLocalThreadWork(threadId)) return false;
     const signal = AbortSignal.timeout(10_000);
     const snapshot = await this.router.readThread(threadId, signal);
-    if (snapshot.status.type !== "idle" && snapshot.status.type !== "notLoaded") return false;
+    // Only Router's post-unsubscribe phase may use the already established
+    // terminal boundary. This does not turn fresh systemError metadata into
+    // terminal evidence. Still veto observable activity and recheck dependents.
+    if (!isThreadExecutionSettled(snapshot)
+      && !(terminalUnsubscribed && snapshot.status.type === "systemError" && snapshot.activeTurnId === null)) return false;
     if (await this.router.hasActiveDescendants(threadId, signal)) return false;
     if (await this.probeNativeQueueItems(threadId)) return false;
     return !this.hasLocalThreadWork(threadId);

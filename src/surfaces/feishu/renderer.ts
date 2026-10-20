@@ -284,5 +284,5 @@ function threadStatusLabel(status: string): string {
     ? "运行中"
     : status === "idle"
       ? "空闲"
-      : "未知";
+      : status === "systemError" ? "发生错误" : status === "notLoaded" ? "会话未加载" : "未知";
 }

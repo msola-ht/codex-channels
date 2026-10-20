@@ -235,7 +235,7 @@ export class BindingRestoreCoordinator {
               target: binding.target,
               threadId,
               background: true,
-              message: "后台任务已在 Gateway 离线期间结束，可通过 /resume 查看完整会话。",
+              message: "恢复检查确认原后台会话已无待处理任务，已解除后台绑定；可通过 /resume 查看完整会话。",
             }, true);
           } else if (!canRestore(binding)) {
             restoredThreadIds.delete(threadId);

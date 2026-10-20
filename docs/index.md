@@ -566,6 +566,8 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 和 `thread/read` 核验父子活动，包括未持久化的已加载标准子代理 Thread；官方列表排除 `SessionSource::Internal`，不宣称枚举全部内部代理。
 查询限时、限页数、节点数与祖先深度，
 身份或祖先关系无法确认时失败关闭。恢复后台订阅后复用正常释放条件，不仅凭父 Thread 空闲就清理绑定。
+释放与后代活动查询共用 `isThreadExecutionSettled`：接受 `idle`、`notLoaded`；对 `systemError`，必须另有 Client 在当前连续订阅中先后收到同一 Turn 的 `turn/started` 与 `turn/completed` 证据，已知活动 Turn 始终否决。锁定上游的旁路 Error 也会设置 `systemError`，因此元数据 `thread/read(includeTurns:false)` 的空 Turn ID、错误标记和按该标记归一化的历史均不作为终态证明。新活动、错误、断线及订阅变化使旧终态证据失效；未知的恢复会话和子代理继续保守保留，不扩展历史读取或持久化会话索引。对于已确认结束的失败会话，完整的活动、交互、子代理与 Queue 复核在取消订阅前完成，以取消订阅作为释放边界，之后仍检查父会话可见活动、本地活动与授权守卫、Queue 和后代；不拿已失效的终态证据推断其他客户端此后没有开始新任务。普通空闲路径仍在取消订阅后复核状态，跨渠道接管的独立条件不变。上游没有跨客户端的原子“核验空闲并取消订阅”接口。
+隔离的原生 App Server 经本地 CLP 桥拒绝 cached 搜索后，已观察到失败 Turn、`systemError` 和同 Turn 终态证据，随后 `/new` 解除绑定且不保留后台；后台清理经过真实 Queue 空队列屏障也完成释放。重新订阅使证据失效后，同样的失败会话被保守保留。以上未调用外网 CLP，也未验证真实渠道投递或另一设备现场。
 [`conversation-service.ts`](../src/application/conversation-service.ts) 在锁内复核选择上下文，并恢复活动 Turn。
 
 ### 模型请求重试展示
@@ -671,7 +673,7 @@ Config 文案说明：协议索引中的“Codex 用户设置”“一键配置�
 
 CLP 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由，不增加 RPC。
 CLP 共用 Codex 目录由 [`cline-pass-account-management.mjs`](../scripts/cline-pass-account-management.mjs) 从 Cline 官方元数据独立生成；仅 Flash 复制仓库 DS 模板，其余模型独立声明能力，模型窗口由所有 CLP 账户共用，不影响其他提供商。[手填新增](cline-pass.md)可选择从当前目录一次性继承完整配置及请求行为，仍向上游发送新模型 ID；请求配置通过本地目录条目的 `cline_request_profile` 明确保存，不添加 RPC 字段。桥接受七种普通思考等级；目录声明开关时额外使用 `enabled`，基于锁定 Codex `protocol/src/openai_models.rs` 的 `ReasoningEffort::Custom` 和 `ReasoningEffortPreset`，沿用目录、模型选择及 Turn 既有字段。Flash 请求配置保留 `reasoning.effort` 和固定 DeepSeek 路由，标准配置普通等级使用 `reasoning_effort`，关闭/开启使用 `reasoning.enabled=false/true`；没有显式配置时保留精确 Flash ID 的默认分支，出站选项必须属于当前启用目录。真实云端新增模型仍需分别验收。
-受管 CLP 的 live `web_search` 经内部函数调用同账户 `/search/websearch`，在单一 Responses 生命周期内续答；其他未映射声明及选择仍透传。搜索历史仅保留锁定协议支持的查询，具体限制见 [CLP 网页搜索](cline-pass.md#网页搜索适配)。声明形态依据锁定源码 `tools/src/tool_spec.rs`、`tool_spec_tests.rs` 和 `core/tests/suite/web_search.rs`。
+受管 CLP 的 live `web_search` 经内部函数调用同账户 `/search/websearch`，在单一 Responses 生命周期内续答；合法混合调用先搜索，对同批尚未派发的客户端调用返回明确的内部 `not_executed` 工具结果，让模型结合来源后重新发起纯客户端调用，实际执行与审批仍由 Codex 负责。不缓存跨请求结果或增加私有 Responses 历史字段；其他未映射声明及选择仍透传。搜索历史仅保留锁定协议支持的查询，具体限制见 [CLP 网页搜索](cline-pass.md#网页搜索适配)。声明形态依据锁定源码 `tools/src/tool_spec.rs`、`tool_spec_tests.rs` 和 `core/tests/suite/web_search.rs`。
 账户用量由 [`cline-pass-account-adapter.ts`](../src/bootstrap/cline-pass-account-adapter.ts) 查询 Cline 官方套餐额度接口，复用账户快照和窗口展示；
 [`cline-pass-setup.mjs`](../scripts/cline-pass-setup.mjs) 按账户创建受管 Profile，注册表和默认账户复用共享校验与路由，模型目录和 Chat 代理按 Provider ID 独立；
 [`model-api`](../src/model-api/README.md) 独立转换模型消息（含 `text.format` 的 `json_schema` 到 Chat `response_format` 映射），

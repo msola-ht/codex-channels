@@ -163,6 +163,7 @@ export class ChatCompletionsBridge {
         }
       };
       let searchCount = 0;
+      let deferredClientCalls = 0;
       let remainingTokens = body.max_completion_tokens;
       for (;;) {
         // Continuations are new billable calls: recheck the catalog before each submission.
@@ -262,8 +263,12 @@ export class ChatCompletionsBridge {
         }
         const step = converter.completeHostedSearches(webSearch.name, results);
         await emit(step.events);
-        if (!step.continue) break;
-        outbound.messages.push(step.message, ...results.map(result => ({ role: "tool" as const, tool_call_id: result.id, content: result.text })));
+        if (step.deferredClientCalls > 0) {
+          deferredClientCalls += step.deferredClientCalls;
+          diagnostics.conversion({ webSearchCoordination: "serialized", webSearchDeferredClientCalls: deferredClientCalls });
+          publishDiagnostics();
+        }
+        outbound.messages.push(step.message, ...step.toolMessages);
         // A forced initial search must not force an unbounded loop on the next model call.
         if (outbound.tool_choice === "required" || typeof outbound.tool_choice === "object" && outbound.tool_choice !== null
           && "function" in outbound.tool_choice && (outbound.tool_choice.function as { name?: unknown })?.name === webSearch.name) outbound.tool_choice = "auto";
@@ -285,9 +290,15 @@ export class ChatCompletionsBridge {
       let failure = error instanceof ModelConversionError || error instanceof ChatUpstreamError ? error
         : aborted;
       if (failure instanceof ModelConversionError && failure.diagnostics?.webSearch === "unsupported_controls") {
-        failure = new ChatUpstreamError("clp_search_unsupported_controls", "CLP 搜索仅支持 live 文本搜索及域名过滤，请将联网搜索设为 live；缓存、索引、地域和其他搜索控制暂不支持。", false);
-      } else if (failure instanceof ModelConversionError && failure.diagnostics?.webSearch === "mixed_tools") {
-        failure = new ChatUpstreamError("clp_search_mixed_tools", "CLP 同一轮不能混合网页搜索与客户端工具调用，请分步执行。", false);
+        const control = failure.diagnostics.webSearchControl;
+        const reason = control === "external_web_access" ? "external_web_access 必须为 true，请将联网搜索设为 live。"
+          : control === "indexed_web_access" ? "不支持 indexed_web_access 索引控制，请改用 live 并移除索引控制。"
+            : control === "user_location" ? "不支持 user_location 地域控制，请移除该控制；仅改为 live 不会移除它。"
+              : control === "search_context_size" ? "不支持 search_context_size 上下文档位，请移除该控制。"
+                : control === "search_content_types" ? "不支持 search_content_types 内容类型控制，请移除该控制。"
+                  : "请求含未支持的搜索控制字段；请移除额外控制，仅保留 live 文本搜索及域名过滤。";
+        diagnostics.conversion(failure.diagnostics);
+        failure = new ChatUpstreamError("clp_search_unsupported_controls", `CLP 搜索参数不受支持：${reason}`, false);
       }
       if (failure instanceof ModelRequestTimeoutError) status = failure.status;
       else if (failure instanceof ChatUpstreamError && failure.upstreamStatus) status = failure.upstreamStatus;

@@ -3,7 +3,7 @@
 独立的纯转换模块，不依赖 Provider 账户材料、HTTP、App Server RPC、配置读写或存储。原生协议思考策略仅引用共享的无 I/O 能力元数据。
 每个请求必须携带完整输入，转换状态只存活于单次流式响应，不缓存会话历史。
 
-显式 `clineWebSearch` 选项把 live `web_search` 映射为内部查询函数，返回固定域名限制；该选项与上游原生能力诊断分开。`ChatToResponses` 的 hosted-search 接口校验整轮工具、发出原生搜索生命周期并在同一响应中继续下一模型轮，累计用量且保留未知计数；HTTP 由 Provider Proxy 执行。内部搜索不发布为客户端函数，混合调用执行前拒绝。历史 search 查询可降为可读记录，缺失结果不补造；来源链接不合成为未经验证的引用注解。
+显式 `clineWebSearch` 选项把 live `web_search` 映射为内部查询函数，返回固定域名限制；该选项与上游原生能力诊断分开。`ChatToResponses` 的 hosted-search 接口校验整轮工具、发出原生搜索生命周期并在同一响应中继续下一模型轮，累计用量且保留未知计数；HTTP 由 Provider Proxy 执行。混合调用先执行搜索，同批客户端调用不交付执行，而以固定 `not_executed` 工具结果告知模型尚未派发，要求看过搜索结果后单独重新发起；完整 assistant 调用组与全部配对结果一起续传，内部调用 ID 按响应、模型轮次及工具序号重写以避免上游跨轮重用。后续纯客户端调用才还原交给 Codex，内部搜索不发布为客户端函数，不代替审批或伪造执行成功。历史 search 查询可降为可读记录，缺失结果不补造；搜索来源仍仅在当前请求续答可用，不承诺跨请求保留，来源链接不合成为未经验证的引用注解。
 
 自定义模型添加时的能力探测通过公开入口复用 `responsesToChat`，确保短请求的工具与思考参数编码和运行时通用 Chat 桥一致；探测的网络、凭据及配置写入仍归 Scripts 管理入口负责。
 
@@ -38,6 +38,6 @@ Responses 转 Chat 保留 `temperature`、`top_p`、`top_k`、`min_p`、`presenc
 Chat 返回的 `reasoning` 和无签名 `reasoning_details` 明文以独立摘要保存，并在请求历史中还原为 `reasoning`。
 `reasoning_content` 通过 Responses `reasoning.content` 中的 `reasoning_text` 内容块和对应流事件保留，在工具续跑及后续用户轮次原文回传为 `reasoning_content`；完整正文存在时不以摘要替代或重复拼接。
 同一增量的重复文本只保留一次，冲突或带签名的推理明确拒绝，绝不伪装成加密内容或补造推理占位文本。缓存计数缺失保持缺失。
-流必须具有明确结束原因；长度截断和内容过滤映射为 incomplete，并收尾保留已生成文本，不发布部分工具调用，上游错误和断流不得生成 completed。
+流必须具有明确结束原因；长度截断和内容过滤映射为 incomplete，并收尾保留已生成文本，不发布部分工具调用，上游错误和断流不得生成 completed。经历托管搜索内部续答后发布的客户端调用使用当前 Responses 响应范围内的新 `call_id`，避免上游跨 HTTP 轮重用 ID 与已有历史冲突；客户端结果沿该 ID 正常配对，不缓存映射。
 CLP 目录声明开关能力时，额外接受 Codex 自定义思考值 `enabled`，由桥映射为 `reasoning.enabled=true`；`none` 关闭，普通等级仍按既有上游映射。转换入口只有收到可信目录明确列出的选项才接受 `enabled`，并校验其他显式选择也属于该模型。未提供能力的通用转换不接受该值，独立 Relay 的原生 Chat/Responses 参数保留规则不变。
 直接 Chat 与 Chat→Responses 共用 CLP 用量尾帧判定：已有结束原因后，仅接受带有效用量、相同结束原因和空 assistant delta（仅允许 assistant role 与空或 null content）的重复终态；不重复输出正文。新增正文、工具调用、推理字段或不同结束原因仍拒绝。
