@@ -33,6 +33,7 @@ export class UnixWebSocketTransport extends BaseTransport {
     if (this.socket?.readyState === WebSocket.OPEN) {
       return;
     }
+    if (this.socket) await this.close();
 
     const endpoint = inspectAppServerUnixSocket(this.socketPath);
     if (!endpoint?.available) throw new Error("Codex Unix Socket 不可用");
@@ -99,20 +100,21 @@ export class UnixWebSocketTransport extends BaseTransport {
 
   async close(): Promise<void> {
     const socket = this.socket;
-    this.socket = undefined;
     if (!socket || socket.readyState === WebSocket.CLOSED) {
+      if (this.socket === socket) this.socket = undefined;
       return;
     }
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (socket.readyState !== WebSocket.CLOSED) {
           socket.terminate();
+          reject(new Error("Codex Unix WebSocket 关闭未确认"));
         }
-        resolve();
       }, 2_000).unref();
       socket.once("close", () => { clearTimeout(timeout); resolve(); });
       socket.close();
     });
+    if (this.socket === socket) this.socket = undefined;
   }
 }
 

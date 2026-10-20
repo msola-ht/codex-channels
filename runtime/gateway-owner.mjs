@@ -77,10 +77,7 @@ export function gatewayOwnerSocketPath(configPath) {
 
 export function gatewayOwnerIsActive(configPath, signal) {
   const socketPath = gatewayOwnerSocketPath(configPath);
-  return readGatewayOwnerStatus(socketPath, signal, true).then(Boolean, () => {
-    signal?.throwIfAborted();
-    return false;
-  });
+  return readGatewayOwnerStatus(socketPath, signal, true).then(Boolean);
 }
 
 export async function gatewayOwnerIsReady(configPath, signal) {
@@ -100,6 +97,7 @@ function readGatewayOwnerStatus(socketPath, signal, activeOnly = false) {
     const chunks = [];
     let bytes = 0;
     let settled = false;
+    const unconfirmed = () => new Error("Gateway 活动状态未确认，请确认服务状态后重试");
     const finish = (value, error) => {
       if (settled) return;
       settled = true;
@@ -110,12 +108,13 @@ function readGatewayOwnerStatus(socketPath, signal, activeOnly = false) {
       if (error !== undefined) rejectStatus(error);
       else resolveStatus(value);
     };
-    const timer = setTimeout(() => finish(undefined), connectionTimeoutMs);
+    const timer = setTimeout(() => finish(undefined, activeOnly ? unconfirmed() : undefined), connectionTimeoutMs);
     const abort = () => finish(undefined, signal.reason);
     signal?.addEventListener("abort", abort, { once: true });
     void createPrivateIpcConnectionAsync(socketPath, { signal: cancellation.signal }).then(connection => {
       socket = connection;
-      socket.on("error", () => finish(undefined));
+      socket.on("error", error => finish(undefined,
+        activeOnly && !["ENOENT", "ECONNREFUSED"].includes(error?.code) ? unconfirmed() : undefined));
       if (settled) { socket.destroy(); return; }
       if (activeOnly) socket.once("connect", () => finish(true));
       socket.on("data", (chunk) => {
@@ -133,8 +132,8 @@ function readGatewayOwnerStatus(socketPath, signal, activeOnly = false) {
           finish(undefined);
         }
       });
-      socket.once("close", () => finish(undefined));
-    }).catch(error => finish(undefined, error?.code === "ENOENT" ? undefined : error));
+      socket.once("close", () => finish(undefined, activeOnly ? unconfirmed() : undefined));
+    }).catch(error => finish(undefined, error?.code === "ENOENT" ? undefined : activeOnly ? unconfirmed() : error));
     if (signal?.aborted) abort();
   });
 }

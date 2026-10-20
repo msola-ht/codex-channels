@@ -44,7 +44,8 @@ import {
   loadGatewaySettings,
 } from "./config-management.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
-import { closePendingCodexUserConfigReads, createSharedCodexUserConfigClient, readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
+import { closeCodexUserConfigClients, createSharedCodexUserConfigClient, readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
+import { closeAppServerUserAgentReads } from "./webui-management-status-route.mjs";
 import { invalidateServiceStatusSummary, loadServiceStatusSummary, serviceSummaryHealthy } from "./webui-service-status.mjs";
 import {
   ApiError,
@@ -199,12 +200,13 @@ export function createWebuiServer({
       Promise.resolve().then(() => closeQueueStreams(management)),
       metricsExports.close(), closeDeliveryReaders(), closeDeliveryJournals(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
       closeOfficialModelOperations(management),
-      closeManagementSnapshotReads(management).then(() => closePendingCodexUserConfigReads()),
+      closeAppServerUserAgentReads(management.appServerUserAgentCache),
+      closeManagementSnapshotReads(management).then(() => closeCodexUserConfigClients()),
     ]);
     if (results.some(result => result.status === "rejected")) throw new Error("WebUI 后台资源退出未确认");
   }, waitForNotificationsExit: async () => {
-    await Promise.all([metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management, { waitForExit: true }),
-      closeManagementSnapshotReads(management).then(() => closePendingCodexUserConfigReads())]);
+    await Promise.all([closeQueueStreams(management), closeAppServerUserAgentReads(management.appServerUserAgentCache), metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management, { waitForExit: true }),
+      closeManagementSnapshotReads(management).then(() => closeCodexUserConfigClients())]);
   } };
 }
 

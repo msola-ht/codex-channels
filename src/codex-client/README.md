@@ -44,12 +44,13 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
 - `unix-websocket-transport.ts`：连接前校验当前用户私有的父目录和本人所有的真实 Unix Socket，
   通过共享 Runtime 校验 0.163.0 的确定性 rendezvous 链接与受保护目标，再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
   128 MiB 边界一致，避免大型 Thread 恢复响应被客户端提前断开，同时保留有界内存约束。
+  直接 Socket 与链接目标均要求 `0600`；关闭超时不丢弃连接引用，不把发出终止请求当作已退出。
 - `windows-proxy-transport.ts`：在 Windows 启动并拥有固定版 `codex app-server proxy --sock`
   子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，握手使用独立
   有界超时并清理静默 Proxy，关闭 Gateway Client 时只终止对应 Proxy，不终止独立 App Server。
   Proxy 与 stdio 的并发关闭共用清理任务；终止失败保留进程所有权，重新连接不能绕过未完成的清理。
   Proxy 握手期间关闭会立即取消握手，再等待同一子进程清理，不等待完整连接超时。
-- `stdio-transport.ts`：用于受控开发场景的 stdio Transport。
+- `stdio-transport.ts`：用于临时配置事务及受控开发场景的 stdio Transport。Unix 创建独立进程组并经注入的 Runtime 端口登记；包装器退出后仍保留归属，只有整组清理确认后允许新连接。Windows 继续使用自有进程树回收。失去组长身份且后代仍存活时拒绝关闭成功，不向可能复用的旧 PGID 盲目发信号。
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；通知不附加本地接收时间戳。
   初始化期间

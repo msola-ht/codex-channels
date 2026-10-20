@@ -14,3 +14,6 @@ export type TerminateCodexProcess = (
   child: ChildProcessWithoutNullStreams,
   options?: { gracePeriodMs?: number; forcePeriodMs?: number },
 ) => Promise<void>;
+
+/** Register the process created by this Transport with its Runtime owner. */
+export type RegisterCodexProcess = (child: ChildProcessWithoutNullStreams) => void;

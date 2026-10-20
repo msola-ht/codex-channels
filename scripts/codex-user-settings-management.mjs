@@ -1,6 +1,6 @@
 import { loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { acceleratedServiceTierId } from "../runtime/service-tier.mjs";
-import { createCodexUserConfigClient, readWithCodexUserConfigClient } from "./codex-user-config.mjs";
+import { createCodexUserConfigClient, readWithCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
 import { supportedPublicApprovalPolicies } from "./codex-public-cli-contract.mjs";
 import { projectToolSettings, toolSettingEdits } from "./codex-tool-settings.mjs";
 
@@ -53,9 +53,7 @@ export async function updateCodexUserSetting(
   if (["all", "defaults", "preferences", "model-compact", "service-tier"].includes(input?.kind)) {
     assertOfficialDefaults(provider);
   }
-  const client = await createClient({ environment });
-  try {
-    await client.connect();
+  return withCodexUserConfigClient(environment, createClient, undefined, async (client) => {
     const [snapshot, models] = await Promise.all([
       client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer", includeAcceleration: input?.kind === "all" || input?.kind === "service-tier" }),
       ["all", "defaults", "preferences", "service-tier"].includes(input?.kind)
@@ -92,9 +90,7 @@ export async function updateCodexUserSetting(
       value,
       activation: codexUserSettingActivation(input.kind),
     };
-  } finally {
-    await client.close().catch(() => undefined);
-  }
+  }, { preserveOperationResult: true });
 }
 
 /** Validate and project a change without writing the App Server config. */
@@ -114,9 +110,7 @@ export async function previewCodexUserSetting(
   if (["all", "defaults", "preferences", "model-compact", "service-tier"].includes(input?.kind)) {
     assertOfficialDefaults(provider);
   }
-  const client = await createClient({ environment });
-  try {
-    await client.connect();
+  return readWithCodexUserConfigClient(environment, createClient, undefined, async (client) => {
     const [snapshot, models] = await Promise.all([
       client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer", includeAcceleration: input?.kind === "all" || input?.kind === "service-tier" }),
       ["all", "defaults", "preferences", "service-tier"].includes(input?.kind)
@@ -140,9 +134,7 @@ export async function previewCodexUserSetting(
       value,
       activation: codexUserSettingActivation(input.kind),
     };
-  } finally {
-    await client.close().catch(() => undefined);
-  }
+  });
 }
 
 function codexUserSettingActivation(kind) {

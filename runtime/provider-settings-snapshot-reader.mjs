@@ -25,4 +25,5 @@ export class ProviderSettingsSnapshotReader {
   read() { return this.#reader.read(); }
   readFresh() { return this.#reader.readFresh(); }
   close() { return this.#reader.close(); }
+  waitForExit() { return this.#reader.waitForExit(); }
 }

@@ -18,7 +18,10 @@ export function inspectAppServerUnixSocket(socketPath) {
   if (!alias) return undefined;
   if (alias.uid !== uid) throw new Error("Codex Unix Socket 必须是当前用户拥有的 Socket");
   const identity = { dev: alias.dev, ino: alias.ino };
-  if (alias.isSocket()) return { path: socketPath, identity, available: true };
+  if (alias.isSocket()) {
+    if ((alias.mode & 0o777) !== 0o600) throw new Error("Codex Unix Socket 权限不安全");
+    return { path: socketPath, identity, available: true };
+  }
   if (!alias.isSymbolicLink()) throw new Error("Codex Unix Socket 必须是当前用户拥有的 Socket");
 
   // Upstream hashes the canonical parent plus basename, independent of TMPDIR/HOME.

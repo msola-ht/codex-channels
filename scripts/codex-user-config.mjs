@@ -8,13 +8,22 @@ import {
   resolveOptionalExecutable,
 } from "../runtime/executable.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
-import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
+import { registerChildProcessGroup, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { readGatewayConfig, validateCodexConfigDocument } from "../runtime/gateway-config.mjs";
 import { locateOptionalUserConfig, locateUserConfig } from "./runtime-config.mjs";
 
-// A failed proxy cleanup must remain owned before another read can reconnect.
+// Failed temporary-client cleanup remains owned before any new operation.
 const unclosedReadClients = new Set();
+const activeOperations = new Set();
+let clientsClosing = false;
+
+/** Final host shutdown: stop admission, let submitted writes settle, then clean. */
+export async function closeCodexUserConfigClients() {
+  clientsClosing = true;
+  await Promise.allSettled([...activeOperations]);
+  await closePendingCodexUserConfigReads();
+}
 
 export async function closePendingCodexUserConfigReads() {
   const results = await Promise.allSettled([...unclosedReadClients].map(async client => {
@@ -22,7 +31,7 @@ export async function closePendingCodexUserConfigReads() {
     unclosedReadClients.delete(client);
   }));
   const failures = results.filter(result => result.status === "rejected").map(result => result.reason);
-  if (failures.length) throw new AggregateError(failures, "用户设置读取连接清理未确认");
+  if (failures.length) throw new AggregateError(failures, "用户设置连接清理未确认");
 }
 
 export async function disableCodexDaemonAutoStart(environment = process.env, dependencies = {}) {
@@ -39,16 +48,12 @@ export async function updateCodexUserConfig(
   createEdits,
   { createClient = createCodexUserConfigClient } = {},
 ) {
-  const client = await createClient({ environment });
-  try {
-    await client.connect();
+  return withCodexUserConfigClient(environment, createClient, undefined, async (client) => {
     const snapshot = await client.readUserConfigSnapshot();
     const edits = createEdits(snapshot.config);
     if (edits.length === 0) return;
     await client.writeUserConfigEdits(edits, { expectedVersion: snapshot.version });
-  } finally {
-    await client.close().catch(() => undefined);
-  }
+  }, { preserveOperationResult: true });
 }
 
 export async function readCodexUserConfigSnapshot(
@@ -61,6 +66,23 @@ export async function readCodexUserConfigSnapshot(
 
 /** A cancelled read closes only its owned connection (and any owned proxy). */
 export async function readWithCodexUserConfigClient(environment, createClient, signal, read) {
+  return withCodexUserConfigClient(environment, createClient, signal, read);
+}
+
+/** Writes are never cancelled after submission; cleanup must not imply a replay. */
+export function withCodexUserConfigClient(
+  environment, createClient, signal, operation, options = {},
+) {
+  if (clientsClosing) return Promise.reject(new Error("用户设置客户端正在关闭"));
+  const task = runWithCodexUserConfigClient(environment, createClient, signal, operation, options)
+    .finally(() => activeOperations.delete(task));
+  activeOperations.add(task);
+  return task;
+}
+
+async function runWithCodexUserConfigClient(
+  environment, createClient, signal, operation, { preserveOperationResult = false } = {},
+) {
   signal?.throwIfAborted();
   await closePendingCodexUserConfigReads();
   signal?.throwIfAborted();
@@ -76,12 +98,17 @@ export async function readWithCodexUserConfigClient(environment, createClient, s
     signal?.throwIfAborted();
     await client.connect();
     signal?.throwIfAborted();
-    const result = await read(client);
+    const result = await operation(client);
     signal?.throwIfAborted();
     return result;
   } finally {
     signal?.removeEventListener("abort", abort);
-    await close();
+    await close().catch(error => {
+      if (!preserveOperationResult) throw error;
+      process.emitWarning("用户设置操作已结束，但临时连接清理未确认；已保留归属，后续操作须先完成清理，请勿因此重复提交写入。", {
+        code: "CODEX_CONFIG_CLIENT_CLEANUP_UNCONFIRMED",
+      });
+    });
   }
 }
 
@@ -97,15 +124,11 @@ export async function writeCodexUserConfigEdits(
   edits,
   { expectedVersion, createClient = createCodexUserConfigClient } = {},
 ) {
-  const client = await createClient({ environment });
-  try {
-    await client.connect();
+  return withCodexUserConfigClient(environment, createClient, undefined, async (client) => {
     await client.writeUserConfigEdits(edits, {
       ...(expectedVersion === undefined ? {} : { expectedVersion }),
     });
-  } finally {
-    await client.close().catch(() => undefined);
-  }
+  }, { preserveOperationResult: true });
 }
 
 export async function createCodexUserConfigClient({
@@ -128,6 +151,9 @@ export async function createCodexUserConfigClient({
       createCodexProcessInvocation: (args) =>
         codexProcessInvocation(codexBinary, args, environment),
       terminateCodexProcess: terminateChildProcess,
+      registerCodexProcess: (child) => {
+        if (process.platform !== "win32") registerChildProcessGroup(child);
+      },
     })),
     {},
   );

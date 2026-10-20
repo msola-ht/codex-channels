@@ -633,6 +633,8 @@ Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOM
 不一致时提示“配置已保存，重启后生效”；没有覆盖时不判断是否重启，只显示“与最近一次请求
 不一致”。还没有请求样本时不做判断。
 
+未配置 UA 覆盖时，同一 Socket、Codex binary 与客户端版本的在途 UA 读取合并，结果缓存 5 秒；目标变化不复用旧值。单个 HTTP 请求断开只撤销自身等待，全部等待者离开或 WebUI 关闭才取消共享读取。读取默认 3 秒到期触发取消，资源回收继续等待实际关闭；不可用时不伪造 UA。Relay 状态和队列 GET 也把 HTTP 断开传至只读 IPC，配置写入与 apply 的结果结算不受此取消影响。
+
 部署：仓库根目录 `npm run install:global` 会自动安装 webui 依赖并构建
 `webui/dist/`，产物随本地打包安装，由 `codexc webui` 托管。
 
