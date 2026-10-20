@@ -721,6 +721,11 @@ const zh = {
   },
   settingsUi: {
     loadFailed: "设置快照加载失败", notConfigured: "未配置",
+    codexLoadFailed: "Codex 设置快照加载失败",
+    providerLoadFailed: "提供商设置快照加载失败",
+    previousSnapshot: "当前展示上次成功读取的快照，相关修改暂不可用。",
+    codexUnavailable: "暂时无法从 App Server 读取 Codex 设置。若服务刚启动或重启，请稍后重试；持续失败时请检查 App Server 状态。",
+    providerUnavailable: "暂时无法读取提供商设置。若服务刚启动或重启，请稍后重试；持续失败时请检查 App Server 状态及提供商配置、模型目录。",
     savedActivation: "设置已保存。生效方式：{value}",
     noActivationRequired: "无需后续激活或重启",
     instanceStopped: "对应 App Server 实例已停止。",
@@ -2458,6 +2463,11 @@ const en: Messages = {
   },
   settingsUi: {
     loadFailed: "Unable to load settings", notConfigured: "Not configured",
+    codexLoadFailed: "Unable to load Codex settings",
+    providerLoadFailed: "Unable to load provider settings",
+    previousSnapshot: "Showing the last successful snapshot. Related changes are temporarily disabled.",
+    codexUnavailable: "Codex settings cannot be read from App Server. If the service just started or restarted, retry shortly. If this persists, check App Server status.",
+    providerUnavailable: "Provider settings cannot be read. If the service just started or restarted, retry shortly. If this persists, check App Server status, provider configuration and model catalogs.",
     savedActivation: "Settings saved. Activation: {value}",
     noActivationRequired: "No further activation or restart is needed",
     instanceStopped: "The selected App Server instance has stopped.",

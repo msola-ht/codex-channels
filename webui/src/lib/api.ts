@@ -426,7 +426,40 @@ export function refreshOpenAiModelCatalog(input: OpenAiModelRefreshInput, confir
 }
 
 export function fetchCodexUserSettings(signal?: AbortSignal): Promise<CodexUserSettingsResponse> {
-  return getJson<CodexUserSettingsResponse>(`${API_PREFIX}/management/codex/settings`, signal)
+  return readAppServerSettings<CodexUserSettingsResponse>("codex/settings", "codex_settings_unavailable", signal)
+}
+
+/** These two GET snapshots depend on App Server readiness during service startup. */
+async function readAppServerSettings<T>(path: string, unavailableCode: string, signal?: AbortSignal): Promise<T> {
+  const startedAt = Date.now()
+  const delays = [1_000, 2_000, 4_000]
+  for (let attempt = 0; ; attempt++) {
+    signal?.throwIfAborted()
+    try {
+      return await getJson<T>(`${API_PREFIX}/management/${path}`, signal)
+    } catch (error) {
+      signal?.throwIfAborted()
+      const delay = delays[attempt]
+      const unavailable = error instanceof ApiClientError
+        ? error.status === 503 && error.code === unavailableCode
+        : error instanceof TypeError
+      // Do not repeat authentication failures, writes or already slow reads.
+      if (!unavailable || delay === undefined || Date.now() - startedAt + delay > 10_000) throw error
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => {
+          clearTimeout(timer)
+          reject(signal?.reason)
+        }
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", abort)
+          resolve()
+        }, delay)
+        signal?.addEventListener("abort", abort, { once: true })
+      })
+      // Background tabs can delay timers beyond the startup recovery window.
+      if (Date.now() - startedAt > 10_000) throw error
+    }
+  }
 }
 
 export function previewCodexUserSetting(
@@ -467,7 +500,7 @@ export function cancelManagementTask(id: string, signal?: AbortSignal): Promise<
 }
 
 export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<ManagementProviderSettingsResponse> {
-  return getJson<ManagementProviderSettingsResponse>(`${API_PREFIX}/management/provider-settings`, signal)
+  return readAppServerSettings<ManagementProviderSettingsResponse>("provider-settings", "provider_state_unavailable", signal)
 }
 
 export function fetchProviderModelTemplateOptions(provider: string, signal?: AbortSignal): Promise<ProviderModelTemplateOptionsResponse> {

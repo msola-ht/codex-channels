@@ -60,7 +60,7 @@ export function ModelConfigurationPage() {
   const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog])
   const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
   return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy} refresh={refresh}>
-    <OpenAiModelCatalogCard catalog={catalog} disabled={busy} configurationRevision={providers.settings?.resourceRevision ?? null} renderCatalog={official =>
+    <OpenAiModelCatalogCard catalog={catalog} disabled={busy || providers.error !== null} configurationRevision={providers.settings?.resourceRevision ?? null} renderCatalog={official =>
       <ProviderSettingsManagement management={providers} section="models" onChanged={reloadCodex} renderCatalog={thirdParty =>
         <Card>
           <CardHeader><CardTitle>{t("modelCatalog.title")}</CardTitle><CardDescription>{t("modelCatalog.unifiedHint")} {t("openAiModelCatalog.searchReadOnlyHint")} <Link className="underline underline-offset-4" to="/settings">{t("openAiModelCatalog.editGlobalSearch")}</Link></CardDescription></CardHeader>
@@ -69,7 +69,7 @@ export function ModelConfigurationPage() {
       } />
     } />
     <AppServerSettingsCard management={codex} section="models" onChanged={reloadProviders} />
-    <ModelDisplayGroups management={gateway} providers={providers.settings} disabled={busy || gateway.error !== null} />
+    <ModelDisplayGroups management={gateway} providers={providers.settings} disabled={busy || gateway.error !== null || providers.error !== null} />
     <Card><CardHeader><CardTitle>{t("modelManagement.channelModel")}</CardTitle><CardDescription>{t("modelManagement.channelModelHint")}</CardDescription></CardHeader><CardContent>
       {gateway.loading && gateway.managedSettings === null && <Skeleton className="h-9 w-full" />}
       {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup><ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={gateway.managedSettings.system.defaultModel ?? ""} placeholder={t("modelManagement.followDefault")} disabled={busy} saved={gateway.lastAppliedSetting?.kind === "system.default-model" ? gateway.lastAppliedSetting : null} onBlur={value => void gateway.previewSetting("system.default-model", value || null, { key: "modelManagement.channelModel" })} /></FieldGroup>}

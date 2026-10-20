@@ -59,10 +59,10 @@ export function ProviderSettingsManagement({ management, onChanged, section, ren
   const { t } = useTranslation()
   const settings = management.settings
   if (settings === null) {
-    const content = management.loading ? renderCatalog ? <p aria-busy="true">{t("common.loading")}</p> : <LoadingSettingsCard title={t("managementUi.providerSettings")} /> : <SettingsError message={management.error ?? t("managementUi.providerSettingsUnavailable")} retry={management.refetch} />
+    const content = management.loading ? renderCatalog ? <p aria-busy="true">{t("common.loading")}</p> : <LoadingSettingsCard title={t("managementUi.providerSettings")} /> : <SettingsError title={t("settingsUi.providerLoadFailed")} message={management.error ?? t("managementUi.providerSettingsUnavailable")} retry={management.refetch} />
     return renderCatalog ? renderCatalog([{ id: "third-party-status", header: t("modelCatalog.title"), models: [], onSelect: () => {}, renderAction: () => null, content }]) : content
   }
-  return <>{management.error !== null && !renderCatalog ? <SettingsError message={management.error} retry={management.refetch} /> : null}<ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} section={section} renderCatalog={renderCatalog} /></>
+  return <>{management.error !== null ? <SettingsError title={t("settingsUi.providerLoadFailed")} message={`${management.error} ${t("settingsUi.previousSnapshot")}`} retry={management.refetch} /> : null}<ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} section={section} renderCatalog={renderCatalog} /></>
 }
 
 function ProviderSettingsCard({
@@ -326,6 +326,7 @@ function ProviderSettingsCard({
       </div>,
       models: catalog.models.map(entry => ({ ...entry.presentation, isDefault: entry.isDefault })),
       webSearchSettings: settings.webSearchSettings.filter(entry => catalog.providers.includes(entry.provider)),
+      webSearchState: management.loading ? "loading" : management.error !== null ? "error" : undefined,
       onSelect: model => setSelectedModel({ provider: catalog.provider, model: model.model, revision: catalog.revision }),
       renderAction: model => {
         const reason = model.isDefault ? t("modelCatalog.defaultProtected") : catalog.models.length <= 1 ? t("modelCatalog.lastProtected") : !catalog.canRemove ? t("modelCatalog.unsupported") : undefined
@@ -355,13 +356,13 @@ function ProviderSettingsCard({
           </DropdownMenuGroup></DropdownMenuContent>
         </DropdownMenu>
       },
-      content: management.loading ? <p>{t("common.loading")}</p> : management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : catalog.models.length === 0 ? <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty> : undefined,
+      content: catalog.models.length === 0 ? <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty> : undefined,
       footer: !catalog.canRemove ? <p className="text-muted-foreground">{catalog.unavailableReason === "deepseek-template-source" ? t("modelCatalog.deepseek") : catalog.unavailableReason === "shared-accounts-incomplete" ? t("modelCatalog.accountsIncomplete") : catalog.unavailableReason === "official-catalog-unavailable" ? t("modelCatalog.officialUnavailable") : catalog.unavailableReason === "official-shared-catalog" ? t("modelCatalog.official") : t("modelCatalog.unsupported")}</p> : undefined,
     }
   })
   if (catalogGroups.length === 0) catalogGroups.push({
     id: "third-party-status", header: t("modelCatalog.title"), models: [], onSelect: () => {}, renderAction: () => null,
-    content: management.loading ? <p>{t("common.loading")}</p> : management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty>,
+    content: <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty>,
   })
 
   const feedback = <>
