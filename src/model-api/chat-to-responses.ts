@@ -92,9 +92,6 @@ export class ChatToResponses {
     if (this.ended || !this.finishReason) throw new ModelConversionError("Chat stream ended without a finish reason");
     if (this.finishReason === "length" || this.finishReason === "content_filter") return [];
     this.validateCalls();
-    if ([...this.tools.values()].some(state => state.name === name) && [...this.tools.values()].some(state => state.name !== name)) {
-      throw new ModelConversionError("Mixed hosted web search and client tool calls are unsupported", { webSearch: "mixed_tools" });
-    }
     return [...this.tools.values()].filter(state => state.name === name).map(state => {
       if (this.toolNames?.get(name)?.kind !== "web_search") throw new ModelConversionError("Unknown hosted web search tool");
       return { id: state.callId, query: hostedSearchQuery(state.arguments) };
@@ -117,7 +114,9 @@ export class ChatToResponses {
     return events;
   }
 
-  completeHostedSearches(name: string, results: HostedSearchResult[]): { events: JsonObject[]; message: ChatMessage; continue: boolean } {
+  completeHostedSearches(name: string, results: HostedSearchResult[]): {
+    events: JsonObject[]; message: ChatMessage; toolMessages: ChatMessage[]; deferredClientCalls: number;
+  } {
     const calls = this.hostedSearchCalls(name);
     if (!calls.length || results.length !== calls.length || new Set(results.map(result => result.id)).size !== calls.length) throw new ModelConversionError("Missing hosted web search results");
     const completed = calls.map(call => {
@@ -133,28 +132,42 @@ export class ChatToResponses {
       return { active, item: { ...active.item, status: "completed", action: { type: "search", query: call.query, queries: [call.query], sources } } };
     });
     this.addBytes(JSON.stringify(results));
+    // These calls stay inside this response. Give each model round distinct
+    // Chat IDs even if the upstream reuses a call ID on its next HTTP request.
+    const roundCalls = [...this.tools].map(([index, state]) => ({
+      state, id: `${this.id}_round_${this.previousUsage.length}_call_${index}`,
+    }));
     const message: ChatMessage = { role: "assistant", content: this.roundText || null,
       ...(this.roundReasoning ? { reasoning: this.roundReasoning } : {}),
       ...(this.roundReasoningContent ? { reasoning_content: this.roundReasoningContent } : {}),
-      tool_calls: [...this.tools.values()].map(state => ({ id: state.callId, type: "function", function: { name: state.name, arguments: state.arguments } })),
+      tool_calls: roundCalls.map(({ state, id }) => ({ id, type: "function", function: { name: state.name, arguments: state.arguments } })),
     };
+    const deferred = JSON.stringify({
+      status: "not_executed",
+      reason: "This client tool was not dispatched because this response also requested hosted web search. Review the search results and issue the client tool again in a separate model response without hosted search. No client action or approval has occurred.",
+    });
+    const toolMessages: ChatMessage[] = roundCalls.map(({ state, id }) => ({
+      role: "tool", tool_call_id: id,
+      content: state.name === name ? results.find(result => result.id === state.callId)!.text : deferred,
+    }));
+    const deferredClientCalls = roundCalls.filter(({ state }) => state.name !== name).length;
+    this.addBytes(deferred.repeat(deferredClientCalls));
     const events: JsonObject[] = [];
     for (const { active, item } of completed) {
       this.items[active.index] = item;
       events.push(this.event("response.web_search_call.completed", { item_id: item.id, output_index: active.index }));
       events.push(this.event("response.output_item.done", { item, output_index: active.index }));
     }
-    for (const [index, state] of this.tools) if (state.name === name) this.tools.delete(index);
+    // No client call from the mixed round was published or executed. Its
+    // explicit non-execution result lets the model reconsider after searching.
+    this.tools.clear();
     this.hostedItems.clear();
-    const resume = this.tools.size === 0;
-    if (resume) {
-      this.previousUsage.push(this.usage);
-      this.usage = undefined;
-      this.awaitingNextRound = true;
-      this.finishReason = undefined;
-      this.roundText = ""; this.roundReasoning = ""; this.roundReasoningContent = "";
-    }
-    return { events, message, continue: resume };
+    this.previousUsage.push(this.usage);
+    this.usage = undefined;
+    this.awaitingNextRound = true;
+    this.finishReason = undefined;
+    this.roundText = ""; this.roundReasoning = ""; this.roundReasoningContent = "";
+    return { events, message, toolMessages, deferredClientCalls };
   }
 
   finish(): JsonObject[] {
@@ -166,7 +179,11 @@ export class ChatToResponses {
     }
     const calls = this.validateCalls().map(([index, state, identity]) => {
       if (identity?.kind === "web_search") throw new ModelConversionError("Unexecuted hosted web search call");
-      return toolCallItem(`${this.id}_call_${index}`, state, identity);
+      const id = `${this.id}_call_${index}`;
+      // A hosted-search continuation is another upstream request and can reuse
+      // an earlier raw call ID. Publish a response-scoped ID so the next full
+      // Responses history can pair its actual client result without collisions.
+      return toolCallItem(id, this.previousUsage.length > 0 ? { ...state, callId: id } : state, identity);
     });
     const events = this.closeContent();
     // Keep partial or invalid tool calls away from the client. Publish validated
