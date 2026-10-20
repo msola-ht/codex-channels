@@ -6,6 +6,7 @@ export {
   type ApprovalTarget,
 } from "./router.js";
 export {
+  isThreadExecutionSettled,
   type ThreadLifecyclePort,
   type ThreadDynamicToolSpec,
   type ThreadQueryOptions,

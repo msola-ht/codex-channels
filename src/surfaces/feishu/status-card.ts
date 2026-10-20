@@ -23,7 +23,9 @@ export function renderFeishuThreadStatusCard(
         ? `${identityPrefix}运行中`
         : status === "idle"
           ? `${identityPrefix}处理结束 · 结果见下方消息`
-          : "未知",
+          : status === "systemError"
+            ? `${identityPrefix}发生错误 · 详情见下方消息`
+            : status === "notLoaded" ? "会话未加载" : "未知",
     )],
   );
 }

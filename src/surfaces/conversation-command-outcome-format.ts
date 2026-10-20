@@ -41,7 +41,7 @@ export function formatConversationCommandOutcome(
               ? ["Queue 中有待派发条目，已沿用该 Session 自身设置，未应用当前会话的待生效偏好。"]
               : []),
             ...(outcome.backgroundedThreadId
-              ? [`原任务已转入后台：${outcome.backgroundedThreadId}`]
+              ? [`原会话已保留为后台会话：${outcome.backgroundedThreadId}`]
               : []),
           ].join("\n"));
     case "session.new":
@@ -51,7 +51,7 @@ export function formatConversationCommandOutcome(
         return toStructuredMarkdownList([
           ...(outcome.backgroundedThreadId
             ? [
-                "新会话已准备，原任务继续在后台运行。",
+                "新会话已准备，原会话尚不满足释放条件，已保留在后台。",
                 `后台 Session ID：${outcome.backgroundedThreadId}`,
               ]
             : ["已退出当前会话。"]),

@@ -365,10 +365,11 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
 
 function webSearchOptions(tool: JsonObject): { allowedDomains?: string[] } {
   const allowed = new Set(["type", "external_web_access", "indexed_web_access", "filters", "user_location", "search_context_size", "search_content_types"]);
-  if (Object.keys(tool).some(key => !allowed.has(key))) throw new ModelConversionError("Unsupported hosted web search control", { webSearch: "unsupported_controls" });
-  if (tool.external_web_access != null && tool.external_web_access !== true) throw new ModelConversionError("CLP hosted web search requires live web access", { webSearch: "unsupported_controls" });
-  if (["indexed_web_access", "user_location", "search_context_size", "search_content_types"].some(key => tool[key] != null)) {
-    throw new ModelConversionError("Unsupported hosted web search control", { webSearch: "unsupported_controls" });
+  if (Object.keys(tool).some(key => !allowed.has(key))) throw new ModelConversionError("Unsupported hosted web search control", { webSearch: "unsupported_controls", webSearchControl: "unknown" });
+  if (tool.external_web_access != null && tool.external_web_access !== true) throw new ModelConversionError("CLP hosted web search requires live web access", { webSearch: "unsupported_controls", webSearchControl: "external_web_access" });
+  const unsupported = ["indexed_web_access", "user_location", "search_context_size", "search_content_types"].find(key => tool[key] != null);
+  if (unsupported !== undefined) {
+    throw new ModelConversionError("Unsupported hosted web search control", { webSearch: "unsupported_controls", webSearchControl: unsupported });
   }
   if (tool.filters == null) return {};
   const filters = object(tool.filters);

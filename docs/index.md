@@ -566,6 +566,8 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 和 `thread/read` 核验父子活动，包括未持久化的已加载标准子代理 Thread；官方列表排除 `SessionSource::Internal`，不宣称枚举全部内部代理。
 查询限时、限页数、节点数与祖先深度，
 身份或祖先关系无法确认时失败关闭。恢复后台订阅后复用正常释放条件，不仅凭父 Thread 空闲就清理绑定。
+释放与后代活动查询共用 `isThreadExecutionSettled`：接受 `idle`、`notLoaded`；对 `systemError`，必须另有 Client 在当前连续订阅中先后收到同一 Turn 的 `turn/started` 与 `turn/completed` 证据，已知活动 Turn 始终否决。锁定上游的旁路 Error 也会设置 `systemError`，因此元数据 `thread/read(includeTurns:false)` 的空 Turn ID、错误标记和按该标记归一化的历史均不作为终态证明。新活动、错误、断线及订阅变化使旧终态证据失效；未知的恢复会话和子代理继续保守保留，不扩展历史读取或持久化会话索引。对于已确认结束的失败会话，完整的活动、交互、子代理与 Queue 复核在取消订阅前完成，以取消订阅作为释放边界，之后仍检查父会话可见活动、本地活动与授权守卫、Queue 和后代；不拿已失效的终态证据推断其他客户端此后没有开始新任务。普通空闲路径仍在取消订阅后复核状态，跨渠道接管的独立条件不变。上游没有跨客户端的原子“核验空闲并取消订阅”接口。
+隔离的原生 App Server 经本地 CLP 桥拒绝 cached 搜索后，已观察到失败 Turn、`systemError` 和同 Turn 终态证据，随后 `/new` 解除绑定且不保留后台；后台清理经过真实 Queue 空队列屏障也完成释放。重新订阅使证据失效后，同样的失败会话被保守保留。以上未调用外网 CLP，也未验证真实渠道投递或另一设备现场。
 [`conversation-service.ts`](../src/application/conversation-service.ts) 在锁内复核选择上下文，并恢复活动 Turn。
 
 ### 模型请求重试展示

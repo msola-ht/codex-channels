@@ -1,4 +1,4 @@
-import { lunaReserveModel } from "../application/index.js";
+import { lunaReserveModel, ThreadQueueError } from "../application/index.js";
 import type { ApprovalRequest } from "../approval/index.js";
 import { FileChangeApprovalContext } from "./file-change-approval-context.js";
 import type {
@@ -120,10 +120,12 @@ import type {
   ThreadSnapshot,
   ThreadModelSettings,
 } from "../session-routing/index.js";
+import { isThreadExecutionSettled } from "../session-routing/index.js";
 import { JsonRpcClient, JsonRpcError, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
 import { UserFacingError } from "../conversation-core/index.js";
 import { ImageReferenceUpload } from "./image-reference-upload.js";
-import { toThreadStateEvent } from "./notification-adapter.js";
+import { toConversationInputEvent, toThreadStateEvent } from "./notification-adapter.js";
+import { asRecord, nonEmptyString } from "./notification-parse-helpers.js";
 import {
   PINNED_THREAD_SECTION_ID,
   toThreadSession,
@@ -179,6 +181,11 @@ export interface ThreadDefaults {
   model?: string;
 }
 
+type ObservedTurnState =
+  | { type: "running"; turnId: string }
+  | { type: "completed"; turnId: string }
+  | { type: "unknown" };
+
 export class CodexAppServerClient implements
   ThreadLifecyclePort,
   TurnExecutionPort,
@@ -198,6 +205,7 @@ export class CodexAppServerClient implements
   private readonly imageUpload: ImageReferenceUpload | undefined;
   private readonly fileChanges = new FileChangeApprovalContext();
   private readonly pendingSettingsUpdates = new Set<() => void>();
+  private readonly observedTurns = new Map<string, ObservedTurnState>();
 
   constructor(
     private readonly rpc: JsonRpcClient,
@@ -205,7 +213,11 @@ export class CodexAppServerClient implements
     imageUploadHttp?: { upload: typeof fetch; local?: typeof fetch },
   ) {
     this.rpc.onNotification(notification => this.fileChanges.observe(notification));
-    this.rpc.onDisconnect(() => this.fileChanges.clear());
+    this.rpc.onNotification(notification => this.observeTurnState(notification));
+    this.rpc.onDisconnect(() => {
+      this.fileChanges.clear();
+      this.observedTurns.clear();
+    });
     this.imageUpload = imageUploadHttp ? new ImageReferenceUpload(rpc, imageUploadHttp.upload, imageUploadHttp.local ?? fetch,
       signal => this.rpc.request<GetAuthStatusResponse>({
         method: "getAuthStatus",
@@ -220,12 +232,14 @@ export class CodexAppServerClient implements
   reconnect(): Promise<InitializeResponse> {
     for (const cancel of this.pendingSettingsUpdates) cancel();
     this.fileChanges.clear();
+    this.observedTurns.clear();
     return this.rpc.reconnect();
   }
 
   close(): Promise<void> {
     for (const cancel of this.pendingSettingsUpdates) cancel();
     this.fileChanges.clear();
+    this.observedTurns.clear();
     this.imageUpload?.cancelAll();
     return this.rpc.close();
   }
@@ -244,6 +258,60 @@ export class CodexAppServerClient implements
 
   fileApprovalChanges(request: Extract<ApprovalRequest, { type: "file" }>) {
     return this.fileChanges.get(request.threadId, request.turnId, request.itemId);
+  }
+
+  private observeTurnState(notification: RpcNotification): void {
+    if (notification.method === "thread/started") {
+      const threadId = nonEmptyString(asRecord(asRecord(notification.params)?.thread)?.id);
+      if (threadId) this.observedTurns.delete(threadId);
+      return;
+    }
+    if (!["turn/started", "turn/completed", "error", "thread/status/changed", "thread/closed",
+      "thread/archived", "thread/deleted", "thread/reverted"].includes(notification.method)) return;
+    const event = toConversationInputEvent(notification);
+    const threadId = nonEmptyString(asRecord(notification.params)?.threadId);
+    if (!threadId) return;
+    const current = this.observedTurns.get(threadId);
+    if (event?.type === "thread.closed" || event?.type === "thread.archived"
+      || event?.type === "thread.deleted" || event?.type === "thread.reverted") {
+      this.observedTurns.delete(threadId);
+      return;
+    }
+    if (event?.type === "turn.started") {
+      this.rememberTurnState(threadId, { type: "running", turnId: event.turnId });
+    } else if (event?.type === "turn.completed" && event.status !== "inProgress") {
+      // A completion for an old Turn must not settle a newer Turn. Requiring
+      // its start also makes eviction and missed subscription intervals safe.
+      if (current?.type === "running" && current.turnId === event.turnId) {
+        this.rememberTurnState(threadId, { type: "completed", turnId: event.turnId });
+      } else if (current?.type === "completed" && current.turnId !== event.turnId) {
+        this.rememberTurnState(threadId, { type: "unknown" });
+      }
+    } else if (notification.method === "turn/started" || notification.method === "turn/completed") {
+      // Malformed execution boundaries cannot preserve an older terminal proof.
+      this.rememberTurnState(threadId, { type: "unknown" });
+    } else if (notification.method === "error") {
+      // Error notifications can describe a failed operation while a task stays
+      // alive. Only a later completion of the known running Turn can settle it.
+      if (event?.type !== "turn.error" || current?.type !== "running" || current.turnId !== event.turnId) {
+        this.rememberTurnState(threadId, { type: "unknown" });
+      }
+    } else if (notification.method === "thread/status/changed") {
+      if (event?.type !== "thread.status.changed" || event.status === "notLoaded") {
+        this.observedTurns.delete(threadId);
+      } else if (event.status === "active" && current?.type !== "running") {
+        this.rememberTurnState(threadId, { type: "unknown" });
+      }
+    }
+  }
+
+  private rememberTurnState(threadId: string, state: ObservedTurnState): void {
+    this.observedTurns.delete(threadId);
+    if (this.observedTurns.size >= 2_000) {
+      const oldest = this.observedTurns.keys().next().value;
+      if (oldest !== undefined) this.observedTurns.delete(oldest);
+    }
+    this.observedTurns.set(threadId, state);
   }
 
   async listThreads(
@@ -362,7 +430,17 @@ export class CodexAppServerClient implements
       && (typeof result.thread.parentThreadId !== "string" || !result.thread.parentThreadId.trim())) {
       throw new Error("Codex Thread 响应缺少有效 parentThreadId");
     }
-    return toThreadSnapshot(result.thread);
+    const snapshot = toThreadSnapshot(result.thread);
+    if (snapshot.id !== threadId) throw new Error("Codex Thread 读取目标不一致");
+    if (snapshot.status.type === "active" || snapshot.status.type === "notLoaded"
+      || snapshot.activeTurnId !== null) {
+      const current = this.observedTurns.get(threadId);
+      if (current?.type === "completed") this.rememberTurnState(threadId, { type: "unknown" });
+    }
+    const observed = this.observedTurns.get(threadId);
+    return observed?.type === "completed"
+      ? { ...snapshot, observedTerminalTurnId: observed.turnId }
+      : snapshot;
   }
 
   async hasActiveDescendants(threadId: string, signal?: AbortSignal): Promise<boolean> {
@@ -433,7 +511,7 @@ export class CodexAppServerClient implements
     for (const id of loadedIds) {
       if (id === threadId) continue;
       const thread = await read(id);
-      if (thread.status.type === "idle" || thread.status.type === "notLoaded") continue;
+      if (isThreadExecutionSettled(thread)) continue;
       const ancestors = new Set<string>([id]);
       let parentId = thread.parentThreadId;
       let depth = 0;
@@ -535,6 +613,7 @@ export class CodexAppServerClient implements
         ? { permissions: options.permissions }
         : options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
     };
+    this.observedTurns.delete(threadId);
     const response = await this.rpc.request<ThreadResumeResponse>({
       method: "thread/resume",
       params: {
@@ -549,10 +628,19 @@ export class CodexAppServerClient implements
     beforeSubmit?.();
     this.fileChanges.clearThread(threadId);
     this.cancelPendingInput(threadId);
-    await this.rpc.request<ThreadUnsubscribeResponse>({
-      method: "thread/unsubscribe",
-      params: { threadId },
-    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
+    try {
+      await this.rpc.request<ThreadUnsubscribeResponse>({
+        method: "thread/unsubscribe",
+        params: { threadId },
+      }, { retryOverload: true, beforeSubmit: () => {
+        beforeSubmit?.();
+        this.observedTurns.delete(threadId);
+      } });
+    } finally {
+      // Notifications already in flight may have arrived while unsubscribing;
+      // none can prove continued observation across the subscription gap.
+      this.observedTurns.delete(threadId);
+    }
   }
 
   async deleteThread(threadId: string): Promise<void> {
@@ -586,6 +674,7 @@ export class CodexAppServerClient implements
   ): Promise<TurnStarted> {
     return this.submitTurnInput(threadId, input, async (protocolInput) => {
       overrides.beforeSubmit?.();
+      this.observedTurns.delete(threadId);
       const response = await this.rpc.request<TurnStartResponse>({
         method: "turn/start",
         params: {
@@ -703,13 +792,28 @@ export class CodexAppServerClient implements
     queuedSubmissionId?: string,
     beforeSubmit?: () => void,
   ): Promise<{ turnId: string }> {
+    let previous: ObservedTurnState | undefined;
+    const pending: ObservedTurnState = { type: "unknown" };
     const response = await this.rpc.request<ThreadQueueStartResponse>({
       method: "thread/queue/start",
       params: {
         threadId,
         ...(queuedSubmissionId === undefined ? {} : { queuedSubmissionId }),
       } satisfies ThreadQueueStartParams,
-    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
+    }, { retryOverload: false, beforeSubmit: () => {
+      beforeSubmit?.();
+      previous = this.observedTurns.get(threadId);
+      this.rememberTurnState(threadId, pending);
+    } }).catch(rethrowThreadQueueError).catch((error: unknown) => {
+      // Background cleanup uses queue/start as a dispatch barrier. A confirmed
+      // empty queue did not start a Turn; restore only if no notification,
+      // reconnect or competing submission changed the pending observation.
+      if (error instanceof ThreadQueueError && error.failure === "empty"
+        && previous && this.observedTurns.get(threadId) === pending) {
+        this.rememberTurnState(threadId, previous);
+      }
+      throw error;
+    });
     return toThreadQueueStartResult(response);
   }
 
@@ -1135,7 +1239,10 @@ export class CodexAppServerClient implements
     const response = await this.rpc.request<ReviewStartResponse>({
       method: "review/start",
       params: { threadId, target: toProtocolReviewTarget(target), delivery: "inline" },
-    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
+    }, { retryOverload: false, beforeSubmit: () => {
+      beforeSubmit?.();
+      this.observedTurns.delete(threadId);
+    } });
     return toReviewStarted(response);
   }
 

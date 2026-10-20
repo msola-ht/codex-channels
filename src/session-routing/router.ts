@@ -21,6 +21,7 @@ import type {
   ThreadStartOptions,
   ThreadDynamicToolSpec,
 } from "./thread-port.js";
+import { isThreadExecutionSettled } from "./thread-port.js";
 
 export interface ThreadModelSettings {
   model: string;
@@ -65,6 +66,9 @@ interface ApprovalResolution {
 interface ThreadReleaseCondition {
   isCurrent(): boolean;
   verifyIdle(): Promise<boolean>;
+  /** Recheck Queue, descendants, local work and observable new activity after
+   * releasing a proven terminal Turn; must not reuse invalidated evidence. */
+  verifyAfterTerminalUnsubscribe?(): Promise<boolean>;
   canRestore(): boolean;
   restored(thread: ThreadSnapshot): void;
   restoreRequired?(): void;
@@ -634,6 +638,7 @@ export class SessionRouter {
       assertCurrent: () => void;
       restored: (binding: ConversationBinding, thread: ThreadSnapshot) => void;
       verifyPreviousIdle?: () => Promise<boolean>;
+      verifyPreviousAfterTerminalUnsubscribe?: () => Promise<boolean>;
       restoredPrevious?: (thread: ThreadSnapshot) => void;
       restorePreviousFailed?: () => void;
     },
@@ -690,13 +695,18 @@ export class SessionRouter {
     try {
       assertCurrent();
       if (current && current.threadId !== resumed.thread.id && !preserveCurrent) {
+        const previous = await this.codex.readThread(current.threadId, undefined, assertCurrent);
+        const terminalRelease = previous.status.type === "systemError" && isThreadExecutionSettled(previous);
         if (transition?.verifyPreviousIdle && !await transition.verifyPreviousIdle()) {
           throw new UserFacingError("thread.takeover.changed", "原会话仍有活动，请重新选择会话");
         }
         assertCurrent();
         await this.codex.unsubscribeThread(current.threadId, assertCurrent);
         previousUnsubscribed = true;
-        if (transition?.verifyPreviousIdle && !await transition.verifyPreviousIdle()) {
+        const verifyPrevious = terminalRelease
+          ? transition?.verifyPreviousAfterTerminalUnsubscribe ?? transition?.verifyPreviousIdle
+          : transition?.verifyPreviousIdle;
+        if (verifyPrevious && !await verifyPrevious()) {
           throw new UserFacingError("thread.takeover.changed", "原会话活动已变化，请重新选择会话");
         }
       }
@@ -945,12 +955,19 @@ export class SessionRouter {
   ): Promise<boolean> {
     const ownsBinding = () => this.sameBinding(expected, this.bindings.get(target));
     if (!ownsBinding() || !condition.isCurrent()) return false;
+    // For a proven failed Turn, the last authoritative check must run while
+    // subscribed. Unsubscribe invalidates the live notification evidence; a
+    // later metadata-only read cannot prove that another client stayed idle.
+    const terminalRelease = snapshot.status.type === "systemError" && isThreadExecutionSettled(snapshot);
+    if (terminalRelease && !await condition.verifyIdle()) return false;
+    if (!ownsBinding() || !condition.isCurrent()) return false;
     assertAuthorized?.();
     await this.codex.unsubscribeThread(expected.threadId, assertAuthorized);
     this.unsubscribedBindings.add(expected.threadId);
     let verified = false;
     try {
-      verified = ownsBinding() && condition.isCurrent() && await condition.verifyIdle();
+      verified = ownsBinding() && condition.isCurrent() && await (terminalRelease && condition.verifyAfterTerminalUnsubscribe
+        ? condition.verifyAfterTerminalUnsubscribe() : condition.verifyIdle());
     } catch {
       // An inconclusive final read must preserve the binding and restore its
       // subscription just like activity arriving during unsubscribe.
@@ -992,14 +1009,19 @@ export class SessionRouter {
       if (condition) {
         if (!isCurrent() || !await condition.verifyIdle() || !isCurrent()) return undefined;
         snapshot = await this.codex.readThread(threadId);
-        if (!isCurrent() || (snapshot.status.type !== "idle" && snapshot.status.type !== "notLoaded")) return undefined;
+        if (!isCurrent() || !isThreadExecutionSettled(snapshot)) return undefined;
       }
-      await this.codex.unsubscribeThread(threadId);
+      const terminalRelease = snapshot?.status.type === "systemError" && isThreadExecutionSettled(snapshot);
+      if (terminalRelease && condition && (!await condition.verifyIdle() || !isCurrent())) return undefined;
+      await this.codex.unsubscribeThread(threadId, condition ? () => {
+        if (!isCurrent()) throw new UserFacingError("thread.takeover.changed", "会话活动或绑定已变化，请重新操作");
+      } : undefined);
       if (condition && binding && snapshot) {
         let verified = false;
         let verificationFailed = false;
         let verificationError: unknown;
-        try { verified = isCurrent() && await condition.verifyIdle() && isCurrent(); } catch (error) {
+        try { verified = isCurrent() && await (terminalRelease && condition.verifyAfterTerminalUnsubscribe
+          ? condition.verifyAfterTerminalUnsubscribe() : condition.verifyIdle()) && isCurrent(); } catch (error) {
           // Keep the binding when the final observation is inconclusive.
           verificationFailed = true;
           verificationError = error;

@@ -75,6 +75,8 @@ Remote 保留 `--profile sf-clp-<账户>`；两个入口默认连接主实例。
 
 ## Chat 转换边界
 
+`clp_search_unsupported_controls` 表示转换阶段拒绝了搜索参数，本次模型与搜索请求尚未发往上游。错误消息区分 `external_web_access`、`indexed_web_access`、`user_location`、`search_context_size` 和 `search_content_types`；未知字段只显示固定分类，不回显字段名或值。地域等控制即使设置为 live 仍会被拒绝，需要移除对应控制。开启调用详情时，脱敏诊断保留 `conversion.webSearchControl`，不保存搜索正文。
+
 非 Flash 的 CLP 模型使用项目内 `runtime/third-party-coding-instructions.mjs` 维护的通用编程提示词，通过目录的 `model_messages.instructions_template` 加载；新增 OCG/CCG 手填模型及新增非 DS 自定义 Responses 模型复用同一资源。内容覆盖任务范围、上下文延续、仓库规则、工具使用、权限、用户数据保护、验证与交付；不声明具体模型身份，不强制新增测试、委派或提交，工具与能力仍以实际环境和模型目录为准。它参考 DS 模板的协作主题独立编写。精确 Flash 使用仓库 DS 模板；显式生成目录时还补全基础提示词，既有目录读取保持其已保存内容。
 
 Flash 投影继承 DS 模型定义中的说明、思考等级说明、提示词、上下文及压缩／截断默认值等受支持字段，再覆盖 CLP 的 ID、名称、`none` 思考等级、自由格式补丁和工具检索声明。图片输入仍可用，但 `supports_image_detail_original` 明确为 `false`，因为 Chat 桥只接受 `auto`、`low`、`high`；不把 DS Responses 的原图能力声明为 CLP 可用。该投影不是原始 DS JSON 的逐字段复制：旧字段沿用当前 Codex 的规范表示，未证实适用于 CLP 的 DS 压缩兼容标识 `comp_hash` 不继承。

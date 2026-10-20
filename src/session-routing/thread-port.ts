@@ -34,10 +34,20 @@ export interface ThreadSnapshot {
   source: ThreadSource;
   historyMode: ThreadHistoryMode;
   activeTurnId: string | null;
+  /** Matching live start/terminal notifications observed on the current subscription;
+   * never inferred from metadata or stored history. Absent means unknown. */
+  observedTerminalTurnId?: string;
   /** Unix timestamp (seconds) when the Thread was last updated by App Server. */
   updatedAt?: number;
   /** Unix timestamp (seconds) used by App Server for recency ordering. */
   recencyAt?: number | null;
+}
+
+/** A system error alone is not a terminal event. Callers must still check local
+ * work, interactions, descendants and Queue. Unsubscribe invalidates evidence. */
+export function isThreadExecutionSettled(thread: Pick<ThreadSnapshot, "status" | "activeTurnId" | "observedTerminalTurnId">): boolean {
+  return thread.activeTurnId === null && (thread.status.type === "idle" || thread.status.type === "notLoaded"
+    || (thread.status.type === "systemError" && Boolean(thread.observedTerminalTurnId)));
 }
 
 export interface ThreadSession {
