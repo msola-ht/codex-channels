@@ -103,7 +103,7 @@ export async function listPrimaryProviders({
     return;
   }
 
-  output.write("\nCodex Connect 自定义 Provider（Codex 兼容 / Responses）\n");
+  output.write("\nCodex Connect 自定义提供商（官方模型目录 / 自定义模型目录）\n");
   output.write(`当前主实例：${activeLabel}\n`);
   if (state.customProviders.fixedCandidates.length === 0) {
     output.write("自定义固定候选：无\n");
@@ -130,7 +130,8 @@ export async function listPrimaryProviders({
   }
   output.write(
     "\n设为固定主 Provider：codexc provider switch <Provider ID>；"
-    + "新增：codexc provider add；编辑：codexc setup → 模型与提供商 → 第三方 Provider → Codex 兼容 Provider 接入或自定义模型 Provider 接入 → 编辑。\n",
+    + "新增：codexc provider add（官方模型目录）或 codexc provider add --custom-models（自定义模型目录）；"
+    + "编辑：codexc setup → 模型与提供商 → 第三方提供商 → 自定义提供商 → 编辑。\n",
   );
 }
 
@@ -286,28 +287,31 @@ export async function runCustomPrimaryProviderMenu({
   prompts = clackPrompts,
   allowBack = false,
   createClient = createCodexUserConfigClient,
-  catalogKind = "official",
+  catalogKind,
 } = {}) {
+  let lastAction;
   while (true) {
     const action = await prompts.select({
-      message: catalogKind === "custom" ? "自定义提供商" : "Codex 兼容 Provider",
+      message: catalogKind === "official" ? "Codex 兼容 Provider" : "自定义提供商",
       showInstructions: false,
+      initialValue: lastAction,
       options: [
-        { value: "add", label: "新增", hint: "新增固定或切换 Provider" },
-        { value: "edit", label: "编辑", hint: "修改已有 Provider；Provider ID 保持不变" },
-        ...(catalogKind === "custom" ? [{ value: "recover", label: "恢复未完成的模型目录保存", hint: "先停止服务；核对当前配置后恢复" }] : []),
-        { value: "list", label: "列表", hint: "查看主实例、切换 Provider、固定候选与备份" },
+        { value: "list", label: "列表", hint: "查看两类目录的主实例、切换 Provider、固定候选与备份" },
+        { value: "add", label: "新增", hint: catalogKind === undefined ? "先选择模型目录，再新增固定或切换 Provider" : "新增固定或切换 Provider" },
+        { value: "edit", label: "编辑", hint: "编辑两类目录的已有 Provider；Provider ID 保持不变" },
         { value: "switch", label: "设为固定主 Provider", hint: "切换模式将转换为固定模式" },
         { value: "official", label: "恢复官方主 Provider", hint: "固定候选移入备份；切换 Provider 保持启用" },
-        { value: "remove", label: "删除", hint: "删除 Provider；删除当前固定主 Provider 时恢复官方" },
+        ...(catalogKind !== "official" ? [{ value: "recover", label: "恢复未完成的模型目录保存", hint: "自定义目录；先停止服务并核对当前配置" }] : []),
+        { value: "remove", label: "删除", hint: "删除两类目录的 Provider；删除当前固定主 Provider 时恢复官方" },
         ...(allowBack
-          ? [{ value: "back", label: "返回", hint: "返回第三方 Provider 设置" }]
+          ? [{ value: "back", label: "返回", hint: "返回第三方提供商" }]
           : []),
       ],
     });
     if (prompts.isCancel(action) || action === "back") {
       return { action: allowBack ? "back" : "cancel" };
     }
+    lastAction = action;
     if (action === "recover") {
       const id = await prompts.text({ message: "自定义提供商 ID" });
       if (prompts.isCancel(id)) continue;
@@ -317,17 +321,34 @@ export async function runCustomPrimaryProviderMenu({
       continue;
     }
     if (action === "add") {
-      const result = await addPrimaryProvider({
-        catalogKind,
-        environment,
-        output,
-        prompts,
-        createClient,
-      });
-      if (result === undefined || result?.action !== undefined) {
-        continue;
+      let lastCatalogKind;
+      while (true) {
+        const selectedCatalogKind = catalogKind ?? await prompts.select({
+          message: "新增提供商使用哪个模型目录？",
+          showInstructions: false,
+          initialValue: lastCatalogKind,
+          options: [
+            { value: "official", label: "官方模型目录", hint: "上游模型 ID 必须在 Codex 官方目录中；Responses 接口" },
+            { value: "custom", label: "自定义模型目录", hint: "自行声明模型与能力；Responses 或 Chat Completions 接口" },
+            { value: "back", label: "返回", hint: "返回自定义提供商" },
+          ],
+        });
+        if (prompts.isCancel(selectedCatalogKind) || selectedCatalogKind === "back") break;
+        lastCatalogKind = selectedCatalogKind;
+        const result = await addPrimaryProvider({
+          catalogKind: selectedCatalogKind,
+          environment,
+          output,
+          prompts,
+          createClient,
+        });
+        if (result === undefined || result?.action !== undefined) {
+          if (catalogKind === undefined) continue;
+          break;
+        }
+        output.write("已保存自定义 Provider；可继续选择其他操作或返回。\n");
+        break;
       }
-      output.write("已保存自定义 Provider；可继续选择其他操作或返回。\n");
       continue;
     }
     if (action === "edit") {

@@ -29,6 +29,7 @@ export type InteractivePrimaryProviderCliOptions = Omit<
   PrimaryProviderCliOptions,
   "prompts" | "createClient"
 > & {
+  /** 新增时指定目录；菜单未指定时先询问目录，列表、编辑与删除始终包含两类目录。 */
   catalogKind?: "official" | "custom";
   prompts?: InteractivePrimaryProviderCliPrompts;
   createClient?: (options: {

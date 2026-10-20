@@ -253,7 +253,16 @@ export async function removeCcgConfiguration({ accountId, confirmRemove = false,
   });
 }
 
-export async function runCcgSetup({
+export async function runCcgSetup(options = {}) {
+  while (true) {
+    const result = await runCcgSetupOperation(options);
+    if (result.action === "menu-back") return { action: "back" };
+    if (result.action === "back" && options.action === undefined) continue;
+    return result;
+  }
+}
+
+async function runCcgSetupOperation({
   environment = process.env,
   output = process.stdout,
   prompts = clackPrompts,
@@ -269,7 +278,7 @@ export async function runCcgSetup({
       { value: "add", label: "新增账户" },
       ...(accounts.length === 0 ? [] : [
         { value: "reconfigure", label: "重新配置账户" },
-        { value: "settings", label: "修改默认模型与思考等级" },
+        { value: "settings", label: "账户默认模型与共享思考等级" },
         { value: "catalog", label: "发现／添加共享模型" },
         { value: "default", label: "设置默认账户" },
         { value: "remove", label: "删除账户" },
@@ -277,7 +286,7 @@ export async function runCcgSetup({
       { value: "back", label: "返回" },
     ],
   });
-  if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (prompts.isCancel(action) || action === "back") return { action: "menu-back" };
   if (action === "catalog") return runManagedProviderModelSetup(requestedAccountId === undefined ? "ccg" : ccgProviderId(requestedAccountId), { environment, prompts, output, downloadCatalog });
   const accountId = requestedAccountId ?? (action === "add"
     ? await promptManagedAccountId(prompts, accounts)
@@ -309,8 +318,8 @@ export async function runCcgSetup({
     const mode = await prompts.select({
       message: "运行模式",
       options: [
-        { value: "switching", label: "切换模式" },
-        { value: "exclusive", label: "固定主 Provider" },
+        { value: "switching", label: "切换模式", hint: "保留 OpenAI 主实例，使用独立实例" },
+        { value: "exclusive", label: "固定模式", hint: "修改主实例配置，使用此账户" },
       ],
     });
     if (prompts.isCancel(mode)) return { action: "back" };

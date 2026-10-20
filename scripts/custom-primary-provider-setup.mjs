@@ -61,7 +61,42 @@ function modeOptions() {
   ];
 }
 
-export async function runCustomPrimaryProviderSetup({
+export async function runCustomPrimaryProviderSetup(options = {}) {
+  const {
+    environment = process.env,
+    output = process.stdout,
+    prompts = clackPrompts,
+    allowBack = false,
+    providerId,
+  } = options;
+  if (providerId === undefined || !isCustomCatalogProvider(providerId)) {
+    return runCustomPrimaryProviderForm(options);
+  }
+  let lastSection;
+  while (true) {
+    const section = await prompts.select({
+      message: `编辑 ${providerId} 的哪些设置？`,
+      initialValue: lastSection,
+      options: [
+        { value: "models", label: "模型管理", hint: "添加、按项编辑、默认模型、模板更新、移除与网页搜索检测" },
+        { value: "connection", label: "连接、凭据与运行模式", hint: "地址、协议、显示名称、API Key 和 WebSocket" },
+        { value: "back", label: "返回", hint: "返回自定义提供商" },
+      ],
+    });
+    if (prompts.isCancel(section) || section === "back") {
+      return { action: allowBack ? "back" : "cancel" };
+    }
+    if (section !== "models" && section !== "connection") throw new Error("未知自定义提供商编辑操作");
+    lastSection = section;
+    const result = section === "models"
+      ? await runProviderModelSetup({ environment, prompts, output, provider: providerId })
+      : await runCustomPrimaryProviderForm(options);
+    if (result === undefined || result?.action === "back" || result?.action === "cancel") continue;
+    return result;
+  }
+}
+
+async function runCustomPrimaryProviderForm({
   environment = process.env,
   output = process.stdout,
   prompts = clackPrompts,
@@ -75,15 +110,6 @@ export async function runCustomPrimaryProviderSetup({
 } = {}) {
   const custom = editingProviderId === undefined ? catalogKind === "custom" : isCustomCatalogProvider(editingProviderId);
   const editingCustom = custom && editingProviderId !== undefined;
-  if (editingCustom) {
-    const section = await prompts.select({ message: `编辑 ${editingProviderId} 的哪些设置？`, options: [
-      { value: "models", label: "模型管理", hint: "添加、按项编辑、默认模型、模板更新、移除与网页搜索检测" },
-      { value: "connection", label: "连接、凭据与运行模式", hint: "地址、协议、显示名称、API Key 和 WebSocket" },
-      { value: "back", label: "返回" },
-    ] });
-    if (prompts.isCancel(section) || section === "back") return { action: allowBack ? "back" : "cancel" };
-    if (section === "models") return runProviderModelSetup({ environment, prompts, output, provider: editingProviderId });
-  }
   const openingFiles = snapshotProviderFiles([
     join(codexHomePath(environment), "config.toml"),
     customSwitchingProviderRegistryPath(environment),

@@ -12,6 +12,7 @@ export interface ModelWindowImportEntry {
 
 export interface ModelWindowSetupOptions {
   allowBack?: boolean;
+  provider?: string;
   environment?: NodeJS.ProcessEnv;
   output?: Pick<NodeJS.WriteStream, "write">;
   prompts?: Record<string, unknown>;

@@ -8,10 +8,10 @@ CCG 是 CommandCode 的受管 Responses Provider，支持在同一 Gateway 中�
 
 ## 接入与模型设置
 
-运行 `codexc setup → 模型与提供商 → 第三方 Provider → CCG（CommandCode）`：
+运行 `codexc setup → 模型与提供商 → 第三方提供商 → CommandCode Go 官方`：
 
-1. 选择切换模式或固定模式。
-2. 填写账户 ID 并输入该账户的 CommandCode API Key。
+1. 选择“新增账户”并填写账户 ID。
+2. 选择切换模式或固定模式；涉及主配置修改时先确认，再输入该账户的 CommandCode API Key。
 3. 首次接入从 DS 官方下载完整模型目录并生成 CCG 共用目录，后续账户复用已有目录；各账户独立选择默认模型。
 4. 运行 `codexc restart all`，之后通过渠道 `/model` 选择 CCG 模型。
 

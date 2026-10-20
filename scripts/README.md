@@ -175,15 +175,15 @@
   失败关闭、不修改数据。非交互调用不进入本模块，只创建用户目录、默认工作区仓库与初始配置。
 - `setup.mjs`：使用 `@clack/prompts` 提供接入类别菜单和脱敏总览，并把“模型与提供商”“通讯渠道”
   和“项目技能”流程委派给具体适配器；“完成接入”正常退出，与顶层“取消”区分。总览与具体流程在选中后按需加载，注入回调优先。模型与提供商下分 OpenAI 官方
-  登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级，并在本次向导内保留各层选择；第三方设置区分账户接入、受管 Provider 默认值和按提供商／模型共用设置的目录窗口；配置写入后的激活结果由
+  登录/恢复与第三方提供商两级，子模块返回时停留在所属层级；第三方设置分为统一模型管理和各提供商账户接入，默认模型、共享思考等级与目录窗口集中在模型管理，自定义接入合并为一个入口；配置写入后的激活结果由
   `config-activation-result.mjs` 提供统一状态和目标定义，只转换子模块显式返回的激活范围，不为查询或取消操作推断重启。公开 CLI 的 `codexc setup --jsonl` 将交互提示
   写入终端 stderr，并按每行一个事件把脱敏结果或错误写入 stdout；完成接入返回 `result` 事件的 `action: completed`。输入或提示输出不连接终端时明确拒绝，操作失败后可继续选择。默认 `codexc setup` 保持纯交互文本输出。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
   原生子代理、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
   允许名单、代理值或 Provider URL。
-- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider”下 Codex 兼容 Provider 与自定义模型 Provider 共用设置流程；
-  已有自定义提供商先选择模型管理或连接设置；模型管理复用 `provider-model-setup.mjs`，连接编辑保留模型与默认值，不重问模型能力或工具探测。
+- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方提供商 → 自定义提供商”共用设置流程；新增时选择官方或自定义模型目录。
+  已有自定义模型提供商先选择模型管理或连接设置，取消子操作回编辑小节；模型管理复用 `provider-model-setup.mjs`，连接编辑保留模型与默认值，不重问模型能力或工具探测。
   新增时可从 URL 主机名派生 Provider ID、输入自定义标识符或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
   上游 `base_url`、直接写入的 API Key、固定/切换模式、上游接口（Responses 直连或 Chat Completions 由网关转换）、WebSocket 开关、客户端检索检测和上游模型 ID。选择 Chat Completions 时强制关闭 WebSocket 并跳过检索检测（检索与工具由 Chat 桥适配）。Codex 兼容入口从官方目录校验，服务启动时导出官方快照；自定义提供商入口
   收集逐模型能力并生成独立目录。两者均不调用第三方 `/models`。
@@ -215,7 +215,7 @@
 - `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：Provider 保存前的 Codex 模型目录合同校验；先将自身新建的隔离临时目录设为私有，再写入目录数据，限制运行时间并清理临时文件，不修改系统 TEMP 根目录权限。
 - `responses-model-setup.mjs` / `responses-model-setup.d.mts`：新模型从固定 OpenAI 或 DS 模板草稿开始，填写 ID、名称、当前窗口并确认思考、图片、文件编辑和工具搜索能力；已有模型先选择目标模型与设置组，未选内容保留，不重新套用模板。高级设置按组选择描述、最大窗口、等级说明、图片精度、详细程度、摘要、指令、有效窗口比例、压缩阈值、截断与采样参数。采样仅预填已有值，未设置值为空，留空省略字段；不再重复选择启用列表或中途确认保存。默认模型在添加／编辑完成后选择，最终预览确认才写入；新建提供商填写 Key 后由 `custom-model-capability-setup.mjs` 提供默认跳过的可选工具探测，只有明确选择单项探测才发起请求。
 - `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义提供商共用的 1–64 个模型多选、预览确认与默认模型保护。
-- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG/CLP 按提供商管理共用目录的手填模型及官方发现；OCG/CCG 从 DS 导入，CLP 从 Cline 发现并支持思考开关声明，也可明确选择继承当前目录的模型配置及请求行为。只添加选中的新模型及明确来源关联，已有条目不重建。保存复用受管目录／来源持久事务与恢复入口，无内容变化不写入或更新备份。保护所有同族账户默认值，目录变化不修改账户凭据。
+- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG/CLP 按提供商管理共用目录的手填模型及官方发现；OCG/CCG 从 DS 导入，CLP 从 Cline 发现并支持思考开关声明，也可明确选择继承当前目录的模型配置及请求行为。只添加选中的新模型及明确来源关联，已有条目不重建。保存复用受管目录／来源持久事务与恢复入口，无内容变化不写入或更新备份。保护所有同族账户默认值，目录变化不修改账户凭据。 查看启用模型或取消添加、发现子操作后返回本目录菜单；从目录菜单返回才退出到调用入口。
 - `managed-provider-model-edit.mjs` / `managed-provider-model-edit.d.mts`：CLP 已保存模型的本地读取、按字段差异预览与锁内保存，不依赖远程模板或模型 ID 匹配。保留精确 ID、请求路由、来源关联及未改字段；复用受管目录事务、备份、回读与同族账户等级镜像。
 - `managed-provider-model-edit-setup.mjs` / `managed-provider-model-edit-setup.d.mts`：CLI 本地编辑 CLP 已有模型，按设置组选项修改并确认前后差异；支持思考开关 `enabled`，不新增模型、不下载模板，不提供 CLP 不支持的采样、原图或摘要控制。
 - `provider-model-management.mjs` / `provider-model-management.d.mts`：CLI/WebUI 共用的提供商目录能力、本地移除、单模型窗口及显示名称预览和锁内保存；修改绑定 Provider、模型和目录修订，并显示家族共用账户范围。显示名称修改保留模型 ID、默认值及能力参数，无变化不写入；自定义修改仅重编译已保存定义，不重新应用提示词模板；官方共享目录只读。WebUI 从对应保存目录投影完整能力，按目录身份、精确模型 ID 和内容修订读取白名单提示词。列表不携带提示正文。保护账户和 Gateway 显式默认值、非空目录及文件修订；受管修改纳入账户目录／来源持久恢复，自定义写入统一前后摘要 pending 与回读校验。
@@ -257,7 +257,7 @@
   切换 Provider 转固定）都会先经二次确认，并提示将改写主配置的 model_provider / model；命令行 switch
   传 --yes 跳过确认（仅命令行，Setup 菜单仍确认）；
   add 复用共用 Provider Setup，`--custom-models` 选择自定义目录；recover 明确选择保留或回滚未完成目录，
-  Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
+  Setup 统一管理两类目录，新增先选目录类型，取消表单回目录选择，目录选择返回提供商菜单；另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
   并把固定候选移入私有备份、保留切换 Provider，`switch <ID>` 把目标设为固定主 Provider；目标是切换
   Provider 时会移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接
   编辑备份候选并恢复、修改和激活，也可经二次确认删除备份候选。恢复、编辑或删除时先提交配置，
@@ -296,16 +296,16 @@
   安装、更新和默认值与用户偏好配置均不自动应用该预设。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
   默认模型与思考等级的无终端校验、版本化预览与确认保存接口；预览区分账户默认模型、同族共享模型等级及 Profile 镜像范围，保存拒绝过期预览。写默认模型时保留模型目录中已有的上下文窗口，
-  窗口由「受管模型目录上下文窗口」按精确 Provider ID 和模型管理；切换模式更新私有 Profile，固定模式与切换模式共用统一
+  窗口由「模型管理 → 所属提供商 → 模型上下文窗口」按精确 Provider ID 和模型管理；切换模式更新私有 Profile，固定模式与切换模式共用统一
   Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读确认写入结果，仅在主 Provider 未变且确认未生效
   且目录写入后的相关文件无后续修改时恢复模型目录。写入返回后仍回读主配置及同族账户默认选择、共享思考等级，不确定时返回 `save-unconfirmed`，不自动重试；执行阶段未知异常不对外暴露原文，结果明确返回 App Server 重启动作。
-- `model-window-setup.mjs` / `model-window-setup.d.mts`：`codexc setup` 的“受管模型目录上下文窗口”入口；
+- `model-window-setup.mjs` / `model-window-setup.d.mts`：`codexc setup` 模型管理中的“模型上下文窗口”入口，按所选提供商限制可编辑目录；
   按提供商和模型选择受管模型，通过 128K、256K、384K、512K、1M 预设或自定义
   Token 数设置窗口；预设按模型最大窗口过滤，可直接选择最大窗口，自定义范围为 1024 至模型最大值。
   选择窗口前读取目录修订并显示目标提供商、模型及受影响账户；与添加自定义模型复用 `responses-model-setup.mjs` 的窗口选择交互。
   CLI 与 WebUI 共用 `provider-model-management.mjs` 的 `model.context` 预览、确认和事务保存；确认前显示窗口差异及账户范围，取消不写入，目录或账户变化拒绝旧编辑。结果返回 App Server 重启动作。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
-  Provider、模型与思考等级交互与中文渲染，写入复用管理接口；第三方 Provider 总菜单会先选择 Provider，DeepSeek 与 OpenCode Go 子菜单则复用同一入口并预选当前 Provider。上下文窗口不在本流程，转到
+  Provider、模型与思考等级交互与中文渲染，写入复用管理接口；统一模型管理与账户子菜单先明确所选账户，进入时允许取消返回所属菜单。上下文窗口不在本流程，转到
   `model-window-setup.mjs`；历史 Thread 仍保留创建时的模型。确认前展示默认模型与共享思考等级的差异和影响账户；保存时在管理锁内复核预览修订，成功提示使用实际执行结果。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：WebUI 只读配置先从监管器取得主 Provider 的短租约，按需恢复空闲释放的主 App Server，读取及连接清理完成后释放租约；不创建临时 App Server。监管入口确实缺失时仍可连接已显式运行的独立主实例，协议不兼容或探测失败不得绕过租约。UA、指标、服务状态及本地目录展示不主动唤醒。CLI 事务创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` 普通键级修改及更新器关闭 daemon 自动启动作为官方 `config/batchWrite` 事务写入用户配置；
