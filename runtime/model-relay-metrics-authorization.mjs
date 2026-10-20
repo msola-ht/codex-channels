@@ -5,9 +5,12 @@ export function createRelayMetricAuthorization(configPath, environment = process
   const reader = new ModelRelayMaterialReader(configPath, environment, "metrics");
   let pending = 0;
   let reading;
+  let preparation;
+  let prepared = false;
   let closed = false;
   const authorize = async (sample, signal) => {
     if (closed || signal?.aborted) return "closing";
+    if (!prepared) return "invalid_sample";
     if (pending >= 8) return "queue_full";
     pending++;
     try {
@@ -23,6 +26,16 @@ export function createRelayMetricAuthorization(configPath, environment = process
       return snapshot.providers.includes(sample.provider) ? undefined : "unknown_provider";
     } catch { return "invalid_sample"; }
     finally { pending--; }
+  };
+  authorize.prepare = () => {
+    if (closed) return Promise.reject(new Error("Relay metric authorization closed"));
+    // Discard the initialization snapshot; every sample still needs a fresh read.
+    // Keep a failed preparation terminal rather than silently retrying startup.
+    preparation ??= reader.read().then(() => {
+      if (closed) throw new Error("Relay metric authorization closed");
+      prepared = true;
+    });
+    return preparation;
   };
   authorize.close = async () => { closed = true; await reader.close(); };
   return authorize;

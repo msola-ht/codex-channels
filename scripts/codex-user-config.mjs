@@ -13,6 +13,18 @@ import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime
 import { readGatewayConfig, validateCodexConfigDocument } from "../runtime/gateway-config.mjs";
 import { locateOptionalUserConfig, locateUserConfig } from "./runtime-config.mjs";
 
+// A failed proxy cleanup must remain owned before another read can reconnect.
+const unclosedReadClients = new Set();
+
+export async function closePendingCodexUserConfigReads() {
+  const results = await Promise.allSettled([...unclosedReadClients].map(async client => {
+    await client.close();
+    unclosedReadClients.delete(client);
+  }));
+  const failures = results.filter(result => result.status === "rejected").map(result => result.reason);
+  if (failures.length) throw new AggregateError(failures, "用户设置读取连接清理未确认");
+}
+
 export async function disableCodexDaemonAutoStart(environment = process.env, dependencies = {}) {
   await updateCodexUserConfig(environment, (config) => {
     const features = config.features;
@@ -41,14 +53,35 @@ export async function updateCodexUserConfig(
 
 export async function readCodexUserConfigSnapshot(
   environment,
-  { createClient = createCodexUserConfigClient } = {},
+  { createClient = createCodexUserConfigClient, signal } = {},
 ) {
+  return readWithCodexUserConfigClient(environment, createClient, signal,
+    (client) => client.readUserConfigSnapshot());
+}
+
+/** A cancelled read closes only its owned connection (and any owned proxy). */
+export async function readWithCodexUserConfigClient(environment, createClient, signal, read) {
+  signal?.throwIfAborted();
+  await closePendingCodexUserConfigReads();
+  signal?.throwIfAborted();
   const client = await createClient({ environment });
+  let closing;
+  const close = () => closing ??= Promise.resolve().then(() => client.close()).catch(error => {
+    unclosedReadClients.add(client);
+    throw error;
+  });
+  const abort = () => { void close().catch(() => undefined); };
+  signal?.addEventListener("abort", abort, { once: true });
   try {
+    signal?.throwIfAborted();
     await client.connect();
-    return await client.readUserConfigSnapshot();
+    signal?.throwIfAborted();
+    const result = await read(client);
+    signal?.throwIfAborted();
+    return result;
   } finally {
-    await client.close().catch(() => undefined);
+    signal?.removeEventListener("abort", abort);
+    await close();
   }
 }
 

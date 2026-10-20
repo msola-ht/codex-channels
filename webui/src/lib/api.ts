@@ -41,6 +41,7 @@ import type {
   ManagementTaskInput,
   ManagementTaskPreview,
   ManagementProviderSettingsResponse,
+  ManagementProviderModelCatalogsResponse,
   ManagementProviderSettingsMutationInput,
   ManagementProviderSettingsPreviewResponse,
   ManagementProviderSettingsMutationResponse,
@@ -501,6 +502,10 @@ export function cancelManagementTask(id: string, signal?: AbortSignal): Promise<
 
 export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<ManagementProviderSettingsResponse> {
   return readAppServerSettings<ManagementProviderSettingsResponse>("provider-settings", "provider_state_unavailable", signal)
+}
+
+export function fetchManagementProviderModelCatalogs(signal?: AbortSignal): Promise<ManagementProviderModelCatalogsResponse> {
+  return getJson(`${API_PREFIX}/management/provider-model-catalogs`, signal)
 }
 
 export function fetchProviderModelTemplateOptions(provider: string, signal?: AbortSignal): Promise<ProviderModelTemplateOptionsResponse> {

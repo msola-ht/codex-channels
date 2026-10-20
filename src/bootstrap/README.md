@@ -253,4 +253,4 @@ Thread 恢复失败。单个 Thread 被另一个 Codex 进程持有写锁时，�
 的 Client 关闭外，Surface、事件总线、Client 收尾和存储不会被组合根重复关闭。组合根有界持有
 已接收的 Queue 完成释放任务，停止时拒绝新任务并先限时等待，避免 Surface 或 Client 关闭后继续派发。
 
-- `relay-metrics-composition.ts`：Relay IPC 与已有 Gateway 指标 Writer 的组合；接收端随 Writer 存活，结算通过隔离 Worker 按当前私有原子配置异步核对调用方、账户和代次，入队前复核取消与关闭状态，不依赖延迟热加载或入口启用状态；停用身份仍可结算历史调用。不创建第二个数据库写入者或 Core 事件。
+- `relay-metrics-composition.ts`：Relay IPC 与已有 Gateway 指标 Writer 的组合；接收端随 Writer 存活，先等待授权材料准备再发布监听；准备期间关闭会取消 Reader，监听启动返回后再次核对关闭与最新启用状态。结算通过隔离 Worker 按当前私有原子配置异步核对调用方、账户和代次，入队前复核取消与关闭状态，不依赖延迟热加载或入口启用状态；停用身份仍可结算历史调用。不创建第二个数据库写入者或 Core 事件。

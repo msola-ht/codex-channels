@@ -139,6 +139,7 @@
 - `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置校验、管理错误、高风险路径分类、Provider 状态缓存，以及
   WebUI HTTP 响应、JSON 请求体、令牌鉴权和回环地址校验；主服务组合共享访问与错误边界并完成分派，
   具体资源处理留在对应管理路由。
+  Codex／Provider 只读管理快照共享 20 秒取消期限与 HTTP 断开处理，关闭 WebUI 会取消并等待其自有连接清理；预览、确认与写入保持各自事务边界。本地模型目录另由 Provider 路由直接投影文件，不依赖完整管理快照。
   管理错误仅映射显式领域类型的稳定代码与安全文案；未知异常返回 500，不将其消息、代码或字段直接公开。冲突返回 409，目标缺失返回 404，明确依赖不可用返回 503。
 - `account-management-error.mjs`：DeepSeek、CLP 及账户运行状态适配器共享的输入、冲突与恢复失败分类；WebUI 只消费其受控代码和字段，不公开底层异常。
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标和调用记录维护异步任务；
@@ -308,6 +309,7 @@
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：WebUI 只读配置连接已有主 App Server，连接失败不启动临时进程；CLI 事务创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` 普通键级修改及更新器关闭 daemon 自动启动作为官方 `config/batchWrite` 事务写入用户配置；
   用户设置修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
+  只读生命周期接受取消信号，关闭自有连接及 Proxy，不终止共享服务；关闭失败保留客户端，由后续读取或 WebUI 关闭重试清理，未确认前不能启动替代读取。
   所有 CLI 用户设置、MCP 与官方登录统一解析 Gateway 显式 Codex binary，配置为默认 `codex` 时才采用 `CODEX_BINARY`；默认 Codex Home 尚不存在时
   从用户主目录启动并由 Codex 初始化默认目录，显式 `CODEX_HOME` 仍要求已存在且为目录。
 - `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“项目技能”类别；列出项目 `.codex/skills` 下带

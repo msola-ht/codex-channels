@@ -116,7 +116,7 @@ export type CodexUserSettingActivation =
   | "next-thread-and-tui";
 
 export function loadCodexUserSettings(
-  options?: CodexUserSettingsDependencies,
+  options?: CodexUserSettingsDependencies & { signal?: AbortSignal },
 ): Promise<CodexUserSettingsState>;
 
 export function updateCodexUserSetting(

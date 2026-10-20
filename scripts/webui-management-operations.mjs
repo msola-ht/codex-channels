@@ -12,6 +12,40 @@ export class ManagementOperationError extends Error {
   }
 }
 
+/** The read budget includes connection setup; cleanup still retains its owner. */
+export async function readManagementSnapshot(request, response, state, read) {
+  const controller = new AbortController();
+  const deadline = Date.now() + 20_000;
+  const disconnect = () => { if (!response.writableEnded) controller.abort(); };
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  response.once("close", disconnect);
+  if (request.aborted || response.destroyed || state.snapshotReadsClosed) controller.abort();
+  const entry = { controller, settled: undefined };
+  state.snapshotReads.add(entry);
+  const task = Promise.resolve().then(async () => {
+    controller.signal.throwIfAborted();
+    const result = await read(controller.signal);
+    if (Date.now() >= deadline) controller.abort();
+    controller.signal.throwIfAborted();
+    return result;
+  });
+  entry.settled = task.then(() => undefined, () => undefined);
+  try {
+    return await task;
+  } finally {
+    clearTimeout(timer);
+    response.removeListener("close", disconnect);
+    state.snapshotReads.delete(entry);
+  }
+}
+
+export async function closeManagementSnapshotReads(state) {
+  state.snapshotReadsClosed = true;
+  const entries = [...state.snapshotReads];
+  for (const entry of entries) entry.controller.abort();
+  await Promise.all(entries.map(entry => entry.settled));
+}
+
 export function codexManagementError(error) {
   return managementOperationError(error, [CodexUserSettingsError], "codex_settings_failed");
 }

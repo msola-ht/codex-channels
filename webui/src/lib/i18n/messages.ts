@@ -187,6 +187,11 @@ const zh = {
     absent: "不在可见列表中",
   },
   modelCatalog: {
+    localReadOnlyLabel: "只读",
+    localReadOnly: "本地目录可独立读取。修改模型需要可用且与目录修订一致的完整管理快照；管理读取不可用时，内置搜索设置显示未知。",
+    managementMismatch: "本地目录与管理快照的修订不一致。请重新读取后再编辑。",
+    localLoadFailed: "本地模型目录读取失败",
+    localUnavailable: "本地模型目录暂不可用，请重新读取。",
     rename: "编辑显示名称",
     renameHint: "修改所选模型的显示名称，模型 ID 保持不变。同一托管目录的账户共用此名称，保存前请确认影响范围。",
     renameAfter: "新显示名称：{name}",
@@ -1929,6 +1934,11 @@ const en: Messages = {
     absent: "Not in the visible list",
   },
   modelCatalog: {
+    localReadOnlyLabel: "Read-only",
+    localReadOnly: "Local catalogs can be read independently. Editing requires a complete management snapshot with matching catalog revisions. Built-in search settings are unknown while management reads are unavailable.",
+    managementMismatch: "The local catalogs and management snapshot have different revisions. Reload before editing.",
+    localLoadFailed: "Failed to read local model catalogs",
+    localUnavailable: "Local model catalogs are unavailable. Reload to try again.",
     rename: "Edit display name",
     renameHint: "Change the selected model's display name while keeping its model ID. Accounts sharing a managed catalog share this name. Review the affected accounts before saving.",
     renameAfter: "New display name: {name}",
