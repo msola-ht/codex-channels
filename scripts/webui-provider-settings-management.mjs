@@ -1,4 +1,5 @@
 import { loadModelProviderManagementState, loadProviderWebSearchSettings } from "./model-provider-management.mjs";
+import { previewProviderModelRename, applyProviderModelRename } from "./provider-model-management.mjs";
 import { loadProviderModelCatalogPresentations, previewProviderModelRemoval, applyProviderModelRemoval, previewProviderModelContextChange, applyProviderModelContextChange, ProviderModelManagementError } from "./provider-model-management.mjs";
 import {
   applyManagedProviderDefaultChange,
@@ -49,6 +50,11 @@ export function normalizeProviderSettingsMutation(input) {
     throw new ManagementOperationError("invalid_json", "Provider 设置操作正文必须是对象");
   }
   switch (input.operation) {
+    case "model.rename":
+      if (Object.keys(input).some(key => !["operation", "provider", "model", "displayName", "revision", "confirmationToken"].includes(key))) {
+        throw new ManagementOperationError("invalid_provider_operation", "模型名称请求包含不支持的字段");
+      }
+      return { operation: input.operation, ...renameMutationInput(input) };
     case "provider.web-search":
       if (Object.keys(input).some(key => !["operation", "provider", "mode", "resourceRevision", "confirmationToken"].includes(key))
         || typeof input.provider !== "string" || ![null, "disabled", "cached", "indexed", "live"].includes(input.mode)) {
@@ -158,6 +164,8 @@ export function normalizeProviderSettingsMutation(input) {
 export async function previewProviderSettingsMutation(input, environment) {
   try {
     switch (input.operation) {
+      case "model.rename":
+        return await previewProviderModelRename(renameMutationInput(input), { environment });
       case "provider.web-search":
         return await previewProviderWebSearchChange(webSearchMutationInput(input), { environment });
       case "model.add":
@@ -219,6 +227,8 @@ export async function applyProviderSettingsMutation(input, environment, preview)
         delete templatePreview.operation;
         return await applyProviderModelTemplateUpdate(templateMutationInput(input), { environment, preview: templatePreview });
       }
+      case "model.rename":
+        return await applyProviderModelRename(renameMutationInput(input), { environment, preview });
       case "model.context":
         return await applyProviderModelContextChange(contextMutationInput(input), { environment, preview });
       case "model.custom.save":
@@ -288,6 +298,7 @@ export function redactProviderSettingsResult(result) {
     ...(result.reasoningEffort !== undefined ? { reasoningEffort: result.reasoningEffort } : {}),
     ...(result.windowPercent !== undefined ? { windowPercent: result.windowPercent } : {}),
     ...(result.contextWindow !== undefined ? { contextWindow: result.contextWindow } : {}),
+    ...(result.displayName !== undefined ? { displayName: result.displayName } : {}),
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),
     ...(result.effects !== undefined ? { effects: result.effects } : {}),
     ...(result.before !== undefined ? { before: result.before } : {}),
@@ -422,6 +433,10 @@ function webSearchMutationInput(input) {
 
 function contextMutationInput(input) {
   return { provider: input.provider, model: input.model, contextWindow: input.contextWindow, revision: input.revision };
+}
+
+function renameMutationInput(input) {
+  return { provider: input.provider, model: input.model, displayName: input.displayName, revision: input.revision };
 }
 
 function templateMutationInput(input) {

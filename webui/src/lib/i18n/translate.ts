@@ -25,6 +25,8 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  "rename-not-supported": "modelCatalog.renameReadOnly",
+  "invalid-display-name": "modelCatalog.renameInvalid",
   "addition-source-expired": "modelAddition.expired",
   "addition-unavailable": "modelAddition.unavailable",
   "model-exists": "modelAddition.unavailable",

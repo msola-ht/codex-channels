@@ -528,7 +528,7 @@ function recordProviderAudit(state, details, failureMessage) {
 
 function providerSettingsAuditTarget(input) {
   if (input.operation === "model.add") return `models:${fingerprintManagementValue({ provider: input.provider, models: input.models })}`;
-  if (input.operation === "model.remove" || input.operation === "model.custom.save" || input.operation === "model.context" || input.operation === "model.template.update") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
+  if (input.operation === "model.remove" || input.operation === "model.custom.save" || input.operation === "model.context" || input.operation === "model.rename" || input.operation === "model.template.update") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
   if (input.operation === "primary.custom.save" || input.operation === "primary.custom.connection.save") return String(input.provider?.providerId ?? "unknown");
   if (input.operation === "managed.default" || input.operation === "provider.web-search") return String(input.provider ?? "unknown");
   return String(input.providerId ?? "unknown");

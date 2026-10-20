@@ -18,6 +18,19 @@ export function loadProviderModelCatalogPresentations(options?: { environment?: 
 export function loadProviderModelPrompts(input: unknown, options?: { environment?: NodeJS.ProcessEnv }): Promise<OpenAiModelPrompts & Pick<ModelDefinition, "template" | "sampling">>;
 
 export interface ProviderModelContextInput { provider: string; model: string; contextWindow: number; revision: string }
+export interface ProviderModelRenameInput { provider: string; model: string; displayName: string; revision: string }
+export interface ProviderModelRenamePreview {
+  operation: "model.rename";
+  provider: string;
+  model: { id: string; displayName: string };
+  displayName: string;
+  providers: string[];
+  revision: string;
+  willChange: boolean;
+  activation: "restart-app-server" | "none";
+}
+export function previewProviderModelRename(input: ProviderModelRenameInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ProviderModelRenamePreview>;
+export function applyProviderModelRename(input: ProviderModelRenameInput, options: { environment?: NodeJS.ProcessEnv; preview: ProviderModelRenamePreview }): Promise<ProviderModelRenamePreview & { action: "updated" | "unchanged" }>;
 export interface ProviderModelContextPreview {
   operation: "model.context";
   provider: string;

@@ -832,6 +832,7 @@ export type ManagementProviderSettingsMutationInput =
   | ProviderModelTemplateUpdateInput
   | { operation: "model.remove"; provider: string; model: string }
   | { operation: "model.context"; provider: string; model: string; contextWindow: number; revision: string }
+  | { operation: "model.rename"; provider: string; model: string; displayName: string; revision: string }
   | { operation: "model.custom.save"; resourceRevision: string; provider: string; models: ResponsesModelDefinition[]; model: string; probeConnections?: Array<{ model: string; capability: "applyPatch" | "toolSearch"; token: string }> }
   | { operation: "primary.switch"; providerId: string; model?: string }
   | { operation: "primary.remove"; providerId: string }
@@ -866,7 +867,7 @@ export type ManagementProviderSettingsMutationInput =
     }
 
 export interface ManagementProviderSettingsStandardPreview {
-  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "model.remove" | "model.context" | "model.custom.save"
+  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "model.remove" | "model.context" | "model.rename" | "model.custom.save"
   revision?: string
   before?: { defaultModel: string; reasoningEffort: string }
   warnings?: Array<{ code: string }>
@@ -893,6 +894,7 @@ export interface ManagementProviderSettingsStandardPreview {
     apiKeyChange?: boolean
   }
   model?: { id: string; displayName: string; contextWindow?: number; maxContextWindow?: number }
+  displayName?: string
   providers?: string[]
   reasoningEffort?: string
   windowPercent?: number

@@ -1,4 +1,5 @@
 import * as clackPrompts from "@clack/prompts";
+import { previewProviderModelRename, applyProviderModelRename } from "./provider-model-management.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { loadProviderModelCatalogs, loadProviderModelCatalogPresentations, ProviderModelManagementError, previewProviderModelRemoval, applyProviderModelRemoval } from "./provider-model-management.mjs";
@@ -175,6 +176,7 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     ? "DeepSeek 暂不支持单模型移除。\n"
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
   const action = await prompts.select({ message: "模型操作", options: [
+    ...(custom || family ? [{ value: "rename", label: "编辑模型显示名称", hint: "模型 ID 保持不变" }] : []),
     { value: "web-search", label: "检测原生网页搜索", hint: "选择单一账户；1 次可能计费请求；仅诊断" },
     ...(catalog.canRemove ? [{ value: "remove", label: "本地移除模型", hint: "不联网、不改账户和凭据" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
@@ -186,6 +188,25 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (action === "rename") {
+    const current = (await loadProviderModelCatalogPresentations({ environment })).catalogs.find(entry => entry.provider === catalog.provider);
+    if (!current) throw new Error("模型目录已变化，请重新打开模型管理");
+    const model = await prompts.select({ message: "选择模型", options: current.models.map(entry => ({ value: entry.id, label: `${entry.displayName}（${entry.id}）` })) });
+    if (prompts.isCancel(model)) return { action: "back" };
+    const selectedModel = current.models.find(entry => entry.id === model);
+    if (!selectedModel) throw new Error("模型选择无效");
+    const name = await prompts.text({ message: "显示名称", initialValue: selectedModel.displayName });
+    if (prompts.isCancel(name)) return { action: "back" };
+    const input = { provider: current.provider, model, displayName: name.trim(), revision: current.revision };
+    const preview = await previewProviderModelRename(input, { environment });
+    if (!preview.willChange) { output.write("显示名称未变化。\n"); return { action: "unchanged", activation: "none" }; }
+    output.write(`模型 ID：${JSON.stringify(model)}（保持不变）\n显示名称：${JSON.stringify(preview.model.displayName)} → ${JSON.stringify(preview.displayName)}\n影响账户：${preview.providers.join("、")}\n`);
+    if (await prompts.confirm({ message: "确认保存显示名称？", initialValue: false }) !== true) return { action: "back" };
+    const result = await applyProviderModelRename(input, { environment, preview });
+    output.write("模型显示名称已保存并回读。\n");
+    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+    return result;
+  }
   if (action === "web-search") return runProviderWebSearchSetup({ environment, prompts, output, provider: selected });
   if (action === "template-update") return runProviderModelTemplateSetup(catalog.provider, { environment, prompts, output });
   if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });

@@ -187,6 +187,11 @@ const zh = {
     absent: "不在可见列表中",
   },
   modelCatalog: {
+    rename: "编辑显示名称",
+    renameHint: "修改所选模型的显示名称，模型 ID 保持不变。同一托管目录的账户共用此名称，保存前请确认影响范围。",
+    renameAfter: "新显示名称：{name}",
+    renameInvalid: "显示名称须为 1–120 个字符，不能包含控制字符。",
+    renameReadOnly: "官方共享模型目录只读，不能在第三方提供商中修改显示名称。",
     unifiedHint: "按提供商展示模型；同一受管提供商的账户共用目录和模型设置。点击模型名称查看详情。",
     detailsHint: "来自当前提供商的本地模型目录，只读展示；不代表当前会话的实际设置。悬浮字段名可查看原始字段和值。",
     sourceManaged: "托管目录",
@@ -1905,6 +1910,11 @@ const en: Messages = {
     absent: "Not in the visible list",
   },
   modelCatalog: {
+    rename: "Edit display name",
+    renameHint: "Change the selected model's display name while keeping its model ID. Accounts sharing a managed catalog share this name. Review the affected accounts before saving.",
+    renameAfter: "New display name: {name}",
+    renameInvalid: "The display name must contain 1–120 characters and no control characters.",
+    renameReadOnly: "The shared official catalog is read-only. Its display names cannot be edited for third-party providers.",
     unifiedHint: "Models grouped by provider. Accounts of the same managed provider share the catalog and model settings. Select a model name to view details.",
     detailsHint: "Read-only declarations from this provider's local model catalog, not the current session settings. Hover over a label for its raw field and value.",
     sourceManaged: "Managed catalog",
