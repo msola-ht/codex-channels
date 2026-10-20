@@ -73,7 +73,7 @@ export function createClinePassCatalog(templates, source, enabledModels) {
     if (!Array.isArray(template.reasoningEfforts) || template.reasoningEfforts.some(effort => !["none", "low", "high", "max"].includes(effort))) throw new Error("DS 模板缺少思考等级或包含 CLP 未支持的等级");
     const flash = {
       ...template,
-      id: definition.defaultModel, name: "CLP DeepSeek V4.1 Flash",
+      id: definition.defaultModel, name: "DeepSeek V4.1 Flash",
       reasoningEfforts: [...new Set(["none", ...template.reasoningEfforts])],
       // Chat image parts accept auto/low/high, never Responses' original detail.
       supportsImageDetailOriginal: false,
