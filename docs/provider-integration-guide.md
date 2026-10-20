@@ -579,7 +579,7 @@ CLI／WebUI 设置入口；它们不同于用户的 `web_search` 偏好，也不
 
 App Server 的固定、切换入口保留已有的顶层 `web_search`、`tool_choice` 和 Responses 历史 `web_search_call`，由上游判断执行支持。源目录不变，临时运行投影使用普通 Responses 工具编码（`use_responses_lite=false`），实例关闭 `features.standalone_web_search`，防止切换到独立 `/alpha/search` 执行器。App Server 从对应配置生成受控启动参数并隔离子进程凭据；`codexc remote` 通过原生 Profile 选择连接同一实例。聚合入口当前关闭。
 
-HTTP、Responses WebSocket 和 Chat 桥复用工具透传合同，官方 OpenAI 与独立 Model Relay 保留自己的合同。Chat 对 hosted 声明仅透传，尚无原生 `web_search_call` 回程映射，包含这种历史的跨模型续聊仍会明确拒绝；透传本身不能证明搜索执行或回程可用。
+HTTP 与 Responses WebSocket 保持工具透传，官方 OpenAI 与独立 Model Relay 保留自己的合同。受管 CLP Chat 桥将 live `web_search` 适配至同账户独立搜索接口，映射搜索事件并处理 search 查询历史，详见 [CLP 网页搜索适配](cline-pass.md#网页搜索适配)。其他 Chat 对 hosted 声明仍仅透传，不承诺执行或历史转换。
 
 已保存的 CP v5 `supportsWebSearch` 作为历史布尔元数据保留，并按原字段顺序编译为 `supports_web_search`，既有定义与编译快照仍可一致性校验和读取。普通读取不迁移、删字段或改写目录，编辑后保存仍保留该元数据；它不参与搜索门控，也不再从新模板导入。非法类型、未知字段、定义与编译快照不一致及未完成事务仍明确拒绝，不能删除 pending 绕过检查。受管或官方完整目录同样保留原文件内容，搜索策略不解释该扩展字段。
 

@@ -1,5 +1,21 @@
 # CLP（Cline Pass）
 
+## 网页搜索适配
+
+受管 CLP 的模型代理把 Codex `web_search` 转成内部普通函数调用，再以同一账户凭据请求 Cline `/search/websearch`，把返回的标题和 URL 交给模型续答。只在请求声明搜索且模型实际调用时执行；`disabled` 不声明搜索，也不会发出搜索请求。请在提供商联网搜索中选择 `live`；`cached`、`indexed`、地域、上下文档位及图片搜索控制不能映射，明确拒绝而不扩大联网范围。支持 `filters.allowed_domains` 的普通域名名单，模型不能覆盖名单。
+
+搜索和模型续答共享一个 Responses 响应，返回原生 `web_search_call` 生命周期，并累计各轮模型用量。请求指定 `tool_choice: none` 或强制其他工具时，即使上游错误返回搜索调用也会在联网前拒绝。答复使用模型生成的 Markdown 来源链接，不伪造字符范围引用。锁定 Codex 的历史只保留搜索查询，原始结果不会持久化为另一套历史；后续完整输入可继续转换。`open_page`、`find_in_page` 和加密搜索历史尚不支持。
+
+每个模型请求最多搜索 4 次，单次搜索期限 45 秒，正文最多 256 KiB、最多 50 个结果；整条响应保留 16 MiB 转换预算，并扣减显式输出 Token 预算。搜索失败、无效响应或预算耗尽均明确失败，不伪装成成功；用户取消或代理关闭会取消当前搜索和后续模型调用。关闭并行工具声明；上游若仍在同轮混合返回搜索与客户端工具，在执行搜索前拒绝，避免缺少客户端结果或丢失搜索结果。
+
+搜索认证、额度、权限、限流、超时和协议错误分别用 `clp_search_*` 错误码记录，WebUI 用固定的中英文文案展示，不记录原始错误正文。永久流内失败使用 Codex 可识别的非重试码，细分原因保留在错误类型中；搜索后空续答也不会被标记为成功。独立搜索可在 Cline 用量页单列为 `Web Search`；是否计费由当前账户和上游决定。
+
+该适配只用于受管 CLP 的 Responses→Chat 桥，不改写独立 Relay 或通用 Chat 提供商。WebUI“检测原生网页搜索”仍检测上游原生工具格式，不检测此适配，原生格式被拒绝不代表独立搜索不可用。升级代码后需按现有流程重启 App Server 才加载新桥；代码修改不自动重启服务或修改搜索设置。
+
+接口依据：[Cline SDK 独立搜索实现](https://github.com/cline/cline/blob/c269dbb7f97256d53d4aedabb6c245b9ec54b1b6/sdk/packages/llms/src/providers/vendors/cline.ts)。其他 `vercel:*` 搜索及 Browserbase Fetch 虽可由上游内部执行，但 Chat 回包不含原始工具结果，本适配不自动回退至这些工具。
+
+## 账户配置
+
 通过 `codexc setup` → 模型与提供商 → 第三方 Provider → Cline Pass 官方配置。
 支持多个 CLP 账户，各账户使用独立 API Key，支持固定与切换模式。首次配置从 Cline 官方目录生成 Codex 多模型目录；勾选 Flash 时优先作为默认，否则以所选模型在官方目录中的第一项作为默认，CLI 保存前明确显示。
 Setup 和 WebUI 设置页均可添加、重新配置、设置默认及移除账户。账户 ID 为 1–32 位小写字母、数字、`-` 或 `_`；映射后凭据变量名相同的 ID 不可同时使用，例如 `a-b` 与 `a_b`。
@@ -71,7 +87,7 @@ Flash 投影继承 DS 模型定义中的说明、思考等级说明、提示词�
 把完整请求转换后发送至 `https://api.cline.bot/api/v1/chat/completions`，再把 Chat SSE 转换回 Responses。
 Gateway 重启不会终止该桥或共享 App Server。转换逻辑独立在 `src/model-api`，可以供其他 Chat Provider 复用。
 
-支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，声明 `grammar`（lark）格式时其语法原文保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。CLP 共用目录声明 `apply_patch_tool_type: freeform`，模型改用自由格式 `apply_patch` 工具修改文件，渠道据此显示「修改文件」卡片；CLP 共用目录同时开启 `supports_search_tool`，客户端 `tool_search` 可检索并按需加载命名空间工具。已有模型须按模板更新的保留规则查看差异；除上述两项本地声明外，其他工具配置不在模板能力覆盖范围内，无需删除账户。`text.format` 的 `json_schema` 按原样映射为 Chat `response_format`，因此 TUI 的线程标题生成等结构化请求无需关闭。未映射的顶层工具声明及其 `tool_choice` 原样交给 CLP 判断，包括 hosted `web_search` 与服务端 `tool_search`。内置网页搜索沿用 Codex 的 `web_search` 配置；透传不表示 CLP 或模型支持执行，不为这些声明注册客户端工具，回程不支持的工具调用和历史 `web_search_call` 仍明确失败。远程 compaction、加密或带签名的推理和 WebSocket 仍不支持；外部函数形式的工具仍按函数调用处理。
+支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，声明 `grammar`（lark）格式时其语法原文保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。CLP 共用目录声明 `apply_patch_tool_type: freeform`，模型改用自由格式 `apply_patch` 工具修改文件，渠道据此显示「修改文件」卡片；CLP 共用目录同时开启 `supports_search_tool`，客户端 `tool_search` 可检索并按需加载命名空间工具。已有模型须按模板更新的保留规则查看差异；除上述两项本地声明外，其他工具配置不在模板能力覆盖范围内，无需删除账户。`text.format` 的 `json_schema` 按原样映射为 Chat `response_format`，因此 TUI 的线程标题生成等结构化请求无需关闭。受管 CLP 的 hosted `web_search` 由桥适配为普通函数，并调用同账户的独立 `/search/websearch`；仅支持 live 文本查询及域名过滤，详见下节。其他未映射工具（如服务端 `tool_search`）仍原样交给上游判断，不承诺执行或回程支持。远程 compaction、加密或带签名的推理和 WebSocket 仍不支持；外部函数形式的工具仍按函数调用处理。
 边界案例可对照 [CLIProxyAPI 的 Responses 转换器（固定提交 9bdde54）](https://github.com/router-for-me/CLIProxyAPI/tree/9bdde54b59d1af70ae0534a0ef61b2c3361a1257/internal/translator/openai/openai/responses)，仅作实现参考，不作为 Codex 协议来源或运行时依赖。
 CLP 按上游不拒绝的标准开放参数透传：`text.verbosity` 映射为 Chat 顶层 `verbosity`，`service_tier` 与 `client_metadata` 原值传递，由上游判断，不再由桥按值提前拒绝或丢弃。精确 Flash 模板声明详细程度可选、默认 `medium`，不声明 `priority`、`flex` 等加速或服务档位；参数允许透传不能作为服务档位能力证据。其他 CLP 模型仍沿用各自目录声明，不因 Flash 的探测结果自动增加这些选项。旧目录中曾注入的服务档位通过“更新模板 → 能力”展示删除差异，明确确认后清除；只更新提示词或运行设置不清除其他声明。新建及发现新增使用同一投影，默认服务档位仍保持标准。
 

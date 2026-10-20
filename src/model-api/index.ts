@@ -1,6 +1,7 @@
 export { responsesToChat } from "./responses-to-chat.js";
 export type { ChatRequest, ChatMessage, ChatUserContentPart, ChatToolIdentity } from "./responses-to-chat.js";
 export { ChatToResponses } from "./chat-to-responses.js";
+export type { HostedSearchCall, HostedSearchResult } from "./chat-to-responses.js";
 export { ModelConversionError } from "./validation.js";
 export { normalizeResponsesRequest, type NormalizedResponsesRequest } from "./responses-normalize.js";
 export { DirectChatRequestError, validateDirectChatRequest, applyChatReasoningPolicy, clinePassChatReasoningControl, type DirectChatRequest, type RelayModelCapability, type RelayModelReasoning } from "./chat-request.js";

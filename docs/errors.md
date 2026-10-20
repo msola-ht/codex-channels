@@ -7,6 +7,10 @@
 
 ## 日志字段约定
 
+受管 CLP 独立搜索适配使用 `clp_search_authentication_error`、`clp_search_payment_required`、`clp_search_permission_denied`、`clp_search_rate_limit`、`clp_search_timeout`、`clp_search_invalid_response`、`clp_search_upstream_error` 和 `clp_search_cancelled` 区分搜索接口故障。`clp_search_unsupported_controls` 提示改用 live 并移除不支持的控制；`clp_search_mixed_tools` 表示上游同轮混合了搜索与客户端工具；`clp_search_limit` 和 `clp_search_output_limit` 表示次数或输出预算不足。错误列表及调用详情按精确代码显示固定中英文文案，外层 HTTP 200/502 不掩盖搜索原因，本地断连仍优先。原生诊断的 `web_search_unsupported` 与适配错误不同，见 [CLP 网页搜索适配](cline-pass.md#网页搜索适配)。
+
+`clp_search_tool_choice` 表示上游搜索调用违反本轮工具选择限制，联网前已阻止。CLP 永久流内失败对 Codex 返回非重试码 `invalid_prompt`，细分原因保留在 `error.type` 与诊断码中；错误记录同时读取 code/type。可重试流内失败保留分类，并透传经校验的 `Retry-After`，避免永久搜索失败引发整轮自动重试。
+
 渠道输入、输出和生命周期失败统一使用以下字段（能拿到时才出现）：
 
 | 字段 | 含义 | 示例 |

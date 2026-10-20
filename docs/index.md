@@ -671,7 +671,7 @@ Config 文案说明：协议索引中的“Codex 用户设置”“一键配置�
 
 CLP 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由，不增加 RPC。
 CLP 共用 Codex 目录由 [`cline-pass-account-management.mjs`](../scripts/cline-pass-account-management.mjs) 从 Cline 官方元数据独立生成；仅 Flash 复制仓库 DS 模板，其余模型独立声明能力，模型窗口由所有 CLP 账户共用，不影响其他提供商。[手填新增](cline-pass.md)可选择从当前目录一次性继承完整配置及请求行为，仍向上游发送新模型 ID；请求配置通过本地目录条目的 `cline_request_profile` 明确保存，不添加 RPC 字段。桥接受七种普通思考等级；目录声明开关时额外使用 `enabled`，基于锁定 Codex `protocol/src/openai_models.rs` 的 `ReasoningEffort::Custom` 和 `ReasoningEffortPreset`，沿用目录、模型选择及 Turn 既有字段。Flash 请求配置保留 `reasoning.effort` 和固定 DeepSeek 路由，标准配置普通等级使用 `reasoning_effort`，关闭/开启使用 `reasoning.enabled=false/true`；没有显式配置时保留精确 Flash ID 的默认分支，出站选项必须属于当前启用目录。真实云端新增模型仍需分别验收。
-未映射的顶层工具声明及其 `tool_choice` 原样交给 CLP，不注册本地执行身份；不宣称支持托管工具的执行或回程。声明形态依据锁定源码 `tools/src/tool_spec.rs`、`tool_spec_tests.rs` 和 `core/tests/suite/web_search.rs`。
+受管 CLP 的 live `web_search` 经内部函数调用同账户 `/search/websearch`，在单一 Responses 生命周期内续答；其他未映射声明及选择仍透传。搜索历史仅保留锁定协议支持的查询，具体限制见 [CLP 网页搜索](cline-pass.md#网页搜索适配)。声明形态依据锁定源码 `tools/src/tool_spec.rs`、`tool_spec_tests.rs` 和 `core/tests/suite/web_search.rs`。
 账户用量由 [`cline-pass-account-adapter.ts`](../src/bootstrap/cline-pass-account-adapter.ts) 查询 Cline 官方套餐额度接口，复用账户快照和窗口展示；
 [`cline-pass-setup.mjs`](../scripts/cline-pass-setup.mjs) 按账户创建受管 Profile，注册表和默认账户复用共享校验与路由，模型目录和 Chat 代理按 Provider ID 独立；
 [`model-api`](../src/model-api/README.md) 独立转换模型消息（含 `text.format` 的 `json_schema` 到 Chat `response_format` 映射），
@@ -679,13 +679,13 @@ CLP 共用 Codex 目录由 [`cline-pass-account-management.mjs`](../scripts/clin
 依据锁定官方 `core/src/client.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs` 的请求、条目和事件合同，
 接受文本、用户内联图片、函数与自由格式工具、客户端 `tool_search`；工具结果里的内联图片不放进 Chat `tool` 消息，转成该组工具结果之后紧随的一条 `user` 消息图片段，并用相同的调用 ID 与图片序号标记关联原 `tool` 文本位置和图片；自由格式语法保留在 Chat 工具说明，CLP 模型目录声明 `apply_patch_tool_type: freeform` 与 `supports_search_tool`，检索结果按锁定 `tools/src/tool_search.rs` 的命名空间和 `defer_loading` 形态显式加载。`reasoning_content` 通过 `reasoning.content` 原文往返，Cline `reasoning` 通过摘要往返。图片沿用稳定 `UserInput.image` 与模型目录 `input_modalities`，不伪造加密推理或远程压缩语义；不完整终态保留已生成文本并拒绝执行部分工具调用。Chat 上游诊断通过请求级进程内回调写独立调用记录，不增加协议事件；HTTP 与流内错误经 [`chat-errors.ts`](../src/provider-proxy/chat-errors.ts) 映射为固定文案和白名单分类，`context_length_exceeded` 沿用锁定上游 SSE 的上下文错误语义。用户边界见 [`CLP`](cline-pass.md)。
 原生 Responses 推理回传
-第三方固定、切换入口的 HTTP／WS 出站处理和 CLP Chat 桥保留请求中的 hosted `web_search` 与 `tool_choice`，聚合入口当前关闭。
+第三方固定、切换入口的 HTTP／WS 出站保留 hosted `web_search` 与选择；受管 CLP Chat 桥对 live 搜索采用独立接口适配，通用 Chat 保持透传。聚合入口当前关闭。
 内置搜索使用 Codex 的全局 `web_search` 及精确 Provider ID 的独立覆盖。CP v5 已保存的 `supportsWebSearch` 与编译快照字段 `supports_web_search` 保持可读及原样保存，仅作为历史元数据，不参与搜索门控；新模板不导入该字段。
 锁定 CLI 的 `ModelInfo` 中，`web_search_tool_type` 只选形态，`supports_search_tool` 是客户端工具检索。
 [`third-party-model-catalog.mjs`](../runtime/third-party-model-catalog.mjs) 仅在运行投影中关闭 Responses Lite，
 启动同时关闭 standalone 搜索，确保使用模型 API 的 hosted 合同而非 OpenAI `/alpha/search`。
 依据 `core/src/tools/spec_plan.rs`、`core/src/tools/hosted_spec.rs` 与 `ext/web-search/src/extension.rs`；
-官方 OpenAI 和独立 Relay 不套用此策略，Chat 声明不保证托管搜索的执行或回程，见 [DeepSeek](deepseek.md#网页搜索)。
+官方 OpenAI 和独立 Relay 不套用此策略；通用 Chat 声明不保证托管搜索的执行或回程，见 [DeepSeek](deepseek.md#网页搜索)。
 DS 官方目录的无效 verbosity/摘要声明由 [`deepseek-setup.mjs`](../scripts/deepseek-setup.mjs) 调用共享纯数据层 [`model-catalog.mjs`](../runtime/model-catalog.mjs) 收紧，
 已有目录经 [`deepseek-account-management.mjs`](../scripts/deepseek-account-management.mjs) 的显式配置事务更新。
 客户端工具检索与跨轮推理的线上验证范围见
