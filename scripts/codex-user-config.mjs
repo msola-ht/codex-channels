@@ -10,6 +10,10 @@ import {
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import { registerChildProcessGroup, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
+import {
+  acquireAppServerProviderLease,
+  inspectAppServerSupervisorState,
+} from "../runtime/app-server-supervisor.mjs";
 import { readGatewayConfig, validateCodexConfigDocument } from "../runtime/gateway-config.mjs";
 import { locateOptionalUserConfig, locateUserConfig } from "./runtime-config.mjs";
 
@@ -182,7 +186,7 @@ function codexUserConfigWorkingDirectory(environment) {
   }
 }
 
-/** WebUI reads reuse the running primary server; never start a temporary server. */
+/** WebUI reads lease the supervised primary, waking it after idle release. */
 export async function createSharedCodexUserConfigClient({ environment = process.env } = {}) {
   const config = locateUserConfig(environment);
   const document = readGatewayConfig(config.configPath);
@@ -196,7 +200,43 @@ export async function createSharedCodexUserConfigClient({ environment = process.
     createCodexProcessInvocation: (args) => codexProcessInvocation(codexBinary, args, environment),
     terminateCodexProcess: terminateChildProcess,
   });
-  return new CodexAppServerClient(new JsonRpcClient(transport), {});
+  const client = new CodexAppServerClient(new JsonRpcClient(transport), {});
+  const connect = client.connect.bind(client);
+  const close = client.close.bind(client);
+  const cancellation = new AbortController();
+  let connecting;
+  let closing;
+  let lease;
+  client.connect = () => {
+    if (cancellation.signal.aborted) return Promise.reject(new Error("共享用户设置连接已关闭"));
+    return connecting ??= (async () => {
+      const inspection = await inspectAppServerSupervisorState(socketPath, cancellation.signal);
+      if (inspection.status === "incompatible") throw new Error("App Server 监管协议不兼容");
+      if (inspection.status === "ready") {
+        lease = await acquireAppServerProviderLease(
+          socketPath, inspection.topology.primaryProvider, cancellation.signal,
+        );
+      }
+      // A missing supervisor still permits an explicitly running standalone primary.
+      // Inspection errors must never be interpreted as permission to bypass a lease.
+      cancellation.signal.throwIfAborted();
+      const initialized = await connect();
+      cancellation.signal.throwIfAborted();
+      return initialized;
+    })();
+  };
+  client.close = () => {
+    cancellation.abort();
+    return closing ??= (async () => {
+      // Interrupt initialization before waiting for it; never stop the shared server.
+      const result = await Promise.allSettled([close(), connecting]);
+      if (result[0].status === "rejected") throw result[0].reason;
+      // Retain the lease if connection/proxy cleanup is unconfirmed.
+      await lease?.close();
+      lease = undefined;
+    })().finally(() => { closing = undefined; });
+  };
+  return client;
 }
 
 function configValueAtPath(config, keyPath) {

@@ -109,7 +109,8 @@ export async function routeCodexSettingsManagement({
     invalidateProviderManagementSummary(state.providerStateCache);
     let current = null;
     try {
-      current = await state.loadCodexSettings({ environment });
+      current = await readManagementSnapshot(request, response, state,
+        signal => state.loadCodexSettings({ environment, signal }));
     } catch (error) {
       webuiLogger.warn({ module: "settings", event: "settings.readback_failed", err: error }, "App Server 用户设置已写入，但新修订读取失败");
     }
