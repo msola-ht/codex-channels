@@ -185,6 +185,8 @@ Chat 桥复用公共端到端请求头过滤器，保留 Provider 的普通附�
 
 `chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码；HTTP 错误可携带经验证的 Retry-After，由 Chat 桥及原生 Relay 交付，不自动重试。桥将上游 429/503 的受限整数秒或规范 HTTP 日期交给外层 Codex，错误正文超时或使用不支持的压缩编码时不丢失该建议，畸形值不转发。
 
+公开入口导出 `chatUpstreamError` 与 `chatStreamError`，供 Scripts 的主动搜索诊断复用结构化错误分类；调用方传入实际出站工具及真实 HTTP 状态，诊断不另行解析固定包装或改变状态优先级。
+
 Chat 桥与直接 Chat 调用将实际出站工具声明交给错误分类器。HTTP 400 或流内 `invalid_request_error` 明确拒绝 `tools.N.type`，且该位置实际为 `web_search` 时，返回固定 `web_search_unsupported` 文案与关闭原生搜索的建议；同时支持实测 Cline `stream_initialization_failed` 固定包装内的有界 HTTP 400 JSON 原因。不转发原始错误正文，不从工具名称相似度或任意错误文本推断能力，不改写请求或自动重试；其他 HTTP 状态仍优先决定认证、限流及服务错误分类。
 
 本地模型请求期限统一使用 `ModelRequestTimeoutError`：上传为 HTTP 408 `upload_timeout`，准备为 HTTP 504 `preparation_timeout`，上游响应头/正文/完整事件为 HTTP 504 `upstream_timeout`，交付/收尾为 HTTP 504 `delivery_timeout`。可发送结构化错误时附带 `timeout_stage`（`upload/prepare/headers/body/stream/delivery/terminal`）；已发送 HTTP 响应头时不改写状态，透明转发中断仅关闭连接并记录受控错误。已完成生成的指标不被交付失败覆盖。

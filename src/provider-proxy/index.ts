@@ -15,7 +15,7 @@ export { ChatCompletionsBridge } from "./chat-bridge.js";
 export { sendDirectChat, type DirectChatTarget } from "./direct-chat.js";
 export { sendDirectResponses, DirectResponsesObserver } from "./direct-responses.js";
 export { ChatBodyTooLargeError, readChatBody, waitForChatOperation, writeChatData } from "./chat-io.js";
-export { ChatUpstreamError, ModelRequestTimeoutError } from "./chat-errors.js";
+export { ChatUpstreamError, ModelRequestTimeoutError, chatUpstreamError, chatStreamError } from "./chat-errors.js";
 export type { RelayMetric } from "./relay-metric.js";
 export { RelayMetricsServer, sendRelayMetrics, type RelayMetricEnvelope, type RelayMetricRejection } from "./relay-metrics-channel.js";
 

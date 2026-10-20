@@ -203,7 +203,7 @@
   无效旧 URL 按不可复用 Key 处理，允许输入新 URL 与新 Key 修复。保留其他候选块，只移除与自定义
   主 Provider 冲突的顶层 `openai_base_url`。
 - `responses-model-templates.mjs` / `responses-model-templates.d.mts`：读取单一固定 OpenAI 底座与仓库 DS 补全模板，不读取当前 CLI 官方目录或账户目录。`loadCustomModelDraftTemplates` 为 CLI 与 WebUI 提供包含提示词、来源、`send_user_message_async`／`clock` 本地工具及已声明的有效上下文比例、压缩阈值和截断策略的新增草稿，并带入 `model-catalog.mjs` 中项目固定采样默认值；上下文必须明确填写，其他能力未知暂不启用；参考值在 suggested 中独立展示，不预选思考等级或继承最大窗口。字段转换与 DS 能力修正统一由 `runtime/model-catalog.mjs` 负责。已有自定义模型默认仅更新提示词与来源；运行设置及本地工具须分别勾选后预览确认，不产生上下文跟随，采样保留本地值。
-- `custom-model-capability-probe.mjs` / `custom-model-capability-probe.d.mts`：CLI 与 WebUI 共用的单项工具探测；按用户选择验证 apply_patch 或 tool_search 的调用及模拟结果接续，不执行返回的工具。另支持一次有界流式原生 web_search 诊断，上游可能实际搜索并计费，仅完整结构化搜索证据算通过；使用手填思考等级和安全结果，不写配置。
+- `custom-model-capability-probe.mjs` / `custom-model-capability-probe.d.mts`：CLI 与 WebUI 共用的单项工具探测；按用户选择验证 apply_patch 或 tool_search 的调用及模拟结果接续，不执行返回的工具。另支持一次有界流式原生 web_search 诊断，上游可能实际搜索并计费，仅完整结构化搜索证据算通过；结构化工具拒绝复用 Provider Proxy 分类器及实际出站工具索引，覆盖 HTTP、顶层和选择项流错误；使用手填思考等级和安全结果，不写配置。
 - `custom-model-capability-setup.mjs` / `custom-model-capability-setup.d.mts`：CLI 逐模型、逐项询问 apply_patch 和 tool_search，支持手动选择或显式探测本项；用户选择采用结果后才回填草稿，最终复用 Provider 预览和目录事务。原生网页搜索默认跳过，仅诊断，不回填工具能力或改变搜索策略。
 - `provider-web-search-probe.mjs` / `provider-web-search-probe.d.mts`：已配置提供商共用的原生网页搜索诊断，按目录修订和明确账户解析模型、协议及凭据；CLP 读取已保存的请求配置，使继承模型的思考参数与固定路由和正常桥一致。复用单请求探测引擎，不写目录或搜索策略，不自动刷新登录或启动服务。CLI 和 WebUI 共用同一执行入口。
 - `responses-websocket-probe.mjs` / `responses-websocket-probe.d.mts`：按锁定 Codex 协议探测第三方 Responses WS 握手、预热及可选文字请求；复用代理，限制超时与响应大小，取消时释放连接，不保存凭据或原始响应。
