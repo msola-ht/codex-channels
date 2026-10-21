@@ -25,6 +25,7 @@ import { formatFeishuCommandMarkdown } from "./command-format.js";
 import type { FeishuOutbox } from "./outbox.js";
 
 export const feishuCommandMenuEventKey = "codexc_home";
+export const feishuCommandChoiceLimit = 18;
 
 const feishuLocalCommandActions = [
   "help",
@@ -38,6 +39,7 @@ const feishuLocalCommandActions = [
   "sessions-search",
   "archived-search",
   "thread-autoreview-select",
+  "workspace-select",
 ] as const;
 
 export type FeishuCommandCenterAction =
@@ -470,7 +472,7 @@ function renderFeishuCommandChoicesCard(
   token: string,
   selection: FeishuCommandCenterChoices,
 ): FeishuCardDocument {
-  const choices = selection.choices.slice(0, 18);
+  const choices = selection.choices.slice(0, feishuCommandChoiceLimit);
   if (selection.descriptionFormat === "markdown") {
     return feishuCardShell("blue", selection.title, [
       ...(selection.description

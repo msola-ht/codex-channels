@@ -322,6 +322,7 @@ function modelSelectionResult(state: ModelSelectionState): ConversationCommandRe
 }
 
 export interface ConversationCommandExecutor {
+  selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string): Promise<ConversationCommandResult>;
   selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult>;
   selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult>;
   execute(
@@ -343,6 +344,23 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     },
   ) {
     this.scheduledTasks = scheduledTasks;
+  }
+
+  async selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string): Promise<ConversationCommandResult> {
+    const assertAuthorized = this.commandGuard(target, actorId, true);
+    this.conversations.touchActivity?.(target);
+    const result = await this.selectWorkspaceResult(target, { id: workspaceId }, assertAuthorized);
+    this.authorize(target, actorId);
+    return result;
+  }
+
+  private async selectWorkspaceResult(target: ConversationTarget, selector: string | { id: string },
+    assertAuthorized: () => void): Promise<ConversationCommandResult> {
+    const workspace = await this.conversations.selectWorkspace(target, selector, assertAuthorized);
+    return { kind: "outcome", outcome: {
+      type: "workspace.selected", workspace,
+      nextModel: toConversationModelSummary(this.conversations.status(target)),
+    } };
   }
 
   async selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult> {
@@ -527,15 +545,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "workspace": {
         if (argumentsText) {
-          const workspace = await this.conversations.selectWorkspace(target, argumentsText, assertAuthorized);
-          return {
-            kind: "outcome",
-            outcome: {
-              type: "workspace.selected",
-              workspace,
-              nextModel: toConversationModelSummary(this.conversations.status(target)),
-            },
-          };
+          return this.selectWorkspaceResult(target, argumentsText, assertAuthorized);
         }
         return {
           kind: "workspaces",

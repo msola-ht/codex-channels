@@ -19,6 +19,9 @@ export function formatConversationWorkspaces(
 ): string {
   return toStructuredMarkdownList([
     `Workspace（${result.workspaces.length}）：`,
+    ...(!result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId)
+      ? [`原选择已失效：${result.currentWorkspaceId}。请选择下列工作区后重新发起操作。`]
+      : []),
     ...result.workspaces.flatMap((workspace, index) => [
       `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
       `工作目录：${workspace.cwd}`,

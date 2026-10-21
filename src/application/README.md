@@ -6,6 +6,8 @@
 
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 
+工作区文字命令保留序号、ID、名称选择；`ConversationCommandExecutor.selectWorkspace` 为渠道按钮提供精确 ID 入口，复用同一授权、会话锁、空闲检查及绑定切换。旧工作区选择已失效时仍允许显式重选，不自动选择默认目录或重试失败请求。
+
 普通消息的 `submit` 接收 Surface 提供的实时授权闭包，在等待会话锁、Thread 准备及最终 Turn 写入前复核；
 输入同时固定接收时的 Workspace ID 与目录，变化时拒绝。图片准备后的 start/steer 也保留最终守卫。
 已经提交的请求仍按实际结果结算，不因后续撤权自动重试或丢弃响应。
