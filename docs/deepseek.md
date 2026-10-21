@@ -161,7 +161,7 @@ DS 目录生成时明确设置 `support_verbosity: false`、`default_verbosity: 
 `supports_reasoning_summary_parameter: false` 和 `default_reasoning_summary: "none"`，
 移除锁定 Codex 已不使用的 `supports_reasoning_summaries` 声明。保留完整思考正文、工具能力与提示词。
 已有账户的上述能力参数通过“模型管理 → 对比并更新模型模板”显式更新：选择 DS 模型及对应的 DeepSeek 模板，
-勾选“能力参数”，查看差异后确认保存。来源读取仓库中的 DS 模板快照，不重新下载；所选模型的修改由所有 DS 账户共用，
+取消默认勾选的“提示词”，只勾选“能力参数”，查看差异后确认保存。来源读取仓库中的 DS 模板快照，不重新下载；所选模型的修改由所有 DS 账户共用，
 保留账户凭据、各自默认模型、模型默认思考等级和当前窗口；来源不支持当前设置时拒绝更新，不自动替换。
 模板保存沿用目录与来源备份及事务恢复，完成后按提示重启 App Server。账户编辑只调整 Key 和运行模式，复用已有目录；
 启动、Doctor 和源码更新器也不隐式改写目录。模板更新仅修改所选范围，不承诺清除所有历史字段。
