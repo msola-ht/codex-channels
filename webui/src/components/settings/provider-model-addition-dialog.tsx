@@ -3,21 +3,19 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { ManagedSelect, ManagementConfirmationDialog, modelOperationDialogClassName } from "@/components/settings/settings-controls"
+import { ManagedSelect, ManagementConfirmationDialog, modelOperationDialogClassName, modelOperationFormDialogClassName } from "@/components/settings/settings-controls"
+import { ModelCapabilityFields, ModelIdentityFields } from "@/components/settings/model-definition-fields"
 import { useTranslation } from "@/hooks/use-translation"
 import { useProviderModelAdditionOptions } from "@/hooks/use-provider-model-addition-options"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 import type { ManagedManualModelDefinition, ProviderModelAdditionPreview } from "../../../../scripts/provider-model-additions.mjs"
-import { contextWindowPresetLabel, contextWindowPresetTokens, defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
+import { defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
 import { cn } from "cn"
 
 export interface ProviderModelAdditionTarget { provider: string; revision: string; models: Array<{ id: string; displayName: string }> }
-
-const reasoningLevels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 export function ProviderModelAdditionDialog({ target, open, stale, management, previewRef, finalFocus, onClose }: {
   target: ProviderModelAdditionTarget
@@ -66,8 +64,9 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
     await candidates.load(manualModel)
   }
   return <Dialog open={open} disablePointerDismissal onOpenChange={(next, details) => { if (management.busy) { details.cancel(); return }; if (!next && open) onClose() }}>
-    <DialogContent initialFocus={options && selected.length > 0 && !locked ? previewRef : undefined} finalFocus={open ? finalFocus : false} closeLabel={t("common.close")} showCloseButton={!management.busy} className={modelOperationDialogClassName}>
-      <DialogHeader><DialogTitle>{t("modelAddition.title")}</DialogTitle><DialogDescription>{t("modelAddition.hint")}</DialogDescription></DialogHeader>
+    <DialogContent initialFocus={options && selected.length > 0 && !locked ? previewRef : undefined} finalFocus={open ? finalFocus : false} closeLabel={t("common.close")} showCloseButton={!management.busy} className={cn(modelOperationDialogClassName, modelOperationFormDialogClassName)}>
+      <DialogHeader className="shrink-0"><DialogTitle>{t("modelAddition.title")}</DialogTitle><DialogDescription>{t("modelAddition.hint")}</DialogDescription></DialogHeader>
+      <div className="flex min-h-0 min-w-0 flex-col gap-6 overflow-y-auto">
       <code className="break-all">{target.provider}</code>
       {!options ? <FieldGroup>
         <FieldGroup className={cn("grid min-w-0 gap-6", !custom && mode === "manual" && !inheriting && "sm:grid-cols-2")}>
@@ -82,38 +81,19 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
         </FieldGroup>
         {mode === "manual" ? <>
           <p className="text-sm text-muted-foreground">{t(inheriting ? "modelAddition.clineInheritHint" : clinePass ? "modelAddition.clineManualHint" : "modelAddition.manualHint")}</p>
-          <FieldGroup className={cn("grid min-w-0 gap-6", !inheriting && "sm:grid-cols-2")}>
-            <Field><FieldLabel htmlFor="addition-id">{t("managementUi.modelId")}</FieldLabel><Input id="addition-id" value={id} disabled={locked} onChange={event => { const next = event.target.value; if (name === "" || name === defaultModelDisplayName(id)) setName(defaultModelDisplayName(next)); setId(next) }} /></Field>
-            <Field><FieldLabel htmlFor="addition-name">{t("managementUi.displayName")}</FieldLabel><Input id="addition-name" value={name} disabled={locked} onChange={event => setName(event.target.value)} /></Field>
-          </FieldGroup>
+          <ModelIdentityFields id={id} name={name} disabled={locked} singleColumn={inheriting} onIdChange={next => { if (name === "" || name === defaultModelDisplayName(id)) setName(defaultModelDisplayName(next)); setId(next) }} onNameChange={setName} />
           {inheriting ? <>
             <ManagedSelect fullWidth label={t("modelAddition.inheritFrom")} placeholder={t("modelAddition.selectInheritSource")} value={inheritFrom} disabled={locked} options={target.models.map(entry => [entry.id, `${entry.displayName} (${entry.id})`])} onChange={setInheritFrom} />
             {target.models.length === 0 ? <p>{t("modelAddition.noInheritSource")}</p> : null}
-          </> : <>
-            <FieldGroup className="grid min-w-0 items-start gap-6 sm:grid-cols-2">
-              <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.context")}</FieldLegend><FieldGroup>
-                <ManagedSelect fullWidth label={t("managementUi.contextPreset")} value={window} disabled={locked} options={contextWindowPresetTokens.map(value => [String(value), `${contextWindowPresetLabel(value)} (${value})`])} onChange={setWindow} />
-                <Field><FieldLabel htmlFor="addition-window">{t("managementUi.contextTokens")}</FieldLabel><Input id="addition-window" type="number" min={1024} max={100000000} value={window} disabled={locked} onChange={event => setWindow(event.target.value)} /></Field>
-              </FieldGroup></FieldSet>
-              <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.reasoning")}</FieldLegend><FieldGroup>
-                <FieldGroup className="flex-row flex-wrap gap-x-4 gap-y-2">{(clinePass ? ["none", "enabled", ...reasoningLevels.slice(1)] : reasoningLevels).map(value => <Field key={value} orientation="horizontal" className="w-auto"><Checkbox id={`addition-${value}`} checked={efforts.includes(value)} disabled={locked} onCheckedChange={checked => {
-                  const next = checked ? [...efforts, value] : efforts.filter(entry => entry !== value)
-                  setEfforts(next); if (!next.includes(effort)) setEffort(next[0] ?? "")
-                }} /><FieldLabel htmlFor={`addition-${value}`}>{value}</FieldLabel></Field>)}</FieldGroup>
-                <ManagedSelect fullWidth label={t("managementUi.defaultReasoning")} value={effort} disabled={locked} options={efforts.map(value => [value, value])} onChange={setEffort} />
-              </FieldGroup><FieldDescription>{t("modelAddition.reasoningHint")}</FieldDescription></FieldSet>
-            </FieldGroup>
-            <FieldGroup className="grid min-w-0 gap-6 sm:grid-cols-3">
-              {[
-                { label: t("managementUi.imageInput"), value: images, onChange: setImages },
-                { label: t("modelAddition.fileEditing"), value: patch, onChange: setPatch },
-                { label: t("modelAddition.toolSearch"), value: search, onChange: setSearch },
-              ].map(capability => <FieldSet key={capability.label} disabled={locked}><FieldLegend>{capability.label}</FieldLegend><ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={capability.value === "unknown" ? [] : [capability.value]} disabled={locked} aria-label={capability.label} onValueChange={values => capability.onChange(values[0] ?? "unknown")}>
-                <ToggleGroupItem value="yes">{t("managementUi.supported")}</ToggleGroupItem>
-                <ToggleGroupItem value="no">{t("managementUi.unsupported")}</ToggleGroupItem>
-              </ToggleGroup></FieldSet>)}
-            </FieldGroup>
-          </>}
+          </> : <ModelCapabilityFields disabled={locked} allowReasoningToggle={clinePass} value={{ contextWindow: window, reasoningEfforts: efforts, defaultReasoningEffort: effort || null,
+            supportsImages: images === "unknown" ? undefined : images === "yes", supportsPatch: patch === "unknown" ? undefined : patch === "yes", supportsSearch: search === "unknown" ? undefined : search === "yes" }} onChange={changes => {
+              if (changes.contextWindow !== undefined) setWindow(changes.contextWindow)
+              if (changes.reasoningEfforts !== undefined) setEfforts(changes.reasoningEfforts)
+              if (Object.hasOwn(changes, "defaultReasoningEffort")) setEffort(changes.defaultReasoningEffort ?? "")
+              if (Object.hasOwn(changes, "supportsImages")) setImages(changes.supportsImages === undefined ? "unknown" : changes.supportsImages ? "yes" : "no")
+              if (Object.hasOwn(changes, "supportsPatch")) setPatch(changes.supportsPatch === undefined ? "unknown" : changes.supportsPatch ? "yes" : "no")
+              if (Object.hasOwn(changes, "supportsSearch")) setSearch(changes.supportsSearch === undefined ? "unknown" : changes.supportsSearch ? "yes" : "no")
+            }} />}
         </> : null}
         <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{t(loading ? "common.loading" : mode === "manual" ? "modelAddition.load" : "modelAddition.discoverLoad")}</Button>
       </FieldGroup> : <FieldGroup>
@@ -125,7 +105,8 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
       {stale ? <Alert variant="destructive"><AlertDescription>{t("modelCatalog.stale")}</AlertDescription></Alert> : null}
       {management.actionError ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
       {management.readbackRequired ? <Alert><AlertDescription>{t("settingsUi.readbackUnknown")}</AlertDescription></Alert> : null}
-      <DialogFooter><Button variant="outline" disabled={management.busy} onClick={onClose}>{t("modelManagement.cancel")}</Button><Button ref={previewRef} disabled={locked || !options || selected.length === 0} onClick={() => {
+      </div>
+      <DialogFooter className="shrink-0"><Button variant="outline" disabled={management.busy} onClick={onClose}>{t("modelManagement.cancel")}</Button><Button ref={previewRef} disabled={locked || !options || selected.length === 0} onClick={() => {
         if (options && !locked) void management.mutate({ operation: "model.add", provider: target.provider, revision: options.revision, sourceToken: options.sourceToken, models: selected })
       }}>{t("modelManagement.preview")}</Button></DialogFooter>
     </DialogContent>

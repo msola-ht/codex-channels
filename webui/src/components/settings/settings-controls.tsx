@@ -26,6 +26,7 @@ import type { MessageKey, Translate } from "@/lib/i18n/messages"
 import { cn } from "cn"
 
 export const modelOperationDialogClassName = "w-[calc(100%-2rem)] max-w-2xl max-h-[85dvh] overflow-y-auto sm:max-w-2xl"
+export const modelOperationFormDialogClassName = "flex flex-col overflow-hidden"
 
 const providerCleanupWarnings: Record<string, MessageKey> = {
   "backup-cleanup-failed": "settingsUi.providerBackupCleanupFailed",
