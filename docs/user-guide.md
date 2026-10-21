@@ -88,6 +88,8 @@ Plugin 查询与调用不再需要 Gateway 功能开关。旧配置中的 `[expe
 升级前请备份实际使用的 `config.toml`，再显式删除该键及空的 `[experimental]` 表；未清理时配置校验失败，
 原文件保持不变。若需回退旧版本，恢复与该版本匹配的配置备份。程序更新不会代为修改这项旧配置。
 
+项目技能覆盖更新先复制完整候选，再核对确认时的目标并替换；失败保留旧版或报告恢复材料的位置，失败恢复不覆盖已存在目标。更新成功也保留旧目录副本，输出其精确路径；确认旧内容无需保留且没有进程继续使用后，可手动清理。取消覆盖不写入，新会话读取更新后的技能。
+
 “Codex 新会话与用户偏好”先显示设置分类，进入具体项目后再读取当前值与可用选项；分类页返回或取消无需等待 App Server。“配置默认值与用户偏好”统一收集模型、加速档位、权限、Plan 思考等级、推理摘要、输出详细程度、更新检查与历史记录，最后一次确认并批量写入；中途取消不保存。可修改项以进入后读取的 Provider 和 Permission Profile 为准；使用 Permission Profile 时保留现有权限，其余偏好仍可设置。保存校验配置修订及对应策略。
 初始化、日常 Codex 设置、MCP 配置与官方登录使用同一可执行文件选择：显式 `[codex] binary` 优先；值为默认 `codex` 时允许 `CODEX_BINARY` 覆盖。官方登录输出跟随交互输出流，`setup --jsonl` 的 stdout 只保留事件；登录失败或取消不会继续恢复官方配置。
 
@@ -381,7 +383,7 @@ codexc work list [--json]
 新增 Workspace 生效后的渠道通知会逐项以独立代码块提供数字切换命令，例如 `/work 2`，数字与当前完整 Workspace 列表中的序号一致；
 发送该命令即可直接切换，Telegram 通知还提供切换按钮。发送 `/work` 可查看全部 Workspace。
 
-`work` 写入前检查当前配置版本和结构，失效目录仍可用 `work add --prune-missing` 显式清理注册。配置保存后若通知队列清理失败，会明确提示已保存的结果与处理路径；不要重复添加或移除。
+`work` 写入前检查当前配置版本和结构，失效目录仍可用 `work add --prune-missing` 显式清理注册。交互移除绑定展示时的配置；等待确认期间配置发生变化时拒绝移除，需重新选择，避免同 ID 已改绑到另一目录。配置保存后若通知队列清理失败，会明确提示已保存的结果与处理路径；不要重复添加或移除。
 
 管理模型 Provider：
 
@@ -698,7 +700,7 @@ codexc cleanup
 | 维护项目 | 直接命令 | 执行条件与结果 |
 | --- | --- | --- |
 | 归档短会话及子会话 | `codexc cleanup sessions <最大轮数>` | 停止 Gateway、保留 App Server；预览并确认后归档 |
-| 删除请求与响应转储 | `codexc cleanup traffic` | 先预览，确认删除需停止全部 App Server 与 Relay；永久删除当前配置目录下全部转储 |
+| 删除请求与响应转储 | `codexc cleanup traffic` | 先预览，确认删除需停止全部 App Server 与 Relay；仅删除识别的 V2 session，菜单确认绑定本次预览，范围变化则拒绝 |
 | 清理旧指标 | `codexc cleanup metrics --restart-gateway` | 备份清理；显式 `--restart-gateway` 会停止后启动 Gateway（原先停止也会启动），交互菜单则按原状态恢复 |
 | 核对未确认渠道结果 | `codexc delivery status` / `codexc delivery list` | 先停止 Gateway；明确重发、确认送达与停写备份见[投递箱运维](delivery.md) |
 | 清理指定 Provider 的指标 | `codexc cleanup metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
@@ -860,7 +862,7 @@ codexc traffic
 
 WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接使用设置页，显式配置令牌后所有 API 都会验证。`0.0.0.0` 监听必须配置非空令牌，验证后可远程修改设置；写请求的 Origin 必须匹配访问主机，域名反代须保留原始 Host。原始调用转储仍只允许回环访问。详情见 [`WebUI`](webui.md)。
 指标查询与清理、转储查看与清理的同名单值选项拒绝重复，避免后一个值静默改变范围；转储查看最多指定一个 session 目录。
-`metrics report/export/run/threads/turns/quota` 默认生成私有导出文件，使用 `--stdout` 输出到标准输出。组合查询、分页明细及聚合共用一次只读快照，运行中新增记录会在下一次查询出现。服务启动等待 WebUI 健康响应与受管进程身份匹配；其他程序返回 HTTP 200 不代表 WebUI 已就绪。IPv6 地址使用带方括号的 URL。
+`metrics report/export/run/threads/turns/quota` 默认生成私有导出文件，使用 `--stdout` 输出到标准输出。创建导出前逐级检查数据目录、output 和日期目录的类型、所有者及平台私有访问权限，拒绝将这些目录设为符号链接。组合查询、分页明细及聚合共用一次只读快照，运行中新增记录会在下一次查询出现。服务启动等待 WebUI 健康响应与受管进程身份匹配；其他程序返回 HTTP 200 不代表 WebUI 已就绪。IPv6 地址使用带方括号的 URL。
 
 指标查询与导出在独立子进程执行，耗时超过 250 毫秒才显示进度，进度写入标准错误流，不混入 JSON/CSV 或导出文件。取消会等待当前数据库操作释放资源；失败或取消的导出文件会移除，只有成功后才报告文件路径。
 `metrics report/export` 支持 `--request-purpose autoApprovalReview|unmarked`；不指定时包含全部用途。`unmarked` 表示未标记用途（含历史未知），不能证明是普通请求，可与 Thread/Turn 归属筛选组合。会话、轮次和 `run` 的任务统计固定排除明确审查，不接受此选项。聚合保留已知 Token 累计与 `usageCoverage` 缺失计数，CSV/JSON 同步输出；Markdown 直接显示已有累计，不附加字段缺失标注，零值与未提供的数值留空或省略。全局和提供商总量含审查，以“其中自动审查”列出，不能再次加到总数。模型组只按记录模型归组，涉及轮次不可跨组相加。

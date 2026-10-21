@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { lstatSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setImmediate } from "node:timers/promises";
@@ -27,6 +28,7 @@ export async function runTrafficCleanup(
   {
     assertAppServersStopped = assertConfiguredAppServersStopped,
     environment = process.env,
+    expectedFingerprint,
     output = console,
     signal,
   } = {},
@@ -36,13 +38,19 @@ export async function runTrafficCleanup(
   const located = locateOptionalUserConfig(environment);
   const directory = options.directory ?? join(located?.dataDir ?? userDataDir(environment), "traffic");
   const preview = trafficCleanupPreview(directory);
+  const original = preview.targets.length > 0 ? cleanupIdentity(preview) : undefined;
+  const fingerprint = original === undefined ? null
+    : createHash("sha256").update(JSON.stringify(original)).digest("hex");
+  const plan = { ...preview, fingerprint };
   renderPreview(preview, output);
-  if (preview.targets.length === 0) return preview;
+  if (expectedFingerprint !== undefined && expectedFingerprint !== fingerprint) {
+    throw new Error("转储范围在预览后发生变化，请重新预览并确认；未删除任何文件");
+  }
+  if (preview.targets.length === 0) return plan;
   if (!options.confirm) {
     output.log("未删除。停止全部 App Server 与 Relay 后，加 --confirm 再执行。");
-    return preview;
+    return plan;
   }
-  const original = cleanupIdentity(preview);
   await assertAppServersStopped(environment, directory);
   signal?.throwIfAborted();
   const confirmed = trafficCleanupPreview(directory);
@@ -66,7 +74,7 @@ export async function runTrafficCleanup(
     deleted++;
   }
   output.log(`已删除 ${confirmed.v2Sessions} 个 V2 session（${formatBytes(confirmed.bytes)}）。`);
-  return confirmed;
+  return { ...confirmed, fingerprint };
 }
 
 function directoryIdentity(path) {

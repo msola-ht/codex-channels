@@ -4,6 +4,7 @@ export interface SourceUpdateResult {
   managed: boolean;
   previousVersion?: string;
   version?: string;
+  backupPath?: string;
 }
 
 export type SourceUpdateStage =
@@ -27,6 +28,7 @@ export interface SourceUpdatePlan {
   operation: "source-update";
   managed: boolean;
   checkout?: string;
+  checkoutIdentity?: { path: string; dev: number; ino: number };
   currentCommit?: string;
   currentVersion?: string;
   npmPrefix?: string;

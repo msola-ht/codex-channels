@@ -4,7 +4,6 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
-  mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
@@ -42,6 +41,7 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
   repairWindowsPrivateFileSync,
   assertCodexConfigAccessSync,
+  ensurePrivateDirectorySync,
 } from "../runtime/private-file.mjs";
 import {
   CODEX_REMOTE_USAGE,
@@ -537,7 +537,8 @@ async function dispatchCommand(command, args) {
       }
       await (await import("../scripts/cleanup-menu.mjs")).runCleanupMenu({
         runSessionCleanup: (values, options) => runMaintenanceScript("scripts/session-cleanup.mjs", values, options),
-        runTrafficCleanup: (values, options) => runMaintenanceScript("scripts/traffic-cleanup.mjs", values, options, false),
+        runTrafficCleanup: async (values, options) =>
+          (await import("../scripts/traffic-cleanup.mjs")).runTrafficCleanup(values, options),
         runDatabaseCommand: (values, options) => runMaintenanceScript("scripts/metrics-database.mjs", values, options),
       });
       break;
@@ -948,8 +949,9 @@ function openMetricsExportFile(subcommand, args) {
   const { dataDir } = requireUserConfig();
   const dateDirectory = new Date().toLocaleDateString("en-CA");
   const directory = join(dataDir, "output", dateDirectory);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  chmodSync(directory, 0o700);
+  for (const path of [dataDir, join(dataDir, "output"), directory]) {
+    ensurePrivateDirectorySync(path);
+  }
   const formatOption = args.findIndex((argument) => argument === "--format");
   const format = formatOption >= 0
     ? args[formatOption + 1] ?? "markdown"

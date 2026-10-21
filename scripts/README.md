@@ -45,7 +45,7 @@
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
 - `source-update.mjs` / `source-update.d.mts`：从本机终端更新受管官方 `main`；跨平台独占锁阻止并发更新，候选克隆启用长路径支持。先构建并只读检查配置、数据库结构和精确 CLI 合同，CLI 不匹配时确认后同步。记录 App Server、Gateway、Relay、WebUI 状态，按依赖顺序停服；刷新源码与全局命令后，只恢复原本运行的服务，Relay 还须保持启用，WebUI 还须未被配置关闭。恢复前再次校验 CLI 版本和配置、数据库，失败保留阶段及必要备份。无新提交或本地构建包只同步配套 CLI，不更新 Gateway 包；关闭 daemon 自动启动，其他用户偏好和模型目录不变。
-  已安装包按自身来源记录识别受管源码，不因旧受管目录残留而覆盖本地构建包。更新预检核对当前 npm prefix、运行包和已安装服务定义的程序路径，拒绝刷新范围外的服务路径；停服前再次复核，换仓库时合并保留完整安装 prefix 归属。候选依赖安装禁用隐式生命周期，随后显式构建一次；仅在 npm 有效配置未禁用脚本时安装 Git hooks。
+  已安装包按自身来源记录识别受管源码，不因旧受管目录残留而覆盖本地构建包。更新预检核对当前 npm prefix、运行包和已安装服务定义的程序路径，拒绝刷新范围外的服务路径；停服前及切换前复核旧目录身份、HEAD、origin 和工作树状态，换仓库时合并保留完整安装 prefix 归属。成功后也保留旧源码副本并返回 backupPath，避免删除外部并发修改。候选依赖安装禁用隐式生命周期，随后显式构建一次；仅在 npm 有效配置未禁用脚本时安装 Git hooks。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并在已安装包记录精确源码来源，从当前全局包路径识别其所属 prefix，供安装归属核对和跨 Node.js 环境卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：统一识别受管源码、本地工作树构建包与 npm 全局包，先卸载后台服务，再卸载当前包及来源匹配的已记录包；只有路径、来源与受管标记均匹配才删除仓库。拒绝符号链接、身份冲突和执行中替换，保留普通工作树和用户数据。
@@ -317,7 +317,7 @@
 - `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“项目技能”类别；列出项目 `.codex/skills` 下带
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
-  hermes 运行时的 `.skill-lock.json`。
+  hermes 运行时的 `.skill-lock.json`。覆盖确认绑定目标快照，同父目录先准备候选再替换；旧树保留在隐藏操作目录并输出恢复位置，失败恢复不覆盖已存在目标。
 - `config.mjs`：`codexc config` 的顶层交互编排，按作用范围提供 Codex 用户偏好、工具与 MCP、Gateway 显示与会话、身份时区、调用记录、计划任务、网络代理、服务访问、日志高级功能与指标存储，以及脱敏总览和路径查询。MCP 添加、编辑、删除与已有工具策略管理同组，Relay/WebUI 访问设置同组；保留损坏 Gateway 配置时的 Codex、MCP 和路径入口。循环记住上次选择；修改复用既有保存流程，非交互终端无参数时显示帮助。
   `paths [--json]` 不进入菜单或读取配置正文，只输出绝对路径与文件存在状态，不创建配置。子菜单与总览在选中后按需加载，路径查询和取消不加载这些实现。
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，有效默认值来自共享 Schema，原始配置保留未配置与显式配置的区别；只显示配置来源、有效开关、作用范围
@@ -512,7 +512,7 @@
   并向顶层帮助导出规范用法行。
 - `traffic-cleanup.mjs` / `traffic-cleanup.d.mts`：实现并声明 `codexc cleanup traffic`；默认只预览
   已识别的 V2 session，确认全部 App Server 与 Relay 已停止后才按 `--confirm` 永久删除，
-  停止检查后复核预览范围及目录/manifest 身份，逐项删除前再复核；未识别文件与目录保持不变。
+  菜单传入首次预览的范围指纹，停止检查后复核预览范围及目录/manifest 身份，逐项删除前再复核；未识别文件与目录保持不变。菜单内调用与维护服务共享取消信号，直接命令保留子进程收尾协议。
 - `traffic-command.mjs`：`codexc traffic` 的实现，把 V2 逻辑调用索引与正文引用渲染成人可读文本；
   每个编号固定展示一条请求和一个终态响应，支持编号、关键字、正文上限与持续跟随；不修改转储文件。
 - `traffic-dump-reader.mjs`：V2 转储共享读取实现，Relay debug v1 补充入站/交付阶段且拒绝未知版本，严格读取 `manifest.json`、`interactions.jsonl` 与

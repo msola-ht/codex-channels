@@ -85,6 +85,7 @@ export function inspectManagedSourceUpdatePlan(
   }
   const repository = options.repository ?? officialRepository;
   assertManagedRepository(checkout, repository, environment, options.captureCommand);
+  const checkoutIdentity = sourceCheckoutIdentity(checkout);
   readManagedNpmPrefixes(checkout, environment);
   const npmPrefix = assertSourceUpdateInstallation(checkout, environment, options);
   const targetCommit = resolveMainCommit(
@@ -106,6 +107,7 @@ export function inspectManagedSourceUpdatePlan(
     operation: "source-update",
     managed: true,
     checkout,
+    checkoutIdentity,
     currentCommit,
     currentVersion,
     npmPrefix,
@@ -291,6 +293,7 @@ export async function updateManagedSourceInstallation(
           throw new Error("npm 全局目录在候选构建期间发生变化，拒绝更新；请重新运行 codexc update");
         }
         recordManagedSourceMetadata(stagedCheckout, [...readManagedNpmPrefixes(checkout, environment), plan.npmPrefix], environment);
+        assertSourceCheckoutUnchanged(plan, repository, environment, options);
       },
     );
     if (inspection.services.installed) {
@@ -315,6 +318,8 @@ export async function updateManagedSourceInstallation(
     if (!options.runStage) writeMessageSafely(writeMessage, "note", "候选源码已通过校验，准备切换。");
     const proposedBackupPath = `${checkout}.pre-update-${Date.now()}`;
     await runStage("switch-source", () => {
+      assertSourceCheckoutUnchanged(plan, repository, environment, options);
+      if (existsSync(proposedBackupPath)) throw new Error("旧源码备份路径已存在，拒绝覆盖");
       renamePath(checkout, proposedBackupPath);
       backupPath = proposedBackupPath;
       try {
@@ -352,8 +357,9 @@ export async function updateManagedSourceInstallation(
       servicesMayNeedRestore = false;
     }
     await runStage("cleanup", () => {
-      rmSync(backupPath, { recursive: true, force: true });
-      backupPath = undefined;
+      // Editors may still hold descriptors into the renamed tree. No snapshot
+      // can prove that deleting it is safe after the final check.
+      writeMessageSafely(writeMessage, "note", `旧源码已保留：${backupPath}。确认没有待保留修改且旧目录已无人使用后，可手动清理；更新不会自动删除旧源码副本。`);
     });
     return {
       changed: true,
@@ -361,6 +367,7 @@ export async function updateManagedSourceInstallation(
       managed: true,
       previousVersion: currentVersion,
       version: candidate.targetVersion,
+      backupPath,
     };
   } catch (error) {
     let updateError = error;
@@ -615,6 +622,21 @@ function resolveMainCommit(repository, checkout, environment, captureCommand) {
     throw new Error("无法解析官方 main 分支的唯一 commit");
   }
   return commit;
+}
+
+function sourceCheckoutIdentity(checkout) {
+  const stat = lstatSync(checkout);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("受管源码目录类型已变化，拒绝更新");
+  return { path: realpathSync(checkout), dev: stat.dev, ino: stat.ino };
+}
+
+function assertSourceCheckoutUnchanged(plan, repository, environment, options) {
+  if (JSON.stringify(sourceCheckoutIdentity(plan.checkout)) !== JSON.stringify(plan.checkoutIdentity)) {
+    throw new Error("受管源码目录身份在预检后发生变化，拒绝切换");
+  }
+  assertManagedRepository(plan.checkout, repository, environment, options.captureCommand);
+  const head = capture("git", ["rev-parse", "HEAD"], plan.checkout, environment, options.captureCommand).trim();
+  if (head !== plan.currentCommit) throw new Error("受管源码 HEAD 在预检后发生变化，拒绝切换");
 }
 
 function assertManagedRepository(checkout, repository, environment, captureCommand) {
