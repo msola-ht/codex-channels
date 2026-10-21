@@ -28,7 +28,6 @@ import type {
   FeishuCommandCenterChoices,
   FeishuCommandCenterResponse,
 } from "./command-center.js";
-import { feishuCommandChoiceLimit } from "./command-center.js";
 import {
   renderQueueCommandCenterChoices,
   renderQueueItemChoices,
@@ -217,15 +216,6 @@ export class FeishuConversationAdapter {
           message.actorId,
         );
         if (cancelledInteraction) this.notifyText(message.target.conversationId, interactionStoppedText);
-        if (result.kind === "workspaces" && this.commandCenter) {
-          const response = renderCommandCenterChoices("workspace", result);
-          if (response) {
-            await this.commandCenter.openResponse(message.target, message.actorId, response);
-            // Cards have a bounded number of choices; retain the complete text
-            // list so later entries remain discoverable through /workspace.
-            if (response.choices.length <= feishuCommandChoiceLimit) return;
-          }
-        }
         if (result.kind === "hooks") {
           const response = renderCommandCenterChoices("hooks", result);
           if (response && this.commandCenter) {
