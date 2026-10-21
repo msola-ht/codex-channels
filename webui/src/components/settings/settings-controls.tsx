@@ -160,14 +160,14 @@ export function SettingsMutationFeedback({ result, writeUnconfirmed, readbackReq
   </AlertDescription></Alert>
 }
 
-export function ManagedSelect({ label, value, options, disabled, disabledValues = [], onChange, description, descriptionId, placeholder, fullWidth = false }: { description?: string; descriptionId?: string; placeholder?: string; fullWidth?: boolean; label: string; value: string; options: string[][]; disabled: boolean; disabledValues?: readonly string[]; onChange: (value: string) => void }) {
+export function ManagedSelect({ label, value, options, disabled, disabledValues = [], onChange, description, descriptionId, placeholder, fullWidth = false, hideLabel = false }: { description?: string; descriptionId?: string; placeholder?: string; fullWidth?: boolean; hideLabel?: boolean; label: string; value: string; options: string[][]; disabled: boolean; disabledValues?: readonly string[]; onChange: (value: string) => void }) {
   const { t } = useTranslation()
   const selectId = useId()
   const nonEmptyOptions = options.filter(([option]) => option !== "")
   const effectiveOptions = value !== "" && !nonEmptyOptions.some(([option]) => option === value) ? [[value, value], ...nonEmptyOptions] : nonEmptyOptions
   const selectedLabel = effectiveOptions.find(([option]) => option === value)?.[1]
   const hintId = descriptionId ?? `${selectId}-description`
-  const labelContent = <FieldLabel className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]" htmlFor={selectId}>{label}</FieldLabel>
+  const labelContent = <FieldLabel className={cn("min-w-0 text-muted-foreground [overflow-wrap:anywhere]", hideLabel && "sr-only")} htmlFor={selectId}>{label}</FieldLabel>
   return <Field className="min-w-0" orientation={fullWidth ? "vertical" : "responsive"} data-disabled={disabled}>
     {description ? <FieldContent className="min-w-0 [overflow-wrap:anywhere]">{labelContent}<FieldDescription id={hintId}>{description}</FieldDescription></FieldContent> : labelContent}
     <Select items={[{ value: null, label: placeholder ?? t("settingsUi.notConfigured") }, ...effectiveOptions.map(([value, label]) => ({ value, label }))]} value={value || null} disabled={disabled} onValueChange={next => { if (next !== null) onChange(next) }}>

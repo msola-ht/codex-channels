@@ -2,9 +2,9 @@ import { useId } from "react"
 import { cn } from "cn"
 
 import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ManagedSelect } from "@/components/settings/settings-controls"
 import { useTranslation } from "@/hooks/use-translation"
@@ -52,7 +52,7 @@ export function ModelCapabilityFields({ value, disabled, maximum = 100000000, al
   return <>
     <FieldGroup className="grid min-w-0 items-start gap-6 sm:grid-cols-2">
       <FieldSet disabled={disabled}><FieldLegend>{t("modelAddition.context")}</FieldLegend><FieldGroup>
-        <ManagedSelect fullWidth label={t("managementUi.contextPreset")} value={contextWindowPresetTokens.some(tokens => String(tokens) === value.contextWindow && tokens <= maximum) ? value.contextWindow : ""} placeholder={value.contextWindow ? t("openAiModelCatalog.contextCustom") : undefined} disabled={disabled} options={contextWindowPresetTokens.filter(tokens => tokens <= maximum).map(tokens => [String(tokens), t("managementUi.contextPresetLabel", { label: contextWindowPresetLabel(tokens), tokens })])} onChange={contextWindow => onChange({ contextWindow })} />
+        <ManagedSelect fullWidth hideLabel label={t("managementUi.contextPreset")} value={contextWindowPresetTokens.some(tokens => String(tokens) === value.contextWindow && tokens <= maximum) ? value.contextWindow : ""} placeholder={value.contextWindow ? t("openAiModelCatalog.contextCustom") : undefined} disabled={disabled} options={contextWindowPresetTokens.filter(tokens => tokens <= maximum).map(tokens => [String(tokens), t("managementUi.contextPresetLabel", { label: contextWindowPresetLabel(tokens), tokens })])} onChange={contextWindow => onChange({ contextWindow })} />
         <Field><FieldLabel htmlFor={`${instance}-window`}>{t("managementUi.contextTokens")}</FieldLabel><Input id={`${instance}-window`} type="number" min={1024} max={maximum} value={value.contextWindow} disabled={disabled} onChange={event => onChange({ contextWindow: event.target.value })} /></Field>
       </FieldGroup></FieldSet>
       <FieldSet disabled={disabled}><FieldLegend>{t("modelAddition.reasoning")}</FieldLegend><FieldGroup>
@@ -64,12 +64,17 @@ export function ModelCapabilityFields({ value, disabled, maximum = 100000000, al
           <ToggleGroupItem value="supported">{t("managementUi.supported")}</ToggleGroupItem>
         </ToggleGroup> : null}
         {!allowUnknown || reasoningStatus === "supported" ? <>
-          <FieldGroup className="flex-row flex-wrap gap-x-4 gap-y-2">{levels.map(level => <Field key={level} orientation="horizontal" className="w-auto">
-            <Checkbox id={`${instance}-${level}`} checked={efforts.includes(level)} disabled={disabled} onCheckedChange={checked => {
-              const next = checked ? [...efforts, level] : efforts.filter(effort => effort !== level)
+          <Field>
+            <FieldLabel className="sr-only" htmlFor={`${instance}-efforts`}>{t("modelAddition.reasoning")}</FieldLabel>
+            <Select multiple items={levels.map(level => ({ value: level, label: level }))} value={efforts} disabled={disabled} onValueChange={next => {
               onChange({ reasoningEfforts: next, defaultReasoningEffort: next.includes(value.defaultReasoningEffort ?? "") ? value.defaultReasoningEffort : next[0] ?? null })
-            }} /><FieldLabel htmlFor={`${instance}-${level}`}>{level}</FieldLabel>
-          </Field>)}</FieldGroup>
+            }}>
+              <SelectTrigger id={`${instance}-efforts`} size="sm" className="w-full min-w-0 max-w-full whitespace-normal data-[size=sm]:h-auto data-[size=sm]:min-h-7 *:data-[slot=select-value]:line-clamp-none">
+                <SelectValue className="min-w-0 [overflow-wrap:anywhere]" placeholder={t("settingsUi.notConfigured")} />
+              </SelectTrigger>
+              <SelectContent className="max-w-[calc(100vw-2rem)]"><SelectGroup>{levels.map(level => <SelectItem key={level} value={level}>{level}</SelectItem>)}</SelectGroup></SelectContent>
+            </Select>
+          </Field>
           <ManagedSelect fullWidth label={t("managementUi.defaultReasoning")} value={value.defaultReasoningEffort ?? ""} disabled={disabled} options={efforts.map(level => [level, level])} onChange={defaultReasoningEffort => onChange({ defaultReasoningEffort })} />
         </> : null}
       </FieldGroup>{!allowUnknown ? <FieldDescription>{t("modelAddition.reasoningHint")}</FieldDescription> : null}</FieldSet>
