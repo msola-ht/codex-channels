@@ -310,12 +310,17 @@ export abstract class GatewayComponentGraph {
     this.primaryProvider = primaryProvider;
     this.customPrimaryProviderId = customPrimaryProvider?.id;
     const clients = new Map<string, CodexAppServerClient>();
+    const imageUploadFetch = createProxyFetch(config.networkProxy);
+    const supportsImageReferenceUpload = (provider: string): boolean =>
+      provider === "openai" || /^ds-[a-z0-9_-]{1,32}$/u.test(provider);
+    const imageUploadOptions = (provider: string) =>
+      supportsImageReferenceUpload(provider) ? { upload: imageUploadFetch } : undefined;
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger, 64, config.codexClientIdentity),
       {
         ...(config.codexModel ? { model: config.codexModel } : {}),
       },
-      primaryProvider === "openai" ? { upload: createProxyFetch(config.networkProxy) } : undefined,
+      imageUploadOptions(primaryProvider),
     ));
     for (const managedProvider of managedProviders) {
       const providerTransport = createTransport(
@@ -324,6 +329,7 @@ export abstract class GatewayComponentGraph {
       clients.set(managedProvider.provider, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
         {},
+        imageUploadOptions(managedProvider.provider),
       ));
     }
     for (const customSwitchingProvider of customSwitchingProviders) {

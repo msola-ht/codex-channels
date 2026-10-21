@@ -4,6 +4,7 @@ export {
   type ProviderWeeklyQuotaSnapshot,
   type ProviderQuotaWindowsSnapshot,
   type ProviderProxyOptions,
+  type ProviderImageUpload,
 } from "./proxy.js";
 export {
   ProviderProxyMetricsServer,
@@ -13,6 +14,7 @@ export { pruneModelTrafficDumpSessions, pruneModelTrafficDumpSessionsAsync } fro
 
 export { ChatCompletionsBridge } from "./chat-bridge.js";
 export { sendDirectChat, type DirectChatTarget } from "./direct-chat.js";
+export { uploadDeepseekImage, type DeepseekImageMediaType } from "./deepseek-file-upload.js";
 export { sendDirectResponses, DirectResponsesObserver } from "./direct-responses.js";
 export { ChatBodyTooLargeError, readChatBody, waitForChatOperation, writeChatData } from "./chat-io.js";
 export { ChatUpstreamError, ModelRequestTimeoutError, chatUpstreamError, chatStreamError } from "./chat-errors.js";
