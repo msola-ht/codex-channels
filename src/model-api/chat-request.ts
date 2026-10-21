@@ -45,12 +45,12 @@ export function applyChatReasoningPolicy(request: DirectChatRequest, provider: s
   }
   if (mode === "passthrough") return request;
   if (mode !== "off") return applyExplicitReasoningPolicy(request, mode,
-    effort => provider.startsWith("clp-") ? clinePassChatReasoningControl(request.model, effort) : { reasoning_effort: effort }, DirectChatRequestError);
+    effort => provider.startsWith("clp-") ? clinePassChatReasoningControl(request.model, effort, extraModel?.cline_request_profile) : { reasoning_effort: effort }, DirectChatRequestError);
   const knownOff = supportsChatReasoningOff(provider, request.model);
   if (!knownOff && !extraModel?.reasoning_efforts.includes("none")) return request;
   const result = clearReasoningControls(request, DirectChatRequestError);
   if (provider.startsWith("ds-")) result.reasoning_effort = "none";
-  else Object.assign(result, clinePassChatReasoningControl(request.model, "none"));
+  else Object.assign(result, clinePassChatReasoningControl(request.model, "none", extraModel?.cline_request_profile));
   return result;
 }
 

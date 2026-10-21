@@ -11,7 +11,6 @@ export interface ClinePassConfigurationInput {
 export interface ClinePassConfigurationOptions {
   environment?: NodeJS.ProcessEnv;
   loadTemplates?: typeof import("./responses-model-templates.mjs").loadResponsesModelTemplates;
-  downloadClineCatalog?: typeof import("../runtime/cline-relay-catalog-update.mjs").downloadClineRelayCatalog;
   selectModels?: (selection: {
     models: Array<{ id: string; name: string; reasoningEffort: string }>;
     enabledModels: string[];
@@ -20,8 +19,7 @@ export interface ClinePassConfigurationOptions {
   }) => Promise<string[] | undefined>;
 }
 export function clinePassSetupPaths(environment: NodeJS.ProcessEnv, accountId: string): Record<"config" | "profile" | "marker" | "catalog" | "manifest" | "backup" | "registry", string>;
-export function createClinePassCatalog(templates: ResponsesModelDefinition[], source: import("../runtime/cline-relay-catalog.mjs").ClineRelayCatalog, enabledModels?: string[]): { models: Array<Record<string, unknown>> };
-export function projectClinePassModels(source: import("../runtime/cline-relay-catalog.mjs").ClineRelayCatalog, options?: { requireModels?: boolean }): { models: ResponsesModelDefinition[]; excludedModels: Array<{ model: string; reason: string }> };
+export function createClinePassCatalog(templates: ResponsesModelDefinition[], enabledModels?: string[]): ReturnType<typeof import("./provider-model-catalog.mjs").createClinePassCatalogWithTemplateBindings>;
 export function previewClinePassConfiguration(input: ClinePassConfigurationInput, options?: ClinePassConfigurationOptions): { revision: string; operation: string; account: { id: string; provider: string; default: boolean }; mode: "switching" | "exclusive"; previousMode?: "switching" | "exclusive"; credentialAction: "preserve" | "replace"; willChange: boolean; effects: { writesMainConfig: boolean; writesIsolatedProfile: boolean }; activation: "none" | "restart-all" };
 export function applyClinePassConfiguration(input: ClinePassConfigurationInput, options?: ClinePassConfigurationOptions): Promise<ReturnType<typeof previewClinePassConfiguration> & { action: string; excludedModels: Array<{ model: string; reason: string }> }>;
 export function previewClinePassRemoval(accountId: string, options?: ManagedAccountRuntimeOptions): Promise<{ revision: string; operation: string; account: { id: string; provider: string }; effects: { stopsRunningAppServer: boolean; historyThreadsBecomeUnavailable: true; preservesPrivateBackup: true; restoresInitialConfig: boolean }; activation: string }>;

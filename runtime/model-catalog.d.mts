@@ -2,6 +2,7 @@ export const contextWindowPresetTokens: readonly [131072, 262144, 393216, 524288
 export const openAiContextWindowPresetTokens: readonly [272000, 372000, 500000];
 export function contextWindowPresetLabel(tokens: number): string;
 export function defaultModelDisplayName(id: string): string;
+export function createIndependentModelDraft(model?: Partial<ModelDefinition>): Omit<ModelDefinition, "contextWindow"> & { contextWindow?: number };
 export function isValidCustomModelId(id: unknown): id is string;
 export function withModelContextWindow(model: ModelDefinition, contextWindow: number): ModelDefinition;
 export interface SamplingParameters {

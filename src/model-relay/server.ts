@@ -232,8 +232,8 @@ export class ModelRelayServer {
         ? lease.caller.modelReasoning[requestModel]! : lease.caller.reasoning ?? "passthrough";
       body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, provider!, reasoningPolicy)
         : applyChatReasoningPolicy(body as DirectChatRequest, provider!, reasoningPolicy, prepared.modelCapabilities?.find(model => model.id === body!.model));
-      if (protocol === "chat" && provider!.startsWith("clp-") && body.model === "cline-pass/deepseek-v4.1-flash") {
-        const routed = pinClinePassRouting(body);
+      if (protocol === "chat" && provider!.startsWith("clp-")) {
+        const routed = pinClinePassRouting(body, prepared.modelCapabilities?.find(model => model.id === body!.model)?.cline_request_profile);
         clineRoutingChanged = routed !== body;
         body = routed;
       }

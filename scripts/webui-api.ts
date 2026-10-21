@@ -1,6 +1,4 @@
-export type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { GenerationTiming } from "../runtime/request-timing.mjs"
-import type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 import type { CustomModelCapabilityProbeResult } from "./custom-model-capability-probe.mjs"
 export type { ProviderWebSearchProbeInput as ManagementProviderWebSearchProbeInput, ProviderWebSearchProbeResult as ManagementProviderWebSearchProbeResult } from "./provider-web-search-probe.mjs"
@@ -799,15 +797,6 @@ export interface ManagementProviderSettingsResponse {
 }
 
 export type ProviderModelTemplateSource = "official" | "deepseek" | "cline"
-export interface CustomModelDraftTemplatesResponse {
-  templates: Array<{
-    source: "official" | "deepseek"
-    model: string
-    displayName: string
-    draft: import("./responses-model-templates.mjs").CustomModelDraftDefinition
-    suggested: ResponsesModelDefinition
-  }>
-}
 export type ProviderModelTemplateSection = "prompts" | "capabilities" | "settings"
 export type ProviderModelTemplateValue = { present: false } | { present: true; value: unknown }
 export interface ProviderModelTemplateOptionsResponse {
@@ -1360,7 +1349,6 @@ export interface RelayManagedCaller {
   models: string[]; reasoning: RelayReasoning; model_reasoning?: Record<string, RelayModelReasoning>;
 }
 export interface RelayManagementSnapshot {
-  clineCatalog?: ClineRelayCatalogSnapshot;
   revision: string; enabled: boolean; maxConcurrency: number; callers: RelayManagedCaller[];
   usage: { observedAtMs: number; startAtMs: number; callers: Array<{
     callerId: string; keyId: string; lastRequestAtMs: number | null; requestCount: number; unsuccessfulRequestCount: number;

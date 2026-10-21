@@ -1,6 +1,16 @@
 // Pure model-definition validation, Codex field generation and source adaptation.
 // Provider files and credentials belong to the runtime persistence owners.
 import { completeModelMessages } from "./model-template-prompts.mjs";
+import { thirdPartyCodingInstructions } from "./third-party-coding-instructions.mjs";
+
+/** Shared independent draft. Capabilities remain unset until explicitly declared. */
+export function createIndependentModelDraft(model = {}) {
+  const instructions = model.instructions === undefined
+    ? model.modelMessages?.instructions_template ?? thirdPartyCodingInstructions : model.instructions;
+  return { id: "", name: "", defaultReasoningEffort: null, ...model, instructions,
+    modelMessages: { instructions_template: instructions, ...model.modelMessages },
+    experimentalSupportedTools: [...new Set([...(model.experimentalSupportedTools ?? []), "send_user_message_async", "clock"])] };
+}
 export const contextWindowPresetTokens = Object.freeze([131072, 262144, 393216, 524288, 1048576]);
 export const openAiContextWindowPresetTokens = Object.freeze([272000, 372000, 500000]);
 export function contextWindowPresetLabel(tokens) {

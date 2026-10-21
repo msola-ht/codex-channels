@@ -5,7 +5,7 @@
 
 - `index.ts`：公开模块能力。
 - `admission.ts`：内存身份快照、常数时间秘密哈希比较、全局令牌桶与并发许可、有界上传/等待预算及按 Key 公平调度、撤销和关闭。
-- `server.ts`：默认回环、可显式 IPv4 局域网监听的 HTTP、异步准备后的出站复核、Key 多提供商模型授权、公共 ID 到精确上游 ID 映射及按当前 Key 和公共模型 ID 选择思考策略、CLP 精确 DeepSeek 模型的上游限定（复用 Provider Proxy 公共投影）、原生 Chat/Responses JSON/SSE 交付、请求关闭及一次性指标生成（含实际出站 User-Agent，缺失不推断）；错误响应提供受控原因、阶段、上游状态与指标关联编号。
+- `server.ts`：默认回环、可显式 IPv4 局域网监听的 HTTP、异步准备后复核、Key 精确模型授权及公共 ID 映射、逐模型思考策略和 CLP 共用请求快照。CLP Flash 快照通过 Provider Proxy 公共投影限定 DeepSeek 路由，标准快照不固定路由；原生 Chat/Responses JSON/SSE 交付及指标合同保持独立，错误只提供受控原因、阶段、上游状态和关联编号。
 - `metrics-sender.ts`：有界单次指标发送、四类确认结果、零重试与限时关闭。
 
 Runtime 注入已验证的配置、Provider 材料与网络目标；本模块不解析账户文件或凭据路径。

@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
-import { normalizeDeepseekCatalogCapabilities } from "../runtime/model-catalog.mjs";
+import { normalizeDeepseekCatalogCapabilities, modelDefinitionsFromCatalog } from "../runtime/model-catalog.mjs";
 import { completeCatalogPrompts } from "../runtime/model-template-catalog.mjs";
+import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { withThirdPartyLocalTools } from "../runtime/third-party-model-catalog.mjs";
 
 const settings = JSON.parse(readFileSync(new URL("../provider-model-catalog.json", import.meta.url), "utf8"));
 
@@ -47,4 +49,24 @@ export function createCcgCatalogWithTemplateBindings(source) {
     return { ...entry, slug };
   });
   return { catalog, templateBindings };
+}
+
+/** Fixed upstream IDs; DS supplies reusable metadata, never CLP Responses capabilities. */
+export function createClinePassCatalogWithTemplateBindings(source) {
+  const templates = modelDefinitionsFromCatalog(completeCatalogPrompts(source), "deepseek");
+  const templateBindings = {};
+  const definitions = Object.entries(settings.clp.modelIds).map(([id, sourceId]) => {
+    const matches = templates.filter(model => model.id === sourceId);
+    if (matches.length !== 1) throw new Error(`CLP 缺少唯一的 DS 模板：${sourceId}`);
+    const model = structuredClone(matches[0]);
+    delete model.template;
+    templateBindings[id] = { source: "deepseek", model: sourceId };
+    return { ...model, id, name: id.slice("cline-pass/".length),
+      reasoningEfforts: [...new Set(["none", ...(model.reasoningEfforts ?? [])])],
+      supportsImageDetailOriginal: false, supportsReasoningSummary: false, defaultReasoningSummary: "none",
+      supportsVerbosity: true, defaultVerbosity: "medium", applyPatchToolType: "freeform", supportsSearchTool: true };
+  });
+  const catalog = withThirdPartyLocalTools(createResponsesModelCatalog(definitions, definitions[0].id));
+  for (const model of catalog.models) model.cline_request_profile = templateBindings[model.slug].model === settings.flashSourceModel ? "deepseek-flash" : "standard";
+  return { catalog: { models: catalog.models }, templateBindings };
 }

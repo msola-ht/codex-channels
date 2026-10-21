@@ -1,5 +1,4 @@
-import { contextWindowPresetTokens, contextWindowPresetLabel, customModelSamplingDefaults, validateModelDefinitions as validateResponsesModels, validateSamplingParameters, isValidCustomModelId, withModelContextWindow, defaultModelDisplayName } from "../runtime/model-catalog.mjs";
-import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
+import { createIndependentModelDraft, contextWindowPresetTokens, contextWindowPresetLabel, customModelSamplingDefaults, validateModelDefinitions as validateResponsesModels, validateSamplingParameters, isValidCustomModelId, withModelContextWindow, defaultModelDisplayName } from "../runtime/model-catalog.mjs";
 
 const contextWindowPresets = contextWindowPresetTokens.map(tokens => ({
   value: String(tokens), label: `${contextWindowPresetLabel(tokens)}（${tokens} Token）`,
@@ -17,7 +16,7 @@ const advancedSettingGroups = [
   { value: "sampling", label: "默认采样参数（temperature、top_p 等）" },
 ];
 
-export async function promptResponsesModels(prompts, defaultModel, previous = [], output = process.stdout, upstreamWireApi = "responses", retainedModels = [], { loadDraftTemplates = loadCustomModelDraftTemplates, allowAdd = true, managedClinePass = false } = {}) {
+export async function promptResponsesModels(prompts, defaultModel, previous = [], output = process.stdout, upstreamWireApi = "responses", retainedModels = [], { allowAdd = true, managedClinePass = false } = {}) {
   if (!["responses", "chat_completions"].includes(upstreamWireApi)) throw new Error("自定义模型上游接口不受支持");
   if (!allowAdd && previous.length === 0) throw new Error("本地编辑必须选择已保存的模型");
   const editableAdvancedGroups = advancedSettingGroups.filter(group => !managedClinePass || !["sampling", "image-detail"].includes(group.value))
@@ -42,21 +41,8 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
     const old = previous.find((entry) => entry.id === id);
     let model;
     if (old === undefined) {
-      const templates = await loadDraftTemplates();
-      if (templates.length === 0) throw new Error("没有可用的模型起点模板");
-      const selected = await prompts.select({
-        message: "选择新模型的起点模板（仅参考，不证明上游支持模板能力）",
-        options: templates.map((entry, templateIndex) => ({ value: templateIndex, label: entry.displayName, hint: entry.source === "official" ? "固定 OpenAI 底座；推荐" : `DeepSeek 模板：${entry.model}` })),
-        initialValue: 0,
-      });
-      if (prompts.isCancel(selected)) return undefined;
-      const template = templates[selected];
-      if (template === undefined) throw new Error("模型起点模板选择无效");
-      model = structuredClone(template.draft);
-      output.write(`默认采样参数：${JSON.stringify(model.sampling ?? {})}；保存后自动补齐请求中未指定的参数，可在高级设置修改或清空。\n`);
-      const suggested = template.suggested;
-      output.write(`已带入模板提示词及运行设置：有效上下文比例 ${model.effectiveContextWindowPercent ?? 95}%；自动压缩阈值 ${model.autoCompactTokenLimit ?? "Codex 默认"}；截断策略 ${model.truncationPolicy === undefined ? "项目默认" : `${model.truncationPolicy.mode} ${model.truncationPolicy.limit}`}。可在高级设置中修改。\n`);
-      output.write(`模板参考：${template.displayName}；上下文 ${suggested.contextWindow} Token；思考 ${suggested.reasoningEfforts?.join("/") || "未声明"}；图片 ${capabilityLabel(suggested.supportsImages)}；apply_patch ${capabilityLabel(suggested.applyPatchToolType === undefined ? undefined : suggested.applyPatchToolType === "freeform")}；tool_search ${capabilityLabel(suggested.supportsSearchTool)}。请按上游平台说明逐项确认，未知暂不启用。\n`);
+      model = createIndependentModelDraft();
+      output.write("新模型使用通用编程提示词；请按上游说明填写准确 ID 和能力。保存不会发送推理请求或证明上游支持。\n");
       const typedId = await prompts.text({
         message: "上游模型 ID（必填，使用平台提供的准确名称）", initialValue: id ?? "",
         validate: value => validModelId(String(value), [...previous, ...models]) ? undefined : "请输入 1-200 字符且不重复、无首尾空白、控制字符、格式字符或代理字符的模型 ID",
@@ -155,8 +141,6 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
 function validModelId(id, models) {
   return isValidCustomModelId(id) && !models.some(model => model.id === id);
 }
-
-function capabilityLabel(value) { return value === undefined ? "未知" : value ? "支持" : "不支持"; }
 
 async function promptCapability(prompts, message, current, allowUnknown = true) {
   const value = await prompts.select({ message, options: [{value: "yes", label: "支持（按平台说明手动声明）"}, {value: "no", label: "不支持"}, ...(allowUnknown ? [{value: "unknown", label: "未知（保存但暂不启用）"}] : [])], initialValue: current === undefined && allowUnknown ? "unknown" : current ? "yes" : "no" });

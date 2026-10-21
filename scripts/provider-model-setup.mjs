@@ -23,7 +23,6 @@ import { loadConfiguredRelayProviderMaterial } from "../runtime/model-provider-r
 
 const warningMessages = {
   "shared-relay-grants-retained": "Relay Key 授权保留；共用目录移除后调用受限，重新加入可能恢复旧授权。永久撤销请使用 Key 管理。",
-  "clp-relay-independent": "CLP Relay 使用独立目录，本次移除不限制其调用。",
   "historical-references": "旧会话和计划任务保留，引用此模型时可能失败；不会自动换模型。聚合旧快照需刷新。",
   "provider-relay-inflight": "目录变更可能撤销该提供商的其他 Relay 在途请求。",
 };
@@ -103,7 +102,7 @@ function templateDifferenceValue(value, full = false) {
 
 async function runProviderModelTemplateSetup(provider, { environment, prompts, output }) {
   const options = provider.startsWith("clp-")
-    ? await withCliProgress("读取 CLP 远程模板", progress => loadProviderModelTemplateOptions(provider, { environment, signal: progress.signal }), { output, delayMs: 150 })
+    ? await withCliProgress("读取 CLP 本地 DS 模板", progress => loadProviderModelTemplateOptions(provider, { environment, signal: progress.signal }), { output, delayMs: 150 })
     : await loadProviderModelTemplateOptions(provider, { environment });
   if (!options.targets.length) {
     output.write("此账户没有可更新模板的模型。\n");
@@ -115,7 +114,7 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   })) });
   if (prompts.isCancel(model)) return { action: "back" };
   const target = options.targets.find(entry => entry.model === model);
-  const templates = options.templates.filter(entry => !provider.startsWith("ds-") && !provider.startsWith("clp-") || entry.model === model);
+  const templates = options.templates.filter(entry => !provider.startsWith("ds-") || entry.model === model);
   if (!templates.length) { output.write("来源中没有可用于此模型的模板。\n"); return { action: "back" }; }
   const initialTemplate = target?.template ? templates.findIndex(entry => entry.source === target.template.source && entry.model === target.template.model) : -1;
   const selected = await prompts.select({ message: "明确选择模板来源及模型", options: templates.map((entry, index) => ({
@@ -196,13 +195,13 @@ async function runProviderModelOperation({ environment, prompts, output, provide
     ? "DeepSeek 暂不支持单模型移除。\n"
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
   const action = await prompts.select({ message: "模型操作", options: [
-    ...(["ccg", "ocg", "clp"].includes(family) ? [{ value: "manage", label: "查看／添加新模型", hint: family === "clp" ? "手动添加或从 Cline 发现；已有模型保持不变" : "手动添加或从 DS 目录导入；需自行确认上游支持" }] : []),
-    ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
+    ...(["ccg", "ocg", "clp"].includes(family) || custom && catalog.canRemove ? [{ value: "manage", label: "查看／添加新模型", hint: "按 ID 独立填写或继承已有模型；已有模型保持不变" }] : []),
+    ...(custom && catalog.canRemove ? [{ value: "edit", label: "编辑模型与默认值" }] : []),
     ...(custom || family ? [{ value: "rename", label: "编辑模型显示名称", hint: "模型 ID 保持不变" }] : []),
     ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求路由" }] : []),
     ...(family && catalog.providers.length ? [{ value: "default", label: "账户默认模型与共享思考等级", hint: "默认模型仅影响所选账户；模型思考等级由同族账户共用" }] : []),
     ...(family ? [{ value: "window", label: "模型上下文窗口", hint: "按模型设置，同族账户共享" }] : []),
-    ...(catalog.source !== "official-shared" && (custom || family) ? [{ value: "template-update", label: "对比并更新模型模板", hint: family === "clp" ? "读取远程模板后预览差异" : "选择来源和更新内容，预览差异后保存" }] : []),
+    ...(catalog.source !== "official-shared" && (custom || family) ? [{ value: "template-update", label: "对比并更新模型模板", hint: "选择本地来源和更新内容，预览差异后保存" }] : []),
     { value: "web-search", label: "检测原生网页搜索", hint: "选择单一账户；1 次可能计费请求；仅诊断" },
     ...(custom && catalog.canRemove ? [{ value: "tools", label: "探测单个模型的工具能力", hint: "apply_patch、tool_search；明确选择才发请求，可能计费" }] : []),
     ...(catalog.canRemove ? [{ value: "remove", label: "本地移除模型", hint: "不联网、不改账户和凭据" }] : []),
@@ -261,8 +260,8 @@ async function runProviderModelOperation({ environment, prompts, output, provide
       models = previous.definitions.map(entry => entry.id === target ? selected.models[0] : entry);
       probeConnections = selected.probeConnections;
     } else {
-      output.write("此入口添加和编辑模型；移除已有模型请返回选择本地移除。\n");
-      models = await promptResponsesModels(prompts, previous.defaultModel, previous.definitions, output, readCustomProviderUpstreamWireApi(environment, catalog.provider), previous.definitions.map(entry => entry.id));
+      output.write("此入口编辑已有模型；添加和移除请使用各自的模型操作。\n");
+      models = await promptResponsesModels(prompts, previous.defaultModel, previous.definitions, output, readCustomProviderUpstreamWireApi(environment, catalog.provider), previous.definitions.map(entry => entry.id), { allowAdd: false });
       if (!models) return { action: "back" };
       model = await prompts.select({ message: "选择默认模型", options: models.map(entry => ({ value: entry.id, label: `${entry.name}（${entry.id}）` })), initialValue: previous.defaultModel });
       if (prompts.isCancel(model)) return { action: "back" };

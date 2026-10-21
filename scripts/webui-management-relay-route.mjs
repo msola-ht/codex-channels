@@ -1,4 +1,3 @@
-import { downloadClineRelayCatalog, saveClineRelayCatalog } from "./cline-relay-catalog.mjs";
 import { openQueueStream } from "./webui-queue-events.mjs";
 import { watchRelayChanges } from "../runtime/model-relay-control.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
@@ -112,33 +111,6 @@ export async function routeRelayManagement({ environment, maximumBodyBytes, open
       request.off("aborted", cancel);
       activeReasoningProbes.delete(state);
     }
-    return true;
-  }
-  if (path === "/relay/catalog/update" && request.method === "POST") {
-    if (new URL(request.url, "http://localhost").search || !z.strictObject({}).safeParse(await readJsonBody(request, maximumBodyBytes)).success) {
-      throw new ApiError(400, "relay_invalid", "Cline 目录更新参数无效");
-    }
-    try { state.audit.assertWritable(); }
-    catch { throw new ApiError(503, "management_audit_unavailable", "审计不可用，未更新目录"); }
-    const controller = new AbortController();
-    const cancel = () => controller.abort();
-    response.once("close", cancel);
-    const signal = globalThis.AbortSignal.any([controller.signal, globalThis.AbortSignal.timeout(25_000)]);
-    try {
-      const catalog = await downloadClineRelayCatalog(environment, signal);
-      signal.throwIfAborted();
-      const result = await withRelayManagementTransaction(environment, async () => {
-        signal.throwIfAborted();
-        state.audit.assertWritable();
-        return { activation: "saved", catalog: saveClineRelayCatalog(catalog, environment) };
-      });
-      let auditStatus = result.cleanupStatus === "failed" ? "failed" : "recorded";
-      try { state.audit.record({ sessionId: principalId, source: "webui", operation: "relay.catalog.update",
-        inputFingerprint: fingerprintManagementValue({ commit: catalog.commit }), phase: "completed", resultCode: "saved", recovery: "none" }); }
-      catch { auditStatus = "failed"; }
-      sendManagementJson(response, 200, { catalog: result.catalog, auditStatus });
-    } catch { throw new ApiError(502, "relay_invalid", "Cline 目录下载或保存失败，原目录保留"); }
-    finally { response.off("close", cancel); }
     return true;
   }
   if (path === "/relay/queue/events" && request.method === "GET") {

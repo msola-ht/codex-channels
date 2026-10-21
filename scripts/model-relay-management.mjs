@@ -1,5 +1,4 @@
 import { parseRelayModelId, relayModelId } from "../runtime/model-relay-model-id.mjs";
-import { readClineRelayCatalog, downloadClineRelayCatalog, saveClineRelayCatalog } from "./cline-relay-catalog.mjs";
 import { stringify } from "smol-toml";
 import { createHash, randomBytes } from "node:crypto";
 import { parseGatewayConfig, validateGatewayConfigDocument, withGatewayConfigLock } from "../runtime/gateway-config.mjs";
@@ -36,7 +35,6 @@ export function readRelayManagement(environment = process.env) {
   const content = readPrivateFileSync(configPath, 1024 * 1024);
   const document = validateGatewayConfigDocument(parseGatewayConfig(content));
   const config = document.model_relay ?? modelRelayConfigSchema.parse({});
-  const clineCatalog = readClineRelayCatalog(environment);
   const materialRevisions = [];
   const providers = listRelayProviderIds(environment).map(id => {
     try {
@@ -49,8 +47,8 @@ export function readRelayManagement(environment = process.env) {
       }) };
     } catch { return { id, available: false, protocols: [], reason: "provider_material_unavailable", models: [] }; }
   });
-  return { revision: createHash("sha256").update(content).update(JSON.stringify([providers, materialRevisions, clineCatalog])).digest("hex"),
-    clineCatalog, enabled: config.enabled, maxConcurrency: config.max_concurrency, providers, callers: safeCallers(config.callers) };
+  return { revision: createHash("sha256").update(content).update(JSON.stringify([providers, materialRevisions])).digest("hex"),
+    enabled: config.enabled, maxConcurrency: config.max_concurrency, providers, callers: safeCallers(config.callers) };
 }
 
 /** Listener settings do not depend on Provider catalog availability. */
@@ -109,19 +107,6 @@ export async function manageModelRelay(input, environment = process.env, options
     const parsed = relayModelReasoningMapSchema.safeParse(input.modelReasoning);
     if (!parsed.success) throw invalid("逐模型思考策略包含无效模型、策略或超过数量限制");
     input = { ...input, modelReasoning: parsed.data };
-  }
-  // Revision-bound confirmation must use exactly the catalog reviewed in its preview.
-  if (!options.preview && options.expectedRevision === undefined && readClineRelayCatalog(environment).status === "missing"
-    && (input.command === "providers" || ["issue", "edit"].includes(input.command) && input.models?.some(id => id.startsWith("clp-")))
-    && listRelayProviderIds(environment).some(id => input.command === "providers" ? id.startsWith("clp-") : input.models?.some(model => model.startsWith(`${id}/`)))) {
-    try {
-      const catalog = await downloadClineRelayCatalog(environment);
-      await withRelayManagementTransaction(environment, () => {
-        // Downloads must not block revocation. Another owner may have saved a catalog meanwhile.
-        if (readClineRelayCatalog(environment).status !== "missing") return {};
-        return { activation: "catalog_saved", catalog: saveClineRelayCatalog(catalog, environment) };
-      });
-    } catch { throw invalid("Cline 模型目录自动下载失败，请检查网络后重试，或在 WebUI 手动下载"); }
   }
   if (["listen", "issue", "edit", "delete", "rotate", "disable", "enable"].includes(input.command)) {
     return withRelayManagementTransaction(environment, () => executeModelRelay(input, environment, options));

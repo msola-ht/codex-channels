@@ -7,7 +7,7 @@ import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { assertProviderModelRequestPolicy } from "../runtime/model-request-policy.mjs";
 import { withCustomBaseTemplate } from "../runtime/model-template-catalog.mjs";
-import { isValidCustomModelId } from "../runtime/model-catalog.mjs";
+import { isValidCustomModelId, createIndependentModelDraft } from "../runtime/model-catalog.mjs";
 import { createResponsesModelCatalog, compileResponsesModelCatalog, isCustomCatalogProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath, customProviderUpstreamWireApis, readCustomProviderUpstreamWireApi, removeCustomProviderUpstreamMetadata, writeCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { isDeepStrictEqual } from "node:util";
@@ -205,8 +205,9 @@ async function buildModelOnlySavePlan(input, options) {
   if (options.expectedCatalogContent !== undefined && previous.content !== options.expectedCatalogContent) {
     throw invalid("stale-preview", "catalog", "模型目录已变化，请重新打开模型管理");
   }
-  if (!Array.isArray(input.models) || previous.definitions.some(entry => !input.models.some(next => next?.id === entry.id))) {
-    throw invalid("invalid-catalog", "models", "移除已有模型请使用独立移除入口；重命名请先添加新模型");
+  if (!Array.isArray(input.models) || previous.definitions.some(entry => !input.models.some(next => next?.id === entry.id))
+    || input.models.some(entry => !previous.definitions.some(previous => previous.id === entry?.id))) {
+    throw invalid("invalid-catalog", "models", "此入口只编辑已保存模型；新增、移除和重命名请使用各自的独立模型操作");
   }
   const saveInput = {
     operation: "update", providerId: input.provider,
@@ -606,12 +607,23 @@ async function buildSavePlan(input, options, { requireConfirmation, connectionOn
     && !isDeepStrictEqual(entry, previousCatalog.definitions.find(previous => previous.id === entry.id)))) {
     throw invalid("invalid-catalog", "catalog", "包含格式字符或代理字符的已有模型仅能保留原值或通过独立移除入口删除");
   }
+  if (previousCatalog && Array.isArray(input.catalog.models) && input.catalog.models.some(entry => !existingIds.has(entry.id))) {
+    throw invalid("invalid-catalog", "catalog", "已有提供商新增模型请使用统一的按 ID 添加入口");
+  }
   if (custom && !connectionOnly && !isValidCustomModelId(model) && model !== previousCatalog?.defaultModel) {
     throw invalid("invalid-catalog", "model", "默认模型 ID 不能包含控制字符、格式字符或代理字符");
   }
   // Saved models are snapshots. Only new models receive missing base prompts.
-  const models = custom ? validateResponsesModels(input.catalog.models, model).map(entry => existingIds.has(entry.id)
-    ? entry : createResponsesModelCatalog([withCustomBaseTemplate(entry)], entry.id).definitions[0]) : undefined;
+  let models;
+  if (custom) {
+    try {
+      models = validateResponsesModels(input.catalog.models, model);
+    } catch (error) {
+      throw invalid("invalid-catalog", "catalog", "模型定义无效，请检查上下文、思考等级、默认值及能力设置", error);
+    }
+    models = models.map(entry => existingIds.has(entry.id)
+      ? entry : createResponsesModelCatalog([entry.template ? withCustomBaseTemplate(entry) : createIndependentModelDraft(entry)], entry.id).definitions[0]);
+  }
   const reasoningEffort = models?.find((entry) => entry.id === model)?.defaultReasoningEffort ?? "none";
   const officialModelIds = new Set(
     officialModels.filter((candidate) => candidate.available !== false)

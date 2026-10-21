@@ -25,7 +25,6 @@ import type {
   OpenAiModelPromptsResponse,
   ProviderModelPromptsResponse,
   ProviderModelTemplateOptionsResponse,
-  CustomModelDraftTemplatesResponse,
   OpenAiModelContextInput,
   OpenAiModelContextPreview,
   OpenAiModelContextResult,
@@ -518,9 +517,6 @@ export function fetchProviderModelAdditionOptions(provider: string, manualModel:
   }, signal, 100_000)
 }
 
-export function fetchCustomModelDraftTemplates(signal: AbortSignal): Promise<CustomModelDraftTemplatesResponse> {
-  return getJson(`${API_PREFIX}/management/provider-model-drafts`, signal)
-}
 
 export function probeManagementCustomModel(input: ManagementCustomModelProbeInput, signal: AbortSignal): Promise<ManagementCustomModelProbeResult> {
   return requestJson<ManagementCustomModelProbeResult>(`${API_PREFIX}/management/provider-settings/probe`, {
@@ -775,9 +771,4 @@ export function consumeResetCredit(attemptId: string, confirmationToken: string,
 
 export function cancelResetCredit(attemptId: string, confirmationToken: string, signal?: AbortSignal): Promise<{ cancelled: true }> {
   return requestJson(`${API_PREFIX}/management/accounts/openai/reset-credits/cancel`, { method: "POST", body: JSON.stringify({ attemptId, confirmationToken }) }, signal)
-}
-
-
-export function updateRelayCatalog(signal?: AbortSignal): Promise<{ auditStatus: "recorded" | "failed" }> {
-  return requestJson(`${API_PREFIX}/management/relay/catalog/update`, { method: "POST", body: "{}" }, signal)
 }

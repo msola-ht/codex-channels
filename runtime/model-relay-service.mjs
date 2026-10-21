@@ -1,4 +1,3 @@
-import { createClineRelayCatalogBootstrap } from "./cline-relay-catalog-bootstrap.mjs";
 import { watch } from "node:fs";
 import { dirname, join } from "node:path";
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -18,10 +17,6 @@ export async function startModelRelayService(configPath, environment = process.e
   const { sendRelayMetrics, RelayTrafficDump } = await import("../dist/provider-proxy/index.js");
   signal?.throwIfAborted();
   environment = { ...environment, CODEX_CONNECT_CONFIG_FILE: configPath };
-  const catalogBootstrap = createClineRelayCatalogBootstrap(environment, {
-    ready: () => refreshCurrent(),
-    failed: () => logger.warn({ module: "catalog", event: "catalog.download_failed" }, "Cline Relay 模型目录自动下载失败，请在 WebUI 手动重试"),
-  });
   const paths = modelRelayPaths(configPath);
   const reader = new ModelRelayMaterialReader(configPath, environment);
   const dump = new RelayTrafficDump({ directory: join(dirname(configPath), "traffic"),
@@ -81,7 +76,6 @@ export async function startModelRelayService(configPath, environment = process.e
     if (next.debug.model_traffic_dump) void dump.prepare();
     const policyChanged = !snapshot || snapshot.digest !== next.digest;
     snapshot = next;
-    if (next.clineCatalogStatus !== undefined) catalogBootstrap.ensure(next.clineCatalogStatus);
     relay ??= new ModelRelayServer({ queueChanged: () => control.changed(), capture: (provider, signal, protocol) => {
       if (!snapshot?.debug.model_traffic_dump) return undefined;
       signal.throwIfAborted();
@@ -201,7 +195,6 @@ export async function startModelRelayService(configPath, environment = process.e
       };
       await collect([
         ...[...watchers].map(([directory, watcher]) => cleanup("watcher", () => { watcher.close(); watchers.delete(directory); }, watcher)),
-        cleanup("catalog", () => catalogBootstrap.close()),
         cleanup("control", async () => { await controlStart?.catch(() => {}); await control.close(); }),
         cleanup("reader", () => reader.close()),
         cleanup("listener", async () => {

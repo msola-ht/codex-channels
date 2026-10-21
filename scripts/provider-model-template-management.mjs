@@ -12,14 +12,12 @@ import { managedProviderDirectory, managedProviderMarkerPath, writeManagedModelP
 import { readResponsesModelCatalog, validateResponsesModels, responsesProviderCatalogPath, compileResponsesModelCatalog,
   writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath } from "../runtime/model-provider-upstream-metadata.mjs";
-import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
-import { createClinePassCatalog, projectClinePassModels } from "./cline-pass-account-management.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadResponsesModelTemplates } from "./responses-model-templates.mjs";
 import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
-import { createDeepseekTemplateCatalog } from "./provider-model-catalog.mjs";
+import { createDeepseekTemplateCatalog, createClinePassCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
 
 const revisionSecret = randomBytes(32);
 const sourceSnapshots = new Map();
@@ -218,7 +216,8 @@ async function readTargetState(provider, environment) {
 function allowedTemplate(state, model, template) {
   if (state.custom) return ["official", "deepseek"].includes(template.source);
   if (state.family === "deepseek") return template.source === "deepseek" && template.model === model;
-  if (state.family === "clp") return template.source === "cline" && template.model === model;
+  if (state.family === "clp") return template.source === "cline" && template.model === model
+    || template.source === "deepseek" && ["deepseek-flash", "deepseek-v4-pro"].includes(template.model);
   return ["ccg", "opencode-go"].includes(state.family) && template.source === "deepseek";
 }
 
@@ -245,21 +244,17 @@ async function loadSourceTemplates(state, environment, signal) {
         template: { ...template, maxContextWindow: template.maxContextWindow ?? template.contextWindow } }))));
     result = sources.flat();
   } else if (state.family === "clp") {
-    const timeout = globalThis.AbortSignal.timeout(25_000);
-    const operationSignal = signal ? globalThis.AbortSignal.any([signal, timeout]) : timeout;
-    let downloaded;
-    try { downloaded = await downloadClineRelayCatalog(environment, operationSignal); }
-    catch (error) {
-      signal?.throwIfAborted();
-      throw invalid("template-source-unavailable", "template", "CLP 模板来源下载或校验失败，请检查网络后重新读取模板", error);
-    }
-    const enabledModels = projectClinePassModels(downloaded, { requireModels: false }).models
-      .filter(model => state.targets.some(target => target.model === model.id)).map(model => model.id);
-    if (!enabledModels.length) throw invalid("template-unavailable", "template", "远程来源中没有适用于当前目录的 CLP 模型，请检查模型范围");
-    const templates = enabledModels.includes(state.definition.defaultModel) ? await loadResponsesModelTemplates("deepseek") : [];
-    const catalog = createClinePassCatalog(templates, downloaded, enabledModels);
-    result = catalog.models.map(template => ({ source: "cline", model: template.slug, displayName: template.display_name,
-      template: { ...template, max_context_window: template.max_context_window ?? template.context_window } }));
+    signal?.throwIfAborted();
+    const { catalog, templateBindings } = createClinePassCatalogWithTemplateBindings(
+      JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8")));
+    const seen = new Set();
+    result = catalog.models.flatMap(template => {
+      const binding = templateBindings[template.slug];
+      if (seen.has(binding.model)) return [];
+      seen.add(binding.model);
+      return [{ ...binding, displayName: template.display_name,
+        template: { ...template, max_context_window: template.max_context_window ?? template.context_window } }];
+    });
   } else {
     const catalog = createDeepseekTemplateCatalog(
       JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8")), state.family);

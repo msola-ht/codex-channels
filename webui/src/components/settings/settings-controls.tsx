@@ -23,6 +23,10 @@ import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import type { PendingSetting } from "@/lib/settings-management"
 import type { ManagementSettingMutationResponse } from "@/lib/types"
 import type { MessageKey, Translate } from "@/lib/i18n/messages"
+import { cn } from "cn"
+
+export const modelOperationDialogClassName = "w-[calc(100%-2rem)] max-w-2xl max-h-[85dvh] overflow-y-auto sm:max-w-2xl"
+export const modelOperationFormDialogClassName = "flex flex-col overflow-hidden"
 
 const providerCleanupWarnings: Record<string, MessageKey> = {
   "backup-cleanup-failed": "settingsUi.providerBackupCleanupFailed",
@@ -44,6 +48,7 @@ export function ManagementConfirmationDialog({
   confirmVariant = "default",
   confirmDisabled = false,
   finalFocus,
+  className,
   children,
 }: {
   open: boolean
@@ -57,13 +62,14 @@ export function ManagementConfirmationDialog({
   confirmVariant?: ComponentProps<typeof Button>["variant"]
   confirmDisabled?: boolean
   finalFocus?: ComponentProps<typeof AlertDialogContent>["finalFocus"]
+  className?: string
   children: ReactNode
 }) {
   const { t } = useTranslation()
   const cancelRef = useRef<HTMLButtonElement>(null)
   return (
     <AlertDialog open={open} onOpenChange={(nextOpen, details) => { if (saving) { details.cancel(); return }; if (!nextOpen) onCancel() }}>
-      <AlertDialogContent initialFocus={cancelRef} finalFocus={finalFocus} className="max-h-[85dvh] overflow-y-auto">
+      <AlertDialogContent initialFocus={cancelRef} finalFocus={finalFocus} className={cn("max-h-[85dvh] overflow-y-auto", className)}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
@@ -154,14 +160,14 @@ export function SettingsMutationFeedback({ result, writeUnconfirmed, readbackReq
   </AlertDescription></Alert>
 }
 
-export function ManagedSelect({ label, value, options, disabled, disabledValues = [], onChange, description, descriptionId, placeholder, fullWidth = false }: { description?: string; descriptionId?: string; placeholder?: string; fullWidth?: boolean; label: string; value: string; options: string[][]; disabled: boolean; disabledValues?: readonly string[]; onChange: (value: string) => void }) {
+export function ManagedSelect({ label, value, options, disabled, disabledValues = [], onChange, description, descriptionId, placeholder, fullWidth = false, hideLabel = false }: { description?: string; descriptionId?: string; placeholder?: string; fullWidth?: boolean; hideLabel?: boolean; label: string; value: string; options: string[][]; disabled: boolean; disabledValues?: readonly string[]; onChange: (value: string) => void }) {
   const { t } = useTranslation()
   const selectId = useId()
   const nonEmptyOptions = options.filter(([option]) => option !== "")
   const effectiveOptions = value !== "" && !nonEmptyOptions.some(([option]) => option === value) ? [[value, value], ...nonEmptyOptions] : nonEmptyOptions
   const selectedLabel = effectiveOptions.find(([option]) => option === value)?.[1]
   const hintId = descriptionId ?? `${selectId}-description`
-  const labelContent = <FieldLabel className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]" htmlFor={selectId}>{label}</FieldLabel>
+  const labelContent = <FieldLabel className={cn("min-w-0 text-muted-foreground [overflow-wrap:anywhere]", hideLabel && "sr-only")} htmlFor={selectId}>{label}</FieldLabel>
   return <Field className="min-w-0" orientation={fullWidth ? "vertical" : "responsive"} data-disabled={disabled}>
     {description ? <FieldContent className="min-w-0 [overflow-wrap:anywhere]">{labelContent}<FieldDescription id={hintId}>{description}</FieldDescription></FieldContent> : labelContent}
     <Select items={[{ value: null, label: placeholder ?? t("settingsUi.notConfigured") }, ...effectiveOptions.map(([value, label]) => ({ value, label }))]} value={value || null} disabled={disabled} onValueChange={next => { if (next !== null) onChange(next) }}>

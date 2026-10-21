@@ -10,3 +10,7 @@ export function createCcgCatalogWithTemplateBindings(source: ProviderModelCatalo
   catalog: ProviderModelCatalog;
   templateBindings: Record<string, import("../runtime/model-template-bindings.mjs").ModelTemplateBinding>;
 };
+export function createClinePassCatalogWithTemplateBindings(source: ProviderModelCatalog): {
+  catalog: ProviderModelCatalog;
+  templateBindings: Record<string, import("../runtime/model-template-bindings.mjs").ModelTemplateBinding>;
+};
