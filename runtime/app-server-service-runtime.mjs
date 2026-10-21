@@ -2,7 +2,7 @@ import { isCustomCatalogProvider, responsesProviderCatalogPath, parseResponsesMo
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { resolveCodexRequestIdentity } from "./codex-request-identity.mjs";
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArguments, loadAggregateModelMaterial,
   readAggregateProviderSettingsFingerprint, AggregateProviderTopologyChangedError } from "./aggregate-model-provider.mjs";
@@ -10,7 +10,9 @@ import { readCustomProviderUpstreamWireApi } from "./model-provider-upstream-met
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 import { ProviderModelGuard } from "./provider-model-guard.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
-import { loadConfiguredManagedProviderMaterial } from "./model-provider-managed-runtime.mjs";
+import { DeepseekImageMaterialReader } from "./deepseek-image-material-reader.mjs";
+import { closeSingleWorkerReaders, waitForSingleWorkerReadersExit } from "./single-worker-reader.mjs";
+import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "./windows-acl-bridge.mjs";
 import { writeThirdPartyRuntimeModelCatalog } from "./third-party-model-catalog.mjs";
 import { assertProviderModelRequestPolicy, assertProviderModelRetryPolicy } from "./model-request-policy.mjs";
 
@@ -84,7 +86,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const startupFinished = new Promise(resolve => { finishStartup = resolve; });
   const lifecycle = forwardChildrenLifecycle(children, async () => {
     await startupFinished;
-    await closeResources();
+    const results = await Promise.allSettled([closeResources(), closeAppServerMaterialOwners()]);
+    const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
+    if (errors.length) throw new AggregateError(errors, "App Server 资源清理未完成");
   });
   let startupError;
   try {
@@ -105,6 +109,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     if (startupError && !lifecycle.stopRequested
       && !(startupError instanceof AppServerStoppedError)) throw startupError;
   }
+}
+
+async function closeAppServerMaterialOwners() {
+  const results = await Promise.allSettled([closeSingleWorkerReaders(), closeWindowsAclBridge()]);
+  await Promise.all([waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit()]);
+  const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
+  if (errors.length) throw new AggregateError(errors, "App Server 材料读取资源退出未确认");
 }
 
 class AppServerStoppedError extends Error {
@@ -229,45 +240,78 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     upstreamAgentsByProxyUrl.set(proxyUrl, agent);
     return agent;
   };
+  const imageUploadGenerations = new Map();
+  const imageUploadRoutes = new Map();
   const deepseekImageUploadFor = (provider) => {
-    const material = signal => {
+    const reader = new DeepseekImageMaterialReader(provider, runtime.environment);
+    const material = async signal => {
       signal?.throwIfAborted();
-      const configured = loadConfiguredManagedProviderMaterial(provider, runtime.environment);
+      const generation = imageUploadGenerations.get(provider);
+      const active = settingsSnapshots.get(provider);
+      if (!generation || !active || generation.controller.signal.aborted
+        || !childProcessIsRunning(childrenByProvider.get(provider))) {
+        throw new Error("DeepSeek 图片上传实例尚未确认");
+      }
+      const observed = await reader.readFresh();
+      signal?.throwIfAborted();
+      if (imageUploadGenerations.get(provider) !== generation || settingsSnapshots.get(provider) !== active
+        || observed.settingsFingerprint !== active.fingerprint || generation.controller.signal.aborted) {
+        throw new Error("DeepSeek 配置尚未应用到运行实例，请等待设置应用后重试");
+      }
+      const configured = observed.material;
       const url = new URL(configured.baseUrl);
-      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash
+        || !configured.protocols.includes("responses")) {
         throw new Error("DeepSeek 图片上传地址无效");
       }
       const revision = createHash("sha256")
-        .update(JSON.stringify([configured.revision, provider, url.origin, url.pathname]))
+        .update(JSON.stringify([configured.revision, provider, active.fingerprint, generation.token, url.origin, url.pathname]))
         .digest("hex");
-      return { configured, url, revision };
+      return { configured, url, revision, generation };
     };
     return {
       kind: "deepseek",
+      authorize(authorization) {
+        const generation = imageUploadGenerations.get(provider);
+        if (!generation || generation.controller.signal.aborted || typeof authorization !== "string"
+          || !/^Bearer [a-f0-9]{64}$/u.test(authorization)
+          || !childProcessIsRunning(childrenByProvider.get(provider))) return false;
+        const expected = `Bearer ${generation.token}`;
+        return authorization.length === expected.length
+          && timingSafeEqual(Buffer.from(authorization), Buffer.from(expected));
+      },
+      async route(signal) {
+        const observed = await material(signal);
+        return { revision: observed.revision, authorization: `Bearer ${observed.generation.token}` };
+      },
       async describe(signal) {
-        return { revision: material(signal).revision };
+        return { revision: (await material(signal)).revision };
       },
       async upload({ bytes, mediaType, revision, signal }) {
-        const before = material(signal);
+        const before = await material(signal);
         if (before.revision !== revision) throw new Error("DeepSeek 图片上传配置已变化");
         const agent = await upstreamAgentFor(before.url, signal);
-        signal?.throwIfAborted();
-        if (!before.configured.protocols.includes("responses")) {
-          throw new Error("DeepSeek Provider 不使用原生 Responses");
+        // Proxy discovery is asynchronous; recheck the running generation and
+        // disk snapshot after it, immediately before spending the private Key.
+        const current = await material(signal);
+        if (current.revision !== revision || current.generation !== before.generation) {
+          throw new Error("DeepSeek 图片上传配置已变化");
         }
+        signal?.throwIfAborted();
         const fileId = await uploadDeepseekImage({
-          host: before.url.hostname.replace(/^\[|\]$/gu, ""),
-          ...(before.url.port ? { port: Number(before.url.port) } : {}),
+          host: current.url.hostname.replace(/^\[|\]$/gu, ""),
+          ...(current.url.port ? { port: Number(current.url.port) } : {}),
           protocol: "https",
-          basePath: before.url.pathname,
+          basePath: current.url.pathname,
           ...(agent ? { agent } : {}),
-          authorization: `Bearer ${before.configured.apiKey}`,
-        }, bytes, mediaType, signal);
-        if (material(signal).revision !== revision) {
+          authorization: `Bearer ${current.configured.apiKey}`,
+        }, bytes, mediaType, globalThis.AbortSignal.any([signal, current.generation.controller.signal]));
+        if ((await material(signal)).revision !== revision) {
           throw new Error("DeepSeek 图片上传配置在传输期间发生变化");
         }
         return fileId;
       },
+      close: () => reader.close(),
     };
   };
   const proxyProviderIds = new Map();
@@ -371,6 +415,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const imageUpload = definition?.storageId === "deepseek" && !bridge
       ? deepseekImageUploadFor(upstreamProvider)
       : undefined;
+    if (imageUpload) ownedResources.add(imageUpload);
     const managedAccountProxyOptions = (accounts, providerId, label) => ({
       accountIds: accounts.map((account) => account.id),
       defaultAccountId: accounts.find((account) => account.default)?.id,
@@ -431,6 +476,13 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     await modelProxy.start();
     assertRunning();
     proxyRuntime.baseUrl = `http://${modelProxy.address()}`;
+    if (imageUpload) {
+      const route = { runtime: proxyRuntime, upload: imageUpload };
+      imageUploadRoutes.set(upstreamProvider, route);
+      ownedResources.add({ close: async () => {
+        if (imageUploadRoutes.get(upstreamProvider) === route) imageUploadRoutes.delete(upstreamProvider);
+      } });
+    }
     console.log(
       `${opencodeGo ? "opencode-go" : provider} 模型统计代理已启动：${modelProxy.address()}`,
     );
@@ -574,6 +626,10 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       throw new Error("Provider 设置在应用期间发生变化");
     }
     settingsSnapshots.set(provider, snapshot);
+    if (/^ds-[a-z0-9_-]{1,32}$/u.test(provider)) {
+      imageUploadGenerations.get(provider)?.controller.abort();
+      imageUploadGenerations.set(provider, { token: randomBytes(32).toString("hex"), controller: new AbortController() });
+    }
   };
   const instanceLaunches = new Map();
   let aggregateProxy;
@@ -960,6 +1016,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     if (provider !== primaryProvider && !managedByProvider.has(provider)) {
       throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
     }
+    imageUploadGenerations.get(provider)?.controller.abort();
+    imageUploadGenerations.delete(provider);
     const child = childrenByProvider.get(provider);
     if (child) {
       detachChild(child, { retainOwnership: true });
@@ -1260,6 +1318,17 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           if (provider === aggregateProviderId) assertCurrentAggregateProtocols();
           return settingsSnapshots.get(provider);
         },
+        imageUploadRoute: async (provider, signal) => {
+          assertRunning();
+          if (!childrenByProvider.has(provider)) throw new Error("DeepSeek 图片上传实例未运行");
+          const route = imageUploadRoutes.get(provider);
+          if (!route?.runtime.baseUrl) throw new Error("DeepSeek 图片上传路由未就绪");
+          const capability = await route.upload.route(signal);
+          signal.throwIfAborted();
+          if (imageUploadRoutes.get(provider) !== route) throw new Error("DeepSeek 图片上传路由已变化");
+          return { endpoint: route.runtime.baseUrl,
+            modelEndpoint: `${route.runtime.baseUrl}/go/${proxyAccountId(provider)}`, ...capability };
+        },
         attachDesktopApp,
         detachDesktopApp,
         desktopAppProviderSelectionEnabled: validatedCodex.desktop_app?.enabled === true
@@ -1313,6 +1382,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   }
 
   async function closeResources() {
+    for (const generation of imageUploadGenerations.values()) generation.controller.abort();
+    imageUploadGenerations.clear();
     // Launch continuations can register proxies after their awaited start finishes.
     // Drain them before taking the resource snapshot used by cleanup.
     await Promise.allSettled([...instanceLaunches.values()]);
@@ -1513,8 +1584,8 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     settled = true;
     cancellation.abort(new AppServerStoppedError());
     const deadline = setTimeout(() => {
-      printCliMessage("failure", "App Server 停止等待超时，监管进程将以故障状态退出");
-      process.exit(1);
+      printCliMessage("failure", "App Server 停止等待超时，等待自有材料读取资源退出后以故障状态退出");
+      void closeAppServerMaterialOwners().then(() => process.exit(1), () => process.exit(1));
     }, serviceShutdownTimeoutMs);
     cleanup();
     for (const [child, watcher] of watchers) {

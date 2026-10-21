@@ -94,6 +94,7 @@ export interface ProviderProxyUpstream {
 
 export interface ProviderImageUpload {
   kind: "deepseek";
+  authorize(authorization: string | undefined): boolean;
   describe(signal: AbortSignal): Promise<{ revision: string }>;
   upload(input: {
     bytes: Buffer;
@@ -187,6 +188,7 @@ export class ProviderProxy {
   private readonly pendingUpgrades = new Set<Duplex>();
   private readonly pendingRequests = new Set<AbortController>();
   private readonly activeImageUploads = new Set<AbortController>();
+  private readonly imageUploadOperations = new Set<Promise<string>>();
   private readonly shutdownController = new AbortController();
   private readonly accountIds: readonly string[] | undefined;
   private readonly defaultAccountId: string | undefined;
@@ -341,6 +343,7 @@ export class ProviderProxy {
         this.listenerClosed = true;
       }),
       settleWithin(quotaRefreshes.map((refresh) => refresh.promise), quotaRefreshCloseTimeoutMs),
+      Promise.allSettled([...this.imageUploadOperations]),
       Promise.resolve().then(() => this.trafficDump?.close()),
     ]);
     const failures: unknown[] = [];
@@ -362,6 +365,10 @@ export class ProviderProxy {
     const remote = request.socket.remoteAddress;
     if (remote !== "127.0.0.1" && remote !== "::1" && remote !== "::ffff:127.0.0.1") {
       reject(403, "image_upload_forbidden", "图片上传只接受本机回环请求");
+      return;
+    }
+    if (!this.imageUpload!.authorize(request.headers.authorization)) {
+      reject(403, "image_upload_forbidden", "图片上传调用身份无效");
       return;
     }
     if (this.activeImageUploads.size >= maximumBufferedModelRequests) {
@@ -424,10 +431,10 @@ export class ProviderProxy {
         reject(409, "image_upload_stale", "模型配置已变化，请重新发送图片");
         return;
       }
-      const fileId = await waitForChatOperation(
-        this.imageUpload!.upload({ bytes, mediaType, revision, signal }),
-        signal,
-      );
+      const operation = this.imageUpload!.upload({ bytes, mediaType, revision, signal });
+      this.imageUploadOperations.add(operation);
+      void operation.finally(() => this.imageUploadOperations.delete(operation)).catch(() => undefined);
+      const fileId = await waitForChatOperation(operation, signal);
       signal.throwIfAborted();
       if (!/^file-api-[A-Za-z0-9_-]{1,128}$/u.test(fileId)) throw new Error("Invalid image file ID");
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
@@ -446,6 +453,11 @@ export class ProviderProxy {
     const signal = this.requestSignal(response);
     if (request.method === "GET" && request.url === "/_codexc/image-upload-route") {
       request.resume();
+      if (this.imageUpload && !this.imageUpload.authorize(request.headers.authorization)) {
+        response.writeHead(403, { "content-type": "application/json", "cache-control": "no-store" });
+        response.end(JSON.stringify({ error: { code: "image_upload_forbidden", message: "图片上传调用身份无效" } }));
+        return;
+      }
       try {
         let result: Record<string, unknown>;
         if (this.allowOpenAiApiPaths) {

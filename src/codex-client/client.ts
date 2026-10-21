@@ -123,7 +123,7 @@ import type {
 import { isThreadExecutionSettled } from "../session-routing/index.js";
 import { JsonRpcClient, JsonRpcError, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
 import { UserFacingError } from "../conversation-core/index.js";
-import { ImageReferenceUpload } from "./image-reference-upload.js";
+import { ImageReferenceUpload, type ProviderImageUploadRoute } from "./image-reference-upload.js";
 import { toConversationInputEvent, toThreadStateEvent } from "./notification-adapter.js";
 import { asRecord, nonEmptyString } from "./notification-parse-helpers.js";
 import {
@@ -210,7 +210,8 @@ export class CodexAppServerClient implements
   constructor(
     private readonly rpc: JsonRpcClient,
     private readonly defaults: ThreadDefaults,
-    imageUploadHttp?: { upload: typeof fetch; local?: typeof fetch },
+    imageUploadHttp?: { upload: typeof fetch; local?: typeof fetch;
+      readProviderUploadRoute?: (provider: string, signal: AbortSignal) => Promise<ProviderImageUploadRoute> },
   ) {
     this.rpc.onNotification(notification => this.fileChanges.observe(notification));
     this.rpc.onNotification(notification => this.observeTurnState(notification));
@@ -222,7 +223,7 @@ export class CodexAppServerClient implements
       signal => this.rpc.request<GetAuthStatusResponse>({
         method: "getAuthStatus",
         params: { includeToken: true, refreshToken: false },
-      }, { retryOverload: false, signal })) : undefined;
+      }, { retryOverload: false, signal }), imageUploadHttp.readProviderUploadRoute) : undefined;
   }
 
   connect(): Promise<InitializeResponse> {

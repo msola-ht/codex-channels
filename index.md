@@ -12,6 +12,7 @@
 - [`startup-network-policy.json`](startup-network-policy.json)：首次网络探测与启动恢复的时限、退避参数。
 - [`docs/display.md`](docs/display.md)：渠道展示口径、`/metrics` 命令与调试模式说明。
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换、网页搜索能力与运行统计。
+- [`docs/archive/deepseek-upload-remediation.md`](docs/archive/deepseek-upload-remediation.md)：历史记录，DeepSeek 图片上传调用身份、运行实例一致性、材料 Worker 的关联修复、独立复查与隔离观察。
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
 - [`docs/cline-pass.md`](docs/cline-pass.md)：CLP 配置、Chat 转换边界与用量。
 - [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、账户模型目录、额度查询与固定/切换模式。
