@@ -38,8 +38,18 @@ export interface PrimaryProviderRemovalTarget {
 }
 
 export interface PrimaryProviderManagementWarning {
-  code: "backup-cleanup-failed" | "credential-cleanup-failed";
+  code: "backup-cleanup-failed" | "credential-cleanup-failed" | "catalog-cleanup-failed" | "metadata-cleanup-failed" | "lock-cleanup-failed";
   providerId: string;
+}
+
+export interface PrimaryProviderRemovalResult {
+  action: "removed";
+  configuration: "removed" | "already-absent";
+  target: PrimaryProviderRemovalTarget;
+  activation: PrimaryProviderActivation;
+  effects: { restoresOfficial: boolean };
+  cleanup: Record<"backup" | "credentials" | "catalog" | "metadata", "completed" | "failed" | "retained" | "not-applicable">;
+  warnings: PrimaryProviderManagementWarning[];
 }
 
 export interface PrimaryProviderRemovalPreview {
@@ -87,10 +97,4 @@ export function previewPrimaryProviderRemoval(
 export function applyPrimaryProviderRemoval(
   input: { providerId: string },
   options?: PrimaryProviderManagementOptions,
-): Promise<{
-  action: "removed";
-  target: PrimaryProviderRemovalTarget;
-  activation: PrimaryProviderActivation;
-  effects: { restoresOfficial: boolean };
-  warnings: PrimaryProviderManagementWarning[];
-}>;
+): Promise<PrimaryProviderRemovalResult>;

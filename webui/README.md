@@ -5,6 +5,8 @@ shadcn（`npx shadcn@latest add` 安装），业务层只做组件组合与数�
 
 ## 开发
 
+`components/settings/management-task-feedback.tsx` 将任务的受控提交状态、失败阶段及恢复类别映射到双语提示；设置、Relay 最近任务和转储清理复用，原始 CLI 输出不进入界面。
+
 ```bash
 npm install
 npm run dev        # Vite dev server（API 走 /api/v1，需同时运行 codexc webui）
@@ -19,7 +21,7 @@ i18n-glossary.json  翻译术语、原样保留项和规则，供开发工具生
 .npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
   lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时、页面可见性和设置页恢复事件的延后补查，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 投影 OpenAI 当前周额度、Credits 余额和重置券到期明细，并管理有界手动查询失败记录、有界并发查询、逐账户结果交付、观测时间合并及 DS、OCG、CCG、Cline Pass 账户快照时效，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数
-  hooks/       数据 hook（useApi 统一 loading/error/refetch，支持按当前状态更新和账户观测时间合并，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、Relay 服务管理 use-relay-service-management（统一手动、页面恢复及任务完成刷新）、Relay Key 管理 use-relay-management（复用确认 Hook）、use-relay-queue（队列页面挂载期间的 SSE 推送与有界快照刷新），设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
+  hooks/       数据 hook（useApi 统一 loading/error/refetch，支持按当前状态更新和账户观测时间合并，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、Relay 服务管理 use-relay-service-management（统一手动、页面恢复及任务完成刷新）、Relay Key 管理 use-relay-management（复用确认 Hook）、use-relay-queue（队列页面挂载期间的 SSE 推送与有界快照刷新），设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、use-provider-model-catalogs（独立读取本地目录并核对管理快照的目录修订）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
   pages/       relay-queue-page 独立实时请求队列页；thread-subagents-page 组合全部子代理和所属会话的关联子代理独立页；model-management-page 组合提供商、账户与凭据、模型配置、上下文与压缩四个独立路由，channels-page 组合渠道配置和消息展示，settings-page 组合常规、权限、网络、数据、服务五个子页；概览、会话、会话详情、请求、错误、调用详情、渠道投递队列、模型转发（独立 Key 管理，中文用途名称及居中弹窗，手动刷新运行状态）、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载，通过轻量配置读取共享调用采集开关以控制转储入口，数据设置保存后主动刷新开关，保留页面切换间的控制台已应用范围及有界账户手动查询失败记录（不保存账户快照）（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
@@ -59,7 +61,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `hooks/use-openai-model-catalog.ts` 通过共享 API 类型读取 `/api/v1/management/models/official`，编辑仅提交选中模型的 `context_window`，
 复用版本化预览、确认、备份和写后回读。“刷新当前配置目录”是唯一目录刷新入口，确认后运行 `codex debug models`，让上游自行管理缓存；不在预览阶段执行，也不将可能回退的 stdout 覆盖缓存。执行后展示可见字段的前后对比，明确区分文件变化与远程成功，并提示输出的可见模型信息与缓存不一致。
 页面顶部刷新仍只重新读取。所有写入共用互斥状态，编辑草稿和待确认期间暂停页面自动刷新；加载时隐藏旧目录，读取失败清除旧数据并提供独立重试。
-保存结果说明备份、回读未知、审计降级与运行中服务不会立即更新，官方后续刷新可能覆盖手动修改。
+保存结果说明备份、回读未知、审计降级与运行中服务不会立即更新，官方后续刷新可能覆盖手动修改。上下文预览包含 `changed`；API 同值确认在修订复核后返回 `status=unchanged`，不备份、不替换缓存，反馈不显示保存或激活提醒，也不新增覆盖跟踪。普通界面仍禁用同值预览；实际变更返回 `status=saved`，仅确认保存的变更加入跟踪。
 `lib/openai-model-cache-edits.ts` 仅在本标签页 `sessionStorage` 保存至多 20 条已确认编辑的缓存范围、模型 ID 和上下文数值；
 再次读取同范围发现值变化或模型消失时提示可能被官方刷新覆盖；刷新目录后保留该范围跟踪。
 未知版本、畸形记录或存储不可用时提示跟踪不可用，保留原存储，不影响缓存编辑；不同标签页不共享跟踪。
@@ -68,6 +70,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 官方目录按缓存展示声明；自定义目录额外读取 `declaredCapabilities`，思考、图片、工具搜索和 `apply_patch` 区分未知、支持与不支持，未声明的能力显示未知，不把编译后的安全禁用值冒充显式不支持。
 内置搜索读取主配置文件的 `web_search` 及精确 Provider ID 的独立覆盖，不使用模型搜索能力元数据过滤请求；搜索是否执行仍取决于上游接口和模型。模型目录提供通用设置与提供商搜索设置入口；保存确认按实际值展示修改前后的模式，全局缺省显示“跟随默认”，账户缺省显示“跟随全局”。搜索诊断保留，不自动修改配置。
 模型页要求提供统一目录渲染回调；第三方操作错误与保存反馈放在目录下方，避免误归入托管默认值设置。
+`components/settings/provider-model-catalogs.tsx` 组合独立本地目录与完整管理快照，在管理不可用或目录修订不一致时复用目录表格与详情展示只读模型。
 第三方模型区展示 `modelCatalogs` 派生的启用目录，每个 Provider ID 的账户目录分别作为操作目标，
 点击模型名称复用能力详情侧栏；精确模型 ID 在侧栏展示，账户范围在目录标题展示。
 详情按提供商、精确模型 ID 和目录修订绑定，目录修订变化、读取失败或模型消失时不复用旧详情。
@@ -77,7 +80,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 本地移除复用 `management.mutate/confirm`，
 确认页将模型名称、ID 与影响账户和简短提醒分区展示，以分隔线和留白区分，不折叠说明；
 提醒保留共享 Relay 授权、CLP Relay 独立目录、历史引用、备份和手动重启要求，具体重启命令在保存结果中展示；
-默认模型、最后一个模型以及不支持裁剪的来源在界面禁用，并由后端锁内复核。
+模型行使用共享业务层的 `removalBlockedReason` 禁用移除并显示原因，区分账户默认值、目录默认值、当前主提供商的 Gateway 显式默认值、最后一个模型和不支持裁剪的来源；`isDefault` 仍只表示账户选择。CLI 与 WebUI 共用该保护投影，后端执行时仍在锁内复核。
 自定义模型编辑复用既有能力表单，通过 `model.custom.save` 仅提交模型定义与默认值，
 不提交连接或凭据；已有模型不可在编辑中隐式删除或重命名，移除走独立预览。
 新增模型先读取 `/api/v1/management/provider-model-drafts` 选择模板，默认固定 OpenAI 底座，可选 DeepSeek；失败时须重新读取，关闭编辑取消读取。模板仅作为下一次添加的起点，四项能力从未知开始，高级参数默认折叠，预览显示来源、三态声明及实际指令。草稿继承模板提示词、来源及模板提供的有效上下文比例、自动压缩阈值和截断策略；采样不从模板继承，已有采样字段在编辑时保留；切换新增候选不覆盖已填写或已有模型。
@@ -87,6 +90,8 @@ CCG/OCG 的添加、模板和选择，以及 CLP 的显式联网更新继续指�
 ## UI 组件规范
 
 - 组件使用官方 `base-nova` 样式和 `@base-ui/react`，类名合并统一使用 `cn` 包。组合触发器使用 `render`，Select 显式提供 `items` 的值与显示标签，ToggleGroup 的受控值使用数组；不保留 Radix 调用接口。
+- `ManagedSelect` 在业务组合层约束字段与触发器宽度；普通选择随 FieldGroup 容器切换全宽/紧凑布局，不按浏览器视口提前收窄，长值保留截断，完整标签可在换行菜单中查看，`fullWidth` 保留多行展示。统计分组、账户等窄弹窗中的纵向选择与输入等宽；字段说明通过稳定 ID 与控件关联，多模型高级参数使用每实例 ID。
+- WebUI 端口和指标存储按字段显示校验错误，错误关联被校验的草稿；更改对应输入后旧错误失效，整组校验通过才请求预览。共享确认按设置种类显示实际前后值及组合范围，令牌和代理另保存白名单非秘密操作意图，以区分替换、清除和生成；公开监听自动生成令牌须显示副作用，秘密不进入确认正文。原始请求、修订和确认令牌仍由既有版本化流程提交。
 - `components/ui/toast.tsx` 提供 Base UI 通知容器，`toast-manager.ts` 提供共享通知管理器；`App.tsx` 挂载容器，默认 3 秒关闭并本地化关闭按钮。成功通知短暂显示，错误及需要处理的警告仍保留在操作区域。
 
 - 基础 UI 组件放在 `components/ui/`，只通过 `npx shadcn@latest add` 安装或升级，
@@ -185,6 +190,7 @@ CCG/OCG 的添加、模板和选择，以及 CLP 的显式联网更新继续指�
 模型目录的内置搜索列保持只读，显示相同账户覆盖，空覆盖显示跟随全局；通用设置中的空搜索值仍显示跟随默认。
 
 `components/settings/provider-model-addition-dialog.tsx` 为受管目录提供新增／发现、候选选择和完整字段确认；CCG／OCG 可手填或导入 DS，CLP 可手填完整模型 ID 或从 Cline 发现。CLP 手填默认独立填写，提供 `enabled` 思考开关，明确要求按平台声明填写能力，不按名称继承 Flash 模板或路由。可主动切换到「继承已有模型」，从当前账户目录选择来源，只填写新 ID 和名称，一次复制来源配置、请求格式及固定路由；不自动选择来源，不提交隐藏的能力草稿，新 ID 保持填写值，保存后互不联动。确认界面展示继承来源、请求格式／路由和完整新增字段。读取候选与保存分离，复用后端修订、一次性确认及回读。已有 CP 连接编辑通过专用操作仅修改连接、凭据与运行模式；模型编辑仍使用模型操作，不把隐藏的旧模型草稿随连接保存。
+`hooks/use-provider-model-addition-options.ts` 拥有用户触发的候选读取、加载与受控错误、选择和取消；目标或修订变化、目录失效及卸载会取消旧读取并隔离迟到结果。进入确认只隐藏编辑弹窗并保留候选与输入草稿，取消确认不重新读取；不自动发现或探测上游。
 
 `components/settings/provider-settings-management.tsx` 按模型提供图片、思考、`apply_patch` 与
 `tool_search` 的手动声明；思考支持开关控制既有思考等级与默认值。新增模型不会预选补丁或搜索工具，

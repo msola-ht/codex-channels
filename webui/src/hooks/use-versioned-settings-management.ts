@@ -18,6 +18,7 @@ interface VersionedSettingsManagementOptions<Snapshot extends VersionedSnapshot,
   update: UpdateRequest<Setting>
   revisionOf: (snapshot: Snapshot) => string
   currentValue: (snapshot: Snapshot, setting: Setting) => unknown
+  confirmationIntent?: (setting: Setting) => PendingSetting["intent"]
 }
 
 export function useVersionedSettingsManagement<Snapshot extends VersionedSnapshot, Setting>({
@@ -26,6 +27,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
   update,
   revisionOf,
   currentValue,
+  confirmationIntent,
 }: VersionedSettingsManagementOptions<Snapshot, Setting>) {
   const { t } = useTranslation()
   const request = useApi(load, [])
@@ -57,6 +59,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
           kind: typeof setting === "object" && setting !== null && "kind" in setting ? String(setting.kind) : typeof label === "string" ? label : label.key,
           before: currentValue(snapshot, setting),
           value: result.value,
+          intent: confirmationIntent?.(setting),
           label,
           activation: result.activation,
           ...(result.confirmationToken === undefined ? {} : { confirmationToken: result.confirmationToken }),
@@ -70,7 +73,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
       if (operation.current === controller) operation.current = null
       if (!controller.signal.aborted) setSaving(false)
     }
-  }, [currentValue, data, preview, refetch, revisionOf, request.loading, request.error, saving, pending, readbackRequired])
+  }, [confirmationIntent, currentValue, data, preview, refetch, revisionOf, request.loading, request.error, saving, pending, readbackRequired])
 
   const confirmSetting = useCallback(async (): Promise<boolean> => {
     const snapshot = data
@@ -94,7 +97,12 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
         setPending(null)
         handleError(error, pendingSetting.setting, refetch, () => setPending(null), setActionError)
         if (isUnconfirmedManagementWrite(error)) {
-          requireReadback(snapshot, true)
+          const committed = error instanceof ApiClientError && error.code === "gateway_config_saved_cleanup_failed"
+          if (committed) {
+            setLastAppliedSetting(pendingSetting.setting)
+            setActionResult(null)
+          }
+          requireReadback(snapshot, !committed)
           refetch()
         }
       }

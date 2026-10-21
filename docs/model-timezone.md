@@ -46,6 +46,8 @@ codexc timezone --json             # 只读输出当前配置
 
 同一入口也位于 `codexc config` → 身份与时区 → 服务时区。
 
+设置时加 `--json` 返回 `action`（`saved` 或 `unchanged`）、`timezone`、`configPath`、`activation` 及结构化 `activationResult`（状态、目标和命令）。等值设置不写入，生效状态为 `none`，命令列表为空；返回重启命令不会自动执行它们。单独 `--json` 仍只读查询当前配置。
+
 ## 网关时区
 
 使用 `codexc config` → 身份与时区 → 网关时区，或 `codexc timezone --gateway`，选择：

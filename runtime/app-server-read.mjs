@@ -1,12 +1,18 @@
-import { createConnection } from "node:net";
-
-import WebSocket from "ws";
-
 import { codexProcessInvocation } from "./owned-process.mjs";
 import { terminateChildProcess } from "./process-lifecycle.mjs";
 
 const defaultTimeoutMs = 3_000;
-const handshakeTimeoutMs = 2_000;
+const unclosedTransports = new Set();
+
+export async function closePendingAppServerReads() {
+  const results = await Promise.allSettled([...unclosedTransports].map(async transport => {
+    await transport.close();
+    unclosedTransports.delete(transport);
+  }));
+  if (results.some(result => result.status === "rejected")) {
+    throw new Error("App Server 读取连接清理未确认");
+  }
+}
 
 const initializeCapabilities = {
   experimentalApi: false,
@@ -25,10 +31,13 @@ export async function readAppServerUserAgent({
   codexBinary,
   clientInfo,
   timeoutMs = defaultTimeoutMs,
+  signal,
 }) {
-  if (process.platform !== "win32") {
-    return initializeUnixWebSocket(socketPath, clientInfo, timeoutMs);
-  }
+  const deadline = globalThis.AbortSignal.timeout(timeoutMs);
+  const cancellation = signal ? globalThis.AbortSignal.any([signal, deadline]) : deadline;
+  cancellation.throwIfAborted();
+  await closePendingAppServerReads();
+  cancellation.throwIfAborted();
   const { createAppServerTransport } = await import(
     "../dist/codex-client/index.js"
   );
@@ -40,85 +49,27 @@ export async function readAppServerUserAgent({
       terminateCodexProcess: terminateChildProcess,
     },
   );
-  await transport.connect();
+  let closing;
+  const close = () => closing ??= transport.close().catch(error => {
+    unclosedTransports.add(transport);
+    throw error;
+  });
+  const abort = () => { void close().catch(() => undefined); };
+  cancellation.addEventListener("abort", abort, { once: true });
   try {
-    return await initializeJsonRpcTransport(transport, clientInfo, timeoutMs);
+    cancellation.throwIfAborted();
+    await transport.connect();
+    cancellation.throwIfAborted();
+    return await initializeJsonRpcTransport(transport, clientInfo, cancellation);
   } finally {
-    await transport.close();
+    cancellation.removeEventListener("abort", abort);
+    await close();
   }
 }
 
-function initializeUnixWebSocket(socketPath, clientInfo, timeoutMs) {
-  return new Promise((resolvePromise, rejectPromise) => {
-    const socket = new WebSocket("ws://localhost/", {
-      perMessageDeflate: false,
-      handshakeTimeout: handshakeTimeoutMs,
-      createConnection: () => createConnection(socketPath),
-    });
-    let settled = false;
-    const timeout = setTimeout(() => finish(new Error("initialize 握手超时")), timeoutMs);
-    timeout.unref();
-    const finish = (error, response) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeout);
-      socket.terminate();
-      if (error) {
-        rejectPromise(error);
-      } else {
-        resolvePromise(response);
-      }
-    };
-    socket.once("open", () => {
-      socket.send(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "initialize",
-          params: { clientInfo, capabilities: initializeCapabilities },
-        }),
-        (error) => error && finish(error),
-      );
-    });
-    socket.on("message", (data, isBinary) => {
-      if (isBinary) {
-        return;
-      }
-      let message;
-      try {
-        message = JSON.parse(data.toString("utf8"));
-      } catch {
-        return;
-      }
-      if (message.id !== 1) {
-        return;
-      }
-      if (message.error) {
-        finish(new Error(`initialize 被拒绝：${message.error.message || "未知错误"}`));
-        return;
-      }
-      socket.send(
-        JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }),
-        (error) => finish(
-          error,
-          typeof message.result?.userAgent === "string"
-            ? message.result.userAgent
-            : undefined,
-        ),
-      );
-    });
-    socket.once("error", finish);
-    socket.once("close", () => finish(new Error("WebSocket 在握手完成前关闭")));
-  });
-}
-
-function initializeJsonRpcTransport(transport, clientInfo, timeoutMs) {
+function initializeJsonRpcTransport(transport, clientInfo, signal) {
   return new Promise((resolvePromise, rejectPromise) => {
     let settled = false;
-    const timeout = setTimeout(() => finish(new Error("initialize 握手超时")), timeoutMs);
-    timeout.unref();
     const removeMessage = transport.onMessage((raw) => {
       let message;
       try {
@@ -126,11 +77,15 @@ function initializeJsonRpcTransport(transport, clientInfo, timeoutMs) {
       } catch {
         return;
       }
-      if (message.id !== 1) {
+      if (!message || typeof message !== "object" || Array.isArray(message) || message.id !== 1) {
         return;
       }
       if (message.error) {
-        finish(new Error(`initialize 被拒绝：${message.error.message || "未知错误"}`));
+        finish(new Error("App Server initialize 被拒绝"));
+        return;
+      }
+      if (typeof message.result?.userAgent !== "string" || message.result.userAgent.length === 0) {
+        finish(new Error("App Server initialize 未返回 User-Agent"));
         return;
       }
       void transport.send(
@@ -138,9 +93,7 @@ function initializeJsonRpcTransport(transport, clientInfo, timeoutMs) {
       ).then(
         () => finish(
           undefined,
-          typeof message.result?.userAgent === "string"
-            ? message.result.userAgent
-            : undefined,
+          message.result.userAgent,
         ),
         finish,
       );
@@ -153,7 +106,7 @@ function initializeJsonRpcTransport(transport, clientInfo, timeoutMs) {
         return;
       }
       settled = true;
-      clearTimeout(timeout);
+      signal.removeEventListener("abort", abort);
       removeMessage();
       removeClose();
       if (error) {
@@ -162,6 +115,9 @@ function initializeJsonRpcTransport(transport, clientInfo, timeoutMs) {
         resolvePromise(response);
       }
     };
+    const abort = () => finish(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) { abort(); return; }
     void transport.send(JSON.stringify({
       jsonrpc: "2.0",
       id: 1,

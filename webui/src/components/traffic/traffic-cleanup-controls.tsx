@@ -1,7 +1,9 @@
 import { Trash2Icon } from "lucide-react"
 import { useManagementTaskRefresh } from "@/hooks/use-management-tasks"
+import { isManagementTaskActive } from "@/lib/api-polling"
 
 import { ManagementTaskConfirmationDialog } from "@/components/settings/management-task-controls"
+import { ManagementTaskFeedback } from "@/components/settings/management-task-feedback"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,9 +18,9 @@ export function TrafficCleanupControls({ tasks, onCompleted }: {
 }) {
   const { t } = useTranslation()
   const latest = tasks.tasks.findLast((task) => task.operation === "traffic")
-  const active = tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
+  const active = tasks.tasks.some(isManagementTaskActive)
   const disabled = tasks.loading || tasks.error !== null || tasks.saving || tasks.pendingPreview !== null || active
-  const error = tasks.actionError ?? tasks.error ?? latest?.error ?? null
+  const error = tasks.actionError ?? tasks.error ?? null
   useManagementTaskRefresh(tasks, onCompleted)
 
   return <>
@@ -36,11 +38,13 @@ export function TrafficCleanupControls({ tasks, onCompleted }: {
         {tasks.saving ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
         {t("traffic.cleanupAction")}
       </Button>
+      {latest && isManagementTaskActive(latest) ? <Button variant="outline" size="sm" disabled={tasks.loading || latest.state === "cancelling"} onClick={() => void tasks.cancel(latest.id)}>{t("modelManagement.cancel")}</Button> : null}
     </div>
     {tasks.notificationError && <Alert><AlertDescription>{tasks.notificationError}<Button variant="outline" size="sm" disabled={tasks.loading} onClick={tasks.refetch}>{t("traffic.retryTasks")}</Button></AlertDescription></Alert>}
     {error === null ? null : <Alert variant="destructive">
-      <AlertDescription>{t("errors.unknown")}{tasks.error !== null ? <Button variant="outline" size="sm" disabled={tasks.loading} onClick={tasks.refetch}>{t("traffic.retryTasks")}</Button> : null}</AlertDescription>
+      <AlertDescription>{error}{tasks.error !== null ? <Button variant="outline" size="sm" disabled={tasks.loading} onClick={tasks.refetch}>{t("traffic.retryTasks")}</Button> : null}</AlertDescription>
     </Alert>}
+    <ManagementTaskFeedback task={latest} />
     <ManagementTaskConfirmationDialog tasks={tasks} />
   </>
 }

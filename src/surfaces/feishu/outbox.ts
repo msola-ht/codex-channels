@@ -90,6 +90,10 @@ interface FeishuReasoningCard {
 
 
 export interface FeishuOutboxOptions {
+  deliverIdleReleased?: (
+    event: Extract<OutputEvent, { type: "conversation.idle.released" }>,
+    sendCard: (card: FeishuCardDocument) => Promise<string>,
+  ) => Promise<void>;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
@@ -463,35 +467,37 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "conversation.idle.released") {
-      const card = renderFeishuConversationIdleReleasedCard(
-        event.minutes,
-        event.threadId,
-      );
       this.delivery.enqueue(
         event.target.conversationId,
-        (signal) => this.messagePort
-          .sendCard(event.target.conversationId, card, signal)
-          .then(
-            () => undefined,
-            (error) => {
-              this.logger.warn(
-                {
-                  component: "Feishu",
-                  fallback: "markdown",
-                  errorType: error instanceof Error ? error.name : typeof error,
-                },
-                "飞书空闲解除 CardKit 创建失败，已降级为 Markdown",
-              );
-              return this.sendMarkdown(
-                event.target.conversationId,
-                formatFeishuConversationIdleReleased(event.minutes, event.threadId),
-                maximumFeishuMessageChunks,
-                undefined,
-                undefined,
-                signal,
-              );
-            },
-          ),
+        async (signal) => {
+          // Already inside the conversation queue: send directly, never re-enqueue.
+          const sendCard = (card: FeishuCardDocument): Promise<string> =>
+            this.messagePort.sendCard(event.target.conversationId, card, signal);
+          try {
+            if (this.options.deliverIdleReleased) {
+              await this.options.deliverIdleReleased(event, sendCard);
+            } else {
+              await sendCard(renderFeishuConversationIdleReleasedCard(event.minutes, event.threadId));
+            }
+          } catch (error) {
+            this.logger.warn(
+              {
+                component: "Feishu",
+                fallback: "markdown",
+                errorType: error instanceof Error ? error.name : typeof error,
+              },
+              "飞书空闲解除 CardKit 创建失败，已降级为 Markdown",
+            );
+            await this.sendMarkdown(
+              event.target.conversationId,
+              formatFeishuConversationIdleReleased(event.minutes, event.threadId),
+              maximumFeishuMessageChunks,
+              undefined,
+              undefined,
+              signal,
+            );
+          }
+        },
         true,
       );
       return;

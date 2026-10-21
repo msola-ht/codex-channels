@@ -10,7 +10,7 @@
 - `cli-lifecycle-command.mjs`：更新、程序卸载、Doctor 与指标/数据维护的 CLI 父子进程协作；就绪握手后通过私有 IPC 转发取消，子进程在安全边界检查取消，父进程等待事务收尾并退出，不用强制终止代替取消。指标导出可把子进程标准输出直接写入私有文件。
 - `installation-command.mjs`：安装入口共用的异步命令执行器；避免同步子进程冻结进度，交互模式保留有界诊断尾部并在失败时展示，非交互模式实时输出日志，取消时终止自己启动的进程树。供源码安装器和本地安装复用，不管理后台服务。
 - `source-build.mjs`：首装 Shell/PowerShell 与更新器共用的源码构建阶段；无需已安装依赖即可加载，显式处理 ignore-scripts、根依赖/Hook/Gateway/WebUI 构建与产物检查。各入口保留命令执行、取消和安装事务所有权。
-- `cli-command-worker.mjs`：安装命令、更新准备命令、服务控制器、Doctor 与 Desktop 平台查询共用的 Unix 进程组监管入口；等待后代输出管道关闭，保留组长身份以支持取消升级为强制终止，不把直接子进程退出当作整组完成。Windows 保留调用方已有的进程所有权机制。
+- `cli-command-worker.mjs`：安装命令、更新准备命令、服务控制器、Doctor、Desktop 平台查询与 WebUI 管理任务共用的 Unix 进程组监管入口；等待后代输出管道关闭，保留组长身份以支持取消升级为强制终止，不把直接子进程退出当作整组完成。管理任务可显式转发 stdin 协作取消，其他调用方仍忽略输入。Windows 保留调用方已有的进程所有权机制。
 
 - `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，由 MCP 客户端启动；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
 - `mcp-setup.mjs`：`codexc config → 工具与 MCP` 的添加、编辑、删除交互入口。添加支持 stdio、Streamable HTTP、AnySearch 搜索和 Strata 视频预设；预设只问必要信息，通用类型保留自定义字段。编辑仅修改选定用户 MCP 字段，保留其他设置与凭据；删除只移除选定用户配置条目，不操作插件、包或附件。三种操作共用脱敏摘要、最终确认、带修订的配置事务及回读校验，拒绝同名添加，不自动重试写入。AnySearch Key 保存为 Bearer Header；Strata 固定文件引用模式及分析时限，从有效 Gateway 配置推导渠道附件目录，最终确认后复核并准备私有权限。不自动安装、启动或重启服务。
@@ -36,6 +36,7 @@
   目标实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
   平台命令异步执行，限制 15 秒和 1 MiB 输出；资源标记单遍异步扫描，活动 Thread 检查设置 30 秒总预算。
   检查与启动进度延迟显示，JSON 状态禁用进度；取消等待自有查询和租约收尾。
+  首次确认绑定配置原文、Provider 与运行目标；写入前在配置锁内重验，异步激活和失败恢复再次检查，过期目标拒绝继续。
   macOS 的具体构建实机验收边界见 `docs/codex-desktop-app-development.md`，Windows 尚未实机验收。
 - `desktop-app-proxy.mjs`：只由 macOS Desktop 的 `CODEX_CLI_PATH` 启动；解析并受控传递 Desktop
   内置插件的布尔启用值和本次 Provider；无插件配置时恢复目标实例但不持有长期租约，带配置时把动态工具 Pipe
@@ -45,7 +46,7 @@
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
 - `source-update.mjs` / `source-update.d.mts`：从本机终端更新受管官方 `main`；跨平台独占锁阻止并发更新，候选克隆启用长路径支持。先构建并只读检查配置、数据库结构和精确 CLI 合同，CLI 不匹配时确认后同步。记录 App Server、Gateway、Relay、WebUI 状态，按依赖顺序停服；刷新源码与全局命令后，只恢复原本运行的服务，Relay 还须保持启用，WebUI 还须未被配置关闭。恢复前再次校验 CLI 版本和配置、数据库，失败保留阶段及必要备份。无新提交或本地构建包只同步配套 CLI，不更新 Gateway 包；关闭 daemon 自动启动，其他用户偏好和模型目录不变。
-  已安装包按自身来源记录识别受管源码，不因旧受管目录残留而覆盖本地构建包。更新预检核对当前 npm prefix、运行包和已安装服务定义的程序路径，拒绝刷新范围外的服务路径；停服前再次复核，换仓库时合并保留完整安装 prefix 归属。候选依赖安装禁用隐式生命周期，随后显式构建一次；仅在 npm 有效配置未禁用脚本时安装 Git hooks。
+  已安装包按自身来源记录识别受管源码，不因旧受管目录残留而覆盖本地构建包。更新预检核对当前 npm prefix、运行包和已安装服务定义的程序路径，拒绝刷新范围外的服务路径；停服前及切换前复核旧目录身份、HEAD、origin 和工作树状态，换仓库时合并保留完整安装 prefix 归属。成功后也保留旧源码副本并返回 backupPath，避免删除外部并发修改。候选依赖安装禁用隐式生命周期，随后显式构建一次；仅在 npm 有效配置未禁用脚本时安装 Git hooks。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并在已安装包记录精确源码来源，从当前全局包路径识别其所属 prefix，供安装归属核对和跨 Node.js 环境卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：统一识别受管源码、本地工作树构建包与 npm 全局包，先卸载后台服务，再卸载当前包及来源匹配的已记录包；只有路径、来源与受管标记均匹配才删除仓库。拒绝符号链接、身份冲突和执行中替换，保留普通工作树和用户数据。
@@ -72,6 +73,7 @@
   行，Gateway 按执行前的运行状态恢复；额度重置
   后可用它从零重新统计用量。
   cleanup/prune 在任何维护写入前校验完整当前 Schema，并在检查点、备份、删除与 VACUUM 期间持有统一 writer 锁；备份不覆盖既有文件。裁剪计时会撤销对应 Thread 历史完整标记。
+  提交后的 VACUUM、计数、关闭、释放锁或恢复服务失败通过 MetricsMaintenanceError 保留提交状态、数量、备份及失败阶段；CLI 非零退出仍打印结果，未知提交不报告成功，不自动重放删除。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
   时间范围、组合筛选、分组、格式及维护命令参数，通过 Observability 的 `query/index` 无状态入口复用规范范围、日期解析与聚合维度，并向顶层帮助
   导出规范用法行；不访问配置、数据库或服务，
@@ -85,7 +87,7 @@
   执行确认后的失败、部分成功、未确认、复核跳过及缓存清理失败返回非零状态，逐组结果保留，不自动重试或回滚。
 - `cli-command-usage.mjs`：共享纯帮助文案与服务动作目录，不加载命令执行实现。
 - `cli-help.mjs`：校验公开命令的精确帮助路径，拒绝未知子命令和多余参数。
-- `delivery-command.mjs`：仅执行 status/list 时从 Surface 窄诊断入口加载载荷解码与屏障策略，避免帮助及其他 CLI 命令加载平台 SDK；通过 Surface 公开入口复用持久输出分类，离线查看独立投递箱的计数、事件身份、阻塞策略与检查点，并根据明确参数重发或确认送达；不输出正文、不自动清理未确认记录。
+- `delivery-command.mjs`：仅执行 status/list 时从 Surface 窄诊断入口加载载荷解码与屏障策略，避免帮助及其他 CLI 命令加载平台 SDK；通过 Surface 公开入口复用持久输出分类，离线查看独立投递箱的计数、事件身份、阻塞策略与检查点，并根据明确参数重发或确认送达；status/list 打开时会恢复遗留 sending 为 uncertain 并清理中断的渲染暂存，不是只读查询；不输出正文、不自动清理未确认记录。
 - `cli-menu.mjs` / `cli-menu.d.mts`：八项顶层导航及运行连接、状态服务、数据维护、程序维护子菜单；与主帮助共用分类口径。连接菜单列出已注册工作区和实际可用的 Provider 拓扑，普通隔离实例使用规范 Profile 名分派，聚合项受共享暂停门禁隐藏；按平台隐藏不可用的 Desktop 与权限修复。循环保留上次选择，维护写操作需确认；只分派现有命令，保留进程终止信号语义。
 - `cleanup-menu.mjs` / `cleanup-menu.d.mts`：统一清理交互入口，复用会话参数菜单、指标维护菜单和现有执行命令；转储先预览再确认删除，Provider 指标按精确 ID 确认清理，单项完成后返回菜单。
 - `maintenance-services.mjs` / `maintenance-services.d.mts`：交互清理共用的服务状态检查、停服确认与逆序恢复；取消覆盖停止、维护和恢复全程，子命令通过私有 IPC 在安全边界收尾，恢复后才返回取消状态，不停止非受管进程。
@@ -100,7 +102,7 @@
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务、共享 API 类型与管理路由组合入口；
   服务入口同时接收终端信号与父进程 `codexc-stop`，统一关闭 HTTP 监听、通知连接与尚未发送请求的浏览器预连接，并取消导出和投递只读 Worker；活动请求按共享停止预算收尾。超时关闭剩余连接并记录非零状态，后台读取或 Windows ACL 辅助进程未确认退出时保留归属，实际退出后再结束服务。Windows CLI 包装层异步转发停止消息。
-  主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
+  主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行监听模式对应的管理访问边界（回环连接，或 `0.0.0.0` 下强制 Bearer）、精确 Origin、Bearer 鉴权、JSON 请求
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。正常页面和未构建回退页统一设置
   同源脚本 CSP、`frame-ancestors 'none'`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`
@@ -109,6 +111,7 @@
   概览读取模型统计分组配置，按原始模型 ID 合并并提供原始模型成员明细，不向展示层注入映射；
   概览与调用采集开关共用可取消的进行中私有配置读取，不缓存配置或权限判断。
 - `webui-official-model-catalog.mjs` / `webui-official-model-catalog.d.mts`：读写当前 Codex Home 的 `models_cache.json`，按精确模型修改上下文；目录列表只投影展示字段、25 项白名单详情、加速说明及明确的速度倍率，审批仅返回模式和文本来源状态；提示正文通过独立的可见模型与修订校验入口读取。预览修订、私有备份、锁内复核及保存后回读共用存储边界。刷新仅执行当前 CLI 的 `debug models`，由上游决定缓存复用、联网获取与写回，不将可能回退的 stdout 覆盖缓存，执行后对比可见模型字段。导出子进程受超时、输出预算与取消管理；终止失败有界返回错误，仍保留进程归属并拒绝后续缓存写入，服务关闭先尝试有界清理，失败后等待实际退出。
+  上下文共享计划计算同值，锁内复核后返回 `unchanged`，不备份或替换缓存，审计和前端反馈使用相同语义。
 - `webui-management-official-model-route.mjs`：OpenAI 缓存读取、上下文修改和当前配置目录刷新的预览/确认路由；独立 prompts GET 按可见模型 ID 与缓存修订返回白名单提示正文，最多 512 项，不返回任意配置或缓存归属元数据，正文不写日志。当前配置命令只在确认、备份后执行，展示真实缓存前后差异。复用管理鉴权、限速、一次性确认及审计，同一服务内操作互斥，关闭服务时取消并等待自有导出进程与写入收尾。
 - `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /
   `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警；响应附加同账户的 OpenAI 凭证刷新时间，不写入快照） / `webui-management-task-route.mjs` /
@@ -127,6 +130,7 @@
   响应；默认跨批次按请求时间倒序分页，支持单批次筛选，明细按批次与编号定位，指标关联目标缺失时明确报错，不替换目标。
   只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意
   路径；正文超过上限时返回截断标记，独立 trace 按总字节与记录数分页。仅支持 V2 session。
+  HTTP 断连、10 秒期限与服务停止传至共同读取上下文，进程最多并行两个读取；目录、索引、正文与轨迹共享工作预算，资源实际关闭后才释放名额，关闭入口等待该服务归属的读取完成。
 - `webui-traffic-events.mjs`：按提供商及批次过滤转储文件变化，合并通知到只读 SSE；仅对相关批次建立非递归目录监听，监听首次目录创建、清理及重建，订阅关闭即释放文件监听与心跳，不读取正文或轮询 App Server。
 - `reset-credit-command.mjs`：`codexc reset-credit` 查询与交互确认入口，复用 Gateway 私有账户 IPC，不依赖 WebUI。
 - `webui-reset-credit-route.mjs`：OpenAI 重置券实时列表、预览及消费确认路由，复用管理鉴权、限速、一次性令牌和审计，通过 Gateway 私有账户 IPC 执行。
@@ -139,11 +143,14 @@
 - `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置校验、管理错误、高风险路径分类、Provider 状态缓存，以及
   WebUI HTTP 响应、JSON 请求体、令牌鉴权和回环地址校验；主服务组合共享访问与错误边界并完成分派，
   具体资源处理留在对应管理路由。
+  Codex／Provider 只读管理快照共享 20 秒取消期限与 HTTP 断开处理，关闭 WebUI 会取消并等待其自有连接清理；预览、确认与写入保持各自事务边界。本地模型目录另由 Provider 路由直接投影文件，不依赖完整管理快照。
+  Provider 摘要保留 5 秒缓存与在途合并，单个 HTTP 取消不撤销其他等待者，最后一个等待者离开才取消共享读取；共享操作另有总预算及关闭归属，超时或取消的结果不进入缓存。Codex 已提交写入后的独立回读也接受只读预算与关闭取消，不撤销或重放写入。
   管理错误仅映射显式领域类型的稳定代码与安全文案；未知异常返回 500，不将其消息、代码或字段直接公开。冲突返回 409，目标缺失返回 404，明确依赖不可用返回 503。
 - `account-management-error.mjs`：DeepSeek、CLP 及账户运行状态适配器共享的输入、冲突与恢复失败分类；WebUI 只消费其受控代码和字段，不公开底层异常。
+- `webui-management-task-command.mjs`：Runner 自有维护命令，通过标准输入跨平台请求协作取消；返回请求标识绑定的受控提交/收尾状态，不返回原始输出。任务环境的内部 `CODEX_CONNECT_MANAGEMENT_TASK=1` 使下游控制器保留在同一自有进程树内，不扩展公开命令。
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标和调用记录维护异步任务；
   只接受固定动作和字段，显式输入/占用错误使用 `ManagementTaskInputError`，未知异常不公开原文。
-  任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或归一化回环 Origin 隔离，输出不回传且支持取消；Windows 取消复用共享的有界进程树回收，避免只终止 npm 包装进程。回收失败保留任务归属、错误及再次取消入口，不放行重叠任务；退出与取消完成协调后才发布终态。
+  任务由包内维护 Worker 执行，状态按已验证的 WebUI 令牌或归一化回环 Origin 隔离，不回传原始输出；先协作取消，10 秒宽限后在总退出预算内收尾同一自有进程树。Unix 登记进程组，Windows 由所有者辅助程序及 Job 管理后代；Windows 树终止异步执行，多个任务不依次阻塞事件循环。未确认退出保留归属、错误与再次取消入口。WebUI 关闭先拒绝新任务再等待现有任务，取消或强制中断不冒充回滚成功。
   Runner 通过同一回调记录启动和终态审计，`auditStatus` 保留任何阶段的降级；列表、详情及 WebUI
   任务反馈均消费该状态。变更订阅在审计结果确定后通知，审计失败不阻断通知或覆盖任务结果。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/time`（服务端时区与当前时间）、
@@ -166,22 +173,22 @@
   可连续配置模型与渠道，选择“完成接入”后进入 Codex 设置菜单，复用用户偏好、官方 TUI 身份与时区设置，
   单项完成、返回或失败后可继续选择，选择“完成 Codex 设置”后继续；该菜单取消会中止初始化；
   逐项询问 WebUI 后台服务、调用详情记录与模型转发监听（默认沿用当前状态、首次初始化默认关闭，通过
-  Config 管理接口写入 `[webui] enabled`，调用详情记录仅在变化时写入，模型转发监听选“是”才进入
+  Config 管理接口写入 `[webui] enabled`，可选项确认绑定展示修订，全部确认后在配置锁内核对并写入；调用详情记录仅在变化时写入，模型转发监听选“是”才进入
   `model-relay-listen-menu.mjs`），在接入向导类别菜单取消即中止本向导（子流程取消只结束该子流程），
   尚未启用渠道时跳过安装，最后询问
   是否执行 `codexc install`；`bin/codexc.mjs` 在安装成功后按配置补启动 WebUI，并对已有但不可用的配置
   失败关闭、不修改数据。非交互调用不进入本模块，只创建用户目录、默认工作区仓库与初始配置。
 - `setup.mjs`：使用 `@clack/prompts` 提供接入类别菜单和脱敏总览，并把“模型与提供商”“通讯渠道”
   和“项目技能”流程委派给具体适配器；“完成接入”正常退出，与顶层“取消”区分。总览与具体流程在选中后按需加载，注入回调优先。模型与提供商下分 OpenAI 官方
-  登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级，并在本次向导内保留各层选择；第三方设置区分账户接入、受管 Provider 默认值和按提供商／模型共用设置的目录窗口；配置写入后的激活结果由
+  登录/恢复与第三方提供商两级，子模块返回时停留在所属层级；第三方设置分为统一模型管理和各提供商账户接入，默认模型、共享思考等级与目录窗口集中在模型管理，自定义接入合并为一个入口；配置写入后的激活结果由
   `config-activation-result.mjs` 提供统一状态和目标定义，只转换子模块显式返回的激活范围，不为查询或取消操作推断重启。公开 CLI 的 `codexc setup --jsonl` 将交互提示
   写入终端 stderr，并按每行一个事件把脱敏结果或错误写入 stdout；完成接入返回 `result` 事件的 `action: completed`。输入或提示输出不连接终端时明确拒绝，操作失败后可继续选择。默认 `codexc setup` 保持纯交互文本输出。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
   原生子代理、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
   允许名单、代理值或 Provider URL。
-- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider”下 Codex 兼容 Provider 与自定义模型 Provider 共用设置流程；
-  已有自定义提供商先选择模型管理或连接设置；模型管理复用 `provider-model-setup.mjs`，连接编辑保留模型与默认值，不重问模型能力或工具探测。
+- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方提供商 → 自定义提供商”共用设置流程；新增时选择官方或自定义模型目录。
+  已有自定义模型提供商先选择模型管理或连接设置，取消子操作回编辑小节；模型管理复用 `provider-model-setup.mjs`，连接编辑保留模型与默认值，不重问模型能力或工具探测。
   新增时可从 URL 主机名派生 Provider ID、输入自定义标识符或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
   上游 `base_url`、直接写入的 API Key、固定/切换模式、上游接口（Responses 直连或 Chat Completions 由网关转换）、WebSocket 开关、客户端检索检测和上游模型 ID。选择 Chat Completions 时强制关闭 WebSocket 并跳过检索检测（检索与工具由 Chat 桥适配）。Codex 兼容入口从官方目录校验，服务启动时导出官方快照；自定义提供商入口
   收集逐模型能力并生成独立目录。两者均不调用第三方 `/models`。
@@ -213,10 +220,11 @@
 - `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：Provider 保存前的 Codex 模型目录合同校验；先将自身新建的隔离临时目录设为私有，再写入目录数据，限制运行时间并清理临时文件，不修改系统 TEMP 根目录权限。
 - `responses-model-setup.mjs` / `responses-model-setup.d.mts`：新模型从固定 OpenAI 或 DS 模板草稿开始，填写 ID、名称、当前窗口并确认思考、图片、文件编辑和工具搜索能力；已有模型先选择目标模型与设置组，未选内容保留，不重新套用模板。高级设置按组选择描述、最大窗口、等级说明、图片精度、详细程度、摘要、指令、有效窗口比例、压缩阈值、截断与采样参数。采样仅预填已有值，未设置值为空，留空省略字段；不再重复选择启用列表或中途确认保存。默认模型在添加／编辑完成后选择，最终预览确认才写入；新建提供商填写 Key 后由 `custom-model-capability-setup.mjs` 提供默认跳过的可选工具探测，只有明确选择单项探测才发起请求。
 - `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义提供商共用的 1–64 个模型多选、预览确认与默认模型保护。
-- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG/CLP 按提供商管理共用目录的手填模型及官方发现；OCG/CCG 从 DS 导入，CLP 从 Cline 发现并支持思考开关声明，也可明确选择继承当前目录的模型配置及请求行为。只添加选中的新模型及明确来源关联，已有条目不重建。保存复用受管目录／来源持久事务与恢复入口，无内容变化不写入或更新备份。保护所有同族账户默认值，目录变化不修改账户凭据。
+- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG/CLP 按提供商管理共用目录的手填模型及官方发现；OCG/CCG 从 DS 导入，CLP 从 Cline 发现并支持思考开关声明，也可明确选择继承当前目录的模型配置及请求行为。只添加选中的新模型及明确来源关联，已有条目不重建。保存复用受管目录／来源持久事务与恢复入口，无内容变化不写入或更新备份。保护所有同族账户默认值，目录变化不修改账户凭据。 查看启用模型或取消添加、发现子操作后返回本目录菜单；从目录菜单返回才退出到调用入口。
 - `managed-provider-model-edit.mjs` / `managed-provider-model-edit.d.mts`：CLP 已保存模型的本地读取、按字段差异预览与锁内保存，不依赖远程模板或模型 ID 匹配。保留精确 ID、请求路由、来源关联及未改字段；复用受管目录事务、备份、回读与同族账户等级镜像。
 - `managed-provider-model-edit-setup.mjs` / `managed-provider-model-edit-setup.d.mts`：CLI 本地编辑 CLP 已有模型，按设置组选项修改并确认前后差异；支持思考开关 `enabled`，不新增模型、不下载模板，不提供 CLP 不支持的采样、原图或摘要控制。
 - `provider-model-management.mjs` / `provider-model-management.d.mts`：CLI/WebUI 共用的提供商目录能力、本地移除、单模型窗口及显示名称预览和锁内保存；修改绑定 Provider、模型和目录修订，并显示家族共用账户范围。显示名称修改保留模型 ID、默认值及能力参数，无变化不写入；自定义修改仅重编译已保存定义，不重新应用提示词模板；官方共享目录只读。WebUI 从对应保存目录投影完整能力，按目录身份、精确模型 ID 和内容修订读取白名单提示词。列表不携带提示正文。保护账户和 Gateway 显式默认值、非空目录及文件修订；受管修改纳入账户目录／来源持久恢复，自定义写入统一前后摘要 pending 与回读校验。
+  列表投影受控移除原因，区分账户默认、目录默认及活动主提供商的 Gateway 显式默认；CLI/WebUI 共用判断，执行仍在锁内复核。
 - `provider-model-template-management.mjs` / `provider-model-template-management.d.mts`：DS、CLP、CCG、OCG 和 CP 的统一模板选项、显式来源关联、分组差异预览与锁内执行。availableSections 区分提示词、运行设置及 capabilities；CLI／WebUI 将后者对受管模型标为“能力参数”、对 CP 标为“本地工具”。运行设置只包含有效比例、压缩阈值和截断策略，未选择的参数保持原值。两类模型选择 capabilities 时仅合并来源工具声明中的 `send_user_message_async`、`clock` 两项，纳入预览保存，保留其他本地工具声明；CP 的其他模型能力不从模板更新。仅选择提示词或运行设置不更新工具，清除旧中文时钟尾段须明确选提示词。有界进程缓存绑定源快照、目标修订及 10 分钟有效期；CLP 在读取候选时下载一次，整体限时 25 秒并支持取消，只投影当前目录受支持模型，包含 Flash 时按需读取 DS 模板，预览及确认不重新联网。CP 仅执行既有目录 pending／backup 事务并回读，不调用连接与默认模型保存，保留 Profile／主配置及目录独立默认值；受管账户复用目录与来源事务。无差异不写入，不自动重启。CLI 与 WebUI 复用同一计划接口。
 - `provider-model-additions.mjs` / `provider-model-additions.d.mts`：CCG／OCG／CLP 手填、DS 导入及 CLP 发现共用的新增候选、全字段预览和执行计划。锁外获取有界来源快照，绑定账户、目录及来源修订；锁内复核并追加，保留旧模型和来源关联，复用受管目录恢复事务。候选十分钟失效，确认时不重新下载，无新增不写入。CLP 继承从同一目录复制完整模型条目，替换 ID／名称并固化请求配置，不建立动态引用或模板关联；来源变化使预览失效。CLI 与 WebUI 共用此后端；独立手填定义不接受受管目录无法保存和消费的 `sampling`，CLP 还拒绝 Chat 桥不支持的原图细节和思考摘要控制，并补齐本地工具声明。
 - `provider-model-setup.mjs` / `provider-model-setup.d.mts`：Setup 的统一模型管理菜单，复用显示名称编辑、移除、自定义模型专用保存、受管默认设置和 CLP／CCG／OCG 发现添加。名称编辑展示固定模型 ID、旧名称、新名称及共享账户，确认后调用共用保存接口。已有自定义模型可单独选择工具能力探测，明确选择才发请求，采用结果仍走修订检查和预览保存。五类独立目录均可选择来源、对比并更新模板；自定义允许提示词、运行设置及本地工具，受管另有能力参数；默认仅选择提示词。逐字段预览差异，长内容显示 JSON 长度与 SHA-256 摘要并可在确认前展开，确认后保存，无差异不写入；不自动重启服务。
@@ -241,7 +249,7 @@
   事务；同一异步调用链中的嵌套操作复用事务，避免 Provider 设置与账户删除交叉提交。
 - `primary-provider-management.mjs` / `primary-provider-management.d.mts`：提供自定义主 Provider
   切换与删除的无终端预览和执行接口；预览仅返回脱敏目标、影响与生效动作，执行校验显式模型属于 App Server 官方目录、保持配置/Profile/私有备份事务顺序，
-  并以稳定错误码和结构化警告报告失败或备份清理部分成功。CLI 已确认的切换预览在事务内重新比对，目标或影响变化时要求重新确认。切换只加载目标 Provider，删除只依赖注册表与
+  并以稳定错误码和结构化警告报告失败或清理部分成功。删除结果分别保留 configuration、backup/credentials/catalog/metadata 清理状态及 activation；目录与元数据独立清理，精确 ID 可重试孤立材料。CLI 已确认的切换预览在事务内重新比对，目标或影响变化时要求重新确认。切换只加载目标 Provider，删除只依赖注册表与
   Profile 原文，其他 Provider 目录不可读不阻塞本次操作；管理模式整体校验与目标自身目录校验保持失败关闭。
 - `primary-provider-config-transaction.mjs` / `primary-provider-config-transaction.d.mts`：统一自定义
   Provider 固定模式写入事务；切换与新增/编辑共同复用 Profile 移除、Codex 配置版本写入、响应丢失
@@ -251,11 +259,11 @@
   `profile-conversion-backups/<随机 ID>.json`，校验私有目录及备份回读后才继续。快照不覆盖、不自动清理或恢复，结果未知时供人工核对。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc provider` 的
   list / add / switch / remove / recover 子命令；`list --json` 复用统一 Provider 管理状态并返回不含凭据的稳定主实例与候选摘要；
-  switch / remove 复用 Provider 管理接口并负责中文确认与结果渲染；所有 switch（含恢复官方、从备份恢复、
+  switch / remove 复用 Provider 管理接口并负责中文确认与结果渲染；直接 remove 清理未完成时输出结果后返回非零，Setup 保留部分成功并继续菜单。所有 switch（含恢复官方、从备份恢复、
   切换 Provider 转固定）都会先经二次确认，并提示将改写主配置的 model_provider / model；命令行 switch
   传 --yes 跳过确认（仅命令行，Setup 菜单仍确认）；
   add 复用共用 Provider Setup，`--custom-models` 选择自定义目录；recover 明确选择保留或回滚未完成目录，
-  Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
+  Setup 统一管理两类目录，新增先选目录类型，取消表单回目录选择，目录选择返回提供商菜单；另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
   并把固定候选移入私有备份、保留切换 Provider，`switch <ID>` 把目标设为固定主 Provider；目标是切换
   Provider 时会移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接
   编辑备份候选并恢复、修改和激活，也可经二次确认删除备份候选。恢复、编辑或删除时先提交配置，
@@ -268,12 +276,13 @@
   避免两份文案漂移。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的官方设备登录入口；登录前预览共享 Provider 切换计划，受管固定模式须先改为切换模式。登录完成后重新核对确认范围与配置修订，再提交官方恢复；自定义候选备份、第三方默认模型、模型目录和思考设置清理与 `codexc provider switch openai` 保持一致。
   登录子进程异步运行，输出跟随交互输出流，不混入 Setup JSONL；失败、信号取消或输出异常均停止后续配置写入，并清理自有进程。
-- `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与校验；导出共用 MCP 审批模式供新增和编辑向导使用；插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
+- `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与异步校验；导出共用 MCP 审批模式及 Strata 实际目标/时限校验供编辑向导使用；未知继承或宿主范围明确拒绝，不将普通 MCP 套用视频预算。插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
   Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Standard/Fast/Ultrafast、计划清单工具、TUI 空闲总结，
   按显式字段修改 Sandbox、审批和 Workspace Sandbox 网络权限，省略字段保留原值与继承状态；CLI 整组确认仍提交完整三项，一键批量配置仍要求完整权限，或一次原子写入默认值与用户偏好（已有 Permission Profile 时保留权限）；加速档位仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
   第三方固定模式不开放官方默认模型、思考等级和加速档位；已有 `default_permissions` 时不混写传统 Sandbox 字段。
+  预览与执行按用户层原值计算实际 edits；等值返回 unchanged、willChange=false、activation=none，不调用写入。缺省与显式默认值分开，清除仅移除用户覆盖；策略及工具合并状态校验仍先执行。
   Fast 按模型目录精确 `priority`/`fast` ID、Ultrafast 按 `ultrafast` ID 开放，纯目录匹配与 Application、WebUI 共用 `runtime/service-tier.mjs`，预览和写入前重新校验所选模型及 Client 投影的独立开关；`fast_mode` / `ultrafast_mode` 分别结合合并配置与受管策略，不自动修改开关。设置页保留原始配置档位，关闭档位仍可退出到 Standard。
   快照保留已配置但不可用的模型 ID，未配置时只采用目录显式默认模型，不回退到其他条目；CLI/WebUI 提示先选有效模型，仍允许 Standard 退出加速。
   全局 Auto-review 默认值仅允许官方 OpenAI 主实例或复用官方模型目录的 Codex 兼容主实例开启；其他主实例仍可关闭，组织策略限制继续适用。
@@ -294,26 +303,28 @@
   安装、更新和默认值与用户偏好配置均不自动应用该预设。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
   默认模型与思考等级的无终端校验、版本化预览与确认保存接口；预览区分账户默认模型、同族共享模型等级及 Profile 镜像范围，保存拒绝过期预览。写默认模型时保留模型目录中已有的上下文窗口，
-  窗口由「受管模型目录上下文窗口」按精确 Provider ID 和模型管理；切换模式更新私有 Profile，固定模式与切换模式共用统一
+  窗口由「模型管理 → 所属提供商 → 模型上下文窗口」按精确 Provider ID 和模型管理；切换模式更新私有 Profile，固定模式与切换模式共用统一
   Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读确认写入结果，仅在主 Provider 未变且确认未生效
   且目录写入后的相关文件无后续修改时恢复模型目录。写入返回后仍回读主配置及同族账户默认选择、共享思考等级，不确定时返回 `save-unconfirmed`，不自动重试；执行阶段未知异常不对外暴露原文，结果明确返回 App Server 重启动作。
-- `model-window-setup.mjs` / `model-window-setup.d.mts`：`codexc setup` 的“受管模型目录上下文窗口”入口；
+- `model-window-setup.mjs` / `model-window-setup.d.mts`：`codexc setup` 模型管理中的“模型上下文窗口”入口，按所选提供商限制可编辑目录；
   按提供商和模型选择受管模型，通过 128K、256K、384K、512K、1M 预设或自定义
   Token 数设置窗口；预设按模型最大窗口过滤，可直接选择最大窗口，自定义范围为 1024 至模型最大值。
   选择窗口前读取目录修订并显示目标提供商、模型及受影响账户；与添加自定义模型复用 `responses-model-setup.mjs` 的窗口选择交互。
   CLI 与 WebUI 共用 `provider-model-management.mjs` 的 `model.context` 预览、确认和事务保存；确认前显示窗口差异及账户范围，取消不写入，目录或账户变化拒绝旧编辑。结果返回 App Server 重启动作。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
-  Provider、模型与思考等级交互与中文渲染，写入复用管理接口；第三方 Provider 总菜单会先选择 Provider，DeepSeek 与 OpenCode Go 子菜单则复用同一入口并预选当前 Provider。上下文窗口不在本流程，转到
+  Provider、模型与思考等级交互与中文渲染，写入复用管理接口；统一模型管理与账户子菜单先明确所选账户，进入时允许取消返回所属菜单。上下文窗口不在本流程，转到
   `model-window-setup.mjs`；历史 Thread 仍保留创建时的模型。确认前展示默认模型与共享思考等级的差异和影响账户；保存时在管理锁内复核预览修订，成功提示使用实际执行结果。
-- `codex-user-config.mjs` / `codex-user-config.d.mts`：WebUI 只读配置连接已有主 App Server，连接失败不启动临时进程；CLI 事务创建隔离的 stdio App Server Client，把 Codex 官方默认值与
+- `codex-user-config.mjs` / `codex-user-config.d.mts`：WebUI 只读配置先从监管器取得主 Provider 的短租约，按需恢复空闲释放的主 App Server，读取及连接清理完成后释放租约；不创建临时 App Server。监管入口确实缺失时仍可连接已显式运行的独立主实例，协议不兼容或探测失败不得绕过租约。UA、指标、服务状态及本地目录展示不主动唤醒。CLI 事务创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` 普通键级修改及更新器关闭 daemon 自动启动作为官方 `config/batchWrite` 事务写入用户配置；
   用户设置修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
+  读取、预览和写入共用临时客户端归属；只读生命周期接受取消信号，关闭自有连接及 Proxy，不终止共享服务。关闭失败保留客户端，由后续操作或 WebUI 关闭重试，未确认前不能创建替代客户端。已确认写入不因清理失败改判为写入失败；输出固定清理告警，不自动重复写入。Unix stdio 创建并登记独立进程组，包装器退出不等于整组退出。
+  WebUI 最终关闭通过 `closeCodexUserConfigClients` 禁止新客户端操作，等待已准入操作结算后再处理残留清理；不取消已提交写入，也不在写入仍持有客户端时确认后台退出。
   所有 CLI 用户设置、MCP 与官方登录统一解析 Gateway 显式 Codex binary，配置为默认 `codex` 时才采用 `CODEX_BINARY`；默认 Codex Home 尚不存在时
   从用户主目录启动并由 Codex 初始化默认目录，显式 `CODEX_HOME` 仍要求已存在且为目录。
 - `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“项目技能”类别；列出项目 `.codex/skills` 下带
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
-  hermes 运行时的 `.skill-lock.json`。
+  hermes 运行时的 `.skill-lock.json`。覆盖确认绑定目标快照，同父目录先准备候选再替换；旧树保留在隐藏操作目录并输出恢复位置，失败恢复不覆盖已存在目标。
 - `config.mjs`：`codexc config` 的顶层交互编排，按作用范围提供 Codex 用户偏好、工具与 MCP、Gateway 显示与会话、身份时区、调用记录、计划任务、网络代理、服务访问、日志高级功能与指标存储，以及脱敏总览和路径查询。MCP 添加、编辑、删除与已有工具策略管理同组，Relay/WebUI 访问设置同组；保留损坏 Gateway 配置时的 Codex、MCP 和路径入口。循环记住上次选择；修改复用既有保存流程，非交互终端无参数时显示帮助。
   `paths [--json]` 不进入菜单或读取配置正文，只输出绝对路径与文件存在状态，不创建配置。子菜单与总览在选中后按需加载，路径查询和取消不加载这些实现。
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，有效默认值来自共享 Schema，原始配置保留未配置与显式配置的区别；只显示配置来源、有效开关、作用范围
@@ -332,7 +343,7 @@
   结果预填，由用户确认后写入。
 - `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`：
   保存 Config 管理接口的共享稳定错误，以及 WebUI、指标的脱敏投影、输入校验与文档修改语义；
-  CLI 菜单不直接读写这些配置段。
+  切换 WebUI 为全网卡监听且尚无令牌时，共享逻辑生成随机令牌并与地址一起保存；也支持经确认显式重新生成。预览仅返回脱敏状态，写入响应只提供本次生成的令牌。CLI 菜单不直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理与日志等级；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
 - `config-display-menu.mjs`：独立管理模型统计分组、操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；模型分组仅用于控制台汇总，保留原模型明细，重新读取即生效；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
@@ -346,6 +357,7 @@
   WebUI 的重启要求；缺省不写入配置，非交互终端只报告当前值，`codexc config` 的身份与时区菜单复用同一实现。
   `--gateway` 管理 `[gateway].timezone`：缺省跟随 App Server，`--system` 选择独立系统时区，
   IANA 名称设置自定义时区，`--follow-app-server` 删除独立设置；修改后提示重启网关。
+  写入 JSON 同步返回 action、activation 与结构化 activationResult；等值不写入且不提示重启。
 - `config-webui-menu.mjs`：独立管理 WebUI 启用状态、监听地址、端口和访问令牌交互；启用状态写入
   `[webui] enabled` 并据此决定 `codexc start/restart all` 是否启动 WebUI；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
@@ -357,7 +369,7 @@
 - `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、默认账户及 `codexc provider ccg remove` 删除入口；账户隔离 Key/Profile/App Server 与统计代理，模型目录由 CCG 账户共用，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录及显式来源关联，保留原模型并复制 Flash 增加 V4.1。模型 ID 与显示名来自根目录 `provider-model-catalog.json`，V4.1 的来源绑定指向 Flash。
   DS、CCG、OCG 的初建及模板更新共用按目标家族区分的来源投影；仅 DS 官方账户关闭 verbosity 与摘要声明，CCG／OCG 保留源声明，不将 DS 官方端点限制套用到其他平台。
-- `managed-provider-files.mjs` / `managed-provider-files.d.mts`：Provider 文件事务必须提供当前运行环境；统一访问器绑定文件归属，快照携带内存中的读取与写入闭包，并发复核、更新及回滚复用同一策略。固定模式先纳入不可变私有凭据再发布主配置，回滚先恢复已有文件，失败保留新增恢复资料并停止后续删除；未纳入快照的更新明确拒绝，不改变持久化备份格式。
+- `managed-provider-files.mjs` / `managed-provider-files.d.mts`：Provider 文件事务必须提供当前运行环境；统一访问器绑定文件归属，快照携带内存中的读取与写入闭包。主 Codex 配置通过用户层 `config/read` 与带 `expectedVersion` 的 `config/batchWrite` 发布实际变化的字段，禁止全文件替换；回滚只逆转本次字段并再次校验版本。固定模式先纳入不可变私有凭据再发布引用；未知写入先回读，不自动重放，无法确认时保留私有文件、凭据及备份并阻止自动回滚。已确认失败时先恢复已有文件，失败保留新增恢复资料并停止后续删除；未纳入快照的更新明确拒绝，不改变持久化备份格式。
 - `managed-provider-account-plan.mjs` / `managed-provider-account-plan.d.mts`：受管账户固定模式与自定义切换注册表的兼容性检查；账户计划快照包含相关配置、注册表及当前固定凭据版本，以私有 HMAC 修订绑定预览，执行时拒绝过期确认，不公开凭据摘要。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。使用用户配置定位主 Socket，源码拆分入口直接运行时也遵守显式配置文件、用户数据目录与默认用户配置的优先级，不回退仓库配置。
 - `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，构建时复用 `runtime/model-catalog.mjs` 收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；调用方取消覆盖请求、正文读取及重试等待，取消后不重试。拒绝响应时释放正文；不导入账户菜单或管理事务。
@@ -412,7 +424,8 @@
 - `weixin-setup-session.mjs` / `weixin-setup-session.d.mts`：提供所有者绑定的微信 Setup 开始、状态、
   配对码提交、确认与取消接口；二维码和凭据只保存在有期限的进程内会话中，状态与保存预览不返回
   Bot Token，取消和超时会中止底层请求并丢弃临时状态，确认时检查微信配置未被并发改动后复用原子
-  凭据/配置回滚事务；扫码前及凭据写入前校验配置版本与结构。写入异常时同时核对原子替换的文件身份和目标配置，不能用旧配置值相同判定提交成功。
+  凭据/配置回滚事务；扫码前及凭据写入前校验配置版本与结构。未知写入异常时同时核对原子替换的文件身份和目标配置，不能用旧配置值相同判定提交成功。
+  三个渠道会话均保留已确认配置提交后的锁释放告警，不把已保存降为普通保存失败；终端显示后续处理提示，Setup JSONL 保留 warnings。
 - `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份、应用权限、
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
   稳定错误；每次凭据验证使用独立 Token 缓存，鉴权和 Bot 查询均受请求期限与会话取消约束。
@@ -508,13 +521,14 @@
   并向顶层帮助导出规范用法行。
 - `traffic-cleanup.mjs` / `traffic-cleanup.d.mts`：实现并声明 `codexc cleanup traffic`；默认只预览
   已识别的 V2 session，确认全部 App Server 与 Relay 已停止后才按 `--confirm` 永久删除，
-  停止检查后复核预览范围及目录/manifest 身份，逐项删除前再复核；未识别文件与目录保持不变。
+  菜单传入首次预览的范围指纹，停止检查后复核预览范围及目录/manifest 身份，逐项删除前再复核；未识别文件与目录保持不变。菜单内调用与维护服务共享取消信号，直接命令保留子进程收尾协议。
 - `traffic-command.mjs`：`codexc traffic` 的实现，把 V2 逻辑调用索引与正文引用渲染成人可读文本；
   每个编号固定展示一条请求和一个终态响应，支持编号、关键字、正文上限与持续跟随；不修改转储文件。
 - `traffic-dump-reader.mjs`：V2 转储共享读取实现，Relay debug v1 补充入站/交付阶段且拒绝未知版本，严格读取 `manifest.json`、`interactions.jsonl` 与
   payload 引用，按批次和逻辑调用编号配对产出摘要和详情；`codexc traffic` 与 WebUI 共用。
   manifest 只接受当前四个字段，扫描路径不受字段覆盖；各读取入口拒绝链接、非普通文件与打开时替换，
-  manifest 限制 1 MiB、索引和 trace 每行限制 16 MiB。WebUI 摘要
+  manifest 限制 1 MiB、索引和 trace 每行限制 16 MiB。WebUI
+  使用可取消的异步目录、manifest、文件流与分块正文读取，整次 HTTP 读取共享 128 MiB、10 万记录/正文分片、2 万目录项及 2048 次文件读取尝试预算；CLI 与清理保留默认读取契约。WebUI 摘要
   分页用有界堆只保留当前页之前的候选，并限制 offset 上限；对当前页有界读取请求正文以投影思考等级，与详情共用参数解析，不回写转储；单条详情只保留目标调用。
   正文和独立 trace 均有界读取；客户端 WebSocket 关闭明细提取同连接关闭码，并按当前 writer 的原始 Thread/Turn、账户与目标关联一个后续调用，额外正文最多读取 1 MiB，不改写原始状态或推断取消原因。`describeDumpTrace` 为 WebUI 事件翻页单独读取轨迹，不重读正文或聚合输出。Turn State 字符数仅在单次调用诊断中提取，指标列表不读取调用索引。只识别当前 V2 格式。
 - `traffic-dump-presentation.mjs`：从已有 V2 请求接口识别协议、请求头识别客户端自报名称，从正文投影每次调用的元数据、参数、用量和错误，从响应索引投影失败阶段；从终态或
@@ -566,6 +580,7 @@
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 使用当前用户计划任务及受管宿主，并校验私有定义与就绪状态。
   控制器异步执行并提供输出回调；取消在阶段边界生效，当前操作完成后执行既有恢复，恢复不继承取消信号。
+  三平台定义保存显式规范化 Codex Home，未设置时不写环境项；systemd ExecStart 关闭变量展开，路径按字面传递，其他字段保留原转义规则。
   Windows 定义包含解析后的 App Server Socket，缺失时拒绝跳过就绪检查；预检通过私有文件边界读取旧 JSON/VBS 快照，安装激活先停止核心服务与 Relay 再启动，保留 WebUI 运行状态。首次或旧定义不完整的安装在激活失败后保留新定义供诊断，完整旧定义恢复失败时保留原始阶段与两层错误。
 - `service-command.mjs` / `service-command.d.mts`：公开 `appserver`、`relay` 目标映射到内部 `app-server`、`model-relay` 服务标识；实现顶层后台服务命令和隐藏的 Gateway/App Server/Relay 服务入口装配；Relay 在启动和关闭期间持续接收停止信号及父进程控制，取消传入资源 owner；集中解析
   服务目标与日志参数（行数限定为 1 到 10000 的十进制整数）、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
@@ -613,6 +628,7 @@
   通过计划任务控制脚本执行 App Server、Gateway、WebUI 与 Relay 的安装、启停、状态、日志
   与卸载；
   核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
+  非跟随日志按固定块后向定位最近行，再按打开文件的大小快照流式输出，保留超长行并限制内存；末尾换行不额外算空行，读取期间截短明确失败。跟随仍使用 PowerShell Tail。
   Windows 使用 Task Scheduler COM 精确查找任务并批量读取状态，宿主 IPC 并发查询；只把任务不存在识别为缺失，权限和调度器错误明确失败。批量启停遇到首个失败即停止后续操作，并报告已完成和未执行目标。
   计划任务预检、查询和普通变更分别限制为 10、5、15 秒；停止在同一 PowerShell 与 COM 连接内执行并确认任务停止，确认预算 20 秒，外层含启动开销最多 25 秒，避免每轮确认新建 PowerShell。之后仍检查宿主退出。变更超时只补一次有界状态查询并报告结果未确认，不重复变更，不把任务状态当作应用就绪。
   App Server 启动等待向共享检查入口传入主 Socket 路径，由该入口统一派生监管地址；实例已空闲释放时也检查同一监管入口。
@@ -631,6 +647,7 @@
 Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决定资格。后代通过 `ancestorThreadId`
 查询未归档与已归档成员，执行前重新检查会话组及绑定；仅在交互终端 `--confirm` 确认后向父会话
 发送一次官方归档。根会话只扫描一份共享历史，轮数超过阈值时不再扫描后代；扫描与执行显示进度。结果核验在写入批次后集中读取各 Workspace 的已归档/未归档根列表，各组再独立读取后代。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
+扫描连接在建连前登记，连接失败也进入清理；关闭未确认时保留客户端并输出独立告警，不覆盖归档结果。同进程再次扫描前先重试旧连接清理，仍失败时不创建替代连接。
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户交互菜单、模型多选、名单预览与确认；保留账户默认模型，委托账户管理模块执行后显示激活提示。
 - `cline-pass-account-management.mjs` / `cline-pass-account-management.d.mts`：CLI/WebUI 共用的 CLP 固定/切换配置、默认账户与移除预览及私有写入事务；从 Cline 官方元数据投影多模型目录，`createClinePassCatalog` 在定义编译后补齐固定底座的 `send_user_message_async`、`clock` 两项本地工具声明。CLI 显式更新时备份与保留账户默认值，仅 Flash 复制仓库 DS 模板，窗口由全部 CLP 账户共用，不影响 DS，不依赖终端交互。
@@ -641,7 +658,7 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `model-relay-management.mjs` / `model-relay-management.d.mts`：CLI/WebUI 共享 Relay 管理，脱敏资源、Key 多提供商模型授权与思考策略管理、目录输入能力与策略能力、只读预览、版本检查、配置锁/备份/原子保存及 IPC 生效确认；只在实际保存后返回一次新秘密；Relay 专用事务保留已保存结果并单独标记锁清理失败。
 - `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 与队列 SSE 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
 - `relay-reasoning-probe.mjs` / `relay-reasoning-probe.d.mts`：WebUI 按目录版本与公开模型 ID 发起一次基线及八种关闭参数对比；复用真实 Provider 材料、代理、出站策略和 Chat/Responses 观察器，顺序请求、不重试，限制单次/总预算及真实响应字节，以有界 NDJSON 流逐项返回进度、思考可见性、用量和受控状态，不保存服务器配置或正文。
-- `webui-queue-events.mjs`：账户快照、请求指标、Relay、渠道投递与管理任务共用的鉴权后 SSE 转接、订阅总量限制及 WebUI 关闭清理；通知不携带指标、队列或任务内容。
+- `webui-queue-events.mjs`：账户快照、请求指标、Relay、渠道投递与管理任务共用的鉴权后 SSE 转接、订阅总量限制及 WebUI 关闭清理；通知不携带指标、队列或任务内容。`closeQueueStreams` 禁止新订阅并等待已有 watch 结束，收尾完成前继续占用八个订阅名额之一。
 - `webui-management-delivery-route.mjs`：渠道投递箱鉴权 SSE 变化通知、只读分页查询、按需限定内容预览及单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，在线操作通过投递私有 IPC 交给 Gateway 单写者，确认未发送命令且 Gateway 不可连接时才使用 Journal 维护模式独占锁，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。
   只读查询交给有界 Worker，连接断开取消读取；批量正文先记录修订基线，再逐条在短事务内核对修订并读取，解密和消费确认不持有数据库读锁。管理写入的确认、审计和结果未知处理仍由原接口负责。
 - `service-selection.mjs` / `service-selection.d.mts`：统一三平台服务定义路径，将已安装的可选 WebUI、Relay 纳入 all；启动 all 时排除配置中关闭的 WebUI 与未启用的 Relay，停止、状态与日志仍包含已安装的可选服务，健康判定同样允许关闭的可选服务保持停止；状态查询经容错的 `status-required` 顺序取预期运行集合，配置不可读时退回“已安装即可选服务必需”并在 stderr 说明降级，使诊断不因配置损坏中断；安装动作排除 WebUI，服务顺序由 Runtime 服务目录定义。

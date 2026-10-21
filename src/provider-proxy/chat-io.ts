@@ -48,6 +48,28 @@ export function readModelBody(request: IncomingMessage, signal: AbortSignal, max
   });
 }
 
+/** Drain a rejected upload long enough to deliver the terminal response without resetting the client. */
+export function drainRejectedRequest(request: IncomingMessage, maximumWaitMs = 5_000): Promise<void> {
+  if (request.complete || request.readableEnded || request.destroyed) return Promise.resolve();
+  return new Promise(resolve => {
+    const finish = (): void => {
+      clearTimeout(timer);
+      request.off("end", finish);
+      request.off("close", finish);
+      request.off("error", finish);
+      request.off("aborted", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, maximumWaitMs);
+    request.once("end", finish);
+    request.once("close", finish);
+    request.once("error", finish);
+    request.once("aborted", finish);
+    if (request.complete || request.readableEnded || request.destroyed) finish();
+    else request.resume();
+  });
+}
+
 export function writeChatData(response: ServerResponse, data: string, signal: AbortSignal, backpressure?: () => void, timeoutMs: number = modelRequestPolicy.deliveryTimeoutMs, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
   return writeResponseChunk(response, data, signal, timeoutMs, backpressure, stage);
 }

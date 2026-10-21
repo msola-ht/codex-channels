@@ -8,9 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { RefreshCwIcon } from "lucide-react"
 import { useTranslation } from "@/hooks/use-translation"
 
-export function SettingsError({ message, retry }: { message: string; retry: () => void }) {
+export function SettingsError({ message, retry, title }: { message: string; retry: () => void; title?: string }) {
   const { t } = useTranslation()
-  return <Alert variant="destructive"><AlertTitle>{t("settingsUi.loadFailed")}</AlertTitle><AlertDescription>{message}</AlertDescription><AlertAction><Button variant="outline" size="sm" onClick={retry}><RefreshCwIcon data-icon="inline-start" />{t("common.retry")}</Button></AlertAction></Alert>
+  return <Alert variant="destructive"><AlertTitle>{title ?? t("settingsUi.loadFailed")}</AlertTitle><AlertDescription>{message}</AlertDescription><AlertAction><Button variant="outline" size="sm" onClick={retry}><RefreshCwIcon data-icon="inline-start" />{t("common.retry")}</Button></AlertAction></Alert>
 }
 
 export function LoadingSettingsCard({ title }: { title: string }) {

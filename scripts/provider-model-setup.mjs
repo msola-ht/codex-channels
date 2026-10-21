@@ -11,6 +11,7 @@ import { promptResponsesModels } from "./responses-model-setup.mjs";
 import { runManagedProviderModelSetup, runProviderModelAdditionSetup } from "./managed-provider-model-management.mjs";
 import { runManagedProviderModelEditSetup } from "./managed-provider-model-edit-setup.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
+import { runModelWindowSetup } from "./model-window-setup.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { managedProviderAccountFamilies } from "../runtime/model-provider-definitions.mjs";
@@ -158,15 +159,33 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
 }
 
 export async function runProviderModelSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout, provider } = {}) {
-  const { catalogs } = await loadProviderModelCatalogs({ environment });
-  if (!catalogs.length) { output.write("尚未配置第三方模型，请先完成提供商接入。\n"); return { action: "back" }; }
   const requestedFamily = managedProviderAccountFamilies.find(entry => entry.proxyKey === provider);
-  const choices = requestedFamily ? catalogs.filter(entry => requestedFamily.matches(entry.provider)) : catalogs;
-  const selected = provider !== undefined && !requestedFamily ? provider : await prompts.select({ message: "选择模型目录所属提供商", options: [
-    ...choices.map(entry => ({ value: entry.provider, label: entry.displayName, hint: entry.providers.join("、") })),
-    { value: "back", label: "返回" },
-  ] });
-  if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
+  let selected = provider !== undefined && !requestedFamily ? provider : undefined;
+  while (true) {
+    const { catalogs } = await loadProviderModelCatalogs({ environment });
+    const choices = requestedFamily ? catalogs.filter(entry => requestedFamily.matches(entry.provider)) : catalogs;
+    if (!choices.length) { output.write("尚未配置可管理的第三方模型，请先完成提供商接入。\n"); return { action: "back" }; }
+    if (selected === undefined) {
+      selected = await prompts.select({ message: "选择模型目录所属提供商", options: [
+        ...choices.map(entry => ({ value: entry.provider, label: entry.displayName, hint: entry.providers.join("、") })),
+        { value: "back", label: "返回上一级" },
+      ] });
+      if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
+    }
+    const result = await runProviderModelOperation({ environment, prompts, output, provider: selected,
+      backLabel: provider !== undefined && !requestedFamily ? "返回上一级" : "返回提供商列表" });
+    if (result.action === "select-provider") {
+      if (provider !== undefined && !requestedFamily) return { action: "back" };
+      selected = undefined;
+      continue;
+    }
+    if (result.action === "back") continue;
+    return result;
+  }
+}
+
+async function runProviderModelOperation({ environment, prompts, output, provider: selected, backLabel }) {
+  const { catalogs } = await loadProviderModelCatalogs({ environment });
   const catalog = catalogs.find(entry => entry.providers.includes(selected));
   if (!catalog) throw new Error("提供商目录已变化，请重新打开模型管理");
   output.write(`${catalog.displayName}：${catalog.providers.join("、")}\n${catalog.models.map(entry => `  ${entry.id}${entry.isDefault ? "（账户默认）" : ""}`).join("\n")}\n`);
@@ -177,19 +196,20 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     ? "DeepSeek 暂不支持单模型移除。\n"
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
   const action = await prompts.select({ message: "模型操作", options: [
-    ...(custom || family ? [{ value: "rename", label: "编辑模型显示名称", hint: "模型 ID 保持不变" }] : []),
-    { value: "web-search", label: "检测原生网页搜索", hint: "选择单一账户；1 次可能计费请求；仅诊断" },
-    ...(catalog.canRemove ? [{ value: "remove", label: "本地移除模型", hint: "不联网、不改账户和凭据" }] : []),
-    ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
-    ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求路由" }] : []),
-    ...(custom && catalog.canRemove ? [{ value: "tools", label: "探测单个模型的工具能力", hint: "apply_patch、tool_search；明确选择才发请求，可能计费" }] : []),
-    ...(family && catalog.providers.length ? [{ value: "default", label: "设置账户默认模型" }] : []),
     ...(family === "ccg" || family === "ocg" ? [{ value: "manage", label: "查看／添加／导入新模型" }] : []),
     ...(family === "clp" ? [{ value: "refresh", label: "联网发现并添加新模型", hint: "只添加选中的新模型；已有模型保持不变" }] : []),
+    ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
+    ...(custom || family ? [{ value: "rename", label: "编辑模型显示名称", hint: "模型 ID 保持不变" }] : []),
+    ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求路由" }] : []),
+    ...(family && catalog.providers.length ? [{ value: "default", label: "账户默认模型与共享思考等级", hint: "默认模型仅影响所选账户；模型思考等级由同族账户共用" }] : []),
+    ...(family ? [{ value: "window", label: "模型上下文窗口", hint: "按模型设置，同族账户共享" }] : []),
     ...(catalog.source !== "official-shared" && (custom || family) ? [{ value: "template-update", label: "对比并更新模型模板", hint: family === "clp" ? "读取远程模板后预览差异" : "选择来源和更新内容，预览差异后保存" }] : []),
-    { value: "back", label: "返回" },
+    { value: "web-search", label: "检测原生网页搜索", hint: "选择单一账户；1 次可能计费请求；仅诊断" },
+    ...(custom && catalog.canRemove ? [{ value: "tools", label: "探测单个模型的工具能力", hint: "apply_patch、tool_search；明确选择才发请求，可能计费" }] : []),
+    ...(catalog.canRemove ? [{ value: "remove", label: "本地移除模型", hint: "不联网、不改账户和凭据" }] : []),
+    { value: "back", label: backLabel },
   ] });
-  if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (prompts.isCancel(action) || action === "back") return { action: "select-provider" };
   if (action === "rename") {
     const current = (await loadProviderModelCatalogPresentations({ environment })).catalogs.find(entry => entry.provider === catalog.provider);
     if (!current) throw new Error("模型目录已变化，请重新打开模型管理");
@@ -214,10 +234,11 @@ export async function runProviderModelSetup({ environment = process.env, prompts
   if (action === "template-update") return runProviderModelTemplateSetup(catalog.provider, { environment, prompts, output });
   if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });
   if (action === "refresh") return runProviderModelAdditionSetup(catalog.provider, { environment, prompts, output });
+  if (action === "window") return runModelWindowSetup({ environment, prompts, output, provider: selected, allowBack: true });
   if (action === "default") {
     const account = catalog.providers.length === 1 ? catalog.providers[0] : await prompts.select({ message: "选择默认设置所属账户", options: catalog.providers.map(id => ({ value: id, label: id })) });
     if (prompts.isCancel(account)) return { action: "back" };
-    return runModelProviderDefaultSetup({ environment, prompts, output, provider: account });
+    return runModelProviderDefaultSetup({ environment, prompts, output, provider: account, allowBack: true });
   }
   let result;
   if (action === "edit" || action === "tools") {
@@ -271,8 +292,8 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     if (await prompts.confirm({ message: "备份并保存模型设置？", initialValue: false }) !== true) return { action: "back" };
     result = await applyCustomProviderModelsSave(input, { ...saveOptions, preview });
   } else if (action === "remove") {
-    const candidates = catalog.models.filter(entry => !entry.isDefault);
-    if (!candidates.length || catalog.models.length < 2) throw new Error("没有可移除的模型；请先调整账户默认模型，并保留至少一个模型");
+    const candidates = catalog.models.filter(entry => entry.removalBlockedReason === null);
+    if (!candidates.length) throw new Error("没有可移除的模型；请核对账户、目录和 Gateway 显式默认值，并保留至少一个模型");
     const model = await prompts.select({ message: "选择要移除的精确模型 ID", options: candidates.map(entry => ({ value: entry.id, label: entry.id })) });
     if (prompts.isCancel(model)) return { action: "back" };
     const input = { provider: catalog.provider, model };

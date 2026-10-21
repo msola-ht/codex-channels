@@ -466,6 +466,10 @@ Provider Proxy 独立采集请求与响应模型、出站 `request_service_tier`
 
 更新器关闭原生 daemon 自动启动也复用用户层 `config/read` 与版本化 `config/batchWrite`；
 入口为 `scripts/codex-user-config.mjs`，由 `source-update.mjs` 在候选切换和无需升级两条路径调用。
+受管 DS、CLP、CCG、OCG 账户发布或恢复主配置由 `scripts/managed-provider-files.mjs` 复用同一用户层版本合同，
+仅写入计划差异字段；私有凭据先发布，写入后回读，未知结果保留恢复材料，不自动重放或全文件回滚。
+用户层会规范化路径字段；该事务在 RPC 读取两侧复核磁盘原文，使用返回版本条件写入，再以稳定回读的磁盘字段判定持久化结果，不将原始 TOML 与规范化用户层直接比较。
+官方版本检查不构成主配置与私有文件的跨文件原子提交，也不承诺原生文件写入的全局串行化；恢复边界见[Provider 接入指南](provider-integration-guide.md#4-安全边界)。
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，读取用户层并投影该连接的合并配置；渠道跨 Provider
 切换则向目标 App Server 发送带 Workspace CWD 的只读 `config/read`，取得该 Profile 的有效思考等级。
@@ -544,7 +548,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | 文本 | `turn/start`、`turn/steer` 的稳定 `UserInput.text` | Telegram、飞书、微信已支持 | 由 Application 的 `TurnInput.text` 进入统一 Turn |
 | 视频附件引用 | 沿用稳定 `UserInput.text`，不添加原生视频类型 | 三渠道已实现下载与单文件随机引用；真实平台待验收 | 视频经私有暂存后，当前会话通过显式配置的独立 MCP 分析；MCP 以 `attachment` 读取有时限的单文件能力引用。下载期间切换工作区/Thread或撤权则拒绝提交。详见[视频分析 MCP](video-analysis-mcp.md#渠道视频附件) |
 | 内联图片 | `turn/start`、`turn/steer` 的稳定 `UserInput.image`（`url`） | 三渠道受限 PNG/JPEG/WebP/非动画 GIF Data URL 已支持；仅当前模型声明 `image` 输入能力时可用 | Surface 完成下载、签名、格式、数量和大小校验后，共享批处理器按 [OpenAI 图片输入要求](https://developers.openai.com/api/docs/guides/images-vision#image-input-requirements)在提交边界读取为有界 Base64 Data URL；Gateway 统一限制为单张 10 MiB、每批最多四张且合计 20 MiB，这是跨渠道安全边界，不代表三平台具有相同官方上限，并低于当前已知 Provider 上限。Application 拒绝 HTTP(S)、空值和非法 Base64，Gateway 不把本地路径或 Base64 写入自身日志或独立存储，并在创建或追加 Turn 前按模型目录检查 `image` 能力；支持时提交官方 `image`，不支持时提示使用 `/model` 切换模型，不调用外部视觉 API，也不建立第二套识图会话 |
-| 图片自动引用 | 稳定 `turn/start`、`turn/steer` 的 `UserInput.image.fileId`；`getAuthStatus` 与受控 `account/read.workspaceRouting` | OpenAI ChatGPT Thread 经当前模型代理后端核验后上传原图并提交编号；仅默认后端一致且策略为 `NO_CONSTRAINT` 时转换，自定义独立后端保留内联，`us`、`us_cr` 或后端不一致拒绝；历史由官方保留。飞书实机已验证首次 `file_id` 与后续 `previous_response_id` 接续不重复 Base64 | [`image-reference-upload.ts`](../src/codex-client/image-reference-upload.ts) |
+| 图片自动引用 | 稳定 `turn/start`、`turn/steer` 的 `UserInput.image.fileId`；`getAuthStatus` 与受控 `account/read.workspaceRouting`；受管 DeepSeek 的本地 `/_codexc/image-upload-route` 与受限 Files API 上传入口 | OpenAI ChatGPT Thread 经当前模型代理后端核验后上传原图并提交编号；仅默认后端一致且策略为 `NO_CONSTRAINT` 时转换，自定义独立后端保留内联，`us`、`us_cr` 或后端不一致拒绝。受管 DeepSeek Thread 经同一回环代理上传官方 Files API，按 Provider 材料修订复核后提交编号；上传失败不回退 Base64。历史均由 App Server 保留。飞书实机已验证 OpenAI 首次 `file_id` 与后续 `previous_response_id` 接续不重复 Base64 | [`image-reference-upload.ts`](../src/codex-client/image-reference-upload.ts) |
 | 一次性音频 | 稳定 `UserInput.audio` / `UserInput.localAudio`；模型目录用 `inputModalities` 声明实际能力；固定源码支持 WAV、MP3、M4A、WebM 与 OGG 本地音频 | 三渠道平台接收与受限转换已实现；当前可见模型均未声明 `audio`，原始音频不属于当前端到端支持 | Surface 先验证可信时长、最长 5 分钟、最大 20 MiB 与格式并写入一小时私有临时文件；Application 再按当前或下一 Turn 模型的 `inputModalities` 检查 `audio`，缺失时在 `turn/start` / `turn/steer` 前明确拒绝。微信可信转写仍作为文本提交；SILK 明确拒绝 |
 | 实时语音 | 实验 `thread/realtime/start`、`appendAudio`、`appendSpeech`、`stop` 及 Realtime 通知 | 禁止接入 | Realtime 不在 Plan、Queue、Revert、前台计划任务动态工具、图片上传账户路由及 Auto-review 策略读取和审查状态投影六类受控例外中；不得导出、调用或消费 Realtime 业务能力 |
 | ChatGPT Voice / 语音听写 | 官方桌面应用产品能力，不是当前 CLI 命令入口 | 不属于 Gateway | 不用平台模拟实现第二套 Codex 实时会话或语音输出 |

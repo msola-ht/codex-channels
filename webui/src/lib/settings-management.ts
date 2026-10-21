@@ -22,6 +22,7 @@ export type SettingLabel = string | { key: MessageKey; params?: TranslateParams 
 
 export type PendingSetting = {
   kind: string
+  intent?: "set" | "clear" | "generate"
   before: unknown
   value: unknown
   label: SettingLabel

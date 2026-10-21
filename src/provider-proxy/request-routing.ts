@@ -1,5 +1,8 @@
 import type { IncomingHttpHeaders } from "node:http";
 
+/** Private identity for the in-process ProviderProxy → Chat bridge hop. */
+export const chatBridgeAuthorizationHeader = "x-codexc-chat-bridge-token";
+
 const openAiPostPaths = new Set([
   "/alpha/search",
   "/images/edits",
@@ -169,7 +172,7 @@ export function endToEndHeaders(headers: IncomingHttpHeaders): IncomingHttpHeade
     : [];
   for (const name of [
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
-    "te", "trailer", "transfer-encoding", "upgrade", ...connectionTokens,
+    "te", "trailer", "transfer-encoding", "upgrade", chatBridgeAuthorizationHeader, ...connectionTokens,
   ]) delete result[name];
   return result;
 }

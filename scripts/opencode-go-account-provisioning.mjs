@@ -244,11 +244,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     }
     await assertProviderFileSnapshots(guards);
     if (mode === "exclusive" || previousMode === "exclusive") {
-      await replaceOptionalProviderFile(
-        plan.paths.configPath,
-        Object.keys(nextConfig).length === 0 ? undefined : stringify(nextConfig),
-        environment,
-      );
+      await guards.find(snapshot => snapshot.path === plan.paths.configPath).writeCurrent(stringify(nextConfig));
       guards = refreshProviderFileSnapshot(guards, plan.paths.configPath);
     }
     await assertProviderFileSnapshots(guards);

@@ -10,13 +10,14 @@ import {
   executableInvocation,
   resolveExecutable,
 } from "../runtime/executable.mjs";
-import { readGatewayConfig, webuiServiceEnabled } from "../runtime/gateway-config.mjs";
+import { readGatewayConfig, webuiServiceEnabled, withGatewayConfigLock } from "../runtime/gateway-config.mjs";
 import { gatewayChannelStates } from "./config-summary.mjs";
 import { reportMenuError } from "./cli-menu.mjs";
 import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
 import { runOfficialTuiIdentity } from "./config-system-menu.mjs";
 import { runTimezoneCommand } from "./timezone-command.mjs";
 import { loadGatewaySettings, updateGatewaySetting } from "./config-management.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { runRelayListenMenu } from "./model-relay-listen-menu.mjs";
 import { packageDir } from "./package-path.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
@@ -80,7 +81,6 @@ export async function runInitWizard({
     output,
     prompts,
     configCreated,
-    document,
     relayListenMenu,
     loadSettings,
     applySetting,
@@ -144,20 +144,21 @@ async function configureOptionalFeatures({
   output,
   prompts,
   configCreated,
-  document,
   relayListenMenu,
   loadSettings,
   applySetting,
 }) {
   // 默认值沿用当前状态：首次初始化默认关闭，已有配置未设置时视为启用。
-  const storedWebui = webuiServiceEnabled(document);
+  const settings = loadSettings(environment);
+  const document = readDocument(environment);
+  const storedWebui = settings.webui.enabled;
   const webui = await prompts.confirm({
     message: `启用 WebUI 后台服务？（当前：${webuiStateLabel(storedWebui)}；默认仅本机 127.0.0.1:8787）`,
     initialValue: storedWebui ?? !configCreated,
   });
   if (prompts.isCancel(webui)) return { cancelled: true };
 
-  const storedTrafficDump = table(document.debug).model_traffic_dump === true;
+  const storedTrafficDump = settings.system.modelTrafficDumpEnabled;
   const trafficDump = await prompts.confirm({
     message: `记录模型调用详情（本地转储 prompt、工具输出与代码）？（当前：${storedTrafficDump ? "开启" : "关闭"}）`,
     initialValue: storedTrafficDump,
@@ -174,26 +175,33 @@ async function configureOptionalFeatures({
 
   const applied = [];
   try {
-    if (webui !== storedWebui) {
-      applySetting({ kind: "webui.enabled", value: webui === true }, {
-        environment,
-        expectedRevision: loadSettings(environment).revision,
-      });
-      applied.push(`webui.enabled=${webui === true}`);
-      output.write(webui === true
-        ? "WebUI 已启用：codexc start/restart all 会启动它；地址与访问令牌用 codexc config → 服务访问 → WebUI 设置 修改。\n"
-        : "WebUI 已关闭：codexc start/restart all 不再启动它；需要时用 codexc start webui 单独启动。\n");
-    }
-    if (trafficDump !== storedTrafficDump) {
-      applySetting({ kind: "system.model-traffic-dump", value: trafficDump === true }, {
-        environment,
-        expectedRevision: loadSettings(environment).revision,
-      });
-      applied.push(`model_traffic_dump=${trafficDump === true}`);
-      output.write(trafficDump === true
-        ? "调用详情记录已开启：写入本地 traffic 目录，不含 Authorization/Cookie；重启 App Server 后生效。\n"
-        : "调用详情记录已关闭。\n");
-    }
+    withGatewayConfigLock(settings.configPath, () => {
+      if (loadSettings(environment).revision !== settings.revision) {
+        throw new Error("Gateway 配置已变化，本次初始化确认已失效；请重新运行 codexc init。");
+      }
+      if (webui !== storedWebui) {
+        applySetting({ kind: "webui.enabled", value: webui === true }, {
+          environment,
+          expectedRevision: loadSettings(environment).revision,
+        });
+        applied.push(`webui.enabled=${webui === true}`);
+        output.write(webui === true
+          ? "WebUI 已启用：codexc start/restart all 会启动它；地址与访问令牌用 codexc config → 服务访问 → WebUI 设置 修改。\n"
+          : "WebUI 已关闭：codexc start/restart all 不再启动它；需要时用 codexc start webui 单独启动。\n");
+      }
+      if (trafficDump !== storedTrafficDump) {
+        const result = applySetting({ kind: "system.model-traffic-dump", value: trafficDump === true }, {
+          environment,
+          expectedRevision: loadSettings(environment).revision,
+        });
+        applied.push(`model_traffic_dump=${trafficDump === true}`);
+        output.write(trafficDump === true
+          ? "调用详情记录开启配置已保存：将写入本地 traffic 目录，不含 Authorization/Cookie。\n"
+          : "调用详情记录关闭配置已保存。\n");
+        writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+        output.write("Relay 在配置刷新后对新请求采用此设置；已开始的请求保持原状态。\n");
+      }
+    });
     if (relay === true) await relayListenMenu({ environment, output, prompts });
   } catch (error) {
     if (applied.length > 0) output.write(`已写入：${applied.join("、")}；后续步骤失败。\n`);

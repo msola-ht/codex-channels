@@ -64,9 +64,10 @@ export async function applyOpenAiModelContext(input, environment = process.env, 
   contextPlan(input, initial);
   return replaceCache(initial, environment, signal, (snapshot) => {
     const { preview, index } = contextPlan(input, snapshot);
-    snapshot.document.models[index].context_window = preview.contextWindow;
+    if (preview.changed) snapshot.document.models[index].context_window = preview.contextWindow;
     return {
       document: snapshot.document,
+      changed: preview.changed,
       result: { model: preview.model, contextWindow: preview.contextWindow },
     };
   });
@@ -137,6 +138,7 @@ function contextPlan(input, snapshot) {
       previousContextWindow: model.contextWindow,
       contextWindow: input.contextWindow,
       maxContextWindow: model.maxContextWindow,
+      changed: input.contextWindow !== model.contextWindow,
     },
   };
 }
@@ -152,7 +154,11 @@ async function replaceCache(initial, environment, signal, build) {
       assertTransactionDirectory(transactionDirectory);
       const snapshot = readCache(environment);
       assertSameSnapshot(initial, snapshot);
-      const { document, result } = build(snapshot);
+      const { document, changed, result } = build(snapshot);
+      if (!changed) return {
+        revision: snapshot.revision, scope: snapshot.scope, ...result,
+        status: "unchanged", consistency: "confirmed", backupCreated: false,
+      };
       const content = Buffer.from(`${JSON.stringify(document)}\n`, "utf8");
       if (content.length > maximumBytes) fail("invalid_catalog");
       parseCache(content.toString("utf8"));
@@ -167,7 +173,7 @@ async function replaceCache(initial, environment, signal, build) {
       let writeFailed = false;
       try { writePrivateFileAtomicSync(snapshot.path, content); }
       catch { writeFailed = true; }
-      saved = { revision: null, scope: snapshot.scope, ...result, consistency: "unknown", backupCreated: true };
+      saved = { revision: null, scope: snapshot.scope, ...result, status: "saved", consistency: "unknown", backupCreated: true };
       try {
         const current = readCache(environment);
         if (current.scope === snapshot.scope && sameDirectory(current.parent, snapshot.parent)

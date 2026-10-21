@@ -10,6 +10,7 @@ import { readCustomProviderUpstreamWireApi } from "./model-provider-upstream-met
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 import { ProviderModelGuard } from "./provider-model-guard.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
+import { loadConfiguredManagedProviderMaterial } from "./model-provider-managed-runtime.mjs";
 import { writeThirdPartyRuntimeModelCatalog } from "./third-party-model-catalog.mjs";
 import { assertProviderModelRequestPolicy, assertProviderModelRetryPolicy } from "./model-request-policy.mjs";
 
@@ -200,6 +201,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     ProviderProxy,
     AggregateModelProxy,
     ChatCompletionsBridge,
+    uploadDeepseekImage,
     pruneModelTrafficDumpSessionsAsync,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
@@ -226,6 +228,47 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     upstreamAgents.add(agent);
     upstreamAgentsByProxyUrl.set(proxyUrl, agent);
     return agent;
+  };
+  const deepseekImageUploadFor = (provider) => {
+    const material = signal => {
+      signal?.throwIfAborted();
+      const configured = loadConfiguredManagedProviderMaterial(provider, runtime.environment);
+      const url = new URL(configured.baseUrl);
+      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+        throw new Error("DeepSeek 图片上传地址无效");
+      }
+      const revision = createHash("sha256")
+        .update(JSON.stringify([configured.revision, provider, url.origin, url.pathname]))
+        .digest("hex");
+      return { configured, url, revision };
+    };
+    return {
+      kind: "deepseek",
+      async describe(signal) {
+        return { revision: material(signal).revision };
+      },
+      async upload({ bytes, mediaType, revision, signal }) {
+        const before = material(signal);
+        if (before.revision !== revision) throw new Error("DeepSeek 图片上传配置已变化");
+        const agent = await upstreamAgentFor(before.url, signal);
+        signal?.throwIfAborted();
+        if (!before.configured.protocols.includes("responses")) {
+          throw new Error("DeepSeek Provider 不使用原生 Responses");
+        }
+        const fileId = await uploadDeepseekImage({
+          host: before.url.hostname.replace(/^\[|\]$/gu, ""),
+          ...(before.url.port ? { port: Number(before.url.port) } : {}),
+          protocol: "https",
+          basePath: before.url.pathname,
+          ...(agent ? { agent } : {}),
+          authorization: `Bearer ${before.configured.apiKey}`,
+        }, bytes, mediaType, signal);
+        if (material(signal).revision !== revision) {
+          throw new Error("DeepSeek 图片上传配置在传输期间发生变化");
+        }
+        return fileId;
+      },
+    };
   };
   const proxyProviderIds = new Map();
   const proxyTargetSignatures = new Map();
@@ -325,6 +368,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const accountFamily = managedProviderAccountFamilies.find(family => family.matches(upstreamProvider));
     const accountId = accountFamily?.accountId(upstreamProvider);
     const opencodeGo = accountFamily?.proxyKey === "ocg";
+    const imageUpload = definition?.storageId === "deepseek" && !bridge
+      ? deepseekImageUploadFor(upstreamProvider)
+      : undefined;
     const managedAccountProxyOptions = (accounts, providerId, label) => ({
       accountIds: accounts.map((account) => account.id),
       defaultAccountId: accounts.find((account) => account.default)?.id,
@@ -341,6 +387,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       // CLP 桥在桥内按目录校验模型；通用 Chat 桥没有该校验，继续由统计代理拒绝目录外或已停用模型。
       ...(modelGuard && !bridgedClinePass
         ? { readModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) } : {}),
+      ...(imageUpload ? { imageUpload } : {}),
       // 除官方 OpenAI 端点外的 Responses 上游都不理解 Codex 私有输入项与参数标记，
       // 必须在上游收到正文前归一化；Chat 上游由桥转换，不在此处改写。
       ...(!bridge && !officialOpenAiRoute ? { normalizeResponsesInput: true } : {}),

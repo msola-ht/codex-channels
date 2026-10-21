@@ -15,6 +15,7 @@
 - `reader.ts`：公开异步 `readDeliveryQueue`、`readDeliveryEntries`、`readDeliveryPayload`、`readDeliveryPayloads`，全进程最多 2 个尚未确认退出的只读 Worker，过载显式拒绝。批量最多 50 个不同 ID，投影结果累计最多 4 MiB；调用方负责同步裁剪可展示字段。支持请求 `AbortSignal`；初始化预算 Windows 30 秒、其他平台 5 秒，普通请求（包含全部逐条投影）总预算 5 秒，关闭等待最多 2 秒，退出未确认保留资源归属和容量。`DeliveryReadError.failure` 仅含阶段、原因和操作。WebUI 断开只取消本请求的读取，不改变已经开始的投递处理语义。
   `closeDeliveryReaders()` 永久停止新读取准入、取消所有在途只读操作并在 2 秒内等待；超时仍保留归属，`waitForDeliveryReadersExit()` 提供真实退出的等待句柄。Windows 关闭先等待 ACL helper 的子进程与线程真实退出；超过关闭预算时读取调用报告未确认，外层 Worker 保持引用及容量归属，等待 helper 的真实退出后再关闭，不强制终止或允许进程自然退出后遗忘 helper。其他平台可终止自身只读 Worker，仍在实际 `exit` 后释放容量。
 - `worker.ts`：串行处理存储命令，不执行平台请求或业务授权。
+  构造 Journal 前先复核共享取消标记，已取消时不创建存储或执行恢复；构造后再次复核，初始化中到达的取消走原有关闭路径。
   正常关闭和初始化失败均关闭 SQLite 与嵌套 Windows ACL helper；关闭响应在资源清理后发送。故障取消标记阻止尚未开始的邮箱写入，已开始的事务仍按未知结果处理。
 - `journal.ts`：主线程的有界 Worker 邮箱，预留控制槽，限制启动、请求和关闭等待；`available` 暴露 Worker 未失败且未关闭的即时状态，不代替 `ready`；`onFailure` 对非正常 Worker 故障通知组合根一次，正常关闭不触发。
   Windows Worker 初始化单独允许 30 秒以覆盖多次私有 ACL 操作，其余平台初始化与普通请求仍为 5 秒；故障提供固定枚举的阶段、原因与操作，不传递原始异常、路径或正文。

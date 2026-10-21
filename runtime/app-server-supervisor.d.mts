@@ -70,17 +70,21 @@ export class AppServerSupervisorOwner {
 export function appServerSupervisorSocketPath(primarySocketPath: string): string;
 export function inspectAppServerSupervisor(
   primarySocketPath: string,
+  signal?: AbortSignal,
 ): Promise<InspectedAppServerTopology | undefined>;
 export function inspectAppServerSupervisorState(
   primarySocketPath: string,
+  signal?: AbortSignal,
 ): Promise<AppServerSupervisorInspection>;
 export function ensureAppServerProvider(
   primarySocketPath: string,
   provider: string,
+  signal?: AbortSignal,
 ): Promise<void>;
 export function acquireAppServerProviderLease(
   primarySocketPath: string,
   provider: string,
+  signal?: AbortSignal,
 ): Promise<AppServerProviderLease>;
 export function acquireMacDesktopAppHostLease(
   primarySocketPath: string,
@@ -90,10 +94,12 @@ export function acquireMacDesktopAppHostLease(
     appPath: string;
     toolsEnabled: boolean;
   },
+  signal?: AbortSignal,
 ): Promise<AppServerProviderLease>;
 export function releaseAppServerProvider(
   primarySocketPath: string,
   provider: string,
+  signal?: AbortSignal,
 ): Promise<AppServerProviderReleaseResult>;
 export function applyAppServerProviderSettings(
   primarySocketPath: string,

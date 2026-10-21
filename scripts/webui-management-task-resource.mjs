@@ -74,6 +74,8 @@ export async function managementTaskResourceState(normalized, environment, servi
               state: appServer.state,
             },
         dumps: {
+          directory: preview.directory,
+          fingerprint: preview.fingerprint,
           bytes: preview.bytes,
           labels: preview.labels,
           resources: preview.resources,

@@ -5,6 +5,7 @@ import type { CodexUserSettingActivation } from "./codex-user-settings-managemen
 export type CodexDefaultsClient = CodexDefaultSettingsClient;
 
 export interface CodexDefaultsSetupResult {
+  action: "updated" | "unchanged";
   model: string;
   effort: string;
   activation: CodexUserSettingActivation;

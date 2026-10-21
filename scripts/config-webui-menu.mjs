@@ -26,7 +26,7 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
         {
           value: "token",
           label: "访问令牌",
-          hint: webui.tokenConfigured ? "已设置（内容不显示）" : "未设置；绑定 0.0.0.0 时必须设置",
+          hint: webui.tokenConfigured ? "已设置（内容不显示）" : "未设置；切换到 0.0.0.0 时自动生成",
         },
         { value: "back", label: "返回", hint: "返回配置菜单" },
       ],
@@ -58,23 +58,14 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
         options: [
           { value: "127.0.0.1", label: "仅本机", hint: "默认，最安全" },
           { value: "::1", label: "仅本机（IPv6 回环）", hint: "IPv6 环境使用" },
-          { value: "0.0.0.0", label: "所有网卡", hint: "局域网/公网直连，必须设置令牌" },
+          { value: "0.0.0.0", label: "所有网卡", hint: "局域网/公网直连；无令牌时自动生成并保存" },
           { value: "clear", label: "恢复默认", hint: "回到仅本机" },
         ],
       });
       if (prompts.isCancel(selected)) continue;
-      let token;
-      if (selected === "0.0.0.0" && !webui.tokenConfigured) {
-        token = await prompts.password({ message: "绑定 0.0.0.0 必须设置访问令牌（留空取消）" });
-        if (prompts.isCancel(token) || String(token).trim() === "") {
-          output.write("未设置访问令牌，监听地址未修改。\n");
-          continue;
-        }
-      }
       input = {
         kind: "webui.host",
         value: selected === "clear" ? null : selected,
-        ...(token === undefined ? {} : { token: String(token).trim() }),
       };
     } else if (section === "port") {
       const value = await prompts.text({
@@ -94,6 +85,11 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
         showInstructions: false,
         options: [
           {
+            value: "generate",
+            label: webui.tokenConfigured ? "重新生成随机令牌" : "生成随机令牌",
+            hint: "保存后重启 WebUI 生效，请妥善保存新令牌",
+          },
+          {
             value: "set",
             label: webui.tokenConfigured ? "重新设置令牌" : "设置令牌",
             hint: webui.tokenConfigured ? "替换现有令牌" : "绑定 0.0.0.0 时必须设置",
@@ -105,7 +101,14 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
         ],
       });
       if (prompts.isCancel(action) || action === "back") continue;
-      if (action === "clear") {
+      if (action === "generate") {
+        const confirmed = await prompts.confirm({
+          message: "生成并保存新随机令牌？重启 WebUI 后须使用新令牌，旧令牌将失效。",
+          initialValue: false,
+        });
+        if (prompts.isCancel(confirmed) || confirmed !== true) continue;
+        input = { kind: "webui.token", action: "generate" };
+      } else if (action === "clear") {
         if (webui.host === "0.0.0.0") {
           output.write("绑定 0.0.0.0 时必须保留访问令牌，请先改回仅本机。\n");
           continue;
@@ -127,6 +130,10 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
       writeConfig,
     });
     output.write(`WebUI 设置已更新：${result.configPath}\n`);
+    if (result.generatedWebuiToken !== undefined) {
+      if (output.isTTY) output.write(`已生成 WebUI 访问令牌，请妥善保存：${result.generatedWebuiToken}\n`);
+      else output.write("已生成 WebUI 访问令牌，保存在上述配置文件的 [webui].token；为避免进入日志，此处不输出令牌。\n");
+    }
     writeGatewayConfigActivationNotice(
       output,
       environment,

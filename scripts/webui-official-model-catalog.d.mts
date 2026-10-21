@@ -21,6 +21,7 @@ export interface OpenAiModelContextPreview extends OpenAiModelContextInput {
   displayName: string;
   previousContextWindow: number | null;
   maxContextWindow: number;
+  changed: boolean;
 }
 export interface OpenAiModelCacheWriteResult {
   revision: string | null;
@@ -28,6 +29,10 @@ export interface OpenAiModelCacheWriteResult {
   consistency: "confirmed" | "unknown";
   backupCreated: true;
 }
+export type OpenAiModelContextResult = { model: string; contextWindow: number } & (
+  | (OpenAiModelCacheWriteResult & { status: "saved" })
+  | { status: "unchanged"; revision: string; scope: string; consistency: "confirmed"; backupCreated: false }
+);
 export interface OpenAiModelDifference {
   model: string;
   before: OpenAiModelCatalogEntry | null;
@@ -52,6 +57,6 @@ export interface OpenAiModelPrompts {
 }
 export function loadOpenAiModelPrompts(input: unknown, environment?: NodeJS.ProcessEnv): Promise<OpenAiModelPrompts>;
 export function previewOpenAiModelContext(input: unknown, environment?: NodeJS.ProcessEnv, options?: { signal?: AbortSignal }): Promise<OpenAiModelContextPreview>;
-export function applyOpenAiModelContext(input: unknown, environment?: NodeJS.ProcessEnv, options?: { signal?: AbortSignal }): Promise<OpenAiModelCacheWriteResult & { model: string; contextWindow: number }>;
+export function applyOpenAiModelContext(input: unknown, environment?: NodeJS.ProcessEnv, options?: { signal?: AbortSignal }): Promise<OpenAiModelContextResult>;
 export function previewOpenAiModelRefresh(input: unknown, environment?: NodeJS.ProcessEnv, options?: { signal?: AbortSignal }): Promise<OpenAiModelRefreshPreview>;
 export function applyOpenAiModelRefresh(input: unknown, environment?: NodeJS.ProcessEnv, options?: { signal?: AbortSignal }): Promise<OpenAiModelRefreshResult>;

@@ -29,6 +29,23 @@ const mutation = z.discriminatedUnion("command", [
 });
 const envelope = z.strictObject({ input: mutation, revision: z.string().regex(/^[a-f0-9]{64}$/u), confirmationToken: z.string().max(128).optional() });
 
+async function readForRequest(request, response, read) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  request.once("aborted", cancel);
+  response.once("close", cancel);
+  if (request.aborted || response.destroyed) cancel();
+  try {
+    controller.signal.throwIfAborted();
+    const result = await read(controller.signal);
+    controller.signal.throwIfAborted();
+    return result;
+  } finally {
+    request.off("aborted", cancel);
+    response.off("close", cancel);
+  }
+}
+
 export async function routeRelayManagement({ environment, maximumBodyBytes, openMetricsStore, path, principalId, request, response, state }) {
   if (path === "/relay/reasoning-probe" && request.method === "POST") {
     if (new URL(request.url, "http://localhost").search) throw new ApiError(400, "relay_probe_invalid", "Relay 思考探测参数无效");
@@ -131,11 +148,12 @@ export async function routeRelayManagement({ environment, maximumBodyBytes, open
     return true;
   }
   if (path === "/relay/queue" && request.method === "GET") {
-    sendManagementJson(response, 200, await readRelayQueue(environment)); return true;
+    const queue = await readForRequest(request, response, signal => readRelayQueue(environment, { signal }));
+    sendManagementJson(response, 200, queue); return true;
   }
   if (path === "/relay" && request.method === "GET") {
     const snapshot = readRelayManagement(environment);
-    const status = await manageModelRelay({ command: "status" }, environment);
+    const status = await readForRequest(request, response, signal => manageModelRelay({ command: "status" }, environment, { signal }));
     const runtime = status.result === "status" ? {
       state: "running", listening: status.listening, configurationValid: status.configurationValid,
       active: status.active, waiting: status.queue.waiting, uploading: status.queue.pending - status.queue.waiting,

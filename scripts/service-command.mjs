@@ -115,7 +115,7 @@ function recordInstalledTerminalIdentity(environment, writeMessage = printCliMes
   writeMessage("note", `已按当前终端记录模型上游终端标识：${terminalIdentity}`);
 }
 
-async function timedServiceStep(action, definition, environment) {
+async function timedServiceStep(action, definition, environment, signal) {
   const label = `${action === "stop" ? "停止" : "启动并确认就绪"} ${definition.displayName}`;
   await withCliProgress(label, async progress => {
     await runServiceController(action, [definition.target], environment, progress);
@@ -124,10 +124,10 @@ async function timedServiceStep(action, definition, environment) {
       progress.message(`等待 ${definition.displayName} 就绪`);
       await waitForServiceReadiness(definition.target, environment, progress.signal);
     }
-  });
+  }, { signal });
 }
 
-export async function runRestartCommand(args = []) {
+export async function runRestartCommand(args = [], { signal } = {}) {
   if (args.length > 1) throw new Error(restartCommandUsage);
   const target = parseServiceTarget(args[0] ?? "all");
   rejectUnsafeAppServerServiceAction("restart", [target], process.env);
@@ -184,7 +184,7 @@ export async function runRestartCommand(args = []) {
       ...starting.map(definition => ({ action: "start", definition })),
     ];
     return { runtime, stopping, steps };
-  });
+  }, { signal });
   const label = step => `${step.action === "stop" ? "停止" : "启动并确认就绪"} ${step.definition.displayName}`;
   const completed = [];
   let previousAction;
@@ -194,7 +194,7 @@ export async function runRestartCommand(args = []) {
       previousAction = step.action;
     }
     try {
-      await timedServiceStep(step.action, step.definition, runtime.environment);
+      await timedServiceStep(step.action, step.definition, runtime.environment, signal);
       completed.push(label(step));
     } catch (error) {
       if (error instanceof ForwardedChildSignalError) throw error;
@@ -216,7 +216,8 @@ export async function runRestartCommand(args = []) {
   printCliMessage("success", `${target === "all" ? "全部已选后台服务" : stopping[0].displayName}重启完成。`);
 }
 
-export async function runServiceCommand(args) {
+export async function runServiceCommand(args, { signal } = {}) {
+  signal?.throwIfAborted();
   const [action, ...rest] = args;
   if (!serviceCommandActions.includes(action)) {
     throw new Error("未知后台服务操作");
@@ -267,7 +268,7 @@ export async function runServiceCommand(args) {
         }
         throw error;
       }
-    });
+    }, { signal });
     writeCliSection("安装结果");
     printCliMessage("success", coreServiceReadyMessage("all"));
     return;
@@ -277,7 +278,7 @@ export async function runServiceCommand(args) {
   if (action === "uninstall") {
     writeCliSection("卸载后台服务");
     await withCliProgress("停止并移除后台服务", progress =>
-      runProgressServiceController(action, serviceArgs, controlEnvironment, progress, { waitOnCancel: true }));
+      runProgressServiceController(action, serviceArgs, controlEnvironment, progress, { waitOnCancel: true }), { signal });
     printCliMessage("note", "程序与用户数据已保留。");
     return;
   }
@@ -292,7 +293,7 @@ export async function runServiceCommand(args) {
     const failures = [];
     for (const definition of selected) {
       try {
-        await timedServiceStep(action, definition, controlEnvironment);
+        await timedServiceStep(action, definition, controlEnvironment, signal);
       } catch (error) {
         // Unix controllers historically attempt every selected stop before
         // reporting failure. Timing must not turn this into fail-fast behavior.
@@ -517,9 +518,10 @@ async function runProgressServiceController(action, serviceArgs, environment, pr
   });
   const child = spawn(
     invocation.file, invocation.args,
-    { env: environment, stdio: ["inherit", "pipe", "pipe"], detached: waitOnCancel || !windows, windowsHide: true },
+    { env: environment, stdio: ["inherit", "pipe", "pipe"],
+      detached: environment.CODEX_CONNECT_MANAGEMENT_TASK !== "1" && (waitOnCancel || !windows), windowsHide: true },
   );
-  if (!windows) registerChildProcessGroup(child);
+  if (!windows && environment.CODEX_CONNECT_MANAGEMENT_TASK !== "1") registerChildProcessGroup(child);
   const stdout = createInterface({ input: child.stdout });
   const stderr = createInterface({ input: child.stderr });
   stdout.on("line", line => {
@@ -530,15 +532,11 @@ async function runProgressServiceController(action, serviceArgs, environment, pr
   let abort;
   const stopped = new Promise((resolve, reject) => {
     abort = () => {
-      if (waitOnCancel) return;
+      if (waitOnCancel || environment.CODEX_CONNECT_MANAGEMENT_TASK === "1") return;
       cleanup ??= terminateChildProcess(child).catch(error => {
-        child.unref();
         throw Object.assign(new Error("后台服务控制命令终止未获确认，请检查服务状态", { cause: error }), {
           exitCode: progress.signal.reason?.exitCode ?? 1,
         });
-      }).finally(() => {
-        child.stdout.destroy();
-        child.stderr.destroy();
       });
       void cleanup.then(() => reject(progress.signal.reason), reject);
     };

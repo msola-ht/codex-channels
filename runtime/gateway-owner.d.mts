@@ -9,5 +9,6 @@ export class GatewayOwner {
 }
 
 export function gatewayOwnerSocketPath(configPath: string): string;
-export function gatewayOwnerIsActive(configPath: string): Promise<boolean>;
-export function gatewayOwnerIsReady(configPath: string): Promise<boolean>;
+/** False only for an absent/refused endpoint; unknown activity rejects maintenance. */
+export function gatewayOwnerIsActive(configPath: string, signal?: AbortSignal): Promise<boolean>;
+export function gatewayOwnerIsReady(configPath: string, signal?: AbortSignal): Promise<boolean>;

@@ -4,6 +4,7 @@ import { TextAttachmentStore, textAttachmentBody } from "../text-attachment-stor
 import { videoAttachmentBody } from "../video-attachment-store.js";
 import { SurfaceShutdown } from "../surface-shutdown.js";
 import { Bot, type Context } from "grammy";
+import type { InlineKeyboardMarkup } from "grammy/types";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
@@ -21,6 +22,7 @@ import {
 import {
   UserFacingError,
   type ConversationTarget,
+  type OutputEvent,
 } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -190,6 +192,13 @@ export class TelegramSurface {
   private readonly inputs: SurfaceInputBatcher;
   private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
   private readonly now: () => number;
+  private readonly idleResumeSelections = new Map<string, {
+    target: ConversationTarget;
+    actorId: string;
+    threadId: string;
+    messageId: number;
+    expiresAt: number;
+  }>();
   private readonly autoReviewSelections = new Map<string, {
     target: ConversationTarget;
     actorId: string;
@@ -267,6 +276,7 @@ export class TelegramSurface {
         ? {}
         : { autoCompactPercent: options.autoCompactPercent }),
       debugEnabled: this.debugEnabled,
+      deliverIdleReleased: (event, send) => this.deliverIdleReleased(event, send),
     });
     this.output = this.outbox;
     this.inputs = new SurfaceInputBatcher(
@@ -383,6 +393,38 @@ export class TelegramSurface {
     this.lifecycle.start();
   }
 
+  private async deliverIdleReleased(
+    event: Extract<OutputEvent, { type: "conversation.idle.released" }>,
+    send: (keyboard?: InlineKeyboardMarkup) => Promise<number | undefined>,
+  ): Promise<void> {
+    if (this.stopping) throw new Error("Telegram 正在关闭");
+    const actors = [...new Set(this.actorRegistry?.actors(event.target) ?? [])]
+      .filter(actorId => this.access.isAllowed({ target: event.target, actorId }));
+    const actorId = actors.length === 1 ? actors[0] : undefined;
+    if (actorId === undefined) {
+      await send();
+      return;
+    }
+    const token = randomBytes(18).toString("base64url");
+    // The Outbox already owns ordering, cancellation and the delivery receipt.
+    const messageId = await send({ inline_keyboard: [[{
+      text: "恢复此会话",
+      callback_data: `idle:resume:${token}`,
+    }]] });
+    if (this.stopping || messageId === undefined
+      || !this.access.isAllowed({ target: event.target, actorId })) return;
+    for (const [key, selection] of this.idleResumeSelections) {
+      if (selection.expiresAt <= this.now()) this.idleResumeSelections.delete(key);
+    }
+    this.idleResumeSelections.set(token, {
+      target: event.target, actorId, threadId: event.threadId, messageId,
+      expiresAt: this.now() + 10 * 60_000,
+    });
+    while (this.idleResumeSelections.size > 100) {
+      this.idleResumeSelections.delete(this.idleResumeSelections.keys().next().value!);
+    }
+  }
+
   stop(): Promise<void> {
     this.stopPromise ??= this.stopOnce();
     return this.stopPromise;
@@ -400,6 +442,7 @@ export class TelegramSurface {
     await shutdown.run("audios", () => this.audioStore.close());
     this.pluginTaskPrompts.clear();
     this.autoReviewSelections.clear();
+    this.idleResumeSelections.clear();
     await shutdown.run("interactions", () => this.interactions.close());
     await shutdown.run("outbox", () => this.outbox.close());
     await lifecycleStop;
@@ -475,6 +518,28 @@ export class TelegramSurface {
     this.bot.callbackQuery(/^(?:wp|ar):/, async (context) => {
       await context.answerCallbackQuery({ text: "工作区权限设置入口已停用，请使用原生 Codex 权限配置。" });
     });
+    this.bot.callbackQuery(/^idle:resume:([A-Za-z0-9_-]{24})$/, async (context) => {
+      const token = context.match[1]!;
+      const pending = this.idleResumeSelections.get(token);
+      const callbackTarget = target(context);
+      if (this.stopping || !pending || pending.expiresAt <= this.now()
+        || pending.actorId !== String(context.from.id)
+        || pending.target.conversationId !== callbackTarget.conversationId
+        || pending.target.accountId !== callbackTarget.accountId
+        || pending.messageId !== context.callbackQuery.message?.message_id
+      ) {
+        if (pending && pending.expiresAt <= this.now()) this.idleResumeSelections.delete(token);
+        await context.answerCallbackQuery({ text: "恢复按钮已失效，请使用通知中的 /r 命令。" });
+        return;
+      }
+      this.idleResumeSelections.delete(token);
+      await context.answerCallbackQuery({ text: "正在恢复会话" });
+      if (this.stopping || !this.access.isAllowed({ target: callbackTarget, actorId: pending.actorId })) return;
+      const result = await this.commands.execute(callbackTarget, "resume", pending.threadId, pending.actorId);
+      try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
+      catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "空闲恢复按钮清理失败"); }
+      await renderTelegramCommandResult(context, result);
+    });
     this.bot.callbackQuery(/^tar:(on|off):([A-Za-z0-9_-]{24})$/, async (context) => {
       const token = context.match[2]!;
       const pending = this.autoReviewSelections.get(token);
@@ -504,9 +569,8 @@ export class TelegramSurface {
           "Workspace 切换按钮已失效",
         );
       }
-      const result = await this.commands.execute(
+      const result = await this.commands.selectWorkspace(
         target(context),
-        "workspace",
         workspace.id,
         String(context.from.id),
       );

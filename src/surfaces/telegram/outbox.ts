@@ -104,6 +104,10 @@ interface TelegramReasoningMessage {
 }
 
 export interface TelegramOutboxOptions {
+  deliverIdleReleased?: (
+    event: Extract<OutputEvent, { type: "conversation.idle.released" }>,
+    send: (keyboard?: InlineKeyboardMarkup) => Promise<number | undefined>,
+  ) => Promise<void>;
   finalMessageFormat?: TelegramFinalMessageFormat;
   accountId?: string;
   operationUpdateDisplay?: OperationUpdateDisplay;
@@ -565,13 +569,20 @@ export class TelegramOutbox {
         }, true);
         return;
       case "conversation.idle.released":
-        this.enqueue(chatId, async () => {
-          await this.sendPanel(
+        this.enqueue(chatId, async (signal) => {
+          const send = (keyboard?: InlineKeyboardMarkup): Promise<number | undefined> => this.sendPanel(
             chatId,
             formatIdleReleaseNotification(event.minutes, event.threadId),
             undefined,
             true,
+            signal,
+            keyboard,
           );
+          if (this.options.deliverIdleReleased) {
+            await this.options.deliverIdleReleased(event, send);
+          } else {
+            await send();
+          }
         }, true);
         return;
       case "thread.availability":
@@ -1060,17 +1071,22 @@ export class TelegramOutbox {
     replyTo?: number,
     silent = false,
     signal?: AbortSignal,
+    keyboard?: InlineKeyboardMarkup,
   ): Promise<number | undefined> {
     let firstMessageId: number | undefined;
-    for (const chunk of formatTelegramPanelChunks(text)) {
+    const chunks = formatTelegramPanelChunks(text);
+    for (const [index, chunk] of chunks.entries()) {
+      const last = index === chunks.length - 1;
       const messageId = await this.sendHtmlMessage(
         chatId,
         chunk,
         firstMessageId === undefined ? replyTo : undefined,
         silent || firstMessageId !== undefined,
         signal,
+        last ? keyboard : undefined,
       );
       firstMessageId ??= messageId;
+      if (last && keyboard) return messageId;
     }
     return firstMessageId;
   }
@@ -1274,10 +1290,14 @@ export class TelegramOutbox {
     replyTo?: number,
     silent = false,
     signal?: AbortSignal,
+    keyboard?: InlineKeyboardMarkup,
   ): Promise<number> {
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
-      (requestSignal) => this.api.sendMessage(chatId, text, htmlSendOptions(replyTo, silent), telegramAbortSignal(requestSignal)),
+      (requestSignal) => this.api.sendMessage(chatId, text, {
+        ...htmlSendOptions(replyTo, silent),
+        ...(keyboard === undefined ? {} : { reply_markup: keyboard }),
+      }, telegramAbortSignal(requestSignal)),
       signal,
     );
     return message.message_id;

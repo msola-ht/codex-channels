@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -8,25 +8,48 @@ import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "
 import { ChatUpstreamError, ModelRequestTimeoutError, type ModelRequestStage, chatStreamError } from "./chat-errors.js";
 import { parseDirectModelJson, validateDirectModelResponse } from "./direct-model-http.js";
 import type { ProviderProxyOptions } from "./proxy.js";
-import { readChatBody, readModelFrames, waitForChatOperation, writeChatData } from "./chat-io.js";
+import {
+  ChatBodyTooLargeError,
+  drainRejectedRequest,
+  readChatBody,
+  readModelFrames,
+  waitForChatOperation,
+  writeChatData,
+} from "./chat-io.js";
 import { pinClinePassRouting } from "./cline-pass-routing.js";
 import { executeClineWebSearch } from "./cline-web-search.js";
 import { ChatGenerationTimingObserver } from "./generation-timing.js";
-import { forwardedRequestHeaders } from "./request-routing.js";
+import { chatBridgeAuthorizationHeader, forwardedRequestHeaders } from "./request-routing.js";
 import type { UpstreamTiming } from "./response-metrics-observer.js";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import type { ClinePassRequestProfile } from "../../runtime/chat-reasoning.mjs";
+import {
+  maximumModelRequestBytes,
+  maximumRetainedModelRequestBytes,
+} from "./model-request-limits.js";
 
 interface ClinePassModelCapabilities {
   reasoningEfforts: readonly string[];
   clineRequestProfile?: ClinePassRequestProfile;
 }
 
+const maximumRequestBytes = maximumModelRequestBytes;
+const maximumRetainedRequestBytes = maximumRetainedModelRequestBytes;
+// All account bridges in this process share admission. Reserve the full body
+// allowance before attaching a reader, including uploads without Content-Length.
+let retainedRequestBytes = 0;
+
 /** HTTP lifecycle adapter. Pure model conversion lives in model-api. */
 export class ChatCompletionsBridge {
   readonly diagnostics = new ChatDiagnosticsChannel();
   private readonly active = new Set<AbortController>();
-  private readonly server = createServer((request, response) => { void this.handle(request, response); });
+  private readonly pending = new Set<Promise<void>>();
+  private readonly localToken = randomBytes(32).toString("hex");
+  private readonly server = createServer((request, response) => {
+    const pending = this.handle(request, response);
+    this.pending.add(pending);
+    void pending.catch(() => response.destroy()).finally(() => this.pending.delete(pending));
+  });
   constructor(private readonly options: ProviderProxyOptions & {
     clinePass?: boolean;
     readClinePassModelCapabilities?: (model: string, signal: AbortSignal) => Promise<ClinePassModelCapabilities | undefined>;
@@ -49,6 +72,7 @@ export class ChatCompletionsBridge {
       upstreamPort: address.port,
       upstreamProtocol: "http",
       chatDiagnostics: this.diagnostics,
+      localChatBridgeToken: this.localToken,
     };
   }
   async close(): Promise<void> {
@@ -56,11 +80,36 @@ export class ChatCompletionsBridge {
     this.server.closeAllConnections();
     this.diagnostics.clear();
     await new Promise<void>(resolve => this.server.close(() => resolve()));
+    await Promise.allSettled(this.pending);
   }
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const reject = (status: number, code: string, message: string): void => {
+      response.writeHead(status, { "content-type": "application/json", connection: "close" });
+      response.once("finish", () => request.destroy());
+      response.end(JSON.stringify({ error: { code, message } }));
+    };
     if (request.method !== "POST" || request.url !== "/responses") {
-      response.writeHead(404).end(); return;
+      reject(404, "unsupported_path", "Unsupported Chat bridge path"); return;
     }
+    const token = request.headers[chatBridgeAuthorizationHeader];
+    if (typeof token !== "string" || !/^[a-f0-9]{64}$/u.test(token)
+      || !timingSafeEqual(Buffer.from(token), Buffer.from(this.localToken))) {
+      reject(401, "chat_bridge_unauthorized", "Chat bridge local identity is required"); return;
+    }
+    const declared = Number(request.headers["content-length"]);
+    const reservedBytes = Number.isSafeInteger(declared) && declared >= 0
+      ? Math.min(declared, maximumRequestBytes)
+      : maximumRequestBytes;
+    if (retainedRequestBytes + reservedBytes > maximumRetainedRequestBytes) {
+      reject(503, "chat_bridge_capacity_exceeded", "Chat bridge request capacity is exhausted"); return;
+    }
+    retainedRequestBytes += reservedBytes;
+    // processRequest owns all body-derived references and cancellation cleanup.
+    // Its frame must finish before this reservation becomes available again.
+    try { await this.processRequest(request, response); }
+    finally { retainedRequestBytes -= reservedBytes; }
+  }
+  private async processRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const controller = new AbortController();
     const terminalController = new AbortController();
     this.active.add(controller);
@@ -109,14 +158,16 @@ export class ChatCompletionsBridge {
     };
     try {
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new ModelConversionError("Compressed model requests are unsupported");
-      const payloadBody = await readChatBody(request, controller.signal, 16 * 1024 * 1024);
+      const payloadBody = await readChatBody(request, controller.signal, maximumRequestBytes);
       phaseTimeout(modelRequestPolicy.preparationTimeoutMs, "prepare");
       const source: unknown = JSON.parse(payloadBody);
       const requestedModel = source && typeof source === "object" && "model" in source ? source.model : undefined;
       let modelCapabilities: ClinePassModelCapabilities | undefined;
       status = 502;
+      const upstreamHeaders = { ...request.headers };
+      delete upstreamHeaders[chatBridgeAuthorizationHeader];
       const upstream = this.options.resolveUpstream
-        ? await waitForChatOperation(Promise.resolve(this.options.resolveUpstream(request.headers, controller.signal)), controller.signal)
+        ? await waitForChatOperation(Promise.resolve(this.options.resolveUpstream(upstreamHeaders, controller.signal)), controller.signal)
         : { host: this.options.upstreamHost, port: this.options.upstreamPort, protocol: this.options.upstreamProtocol, basePath: this.options.upstreamBasePath, agent: this.options.upstreamAgent };
       if (controller.signal.aborted) throw new Error("aborted");
       // Check the requested model before capability-dependent conversion: a resumed
@@ -180,7 +231,7 @@ export class ChatCompletionsBridge {
           if (JSON.stringify(current) !== JSON.stringify(modelCapabilities)) throw new ChatUpstreamError("clp_catalog_unavailable", "CLP 模型配置在搜索期间发生变化，请重新发起请求。", false, undefined, 503);
         }
         const payload = JSON.stringify(this.options.clinePass ? pinClinePassRouting(outbound, modelCapabilities?.clineRequestProfile) : outbound);
-        if (Buffer.byteLength(payload) > 16 * 1024 * 1024) throw new ModelConversionError("Chat continuation exceeds size limit");
+        if (Buffer.byteLength(payload) > maximumRequestBytes) throw new ModelConversionError("Chat continuation exceeds size limit");
         headers["content-length"] = String(Buffer.byteLength(payload));
         status = 502;
         clearTimeout(timer);
@@ -302,6 +353,7 @@ export class ChatCompletionsBridge {
       }
       if (failure instanceof ModelRequestTimeoutError) status = failure.status;
       else if (failure instanceof ChatUpstreamError && failure.upstreamStatus) status = failure.upstreamStatus;
+      if (failure instanceof ChatBodyTooLargeError) await drainRejectedRequest(request);
       const message = failure?.message ?? "Chat upstream request failed";
       if (status === 502 && (!controller.signal.aborted || aborted)) this.options.onError?.(new Error(message));
       controller.abort(failure);

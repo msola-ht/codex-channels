@@ -164,6 +164,9 @@ export async function runFeishuSetup({
 
     const result = await session.confirm(ownerId);
     output.write(`\n飞书配置已保存：${result.configPath}\n`);
+    if (result.warnings?.some(({ code }) => code === "gateway-config-lock-release-failed")) {
+      output.write("配置已保存，但配置锁释放失败；请检查配置和锁状态，勿重复保存。\n");
+    }
     if (mode === "scan") {
       if (result.applicationConfiguration !== "failed") {
         output.write(

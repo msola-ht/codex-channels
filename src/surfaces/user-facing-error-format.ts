@@ -197,7 +197,7 @@ export function formatSurfaceUserFacingError(
     case "revert.result-unknown":
       return "Revert 结果未知；请求不会自动重试，请重新执行 /revert list 核对历史";
     case "workspace.missing":
-      return `Workspace 不存在或未获授权：${detail(error, "workspaceId", "未知")}`;
+      return `当前 Workspace 已移除或未获授权：${detail(error, "workspaceId", "未知")}。请发送 /workspace 查看可用工作区，再显式选择；不会自动切换目录，也不会自动重试本次操作。`;
     case "workspace.selector.required":
       return "用法：/workspace <序号、ID 或名称>";
     case "workspace.selector.ambiguous":

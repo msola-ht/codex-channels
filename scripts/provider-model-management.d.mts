@@ -1,18 +1,26 @@
 import type { OpenAiModelCatalogEntry } from "../runtime/model-catalog-presentation.mjs";
 import type { OpenAiModelPrompts } from "./webui-official-model-catalog.mjs";
 import type { ModelDefinition } from "../runtime/model-catalog.mjs";
+export type ProviderModelRemovalBlockedReason = "removal-not-supported" | "last-model-protected"
+  | "account-default-protected" | "catalog-default-protected" | "gateway-default-protected";
+export interface ProviderModelCatalogModel {
+  id: string;
+  displayName: string;
+  isDefault: boolean;
+  removalBlockedReason: ProviderModelRemovalBlockedReason | null;
+}
 export interface ProviderModelCatalog {
   provider: string;
   displayName: string;
   providers: string[];
-  models: Array<{ id: string; displayName: string; isDefault: boolean }>;
+  models: ProviderModelCatalogModel[];
   canRemove: boolean;
   unavailableReason?: string;
 }
 export interface ProviderModelCatalogPresentation extends Omit<ProviderModelCatalog, "models"> {
   source: "managed" | "custom" | "official-shared";
   revision: string;
-  models: Array<{ id: string; displayName: string; isDefault: boolean; presentation: OpenAiModelCatalogEntry }>;
+  models: Array<ProviderModelCatalogModel & { presentation: OpenAiModelCatalogEntry }>;
 }
 export function loadProviderModelCatalogPresentations(options?: { environment?: NodeJS.ProcessEnv }): Promise<{ catalogs: ProviderModelCatalogPresentation[] }>;
 export function loadProviderModelPrompts(input: unknown, options?: { environment?: NodeJS.ProcessEnv }): Promise<OpenAiModelPrompts & Pick<ModelDefinition, "template" | "sampling">>;

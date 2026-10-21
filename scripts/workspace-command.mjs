@@ -321,6 +321,7 @@ async function removeWorkspaceInteractively({
   const result = removeWorkspaceFromConfig({
     configPath: runtime.configPath,
     selector: { id: selected },
+    expectedDocument: document,
     fallbackDefaultWorkspace,
     eventQueuePath,
   });

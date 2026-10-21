@@ -6,6 +6,8 @@
 `gateway-component-graph.ts` 在有损展示队列之前接入第三方重复思考保护，仅为已绑定、当前活动且 Provider 已知并非 OpenAI 官方的 Thread 提供中断端口。原始思考与摘要增量由 Client 适配后交给 Application 的有界异步检测，不等待 RPC；中断任务纳入既有生命周期任务集合，对应 Provider 断线或绑定失效清空检测窗口，关闭先停检测再等待已发出的中断。提示走现有 warning 投递链，不传出思考内容。
 当前页 Thread 状态由组件图以最多 4 个并发只读查询已连接 Provider；配置生命周期在应用启动成功后发布独立私有 IPC，
 停止先撤销入口和查询再停止应用，不接管共享 App Server 的进程生命周期。
+最终显式退出前统一关闭并等待 Delivery、Metrics、Scheduled Tasks、材料 Reader 和主线程 Windows ACL bridge 的真实退出；有界关闭失败仍保留归属并报告故障。初始配置或构造失败也清理已创建的材料 Reader／ACL 资源。
+启动期间提前停止同样传播资源清理失败的非零退出状态，不能在等待资源最终退出后将曾超时的关闭改报成功。
 
 渠道组合统一将数据库旁的 `uploads/video` 作为视频附件根传给三个 Surface，各渠道拥有独立暂存器生命周期。该目录不作为普通本地视频目录开放；MCP 通过显式 `STRATA_VIDEO_CHANNEL_ROOT` 和当前会话的随机附件引用读取单个文件，不由 Gateway 自动改写 Codex 配置。
 
@@ -253,4 +255,4 @@ Thread 恢复失败。单个 Thread 被另一个 Codex 进程持有写锁时，�
 的 Client 关闭外，Surface、事件总线、Client 收尾和存储不会被组合根重复关闭。组合根有界持有
 已接收的 Queue 完成释放任务，停止时拒绝新任务并先限时等待，避免 Surface 或 Client 关闭后继续派发。
 
-- `relay-metrics-composition.ts`：Relay IPC 与已有 Gateway 指标 Writer 的组合；接收端随 Writer 存活，结算通过隔离 Worker 按当前私有原子配置异步核对调用方、账户和代次，入队前复核取消与关闭状态，不依赖延迟热加载或入口启用状态；停用身份仍可结算历史调用。不创建第二个数据库写入者或 Core 事件。
+- `relay-metrics-composition.ts`：Relay IPC 与已有 Gateway 指标 Writer 的组合；接收端随 Writer 存活，先等待授权材料准备再发布监听；准备期间关闭会取消 Reader，监听启动返回后再次核对关闭与最新启用状态。结算通过隔离 Worker 按当前私有原子配置异步核对调用方、账户和代次，入队前复核取消与关闭状态，不依赖延迟热加载或入口启用状态；停用身份仍可结算历史调用。不创建第二个数据库写入者或 Core 事件。

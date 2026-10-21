@@ -37,6 +37,7 @@ export class ProviderModelManagementError extends Error {
 export async function loadProviderModelCatalogs({ environment = process.env } = {}) {
   try {
     const state = await readManagementState(environment, true);
+    const gatewayDefault = readGatewayDefault(gatewaySnapshot(environment));
     const catalogs = [];
     const definitions = loadManagedModelProviderDefinitions(environment);
     const seenFamilies = new Set();
@@ -48,8 +49,11 @@ export async function loadProviderModelCatalogs({ environment = process.env } = 
       const family = managedProviderAccountFamilies.find(entry => entry.storageId === definition.storageId);
       const members = state.managedProviders.filter(provider => definitions.some(entry => entry.storageId === definition.storageId && entry.id === provider.id));
       const canRemove = definition.storageId !== "deepseek";
-      catalogs.push({ provider: definition.id, displayName: family.definition.displayName, providers: members.map(entry => entry.id),
-        models: member.models.map(model => ({ id: model.id, displayName: model.displayName, isDefault: members.some(entry => entry.model === model.id) })), canRemove,
+      const providers = members.map(entry => entry.id);
+      catalogs.push({ provider: definition.id, displayName: family.definition.displayName, providers,
+        models: member.models.map(model => ({ id: model.id, displayName: model.displayName, isDefault: members.some(entry => entry.model === model.id),
+          removalBlockedReason: removalBlockedReason(model.id, { canRemove, modelCount: member.models.length,
+            accountDefaults: members.map(entry => entry.model), providers, primary: state.primary.id, gatewayDefault }) })), canRemove,
         ...(!canRemove ? { unavailableReason: "deepseek-template-source" } : {}),
       });
     }
@@ -57,9 +61,14 @@ export async function loadProviderModelCatalogs({ environment = process.env } = 
     let officialModels;
     for (const provider of candidates) {
       const custom = isCustomCatalogProvider(provider.id);
+      const catalogDefault = custom ? readResponsesModelCatalog(environment, provider.id).defaultModel : undefined;
       if (!custom && officialModels === undefined) officialModels = await savedOfficialModels(environment);
-      const models = custom ? provider.models.map(model => ({ id: model.id, displayName: model.name, isDefault: model.id === provider.model }))
+      const sourceModels = custom ? provider.models.map(model => ({ id: model.id, displayName: model.name, isDefault: model.id === provider.model }))
         : officialModels.map(model => ({ ...model, isDefault: model.id === (provider.model ?? state.defaults.model) }));
+      const models = sourceModels.map(model => ({ ...model, removalBlockedReason: removalBlockedReason(model.id, {
+        canRemove: custom, modelCount: sourceModels.length, accountDefaults: [provider.model], catalogDefault,
+        providers: [provider.id], primary: state.primary.id, gatewayDefault,
+      }) }));
       catalogs.push({ provider: provider.id, displayName: provider.displayName, providers: [provider.id], models, canRemove: custom,
         ...(!custom ? { unavailableReason: models.length ? "official-shared-catalog" : "official-catalog-unavailable" } : {}),
       });
@@ -78,10 +87,11 @@ export async function loadProviderModelCatalogPresentations({ environment = proc
         models: snapshot.models.map(presentation => ({
           id: presentation.model, displayName: presentation.displayName,
           isDefault: catalog.models.some(model => model.id === presentation.model && model.isDefault),
+          removalBlockedReason: catalog.models.find(model => model.id === presentation.model).removalBlockedReason,
           presentation,
         })) };
     });
-    // Account defaults and membership must not change between the discovery and projection.
+    // Defaults, removal protections and membership must not change during projection.
     const current = await loadProviderModelCatalogs({ environment });
     if (JSON.stringify(current.catalogs) !== JSON.stringify(catalogs)) {
       throw invalid("stale-preview", "provider", "模型目录或账户已变化，请刷新");
@@ -371,17 +381,15 @@ async function buildRemovalPlan(input, environment) {
   if (family && !loadManagedModelProviderDefinitions(environment).some(entry => entry.id === definition.id)) {
     throw invalid("stale-preview", "revision", "账户已变化，请重新预览");
   }
-  const gatewayContent = gateway.content?.toString("utf8");
-  const gatewayDefault = gatewayContent === undefined ? undefined
-    : validateGatewayConfigStructureDocument(parseGatewayConfig(gatewayContent)).codex?.default_model;
+  const gatewayDefault = readGatewayDefault(gateway);
   let catalog, nextManifest, custom;
-  let providers, displayName, defaults;
+  let providers, displayName, accountDefaults, catalogDefault;
   if (family) {
     const members = state.managedProviders.filter(provider => memberDefinitions.some(definition => definition.id === provider.id));
     if (!members.some(member => member.id === input.provider)) throw invalid("provider-not-configured", "provider", "请先完成该账户配置");
     providers = members.map(provider => provider.id);
     displayName = family.definition.displayName;
-    defaults = members.map(provider => provider.model);
+    accountDefaults = members.map(provider => provider.model);
     catalog = parseJson(requiredContent(snapshots, catalogPath));
     const manifest = parseJson(requiredContent(snapshots, manifestPath));
     if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || typeof manifest.source !== "string" || !manifest.source) {
@@ -433,14 +441,19 @@ async function buildRemovalPlan(input, environment) {
     catalog = custom;
     providers = [provider.id];
     displayName = provider.displayName;
-    defaults = [custom.defaultModel, provider.model];
+    accountDefaults = [provider.model];
+    catalogDefault = custom.defaultModel;
   }
   const models = catalog.models;
   const model = models.find(candidate => candidate.slug === input.model);
   if (!model) throw invalid("model-not-found", "model", "模型 ID 不在当前目录中");
-  if (models.length === 1) throw invalid("last-model-protected", "model", "不能移除最后一个启用模型");
-  if (defaults.includes(input.model)) throw invalid("default-model-protected", "model", "模型是账户或目录默认值，请先更改默认模型");
-  if (gatewayDefault === input.model && providers.includes(state.primary.id)) throw invalid("gateway-default-protected", "model", "模型是当前主提供商的 Gateway 显式默认值，请先更改配置");
+  const blocked = removalBlockedReason(input.model, { canRemove: true, modelCount: models.length, accountDefaults,
+    catalogDefault, gatewayDefault, providers, primary: state.primary.id });
+  if (blocked === "last-model-protected") throw invalid(blocked, "model", "不能移除最后一个启用模型");
+  if (blocked === "account-default-protected" || blocked === "catalog-default-protected") {
+    throw invalid("default-model-protected", "model", "模型是账户或目录默认值，请先更改默认模型");
+  }
+  if (blocked === "gateway-default-protected") throw invalid(blocked, "model", "模型是当前主提供商的 Gateway 显式默认值，请先更改配置");
   const nextCatalog = custom ? compileResponsesModelCatalog(custom.definitions.filter(model => model.id !== input.model), custom.defaultModel)
     : { ...catalog, models: models.filter(model => model.slug !== input.model) };
   await assertProviderFileSnapshots(snapshots);
@@ -511,6 +524,22 @@ function gatewaySnapshot(environment) {
   const [snapshot] = snapshotProviderFiles([path], environment);
   if (located && snapshot.content === undefined) throw invalid("provider-state-unavailable", "provider", "Gateway 配置缺失，无法核对模型默认值");
   return { ...snapshot, writeCurrent: () => { throw new Error("模型移除不能写入 Gateway 配置"); } };
+}
+
+function readGatewayDefault(snapshot) {
+  const content = snapshot.content?.toString("utf8");
+  return content === undefined ? undefined
+    : validateGatewayConfigStructureDocument(parseGatewayConfig(content)).codex?.default_model;
+}
+
+/** Account selection and catalog fallback remain distinct even when both protect the same model. */
+function removalBlockedReason(model, { canRemove, modelCount, accountDefaults, catalogDefault, gatewayDefault, providers, primary }) {
+  if (!canRemove) return "removal-not-supported";
+  if (modelCount <= 1) return "last-model-protected";
+  if (accountDefaults.includes(model)) return "account-default-protected";
+  if (catalogDefault === model) return "catalog-default-protected";
+  if (gatewayDefault === model && providers.includes(primary)) return "gateway-default-protected";
+  return null;
 }
 
 async function savedOfficialModels(environment) {

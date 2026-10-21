@@ -6,6 +6,7 @@ import { useAccountSettingsManagement } from "@/hooks/use-account-settings-manag
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { useOpenAiModelCatalog } from "@/hooks/use-openai-model-catalog"
+import { useProviderModelCatalogs } from "@/hooks/use-provider-model-catalogs"
 import { ModelDisplayGroups } from "@/components/settings/model-display-groups"
 import { useTranslation } from "@/hooks/use-translation"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
@@ -13,6 +14,7 @@ import { fetchManagementProviders, fetchSettingsSummary } from "@/lib/api"
 import { OpenAiModelCatalogCard } from "@/components/settings/openai-model-catalog-card"
 import { ModelCatalogTable } from "@/components/settings/model-catalog-columns"
 import { ProviderSettingsManagement } from "@/components/settings/provider-settings-management"
+import { ProviderModelCatalogs } from "@/components/settings/provider-model-catalogs"
 import { AccountSettingsManagement } from "@/components/settings/account-settings-management"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
 import { ProviderStatusCard } from "@/components/settings/provider-channel-status"
@@ -55,13 +57,15 @@ export function ModelConfigurationPage() {
   const reloadCatalog = catalog.refresh
   const codex = useCodexSettingsManagement()
   const providers = useProviderSettingsManagement()
+  const localCatalogs = useProviderModelCatalogs(providers.settings)
   const gateway = useSettingsManagement()
   const reloadCodex = codex.refetch, reloadProviders = providers.refetch, reloadGateway = gateway.refetch
-  const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog])
+  const reloadLocalCatalogs = localCatalogs.refetch
+  const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog(); reloadLocalCatalogs() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog, reloadLocalCatalogs])
   const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
-  return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy} refresh={refresh}>
-    <OpenAiModelCatalogCard catalog={catalog} disabled={busy} configurationRevision={providers.settings?.resourceRevision ?? null} renderCatalog={official =>
-      <ProviderSettingsManagement management={providers} section="models" onChanged={reloadCodex} renderCatalog={thirdParty =>
+  return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy || localCatalogs.loading} refresh={refresh}>
+    <OpenAiModelCatalogCard catalog={catalog} disabled={busy || providers.error !== null} configurationRevision={providers.settings?.resourceRevision ?? null} renderCatalog={official =>
+      <ProviderModelCatalogs local={localCatalogs} management={providers} onChanged={reloadCodex} renderCatalog={thirdParty =>
         <Card>
           <CardHeader><CardTitle>{t("modelCatalog.title")}</CardTitle><CardDescription>{t("modelCatalog.unifiedHint")} {t("openAiModelCatalog.searchReadOnlyHint")} <Link className="underline underline-offset-4" to="/settings">{t("openAiModelCatalog.editGlobalSearch")}</Link></CardDescription></CardHeader>
           <CardContent><ModelCatalogTable label={t("modelCatalog.title")} groups={[{ ...official, webSearchSettings: providers.settings?.webSearchSettings.filter(entry => entry.provider === "openai"), webSearchState: providers.loading ? "loading" : providers.error !== null ? "error" : undefined }, ...thirdParty]} /></CardContent>
@@ -69,7 +73,7 @@ export function ModelConfigurationPage() {
       } />
     } />
     <AppServerSettingsCard management={codex} section="models" onChanged={reloadProviders} />
-    <ModelDisplayGroups management={gateway} providers={providers.settings} disabled={busy || gateway.error !== null} />
+    <ModelDisplayGroups management={gateway} providers={providers.settings} disabled={busy || gateway.error !== null || providers.error !== null || localCatalogs.loading || localCatalogs.error !== null || !localCatalogs.matchesManagement} />
     <Card><CardHeader><CardTitle>{t("modelManagement.channelModel")}</CardTitle><CardDescription>{t("modelManagement.channelModelHint")}</CardDescription></CardHeader><CardContent>
       {gateway.loading && gateway.managedSettings === null && <Skeleton className="h-9 w-full" />}
       {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup><ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={gateway.managedSettings.system.defaultModel ?? ""} placeholder={t("modelManagement.followDefault")} disabled={busy} saved={gateway.lastAppliedSetting?.kind === "system.default-model" ? gateway.lastAppliedSetting : null} onBlur={value => void gateway.previewSetting("system.default-model", value || null, { key: "modelManagement.channelModel" })} /></FieldGroup>}

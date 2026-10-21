@@ -196,12 +196,20 @@ export async function runTimezoneCommand(args = [], {
     expectedRevision: settings.revision,
     writeConfig,
   });
+  const outcome = {
+    action: result.activation === "none" ? "unchanged" : "saved",
+    timezone: result.value,
+    configPath: result.configPath,
+    activation: result.activation,
+    activationResult: result.activationResult,
+  };
   if (parsed.json) {
-    output.write(`${JSON.stringify({
-      timezone: result.value,
-      configPath: result.configPath,
-    })}\n`);
-    return { action: "saved", timezone: result.value, configPath: result.configPath };
+    output.write(`${JSON.stringify(outcome)}\n`);
+    return outcome;
+  }
+  if (outcome.action === "unchanged") {
+    writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+    return outcome;
   }
   writeCliMessage("success", gateway
     ? `网关时区已设为${gatewayTimezoneLabel(result.value)}：${result.configPath}`
@@ -212,13 +220,7 @@ export async function runTimezoneCommand(args = [], {
     environment,
   });
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  return {
-    action: "saved",
-    timezone: result.value,
-    configPath: result.configPath,
-    activation: result.activation,
-    activationResult: result.activationResult,
-  };
+  return outcome;
 }
 
 function writeCurrentTimezone({ environment, output, current, configPath, gateway }) {

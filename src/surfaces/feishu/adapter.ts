@@ -382,6 +382,12 @@ export class FeishuConversationAdapter {
         );
         return;
       }
+      if (action === "workspace-select") {
+        const result = await this.commands.selectWorkspace(target, input, actorId);
+        const rendered = renderFeishuCommandResult(result);
+        if (rendered !== null) this.notifyMarkdown(target.conversationId, rendered);
+        return;
+      }
       if (action === "feishu-status") {
         await this.handleFeishuCommand(
           actorId,

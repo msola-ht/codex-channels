@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  GatewayConfigWriteCommittedError,
   readGatewayConfig,
   validateGatewayConfigStructureDocument,
   writeGatewayConfig,
@@ -201,15 +202,18 @@ class FeishuSetupSession {
     validateGatewayConfigStructureDocument(currentDocument);
     this.#clearTimeout();
     this.#setState("saving");
+    const warnings = [];
     try {
       this.#writeConfig(this.#configPath, currentDocument);
     } catch (error) {
-      this.#fail("save-failed");
-      throw error;
+      if (!(error instanceof GatewayConfigWriteCommittedError)) {
+        this.#fail("save-failed");
+        throw error;
+      }
+      warnings.push({ code: "gateway-config-lock-release-failed" });
     }
 
     let applicationConfiguration = "not-requested";
-    const warnings = [];
     if (this.#mode === "scan") {
       this.#setState("configuring-application");
       try {

@@ -47,6 +47,7 @@ import {
   type FeishuFilePort,
 } from "./file-input.js";
 import { FeishuInbox } from "./inbox.js";
+import { renderFeishuConversationIdleReleasedCard } from "./idle-release-card.js";
 import { FeishuInteractionPort } from "./interactions.js";
 import {
   FeishuImageStore,
@@ -159,6 +160,7 @@ export class FeishuSurface implements SurfaceAdapter {
   private readonly configurationRecipients:
     | (() => readonly string[])
     | undefined;
+  private readonly notificationActor: (target: ConversationTarget) => string | undefined;
   private readonly startupNotification:
     | FeishuStartupNotification
     | undefined;
@@ -177,6 +179,11 @@ export class FeishuSurface implements SurfaceAdapter {
   ) {
     this.accountId = options.appId;
     this.configurationRecipients = options.configurationRecipients;
+    this.notificationActor = target => {
+      const actors = [...new Set(options.actorRegistry?.actors(target) ?? [])]
+        .filter(actorId => options.access.isAllowed({ target, actorId }));
+      return actors.length === 1 ? actors[0] : undefined;
+    };
     this.startupNotification = options.startupNotification;
     this.logger = options.logger;
     const client = dependencies.messagePort
@@ -229,6 +236,16 @@ export class FeishuSurface implements SurfaceAdapter {
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),
         debugEnabled: options.debugEnabled ?? false,
+        deliverIdleReleased: async (event, sendCard) => {
+          const actorId = this.notificationActor(event.target);
+          if (actorId === undefined) {
+            await sendCard(renderFeishuConversationIdleReleasedCard(event.minutes, event.threadId));
+            return;
+          }
+          await this.commandCenter.deliverIdleReleased(
+            event.target, actorId, event.minutes, event.threadId, sendCard,
+          );
+        },
       },
     );
     this.interactions = new FeishuInteractionPort(
@@ -586,6 +603,14 @@ export class FeishuSurface implements SurfaceAdapter {
     }
     const text = renderFeishuConfigurationChange(change);
     for (const chatId of this.safeConfigurationRecipients()) {
+      const card = this.deliverWorkspaceAddedCard(chatId, change);
+      if (card) {
+        void card.catch((error: unknown) => {
+          this.logger.warn({ accountId: this.accountId, conversationId: chatId, ...surfaceErrorMetadata(error) },
+            "飞书新增工作区卡片投递失败");
+        });
+        continue;
+      }
       if (!this.output.notifyMarkdown(chatId, text)) {
         this.logger.warn(
           { accountId: this.accountId, conversationId: chatId },
@@ -606,9 +631,20 @@ export class FeishuSurface implements SurfaceAdapter {
     const text = renderFeishuConfigurationChange(change);
     return Promise.all(
       this.safeConfigurationRecipients().map(
-        (chatId) => this.output.deliverMarkdown(chatId, text),
+        (chatId) => this.deliverWorkspaceAddedCard(chatId, change)
+          ?? this.output.deliverMarkdown(chatId, text),
       ),
     ).then(() => undefined);
+  }
+
+  private deliverWorkspaceAddedCard(chatId: string, change: SurfaceConfigurationChange): Promise<void> | undefined {
+    if (change.action !== "reloaded" || change.addedWorkspaces.length === 0) return undefined;
+    const target: ConversationTarget = { surface: "feishu", accountId: this.accountId, conversationId: chatId };
+    const actorId = this.notificationActor(target);
+    // A proactive card must belong to one known actor, never whichever user
+    // happens to click first. Ambiguous conversations retain the text notice.
+    return actorId === undefined ? undefined
+      : this.commandCenter.deliverWorkspaceAdded(target, actorId, change);
   }
 
   private safeConfigurationRecipients(): string[] {

@@ -26,6 +26,7 @@ import {
   loadProviderManagementSummary,
   managementOperationError,
   assertManagementAuditWritable,
+  readManagementSnapshot,
 } from "./webui-management-operations.mjs";
 import {
   loadProviderSettingsResource,
@@ -36,7 +37,7 @@ import { invalidateServiceStatusSummary } from "./webui-service-status.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
 import { routeCustomModelCapabilityProbe } from "./webui-custom-model-probe.mjs";
 import { routeOfficialModelManagement } from "./webui-management-official-model-route.mjs";
-import { loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
+import { loadProviderModelCatalogPresentations, loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadProviderModelTemplateOptions } from "./provider-model-template-management.mjs";
 import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
 import { loadProviderModelAdditionOptions } from "./provider-model-additions.mjs";
@@ -54,6 +55,17 @@ export async function routeProviderManagement({
   response,
   state,
 }) {
+  if (path === "/provider-model-catalogs" && request.method === "GET") {
+    if (new URL(request.url, "http://localhost").searchParams.size !== 0) {
+      throw new ApiError(400, "provider_models_invalid_input", "模型目录读取不接受查询参数");
+    }
+    try {
+      sendManagementJson(response, 200, await loadProviderModelCatalogPresentations({ environment }));
+    } catch {
+      throw new ApiError(503, "provider_models_unavailable", "本地模型目录暂不可用，请检查配置文件");
+    }
+    return true;
+  }
   if (await routeOfficialModelManagement({ environment, maximumBodyBytes, path, principalId, request, response, state })) return true;
   if (path === "/provider-model-additions" && request.method === "POST") {
     if (new URL(request.url, "http://localhost").searchParams.size !== 0) {
@@ -208,7 +220,14 @@ export async function routeProviderManagement({
     return true;
   }
   if (path === "/provider-settings" && request.method === "GET") {
-    const resource = await readProviderSettings(environment, state);
+    let resource;
+    try {
+      resource = await readManagementSnapshot(request, response, state,
+        signal => readProviderSettings(environment, state, signal));
+    } catch {
+      if (response.destroyed) return true;
+      throw new ApiError(503, "provider_state_unavailable", "Provider 设置暂不可用，请检查 Codex 配置");
+    }
     sendManagementJson(response, 200, {
       observedAt: new Date().toISOString(),
       resourceRevision: fingerprintManagementValue(resource),
@@ -368,12 +387,10 @@ export async function routeProviderManagement({
   if (path === "/providers" && request.method === "GET") {
     let providers;
     try {
-      providers = await loadProviderManagementSummary(
-        environment,
-        state.providerStateCache,
-        state.loadProviderState,
-      );
+      providers = await readManagementSnapshot(request, response, state,
+        signal => loadProviderManagementSummary(environment, state, signal));
     } catch {
+      if (response.destroyed) return true;
       throw new ApiError(503, "provider_state_unavailable", "Provider 状态暂不可用，请使用 codexc setup 查看");
     }
     sendManagementJson(response, 200, providers);
@@ -540,9 +557,10 @@ function accountSettingsAuditTarget(input) {
   return input.operation.startsWith("deepseek.") ? "deepseek" : "unknown";
 }
 
-async function readProviderSettings(environment, state) {
+async function readProviderSettings(environment, state, signal) {
   try {
-    return await loadProviderSettingsResource(environment, state.loadProviderState);
+    return await loadProviderSettingsResource(environment,
+      options => state.loadProviderState({ ...options, signal }));
   } catch {
     throw new ApiError(503, "provider_state_unavailable", "Provider 设置暂不可用，请检查 Codex 配置");
   }
