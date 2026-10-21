@@ -81,4 +81,4 @@ A 审查后确定以下实施顺序：
 - 桌面点击长候选后，成员保留精确 `cline-pass/deepseek-v4.1-flash-1017`；DS 选择 `deepseek-v4-pro` 后，组名和新增成员均保留该 ID，原 CLP 成员仍在，再次展开只剩未加入的两个候选。窄屏又通过 End/Enter 选入长 CLP 成员，真实隔离后端预览显示该原始 ID 映射到 `group-select-audit`；取消前后临时配置 SHA-256 同为 `7e68ed15c9623080a82ad5b3fbcf9e05e93e2ce81dac1a6c63992bc0fa099e48`，没有保存。
 - 账户页新增 DeepSeek 的 384px 窄弹窗内，账户 ID、运行模式和展开菜单均宽 352px；已查看截图 `output/playwright/group-select-account-after.png`，随后取消草稿，未调用账户操作。设置页 1128px FieldGroup 中的选择仍为横向紧凑行，实际宽 56–214px，均在视口内。
 
-A `astra_group_select_review`（`gpt-6-astra/high`）只读独立复查本次源码、Field/FieldGroup/Select 合同、统计分组身份与预览链，以及账户、模型新增/参数、搜索探测、模板和宽设置消费者，未发现阻断问题；它查看修复前截图，没有操作浏览器或查看修复后截图，修复后证据由主代理收集。WebUI 类型及生产构建通过；正常提交门禁待执行。其他消费者全部交互、完整读屏、各 OS 浏览器及真实账户写入仍未观察，本次不将这些路径描述为实测通过。
+A `astra_group_select_review`（`gpt-6-astra/high`）只读独立复查本次源码、Field/FieldGroup/Select 合同、统计分组身份与预览链，以及账户、模型新增/参数、搜索探测、模板和宽设置消费者，未发现阻断问题；它查看修复前截图，没有操作浏览器或查看修复后截图，修复后证据由主代理收集。修复已本地提交为 `c30eb5c5`，正常 pre-commit 的类型/版本/模块边界、文档、WebUI 构建/Lint/翻译字典及 Gateway 构建全部通过。其他消费者全部交互、完整读屏、各 OS 浏览器及真实账户写入仍未观察，本次不将这些路径描述为实测通过。
