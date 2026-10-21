@@ -424,6 +424,8 @@ Provider 新增、需要确认的受管账户删除与重配要求标准输入�
 
 添加账户时，Setup 与 WebUI 已有的多账户配置入口均提供 `main`（主账户）、`work`（工作账户）、`other`（其他账户）和“自定义”；已占用的预设不再显示。名称仅作账户 ID，不决定默认账户或自动切换行为。
 
+OpenCode Go 的账户菜单提供添加、编辑、统一模型管理、设置默认账户和移除本地配置；模式在添加或编辑中选择，编辑目标不依赖默认账户。新增无需邮箱或手机号，已有联系方式保留。编辑时 Key 留空保留当前凭据，当前模式预选；Setup 和 WebUI 都在保存前预览确认，无变化不写入、不备份、不提示重启。直接编辑使用 `codexc provider opencode-go reconfigure <id>`，列表和实例释放继续使用 `list`、`release` 命令。
+
 DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSeek 使用说明`](deepseek.md)、[`OpenCode Go 使用说明`](opencode-go.md)、[`Provider 接入指南`](provider-integration-guide.md) 和 [`OpenCode Go 多账户`](opencode-go-multi-account.md)。
 
 继续使用聊天会话：

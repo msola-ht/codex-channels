@@ -18,6 +18,9 @@ export interface OpenCodeGoAccountConfigurationPreview {
     default: boolean;
   };
   mode: "switching" | "exclusive";
+  previousMode?: "switching" | "exclusive";
+  credentialAction: "preserve" | "replace";
+  willChange: boolean;
   effects: {
     writesMainConfig: boolean;
     writesIsolatedProfile: boolean;
@@ -28,7 +31,7 @@ export interface OpenCodeGoAccountConfigurationPreview {
     required: boolean;
     field: "confirmExclusiveConfigChange";
   };
-  activation: "restart-all";
+  activation: "none" | "restart-all";
 }
 
 interface ProvisioningOptions {
@@ -50,6 +53,7 @@ export function previewOpencodeGoAccountConfiguration(
     contact?: string;
     mode?: "switching" | "exclusive";
     reconfigure?: boolean;
+    apiKey?: string;
   },
   options?: ProvisioningOptions,
 ): Promise<OpenCodeGoAccountConfigurationPreview>;
@@ -62,7 +66,7 @@ export function applyOpencodeGoAccountConfiguration(
     contact?: string;
     mode?: "switching" | "exclusive";
     reconfigure?: boolean;
-    apiKey: string;
+    apiKey?: string;
     confirmExclusiveConfigChange?: boolean;
     expectedRevision?: string;
   },
@@ -74,7 +78,7 @@ export function applyOpencodeGoAccountConfiguration(
     }>;
   },
 ): Promise<{
-  action: "configured";
+  action: "configured" | "unchanged";
   model: string;
   paths: {
     configPath: string;

@@ -34,7 +34,7 @@ Codex Thread 的 `modelProvider` 创建后不可变。因此：
 
 ```text
 ~/.codex-connect/providers/
-  opencode-go/accounts.json                家族注册表（id、default、email 或 phone）
+  opencode-go/accounts.json                家族注册表（id、default，可选 email 或 phone）
   opencode-go/models.json                  所有 OCG 账户共用模型目录
   opencode-go/models.manifest.json         共用目录来源
   opencode-go/ocg-<account>/managed.toml    管理标记（version、provider、mode）
@@ -52,12 +52,13 @@ Profile 保存该账户的 Key、Provider 配置、模型目录、默认模型�
 权限校验。
 
 账户 id 使用小写字母、数字、`-` 或 `_`，长度为 1–32；Provider 始终使用
-`ocg-<accountId>`，默认账户不使用固定 ID。添加账户时邮箱和手机号必须二选一。
+`ocg-<accountId>`，默认账户不使用固定 ID。新增账户无需联系方式；已有邮箱或手机号保持原值，未提供新值的重配不会清除它们。
 
 ## CLI 与原子性
 
 ```bash
 codexc provider opencode-go add <id>
+codexc provider opencode-go reconfigure <id>
 codexc provider opencode-go list
 codexc provider opencode-go list --json
 codexc provider opencode-go remove <id>
@@ -73,6 +74,7 @@ codexc provider opencode-go release <id>
   租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；清理账户配置与管理标记，保留共用模型目录和来源记录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
   删除计划在等待监管器前固定文件快照，期间注册表、账户文件或固定恢复基线被外部修改时拒绝继续，保留外部修改；
 - `default` 原子更新默认账户注册表；
+- `reconfigure` 明确选择账户并预选当前模式，Key 可留空沿用；新增必须提供 Key。预览和执行绑定文件修订，过期预览拒绝保存；模式、凭据及展示信息均无变化时不写入、不备份、不要求重启；
 - `release` 立即请求释放账户 App Server；如果对应 Remote TUI 正在持有租约，则保留实例并提示用户
   退出 TUI 后重试；
 - 删除账户后，该账户历史 Thread 因 Provider 不再存在而不可恢复，CLI 会要求明确确认。

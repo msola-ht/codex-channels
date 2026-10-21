@@ -999,7 +999,7 @@ export type ManagementAccountSettingsMutationInput =
       phone?: string
       mode?: "switching" | "exclusive"
       reconfigure?: boolean
-      apiKey: string
+      apiKey?: string
       confirmExclusiveConfigChange?: boolean
     }
   | { operation: "opencode.account.default"; accountId: string }
@@ -1030,6 +1030,8 @@ export interface ManagementAccountSettingsPreview {
   }
   provider?: { id?: string; name?: string }
   mode?: string
+  previousMode?: string
+  credentialAction?: "preserve" | "replace"
   model?: string
   status?: string
   willChange?: boolean

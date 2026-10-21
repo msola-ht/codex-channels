@@ -391,10 +391,11 @@
   删除默认账户前必须先指定其他默认账户；删除时仅清理账户配置与管理标记，保留共用模型目录与来源记录，固定模式账户只恢复其管理的主配置字段，保留无关子代理。
 - `opencode-go-account-provisioning.mjs` / `opencode-go-account-provisioning.d.mts`：提供 OpenCode Go
   账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、每个账户进入固定模式时的恢复基线更新与旧基线归档、Key 写入、切换/固定模式配置和多文件事务回滚；同一家可保留一个固定账户与其他切换账户。
+  联系方式可省略，重配保留已有展示字段；省略 Key 仅允许已有账户沿用可安全读取的凭据。预览包含模式前后值与凭据操作，修订绑定实际配置和私有凭据，无变化仍校验完整模型目录，但不写入或要求重启。
   执行计划在首次异步等待前捕获既有文件快照，目录下载和 CLI 校验后仍使用原快照，外部修改不会成为旧计划的新回滚基线。
   首次接入从官方模板生成共用目录，新增账户和重配均复用已有目录，不继承其他 Provider 的同名模型窗口。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
-  （add/list/remove/default/stop，供 `codexc provider opencode-go` 调用）与 Setup 菜单；`list --json`
+  （add/list/reconfigure/remove/default/release，供 `codexc provider opencode-go` 调用）与统一账户 Setup 菜单；列表和实例释放仅保留直接命令，模型操作委托统一模型管理；`list --json`
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
   从同一受审查来源分别生成账户模型目录；重复配置时保留仍受支持的
   默认模型与逐模型设置。

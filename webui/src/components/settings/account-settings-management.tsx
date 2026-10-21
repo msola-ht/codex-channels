@@ -32,7 +32,6 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   const [editor, setEditor] = useState<Platform | null>(null)
   const [editing, setEditing] = useState(false)
   const [accountId, setAccountId] = useState("")
-  const [contact, setContact] = useState("")
   const [mode, setMode] = useState<"switching" | "exclusive">("switching")
   const [key, setKey] = useState("")
   const pending = management.pendingPreview
@@ -45,12 +44,12 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   const close = () => { setEditor(null); setKey("") }
   const open = (platform: Platform, row?: AccountRow) => {
     management.clearError()
-    setEditor(platform); setEditing(Boolean(row)); setAccountId(row?.id ?? ""); setContact(row?.contact ?? ""); setMode(row?.mode ?? "switching"); setKey("")
+    setEditor(platform); setEditing(Boolean(row)); setAccountId(row?.id ?? ""); setMode(row?.mode ?? "switching"); setKey("")
   }
   const save = () => {
     if (editor === null) return
     const common = { accountId: accountId.trim(), mode, apiKey: key, reconfigure: editing }
-    if (editor === "opencodeGo") void management.mutate({ operation: "opencode.account.configure", ...common, contact: contact.trim() })
+    if (editor === "opencodeGo") void management.mutate({ ...common, operation: "opencode.account.configure", apiKey: editing && key === "" ? undefined : key })
     if (editor === "deepseek") void management.mutate({ operation: "deepseek.configure", ...common })
     if (editor === "clinePass") void management.mutate({ operation: "clp.configure", ...common })
   }
@@ -58,7 +57,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
     const result = await management.confirm()
     if (result !== null) { close(); onChanged?.() }
   }
-  const cancel = () => { management.cancel(); setKey("") }
+  const cancel = () => { management.cancel() }
   const action = (row: AccountRow, kind: "default" | "remove") => {
     const prefix = row.platform === "opencodeGo" ? "opencode.account" : row.platform === "deepseek" ? "deepseek" : "clp"
     void management.mutate({ operation: `${prefix}.${kind}`, accountId: row.id })
@@ -72,7 +71,6 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
     { id: "actions", header: t("modelManagement.actions"), cell: ({ row: { original: row } }) => <div className="flex flex-wrap gap-2">
       <Button variant="outline" size="sm" disabled={disabled} onClick={() => open(row.platform, row)}>{t("modelManagement.edit")}</Button>
       <Button variant="outline" size="sm" disabled={disabled || row.default} onClick={() => action(row, "default")}>{t("modelManagement.setDefault")}</Button>
-      {row.platform === "opencodeGo" && <Button variant="outline" size="sm" disabled={disabled} onClick={() => void management.mutate({ operation: "opencode.account.stop", accountId: row.id })}>{t("modelManagement.stop")}</Button>}
       <Button variant="destructive" size="sm" disabled={disabled} onClick={() => action(row, "remove")}>{t("modelManagement.remove")}</Button>
     </div> },
   ]
@@ -88,12 +86,11 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
         <DialogHeader><DialogTitle>{editor ? platforms[editor] : ""} · {t(editing ? "modelManagement.edit" : "modelManagement.add")}</DialogTitle><DialogDescription>{t("modelManagement.credentialsHint")}</DialogDescription></DialogHeader>
         {editor && <FieldGroup>
           <AccountIdField id="model-account-id" value={accountId} accounts={settings[editor].accounts} reservedIds={editor === "opencodeGo" ? opencodeGoReservedAccountIds : undefined} disabled={disabled} editing={editing} onChange={setAccountId} />
-          {editor === "opencodeGo" && <Field data-disabled={disabled}><FieldLabel htmlFor="model-account-contact">{t("modelManagement.contact")}</FieldLabel><Input id="model-account-contact" value={contact} disabled={disabled} onChange={event => setContact(event.target.value)} /></Field>}
           <ManagedSelect label={t("modelManagement.mode")} value={mode} options={[["switching", t("modelManagement.switching")], ["exclusive", t("modelManagement.exclusive")]]} disabled={disabled} onChange={value => setMode(value as typeof mode)} />
-          <Field data-disabled={disabled}><FieldLabel htmlFor="model-account-key">API Key</FieldLabel><Input id="model-account-key" type="password" autoComplete="new-password" disabled={disabled} value={key} onChange={event => setKey(event.target.value)} /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="model-account-key">API Key</FieldLabel><Input id="model-account-key" type="password" autoComplete="new-password" disabled={disabled} value={key} placeholder={editing && editor === "opencodeGo" ? t("managementUi.preserveCredentials") : undefined} onChange={event => setKey(event.target.value)} /></Field>
         </FieldGroup>}
         {management.actionError && <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert>}
-        <DialogFooter><Button variant="outline" disabled={disabled} onClick={close}>{t("modelManagement.cancel")}</Button><Button disabled={disabled || !editor || !key.trim() || (editor === "opencodeGo" && !contact.trim()) || (!editing && Boolean(newManagedAccountIdError(accountId, editor ? settings[editor].accounts : [], editor === "opencodeGo" ? opencodeGoReservedAccountIds : undefined)))} onClick={save}>{t("modelManagement.preview")}</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" disabled={disabled} onClick={close}>{t("modelManagement.cancel")}</Button><Button disabled={disabled || !editor || (!key.trim() && !(editing && editor === "opencodeGo" && key === "")) || (!editing && Boolean(newManagedAccountIdError(accountId, editor ? settings[editor].accounts : [], editor === "opencodeGo" ? opencodeGoReservedAccountIds : undefined)))} onClick={save}>{t("modelManagement.preview")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     {pending && <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} loading={management.loading} onConfirm={() => void confirm()} onCancel={cancel} />}
@@ -121,7 +118,9 @@ export function AccountSettingsConfirmationDialog({
   const lines = [t("accountConfirmation.operation", { value: preview.operation })]
   if (account?.id !== undefined) lines.push(t("accountConfirmation.account", { name: account.displayName ?? account.email ?? account.phone ?? account.id, id: account.id }))
   if (provider?.name !== undefined) lines.push(t("accountConfirmation.provider", { name: provider.name, id: provider.id ?? t("common.unknown") }))
-  if (preview.mode !== undefined) lines.push(t("accountConfirmation.mode", { value: preview.mode === "exclusive" ? t("modelManagement.exclusive") : preview.mode === "switching" ? t("modelManagement.switching") : preview.mode }))
+  const modeLabel = (value: string) => value === "exclusive" ? t("modelManagement.exclusive") : value === "switching" ? t("modelManagement.switching") : value
+  if (preview.mode !== undefined) lines.push(t("accountConfirmation.mode", { value: preview.previousMode === undefined ? modeLabel(preview.mode) : `${modeLabel(preview.previousMode)} → ${modeLabel(preview.mode)}` }))
+  if (preview.credentialAction !== undefined) lines.push(t(preview.credentialAction === "preserve" ? "accountConfirmation.preserveKey" : "accountConfirmation.replaceKey"))
   if (preview.model !== undefined) lines.push(t("accountConfirmation.model", { value: preview.model }))
   if (preview.status !== undefined) lines.push(t("accountConfirmation.status", { value: preview.status }))
   if (preview.effects !== undefined) {

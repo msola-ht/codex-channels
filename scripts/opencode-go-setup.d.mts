@@ -1,14 +1,3 @@
-export interface OpenCodeGoSetupPrompter {
-  select(): Promise<string>;
-  accountId?(): Promise<string>;
-  contact?(): Promise<string>;
-  selectAccount?(
-    accounts: ReadonlyArray<{ id: string; default: boolean }>,
-  ): Promise<string>;
-  secret(message: string): Promise<string>;
-  confirm(message: string, initialValue: boolean): Promise<boolean>;
-}
-
 export function runOpenCodeGoSetup(options?: {
   allowBack?: boolean;
   environment?: NodeJS.ProcessEnv;
@@ -26,14 +15,11 @@ export function runOpenCodeGoSetup(options?: {
     confirm(options: unknown): Promise<unknown>;
     isCancel(value: unknown): boolean;
   };
-  prompter?: OpenCodeGoSetupPrompter;
 }): Promise<
   | { action: "back" }
   | { action: "cancelled" }
   | { action: "configured"; mode: "switching" | "exclusive"; accountId: string }
   | { action: "default-set" | "unchanged" }
-  | { action: "stopped" | "not-running" | "in-use"; accountId: string }
-  | { action: "listed" }
   | { action: "catalog-updated"; activation: "restart-all"; models: string[] }
   | undefined
 >;
@@ -54,7 +40,6 @@ export function addOpencodeGoAccount(
       sha256: string;
     }>;
     prompts?: unknown;
-    prompter?: OpenCodeGoSetupPrompter;
   },
 ): Promise<{ action: string; mode?: string; accountId?: string }>;
 
@@ -95,7 +80,6 @@ export function runOpencodeGoAccountCli(
     environment?: NodeJS.ProcessEnv;
     output?: { write(value: string): unknown };
     prompts?: unknown;
-    prompter?: OpenCodeGoSetupPrompter;
     downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{
       catalog: { models: Array<Record<string, unknown>> };
       sha256: string;

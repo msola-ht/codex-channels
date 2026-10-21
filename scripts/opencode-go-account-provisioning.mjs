@@ -11,6 +11,7 @@ import {
 import {
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
+  loadOpencodeGoAccountCredentialFor,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   loadOpencodeGoAccounts,
@@ -65,14 +66,14 @@ export class OpenCodeGoAccountProvisioningError extends Error {
 }
 
 export async function previewOpencodeGoAccountConfiguration(
-  { accountId, email, phone, contact, mode = "switching", reconfigure = false },
+  { accountId, email, phone, contact, mode, reconfigure = false, apiKey },
   {
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
     loadPrimaryProvider = loadPrimaryModelProvider,
   } = {},
 ) {
-  return publicPreview(await buildPlan({ accountId, email, phone, contact, mode, reconfigure }, {
+  return publicPreview(await buildPlan({ accountId, email, phone, contact, mode, reconfigure, apiKey }, {
     environment,
     loadAccounts,
     loadPrimaryProvider,
@@ -93,7 +94,7 @@ export async function applyOpencodeGoAccountConfiguration(
 async function applyOpencodeGoAccountConfigurationUnlocked(
   {
     accountId,
-    mode = "switching",
+    mode,
     reconfigure = false,
     email,
     phone,
@@ -110,21 +111,19 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     loadPrimaryProvider = loadPrimaryModelProvider,
   } = {},
 ) {
-  const plan = await buildPlan({ accountId, email, phone, contact, mode, reconfigure }, {
+  const plan = await buildPlan({ accountId, email, phone, contact, mode, reconfigure, apiKey }, {
     environment,
     loadAccounts,
     loadPrimaryProvider,
   });
+  mode = plan.mode;
   assertManagedAccountRevision(expectedRevision, plan.revision);
-  if ((plan.mode === "exclusive" || plan.previousMode === "exclusive") && confirmExclusiveConfigChange !== true) {
+  if (plan.willChange && (plan.mode === "exclusive" || plan.previousMode === "exclusive") && confirmExclusiveConfigChange !== true) {
     throw invalid(
       "confirmation-required",
       "confirmExclusiveConfigChange",
       "修改 Codex 主配置前必须明确确认",
     );
-  }
-  if (typeof apiKey !== "string" || !/^sk-[^\s"]+$/u.test(apiKey) || apiKey.length > 4_096) {
-    throw invalid("invalid-api-key", "apiKey", "OpenCode Go API Key 无效");
   }
 
   let catalogState;
@@ -159,6 +158,10 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     definition,
     previous?.model,
   );
+  if (!plan.willChange) {
+    await assertProviderFileSnapshots(plan.snapshots);
+    return { ...publicPreview(plan), action: "unchanged", paths: publicPaths(plan.paths), model: selectedModel };
+  }
   const previousMode = readOpencodeGoAccountMarker(environment, accountId)?.mode;
   if (previousMode === "exclusive" && confirmExclusiveConfigChange !== true) {
     throw invalid(
@@ -206,7 +209,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
         mode,
         previousMode,
         previousProfile: snapshots.find(item => item.path === plan.paths.profilePath)?.content?.toString("utf8"),
-        apiKey, catalogPath: plan.paths.catalogPath, catalog: managedCatalog, model: selectedModel,
+        apiKey: plan.apiKey, catalogPath: plan.paths.catalogPath, catalog: managedCatalog, model: selectedModel,
       },
     );
     const profileContent = profile === undefined ? undefined : stringify(profile);
@@ -280,7 +283,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
 }
 
 async function buildPlan(
-  { accountId, email, phone, contact, mode, reconfigure },
+  { accountId, email, phone, contact, mode, reconfigure, apiKey },
   { environment, loadAccounts, loadPrimaryProvider },
 ) {
   try {
@@ -288,8 +291,8 @@ async function buildPlan(
   } catch (error) {
     throw normalize("invalid-account-id", "accountId", error);
   }
-  if (mode !== "switching" && mode !== "exclusive") {
-    throw invalid("invalid-mode", "mode", "OpenCode Go 账户管理模式无效");
+  if (typeof reconfigure !== "boolean") {
+    throw invalid("invalid-input", "reconfigure", "reconfigure 必须为布尔值");
   }
   let accounts;
   try {
@@ -310,10 +313,17 @@ async function buildPlan(
       const configured = loadManagedModelProviderSettings(environment)
         .find((provider) => provider.provider === opencodeGoProviderId(accountId));
       if (configured === undefined) throw new Error("OpenCode Go 账户配置不完整，请先恢复缺失文件");
+      if (!configured.models.some(model => model.model === configured.model)) {
+        throw invalid("account-default-model-missing", "model", "账户默认模型不在当前目录中，请先在模型管理中设置有效的账户默认模型");
+      }
       previousMode = configured.mode;
     } catch (error) {
       throw normalize("provider-state-unavailable", "accountId", error);
     }
+  }
+  if (mode === undefined) mode = previousMode ?? "switching";
+  if (mode !== "switching" && mode !== "exclusive") {
+    throw invalid("invalid-mode", "mode", "OpenCode Go 账户管理模式无效");
   }
   if ([contact, email, phone].filter((value) => value !== undefined).length > 1) {
     throw invalid(
@@ -341,9 +351,6 @@ async function buildPlan(
       throw normalize("invalid-contact", "contact", error);
     }
   }
-  if (normalizedEmail === undefined && normalizedPhone === undefined) {
-    throw invalid("invalid-contact", "contact", "OpenCode Go 账户必须提供邮箱或手机号码");
-  }
   assertManagedAccountMode(mode, opencodeGoAccountDefinition(accountId), environment, loadPrimaryProvider);
   const paths = opencodeGoAccountPaths(environment, accountId);
   let snapshots;
@@ -367,7 +374,24 @@ async function buildPlan(
   } catch (error) {
     throw normalize("profile-conflict", "accountId", error);
   }
+  const preservesApiKey = apiKey === undefined;
+  let currentApiKey;
+  if (existing !== undefined) {
+    try { currentApiKey = loadOpencodeGoAccountCredentialFor(opencodeGoProviderId(accountId), environment); }
+    catch {
+      if (preservesApiKey) throw invalid("invalid-api-key", "apiKey", "现有 API Key 无法安全读取，请显式填写新 Key");
+    }
+  }
+  if (preservesApiKey) apiKey = currentApiKey;
+  if (typeof apiKey !== "string" || !/^sk-[^\s"]+$/u.test(apiKey) || apiKey.length > 4_096) {
+    throw invalid("invalid-api-key", "apiKey", "OpenCode Go API Key 无效；新增账户必须填写 Key");
+  }
+  await assertProviderFileSnapshots(snapshots);
   return {
+    apiKey,
+    credentialAction: apiKey === currentApiKey ? "preserve" : "replace",
+    willChange: existing === undefined || apiKey !== currentApiKey || mode !== previousMode
+      || normalizedEmail !== existing.email || normalizedPhone !== existing.phone,
     account: {
       id: accountId,
       provider: opencodeGoProviderId(accountId),
@@ -440,17 +464,20 @@ function publicPreview(plan) {
     operation: plan.account.exists ? "reconfigure" : "add",
     account: plan.account,
     mode: plan.mode,
+    previousMode: plan.previousMode,
+    credentialAction: plan.credentialAction,
+    willChange: plan.willChange,
     effects: {
-      writesMainConfig: plan.mode === "exclusive" || plan.previousMode === "exclusive",
-      writesIsolatedProfile: plan.mode === "switching",
+      writesMainConfig: plan.willChange && (plan.mode === "exclusive" || plan.previousMode === "exclusive"),
+      writesIsolatedProfile: plan.willChange && plan.mode === "switching",
       downloadsCatalog: plan.downloadsCatalog,
       updatesExternalAgent: plan.updatesExternalAgent,
     },
     confirmation: {
-      required: plan.mode === "exclusive" || plan.previousMode === "exclusive",
+      required: plan.willChange && (plan.mode === "exclusive" || plan.previousMode === "exclusive"),
       field: "confirmExclusiveConfigChange",
     },
-    activation: "restart-all",
+    activation: plan.willChange ? "restart-all" : "none",
   };
 }
 
