@@ -17,7 +17,6 @@
 - [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、账户模型目录、额度查询与固定/切换模式。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
-- [`docs/webui-review-plan.md`](docs/webui-review-plan.md)：WebUI 模块化、解耦和 UI 规范的逐链路审查计划、证据、待修问题与 A 独立复查记录。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
 - [`docs/video-analysis-mcp.md`](docs/video-analysis-mcp.md)：独立视频分析 MCP、授权目录、Strata 接口及 Codex 配置。
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
@@ -70,6 +69,8 @@
 ## 历史审查与研究记录
 
 以下记录保留原基线、结论及未观察限制；其中的旧执行顺序不是当前开发流程，重新使用证据前须确认适用范围。
+
+- [`docs/archive/webui-review-plan.md`](docs/archive/webui-review-plan.md)：WebUI W01–W16 审查、10 项整改、逐批复查及完成后相对 `main` 的 A 独立审查历史；保留提交、隔离观察和未观察边界，现行合同见 WebUI 文档。
 
 - [`docs/archive/cli-review.md`](docs/archive/cli-review.md)：CLI 两轮审查及六批修复的历史记录；25 条确认发现与三项文案澄清已处理，保留逐批独立复查、提交、实际观察及平台限制。
 - [`docs/archive/consolidation-review.md`](docs/archive/consolidation-review.md)：已完成统一治理的历史审查、决策依据和证据限制；U16 的现行 IPC 边界维护在 Runtime 文档。
