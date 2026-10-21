@@ -8,7 +8,7 @@ import { readResponsesModelCatalog } from "../runtime/model-provider-responses-c
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { previewCustomProviderModelsSave, applyCustomProviderModelsSave } from "./custom-primary-provider-management.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
-import { runManagedProviderModelSetup, runProviderModelAdditionSetup } from "./managed-provider-model-management.mjs";
+import { runManagedProviderModelSetup } from "./managed-provider-model-management.mjs";
 import { runManagedProviderModelEditSetup } from "./managed-provider-model-edit-setup.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { runModelWindowSetup } from "./model-window-setup.mjs";
@@ -196,8 +196,7 @@ async function runProviderModelOperation({ environment, prompts, output, provide
     ? "DeepSeek 暂不支持单模型移除。\n"
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
   const action = await prompts.select({ message: "模型操作", options: [
-    ...(family === "ccg" || family === "ocg" ? [{ value: "manage", label: "查看／添加／导入新模型" }] : []),
-    ...(family === "clp" ? [{ value: "refresh", label: "联网发现并添加新模型", hint: "只添加选中的新模型；已有模型保持不变" }] : []),
+    ...(["ccg", "ocg", "clp"].includes(family) ? [{ value: "manage", label: "查看／添加新模型", hint: family === "clp" ? "手动添加或从 Cline 发现；已有模型保持不变" : "手动添加或从 DS 目录导入；需自行确认上游支持" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
     ...(custom || family ? [{ value: "rename", label: "编辑模型显示名称", hint: "模型 ID 保持不变" }] : []),
     ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求路由" }] : []),
@@ -233,7 +232,6 @@ async function runProviderModelOperation({ environment, prompts, output, provide
   if (action === "local-edit") return runManagedProviderModelEditSetup(selected, { environment, prompts, output });
   if (action === "template-update") return runProviderModelTemplateSetup(catalog.provider, { environment, prompts, output });
   if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });
-  if (action === "refresh") return runProviderModelAdditionSetup(catalog.provider, { environment, prompts, output });
   if (action === "window") return runModelWindowSetup({ environment, prompts, output, provider: selected, allowBack: true });
   if (action === "default") {
     const account = catalog.providers.length === 1 ? catalog.providers[0] : await prompts.select({ message: "选择默认设置所属账户", options: catalog.providers.map(id => ({ value: id, label: id })) });

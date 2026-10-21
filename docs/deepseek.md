@@ -11,7 +11,7 @@ DS 不另造 `deepseek-v4.1-flash` 模型 ID。
 
 ```bash
 codexc provider deepseek add work           # 新增账户，交互输入模式和 Key
-codexc provider deepseek reconfigure work   # 重新配置已有账户
+codexc provider deepseek reconfigure work   # 编辑已有账户，Key 留空保留
 codexc provider deepseek list --json        # 列出账户与默认标记，不包含 Key
 codexc provider deepseek default work       # 选择默认账户
 codexc provider deepseek remove personal    # 确认后删除账户配置
@@ -22,6 +22,8 @@ codexc restart all                 # 应用配置变化
 首个账户标记为默认，后续可手动修改。不同 ID 不能生成相同的凭据环境变量名。
 仅支持当前多账户格式。删除固定模式账户时只恢复该 Provider 管理的主配置字段，保留安装前备份与历史统计；Remote TUI 正在使用该实例时须先退出。写入失败会回滚本次文件变更。
 新增及重新配置账户均在写入前用当前 Codex CLI 校验完整模型目录，包括复用已有共享目录的情况；无效目录或超过 2 MiB 的目录会拒绝接入，不能只凭默认模型可解析就报告成功。
+
+账户菜单为添加账户、编辑账户、模型管理、设置默认账户、移除本地账户配置和返回。编辑预选当前模式，Key 留空保留；Setup 与 WebUI 保存前预览目标账户、前后模式及凭据操作。无变化不写文件、备份或要求重启；当前默认模型不在目录时先到模型管理修复，不自动选择替代模型。
 
 请求与指标按精确的 `ds-<账户>` 身份归属，只恢复能映射到当前账户的 Thread。
 
@@ -103,7 +105,7 @@ DS 目录从官方安装脚本提取，不执行下载脚本。当前目录为 `
 已下线模型会切到目录默认模型，同时更新对应账户配置。
 导入 DS 模板到自定义提供商或 CLP 时，目录自带的提示词（`model_messages.instructions_template`）随模型定义携带；deprecated 的顶层 `base_instructions` 只是旧客户端镜像，不单独保留。
 
-通过账户菜单选择默认模型和思考等级，通过“模型上下文窗口”选择提供商和模型设置窗口 Token 数。
+通过“模型管理 → 账户默认模型与共享思考等级”选择默认模型和思考等级，通过同一模型管理菜单的“模型上下文窗口”设置窗口 Token 数。
 可选 128K、256K、384K、512K、1M 预设（仅显示不超过模型最大窗口的值），
 也可选择最大窗口或自定义输入 1024 至模型最大值之间的整数；K 为 1024，M 为 1048576。
 账户独立选择默认模型；思考等级、上下文和能力字段按 DS 模型共用，修改一个模型会影响所有使用该模型的 DS 账户，不影响其他提供商。相关 Profile 的默认思考等级同步保持一致。
@@ -158,9 +160,11 @@ Remote 保留 `--profile sf-ds-personal`；两个入口默认连接主实例，�
 DS 目录生成时明确设置 `support_verbosity: false`、`default_verbosity: null`、
 `supports_reasoning_summary_parameter: false` 和 `default_reasoning_summary: "none"`，
 移除锁定 Codex 已不使用的 `supports_reasoning_summaries` 声明。保留完整思考正文、工具能力与提示词。
-已有账户可通过 Setup 的“重新配置账户”或 `codexc provider deepseek reconfigure <账户>` 应用；
-复用该账户的本地目录，不重新下载，不重置模型、思考等级或上下文设置；只更新所选账户，
-写入失败按现有配置事务恢复原文件；完成后重启 App Server 生效。启动、Doctor 和源码更新器不隐式改写目录。
+已有账户的上述能力参数通过“模型管理 → 对比并更新模型模板”显式更新：选择 DS 模型及对应的 DeepSeek 模板，
+取消默认勾选的“提示词”，只勾选“能力参数”，查看差异后确认保存。来源读取仓库中的 DS 模板快照，不重新下载；所选模型的修改由所有 DS 账户共用，
+保留账户凭据、各自默认模型、模型默认思考等级和当前窗口；来源不支持当前设置时拒绝更新，不自动替换。
+模板保存沿用目录与来源备份及事务恢复，完成后按提示重启 App Server。账户编辑只调整 Key 和运行模式，复用已有目录；
+启动、Doctor 和源码更新器也不隐式改写目录。模板更新仅修改所选范围，不承诺清除所有历史字段。
 
 当前版本拒绝旧嵌套或平级账户目录及未完成的历史目录迁移，不提供迁移命令。
 保留原文件、备份和标记，处理边界见[当前目录布局与旧版本恢复](provider-integration-guide.md#当前目录布局与旧版本恢复)；升级不会迁移真实用户目录。

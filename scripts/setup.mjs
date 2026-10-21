@@ -293,11 +293,11 @@ async function runThirdPartyModelSetup({
         {
           value: "opencode-go",
           label: "OpenCode Go 官方",
-          hint: "账户、默认账户与模型设置",
+          hint: "账户、运行模式与共享模型目录",
         },
         {
           value: "ccg",
-          label: "CommandCode Go 官方",
+          label: "CCG（CommandCode）",
           hint: "账户、运行模式与共享模型目录",
         },
         {

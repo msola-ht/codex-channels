@@ -53,6 +53,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   "removal-not-supported": "modelCatalog.unsupported",
   "web-search-not-supported": "modelCatalog.unsupported",
   "model-not-found": "settingsUi.targetMissing",
+  "account-default-model-missing": "settingsUi.accountDefaultModelMissing",
   "default-model-protected": "modelCatalog.defaultProtected",
   "last-model-protected": "modelCatalog.lastProtected",
   "gateway-default-protected": "modelCatalog.defaultProtected",

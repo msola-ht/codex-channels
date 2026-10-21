@@ -190,7 +190,7 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
 修复 Windows Codex Home 顶层私有 TOML 的 ACL；主 config.toml 完整性有效时保留上游读取权限。
 管理员所有的文件仅在当前用户已有完全控制且无拒绝规则时恢复为当前用户所有；不接管其他用户文件。
 不修改配置内容或 Codex 沙箱目录权限，其他平台明确提示无需处理。`,
-  provider: `${primaryProviderUsage}\n\n受管账户：\n  codexc provider deepseek <add|list|reconfigure|remove|default> [id]\n  codexc provider opencode-go <add|list|remove|default|release> [id]\n  codexc provider ccg remove <id>\n\n各家只开放已有能力；CCG 新增与设置使用 codexc setup。release 释放账户 App Server 实例，后续请求可重新拉起，不禁用账户。`,
+  provider: `${primaryProviderUsage}\n\n受管账户：\n  codexc provider deepseek <add|list|reconfigure|remove|default> [id]\n  codexc provider opencode-go <add|list|reconfigure|remove|default|release> [id]\n  codexc provider ccg remove <id>\n\n各家只开放已有能力；CCG 新增与设置使用 codexc setup。release 释放账户 App Server 实例，后续请求可重新拉起，不禁用账户。`,
   update: `用法：codexc update
 
 Git 源码安装检查并构建官方 main 最新提交，校验当前配置、数据库与配套 Codex CLI 合同后，
@@ -452,7 +452,7 @@ async function dispatchCommand(command, args) {
       const [family, ...values] = args;
       if (["deepseek", "opencode-go", "ccg"].includes(family)) {
         const actions = family === "deepseek" ? ["add", "list", "reconfigure", "remove", "default"]
-          : family === "opencode-go" ? ["add", "list", "remove", "default", "release"] : ["remove"];
+          : family === "opencode-go" ? ["add", "list", "reconfigure", "remove", "default", "release"] : ["remove"];
         const usage = `用法：codexc provider ${family} <${actions.join("|")}> [id]${family === "ccg" ? "" : "（list 支持 --json）"}`;
         if (values.length === 0 || isCommandHelp(values, [[], ...actions.map(action => [action])], usage)) {
           console.log(values.length === 2

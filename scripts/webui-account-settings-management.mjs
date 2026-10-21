@@ -236,6 +236,8 @@ export function redactAccountSettingsResult(result) {
     ...(result.account !== undefined ? { account: redactAccount(result.account) } : {}),
     ...(result.provider !== undefined ? { provider: redactProvider(result.provider) } : {}),
     ...(result.mode !== undefined ? { mode: result.mode } : {}),
+    ...(["switching", "exclusive"].includes(result.previousMode) ? { previousMode: result.previousMode } : {}),
+    ...(["preserve", "replace"].includes(result.credentialAction) ? { credentialAction: result.credentialAction } : {}),
     ...(result.model !== undefined ? { model: result.model } : {}),
     ...(result.status !== undefined ? { status: result.status } : {}),
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),

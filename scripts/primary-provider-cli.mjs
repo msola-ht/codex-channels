@@ -306,13 +306,13 @@ export async function runCustomPrimaryProviderMenu({
       showInstructions: false,
       initialValue: lastAction,
       options: [
-        { value: "list", label: "列表", hint: "查看两类目录的主实例、切换 Provider、固定候选与备份" },
-        { value: "add", label: "新增", hint: catalogKind === undefined ? "先选择模型目录，再新增固定或切换 Provider" : "新增固定或切换 Provider" },
-        { value: "edit", label: "编辑", hint: "编辑两类目录的已有 Provider；Provider ID 保持不变" },
-        { value: "switch", label: "设为固定主 Provider", hint: "切换模式将转换为固定模式" },
-        { value: "official", label: "恢复官方主 Provider", hint: "固定候选移入备份；切换 Provider 保持启用" },
+        { value: "list", label: "查看提供商", hint: "查看当前主实例、切换模式、固定候选与备份" },
+        { value: "add", label: "添加提供商", hint: catalogKind === undefined ? "先选择模型目录，再选择运行模式" : "选择固定模式或切换模式" },
+        { value: "edit", label: "编辑提供商", hint: "连接、凭据与运行模式；自定义目录还可管理模型" },
+        { value: "switch", label: "设为固定主提供商", hint: "切换模式将转换为固定模式" },
+        { value: "official", label: "恢复 OpenAI 为主提供商", hint: "固定候选移入备份；切换提供商保持启用" },
         ...(catalogKind !== "official" ? [{ value: "recover", label: "恢复未完成的模型目录保存", hint: "自定义目录；先停止服务并核对当前配置" }] : []),
-        { value: "remove", label: "删除", hint: "删除两类目录的 Provider；删除当前固定主 Provider 时恢复官方" },
+        { value: "remove", label: "移除本地提供商配置", hint: "移除当前固定主提供商时恢复 OpenAI" },
         ...(allowBack
           ? [{ value: "back", label: "返回", hint: "返回第三方提供商" }]
           : []),
@@ -334,11 +334,11 @@ export async function runCustomPrimaryProviderMenu({
       let lastCatalogKind;
       while (true) {
         const selectedCatalogKind = catalogKind ?? await prompts.select({
-          message: "新增提供商使用哪个模型目录？",
+          message: "添加提供商使用哪个模型目录？",
           showInstructions: false,
           initialValue: lastCatalogKind,
           options: [
-            { value: "official", label: "官方模型目录", hint: "上游模型 ID 必须在 Codex 官方目录中；Responses 接口" },
+            { value: "official", label: "Codex 官方模型目录", hint: "上游模型 ID 必须在 Codex 官方目录中；Responses 接口" },
             { value: "custom", label: "自定义模型目录", hint: "自行声明模型与能力；Responses 或 Chat Completions 接口" },
             { value: "back", label: "返回", hint: "返回自定义提供商" },
           ],

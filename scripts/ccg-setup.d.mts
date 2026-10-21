@@ -7,24 +7,28 @@ export function ccgSetupPaths(environment: NodeJS.ProcessEnv | undefined, accoun
   config: string; profile: string; marker: string;
   catalog: string; manifest: string; backup: string; registry: string;
 };
-export function applyCcgConfiguration(input: {
+export interface CcgConfigurationInput {
   accountId: string;
-  apiKey: string;
-  catalog: CcgCatalog;
+  apiKey?: string;
+  catalog?: CcgCatalog;
   templateBindings?: Record<string, import("../runtime/model-template-bindings.mjs").ModelTemplateBinding>;
-  model: string;
+  model?: string;
   mode?: "switching" | "exclusive";
   reconfigure?: boolean;
   confirmExclusiveConfigChange?: boolean;
   expectedRevision?: string;
-}, options?: {
+}
+export function previewCcgConfiguration(input: CcgConfigurationInput, options?: { environment?: NodeJS.ProcessEnv }): {
+  revision: string; account: { id: string; provider: `ccg-${string}`; default: boolean }; mode: "switching" | "exclusive"; previousMode?: "switching" | "exclusive"; credentialAction: "preserve" | "replace"; willChange: boolean; model?: string; effects: { writesMainConfig: boolean; writesIsolatedProfile: boolean }; activation: "none" | "restart-all";
+};
+export function applyCcgConfiguration(input: CcgConfigurationInput, options?: {
   environment?: NodeJS.ProcessEnv;
 }): Promise<{
-  action: "configured";
+  action: "configured" | "unchanged";
   account: { id: string; provider: `ccg-${string}`; default: boolean };
   mode: "switching" | "exclusive";
   model: string;
-  activation: "restart-all";
+  activation: "none" | "restart-all";
 }>;
 export function setCcgDefaultAccount(accountId: string, options?: {
   environment?: NodeJS.ProcessEnv;
@@ -36,7 +40,7 @@ export function runCcgSetup(options?: {
   prompts?: unknown;
   fetchImpl?: typeof fetch;
   downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{ catalog: CcgCatalog }>;
-  action?: "add" | "reconfigure" | "settings" | "catalog" | "default" | "remove";
+  action?: "add" | "reconfigure" | "models" | "default" | "remove";
   accountId?: string;
 }): Promise<unknown>;
 export function runCcgAccountCli(args: string[], options?: Parameters<typeof runCcgSetup>[0]): Promise<unknown>;

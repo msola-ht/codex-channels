@@ -14,7 +14,8 @@ ID 已由 [OCG 公开模型目录](https://opencode.ai/zen/go/v1/models) 确认�
 运行 `codexc setup`，依次选择“模型与提供商 → 第三方提供商 → OpenCode Go 官方”，或直接使用账户命令：
 
 ```bash
-codexc provider opencode-go add <id>      # 新增账户（交互输入邮箱或手机号、Key）
+codexc provider opencode-go add <id>      # 新增账户（选择运行模式、输入 Key）
+codexc provider opencode-go reconfigure <id> # 编辑已有账户（Key 可留空保留）
 codexc provider opencode-go list          # 列出账户与默认标记
 codexc provider opencode-go list --json   # 以 JSON 输出账户状态（不含凭据）
 codexc provider opencode-go remove <id>   # 备份后删除账户
@@ -25,7 +26,7 @@ codexc provider opencode-go release <id>     # 立即释放该账户隔离 App S
 首次和后续添加都必须输入账户 ID。Provider 使用 `ocg-<accountId>` 命名，切换账户（包括首个和
 默认账户）拥有独立的私有 Profile（Unix `0600`，Windows 私有 ACL）
 `~/.codex/sf-ocg-<accountId>.config.toml`。默认账户只由注册表的 `default: true` 标记决定，不使用
-固定的 `main` ID；切换 Key 只进入该 Profile 与对应 App Server 子进程环境，固定 Key 使用[独立私有版本与主配置 `env_key` 引用](provider-integration-guide.md#4-安全边界)，不进入注册表、共享主配置或日志。添加账户时必须输入邮箱或手机号码（二选一）；联系方式只用于本机展示，不参与 CLI Provider 路由。共用模型目录 `models.json` 和来源文件 `models.manifest.json` 位于 `~/.codex-connect/providers/opencode-go/`，各账户管理标记位于
+固定的 `main` ID；切换 Key 只进入该 Profile 与对应 App Server 子进程环境，固定 Key 使用[独立私有版本与主配置 `env_key` 引用](provider-integration-guide.md#4-安全边界)，不进入注册表、共享主配置或日志。Setup、CLI 和 WebUI 新增账户均无需邮箱或手机号，按账户 ID 区分；已保存的联系方式继续保留并用于展示，不参与 CLI Provider 路由。共用模型目录 `models.json` 和来源文件 `models.manifest.json` 位于 `~/.codex-connect/providers/opencode-go/`，各账户管理标记位于
 `~/.codex-connect/providers/opencode-go/ocg-<accountId>/`。首个账户也可通过 Setup 选择保留 OpenAI 默认的
 切换模式，或让原生 Codex 和 Gateway 默认使用 OpenCode Go 的固定模式；固定模式会先备份再修改
 `~/.codex/config.toml`。同一时刻只允许一个固定主 Provider；一个 OCG 账户处于固定模式时，其他
@@ -33,6 +34,13 @@ OCG 账户仍可保留切换模式。切换账户每次进入固定模式都会�
 按 UUID 归档；固定模式内重新配置继续使用本次进入时的基线。账户基线缺失时明确报错，不读取共享旧备份代替。
 如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
 会明确拒绝，不会覆盖用户配置。
+
+Setup 统一提供“添加账户”“编辑账户”“模型管理”“设置默认账户”“移除本地账户配置”和“返回”。
+添加和编辑均在账户流程内选择运行模式；编辑先选择准确账户，不要求将其设为默认，并预选当前模式。
+编辑时 API Key 留空沿用当前凭据；凭据不可安全读取时明确报错，须填写新 Key。
+保存前显示目标账户、模式变化、Key 保留或替换及主配置影响，确认后保存；取消不写入。
+设置没有变化时仍校验完整模型目录，不写入、不备份，也无需重启。账户列表和实例释放保留对应命令，不在日常配置菜单单列。
+已有账户的默认模型不在当前目录时拒绝编辑，先从模型管理修复该账户的默认模型；不自动改成目录中的其他模型，也不报告无变化成功。
 
 仅支持当前多账户格式，删除账户使用 `codexc provider opencode-go remove <accountId>`。
 命令先预览并要求确认，再停止对应实例并清理配置；保留其他账户、备份和历史统计。
@@ -45,12 +53,12 @@ codexc restart all
 ```
 
 初次配置默认使用官方目录的默认模型 `deepseek-flash`。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方提供商 → OpenCode Go 官方 →
-账户默认模型与共享思考等级”，或从“第三方提供商 → 模型管理”选择 OpenCode Go 目录与同名操作。
+模型管理 → OpenCode Go 目录 → 账户默认模型与共享思考等级”，或从“第三方提供商 → 模型管理”选择 OpenCode Go 目录与同名操作。
 先选择准确账户，再设置账户默认模型与共享模型的默认思考等级；所有选择该模型的账户 Profile 同步该等级，原生子代理保留独立设置，目录刷新保留共用模型的有效等级。上下文窗口走“第三方提供商 → 模型管理 → OpenCode Go 目录 → 模型上下文窗口”，按模型通过 Token 预设或自定义输入设置，同族账户共享。
 账户独立选择默认模型；思考等级、上下文和启用名单保存在共用的 `providers/opencode-go/models.json`，影响所有 OCG 账户，不影响其他提供商。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。新增 OCG 模型目录使用其官方模板窗口，显式模板更新保留共用目录中已有模型的窗口 Token 数。
 若新模板的最大窗口小于现有 Token 数，则拒绝刷新并保留原目录，需先调整窗口。重复运行 Setup 和更新 Key 会保留现有目录，不再隐式下载覆盖；更新器不刷新模型目录。
-配置账户后，通过“发现／添加共享模型”手填该上游实际提供的 Responses 模型，或显式发现／导入 DS 新模型。模板仍从 DS 官方脚本下载并保留 OCG ID 映射，不取其他账户目录。手填须确认准确 ID 和能力，新模型复用通用编程提示词；共用目录最多启用 64 个模型，所有账户的默认模型均受保护。发现只添加新项，保留已有条目；移除及更新已有模型分别使用统一模型管理的本地移除与模板对比入口。保存前备份目录及来源文件为同目录 `.backup` 并进行并发检查和事务写入，来源标记为用户配置；失败保留原目录。显式创建或更新时补全缺失的基础提示词并固化，读取不注入新模板。手工回退须先停止使用目录的客户端和相关服务，成对恢复最近一次备份后重启。此入口不意味着上游支持任意第三方模型，也不会改成 Chat 协议。
+配置账户后，通过“模型管理 → OpenCode Go 目录 → 查看／添加新模型”手填该上游实际提供的 Responses 模型，或显式发现／导入 DS 新模型。模板仍从 DS 官方脚本下载并保留 OCG ID 映射，不取其他账户目录。手填须确认准确 ID 和能力，新模型复用通用编程提示词；共用目录最多启用 64 个模型，所有账户的默认模型均受保护。发现只添加新项，保留已有条目；移除及更新已有模型分别使用统一模型管理的本地移除与模板对比入口。保存前备份目录及来源文件为同目录 `.backup` 并进行并发检查和事务写入，来源标记为用户配置；失败保留原目录。显式创建或更新时补全缺失的基础提示词并固化，读取不注入新模板。手工回退须先停止使用目录的客户端和相关服务，成对恢复最近一次备份后重启。此入口不意味着上游支持任意第三方模型，也不会改成 Chat 协议。
 
 当前版本只接受提供商共用模型目录和家族下完整账户 ID 的身份材料路径；旧账户布局及未完成的历史目录迁移会被拒绝。保留文件、备份及标记，按[当前目录布局与旧版本恢复](provider-integration-guide.md#当前目录布局与旧版本恢复)使用对应旧版本处理；升级不迁移真实用户目录。
 

@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { clinePassProviderDefinition as definition, clinePassAccountDefinition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
+import { clinePassProviderDefinition as definition, clinePassAccountDefinition } from "../runtime/model-provider-definitions.mjs";
 import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
 import { loadResponsesModelTemplates } from "./responses-model-templates.mjs";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
@@ -17,11 +17,11 @@ import { clineRelayCatalogSchema, clinePassReasoningEfforts, clineRelayInputModa
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
 import { managedProviderDirectory, loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
-import { applyProviderFileUpdates, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
+import { applyProviderFileUpdates, assertProviderFileSnapshots, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
-import { assertManagedAccountMode, snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision } from "./managed-provider-account-plan.mjs";
+import { assertManagedAccountMode, snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision, managedAccountConfigurationEdit } from "./managed-provider-account-plan.mjs";
 
 export function clinePassSetupPaths(environment, accountId) {
   const definition = clinePassAccountDefinition(accountId);
@@ -105,27 +105,31 @@ async function selectClinePassModels(models, providers, selectModels) {
 }
 
 export function previewClinePassConfiguration(input, { environment = process.env } = {}) {
+  return clinePassConfigurationPlan(input, environment).preview;
+}
+
+function clinePassConfigurationPlan(input, environment) {
   if (existsSync(join(codexHomePath(environment), "sf-cline-pass.config.toml"))) throw new AccountManagementError("provider-state-unavailable", "accountId", "CLP 单账户配置不受支持，请先移除旧配置再重新设置账户");
   const definition = clinePassAccountDefinition(input.accountId);
-  const mode = input.mode ?? "switching";
-  if (!["switching", "exclusive"].includes(mode)) throw new AccountManagementError("invalid-mode", "mode", "CLP 模式无效");
-  if (!isManagedProviderApiKeyValid(definition, input.apiKey)) throw new AccountManagementError("invalid-api-key", "apiKey", "CLP API Key 无效");
   const accounts = loadClinePassAccounts(environment);
   const account = accounts.find(item => item.id === input.accountId);
   if (Boolean(account) !== (input.reconfigure === true)) throw new AccountManagementError(account ? "account-exists" : "account-not-found", "accountId", account ? "账户已存在，请选择重新配置" : "CLP 账户不存在");
   validateClinePassAccounts(account ? accounts : [...accounts, { id: input.accountId, default: accounts.length === 0 }]);
   const previous = loadManagedModelProviderSettings(environment).find(item => item.provider === definition.id);
   if (account && !previous) throw new AccountManagementError("provider-state-unavailable", "accountId", "CLP 账户配置不完整，请先恢复缺失文件");
+  const { apiKey, ...edit } = managedAccountConfigurationEdit(input, previous, definition, environment);
+  const { mode, willChange } = edit;
   assertManagedAccountMode(mode, definition, environment);
-  return { revision: managedAccountRevision(snapshotManagedAccountFiles(Object.values(clinePassSetupPaths(environment, input.accountId)), definition, environment)), operation: account ? "reconfigure" : "add", account: { id: input.accountId, provider: definition.id, default: account?.default ?? accounts.length === 0 }, mode,
-    effects: { writesMainConfig: mode === "exclusive" || previous?.mode === "exclusive", writesIsolatedProfile: mode === "switching" }, activation: "restart-all" };
+  return { apiKey, preview: { revision: managedAccountRevision(snapshotManagedAccountFiles(Object.values(clinePassSetupPaths(environment, input.accountId)), definition, environment)), operation: account ? "reconfigure" : "add", account: { id: input.accountId, provider: definition.id, default: account?.default ?? accounts.length === 0 }, ...edit,
+    effects: { writesMainConfig: willChange && (mode === "exclusive" || previous?.mode === "exclusive"), writesIsolatedProfile: willChange && mode === "switching" }, activation: willChange ? "restart-all" : "none" } };
 }
 
 export async function applyClinePassConfiguration(input, { environment = process.env, loadTemplates = loadResponsesModelTemplates, downloadClineCatalog = downloadClineRelayCatalog, selectModels } = {}) {
-  const { accountId, apiKey, mode = "switching", confirmExclusiveConfigChange = false } = input;
+  const { accountId, confirmExclusiveConfigChange = false } = input;
   const definition = clinePassAccountDefinition(accountId);
   return withModelProviderManagementTransaction(environment, async () => {
-    const preview = previewClinePassConfiguration(input, { environment });
+    const { preview, apiKey } = clinePassConfigurationPlan(input, environment);
+    const { mode } = preview;
     assertManagedAccountRevision(input.expectedRevision, preview.revision);
     if (preview.effects.writesMainConfig && confirmExclusiveConfigChange !== true) throw new AccountManagementError("confirmation-required", "confirmExclusiveConfigChange", "修改 Codex 主配置前必须明确确认");
     const accounts = loadClinePassAccounts(environment);
@@ -152,6 +156,10 @@ export async function applyClinePassConfiguration(input, { environment = process
       catalog = createClinePassCatalog(templates, downloadedCline, selected);
     }
     await validateModelCatalogWithCodex(catalog, environment);
+    if (!preview.willChange) {
+      await assertProviderFileSnapshots(snapshots);
+      return { ...preview, action: "unchanged", excludedModels: [] };
+    }
     const initial = previous && !(previous.mode === "switching" && mode === "exclusive") ? backup.config : current;
     const { config, profile, credential } = createManagedProviderConfiguration(current, initial, definition, {
       mode, previousMode: previous?.mode, apiKey, catalogPath: paths.catalog, catalog,
