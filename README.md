@@ -49,7 +49,7 @@ codexc config                # Codex 新会话偏好与 Gateway 日常设置
 codexc cleanup               # 统一交互归档会话、清理转储和维护指标
 codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网关时区
 codexc work                  # 新建或注册已有工作区
-codexc                       # 主菜单 → 后台服务
+codexc                       # 主菜单 → 状态与服务
 codexc run                   # 前台运行核心服务
 codexc start                 # 启动全部后台服务，含已安装且未关闭的 WebUI 与已启用 Relay
 codexc status                # 查看全部后台服务状态

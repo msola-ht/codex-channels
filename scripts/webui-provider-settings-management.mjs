@@ -301,6 +301,8 @@ export function redactProviderSettingsResult(result) {
     ...(result.displayName !== undefined ? { displayName: result.displayName } : {}),
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),
     ...(result.effects !== undefined ? { effects: result.effects } : {}),
+    ...(result.configuration !== undefined ? { configuration: result.configuration } : {}),
+    ...(result.cleanup !== undefined ? { cleanup: result.cleanup } : {}),
     ...(result.before !== undefined ? { before: result.before } : {}),
     ...(result.modelDefaults !== undefined ? { modelDefaults: {
       catalog: { before: result.modelDefaults.catalog.before, after: result.modelDefaults.catalog.after },

@@ -5,6 +5,7 @@ import { readFileSync, unlinkSync } from "node:fs";
 import {
   GatewayConfigConflictError,
   GatewayConfigValidationError,
+  GatewayConfigWriteCommittedError,
   parseGatewayConfig,
   validateCodexConfigDocument,
   validateDebugConfigDocument,
@@ -179,6 +180,7 @@ export function updateGatewaySetting(
   try {
     writeConfig(configPath, document);
   } catch (error) {
+    if (error instanceof GatewayConfigWriteCommittedError) throw error;
     if (backupPath !== null) {
       try {
         unlinkSync(backupPath);

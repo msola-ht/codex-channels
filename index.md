@@ -70,6 +70,7 @@
 
 以下记录保留原基线、结论及未观察限制；其中的旧执行顺序不是当前开发流程，重新使用证据前须确认适用范围。
 
+- [`docs/archive/cli-review.md`](docs/archive/cli-review.md)：CLI 两轮审查及六批修复的历史记录；25 条确认发现与三项文案澄清已处理，保留逐批独立复查、提交、实际观察及平台限制。
 - [`docs/archive/consolidation-review.md`](docs/archive/consolidation-review.md)：已完成统一治理的历史审查、决策依据和证据限制；U16 的现行 IPC 边界维护在 Runtime 文档。
 - [`docs/archive/chain-verification-review.md`](docs/archive/chain-verification-review.md)：已完成 L01–L19 阶段的历史审查、修复与证据记录；保留未观察边界，不作为新一轮计划。
 - [`docs/archive/codex-daemon-review.md`](docs/archive/codex-daemon-review.md)：原生 daemon 的历史研究与隔离观察，保留未采用原因和重新评估条件。

@@ -13,7 +13,16 @@ import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 
-export async function runDeepseekSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout, action: requestedAction, accountId: requestedId } = {}) {
+export async function runDeepseekSetup(options = {}) {
+  while (true) {
+    const result = await runDeepseekSetupOperation(options);
+    if (result.action === "menu-back") return { action: "back" };
+    if (result.action === "back" && options.action === undefined) continue;
+    return result;
+  }
+}
+
+async function runDeepseekSetupOperation({ environment = process.env, prompts = clackPrompts, output = process.stdout, action: requestedAction, accountId: requestedId } = {}) {
   const accounts = loadDeepseekAccounts(environment);
   const action = requestedAction ?? await prompts.select({
     message: "DeepSeek 账户管理",
@@ -21,14 +30,14 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
       { value: "add", label: "新增账户" },
       ...(accounts.length === 0 ? [] : [
         { value: "reconfigure", label: "重新配置账户" },
-        { value: "settings", label: "修改默认模型与思考等级" },
+        { value: "settings", label: "账户默认模型与共享思考等级" },
         { value: "default", label: "设置默认账户" },
         { value: "remove", label: "删除账户" },
       ]),
       { value: "back", label: "返回" },
     ],
   });
-  if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (prompts.isCancel(action) || action === "back") return { action: "menu-back" };
   const accountId = requestedId ?? (action === "add"
     ? await promptManagedAccountId(prompts, accounts)
     : await prompts.select({ message: "选择 DS 账户", options: accounts.map((account) => ({ value: account.id, label: `${account.id}${account.default ? "（默认）" : ""}` })) }));
@@ -44,7 +53,7 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
   } else if (action === "settings") {
     return runModelProviderDefaultSetup({ provider: deepseekProviderId(accountId), allowBack: true, environment, prompts, output });
   } else if (["add", "reconfigure"].includes(action)) {
-    const mode = await prompts.select({ message: "运行模式", options: [{ value: "switching", label: "切换模式" }, { value: "exclusive", label: "固定主 Provider" }] });
+    const mode = await prompts.select({ message: "运行模式", options: [{ value: "switching", label: "切换模式", hint: "保留 OpenAI 主实例，使用独立实例" }, { value: "exclusive", label: "固定模式", hint: "修改主实例配置，使用此账户" }] });
     if (prompts.isCancel(mode)) return { action: "back" };
     const preview = previewDeepseekAccountConfiguration({ accountId, mode, reconfigure: action === "reconfigure" }, { environment });
     let confirmExclusiveConfigChange = false;

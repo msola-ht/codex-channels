@@ -15,14 +15,19 @@ export interface TrafficCleanupDependencies {
     directory: string,
   ) => Promise<void>;
   environment?: NodeJS.ProcessEnv;
+  expectedFingerprint?: string;
   output?: Pick<Console, "log">;
   signal?: AbortSignal;
+}
+
+export interface TrafficCleanupPlan extends TrafficCleanupPreview {
+  fingerprint: string | null;
 }
 
 export function runTrafficCleanup(
   args: readonly string[],
   dependencies?: TrafficCleanupDependencies,
-): Promise<TrafficCleanupPreview>;
+): Promise<TrafficCleanupPlan>;
 
 export function trafficCleanupPreview(directory: string): TrafficCleanupPreview;
 

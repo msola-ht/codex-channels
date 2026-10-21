@@ -94,7 +94,12 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
         setPending(null)
         handleError(error, pendingSetting.setting, refetch, () => setPending(null), setActionError)
         if (isUnconfirmedManagementWrite(error)) {
-          requireReadback(snapshot, true)
+          const committed = error instanceof ApiClientError && error.code === "gateway_config_saved_cleanup_failed"
+          if (committed) {
+            setLastAppliedSetting(pendingSetting.setting)
+            setActionResult(null)
+          }
+          requireReadback(snapshot, !committed)
           refetch()
         }
       }

@@ -6,7 +6,7 @@ DS 不另造 `deepseek-v4.1-flash` 模型 ID。
 
 ## 配置与移除
 
-在 `codexc setup → 模型与提供商 → 第三方 Provider → DeepSeek 官方` 管理账户，
+在 `codexc setup → 模型与提供商 → 第三方提供商 → DeepSeek 官方` 管理账户，
 也可在 WebUI 账户设置中操作，或使用以下命令：
 
 ```bash

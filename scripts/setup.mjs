@@ -18,8 +18,6 @@ export async function runSetup({
   weixinSetup = async (options) => (await import("./weixin-setup.mjs")).runWeixinSetup(options),
   skillSetup = async (options) => (await import("./skill-setup.mjs")).runSkillSetup(options),
   openCodeGoSetup = async (options) => (await import("./opencode-go-setup.mjs")).runOpenCodeGoSetup(options),
-  modelProviderDefaultSetup = async (options) => (await import("./model-provider-default-setup.mjs")).runModelProviderDefaultSetup(options),
-  modelWindowSetup = async (options) => (await import("./model-window-setup.mjs")).runModelWindowSetup(options),
   customPrimarySetup = async (options) => (await import("./primary-provider-cli.mjs")).runCustomPrimaryProviderMenu(options),
   officialLoginSetup = async (options) => (await import("./official-login-setup.mjs")).runOfficialLoginSetup(options),
   setupSummary = async (options) => (await import("./setup-summary.mjs")).writeSetupConfigurationSummary(options),
@@ -34,7 +32,7 @@ export async function runSetup({
     section: "summary",
     modelCategory: "official",
     officialModule: "official_login",
-    thirdPartyModule: "deepseek",
+    thirdPartyModule: "models",
     channel: "telegram",
   };
   while (true) {
@@ -121,8 +119,6 @@ export async function runSetup({
             ccgSetup,
             clinePassSetup,
             openCodeGoSetup,
-            modelProviderDefaultSetup,
-            modelWindowSetup,
             customPrimarySetup,
             officialLoginSetup,
           });
@@ -166,8 +162,6 @@ async function runModelSetup({
   ccgSetup,
   clinePassSetup,
   openCodeGoSetup,
-  modelProviderDefaultSetup,
-  modelWindowSetup,
   customPrimarySetup,
   officialLoginSetup,
 }) {
@@ -184,8 +178,8 @@ async function runModelSetup({
         },
         {
           value: "third_party",
-          label: "第三方 Provider",
-          hint: "账户与自定义接入、受管模型设置",
+          label: "第三方提供商",
+          hint: "账户接入、模型管理与共享目录设置",
         },
         { value: "web-search", label: "检测原生网页搜索", hint: "官方或第三方；选择单一账户和模型；可能计费" },
         { value: "web-search-settings", label: "提供商联网搜索", hint: "按账户修改搜索模式；不发送探测请求" },
@@ -227,8 +221,6 @@ async function runModelSetup({
         ccgSetup,
         clinePassSetup,
         openCodeGoSetup,
-        modelProviderDefaultSetup,
-        modelWindowSetup,
         customPrimarySetup,
       });
       if (isBackResult(result)) continue;
@@ -284,13 +276,11 @@ async function runThirdPartyModelSetup({
   ccgSetup,
   clinePassSetup,
   openCodeGoSetup,
-  modelProviderDefaultSetup,
-  modelWindowSetup,
   customPrimarySetup,
 }) {
   while (true) {
     const module = await prompts.select({
-      message: "第三方 Provider",
+      message: "第三方提供商",
       showInstructions: false,
       initialValue: selection.thirdPartyModule,
       options: [
@@ -308,38 +298,23 @@ async function runThirdPartyModelSetup({
         {
           value: "ccg",
           label: "CommandCode Go 官方",
-          hint: "DS 模型目录与固定/切换模式",
+          hint: "账户、运行模式与共享模型目录",
         },
         {
           value: "clp",
           label: "Cline Pass 官方",
-          hint: "Chat 模型与固定/切换模式",
+          hint: "账户、运行模式与共享模型目录",
         },
         {
           value: "custom_primary",
-          label: "Codex 兼容 Provider 接入",
-          hint: "管理自定义接入，使用 Codex 官方模型目录",
-        },
-        {
-          value: "custom_responses",
-          label: "自定义模型 Provider 接入",
-          hint: "管理自定义接入，手填独立模型目录与能力",
-        },
-        {
-          value: "provider_default",
-          label: "受管 Provider 默认模型与思考等级",
-          hint: "账户默认模型独立设置；同族模型思考等级共用",
-        },
-        {
-          value: "model_window",
-          label: "受管模型目录上下文窗口",
-          hint: "选择具体 Provider 与模型，独立设置上下文窗口",
+          label: "自定义提供商",
+          hint: "管理全部自定义接入；新增时选择官方或自定义模型目录",
         },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],
     });
     if (prompts.isCancel(module) || module === "back") return { action: "back" };
-    if (!["models", "deepseek", "opencode-go", "clp", "ccg", "custom_responses", "custom_primary", "provider_default", "model_window"].includes(module)) {
+    if (!["models", "deepseek", "opencode-go", "clp", "ccg", "custom_primary"].includes(module)) {
       throw new Error(`未知第三方设置：${String(module)}`);
     }
     selection.thirdPartyModule = module;
@@ -354,14 +329,8 @@ async function runThirdPartyModelSetup({
       result = await clinePassSetup({ input, output, prompts, allowBack: true });
     } else if (module === "ccg") {
       result = await ccgSetup({ input, output, prompts, allowBack: true });
-    } else if (module === "custom_responses") {
-      result = await customPrimarySetup({ input, output, prompts, allowBack: true, catalogKind: "custom" });
     } else if (module === "custom_primary") {
       result = await customPrimarySetup({ input, output, prompts, allowBack: true });
-    } else if (module === "provider_default") {
-      result = await modelProviderDefaultSetup({ input, output, prompts, allowBack: true });
-    } else if (module === "model_window") {
-      result = await modelWindowSetup({ input, output, prompts, allowBack: true });
     }
     if (isBackResult(result)) continue;
     return result;

@@ -38,7 +38,7 @@
   就绪、单次子进程环境和令牌脱敏由 `scripts/desktop-app-command.mjs` 负责。macOS 通过受管 stdio
   Proxy 附加带生命周期保护的可信工具 Host，不再依赖桥端口或令牌，并由 `status` 单独报告；
   Windows 仍只承诺未实机验收的会话共享预览。
-- `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；菜单区分新建目录、注册当前目录和注册已有目录；
+- `work`：把参数交给 `scripts/workspace-command.mjs`，列出、设置默认、注册或移除 Workspace，或进入交互工作区菜单；菜单区分新建目录、注册当前目录和注册已有目录；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
 - `cleanup sessions <最大轮数>`：直接预览或确认归档旧会话；无参数 `cleanup` 提供交互入口。转储与指标维护分别使用 `cleanup traffic`、`cleanup metrics [prune|reset]`，原领域命令只负责查询。
 - `cleanup`：统一交互选择会话归档、转储删除、旧指标清理、Provider 指标清理与指标库重置；复用各自执行入口与服务状态检查，完成或取消单项后返回菜单，非交互终端只显示帮助。
@@ -51,11 +51,11 @@
 - `uninstall`：自动识别当前受管源码、本地构建包或 npm 全局安装；先卸载后台服务，再卸载对应 npm 全局命令，仅在精确来源与受管标记匹配时删除仓库，
   保留普通工作树、缺少来源记录的旧安装源码，以及用户配置、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置。
 - `reset-credit`：通过 Gateway 查询 OpenAI 重置券，交互选券、预览后默认拒绝消费；明确确认才提交，非交互终端仅支持查询。
-- `metrics`：交互菜单提供运行、会话明细、会话列表、聚合、请求明细、历史额度窗口和数据库状态；清理与重置交互集中在 `cleanup`，直接维护子命令保留；`status --json` 返回稳定的路径、Schema
+- `metrics`：交互菜单提供运行、会话明细、会话列表、聚合、请求明细、历史额度窗口和数据库状态；清理与重置统一使用 `cleanup metrics`（含 `prune`、`reset`），不接受 `metrics` 下的维护子命令；`status --json` 返回稳定的路径、Schema
   兼容性与记录数；数据库只接受当前 Schema，`update` 不执行数据库迁移。
 - `traffic`：把 `[debug].model_traffic_dump` 生成的 V2 session 转储渲染成人可读文本，支持列出
   exchange 摘要、展开指定 exchange 的完整请求与响应、关键字与长度过滤，以及持续跟随新写入的
-  记录；参数在读取用户配置前完成校验，查询只读转储目录，不访问网络或凭据。`traffic cleanup` 默认预览，确认删除要求全部 App Server 与 Relay 已停止。
+  记录；参数在读取用户配置前完成校验，查询只读转储目录，不访问网络或凭据。`cleanup traffic` 默认预览，确认删除要求全部 App Server 与 Relay 已停止。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
   发送回对应会话；见 `docs/channel-image.md`。
 - `relay`：管理独立模型 API 转发的监听、调用方、Key 和运行状态；边界与操作见[模型 API 转发](../docs/user-guide.md#可选模型-api-转发)。

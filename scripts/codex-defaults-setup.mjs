@@ -100,10 +100,11 @@ export async function runCodexDefaultsSetup({
     createClient,
     primaryProvider,
   }), { output, delayMs: 150, handleSignals: false });
-  output.write(`Codex 全局默认设置已更新：${model.model} · ${selectedEffort}\n`);
+  if (result.action !== "unchanged") output.write(`Codex 全局默认设置已更新：${model.model} · ${selectedEffort}\n`);
   const activationResult = configActivationResult(result.activation);
   writeGatewayConfigActivationNotice(output, environment, activationResult);
   return {
+    action: result.action,
     model: model.model,
     effort: selectedEffort,
     activation: result.activation,

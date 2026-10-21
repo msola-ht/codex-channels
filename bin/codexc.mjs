@@ -4,7 +4,6 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
-  mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
@@ -42,6 +41,7 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
   repairWindowsPrivateFileSync,
   assertCodexConfigAccessSync,
+  ensurePrivateDirectorySync,
 } from "../runtime/private-file.mjs";
 import {
   CODEX_REMOTE_USAGE,
@@ -64,6 +64,11 @@ import {
 } from "../scripts/cli-command-usage.mjs";
 import {
   metricsCommandUsage,
+  metricsQueryOptions,
+  metricsRequestPurposeOption,
+  parseMetricsOptions,
+  parseMetricsRunArgs,
+  parseMetricsTurnsArgs,
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
 import { configuredEnvironment, serviceControlEnvironment } from "../scripts/runtime-environment.mjs";
@@ -160,7 +165,6 @@ DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开�
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
 与 codexc app 使用相同的 -p / --provider 选择：推荐 -p ds-main、-p clp-main 或 -p cp-llm，
 也接受已配置的规范 sf- 名称，例如 -p sf-ds-main、-p sf-cp-llm。
-至少两个 API Key 切换提供商已配置时，可用 -p agg 或 -p sf-agg 连接聚合实例，
 默认模型从服务端读取。自动审批沿用工作区或显式设置；终端退出时释放实例租约。
 Provider 选择不能与 --profile 同用；个人 Profile 请显式使用 --profile，-- 后参数原样透传。
 不指定 Provider 或 Profile 时连接主实例，不根据登录状态自动选择第三方。`,
@@ -537,7 +541,8 @@ async function dispatchCommand(command, args) {
       }
       await (await import("../scripts/cleanup-menu.mjs")).runCleanupMenu({
         runSessionCleanup: (values, options) => runMaintenanceScript("scripts/session-cleanup.mjs", values, options),
-        runTrafficCleanup: (values, options) => runMaintenanceScript("scripts/traffic-cleanup.mjs", values, options, false),
+        runTrafficCleanup: async (values, options) =>
+          (await import("../scripts/traffic-cleanup.mjs")).runTrafficCleanup(values, options),
         runDatabaseCommand: (values, options) => runMaintenanceScript("scripts/metrics-database.mjs", values, options),
       });
       break;
@@ -917,10 +922,9 @@ async function runMetricsCommand(args) {
   const withoutStdout = args.filter((argument) => argument !== "--stdout");
   const writeFile = withoutStdout.length === args.length;
   if (!writeFile) {
-    const runtime = configuredEnvironment();
     await withCliProgress("查询指标", ({ signal }) => runCliLifecycleCommand(
       join(packageDir, "scripts/metrics-database.mjs"), withoutStdout,
-      { environment: runtime.environment, cwd: runtime.dataDir, signal },
+      { environment: process.env, cwd: process.cwd(), signal },
     ), { output: process.stderr, delayMs: 250 });
     return;
   }
@@ -948,8 +952,9 @@ function openMetricsExportFile(subcommand, args) {
   const { dataDir } = requireUserConfig();
   const dateDirectory = new Date().toLocaleDateString("en-CA");
   const directory = join(dataDir, "output", dateDirectory);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  chmodSync(directory, 0o700);
+  for (const path of [dataDir, join(dataDir, "output"), directory]) {
+    ensurePrivateDirectorySync(path);
+  }
   const formatOption = args.findIndex((argument) => argument === "--format");
   const format = formatOption >= 0
     ? args[formatOption + 1] ?? "markdown"
@@ -978,26 +983,11 @@ function openMetricsExportFile(subcommand, args) {
 }
 
 function metricsPositionalIdentifier(subcommand, args) {
-  if (subcommand !== "run" && subcommand !== "turns" && subcommand !== "export") {
-    return undefined;
-  }
+  const rest = args.slice(1);
+  if (subcommand === "run") return parseMetricsRunArgs(rest).threadId;
+  if (subcommand === "turns") return parseMetricsTurnsArgs(rest).threadId;
   if (subcommand === "export") {
-    const threadOption = args.findIndex((argument) => argument === "--thread");
-    return threadOption >= 0 ? args[threadOption + 1] : undefined;
-  }
-  const valueOptions = new Set(["--range", "--group", "--format"]);
-  for (let index = 1; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--thread") {
-      return args[index + 1];
-    }
-    if (valueOptions.has(argument)) {
-      index += 1;
-      continue;
-    }
-    if (!argument.startsWith("--")) {
-      return argument;
-    }
+    return parseMetricsOptions(rest, new Set([...metricsQueryOptions, metricsRequestPurposeOption, "--format"])).thread;
   }
   return undefined;
 }

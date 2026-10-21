@@ -2,6 +2,7 @@ import type {
   CodexUserConfigTransactionClient,
 } from "./codex-user-config.mjs";
 import type { CustomPrimaryProviderSetupClient } from "./custom-primary-provider-setup.mjs";
+import type { PrimaryProviderRemovalResult } from "./primary-provider-management.mjs";
 
 export interface PrimaryProviderCliPrompts {
   text(options: unknown): Promise<unknown>;
@@ -29,6 +30,7 @@ export type InteractivePrimaryProviderCliOptions = Omit<
   PrimaryProviderCliOptions,
   "prompts" | "createClient"
 > & {
+  /** 新增时指定目录；菜单未指定时先询问目录，列表、编辑与删除始终包含两类目录。 */
   catalogKind?: "official" | "custom";
   prompts?: InteractivePrimaryProviderCliPrompts;
   createClient?: (options: {
@@ -47,7 +49,7 @@ export function switchPrimaryProvider(
 export function removePrimaryProvider(
   providerId: string,
   options?: PrimaryProviderCliOptions,
-): Promise<void>;
+): Promise<PrimaryProviderRemovalResult | void>;
 export function addPrimaryProvider(
   options?: InteractivePrimaryProviderCliOptions,
 ): Promise<unknown>;

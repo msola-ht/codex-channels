@@ -14,13 +14,15 @@ class ModelWindowSetupCancelled extends Error {}
 
 export async function runModelWindowSetup({
   allowBack = false,
+  provider,
   environment = process.env,
   output = process.stdout,
   prompts = clackPrompts,
   prompter,
 } = {}) {
   const { catalogs } = await loadProviderModelCatalogPresentations({ environment });
-  const models = catalogs.filter(catalog => catalog.source === "managed").flatMap(catalog =>
+  const models = catalogs.filter(catalog => catalog.source === "managed"
+    && (provider === undefined || catalog.providers.includes(provider))).flatMap(catalog =>
     catalog.models.filter(model => Number.isSafeInteger(model.presentation.maxContextWindow)).map(model => ({
       provider: catalog.provider,
       providers: catalog.providers,

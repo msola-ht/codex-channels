@@ -22,7 +22,15 @@ import { useTranslation } from "@/hooks/use-translation"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import type { PendingSetting } from "@/lib/settings-management"
 import type { ManagementSettingMutationResponse } from "@/lib/types"
-import type { Translate } from "@/lib/i18n/messages"
+import type { MessageKey, Translate } from "@/lib/i18n/messages"
+
+const providerCleanupWarnings: Record<string, MessageKey> = {
+  "backup-cleanup-failed": "settingsUi.providerBackupCleanupFailed",
+  "credential-cleanup-failed": "settingsUi.providerCredentialCleanupFailed",
+  "catalog-cleanup-failed": "settingsUi.providerCatalogCleanupFailed",
+  "metadata-cleanup-failed": "settingsUi.providerMetadataCleanupFailed",
+  "lock-cleanup-failed": "settingsUi.providerLockCleanupFailed",
+}
 
 export function ManagementConfirmationDialog({
   open,
@@ -140,6 +148,9 @@ export function SettingsMutationFeedback({ result, writeUnconfirmed, readbackReq
             : t("settingsUi.savedActivation", { value: formatActivation(result.activation, t) })}</p>
       {result.activation.commands.length > 0 && <p>{t(result.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: result.activation.commands.join("; ") })}</p>}
       {result.auditStatus === "degraded" && <p>{t("settingsUi.auditDegraded")}</p>}
+      {result.warnings?.map((warning, index) => Object.hasOwn(providerCleanupWarnings, warning.code)
+        ? <p key={`${warning.code}-${index}`}>{t(providerCleanupWarnings[warning.code], { provider: warning.providerId ?? "" })}</p>
+        : null)}
     </> : null}
     {readbackRequired && (writeUnconfirmed || result?.consistency === "unknown") && <p>{t("settingsUi.readbackUnknown")}</p>}
   </AlertDescription></Alert>

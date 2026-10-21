@@ -48,6 +48,7 @@ export interface TelegramSetupSessionResult {
   allowedUserIds: string[];
   configPath: string;
   activation: "restart-gateway";
+  warnings: Array<{ code: "gateway-config-lock-release-failed" }>;
 }
 
 export class TelegramSetupSessionError extends Error {

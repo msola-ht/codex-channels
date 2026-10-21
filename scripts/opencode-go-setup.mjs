@@ -36,7 +36,16 @@ import { opencodeGoAccountPaths } from "./opencode-go-account-files.mjs";
 
 class OpenCodeGoSetupCancelled extends Error {}
 
-export async function runOpenCodeGoSetup({
+export async function runOpenCodeGoSetup(options = {}) {
+  while (true) {
+    const result = await runOpenCodeGoSetupOperation(options);
+    if (result.action === "menu-back") return { action: "back" };
+    if (result.action === "back" || result.action === "cancelled") continue;
+    return result;
+  }
+}
+
+async function runOpenCodeGoSetupOperation({
   allowBack = false,
   environment = process.env,
   output = process.stdout,
@@ -57,12 +66,13 @@ export async function runOpenCodeGoSetup({
   });
   try {
     const action = await prompt.select();
-    if (action === "back") return { action: "back" };
+    if (action === "back") return { action: "menu-back" };
     if (action === "model-settings") {
-      if (!defaultAccount) return { action: "back" };
+      const accountId = await prompt.selectAccount(accounts);
+      if (accountId === undefined) return { action: "back" };
       return runModelProviderDefaultSetup({
         allowBack: true,
-        provider: opencodeGoProviderId(defaultAccount.id),
+        provider: opencodeGoProviderId(accountId),
         environment,
         output,
         prompts,
@@ -72,7 +82,7 @@ export async function runOpenCodeGoSetup({
     if (action === "account-add") {
       const accountId = await prompt.accountId();
       const contact = await prompt.contact();
-      return addOpencodeGoAccount(accountId, {
+      return await addOpencodeGoAccount(accountId, {
         contact,
         environment,
         output,
@@ -98,7 +108,7 @@ export async function runOpenCodeGoSetup({
     if (action === "account-remove") {
       const accountId = await prompt.selectAccount(accounts);
       if (accountId === undefined) return { action: "back" };
-      return removeOpencodeGoAccount(accountId, {
+      return await removeOpencodeGoAccount(accountId, {
         environment,
         output,
         prompts,
@@ -114,7 +124,7 @@ export async function runOpenCodeGoSetup({
       if (accountId === undefined) return { action: "back" };
       const contact = defaultAccount?.email ?? defaultAccount?.phone
         ?? (typeof prompt.contact === "function" ? await prompt.contact() : undefined);
-      return addOpencodeGoAccount(accountId, {
+      return await addOpencodeGoAccount(accountId, {
         mode: action,
         reconfigure: defaultAccount !== undefined,
         contact,
@@ -248,7 +258,7 @@ export async function removeOpencodeGoAccount(accountId, {
   const removesLastAccount = preview.effects?.removesLastAccount === true;
   const confirmationMessage = removesLastAccount
     ? preview.effects?.restoresInitialConfig === true
-      ? `确认删除最后一个 OpenCode Go 账户 ${accountId}？将恢复安装前 Codex 主配置，历史 Thread 将不可恢复。`
+      ? `确认删除最后一个 OpenCode Go 账户 ${accountId}？将恢复该账户接管的 Codex 主配置字段，保留其他设置；历史 Thread 将不可恢复。`
       : `确认删除最后一个 OpenCode Go 账户 ${accountId}？将删除该账户配置，保留共享模型目录，历史 Thread 将不可恢复。`
     : `确认删除 OpenCode Go 账户 ${accountId}？历史 Thread 将不可恢复。`;
   if (confirm && !await confirmPrompt(prompts, confirmationMessage, false)) {
@@ -264,7 +274,7 @@ export async function removeOpencodeGoAccount(accountId, {
   });
   const cleanupSummary = removesLastAccount
     ? result.effects?.restoresInitialConfig === true
-      ? "，主配置已恢复为安装前状态"
+      ? "，该账户接管的主配置字段已恢复，其他设置已保留"
       : "，账户配置已清理，共享模型目录已保留"
     : "";
   output.write(
@@ -394,25 +404,27 @@ function createPrompter(prompts, { accounts = [], allowBack, hasModelSettings, h
           { value: "account-add", label: "添加账户" },
           { value: "list", label: "列出账户" },
           { value: "account-default", label: "设置默认账户" },
-          { value: "account-stop", label: "释放账户 App Server 实例（可自动重新拉起）" },
-          { value: "account-remove", label: "删除账户" },
         );
       }
       options.push(
         { value: "switching", label: hasAccounts
           ? "切换模式（配置默认账户为切换模式）"
-          : "OpenAI + OpenCode Go 切换模式（先输入账户 ID）" },
+          : "切换模式（先添加账户）", hint: "保留 OpenAI 主实例，使用独立实例" },
         { value: "exclusive", label: hasAccounts
           ? "固定模式（配置默认账户为固定模式）"
-          : "仅 OpenCode Go 固定模式（先输入账户 ID）" },
+          : "固定模式（先添加账户）", hint: "修改主实例配置，使用此账户" },
       );
       if (hasModelSettings) {
-        options.push({ value: "model-settings", label: "修改模型设置（思考等级）" });
+        options.push({ value: "model-settings", label: "账户默认模型与共享思考等级", hint: "先选择账户；模型思考等级由同族账户共用" });
         options.push({ value: "catalog", label: "发现／添加共享模型" });
       }
+      if (hasAccounts) options.push(
+        { value: "account-stop", label: "释放账户 App Server 实例", hint: "再次使用时可自动重新拉起，不禁用账户" },
+        { value: "account-remove", label: "删除账户" },
+      );
       if (allowBack) options.push({ value: "back", label: "返回上一级" });
       const value = await prompts.select({ message: "OpenCode Go Provider", options });
-      if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
+      if (prompts.isCancel(value)) return "back";
       return value;
     },
     accountId: async () => {

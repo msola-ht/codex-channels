@@ -58,6 +58,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   更新 Gateway 配置与直接 API 凭据的同步管理事务复用该可重入锁，异步操作必须使用独立事务锁，
   拒绝并发覆盖；写入者可指定 `maximumBytes`，在保留注释后、原子替换前检查完整文件大小，
   并以 `0600` 权限写入 CLI、脚本和 Gateway 共享的 TOML 配置。
+  同步操作完成后释放锁失败用 `GatewayConfigLockReleaseError` 保留操作结果；仅原子配置写入已确认后转换为 `GatewayConfigWriteCommittedError`，调用方不得当作未保存而重试或删除有效备份。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 - `chat-reasoning.mjs` / `chat-reasoning.d.mts`：无 I/O 的默认 Chat 关闭能力表、Relay 逐模型思考策略枚举及模型思考声明类型，供配置、管理和模型 API 共用；`resolveClinePassRequestProfile` 校验受管 CLP 的 `standard`／`deepseek-flash` 请求快照，未指定时保留精确 Flash ID 默认分支，显式 `standard` 可覆盖该默认。显式参数方式不声明上游一定支持。
 - `model-relay-config.mjs` / `model-relay-config.d.mts`：可选 Relay 严格配置、可选中文用途名称、仅结算使用的历史身份摘要、每 Key 多提供商模型授权、逐模型思考映射及仅全局限流策略投影；服务默认关闭和回环监听，允许显式 IPv4 内网/通配绑定、保留停用身份，不生成凭据；不接受旧 Relay 配置字段。
@@ -364,7 +365,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   原生 DLL 加载失败使用保留退出码 78，桥接器映射为 `ERR_WINDOWS_NATIVE_LOAD`；等待输出流关闭后分类，避免 stdin 提前断开掩盖原因。公开错误明确要求重新构建/安装，不将组件故障归类为 ACL 不合格，也不传递原始异常或 stderr。
 - `private-file-lock.mjs` / `private-file-lock.d.mts`：为跨越异步配置事务的私有文件更新提供
   PID 所有权、陈旧锁回收和替换锁保护，锁目录与锁文件同样使用当前平台私有权限，供 Provider 管理与
-  微信配置/凭据事务串行写入。
+  微信配置/凭据事务串行写入。操作返回后释放失败用 PrivateFileLockReleaseError 非枚举地保留返回值；这仅证明回调完成，由调用者判断是否代表配置已提交。
 - `windows-dpapi.mjs` / `windows-dpapi.d.mts` / `windows-dpapi.ps1`：通过 PowerShell 7 调用
   `ProtectedData` 的 `CurrentUser` 作用域保护和解保护小型二进制主密钥；只接受 Base64 JSON stdin/stdout，
   单次调用最多 5 秒，继承调用方明确传入的环境，不把输入或底层异常写入日志。

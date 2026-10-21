@@ -11,7 +11,7 @@ ID 已由 [OCG 公开模型目录](https://opencode.ai/zen/go/v1/models) 确认�
 
 ## 配置与使用
 
-运行 `codexc setup`，依次选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方”，或直接使用账户命令：
+运行 `codexc setup`，依次选择“模型与提供商 → 第三方提供商 → OpenCode Go 官方”，或直接使用账户命令：
 
 ```bash
 codexc provider opencode-go add <id>      # 新增账户（交互输入邮箱或手机号、Key）
@@ -44,9 +44,9 @@ OCG 账户仍可保留切换模式。切换账户每次进入固定模式都会�
 codexc restart all
 ```
 
-初次配置默认使用官方目录的默认模型 `deepseek-flash`。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
-修改模型设置（思考等级）”，或选择“模型与提供商 → 第三方 Provider → 默认模型与思考等级 → OpenCode Go”，
-选择准确账户后按模型设置默认思考等级，所有选择该模型的账户 Profile 同步该等级，原生子代理保留独立设置；目录刷新保留共用模型的有效等级。上下文窗口走“模型与提供商 → 第三方 Provider → 模型上下文窗口”，按提供商和模型通过 Token 预设或自定义输入设置。
+初次配置默认使用官方目录的默认模型 `deepseek-flash`。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方提供商 → OpenCode Go 官方 →
+账户默认模型与共享思考等级”，或从“第三方提供商 → 模型管理”选择 OpenCode Go 目录与同名操作。
+先选择准确账户，再设置账户默认模型与共享模型的默认思考等级；所有选择该模型的账户 Profile 同步该等级，原生子代理保留独立设置，目录刷新保留共用模型的有效等级。上下文窗口走“第三方提供商 → 模型管理 → OpenCode Go 目录 → 模型上下文窗口”，按模型通过 Token 预设或自定义输入设置，同族账户共享。
 账户独立选择默认模型；思考等级、上下文和启用名单保存在共用的 `providers/opencode-go/models.json`，影响所有 OCG 账户，不影响其他提供商。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。新增 OCG 模型目录使用其官方模板窗口，显式模板更新保留共用目录中已有模型的窗口 Token 数。
 若新模板的最大窗口小于现有 Token 数，则拒绝刷新并保留原目录，需先调整窗口。重复运行 Setup 和更新 Key 会保留现有目录，不再隐式下载覆盖；更新器不刷新模型目录。

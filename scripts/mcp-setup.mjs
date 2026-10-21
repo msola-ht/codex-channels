@@ -6,10 +6,10 @@ import { readGatewayConfig, validateGatewayConfigStructureDocument } from "../ru
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { securePrivateDirectorySync } from "../runtime/private-file.mjs";
 import { packageDir } from "./package-path.mjs";
-import { createCodexUserConfigClient } from "./codex-user-config.mjs";
+import { createCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import { videoConfiguration } from "./video-analysis-client.mjs";
-import { mcpToolApprovalModes } from "./codex-tool-settings.mjs";
+import { isStrataServer, mcpToolApprovalModes, validateStrataMcpEdit } from "./codex-tool-settings.mjs";
 
 const cancelled = Symbol("cancelled");
 const approvalLabels = {
@@ -163,30 +163,6 @@ function authCleanupEdits(path, server, keepGroup, keepHeader) {
   return edits;
 }
 
-function isStrataServer(server) {
-  return Array.isArray(server.args) && server.args[0] === join(packageDir, "scripts", "video-analysis-mcp.mjs");
-}
-
-async function validateStrataEdit(server, field, value, output) {
-  if (!isStrataServer(server) || !["env", "env_vars", "tool_timeout_sec"].includes(field)) return;
-  const candidate = { ...server };
-  if (value === null) delete candidate[field];
-  else candidate[field] = value;
-  const env = { ...candidate.env };
-  const inherited = new Set((candidate.env_vars ?? []).map(item => typeof item === "string" ? item : item.name));
-  if (["STRATA_VIDEO_BASE_URL", "STRATA_VIDEO_MODEL", "STRATA_VIDEO_ROOT", "STRATA_VIDEO_CHANNEL_ROOT", "STRATA_VIDEO_TRANSPORT", "STRATA_VIDEO_TIMEOUT_SECONDS"]
-    .some(key => env[key] === undefined && inherited.has(key))) {
-    throw new Error("Strata 参数依赖实际 MCP 宿主环境，无法确认分析时限或目录范围；请通过原生配置编辑，未保存");
-  }
-  // Validate the configuration contract without reading a secret from this CLI's host environment.
-  if (env.STRATA_VIDEO_API_KEY === undefined && inherited.has("STRATA_VIDEO_API_KEY")) env.STRATA_VIDEO_API_KEY = "host-provided-key";
-  const config = await videoConfiguration(env);
-  if (!(candidate.tool_timeout_sec > config.timeoutMs / 1000)) {
-    throw new Error("Strata MCP 调用超时必须显式大于视频分析总时限；不能移除或缩短到分析时限以内，未保存");
-  }
-  output.write(`Strata 分析总时限：${config.timeoutMs / 1000} 秒；MCP 调用超时：${candidate.tool_timeout_sec} 秒\n本机视频范围：${env.STRATA_VIDEO_ROOT === "any" ? "任意本机绝对路径" : env.STRATA_VIDEO_ROOT}\n渠道附件目录：${env.STRATA_VIDEO_CHANNEL_ROOT ?? "未配置"}\n`);
-}
-
 async function manageExistingMcp({ operation, snapshot, client, ask, apiKey, environment, output }) {
   const servers = snapshot.config.mcp_servers ?? {};
   const names = Object.keys(servers).sort();
@@ -203,6 +179,7 @@ async function manageExistingMcp({ operation, snapshot, client, ask, apiKey, env
   const path = ["mcp_servers", name];
   output.write(`目标：${join(codexHomePath(environment), "config.toml")}\nMCP：${name}；作用范围：仅当前 Codex Home 用户配置\n`);
   let edits;
+  let strataEdit;
   if (operation === "delete") {
     output.write("仅删除此用户配置条目，不卸载包、不删除附件或目录。其他配置来源或插件中的同名 MCP 仍可能生效。\n");
     edits = [{ path, value: null }];
@@ -276,7 +253,9 @@ async function manageExistingMcp({ operation, snapshot, client, ask, apiKey, env
         value = jsonFields.includes(field) ? jsonValue(input, field) : field.endsWith("_timeout_sec") ? Number(input) : input;
       } else throw new Error("不支持的编辑操作");
     }
-    await validateStrataEdit(server, field, value, output);
+    const strata = await validateStrataMcpEdit(snapshot.config, snapshot.toolConfig, name, field, value);
+    strataEdit = { field, value };
+    if (strata) output.write(`Strata 分析总时限：${strata.timeoutSeconds} 秒；MCP 调用超时：${strata.toolTimeoutSeconds} 秒\n本机视频范围：${strata.root === "any" ? "任意本机绝对路径" : strata.root}\n渠道附件目录：${strata.channelRoot ?? "未配置"}\n`);
     edits ??= [{ path: [...path, field], value }];
     if (value !== null && (field === "bearer_token_env_var"
         || (["http_headers", "env_http_headers"].includes(field) && Object.keys(value).some(key => key.toLowerCase() === "authorization")))) {
@@ -288,6 +267,14 @@ async function manageExistingMcp({ operation, snapshot, client, ask, apiKey, env
     output.write("工具允许/禁用列表和单工具审批覆盖仍在“电脑、浏览器与已有 MCP”管理；其他配置来源可能影响最终生效值。\n");
   }
   if (await ask("confirm", { message: operation === "delete" ? "确认删除上述 MCP 用户配置？" : "确认保存上述 MCP 修改？", initialValue: false }) !== true) return { action: "back" };
+  if (strataEdit) {
+    const current = await client.readUserConfigSnapshot();
+    if (current.version !== snapshot.version
+      || !isDeepStrictEqual(current.toolConfig?.mcp_servers?.[name], snapshot.toolConfig?.mcp_servers?.[name])) {
+      throw new Error("MCP 用户配置或合并配置已变化，请重新进入菜单确认，未保存");
+    }
+    await validateStrataMcpEdit(current.config, current.toolConfig, name, strataEdit.field, strataEdit.value);
+  }
   await saveMcpEdits(client, snapshot, edits, output);
   return { action: operation === "delete" ? "deleted" : "edited", name };
 }
@@ -317,20 +304,9 @@ export async function runMcpSetup({ environment = process.env, dataDir, configPa
     });
     return jsonValue(value || "{}", kind);
   };
-  let client;
-  try {
-    if (!["add", "edit", "delete"].includes(operation)) throw new Error("不支持的 MCP 管理操作");
-    const kind = operation === "add" ? await ask("select", { message: "新增 MCP 类型", options: [
-      ...mcpTypes,
-      { value: "back", label: "返回" },
-    ] }) : undefined;
-    if (kind === "back") return { action: "back" };
-    const type = mcpTypes.find(item => item.value === kind);
-    if (operation === "add" && !type) throw new Error("不支持的 MCP 类型");
+  async function configure(client, kind, type) {
     let snapshot;
     try {
-      client = await createClient({ environment });
-      await client.connect();
       snapshot = await client.readUserConfigSnapshot();
     } catch {
       throw new Error("无法读取 Codex 用户配置；请检查 CLI 与配置是否可用，未写入 MCP");
@@ -406,8 +382,20 @@ export async function runMcpSetup({ environment = process.env, dataDir, configPa
     }
     await saveMcpEdits(client, snapshot, [{ path: ["mcp_servers", name], value: server }], output);
     return { action: "added", name };
+  }
+  try {
+    if (!["add", "edit", "delete"].includes(operation)) throw new Error("不支持的 MCP 管理操作");
+    const kind = operation === "add" ? await ask("select", { message: "新增 MCP 类型", options: [
+      ...mcpTypes,
+      { value: "back", label: "返回" },
+    ] }) : undefined;
+    if (kind === "back") return { action: "back" };
+    const type = mcpTypes.find(item => item.value === kind);
+    if (operation === "add" && !type) throw new Error("不支持的 MCP 类型");
+    return await withCodexUserConfigClient(environment, createClient, undefined,
+      client => configure(client, kind, type), { preserveOperationResult: true });
   } catch (error) {
     if (error === cancelled) return { action: "back" };
     throw error;
-  } finally { await client?.close().catch(() => undefined); }
+  }
 }

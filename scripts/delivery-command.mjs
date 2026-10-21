@@ -12,6 +12,8 @@ export const deliveryCommandUsage = `用法：codexc delivery <status|list|retry
   confirm <ID> --confirmed-delivered  已自行核实送达后删除未知/阻塞结果
 
 先用 codexc stop gateway 停止 Gateway；不需要停止共享 App Server。
+status/list 打开投递箱时会将崩溃遗留 sending 转为 uncertain，并清理中断的渲染暂存；
+属于离线维护，不是只读检查，不会自动重发消息。
 重发恢复后仍须通过当前授权检查。未确认记录不按时间或容量自动删除。`;
 
 export async function runDeliveryCommand(args, environment = process.env) {

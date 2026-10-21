@@ -68,6 +68,49 @@ import {
 
 export { metricsRange } from "./metrics-command-options.mjs";
 
+export class MetricsMaintenanceError extends AggregateError {
+  constructor(result, failures) {
+    const state = result.committed === true ? "指标数据已提交"
+      : result.committed === "unknown" ? "指标提交结果未确认" : "指标维护未改变数据";
+    const phases = { commit: "提交", vacuum: "VACUUM", count: "读取剩余数量", close: "关闭数据库", "lock-release": "释放数据库锁", "gateway-restart": "恢复 Gateway" };
+    super(failures.map(failure => failure.error),
+      `${state}，但后续处理失败：${failures.map(failure => `${phases[failure.phase]}：${errorMessage(failure.error)}`).join("；")}；请先核对数据与备份，勿重复清理`);
+    this.name = "MetricsMaintenanceError";
+    this.result = result;
+    this.failures = failures;
+  }
+}
+
+function maintenanceFailure(result, error, phase) {
+  return new MetricsMaintenanceError(result, [
+    ...(error instanceof MetricsMaintenanceError ? error.failures : []),
+    ...(phase === undefined ? [] : [{ phase, error }]),
+  ]);
+}
+
+function withMetricsMaintenanceLock(databasePath, operation) {
+  const lock = acquireRequestMetricsDatabaseLock(databasePath);
+  let result;
+  let failure;
+  try {
+    result = operation();
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    lock.release();
+  } catch (error) {
+    const outcome = result ?? (failure instanceof MetricsMaintenanceError ? failure.result : undefined);
+    failure = outcome === undefined
+      ? new AggregateError([...(failure === undefined ? [] : [failure]), error], "指标数据库锁释放失败")
+      : new MetricsMaintenanceError(outcome, [
+        ...(failure instanceof MetricsMaintenanceError ? failure.failures : []), { phase: "lock-release", error },
+      ]);
+  }
+  if (failure !== undefined) throw failure;
+  return result;
+}
+
 export {
   inspectMetricsDatabase,
   readMetricsExport,
@@ -151,7 +194,6 @@ export function pruneProviderMetrics(provider, environment = process.env, option
     ?? (options.stopGateway !== undefined || options.startGateway !== undefined
       ? true
       : isManagedServiceRunning("gateway", environment));
-  const warnings = [];
   let gatewayStopped = false;
   const stopErrors = [];
   if (gatewayWasRunning) {
@@ -189,6 +231,19 @@ export function pruneProviderMetrics(provider, environment = process.env, option
     }
   }
 
+  const outcome = result ?? (operationError instanceof MetricsMaintenanceError ? operationError.result : undefined);
+  if (outcome !== undefined) {
+    result = { ...outcome, gatewayWasRunning, gatewayRestored: !gatewayWasRunning || startFailures.length === 0, warnings: [] };
+    if (operationError instanceof MetricsMaintenanceError) {
+      operationError = maintenanceFailure(result, operationError);
+    }
+    if (startFailures.length > 0) {
+      const failures = operationError instanceof MetricsMaintenanceError ? operationError.failures : [];
+      throw new MetricsMaintenanceError(result, [...failures,
+        { phase: "gateway-restart", error: new Error(startFailures.join("；") + "；请运行 codexc start gateway") },
+      ]);
+    }
+  }
   if (operationError !== undefined && startFailures.length > 0) {
     throw new AggregateError(
       [operationError, ...startFailures.map((message) => new Error(message))],
@@ -199,11 +254,7 @@ export function pruneProviderMetrics(provider, environment = process.env, option
   if (startFailures.length > 0) {
     throw new Error(startFailures.join("；"));
   }
-  return {
-    ...result,
-    gatewayWasRunning,
-    warnings,
-  };
+  return result;
 }
 
 export function cleanupMetricsDatabase(environment = process.env, options = {}) {
@@ -218,13 +269,10 @@ export function cleanupMetricsDatabase(environment = process.env, options = {}) 
     );
   }
   const databasePath = requireCompatibleMetricsDatabase(environment);
-  const lock = acquireRequestMetricsDatabaseLock(databasePath);
-  try {
+  return withMetricsMaintenanceLock(databasePath, () => {
     requireCompatibleDatabasePath(databasePath);
     return cleanupCompatibleMetricsDatabase(databasePath, { ...options, keepDays, maxRows, beforeMs });
-  } finally {
-    lock.release();
-  }
+  });
 }
 
 function cleanupCompatibleMetricsDatabase(databasePath, options) {
@@ -236,6 +284,9 @@ function cleanupCompatibleMetricsDatabase(databasePath, options) {
   const database = new DatabaseSync(databasePath);
   let deletedByAge;
   let deletedByLimit;
+  let result;
+  let failure;
+  let phase = "transaction";
   try {
     database.exec("BEGIN IMMEDIATE");
     deletedByAge = Number(database.prepare(`
@@ -267,12 +318,8 @@ function cleanupCompatibleMetricsDatabase(databasePath, options) {
     database.exec(`DELETE FROM auto_approval_reviews WHERE (thread_id, turn_id) NOT IN (
       SELECT thread_id, turn_id FROM auto_approval_review_turns
     )`);
-    database.exec("COMMIT");
-    if (options.vacuum === true) database.exec("VACUUM");
-    const remaining = Number(database.prepare(
-      "SELECT COUNT(*) AS count FROM model_request_metrics",
-    ).get()?.count ?? 0);
-    return {
+    result = {
+      committed: "unknown",
       backupPath,
       databasePath,
       deleted: deletedByAge + deletedByLimit,
@@ -280,19 +327,36 @@ function cleanupCompatibleMetricsDatabase(databasePath, options) {
       deletedByLimit,
       keepDays,
       maxRows,
-      remaining,
-      vacuumed: options.vacuum === true,
+      remaining: null,
+      vacuumed: false,
     };
-  } catch (error) {
-    try {
-      database.exec("ROLLBACK");
-    } catch {
-      // 保留原始异常
+    phase = "commit";
+    database.exec("COMMIT");
+    result.committed = true;
+    if (options.vacuum === true) {
+      phase = "vacuum";
+      database.exec("VACUUM");
+      result.vacuumed = true;
     }
-    throw error;
-  } finally {
-    database.close();
+    phase = "count";
+    result.remaining = Number(database.prepare(
+      "SELECT COUNT(*) AS count FROM model_request_metrics",
+    ).get().count);
+  } catch (error) {
+    if (result?.committed !== true) {
+      try { database.exec("ROLLBACK"); result = undefined; } catch { /* 无法确认回滚时保留未知提交状态 */ }
+    }
+    failure = result === undefined ? error : maintenanceFailure(result, error, phase);
   }
+  try { database.close(); } catch (error) {
+    failure = result === undefined
+      ? new AggregateError([...(failure === undefined ? [] : [failure]), error], "指标数据库关闭失败")
+      : new MetricsMaintenanceError(result, [
+        ...(failure instanceof MetricsMaintenanceError ? failure.failures : []), { phase: "close", error },
+      ]);
+  }
+  if (failure !== undefined) throw failure;
+  return result;
 }
 
 export function cleanupMetricsDatabaseWithGatewayRestart(
@@ -313,11 +377,21 @@ export function cleanupMetricsDatabaseWithGatewayRestart(
   try {
     startGateway();
   } catch (error) {
+    const outcome = result ?? (operationError instanceof MetricsMaintenanceError ? operationError.result : undefined);
+    if (outcome !== undefined) {
+      throw new MetricsMaintenanceError({ ...outcome, gatewayRestored: false }, [
+        ...(operationError instanceof MetricsMaintenanceError ? operationError.failures : []),
+        { phase: "gateway-restart", error: new Error("Gateway 恢复失败；请运行 codexc start gateway", { cause: error }) },
+      ]);
+    }
     throw new AggregateError(operationError ? [operationError, error] : [error],
       "指标清理流程结束，但 Gateway 恢复失败；请运行 codexc start gateway", { cause: error });
   }
+  if (operationError instanceof MetricsMaintenanceError) {
+    throw maintenanceFailure({ ...operationError.result, gatewayRestored: true }, operationError);
+  }
   if (operationError) throw operationError;
-  return result;
+  return { ...result, gatewayRestored: true };
 }
 
 function resolveCleanupPolicy(environment, options) {
@@ -339,16 +413,13 @@ function pruneProviderDatabase({
   allowVacuumLocal,
 }) {
   if (!existsSync(localDatabasePath)) {
-    return { provider, local: { databasePath: localDatabasePath, backupPath: null, deleted: 0 } };
+    return { provider, committed: false, local: { databasePath: localDatabasePath, backupPath: null, deleted: 0, vacuumed: false } };
   }
   requireCompatibleDatabasePath(localDatabasePath);
-  const lock = acquireRequestMetricsDatabaseLock(localDatabasePath);
-  try {
+  return withMetricsMaintenanceLock(localDatabasePath, () => {
     requireCompatibleDatabasePath(localDatabasePath);
     return pruneCompatibleProviderDatabase({ provider, localDatabasePath, allowVacuumLocal });
-  } finally {
-    lock.release();
-  }
+  });
 }
 
 function requireCompatibleDatabasePath(databasePath) {
@@ -362,20 +433,17 @@ function requireCompatibleDatabasePath(databasePath) {
 
 function pruneCompatibleProviderDatabase({ provider, localDatabasePath, allowVacuumLocal }) {
   const localBackupPath = backupMetricsDatabase(localDatabasePath, provider);
-  const localDeleted = deleteProviderRows(
-    localDatabasePath,
-    "model_request_metrics",
+  const result = {
     provider,
-    allowVacuumLocal,
-  );
-  return {
-    provider,
+    committed: false,
     local: {
       databasePath: localDatabasePath,
       backupPath: localBackupPath,
-      deleted: localDeleted,
+      deleted: 0,
+      vacuumed: false,
     },
   };
+  return deleteProviderRows(localDatabasePath, provider, allowVacuumLocal, result);
 }
 
 function backupMetricsDatabase(databasePath, provider) {
@@ -391,33 +459,49 @@ function backupMetricsDatabase(databasePath, provider) {
   return backupPath;
 }
 
-function deleteProviderRows(databasePath, table, provider, allowVacuum) {
-  if (!existsSync(databasePath)) return 0;
+function deleteProviderRows(databasePath, provider, allowVacuum, result) {
   const database = new DatabaseSync(databasePath);
+  let failure;
+  let phase = "transaction";
   try {
     database.exec("PRAGMA busy_timeout = 10000;");
     database.exec("BEGIN IMMEDIATE");
-    if (table === "model_request_metrics") {
-      database.prepare(`DELETE FROM auto_approval_reviews WHERE (thread_id, turn_id) IN (
+    database.prepare(`DELETE FROM auto_approval_reviews WHERE (thread_id, turn_id) IN (
         SELECT thread_id, turn_id FROM auto_approval_review_turns WHERE provider = ?
       )`).run(provider);
-      database.prepare("DELETE FROM auto_approval_review_turns WHERE provider = ?").run(provider);
-      database.prepare(`DELETE FROM turn_execution_metrics WHERE thread_id IN (
+    database.prepare("DELETE FROM auto_approval_review_turns WHERE provider = ?").run(provider);
+    database.prepare(`DELETE FROM turn_execution_metrics WHERE thread_id IN (
         SELECT thread_id FROM thread_execution_state WHERE provider = ?
       )`).run(provider);
-      database.prepare("DELETE FROM thread_execution_state WHERE provider = ?").run(provider);
-    }
+    database.prepare("DELETE FROM thread_execution_state WHERE provider = ?").run(provider);
     const info = database.prepare(
-      `DELETE FROM ${table} WHERE provider = ?`,
+      "DELETE FROM model_request_metrics WHERE provider = ?",
     ).run(provider);
+    result.local.deleted = Number(info.changes);
+    result.committed = "unknown";
+    phase = "commit";
     database.exec("COMMIT");
+    result.committed = true;
     if (allowVacuum) {
+      phase = "vacuum";
       database.exec("VACUUM");
+      result.local.vacuumed = true;
     }
-    return Number(info.changes ?? 0);
-  } finally {
-    database.close();
+  } catch (error) {
+    if (result.committed !== true) {
+      try { database.exec("ROLLBACK"); result.committed = false; } catch { /* 无法确认回滚时保留未知提交状态 */ }
+    }
+    failure = result.committed ? maintenanceFailure(result, error, phase) : error;
   }
+  try { database.close(); } catch (error) {
+    failure = result.committed
+      ? new MetricsMaintenanceError(result, [
+        ...(failure instanceof MetricsMaintenanceError ? failure.failures : []), { phase: "close", error },
+      ])
+      : new AggregateError([...(failure === undefined ? [] : [failure]), error], "指标数据库关闭失败");
+  }
+  if (failure !== undefined) throw failure;
+  return result;
 }
 
 function errorMessage(error) {
@@ -552,6 +636,35 @@ function backupTimestamp(date) {
   return date.toISOString().replaceAll(/[:.]/gu, "-");
 }
 
+function printMaintenanceResult(result, failed = false) {
+  const kind = failed ? "note" : "success";
+  const unknown = result.committed === "unknown";
+  const state = unknown ? "指标提交结果未确认；" : result.committed ? "指标数据已提交；" : "";
+  if ("provider" in result) {
+    writeCliMessage(kind, `${state}${result.provider} 请求指标：本地${unknown ? "拟删除" : "删除"} ${result.local.deleted} 条。`);
+    console.log(`数据库：${result.local.databasePath}`);
+    if (result.local.backupPath !== null) console.log(`本地备份：${result.local.backupPath}`);
+    console.log(`VACUUM：${result.local.vacuumed ? "已完成" : "未完成或未执行"}`);
+    for (const warning of result.warnings ?? []) {
+      writeCliMessage("note", `警告：${warning}`, { destination: "stderr" });
+    }
+    if (result.gatewayRestored !== false) {
+      writeCliMessage(kind, result.gatewayWasRunning ? "Gateway 已恢复运行。" : "Gateway 原为停止，保持停止。");
+    }
+  } else {
+    const remaining = result.remaining === null ? "剩余数量未能读取" : `剩余 ${result.remaining} 条`;
+    writeCliMessage(kind, `${state}${unknown ? "拟清理" : "已清理"} ${result.deleted} 条指标，${remaining}。`);
+    console.log(`数据库：${result.databasePath}`);
+    console.log(`备份：${result.backupPath}`);
+    console.log(`VACUUM：${result.vacuumed ? "已完成" : "未完成或未执行"}`);
+    if (!failed && !result.vacuumed) {
+      writeCliMessage("note", "未执行 VACUUM；空闲页会由 SQLite 后续复用。需要立即缩小文件时加 --vacuum。");
+    }
+    if (result.gatewayRestored === true) writeCliMessage(kind, "Gateway 已恢复运行。");
+  }
+  if (result.gatewayRestored === false) writeCliMessage("failure", "Gateway 恢复失败；请运行 codexc start gateway。");
+}
+
 if (
   process.argv[1]
   && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
@@ -582,27 +695,13 @@ if (
       } else if (command === "prune" && process.argv.length === 4) {
         const provider = process.argv[3];
         const result = pruneProviderMetrics(provider);
-        writeCliMessage("success", `已清理 ${result.provider} 请求指标：本地删除 ${result.local.deleted} 条。`);
-        if (result.local.backupPath !== null) {
-          console.log(`本地备份：${result.local.backupPath}`);
-        }
-        for (const warning of result.warnings) {
-          writeCliMessage("note", `警告：${warning}`, { destination: "stderr" });
-        }
-        const restored = [];
-        restored.push(result.gatewayWasRunning ? "Gateway 已恢复运行" : "Gateway 原为停止，保持停止");
-        writeCliMessage("success", restored.join("；") + "。");
+        printMaintenanceResult(result);
       } else if (command === "cleanup" || command === "cleanup-restart") {
         const options = parseCleanupOptions(process.argv.slice(3));
         const result = command === "cleanup-restart"
           ? cleanupMetricsDatabaseWithGatewayRestart(process.env, options)
           : cleanupMetricsDatabase(process.env, options);
-        writeCliMessage("success", `已清理 ${result.deleted} 条指标，剩余 ${result.remaining} 条。`);
-        console.log(`数据库：${result.databasePath}`);
-        console.log(`备份：${result.backupPath}`);
-        if (!result.vacuumed) {
-          writeCliMessage("note", "未执行 VACUUM；空闲页会由 SQLite 后续复用。需要立即缩小文件时加 --vacuum。");
-        }
+        printMaintenanceResult(result);
       } else if (command === "report") {
         const options = parseMetricsOptions(
           process.argv.slice(3),
@@ -648,6 +747,7 @@ if (
       }
     });
   } catch (error) {
+    if (error instanceof MetricsMaintenanceError) printMaintenanceResult(error.result, true);
     if (
       !(error instanceof ReportedChildExitError)
       && !(error instanceof ForwardedChildSignalError)

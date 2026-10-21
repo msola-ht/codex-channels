@@ -49,6 +49,8 @@ export async function routeCodexSettingsManagement({
       const payload = {
         revision: result.previousVersion,
         value: result.value,
+        action: result.action,
+        willChange: result.willChange,
         activation: configActivationResult(result.activation),
       };
       if (highRiskCodexSettingKinds.has(body.setting?.kind)) {
@@ -87,6 +89,8 @@ export async function routeCodexSettingsManagement({
         const preview = {
           revision: previewResult.previousVersion,
           value: previewResult.value,
+          action: previewResult.action,
+          willChange: previewResult.willChange,
           activation: configActivationResult(previewResult.activation),
         };
         state.confirmations.consume(body.confirmationToken, {
@@ -112,7 +116,7 @@ export async function routeCodexSettingsManagement({
       current = await readManagementSnapshot(request, response, state,
         signal => state.loadCodexSettings({ environment, signal }));
     } catch (error) {
-      webuiLogger.warn({ module: "settings", event: "settings.readback_failed", err: error }, "App Server 用户设置已写入，但新修订读取失败");
+      webuiLogger.warn({ module: "settings", event: "settings.readback_failed", err: error }, "App Server 用户设置操作已完成，但新修订读取失败");
     }
     let auditStatus = "recorded";
     try {
@@ -124,16 +128,18 @@ export async function routeCodexSettingsManagement({
         inputFingerprint: fingerprintManagementValue(body.setting),
         revision: fingerprintManagementValue(result.previousVersion),
         phase: "completed",
-        resultCode: "updated",
+        resultCode: result.action,
         recovery: current === null ? "re-read" : "none",
       });
     } catch (error) {
       auditStatus = "degraded";
-      webuiLogger.error({ module: "audit", event: "settings.audit_failed", err: error }, "App Server 用户设置已写入，但审计记录失败");
+      webuiLogger.error({ module: "audit", event: "settings.audit_failed", err: error }, "App Server 用户设置操作已完成，但审计记录失败");
     }
     sendManagementJson(response, 200, {
       revision: current?.version ?? null,
       value: result.value,
+      action: result.action,
+      willChange: result.willChange,
       activation: configActivationResult(result.activation),
       consistency: current === null ? "unknown" : "confirmed",
       auditStatus,

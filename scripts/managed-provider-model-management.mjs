@@ -15,6 +15,15 @@ function definitionFor(provider, environment) {
 
 /** All interaction and source acquisition precede the short write transaction. */
 export async function runManagedProviderModelSetup(provider, { environment = process.env, prompts = clackPrompts, output = process.stdout, downloadCatalog = downloadDeepseekCatalog, downloadClineCatalog, loadTemplates, signal } = {}) {
+  while (true) {
+    const result = await runManagedProviderModelOperation(provider, { environment, prompts, output, downloadCatalog, downloadClineCatalog, loadTemplates, signal });
+    if (result.action === "menu-back") return { action: "back", activation: "none" };
+    if (result.action === "back") continue;
+    return result;
+  }
+}
+
+async function runManagedProviderModelOperation(provider, { environment, prompts, output, downloadCatalog, downloadClineCatalog, loadTemplates, signal }) {
   if (["ccg", "ocg", "clp"].includes(provider)) {
     const storageId = provider === "ocg" ? "opencode-go" : provider;
     const accounts = loadManagedModelProviderDefinitions(environment).filter(entry => entry.storageId === storageId);
@@ -33,7 +42,7 @@ export async function runManagedProviderModelSetup(provider, { environment = pro
     { value: "templates", label: clinePass ? "发现 Cline 新模型" : "发现／导入 DS 新模型", hint: "只添加选中的新模型，已有模型使用统一模板更新" },
     { value: "back", label: "返回" },
   ] });
-  if (prompts.isCancel(action) || action === "back") return { action: "back", activation: "none" };
+  if (prompts.isCancel(action) || action === "back") return { action: "menu-back", activation: "none" };
   if (action === "select") {
     output.write(`${current.models.map(model => `  ${model.id}${model.isDefault ? "（账户默认）" : ""}`).join("\n")}\n移除请使用统一模型管理入口。\n`);
     return { action: "back", activation: "none" };

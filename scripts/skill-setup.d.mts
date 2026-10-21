@@ -9,6 +9,8 @@ export interface SkillInstallResult {
   installed: boolean;
   target: string;
   reason?: "exists";
+  backup?: string;
+  retainedDirectory?: string;
 }
 
 export interface SkillUninstallResult {
@@ -35,6 +37,7 @@ export function installSkill(options?: {
   projectRoot?: string;
   environment?: NodeJS.ProcessEnv;
   overwrite?: boolean;
+  expectedTargetRevision?: string;
 }): SkillInstallResult;
 
 export function uninstallSkill(options?: {

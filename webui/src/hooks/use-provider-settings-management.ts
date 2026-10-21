@@ -33,6 +33,7 @@ export function useProviderSettingsManagement(): ProviderSettingsController {
     value: null,
     activation: configActivationResult(result.activation ?? "unknown"),
     auditStatus: result.auditStatus,
+    warnings: result.warnings,
     consistency: management.readbackRequired ? "unknown" : "confirmed",
   }
   return { ...management, actionResult, settings: management.data }

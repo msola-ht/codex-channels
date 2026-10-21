@@ -21,6 +21,7 @@ import { closeDeliveryReaders, waitForDeliveryReadersExit, closeDeliveryJournals
 import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "../runtime/windows-acl-bridge.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { userDataDir } from "./runtime-config.mjs";
+import { GatewayConfigWriteCommittedError } from "../runtime/gateway-config.mjs";
 import {
   assertWebuiHost,
   parseWebuiCliArgs,
@@ -272,6 +273,13 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
     }
     serveStatic(staticDir, url.pathname, response);
   } catch (error) {
+    if (error instanceof GatewayConfigWriteCommittedError) {
+      const sendError = managementRequest ? sendManagementJson : sendJson;
+      sendError(response, 500, {
+        error: { code: "gateway_config_saved_cleanup_failed", message: error.message },
+      });
+      return;
+    }
     if (error instanceof ManagementOperationError) {
       if (error.status >= 500) logger.error({ event: "management.failed", code: error.code, err: error.cause }, "WebUI 管理操作失败");
       sendManagementJson(response, error.status, {

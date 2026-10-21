@@ -111,6 +111,7 @@ export interface CodexUserSettingsDependencies {
 }
 
 export type CodexUserSettingActivation =
+  | "none"
   | "next-thread"
   | "next-tui"
   | "next-thread-and-tui";
@@ -126,6 +127,8 @@ export function updateCodexUserSetting(
   kind: CodexUserSettingInput["kind"];
   previousVersion: string;
   value: Record<string, unknown>;
+  action: "updated" | "unchanged";
+  willChange: boolean;
   activation: CodexUserSettingActivation;
 }>;
 
@@ -136,5 +139,7 @@ export function previewCodexUserSetting(
   kind: CodexUserSettingInput["kind"];
   previousVersion: string;
   value: Record<string, unknown>;
+  action: "updated" | "unchanged";
+  willChange: boolean;
   activation: CodexUserSettingActivation;
 }>;

@@ -90,7 +90,7 @@ export async function runModelProviderDefaultSetup({
     output.write(`模型上下文：${result.model.contextWindow} tokens。\n`);
     output.write(`共享模型 ${model} 的默认思考等级：${reasoningEffort}；影响账户：${result.effects.reasoningEffortProviders.join("、")}。\n`);
     output.write("新会话使用该默认值；恢复历史会话仍使用 Thread 原有模型。\n");
-    output.write("窗口请在「受管模型目录上下文窗口」中选择具体 Provider 与模型设置。\n");
+    output.write("窗口请在「模型管理 → 所属提供商 → 模型上下文窗口」中设置；同族账户共享。\n");
     writeGatewayConfigActivationNotice(output, environment, activationResult);
     return {
       action: "configured",
@@ -139,7 +139,7 @@ function createPrompter(prompts, configured, { allowBack }) {
     },
     selectReasoningEffort: async (_provider, model) => {
       const value = await prompts.select({
-        message: `选择 ${model.displayName} 默认思考等级`,
+        message: `选择 ${model.displayName} 的共享默认思考等级（影响同族账户）`,
         initialValue: model.reasoningEffort,
         options: model.reasoningEfforts.map((option) => ({
           value: option.effort,

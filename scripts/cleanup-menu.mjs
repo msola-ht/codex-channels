@@ -52,13 +52,17 @@ export async function runCleanupMenu({
             run: options => runDatabaseCommand([values[0] === "cleanup-restart" ? "cleanup" : values[0], ...values.slice(1)], options) }),
         });
       } else if (action === "traffic") {
-        await runTrafficCleanup([]);
+        const preview = await runTrafficCleanup([]);
+        if (preview.targets.length === 0) continue;
+        if (typeof preview.fingerprint !== "string") throw new Error("转储清理预览缺少确认指纹，未执行删除");
         const confirmed = await prompts.confirm({
-          message: "确认永久删除当前配置目录中的全部请求与响应转储？执行前将确认临停 Gateway、Relay 和 App Server，结束后按原状态恢复。",
+          message: "确认永久删除本次预览的请求与响应转储？范围变化时将中止；执行前将确认临停 Gateway、Relay 和 App Server，结束后按原状态恢复。",
           initialValue: false,
         });
         if (!prompts.isCancel(confirmed) && confirmed === true) await runMaintenanceServices({ ...services, prompts,
-          targets: ["gateway", "relay", "app-server"], run: options => runTrafficCleanup(["--confirm"], options) });
+          targets: ["gateway", "relay", "app-server"], run: options => runTrafficCleanup(["--confirm"], {
+            ...options, expectedFingerprint: preview.fingerprint,
+          }) });
       } else if (action === "prune") {
         const provider = await prompts.text({
           message: "需要清理指标的精确 Provider ID（区分大小写）",

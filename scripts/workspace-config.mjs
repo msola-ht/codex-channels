@@ -15,6 +15,7 @@ import {
 import {
   readGatewayConfig,
   validateGatewayConfigStructureDocument,
+  withGatewayConfigLock,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { securePrivateFileSync } from "../runtime/private-file.mjs";
@@ -160,41 +161,47 @@ export function removeWorkspaceFromConfig({
   selector,
   fallbackDefaultWorkspace,
   eventQueuePath,
+  expectedDocument,
 }) {
-  const document = readGatewayConfig(configPath);
-  const parsed = parseWorkspaceConfig(document);
-  securePrivateFileSync(configPath);
-  const selected = resolveWorkspaceSelector(parsed.workspaces, selector);
-  if (
-    selected.id === fallbackDefaultWorkspace.id
-    || resolve(selected.cwd) === resolve(fallbackDefaultWorkspace.cwd)
-  ) {
-    throw new Error("固定默认 Workspace 不能删除");
-  }
+  return withGatewayConfigLock(configPath, () => {
+    const document = readGatewayConfig(configPath);
+    if (expectedDocument !== undefined && JSON.stringify(document) !== JSON.stringify(expectedDocument)) {
+      throw new Error("Workspace 配置在展示后发生变化，请重新选择；未移除任何注册");
+    }
+    const parsed = parseWorkspaceConfig(document);
+    securePrivateFileSync(configPath);
+    const selected = resolveWorkspaceSelector(parsed.workspaces, selector);
+    if (
+      selected.id === fallbackDefaultWorkspace.id
+      || resolve(selected.cwd) === resolve(fallbackDefaultWorkspace.cwd)
+    ) {
+      throw new Error("固定默认 Workspace 不能删除");
+    }
 
-  const workspaces = parsed.workspaces.filter(
-    (workspace) => workspace.id !== selected.id,
-  );
-  let defaultWorkspace = workspaces.find(
-    (workspace) => workspace.id === parsed.defaultWorkspaceId,
-  );
-  if (!defaultWorkspace) {
-    const fallback = ensureFallbackWorkspace(fallbackDefaultWorkspace);
-    defaultWorkspace = upsertFallbackWorkspace(workspaces, fallback);
-  }
-  if (eventQueuePath) {
-    readConfigEvents(eventQueuePath);
-  }
-  writeWorkspaceConfig(configPath, document, workspaces, defaultWorkspace.id);
-  const eventQueueCleanupPending = eventQueuePath
-    ? cleanupCommittedWorkspaceEvents(eventQueuePath, [selected.id])
-    : false;
-  return {
-    removedWorkspace: selected,
-    defaultWorkspace,
-    defaultChanged: defaultWorkspace.id !== parsed.defaultWorkspaceId,
-    eventQueueCleanupPending,
-  };
+    const workspaces = parsed.workspaces.filter(
+      (workspace) => workspace.id !== selected.id,
+    );
+    let defaultWorkspace = workspaces.find(
+      (workspace) => workspace.id === parsed.defaultWorkspaceId,
+    );
+    if (!defaultWorkspace) {
+      const fallback = ensureFallbackWorkspace(fallbackDefaultWorkspace);
+      defaultWorkspace = upsertFallbackWorkspace(workspaces, fallback);
+    }
+    if (eventQueuePath) {
+      readConfigEvents(eventQueuePath);
+    }
+    writeWorkspaceConfig(configPath, document, workspaces, defaultWorkspace.id);
+    const eventQueueCleanupPending = eventQueuePath
+      ? cleanupCommittedWorkspaceEvents(eventQueuePath, [selected.id])
+      : false;
+    return {
+      removedWorkspace: selected,
+      defaultWorkspace,
+      defaultChanged: defaultWorkspace.id !== parsed.defaultWorkspaceId,
+      eventQueueCleanupPending,
+    };
+  });
 }
 
 function cleanupCommittedWorkspaceEvents(eventQueuePath, workspaceIds) {

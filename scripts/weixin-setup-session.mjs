@@ -3,6 +3,7 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  GatewayConfigWriteCommittedError,
   readGatewayConfig,
   validateGatewayConfigStructureDocument,
   writeGatewayConfig,
@@ -203,6 +204,7 @@ class WeixinSetupSession {
     let credentialWriteAttempted = false;
     let configWriteAttempted = false;
     let configBeforeWrite;
+    const warnings = [];
     try {
       store = await this.#createCredentialStore(
         join(this.#dataDir, "credentials", "weixin"),
@@ -214,7 +216,9 @@ class WeixinSetupSession {
       configWriteAttempted = true;
       this.#writeConfig(this.#configPath, currentDocument);
     } catch (error) {
-      const confirmation = configWriteAttempted ? confirmWeixinConfig(
+      const committed = configWriteAttempted && error instanceof GatewayConfigWriteCommittedError;
+      if (committed) warnings.push({ code: "gateway-config-lock-release-failed" });
+      const confirmation = committed ? { applied: true } : configWriteAttempted ? confirmWeixinConfig(
         this.#configPath,
         credential.accountId,
         allowedUserIds,
@@ -244,7 +248,6 @@ class WeixinSetupSession {
         throw error;
       }
     }
-    const warnings = [];
     const oldAccountId = stringValue(currentExisting.account_id);
     if (oldAccountId && oldAccountId !== credential.accountId) {
       try {

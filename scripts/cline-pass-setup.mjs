@@ -15,14 +15,23 @@ import {
   setClinePassDefaultAccount,
 } from "./cline-pass-account-management.mjs";
 
-export async function runClinePassSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout } = {}) {
+export async function runClinePassSetup(options = {}) {
+  while (true) {
+    const result = await runClinePassSetupOperation(options);
+    if (result.action === "menu-back") return { action: "back" };
+    if (result.action === "back") continue;
+    return result;
+  }
+}
+
+async function runClinePassSetupOperation({ environment = process.env, prompts = clackPrompts, output = process.stdout } = {}) {
   const accounts = loadClinePassAccounts(environment);
   const action = await prompts.select({ message: "Cline Pass 官方", options: [
     { value: "configure", label: "添加账户" },
     ...(accounts.length ? [{ value: "reconfigure", label: "重新配置账户" }, { value: "models", label: "模型管理／本地移除" }, { value: "catalog", label: "发现／添加新模型" }, { value: "default", label: "设置默认账户" }, { value: "remove", label: "移除账户" }] : []),
     { value: "back", label: "返回" },
   ] });
-  if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (prompts.isCancel(action) || action === "back") return { action: "menu-back" };
   if (action === "models") return runProviderModelSetup({ environment, prompts, output, provider: "clp" });
   if (action === "catalog") {
     const accountId = accounts[0].id;
@@ -42,7 +51,7 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
   } else {
     const apiKey = await prompts.password({ message: "Cline Pass API Key", validate: value => isManagedProviderApiKeyValid(definition, value) ? undefined : "请输入有效 API Key" });
     if (prompts.isCancel(apiKey)) return { action: "back" };
-    const mode = await prompts.select({ message: "运行模式", options: [{ value: "switching", label: "切换模式" }, { value: "exclusive", label: "固定模式" }] });
+    const mode = await prompts.select({ message: "运行模式", options: [{ value: "switching", label: "切换模式", hint: "保留 OpenAI 主实例，使用独立实例" }, { value: "exclusive", label: "固定模式", hint: "修改主实例配置，使用此账户" }] });
     if (prompts.isCancel(mode)) return { action: "back" };
     const input = { accountId, apiKey, mode, reconfigure: action === "reconfigure" };
     const preview = previewClinePassConfiguration(input, { environment });

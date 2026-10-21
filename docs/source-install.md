@@ -131,7 +131,7 @@ hook；操作者的有效 npm `ignore-scripts=true` 设置会跳过 hook，显�
 `prebuild`、`postbuild` 等生命周期脚本。Windows 因此不会生成所需原生 DLL，缺少原生产物时无法
 完成全局安装。更新在停服前复核目录归属，并把旧 checkout 中完整且有效的 npm prefix 清单合并到
 候选 `.git/config`；切换成功后仍保留其他 Node.js 环境的安装归属，供后续卸载核对。清单无效或
-合并失败时保留当前源码与服务；切换后失败仍按下文保留旧源码备份。
+合并失败时保留当前源码与服务。停服前及切换源码前再次核对旧目录身份、HEAD、origin 和未提交修改；变化时拒绝继续切换。源码切换成功后，旧目录无论更新最终成功或失败都保留在输出的 `codex-channels.pre-update-*` 路径，不自动删除，以保护预检之后或仍持有旧目录句柄的编辑器写入。确认没有需要保留的修改、没有进程继续使用旧目录后，再手动清理该精确副本；更新不会自动回退到旧副本或覆盖当前源码。
 
 更新通过官方版本化配置事务将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，避免原生终端另起官方后台；已为 `false` 时不重复写入，未设置或为 `true` 时关闭。即使源码与 CLI 无需更新且数据库已满足当前结构，也执行该设置。其他用户偏好与 Provider 模型目录不改写，也不处理历史服务和 PATH。写入失败会使更新明确失败；数据库已就绪时仍按原恢复流程恢复项目服务。此操作不停止已有官方 daemon，不改变其自动更新设置；`codexc remote` 继续连接项目管理的实例。
 
@@ -180,6 +180,9 @@ Windows 构建使用现有 PowerShell 7 提前编译原生 Job/目录保护 DLL�
 已有运行服务时，先从本机终端记录 `codexc status all` 和 `codexc status webui` 的状态，停止运行中的 WebUI，再执行 `codexc stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；这里使用显式目标，配置中关闭的 WebUI 不会自动恢复，需要时显式运行 `codexc start webui`。安装失败先处理错误，不启动版本未就绪的服务。程序目录、Node.js 路径或服务模板改变时用 `codexc install` 重建并激活服务定义；该命令会启动核心服务。macOS/Linux 的 50 秒停止期限及 Linux 的有序子进程收尾设置属于模板变更，仅更新程序和重启不能将它们写入已有定义。
 
 `npm run install:global` 不拉取 Git，也不自动管理服务；上面的 `codexc install` 是另行执行的服务操作。自行选择分支并更新源码后重复执行程序安装；当前全局包不属于受管源码安装时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
+
+服务安装会在三个平台的四类定义中保存显式 `CODEX_HOME` 的规范化目录，未设置时不写该变量。Unix 已有定义需在设置了目标 Home 的终端重新执行 `codexc install` 才能加载此行为；Linux 的新定义同时关闭 ExecStart 变量展开，保留路径中的字面 `$`。普通 restart 不重建定义；重新安装的核心服务、Relay 与 WebUI 激活边界同上。
+当前源码更新预检按新 ExecStart 格式核对 Linux 服务定义；旧定义被拒绝时，先按本节完成程序安装和 `codexc install`，再使用源码自动更新，不手工绕过路径检查。
 
 新设备先运行 `npm run install:global`，安装成功后在交互终端运行 `codexc init` 完成初始化、接入和后台服务安装；仅在跳过相应步骤时再按需运行 `codexc setup`、`codexc install`。非交互 `init` 只初始化用户数据，不提供无人值守接入；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。
 Windows 首次或旧服务定义不完整时，若任务激活或就绪检查失败，会保留本次生成的服务定义并报告原始失败阶段，便于检查状态、日志和重试；不会删除任务引用的定义后再尝试安装不存在的旧服务。已有完整定义的安装继续恢复旧定义；恢复失败时同时保留原始安装错误。
