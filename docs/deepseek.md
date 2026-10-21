@@ -160,9 +160,11 @@ Remote 保留 `--profile sf-ds-personal`；两个入口默认连接主实例，�
 DS 目录生成时明确设置 `support_verbosity: false`、`default_verbosity: null`、
 `supports_reasoning_summary_parameter: false` 和 `default_reasoning_summary: "none"`，
 移除锁定 Codex 已不使用的 `supports_reasoning_summaries` 声明。保留完整思考正文、工具能力与提示词。
-已有账户可通过 Setup 的“编辑账户”或 `codexc provider deepseek reconfigure <账户>` 应用；
-复用该账户的本地目录，不重新下载，不重置模型、思考等级或上下文设置；只更新所选账户，
-写入失败按现有配置事务恢复原文件；完成后重启 App Server 生效。启动、Doctor 和源码更新器不隐式改写目录。
+已有账户的上述能力参数通过“模型管理 → 对比并更新模型模板”显式更新：选择 DS 模型及对应的 DeepSeek 模板，
+勾选“能力参数”，查看差异后确认保存。来源读取仓库中的 DS 模板快照，不重新下载；所选模型的修改由所有 DS 账户共用，
+保留账户凭据、各自默认模型、模型默认思考等级和当前窗口；来源不支持当前设置时拒绝更新，不自动替换。
+模板保存沿用目录与来源备份及事务恢复，完成后按提示重启 App Server。账户编辑只调整 Key 和运行模式，复用已有目录；
+启动、Doctor 和源码更新器也不隐式改写目录。模板更新仅修改所选范围，不承诺清除所有历史字段。
 
 当前版本拒绝旧嵌套或平级账户目录及未完成的历史目录迁移，不提供迁移命令。
 保留原文件、备份和标记，处理边界见[当前目录布局与旧版本恢复](provider-integration-guide.md#当前目录布局与旧版本恢复)；升级不会迁移真实用户目录。
