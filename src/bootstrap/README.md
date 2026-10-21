@@ -33,7 +33,7 @@
   已登记计划任务的同类工具请求在本入口先由恢复协调器记录拒绝，其余请求仍由 `scheduled-task-server-request.ts` 拒绝；工具入口的独立检查仍覆盖未知 Run、显式重试和重启后的旧 Thread。
 - `app.ts`：通过异步 `GatewayApplication.create` 提供唯一构造入口，接收已加载的内置渠道插件；构造失败时逆序清理组合根登记的已取得资源，继续清理其余组件并保留原始错误及清理错误。提供启动、停止和配置重载入口，编排顶层生命周期，
   把具体组件所有权交给组件图；持有启动/停止幂等任务，内部致命故障同时通知进程生命周期退出，配置重载继承组件图实现，启动中取消、订阅移除和资源关闭由组件图统一处理。
-- `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；
+- `gateway-component-graph.ts`：为 OpenAI 与受管 DS 主／隔离 Client 注入图片引用能力；OpenAI 上传遵循共享代理配置，本地模型路由核验直连回环地址；DS 只经受保护 Supervisor IPC 取得运行实例能力，并将私有路由读取失败映射为固定安全分类及设置应用／重启提示，不透传未知异常正文；
   为渠道 Hook 管理注入实时授权守卫及 Surface 无损审查策略，在会话锁内和写入前复核运行状态、渠道允许名单及 Actor 归属；
   Provider 断线时清理其已绑定 Thread 的 MCP 登录关联，防止跨连接迟到完成重新投递；
   校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；

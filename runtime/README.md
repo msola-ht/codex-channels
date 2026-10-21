@@ -202,7 +202,11 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   和服务安装入口复用；Windows 同时校验最终 UDS 路径长度，避免各入口独立解释运行拓扑。
 - `app-server-service-runtime.mjs`：持有内部 App Server 服务入口的 Provider 统计代理、主实例与隔离
   实例子进程、按需启动/释放、Supervisor、可选 Desktop App 桥和退出清理生命周期；不额外打开 Codex
-  特性，也不改写上游私有请求头。Provider Proxy 在每次出站请求时使用当前缓存的代理路由；
+  特性，也不改写上游私有请求头。受管 DS 图片上传的随机能力由该服务持有，按精确 Provider、
+  运行实例、代理地址和代次绑定，经私有 Supervisor IPC 交给 Gateway；释放或重启实例撤销旧能力。
+  独立材料 Worker 的同次前后设置指纹必须一致且匹配已应用的 `settingsSnapshots`，待应用配置
+  拒绝上传；异步代理发现后、实际出站前及上传后复核，Key 不经上传路由 IPC 传出。
+  Provider Proxy 在每次出站请求时使用当前缓存的代理路由；
   上游连接失败会使系统代理发现结果失效，下一次请求可采用代理软件启动后才写入的系统代理，无需重启
   模型代理。App Server 自身发出的账户额度请求不经过 Provider Proxy；Gateway 的系统代理观察器仅
   提示操作者在所有客户端任务结束后重新启动 Gateway 与 App Server，不自动刷新子进程环境。Codex `.env` 和标准代理环境
@@ -268,6 +272,9 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   提供商拓扑变化或 CP 上游协议与启动快照不同，以白名单错误码 `PROVIDER_TOPOLOGY_CHANGED` 跨监管 IPC 传递，调用方据此提示显式重启；未知错误不返回内部正文。聚合材料包含 CP `provider.json`，协议变化使旧出站材料失效；指纹查询与应用准备均复核协议，避免旧代理错误宣称已应用。
   原生 TUI 租约阻止设置应用时，返回宿主快照前仍只读核对聚合协议，避免把必须重启的变化长期报告为等待租约释放；不会因此释放或重建被租约占用的实例。
   `readAppServerProviderSettingsFingerprint` 提供同源只读指纹比较，供调用方关联一次捕获的目录；IPC 不保存或返回目录副本。
+  v5 的 `imageUploadRoute` 使用独立 `imageUploadProtocolVersion=1`，只接受已登记的精确 DS
+  Provider，通过同一 Provider 队列确认运行实例后返回根路径上传 endpoint、含准确账户前缀的 modelEndpoint、revision 和随机 Bearer 能力；Client 将 modelEndpoint 与官方配置精确比对，只向同源上传 endpoint 发送能力。
+  revision 只检测变化，不授予上传权限；旧宿主缺少能力时失败关闭并提示重启 App Server 与 Gateway，不自动重启。
   Gateway 还据此避免把主动释放
   误判为意外断线。入口集中检查真实 WebSocket 健康状态，拒绝
   未受监管的活动 App Server；Windows 通过官方 `app-server proxy` 检查 UDS 健康并把失效 rendezvous
@@ -276,7 +283,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `provider-proxy-runtime-registry.mjs` / `provider-proxy-runtime-registry.d.mts`：按精确 Provider ID 合并并发
   启动，保存构造中与已启动代理及其 Provider 使用者；关闭成功后才移除登记，失败保留资源并允许再次清理，
   清理未确认时拒绝复用或替换，避免同一 Provider 并发启动时重复创建或过早关闭代理。
-- `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
+- `app-server-supervisor.d.mts`：声明 App Server 监管拓扑、健康检查与私有图片上传路由接口。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
   建立与应用就绪使用不同状态，应用开始停止时立即撤销就绪；公开同源健康探针供本地更新确认
@@ -341,7 +348,8 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup 与 Runtime 复用。
 - `provider-file-access.mjs` / `provider-file-access.d.mts`：在创建访问器时绑定当前环境的 Codex Home，通过 `isMainConfig` 精确规范化匹配唯一共享主配置；其他路径（包括同名备份）保持严格私有。Provider 的读取、凭据认证选择、指纹、事务写入和回滚使用同一归属判断，不由业务入口选择权限标记；不改变磁盘路径或格式。
-- `single-worker-reader.mjs` / `single-worker-reader.d.mts`：设置快照与 Relay 材料 Reader 共用的单 Worker 宿主；集中读取合并、ready/读取时限、监听清理和物理退出归属。业务否定结果保留线程，通信失败进入协作关闭；各 Reader 提供自身数据、预算和安全错误。`readFresh` 等待已有读取后重新请求，不是缓存。`closeSingleWorkerReaders` 永久关闭当前进程的准入；有界关闭失败后，`waitForSingleWorkerReadersExit` 及 Reader 的 `waitForExit` 仍等待物理线程退出，包含嵌套 Windows ACL 清理。
+- `single-worker-reader.mjs` / `single-worker-reader.d.mts`：设置快照、Relay 材料与 DS 图片材料 Reader 共用的单 Worker 宿主；集中读取合并、ready/读取时限、监听清理和物理退出归属。业务否定结果保留线程，通信失败进入协作关闭；各 Reader 提供自身数据、预算和安全错误。`readFresh` 等待已有读取后重新请求，不是缓存。`closeSingleWorkerReaders` 永久关闭当前进程的准入；有界关闭失败后，`waitForSingleWorkerReadersExit` 及 Reader 的 `waitForExit` 仍等待物理线程退出，包含嵌套 Windows ACL 清理。
+- `deepseek-image-material-reader.mjs` / `deepseek-image-material-worker.mjs`：受管 DS 上传拥有的窄材料读取器，按精确 Provider 在独立 Worker 中复核私有账户材料和同次前后设置指纹；不复用 Relay 业务授权，不在主线程执行私有文件或 Windows ACL 读取。协作关闭等待嵌套 ACL 清理，关闭超时仍保留物理退出归属；App Server 正常及超时关闭均先停止材料读取准入，再等待 Worker 与当前进程 ACL 资源实际退出，超时保留故障状态。
 - `provider-settings-snapshot-reader.mjs` / `provider-settings-snapshot-reader.d.mts` / `provider-settings-snapshot-worker.mjs`：Provider 设置观察器拥有的单 Worker，读取有界材料指纹并校验完整配置；聚合成员变化单独返回需重启状态，不阻断其他提供商指纹读取。初始化与单次读取分别限时，关闭确认线程退出，源正文和凭据不跨线程返回。Windows 协作关闭先等待 ACL 子进程实际退出，再关闭外层线程；2 秒关闭等待超时仍保留旧代及引用，不启动替代线程。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时

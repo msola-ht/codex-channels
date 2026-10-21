@@ -23,6 +23,13 @@ export interface AppServerProviderLease {
   close(): Promise<void>;
 }
 
+export interface AppServerImageUploadRoute {
+  endpoint: string;
+  modelEndpoint: string;
+  revision: string;
+  authorization: string;
+}
+
 export type AppServerProviderReleaseResult =
   | { released: true; reason: "released" }
   | { released: false; reason: "leased" | "not-running" };
@@ -51,6 +58,7 @@ export class AppServerSupervisorOwner {
       releaseProvider?: (provider: string) => Promise<boolean>;
       applyProviderSettings?: (provider: string, signal: AbortSignal, canApply: () => boolean) => Promise<AppServerProviderSettingsResult>;
       providerSettingsSnapshot?: (provider: string) => AppServerProviderSettingsSnapshot | undefined;
+      imageUploadRoute?: (provider: string, signal: AbortSignal) => Promise<AppServerImageUploadRoute>;
       attachDesktopApp?: (attachment: {
         provider: string;
         appPath: string;
@@ -81,6 +89,9 @@ export function ensureAppServerProvider(
   provider: string,
   signal?: AbortSignal,
 ): Promise<void>;
+export function readAppServerImageUploadRoute(
+  primarySocketPath: string, provider: string, signal?: AbortSignal,
+): Promise<AppServerImageUploadRoute>;
 export function acquireAppServerProviderLease(
   primarySocketPath: string,
   provider: string,

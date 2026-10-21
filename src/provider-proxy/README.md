@@ -25,10 +25,13 @@
   `/responses` 与只读 `/models` 路径转发到上游；官方 OpenAI
   主代理提供只读 `GET /_codexc/image-upload-route`，通过正在运行的路由解析器核验默认
   ChatGPT 图片引用后端，不转发上游、不读取凭据、不生成模型指标；独立后端返回不支持。
-  受管 DeepSeek 原生 Responses 代理在同一只读入口报告可选本地上传，并提供
-  `POST /_codexc/image-upload`：只接受 10 MiB 内 PNG/JPEG/WebP/GIF 原始字节、精确 Provider
-  修订和严格媒体签名，由 Runtime 提供的凭据回调上传到官方 `/files`，只返回校验后的
+  受管 DeepSeek 原生 Responses 代理的同一路由描述入口和 `POST /_codexc/image-upload`
+  均要求 Runtime 确认的随机运行实例 Bearer 能力；HTTP 不授予能力，配置修订不能代替授权。
+  POST 只接受 10 MiB 内 PNG/JPEG/WebP/GIF 原始字节、精确 Provider 修订和严格媒体签名，
+  由 Runtime 材料回调复核运行设置快照、代次和私有凭据，再上传到官方 `/files`，只返回校验后的
   `file-api-...` 编号；不暴露 Key、上游错误或文件列表，最多四项并行，断线与关闭取消。
+  本地上传整次预算为 30 秒，包含收图、材料复核及上游传输；上游 Files POST 自身上限为 60 秒，
+  单次请求不自动重试。实例释放或重启撤销能力，上传失败不回退内联输入。
   主代理还按当前锁定 Codex 0.163.0 的固定端点清单接受 POST `/alpha/search`、
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
   `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限
