@@ -258,7 +258,7 @@ export async function removeOpencodeGoAccount(accountId, {
   const removesLastAccount = preview.effects?.removesLastAccount === true;
   const confirmationMessage = removesLastAccount
     ? preview.effects?.restoresInitialConfig === true
-      ? `确认删除最后一个 OpenCode Go 账户 ${accountId}？将恢复安装前 Codex 主配置，历史 Thread 将不可恢复。`
+      ? `确认删除最后一个 OpenCode Go 账户 ${accountId}？将恢复该账户接管的 Codex 主配置字段，保留其他设置；历史 Thread 将不可恢复。`
       : `确认删除最后一个 OpenCode Go 账户 ${accountId}？将删除该账户配置，保留共享模型目录，历史 Thread 将不可恢复。`
     : `确认删除 OpenCode Go 账户 ${accountId}？历史 Thread 将不可恢复。`;
   if (confirm && !await confirmPrompt(prompts, confirmationMessage, false)) {
@@ -274,7 +274,7 @@ export async function removeOpencodeGoAccount(accountId, {
   });
   const cleanupSummary = removesLastAccount
     ? result.effects?.restoresInitialConfig === true
-      ? "，主配置已恢复为安装前状态"
+      ? "，该账户接管的主配置字段已恢复，其他设置已保留"
       : "，账户配置已清理，共享模型目录已保留"
     : "";
   output.write(

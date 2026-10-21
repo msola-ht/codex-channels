@@ -165,7 +165,6 @@ DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开�
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
 与 codexc app 使用相同的 -p / --provider 选择：推荐 -p ds-main、-p clp-main 或 -p cp-llm，
 也接受已配置的规范 sf- 名称，例如 -p sf-ds-main、-p sf-cp-llm。
-至少两个 API Key 切换提供商已配置时，可用 -p agg 或 -p sf-agg 连接聚合实例，
 默认模型从服务端读取。自动审批沿用工作区或显式设置；终端退出时释放实例租约。
 Provider 选择不能与 --profile 同用；个人 Profile 请显式使用 --profile，-- 后参数原样透传。
 不指定 Provider 或 Profile 时连接主实例，不根据登录状态自动选择第三方。`,

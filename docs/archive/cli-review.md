@@ -1,10 +1,10 @@
-# CLI 逐项审查记录
+# CLI 审查与分批修复历史记录
 
 ## 范围与状态
 
-本记录按“审查记录→逐批修复→子代理复查→关联修正→本地提交”的顺序推进。范围是 `codexc` 的命令结构、文案、执行逻辑、聚合与拆分、重复实现和用户流程。前两轮仅修改审查记录及索引；用户现已授权按六批实施并逐批本地提交，不包含远程推送、操作真实用户服务/配置或外部发送。历史审查结论保留原基线，当前修复进度及证据以文末执行记录为准。
+本任务已完成。25 条确认发现按六批修复，每批经过全链路分析、独立 Sol 复查、关联修正及本地提交；另完成三项明确文案澄清。未推送、部署或操作真实用户服务/账户。本记录保留审查时点和逐批证据，不作为当前待办计划；现行合同见[使用指南](../user-guide.md)、[服务时区](../model-timezone.md)、[投递箱运维](../delivery.md)、[Runtime](../../runtime/README.md)及[脚本职责](../../scripts/README.md)。
 
-基线：`ea9afe5b441d316e3390b1512764ed8e94a4f948`，2026-10-20；开始时工作区无已有改动。以下源码结论针对该基线，不代表安装中的全局命令。第一轮按四批覆盖 C01–C16 的 CLI 结构、编排及相关管理合同，并完成 Astra 独立复审和主代理证据核对。状态更正：第一轮完成不等于所有子流程已深入审完；此前“审查分析完成”的表述过宽。第二轮现已完成 D01–D05 补查、四个 Sol 分工报告整合和 Astra 对四项重点发现的独立核验，累计 25 条确认发现，均未实施修正。各批明确底层/平台及运行观察限制；完成的是所列 CLI 流程与共享合同审查，不是所有底层实现、全仓库或上游协议审计。
+基线：`ea9afe5b441d316e3390b1512764ed8e94a4f948`，2026-10-20；开始时工作区无已有改动。以下源码结论针对该基线，不代表安装中的全局命令。第一轮按四批覆盖 C01–C16 的 CLI 结构、编排及相关管理合同，并完成 Astra 独立复审和主代理证据核对。状态更正：第一轮完成不等于所有子流程已深入审完；此前“审查分析完成”的表述过宽。第二轮现已完成 D01–D05 补查、四个 Sol 分工报告整合和 Astra 对四项重点发现的独立核验，累计 25 条确认发现，在该审查阶段均未实施修正。各批明确底层/平台及运行观察限制；完成的是所列 CLI 流程与共享合同审查，不是所有底层实现、全仓库或上游协议审计。
 
 每项依次记录：用户意图与合同 → 入口及最终消费路径 → 正常、取消、失败与非交互流程 → 文案与反馈 → 重复/聚合/拆分判断 → 证据、影响、建议与未观察范围。问题区分为已确认不一致、设计建议、待核实风险；建议不等于实施决策。
 
@@ -31,11 +31,11 @@
 | C15 | `version`、`update`、程序 `uninstall` | 第四批完成；身份、预检、切换及恢复 |
 | C16 | 跨入口收敛复核 | 第四批完成；共享管理层与呈现边界 |
 
-公共命令来自 [顶层入口](../bin/codexc.mjs) 的帮助与分派；内部 `gateway`、`service-app-server`、`service-model-relay` 只作为后续生命周期调用链检查，不列为用户命令。聊天渠道斜杠命令不在本轮独立审查范围，仅在共享业务合同需要时追踪。
+公共命令来自 [顶层入口](../../bin/codexc.mjs) 的帮助与分派；内部 `gateway`、`service-app-server`、`service-model-relay` 只作为后续生命周期调用链检查，不列为用户命令。聊天渠道斜杠命令不在本轮独立审查范围，仅在共享业务合同需要时追踪。
 
 ## C01：顶层分类与菜单流程
 
-证据：`bin/codexc.mjs:77` 的 `helpText.main`、`:286` 的入口判断、`:307` 的 `executeCommand`；[cli-menu.mjs](../scripts/cli-menu.mjs) 的 `runCliMenu`、`runLaunchMenu`、`runToolGroup`、`runServiceMenu`；[使用入口](../README.md)。
+证据：`bin/codexc.mjs:77` 的 `helpText.main`、`:286` 的入口判断、`:307` 的 `executeCommand`；[cli-menu.mjs](../../scripts/cli-menu.mjs) 的 `runCliMenu`、`runLaunchMenu`、`runToolGroup`、`runServiceMenu`；[使用入口](../../README.md)。
 
 - 顶层帮助与菜单均分为运行与连接、工作区、日常设置、接入与账户、状态与服务、数据与维护、程序维护。分类已基本收敛，不建议再增加一层覆盖全部命令的命名空间。
 - stdin/stdout 同为 TTY 时，无参数打开菜单；否则显示帮助。菜单通过注入的 `runCommand` 回到同一 `executeCommand`，没有另写一套顶层执行逻辑。
@@ -48,7 +48,7 @@
 
 ## C02：帮助、文案与职责拆分
 
-证据：[cli-help.mjs](../scripts/cli-help.mjs) 的 `isCommandHelp`；`bin/codexc.mjs:1052` 的 `showRequestedHelp`、`:1060` 的 `showSubcommandHelp`；[cli-command-usage.mjs](../scripts/cli-command-usage.mjs)；[cli-presentation.mjs](../runtime/cli-presentation.mjs)。
+证据：[cli-help.mjs](../../scripts/cli-help.mjs) 的 `isCommandHelp`；`bin/codexc.mjs:1052` 的 `showRequestedHelp`、`:1060` 的 `showSubcommandHelp`；[cli-command-usage.mjs](../../scripts/cli-command-usage.mjs)；[cli-presentation.mjs](../../runtime/cli-presentation.mjs)。
 
 - 一部分帮助已独立为纯数据，另一部分仍位于 `bin/codexc.mjs`。帮助路径有共享精确匹配器和本地一层/两层判断；它们行为范围不同，不能直接认定可互换。
 - 普通操作使用 `[成功]/[失败]/[提示]/[处理]`，Doctor 项目使用 `[通过]`；这是有意区分检查结果与操作结果，不建议统一成一个标签。
@@ -63,7 +63,7 @@
 
 链路：`bin/codexc.mjs:514` 的 `cleanup` 按 sessions/traffic/metrics 分派；traffic 解析后调用维护脚本，metrics 经 `metricsMaintenance` 转成底层 `cleanup/reset/prune` 动作。`:544` 的 `traffic` 拒绝旧 cleanup 路径，`:830` 的 `metrics` 拒绝 reset/cleanup/prune。菜单的清理入口同样进入 `cleanup`，再复用各领域维护入口。
 
-**C03-F01，已确认合同文档过期，中优先级。** [bin/README.md](../bin/README.md) 的 `metrics` 段称“直接维护子命令保留”，`traffic` 段仍说明 `traffic cleanup`。公开入口已经拒绝这些命令；使用旧说明会得到退出码 1，不能到达维护能力。当前有效入口是 `cleanup metrics` 与 `cleanup traffic`。
+**C03-F01，已确认合同文档过期，中优先级。** [bin/README.md](../../bin/README.md) 的 `metrics` 段称“直接维护子命令保留”，`traffic` 段仍说明 `traffic cleanup`。公开入口已经拒绝这些命令；使用旧说明会得到退出码 1，不能到达维护能力。当前有效入口是 `cleanup metrics` 与 `cleanup traffic`。
 
 建议后续修正模块说明并核对相关引用，保留公开入口的显式拒绝；不新增兼容别名。底层脚本仍使用领域动作是内部执行合同，不等于旧公开 CLI 仍受支持，也不能为了名称统一直接删除底层分支。维护执行、停止条件及数据恢复已在 C11 补查。
 
@@ -90,11 +90,11 @@
 
 ### 已查链路与判断
 
-- `bin/codexc.mjs initialize/runSetup` → [init-wizard.mjs](../scripts/init-wizard.mjs) / [setup.mjs](../scripts/setup.mjs) / [config.mjs](../scripts/config.mjs)：初始化负责目录与配置，再选择接入、偏好、可选功能、服务安装；Setup 负责接入，Config 负责日常设置。三者复用领域入口，重叠入口本身有用户价值，无需合成一个长向导。
+- `bin/codexc.mjs initialize/runSetup` → [init-wizard.mjs](../../scripts/init-wizard.mjs) / [setup.mjs](../../scripts/setup.mjs) / [config.mjs](../../scripts/config.mjs)：初始化负责目录与配置，再选择接入、偏好、可选功能、服务安装；Setup 负责接入，Config 负责日常设置。三者复用领域入口，重叠入口本身有用户价值，无需合成一个长向导。
 - Setup 非交互检查在实际接入前进行；`--jsonl` 仍要求 stdin/stderr 为终端。公开 Setup/Config 使用持续菜单模式，失败不会自动重试；初始化取消明确保留已经应用的设置。初始化末尾区分核心安装与 WebUI 启动失败。
-- [timezone-command.mjs](../scripts/timezone-command.mjs) → [config-management.mjs](../scripts/config-management.mjs) → [gateway-config.mjs](../runtime/gateway-config.mjs)：参数拒绝重复及互斥组合，IANA 名称检查，使用读取时 revision；共享写入器在锁内核对原文并原子写入。Config 的时区选项调用同一入口，WebUI Gateway 设置路由也调用 `updateGatewaySetting`，没有必要再造时区写入层。
+- [timezone-command.mjs](../../scripts/timezone-command.mjs) → [config-management.mjs](../../scripts/config-management.mjs) → [gateway-config.mjs](../../runtime/gateway-config.mjs)：参数拒绝重复及互斥组合，IANA 名称检查，使用读取时 revision；共享写入器在锁内核对原文并原子写入。Config 的时区选项调用同一入口，WebUI Gateway 设置路由也调用 `updateGatewaySetting`，没有必要再造时区写入层。
 - 消费端：`src/config/index.ts` 将 Gateway 的独立时区/跟随/系统三种语义分开，`scripts/webui-server.mjs applyConfiguredTimezone` 使用 `codex.timezone`；设置模块将服务时区激活标为 App Server/Gateway/WebUI 重启。不能把已保存的值描述为运行中进程已切换。
-- [workspace-command.mjs](../scripts/workspace-command.mjs) → [workspace-config.mjs](../scripts/workspace-config.mjs)：注册与新建分开；移除只删除注册，固定默认项受保护，删除当前默认时回退；通知队列预读后提交配置，提交后队列清理失败明确提示“配置已保存，勿重复”。`work` 设置默认复用 Config 的 `runDefaultWorkspace`，后者使用 revision。没有发现需要为相同默认项另建业务实现的理由。
+- [workspace-command.mjs](../../scripts/workspace-command.mjs) → [workspace-config.mjs](../../scripts/workspace-config.mjs)：注册与新建分开；移除只删除注册，固定默认项受保护，删除当前默认时回退；通知队列预读后提交配置，提交后队列清理失败明确提示“配置已保存，勿重复”。`work` 设置默认复用 Config 的 `runDefaultWorkspace`，后者使用 revision。没有发现需要为相同默认项另建业务实现的理由。
 
 ### 发现与建议
 
@@ -112,7 +112,7 @@
 
 ### C06：Provider 与账户
 
-链路：顶层 `provider` → [primary-provider-cli.mjs](../scripts/primary-provider-cli.mjs) → [primary-provider-management.mjs](../scripts/primary-provider-management.mjs) → 配置事务；受管账户分别进入 DS/OCG/CCG Setup 和所属管理模块。自定义主 Provider 的预览在执行时重建并比较；受管账户移除携带展示前的 revision。Setup 的账户/模型编辑比直接 CLI 更丰富，CLP 只经 Setup 提供接入；这种能力不对称不能仅按命令数量判为遗漏。
+链路：顶层 `provider` → [primary-provider-cli.mjs](../../scripts/primary-provider-cli.mjs) → [primary-provider-management.mjs](../../scripts/primary-provider-management.mjs) → 配置事务；受管账户分别进入 DS/OCG/CCG Setup 和所属管理模块。自定义主 Provider 的预览在执行时重建并比较；受管账户移除携带展示前的 revision。Setup 的账户/模型编辑比直接 CLI 更丰富，CLP 只经 Setup 提供接入；这种能力不对称不能仅按命令数量判为遗漏。
 
 - `release` 对外表示释放实例，OCG 内部映射 `stop`，并说明后续可重启；不应与删除账户合并。
 - 自定义 `switch` 默认确认、`--yes` 明确跳过；直接 `remove` 不确认，菜单 remove 确认。当前帮助没有承诺直接 remove 会询问，因此先记为交互一致性建议，不能称为绕过既有确认合同。建议统一说明哪些命令执行即授权、哪些必须交互；如改变合同，需同步脚本调用方。
@@ -122,7 +122,7 @@
 
 ### C07：TUI 与 Desktop
 
-链路：[codex-remote-options.mjs](../scripts/codex-remote-options.mjs) → [codex-remote.mjs](../scripts/codex-remote.mjs) → Provider 解析、监管租约、原生 TUI；[desktop-app-command.mjs](../scripts/desktop-app-command.mjs) → 平台检查、配置事务、共享入口与临时租约。
+链路：[codex-remote-options.mjs](../../scripts/codex-remote-options.mjs) → [codex-remote.mjs](../../scripts/codex-remote.mjs) → Provider 解析、监管租约、原生 TUI；[desktop-app-command.mjs](../../scripts/desktop-app-command.mjs) → 平台检查、配置事务、共享入口与临时租约。
 
 - Remote 拒绝改写远端地址的参数，Workspace 与 cwd 互斥，Provider 与 Profile 选择互斥；选择后的执行阶段再次核对受管 Profile 是否存在。工作区目录选择与原生命令参数透传各有职责，不能把本机 CLI 的目录权限直接类比为外部渠道任意目录输入。
 - Remote 的租约在 TUI 结束后 finally 释放，不通过关闭客户端停止共享服务；非受监管主实例分支不获取租约，应继续保留“直接 native remote 无租约保护”的使用说明，不能将所有连接描述为新启动服务。
@@ -131,7 +131,7 @@
 
 ### C08：前台与后台服务
 
-链路：`run` → [dev-all.mjs](../scripts/dev-all.mjs) → 监管入口与 Gateway；后台命令 → [service-command.mjs](../scripts/service-command.mjs) → [service-selection.mjs](../scripts/service-selection.mjs)、[service-targets.mjs](../runtime/service-targets.mjs) → 各平台控制器与就绪检测。
+链路：`run` → [dev-all.mjs](../../scripts/dev-all.mjs) → 监管入口与 Gateway；后台命令 → [service-command.mjs](../../scripts/service-command.mjs) → [service-selection.mjs](../../scripts/service-selection.mjs)、[service-targets.mjs](../../runtime/service-targets.mjs) → 各平台控制器与就绪检测。
 
 - 前台复用要求监管拓扑匹配及 Socket 健康；裸 App Server 或部分占用会拒绝，退出只清理自己持有的子进程集合。不能把 `run` 与 `start` 合为同一生命周期命令。
 - 服务名的公开 spelling 与内部标识已有映射；`logs` 默认 gateway，其余通常 all。all 选已安装可选服务，start/restart 再按启用状态筛选；显式单目标和 all 的语义差异是有意合同。
@@ -142,7 +142,7 @@
 
 ### C09：诊断与修复
 
-[doctor.mjs](../scripts/doctor.mjs) 经生命周期执行器做配置、私有路径、版本、拓扑与连通性检查，[doctor-output.mjs](../scripts/doctor-output.mjs) 将全部结果转 JSON，文本隐藏通过项并保留领域汇总；失败使退出码非零。`security repair` 则显式进入 Windows 私有文件修复适配器，Unix 只提示无需处理。两者的“只读检查”和“修改 ACL”边界应保留。
+[doctor.mjs](../../scripts/doctor.mjs) 经生命周期执行器做配置、私有路径、版本、拓扑与连通性检查，[doctor-output.mjs](../../scripts/doctor-output.mjs) 将全部结果转 JSON，文本隐藏通过项并保留领域汇总；失败使退出码非零。`security repair` 则显式进入 Windows 私有文件修复适配器，Unix 只提示无需处理。两者的“只读检查”和“修改 ACL”边界应保留。
 
 **C09-D01，呈现建议。** Doctor 领域总结与普通命令状态已有不同职责；不要用“统一文案”删掉领域上下文或把提示项变成失败。可收敛错误提示的结构为“失败对象/已完成状态/下一步”，但原始日志与机器输出保持原格式。
 
@@ -152,42 +152,42 @@
 
 ### C10：查询和导出
 
-`metrics` 经 [metrics-command-options.mjs](../scripts/metrics-command-options.mjs) 校验后，由生命周期子进程执行 [metrics-database.mjs](../scripts/metrics-database.mjs)，查询经 [metrics-database-access.mjs](../scripts/metrics-database-access.mjs) 调用 Observability 只读 Store 和查询服务；报告使用同一 readSnapshot，缺库及不兼容有明确错误。默认导出路径仅在子进程完成后报告，取消/失败移除本次文件，`--stdout` 的进度写 stderr。CLI 与 WebUI 共享底层指标能力，没必要再合并查询与维护事务。
+`metrics` 经 [metrics-command-options.mjs](../../scripts/metrics-command-options.mjs) 校验后，由生命周期子进程执行 [metrics-database.mjs](../../scripts/metrics-database.mjs)，查询经 [metrics-database-access.mjs](../../scripts/metrics-database-access.mjs) 调用 Observability 只读 Store 和查询服务；报告使用同一 readSnapshot，缺库及不兼容有明确错误。默认导出路径仅在子进程完成后报告，取消/失败移除本次文件，`--stdout` 的进度写 stderr。CLI 与 WebUI 共享底层指标能力，没必要再合并查询与维护事务。
 
 **C10-F01，已确认文件命名解析重复且不一致，低优先级。** `bin/codexc.mjs metricsPositionalIdentifier` 只跳过 `--range/--group/--format`，但 `parseMetricsTurnsArgs` 允许筛选项在 Thread ID 前，例如 `turns --provider openai <Thread ID>`。实际查询仍使用正确 Thread ID，导出文件名却取 `openai` 为会话标识。建议复用已解析的 threadId 生成文件名，不再扫描原始 argv；影响是结果识别，不是数据库查询错范围。
 
 **C10-F02，已确认私有输出目录边界缺失，中优先级。** `openMetricsExportFile` 对已有 `output/<日期>` 直接 recursive mkdir/chmod，再用拼接路径 open；未使用共享私有目录校验，未拒绝已有路径的符号链接/不可信祖先。若 output 或日期目录被替换为指向其他目录的链接，导出会沿链接写入并 chmod 目标目录。`wx` 只保护最终文件不覆盖，不能证明父目录归属。建议复用 `ensurePrivateDirectorySync` 等现有边界，并检查 Windows 私有 ACL，而不是仅依赖 POSIX mode。未实际构造目录替换或写出数据。
 
-`traffic` 的列表/详情/跟随均经 [traffic-command.mjs](../scripts/traffic-command.mjs) 与 V2 reader；默认摘要，完整正文需显式展开；无目录返回非零。跟随记录已显示终态并在 session 切换后重置集合，信号让循环退出。持续模式的展示去重属于本次运行状态，不是会话权威索引。源文件正文/终端控制字符的全面净化不在本轮已验证范围。
+`traffic` 的列表/详情/跟随均经 [traffic-command.mjs](../../scripts/traffic-command.mjs) 与 V2 reader；默认摘要，完整正文需显式展开；无目录返回非零。跟随记录已显示终态并在 session 切换后重置集合，信号让循环退出。持续模式的展示去重属于本次运行状态，不是会话权威索引。源文件正文/终端控制字符的全面净化不在本轮已验证范围。
 
 ### C11：清理、归档与恢复
 
-[cleanup-menu.mjs](../scripts/cleanup-menu.mjs) → [maintenance-services.mjs](../scripts/maintenance-services.mjs) → 各领域执行入口。公共维护包装先读取全部服务状态，再询问临停，只恢复尝试停止的原运行服务；取消不打断恢复，失败列出恢复命令。数据确认和服务中断确认是两个不同授权范围，不应简单删去一次确认以减少步骤。
+[cleanup-menu.mjs](../../scripts/cleanup-menu.mjs) → [maintenance-services.mjs](../../scripts/maintenance-services.mjs) → 各领域执行入口。公共维护包装先读取全部服务状态，再询问临停，只恢复尝试停止的原运行服务；取消不打断恢复，失败列出恢复命令。数据确认和服务中断确认是两个不同授权范围，不应简单删去一次确认以减少步骤。
 
-- [session-cleanup.mjs](../scripts/session-cleanup.mjs)：App Server 提供会话列表和后代，直接 `--confirm` 仍需 TTY 确认；执行前重读绑定、复核成员快照及 Gateway 已停止；取消后不发新归档，继续核验已发请求。结果区分已核验、部分、失败、未知及跳过，非全部完成返回非零。只清理已确认归档的展示缓存，不以请求成功直接宣布全部归档。
+- [session-cleanup.mjs](../../scripts/session-cleanup.mjs)：App Server 提供会话列表和后代，直接 `--confirm` 仍需 TTY 确认；执行前重读绑定、复核成员快照及 Gateway 已停止；取消后不发新归档，继续核验已发请求。结果区分已核验、部分、失败、未知及跳过，非全部完成返回非零。只清理已确认归档的展示缓存，不以请求成功直接宣布全部归档。
 - `metrics-database.mjs` 的 reset/cleanup/prune：使用当前 Schema 和数据库锁，备份采用排他创建，reset 缺库为未变化；Provider prune 使用精确标识并恢复原 Gateway 状态。菜单服务包装和直接维护脚本各承担对应入口的停服合同，虽有类似代码，不可在未保留直接命令语义时删除一层。
 
 **C11-F01，已确认菜单预览与执行未绑定，中优先级。** `cleanup-menu.mjs` 先调用 `runTrafficCleanup([])` 展示范围，确认后经停服包装再调用 `runTrafficCleanup(["--confirm"])`，没有传第一次预览指纹。第二次会重新扫描并立即按新范围删除。用户等待确认/停服期间新增 session 会进入删除集合，虽然第一次预览没有展示它。`traffic-cleanup.mjs` 的 identity 检查只覆盖第二次调用内部的“扫描→停服检查→重扫”，不能覆盖菜单确认窗口。建议菜单传候选指纹或停服后重新展示、重新确认；直接 `--confirm` 的全范围语义另行保留。每项删除前的身份复核和部分取消结果仍有价值，不应因修菜单而删除。
 
 ### C12：投递箱与图片提交
 
-[delivery-command.mjs](../scripts/delivery-command.mjs) → `DeliveryJournal` → [sqlite-journal.ts](../src/delivery/sqlite-journal.ts)：独占 Writer Lock 阻止与 Gateway 同时操作，status/list 分页读取且不展示正文，retry/confirm 要求不同的显式标志。retry 是改成待重发，最终消息仍经 Gateway 授权；CLI 不直接重发。
+[delivery-command.mjs](../../scripts/delivery-command.mjs) → `DeliveryJournal` → [sqlite-journal.ts](../../src/delivery/sqlite-journal.ts)：独占 Writer Lock 阻止与 Gateway 同时操作，status/list 分页读取且不展示正文，retry/confirm 要求不同的显式标志。retry 是改成待重发，最终消息仍经 Gateway 授权；CLI 不直接重发。
 
 **C12-F01，已确认帮助未充分说明查询写副作用，低优先级。** status/list 构造默认 runtime 模式 Journal；启动会将遗留 `sending` 改为 `uncertain`，并清理中断的渲染暂存。菜单 status hint 已说明会恢复 sending，命令帮助仅称显示/列出，没有同样说明，list 菜单提示也没有。建议先补全所有查询入口文案。独立复审修正：不能直接改用已有 maintenance 模式，`sqlite-journal.ts:141` 不允许该模式执行当前 CLI 所需的 summary/list/read；若以后提供真正只读的查询，应评估现有 reader 能力及恢复/状态投影合同，另做行为决定，不能作为文字修正顺手修改。
 
-图片链路：[channel-send-image.mjs](../scripts/channel-send-image.mjs) 读取现有绑定、严格验证图片、写私有 spool 并原子发布 manifest，再由 [channel-image-spool.ts](../src/bootstrap/channel-image-spool.ts) 消费；多绑定时要求明确 Thread。成功文案是“已提交”，不等于平台已送达。它与持久投递箱的 pending/uncertain 不是同一概念，不宜只因都叫 outbox 而合并。未发送图片或访问平台账号。
+图片链路：[channel-send-image.mjs](../../scripts/channel-send-image.mjs) 读取现有绑定、严格验证图片、写私有 spool 并原子发布 manifest，再由 [channel-image-spool.ts](../../src/bootstrap/channel-image-spool.ts) 消费；多绑定时要求明确 Thread。成功文案是“已提交”，不等于平台已送达。它与持久投递箱的 pending/uncertain 不是同一概念，不宜只因都叫 outbox 而合并。未发送图片或访问平台账号。
 
 ### C13：Relay 和 WebUI
 
-[model-relay-command.mjs](../scripts/model-relay-command.mjs) 严格解析命令与模型策略，管理经 [model-relay-management.mjs](../scripts/model-relay-management.mjs) 的事务/配置锁、模型校验、备份后应用。返回区分 saved_and_applied/saved_not_running/saved_unconfirmed，秘密仅在保存后返回；查询调用方只输出白名单字段。监听 Config/CLI 复用 `runRelayListenMenu`；服务进程启停仍走公共服务入口，应保留“配置启用”与“启动进程”的区分。
+[model-relay-command.mjs](../../scripts/model-relay-command.mjs) 严格解析命令与模型策略，管理经 [model-relay-management.mjs](../../scripts/model-relay-management.mjs) 的事务/配置锁、模型校验、备份后应用。返回区分 saved_and_applied/saved_not_running/saved_unconfirmed，秘密仅在保存后返回；查询调用方只输出白名单字段。监听 Config/CLI 复用 `runRelayListenMenu`；服务进程启停仍走公共服务入口，应保留“配置启用”与“启动进程”的区分。
 
-WebUI 前台参数 → [webui-command-options.mjs](../scripts/webui-command-options.mjs) → `webui-server.mjs resolveWebuiSettings/createWebuiServer`：CLI 只覆盖本次 host/port，不接受命令行 token；非回环要求配置 token，管理路由另做身份/Origin/修订保护。WebUI 设置和运行入口不宜合成一条隐式保存命令。
+WebUI 前台参数 → [webui-command-options.mjs](../../scripts/webui-command-options.mjs) → `webui-server.mjs resolveWebuiSettings/createWebuiServer`：CLI 只覆盖本次 host/port，不接受命令行 token；非回环要求配置 token，管理路由另做身份/Origin/修订保护。WebUI 设置和运行入口不宜合成一条隐式保存命令。
 
 **C13-D01，一致性建议。** WebUI `--host/--port` 重复时最后值生效，metrics/traffic 同名单值参数拒绝重复。未发现文档承诺所有命令统一拒绝，所以不列为合同缺陷；建议以后统一拒绝重复，避免监听范围因多处拼参静默改变。需同步直接解析器与公开帮助。
 
 ### C14：重置券
 
-[reset-credit-command.mjs](../scripts/reset-credit-command.mjs) → Gateway 私有请求 → [openai-reset-credit-service.ts](../src/application/openai-reset-credit-service.ts)：use 在定位用户配置和发请求前要求 TTY；查询、选择、预览、默认拒绝确认、消费依次进行。消费使用一次性 attemptId，应用层重新读取账户与券、检查有效期、串行防重复；发送后失败记为 unknown，不自动重试。额度刷新失败与已消费结果分开，finally 取消预览不声称撤销消费。该流程已有清楚的确认/结果边界，不能套用普通配置的 `--yes` 以追求统一。
+[reset-credit-command.mjs](../../scripts/reset-credit-command.mjs) → Gateway 私有请求 → [openai-reset-credit-service.ts](../../src/application/openai-reset-credit-service.ts)：use 在定位用户配置和发请求前要求 TTY；查询、选择、预览、默认拒绝确认、消费依次进行。消费使用一次性 attemptId，应用层重新读取账户与券、检查有效期、串行防重复；发送后失败记为 unknown，不自动重试。额度刷新失败与已消费结果分开，finally 取消预览不声称撤销消费。该流程已有清楚的确认/结果边界，不能套用普通配置的 `--yes` 以追求统一。
 
 覆盖限制：本批是读取源码的 CLI 合同审查；未读用户指标/投递正文、未删除文件或数据库、未归档真实会话、未签发 Relay Key、未消费券。上游归档/消费 RPC 语义沿用既有端口合同，未改变或重新验证上游协议；平台网络、数据库大数据量和信号实机行为未观察。
 
@@ -195,11 +195,11 @@ WebUI 前台参数 → [webui-command-options.mjs](../scripts/webui-command-opti
 
 ### C15：版本、更新与卸载
 
-`version` 只读当前包元数据；更新/卸载经 [cli-lifecycle-command.mjs](../scripts/cli-lifecycle-command.mjs) 的父子 IPC 传递取消，父进程等待子进程收尾，不用直接杀子进程代替事务取消。
+`version` 只读当前包元数据；更新/卸载经 [cli-lifecycle-command.mjs](../../scripts/cli-lifecycle-command.mjs) 的父子 IPC 传递取消，父进程等待子进程收尾，不用直接杀子进程代替事务取消。
 
-[source-update.mjs](../scripts/source-update.mjs) 的受管更新先核对来源、干净工作树、npm prefix 与服务路径，再解析候选提交；构建及配置/数据库/CLI 合同预检完成后才停服。切换源码前有备份，失败区分切换前/已切换/全局命令未刷新及服务恢复状态；源码已切换但安装未完成时保留服务停止，给出手工恢复步骤。原运行服务集合按配置恢复；npm/本地包路径只同步配套 CLI，不假称更新 Gateway 源码。没有执行更新、下载或包安装。
+[source-update.mjs](../../scripts/source-update.mjs) 的受管更新先核对来源、干净工作树、npm prefix 与服务路径，再解析候选提交；构建及配置/数据库/CLI 合同预检完成后才停服。切换源码前有备份，失败区分切换前/已切换/全局命令未刷新及服务恢复状态；源码已切换但安装未完成时保留服务停止，给出手工恢复步骤。原运行服务集合按配置恢复；npm/本地包路径只同步配套 CLI，不假称更新 Gateway 源码。没有执行更新、下载或包安装。
 
-[source-uninstall.mjs](../scripts/source-uninstall.mjs) 先确认安装身份和精确删除范围，再卸载服务、包和受管源码；删除前再次检查目录/包身份，保留普通工作树和用户数据。菜单会询问是否继续，直接命令代表显式执行，帮助需要准确说明该区别。卸载程序和 `uninstall --services` 共享服务卸载能力但删除范围不同，应保留两个明确入口。
+[source-uninstall.mjs](../../scripts/source-uninstall.mjs) 先确认安装身份和精确删除范围，再卸载服务、包和受管源码；删除前再次检查目录/包身份，保留普通工作树和用户数据。菜单会询问是否继续，直接命令代表显式执行，帮助需要准确说明该区别。卸载程序和 `uninstall --services` 共享服务卸载能力但删除范围不同，应保留两个明确入口。
 
 **C15-D01，流程建议。** 主菜单对 update/security/uninstall 的通用“继续？”仅覆盖启动此操作；真正的目标、阶段及恢复信息由领域模块提供。若优化确认，优先将精确卸载范围在最终执行前展示清楚，不要再叠加没有新信息的“确定吗”。更新候选的配套 CLI 安装确认则涉及新增副作用，不能与菜单确认混为一谈。
 
@@ -217,7 +217,7 @@ WebUI 前台参数 → [webui-command-options.mjs](../scripts/webui-command-opti
 | Relay | `model-relay-management`、`runRelayListenMenu` | 监听配置和服务进程生命周期；签发 Key 的一次性秘密展示 |
 | 服务 | `service-targets`/`service-selection`/安装管理 | restart 失败即止、stop 的收尾策略、维护按原状态恢复 |
 
-[model-provider-default-setup.mjs](../scripts/model-provider-default-setup.mjs) 已明确展示账户默认模型、共享思考等级及受影响 Profile 范围，确认后传 preview 给管理层；[webui-provider-settings-management.mjs](../scripts/webui-provider-settings-management.mjs) 复用同一管理能力。没有因“同族共享目录”而建议将单账户默认值同步给全部账户。
+[model-provider-default-setup.mjs](../../scripts/model-provider-default-setup.mjs) 已明确展示账户默认模型、共享思考等级及受影响 Profile 范围，确认后传 preview 给管理层；[webui-provider-settings-management.mjs](../../scripts/webui-provider-settings-management.mjs) 复用同一管理能力。没有因“同族共享目录”而建议将单账户默认值同步给全部账户。
 
 `config-activation-result` 与 `config-activation-notice` 已区分无变化、下次读取、新会话/TUI、热加载、各服务重启及重装。后续文案应消费这些结果，不在 init 或单命令里重新推导生效方式。菜单返回值虽有 back/cancel/cancelled/undefined 等多种形态，但在已查调用链各有适配；没有证据支持一次性统一全部返回类型。适合按具体错误收敛，避免大面积等价改写。
 
@@ -455,7 +455,7 @@ CP 删除结果贯穿管理层、CLI/Setup和WebUI投影/提示，区分已删�
 
 MCP 菜单改用现有 withCodexUserConfigClient，连接先登记，连接/读取/操作失败均收尾；关闭失败保留归属及告警，已保存结果不被收尾覆盖，再次管理先重试旧客户端。真实隔离PTY和Codex配置RPC添加禁用的回环HTTP MCP，保存/回读后让close在实际关闭完成后抛模拟失败：仍返回 added，显示 CODEX_CONFIG_CLIENT_CLEANUP_UNCONFIRMED；再次进入被旧清理失败拦截，created保持1。解除故障后才创建第二客户端，真实菜单删除成功、独立TOML读取剩余MCP为空。未启动MCP或请求其URL；这是清理失败信号/归属观察，不代表制造了真实存活孤儿进程。首次隔离Gateway配置缺失明确ENOENT，随后用真实init创建后继续，没有改真实用户数据。自有PTY已退出，客户端已实际关闭。
 
-### R5：结果准确性与读取边界（独立复查完成，待提交）
+### R5：结果准确性与读取边界（已提交 `61e37808`）
 
 时区写入JSON和文本共用action/activation结果，等值返回unchanged/none。真实bin入口在隔离配置写UTC返回saved及四条有序生效命令，再次写返回unchanged、空命令；Bad/Zone拒绝。首次保留任务无效代理.env时设置被现有管理校验拒绝，移除任务代理后正常，未修改该管理合同。初始化转储关闭使用共享生效提示，区分App Server重启和Relay新请求刷新；实际runInitWizard入口、提示输入替身、真实配置关闭后输出正确提示及install=false，独立读取false。R2取消和旧确认观察所覆盖的未改流程保持有效；没有操作服务或真实采集。
 
@@ -466,3 +466,26 @@ Windows非跟随日志采用64KiB后向定位、同fd大小快照及带背压的
 Codex no-op在完整业务校验后按用户层原值筛选edits，preview/update共用结果；缺省与显式默认分开，工具原始路径段不重解码。真实Codex 0.163.0配置RPC：cached同值preview/update返回unchanged/false/none且revision、inode、mtime不变；完整config PTY确认同值输出“当前值未变化”。回环WebUI HTTP缺省auto_recap写显式false为updated/next-tui，再次写为unchanged/none，旧revision即使同值仍409。含点、反斜杠、引号的MCP名经高风险preview/token/PATCH，数组同值不写；清除enabled_tools仅删除该字段，command和enabled=false保留，重复清除不写。现有Strata调用20秒/分析30秒的同值请求preview400、执行同样拒绝，不绕过有效策略校验。WebUI保存后CLI读取关闭，取消不写。隔离env -i无账户/外部请求，真实HTTP/PTY已关闭，目录已删除；未观察浏览器、平台服务、已有Thread/TUI激活和写入网络中断，其余setting kind通过共享planner来源与消费核对，未逐项写入。
 
 独立复查发现Windows stdout写回调之后还会发error事件，仅回调reject可能使进程提前退出；现按输出所有权保留error监听至事件或成功回调，取消后也等待在途写入收尾。实际子进程读取1MiB任务日志，父进程收到标题后关闭stdout管道，子进程exit1、EPIPE且观测fd close完成1次，无Unhandled error；平台/定义读取仍用替身。定向ESLint、Node22类型/边界和文档检查通过；提交钩子覆盖最终集成。
+
+### R6：帮助与文档一致性（独立复查完成，随本记录归档提交）
+
+README菜单名改为实际“状态与服务”；bin模块说明收敛到cleanup metrics/traffic及实际工作区菜单。Remote附加帮助移除禁用聚合的启用推荐，保留规范CODEX_REMOTE_USAGE单一关闭说明；源码核对选择器仍拒绝agg/sf-agg，未改变连接能力。投递status/list帮助及两个菜单提示均说明恢复sending、清理渲染暂存、不重发；沿DeliveryJournal默认runtime到sqlite-journal恢复写入核对，未切换maintenance或宣称只读。用户指南明确直接指标维护即执行、菜单另确认；reset实际先备份移除，Gateway启动后才重建。OCG最后账户删除提示限定账户接管字段，沿restoreProviderBaseConfig核对managedRootKeys及同ID条目，其它设置保留。
+
+实际bin remote -h退出0只显示聚合关闭、不再推荐启用；delivery list --help退出0显示两项恢复副作用。旧metrics cleanup和traffic cleanup均退出1，未访问维护路径。此批只改帮助/文案与文档，不执行删除账户、投递恢复或服务管理；底层恢复/连接行为依源码核对，不增加无关运行操作。
+
+独立Sol复查覆盖实际菜单/路由、Remote选择器、Delivery默认runtime恢复、指标直接与菜单确认、reset建库时机、OCG恢复字段；未发现阻断，25项在六批中唯一对应。归档移动、相对链接与索引由主代理另外核对，不宣称代理审过归档后文件。
+
+## 交付与保留边界
+
+| 批次 | 本地提交 | 状态 |
+| --- | --- | --- |
+| R1 | `348d59d7` | 5项已修复并独立复查 |
+| R2 | `8f1e8454` | 3项已修复并独立复查 |
+| R3 | `d1fcf69e` | 4项已修复并独立复查 |
+| R4 | `aeb4b175` | 3项已修复并独立复查 |
+| R5 | `61e37808` | 6项已修复并独立复查 |
+| R6 | 本记录归档所在提交 | 4项及3项附带文案澄清已修复并独立复查 |
+
+每批正常提交钩子执行适用的静态检查和构建；不以这些结果代替上述实际观察。没有新增、维护或运行测试。任务临时客户端、HTTP服务、子进程及隔离数据已收尾；源码更新实际运行受服务内限制未观察，三平台实际服务启停、macOS/Windows Desktop、平台凭据后端、真实外部账户、浏览器全部交互仍未验收。既有部署需按当前源码安装/使用指南重新安装服务定义，重启本身不刷新模板，本任务不包含部署。
+
+本次25项没有遗留待实现修复；“未观察”是平台/环境证据限制，不代表已完成实机验证。若后续需要上线验收，应按对应当前文档在获授权的目标环境执行，不能据本记录自动操作服务或账户。统一万能命令框架、全菜单重排等设计建议未采纳为本次任务，不形成隐藏待办；后续如有新需求需另行确定范围。历史源码行号对应原审查基线，修复后以相关提交及现行模块入口定位。

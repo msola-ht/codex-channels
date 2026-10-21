@@ -713,10 +713,10 @@ codexc cleanup
 | 删除请求与响应转储 | `codexc cleanup traffic` | 先预览，确认删除需停止全部 App Server 与 Relay；仅删除识别的 V2 session，菜单确认绑定本次预览，范围变化则拒绝 |
 | 清理旧指标 | `codexc cleanup metrics --restart-gateway` | 备份清理；显式 `--restart-gateway` 会停止后启动 Gateway（原先停止也会启动），交互菜单则按原状态恢复 |
 | 核对未确认渠道结果 | `codexc delivery status` / `codexc delivery list` | 先停止 Gateway；明确重发、确认送达与停写备份见[投递箱运维](delivery.md) |
-| 清理指定 Provider 的指标 | `codexc cleanup metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
-| 重置整个指标库 | `codexc cleanup metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
+| 清理指定 Provider 的指标 | `codexc cleanup metrics prune <provider>` | 指定区分大小写的精确 ID 即执行；备份清理，Gateway 按原状态恢复 |
+| 重置整个指标库 | `codexc cleanup metrics reset` | 先停止 Gateway；直接备份并移除当前库，启动 Gateway 后重建 |
 
-`codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。会话归档、旧指标清理和指标库重置会在确认后临停运行中的 Gateway；转储删除先预览并确认，再询问临停 Gateway、Relay 和 App Server。结束、取消或失败后按原状态恢复，原先停止的服务不会被启动；恢复失败会报告具体服务和手动启动命令。底层命令仍检查实际进程已退出，不终止前台自行运行的进程。执行失败会报告错误并返回清理菜单。
+`codexc cleanup -h` / `--help` 显示说明，无参数菜单在非交互终端不会执行清理。直接指标维护命令即显式执行，不再询问确认；交互菜单会先确认目标及影响。菜单中的会话归档、旧指标清理和指标库重置会在确认后临停运行中的 Gateway；转储删除先预览并确认，再询问临停 Gateway、Relay 和 App Server。菜单结束、取消或失败后按原状态恢复，原先停止的服务不会被启动；恢复失败会报告具体服务和手动启动命令。底层命令仍检查实际进程已退出，不终止前台自行运行的进程。执行失败会报告错误并返回清理菜单。
 旧指标清理菜单收集保留范围和 VACUUM 选择后，再显示默认拒绝的删除确认。旧指标清理和 Provider 清理均校验完整的当前 Schema，并在检查点、备份、删除和 VACUUM 期间持有共享 writer 锁；前台写入者占用时拒绝操作。Provider ID 可为已移除提供商的历史精确 ID，区分大小写。裁剪 Thread 计时记录时会撤销对应历史完整标记，避免剩余数据被误当作完整历史。
 重置同样在持锁前后校验完整当前 Schema，未知版本或结构残缺均拒绝且保留原库。备份独占创建、
 私有权限保护成功后才移除当前库；备份失败时原库保留，已生成的备份不自动覆盖或删除，需检查后处理。
