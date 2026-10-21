@@ -45,6 +45,7 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
   const metadata = catalog.data
   const showMetadata = metadata !== null && !catalog.loading && !catalog.error
   const refreshResult = catalog.actionResult?.kind === "refresh" ? catalog.actionResult.value : null
+  const unchanged = catalog.actionResult?.kind === "context" && catalog.actionResult.value.status === "unchanged"
 
   const group: ModelCatalogGroup = {
     id: "openai",
@@ -88,10 +89,10 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
       {catalog.storageUnavailable && <Alert><AlertDescription>{t("openAiModelCatalog.trackingUnavailable")}</AlertDescription></Alert>}
       {!catalog.draft && catalog.actionError && <Alert variant="destructive"><AlertDescription>{catalog.actionError}</AlertDescription></Alert>}
       {(result || catalog.writeUnconfirmed) && <Alert variant={warning ? "destructive" : "default"}><AlertDescription className="flex flex-col gap-2" aria-live="polite">
-        <p>{catalog.writeUnconfirmed ? t("openAiModelCatalog.writeUnknown") : result?.consistency === "unknown" ? t("openAiModelCatalog.readbackUnknown") : refreshResult ? t(refreshResult.cacheChanged ? "openAiModelCatalog.configuredChanged" : "openAiModelCatalog.configuredUnchanged") : t("openAiModelCatalog.saved")}</p>
+        <p>{catalog.writeUnconfirmed ? t("openAiModelCatalog.writeUnknown") : result?.consistency === "unknown" ? t("openAiModelCatalog.readbackUnknown") : refreshResult ? t(refreshResult.cacheChanged ? "openAiModelCatalog.configuredChanged" : "openAiModelCatalog.configuredUnchanged") : t(unchanged ? "openAiModelCatalog.unchanged" : "openAiModelCatalog.saved")}</p>
         {refreshResult && !refreshResult.outputMatchesCache && <p>{t("openAiModelCatalog.outputDiffers")}</p>}
         {result?.backupCreated && <p>{t("openAiModelCatalog.backupCreated")}</p>}
-        <p>{t("openAiModelCatalog.activation")}</p>
+        {!unchanged && <p>{t("openAiModelCatalog.activation")}</p>}
         {result?.auditStatus === "degraded" && <p>{t("settingsUi.auditDegraded")}</p>}
         {catalog.readbackRequired && <p>{t("settingsUi.readbackUnknown")}</p>}
       </AlertDescription></Alert>}
@@ -123,8 +124,7 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
           <SettingsRow label={t("openAiModelCatalog.nextContext")} value={context(pending.value.contextWindow)} />
           <SettingsRow label={t("openAiModelCatalog.maxContext")} value={context(pending.value.maxContextWindow)} />
           <Separator />
-          <p>{t("openAiModelCatalog.backupHint")}</p>
-          <p>{t("openAiModelCatalog.activation")}</p>
+          {pending.value.changed ? <><p>{t("openAiModelCatalog.backupHint")}</p><p>{t("openAiModelCatalog.activation")}</p></> : <p>{t("openAiModelCatalog.unchanged")}</p>}
         </>}
         {pending?.kind === "refresh" && <code>codex debug models</code>}
       </div>

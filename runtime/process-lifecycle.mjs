@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
@@ -239,9 +239,9 @@ export async function terminateChildProcess(child, {
   }
   if (!childProcessIsRunning(child)) return;
   if (process.platform === "win32") {
-    const signaled = signalWindowsProcessTree(child, false);
+    const signaled = await signalWindowsProcessTreeAsync(child, false);
     if (!signaled && childProcessIsRunning(child)) {
-      signalWindowsProcessTree(child, true);
+      await signalWindowsProcessTreeAsync(child, true);
       if (await childExitedWithin(child, forcePeriodMs)) return;
       throw new Error("子进程在强制终止后仍未退出");
     }
@@ -251,7 +251,7 @@ export async function terminateChildProcess(child, {
   if (await childExitedWithin(child, gracePeriodMs)) return;
   if (childProcessIsRunning(child)) {
     if (process.platform === "win32") {
-      signalWindowsProcessTree(child, true);
+      await signalWindowsProcessTreeAsync(child, true);
     } else {
       signalChildProcess(child, "SIGKILL");
     }
@@ -338,6 +338,22 @@ function signalWindowsProcessTree(child, force) {
     throw new Error(`Windows 子进程树终止失败：pid=${child.pid} exit=${result.status ?? 1}`);
   }
   return result.status === 0;
+}
+
+async function signalWindowsProcessTreeAsync(child, force) {
+  if (child.pid === undefined) return child.kill(force ? "SIGKILL" : "SIGTERM");
+  const systemRoot = process.env.SystemRoot || process.env.SYSTEMROOT;
+  if (!systemRoot) throw new Error("Windows 进程树终止需要 SystemRoot");
+  const command = spawn(join(systemRoot, "System32", "taskkill.exe"),
+    ["/PID", String(child.pid), "/T", ...(force ? ["/F"] : [])],
+    { stdio: "ignore", windowsHide: true, timeout: 2_000 });
+  let failure;
+  command.once("error", error => { failure = error; });
+  const status = await new Promise(resolve => command.once("close", code => resolve(code)));
+  if (failure) throw failure;
+  if (status !== 0 && !windowsProcessExists(child.pid)) return true;
+  if (force && status !== 0 && childProcessIsRunning(child)) throw new Error("Windows 子进程树终止失败");
+  return status === 0;
 }
 
 function windowsProcessExists(pid) {

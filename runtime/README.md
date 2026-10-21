@@ -296,6 +296,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   label、Windows 计划任务名称、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor
   复用。
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
+  `terminateChildProcess` 的 Windows 树终止通过异步 taskkill 等待，不在批量任务关闭时串行阻塞事件循环；同步信号转发入口保留原合同。
   通过 `childExitedWithin` 有界观察 exit（含 signalCode、注册后复核与监听清理），调用方决定 timer 是否 unref；观察成功不代表整个进程树或输出管道已关闭。
   父子服务 IPC 控制监听就绪握手和有界发送；控制就绪不代表服务业务就绪，停止优先于尚未发送的重载，
   停止确认表示交付 IPC；重载按请求标识逐层等待最终接收确认，截止或断开撤销未接受的请求，

@@ -292,8 +292,8 @@ async function runProviderModelOperation({ environment, prompts, output, provide
     if (await prompts.confirm({ message: "备份并保存模型设置？", initialValue: false }) !== true) return { action: "back" };
     result = await applyCustomProviderModelsSave(input, { ...saveOptions, preview });
   } else if (action === "remove") {
-    const candidates = catalog.models.filter(entry => !entry.isDefault);
-    if (!candidates.length || catalog.models.length < 2) throw new Error("没有可移除的模型；请先调整账户默认模型，并保留至少一个模型");
+    const candidates = catalog.models.filter(entry => entry.removalBlockedReason === null);
+    if (!candidates.length) throw new Error("没有可移除的模型；请核对账户、目录和 Gateway 显式默认值，并保留至少一个模型");
     const model = await prompts.select({ message: "选择要移除的精确模型 ID", options: candidates.map(entry => ({ value: entry.id, label: entry.id })) });
     if (prompts.isCancel(model)) return { action: "back" };
     const input = { provider: catalog.provider, model };

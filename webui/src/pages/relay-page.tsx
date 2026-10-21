@@ -12,15 +12,16 @@ import { translateApiError } from "@/lib/i18n/translate"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorBanner } from "@/components/metrics/error-banner"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export function RelayPage() {
   const { t } = useTranslation()
   const management = useRelayManagement()
   const data = management.data
-  const snapshotCurrent = !management.loading && management.error === null
+  const snapshotCurrent = !management.loading && management.error === null && !management.readbackRequired
   const refreshingBlocked = management.busy || management.loading || management.pendingPreview !== null
   const serviceManagement = useRelayServiceManagement(management.refetch, refreshingBlocked)
-  const blocked = refreshingBlocked || management.error !== null
+  const blocked = refreshingBlocked || management.error !== null || management.readbackRequired
   const editor = useRelayKeyEditor(management, blocked)
   const { editing, preview, result } = editor
   const returnFocus = useRef<HTMLElement | null>(null)
@@ -45,7 +46,12 @@ export function RelayPage() {
       <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={serviceManagement.refreshBlocked} onClick={serviceManagement.refresh}>{t("relay.refresh")}</Button><Button disabled={blocked || !data} onClick={() => openEditor("new")}>{t("relay.create")}</Button></div>
     </div>
     <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
-    <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
+    <ErrorBanner error={management.latestWriteUnconfirmed ? null : management.actionError} />
+    {management.recoveries.map(recovery => <Alert key={recovery.caller}><AlertDescription>
+      {t(recovery.secret ? "relay.secretUnconfirmed" : "relay.writeUnconfirmed", { caller: recovery.caller })}
+      <Button variant="outline" size="sm" disabled={refreshingBlocked} onClick={management.refetch}>{t("relay.refresh")}</Button>
+    </AlertDescription></Alert>)}
+    {management.readbackRequired && <Alert><AlertDescription>{t("settingsUi.readbackUnknown")}</AlertDescription></Alert>}
     <RelayServiceManagement controller={serviceManagement} snapshot={data} loading={management.loading} current={snapshotCurrent} />
     {data && <RelayProviderModels snapshot={data} blocked={blocked} refreshBlocked={refreshingBlocked} onRefresh={management.refetch} error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />}
     {management.loading && <div role="status" aria-label={t("common.loading")}><Skeleton className="h-24 w-full" /></div>}

@@ -7,6 +7,7 @@ import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/fie
 import { Input } from "@/components/ui/input"
 import { ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import { formatBytes } from "@/lib/format"
+import { isManagementTaskActive } from "@/lib/api-polling"
 import type { ManagementTaskController } from "@/lib/settings-management"
 
 const maintenanceActions = [
@@ -19,7 +20,7 @@ export function ManagementTaskControls({ tasks, providerIds = [] }: { tasks: Man
   const providerOptions = [...new Set(providerIds.filter((providerId) => providerId.length > 0))]
   const [editedPruneProvider, setPruneProvider] = useState<string | null>(null)
   const pruneProvider = editedPruneProvider ?? providerOptions[0] ?? ""
-  const hasActiveTask = tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
+  const hasActiveTask = tasks.tasks.some(isManagementTaskActive)
   const disabled = tasks.loading || tasks.error !== null || tasks.saving || tasks.pendingPreview !== null || hasActiveTask
 
   return (
@@ -77,21 +78,24 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
     if (value.startsWith("执行 codexc ")) return t("managementUi.executeCommand", { command: value.slice(3) })
     const known = {
       "Gateway 必须已停止，且指标 Socket 不可用": "managementUi.metricsStoppedRequired",
-      "操作前备份本地指标库；失败时保留备份并尝试恢复原服务状态": "managementUi.pruneRecovery",
-      "操作前保留指标数据库备份；失败时保留备份并重试": "managementUi.metricsRecovery",
-      "服务管理器失败时任务标记失败，不自动扩大操作范围": "managementUi.serviceRecovery",
     } as const
     if (Object.hasOwn(known, value)) return t(known[value as keyof typeof known])
     if (value === "全部 App Server 与 Relay 必须已停止") return t("traffic.cleanupStoppedRequired")
     if (value === "永久删除全部可识别调用记录，无法恢复；未知文件与目录不处理") return t("traffic.cleanupIrreversible")
     return value
   }
+  const recoveryText = {
+    traffic_irreversible: "traffic.cleanupIrreversible",
+    metrics_restore: "managementUi.pruneRecovery",
+    metrics_backup: "managementUi.metricsRecovery",
+    service_check: "managementUi.serviceRecovery",
+  } as const
   const description = [
     t("managementUi.operationAction", { operation: pending.preview.operation, action: pending.preview.action }),
     pending.preview.target ? t("managementUi.target", { target: pending.preview.target }) : null,
     ...pending.preview.effects.map(previewText),
     ...pending.preview.preconditions.map((condition) => t("managementUi.precondition", { condition: previewText(condition) })),
-    pending.preview.recovery ? t("managementUi.recovery", { recovery: previewText(pending.preview.recovery) }) : null,
+    t("managementUi.recovery", { recovery: t(recoveryText[pending.preview.recovery]) }),
   ].filter((item): item is string => item !== null)
   const destructive = pending.input.operation === "metrics"
     || pending.input.operation === "traffic"

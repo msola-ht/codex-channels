@@ -117,6 +117,7 @@ const zh = {
     after: "保存后：{mode}",
   },
   openAiModelCatalog: {
+    unchanged: "上下文与当前缓存相同，未写入，也未创建备份。",
     builtinSearch: "内置搜索",
     providerSearchSource: "只读显示 {provider} config 中保存的 web_search；跟随全局表示该文件未设置此字段，不代表当前会话的实际模式。",
     searchDefault: "跟随默认",
@@ -227,6 +228,9 @@ const zh = {
     customHint: "新增模型先选择模板，默认固定 OpenAI 底座，也可选择 DeepSeek；能力须逐项确认，已有模型不会自动更新。仅保存当前提供商的模型定义与默认模型，沿用连接和凭据。已有 ID 不可在此重命名或删除。",
     remove: "本地移除",
     defaultProtected: "账户或显式配置正在默认使用；请先修改默认值。",
+    accountDefaultProtected: "模型是账户默认值，请先更改账户默认模型。",
+    catalogDefaultProtected: "模型是目录默认值，请先更改目录默认模型。",
+    gatewayDefaultProtected: "模型是当前主提供商的 Gateway 显式默认值，请先更改 Gateway 配置。",
     lastProtected: "必须保留至少一个启用模型。",
     unsupported: "此目录暂不支持本地移除。",
     deepseek: "DeepSeek 提供模型模板，暂不开放单模型移除；默认值使用下方已有设置。",
@@ -719,7 +723,23 @@ const zh = {
     "executeCommand": "执行 {command}",
     "metricsStoppedRequired": "Gateway 必须已停止，且指标 Socket 不可用",
     "pruneRecovery": "操作前备份本地指标库；失败时保留备份并尝试恢复原服务状态",
-    "metricsRecovery": "操作前保留指标数据库备份；失败时保留备份并重试",
+    "metricsRecovery": "操作前保留指标数据库备份；失败后先核对数据与备份，已提交时勿重复清理",
+    taskWriteUnknown: "执行结果未确认。请核对实际状态及备份，勿重复执行。",
+    taskCommitted: "操作已提交，但取消或后续收尾未完全成功；请核对状态及备份，勿重复执行。",
+    taskNotStarted: "操作未启动，没有执行数据变更。",
+    taskNotCommitted: "本次数据事务未提交；请核对备份与服务状态后再操作。",
+    taskCheckState: "取消或失败不代表操作已回滚，请先核对实际状态。",
+    taskErrors: {
+      start_failed: "任务启动失败，请检查运行环境与服务状态。",
+      execution_failed: "任务执行失败，恢复方式取决于实际提交状态。",
+      cancellation_unconfirmed: "取消未确认，进程仍由当前任务持有；可重试取消，请勿重复执行。",
+      process_cleanup_unconfirmed: "尚未确认全部自有进程退出，请先核对状态。",
+      result_unconfirmed: "未收到有效的任务结果，请勿根据退出码重试操作。",
+    },
+    taskPhases: {
+      commit: "失败阶段：提交。", vacuum: "失败阶段：VACUUM。", count: "失败阶段：读取剩余数量。",
+      close: "失败阶段：关闭数据库。", lockRelease: "失败阶段：释放数据库锁。", gatewayRestart: "失败阶段：恢复 Gateway。",
+    },
     "serviceRecovery": "服务管理器失败时任务标记失败，不自动扩大操作范围",
     "feishu": "飞书",
     "weixin": "微信"
@@ -875,6 +895,8 @@ const zh = {
     followDefault: "跟随 Codex 全局默认"
   },
   relay: {
+    writeUnconfirmed: "调用方 {caller} 的写入结果未确认。请先刷新并核对实际配置，勿直接重复提交。",
+    secretUnconfirmed: "调用方 {caller} 的签发或轮换结果未确认。请先刷新核对；若已保存但未收到一次性密钥，需为该调用方显式轮换并保存新密钥，不能通过列表找回旧密钥。",
     copyModelId: "复制模型 ID",
     modelReasoningLabel: "{model} 的思考策略：{mode}",
     reasoningOffMethod: "关闭思考…",
@@ -1488,6 +1510,10 @@ const zh = {
     "listSeparator": "、"
   },
   traffic: {
+    readLimit: "读取超过整体工作预算，请缩小批次范围后重试。",
+    readTimeout: "读取超过 10 秒期限，请缩小批次范围后重试。",
+    readCancelled: "调用记录读取已取消。",
+    readBusy: "已有两个调用记录读取正在执行，请等待结束后重试。",
     startedAt: "开始时间",
     captureSource: "采集来源",
     debugTitle: "调试报文",
@@ -1870,6 +1896,7 @@ const en: Messages = {
     after: "After: {mode}",
   },
   openAiModelCatalog: {
+    unchanged: "The context matches the current cache. No changes or backup were made.",
     builtinSearch: "Built-in search",
     providerSearchSource: "Read-only web_search saved in the {provider} config. Follow global means the field is absent and does not indicate the current session's effective mode.",
     searchDefault: "Follow default",
@@ -1980,6 +2007,9 @@ const en: Messages = {
     customHint: "Choose a starting template for new models: the fixed OpenAI base by default, or DeepSeek. Confirm each capability. Existing models do not update automatically. Save only model definitions and the default model, keeping the current connection and credentials. Existing IDs cannot be renamed or deleted here.",
     remove: "Remove locally",
     defaultProtected: "Used as a default by an account or explicit configuration. Change the default first.",
+    accountDefaultProtected: "This model is an account default. Change the account default first.",
+    catalogDefaultProtected: "This model is the catalog default. Change the catalog default first.",
+    gatewayDefaultProtected: "This model is the active primary provider's explicit Gateway default. Change the Gateway configuration first.",
     lastProtected: "At least one enabled model must remain.",
     unsupported: "Local removal is not supported for this catalog.",
     deepseek: "DeepSeek supplies model templates. Individual removal is unavailable. Use the existing default settings below.",
@@ -2472,7 +2502,23 @@ const en: Messages = {
     "executeCommand": "Run {command}",
     "metricsStoppedRequired": "Gateway must be stopped and the metrics Socket must be unavailable.",
     "pruneRecovery": "Back up the local metrics database before running. On failure, preserve the backup and attempt to restore the previous service state.",
-    "metricsRecovery": "Back up the metrics database before running. On failure, preserve the backup and retry.",
+    "metricsRecovery": "Back up the metrics database first. After a failure, inspect the data and backup; do not repeat committed cleanup.",
+    taskWriteUnknown: "The result is unconfirmed. Check the actual state and backup before running the operation again.",
+    taskCommitted: "The operation committed, but cancellation or subsequent cleanup did not fully succeed. Check the state and backup; do not repeat it.",
+    taskNotStarted: "The operation did not start and made no data changes.",
+    taskNotCommitted: "The data transaction did not commit. Check the backup and service state before proceeding.",
+    taskCheckState: "Cancellation or failure does not imply rollback. Check the actual state first.",
+    taskErrors: {
+      start_failed: "The task could not start. Check the runtime environment and service state.",
+      execution_failed: "The task failed. Recovery depends on whether the operation committed.",
+      cancellation_unconfirmed: "Cancellation is unconfirmed and the task still owns the process. Retry cancellation; do not repeat the operation.",
+      process_cleanup_unconfirmed: "Not all owned processes have been confirmed stopped. Check their state first.",
+      result_unconfirmed: "No valid task result was received. Do not retry based only on the exit code.",
+    },
+    taskPhases: {
+      commit: "Failure phase: commit.", vacuum: "Failure phase: VACUUM.", count: "Failure phase: reading remaining counts.",
+      close: "Failure phase: closing the database.", lockRelease: "Failure phase: releasing the database lock.", gatewayRestart: "Failure phase: restoring Gateway.",
+    },
     "serviceRecovery": "Mark the task failed if the service manager fails; the operation scope is not automatically expanded.",
     "feishu": "Feishu",
     "weixin": "WeChat"
@@ -2628,6 +2674,8 @@ const en: Messages = {
     followDefault: "Follow the Codex default"
   },
   relay: {
+    writeUnconfirmed: "The write for caller {caller} is unconfirmed. Refresh and check the actual configuration before submitting again.",
+    secretUnconfirmed: "Issuing or rotating the key for caller {caller} is unconfirmed. Refresh and check first. If it was saved but the one-time key was not received, explicitly rotate that caller's key and save the new secret; the list cannot recover the old secret.",
     copyModelId: "Copy model ID",
     modelReasoningLabel: "Reasoning policy for {model}: {mode}",
     reasoningOffMethod: "Turn reasoning off…",
@@ -3241,6 +3289,10 @@ const en: Messages = {
     "listSeparator": ", "
   },
   traffic: {
+    readLimit: "The read exceeded its overall work budget. Select a smaller batch and try again.",
+    readTimeout: "The read exceeded the 10-second deadline. Select a smaller batch and try again.",
+    readCancelled: "The traffic read was cancelled.",
+    readBusy: "Two traffic reads are already running. Wait for them to finish and try again.",
     startedAt: "Started at",
     captureSource: "Capture source",
     debugTitle: "Debug messages",

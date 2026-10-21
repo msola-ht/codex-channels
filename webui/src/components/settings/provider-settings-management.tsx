@@ -333,7 +333,12 @@ function ProviderSettingsCard({
       webSearchState: management.loading ? "loading" : management.error !== null ? "error" : undefined,
       onSelect: model => setSelectedModel({ provider: catalog.provider, model: model.model, revision: catalog.revision }),
       renderAction: model => {
-        const reason = model.isDefault ? t("modelCatalog.defaultProtected") : catalog.models.length <= 1 ? t("modelCatalog.lastProtected") : !catalog.canRemove ? t("modelCatalog.unsupported") : undefined
+        const blockedReason = catalog.models.find(entry => entry.id === model.model)?.removalBlockedReason
+        const reason = blockedReason === "account-default-protected" ? t("modelCatalog.accountDefaultProtected")
+          : blockedReason === "catalog-default-protected" ? t("modelCatalog.catalogDefaultProtected")
+          : blockedReason === "gateway-default-protected" ? t("modelCatalog.gatewayDefaultProtected")
+          : blockedReason === "last-model-protected" ? t("modelCatalog.lastProtected")
+          : blockedReason === "removal-not-supported" ? t("modelCatalog.unsupported") : undefined
         const locked = busy || pending !== null || contextDraft !== null || renameDraft !== null || editorOpen || templateTarget !== null || additionTarget !== null || webSearchTarget !== null
         return <DropdownMenu onOpenChange={(open, details) => { if (open && locked) details.cancel() }}>
           <DropdownMenuTrigger ref={node => {
