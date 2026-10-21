@@ -13,7 +13,7 @@
   选择主进程授权快照中的已启动本地 ProviderProxy（可带 `/go/<账户>`），出站改为真实模型和账户认证，
   Provider 前缀后的模型 ID 按源目录契约作为不透明 JSON 字段保留，不按 URL 路径解释。
   保留 Codex Thread/Turn 指标关联头。只监听 `127.0.0.1` 随机端口并接受认证的 POST `/responses`，
-  拒绝 WebSocket、压缩正文和远端响应状态引用；正文限制 16 MiB，强制 `store=false`。
+  拒绝 WebSocket、压缩正文和远端响应状态引用；正文限制 48 MiB，强制 `store=false`。
   不读取账户或目录文件，不直接访问真实上游，不重试或回退；发送前调用可选 `assertCurrent(signal)`
   复核快照，支持可取消的异步复核，变更返回 409 并提示等待安全应用或在 Gateway 未运行时重启。上传预算独立为 30 秒；
   快照复核预算独立为 15 秒；完成复核后由真实出站层负责首响应头等待，Codex 负责可见完整 Responses 事件的空闲等待。
@@ -25,6 +25,10 @@
   `/responses` 与只读 `/models` 路径转发到上游；官方 OpenAI
   主代理提供只读 `GET /_codexc/image-upload-route`，通过正在运行的路由解析器核验默认
   ChatGPT 图片引用后端，不转发上游、不读取凭据、不生成模型指标；独立后端返回不支持。
+  受管 DeepSeek 原生 Responses 代理在同一只读入口报告可选本地上传，并提供
+  `POST /_codexc/image-upload`：只接受 10 MiB 内 PNG/JPEG/WebP/GIF 原始字节、精确 Provider
+  修订和严格媒体签名，由 Runtime 提供的凭据回调上传到官方 `/files`，只返回校验后的
+  `file-api-...` 编号；不暴露 Key、上游错误或文件列表，最多四项并行，断线与关闭取消。
   主代理还按当前锁定 Codex 0.163.0 的固定端点清单接受 POST `/alpha/search`、
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
   `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限
@@ -204,17 +208,20 @@ Chat 桥与直接模型适配器共用 `direct-model-http.ts` 的成功响应校
 
 自定义 `cp-*` 的 Runtime 守卫还复用配置读取器的版本 5 和完整目录一致性校验，并拒绝目录 `.pending` 与全局上下文同步未完成状态；HTTP/WS 复用相同回调，不把合法 slug 单独视为有效目录。
 
-DS/OCG/CCG 和自定义目录提供商由 Runtime 向 `ProviderProxy` 注入同源目录复核；CLP 在桥内执行。HTTP 在路由解析后、有界读取正文并复核模型再提交；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 16 MiB、上传预算 30 秒，目录复核预算 30 秒；全代理最多 16 项授权准备，WS 单帧与连接队列各限制 16 MiB、队列最多 16 帧。官方 OpenAI、Codex 兼容 Provider 的共享官方只读目录与独立 Relay 不注入此目录复核。
+DS/OCG/CCG 和自定义目录提供商由 Runtime 向 `ProviderProxy` 注入同源目录复核；CLP 在桥内执行。HTTP 在路由解析后、有界读取正文并复核模型再提交；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 48 MiB、上传预算 30 秒，目录复核预算 30 秒；全代理最多四项授权准备，WS 单帧限制 48 MiB、排队与连接队列各限制 96 MiB且最多 16 帧。官方 OpenAI、Codex 兼容 Provider 的共享官方只读目录与独立 Relay 不注入此目录复核。
 HTTP／WS 保留请求中的 hosted `web_search` 与 `tool_choice`，不依赖模型目录的扩展声明；搜索是否启用由 Codex 配置决定，执行支持由上游判断。采样与私有项归一化不改变该合同。聚合先恢复真实模型 ID，再经过对应 Provider 代理。通用 Chat 桥透传未映射的顶层声明；受管 CLP 对 live `web_search` 使用独立搜索适配，并接受 search 查询历史，其他 hosted 历史仍按转换边界拒绝。
-除官方 OpenAI 端点外的 Responses 上游（受管 DS/OCG/CCG、自定义 Provider 与自定义 `cp-*`）在提交前归一化 Codex 私有输入项：`agent_message` 降级为普通 `user` 消息，工具参数 schema 中的布尔 `encrypted` 标记被删除，无法转换的私有项按 `400 provider_model_request_invalid` 失败关闭，不退回透传（与 Chat 桥一致）。HTTP 与 Responses WS 都只替换发往上游的字节，转储与指标仍记录客户端原始报文；未发生改写时沿用原始字节。正文改写后按实际字节重写 `content-length`；没有目录守卫的第三方上游沿用同一 16 MiB 正文上限、30 秒上传预算与 16 项准备上限，压缩正文仍拒绝。
-Responses WS 归一化同样要求文本 JSON 消息且单条不超过 16 MiB；无守卫上游也在 WebSocket 接收层限制消息大小（含分片累计），并受同一等待队列上限约束。HTTP 目录复核与归一化共用一次正文解析。官方 `openai` 路由（含 `openai_base_url` 覆盖）不归一化，该端点理解 Codex 私有输入项；独立 Relay 的出站请求来自外部调用方自带报文，同样不归一化。
+除官方 OpenAI 端点外的 Responses 上游（受管 DS/OCG/CCG、自定义 Provider 与自定义 `cp-*`）在提交前归一化 Codex 私有输入项：`agent_message` 降级为普通 `user` 消息，工具参数 schema 中的布尔 `encrypted` 标记被删除，无法转换的私有项按 `400 provider_model_request_invalid` 失败关闭，不退回透传（与 Chat 桥一致）。HTTP 与 Responses WS 都只替换发往上游的字节，转储与指标仍记录客户端原始报文；未发生改写时沿用原始字节。正文改写后按实际字节重写 `content-length`；没有目录守卫的第三方上游沿用同一 48 MiB 正文上限、30 秒上传预算与四项准备上限，压缩正文仍拒绝。
+Responses WS 归一化同样要求文本 JSON 消息且单条不超过 48 MiB；无守卫上游也在 WebSocket 接收层限制消息大小（含分片累计），并受同一等待队列上限约束。HTTP 目录复核与归一化共用一次正文解析。官方 `openai` 路由（含 `openai_base_url` 覆盖）不归一化，该端点理解 Codex 私有输入项；独立 Relay 的出站请求来自外部调用方自带报文，同样不归一化。
 
 `chat-bridge.ts` 按 Runtime 的受管 CLP 身份映射模型思考参数，并仅对精确 Flash 模型限定 DeepSeek 上游；其他 Chat Provider 不注入。它管理 Chat HTTP 连接、SSE 分帧、背压、取消和有限超时，通过 `model-api/index.ts` 调用纯转换模块。转换覆盖 Responses 的 `function`、`namespace`、自由格式 `custom` 工具、执行位置为 `client` 的 `tool_search`（含其结果带回的工具声明）与 Codex multi-agent v2 的 `agent_message` 输入项；`agent_message` 降级为普通 `user` 消息，Responses 私有的 `encrypted` 参数标记不下发；除受管 CLP 的 live 网页搜索适配外，未映射的顶层工具声明及其 `tool_choice` 原样交给上游判断，不为它们注册客户端执行身份；回程不支持的工具调用仍明确失败。`text.format` 的 `json_schema` 映射为 Chat `response_format`，`text.verbosity` 校验后忽略。
 上游接口为 `chat_completions` 的自定义第三方 Provider 复用同一桥，按通用分支运行（不 pin CLP 路由、不读 CLP 目录、思考等级按通用形状发送）；这类 Provider 的 WebSocket 关闭，客户端检索与连接器工具由桥转换。通用分支在请求同时带工具时把 `text.format` 的 schema 追加到首条 system 消息并省略 `response_format`，因为部分 Chat 上游拒绝两者并存；托管 CLP 已验证接受，继续使用 `response_format`。该降级只由提示词保证，桥不校验最终文本，`conversion.structuredOutput=prompt` 记录在请求诊断中；模型侧仍由统计代理按 Provider 目录拒绝目录外或已停用模型。
 上述按精确 Flash ID 选择格式和路由是未保存请求快照时的默认行为。受管 CLP 通过同次启用目录读取取得思考选项和可选 `clineRequestProfile`：`deepseek-flash` 使用 Flash 格式并限定 DeepSeek 上游，`standard` 使用通用格式且不固定路由，出站始终保留用户新增的模型 ID。所有显式思考选项须属于当前模型；只有声明开关的目录允许 `enabled`，出站转换为 `reasoning.enabled=true`。未知选项或请求快照在出站前拒绝，目录不可读时失败关闭；直接 Chat/Responses Relay 保留自己的参数合同，不套用此目录或转换。
 Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。统一阶段预算来自 `runtime/model-request-policy.mjs`：上传 30 秒、准备 30 秒、真实上游首响应头 300 秒、完整 Chat 数据事件空闲 300 秒；没有生成总期限。正文接收超时返回 408 `upload_timeout`；上游等待超时返回 504 `upstream_timeout`。交付受阻最多 30 秒，终态与失败交付使用独立 5 秒预算，外层统计代理不再以 305 秒计时抢先截断。完整数据事件空闲不因注释心跳或不完整字节续期；下游背压期间暂停上游事件等待。工具转换仍保留完整校验后发布的合同；转换前有 Chat 帧不等于 Codex 已看到 Responses 事件，长时间没有可交付事件时仍受 Codex 自身的 300 秒空闲限制，不伪造保活事件。
 
-所有账户的 Chat 桥在同一进程共享 64 MiB 请求正文保留预算：读取正文前按单请求最大 16 MiB 预留，因此最多四个在途请求；生成、交付及取消清理完成后才释放。超限返回 `503 chat_bridge_capacity_exceeded`，不排队、不自动重试；这不是 Node 总内存上限。每座桥拥有独立随机本地身份，统计代理覆盖客户端同名身份头，桥校验后才准入；该头不进入 resolver 或模型上游，原有 `Authorization` 语义不变。关闭等待本桥在途处理结束。
+所有账户的 Chat 桥在同一进程共享 192 MiB 请求正文保留预算：读取正文前按有效
+`Content-Length` 预留，缺失或 chunked 时按单请求最大 48 MiB 预留，因此最多四个最大请求同时准备；
+小型请求按实际声明长度准入。生成、交付及取消清理完成后才释放。超限返回
+`503 chat_bridge_capacity_exceeded`，不排队、不自动重试；这不是 Node 总内存上限。每座桥拥有独立随机本地身份，统计代理覆盖客户端同名身份头，桥校验后才准入；该头不进入 resolver 或模型上游，原有 `Authorization` 语义不变。关闭等待本桥在途处理结束。
 
 - `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在其后复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 复核取消后立即尝试采集，首次容量初始化期间跳过并报告 initializing，不等待磁盘；共享存储报告实际接受的写入量，在途调用单独预留预算；后台单任务清理历史并保护活动及新建批次，整理期间继续采集；维护与关闭各有 5 秒预算，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。
 - `relay-metric.ts`：直接模型调用的最小跨进程指标合同，不包含消息正文或凭据。

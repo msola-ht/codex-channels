@@ -8,7 +8,14 @@ import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "
 import { ChatUpstreamError, ModelRequestTimeoutError, type ModelRequestStage, chatStreamError } from "./chat-errors.js";
 import { parseDirectModelJson, validateDirectModelResponse } from "./direct-model-http.js";
 import type { ProviderProxyOptions } from "./proxy.js";
-import { readChatBody, readModelFrames, waitForChatOperation, writeChatData } from "./chat-io.js";
+import {
+  ChatBodyTooLargeError,
+  drainRejectedRequest,
+  readChatBody,
+  readModelFrames,
+  waitForChatOperation,
+  writeChatData,
+} from "./chat-io.js";
 import { pinClinePassRouting } from "./cline-pass-routing.js";
 import { executeClineWebSearch } from "./cline-web-search.js";
 import { ChatGenerationTimingObserver } from "./generation-timing.js";
@@ -16,14 +23,18 @@ import { chatBridgeAuthorizationHeader, forwardedRequestHeaders } from "./reques
 import type { UpstreamTiming } from "./response-metrics-observer.js";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import type { ClinePassRequestProfile } from "../../runtime/chat-reasoning.mjs";
+import {
+  maximumModelRequestBytes,
+  maximumRetainedModelRequestBytes,
+} from "./model-request-limits.js";
 
 interface ClinePassModelCapabilities {
   reasoningEfforts: readonly string[];
   clineRequestProfile?: ClinePassRequestProfile;
 }
 
-const maximumRequestBytes = 16 * 1024 * 1024;
-const maximumRetainedRequestBytes = 64 * 1024 * 1024;
+const maximumRequestBytes = maximumModelRequestBytes;
+const maximumRetainedRequestBytes = maximumRetainedModelRequestBytes;
 // All account bridges in this process share admission. Reserve the full body
 // allowance before attaching a reader, including uploads without Content-Length.
 let retainedRequestBytes = 0;
@@ -85,14 +96,18 @@ export class ChatCompletionsBridge {
       || !timingSafeEqual(Buffer.from(token), Buffer.from(this.localToken))) {
       reject(401, "chat_bridge_unauthorized", "Chat bridge local identity is required"); return;
     }
-    if (retainedRequestBytes + maximumRequestBytes > maximumRetainedRequestBytes) {
+    const declared = Number(request.headers["content-length"]);
+    const reservedBytes = Number.isSafeInteger(declared) && declared >= 0
+      ? Math.min(declared, maximumRequestBytes)
+      : maximumRequestBytes;
+    if (retainedRequestBytes + reservedBytes > maximumRetainedRequestBytes) {
       reject(503, "chat_bridge_capacity_exceeded", "Chat bridge request capacity is exhausted"); return;
     }
-    retainedRequestBytes += maximumRequestBytes;
+    retainedRequestBytes += reservedBytes;
     // processRequest owns all body-derived references and cancellation cleanup.
     // Its frame must finish before this reservation becomes available again.
     try { await this.processRequest(request, response); }
-    finally { retainedRequestBytes -= maximumRequestBytes; }
+    finally { retainedRequestBytes -= reservedBytes; }
   }
   private async processRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const controller = new AbortController();
@@ -338,6 +353,7 @@ export class ChatCompletionsBridge {
       }
       if (failure instanceof ModelRequestTimeoutError) status = failure.status;
       else if (failure instanceof ChatUpstreamError && failure.upstreamStatus) status = failure.upstreamStatus;
+      if (failure instanceof ChatBodyTooLargeError) await drainRejectedRequest(request);
       const message = failure?.message ?? "Chat upstream request failed";
       if (status === 502 && (!controller.signal.aborted || aborted)) this.options.onError?.(new Error(message));
       controller.abort(failure);

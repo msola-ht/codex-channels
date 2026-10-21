@@ -76,7 +76,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   2,000 个唯一节点及 64 层祖先；身份或 Provider 不匹配、缺字段、循环、越限、超时和断线均拒绝，
   不以持久 `thread/list` 或内存活动缓存替代权威查询。覆盖范围遵循官方 loaded/list，包含标准
   SubAgent 与 ephemeral，但不宣称枚举上游主动隐藏的 Internal Thread。
-- `image-reference-upload.ts`：通过 `config/read` 定位当前 App Server 的回环模型代理并查询实际路由，再经官方账户路由和令牌校验，为 OpenAI ChatGPT 图片执行创建、无凭据字节上传和完成确认，再提交官方 fileId；管理有界并发、分阶段超时和取消；同一字节 PUT 按锁定上游预算有界重试，创建和提交不重试；账户通知异步合并复核，身份未变不取消，变化或核验失败才取消；失败不回退。
+- `image-reference-upload.ts`：通过 `config/read` 定位当前 App Server 的回环模型代理并查询实际路由；OpenAI ChatGPT 走官方账户路由、令牌校验、创建、无凭据字节上传和完成确认，受管 DeepSeek 走同源代理的受限 Files API 上传，两者都只向 App Server 提交 fileId。管理有界并发、分阶段超时和取消；OpenAI 同一字节 PUT 按锁定上游预算有界重试，创建、DeepSeek 上传和 Turn 提交不重试；账户或 Provider 修订变化时取消；失败不回退 Base64。
 - `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `queue-adapter.ts`：把官方 Queue 条目裁剪为 Application 的稳定种类、可编辑标记和有界文本预览；
