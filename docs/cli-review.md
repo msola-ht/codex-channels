@@ -445,7 +445,7 @@ Node 22 类型/运行边界、定向 ESLint、文档及 diff 检查通过。源�
 
 独立 Sol 全链路复查发现并定向核对两项修正：模板字符串 replacement 会解释合法路径中的美元序列，已改 callback；官方目录导出没有沿用 RPC 的显式 Codex binary，已共用解析器。随后主代理把模板替换收敛为单轮 callback，防止路径内字面占位符被下一轮再次解释，并自行核对这项收敛。Node22 重生成八定义，包含 $$、$&、美元反引号/单引号及字面 __CONFIG_DIR__/__CODEX_HOME_ENVIRONMENT__ 的路径在 plist 解析和 unit 文本中精确保留，systemd-analyze verify 0。PATH 不含 codex、Gateway 指向真实 native Codex 绝对路径时，CP来源的官方模型预览成功；首次使用依赖node的JS包装器但PATH无node时目录导出失败，未误报成功。复查无剩余阻断，限制保持如上。
 
-### R4：部分成功与资源收尾（独立复查完成，待提交）
+### R4：部分成功与资源收尾（已提交 `aeb4b175`）
 
 指标 cleanup/prune 区分提交、未知提交及后处理失败，MetricsMaintenanceError 保留数量、备份、VACUUM 和恢复状态。隔离真实当前 Schema SQLite：正常 cleanup 删除2行、备份含2行；提交后 VACUUM/COUNT/close/锁释放故障仍标 committed=true，当前库0行，提交后ROLLBACK次数0；COMMIT响应丢失标unknown，提交前拒绝保留2行。prune只删openai1行、other保留，VACUUM及服务恢复双失败均保留阶段。真实脚本main配合限定服务命令替身，正常退出0，后处理/恢复故障退出1并打印提交数量和备份；原停止的prune保持停止。未操作真实服务。WebUI现有任务忽略stdout/stderr，本批只纠正重试提示，用户指南给出status定位备份路径；不声称页面已显示维护明细。
 
@@ -454,3 +454,15 @@ CP 删除结果贯穿管理层、CLI/Setup和WebUI投影/提示，区分已删�
 独立复查指出非cp自定义Provider也有归属凭据、共用备份告警不能建议删除仍有效的Provider、外层异步管理锁及内层Profile锁释放仍可能覆盖完成结果。已同步修正精确残留发现、双语安全提示和锁结果传播：异步锁只携带回调完成结果，不泛化为已提交；删除入口识别其完整删除结果，Profile锁识别已完成的boolean结果，均附独立锁告警。其它共享锁调用者仍抛错，不自动重试或把回调完成当配置提交。新增隔离真实文件观察：非cp凭据可精确删除；分别注入两层锁unlink EACCES均保留already-absent、cleanup completed及lock-cleanup-failed。配置读取用空配置替身，无真实账户。定向类型、i18n及文档检查通过，提交钩子另记录最终状态。
 
 MCP 菜单改用现有 withCodexUserConfigClient，连接先登记，连接/读取/操作失败均收尾；关闭失败保留归属及告警，已保存结果不被收尾覆盖，再次管理先重试旧客户端。真实隔离PTY和Codex配置RPC添加禁用的回环HTTP MCP，保存/回读后让close在实际关闭完成后抛模拟失败：仍返回 added，显示 CODEX_CONFIG_CLIENT_CLEANUP_UNCONFIRMED；再次进入被旧清理失败拦截，created保持1。解除故障后才创建第二客户端，真实菜单删除成功、独立TOML读取剩余MCP为空。未启动MCP或请求其URL；这是清理失败信号/归属观察，不代表制造了真实存活孤儿进程。首次隔离Gateway配置缺失明确ENOENT，随后用真实init创建后继续，没有改真实用户数据。自有PTY已退出，客户端已实际关闭。
+
+### R5：结果准确性与读取边界（独立复查完成，待提交）
+
+时区写入JSON和文本共用action/activation结果，等值返回unchanged/none。真实bin入口在隔离配置写UTC返回saved及四条有序生效命令，再次写返回unchanged、空命令；Bad/Zone拒绝。首次保留任务无效代理.env时设置被现有管理校验拒绝，移除任务代理后正常，未修改该管理合同。初始化转储关闭使用共享生效提示，区分App Server重启和Relay新请求刷新；实际runInitWizard入口、提示输入替身、真实配置关闭后输出正确提示及install=false，独立读取false。R2取消和旧确认观察所覆盖的未改流程保持有效；没有操作服务或真实采集。
+
+指标文件名复用run/turns及export规范解析，stdout与文件导出同用最小本地环境。真实bin入口在任务Codex .env含无效HTTPS_PROXY时，turns --provider openai r5-thread --format json导出turns-r5-thread文件；stdout同样退出0，JSON threadId/filters均为r5-thread，缺少provider值退出1；既有任务空指标库返回合法空turns，未制造真实会话。文件内容/查询范围没有用Provider值替代Thread ID。
+
+Windows非跟随日志采用64KiB后向定位、同fd大小快照及带背压的流式输出，UTF8/CRLF跨块保留，末尾LF不虚增一行，长行完整输出。Linux平台/定义读取替身下真实脚本main logs gateway --lines 1输出最后正文及中文错误、退出0；lines0退出1。真实任务文件观察：跨块文本155544字节SHA256一致；64MiB单行在32MiB V8 heap与慢stdout管道下完整输出67108865字节、SHA一致、最大writableLength65536、peak RSS约89.5MB；1GiB稀疏日志只输出末两行。无日志、实际截短、EIO和读取/写等待取消均明确失败，fd关闭；取消监听用getEventListeners实测0。曾打印未测字面监听计数，已用后一实际观察纠正，不采用前者。未运行Windows任务调度/ACL/PowerShell跟随；平台替身不等于实机。任务进程/目录已收尾。
+
+Codex no-op在完整业务校验后按用户层原值筛选edits，preview/update共用结果；缺省与显式默认分开，工具原始路径段不重解码。真实Codex 0.163.0配置RPC：cached同值preview/update返回unchanged/false/none且revision、inode、mtime不变；完整config PTY确认同值输出“当前值未变化”。回环WebUI HTTP缺省auto_recap写显式false为updated/next-tui，再次写为unchanged/none，旧revision即使同值仍409。含点、反斜杠、引号的MCP名经高风险preview/token/PATCH，数组同值不写；清除enabled_tools仅删除该字段，command和enabled=false保留，重复清除不写。现有Strata调用20秒/分析30秒的同值请求preview400、执行同样拒绝，不绕过有效策略校验。WebUI保存后CLI读取关闭，取消不写。隔离env -i无账户/外部请求，真实HTTP/PTY已关闭，目录已删除；未观察浏览器、平台服务、已有Thread/TUI激活和写入网络中断，其余setting kind通过共享planner来源与消费核对，未逐项写入。
+
+独立复查发现Windows stdout写回调之后还会发error事件，仅回调reject可能使进程提前退出；现按输出所有权保留error监听至事件或成功回调，取消后也等待在途写入收尾。实际子进程读取1MiB任务日志，父进程收到标题后关闭stdout管道，子进程exit1、EPIPE且观测fd close完成1次，无Unhandled error；平台/定义读取仍用替身。定向ESLint、Node22类型/边界和文档检查通过；提交钩子覆盖最终集成。

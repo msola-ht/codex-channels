@@ -64,6 +64,11 @@ import {
 } from "../scripts/cli-command-usage.mjs";
 import {
   metricsCommandUsage,
+  metricsQueryOptions,
+  metricsRequestPurposeOption,
+  parseMetricsOptions,
+  parseMetricsRunArgs,
+  parseMetricsTurnsArgs,
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
 import { configuredEnvironment, serviceControlEnvironment } from "../scripts/runtime-environment.mjs";
@@ -918,10 +923,9 @@ async function runMetricsCommand(args) {
   const withoutStdout = args.filter((argument) => argument !== "--stdout");
   const writeFile = withoutStdout.length === args.length;
   if (!writeFile) {
-    const runtime = configuredEnvironment();
     await withCliProgress("查询指标", ({ signal }) => runCliLifecycleCommand(
       join(packageDir, "scripts/metrics-database.mjs"), withoutStdout,
-      { environment: runtime.environment, cwd: runtime.dataDir, signal },
+      { environment: process.env, cwd: process.cwd(), signal },
     ), { output: process.stderr, delayMs: 250 });
     return;
   }
@@ -980,26 +984,11 @@ function openMetricsExportFile(subcommand, args) {
 }
 
 function metricsPositionalIdentifier(subcommand, args) {
-  if (subcommand !== "run" && subcommand !== "turns" && subcommand !== "export") {
-    return undefined;
-  }
+  const rest = args.slice(1);
+  if (subcommand === "run") return parseMetricsRunArgs(rest).threadId;
+  if (subcommand === "turns") return parseMetricsTurnsArgs(rest).threadId;
   if (subcommand === "export") {
-    const threadOption = args.findIndex((argument) => argument === "--thread");
-    return threadOption >= 0 ? args[threadOption + 1] : undefined;
-  }
-  const valueOptions = new Set(["--range", "--group", "--format"]);
-  for (let index = 1; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--thread") {
-      return args[index + 1];
-    }
-    if (valueOptions.has(argument)) {
-      index += 1;
-      continue;
-    }
-    if (!argument.startsWith("--")) {
-      return argument;
-    }
+    return parseMetricsOptions(rest, new Set([...metricsQueryOptions, metricsRequestPurposeOption, "--format"])).thread;
   }
   return undefined;
 }

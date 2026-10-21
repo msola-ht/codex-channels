@@ -583,6 +583,7 @@ export interface ManagementSettingsResponse {
 export interface ManagementSettingInput { kind: string; value: unknown; [key: string]: unknown }
 export interface ManagementSettingMutationResponse {
   action?: string
+  willChange?: boolean
   revision: string | null
   value: unknown
   activation: { status: string; target: string; commands: readonly string[] }

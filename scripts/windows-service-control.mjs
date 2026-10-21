@@ -1,10 +1,11 @@
 import { execFile, spawnSync } from "node:child_process";
 import {
   existsSync,
-  readFileSync,
   unlinkSync,
 } from "node:fs";
+import { open } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -36,6 +37,7 @@ const hostStartTimeoutMs = 15_000;
 const appServerStartTimeoutMs = 60_000;
 const hostStopTimeoutMs = serviceStopTimeoutMs;
 const pollIntervalMs = 100;
+const logReadChunkBytes = 64 * 1024;
 
 export function windowsServiceDefinitionsDirectory(environment = process.env) {
   const dataDir = stringValue(environment.CODEX_CONNECT_HOME);
@@ -141,7 +143,7 @@ export async function controlWindowsServices({
     return status;
   }
   if (action === "logs") {
-    showLogs(parsedTarget, definitionsDirectory, environment, { follow, lines });
+    await showLogs(parsedTarget, definitionsDirectory, environment, { follow, lines, signal });
     return;
   }
   throw new Error(`不支持的 Windows 服务操作：${String(action)}`);
@@ -504,7 +506,10 @@ async function waitForHost(controlPath, expected, timeoutMs, throwOnTimeout = tr
   throw new Error(`等待 Windows 服务宿主${expected ? "启动" : "停止"}超时，状态未确认：${controlPath}`, { cause: lastError });
 }
 
-function showLogs(target, definitionsDirectory, environment, { follow, lines }) {
+async function showLogs(target, definitionsDirectory, environment, { follow, lines, signal }) {
+  if (!Number.isSafeInteger(lines) || lines < 1 || lines > 10_000) {
+    throw new Error("日志行数必须是 1 到 10000 之间的整数");
+  }
   const paths = [];
   for (const service of serviceControlDefinitions("windows", target, "status", environment, definitionsDirectory)) {
     const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
@@ -517,8 +522,9 @@ function showLogs(target, definitionsDirectory, environment, { follow, lines }) 
   }
   if (!follow) {
     for (const path of paths) {
-      console.log(`==> ${path} <==`);
-      console.log(tailLines(readFileSync(path, "utf8"), lines));
+      signal?.throwIfAborted();
+      await writeLogOutput(`==> ${path} <==\n`, signal);
+      await writeLogTail(path, lines, signal);
     }
     return;
   }
@@ -575,8 +581,107 @@ function printLifecycleResult(action, target) {
   writeCliMessage(action === "start" ? "note" : "success", `${label}${verb}。`);
 }
 
-function tailLines(value, count) {
-  return value.replace(/\r\n/gu, "\n").split("\n").slice(-count).join("\n");
+async function writeLogTail(path, count, signal) {
+  const file = await open(path, "r");
+  try {
+    const metadata = await file.stat();
+    if (!metadata.isFile() || !Number.isSafeInteger(metadata.size)) {
+      throw new Error(`Windows 日志类型或大小无效：${path}`);
+    }
+    // Read a fixed snapshot of the open file. Appends belong to a later call;
+    // truncation before that snapshot is consumed must fail, never silently pass.
+    const end = metadata.size;
+    const buffer = Buffer.alloc(logReadChunkBytes);
+    let start = 0;
+    let position = end;
+    let remaining = count;
+    while (position > 0) {
+      const length = Math.min(buffer.length, position);
+      position -= length;
+      await readLogBytes(file, buffer, length, position, path, signal);
+      // A final LF terminates the last line; it is not another empty line.
+      if (position + length === end && buffer[length - 1] === 10) remaining += 1;
+      for (let index = length - 1; index >= 0; index -= 1) {
+        if (buffer[index] === 10 && --remaining === 0) {
+          start = position + index + 1;
+          break;
+        }
+      }
+      if (remaining === 0) break;
+    }
+    // Even a single arbitrarily long line is streamed completely. Both scanning
+    // and UTF-8/CRLF decoding keep only one fixed chunk, independent of log size.
+    const decoder = new StringDecoder("utf8");
+    let carriageReturn = "";
+    let endsWithNewline = false;
+    position = start;
+    while (position < end) {
+      const length = Math.min(buffer.length, end - position);
+      await readLogBytes(file, buffer, length, position, path, signal);
+      position += length;
+      let text = carriageReturn + decoder.write(buffer.subarray(0, length));
+      carriageReturn = text.endsWith("\r") ? "\r" : "";
+      if (carriageReturn) text = text.slice(0, -1);
+      text = text.replace(/\r\n/gu, "\n");
+      if (text) {
+        await writeLogOutput(text, signal);
+        endsWithNewline = text.endsWith("\n");
+      }
+    }
+    const final = carriageReturn + decoder.end();
+    if (final) {
+      await writeLogOutput(final, signal);
+      endsWithNewline = final.endsWith("\n");
+    }
+    signal?.throwIfAborted();
+    if (!endsWithNewline) await writeLogOutput("\n", signal);
+  } finally {
+    await file.close();
+  }
+}
+
+async function readLogBytes(file, buffer, length, position, path, signal) {
+  let offset = 0;
+  while (offset < length) {
+    signal?.throwIfAborted();
+    const { bytesRead } = await file.read(buffer, offset, length - offset, position + offset);
+    if (bytesRead === 0) throw new Error(`Windows 日志在读取期间被截短，输出可能不完整：${path}`);
+    offset += bytesRead;
+  }
+  signal?.throwIfAborted();
+}
+
+function writeLogOutput(value, signal) {
+  // Await the write callback so a slow pipe cannot buffer an unbounded long line.
+  signal?.throwIfAborted();
+  return new Promise((resolveWrite, rejectWrite) => {
+    const output = process.stdout;
+    const abort = () => {
+      signal?.removeEventListener("abort", abort);
+      rejectWrite(signal.reason);
+    };
+    const failed = error => {
+      output.removeListener("error", failed);
+      signal?.removeEventListener("abort", abort);
+      rejectWrite(error);
+    };
+    output.once("error", failed);
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
+      output.write(value, (error) => {
+        signal?.removeEventListener("abort", abort);
+        // Writable invokes this callback before emitting error. Keep its
+        // listener through that event, including after cancellation.
+        if (error) rejectWrite(error);
+        else {
+          output.removeListener("error", failed);
+          resolveWrite();
+        }
+      });
+    } catch (error) {
+      failed(error);
+    }
+  });
 }
 
 function firstNonemptyLine(value) {

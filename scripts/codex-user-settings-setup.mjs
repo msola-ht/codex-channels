@@ -201,7 +201,7 @@ async function runApprovalsReviewerSetting({ environment, output, prompts, setti
   const result = await saveUserSettings(updateSetting, output, { kind: "approvals-reviewer", value }, {
     environment, expectedVersion: settings.version, createClient, primaryProvider,
   });
-  output.write(`Codex 默认审批方式已设为${value === "auto_review" ? "自动审查" : "手动审批"}。\n`);
+  if (result.action !== "unchanged") output.write(`Codex 默认审批方式已设为${value === "auto_review" ? "自动审查" : "手动审批"}。\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
@@ -260,7 +260,7 @@ async function runToolSetting({ environment, output, prompts, settings, updateSe
   const result = await saveUserSettings(updateSetting, output, { kind: "tool-access", path: field.path, value }, {
     environment, expectedVersion: settings.version, createClient, primaryProvider,
   });
-  output.write("已保存 Codex 工具设置。插件启动参数由插件清单管理；本页不修改操作系统权限。\n");
+  if (result.action !== "unchanged") output.write("已保存 Codex 工具设置。插件启动参数由插件清单管理；本页不修改操作系统权限。\n");
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
@@ -321,7 +321,7 @@ async function runAllSettings({
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  output.write(
+  if (result.action !== "unchanged") output.write(
     `Codex 默认值与用户偏好已更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · ${serviceTierLabel(serviceTier)} · ${permissionSummary}\n`,
   );
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
@@ -355,7 +355,7 @@ async function runServiceTierSetting({
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  output.write(`Codex 新会话默认加速档位已设为 ${serviceTierLabel(serviceTier)}。\n`);
+  if (result.action !== "unchanged") output.write(`Codex 新会话默认加速档位已设为 ${serviceTierLabel(serviceTier)}。\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
@@ -396,7 +396,7 @@ async function runWebSearchSetting({
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  output.write(`Codex 联网搜索模式已更新：${mode}\n`);
+  if (result.action !== "unchanged") output.write(`Codex 联网搜索模式已更新：${mode}\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
@@ -431,7 +431,7 @@ async function runUpdatePlanSetting({ environment, output, prompts, settings, up
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  output.write(`Codex 计划清单工具已${value ? "开启" : "关闭"}。\n`);
+  if (result.action !== "unchanged") output.write(`Codex 计划清单工具已${value ? "开启" : "关闭"}。\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
@@ -466,7 +466,7 @@ async function runAutoRecapSetting({ environment, output, prompts, settings, upd
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  output.write(`Codex 空闲总结已${value ? "开启" : "关闭"}。\n`);
+  if (result.action !== "unchanged") output.write(`Codex 空闲总结已${value ? "开启" : "关闭"}。\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
@@ -544,7 +544,7 @@ async function runModelCompactSetting({
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  output.write(
+  if (result.action !== "unchanged") output.write(
     `Codex 模型上下文与自动压缩已更新：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩 ${autoCompactPercent === null ? "默认 95%" : `${autoCompactPercent}%`}。\n`,
   );
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
@@ -609,7 +609,7 @@ async function runPermissionSettings({
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  output.write(
+  if (result.action !== "unchanged") output.write(
     `Codex 用户权限已更新：${sandboxMode} · ${approvalPolicy} · 网络${networkAccess ? "开启" : "关闭"}\n`,
   );
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));

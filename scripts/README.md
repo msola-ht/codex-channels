@@ -278,6 +278,7 @@
   按显式字段修改 Sandbox、审批和 Workspace Sandbox 网络权限，省略字段保留原值与继承状态；CLI 整组确认仍提交完整三项，一键批量配置仍要求完整权限，或一次原子写入默认值与用户偏好（已有 Permission Profile 时保留权限）；加速档位仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
   第三方固定模式不开放官方默认模型、思考等级和加速档位；已有 `default_permissions` 时不混写传统 Sandbox 字段。
+  预览与执行按用户层原值计算实际 edits；等值返回 unchanged、willChange=false、activation=none，不调用写入。缺省与显式默认值分开，清除仅移除用户覆盖；策略及工具合并状态校验仍先执行。
   Fast 按模型目录精确 `priority`/`fast` ID、Ultrafast 按 `ultrafast` ID 开放，纯目录匹配与 Application、WebUI 共用 `runtime/service-tier.mjs`，预览和写入前重新校验所选模型及 Client 投影的独立开关；`fast_mode` / `ultrafast_mode` 分别结合合并配置与受管策略，不自动修改开关。设置页保留原始配置档位，关闭档位仍可退出到 Standard。
   快照保留已配置但不可用的模型 ID，未配置时只采用目录显式默认模型，不回退到其他条目；CLI/WebUI 提示先选有效模型，仍允许 Standard 退出加速。
   全局 Auto-review 默认值仅允许官方 OpenAI 主实例或复用官方模型目录的 Codex 兼容主实例开启；其他主实例仍可关闭，组织策略限制继续适用。
@@ -352,6 +353,7 @@
   WebUI 的重启要求；缺省不写入配置，非交互终端只报告当前值，`codexc config` 的身份与时区菜单复用同一实现。
   `--gateway` 管理 `[gateway].timezone`：缺省跟随 App Server，`--system` 选择独立系统时区，
   IANA 名称设置自定义时区，`--follow-app-server` 删除独立设置；修改后提示重启网关。
+  写入 JSON 同步返回 action、activation 与结构化 activationResult；等值不写入且不提示重启。
 - `config-webui-menu.mjs`：独立管理 WebUI 启用状态、监听地址、端口和访问令牌交互；启用状态写入
   `[webui] enabled` 并据此决定 `codexc start/restart all` 是否启动 WebUI；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
@@ -621,6 +623,7 @@
   通过计划任务控制脚本执行 App Server、Gateway、WebUI 与 Relay 的安装、启停、状态、日志
   与卸载；
   核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
+  非跟随日志按固定块后向定位最近行，再按打开文件的大小快照流式输出，保留超长行并限制内存；末尾换行不额外算空行，读取期间截短明确失败。跟随仍使用 PowerShell Tail。
   Windows 使用 Task Scheduler COM 精确查找任务并批量读取状态，宿主 IPC 并发查询；只把任务不存在识别为缺失，权限和调度器错误明确失败。批量启停遇到首个失败即停止后续操作，并报告已完成和未执行目标。
   计划任务预检、查询和普通变更分别限制为 10、5、15 秒；停止在同一 PowerShell 与 COM 连接内执行并确认任务停止，确认预算 20 秒，外层含启动开销最多 25 秒，避免每轮确认新建 PowerShell。之后仍检查宿主退出。变更超时只补一次有界状态查询并报告结果未确认，不重复变更，不把任务状态当作应用就绪。
   App Server 启动等待向共享检查入口传入主 Socket 路径，由该入口统一派生监管地址；实例已空闲释放时也检查同一监管入口。

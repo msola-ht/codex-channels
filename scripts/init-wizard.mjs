@@ -17,6 +17,7 @@ import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
 import { runOfficialTuiIdentity } from "./config-system-menu.mjs";
 import { runTimezoneCommand } from "./timezone-command.mjs";
 import { loadGatewaySettings, updateGatewaySetting } from "./config-management.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { runRelayListenMenu } from "./model-relay-listen-menu.mjs";
 import { packageDir } from "./package-path.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
@@ -189,14 +190,16 @@ async function configureOptionalFeatures({
           : "WebUI 已关闭：codexc start/restart all 不再启动它；需要时用 codexc start webui 单独启动。\n");
       }
       if (trafficDump !== storedTrafficDump) {
-        applySetting({ kind: "system.model-traffic-dump", value: trafficDump === true }, {
+        const result = applySetting({ kind: "system.model-traffic-dump", value: trafficDump === true }, {
           environment,
           expectedRevision: loadSettings(environment).revision,
         });
         applied.push(`model_traffic_dump=${trafficDump === true}`);
         output.write(trafficDump === true
-          ? "调用详情记录已开启：写入本地 traffic 目录，不含 Authorization/Cookie；重启 App Server 后生效。\n"
-          : "调用详情记录已关闭。\n");
+          ? "调用详情记录开启配置已保存：将写入本地 traffic 目录，不含 Authorization/Cookie。\n"
+          : "调用详情记录关闭配置已保存。\n");
+        writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+        output.write("Relay 在配置刷新后对新请求采用此设置；已开始的请求保持原状态。\n");
       }
     });
     if (relay === true) await relayListenMenu({ environment, output, prompts });

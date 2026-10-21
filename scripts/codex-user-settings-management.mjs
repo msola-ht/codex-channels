@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { acceleratedServiceTierId } from "../runtime/service-tier.mjs";
 import { createCodexUserConfigClient, readWithCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
@@ -63,14 +65,15 @@ export async function updateCodexUserSetting(
     if (snapshot.version !== expectedVersion) {
       throw invalid("revision", "stale-revision", "Codex 用户配置已变化，请重新读取设置");
     }
-    const { edits, value } = await createEdits(input, {
+    const { edits, result } = await planSettingChange(input, {
       config: snapshot.config,
       toolConfig: snapshot.toolConfig,
       approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
       acceleration: snapshot.acceleration,
       provider,
       models,
-    });
+    }, expectedVersion);
+    if (edits.length === 0) return result;
     try {
       await client.writeUserConfigEdits(edits, { expectedVersion });
     } catch (error) {
@@ -84,12 +87,7 @@ export async function updateCodexUserSetting(
       }
       throw error;
     }
-    return {
-      kind: input.kind,
-      previousVersion: expectedVersion,
-      value,
-      activation: codexUserSettingActivation(input.kind),
-    };
+    return result;
   }, { preserveOperationResult: true });
 }
 
@@ -120,21 +118,42 @@ export async function previewCodexUserSetting(
     if (snapshot.version !== expectedVersion) {
       throw invalid("revision", "stale-revision", "Codex 用户配置已变化，请重新读取设置");
     }
-    const { value } = await createEdits(input, {
+    const { result } = await planSettingChange(input, {
       config: snapshot.config,
       toolConfig: snapshot.toolConfig,
       approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
       acceleration: snapshot.acceleration,
       provider,
       models,
-    });
-    return {
-      kind: input.kind,
-      previousVersion: expectedVersion,
-      value,
-      activation: codexUserSettingActivation(input.kind),
-    };
+    }, expectedVersion);
+    return result;
   });
+}
+
+async function planSettingChange(input, context, previousVersion) {
+  // Validate the full proposed setting, including effective tool policy, before
+  // comparing user overrides. An inherited default is not a stored override.
+  const { edits: proposed, value } = await createEdits(input, context);
+  const edits = proposed.filter(edit => {
+    // Tool keys may contain dots, quotes or backslashes; retain their original
+    // segments rather than reparsing the encoded App Server key path.
+    const path = input.kind === "tool-access" ? input.path : edit.keyPath.split(".");
+    let current = context.config;
+    for (const segment of path) {
+      current = current !== null && typeof current === "object" && !Array.isArray(current)
+        && Object.hasOwn(current, segment) ? current[segment] : undefined;
+    }
+    return edit.value === null ? current !== undefined : !isDeepStrictEqual(current, edit.value);
+  });
+  const willChange = edits.length > 0;
+  return { edits, result: {
+    kind: input.kind,
+    previousVersion,
+    value,
+    action: willChange ? "updated" : "unchanged",
+    willChange,
+    activation: willChange ? codexUserSettingActivation(input.kind) : "none",
+  } };
 }
 
 function codexUserSettingActivation(kind) {
