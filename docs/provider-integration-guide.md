@@ -414,6 +414,7 @@ Codex 兼容 Provider 不接受用户自定义模型目录、第三方 `models.j
 配置的 Codex CLI 执行 `debug models --bundled`，把 Codex 官方目录原子写入
 `~/.codex-connect/providers/custom/official-models.json`（0600），并通过 `model_catalog_json`
 注入固定/切换自定义 App Server；目录只随本机锁定的 Codex CLI 版本更新。该只读目录不接受第三方扩展能力声明，Codex 兼容 Provider 的原生网页搜索保留工具透传与上游策略，使用该 Provider 的搜索覆盖，缺省跟随用户全局设置。
+主 Provider 切换在预览和执行中校验最终模型：显式模型优先，其次目标 switching Profile，最后沿用主配置。切入官方目录目标时，非法继承会拒绝并要求明确选择，完全缺省仍保留默认继承；切回 OpenAI 的既有清除第三方默认模型行为不变。
 自定义 Provider 切换模式可以与受管切换模式
 共存，但不能与任何受管固定模式同时启用。需要手填模型时使用下面的自定义提供商；需要账户能力时，仍按本指南前述的编译期
 受管 Provider 流程接入。

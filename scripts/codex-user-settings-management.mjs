@@ -63,7 +63,7 @@ export async function updateCodexUserSetting(
     if (snapshot.version !== expectedVersion) {
       throw invalid("revision", "stale-revision", "Codex 用户配置已变化，请重新读取设置");
     }
-    const { edits, value } = createEdits(input, {
+    const { edits, value } = await createEdits(input, {
       config: snapshot.config,
       toolConfig: snapshot.toolConfig,
       approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
@@ -120,7 +120,7 @@ export async function previewCodexUserSetting(
     if (snapshot.version !== expectedVersion) {
       throw invalid("revision", "stale-revision", "Codex 用户配置已变化，请重新读取设置");
     }
-    const { value } = createEdits(input, {
+    const { value } = await createEdits(input, {
       config: snapshot.config,
       toolConfig: snapshot.toolConfig,
       approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,

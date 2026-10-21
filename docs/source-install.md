@@ -181,6 +181,9 @@ Windows 构建使用现有 PowerShell 7 提前编译原生 Job/目录保护 DLL�
 
 `npm run install:global` 不拉取 Git，也不自动管理服务；上面的 `codexc install` 是另行执行的服务操作。自行选择分支并更新源码后重复执行程序安装；当前全局包不属于受管源码安装时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
 
+服务安装会在三个平台的四类定义中保存显式 `CODEX_HOME` 的规范化目录，未设置时不写该变量。Unix 已有定义需在设置了目标 Home 的终端重新执行 `codexc install` 才能加载此行为；Linux 的新定义同时关闭 ExecStart 变量展开，保留路径中的字面 `$`。普通 restart 不重建定义；重新安装的核心服务、Relay 与 WebUI 激活边界同上。
+当前源码更新预检按新 ExecStart 格式核对 Linux 服务定义；旧定义被拒绝时，先按本节完成程序安装和 `codexc install`，再使用源码自动更新，不手工绕过路径检查。
+
 新设备先运行 `npm run install:global`，安装成功后在交互终端运行 `codexc init` 完成初始化、接入和后台服务安装；仅在跳过相应步骤时再按需运行 `codexc setup`、`codexc install`。非交互 `init` 只初始化用户数据，不提供无人值守接入；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。
 Windows 首次或旧服务定义不完整时，若任务激活或就绪检查失败，会保留本次生成的服务定义并报告原始失败阶段，便于检查状态、日志和重试；不会删除任务引用的定义后再尝试安装不存在的旧服务。已有完整定义的安装继续恢复旧定义；恢复失败时同时保留原始安装错误。
 Windows 安装预检会拒绝权限、类型或大小不安全的旧服务定义与启动器；不会将这些文件用作恢复快照。激活时先停止核心服务和 Relay，再按新定义启动，WebUI 的运行状态保留；App Server 定义缺少 Socket 路径时明确要求重新安装。

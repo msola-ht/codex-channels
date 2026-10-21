@@ -11,6 +11,7 @@
 - `codex-connect-model-relay.service.template`：独立模型 API 进程，使用内部 `service-model-relay` 入口。
 
 模板由 `codexc install` 调用的服务安装管理接口渲染到 `~/.config/systemd/user`（或 `$XDG_CONFIG_HOME/systemd/user`）。
+显式 `CODEX_HOME` 经规范化后写入四份定义，未设置时不生成该环境项；ExecStart 的 `:` 前缀关闭变量展开，保留程序路径中的字面美元符号，Environment 和 WorkingDirectory 仍按各自语义转义。
 服务都通过 CLI 服务入口启动，并在每次启动时按 Codex Home 的 `.env`、systemd 用户管理器继承的标准
 代理环境变量和 GNOME 手动代理的顺序解析代理，不把自动发现的地址固化到 unit。安装、启停和
 卸载由 `scripts/systemd-control.sh` 完成；Gateway unit 显式标记为受监管进程，配置要求重启时

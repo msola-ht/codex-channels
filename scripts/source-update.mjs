@@ -552,9 +552,10 @@ function assertSourceUpdateInstallation(checkout, environment, options, prefix =
       if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("服务定义不是普通文件");
       if (platform === "systemd") {
         const starts = readFileSync(path, "utf8").split(/\r?\n/u).filter(line => /^\s*ExecStart\s*=/u.test(line));
-        const nodeArgument = starts.length === 1 ? /^ExecStart=("(?:\\.|[^"\\])*") /u.exec(starts[0])?.[1] : undefined;
-        matches = nodeArgument !== undefined && cliEntries.some(entry =>
-          starts[0] === `ExecStart=${nodeArgument} --disable-warning=ExperimentalWarning ${systemdArgument(entry)} ${command}`);
+        const nodeArgument = starts.length === 1 ? /^ExecStart=:("(?:\\.|[^"\\])*") /u.exec(starts[0])?.[1] : undefined;
+        if (nodeArgument === undefined) throw new Error("ExecStart 不符合当前服务定义格式");
+        matches = cliEntries.some(entry =>
+          starts[0] === `ExecStart=:${nodeArgument} --disable-warning=ExperimentalWarning ${systemdArgument(entry)} ${command}`);
       } else {
         const value = platform === "launchd"
           ? JSON.parse(capture("/usr/bin/plutil", ["-extract", "ProgramArguments", "json", "-o", "-", path], checkout, environment, options.captureCommand))

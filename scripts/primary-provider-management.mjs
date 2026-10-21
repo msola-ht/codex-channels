@@ -34,6 +34,7 @@ import { thirdPartyProviderRequestMaxRetries, thirdPartyProviderStreamMaxRetries
 import {
   createCodexUserConfigClient,
   readCodexUserConfigSnapshot,
+  resolveCodexUserConfigBinary,
 } from "./codex-user-config.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import {
@@ -324,31 +325,21 @@ async function buildSwitchPlan(
     );
   }
   const normalizedModel = optionalString(model);
-  const { snapshot, officialModels } = await loadSwitchContext(
-    environment,
-    createClient,
-    normalizedModel !== undefined && !isCustomCatalogProvider(normalizedId),
-  );
-  if (
-    normalizedModel !== undefined
-    && !isCustomCatalogProvider(normalizedId)
-    && !officialModels.some(
-      (candidate) => candidate.available !== false && candidate.model === normalizedModel,
-    )
-  ) {
-    throw invalid(
-      "unknown-model",
-      "model",
-      `模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`,
-    );
-  }
-  const config = record(snapshot.config);
-  const providers = record(config.model_providers);
-  const currentProvider = optionalString(config.model_provider) ?? "openai";
   // 只加载目标 Provider：其他 Provider 的目录不可读不应阻塞本次切换，注册表只读 ID 列表。
   const switchingProviderIds = loadCustomSwitchingProviderIds(environment);
   const switching = loadConfiguredCustomSwitchingModelProviders(environment, normalizedId)[0];
+  const { snapshot, officialModels } = await loadSwitchContext(
+    environment,
+    createClient,
+    (config) => !isCustomCatalogProvider(normalizedId)
+      && (normalizedModel !== undefined || (normalizedId !== "openai"
+        && (switching?.model ?? optionalString(config.model)) !== undefined)),
+  );
+  const config = record(snapshot.config);
+  const providers = record(config.model_providers);
+  const currentProvider = optionalString(config.model_provider) ?? "openai";
   if (normalizedId === "openai") {
+    assertOfficialModel(normalizedModel, officialModels, normalizedId);
     const candidateIds = listCustomPrimaryProviderCandidates(providers);
     const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
     const clearsCustomModel = currentProvider !== "openai";
@@ -439,6 +430,8 @@ async function buildSwitchPlan(
   }
   assertCustomPrimaryProviderAuthentication(targetProvider);
   const custom = isCustomCatalogProvider(normalizedId) ? responsesModelSettings(environment, normalizedId, normalizedModel ?? switching?.model) : undefined;
+  const targetModel = custom?.model ?? normalizedModel ?? switching?.model ?? optionalString(config.model);
+  if (custom === undefined) assertOfficialModel(targetModel, officialModels, normalizedId);
   const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   return {
     target: {
@@ -446,7 +439,7 @@ async function buildSwitchPlan(
       displayName: optionalString(provider.name) ?? normalizedId,
       source,
       baseUrl: optionalString(provider.base_url) ?? "",
-      model: custom?.model ?? normalizedModel ?? switching?.model ?? optionalString(config.model) ?? null,
+      model: targetModel ?? null,
     },
     providers,
     expectedVersion: snapshot.version,
@@ -469,7 +462,7 @@ async function buildSwitchPlan(
       ] : []),
       ...(custom || (normalizedModel === undefined && switching === undefined)
         ? []
-        : [{ keyPath: "model", value: normalizedModel ?? switching?.model }]),
+        : [{ keyPath: "model", value: targetModel }]),
     ],
     effects: {
       currentProviderId: currentProvider,
@@ -482,20 +475,30 @@ async function buildSwitchPlan(
   };
 }
 
-async function loadSwitchContext(environment, createClient, includeModels) {
+async function loadSwitchContext(environment, createClient, needsModels) {
   const client = await createClient({ environment });
   try {
     await client.connect();
-    const [snapshot, officialModels] = await Promise.all([
-      client.readUserConfigSnapshot(),
-      includeModels ? client.listModels() : [],
-    ]);
-    return { snapshot, officialModels: includeModels && isCustomCatalogProvider(record(snapshot.config).model_provider)
-      ? readOfficialModelCatalog(environment).models.filter(model => model.supported_in_api && model.visibility === "list").map(model => ({model: model.slug, available:true}))
-      : officialModels };
+    const snapshot = await client.readUserConfigSnapshot();
+    const includeModels = needsModels(record(snapshot.config));
+    const officialModels = !includeModels ? [] : isCustomCatalogProvider(record(snapshot.config).model_provider)
+      ? readOfficialModelCatalog(environment, resolveCodexUserConfigBinary(environment)).models.filter(model => model.supported_in_api && model.visibility === "list").map(model => ({model: model.slug, available:true}))
+      : await client.listModels();
+    return { snapshot, officialModels };
   } finally {
     await client.close().catch(() => undefined);
   }
+}
+
+function assertOfficialModel(model, officialModels, providerId) {
+  if (model === undefined || officialModels.some(
+    candidate => candidate.available !== false && candidate.model === model,
+  )) return;
+  throw invalid(
+    "unknown-model",
+    "model",
+    `模型 ID 不在 Codex 官方模型目录中：${model}；请通过 codexc provider switch ${providerId} <模型 ID> 明确选择官方目录中的模型`,
+  );
 }
 
 /**

@@ -11,7 +11,8 @@
 - `com.hegenai.codex-model-relay.plist.template`：独立模型 API 进程，使用内部 `service-model-relay` 入口。
 
 模板中的占位符由 `codexc install` 调用的服务安装管理接口写入实际路径和运行环境。服务都通过 CLI
-服务入口启动，并在每次启动时按 Codex Home 的 `.env`、标准环境变量和 macOS 系统代理的顺序解析代理，不把
+服务入口启动；显式 `CODEX_HOME` 经规范化与 XML 转义后写入四份定义，未设置时不生成该环境项。服务
+在每次启动时按 Codex Home 的 `.env`、标准环境变量和 macOS 系统代理的顺序解析代理，不把
 自动发现的地址固化到 plist。安装流程加载 App Server 与 Gateway 服务，WebUI plist 只生成不
 自动加载；Gateway plist 显式标记为受监管进程，配置要求重启时由 launchd 自动拉起；若检测到
 不支持的其他标签仍在运行则明确拒绝，避免多个 Gateway 同时轮询。Gateway 启动前会等待受监管的
