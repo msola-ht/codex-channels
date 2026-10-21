@@ -68,3 +68,6 @@ export function settledTaskIds(
   const terminal = (state: string | undefined) => state === "completed" || state === "failed" || state === "cancelled"
   return tasks.filter((task) => terminal(task.state) && !terminal(previous.get(task.id))).map((task) => task.id)
 }
+export function isManagementTaskActive(task: { state: string; errorCode?: string | null }): boolean {
+  return ["queued", "running", "cancelling"].includes(task.state) || task.errorCode === "process_cleanup_unconfirmed"
+}

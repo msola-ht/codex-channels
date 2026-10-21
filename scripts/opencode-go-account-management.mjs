@@ -24,7 +24,6 @@ import {
 import {
   assertProviderFileSnapshots,
   readOptionalProviderFile,
-  replaceOptionalProviderFile,
   removeOptionalProviderFile,
   refreshProviderFileSnapshot,
   restoreProviderFileSnapshots,
@@ -536,13 +535,7 @@ async function restoreOpencodeGoBaseConfig(plan, initialConfig, environment) {
       plan.account.phone,
     ),
   );
-  if (Object.keys(restored).length === 0) {
-    if (existsSync(plan.paths.configPath)) {
-      await removeOptionalProviderFile(plan.paths.configPath);
-    }
-  } else {
-    await replaceOptionalProviderFile(plan.paths.configPath, stringify(restored), environment);
-  }
+  await plan.snapshots.find(snapshot => snapshot.path === plan.paths.configPath).writeCurrent(stringify(restored));
 }
 
 function parseConfig(content) {

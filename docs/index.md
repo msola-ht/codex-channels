@@ -466,6 +466,10 @@ Provider Proxy 独立采集请求与响应模型、出站 `request_service_tier`
 
 更新器关闭原生 daemon 自动启动也复用用户层 `config/read` 与版本化 `config/batchWrite`；
 入口为 `scripts/codex-user-config.mjs`，由 `source-update.mjs` 在候选切换和无需升级两条路径调用。
+受管 DS、CLP、CCG、OCG 账户发布或恢复主配置由 `scripts/managed-provider-files.mjs` 复用同一用户层版本合同，
+仅写入计划差异字段；私有凭据先发布，写入后回读，未知结果保留恢复材料，不自动重放或全文件回滚。
+用户层会规范化路径字段；该事务在 RPC 读取两侧复核磁盘原文，使用返回版本条件写入，再以稳定回读的磁盘字段判定持久化结果，不将原始 TOML 与规范化用户层直接比较。
+官方版本检查不构成主配置与私有文件的跨文件原子提交，也不承诺原生文件写入的全局串行化；恢复边界见[Provider 接入指南](provider-integration-guide.md#4-安全边界)。
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，读取用户层并投影该连接的合并配置；渠道跨 Provider
 切换则向目标 App Server 发送带 Workspace CWD 的只读 `config/read`，取得该 Profile 的有效思考等级。

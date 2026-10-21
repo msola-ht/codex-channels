@@ -613,20 +613,9 @@ export interface OpenAiModelContextInput {
   contextWindow: number
 }
 
-export interface OpenAiModelContextPreview extends OpenAiModelContextInput {
-  scope: string
-  displayName: string
-  previousContextWindow: number | null
-  maxContextWindow: number | null
-}
+export type OpenAiModelContextPreview = import("./webui-official-model-catalog.mjs").OpenAiModelContextPreview
 
-export interface OpenAiModelContextResult {
-  revision: string | null
-  scope: string
-  model: string
-  contextWindow: number
-  consistency: "confirmed" | "unknown"
-  backupCreated: true
+export type OpenAiModelContextResult = import("./webui-official-model-catalog.mjs").OpenAiModelContextResult & {
   auditStatus: "recorded" | "degraded"
 }
 
@@ -688,6 +677,11 @@ export interface CodexUserSettingsResponse {
 
 export interface CodexUserSettingInput { kind: string; [key: string]: unknown }
 
+export interface ManagementTaskResult {
+  commitState: "not_started" | "unchanged" | "committed" | "not_committed" | "unknown"
+  failurePhases: Array<"commit" | "vacuum" | "count" | "close" | "lock-release" | "gateway-restart">
+}
+
 export interface ManagementTask {
   id: string
   operation: "service" | "metrics" | "traffic"
@@ -697,7 +691,8 @@ export interface ManagementTask {
   createdAt: string
   updatedAt: string
   error: string | null
-  result: { output: string | null } | null
+  errorCode: "start_failed" | "execution_failed" | "cancellation_unconfirmed" | "process_cleanup_unconfirmed" | "result_unconfirmed" | null
+  result: ManagementTaskResult | null
   auditStatus: "recorded" | "degraded" | null
 }
 
@@ -715,7 +710,7 @@ export interface ManagementTaskPreview {
   target: string | null
   effects: string[]
   preconditions: string[]
-  recovery: string
+  recovery: "traffic_irreversible" | "metrics_restore" | "metrics_backup" | "service_check"
   activation: string | { status: string; target: string; commands: readonly string[] }
   resource?: unknown
   requiresConfirmation: true
@@ -737,7 +732,7 @@ export interface ManagementProviderSettingsResponse {
     revision: string
     displayName: string
     providers: string[]
-    models: Array<{ id: string; displayName: string; isDefault: boolean; presentation: OpenAiModelCatalogEntry & { editable: false } }>
+    models: Array<{ id: string; displayName: string; isDefault: boolean; removalBlockedReason: import("./provider-model-management.mjs").ProviderModelRemovalBlockedReason | null; presentation: OpenAiModelCatalogEntry & { editable: false } }>
     canRemove: boolean
     unavailableReason?: string
   }>

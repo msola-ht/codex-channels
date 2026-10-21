@@ -101,6 +101,10 @@ export async function routeTaskManagement({
       const task = state.tasks.start(normalized, {
         owner: principalId,
         environment,
+        trafficConfirmation: normalized.operation === "traffic" ? {
+          directory: resource.dumps.directory,
+          fingerprint: resource.dumps.fingerprint,
+        } : null,
         auditMetadata: {
           sessionId: principalId,
           source: "webui",

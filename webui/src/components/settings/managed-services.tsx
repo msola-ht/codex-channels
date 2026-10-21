@@ -1,5 +1,7 @@
 import { Link } from "react-router"
 import { useTranslation } from "@/hooks/use-translation"
+import { ManagementTaskFeedback } from "@/components/settings/management-task-feedback"
+import { isManagementTaskActive } from "@/lib/api-polling"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -10,13 +12,13 @@ import type { ManagementServicesResponse } from "@/lib/types"
 
 export function ManagedServices({ services, tasks, scope, showTasks = true }: { services: ManagementServicesResponse; tasks: ManagementTaskController; showTasks?: boolean; scope?: ManagementServicesResponse["entries"][number]["target"] }) {
   const { t } = useTranslation()
-  const otherTaskActive = scope && tasks.tasks.some(task => ["queued", "running", "cancelling"].includes(task.state) && (task.operation !== "service" || task.target !== scope))
+  const otherTaskActive = scope && tasks.tasks.some(task => isManagementTaskActive(task) && (task.operation !== "service" || task.target !== scope))
   const entries = scope ? services.entries.filter(service => service.target === scope) : services.entries
   const recentTasks = scope ? tasks.tasks.filter(task => task.operation === "service" && task.target === scope) : tasks.tasks
   if (entries.length === 0) {
     return <SettingsEmpty>{t("managementUi.servicesEmpty")}</SettingsEmpty>
   }
-  const taskBusy = tasks.loading || tasks.error !== null || tasks.saving || tasks.pendingPreview !== null || tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
+  const taskBusy = tasks.loading || tasks.error !== null || tasks.saving || tasks.pendingPreview !== null || tasks.tasks.some(isManagementTaskActive)
   return <>
     {otherTaskActive && <Alert><AlertDescription>{t("relay.otherTaskActive")} <Link to="/settings/services" className="underline">{t("relay.viewTasks")}</Link></AlertDescription></Alert>}
     {!scope && <div className="flex flex-wrap gap-2">
@@ -57,7 +59,16 @@ export function RecentManagementTasks({ tasks }: { tasks: ManagementTaskControll
   const { t } = useTranslation()
   return <div className="mt-2 rounded-md border p-2 text-xs">
     <span className="font-medium">{t("managementUi.recentTasks")}</span>
-    {tasks.tasks.slice(-3).map((task) => <div key={task.id} className="mt-1 flex flex-wrap items-center justify-between gap-2"><span className="break-all">{task.operation}:{task.action}{task.target ? `:${task.target}` : ""}</span><div className="flex items-center gap-2"><Badge variant={task.state === "completed" ? "secondary" : task.state === "failed" ? "destructive" : "outline"}>{t(task.state === "queued" ? "managementUi.queued" : task.state === "running" ? "managementUi.running" : task.state === "cancelling" ? "managementUi.cancelling" : task.state === "completed" ? "delivery.contentStates.completed" : task.state === "failed" ? "delivery.contentStates.failed" : "managementUi.cancelled")}</Badge>{["queued", "running", "cancelling"].includes(task.state) ? <Button variant="ghost" size="sm" disabled={tasks.loading || task.state === "cancelling"} onClick={() => void tasks.cancel(task.id)}>{t("modelManagement.cancel")}</Button> : null}</div></div>)}
+    {tasks.tasks.slice(-3).map(task => <div key={task.id} className="mt-1 flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="break-all">{task.operation}:{task.action}{task.target ? `:${task.target}` : ""}</span>
+        <div className="flex items-center gap-2">
+          <Badge variant={task.state === "completed" ? "secondary" : task.state === "failed" ? "destructive" : "outline"}>{t(task.state === "queued" ? "managementUi.queued" : task.state === "running" ? "managementUi.running" : task.state === "cancelling" ? "managementUi.cancelling" : task.state === "completed" ? "delivery.contentStates.completed" : task.state === "failed" ? "delivery.contentStates.failed" : "managementUi.cancelled")}</Badge>
+          {isManagementTaskActive(task) ? <Button variant="ghost" size="sm" disabled={tasks.loading || task.state === "cancelling"} onClick={() => void tasks.cancel(task.id)}>{t("modelManagement.cancel")}</Button> : null}
+        </div>
+      </div>
+      <ManagementTaskFeedback task={task} />
+    </div>)}
   </div>
 }
 

@@ -1,6 +1,6 @@
 import { fetchManagementSettings, previewManagementSetting, updateManagementSetting } from "@/lib/api"
 import { useVersionedSettingsManagement } from "@/hooks/use-versioned-settings-management"
-import type { GatewaySettingsController } from "@/lib/settings-management"
+import type { GatewaySettingsController, PendingSetting } from "@/lib/settings-management"
 import type { ManagementSettingInput, ManagementSettingsResponse } from "@/lib/types"
 
 export function useSettingsManagement(): GatewaySettingsController {
@@ -10,6 +10,7 @@ export function useSettingsManagement(): GatewaySettingsController {
     update: updateManagementSetting,
     revisionOf: (settings) => settings.revision,
     currentValue,
+    confirmationIntent,
   })
   return {
     actionResult: management.actionResult,
@@ -27,6 +28,16 @@ export function useSettingsManagement(): GatewaySettingsController {
     refetch: management.refetch,
     managedSettings: management.data,
   }
+}
+
+/** Confirmation copy retains only the supported action, never the input secret. */
+function confirmationIntent(setting: ManagementSettingInput): PendingSetting["intent"] {
+  if (setting.kind !== "webui.token" && setting.kind !== "network.proxy") return undefined
+  const value = setting.value
+  if (value === null || typeof value !== "object" || !("action" in value)) return undefined
+  if (value.action === "set" || value.action === "clear") return value.action
+  if (setting.kind === "webui.token" && value.action === "generate") return "generate"
+  return undefined
 }
 
 function currentValue(settings: ManagementSettingsResponse, setting: ManagementSettingInput): unknown {

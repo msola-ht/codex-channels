@@ -80,7 +80,7 @@ export function useOpenAiModelCatalog() {
   const confirm = async () => {
     const result = await management.confirm()
     if (result !== null) {
-      if (result.kind === "context" && result.value.consistency === "confirmed") setTracking(previous => {
+      if (result.kind === "context" && result.value.status === "saved" && result.value.consistency === "confirmed") setTracking(previous => {
         const next = recordOpenAiModelCacheEdit(previous.edits, { scope: result.value.scope, model: result.value.model, contextWindow: result.value.contextWindow })
         return { ...next, storageUnavailable: previous.storageUnavailable || next.storageUnavailable }
       })

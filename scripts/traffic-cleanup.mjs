@@ -37,13 +37,12 @@ export async function runTrafficCleanup(
   const options = parseTrafficCleanupArgs(args);
   const located = locateOptionalUserConfig(environment);
   const directory = options.directory ?? join(located?.dataDir ?? userDataDir(environment), "traffic");
-  const preview = trafficCleanupPreview(directory);
-  const original = preview.targets.length > 0 ? cleanupIdentity(preview) : undefined;
-  const fingerprint = original === undefined ? null
-    : createHash("sha256").update(JSON.stringify(original)).digest("hex");
+  const { preview } = trafficCleanupSnapshot(directory);
+  const fingerprint = preview.fingerprint;
   const plan = { ...preview, fingerprint };
   renderPreview(preview, output);
-  if (expectedFingerprint !== undefined && expectedFingerprint !== fingerprint) {
+  const expected = expectedFingerprint ?? options.expectedFingerprint;
+  if (expected !== undefined && expected !== fingerprint) {
     throw new Error("转储范围在预览后发生变化，请重新预览并确认；未删除任何文件");
   }
   if (preview.targets.length === 0) return plan;
@@ -53,9 +52,8 @@ export async function runTrafficCleanup(
   }
   await assertAppServersStopped(environment, directory);
   signal?.throwIfAborted();
-  const confirmed = trafficCleanupPreview(directory);
-  const current = cleanupIdentity(confirmed);
-  if (JSON.stringify(original) !== JSON.stringify(current)) {
+  const { preview: confirmed, identity: current } = trafficCleanupSnapshot(directory);
+  if (preview.fingerprint !== confirmed.fingerprint) {
     throw new Error("转储范围在预览后发生变化，请重新预览并确认；未删除任何文件");
   }
   let deleted = 0;
@@ -97,9 +95,13 @@ function cleanupIdentity(preview) {
 }
 
 export function trafficCleanupPreview(directory) {
+  return trafficCleanupSnapshot(directory).preview;
+}
+
+function trafficCleanupSnapshot(directory) {
   const catalog = dumpCatalog(directory);
   const targets = catalog.files;
-  return {
+  const preview = {
     bytes: targets.reduce((total, target) => total + pathSize(target), 0),
     directory,
     labels: catalog.labels.length,
@@ -114,6 +116,10 @@ export function trafficCleanupPreview(directory) {
     targets,
     v2Sessions: catalog.files.length,
   };
+  // Empty previews also bind the selected directory, never newly added data.
+  const identity = targets.length === 0 ? { directory, targets: [] } : cleanupIdentity(preview);
+  preview.fingerprint = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+  return { preview, identity };
 }
 
 export async function assertConfiguredAppServersStopped(environment, directory) {

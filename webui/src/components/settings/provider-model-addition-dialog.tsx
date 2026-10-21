@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps, type RefObject } from "react"
+import { useState, type ComponentProps, type RefObject } from "react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -8,10 +8,10 @@ import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import { useTranslation } from "@/hooks/use-translation"
-import { ApiClientError, fetchProviderModelAdditionOptions } from "@/lib/api"
-import { translateApiError } from "@/lib/i18n/translate"
+import { useProviderModelAdditionOptions } from "@/hooks/use-provider-model-addition-options"
+import { translateApiErrorCode } from "@/lib/i18n/translate"
 import type { ProviderSettingsController } from "@/lib/settings-management"
-import type { ManagedManualModelDefinition, ProviderModelAdditionOptions, ProviderModelAdditionPreview } from "../../../../scripts/provider-model-additions.mjs"
+import type { ManagedManualModelDefinition, ProviderModelAdditionPreview } from "../../../../scripts/provider-model-additions.mjs"
 import { contextWindowPresetLabel, contextWindowPresetTokens } from "../../../../runtime/model-catalog.mjs"
 
 export interface ProviderModelAdditionTarget { provider: string; revision: string; models: Array<{ id: string; displayName: string }> }
@@ -30,10 +30,6 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const { t } = useTranslation()
   const clinePass = target.provider.startsWith("clp-")
   const [mode, setMode] = useState("discover")
-  const [options, setOptions] = useState<ProviderModelAdditionOptions | null>(null)
-  const [selected, setSelected] = useState<string[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<{ message: string; code: string } | null>(null)
   const [id, setId] = useState("")
   const [name, setName] = useState("")
   const [manualSource, setManualSource] = useState("independent")
@@ -44,9 +40,9 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const [images, setImages] = useState("unknown")
   const [patch, setPatch] = useState("unknown")
   const [search, setSearch] = useState("unknown")
-  const request = useRef<AbortController | null>(null)
-  useEffect(() => () => request.current?.abort(), [])
   const busy = management.busy || management.loading || management.error !== null || management.readbackRequired
+  const candidates = useProviderModelAdditionOptions(target, open, stale, busy)
+  const { options, selected, loading, errorCode, setSelected, clearError } = candidates
   const locked = busy || loading || stale
   const inheriting = clinePass && manualSource === "inherit"
   const capabilitiesValid = /^\d+$/u.test(window)
@@ -56,10 +52,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
     && (inheriting ? target.models.some(entry => entry.id === inheritFrom) : capabilitiesValid)
   const load = async () => {
     if (locked || !open || mode === "manual" && !manualValid) return
-    request.current?.abort()
-    const controller = new AbortController()
-    request.current = controller
-    setLoading(true); setError(null); setOptions(null); setSelected([]); management.clearError()
+    management.clearError()
     const manualModel: ManagedManualModelDefinition | undefined = mode !== "manual" ? undefined : inheriting ? {
       id: id.trim(), name: name.trim(), inheritFrom,
     } : {
@@ -68,14 +61,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
       ...(patch === "unknown" ? {} : { applyPatchToolType: patch === "yes" ? "freeform" : null }),
       ...(search === "unknown" ? {} : { supportsSearchTool: search === "yes" }),
     }
-    try {
-      const result = await fetchProviderModelAdditionOptions(target.provider, manualModel, controller.signal)
-      if (!controller.signal.aborted) { setOptions(result); setSelected(mode === "manual" ? result.candidates.map(entry => entry.model) : []) }
-    } catch (cause) {
-      if (!controller.signal.aborted) setError({ message: "", code: cause instanceof ApiClientError ? cause.code : "network_error" })
-    } finally {
-      if (!controller.signal.aborted) setLoading(false)
-    }
+    await candidates.load(manualModel)
   }
   const capabilityOptions: [string, string][] = [["unknown", t("common.unknown")], ["yes", t("managementUi.supported")], ["no", t("managementUi.unsupported")]]
   return <Dialog open={open} disablePointerDismissal onOpenChange={(next, details) => { if (management.busy) { details.cancel(); return }; if (!next && open) onClose() }}>
@@ -83,10 +69,10 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
       <DialogHeader><DialogTitle>{t("modelAddition.title")}</DialogTitle><DialogDescription>{t("modelAddition.hint")}</DialogDescription></DialogHeader>
       <code className="break-all">{target.provider}</code>
       {!options ? <FieldGroup>
-        <ManagedSelect label={t("modelAddition.method")} value={mode} disabled={locked} options={[["discover", t("modelAddition.discover")], ["manual", t("modelAddition.manual")]]} onChange={value => { setMode(value); setError(null) }} />
+        <ManagedSelect label={t("modelAddition.method")} value={mode} disabled={locked} options={[["discover", t("modelAddition.discover")], ["manual", t("modelAddition.manual")]]} onChange={value => { setMode(value); clearError() }} />
         {mode === "manual" ? <>
           {clinePass ? <>
-            <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.manualSource")}</FieldLegend><ToggleGroup variant="outline" size="sm" value={[manualSource]} disabled={locked} aria-label={t("modelAddition.manualSource")} onValueChange={values => { if (values[0]) { setManualSource(values[0]); setError(null) } }}>
+            <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.manualSource")}</FieldLegend><ToggleGroup variant="outline" size="sm" value={[manualSource]} disabled={locked} aria-label={t("modelAddition.manualSource")} onValueChange={values => { if (values[0]) { setManualSource(values[0]); clearError() } }}>
               <ToggleGroupItem value="independent">{t("modelAddition.independent")}</ToggleGroupItem>
               <ToggleGroupItem value="inherit">{t("modelAddition.inherit")}</ToggleGroupItem>
             </ToggleGroup></FieldSet>
@@ -114,9 +100,9 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
       </FieldGroup> : <FieldGroup>
         <p>{t("modelCatalog.scope", { providers: options.providers.join(t("managementUi.listSeparator")) })}</p>
         {options.candidates.length === 0 ? <p>{t("modelAddition.empty")}</p> : <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.select")}</FieldLegend><FieldGroup>{options.candidates.map((entry, index) => <Field key={entry.model} orientation="horizontal"><Checkbox id={`addition-candidate-${index}`} checked={selected.includes(entry.model)} disabled={locked} onCheckedChange={checked => setSelected(previous => checked ? [...previous, entry.model] : previous.filter(model => model !== entry.model))} /><FieldLabel htmlFor={`addition-candidate-${index}`} className="break-all">{entry.displayName} ({entry.model})</FieldLabel></Field>)}</FieldGroup></FieldSet>}
-        <Button variant="outline" disabled={locked} onClick={() => { setOptions(null); setSelected([]); management.clearError() }}>{t("modelAddition.reset")}</Button>
+        <Button variant="outline" disabled={locked} onClick={() => { candidates.reset(); management.clearError() }}>{t("modelAddition.reset")}</Button>
       </FieldGroup>}
-      {error ? <Alert variant="destructive"><AlertDescription>{translateApiError(t, error.message, error.code)}</AlertDescription></Alert> : null}
+      {errorCode ? <Alert variant="destructive"><AlertDescription>{translateApiErrorCode(t, errorCode)}</AlertDescription></Alert> : null}
       {stale ? <Alert variant="destructive"><AlertDescription>{t("modelCatalog.stale")}</AlertDescription></Alert> : null}
       {management.actionError ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
       {management.readbackRequired ? <Alert><AlertDescription>{t("settingsUi.readbackUnknown")}</AlertDescription></Alert> : null}
