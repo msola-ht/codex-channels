@@ -102,14 +102,8 @@ export function ManagedInputRow({ id, label, defaultValue, value, placeholder, d
 
 export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; loading?: boolean; onConfirm: () => void; onCancel: () => void }) {
   const { t } = useTranslation()
-  const destructive = pending !== null
-    && pending.value !== null
-    && typeof pending.value === "object"
-    && "action" in pending.value
-    && pending.value.action === "clear"
-  const regeneratingToken = pending?.kind === "webui.token"
-    && pending.value !== null && typeof pending.value === "object"
-    && "action" in pending.value && pending.value.action === "generate"
+  const destructive = pending?.intent === "clear"
+  const regeneratingToken = pending?.kind === "webui.token" && pending.intent === "generate"
   return (
     <ManagementConfirmationDialog
       open={pending !== null}
@@ -123,6 +117,10 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
     >
       {pending !== null ? <>
           <p>{regeneratingToken ? t("settingsFields.regenerateTokenConfirmation") : t("settingsUi.change", { label: typeof pending.label === "string" ? pending.label : t(pending.label.key, pending.label.params), before: formatPreviewValue(pending.before, pending.kind, t), after: formatPreviewValue(pending.value, pending.kind, t) })}</p>
+          {pending.kind === "webui.token" && pending.intent === "set" ? <p>{t("settingsFields.setTokenConfirmation")}</p> : null}
+          {pending.kind === "webui.token" && pending.intent === "clear" ? <p>{t("settingsFields.clearTokenConfirmation")}</p> : null}
+          {pending.kind === "network.proxy" && pending.intent !== undefined ? <p>{t(pending.intent === "clear" ? "settingsFields.clearProxyConfirmation" : "settingsFields.setProxyConfirmation")}</p> : null}
+          {pending.kind === "webui.host" && previewRecord(pending.before)?.tokenConfigured === false && previewRecord(pending.value)?.tokenConfigured === true ? <p>{t("settingsFields.publicHostTokenConfirmation")}</p> : null}
           <p className="text-muted-foreground">{t("settingsUi.activation", { value: formatActivation(pending.activation, t) })}</p>
           {pending.activation.commands.length > 0
             ? <p className="text-muted-foreground">{t(pending.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: pending.activation.commands.join("; ") })}</p>
@@ -156,22 +154,70 @@ export function SettingsMutationFeedback({ result, writeUnconfirmed, readbackReq
   </AlertDescription></Alert>
 }
 
-export function ManagedSelect({ label, value, options, disabled, disabledValues = [], onChange, description, placeholder, fullWidth = false }: { description?: string; placeholder?: string; fullWidth?: boolean; label: string; value: string; options: string[][]; disabled: boolean; disabledValues?: readonly string[]; onChange: (value: string) => void }) {
+export function ManagedSelect({ label, value, options, disabled, disabledValues = [], onChange, description, descriptionId, placeholder, fullWidth = false }: { description?: string; descriptionId?: string; placeholder?: string; fullWidth?: boolean; label: string; value: string; options: string[][]; disabled: boolean; disabledValues?: readonly string[]; onChange: (value: string) => void }) {
   const { t } = useTranslation()
   const selectId = useId()
   const nonEmptyOptions = options.filter(([option]) => option !== "")
   const effectiveOptions = value !== "" && !nonEmptyOptions.some(([option]) => option === value) ? [[value, value], ...nonEmptyOptions] : nonEmptyOptions
-  const labelContent = <FieldLabel className="text-muted-foreground" htmlFor={selectId}>{label}</FieldLabel>
-  return <Field orientation={fullWidth ? "vertical" : "responsive"} data-disabled={disabled}>
-    {description ? <FieldContent className="min-w-0">{labelContent}<FieldDescription id={`${selectId}-description`}>{description}</FieldDescription></FieldContent> : labelContent}
+  const selectedLabel = effectiveOptions.find(([option]) => option === value)?.[1]
+  const hintId = descriptionId ?? `${selectId}-description`
+  const labelContent = <FieldLabel className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]" htmlFor={selectId}>{label}</FieldLabel>
+  return <Field className="min-w-0" orientation={fullWidth ? "vertical" : "responsive"} data-disabled={disabled}>
+    {description ? <FieldContent className="min-w-0 [overflow-wrap:anywhere]">{labelContent}<FieldDescription id={hintId}>{description}</FieldDescription></FieldContent> : labelContent}
     <Select items={[{ value: null, label: placeholder ?? t("settingsUi.notConfigured") }, ...effectiveOptions.map(([value, label]) => ({ value, label }))]} value={value || null} disabled={disabled} onValueChange={next => { if (next !== null) onChange(next) }}>
-      <SelectTrigger id={selectId} aria-describedby={description ? `${selectId}-description` : undefined} size="sm" className={fullWidth ? "w-full min-w-0 whitespace-normal data-[size=sm]:h-auto data-[size=sm]:min-h-7 *:data-[slot=select-value]:line-clamp-none" : "w-full sm:w-[160px]"}><SelectValue className={fullWidth ? "min-w-0 [overflow-wrap:anywhere]" : undefined} placeholder={value === "" ? placeholder ?? t("settingsUi.notConfigured") : undefined} /></SelectTrigger>
-      {effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option} disabled={disabledValues.includes(option)} className={fullWidth ? "[&>span]:min-w-0 [&>span]:shrink [&>span]:whitespace-normal [&>span]:[overflow-wrap:anywhere]" : undefined}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}
+      <SelectTrigger id={selectId} aria-describedby={description ? hintId : undefined} size="sm" className={fullWidth ? "w-full min-w-0 max-w-full whitespace-normal data-[size=sm]:h-auto data-[size=sm]:min-h-7 *:data-[slot=select-value]:line-clamp-none" : "w-full min-w-0 max-w-full sm:w-[160px]"}>
+        <SelectValue className="min-w-0" placeholder={value === "" ? placeholder ?? t("settingsUi.notConfigured") : undefined}>
+          {value === "" ? undefined : <span className={fullWidth ? "min-w-0 [overflow-wrap:anywhere]" : "min-w-0 truncate"}>{selectedLabel}</span>}
+        </SelectValue>
+      </SelectTrigger>
+      {effectiveOptions.length > 0 ? <SelectContent className="max-w-[calc(100vw-2rem)]"><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option} disabled={disabledValues.includes(option)} className="min-w-0 [&>:first-child]:min-w-0 [&>:first-child]:shrink [&>:first-child]:whitespace-normal [&>:first-child]:[overflow-wrap:anywhere]">{text}</SelectItem>)}</SelectGroup></SelectContent> : null}
     </Select>
   </Field>
 }
 
+function previewRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
 function formatPreviewValue(value: unknown, kind: string, t: Translate): string {
+  const record = previewRecord(value)
+  const scalar = (current: unknown): string => current === null || current === undefined ? t("settingsFields.notSet")
+    : typeof current === "boolean" ? t(current ? "settingsFields.enabled" : "settingsFields.disabled")
+      : typeof current === "string" || typeof current === "number" ? String(current) : t("common.unknown")
+  const fields = (source: Record<string, unknown> | null, labels: Record<string, MessageKey>, display = scalar): string => source === null ? t("common.unknown")
+    : Object.entries(labels).filter(([field]) => Object.hasOwn(source, field)).map(([field, label]) => `${t(label)}：${display(source[field])}`).join(" · ")
+  if (kind === "webui.port") return scalar(record?.port)
+  if (kind === "webui.host") return fields(record, { host: "settingsFields.listenAddress", tokenConfigured: "settingsFields.accessToken" }, current => typeof current === "boolean" ? t(current ? "settingsFields.configured" : "settingsFields.notConfigured") : scalar(current))
+  if (kind === "webui.token" || kind === "network.proxy") {
+    const configured = record?.[kind === "webui.token" ? "tokenConfigured" : "configured"]
+    return typeof configured === "boolean" ? t(configured ? "settingsFields.configured" : "settingsFields.notConfigured") : t("common.unknown")
+  }
+  if (kind === "metrics.storage") return fields(previewRecord(record?.storage), { retentionDays: "settingsFields.retentionDays", maxRows: "settingsFields.maxRows" })
+  if (kind === "defaults") return fields(record, { model: "settingsFields.defaultModel", reasoningEffort: "settingsFields.reasoningEffort" }, current => current === null ? t("settingsFields.upstreamDecides") : scalar(current))
+  if (kind === "model-compact") return fields(record, { contextWindow: "settingsFields.contextWindow", autoCompactPercent: "settingsFields.compactPercent" }, current => current === null ? t("settingsFields.modelDefault") : scalar(current))
+  if (kind === "update-plan" || kind === "auto-recap") return scalar(record?.enabled)
+  if (kind === "service-tier") return record?.serviceTier === null ? t("settingsFields.serviceTierDefault") : scalar(record?.serviceTier)
+  if (kind === "approvals-reviewer") return record?.value === null ? t("settingsFields.approvalsReviewerUnset")
+    : record?.value === "user" ? t("settingsFields.manualReview") : record?.value === "auto_review" ? t("settingsFields.autoReview") : t("common.unknown")
+  if (kind === "preferences") {
+    const labels = { planModeReasoningEffort: "settingsFields.planEffort", reasoningSummary: "settingsFields.reasoningSummary", verbosity: "settingsFields.verbosity", checkForUpdateOnStartup: "settingsFields.startupUpdate", historyPersistence: "settingsFields.historyPersistence" } as const
+    return record === null ? t("common.unknown") : Object.entries(labels).filter(([field]) => Object.hasOwn(record, field)).map(([field, label]) => {
+      const current = record[field]
+      const choices: Record<string, MessageKey> = field === "reasoningSummary" ? { auto: "settingsFields.auto", concise: "settingsFields.concise", detailed: "settingsFields.detailed", none: "settingsFields.summaryNone" }
+        : field === "verbosity" ? { low: "settingsFields.low", medium: "settingsFields.medium", high: "settingsFields.high" }
+          : field === "historyPersistence" ? { "save-all": "settingsFields.save", none: "settingsFields.doNotSave" } : {}
+      return `${t(label)}：${typeof current === "string" && Object.hasOwn(choices, current) ? t(choices[current]) : scalar(current)}`
+    }).join(" · ")
+  }
+  if (kind === "system.official-tui-identity") {
+    const identity = previewRecord(record?.clientIdentity)
+    return [
+      fields(record, { followCliVersion: "settingsFields.followCliVersion", terminalIdentity: "settingsFields.terminalIdentity", upstreamUserAgent: "settingsFields.upstreamUserAgent" }),
+      fields({ name: identity?.name ?? null, title: identity?.title ?? null, version: identity?.version ?? null }, { name: "settingsFields.identityName", title: "settingsFields.identityTitle", version: "settingsFields.identityVersion" }),
+    ].join(" · ")
+  }
+  if (kind === "tool-access") return `${t("settingsFields.toolSetting")}：${JSON.stringify(record?.path)} · ${t("settingsFields.newValue")}：${record?.value === null ? t("settingsFields.inheritUserSetting") : JSON.stringify(record?.value)}`
+  if (kind === "display.model-aliases" && record !== null) return Object.entries(record).map(([group, members]) => `${group}：${JSON.stringify(members)}`).join(" · ") || t("settingsFields.notSet")
   if (kind === "permissions" && value !== null && typeof value === "object") {
     const labels = { sandboxMode: "settingsFields.sandbox", approvalPolicy: "settingsFields.approvalPolicy", networkAccess: "settingsFields.networkAccess" } as const
     return (Object.keys(labels) as Array<keyof typeof labels>).filter(field => Object.hasOwn(value, field)).map(field => {
@@ -193,8 +239,11 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
       case "live": return t("settingsFields.live")
     }
   }
-  if (value !== null && typeof value === "object") return JSON.stringify(value)
-  return String(value)
+  if (kind === "system.default-model" && value === null) return t("modelManagement.followDefault")
+  const choices: Record<string, MessageKey> = kind === "display.operation-updates" ? { full: "settingsFields.full", compact: "settingsFields.compact", hidden: "settingsFields.hidden" }
+    : kind === "telegram.message-format" ? { rich: "settingsFields.richText" } : {}
+  if (typeof value === "string" && Object.hasOwn(choices, value)) return t(choices[value])
+  return scalar(value)
 }
 
 function formatActivation(activation: PendingSetting["activation"], t: Translate): string {

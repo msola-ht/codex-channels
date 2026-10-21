@@ -1,11 +1,11 @@
 import { useTranslation } from "@/hooks/use-translation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { ManagedSelect, SettingsRow } from "@/components/settings/settings-controls"
@@ -18,6 +18,9 @@ const proxyFields = [
   ["all_proxy", "ALL_PROXY", "socks5://127.0.0.1:7890"],
   ["no_proxy", "NO_PROXY", "127.0.0.1,localhost"],
 ] as const
+
+type NumericField = "port" | "retentionDays" | "maxRows"
+type FieldErrors = Partial<Record<NumericField, { value: string; key: MessageKey }>>
 
 export function WebuiDataSettingsCard({ management, section = "network" }: { management: GatewaySettingsController; section?: "network" | "data" }) {
   const { t } = useTranslation()
@@ -34,10 +37,18 @@ export function WebuiDataSettingsCard({ management, section = "network" }: { man
   useEffect(() => setShowGeneratedToken(false), [generatedToken])
   const [proxyValues, setProxyValues] = useState<Record<string, string>>({})
   const [localError, setLocalError] = useState<{ key: MessageKey; params?: TranslateParams } | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
+  const portRef = useRef<HTMLInputElement>(null)
+  const retentionRef = useRef<HTMLInputElement>(null)
+  const rowsRef = useRef<HTMLInputElement>(null)
+  const portError = fieldErrors.port?.value === port ? fieldErrors.port.key : null
+  const retentionError = fieldErrors.retentionDays?.value === retentionDays ? fieldErrors.retentionDays.key : null
+  const rowsError = fieldErrors.maxRows?.value === maxRows ? fieldErrors.maxRows.key : null
+  const clearFieldError = (field: NumericField) => setFieldErrors(previous => ({ ...previous, [field]: undefined }))
   useEffect(() => {
     const saved = management.lastAppliedSetting
-    if (saved?.kind === "metrics.storage") resetMetrics()
-    if (saved?.kind === "webui.port") resetWebui()
+    if (saved?.kind === "metrics.storage") { resetMetrics(); setFieldErrors(previous => ({ ...previous, retentionDays: undefined, maxRows: undefined })) }
+    if (saved?.kind === "webui.port") { resetWebui(); setFieldErrors(previous => ({ ...previous, port: undefined })) }
     if (saved?.kind === "webui.token") setWebuiToken("")
     if (saved?.kind === "network.proxy" && typeof saved.value === "object" && saved.value !== null && "field" in saved.value && typeof saved.value.field === "string") {
       const field = saved.value.field
@@ -51,25 +62,29 @@ export function WebuiDataSettingsCard({ management, section = "network" }: { man
   const saveMetrics = () => {
     const days = Number(retentionDays)
     const rows = Number(maxRows)
+    const errors: FieldErrors = {}
     if (!Number.isInteger(days) || days < 1 || days > 3_650) {
-      setLocalError({ key: "settingsFields.retentionDaysInvalid" })
-      return
+      errors.retentionDays = { value: retentionDays, key: "settingsFields.retentionDaysInvalid" }
     }
     if (!Number.isInteger(rows) || rows < 1_000 || rows > 10_000_000) {
-      setLocalError({ key: "settingsFields.maxRowsInvalid" })
+      errors.maxRows = { value: maxRows, key: "settingsFields.maxRowsInvalid" }
+    }
+    setFieldErrors(previous => ({ ...previous, retentionDays: errors.retentionDays, maxRows: errors.maxRows }))
+    if (errors.retentionDays || errors.maxRows) {
+      (errors.retentionDays ? retentionRef : rowsRef).current?.focus()
       return
     }
-    setLocalError(null)
     void management.previewSetting("metrics.storage", { retentionDays: days, maxRows: rows }, { key: "navigation.dataCard" })
   }
 
   const savePort = () => {
     const parsed = Number(port)
     if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
-      setLocalError({ key: "settingsFields.webuiPortInvalid" })
+      setFieldErrors(previous => ({ ...previous, port: { value: port, key: "settingsFields.webuiPortInvalid" } }))
+      portRef.current?.focus()
       return
     }
-    setLocalError(null)
+    clearFieldError("port")
     void management.previewSetting("webui.port", parsed, { key: "settingsFields.webuiPort" })
   }
 
@@ -89,8 +104,16 @@ export function WebuiDataSettingsCard({ management, section = "network" }: { man
       {section === "data" && <section className="flex flex-col gap-3">
         <div><h3 className="font-medium">{t("navigation.dataCard")}</h3><p className="text-xs text-muted-foreground">{t("settingsFields.metricsStorageHint")}</p></div>
         <FieldGroup className="grid gap-3 md:grid-cols-2">
-          <Field data-disabled={disabled}><FieldLabel htmlFor="metrics-retention-days">{t("settingsFields.retentionDays")}</FieldLabel><Input id="metrics-retention-days" type="number" min={1} max={3650} value={retentionDays} disabled={disabled} onChange={(event) => patchMetrics({ retentionDays: event.target.value })} /></Field>
-          <Field data-disabled={disabled}><FieldLabel htmlFor="metrics-max-rows">{t("settingsFields.maxRows")}</FieldLabel><Input id="metrics-max-rows" type="number" min={1000} max={10000000} value={maxRows} disabled={disabled} onChange={(event) => patchMetrics({ maxRows: event.target.value })} /></Field>
+          <Field data-disabled={disabled} data-invalid={retentionError !== null}>
+            <FieldLabel htmlFor="metrics-retention-days">{t("settingsFields.retentionDays")}</FieldLabel>
+            <Input ref={retentionRef} id="metrics-retention-days" type="number" min={1} max={3650} value={retentionDays} disabled={disabled} aria-invalid={retentionError !== null} aria-describedby={retentionError ? "metrics-retention-error" : undefined} onChange={(event) => { patchMetrics({ retentionDays: event.target.value }); clearFieldError("retentionDays") }} />
+            {retentionError ? <FieldError id="metrics-retention-error">{t(retentionError)}</FieldError> : null}
+          </Field>
+          <Field data-disabled={disabled} data-invalid={rowsError !== null}>
+            <FieldLabel htmlFor="metrics-max-rows">{t("settingsFields.maxRows")}</FieldLabel>
+            <Input ref={rowsRef} id="metrics-max-rows" type="number" min={1000} max={10000000} value={maxRows} disabled={disabled} aria-invalid={rowsError !== null} aria-describedby={rowsError ? "metrics-max-rows-error" : undefined} onChange={(event) => { patchMetrics({ maxRows: event.target.value }); clearFieldError("maxRows") }} />
+            {rowsError ? <FieldError id="metrics-max-rows-error">{t(rowsError)}</FieldError> : null}
+          </Field>
         </FieldGroup>
         <Button className="self-start" variant="outline" disabled={disabled} onClick={saveMetrics}>{t("settingsFields.saveMetricsStorage")}</Button>
       </section>}
@@ -100,12 +123,18 @@ export function WebuiDataSettingsCard({ management, section = "network" }: { man
         <div><h3 className="font-medium">{t("settingsFields.webuiService")}</h3><p className="text-xs text-muted-foreground">{t("settingsFields.webuiServiceHint")}</p></div>
         <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
           <ManagedSelect label={t("settingsFields.listenAddress")} value={settings.webui.host} options={[["127.0.0.1", "127.0.0.1"], ["::1", "::1"], ["0.0.0.0", "0.0.0.0"]]} disabled={disabled} onChange={(value) => void management.previewSetting("webui.host", value, { key: "settingsFields.webuiHost" })} />
-          <Field orientation="responsive" data-disabled={disabled}><FieldLabel className="text-muted-foreground" htmlFor="webui-port">{t("settingsFields.listenPort")}</FieldLabel><FieldContent className="flex-row items-center gap-2"><Input id="webui-port" className="min-w-0 flex-1 sm:w-[130px] sm:flex-none" type="number" min={1} max={65535} value={port} disabled={disabled} onChange={(event) => patchWebui({ port: event.target.value })} /><Button variant="outline" size="sm" disabled={disabled} onClick={savePort}>{t("settingsFields.save")}</Button></FieldContent></Field>
+          <Field orientation="responsive" data-disabled={disabled} data-invalid={portError !== null}>
+            <FieldLabel className="text-muted-foreground" htmlFor="webui-port">{t("settingsFields.listenPort")}</FieldLabel>
+            <FieldContent>
+              <div className="flex items-center gap-2"><Input ref={portRef} id="webui-port" className="min-w-0 flex-1 sm:w-[130px] sm:flex-none" type="number" min={1} max={65535} value={port} disabled={disabled} aria-invalid={portError !== null} aria-describedby={portError ? "webui-port-error" : undefined} onChange={(event) => { patchWebui({ port: event.target.value }); clearFieldError("port") }} /><Button variant="outline" size="sm" disabled={disabled} onClick={savePort}>{t("settingsFields.save")}</Button></div>
+              {portError ? <FieldError id="webui-port-error">{t(portError)}</FieldError> : null}
+            </FieldContent>
+          </Field>
         </FieldGroup>
         <Field data-disabled={disabled}>
           <FieldLabel htmlFor="webui-token">{t("settingsFields.accessToken")}</FieldLabel>
-          <div className="flex flex-wrap gap-2"><Input id="webui-token" className="min-w-0 flex-[1_1_240px]" type="password" autoComplete="new-password" value={webuiToken} placeholder={t(settings.webui.tokenConfigured ? "settingsFields.replaceTokenPlaceholder" : "settingsFields.newTokenPlaceholder")} disabled={disabled} onChange={(event) => setWebuiToken(event.target.value)} /><Button variant="outline" disabled={disabled || webuiToken.trim() === ""} onClick={() => void management.previewSetting("webui.token", { action: "set", value: webuiToken }, { key: "settingsFields.webuiToken" })}>{t(settings.webui.tokenConfigured ? "settingsFields.replaceToken" : "settingsFields.setToken")}</Button>{settings.webui.tokenConfigured ? <Button variant="destructive" disabled={disabled || settings.webui.host === "0.0.0.0"} onClick={() => void management.previewSetting("webui.token", { action: "clear" }, { key: "settingsFields.webuiToken" })}>{t("settingsFields.clearToken")}</Button> : null}</div>
-          <FieldDescription>{t("settingsFields.tokenHint")}</FieldDescription>
+          <div className="flex flex-wrap gap-2"><Input id="webui-token" aria-describedby="webui-token-hint" className="min-w-0 flex-[1_1_240px]" type="password" autoComplete="new-password" value={webuiToken} placeholder={t(settings.webui.tokenConfigured ? "settingsFields.replaceTokenPlaceholder" : "settingsFields.newTokenPlaceholder")} disabled={disabled} onChange={(event) => setWebuiToken(event.target.value)} /><Button variant="outline" disabled={disabled || webuiToken.trim() === ""} onClick={() => void management.previewSetting("webui.token", { action: "set", value: webuiToken }, { key: "settingsFields.webuiToken" })}>{t(settings.webui.tokenConfigured ? "settingsFields.replaceToken" : "settingsFields.setToken")}</Button>{settings.webui.tokenConfigured ? <Button variant="destructive" disabled={disabled || settings.webui.host === "0.0.0.0"} onClick={() => void management.previewSetting("webui.token", { action: "clear" }, { key: "settingsFields.webuiToken" })}>{t("settingsFields.clearToken")}</Button> : null}</div>
+          <FieldDescription id="webui-token-hint">{t("settingsFields.tokenHint")}</FieldDescription>
           <Button className="self-start" variant="outline" disabled={disabled} onClick={() => void management.previewSetting("webui.token", { action: "generate" }, { key: "settingsFields.webuiToken" })}>{t(settings.webui.tokenConfigured ? "settingsFields.regenerateToken" : "settingsFields.generateToken")}</Button>
         </Field>
         <SettingsRow label={t("settingsFields.currentState")} value={t(settings.webui.tokenConfigured ? "settingsFields.configured" : "settingsFields.notConfigured")} />
@@ -113,10 +142,10 @@ export function WebuiDataSettingsCard({ management, section = "network" }: { man
           <Field>
             <FieldLabel htmlFor="generated-webui-token">{t("settingsFields.generatedToken")}</FieldLabel>
             <FieldContent className="flex-row gap-2">
-              <Input id="generated-webui-token" type={showGeneratedToken ? "text" : "password"} readOnly autoComplete="off" value={generatedToken} onFocus={(event) => event.target.select()} />
+              <Input id="generated-webui-token" aria-describedby="generated-webui-token-hint" type={showGeneratedToken ? "text" : "password"} readOnly autoComplete="off" value={generatedToken} onFocus={(event) => event.target.select()} />
               <Button variant="outline" onClick={() => setShowGeneratedToken((value) => !value)}>{t(showGeneratedToken ? "settingsFields.hideGeneratedToken" : "settingsFields.showGeneratedToken")}</Button>
             </FieldContent>
-            <FieldDescription>{t("settingsFields.generatedTokenHint")}</FieldDescription>
+            <FieldDescription id="generated-webui-token-hint">{t("settingsFields.generatedTokenHint")}</FieldDescription>
           </Field>
         )}
       </section>
