@@ -25,7 +25,7 @@
   未配置 `videoDirectory` 时明确拒绝视频，关闭时取消下载，迟到结果不提交；
   普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
   `/queue add|list|update|delete|reorder|start` 管理 App Server 持久 Queue，`/schedule <自然语言>` 由前台 Agent 调用 `schedule_task` 工具生成确认预览，`/schedule` 管理显式启用的
-  Gateway 计划任务；创建与删除预览直接提供原生确认/取消按钮，确认仍复用五分钟一次性令牌；选择支持多个思考等级的模型后提供思考等级内联按钮；
+  Gateway 计划任务；创建与删除预览直接提供原生确认/取消按钮，确认仍复用五分钟一次性令牌；选择支持多个思考等级的模型后及直接打开 `/effort` 面板时提供思考等级内联按钮；
   同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
   版本字符串和当前 Workspace Git 分支，不读取生成协议。

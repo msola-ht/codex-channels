@@ -189,7 +189,7 @@ export function modelEffortKeyboard(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
   actorId = "",
 ): InlineKeyboardMarkup | undefined {
-  if (result.nextSelection !== "effort") {
+  if (result.view !== "effort") {
     return undefined;
   }
   const model = result.state.models.find((candidate) =>
