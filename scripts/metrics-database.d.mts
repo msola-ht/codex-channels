@@ -127,11 +127,14 @@ export function resetMetricsDatabase(
 
 export interface MetricsProviderPruneResult {
   provider: string;
+  committed: boolean | "unknown";
   gatewayWasRunning: boolean;
+  gatewayRestored: boolean;
   local: {
     databasePath: string;
     backupPath: string | null;
     deleted: number;
+    vacuumed: boolean;
   };
   warnings: string[];
 }
@@ -148,6 +151,8 @@ export function pruneProviderMetrics(
 ): MetricsProviderPruneResult;
 
 export interface MetricsCleanupResult {
+  committed: true | "unknown";
+  gatewayRestored?: boolean;
   backupPath: string;
   databasePath: string;
   deleted: number;
@@ -155,8 +160,17 @@ export interface MetricsCleanupResult {
   deletedByLimit: number;
   keepDays: number;
   maxRows: number;
-  remaining: number;
+  remaining: number | null;
   vacuumed: boolean;
+}
+
+export class MetricsMaintenanceError extends AggregateError {
+  constructor(
+    result: MetricsCleanupResult | MetricsProviderPruneResult,
+    failures: Array<{ phase: "commit" | "vacuum" | "count" | "close" | "lock-release" | "gateway-restart"; error: unknown }>,
+  );
+  result: MetricsCleanupResult | MetricsProviderPruneResult;
+  failures: Array<{ phase: "commit" | "vacuum" | "count" | "close" | "lock-release" | "gateway-restart"; error: unknown }>;
 }
 
 export function cleanupMetricsDatabase(
@@ -177,6 +191,7 @@ export function cleanupMetricsDatabaseWithGatewayRestart(
     keepDays?: number;
     maxRows?: number;
     vacuum?: boolean;
+    gatewayRunning?: () => boolean;
     stopGateway?: () => void;
     startGateway?: () => void;
   },

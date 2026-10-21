@@ -73,6 +73,7 @@
   行，Gateway 按执行前的运行状态恢复；额度重置
   后可用它从零重新统计用量。
   cleanup/prune 在任何维护写入前校验完整当前 Schema，并在检查点、备份、删除与 VACUUM 期间持有统一 writer 锁；备份不覆盖既有文件。裁剪计时会撤销对应 Thread 历史完整标记。
+  提交后的 VACUUM、计数、关闭、释放锁或恢复服务失败通过 MetricsMaintenanceError 保留提交状态、数量、备份及失败阶段；CLI 非零退出仍打印结果，未知提交不报告成功，不自动重放删除。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
   时间范围、组合筛选、分组、格式及维护命令参数，通过 Observability 的 `query/index` 无状态入口复用规范范围、日期解析与聚合维度，并向顶层帮助
   导出规范用法行；不访问配置、数据库或服务，
@@ -244,7 +245,7 @@
   事务；同一异步调用链中的嵌套操作复用事务，避免 Provider 设置与账户删除交叉提交。
 - `primary-provider-management.mjs` / `primary-provider-management.d.mts`：提供自定义主 Provider
   切换与删除的无终端预览和执行接口；预览仅返回脱敏目标、影响与生效动作，执行校验显式模型属于 App Server 官方目录、保持配置/Profile/私有备份事务顺序，
-  并以稳定错误码和结构化警告报告失败或备份清理部分成功。CLI 已确认的切换预览在事务内重新比对，目标或影响变化时要求重新确认。切换只加载目标 Provider，删除只依赖注册表与
+  并以稳定错误码和结构化警告报告失败或清理部分成功。删除结果分别保留 configuration、backup/credentials/catalog/metadata 清理状态及 activation；目录与元数据独立清理，精确 ID 可重试孤立材料。CLI 已确认的切换预览在事务内重新比对，目标或影响变化时要求重新确认。切换只加载目标 Provider，删除只依赖注册表与
   Profile 原文，其他 Provider 目录不可读不阻塞本次操作；管理模式整体校验与目标自身目录校验保持失败关闭。
 - `primary-provider-config-transaction.mjs` / `primary-provider-config-transaction.d.mts`：统一自定义
   Provider 固定模式写入事务；切换与新增/编辑共同复用 Profile 移除、Codex 配置版本写入、响应丢失
@@ -254,7 +255,7 @@
   `profile-conversion-backups/<随机 ID>.json`，校验私有目录及备份回读后才继续。快照不覆盖、不自动清理或恢复，结果未知时供人工核对。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc provider` 的
   list / add / switch / remove / recover 子命令；`list --json` 复用统一 Provider 管理状态并返回不含凭据的稳定主实例与候选摘要；
-  switch / remove 复用 Provider 管理接口并负责中文确认与结果渲染；所有 switch（含恢复官方、从备份恢复、
+  switch / remove 复用 Provider 管理接口并负责中文确认与结果渲染；直接 remove 清理未完成时输出结果后返回非零，Setup 保留部分成功并继续菜单。所有 switch（含恢复官方、从备份恢复、
   切换 Provider 转固定）都会先经二次确认，并提示将改写主配置的 model_provider / model；命令行 switch
   传 --yes 跳过确认（仅命令行，Setup 菜单仍确认）；
   add 复用共用 Provider Setup，`--custom-models` 选择自定义目录；recover 明确选择保留或回滚未完成目录，

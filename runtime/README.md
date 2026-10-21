@@ -365,7 +365,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   原生 DLL 加载失败使用保留退出码 78，桥接器映射为 `ERR_WINDOWS_NATIVE_LOAD`；等待输出流关闭后分类，避免 stdin 提前断开掩盖原因。公开错误明确要求重新构建/安装，不将组件故障归类为 ACL 不合格，也不传递原始异常或 stderr。
 - `private-file-lock.mjs` / `private-file-lock.d.mts`：为跨越异步配置事务的私有文件更新提供
   PID 所有权、陈旧锁回收和替换锁保护，锁目录与锁文件同样使用当前平台私有权限，供 Provider 管理与
-  微信配置/凭据事务串行写入。
+  微信配置/凭据事务串行写入。操作返回后释放失败用 PrivateFileLockReleaseError 非枚举地保留返回值；这仅证明回调完成，由调用者判断是否代表配置已提交。
 - `windows-dpapi.mjs` / `windows-dpapi.d.mts` / `windows-dpapi.ps1`：通过 PowerShell 7 调用
   `ProtectedData` 的 `CurrentUser` 作用域保护和解保护小型二进制主密钥；只接受 Base64 JSON stdin/stdout，
   单次调用最多 5 秒，继承调用方明确传入的环境，不把输入或底层异常写入日志。

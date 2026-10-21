@@ -56,7 +56,7 @@ export class WebuiManagementTaskRunner {
         : metrics
         ? normalized.action === "prune"
           ? "操作前备份本地指标库；失败时保留备份并尝试恢复原服务状态"
-          : "操作前保留指标数据库备份；失败时保留备份并重试"
+          : "操作前保留指标数据库备份；失败后先核对数据与备份，已提交时勿重复清理"
         : "服务管理器失败时任务标记失败，不自动扩大操作范围",
       activation: traffic
         ? "不会自动启动已停止的 App Server"

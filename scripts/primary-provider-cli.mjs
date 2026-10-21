@@ -237,7 +237,7 @@ export async function removePrimaryProvider(
     { environment, createClient, preview },
   );
   if (result.target.state === "orphan-catalog") {
-    output.write(`已清理 ${result.target.id} 的残留模型目录、私有 Profile 与恢复备份。\n`);
+    output.write(`Provider ${result.target.id} 配置已不存在，已执行其精确残留清理。\n`);
   } else if (result.target.state === "stale-switching") {
     output.write(`已清理缺失 Profile 的自定义切换 Provider ${result.target.id}。\n`);
   } else if (result.target.state === "switching") {
@@ -269,9 +269,19 @@ export async function removePrimaryProvider(
   if (result.warnings.some(({ code }) => code === "credential-cleanup-failed")) {
     output.write(`Provider ${result.target.id} 已删除，但私有凭据版本无法安全检查或清理，文件保持保留；请检查其 primary-credentials 目录。\n`);
   }
+  if (result.warnings.some(({ code }) => code === "catalog-cleanup-failed")) {
+    output.write(`Provider ${result.target.id} 配置已删除，但模型目录或恢复材料清理未完成；请修复对应文件权限或类型后再次运行 codexc provider remove ${result.target.id}。\n`);
+  }
+  if (result.warnings.some(({ code }) => code === "metadata-cleanup-failed")) {
+    output.write(`Provider ${result.target.id} 配置已删除，但 provider.json 元数据清理未完成；请修复对应文件权限或类型后再次运行 codexc provider remove ${result.target.id}。\n`);
+  }
+  if (result.warnings.some(({ code }) => code === "lock-cleanup-failed")) {
+    output.write(`Provider ${result.target.id} 删除处理已完成，但管理锁释放失败；请检查锁文件权限和持有进程，不要重复删除。\n`);
+  }
   if (result.activation === "restart-all") {
     writeCliRemediationRestartAll();
   }
+  return result;
 }
 
 export async function addPrimaryProvider(options = {}) {
@@ -572,7 +582,10 @@ export async function runPrimaryProviderCli(
     if (rest.length !== 1) {
       throw new Error("用法：codexc provider remove <Provider ID>");
     }
-    await removePrimaryProvider(rest[0], { environment, output, createClient });
+    const result = await removePrimaryProvider(rest[0], { environment, output, createClient });
+    if (result?.warnings.length > 0) {
+      throw new Error("Provider 配置已删除，但清理未全部完成；请按上方提示核对已完成操作与残留状态。");
+    }
     return;
   }
   throw new Error(`未知子命令：${subcommand}\n${primaryProviderUsage}`);

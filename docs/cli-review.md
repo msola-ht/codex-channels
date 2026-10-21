@@ -428,7 +428,7 @@ Desktop 保留初始原文/CAS 文档与 Provider 运行目标快照，在锁内
 
 独立 Sol 复查覆盖共享锁/原子提交到配置管理、三渠道 CLI/JSONL、WebUI API/前端消费、init 与 Desktop 确认和恢复，未发现新增生产代码阻断；复查指出的残留“实施中”记录已修正。该复查为源码判断，未重复实施观察或静态检查。
 
-### R3：运行作用域与配置不变量（已实施并完成独立复查，提交收尾）
+### R3：运行作用域与配置不变量（已提交 `d1fcf69e`）
 
 Unix 四类服务定义写入显式规范化 Codex Home；未设置则不生成环境项，Windows 原行为保留。systemd 采用官方 [Command Lines](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html#Command%20Lines) 的 `:` 前缀关闭 ExecStart 变量展开，保持路径字面值，不改变 Environment/WorkingDirectory 或 launchd 的转义规则。已有定义需重新 install，普通 restart 不刷新模板，文档同步说明激活和恢复边界。
 源码更新安装归属校验同样按新 ExecStart 格式精确匹配，旧格式需要按文档重装程序/服务定义；不添加另一套宽松路径解析。
@@ -444,3 +444,13 @@ Strata 共享校验位于现有工具设置模块，预览/执行 await；MCP �
 Node 22 类型/运行边界、定向 ESLint、文档及 diff 检查通过。源更新完整执行仍受当前服务内约束未观察，归属匹配仅源码核对；真实三平台服务/Provider对话和跨配置层原子性不声称已验证。
 
 独立 Sol 全链路复查发现并定向核对两项修正：模板字符串 replacement 会解释合法路径中的美元序列，已改 callback；官方目录导出没有沿用 RPC 的显式 Codex binary，已共用解析器。随后主代理把模板替换收敛为单轮 callback，防止路径内字面占位符被下一轮再次解释，并自行核对这项收敛。Node22 重生成八定义，包含 $$、$&、美元反引号/单引号及字面 __CONFIG_DIR__/__CODEX_HOME_ENVIRONMENT__ 的路径在 plist 解析和 unit 文本中精确保留，systemd-analyze verify 0。PATH 不含 codex、Gateway 指向真实 native Codex 绝对路径时，CP来源的官方模型预览成功；首次使用依赖node的JS包装器但PATH无node时目录导出失败，未误报成功。复查无剩余阻断，限制保持如上。
+
+### R4：部分成功与资源收尾（独立复查完成，待提交）
+
+指标 cleanup/prune 区分提交、未知提交及后处理失败，MetricsMaintenanceError 保留数量、备份、VACUUM 和恢复状态。隔离真实当前 Schema SQLite：正常 cleanup 删除2行、备份含2行；提交后 VACUUM/COUNT/close/锁释放故障仍标 committed=true，当前库0行，提交后ROLLBACK次数0；COMMIT响应丢失标unknown，提交前拒绝保留2行。prune只删openai1行、other保留，VACUUM及服务恢复双失败均保留阶段。真实脚本main配合限定服务命令替身，正常退出0，后处理/恢复故障退出1并打印提交数量和备份；原停止的prune保持停止。未操作真实服务。WebUI现有任务忽略stdout/stderr，本批只纠正重试提示，用户指南给出status定位备份路径；不声称页面已显示维护明细。
+
+CP 删除结果贯穿管理层、CLI/Setup和WebUI投影/提示，区分已删与四类清理状态。真实隔离文件、锁、备份配合配置RPC文件替身：目录/元数据同时EACCES仍保留配置删除、恢复openai及重启提示，配置只写一次；修复后同ID重试仅清残留。备份失败保留凭据/目录/元数据；修复后重试且其它备份不变。旧revision、取消、非法ID不写；不支持凭据版本保留，修复后精确清理且无关文件保留。仅provider.json和仅归属凭据残留均可重新预览。API脱敏投影保留already-absent、cleanup、warnings和activation=none。未观察真实App Server账户、浏览器提示、Windows ACL或macOS；任务目录和REPL已收尾。
+
+独立复查指出非cp自定义Provider也有归属凭据、共用备份告警不能建议删除仍有效的Provider、外层异步管理锁及内层Profile锁释放仍可能覆盖完成结果。已同步修正精确残留发现、双语安全提示和锁结果传播：异步锁只携带回调完成结果，不泛化为已提交；删除入口识别其完整删除结果，Profile锁识别已完成的boolean结果，均附独立锁告警。其它共享锁调用者仍抛错，不自动重试或把回调完成当配置提交。新增隔离真实文件观察：非cp凭据可精确删除；分别注入两层锁unlink EACCES均保留already-absent、cleanup completed及lock-cleanup-failed。配置读取用空配置替身，无真实账户。定向类型、i18n及文档检查通过，提交钩子另记录最终状态。
+
+MCP 菜单改用现有 withCodexUserConfigClient，连接先登记，连接/读取/操作失败均收尾；关闭失败保留归属及告警，已保存结果不被收尾覆盖，再次管理先重试旧客户端。真实隔离PTY和Codex配置RPC添加禁用的回环HTTP MCP，保存/回读后让close在实际关闭完成后抛模拟失败：仍返回 added，显示 CODEX_CONFIG_CLIENT_CLEANUP_UNCONFIRMED；再次进入被旧清理失败拦截，created保持1。解除故障后才创建第二客户端，真实菜单删除成功、独立TOML读取剩余MCP为空。未启动MCP或请求其URL；这是清理失败信号/归属观察，不代表制造了真实存活孤儿进程。首次隔离Gateway配置缺失明确ENOENT，随后用真实init创建后继续，没有改真实用户数据。自有PTY已退出，客户端已实际关闭。

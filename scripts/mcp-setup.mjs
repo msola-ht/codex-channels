@@ -6,7 +6,7 @@ import { readGatewayConfig, validateGatewayConfigStructureDocument } from "../ru
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { securePrivateDirectorySync } from "../runtime/private-file.mjs";
 import { packageDir } from "./package-path.mjs";
-import { createCodexUserConfigClient } from "./codex-user-config.mjs";
+import { createCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import { videoConfiguration } from "./video-analysis-client.mjs";
 import { isStrataServer, mcpToolApprovalModes, validateStrataMcpEdit } from "./codex-tool-settings.mjs";
@@ -304,20 +304,9 @@ export async function runMcpSetup({ environment = process.env, dataDir, configPa
     });
     return jsonValue(value || "{}", kind);
   };
-  let client;
-  try {
-    if (!["add", "edit", "delete"].includes(operation)) throw new Error("不支持的 MCP 管理操作");
-    const kind = operation === "add" ? await ask("select", { message: "新增 MCP 类型", options: [
-      ...mcpTypes,
-      { value: "back", label: "返回" },
-    ] }) : undefined;
-    if (kind === "back") return { action: "back" };
-    const type = mcpTypes.find(item => item.value === kind);
-    if (operation === "add" && !type) throw new Error("不支持的 MCP 类型");
+  async function configure(client, kind, type) {
     let snapshot;
     try {
-      client = await createClient({ environment });
-      await client.connect();
       snapshot = await client.readUserConfigSnapshot();
     } catch {
       throw new Error("无法读取 Codex 用户配置；请检查 CLI 与配置是否可用，未写入 MCP");
@@ -393,8 +382,20 @@ export async function runMcpSetup({ environment = process.env, dataDir, configPa
     }
     await saveMcpEdits(client, snapshot, [{ path: ["mcp_servers", name], value: server }], output);
     return { action: "added", name };
+  }
+  try {
+    if (!["add", "edit", "delete"].includes(operation)) throw new Error("不支持的 MCP 管理操作");
+    const kind = operation === "add" ? await ask("select", { message: "新增 MCP 类型", options: [
+      ...mcpTypes,
+      { value: "back", label: "返回" },
+    ] }) : undefined;
+    if (kind === "back") return { action: "back" };
+    const type = mcpTypes.find(item => item.value === kind);
+    if (operation === "add" && !type) throw new Error("不支持的 MCP 类型");
+    return await withCodexUserConfigClient(environment, createClient, undefined,
+      client => configure(client, kind, type), { preserveOperationResult: true });
   } catch (error) {
     if (error === cancelled) return { action: "back" };
     throw error;
-  } finally { await client?.close().catch(() => undefined); }
+  }
 }

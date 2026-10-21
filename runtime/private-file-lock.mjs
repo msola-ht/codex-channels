@@ -10,6 +10,14 @@ import {
 const defaultTimeoutMs = 2_000;
 const staleLockMs = 30_000;
 
+export class PrivateFileLockReleaseError extends Error {
+  constructor(result, cause) {
+    super("操作已完成，但私有文件锁释放失败", { cause });
+    this.name = "PrivateFileLockReleaseError";
+    Object.defineProperty(this, "result", { value: result });
+  }
+}
+
 export async function withPrivateFileLock(
   targetPath,
   operation,
@@ -41,7 +49,7 @@ export async function withPrivateFileLock(
     if (error?.code !== "ENOENT" && releaseError === undefined) releaseError = error;
   }
   if (operationFailed) throw operationError;
-  if (releaseError !== undefined) throw releaseError;
+  if (releaseError !== undefined) throw new PrivateFileLockReleaseError(result, releaseError);
   return result;
 }
 

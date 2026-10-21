@@ -37,6 +37,8 @@ import {
   resolveCodexUserConfigBinary,
 } from "./codex-user-config.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { PrivateFileLockReleaseError } from "../runtime/private-file-lock.mjs";
+import { GatewayConfigLockReleaseError } from "../runtime/gateway-config.mjs";
 import {
   writePrimaryProviderConfigEditsWithProfileRemoval,
 } from "./primary-provider-config-transaction.mjs";
@@ -134,17 +136,23 @@ export async function applyPrimaryProviderRemoval(
   options = {},
 ) {
   const environment = options.environment ?? process.env;
-  return withModelProviderManagementTransaction(environment, async () => {
-    const revision = providerSourceRevision(input.providerId, environment);
-    const preview = options.preview && { ...options.preview };
-    if (preview) {
-      if (preview.revision !== revision) throw invalid("stale-preview", "preview", "Provider 源配置已变化，请重新生成删除预览");
-      delete preview.revision;
-    }
-    const plan = await removalPlanForExecution(input, preview, options);
-    assertSourceRevision(input.providerId, environment, revision);
-    return applyPrimaryProviderRemovalPlan(plan, options);
-  });
+  try {
+    return await withModelProviderManagementTransaction(environment, async () => {
+      const revision = providerSourceRevision(input.providerId, environment);
+      const preview = options.preview && { ...options.preview };
+      if (preview) {
+        if (preview.revision !== revision) throw invalid("stale-preview", "preview", "Provider 源配置已变化，请重新生成删除预览");
+        delete preview.revision;
+      }
+      const plan = await removalPlanForExecution(input, preview, options);
+      assertSourceRevision(input.providerId, environment, revision);
+      return applyPrimaryProviderRemovalPlan(plan, options);
+    });
+  } catch (error) {
+    if (!(error instanceof PrivateFileLockReleaseError) || error.result?.action !== "removed") throw error;
+    return { ...error.result, warnings: [...error.result.warnings,
+      { code: "lock-cleanup-failed", providerId: error.result.target.id }] };
+  }
 }
 
 async function applyPrimaryProviderRemovalPlan(plan, options) {
@@ -153,18 +161,23 @@ async function applyPrimaryProviderRemovalPlan(plan, options) {
     createClient = createCodexUserConfigClient,
   } = options;
   let backupCleaned = true;
+  let profileLockCleaned = true;
+  const removeProfile = (expectedContent) => {
+    try { return removeCustomPrimaryProviderSwitchingProfile(environment, plan.target.id, expectedContent); }
+    catch (error) {
+      if (!(error instanceof GatewayConfigLockReleaseError) || typeof error.result !== "boolean") throw error;
+      profileLockCleaned = false;
+      return error.result;
+    }
+  };
   if (plan.target.state === "orphan-catalog") {
-    removeCustomPrimaryProviderSwitchingProfile(environment, plan.target.id);
+    removeProfile();
   } else if (plan.target.state === "stale-switching") {
-    removeCustomPrimaryProviderSwitchingProfile(environment, plan.target.id);
+    removeProfile();
     backupCleaned = removeBackupCandidateSafely(plan.target.id, environment);
   } else if (plan.target.state === "switching") {
     try {
-      removeCustomPrimaryProviderSwitchingProfile(
-        environment,
-        plan.target.id,
-        plan.expectedProfileContent,
-      );
+      removeProfile(plan.expectedProfileContent);
     } catch (error) {
       if (error?.code === "CUSTOM_SWITCHING_PROFILE_CHANGED") {
         throw invalid(
@@ -194,18 +207,33 @@ async function applyPrimaryProviderRemovalPlan(plan, options) {
     try { removeCustomPrimaryProviderCredentials(environment, plan.target.id); }
     catch { credentialsCleaned = false; }
   }
-  if (backupCleaned && isCustomCatalogProvider(plan.target.id)) {
-    removeResponsesModelCatalog(environment, plan.target.id);
-    removeCustomProviderUpstreamMetadata(environment, plan.target.id);
+  let catalogCleaned = true;
+  let metadataCleaned = true;
+  const customCatalog = isCustomCatalogProvider(plan.target.id);
+  if (backupCleaned && customCatalog) {
+    try { removeResponsesModelCatalog(environment, plan.target.id); }
+    catch { catalogCleaned = false; }
+    try { removeCustomProviderUpstreamMetadata(environment, plan.target.id); }
+    catch { metadataCleaned = false; }
   }
   return {
     action: "removed",
+    configuration: plan.target.state === "orphan-catalog" ? "already-absent" : "removed",
     target: plan.target,
     activation: plan.activation,
     effects: plan.effects,
+    cleanup: {
+      backup: backupCleaned ? "completed" : "failed",
+      credentials: !backupCleaned ? "retained" : credentialsCleaned ? "completed" : "failed",
+      catalog: !customCatalog ? "not-applicable" : !backupCleaned ? "retained" : catalogCleaned ? "completed" : "failed",
+      metadata: !customCatalog ? "not-applicable" : !backupCleaned ? "retained" : metadataCleaned ? "completed" : "failed",
+    },
     warnings: [
       ...(!backupCleaned ? [{ code: "backup-cleanup-failed", providerId: plan.target.id }] : []),
       ...(!credentialsCleaned ? [{ code: "credential-cleanup-failed", providerId: plan.target.id }] : []),
+      ...(!catalogCleaned ? [{ code: "catalog-cleanup-failed", providerId: plan.target.id }] : []),
+      ...(!metadataCleaned ? [{ code: "metadata-cleanup-failed", providerId: plan.target.id }] : []),
+      ...(!profileLockCleaned ? [{ code: "lock-cleanup-failed", providerId: plan.target.id }] : []),
     ],
   };
 }
@@ -567,9 +595,26 @@ async function buildRemovalPlan(
   const switching = registeredSwitchingProviderForRemoval(environment, normalizedId);
   const configured = candidateIds.includes(normalizedId);
   const backedUp = Object.prototype.hasOwnProperty.call(backup, normalizedId);
-  if (!configured && !backedUp && switching === undefined && isCustomCatalogProvider(normalizedId)) {
-    const path = responsesProviderCatalogPath(environment, normalizedId);
-    if ([path, `${path}.backup`, `${path}.pending`, responsesProviderBackupPath(environment, normalizedId), customPrimaryProviderProfilePath(environment, normalizedId)].some(path => existsSync(path))) {
+  if (!configured && !backedUp && switching === undefined) {
+    const residuePaths = [customPrimaryProviderProfilePath(environment, normalizedId)];
+    if (isCustomCatalogProvider(normalizedId)) {
+      const path = responsesProviderCatalogPath(environment, normalizedId);
+      residuePaths.push(path, `${path}.backup`, `${path}.pending`, responsesProviderBackupPath(environment, normalizedId),
+        customProviderUpstreamMetadataPath(environment, normalizedId));
+    }
+    const credentialDirectory = dirname(customPrimaryProviderCredentialPath(environment, normalizedId,
+      customPrimaryProviderCredentialEnvironmentKey(normalizedId, "0".repeat(32))));
+    let hasCredentials = false;
+    try {
+      const stat = lstatSync(credentialDirectory);
+      if (!stat.isDirectory()) throw invalid("unsafe-credentials", "providerId", "Provider 私有凭据目录类型无效，拒绝清理");
+      assertPrivateDirectoryAccessSync(credentialDirectory);
+      hasCredentials = readdirSync(credentialDirectory).some(name => /^[a-f0-9]{32}\.json$/u.test(name));
+    } catch (error) { if (error?.code !== "ENOENT") throw error; }
+    if (hasCredentials || residuePaths.some(path => {
+      try { lstatSync(path); return true; }
+      catch (error) { if (error?.code === "ENOENT") return false; throw error; }
+    })) {
       return {
         target: {id: normalizedId, displayName: normalizedId, baseUrl: "", state: "orphan-catalog", active: false},
         activation: "none",

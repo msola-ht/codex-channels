@@ -588,6 +588,7 @@ export interface ManagementSettingMutationResponse {
   activation: { status: string; target: string; commands: readonly string[] }
   auditStatus?: "recorded" | "degraded"
   consistency?: "confirmed" | "unknown"
+  warnings?: Array<{ code: string; providerId?: string }>
   confirmationRequired?: boolean
   confirmationToken?: string
   confirmationExpiresAt?: number
@@ -962,6 +963,8 @@ export interface ManagementProviderSettingsMutationResponse {
   contextWindow?: number
   effects?: Record<string, boolean | string[] | string | null>
   warnings?: Array<{ code: string; providerId?: string }>
+  configuration?: import("./primary-provider-management.mjs").PrimaryProviderRemovalResult["configuration"]
+  cleanup?: import("./primary-provider-management.mjs").PrimaryProviderRemovalResult["cleanup"]
   activation?: string
   auditStatus?: "recorded" | "degraded"
 }

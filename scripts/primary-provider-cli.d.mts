@@ -2,6 +2,7 @@ import type {
   CodexUserConfigTransactionClient,
 } from "./codex-user-config.mjs";
 import type { CustomPrimaryProviderSetupClient } from "./custom-primary-provider-setup.mjs";
+import type { PrimaryProviderRemovalResult } from "./primary-provider-management.mjs";
 
 export interface PrimaryProviderCliPrompts {
   text(options: unknown): Promise<unknown>;
@@ -48,7 +49,7 @@ export function switchPrimaryProvider(
 export function removePrimaryProvider(
   providerId: string,
   options?: PrimaryProviderCliOptions,
-): Promise<void>;
+): Promise<PrimaryProviderRemovalResult | void>;
 export function addPrimaryProvider(
   options?: InteractivePrimaryProviderCliOptions,
 ): Promise<unknown>;
