@@ -352,7 +352,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   App Server Socket 目录通过 `secureAppServerSocketDirectorySync` 将已受信任目录收紧为锁定 CLI 要求的单条当前 SID 可继承完全控制权限；其他目录写入与父目录读取接受并保留此更严格权限，不向 Socket 目录重新添加 SYSTEM/Administrators。
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
   `readCodexConfigFileSync` / `assertCodexConfigAccessSync` 对共享主配置校验当前用户所有权及写入完整性，允许上游继承的只读访问，不声称主配置机密性；Provider Profile、凭据、备份仍要求严格私有。普通设置不增加 RPC 后 ACL 修复事务。
-  Provider 原文事务通过 `writeCodexConfigFileAtomic` 写共享主配置：Windows 在目标同目录先创建空文件并设私有 ACL，再写内容，使用原生替换保留已有 DACL；新配置继承已校验父目录的 ACL。替换失败保留恢复目录中的原文件及尚存临时文件，报告路径，不盲目清理未确认结果。普通私有写入不使用此合同。
+  受管账户的主配置发布和恢复由 `managed-provider-files.mjs` 通过官方版本化 RPC 按变化字段处理；不再调用本地全文件替换。底层 `writeCodexConfigFileAtomic` 能力在 Windows 使用同目录私有临时文件并以原生替换保留已有 DACL，仍不是原生并发 writer 之间的提交条件；Provider Profile、凭据与备份沿用各自私有文件合同。
   `WindowsPrivatePathError` 区分 ACL 检查超时、输出超限、进程启动失败和检查进程失败，附有界路径及操作类型；结构化拒绝只展示允许列表内的原因和阶段，不透传原始 PowerShell 异常或输出；服务定义读取保留该诊断。
   `repairWindowsPrivateFileSync` 仅供显式 `security repair` 使用：管理员所有的普通文件须有当前 SID 完全控制且无拒绝规则，才能恢复当前用户所有权；常规读取和写入不放宽所有者校验。
   Codex Home 顶层严格私有 TOML 的所有者、继承和访问规则拒绝会附带修复命令；共享主配置由 Doctor 提示检查文件及父目录的所有者和写入权限，目录、进程故障与修复操作自身失败不误报文件修复建议。
