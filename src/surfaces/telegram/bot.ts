@@ -504,9 +504,8 @@ export class TelegramSurface {
           "Workspace 切换按钮已失效",
         );
       }
-      const result = await this.commands.execute(
+      const result = await this.commands.selectWorkspace(
         target(context),
-        "workspace",
         workspace.id,
         String(context.from.id),
       );

@@ -583,14 +583,14 @@ export function renderCommandCenterChoices(
       title: "选择工作区",
       description: [
         "当前工作区",
-        `- ${result.currentWorkspaceId ?? "未选择"}`,
+        `- ${result.currentWorkspaceId}${result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId) ? "" : "（已失效）"}`,
         "",
-        "可切换工作区",
+        "请选择下方工作区；切换后请重新发起操作，不会自动重试之前的请求。",
       ].join("\n"),
       descriptionFormat: "markdown",
       choices: result.workspaces.map((workspace) => ({
         label: `${workspace.id === result.currentWorkspaceId ? "✓ " : ""}${workspace.name}`,
-        action: "workspace",
+        action: "workspace-select",
         input: workspace.id,
       })),
     };

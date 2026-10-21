@@ -344,7 +344,7 @@ export interface ConversationSessionUseCases {
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
   listWorkspaces(): Workspace[];
   selectedWorkspaceId(target: ConversationTarget): string;
-  selectWorkspace(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<Workspace>;
+  selectWorkspace(target: ConversationTarget, selector: string | { id: string }, assertAuthorized?: () => void): Promise<Workspace>;
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
@@ -1292,7 +1292,7 @@ export class ConversationService implements
     return this.router.selectedWorkspaceId(target);
   }
 
-  selectWorkspace(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<Workspace> {
+  selectWorkspace(target: ConversationTarget, selector: string | { id: string }, assertAuthorized?: () => void): Promise<Workspace> {
     return this.authorizedLocked(target, assertAuthorized, async () => {
       this.requireIdle(target);
       if ((this.router.backgroundBindings?.(target).length ?? 0) > 0) {
@@ -1301,7 +1301,10 @@ export class ConversationService implements
           "仍有后台任务运行，暂不能切换 Workspace",
         );
       }
-      const selected = this.router.resolveWorkspace(selector);
+      const selected = typeof selector === "string"
+        ? this.router.resolveWorkspace(selector)
+        : this.router.listWorkspaces().find(workspace => workspace.id === selector.id);
+      if (!selected) throw new UserFacingError("workspace.selector.not-found", "找不到指定 Workspace");
       const currentWorkspaceId = this.router.selectedWorkspaceId(target);
       const current = this.router.current?.(target);
       if (current && currentWorkspaceId !== selected.id
