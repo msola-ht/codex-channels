@@ -657,7 +657,7 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑改绑/轮换/停用/删除、中文用途名称及每 Key 多提供商模型授权，不提供旧格式转换命令。
 - `model-relay-management.mjs` / `model-relay-management.d.mts`：CLI/WebUI 共享 Relay 管理，脱敏资源、Key 多提供商模型授权与思考策略管理、目录输入能力与策略能力、只读预览、版本检查、配置锁/备份/原子保存及 IPC 生效确认；只在实际保存后返回一次新秘密；Relay 专用事务保留已保存结果并单独标记锁清理失败。
 - `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 与队列 SSE 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
-- `relay-reasoning-probe.mjs` / `relay-reasoning-probe.d.mts`：WebUI 按目录版本与公开模型 ID 发起一次基线及八种关闭参数对比；复用真实 Provider 材料、代理、出站策略和 Chat/Responses 观察器，顺序请求、不重试，限制单次/总预算及真实响应字节，以有界 NDJSON 流逐项返回进度、思考可见性、用量和受控状态，不保存服务器配置或正文。
+- `relay-reasoning-probe.mjs` / `relay-reasoning-probe.d.mts`：WebUI 按目录版本与公开模型 ID 发起一次基线及八种关闭参数对比；复用真实 Provider 材料、代理、出站策略和 Chat/Responses 观察器，CLP 按精确模型读取同一材料快照的请求配置，使探测路由与实际 Relay 一致。顺序请求、不重试，限制单次/总预算及真实响应字节，以有界 NDJSON 流逐项返回进度、思考可见性、用量和受控状态，不保存服务器配置或正文。
 - `webui-queue-events.mjs`：账户快照、请求指标、Relay、渠道投递与管理任务共用的鉴权后 SSE 转接、订阅总量限制及 WebUI 关闭清理；通知不携带指标、队列或任务内容。`closeQueueStreams` 禁止新订阅并等待已有 watch 结束，收尾完成前继续占用八个订阅名额之一。
 - `webui-management-delivery-route.mjs`：渠道投递箱鉴权 SSE 变化通知、只读分页查询、按需限定内容预览及单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，在线操作通过投递私有 IPC 交给 Gateway 单写者，确认未发送命令且 Gateway 不可连接时才使用 Journal 维护模式独占锁，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。
   只读查询交给有界 Worker，连接断开取消读取；批量正文先记录修订基线，再逐条在短事务内核对修订并读取，解密和消费确认不持有数据库读锁。管理写入的确认、审计和结果未知处理仍由原接口负责。
