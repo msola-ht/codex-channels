@@ -23,6 +23,9 @@ import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import type { PendingSetting } from "@/lib/settings-management"
 import type { ManagementSettingMutationResponse } from "@/lib/types"
 import type { MessageKey, Translate } from "@/lib/i18n/messages"
+import { cn } from "cn"
+
+export const modelOperationDialogClassName = "w-[calc(100%-2rem)] max-w-2xl max-h-[85dvh] overflow-y-auto sm:max-w-2xl"
 
 const providerCleanupWarnings: Record<string, MessageKey> = {
   "backup-cleanup-failed": "settingsUi.providerBackupCleanupFailed",
@@ -44,6 +47,7 @@ export function ManagementConfirmationDialog({
   confirmVariant = "default",
   confirmDisabled = false,
   finalFocus,
+  className,
   children,
 }: {
   open: boolean
@@ -57,13 +61,14 @@ export function ManagementConfirmationDialog({
   confirmVariant?: ComponentProps<typeof Button>["variant"]
   confirmDisabled?: boolean
   finalFocus?: ComponentProps<typeof AlertDialogContent>["finalFocus"]
+  className?: string
   children: ReactNode
 }) {
   const { t } = useTranslation()
   const cancelRef = useRef<HTMLButtonElement>(null)
   return (
     <AlertDialog open={open} onOpenChange={(nextOpen, details) => { if (saving) { details.cancel(); return }; if (!nextOpen) onCancel() }}>
-      <AlertDialogContent initialFocus={cancelRef} finalFocus={finalFocus} className="max-h-[85dvh] overflow-y-auto">
+      <AlertDialogContent initialFocus={cancelRef} finalFocus={finalFocus} className={cn("max-h-[85dvh] overflow-y-auto", className)}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>

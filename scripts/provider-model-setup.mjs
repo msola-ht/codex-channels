@@ -102,7 +102,7 @@ function templateDifferenceValue(value, full = false) {
 
 async function runProviderModelTemplateSetup(provider, { environment, prompts, output }) {
   const options = provider.startsWith("clp-")
-    ? await withCliProgress("读取 CLP 远程模板", progress => loadProviderModelTemplateOptions(provider, { environment, signal: progress.signal }), { output, delayMs: 150 })
+    ? await withCliProgress("读取 CLP 本地 DS 模板", progress => loadProviderModelTemplateOptions(provider, { environment, signal: progress.signal }), { output, delayMs: 150 })
     : await loadProviderModelTemplateOptions(provider, { environment });
   if (!options.targets.length) {
     output.write("此账户没有可更新模板的模型。\n");
@@ -114,7 +114,7 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   })) });
   if (prompts.isCancel(model)) return { action: "back" };
   const target = options.targets.find(entry => entry.model === model);
-  const templates = options.templates.filter(entry => !provider.startsWith("ds-") && !provider.startsWith("clp-") || entry.model === model);
+  const templates = options.templates.filter(entry => !provider.startsWith("ds-") || entry.model === model);
   if (!templates.length) { output.write("来源中没有可用于此模型的模板。\n"); return { action: "back" }; }
   const initialTemplate = target?.template ? templates.findIndex(entry => entry.source === target.template.source && entry.model === target.template.model) : -1;
   const selected = await prompts.select({ message: "明确选择模板来源及模型", options: templates.map((entry, index) => ({
