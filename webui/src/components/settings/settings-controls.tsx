@@ -165,7 +165,7 @@ export function ManagedSelect({ label, value, options, disabled, disabledValues 
   return <Field className="min-w-0" orientation={fullWidth ? "vertical" : "responsive"} data-disabled={disabled}>
     {description ? <FieldContent className="min-w-0 [overflow-wrap:anywhere]">{labelContent}<FieldDescription id={hintId}>{description}</FieldDescription></FieldContent> : labelContent}
     <Select items={[{ value: null, label: placeholder ?? t("settingsUi.notConfigured") }, ...effectiveOptions.map(([value, label]) => ({ value, label }))]} value={value || null} disabled={disabled} onValueChange={next => { if (next !== null) onChange(next) }}>
-      <SelectTrigger id={selectId} aria-describedby={description ? hintId : undefined} size="sm" className={fullWidth ? "w-full min-w-0 max-w-full whitespace-normal data-[size=sm]:h-auto data-[size=sm]:min-h-7 *:data-[slot=select-value]:line-clamp-none" : "w-full min-w-0 max-w-full sm:w-[160px]"}>
+      <SelectTrigger id={selectId} aria-describedby={description ? hintId : undefined} size="sm" className={fullWidth ? "w-full min-w-0 max-w-full whitespace-normal data-[size=sm]:h-auto data-[size=sm]:min-h-7 *:data-[slot=select-value]:line-clamp-none" : "w-full min-w-0 max-w-full @md/field-group:w-[160px]"}>
         <SelectValue className="min-w-0" placeholder={value === "" ? placeholder ?? t("settingsUi.notConfigured") : undefined}>
           {value === "" ? undefined : <span className={fullWidth ? "min-w-0 [overflow-wrap:anywhere]" : "min-w-0 truncate"}>{selectedLabel}</span>}
         </SelectValue>

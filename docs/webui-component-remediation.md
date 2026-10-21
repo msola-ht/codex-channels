@@ -64,4 +64,21 @@ A 审查后确定以下实施顺序：
 
 最终截图及快照保留在忽略目录：`ui-fix-port-invalid.png`、`ui-fix-token-clear.png`、`ui-fix-long-select-mobile.png`、`ui-fix-unbroken-select.png`、`ui-fix-fullwidth-template.png`、`ui-fix-model-descriptions.yml`。这些证据逐项对应上文输入，不代表完整读屏或所有基础组件状态通过。
 
-开放观察：完整读屏朗读、所有消费者全部交互状态、各 OS 浏览器及真实账户写入/服务激活仍未观察；本轮不改相关后端合同，也不以源码或模拟结果代替这些证据。此次整改项 U01–U04 及新增 P2 均已处理，当前无已确认而未修复的本轮问题。
+开放观察：完整读屏朗读、所有消费者全部交互状态、各 OS 浏览器及真实账户写入/服务激活仍未观察；本轮不改相关后端合同，也不以源码或模拟结果代替这些证据。U01–U04 及新增 P2 的初轮修复见上述记录；之后用户截图揭示的同链路遗漏另记如下，不能将初轮结论理解为所有弹窗选择框均已检查通过。
+
+## 用户截图后的统计分组补修
+
+基线 `8cd9fea8`。上一轮没有在浏览器实际展开统计分组的两个选择框，这里明确更正覆盖范围。用户截图显示选择框和菜单过窄，候选模型 ID 与来源被挤成多行。该问题仍属 U01 的布局关联遗漏。
+
+修复前实际复现：1440×1000 视口、384px 弹窗、350px 输入框，两个 ManagedSelect 触发器均仅 158px，菜单 160px；CLP 候选项高 88px。模型与来源使用虚构 DS/CLP 快照，未访问真实账户。截图 `output/playwright/group-select-before.png`。
+
+根因是普通触发器 `sm:w-[160px]` 按浏览器视口生效，Field 的纵向/横向布局却使用 FieldGroup 容器断点。桌面窄弹窗中字段仍纵向，触发器已经被收窄；菜单随 anchor 宽度继续收窄。共享组合改为同一 `@md/field-group` 容器断点，窄容器选择框全宽，有 FieldGroup 的宽设置区域保留横向紧凑布局；没有该容器的工具权限选择、提供商类型选择随原有纵向 Field 保持全宽。基础组件、原始模型 ID、候选来源标签、分组成员选择/预览及保存合同不变。
+
+修复后浏览器观察与 Hack：
+
+- 1440×1000 视口下，统计分组弹窗宽 384px，两处触发器与输入框外框均 352px（内容宽 350px），成员菜单宽 352px；DS 候选高 28px，长 CLP 候选高 48px，文字完整换行且无横向裁切。截图 `output/playwright/group-select-after-desktop.png`。
+- 390×844 视口下，弹窗宽 358px、两处触发器宽 326px；实际重新展开的菜单宽 326px、右边界 359px，长候选宽与内容宽均 318px。截图 `output/playwright/group-select-after-mobile.png`。两张修复后截图均实际查看，中文字符正常。
+- 桌面点击长候选后，成员保留精确 `cline-pass/deepseek-v4.1-flash-1017`；DS 选择 `deepseek-v4-pro` 后，组名和新增成员均保留该 ID，原 CLP 成员仍在，再次展开只剩未加入的两个候选。窄屏又通过 End/Enter 选入长 CLP 成员，真实隔离后端预览显示该原始 ID 映射到 `group-select-audit`；取消前后临时配置 SHA-256 同为 `7e68ed15c9623080a82ad5b3fbcf9e05e93e2ce81dac1a6c63992bc0fa099e48`，没有保存。
+- 账户页新增 DeepSeek 的 384px 窄弹窗内，账户 ID、运行模式和展开菜单均宽 352px；已查看截图 `output/playwright/group-select-account-after.png`，随后取消草稿，未调用账户操作。设置页 1128px FieldGroup 中的选择仍为横向紧凑行，实际宽 56–214px，均在视口内。
+
+A `astra_group_select_review`（`gpt-6-astra/high`）只读独立复查本次源码、Field/FieldGroup/Select 合同、统计分组身份与预览链，以及账户、模型新增/参数、搜索探测、模板和宽设置消费者，未发现阻断问题；它查看修复前截图，没有操作浏览器或查看修复后截图，修复后证据由主代理收集。WebUI 类型及生产构建通过；正常提交门禁待执行。其他消费者全部交互、完整读屏、各 OS 浏览器及真实账户写入仍未观察，本次不将这些路径描述为实测通过。
