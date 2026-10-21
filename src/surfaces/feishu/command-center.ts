@@ -22,10 +22,12 @@ import {
 } from "./card-kit.js";
 import type { FeishuCardAction } from "./card-action.js";
 import { formatFeishuCommandMarkdown } from "./command-format.js";
+import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
+import type { SurfaceConfigurationChange } from "../types.js";
 import type { FeishuOutbox } from "./outbox.js";
+import { renderFeishuConversationIdleReleasedCard } from "./idle-release-card.js";
 
 export const feishuCommandMenuEventKey = "codexc_home";
-export const feishuCommandChoiceLimit = 18;
 
 const feishuLocalCommandActions = [
   "help",
@@ -207,6 +209,50 @@ export class FeishuCommandCenter {
     );
   }
 
+  deliverWorkspaceAdded(
+    target: ConversationTarget,
+    actorId: string,
+    change: SurfaceConfigurationChange,
+  ): Promise<void> {
+    return this.track((async () => {
+      if (this.closed || !this.access.isAllowed({ target, actorId })) {
+        throw new Error("工作区通知接收者已不可用");
+      }
+      await this.openResponse(target, actorId, {
+        title: "新增工作区",
+        description: formatSurfaceConfigurationChange(change, "feishu", true),
+        descriptionFormat: "markdown",
+        choices: change.addedWorkspaces.map(workspace => ({
+          label: `切换到 ${workspace.name}`,
+          action: "workspace-select",
+          input: workspace.id,
+        })),
+      });
+      if (this.closed || !this.access.isAllowed({ target, actorId })) {
+        throw new Error("工作区通知投递期间接收者已不可用");
+      }
+    })());
+  }
+
+  deliverIdleReleased(
+    target: ConversationTarget,
+    actorId: string,
+    minutes: number,
+    threadId: string,
+    sendCard: (card: FeishuCardDocument) => Promise<string>,
+  ): Promise<void> {
+    return this.track((async () => {
+      if (this.closed || !this.access.isAllowed({ target, actorId })) {
+        throw new Error("空闲解除通知接收者已不可用");
+      }
+      await this.openCard(
+        target, actorId,
+        token => renderFeishuConversationIdleReleasedCard(minutes, threadId, token),
+        undefined, true, new Map(), this.tokenTtlMs, sendCard,
+      );
+    })());
+  }
+
   private async openCard(
     target: ConversationTarget,
     actorId: string,
@@ -215,6 +261,8 @@ export class FeishuCommandCenter {
     consumeOnUse = false,
     acceptedStates: ReadonlyMap<string, FeishuCommandAcceptedState> = new Map(),
     tokenTtlMs = this.tokenTtlMs,
+    sendCard: (card: FeishuCardDocument) => Promise<string> = card =>
+      this.outbox.deliverCard(target.conversationId, card),
   ): Promise<void> {
     if (
       this.closed
@@ -225,19 +273,15 @@ export class FeishuCommandCenter {
     this.prune();
     const token = randomBytes(18).toString("base64url");
     const card = render(token);
-    const expiresAt = this.now() + tokenTtlMs;
-    const messageId = await this.outbox.deliverCard(
-      target.conversationId,
-      card,
-    );
-    if (this.closed) {
+    const messageId = await sendCard(card);
+    if (this.closed || !this.access.isAllowed({ target, actorId })) {
       return;
     }
     this.pending.set(token, {
       target,
       actorId,
       messageId,
-      expiresAt,
+      expiresAt: this.now() + tokenTtlMs,
       allowedSelections: collectCommandSelections(card, token),
       acceptedStates,
       ...(form ? { form } : {}),
@@ -472,7 +516,7 @@ function renderFeishuCommandChoicesCard(
   token: string,
   selection: FeishuCommandCenterChoices,
 ): FeishuCardDocument {
-  const choices = selection.choices.slice(0, feishuCommandChoiceLimit);
+  const choices = selection.choices.slice(0, 18);
   if (selection.descriptionFormat === "markdown") {
     return feishuCardShell("blue", selection.title, [
       ...(selection.description
