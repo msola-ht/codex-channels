@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { AccountManagementError } from "./account-management-error.mjs";
+import { defaultModelDisplayName } from "../runtime/model-catalog.mjs";
 import { clinePassAccountDirectory, clinePassAccountMarkerPath, clinePassAccountsFilePath, loadClinePassAccounts, validateClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -51,7 +52,7 @@ export function projectClinePassModels(source, { requireModels = true } = {}) {
       ? "仅声明 token 预算，Codex 暂不支持映射" : "未声明可映射的思考等级或开关";
     if (reason) { excludedModels.push({ model: model.id, reason }); continue; }
     models.push({
-      id: model.id, name: model.name ?? model.id,
+      id: model.id, name: model.name ?? defaultModelDisplayName(model.id),
       contextWindow: model.contextWindow, maxContextWindow: model.contextWindow,
       reasoningEfforts: efforts,
       defaultReasoningEffort: efforts.includes("high") ? "high" : efforts[0],

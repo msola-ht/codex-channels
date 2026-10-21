@@ -7,6 +7,12 @@ export function contextWindowPresetLabel(tokens) {
   return tokens === 1048576 ? "1M" : `${tokens / 1024}K`;
 }
 
+/** Suggested names omit ID namespaces; explicit names and upstream IDs stay intact. */
+export function defaultModelDisplayName(id) {
+  const path = id.replace(/\/+$/u, "");
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
 /** New custom IDs use the same strict contract as single-model management. */
 export function isValidCustomModelId(id) {
   return typeof id === "string" && id.trim() === id && id.length > 0 && id.length <= 200
