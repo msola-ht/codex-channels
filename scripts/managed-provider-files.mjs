@@ -1,7 +1,10 @@
 import { unlinkSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
+import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { parse } from "smol-toml";
 
+import { codexHomePath } from "../runtime/codex-home.mjs";
 import { assertCodexConfigHasNoPlaintextCredentials, createProviderFileAccess, createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { managedPrimaryCredentialPath } from "../runtime/managed-provider-credentials.mjs";
 import { createCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
@@ -75,12 +78,22 @@ async function writeMainConfigEdits(content, state, readFile, environment) {
   assertCodexConfigHasNoPlaintextCredentials(content ?? "");
   // A rollback reverses only our published fields, including when readback saw
   // an unrelated upstream edit. Never turn the old full snapshot into a restore.
-  const changes = state.reverseChanges && isDeepStrictEqual(after, parseMainConfig(state.originalContent))
+  const plannedChanges = state.reverseChanges && isDeepStrictEqual(after, parseMainConfig(state.originalContent))
     ? state.reverseChanges : configChanges(before, after);
+  // This is the sole path field edited by managed-account main-config plans.
+  // RPC validation requires an absolute value, including a restored catalog.
+  const changes = plannedChanges.map(change => change.segments.length === 1
+    && change.segments[0] === "model_catalog_json" && typeof change.value === "string"
+    ? { ...change, value: mainCatalogPath(change.value, environment) } : change);
   if (changes.length === 0) return;
   await withCodexUserConfigClient(environment, createCodexUserConfigClient, undefined, async client => {
+    if (!sameOptionalContent(readFile(), state.content)) {
+      throw new Error("Codex 主配置已变化，请重新预览并确认");
+    }
     const current = await client.readUserConfigSnapshot();
-    if (!sameOptionalContent(readFile(), state.content) || !isDeepStrictEqual(current.config, before)) {
+    // config/read resolves relative paths. Bind its version to a stable raw
+    // snapshot instead of comparing normalized RPC values with TOML literals.
+    if (!sameOptionalContent(readFile(), state.content)) {
       throw new Error("Codex 主配置已变化，请重新预览并确认");
     }
     let writeError;
@@ -91,17 +104,19 @@ async function writeMainConfigEdits(content, state, readFile, environment) {
     } catch (error) { writeError = error; }
     try {
       // A response alone does not prove the multi-file publication succeeded.
-      const saved = await client.readUserConfigSnapshot();
+      const observed = readFile();
+      await client.readUserConfigSnapshot();
       const actual = readFile();
-      if (!isDeepStrictEqual(parseMainConfig(actual), saved.config)) {
+      if (!sameOptionalContent(observed, actual)) {
         throw new Error("Codex 主配置回读期间发生变化");
       }
-      if (changes.every(({ segments, value }) => isDeepStrictEqual(configAt(saved.config, segments), value === null ? undefined : value))) {
+      const saved = parseMainConfig(actual);
+      if (changes.every(({ segments, value }) => isDeepStrictEqual(configAt(saved, segments), value === null ? undefined : value))) {
         state.content = actual;
         state.reverseChanges = changes.map(({ segments }) => ({ segments, value: configAt(before, segments) ?? null }));
         return;
       }
-      if (writeError && isDeepStrictEqual(saved.config, before)) throw writeError;
+      if (writeError && isDeepStrictEqual(saved, before)) throw writeError;
       state.uncertain = true;
       throw new Error("Codex 主配置字段保存结果不一致；已保留私有文件、凭据及备份，请先核对后再操作");
     } catch (error) {
@@ -111,6 +126,17 @@ async function writeMainConfigEdits(content, state, readFile, environment) {
         "Codex 主配置保存结果无法确认；已保留私有文件、凭据及备份，未自动回滚或重试", { cause: error });
     }
   }, { preserveOperationResult: true });
+}
+
+function mainCatalogPath(value, environment) {
+  // Match the locked CLI's home-relative forms; ~user remains an ordinary path.
+  const suffix = value === "~" ? "" : value.startsWith("~/") ? value.slice(2).replace(/^\/+/u, "")
+    : process.platform === "win32" && value.startsWith("~\\") ? value.slice(2).replace(/^\\+/u, "") : null;
+  if (suffix !== null) {
+    const home = (process.platform === "win32" ? environment.USERPROFILE : environment.HOME) || homedir();
+    return resolve(home, suffix);
+  }
+  return resolve(codexHomePath(environment), value);
 }
 
 function parseMainConfig(content) {
