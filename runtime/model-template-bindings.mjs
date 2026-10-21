@@ -30,3 +30,20 @@ export function readModelTemplateBindings(manifest, modelIds) {
   }
   return result;
 }
+
+/** Existing Cline provenance stays readable; new fixed catalogs use DS bindings. */
+export function validateClinePassCatalogManifest(manifest, modelIds, defaultModel) {
+  const bindings = readModelTemplateBindings(manifest, modelIds);
+  if (Object.hasOwn(manifest, "cline")) {
+    const source = manifest.cline;
+    if (!record(source) || Object.keys(source).length !== 2 || Object.keys(source).some(key => !["commit", "downloadedAt"].includes(key))
+      || typeof source.commit !== "string" || !/^[a-f0-9]{40}$/u.test(source.commit)
+      || !Number.isSafeInteger(source.downloadedAt) || source.downloadedAt <= 0
+      || !["deepseek", "cline"].includes(manifest.source)
+      || manifest.source === "deepseek" && manifest.model !== "deepseek-flash"
+      || modelIds.includes(defaultModel) !== (manifest.source === "deepseek")) throw new Error("CLP 模型目录与来源不一致");
+  } else if (manifest.source !== "deepseek" || manifest.model !== undefined || !Object.hasOwn(manifest, "modelTemplates")) {
+    throw new Error("CLP 固定模型目录来源无效");
+  }
+  return bindings;
+}

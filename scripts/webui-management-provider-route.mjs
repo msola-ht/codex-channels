@@ -39,7 +39,6 @@ import { routeCustomModelCapabilityProbe } from "./webui-custom-model-probe.mjs"
 import { routeOfficialModelManagement } from "./webui-management-official-model-route.mjs";
 import { loadProviderModelCatalogPresentations, loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadProviderModelTemplateOptions } from "./provider-model-template-management.mjs";
-import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
 import { loadProviderModelAdditionOptions } from "./provider-model-additions.mjs";
 
 const activeTemplateOptionsReads = new WeakSet();
@@ -97,27 +96,6 @@ export async function routeProviderManagement({
       throw managementOperationError(error, [ProviderModelManagementError], "provider_models_unavailable");
     } finally {
       response.removeListener("close", disconnect);
-      activeTemplateOptionsReads.delete(state);
-    }
-    return true;
-  }
-  if (path === "/provider-model-drafts" && request.method === "GET") {
-    if (new URL(request.url, "http://localhost").searchParams.size !== 0) {
-      throw new ApiError(400, "provider_models_invalid_input", "新增模型模板请求不接受参数");
-    }
-    if (activeTemplateOptionsReads.has(state)) {
-      throw new ApiError(503, "provider_templates_busy", "已有模型模板读取正在进行，请稍后重试");
-    }
-    activeTemplateOptionsReads.add(state);
-    try {
-      const templates = await loadCustomModelDraftTemplates();
-      if (Buffer.byteLength(JSON.stringify({ templates })) > 2 * 1024 * 1024) {
-        throw new ApiError(503, "provider_models_unavailable", "新增模型模板超过大小限制");
-      }
-      if (!response.destroyed) sendManagementJson(response, 200, { templates });
-    } catch (error) {
-      throw managementOperationError(error, [ProviderModelManagementError], "provider_models_unavailable");
-    } finally {
       activeTemplateOptionsReads.delete(state);
     }
     return true;

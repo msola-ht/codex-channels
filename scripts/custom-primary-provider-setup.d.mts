@@ -25,7 +25,6 @@ export interface CustomPrimaryProviderSetupOptions {
   providerId?: string;
   probeWebSocket?: typeof import("./responses-websocket-probe.mjs").probeResponsesWebSocket;
   probeModelCapabilities?: typeof import("./custom-model-capability-probe.mjs").probeCustomModelCapabilities;
-  loadDraftTemplates?: typeof import("./responses-model-templates.mjs").loadCustomModelDraftTemplates;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CustomPrimaryProviderSetupClient>;

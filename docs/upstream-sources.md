@@ -73,14 +73,11 @@ TTFT 参考 `internal/runtime/executor/helps/responses_ttft_helpers.go`、`chat_
 
 ## Cline 模型目录来源
 
-Relay 与 CLP Codex 目录共用下载器读取 [Cline 官方模型文件](https://github.com/cline/cline/blob/c269dbb7f97256d53d4aedabb6c245b9ec54b1b6/sdk/packages/llms/src/catalog/catalog.generated.ts)，
-首次解析格式审查基线为 `c269dbb7f97256d53d4aedabb6c245b9ec54b1b6`，未建立本地源码仓库。
-同时核对该提交的 `catalog-cline-recommended.ts`、`scripts/generate-models.ts` 和共享 `reasoning-options.ts`；输入类型映射核对同一提交的 `providers/model-capabilities.ts` 与 `catalog/catalog-live.ts`。
-思考参数映射另核对同一提交 `providers/routing/portable-reasoning.ts`、`providers/routing/anthropic-compatible.ts`、`providers/routing/provider-option-rules.ts`、`providers/vendors/cline.ts` 及相邻测试；Cline/Cline Pass 共用 `cline` SDK 适配器，通用关闭请求使用 `reasoning.enabled=false`；本项目保留精确 Flash 原有的 `reasoning.effort=none` 默认映射，由独立 Relay 的逐模型策略显式选择其他关闭字段。锁定源码证明该字段被适配器保留，不证明当前云端内部推理关闭。历史记录显示旧 `reasoning.effort=none` 曾返回零推理 Token，实际路由变更后仍返回推理；2026-10-15 三次受限实测中，新字段不返回思考正文但仍报告推理 Token，观察条件与限制见 [CLP 文档](cline-pass.md)。锁定依赖 `@ai-sdk/openai-compatible@3.0.37` 的 [Chat 出站映射](https://github.com/vercel/ai/blob/%40ai-sdk%2Fopenai-compatible%403.0.37/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts)将指定等级序列化为 `reasoning_effort`；Flash 非关闭等级仍保留既有映射，不据此复制其他原生提供商适配器。
-此处是可由用户显式更新的模型元数据，不是 Codex 协议基线；每次下载记录实际 SHA，不加载上游代码。
-开关启用语义另核对本机目录记录的提交 `cd80a20e96481f5f5d413789f6847accf846487b`：`providers/routing/provider-option-rules.ts` 的 Cline 规则调用 `providers/routing/anthropic-compatible.ts` 中的 `buildGatewayReasoningOptions`，保留显式 `enabled: true/false`。目录中的 `toggle` 投影为 Codex `none/enabled`，不虚构上游思考等级；该投影不更改独立 Relay 的参数保留合同。
-下载入口为 `runtime/cline-relay-catalog-update.mjs`，共用读取入口为 `runtime/cline-relay-catalog.mjs`；
-Relay 更新和回退见[Relay 模型设置](provider-api-relay-development.md#clp-转发模型目录与设置)；CLP Codex 目录由独立的[共享目录更新入口](cline-pass.md)显式生成，双方不隐式覆盖彼此目录。
+CLP 不再使用 Cline 官方生成目录作为模型名单或能力来源。固定 DS 模型由仓库 `runtime/model-catalog-deepseek.json` 和 `provider-model-catalog.json` 的明确映射生成，入口为 `scripts/provider-model-catalog.mjs`；其他模型通过统一的按 ID 添加入口独立声明或继承本地快照。渠道和 Relay 共用受管目录；旧独立 Relay 文件及 Cline 来源记录保留，不自动迁移或删除，见[CLP 配置与恢复](cline-pass.md)。
+
+Cline 官方 SDK 仍是 Chat 参数语义的参考，而非模型能力验收结论。曾核对提交 `c269dbb7f97256d53d4aedabb6c245b9ec54b1b6` 的 `providers/routing/portable-reasoning.ts`、`anthropic-compatible.ts`、`provider-option-rules.ts` 和 `providers/vendors/cline.ts`。锁定的 `@ai-sdk/openai-compatible@3.0.37` 将指定等级序列化为 `reasoning_effort`；通用开关使用 `reasoning.enabled`。另核对提交 `cd80a20e96481f5f5d413789f6847accf846487b` 中保留显式 `enabled: true/false` 的规则。手填 `none/enabled` 仅用于 CLP 明确声明的开关能力，不虚构其他等级。
+
+上述源码证明请求字段被适配器保留，不证明云端停止内部推理。Flash 请求格式由保存的 `cline_request_profile` 明确选择；未保存时仅精确原 Flash ID 使用历史默认映射。实际路由、思考正文和推理 Token 的受限观察及其限制见[CLP 文档](cline-pass.md)。
 
 ### CPAMP 指标展示参考
 

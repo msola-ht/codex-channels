@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { clineRelayCatalogSchema } from "../runtime/cline-relay-catalog.mjs";
 import { managedProviderAccountFamilies, loadManagedModelProviderDefinitions, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
 import { managedProviderDirectory, managedProviderMarkerPath, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath, primaryProviderBackupPath, loadConfiguredCustomPrimaryModelProvider, writeManagedModelWindow, writeManagedModelProviderCatalogUpdates } from "../runtime/model-provider-runtime.mjs";
 import { customProviderUpstreamMetadataPath } from "../runtime/model-provider-upstream-metadata.mjs";
@@ -18,11 +17,10 @@ import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { projectModelCatalogEntries, projectModelPrompts } from "../runtime/model-catalog-presentation.mjs";
 import { providerCatalogIsolationPath } from "../runtime/provider-catalog-isolation.mjs";
-import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
+import { readModelTemplateBindings, validateClinePassCatalogManifest } from "../runtime/model-template-bindings.mjs";
 
 // Revisions cover private profiles too; avoid exposing a reusable credential fingerprint.
 const revisionSecret = randomBytes(32);
-const clineSourceMetadataSchema = clineRelayCatalogSchema.pick({ commit: true, downloadedAt: true });
 
 export class ProviderModelManagementError extends Error {
   constructor(code, field, message, options) {
@@ -402,15 +400,12 @@ async function buildRemovalPlan(input, environment) {
       throw invalid("provider-state-unavailable", "provider", "账户默认模型或思考等级与目录不一致，请先修复默认设置");
     }
     if (family.proxyKey === "clp") {
-      if (!clineSourceMetadataSchema.safeParse(manifest.cline).success
-        || !["deepseek", "cline"].includes(manifest.source)
-        || (manifest.source === "deepseek" && manifest.model !== "deepseek-flash")) {
+      try { validateClinePassCatalogManifest(manifest, catalog.models.map(model => model.slug), family.definition.defaultModel); }
+      catch {
         throw invalid("catalog-source-invalid", "provider", "CLP 模型来源信息无效，请先核对账户目录来源，未执行移除");
       }
-      const hasDsTemplate = catalog.models.some(model => model.slug === family.definition.defaultModel);
-      if (hasDsTemplate !== (manifest.source === "deepseek")) throw invalid("catalog-source-invalid", "provider", "CLP 目录与模板来源不一致，未执行移除");
       nextManifest = { ...manifest };
-      if (input.model === family.definition.defaultModel) {
+      if (manifest.cline !== undefined && input.model === family.definition.defaultModel) {
         nextManifest.source = "cline";
         delete nextManifest.model;
       }
@@ -460,9 +455,7 @@ async function buildRemovalPlan(input, environment) {
   const revision = createHmac("sha256", revisionSecret).update(JSON.stringify({ provider: input.provider, model: input.model,
     files: snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("base64") ?? null]),
   })).digest("hex");
-  const warnings = [{ code: "historical-references" }, ...(family?.proxyKey === "clp"
-    ? [{ code: "clp-relay-independent" }]
-    : [{ code: "provider-relay-inflight" }, { code: "shared-relay-grants-retained" }])];
+  const warnings = [{ code: "historical-references" }, { code: "provider-relay-inflight" }, { code: "shared-relay-grants-retained" }];
   const preview = { operation: "model.remove", provider: { id: input.provider, displayName },
     model: { id: input.model, displayName: model.display_name ?? input.model }, providers, revision, warnings, activation: "restart-all" };
   return { preview, snapshots, catalog: nextCatalog, catalogPath, custom,

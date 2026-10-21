@@ -55,7 +55,6 @@ export type {
   OpenAiModelPromptsResponse,
   ProviderModelPromptsResponse,
   ProviderModelTemplateOptionsResponse,
-  CustomModelDraftTemplatesResponse,
   ProviderModelTemplateUpdateInput,
   ProviderModelTemplateUpdatePreview,
   ProviderModelTemplateSource,

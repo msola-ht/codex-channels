@@ -412,7 +412,7 @@ codexc provider list [--json]
 codexc provider switch <Provider ID> [模型] [--yes]
 ```
 
-CLP 的 CLI／WebUI 模板更新在读取候选时下载一次官方目录，下载整体限时 25 秒并支持取消；无需先执行独立刷新命令。候选仅在当前进程保留 10 分钟，预览和确认复用该快照，不重新联网；失败、过期或目标目录修订变化后重新读取。操作及保存步骤见 [CLP 使用说明](cline-pass.md)。
+CLP 的 CLI／WebUI 固定模型候选和模板更新读取仓库 DS 模板，不下载 Cline 官方模型目录。候选仅在当前进程保留 10 分钟，预览和确认复用该快照；失败、过期或目标目录修订变化后重新读取。其他模型按准确 ID 独立填写能力，或继承同一目录中已保存模型的快照；自定义提供商使用同一添加流程。操作及保存步骤见 [CLP 使用说明](cline-pass.md)。
 
 `codexc provider switch` 会把主实例切换到目标 Provider，执行前会二次确认，并提示将改写
 Codex 主配置的 `model_provider` / `model`；`switch` 与 `recover` 可用 `--yes` 显式跳过确认（适合脚本化调用）；交互式 Setup 菜单仍会确认。确认期间切换目标或影响范围发生变化时拒绝执行，需重新确认。
@@ -1176,10 +1176,10 @@ codexc relay edit --caller translation --reasoning passthrough
 
 `codexc relay delete --caller ID` 删除调用方并撤销 Key，取消其旧请求；历史指标和转储不删除。WebUI 的“删除”先预览再确认。改绑或删除会保留仅用于旧调用指标结算的历史身份摘要，不含秘密，不能用于请求鉴权；删除后新建必须使用新的 callerId 和 keyId。不删除上游账户或凭据。摘要最多 4096 条，同时受配置文件 1 MiB 限制；达到上限时拒绝整次操作，不静默清除历史摘要。
 
-CLP 转发使用独立于 Codex 的 Cline 模型目录。在 WebUI「模型转发 → 提供商模型」首次使用自动下载缺失的模型文件，之后可手动更新；点击提供商行的“模型列表”打开弹窗，只读查看调用模型 ID、目录声明的输入格式及协议；模型授权和思考策略在 Key 编辑弹窗中设置。已有上游账户密钥继续复用，无须申请新 Key。目录补齐前 CLP 转发暂不可用；自动下载失败可手动重试，不回退 Codex 模型文件。见[转发模型目录与设置](provider-api-relay-development.md#clp-转发模型目录与设置)。
+CLP 转发与渠道共用受管模型目录，不再下载或更新独立 Cline 模型文件。在 WebUI「模型转发 → 提供商模型」点击提供商行的“模型列表”，只读查看调用模型 ID、目录声明的输入格式及协议；新增、模板更新和移除在模型配置中完成，模型授权和思考策略仍在 Key 编辑弹窗中单独设置。已有上游账户密钥继续复用，无须申请新 Key；新增目录条目不会自动扩大 Key 权限。旧独立目录文件不自动修改或删除。见[转发模型目录与设置](provider-api-relay-development.md#clp-转发模型目录与设置)。
 
 既有配置或 CLI 的 `off` 显示为“关闭 · 旧自动映射”，WebUI 不再提供这一新选择，也不自动改写已有值。它支持目录显式声明 `none` 的 CLP 模型、CLP 的精确模型 `cline-pass/deepseek-v4.1-flash`，以及 DS 的 `deepseek-flash` / `deepseek-v4-pro`，只对当前请求中明确支持的模型生效。未声明或不支持关闭的模型继续使用客户端原参数，仍可能产生思考内容；可在模型旁改选明确的关闭参数方式。
-关闭策略覆盖顶层思考控制参数，通用 CLP Chat 实际出站为 `reasoning.enabled=false`；CLP 精确模型 `cline-pass/deepseek-v4.1-flash` 保留原有 `reasoning.effort=none`，DS Responses 使用 `reasoning.effort=none`，DS Chat 使用 `reasoning_effort=none`；不改历史消息或隐藏上游思考响应。
+关闭策略覆盖顶层思考控制参数，通用 CLP Chat 实际出站为 `reasoning.enabled=false`；CLP 保存为 `deepseek-flash` 请求配置的模型使用 `reasoning.effort=none`，未保存配置的旧精确模型 `cline-pass/deepseek-v4.1-flash` 保留同一默认行为。DS Responses 使用 `reasoning.effort=none`，DS Chat 使用 `reasoning_effort=none`；不改历史消息或隐藏上游思考响应。
 嵌套 `extra_body` / `extraBody` 的思考控制字段与关闭策略冲突时明确拒绝；跟随客户端不增加此限制。
 Chat 和 Responses 的冲突错误均定位到完整字段路径，例如 `extra_body.reasoning`。
 显式关闭方式包括 `reasoning.effort=none`、`reasoning.enabled=false`、`reasoning_effort=none`、`thinking.type=disabled` 和 `enable_thinking=false`，受管和自定义提供商都可选择。它们只指定出站参数，上游可能拒绝或继续内部推理，不保证零推理 Token。完整配置值、协议等级映射和回退步骤见[逐模型思考设置](provider-api-relay-development.md)。CLI 使用 `--model-reasoning` JSON 对象提交完整模型映射，与旧 `--reasoning` 互斥。

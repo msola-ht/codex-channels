@@ -38,8 +38,6 @@ export interface ProviderModelAdditionLoadOptions {
   signal?: AbortSignal;
   manualModel?: ManagedManualModelDefinition;
   downloadCatalog?: typeof import("./deepseek-setup.mjs").downloadDeepseekCatalog;
-  downloadClineCatalog?: typeof import("../runtime/cline-relay-catalog-update.mjs").downloadClineRelayCatalog;
-  loadTemplates?: typeof import("./responses-model-templates.mjs").loadResponsesModelTemplates;
 }
 export function loadProviderModelAdditionOptions(provider: string, options?: ProviderModelAdditionLoadOptions): Promise<ProviderModelAdditionOptions>;
 export function previewProviderModelAddition(input: ProviderModelAdditionInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ProviderModelAdditionPreview>;

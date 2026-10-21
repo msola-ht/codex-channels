@@ -62,7 +62,7 @@ export interface ProviderModelRemovalPreview {
   model: { id: string; displayName: string };
   providers: string[];
   revision: string;
-  warnings: Array<{ code: "shared-relay-grants-retained" | "clp-relay-independent" | "historical-references" | "provider-relay-inflight" }>;
+  warnings: Array<{ code: "shared-relay-grants-retained" | "historical-references" | "provider-relay-inflight" }>;
   activation: "restart-all";
 }
 export class ProviderModelManagementError extends Error {

@@ -12,7 +12,7 @@ import { useProviderModelAdditionOptions } from "@/hooks/use-provider-model-addi
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 import type { ManagedManualModelDefinition, ProviderModelAdditionPreview } from "../../../../scripts/provider-model-additions.mjs"
-import { contextWindowPresetLabel, contextWindowPresetTokens } from "../../../../runtime/model-catalog.mjs"
+import { contextWindowPresetLabel, contextWindowPresetTokens, defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
 
 export interface ProviderModelAdditionTarget { provider: string; revision: string; models: Array<{ id: string; displayName: string }> }
 
@@ -29,7 +29,8 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
 }) {
   const { t } = useTranslation()
   const clinePass = target.provider.startsWith("clp-")
-  const [mode, setMode] = useState("discover")
+  const custom = target.provider.startsWith("cp-")
+  const [mode, setMode] = useState("manual")
   const [id, setId] = useState("")
   const [name, setName] = useState("")
   const [manualSource, setManualSource] = useState("independent")
@@ -44,11 +45,11 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const candidates = useProviderModelAdditionOptions(target, open, stale, busy)
   const { options, selected, loading, errorCode, setSelected, clearError } = candidates
   const locked = busy || loading || stale
-  const inheriting = clinePass && manualSource === "inherit"
+  const inheriting = manualSource === "inherit"
   const capabilitiesValid = /^\d+$/u.test(window)
     && Number.isSafeInteger(Number(window)) && Number(window) >= 1024 && Number(window) <= 100_000_000
     && efforts.length > 0 && efforts.includes(effort) && [images, patch, search].every(value => value !== "unknown")
-  const manualValid = id.trim().length > 0 && name.trim().length > 0
+  const manualValid = id.trim().length > 0 && name.trim().length > 0 && !target.models.some(model => model.id === id.trim())
     && (inheriting ? target.models.some(entry => entry.id === inheritFrom) : capabilitiesValid)
   const load = async () => {
     if (locked || !open || mode === "manual" && !manualValid) return
@@ -69,16 +70,16 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
       <DialogHeader><DialogTitle>{t("modelAddition.title")}</DialogTitle><DialogDescription>{t("modelAddition.hint")}</DialogDescription></DialogHeader>
       <code className="break-all">{target.provider}</code>
       {!options ? <FieldGroup>
-        <ManagedSelect label={t("modelAddition.method")} value={mode} disabled={locked} options={[["discover", t("modelAddition.discover")], ["manual", t("modelAddition.manual")]]} onChange={value => { setMode(value); clearError() }} />
+        {!custom ? <ManagedSelect label={t("modelAddition.method")} value={mode} disabled={locked} options={[["manual", t("modelAddition.manual")], ["discover", t("modelAddition.discover")]]} onChange={value => { setMode(value); clearError() }} /> : null}
         {mode === "manual" ? <>
-          {clinePass ? <>
+          <>
             <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.manualSource")}</FieldLegend><ToggleGroup variant="outline" size="sm" value={[manualSource]} disabled={locked} aria-label={t("modelAddition.manualSource")} onValueChange={values => { if (values[0]) { setManualSource(values[0]); clearError() } }}>
               <ToggleGroupItem value="independent">{t("modelAddition.independent")}</ToggleGroupItem>
               <ToggleGroupItem value="inherit">{t("modelAddition.inherit")}</ToggleGroupItem>
             </ToggleGroup></FieldSet>
-            <p className="text-sm text-muted-foreground">{t(inheriting ? "modelAddition.clineInheritHint" : "modelAddition.clineManualHint")}</p>
-          </> : null}
-          <Field><FieldLabel htmlFor="addition-id">{t("managementUi.modelId")}</FieldLabel><Input id="addition-id" value={id} disabled={locked} onChange={event => setId(event.target.value)} /></Field>
+            <p className="text-sm text-muted-foreground">{t(inheriting ? "modelAddition.clineInheritHint" : clinePass ? "modelAddition.clineManualHint" : "modelAddition.manualHint")}</p>
+          </>
+          <Field><FieldLabel htmlFor="addition-id">{t("managementUi.modelId")}</FieldLabel><Input id="addition-id" value={id} disabled={locked} onChange={event => { const next = event.target.value; if (name === "" || name === defaultModelDisplayName(id)) setName(defaultModelDisplayName(next)); setId(next) }} /></Field>
           <Field><FieldLabel htmlFor="addition-name">{t("managementUi.displayName")}</FieldLabel><Input id="addition-name" value={name} disabled={locked} onChange={event => setName(event.target.value)} /></Field>
           {inheriting ? <>
             <ManagedSelect fullWidth label={t("modelAddition.inheritFrom")} placeholder={t("modelAddition.selectInheritSource")} value={inheritFrom} disabled={locked} options={target.models.map(entry => [entry.id, `${entry.displayName} (${entry.id})`])} onChange={setInheritFrom} />

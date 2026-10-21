@@ -98,7 +98,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   CP 从同次已校验目录的精确模型定义读取默认采样，和启用状态共同交给代理；采样不进入编译后的 Codex 模型字段。
   CLP 在同一次目录读取中取得模型的思考选项，出站同时验证启用名单和思考能力，不为能力检查重复执行 ACL 读取。
   自定义提供商注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和旧上下文事务标记；自定义及受管账户均检查旧版目录整理未完成记录。未完成事务拒绝对应出站，不复用管理事务内部的读取豁免。
-- `third-party-coding-instructions.mjs`：非 Flash CLP、新增 OCG/CCG 手填模型与新增非 DS 自定义提供商模型共用的编程提示词；显式写入模型定义，不改变既有目录缺省值，不声明模型身份或授予工具权限，不依赖 DS 下载。
+- `third-party-coding-instructions.mjs`：CCG、OCG、CLP 和自定义目录的独立新增模型共用的通用编程提示词；显式保存，不改既有目录，不声明具体模型身份或授予工具权限。固定 DS 映射各自使用其 DS 来源模板，继承模型复制当前保存的提示词快照。
 - `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：共享 `aggregateProviderEnabled=false` 门禁暂停聚合入口，Runtime／Gateway 不再派生或注册聚合实例，保留账户与既有数据。内部实现从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
   拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
   目录快照；公开第三方账户、Profile、目录及事务状态的源文件清单与内容指纹供安全刷新使用。
@@ -131,7 +131,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   取消信号，快照随请求指标写入指标库供账户用量按周期归属本地 Token。
 - `model-provider-runtime.mjs` / `model-provider-runtime.d.mts`：保留受控模型 Provider 运行时的稳定
   导出门面与 TypeScript 接口；`readManagedMarker` 提供单个 Provider 管理标记的只读查询，不读取其他账户注册表。门面不承载具体读取、写入或启动逻辑。
-- `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录读取；提供原生协议集合、目录输入能力、CLP 独立转发目录与模型覆盖与思考声明、依赖路径和修订摘要。CP 协议元数据即使缺失也参与摘要和依赖路径，按 16 KiB 上限读取，防止读取期间新增文件逃过前后修订核对；不读取 OAuth 或创建 App Server。
+- `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录。CLP 与其他受管提供商共用渠道目录，提供原生 Chat 协议、关闭思考能力及明确保存的请求快照；不读取旧独立 Cline Relay 目录，不连接 App Server。
   受管及自定义 Provider 材料复用 `provider-file-access` 的文件归属判断，指纹不自行选择 ACL 策略。
 - `managed-model-catalog.mjs`：受管目录的纯数据校验、单模型设置读取、窗口与思考等级更新及刷新时保留设置；窗口按精确 Token 数保留，百分比仅派生、不取整后反向还原；窗口变更与原自动压缩阈值冲突时拒绝，不截小阈值；新上限小于原窗口或不再支持原思考等级时拒绝刷新，不静默替换非默认模型的等级。DS、OCG、CCG、CLP 共用，完整保留未修改的上游元数据，不执行文件读写。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile，复用 `managed-model-catalog` 处理目录数据；
@@ -157,9 +157,9 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `third-party-model-catalog.mjs` / `third-party-model-catalog.d.mts`：第三方模板投影与 App Server 运行目录共用的本地工具策略，从固定底座 `experimental_supported_tools` 为每个模型仅补齐 `send_user_message_async` 和 `clock`，保留原有其他工具声明；异步提问实际工具名仍为 `request_user_input_async`，上游 Feature、配置及角色限制继续生效。`withThirdPartyRuntimeTools` 另在运行副本将 `use_responses_lite` 设为 false，配合第三方启动参数 `features.standalone_web_search=false`，使原生网页搜索采用模型 API 的 hosted 工具合同，不走 OpenAI 独立搜索执行器。固定与切换实例每次启动从原目录生成私有 `runtime/model-catalogs/<Provider>.json`，聚合复用运行转换及既有摘要守卫。覆盖 Responses 与 Chat，不改源目录、模板的 Lite 元数据或官方 OpenAI 实例；无效工具声明及超过 8 MiB 的运行目录结果明确拒绝。CLP 在定义编译后补齐这两项；CP 可显式保存工具声明，运行副本仍补齐两项，不迁移用户文件。
 - `responses-context-sync.mjs` / `responses-context-sync.d.mts`：仅保留旧版跨目录上下文事务的私有记录读取、校验及显式整批恢复；不再创建同步事务或提供跟随联动。
 - `provider-catalog-isolation.mjs` / `provider-catalog-isolation.d.mts`：旧版 Provider 目录整理未完成记录的只读拒绝保护；记录存在时拒绝 runtime 使用受管及 CP 目录、CP 首次写入及统一模型恢复。当前版本不提供目录迁移，不修改或删除旧记录；须保留记录与备份，并使用产生事务的原版本恢复。受管模型按家族放在 `providers/deepseek|clp|ccg|opencode-go/`；账户身份材料按完整 ID 放在对应家族子目录，自定义 cp 模型保持各自目录。
-- `model-catalog.mjs` / `model-catalog.d.mts`：模型定义与 Codex 字段转换的纯数据层，集中校验基础及扩展能力、生成默认字段、导入官方／DS 模板及修正 DS 能力声明；CP、CLP 和 CLI 模板入口复用。CP 保留思考、图片、文件编辑及工具搜索的未知／不支持／支持声明；内置网页搜索使用 Codex 配置。历史 v5 `supportsWebSearch` 仍按布尔类型保留，并按原字段顺序编译为 `supports_web_search` 以维持保存快照一致性；它不参与搜索门控，新模板不导入该字段。可选 `experimentalSupportedTools` 严格校验非空、无首尾空白或控制字符且不重复的工具名，编译为 `experimental_supported_tools`；缺省仍按原字节生成 `[]`，不自动补齐或迁移。目录投影另保留声明状态。导出 `SamplingParameters` 与严格数值校验，逐模型可选 `sampling` 仅保留于定义，空对象归一为省略，不进入 Codex 生成字段。完整官方及受管目录不经过 CP 白名单往返，避免丢失专用元数据。
+- `model-catalog.mjs` / `model-catalog.d.mts`：模型定义、字段编译和来源适配的纯数据层；`createIndependentModelDraft` 为 CLI、WebUI 初始配置及统一新增提供通用编程提示词与本地工具声明，保留显式指令或模板提示词的优先级，不推断上游能力或自动绑定模板。保留已有模型验证、上下文设置及 DS 能力投影。
 - `model-template-prompts.mjs` / `model-template-prompts.d.mts`：纯 JSON 提示词补全，保留显式值，补缺失文本及必要 token-budget 配套字段；`approvals: null` 是继承基础审批提示词的例外。
-- `model-template-bindings.mjs` / `model-template-bindings.d.mts`：校验受管目录 manifest 的显式模型来源关联；缺少关联保持未关联，拒绝无效或孤立引用，不按名称推断。
+- `model-template-bindings.mjs` / `model-template-bindings.d.mts`：严格读取 manifest 的逐模型来源关联，拒绝孤立引用；`validateClinePassCatalogManifest` 共用于保存与移除，区分保留的旧 Cline 来源记录和新固定 DS 来源，未知字段或不一致失败关闭，不隐式迁移。
 - `model-template-catalog.mjs` / `model-template-catalog.d.mts`：读取固定仓库底座，在显式新增模型时补全并固化 `model_messages`／`modelMessages`。自定义入口共享 `withCustomBaseTemplate`，仅为新模型记录缺省底座来源，并合并固定底座的 `send_user_message_async`、`clock` 到 `experimentalSupportedTools`，保留已有其他声明；官方底座读取和目录模板投影将已知来源模型身份改为通用助手身份，并保留独立审批中文回复要求及两项受控本地工具声明。主提示词保留来源正文与显式空值，不追加中文时钟指导；缺失辅助提示词沿用 `completeModelMessages`，原始快照及用户显式指令保留。`tool_mode`、`node_repl_auto_review_required`、`web_search_tool_type` 分别涉及执行架构、Guardian 审核策略及托管搜索格式，不作为本地工具前提自动继承。显式模板更新重新读取已保存底座；读取、普通编辑、删除及调整已有模型窗口不执行模板补全。
 - `model-catalog-base.json`：按项目锁定 Codex CLI 内置目录的原始顺序抽取第一个模型，保存为单模型固定快照，并记录实际模型 ID；不依赖固定名称。只有维护脚本显式 `--update-base --write` 才更新，不随 CLI 升级或 DS 维护刷新。源模型的上下文、思考等级、加速和工具声明不能视为第三方实际能力。
 - `model-catalog-deepseek-source.json` / `model-catalog-deepseek.json`：分别保存 DS 官方原始目录与提示词补全目录。保留 DS 已有字段，仅补缺失提示词及必要的 token-budget 配套结构；`approvals: null` 是明确允许继承基础审批提示词的例外。
@@ -396,8 +396,3 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   服务诊断通过 `dist/observability/index.js` 的安全 Logger 输出服务、模块、事件和受限错误字段，不输出原始异常正文。
 
 公开服务命令通过 `service-targets.mjs` 的 `serviceCommandTarget` 将内部 `model-relay`、`app-server` 标识显示为 `relay`、`appserver`；平台服务标识和已有定义文件保持稳定。目录中的 `all` 覆盖全部目标，必需服务检查通过 `core` 属性明确筛选。
-
-- `cline-relay-catalog.mjs` / `cline-relay-catalog.d.mts`：独立 Cline 转发模型文件的严格校验、只读快照与思考能力投影；不读取 Codex 模型目录。
-
-- `cline-relay-catalog-update.mjs` / `cline-relay-catalog-update.d.mts`：固定来源的目录下载、格式解析、备份和原子替换；供自动初始化与显式更新共用。
-- `cline-relay-catalog-bootstrap.mjs` / `cline-relay-catalog-bootstrap.d.mts`：服务拥有的缺失目录单次后台初始化，消费材料 Worker 的目录状态，常规刷新不在主线程读取文件；复用管理锁，取消、失败报告与限时关闭；关闭超时报未确认并保留任务归属，不覆盖并发更新。

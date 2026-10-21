@@ -1,7 +1,6 @@
 import { isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
-import { clineRelayCatalogSchema } from "./cline-relay-catalog.mjs";
 import { resolveClinePassRequestProfile } from "./chat-reasoning.mjs";
-import { readModelTemplateBindings } from "./model-template-bindings.mjs";
+import { readModelTemplateBindings, validateClinePassCatalogManifest } from "./model-template-bindings.mjs";
 import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
@@ -447,11 +446,7 @@ function validateCatalogManifest(catalogContent, manifestContent, definition) {
   for (const slug of slugs) modelCatalogSetting(catalogContent, definition, slug);
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || typeof manifest.source !== "string" || !manifest.source) throw new Error("模型来源无效");
   readModelTemplateBindings(manifest, [...slugs]);
-  if (isClinePassAccountProvider(definition.id)
-    && (!clineRelayCatalogSchema.pick({ commit: true, downloadedAt: true }).safeParse(manifest.cline).success
-      || !["deepseek", "cline"].includes(manifest.source)
-      || (manifest.source === "deepseek" && manifest.model !== "deepseek-flash")
-      || slugs.has(definition.defaultModel) !== (manifest.source === "deepseek"))) throw new Error("CLP 模型目录与来源不一致");
+  if (isClinePassAccountProvider(definition.id)) validateClinePassCatalogManifest(manifest, [...slugs], definition.defaultModel);
 }
 
 /** Called only by the explicit recovery command under the Provider management lock. */
@@ -737,6 +732,9 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
   const protocols = definition.upstreamWireApi === "chat_completions" ? ["chat"]
     : definition.storageId === "deepseek" ? ["chat", "responses"] : ["responses"];
   return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs, protocols,
+    ...(definition.storageId === "clp" ? { modelCapabilities: settings.map(model => ({ id: model.model,
+      reasoning_efforts: model.reasoningEfforts.map(level => level.effort).filter(effort => effort !== "enabled"),
+      cline_request_profile: model.clineRequestProfile })) } : {}),
     paths: [...paths, responsesContextSyncPath(environment), providerCatalogIsolationPath(environment), `${join(directory, definition.catalogFileName)}.settings-pending`], revision: before };
 }
 
@@ -897,8 +895,10 @@ function validateModelCatalog(path, definition, model = definition.defaultModel)
 
 function loadModelCatalogSettings(path, definition) {
   const content = readPrivateFile(path, maximumCatalogBytes);
+  const entries = definition.storageId === "clp" ? JSON.parse(content).models : undefined;
   return [...readCatalogSlugSet(content, definition)]
-    .map((slug) => modelCatalogSetting(content, definition, slug));
+    .map((slug) => ({ ...modelCatalogSetting(content, definition, slug),
+      ...(entries ? { clineRequestProfile: resolveClinePassRequestProfile(slug, entries.find(model => model.slug === slug)?.cline_request_profile) } : {}) }));
 }
 
 function readCatalogSlugSet(content, definition) {

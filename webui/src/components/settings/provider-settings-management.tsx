@@ -4,8 +4,6 @@ import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNo
 import { useTranslation } from "@/hooks/use-translation"
 
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
-import { useApi } from "@/hooks/use-api"
-import { fetchCustomModelDraftTemplates } from "@/lib/api"
 import { useCustomModelCapabilityProbe } from "@/hooks/use-custom-model-capability-probe"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { translateCustomModelProbeReason } from "@/lib/custom-model-probe"
@@ -16,8 +14,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { ManagedSelect, ManagementConfirmationDialog, SettingsMutationFeedback } from "@/components/settings/settings-controls"
@@ -31,7 +28,7 @@ import { OpenAiModelDetails } from "@/components/settings/openai-model-details"
 import { ModelContextWindowFields } from "@/components/settings/model-context-window-fields"
 import { contextWindowPreset, validContextWindow, type ContextWindowPreset } from "@/lib/model-context-window"
 import type { CustomModelDraft } from "@/components/settings/custom-model-details"
-import { contextWindowPresetTokens, contextWindowPresetLabel, defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
+import { createIndependentModelDraft, contextWindowPresetTokens, contextWindowPresetLabel, defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
 import { ProviderModelTemplateDialog, ProviderModelTemplateConfirmation, type ProviderModelTemplateTarget } from "@/components/settings/provider-model-template-dialog"
 import { ProviderModelAdditionDialog, ProviderModelAdditionConfirmation, type ProviderModelAdditionTarget } from "@/components/settings/provider-model-addition-dialog"
 import { ProviderWebSearchProbeDialog, type ProviderWebSearchProbeTarget } from "@/components/settings/provider-web-search-probe-dialog"
@@ -326,7 +323,7 @@ function ProviderSettingsCard({
           <p className="text-xs font-normal text-muted-foreground">{t("modelCatalog.scope", { providers: catalog.providers.join(t("managementUi.listSeparator")) })}</p>
         </div>
         {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
-        {catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) ? <Button variant="outline" size="sm" ref={node => { if ((additionTarget?.provider ?? additionSavedTarget.current) === catalog.provider) additionTriggerRef.current = node }} disabled={busy || pending !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null || editorOpen} onClick={event => { additionTriggerRef.current = event.currentTarget; management.clearError(); setAdditionTarget({ provider: catalog.provider, revision: settings.resourceRevision, models: catalog.models.map(entry => ({ id: entry.id, displayName: entry.displayName })) }) }}>{t("modelAddition.title")}</Button> : null}
+        {(catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) || catalog.source === "custom") ? <Button variant="outline" size="sm" ref={node => { if ((additionTarget?.provider ?? additionSavedTarget.current) === catalog.provider) additionTriggerRef.current = node }} disabled={busy || pending !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null || editorOpen} onClick={event => { additionTriggerRef.current = event.currentTarget; management.clearError(); setAdditionTarget({ provider: catalog.provider, revision: settings.resourceRevision, models: catalog.models.map(entry => ({ id: entry.id, displayName: entry.displayName })) }) }}>{t("modelAddition.title")}</Button> : null}
       </div>,
       models: catalog.models.map(entry => ({ ...entry.presentation, isDefault: entry.isDefault })),
       webSearchSettings: settings.webSearchSettings.filter(entry => catalog.providers.includes(entry.provider)),
@@ -432,7 +429,7 @@ function ProviderSettingsCard({
           <p className="text-xs text-muted-foreground">{t("managementUi.responsesHint")}</p>
           {editingId !== null ? <p className="text-xs text-muted-foreground">{t("modelCatalog.editRequiresRemoval")}</p> : null}
           <Alert><AlertTitle>{t("modelProbe.title")}</AlertTitle><AlertDescription>{t("modelProbe.hint")}</AlertDescription></Alert>
-          {editorOpen ? <CustomModelTemplatePicker disabled={busy || pending !== null || editorStale || customModels.length >= 64 || customModels.some(entry => entry.id.trim() === "")} onAdd={draft => setCustomModels(current => current.length >= 64 || current.some(entry => entry.id.trim() === "") ? current : [...current, { ...draft, id: current.length === 0 ? model : "", name: current.length === 0 ? defaultModelDisplayName(model) : "" }])} /> : null}
+          {editorOpen && !modelsOnly ? <CustomModelTemplatePicker disabled={busy || pending !== null || editorStale || customModels.length >= 64 || customModels.some(entry => entry.id.trim() === "")} onAdd={draft => setCustomModels(current => current.length >= 64 || current.some(entry => entry.id.trim() === "") ? current : [...current, { ...draft, id: current.length === 0 ? model : "", name: current.length === 0 ? defaultModelDisplayName(model) : "" }])} /> : null}
           {customModels.map((entry, index) => {
             const existingModel = editingId !== null && index < originalModelCount
             const patch = (changes: Partial<typeof entry>) => setCustomModels(current => current.map((value, position) => position === index ? { ...value, ...changes } : value))
@@ -544,34 +541,10 @@ function hasCustomModelContext(entry: CustomModelDraft): entry is CustomModelDra
 }
 
 function CustomModelTemplatePicker({ disabled, onAdd }: { disabled: boolean; onAdd: (draft: CustomModelDraft) => void }) {
-  const { t, language } = useTranslation()
-  const request = useApi(fetchCustomModelDraftTemplates, [], { retainDataOnError: false })
-  const [selection, setSelection] = useState<string | null>(null)
-  const templates = request.data?.templates ?? []
-  const key = (entry: typeof templates[number]) => `${entry.source}:${entry.model}`
-  const official = templates.find(entry => entry.source === "official")
-  const selectedKey = selection ?? (official === undefined ? "" : key(official))
-  const selected = templates.find(entry => key(entry) === selectedKey)
-  const suggested = selected?.suggested
-  const numbers = new Intl.NumberFormat(language === "zh" ? "zh-CN" : "en-US")
-  const support = (value: boolean | undefined) => t(value === undefined ? "common.unknown" : value ? "managementUi.supported" : "managementUi.unsupported")
+  const { t } = useTranslation()
   return <FieldGroup className="rounded-md border p-3">
-    {request.loading ? <p aria-busy="true">{t("common.loading")}</p> : request.errorCode !== null || templates.length === 0 ? <Alert variant="destructive"><AlertDescription>{request.errorCode !== null ? translateApiErrorCode(t, request.errorCode) : t("customModel.templatesUnavailable")}<Button variant="outline" disabled={disabled} onClick={request.refetch}>{t("modelTemplate.retry")}</Button></AlertDescription></Alert> : <>
-      <ManagedSelect label={t("customModel.startingTemplate")} value={selectedKey} options={templates.map(entry => [key(entry), `${entry.source === "official" ? "OpenAI" : "DeepSeek"} · ${entry.displayName}`])} disabled={disabled} onChange={setSelection} />
-      <FieldDescription>{t("customModel.startingTemplateHint")}</FieldDescription>
-      {suggested === undefined ? null : <Collapsible>
-        <CollapsibleTrigger render={<Button variant="outline" />}>{t("customModel.templateReference")}</CollapsibleTrigger>
-        <CollapsibleContent className="pt-3"><div className="flex flex-col gap-2 text-sm">
-          <p className="text-muted-foreground">{t("customModel.templateReferenceHint")}</p>
-          <p>{t("managementUi.contextTokens")}: {numbers.format(suggested.contextWindow)}; {t("customModel.maxContext")}: {numbers.format(suggested.maxContextWindow ?? suggested.contextWindow)}</p>
-          <p>{t("managementUi.supportsReasoning")}: {suggested.reasoningEfforts === undefined ? t("common.unknown") : suggested.reasoningEfforts.join(", ") || t("managementUi.unsupported")}; {t("managementUi.defaultReasoning")}: {suggested.defaultReasoningEffort ?? t("customModel.unset")}</p>
-          <p>{t("managementUi.imageInput")}: {support(suggested.supportsImages)}</p>
-          <p>{t("managementUi.freeformPatchTool")}: {support(suggested.applyPatchToolType === undefined ? undefined : suggested.applyPatchToolType !== null)}</p>
-          <p>{t("managementUi.toolSearchTool")}: {support(suggested.supportsSearchTool)}</p>
-        </div></CollapsibleContent>
-      </Collapsible>}
-      <Button variant="outline" disabled={disabled || selected === undefined} onClick={() => { if (selected !== undefined && !disabled) onAdd(structuredClone(selected.draft)) }}>{t("managementUi.addModel")}</Button>
-    </>}
+    <p className="text-sm text-muted-foreground">{t("modelAddition.manualHint")}</p>
+    <Button variant="outline" disabled={disabled} onClick={() => { if (!disabled) onAdd(createIndependentModelDraft()) }}>{t("managementUi.addModel")}</Button>
   </FieldGroup>
 }
 
@@ -642,7 +615,6 @@ function ProviderSettingsConfirmationDialog({
   if (pending.transport?.cleartext === true) lines.push(t("managementUi.cleartextUpstream"))
   const warningKeys: Record<string, MessageKey> = {
     "shared-relay-grants-retained": "modelCatalog.grants",
-    "clp-relay-independent": "modelCatalog.independent",
     "historical-references": "modelCatalog.historical",
     "provider-relay-inflight": "modelCatalog.inflight",
   }

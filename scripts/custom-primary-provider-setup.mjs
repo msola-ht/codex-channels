@@ -5,7 +5,6 @@ import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-pr
 import { promptCustomModelCapabilities } from "./custom-model-capability-setup.mjs";
 import { compileResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
-import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
 import { runProviderModelSetup } from "./provider-model-setup.mjs";
 import * as clackPrompts from "@clack/prompts";
@@ -104,7 +103,6 @@ async function runCustomPrimaryProviderForm({
   createClient = createCodexUserConfigClient,
   providerId: editingProviderId,
   catalogKind = "official",
-  loadDraftTemplates = loadCustomModelDraftTemplates,
   probeWebSocket,
   probeModelCapabilities,
 } = {}) {
@@ -395,9 +393,9 @@ async function runCustomPrimaryProviderForm({
     normalizedModel = currentModel ?? previousCatalog.defaultModel;
     output.write("本次仅编辑连接设置，保留已有模型定义与默认模型。\n");
   } else if (custom) {
-    if (previousCatalog?.definitions.length) output.write("已有模型保留现有模板与参数；模板更新请从模型管理选择“对比并更新模型模板”。新模型逐项选择起点模板。\n");
+    if (previousCatalog?.definitions.length) output.write("已有模型保留现有参数；新增请从模型管理选择“按 ID 添加模型”，模板更新使用“对比并更新模型模板”。\n");
     models = await promptResponsesModels(prompts, currentModel ?? previousCatalog?.defaultModel, previousCatalog?.definitions ?? [], output,
-      chatUpstream ? "chat_completions" : "responses", previousCatalog?.definitions.map(entry => entry.id) ?? [], { loadDraftTemplates });
+      chatUpstream ? "chat_completions" : "responses", previousCatalog?.definitions.map(entry => entry.id) ?? [], { allowAdd: !previousCatalog?.definitions.length });
     if (models === undefined) return { action: allowBack ? "back" : "cancel" };
     const model = await prompts.select({ message: "选择默认模型", options: models.map(entry => ({ value: entry.id, label: `${entry.name}（${entry.id}）` })), initialValue: currentModel ?? previousCatalog?.defaultModel ?? models[0].id });
     if (prompts.isCancel(model)) return { action: allowBack ? "back" : "cancel" };

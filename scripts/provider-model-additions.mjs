@@ -1,21 +1,20 @@
 import { createHmac, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { connectHomePath } from "../runtime/connect-home.mjs";
 import { loadManagedModelProviderDefinitions, managedProviderAccountFamilies, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
-import { managedProviderDirectory, managedProviderMarkerPath, withManagedModelCatalogSettings, writeManagedModelProviderCatalogUpdates } from "../runtime/model-provider-runtime.mjs";
-import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
-import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
+import { managedProviderDirectory, managedProviderMarkerPath, withManagedModelCatalogSettings, writeManagedModelProviderCatalogUpdates, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath } from "../runtime/model-provider-runtime.mjs";
+import { createResponsesModelCatalog, readResponsesModelCatalog, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite, compileResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { withThirdPartyLocalTools } from "../runtime/third-party-model-catalog.mjs";
 import { resolveClinePassRequestProfile } from "../runtime/chat-reasoning.mjs";
+import { createIndependentModelDraft, isValidCustomModelId } from "../runtime/model-catalog.mjs";
 import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
-import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import { createCcgCatalogWithTemplateBindings, createOpencodeGoCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
-import { createClinePassCatalog, projectClinePassModels } from "./cline-pass-account-management.mjs";
-import { loadResponsesModelTemplates } from "./responses-model-templates.mjs";
+import { createCcgCatalogWithTemplateBindings, createOpencodeGoCatalogWithTemplateBindings, createClinePassCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
 import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
@@ -35,7 +34,7 @@ const stateError = error => error instanceof ProviderModelManagementError || err
 /** The downloaded source is retained privately; callers select exact candidate IDs only. */
 export async function loadProviderModelAdditionOptions(provider, {
   environment = process.env, signal, manualModel,
-  downloadCatalog = downloadDeepseekCatalog, downloadClineCatalog = downloadClineRelayCatalog, loadTemplates = loadResponsesModelTemplates,
+  downloadCatalog = downloadDeepseekCatalog,
 } = {}) {
   try {
     const deadline = globalThis.AbortSignal.timeout(90_000);
@@ -44,59 +43,63 @@ export async function loadProviderModelAdditionOptions(provider, {
     const state = await readState(provider, environment);
     let models, bindings = {}, source;
     if (manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "inheritFrom")) {
-      if (state.family.storageId !== "clp" || Array.isArray(manualModel)
+      if (Array.isArray(manualModel)
         || Object.keys(manualModel).some(key => !["id", "name", "inheritFrom"].includes(key))
-        || !isManagedProviderModelValid(state.definition, manualModel.id)
-        || !isManagedProviderModelValid(state.definition, manualModel.inheritFrom)
+        || !validModelId(state, manualModel.id) || !validModelId(state, manualModel.inheritFrom)
         || typeof manualModel.name !== "string" || !manualModel.name.trim() || manualModel.name.length > 120 || /\p{Cc}/u.test(manualModel.name)) {
-        throw invalid("invalid-input", "manualModel", "继承仅支持同一 CLP 目录的已有模型；请提供有效的新 ID、名称及来源，不混入独立能力字段");
+        throw invalid("invalid-input", "manualModel", "请提供同一目录中有效的新 ID、名称及继承来源，不混入独立能力字段");
       }
       if (state.catalog.models.some(model => model.slug === manualModel.id)) throw invalid("model-exists", "manualModel", "模型 ID 已存在，新增不能覆盖已有模型");
       const original = state.catalog.models.find(model => model.slug === manualModel.inheritFrom);
-      if (!original) throw invalid("invalid-input", "manualModel", "继承来源不在当前 CLP 目录中，请重新选择");
-      const profile = resolveClinePassRequestProfile(original.slug, original.cline_request_profile);
-      models = [{ ...structuredClone(original), slug: manualModel.id, display_name: manualModel.name.trim(), cline_request_profile: profile }];
-      source = { kind: "inherited", model: original.slug, clineRequestProfile: profile };
+      if (!original) throw invalid("invalid-input", "manualModel", "继承来源不在当前目录中，请重新选择");
+      const profile = state.family.storageId === "clp" ? resolveClinePassRequestProfile(original.slug, original.cline_request_profile) : undefined;
+      if (state.custom) {
+        const model = structuredClone(state.previous.definitions.find(model => model.id === original.slug));
+        delete model.template;
+        models = [{ ...model, id: manualModel.id, name: manualModel.name.trim() }];
+      } else models = [{ ...structuredClone(original), slug: manualModel.id, display_name: manualModel.name.trim(), ...(profile ? { cline_request_profile: profile } : {}) }];
+      source = { kind: "inherited", model: original.slug, ...(profile ? { clineRequestProfile: profile } : {}) };
     } else if (manualModel !== undefined) {
       if (manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "sampling")) {
         throw invalid("invalid-input", "manualModel", "受管模型手动新增不支持默认采样参数；sampling 不会保存，请移除此字段");
       }
-      if (!["ccg", "opencode-go", "clp"].includes(state.family.storageId)
+      if (!["ccg", "opencode-go", "clp", "custom"].includes(state.family.storageId)
         || !manualModel || typeof manualModel !== "object" || Array.isArray(manualModel)
+        || !validModelId(state, manualModel.id)
+        || manualModel.experimentalSupportedTools !== undefined && !Array.isArray(manualModel.experimentalSupportedTools)
+        || manualModel.modelMessages !== undefined && (!manualModel.modelMessages || typeof manualModel.modelMessages !== "object" || Array.isArray(manualModel.modelMessages))
         || !Array.isArray(manualModel.reasoningEfforts) || manualModel.reasoningEfforts.length === 0
         || typeof manualModel.supportsImages !== "boolean" || typeof manualModel.supportsSearchTool !== "boolean"
         || ![null, "freeform"].includes(manualModel.applyPatchToolType) || manualModel.template !== undefined) {
-        throw invalid("invalid-input", "manualModel", "手动新增仅支持 CCG／OCG／CLP；须明确声明思考等级、图片、apply_patch 和 tool_search 能力，不自动关联模板");
+        throw invalid("invalid-input", "manualModel", "须明确声明思考等级、图片、apply_patch 和 tool_search 能力，不自动关联模板");
       }
       const clinePass = state.family.storageId === "clp";
-      if (clinePass && manualModel.supportsImageDetailOriginal !== undefined && manualModel.supportsImageDetailOriginal !== false) {
-        throw invalid("invalid-input", "manualModel", "CLP Chat 桥不支持 original 图片细节");
+      const chat = clinePass || state.upstreamWireApi === "chat_completions";
+      if (chat && manualModel.supportsImageDetailOriginal !== undefined && manualModel.supportsImageDetailOriginal !== false) {
+        throw invalid("invalid-input", "manualModel", "Chat 桥不支持 original 图片细节");
       }
-      if (clinePass && (manualModel.supportsReasoningSummary === true
+      if (chat && (manualModel.supportsReasoningSummary === true
         || manualModel.defaultReasoningSummary !== undefined && manualModel.defaultReasoningSummary !== "none")) {
-        throw invalid("invalid-input", "manualModel", "CLP Chat 桥不支持思考摘要控制");
+        throw invalid("invalid-input", "manualModel", "Chat 桥不支持思考摘要控制");
       }
       try {
-        const catalog = createResponsesModelCatalog([{ ...manualModel, instructions: manualModel.instructions ?? thirdPartyCodingInstructions,
-          ...(clinePass ? { supportsImageDetailOriginal: false } : {}),
+        const catalog = createResponsesModelCatalog([{ ...createIndependentModelDraft(manualModel),
+          ...(chat ? { supportsImageDetailOriginal: false } : {}),
         }], manualModel.id, { allowReasoningToggle: clinePass });
-        models = (clinePass ? withThirdPartyLocalTools(catalog) : catalog).models;
-        validateModel(models[0], state.definition);
+        models = state.custom ? catalog.definitions : withThirdPartyLocalTools(catalog).models;
+        validateModel(models[0], state);
       } catch (error) {
         throw invalid("invalid-input", "manualModel", "手动模型 ID、上下文、默认思考等级或能力定义无效", error);
       }
       if (state.catalog.models.some(model => model.slug === manualModel.id)) throw invalid("model-exists", "manualModel", "模型 ID 已存在，新增不能覆盖已有模型");
       source = { kind: "manual" };
     } else if (state.family.storageId === "clp") {
-      const downloaded = await downloadClineCatalog(environment, operationSignal);
-      operationSignal.throwIfAborted();
-      const projected = projectClinePassModels(downloaded, { requireModels: false });
-      const candidates = projected.models.filter(model => !state.catalog.models.some(saved => saved.slug === model.id));
-      if (candidates.length > maximumCandidates) throw invalid("addition-source-too-large", "models", "新增候选超过 128 个，请缩小源目录后重试");
-      const templates = candidates.some(model => model.id === state.definition.defaultModel) ? await loadTemplates("deepseek") : [];
-      models = candidates.flatMap(model => createClinePassCatalog(templates, downloaded, [model.id]).models);
-      bindings = Object.fromEntries(models.map(model => [model.slug, { source: "cline", model: model.slug }]));
-      source = { kind: "cline", commit: downloaded.commit, downloadedAt: downloaded.downloadedAt };
+      const generated = createClinePassCatalogWithTemplateBindings(JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8")));
+      models = generated.catalog.models;
+      bindings = generated.templateBindings;
+      source = { kind: "deepseek" };
+    } else if (state.custom) {
+      throw invalid("invalid-input", "manualModel", "自定义提供商新增模型必须填写准确 ID 及能力，或选择已有模型继承");
     } else {
       const downloaded = await downloadCatalog(globalThis.fetch, { signal: operationSignal });
       operationSignal.throwIfAborted();
@@ -106,12 +109,14 @@ export async function loadProviderModelAdditionOptions(provider, {
       source = { kind: "deepseek", sha256: downloaded.sha256 };
     }
     operationSignal.throwIfAborted();
-    if (!Array.isArray(models) || models.some(model => !model || typeof model.slug !== "string")
-      || new Set(models.map(model => model.slug)).size !== models.length) throw invalid("addition-source-invalid", "models", "新增来源包含无效或重复的模型 ID");
-    const candidates = models.filter(model => !state.catalog.models.some(saved => saved.slug === model.slug)).map(model => {
-      validateModel(model, state.definition);
-      return { model: model.slug, displayName: model.display_name ?? model.slug, fields: model,
-        ...(source.kind === "inherited" ? { inheritedFrom: source.model, clineRequestProfile: source.clineRequestProfile } : {}),
+    const idOf = model => state.custom ? model?.id : model?.slug;
+    if (!Array.isArray(models) || models.some(model => typeof idOf(model) !== "string")
+      || new Set(models.map(idOf)).size !== models.length) throw invalid("addition-source-invalid", "models", "新增来源包含无效或重复的模型 ID");
+    const candidates = models.filter(model => !state.catalog.models.some(saved => saved.slug === idOf(model))).map(model => {
+      validateModel(model, state);
+      return { model: idOf(model), displayName: state.custom ? model.name : model.display_name ?? model.slug, fields: model,
+        ...(source.kind === "inherited" ? { inheritedFrom: source.model } : {}),
+        ...(source.clineRequestProfile === undefined ? {} : { clineRequestProfile: source.clineRequestProfile }),
         ...(Object.hasOwn(bindings, model.slug) ? { template: bindings[model.slug] } : {}) };
     });
     if (candidates.length > maximumCandidates) throw invalid("addition-source-too-large", "models", "新增候选超过 128 个，请缩小源目录后重试");
@@ -151,7 +156,16 @@ export async function applyProviderModelAddition(input, { environment = process.
     const snapshot = snapshots.get(input.sourceToken);
     if (!snapshot || snapshot.expiresAt <= Date.now()) throw invalid("addition-source-expired", "sourceToken", "新增候选已过期，请重新读取并预览");
     try {
-      writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
+      if (plan.state.custom) {
+        const transaction = writeResponsesModelCatalog(environment, input.provider, plan.customCatalog.definitions,
+          plan.state.previous.defaultModel, plan.state.previous.revision);
+        await withResponsesModelCatalogWrite(transaction, async () => {
+          if (readResponsesModelCatalog(environment, input.provider).content !== transaction.content) throw new Error("新增目录回读不一致");
+          const written = new Set([transaction.path, `${transaction.path}.backup`, `${transaction.path}.pending`]);
+          await assertProviderFileSnapshots(plan.state.snapshots.filter(file => !written.has(file.path)));
+          finishResponsesModelCatalogWrite(transaction);
+        });
+      } else writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
         new Map(plan.state.snapshots.filter(snapshot => !snapshot.path.endsWith(".settings-pending"))
           .map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
     } catch (error) {
@@ -181,11 +195,21 @@ async function buildPlan(input, environment, validate) {
     throw invalid("addition-unavailable", "models", "所选模型不在当前新增候选中，或 ID 已存在");
   }
   if (additions.length && state.catalog.models.length + additions.length > 64) throw invalid("invalid-input", "models", "保存后的模型目录最多允许 64 个模型");
+  if (state.custom) {
+    const customCatalog = compileResponsesModelCatalog([...state.previous.definitions, ...additions.map(candidate => candidate.fields)], state.previous.defaultModel);
+    if (validate && additions.length) await validateModelCatalogWithCodex(customCatalog, environment);
+    await assertProviderFileSnapshots(state.snapshots);
+    if (snapshot.expiresAt <= Date.now() || snapshots.get(input.sourceToken) !== snapshot) throw invalid("addition-source-expired", "sourceToken", "新增候选已过期，请重新读取并预览");
+    const preview = { provider: input.provider, providers: state.providers, additions: structuredClone(additions),
+      revision: revisionOf([state.revision, input.sourceToken, snapshot.source, additions]),
+      willChange: additions.length > 0, activation: additions.length ? "restart-all" : "none" };
+    return { state, preview, customCatalog, models: customCatalog.models.map(model => model.slug) };
+  }
   const catalog = { ...state.catalog, models: [...state.catalog.models, ...additions.map(candidate => candidate.fields)] };
   const bindings = { ...state.bindings, ...Object.fromEntries(additions.filter(candidate => candidate.template).map(candidate => [candidate.model, candidate.template])) };
   const manifest = { ...state.manifest,
     ...(state.manifest.modelTemplates !== undefined || Object.keys(bindings).length ? { modelTemplates: bindings } : {}),
-    ...(state.family.storageId === "clp" && additions.length ? {
+    ...(state.family.storageId === "clp" && state.manifest.cline !== undefined && additions.length ? {
       ...(additions.some(model => model.model === state.definition.defaultModel) ? { source: "deepseek", model: "deepseek-flash" } : {}),
     } : {}),
   };
@@ -204,6 +228,21 @@ async function buildPlan(input, environment, validate) {
 
 async function readState(provider, environment) {
   if (typeof provider !== "string" || !provider || provider.length > 200) throw invalid("invalid-input", "provider", "请选择准确提供商账户");
+  if (provider.startsWith("cp-")) {
+    const { catalogs } = await loadProviderModelCatalogs({ environment });
+    const visible = catalogs.find(catalog => catalog.provider === provider && catalog.canRemove);
+    if (!visible) throw invalid("addition-unavailable", "provider", "请先配置使用独立模型目录的自定义提供商");
+    const previous = readResponsesModelCatalog(environment, provider);
+    const files = snapshotProviderFiles([previous.path, `${previous.path}.backup`, `${previous.path}.pending`,
+      join(codexHomePath(environment), "config.toml"), customPrimaryProviderProfilePath(environment, provider),
+      customSwitchingProviderRegistryPath(environment), customProviderUpstreamMetadataPath(environment, provider)], environment);
+    if (content(files, previous.path) !== previous.content
+      || !isDeepStrictEqual(visible.models.map(model => model.id).sort(), previous.models.map(model => model.slug).sort())) throw stale();
+    const scope = JSON.stringify([codexHomePath(environment), connectHomePath(environment), resolve(environment.CODEX_CONNECT_CONFIG_FILE?.trim() || join(connectHomePath(environment), "config.toml"))]);
+    return { custom: true, family: { storageId: "custom" }, providers: [provider], previous, catalog: previous, snapshots: files, scope,
+      upstreamWireApi: readCustomProviderUpstreamWireApi(environment, provider),
+      revision: revisionOf([provider, scope, visible, files.map(file => [file.path, file.content?.toString("base64") ?? null])]) };
+  }
   const definitions = loadManagedModelProviderDefinitions(environment);
   const definition = definitions.find(entry => entry.id === provider);
   const family = managedProviderAccountFamilies.find(entry => entry.storageId === definition?.storageId);
@@ -234,9 +273,15 @@ async function readState(provider, environment) {
     revision: revisionOf([provider, scope, visible, files.map(file => [file.path, file.content?.toString("base64") ?? null])]) };
 }
 
-function validateModel(model, definition) {
-  if (!isManagedProviderModelValid(definition, model.slug)) throw invalid("addition-source-invalid", "models", "新增模型 ID 不符合该提供商约束");
-  withManagedModelCatalogSettings({ models: [model] }, definition, { model: model.slug, reasoningEffort: model.default_reasoning_level });
+function validModelId(state, id) {
+  return state.custom ? isValidCustomModelId(id)
+    : isManagedProviderModelValid(state.definition, id);
+}
+
+function validateModel(model, state) {
+  if (state.custom) { compileResponsesModelCatalog([model], model.id); return; }
+  if (!isManagedProviderModelValid(state.definition, model.slug)) throw invalid("addition-source-invalid", "models", "新增模型 ID 不符合该提供商约束");
+  withManagedModelCatalogSettings({ models: [model] }, state.definition, { model: model.slug, reasoningEffort: model.default_reasoning_level });
 }
 
 function content(files, path) { return files.find(file => file.path === path)?.content?.toString("utf8"); }
