@@ -528,7 +528,7 @@ CLP 等 Chat 上游仍须通过 `codexc remote -p <提供商>` 连接受管转�
 
 ## 7. 自定义提供商
 
-`codexc setup → 模型与提供商 → 第三方提供商 → 自定义提供商 → 新增 → 自定义模型目录` 与
+`codexc setup → 模型与提供商 → 第三方提供商 → 自定义提供商 → 添加提供商 → 自定义模型目录` 与
 `codexc provider add --custom-models` 提供相同的新增入口；编辑、列表、切换、删除复用
 `provider` 管理链路。WebUI 的 Provider 设置中选择“自定义提供商”。
 此类型使用 `cp-` 开头的 Provider ID（其后 1-61 位 ASCII 字母、数字、`-` 或 `_`）。CLI 添加时选择自定义标识符、或在 WebUI 添加此类型时，`cp-` 前缀固定，只填写后面的名称；例如输入 `llm`，保存为 `cp-llm`。编辑已有提供商时 ID 不变。

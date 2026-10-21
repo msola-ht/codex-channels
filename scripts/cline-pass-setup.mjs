@@ -1,9 +1,9 @@
 import * as clackPrompts from "@clack/prompts";
 import { runProviderModelSetup } from "./provider-model-setup.mjs";
 import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
-import { runManagedProviderModelSetup } from "./managed-provider-model-management.mjs";
-import { clinePassProviderDefinition as definition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
-import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
+import { loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
+import { clinePassProviderDefinition as definition } from "../runtime/model-provider-definitions.mjs";
+import { promptManagedAccountId, promptManagedAccountEdit, confirmManagedAccountEdit } from "./managed-provider-account-prompt.mjs";
 import { promptEnabledProviderModels } from "./provider-model-selection.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
@@ -28,15 +28,16 @@ async function runClinePassSetupOperation({ environment = process.env, prompts =
   const accounts = loadClinePassAccounts(environment);
   const action = await prompts.select({ message: "Cline Pass 官方", options: [
     { value: "configure", label: "添加账户" },
-    ...(accounts.length ? [{ value: "reconfigure", label: "重新配置账户" }, { value: "models", label: "模型管理／本地移除" }, { value: "catalog", label: "发现／添加新模型" }, { value: "default", label: "设置默认账户" }, { value: "remove", label: "移除账户" }] : []),
+    ...(accounts.length ? [
+      { value: "reconfigure", label: "编辑账户", hint: "API Key 与运行模式" },
+      { value: "models", label: "模型管理", hint: "所有 CLP 账户共用目录；默认模型按账户设置" },
+      { value: "default", label: "设置默认账户", hint: "用于渠道默认选择，已有会话保持原账户" },
+      { value: "remove", label: "移除本地账户配置" },
+    ] : []),
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "menu-back" };
   if (action === "models") return runProviderModelSetup({ environment, prompts, output, provider: "clp" });
-  if (action === "catalog") {
-    const accountId = accounts[0].id;
-    return runManagedProviderModelSetup(clinePassProviderId(accountId), { environment, prompts, output });
-  }
   const accountId = action === "configure"
     ? await promptManagedAccountId(prompts, accounts)
     : await prompts.select({ message: "选择账户", options: accounts.map(account => ({ value: account.id, label: `${account.id}${account.default ? "（默认）" : ""}` })) });
@@ -44,24 +45,20 @@ async function runClinePassSetupOperation({ environment = process.env, prompts =
   let result;
   if (action === "remove") {
     const preview = await previewClinePassRemoval(accountId, { environment });
-    if (await prompts.confirm({ message: "移除账户配置与 Key 后，该账户历史会话将不可用；保留备份和历史统计，是否继续？", initialValue: false }) !== true) return { action: "back" };
+    if (await prompts.confirm({ message: `确认移除 CLP 账户 ${accountId} 的本地配置？将停止对应实例，该账户历史会话将不可用；保留共享模型目录、备份和历史统计。${preview.effects.restoresInitialConfig ? "将恢复该账户接管的主配置字段，保留其他设置。" : ""}`, initialValue: false }) !== true) return { action: "back" };
     result = await removeClinePassConfiguration({ accountId, confirmRemove: true, expectedRevision: preview.revision }, { environment });
   } else if (action === "default") {
     result = await setClinePassDefaultAccount(accountId, { environment });
   } else {
-    const apiKey = await prompts.password({ message: "Cline Pass API Key", validate: value => isManagedProviderApiKeyValid(definition, value) ? undefined : "请输入有效 API Key" });
-    if (prompts.isCancel(apiKey)) return { action: "back" };
-    const mode = await prompts.select({ message: "运行模式", options: [{ value: "switching", label: "切换模式", hint: "保留 OpenAI 主实例，使用独立实例" }, { value: "exclusive", label: "固定模式", hint: "修改主实例配置，使用此账户" }] });
-    if (prompts.isCancel(mode)) return { action: "back" };
-    const input = { accountId, apiKey, mode, reconfigure: action === "reconfigure" };
+    const current = loadManagedModelProviderSettings(environment).find(entry => entry.provider === clinePassProviderId(accountId));
+    const edit = await promptManagedAccountEdit({ prompts, current, definition, reconfigure: action === "reconfigure" });
+    if (!edit) return { action: "back" };
+    const input = { accountId, ...edit, reconfigure: action === "reconfigure" };
     const preview = previewClinePassConfiguration(input, { environment });
-    let confirmExclusiveConfigChange = false;
-    if (preview.effects.writesMainConfig) {
-      confirmExclusiveConfigChange = await prompts.confirm({ message: "此操作会修改或恢复 Codex 主配置，是否继续？", initialValue: false }) === true;
-      if (!confirmExclusiveConfigChange) return { action: "back" };
-    }
-    result = await applyClinePassConfiguration({ ...input, confirmExclusiveConfigChange, expectedRevision: preview.revision }, { environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
+    if (!await confirmManagedAccountEdit(preview, { prompts, output })) return { action: "back" };
+    result = await applyClinePassConfiguration({ ...input, confirmExclusiveConfigChange: preview.effects.writesMainConfig, expectedRevision: preview.revision }, { environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
     if (result.action === "back") return result;
+    output.write(result.action === "unchanged" ? "账户配置未变化，无需保存或重启。\n" : `CLP 账户 ${accountId} 配置已保存。\n`);
   }
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   writeCatalogExclusions(output, result.excludedModels ?? []);

@@ -1010,7 +1010,7 @@ export type ManagementAccountSettingsMutationInput =
       accountId: string
       reconfigure?: boolean
       mode?: "switching" | "exclusive"
-      apiKey: string
+      apiKey?: string
       confirmExclusiveConfigChange?: boolean
     }
   | { operation: "deepseek.default" | "deepseek.remove" | "clp.default" | "clp.remove"; accountId: string }

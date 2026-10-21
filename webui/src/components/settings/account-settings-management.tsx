@@ -48,8 +48,8 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   }
   const save = () => {
     if (editor === null) return
-    const common = { accountId: accountId.trim(), mode, apiKey: key, reconfigure: editing }
-    if (editor === "opencodeGo") void management.mutate({ ...common, operation: "opencode.account.configure", apiKey: editing && key === "" ? undefined : key })
+    const common = { accountId: accountId.trim(), mode, apiKey: editing && key === "" ? undefined : key, reconfigure: editing }
+    if (editor === "opencodeGo") void management.mutate({ ...common, operation: "opencode.account.configure" })
     if (editor === "deepseek") void management.mutate({ operation: "deepseek.configure", ...common })
     if (editor === "clinePass") void management.mutate({ operation: "clp.configure", ...common })
   }
@@ -71,7 +71,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
     { id: "actions", header: t("modelManagement.actions"), cell: ({ row: { original: row } }) => <div className="flex flex-wrap gap-2">
       <Button variant="outline" size="sm" disabled={disabled} onClick={() => open(row.platform, row)}>{t("modelManagement.edit")}</Button>
       <Button variant="outline" size="sm" disabled={disabled || row.default} onClick={() => action(row, "default")}>{t("modelManagement.setDefault")}</Button>
-      <Button variant="destructive" size="sm" disabled={disabled} onClick={() => action(row, "remove")}>{t("modelManagement.remove")}</Button>
+      <Button variant="destructive" size="sm" disabled={disabled} onClick={() => action(row, "remove")}>{t("modelManagement.removeAccountConfig")}</Button>
     </div> },
   ]
   return <>
@@ -87,10 +87,10 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
         {editor && <FieldGroup>
           <AccountIdField id="model-account-id" value={accountId} accounts={settings[editor].accounts} reservedIds={editor === "opencodeGo" ? opencodeGoReservedAccountIds : undefined} disabled={disabled} editing={editing} onChange={setAccountId} />
           <ManagedSelect label={t("modelManagement.mode")} value={mode} options={[["switching", t("modelManagement.switching")], ["exclusive", t("modelManagement.exclusive")]]} disabled={disabled} onChange={value => setMode(value as typeof mode)} />
-          <Field data-disabled={disabled}><FieldLabel htmlFor="model-account-key">API Key</FieldLabel><Input id="model-account-key" type="password" autoComplete="new-password" disabled={disabled} value={key} placeholder={editing && editor === "opencodeGo" ? t("managementUi.preserveCredentials") : undefined} onChange={event => setKey(event.target.value)} /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="model-account-key">API Key</FieldLabel><Input id="model-account-key" type="password" autoComplete="new-password" disabled={disabled} value={key} placeholder={editing ? t("managementUi.preserveCredentials") : undefined} onChange={event => setKey(event.target.value)} /></Field>
         </FieldGroup>}
         {management.actionError && <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert>}
-        <DialogFooter><Button variant="outline" disabled={disabled} onClick={close}>{t("modelManagement.cancel")}</Button><Button disabled={disabled || !editor || (!key.trim() && !(editing && editor === "opencodeGo" && key === "")) || (!editing && Boolean(newManagedAccountIdError(accountId, editor ? settings[editor].accounts : [], editor === "opencodeGo" ? opencodeGoReservedAccountIds : undefined)))} onClick={save}>{t("modelManagement.preview")}</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" disabled={disabled} onClick={close}>{t("modelManagement.cancel")}</Button><Button disabled={disabled || !editor || (!key.trim() && !(editing && key === "")) || (!editing && Boolean(newManagedAccountIdError(accountId, editor ? settings[editor].accounts : [], editor === "opencodeGo" ? opencodeGoReservedAccountIds : undefined)))} onClick={save}>{t("modelManagement.preview")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     {pending && <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} loading={management.loading} onConfirm={() => void confirm()} onCancel={cancel} />}

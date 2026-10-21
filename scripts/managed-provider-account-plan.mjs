@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { parse } from "smol-toml";
-import { customSwitchingProviderRegistryPath, loadCustomSwitchingProviderIds, loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
+import { customSwitchingProviderRegistryPath, loadCustomSwitchingProviderIds, loadPrimaryModelProvider, loadConfiguredProviderCredential } from "../runtime/model-provider-runtime.mjs";
+import { isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { managedPrimaryCredentialPath } from "../runtime/managed-provider-credentials.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { join } from "node:path";
@@ -9,6 +10,29 @@ import { snapshotProviderFiles } from "./managed-provider-files.mjs";
 
 // A private process key prevents exposed revisions from becoming credential guesses.
 const revisionKey = randomBytes(32);
+
+// Only the public fields belong in a preview; apiKey stays inside the management boundary.
+export function managedAccountConfigurationEdit(input, previous, definition, environment) {
+  if (input.reconfigure !== undefined && typeof input.reconfigure !== "boolean") {
+    throw new AccountManagementError("invalid-input", "reconfigure", "reconfigure 必须为布尔值");
+  }
+  const mode = input.mode === undefined ? previous?.mode ?? "switching" : input.mode;
+  if (mode !== "switching" && mode !== "exclusive") throw new AccountManagementError("invalid-mode", "mode", "账户运行模式无效");
+  if (previous && !previous.models.some(model => model.model === previous.model)) {
+    throw new AccountManagementError("account-default-model-missing", "model", "账户默认模型不在当前目录中，请先在模型管理中设置有效的账户默认模型");
+  }
+  let currentApiKey;
+  if (previous) {
+    try { currentApiKey = loadConfiguredProviderCredential(definition.id, environment).apiKey; }
+    catch {
+      if (input.apiKey === undefined) throw new AccountManagementError("invalid-api-key", "apiKey", "现有 API Key 无法安全读取，请显式填写新 Key");
+    }
+  }
+  const apiKey = input.apiKey === undefined ? currentApiKey : input.apiKey;
+  if (!isManagedProviderApiKeyValid(definition, apiKey)) throw new AccountManagementError("invalid-api-key", "apiKey", "请输入有效 API Key；新增账户必须填写 Key");
+  const willChange = previous === undefined || mode !== previous.mode || apiKey !== currentApiKey;
+  return { apiKey, mode, previousMode: previous?.mode, credentialAction: apiKey === currentApiKey ? "preserve" : "replace", willChange };
+}
 
 export function assertManagedAccountMode(mode, definition, environment, loadPrimary = loadPrimaryModelProvider) {
   if (mode !== "exclusive") return;

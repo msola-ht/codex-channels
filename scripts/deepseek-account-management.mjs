@@ -10,21 +10,21 @@ import {
   deepseekAccountDirectory, deepseekAccountMarkerPath, deepseekAccountsFilePath,
   loadDeepseekAccounts, validateDeepseekAccounts,
 } from "../runtime/deepseek-accounts.mjs";
-import { deepseekAccountDefinition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
+import { deepseekAccountDefinition } from "../runtime/model-provider-definitions.mjs";
 import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
 import {
   loadManagedModelProviderSettings,
   managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
-import { applyProviderFileUpdates, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
+import { applyProviderFileUpdates, assertProviderFileSnapshots, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, resolveManagedCatalogModel, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
 import { createManagedDeepseekCatalog, downloadDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
 import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
-import { assertManagedAccountMode, snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision } from "./managed-provider-account-plan.mjs";
+import { assertManagedAccountMode, snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision, managedAccountConfigurationEdit } from "./managed-provider-account-plan.mjs";
 
 export function deepseekAccountPaths(environment, accountId) {
   const definition = deepseekAccountDefinition(accountId);
@@ -62,9 +62,11 @@ function readBackup(path, environment) {
 }
 
 export function previewDeepseekAccountConfiguration(input, { environment = process.env } = {}) {
+  return deepseekConfigurationPlan(input, environment).preview;
+}
+
+function deepseekConfigurationPlan(input, environment) {
   const definition = deepseekAccountDefinition(input.accountId);
-  const mode = input.mode ?? "switching";
-  if (!["switching", "exclusive"].includes(mode)) throw new AccountManagementError("invalid-mode", "mode", "DeepSeek 模式无效");
   const accounts = loadDeepseekAccounts(environment);
   const previous = accounts.find((account) => account.id === input.accountId);
   if (Boolean(previous) !== (input.reconfigure === true)) {
@@ -74,25 +76,26 @@ export function previewDeepseekAccountConfiguration(input, { environment = proce
   const configured = previous ? loadManagedModelProviderSettings(environment)
     .find((provider) => provider.provider === definition.id) : undefined;
   if (previous && !configured) throw new AccountManagementError("provider-state-unavailable", "accountId", "DeepSeek 账户配置不完整，请先恢复缺失文件");
+  const { apiKey, ...edit } = managedAccountConfigurationEdit(input, configured, definition, environment);
+  const { mode, willChange } = edit;
   assertManagedAccountMode(mode, definition, environment);
-  return {
+  return { apiKey, preview: {
     revision: managedAccountRevision(snapshotManagedAccountFiles(Object.values(deepseekAccountPaths(environment, input.accountId)), definition, environment)),
     operation: previous ? "reconfigure" : "add",
     account: { id: input.accountId, provider: definition.id, exists: Boolean(previous), default: previous?.default ?? accounts.length === 0 },
-    mode,
-    effects: { writesMainConfig: mode === "exclusive" || configured?.mode === "exclusive", writesIsolatedProfile: mode === "switching", downloadsCatalog: !existsSync(deepseekAccountPaths(environment, input.accountId).catalog) },
-    confirmation: { required: mode === "exclusive" || configured?.mode === "exclusive", field: "confirmExclusiveConfigChange" },
-    activation: "restart-all",
-  };
+    ...edit,
+    effects: { writesMainConfig: willChange && (mode === "exclusive" || configured?.mode === "exclusive"), writesIsolatedProfile: willChange && mode === "switching", downloadsCatalog: !existsSync(deepseekAccountPaths(environment, input.accountId).catalog) },
+    confirmation: { required: willChange && (mode === "exclusive" || configured?.mode === "exclusive"), field: "confirmExclusiveConfigChange" },
+    activation: willChange ? "restart-all" : "none",
+  } };
 }
 
 export async function applyDeepseekAccountConfiguration(input, options = {}) {
   const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
-    const preview = previewDeepseekAccountConfiguration(input, { environment });
+    const { preview, apiKey } = deepseekConfigurationPlan(input, environment);
     assertManagedAccountRevision(input.expectedRevision, preview.revision);
     const definition = deepseekAccountDefinition(input.accountId);
-    if (!isManagedProviderApiKeyValid(definition, input.apiKey)) throw new AccountManagementError("invalid-api-key", "apiKey", "DeepSeek API Key 无效");
     if (preview.effects.writesMainConfig && input.confirmExclusiveConfigChange !== true) throw new AccountManagementError("confirmation-required", "confirmExclusiveConfigChange", "修改 Codex 主配置前必须明确确认");
     const paths = deepseekAccountPaths(environment, input.accountId);
     const snapshots = snapshotManagedAccountFiles(Object.values(paths), definition, environment);
@@ -131,8 +134,12 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     }
     await validateModelCatalogWithCodex(catalog, environment);
     const model = resolveManagedCatalogModel(catalog, definition, previous?.model);
+    if (!preview.willChange) {
+      await assertProviderFileSnapshots(snapshots);
+      return { ...preview, action: "unchanged", model };
+    }
     const configured = createManagedProviderConfiguration(current, initial.config, definition, {
-      mode: preview.mode, previousMode: previous?.mode, apiKey: input.apiKey,
+      mode: preview.mode, previousMode: previous?.mode, apiKey,
       previousProfile: snapshots.find(item => item.path === paths.profile)?.content?.toString("utf8"),
       catalogPath: paths.catalog, catalog, model,
     });
