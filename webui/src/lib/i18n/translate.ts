@@ -60,6 +60,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   "catalog-source-invalid": "modelCatalog.sourceInvalid",
   "readback-failed": "settingsUi.writeUnconfirmed",
   management_unavailable: "settingsUi.unavailable",
+  gateway_config_saved_cleanup_failed: "settingsUi.savedLockReleaseFailed",
   codex_settings_unavailable: "settingsUi.codexUnavailable",
   provider_state_unavailable: "settingsUi.providerUnavailable",
   official_models_cache_unavailable: "openAiModelCatalog.unavailable",

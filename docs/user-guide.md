@@ -62,6 +62,7 @@ Gateway 配置位于：
 配置模型转发监听，最后询问是否执行 `codexc install`。可选功能默认取值沿用当前状态：首次初始化默认关闭，
 已有配置未显式设置 WebUI 时按“未设置即继续启动”的语义给出默认值；WebUI 按所选值写入
 `[webui] enabled`，调用详情记录只在取值变化时写入，模型转发监听选“是”进入监听设置、选“否”保持现状。
+可选功能确认绑定展示时的配置修订，确认期间其他入口修改配置会使本次确认失效；重新运行向导后再选择。WebUI 与调用详情记录在全部确认结束后才保存，取消确认不会写入这两项。
 接入向导完成单项后返回类别菜单，可继续配置 Provider、通讯渠道或项目技能；选择“完成接入”后才继续
 Codex 设置、可选功能与安装步骤。Codex 设置可连续选择“Codex 新会话与用户偏好”（统一配置默认值与用户偏好，也可单独调整默认审批方式）、
 “一键设为官方 TUI 身份”和“服务时区”，复用日常设置的校验与保存流程；默认值与用户偏好的可见性沿用当前 Provider 限制。
@@ -82,6 +83,7 @@ WebUI 启动失败会报告核心服务已安装、WebUI 未完成，并以失�
 `codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；完成单项后可继续选择，选择“完成接入”正常退出，选择“取消”或在类别菜单按 Esc/Ctrl+C 取消退出。`setup --jsonl` 的渠道结果保留 `warnings`，飞书另返回 `applicationConfiguration`，配置保存成功但存在降级时应按这些字段处理。`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 CLI 和 WebUI 的 Gateway 设置在读取和保存前均校验当前配置结构；不支持的版本、未知字段或非法值会阻止操作并保留原文件，不以默认显示值掩盖错误。请先修复配置，再重新进入设置。
+渠道保存若返回 `gateway-config-lock-release-failed` 告警，配置已经保存，先核对配置和锁状态，再按原要求激活，不要重复保存。普通 Gateway 设置也会明确区分已保存后的锁释放失败；不能把后续告警当作配置未写入。
 
 Plugin 查询与调用不再需要 Gateway 功能开关。旧配置中的 `[experimental].plugin_api`（TOML 写法为
 `[experimental]` 表下的 `plugin_api`）及仅含该字段的表已不受支持，不会被自动忽略或迁移。
@@ -475,6 +477,7 @@ App Server 和 Gateway 后加载关闭状态；更新代码本身不会停止现
 
 需要诊断时使用 `codexc app status [--provider <Provider-ID>]`；非交互启用或指定 Windows 桥端口时，
 使用 `codexc app enable [--port <端口>]`，再执行 `codexc app`。
+首次启用确认会显示目标 Provider 与连接方式，并绑定当时的配置和运行目标；确认期间配置或目标变化会中止操作，需重新运行命令。配置已保存后的激活失败单独报告；恢复前再次核对，避免覆盖其他入口的新修改。
 `--port` 仅适用于 Windows，接受 1 到 65535 的十进制整数；macOS 使用受管 stdio，拒绝端口参数。Linux 上的启用、禁用与启动会在读取配置前报告不支持，`app status` 仍可只读查询。
 关闭功能前同样先完全退出 App，再执行：
 

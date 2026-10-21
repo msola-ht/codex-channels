@@ -52,7 +52,7 @@ export interface FeishuSetupSessionResult {
     | "updated"
     | "unchanged"
     | "failed";
-  warnings: Array<{ code: "application-configuration-failed" }>;
+  warnings: Array<{ code: "application-configuration-failed" | "gateway-config-lock-release-failed" }>;
 }
 
 export class FeishuSetupSessionError extends Error {

@@ -82,6 +82,15 @@ export interface GatewayConfigDocument {
 }
 
 export class GatewayConfigConflictError extends Error {}
+/** The operation returned successfully; its result does not imply a file commit. */
+export class GatewayConfigLockReleaseError<T = unknown> extends Error {
+  constructor(result: T, cause: unknown);
+  readonly result: T;
+}
+/** The atomic Gateway writer completed before configuration lock release failed. */
+export class GatewayConfigWriteCommittedError extends Error {
+  constructor(cause: unknown);
+}
 export class GatewayConfigValidationError extends Error {
   constructor(message: string, issues: readonly { path: readonly PropertyKey[]; code: string }[]);
   readonly issues: { path: PropertyKey[]; code: string }[];

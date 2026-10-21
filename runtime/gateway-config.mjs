@@ -33,6 +33,23 @@ export class GatewayConfigConflictError extends Error {
   }
 }
 
+/** The synchronous operation returned; this does not establish a file commit. */
+export class GatewayConfigLockReleaseError extends Error {
+  constructor(result, cause) {
+    super("配置锁内操作已完成，但配置锁释放失败；请先检查当前状态，勿重复执行写入", { cause });
+    this.name = "GatewayConfigLockReleaseError";
+    Object.defineProperty(this, "result", { value: result });
+  }
+}
+
+/** Only emitted after the atomic Gateway writer has returned successfully. */
+export class GatewayConfigWriteCommittedError extends Error {
+  constructor(cause) {
+    super("Gateway 配置已保存，但配置锁释放失败；请先检查配置和锁状态，勿重复保存，仍需按原要求激活配置", { cause });
+    this.name = "GatewayConfigWriteCommittedError";
+  }
+}
+
 /** Structured validation metadata; never carries rejected input values. */
 export class GatewayConfigValidationError extends Error {
   constructor(message, issues) {
@@ -406,27 +423,34 @@ export function writeGatewayConfig(configPath, document, { maximumBytes } = {}) 
       securePrivateDirectorySync(parent);
     }
   }
-  return withGatewayConfigLock(configPath, () => {
-    const generated = stringify(document);
-    const source = sourceByDocument.get(document);
-    if (source !== undefined && currentGatewayConfig(configPath) !== source.content) {
-      throw new GatewayConfigConflictError();
-    }
-    const content = source === undefined
-      ? generated
-      : preserveTomlComments(
-          source.content,
-          generated,
-          source.workspaceIds,
-          workspaceIds(document),
-        );
-    if (maximumBytes !== undefined && Buffer.byteLength(content, "utf8") > maximumBytes) throw new Error("配置文件超过容量上限，未保存");
-    writePrivateFileAtomicSync(configPath, content);
-    sourceByDocument.set(document, {
-      content,
-      workspaceIds: workspaceIds(document),
+  try {
+    return withGatewayConfigLock(configPath, () => {
+      const generated = stringify(document);
+      const source = sourceByDocument.get(document);
+      if (source !== undefined && currentGatewayConfig(configPath) !== source.content) {
+        throw new GatewayConfigConflictError();
+      }
+      const content = source === undefined
+        ? generated
+        : preserveTomlComments(
+            source.content,
+            generated,
+            source.workspaceIds,
+            workspaceIds(document),
+          );
+      if (maximumBytes !== undefined && Buffer.byteLength(content, "utf8") > maximumBytes) throw new Error("配置文件超过容量上限，未保存");
+      writePrivateFileAtomicSync(configPath, content);
+      sourceByDocument.set(document, {
+        content,
+        workspaceIds: workspaceIds(document),
+      });
     });
-  });
+  } catch (error) {
+    if (error instanceof GatewayConfigLockReleaseError) {
+      throw new GatewayConfigWriteCommittedError(error);
+    }
+    throw error;
+  }
 }
 
 function currentGatewayConfig(configPath) {
@@ -476,7 +500,7 @@ export function withGatewayConfigLock(configPath, operation) {
   }
   activeGatewayConfigLocks.delete(normalizedPath);
   if (operationFailed) throw operationError;
-  if (releaseError !== undefined) throw releaseError;
+  if (releaseError !== undefined) throw new GatewayConfigLockReleaseError(result, releaseError);
   return result;
 }
 

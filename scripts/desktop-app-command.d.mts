@@ -15,7 +15,7 @@ export interface DesktopAppCommandOptions {
   writeMessage?: (kind: "success" | "failure" | "note", message: string) => void;
   inspectDesktopApp?: (options?: { signal?: AbortSignal }) => DesktopAppInspection | Promise<DesktopAppInspection>;
   restartAppServer?: () => Promise<void>;
-  confirmEnable?: () => boolean | Promise<boolean>;
+  confirmEnable?: (preview: { provider: string; port: number | null }) => boolean | Promise<boolean>;
   probeBridge?: (endpoint: string, options?: { signal?: AbortSignal }) => Promise<boolean>;
   inspectSupervisorState?: typeof import("../runtime/app-server-supervisor.mjs").inspectAppServerSupervisorState;
   acquireProviderLease?: typeof import("../runtime/app-server-supervisor.mjs").acquireAppServerProviderLease;

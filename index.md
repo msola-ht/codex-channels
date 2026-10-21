@@ -57,7 +57,7 @@
 
 ## 验收与开放补证
 
-- [`docs/cli-review.md`](docs/cli-review.md)：CLI 两轮审查及 Sol/Astra 复核记录；25 条发现编排为六批修复，R1 已实施并进入提交收尾，R2–R6 待实施，附逐批证据和未观察边界。
+- [`docs/cli-review.md`](docs/cli-review.md)：CLI 两轮审查及 Sol/Astra 复核记录；25 条发现编排为六批修复，附逐批实施、复查、提交证据和未观察边界。
 - [`docs/ipc-readiness-development.md`](docs/ipc-readiness-development.md)：IPC 读取与启动恢复改造的阶段计划、关联审查、观察证据及平台限制。
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信的持续验收入口，分别记录已观察能力与未完成平台边界。
 - [`docs/codex-desktop-app-acceptance.md`](docs/codex-desktop-app-acceptance.md)：Desktop 专项验收主记录，保留 Linux 证据及 macOS、Windows 等开放事项。
