@@ -162,7 +162,7 @@ UA 缓存键包含 Socket、binary 和客户端版本，按源码复核目标改
 未调用外部模型，没有计费。未另等 30 秒上传超时，未观察 Windows/macOS；现有阶段期限不变。休眠聚合路径没有重新启用，其 Guard 嵌套退出与代理准入仍是启用前必要工作，不能套用本节结果声称已解决。
 
 该段保留 P9 当时的上限与观察。当前请求契约已调整为单请求最多 48 MiB、Chat 桥共享 192 MiB
-保留额度且最多四项准备，以 [Provider Proxy](../src/provider-proxy/README.md) 和
+保留额度，可同时容纳四个最大请求，小请求按声明长度准入；以 [Provider Proxy](../src/provider-proxy/README.md) 和
 [DeepSeek 图片识别](deepseek.md#图片识别)为准。
 
 ### P10：集成结论与交付状态

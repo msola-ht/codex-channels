@@ -443,7 +443,7 @@ async function runController(plan, action, environment, options, isolateSignals 
   const child = spawn(plan.shell, args, {
     ...controllerOptions,
     // Finish the current service-manager operation before cancellation recovery.
-    detached: isolateSignals,
+    detached: isolateSignals && environment.CODEX_CONNECT_MANAGEMENT_TASK !== "1",
     windowsHide: true,
   });
   const readers = [];

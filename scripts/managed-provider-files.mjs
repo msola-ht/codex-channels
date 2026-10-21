@@ -1,7 +1,13 @@
 import { unlinkSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
+import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { parse } from "smol-toml";
 
-import { createProviderFileAccess, createProviderFileReader } from "../runtime/provider-file-access.mjs";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import { assertCodexConfigHasNoPlaintextCredentials, createProviderFileAccess, createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { managedPrimaryCredentialPath } from "../runtime/managed-provider-credentials.mjs";
+import { createCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
 
 const maximumPrivateConfigBytes = 2_097_152;
 
@@ -32,6 +38,9 @@ function readOptionalFile(read, path) {
 }
 
 export async function replaceOptionalProviderFile(path, content, environment) {
+  if (createProviderFileAccess(environment).isMainConfig(path)) {
+    throw new Error("Codex 主配置必须通过事务快照的版本化字段编辑写入");
+  }
   if (content === undefined) return removeOptionalProviderFile(path);
   await createProviderFileAccess(environment).write(path, content);
 }
@@ -45,12 +54,116 @@ export async function removeOptionalProviderFile(path) {
 }
 
 export function snapshotProviderFiles(paths, environment) {
-  const { read, write } = createProviderFileAccess(environment);
+  const { read, write, isMainConfig } = createProviderFileAccess(environment);
   return [...new Set(paths)].map((path) => {
-    const readCurrent = () => readOptionalFile(read, path);
-    const writeCurrent = content => content === undefined ? removeOptionalProviderFile(path) : write(path, content);
+    const readFile = () => readOptionalFile(read, path);
+    const originalContent = readFile();
+    const state = { content: originalContent, originalContent, uncertain: false };
+    const readCurrent = () => {
+      if (state.uncertain) throw new Error("Codex 主配置保存结果无法确认；已保留私有文件、凭据及备份，请先核对主配置，勿自动重试或恢复备份");
+      return readFile();
+    };
+    const writeCurrent = isMainConfig(path)
+      ? content => writeMainConfigEdits(content, state, readFile, environment)
+      : content => content === undefined ? removeOptionalProviderFile(path) : write(path, content);
     return { path, content: readCurrent(), readCurrent, writeCurrent };
   });
+}
+
+/** The upstream writer owns version checking and field persistence; never replace its file. */
+async function writeMainConfigEdits(content, state, readFile, environment) {
+  if (state.uncertain) throw new Error("Codex 主配置存在未确认写入，拒绝自动重放");
+  const before = parseMainConfig(state.content);
+  const after = parseMainConfig(content);
+  assertCodexConfigHasNoPlaintextCredentials(content ?? "");
+  // A rollback reverses only our published fields, including when readback saw
+  // an unrelated upstream edit. Never turn the old full snapshot into a restore.
+  const plannedChanges = state.reverseChanges && isDeepStrictEqual(after, parseMainConfig(state.originalContent))
+    ? state.reverseChanges : configChanges(before, after);
+  // This is the sole path field edited by managed-account main-config plans.
+  // RPC validation requires an absolute value, including a restored catalog.
+  const changes = plannedChanges.map(change => change.segments.length === 1
+    && change.segments[0] === "model_catalog_json" && typeof change.value === "string"
+    ? { ...change, value: mainCatalogPath(change.value, environment) } : change);
+  if (changes.length === 0) return;
+  await withCodexUserConfigClient(environment, createCodexUserConfigClient, undefined, async client => {
+    if (!sameOptionalContent(readFile(), state.content)) {
+      throw new Error("Codex 主配置已变化，请重新预览并确认");
+    }
+    const current = await client.readUserConfigSnapshot();
+    // config/read resolves relative paths. Bind its version to a stable raw
+    // snapshot instead of comparing normalized RPC values with TOML literals.
+    if (!sameOptionalContent(readFile(), state.content)) {
+      throw new Error("Codex 主配置已变化，请重新预览并确认");
+    }
+    let writeError;
+    try {
+      await client.writeUserConfigEdits(changes.map(({ segments, value }) => ({
+        keyPath: segments.map(segment => JSON.stringify(segment)).join("."), value,
+      })), { expectedVersion: current.version });
+    } catch (error) { writeError = error; }
+    try {
+      // A response alone does not prove the multi-file publication succeeded.
+      const observed = readFile();
+      await client.readUserConfigSnapshot();
+      const actual = readFile();
+      if (!sameOptionalContent(observed, actual)) {
+        throw new Error("Codex 主配置回读期间发生变化");
+      }
+      const saved = parseMainConfig(actual);
+      if (changes.every(({ segments, value }) => isDeepStrictEqual(configAt(saved, segments), value === null ? undefined : value))) {
+        state.content = actual;
+        state.reverseChanges = changes.map(({ segments }) => ({ segments, value: configAt(before, segments) ?? null }));
+        return;
+      }
+      if (writeError && isDeepStrictEqual(saved, before)) throw writeError;
+      state.uncertain = true;
+      throw new Error("Codex 主配置字段保存结果不一致；已保留私有文件、凭据及备份，请先核对后再操作");
+    } catch (error) {
+      if (error === writeError) throw error;
+      state.uncertain = true;
+      throw new AggregateError([...(writeError ? [writeError] : []), error],
+        "Codex 主配置保存结果无法确认；已保留私有文件、凭据及备份，未自动回滚或重试", { cause: error });
+    }
+  }, { preserveOperationResult: true });
+}
+
+function mainCatalogPath(value, environment) {
+  // Match the locked CLI's home-relative forms; ~user remains an ordinary path.
+  const suffix = value === "~" ? "" : value.startsWith("~/") ? value.slice(2).replace(/^\/+/u, "")
+    : process.platform === "win32" && value.startsWith("~\\") ? value.slice(2).replace(/^\\+/u, "") : null;
+  if (suffix !== null) {
+    const home = (process.platform === "win32" ? environment.USERPROFILE : environment.HOME) || homedir();
+    return resolve(home, suffix);
+  }
+  return resolve(codexHomePath(environment), value);
+}
+
+function parseMainConfig(content) {
+  try { return content === undefined ? {} : parse(Buffer.from(content).toString("utf8")); }
+  catch { throw new Error("Codex 主配置无法安全解析，未执行写入"); }
+}
+
+function configChanges(before, after, segments = []) {
+  if (isDeepStrictEqual(before, after)) return [];
+  // A removed Provider/Profile entry must disappear as a unit: clearing its
+  // leaves would leave an empty, invalid Provider. Its inverse uses the same
+  // entry boundary when publishing a new Provider. Keep the parent collection.
+  if (after === undefined && segments.length >= 2) return [{ segments, value: null }];
+  if (before === undefined && segments.length >= 2) return [{ segments, value: after }];
+  const table = value => value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+  if ((before === undefined || table(before)) && (after === undefined || table(after))) {
+    const keys = new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]);
+    if (keys.size > 0) return [...keys].flatMap(key => configChanges(before?.[key], after?.[key], [...segments, key]));
+  }
+  return [{ segments, value: after ?? null }];
+}
+
+function configAt(config, segments) {
+  let value = config;
+  for (const segment of segments) value = value?.[segment];
+  return value;
 }
 
 export async function assertProviderFileSnapshots(snapshots) {

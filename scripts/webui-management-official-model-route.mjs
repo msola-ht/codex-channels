@@ -105,11 +105,12 @@ export async function routeOfficialModelManagement({ environment, maximumBodyByt
         revision: confirmation.resourceRevision,
         previewId: confirmation.previewFingerprint,
         confirmationId: fingerprintManagementValue(body.confirmationToken),
-        phase: "completed", resultCode: "updated", recovery: result.consistency === "confirmed" ? "none" : "re-read",
+        phase: "completed", resultCode: !refresh && result.status === "unchanged" ? "unchanged" : "updated", recovery: result.consistency === "confirmed" ? "none" : "re-read",
       });
     } catch {
       auditStatus = "degraded";
-      webuiLogger.error({ event: "official-model-catalog.audit_failed", operation }, "模型缓存已保存，但审计记录失败");
+      webuiLogger.error({ event: "official-model-catalog.audit_failed", operation }, !refresh && result.status === "unchanged"
+        ? "模型缓存无变化，但审计记录失败" : "模型缓存已保存，但审计记录失败");
     }
     sendManagementJson(response, 200, { ...result, auditStatus });
   })();

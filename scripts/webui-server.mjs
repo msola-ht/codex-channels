@@ -75,7 +75,7 @@ import {
   ManagementOperationError,
   closeManagementSnapshotReads,
 } from "./webui-management-operations.mjs";
-import { routeTrafficApi, routeTrafficEvents } from "./webui-traffic-route.mjs";
+import { routeTrafficApi, routeTrafficEvents, waitForTrafficReads } from "./webui-traffic-route.mjs";
 import {
   applyProviderSettingsMutation,
   previewProviderSettingsMutation,
@@ -196,9 +196,12 @@ export function createWebuiServer({
   });
   server.on("close", () => gatewayConfigRead.controller?.abort());
   return { host, server, staticDir, token, closeNotifications: async () => {
+    management.shutdownController.abort();
     gatewayConfigRead.controller?.abort();
     const results = await Promise.allSettled([
       Promise.resolve().then(() => closeQueueStreams(management)),
+      management.tasks.close(),
+      waitForTrafficReads(management.shutdownController.signal),
       metricsExports.close(), closeDeliveryReaders(), closeDeliveryJournals(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
       closeOfficialModelOperations(management),
       closeAppServerUserAgentReads(management.appServerUserAgentCache),
@@ -206,7 +209,8 @@ export function createWebuiServer({
     ]);
     if (results.some(result => result.status === "rejected")) throw new Error("WebUI 后台资源退出未确认");
   }, waitForNotificationsExit: async () => {
-    await Promise.all([closeQueueStreams(management), closeAppServerUserAgentReads(management.appServerUserAgentCache), metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management, { waitForExit: true }),
+    await waitForTrafficReads(management.shutdownController.signal);
+    await Promise.all([management.tasks.waitForExit(), closeQueueStreams(management), closeAppServerUserAgentReads(management.appServerUserAgentCache), metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management, { waitForExit: true }),
       closeManagementSnapshotReads(management).then(() => closeCodexUserConfigClients())]);
   } };
 }
@@ -268,7 +272,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         openQueueStream(management, response, (signal, send) => watchQueueChanges(path(resolveGatewayConfigPath(environment)), signal, send));
         return;
       }
-      await routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports);
+      await routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports, management.shutdownController.signal);
       return;
     }
     serveStatic(staticDir, url.pathname, response);
@@ -358,6 +362,7 @@ function createManagementState(
     appServerUserAgentCache: { expiresAtMs: 0, value: null },
     snapshotReads: new Set(),
     snapshotReadsClosed: false,
+    shutdownController: new AbortController(),
     serviceStatusCache,
     providerStateCache,
     loadProviderState,
@@ -513,7 +518,7 @@ function readJsonMetadata(path) {
   }
 }
 
-async function routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports) {
+async function routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports, shutdownSignal) {
   const path = url.pathname;
   if (!path.startsWith(`${API_PREFIX}/`)) {
     throw new ApiError(404, "not_found", `未知 API：${path}`);
@@ -597,7 +602,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     await sendAccountSnapshots(environment, response, openMetricsStore);
     return;
   }
-  if (await routeTrafficApi({ apiPath, environment, request, response, url })) return;
+  if (await routeTrafficApi({ apiPath, environment, request, response, url, signal: shutdownSignal })) return;
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
 }
 function openMetricsStore(environment, endAtMs = Date.now()) {

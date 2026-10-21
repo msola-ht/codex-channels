@@ -22,7 +22,7 @@ export const TRAFFIC_USAGE = `用法：codexc traffic [选项] [V2 session 目�
 
 清理使用 codexc cleanup traffic -h 查看预览与确认删除的要求。`;
 
-export const TRAFFIC_CLEANUP_USAGE = `用法：codexc cleanup traffic [--dir 目录] [--confirm]
+export const TRAFFIC_CLEANUP_USAGE = `用法：codexc cleanup traffic [--dir 目录] [--confirm] [--expected-fingerprint 指纹]
 
 预览或清空转储目录中可识别的全部 V2 session。默认只预览；加 --confirm 才会
 删除，删除前必须停止全部 App Server 与 Relay。未知文件和目录不会删除。
@@ -30,6 +30,7 @@ export const TRAFFIC_CLEANUP_USAGE = `用法：codexc cleanup traffic [--dir 目
 选项：
   --dir <目录>         指定预览目录；确认删除只允许当前配置的数据目录下的 traffic
   --confirm            确认永久删除预览范围内的全部转储
+  --expected-fingerprint <SHA-256>  仅清理与已确认预览完全一致的范围
   -h, --help           显示本帮助`;
 
 export function parseTrafficCommandArgs(args) {
@@ -97,7 +98,7 @@ export function parseTrafficCommandArgs(args) {
 }
 
 export function parseTrafficCleanupArgs(args) {
-  const options = { confirm: false, directory: undefined };
+  const options = { confirm: false, directory: undefined, expectedFingerprint: undefined };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -109,6 +110,13 @@ export function parseTrafficCleanupArgs(args) {
     }
     if (argument === "--dir") {
       options.directory = resolve(requiredValue(args[index + 1], "--dir"));
+      index += 1;
+      continue;
+    }
+    if (argument === "--expected-fingerprint") {
+      const value = requiredValue(args[index + 1], argument);
+      if (!/^[a-f0-9]{64}$/u.test(value)) throw new Error("清理预览指纹必须是 SHA-256");
+      options.expectedFingerprint = value;
       index += 1;
       continue;
     }

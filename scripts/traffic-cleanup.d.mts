@@ -1,4 +1,5 @@
 export interface TrafficCleanupPreview {
+  fingerprint: string;
   bytes: number;
   directory: string;
   labels: number;
@@ -21,7 +22,7 @@ export interface TrafficCleanupDependencies {
 }
 
 export interface TrafficCleanupPlan extends TrafficCleanupPreview {
-  fingerprint: string | null;
+  fingerprint: string;
 }
 
 export function runTrafficCleanup(

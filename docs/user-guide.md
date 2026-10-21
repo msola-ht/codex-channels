@@ -735,7 +735,7 @@ codexc cleanup
 私有权限保护成功后才移除当前库；备份失败时原库保留，已生成的备份不自动覆盖或删除，需检查后处理。
 三种指标维护都要求服务状态明确；无法确认停止状态时不会把它当成已停止继续操作。
 
-指标删除提交后，VACUUM、剩余数量读取、数据库关闭、锁释放或 Gateway 恢复失败不会撤销删除。直接命令返回非零，同时保留已提交数量和备份位置；提交是否成功无法确认时明确显示“未确认”，不要重复清理。WebUI 维护任务目前只显示退出状态，不展示子进程明细；可用 `codexc metrics status --json` 获取 `databasePath`，在同目录核对 `.cleanup-<时间>.bak` 或 `.<精确ProviderID>-prune-<时间>.bak` 备份及当前记录。Gateway 恢复失败按提示运行 `codexc start gateway`。
+指标删除提交后，VACUUM、剩余数量读取、数据库关闭、锁释放或 Gateway 恢复失败不会撤销删除。直接命令返回非零，同时保留已提交数量和备份位置；提交是否成功无法确认时明确显示“未确认”，不要重复清理。WebUI 维护任务展示受控提交状态、失败阶段及恢复提示，不返回原始子进程输出或备份路径；可用 `codexc metrics status --json` 获取 `databasePath`，在同目录核对 `.cleanup-<时间>.bak` 或 `.<精确ProviderID>-prune-<时间>.bak` 备份及当前记录。Gateway 恢复失败按提示运行 `codexc start gateway`。
 
 维护期间收到 Ctrl+C 或 SIGTERM 时，停止后续操作，等待已开始的写入、归档核验及服务恢复收尾后退出。已完成的删除或归档不自动撤销；再次取消不会跳过服务恢复。普通操作失败可返回菜单，终止请求收尾后退出 CLI。
 
@@ -1037,6 +1037,7 @@ codexc cleanup traffic --confirm               # 停止全部 App Server 与 Rel
 不传路径时读取 `traffic/` 中最新标签的最新 writer session；也可以用 `--dir` 指定根
 目录，或传入一个 V2 session 目录。仅支持 V2 session。`codexc traffic -h` 列出全部选项。
 `cleanup` 会预览默认 `traffic/` 或 `--dir` 指定目录中可识别的全部 V2 session，
+管理调用可将预览返回的 SHA-256 作为 `--expected-fingerprint` 传入确认命令；目录或对象变化会拒绝删除。WebUI 和交互菜单自动绑定该指纹。
 未知文件与目录不处理。实际删除只允许当前配置的数据目录下的 `traffic/`；先运行
 `codexc stop relay` 和 `codexc stop appserver`，再加 `--confirm`。删除不可恢复，完成后可按需运行
 `codexc start appserver`，此前启用的 Relay 可按需运行 `codexc start relay`。

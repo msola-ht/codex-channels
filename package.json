@@ -206,6 +206,7 @@
     "scripts/webui-management-settings.mjs",
     "scripts/webui-management-status-route.mjs",
     "scripts/webui-management-task-resource.mjs",
+    "scripts/webui-management-task-command.mjs",
     "scripts/webui-management-task-route.mjs",
     "scripts/webui-management-tasks.mjs",
     "scripts/webui-provider-settings-management.mjs",

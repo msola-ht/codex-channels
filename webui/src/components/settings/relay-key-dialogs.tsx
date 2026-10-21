@@ -36,7 +36,10 @@ export function RelayKeyDialogs({ editor, management, blocked, refreshBlocked, o
       <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl" closeLabel={t("relay.close")} finalFocus={restoreFocus} showCloseButton={!management.busy}><DialogHeader className="pr-8"><DialogTitle>{t(editing === "new" ? "relay.create" : "relay.edit")}</DialogTitle><DialogDescription>{t("relay.formHint")}</DialogDescription></DialogHeader>
         <FieldGroup className="min-h-0 overflow-y-auto px-1 py-1">
           <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
-          <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
+        <ErrorBanner error={management.latestWriteUnconfirmed ? null : management.actionError} />
+        {management.recoveries.map(recovery => <Alert key={recovery.caller}><AlertDescription>
+          {t(recovery.secret ? "relay.secretUnconfirmed" : "relay.writeUnconfirmed", { caller: recovery.caller })}
+        </AlertDescription></Alert>)}
           {(management.error || management.actionError) && <Button variant="outline" disabled={refreshBlocked} onClick={onRefresh}>{t("relay.refresh")}</Button>}
           {draftStale && !management.loading && !management.error && <Alert><AlertDescription>{t(editing !== "new" && !latestCaller ? "relay.callerRemoved" : "relay.draftStale")}</AlertDescription></Alert>}
           {draftStale && (editing === "new" || latestCaller) && <Button variant="outline" disabled={blocked} onClick={() => { if (editing === "new") openEditor("new"); else if (latestCaller) openEditor(latestCaller) }}>{t("relay.reloadDraft")}</Button>}

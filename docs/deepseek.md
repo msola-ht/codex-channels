@@ -254,8 +254,8 @@ App Server 的 Thread 历史负责后续引用，Gateway 不建立第二份文�
 继续使用上游 Usage 统计，不自行按像素估算。
 
 原生 Responses、Chat 桥和聚合模型入口的请求正文上限统一为 48 MiB；每次准备按声明的
-`Content-Length` 预留容量，Chat 桥和 Responses 目录准备各自最多四项并行，避免把单请求上限直接
-乘以原并发数。该值是 JSON 编码后的字节数，不是模型上下文 Token。取 48 MiB 是因为 DeepSeek
+`Content-Length` 预留容量，Chat 桥的 192 MiB 共享预算可容纳四个最大请求，小请求按声明长度准入；
+Responses 目录准备最多四项并行。该值是 JSON 编码后的字节数，不是模型上下文 Token。取 48 MiB 是因为 DeepSeek
 官方内联图片请求的上限为 48 MiB；Codex 0.163.0 远程 App Server 自身的单消息上限为 128 MiB，
 Cline 官方未公布固定正文上限，48 MiB 入口探测只证明请求被接收，不证明生成成功。
 

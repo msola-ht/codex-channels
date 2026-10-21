@@ -14,8 +14,9 @@ export interface ManagementTask {
   createdAt: string;
   updatedAt: string;
   error: string | null;
+  errorCode: import("./webui-api.js").ManagementTask["errorCode"];
   auditStatus: "recorded" | "degraded" | null;
-  result: { output: string | null } | null;
+  result: import("./webui-api.js").ManagementTaskResult | null;
 }
 export class ManagementTaskInputError extends Error {}
 export class WebuiManagementTaskRunner {
@@ -34,7 +35,9 @@ export class WebuiManagementTaskRunner {
     confirmationId?: string;
   }) => void; cancellationGraceMs?: number });
   preview(input: ManagementTaskInput): Record<string, unknown>;
-  start(input: ManagementTaskInput, options?: { owner?: string; environment?: NodeJS.ProcessEnv; auditMetadata?: Record<string, unknown> | null }): Omit<ManagementTask, "owner">;
+  start(input: ManagementTaskInput, options?: { owner?: string; environment?: NodeJS.ProcessEnv; auditMetadata?: Record<string, unknown> | null; trafficConfirmation?: { directory: string; fingerprint: string } | null }): Omit<ManagementTask, "owner">;
+  close(): Promise<void>;
+  waitForExit(): Promise<void>;
   get(id: string, owner: string): Omit<ManagementTask, "owner"> | null;
   list(owner: string): Array<Omit<ManagementTask, "owner">>;
   watch(owner: string, signal: AbortSignal, receive: (type: "changed" | "heartbeat") => void): Promise<void>;

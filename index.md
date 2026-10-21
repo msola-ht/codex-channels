@@ -57,6 +57,7 @@
 
 ## 验收与开放补证
 
+- [`docs/webui-component-remediation.md`](docs/webui-component-remediation.md)：WebUI 组件浏览器发现、关联修复、A 独立复查与最终证据；保留未观察的 UI 验收范围。
 - [`docs/ipc-readiness-development.md`](docs/ipc-readiness-development.md)：IPC 读取与启动恢复改造的阶段计划、关联审查、观察证据及平台限制。
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信的持续验收入口，分别记录已观察能力与未完成平台边界。
 - [`docs/codex-desktop-app-acceptance.md`](docs/codex-desktop-app-acceptance.md)：Desktop 专项验收主记录，保留 Linux 证据及 macOS、Windows 等开放事项。
@@ -69,6 +70,8 @@
 ## 历史审查与研究记录
 
 以下记录保留原基线、结论及未观察限制；其中的旧执行顺序不是当前开发流程，重新使用证据前须确认适用范围。
+
+- [`docs/archive/webui-review-plan.md`](docs/archive/webui-review-plan.md)：WebUI W01–W16 审查、10 项整改、逐批复查及完成后相对 `main` 的 A 独立审查历史；保留提交、隔离观察和未观察边界，现行合同见 WebUI 文档。
 
 - [`docs/archive/cli-review.md`](docs/archive/cli-review.md)：CLI 两轮审查及六批修复的历史记录；25 条确认发现与三项文案澄清已处理，保留逐批独立复查、提交、实际观察及平台限制。
 - [`docs/archive/consolidation-review.md`](docs/archive/consolidation-review.md)：已完成统一治理的历史审查、决策依据和证据限制；U16 的现行 IPC 边界维护在 Runtime 文档。
