@@ -19,6 +19,7 @@ import { assertAppServerSocketPathSupported } from "../../runtime/app-server-run
 import {
   applyAppServerProviderSettings,
   readAppServerProviderSettingsFingerprint,
+  readAppServerImageUploadRoute,
   ensureAppServerProvider,
   releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
@@ -314,7 +315,18 @@ export abstract class GatewayComponentGraph {
     const supportsImageReferenceUpload = (provider: string): boolean =>
       provider === "openai" || /^ds-[a-z0-9_-]{1,32}$/u.test(provider);
     const imageUploadOptions = (provider: string) =>
-      supportsImageReferenceUpload(provider) ? { upload: imageUploadFetch } : undefined;
+      supportsImageReferenceUpload(provider) ? { upload: imageUploadFetch,
+        ...(/^ds-[a-z0-9_-]{1,32}$/u.test(provider) ? {
+          readProviderUploadRoute: async (target: string, signal: AbortSignal) => {
+            try { return await readAppServerImageUploadRoute(config.codexSocketPath, target, signal); }
+            catch {
+              signal.throwIfAborted();
+              throw new UserFacingError("image.reference.failed",
+                "图片上传私有路由不可用，请确认 Provider 配置已应用并重启 App Server 与 Gateway。",
+                { reason: "private-route-unavailable" });
+            }
+          },
+        } : {}) } : undefined;
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger, 64, config.codexClientIdentity),
       {

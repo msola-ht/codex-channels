@@ -5,6 +5,13 @@ import type { ConfigReadResponse, GetAccountResponse, GetAuthStatusResponse, Thr
 import { UserFacingError } from "../conversation-core/index.js";
 import { JsonRpcError, type JsonRpcClient } from "./json-rpc.js";
 
+export interface ProviderImageUploadRoute {
+  endpoint: string;
+  modelEndpoint: string;
+  revision: string;
+  authorization: string;
+}
+
 /** Uploads only caller-supplied images; subsequent history belongs to App Server. */
 export class ImageReferenceUpload {
   private readonly pending = new Map<string, PendingUpload>();
@@ -14,6 +21,7 @@ export class ImageReferenceUpload {
     private readonly fetchImpl: typeof fetch,
     private readonly localFetch: typeof fetch,
     private readonly readAuth: (signal: AbortSignal) => Promise<GetAuthStatusResponse>,
+    private readonly readProviderUploadRoute?: (provider: string, signal: AbortSignal) => Promise<ProviderImageUploadRoute>,
   ) {
     rpc.onDisconnect(() => this.cancelAll());
     rpc.onNotification(notification => {
@@ -71,11 +79,12 @@ export class ImageReferenceUpload {
           throw failure("会话 Provider 与图片上传路由不一致。");
         }
         const converted = await this.prepareImages(input, pending,
-          (bytes, mediaType) => this.uploadDeepseek(modelRoute.endpoint, modelRoute.revision, bytes, mediaType, pending));
+          (bytes, mediaType) => this.uploadDeepseek(modelRoute.endpoint, modelRoute.revision, modelRoute.authorization, bytes, mediaType, pending));
         stage(pending, "account-recheck");
         const current = await this.modelRoute(thread.thread.cwd, provider, pending);
         if (current?.kind !== "deepseek" || current.endpoint !== modelRoute.endpoint
-          || current.revision !== modelRoute.revision) {
+          || current.modelEndpoint !== modelRoute.modelEndpoint
+          || current.revision !== modelRoute.revision || current.authorization !== modelRoute.authorization) {
           throw failure("模型后端已变化，请重新发送图片。");
         }
         pending.signal.throwIfAborted();
@@ -171,11 +180,27 @@ export class ImageReferenceUpload {
     const base = provider === "openai" ? openaiBase ?? providerBase : providerBase ?? openaiBase;
     if (typeof base !== "string") throw failure("无法确认当前 App Server 的模型代理地址。");
     const endpoint = new URL(base);
+    const deepseek = /^ds-[a-z0-9_-]{1,32}$/u.test(provider);
     // Only the service's private loopback proxy can attest its running route.
     // Independent model endpoints retain inline input; never probe them with credentials.
     if (endpoint.protocol !== "http:" || endpoint.hostname !== "127.0.0.1" || !endpoint.port
-      || endpoint.pathname !== "/" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) return null;
+      || (!deepseek && endpoint.pathname !== "/") || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+      if (deepseek) throw failure("DeepSeek 图片上传未连接受管实例。", "invalid-response");
+      return null;
+    }
     stage(pending, "model-route");
+    if (deepseek) {
+      if (!this.readProviderUploadRoute) throw failure("图片上传私有路由不可用，请重启 Gateway 与 App Server。", "invalid-response");
+      pending.assertAllowed();
+      const route = await this.readProviderUploadRoute(provider, pending.signal);
+      pending.assertAllowed();
+      if (route.endpoint !== endpoint.origin || route.modelEndpoint !== endpoint.href
+        || !/^Bearer [a-f0-9]{64}$/u.test(route.authorization)
+        || !/^[a-f0-9]{64}$/u.test(route.revision)) {
+        throw failure("图片上传私有路由与当前模型实例不一致。", "invalid-response");
+      }
+      return { kind: "deepseek", ...route };
+    }
     const result = await this.localFetch(new URL("/_codexc/image-upload-route", endpoint), {
       method: "GET", redirect: "error", signal: pending.signal,
     });
@@ -187,10 +212,6 @@ export class ImageReferenceUpload {
     if ((inspected.kind === undefined || inspected.kind === "openai")
       && inspected.backendOrigin === "https://chatgpt.com") {
       return { kind: "openai", endpoint: endpoint.origin, origin: inspected.backendOrigin };
-    }
-    if (inspected.kind === "deepseek" && typeof inspected.revision === "string"
-      && /^[a-f0-9]{64}$/u.test(inspected.revision)) {
-      return { kind: "deepseek", endpoint: endpoint.origin, revision: inspected.revision };
     }
     throw failure("当前模型代理无法确认图片引用后端。", "invalid-response");
   }
@@ -227,6 +248,7 @@ export class ImageReferenceUpload {
   private async uploadDeepseek(
     endpoint: string,
     revision: string,
+    authorization: string,
     bytes: Buffer,
     mediaType: ImageMediaType,
     pending: PendingUpload,
@@ -237,6 +259,7 @@ export class ImageReferenceUpload {
       method: "POST",
       headers: {
         "content-type": mediaType,
+        authorization,
         "x-codexc-image-upload-revision": revision,
       },
       body: new Uint8Array(bytes),
@@ -400,7 +423,7 @@ interface PendingUpload {
 type ImageMediaType = "image/gif" | "image/jpeg" | "image/png" | "image/webp";
 type ModelRoute =
   | { kind: "openai"; endpoint: string; origin: "https://chatgpt.com" }
-  | { kind: "deepseek"; endpoint: string; revision: string };
+  | ({ kind: "deepseek" } & ProviderImageUploadRoute);
 
 function providerBaseUrl(value: unknown, provider: string): string | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;

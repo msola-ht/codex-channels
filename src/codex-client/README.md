@@ -4,7 +4,8 @@
 
 Thread 启动/恢复、Turn 启动/追加及中断的本地 `beforeSubmit` 守卫透过 Provider 准备保留到 RPC 发送前同步执行，不编码为
 协议字段；守卫拒绝时不发请求，已经发出的写请求仍等待实际响应，不以取消丢弃写入结果。
-图片引用准备同样在创建文件、每次字节上传及完成确认前复核该守卫；撤权后不再新出站，
+图片引用准备同样在创建文件、每次字节上传及完成确认前复核该守卫；受管 DS 还在私有上传路由
+IPC 前后及上传后复核。撤权后不再新出站，
 守卫错误保留原分类，既有上传失败处理不会将其吞掉或重试。
 Queue 的本地守卫由 JSON-RPC 在每次请求尝试前执行，读请求遇过载后的重试也复核授权；写请求仍不重试。
 模型与 Thread 列表分页、模型默认配置读取/写入、派生、归档和取消订阅同样保留调用方的本地守卫，
@@ -76,7 +77,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   2,000 个唯一节点及 64 层祖先；身份或 Provider 不匹配、缺字段、循环、越限、超时和断线均拒绝，
   不以持久 `thread/list` 或内存活动缓存替代权威查询。覆盖范围遵循官方 loaded/list，包含标准
   SubAgent 与 ephemeral，但不宣称枚举上游主动隐藏的 Internal Thread。
-- `image-reference-upload.ts`：通过 `config/read` 定位当前 App Server 的回环模型代理并查询实际路由；OpenAI ChatGPT 走官方账户路由、令牌校验、创建、无凭据字节上传和完成确认，受管 DeepSeek 走同源代理的受限 Files API 上传，两者都只向 App Server 提交 fileId。管理有界并发、分阶段超时和取消；OpenAI 同一字节 PUT 按锁定上游预算有界重试，创建、DeepSeek 上传和 Turn 提交不重试；账户或 Provider 修订变化时取消；失败不回退 Base64。
+- `image-reference-upload.ts`：通过 `config/read` 定位当前 App Server 的回环模型代理；OpenAI ChatGPT 查询无凭据只读路由，走官方账户路由、令牌校验、创建、无凭据字节 PUT 和完成确认。受管 DS 按 Thread 的精确 Provider 经 Bootstrap 注入的私有 IPC reader 取得随机 Bearer 能力；modelEndpoint 包含准确账户前缀，必须与该 App Server 配置精确一致，能力只发送到私有合同确认的同源根路径上传 endpoint。上传前后复核能力和修订，只提交校验后的 fileId，能力缺失或变化失败关闭，不回退 inline。OpenAI API Key、自定义第三方、CLP 等其他 Provider 保持 inline。管理有界并发、顺序多图、分阶段超时和取消；OpenAI 同一字节 PUT 共用 5 分钟、最多 5 次尝试及退避，完成确认最多 30 秒；DS 客户端传输上限 5 分钟，代理整体和上游 Files POST 仍受各自更短期限约束，材料及路由准备阶段最多 60 秒。创建、DS 上传和 Turn 提交不重试；账户或 Provider 修订变化时取消。
 - `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `queue-adapter.ts`：把官方 Queue 条目裁剪为 Application 的稳定种类、可编辑标记和有界文本预览；

@@ -36,6 +36,7 @@ const providerOperationTimeoutMs = 60_000;
 const desktopAppHostProtocolVersion = 2;
 const desktopAppProviderProtocolVersion = 1;
 const providerSettingsProtocolVersion = 1;
+const imageUploadProtocolVersion = 1;
 const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 4_096;
 const connectionTimeoutMs = 1_000;
@@ -52,6 +53,7 @@ export class AppServerSupervisorOwner {
   #releaseProvider;
   #applyProviderSettings;
   #providerSettingsSnapshot;
+  #imageUploadRoute;
   #attachDesktopApp;
   #detachDesktopApp;
   #desktopAppProviderSelectionEnabled;
@@ -68,7 +70,7 @@ export class AppServerSupervisorOwner {
   constructor(
     primarySocketPath,
     topology,
-    { ensureProvider, releaseProvider, applyProviderSettings, providerSettingsSnapshot, attachDesktopApp, detachDesktopApp, desktopAppProviderSelectionEnabled = false } = {},
+    { ensureProvider, releaseProvider, applyProviderSettings, providerSettingsSnapshot, imageUploadRoute, attachDesktopApp, detachDesktopApp, desktopAppProviderSelectionEnabled = false } = {},
   ) {
     this.#socketPath = appServerSupervisorSocketPath(primarySocketPath);
     this.#topology = topology;
@@ -76,6 +78,7 @@ export class AppServerSupervisorOwner {
     this.#releaseProvider = releaseProvider;
     this.#applyProviderSettings = applyProviderSettings;
     this.#providerSettingsSnapshot = providerSettingsSnapshot;
+    this.#imageUploadRoute = imageUploadRoute;
     this.#attachDesktopApp = attachDesktopApp;
     this.#detachDesktopApp = detachDesktopApp;
     this.#desktopAppProviderSelectionEnabled = desktopAppProviderSelectionEnabled;
@@ -128,6 +131,34 @@ export class AppServerSupervisorOwner {
         desktopAppAttached: this.#desktopAppLeases.size > 0,
         ...(this.#desktopAppLeases.size > 0 ? { desktopAppProvider: this.#desktopAppProvider } : {}),
       })}\n`);
+      return;
+    }
+    if (request?.action === "imageUploadRoute") {
+      if (request.imageUploadProtocolVersion !== imageUploadProtocolVersion
+        || Object.keys(request).some(key => !["action", "imageUploadProtocolVersion", "provider"].includes(key))
+        || typeof request.provider !== "string" || !/^ds-[a-z0-9_-]{1,32}$/u.test(request.provider)
+        || !providerIds(this.#topology).includes(request.provider) || !this.#imageUploadRoute || this.#closing) {
+        socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
+        return;
+      }
+      const controller = new AbortController();
+      const cancel = () => controller.abort(new Error("图片上传路由读取已取消"));
+      const timer = setTimeout(cancel, 15_000);
+      socket.setTimeout(15_000, () => socket.destroy());
+      socket.once("close", cancel);
+      try {
+        const route = await this.#runProviderOperation(request.provider,
+          () => this.#imageUploadRoute(request.provider, controller.signal));
+        controller.signal.throwIfAborted();
+        socket.end(`${JSON.stringify({ version: protocolVersion, imageUploadProtocolVersion,
+          ok: true, provider: request.provider, ...route })}\n`);
+      } catch {
+        if (!socket.destroyed) socket.end(`${JSON.stringify({ version: protocolVersion,
+          imageUploadProtocolVersion, ok: false, provider: request.provider })}\n`);
+      } finally {
+        clearTimeout(timer);
+        socket.off("close", cancel);
+      }
       return;
     }
     if (request?.action === "leaseDesktopApp") {
@@ -554,6 +585,30 @@ export async function ensureAppServerProvider(primarySocketPath, provider, signa
           : `模型 Provider 启动失败：${provider}`,
     );
   }
+}
+
+/** Private IPC is the sole channel that grants the running Provider's upload capability. */
+export async function readAppServerImageUploadRoute(primarySocketPath, provider, signal) {
+  if (typeof provider !== "string" || !/^ds-[a-z0-9_-]{1,32}$/u.test(provider)) {
+    throw new Error("图片上传 Provider 无效");
+  }
+  const response = await readSupervisorResponse(appServerSupervisorSocketPath(primarySocketPath), {
+    action: "imageUploadRoute", imageUploadProtocolVersion, provider,
+  }, 15_000, signal);
+  signal?.throwIfAborted();
+  let value;
+  try { value = JSON.parse(response); } catch { throw new Error("图片上传私有路由未确认"); }
+  if (value?.version !== protocolVersion || value.imageUploadProtocolVersion !== imageUploadProtocolVersion
+    || value.ok !== true || value.provider !== provider
+    || Object.keys(value).some(key => !["version", "imageUploadProtocolVersion", "ok", "provider", "endpoint", "modelEndpoint", "revision", "authorization"].includes(key))
+    || typeof value.endpoint !== "string" || !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/u.test(value.endpoint)
+    || Number(value.endpoint.slice(value.endpoint.lastIndexOf(":") + 1)) > 65_535
+    || value.modelEndpoint !== `${value.endpoint}/go/${provider.slice(3)}`
+    || typeof value.revision !== "string" || !/^[a-f0-9]{64}$/u.test(value.revision)
+    || typeof value.authorization !== "string" || !/^Bearer [a-f0-9]{64}$/u.test(value.authorization)) {
+    throw new Error("图片上传路由不可用，请确认 Provider 配置已应用并重启 App Server 与 Gateway");
+  }
+  return { endpoint: value.endpoint, modelEndpoint: value.modelEndpoint, revision: value.revision, authorization: value.authorization };
 }
 
 export async function acquireAppServerProviderLease(primarySocketPath, provider, signal) {
