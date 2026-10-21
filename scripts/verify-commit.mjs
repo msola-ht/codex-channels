@@ -138,7 +138,8 @@ function runChecks(checks) {
       env: { ...process.env, ...check.environment },
       stdio: check.templatePath ? ["pipe", "inherit", "inherit"] : "inherit",
       ...(check.templatePath ? { input: readFileSync(check.templatePath, "utf8")
-        .replaceAll("__STOP_TIMEOUT_SECONDS__", String(serviceStopTimeoutSeconds)) } : {}),
+        .replaceAll("__STOP_TIMEOUT_SECONDS__", String(serviceStopTimeoutSeconds))
+        .replaceAll("__CODEX_HOME_ENVIRONMENT__", "<key>CODEX_HOME</key><string>/tmp/codexc-home</string>") } : {}),
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
     const checkDuration = formatDuration(performance.now() - checkStartedAt);
