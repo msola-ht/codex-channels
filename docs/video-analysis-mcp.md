@@ -1,6 +1,6 @@
 # 视频分析 MCP
 
-`scripts/video-analysis-mcp.mjs` 提供独立 stdio MCP 工具 `analyze_video`。Codex 调用工具，工具将指定视频和问题发送给管理员配置的 Strata `/v1/responses`，再把分析文字返回 Codex。不修改 Codex 本体，不经过 Gateway 的 Provider Proxy，不写会话历史或数据库，也不安装、启停 Strata。
+`codexc video-mcp` 通过当前安装的 `scripts/video-analysis-mcp.mjs` 提供独立 stdio MCP 工具 `analyze_video`。Codex 调用工具，工具将指定视频和问题发送给管理员配置的 Strata `/v1/responses`，再把分析文字返回 Codex。不修改 Codex 本体，不经过 Gateway 的 Provider Proxy，不写会话历史或数据库，也不安装、启停 Strata。
 
 入口使用 Node.js 22.23.4+ 和项目已有的 `undici`，无新增依赖。运行前完成本项目正常依赖安装。工具默认不启动，由配置它的 MCP 客户端管理进程。
 
@@ -36,8 +36,8 @@ Strata 必须已部署支持 `input_video` 的版本，启用视频、加载模�
 
 ```toml
 [mcp_servers.strata_video]
-command = "node"
-args = ["/absolute/path/codex-channels/scripts/video-analysis-mcp.mjs"]
+command = "codexc"
+args = ["video-mcp"]
 env_vars = ["STRATA_VIDEO_API_KEY"]
 tool_timeout_sec = 960
 
@@ -52,7 +52,9 @@ STRATA_VIDEO_TRANSPORT = "files"
 # STRATA_VIDEO_CHANNEL_ROOT = "/absolute/path/gateway-data/uploads/video"
 ```
 
-Windows 将 `args` 和 `STRATA_VIDEO_ROOT` 替换为 Windows 绝对路径，可使用 TOML 单引号保留反斜杠；`any` 在 Windows 上同样表示只接受本机绝对路径，因此多盘符无需逐个列出。macOS/Linux 保持对应主机的绝对路径。`node` 必须在启动 MCP 的宿主 PATH 内，否则使用 Node 可执行文件绝对路径。
+三平台均使用 `command = "codexc"` 和 `args = ["video-mcp"]`，不保存 Node 版本目录或包内脚本路径。启动 MCP 的宿主 PATH 必须能找到已安装的 `codexc` 和 Node；后台 App Server 或桌面客户端不会自动继承终端后来修改的 PATH，切换 Node/npm 全局目录后需确认新环境已安装 `codexc` 并更新宿主启动环境。Windows 的 Codex MCP 启动器会按 PATH/PATHEXT 查找 npm 的 `codexc.cmd`。本机视频目录仍按实际主机设置；Windows 可使用 TOML 单引号保留反斜杠，`any` 在三平台均表示只接受本机绝对路径，因此多盘符无需逐个列出。
+
+旧的 `node` 加脚本绝对路径入口仍可手工使用，但新增预设只保存上述稳定命令。已有配置不会自动改写；安装包含 `video-mcp` 的新版本后，可在原生 MCP 配置中把旧 `command` 和 `args` 一起替换成上述两项，保留其他环境变量、密钥和策略，再重新加载 MCP。只改 `command` 而保留旧脚本参数不能完成切换。
 
 `env_vars` 只转发宿主实际已有的环境变量，不会自动创建密钥。CLI 从启动它的环境继承；Desktop/独立 App Server 必须在自己的启动环境中具备该变量，终端临时 export 不保证 GUI 或后台服务可见。不要把密钥提交到仓库。缺少任何必填设置，MCP 启动即失败，不回退到其他模型服务。
 
@@ -61,7 +63,7 @@ MCP 菜单、CLI 通用工具设置和 WebUI `tool-access` 共用实际合并目
 
 ## 使用
 
-也可先运行 `codexc config → 工具与 MCP → 新增 MCP → Strata 视频分析预设`，输入服务根地址、模型 ID 和 API Key，再选择工具调用审批，随后查看脱敏摘要并确认保存；不询问任何目录。审批选项及优先级见[工具与 MCP 设置](user-guide.md)。预设固定使用文件引用模式 `files`（需要 Strata 启用 `video_files`），分析总时限 900 秒、启动超时 10 秒、调用超时 960 秒，默认启用；其他传输方式或分析时限可通过自定义 stdio 或原生配置设置。本机视频范围写为 `STRATA_VIDEO_ROOT=any`，即任意本机绝对路径都能分析（不限定目录，也不接受直属文件名）。预设要求当前 Gateway 配置已存在且通过结构校验；文件缺失、不可读或无效时停止，不猜测目录。渠道附件目录自动取 StateStore 数据库旁的 `uploads/video`（默认 `<数据目录>/data/uploads/video`），相对数据库路径以配置文件所在目录为基准，保留路径文本中的空格；范围、目录与目标 Codex 配置文件都会在确认摘要中显示。预设固定使用渠道提示引用的名称 `strata_video`，自动填写当前安装的 Node/脚本绝对路径，调用超时保持比分析总时限多 60 秒，思考默认 `medium`，预算由 Strata 管理。
+也可先运行 `codexc config → 工具与 MCP → 新增 MCP → Strata 视频分析预设`，输入服务根地址、模型 ID 和 API Key，再选择工具调用审批，随后查看脱敏摘要并确认保存；不询问任何目录。审批选项及优先级见[工具与 MCP 设置](user-guide.md)。预设固定使用文件引用模式 `files`（需要 Strata 启用 `video_files`），分析总时限 900 秒、启动超时 10 秒、调用超时 960 秒，默认启用；其他传输方式或分析时限可通过自定义 stdio 或原生配置设置。本机视频范围写为 `STRATA_VIDEO_ROOT=any`，即任意本机绝对路径都能分析（不限定目录，也不接受直属文件名）。预设要求当前 Gateway 配置已存在且通过结构校验；文件缺失、不可读或无效时停止，不猜测目录。渠道附件目录自动取 StateStore 数据库旁的 `uploads/video`（默认 `<数据目录>/data/uploads/video`），相对数据库路径以配置文件所在目录为基准，保留路径文本中的空格；范围、目录与目标 Codex 配置文件都会在确认摘要中显示。预设固定使用渠道提示引用的名称 `strata_video`，启动命令为 `codexc video-mcp`，摘要明确提示宿主 PATH 要求；调用超时保持比分析总时限多 60 秒，思考默认 `medium`，预算由 Strata 管理。
 
 交互保存使用当前 Codex Home 的用户配置，影响使用该配置的会话；确认前会显示目标路径、目录授权范围和启用状态。API Key 隐藏输入并写入该用户配置，不回显；若希望密钥只从宿主环境继承，可使用上方手工 `env_vars` 配置。已有同名条目不会被覆盖。最终确认前取消，不创建渠道附件目录、不写入 MCP；确认后再次核对 Gateway 推导出的目录，若已变化则停止。随后创建目录，按 Gateway 暂存器的要求拒绝符号链接、非目录和其他用户拥有的目录，并设置平台私有权限；目录准备失败时不保存 MCP。确认后的配置写入若失败，已准备的目录会保留。保存不等于 MCP 已连接，需要重新加载 MCP 或在新会话中使用；不会自动重启服务。保存的渠道目录是当时的配置值，之后更改 `storage.database_path` 时需同步调整 MCP 环境配置。
 

@@ -90,6 +90,7 @@ const helpText = {
   remote [参数]                启动共享 App Server 的 Codex TUI
   app                          启动 Codex Desktop App 或管理共享连接（macOS / Windows）
   webui                        前台运行本地管理 WebUI
+  video-mcp                    启动独立视频分析 MCP（stdio）
   run                          前台运行核心服务
 
 工作区：
@@ -195,9 +196,10 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
 
 Git 源码安装检查并构建官方 main 最新提交，校验当前配置、数据库与配套 Codex CLI 合同后，
 在一个停机窗口更新程序与所需 CLI，再恢复核心服务。
-CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI，不更新 Gateway 程序包。
-数据库只接受当前 Schema，不迁移或删除数据；关闭 Codex daemon 自动启动，其他用户偏好与模型目录不改写。
-预检失败时不停止服务；更新按原运行状态恢复核心服务和 WebUI，失败报告阶段并尝试恢复。
+CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI；源码入口迁移数据库后会刷新全局命令。
+精确的指标 v31 在停服后私有备份并升级至 v32；其他旧结构拒绝，不删除数据。
+关闭 Codex daemon 自动启动，其他用户偏好与模型目录不改写。
+预检失败时不停止服务；更新按原运行状态恢复仍启用的服务。迁移开始后程序未就绪时保持停止并保留恢复材料。
 须在本机执行，不能从 Gateway/App Server 服务进程调用；需要安装配套 CLI 时必须在交互终端确认。`,
   uninstall: `用法：codexc uninstall [--services]
 
@@ -312,12 +314,15 @@ async function executeCommand(command, args) {
   const startedAt = performance.now();
   try { await dispatchCommand(command, args); }
   finally {
-    printCliMessage("note", `命令总耗时 ${((performance.now() - startedAt) / 1000).toFixed(2)} 秒。`, { destination: "stderr" });
+    if (command !== "video-mcp") printCliMessage("note", `命令总耗时 ${((performance.now() - startedAt) / 1000).toFixed(2)} 秒。`, { destination: "stderr" });
   }
 }
 
 async function dispatchCommand(command, args) {
   switch (command) {
+    case "video-mcp":
+      await (await import("../scripts/video-analysis-mcp.mjs")).runVideoMcp(args);
+      break;
     case undefined:
       printHelp();
       break;
