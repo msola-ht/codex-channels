@@ -2,6 +2,39 @@
 
 本页是后续修复的执行流程，问题原始证据集中在[收尾审查记录](project-closeout-review.md)，全文阅读范围见[逐文件清单](project-closeout-file-inventory.csv)。本页不复制原始审查报告，也不替代现行用户与模块合同。
 
+## main 基线整分支关联审查
+
+本轮只读审查固定于 `main=08c97a60d4dd5b973066e90bec8f097c42f6dade`、`HEAD=ce2f24e112fc3a2f9c25bdd799c497fc5809945e`。已通过 `git ls-remote origin refs/heads/main` 确认远程 main 与本地一致；分支领先28个提交，完整差异169个文件。用户授权多个 Astra 辅助；三个独立 `gpt-6-astra/high` 按会话授权与渠道、运行时配置与安装、网络数据与管理界面划分，主代理核对跨边界发现、覆盖和记录。业务源码未修改，不执行推送、合并或部署。
+
+三个独立报告已全部收齐，主代理已读完整报告并定向复核全部发现。团队完成169个变更文件及受影响调用链的审查，确认3项待处理：2项P2、1项P3；其中2项为新增回归，1项为旧问题的等价入口遗漏。本轮新增发现单独编号，不静默改写原45项的历史修复状态；下方“0项待实施”仅适用于此前批次清单。本轮未修复这3项，也不将本次审查称为重新逐行阅读原1,146个文件。
+
+| 编号 | 等级、归因 | 触发、影响与源码证据 | 后续修复及关闭条件 |
+| --- | --- | --- | --- |
+| M01 | P2，B21等价入口遗漏，main已有风险 | 飞书音视频已接收、仍在Inbox排队时，点击“更多命令→停止任务”。`src/surfaces/feishu/adapter.ts:483` 只停止交互并执行Application stop，没有像 `receiveInput:162` 的文本停止那样调用 `AttachmentInputLifecycle.receiveStop`；尚未建立Application scope的附件随后仍可下载并提交。A1通过生产Adapter隔离注入观察按钮路径 `stop,prepare,capture,download,submit`，同序列文本停止在prepare拒绝为audio.unavailable。主代理核对两入口和生命周期实现；未向真实飞书发送消息。 | 在卡片Actor授权通过后建立同一同步停止接收边界，finally释放，合并cancelled反馈；核对停止前附件取消、停止后新附件等待/释放、撤权和失败分支，避免取消边界覆盖未授权目标。 |
+| M02 | P2，B05严格校验引入的并发回归 | `src/provider-proxy/traffic-dump-storage.ts:239` 异步 `writeFile(wx)` 创建manifest，文件可在正文写完前可见；`traffic-dump-retention.ts:118–130` 在label筛选和活跃保护判断前严格读取所有manifest，空/部分正文或读取间元数据变化都会抛错。维护错误在storage:319–330进入fail，终止该writer后续转储；独立Relay维护owner同样受影响。保护登记在创建前，但只在保留规划/删除阶段使用，跨进程保护表也不能解决发布窗口。主代理核对writer、reader与失败收尾；此项为源码支持的竞态，未运行并发复现，未声称业务请求本身失败。 | 使完整manifest原子发布，保留私有路径、独占创建与历史损坏fail-closed合同；核对同进程多个Provider及独立Relay共享目录。不能简单吞掉所有解析错误。后续观察初始化与维护交错时writer持续可用、历史损坏仍拒绝、清理不删除活跃目录。 |
+| M03 | P3，B20撤权保护新增生命周期遗漏 | `src/surfaces/telegram/text-streams.ts:64` 将revokedStreams计入100条全局活动流容量；撤权时把流移入该表，只有completeTurn或全局clear删除，`clearThread:211` 不清理。撤权后连接丢失且错过Turn终态，记录持续占用配额；累计100条后重新授权的新Thread也无法接收增量。A1生产类内联观察 `created=100,warnings=1,active=0,revoked=100`，新流未创建。主代理核对outbox.observe的connection.lost→clearThreadOutput与turn.completed→completeTurn两条消费链；这是流式预览降级，最终正文路径不受该容量门禁。 | 为撤权身份建立有界且可终结的生命周期，避免永久占用活动正文配额；同时保持旧授权流不能在恢复授权后重放的安全语义，不能简单断线即删除全部保护。后续观察多次撤权/断线/重新授权及迟到旧事件，确认新流恢复且旧事件仍拒绝。 |
+
+全量 `npm run verify:ci` 在Node `v24.22.1` 下通过，总耗时39.0秒：类型/版本/模块边界、全仓Lint、WebUI构建与Lint、2136个翻译键及占位符、84份Markdown链接索引、Gateway构建和三份Shell语法均通过。这是本地静态工作流结果，不是远程CI或真实平台验收；本轮没有重新执行安装路径或跨OS原生服务观察。
+
+覆盖对账（按变更文件去重，关联读取另计）：
+
+| 负责人 | 文件数 | 已完成边界 |
+| --- | --- | --- |
+| A1 | 60 | Application、Approval、Core、Client、Session Routing、三个会话Bootstrap文件、Surface公共层及三渠道；包括入口授权、精确模型选择、活动恢复、附件取消、审批完整性与可靠原文交付 |
+| A2 | 60 | Runtime 18、Scripts 34、配置及组合层3、安装模板和包清单5；包括配置/事件提交语义、私有文件、锁、进程归属、可执行路径、Setup/Provider/Skill及安装激活 |
+| A3 | 38 | 网络/Proxy/指标10、Chat2、转储5、日志/管理HTTP5、探测3、WebUI7、升级2、当前文档4；包括实际提交计时、错误正文隔离、出站路由、模型身份、匿名门禁与产物基线 |
+| 主代理与所属A交叉核对 | 11 | `docs/channel-image.md`、`docs/delivery.md`、`docs/index.md`、`docs/source-install.md`、`docs/user-agent-customization.md`、`docs/user-guide.md`、`src/bootstrap/README.md`及三份原收尾材料和根`index.md`；核对文档与实际入口、原CSV基线、批次状态和新增待办。A1/A2已关联读取的文档不重复计数 |
+
+跨组核对还确认：安装器与服务状态/日志reader均从配置Socket父目录推导日志目录，Linux仍使用journal；新Runtime文件由既有`runtime/`包目录覆盖，新增日志脱敏器进入显式包清单；恢复观察器与计划任务的Turn关联结果分别交给对应消费方，不把观察到终态等同于启动请求无效。
+
+排除项和保留限制：相对 `CODEX_BINARY` 仍按实际执行进程cwd解释，显式配置路径才按配置目录解析，这是B27明确保留并观察过的合同，不列新回归。微信同configPath的Setup事务已串行；不同配置共用凭据目录、飞书OAuth恢复旧Token等跨调用补偿没有CAS保证，属于已存在的独立风险，本轮单列保留，不扩大为源码修复。未来处理需先确定共享凭据写入与补偿的版本合同。
+
+本轮仅更新审查记录和索引，未新增提交；独立代理均无遗留作业或自有资源。后续建议按M01、M02、M03分三批实施，每批完成关联修复、失败输入与真实可用入口观察，再由新的独立A复审后提交。M02应先明确原子发布/独占创建策略；M03应先明确撤权身份生命周期。真实渠道、跨OS原生服务、真实供应商/代理以及远程升级workflow仍按既有开放验收边界保留。
+
+## M01–M03修复与PR交付
+
+用户在整分支审查后授权全链路关联分析、修复、本地提交、推送分支和创建PR。继续使用 `review/closeout-remediation-plan`，目标仓库 `msola-ht/codex-channels`、基线 `main`；查询未发现该分支既有PR。先保存上述审查材料，再按M01、M02、M03逐批实施和独立A复审，最终刷新main并检查完整差异后推送、创建PR。没有合并、发布、部署或真实渠道发送授权；实机补证限制继续保留。
+
 ## 本轮实施汇总
 
 原25个修复包及实施中登记的4个关联问题均已完成代码或文档处理、独立Astra关联复审和本地提交，共26批修复提交，业务修复末次提交为 `db2fc319573b907dd61f656a12ace49dc4aeacc0`。本清单待修复为0，不等于全部实机验收通过。
