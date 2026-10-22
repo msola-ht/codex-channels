@@ -17,6 +17,7 @@ export interface SkillUninstallResult {
   name: string;
   removed: boolean;
   target: string;
+  retainedDirectory?: string;
 }
 
 export function projectSkillsRoot(projectRoot?: string): string;
@@ -43,6 +44,7 @@ export function installSkill(options?: {
 export function uninstallSkill(options?: {
   name: string;
   environment?: NodeJS.ProcessEnv;
+  expectedTargetRevision?: string;
 }): SkillUninstallResult;
 
 export function runSkillSetup(options?: {
