@@ -56,13 +56,14 @@ export function useTrafficExchange(
     const previous = resolveTrafficDetailSnapshot(current, snapshot.current)
     let value: TrafficDetailResponse
     try {
-      if (previous !== null && canReuseTrafficSummary(previous.exchange)) {
+      if (previous !== null && previous.exchange.tracePage.complete && canReuseTrafficSummary(previous.exchange)) {
         const page = await fetchTrafficTrace({
           ...current, label: previous.label, session: previous.session,
         }, signal)
         // A late trace flush can add output/model evidence after the terminal index.
         // Rebuild the summary only when this call's trace changed, not for other calls in the batch.
-        value = previous.exchange.tracePage.total === page.exchange.tracePage.total
+        value = previous.exchange.tracePage.complete && page.exchange.tracePage.complete
+          && previous.exchange.tracePage.total === page.exchange.tracePage.total
           ? { ...previous, exchange: { ...previous.exchange, ...page.exchange } }
           : await fetchTrafficExchange(current, signal)
       } else {

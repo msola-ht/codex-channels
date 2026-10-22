@@ -1186,6 +1186,7 @@ export interface TrafficDebugStage {
 export interface TrafficExchangeDetail {
   continuation?: {
     scope: "same_writer_thread_turn"
+    complete: boolean
     next: { id: number; startedAtMs: number; gapMs: number; state: "completed" | "failed" | "incomplete" | "pending"; agentMessageObserved: boolean } | null
   }
   requestPurpose?: "autoApprovalReview" | null
@@ -1283,7 +1284,9 @@ export interface TrafficExchangeDetail {
   } | null
   tracePage: {
     offset: number
-    total: number
+    /** null means that the shared read budget prevented a complete scan. */
+    total: number | null
+    complete: boolean
     previousOffset: number | null
     nextOffset: number | null
   }

@@ -87,6 +87,7 @@ export function TrafficDetail({
         </CardContent>
       </Card>
       {traceLoading ? <p role="status" className="text-sm text-muted-foreground">{t("traffic.refreshingTrace")}</p> : null}
+      {!detail.tracePage.complete ? <Alert><AlertTitle>{t("traffic.readLimitedTitle")}</AlertTitle><AlertDescription>{t("traffic.readLimitedDescription")}</AlertDescription></Alert> : null}
       {detail.response === null ? (
         <Card size="sm" aria-label={t("filters.response")}>
           <CardHeader><CardTitle>{t(detail.debug ? "traffic.debugUpstream" : "filters.response")}</CardTitle></CardHeader>
@@ -109,7 +110,7 @@ export function TrafficDetail({
             {detail.continuation === undefined ? null : <Alert>
               <AlertTitle>{t("traffic.continuationTitle")}</AlertTitle>
               <AlertDescription>
-                {detail.continuation.next === null ? <p>{t("traffic.continuationMissing")}</p> : <>
+                {!detail.continuation.complete ? <p>{t("traffic.continuationLimited")}</p> : detail.continuation.next === null ? <p>{t("traffic.continuationMissing")}</p> : <>
                   <p>{t("traffic.continuationFound", { id: detail.continuation.next.id, gap: formatElapsedDuration(detail.continuation.next.gapMs) })}</p>
                   <div className="flex flex-wrap items-center gap-2">
                     <StateBadge state={detail.continuation.next.state} />
@@ -220,9 +221,9 @@ export function TrafficDetail({
           <TrafficDisclosure title={t("traffic.modelEvidenceTitle")}><ModelEvidence detail={detail} /></TrafficDisclosure>
           <TrafficParameterComparison rows={detail.parameterComparison} />
           {detail.tracePage.total === 0 ? null : (
-            <TrafficDisclosure title={t("traffic.traceTitle", { count: detail.tracePage.total })}>
+            <TrafficDisclosure title={detail.tracePage.total === null ? t("traffic.traceTitleUnknown") : t("traffic.traceTitle", { count: detail.tracePage.total })}>
               <div className="flex min-w-0 flex-col gap-3" aria-busy={traceLoading}>
-                {traceLoading ? <><p role="status">{t("traffic.traceLoading")}</p><Skeleton className="h-32 w-full" /></> : traceError ? <><p>{t("traffic.traceError")}</p><Button type="button" variant="outline" onClick={onRetry}>{t("traffic.traceRetry")}</Button></> : <><p className="text-xs text-muted-foreground">{t("traffic.traceRange", { from: detail.tracePage.offset + 1, to: detail.tracePage.offset + detail.trace.length, total: detail.tracePage.total })}</p>{detail.trace.map((item, index) => (
+                {traceLoading ? <><p role="status">{t("traffic.traceLoading")}</p><Skeleton className="h-32 w-full" /></> : traceError ? <><p>{t("traffic.traceError")}</p><Button type="button" variant="outline" onClick={onRetry}>{t("traffic.traceRetry")}</Button></> : <><p className="text-xs text-muted-foreground">{detail.tracePage.total === null ? t("traffic.traceRangeUnknown", { count: detail.trace.length }) : t("traffic.traceRange", { from: detail.tracePage.offset + 1, to: detail.tracePage.offset + detail.trace.length, total: detail.tracePage.total })}</p>{detail.trace.map((item, index) => (
                   <section key={`${item.atMs}-${item.kind}-${index}`} className="flex min-w-0 flex-col gap-1">
                     <p className="font-mono text-xs text-muted-foreground">
                       {formatTime(item.atMs)} [{item.kind}]{item.truncated ? t("traffic.truncatedInline") : ""}

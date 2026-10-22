@@ -18,6 +18,7 @@ import {
   describeDumpExchange,
   describeDumpTrace,
   readDumpCatalog,
+  readDumpSession,
   selectFilesOfLabel,
   summarizeDumpFiles,
   writerSessionOf,
@@ -92,7 +93,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     const error = controller.signal.aborted ? controller.signal.reason : cause;
     if (error instanceof ApiError) throw error;
     if (error instanceof TrafficDumpReadError || error instanceof TrafficDumpDebugError) {
-      throw new ApiError(error.code === "traffic_read_timeout" ? 504 : 503, error.code, error.message);
+      throw new ApiError(error.code === "invalid_parameter" ? 400 : error.code === "traffic_read_timeout" ? 504 : 503, error.code, error.message);
     }
     throw new ApiError(503, "traffic_unavailable", "调用记录不可读取：文件缺失、损坏或已被替换，请刷新后重试");
   } finally {
@@ -110,7 +111,21 @@ async function readTrafficApi({ apiPath, environment, response, url, context }) 
   assertParameters(url, apiPath === "/traffic" ? ["label", "limit", "offset", "session"] : ["id", "label", "session", "traceOffset"]);
   const located = locateOptionalUserConfig(environment);
   const directory = join(located?.dataDir ?? userDataDir(environment), "traffic");
-  const catalog = await readDumpCatalog(directory, context);
+  let catalog;
+  if (apiPath !== "/traffic" && url.searchParams.has("label") && url.searchParams.has("session")) {
+    const labels = url.searchParams.getAll("label");
+    const sessions = url.searchParams.getAll("session");
+    if (labels.length !== 1 || sessions.length !== 1) throw new ApiError(400, "unsupported_parameter", "label 与 session 只能出现一次");
+    let path;
+    try { path = await readDumpSession(directory, labels[0], sessions[0], context); }
+    catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      throw new ApiError(404, "traffic_session_not_found", "关联调用记录不可用：批次尚未写入、写入失败或已被清理；不会匹配其他请求");
+    }
+    catalog = { files: [path], labels: [{ label: labels[0] }], sessions: [] };
+  } else {
+    catalog = await readDumpCatalog(directory, context);
+  }
   const labels = catalog.labels;
   if (apiPath !== "/traffic" && url.searchParams.has("session") && labels.length === 0) {
     throw new ApiError(404, "traffic_session_not_found", "关联调用记录不可用：批次尚未写入、写入失败或已被清理；不会匹配其他请求");
@@ -176,7 +191,7 @@ async function readTrafficApi({ apiPath, environment, response, url, context }) 
     throw new ApiError(404, "traffic_exchange_not_found", `没有找到关联模型调用 #${id}：记录可能尚未写入、写入失败或已被清理；不会匹配其他请求`);
   }
   context.check();
-  if (traceOffset > 0 && traceOffset >= exchange.tracePage.total) {
+  if (traceOffset > 0 && exchange.tracePage.total !== null && traceOffset >= exchange.tracePage.total) {
     throw new ApiError(400, "invalid_parameter", "traceOffset 超出允许范围");
   }
   sendJson(response, 200, {

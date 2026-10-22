@@ -41,7 +41,7 @@ export function createTrafficReadContext(signal) {
     charge(kind, count = 1) {
       this.check();
       remaining[kind] -= count;
-      if (remaining[kind] < 0) throw new TrafficDumpReadError("traffic_read_limit", "调用记录读取超过整体工作预算，请缩小批次范围");
+      if (remaining[kind] < 0) throw new TrafficReadBudgetError("traffic_read_limit", "调用记录读取超过整体工作预算，请缩小批次范围");
     },
     async checkpoint() {
       this.check();
@@ -54,6 +54,27 @@ export function createTrafficReadContext(signal) {
 
 export class TrafficDumpReadError extends Error {
   constructor(code, message) { super(message); this.code = code; }
+}
+
+// Only exhaustion of the shared work budget may degrade optional diagnostics.
+// Cancellation, malformed records and file identity failures must still fail closed.
+class TrafficReadBudgetError extends TrafficDumpReadError {}
+
+/** Exact detail links do not need to enumerate unrelated writers. */
+export async function readDumpSession(directory, label, session, context) {
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}$/u.test(label)
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/u.test(session)) {
+    throw new TrafficDumpReadError("invalid_parameter", "调用记录定位参数无效");
+  }
+  context.rootDirectory = resolve(directory);
+  await readDirectoryMetadata(directory, context);
+  const path = join(directory, `${label}-${session}`);
+  const buffer = await readFileSliceAsync(join(path, manifestName), 0, maximumManifestBytes, false, context, true);
+  const manifest = validateManifest(parseJson(buffer.toString("utf8")), path);
+  if (manifest.version !== 2) throw new TrafficDumpReadError("traffic_unsupported_version", "不支持的模型流量转储版本");
+  if (manifest.label !== label || manifest.session !== session) throw new Error("模型流量 manifest 身份不匹配");
+  context.manifests.set(resolve(path), manifest);
+  return path;
 }
 
 /** 异步目录与 manifest 读取，避免 HTTP 扫描退回同步 CLI catalog。 */
@@ -184,6 +205,25 @@ export async function readDumpExchange(paths, id, context) {
   }
   const directory = sessionDirectories(paths, context)[0];
   let interaction;
+  if (context) {
+    const path = join(directory, interactionFileName);
+    if (!await fileExists(path, context)) return null;
+    let tail = true;
+    for await (const line of reverseDumpLines(path, context)) {
+      context.charge("records");
+      await context.checkpoint();
+      if (line.length === 0) continue;
+      await visitIndexLine(line, directory, record => {
+        if ((record.kind !== "request" && record.kind !== "response") || record.id !== id) return;
+        interaction ??= { directory, session: writerSessionOf(directory, context) };
+        interaction[record.kind] ??= record;
+      }, tail);
+      tail = false;
+      // Reading backwards preserves the last record of each kind even for repeated terminals.
+      if (interaction?.request !== undefined && interaction.response !== undefined) break;
+    }
+    return interaction?.request === undefined ? null : interaction;
+  }
   await forEachDumpRecord(paths, (record, recordDirectory) => {
     if ((record.kind !== "request" && record.kind !== "response") || record.id !== id) return;
     interaction ??= { directory: recordDirectory, session: writerSessionOf(directory, context) };
@@ -212,6 +252,7 @@ export async function describeDumpExchange(
   const responsePayload = await readPayload(directory, interaction.response?.payload, maxSectionBytes, false, context);
   const requestBody = parseJson(requestPayload.text);
   const responseBody = parseJson(responsePayload.text);
+  const debug = await debugDetail(interaction, maxSectionBytes, context);
   const facts = responseFacts(responseBody);
   const models = createModelEvidenceCollector();
   models.headers(interaction.response?.headers, "http.headers");
@@ -234,7 +275,12 @@ export async function describeDumpExchange(
     output.consume({ kind: "response_body", encoding: "utf8", text: responsePayload.text });
   }
   const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes, output, interaction, context);
-  const continuation = await readContinuation(interaction, context);
+  let continuation;
+  try { continuation = await readContinuation(interaction, context); }
+  catch (error) {
+    if (!(error instanceof TrafficReadBudgetError)) throw error;
+    continuation = { scope: "same_writer_thread_turn", complete: false, next: null };
+  }
   const collected = output.result();
   // Read existing V2 dumps using their explicit terminal payload; never rewrite archived data.
   if (terminalResponse && interaction.response.state === "completed") {
@@ -242,8 +288,8 @@ export async function describeDumpExchange(
   }
   return {
     ...summaryOf(interaction, requestBody, true, context),
-    ...await debugDetail(interaction, maxSectionBytes, context),
-    modelEvidence: models.result(),
+    ...debug,
+    modelEvidence: { ...models.result(), ...(!trace.page.complete ? { truncated: true } : {}) },
     chatDiagnostics: trace.chatDiagnostics,
     continuation,
     parameterComparison: parameterComparison(requestBody, responseBody),
@@ -282,7 +328,7 @@ export async function describeDumpExchange(
       storedBytes: interaction.response.payload?.bytes,
       ...(streamFacts ?? facts),
       ...collected,
-      ...(responsePayload.truncated || interaction.response.traceTruncated === true && collected.outputSource === "trace"
+      ...(responsePayload.truncated || (interaction.response.traceTruncated === true || !trace.page.complete) && collected.outputSource === "trace"
         ? { outputTruncated: true } : {}),
     },
     trace: trace.items,
@@ -309,7 +355,7 @@ async function readContinuation(interaction, context) {
       && (next === undefined || record.id < next.request.id)) next = { request: record };
     if (record.kind === "response" && next?.request.id === record.id) next.response = record;
   }, context);
-  if (next === undefined) return { scope: "same_writer_thread_turn", next: null };
+  if (next === undefined) return { scope: "same_writer_thread_turn", complete: true, next: null };
   // 只报告已保留输入中存在代理消息，不推断“新增”、重试或取消原因。
   const payload = await readPayload(directory, next.request.payload, 1_048_576, true, context);
   const body = parseJson(payload.text);
@@ -317,6 +363,7 @@ async function readContinuation(interaction, context) {
     && body.input.some(item => item?.type === "agent_message");
   return {
     scope: "same_writer_thread_turn",
+    complete: true,
     next: {
       id: next.request.id,
       startedAtMs: next.request.startedAtMs,
@@ -715,34 +762,80 @@ async function* dumpLines(path, context) {
   }
 }
 
+/** Bounded reverse lookup for exact HTTP details; append-only files are read at their opening size. */
+async function* reverseDumpLines(path, context) {
+  const handle = await openDumpFileAsync(path, context);
+  try {
+    let position = (await handle.stat()).size;
+    let parts = [];
+    let bytes = 0;
+    const append = part => {
+      bytes += part.length;
+      if (bytes > maximumLineBytes) throw new TrafficDumpReadError("traffic_read_limit", "模型流量记录超过 16 MiB 读取上限");
+      parts.unshift(part);
+    };
+    while (position > 0) {
+      await context.checkpoint();
+      const length = Math.min(65_536, position);
+      position -= length;
+      context.charge("bytes", length);
+      const buffer = Buffer.allocUnsafe(length);
+      let read = 0;
+      while (read < length) {
+        await context.checkpoint();
+        const { bytesRead } = await handle.read(buffer, read, length - read, position + read);
+        if (bytesRead === 0) throw new Error("模型流量索引在读取时被截断");
+        read += bytesRead;
+      }
+      await readDirectoryMetadata(dirname(path), context);
+      let end = length;
+      for (let index = buffer.lastIndexOf(10); index >= 0; index = buffer.lastIndexOf(10, index - 1)) {
+        append(buffer.subarray(index + 1, end));
+        yield Buffer.concat(parts, bytes).toString("utf8").replace(/\r$/u, "");
+        parts = []; bytes = 0; end = index;
+        if (index === 0) break;
+      }
+      append(buffer.subarray(0, end));
+    }
+    if (bytes > 0) yield Buffer.concat(parts, bytes).toString("utf8").replace(/\r$/u, "");
+  } finally { await handle.close(); }
+}
+
 async function readTrace(directory, id, offset, limit, maxBytes, output, interaction, context) {
   const items = [];
   let chatDiagnostics;
   let websocketClose;
   let remaining = maxBytes;
   let total = 0;
-  for await (const record of traceRecords(directory, context)) {
-    if (websocketClose === undefined && interaction?.response?.errorScope === "websocket_client_closed"
-      && record?.kind === "websocket_close" && record.peer === "client"
-      && Number.isSafeInteger(interaction.request.connection) && record.connection === interaction.request.connection
-      && record.ts >= interaction.request.startedAtMs && record.ts <= interaction.response.ts
-      && Number.isInteger(record.code) && record.code >= 1000 && record.code <= 4999) {
-      websocketClose = { peer: "client", code: record.code, atMs: record.ts };
+  let complete = true;
+  try {
+    for await (const record of traceRecords(directory, context)) {
+      if (websocketClose === undefined && interaction?.response?.errorScope === "websocket_client_closed"
+        && record?.kind === "websocket_close" && record.peer === "client"
+        && Number.isSafeInteger(interaction.request.connection) && record.connection === interaction.request.connection
+        && record.ts >= interaction.request.startedAtMs && record.ts <= interaction.response.ts
+        && Number.isInteger(record.code) && record.code >= 1000 && record.code <= 4999) {
+        websocketClose = { peer: "client", code: record.code, atMs: record.ts };
+      }
+      if (record?.interaction !== id) continue;
+      if (record.kind === "chat_diagnostics" && record.fields && typeof record.fields === "object" && !Array.isArray(record.fields)) {
+        chatDiagnostics = { fields: record.fields, truncated: record.truncated === true };
+      }
+      output?.consume(record);
+      if (total >= offset && items.length < limit && remaining > 0) {
+        const raw = JSON.stringify(record);
+        const buffer = Buffer.from(raw, "utf8");
+        const text = buffer.subarray(0, Math.max(0, remaining)).toString("utf8");
+        const truncated = buffer.length > remaining;
+        remaining -= Math.min(buffer.length, remaining);
+        items.push({ atMs: record.ts, kind: record.kind, text, truncated });
+      }
+      total += 1;
     }
-    if (record?.interaction !== id) continue;
-    if (record.kind === "chat_diagnostics" && record.fields && typeof record.fields === "object" && !Array.isArray(record.fields)) {
-      chatDiagnostics = { fields: record.fields, truncated: record.truncated === true };
-    }
-    output?.consume(record);
-    if (total >= offset && items.length < limit && remaining > 0) {
-      const raw = JSON.stringify(record);
-      const buffer = Buffer.from(raw, "utf8");
-      const text = buffer.subarray(0, Math.max(0, remaining)).toString("utf8");
-      const truncated = buffer.length > remaining;
-      remaining -= Math.min(buffer.length, remaining);
-      items.push({ atMs: record.ts, kind: record.kind, text, truncated });
-    }
-    total += 1;
+  } catch (error) {
+    if (!(error instanceof TrafficReadBudgetError)) throw error;
+    complete = false;
+    if (chatDiagnostics) chatDiagnostics.truncated = true;
   }
   return {
     items,
@@ -750,9 +843,10 @@ async function readTrace(directory, id, offset, limit, maxBytes, output, interac
     websocketClose,
     page: {
       offset,
-      total,
+      total: complete ? total : null,
+      complete,
       previousOffset: offset === 0 ? null : Math.max(0, offset - limit),
-      nextOffset: offset + items.length < total ? offset + items.length : null,
+      nextOffset: complete && offset + items.length < total ? offset + items.length : null,
     },
   };
 }
