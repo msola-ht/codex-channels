@@ -1,6 +1,6 @@
 # CLI 入口
 
-本目录保存 npm 包对用户暴露的 `codexc` 可执行入口。
+本目录保存 npm 包对用户暴露的 `codexc` 和独立 `strata-video-mcp` 可执行入口。
 
 ## 文件
 
@@ -8,6 +8,8 @@
   命令；帮助数据与执行实现分离，命中命令或交互菜单后才加载相应实现；自身不持有 Gateway、App Server 或后台服务状态机。`doctor` 会执行安装、配置和服务连通性诊断。
 
 ## 命令范围
+
+独立入口 `strata-video-mcp.mjs` 直接调用视频分析模块，由 npm 安装为跨平台的 `strata-video-mcp` 命令。不经过 Gateway CLI 分派，不启动服务或连接 App Server。
 
 `delivery` 委托 `scripts/delivery-command.mjs` 离线查看和处理未确认渠道投递；参数与备份恢复步骤见 [投递箱运维](../docs/delivery.md)。
 
@@ -38,7 +40,7 @@
   就绪、单次子进程环境和令牌脱敏由 `scripts/desktop-app-command.mjs` 负责。macOS 通过受管 stdio
   Proxy 附加带生命周期保护的可信工具 Host，不再依赖桥端口或令牌，并由 `status` 单独报告；
   Windows 仍只承诺未实机验收的会话共享预览。
-- `video-mcp`：在当前进程内调用当前安装的视频分析模块，保持 stdio 仅承载 MCP 协议，复用模块的取消、EOF 和信号退出；不加载 Gateway 配置、不连接 App Server。新增 Strata 预设通过宿主 PATH 调用此命令，不保存 Node 或脚本的安装路径，详见[视频分析 MCP](../docs/video-analysis-mcp.md)。
+- `video-mcp`：在当前进程内调用当前安装的视频分析模块，保持 stdio 仅承载 MCP 协议，复用模块的取消、EOF 和信号退出；不加载 Gateway 配置、不连接 App Server。此入口供显式调用；新增 Strata 预设通过宿主 PATH 调用独立的 `strata-video-mcp`，不保存 Node 或脚本的安装路径，详见[视频分析 MCP](../docs/video-analysis-mcp.md)。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、设置默认、注册或移除 Workspace，或进入交互工作区菜单；菜单区分新建目录、注册当前目录和注册已有目录；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
 - `cleanup sessions <最大轮数>`：直接预览或确认归档旧会话；无参数 `cleanup` 提供交互入口。转储与指标维护分别使用 `cleanup traffic`、`cleanup metrics [prune|reset]`，原领域命令只负责查询。

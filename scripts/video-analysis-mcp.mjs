@@ -148,7 +148,7 @@ export function serveVideoMcp(config, input = process.stdin, output = process.st
 
 export async function runVideoMcp(args = []) {
   if (args.length === 1 && ["-h", "--help"].includes(args[0])) {
-    console.log("用法：codexc video-mcp\n亦可直接运行 node scripts/video-analysis-mcp.mjs。\n独立视频分析 MCP（stdio）。必填环境变量：STRATA_VIDEO_BASE_URL、STRATA_VIDEO_API_KEY、STRATA_VIDEO_MODEL、STRATA_VIDEO_ROOT（已存在目录的绝对路径，或 any 表示只接受本机绝对路径而不限定目录）。可选 STRATA_VIDEO_CHANNEL_ROOT、STRATA_VIDEO_TIMEOUT_SECONDS（默认 900，1–1800）、STRATA_VIDEO_TRANSPORT（默认 files；旧版需显式 url）。预算由 Strata 管理；reasoning_effort 默认 medium，可选 none、low、medium、xhigh。详见 docs/video-analysis-mcp.md。");
+    console.log("用法：strata-video-mcp\n亦可运行 codexc video-mcp 或 node scripts/video-analysis-mcp.mjs。\n独立视频分析 MCP（stdio）。必填环境变量：STRATA_VIDEO_BASE_URL、STRATA_VIDEO_API_KEY、STRATA_VIDEO_MODEL、STRATA_VIDEO_ROOT（已存在目录的绝对路径，或 any 表示只接受本机绝对路径而不限定目录）。可选 STRATA_VIDEO_CHANNEL_ROOT、STRATA_VIDEO_TIMEOUT_SECONDS（默认 900，1–1800）、STRATA_VIDEO_TRANSPORT（默认 files；旧版需显式 url）。预算由 Strata 管理；reasoning_effort 默认 medium，可选 none、low、medium、xhigh。详见 docs/video-analysis-mcp.md。");
     return;
   }
   try {
