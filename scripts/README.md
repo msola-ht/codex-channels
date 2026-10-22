@@ -12,7 +12,7 @@
 - `source-build.mjs`：首装 Shell/PowerShell 与更新器共用的源码构建阶段；无需已安装依赖即可加载，显式处理 ignore-scripts、根依赖/Hook/Gateway/WebUI 构建与产物检查。各入口保留命令执行、取消和安装事务所有权。
 - `cli-command-worker.mjs`：安装命令、更新准备命令、服务控制器、Doctor、Desktop 平台查询与 WebUI 管理任务共用的 Unix 进程组监管入口；等待后代输出管道关闭，保留组长身份以支持取消升级为强制终止，不把直接子进程退出当作整组完成。管理任务可显式转发 stdin 协作取消，其他调用方仍忽略输入。Windows 保留调用方已有的进程所有权机制。
 
-- `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，`runVideoMcp` 供 `codexc video-mcp` 在当前进程调用，仍支持直接运行脚本；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。新增 Strata 预设保存 `codexc video-mcp`，由宿主 PATH 选择安装，不保存 Node 版本或脚本路径。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
+- `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，`runVideoMcp` 供独立入口 `strata-video-mcp` 及 `codexc video-mcp` 在当前进程调用，仍支持直接运行脚本；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。新增 Strata 预设保存独立命令 `strata-video-mcp`，由标准 MCP 宿主 PATH 选择安装，不保存 Node 版本或脚本路径。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
 - `mcp-setup.mjs`：`codexc config → 工具与 MCP` 的添加、编辑、删除交互入口。添加支持 stdio、Streamable HTTP、AnySearch 搜索和 Strata 视频预设；预设只问必要信息，通用类型保留自定义字段。编辑仅修改选定用户 MCP 字段，保留其他设置与凭据；删除只移除选定用户配置条目，不操作插件、包或附件。三种操作共用脱敏摘要、最终确认、带修订的配置事务及回读校验，拒绝同名添加，不自动重试写入。AnySearch Key 保存为 Bearer Header；Strata 固定文件引用模式及分析时限，从有效 Gateway 配置推导渠道附件目录，最终确认后复核并准备私有权限。不自动安装、启动或重启服务。
 - `video-analysis-client.mjs`：视频 MCP 的严格环境配置、本机路径校验（授权目录内文件名/绝对路径，或 `STRATA_VIDEO_ROOT=any` 时的任意绝对路径，渠道附件目录内的路径始终拒绝）、有界读取及 Strata Files/Responses 请求；默认使用有界内存 file_id 映射、共享上传及一次明确失效恢复，显式 url 模式兼容旧部署；通过 `instructions` 发送通用视频分析规则，用户问题保持原样，可用有界 `context` 补充同一视频追问线索；预算由上游管理，支持显式思考等级，白名单提取用量及失败分类，只在完整 `completed` 响应中提取分析文字，不接受任意远程视频 URL，不执行模型返回的内容。
 

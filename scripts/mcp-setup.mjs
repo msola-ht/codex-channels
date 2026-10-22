@@ -330,7 +330,7 @@ export async function runMcpSetup({ environment = process.env, dataDir, configPa
       };
       // Validate service settings now; the attachment directory is prepared only after confirmation.
       await videoConfiguration({ ...env, STRATA_VIDEO_CHANNEL_ROOT: undefined });
-      server = { command: "codexc", args: ["video-mcp"], env,
+      server = { command: "strata-video-mcp", args: [], env,
         tool_timeout_sec: Number(env.STRATA_VIDEO_TIMEOUT_SECONDS) + 60 };
     } else if (kind === "anysearch") {
       server = { url: "https://api.anysearch.com/mcp", http_headers: { Authorization: `Bearer ${await apiKey("AnySearch")}` } };
@@ -369,7 +369,7 @@ export async function runMcpSetup({ environment = process.env, dataDir, configPa
     if (server.bearer_token_env_var || server.env_vars?.length || Object.keys(server.env_http_headers ?? {}).length) {
       output.write("引用的环境变量须由实际启动 Codex 的宿主提供。\n");
     }
-    if (kind === "strata") output.write("启动命令：codexc video-mcp；启动 MCP 的宿主 PATH 必须能找到当前安装的 codexc 和 Node，不保存版本目录。\n文件引用模式需要 Strata 启用 video_files；其他传输方式可通过自定义 stdio 或原生配置设置。\n");
+    if (kind === "strata") output.write("启动命令：strata-video-mcp；标准 stdio MCP，官方 CLI 或其他客户端的 PATH 必须能找到随本项目安装的独立命令和 Node，不经过 codexc，也不保存版本目录。\n文件引用模式需要 Strata 启用 video_files；其他传输方式可通过自定义 stdio 或原生配置设置。\n");
     output.write("未读取插件清单；请使用独立名称，用户配置中的同名 MCP 会优先于插件服务器。\n");
     if (await ask("confirm", { message: "确认新增并保存上述 MCP？", initialValue: false }) !== true) return { action: "back" };
     if (kind === "strata") {

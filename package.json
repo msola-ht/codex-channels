@@ -21,7 +21,8 @@
   "type": "module",
   "private": true,
   "bin": {
-    "codexc": "bin/codexc.mjs"
+    "codexc": "bin/codexc.mjs",
+    "strata-video-mcp": "bin/strata-video-mcp.mjs"
   },
   "files": [
     "provider-model-catalog.json",

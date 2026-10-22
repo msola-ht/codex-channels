@@ -560,7 +560,7 @@ Windows 先以临时 Provider 租约等待目标实例就绪，再检查桥并�
 当前支持默认应用访问、浏览器历史访问和默认站点策略，以及配置中已有的 macOS Bundle ID、Windows AUMID
 和站点规则。普通 MCP 可修改启用状态、启动/调用超时、工具允许/禁用列表与审批策略；已有单工具覆盖还可修改
 审批和输出 token 上限。插件 MCP 只开放这些策略覆盖，不修改插件清单里的启动命令、环境和超时。
-Strata 的调用超时在 CLI、MCP 编辑菜单和 WebUI 通用工具设置中均须大于分析预算；无法确定实际目标、继承值或宿主参数时拒绝保存，已有不安全的合并时限需通过原生配置修复后重读，详见[视频分析 MCP](video-analysis-mcp.md)。新增 Strata 预设保存 `command = "codexc"`、`args = ["video-mcp"]`，通过实际 MCP 宿主的 PATH 选择安装，不写死 Node 版本或脚本路径；通用 stdio 保留操作者输入的命令。已有配置不会自动改写。
+Strata 的调用超时在 CLI、MCP 编辑菜单和 WebUI 通用工具设置中均须大于分析预算；无法确定实际目标、继承值或宿主参数时拒绝保存，已有不安全的合并时限需通过原生配置修复后重读，详见[视频分析 MCP](video-analysis-mcp.md)。新增 Strata 预设保存 `command = "strata-video-mcp"`、`args = []`，通过实际 MCP 宿主的 PATH 选择独立入口，不经过 `codexc`，不写死 Node 版本或脚本路径；通用 stdio 保留操作者输入的命令。已有配置不会自动改写。
 MCP 管理结束时若临时连接关闭未确认，会显示独立告警并保留已保存结果；不要因此重复写入。同进程的后续配置操作先重试清理，仍失败时不创建替代连接。
 新增 MCP 使用 `codexc config → 工具与 MCP → 新增 MCP`：支持本地 stdio、远程 Streamable HTTP、AnySearch 搜索和 Strata 视频预设。统一按“选择类型 → 填写必要信息 → 查看脱敏摘要 → 确认保存”执行；预设采用固定默认参数，仅询问服务必需信息，通用类型保留自定义配置。stdio 逐项输入命令、参数 JSON 数组、工作目录、环境变量和继承变量；HTTP 输入 URL、Bearer Token 环境变量名、固定 Header 和环境变量 Header。通用类型可设置启动/调用超时及启用状态，默认 10 秒、60 秒和启用；Strata 预设调用超时为 960 秒。预设 API Key 与密钥类 JSON 均隐藏输入，固定值写入 Codex 用户配置；环境变量引用需由实际启动 Codex 的宿主提供。保存前显示脱敏摘要及目标路径，确认后按配置修订写入；同名服务器拒绝覆盖，配置冲突不自动重试。此入口不安装 MCP 包、不执行命令探测、不自动重启服务，OAuth 登录仍使用 Codex 原生入口。Strata 预设详见[视频分析 MCP](video-analysis-mcp.md)。
 

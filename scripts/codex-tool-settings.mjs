@@ -80,9 +80,10 @@ export async function toolSettingEdits(input, config, merged, invalid) {
 
 export function isStrataServer(server) {
   return typeof server?.command === "string" && !server.url
-    && Array.isArray(server.args)
-    && ((server.command === "codexc" && server.args[0] === "video-mcp")
-      || server.args[0] === join(packageDir, "scripts", "video-analysis-mcp.mjs"));
+    && (server.command === "strata-video-mcp"
+      || (Array.isArray(server.args)
+        && ((server.command === "codexc" && server.args[0] === "video-mcp")
+          || server.args[0] === join(packageDir, "scripts", "video-analysis-mcp.mjs"))));
 }
 
 /** Validate the actual merged target, without guessing values hidden below user overrides. */
