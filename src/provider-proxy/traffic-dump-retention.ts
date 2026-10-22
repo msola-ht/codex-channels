@@ -167,14 +167,18 @@ function planRetention(options: PruneModelTrafficDumpOptions, byLabel: Map<strin
   let bytes = 0;
   for (const sessions of byLabel.values()) {
     sessions.sort((left, right) => right.lastActivityAtMs - left.lastActivityAtMs || right.createdAtMs - left.createdAtMs);
-    let retained = 0;
+    // Older active sessions must consume the budget before choosing newer history.
+    // Otherwise a protected tail can push the result past a limit without evicting any candidate.
+    const protectedSessions = new Set(sessions.filter(session => activeSessionDirectories.has(session.path)
+      || protectedDirectories.has(session.path) || options.isProtected?.(session.path) === true));
+    let retained = [...protectedSessions].reduce((sum, session) => sum + session.size, 0);
     for (const session of sessions) {
-      const protectedSession = activeSessionDirectories.has(session.path) || protectedDirectories.has(session.path) || options.isProtected?.(session.path) === true;
-      if (!protectedSession && oldestRetainedAtMs !== null && session.lastActivityAtMs < oldestRetainedAtMs) {
+      if (protectedSessions.has(session)) { bytes += session.size; continue; }
+      if (oldestRetainedAtMs !== null && session.lastActivityAtMs < oldestRetainedAtMs) {
         remove.push(session); continue;
       }
       retained += session.size;
-      if (protectedSession || retained <= (options.maximumBytes ?? retainedBytesPerLabel)) bytes += session.size;
+      if (retained <= (options.maximumBytes ?? retainedBytesPerLabel)) bytes += session.size;
       else remove.push(session);
     }
   }

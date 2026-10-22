@@ -7,7 +7,10 @@ export function redactTrafficHeaderValue(name: string, value: string): string {
   if (sensitiveName.test(name) || /^\s*(?:Bearer|Basic|Digest)\s+/iu.test(value)) return "[REDACTED]";
   const text = name.toLowerCase().startsWith("content-security-policy")
     ? value.replace(/'nonce-[^']*'/giu, "'nonce-[REDACTED]'") : value;
-  const urls = text.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/giu, raw => {
+  // Consume bare scheme-shaped words too, so a missing :// cannot retry every
+  // suffix of a long ordinary header value with quadratic backtracking.
+  const urls = text.replace(/[a-z][a-z0-9+.-]*(?::\/\/[^\s"'<>]+)?/giu, raw => {
+    if (!raw.includes("://")) return raw;
     try {
       const url = new URL(raw);
       let changed = false;

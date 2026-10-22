@@ -23,6 +23,7 @@ export interface TrafficPayloadPart {
 }
 
 export interface TrafficDumpSession {
+  acceptedBytes: number;
   activeInteractions: number;
   closing: boolean;
   interactionCount: number;
@@ -44,12 +45,12 @@ interface TrafficDumpStorageOptions {
   retentionDays: number;
   maximumPendingBytes?: number;
   pendingBudget?: PendingBudget;
-  rotateAfterPayloadBytes?: number;
+  rotateAfterBytes?: number;
   retentionManagedExternally?: boolean;
   onBytesAccepted?: (bytes: number) => void;
 }
 
-type WriteJob = { session: TrafficDumpSession; name: string; content: string | Buffer; bytes: number; trace?: true };
+type WriteJob = { session: TrafficDumpSession; name: string; content: string | Buffer; bytes: number; manifestBytes?: number; trace?: true };
 type RetireJob = { session: TrafficDumpSession; bytes: 0 };
 type Job = WriteJob | RetireJob;
 type SessionFiles = { prepared: boolean; files: Map<string, FileHandle> };
@@ -61,6 +62,7 @@ export class TrafficDumpStorage {
   private readonly jobs: Job[] = [];
   private readonly files = new Map<TrafficDumpSession, SessionFiles>();
   private readonly protections = new Map<TrafficDumpSession, () => void>();
+  private readonly retirements = new Map<TrafficDumpSession, { promise: Promise<void>; resolve: () => void }>();
   private readonly abortController = new AbortController();
   private currentSession: TrafficDumpSession | undefined;
   private running: Promise<void> | undefined;
@@ -86,9 +88,16 @@ export class TrafficDumpStorage {
   }
   completeLogicalInteraction(session: TrafficDumpSession): void {
     if (session.activeInteractions > 0) session.activeInteractions--;
-    if (session !== this.currentSession) this.retireSession(session);
+    if (session !== this.currentSession) void this.retireSession(session);
   }
   nextInteractionId(session: TrafficDumpSession): number { return ++session.interactionCount; }
+  /** Release an idle current session only after its accepted writes and handles settle. */
+  retireIdleSession(): Promise<void> {
+    const session = this.currentSession;
+    if (!session || session.activeInteractions > 0 || this.closed || this.failed) return Promise.resolve();
+    this.currentSession = undefined;
+    return this.retireSession(session) ?? Promise.resolve();
+  }
   reference(session: TrafficDumpSession, interaction: number): ProviderProxyMetrics["traffic"] {
     return this.closed || this.failed ? undefined : { label: this.label, session: session.writerSession, interaction };
   }
@@ -133,7 +142,7 @@ export class TrafficDumpStorage {
     if (this.closing) return this.closing;
     this.closed = true;
     this.currentSession = undefined;
-    for (const session of this.state.sessions) this.retireSession(session, true);
+    for (const session of this.state.sessions) void this.retireSession(session, true);
     this.closing = this.closeWithinBudget().catch((error: unknown) => {
       this.closing = undefined;
       throw error;
@@ -162,13 +171,12 @@ export class TrafficDumpStorage {
   private ensureCurrentSession(startedAtMs: number, rotate: boolean): TrafficDumpSession {
     const current = this.currentSession;
     if (current && (!rotate || startedAtMs - current.startedAtMs < sessionRotationIntervalMs
-      && (this.options.rotateAfterPayloadBytes === undefined || current.payloadFileIndex === 1
-        && current.payloadWrittenBytes < this.options.rotateAfterPayloadBytes))) return current;
+      && current.acceptedBytes < (this.options.rotateAfterBytes ?? modelTrafficDumpFileSizeLimitBytes))) return current;
     // Allocate identity before any async work; collisions fail closed without rebinding published references.
     // Keep the existing timestamp/numeric-suffix contract used by Relay metrics admission.
     const nonce = BigInt(`0x${randomUUID().replaceAll("-", "")}`).toString(10);
     const writerSession = `${new Date(startedAtMs).toISOString().replace(/[:.]/gu, "-")}-${nonce}`;
-    const session: TrafficDumpSession = { activeInteractions: 0, closing: false, interactionCount: 0,
+    const session: TrafficDumpSession = { acceptedBytes: 0, activeInteractions: 0, closing: false, interactionCount: 0,
       payloadFileIndex: 1, payloadWrittenBytes: 0, sessionDirectory: join(this.options.directory, `${this.label}-${writerSession}`),
       startedAtMs, traceFileIndex: 1, traceWrittenBytes: 0, writerSession };
     if (!this.closed && !this.failed) {
@@ -178,7 +186,7 @@ export class TrafficDumpStorage {
         this.protections.set(session, protectModelTrafficDumpSession(session.sessionDirectory));
       }
     }
-    if (current) this.retireSession(current);
+    if (current) void this.retireSession(current);
     return session;
   }
 
@@ -193,9 +201,17 @@ export class TrafficDumpStorage {
   }
   private enqueue(job: Job): boolean {
     if (this.failed) return false;
-    if (!this.hasCapacity(job.bytes)) { this.fail("queue", "capacity"); return false; }
+    // Reserve the immutable manifest with the first accepted write, including while it is pending.
+    const manifestBytes = "name" in job && job.session.acceptedBytes === 0
+      ? Buffer.byteLength(this.manifest(job.session)) : 0;
+    if (!this.hasCapacity(job.bytes + manifestBytes)) { this.fail("queue", "capacity"); return false; }
+    if ("name" in job) {
+      job.manifestBytes = manifestBytes;
+      job.bytes += manifestBytes;
+      job.session.acceptedBytes += job.bytes;
+    }
     this.budget.bytes += job.bytes; this.budget.items++;
-    if ("trace" in job && job.trace) this.budget.traceBytes += job.bytes;
+    if ("trace" in job && job.trace) this.budget.traceBytes += job.bytes - (job.manifestBytes ?? 0);
     this.jobs.push(job);
     this.options.onBytesAccepted?.(job.bytes);
     this.startDrain();
@@ -212,7 +228,7 @@ export class TrafficDumpStorage {
   }
   private release(job: Job): void {
     this.budget.bytes -= job.bytes; this.budget.items--;
-    if ("trace" in job && job.trace) this.budget.traceBytes -= job.bytes;
+    if ("trace" in job && job.trace) this.budget.traceBytes -= job.bytes - (job.manifestBytes ?? 0);
     if (this.budget.items === 0) this.capacityNotices.clear();
   }
   private async drain(): Promise<void> {
@@ -225,6 +241,7 @@ export class TrafficDumpStorage {
           await this.closeSessionFiles(job.session);
           this.state.sessions.delete(job.session);
           this.protections.get(job.session)?.(); this.protections.delete(job.session);
+          this.finishRetirement(job.session);
           this.pruneSessions();
         }
       } catch (error) { if (!this.failed) this.fail("write", errorReason(error)); }
@@ -242,7 +259,7 @@ export class TrafficDumpStorage {
       await fs.mkdir(job.session.sessionDirectory, { mode: 0o700 }); signal.throwIfAborted();
       await securePrivateDirectory(job.session.sessionDirectory, { signal }); signal.throwIfAborted();
       const manifestPath = join(job.session.sessionDirectory, "manifest.json");
-      const manifest = `${JSON.stringify({ createdAtMs: job.session.startedAtMs, label: this.label, session: job.session.writerSession, version: 2 }, null, 2)}\n`;
+      const manifest = this.manifest(job.session);
       const pendingPath = join(job.session.sessionDirectory, `.manifest-${randomUUID()}.pending`);
       try {
         // Finish both private access preparation and Runtime staging cleanup before
@@ -263,8 +280,6 @@ export class TrafficDumpStorage {
         await fs.rm(pendingPath, { force: true });
         throw error;
       }
-      // A completed publish remains accepted even if cancellation arrived in rename.
-      this.options.onBytesAccepted?.(Buffer.byteLength(manifest));
       signal.throwIfAborted();
       resources.prepared = true;
       this.pruneSessions();
@@ -288,10 +303,22 @@ export class TrafficDumpStorage {
     await file.writeFile(job.content);
     signal.throwIfAborted();
   }
-  private retireSession(session: TrafficDumpSession, force = false): void {
-    if (session.closing || !force && session.activeInteractions > 0) return;
+  private manifest(session: TrafficDumpSession): string {
+    return `${JSON.stringify({ createdAtMs: session.startedAtMs, label: this.label, session: session.writerSession, version: 2 }, null, 2)}\n`;
+  }
+  private retireSession(session: TrafficDumpSession, force = false): Promise<void> | undefined {
+    if (session.closing) return this.retirements.get(session)?.promise;
+    if (!force && session.activeInteractions > 0) return undefined;
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    this.retirements.set(session, { promise, resolve });
     session.closing = true;
     this.enqueue({ session, bytes: 0 });
+    return promise;
+  }
+  private finishRetirement(session: TrafficDumpSession): void {
+    this.retirements.get(session)?.resolve();
+    this.retirements.delete(session);
   }
   private async closeSessionFiles(session: TrafficDumpSession): Promise<void> {
     const resources = this.files.get(session);
@@ -308,6 +335,7 @@ export class TrafficDumpStorage {
     if (results.some(result => result.status === "rejected")) throw new Error("Traffic dump session cleanup failed");
     for (const release of this.protections.values()) release();
     this.protections.clear(); this.state.sessions.clear();
+    for (const session of this.retirements.keys()) this.finishRetirement(session);
   }
   private cleanupAfterWrites(): Promise<void> {
     if (this.cleanupTask) return this.cleanupTask;

@@ -1,4 +1,5 @@
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
+import { setTimeout as delay } from "node:timers/promises";
 import { RelayDumpPayload, redactRelayValue } from "./relay-dump-payload.js";
 import { capturedTrafficHeaders } from "./traffic-dump-headers.js";
 import { ChatDiagnostics } from "./chat-diagnostics.js";
@@ -32,6 +33,7 @@ export class RelayTrafficDump {
   private ready = false;
   private retentionDays = 30;
   private maintenance: Promise<void> | undefined;
+  private maintenanceReleaseIdle = false;
   private lastMaintenance = -Infinity;
   private readonly maintenanceAbort = new AbortController();
   private active = 0;
@@ -47,7 +49,7 @@ export class RelayTrafficDump {
     const create = (protocol: "chat" | "responses"): TrafficDumpStorage => {
       const sessions = new Set<TrafficDumpSession>(); this.sessionGroups.push(sessions);
       return new TrafficDumpStorage({ ...options, label: `relay.${protocol}`, retentionDays: this.retentionDays,
-        retentionManagedExternally: true, maximumPendingBytes: 14 * MiB, pendingBudget, rotateAfterPayloadBytes: 8 * MiB,
+        retentionManagedExternally: true, maximumPendingBytes: 14 * MiB, pendingBudget, rotateAfterBytes: 8 * MiB,
         onBytesAccepted: bytes => { this.retained += bytes; },
         onCapacity: error => this.notice(error.message), onError: error => this.fail(error.message) }, {
         sessions,
@@ -76,18 +78,26 @@ export class RelayTrafficDump {
       return this.begin(provider, debug);
     });
   }
-  private maintain(): Promise<void> {
-    if (this.maintenance) return this.maintenance;
+  private maintain(releaseIdle = false): Promise<void> {
+    if (this.maintenance) {
+      this.maintenanceReleaseIdle ||= releaseIdle;
+      return this.maintenance;
+    }
     if (this.closed || this.failed) return Promise.resolve();
     const initializing = !this.ready;
     const timer = setTimeout(() => {
       this.maintenanceAbort.abort();
       this.fail("Relay traffic dump maintenance failed (timeout)");
     }, 5000);
-    const protectedSessionDirectories = [...this.sessions].flatMap(session => session.sessionDirectory ? [session.sessionDirectory] : []);
     this.maintenance = (async () => {
+      if (releaseIdle) {
+        await delay(Math.max(0, 1000 - (performance.now() - this.lastMaintenance)), undefined, { signal: this.maintenanceAbort.signal });
+        await Promise.all(Object.values(this.storage).map(storage => storage.retireIdleSession()));
+        this.maintenanceAbort.signal.throwIfAborted();
+      }
+      const protectedSessionDirectories = this.sessions.map(session => session.sessionDirectory);
       const retained = await pruneModelTrafficDumpSessionsAsync({ directory: this.options.directory, labels: ["relay.chat", "relay.responses"], retentionDays: this.retentionDays,
-        maximumBytes: 512 * MiB - reservationBytes - 128 * 1024,
+        maximumBytes: Math.max(0, 512 * MiB - this.reserved - reservationBytes - 128 * 1024),
         protectedSessionDirectories, isProtected: path => this.sessions.some(session => session.sessionDirectory === path),
         onRemoved: bytes => { if (!initializing) this.retained -= bytes; } }, this.maintenanceAbort.signal);
       if (initializing) this.retained = retained;
@@ -95,6 +105,9 @@ export class RelayTrafficDump {
     })().catch(() => { if (!this.closed) this.fail(); }).finally(() => {
       this.lastMaintenance = performance.now(); this.maintenance = undefined;
       clearTimeout(timer);
+      const again = this.maintenanceReleaseIdle;
+      this.maintenanceReleaseIdle = false;
+      if (again && this.retained + this.reserved + reservationBytes > 512 * MiB) void this.maintain(true);
     });
     return this.maintenance;
   }
@@ -105,7 +118,7 @@ export class RelayTrafficDump {
     const reservation = reservationBytes + (debug ? 128 * 1024 : 0);
     const full = this.retained + this.reserved + reservation > 512 * MiB;
     const elapsed = performance.now() - this.lastMaintenance;
-    if (!this.ready || elapsed >= 60_000 || full && elapsed >= 1000) void this.maintain();
+    if (!this.ready || elapsed >= 60_000 || full) void this.maintain(full);
     if (!this.ready || full) {
       if (full) this.skippedCapacity = Math.min(Number.MAX_SAFE_INTEGER, this.skippedCapacity + 1);
       this.notice(this.ready ? "Relay traffic dump capacity unavailable; capture skipped"
@@ -207,6 +220,7 @@ export class RelayTrafficDump {
           finished = true; inboundBody = undefined; inboundHead = undefined;
           upstream.discard(); delivered?.discard(); this.active--; this.reserved -= reservation;
           storage.completeLogicalInteraction(session);
+          if (this.retained + this.reserved + reservationBytes > 512 * MiB) void this.maintain(true);
           return requestSaved && !this.failed ? reference : undefined;
         },
       };
