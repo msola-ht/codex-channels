@@ -109,9 +109,11 @@ export async function runCodexDefaultsSetup({
   if (result.writeStatus === "okOverridden") {
     output.write("用户配置已保存，但本次修改受到更高优先级配置覆盖；保存不代表有效配置已改变。\n");
   }
-  const activationResult = configActivationResult(result.consistency === "unknown"
-    || result.writeStatus === "okOverridden" ? "none" : result.activation);
-  writeGatewayConfigActivationNotice(output, environment, activationResult);
+  const activationResult = result.consistency === "unknown" || result.writeStatus === "okOverridden"
+    ? null : configActivationResult(result.activation);
+  if (activationResult !== null) {
+    writeGatewayConfigActivationNotice(output, environment, activationResult);
+  }
   return {
     action: result.action,
     consistency: result.consistency,

@@ -12,7 +12,7 @@ export interface CodexDefaultsSetupResult {
   model: string;
   effort: string;
   activation: CodexUserSettingActivation;
-  activationResult: ConfigActivationResult;
+  activationResult: ConfigActivationResult | null;
 }
 
 export interface CodexDefaultsSetupBackResult {

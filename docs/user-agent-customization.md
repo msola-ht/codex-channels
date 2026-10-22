@@ -243,7 +243,8 @@ Provider ID 字符串插值到全局 UA。
   `model_request_metrics.user_agent`（限长 512），供 WebUI 请求明细逐条展示。
 - `runtime/terminal-identity.mjs`：按当前锁定 Codex CLI 的探测顺序从进程环境推导终端标识；
   `detectTerminalUserAgentToken` 复现官方取值供 UA 文本预填使用，`detectTerminalIdentity`
-  只在结果可作为 `terminal_identity` 记录时返回，探不到终端或只探测到 `dumb` 时返回 `null`。
+  只在结果满足 `terminal_identity` 的字符规则和总长 1–64 时返回；超长、探不到终端或只探测到 `dumb`
+  时返回 `null`，不截断标识，UA 探测原值不受此保存约束影响。
 - `runtime/app-server-service-runtime.mjs`：App Server 服务进程启动每个 Provider Proxy 时统一读取
   `[codex].upstream_user_agent`，主代理、按需 Provider 代理和 OpenCode Go 共享代理复用同一值；
   启动主 App Server 与 Provider App Server 前把 `[codex].terminal_identity` 写入子进程的

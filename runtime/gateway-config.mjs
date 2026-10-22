@@ -142,9 +142,9 @@ const upstreamUserAgentSchema = z.string().min(1).max(512).refine(
   "upstream_user_agent 必须是 1–512 个可显示 ASCII 字符，且不允许首尾空白或其他控制字符",
 );
 
-/** `[codex].terminal_identity` 的字面格式：`终端名` 或 `终端名/版本`。 */
+/** `[codex].terminal_identity` 的字面格式：`终端名` 或 `终端名/版本`，总长 1–64。 */
 export const terminalIdentityPattern =
-  /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/u;
+  /^(?=.{1,64}$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/u;
 
 const terminalIdentitySchema = z.string().max(
   64,

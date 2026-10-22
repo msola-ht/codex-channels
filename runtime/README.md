@@ -196,7 +196,8 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   `User-Agent` 的终端标识（`TERM_PROGRAM[/版本]` 优先，其次各终端专有变量，最后 `TERM`），
   只读环境、不执行子进程；`detectTerminalUserAgentToken` 复现官方取值，供“一键设为官方 TUI
   身份”的 UA 文本使用，`detectTerminalIdentity` 只在结果可作为 `[codex].terminal_identity`
-  记录时返回，供服务安装命令与 `codexc config` 复用。
+  记录时返回，包含字符规则及总长 1–64 约束，供服务安装命令与 `codexc config` 复用；不截断超长值，
+  不改变 UA 文本使用的探测结果。
 - `app-server-runtime.mjs` / `app-server-runtime.d.mts`：从当前 TOML、数据目录和 Provider
   配置一次性派生主 Socket、受管或自定义切换 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用；Windows 同时校验最终 UDS 路径长度，避免各入口独立解释运行拓扑。
