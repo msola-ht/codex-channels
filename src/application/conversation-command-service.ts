@@ -781,7 +781,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
         return {
           kind: "occupancy",
-          result: await this.conversations.releaseThread(target, force),
+          result: await this.conversations.releaseThread(target, force, assertAuthorized),
         };
       }
       case "schedule":

@@ -37,7 +37,7 @@
 - `gateway-component-graph.ts`：为 OpenAI 与受管 DS 主／隔离 Client 注入图片引用能力；OpenAI 上传遵循共享代理配置，本地模型路由核验直连回环地址；DS 只经受保护 Supervisor IPC 取得运行实例能力，并将私有路由读取失败映射为固定安全分类及设置应用／重启提示，不透传未知异常正文；
   为渠道 Hook 管理注入实时授权守卫及 Surface 无损审查策略，在会话锁内和写入前复核运行状态、渠道允许名单及 Actor 归属；
   Provider 断线时清理其已绑定 Thread 的 MCP 登录关联，防止跨连接迟到完成重新投递；
-  校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；
+  集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；Codex 版本校验在可取消的启动阶段先异步执行，成功后才继续连接及启动，不在构造中同步等待外部进程；
   构造期间即时登记数据库、指标写入方、通知端点与已创建的渠道实例；指标数据库由单 Worker 拥有，启动先等待独立初始化及订阅限制投影读取完成，再开放指标 Socket 与渠道；订阅限制只在已确认账户快照提交后更新内存投影。计划任务 Store 和插件实例创建边界也登记部分取得的资源，不依赖尚未返回的完整应用实例回滚；
   私有持有当前配置、Workspace Registry、Surface 集合与管理器，统一协调配置重载和重启通知接收方的临时切换与恢复；
   启动账户预热绑定应用关闭信号，按账户记录安全失败分类，在指标存储关闭前最多等待 5 秒；

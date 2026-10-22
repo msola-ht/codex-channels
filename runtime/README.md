@@ -338,11 +338,13 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `codex-home.mjs` / `codex-home.d.mts`：统一解析 Codex 用户目录（`CODEX_HOME` 或
   `~/.codex`），并检测 Codex 官方鉴权文件 `auth.json` 是否存在，供 CLI、脚本、Runtime 与
   Bootstrap 复用。
-- `thread-writer-lock.mjs` / `thread-writer-lock.d.mts`：定位并安全结束持有 Codex 线程写锁
+- `owned-command-runner.mjs` / `owned-command-runner.d.mts`：Gateway 版本检查与 Windows 锁诊断共用的异步自有命令 owner；限定执行时间和输出体积，取消时关闭准入并回收自己创建的进程。执行期限与终止、退出确认期限分别计算；清理未确认保留归属，最终关闭仍等待物理退出，不把发出终止信号视为成功。不管理被诊断的持锁目标。
+- `owned-command-worker.mjs`：Unix 辅助命令进程组监管入口，等待继承的输出管道关闭以保留组长身份；脚本入口复用此实现。Windows 使用既有 owned-process Job 机制。
+- `thread-writer-lock.mjs` / `thread-writer-lock.d.mts`：异步定位并安全结束持有 Codex 线程写锁
   （`~/.codex/thread-writer-locks/<thread>.lock`）的本地进程；Linux 通过 `/proc` 按打开描述符
   与命令行识别持锁方，Windows 通过 PowerShell 7 调用 Restart Manager 按文件句柄取得 PID 与进程
   启动时间，并只展示可执行路径；`/release force` 只放行入口可执行文件为 `codex`、且发送终止前
-  二次核验 PID 的持锁方，Windows 还核验启动时间；供恢复诊断复用且不删除锁文件。
+  二次核验 PID 的持锁方，Windows 还核验启动时间；调用方提供自有命令 owner 与取消信号，Windows helper 整体受执行期限约束，超时或解析失败返回诊断不可用，不伪造未占用。供恢复诊断复用且不删除锁文件。
   macOS 尚不支持持锁进程识别；无法识别时区分平台不支持与诊断不可用，锁文件存在不作为占用已确认的证据。
 - `windows-thread-writer-lock.ps1`：Windows Thread Writer Lock 的 Restart Manager 适配器；返回文件
   持有进程的 PID、启动时间和可执行路径，并在终止前通过同一进程对象复核启动时间。

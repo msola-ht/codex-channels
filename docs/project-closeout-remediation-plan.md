@@ -95,7 +95,7 @@ B 编号是责任边界，不强制一包一提交。每包实施时核对原编
 | B12 飞书选择快照 | R44：精确 Provider/model，模型/effort/fast 三卡内存限时一次性快照，写入前复核。 | command-center presentation/pending、feishu adapter、Application selectionScope/精确选择/偏好及默认值 writer。 | B11 与本包先约定定向目录和目标身份合同，非必须先实施 B11；与 B21 的 adapter 编辑串行。 |
 | B13 探测实际模型 | R09：每次成功解析前检查模型，不匹配固定 inconclusive，禁止采用。 | custom-model-capability-probe、CLI/WebUI 采用门禁、reason 翻译/字典。 | 不推断别名，不加无必要持久字段；保留已有正确 webSearch 分支。 |
 | B14 Chat 流终态 | R15：完成构造校验后才提交不可逆 ended，失败仍关闭已产生内容。 | chat-to-responses、chat bridge、锁定上游 completed Item/错误消费；转换器合同。 | 与 R03 不是同一状态 owner，无硬依赖。不得派发无效工具，不改 Codex 内部历史文件。 |
-| B15 自有进程生命周期 | R13/R37：异步、可取消、有总预算且确认退出的 helper/版本检查。 | gateway-component-graph、thread-writer-lock 及声明、app/config-lifecycle 和已有 owned-process 能力。 | 共用 graph 一个 writer；Windows 诊断预算与 Gateway 启动预算独立。force 异步等待后重核绑定/PID/创建时间；不得停止共享 App Server。 |
+| B15 自有进程生命周期 | R13/R37：异步、可取消、有总预算且确认退出的 helper/版本检查。 | gateway-component-graph、thread-writer-lock 及声明、app/config-lifecycle 和已有 owned-process 能力。 | 共用 graph 一个 writer；Windows 诊断预算与 Gateway 启动预算独立。force 异步等待后重核绑定/PID/创建时间；辅助进程清理不得停止共享 App Server，保留用户显式 force 的既有持锁目标合同。 |
 | B16 有效二进制选择 | R17：所有入口复用 executable 优先级，不覆盖合法环境选择。 | runtime-environment、Doctor、service-install-context、desktop-app-command/proxy；Init、Setup、remote、维护及服务定义消费。 | 建议先于 B15 的正常启动观察，非其代码前置。明确已有定义激活方式，不自动重装/重启服务；Windows 环境名大小写单独核对。 |
 | B17 网络目的地与额度正文 | R24/R25/R26：分别区分 hostname/authority、逐端点 redirect 合同、有界字节读取与 cancel。 | app-server-service-runtime、proxy/chat/request-routing、proxy-fetch、微信/AccountQuery/OCG 消费，runtime quota reader。 | 三个独立补丁；先确定哪些端点允许跳转再接 OCG，不一律造通用跳转器。与 B18 共改 proxy.ts 串行。 |
 | B18 指标安全与提交计时 | R05/R28：自由错误受控投影，真实提交时才记录时间及 bytes。 | metrics observer、proxy、IPC、provider-metrics composition、SQLite writer、详情/摘要/JSON/CSV。 | 两个逻辑补丁串行整合 proxy.ts；独立 Relay null 保留。不改变 schema，部分提交仍计时。 |
@@ -108,6 +108,13 @@ B 编号是责任边界，不强制一包一提交。每包实施时核对原编
 | B25 UI 与独立文档 | R22/R31/R32/R14/R33：调用方翻译、零值显示、可访问名；按事实修正文档。 | Relay service card、turn-table、两 Spinner 调用、翻译映射；Observability README、WebUI 专题及用户说明。 | UI 三项与纯文档两项可独立；R29 属 B02、R43 属 B05，不重复分派。保留排序、真实管理入口及当前加载状态。 |
 
 共同文件协调不等于业务依赖：`private-file`、`gateway-config`、`gateway-component-graph`、`model-selection-service`、`surface-composition`、`feishu/adapter`、`provider-proxy/proxy`、`weixin/outbox` 和用户指南分别保持单一写入者。接口变化后通知消费包定向复核；不要要求所有包等一个大重构完成。
+
+实施中新发现的旁支另行排队，不混入原 45 项统计：
+
+| 补充任务 | 当前证据与下一步 |
+| --- | --- |
+| Telegram effort 键盘目录快照 | B12 发现预存 selectEffort 返回未按 Provider filter 裁剪的目录，后续回调刷新目录可能使刚生成键盘过期；待独立复现并逐路径修复，随后独立 A 复审、单批提交。 |
+| 显式相对 CLI 路径 | B16 独立 A 源码推导安装 cwd 与服务 cwd 可产生不同选择；待明确已支持的相对路径基准、复现及全入口修复，随后独立 A 复审、单批提交。当前绝对路径与环境覆盖证据不关闭此任务。 |
 
 ## 数据、失败恢复与回滚
 
@@ -376,7 +383,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立 Astra/high 最终覆盖 HTTP/转换/hosted 续轮/失败交付/锁定官方完成 Item 与历史读取链，确认无剩余源码阻断，最终 blob 与上述一致。主代理已读完整报告；Message incomplete 和无 status 的 Reasoning 完整内容 done 均符合官方类型，未完成搜索不伪造完成，断连不承诺送达。R15 标记已修复待补证：Linux 自有官方 App Server 权威分页历史已实际观察，剩余限制是磁盘重载、其他 OS、真实供应商与不可达客户端的最终交付，不再把该已观察历史路径标为未实测。
 - 本地提交 `f47cee981f0b849b7b90abdd77daf9a390342b31`；正常 Hook 类型/版本/边界、局部 lint、84 份 Markdown 和 Gateway 构建通过，耗时 12.9 秒。提交后工作区干净，未推送。另实际核对当前 CLI 为 0.163.0；普通环境版本查询提示无法创建 PATH aliases（只读文件系统）但退出成功，此提示不影响此前隔离正式 RPC 观察，也没有修改环境或安装程序。
 
-### 第十二批：B16（复审通过，待提交，先于 B15）
+### 第十二批：B16（已提交 `b5f974a0`，先于 B15）
 
 - 输入 `f47cee98`，范围 R17。按原包依赖建议，先统一二进制选择再观察 B15 的启动/退出预算，避免用错程序影响生命周期结论。合同沿用现有 effectiveCodexBinary：显式非默认配置优先，配置为 codex 时采用有效 CODEX_BINARY，否则使用 PATH 默认命令；不添加命令字符串解析或别名。
 - 只读初步确认 runtime-environment、Doctor、service-install-context、Desktop command/proxy 和 remote 有遗漏；Unix App Server systemd/launchd 模板也未固化所选 CODEX_BINARY，而 Gateway 与 Windows 服务已有相应字段。仅把自定义目录加入 PATH 不能支持文件名不是 codex 的合法路径。完整调用/渲染/激活边界仍在核对，暂不修改服务或用户定义。
@@ -389,3 +396,16 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 原 R17 证据更正：当前 bin 的 config 直接使用 process.env，并非经 runScript；Setup 的父环境污染成立。原45项之外另记预存边界：显式相对 config.binary 按安装 cwd 解析，但服务启动可被配置原相对值覆盖并按服务 cwd 再解析，跨 cwd 一致性尚未修复，须另批明确相对路径基准和观察；本批不声称该路径已一致。另有此前 Telegram effort 键盘旁支仍待独立处理。
 - WebUI 生产状态子路由在自有 HTTP 服务中使用合法省略 binary 的配置：无 App Server 时两次均 HTTP 200/source=unavailable，不因缺省值抛错；改变环境 binary 后 cache key 同步变化。此观察仅覆盖默认值和缓存归属、降级合同，不含真实 WebUI 鉴权外壳或 Windows Proxy 成功路径；自有 HTTP 与目录已关闭清理。
 - 独立 Astra/high 完整复审已完成，4 项关联发现补修后无剩余本批阻断，主代理已读完整报告；审查源码差异 SHA-256 为 `86fd36ca595271e4e54b7bfb5bfe2a3868527a56218be475325787cec14ab234`。补修后 Node 22.23.4 类型/版本/边界检查与4个改动模块局部 ESLint 均 exit 0。R17 标记已修复待补证，保留上述跨 OS、服务和相对路径限制；尚未提交。
+- 本地提交 `b5f974a07a5b3b9448948c90fe53df2418b8f92d`，正常 Hook 使用 Node 22.23.4，类型/版本/边界、局部 lint、84 份 Markdown、安装和控制脚本语法、Gateway 构建全部通过，耗时 11.8 秒。提交后工作区干净，未推送。
+
+### 第十三批：B15（复审通过，待提交）
+
+- 输入 `b5f974a0`，范围 R13/R37。版本检查仍在 Graph 同步构造内 spawnSync；Windows writer helper 的启动/编译/查询未纳入总预算，/release 直接等待会阻塞事件循环。下一步沿 Gateway create/start/stop 与 release 授权、绑定、PID/创建时间复核梳理异步边界，复用已有自有进程终止能力，不终止共享 App Server。
+- 关联分析确定：版本读取移到 startInternal 建立取消信号后的首个异步步骤、先于 IPC/连接；helper 与版本进程复用小型 Runtime owner，分清操作期限和清理期限，未确认退出保留归属并接入最终关闭。release 贯通已有 Actor 授权闭包，异步等待后复核原绑定/Workspace 和 PID/创建时间。这里“不终止共享 App Server”限定本任务运行观察及辅助进程清理；保留用户指南现有显式 `/release force` 可结束持锁进程的合同，不擅自撤销该功能，也不对用户进程执行它。
+- 新增 owned-command-runner 及声明，Unix worker 从 scripts 移入 Runtime，原脚本转发同一实现；无 Runtime→scripts 依赖。版本操作 5 秒/合计输出 4096B，Windows writer helper 8 秒/1MiB；另有清理 500ms grace+1000ms 确认，Windows 最多加两次各 2 秒 taskkill。操作超时不等于总清理成功：未确认 child/进程组保留 owner，最终进程退出路径仍等待物理退出。构造、启动失败、停止均覆盖关闭，不改变服务模板和共享关闭预算。
+- release 命令将既有授权闭包经 Application 窄端口传至 Graph；捕获稳定绑定对象与冻结 Workspace 快照，两次诊断后、终止前后复核。Windows 继续使用同一目标进程对象复核 startedAt，目标等待只使用剩余期限；辅助 runner 不接管被终止的持锁 PID。已发出 force 的未知结果不伪装成回滚，不对替换绑定执行恢复。
+- 实施者内联 Node 22 生产 runner Hack：正常 stdout/stderr status0（74ms），非零 status7（61ms），挂起 timeout（262ms），cancelled（276ms），output-limit（100ms），父先退出/后代继承管道最终 descendant-done（473ms），树取消（336ms），重复 close 及关闭后新调用拒绝。20ms 心跳持续增长。无管道后代存活 2 秒时，run 在1068ms/close在1069ms明确 cleanup-unconfirmed，waitForExit 在2173ms确认整组退出，最终 close 成功；未遗失归属或发送信号到用户目标。
+- 主代理 Linux 正式构建入口观察：隔离 Home/工作区/数据/唯一 Unix Socket，自有官方 0.163.0 App Server，GatewayApplication.create→start→stop 均 fulfilled，5ms 心跳推进21/23次；stop 后 App Server仍运行且通过生产 readAppServerUserAgent 再次握手。随后按自有进程归属终止官方 Server，exit0，六类 resource owners close/wait 全部完成，全部任务目录/Socket清理。无认证、无 Surface 插件、无模型请求，因此这不是带渠道的完整 CLI 服务就绪或真实平台投递验收；无认证周限查询降级日志符合隔离条件。
+- 另三个隔离生产启动场景：真实 Node 作为 CLI 返回固定版本不支持，启动前 stop 返回 Gateway正在停止，启动中5ms stop 返回 cancelled；三者 start 均 rejected/stop fulfilled，心跳继续且六类资源关闭均成功。Linux 生产 writer inspection 对自有打开锁文件识别 Node PID；关闭描述符后 held=false，不存在文件也为 false；不可读 procRoot 与已取消输入均 inspection-unavailable。没有真实 force 成功断言。
+- 观察故障记录：沙箱中官方固定 `/tmp/codex-daemon-0` 显示 mode0，批准只读核对实际700后使用授权升级在唯一自有 Socket 观察，未 chmod 用户目录。最初源码 tsx 观察因 MetricsWorker 固定 .js 路径不可用失败；曾误判为继承 input-type并重试，核源码后正式构建解决。随后内联 --input-type 仍导致 Delivery Worker 初始化关闭，改用Node22原生 stdin模块识别、execArgv=[]后正常启动。以上是观察入口修正，没有为此修改产品 Worker，也没有把失败轮记为成功。
+- 独立 Astra/high 完整覆盖 create/start/stop/最终退出、runner及Windows Job源码、release授权/绑定/身份/恢复、七个脚本worker消费者及打包包含，无剩余本批阻断；主代理已读完整报告。完整类型、局部 ESLint、Runtime边界、正式构建与diff格式通过。Windows helper/Restart Manager/Job/taskkill、macOS运行及真实force尚未观察；Linux既有PID复用窗口不因此关闭。R13/R37标记已修复待补证。

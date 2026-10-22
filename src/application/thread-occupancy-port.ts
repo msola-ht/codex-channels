@@ -28,5 +28,6 @@ export interface ThreadOccupancyPort {
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
+    assertAuthorized?: () => void,
   ): Promise<ThreadOccupancyReleaseResult>;
 }

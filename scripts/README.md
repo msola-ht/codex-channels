@@ -10,7 +10,7 @@
 - `cli-lifecycle-command.mjs`：更新、程序卸载、Doctor 与指标/数据维护的 CLI 父子进程协作；就绪握手后通过私有 IPC 转发取消，子进程在安全边界检查取消，父进程等待事务收尾并退出，不用强制终止代替取消。指标导出可把子进程标准输出直接写入私有文件。
 - `installation-command.mjs`：安装入口共用的异步命令执行器；避免同步子进程冻结进度，交互模式保留有界诊断尾部并在失败时展示，非交互模式实时输出日志，取消时终止自己启动的进程树。供源码安装器和本地安装复用，不管理后台服务。
 - `source-build.mjs`：首装 Shell/PowerShell 与更新器共用的源码构建阶段；无需已安装依赖即可加载，显式处理 ignore-scripts、根依赖/Hook/Gateway/WebUI 构建与产物检查。各入口保留命令执行、取消和安装事务所有权。
-- `cli-command-worker.mjs`：安装命令、更新准备命令、服务控制器、Doctor、Desktop 平台查询与 WebUI 管理任务共用的 Unix 进程组监管入口；等待后代输出管道关闭，保留组长身份以支持取消升级为强制终止，不把直接子进程退出当作整组完成。管理任务可显式转发 stdin 协作取消，其他调用方仍忽略输入。Windows 保留调用方已有的进程所有权机制。
+- `cli-command-worker.mjs`：安装命令、更新准备命令、服务控制器、Doctor、Desktop 平台查询与 WebUI 管理任务共用的 Unix 进程组监管入口，重导出并转交 Runtime 的 `owned-command-worker.mjs` 实现；等待后代输出管道关闭，保留组长身份以支持取消升级为强制终止，不把直接子进程退出当作整组完成。管理任务可显式转发 stdin 协作取消，其他调用方仍忽略输入。Windows 保留调用方已有的进程所有权机制。
 
 - `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，`runVideoMcp` 供独立入口 `strata-video-mcp` 及 `codexc video-mcp` 在当前进程调用，仍支持直接运行脚本；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。新增 Strata 预设保存独立命令 `strata-video-mcp`，由标准 MCP 宿主 PATH 选择安装，不保存 Node 版本或脚本路径。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
 - `mcp-setup.mjs`：`codexc config → 工具与 MCP` 的添加、编辑、删除交互入口。添加支持 stdio、Streamable HTTP、AnySearch 搜索和 Strata 视频预设；预设只问必要信息，通用类型保留自定义字段。编辑仅修改选定用户 MCP 字段，保留其他设置与凭据；删除只移除选定用户配置条目，不操作插件、包或附件。三种操作共用脱敏摘要、最终确认、带修订的配置事务及回读校验，拒绝同名添加，不自动重试写入。AnySearch Key 保存为 Bearer Header；Strata 固定文件引用模式及分析时限，从有效 Gateway 配置推导渠道附件目录，最终确认后复核并准备私有权限。不自动安装、启动或重启服务。

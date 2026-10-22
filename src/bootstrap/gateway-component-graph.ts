@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { currentGitBranch } from "./git-workspace-status.js";
 import { dirname, join } from "node:path";
 
@@ -51,6 +50,7 @@ import {
   terminateThreadWriterHolder,
 } from "../../runtime/thread-writer-lock.mjs";
 import { terminateChildProcess } from "../../runtime/process-lifecycle.mjs";
+import { OwnedCommandRunner } from "../../runtime/owned-command-runner.mjs";
 import {
   inspectAppServerSupervisor,
   inspectAppServerSupervisorState,
@@ -235,6 +235,7 @@ export abstract class GatewayComponentGraph {
   private startupNetworkRecovery: StartupNetworkRecovery | undefined;
   private openAiConnectivityAbort: AbortController | undefined;
   private startupAbort: AbortController | undefined;
+  private readonly auxiliaryCommands: OwnedCommandRunner;
   private stopping = false;
 
   protected abstract requestStop(): Promise<void>;
@@ -248,7 +249,8 @@ export abstract class GatewayComponentGraph {
   ) {
     logger = logger.child({ module: "gateway" });
     this.logger = logger;
-    verifyCodexVersion(config);
+    this.auxiliaryCommands = new OwnedCommandRunner();
+    registerConstructionCleanup("Auxiliary Commands", () => this.auxiliaryCommands.close());
     const primaryProvider = loadPrimaryModelProvider();
     const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider();
     const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders();
@@ -803,7 +805,7 @@ export abstract class GatewayComponentGraph {
         listAgentRoles: () => listConfiguredAgentRoles(process.env),
       },
       {
-        releaseThread: (target, force) => this.releaseThread(target, force),
+        releaseThread: (target, force, assertAuthorized) => this.releaseThread(target, force, assertAuthorized),
       },
       execution,
       this.codex,
@@ -1691,6 +1693,8 @@ export abstract class GatewayComponentGraph {
     try {
       this.requireRunning();
       this.startupAbort = new AbortController();
+      await verifyCodexVersion(this.config, this.auxiliaryCommands, this.startupAbort.signal);
+      this.requireRunning();
       await this.metricsReady;
       this.requireRunning();
       await this.scheduledTasks?.prepareStore(this.startupAbort.signal);
@@ -1859,6 +1863,7 @@ export abstract class GatewayComponentGraph {
     this.surfaceManager.beginShutdown?.();
     this.conversations?.closeSessionQueries();
     this.startupAbort?.abort();
+    this.auxiliaryCommands.cancel();
     void this.startupNetworkRecovery?.stop();
     this.openAiConnectivityAbort?.abort(new Error("Gateway 正在停止"));
     const reconnecting = this.stopReconnect();
@@ -1974,6 +1979,7 @@ export abstract class GatewayComponentGraph {
     this.surfaceManager.beginShutdown?.();
     this.conversations?.closeSessionQueries();
     this.startupAbort?.abort();
+    this.auxiliaryCommands.cancel();
     const restoringBindings = this.bindingRestoreCoordinator().close();
     this.openAiConnectivityAbort?.abort();
     this.openAiConnectivityAbort = undefined;
@@ -1983,6 +1989,7 @@ export abstract class GatewayComponentGraph {
     this.removeRpcDisconnect = undefined;
     const failures: unknown[] = [];
     for (const [component, close] of [
+      ["Auxiliary Commands", () => this.auxiliaryCommands.close()],
       ["Startup Network Recovery", () => this.startupNetworkRecovery?.stop()],
       ["Scheduled Task Scheduler", () => this.scheduledTasks?.stop()],
       ["Reasoning Repeat Guard", () => this.reasoningRepeatGuard.close()],
@@ -2257,13 +2264,29 @@ export abstract class GatewayComponentGraph {
   private async releaseThread(
     target: ConversationTarget,
     force?: boolean,
+    assertAuthorized?: () => void,
   ): Promise<ThreadOccupancyReleaseResult> {
+    this.requireRunning();
+    assertAuthorized?.();
     const current = this.router.current(target);
     if (!current) {
       return { status: "unbound" };
     }
+    const workspace = this.router.workspace(target);
+    const assertCurrent = () => {
+      this.requireRunning();
+      assertAuthorized?.();
+      if (this.router.current(target) !== current || this.router.workspace(target) !== workspace) {
+        throw new UserFacingError("thread.takeover.changed", "等待期间会话或 Workspace 已变化，请重新查询占用");
+      }
+    };
     const threadId = current.threadId;
-    const inspection = inspectThreadWriterLock(threadId);
+    const options = {
+      runner: this.auxiliaryCommands,
+      ...(this.startupAbort ? { signal: this.startupAbort.signal } : {}),
+    };
+    const inspection = await inspectThreadWriterLock(threadId, process.env, "/proc", options);
+    assertCurrent();
     if (!inspection.held) {
       this.retryPendingBindingRestore(threadId);
       return { status: "free", threadId };
@@ -2283,7 +2306,8 @@ export abstract class GatewayComponentGraph {
         stuck,
       };
     }
-    const recheck = inspectThreadWriterLock(threadId);
+    const recheck = await inspectThreadWriterLock(threadId, process.env, "/proc", options);
+    assertCurrent();
     if (!recheck.held) {
       this.retryPendingBindingRestore(threadId);
       return { status: "released", threadId, holder };
@@ -2305,9 +2329,14 @@ export abstract class GatewayComponentGraph {
         stuck,
       };
     }
+    assertCurrent();
     const exited = await terminateThreadWriterHolder(holder.pid, {
       ...(holder.startedAt === undefined ? {} : { startedAt: holder.startedAt }),
+      ...options,
     });
+    // Termination may already have happened. A stale result never restores a
+    // replacement binding, and cancellation does not imply rollback of force.
+    assertCurrent();
     if (!exited) {
       return {
         status: "held",
@@ -2394,24 +2423,19 @@ export async function waitAtMost(task: Promise<void>, timeoutMs: number): Promis
   }
 }
 
-function verifyCodexVersion(config: GatewayConfig): void {
+async function verifyCodexVersion(config: GatewayConfig, runner: OwnedCommandRunner, signal: AbortSignal): Promise<void> {
   const invocation = executableInvocation(
     resolveExecutable(effectiveCodexBinary(config.codexBinary)),
     ["--version"],
   );
-  const result = spawnSync(invocation.file, invocation.args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-  });
-  if (result.error) throw result.error;
+  const result = await runner.run(invocation, { timeoutMs: 5_000, maxOutputBytes: 4_096, signal });
   if (result.status !== 0) {
     throw new Error("无法读取 Codex 版本");
   }
   const actual = result.stdout.trim();
   if (actual !== supportedCodexCliVersion) {
     throw new Error(
-      `Codex 版本不受支持：当前 ${actual}，协议基线 ${supportedCodexCliVersion}`,
+      `Codex 版本不受支持：需要协议基线 ${supportedCodexCliVersion}`,
     );
   }
 }

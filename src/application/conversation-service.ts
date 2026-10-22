@@ -351,6 +351,7 @@ export interface ConversationSessionUseCases {
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
+    assertAuthorized?: () => void,
   ): Promise<ThreadOccupancyReleaseResult>;
   releaseIdle?(
     target: ConversationTarget,
@@ -501,6 +502,7 @@ export class ConversationService implements
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
+    assertAuthorized?: () => void,
   ): Promise<ThreadOccupancyReleaseResult> {
     if (!this.threadOccupancy) {
       return Promise.reject(new UserFacingError(
@@ -508,7 +510,8 @@ export class ConversationService implements
         "当前环境不支持释放会话占用",
       ));
     }
-    return this.threadOccupancy.releaseThread(target, force);
+    assertAuthorized?.();
+    return this.threadOccupancy.releaseThread(target, force, assertAuthorized);
   }
 
   touchActivity(target: ConversationTarget): void {

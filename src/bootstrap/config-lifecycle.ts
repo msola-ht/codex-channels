@@ -22,6 +22,7 @@ import { installProcessSignalHandlers, installServiceControlHandler } from "../.
 import { serviceShutdownTimeoutMs } from "../../runtime/shutdown-budget.mjs";
 import { closeSingleWorkerReaders, waitForSingleWorkerReadersExit } from "../../runtime/single-worker-reader.mjs";
 import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "../../runtime/windows-acl-bridge.mjs";
+import { closeOwnedCommandRunners, waitForOwnedCommandRunnersExit } from "../../runtime/owned-command-runner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { ResetCreditError } from "../application/index.js";
@@ -57,8 +58,8 @@ export async function runGatewayProcess(): Promise<void> {
   catch (error) {
     // Configuration/construction can already have created the main-thread ACL
     // bridge, even before the normal shutdown controls have been installed.
-    const closed = await Promise.allSettled([closeSingleWorkerReaders(), closeWindowsAclBridge()]);
-    await Promise.all([waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit()]);
+    const closed = await Promise.allSettled([closeSingleWorkerReaders(), closeWindowsAclBridge(), closeOwnedCommandRunners()]);
+    await Promise.all([waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit(), waitForOwnedCommandRunnersExit()]);
     const failures = closed.filter(result => result.status === "rejected").map(result => result.reason as unknown);
     if (failures.length) throw new AggregateError([error, ...failures], "Gateway 启动失败且资源关闭曾超时", { cause: error });
     throw error;
@@ -76,10 +77,10 @@ async function startGatewayProcess(): Promise<void> {
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config, { service: "gateway", module: "lifecycle" });
   const closeResourceOwners = async (): Promise<boolean> => {
-    const components = ["Delivery", "Metrics", "Scheduled Tasks", "Material Readers", "Windows ACL"];
+    const components = ["Delivery", "Metrics", "Scheduled Tasks", "Material Readers", "Windows ACL", "Auxiliary Commands"];
     const results = await Promise.allSettled([
       closeDeliveryJournals(), closeMetricsStores(), closeScheduledTaskStores(),
-      closeSingleWorkerReaders(), closeWindowsAclBridge(),
+      closeSingleWorkerReaders(), closeWindowsAclBridge(), closeOwnedCommandRunners(),
     ]);
     for (const [index, result] of results.entries()) {
       if (result.status === "rejected") {
@@ -88,7 +89,7 @@ async function startGatewayProcess(): Promise<void> {
     }
     await Promise.all([
       waitForDeliveryJournalsExit(), waitForMetricsStoresExit(), waitForScheduledTaskStoresExit(),
-      waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit(),
+      waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit(), waitForOwnedCommandRunnersExit(),
     ]);
     return results.every(result => result.status === "fulfilled");
   };
