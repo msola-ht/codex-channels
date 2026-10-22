@@ -280,6 +280,10 @@ Computer Use／浏览器过程展示复用已支持的 `item/started`、`item/co
 `item/mcpToolCall/progress`，也不解析执行代码、原始结果或截图。
 飞书 MCP 工具审批复用已支持的 `mcpServer/elicitation/request`，分别映射允许一次、
 会话／持久允许、拒绝与取消，不新增系统或网站权限管理接口。
+共同 Client 按锁定上游 `tool_params` 与 `tool_params_display` 核对完整参数，缺失或矛盾时拒绝；
+Approval 保留原名、标签、值和授权范围的 JSON 转义表示；命令预览保留上游工作目录，未提供则明确提示未知，不推定 Workspace。工具审批完整预览及命令详情分别受
+3000 UTF-8 字节共同预算约束，超限不提供批准；飞书展开内容和工具审批不再截断。
+实际渠道审批往返尚未观察，不将本地类型或渲染检查视为平台验收。
 
 本表列出项目当前主动调用或消费的协议能力。未列出的生成类型不能直接视为已支持能力。
 `codexc setup` 的脱敏总览复用既有 `config/read` 显示全局默认模型与思考等级，入口位于

@@ -87,6 +87,7 @@ export type ApprovalRequest =
       turnId: string;
       itemId: string;
       command: string | null;
+      cwd: string | null;
       reason: string | null;
       additionalPermissions: AdditionalPermissionProfile | null;
       networkApprovalContext: NetworkApprovalContext | null;

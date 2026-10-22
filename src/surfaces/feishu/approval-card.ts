@@ -3,7 +3,6 @@ import type {
   InteractionRequest,
 } from "../../approval/index.js";
 import { interactionProcessedTitle } from "../interaction-copy.js";
-import { contentTruncatedText } from "../output-copy.js";
 import {
   feishuCardButton,
   feishuCardColumnSetRows,
@@ -33,12 +32,20 @@ export type FeishuApprovalAction =
 const maximumDetailBytes = 12_000;
 const maximumPreviewCharacters = 150;
 const maximumPreviewLines = 3;
-const truncatedSuffix = `\n\n[${contentTruncatedText}]`;
+
+export function supportsFeishuApprovalRequest(
+  request: Extract<InteractionRequest, { type: "approval" }>,
+): boolean {
+  return Buffer.byteLength(`${request.title}\n\n${request.detail}`, "utf8") <= maximumDetailBytes;
+}
 
 export function renderFeishuApprovalCard(
   request: Extract<InteractionRequest, { type: "approval" }>,
   interactionToken: string,
 ): FeishuCardDocument {
+  if (!supportsFeishuApprovalRequest(request)) {
+    throw new Error("飞书审批内容无法完整展示");
+  }
   const actions: Array<Record<string, unknown>> = [
     button("批准一次", "primary", interactionToken, "approve-once"),
   ];
@@ -156,7 +163,7 @@ function collapsedDetail(detail: string): Record<string, unknown> {
     vertical_spacing: "8px",
     padding: "8px 8px 8px 8px",
     elements: [
-      feishuCardPlainText(truncateUtf8(detail, maximumDetailBytes)),
+      feishuCardPlainText(detail),
     ],
   };
 }
@@ -177,22 +184,4 @@ function button(
     interaction_token: interactionToken,
     decision,
   });
-}
-
-function truncateUtf8(value: string, maximumBytes: number): string {
-  if (Buffer.byteLength(value, "utf8") <= maximumBytes) {
-    return value;
-  }
-  const payloadLimit = maximumBytes - Buffer.byteLength(
-    truncatedSuffix,
-    "utf8",
-  );
-  let result = "";
-  for (const character of value) {
-    if (Buffer.byteLength(result + character, "utf8") > payloadLimit) {
-      break;
-    }
-    result += character;
-  }
-  return `${result}${truncatedSuffix}`;
 }

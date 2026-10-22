@@ -11,7 +11,6 @@ import type {
   FileSystemPath,
   JsonValue,
   McpToolApproval,
-  NetworkApprovalContext,
   NetworkPolicyAmendment,
 } from "./requests.js";
 import type {
@@ -151,6 +150,24 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           return { type: "command", decision: "decline" };
         }
         const isNetworkOnly = request.networkApprovalContext !== null && !hasCommand;
+        const detail = [
+          "以下为完整 JSON 转义表示，请核对命令、权限与授权范围。",
+          request.reason ? `原因：${approvalPreview(request.reason)}` : undefined,
+          hasCommand ? `命令：${approvalPreview(request.command!)}` : undefined,
+          hasCommand ? `工作目录：${request.cwd === null ? "上游未提供，请先在原生客户端核对" : approvalPreview(request.cwd)}` : undefined,
+          request.networkApprovalContext
+            ? `网络目标：${approvalPreview(JSON.stringify(request.networkApprovalContext))}` : undefined,
+          request.additionalPermissions
+            ? `额外权限：${approvalPreview(JSON.stringify(request.additionalPermissions))}` : undefined,
+          execPolicyAmendment
+            ? `持久规则前缀：${approvalPreview(JSON.stringify(execPolicyAmendment))}` : undefined,
+          ...networkPolicyAmendments.amendments.map(amendment =>
+            `持久网络规则：${approvalPreview(JSON.stringify(amendment))}`),
+        ].filter(Boolean).join("\n\n");
+        if (Buffer.byteLength(detail, "utf8") > 3_000) {
+          this.logger?.warn({ ...metadata, reason: "command-preview-too-large" }, "命令审批无法完整展示，已安全拒绝");
+          return { type: "command", decision: "decline" };
+        }
         const decision = await requestInteraction({
           type: "approval",
           requestId,
@@ -159,19 +176,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           turnId: request.turnId,
           itemId: request.itemId,
           title: title(isNetworkOnly ? "Codex 请求访问网络" : "Codex 请求执行命令"),
-          detail: [
-            request.reason ?? undefined,
-            hasCommand ? request.command ?? undefined : undefined,
-            request.networkApprovalContext
-              ? formatNetworkApprovalContext(request.networkApprovalContext)
-              : undefined,
-            formatAdditionalPermissions(request.additionalPermissions),
-            execPolicyAmendment
-              ? `持久规则前缀：${JSON.stringify(execPolicyAmendment)}`
-              : undefined,
-            ...networkPolicyAmendments.amendments.map((amendment) =>
-              `持久网络规则：${amendment.action === "allow" ? "允许" : "拒绝"} ${amendment.host}`),
-          ].filter(Boolean).join("\n\n"),
+          detail,
           allowSession: offersCommandDecision(
             request.availableDecisions,
             "acceptForSession",
@@ -288,15 +293,25 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
       }
       case "elicitation": {
         const toolApproval = request.toolApproval;
+        const interactionTitle = title(toolApproval
+          ? `MCP ${approvalPreview(toolApproval.connectorName ?? request.serverName)} 请求批准`
+          : `MCP ${request.serverName} 请求输入`);
+        const message = toolApproval ? approvalPreview(request.message) : request.message;
+        const toolTitle = toolApproval?.toolTitle ? approvalPreview(toolApproval.toolTitle) : null;
+        const detail = toolApproval ? formatMcpToolApprovalDetail(toolApproval) : "";
+        if (toolApproval && Buffer.byteLength(
+          [interactionTitle, message, toolTitle ?? "", detail].join("\n\n"), "utf8",
+        ) > 3_000) {
+          this.logger?.warn({ ...metadata, reason: "mcp-preview-too-large" }, "MCP 工具审批无法完整展示，已安全拒绝");
+          return safeDecline(request);
+        }
         const decision = await requestInteraction({
           type: "elicitation",
           requestId,
           threadId: request.threadId,
           turnId: request.turnId,
-          title: title(toolApproval
-            ? `MCP ${toolApproval.connectorName ?? request.serverName} 请求批准`
-            : `MCP ${request.serverName} 请求输入`),
-          message: request.message,
+          title: interactionTitle,
+          message,
           mode: toolApproval
             ? "tool-approval"
             : request.mode === "url"
@@ -306,8 +321,8 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           ...(toolApproval
             ? {
                 toolApproval: {
-                  toolTitle: toolApproval.toolTitle,
-                  detail: formatMcpToolApprovalDetail(toolApproval),
+                  toolTitle,
+                  detail,
                   allowSession: toolApproval.allowSession,
                   allowAlways: toolApproval.allowAlways,
                 },
@@ -565,10 +580,6 @@ function offeredNetworkPolicyAmendments(
   };
 }
 
-function formatNetworkApprovalContext(context: NetworkApprovalContext): string {
-  return `网络目标：${context.host}\n协议：${context.protocol}`;
-}
-
 function sameNetworkPolicyAmendment(
   left: NetworkPolicyAmendment,
   right: NetworkPolicyAmendment,
@@ -625,29 +636,12 @@ function isJsonValue(value: unknown): value is JsonValue {
 }
 
 function formatMcpToolApprovalDetail(approval: McpToolApproval): string {
-  const parameters = approval.parameters.slice(0, 10).map((parameter) =>
-    `${truncate(parameter.displayName, 100)}：${truncate(
-      displayJsonValue(parameter.value),
-      300,
-    )}`
-  );
-  if (approval.parameters.length > parameters.length) {
-    parameters.push(`另有 ${approval.parameters.length - parameters.length} 项参数`);
-  }
-  return parameters.join("\n")
-    || approval.toolDescription
-    || approval.toolTitle
-    || "此 MCP 工具操作需要明确批准。";
-}
-
-function displayJsonValue(value: JsonValue): string {
-  return typeof value === "string" ? value : JSON.stringify(value);
-}
-
-function truncate(value: string, maximumLength: number): string {
-  return value.length <= maximumLength
-    ? value
-    : `${value.slice(0, maximumLength - 1)}…`;
+  return [
+    "完整参数（JSON 转义表示，name 为原参数名，displayName 为展示标签）：",
+    approvalPreview(JSON.stringify(approval.parameters)),
+    approval.toolDescription ? `说明：${approvalPreview(approval.toolDescription)}` : undefined,
+    `授权范围：允许一次${approval.allowSession ? "；本会话允许" : ""}${approval.allowAlways ? "；始终允许" : ""}`,
+  ].filter(Boolean).join("\n\n");
 }
 
 function approvalPreview(value: string): string {

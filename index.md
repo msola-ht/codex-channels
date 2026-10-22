@@ -58,7 +58,8 @@
 
 ## 验收与开放补证
 
-- [`docs/project-closeout-review.md`](docs/project-closeout-review.md)：五轮收尾审查汇总，记录 45 项开放问题、关联证据、修复建议、关闭条件及运行验证边界。
+- [`docs/project-closeout-review.md`](docs/project-closeout-review.md)：五轮收尾审查汇总与逐批处理状态，记录 45 项问题、关联证据、修复建议、关闭条件及运行验证边界。
+- [`docs/project-closeout-remediation-plan.md`](docs/project-closeout-remediation-plan.md)：Astra 分批关联复审及后续修复流程，记录判定修订、修复包依赖、数据恢复和关闭要求。
 - [`docs/project-closeout-file-inventory.csv`](docs/project-closeout-file-inventory.csv)：1,146 项逐文件关联阅读证据，清单范围已全部完成；不代表问题修复或运行验收。
 - [`docs/webui-component-remediation.md`](docs/webui-component-remediation.md)：WebUI 组件浏览器发现、关联修复、A 独立复查与最终证据；保留未观察的 UI 验收范围。
 - [`docs/ipc-readiness-development.md`](docs/ipc-readiness-development.md)：IPC 读取与启动恢复改造的阶段计划、关联审查、观察证据及平台限制。

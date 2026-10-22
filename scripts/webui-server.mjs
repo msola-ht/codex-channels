@@ -240,6 +240,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
     const managementPrefix = `${API_PREFIX}/management`;
     managementRequest = requestUrl.pathname === managementPrefix || requestUrl.pathname.startsWith(`${managementPrefix}/`);
+    if (token === null) validateAnonymousRequest(request);
     if (managementRequest) {
       await routeManagement(environment, requestUrl, request, response, management, token);
       return;
@@ -474,6 +475,28 @@ async function routeManagement(environment, url, request, response, state, token
     openMetricsStore,
   })) return;
   throw new ApiError(404, "not_found", `未知管理 API：${path}`);
+}
+
+function validateAnonymousRequest(request) {
+  if (!isLoopbackAddress(request.socket.remoteAddress)) {
+    throw new ApiError(403, "loopback_required", "未配置访问令牌时只允许回环访问");
+  }
+  // 不经 URL 归一化接受数字 IP、尾点、凭据或其他主机别名，也不信任转发头。
+  const hostHeaders = request.rawHeaders.filter((name, index) => index % 2 === 0 && name.toLowerCase() === "host");
+  if (hostHeaders.length !== 1 || !isLoopbackAuthority(request.headers.host)) {
+    throw new ApiError(403, "host_invalid", "未配置访问令牌时 Host 必须是受支持的回环主机");
+  }
+  const origin = request.headers.origin;
+  if (origin !== undefined && origin !== new URL(`http://${request.headers.host}`).origin) {
+    throw new ApiError(403, "origin_invalid", "未配置访问令牌时 Origin 必须与请求 Host 的 HTTP 来源一致");
+  }
+}
+
+function isLoopbackAuthority(value) {
+  if (typeof value !== "string") return false;
+  const match = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::([0-9]+))?$/iu.exec(value);
+  // SSH 本机转发端口无需与服务器监听端口一致。
+  return match !== null && (match[1] === undefined || (Number(match[1]) >= 1 && Number(match[1]) <= 65_535));
 }
 
 function authenticatedManagementOrigin(request) {

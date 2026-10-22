@@ -26,7 +26,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
   新增工作区通知在会话具有唯一已授权 Actor 时通过命令中心发送精确 ID 切换卡片；归属不唯一时保留文字通知。异步卡片发送纳入命令中心关闭等待，可等待的配置通知只在投递完成后返回，失败交回配置事件重试。
 - `approval-card.ts`：生成有界 CardKit 2.0 审批卡片和移除动作后的处理结果卡片；短审批直接显示，
   长审批在待处理与处理结果中显示最多三行、150 字符的预览，完整命令、权限与持久规则保留在默认
-  收起的核对面板中。
+  收起的核对面板中，不截断展开内容。标题与详情超过渠道 12,000 UTF-8 字节预算时安全拒绝，
+  共同层对命令等预览另有更严格预算；不能为超限内容生成批准按钮。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
 - `card-kit.ts`：只构造 CardKit 2.0 外壳（`schema`、`update_multi`、`wide_screen_mode`）、Markdown/纯文本/备注块、按钮与 column_set 行；不承载审批动作、交互令牌或业务语义。
 - `command-center-presentation.ts`：将命令结果转换为命令中心选项、输入表单和展示文案；仅接收动作与结果数据，
@@ -78,6 +79,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
   Outbox 在原会话队列内直接发送，成功后按消息 ID 登记令牌，避免重复入队等待。
 - `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片；异步问题复用 Markdown 安全处理，截断时闭合代码围栏，结果卡片保留有界题干。
   MCP 工具审批分别提供一次批准、上游允许的持久范围、拒绝与取消，拒绝和取消不携带持久范围。
+  工具审批标题、message、工具名与完整参数使用纯文本无损显示，合计超过 3000 UTF-8 字节拒绝，
+  不复用普通表单的截断显示。共同层提供 JSON 转义表示，渠道不把参数解释为 Markdown。
 - `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
   请求去重、过期、取消和跨客户端失效。
 - `media.ts`：通过官方消息资源 API 下载私聊图片，并调用 Surface 共用暂存器完成大小、签名、

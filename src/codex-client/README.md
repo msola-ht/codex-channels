@@ -153,9 +153,10 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   文件变更通知，仅有界保留路径、操作类型与移动目标，不保存 Diff；Item/Turn 完成、Thread
   失效、取消订阅、断线与关闭时清理。缺失明细不借用其他 Item，Provider 路由同时校验请求来源。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
-  Server Request 解码为 Approval 稳定请求；命令审批只接受缺省或明确的 `kind=command`，
+  Server Request 解码为 Approval 稳定请求；命令审批只接受缺省或明确的 `kind=command`，保留上游可选工作目录，畸形目录拒绝而非当作缺失，
   `writeStdin` 解码为独立 stdin 审批，要求完整输入、目录、回调身份和仅 accept/cancel 决策；未知种类安全拒绝；其中按固定版本的空对象 Schema 与
-  `mcp_tool_call` 元数据识别 MCP 工具审批，保留工具展示参数和上游提供的持久范围。稳定决定
+  `mcp_tool_call` 元数据识别 MCP 工具审批，逐名、逐值核对 `tool_params` 对象与展示数组完整一致；
+  缺失、重复或矛盾时安全拒绝，保留参数原名、展示标签和上游提供的持久范围。稳定决定
   精确编码为当前官方响应；未协商的 `openai/userVerification` 模式显式取消，畸形请求安全拒绝，
   未知请求返回明确 JSON-RPC 方法错误。实验
   `item/tool/call` 属于 Gateway 宿主动态工具边界，不在本审批适配器中执行。

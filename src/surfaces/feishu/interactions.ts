@@ -24,6 +24,7 @@ import type { Logger } from "pino";
 import {
   renderFeishuApprovalCard,
   renderFeishuApprovalOutcomeCard,
+  supportsFeishuApprovalRequest,
   type FeishuApprovalAction,
   type FeishuCardDocument,
 } from "./approval-card.js";
@@ -91,8 +92,9 @@ export class FeishuInteractionPort implements InteractionPort {
     request: InteractionRequest,
   ): Promise<InteractionDecision> {
     if (
-      request.type !== "approval"
-      && !supportsFeishuInputRequest(request)
+      request.type === "approval"
+        ? !supportsFeishuApprovalRequest(request)
+        : !supportsFeishuInputRequest(request)
     ) {
       return safeInteractionDecision(request);
     }
