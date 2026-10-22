@@ -33,6 +33,8 @@ export function securePrivateDirectorySync(path: string): void;
 export function securePrivateFile(path: string, options?: { signal?: AbortSignal }): Promise<void>;
 export function securePrivateDirectory(path: string, options?: { signal?: AbortSignal }): Promise<void>;
 export function assertPrivateDirectoryAccess(path: string, options?: { signal?: AbortSignal }): Promise<void>;
+export function inspectPrivateDirectoryAccess(path: string, options?: { signal?: AbortSignal }): Promise<{ dev: number; ino: number }>;
+export function inspectPrivateDirectoryAccessSync(path: string): { dev: number; ino: number };
 export function secureAppServerSocketDirectorySync(path: string): void;
 
 export function assertPrivateDirectoryAccessSync(path: string): void;

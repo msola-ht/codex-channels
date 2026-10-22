@@ -8,7 +8,8 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
-  readFileSync,
+  readSync,
+  realpathSync,
   renameSync,
   rmSync,
   rmdirSync,
@@ -115,23 +116,55 @@ export function readPrivateFileSync(
   path,
   maximumBytes = defaultMaximumPrivateFileBytes,
 ) {
+  validateSyncReadLimit(maximumBytes);
   if (process.platform === "win32") {
     return readWindowsFileSync(path, "file", maximumBytes);
   }
+  return readUnixFileSync(path, maximumBytes, false);
+}
+
+function validateSyncReadLimit(maximumBytes) {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 16_777_216) {
+    throw new Error("私有配置读取上限无效");
+  }
+}
+
+function readUnixFileSync(path, maximumBytes, sharedConfig) {
+  // Only the main Codex config follows its documented shared/symlink contract.
+  const openedPath = sharedConfig ? realpathSync(path) : path;
   const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-  const descriptor = openSync(path, constants.O_RDONLY | noFollow);
-  try {
-    const metadata = fstatSync(descriptor);
-    const currentUid = process.getuid?.();
-    if (
-      !metadata.isFile()
-      || metadata.size > maximumBytes
-      || (process.platform !== "win32" && (metadata.mode & 0o077) !== 0)
-      || (currentUid !== undefined && metadata.uid !== currentUid)
-    ) {
+  const descriptor = openSync(openedPath, constants.O_RDONLY | constants.O_NONBLOCK | noFollow);
+  const validate = metadata => {
+    if (!metadata.isFile() || metadata.size > maximumBytes
+      || (!sharedConfig && (metadata.mode & 0o077) !== 0)
+      || (process.getuid !== undefined && metadata.uid !== process.getuid())) {
       throw new Error("私有文件权限、类型或大小无效");
     }
-    return readFileSync(descriptor, "utf8");
+  };
+  try {
+    const before = fstatSync(descriptor);
+    validate(before);
+    const buffer = Buffer.alloc(maximumBytes + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const bytesRead = readSync(descriptor, buffer, length, buffer.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > maximumBytes) throw new Error("私有文件超过读取上限");
+    const after = fstatSync(descriptor);
+    validate(after);
+    const current = lstatSync(openedPath);
+    validate(current);
+    const content = buffer.subarray(0, length).toString("utf8");
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs
+      || current.dev !== before.dev || current.ino !== before.ino
+      || current.size !== after.size || current.mtimeMs !== after.mtimeMs || current.ctimeMs !== after.ctimeMs
+      || (sharedConfig && realpathSync(path) !== openedPath)
+      || Buffer.byteLength(content, "utf8") > maximumBytes) {
+      throw new Error("私有文件在读取期间发生变化");
+    }
+    return content;
   } finally {
     closeSync(descriptor);
   }
@@ -139,12 +172,12 @@ export function readPrivateFileSync(
 
 /** Upstream config is shared with Codex's sandbox: validate integrity, not secrecy. */
 export function readCodexConfigFileSync(path, maximumBytes = defaultMaximumPrivateFileBytes) {
-  if (process.platform !== "win32") return readPrivateFileSync(path, maximumBytes);
+  validateSyncReadLimit(maximumBytes);
+  if (process.platform !== "win32") return readUnixFileSync(path, maximumBytes, true);
   return readWindowsFileSync(path, "codex-config", maximumBytes);
 }
 
 function readWindowsFileSync(path, kind, maximumBytes) {
-  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 16_777_216) throw new Error("私有配置读取上限无效");
   // Preserve ENOENT for optional-file callers before invoking the ACL adapter.
   const metadata = lstatSync(path);
   if (metadata.isSymbolicLink()) throw new Error("私有路径不能是符号链接");
@@ -311,6 +344,63 @@ export async function assertPrivateDirectoryAccess(path, { signal } = {}) {
   signal?.throwIfAborted();
   if (process.platform === "win32") await assertWindowsPrivatePath(path, "directory", "verify", {}, signal);
   signal?.throwIfAborted();
+}
+
+function validatePrivateDirectory(metadata) {
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()
+    || (process.platform !== "win32" && ((metadata.mode & 0o077) !== 0
+      || (process.getuid !== undefined && metadata.uid !== process.getuid())))) {
+    throw new Error("私有目录权限、类型或所有者无效");
+  }
+}
+
+function directoryIdentity(before, opened, current) {
+  for (const metadata of [before, opened, current]) validatePrivateDirectory(metadata);
+  if (before.dev !== opened.dev || before.ino !== opened.ino
+    || current.dev !== opened.dev || current.ino !== opened.ino) {
+    throw new Error("私有目录在校验期间发生变化");
+  }
+  return { dev: opened.dev, ino: opened.ino };
+}
+
+/** Inspect existing resources without creating directories or repairing permissions. */
+export async function inspectPrivateDirectoryAccess(path, { signal } = {}) {
+  signal?.throwIfAborted();
+  const before = await lstat(path);
+  signal?.throwIfAborted();
+  validatePrivateDirectory(before);
+  if (process.platform === "win32") {
+    await assertWindowsPrivatePath(path, "directory", "verify", {}, signal);
+    const current = await lstat(path);
+    signal?.throwIfAborted();
+    return directoryIdentity(before, current, current);
+  }
+  const descriptor = await open(path, constants.O_RDONLY | constants.O_NONBLOCK
+    | (constants.O_NOFOLLOW ?? 0) | (constants.O_DIRECTORY ?? 0));
+  let identity;
+  try {
+    const opened = await descriptor.stat();
+    const current = await lstat(path);
+    identity = directoryIdentity(before, opened, current);
+    signal?.throwIfAborted();
+  } finally { await descriptor.close(); }
+  signal?.throwIfAborted();
+  return identity;
+}
+
+export function inspectPrivateDirectoryAccessSync(path) {
+  const before = lstatSync(path);
+  validatePrivateDirectory(before);
+  if (process.platform === "win32") {
+    assertWindowsPrivatePathSync(path, "directory");
+    const current = lstatSync(path);
+    return directoryIdentity(before, current, current);
+  }
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK
+    | (constants.O_NOFOLLOW ?? 0) | (constants.O_DIRECTORY ?? 0));
+  try {
+    return directoryIdentity(before, fstatSync(descriptor), lstatSync(path));
+  } finally { closeSync(descriptor); }
 }
 
 /** Create or protect a directory only after checking its type and ownership. */

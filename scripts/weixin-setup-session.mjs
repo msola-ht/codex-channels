@@ -201,7 +201,7 @@ class WeixinSetupSession {
     this.#setState("saving");
     let store;
     let previous;
-    let credentialWriteAttempted = false;
+    let credentialWriteConfirmed = false;
     let configWriteAttempted = false;
     let configBeforeWrite;
     const warnings = [];
@@ -210,8 +210,8 @@ class WeixinSetupSession {
         join(this.#dataDir, "credentials", "weixin"),
       );
       previous = await store.get(credential.accountId);
-      credentialWriteAttempted = true;
       await store.set(credential);
+      credentialWriteConfirmed = true;
       configBeforeWrite = statSync(this.#configPath, { bigint: true });
       configWriteAttempted = true;
       this.#writeConfig(this.#configPath, currentDocument);
@@ -235,7 +235,9 @@ class WeixinSetupSession {
         );
       } else {
         try {
-          if (store && credentialWriteAttempted) {
+          // A rejected credential write may have committed or detected concurrent
+          // material. Compensate only a write that actually confirmed success.
+          if (store && credentialWriteConfirmed) {
             if (previous) {
               await store.set(previous);
             } else {

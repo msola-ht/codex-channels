@@ -1,4 +1,5 @@
 import { validRequestTiming } from "../runtime/request-timing.mjs";
+import { projectTrafficDumpManifest } from "../runtime/traffic-dump-manifest.mjs";
 import {
   closeSync,
   constants,
@@ -373,16 +374,9 @@ function readManifest(directory) {
 }
 
 function validateManifest(value, directory) {
-  if (typeof value !== "object" || value === null
-    || Array.isArray(value)
-    || Object.keys(value).some(key => !["createdAtMs", "label", "session", "version"].includes(key))
-    || typeof value.createdAtMs !== "number" || !Number.isFinite(value.createdAtMs)
-    || typeof value.label !== "string" || value.label.length === 0
-    || typeof value.session !== "string" || value.session.length === 0
-    || typeof value.version !== "number" || !Number.isFinite(value.version)) {
-    throw new Error(`模型流量 manifest 无效：${directory}`);
-  }
-  return { createdAtMs: value.createdAtMs, label: value.label, session: value.session, version: value.version };
+  const manifest = projectTrafficDumpManifest(value);
+  if (manifest === undefined) throw new Error(`模型流量 manifest 无效：${directory}`);
+  return manifest;
 }
 
 async function visitIndexLine(line, directory, visit, allowTornTail) {

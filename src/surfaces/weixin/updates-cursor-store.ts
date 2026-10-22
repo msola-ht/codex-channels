@@ -14,6 +14,7 @@ import { validateWeixinAccountId } from "./credential-store.js";
 
 export interface WeixinUpdatesCursorStore {
   get(accountId: string): Promise<string | null>;
+  inspect(accountId: string): Promise<string | null>;
   set(accountId: string, cursor: string): Promise<void>;
   remove(accountId: string): Promise<void>;
 }

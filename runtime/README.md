@@ -348,16 +348,18 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup 与 Runtime 复用。
 - `provider-file-access.mjs` / `provider-file-access.d.mts`：在创建访问器时绑定当前环境的 Codex Home，通过 `isMainConfig` 精确规范化匹配唯一共享主配置；其他路径（包括同名备份）保持严格私有。Provider 的读取、凭据认证选择、指纹、事务写入和回滚使用同一归属判断，不由业务入口选择权限标记；不改变磁盘路径或格式。
+- `traffic-dump-manifest.mjs` / `traffic-dump-manifest.d.mts`：CLI/WebUI reader、显式 cleanup 与自动保留维护共用的纯 manifest 严格四字段投影，不执行 I/O、迁移或修改读取预算。
 - `single-worker-reader.mjs` / `single-worker-reader.d.mts`：设置快照、Relay 材料与 DS 图片材料 Reader 共用的单 Worker 宿主；集中读取合并、ready/读取时限、监听清理和物理退出归属。业务否定结果保留线程，通信失败进入协作关闭；各 Reader 提供自身数据、预算和安全错误。`readFresh` 等待已有读取后重新请求，不是缓存。`closeSingleWorkerReaders` 永久关闭当前进程的准入；有界关闭失败后，`waitForSingleWorkerReadersExit` 及 Reader 的 `waitForExit` 仍等待物理线程退出，包含嵌套 Windows ACL 清理。
 - `deepseek-image-material-reader.mjs` / `deepseek-image-material-worker.mjs`：受管 DS 上传拥有的窄材料读取器，按精确 Provider 在独立 Worker 中复核私有账户材料和同次前后设置指纹；不复用 Relay 业务授权，不在主线程执行私有文件或 Windows ACL 读取。协作关闭等待嵌套 ACL 清理，关闭超时仍保留物理退出归属；App Server 正常及超时关闭均先停止材料读取准入，再等待 Worker 与当前进程 ACL 资源实际退出，超时保留故障状态。
 - `provider-settings-snapshot-reader.mjs` / `provider-settings-snapshot-reader.d.mts` / `provider-settings-snapshot-worker.mjs`：Provider 设置观察器拥有的单 Worker，读取有界材料指纹并校验完整配置；聚合成员变化单独返回需重启状态，不阻断其他提供商指纹读取。初始化与单次读取分别限时，关闭确认线程退出，源正文和凭据不跨线程返回。Windows 协作关闭先等待 ACL 子进程实际退出，再关闭外层线程；2 秒关闭等待超时仍保留旧代及引用，不启动替代线程。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
-  文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
-  避免路径校验后被符号链接替换；Windows 使用解析后的 PowerShell 7 `pwsh` 调用结构化 SID/ACL
+  文件原子替换；Unix 同步读取以 `O_NONBLOCK` 和 `O_NOFOLLOW` 打开，在同一描述符上校验普通文件、大小、权限与属主，并在固定字节上限内读取；返回前复核描述符元数据与路径身份，拒绝读取期间的替换或变化。
+  共享主配置复用同一有界读取，保留 Unix 链接及共享读取权限合同，不将其父目录强制收紧为私有目录。Windows 使用解析后的 PowerShell 7 `pwsh` 调用结构化 SID/ACL
   适配器，冷启动调用最多 5 秒、复用调用最多 2 秒，超时终止并拒绝操作；Windows 原子写入使用先收紧权限的临时子目录，已有父目录只校验所有者与写入权限，不移除上游沙箱读取权限；严格私有文件关闭继承，只允许当前 SID、SYSTEM 和
   Administrators 完全控制；状态库、任务库、指标库、媒体、渠道输出和受管备份复用同一合同；
   渠道图片暂存目录通过 `ensurePrivateDirectorySync` 在保护权限前检查目录类型、链接与所有者，消费端和提交端共用。
+  `inspectPrivateDirectoryAccess` / `inspectPrivateDirectoryAccessSync` 对既有目录只读校验类型、链接、属主与平台私有权限，返回 `dev` / `ino` 供调用方跨操作复核身份；不创建目录、不修复权限，也不替代操作完成后的再次核对。Unix 通过非阻塞目录描述符核对路径身份，Windows 复用 ACL 与重解析点校验；原有 `assertPrivateDirectoryAccess` 接口合同保持不变。
   App Server Socket 目录通过 `secureAppServerSocketDirectorySync` 将已受信任目录收紧为锁定 CLI 要求的单条当前 SID 可继承完全控制权限；其他目录写入与父目录读取接受并保留此更严格权限，不向 Socket 目录重新添加 SYSTEM/Administrators。
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
   `readCodexConfigFileSync` / `assertCodexConfigAccessSync` 对共享主配置校验当前用户所有权及写入完整性，允许上游继承的只读访问，不声称主配置机密性；Provider Profile、凭据、备份仍要求严格私有。普通设置不增加 RPC 后 ACL 修复事务。

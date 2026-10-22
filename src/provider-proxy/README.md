@@ -153,7 +153,10 @@
   迟到 I/O 仍由原 owner 持有并收尾。
   App Server 启动及新 session 建立时异步按 session
   最后活动时间与 `[debug].model_traffic_retention_days` 清理过期 V2 历史 session，`0` 关闭按时间清理。
-  历史完整 session 仍按 Provider 约保留 320 MiB；清理在删除前复核同进程所有 writer 的活动目录，
+  历史完整 session 仍按 Provider 约保留 320 MiB；同步公开维护入口与异步 owner 均只读验证既有根目录和 session 的类型、owner 与平台私有访问，拒绝链接，不通过修改权限接受未知目录。
+  自动维护与 CLI/WebUI reader、显式 cleanup 共用 Runtime 的严格纯 manifest 四字段投影，未知字段、空身份及非有限数不纳入清理；读取预算各自保留，自动维护的 manifest 上限为 16 KiB。
+  删除前复核根、session 的设备/节点身份及 manifest 的身份、大小、修改时间与内容；校验失败停止本轮维护、保留尚未删除的对象并经 owner 报告固定维护故障，不迁移、不清除未知材料。
+  不含 manifest 的未知目录及非 V2 session 继续跳过；损坏的现有 manifest 会阻止本轮后续合法清理，Relay 采集进入 failed 状态，模型交付仍独立继续。清理同时复核同进程所有 writer 的活动目录，
   包含扫描期间新分配但尚未完成文件准备的 session；维护可取消且有时间和扫描项数上限。
   当前写入中的 session 不会被拆除，未知目录和旧版文件不会被自动删除；
   Authorization、Cookie 等凭据字段只保留认证
@@ -227,7 +230,7 @@ Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 
 小型请求按实际声明长度准入。生成、交付及取消清理完成后才释放。超限返回
 `503 chat_bridge_capacity_exceeded`，不排队、不自动重试；这不是 Node 总内存上限。每座桥拥有独立随机本地身份，统计代理覆盖客户端同名身份头，桥校验后才准入；该头不进入 resolver 或模型上游，原有 `Authorization` 语义不变。关闭等待本桥在途处理结束。
 
-- `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在其后复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 复核取消后立即尝试采集，首次容量初始化期间跳过并报告 initializing，不等待磁盘；共享存储报告实际接受的写入量，在途调用单独预留预算；后台单任务清理历史并保护活动及新建批次，整理期间继续采集；维护与关闭各有 5 秒预算，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。
+- `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在后台启动并复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 复核取消后立即尝试采集，首次容量初始化期间跳过并报告 initializing，不等待磁盘；ready 后仅采集新请求，不补录初始化期间跳过的请求。共享存储报告实际接受的写入量，在途调用单独预留预算；后台单任务清理历史并保护活动及新建批次，整理期间继续采集；维护与关闭各有 5 秒预算，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。
 - `relay-metric.ts`：直接模型调用的最小跨进程指标合同，不包含消息正文或凭据。
 - `relay-metrics-channel.ts`：版本化、受限帧与连接的私有指标 IPC；显式接收/拒绝，未知确认不判定为丢失；异步接收任务最多 8 个，断连时取消，任务实际结束才释放名额。
   协议/生成/交付状态及转储标签严格要求字符串枚举，不以强制转换接受数组，避免畸形样本进入批次影响其他指标。

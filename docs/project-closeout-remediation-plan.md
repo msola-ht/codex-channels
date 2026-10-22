@@ -184,7 +184,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 
 ## 实施批次记录
 
-### 第一批：B01 / B02（实施与独立复审完成，待本地提交）
+### 第一批：B01 / B02（已提交 `1f5472d4`）
 
 - 范围：R01/R34 审批完整性、R02 匿名 HTTP 边界、R29 当前安全文档。业务修复从 `c6d26882` 开始，先前流程与复审补充一并纳入本批交接。
 - B01 实施：Client 以原始参数对象逐名逐值核对展示数组；共同层完整转义命令、权限、规则与 MCP 参数原名/标签/值，不截取前若干项。命令详情与 MCP 完整预览超 3000 UTF-8 字节安全拒绝；飞书完整内容改为无损展示，并在端口和渲染前防御性拒绝超限。
@@ -198,3 +198,27 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 静态状态：`npm run check`（类型、版本、模块边界）、目标 ESLint、文档检查及最终 `npm run build` 均通过。一次直接 tsc 增量发射因已有 dist 声明被读作输入报 TS5055，已改回标准 build 成功，不修改门禁或业务代码来掩盖该调用方式问题。
 - cwd 本地解码观察：字符串目录按原值保留，数字目录返回 `decline`，缺失目录保留 `null`。最终完整用户路径观察限制不因此解除。
 - 未观察：真实渠道发卡/点击、App Server 完整审批往返、浏览器 DNS 重绑定；没有为本地观察发送渠道消息、访问用户凭据或产生模型费用。本地解码/渲染观察不能替代完整用户路径，相关行为保持待补证。
+- 本地提交：`1f5472d45a0298f601cd3c2600956b09c28bc299`，正常 Hook 的类型/版本/边界、变更 Lint、文档与构建全部通过，总计 13.2 秒；提交后工作区 clean。没有推送。
+
+### 第二批子批次：B03 / B04 / B05（独立复审通过，待本地提交）
+
+原第二批按共享资源责任拆成可独立审查提交的子批次，本次只处理私有读取、凭据与诊断、自动转储维护，配置事务及渠道撤权等仍待后续子批次。输入为第一批提交 `1f5472d4`。
+
+- B03：新增只读目录身份 inspect（旧 assert 语义不变），同步 reader 改 NONBLOCK、同 FD 有界读取、前后元数据和路径身份复核；主 Codex 配置保持已有 realpath 链接与共享读取 mode 合同，Provider wrapper 共用实现。settings snapshot 的预算前 marker 和 Relay materials 共用此边界，不改 Worker 生命周期。
+- B03 实际 Linux 观察：FIFO 约 0.05 ms 拒绝，严格链接 ELOOP、特殊文件/无效预算/超限拒绝；0644 主配置链接和 0755 父目录可读且权限不变。目录 inspect 对宽权限、链接、文件和 FIFO 拒绝，预取消为 AbortError。40 次拒绝前后 FD 为 19→19；16 MiB 原子替换竞争被拒绝，替换 Worker exit=0，稳定后可读。
+- B03 真实生产 Reader：正常 Provider settings 返回可见 ds-manual 与指纹，正常 Relay materials 返回禁用配置快照；FIFO marker 返回 snapshot-invalid（约 118 ms）、FIFO Gateway config 返回 materials invalid（约 101 ms），均等待 close/waitForExit 完成。最初 node --input-type 被 Worker 继承造成初始化失败，已确认退出并改正常 node -e 动态 import 后取得上述结果，不作为产品失败。异主样本 chown 被容器以 EINVAL 拒绝；Windows/macOS 未观察。
+- B04：Linux 凭据通过新目录 inspect 和持有的目录 FD 进行操作，拒绝祖先/叶链接、异主/宽权限/多硬链接，不 chmod 既有材料；二进制读取同 FD 非阻塞有界。既有记录缺 key 不生成替代 key；删除只需路径/身份安全，不依赖解密。微信 Doctor 的窄接口和装配改为 inspect；macOS 非空损坏 Token 抛固定错误，沿现有显式 revoke 清理分支。
+- B04 数据处理：保留既有 AES-GCM 格式、master.key、记录命名及系统 Keychain/DPAPI 分工，不迁移或重加密。只新建资源设置 0700/0600；损坏/未知材料保持原样，旧权限或密钥恢复不自动执行。Linux procfs 不可用则失败关闭。代码回退不能恢复显式撤销的凭据，不自动用旧备份覆盖新写入。
+- B04 实际 Linux 观察：生产记录 Store 对任务自有材料 missing→null、set/get→disposable-one、update/get→disposable-two；0644 记录拒绝且仍为 644；目录链接拒绝 remove、链接目标文件仍在；有记录但缺 key 拒绝 set，key 未重建，显式 remove 后 get→null。生产 cursor Store 正常 inspect 读回游标，目录 0755 时拒绝并保持 755。临时材料已清理；真实渠道 Doctor/授权和 macOS Keychain 未观察。
+- B05：共享 Runtime 纯 manifest 校验，reader、自动 sync/async retention 与经 reader 的显式 cleanup 保持严格识别；私有根/目标/manifest 在扫描、计数及删除前复核。未知版本或无 manifest 跳过，已识别位置的坏 manifest 中止维护并走既有固定故障/采集降级，不修改未知材料；R43 指南对齐后台初始化、未 ready 跳 capture、ready 后只采新请求。
+- 本次新增 runtime manifest 两个源/声明文件属于本批关联审查范围；原 1,146 项 CSV 仍对应初始业务基线，不把旧清单冒充新文件的逐行证据。
+- B05 隔离观察：同步/异步按时间和容量淘汰四条路径均保留 new、返回 1363 字节；活动 registry 在容量为零时保留活动 session、删除非活动 session，释放保护后返回 0。根链接、0755 根、扫描后根/session/manifest 替换均拒绝且保留材料；权限保持 755。额外字段、空身份、非有限时间在维护及共同 reader 均拒绝；V3 合法结构、无 manifest 未知目录跳过保留。维护的 16 KiB 与 reader 原有 1 MiB 预算分别保留；17 KiB 合法 manifest 维护拒绝、reader 接受。预取消入口为 AbortError。
+- B05 生产消费观察：隔离 Relay owner 的 prepare 实际删除合法过期 session；begin 初始化期间返回 undefined 并记录 skipped，ready 后公开采集流程保存一条完整调用，实际 traffic CLI 显示 manual-model→manual-model、结果“完成”。显式 cleanup 实际预览一个 V2 session、1.4 KiB，未删除；损坏 manifest 令真实 Relay owner 报固定 capture failed、状态 failed、材料保留。三个 owner 均 closed，REPL exit=0，临时目录和独立 tsbuildinfo 已清理。
+- B05 限制：未启动真实 App Server 或 WebUI HTTP，仅分别核对其启动调用链和共同 reader；同步公开入口无生产 caller，只观察函数本身；Windows/macOS ACL 未观察。路径式 rm 仍存在身份复核到执行间的竞争窗口，不能宣称跨进程原子条件删除。
+- 第二批首次独立 Astra/high 复审：B03/B05 全链未发现其他确定阻断；B04 有两项必须修正。其一，读取 master.key 后至记录 rename 和最终返回没有延续密钥修订核对，读取记录与密钥也需最终快照复核；其二，/proc/self/fd 能力不可用时 ENOENT 可能被误作记录不存在，删除假成功。两项来自源码独立判断，未执行注入；本批保留未提交，修订后另开独立 A 定向复核，不能把首次审查描述为通过。
+- B04 复审修订：文件读取返回内容及同 FD 修订；get 最终核对记录与密钥，set 在 rename 前及最终成功确认时核对密钥。目录能力先确认 proc 路径可达且对应持有目录；叶 ENOENT 必须复核目录能力，持有后配置路径消失转固定目录变化错误。初始尚未创建目录仍保持 missing 语义。
+- B04 修订观察：用生产 TypeScript 微信凭据入口和任务自有材料完成保存→读取→删除→null，权限 0700/0600、密文不含输入明文。FS 调用边界注入读取 key 后删除/替换/chmod 均拒绝，旧记录字节保留且临时记录为零；rename 后 chmod 也在最终返回失败，不恢复覆盖并发材料。get 期间替换记录或放宽 key 权限均拒绝；proc 初始/叶访问期间失效、proc 指向其他目录，以及操作期间移动配置目录均固定失败、顶层无 ENOENT code；原材料保留。真正初始缺失仍返回 null。没有卸载系统 procfs；这些是调用边界模拟，不是宿主故障实测。自有目录、句柄均已清理。
+- 修订后的完整 `npm run build` 与 `npm run check` 均 exit=0，包含 B05 最后补充的统计后身份复核；类型、版本和模块依赖检查通过。目标 ESLint、差异空白检查与 84 个 Markdown 的文档检查通过。以上为静态状态，真实渠道、macOS/Windows 观察限制仍保留。
+- 第二个独立 Astra/high 定向复核发现上层补偿会绕过底层并发拒绝：飞书授权在 set 失败后无条件恢复旧 Token，微信 Setup 在 set 前标记 attempted 后同样补偿。已删除飞书失败后的恢复，并把失败提示改成授权未确认；微信仅在 set 确认成功后置位，存储拒绝不进入后续配置失败补偿。保留材料、不自动恢复或删除是本次失败恢复方案；无需迁移或备份重放。已成功写入后的停止／配置失败沿用既有补偿合同，仍不构成跨进程 CAS。
+- 上层实际隔离观察：飞书控制器用模拟平台/存储端口推进到授权后 set 拒绝，原记录为空和非空两种输入均只 set 一次、remove 零次，提示授权未确认。首次合成授权链接不符合官方域名门禁而提前拒绝（set 零次），改为受支持域名后取得上述完整分支结果，未发网络或平台消息。微信生产 Setup 会话推进到 ready 后注入 set 拒绝，两种原记录情况均 set 一次、remove 零次、配置写入零次、文件字节不变、状态 failed；另观察 set 成功但配置提交前失败时仍 remove 一次，保留既有补偿。会话及自有临时目录已清理。
+- 最终独立复核：第二个 Astra 已读取底层修订、飞书授权与刷新、微信 Setup/Bot/回复上下文、Doctor 关联链，确认本次修订无剩余提交阻断。它是第一次 B03/B05 全链审查之后的定向补充，不重复宣称全量复审。主代理核对全部报告和最终差异；R07/R08/R12/R16/R21/R41 标为已修复待补证，R43 文档已关闭，其他包继续开放。
