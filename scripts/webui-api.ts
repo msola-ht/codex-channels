@@ -1157,7 +1157,7 @@ export interface TrafficExchangeSummary {
   upstreamProvider?: string
 }
 
-export interface TrafficListResponse {
+interface TrafficListCatalog {
   directory: string
   enabled: boolean
   retentionDays: number
@@ -1166,11 +1166,21 @@ export interface TrafficListResponse {
   session: string | null
   sessions: Array<{ session: string; createdAtMs: number }>
   generatedAt: string
+}
+
+export type TrafficListResponse = TrafficListCatalog & ({
+  indexStatus: "ready"
+  indexPending: boolean
   exchanges: TrafficExchangeSummary[]
   total: number
-  maximumOffset: number
   nextOffset: number | null
-}
+} | {
+  indexStatus: "building" | "unavailable"
+  errorCode: "traffic_index_building" | "traffic_index_limit" | "traffic_index_timeout"
+  exchanges: []
+  total: null
+  nextOffset: null
+})
 
 export type TrafficHeaderValue = string | string[]
 
@@ -1294,6 +1304,7 @@ export interface TrafficExchangeDetail {
 }
 
 export interface TrafficDetailResponse {
+  indexPending: boolean
   directory: string
   enabled: boolean
   retentionDays: number

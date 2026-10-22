@@ -64,15 +64,9 @@ function EnabledTrafficPage() {
   const listData = list.data
   const detailView = detail.displayData
   const pageNumber = Math.floor(query.offset / query.limit) + 1
-  const paginationLimited = listData !== null
-    && listData.nextOffset === null
-    && query.offset + listData.exchanges.length < listData.total
-    && query.offset + listData.exchanges.length >= listData.maximumOffset
   // 完整说明带可翻译前缀，配置键本身原样保留并保持 code 展示。
   const dumpKey = "[debug].model_traffic_dump"
   const dumpNotice = t("traffic.dumpDisabledDescription").split("{configKey}")
-  // 分页上限说明同理：只翻译说明文字，命令本身原样保留并保持 code 展示。
-  const limitNotice = t("traffic.limitDescription", { offset: listData?.maximumOffset.toLocaleString("zh-CN") ?? "" }).split("{command}")
 
   if (query.id !== null) {
     return (
@@ -99,6 +93,7 @@ function EnabledTrafficPage() {
           </div>
         </div>
         <ErrorBanner error={translateApiError(t, detail.error, detail.errorCode)} onRetry={detail.refetch} pending={detail.refreshing} />
+        {detail.building ? <Alert><AlertTitle>{t("traffic.indexBuilding")}</AlertTitle><AlertDescription>{t("traffic.indexBuildingDescription")}</AlertDescription></Alert> : null}
         {detailView === null ? detail.error !== null ? null : <PageSkeleton rows={6} /> : (
               <TrafficDetail
                 key={`${detailView.label}:${detailView.session}:${detailView.exchange.id}`}
@@ -179,7 +174,7 @@ function EnabledTrafficPage() {
               </Field>
             ) : null}
           </FieldGroup>
-          <RefreshStatus status={list.notificationStatus} updatedAt={listData === null ? null : list.lastUpdatedAt} failed={list.error !== null} history={query.offset > 0} />
+          <RefreshStatus status={list.notificationStatus} updatedAt={listData?.indexStatus === "ready" ? list.lastUpdatedAt : null} failed={list.error !== null} history={query.offset > 0} />
           <Button
             type="button"
             variant="outline"
@@ -212,12 +207,10 @@ function EnabledTrafficPage() {
           </AlertDescription>
         </Alert>
       ) : null}
-      {paginationLimited ? (
+      {list.building ? (
         <Alert>
-          <AlertTitle>{t("traffic.limitTitle")}</AlertTitle>
-          <AlertDescription>
-            {limitNotice[0]}<code className="rounded bg-muted px-1 text-xs">codexc traffic</code>{limitNotice[1]}
-          </AlertDescription>
+          <AlertTitle>{t("traffic.indexBuilding")}</AlertTitle>
+          <AlertDescription>{t("traffic.indexBuildingDescription")}</AlertDescription>
         </Alert>
       ) : null}
       {listData !== null ? (
@@ -226,7 +219,7 @@ function EnabledTrafficPage() {
         </p>
       ) : null}
 
-      {listData === null ? list.error !== null ? null : <PageSkeleton rows={8} /> : (
+      {listData?.indexStatus !== "ready" ? list.error !== null ? null : <PageSkeleton rows={8} /> : (
             <TrafficTable
               description={`${listData.label ?? t("traffic.allProviders")} · ${listData.session === null ? t("traffic.allSessionsCount", { count: listData.sessions.length }) : t("traffic.sessionScope", { name: listData.session })}`}
               pagination={{ mode: "server", pageNumber, pageSize: query.limit, pageSizeOptions: trafficPageSizeOptions, serverTotal: listData.total,

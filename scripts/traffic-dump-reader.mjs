@@ -1,4 +1,5 @@
 import { validRequestTiming } from "../runtime/request-timing.mjs";
+import { createHash } from "node:crypto";
 import { projectTrafficDumpManifest } from "../runtime/traffic-dump-manifest.mjs";
 import {
   closeSync,
@@ -15,6 +16,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { lstat, open, opendir } from "node:fs/promises";
 import { finished } from "node:stream/promises";
 import { setImmediate as yieldReading } from "node:timers/promises";
+import { createTrafficOffsetStore, sameRevision, sameSource } from "./traffic-offset-index.mjs";
 
 import { callTiming, createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestClientName, requestContent, requestMetadata, requestParameters, requestProtocol, responseFacts } from "./traffic-dump-presentation.mjs";
 
@@ -25,9 +27,11 @@ const maximumManifestBytes = 1_048_576;
 const maximumLineBytes = 16 * 1_048_576;
 
 /** HTTP 一次读取的共同预算；CLI 与清理不创建该上下文，保留原契约。 */
-export function createTrafficReadContext(signal) {
-  const remaining = { bytes: 128 * 1_048_576, records: 100_000, entries: 20_000, files: 2_048 };
-  const deadline = performance.now() + 10_000;
+export function createTrafficReadContext(signal, indexing = false) {
+  const remaining = indexing
+    ? { bytes: 512 * 1_048_576, records: 2_000_000, entries: 20_000, files: 2_048 }
+    : { bytes: 128 * 1_048_576, records: 100_000, entries: 20_000, files: 2_048 };
+  const deadline = performance.now() + (indexing ? 30_000 : 10_000);
   let steps = 0;
   return {
     signal,
@@ -36,12 +40,14 @@ export function createTrafficReadContext(signal) {
     check() {
       if (signal.aborted) throw signal.reason instanceof TrafficDumpReadError
         ? signal.reason : new TrafficDumpReadError("traffic_read_cancelled", "调用记录读取已取消");
-      if (performance.now() >= deadline) throw new TrafficDumpReadError("traffic_read_timeout", "调用记录读取超过 10 秒期限，请缩小批次范围");
+      if (performance.now() >= deadline) throw new TrafficDumpReadError(indexing ? "traffic_index_timeout" : "traffic_read_timeout", indexing
+        ? "调用索引构建超过 30 秒期限，请选择较小的批次范围" : "调用记录读取超过 10 秒期限，请缩小批次范围");
     },
     charge(kind, count = 1) {
       this.check();
       remaining[kind] -= count;
-      if (remaining[kind] < 0) throw new TrafficReadBudgetError("traffic_read_limit", "调用记录读取超过整体工作预算，请缩小批次范围");
+      if (remaining[kind] < 0) throw new TrafficReadBudgetError(indexing ? "traffic_index_limit" : "traffic_read_limit", indexing
+        ? "调用索引构建超过工作预算，请选择较小的批次范围" : "调用记录读取超过整体工作预算，请缩小批次范围");
     },
     async checkpoint() {
       this.check();
@@ -59,6 +65,151 @@ export class TrafficDumpReadError extends Error {
 // Only exhaustion of the shared work budget may degrade optional diagnostics.
 // Cancellation, malformed records and file identity failures must still fail closed.
 class TrafficReadBudgetError extends TrafficDumpReadError {}
+
+export function createTrafficIndexStore(signal) {
+  return createTrafficOffsetStore({
+    signal, openSource: openTrafficIndexSource,
+    error: (code, message) => new TrafficDumpReadError(code, message),
+    createContext(buildSignal, source, directory) {
+      const context = createTrafficReadContext(buildSignal, true);
+      context.rootDirectory = source.rootDirectory;
+      context.directories = new Map([
+        [source.rootDirectory, source.directories.get(source.rootDirectory)],
+        [resolve(directory), source.directories.get(resolve(directory))],
+      ].filter(([, metadata]) => metadata !== undefined));
+      context.manifests = new Map([[resolve(directory), source.manifests.get(resolve(directory))]]);
+      return context;
+    },
+  });
+}
+
+async function openTrafficIndexSource(directory, context) {
+  const expected = manifestOf(directory, context);
+  const manifestPath = join(directory, manifestName);
+  const manifestBefore = await lstat(manifestPath);
+  const manifestBytes = await readFileSliceAsync(join(directory, manifestName), 0, maximumManifestBytes, false, context, true);
+  const manifestAfter = await lstat(manifestPath);
+  if (manifestBefore.dev !== manifestAfter.dev || manifestBefore.ino !== manifestAfter.ino
+    || manifestBefore.size !== manifestAfter.size || manifestBefore.mtimeMs !== manifestAfter.mtimeMs
+    || manifestBefore.ctimeMs !== manifestAfter.ctimeMs) throw new Error("模型流量 manifest 在读取时被替换");
+  const manifest = validateManifest(parseJson(manifestBytes.toString("utf8")), directory);
+  if (JSON.stringify(manifest) !== JSON.stringify(expected)) throw new Error("模型流量 manifest 在读取时被替换");
+  const handle = await openDumpFileAsync(join(directory, interactionFileName), context);
+  try {
+    const stats = await handle.stat();
+    const root = context.directories.get(context.rootDirectory);
+    const parent = context.directories.get(resolve(directory));
+    context.check();
+    return { handle, identity: {
+      source: createHash("sha256").update(JSON.stringify([root.dev, root.ino, parent.dev, parent.ino,
+        manifestAfter.dev, manifestAfter.ino, manifestAfter.size, manifestAfter.mtimeMs, manifestAfter.ctimeMs, manifest])).digest("hex"),
+      dev: stats.dev, ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs, ctimeMs: stats.ctimeMs,
+    } };
+  } catch (error) { await handle.close(); throw error; }
+}
+
+function validIndexSnapshot(expected, identity) {
+  return sameSource(expected, identity) && identity.size >= expected.size
+    && (identity.size > expected.size || sameRevision(expected, identity));
+}
+
+async function indexedInteraction(directory, lease, slot, context, borrowedSource) {
+  const source = borrowedSource ?? await openTrafficIndexSource(directory, context);
+  try {
+    const expected = lease.identity;
+    if (!validIndexSnapshot(expected, source.identity)) throw new Error("模型流量索引快照已失效");
+    const interaction = { directory, session: writerSessionOf(directory, context) };
+    for (const [kind, field] of [["request", 1], ["response", 3]]) {
+      const offset = lease.index.get(slot, field) - 1;
+      if (offset < 0) continue;
+      const length = lease.index.get(slot, field + 1);
+      context.charge("records"); context.charge("bytes", length);
+      const buffer = Buffer.allocUnsafe(length);
+      let read = 0;
+      while (read < length) {
+        await context.checkpoint();
+        const { bytesRead } = await source.handle.read(buffer, read, Math.min(65_536, length - read), offset + read);
+        if (!bytesRead) throw new Error("模型流量索引在读取时被截断");
+        read += bytesRead;
+      }
+      const record = parseJson(buffer.toString("utf8"));
+      if (record?.version !== 2 || record.kind !== kind || record.id !== lease.index.get(slot, 0)) throw new Error("模型流量索引定位已失效");
+      interaction[kind] = record;
+    }
+    if (!borrowedSource) {
+      const current = await openTrafficIndexSource(directory, context);
+      try { if (!validIndexSnapshot(expected, current.identity)) throw new Error("模型流量索引快照已失效"); }
+      finally { await current.handle.close(); }
+    }
+    return interaction;
+  } finally { if (!borrowedSource) await source.handle.close(); }
+}
+
+async function indexedSummaryPage(paths, offset, limit, context) {
+  const leases = [];
+  const sources = new Map();
+  try {
+    for (const directory of sessionDirectories(paths, context)) {
+      if (!await fileExists(join(directory, interactionFileName), context)) continue;
+      const lease = await context.indexes.acquire(directory, context);
+      context.indexPending ||= lease.pending;
+      leases.push({ ...lease, directory, session: writerSessionOf(directory, context), cursor: 0 });
+    }
+    const total = leases.reduce((sum, lease) => sum + lease.index.order.length, 0);
+    const entries = [];
+    if (offset >= total) {
+      for (const lease of leases) lease.confirmSnapshot();
+      return { entries, total };
+    }
+    // Merge already sorted sessions. Only one cursor per session and the requested
+    // page are retained, so deep pagination does not allocate offset-sized heaps.
+    const heap = leases.filter(lease => lease.index.order.length > 0);
+    const compare = (left, right) => {
+      const a = left.index.order[left.cursor];
+      const b = right.index.order[right.cursor];
+      return right.index.get(b, 5) - left.index.get(a, 5)
+        || right.session.localeCompare(left.session) || right.index.get(b, 0) - left.index.get(a, 0)
+        || left.directory.localeCompare(right.directory);
+    };
+    const sift = () => {
+      let index = 0;
+      for (;;) {
+        let next = index * 2 + 1;
+        if (next >= heap.length) return;
+        if (next + 1 < heap.length && compare(heap[next + 1], heap[next]) < 0) next++;
+        if (compare(heap[index], heap[next]) <= 0) return;
+        [heap[index], heap[next]] = [heap[next], heap[index]];
+        index = next;
+      }
+    };
+    heap.sort(compare);
+    for (let position = 0; position < total && position < offset + limit; position++) {
+      await context.checkpoint();
+      const lease = heap[0];
+      if (position >= offset) {
+        let source = sources.get(lease);
+        if (!source) { source = await openTrafficIndexSource(lease.directory, context); sources.set(lease, source); }
+        entries.push(await indexedInteraction(lease.directory, lease, lease.index.order[lease.cursor], context, source));
+      }
+      lease.cursor++;
+      if (lease.cursor >= lease.index.order.length) {
+        const last = heap.pop();
+        if (heap.length > 0) heap[0] = last;
+      }
+      if (heap.length > 0) sift();
+    }
+    for (const lease of sources.keys()) {
+      const current = await openTrafficIndexSource(lease.directory, context);
+      try { if (!validIndexSnapshot(lease.identity, current.identity)) throw new Error("模型流量索引快照已失效"); }
+      finally { await current.handle.close(); }
+    }
+    for (const lease of leases) lease.confirmSnapshot();
+    return { entries, total };
+  } finally {
+    await Promise.all([...sources.values()].map(source => source.handle.close()));
+    for (const lease of leases) lease.release();
+  }
+}
 
 /** Exact detail links do not need to enumerate unrelated writers. */
 export async function readDumpSession(directory, label, session, context) {
@@ -179,11 +330,12 @@ export async function forEachDumpRecord(paths, visit, context) {
 }
 
 export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst = false, context } = {}) {
-  const page = limit === undefined
+  const indexed = context?.indexes && newestFirst && limit !== undefined;
+  const page = indexed ? await indexedSummaryPage(paths, offset, limit, context) : limit === undefined
     ? await readAllInteractionSummaries(paths, newestFirst, context)
     : await readInteractionSummaryPage(paths, offset + limit, newestFirst, context);
   const boundedLimit = limit ?? page.entries.length;
-  const entries = page.entries.slice(offset, offset + boundedLimit);
+  const entries = indexed ? page.entries : page.entries.slice(offset, offset + boundedLimit);
   const exchanges = [];
   for (const entry of entries) {
     await context?.checkpoint();
@@ -205,6 +357,18 @@ export async function readDumpExchange(paths, id, context) {
   }
   const directory = sessionDirectories(paths, context)[0];
   let interaction;
+  if (context?.indexes) {
+    if (!await fileExists(join(directory, interactionFileName), context)) return null;
+    const lease = await context.indexes.acquire(directory, context);
+    try {
+      const slot = lease.index.lookup(id);
+      const interaction = slot < 0 || lease.index.get(slot, 1) === 0 ? null : await indexedInteraction(directory, lease, slot, context);
+      context.indexPending ||= lease.pending;
+      lease.confirmSnapshot();
+      if (interaction === null && lease.pending) throw new TrafficDumpReadError("traffic_index_building", "调用索引还有未读取的记录，请稍后重试");
+      return interaction;
+    } finally { lease.release(); }
+  }
   if (context) {
     const path = join(directory, interactionFileName);
     if (!await fileExists(path, context)) return null;

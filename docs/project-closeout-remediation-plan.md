@@ -25,8 +25,8 @@ writer实际隔离生产Relay完成100001次Responses调用：0错误、单sessi
 | 批次 | 问题及处理边界 | 当前状态 |
 | --- | --- | --- |
 | L01 | Relay全字节容量与session轮转/空闲退休；保持活动调用原引用与退休保护 | 独立A关联复审无阻断，本地提交`b9b4005b` |
-| L02 | V2进程内有界偏移索引、HTTP列表/早期/pending详情、可恢复catalog及5万offset限制 | 实施及HTTP/浏览器观察完成，新的独立A关联复审中 |
-| L03 | WebUI同步指标重读移入有界只读Worker，保持同快照/错误合同，覆盖取消和真实退出 | 独立A两项关联发现已修复并复核，浏览器详情路径完成；待本地提交 |
+| L02 | V2进程内有界偏移索引、HTTP列表/早期/pending详情、可恢复catalog及5万offset限制 | 独立A两项水位发现已修正并复核，HTTP及真实浏览器观察完成，准备本地提交 |
+| L03 | WebUI同步指标重读移入有界只读Worker，保持同快照/错误合同，覆盖取消和真实退出 | 独立A关联复审通过，本地提交`78332ab1` |
 | L04 | trace与continuation定点/增量读取，防无关调用挤占目标诊断预算 | 待L02接口稳定后实施 |
 | L05 | CLI会话/轮次全量导出重复聚合，改为一次聚合/游标且保留字段与筛选 | Sol实施中；不改变普通分页与Schema |
 | L06 | CLI traffic批量展开重复扫描及follow轮转后漏旧批次终态 | 待L02/L04共享读取接口稳定后实施 |
@@ -50,7 +50,13 @@ L05隔离操作失误记录：首次CLI仅覆盖CODEX_CONNECT_HOME，遗漏继�
 
 维护竞争已由主代理定向复现：隔离生产 `pruneModelTrafficDumpSessionsAsync` 扫描自有ordinary标签候选，首次manifest lstat返回后注入该候选的合法删除，再以仅Relay labels的维护范围继续扫描，实际输出removed=true、ok=false、code=ENOENT；根目录未变且被删除候选原本不属本owner清理范围。注入仅在当前stdin进程包装fs.promises.lstat以固定交错，未改产品文件；finally恢复方法并删除任务临时目录，进程exit0。由调用链可知Relay将该维护失败视为采集failed，该后果尚未通过真实Relay入口观察。登记L07，不吞替换、权限或根变化错误。指标IPC洪峰、Windows/macOS原生路径及实际HTTP下载仍有未观察边界，不据本轮隔离SQL测量声称它们全部通过。
 
-## 当前交付状态
+L02实现保持V2及磁盘材料不变：共享进程内索引最多128MiB、256项、2个构建作业，构建最多512MiB/200万行/30秒；HTTP读取预算不提高。冷建返回catalog及未知total，页面可筛选并进行有界恢复。100011条隔离请求经生产HTTP观察由202恢复为200；早期/中间/最新完成详情约4–7毫秒，pending可读，不存在ID明确404；offset99511读取500条约181毫秒，最终ID1且无下一页。真实浏览器深页及点击ID1可用，中文截图已检查。Hack覆盖重复记录last-wins、跨批次、无换行及UTF8分片、截断/同大小改写/替换/符号链接拒绝、共享构建取消、空闲作业退出及服务关闭。独立A另用当前reader观察offset100000得到total100011、ID11..1及nextOffset=null。
+
+L02独立A发现并关闭两项P2：旧固定水位在已知追加时不能对新ID作404否定证据；列表或详情也不能确认最新通知后永久停留在旧快照。acquire交付前复核源身份并暴露pending，精确缺失在pending时返回构建状态；API传递indexPending，前端继续有界恢复，仅成功且无待处理尾部时重置重试预算。一次追加后停止写入的生产HTTP详情由503恢复到新ID100012的200；真实浏览器依次观察202、ready/total100011/indexPending=true、202、ready/total100012/indexPending=false，旧pending调用同时变为completed，未依赖后续写入通知。截图`output/playwright/l02-catchup/append-caught-up.png`已目视检查。独立A复核最终代码及文档无剩余阻断；新增浏览器证据由主代理采集，并非A亲自操作。尚未实际覆盖30秒构建超时、128MiB压力淘汰、30次自动重试耗尽及离线恢复、Windows/macOS；持续追加期间不存在目标可能保守等待至自动重试结束。trace/接续和CLI仍属L04/L06，不能用本批通过代替。
+
+L03本地提交`78332ab1`，正常Hook类型/边界、Lint、WebUI构建、2148翻译键、文档与Gateway构建通过，40.3秒；未推送。
+
+## 部署前M01–M04交付状态（历史阶段）
 
 本轮M01–M04均已完成关联修复、独立A复审和本地提交，分支为 `review/closeout-remediation-plan`。按用户最新要求，未推送、未创建PR、未合并、未部署或重启用户服务。用户后续要求只使用A子代理，最后一轮接手核对及独立复审均已由A完成。
 
