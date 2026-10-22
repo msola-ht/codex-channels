@@ -9,13 +9,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ProviderWebSearchSettings } from "@/components/settings/provider-web-search-settings"
+import { ProviderSearchSummary } from "@/components/settings/provider-search-summary"
 import { modelOperationDialogClassName } from "@/components/settings/settings-controls"
 import type { AccountDirectoryActions, AccountRow, Platform } from "@/components/settings/account-settings-management"
 import type { ProviderDirectoryActions } from "@/components/settings/provider-settings-management"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 
 const platforms: Record<Platform, string> = { opencodeGo: "OpenCode Go", deepseek: "DeepSeek", clinePass: "Cline Pass" }
-type ProviderRow = { id: string; name: string; type: string; mode: string | null; model: string; state: string; account?: AccountRow; custom?: boolean; address?: string; statusContent?: ReactNode; actions?: ReactNode }
+type ProviderRow = { id: string; name: string; type: string; mode: string | null; model: string; state: string; account?: AccountRow; custom?: boolean; address?: string; statusContent?: ReactNode; searchContent?: ReactNode; actions?: ReactNode }
 
 export function ProviderDirectory({ providers, accounts, management, locked, fresh, authenticated, terminalContent, onEditingChange }: {
   providers: ProviderDirectoryActions | null
@@ -61,7 +62,14 @@ export function ProviderDirectory({ providers, accounts, management, locked, fre
   const hasExclusive = settings?.managedProviders.some(provider => provider.mode === "exclusive") === true
   const accountsFresh = accounts?.fresh ?? false
   const editorOpen = providers?.editing === true || accounts?.editing === true || dialogOpen
+  const globalSearch = fresh ? settings?.webSearchSettings.find(entry => entry.provider === "openai" && entry.source === "global") : undefined
   for (const row of rows) {
+    const search = fresh ? settings?.webSearchSettings.find(entry => entry.provider === row.id) : undefined
+    row.searchContent = <ProviderSearchSummary setting={search} globalMode={globalSearch?.status === "ready" ? globalSearch.mode : undefined} disabled={search?.source === "global" ? menuLocked : providerLocked} onEdit={search ? node => {
+      setTrigger(node)
+      if (search.source === "global") navigate("/settings/global?section=general")
+      else { management.clearError(); setSearchProvider(row.id) }
+    } : undefined} />
     row.statusContent = <div className="flex flex-wrap gap-1"><Badge variant="outline">{row.account ? !accountsFresh ? t("common.unknown") : row.state : fresh ? row.state : t("common.unknown")}</Badge>{fresh && settings?.primary.id === row.id && <Badge variant="secondary">{t("providerDirectory.primary")}</Badge>}{row.account?.default && accountsFresh && <Badge variant="secondary">{t("providerDirectory.defaultAccount")}</Badge>}</div>
     row.actions = <DropdownMenu>
       <DropdownMenuTrigger render={<Button variant="outline" size="sm" />} disabled={menuLocked} onFocus={event => setTrigger(event.currentTarget)} onPointerDown={event => setTrigger(event.currentTarget)}>{t("modelManagement.actions")}</DropdownMenuTrigger>
@@ -82,6 +90,7 @@ export function ProviderDirectory({ providers, accounts, management, locked, fre
     { accessorKey: "type", header: t("modelManagement.platform"), cell: ({ row }) => row.original.type === "custom" ? t("providerDirectory.custom") : row.original.type === "managed" ? t("providerDirectory.managed") : row.original.type },
     { accessorKey: "mode", header: t("modelManagement.mode"), cell: ({ row }) => row.original.id === "openai" ? "—" : row.original.mode === "switching" ? t("modelManagement.switching") : row.original.mode === "exclusive" ? t("modelManagement.exclusive") : t("common.unknown") },
     { accessorKey: "model", header: t("managementUi.defaultModel"), cell: ({ row }) => <TruncatedText text={row.original.model || "—"} /> },
+    { id: "search", header: t("openAiModelCatalog.builtinSearch"), cell: ({ row }) => row.original.searchContent },
     { id: "state", header: t("channelSettings.state"), cell: ({ row }) => row.original.statusContent },
     { id: "actions", header: t("modelManagement.actions"), cell: ({ row }) => row.original.actions },
   ], [t])

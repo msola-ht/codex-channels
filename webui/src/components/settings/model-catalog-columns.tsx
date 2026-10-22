@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "@/hooks/use-translation"
+import { providerSearchSettingLabel } from "@/lib/provider-search"
 import type { OpenAiModelCatalogEntry, ManagementProviderSettingsResponse } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -69,15 +70,8 @@ function ModelWebSearchSettings({ settings, state }: { settings?: ManagementProv
   if (state === "loading") return <span aria-busy="true">{t("common.loading")}</span>
   if (state === "error") return <span>{t("openAiModelCatalog.searchReadFailed")}</span>
   if (!settings?.length) return <span>{t("common.unknown")}</span>
-  const labels = {
-    default: t("providerWebSearch.followGlobal"),
-    disabled: t("settingsFields.off"),
-    cached: t("settingsFields.cached"),
-    indexed: t("settingsFields.indexed"),
-    live: t("settingsFields.live"),
-  }
   return <div className="flex flex-col gap-2">{settings.map(setting => {
-    const label = setting.status === "ready" ? setting.source === "global" && setting.mode === null ? t("providerWebSearch.globalDefault") : labels[setting.mode === null ? "default" : setting.mode] ?? t("common.unknown") : t(setting.error === "invalid-mode" ? "openAiModelCatalog.searchInvalidMode" : setting.error === "invalid-document" ? "openAiModelCatalog.searchInvalidDocument" : "openAiModelCatalog.searchReadFailed")
+    const label = providerSearchSettingLabel(t, setting)
     return <Tooltip key={setting.provider}>
       <TooltipTrigger render={<span tabIndex={0} className="flex items-center gap-2" />}>
         <span>{label}</span>

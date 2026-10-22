@@ -7,16 +7,8 @@ import { SettingsEmpty, SettingsError } from "@/components/settings/settings-fee
 import { useTranslation } from "@/hooks/use-translation"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
-import type { Translate } from "@/lib/i18n/messages"
-
-function searchLabel(t: Translate, mode: unknown): string {
-  if (mode === null) return t("providerWebSearch.followGlobal")
-  if (mode === "disabled") return t("settingsFields.off")
-  if (mode === "cached") return t("settingsFields.cached")
-  if (mode === "indexed") return t("settingsFields.indexed")
-  if (mode === "live") return t("settingsFields.live")
-  return t("common.unknown")
-}
+import { Link } from "react-router"
+import { providerSearchModeLabel, providerSearchSettingLabel } from "@/lib/provider-search"
 
 export function ProviderWebSearchSettings({ settings, management, provider }: { settings: ManagementProviderSettingsResponse; management: ProviderSettingsController; provider: string }) {
   const { t } = useTranslation()
@@ -30,7 +22,7 @@ export function ProviderWebSearchSettings({ settings, management, provider }: { 
       {searchSettings.length === 0 ? <SettingsEmpty>{t("providerWebSearch.empty")}</SettingsEmpty> : <FieldGroup>{searchSettings.map(setting => {
         const knownMode = setting.status === "ready" && (setting.mode === null || ["disabled", "cached", "indexed", "live"].includes(setting.mode))
         const label = setting.provider === "openai" ? "OpenAI" : providers.find(provider => provider.id === setting.provider)?.displayName ?? setting.provider
-        const error = setting.status === "error" ? t(setting.error === "invalid-mode" ? "openAiModelCatalog.searchInvalidMode" : setting.error === "invalid-document" ? "openAiModelCatalog.searchInvalidDocument" : "openAiModelCatalog.searchReadFailed") : t("common.unknown")
+        const error = providerSearchSettingLabel(t, setting)
         return <ManagedSelect fullWidth key={setting.provider} label={t("providerWebSearch.providerLabel", { name: label, provider: setting.provider })}
           value={knownMode && setting.status === "ready" ? setting.mode ?? "global" : ""} placeholder={error}
           description={!knownMode ? error : undefined} disabled={locked || !knownMode}
@@ -43,6 +35,7 @@ export function ProviderWebSearchSettings({ settings, management, provider }: { 
           }} />
       })}</FieldGroup>}
       <p className="text-sm text-muted-foreground">{t("providerWebSearch.activationHint")}</p>
+      <Button variant="outline" nativeButton={false} disabled={locked} render={<Link to="/settings/global?section=general" />}>{t("openAiModelCatalog.editGlobalSearch")}</Button>
     </div>
 }
 
@@ -59,8 +52,8 @@ export function ProviderWebSearchConfirmation({ preview, ...props }: {
   const { t } = useTranslation()
   return <ManagementConfirmationDialog {...props} open title={t("providerWebSearch.confirmTitle")} description={t("providerWebSearch.hint")}>
     <p>{t("managementUi.providerConfirm", { name: preview.provider })}</p>
-    <p>{t("providerWebSearch.before", { mode: searchLabel(t, preview.before.mode) })}</p>
-    <p>{t("providerWebSearch.after", { mode: searchLabel(t, preview.mode) })}</p>
+    <p>{t("providerWebSearch.before", { mode: providerSearchModeLabel(t, preview.before.mode) })}</p>
+    <p>{t("providerWebSearch.after", { mode: providerSearchModeLabel(t, preview.mode) })}</p>
     <p className="text-muted-foreground">{t("providerWebSearch.activationHint")}</p>
     {preview.activation === "restart-app-server" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart appserver" })}</p> : null}
   </ManagementConfirmationDialog>

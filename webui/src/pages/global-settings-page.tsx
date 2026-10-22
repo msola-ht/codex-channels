@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useBeforeUnload, useBlocker, useSearchParams } from "react-router"
+import { useCallback, useRef, useState } from "react"
+import { useSearchParams } from "react-router"
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
 import { useTranslation } from "@/hooks/use-translation"
 import { globalSettingsSection, globalSettingsSections, type GlobalSettingsSection } from "@/lib/navigation"
@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
+import { SettingsNavigationGuard } from "@/components/settings/settings-navigation-guard"
 
 export function GlobalSettingsPage() {
   const { t } = useTranslation()
@@ -22,7 +22,6 @@ export function GlobalSettingsPage() {
   const triggers = useRef<Partial<Record<GlobalSettingsSection, HTMLButtonElement | null>>>({})
   const section = globalSettingsSection(requested)
   const locked = management.saving || management.pendingSetting !== null
-  const blocker = useBlocker(editing || locked)
   const busy = locked || management.loading || management.readbackRequired
   const changeSection = useCallback((target: string | null) => {
     setParams(previous => {
@@ -32,13 +31,6 @@ export function GlobalSettingsPage() {
       return next
     })
   }, [setParams])
-
-  useEffect(() => {
-    if (blocker.state === "blocked" && locked) blocker.reset()
-  }, [blocker, locked])
-  useBeforeUnload(useCallback((event: BeforeUnloadEvent) => {
-    if (editing || locked) { event.preventDefault(); event.returnValue = "" }
-  }, [editing, locked]))
 
   const settings = !management.loading && management.error === null && !management.readbackRequired ? management.codexSettings : null
   const summary = (id: GlobalSettingsSection) => {
@@ -51,6 +43,7 @@ export function GlobalSettingsPage() {
   }
 
   return <SettingsPageFrame title="globalSettings.title" busy={locked || management.loading || section !== null || editing} refresh={management.refetch}>
+    <SettingsNavigationGuard editing={editing} locked={locked} />
     <Alert><AlertDescription>{t("globalSettings.scopeHint")}</AlertDescription></Alert>
     {requested !== null && section === null && <Alert variant="destructive"><AlertDescription className="flex flex-col items-start gap-2">{t("globalSettings.invalidSection")}<Button variant="outline" onClick={() => changeSection(null)}>{t("globalSettings.showGroups")}</Button></AlertDescription></Alert>}
     {management.error !== null && <SettingsError title={t("settingsUi.codexLoadFailed")} message={management.error} retry={management.refetch} />}
@@ -75,14 +68,5 @@ export function GlobalSettingsPage() {
         </DialogFooter>
       </DialogContent>
     </Dialog>}
-    <AlertDialog open={blocker.state === "blocked" && !locked} onOpenChange={open => { if (!open && blocker.state === "blocked") blocker.reset() }}>
-      <AlertDialogContent>
-        <AlertDialogHeader><AlertDialogTitle>{t("globalSettings.discardTitle")}</AlertDialogTitle><AlertDialogDescription>{t("globalSettings.discardHint")}</AlertDialogDescription></AlertDialogHeader>
-        <AlertDialogFooter>
-          <Button variant="outline" onClick={() => { if (blocker.state === "blocked") blocker.reset() }}>{t("globalSettings.keepEditing")}</Button>
-          <Button variant="destructive" onClick={() => { if (blocker.state === "blocked") blocker.proceed() }}>{t("globalSettings.discardDraft")}</Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </SettingsPageFrame>
 }

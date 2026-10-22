@@ -6,6 +6,7 @@ import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-man
 import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
+import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { useOpenAiModelCatalog } from "@/hooks/use-openai-model-catalog"
 import { useProviderModelCatalogs } from "@/hooks/use-provider-model-catalogs"
 import { ModelDisplayGroups } from "@/components/settings/model-display-groups"
@@ -26,6 +27,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { FieldGroup } from "@/components/ui/field"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { SettingsPageFrame } from "@/components/settings/settings-page-frame"
+import { SettingsNavigationGuard } from "@/components/settings/settings-navigation-guard"
 import { SettingsCliCommands } from "@/components/settings/settings-cli-commands"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -50,6 +52,7 @@ export function ProvidersPage() {
   useEffect(() => { if (accounts.writeUnconfirmed && accounts.readbackRequired) afterAccountChange() }, [accounts.writeUnconfirmed, accounts.readbackRequired, afterAccountChange])
   const busy = management.busy || management.loading || management.pendingPreview !== null || accounts.busy || accounts.loading || accounts.pendingPreview !== null
   return <SettingsPageFrame title="modelManagement.providers" busy={editing || accountEditing || directoryEditing || busy || status.loading || summary.loading} refresh={refresh}>
+    <SettingsNavigationGuard editing={editing || accountEditing} locked={management.busy || management.pendingPreview !== null || accounts.busy || accounts.pendingPreview !== null} />
     {status.error && <SettingsError message={translateApiErrorCode(t, status.errorCode)} retry={reloadStatus} />}
     <ProviderSettingsManagement management={management} section="providers" onEditingChange={setEditing} onChanged={afterProviderChange} renderProviders={providerActions =>
       <AccountSettingsManagement management={accounts} onEditingChange={setAccountEditing} onChanged={afterAccountChange} renderAccounts={accountActions =>
@@ -76,6 +79,11 @@ export function ModelConfigurationPage() {
   const providers = useProviderSettingsManagement()
   const localCatalogs = useProviderModelCatalogs(providers.settings)
   const gateway = useSettingsManagement()
+  const channelDefault = gateway.managedSettings?.system.defaultModel ?? ""
+  const [channelDraft, patchChannelDraft, resetChannelDraft] = useSettingsDraft({ model: channelDefault })
+  const channelEditing = channelDraft.model !== channelDefault
+  const channelSaved = gateway.lastAppliedSetting?.kind === "system.default-model" ? gateway.lastAppliedSetting : null
+  useEffect(() => { if (channelSaved) resetChannelDraft() }, [channelSaved, resetChannelDraft])
   const reloadCodex = codex.refetch, reloadProviders = providers.refetch, reloadGateway = gateway.refetch
   const reloadLocalCatalogs = localCatalogs.refetch
   const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog(); reloadLocalCatalogs() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog, reloadLocalCatalogs])
@@ -85,7 +93,8 @@ export function ModelConfigurationPage() {
   const localOnly = providers.settings === null || providers.error !== null || !localCatalogs.matchesManagement
   const providerCatalogs = localOnly ? localCatalogs.data?.catalogs ?? [] : providers.settings?.modelCatalogs ?? []
   const selectedCatalogIds = new Set(providerCatalogs.filter(item => item.providers.includes(selectedProvider ?? "")).map(item => `provider:${item.provider}`))
-  return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy || localCatalogs.loading || providerEditing || groupsEditing} refresh={refresh}>
+  return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy || localCatalogs.loading || providerEditing || groupsEditing || channelEditing} refresh={refresh}>
+    <SettingsNavigationGuard editing={providerEditing || groupsEditing || catalog.draft !== null || channelEditing} locked={providers.busy || providers.pendingPreview !== null || catalog.busy || catalog.pendingPreview !== null || gateway.saving || gateway.pendingSetting !== null} />
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="text-sm font-medium">{t("settingsFields.primaryDefaults")}</span>
@@ -117,7 +126,7 @@ export function ModelConfigurationPage() {
     <ModelDisplayGroups management={gateway} onEditingChange={setGroupsEditing} providers={providers.settings} disabled={busy || gateway.error !== null || providers.error !== null || localCatalogs.loading || localCatalogs.error !== null || !localCatalogs.matchesManagement} />
     <Card><CardHeader><CardTitle>{t("modelManagement.channelModel")}</CardTitle><CardDescription>{t("modelManagement.channelModelHint")}</CardDescription></CardHeader><CardContent>
       {gateway.loading && gateway.managedSettings === null && <Skeleton className="h-9 w-full" />}
-      {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup><ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={gateway.managedSettings.system.defaultModel ?? ""} placeholder={t("modelManagement.followDefault")} disabled={busy} saved={gateway.lastAppliedSetting?.kind === "system.default-model" ? gateway.lastAppliedSetting : null} onBlur={value => void gateway.previewSetting("system.default-model", value || null, { key: "modelManagement.channelModel" })} /></FieldGroup>}
+      {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup><ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={channelDefault} value={channelDraft.model} onChange={model => patchChannelDraft({ model })} placeholder={t("modelManagement.followDefault")} disabled={busy} onBlur={value => { patchChannelDraft({ model: value }); void gateway.previewSetting("system.default-model", value || null, { key: "modelManagement.channelModel" }) }} /></FieldGroup>}
       {gateway.actionError && <Alert variant="destructive"><AlertDescription>{gateway.actionError}</AlertDescription></Alert>}
     </CardContent></Card>
     <PendingSettingDialog pending={gateway.pendingSetting} saving={gateway.saving} loading={gateway.loading} onCancel={gateway.cancelSetting} onConfirm={() => void gateway.confirmSetting()} />

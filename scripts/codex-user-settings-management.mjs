@@ -54,7 +54,7 @@ export async function updateCodexUserSetting(
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
   const provider = primaryProvider(environment);
-  if (requiresOfficialModels(input) || input?.kind === "model-compact") {
+  if (requiresOfficialModels(input) || input?.kind === "model-compact" || input?.kind === "service-tier") {
     assertOfficialDefaults(provider);
   }
   return withCodexUserConfigClient(environment, createClient, undefined, async (client) => {
@@ -127,7 +127,7 @@ export async function previewCodexUserSetting(
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
   const provider = primaryProvider(environment);
-  if (requiresOfficialModels(input) || input?.kind === "model-compact") {
+  if (requiresOfficialModels(input) || input?.kind === "model-compact" || input?.kind === "service-tier") {
     assertOfficialDefaults(provider);
   }
   return readWithCodexUserConfigClient(environment, createClient, undefined, async (client) => {
@@ -183,7 +183,8 @@ async function planSettingChange(input, context, previousVersion) {
 }
 
 function requiresOfficialModels(input) {
-  return ["all", "defaults", "service-tier"].includes(input?.kind)
+  return ["all", "defaults"].includes(input?.kind)
+    || (input?.kind === "service-tier" && input.serviceTier !== "default")
     || (input?.kind === "preferences" && Object.hasOwn(input, "planModeReasoningEffort")
       && input.planModeReasoningEffort !== null);
 }
