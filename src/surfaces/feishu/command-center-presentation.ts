@@ -636,7 +636,7 @@ export function renderCommandCenterChoices(
   }
   const currentModel = result.state.models.find(
     (model) =>
-      model.model === result.state.model
+      model.available !== false && model.model === result.state.model
       && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai"),
   );
   // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。

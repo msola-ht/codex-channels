@@ -289,9 +289,10 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立 A 实测发现 230 字节技能名可安装、却因保留目录前缀拼接完整名称而 ENAMETOOLONG；主代理改用固定 `.codexc-skill-uninstall-` 前缀（替代前述中间版本的带名称前缀），重做生产 install/uninstall 后 installed=true、removed=true、列表空、原文保留。rename 实际完成后注入 EIO 的完整 Setup 观察显示“移动结果未确认”，完整路径可见、target 空、previous 原文存在，无“原目标未移走”错误声明、不重试移动。`codexc-b09-final-piQXcj` 已清理。
 - 独立 Astra/high 最终检查确认、父/树修订、保留路径、后置失败、旧 descriptor、普通/JSONL 输出、列表及安装消费者和上游发现合同，无剩余 P1/P2 提交阻断。主代理已收齐实施与复审完整报告并核对最终差异；类型、版本、模块边界、局部 ESLint 与差异检查通过。真实终端、App Server 缓存加载和 Windows/macOS 文件系统/ACL 未观察；不声明能原子隔离任意同 UID 写者改名保留目录或祖先，记录路径仍须人工核对。R18 保留已修复待补证。
 
-### 第七批：B10（独立复审通过，待本地提交）
+### 第七批：B10（已提交 `0b9d5ff1`）
 
 - 输入 `c810b6a8`，范围 R03/R23。R03 的活动缓存只用于路由与展示，成功启动响应仍按提交事实结算，不推断续体执行时 Turn 仍运行；R23 保留现有列表排序、有效数字序号优先与后续权限检查，只修复精确匹配歧义被前缀绕过。
+- 本地提交 `0b9d5ff1105a6c18af5a02ebb2d030d1c1cf427f`；正常 Hook 的类型、版本、模块边界、局部 lint、84 份 Markdown 与 Gateway 构建检查通过，耗时 14.1 秒。提交后工作区干净，未推送。
 - 已核对锁定上游 `83086188ae0614bd882818ff1aa23f3194962012`：`turn_processor.rs` 662–734 在提交后继续等待并构造固定 inProgress 响应，Review 1451–1472 也先提交再响应；`thread_lifecycle.rs` 323–389 通知有序但与响应独立，不能假设响应先于完成。
 - Core 复用请求作用域 `trackThreadActivity`，以 untouched/active/terminal/invalidated/stopped 有限状态替代完成 ID 集合。普通 start、inline Review、Scheduled 请求前登记、finally 释放；恢复、解绑补偿继续同一接口。完成 A 不清除活动 B，启动身份只附相同响应 Turn，合并前核对当前归属；断线、Thread 关闭/归档/删除永久使旧窗口失效。仅官方终态删除同 Turn 活动，单独 error 与 revert 不推断终态。未绑定时仍记录通知以支持后续合法绑定。
 - 关联路径已核对：ensure、resume、新会话切换、原绑定补偿、空闲释放、后台释放与重连恢复；两个 Queue start 路径没有乐观 mark，保持原职责。Scheduled 的准确 `onTurnStarted` 回调与 Run 协调器提前终态、精确历史读取保持独立，普通成功提交仍消费模型/模式选择。无协议、持久格式、用户材料或权限变更。
@@ -306,3 +307,18 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 同合同扩展检查发现 transferBinding/fork 失败恢复与 unarchive 的原有活动快照交回缺口，一并接入新观察工厂，未改变成功绑定或权限合同；这三条不是本次引入的回归。主代理用生产 Command → Service → Router → MemoryBindingStore/Core 重做 resume/unarchive：重复名均拒绝且写入调用为空、无绑定；唯一名均精准选 abcd-third，resume 或 unarchive→resume 返回活动 B 后，绑定与 Core 活动均准确，observer=0。
 - 最后补证：ensure 读取 notLoaded 期间注入 closed，后续新 resume 返回 active B，普通 submit 返回 `conversation.busy`、startTurn 调用 0、binding=t、Core=B、observer=0。fork 入口注入绑定提交失败，实际顺序 unsubscribe t/closed → resume t(active B) → cleanup unsubscribe forked；原错误返回，原 binding=t、Core=B、observer=0。未将这些受控边界观察描述为真实平台或官方 RPC 竞态。
 - 独立 Astra/high 最终覆盖全部启动、恢复/补偿、解绑、断线、归属、输出与 Run 下游、Queue 和两个会话选择入口，确认原补偿窗口 P2 关闭，无剩余 P1/P2 提交阻断。主代理已读完整报告和最终 Router/Application/Bootstrap 差异；关键 blob 与复审一致：Router `0ba65ca4`、Service `de29d3b5`。补偿版完整类型、版本、模块边界与四文件局部 ESLint 通过；选择器局部 ESLint、84 份 Markdown 索引/链接与差异检查通过。接管失败、ensure 生命周期锁等待和批量重连的事件竞态完成源码关联复审，未单独运行；真实平台与跨 OS 限制仍保留。R03/R23 标记已修复待补证，未扩大为整体验收通过。
+
+### 第八批：B11（复审完成，待本地提交）
+
+- 输入 `0b9d5ff1`，范围 R11。独立 CP 的定向目录不应依赖无关主实例；官方兼容 CP 的克隆目录仍真实依赖主实例，不制造能力。总览隔离来源失败，不把故障当成未登录或自动切换 Provider；当前选择身份与本次查询覆盖范围分开，保留精确 Provider/model、已有 Thread 与 pending 权威设置。
+- 只读关联分析覆盖目录装配、模型/effort/fast、图片/音频能力、未绑定偏好校验和新 Thread 提交，以及 CollaborationMode/Luna Reserve 的共享状态消费。确认不能仅跳过主查询：主默认模型缺失判断与 `models[0]` 回退会继续阻断浏览或误把浏览目标当作当前 Provider，影响目标默认设置读取及跨 Provider 新会话语义。目录失败的空能力列表也不能展示为“不支持加速”或继承 none 作为真实思考等级。
+- 主代理修前实际观察：生产 ModelSelectionService + SessionRouter/MemoryBindingStore/WorkspaceRegistry，主目录端口注入失败、cp-task 目录准备健康结果；browseProvider(cp-task) 返回主故障，calls=[primary]，目标目录未调用，当前身份仍 main-model/openai。仅内存和受控端口，没有真实模型请求或用户数据写入。
+- 实施计划同时保留等待后的授权守卫、收齐同批在途目录及最终缓存发布守卫；整体 Client 关闭须阻止后续查询与结果，单 Provider 关闭可显示目录不可用，不解析英文错误识别取消。无协议或持久格式变更；B12 飞书卡片快照另批处理。
+- 已实施私有 ModelCatalog/confirmedProviders，只有成功目录证明模型缺失；未查询与失败来源保留当前身份，移除目标首项回退。独立目录最多四个并发，allSettled 收齐后复核粘性守卫，全部读取完成后才更新默认缓存。生产固定与切换模式都注入 ProviderRoutingClient，其同步本地生命周期守卫进入模型选择、能力与偏好校验链；整体关闭不降级为成功状态，单 Provider 故障只标记该来源不可用。失败占位的空能力和 none 不作为真实能力或默认 effort。
+- 主代理生产 Command → ConversationService → ModelSelectionService → SessionRouter/MemoryBindingStore/WorkspaceRegistry 的受控观察：主目录失败，总览 openai 与官方克隆 cp-clone 均 available=false/支持情况未知，独立 cp-task 健康；浏览 cp-task 仍保留当前 main-model/openai。精确选择 cp-task/same 只读取目标目录和目标默认 effort/tier，保存 medium/default 并设置 forceNew；effort high、fast on/off、image/audio 能力查询均只到目标。随后 submit 经保存偏好校验，startThread 与 startTurn 均收到准确 cp-task/same，返回 new-cp/task-turn，绑定正确。仅外部模型和 Thread/Turn 端口注入自有数据，没有真实请求或平台发送。
+- 文字 `/model cp-task` 的实际调用仍为 primary、cp-task、cp-task：共享命令先总览解析，再定向浏览；本批修复主目录失败后可以继续，不宣称文字命令端到端不等待主目录。直接 browseProvider 和结构化精确选择跳过无关主目录；保留既有数字选择和命令分类语义，当前用户指南及模块合同已区分。
+- 最终版失败观察：首次授权异常即使随后恢复也原样拒绝，calls=[cp0]、active=0、默认缓存为空、偏好为空；整体停止发生在并发读取中时，已启动 cp0..cp3 全部收齐、active=0，不启动 cp4、不更新缓存；选择等待默认 effort 时停止，返回同一关闭错误且偏好为空。官方未登录、唯一 CP 动态默认未知且目录失败时，状态保留 cp/请选择模型/effort=null/available=false；threadStartOptions 拒绝 default-missing，目录成功但无默认标记后状态也明确拒绝 default-missing。
+- 生产 ProviderRoutingClient 的活动准入等待观察分别覆盖主目录与独立 cp：等待期间撤权，释放准入后均返回原授权错误，只有 waiting 记录，没有 ensureProvider 或 model RPC 调用；自有 Routing 对象已关闭。没有新增测试、probe 文件或后台进程。上述观察不替代真实 RPC、平台和 Windows/macOS 验收；单 Provider 关闭、CollaborationMode/LunaReserve 的实际服务交互仍仅源码关联检查。
+- 实施者最终完整类型、版本、模块边界与四文件 ESLint、差异检查通过。独立 Astra 正在复审，暂未提交；最终结论和提交状态在收齐后追加。
+- 独立 A 找到失败占位的两处关联泄漏，均已修正：未配置主默认时，不可用占位的 Provider ID 不能回退为当前模型；共享文本、飞书与 Telegram 当前模型呈现也不能从失败占位读取显示名或 defaultReasoningEffort=none。主代理过滤这些已确认目录的消费点，保留列表不可用原因，不涉及 B12 交互快照。实际观察无配置主失败的 state/status/browse 均为 默认模型/openai/effort=null；明确配置失败均保留 configured-main；健康主目录仍显示 actual-main/medium。实际生产共享 effort 文本、飞书 Provider 卡与 Telegram 渲染入口均显示 configured-main/模型默认，不再显示错误的 Provider 名称或“关闭思考”；Telegram reply 只记录到自有内存，未发送平台消息。
+- 独立 Astra/high 最终覆盖命令、Service、目录路由、固定/切换装配、同名精确身份、默认值、偏好存储与 Thread/Turn 消费、CollaborationMode/LunaReserve、关闭/授权和三端呈现，确认两项占位问题已关闭，无剩余 P1/P2 提交阻断。主代理已读完整报告并核对七源码 blob：Service `37965517`、Routing `d928b60f`、共享格式 `34aba1ed`、飞书 `57c44693`、Telegram `0769d1c5`；最终类型/版本/边界与变更呈现局部 ESLint 通过。用户指南进一步明确渠道按钮仍可能前置页面刷新；模式预设读取、首次自动接续历史查询等既有主依赖不属于本次解耦范围，不承诺主实例完全故障时所有操作可用。R11 标记已修复待补证，真实平台与跨 OS 限制保留。

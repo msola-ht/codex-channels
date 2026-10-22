@@ -53,7 +53,7 @@ export function formatServiceTier(serviceTier: string | null | undefined, model?
 }
 
 export function formatModelSpeedSupport(model: ModelOption | undefined): string {
-  if (!model) return "支持情况未知";
+  if (!model || model.available === false) return "支持情况未知";
   const speeds = [
     ...(fastServiceTierId(model) ? ["Fast"] : []),
     ...(ultrafastServiceTierId(model) ? ["Ultrafast"] : []),
