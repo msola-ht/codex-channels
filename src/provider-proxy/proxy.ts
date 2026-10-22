@@ -639,7 +639,7 @@ export class ProviderProxy {
     };
     const upstream = upstreamRequest({
       agent: upstreamTarget.agent ?? this.upstreamAgent,
-      hostname: upstreamTarget.host,
+      hostname: upstreamTarget.host.replace(/^\[(.*)\]$/u, "$1"),
       ...(upstreamTarget.port === undefined ? {} : { port: upstreamTarget.port }),
       path: upstreamPath(upstreamTarget.basePath, route.path),
       method: request.method,

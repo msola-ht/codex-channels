@@ -11,6 +11,8 @@ export interface ProxyFetchDependencies {
   createDispatcher?: (proxyUrl: string) => Dispatcher;
 }
 
+/** URL inputs default to redirect:error. Request inputs must use error/manual,
+ * either on the Request itself or through init; effective follow is rejected. */
 export function createProxyFetch(
   proxy: HttpClientProxySettings,
   dependencies?: ProxyFetchDependencies,

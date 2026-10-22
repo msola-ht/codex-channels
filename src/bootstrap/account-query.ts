@@ -75,7 +75,7 @@ export class AccountQuery {
     this.assertCurrent();
     const response = await fetchImpl(url, {
       method: "GET", headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
-      signal: this.signal, ...(options.redirect ? { redirect: options.redirect } : {}),
+      signal: this.signal, redirect: options.redirect ?? "error",
     });
     this.signal.throwIfAborted();
     if (!response.ok && !(options.allowForbidden && response.status === 403)) {

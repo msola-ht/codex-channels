@@ -237,7 +237,7 @@ export class ChatCompletionsBridge {
         status = 502;
         clearTimeout(timer);
         upstreamRequest = (upstream.protocol === "http" ? httpRequest : httpsRequest)({
-          hostname: upstream.host, port: upstream.port, agent: upstream.agent,
+          hostname: upstream.host.replace(/^\[(.*)\]$/u, "$1"), port: upstream.port, agent: upstream.agent,
           path: `${upstream.basePath?.replace(/\/$/u, "") ?? ""}/chat/completions`,
           method: "POST", headers, signal: controller.signal,
         });

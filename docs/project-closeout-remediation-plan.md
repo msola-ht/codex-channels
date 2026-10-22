@@ -115,6 +115,7 @@ B 编号是责任边界，不强制一包一提交。每包实施时核对原编
 | --- | --- |
 | Telegram effort 键盘目录快照 | B12 发现预存 selectEffort 返回未按 Provider filter 裁剪的目录，后续回调刷新目录可能使刚生成键盘过期；待独立复现并逐路径修复，随后独立 A 复审、单批提交。 |
 | 显式相对 CLI 路径 | B16 独立 A 源码推导安装 cwd 与服务 cwd 可产生不同选择；待明确已支持的相对路径基准、复现及全入口修复，随后独立 A 复审、单批提交。当前绝对路径与环境覆盖证据不关闭此任务。 |
+| 微信非成功响应正文清理 | B17 独立 A 确认 JSON/CDN 的既有非2xx分支未释放正文；redirect:error 的拒绝不经过该分支，本批未扩大缺口。待沿请求期限、错误映射和关闭链复现、修复，再独立 A 复审提交；不以正常响应或跳转观察关闭此任务。 |
 
 ## 数据、失败恢复与回滚
 
@@ -398,7 +399,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立 Astra/high 完整复审已完成，4 项关联发现补修后无剩余本批阻断，主代理已读完整报告；审查源码差异 SHA-256 为 `86fd36ca595271e4e54b7bfb5bfe2a3868527a56218be475325787cec14ab234`。补修后 Node 22.23.4 类型/版本/边界检查与4个改动模块局部 ESLint 均 exit 0。R17 标记已修复待补证，保留上述跨 OS、服务和相对路径限制；尚未提交。
 - 本地提交 `b5f974a07a5b3b9448948c90fe53df2418b8f92d`，正常 Hook 使用 Node 22.23.4，类型/版本/边界、局部 lint、84 份 Markdown、安装和控制脚本语法、Gateway 构建全部通过，耗时 11.8 秒。提交后工作区干净，未推送。
 
-### 第十三批：B15（复审通过，待提交）
+### 第十三批：B15（已提交）
 
 - 输入 `b5f974a0`，范围 R13/R37。版本检查仍在 Graph 同步构造内 spawnSync；Windows writer helper 的启动/编译/查询未纳入总预算，/release 直接等待会阻塞事件循环。下一步沿 Gateway create/start/stop 与 release 授权、绑定、PID/创建时间复核梳理异步边界，复用已有自有进程终止能力，不终止共享 App Server。
 - 关联分析确定：版本读取移到 startInternal 建立取消信号后的首个异步步骤、先于 IPC/连接；helper 与版本进程复用小型 Runtime owner，分清操作期限和清理期限，未确认退出保留归属并接入最终关闭。release 贯通已有 Actor 授权闭包，异步等待后复核原绑定/Workspace 和 PID/创建时间。这里“不终止共享 App Server”限定本任务运行观察及辅助进程清理；保留用户指南现有显式 `/release force` 可结束持锁进程的合同，不擅自撤销该功能，也不对用户进程执行它。
@@ -409,3 +410,16 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 另三个隔离生产启动场景：真实 Node 作为 CLI 返回固定版本不支持，启动前 stop 返回 Gateway正在停止，启动中5ms stop 返回 cancelled；三者 start 均 rejected/stop fulfilled，心跳继续且六类资源关闭均成功。Linux 生产 writer inspection 对自有打开锁文件识别 Node PID；关闭描述符后 held=false，不存在文件也为 false；不可读 procRoot 与已取消输入均 inspection-unavailable。没有真实 force 成功断言。
 - 观察故障记录：沙箱中官方固定 `/tmp/codex-daemon-0` 显示 mode0，批准只读核对实际700后使用授权升级在唯一自有 Socket 观察，未 chmod 用户目录。最初源码 tsx 观察因 MetricsWorker 固定 .js 路径不可用失败；曾误判为继承 input-type并重试，核源码后正式构建解决。随后内联 --input-type 仍导致 Delivery Worker 初始化关闭，改用Node22原生 stdin模块识别、execArgv=[]后正常启动。以上是观察入口修正，没有为此修改产品 Worker，也没有把失败轮记为成功。
 - 独立 Astra/high 完整覆盖 create/start/stop/最终退出、runner及Windows Job源码、release授权/绑定/身份/恢复、七个脚本worker消费者及打包包含，无剩余本批阻断；主代理已读完整报告。完整类型、局部 ESLint、Runtime边界、正式构建与diff格式通过。Windows helper/Restart Manager/Job/taskkill、macOS运行及真实force尚未观察；Linux既有PID复用窗口不因此关闭。R13/R37标记已修复待补证。
+- 本地提交 `fc940b9f4616607399920396b63be2239063a9aa`，正常 Node 22 Hook 的类型/版本/边界、局部 lint、84 份 Markdown、脚本语法和 Gateway 构建全部通过，耗时19.5秒；提交后工作区干净，未推送。
+
+### 第十四批：B17（复审通过，待提交）
+
+- 输入 `fc940b9f`，范围 R24/R25/R26。连接 hostname 去除 IPv6 外围方括号，HTTP Host 与 WebSocket URL authority 保留；共享 Fetch 固定 API 默认拒绝跳转、保留 manual，显式 follow 在出站前拒绝。微信 JSON API、AccountQuery 和 Runtime OCG 显式 error，不引入逐跳通用代理。锁定微信源默认 follow 不是本项目必须支持跳转的证据；本批采用本项目固定端点失败关闭合同，未声称供应商永不跳转。
+- OCG 正文按实际接收字节累计到64KiB，超限停止读取，非2xx及异常释放正文；取消不写失败缓存，成功后才产生 observedAtMs，模型终态仍只读已有快照、不等待额度网络。
+- 主代理 Node 22.23.4 内联调用生产 ProviderProxy/ChatCompletionsBridge：IPv4与localhost的 HTTP Responses、Chat→Responses、WebSocket均成功；HTTP均200，Chat可见 OWNED_NETWORK_OK及completed，WS收到completed。自有 CONNECT代理收到三次精确 `[::1]:38381`，转接自有IPv4上游后上述三链成功，Host保留方括号，路径分别为 `/v1/responses` 与 `/v1/chat/completions`。全部监听、连接及代理已关闭。
+- IPv6直接监听在沙箱及受支持升级后均返回 EADDRNOTAVAIL；上述CONNECT观察只证明authority、连接参数与转发合同，不证明真实IPv6 socket、TLS/SNI或外部供应商可用。未调用真实模型、账户或平台。
+- 实施者另发现 Node 内置 Request 与安装的 Undici Fetch 品牌不兼容：代理路径的 error/manual Request 在发网前失败。已统一默认直连与代理使用全局 Fetch，代理仍使用安装的 ProxyAgent Dispatcher；Node22.23.4（内置Undici6.29.1）和Node24.22.1（内置Undici7.30.1）真实CONNECT均观察native Request manual返回307、不访问终点，POST返回200且方法/头/正文保留。error及init覆盖error在首跳拒绝，effective follow在出站前拒绝。尚未完成独立复审或提交。
+- 实施者生产OCG Provider配合隔离私有凭据和自有HTTP：65536字节成功；约66KiB多字节、持续流超限、503、断流、坏JSON及307均null并进入普通失败退避；取消后立即下一请求成功，缓存命中保留observedAt。生产AccountQuery普通JSON成功、allowForbidden的403仍解析、307归network/request且未访问跳转终点；微信Client经既有fetchImpl端口映射自有loopback，上线成功，307归稳定network-error，传入redirect均error。首轮微信因无效accountId被invalid-input拒绝，改用合规自有身份后完成；没有真实微信请求。实施者确认自有监听、计时器和隔离目录已清理。
+- 主代理另用生产 ProviderProxy 和自有 HTTP 上游、故意等待取消的额度回调观察：模型在31ms内返回200/completed，指标为completed且quotaWindows/quotaObservedAtMs均null；刷新仅启动一次且交付时尚未完成。关闭代理后该刷新收到一次取消并结算，全部自有连接关闭。这证明后台额度等待不阻本地模型交付及关闭归属，不是外部额度服务运行验收。
+- 实施者最终全量类型、六个实现文件ESLint、Runtime边界及diff格式均通过；声明文件由类型检查覆盖，首次ESLint对.d.mts仅报告无匹配配置的ignored警告，不作为声明检查成功。未运行或新增测试。运行观察没有覆盖Windows/macOS网络、TLS/SNI或真实供应商。
+- 新独立 Astra/high 全链复审完成，无剩余本批阻断；主代理已读完整报告并核对七个最终源码blob一致。审查差异SHA-256为 `5f9136db4c12f0bfecae3aa32d5e5f37e4515320d5fee5d2b14eaef85c1d70e4`。覆盖静态/动态上游、Responses/Chat/WS、全部共享Fetch消费者、Request与代理合同、额度账户归属/退避/取消/时间戳、后台关闭以及IPC/Writer/SQLite消费。R24/R25/R26标记已修复待补证；微信非2xx既有清理缺口已单列后续任务。

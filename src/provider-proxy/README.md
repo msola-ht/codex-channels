@@ -22,7 +22,7 @@
   异步快照复核不是文件状态与网络提交的原子操作；完成后复核取消状态才提交本地请求。
   原样交付状态码和 JSON/SSE 正文，过滤跳级头和响应凭据头，取消、断流及关闭清理连接。
 - `proxy.ts`：HTTP/SSE 与 WebSocket 转发、背压和连接生命周期协调。监听自动分配的回环地址，把精确
-  `/responses` 与只读 `/models` 路径转发到上游；官方 OpenAI
+  `/responses` 与只读 `/models` 路径转发到上游；HTTP连接的IPv6 hostname不带方括号，Host与WebSocket URL的authority保留方括号及端口，Chat桥遵循相同边界。官方 OpenAI
   主代理提供只读 `GET /_codexc/image-upload-route`，通过正在运行的路由解析器核验默认
   ChatGPT 图片引用后端，不转发上游、不读取凭据、不生成模型指标；独立后端返回不支持。
   受管 DeepSeek 原生 Responses 代理的同一路由描述入口和 `POST /_codexc/image-upload`

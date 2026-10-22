@@ -753,6 +753,7 @@ async function request(options: {
               "iLink-App-ClientVersion": String(appClientVersion),
             },
             body: JSON.stringify(options.body),
+            redirect: "error",
             signal,
           },
         );

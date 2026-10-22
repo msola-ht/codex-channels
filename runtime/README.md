@@ -80,7 +80,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `proxy-fetch.mjs` / `proxy-fetch.d.mts`：把共享 HTTP(S) 代理选择适配为 Fetch；命中
   `NO_PROXY` 时直连，否则按代理 URL 复用 Undici Dispatcher，供 Gateway 与 App Server 服务 Runtime
-  共同使用。
+  共同使用。URL 输入默认拒绝重定向；仅接受 `error` 或 `manual`，显式 `follow`（包括 Request 自带的默认值）在出站前拒绝，调用方可通过 init 覆盖。固定端点不自动沿跳转复用首次选择的出口。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
   账户家族登记同时拥有实例展开、账户身份和注册表／管理标记路径；账户路由、服务代理、
@@ -129,7 +129,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照，以 `{ windows, observedAtMs }` 返回成功采样
   的窗口及本地接收时刻；缓存命中保持原时刻，真实请求成功后才更新。按最早 `resetsAt` 失效前缓存，失败时短时
   退避后重试，缺失或已过期的重置时间同样短时退避，避免每个模型请求重复查询；接受代理生命周期
-  取消信号，快照随请求指标写入指标库供账户用量按周期归属本地 Token。
+  取消信号，快照随请求指标写入指标库供账户用量按周期归属本地 Token。固定额度端点拒绝重定向，正文按实际接收字节限制为64KiB；非2xx、超限与取消释放正文，调用方取消不写入失败缓存。
 - `model-provider-runtime.mjs` / `model-provider-runtime.d.mts`：保留受控模型 Provider 运行时的稳定
   导出门面与 TypeScript 接口；`readManagedMarker` 提供单个 Provider 管理标记的只读查询，不读取其他账户注册表。门面不承载具体读取、写入或启动逻辑。
 - `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录。CLP 与其他受管提供商共用渠道目录，提供原生 Chat 协议、关闭思考能力及明确保存的请求快照；不读取旧独立 Cline Relay 目录，不连接 App Server。
