@@ -126,7 +126,10 @@ export function ModelConfigurationPage() {
     <ModelDisplayGroups management={gateway} onEditingChange={setGroupsEditing} providers={providers.settings} disabled={busy || gateway.error !== null || providers.error !== null || localCatalogs.loading || localCatalogs.error !== null || !localCatalogs.matchesManagement} />
     <Card><CardHeader><CardTitle>{t("modelManagement.channelModel")}</CardTitle><CardDescription>{t("modelManagement.channelModelHint")}</CardDescription></CardHeader><CardContent>
       {gateway.loading && gateway.managedSettings === null && <Skeleton className="h-9 w-full" />}
-      {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup><ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={channelDefault} value={channelDraft.model} onChange={model => patchChannelDraft({ model })} placeholder={t("modelManagement.followDefault")} disabled={busy} onBlur={value => { patchChannelDraft({ model: value }); void gateway.previewSetting("system.default-model", value || null, { key: "modelManagement.channelModel" }) }} /></FieldGroup>}
+      {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup>
+        <ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={channelDefault} value={channelDraft.model} onChange={model => patchChannelDraft({ model })} placeholder={t("modelManagement.followDefault")} disabled={busy} onBlur={model => patchChannelDraft({ model })} />
+        <Button className="self-end" disabled={busy || !channelEditing} onClick={() => void gateway.previewSetting("system.default-model", channelDraft.model.trim() || null, { key: "modelManagement.channelModel" })}>{t("modelManagement.preview")}</Button>
+      </FieldGroup>}
       {gateway.actionError && <Alert variant="destructive"><AlertDescription>{gateway.actionError}</AlertDescription></Alert>}
     </CardContent></Card>
     <PendingSettingDialog pending={gateway.pendingSetting} saving={gateway.saving} loading={gateway.loading} onCancel={gateway.cancelSetting} onConfirm={() => void gateway.confirmSetting()} />
