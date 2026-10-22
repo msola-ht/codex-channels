@@ -83,7 +83,8 @@ export async function updateCodexUserSetting(
     try {
       written = await client.writeUserConfigEdits(edits, { expectedVersion });
     } catch (error) {
-      if (configWriteErrorCode(error) === "configVersionConflict") {
+      const code = configWriteErrorCode(error);
+      if (code === "configVersionConflict") {
         throw invalid(
           "revision",
           "stale-revision",
@@ -91,7 +92,11 @@ export async function updateCodexUserSetting(
           { cause: error },
         );
       }
-      throw error;
+      if (["configLayerReadonly", "configRequirementReadonly", "configValidationError"].includes(code)) {
+        throw invalid("input", "unsupported-value", "Codex 拒绝本次配置修改：目标只读、受策略限制或配置无效；本次未写入，请重新读取后检查。", { cause: error });
+      }
+      // A lost response (or userLayerNotFound after persistence) cannot prove no write.
+      throw invalid("input", "save-unconfirmed", "Codex 配置保存结果未确认，修改可能已写入；请先重新读取并核对，勿直接重复提交。", { cause: error });
     }
     const writeStatus = ["ok", "okOverridden"].includes(written?.status) ? written.status : null;
     const saved = { ...result, revision: null, consistency: "unknown", writeStatus };
@@ -264,6 +269,7 @@ function projectSettings(snapshot, provider, rawModels) {
       unsupportedFields: [
         ...(config.web_search != null && webSearch === null ? ["webSearch"] : []),
         ...(config.model_reasoning_summary != null && reasoningSummary === null ? ["reasoningSummary"] : []),
+        ...(config.plan_mode_reasoning_effort != null && planModeReasoningEffort === null ? ["planModeReasoningEffort"] : []),
         ...(config.model_verbosity != null && verbosity === null ? ["verbosity"] : []),
         ...(history.persistence != null && !historyPersistences.has(history.persistence) ? ["historyPersistence"] : []),
         ...(updatePlan.enabled != null && typeof updatePlan.enabled !== "boolean" ? ["updatePlanEnabled"] : []),

@@ -285,13 +285,15 @@
   预览与执行按用户层原值计算实际 edits；等值返回 unchanged、willChange=false、activation=none，不调用写入。缺省与显式默认值分开，清除仅移除用户覆盖；策略及工具合并状态校验仍先执行。
   普通偏好支持仅提交所选字段和显式 null 清除覆盖；只有设置非空 Plan 思考等级需要 OpenAI 模型资格。快照分开提供模型、加速可用性及原始用户模型，未知枚举列入 unsupportedFields。
   写响应仅保留 status/version，同 Client 回读核对本次 edits 与写入版本，明确区分 confirmed/unknown；保存未确认不重试，okOverridden 提示高优先级覆盖。工具确认绑定相关合并目标的安全 hash，执行前再次核对，不返回命令或凭据。
+  写响应丢失或不能确认的原生写异常返回受控 save-unconfirmed，提示可能已保存、先重读且不直接重提；版本冲突和已知写前拒绝分别保留冲突或无效设置语义，CLI/Setup 与 WebUI 一致。
   Fast 按模型目录精确 `priority`/`fast` ID、Ultrafast 按 `ultrafast` ID 开放，纯目录匹配与 Application、WebUI 共用 `runtime/service-tier.mjs`，预览和写入前重新校验所选模型及 Client 投影的独立开关；`fast_mode` / `ultrafast_mode` 分别结合合并配置与受管策略，不自动修改开关。设置页保留原始配置档位，关闭档位仍可退出到 Standard。
   快照保留已配置但不可用的模型 ID，未配置时只采用目录显式默认模型，不回退到其他条目；CLI/WebUI 提示先选有效模型，仍允许 Standard 退出加速。
-  全局 Auto-review 默认值仅允许官方 OpenAI 主实例或复用官方模型目录的 Codex 兼容主实例开启；其他主实例仍可关闭，组织策略限制继续适用。
+  全局 Auto-review 默认值不按 Provider 白名单限制；原生配置值不受支持、组织策略限制或策略无法读取时保持只读。
 - `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc config` 的“Codex 新会话与用户偏好”适配器。
   导出共用的工具访问入口，供“工具与 MCP → 电脑、浏览器与已有 MCP”与用户偏好中的原入口调用，复用相同的读取、预览和写入流程。
   分类菜单先显示，选择具体设置后再读取 App Server 状态；返回或取消不启动临时 App Server，默认模型入口不重复预读。
   只负责选择、预览和中文结果；“配置默认值与用户偏好”统一收集模型、加速、权限、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、更新检查与历史保存，最后确认并批量写入，中途取消不保存。
+  “普通用户偏好”逐次选择单字段，复用管理层预览、修订保护与结果；显式继承清除覆盖，保留 false，第三方也可使用，非空 Plan 思考等级仍需官方模型资格。旧值区分未设置与不支持，不把显示默认写回；取消不写入。
   可单独设置计划清单工具、TUI 空闲总结与 Auto-review 审批审核人；Auto-review 单独显式确认，受管限制或未知值拒绝修改。
   第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和

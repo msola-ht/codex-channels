@@ -26,6 +26,13 @@ const reasoningSummaryHints = { auto: "由 Codex 自动选择摘要方式", conc
 const verbosityHints = { low: "回复更简洁", medium: "在简洁和细节之间平衡", high: "提供更完整的解释" };
 const historyPersistenceHints = { "save-all": "保存会话历史，便于恢复和接续", none: "不保存新的会话历史" };
 const serviceTierLabels = { default: "Standard", fast: "Fast", ultrafast: "Ultrafast" };
+const preferenceLabels = {
+  planModeReasoningEffort: "Plan 默认思考等级",
+  reasoningSummary: "推理摘要",
+  verbosity: "输出详细程度",
+  checkForUpdateOnStartup: "启动时检查更新",
+  historyPersistence: "历史记录保存",
+};
 
 function serviceTierLabel(value) {
   if (value === null) return "跟随上游默认";
@@ -70,6 +77,11 @@ export async function runCodexUserSettingsSetup({
         label: "默认加速档位",
         hint: "查看并选择 Standard、Fast 或 Ultrafast",
       }] : []),
+      {
+        value: "preferences",
+        label: "普通用户偏好",
+        hint: "单独设置 Plan、摘要、输出、更新检查或历史；可恢复继承",
+      },
       {
         value: "web-search",
         label: "联网搜索模式",
@@ -129,6 +141,9 @@ export async function runCodexUserSettingsSetup({
     loadSettings({ environment, createClient, primaryProvider }), { output, delayMs: 150, handleSignals: false });
   if (section === "all") {
     return runAllSettings({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
+  }
+  if (section === "preferences") {
+    return runPreferenceSetting({ environment, output, prompts, settings, updateSetting, previewSetting, createClient, primaryProvider });
   }
   if (section === "service-tier") {
     return runServiceTierSetting({
@@ -204,6 +219,75 @@ async function runApprovalsReviewerSetting({ environment, output, prompts, setti
     environment, expectedVersion: settings.version, createClient, primaryProvider,
   });
   if (result.action !== "unchanged" && result.consistency !== "unknown") output.write(`Codex 默认审批方式已设为${value === "auto_review" ? "自动审查" : "手动审批"}。\n`);
+  writeUserSettingActivationNotice(output, environment, result);
+  return result;
+}
+
+async function runPreferenceSetting({ environment, output, prompts, settings, updateSetting, previewSetting, createClient, primaryProvider }) {
+  const field = await prompts.select({
+    message: "选择要修改的普通用户偏好",
+    showInstructions: false,
+    options: [
+      ...Object.entries(preferenceLabels).map(([value, label]) => ({ value, label })),
+      { value: "back", label: "返回" },
+    ],
+  });
+  if (prompts.isCancel(field) || field === "back") return { action: "back" };
+  if (!Object.hasOwn(preferenceLabels, field)) throw new Error(`未知普通用户偏好：${String(field)}`);
+  const label = preferenceLabels[field];
+  const model = settings.provider === "openai" && settings.modelsAvailable
+    ? settings.models.find(candidate => candidate.model === settings.defaults.model)
+    : undefined;
+  const planOptions = model?.reasoningEfforts.map(item => ({ value: item.effort, label: item.effort, hint: item.description })) ?? [];
+  const choices = field === "planModeReasoningEffort" ? planOptions
+    : field === "reasoningSummary" ? Object.entries(reasoningSummaryLabels).map(([value, name]) => ({ value, label: value === "none" ? "关闭（none）" : name, hint: reasoningSummaryHints[value] }))
+    : field === "verbosity" ? Object.entries(verbosityLabels).map(([value, name]) => ({ value, label: name, hint: verbosityHints[value] }))
+    : field === "checkForUpdateOnStartup" ? [{ value: true, label: "开启" }, { value: false, label: "关闭" }]
+    : Object.entries(historyPersistenceLabels).map(([value, name]) => ({ value, label: name, hint: historyPersistenceHints[value] }));
+  const current = settings.defaults[field];
+  const unsupported = settings.defaults.unsupportedFields.includes(field);
+  const unavailable = field === "planModeReasoningEffort" && current != null
+    && !choices.some(option => option.value === current);
+  const previous = unsupported ? "已配置但不支持（无法显示为已知值）"
+    : current == null ? "未设置（继承上游配置）"
+    : `${JSON.stringify(current)}${unavailable ? "（当前模型能力不可用或不支持此值）" : ""}`;
+  output.write(`${label}的旧用户层值：${previous}。\n`);
+  if (field === "planModeReasoningEffort" && choices.length === 0) {
+    output.write(settings.provider !== "openai"
+      ? "设置非空 Plan 思考等级仅对 OpenAI 主配置开放；仍可移除用户覆盖，恢复继承。\n"
+      : "当前默认模型没有可确认的思考等级，请先选择可用官方模型或重新读取；仍可移除用户覆盖，恢复继承。\n");
+  }
+  const selection = await prompts.select({
+    message: `设置${label}`,
+    showInstructions: false,
+    initialValue: unsupported || unavailable ? "back" : current ?? "inherit",
+    options: [
+      { value: "inherit", label: "移除用户覆盖，继承上游配置" },
+      ...choices,
+      { value: "back", label: "返回" },
+    ],
+  });
+  if (prompts.isCancel(selection) || selection === "back") return { action: "back" };
+  if (selection !== "inherit" && !choices.some(option => option.value === selection)) {
+    throw new Error(`普通用户偏好选项不可用：${String(selection)}`);
+  }
+  const value = selection === "inherit" ? null : selection;
+  const input = { kind: "preferences", [field]: value };
+  const preview = await withCliProgress("预览 Codex 用户偏好", () => previewSetting(input, {
+    environment, expectedVersion: settings.version, createClient, primaryProvider,
+  }), { output, delayMs: 150, handleSignals: false });
+  const next = value === null ? "移除用户覆盖，继承上游配置" : JSON.stringify(value);
+  output.write(`本次仅修改${label}（${field}）：${previous} → ${next}。\n`);
+  output.write(preview.willChange
+    ? "保存后供新会话或下次 TUI 启动读取；已有会话的实际行为由 App Server 决定。\n"
+    : "用户层值没有实际改动，不会写入配置，也无需重新生效。\n");
+  const confirmed = await prompts.confirm({ message: `确认仅保存${label}：${next}？`, initialValue: false });
+  if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
+  const result = await saveUserSettings(updateSetting, output, input, {
+    environment, expectedVersion: preview.previousVersion, createClient, primaryProvider,
+  });
+  if (result.action === "unchanged") output.write(`${label}没有实际改动，未写入配置。\n`);
+  else if (result.consistency !== "unknown") output.write(`${label}的用户层设置已保存：${next}。\n`);
   writeUserSettingActivationNotice(output, environment, result);
   return result;
 }
