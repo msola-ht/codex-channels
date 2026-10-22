@@ -6,6 +6,7 @@ import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
 import { runCodexSubagentsSetup } from "./codex-subagents-setup.mjs";
 import {
   loadCodexUserSettings,
+  previewCodexUserSetting,
   updateCodexUserSetting,
 } from "./codex-user-settings-management.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
@@ -25,6 +26,13 @@ const reasoningSummaryHints = { auto: "由 Codex 自动选择摘要方式", conc
 const verbosityHints = { low: "回复更简洁", medium: "在简洁和细节之间平衡", high: "提供更完整的解释" };
 const historyPersistenceHints = { "save-all": "保存会话历史，便于恢复和接续", none: "不保存新的会话历史" };
 const serviceTierLabels = { default: "Standard", fast: "Fast", ultrafast: "Ultrafast" };
+const preferenceLabels = {
+  planModeReasoningEffort: "Plan 默认思考等级",
+  reasoningSummary: "推理摘要",
+  verbosity: "输出详细程度",
+  checkForUpdateOnStartup: "启动时检查更新",
+  historyPersistence: "历史记录保存",
+};
 
 function serviceTierLabel(value) {
   if (value === null) return "跟随上游默认";
@@ -41,6 +49,7 @@ export async function runCodexUserSettingsSetup({
   subagentsSetup = runCodexSubagentsSetup,
   loadSettings = loadCodexUserSettings,
   updateSetting = updateCodexUserSetting,
+  previewSetting = previewCodexUserSetting,
   createClient,
   primaryProvider = loadPrimaryModelProvider,
 } = {}) {
@@ -69,6 +78,11 @@ export async function runCodexUserSettingsSetup({
         hint: "查看并选择 Standard、Fast 或 Ultrafast",
       }] : []),
       {
+        value: "preferences",
+        label: "普通用户偏好",
+        hint: "单独设置 Plan、摘要、输出、更新检查或历史；可恢复继承",
+      },
+      {
         value: "web-search",
         label: "联网搜索模式",
         hint: "查看并选择联网搜索方式",
@@ -86,7 +100,7 @@ export async function runCodexUserSettingsSetup({
       ...(defaultsEditable ? [{
         value: "model-compact",
         label: "模型上下文与自动压缩",
-        hint: "查看并设置上下文窗口与自动压缩比例",
+        hint: "查看并设置上下文窗口与自动压缩 Token 阈值",
       }] : []),
       {
         value: "permissions",
@@ -121,12 +135,15 @@ export async function runCodexUserSettingsSetup({
     });
   }
   if (section === "tool-access") {
-    return runCodexToolAccess({ environment, output, prompts, loadSettings, updateSetting, createClient, primaryProvider });
+    return runCodexToolAccess({ environment, output, prompts, loadSettings, updateSetting, previewSetting, createClient, primaryProvider });
   }
   const settings = await withCliProgress("读取 Codex 当前设置", () =>
     loadSettings({ environment, createClient, primaryProvider }), { output, delayMs: 150, handleSignals: false });
   if (section === "all") {
     return runAllSettings({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
+  }
+  if (section === "preferences") {
+    return runPreferenceSetting({ environment, output, prompts, settings, updateSetting, previewSetting, createClient, primaryProvider });
   }
   if (section === "service-tier") {
     return runServiceTierSetting({
@@ -201,22 +218,92 @@ async function runApprovalsReviewerSetting({ environment, output, prompts, setti
   const result = await saveUserSettings(updateSetting, output, { kind: "approvals-reviewer", value }, {
     environment, expectedVersion: settings.version, createClient, primaryProvider,
   });
-  if (result.action !== "unchanged") output.write(`Codex 默认审批方式已设为${value === "auto_review" ? "自动审查" : "手动审批"}。\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  if (result.action !== "unchanged" && result.consistency !== "unknown") output.write(`Codex 默认审批方式已设为${value === "auto_review" ? "自动审查" : "手动审批"}。\n`);
+  writeUserSettingActivationNotice(output, environment, result);
+  return result;
+}
+
+async function runPreferenceSetting({ environment, output, prompts, settings, updateSetting, previewSetting, createClient, primaryProvider }) {
+  const field = await prompts.select({
+    message: "选择要修改的普通用户偏好",
+    showInstructions: false,
+    options: [
+      ...Object.entries(preferenceLabels).map(([value, label]) => ({ value, label })),
+      { value: "back", label: "返回" },
+    ],
+  });
+  if (prompts.isCancel(field) || field === "back") return { action: "back" };
+  if (!Object.hasOwn(preferenceLabels, field)) throw new Error(`未知普通用户偏好：${String(field)}`);
+  const label = preferenceLabels[field];
+  const model = settings.provider === "openai" && settings.modelsAvailable
+    ? settings.models.find(candidate => candidate.model === settings.defaults.model)
+    : undefined;
+  const planOptions = model?.reasoningEfforts.map(item => ({ value: item.effort, label: item.effort, hint: item.description })) ?? [];
+  const choices = field === "planModeReasoningEffort" ? planOptions
+    : field === "reasoningSummary" ? Object.entries(reasoningSummaryLabels).map(([value, name]) => ({ value, label: value === "none" ? "关闭（none）" : name, hint: reasoningSummaryHints[value] }))
+    : field === "verbosity" ? Object.entries(verbosityLabels).map(([value, name]) => ({ value, label: name, hint: verbosityHints[value] }))
+    : field === "checkForUpdateOnStartup" ? [{ value: true, label: "开启" }, { value: false, label: "关闭" }]
+    : Object.entries(historyPersistenceLabels).map(([value, name]) => ({ value, label: name, hint: historyPersistenceHints[value] }));
+  const current = settings.defaults[field];
+  const unsupported = settings.defaults.unsupportedFields.includes(field);
+  const unavailable = field === "planModeReasoningEffort" && current != null
+    && !choices.some(option => option.value === current);
+  const previous = unsupported ? "已配置但不支持（无法显示为已知值）"
+    : current == null ? "未设置（继承上游配置）"
+    : `${JSON.stringify(current)}${unavailable ? "（当前模型能力不可用或不支持此值）" : ""}`;
+  output.write(`${label}的旧用户层值：${previous}。\n`);
+  if (field === "planModeReasoningEffort" && choices.length === 0) {
+    output.write(settings.provider !== "openai"
+      ? "设置非空 Plan 思考等级仅对 OpenAI 主配置开放；仍可移除用户覆盖，恢复继承。\n"
+      : "当前默认模型没有可确认的思考等级，请先选择可用官方模型或重新读取；仍可移除用户覆盖，恢复继承。\n");
+  }
+  const selection = await prompts.select({
+    message: `设置${label}`,
+    showInstructions: false,
+    initialValue: unsupported || unavailable ? "back" : current ?? "inherit",
+    options: [
+      { value: "inherit", label: "移除用户覆盖，继承上游配置" },
+      ...choices,
+      { value: "back", label: "返回" },
+    ],
+  });
+  if (prompts.isCancel(selection) || selection === "back") return { action: "back" };
+  if (selection !== "inherit" && !choices.some(option => option.value === selection)) {
+    throw new Error(`普通用户偏好选项不可用：${String(selection)}`);
+  }
+  const value = selection === "inherit" ? null : selection;
+  const input = { kind: "preferences", [field]: value };
+  const preview = await withCliProgress("预览 Codex 用户偏好", () => previewSetting(input, {
+    environment, expectedVersion: settings.version, createClient, primaryProvider,
+  }), { output, delayMs: 150, handleSignals: false });
+  const next = value === null ? "移除用户覆盖，继承上游配置" : JSON.stringify(value);
+  output.write(`本次仅修改${label}（${field}）：${previous} → ${next}。\n`);
+  output.write(preview.willChange
+    ? "保存后供新会话或下次 TUI 启动读取；已有会话的实际行为由 App Server 决定。\n"
+    : "用户层值没有实际改动，不会写入配置，也无需重新生效。\n");
+  const confirmed = await prompts.confirm({ message: `确认仅保存${label}：${next}？`, initialValue: false });
+  if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
+  const result = await saveUserSettings(updateSetting, output, input, {
+    environment, expectedVersion: preview.previousVersion, createClient, primaryProvider,
+  });
+  if (result.action === "unchanged") output.write(`${label}没有实际改动，未写入配置。\n`);
+  else if (result.consistency !== "unknown") output.write(`${label}的用户层设置已保存：${next}。\n`);
+  writeUserSettingActivationNotice(output, environment, result);
   return result;
 }
 
 export async function runCodexToolAccess({
   environment = process.env, output = process.stdout, prompts = clackPrompts,
   loadSettings = loadCodexUserSettings, updateSetting = updateCodexUserSetting,
+  previewSetting = previewCodexUserSetting,
   createClient, primaryProvider = loadPrimaryModelProvider,
 } = {}) {
   const settings = await withCliProgress("读取 Codex 当前设置", () =>
     loadSettings({ environment, createClient, primaryProvider }), { output, delayMs: 150, handleSignals: false });
-  return runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
+  return runToolSetting({ environment, output, prompts, settings, updateSetting, previewSetting, createClient, primaryProvider });
 }
 
-async function runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
+async function runToolSetting({ environment, output, prompts, settings, updateSetting, previewSetting, createClient, primaryProvider }) {
   output.write("用户设置与合并配置不代表最终授权；组织策略、工具审批和系统权限仍然适用。\n");
   const fields = settings.toolSettings.fields;
   const selected = await prompts.select({
@@ -255,13 +342,17 @@ async function runToolSetting({ environment, output, prompts, settings, updateSe
     if (prompts.isCancel(entered)) return { action: "back" };
     value = entered.trim() === "" ? null : JSON.parse(entered);
   }
+  const input = { kind: "tool-access", path: field.path, value };
+  const preview = await withCliProgress("核对 Codex 工具目标", () => previewSetting(input, {
+    environment, expectedVersion: settings.version, createClient, primaryProvider,
+  }), { output, delayMs: 150, handleSignals: false });
   const confirmed = await prompts.confirm({ message: `保存 ${field.label}：${JSON.stringify(value)}？`, initialValue: false });
   if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
-  const result = await saveUserSettings(updateSetting, output, { kind: "tool-access", path: field.path, value }, {
-    environment, expectedVersion: settings.version, createClient, primaryProvider,
+  const result = await saveUserSettings(updateSetting, output, input, {
+    environment, expectedVersion: settings.version, expectedTargetFingerprint: preview.targetFingerprint, createClient, primaryProvider,
   });
-  if (result.action !== "unchanged") output.write("已保存 Codex 工具设置。插件启动参数由插件清单管理；本页不修改操作系统权限。\n");
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  if (result.action !== "unchanged" && result.consistency !== "unknown") output.write("已保存 Codex 工具设置。插件启动参数由插件清单管理；本页不修改操作系统权限。\n");
+  writeUserSettingActivationNotice(output, environment, result);
   return result;
 }
 
@@ -275,7 +366,9 @@ async function runAllSettings({
   primaryProvider,
 }) {
   if (!settings.defaultsEditable) {
-    output.write("当前 Provider 不支持配置官方默认值与用户偏好。\n");
+    output.write(settings.provider === "openai"
+      ? "官方模型目录暂不可用，请重新读取；普通偏好可通过独立入口设置。\n"
+      : "当前 Provider 不支持官方默认值整组设置；普通偏好可通过独立入口设置。\n");
     return { action: "back" };
   }
   const modelDefaults = await promptModelDefaults(prompts, settings);
@@ -321,10 +414,10 @@ async function runAllSettings({
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  if (result.action !== "unchanged") output.write(
+  if (result.action !== "unchanged" && result.consistency !== "unknown") output.write(
     `Codex 默认值与用户偏好已更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · ${serviceTierLabel(serviceTier)} · ${permissionSummary}\n`,
   );
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  writeUserSettingActivationNotice(output, environment, result);
   return result;
 }
 
@@ -355,8 +448,8 @@ async function runServiceTierSetting({
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  if (result.action !== "unchanged") output.write(`Codex 新会话默认加速档位已设为 ${serviceTierLabel(serviceTier)}。\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  if (result.action !== "unchanged" && result.consistency !== "unknown") output.write(`Codex 新会话默认加速档位已设为 ${serviceTierLabel(serviceTier)}。\n`);
+  writeUserSettingActivationNotice(output, environment, result);
   return result;
 }
 
@@ -396,12 +489,17 @@ async function runWebSearchSetting({
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  if (result.action !== "unchanged") output.write(`Codex 联网搜索模式已更新：${mode}\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  if (result.action !== "unchanged" && result.consistency !== "unknown") output.write(`Codex 联网搜索模式已更新：${mode}\n`);
+  writeUserSettingActivationNotice(output, environment, result);
   return result;
 }
 
 async function runUpdatePlanSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
+  if (settings.defaults.updatePlanEnabled === null) {
+    output.write(settings.defaults.unsupportedFields.includes("updatePlanEnabled")
+      ? "当前计划清单工具配置不受支持；请选择要明确写入的状态。\n"
+      : "计划清单工具未配置用户覆盖，当前继承 Codex 默认；选择状态会新增用户覆盖。\n");
+  }
   const enabled = await prompts.select({
     message: "计划清单工具",
     showInstructions: false,
@@ -431,12 +529,17 @@ async function runUpdatePlanSetting({ environment, output, prompts, settings, up
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  if (result.action !== "unchanged") output.write(`Codex 计划清单工具已${value ? "开启" : "关闭"}。\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  if (result.action !== "unchanged" && result.consistency !== "unknown") output.write(`Codex 计划清单工具已${value ? "开启" : "关闭"}。\n`);
+  writeUserSettingActivationNotice(output, environment, result);
   return result;
 }
 
 async function runAutoRecapSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
+  if (settings.defaults.autoRecapEnabled === null) {
+    output.write(settings.defaults.unsupportedFields.includes("autoRecapEnabled")
+      ? "当前空闲总结配置不受支持；请选择要明确写入的状态。\n"
+      : "空闲总结未配置用户覆盖，当前继承 Codex 默认；选择状态会新增用户覆盖。\n");
+  }
   const enabled = await prompts.select({
     message: "空闲总结",
     showInstructions: false,
@@ -466,8 +569,8 @@ async function runAutoRecapSetting({ environment, output, prompts, settings, upd
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  if (result.action !== "unchanged") output.write(`Codex 空闲总结已${value ? "开启" : "关闭"}。\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  if (result.action !== "unchanged" && result.consistency !== "unknown") output.write(`Codex 空闲总结已${value ? "开启" : "关闭"}。\n`);
+  writeUserSettingActivationNotice(output, environment, result);
   return result;
 }
 
@@ -480,54 +583,43 @@ async function runModelCompactSetting({
   createClient,
   primaryProvider,
 }) {
-  let contextWindow = settings.compact?.contextWindow ?? null;
-  let autoCompactPercent = settings.compact?.autoCompactPercent ?? null;
-  for (;;) {
-    const windowValue = await prompts.text({
-      message: contextWindow === null
-        ? "模型上下文窗口（tokens，留空恢复模型默认；当前：模型默认）"
-        : `模型上下文窗口（当前：${contextWindow.toLocaleString()} tokens；留空恢复模型默认）`,
-      initialValue: contextWindow === null ? "" : String(contextWindow),
-      validate: (value) => {
-        const trimmed = value.trim();
-        if (trimmed === "") return undefined;
-        const parsed = Number(trimmed);
-        return Number.isSafeInteger(parsed) && parsed > 0
-          ? undefined
-          : "请输入正整数，或留空恢复模型默认";
-      },
-    });
-    if (prompts.isCancel(windowValue)) return { action: "back" };
-    const nextWindow = windowValue.trim() === "" ? null : Number(windowValue.trim());
-
-    const percentValue = await prompts.text({
-      message: autoCompactPercent === null
-        ? "自动压缩百分比（10-90，留空恢复 95% 默认；当前：默认 95%）"
-        : `自动压缩百分比（当前：${autoCompactPercent}%；10-90，留空恢复 95% 默认）`,
-      initialValue: autoCompactPercent === null ? "" : String(autoCompactPercent),
-      validate: (value) => {
-        const trimmed = value.trim();
-        if (trimmed === "") return undefined;
-        const parsed = Number(trimmed);
-        return Number.isInteger(parsed) && parsed >= 10 && parsed <= 90
-          ? undefined
-          : "请输入 10 到 90 的整数，或留空恢复默认";
-      },
-    });
-    if (prompts.isCancel(percentValue)) return { action: "back" };
-    const nextPercent = percentValue.trim() === "" ? null : Number(percentValue.trim());
-    if (nextPercent !== null && nextWindow === null) {
-      output.write("设置自动压缩百分比前必须先设置上下文窗口；请重新输入。\n");
-      contextWindow = nextWindow;
-      autoCompactPercent = nextPercent;
-      continue;
-    }
-    contextWindow = nextWindow;
-    autoCompactPercent = nextPercent;
-    break;
-  }
+  const currentWindow = settings.compact.contextWindow;
+  const currentTokenLimit = settings.compact.autoCompactTokenLimit;
+  output.write("上下文窗口与自动压缩阈值可独立设置；留空仅移除对应用户覆盖，跟随上游配置。\n");
+  const windowValue = await prompts.text({
+    message: currentWindow === null
+      ? "模型上下文窗口（tokens，留空恢复模型默认；当前：模型默认）"
+      : `模型上下文窗口（当前：${currentWindow.toLocaleString()} tokens；留空恢复模型默认）`,
+    initialValue: currentWindow === null ? "" : String(currentWindow),
+    validate: (value) => {
+      const trimmed = value.trim();
+      if (trimmed === "") return undefined;
+      const parsed = Number(trimmed);
+      return Number.isSafeInteger(parsed) && parsed > 0
+        ? undefined
+        : "请输入正整数，或留空恢复模型默认";
+    },
+  });
+  if (prompts.isCancel(windowValue)) return { action: "back" };
+  const contextWindow = windowValue.trim() === "" ? null : Number(windowValue.trim());
+  const tokenLimitValue = await prompts.text({
+    message: currentTokenLimit === null
+      ? "自动压缩阈值（tokens，留空跟随上游配置；当前：上游默认）"
+      : `自动压缩阈值（当前：${currentTokenLimit.toLocaleString()} tokens；留空跟随上游配置）`,
+    initialValue: currentTokenLimit === null ? "" : String(currentTokenLimit),
+    validate: (value) => {
+      const trimmed = value.trim();
+      if (trimmed === "") return undefined;
+      const parsed = Number(trimmed);
+      return Number.isSafeInteger(parsed) && parsed > 0
+        ? undefined
+        : "请输入正整数，或留空跟随上游配置";
+    },
+  });
+  if (prompts.isCancel(tokenLimitValue)) return { action: "back" };
+  const autoCompactTokenLimit = tokenLimitValue.trim() === "" ? null : Number(tokenLimitValue.trim());
   const confirmed = await prompts.confirm({
-    message: `保存模型上下文与自动压缩：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩 ${autoCompactPercent === null ? "默认 95%" : `${autoCompactPercent}%`}？`,
+    message: `保存模型上下文与自动压缩：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩阈值 ${autoCompactTokenLimit === null ? "上游默认" : `${autoCompactTokenLimit.toLocaleString()} tokens`}？`,
     initialValue: true,
   });
   if (prompts.isCancel(confirmed) || confirmed !== true) {
@@ -537,17 +629,17 @@ async function runModelCompactSetting({
   const result = await saveUserSettings(updateSetting, output, {
     kind: "model-compact",
     contextWindow,
-    autoCompactPercent,
+    autoCompactTokenLimit,
   }, {
     environment,
     expectedVersion: settings.version,
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  if (result.action !== "unchanged") output.write(
-    `Codex 模型上下文与自动压缩已更新：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩 ${autoCompactPercent === null ? "默认 95%" : `${autoCompactPercent}%`}。\n`,
+  if (result.action !== "unchanged" && result.consistency !== "unknown") output.write(
+    `Codex 模型上下文与自动压缩已更新：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩阈值 ${autoCompactTokenLimit === null ? "上游默认" : `${autoCompactTokenLimit.toLocaleString()} tokens`}。\n`,
   );
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  writeUserSettingActivationNotice(output, environment, result);
   return result;
 }
 
@@ -609,17 +701,30 @@ async function runPermissionSettings({
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  if (result.action !== "unchanged") output.write(
+  if (result.action !== "unchanged" && result.consistency !== "unknown") output.write(
     `Codex 用户权限已更新：${sandboxMode} · ${approvalPolicy} · 网络${networkAccess ? "开启" : "关闭"}\n`,
   );
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  writeUserSettingActivationNotice(output, environment, result);
   return result;
 }
 
-function saveUserSettings(updateSetting, output, input, options) {
-  return withCliProgress("保存 Codex 用户设置", () => updateSetting(input, options), {
+function writeUserSettingActivationNotice(output, environment, result) {
+  if (result.consistency !== "unknown" && result.writeStatus !== "okOverridden") {
+    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  }
+}
+
+async function saveUserSettings(updateSetting, output, input, options) {
+  const result = await withCliProgress("保存 Codex 用户设置", () => updateSetting(input, options), {
     output, delayMs: 150, handleSignals: false,
   });
+  if (result.consistency === "unknown") {
+    output.write("Codex 已返回保存结果，但未能核对当前用户配置；请重新读取设置，勿重复提交。\n");
+  }
+  if (result.writeStatus === "okOverridden") {
+    output.write("用户配置已保存，但本次修改受到更高优先级配置覆盖；保存不代表有效配置已改变。\n");
+  }
+  return result;
 }
 
 async function promptModelDefaults(prompts, settings) {
@@ -681,7 +786,9 @@ async function promptServiceTier(prompts, settings, model) {
   const current = normalizeServiceTier(settings.defaults.serviceTier);
   const available = options.some((option) => option.value === current);
   const serviceTier = await prompts.select({
-    message: `新会话默认加速档位（当前：${serviceTierLabel(current)}${available || current === null ? "" : "，当前档位不可选"}）`,
+    message: settings.accelerationAvailable
+      ? `新会话默认加速档位（当前：${serviceTierLabel(current)}${available || current === null ? "" : "，当前档位不可选"}）`
+      : "加速能力读取失败；暂不提供加速选项，可返回后重新读取，或选择 Standard 退出加速。",
     showInstructions: false,
     initialValue: available ? current : "back",
     options,

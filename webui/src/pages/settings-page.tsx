@@ -1,6 +1,6 @@
 import { useCallback } from "react"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
-import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
+import { Link } from "react-router"
 import { useApi, type UseApiState } from "@/hooks/use-api"
 import { useManagementTasks, useManagementTaskRefresh } from "@/hooks/use-management-tasks"
 import { useTranslation } from "@/hooks/use-translation"
@@ -10,7 +10,6 @@ import { fetchManagementProviders, fetchManagementServices, fetchUpstreamUserAge
 import { SettingsPageFrame } from "@/components/settings/settings-page-frame"
 import { GatewaySettingsSection } from "@/components/settings/gateway-settings-section"
 import { SettingsCliCommands } from "@/components/settings/settings-cli-commands"
-import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
 import { GatewaySettingsCard } from "@/components/settings/gateway-settings-card"
 import { WebuiDataSettingsCard } from "@/components/settings/webui-data-settings-card"
 import { ManagedServices, RecentManagementTasks } from "@/components/settings/managed-services"
@@ -19,10 +18,9 @@ import { SettingsError, LoadingSettingsCard } from "@/components/settings/settin
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import type { SettingsSummaryResponse } from "@/lib/types"
-import type { GatewaySettingsController, CodexSettingsController, ManagementTaskController } from "@/lib/settings-management"
+import type { GatewaySettingsController, ManagementTaskController } from "@/lib/settings-management"
 
 function gatewayBusy(state: GatewaySettingsController) { return state.loading || state.saving || state.pendingSetting !== null }
-function codexBusy(state: CodexSettingsController) { return state.loading || state.saving || state.pendingSetting !== null }
 function tasksBusy(state: ManagementTaskController) { return state.loading || state.saving || state.pendingPreview !== null }
 
 export function SettingsPage({ section = "general" }: { section?: "general" | "permissions" }) {
@@ -35,14 +33,14 @@ function GeneralSettingsPage() {
 }
 
 function PreferenceSettingsPage({ section, summary }: { section: "general" | "permissions"; summary?: UseApiState<SettingsSummaryResponse> & { refetch: () => void } }) {
+  const { t } = useTranslation()
   const gateway = useSettingsManagement()
-  const codex = useCodexSettingsManagement()
-  const reloadGateway = gateway.refetch, reloadCodex = codex.refetch
+  const reloadGateway = gateway.refetch
   const reloadSummary = summary?.refetch
-  const refresh = useCallback(() => { reloadGateway(); reloadCodex(); reloadSummary?.() }, [reloadGateway, reloadCodex, reloadSummary])
-  return <SettingsPageFrame title={section === "general" ? "navigation.general" : "navigation.permissions"} busy={gatewayBusy(gateway) || codexBusy(codex) || (summary?.loading ?? false)} refresh={refresh}>
-    <AppServerSettingsCard management={codex} section={section} onChanged={reloadGateway} />
-    <GatewaySettingsSection management={gateway} onChanged={reloadCodex}>
+  const refresh = useCallback(() => { reloadGateway(); reloadSummary?.() }, [reloadGateway, reloadSummary])
+  return <SettingsPageFrame title={section === "general" ? "navigation.general" : "navigation.permissions"} busy={gatewayBusy(gateway) || (summary?.loading ?? false)} refresh={refresh}>
+    <Alert><AlertDescription>{t("globalSettings.gatewayHint")} <Link className="underline underline-offset-4" to={`/settings/global?section=${section}`}>{t("globalSettings.open")}</Link></AlertDescription></Alert>
+    <GatewaySettingsSection management={gateway}>
       <GatewaySettingsCard management={gateway} section={section} />
     </GatewaySettingsSection>
     {section === "general" && summary && <SettingsCliCommands scope="general" summary={summary} />}

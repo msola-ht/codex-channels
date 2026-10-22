@@ -137,7 +137,7 @@
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
 - `webui-provider-settings-management.mjs`：复用主 Provider、受管 Provider 默认值与模型窗口、自定义 Provider 管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；只读展示各提供商主配置的网页搜索模式和配置来源；不读取或返回凭据正文。
 - `webui-custom-model-probe.mjs`：鉴权后的逐模型能力检测入口，限制并发、请求大小和取消生命周期；保留凭据仅可用于原 Origin，检测结果不直接写入配置。
-- `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management、DeepSeek 与 CLP 多账户管理接口，为 WebUI 提供账户资源投影、移除与配置预览、确认后写入和结果脱敏；不返回凭据正文。
+- `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management、DeepSeek 与 CLP 多账户管理接口，为 WebUI 提供账户资源投影、移除与配置预览、确认后写入和结果脱敏；账户投影包含 runtime 规范 Provider ID，并按该 ID 关联默认模型，不返回凭据正文。
 - `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
   设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
 - `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置校验、管理错误、高风险路径分类、Provider 状态缓存，以及
@@ -277,19 +277,23 @@
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的官方设备登录入口；登录前预览共享 Provider 切换计划，受管固定模式须先改为切换模式。登录完成后重新核对确认范围与配置修订，再提交官方恢复；自定义候选备份、第三方默认模型、模型目录和思考设置清理与 `codexc provider switch openai` 保持一致。
   登录子进程异步运行，输出跟随交互输出流，不混入 Setup JSONL；失败、信号取消或输出异常均停止后续配置写入，并清理自有进程。
 - `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与异步校验；导出共用 MCP 审批模式及 Strata 实际目标/时限校验供编辑向导使用；未知继承或宿主范围明确拒绝，不将普通 MCP 套用视频预算。插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
-- `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
+- `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：思考等级保留原始覆盖或未配置，不以目录默认值替代。上下文窗口与自动压缩阈值独立使用精确 Token 正整数或 null，预览与写入不经过百分比换算，不接受旧百分比字段；不可解释的存储数值读取失败而不修改文件。统一返回不依赖终端的
   Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Standard/Fast/Ultrafast、计划清单工具、TUI 空闲总结，
   按显式字段修改 Sandbox、审批和 Workspace Sandbox 网络权限，省略字段保留原值与继承状态；CLI 整组确认仍提交完整三项，一键批量配置仍要求完整权限，或一次原子写入默认值与用户偏好（已有 Permission Profile 时保留权限）；加速档位仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
   第三方固定模式不开放官方默认模型、思考等级和加速档位；已有 `default_permissions` 时不混写传统 Sandbox 字段。
   预览与执行按用户层原值计算实际 edits；等值返回 unchanged、willChange=false、activation=none，不调用写入。缺省与显式默认值分开，清除仅移除用户覆盖；策略及工具合并状态校验仍先执行。
+  普通偏好支持仅提交所选字段和显式 null 清除覆盖；只有设置非空 Plan 思考等级需要 OpenAI 模型资格。快照分开提供模型、加速可用性及原始用户模型，未知枚举列入 unsupportedFields。
+  写响应仅保留 status/version，同 Client 回读核对本次 edits 与写入版本，明确区分 confirmed/unknown；保存未确认不重试，okOverridden 提示高优先级覆盖。工具确认绑定相关合并目标的安全 hash，执行前再次核对，不返回命令或凭据。
+  写响应丢失或不能确认的原生写异常返回受控 save-unconfirmed，提示可能已保存、先重读且不直接重提；版本冲突和已知写前拒绝分别保留冲突或无效设置语义，CLI/Setup 与 WebUI 一致。
   Fast 按模型目录精确 `priority`/`fast` ID、Ultrafast 按 `ultrafast` ID 开放，纯目录匹配与 Application、WebUI 共用 `runtime/service-tier.mjs`，预览和写入前重新校验所选模型及 Client 投影的独立开关；`fast_mode` / `ultrafast_mode` 分别结合合并配置与受管策略，不自动修改开关。设置页保留原始配置档位，关闭档位仍可退出到 Standard。
   快照保留已配置但不可用的模型 ID，未配置时只采用目录显式默认模型，不回退到其他条目；CLI/WebUI 提示先选有效模型，仍允许 Standard 退出加速。
-  全局 Auto-review 默认值仅允许官方 OpenAI 主实例或复用官方模型目录的 Codex 兼容主实例开启；其他主实例仍可关闭，组织策略限制继续适用。
+  全局 Auto-review 默认值不按 Provider 白名单限制；原生配置值不受支持、组织策略限制或策略无法读取时保持只读。
 - `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc config` 的“Codex 新会话与用户偏好”适配器。
   导出共用的工具访问入口，供“工具与 MCP → 电脑、浏览器与已有 MCP”与用户偏好中的原入口调用，复用相同的读取、预览和写入流程。
   分类菜单先显示，选择具体设置后再读取 App Server 状态；返回或取消不启动临时 App Server，默认模型入口不重复预读。
   只负责选择、预览和中文结果；“配置默认值与用户偏好”统一收集模型、加速、权限、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、更新检查与历史保存，最后确认并批量写入，中途取消不保存。
+  “普通用户偏好”逐次选择单字段，复用管理层预览、修订保护与结果；显式继承清除覆盖，保留 false，第三方也可使用，非空 Plan 思考等级仍需官方模型资格。旧值区分未设置与不支持，不把显示默认写回；取消不写入。
   可单独设置计划清单工具、TUI 空闲总结与 Auto-review 审批审核人；Auto-review 单独显式确认，受管限制或未知值拒绝修改。
   第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
@@ -329,7 +333,7 @@
   `paths [--json]` 不进入菜单或读取配置正文，只输出绝对路径与文件存在状态，不创建配置。子菜单与总览在选中后按需加载，路径查询和取消不加载这些实现。
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，有效默认值来自共享 Schema，原始配置保留未配置与显式配置的区别；只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
-- `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
+- `config-management.mjs` / `config-management.d.mts`：渠道新会话模型通过异步 `updateGatewayDefaultModelSetting` 校验当前主实例目录与配置修订后预览或保存；同步入口拒绝该设置，清除覆盖可离线执行。目录读取与 Gateway 写入分属不同资源，不提供跨资源原子事务。提供不依赖 prompts、TTY 或终端文案的 Gateway
   设置接口；官方身份一键设置持久写入 `follow_cli_version`，WebUI 可开关，终端单项修改保留标记；无标记或 false 时显式版本固定。
   设置脱敏读取与明确修改在读取快照及写入前复用当前版本的完整结构校验，拒绝未知字段和非法值，校验不回填默认值或替换带注释来源的原文对象；只接受受控的显示、系统（含一键官方 TUI 身份与模型上游终端标识）、自动化、网络、
   高级、Telegram 格式、WebUI、指标和默认 Workspace 输入，返回稳定字段错误与精确生效动作，

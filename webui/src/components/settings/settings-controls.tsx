@@ -106,13 +106,15 @@ export function ManagedInputRow({ id, label, defaultValue, value, placeholder, d
   return <Field orientation="responsive" data-disabled={disabled}><FieldLabel className="text-muted-foreground" htmlFor={inputId}>{label}</FieldLabel><Input id={inputId} className="w-full sm:w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} value={value ?? draft.value} placeholder={placeholder} disabled={disabled} onChange={(event) => { if (value === undefined) patch({ value: event.target.value }); onChange?.(event.target.value) }} onBlur={(event) => { const next = event.target.value.trim(); if (value === undefined) patch({ value: next }); onBlur(next) }} /></Field>
 }
 
-export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; loading?: boolean; onConfirm: () => void; onCancel: () => void }) {
+export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCancel, className, finalFocus }: { pending: PendingSetting | null; saving: boolean; loading?: boolean; onConfirm: () => void; onCancel: () => void; className?: string; finalFocus?: ComponentProps<typeof AlertDialogContent>["finalFocus"] }) {
   const { t } = useTranslation()
   const destructive = pending?.intent === "clear"
   const regeneratingToken = pending?.kind === "webui.token" && pending.intent === "generate"
   return (
     <ManagementConfirmationDialog
       open={pending !== null}
+      className={className}
+      finalFocus={finalFocus}
       title={t("settingsUi.confirmTitle")}
       description={t("settingsUi.confirmDescription")}
       saving={saving}
@@ -145,12 +147,13 @@ export function SettingsMutationFeedback({ result, writeUnconfirmed, readbackReq
   if (result === null && !writeUnconfirmed) return null
   return <Alert><AlertDescription className="flex flex-col gap-2">
     {writeUnconfirmed ? <p>{t("settingsUi.writeUnconfirmed")}</p> : result !== null ? <>
-      <p>{result.action === "stopped" ? t("settingsUi.instanceStopped")
+      <p>{result.writeStatus === "okOverridden" ? t("globalSettings.savedOverridden")
+        : result.action === "stopped" ? t("settingsUi.instanceStopped")
         : result.action === "in-use" ? t("settingsUi.instanceInUse")
         : result.action === "not-running" ? t("settingsUi.instanceNotRunning")
           : result.action === "unchanged" || result.action === undefined && result.activation.status === "none" ? t("settingsUi.unchanged")
             : t("settingsUi.savedActivation", { value: formatActivation(result.activation, t) })}</p>
-      {result.activation.commands.length > 0 && <p>{t(result.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: result.activation.commands.join("; ") })}</p>}
+      {result.writeStatus !== "okOverridden" && result.activation.commands.length > 0 && <p>{t(result.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: result.activation.commands.join("; ") })}</p>}
       {result.auditStatus === "degraded" && <p>{t("settingsUi.auditDegraded")}</p>}
       {result.warnings?.map((warning, index) => Object.hasOwn(providerCleanupWarnings, warning.code)
         ? <p key={`${warning.code}-${index}`}>{t(providerCleanupWarnings[warning.code], { provider: warning.providerId ?? "" })}</p>
@@ -188,6 +191,7 @@ function previewRecord(value: unknown): Record<string, unknown> | null {
 function formatPreviewValue(value: unknown, kind: string, t: Translate): string {
   const record = previewRecord(value)
   const scalar = (current: unknown): string => current === null || current === undefined ? t("settingsFields.notSet")
+    : current === "unsupported" ? t("globalSettings.unsupportedValue")
     : typeof current === "boolean" ? t(current ? "settingsFields.enabled" : "settingsFields.disabled")
       : typeof current === "string" || typeof current === "number" ? String(current) : t("common.unknown")
   const fields = (source: Record<string, unknown> | null, labels: Record<string, MessageKey>, display = scalar): string => source === null ? t("common.unknown")
@@ -200,7 +204,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
   }
   if (kind === "metrics.storage") return fields(previewRecord(record?.storage), { retentionDays: "settingsFields.retentionDays", maxRows: "settingsFields.maxRows" })
   if (kind === "defaults") return fields(record, { model: "settingsFields.defaultModel", reasoningEffort: "settingsFields.reasoningEffort" }, current => current === null ? t("settingsFields.upstreamDecides") : scalar(current))
-  if (kind === "model-compact") return fields(record, { contextWindow: "settingsFields.contextWindow", autoCompactPercent: "settingsFields.compactPercent" }, current => current === null ? t("settingsFields.modelDefault") : scalar(current))
+  if (kind === "model-compact") return fields(record, { contextWindow: "settingsFields.contextWindow", autoCompactTokenLimit: "settingsFields.compactTokenLimit" }, current => current === null ? t("settingsFields.compactDefault") : scalar(current))
   if (kind === "update-plan" || kind === "auto-recap") return scalar(record?.enabled)
   if (kind === "service-tier") return record?.serviceTier === null ? t("settingsFields.serviceTierDefault") : scalar(record?.serviceTier)
   if (kind === "approvals-reviewer") return record?.value === null ? t("settingsFields.approvalsReviewerUnset")
@@ -238,6 +242,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
   }
   if (kind === "web-search" && value !== null && typeof value === "object" && "mode" in value) {
     switch (value.mode) {
+      case "unsupported": return t("globalSettings.unsupportedValue")
       case null: return t("openAiModelCatalog.searchDefault")
       case "disabled": return t("settingsFields.off")
       case "cached": return t("settingsFields.cached")

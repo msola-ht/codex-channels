@@ -106,6 +106,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   通知失效贯穿在途列表、预览和最终提交，确认成功或失败均清理同会话其他令牌和快照。
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
+  Gateway 默认模型只在没有当前或待选模型时回退使用，并核对主 Provider 目录与可用性；显式选择模型不依赖旧默认值，失效默认值不阻断已有会话的模型设置。
   模型状态带不透明的 Conversation/Workspace/Thread/Session 页面身份；选择等待期间新 Turn 开始会取消在途选择。
   加速档位的纯目录匹配复用 `runtime/service-tier.mjs`，与 CLI/WebUI 使用相同的 Fast、Ultrafast 能力判断；回到 Standard 不受当前目录项的不可用标记阻断。
   无 Thread 且无显式档位偏好时从目标 Provider 的 Workspace 有效配置读取服务层级，保留 null，不以目录默认层级推断已启用加速；开启加速前经窄端口核对同一作用域的 `features.fast_mode`，写入前后复核订阅。

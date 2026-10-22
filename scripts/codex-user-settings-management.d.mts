@@ -38,15 +38,15 @@ export type CodexUserSettingInput =
   | {
       kind: "model-compact";
       contextWindow: number | null;
-      autoCompactPercent: number | null;
+      autoCompactTokenLimit: number | null;
     }
   | {
       kind: "preferences";
-      reasoningSummary: "auto" | "concise" | "detailed" | "none";
-      planModeReasoningEffort: string;
-      verbosity: "low" | "medium" | "high";
-      checkForUpdateOnStartup: boolean;
-      historyPersistence: "save-all" | "none";
+      reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null;
+      planModeReasoningEffort?: string | null;
+      verbosity?: "low" | "medium" | "high" | null;
+      checkForUpdateOnStartup?: boolean | null;
+      historyPersistence?: "save-all" | "none" | null;
     }
   | CodexPermissionChange;
 
@@ -55,6 +55,9 @@ export interface CodexUserSettingsState {
   version: string;
   provider: string;
   defaultsEditable: boolean;
+  modelsAvailable: boolean;
+  accelerationAvailable: boolean;
+  contextEditable: boolean;
   approvalsReviewer: {
     value: "user" | "auto_review" | null;
     editable: boolean;
@@ -69,14 +72,16 @@ export interface CodexUserSettingsState {
     isDefault: boolean;
   }>;
   defaults: {
+    configuredModel: string | null;
     model: string | null;
     reasoningEffort: string | null;
     serviceTier: string | null;
     fastEnabled: boolean;
     ultrafastEnabled: boolean;
     webSearch: "live" | "indexed" | "cached" | "disabled" | null;
-    updatePlanEnabled: boolean;
-    autoRecapEnabled: boolean;
+    updatePlanEnabled: boolean | null;
+    autoRecapEnabled: boolean | null;
+    unsupportedFields: string[];
     reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null;
     planModeReasoningEffort?: string | null;
     verbosity?: "low" | "medium" | "high" | null;
@@ -93,7 +98,7 @@ export interface CodexUserSettingsState {
   };
   compact: {
     contextWindow: number | null;
-    autoCompactPercent: number | null;
+    autoCompactTokenLimit: number | null;
   };
 }
 
@@ -122,7 +127,7 @@ export function loadCodexUserSettings(
 
 export function updateCodexUserSetting(
   input: CodexUserSettingInput,
-  options: CodexUserSettingsDependencies & { expectedVersion: string },
+  options: CodexUserSettingsDependencies & { expectedVersion: string; expectedTargetFingerprint?: string },
 ): Promise<{
   kind: CodexUserSettingInput["kind"];
   previousVersion: string;
@@ -130,6 +135,10 @@ export function updateCodexUserSetting(
   action: "updated" | "unchanged";
   willChange: boolean;
   activation: CodexUserSettingActivation;
+  revision: string | null;
+  consistency: "confirmed" | "unknown";
+  writeStatus: "ok" | "okOverridden" | null;
+  targetFingerprint?: string;
 }>;
 
 export function previewCodexUserSetting(
@@ -142,4 +151,8 @@ export function previewCodexUserSetting(
   action: "updated" | "unchanged";
   willChange: boolean;
   activation: CodexUserSettingActivation;
+  revision: string | null;
+  consistency: "confirmed" | "unknown";
+  writeStatus: "ok" | "okOverridden" | null;
+  targetFingerprint?: string;
 }>;

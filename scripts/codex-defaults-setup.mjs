@@ -23,6 +23,7 @@ export async function runCodexDefaultsSetup({
   const settings = await withCliProgress("读取 Codex 默认模型设置", () =>
     loadSettings({ environment, createClient, primaryProvider }), { output, delayMs: 150, handleSignals: false });
   if (!settings.defaultsEditable) {
+    if (settings.provider === "openai") throw new Error("Codex 官方模型目录暂不可用，请重新读取设置");
     throw new Error(
       `当前是第三方固定模式（${settings.provider}）；请先恢复 OpenAI 默认配置，再设置 Codex 官方模型`,
     );
@@ -100,11 +101,22 @@ export async function runCodexDefaultsSetup({
     createClient,
     primaryProvider,
   }), { output, delayMs: 150, handleSignals: false });
-  if (result.action !== "unchanged") output.write(`Codex 全局默认设置已更新：${model.model} · ${selectedEffort}\n`);
-  const activationResult = configActivationResult(result.activation);
+  if (result.consistency === "unknown") {
+    output.write("Codex 已返回保存结果，但未能核对当前用户配置；请重新读取设置，勿重复提交。\n");
+  } else if (result.action !== "unchanged") {
+    output.write(`Codex 全局默认设置已更新：${model.model} · ${selectedEffort}\n`);
+  }
+  if (result.writeStatus === "okOverridden") {
+    output.write("用户配置已保存，但本次修改受到更高优先级配置覆盖；保存不代表有效配置已改变。\n");
+  }
+  const activationResult = configActivationResult(result.consistency === "unknown"
+    || result.writeStatus === "okOverridden" ? "none" : result.activation);
   writeGatewayConfigActivationNotice(output, environment, activationResult);
   return {
     action: result.action,
+    consistency: result.consistency,
+    revision: result.revision,
+    writeStatus: result.writeStatus,
     model: model.model,
     effort: selectedEffort,
     activation: result.activation,

@@ -86,6 +86,7 @@ export function useOpenAiModelCatalog() {
       })
       setDraft(null)
     }
+    return result
   }
   const closeEdit = () => { if (!management.busy) { management.cancel(); setDraft(null) } }
   const { busy, pendingPreview, refetch } = management
