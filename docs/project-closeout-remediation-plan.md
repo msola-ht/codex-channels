@@ -41,7 +41,7 @@
 | R12 | P2 | 确认：同步 open 可先阻塞在 FIFO；异步私有 reader 已有 NONBLOCK。主 Codex 配置允许链接的独立合同须保留。 | B03 |
 | R13 | P2 | 确认：Windows writer helper 同步阻塞且无总期限；内部 WaitForExit 不能覆盖 helper 全过程，其他 OS 不属于同一触发路径。 | B15 |
 | R14 | P3 | 确认文档漂移：异常分组实际按最近发生、再按次数，最多 20 组，WebUI 取前 5；不为旧描述修改 SQL。 | B25 |
-| R15 | P2 | 确认：finish 先 ended 再校验，失败漏内容完成；锁定上游支持历史影响推导，但权威历史丢失未实测。非法工具仍须整组拒绝。 | B14 |
+| R15 | P2 | 确认：finish 先 ended 再校验，失败漏内容完成；初审历史影响仅源码推导，B14 已补 Linux 自有官方 App Server 修前/修后分页历史读回。非法工具仍须整组拒绝。 | B14 |
 | R16 | P2 | 确认：Linux 凭据既有资源缺只读安全验证；目录链接可重定向，叶链接 unlink 不删除其目标，不能混写。 | B04 |
 | R17 | P2 | 确认并扩全入口：除 shared environment/Doctor，还包括 service-install-context、Desktop command/proxy；服务定义会固化误选路径。 | B16 |
 | R18 | P2 | 确认：Skill 删除确认不绑定内容修订；一次检查后 rm 或简单 rename 不能证明并发内容安全，恢复语义须先明确。 | B09 |
@@ -347,7 +347,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立 Astra/high 最终全链复审与两轮修订复核无剩余阻断。主代理已读完整报告并核对最终 Models blob `d5f901f1eb50da5aba3638422b4456458b133f42`、CommandCenter `9ab87c0a01a8082ab7e2335297f29561abd3b3de`；其余七源码保持复审输入。类型、版本和模块边界检查通过。R44 标记已修复待补证；真实飞书/App Server RPC、SQLite 落盘和 Windows/macOS 未观察，独立 CLI/WebUI 配置写者与最后读取至写入间不具备跨进程原子 revision 保证，不以本批快照守卫宣称解决该外部事务问题。
 - 本地提交 `322fc7ab759356a5b3a85011d3b55434237f86b5`；正常 Hook 类型/版本/边界、局部 lint、84 份 Markdown 和 Gateway 构建通过，耗时 14.6 秒。提交后工作区干净，未推送。
 
-### 第十批：B13（独立复审通过，待本地提交）
+### 第十批：B13（已提交 `186be82e`）
 
 - 输入 `322fc7ab`，范围 R09。CLI/WebUI 共用的非流式 apply_patch/tool_search 探测只检查响应 model 字段形状，未确认与请求模型精确相等；外层 result.model 是请求身份，不能替代每次响应归属证据。两步补丁和三步工具搜索任一步错模型都必须为无法确认，不得采用到目标模型。
 - 关联路径已核对：共享 request/parser → CLI 逐项显式采用与 WebUI canApply/draftKey → 连接关联标识/预览 revision → Provider 模型目录事务 → runtime 编译 apply_patch_tool_type/supports_search_tool。非 200 明确工具拒绝分类保留；原生 Responses webSearch 已有完成响应模型核对，Chat webSearch 不产生支持证据。独立 responses-tool-search-probe 只做单请求诊断、无上述保存调用方，不扩为本批工具能力自动采用路径。
@@ -358,3 +358,19 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 主代理 WebUI 生产 HTTP 子路由观察：向任务自有 routeCustomModelCapabilityProbe 提交 A，合成上游返回 B；HTTP 200、一次请求、result.model=A、check=inconclusive、固定原因、httpStatus=200，保留既有 connectionToken 合同但 canApply=false，响应不含 B 的实际名称。此观察不含管理认证外壳或浏览器，未连接真实 WebUI；自有 `/tmp/codexc-b13-web-route-QpyC6l` 与两个服务器已清理。
 - 真实翻译函数中英文新原因及未知文本安全回退通过；局部 ESLint、node --check、Oxlint、WebUI 自身 TypeScript 6.0.3 和 i18n:check 通过（2136 源键、键及占位符一致）。第一次误用根 TypeScript 5.9.3 检查 WebUI 报范围外泛型/DOM iterable 错，核对实际构建入口后使用 WebUI 编译器通过，未修改范围外代码。所有行为观察均为合成响应，真实供应商、浏览器点击和跨 OS 尚未观察；独立 A 复审结论待追加。
 - 独立 Astra/high 完整核对双协议每步模型归属、失败/取消/预算、CLI/WebUI 采用、管理鉴权/Origin、token/预览/目录事务及 runtime 逐模型消费，无剩余阻断。主代理已读完整报告并核对三源码 blob：probe `44df6489`、reason 映射 `6a01dfc8`、中英消息 `d55c336a`。token 仍是连接归属证明，不宣称服务端能力证明；手动声明合同保持。R09 标记已修复待补证，以上真实环境限制保留。
+- 本地提交 `186be82e96b5faf950b2ac6186b0fdec46e89c97`；正常 Hook 类型/版本/边界、局部 lint、84 份 Markdown、WebUI 构建/Lint/翻译和 Gateway 构建通过，耗时 18.2 秒。提交后工作区干净，未推送。
+
+### 第十一批：B14（独立复审通过，待本地提交）
+
+- 输入 `186be82e`，范围 R15。Chat 终态必须在全部可失败的构造检查成功后提交；错误路径应收尾此前已交付的文本/推理 Item，非法客户端工具始终整组拒绝。仅将 ended 后移不足以覆盖用量构造失败或 push 同帧切换内容后抛错导致已生成事件未返回。
+- 主代理修前生产 ChatToResponses 观察：content/reasoning/reasoning_content 三种先输出 already-visible，再积累非法 JSON 工具并 finish，均抛 Invalid Chat tool arguments；随后 fail 只有 response.failed、output_item.done=0，终态对应 content/summary 为空。另在先输出 reasoning 后，同一帧 content+非法工具 index=128 触发 push 错误，fail 只输出 message 的 done，之前 reasoning 的 done 已丢失。以上均为内联纯转换输入，无测试或 probe 文件。
+- 用量关联反例实测：单轮 prompt_tokens=MAX_SAFE_INTEGER、completion_tokens=1，各字段单独通过原计数检查，但 finish 与随后 fail 都抛 Invalid accumulated Chat usage，不能生成终态。分析同时核对 hosted 多轮累加及失败路径的未知用量语义，不将本批扩大为一般指标重构；尚未宣称修复或上游历史落盘通过。
+- 主代理修前生产 HTTP 桥接观察：ChatCompletionsBridge `/responses` → 自有 Chat SSE 上游，正文 visible-before-error 后非法 JSON 的 known 工具以 tool_calls/[DONE] 结束。HTTP 200 仅有 created/item.added/part.added/text.delta/failed，done=0，failed.output 中正文仍 in_progress/content=[]。首次误用 `/v1/responses` 得到 404，核对私有桥合同后改用 `/responses` 得到上述结果，未据此改变产品路由。两个自有服务器和桥均已关闭；未连接 App Server 或读取用户历史。
+- 完整补修集中在一个转换器：push 先预解析整帧，最多复制 128 个工具状态引用并仅克隆改动项，不复制正文历史；finish 先构造全部合法工具、检查空答复与累计用量，再提交 ended/内容收尾/工具生命周期；fail 在用量聚合已知不可表示时省略 usage，仍生成内容 done 和 failed。合法 usage 独立保留，最新非法 usage 清除旧本轮快照；单轮 total 也检查安全整数。不修改桥终态控制器、直接 Chat Relay、公开协议或历史存储格式。
+- 实施者内存生产入口观察：三种内容×坏 JSON/未知/混合工具 9 项均保留 already-visible 的 text/part/item.done→failed，客户端工具零发布；切内容帧的 index/type/id/function/finish/content/reasoning/后续工具错误不提交新内容，旧 Item 正常收尾；工具增量坏帧不污染原参数。单轮溢出、负数、cache 越界、坏 usage 清旧值，fail 不再二次抛错；合法 usage 与坏工具同帧仍保留 8/3/11、cache2/reason1。
+- 托管搜索关联观察：两轮累计溢出在 tool_calls/length/filter 终态前全部拒绝、无客户端调用、usage 未知；缺首轮/末轮计数保持未知；搜索已完成但下一轮未提交时失败保留 2/1/3，beginModelRound 后未收到新计数则未知；两轮正常累计为 5/3/8、cache2/reason2。混合搜索与坏客户端工具在执行前整组拒绝；合法混合仅内部 not_executed 续传，后续客户端调用获得响应范围 ID。已开始搜索后失败不伪造 search completed。正常文本和 function/custom/tool_search、合法 usage 尾帧、length/filter、无 finish、空响应、16 MiB、上游错误、签名推理与工具 ID 冲突均按相应成功/失败合同观察。
+- 主代理修后实际 HTTP 桥共 11 条：正常文本和合法工具 completed；混合坏工具、未知工具、切 kind 坏帧、非法 usage、无 finish、无 DONE、流内错误都先交付原可见内容 done 再 failed，客户端工具事件为零；length/filter 为 incomplete 且无部分调用。合法工具具有 added/done 配对。桥与上游均在 finally 关闭，无新增观察文件。
+- 已补到 Linux 官方 App Server 权威历史路径：任务自有隔离 Codex Home、工作区、模型目录和 loopback 上游，生产 StdioTransport/JsonRpcClient 与 Runtime owned-process 端口启动并回收自有 App Server，正式 initialize→thread/start(paginated)→turn/start→官方通知→thread/read(metadata)→thread/items/list。修前构建产物为 `186be82e`，一次请求后 Turn failed，agent delta 存在，item/completed 仅 userMessage，分页历史也只有 userMessage、nextCursor=null；修后源码一次请求，Turn 仍 failed，完成通知和分页历史均新增 agentMessage，正文准确为 OWNED_VISIBLE_BEFORE_ERROR。未发出合法工具，未读取内部 session 文件，未连接用户服务/真实供应商。
+- 上述历史首轮日志误从分页 entry 顶层提取 type 得到空对象，核对生成类型 ThreadItemEntry.item 后重新完整运行修前链取得准确历史；这属于观察采集更正，不是协议修复。自有目录 `codexc-b14-history-before-eIxo5M`、`codexc-b14-history-YMKaV9`、`codexc-b14-history-vhiswY` 已在自有进程关闭后精确清理。当前证据覆盖已加载 Thread 的正式权威分页读回；进程重启后的磁盘重载、真实供应商、跨 OS 与客户端断线后的送达结果仍未观察。
+- 最终类型/版本/边界、局部 ESLint 与差异检查通过，实施者已交权，主代理核对最终源码 blob `fafc3ab0ff8c31a3894d33866611e4c7a1f88fa7` 并读完整报告；独立 A 全链复审中，尚未提交。
+- 独立 Astra/high 最终覆盖 HTTP/转换/hosted 续轮/失败交付/锁定官方完成 Item 与历史读取链，确认无剩余源码阻断，最终 blob 与上述一致。主代理已读完整报告；Message incomplete 和无 status 的 Reasoning 完整内容 done 均符合官方类型，未完成搜索不伪造完成，断连不承诺送达。R15 标记已修复待补证：Linux 自有官方 App Server 权威分页历史已实际观察，剩余限制是磁盘重载、其他 OS、真实供应商与不可达客户端的最终交付，不再把该已观察历史路径标为未实测。

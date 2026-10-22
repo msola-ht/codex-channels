@@ -27,15 +27,18 @@ export class ChatToResponses {
   private bytes = 0;
   constructor(private readonly id: string, private readonly model: string, private readonly toolNames?: ReadonlyMap<string, ChatToolIdentity>) {}
 
-  start(): JsonObject[] { return [this.event("response.created", { response: this.response("in_progress") })]; }
+  start(): JsonObject[] { return [this.event("response.created", { response: this.response("in_progress", this.aggregateUsage()) })]; }
 
   /** Called immediately before submitting a model round, not while preparing it. */
   beginModelRound(): void { this.awaitingNextRound = false; }
 
   fail(error: JsonObject): JsonObject[] {
-    if (this.ended) return [this.event("response.failed", { response: { ...this.response("failed"), error } })];
+    let usage: JsonObject | undefined;
+    try { usage = this.aggregateUsage(); }
+    catch (failure) { if (!(failure instanceof ModelConversionError)) throw failure; }
+    if (this.ended) return [this.event("response.failed", { response: { ...this.response("failed", usage), error } })];
     this.ended = true;
-    return [...this.closeContent("incomplete"), this.event("response.failed", { response: { ...this.response("failed"), error } })];
+    return [...this.closeContent("incomplete"), this.event("response.failed", { response: { ...this.response("failed", usage), error } })];
   }
 
   push(value: unknown): JsonObject[] {
@@ -43,7 +46,12 @@ export class ChatToResponses {
     const chunk = object(value);
     this.addBytes(JSON.stringify(chunk));
     if (chunk.error != null) throw new ModelConversionError("Chat upstream returned an error");
-    if (chunk.usage != null) this.usage = convertUsage(chunk.usage);
+    if (chunk.usage != null) {
+      // Usage is independent evidence, including on an otherwise invalid frame.
+      // An invalid replacement must not leave an older snapshot looking final.
+      this.usage = undefined;
+      this.usage = convertUsage(chunk.usage);
+    }
     const choices = array(chunk.choices);
     if (choices.length === 0) return [];
     if (choices.length !== 1) throw new ModelConversionError("Multiple Chat choices are unsupported");
@@ -53,37 +61,46 @@ export class ChatToResponses {
     if (this.finishReason && isChatUsageTrailer(delta, choice.finish_reason, this.finishReason, chunk.usage)) return [];
     if (this.finishReason && Object.keys(delta).length) throw new ModelConversionError("Chat delta after finish reason");
     if (delta.refusal != null) throw new ModelConversionError("Unsupported Chat content");
-    const events: JsonObject[] = [];
     const thought = reasoningText(delta);
-    if (thought.kind === "reasoning_content") this.roundReasoningContent += thought.text;
-    else this.roundReasoning += thought.text;
-    events.push(...this.appendContent(thought.kind, thought.text));
-    if (delta.content != null) {
-      this.roundText += string(delta.content);
-      events.push(...this.appendContent("message", string(delta.content)));
-    }
-    if (delta.tool_calls != null) for (const raw of array(delta.tool_calls)) {
+    const content = delta.content == null ? "" : string(delta.content);
+    const tools = delta.tool_calls == null ? undefined : new Map(this.tools);
+    if (tools) for (const raw of array(delta.tool_calls)) {
       const call = object(raw);
       const index = call.index;
       if (!Number.isSafeInteger(index) || Number(index) < 0 || Number(index) >= 128) throw new ModelConversionError("Invalid Chat tool index");
-      let state = this.tools.get(Number(index));
-      if (!state) {
+      const previous = tools.get(Number(index));
+      let state: ToolState;
+      if (!previous) {
         if (call.type !== "function") throw new ModelConversionError("Unsupported Chat tool type");
         const callId = string(call.id);
-        if (!callId || [...this.tools.values()].some(entry => entry.callId === callId)) throw new ModelConversionError("Invalid Chat tool identity");
+        if (!callId || [...tools.values()].some(entry => entry.callId === callId)) throw new ModelConversionError("Invalid Chat tool identity");
         state = { callId, name: "", arguments: "" };
-        this.tools.set(Number(index), state);
-      } else if ((call.id != null && call.id !== state.callId) || (call.type != null && call.type !== "function")) throw new ModelConversionError("Chat tool identity changed");
+      } else {
+        if ((call.id != null && call.id !== previous.callId) || (call.type != null && call.type !== "function")) throw new ModelConversionError("Chat tool identity changed");
+        state = { ...previous };
+      }
       const fn = object(call.function);
       if (fn.name != null) state.name += string(fn.name);
       if (fn.arguments != null) {
         state.arguments += string(fn.arguments);
       }
+      tools.set(Number(index), state);
     }
+    let finishReason = this.finishReason;
     if (choice.finish_reason != null) {
       if (this.finishReason || !["stop", "tool_calls", "length", "content_filter"].includes(string(choice.finish_reason))) throw new ModelConversionError("Chat upstream failed to finish normally");
-      this.finishReason = string(choice.finish_reason);
+      finishReason = string(choice.finish_reason);
     }
+    // No content lifecycle or tool mutation is committed until the whole frame
+    // is valid; otherwise generated close events could be lost on an exception.
+    if (tools) { this.tools.clear(); for (const [index, state] of tools) this.tools.set(index, state); }
+    this.finishReason = finishReason;
+    const events: JsonObject[] = [];
+    if (thought.kind === "reasoning_content") this.roundReasoningContent += thought.text;
+    else this.roundReasoning += thought.text;
+    events.push(...this.appendContent(thought.kind, thought.text));
+    this.roundText += content;
+    events.push(...this.appendContent("message", content));
     return events;
   }
 
@@ -172,10 +189,11 @@ export class ChatToResponses {
 
   finish(): JsonObject[] {
     if (this.ended || !this.finishReason) throw new ModelConversionError("Chat stream ended without a finish reason");
-    this.ended = true;
     if (this.finishReason === "length" || this.finishReason === "content_filter") {
+      const usage = this.aggregateUsage();
+      this.ended = true;
       const events = this.closeContent("incomplete");
-      return [...events, this.event("response.incomplete", { response: { ...this.response("incomplete"), incomplete_details: { reason: this.finishReason === "length" ? "max_output_tokens" : "content_filter" } } })];
+      return [...events, this.event("response.incomplete", { response: { ...this.response("incomplete", usage), incomplete_details: { reason: this.finishReason === "length" ? "max_output_tokens" : "content_filter" } } })];
     }
     const calls = this.validateCalls().map(([index, state, identity]) => {
       if (identity?.kind === "web_search") throw new ModelConversionError("Unexecuted hosted web search call");
@@ -185,6 +203,9 @@ export class ChatToResponses {
       // Responses history can pair its actual client result without collisions.
       return toolCallItem(id, this.previousUsage.length > 0 ? { ...state, callId: id } : state, identity);
     });
+    if (!this.roundText && !this.roundReasoning && !this.roundReasoningContent && !calls.length) throw new ModelConversionError("Empty Chat response");
+    const usage = this.aggregateUsage();
+    this.ended = true;
     const events = this.closeContent();
     // Keep partial or invalid tool calls away from the client. Publish validated
     // calls after content, each with a complete identity and paired lifecycle.
@@ -203,8 +224,7 @@ export class ChatToResponses {
       }
       events.push(this.event("response.output_item.done", { item, output_index }));
     }
-    if (!this.roundText && !this.roundReasoning && !this.roundReasoningContent && !calls.length) throw new ModelConversionError("Empty Chat response");
-    events.push(this.event("response.completed", { response: this.response("completed") }));
+    events.push(this.event("response.completed", { response: this.response("completed", usage) }));
     return events;
   }
 
@@ -265,8 +285,10 @@ export class ChatToResponses {
     this.items.push(item);
     return [this.event("response.output_item.added", { item: { ...item }, output_index })];
   }
-  private response(status: string): JsonObject {
-    const usage = aggregateUsage(this.awaitingNextRound ? this.previousUsage : [...this.previousUsage, this.usage]);
+  private aggregateUsage(): JsonObject | undefined {
+    return aggregateUsage(this.awaitingNextRound ? this.previousUsage : [...this.previousUsage, this.usage]);
+  }
+  private response(status: string, usage?: JsonObject): JsonObject {
     return { id: this.id, object: "response", model: this.model, status, output: [...this.items], ...(usage ? { usage } : {}) };
   }
   private addBytes(text: string): void {
@@ -372,7 +394,7 @@ function convertUsage(value: unknown): JsonObject {
     return Number(value);
   };
   const input = count(source.prompt_tokens), output = count(source.completion_tokens);
-  const result: JsonObject = { input_tokens: input, output_tokens: output, total_tokens: input + output };
+  const result: JsonObject = { input_tokens: input, output_tokens: output, total_tokens: count(input + output) };
   if (source.prompt_tokens_details != null) {
     const cached = object(source.prompt_tokens_details).cached_tokens;
     if (cached != null) {
