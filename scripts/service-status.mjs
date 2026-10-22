@@ -400,7 +400,7 @@ export async function inspectManagedServiceHealth(options = {}) {
           );
           const topology = await inspectAppServerSupervisor(primarySocketPath);
           rpcReachable = topology?.releasedProviders.includes(topology.primaryProvider) === true
-            || await appServerSocketAcceptsWebSocket(primarySocketPath, { ...environment, CODEX_BINARY: effectiveCodexBinary(configDocument.codex?.binary ?? "codex", environment) });
+            || await appServerSocketAcceptsWebSocket(primarySocketPath, { ...environment, CODEX_BINARY: effectiveCodexBinary(configDocument.codex?.binary ?? "codex", environment, paths.dataDir) });
         }
       } catch {
         rpcReachable = false;

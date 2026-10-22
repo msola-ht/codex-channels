@@ -168,7 +168,7 @@ export function resolveCodexUserConfigBinary(environment = process.env) {
   const codex = config === undefined
     ? { binary: "codex" }
     : validateCodexConfigDocument(readGatewayConfig(config.configPath).codex ?? {});
-  const configuredBinary = effectiveCodexBinary(codex.binary, environment);
+  const configuredBinary = effectiveCodexBinary(codex.binary, environment, config?.dataDir);
   return resolveOptionalExecutable(configuredBinary, environment) ?? configuredBinary;
 }
 
@@ -192,7 +192,7 @@ export async function createSharedCodexUserConfigClient({ environment = process.
   const document = readGatewayConfig(config.configPath);
   const codex = validateCodexConfigDocument(document.codex ?? {});
   const socketPath = resolvePrimaryAppServerSocketPath({ codex }, config.dataDir);
-  const configuredBinary = effectiveCodexBinary(codex.binary, environment);
+  const configuredBinary = effectiveCodexBinary(codex.binary, environment, config.dataDir);
   const codexBinary = resolveOptionalExecutable(configuredBinary, environment) ?? configuredBinary;
   const { CodexAppServerClient, JsonRpcClient, createAppServerTransport } = await import("../dist/codex-client/index.js");
   const transport = createAppServerTransport({ kind: "local-app-server", socketPath }, {

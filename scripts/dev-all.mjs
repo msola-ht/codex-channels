@@ -180,7 +180,7 @@ async function ensureAppServerTopology({
   const assertRunning = () => { if (isStopping()) throw new DevAllStoppedError(); };
   assertRunning();
   const document = readGatewayConfig(runtime.configPath);
-  const environment = { ...process.env, CODEX_BINARY: effectiveCodexBinary(document.codex?.binary ?? "codex", process.env) };
+  const environment = { ...process.env, CODEX_BINARY: effectiveCodexBinary(document.codex?.binary ?? "codex", process.env, runtime.dataDir) };
   const topology = appServerRuntime.topology;
   const paths = topology.socketPaths;
   const primaryPath = appServerRuntime.primarySocketPath;

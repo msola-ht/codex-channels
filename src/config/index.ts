@@ -1,5 +1,6 @@
 import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { resolveCodexRequestIdentity } from "../../runtime/codex-request-identity.mjs";
+import { effectiveCodexBinary } from "../../runtime/executable.mjs";
 import {
   lstatSync,
   readFileSync,
@@ -224,9 +225,11 @@ function loadValidatedConfigDocument(
 ): GatewayConfig {
   const workspaces = validateWorkspaces(raw.workspaces);
   const { clientIdentity, upstreamUserAgent } = resolveCodexRequestIdentity(raw.codex);
+  let codexBinary: string;
   try {
     // Also used by candidate-upgrade preflight, before any services are stopped.
     validateCodexConfigDocument({ upstream_user_agent: upstreamUserAgent });
+    codexBinary = effectiveCodexBinary(raw.codex.binary, {}, baseDirectory);
   } catch (error) {
     throw new ConfigurationError(error instanceof Error ? error.message : String(error));
   }
@@ -276,7 +279,7 @@ function loadValidatedConfigDocument(
           },
         }
       : {}),
-    codexBinary: raw.codex.binary,
+    codexBinary,
     networkProxy: {
       ...(proxyEnvironment.HTTP_PROXY ? { http: proxyEnvironment.HTTP_PROXY } : {}),
       ...(proxyEnvironment.HTTPS_PROXY ? { https: proxyEnvironment.HTTPS_PROXY } : {}),

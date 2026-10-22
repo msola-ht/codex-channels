@@ -36,7 +36,7 @@ async function runDesktopAppProxy() {
     ...process.env,
     CODEX_CONNECT_HOME: located.dataDir,
     CODEX_CONNECT_CONFIG_FILE: located.configPath,
-    CODEX_BINARY: effectiveCodexBinary(codex.binary ?? "codex", process.env),
+    CODEX_BINARY: effectiveCodexBinary(codex.binary ?? "codex", process.env, located.dataDir),
   };
   const appServer = resolveAppServerRuntime(document, located.dataDir, environment);
   if (codex.desktop_app?.enabled !== true || appServer.primaryProvider !== "openai") {

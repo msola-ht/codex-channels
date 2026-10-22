@@ -113,8 +113,8 @@ B 编号是责任边界，不强制一包一提交。每包实施时核对原编
 
 | 补充任务 | 当前证据与下一步 |
 | --- | --- |
-| Telegram effort 键盘目录快照 | B26已复现并修复，独立A全链复审无阻断：提交后的页面统一按state读取浏览目录并投影，当前模型能力验证仍使用定向目录。隔离生产入口连续选择成功；真实Telegram及共享AppServer待补证，准备提交。 |
-| 显式相对 CLI 路径 | B16 独立 A 源码推导安装 cwd 与服务 cwd 可产生不同选择；待明确已支持的相对路径基准、复现及全入口修复，随后独立 A 复审、单批提交。当前绝对路径与环境覆盖证据不关闭此任务。 |
+| Telegram effort 键盘目录快照 | B26已提交6903e105，独立A全链复审无阻断：提交后的页面统一按state读取浏览目录并投影，当前模型能力验证仍使用定向目录。隔离生产入口连续选择成功；真实Telegram及共享AppServer待补证。 |
+| 显式相对 CLI 路径 | B27统一配置文件目录基准，跨cwd及缺失路径隔离观察完成；独立A发现的Windows歧义已拒绝并复核，无剩余代码阻断，准备提交。原生Windows/macOS服务仍待补证。 |
 | 微信非成功响应正文清理 | B17 独立 A 确认 JSON/CDN 的既有非2xx分支未释放正文；redirect:error 的拒绝不经过该分支，本批未扩大缺口。待沿请求期限、错误映射和关闭链复现、修复，再独立 A 复审提交；不以正常响应或跳转观察关闭此任务。 |
 | 自定义Socket目录的日志归属 | B19 独立A源码发现状态摘要固定读取dataDir/runtime，日志路由与安装器按codex.socket_path父目录选取；配置自定义Socket目录可能产生不同日志来源。待隔离复现、明确共享目录合同并修复复审，当前尚未运行观察，不在脱敏批次改变路径选择。 |
 
@@ -528,7 +528,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立A最终全链报告已收齐，五项均无剩余阻断，主代理核当前文档与审查输入一致；A复用有效浏览器DOM/请求观察并直接看英文加载截图，没有宣称重复运行全部路径。准备正常Hook提交，原45项至此0待修复、41已修复待补证、4文档关闭；另4旁支继续逐批处理。
 - 本地提交 `527aa13d1a3a9363282f58bb9b8fe098bb815189`；正常Node22 Hook类型/版本/边界、84份Markdown、WebUI构建/Lint、2136翻译键及占位符、Gateway构建均通过，19.8秒；提交后工作区干净，未推送。
 
-### 第二十三批：B26（关联问题1，修复复审完成）
+### 第二十三批：B26（关联问题1，已提交）
 
 - 输入 `527aa13d`，不计入原45项。B12发现Telegram effort结果使用完整目录、下一回调modelState使用筛选目录，token可能不一致；从ModelSelectionService返回状态、菜单投影/快照与Bot回调追踪，先复现多Provider/筛选范围，再核同合同的Fast返回分支是否需要同步调整。
 - 内部验证继续保留完整目录，菜单与下一回调范围一致；动态目录、Thread/Workspace变化及Actor隔离仍须拒绝旧卡。保留飞书精确快照与普通文本命令合同，不改变用户持久格式或真实账户默认值。隔离生产入口观察后新独立A复审，再单批提交。
@@ -536,3 +536,17 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 生产TelegramSurface.handleUpdate→ConversationCommandService→ModelSelectionService→renderer隔离入口，注入目录、Router与Telegram API：/effort high→me low→me high连续成功，两次回调均提示正在选择，三份键盘回复且最终high。Actor/聊天/目录/Thread/Workspace变化拒绝旧按钮；无效effort保持low；最终读取时Thread改变返回authorization-changed，先前已提交high保留，不声称回滚。结构化选择浏览cp-b、当前openai时读取cp-b→openai→cp-b，新页按cp-b投影，与刷新令牌一致。
 - Fast经消费链区分后未改：Telegram fast不生成目录键盘，飞书fast快照不含models且精确提交mode，速度展示需要当前模型完整能力。隔离fast status返回当前模型元数据且写入0。全项目tsc noEmit、修改文件ESLint及diff检查均通过；源码blob491ed6de9f4acf458cf06d8a5b7cf7b2bab0a2bc，实施报告及全部作业已收齐，Surface已关闭，无临时脚本。未访问真实Telegram、共享AppServer或真实账户，平台网络行为仍待补证。
 - 新独立A已完成命令/结构化选择、完整目录验证与发布投影、Telegram回调、飞书快照、Fast差异、偏好持久化和Turn消费链复审，无阻断。主代理已读完整报告并定向核源码及blob一致；新读取可能增加目录等待，失败不重复写入或回滚，不能以隔离链路替代真实平台验收。相关README同步，准备正常Hook本地提交，不推送。
+- 本地提交6903e105f297f28c8bee7ddac11b66a73b7e74ef，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown及Gateway构建均通过，15秒；提交后工作区干净，未推送。
+
+### 第二十四批：B27（关联问题2，修复复审完成）
+
+- 输入6903e105。安装时显式相对codex.binary按安装cwd固定，服务读取原配置却按服务cwd重新解释；统一显式配置路径相对配置文件目录，符合配置模块现有路径约定。裸程序名、绝对路径及默认codex的CODEX_BINARY覆盖优先级保持，环境覆盖自身不冒充配置相对路径。
+- 覆盖配置加载、安装定义、运行环境、Doctor、Remote、Desktop、设置/登录/MCP、初始化、维护及WebUI消费者；不新增服务元数据、不改持久格式、不自动重装或重启服务。先隔离跨cwd复现和失败输入观察，源码稳定后新独立A复审再提交。
+- 实施新增effectiveCodexBinary可选配置目录参数，全部Gateway配置调用方传已知配置目录；Gateway配置加载先规范化显式相对路径而不提前应用环境覆盖。17个源码文件已稳定，主代理核完整diff及dataDir来源，新的独立A开始全链复审。
+- 首轮隔离观察：配置目录./bin/codex为真实0.163 CLI，服务cwd同名路径为Node22且CODEX_BINARY故意指向Node；两个cwd下安装、foreground、Gateway配置加载及用户设置均选择配置目录CLI。裸程序名保持，默认codex仍采用环境覆盖，环境相对值保持原语义。真实codexc doctor --json的CLI项success/0.163，总exit1因隔离无Socket及临时Provider配置，不称Doctor整体通过。
+- npm run check（完整类型/版本/边界）及修改源码ESLint通过。实施者另直接运行tsc build --noCheck遇TS5055（既有dist输入覆盖），虽输出配置产物供观察，该命令按失败记录；不修无关构建，提交时仍走正常清理构建Hook。失败输入及资源收尾报告待收齐。
+- 后续确认TS5055由直接绕过prebuild清理的调用方式导致，实施者已通过正常npm run build -- --noCheck执行prebuild/build/postbuild，全部成功（前置完整类型检查已通过），未修改生成输入或构建配置。清理继承的Provider环境后重跑隔离Doctor，CLI项仍success/0.163，总失败仅隔离监管身份/Socket不存在。
+- Hack：配置./bin/missing-codex不存在，但服务cwd同名文件及环境替代均存在；安装入口明确报配置目录的“找不到可执行文件”，其他解析入口保留同一绝对缺失路径，Doctor CLI项failure而不回退。裸custom-codex真实按PATH选择Node而非环境Codex；显式绝对路径选择Codex；默认codex+相对环境值按service cwd选Node，证明环境与配置相对值合同分开。
+- 独立A发现Windows P2：C:bin\codex.exe和单根路径依赖盘内cwd/当前盘，原补丁不能保证固定基准。主代理补拒配置来源的drive-relative、单根及不完整UNC，保完整盘符/UNC/设备前缀；环境覆盖提前返回不变。配置加载在既有try/catch转换为ConfigurationError。Linux内联加载实际helper源码，仅改为node:path/win32及模拟platform观察：五类歧义输入均拒绝，普通相对定位D:\config\bin，完整绝对/UNC/设备前缀/裸名保留，默认环境歧义值仍按原合同保留；这是路径语义模拟，不是Windows实机执行。
+- 实施者17文件完整报告、所有作业已收齐，隔离目录/tmp/codexc-b27.y7hiXO已删除，无任务进程；主代理接管后仅补helper与配置异常分类，最终blob分别98c533dd45b8fe53222c6d2deb1f704bbf223060、29875d7e1c3b313ac3450b83202819c86583c448。其余源码和Linux正常/缺失路径观察输入保持有效。未安装/启动服务、Remote/Desktop或共享AppServer，macOS/Windows原生行为待补证；A正复核补修。
+- 独立A完整报告已收齐，Windows发现关闭，17源码及安装/运行/管理消费链、当前文档均无剩余阻断。主代理核最终关键blob与报告一致；A曾将工具JSON转义误认文档双反斜杠，双方逐字符确认实际单反斜杠后撤回该提醒，未作无必要编辑。准备正常Node22 Hook完成最终静态门禁并提交，不推送。

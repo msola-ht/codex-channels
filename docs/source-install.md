@@ -266,6 +266,7 @@ Windows 构建使用现有 PowerShell 7 提前编译原生 Job/目录保护 DLL�
 
 服务安装会在三个平台的四类定义中保存显式 `CODEX_HOME` 的规范化目录，未设置时不写该变量。Unix 已有定义需在设置了目标 Home 的终端重新执行 `codexc install` 才能加载此行为；Linux 的新定义同时关闭 ExecStart 变量展开，保留路径中的字面 `$`。普通 restart 不重建定义；重新安装的核心服务、Relay 与 WebUI 激活边界同上。
 App Server、Gateway 和 WebUI 的服务定义也会保存按上述优先级选出的 CLI 路径。Unix 旧定义缺少该值或需要更换 `CODEX_BINARY` 时，应在设置了目标环境的终端运行 `codexc install` 重新生成并激活定义；仅更新程序或普通 restart 不会补写。该命令启动核心服务，Relay 与 WebUI 按上面的既有状态恢复步骤处理。
+显式 `[codex] binary` 相对路径以 Gateway 配置文件所在目录为基准，安装和运行时使用同一解析规则；裸程序名与环境 `CODEX_BINARY` 保留各自的 PATH/工作目录规则。已有相对配置若曾依赖安装工作目录，应先改为配置目录下的正确路径或绝对路径，再按上述步骤重建定义；程序更新不自动修写配置、重装或重启服务。
 当前源码更新预检按新 ExecStart 格式核对 Linux 服务定义；旧定义被拒绝时，先按本节完成程序安装和 `codexc install`，再使用源码自动更新，不手工绕过路径检查。
 
 新设备先运行 `npm run install:global`，安装成功后在交互终端运行 `codexc init` 完成初始化、接入和后台服务安装；仅在跳过相应步骤时再按需运行 `codexc setup`、`codexc install`。非交互 `init` 只初始化用户数据，不提供无人值守接入；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。

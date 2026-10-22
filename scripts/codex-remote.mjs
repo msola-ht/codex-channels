@@ -113,7 +113,7 @@ async function runRemoteCli() {
     leaseProvider = selectedProvider;
     assertAggregateProviderArguments(passthrough);
   }
-  const configuredBinary = effectiveCodexBinary(codex.binary ?? "codex", process.env);
+  const configuredBinary = effectiveCodexBinary(codex.binary ?? "codex", process.env, runtime.dataDir);
   const supervisorActive = selectedDefinition !== undefined || selectedProvider === aggregateProviderId
     || await inspectAppServerSupervisor(primarySocketPath) !== undefined;
   try {

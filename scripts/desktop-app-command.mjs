@@ -94,7 +94,7 @@ export async function runDesktopAppCommand(args, options = {}) {
     ...environment,
     CODEX_CONNECT_HOME: located.dataDir,
     CODEX_CONNECT_CONFIG_FILE: located.configPath,
-    CODEX_BINARY: effectiveCodexBinary(codex.binary ?? "codex", environment),
+    CODEX_BINARY: effectiveCodexBinary(codex.binary ?? "codex", environment, located.dataDir),
   };
   const appServer = resolveAppServerRuntime(document, located.dataDir, runtimeEnvironment);
   const selectedProvider = parsed.provider === undefined ? appServer.primaryProvider

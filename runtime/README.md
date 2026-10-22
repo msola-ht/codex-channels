@@ -328,7 +328,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   状态标签、颜色、输出流路由和换行，Doctor 检查项另用通过；统一遵守 TTY 与 `NO_COLOR`，
   重定向输出保持纯文本。
 - `executable.mjs` / `executable.d.mts`：统一选择配置或安装环境中的 Codex 路径，并从绝对/相对
-  路径或受控 `PATH` 解析本机可执行文件；Windows 按大小写不敏感的环境变量键读取 `PATH`、`PATHEXT`
+  路径或受控 `PATH` 解析本机可执行文件；Gateway 调用方传入配置目录以统一显式相对 binary 的基准，环境覆盖保留调用进程工作目录语义。Windows 按大小写不敏感的环境变量键读取 `PATH`、`PATHEXT`
   和 `ComSpec`，选择原生可执行文件或 `.cmd` / `.bat` shim，并以结构化调用描述交给 Codex/npm 子进程
   入口，避免依赖 Shell 自动补后缀。供 CLI、Bootstrap、服务安装器和 Doctor 复用，不依赖平台固定
   位置的 `which`。

@@ -382,7 +382,7 @@ if (document) {
   }
 
   setSection("Codex 与 App Server");
-  const codexCommand = effectiveCodexBinary(codex.binary ?? "codex", process.env);
+  const codexCommand = effectiveCodexBinary(codex.binary ?? "codex", process.env, dataDir);
   let codexBinary;
   try {
     codexBinary = resolveExecutable(codexCommand);

@@ -1,6 +1,7 @@
 export function effectiveCodexBinary(
   configuredBinary: string,
   environment?: NodeJS.ProcessEnv,
+  configurationDirectory?: string,
 ): string;
 
 export function resolveExecutable(

@@ -1,17 +1,28 @@
 import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
-import { delimiter, extname, isAbsolute, join, resolve } from "node:path";
+import { delimiter, extname, isAbsolute, join, parse, resolve } from "node:path";
 
 export function effectiveCodexBinary(
   configuredBinary,
   environment = process.env,
+  configurationDirectory,
 ) {
   if (typeof configuredBinary !== "string" || configuredBinary.trim() === "") {
     throw new Error("Codex CLI 路径无效");
   }
   const installedBinary = environmentVariable(environment, "CODEX_BINARY")?.trim();
-  return configuredBinary === "codex" && installedBinary
-    ? installedBinary
-    : configuredBinary;
+  if (configuredBinary === "codex" && installedBinary) return installedBinary;
+  const normalized = configuredBinary.trim();
+  if (configurationDirectory !== undefined && process.platform === "win32") {
+    const root = parse(normalized).root;
+    if (/^[a-z]:(?![\\/])/iu.test(normalized) || root === "\\" || root === "/") {
+      throw new Error("Codex CLI 配置路径必须是普通相对路径、完整盘符绝对路径或完整 UNC 路径");
+    }
+  }
+  if (configurationDirectory !== undefined && !isAbsolute(normalized)
+    && (normalized.includes("/") || (process.platform === "win32" && normalized.includes("\\")))) {
+    return resolve(configurationDirectory, normalized);
+  }
+  return configuredBinary;
 }
 
 export function resolveExecutable(command, environment = process.env) {

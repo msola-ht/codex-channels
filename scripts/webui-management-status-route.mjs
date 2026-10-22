@@ -110,7 +110,7 @@ async function handleUpstreamUserAgent(
   const appServerUserAgent = configured !== null
     ? null
     : await cachedAppServerUserAgent(document, paths.dataDir, cache, gatewayVersion, signal,
-      effectiveCodexBinary(codex.binary, environment));
+      effectiveCodexBinary(codex.binary, environment, paths.dataDir));
   signal.throwIfAborted();
   const effectiveUserAgent = upstreamUserAgent ?? appServerUserAgent;
   const recentRequest = latestRecordedUserAgent(environment, openMetricsStore);

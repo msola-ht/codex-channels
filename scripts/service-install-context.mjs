@@ -33,7 +33,7 @@ export function resolveServiceInstallContext(
 
   const runtimeDir = dirname(socketPath);
   const codexBinary = resolveExecutable(
-    effectiveCodexBinary(codex.binary ?? "codex", environment),
+    effectiveCodexBinary(codex.binary ?? "codex", environment, runtime.dataDir),
     environment,
   );
   const nodeBinary = realpathSync(nodeExecutable);

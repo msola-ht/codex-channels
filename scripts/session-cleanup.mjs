@@ -50,7 +50,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
   const document = readGatewayConfig(config.configPath);
   const workspaces = readWorkspaceConfig(document).workspaces;
   const runtime = resolveAppServerRuntime(document, config.dataDir, environment);
-  const codexBinary = resolveExecutable(effectiveCodexBinary(document.codex.binary, environment), environment);
+  const codexBinary = resolveExecutable(effectiveCodexBinary(document.codex.binary, environment, config.dataDir), environment);
   const databasePath = resolveConfiguredPath(document.storage?.database_path, config.dataDir, "data/gateway.sqlite3");
   readBoundThreadIds(databasePath);
   const clients = new Map();

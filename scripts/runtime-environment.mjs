@@ -19,7 +19,7 @@ export function configuredEnvironment(sourceEnvironment = process.env) {
   const proxyEnvironment = resolveProxyEnvironment(network, environment);
   const unresolvedProxyEnvironment = {
     ...environment,
-    CODEX_BINARY: effectiveCodexBinary(codex.binary ?? "codex", sourceEnvironment),
+    CODEX_BINARY: effectiveCodexBinary(codex.binary ?? "codex", sourceEnvironment, dataDir),
   };
   return {
     configPath,

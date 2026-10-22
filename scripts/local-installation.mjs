@@ -156,7 +156,7 @@ export async function waitForCoreServiceTarget(
   const inspectSupervisorState = options.inspectSupervisorState
     ?? inspectAppServerSupervisorState;
   const socketHealthy = options.socketHealthy ?? (socketPath => appServerSocketAcceptsWebSocket(socketPath,
-    { ...environment, CODEX_BINARY: effectiveCodexBinary(document.codex?.binary ?? "codex", environment) }));
+    { ...environment, CODEX_BINARY: effectiveCodexBinary(document.codex?.binary ?? "codex", environment, dataDir) }));
   const gatewayHealthy = options.gatewayHealthy ?? gatewayOwnerIsReady;
   const deadline = now() + timeoutMs;
   let healthySince;
