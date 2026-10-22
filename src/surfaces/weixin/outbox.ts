@@ -298,9 +298,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
         logger: this.logger,
         metadata: weixinOutputErrorMetadata,
       },
-      call,
+      () => {
+        this.assertSendActive(signal);
+        return call();
+      },
       signal,
     );
+  }
+
+  private assertSendActive(signal?: AbortSignal): void {
+    signal?.throwIfAborted();
+    if (this.closed) throw new Error("微信输出队列已关闭");
   }
 
   private render(event: OutputEvent): string | null {
@@ -354,11 +362,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
     signal: AbortSignal | undefined,
     context: WeixinReplyContext | undefined,
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    this.assertSendActive(signal);
     if (
       event.type === "text.completed"
       && text.length > weixinTextCapacity(text, maximumChunks)
-      && await this.sendLongFinalAnswer(event.target, text, signal, context)
+      && await this.sendLongFinalAnswer(event.target, text, event.text, signal, context)
     ) {
       return;
     }
@@ -368,16 +376,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private async sendLongFinalAnswer(
     target: ConversationTarget,
     text: string,
+    originalText: string,
     signal?: AbortSignal,
     context?: WeixinReplyContext,
   ): Promise<boolean> {
-    signal = this.closed ? undefined : signal;
+    this.assertSendActive(signal);
     context ??= {
       actorId: target.conversationId,
       contextToken: undefined,
     };
     const fileClient = this.options.fileClient;
-    const file = Buffer.from(text, "utf8");
+    const file = Buffer.from(originalText, "utf8");
     if (
       fileClient === undefined
       || file.length > maximumWeixinOutboundFileBytes
@@ -447,7 +456,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     signal?: AbortSignal,
     context = this.contexts.get(target),
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    this.assertSendActive(signal);
     // The upstream Weixin implementation treats context_token as optional.
     // A known, authorized Conversation can still receive a message after the
     // previous token has expired; omit the stale token until the next inbound
@@ -457,6 +466,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       contextToken: undefined,
     };
     for (const chunk of splitWeixinText(text, maximumChunkCount)) {
+      this.assertSendActive(signal);
       if (!this.access.isAllowed({
         target,
         actorId: context.actorId,
@@ -492,7 +502,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     signal?: AbortSignal,
     context = this.contexts.get(target),
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    this.assertSendActive(signal);
     context ??= {
       actorId: target.conversationId,
       contextToken: undefined,

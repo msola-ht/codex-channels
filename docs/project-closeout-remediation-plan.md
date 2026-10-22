@@ -469,7 +469,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 主代理已读实施者及独立A完整报告，并核9个最终源码blob与复审输入一致；A全链结论无剩余本批阻断。R36/R42标已修复待补证：本地生产类、热reload及SDK注入端口观察不等于真实Telegram送达、飞书扫码/远端配置或跨OS验收；startup/context.reply未扩，已发未知结果不自动重发/回滚。将通过正常Hook本地提交，未授权远端推送。
 - 本地提交 `1e92e45201e30f738857282aea0e38fb71cef504`，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown及Gateway构建均通过，16.2秒；提交后工作区干净，未推送。
 
-### 第十八批：B21（修复及独立复审完成，待提交）
+### 第十八批：B21（已提交）
 
 - 输入 `1e92e452`，R38。三渠道音视频在前级输入队列等待时尚未登记Application取消范围，紧急stop可能先执行；须从真实接收入口、Actor/目标鉴权到全部等待队列、下载和锁内提交关联修复。TG同批紧急优先、微信monitor与adapter双层队列、飞书Inbox顺序处理分别核对，不能仅前移到现有flushPending之前。
 - 保留先前输入创建首个Thread后再捕获附件目标的合同；已接收旧附件取消，stop后新收到独立附件仍可提交，其他目标和未授权stop不受影响。已可能提交的引用不得因取消误删，重复、过载和关闭需释放任务范围。不连接真实渠道或共享AppServer，实施后再开新的独立A复审。
@@ -481,3 +481,17 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 真实120秒观察完成：elapsedMs=120151，audio.unavailable、pending0、dispose1；mayHaveSubmitted=true未因dispose清零。FS实际file视频入口迟到下载在stop后discard并拒绝，mayHaveSubmitted=false；已到RPC提交口但确认丢失时retain且mayHaveSubmitted=true。关闭等待中的附件不下载，最终pending/stops0；同目标第5项/第1001个活跃目标拒绝且不建Application scope，释放后0；飞书duplicate/overload不重复登记接收范围。额度是每Surface实例1000目标/每目标4项，Application另保留原全局预算。
 - 独立A已完成三端接收、队列、下载、Application锁内守卫与文件归属的全链复审，无剩余本批阻断；主代理核9个最终源码blob与A报告一致。Application源码未改，相关README已纠正为接收范围与提交作用域分层，新增共享文件已入Surface索引。R38标已修复待补证；真实渠道、共享AppServer、模型执行和macOS/Windows未观察。准备正常Hook本地提交，不推送。
 - 主代理已读实施者最终完整报告，所有异步作业和自有资源已收齐。观察中Application准备/取消调用生产方法，但会话锁及最终Turn消费由隔离端口执行，不能称完整AppServer提交验收；锁内真实守卫的适用性由独立A源码追踪补充。最新tsc、9源码局部ESLint、Runtime边界及diff检查均通过。
+- 本地提交 `32763098cff7ad352f1105d5486ad34194179046`；正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown及Gateway构建均通过，16.3秒；提交后工作区干净，未推送。
+
+### 第十九批：B22（修复及独立复审完成，待提交）
+
+- 输入 `32763098`，R39/R45。关联微信普通通知及可靠最终正文的Surface入口、共享队列、Outbox、平台客户端、完整内容receipt与Journal确认边界。
+- R39保留关闭/worker/单请求取消，核对排队通知、多分片、文件回退及等待后的新调用；不以擦除signal实现排空，也不泛化改变其他渠道的关闭合同。
+- R45完整TXT以原始最终正文生成，UTF-8文件大小也按原文计算；微信兼容格式只用于气泡与预览。完整文件及检查点未确认时不得错误清除持久原文。实施后安排新的独立A关联复审，再提交。
+- 源码改动限定微信Outbox，不改共享队列与其他渠道排空策略。保留输入取消信号，并在每次真实API调用前检查关闭与取消；完整TXT字节独立取自event.text，后台任务前缀仅在预览显示。新的独立A正在核对入口、队列、重试、实际客户端及完整内容确认链。
+- 实施者首轮隔离观察：普通多分片首请求忽略取消并跨15ms关闭预算，关闭返回及迟到首请求结束后API调用均仅1次，排队通知未发送；读图跨关闭后image=0，文件失败跨关闭后无新增回退，started检查点等待跨关闭后API=0。在途已发请求返回成功仍保存真实started/confirmed，不伪称撤回。生产/help入口至窄发送端口返回帮助。完整TXT等于原字节；原文1,000,000字节可发文件，1,000,001字节及原文1,088,114/展示88,044字节均不发文件、限5气泡且拒绝完整确认。缺文件端口、文件未知及confirmed检查点失败均拒绝确认；隔离Journal全链和独立A结论仍待收齐。
+- 独立A已完成源码全链审查，无本批阻断；覆盖普通及可靠入口、队列关闭/超时、重试、协议多阶段上传、原文快照及receipt→Coordinator→Journal删除。取消边界明确为Outbox.close开始，Surface.stop仍先执行其既有输入与生命周期关闭步骤；已发未知请求不能撤回。文件触发条件仍是展示正文超过五气泡，短气泡继续兼容展示，不扩大为所有Markdown逐字附件投递。最终运行报告待收齐后再提交。
+- 实施者最终报告已收齐：生产/help→ConversationAdapter→Outbox→ProtocolClient使用内存Fetch替身，正常链依次sendmessage、sendmessage、getuploadurl、upload、sendmessage；真实媒体加密后解密CDN载荷等于原文60,083字节，覆盖图片标记、CRLF、代码、中文强调和代理对。getuploadurl或upload阻塞跨关闭期限后没有后续平台调用。
+- 源码DeliveryJournal Worker与Coordinator使用独立临时SQLite：正常完整文件ACK=1、records=0；文件未知、confirmed检查点失败及原文超限均ACK=0、records=1、uncertain且原文完全保留；明确文件拒绝按既有合同重试3次后回退，文本合计5条，仍ACK=0。检查点失败未误写文件confirmed。此证据不是实平台送达验收。
+- 主代理已读完整实施报告并核最终源码blob `fd848421312efd6f21e6622b045f0781f729307a` 与独立A输入一致；源码仅outbox.ts，模块README及投递合同同步。类型、局部Lint、Runtime边界及diff检查通过，全部异步任务收齐、临时Worker和目录已清理。R39/R45标已修复待补证，真实微信客户端呈现与外部网络未观察。
+- 独立A最终报告已收齐，复审覆盖Core原文、SurfaceManager快照/重放至SQLite确认删除及所有受影响发送入口，无剩余阻断；A复用实施者有效运行证据并独立形成源码判断，未宣称重复实机观察。上述阶段性“待收齐”现已完成，准备正常Hook提交。
