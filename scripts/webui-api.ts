@@ -669,7 +669,7 @@ export interface CodexUserSettingsResponse {
   }
   compact: {
     contextWindow: number | null
-    autoCompactPercent: number | null
+    autoCompactTokenLimit: number | null
   }
 }
 

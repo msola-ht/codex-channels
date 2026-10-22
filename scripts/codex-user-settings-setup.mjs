@@ -86,7 +86,7 @@ export async function runCodexUserSettingsSetup({
       ...(defaultsEditable ? [{
         value: "model-compact",
         label: "模型上下文与自动压缩",
-        hint: "查看并设置上下文窗口与自动压缩比例",
+        hint: "查看并设置上下文窗口与自动压缩 Token 阈值",
       }] : []),
       {
         value: "permissions",
@@ -480,54 +480,43 @@ async function runModelCompactSetting({
   createClient,
   primaryProvider,
 }) {
-  let contextWindow = settings.compact?.contextWindow ?? null;
-  let autoCompactPercent = settings.compact?.autoCompactPercent ?? null;
-  for (;;) {
-    const windowValue = await prompts.text({
-      message: contextWindow === null
-        ? "模型上下文窗口（tokens，留空恢复模型默认；当前：模型默认）"
-        : `模型上下文窗口（当前：${contextWindow.toLocaleString()} tokens；留空恢复模型默认）`,
-      initialValue: contextWindow === null ? "" : String(contextWindow),
-      validate: (value) => {
-        const trimmed = value.trim();
-        if (trimmed === "") return undefined;
-        const parsed = Number(trimmed);
-        return Number.isSafeInteger(parsed) && parsed > 0
-          ? undefined
-          : "请输入正整数，或留空恢复模型默认";
-      },
-    });
-    if (prompts.isCancel(windowValue)) return { action: "back" };
-    const nextWindow = windowValue.trim() === "" ? null : Number(windowValue.trim());
-
-    const percentValue = await prompts.text({
-      message: autoCompactPercent === null
-        ? "自动压缩百分比（10-90，留空恢复 95% 默认；当前：默认 95%）"
-        : `自动压缩百分比（当前：${autoCompactPercent}%；10-90，留空恢复 95% 默认）`,
-      initialValue: autoCompactPercent === null ? "" : String(autoCompactPercent),
-      validate: (value) => {
-        const trimmed = value.trim();
-        if (trimmed === "") return undefined;
-        const parsed = Number(trimmed);
-        return Number.isInteger(parsed) && parsed >= 10 && parsed <= 90
-          ? undefined
-          : "请输入 10 到 90 的整数，或留空恢复默认";
-      },
-    });
-    if (prompts.isCancel(percentValue)) return { action: "back" };
-    const nextPercent = percentValue.trim() === "" ? null : Number(percentValue.trim());
-    if (nextPercent !== null && nextWindow === null) {
-      output.write("设置自动压缩百分比前必须先设置上下文窗口；请重新输入。\n");
-      contextWindow = nextWindow;
-      autoCompactPercent = nextPercent;
-      continue;
-    }
-    contextWindow = nextWindow;
-    autoCompactPercent = nextPercent;
-    break;
-  }
+  const currentWindow = settings.compact.contextWindow;
+  const currentTokenLimit = settings.compact.autoCompactTokenLimit;
+  output.write("上下文窗口与自动压缩阈值可独立设置；留空仅移除对应用户覆盖，跟随上游配置。\n");
+  const windowValue = await prompts.text({
+    message: currentWindow === null
+      ? "模型上下文窗口（tokens，留空恢复模型默认；当前：模型默认）"
+      : `模型上下文窗口（当前：${currentWindow.toLocaleString()} tokens；留空恢复模型默认）`,
+    initialValue: currentWindow === null ? "" : String(currentWindow),
+    validate: (value) => {
+      const trimmed = value.trim();
+      if (trimmed === "") return undefined;
+      const parsed = Number(trimmed);
+      return Number.isSafeInteger(parsed) && parsed > 0
+        ? undefined
+        : "请输入正整数，或留空恢复模型默认";
+    },
+  });
+  if (prompts.isCancel(windowValue)) return { action: "back" };
+  const contextWindow = windowValue.trim() === "" ? null : Number(windowValue.trim());
+  const tokenLimitValue = await prompts.text({
+    message: currentTokenLimit === null
+      ? "自动压缩阈值（tokens，留空跟随上游配置；当前：上游默认）"
+      : `自动压缩阈值（当前：${currentTokenLimit.toLocaleString()} tokens；留空跟随上游配置）`,
+    initialValue: currentTokenLimit === null ? "" : String(currentTokenLimit),
+    validate: (value) => {
+      const trimmed = value.trim();
+      if (trimmed === "") return undefined;
+      const parsed = Number(trimmed);
+      return Number.isSafeInteger(parsed) && parsed > 0
+        ? undefined
+        : "请输入正整数，或留空跟随上游配置";
+    },
+  });
+  if (prompts.isCancel(tokenLimitValue)) return { action: "back" };
+  const autoCompactTokenLimit = tokenLimitValue.trim() === "" ? null : Number(tokenLimitValue.trim());
   const confirmed = await prompts.confirm({
-    message: `保存模型上下文与自动压缩：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩 ${autoCompactPercent === null ? "默认 95%" : `${autoCompactPercent}%`}？`,
+    message: `保存模型上下文与自动压缩：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩阈值 ${autoCompactTokenLimit === null ? "上游默认" : `${autoCompactTokenLimit.toLocaleString()} tokens`}？`,
     initialValue: true,
   });
   if (prompts.isCancel(confirmed) || confirmed !== true) {
@@ -537,7 +526,7 @@ async function runModelCompactSetting({
   const result = await saveUserSettings(updateSetting, output, {
     kind: "model-compact",
     contextWindow,
-    autoCompactPercent,
+    autoCompactTokenLimit,
   }, {
     environment,
     expectedVersion: settings.version,
@@ -545,7 +534,7 @@ async function runModelCompactSetting({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   if (result.action !== "unchanged") output.write(
-    `Codex 模型上下文与自动压缩已更新：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩 ${autoCompactPercent === null ? "默认 95%" : `${autoCompactPercent}%`}。\n`,
+    `Codex 模型上下文与自动压缩已更新：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩阈值 ${autoCompactTokenLimit === null ? "上游默认" : `${autoCompactTokenLimit.toLocaleString()} tokens`}。\n`,
   );
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;

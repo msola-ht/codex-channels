@@ -10,34 +10,44 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
-import { ManagedSelect, PendingSettingDialog, SettingsRow, SettingsMutationFeedback } from "@/components/settings/settings-controls"
+import { ManagedSelect, PendingSettingDialog, SettingsRow, SettingsMutationFeedback, modelOperationDialogClassName } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { CodexSettingsController } from "@/lib/settings-management"
 import type { MessageKey } from "@/lib/i18n/messages"
 import { ToolAccessSettings } from "@/components/settings/tool-access-settings"
 
-export function AppServerSettingsCard({ management, onChanged, section = "general", renderContent }: { management: CodexSettingsController; onChanged?: () => void; section?: "general" | "permissions" | "models" | "context"; renderContent?: (content: ReactNode) => ReactNode }) {
+export function AppServerSettingsCard({ management, onChanged, onEditingChange, section = "general", renderContent }: { management: CodexSettingsController; onChanged?: () => void; onEditingChange?: (editing: boolean) => void; section?: "general" | "permissions" | "models" | "context"; renderContent?: (content: ReactNode) => ReactNode }) {
   const { t } = useTranslation()
   const settings = management.codexSettings
   const selectedModel = settings?.models.find((model) => settings.defaults.model === null ? model.isDefault : model.model === settings.defaults.model)
-  const [compact, patchCompact, resetCompact] = useSettingsDraft({ contextWindow: settings?.compact.contextWindow == null ? "" : String(settings.compact.contextWindow), compactPercent: settings?.compact.autoCompactPercent == null ? "" : String(settings.compact.autoCompactPercent) })
+  const [defaultDraft, patchDefaults, resetDefaults] = useSettingsDraft({ model: settings?.defaults.model ?? "", reasoning: settings?.defaults.reasoningEffort ?? "" })
+  const [tierDraft, patchTier, resetTier] = useSettingsDraft({ tier: settings?.defaults.serviceTier == null ? "" : normalizeServiceTier(settings.defaults.serviceTier) })
+  const compactSource = { contextWindow: settings?.compact.contextWindow == null ? "" : String(settings.compact.contextWindow), autoCompactTokenLimit: settings?.compact.autoCompactTokenLimit == null ? "" : String(settings.compact.autoCompactTokenLimit) }
+  const [compact, patchCompact, resetCompact] = useSettingsDraft(compactSource)
   const [preferences, patchPreferences, resetPreferences] = useSettingsDraft({
     planEffort: settings?.defaults.planModeReasoningEffort ?? selectedModel?.defaultReasoningEffort ?? "",
     reasoningSummary: settings?.defaults.reasoningSummary ?? "none", verbosity: settings?.defaults.verbosity ?? "medium",
     startupUpdate: String(settings?.defaults.checkForUpdateOnStartup ?? true), historyPersistence: settings?.defaults.historyPersistence ?? "save-all",
   })
-  const { contextWindow, compactPercent } = compact
+  const { contextWindow, autoCompactTokenLimit } = compact
   const { planEffort, reasoningSummary, verbosity, startupUpdate, historyPersistence } = preferences
   const [localError, setLocalError] = useState<MessageKey | null>(null)
-  const [compactError, setCompactError] = useState<{ field: "contextWindow" | "compactPercent"; value: string; requiredByPercent?: string; message: MessageKey } | null>(null)
+  const [compactError, setCompactError] = useState<{ field: "contextWindow" | "autoCompactTokenLimit"; value: string; message: MessageKey } | null>(null)
   const visibleCompactError = compactError !== null
     && compactError.value === compact[compactError.field]
-    && (compactError.requiredByPercent === undefined || compactError.requiredByPercent === compactPercent)
       ? compactError : null
+  const compactEditing = section === "context"
+    && (contextWindow !== compactSource.contextWindow || autoCompactTokenLimit !== compactSource.autoCompactTokenLimit)
+  useEffect(() => {
+    onEditingChange?.(compactEditing)
+    return () => onEditingChange?.(false)
+  }, [compactEditing, onEditingChange])
   useEffect(() => {
     if (management.lastAppliedSetting?.kind === "model-compact") resetCompact()
     if (management.lastAppliedSetting?.kind === "preferences") resetPreferences()
-  }, [management.lastAppliedSetting, resetCompact, resetPreferences])
+    if (management.lastAppliedSetting?.kind === "defaults") resetDefaults()
+    if (management.lastAppliedSetting?.kind === "service-tier") resetTier()
+  }, [management.lastAppliedSetting, resetCompact, resetPreferences, resetDefaults, resetTier])
 
   if (management.loading && settings === null) return <LoadingSettingsCard title={t("settingsFields.appServerTitle")} />
   if (settings === null) return <SettingsError title={t("settingsUi.codexLoadFailed")} message={management.error ?? t("settingsFields.appServerUnavailable")} retry={management.refetch} />
@@ -46,15 +56,16 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
     if (await management.confirmSetting()) onChanged?.()
   }
   const selected = selectedModel
+  const draftModel = settings.models.find(model => model.model === defaultDraft.model)
+  const draftEfforts = draftModel?.reasoningEfforts.map(item => [item.effort, item.effort]) ?? []
+  const draftEffortValid = draftEfforts.some(([effort]) => effort === defaultDraft.reasoning)
   const unavailableModel = selected === undefined ? settings.defaults.model : null
   const modelOptions = settings.models.map((model) => [model.model, model.displayName])
   if (unavailableModel !== null) modelOptions.unshift([unavailableModel, t("settingsFields.modelUnavailable", { model: unavailableModel })])
   const effortOptions = selected?.reasoningEfforts.map((item) => [item.effort, item.effort]) ?? []
   const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null || management.readbackRequired
   const officialDisabled = busy || !settings.defaultsEditable
-  const serviceTier = settings.defaults.serviceTier === null
-    ? ""
-    : normalizeServiceTier(settings.defaults.serviceTier)
+  const serviceTier = tierDraft.tier
   const serviceTierOptions = [["default", t("settingsFields.standard")]]
   if (settings.defaults.fastEnabled && selected && acceleratedServiceTierId(selected.serviceTiers, "fast")) serviceTierOptions.push(["fast", t("settingsFields.fast")])
   if (settings.defaults.ultrafastEnabled && selected && acceleratedServiceTierId(selected.serviceTiers, "ultrafast")) serviceTierOptions.push(["ultrafast", t("settingsFields.ultrafast")])
@@ -70,21 +81,17 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
 
   const saveCompact = () => {
     const parsedWindow = contextWindow.trim() === "" ? null : Number(contextWindow)
-    const parsedPercent = compactPercent.trim() === "" ? null : Number(compactPercent)
+    const parsedTokenLimit = autoCompactTokenLimit.trim() === "" ? null : Number(autoCompactTokenLimit)
     if (parsedWindow !== null && (!Number.isSafeInteger(parsedWindow) || parsedWindow <= 0)) {
       setCompactError({ field: "contextWindow", value: contextWindow, message: "settingsFields.contextWindowInvalid" })
       return
     }
-    if (parsedPercent !== null && (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 90)) {
-      setCompactError({ field: "compactPercent", value: compactPercent, message: "settingsFields.compactPercentInvalid" })
-      return
-    }
-    if (parsedPercent !== null && parsedWindow === null) {
-      setCompactError({ field: "contextWindow", value: contextWindow, requiredByPercent: compactPercent, message: "settingsFields.contextWindowRequired" })
+    if (parsedTokenLimit !== null && (!Number.isSafeInteger(parsedTokenLimit) || parsedTokenLimit <= 0)) {
+      setCompactError({ field: "autoCompactTokenLimit", value: autoCompactTokenLimit, message: "settingsFields.compactTokenLimitInvalid" })
       return
     }
     setCompactError(null)
-    void management.previewSetting({ kind: "model-compact", contextWindow: parsedWindow, autoCompactPercent: parsedPercent }, { key: "settingsFields.contextCompaction" })
+    void management.previewSetting({ kind: "model-compact", contextWindow: parsedWindow, autoCompactTokenLimit: parsedTokenLimit }, { key: "settingsFields.contextCompaction" })
   }
 
   const savePreferences = () => {
@@ -110,9 +117,12 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
         {section !== "context" && <FieldGroup className={cn("grid gap-x-8 gap-y-3", section !== "models" && "md:grid-cols-2")}>
           <SettingsRow label={t("settingsFields.currentProvider")} value={settings.provider} badge />
           {section === "models" && <>
-          <ManagedSelect fullWidth label={t("settingsFields.defaultModel")} value={settings.defaults.model ?? ""} placeholder={t("settingsFields.selectValidModel")} options={modelOptions} disabledValues={unavailableModel !== null ? [unavailableModel] : []} description={selected === undefined ? t("settingsFields.selectValidModel") : undefined} disabled={officialDisabled} onChange={(value) => { const model = settings.models.find((candidate) => candidate.model === value); if (model !== undefined) void management.previewSetting({ kind: "defaults", model: value, reasoningEffort: model.defaultReasoningEffort }, { key: "settingsFields.defaultModel" }) }} />
-          <ManagedSelect fullWidth label={t("settingsFields.reasoningEffort")} value={settings.defaults.reasoningEffort ?? ""} placeholder={selected === undefined ? t("settingsFields.selectValidModel") : undefined} options={effortOptions} disabledValues={effortOptions.some(([effort]) => effort === settings.defaults.reasoningEffort) ? [] : [settings.defaults.reasoningEffort ?? ""]} disabled={officialDisabled || selected === undefined} onChange={(value) => { if (selected !== undefined) void management.previewSetting({ kind: "defaults", model: selected.model, reasoningEffort: value }, { key: "settingsFields.reasoningEffort" }) }} />
-          <ManagedSelect fullWidth label={t("settingsFields.serviceTier")} value={serviceTier} placeholder={t("settingsFields.serviceTierDefault")} options={serviceTierOptions} disabledValues={serviceTierUnavailable ? [serviceTier] : []} description={t("settingsFields.serviceTierHint")} disabled={officialDisabled} onChange={(value) => { if (value === "default" || value === "fast" || value === "ultrafast") void management.previewSetting({ kind: "service-tier", serviceTier: value }, { key: "settingsFields.serviceTier" }) }} />
+          <ManagedSelect fullWidth label={t("settingsFields.defaultModel")} value={defaultDraft.model} placeholder={t("settingsFields.selectValidModel")} options={modelOptions} disabledValues={unavailableModel !== null ? [unavailableModel] : []} disabled={officialDisabled} onChange={value => { const model = settings.models.find(candidate => candidate.model === value); if (model) patchDefaults({ model: value, reasoning: model.reasoningEfforts.some(candidate => candidate.effort === defaultDraft.reasoning) ? defaultDraft.reasoning : model.defaultReasoningEffort }) }} />
+          <ManagedSelect fullWidth label={t("settingsFields.reasoningEffort")} value={defaultDraft.reasoning} placeholder={t("managementUi.followModelDefault")} options={draftEfforts} disabledValues={draftEffortValid ? [] : [defaultDraft.reasoning]} disabled={officialDisabled || draftModel === undefined} onChange={reasoning => patchDefaults({ reasoning })} />
+          <Button className="self-start" variant="outline" disabled={officialDisabled || !draftModel || !draftEffortValid || defaultDraft.model === settings.defaults.model && defaultDraft.reasoning === settings.defaults.reasoningEffort} onClick={() => void management.previewSetting({ kind: "defaults", model: defaultDraft.model, reasoningEffort: defaultDraft.reasoning }, { key: "settingsFields.defaultModel" })}>{t("modelManagement.preview")}</Button>
+          <Separator />
+          <ManagedSelect fullWidth label={t("settingsFields.serviceTier")} value={serviceTier} placeholder={t("settingsFields.serviceTierDefault")} options={serviceTierOptions} disabledValues={serviceTierUnavailable ? [serviceTier] : []} description={t("settingsFields.serviceTierHint")} disabled={officialDisabled} onChange={tier => patchTier({ tier })} />
+          <Button className="self-start" variant="outline" disabled={officialDisabled || serviceTierUnavailable || !["default", "fast", "ultrafast"].includes(serviceTier) || serviceTier === (settings.defaults.serviceTier === null ? "" : normalizeServiceTier(settings.defaults.serviceTier)) || defaultDraft.model !== (settings.defaults.model ?? "") || defaultDraft.reasoning !== (settings.defaults.reasoningEffort ?? "")} onClick={() => { if (serviceTier === "default" || serviceTier === "fast" || serviceTier === "ultrafast") void management.previewSetting({ kind: "service-tier", serviceTier }, { key: "settingsFields.serviceTier" }) }}>{t("modelManagement.preview")}</Button>
           </>}
           {section === "general" && <>
           <ManagedSelect label={t("settingsFields.webSearch")} value={settings.defaults.webSearch ?? ""} placeholder={t("openAiModelCatalog.searchDefault")} description={t("openAiModelCatalog.searchDefaultHint")} options={[["live", t("settingsFields.live")], ["indexed", t("settingsFields.indexed")], ["cached", t("settingsFields.cached")], ["disabled", t("settingsFields.off")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "web-search", mode: value }, { key: "settingsFields.webSearch" })} />
@@ -137,10 +147,10 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
               <Input id="codex-context-window" type="number" min={1} value={contextWindow} disabled={officialDisabled} aria-invalid={visibleCompactError?.field === "contextWindow"} aria-describedby={visibleCompactError?.field === "contextWindow" ? "codex-context-window-error" : undefined} onChange={(event) => { patchCompact({ contextWindow: event.target.value }); setCompactError(null) }} placeholder={t("settingsFields.modelDefault")} />
               {visibleCompactError?.field === "contextWindow" ? <FieldError id="codex-context-window-error">{t(visibleCompactError.message)}</FieldError> : null}
             </Field>
-            <Field data-disabled={officialDisabled} data-invalid={visibleCompactError?.field === "compactPercent"}>
-              <FieldLabel htmlFor="codex-compact-percent">{t("settingsFields.compactPercent")}</FieldLabel>
-              <Input id="codex-compact-percent" type="number" min={10} max={90} value={compactPercent} disabled={officialDisabled} aria-invalid={visibleCompactError?.field === "compactPercent"} aria-describedby={visibleCompactError?.field === "compactPercent" ? "codex-compact-percent-error" : undefined} onChange={(event) => { patchCompact({ compactPercent: event.target.value }); setCompactError(null) }} placeholder={t("settingsFields.compactDefault")} />
-              {visibleCompactError?.field === "compactPercent" ? <FieldError id="codex-compact-percent-error">{t(visibleCompactError.message)}</FieldError> : null}
+            <Field data-disabled={officialDisabled} data-invalid={visibleCompactError?.field === "autoCompactTokenLimit"}>
+              <FieldLabel htmlFor="codex-compact-token-limit">{t("settingsFields.compactTokenLimit")}</FieldLabel>
+              <Input id="codex-compact-token-limit" type="number" min={1} step={1} value={autoCompactTokenLimit} disabled={officialDisabled} aria-invalid={visibleCompactError?.field === "autoCompactTokenLimit"} aria-describedby={visibleCompactError?.field === "autoCompactTokenLimit" ? "codex-compact-token-limit-error" : undefined} onChange={(event) => { patchCompact({ autoCompactTokenLimit: event.target.value }); setCompactError(null) }} placeholder={t("settingsFields.compactDefault")} />
+              {visibleCompactError?.field === "autoCompactTokenLimit" ? <FieldError id="codex-compact-token-limit-error">{t(visibleCompactError.message)}</FieldError> : null}
             </Field>
           </FieldGroup>
           <Button className="self-start" variant="outline" disabled={officialDisabled} onClick={saveCompact}>{t("settingsFields.saveCompaction")}</Button>
@@ -167,7 +177,7 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
       </div>
   return <>
-    <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
+    <PendingSettingDialog className={section === "models" ? modelOperationDialogClassName : undefined} pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
     {renderContent && management.error !== null && <SettingsError title={t("settingsUi.codexLoadFailed")} message={management.error} retry={management.refetch} />}
     {feedback}
     {renderContent ? renderContent(content) : <Card>

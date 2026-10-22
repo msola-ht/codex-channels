@@ -11,6 +11,7 @@ import { writeGatewayConfigActivationNotice } from "./config-activation-notice.m
 import {
   loadGatewaySettings,
   updateGatewaySetting,
+  updateGatewayDefaultModelSetting,
 } from "./config-management.mjs";
 import { runTimezoneCommand } from "./timezone-command.mjs";
 
@@ -289,7 +290,7 @@ async function runDefaultModel({ environment, output, prompts, writeConfig }) {
   });
   if (prompts.isCancel(value)) return { action: "back" };
   const normalized = value.trim();
-  const result = updateGatewaySetting({
+  const result = await updateGatewayDefaultModelSetting({
     kind: "system.default-model",
     value: normalized || null,
   }, { environment, expectedRevision: settings.revision, writeConfig });

@@ -36,7 +36,7 @@ export function OpenAiModelDetails({ model, revision, open, loading, onClose, on
       <SheetHeader>
         <SheetTitle>{model?.displayName ?? t("openAiModelDetails.title")}</SheetTitle>
         <SheetDescription>{t(provider === undefined ? "openAiModelDetails.hint" : "modelCatalog.detailsHint")}</SheetDescription>
-        {provider !== undefined && model && <code className="break-all text-xs text-muted-foreground">{provider} · {model.model}</code>}
+        {model && <code className="break-all text-xs text-muted-foreground">{provider ?? "openai"} · {model.model}</code>}
       </SheetHeader>
       <div className="flex flex-col gap-6 px-4 pb-6">
         {loading ? <Skeleton className="h-40 w-full" /> : !stale && model && revision && open ? <Tabs key={JSON.stringify([provider, model.model, revision])} defaultValue="capabilities">

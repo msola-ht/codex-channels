@@ -216,8 +216,12 @@ export function formatSurfaceUserFacingError(
       return "尚未确认当前会话审批方式更新结果；请求不会自动重试，请用 /autoreview 核对实际状态";
     case "model.current.missing":
       return `当前模型不在可用模型列表中：${detail(error, "model", "未知")}`;
-    case "model.configured-default.missing":
-      return `配置的默认模型不属于当前主 Provider ${detail(error, "provider", "未知")}：${detail(error, "model", "未知")}`;
+    case "model.configured-default.missing": {
+      const provider = detail(error, "provider", "");
+      return provider
+        ? `配置的默认模型不属于当前主 Provider ${provider}：${detail(error, "model", "未知")}`
+        : `配置的默认模型不在当前主 Provider 的可用目录中：${detail(error, "model", "未知")}`;
+    }
     case "model.official.not-logged-in":
       return "OpenAI 官方未登录，当前没有可用模型；请先运行 codex login";
     case "model.provider.selection-required":

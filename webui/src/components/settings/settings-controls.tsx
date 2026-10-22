@@ -106,13 +106,15 @@ export function ManagedInputRow({ id, label, defaultValue, value, placeholder, d
   return <Field orientation="responsive" data-disabled={disabled}><FieldLabel className="text-muted-foreground" htmlFor={inputId}>{label}</FieldLabel><Input id={inputId} className="w-full sm:w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} value={value ?? draft.value} placeholder={placeholder} disabled={disabled} onChange={(event) => { if (value === undefined) patch({ value: event.target.value }); onChange?.(event.target.value) }} onBlur={(event) => { const next = event.target.value.trim(); if (value === undefined) patch({ value: next }); onBlur(next) }} /></Field>
 }
 
-export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; loading?: boolean; onConfirm: () => void; onCancel: () => void }) {
+export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCancel, className, finalFocus }: { pending: PendingSetting | null; saving: boolean; loading?: boolean; onConfirm: () => void; onCancel: () => void; className?: string; finalFocus?: ComponentProps<typeof AlertDialogContent>["finalFocus"] }) {
   const { t } = useTranslation()
   const destructive = pending?.intent === "clear"
   const regeneratingToken = pending?.kind === "webui.token" && pending.intent === "generate"
   return (
     <ManagementConfirmationDialog
       open={pending !== null}
+      className={className}
+      finalFocus={finalFocus}
       title={t("settingsUi.confirmTitle")}
       description={t("settingsUi.confirmDescription")}
       saving={saving}
@@ -200,7 +202,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
   }
   if (kind === "metrics.storage") return fields(previewRecord(record?.storage), { retentionDays: "settingsFields.retentionDays", maxRows: "settingsFields.maxRows" })
   if (kind === "defaults") return fields(record, { model: "settingsFields.defaultModel", reasoningEffort: "settingsFields.reasoningEffort" }, current => current === null ? t("settingsFields.upstreamDecides") : scalar(current))
-  if (kind === "model-compact") return fields(record, { contextWindow: "settingsFields.contextWindow", autoCompactPercent: "settingsFields.compactPercent" }, current => current === null ? t("settingsFields.modelDefault") : scalar(current))
+  if (kind === "model-compact") return fields(record, { contextWindow: "settingsFields.contextWindow", autoCompactTokenLimit: "settingsFields.compactTokenLimit" }, current => current === null ? t("settingsFields.compactDefault") : scalar(current))
   if (kind === "update-plan" || kind === "auto-recap") return scalar(record?.enabled)
   if (kind === "service-tier") return record?.serviceTier === null ? t("settingsFields.serviceTierDefault") : scalar(record?.serviceTier)
   if (kind === "approvals-reviewer") return record?.value === null ? t("settingsFields.approvalsReviewerUnset")

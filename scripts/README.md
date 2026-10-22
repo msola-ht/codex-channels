@@ -277,7 +277,7 @@
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的官方设备登录入口；登录前预览共享 Provider 切换计划，受管固定模式须先改为切换模式。登录完成后重新核对确认范围与配置修订，再提交官方恢复；自定义候选备份、第三方默认模型、模型目录和思考设置清理与 `codexc provider switch openai` 保持一致。
   登录子进程异步运行，输出跟随交互输出流，不混入 Setup JSONL；失败、信号取消或输出异常均停止后续配置写入，并清理自有进程。
 - `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与异步校验；导出共用 MCP 审批模式及 Strata 实际目标/时限校验供编辑向导使用；未知继承或宿主范围明确拒绝，不将普通 MCP 套用视频预算。插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
-- `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
+- `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：思考等级保留原始覆盖或未配置，不以目录默认值替代。上下文窗口与自动压缩阈值独立使用精确 Token 正整数或 null，预览与写入不经过百分比换算，不接受旧百分比字段；不可解释的存储数值读取失败而不修改文件。统一返回不依赖终端的
   Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Standard/Fast/Ultrafast、计划清单工具、TUI 空闲总结，
   按显式字段修改 Sandbox、审批和 Workspace Sandbox 网络权限，省略字段保留原值与继承状态；CLI 整组确认仍提交完整三项，一键批量配置仍要求完整权限，或一次原子写入默认值与用户偏好（已有 Permission Profile 时保留权限）；加速档位仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
@@ -329,7 +329,7 @@
   `paths [--json]` 不进入菜单或读取配置正文，只输出绝对路径与文件存在状态，不创建配置。子菜单与总览在选中后按需加载，路径查询和取消不加载这些实现。
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，有效默认值来自共享 Schema，原始配置保留未配置与显式配置的区别；只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
-- `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
+- `config-management.mjs` / `config-management.d.mts`：渠道新会话模型通过异步 `updateGatewayDefaultModelSetting` 校验当前主实例目录与配置修订后预览或保存；同步入口拒绝该设置，清除覆盖可离线执行。目录读取与 Gateway 写入分属不同资源，不提供跨资源原子事务。提供不依赖 prompts、TTY 或终端文案的 Gateway
   设置接口；官方身份一键设置持久写入 `follow_cli_version`，WebUI 可开关，终端单项修改保留标记；无标记或 false 时显式版本固定。
   设置脱敏读取与明确修改在读取快照及写入前复用当前版本的完整结构校验，拒绝未知字段和非法值，校验不回填默认值或替换带注释来源的原文对象；只接受受控的显示、系统（含一键官方 TUI 身份与模型上游终端标识）、自动化、网络、
   高级、Telegram 格式、WebUI、指标和默认 Workspace 输入，返回稳定字段错误与精确生效动作，

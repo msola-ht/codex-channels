@@ -20,13 +20,11 @@ import { ModelDetailFields, OpenAiModelDetails } from "@/components/settings/ope
 import { ModelApprovals, ModelServiceTiers, type ModelCatalogGroup } from "@/components/settings/model-catalog-columns"
 import { ProviderWebSearchProbeDialog, type ProviderWebSearchProbeTarget } from "@/components/settings/provider-web-search-probe-dialog"
 
-export function OpenAiModelCatalogCard({ catalog, disabled = false, configurationRevision, renderCatalog, defaultBadges, editDefaultsAction }: {
+export function OpenAiModelCatalogCard({ catalog, disabled = false, configurationRevision, renderCatalog }: {
   catalog: OpenAiModelCatalogController
   disabled?: boolean
   configurationRevision: string | null
   renderCatalog: (group: ModelCatalogGroup) => ReactNode
-  defaultBadges?: ReactNode
-  editDefaultsAction?: ReactNode
 }) {
   const { t, language } = useTranslation()
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -72,7 +70,6 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
             <TooltipTrigger render={<Badge variant="outline" tabIndex={0} />} aria-label={`${t("openAiModelCatalog.clientVersion")}: ${metadata.clientVersion ?? t("common.unknown")}`}>{metadata.clientVersion ?? t("common.unknown")}</TooltipTrigger>
             <TooltipContent>{t("openAiModelCatalog.clientVersion")}</TooltipContent>
           </Tooltip>}
-          {defaultBadges}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {showMetadata && <Tooltip>
@@ -81,7 +78,6 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
             </TooltipTrigger>
             <TooltipContent>{t("openAiModelCatalog.metadataHint")}</TooltipContent>
           </Tooltip>}
-          {editDefaultsAction}
           <Button variant="outline" disabled={disabled || catalog.locked || catalog.draft !== null || catalog.data === null || webSearchTarget !== null} onClick={() => void catalog.previewRefresh()}>{catalog.busy && !catalog.draft && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("openAiModelCatalog.refreshConfigured")}</Button>
         </div>
       </div>,

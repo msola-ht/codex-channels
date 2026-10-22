@@ -541,6 +541,15 @@ export class CodexAppServerClient implements
 
   async startThread(cwd: string, options: ThreadStartOptions = {}): Promise<ThreadSession> {
     options.beforeSubmit?.();
+    if (!options.model && this.defaults.model) {
+      const models = await this.listModels(options.beforeSubmit);
+      options.beforeSubmit?.();
+      if (!models.some(model => model.model === this.defaults.model && model.available !== false)) {
+        throw new UserFacingError("model.configured-default.missing", "Configured default model unavailable in connected provider catalog", {
+          model: this.defaults.model,
+        });
+      }
+    }
     const response = await this.rpc.request<ThreadStartResponse>({
       method: "thread/start",
       params: {

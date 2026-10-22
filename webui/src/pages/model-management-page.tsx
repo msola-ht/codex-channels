@@ -33,6 +33,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 export function ProvidersPage() {
   const { t } = useTranslation()
+  const [editing, setEditing] = useState(false)
   const summary = useApi(fetchSettingsSummary, [])
   const reloadSummary = summary.refetch
   const management = useProviderSettingsManagement()
@@ -40,17 +41,18 @@ export function ProvidersPage() {
   const reload = management.refetch
   const reloadStatus = status.refetch
   const refresh = useCallback(() => { reload(); reloadStatus(); reloadSummary() }, [reload, reloadStatus, reloadSummary])
-  return <SettingsPageFrame title="modelManagement.providers" busy={management.busy || management.loading || management.pendingPreview !== null || status.loading || summary.loading} refresh={refresh}>
+  return <SettingsPageFrame title="modelManagement.providers" busy={editing || management.busy || management.loading || management.pendingPreview !== null || status.loading || summary.loading} refresh={refresh}>
     {status.error ? <SettingsError message={translateApiErrorCode(t, status.errorCode)} retry={reloadStatus} /> : status.data ? <ProviderStatusCard state={status.data} /> : <LoadingSettingsCard title={t("modelManagement.providers")} />}
-    <ProviderSettingsManagement management={management} section="providers" onChanged={reloadStatus} />
+    <ProviderSettingsManagement management={management} section="providers" onEditingChange={setEditing} onChanged={reloadStatus} />
     <SettingsCliCommands scope="providers" summary={summary} />
   </SettingsPageFrame>
 }
 
 export function ModelAccountsPage() {
   const management = useAccountSettingsManagement()
-  return <SettingsPageFrame title="modelManagement.accounts" busy={management.busy || management.loading || management.pendingPreview !== null} refresh={management.refetch}>
-    <AccountSettingsManagement management={management} />
+  const [editing, setEditing] = useState(false)
+  return <SettingsPageFrame title="modelManagement.accounts" busy={editing || management.busy || management.loading || management.pendingPreview !== null} refresh={management.refetch}>
+    <AccountSettingsManagement management={management} onEditingChange={setEditing} />
   </SettingsPageFrame>
 }
 
@@ -73,13 +75,17 @@ export function ModelConfigurationPage() {
   const codexSettings = !codex.loading && codex.error === null && !codex.readbackRequired ? codex.codexSettings : null
   const defaultModel = codexSettings?.models.find(model => codexSettings.defaults.model === null ? model.isDefault : model.model === codexSettings.defaults.model)
   return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy || localCatalogs.loading || codexEditorOpen || providerEditing || groupsEditing} refresh={refresh}>
-    <OpenAiModelCatalogCard catalog={catalog} disabled={busy || providers.error !== null || codexEditorOpen} configurationRevision={providers.settings?.resourceRevision ?? null}
-      defaultBadges={codexSettings && <>
-        {codexSettings.provider !== "openai" && <Badge variant="outline">{t("settingsFields.currentProvider")}: {codexSettings.provider}</Badge>}
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="text-sm font-medium">{t("settingsFields.primaryDefaults")}</span>
+        {codexSettings && <><Badge variant="outline">{t("settingsFields.currentProvider")}: {codexSettings.provider}</Badge>
         <Badge variant="secondary">{t("settingsFields.defaultModel")}: {defaultModel?.displayName ?? codexSettings.defaults.model ?? t("customModel.unset")}</Badge>
-        <Badge variant="secondary">{t("settingsFields.reasoningEffort")}: {codexSettings.defaults.reasoningEffort ?? t("customModel.unset")}</Badge>
-      </>}
-      editDefaultsAction={<Button ref={codexEditorTrigger} variant="outline" size="sm" disabled={busy || catalog.pageBusy || codexEditorOpen || codexSettings === null} onClick={() => setCodexEditorOpen(true)}>{t("modelManagement.actions")}</Button>}
+        <Badge variant="secondary">{t("settingsFields.reasoningEffort")}: {codexSettings.defaults.reasoningEffort ?? t("managementUi.followModelDefault")}</Badge>
+        {!codexSettings.defaultsEditable && <span className="text-sm text-muted-foreground">{t("settingsFields.primaryDefaultsReadOnly")}</span>}</>}
+      </div>
+      <Button ref={codexEditorTrigger} variant="outline" size="sm" disabled={busy || catalog.pageBusy || codexEditorOpen || !codexSettings?.defaultsEditable} onClick={() => setCodexEditorOpen(true)}>{t("modelManagement.actions")}</Button>
+    </div>
+    <OpenAiModelCatalogCard catalog={catalog} disabled={busy || providers.error !== null || codexEditorOpen} configurationRevision={providers.settings?.resourceRevision ?? null}
       renderCatalog={official =>
       <ProviderModelCatalogs local={localCatalogs} management={providers} onChanged={reloadCodex} onEditingChange={setProviderEditing} renderCatalog={thirdParty =>
         <Card>
@@ -88,7 +94,7 @@ export function ModelConfigurationPage() {
         </Card>
       } />
     } />
-    <AppServerSettingsCard management={codex} section="models" onChanged={reloadProviders} renderContent={content => <Dialog open={codexEditorOpen} onOpenChange={open => { if (!codex.saving && codex.pendingSetting === null) setCodexEditorOpen(open) }}>
+    <AppServerSettingsCard key={String(codexEditorOpen)} management={codex} section="models" onChanged={reloadProviders} renderContent={content => <Dialog open={codexEditorOpen} onOpenChange={open => { if (!codex.saving && codex.pendingSetting === null) setCodexEditorOpen(open) }}>
       <DialogContent finalFocus={codexEditorTrigger} closeLabel={t("common.close")} showCloseButton={!codex.saving && codex.pendingSetting === null} className={modelOperationDialogClassName}>
         <DialogHeader><DialogTitle>{t("settingsFields.modelDefaults")}</DialogTitle><DialogDescription>{t("settingsFields.modelDefaultsHint")}</DialogDescription></DialogHeader>
         {content}
@@ -107,7 +113,8 @@ export function ModelConfigurationPage() {
 
 export function ModelContextPage() {
   const codex = useCodexSettingsManagement()
-  return <SettingsPageFrame title="modelManagement.context" busy={codex.loading || codex.saving || codex.pendingSetting !== null} refresh={codex.refetch}>
-    <AppServerSettingsCard management={codex} section="context" />
+  const [editing, setEditing] = useState(false)
+  return <SettingsPageFrame title="modelManagement.context" busy={editing || codex.loading || codex.saving || codex.pendingSetting !== null} refresh={codex.refetch}>
+    <AppServerSettingsCard management={codex} section="context" onEditingChange={setEditing} />
   </SettingsPageFrame>
 }

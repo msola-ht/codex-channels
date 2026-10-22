@@ -166,15 +166,7 @@ function projectSettings(snapshot, provider, rawModels) {
   const config = record(snapshot.config);
   const models = rawModels.filter((model) => model.available !== false).map(projectModel);
   const configuredModel = optionalString(config.model);
-  const selectedModel = configuredModel === null
-    ? models.find((model) => model.isDefault)
-    : models.find((model) => model.model === configuredModel);
   const configuredEffort = optionalString(config.model_reasoning_effort);
-  const effort = selectedModel?.reasoningEfforts.some(
-    (candidate) => candidate.effort === configuredEffort,
-  )
-    ? configuredEffort
-    : selectedModel?.defaultReasoningEffort ?? configuredEffort;
   const serviceTier = optionalString(config.service_tier);
   const webSearch = webSearchModes.has(config.web_search) ? config.web_search : null;
   const reasoningSummary = reasoningSummaries.has(config.model_reasoning_summary)
@@ -201,8 +193,8 @@ function projectSettings(snapshot, provider, rawModels) {
     approvalsReviewer: projectApprovalsReviewer(config, snapshot.approvalsReviewerPolicy),
     models,
     defaults: {
-      model: configuredModel ?? selectedModel?.model ?? null,
-      reasoningEffort: effort ?? null,
+      model: configuredModel ?? models.find((model) => model.isDefault)?.model ?? null,
+      reasoningEffort: configuredEffort,
       serviceTier,
       ...accelerationFlags(snapshot.acceleration),
       webSearch,
@@ -230,24 +222,10 @@ function projectSettings(snapshot, provider, rawModels) {
         : null,
     },
     compact: {
-      contextWindow: optionalSafeInteger(config.model_context_window),
-      autoCompactPercent: compactPercent(config),
+      contextWindow: optionalSafeInteger(config.model_context_window, "contextWindow"),
+      autoCompactTokenLimit: optionalSafeInteger(config.model_auto_compact_token_limit, "autoCompactTokenLimit"),
     },
   };
-}
-
-function compactPercent(config) {
-  const contextWindow = optionalSafeInteger(config.model_context_window);
-  const autoCompactLimit = optionalSafeInteger(config.model_auto_compact_token_limit);
-  if (
-    contextWindow === null
-    || autoCompactLimit === null
-    || contextWindow <= 0
-    || autoCompactLimit <= 0
-  ) {
-    return null;
-  }
-  return Math.round(Math.min(100, autoCompactLimit * 100 / contextWindow));
 }
 
 function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, acceleration, provider, models }) {
@@ -434,8 +412,10 @@ function preferenceEdits(input, models) {
 }
 
 function modelCompactEdits(input) {
-  const contextWindow = input?.contextWindow ?? null;
-  const autoCompactPercent = input?.autoCompactPercent ?? null;
+  if (Object.keys(input).some((key) => !["kind", "contextWindow", "autoCompactTokenLimit"].includes(key))) {
+    throw invalid("input", "invalid-input", "模型上下文与自动压缩仅接受上下文窗口和精确 Token 阈值");
+  }
+  const { contextWindow, autoCompactTokenLimit } = input;
   if (
     contextWindow !== null
     && (!Number.isSafeInteger(contextWindow) || contextWindow <= 0)
@@ -443,29 +423,17 @@ function modelCompactEdits(input) {
     throw invalid("contextWindow", "invalid-window", "模型上下文窗口必须是正整数");
   }
   if (
-    autoCompactPercent !== null
-    && (!Number.isInteger(autoCompactPercent)
-      || autoCompactPercent < 10
-      || autoCompactPercent > 90)
+    autoCompactTokenLimit !== null
+    && (!Number.isSafeInteger(autoCompactTokenLimit) || autoCompactTokenLimit <= 0)
   ) {
-    throw invalid("autoCompactPercent", "invalid-percent", "自动压缩百分比必须是 10 到 90 的整数");
+    throw invalid("autoCompactTokenLimit", "invalid-token-limit", "自动压缩阈值必须是正整数");
   }
-  if (autoCompactPercent !== null && contextWindow === null) {
-    throw invalid(
-      "contextWindow",
-      "window-required",
-      "设置自动压缩百分比前必须先设置模型上下文窗口",
-    );
-  }
-  const autoCompactLimit = contextWindow !== null && autoCompactPercent !== null
-    ? Math.round(contextWindow * autoCompactPercent / 100)
-    : null;
   return {
     edits: [
-      { keyPath: "model_context_window", value: contextWindow === null ? null : contextWindow },
-      { keyPath: "model_auto_compact_token_limit", value: autoCompactLimit },
+      { keyPath: "model_context_window", value: contextWindow },
+      { keyPath: "model_auto_compact_token_limit", value: autoCompactTokenLimit },
     ],
-    value: { contextWindow, autoCompactPercent },
+    value: { contextWindow, autoCompactTokenLimit },
   };
 }
 
@@ -575,14 +543,17 @@ function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
-function optionalSafeInteger(value) {
+function optionalSafeInteger(value, field) {
   if (value === null || value === undefined) return null;
   const normalized = typeof value === "bigint"
     ? Number(value)
     : typeof value === "string"
       ? Number(value)
       : value;
-  return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
+  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+    throw invalid(field, "unsupported-value", "当前上下文或压缩配置无法安全表示为正整数，请先在原生 Codex 配置中调整");
+  }
+  return normalized;
 }
 
 function record(value) {

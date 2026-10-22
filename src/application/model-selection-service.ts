@@ -194,7 +194,7 @@ export class ModelSelectionService {
       throw new UserFacingError("model.selection.expired", "模型选项已失效，请重新发送 /model 选择");
     }
     this.requireAvailableModel(selected);
-    const current = await this.resolveState(target, models, undefined, assertAuthorized);
+    const current = await this.resolveState(target, models, undefined, assertAuthorized, true);
     assertAuthorized?.();
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
@@ -510,6 +510,7 @@ export class ModelSelectionService {
     models: ModelOption[],
     filter?: string,
     assertAuthorized?: () => void,
+    skipConfiguredDefault = false,
   ): Promise<ModelSelectionState> {
     assertAuthorized?.();
     if (models.length === 0) {
@@ -518,7 +519,7 @@ export class ModelSelectionService {
     const pending = this.pending(target);
     const current = this.router.modelSettings(target);
     const selectedProvider = pending?.modelProvider ?? this.normalizeProvider(current?.modelProvider);
-    const useConfiguredDefault = !this.officialUnavailable()
+    const useConfiguredDefault = !pending?.model && !current?.model && !skipConfiguredDefault && !this.officialUnavailable()
       && (selectedProvider === undefined || selectedProvider === this.primaryProvider);
     const configuredDefault = useConfiguredDefault && this.configuredDefaultModel
       ? findModel(models, this.configuredDefaultModel, this.primaryProvider)
@@ -533,9 +534,10 @@ export class ModelSelectionService {
         },
       );
     }
-    const thirdPartyDefault = !current && !pending?.modelProvider && this.officialUnavailable()
+    const thirdPartyDefault = !skipConfiguredDefault && !current && !pending?.modelProvider && this.officialUnavailable()
       ? this.defaultThirdPartySelection()
       : undefined;
+    if (configuredDefault) this.requireAvailableModel(configuredDefault);
     const fallback = this.officialUnavailable()
       ? thirdPartyDefault && findModel(models, thirdPartyDefault.model, thirdPartyDefault.provider)
       : configuredDefault

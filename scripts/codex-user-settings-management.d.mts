@@ -38,7 +38,7 @@ export type CodexUserSettingInput =
   | {
       kind: "model-compact";
       contextWindow: number | null;
-      autoCompactPercent: number | null;
+      autoCompactTokenLimit: number | null;
     }
   | {
       kind: "preferences";
@@ -93,7 +93,7 @@ export interface CodexUserSettingsState {
   };
   compact: {
     contextWindow: number | null;
-    autoCompactPercent: number | null;
+    autoCompactTokenLimit: number | null;
   };
 }
 
