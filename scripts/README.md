@@ -238,7 +238,7 @@
   配置事务与 Profile 回滚，切换模式在写入前复核 Codex 配置版本、私有注册表和 Profile 快照，再在
   同一文件锁内原子写入私有 Profile；整体保存绑定包含连接与凭据状态的预览修订，CLI 编辑另复核打开时的文件快照，拒绝旧草稿覆盖并发修改。切换模式在预览前要求可读取的主配置。统一返回生效动作和备份清理警告；CLI
   继续负责字段询问、危险修改确认和中文渲染。自定义模型定义校验失败转换为 `invalid-catalog`，WebUI 返回参数错误且不写入；内部异常和写入未确认仍保留原有错误语义。
-  已有 CP 的连接专用计划拒绝模型字段，保留目录、所选模型及独立思考默认值；CLI 与 WebUI 共用此接口。连接保存前使用现有私有 Provider 快照，回读失败返回 `save-unconfirmed`，须核对快照人工恢复，不生成模型目录 pending。
+  已有 CP 的连接专用计划拒绝模型字段，保留目录、所选模型及独立思考默认值；CLI 与 WebUI 共用此接口。计划先判断实际连接、认证及配置副作用，再为真实变化分配凭据版本；无变化仍在锁内复核预览修订，返回 unchanged/none，不重写业务材料或恢复快照，保留管理锁和审计。存在真实变化的连接保存前使用现有私有 Provider 快照，回读失败返回 `save-unconfirmed`，须核对快照人工恢复，不生成模型目录 pending。
   CLI 单模型工具能力保存使用内部 `preserveDefaults` 选项，只保存目录并回读原连接选择；不重写 Profile／主配置或连接恢复快照。普通整表模型编辑仍可明确修改默认模型。
 - `model-provider-management.mjs` / `model-provider-management.d.mts`：统一返回 OpenAI 默认值、当前主
   Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选和受管模型目录的

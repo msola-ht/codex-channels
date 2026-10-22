@@ -31,6 +31,7 @@ import {
   customSwitchingProviderRegistryPath,
   restoreCustomPrimaryProviderSwitchingProfile,
   customPrimaryProviderCredentialEnvironmentKey,
+  customPrimaryProviderCredentialPath,
   readCustomPrimaryProviderApiKey,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -152,7 +153,29 @@ async function buildConnectionOnlySavePlan(input, options, requireConfirmation) 
     { keyPath: "model", value: model },
     { keyPath: "model_reasoning_effort", value: plan.reasoningEffort ?? null },
   );
+  const metadataWillChange = plan.upstreamWireApi === "responses"
+    ? plan.sourceState.upstreamMetadataContent !== null
+    : !sameUpstreamMetadata(plan.sourceState.upstreamMetadataContent, plan.upstreamWireApi);
+  let privateCredential = false;
+  if (input.mode === "exclusive") {
+    try {
+      customPrimaryProviderCredentialPath(environment, plan.provider.id, plan.sourceState.existing.env_key);
+      privateCredential = true;
+    } catch { /* External or unsupported references must be normalized on save. */ }
+  }
+  const connectionWillChange = input.mode === "switching"
+    ? !switching || switching.name !== plan.provider.displayName || switching.baseUrl !== plan.provider.baseUrl
+      || switching.supportsWebsockets !== plan.provider.supportsWebsockets || switching.apiKey !== plan.apiKey
+    : !privateCredential || plan.sourceState.existingApiKey !== plan.apiKey
+      || !areCodexUserConfigEditsApplied(config, plan.edits);
+  plan.willChange = connectionWillChange || metadataWillChange || plan.effects.removesTopLevelBaseUrl
+    || plan.effects.convertsSwitchingProfile || plan.effects.consumesBackupCandidate;
   return { saveInput, plan };
+}
+
+function sameUpstreamMetadata(content, upstreamWireApi) {
+  try { return isDeepStrictEqual(JSON.parse(content), { schemaVersion: 1, upstreamWireApi }); }
+  catch { return false; }
 }
 
 /** Model-only edits resolve connection settings again, never accept them from a stale form. */
@@ -291,7 +314,7 @@ function assertCompleteSaveScope(input) {
 }
 
 function savePlanRevision(plan) {
-  // Credential version IDs are freshly allocated per plan, not source revisions.
+  // Newly allocated credential version IDs are write artifacts, not source revisions.
   // Bind the effective secret with a process-local HMAC, never a reusable key hash.
   return createHmac("sha256", probeConnectionSecret).update(JSON.stringify({
     provider: plan.provider, apiKey: plan.apiKey, expectedVersion: plan.expectedVersion,
@@ -304,6 +327,13 @@ function savePlanRevision(plan) {
 async function applySavePlan(input, plan, options) {
   if (plan.willChange === false) {
     return { action: "unchanged", provider: plan.provider, activation: "none", effects: plan.effects, warnings: [] };
+  }
+  if (plan.connectionOnly && plan.provider.mode === "exclusive") {
+    // Allocate an immutable credential version only after revision and change checks.
+    const environmentKey = customPrimaryProviderCredentialEnvironmentKey(plan.provider.id);
+    plan.credential = { providerId: plan.provider.id, baseUrl: plan.provider.baseUrl, apiKey: plan.apiKey, environmentKey };
+    plan.edits = plan.edits.map(edit => edit.keyPath === `model_providers.${plan.provider.id}.env_key`
+      ? { ...edit, value: environmentKey } : edit);
   }
   if (plan.models === undefined || plan.connectionOnly || plan.modelOnly && !plan.catalogWillChange) {
     const environment = options.environment ?? process.env;
@@ -703,8 +733,15 @@ async function buildSavePlan(input, options, { requireConfirmation, connectionOn
   const currentBaseUrl = optionalString(existing.base_url);
   const credential = record(input.credential);
   const sameOrigin = currentBaseUrl !== undefined && sameUrlOrigin(currentBaseUrl, baseUrl);
-  const currentApiKey = credential.action === "preserve" && sameOrigin
-    ? readCustomPrimaryProviderApiKey(providerId, existing, environment) : undefined;
+  let currentApiKey;
+  if (sameOrigin && (credential.action === "preserve" || connectionOnly && credential.action === "replace")) {
+    try { currentApiKey = readCustomPrimaryProviderApiKey(providerId, existing, environment); }
+    catch (error) {
+      // Explicit replacement can repair an unreadable previous credential.
+      if (credential.action === "preserve") throw error;
+    }
+  }
+  if (connectionOnly) sourceState.existingApiKey = currentApiKey;
   const canPreserveApiKey = currentApiKey !== undefined
     && currentBaseUrl !== undefined
     && sameUrlOrigin(currentBaseUrl, baseUrl);
@@ -737,7 +774,9 @@ async function buildSavePlan(input, options, { requireConfirmation, connectionOn
     name: displayName,
     baseUrl,
     auth: "env_key",
-    envKey: customPrimaryProviderCredentialEnvironmentKey(providerId),
+    envKey: connectionOnly ? typeof existing.env_key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(existing.env_key)
+      ? existing.env_key : customPrimaryProviderCredentialEnvironmentKey(providerId, "0".repeat(32))
+      : customPrimaryProviderCredentialEnvironmentKey(providerId),
     supportsWebsockets: input.supportsWebsockets,
   });
   if (mode === "exclusive") {
@@ -775,7 +814,7 @@ async function buildSavePlan(input, options, { requireConfirmation, connectionOn
     reasoningEffort,
     catalogRevision: previousCatalog?.revision,
     apiKey,
-    credential: mode === "exclusive" ? { providerId, baseUrl, apiKey, environmentKey: providerBlock.env_key } : undefined,
+    credential: mode === "exclusive" && !connectionOnly ? { providerId, baseUrl, apiKey, environmentKey: providerBlock.env_key } : undefined,
     expectedVersion: snapshot.version,
     switchingProvider,
     registeredProviderIds: switchingProviders.map(({ id }) => id),

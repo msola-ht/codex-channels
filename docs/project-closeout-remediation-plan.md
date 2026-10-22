@@ -224,7 +224,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 最终独立复核：第二个 Astra 已读取底层修订、飞书授权与刷新、微信 Setup/Bot/回复上下文、Doctor 关联链，确认本次修订无剩余提交阻断。它是第一次 B03/B05 全链审查之后的定向补充，不重复宣称全量复审。主代理核对全部报告和最终差异；R07/R08/R12/R16/R21/R41 标为已修复待补证，R43 文档已关闭，其他包继续开放。
 - 本地提交：`3b8e8b8e30d1634e60618d9615a9fde90358550e`。正常 Hook 对最终包含上层补偿修订的源码重新执行类型/版本/模块边界、变更 Lint、文档与构建，全部通过，总计 14.2 秒；提交后工作区 clean，没有推送。
 
-### 第三批子批次：B06（独立复审通过，待本地提交）
+### 第三批子批次：B06（已提交 `d74d7663`）
 
 - 输入为 `3b8e8b8e`，仅处理 R04 配置非法类型、R06 默认模型保存结果呈现和 R30 终端标识总长；不与 B07 连接事务或 B08 事件锁混写。
 - 关联边界：共享管理 writer 同时供 CLI 和 WebUI 预览/执行使用；身份仍是成组替换，代理批量省略字段保持原值，默认模型的 value 必须显式提供。默认模型向导的实际入口是 Config/Init，WebUI 已保留 unknown/overridden，不改变其 API。终端可保存候选与用于 UA 的上游探测值保持区分。
@@ -236,3 +236,18 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - R06 真实向导及管理层观察：`runCodexUserSettingsSetup → defaults → load/update` 仅在既有 createClient 边界注入。unknown 返回 updated/unknown/revision:null/ok/activationResult:null，overridden 返回 updated/confirmed/okOverridden/null，均无“未写入”提示；真正 no-op 零写且保留 none，正常保存 next-thread，取消零写，所有连接关闭。这是生产向导的结果呈现与管理层路径观察，真实 App Server 的异常返回尚未观测。
 - R30 实际入口：13/64 字符候选通过，65 字符为 null、UA 原值保留；安装所用 apply 函数长候选不写、短候选保存 ShortTerm/1.2、已有身份跳过且字节不变。CLI 身份菜单长候选预填空、短候选正确，取消不写。首次隔离配置遗漏必需 codex 表而失败，补齐输入后完成，不作为产品缺陷。未安装或激活真实服务。
 - 独立 Astra/high 已完成本批源码及关联消费审查，无剩余提交阻断；覆盖 CLI/Config/Init、WebUI、共享 writer/声明、结果转交、终端安装记录与 App Server 环境消费。主代理已核对完整报告及实际差异。类型/版本/模块边界、局部 ESLint、84 个 Markdown 文档和差异空白检查均通过；本地提交继续执行正常 Hook。R04/R06/R30 保留已修复待补证，未把隔离 HTTP 或注入端口等同于真实 TTY/浏览器、上游异常或各 OS 服务安装。
+- 本地提交：`d74d7663320ea12606b762d13a157985376415d4`。正常 Hook 的类型/版本/模块边界、变更 Lint、文档及构建全部通过，总计 9.87 秒；提交后工作区 clean，没有推送。
+
+### 第四批子批次：B07（独立复审通过，待本地提交）
+
+- 输入为 `d74d7663`，仅处理 R10 自定义 Provider 连接原值保存。连接计划在完成模型默认值保护后计算真实变化，固定凭据版本仅为真实修改分配；CLI 与 WebUI 复用判断，并在管理锁内重新读取和核对预览 revision 后才返回 unchanged。
+- 必须保留的真实副作用：模式转换、备份候选消费、顶层 URL 移除、认证表示规范化、Origin 或 URL 变化、协议 metadata 删除均参与变化判断。显式 replace 若旧凭据不可读取仍可修复；不能为了证明同值而强制读取旧凭据。连接保存不重写模型、独立思考默认值或搜索设置。
+- 数据处理与验收：无变化不重写主配置/Profile/注册表/目录/metadata，不创建凭据版本或覆盖恢复快照；保留管理锁和 WebUI 审计，零写入只指这些业务材料，不绕过互斥或审计。真实写入沿用既有不可变凭据、备份及未知结果保留语义，不新增迁移或自动恢复。
+- 实际 HTTP 观察：任务自有 switching/exclusive 两套目录分别通过生产 WebUI GET 读取、POST preview 和带确认令牌的 POST apply，均为 200；预览 willChange:false/activation:none，结果 unchanged/none/auditStatus:recorded。排除正常审计/锁后的业务文件摘要集一致，RPC 写入次数为零。使用实际共享连接管理、资源读取、确认、锁及审计，只在既有工厂边界提供隔离配置 Client，没有连接真实 App Server 或模型上游。两个 HTTP 服务均关闭，并等待通知/后台资源退出。
+- 独立 Astra/high 已核对连接 final plan、固定最终 edits、切换 writer 字段、协议 metadata、三类副作用、延后凭据分配、锁内 revision 复核、原完整/modelOnly 分支、CLI 外层及 WebUI 消费，无剩余源码提交阻断。该代理未运行保存或静态检查，行为证据由实施者和主代理取得，仍需收齐本批全部结果后提交。
+- 两模式隔离保存：preserve 与同 Key replace 均 willChange:false→unchanged/none，业务摘要集不变，凭据版本分别 0→0 / 1→1，RPC 写入零次。完整 CLI 向导原值确认返回 none，无“将写入／配置已写入／写入并启用”文案。名称真实修改后 runtime 读回 B07 changed，所选 active-model、独立 effort high、搜索 cached 和目录字节保留；旧预览均 stale-preview。
+- Hack：名称、URL 路径、WS、实际 Key 和跨 Origin replace 均判真实变化；跨 Origin preserve 拒绝 api-key-replacement-required，夹带模型字段拒绝 invalid-operation。Chat metadata 只改 JSON 排版仍 unchanged 且原字节保留；Responses 已有 metadata 判真实变化并删除。固定模式认证、重试、目录路径、明文 Key、env_key 规范化及顶层 URL 移除均判变化。损坏旧凭据 preserve 拒绝，显式 replace 实际保存并由 runtime 读回对应 Key。
+- 未知结果观察：注入写后响应丢失、随后回读可确认时返回 updated；写后全部回读失败时返回 save-unconfirmed，实际新配置、恢复备份与 5 个凭据版本均保留，没有重放写入。均为隔离配置 Client 的故障边界，不宣称真实上游故障已观测。
+- 跨入口与转换：两模式实际 CLI 向导保存 CLI saved B07 后，生产 WebUI snapshot 读取同名与 active-model；CLI 提示 restart-all，switching 写 Profile（RPC 零次）、exclusive RPC 一次。取消后选择返回，业务摘要不变且写零次。switching→exclusive 实际 updated，主 Provider 为 cp-b07、切换列表清空；备份候选→switching 实际 updated，候选被消费、切换列表含 cp-b07。连接关闭 9/9。
+- 观察输入纠正：首轮隔离模型不支持所设 high 被既有 loader 拒绝，修正材料后重做；一次取消提示注入始终重新选择 connection 导致正常菜单循环，已 Ctrl-C 结束该自有命令，再按 cancel→back 完成无写入观察。不作为产品故障，未修改产品以适配错误观察输入。全部任务临时目录（含 HTTP 审计）、连接与作业已清理。
+- 主代理已收齐并核对实现及独立审查完整报告。现有类型/版本/模块边界、局部 ESLint、文档与差异空白检查通过。真实 App Server RPC、TTY/浏览器和三系统私有适配尚未实机观察，恢复入口对后来 revision 的保护未另行执行；R10 保留已修复待补证，不把接口注入或静态状态当作这些边界的验收。
