@@ -71,7 +71,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   `traffic_label`、`traffic_session`、`traffic_interaction` 全部为空或共同定位一次转储调用。
   可空 `request_purpose` 保存明确的 `autoApprovalReview` 用途，`reviewer_thread_id` / `reviewer_turn_id` 保存原始审查身份；父任务沿用 `thread_id` / `turn_id`，两者必须同时存在才归属。用途与原始身份独立于转储保存，请求筛选和导出复用相同字段，历史缺失不推断为普通请求，不关联或推断单次审批结果。
   可空 `total_duration_ms` 保存提交发送至首次模型终态或结束/失败的单调时钟耗时，支持明细排序与导出，不聚合为 Turn 耗时。
-  可空 `request_bytes` 保存发往模型上游的请求正文或 WebSocket 请求帧字节合计；旧 v31 记录经显式离线工具保留后保持 null，不从 Token、转储或历史耗时推算。
+  可空 `request_bytes` 保存发往模型上游的请求正文或 WebSocket 请求帧字节合计；旧 v31 记录经更新器停服备份升级后保持 null，不从 Token、转储或历史耗时推算。
   可空 `quota_observed_at_ms` 保存额度快照的本机采集时间，未观测时为空。
   数据库使用严格 Schema v32、Unix `0600` / Windows 当前 SID 私有文件权限，
   可空 `request_service_tier` 独立保留出站请求层级。
@@ -157,8 +157,10 @@ WebUI 还通过同一只读 Store 的 `daily()` / `hourly()` 按系统本地日�
 热力图固定展示含今天的最近 90 天，趋势图跟随控制台汇总范围；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
 HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v32，不在启动或查询时自动迁移。
-保留 v31 历史时，只能停止所有写入方后使用仓库中的 `database-upgrades/metrics-to-v32.mjs`
-建立私有备份并执行一次离线转换；历史记录新增的请求发送大小为 null。
+保留 v31 历史时，`codexc update` 在只读检查后停止原运行服务，调用包内
+`scripts/metrics-database-upgrade.mjs` 建立私有完整备份并执行单事务转换，再完成程序切换与服务恢复；
+`database-upgrades/metrics-to-v32.mjs` 作为显式离线入口复用同一实现。
+其他写入方必须先退出；未知结构拒绝，历史记录新增的请求发送大小为 null。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
 `warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。
 

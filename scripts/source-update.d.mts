@@ -1,3 +1,5 @@
+import type { UpdateDatabaseInspection } from "./local-installation.mjs";
+
 export interface SourceUpdateResult {
   changed: boolean;
   commit?: string;
@@ -5,6 +7,7 @@ export interface SourceUpdateResult {
   previousVersion?: string;
   version?: string;
   backupPath?: string;
+  metricsBackupPath?: string;
 }
 
 export type SourceUpdateStage =
@@ -18,6 +21,7 @@ export type SourceUpdateStage =
   | "validate-codex-contract"
   | "install-codex-cli"
   | "stop-services"
+  | "upgrade-databases"
   | "switch-source"
   | "refresh-command"
   | "configure-codex-daemon"
@@ -46,6 +50,10 @@ export interface SourceUpdateFailure {
     services: "not-needed" | "restored" | "failed" | "unknown" | "stopped";
     source: "unchanged" | "restore-failed" | "switched" | "switched-backup-retained";
     backupPath?: string;
+    metricsBackupPath?: string;
+    candidatePath?: string;
+    /** Canonical managed checkout required before installing a retained candidate. */
+    checkoutPath?: string;
   };
   recommendation: string;
 }
@@ -100,7 +108,8 @@ export interface SourceUpdateOptions {
   inspectStaged?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
-  ) => Promise<{ services: { installed: boolean } }>;
+    forUpdate?: boolean,
+  ) => Promise<{ config: { configPath: string }; services: { installed: boolean }; databases: UpdateDatabaseInspection }>;
   stopServices?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,

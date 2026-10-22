@@ -8,7 +8,8 @@ import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { serviceCommandTarget, serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { loadConfigDocument } from "../dist/config/index.js";
 import { assertSessionDisplayCacheSchema, sessionDisplayCacheSchemaVersion } from "../dist/storage/index.js";
-import { validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
+import { modelRequestMetricsSchemaVersion } from "../dist/observability/index.js";
+import { inspectMetricsDatabase, validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
 import { validateStateDatabaseStructure } from "./state-database.mjs";
 import { requireUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 
@@ -31,6 +32,19 @@ export function inspectDatabases(environment = process.env) {
     throw new Error("会话展示缓存版本不兼容；请停止服务并备份后重建缓存");
   }
   return { state, metrics, sessionDisplayCache };
+}
+
+// Update planning is read-only. Runtime and service restoration continue to use
+// inspectDatabases, which accepts only the current schema.
+export async function inspectDatabasesForUpdate(environment = process.env) {
+  const metrics = inspectMetricsDatabase(environment);
+  if (!metrics.exists || metrics.schemaVersion !== 31 || modelRequestMetricsSchemaVersion !== 32) return inspectDatabases(environment);
+  const state = validateStateDatabaseStructure(environment);
+  const sessionDisplayCache = inspectSessionDisplayCache(environment);
+  if (!sessionDisplayCache.compatible) throw new Error("会话展示缓存版本不兼容；请停止服务并备份后重建缓存");
+  const { inspectMetricsUpgrade } = await import("./metrics-database-upgrade.mjs");
+  const metricsUpgrade = await inspectMetricsUpgrade(metrics.databasePath);
+  return { state, metrics, sessionDisplayCache, metricsUpgrade };
 }
 
 export function inspectSessionDisplayCache(environment = process.env) {

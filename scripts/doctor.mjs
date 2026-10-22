@@ -82,8 +82,8 @@ const requiredAppServerVersion = codexPackageVersion(protocolMetadata.codexCli);
 record("Codex Connect", true, `${packageMetadata.name}@${packageMetadata.version}`);
 record(
   "Node.js",
-  versionAtLeast(process.versions.node, "22.22.0"),
-  `${process.version}（要求 >=22.22.0）`,
+  versionAtLeast(process.versions.node, "22.23.4"),
+  `${process.version}（要求 >=22.23.4）`,
 );
 if (process.platform === "linux") {
   const bubblewrap = resolveOptionalExecutable("bwrap");

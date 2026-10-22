@@ -27,6 +27,7 @@
     "provider-model-catalog.json",
     "bin/",
     "dist/",
+    "database-upgrades/metrics-to-v32.mjs",
     "src/codex-protocol/version.json",
     "src/codex-protocol/public-cli-contract.json",
     "launchd/",
@@ -135,6 +136,8 @@
     "scripts/reset-credit-command.mjs",
     "scripts/metrics-config-menu.mjs",
     "scripts/metrics-database-access.mjs",
+    "scripts/metrics-database-upgrade.mjs",
+    "scripts/metrics-schema-v31.mjs",
     "scripts/metrics-database.mjs",
     "scripts/metrics-export-format.mjs",
     "scripts/metrics-export-limits.mjs",
@@ -236,7 +239,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=22.22.0"
+    "node": ">=22.23.4"
   },
   "scripts": {
     "prebuild": "node scripts/clean-dist.mjs",

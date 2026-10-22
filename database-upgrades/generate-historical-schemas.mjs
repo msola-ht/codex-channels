@@ -20,6 +20,7 @@ for (const [version, commit] of baselines) {
     `const modelRequestMetricsSchemaVersion = ${version};`), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
   }).outputText;
-  writeFileSync(new URL(`./schema-v${version}.mjs`, import.meta.url),
+  const destination = version === 31 ? '../scripts/metrics-schema-v31.mjs' : `./schema-v${version}.mjs`;
+  writeFileSync(new URL(destination, import.meta.url),
     `// Generated from ${commit}:src/observability/sqlite-request-metrics-schema.ts.\n// Regenerate with node database-upgrades/generate-historical-schemas.mjs.\n${output}`);
 }

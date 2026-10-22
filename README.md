@@ -1,7 +1,7 @@
 # Codex Connect Gateway
 
 [![CI](https://github.com/msola-ht/codex-channels/actions/workflows/ci.yml/badge.svg)](https://github.com/msola-ht/codex-channels/actions/workflows/ci.yml)
-![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.22.0-339933?logo=nodedotjs&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.23.4-339933?logo=nodedotjs&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20Preview-555555)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -13,7 +13,7 @@
 
 ## 快速开始
 
-安装 Node.js 22.22.0+、Git 和 npm 后，从官方 `main` 安装：
+安装 Node.js 22.23.4+、Git 和 npm 后，从官方 `main` 安装：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
@@ -61,7 +61,7 @@ codexc relay status          # 查询可选模型 API 转发进程
 codexc traffic               # 查看模型请求与响应转储
 codexc reset-credit list     # 查询 OpenAI 可用重置券；use 交互确认使用
 codexc webui                 # 启动本地指标与设置 WebUI
-codexc update                # 更新受管源码、同步配套 CLI 并校验当前数据库
+codexc update                # 更新受管源码与配套 CLI，按需备份升级已知指标库
 codexc uninstall             # 自动识别并卸载当前程序，保留用户数据
 codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc remote -p ds-main     # 用已配置的完整 Provider ID 连接隔离实例
