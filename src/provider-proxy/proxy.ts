@@ -8,11 +8,12 @@ import {
   type Agent,
   type IncomingHttpHeaders,
   type IncomingMessage,
+  type ClientRequest,
   type Server,
   type ServerResponse,
 } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { Transform, type Duplex } from "node:stream";
+import { Writable, type Duplex } from "node:stream";
 import { once } from "node:events";
 import { StringDecoder } from "node:string_decoder";
 
@@ -611,6 +612,7 @@ export class ProviderProxy {
     if (this.localChatBridgeToken !== undefined) upstreamHeaders[chatBridgeAuthorizationHeader] = this.localChatBridgeToken;
     // 归一化会改变正文长度；按实际提交字节重写，避免沿用客户端长度造成上游等待或截断。
     if (upstreamBody !== undefined) upstreamHeaders["content-length"] = String(upstreamBody.length);
+    let streamingWriter: Writable | undefined;
     let closingRejectedUpload = false;
     let headersTimer: NodeJS.Timeout | undefined;
     let bodyTimer: NodeJS.Timeout | undefined;
@@ -666,9 +668,13 @@ export class ProviderProxy {
         upstreamResponse.statusCode ?? null,
         upstreamResponse.headers,
       );
-      if (!request.complete && (upstreamResponse.statusCode ?? 0) >= 400) {
+      if ((upstreamResponse.statusCode ?? 0) >= 400
+        && (!request.complete || (streamingWriter !== undefined && !streamingWriter.writableFinished))) {
         // 上游提前拒绝上传：保留错误响应，响应发送完成后关闭本跳连接。
-        request.unpipe(upstream);
+        if (streamingWriter) {
+          request.unpipe(streamingWriter);
+          streamingWriter.destroy();
+        }
         request.pause();
         clearTimeout(uploadTimer);
         response.setHeader("connection", "close");
@@ -804,7 +810,6 @@ export class ProviderProxy {
       uploadTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("upload")), modelRequestPolicy.preparationTimeoutMs);
       request.once("end", () => clearTimeout(uploadTimer));
     }
-    let streamingLimiter: Transform | undefined;
     if (upstreamBody === undefined) {
       const declared = Number(request.headers["content-length"]);
       if (Number.isFinite(declared) && declared > maximumModelRequestBytes) {
@@ -828,14 +833,19 @@ export class ProviderProxy {
         }
         return;
       }
-      const limiter = createModelRequestBodyLimiter();
-      streamingLimiter = limiter;
-      limiter.once("error", (error) => {
+      const writer = createModelRequestBodyWriter(upstream, this.chatDiagnostics === undefined
+        ? bytes => { metrics.requestBytes = (metrics.requestBytes ?? 0) + bytes; }
+        : undefined);
+      streamingWriter = writer;
+      writer.once("error", (error) => {
         if (closingRejectedUpload || deliveryFailed || signal.aborted) return;
+        if (!(error instanceof ChatBodyTooLargeError)) {
+          upstream.destroy(error);
+          return;
+        }
         clearDeadlines();
         closingRejectedUpload = true;
-        request.unpipe(limiter);
-        limiter.unpipe(upstream);
+        request.unpipe(writer);
         upstream.destroy();
         void drainRejectedRequest(request).then(() => {
           const failedAtMonotonicMs = performance.now();
@@ -859,10 +869,11 @@ export class ProviderProxy {
     }
     upstream.flushHeaders();
     if (upstreamBody === undefined) {
-      if (streamingLimiter) request.pipe(streamingLimiter).pipe(upstream);
-      else request.pipe(upstream);
+      if (this.chatDiagnostics === undefined) metrics.requestBytes = 0;
+      request.pipe(streamingWriter!);
     } else {
       upstream.end(upstreamBody);
+      if (this.chatDiagnostics === undefined) metrics.requestBytes = upstreamBody.length;
     }
   }
 
@@ -1105,7 +1116,10 @@ export class ProviderProxy {
         const submittedAt = performance.now();
         timing?.submitted(submittedAt);
         if (metrics) observeRequestSubmitted(metrics, submittedAt);
-        await sendProxyWebSocket(upstream, data, isBinary, deliverySignal, modelRequestPolicy.deliveryTimeoutMs);
+        await sendProxyWebSocket(upstream, data, isBinary, deliverySignal, modelRequestPolicy.deliveryTimeoutMs,
+          undefined, "delivery", () => {
+            if (metrics) metrics.requestBytes = (metrics.requestBytes ?? 0) + bytes;
+          });
       });
       sending = waitForProxyOperation(next, deliverySignal, modelRequestPolicy.deliveryTimeoutMs, "delivery")
         .catch(error => failForwarding(error, "upstream_delivery")).finally(() => {
@@ -1617,18 +1631,33 @@ function applySamplingDefaults(value: unknown, sampling?: SamplingParameters): {
   return { body: { ...sampling, ...source }, changed: true };
 }
 
-function createModelRequestBodyLimiter(): Transform {
+function createModelRequestBodyWriter(
+  upstream: ClientRequest,
+  submitted?: (bytes: number) => void,
+): Writable {
   let bytes = 0;
-  return new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
+  const writer = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
       bytes += chunk.length;
       if (bytes > maximumModelRequestBytes) {
         callback(new ChatBodyTooLargeError("Model request exceeds size limit"));
         return;
       }
-      callback(null, chunk);
+      if (upstream.destroyed || upstream.writableEnded) {
+        callback(new Error("模型请求出站连接已关闭"));
+        return;
+      }
+      // Count only chunks submitted to ClientRequest, not this writer's queue.
+      // Its write callback bounds buffering without delaying submission accounting.
+      upstream.write(chunk, callback);
+      submitted?.(chunk.length);
     },
+    final(callback) { upstream.end(callback); },
   });
+  const closed = (): void => { writer.destroy(); };
+  upstream.once("close", closed);
+  writer.once("close", () => upstream.off("close", closed));
+  return writer;
 }
 
 function writeUpstreamHead(response: ServerResponse, upstream: IncomingMessage): void {

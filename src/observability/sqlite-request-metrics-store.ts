@@ -378,6 +378,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       !Number.isSafeInteger(sample.quotaObservedAtMs) || sample.quotaObservedAtMs < 0
       || (sample.weeklyQuota == null && !sample.quotaWindows?.length)
     )) throw new Error("额度快照采集时间无效");
+    if (sample.requestBytes != null
+      && (!Number.isSafeInteger(sample.requestBytes) || sample.requestBytes < 0)) {
+      throw new Error("请求发送大小无效");
+    }
     if (!validRequestTiming(sample)) throw new Error("请求生成计时无效");
     const recordedAtMs = sample.recordedAtMs ?? Date.now();
     this.insert!.run(
@@ -420,6 +424,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       sample.traffic?.session ?? null,
       sample.traffic?.interaction ?? null,
       sample.totalDurationMs ?? null,
+      sample.requestBytes ?? null,
       sample.requestServiceTier ?? null,
       sample.source ?? "owned", sample.callerId ?? null, sample.keyId ?? null,
       sample.credentialGeneration ?? null, sample.relayRequestId ?? null, sample.deliveryStatus ?? null,

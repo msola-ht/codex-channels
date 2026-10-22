@@ -70,6 +70,8 @@ export interface ModelRequestMetricSample {
   responseTimeMs?: number | null;
   generationTiming?: GenerationTiming | null;
   totalDurationMs?: number | null;
+  /** 本次逻辑请求实际发往模型上游的请求正文或 WebSocket 请求帧字节合计；未提交时为 null。 */
+  requestBytes?: number | null;
   requestModel?: string | null;
   responseModel?: string | null;
   /** 本地转储定位符；缺失不按时间或 Thread/Turn 推断。 */
@@ -442,7 +444,8 @@ export type ModelRequestMetricsSortKey =
   | "error"
   | "inputTokens"
   | "outputTokens"
-  | "reasoningOutputTokens";
+  | "reasoningOutputTokens"
+  | "requestBytes";
 
 export interface StoredModelRequestMetricsPage {
   startAtMs: number;

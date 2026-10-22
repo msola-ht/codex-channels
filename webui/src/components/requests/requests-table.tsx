@@ -1,5 +1,5 @@
 import * as React from "react"
-import { formatGenerationSpeed } from "@/lib/format"
+import { formatBytes, formatGenerationSpeed } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -111,6 +111,7 @@ export function RequestsTable({
     firstContent: t("requests.firstColumn"),
     generationSpeed: t("requests.speedColumn"),
     duration: t("requests.durationColumn"),
+    requestBytes: t("requests.requestBytesColumn"),
     traffic: t("requests.detailColumn"),
   }
 
@@ -220,6 +221,18 @@ export function RequestsTable({
         <SortableHeader column={column} hint={t("metrics.input")}>{t("metrics.inputColumn")}</SortableHeader>
       ),
       cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} />,
+    },
+    {
+      id: "requestBytes",
+      accessorFn: (record) => record.requestBytes ?? Number.NEGATIVE_INFINITY,
+      header: ({ column }) => (
+        <SortableHeader column={column} hint={t("requests.requestBytesHint")}>{t("requests.requestBytesColumn")}</SortableHeader>
+      ),
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap tabular-nums">
+          {formatBytes(row.original.requestBytes)}
+        </span>
+      ),
     },
     {
       id: "cacheHitRate",
@@ -338,13 +351,13 @@ export function RequestsTable({
     },
   ], [t, language, openRequest])
 
-  const order = ["time", "provider", "requestPurpose", "model", "reasoningEffort", "status", "input", "cacheHitRate", "output", "reasoningOutput", "firstContent", "generationSpeed", "duration", "source", "caller", "delivery", "ua", "operation", "http", "error", "traffic"]
+  const order = ["time", "provider", "requestPurpose", "model", "reasoningEffort", "status", "requestBytes", "input", "cacheHitRate", "output", "reasoningOutput", "firstContent", "generationSpeed", "duration", "source", "caller", "delivery", "ua", "operation", "http", "error", "traffic"]
   const orderedColumns = [...columns].sort((a, b) => (order.includes(a.id!) ? order.indexOf(a.id!) : order.length) - (order.includes(b.id!) ? order.indexOf(b.id!) : order.length))
 
   return (
     <>
     <DataTable
-      numericColumnIds={["input", "cacheHitRate", "output", "firstContent", "generationSpeed", "duration", "http", "reasoningOutput"]}
+      numericColumnIds={["requestBytes", "input", "cacheHitRate", "output", "firstContent", "generationSpeed", "duration", "http", "reasoningOutput"]}
       loading={loading}
       title={t("requests.tableTitle")}
       description={() => t("requests.tableDescription", { total, count: records.length, page: pageNumber })}

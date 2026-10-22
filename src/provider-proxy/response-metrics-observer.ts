@@ -68,6 +68,8 @@ export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
   timingBasis?: "submitted";
   /** 提交发送至首个终态或结束/失败；单调时钟，不含发送前准备。 */
   totalDurationMs?: number;
+  /** 本次逻辑请求实际提交给模型上游的请求正文或 WebSocket 请求帧字节合计。 */
+  requestBytes?: number;
   requestModel?: string | null;
   responseModel?: string | null;
   /** 精确定位本次调用的 V2 转储；未开启转储时不提供。 */
@@ -112,6 +114,7 @@ export interface UpstreamTiming {
   responseTimeMs?: number;
   generationTiming?: GenerationTiming;
   totalDurationMs?: number;
+  requestBytes?: number;
 }
 
 /** Only the in-process Chat bridge can replace synthetic-event timing. */
@@ -122,6 +125,7 @@ export function observeChatTiming(metrics: MetricsState, timing: UpstreamTiming)
   if (timing.responseTimeMs !== undefined) metrics.responseTimeMs = timing.responseTimeMs;
   if (timing.generationTiming !== undefined && !blockedGeneration.has(metrics)) metrics.generationTiming = timing.generationTiming;
   if (timing.totalDurationMs !== undefined) metrics.totalDurationMs = timing.totalDurationMs;
+  if (timing.requestBytes !== undefined) metrics.requestBytes = timing.requestBytes;
 }
 
 export function createMetricsState(

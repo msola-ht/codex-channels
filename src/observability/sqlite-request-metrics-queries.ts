@@ -68,6 +68,7 @@ const pageSortSql = {
   outputTokens: "output_tokens",
   reasoningOutputTokens: "reasoning_output_tokens",
   totalDurationMs: "total_duration_ms",
+  requestBytes: "request_bytes",
 } as const;
 
 /** 只读查询共用 Store 的连接和生命周期，不持有事务、写入口或独立连接。 */

@@ -21,6 +21,7 @@ export interface RelayMetric extends DirectChatUsage, ModelRequestDiagnostics {
   requestStartedAtMs: number;
   responseCompletedAtMs: number;
   totalDurationMs: number;
+  requestBytes: number;
   firstTokenMs?: number;
   responseTimeMs?: number;
   generationTiming?: GenerationTiming;

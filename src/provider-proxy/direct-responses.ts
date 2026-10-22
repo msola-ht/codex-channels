@@ -63,7 +63,7 @@ interface DirectResponsesCall {
   diagnostics?(summary: ModelRequestDiagnostics): void;
   observer: DirectResponsesObserver;
   recheck(): void;
-  submitted(userAgent: string | null): void;
+  submitted(userAgent: string | null, requestBytes: number): void;
   headers(status: number): void;
   content(): void;
   emit(value: Record<string, unknown>, terminal: boolean, rawFrame?: string): Promise<void>;
@@ -82,7 +82,11 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
     await withDirectModelResponse({ body: call.request, path: "/responses", target: call.target, signal: call.signal,
       ...(call.clientHeaders ? { clientHeaders: call.clientHeaders } : {}), recheck: () => call.recheck(),
       transformed: operation => call.capture?.transformed?.(operation),
-      submitted: (ua, headers, path) => { call.observer.submitted(performance.now()); call.submitted(ua); call.capture?.submitted(call.request, headers, path); },
+      submitted: (ua, headers, path, requestBytes) => {
+        call.observer.submitted(performance.now());
+        call.submitted(ua, requestBytes);
+        call.capture?.submitted(call.request, headers, path);
+      },
     }, async incoming => {
       call.headers(incoming.statusCode ?? 502); call.capture?.head(incoming.statusCode ?? 502, incoming.headers);
       await validateDirectModelResponse(incoming, call.request.stream, {
