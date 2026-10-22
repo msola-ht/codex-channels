@@ -19,6 +19,15 @@ import {
 
 import type { MessageKey } from "@/lib/i18n/messages"
 
+export const providerPlatformNames = ["OpenAI", "OpenCode Go", "DeepSeek", "Cline Pass", "managed", "custom"] as const
+export function providerPlatform(value: string | null): string {
+  if (value === null) return "all"
+  return providerPlatformNames.some(platform => platform === value) ? value! : "invalid"
+}
+export function providerPlatformLabel(platform: string, t: (key: MessageKey) => string): string {
+  return platform === "invalid" ? t("providerDirectory.invalidPlatform") : platform === "all" ? t("modelManagement.allPlatforms") : platform === "custom" ? t("providerDirectory.custom") : platform === "managed" ? t("providerDirectory.managed") : platform
+}
+
 export interface NavItem {
   to: string
   labelKey: MessageKey

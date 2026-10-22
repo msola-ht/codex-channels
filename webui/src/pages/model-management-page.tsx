@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router"
+import { providerPlatform } from "@/lib/navigation"
 import { useApi } from "@/hooks/use-api"
 import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
 import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
@@ -67,6 +68,8 @@ export function ModelConfigurationPage() {
   const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedProvider = searchParams.get("provider")
+  const sourcePlatform = providerPlatform(searchParams.get("platform"))
+  const providerReturnSearch = sourcePlatform === "all" ? "" : `?${new URLSearchParams({ platform: searchParams.get("platform")! })}`
   const [codexEditorOpen, setCodexEditorOpen] = useState(false)
   const [providerEditing, setProviderEditing] = useState(false)
   const [groupsEditing, setGroupsEditing] = useState(false)
@@ -103,7 +106,7 @@ export function ModelConfigurationPage() {
         <Card>
           <CardHeader><CardTitle>{t("modelCatalog.title")}</CardTitle><CardDescription>{t("modelCatalog.unifiedHint")} {t("openAiModelCatalog.searchReadOnlyHint")} <Link className="underline underline-offset-4" to="/settings">{t("openAiModelCatalog.editGlobalSearch")}</Link></CardDescription></CardHeader>
           <CardContent className="flex flex-col gap-4">
-            {selectedProvider && <div className="flex flex-wrap items-center justify-between gap-2"><Badge variant="outline">{selectedProvider}</Badge><Button variant="outline" size="sm" onClick={() => setSearchParams({})}>{t("providerDirectory.allModels")}</Button></div>}
+            <div className="flex flex-wrap items-center justify-between gap-2"><Button variant="outline" size="sm" nativeButton={false} render={<Link to={`/models/providers${providerReturnSearch}`} />}>{t("providerDirectory.backToProviders")}</Button>{selectedProvider && <div className="flex min-w-0 flex-wrap items-center gap-2"><Badge variant="outline">{selectedProvider}</Badge><Button variant="outline" size="sm" onClick={() => setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete("provider"); return next })}>{t("providerDirectory.allModels")}</Button></div>}</div>
             {selectedProvider && selectedProvider !== "openai" && selectedCatalogIds.size === 0 && <SettingsEmpty>{t(providers.loading || localCatalogs.loading ? "common.loading" : localOnly && (localCatalogs.error !== null || localCatalogs.data === null) ? "modelCatalog.localUnavailable" : "providerDirectory.noCatalog")}</SettingsEmpty>}
             <ModelCatalogTable label={t("modelCatalog.title")} groups={[{ ...official, webSearchSettings: providers.settings?.webSearchSettings.filter(entry => entry.provider === "openai"), webSearchState: providers.loading ? "loading" as const : providers.error !== null ? "error" as const : undefined }, ...thirdParty].filter(group => !selectedProvider || group.id === "third-party-status" || (selectedProvider === "openai" ? group.id === "openai" : selectedCatalogIds.has(group.id)))} />
           </CardContent>

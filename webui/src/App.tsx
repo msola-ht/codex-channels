@@ -1,5 +1,5 @@
 import type { AccountRefreshAttempts } from "@/lib/account-refresh-state"
-import { navItems, navGroups, decodeThreadPath } from "@/lib/navigation"
+import { navItems, navGroups, decodeThreadPath, providerPlatform, providerPlatformLabel } from "@/lib/navigation"
 import { translateApiError } from "@/lib/i18n/translate"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
@@ -80,6 +80,14 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
   const { search } = useLocation()
   const { t } = useTranslation()
   const params = new URLSearchParams(search)
+  if (pathname === "/models/configuration" || pathname === "/models/providers") {
+    const scope = pathname === "/models/configuration" ? params.get("provider") || t("providerDirectory.allModelsLabel") : providerPlatformLabel(providerPlatform(params.get("platform")), t)
+    return <>
+      <BreadcrumbItem className="hidden md:block"><span>{t("modelManagement.title")}</span></BreadcrumbItem>
+      <BreadcrumbSeparator className="hidden md:block" />
+      <BreadcrumbItem className="min-w-0"><BreadcrumbPage className="min-w-0"><TruncatedText text={t("providerDirectory.scopedPage", { page: pageTitle(pathname, t), scope })} /></BreadcrumbPage></BreadcrumbItem>
+    </>
+  }
   if (pathname === "/traffic" && params.has("id")) {
     for (const key of ["id", "exchangeLabel", "exchangeSession", "traceOffset"]) params.delete(key)
     return <>

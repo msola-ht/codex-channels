@@ -911,6 +911,10 @@ const zh = {
     terminalHint: "OpenAI 登录和 Codex 兼容账户在终端配置，完成后请刷新此页。",
     remove: "移除本地配置",
     allModels: "查看全部模型",
+    allModelsLabel: "全部模型",
+    scopedPage: "{page}（{scope}）",
+    backToProviders: "返回提供商",
+    invalidPlatform: "平台参数无效，请重新选择",
     noCatalog: "未找到此提供商的模型目录，可查看全部模型。",
   },
   modelManagement: {
@@ -2742,6 +2746,10 @@ const en: Messages = {
     terminalHint: "Configure OpenAI sign-in and Codex-compatible accounts in the terminal, then refresh this page.",
     remove: "Remove local configuration",
     allModels: "View all models",
+    allModelsLabel: "All models",
+    scopedPage: "{page} ({scope})",
+    backToProviders: "Back to providers",
+    invalidPlatform: "Invalid platform; select another",
     noCatalog: "No model catalog was found for this provider. You can view all models.",
   },
   modelManagement: {

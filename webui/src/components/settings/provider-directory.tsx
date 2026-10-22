@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { useNavigate } from "react-router"
+import { useNavigate, useSearchParams } from "react-router"
+import { providerPlatform, providerPlatformLabel, providerPlatformNames } from "@/lib/navigation"
 import { useTranslation } from "@/hooks/use-translation"
 import { DataTable, TruncatedText, type DataTableColumn } from "@/components/metrics/data-table"
 import { Badge } from "@/components/ui/badge"
@@ -28,7 +29,7 @@ export function ProviderDirectory({ providers, accounts, management, locked, fre
 }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [filter, setFilter] = useState("all")
+  const [searchParams, setSearchParams] = useSearchParams()
   const [terminalOpen, setTerminalOpen] = useState(false)
   const [searchProvider, setSearchProvider] = useState<string | null>(null)
   const trigger = useRef<HTMLButtonElement | null>(null)
@@ -54,9 +55,9 @@ export function ProviderDirectory({ providers, accounts, management, locked, fre
     if (rows.some(row => row.id === candidate.id)) continue
     rows.push({ id: candidate.id, name: candidate.displayName, type: "custom", mode: "mode" in candidate ? candidate.mode : "active" in candidate && candidate.active ? "exclusive" : null, model: "model" in candidate ? candidate.model : settings?.primary.id === candidate.id ? settings.defaults.model ?? "" : "", state: t("state" in candidate && candidate.state === "backup" ? "managementUi.backup" : "managementUi.configured"), custom: true, address: candidate.baseUrl })
   }
-  const typeLabel = (type: string) => type === "custom" ? t("providerDirectory.custom") : type === "managed" ? t("providerDirectory.managed") : type
-  const types = ["all", ...new Set(rows.map(row => row.type))]
-  const selectedType = types.includes(filter) ? filter : "all"
+  const typeLabel = (type: string) => providerPlatformLabel(type, t)
+  const selectedType = providerPlatform(searchParams.get("platform"))
+  const types = [...(selectedType === "invalid" ? ["invalid"] : []), "all", ...providerPlatformNames]
   const hasExclusive = settings?.managedProviders.some(provider => provider.mode === "exclusive") === true
   const accountsFresh = accounts?.fresh ?? false
   const editorOpen = providers?.editing === true || accounts?.editing === true || dialogOpen
@@ -67,7 +68,7 @@ export function ProviderDirectory({ providers, accounts, management, locked, fre
       <DropdownMenuContent align="end" className="min-w-48" finalFocus={editorOpen ? false : undefined}><DropdownMenuGroup>
         {row.account && <DropdownMenuItem disabled={accountLocked} onClick={() => accounts?.open(row.account!.platform, row.account)}>{t("modelManagement.edit")}</DropdownMenuItem>}
         {row.custom && <DropdownMenuItem disabled={providerLocked} onClick={() => providers?.edit(row.id)}>{t("modelManagement.edit")}</DropdownMenuItem>}
-        <DropdownMenuItem onClick={() => navigate(`/models/configuration?provider=${encodeURIComponent(row.id)}`)}>{t("modelManagement.models")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { const params = new URLSearchParams({ provider: row.id }); if (selectedType !== "all") params.set("platform", selectedType); navigate(`/models/configuration?${params}`) }}>{t("modelManagement.models")}</DropdownMenuItem>
         {settings?.webSearchSettings.some(entry => entry.source === "provider" && entry.provider === row.id) && <DropdownMenuItem disabled={providerLocked} onClick={() => { management.clearError(); setSearchProvider(row.id) }}>{t("providerWebSearch.title")}</DropdownMenuItem>}
         {row.account && <DropdownMenuItem disabled={accountLocked || row.account.default} onClick={() => accounts?.action(row.account!, "default")}>{t("providerDirectory.setDefaultAccount")}</DropdownMenuItem>}
         {(row.custom || row.id === "openai") && <DropdownMenuItem disabled={providerLocked || hasExclusive || settings?.primary.id === row.id} onClick={() => providers?.switchProvider(row.id)}>{t(hasExclusive ? "providerDirectory.fixedBlocksSwitch" : "providerDirectory.switchPrimary")}</DropdownMenuItem>}
@@ -85,8 +86,8 @@ export function ProviderDirectory({ providers, accounts, management, locked, fre
   ], [t])
   return <>
     <DataTable layout="content" title={t("modelManagement.providers")} description={() => t("providerDirectory.hint")} columns={columns} data={rows.filter(row => selectedType === "all" || row.type === selectedType)} getRowId={row => row.id} storageKey="codex-webui:provider-directory-v1" pagination={{ mode: "client", defaultPageSize: 10, defaultSorting: [] }} toolbar={<div className="flex flex-wrap items-center gap-2">
-      <Select items={types.map(type => ({ value: type, label: type === "all" ? t("modelManagement.allPlatforms") : typeLabel(type) }))} value={selectedType} onValueChange={value => { if (value) setFilter(value) }}><SelectTrigger aria-label={t("modelManagement.platform")}><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{types.map(type => <SelectItem key={type} value={type}>{type === "all" ? t("modelManagement.allPlatforms") : typeLabel(type)}</SelectItem>)}</SelectGroup></SelectContent></Select>
-      <DropdownMenu><DropdownMenuTrigger ref={addTrigger} render={<Button />} disabled={menuLocked} onFocus={event => setTrigger(event.currentTarget)} onPointerDown={event => setTrigger(event.currentTarget)}>{t("managementUi.addProvider")}</DropdownMenuTrigger><DropdownMenuContent align="end" finalFocus={providers?.editing || accounts?.editing || dialogOpen ? false : undefined}><DropdownMenuGroup>
+      <Select items={types.map(type => ({ value: type, label: typeLabel(type) }))} value={selectedType} onValueChange={value => { if (value) setSearchParams(previous => { const next = new URLSearchParams(previous); if (value === "all") next.delete("platform"); else next.set("platform", value); return next }) }}><SelectTrigger aria-label={t("modelManagement.platform")}><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{types.map(type => <SelectItem key={type} value={type}>{typeLabel(type)}</SelectItem>)}</SelectGroup></SelectContent></Select>
+      <DropdownMenu><DropdownMenuTrigger ref={addTrigger} render={<Button />} disabled={menuLocked} onFocus={event => setTrigger(event.currentTarget)} onPointerDown={event => setTrigger(event.currentTarget)}>{t("managementUi.addProvider")}</DropdownMenuTrigger><DropdownMenuContent align="end" className="w-max min-w-64 max-w-(--available-width)" finalFocus={providers?.editing || accounts?.editing || dialogOpen ? false : undefined}><DropdownMenuGroup>
         {(Object.keys(platforms) as Platform[]).map(platform => <DropdownMenuItem key={platform} disabled={accountLocked} onClick={() => accounts?.open(platform)}>{platforms[platform]}</DropdownMenuItem>)}
         <DropdownMenuItem disabled={providerLocked} onClick={() => providers?.add()}>{t("providerDirectory.custom")}</DropdownMenuItem>
         <DropdownMenuItem onClick={() => setTerminalOpen(true)}>{t("providerDirectory.officialAndCcg")}</DropdownMenuItem>
