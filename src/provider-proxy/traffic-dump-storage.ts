@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProviderProxyMetrics } from "./response-metrics-observer.js";
-import { securePrivateDirectory, securePrivateFile } from "../../runtime/private-file.mjs";
+import { securePrivateDirectory, securePrivateFile, writePrivateFileAtomic } from "../../runtime/private-file.mjs";
 import { modelTrafficDumpFileSizeLimitBytes, protectModelTrafficDumpSession, pruneModelTrafficDumpSessionsAsync } from "./traffic-dump-retention.js";
 
 const sessionRotationIntervalMs = 24 * 60 * 60 * 1_000;
@@ -243,9 +243,29 @@ export class TrafficDumpStorage {
       await securePrivateDirectory(job.session.sessionDirectory, { signal }); signal.throwIfAborted();
       const manifestPath = join(job.session.sessionDirectory, "manifest.json");
       const manifest = `${JSON.stringify({ createdAtMs: job.session.startedAtMs, label: this.label, session: job.session.writerSession, version: 2 }, null, 2)}\n`;
-      await fs.writeFile(manifestPath, manifest, { flag: "wx", mode: 0o600, signal });
-      await securePrivateFile(manifestPath, { signal }); signal.throwIfAborted();
+      const pendingPath = join(job.session.sessionDirectory, `.manifest-${randomUUID()}.pending`);
+      try {
+        // Finish both private access preparation and Runtime staging cleanup before
+        // readers can discover the manifest. Published metadata stays immutable.
+        await writePrivateFileAtomic(pendingPath, manifest, { signal });
+        signal.throwIfAborted();
+        try {
+          await fs.lstat(manifestPath);
+          throw Object.assign(new Error("Traffic dump manifest already exists"), { code: "EEXIST" });
+        } catch (error) {
+          if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+        }
+        signal.throwIfAborted();
+        // Exclusive session mkdir gives this writer sole ownership. This check
+        // rejects existing objects; rename is not a same-user no-replace primitive.
+        await fs.rename(pendingPath, manifestPath);
+      } catch (error) {
+        await fs.rm(pendingPath, { force: true });
+        throw error;
+      }
+      // A completed publish remains accepted even if cancellation arrived in rename.
       this.options.onBytesAccepted?.(Buffer.byteLength(manifest));
+      signal.throwIfAborted();
       resources.prepared = true;
       this.pruneSessions();
     }

@@ -45,6 +45,18 @@
 
 独立A完整报告已收齐，最终两文件blob与实施输入一致；额外核对重叠停止等待全部边界、关闭和超时取消、视频结果不确定文件保留，未发现本批阻断。上述重叠停止/关闭为源码证据，未冒称真实平台观察。准备正常Hook提交；原问题记录保留发现时语义，M01当前已修复待真实平台补证。
 
+M01本地提交 `1e46d074`，正常Hook类型/版本/边界、定向Lint、84份Markdown和Gateway构建均通过，12.9秒。已fetch origin/main，仍为 `08c97a60`，无需合并或变基。
+
+### M02实施（独立复审通过）
+
+改动storage与模块README：私有独占新session内随机pending经Runtime原子writer完成内容、权限及Windows staging收尾；仅最终manifest路径不存在时rename发布，发布后不再chmod。发布成功即记账一次，随后才检查取消；失败只清本次pending，不删除session和既有manifest。保留V2格式与严格历史材料校验。
+
+实际dist观察：半写pending、权限准备前、rename前各阶段catalog均0、其他label维护0且无错；rename完成但Promise未返回已可读完整manifest、0600权限，排空无pending。两writer并发时A半写20B暂停，B写入和自动维护完成无错；释放A后两个完整批次均可读。已有session/预插manifest均EEXIST且sentinel保留；发布前取消或EIO清pending，发布后取消留完整manifest且153字节accepted恰好一次。另一label损坏历史manifest仍拒绝并保留材料。
+
+真实本地消费路径为ModelTrafficDump HTTP request/response→payload/index/trace→reader→CLI详情；CLI exit0，正确显示自有请求与回答、completed/HTTP200、用量4/5，Authorization脱敏。check/build、定向Lint、docs检查通过，所有作业与临时材料已收齐；新的独立A正在复审。当前方案的lstat→rename不提供针对同UID最后窗口插入manifest的原子noclobber，依赖新私有目录单owner合同；此限制明确交给A评估，不以随机路径或目录私有权限假称同用户隔离。Windows/macOS未实机观察。
+
+独立A完整报告已收齐，无本批阻断，最终两blob一致。A独立核writer、Runtime两平台准备/清理、同步异步retention、当前reader、显式cleanup、Relay计费及迟到I/O归属；确认没有正常第二writer进入独占新目录，接受并保留上述同UID残余限制，不泛称所有冲突原子拒绝。主代理读完整报告并复核最终diff；既有用户材料不迁移或改写，失败仅清任务pending，代码回退不自动删除已发布批次。
+
 ## 本轮实施汇总
 
 原25个修复包及实施中登记的4个关联问题均已完成代码或文档处理、独立Astra关联复审和本地提交，共26批修复提交，业务修复末次提交为 `db2fc319573b907dd61f656a12ace49dc4aeacc0`。本清单待修复为0，不等于全部实机验收通过。

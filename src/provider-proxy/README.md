@@ -134,7 +134,11 @@
   `trace-*.jsonl`。HTTP 请求对应一次调用；同一 WebSocket 连接中的每个 `response.create` 分别对应
   一次调用。响应索引复用代理同一份 `firstTokenMs` 观测，精简模式也保留，不从 trace 反推。
   指标中的 `traffic` 使用同步分配的标签、writer session（时间戳加 128 位随机标识的十进制后缀）与 interaction；
-  manifest、目录和指标共享同一身份，目录或文件冲突时停止采集，不覆盖已有文件或改绑已发出的引用。
+  manifest、目录和指标共享同一身份，目录或文件冲突时停止采集，不改绑已发出的引用。
+  writer 独占创建私有 session 目录；manifest 在随机 pending 路径完成写入、私有权限准备和 Runtime 临时材料收尾后，
+  复核最终路径不存在，再原子 rename 发布，发布后不再修改权限。正常并发 reader/维护仅能看到缺失或完整的 manifest；
+  失败只清理本次 pending，不删除 session 或已有 manifest。已有 session 或发布前已发现的 manifest 均拒绝覆盖；
+  该发布依赖私有新目录的单 owner 合同，最后一次存在性检查与 rename 之间不提供针对同 UID 进程插入文件的原子拒绝覆盖保证。
   HTTP 和每次 WebSocket 调用分别绑定；未开启转储或 WS 握手失败、尚未创建逻辑调用时不提供关联。
   每个逻辑调用绑定开始时的 writer session；长驻进程约每 24 小时让新调用进入新 session，
   已在执行的并发调用继续在原 session 完成，因此请求与响应不会拆分。私有目录准备、ACL、文件创建与写入
