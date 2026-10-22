@@ -1,5 +1,6 @@
 import { useTranslation } from "@/hooks/use-translation"
 import { acceleratedServiceTierId, normalizeServiceTier } from "../../../../runtime/service-tier.mjs"
+import { contextWindowPresetLabel, contextWindowPresetTokens } from "../../../../runtime/model-catalog.mjs"
 import { useEffect, useState, type ReactNode } from "react"
 import { cn } from "cn"
 
@@ -7,14 +8,18 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ManagedSelect, PendingSettingDialog, SettingsRow, SettingsMutationFeedback, modelOperationDialogClassName } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { CodexSettingsController } from "@/lib/settings-management"
 import type { MessageKey } from "@/lib/i18n/messages"
 import { ToolAccessSettings } from "@/components/settings/tool-access-settings"
+
+const compactPercentPresets = [50, 60, 70, 80, 90] as const
+const compactTokens = (window: number, percent: number) => String(BigInt(window) * BigInt(percent) / 100n)
 
 export function AppServerSettingsCard({ management, onChanged, onEditingChange, section = "general", renderContent }: { management: CodexSettingsController; onChanged?: () => void; onEditingChange?: (editing: boolean) => void; section?: "general" | "permissions" | "models" | "context"; renderContent?: (content: ReactNode) => ReactNode }) {
   const { t } = useTranslation()
@@ -30,6 +35,15 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
     startupUpdate: String(settings?.defaults.checkForUpdateOnStartup ?? true), historyPersistence: settings?.defaults.historyPersistence ?? "save-all",
   })
   const { contextWindow, autoCompactTokenLimit } = compact
+  const [customWindow, setCustomWindow] = useState(false)
+  const [compactChoice, setCompactChoice] = useState<{ preset: string; window: string; threshold: string } | null>(null)
+  const compactWindow = Number(contextWindow)
+  const canUseCompactPercent = Number.isSafeInteger(compactWindow) && compactWindow > 1
+  const matchingCompactPercents = canUseCompactPercent ? compactPercentPresets.filter(percent => compactTokens(compactWindow, percent) === autoCompactTokenLimit) : []
+  const compactPreset = compactChoice?.window === contextWindow && compactChoice.threshold === autoCompactTokenLimit
+    ? compactChoice.preset
+    : autoCompactTokenLimit === "" ? "default" : matchingCompactPercents.length === 1 ? String(matchingCompactPercents[0]) : "custom"
+  const windowPreset = customWindow ? "custom" : contextWindow === "" ? "default" : contextWindowPresetTokens.some(tokens => String(tokens) === contextWindow) ? contextWindow : "custom"
   const { planEffort, reasoningSummary, verbosity, startupUpdate, historyPersistence } = preferences
   const [localError, setLocalError] = useState<MessageKey | null>(null)
   const [compactError, setCompactError] = useState<{ field: "contextWindow" | "autoCompactTokenLimit"; value: string; message: MessageKey } | null>(null)
@@ -43,7 +57,7 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
     return () => onEditingChange?.(false)
   }, [compactEditing, onEditingChange])
   useEffect(() => {
-    if (management.lastAppliedSetting?.kind === "model-compact") resetCompact()
+    if (management.lastAppliedSetting?.kind === "model-compact") { resetCompact(); setCustomWindow(false); setCompactChoice(null) }
     if (management.lastAppliedSetting?.kind === "preferences") resetPreferences()
     if (management.lastAppliedSetting?.kind === "defaults") resetDefaults()
     if (management.lastAppliedSetting?.kind === "service-tier") resetTier()
@@ -141,15 +155,40 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
         {section === "context" && <>
         <section className="flex flex-col gap-3">
           <div><h3 className="font-medium">{t("settingsFields.contextCompaction")}</h3><p className="text-xs text-muted-foreground">{t("settingsFields.contextHint")}</p></div>
-          <FieldGroup className="grid gap-3 md:grid-cols-2">
+          <FieldGroup className="grid gap-3">
             <Field data-disabled={officialDisabled} data-invalid={visibleCompactError?.field === "contextWindow"}>
               <FieldLabel htmlFor="codex-context-window">{t("settingsFields.contextWindow")}</FieldLabel>
-              <Input id="codex-context-window" type="number" min={1} value={contextWindow} disabled={officialDisabled} aria-invalid={visibleCompactError?.field === "contextWindow"} aria-describedby={visibleCompactError?.field === "contextWindow" ? "codex-context-window-error" : undefined} onChange={(event) => { patchCompact({ contextWindow: event.target.value }); setCompactError(null) }} placeholder={t("settingsFields.modelDefault")} />
+              <ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={[windowPreset]} disabled={officialDisabled} aria-label={t("managementUi.contextPreset")} onValueChange={([preset]) => {
+                if (preset === undefined) return
+                if (preset === "custom") { setCustomWindow(true); return }
+                setCustomWindow(false)
+                patchCompact({ contextWindow: preset === "default" ? "" : preset })
+                setCompactError(null)
+              }}>
+                <ToggleGroupItem value="default">{t("managementUi.followModelDefault")}</ToggleGroupItem>
+                {contextWindowPresetTokens.map(tokens => <ToggleGroupItem key={tokens} value={String(tokens)} title={t("managementUi.contextPresetLabel", { label: contextWindowPresetLabel(tokens), tokens })}>{contextWindowPresetLabel(tokens)}</ToggleGroupItem>)}
+                <ToggleGroupItem value="custom">{t("openAiModelCatalog.contextCustom")}</ToggleGroupItem>
+              </ToggleGroup>
+              <Input id="codex-context-window" type="number" min={1} value={contextWindow} disabled={officialDisabled} aria-invalid={visibleCompactError?.field === "contextWindow"} aria-describedby={visibleCompactError?.field === "contextWindow" ? "codex-context-window-error" : undefined} onChange={(event) => { setCustomWindow(false); patchCompact({ contextWindow: event.target.value }); setCompactError(null) }} placeholder={t("settingsFields.modelDefault")} />
               {visibleCompactError?.field === "contextWindow" ? <FieldError id="codex-context-window-error">{t(visibleCompactError.message)}</FieldError> : null}
             </Field>
             <Field data-disabled={officialDisabled} data-invalid={visibleCompactError?.field === "autoCompactTokenLimit"}>
               <FieldLabel htmlFor="codex-compact-token-limit">{t("settingsFields.compactTokenLimit")}</FieldLabel>
-              <Input id="codex-compact-token-limit" type="number" min={1} step={1} value={autoCompactTokenLimit} disabled={officialDisabled} aria-invalid={visibleCompactError?.field === "autoCompactTokenLimit"} aria-describedby={visibleCompactError?.field === "autoCompactTokenLimit" ? "codex-compact-token-limit-error" : undefined} onChange={(event) => { patchCompact({ autoCompactTokenLimit: event.target.value }); setCompactError(null) }} placeholder={t("settingsFields.compactDefault")} />
+              <ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={[compactPreset]} disabled={officialDisabled} aria-label={t("settingsFields.compactPreset")} aria-describedby="codex-compact-preset-hint" onValueChange={([preset]) => {
+                if (preset === undefined) return
+                if (preset === "custom") { setCompactChoice({ preset, window: contextWindow, threshold: autoCompactTokenLimit }); return }
+                if (preset !== "default" && !canUseCompactPercent) return
+                const threshold = preset === "default" ? "" : compactTokens(compactWindow, Number(preset))
+                setCompactChoice({ preset, window: contextWindow, threshold })
+                patchCompact({ autoCompactTokenLimit: threshold })
+                setCompactError(null)
+              }}>
+                <ToggleGroupItem value="default">{t("managementUi.followModelDefault")}</ToggleGroupItem>
+                {compactPercentPresets.map(percent => <ToggleGroupItem key={percent} value={String(percent)} disabled={!canUseCompactPercent}>{percent}%</ToggleGroupItem>)}
+                <ToggleGroupItem value="custom">{t("openAiModelCatalog.contextCustom")}</ToggleGroupItem>
+              </ToggleGroup>
+              <Input id="codex-compact-token-limit" type="number" min={1} step={1} value={autoCompactTokenLimit} disabled={officialDisabled} aria-invalid={visibleCompactError?.field === "autoCompactTokenLimit"} aria-describedby={visibleCompactError?.field === "autoCompactTokenLimit" ? "codex-compact-preset-hint codex-compact-token-limit-error" : "codex-compact-preset-hint"} onChange={(event) => { setCompactChoice(null); patchCompact({ autoCompactTokenLimit: event.target.value }); setCompactError(null) }} placeholder={t("settingsFields.compactDefault")} />
+              <FieldDescription id="codex-compact-preset-hint">{t(canUseCompactPercent ? "settingsFields.compactPresetHint" : "settingsFields.compactPresetNeedsWindow")}</FieldDescription>
               {visibleCompactError?.field === "autoCompactTokenLimit" ? <FieldError id="codex-compact-token-limit-error">{t(visibleCompactError.message)}</FieldError> : null}
             </Field>
           </FieldGroup>
