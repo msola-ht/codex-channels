@@ -1497,6 +1497,8 @@ const zh = {
     "speedColumn": "速度",
     "speedHint": "请求平均输出速度：总输出 Token ÷ 提交上游至终态的请求耗时。包含等待、思考、正文、工具参数和网络接收，不含请求外的工具执行；不是模型纯生成速度。未完成、输出量或总耗时无效时显示 —，不依赖生成区间或首 Token。",
     "durationColumn": "请求耗时",
+    "requestBytesColumn": "请求大小",
+    "requestBytesHint": "本次逻辑请求实际发往模型上游的请求正文或 WebSocket 请求帧字节合计；包含协议转换后的内容，不含响应、请求头和网络传输开销。未实际发送时为 —。",
     "viewTraffic": "查看调用详情"
   },
   errorList: {
@@ -3292,6 +3294,8 @@ const en: Messages = {
     "speedColumn": "Speed",
     "speedHint": "Average request output rate: total output tokens divided by time from upstream submission to completion, including waiting, reasoning, text, tool arguments and network reception, excluding tool execution outside the request. Not pure model generation speed. Unfinished requests or invalid output counts or total durations show —; independent of generation intervals and first token.",
     "durationColumn": "Request duration",
+    "requestBytesColumn": "Request size",
+    "requestBytesHint": "Total request-body or WebSocket request-frame bytes actually sent to the model upstream for this logical request, including protocol conversion output and excluding responses, headers and network transport overhead. Shows — when nothing was sent.",
     "viewTraffic": "View traffic detail"
   },
   errorList: {

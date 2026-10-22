@@ -706,6 +706,7 @@ function csvColumns() {
     ["textTimeMs", (record) => record.generationTiming?.textMs],
     ["toolTimeMs", (record) => record.generationTiming?.toolMs],
     ["totalDurationMs", (record) => record.totalDurationMs],
+    ["requestBytes", (record) => record.requestBytes],
     ["upstreamTtftMs", (record) => record.upstreamTtftMs],
     ["responseUsageAmount", (record) => record.responseUsageAmount],
     ["upstreamProvider", (record) => record.upstreamProvider],

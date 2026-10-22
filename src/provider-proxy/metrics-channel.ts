@@ -23,7 +23,7 @@ const metricsFields = [
   "errorMessage", "incompleteReason", "inputTokens", "cachedInputTokens", "outputTokens",
   "reasoningOutputTokens", "totalTokens", "responseUsageAmount", "upstreamTtftMs",
   "firstTokenMs", "responseTimeMs", "generationTiming", "timingBasis", "totalDurationMs",
-  "requestModel", "responseModel", "traffic", "requestStartedAtMs", "responseCompletedAtMs",
+  "requestBytes", "requestModel", "responseModel", "traffic", "requestStartedAtMs", "responseCompletedAtMs",
   "weeklyQuota", "quotaObservedAtMs", "quotaWindows", ...modelRequestDiagnosticKeys,
 ] as const satisfies readonly (keyof ProviderProxyMetrics)[];
 
@@ -238,6 +238,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || (record.totalDurationMs !== undefined
       && (typeof record.totalDurationMs !== "number"
         || !Number.isFinite(record.totalDurationMs) || record.totalDurationMs < 0))
+    || (record.requestBytes !== undefined && !nullableByteCount(record.requestBytes))
     || (record.firstTokenMs !== undefined
       && (typeof record.firstTokenMs !== "number"
         || !Number.isFinite(record.firstTokenMs) || record.firstTokenMs < 0))
@@ -342,6 +343,11 @@ function nullableQuotaWindows(value: unknown): boolean {
         )
       );
   });
+}
+
+function nullableByteCount(value: unknown): boolean {
+  return value === null
+    || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
 }
 
 function nullableWeeklyQuota(value: unknown): boolean {

@@ -127,7 +127,7 @@ CCG、OCG 保留 DS 导入；CLP 的固定 DS 候选和模板更新只读取仓�
 
 错误列表优先显示记录的请求模型，生成前失败也能定位所选模型。`web_search_unsupported` 在错误列表、请求状态与调用详情映射为双语的原生网页搜索拒绝说明，提示关闭请求中的搜索并检查提供商是否跟随全局；HTTP 400 可细分为此已确认原因，认证及限流错误仍保持自身分类。历史泛化错误不据此回填或推断为搜索拒绝。
 
-请求、错误、会话、轮次、全部及关联子代理、调用、Relay 队列表复用 `reasoningEffort` 列 ID 和 `metrics.reasoningEffort` 双语文案，在模型右侧展示独立“思考”列（英文 `Reasoning`）；只投影来源原值，缺失显示“—”，保留原列显隐存储键，不增加服务端等级排序。调用摘要按当前页有界读取已存请求正文，与详情使用相同参数投影；Relay 展示入站请求参数，形状边界与私有 IPC 见 Model Relay 模块和 Runtime 文档。
+请求、错误、会话、轮次、全部及关联子代理、调用、Relay 队列表复用 `reasoningEffort` 列 ID 和 `metrics.reasoningEffort` 双语文案，在模型右侧展示独立“思考”列（英文 `Reasoning`）；只投影来源原值，缺失显示“—”，保留原列显隐存储键，不增加服务端等级排序。请求明细在状态右侧另显示可排序“请求大小”，使用 `requestBytes` 和二进制 `formatBytes`；值为实际发往模型上游的正文或 WebSocket 请求帧合计，历史缺失显示“—”。调用摘要按当前页有界读取已存请求正文，与详情使用相同参数投影；Relay 展示入站请求参数，形状边界与私有 IPC 见 Model Relay 模块和 Runtime 文档。
 
 调用详情正文复用 `components/traffic/traffic-content.tsx` 的延迟展开与只读文本操作组件，统一复制、换行、格式化和截断提示。
 

@@ -231,8 +231,9 @@ export class ChatCompletionsBridge {
           if (JSON.stringify(current) !== JSON.stringify(modelCapabilities)) throw new ChatUpstreamError("clp_catalog_unavailable", "CLP 模型配置在搜索期间发生变化，请重新发起请求。", false, undefined, 503);
         }
         const payload = JSON.stringify(this.options.clinePass ? pinClinePassRouting(outbound, modelCapabilities?.clineRequestProfile) : outbound);
-        if (Buffer.byteLength(payload) > maximumRequestBytes) throw new ModelConversionError("Chat continuation exceeds size limit");
-        headers["content-length"] = String(Buffer.byteLength(payload));
+        const payloadBytes = Buffer.byteLength(payload);
+        if (payloadBytes > maximumRequestBytes) throw new ModelConversionError("Chat continuation exceeds size limit");
+        headers["content-length"] = String(payloadBytes);
         status = 502;
         clearTimeout(timer);
         upstreamRequest = (upstream.protocol === "http" ? httpRequest : httpsRequest)({
@@ -243,9 +244,13 @@ export class ChatCompletionsBridge {
         upstreamRequest.on("error", () => undefined);
         const ready = once(upstreamRequest, "response", { signal: controller.signal });
         timing ??= { submittedAt: performance.now() };
+        timing.requestBytes = (timing.requestBytes ?? 0) + payloadBytes;
         phaseTimeout(modelRequestPolicy.headersTimeoutMs, "headers");
         converter.beginModelRound();
         upstreamRequest.end(payload);
+        // Publish the submitted size before waiting for headers: a client disconnect
+        // closes the outer proxy's subscription even if the upstream never responds.
+        publishDiagnostics();
         [incoming] = await ready as [IncomingMessage];
         clearTimeout(timer);
         diagnostics.header(incoming.headers["x-request-id"]);

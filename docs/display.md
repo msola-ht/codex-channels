@@ -306,6 +306,8 @@ codexc metrics export --range 7d --thread <Thread ID> --turn <Turn ID> --status 
 渠道、CLI 与 WebUI 的 Token 统一使用 `K`、`M`、`B` 紧凑单位：`K` / `M` 最多保留两位小数，
 `B` 最多保留三位小数；渠道、CLI 和 WebUI 的汇总请求数使用相同单位且最多保留两位小数，逐条明细及
 JSON / CSV 导出仍保留精确整数。
+请求明细的 `requestBytes` 按实际发往模型上游的请求正文或 WebSocket 请求帧字节合计保留为原始整数；
+WebUI 使用二进制 `B` / `KB` / `MB` 展示，JSON 与 CSV 不取整或换算单位，历史缺失保持 `null`。
 Turn 级失败独立保留在 Gateway 的 `turn.failed` 诊断日志与用户错误反馈中，不生成模型请求记录。
 历史库可能包含旧实现写入的任务失败，缺乏可靠区分字段，保留原值，不按空 Token 清洗。
 

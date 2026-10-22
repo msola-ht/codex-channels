@@ -14,7 +14,7 @@ export const metricStorageColumns = [
   "weekly_quota_plan_type", "quota_windows", "user_agent", "upstream_ttft_ms",
   "first_token_ms", "request_model", "response_model",
   "traffic_label", "traffic_session", "traffic_interaction",
-  "total_duration_ms",
+  "total_duration_ms", "request_bytes",
   "request_service_tier",
   "source", "caller_id", "key_id", "credential_generation", "relay_request_id", "delivery_status",
   "response_usage_amount", "upstream_provider", "upstream_attempt_count", "model_attempt_count", "finish_reason", "error_stage", "upstream_error_code", "upstream_error_type", "upstream_http_status", "quota_observed_at_ms",
@@ -72,6 +72,10 @@ const baseMetricsTableSql = `
     traffic_session TEXT,
     traffic_interaction INTEGER,
     total_duration_ms REAL CHECK (total_duration_ms IS NULL OR total_duration_ms >= 0),
+    request_bytes INTEGER CHECK (
+      request_bytes IS NULL
+      OR (typeof(request_bytes) = 'integer' AND request_bytes BETWEEN 0 AND 9007199254740991)
+    ),
     request_service_tier TEXT,
     CHECK (
       (traffic_label IS NULL AND traffic_session IS NULL AND traffic_interaction IS NULL)

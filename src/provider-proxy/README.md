@@ -99,6 +99,7 @@
   同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录。
   `responseTimeMs`、`firstTokenMs` 与 `totalDurationMs` 从提交上游发送时刻计时，不含发送前路由、解析与 WS 连接等待；HTTP 提交后发生的连接等待计入耗时；Chat 桥以真实上游提交起点替换本地转发起点。
   `responseTimeMs` 到首个有效上游事件，`firstTokenMs` 到首段非空内容的接收回调入口，`totalDurationMs` 到首次终态或结束/失败。未提交发送不伪造耗时。
+  可空 `requestBytes` 保存实际提交给模型上游的请求正文或 WebSocket `response.create` 请求帧字节合计；HTTP 归一化、采样补齐和 Chat 转换使用转换后的内容，WS 使用实际发送帧，多个受控续答累计到同一逻辑请求。未实际发送时为 null，不包含响应、请求头或传输开销。
   指标通过 `timingBasis: "submitted"` 标记新起点，IPC 拒绝无标记的旧计时；指标独立于调用记录传递；调用索引复用同一观测，不从 trace 反推，不表示客户端显示时间。
   HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
   HTTP JSON/SSE 与 WebSocket 共用终态提取 `usage_metadata.amount`，以可空 `responseUsageAmount`
@@ -162,7 +163,7 @@
 - `relay-dump-payload.ts`：Relay JSON/SSE 的共享脱敏与有界合并写入，供上游及客户端交付阶段复用。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
 - `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压；`readModelBody` 供启用名单复核保留原始 Buffer，`readChatBody` 保持文本返回。
-- `direct-model-http.ts`：直接模型请求共用的 HTTP 出站生命周期、响应状态/Content-Type 校验与安全 JSON 解码，保留普通应用请求头并复用跳级头清理，覆盖凭据和传输头、剔除 Cookie/伪造身份；同步出站复核、实际 UA 观测、首包/空闲超时、取消和关闭清理，不负责协议转换、重试或指标发送。
+- `direct-model-http.ts`：直接模型请求共用的 HTTP 出站生命周期、响应状态/Content-Type 校验与安全 JSON 解码，保留普通应用请求头并复用跳级头清理，覆盖凭据和传输头、剔除 Cookie/伪造身份；同步出站复核、实际 UA 与序列化后正文大小观测、首包/空闲超时、取消和关闭清理，不负责协议转换、重试或指标发送。
 - `direct-responses.ts`：原生 Responses JSON/SSE 交付，复用 HTTP 生命周期和 Responses 指标归约；非流式通过共享白名单识别首个非空输出，观测时间为整包解析校验后；保留事件、用量、终态与扩展字段，不生成 Chat DONE，断流不伪造成功；独立诊断回调仅提交有证据的错误阶段与内层错误，不推断 Chat 专属路由或结束原因。
 - `cline-pass-routing.ts`：CLP 专属出站副本投影，按可选 `deepseek-flash` 请求快照固定 `providerOptions.gateway.only` 为 `deepseek`，保留请求模型 ID 和其他对象字段并拒绝畸形容器。未传快照时保留精确 Flash 模型默认分支，显式 `standard` 不固定路由。桥与 Relay 共用，均由调用方传入受管目录中的请求快照；本模块不处理目录读取、网络或重试。
 - `direct-chat.ts`：单次直接 Chat JSON/SSE 协议处理，复用公共 HTTP 生命周期；识别 CLP 显式成功的单层 JSON 包装后复用响应校验，可向注入的有界采集器提交已解析 Chat 报文；另经独立诊断回调提交受限请求指标摘要，关闭转储仍采集。

@@ -23,7 +23,7 @@ export interface DirectChatCall {
   observer: DirectChatResponse;
   unwrapClpEnvelope: boolean;
   recheck(): void;
-  submitted(userAgent: string | null): void;
+  submitted(userAgent: string | null, requestBytes: number): void;
   headers(status: number): void;
   content(): void;
   emit(value: Record<string, unknown> | undefined, terminal: boolean): Promise<void>;
@@ -49,9 +49,9 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
       ...(call.clientHeaders ? { clientHeaders: call.clientHeaders } : {}),
       signal: call.signal, recheck: () => call.recheck(),
       transformed: operation => call.capture?.transformed?.(operation),
-      submitted: (userAgent, headers, path) => {
+      submitted: (userAgent, headers, path, requestBytes) => {
         submittedAt = performance.now();
-        call.submitted(userAgent);
+        call.submitted(userAgent, requestBytes);
         call.capture?.submitted(call.request, headers, path);
       },
     }, async incoming => {

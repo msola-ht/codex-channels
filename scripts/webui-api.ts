@@ -376,6 +376,8 @@ export interface RequestRecord {
   relayRequestId?: string | null
   deliveryStatus?: "finished" | "disconnected" | "failed" | null
   totalDurationMs: number | null
+  /** 本次逻辑请求实际发往模型上游的正文或 WebSocket 请求帧字节合计。 */
+  requestBytes: number | null
   traffic: { label: string; session: string; interaction: number } | null
   firstTokenMs: number | null
   responseTimeMs?: number | null
@@ -424,6 +426,7 @@ export type RequestSortKey =
   | "input"
   | "output"
   | "reasoningOutput"
+  | "requestBytes"
 
 export type RequestSortDirection = "asc" | "desc"
 

@@ -10,7 +10,7 @@ const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{1
 const identity = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 const sampleKeys = [...modelRequestDiagnosticKeys, "traffic", "source", "threadId", "turnId", "relayRequestId", "callerId", "keyId", "credentialGeneration", "provider", "requestModel", "userAgent",
   "responseModel", "responseFormat", "status", "deliveryStatus", "requestStartedAtMs", "responseCompletedAtMs", "totalDurationMs", "firstTokenMs", "responseTimeMs", "generationTiming",
-  "httpStatus", "errorCode", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"];
+  "httpStatus", "errorCode", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens", "requestBytes"];
 
 export class RelayMetricsServer {
   private readonly server: PrivateIpcServer;
@@ -95,7 +95,7 @@ function validSample(value: unknown, provider: unknown, requestId: unknown): val
     for (const key of ["requestStartedAtMs", "responseCompletedAtMs", "totalDurationMs"]) {
       if (typeof sample[key] !== "number" || !Number.isFinite(sample[key]) || Number(sample[key]) < 0) return false;
     }
-    for (const key of ["firstTokenMs", "httpStatus", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]) {
+    for (const key of ["firstTokenMs", "httpStatus", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens", "requestBytes"]) {
       const number = sample[key];
       if (number === undefined) continue;
       if (typeof number !== "number" || !Number.isFinite(number) || number < 0

@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { RelayRequestStatus } from "@/components/requests/relay-request-status"
 import { useTranslation } from "@/hooks/use-translation"
 import { useModelTrafficDumpEnabled } from "@/hooks/use-model-traffic-settings"
-import { formatElapsedDuration, formatErrorMessage, formatRequestError, formatTimestamp, getServerTimeZone, isClientInterruption } from "@/lib/format"
+import { formatBytes, formatElapsedDuration, formatErrorMessage, formatRequestError, formatTimestamp, getServerTimeZone, isClientInterruption } from "@/lib/format"
 import { trafficDetailPath } from "@/lib/traffic-state"
 import type { RequestRecord } from "@/lib/types"
 
@@ -47,6 +47,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     [t("requests.firstColumn"), !record.firstTokenMs ? "" : formatElapsedDuration(record.firstTokenMs)],
     [t("requests.speedColumn"), formatGenerationSpeed(record)],
     [t("requests.durationColumn"), !record.totalDurationMs ? "" : formatElapsedDuration(record.totalDurationMs)],
+    [t("requests.requestBytesColumn"), formatBytes(record.requestBytes)],
     [t("requestDetail.reasoningEffort"), record.reasoningEffort],
     [t("requestDetail.requestTier"), record.requestServiceTier],
     [t("requestDetail.responseTier"), record.serviceTier],

@@ -137,6 +137,7 @@ export class ModelRelayServer {
     let reasoningEffort: string | null = null;
     let provider: string | null = null;
     let bodyBytes = 0;
+    let outboundBytes = 0;
     let stream = false;
     let phase: "input" | "queue" | "prepare" | "upstream" | "delivery" = "input";
     const protocol = request.url === "/v1/responses" ? "responses" : "chat";
@@ -254,7 +255,12 @@ export class ModelRelayServer {
       inbound = undefined;
       const call = { timing: (value: typeof outputTiming) => { outputTiming = value; }, diagnostics: (summary: ModelRequestDiagnostics) => { diagnostics = summary; }, ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
         recheck: () => { lease!.check(requestModel); prepared.recheck(); },
-        submitted: (ua: string | null) => { userAgent = ua; started = performance.now(); submittedAt = Date.now(); },
+        submitted: (ua: string | null, requestBytes: number) => {
+          userAgent = ua;
+          outboundBytes += requestBytes;
+          started = performance.now();
+          submittedAt = Date.now();
+        },
         headers: (status: number) => { httpStatus = status; },
         content: () => { firstTokenMs ??= performance.now() - started!; },
         emit: async (value: Record<string, unknown> | undefined, terminal: boolean, rawFrame?: string) => {
@@ -354,6 +360,7 @@ export class ModelRelayServer {
           provider: provider!, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",
           status: modelStatus, deliveryStatus,
           requestStartedAtMs: submittedAt!, responseCompletedAtMs: submittedAt! + (ended - started), totalDurationMs: ended - started,
+          requestBytes: outboundBytes,
           ...observer.usage, ...outputTiming, ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
           ...(observer.responseModel === undefined ? {} : { responseModel: observer.responseModel }),
           ...(httpStatus === undefined ? {} : { httpStatus }), ...(errorCode === undefined ? {} : { errorCode }) };
