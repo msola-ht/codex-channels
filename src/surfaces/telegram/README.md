@@ -59,7 +59,13 @@
   长回复展开为 HTML 分段，特别长的内容使用预览加附件；明确的格式拒绝只降级当前分段；网络结果不确定时停止本次发送，Turn 完成不重播失败正文；完成的原生 `imageGeneration`
   PNG/JPEG 经过共享安全读取边界后使用 `sendPhoto` 静默发送，且不受操作过程显示档位影响。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
-- `text-streams.ts`：拥有按 Conversation、Turn、Item 隔离的正文流、刷新计时器、消息 ID、首次发送结果未知状态及每 Turn 的正文提醒状态；处理最终 HTML/Rich Markdown、长回复与附件降级，复用 Outbox 的同一投递队列与只读回复目标。空白 commentary 由 Outbox 明确省略并清理对应流，非空可靠正文必须取得发送确认。
+- `text-streams.ts`：拥有按 Conversation、Turn、Item 隔离的正文流、刷新计时器、消息 ID、首次发送结果未知状态及每 Turn 的正文提醒状态；处理最终 HTML/Rich Markdown、长回复与附件降级，复用 Outbox 的同一投递队列与只读回复目标。
+  增量只接收实时 Turn 开始所建立的当前授权活动身份；最多保留 100 个身份，超限淘汰最旧的非关键预览并记录容量告警。
+  Outbox 的 `admitLive` 在普通与持久模式发布时固定正文身份；富化副本继承 `liveAdmitted` 上下文，不能在迟到路由时重新建立旧身份。普通模式仍按消费顺序处理展示生命周期，持久模式保留发布时观察；准入与展示清理分离，迟到断线清理不会撤销恢复后的新正文身份。
+  撤权、断线或淘汰会取消对应预览和排队操作，不保留等待终态清理的撤权墓碑；重新授权后的新 Turn 可立即建立预览。
+  重连时由权威活动恢复重新发布 Turn 开始；缺少该身份的增量安全省略，完整 Item 仍独立按当前授权投递。
+  排队预览固定原流身份，迟到操作不会刷新同键新流；可靠完整正文独立持有原文及当前授权，不能复用已撤权缓存，须取得平台发送确认。
+  空白 commentary 由 Outbox 明确省略并清理对应流。
 - `message-options.ts`：正文、操作与面板共用的原生回复、静默和 HTML 消息选项。
 - 通知策略按逻辑事件降噪。Gateway 启动、CLI 输入镜像、思考/过程增量、操作过程、Turn 结束统计、
   账户/额度更新、普通 warning 和同一回复的后续分片使用 Telegram `disable_notification`；

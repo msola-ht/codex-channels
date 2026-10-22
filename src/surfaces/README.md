@@ -61,10 +61,11 @@ Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录�
 只通过编译期内置插件注册表显式注册。
 Bootstrap 的内置插件注册表负责把一个渠道插件展开为零到多个账号实例并验证身份唯一性；
 Telegram、飞书目录仍只实现平台 Adapter，不导入插件宿主或组合根类型。
-`SurfaceOutputPort` 接收平台无关的 `OutputEvent`。Reader 只同步调用 `observe`；`deliver` 和
+`SurfaceOutputPort` 接收平台无关的 `OutputEvent`。Reader 只同步调用 `admitLive` 与 `observe`；`deliver` 和
 `deliverSnapshot` 的等待发生在后台 Conversation 队列，不阻塞 Reader。
 `partial_answer` 按稳定正文投递，包括微信回复窗口和长正文处理，但不代表整轮完成；飞书完成统计独立发送，不追加到正文或部分回答卡上。
-可选 `observe` 在实时发布时执行本地生命周期处理，持久重放不再调用；`handle` 的直接调用仍处理本地状态。
+可选 `admitLive` 在普通与持久模式发布时只固定可丢弃的实时输出身份，不变更展示生命周期。可选 `observe` 保留持久模式发布时的本地生命周期处理；普通模式仍由 `handle` 按消费顺序处理，持久重放不调用两者。
+组合根按事件对象弱引用去重；仅向成功调用准入端口的 `handle` 传递 `liveAdmitted: true`，包括富化生成的副本，只跳过重复准入，仍执行普通展示生命周期。准入或观察抛错时不准入路由；未装配准入端口时不传该标记。Telegram 直接 `observe` 仍先固定实时身份，直接 `handle` 仍补全准入和本地展示状态。
 `delivery-policy.ts` 定义最新展示快照的键及终态淘汰关系；Bootstrap 持有有界临时快照，平台不维护第二套投递恢复队列。状态进入渠道队列后仍属于该快照的预算；断线、终态与新轮次
 会取消对应旧状态的未发送操作。状态发送失败或结果未知会向调用方报告，不自动重试整个状态。
 Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不再各自订阅全局事件总线。

@@ -122,6 +122,7 @@ export interface TelegramOutboxOptions {
 }
 
 export class TelegramOutbox {
+  private readonly admittedLive = new WeakSet<OutputEvent>();
   private readonly textStreams: TelegramTextStreams;
   private readonly operationLogs = new Map<string, OperationLogState>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
@@ -190,7 +191,22 @@ export class TelegramOutbox {
     this.replyTargets.set(chatId, this.turnKey(threadId, turnId), messageId);
   }
 
+  admitLive(event: OutputEvent): void {
+    if (this.closed || event.target.surface !== "telegram" || event.target.accountId !== (this.options.accountId ?? telegramDefaultAccountId)
+      || this.admittedLive.has(event)) return;
+    this.admittedLive.add(event);
+    if (event.type === "turn.started") this.textStreams.startTurn(event.target.conversationId, event.threadId, event.turnId);
+    else if (event.type === "text.delta") this.textStreams.observeDelta(event);
+    else if (event.type === "turn.completed") this.textStreams.completeTurn(event.target.conversationId, event.threadId, event.turnId);
+    else if (event.type === "connection.lost") this.textStreams.invalidateThread(event.threadId);
+  }
+
   observe(event: OutputEvent): void {
+    this.admitLive(event);
+    this.observeLifecycle(event);
+  }
+
+  private observeLifecycle(event: OutputEvent): void {
     if (this.closed || event.target.surface !== "telegram" || event.target.accountId !== (this.options.accountId ?? telegramDefaultAccountId)) return;
     this.snapshots.observe(event);
     this.retryMessages.observe(event);
@@ -203,7 +219,6 @@ export class TelegramOutbox {
       this.replyTargets.bindPending(event.target.conversationId, this.turnKey(event.threadId, event.turnId));
       this.typing.start(event.target.conversationId, this.turnActivityKey(event.threadId, event.turnId));
     } else if (event.type === "turn.completed") {
-      this.textStreams.completeTurn(event.target.conversationId, event.threadId, event.turnId);
       this.expireRunningOperations(event.threadId, (key) => key === this.turnKey(event.threadId, event.turnId));
       this.typing.stop(event.target.conversationId, this.turnActivityKey(event.threadId, event.turnId));
     } else if (event.type === "connection.lost") {
@@ -211,7 +226,7 @@ export class TelegramOutbox {
     }
   }
 
-  handle(event: OutputEvent): void | Promise<void> {
+  handle(event: OutputEvent, context?: { liveAdmitted: true }): void | Promise<void> {
     if (
       this.closed
       || event.target.surface !== "telegram"
@@ -220,7 +235,10 @@ export class TelegramOutbox {
     ) {
       return;
     }
-    if (!DeliveryReceipt.current()) this.observe(event);
+    if (!DeliveryReceipt.current()) {
+      if (!context?.liveAdmitted) this.admitLive(event);
+      this.observeLifecycle(event);
+    }
     if (!DeliveryReceipt.current() && surfaceOutputSnapshotKey(event) !== undefined) {
       const delivery = this.deliverSnapshot(event, new AbortController().signal, () => true);
       // Direct callers may intentionally ignore the asynchronous result; the owner still sees rejection.

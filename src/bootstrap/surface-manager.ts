@@ -104,7 +104,8 @@ export class SurfaceManager {
   private readonly outputCoalescer = new SurfaceOutputCoalescer();
   private readonly persistent: PersistentSurfaceOutput | undefined;
   private persistenceStart: Promise<void> | undefined;
-  private removePersistenceObserver: (() => void) | undefined;
+  private removeOutputObserver: (() => void) | undefined;
+  private readonly liveOutput = new WeakMap<OutputEvent, { liveAdmitted: true } | undefined>();
   private readonly suspended = new Set<string>();
   private readonly surfaceStops = new Map<SurfaceAdapter, Promise<void>>();
   private readonly snapshots = new Map<string, PendingSnapshot>();
@@ -187,19 +188,28 @@ export class SurfaceManager {
         }, signal);
       },
     }) : undefined;
-    if (this.persistent) this.removePersistenceObserver = output.observe((event) => {
-      if (!this.acceptingOutput) return;
+    this.removeOutputObserver = output.observe((event) => {
+      if (!this.acceptingOutput || this.liveOutput.has(event)) return;
       const key = surfaceAccountKey(event.target.surface, event.target.accountId);
       const surface = this.surfacesByAccount.get(key);
       if (!surface || this.suspended.has(key)) return;
+      try {
+        surface.output.admitLive?.(event);
+        if (this.persistent) surface.output.observe?.(event);
+      }
+      catch {
+        this.logger.error({ account: key, eventType: event.type }, "Surface 本地输出状态观察失败");
+        this.options.persistence?.fault("surface-state-failed", key);
+        return;
+      }
+      this.liveOutput.set(event, surface.output.admitLive ? { liveAdmitted: true } : undefined);
+      if (!this.persistent) return;
       const order = this.requireRuntime(surface).nextOutputOrder++;
-      try { surface.output.observe?.(event); }
-      catch { this.options.persistence?.fault("surface-state-failed", key); return; }
       for (const [snapshotKey, snapshot] of this.snapshots) {
         if (supersedesSurfaceSnapshot(event, snapshot.event)) this.removeSnapshot(snapshotKey, snapshot);
       }
       if (isPersistentOutput(event)) {
-        if (surface.output.retains?.(event) ?? true) this.persistent!.accept(event, order);
+        if (surface.output.retains?.(event) ?? true) this.persistent.accept(event, order);
       } else if (resolveSurfaceDelivery(event.target.surface, event).disposition !== "ignore") {
         const snapshotKey = surfaceOutputSnapshotKey(event);
         if (snapshotKey !== undefined) this.retainSnapshot(surface, snapshotKey, event, order);
@@ -397,7 +407,7 @@ export class SurfaceManager {
     this.beginShutdown();
     this.completionEnricher.stop();
     this.acceptingOutput = false;
-    this.removePersistenceObserver?.();
+    this.removeOutputObserver?.();
     for (const [key, snapshot] of this.snapshots) this.removeSnapshot(key, snapshot);
     let persistenceError: unknown;
     try { await this.persistent?.close(); }
@@ -509,7 +519,7 @@ export class SurfaceManager {
   }
 
   private routeOutput(event: OutputEvent): void {
-    if (!this.acceptingOutput) {
+    if (!this.acceptingOutput || !this.liveOutput.has(event)) {
       return;
     }
     const surface = this.surfacesByAccount.get(
@@ -874,7 +884,7 @@ export class SurfaceManager {
       return;
     }
     try {
-      await surface.output.handle(routedEvent);
+      await surface.output.handle(routedEvent, this.liveOutput.get(event));
       if (routedEvent.type !== "text.delta") {
         this.logger.debug(
           {
