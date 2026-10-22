@@ -62,40 +62,47 @@ export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOpti
     const path = join(options.directory, entry.name);
     // An unrelated directory without a manifest is not a retention candidate.
     try { lstatSync(join(path, "manifest.json")); } catch (error) { if (missing(error)) continue; throw error; }
-    assertDirectoryIdentitySync(options.directory, root);
-    const identity = inspectPrivateDirectoryAccessSync(path);
-    const snapshot = readManifest(path);
-    assertDirectoryIdentitySync(path, identity);
-    assertDirectoryIdentitySync(options.directory, root);
-    if (snapshot === undefined) continue;
-    const manifest = snapshot.manifest;
-    if (manifest.version !== 2 || (!options.label && !options.labels && ["relay.chat", "relay.responses"].includes(manifest.label)) || (options.label !== undefined && manifest.label !== options.label) || (options.labels !== undefined && !options.labels.includes(manifest.label))) {
-      continue;
+    try {
+      assertDirectoryIdentitySync(options.directory, root);
+      const identity = inspectPrivateDirectoryAccessSync(path);
+      const snapshot = readManifest(path);
+      assertDirectoryIdentitySync(path, identity);
+      assertDirectoryIdentitySync(options.directory, root);
+      const manifest = snapshot.manifest;
+      if (manifest.version !== 2 || (!options.label && !options.labels && ["relay.chat", "relay.responses"].includes(manifest.label)) || (options.label !== undefined && manifest.label !== options.label) || (options.labels !== undefined && !options.labels.includes(manifest.label))) {
+        continue;
+      }
+      const sessions = byLabel.get(options.labels ? "combined" : manifest.label) ?? [];
+      const stats = directoryStats(path, scan);
+      assertDirectoryIdentitySync(path, identity);
+      assertDirectoryIdentitySync(options.directory, root);
+      sessions.push({
+        createdAtMs: manifest.createdAtMs,
+        lastActivityAtMs: Math.max(manifest.createdAtMs, stats.lastModifiedAtMs),
+        path,
+        size: stats.size,
+        identity,
+        manifest: snapshot,
+      });
+      byLabel.set(options.labels ? "combined" : manifest.label, sessions);
+    } catch (error) {
+      if (!candidateDisappearedSync(error, options.directory, root, path)) throw error;
     }
-    const sessions = byLabel.get(options.labels ? "combined" : manifest.label) ?? [];
-    const stats = directoryStats(path, scan);
-    assertDirectoryIdentitySync(path, identity);
-    assertDirectoryIdentitySync(options.directory, root);
-    sessions.push({
-      createdAtMs: manifest.createdAtMs,
-      lastActivityAtMs: Math.max(manifest.createdAtMs, stats.lastModifiedAtMs),
-      path,
-      size: stats.size,
-      identity,
-      manifest: snapshot,
-    });
-    byLabel.set(options.labels ? "combined" : manifest.label, sessions);
   }
   assertDirectoryIdentitySync(options.directory, root);
   const result = planRetention(options, byLabel);
   for (const session of result.remove) {
     if (isProtectedSession(options, session.path)) { result.bytes += session.size; continue; }
-    assertDirectoryIdentitySync(options.directory, root);
-    assertDirectoryIdentitySync(session.path, session.identity);
-    assertManifestSnapshot(session.manifest, readManifest(session.path));
-    assertDirectoryIdentitySync(session.path, session.identity);
-    assertDirectoryIdentitySync(options.directory, root);
-    rmSync(session.path, { force: true, recursive: true });
+    try {
+      assertDirectoryIdentitySync(options.directory, root);
+      assertDirectoryIdentitySync(session.path, session.identity);
+      assertManifestSnapshot(session.manifest, readManifest(session.path));
+      assertDirectoryIdentitySync(session.path, session.identity);
+      assertDirectoryIdentitySync(options.directory, root);
+      rmSync(session.path, { force: true, recursive: true });
+    } catch (error) {
+      if (!candidateDisappearedSync(error, options.directory, root, session.path)) throw error;
+    }
   }
   return result.bytes;
 }
@@ -116,27 +123,25 @@ export async function pruneModelTrafficDumpSessionsAsync(options: PruneModelTraf
     if (!entry.isDirectory()) continue;
     const path = join(options.directory, entry.name);
     try { await fs.lstat(join(path, "manifest.json")); } catch (error) { signal.throwIfAborted(); if (missing(error)) continue; throw error; }
-    await assertDirectoryIdentity(options.directory, root, signal);
-    const identity = await inspectPrivateDirectoryAccess(path, { signal });
-    const snapshot = await readManifestAsync(path, signal);
-    await assertDirectoryIdentity(path, identity, signal);
-    await assertDirectoryIdentity(options.directory, root, signal);
-    if (snapshot === undefined) continue;
-    const manifest = snapshot.manifest;
-    if (manifest.version !== 2 || (!options.label && !options.labels && ["relay.chat", "relay.responses"].includes(manifest.label))
-      || (options.label !== undefined && manifest.label !== options.label) || (options.labels !== undefined && !options.labels.includes(manifest.label))) continue;
-    const stats = await directoryStatsAsync(path, signal, scan).catch((error: unknown) => {
-      // Another maintenance owner may have removed an inactive session while this scan yielded.
-      if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
-      throw error;
-    });
-    if (!stats) continue;
-    await assertDirectoryIdentity(path, identity, signal);
-    await assertDirectoryIdentity(options.directory, root, signal);
-    const sessions = byLabel.get(options.labels ? "combined" : manifest.label) ?? [];
-    sessions.push({ path, createdAtMs: manifest.createdAtMs, lastActivityAtMs: Math.max(manifest.createdAtMs, stats.lastModifiedAtMs), size: stats.size,
-      identity, manifest: snapshot });
-    byLabel.set(options.labels ? "combined" : manifest.label, sessions);
+    try {
+      await assertDirectoryIdentity(options.directory, root, signal);
+      const identity = await inspectPrivateDirectoryAccess(path, { signal });
+      const snapshot = await readManifestAsync(path, signal);
+      await assertDirectoryIdentity(path, identity, signal);
+      await assertDirectoryIdentity(options.directory, root, signal);
+      const manifest = snapshot.manifest;
+      if (manifest.version !== 2 || (!options.label && !options.labels && ["relay.chat", "relay.responses"].includes(manifest.label))
+        || (options.label !== undefined && manifest.label !== options.label) || (options.labels !== undefined && !options.labels.includes(manifest.label))) continue;
+      const stats = await directoryStatsAsync(path, signal, scan);
+      await assertDirectoryIdentity(path, identity, signal);
+      await assertDirectoryIdentity(options.directory, root, signal);
+      const sessions = byLabel.get(options.labels ? "combined" : manifest.label) ?? [];
+      sessions.push({ path, createdAtMs: manifest.createdAtMs, lastActivityAtMs: Math.max(manifest.createdAtMs, stats.lastModifiedAtMs), size: stats.size,
+        identity, manifest: snapshot });
+      byLabel.set(options.labels ? "combined" : manifest.label, sessions);
+    } catch (error) {
+      if (!await candidateDisappeared(error, options.directory, root, path, signal)) throw error;
+    }
   }
   await assertDirectoryIdentity(options.directory, root, signal);
   const result = planRetention(options, byLabel);
@@ -144,15 +149,20 @@ export async function pruneModelTrafficDumpSessionsAsync(options: PruneModelTraf
     signal.throwIfAborted();
     // The owner may have created a writer session after the plan was computed.
     if (isProtectedSession(options, session.path)) { result.bytes += session.size; continue; }
-    await assertDirectoryIdentity(options.directory, root, signal);
-    await assertDirectoryIdentity(session.path, session.identity, signal);
-    assertManifestSnapshot(session.manifest, await readManifestAsync(session.path, signal));
-    await assertDirectoryIdentity(session.path, session.identity, signal);
-    await assertDirectoryIdentity(options.directory, root, signal);
-    signal.throwIfAborted();
-    // No asynchronous gap after the final live-writer check and deletion submission.
-    if (isProtectedSession(options, session.path)) { result.bytes += session.size; continue; }
-    await fs.rm(session.path, { force: true, recursive: true });
+    try {
+      await assertDirectoryIdentity(options.directory, root, signal);
+      await assertDirectoryIdentity(session.path, session.identity, signal);
+      assertManifestSnapshot(session.manifest, await readManifestAsync(session.path, signal));
+      await assertDirectoryIdentity(session.path, session.identity, signal);
+      await assertDirectoryIdentity(options.directory, root, signal);
+      signal.throwIfAborted();
+      // No asynchronous gap after the final live-writer check and deletion submission.
+      if (isProtectedSession(options, session.path)) { result.bytes += session.size; continue; }
+      await fs.rm(session.path, { force: true, recursive: true });
+    } catch (error) {
+      if (!await candidateDisappeared(error, options.directory, root, session.path, signal)) throw error;
+    }
+    // A planned session removed by another owner also releases this owner's accounted bytes.
     options.onRemoved?.(session.size);
   }
   signal.throwIfAborted();
@@ -222,6 +232,31 @@ function missing(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
+function candidateDisappearedSync(error: unknown, directory: string, root: DirectoryIdentity, path: string): boolean {
+  if (!missing(error)) return false;
+  assertDirectoryIdentitySync(directory, root);
+  try { lstatSync(path); } catch (currentError) {
+    if (!missing(currentError)) throw currentError;
+    assertDirectoryIdentitySync(directory, root);
+    return true;
+  }
+  return false;
+}
+
+async function candidateDisappeared(error: unknown, directory: string, root: DirectoryIdentity, path: string, signal: AbortSignal): Promise<boolean> {
+  signal.throwIfAborted();
+  if (!missing(error)) return false;
+  await assertDirectoryIdentity(directory, root, signal);
+  try { await fs.lstat(path); } catch (currentError) {
+    signal.throwIfAborted();
+    if (!missing(currentError)) throw currentError;
+    await assertDirectoryIdentity(directory, root, signal);
+    return true;
+  }
+  signal.throwIfAborted();
+  return false;
+}
+
 function optionalRootSync(path: string): DirectoryIdentity | undefined {
   try { lstatSync(path); } catch (error) { if (missing(error)) return undefined; throw error; }
   return inspectPrivateDirectoryAccessSync(path);
@@ -237,15 +272,17 @@ function isProtectedSession(options: PruneModelTrafficDumpOptions, path: string)
     || options.protectedSessionDirectories?.includes(path) === true;
 }
 
-function readManifest(directory: string): ManifestSnapshot | undefined {
+function readManifest(directory: string): ManifestSnapshot {
   const path = join(directory, "manifest.json");
-  let before: Stats;
-  try { before = lstatSync(path); } catch (error) { if (missing(error)) return undefined; throw error; }
+  const before = lstatSync(path);
   if (!before.isFile() || before.size > maximumManifestBytes) throw new Error("Traffic dump maintenance manifest type or size invalid");
   const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0));
   try {
     const opened = fstatSync(descriptor);
-    if (!sameFile(before, opened)) throw new Error("Traffic dump maintenance manifest changed");
+    if (!sameFile(before, opened)) {
+      lstatSync(path);
+      throw new Error("Traffic dump maintenance manifest changed");
+    }
     const buffer = Buffer.alloc(maximumManifestBytes + 1);
     let length = 0;
     while (length < buffer.length) {
@@ -253,7 +290,11 @@ function readManifest(directory: string): ManifestSnapshot | undefined {
       if (count === 0) break;
       length += count;
     }
-    if (length > maximumManifestBytes || !sameFile(opened, fstatSync(descriptor)) || !sameFile(opened, lstatSync(path))) {
+    const after = fstatSync(descriptor);
+    // Unlink changes descriptor ctime too. Preserve the path's ENOENT before
+    // classifying metadata changes so the caller can verify whole-session removal.
+    const pathAfter = lstatSync(path);
+    if (length > maximumManifestBytes || !sameFile(opened, after) || !sameFile(opened, pathAfter)) {
       throw new Error("Traffic dump maintenance manifest changed or exceeds read limit");
     }
     return { manifest: parseManifest(buffer.subarray(0, length).toString("utf8")), metadata: opened };
@@ -284,7 +325,7 @@ function directoryStats(directory: string, scan: { entries: number }, depth = 0)
   return { lastModifiedAtMs, size };
 }
 
-async function readManifestAsync(directory: string, signal: AbortSignal): Promise<ManifestSnapshot | undefined> {
+async function readManifestAsync(directory: string, signal: AbortSignal): Promise<ManifestSnapshot> {
   let file: import("node:fs/promises").FileHandle | undefined;
   try {
     const path = join(directory, "manifest.json");
@@ -294,7 +335,10 @@ async function readManifestAsync(directory: string, signal: AbortSignal): Promis
     file = await fs.open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0));
     signal.throwIfAborted();
     const status = await file.stat();
-    if (!sameFile(before, status)) throw new Error("Traffic dump maintenance manifest changed");
+    if (!sameFile(before, status)) {
+      await fs.lstat(path);
+      throw new Error("Traffic dump maintenance manifest changed");
+    }
     const buffer = Buffer.alloc(maximumManifestBytes + 1);
     let length = 0;
     while (length < buffer.length) {
@@ -303,14 +347,15 @@ async function readManifestAsync(directory: string, signal: AbortSignal): Promis
       if (bytesRead === 0) break;
       length += bytesRead;
     }
-    if (length > maximumManifestBytes || !sameFile(status, await file.stat()) || !sameFile(status, await fs.lstat(path))) {
+    const after = await file.stat();
+    const pathAfter = await fs.lstat(path);
+    if (length > maximumManifestBytes || !sameFile(status, after) || !sameFile(status, pathAfter)) {
       throw new Error("Traffic dump maintenance manifest changed or exceeds read limit");
     }
     signal.throwIfAborted();
     return { manifest: parseManifest(buffer.subarray(0, length).toString("utf8")), metadata: status };
   } catch (error) {
     signal.throwIfAborted();
-    if (missing(error)) return undefined;
     throw error;
   } finally { await file?.close(); }
 }
