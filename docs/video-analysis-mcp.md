@@ -2,7 +2,7 @@
 
 `scripts/video-analysis-mcp.mjs` 提供独立 stdio MCP 工具 `analyze_video`。Codex 调用工具，工具将指定视频和问题发送给管理员配置的 Strata `/v1/responses`，再把分析文字返回 Codex。不修改 Codex 本体，不经过 Gateway 的 Provider Proxy，不写会话历史或数据库，也不安装、启停 Strata。
 
-入口使用 Node.js 22.22.0+ 和项目已有的 `undici`，无新增依赖。运行前完成本项目正常依赖安装。工具默认不启动，由配置它的 MCP 客户端管理进程。
+入口使用 Node.js 22.23.4+ 和项目已有的 `undici`，无新增依赖。运行前完成本项目正常依赖安装。工具默认不启动，由配置它的 MCP 客户端管理进程。
 
 ## 链路与前提
 

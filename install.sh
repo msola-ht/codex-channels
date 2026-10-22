@@ -49,9 +49,9 @@ for command in git node npm; do
 done
 
 node -e '
-const [major, minor] = process.versions.node.split(".").map(Number);
-if (major < 22 || (major === 22 && minor < 22)) process.exit(1);
-' || fail "Node.js 版本过低；需要 22.22.0 或更高版本"
+const [major, minor, patch] = process.versions.node.split(".").map(Number);
+if (major < 22 || (major === 22 && (minor < 23 || (minor === 23 && patch < 4)))) process.exit(1);
+' || fail "Node.js 版本过低；需要 22.23.4 或更高版本"
 
 npm_version="$(npm --version 2>/dev/null)" || fail "无法读取 npm 版本"
 npm_global_root="$(npm root --global 2>/dev/null)" || fail "无法读取 npm 全局安装目录"

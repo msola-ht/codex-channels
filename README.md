@@ -1,7 +1,7 @@
 # Codex Connect Gateway
 
 [![CI](https://github.com/msola-ht/codex-channels/actions/workflows/ci.yml/badge.svg)](https://github.com/msola-ht/codex-channels/actions/workflows/ci.yml)
-![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.22.0-339933?logo=nodedotjs&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.23.4-339933?logo=nodedotjs&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20Preview-555555)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -13,7 +13,7 @@
 
 ## 快速开始
 
-安装 Node.js 22.22.0+、Git 和 npm 后，从官方 `main` 安装：
+安装 Node.js 22.23.4+、Git 和 npm 后，从官方 `main` 安装：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh

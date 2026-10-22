@@ -85,7 +85,7 @@ $codexCommand = Get-Command codex -ErrorAction SilentlyContinue
 if (-not $git -or -not $node -or -not $npm) { throw '缺少必需命令：git、node 或 npm' }
 
 $nodeVersion = [version]((& $node '--version').Trim().TrimStart('v'))
-if ($nodeVersion -lt [version]'22.22.0') { throw 'Node.js 版本过低；需要 22.22.0 或更高版本' }
+if ($nodeVersion -lt [version]'22.23.4') { throw 'Node.js 版本过低；需要 22.23.4 或更高版本' }
 $npmVersion = (& $npm '--version').Trim()
 $npmRoot = (& $npm 'root' '--global').Trim()
 $npmPrefix = (& $npm 'prefix' '--global').Trim()
