@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 // Process-wide limits include all WebUI instances. Buffers held by the scanner are
 // separately bounded by two builders, a 64 KiB block and a 16 MiB line each.
 const maximumBytes = 128 * 1_048_576;
 const maximumEntries = 256;
-const rowWidth = 6;
+const rowWidth = 10;
 const chunkRows = 4096;
 const entryBytes = 8192;
 const entries = new Set();
@@ -35,7 +35,7 @@ function release(bytes, owner) { allocatedBytes -= bytes; owner.bytes -= bytes; 
 function hashId(id) { return Math.imul((id >>> 0) ^ Math.floor(id / 0x100000000), 0x9e3779b1) >>> 0; }
 
 class Offsets {
-  constructor(owner) { this.owner = owner; this.chunks = []; this.count = 0; this.slots = undefined; this.order = undefined; }
+  constructor(owner) { this.owner = owner; this.chunks = []; this.hashes = []; this.count = 0; this.slots = undefined; this.order = undefined; }
   get(slot, field) { return this.chunks[Math.floor(slot / chunkRows)][slot % chunkRows * rowWidth + field]; }
   set(slot, field, value) { this.chunks[Math.floor(slot / chunkRows)][slot % chunkRows * rowWidth + field] = value; }
   lookup(id) {
@@ -53,7 +53,7 @@ class Offsets {
     while (slots[position] !== 0) position = (position + 1) & (slots.length - 1);
     slots[position] = slot + 1;
   }
-  async add(record, offset, length, context) {
+  async add(record, offset, length, context, checksum) {
     if (record.kind !== "request" && record.kind !== "response") return;
     if (!Number.isSafeInteger(record.id) || record.id < 1) return;
     if (record.kind === "request" && !Number.isFinite(record.startedAtMs)) throw this.owner.error("traffic_unavailable", "调用索引缺少有效请求时间");
@@ -70,7 +70,10 @@ class Offsets {
         if (this.slots) release(this.slots.byteLength, this.owner);
         this.slots = slots;
       }
-      if (this.count % chunkRows === 0) this.chunks.push(allocate(Float64Array, chunkRows * rowWidth, this.owner));
+      if (this.count % chunkRows === 0) {
+        this.chunks.push(allocate(Float64Array, chunkRows * rowWidth, this.owner));
+        this.hashes.push(allocate(Uint32Array, chunkRows * 8, this.owner));
+      }
       slot = this.count++;
       this.set(slot, 0, record.id);
       this.insertHash(slot);
@@ -78,7 +81,15 @@ class Offsets {
     const field = record.kind === "request" ? 1 : 3;
     this.set(slot, field, offset + 1);
     this.set(slot, field + 1, length);
+    this.hashes[Math.floor(slot / chunkRows)].set(checksum, slot % chunkRows * 8 + (record.kind === "request" ? 0 : 4));
     if (record.kind === "request") this.set(slot, 5, record.startedAtMs);
+    if (record.kind === "request") {
+      const key = continuationKey(record);
+      for (let field = 0; field < 4; field++) this.set(slot, 6 + field, key?.[field] ?? 0);
+    }
+  }
+  matches(slot, kind, bytes) {
+    return matchesChecksum(this.hashes[Math.floor(slot / chunkRows)], slot % chunkRows * 8 + (kind === "request" ? 0 : 4), bytes);
   }
   async sort(context) {
     if (this.order) { release(this.order.byteLength, this.owner); this.order = undefined; }
@@ -111,11 +122,126 @@ class Offsets {
       }
       if (source !== order) order.set(source);
     } finally { release(scratch.byteLength, this.owner); }
+    if (this.idOrder) release(this.idOrder.byteLength, this.owner);
+    this.idOrder = await orderedSlots(count, this.owner, context, index => order[index],
+      (left, right) => this.get(left, 0) - this.get(right, 0));
+    if (this.requestOrder) release(this.requestOrder.byteLength, this.owner);
+    this.requestOrder = await orderedSlots(count, this.owner, context, index => order[index],
+      (left, right) => this.get(left, 1) - this.get(right, 1));
+    if (this.continuations) release(this.continuations.byteLength, this.owner);
+    let related = 0;
+    for (const slot of order) if (this.get(slot, 6) !== 0) related++;
+    let position = 0;
+    this.continuations = await orderedSlots(related, this.owner, context, () => {
+      while (this.get(order[position], 6) === 0) position++;
+      return order[position++];
+    }, (left, right) => this.compareKey(left, right) || this.get(left, 0) - this.get(right, 0));
+  }
+  compareKey(left, right) {
+    for (let field = 6; field < 10; field++) {
+      const difference = this.get(left, field) - this.get(right, field);
+      if (difference !== 0) return difference;
+    }
+    return 0;
+  }
+  continuationRange(request) {
+    const key = continuationKey(request);
+    if (!key) return [0, 0];
+    return equalRange(this.continuations, slot => {
+      for (let field = 0; field < 4; field++) {
+        const difference = this.get(slot, field + 6) - key[field];
+        if (difference !== 0) return difference;
+      }
+      return 0;
+    });
   }
 }
 
+function continuationKey(request) {
+  const valid = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/u.test(value);
+  if (request.transport !== "websocket" || request.requestKind !== "turn"
+    || !valid(request.threadId) || !valid(request.turnId)) return undefined;
+  const hash = createHash("sha256").update(JSON.stringify([
+    request.threadId, request.turnId, request.account, request.url,
+  ])).digest();
+  // Zero in the first field means ineligible; hashes only select candidates.
+  return [hash.readUInt32BE(0) + 1, hash.readUInt32BE(4), hash.readUInt32BE(8), hash.readUInt32BE(12)];
+}
+
+class TraceOffsets {
+  constructor(owner) { this.owner = owner; this.chunks = []; this.hashes = []; this.count = 0; }
+  get(slot, field) { return this.chunks[Math.floor(slot / chunkRows)][slot % chunkRows * 3 + field]; }
+  async add(record, offset, length, _context, checksum) {
+    const keys = [];
+    if (Number.isSafeInteger(record?.interaction) && record.interaction > 0) keys.push(record.interaction);
+    if (record?.kind === "websocket_close" && Number.isSafeInteger(record.connection) && record.connection > 0) keys.push(-record.connection);
+    for (const key of keys) {
+      if (this.count % chunkRows === 0) {
+        this.chunks.push(allocate(Float64Array, chunkRows * 3, this.owner));
+        this.hashes.push(allocate(Uint32Array, chunkRows * 4, this.owner));
+      }
+      const row = this.chunks[Math.floor(this.count / chunkRows)];
+      row.set([key, offset, length], this.count % chunkRows * 3);
+      this.hashes[Math.floor(this.count / chunkRows)].set(checksum, this.count % chunkRows * 4);
+      this.count++;
+    }
+  }
+  matches(slot, bytes) { return matchesChecksum(this.hashes[Math.floor(slot / chunkRows)], slot % chunkRows * 4, bytes); }
+  async sort(context) {
+    if (this.order) release(this.order.byteLength, this.owner);
+    this.order = await orderedSlots(this.count, this.owner, context, index => index,
+      (left, right) => this.get(left, 0) - this.get(right, 0) || this.get(left, 1) - this.get(right, 1));
+  }
+  range(key) { return equalRange(this.order, slot => this.get(slot, 0) - key); }
+}
+
+function rowChecksum(bytes) {
+  const hash = createHash("sha256").update(bytes).digest();
+  return [hash.readUInt32BE(0), hash.readUInt32BE(4), hash.readUInt32BE(8), hash.readUInt32BE(12)];
+}
+
+function matchesChecksum(hashes, offset, bytes) {
+  return rowChecksum(bytes).every((value, index) => hashes[offset + index] === value);
+}
+
+function equalRange(order, compare) {
+  let low = 0;
+  let high = order.length;
+  while (low < high) { const middle = Math.floor((low + high) / 2); if (compare(order[middle]) < 0) low = middle + 1; else high = middle; }
+  const start = low;
+  high = order.length;
+  while (low < high) { const middle = Math.floor((low + high) / 2); if (compare(order[middle]) <= 0) low = middle + 1; else high = middle; }
+  return [start, low];
+}
+
+async function orderedSlots(count, owner, context, value, compare) {
+  const order = allocate(Uint32Array, count, owner);
+  const scratch = allocate(Uint32Array, count, owner);
+  try {
+    for (let index = 0; index < count; index++) { order[index] = value(index); if (index % 4096 === 0) await context.checkpoint(); }
+    let source = order;
+    let target = scratch;
+    for (let width = 1; width < count; width *= 2) {
+      for (let start = 0; start < count; start += width * 2) {
+        let left = start;
+        const middle = Math.min(start + width, count);
+        let right = middle;
+        const end = Math.min(start + width * 2, count);
+        for (let out = start; out < end; out++) {
+          target[out] = right >= end || left < middle && compare(source[left], source[right]) <= 0 ? source[left++] : source[right++];
+          if (out % 16384 === 0) await context.checkpoint();
+        }
+      }
+      [source, target] = [target, source];
+    }
+    if (source !== order) order.set(source);
+    return order;
+  } catch (error) { release(order.byteLength, owner); throw error; }
+  finally { release(scratch.byteLength, owner); }
+}
+
 /** The reader supplies secure file opening and manifest/root identity checks. */
-export function createTrafficOffsetStore({ signal, openSource, createContext, error }) {
+export function createTrafficOffsetStore({ signal, openSource, createContext, error, trace = false }) {
   const sessions = new Map();
   const jobs = new Set();
   const controller = new AbortController();
@@ -137,17 +263,19 @@ export function createTrafficOffsetStore({ signal, openSource, createContext, er
       const { handle, identity } = source;
       const size = identity.size;
       const previous = entry.identity;
-      const incremental = previous && !entry.provisional && sameSource(previous, identity) && size > previous.size;
+      const extension = previous && sameSource(previous, identity) && size > previous.size;
+      const incremental = extension && !entry.provisional;
       if (!incremental) {
         // A replaced or truncated source never reuses offsets from the previous file.
         release(entry.bytes - entryBytes, entry);
-        entry.index = new Offsets(entry);
+        entry.index = trace ? new TraceOffsets(entry) : new Offsets(entry);
         entry.resume = 0;
+        if (!extension) entry.generation = randomUUID();
       }
       const start = entry.resume;
-      const result = await scan(handle, start, size, incremental ? previous.size : 0, context,
-        async (record, offset, length) => entry.index.add(record, offset, length, context), error);
-      if (incremental && result.prefix !== entry.digest) throw error("traffic_unavailable", "调用索引的已记录内容发生变化，请刷新后重试");
+      const result = await scan(handle, start, size, extension ? previous.size : 0, context,
+        async (record, offset, length, checksum) => entry.index.add(record, offset, length, context, checksum), error, trace);
+      if (extension && result.prefix !== entry.digest) throw error("traffic_unavailable", "调用索引的已记录内容发生变化，请刷新后重试");
       // Hash the fixed opening prefix, including any unfinished tail. Re-read it
       // before publication so concurrent prefix rewrites cannot masquerade as append.
       const verified = await digest(handle, size, context);
@@ -248,7 +376,7 @@ export function createTrafficOffsetStore({ signal, openSource, createContext, er
       entry.pins++;
       let released = false;
       return {
-        index: entry.index, identity: entry.identity, pending,
+        index: entry.index, identity: entry.identity, pending, resume: entry.resume, generation: entry.generation,
         confirmSnapshot() { entry.delivered = true; },
         release() { if (!released) { released = true; entry.pins--; } },
       };
@@ -298,7 +426,7 @@ async function digest(handle, size, context) {
   return hash.digest("hex");
 }
 
-async function scan(handle, start, size, prefixSize, context, visit, error) {
+async function scan(handle, start, size, prefixSize, context, visit, error, trace) {
   const hash = createHash("sha256");
   const prefix = createHash("sha256");
   const buffer = Buffer.allocUnsafe(65_536);
@@ -323,10 +451,11 @@ async function scan(handle, start, size, prefixSize, context, visit, error) {
         context.charge("records");
         if (length > 0) {
           let record;
-          try { record = JSON.parse(Buffer.concat(parts, length).toString("utf8")); }
+          const bytes = Buffer.concat(parts, length);
+          try { record = JSON.parse(bytes.toString("utf8")); }
           catch { throw error("traffic_unavailable", "调用索引记录损坏"); }
-          if (record?.version !== 2) throw error("traffic_unsupported_version", "不支持的调用索引版本");
-          await visit(record, resume, length);
+          if (!trace && record?.version !== 2) throw error("traffic_unsupported_version", "不支持的调用索引版本");
+          await visit(record, resume, length, rowChecksum(bytes));
         }
         resume = offset + end + 1;
         parts = []; length = 0;
@@ -343,10 +472,11 @@ async function scan(handle, start, size, prefixSize, context, visit, error) {
   if (length > 0) {
     context.charge("records");
     let record;
-    try { record = JSON.parse(Buffer.concat(parts, length).toString("utf8")); } catch { /* Torn tail is allowed. */ }
+    const bytes = Buffer.concat(parts, length);
+    try { record = JSON.parse(bytes.toString("utf8")); } catch { /* Torn tail is allowed. */ }
     if (record !== undefined) {
-      if (record?.version !== 2) throw error("traffic_unsupported_version", "不支持的调用索引版本");
-      await visit(record, resume, length);
+      if (!trace && record?.version !== 2) throw error("traffic_unsupported_version", "不支持的调用索引版本");
+      await visit(record, resume, length, rowChecksum(bytes));
       provisional = true;
     }
   }

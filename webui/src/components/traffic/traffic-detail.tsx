@@ -87,7 +87,7 @@ export function TrafficDetail({
         </CardContent>
       </Card>
       {traceLoading ? <p role="status" className="text-sm text-muted-foreground">{t("traffic.refreshingTrace")}</p> : null}
-      {!detail.tracePage.complete ? <Alert><AlertTitle>{t("traffic.readLimitedTitle")}</AlertTitle><AlertDescription>{t("traffic.readLimitedDescription")}</AlertDescription></Alert> : null}
+      {!detail.diagnosticsComplete || !detail.tracePage.complete ? <Alert><AlertTitle>{t("traffic.readLimitedTitle")}</AlertTitle><AlertDescription>{t("traffic.readLimitedDescription")}</AlertDescription></Alert> : null}
       {detail.response === null ? (
         <Card size="sm" aria-label={t("filters.response")}>
           <CardHeader><CardTitle>{t(detail.debug ? "traffic.debugUpstream" : "filters.response")}</CardTitle></CardHeader>

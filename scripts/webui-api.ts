@@ -1194,6 +1194,8 @@ export interface TrafficDebugStage {
 }
 
 export interface TrafficExchangeDetail {
+  /** False when optional trace aggregation could not be completed within its budget. */
+  diagnosticsComplete: boolean
   continuation?: {
     scope: "same_writer_thread_turn"
     complete: boolean
@@ -1294,7 +1296,7 @@ export interface TrafficExchangeDetail {
   } | null
   tracePage: {
     offset: number
-    /** null means that the shared read budget prevented a complete scan. */
+    /** null means that a complete event-index snapshot is not yet available. */
     total: number | null
     complete: boolean
     previousOffset: number | null
