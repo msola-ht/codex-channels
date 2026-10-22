@@ -258,7 +258,19 @@ export class TelegramSurface {
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = options.commands;
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
-    const apiExecutor = new TelegramApiExecutor(logger);
+    const apiExecutor = new TelegramApiExecutor(logger, (chatId, recipientNotification) => {
+      const outputTarget: ConversationTarget = {
+        surface: this.surface, accountId: this.accountId, conversationId: chatId,
+      };
+      if (recipientNotification) {
+        const userId = Number(chatId);
+        return Number.isSafeInteger(userId) && String(userId) === chatId
+          && this.notificationRecipients.has(userId)
+          && this.access.isAllowed({ target: outputTarget, actorId: chatId });
+      }
+      return (this.actorRegistry?.actors(outputTarget) ?? [])
+        .some(actorId => this.access.isAllowed({ target: outputTarget, actorId }));
+    });
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
         ? { finalMessageFormat: options.finalMessageFormat }
@@ -454,6 +466,10 @@ export class TelegramSurface {
     this.notificationRecipients = new Set(recipients);
   }
 
+  revalidateAccess(): void {
+    this.outbox.revalidateAccess();
+  }
+
   configurationChanged(change: SurfaceConfigurationChange): void {
     const replyMarkup = workspaceSwitchKeyboard(change.addedWorkspaces);
     const text = formatConfigurationChange(change);
@@ -462,6 +478,7 @@ export class TelegramSurface {
         String(chatId),
         text,
         replyMarkup.inline_keyboard.length > 0 ? replyMarkup : undefined,
+        true,
       );
     }
   }
@@ -475,6 +492,7 @@ export class TelegramSurface {
           String(chatId),
           text,
           replyMarkup.inline_keyboard.length > 0 ? replyMarkup : undefined,
+          true,
         )),
     );
   }

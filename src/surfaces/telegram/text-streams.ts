@@ -19,6 +19,7 @@ import { replyOptions, htmlSendOptions, operationEditOptions } from "./message-o
 interface StreamState {
   chatId: string;
   turnKey: string;
+  authorization: AbortSignal;
   text: string;
   messageId: number | undefined;
   creationUncertain: boolean;
@@ -38,6 +39,7 @@ export type TelegramFinalMessageFormat = "html" | "rich";
 /** Owns text delivery state; all sends use the Outbox's existing Conversation queue. */
 export class TelegramTextStreams {
   private readonly streams = new Map<string, StreamState>();
+  private readonly revokedStreams = new Map<string, { chatId: string; turnKey: string }>();
   private readonly notifiedTurns = new Set<string>();
   private streamCapacityWarningIssued = false;
 
@@ -56,8 +58,10 @@ export class TelegramTextStreams {
     const chatId = event.target.conversationId;
     const turnKey = this.turnKey(event.threadId, event.turnId);
     const key = this.streamKey(chatId, turnKey, event.itemId);
+    if (!this.executor.isAuthorized(chatId) || this.revokedStreams.has(key)) return;
     const existing = this.streams.get(key);
-    if (!existing && this.streams.size >= maximumTelegramActiveStreams) {
+    if (existing?.authorization.aborted) return;
+    if (!existing && this.streams.size + this.revokedStreams.size >= maximumTelegramActiveStreams) {
       if (!this.streamCapacityWarningIssued) {
         this.streamCapacityWarningIssued = true;
         this.logger.warn(
@@ -71,7 +75,7 @@ export class TelegramTextStreams {
       }
       return;
     }
-    if (this.streams.size < maximumTelegramActiveStreams) {
+    if (this.streams.size + this.revokedStreams.size < maximumTelegramActiveStreams) {
       this.streamCapacityWarningIssued = false;
     }
     if (!existing) {
@@ -88,7 +92,7 @@ export class TelegramTextStreams {
     if (!state.timer) {
       state.timer = setTimeout(() => {
         state.timer = undefined;
-        this.enqueue(chatId, (signal) => this.flush(chatId, key, false, undefined, signal), false);
+        this.enqueue(chatId, (signal) => this.flush(chatId, key, false, undefined, signal), false, { signal: state.authorization });
       }, 1_000);
       state.timer.unref();
     }
@@ -106,6 +110,7 @@ export class TelegramTextStreams {
     const chatId = event.target.conversationId;
     const turnKey = this.turnKey(event.threadId, event.turnId);
     const key = this.streamKey(chatId, turnKey, event.itemId);
+    if (this.revokedStreams.has(key)) throw new Error("Telegram 正文流授权已撤销");
     const existing = this.streams.get(key);
     const state = existing ?? this.createStream(chatId, turnKey);
     const completedText = `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`;
@@ -132,7 +137,7 @@ export class TelegramTextStreams {
       // Reliable output owns this state even if lifecycle observation clears the live Map.
       (signal) => this.flush(chatId, key, true, state, signal),
       true,
-      { purpose: "answer" },
+      { purpose: "answer", signal: state.authorization },
     );
     return;
   }
@@ -169,7 +174,25 @@ export class TelegramTextStreams {
 
   clear(): void {
     this.streams.clear();
+    this.revokedStreams.clear();
     this.notifiedTurns.clear();
+  }
+
+  revalidateAccess(): void {
+    for (const [key, state] of this.streams) {
+      if (!state.authorization.aborted && this.executor.isAuthorized(state.chatId)) continue;
+      if (state.timer) clearTimeout(state.timer);
+      this.streams.delete(key);
+      this.notifiedTurns.delete(state.turnKey);
+      this.revokedStreams.set(key, { chatId: state.chatId, turnKey: state.turnKey });
+    }
+  }
+
+  completeTurn(chatId: string, threadId: string, turnId: string): void {
+    const turnKey = this.turnKey(threadId, turnId);
+    for (const [key, state] of this.revokedStreams) {
+      if (state.chatId === chatId && state.turnKey === turnKey) this.revokedStreams.delete(key);
+    }
   }
 
   prepareInteraction(chatId: string): void {
@@ -224,6 +247,8 @@ export class TelegramTextStreams {
     if (!state) {
       return;
     }
+    signal = signal ? AbortSignal.any([signal, state.authorization]) : state.authorization;
+    signal.throwIfAborted();
     // 终态尝试从活动流脱离，Turn 完成不能从头重播一次已部分发送或结果不确定的回复。
     if (final && this.streams.get(key) === state) this.streams.delete(key);
     await this.flushState(chatId, state, final, signal);
@@ -312,6 +337,7 @@ export class TelegramTextStreams {
     return {
       chatId,
       turnKey,
+      authorization: this.executor.authorizationSignal(chatId),
       text: "",
       messageId: undefined,
       creationUncertain: false,
@@ -336,7 +362,11 @@ export class TelegramTextStreams {
   }
 
   private enqueue(chatId: string, run: (signal: AbortSignal) => Promise<void>, critical: boolean, options?: ConversationDeliveryOptions): boolean {
-    return this.delivery.enqueue(chatId, run, critical, options);
+    const authorization = this.executor.authorizationSignal(chatId);
+    return this.delivery.enqueue(chatId, run, critical, {
+      ...options,
+      signal: options?.signal ? AbortSignal.any([authorization, options.signal]) : authorization,
+    });
   }
 
   private async sendFirstChunk(chatId: string, state: StreamState, text: string, signal?: AbortSignal): Promise<number> {

@@ -196,12 +196,14 @@ export class TelegramOutbox {
     this.retryMessages.observe(event);
     if (event.type === "text.completed" && isEmptyCommentary(event)) this.textStreams.discard(event);
     if (event.type === "turn.started") {
+      if (!this.executor.isAuthorized(event.target.conversationId)) return;
       this.expireRunningOperations(event.threadId, (key) => key !== this.turnKey(event.threadId, event.turnId));
       this.clearExecutionTurns(event.threadId);
       this.reasoningMessages.delete(event.threadId);
       this.replyTargets.bindPending(event.target.conversationId, this.turnKey(event.threadId, event.turnId));
       this.typing.start(event.target.conversationId, this.turnActivityKey(event.threadId, event.turnId));
     } else if (event.type === "turn.completed") {
+      this.textStreams.completeTurn(event.target.conversationId, event.threadId, event.turnId);
       this.expireRunningOperations(event.threadId, (key) => key === this.turnKey(event.threadId, event.turnId));
       this.typing.stop(event.target.conversationId, this.turnActivityKey(event.threadId, event.turnId));
     } else if (event.type === "connection.lost") {
@@ -214,6 +216,7 @@ export class TelegramOutbox {
       this.closed
       || event.target.surface !== "telegram"
       || event.target.accountId !== (this.options.accountId ?? telegramDefaultAccountId)
+      || !this.executor.isAuthorized(event.target.conversationId)
     ) {
       return;
     }
@@ -274,7 +277,7 @@ export class TelegramOutbox {
       case "turn.started":
         this.enqueue(
           chatId,
-          async () => {
+          async (signal) => {
             await this.sendPanel(
               chatId,
               renderTelegramLifecyclePresentation(
@@ -286,6 +289,7 @@ export class TelegramOutbox {
               ),
               this.replyTargets.get(chatId, this.turnKey(event.threadId, event.turnId)),
               true,
+              signal,
             );
           },
           true,
@@ -305,12 +309,13 @@ export class TelegramOutbox {
         return;
       case "user.message": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           const messageId = await this.sendPanel(
             chatId,
             formatTelegramCliInput(event.text),
             undefined,
             true,
+            signal,
           );
           if (messageId !== undefined) {
             this.replyTargets.set(chatId, turnKey, messageId);
@@ -559,12 +564,13 @@ export class TelegramOutbox {
         return;
       }
       case "warning":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.send(
             chatId,
             formatCodexWarning(visibleUpstreamMessage(event.message)),
             undefined,
             true,
+            signal,
           );
         }, true);
         return;
@@ -586,7 +592,7 @@ export class TelegramOutbox {
         }, true);
         return;
       case "thread.availability":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.send(
             chatId,
             formatThreadAvailability(
@@ -596,56 +602,61 @@ export class TelegramOutbox {
             ),
             undefined,
             true,
+            signal,
           );
         }, true);
         return;
       case "connection.lost":
-        this.enqueue(chatId, async () => {
-          await this.send(chatId, formatConnectionLost(event.message));
+        this.enqueue(chatId, async (signal) => {
+          await this.send(chatId, formatConnectionLost(event.message), undefined, false, signal);
         }, true);
         return;
       case "connection.restored":
-        this.enqueue(chatId, async () => {
-          await this.send(chatId, formatConnectionRestored(event.message));
+        this.enqueue(chatId, async (signal) => {
+          await this.send(chatId, formatConnectionRestored(event.message), undefined, false, signal);
         }, true);
         return;
       case "account.updated":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.sendPanel(
             chatId,
             formatRuntimeAccountUpdate(event.authMode, event.planType),
             undefined,
             true,
+            signal,
           );
         }, true);
         return;
       case "account.rateLimits.updated":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.sendPanel(
             chatId,
             formatRuntimeRateLimitUpdate(event.rateLimits),
             undefined,
             true,
+            signal,
           );
         }, true);
         return;
       case "mcp.status.updated":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.sendPanel(
             chatId,
             formatRuntimeMcpStatusUpdate(event),
             undefined,
             event.status !== "failed",
+            signal,
           );
         }, event.status === "failed");
         return;
       case "mcp.oauth.completed":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.sendPanel(
             chatId,
             formatRuntimeMcpOAuthCompleted(event),
             undefined,
             event.success,
+            signal,
           );
         }, true);
         return;
@@ -697,10 +708,24 @@ export class TelegramOutbox {
   }
 
   sendChannelImage(chatId: string, imagePath: string): Promise<void> {
-    return this.delivery.runOrdered(
+    return this.runOrdered(
       chatId,
       (signal) => this.sendImage(chatId, imagePath, signal),
     );
+  }
+
+  revalidateAccess(): void {
+    const revoked = new Set(this.executor.revalidateAccess());
+    this.textStreams.revalidateAccess();
+    for (const chatId of revoked) this.typing.clear(chatId);
+    for (const [key, state] of this.operationLogs) {
+      if (!revoked.has(state.chatId)) continue;
+      this.cancelOperationTimer(state);
+      this.operationLogs.delete(key);
+    }
+    for (const [key, state] of this.reasoningMessages) {
+      if (revoked.has(state.chatId)) this.reasoningMessages.delete(key);
+    }
   }
 
   async close(): Promise<void> {
@@ -718,6 +743,7 @@ export class TelegramOutbox {
     }
     this.typing.close();
     await this.delivery.close();
+    this.executor.close();
     this.textStreams.clear();
     this.operationLogs.clear();
     this.operationUpdates.clear();
@@ -790,23 +816,31 @@ export class TelegramOutbox {
     if (this.closed) {
       return Promise.reject(new Error("Telegram Outbox 已关闭"));
     }
-    return this.delivery.runOrdered(chatId, run, requestSignal);
+    const authorization = this.executor.authorizationSignal(chatId);
+    return this.delivery.runOrdered(chatId, run,
+      requestSignal ? AbortSignal.any([requestSignal, authorization]) : authorization);
   }
 
   notifyPanel(
     chatId: string,
     text: string,
     replyMarkup?: InlineKeyboardMarkup,
+    recipientNotification = false,
   ): boolean {
-    return this.enqueue(chatId, (signal) => this.sendNotificationPanel(chatId, text, replyMarkup, signal), true);
+    return this.delivery.enqueue(chatId,
+      (signal) => this.sendNotificationPanel(chatId, text, replyMarkup, signal, recipientNotification), true,
+      { signal: this.executor.authorizationSignal(chatId, recipientNotification) });
   }
 
   deliverPanel(
     chatId: string,
     text: string,
     replyMarkup?: InlineKeyboardMarkup,
+    recipientNotification = false,
   ): Promise<void> {
-    return this.runOrdered(chatId, (signal) => this.sendNotificationPanel(chatId, text, replyMarkup, signal));
+    return this.delivery.runOrdered(chatId,
+      (signal) => this.sendNotificationPanel(chatId, text, replyMarkup, signal, recipientNotification),
+      this.executor.authorizationSignal(chatId, recipientNotification));
   }
 
   private enqueue(
@@ -815,7 +849,11 @@ export class TelegramOutbox {
     critical: boolean,
     options?: ConversationDeliveryOptions,
   ): boolean {
-    return this.delivery.enqueue(chatId, run, critical, options);
+    const authorization = this.executor.authorizationSignal(chatId);
+    return this.delivery.enqueue(chatId, run, critical, {
+      ...options,
+      signal: options?.signal ? AbortSignal.any([authorization, options.signal]) : authorization,
+    });
   }
 
   private async sendNotificationPanel(
@@ -823,12 +861,13 @@ export class TelegramOutbox {
     text: string,
     replyMarkup?: InlineKeyboardMarkup,
     signal?: AbortSignal,
+    recipientNotification = false,
   ): Promise<void> {
     const chunks = formatTelegramPanelChunks(text);
     for (const [index, chunk] of chunks.entries()) {
       const finalChunk = index === chunks.length - 1;
       await this.executor.call(
-        { chatId, operation: "sendMessage", critical: true },
+        { chatId, operation: "sendMessage", critical: true, recipientNotification },
         (requestSignal) => this.api.sendMessage(chatId, chunk, {
           ...htmlSendOptions(undefined, index > 0),
           ...(finalChunk && replyMarkup ? { reply_markup: replyMarkup } : {}),
@@ -1142,6 +1181,7 @@ export class TelegramOutbox {
             return;
           }
           state.messageId = await this.sendPanel(chatId, text, undefined, false, signal);
+          signal.throwIfAborted();
           if (state.sealed) {
             this.enqueueReasoningSeal(state);
           }

@@ -438,7 +438,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立A完成全链审查，无剩余本批阻断；主代理已读实施者和A完整报告，核对四个最终源码blob一致。A发现的ready拒绝及README错误文本旧合同均已补修。R05/R28标记已修复待补证；MetricsWorker线程、浏览器、真实模型/平台和跨OS未运行，Chat多轮搜索续答起点仅源码核对，不冒称实测。历史错误文本仍可能被原有读出/导出消费，本批未清理或重写。
 - 本地提交 `690935ff539685e413437b0e00f6b9c3f677cfbb`，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown和Gateway构建全部通过，15.6秒；提交后工作区干净，未推送。
 
-### 第十六批：B19（复审通过，待提交）
+### 第十六批：B19（已提交）
 
 - 输入 `690935ff`，R27。沿文件/journald错误分类到management `/services` recentError，以及日志安全文本到日志API梳理；拟抽现有日志投影为纯共享脚本，保日志入口公开导出、状态错误筛选/工具错误排除，先脱敏后压缩与截断。保留普通诊断可读性，与B18指标正文恒null不是同一合同。
 - 主代理改前用自有gateway.error.log三条Basic/Proxy-Authorization/双Cookie材料，经生产routeStatusManagement的 `/services` 子路由和自有HTTP返回200；recentError仍含三个合成值，日志sanitizeLogText对同材料均REDACTED。使用自有服务状态缓存、platform=null避免查询真实服务，未读用户日志/journald；该观察不包含外层管理鉴权。所有任务目录和HTTP已清理。
@@ -450,3 +450,20 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 最终sanitizer blob `45a86e6ccae2b53650bd1a605b2bc288fe3189b3` 已将敏感query未闭合引号保守消费到行尾，query投影前置于sk/sess等通用替换；主代理五组定向输入全无合成值且status保留，再经production `/services` HTTP子路由观察JSON Cookie/未闭合query/空格api key均返回200及REDACTED，资源全部清理。独立A读取四个最终blob并给无剩余本批阻断结论；主代理已读实施者与A完整报告。
 - 实施者14组及补修后的6组自有文件/注入journal/readServiceLogs观察无合成秘密残留，正常Pino/tracing诊断、工具/warn排除、depth32、失败503及600字边界保持；Node22类型/版本/Runtime边界、局部ESLint和diff检查通过。A报告引用的是较早打包清单；补充最终45a86版本的Node22 npm pack --dry-run --ignore-scripts --offline已完成，sanitizer4399B、status22337B、logs6711B全部收录，自有缓存清理，无安装或发布。
 - R27标记已修复待补证。外层鉴权、真实journald、浏览器与Windows/macOS服务未实机运行；只保证已识别凭据形式的安全投影，不声称可识别任意未知正文中的秘密。自定义Socket目录日志归属差异已另记待复现任务。
+- 本地提交 `3348a4745786cc59548fcc40dd36ce0c75c3446e`，正常Node22 Hook完整类型/版本/边界、Lint、84份Markdown、WebUI构建/Lint/2136字典键以及Gateway构建全部通过，44.2秒；提交后工作区干净，未推送。
+
+### 第十七批：B20（修复与独立复审完成，待提交）
+
+- 输入 `3348a474`，R36/R42。Telegram热撤权目前只替换访问策略/通知目标，现有正文流和显式图片需沿队列、重试与实际API边界复核；飞书应用配置需沿卡片等待、扫码、检查及patchAbility/patchConfig/publish各阶段复核并取消失效任务。仍授权目标保持正常，重授权不能复活旧操作；已远端提交结果不宣称可回滚。
+- 本批不发送真实渠道消息，不修改真实飞书应用，不读用户账户或内部会话。先确定现有授权/取消端口及最小关联修复，隔离观察阶段间撤权和正常路径；未观察的外部平台边界保留。
+- 最小方案已确定：TG由实际登记Actor复核目标权限，不能将群chatId当Actor；共享API执行器每次尝试复核，队列及流捕获可取消授权范围，撤权取消旧范围，重授权不能复活旧操作。仍有授权Actor的共享会话和仍授权的后台Thread不能机械取消。spool保持消费时解析并固定目标的合同，等待期间不改投新绑定；本批不扩共享发图接口，也不宣称持续复核Thread绑定快照。startup直发与命令context.reply并非本次正文/显式图片缺陷，须分别核对现有合同而不冒称被统一执行器覆盖。
+- FS控制器须拥有Doctor与授权任务，热撤权沿Surface取消对应Actor任务；卡片投递贯穿取消信号，迟到扫码回调不得重新发卡。configure内部检查及每次patch/publish前后复核，保留已完成与未确认的远端操作阶段，撤权后不继续发送结果卡，也不宣称已回滚。实现与独立复审尚未完成。
+- 主代理Node22初版集成观察：生产createTelegramSurface→Grammy本地API transformer→createTelegramRuntimeModule热reload，正常已登记Actor图片送至本地终端；名单内但未登记Actor的chat拒绝且未调用API；群会话登记两Actor，撤一人后另一人仍授权时可发。阻塞已进入sendPhoto的请求再排一张，撤权后立即重授权：已有请求确认返回，排队旧请求取消且无API，新提交正常。总sendPhoto目标为 `[11,-100,11,11]`；这区分已提交请求和未执行队列，不把本地取消当作撤回。未启动polling或连接真实平台，任务PNG及Surface资源已清理；后续补修仍须核对证据适用性。
+- 独立A发现共享ConversationDeliveryQueue的取消分支只移除/release，未标记可靠回执失败；生产queue+captureDelivery内联输出 `status:resolved,calls:0,checkpoints:[]`。新TG signal接入激活此路径，可导致持久非正文结果没有平台调用却被ack。已扩本批至该共享队列，取消未执行项及已取消入队均需明确fail，补修和关联复审中。
+- 重授权边界精确限定为已经进入TG平台队列/计时器并捕获授权范围的旧操作；尚在前级持久队列、未开始Surface执行的结果，首次投递继续按原owner及当前授权规则。没有引入整Turn永久封禁或journal授权代次，不改blocked/uncertain的人工处理合同；不得将此实现描述为永久禁止该Turn后续所有输出。
+- A继续发现多段输出丢失队列信号：部分Outbox事件的enqueue回调不向send/sendPanel传signal，首段API迟到确认后可在重授权范围下发后续段。生产Outbox内联以12000字符user.message、首段挂起→撤权→重授权→释放，观察 `status:resolved,calls:4`。已要求贯穿所有同类回调与多段发送链，不能仅补图片或首段；隔离API故意忽略abort模拟已提交请求迟到确认，没有真实平台发送。
+- 上述两项已补：共享队列取消先fail可靠回执，再释放；TG所有相关回调贯穿原signal，reasoning首次发送后也检查取消，防迟到二次入队。A复用原输入独立实观变为queue `rejected,calls:0,checkpoints:[]`、多段输出 `rejected,calls:1`。实施者另观同回执已有一项confirmed、另一等待项取消时仍rejected，入队前已取消也rejected；正常12000字仍为4段。真实进入429退避500ms后撤权再加，调用次数保持1并返回取消。
+- 主代理指出FS扫码卡失败时共用abort会阻止原Doctor错误提示，已分离官方轮询取消与Actor任务范围：投递失败仅终止轮询，仍授权可更新原卡；撤权/关闭取消整个范围。finally取消并收齐已发起卡片投递，避免移除任务owner后仍有迟到卡。实施者已观察失败提示“飞书配置未完成”，完整报告及A最终结论待收齐。
+- 实施者最终报告：Node22生产openDoctor→提取真实Doctor按钮→handleCardAction→HttpApi依赖端口，16个撤权再授权窗口覆盖Doctor读取/卡片、扫码回调/卡片、授权后检查、配置检查、三次写入及配置后检查；撤权后未进入下一次写入，迟到Doctor按钮无效。已发成功分别记录完成到patchAbility/patchConfig/publish；patchConfig未知记录completed=[patchAbility]及unconfirmed=patchConfig，明确403记录rejected=patchConfig。close阻止后续publish；正常扫码完成三写及结果卡；撤A不影响B原有按钮正常配置。未连接真实HTTP/扫码租户。
+- TG正常delta一次send及一次edit；旧计时器和同Item迟到delta在撤再加后不再调用API，其他授权用户与新Turn正常。9源码tsc、局部ESLint、Runtime边界与diff检查均退出0，所有异步作业收齐、任务资源清理。共享队列的飞书/微信调用方也经独立A源码核对，正常顺序合同保持，但没有重复三渠道真实平台运行。
+- 主代理已读实施者及独立A完整报告，并核9个最终源码blob与复审输入一致；A全链结论无剩余本批阻断。R36/R42标已修复待补证：本地生产类、热reload及SDK注入端口观察不等于真实Telegram送达、飞书扫码/远端配置或跨OS验收；startup/context.reply未扩，已发未知结果不自动重发/回滚。将通过正常Hook本地提交，未授权远端推送。

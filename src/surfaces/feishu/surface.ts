@@ -146,6 +146,10 @@ export class FeishuSurface implements SurfaceAdapter {
   readonly interactions: FeishuInteractionPort;
   readonly output: FeishuOutbox;
 
+  revalidateAccess(): void {
+    this.applicationSetup.revalidateAccess();
+  }
+
   private readonly inbox: FeishuInbox;
   private readonly adapter: FeishuConversationAdapter;
   private readonly commandCenter: FeishuCommandCenter;
