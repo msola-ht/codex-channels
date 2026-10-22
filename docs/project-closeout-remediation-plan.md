@@ -483,7 +483,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 主代理已读实施者最终完整报告，所有异步作业和自有资源已收齐。观察中Application准备/取消调用生产方法，但会话锁及最终Turn消费由隔离端口执行，不能称完整AppServer提交验收；锁内真实守卫的适用性由独立A源码追踪补充。最新tsc、9源码局部ESLint、Runtime边界及diff检查均通过。
 - 本地提交 `32763098cff7ad352f1105d5486ad34194179046`；正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown及Gateway构建均通过，16.3秒；提交后工作区干净，未推送。
 
-### 第十九批：B22（修复及独立复审完成，待提交）
+### 第十九批：B22（已提交）
 
 - 输入 `32763098`，R39/R45。关联微信普通通知及可靠最终正文的Surface入口、共享队列、Outbox、平台客户端、完整内容receipt与Journal确认边界。
 - R39保留关闭/worker/单请求取消，核对排队通知、多分片、文件回退及等待后的新调用；不以擦除signal实现排空，也不泛化改变其他渠道的关闭合同。
@@ -495,3 +495,11 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 源码DeliveryJournal Worker与Coordinator使用独立临时SQLite：正常完整文件ACK=1、records=0；文件未知、confirmed检查点失败及原文超限均ACK=0、records=1、uncertain且原文完全保留；明确文件拒绝按既有合同重试3次后回退，文本合计5条，仍ACK=0。检查点失败未误写文件confirmed。此证据不是实平台送达验收。
 - 主代理已读完整实施报告并核最终源码blob `fd848421312efd6f21e6622b045f0781f729307a` 与独立A输入一致；源码仅outbox.ts，模块README及投递合同同步。类型、局部Lint、Runtime边界及diff检查通过，全部异步任务收齐、临时Worker和目录已清理。R39/R45标已修复待补证，真实微信客户端呈现与外部网络未观察。
 - 独立A最终报告已收齐，复审覆盖Core原文、SurfaceManager快照/重放至SQLite确认删除及所有受影响发送入口，无剩余阻断；A复用实施者有效运行证据并独立形成源码判断，未宣称重复实机观察。上述阶段性“待收齐”现已完成，准备正常Hook提交。
+- 本地提交 `44390cdfb7790259ffe6fcea0f0af276dafd9712`；正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown与Gateway构建均通过，14.8秒；提交后工作区干净，未推送。
+
+### 第二十批：B23（修复及独立复审完成，待提交）
+
+- 输入 `44390cdf`，R40。主代理核parseUpdatesResponse→parseInboundContent→Monitor→Input/ConversationAdapter消费；微信上游HEAD与锁定43675b一致，官方voice_item.text属于语音转写，不等于独立text_item。
+- 修复前生产解析器实际输出：音频→文本返回audio且只保留转写，文本→音频返回ignored/unsupported-content；独立语音和文本正常。修复仅补文本分支已有音频的拒绝条件，两种顺序均按现有unsupported-content处理，不新增混合输入支持，不改变游标或存储格式。
+- 修复后七种输入依次为audio+text、text+audio、单语音转写、单文本、单音频媒体、audio+text+audio、重复文本；生产解析器返回ignored/ignored/audio/text/audio/ignored/ignored。生产Monitor→ConversationAdapter仅消费三条合法输入，提交口实际得到“转写正文”“独立说明”与localAudios引用，下载口调用1次、作用域释放2次、游标提交c1，无提示消息。下载、平台getUpdates及最终提交使用注入端口，没有真实微信或AppServer调用。初次观察使用不合合同的账号b23，被Monitor拒绝，改为b23@im.bot后完成观察，未因此改动产品校验。无持久脚本或临时资源。
+- 新独立A完成协议客户端→解析→Monitor去重/游标→Input授权与引用→Conversation提交及finally释放的关联复审，无剩余本批阻断。voice_item.text及ref_msg内部文字不经过新增判断；图片/文件/视频的合法说明组合不受影响。ignored正常参与批次完成，但结构畸形协议字段仍按原合同报错，不宣称所有无效数据都可忽略。主代理已读完整报告，源码blob `5c0c32783bd6b7ad4cfc34c96336fc16c973cb74` 与A一致；无活跃作业，准备正常Hook提交。R40标已修复待补证，真实平台是否生成混合组合仍未确认。

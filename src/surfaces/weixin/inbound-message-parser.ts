@@ -163,7 +163,7 @@ function parseInboundContent(
       "微信消息项目类型无效",
     );
     if (type === 1) {
-      if (text !== undefined) {
+      if (text !== undefined || audio !== undefined) {
         return null;
       }
       const textItem = requiredRecord(
