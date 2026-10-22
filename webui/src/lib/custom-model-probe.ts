@@ -8,6 +8,7 @@ const reasons: Record<string, MessageKey> = {
   "模型能力检测请求次数已达到上限": "modelProbe.reasons.requestLimit",
   "上游响应超过模型能力检测大小限制": "modelProbe.reasons.tooLarge",
   "上游未返回有效 JSON": "modelProbe.reasons.invalidJson",
+  "上游响应模型与请求模型不一致": "modelProbe.reasons.modelMismatch",
   "上游未返回完整且可验证的模型响应": "modelProbe.reasons.incomplete",
   "模型能力检测请求超时": "modelProbe.reasons.timeout",
   "模型能力检测网络、TLS、代理或请求转换失败": "modelProbe.reasons.network",

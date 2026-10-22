@@ -324,7 +324,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立 Astra/high 最终覆盖命令、Service、目录路由、固定/切换装配、同名精确身份、默认值、偏好存储与 Thread/Turn 消费、CollaborationMode/LunaReserve、关闭/授权和三端呈现，确认两项占位问题已关闭，无剩余 P1/P2 提交阻断。主代理已读完整报告并核对七源码 blob：Service `37965517`、Routing `d928b60f`、共享格式 `34aba1ed`、飞书 `57c44693`、Telegram `0769d1c5`；最终类型/版本/边界与变更呈现局部 ESLint 通过。用户指南进一步明确渠道按钮仍可能前置页面刷新；模式预设读取、首次自动接续历史查询等既有主依赖不属于本次解耦范围，不承诺主实例完全故障时所有操作可用。R11 标记已修复待补证，真实平台与跨 OS 限制保留。
 - 本地提交 `3d87ed66209c3044377dadf2c472a0c3fea7a5e1`；正常 Hook 类型/版本/模块边界、局部 lint、84 份 Markdown 与 Gateway 构建全部通过，耗时 13.7 秒。提交后工作区干净，未推送。
 
-### 第九批：B12（独立复审通过，待本地提交）
+### 第九批：B12（已提交 `322fc7ab`）
 
 - 输入 `3d87ed66`，范围 R44。飞书 Provider 导航、模型、effort 与 fast 卡片必须保持生成时的目标和设置身份；旧卡及点击后目录/默认读取等待中的状态变化不得把选择应用到后来目标。普通文字命令保留按执行时状态解释，不扩展为外部配置事务或跨入口 revision 改造。
 - 只读分析已沿 presentation → CommandCenter pending/Actor/Chat/message/TTL → adapter → CommandService → ConversationService 锁/Queue → ModelSelectionService → 默认配置 RPC beforeSubmit、Router/内存或 SQLite 偏好 → 新 Thread/下一 Turn 核对。现有卡片模型只保存 model.id、三种设置均通过字符串 execute，Provider 导航也依赖执行时 providerFilter；selectionScope 只有会话与工作区身份，不含当前/待生效设置或浏览范围。仅扩大 hash 不够，状态生成期间须固定原 scope 并在目录/默认等待后复核，避免旧值与新 scope 混合。
@@ -345,3 +345,16 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立 A 又发现补修中的跨 Provider 导航新卡不自洽：操作内保留的旧来源能力与下一页定向刷新不同。已将提交前旧快照核对与提交后新页目录覆盖分开。修后新 cp-b 卡保留 m1、effort/tier=null，随后精确选择 cp-b/m2 成功，偏好准确为 cp-b/m2/medium/null。官方 fast on/off、Workspace 始终覆盖为 fast 时显式 off 和显式模型选择均成功；定向 CP 选择只查询 cp/cp/tiercp，没有主目录请求。
 - 最终完整飞书受控用户链：Command model 总览→CommandCenter 点击 cp-a 导航→模型序号 1→新 effort 卡 high→fast on→新卡 off→Service.submit，cards=7、warnings=[]、texts=[]、每张已消费卡重放均 invalid。Thread 参数准确 cp-a/same，Turn 第五参数准确 cp-a/same/high/default，返回 task-thread/task-turn。仅平台收发和模型/Thread/Turn 外部端口为自有内存输入，未发送真实消息或写用户配置；对象均已关闭。
 - 独立 Astra/high 最终全链复审与两轮修订复核无剩余阻断。主代理已读完整报告并核对最终 Models blob `d5f901f1eb50da5aba3638422b4456458b133f42`、CommandCenter `9ab87c0a01a8082ab7e2335297f29561abd3b3de`；其余七源码保持复审输入。类型、版本和模块边界检查通过。R44 标记已修复待补证；真实飞书/App Server RPC、SQLite 落盘和 Windows/macOS 未观察，独立 CLI/WebUI 配置写者与最后读取至写入间不具备跨进程原子 revision 保证，不以本批快照守卫宣称解决该外部事务问题。
+- 本地提交 `322fc7ab759356a5b3a85011d3b55434237f86b5`；正常 Hook 类型/版本/边界、局部 lint、84 份 Markdown 和 Gateway 构建通过，耗时 14.6 秒。提交后工作区干净，未推送。
+
+### 第十批：B13（独立复审通过，待本地提交）
+
+- 输入 `322fc7ab`，范围 R09。CLI/WebUI 共用的非流式 apply_patch/tool_search 探测只检查响应 model 字段形状，未确认与请求模型精确相等；外层 result.model 是请求身份，不能替代每次响应归属证据。两步补丁和三步工具搜索任一步错模型都必须为无法确认，不得采用到目标模型。
+- 关联路径已核对：共享 request/parser → CLI 逐项显式采用与 WebUI canApply/draftKey → 连接关联标识/预览 revision → Provider 模型目录事务 → runtime 编译 apply_patch_tool_type/supports_search_tool。非 200 明确工具拒绝分类保留；原生 Responses webSearch 已有完成响应模型核对，Chat webSearch 不产生支持证据。独立 responses-tool-search-probe 只做单请求诊断、无上述保存调用方，不扩为本批工具能力自动采用路径。
+- 修复边界只增加每次非流式成功响应的精确模型归属校验和中英文安全提示，不修改模型别名、历史声明、关联标识、目录 schema 或其他能力。缺失/无效模型仍不可验证，大小写、首尾空格和版本后缀不隐式等同。响应自报模型相同也不能证明供应商实际使用的底层模型身份。
+- 实施者生产 probe 入口的 46 组 loopback 观察：两协议×两能力全 A 的 4 组分别在 2/3 请求后 supported；逐步返回 B 的 10 组均在该步停止并返回固定归属原因/HTTP 200；缺失、null、数字、空串、空白、控制字符及超长字段 14 组不可验证；大小写、尾空格、后缀不同 6 组拒绝；错误工具/marker 8 组不可验证；HTTP 400 明确工具拒绝且正文含其他模型的 4 组仍 unsupported。自有服务器和 dispatcher 已关闭，无文件或后台任务。
+- 主代理完整 CLI 生产提示入口观察：错模型一次请求后没有 apply 选项、没有关联标识；继续选择未知只保留手动草稿。全 A 两请求后出现 apply，明确采用，再经 prepare/applyCustomPrimaryProviderSave 把任务自有 cp-owned 切换 Provider 保存为 created/restart-all；没有执行重启。WebUI 使用的生产 loadProviderModelCatalogPresentations 读回 model-A/other-model；编译目录中 A 为 freeform、图片支持、search=false，另一模型仍 patch=null、文本、search=true，未跨模型或覆盖另一能力。目录验证实际执行隔离 Codex debug models；配置 Client 为自有只读端口，没有真实 App Server RPC。
+- 保存竞争观察：模型预览后另一操作更新 other-model 图片能力，旧预览执行返回 stale-preview，保留竞争后的 otherImages=true 与 A 的 search=false。自有目录 `/tmp/codexc-b13-entry-DPQJkk` 和 loopback 服务器均已清理。
+- 主代理 WebUI 生产 HTTP 子路由观察：向任务自有 routeCustomModelCapabilityProbe 提交 A，合成上游返回 B；HTTP 200、一次请求、result.model=A、check=inconclusive、固定原因、httpStatus=200，保留既有 connectionToken 合同但 canApply=false，响应不含 B 的实际名称。此观察不含管理认证外壳或浏览器，未连接真实 WebUI；自有 `/tmp/codexc-b13-web-route-QpyC6l` 与两个服务器已清理。
+- 真实翻译函数中英文新原因及未知文本安全回退通过；局部 ESLint、node --check、Oxlint、WebUI 自身 TypeScript 6.0.3 和 i18n:check 通过（2136 源键、键及占位符一致）。第一次误用根 TypeScript 5.9.3 检查 WebUI 报范围外泛型/DOM iterable 错，核对实际构建入口后使用 WebUI 编译器通过，未修改范围外代码。所有行为观察均为合成响应，真实供应商、浏览器点击和跨 OS 尚未观察；独立 A 复审结论待追加。
+- 独立 Astra/high 完整核对双协议每步模型归属、失败/取消/预算、CLI/WebUI 采用、管理鉴权/Origin、token/预览/目录事务及 runtime 逐模型消费，无剩余阻断。主代理已读完整报告并核对三源码 blob：probe `44df6489`、reason 映射 `6a01dfc8`、中英消息 `d55c336a`。token 仍是连接归属证明，不宣称服务端能力证明；手动声明合同保持。R09 标记已修复待补证，以上真实环境限制保留。

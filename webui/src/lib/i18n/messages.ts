@@ -354,6 +354,7 @@ const zh = {
     reasons: {
       taskFailed: "短任务输出或工具关联未通过验证。", cancelled: "检测已取消。", budget: "检测总预算已耗尽。", requestLimit: "请求次数已达上限。",
       tooLarge: "上游响应超过大小限制。", invalidJson: "上游未返回有效 JSON。", incomplete: "上游未返回完整且可验证的响应。", timeout: "请求超时。",
+      modelMismatch: "上游响应模型与请求模型不一致，无法确认所选模型的能力。",
       network: "网络、TLS、代理或请求转换失败。", readFailed: "响应读取失败。",
       patch: "自由格式补丁调用及模拟结果回传已通过；未执行补丁。", chatPatch: "经 Chat 桥的 input 函数补丁调用及模拟结果回传已通过；未执行补丁。",
       search: "客户端检索、发现工具调用及模拟结果回传已通过。", chatSearch: "经 Chat 桥函数映射的客户端检索、发现工具调用及结果回传已通过。",
@@ -2232,6 +2233,7 @@ const en: Messages = {
     reasons: {
       taskFailed: "Short-task output or tool correlation did not pass verification.", cancelled: "Detection cancelled.", budget: "Total detection budget exhausted.", requestLimit: "Request limit reached.",
       tooLarge: "Upstream response exceeded the size limit.", invalidJson: "Upstream did not return valid JSON.", incomplete: "Upstream did not return a complete, verifiable response.", timeout: "Request timed out.",
+      modelMismatch: "The upstream response model differs from the requested model; the selected model's capability is unconfirmed.",
       network: "Network, TLS, proxy or request conversion failed.", readFailed: "Response reading failed.",
       patch: "Freeform patch call and simulated result round trip passed. No patch was executed.", chatPatch: "The Chat bridge input-function patch call and simulated result round trip passed. No patch was executed.",
       search: "Client search, discovered tool call and simulated result round trip passed.", chatSearch: "The Chat bridge function mapping for client search, discovered tool calls and results passed.",
