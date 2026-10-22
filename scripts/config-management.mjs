@@ -16,7 +16,7 @@ import {
 import { readCodexProxySnapshot, renderCodexProxySettings, validateCodexProxyValue, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { validateModelDisplayAliases } from "../runtime/model-display-name.mjs";
-import { invalidSetting } from "./config-management-error.mjs";
+import { ConfigManagementError, invalidSetting } from "./config-management-error.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import {
   applyMetricsSetting,
@@ -29,6 +29,7 @@ import {
 } from "./config-webui-management.mjs";
 import { detectTerminalIdentity } from "../runtime/terminal-identity.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
+import { createSharedCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
 
 const operationUpdateValues = ["full", "compact", "hidden"];
 const messageFormatValues = ["html", "rich"];
@@ -110,6 +111,50 @@ export function loadGatewaySettings(environment = process.env) {
 }
 
 export function updateGatewaySetting(
+  input,
+  options = {},
+) {
+  if (input?.kind === "system.default-model") {
+    throw invalid("kind", "model-validation-required", "渠道新会话模型必须通过默认模型管理入口校验后保存");
+  }
+  return updateGatewaySettingValidated(input, options);
+}
+
+/** Preview and save both validate against the connected primary's own catalog. */
+export async function updateGatewayDefaultModelSetting(input, {
+  environment = process.env,
+  createClient = createSharedCodexUserConfigClient,
+  ...options
+} = {}) {
+  if (input?.kind !== "system.default-model") {
+    throw invalid("kind", "unknown-setting", "默认模型管理入口只接受渠道新会话模型设置");
+  }
+  const value = optionalString(input.value, 256, "value", "模型 ID");
+  const normalized = { kind: input.kind, value };
+  const save = () => updateGatewaySettingValidated(normalized, { ...options, environment });
+  // Clearing the override does not select a model and must remain available offline.
+  if (value === null) return save();
+  assertExpectedRevision(options.expectedRevision);
+  try {
+    await withCodexUserConfigClient(environment, createClient, undefined, async client => {
+      const before = await client.readUserConfigSnapshot();
+      const models = await client.listModels();
+      const after = await client.readUserConfigSnapshot();
+      if (before.version !== after.version) {
+        throw invalid("revision", "stale-revision", "主 Provider 配置已变化，请重新读取设置");
+      }
+      if (!models.some(model => model.model === value && model.available !== false)) {
+        throw invalid("value", "unknown-model", "模型不在当前主 Provider 的可用目录中，请重新选择");
+      }
+    });
+  } catch (error) {
+    if (error instanceof ConfigManagementError) throw error;
+    throw invalid("value", "model-catalog-unavailable", "无法确认当前主 Provider 模型目录；请检查 App Server 后重新读取设置");
+  }
+  return save();
+}
+
+function updateGatewaySettingValidated(
   input,
   {
     environment = process.env,

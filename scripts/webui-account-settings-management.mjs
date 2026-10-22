@@ -26,6 +26,7 @@ import {
 import {
   loadOpencodeGoAccounts,
   opencodeGoAccountDisplayName,
+  opencodeGoProviderId,
   readOpencodeGoAccountMarker,
 } from "../runtime/opencode-go-accounts.mjs";
 import { loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
@@ -48,12 +49,16 @@ export async function loadAccountSettingsResource(
         defaultAccountId: accounts.find((account) => account.default)?.id ?? null,
         accounts: accounts.map((account) => {
           const marker = readOpencodeGoAccountMarker(environment, account.id);
+          const providerId = opencodeGoProviderId(account.id);
+          const provider = providers.find((entry) => entry.provider === providerId);
           return {
             id: account.id,
+            provider: providerId,
             displayName: opencodeGoAccountDisplayName(account),
             ...(account.email === undefined ? {} : { email: account.email }),
             ...(account.phone === undefined ? {} : { phone: account.phone }),
             ...(marker?.mode === undefined ? {} : { mode: marker.mode }),
+            model: provider?.model ?? null,
             default: account.default === true,
           };
         }),
@@ -61,15 +66,17 @@ export async function loadAccountSettingsResource(
       clinePass: {
         configured: clineAccounts.length > 0,
         accounts: clineAccounts.map(account => {
-          const provider = providers.find(entry => entry.provider === clinePassProviderId(account.id));
-          return { ...account, mode: provider?.mode ?? null, model: provider?.model ?? null };
+          const providerId = clinePassProviderId(account.id);
+          const provider = providers.find(entry => entry.provider === providerId);
+          return { ...account, provider: providerId, mode: provider?.mode ?? null, model: provider?.model ?? null };
         }),
       },
       deepseek: {
         configured: dsAccounts.length > 0,
         accounts: dsAccounts.map((account) => {
-          const provider = providers.find((entry) => entry.provider === deepseekProviderId(account.id));
-          return { ...account, mode: provider?.mode ?? null, model: provider?.model ?? null };
+          const providerId = deepseekProviderId(account.id);
+          const provider = providers.find((entry) => entry.provider === providerId);
+          return { ...account, provider: providerId, mode: provider?.mode ?? null, model: provider?.model ?? null };
         }),
       },
     };

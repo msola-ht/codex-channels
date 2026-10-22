@@ -49,7 +49,7 @@ export interface CodexUserConfigTransactionClient extends CodexUserConfigClientL
   writeUserConfigEdits(
     edits: CodexUserConfigEdit[],
     options?: { expectedVersion?: string },
-  ): Promise<void>;
+  ): Promise<{ status: "ok" | "okOverridden"; version: string }>;
 }
 
 export interface CodexUserConfigClient

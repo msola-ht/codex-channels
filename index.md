@@ -72,6 +72,8 @@
 
 以下记录保留原基线、结论及未观察限制；其中的旧执行顺序不是当前开发流程，重新使用证据前须确认适用范围。
 
+- [`docs/archive/global-settings-consolidation.md`](docs/archive/global-settings-consolidation.md)：全局设置归纳的历史实施步骤、三轮 Astra 关联审查、隔离观察与交付边界；现行合同见 WebUI 与用户指南。
+
 - [`docs/archive/webui-review-plan.md`](docs/archive/webui-review-plan.md)：WebUI W01–W16 审查、10 项整改、逐批复查及完成后相对 `main` 的 A 独立审查历史；保留提交、隔离观察和未观察边界，现行合同见 WebUI 文档。
 
 - [`docs/archive/cli-review.md`](docs/archive/cli-review.md)：CLI 两轮审查及六批修复的历史记录；25 条确认发现与三项文案澄清已处理，保留逐批独立复查、提交、实际观察及平台限制。

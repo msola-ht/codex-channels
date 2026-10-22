@@ -6,6 +6,9 @@ export type CodexDefaultsClient = CodexDefaultSettingsClient;
 
 export interface CodexDefaultsSetupResult {
   action: "updated" | "unchanged";
+  consistency: "confirmed" | "unknown";
+  revision: string | null;
+  writeStatus: "ok" | "okOverridden" | null;
   model: string;
   effort: string;
   activation: CodexUserSettingActivation;

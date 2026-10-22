@@ -72,7 +72,7 @@ function waitForDelivery(response: ServerResponse, signal: AbortSignal, timeoutM
   });
 }
 
-export function sendProxyWebSocket(target: WebSocket, data: RawData | string, isBinary: boolean, signal: AbortSignal, timeoutMs: number, backpressure?: () => void, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
+export function sendProxyWebSocket(target: WebSocket, data: RawData | string, isBinary: boolean, signal: AbortSignal, timeoutMs: number, backpressure?: () => void, stage: "delivery" | "terminal" = "delivery", submitted?: () => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => failed(new ModelRequestTimeoutError(stage)), timeoutMs);
     const cleanup = (): void => {
@@ -92,6 +92,7 @@ export function sendProxyWebSocket(target: WebSocket, data: RawData | string, is
         if (error) failed(error);
         else { cleanup(); resolve(); }
       });
+      submitted?.();
       if (target.bufferedAmount > 0) backpressure?.();
     } catch (error) { failed(error); }
   });

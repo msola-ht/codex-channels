@@ -140,7 +140,7 @@ export function validateNetworkProxyValue(
 ): string | undefined;
 
 export function updateGatewaySetting(
-  input: GatewaySettingInput,
+  input: Exclude<GatewaySettingInput, { kind: "system.default-model" }>,
   options: {
     environment?: NodeJS.ProcessEnv;
     expectedRevision: string;
@@ -159,3 +159,12 @@ export function updateGatewaySetting(
   activationResult: ConfigActivationResult;
   generatedWebuiToken?: string;
 };
+
+export function updateGatewayDefaultModelSetting(
+  input: Extract<GatewaySettingInput, { kind: "system.default-model" }>,
+  options: Parameters<typeof updateGatewaySetting>[1] & {
+    createClient?: (options: { environment: NodeJS.ProcessEnv }) => Promise<
+      import("./codex-user-config.mjs").CodexUserConfigClient
+    >;
+  },
+): Promise<ReturnType<typeof updateGatewaySetting>>;

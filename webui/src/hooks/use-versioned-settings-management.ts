@@ -87,11 +87,11 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
       const result = await update(pendingSetting.revision, pendingSetting.setting, pendingSetting.value.confirmationToken, controller.signal)
       if (controller.signal.aborted) return false
       setPending(null)
-      setLastAppliedSetting(pendingSetting.setting)
+      if (result.consistency !== "unknown") setLastAppliedSetting(pendingSetting.setting)
       setActionResult(result)
-      requireReadback(snapshot, false)
+      requireReadback(snapshot, result.consistency === "unknown")
       refetch()
-      return true
+      return result.consistency !== "unknown"
     } catch (error) {
       if (!controller.signal.aborted) {
         setPending(null)

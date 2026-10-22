@@ -1,6 +1,8 @@
 import { useState, type ComponentProps, type RefObject } from "react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { SettingsEmpty } from "@/components/settings/settings-feedback"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
@@ -10,6 +12,7 @@ import { ModelCapabilityFields, ModelIdentityFields } from "@/components/setting
 import { useTranslation } from "@/hooks/use-translation"
 import { useProviderModelAdditionOptions } from "@/hooks/use-provider-model-addition-options"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
+import { validContextWindow } from "@/lib/model-context-window"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 import type { ManagedManualModelDefinition, ProviderModelAdditionPreview } from "../../../../scripts/provider-model-additions.mjs"
 import { defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
@@ -45,10 +48,10 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const { options, selected, loading, errorCode, setSelected, clearError } = candidates
   const locked = busy || loading || stale
   const inheriting = manualSource === "inherit"
-  const capabilitiesValid = /^\d+$/u.test(window)
-    && Number.isSafeInteger(Number(window)) && Number(window) >= 1024 && Number(window) <= 100_000_000
+  const capabilitiesValid = validContextWindow(window, 1024, 100_000_000)
     && efforts.length > 0 && efforts.includes(effort) && [images, patch, search].every(value => value !== "unknown")
-  const manualValid = id.trim().length > 0 && name.trim().length > 0 && !target.models.some(model => model.id === id.trim())
+  const duplicateId = target.models.some(model => model.id === id.trim())
+  const manualValid = id.trim().length > 0 && name.trim().length > 0 && !duplicateId
     && (inheriting ? target.models.some(entry => entry.id === inheritFrom) : capabilitiesValid)
   const load = async () => {
     if (locked || !open || mode === "manual" && !manualValid) return
@@ -81,7 +84,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
         </FieldGroup>
         {mode === "manual" ? <>
           <p className="text-sm text-muted-foreground">{t(inheriting ? "modelAddition.clineInheritHint" : clinePass ? "modelAddition.clineManualHint" : "modelAddition.manualHint")}</p>
-          <ModelIdentityFields id={id} name={name} disabled={locked} singleColumn={inheriting} onIdChange={next => { if (name === "" || name === defaultModelDisplayName(id)) setName(defaultModelDisplayName(next)); setId(next) }} onNameChange={setName} />
+          <ModelIdentityFields id={id} name={name} disabled={locked} singleColumn={inheriting} idError={duplicateId ? t("modelAddition.duplicateId") : undefined} onIdChange={next => { if (name === "" || name === defaultModelDisplayName(id)) setName(defaultModelDisplayName(next)); setId(next) }} onNameChange={setName} />
           {inheriting ? <>
             <ManagedSelect fullWidth label={t("modelAddition.inheritFrom")} placeholder={t("modelAddition.selectInheritSource")} value={inheritFrom} disabled={locked} options={target.models.map(entry => [entry.id, `${entry.displayName} (${entry.id})`])} onChange={setInheritFrom} />
             {target.models.length === 0 ? <p>{t("modelAddition.noInheritSource")}</p> : null}
@@ -95,10 +98,10 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
               if (Object.hasOwn(changes, "supportsSearch")) setSearch(changes.supportsSearch === undefined ? "unknown" : changes.supportsSearch ? "yes" : "no")
             }} />}
         </> : null}
-        <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{t(loading ? "common.loading" : mode === "manual" ? "modelAddition.load" : "modelAddition.discoverLoad")}</Button>
+        <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{loading && <Spinner data-icon="inline-start" />}{t(loading ? "common.loading" : mode === "manual" ? "modelAddition.load" : "modelAddition.discoverLoad")}</Button>
       </FieldGroup> : <FieldGroup>
         <p>{t("modelCatalog.scope", { providers: options.providers.join(t("managementUi.listSeparator")) })}</p>
-        {options.candidates.length === 0 ? <p>{t("modelAddition.empty")}</p> : <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.select")}</FieldLegend><FieldGroup>{options.candidates.map((entry, index) => <Field key={entry.model} orientation="horizontal"><Checkbox id={`addition-candidate-${index}`} checked={selected.includes(entry.model)} disabled={locked} onCheckedChange={checked => setSelected(previous => checked ? [...previous, entry.model] : previous.filter(model => model !== entry.model))} /><FieldLabel htmlFor={`addition-candidate-${index}`} className="break-all">{entry.displayName} ({entry.model})</FieldLabel></Field>)}</FieldGroup></FieldSet>}
+        {options.candidates.length === 0 ? <SettingsEmpty>{t("modelAddition.empty")}</SettingsEmpty> : <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.select")}</FieldLegend><FieldGroup>{options.candidates.map((entry, index) => <Field key={entry.model} orientation="horizontal"><Checkbox id={`addition-candidate-${index}`} checked={selected.includes(entry.model)} disabled={locked} onCheckedChange={checked => setSelected(previous => checked ? [...previous, entry.model] : previous.filter(model => model !== entry.model))} /><FieldLabel htmlFor={`addition-candidate-${index}`} className="break-all">{entry.displayName} ({entry.model})</FieldLabel></Field>)}</FieldGroup></FieldSet>}
         <Button variant="outline" disabled={locked} onClick={() => { candidates.reset(); management.clearError() }}>{t("modelAddition.reset")}</Button>
       </FieldGroup>}
       {errorCode ? <Alert variant="destructive"><AlertDescription>{translateApiErrorCode(t, errorCode)}</AlertDescription></Alert> : null}

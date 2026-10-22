@@ -91,6 +91,8 @@ Codex 用户配置：
 
 共享代理通过 `codexc config → 网络代理` 设置，保存在 `~/.codex/.env`，见[代理设置](docs/user-guide.md#代理与权限)。
 
+WebUI 的 Codex 用户主配置集中在“设置 → 全局设置”，模型与提供商页面提供关联入口；Gateway 设置和账户覆盖继续独立管理。范围与生效说明见 [WebUI](docs/webui.md)。
+
 配置示例见[`config.example.toml`](config.example.toml)。不要把 Token、Cookie 或 Authorization Header 写入日志或提交到仓库。
 DS、OCG、CCG、CLP 使用当前多账户结构，在 `codexc setup → 模型与提供商` 中添加和管理；具体命令见下面的提供商文档。
 

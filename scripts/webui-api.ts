@@ -590,6 +590,8 @@ export interface ManagementSettingMutationResponse {
   activation: { status: string; target: string; commands: readonly string[] }
   auditStatus?: "recorded" | "degraded"
   consistency?: "confirmed" | "unknown"
+  writeStatus?: "ok" | "okOverridden" | null
+  targetFingerprint?: string
   warnings?: Array<{ code: string; providerId?: string }>
   confirmationRequired?: boolean
   confirmationToken?: string
@@ -628,53 +630,7 @@ export type OpenAiModelRefreshResult = import("./webui-official-model-catalog.mj
   auditStatus: "recorded" | "degraded"
 }
 
-export interface CodexUserSettingsResponse {
-  toolSettings: import("./codex-tool-settings.mjs").CodexToolSettings
-  version: string
-  provider: string
-  defaultsEditable: boolean
-  models: Array<{
-    model: string
-    displayName: string
-    reasoningEfforts: Array<{ effort: string; description: string }>
-    defaultReasoningEffort: string
-    serviceTiers: Array<{ id: string; name: string }>
-    isDefault: boolean
-  }>
-  defaults: {
-    model: string | null
-    reasoningEffort: string | null
-    serviceTier: string | null
-    fastEnabled: boolean
-    ultrafastEnabled: boolean
-    webSearch: "live" | "indexed" | "cached" | "disabled" | null
-    updatePlanEnabled: boolean
-    autoRecapEnabled: boolean
-    reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null
-    planModeReasoningEffort?: string | null
-    verbosity?: "low" | "medium" | "high" | null
-    personality?: "none" | "friendly" | "pragmatic" | null
-    checkForUpdateOnStartup?: boolean | null
-    historyPersistence?: "save-all" | "none" | null
-  }
-  permissions: {
-    editable: boolean
-    defaultPermissions: string | null
-    unsupportedFields: Array<"sandboxMode" | "approvalPolicy" | "networkAccess">
-    sandboxMode: "read-only" | "workspace-write" | null
-    approvalPolicy: "on-request" | "never" | null
-    networkAccess: boolean | null
-  }
-  approvalsReviewer: {
-    value: "user" | "auto_review" | null
-    editable: boolean
-    reason?: string
-  }
-  compact: {
-    contextWindow: number | null
-    autoCompactPercent: number | null
-  }
-}
+export type CodexUserSettingsResponse = import("./codex-user-settings-management.mjs").CodexUserSettingsState
 
 export interface CodexUserSettingInput { kind: string; [key: string]: unknown }
 
@@ -965,20 +921,22 @@ export interface ManagementAccountSettingsResponse {
     defaultAccountId: string | null
     accounts: Array<{
       id: string
+      provider: string
       displayName: string
       email?: string
       phone?: string
       mode?: "switching" | "exclusive"
+      model: string | null
       default: boolean
     }>
   }
   clinePass: {
     configured: boolean
-    accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
+    accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
   deepseek: {
     configured: boolean
-    accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
+    accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
 }
 

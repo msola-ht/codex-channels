@@ -4,6 +4,8 @@ import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 
+import { assertPrivateDirectoryAccessSync, assertPrivateFileAccessSync, securePrivateFileSync } from '../runtime/private-file.mjs';
+
 const help = `Usage: node database-upgrades/metrics-to-v32.mjs REPOSITORY METRICS_DATABASE NEW_BACKUP_PATH
 
 Manual, offline metrics database upgrade: schema 31 -> 32.
@@ -11,8 +13,10 @@ Requires Node.js with node:sqlite and current schema-32 dist/ (run npm run build
 Stop Gateway and Model Relay and all other metrics writers before running; do not restart
 until the command succeeds. This tool acquires Gateway's metrics writer lock.
 The source must be a regular file, not a symbolic link. The backup must not exist;
-its parent directory must be owned by the current user and not writable by others.
-The full backup is created privately (0600) before the single upgrade transaction.
+its parent directory must be owned by the current user and private on Windows,
+or not writable by others on Unix. Windows requires the current native ACL helper.
+The full backup is created privately (Unix 0600 / Windows private ACL) before the
+single upgrade transaction.
 Existing rows, allocation high-water marks and all other tables are preserved.
 Historical request_bytes values remain null because schema 31 did not record them.
 Failure rolls back the transaction and retains a completed backup. For manual rollback,
@@ -71,9 +75,10 @@ export async function upgradeMetrics(repository, databasePath, backupPath) {
   if (source === backup) throw new Error('Backup must differ from source');
   const parentStat = lstatSync(dirname(backup));
   if (!parentStat.isDirectory() || parentStat.isSymbolicLink()
-    || (process.getuid && parentStat.uid !== process.getuid()) || (parentStat.mode & 0o022)) {
+    || (process.platform !== 'win32' && ((process.getuid && parentStat.uid !== process.getuid()) || (parentStat.mode & 0o022)))) {
     throw new Error('Backup parent must be an owned directory not writable by others');
   }
+  assertPrivateDirectoryAccessSync(dirname(backup));
   const moduleUrl = name => pathToFileURL(resolve(repository, 'dist/observability', name)).href;
   const runtime = await import(moduleUrl('request-metrics-database.js'));
   const target = await import(moduleUrl('sqlite-request-metrics-schema.js'));
@@ -99,11 +104,21 @@ export async function upgradeMetrics(repository, databasePath, backupPath) {
 
     const backupFd = openSync(backup, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
     try { backupIdentity = fstatSync(backupFd); } finally { closeSync(backupFd); }
+    // Protect the empty file before SQLite writes any database contents. Windows
+    // mode bits do not describe ACL privacy, so use the shared native adapter.
+    if (process.platform === 'win32') securePrivateFileSync(backup);
+    assertPrivateFileAccessSync(backup);
+    const protectedStat = lstatSync(backup);
+    if (protectedStat.dev !== backupIdentity.dev || protectedStat.ino !== backupIdentity.ino) {
+      throw new Error('Backup identity changed before writing');
+    }
     database.prepare('VACUUM INTO ?').run(backup);
     const savedStat = lstatSync(backup);
-    if (savedStat.dev !== backupIdentity.dev || savedStat.ino !== backupIdentity.ino || (savedStat.mode & 0o777) !== 0o600) {
+    if (savedStat.dev !== backupIdentity.dev || savedStat.ino !== backupIdentity.ino
+      || (process.platform !== 'win32' && (savedStat.mode & 0o777) !== 0o600)) {
       throw new Error('Backup identity or permissions changed');
     }
+    assertPrivateFileAccessSync(backup);
     const saved = new DatabaseSync(backup, { readOnly: true });
     try { requireExactSchema(saved, historical); integrity(saved); } finally { saved.close(); }
     backupComplete = true;

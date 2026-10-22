@@ -99,7 +99,7 @@
   同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录。
   `responseTimeMs`、`firstTokenMs` 与 `totalDurationMs` 从提交上游发送时刻计时，不含发送前路由、解析与 WS 连接等待；HTTP 提交后发生的连接等待计入耗时；Chat 桥以真实上游提交起点替换本地转发起点。
   `responseTimeMs` 到首个有效上游事件，`firstTokenMs` 到首段非空内容的接收回调入口，`totalDurationMs` 到首次终态或结束/失败。未提交发送不伪造耗时。
-  可空 `requestBytes` 保存实际提交给模型上游的请求正文或 WebSocket `response.create` 请求帧字节合计；HTTP 归一化、采样补齐和 Chat 转换使用转换后的内容，WS 使用实际发送帧，多个受控续答累计到同一逻辑请求。未实际发送时为 null，不包含响应、请求头或传输开销。
+  可空 `requestBytes` 保存实际提交给模型上游出站传输的请求正文或 WebSocket `response.create` 请求帧字节合计；HTTP 归一化、采样补齐和 Chat 转换使用转换后的内容，多个受控续答累计到同一逻辑请求。HTTP 流式正文仅在交给 `ClientRequest.write` 时累计，不计仍留在上传队列的块；WS 在 `send` 提交后立即累计，不等待发送回调，因此取消或发送失败不抹掉已提交大小。该值不表示远端确认收到的字节量；未提交时为 null，不包含响应、请求头或传输开销。
   指标通过 `timingBasis: "submitted"` 标记新起点，IPC 拒绝无标记的旧计时；指标独立于调用记录传递；调用索引复用同一观测，不从 trace 反推，不表示客户端显示时间。
   HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
   HTTP JSON/SSE 与 WebSocket 共用终态提取 `usage_metadata.amount`，以可空 `responseUsageAmount`

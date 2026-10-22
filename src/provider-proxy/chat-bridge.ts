@@ -244,10 +244,10 @@ export class ChatCompletionsBridge {
         upstreamRequest.on("error", () => undefined);
         const ready = once(upstreamRequest, "response", { signal: controller.signal });
         timing ??= { submittedAt: performance.now() };
-        timing.requestBytes = (timing.requestBytes ?? 0) + payloadBytes;
         phaseTimeout(modelRequestPolicy.headersTimeoutMs, "headers");
         converter.beginModelRound();
         upstreamRequest.end(payload);
+        timing.requestBytes = (timing.requestBytes ?? 0) + payloadBytes;
         // Publish the submitted size before waiting for headers: a client disconnect
         // closes the outer proxy's subscription even if the upstream never responds.
         publishDiagnostics();

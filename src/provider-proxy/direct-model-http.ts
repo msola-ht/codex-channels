@@ -84,9 +84,9 @@ export async function withDirectModelResponse(call: DirectModelHttpCall, consume
     const ready = once(request, "response");
     const ua = request.getHeader("user-agent");
     const observedUa = effectiveUpstreamUserAgent({ "user-agent": typeof ua === "string" ? ua : undefined }, undefined);
+    request.end(payload);
     call.submitted(observedUa !== null && [...observedUa].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) ? null : observedUa,
       request.getHeaders(), request.path, payloadBytes);
-    request.end(payload);
     const [incoming] = await ready as [IncomingMessage];
     clearTimeout(timer);
     await consume(incoming);

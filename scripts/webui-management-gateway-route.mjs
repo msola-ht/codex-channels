@@ -1,6 +1,7 @@
 import {
   loadGatewaySettings,
   updateGatewaySetting,
+  updateGatewayDefaultModelSetting,
 } from "./config-management.mjs";
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
 import { webuiLogger } from "./webui-logger.mjs";
@@ -31,7 +32,7 @@ export async function routeGatewaySettingsManagement({
     const setting = normalizeManagedSetting(body?.setting);
     assertManagedSetting(setting);
     if (isHighRiskManagedSetting(setting)) consumeHighRisk();
-    const result = updateGatewaySetting(setting, {
+    const result = await updateManagedGatewaySetting(setting, {
       environment,
       expectedRevision: body.revision,
       writeConfig: () => undefined,
@@ -67,7 +68,7 @@ export async function routeGatewaySettingsManagement({
     assertManagedSetting(input);
     if (isHighRiskManagedSetting(input)) {
       consumeHighRisk();
-      const dryRun = updateGatewaySetting(input, {
+      const dryRun = await updateManagedGatewaySetting(input, {
         environment,
         expectedRevision: body.revision,
         writeConfig: () => undefined,
@@ -99,7 +100,7 @@ export async function routeGatewaySettingsManagement({
       });
       return true;
     }
-    const result = updateGatewaySetting(input, {
+    const result = await updateManagedGatewaySetting(input, {
       environment,
       expectedRevision: body.revision,
     });
@@ -137,4 +138,10 @@ export async function routeGatewaySettingsManagement({
     return true;
   }
   return false;
+}
+
+function updateManagedGatewaySetting(input, options) {
+  return input.kind === "system.default-model"
+    ? updateGatewayDefaultModelSetting(input, options)
+    : updateGatewaySetting(input, options);
 }
