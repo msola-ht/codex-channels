@@ -35,9 +35,9 @@
 - `response-validation.ts`：复用 JSON 对象、数组、受限字符串、整数与微信 API 返回码校验；只产生
   稳定 `WeixinProtocolError`，不保留上游响应正文。
 - `request-abort.ts`：统一微信 JSON API、CDN 下载与二进制上传的请求超时、外部取消、监听器清理
-  和 Abort 原因分类；协议 Client 仍负责按具体操作映射稳定错误码与中文文案。
+  和 Abort 原因分类；回调拥有正文消费范围，作用域结束时终止剩余传输，覆盖非成功响应和上传仅消费响应头的分支。协议 Client 仍负责按具体操作映射稳定错误码与中文文案，资源收尾不改写先前结果。
 - `fetch-body.ts`：统一微信 Fetch 响应的 Content-Length 校验、流式累计、超限取消与 Reader
-  清理；JSON API 将有界 Buffer 解码为文本，CDN 下载保留二进制。
+  清理；直接监听请求作用域取消并终止 Reader，在读取前后复核信号，不能把取消产生的流结束当作完整正文。拒绝正文时发起取消但不等待其 Promise，避免底层取消卡住错误返回和请求作用域收尾。JSON API 将有界 Buffer 解码为文本，CDN 下载保留二进制。
 - `cdn-download.ts`：统一校验固定官方 CDN 地址，并执行禁止重定向、30 秒超时和有界响应下载；
   图片与文件复用该传输边界，各自保留解密、大小、内容与完整性校验。
 - `media-crypto.ts`：统一解析媒体 Base64 AES Key 并执行 AES-128-ECB 解密；图片专属 Hex Key

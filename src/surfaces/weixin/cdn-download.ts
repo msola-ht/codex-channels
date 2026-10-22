@@ -52,6 +52,7 @@ export async function downloadWeixinCdnBytes(
         options.maximumBytes,
         () => new Error("invalid Weixin CDN content length"),
         () => options.tooLarge(),
+        signal,
       );
     },
   );

@@ -114,8 +114,8 @@ B 编号是责任边界，不强制一包一提交。每包实施时核对原编
 | 补充任务 | 当前证据与下一步 |
 | --- | --- |
 | Telegram effort 键盘目录快照 | B26已提交6903e105，独立A全链复审无阻断：提交后的页面统一按state读取浏览目录并投影，当前模型能力验证仍使用定向目录。隔离生产入口连续选择成功；真实Telegram及共享AppServer待补证。 |
-| 显式相对 CLI 路径 | B27统一配置文件目录基准，跨cwd及缺失路径隔离观察完成；独立A发现的Windows歧义已拒绝并复核，无剩余代码阻断，准备提交。原生Windows/macOS服务仍待补证。 |
-| 微信非成功响应正文清理 | B17 独立 A 确认 JSON/CDN 的既有非2xx分支未释放正文；redirect:error 的拒绝不经过该分支，本批未扩大缺口。待沿请求期限、错误映射和关闭链复现、修复，再独立 A 复审提交；不以正常响应或跳转观察关闭此任务。 |
+| 显式相对 CLI 路径 | B27已提交c2c1b494，统一配置文件目录基准，跨cwd及缺失路径隔离观察完成；独立A发现的Windows歧义已拒绝并复核。原生Windows/macOS服务仍待补证。 |
+| 微信非成功响应正文清理 | B28修复请求作用域及Reader收尾，包含上传只读header分支；实际30秒取消停滞已补修并观察timeout与连接关闭，新独立A最终四文件复审无阻断，准备提交。真实微信/代理隧道与跨OS待补证。 |
 | 自定义Socket目录的日志归属 | B19 独立A源码发现状态摘要固定读取dataDir/runtime，日志路由与安装器按codex.socket_path父目录选取；配置自定义Socket目录可能产生不同日志来源。待隔离复现、明确共享目录合同并修复复审，当前尚未运行观察，不在脱敏批次改变路径选择。 |
 
 ## 数据、失败恢复与回滚
@@ -538,7 +538,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 新独立A已完成命令/结构化选择、完整目录验证与发布投影、Telegram回调、飞书快照、Fast差异、偏好持久化和Turn消费链复审，无阻断。主代理已读完整报告并定向核源码及blob一致；新读取可能增加目录等待，失败不重复写入或回滚，不能以隔离链路替代真实平台验收。相关README同步，准备正常Hook本地提交，不推送。
 - 本地提交6903e105f297f28c8bee7ddac11b66a73b7e74ef，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown及Gateway构建均通过，15秒；提交后工作区干净，未推送。
 
-### 第二十四批：B27（关联问题2，修复复审完成）
+### 第二十四批：B27（关联问题2，已提交）
 
 - 输入6903e105。安装时显式相对codex.binary按安装cwd固定，服务读取原配置却按服务cwd重新解释；统一显式配置路径相对配置文件目录，符合配置模块现有路径约定。裸程序名、绝对路径及默认codex的CODEX_BINARY覆盖优先级保持，环境覆盖自身不冒充配置相对路径。
 - 覆盖配置加载、安装定义、运行环境、Doctor、Remote、Desktop、设置/登录/MCP、初始化、维护及WebUI消费者；不新增服务元数据、不改持久格式、不自动重装或重启服务。先隔离跨cwd复现和失败输入观察，源码稳定后新独立A复审再提交。
@@ -550,3 +550,19 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立A发现Windows P2：C:bin\codex.exe和单根路径依赖盘内cwd/当前盘，原补丁不能保证固定基准。主代理补拒配置来源的drive-relative、单根及不完整UNC，保完整盘符/UNC/设备前缀；环境覆盖提前返回不变。配置加载在既有try/catch转换为ConfigurationError。Linux内联加载实际helper源码，仅改为node:path/win32及模拟platform观察：五类歧义输入均拒绝，普通相对定位D:\config\bin，完整绝对/UNC/设备前缀/裸名保留，默认环境歧义值仍按原合同保留；这是路径语义模拟，不是Windows实机执行。
 - 实施者17文件完整报告、所有作业已收齐，隔离目录/tmp/codexc-b27.y7hiXO已删除，无任务进程；主代理接管后仅补helper与配置异常分类，最终blob分别98c533dd45b8fe53222c6d2deb1f704bbf223060、29875d7e1c3b313ac3450b83202819c86583c448。其余源码和Linux正常/缺失路径观察输入保持有效。未安装/启动服务、Remote/Desktop或共享AppServer，macOS/Windows原生行为待补证；A正复核补修。
 - 独立A完整报告已收齐，Windows发现关闭，17源码及安装/运行/管理消费链、当前文档均无剩余阻断。主代理核最终关键blob与报告一致；A曾将工具JSON转义误认文档双反斜杠，双方逐字符确认实际单反斜杠后撤回该提醒，未作无必要编辑。准备正常Node22 Hook完成最终静态门禁并提交，不推送。
+- 本地提交c2c1b494009d155a51de18c1f4b7b498d9b7686e，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown及Gateway构建均通过，15秒；提交后工作区干净，未推送。
+
+### 第二十五批：B28（关联问题3，修复复审完成）
+
+- 输入c2c1b494。微信JSON/CDN非成功响应未消费正文，上传成功及错误分支仅消费status/header；请求作用域返回后解除计时和外部取消，却未释放未读正文。追踪三个withWeixinRequestAbort调用方、原生/代理Fetch、上传重试及错误分类，不只修改JSON非2xx分支。
+- 保留HTTP/外部取消/超时错误分类、固定重定向拒绝、上传Header成功条件与既有重试；拟在请求作用域完成时回收剩余资源，不无界等待正文取消。自有loopback原生Fetch观察慢响应实际关闭，正常下载/JSON/上传消费一并核对；不请求真实微信，完成后新独立A关联复审。
+- 实现仅两文件：request-abort在finally清监听/计时后abort自有controller，fetch-body拒绝正文时发起cancel并吸收拒绝而不等待，Reader仍finally释放。完整check及正常npm run build通过；主代理核源码及调用方，独立A开始JSON、上传、下载、proxy和下游错误消费全链复审，README同步作用域合同。
+- 修前HEAD helper内存转译对照，自有loopback原生Fetch慢503及上传200/header返回80ms后closed=false、finished=false、signal=false；修后同输入closed=true、finished=false，HTTP503及成功header结果保持。底层cancel永不settle的非法长度/声明超限/流超限均cancelCalls=1，分别1/1/8ms返回既有错误、body.locked=false、最终signal=true，未以signal单独证明网络释放。
+- 生产dist观察JSON成功/HTTP/超限/timeout/cancel及CDN成功/HTTP/超限/cancel，慢体均实际close。sendFile/sendImage通过getuploadurl→真实AES上传→sendmessage，解密密文等于输入、上传慢体close且header进入最终消息。4xx上传1次，5xx及缺header3次，500后200共2次且发送成功；timeout3次、aborted1次，保留分类。平台URL被注入端口映射至自有loopback，不能称真实微信送达。固定30秒CDN超时与资源收尾仍待最终报告。
+- 第一位独立A完成两文件版本全链复审未发现源码问题，但固定30秒观察随后暴露实际失败，此结论不作为最终提交放行。原作业19998超过125秒仍停在download operation，非server cleanup；实施者核对自有PID/父命令后SIGTERM，exit143，未将超时路径记成功。
+- 针对性作业58900记录：30008ms scope signal已abort，但Reader和服务端均未结束；35005ms外部看门关闭仅自有连接，35011ms才报TypeError terminated而非timeout，35012ms服务端/Socket关闭，最终openSockets=0。说明本环境仅AbortController不足以保证长时间正文读取收尾，正在补Reader级signal取消及读取前后复核，并将信号穿过JSON/CDN有界读取；补修稳定后由新的独立A复审。该失败及强制回收事实保留。
+- 补修四文件：JSON/CDN传请求scope signal至有界Reader，直接监听abort并发起reader.cancel，读取前后和catch复核信号；预取消先取消已取得Response正文再抛，finally移监听并释放Reader。独立原生Reader对照122ms cancel→132ms done→145ms服务端关闭，说明read后复核是避免部分正文误报成功的必要条件。
+- 最终30秒作业45372 exit0：30007ms scope abort，30014ms WeixinRequestAbortError/timeout，watchdogFired=false，30015ms Socket关闭、30016ms响应关闭且finished=false，30046ms清理openSockets=0。四文件完整check、正常build、定向ESLint与diff均通过，主代理核最终blob与实施者一致；新的独立A正在审最终四文件，不沿用原两文件放行结论。所有实施者作业已收齐、服务器关闭，完整交接待收齐。
+- 完整交接已收齐：最终Reader pending read遇取消且底层cancel不结束，21ms返回aborted、锁释放、监听新增/移除各1；Reader失败、cancel拒绝、预取消、无正文结果符合且无未处理拒绝。正常JSON/长轮询cursor=next/CDN完整usable-download、JSON timeout/abort和CDN abort重新观察通过。一次CDN取消输入先撞3字节预算，输出too-large而未计取消证据；改100字节预算和7字节慢体后得到aborted及服务端关闭，未为错误输入改产品代码。
+- 实际代理观察仅生产createProxyFetch直连分支，不含真实代理隧道；真实微信、跨OS、共享服务未观察。所有作业已收齐，自有服务器/连接结束；旧125秒作业按exit143单独记录，其余最终观察openSockets=0，不留活动句柄。
+- 新独立A完整报告已收齐，重新覆盖最终四文件、三种请求作用域、全部JSON端点/上传与四媒体下载、存储/Monitor/Outbox消费，未发现剩余阻断。主代理读完整报告并核四blob一致；普通文件/图片会话原有外部signal传递选择不因本批泛化，固定预算、存储关闭及下载后复核仍保留。准备正常Hook提交，不推送。
