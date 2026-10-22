@@ -147,12 +147,13 @@ export function SettingsMutationFeedback({ result, writeUnconfirmed, readbackReq
   if (result === null && !writeUnconfirmed) return null
   return <Alert><AlertDescription className="flex flex-col gap-2">
     {writeUnconfirmed ? <p>{t("settingsUi.writeUnconfirmed")}</p> : result !== null ? <>
-      <p>{result.action === "stopped" ? t("settingsUi.instanceStopped")
+      <p>{result.writeStatus === "okOverridden" ? t("globalSettings.savedOverridden")
+        : result.action === "stopped" ? t("settingsUi.instanceStopped")
         : result.action === "in-use" ? t("settingsUi.instanceInUse")
         : result.action === "not-running" ? t("settingsUi.instanceNotRunning")
           : result.action === "unchanged" || result.action === undefined && result.activation.status === "none" ? t("settingsUi.unchanged")
             : t("settingsUi.savedActivation", { value: formatActivation(result.activation, t) })}</p>
-      {result.activation.commands.length > 0 && <p>{t(result.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: result.activation.commands.join("; ") })}</p>}
+      {result.writeStatus !== "okOverridden" && result.activation.commands.length > 0 && <p>{t(result.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: result.activation.commands.join("; ") })}</p>}
       {result.auditStatus === "degraded" && <p>{t("settingsUi.auditDegraded")}</p>}
       {result.warnings?.map((warning, index) => Object.hasOwn(providerCleanupWarnings, warning.code)
         ? <p key={`${warning.code}-${index}`}>{t(providerCleanupWarnings[warning.code], { provider: warning.providerId ?? "" })}</p>
@@ -190,6 +191,7 @@ function previewRecord(value: unknown): Record<string, unknown> | null {
 function formatPreviewValue(value: unknown, kind: string, t: Translate): string {
   const record = previewRecord(value)
   const scalar = (current: unknown): string => current === null || current === undefined ? t("settingsFields.notSet")
+    : current === "unsupported" ? t("globalSettings.unsupportedValue")
     : typeof current === "boolean" ? t(current ? "settingsFields.enabled" : "settingsFields.disabled")
       : typeof current === "string" || typeof current === "number" ? String(current) : t("common.unknown")
   const fields = (source: Record<string, unknown> | null, labels: Record<string, MessageKey>, display = scalar): string => source === null ? t("common.unknown")
@@ -240,6 +242,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
   }
   if (kind === "web-search" && value !== null && typeof value === "object" && "mode" in value) {
     switch (value.mode) {
+      case "unsupported": return t("globalSettings.unsupportedValue")
       case null: return t("openAiModelCatalog.searchDefault")
       case "disabled": return t("settingsFields.off")
       case "cached": return t("settingsFields.cached")

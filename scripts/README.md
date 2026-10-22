@@ -283,6 +283,8 @@
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
   第三方固定模式不开放官方默认模型、思考等级和加速档位；已有 `default_permissions` 时不混写传统 Sandbox 字段。
   预览与执行按用户层原值计算实际 edits；等值返回 unchanged、willChange=false、activation=none，不调用写入。缺省与显式默认值分开，清除仅移除用户覆盖；策略及工具合并状态校验仍先执行。
+  普通偏好支持仅提交所选字段和显式 null 清除覆盖；只有设置非空 Plan 思考等级需要 OpenAI 模型资格。快照分开提供模型、加速可用性及原始用户模型，未知枚举列入 unsupportedFields。
+  写响应仅保留 status/version，同 Client 回读核对本次 edits 与写入版本，明确区分 confirmed/unknown；保存未确认不重试，okOverridden 提示高优先级覆盖。工具确认绑定相关合并目标的安全 hash，执行前再次核对，不返回命令或凭据。
   Fast 按模型目录精确 `priority`/`fast` ID、Ultrafast 按 `ultrafast` ID 开放，纯目录匹配与 Application、WebUI 共用 `runtime/service-tier.mjs`，预览和写入前重新校验所选模型及 Client 投影的独立开关；`fast_mode` / `ultrafast_mode` 分别结合合并配置与受管策略，不自动修改开关。设置页保留原始配置档位，关闭档位仍可退出到 Standard。
   快照保留已配置但不可用的模型 ID，未配置时只采用目录显式默认模型，不回退到其他条目；CLI/WebUI 提示先选有效模型，仍允许 Standard 退出加速。
   全局 Auto-review 默认值仅允许官方 OpenAI 主实例或复用官方模型目录的 Codex 兼容主实例开启；其他主实例仍可关闭，组织策略限制继续适用。

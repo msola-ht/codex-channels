@@ -52,6 +52,7 @@ import type {
   ConsumeAccountRateLimitResetCreditResponse,
   ConfigReadParams,
   ConfigReadResponse,
+  ConfigWriteResponse,
   ConfigRequirementsReadResponse,
   CollaborationModeListResponse,
   GetAccountParams,
@@ -1096,8 +1097,8 @@ export class CodexAppServerClient implements
   async writeUserConfigEdits(
     edits: Array<{ keyPath: string; value: JsonValue }>,
     options: { expectedVersion?: string; beforeSubmit?: () => void } = {},
-  ): Promise<void> {
-    await this.rpc.request({
+  ): Promise<Pick<ConfigWriteResponse, "status" | "version">> {
+    const response = await this.rpc.request<ConfigWriteResponse>({
       method: "config/batchWrite",
       params: {
         edits: edits.map((edit) => ({
@@ -1110,6 +1111,8 @@ export class CodexAppServerClient implements
         reloadUserConfig: true,
       },
     }, { retryOverload: false, ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) });
+    // Keep persistence/override semantics without exposing paths or source values.
+    return { status: response.status, version: response.version };
   }
 
   async readUserConfigSnapshot(options: { includeApprovalsReviewerPolicy?: boolean; includeAcceleration?: boolean; beforeSubmit?: () => void } = {}): Promise<{
@@ -1173,6 +1176,15 @@ export class CodexAppServerClient implements
         approvalsReviewerPolicy = undefined;
       }
     }
+    let acceleration;
+    if (options.includeAcceleration) {
+      try {
+        acceleration = await this.readAccelerationFlags(response.config.features, beforeSubmit);
+      } catch (error) {
+        if (submissionDenied) throw error;
+        // This optional capability must not hide the valid user configuration.
+      }
+    }
     return {
       config: userLayer.config,
       version: userLayer.version,
@@ -1183,7 +1195,7 @@ export class CodexAppServerClient implements
         plugins: response.config.plugins,
       },
       ...(approvalsReviewerPolicy === undefined ? {} : { approvalsReviewerPolicy }),
-      ...(options.includeAcceleration ? { acceleration: await this.readAccelerationFlags(response.config.features, beforeSubmit) } : {}),
+      ...(acceleration === undefined ? {} : { acceleration }),
     };
   }
 

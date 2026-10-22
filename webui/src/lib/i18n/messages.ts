@@ -445,7 +445,7 @@ const zh = {
     "compactPresetNeedsWindow": "先设置全局上下文窗口，再选择比例；也可直接输入 Token 数或跟随模型默认值。",
     "compactTokenLimitInvalid": "自动压缩阈值必须是正整数。",
     "saveCompaction": "预览修改",
-    "preferencesHint": "这些字段作为一组写入 Codex 用户配置；推理摘要未配置时默认关闭。",
+    "preferencesHint": "逐项预览保存；选择继承可移除该项用户覆盖。",
     "planEffort": "Plan 思考等级",
     "reasoningSummary": "推理摘要",
     "auto": "自动",
@@ -776,6 +776,14 @@ const zh = {
     "serviceRecovery": "服务管理器失败时任务标记失败，不自动扩大操作范围",
     "feishu": "飞书",
     "weixin": "微信"
+  },
+  globalSettings: {
+    unsupported: "部分已保存的值不受当前版本支持，请逐项核对；未将它们视为默认值。",
+    unsupportedValue: "当前值不受支持",
+    modelsUnavailable: "模型目录暂不可用，模型选择受限；其他全局设置仍可管理。",
+    accelerationUnavailable: "加速能力暂不可用，暂不提供加速选项；可重新读取后再试。",
+    savedOverridden: "用户配置已保存，但存在更高优先级覆盖，不代表有效配置已改变。",
+    toolTargetUnavailable: "无法确认工具配置来源，请刷新后重试。",
   },
   settingsUi: {
     loadFailed: "设置快照加载失败", notConfigured: "未配置",
@@ -2280,7 +2288,7 @@ const en: Messages = {
     "compactPresetNeedsWindow": "Set a global context window to use percentages, or enter a token limit directly or follow the model default.",
     "compactTokenLimitInvalid": "The auto-compaction threshold must be a positive integer.",
     "saveCompaction": "Preview changes",
-    "preferencesHint": "These fields are saved together in the Codex user configuration. Reasoning summaries are off by default when unset.",
+    "preferencesHint": "Preview and save each field separately. Inherit removes its user override.",
     "planEffort": "Plan reasoning effort",
     "reasoningSummary": "Reasoning summary",
     "auto": "Auto",
@@ -2611,6 +2619,14 @@ const en: Messages = {
     "serviceRecovery": "Mark the task failed if the service manager fails; the operation scope is not automatically expanded.",
     "feishu": "Feishu",
     "weixin": "WeChat"
+  },
+  globalSettings: {
+    unsupported: "Some stored values are unsupported by this version. Review them individually; they are not treated as defaults.",
+    unsupportedValue: "Unsupported stored value",
+    modelsUnavailable: "The model catalog is unavailable. Model selection is limited; other global settings remain available.",
+    accelerationUnavailable: "Acceleration capabilities are unavailable. Reload before choosing an accelerated tier.",
+    savedOverridden: "The user configuration was saved, but a higher-priority override exists. This does not mean the effective configuration changed.",
+    toolTargetUnavailable: "The tool configuration source could not be confirmed. Refresh and try again.",
   },
   settingsUi: {
     loadFailed: "Unable to load settings", notConfigured: "Not configured",

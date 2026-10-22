@@ -203,6 +203,7 @@ const settingErrorKeys: Record<string, MessageKey> = {
   "third-party-primary": "settingsUi.validation.thirdParty",
   "unsupported-tool-setting": "settingsUi.validation.tool",
   "invalid-tool-setting": "settingsUi.validation.toolValue",
+  "tool-target-unavailable": "globalSettings.toolTargetUnavailable",
 }
 
 const integerSettingKeys: Record<string, MessageKey> = {

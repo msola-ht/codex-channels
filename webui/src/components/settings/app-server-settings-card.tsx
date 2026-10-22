@@ -29,11 +29,6 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
   const [tierDraft, patchTier, resetTier] = useSettingsDraft({ tier: settings?.defaults.serviceTier == null ? "" : normalizeServiceTier(settings.defaults.serviceTier) })
   const compactSource = { contextWindow: settings?.compact.contextWindow == null ? "" : String(settings.compact.contextWindow), autoCompactTokenLimit: settings?.compact.autoCompactTokenLimit == null ? "" : String(settings.compact.autoCompactTokenLimit) }
   const [compact, patchCompact, resetCompact] = useSettingsDraft(compactSource)
-  const [preferences, patchPreferences, resetPreferences] = useSettingsDraft({
-    planEffort: settings?.defaults.planModeReasoningEffort ?? selectedModel?.defaultReasoningEffort ?? "",
-    reasoningSummary: settings?.defaults.reasoningSummary ?? "none", verbosity: settings?.defaults.verbosity ?? "medium",
-    startupUpdate: String(settings?.defaults.checkForUpdateOnStartup ?? true), historyPersistence: settings?.defaults.historyPersistence ?? "save-all",
-  })
   const { contextWindow, autoCompactTokenLimit } = compact
   const [customWindow, setCustomWindow] = useState(false)
   const [compactChoice, setCompactChoice] = useState<{ preset: string; window: string; threshold: string } | null>(null)
@@ -44,8 +39,6 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
     ? compactChoice.preset
     : autoCompactTokenLimit === "" ? "default" : matchingCompactPercents.length === 1 ? String(matchingCompactPercents[0]) : "custom"
   const windowPreset = customWindow ? "custom" : contextWindow === "" ? "default" : contextWindowPresetTokens.some(tokens => String(tokens) === contextWindow) ? contextWindow : "custom"
-  const { planEffort, reasoningSummary, verbosity, startupUpdate, historyPersistence } = preferences
-  const [localError, setLocalError] = useState<MessageKey | null>(null)
   const [compactError, setCompactError] = useState<{ field: "contextWindow" | "autoCompactTokenLimit"; value: string; message: MessageKey } | null>(null)
   const visibleCompactError = compactError !== null
     && compactError.value === compact[compactError.field]
@@ -58,10 +51,9 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
   }, [compactEditing, onEditingChange])
   useEffect(() => {
     if (management.lastAppliedSetting?.kind === "model-compact") { resetCompact(); setCustomWindow(false); setCompactChoice(null) }
-    if (management.lastAppliedSetting?.kind === "preferences") resetPreferences()
     if (management.lastAppliedSetting?.kind === "defaults") resetDefaults()
     if (management.lastAppliedSetting?.kind === "service-tier") resetTier()
-  }, [management.lastAppliedSetting, resetCompact, resetPreferences, resetDefaults, resetTier])
+  }, [management.lastAppliedSetting, resetCompact, resetDefaults, resetTier])
 
   if (management.loading && settings === null) return <LoadingSettingsCard title={t("settingsFields.appServerTitle")} />
   if (settings === null) return <SettingsError title={t("settingsUi.codexLoadFailed")} message={management.error ?? t("settingsFields.appServerUnavailable")} retry={management.refetch} />
@@ -77,8 +69,14 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
   const modelOptions = settings.models.map((model) => [model.model, model.displayName])
   if (unavailableModel !== null) modelOptions.unshift([unavailableModel, t("settingsFields.modelUnavailable", { model: unavailableModel })])
   const effortOptions = selected?.reasoningEfforts.map((item) => [item.effort, item.effort]) ?? []
+  const preferenceOptions = (field: string, options: string[][]) => [
+    ...(settings.defaults.unsupportedFields.includes(field) ? [["unsupported", t("globalSettings.unsupportedValue")]] : []),
+    ["inherit", t("settingsFields.inheritUserSetting")], ...options,
+  ]
+  const preferenceValue = (field: string, value: string | boolean | null | undefined) => settings.defaults.unsupportedFields.includes(field) ? "unsupported" : value == null ? "inherit" : String(value)
+  const unsetLabel = (field: string) => t(settings.defaults.unsupportedFields.includes(field) ? "globalSettings.unsupportedValue" : "settingsFields.notSet")
   const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null || management.readbackRequired
-  const officialDisabled = busy || !settings.defaultsEditable
+  const officialDisabled = busy || !(section === "context" ? settings.contextEditable : settings.defaultsEditable)
   const serviceTier = tierDraft.tier
   const serviceTierOptions = [["default", t("settingsFields.standard")]]
   if (settings.defaults.fastEnabled && selected && acceleratedServiceTierId(selected.serviceTiers, "fast")) serviceTierOptions.push(["fast", t("settingsFields.fast")])
@@ -108,26 +106,13 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
     void management.previewSetting({ kind: "model-compact", contextWindow: parsedWindow, autoCompactTokenLimit: parsedTokenLimit }, { key: "settingsFields.contextCompaction" })
   }
 
-  const savePreferences = () => {
-    if (selected === undefined || planEffort === "") {
-      setLocalError(selected === undefined ? "settingsFields.selectValidModel" : "settingsFields.planEffortUnavailable")
-      return
-    }
-    setLocalError(null)
-    void management.previewSetting({
-      kind: "preferences",
-      planModeReasoningEffort: planEffort,
-      reasoningSummary,
-      verbosity,
-      checkForUpdateOnStartup: startupUpdate === "true",
-      historyPersistence,
-    }, { key: "settingsFields.preferences" })
-  }
-
   const feedback = <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
   const content = <div className="flex min-w-0 flex-col gap-5 text-sm">
       {renderContent && feedback}
       {management.error !== null ? <SettingsError title={t("settingsUi.codexLoadFailed")} message={`${management.error} ${t("settingsUi.previousSnapshot")}`} retry={management.refetch} /> : null}
+      {settings.defaults.unsupportedFields.length > 0 && <Alert><AlertDescription>{t("globalSettings.unsupported")}</AlertDescription></Alert>}
+      {!settings.modelsAvailable && settings.provider === "openai" && <Alert><AlertDescription>{t("globalSettings.modelsUnavailable")}</AlertDescription></Alert>}
+      {section === "models" && !settings.accelerationAvailable && <Alert><AlertDescription>{t("globalSettings.accelerationUnavailable")}</AlertDescription></Alert>}
         {section !== "context" && <FieldGroup className={cn("grid gap-x-8 gap-y-3", section !== "models" && "md:grid-cols-2")}>
           <SettingsRow label={t("settingsFields.currentProvider")} value={settings.provider} badge />
           {section === "models" && <>
@@ -139,9 +124,9 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
           <Button className="self-start" variant="outline" disabled={officialDisabled || serviceTierUnavailable || !["default", "fast", "ultrafast"].includes(serviceTier) || serviceTier === (settings.defaults.serviceTier === null ? "" : normalizeServiceTier(settings.defaults.serviceTier)) || defaultDraft.model !== (settings.defaults.model ?? "") || defaultDraft.reasoning !== (settings.defaults.reasoningEffort ?? "")} onClick={() => { if (serviceTier === "default" || serviceTier === "fast" || serviceTier === "ultrafast") void management.previewSetting({ kind: "service-tier", serviceTier }, { key: "settingsFields.serviceTier" }) }}>{t("modelManagement.preview")}</Button>
           </>}
           {section === "general" && <>
-          <ManagedSelect label={t("settingsFields.webSearch")} value={settings.defaults.webSearch ?? ""} placeholder={t("openAiModelCatalog.searchDefault")} description={t("openAiModelCatalog.searchDefaultHint")} options={[["live", t("settingsFields.live")], ["indexed", t("settingsFields.indexed")], ["cached", t("settingsFields.cached")], ["disabled", t("settingsFields.off")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "web-search", mode: value }, { key: "settingsFields.webSearch" })} />
-          <ManagedSelect label={t("settingsFields.updatePlan")} value={String(settings.defaults.updatePlanEnabled)} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "update-plan", enabled: value === "true" }, { key: "settingsFields.updatePlan" })} />
-          <ManagedSelect label={t("settingsFields.autoRecap")} value={String(settings.defaults.autoRecapEnabled)} options={[["false", t("settingsFields.off")], ["true", t("settingsFields.on")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "auto-recap", enabled: value === "true" }, { key: "settingsFields.autoRecap" })} />
+          <ManagedSelect fullWidth label={t("settingsFields.webSearch")} value={settings.defaults.webSearch ?? ""} placeholder={unsetLabel("webSearch")} description={t("openAiModelCatalog.searchDefaultHint")} options={[["live", t("settingsFields.live")], ["indexed", t("settingsFields.indexed")], ["cached", t("settingsFields.cached")], ["disabled", t("settingsFields.off")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "web-search", mode: value }, { key: "settingsFields.webSearch" })} />
+          <ManagedSelect fullWidth label={t("settingsFields.updatePlan")} value={settings.defaults.updatePlanEnabled === null ? "" : String(settings.defaults.updatePlanEnabled)} placeholder={unsetLabel("updatePlanEnabled")} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "update-plan", enabled: value === "true" }, { key: "settingsFields.updatePlan" })} />
+          <ManagedSelect fullWidth label={t("settingsFields.autoRecap")} value={settings.defaults.autoRecapEnabled === null ? "" : String(settings.defaults.autoRecapEnabled)} placeholder={unsetLabel("autoRecapEnabled")} options={[["false", t("settingsFields.off")], ["true", t("settingsFields.on")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "auto-recap", enabled: value === "true" }, { key: "settingsFields.autoRecap" })} />
           </>}
           {section === "permissions" && <>
           <ManagedSelect label={t("settingsFields.approvalsReviewer")} value={settings.approvalsReviewer.value ?? ""} placeholder={t("settingsFields.approvalsReviewerUnset")} options={[["user", t("settingsFields.manualReview")], ["auto_review", t("settingsFields.autoReview")]]} disabled={busy || !settings.approvalsReviewer.editable} description={t(reviewerHint)} onChange={(value) => void management.previewSetting({ kind: "approvals-reviewer", value }, { key: "settingsFields.approvalsReviewer" })} />
@@ -201,18 +186,16 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
         <section className="flex flex-col gap-3">
           <div><h3 className="font-medium">{t("settingsFields.preferences")}</h3><p className="text-xs text-muted-foreground">{t("settingsFields.preferencesHint")}</p></div>
           <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
-            <ManagedSelect label={t("settingsFields.planEffort")} value={planEffort} placeholder={selected === undefined ? t("settingsFields.selectValidModel") : undefined} description={selected === undefined ? t("settingsFields.selectValidModel") : undefined} options={effortOptions} disabled={officialDisabled || selected === undefined} onChange={(value) => patchPreferences({ planEffort: value })} />
-            <ManagedSelect label={t("settingsFields.reasoningSummary")} value={reasoningSummary} options={[["auto", t("settingsFields.auto")], ["concise", t("settingsFields.concise")], ["detailed", t("settingsFields.detailed")], ["none", t("settingsFields.summaryNone")]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ reasoningSummary: value })} />
-            <ManagedSelect label={t("settingsFields.verbosity")} value={verbosity} options={[["low", t("settingsFields.low")], ["medium", t("settingsFields.medium")], ["high", t("settingsFields.high")]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ verbosity: value })} />
-            <ManagedSelect label={t("settingsFields.startupUpdate")} value={startupUpdate} options={[["true", t("settingsFields.on")], ["false", t("settingsFields.off")]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ startupUpdate: value })} />
-            <ManagedSelect label={t("settingsFields.historyPersistence")} value={historyPersistence} options={[["save-all", t("settingsFields.save")], ["none", t("settingsFields.doNotSave")]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ historyPersistence: value })} />
+            <ManagedSelect fullWidth label={t("settingsFields.planEffort")} value={settings.defaults.planModeReasoningEffort ?? "inherit"} options={[["inherit", t("settingsFields.inheritUserSetting")], ...(settings.defaults.planModeReasoningEffort && !effortOptions.some(([value]) => value === settings.defaults.planModeReasoningEffort) ? [[settings.defaults.planModeReasoningEffort, settings.defaults.planModeReasoningEffort]] : []), ...effortOptions]} disabledValues={settings.defaults.planModeReasoningEffort && !effortOptions.some(([value]) => value === settings.defaults.planModeReasoningEffort) ? [settings.defaults.planModeReasoningEffort] : []} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "preferences", planModeReasoningEffort: value === "inherit" ? null : value }, { key: "settingsFields.planEffort" })} />
+            <ManagedSelect fullWidth label={t("settingsFields.reasoningSummary")} value={preferenceValue("reasoningSummary", settings.defaults.reasoningSummary)} options={preferenceOptions("reasoningSummary", [["auto", t("settingsFields.auto")], ["concise", t("settingsFields.concise")], ["detailed", t("settingsFields.detailed")], ["none", t("settingsFields.summaryNone")]])} disabledValues={["unsupported"]} disabled={busy} onChange={(value) => { if (value === "inherit" || value === "auto" || value === "concise" || value === "detailed" || value === "none") void management.previewSetting({ kind: "preferences", reasoningSummary: value === "inherit" ? null : value }, { key: "settingsFields.reasoningSummary" }) }} />
+            <ManagedSelect fullWidth label={t("settingsFields.verbosity")} value={preferenceValue("verbosity", settings.defaults.verbosity)} options={preferenceOptions("verbosity", [["low", t("settingsFields.low")], ["medium", t("settingsFields.medium")], ["high", t("settingsFields.high")]])} disabledValues={["unsupported"]} disabled={busy} onChange={(value) => { if (value === "inherit" || value === "low" || value === "medium" || value === "high") void management.previewSetting({ kind: "preferences", verbosity: value === "inherit" ? null : value }, { key: "settingsFields.verbosity" }) }} />
+            <ManagedSelect fullWidth label={t("settingsFields.startupUpdate")} value={preferenceValue("checkForUpdateOnStartup", settings.defaults.checkForUpdateOnStartup)} options={preferenceOptions("checkForUpdateOnStartup", [["true", t("settingsFields.on")], ["false", t("settingsFields.off")]])} disabledValues={["unsupported"]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "preferences", checkForUpdateOnStartup: value === "inherit" ? null : value === "true" }, { key: "settingsFields.startupUpdate" })} />
+            <ManagedSelect fullWidth label={t("settingsFields.historyPersistence")} value={preferenceValue("historyPersistence", settings.defaults.historyPersistence)} options={preferenceOptions("historyPersistence", [["save-all", t("settingsFields.save")], ["none", t("settingsFields.doNotSave")]])} disabledValues={["unsupported"]} disabled={busy} onChange={(value) => { if (value === "inherit" || value === "save-all" || value === "none") void management.previewSetting({ kind: "preferences", historyPersistence: value === "inherit" ? null : value }, { key: "settingsFields.historyPersistence" }) }} />
           </FieldGroup>
-          <Button className="self-start" variant="outline" disabled={officialDisabled || selected === undefined || planEffort === ""} onClick={savePreferences}>{t("settingsFields.savePreferences")}</Button>
         </section>
 
         </>}
         {section === "permissions" && <><Separator /><ToolAccessSettings management={management} /></>}
-        {localError !== null ? <Alert variant="destructive"><AlertDescription>{t(localError)}</AlertDescription></Alert> : null}
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
       </div>
   return <>
