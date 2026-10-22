@@ -962,20 +962,22 @@ export interface ManagementAccountSettingsResponse {
     defaultAccountId: string | null
     accounts: Array<{
       id: string
+      provider: string
       displayName: string
       email?: string
       phone?: string
       mode?: "switching" | "exclusive"
+      model: string | null
       default: boolean
     }>
   }
   clinePass: {
     configured: boolean
-    accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
+    accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
   deepseek: {
     configured: boolean
-    accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
+    accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
 }
 

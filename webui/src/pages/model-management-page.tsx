@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from "react"
-import { Link } from "react-router"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Link, useSearchParams } from "react-router"
 import { useApi } from "@/hooks/use-api"
 import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
 import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
@@ -17,12 +17,12 @@ import { ProviderSettingsManagement } from "@/components/settings/provider-setti
 import { ProviderModelCatalogs } from "@/components/settings/provider-model-catalogs"
 import { AccountSettingsManagement } from "@/components/settings/account-settings-management"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
-import { ProviderStatusCard } from "@/components/settings/provider-channel-status"
+import { ProviderDirectory } from "@/components/settings/provider-directory"
 import { PendingSettingDialog, ManagedInputRow, SettingsMutationFeedback, modelOperationDialogClassName } from "@/components/settings/settings-controls"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { SettingsError, LoadingSettingsCard } from "@/components/settings/settings-feedback"
+import { SettingsError, SettingsEmpty } from "@/components/settings/settings-feedback"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { FieldGroup } from "@/components/ui/field"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -34,30 +34,39 @@ import { Skeleton } from "@/components/ui/skeleton"
 export function ProvidersPage() {
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
+  const [accountEditing, setAccountEditing] = useState(false)
+  const [directoryEditing, setDirectoryEditing] = useState(false)
   const summary = useApi(fetchSettingsSummary, [])
   const reloadSummary = summary.refetch
   const management = useProviderSettingsManagement()
+  const accounts = useAccountSettingsManagement()
+  const reloadAccounts = accounts.refetch
   const status = useApi(fetchManagementProviders, [])
   const reload = management.refetch
   const reloadStatus = status.refetch
-  const refresh = useCallback(() => { reload(); reloadStatus(); reloadSummary() }, [reload, reloadStatus, reloadSummary])
-  return <SettingsPageFrame title="modelManagement.providers" busy={editing || management.busy || management.loading || management.pendingPreview !== null || status.loading || summary.loading} refresh={refresh}>
-    {status.error ? <SettingsError message={translateApiErrorCode(t, status.errorCode)} retry={reloadStatus} /> : status.data ? <ProviderStatusCard state={status.data} /> : <LoadingSettingsCard title={t("modelManagement.providers")} />}
-    <ProviderSettingsManagement management={management} section="providers" onEditingChange={setEditing} onChanged={reloadStatus} />
-    <SettingsCliCommands scope="providers" summary={summary} />
-  </SettingsPageFrame>
-}
-
-export function ModelAccountsPage() {
-  const management = useAccountSettingsManagement()
-  const [editing, setEditing] = useState(false)
-  return <SettingsPageFrame title="modelManagement.accounts" busy={editing || management.busy || management.loading || management.pendingPreview !== null} refresh={management.refetch}>
-    <AccountSettingsManagement management={management} onEditingChange={setEditing} />
+  const refresh = useCallback(() => { reload(); reloadAccounts(); reloadStatus(); reloadSummary() }, [reload, reloadAccounts, reloadStatus, reloadSummary])
+  const afterProviderChange = useCallback(() => { reloadAccounts(); reloadStatus(); reloadSummary() }, [reloadAccounts, reloadStatus, reloadSummary])
+  const afterAccountChange = useCallback(() => { reload(); reloadStatus(); reloadSummary() }, [reload, reloadStatus, reloadSummary])
+  useEffect(() => { if (management.writeUnconfirmed && management.readbackRequired) afterProviderChange() }, [management.writeUnconfirmed, management.readbackRequired, afterProviderChange])
+  useEffect(() => { if (accounts.writeUnconfirmed && accounts.readbackRequired) afterAccountChange() }, [accounts.writeUnconfirmed, accounts.readbackRequired, afterAccountChange])
+  const busy = management.busy || management.loading || management.pendingPreview !== null || accounts.busy || accounts.loading || accounts.pendingPreview !== null
+  return <SettingsPageFrame title="modelManagement.providers" busy={editing || accountEditing || directoryEditing || busy || status.loading || summary.loading} refresh={refresh}>
+    {status.error && <SettingsError message={translateApiErrorCode(t, status.errorCode)} retry={reloadStatus} />}
+    <ProviderSettingsManagement management={management} section="providers" onEditingChange={setEditing} onChanged={afterProviderChange} renderProviders={providerActions =>
+      <AccountSettingsManagement management={accounts} onEditingChange={setAccountEditing} onChanged={afterAccountChange} renderAccounts={accountActions =>
+        <ProviderDirectory providers={providerActions} accounts={accountActions} management={management} locked={busy || management.readbackRequired || accounts.readbackRequired}
+          fresh={!management.loading && management.error === null && !management.readbackRequired}
+          authenticated={!status.loading && !status.error ? status.data?.official.authenticated ?? null : null}
+          onEditingChange={setDirectoryEditing} terminalContent={<SettingsCliCommands scope="providers" summary={summary} />} />
+      } />
+    } />
   </SettingsPageFrame>
 }
 
 export function ModelConfigurationPage() {
   const { t } = useTranslation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selectedProvider = searchParams.get("provider")
   const [codexEditorOpen, setCodexEditorOpen] = useState(false)
   const [providerEditing, setProviderEditing] = useState(false)
   const [groupsEditing, setGroupsEditing] = useState(false)
@@ -74,6 +83,9 @@ export function ModelConfigurationPage() {
   const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
   const codexSettings = !codex.loading && codex.error === null && !codex.readbackRequired ? codex.codexSettings : null
   const defaultModel = codexSettings?.models.find(model => codexSettings.defaults.model === null ? model.isDefault : model.model === codexSettings.defaults.model)
+  const localOnly = providers.settings === null || providers.error !== null || !localCatalogs.matchesManagement
+  const providerCatalogs = localOnly ? localCatalogs.data?.catalogs ?? [] : providers.settings?.modelCatalogs ?? []
+  const selectedCatalogIds = new Set(providerCatalogs.filter(item => item.providers.includes(selectedProvider ?? "")).map(item => `provider:${item.provider}`))
   return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy || localCatalogs.loading || codexEditorOpen || providerEditing || groupsEditing} refresh={refresh}>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -90,7 +102,11 @@ export function ModelConfigurationPage() {
       <ProviderModelCatalogs local={localCatalogs} management={providers} onChanged={reloadCodex} onEditingChange={setProviderEditing} renderCatalog={thirdParty =>
         <Card>
           <CardHeader><CardTitle>{t("modelCatalog.title")}</CardTitle><CardDescription>{t("modelCatalog.unifiedHint")} {t("openAiModelCatalog.searchReadOnlyHint")} <Link className="underline underline-offset-4" to="/settings">{t("openAiModelCatalog.editGlobalSearch")}</Link></CardDescription></CardHeader>
-          <CardContent><ModelCatalogTable label={t("modelCatalog.title")} groups={[{ ...official, webSearchSettings: providers.settings?.webSearchSettings.filter(entry => entry.provider === "openai"), webSearchState: providers.loading ? "loading" : providers.error !== null ? "error" : undefined }, ...thirdParty]} /></CardContent>
+          <CardContent className="flex flex-col gap-4">
+            {selectedProvider && <div className="flex flex-wrap items-center justify-between gap-2"><Badge variant="outline">{selectedProvider}</Badge><Button variant="outline" size="sm" onClick={() => setSearchParams({})}>{t("providerDirectory.allModels")}</Button></div>}
+            {selectedProvider && selectedProvider !== "openai" && selectedCatalogIds.size === 0 && <SettingsEmpty>{t(providers.loading || localCatalogs.loading ? "common.loading" : localOnly && (localCatalogs.error !== null || localCatalogs.data === null) ? "modelCatalog.localUnavailable" : "providerDirectory.noCatalog")}</SettingsEmpty>}
+            <ModelCatalogTable label={t("modelCatalog.title")} groups={[{ ...official, webSearchSettings: providers.settings?.webSearchSettings.filter(entry => entry.provider === "openai"), webSearchState: providers.loading ? "loading" as const : providers.error !== null ? "error" as const : undefined }, ...thirdParty].filter(group => !selectedProvider || group.id === "third-party-status" || (selectedProvider === "openai" ? group.id === "openai" : selectedCatalogIds.has(group.id)))} />
+          </CardContent>
         </Card>
       } />
     } />

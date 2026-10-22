@@ -1,8 +1,9 @@
 import type { ComponentProps } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { FieldGroup } from "@/components/ui/field"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
-import { SettingsEmpty } from "@/components/settings/settings-feedback"
+import { SettingsEmpty, SettingsError } from "@/components/settings/settings-feedback"
 import { useTranslation } from "@/hooks/use-translation"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
@@ -17,19 +18,20 @@ function searchLabel(t: Translate, mode: unknown): string {
   return t("common.unknown")
 }
 
-export function ProviderWebSearchSettings({ settings, management }: { settings: ManagementProviderSettingsResponse; management: ProviderSettingsController }) {
+export function ProviderWebSearchSettings({ settings, management, provider }: { settings: ManagementProviderSettingsResponse; management: ProviderSettingsController; provider: string }) {
   const { t } = useTranslation()
   const locked = management.busy || management.loading || management.error !== null || management.readbackRequired || management.pendingPreview !== null
   const providers = [...settings.managedProviders, ...settings.customProviders.fixedCandidates, ...settings.customProviders.switchingProviders, ...settings.customProviders.backupCandidates]
-  const searchSettings = settings.webSearchSettings.filter(setting => setting.source === "provider")
-  return <Card>
-    <CardHeader><CardTitle>{t("providerWebSearch.title")}</CardTitle><CardDescription>{t("providerWebSearch.hint")}</CardDescription></CardHeader>
-    <CardContent className="flex flex-col gap-4">
+  const searchSettings = settings.webSearchSettings.filter(setting => setting.source === "provider" && setting.provider === provider)
+  return <div className="flex flex-col gap-4">
+      {management.error && <SettingsError message={management.error} retry={management.refetch} />}
+      {management.actionError && <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert>}
+      {management.readbackRequired && <Alert><AlertDescription className="flex flex-col gap-2"><p>{t(management.writeUnconfirmed ? "settingsUi.writeUnconfirmed" : "settingsUi.readbackUnknown")}</p><Button variant="outline" disabled={management.busy || management.loading} onClick={management.refetch}>{t("common.retry")}</Button></AlertDescription></Alert>}
       {searchSettings.length === 0 ? <SettingsEmpty>{t("providerWebSearch.empty")}</SettingsEmpty> : <FieldGroup>{searchSettings.map(setting => {
         const knownMode = setting.status === "ready" && (setting.mode === null || ["disabled", "cached", "indexed", "live"].includes(setting.mode))
         const label = setting.provider === "openai" ? "OpenAI" : providers.find(provider => provider.id === setting.provider)?.displayName ?? setting.provider
         const error = setting.status === "error" ? t(setting.error === "invalid-mode" ? "openAiModelCatalog.searchInvalidMode" : setting.error === "invalid-document" ? "openAiModelCatalog.searchInvalidDocument" : "openAiModelCatalog.searchReadFailed") : t("common.unknown")
-        return <ManagedSelect key={setting.provider} label={t("providerWebSearch.providerLabel", { name: label, provider: setting.provider })}
+        return <ManagedSelect fullWidth key={setting.provider} label={t("providerWebSearch.providerLabel", { name: label, provider: setting.provider })}
           value={knownMode && setting.status === "ready" ? setting.mode ?? "global" : ""} placeholder={error}
           description={!knownMode ? error : undefined} disabled={locked || !knownMode}
           options={[["global", t("providerWebSearch.followGlobal")], ["disabled", t("settingsFields.off")], ["cached", t("settingsFields.cached")], ["indexed", t("settingsFields.indexed")], ["live", t("settingsFields.live")]]}
@@ -41,8 +43,7 @@ export function ProviderWebSearchSettings({ settings, management }: { settings: 
           }} />
       })}</FieldGroup>}
       <p className="text-sm text-muted-foreground">{t("providerWebSearch.activationHint")}</p>
-    </CardContent>
-  </Card>
+    </div>
 }
 
 type SearchPreview = Extract<NonNullable<ProviderSettingsController["pendingPreview"]>["preview"], { operation: "provider.web-search" }>

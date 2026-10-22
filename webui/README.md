@@ -22,9 +22,12 @@ i18n-glossary.json  翻译术语、原样保留项和规则，供开发工具生
 src/
   lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时、页面可见性和设置页恢复事件的延后补查，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 投影 OpenAI 当前周额度、Credits 余额和重置券到期明细，并管理有界手动查询失败记录、有界并发查询、逐账户结果交付、观测时间合并及 DS、OCG、CCG、Cline Pass 账户快照时效，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数
   hooks/       数据 hook（useApi 统一 loading/error/refetch，支持按当前状态更新和账户观测时间合并，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、Relay 服务管理 use-relay-service-management（统一手动、页面恢复及任务完成刷新）、Relay Key 管理 use-relay-management（复用确认 Hook）、use-relay-queue（队列页面挂载期间的 SSE 推送与有界快照刷新），设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、use-provider-model-catalogs（独立读取本地目录并核对管理快照的目录修订）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
-  pages/       relay-queue-page 独立实时请求队列页；thread-subagents-page 组合全部子代理和所属会话的关联子代理独立页；model-management-page 组合提供商、账户与凭据、模型配置、上下文与压缩四个独立路由，channels-page 组合渠道配置和消息展示，settings-page 组合常规、权限、网络、数据、服务五个子页；概览、会话、会话详情、请求、错误、调用详情、渠道投递队列、模型转发（独立 Key 管理，中文用途名称及居中弹窗，手动刷新运行状态）、设置（只负责组合设置域组件）
+  pages/       relay-queue-page 独立实时请求队列页；thread-subagents-page 组合全部子代理和所属会话的关联子代理独立页；model-management-page 组合提供商、模型配置、全局上下文三个独立路由，channels-page 组合渠道配置和消息展示，settings-page 组合常规、权限、网络、数据、服务五个子页；概览、会话、会话详情、请求、错误、调用详情、渠道投递队列、模型转发（独立 Key 管理，中文用途名称及居中弹窗，手动刷新运行状态）、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载，通过轻量配置读取共享调用采集开关以控制转储入口，数据设置保存后主动刷新开关，保留页面切换间的控制台已应用范围及有界账户手动查询失败记录（不保存账户快照）（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
+
+`components/settings/provider-directory.tsx` 在 `#/models/providers` 统一展示 OpenAI、受管账户和自定义提供商，按平台筛选，新增入口选择平台；编辑、本平台默认账户、模型配置、联网搜索、切换主提供商和移除均收进行操作菜单，只显示适用操作。主提供商、本平台默认账户与默认模型分别管理，已配置不代表连接可用。模型配置入口携带精确 Provider ID，匹配共享目录时保留目录的账户影响范围；找不到目录时提供查看全部模型的入口。
+`components/settings/account-settings-management.tsx` 保留账户草稿、凭据、预览确认及回读职责，`provider-settings-management.tsx` 保留提供商连接、主提供商切换及模型管理职责；目录只组合两者公开的行操作。OpenAI 登录和 CCG 账户仍通过终端配置，命令说明在弹窗中打开；`provider-channel-status.tsx` 保留渠道状态卡职责。
 
 令牌登录：服务端配置访问令牌时，API 返回 401 会显示令牌输入页；令牌存入浏览器
 `localStorage`，重新打开浏览器仍可复用，也可用 `?token=` 查询参数（放在 `#` 前或 HashRouter 路径中均可）打开页面自动登录。
@@ -143,7 +146,7 @@ CCG、OCG 保留 DS 导入；CLP 的固定 DS 候选和模板更新只读取仓�
 模型设置保留已配置但当前目录不可用的模型 ID，并标明“不可用”；选择有效模型后才提供对应思考等级和加速档位。未配置模型时只使用目录显式默认模型，不选择目录第一项；无有效模型时仍可选择 Standard 退出加速。
 `components/requests/errors-table.tsx` 组合错误记录列、错误说明和会话/轮次跳转；`components/traffic/traffic-table.tsx` 组合调用列表及详情入口。两者与渠道投递队列、请求、会话页复用 `DataTable` 的标题摘要、列显隐、滚动区和服务端分页。公共组件支持标题操作区、业务工具栏、稳定行 ID 及行点击；日志使用不分页模式、行内详情和表格视口滚动回调。
 
-`components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。共享 `TooltipContent` 默认在右侧显示，空间不足时由组件自动避让。
+`components/metrics/data-table.tsx` 默认填充受限视口，提供商目录使用 `layout="content"` 按当前页内容展开，避免少量配置行仍需纵向滚动。其 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。共享 `TooltipContent` 默认在右侧显示，空间不足时由组件自动避让。
 `components/metrics/model-usage-cards.tsx` 为控制台与子代理页提供两行紧凑模型用量卡片，只展示调用方给定的统计范围；`components/overview/model-usage.tsx` 组合控制台模型区，默认显示前八个模型，支持展开全部和收起。
 模型卡片没有常驻框线；控制台卡片在服务端返回至少一个 `members` 时可点击打开明细弹窗，不显示占位的明细按钮。全卡片点击入口使用绝对定位的标准 Button 与 DialogTrigger，键盘聚焦保留内侧焦点提示，和内容提示作为兄弟元素，内部用量与截断提示独立聚焦和操作。单个成员也可查看提供商与原始模型 ID。弹窗各行展示请求数、涉及轮次、输入、缓存命中率和输出；同轮跨模型或提供商时各项轮数不可相加，组内去重口径放在弹窗说明中，窄屏或大量明细可滚动查看。超过八个模型时，模型区的展开全部/收起按钮始终显示。缺少 `members` 的子代理卡片不提供明细入口。
 
@@ -188,7 +191,7 @@ CCG、OCG 保留 DS 导入；CLP 的固定 DS 候选和模板更新只读取仓�
 
 ## 自定义模型能力设置
 
-提供商页面的联网搜索卡按后端返回的独立 Provider ID 配置具有独立 config 的第三方账户；OpenAI 和使用主 config 的固定提供商在通用设置中修改全局值。
+提供商页面通过行操作菜单打开联网搜索弹窗，按后端返回的独立 Provider ID 配置具有独立 config 的第三方账户；OpenAI 和使用主 config 的固定提供商在通用设置中修改全局值。
 `components/settings/provider-web-search-settings.tsx` 提供跟随全局、关闭、缓存、索引和实时五种选择，
 通过 `provider.web-search` 携带资源修订进行预览、确认及权威回读；跟随全局只移除账户覆盖。
 读取失败、未知模式、忙碌或等待回读时不允许修改，不把错误显示成跟随全局。确认弹窗明确展示账户和保存前后值，

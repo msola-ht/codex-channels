@@ -59,7 +59,6 @@ const TrafficPage = lazy(() =>
   import("@/pages/traffic-page").then((module) => ({ default: module.TrafficPage })))
 
 const ProvidersPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ProvidersPage })))
-const ModelAccountsPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelAccountsPage })))
 const ModelConfigurationPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelConfigurationPage })))
 const ModelContextPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelContextPage })))
 
@@ -197,7 +196,6 @@ function Layout() {
                 <Route path="/relay/queue" element={<RelayQueuePage />} />
                 <Route path="/delivery" element={<DeliveryPage />} />
                 <Route path="/models/providers" element={<ProvidersPage />} />
-                <Route path="/models/accounts" element={<ModelAccountsPage />} />
                 <Route path="/models/configuration" element={<ModelConfigurationPage />} />
                 <Route path="/models/context" element={<ModelContextPage />} />
                 <Route path="/channels" element={<ChannelsPage />} />

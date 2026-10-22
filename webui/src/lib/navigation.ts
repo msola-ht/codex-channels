@@ -27,7 +27,6 @@ export interface NavItem {
 
 export const modelNavItems: NavItem[] = [
   { to: "/models/providers", labelKey: "modelManagement.providers", icon: Boxes },
-  { to: "/models/accounts", labelKey: "modelManagement.accounts", icon: KeyRound },
   { to: "/models/configuration", labelKey: "modelManagement.models", icon: Settings },
   { to: "/models/context", labelKey: "modelManagement.context", icon: ListOrdered },
 ]
