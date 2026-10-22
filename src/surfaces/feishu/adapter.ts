@@ -384,8 +384,16 @@ export class FeishuConversationAdapter {
     input = "",
     modelSelection?: FeishuModelSelectionInteraction,
   ): Promise<FeishuCommandCenterResponse | void> {
-    this.conversations.touchActivity?.(target);
+    let receivedStop: ReturnType<AttachmentInputLifecycle["receiveStop"]> | undefined;
     try {
+      if (action === "stop") {
+        if (this.videoCancellation.signal.aborted
+          || this.inputOptions.access?.isAllowed({ target, actorId }) !== true) {
+          throw new UserFacingError("command.authorization-changed", "命令授权不可用");
+        }
+        receivedStop = this.attachmentInputs.receiveStop(target);
+      }
+      this.conversations.touchActivity?.(target);
       if (action === "help") {
         this.notifyMarkdown(target.conversationId, renderFeishuHelp());
         return;
@@ -486,6 +494,8 @@ export class FeishuConversationAdapter {
         : action === "fast" && input === ""
         ? await this.commands.execute(target, "model", "", actorId)
         : await this.commands.execute(target, action, input, actorId);
+      if (result.kind === "outcome" && result.outcome.type === "turn.stop-requested"
+        && receivedStop?.cancelled) result.outcome.stopped = true;
       modelSelection?.assertActive();
       if (cancelledInteraction) this.notifyText(target.conversationId, interactionStoppedText);
       const followUpChoices = action === "model"
@@ -532,6 +542,8 @@ export class FeishuConversationAdapter {
         formatOperationFailure(detail),
       );
       throw error;
+    } finally {
+      receivedStop?.();
     }
   }
 
