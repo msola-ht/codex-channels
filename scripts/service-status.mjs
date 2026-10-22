@@ -1,7 +1,7 @@
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { closeSync, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
@@ -138,15 +138,18 @@ export function readManagedServiceError({
   if (target !== "gateway" && target !== "app-server" && target !== "webui" && target !== "model-relay") {
     return null;
   }
-  let dataDir;
+  let directory;
   try {
-    dataDir = runtimeConfig(environment).dataDir;
+    const { configPath, dataDir } = runtimeConfig(environment);
+    directory = dirname(resolvePrimaryAppServerSocketPath(readGatewayConfig(configPath), dataDir));
+    const directoryStats = lstatSync(directory);
+    if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) return null;
   } catch {
     return null;
   }
   const logBase = target === "app-server" ? "codex-app-server" : target;
   const errors = [`${logBase}.error.log`, `${logBase}.log`]
-    .map(name => readManagedServiceLogError(join(dataDir, "runtime", name), now))
+    .map(name => readManagedServiceLogError(join(directory, name), now))
     .filter(error => error !== null);
   errors.sort((left, right) => (right.observedAt ?? "").localeCompare(left.observedAt ?? ""));
   return errors[0] ?? null;

@@ -115,8 +115,8 @@ B 编号是责任边界，不强制一包一提交。每包实施时核对原编
 | --- | --- |
 | Telegram effort 键盘目录快照 | B26已提交6903e105，独立A全链复审无阻断：提交后的页面统一按state读取浏览目录并投影，当前模型能力验证仍使用定向目录。隔离生产入口连续选择成功；真实Telegram及共享AppServer待补证。 |
 | 显式相对 CLI 路径 | B27已提交c2c1b494，统一配置文件目录基准，跨cwd及缺失路径隔离观察完成；独立A发现的Windows歧义已拒绝并复核。原生Windows/macOS服务仍待补证。 |
-| 微信非成功响应正文清理 | B28修复请求作用域及Reader收尾，包含上传只读header分支；实际30秒取消停滞已补修并观察timeout与连接关闭，新独立A最终四文件复审无阻断，准备提交。真实微信/代理隧道与跨OS待补证。 |
-| 自定义Socket目录的日志归属 | B19 独立A源码发现状态摘要固定读取dataDir/runtime，日志路由与安装器按codex.socket_path父目录选取；配置自定义Socket目录可能产生不同日志来源。待隔离复现、明确共享目录合同并修复复审，当前尚未运行观察，不在脱敏批次改变路径选择。 |
+| 微信非成功响应正文清理 | B28已提交183dcdbc，修复请求作用域及Reader收尾，包含上传只读header分支；实际30秒取消停滞已补修并观察timeout与连接关闭，新独立A最终四文件复审无阻断。真实微信/代理隧道与跨OS待补证。 |
+| 自定义Socket目录的日志归属 | B29统一摘要与安装器/日志页面的Socket父目录规则；四目标同源、隔离HTTP、异常及脱敏观察完成，独立A全链复审无阻断，准备提交。原生服务、已加载定义及激活待补证。 |
 
 ## 数据、失败恢复与回滚
 
@@ -552,7 +552,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立A完整报告已收齐，Windows发现关闭，17源码及安装/运行/管理消费链、当前文档均无剩余阻断。主代理核最终关键blob与报告一致；A曾将工具JSON转义误认文档双反斜杠，双方逐字符确认实际单反斜杠后撤回该提醒，未作无必要编辑。准备正常Node22 Hook完成最终静态门禁并提交，不推送。
 - 本地提交c2c1b494009d155a51de18c1f4b7b498d9b7686e，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown及Gateway构建均通过，15秒；提交后工作区干净，未推送。
 
-### 第二十五批：B28（关联问题3，修复复审完成）
+### 第二十五批：B28（关联问题3，已提交）
 
 - 输入c2c1b494。微信JSON/CDN非成功响应未消费正文，上传成功及错误分支仅消费status/header；请求作用域返回后解除计时和外部取消，却未释放未读正文。追踪三个withWeixinRequestAbort调用方、原生/代理Fetch、上传重试及错误分类，不只修改JSON非2xx分支。
 - 保留HTTP/外部取消/超时错误分类、固定重定向拒绝、上传Header成功条件与既有重试；拟在请求作用域完成时回收剩余资源，不无界等待正文取消。自有loopback原生Fetch观察慢响应实际关闭，正常下载/JSON/上传消费一并核对；不请求真实微信，完成后新独立A关联复审。
@@ -566,3 +566,14 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 完整交接已收齐：最终Reader pending read遇取消且底层cancel不结束，21ms返回aborted、锁释放、监听新增/移除各1；Reader失败、cancel拒绝、预取消、无正文结果符合且无未处理拒绝。正常JSON/长轮询cursor=next/CDN完整usable-download、JSON timeout/abort和CDN abort重新观察通过。一次CDN取消输入先撞3字节预算，输出too-large而未计取消证据；改100字节预算和7字节慢体后得到aborted及服务端关闭，未为错误输入改产品代码。
 - 实际代理观察仅生产createProxyFetch直连分支，不含真实代理隧道；真实微信、跨OS、共享服务未观察。所有作业已收齐，自有服务器/连接结束；旧125秒作业按exit143单独记录，其余最终观察openSockets=0，不留活动句柄。
 - 新独立A完整报告已收齐，重新覆盖最终四文件、三种请求作用域、全部JSON端点/上传与四媒体下载、存储/Monitor/Outbox消费，未发现剩余阻断。主代理读完整报告并核四blob一致；普通文件/图片会话原有外部signal传递选择不因本批泛化，固定预算、存储关闭及下载后复核仍保留。准备正常Hook提交，不推送。
+- 本地提交183dcdbce264fd7c2259bdf68f1c0febca45d173，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown及Gateway构建均通过，14.6秒；提交后工作区干净，未推送。
+
+### 第二十六批：B29（关联问题4，修复复审完成）
+
+- 输入183dcdbc。状态最近错误固定读取dataDir/runtime，但日志页面与macOS/Windows安装器按配置Socket父目录选日志；统一当前配置来源，不从旧目录回退猜测。保留四目标文件命名、尾部预算、脱敏、mtime选择及Linux journal行为。
+- 隔离配置/日志观察自定义目录与旧目录诱饵、默认路径、非法/缺失资源和生产管理子路由可用输出；不调用真实服务管理器。配置不可读或目录无效时只缺少错误摘要，不使状态查询崩溃。修复后新独立A复审再提交。
+- 修前自有配置socket_path=custom/app.sock，四目标摘要均误取旧runtime的OLD_DIRECTORY，而生产readServiceLogs(darwin注入)均读CUSTOM_DIRECTORY。单文件修复由既有配置/Socket resolver取得父目录，并拒绝直接目录链接或非目录；文件reader、16KiB、mtime选择及脱敏保持。主代理核diff，用户指南和scripts README同步，独立A已开始安装定义、日志页面、管理摘要与Linux fallback关联复审。
+- 实施者完整报告收齐，源码blob f58aaae8ecd1118b60326c52822c76482667fcd9。修后darwin/win32注入分支四目标摘要与日志同为CUSTOM_DIRECTORY；自有HTTP生产/services子路由返回200、四目标HTTP_CUSTOM且token=[REDACTED]。语法错误/缺失配置仍200、recentError均null，服务状态cache隔离预填、journal指向自有缺失程序，未查询真实服务。
+- 默认Socket、CODEX_CONNECT_HOME、相对配置、绝对Socket正常；直接目录symlink/非目录/缺失、叶symlink/目录及无效target均null；mtime选newer_stdout，16KiB只返回TAIL_ERROR，超界不完整单行null。配置缺失时Linux注入journal一次并返回JOURNAL_FALLBACK。Node22语法、ESLint、完整check及diff通过；自有HTTP/临时目录与作业全部收齐清理。
+- 用户指南区分安装时固化目录与WebUI按当前配置读取，不声称修改Socket会自动改写已加载定义；原生macOS/Windows服务日志及重装激活未观察。主代理核最终源码diff和完整报告，独立A最终结论待收齐。
+- 独立A完整报告已收齐，覆盖公开CLI配置注入、三平台服务定义、两个日志读取者、异步摘要及管理接口/前端消费，最终blob一致，无剩余本批阻断。未把原有叶文件读取竞态等未修改边界声称已解决。主代理已读完整报告并核文档与当前实现一致，准备正常Hook提交。

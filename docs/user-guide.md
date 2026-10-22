@@ -655,6 +655,7 @@ Windows 启动前会检查服务定义所用的 PowerShell、原生构建产物�
 `stop/status all` 仍包含已安装的可选服务，
 `logs` 默认 Gateway，显示最近 100 行；`-n` / `--lines` 接受 1 到 10000 的十进制整数，`-f` 持续跟随。macOS 普通 `start` 不强制重启已运行的服务。
 Windows 非跟随日志分块定位和输出尾部，不随累计日志大小占用内存；末尾换行不额外计为空行，超长单行仍完整输出。读取期间文件被截短会明确报错；之后追加的内容可用下一次查询或 `-f` 查看。
+macOS/Windows 安装器将受管日志目录固定为安装时 `[codex] socket_path` 的父目录；WebUI 日志页面与最近错误摘要按当前配置解析同一目录，未自定义时为配置目录下的 `runtime`。修改 Socket 位置后须按[安装步骤](source-install.md#本地工作树安装与部署)重建服务定义，避免已加载服务继续写旧位置。配置不可读或日志目录无效时文件摘要不可用，不借旧目录内容冒充当前错误；Linux 保留 journal 查询。
 单独重启 Gateway 不停止共享 App Server；单独重启 App Server 时，仍运行的 Gateway 会按真实断线处理并重连。
 渠道内禁止停止或重启 App Server，全部重启也必须在本机终端执行。
 WebUI 内不执行包含自身的停止、重启或卸载任务；请在本机终端运行对应的 `codexc stop/restart webui`、`codexc stop/restart all` 或 `codexc uninstall --services`。
