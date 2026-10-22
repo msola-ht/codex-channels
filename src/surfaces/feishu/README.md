@@ -69,6 +69,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；不等待独立文字或图片，
   已在队列中明确相邻的图片可成批处理，普通文本与命令仍沿用既有顺序路径。
+  音视频在授权、去重与容量准入后同步登记接收取消范围，覆盖等待中的附件；授权stop取消此前范围，后续附件等待旧stop结束后再建立提交作用域。处理完成及关闭丢弃队列项时释放接收范围。
 - `command-format.ts`：把 Gateway Markdown 文案中独立成行的命令和“标签：命令”的值渲染为行内代码，
   供 Markdown 文案出口（`notifyMarkdown`、`deliverMarkdown`）与命令中心 Markdown 卡片共用；
   只识别共享命令、别名与飞书专有命令，跳过目录/路径/文件字段、缩进代码块、代码围栏、表格行、

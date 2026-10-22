@@ -452,7 +452,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - R27标记已修复待补证。外层鉴权、真实journald、浏览器与Windows/macOS服务未实机运行；只保证已识别凭据形式的安全投影，不声称可识别任意未知正文中的秘密。自定义Socket目录日志归属差异已另记待复现任务。
 - 本地提交 `3348a4745786cc59548fcc40dd36ce0c75c3446e`，正常Node22 Hook完整类型/版本/边界、Lint、84份Markdown、WebUI构建/Lint/2136字典键以及Gateway构建全部通过，44.2秒；提交后工作区干净，未推送。
 
-### 第十七批：B20（修复与独立复审完成，待提交）
+### 第十七批：B20（已提交）
 
 - 输入 `3348a474`，R36/R42。Telegram热撤权目前只替换访问策略/通知目标，现有正文流和显式图片需沿队列、重试与实际API边界复核；飞书应用配置需沿卡片等待、扫码、检查及patchAbility/patchConfig/publish各阶段复核并取消失效任务。仍授权目标保持正常，重授权不能复活旧操作；已远端提交结果不宣称可回滚。
 - 本批不发送真实渠道消息，不修改真实飞书应用，不读用户账户或内部会话。先确定现有授权/取消端口及最小关联修复，隔离观察阶段间撤权和正常路径；未观察的外部平台边界保留。
@@ -467,3 +467,17 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 实施者最终报告：Node22生产openDoctor→提取真实Doctor按钮→handleCardAction→HttpApi依赖端口，16个撤权再授权窗口覆盖Doctor读取/卡片、扫码回调/卡片、授权后检查、配置检查、三次写入及配置后检查；撤权后未进入下一次写入，迟到Doctor按钮无效。已发成功分别记录完成到patchAbility/patchConfig/publish；patchConfig未知记录completed=[patchAbility]及unconfirmed=patchConfig，明确403记录rejected=patchConfig。close阻止后续publish；正常扫码完成三写及结果卡；撤A不影响B原有按钮正常配置。未连接真实HTTP/扫码租户。
 - TG正常delta一次send及一次edit；旧计时器和同Item迟到delta在撤再加后不再调用API，其他授权用户与新Turn正常。9源码tsc、局部ESLint、Runtime边界与diff检查均退出0，所有异步作业收齐、任务资源清理。共享队列的飞书/微信调用方也经独立A源码核对，正常顺序合同保持，但没有重复三渠道真实平台运行。
 - 主代理已读实施者及独立A完整报告，并核9个最终源码blob与复审输入一致；A全链结论无剩余本批阻断。R36/R42标已修复待补证：本地生产类、热reload及SDK注入端口观察不等于真实Telegram送达、飞书扫码/远端配置或跨OS验收；startup/context.reply未扩，已发未知结果不自动重发/回滚。将通过正常Hook本地提交，未授权远端推送。
+- 本地提交 `1e92e45201e30f738857282aea0e38fb71cef504`，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown及Gateway构建均通过，16.2秒；提交后工作区干净，未推送。
+
+### 第十八批：B21（修复及独立复审完成，待提交）
+
+- 输入 `1e92e452`，R38。三渠道音视频在前级输入队列等待时尚未登记Application取消范围，紧急stop可能先执行；须从真实接收入口、Actor/目标鉴权到全部等待队列、下载和锁内提交关联修复。TG同批紧急优先、微信monitor与adapter双层队列、飞书Inbox顺序处理分别核对，不能仅前移到现有flushPending之前。
+- 保留先前输入创建首个Thread后再捕获附件目标的合同；已接收旧附件取消，stop后新收到独立附件仍可提交，其他目标和未授权stop不受影响。已可能提交的引用不得因取消误删，重复、过载和关闭需释放任务范围。不连接真实渠道或共享AppServer，实施后再开新的独立A复审。
+- 方案确定为Surface内部共享有界附件接收范围，不新增Application端口：三端在授权、去重与容量准入后、第一次等待前登记音视频任务，120秒预算从接收起。授权stop在接收时取消此前任务，并让后续新附件等待该stop的处理结束，再创建现有Application提交范围，防迟执行stop误杀新输入。TG按update顺序登记，再保留紧急优先调度；微信还覆盖persistReplyContext前的等待。多次stop、处理失败及关闭必须释放等待，取消不能提前删除可能已提交的文件；实现和观察仍在进行。
+- 主代理指出并经独立A确认：TG/WX到达时未授权直接返回无receipt，后续队列等待期间重新授权可走handler的缺receipt回退，夹在其中的stop无法取消旧附件。要求接收拒绝附件留下不占配额的永久拒绝身份或直接忽略，不允许后续当前授权重新接纳；飞书Inbox本身先拒未授权，无此入口路径。
+- 主代理与A核Telegram接收stop识别，A用已安装生产grammY确认：前导空白且实体offset=1、以及无bot_command实体的 `/stop` 均会被新增文字识别误当stop，但SDK按普通文本处理；反之机器人MyBot的 `/stop@mybot` 是SDK有效命令，原接收识别却未匹配。已要求接收取消与紧急调度复用真实命令实体/用户名合同并拒有参数形式，不能用更宽文字识别触发取消。补修及独立复核中。
+- 两项补修已由A独立实观复核：拒绝receipt重授权后仍audio.unavailable、create0/pending0；TG直接复用SDK命令匹配，前导空白/无实体false、大小写用户名和原名true、带参数false。接收未授权stop也限定冻结拒绝以保持准入一致；A未找到此stop分支的可重复生产竞态，不另列已复现缺陷。多stop改用尚未完成任务集合，避免不断链接历史Promise；逆序完成时先结束stop2不创建提交scope，stop1也结束后才create1，取消/close移除waiter。
+- 实施者Node22生产接收链观察：TG lifecycle.pollUpdates→Bot→audio handler覆盖跨批慢前序、同批old/stop/new、其他chat和未授权stop，old无scope/download，new及other提交localAudio、stop后普通文字正常；WX InputAdapter.start→monitor→双层队列覆盖重复old、stop/new、file new.mp4及其他Actor，旧语音一次取消提示、新转写及视频按序提交并retain，游标1/2/3提交；FS Inbox.receive→adapter覆盖stop2先完成时new无下载、stop1完成后新语音提交、其他Chat正常、未授权stop ignored。三端结束pending/stops均0。下载与最终Turn消费口使用隔离注入，没有真实平台或用户AppServer。
+- 真实120秒观察完成：elapsedMs=120151，audio.unavailable、pending0、dispose1；mayHaveSubmitted=true未因dispose清零。FS实际file视频入口迟到下载在stop后discard并拒绝，mayHaveSubmitted=false；已到RPC提交口但确认丢失时retain且mayHaveSubmitted=true。关闭等待中的附件不下载，最终pending/stops0；同目标第5项/第1001个活跃目标拒绝且不建Application scope，释放后0；飞书duplicate/overload不重复登记接收范围。额度是每Surface实例1000目标/每目标4项，Application另保留原全局预算。
+- 独立A已完成三端接收、队列、下载、Application锁内守卫与文件归属的全链复审，无剩余本批阻断；主代理核9个最终源码blob与A报告一致。Application源码未改，相关README已纠正为接收范围与提交作用域分层，新增共享文件已入Surface索引。R38标已修复待补证；真实渠道、共享AppServer、模型执行和macOS/Windows未观察。准备正常Hook本地提交，不推送。
+- 主代理已读实施者最终完整报告，所有异步作业和自有资源已收齐。观察中Application准备/取消调用生产方法，但会话锁及最终Turn消费由隔离端口执行，不能称完整AppServer提交验收；锁内真实守卫的适用性由独立A源码追踪补充。最新tsc、9源码局部ESLint、Runtime边界及diff检查均通过。

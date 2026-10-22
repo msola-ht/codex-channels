@@ -1,8 +1,8 @@
 # Application
 
-`ConversationTurnUseCases.prepareAttachmentSubmission` 在等待前序输入前登记音频或视频取消作用域；Surface 排空前序输入后调用一次 `captureTarget`，在下载前捕获当前工作区与 Thread，允许前序输入正常创建首个 Thread。下载完成后在会话锁内复核目标和调用方实时授权，并在异步会话准备之后、Turn 请求发出前再次复核已捕获的 Thread，再通过原有 Turn 提交入口发送文本视频引用或含 `localAudios` 的稳定输入。未捕获目标不得提交，取消后不得捕获；首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
+Surface 在接收音视频、首次进入队列前登记有界接收取消范围，并等待此前停止命令处理结束；之后调用 `ConversationTurnUseCases.prepareAttachmentSubmission`，在刷新前序输入前建立 Application 提交作用域。Surface 排空前序输入后调用一次 `captureTarget`，在下载前捕获当前工作区与 Thread，允许前序输入正常创建首个 Thread。下载完成后在会话锁内复核目标和调用方实时授权，并在异步会话准备之后、Turn 请求发出前再次复核已捕获的 Thread，再通过原有 Turn 提交入口发送文本视频引用或含 `localAudios` 的稳定输入。未捕获目标不得提交，取消后不得捕获；首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
 
-返回的提交作用域提供取消信号、一次性 `captureTarget` 和 `submit`、`mayHaveSubmitted` 和 `dispose`。Surface 在首次等待前创建作用域并在结束时释放；`/stop` 取消当前目标的附件准备，准备总时限为 120 秒，包含等待前序输入，捕获目标不重置时限。每个目标最多 4 个待处理作用域，全局最多 1000 个目标。RPC 可能发出后即使确认失败也保留附件至过期，避免删除已经进入 Thread 的引用；不自动重试提交。
+返回的提交作用域提供取消信号、一次性 `captureTarget` 和 `submit`、`mayHaveSubmitted` 和 `dispose`，覆盖前序输入刷新至锁内提交，并在结束时释放。Application 自身保留120秒期限；Surface接收范围另从接收起计算120秒预算，包含外层排队及停止等待，超时同时取消已建立的提交作用域，捕获目标不延长总预算。每个目标最多4个待处理作用域，全局最多1000个目标。RPC可能发出后即使确认失败也保留附件至过期，避免删除已经进入Thread的引用；不自动重试提交。
 
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 

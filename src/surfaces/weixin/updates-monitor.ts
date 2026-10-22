@@ -30,6 +30,7 @@ export interface CreateWeixinUpdatesMonitorOptions {
   handleMessage(message: Extract<WeixinInboundMessage, {
     kind: "text" | "image" | "file" | "audio" | "video";
   }>, signal: AbortSignal): Promise<void>;
+  receiveMessage?(message: Exclude<WeixinInboundMessage, { kind: "ignored" }>, signal: AbortSignal): (() => void) | undefined;
   maximumConsecutiveFailures?: number;
   recentMessageCapacity?: number;
   retryDelayMs?: number;
@@ -97,11 +98,12 @@ export function createWeixinUpdatesMonitor(
         const urgent = message.kind === "text" && isEmergencyStopCommand(message.text);
         const lane = message.kind === "text" && isWeixinInteractionCommand(message.text) ? controls : conversations;
         const previous = key === undefined || urgent ? Promise.resolve() : lane.get(key) ?? Promise.resolve();
+        const release = message.kind === "ignored" ? undefined : options.receiveMessage?.(message, pollingSignal);
         const task = previous.then(async () => {
           if (failure) throw failure.error;
           if (message.kind !== "ignored") await options.handleMessage(message, pollingSignal);
           recentMessageIds.add(message.messageId);
-        });
+        }).finally(() => release?.());
         inFlightIds.set(message.messageId, task);
         if (key !== undefined && !urgent) lane.set(key, task);
         void task.then(() => {

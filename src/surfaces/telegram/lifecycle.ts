@@ -1,4 +1,4 @@
-import type { Bot } from "grammy";
+import { Context, type Bot } from "grammy";
 import type { Logger } from "pino";
 import { observeSurfaceStage, withSurfaceDiagnosticContext } from "../diagnostics.js";
 
@@ -6,7 +6,6 @@ import {
   conversationCommandNames,
 } from "../../application/index.js";
 import { conversationCommandDescriptions } from "../conversation-command-help.js";
-import { isEmergencyStopCommand } from "../slash-command.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
@@ -50,6 +49,7 @@ export interface TelegramStartupNotification {
 export interface TelegramLifecycleOptions {
   closeTimeoutMs?: number;
   isInteractionUpdate?: (update: Parameters<Bot["handleUpdate"]>[0]) => boolean;
+  receiveUpdate?: (update: Parameters<Bot["handleUpdate"]>[0]) => (() => void) | undefined;
 }
 
 export class TelegramLifecycle {
@@ -63,6 +63,7 @@ export class TelegramLifecycle {
   private pendingUpdateCount = 0;
   private activeUpdateGroups = 0;
   private readonly updateSlots: Array<() => void> = [];
+  private readonly receivedInputs = new WeakMap<object, () => void>();
   private stopping = false;
   private readonly closeTimeoutMs: number;
 
@@ -258,12 +259,16 @@ export class TelegramLifecycle {
           "Telegram Long Polling 收到更新批次");
         }
         const controlUpdates = new Set(
-          updates.filter((update) => isTelegramEmergencyStopUpdate(update, this.bot.botInfo.username)
+          updates.filter((update) => isTelegramEmergencyStopUpdate(update, this.bot)
             || update.callback_query?.data?.startsWith("ix:")
             || this.options.isInteractionUpdate?.(update)),
         );
-        for (const update of controlUpdates) {
-          this.runUrgentUpdate(update);
+        // Register in platform receive order before urgent handlers can overtake
+        // ordinary queues. In particular, attachments on either side of stop differ.
+        for (const update of updates) {
+          const release = this.options.receiveUpdate?.(update);
+          if (release) this.receivedInputs.set(update, release);
+          if (controlUpdates.has(update)) this.runUrgentUpdate(update);
         }
         for (const group of groupTelegramUpdates(
           updates.filter((update) => !controlUpdates.has(update)),
@@ -336,7 +341,7 @@ export class TelegramLifecycle {
     update: Parameters<Bot["handleUpdate"]>[0],
   ): void {
     const key = telegramUpdateConversation(update);
-    const stop = isTelegramEmergencyStopUpdate(update, this.bot.botInfo.username);
+    const stop = isTelegramEmergencyStopUpdate(update, this.bot);
     const previous = stop ? Promise.resolve() : this.controlProcessing.get(key) ?? Promise.resolve();
     const task = previous.then(() => this.handleUpdate(update))
       .finally(() => {
@@ -393,6 +398,9 @@ export class TelegramLifecycle {
         },
         "Telegram 更新处理失败",
       );
+    } finally {
+      this.receivedInputs.get(update)?.();
+      this.receivedInputs.delete(update);
     }
   }
 }
@@ -402,17 +410,12 @@ function telegramUpdateConversation(update: Parameters<Bot["handleUpdate"]>[0]):
   return chatId === undefined ? "unattributed" : String(chatId);
 }
 
-function isTelegramEmergencyStopUpdate(
+export function isTelegramEmergencyStopUpdate(
   update: Parameters<Bot["handleUpdate"]>[0],
-  botUsername: string,
+  bot: Pick<Bot, "api" | "botInfo">,
 ): boolean {
-  const text = update.message?.text;
-  if (text === undefined) {
-    return false;
-  }
-  const normalized = text.trim();
-  return isEmergencyStopCommand(normalized)
-    || normalized === `/stop@${botUsername}`;
+  const context = new Context(update, bot.api, bot.botInfo);
+  return Context.has.command("stop")(context) && String(context.match).trim().length === 0;
 }
 
 async function waitAtMost(operation: Promise<unknown>, timeoutMs: number): Promise<boolean> {

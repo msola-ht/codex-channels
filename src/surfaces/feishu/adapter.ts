@@ -1,4 +1,5 @@
 import { textAttachmentBody } from "../text-attachment-store.js";
+import { AttachmentInputLifecycle, type ReceivedAttachmentInput } from "../attachment-input-lifecycle.js";
 import { videoAttachmentBody, type PreparedVideoAttachment } from "../video-attachment-store.js";
 import {
   isConversationCommandName,
@@ -13,7 +14,7 @@ import {
 } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
-import { parseSlashCommand } from "../slash-command.js";
+import { isEmergencyStopCommand, parseSlashCommand } from "../slash-command.js";
 import {
   formatOperationFailure,
   gatewayRequestFailedText,
@@ -83,6 +84,9 @@ export class FeishuConversationAdapter {
   private readonly inputs: SurfaceInputBatcher;
   private nextInputSequence = 0;
   private readonly videoCancellation = new AbortController();
+  private readonly attachmentInputs = new AttachmentInputLifecycle();
+  private readonly receivedAttachments = new WeakMap<object, ReceivedAttachmentInput>();
+  private readonly attachmentStops = new WeakSet<object>();
 
   constructor(
     private readonly conversations: Pick<
@@ -154,6 +158,23 @@ export class FeishuConversationAdapter {
     }
   }
 
+  receiveInput(message: FeishuInboxMessage): (() => void) | undefined {
+    const allowed = () => !this.videoCancellation.signal.aborted
+      && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true;
+    if (!allowed()) return;
+    if (message.kind === "text" && isEmergencyStopCommand(message.text)) {
+      const stop = this.attachmentInputs.receiveStop(message.target);
+      if (stop.cancelled) this.attachmentStops.add(message);
+      return stop;
+    }
+    const kind = message.kind === "audio" ? "audio" : message.kind === "video" ? "video" : undefined;
+    if (!kind) return;
+    const receipt = this.attachmentInputs.receive(message.target, allowed, kind,
+      () => this.conversations.prepareAttachmentSubmission?.(message.target, allowed, kind));
+    this.receivedAttachments.set(message, receipt);
+    return () => { receipt.dispose(); this.receivedAttachments.delete(message); };
+  }
+
   async handle(message: FeishuInboxMessage): Promise<void> {
     try {
       this.conversations.touchActivity?.(message.target);
@@ -216,6 +237,8 @@ export class FeishuConversationAdapter {
           command.argumentsText,
           message.actorId,
         );
+        if (result.kind === "outcome" && result.outcome.type === "turn.stop-requested"
+          && this.attachmentStops.has(message)) result.outcome.stopped = true;
         if (cancelledInteraction) this.notifyText(message.target.conversationId, interactionStoppedText);
         if (result.kind === "hooks") {
           const response = renderCommandCenterChoices("hooks", result);
@@ -350,6 +373,7 @@ export class FeishuConversationAdapter {
   }
 
   stopVideoInputs(): void {
+    this.attachmentInputs.close();
     this.videoCancellation.abort();
   }
 
@@ -798,7 +822,7 @@ export class FeishuConversationAdapter {
     let submissionScope: ReturnType<NonNullable<typeof this.conversations.prepareAttachmentSubmission>> | undefined;
     try {
       check();
-      submissionScope = this.conversations.prepareAttachmentSubmission(message.target, () =>
+      submissionScope = await this.receivedAttachments.get(message)?.prepare() ?? this.conversations.prepareAttachmentSubmission(message.target, () =>
         !signal.aborted && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
       );
       signal = AbortSignal.any([signal, submissionScope.signal]);
@@ -849,7 +873,7 @@ export class FeishuConversationAdapter {
     if (message.durationMs > maximumFeishuAudioDurationMs) {
       throw new UserFacingError("audio.too-large", "语音最长支持 5 分钟");
     }
-    const scope = this.conversations.prepareAttachmentSubmission?.(
+    const scope = await this.receivedAttachments.get(message)?.prepare() ?? this.conversations.prepareAttachmentSubmission?.(
       message.target,
       () => !this.videoCancellation.signal.aborted
         && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,

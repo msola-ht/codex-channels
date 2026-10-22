@@ -74,6 +74,7 @@ export interface FeishuInboxOptions {
   access: SurfaceAccessPolicy;
   actorRegistry?: ConversationActorRegistry;
   handle(message: FeishuInboxMessage): Promise<void>;
+  receiveInput?(message: FeishuInboxMessage): (() => void) | undefined;
   handleUrgent?(message: Extract<FeishuInboxMessage, { kind: "text" }>): Promise<void>;
   handleImageBatch?(messages: readonly Extract<
     FeishuInboxMessage,
@@ -107,6 +108,7 @@ export class FeishuInbox {
   private readonly seen = new Map<string, number>();
   private readonly workers = new Map<string, ConversationWorker>();
   private readonly urgentTasks = new Set<Promise<void>>();
+  private readonly receivedInputs = new WeakMap<FeishuInboxMessage, () => void>();
   private pendingCount = 0;
   private closed = false;
   private closePromise: Promise<void> | undefined;
@@ -224,6 +226,7 @@ export class FeishuInbox {
         return { status: "retry", reason: "overloaded" };
       }
       this.rememberSeen(deduplicationKey, now);
+      this.prepareInput(message);
       this.runUrgent(message);
       return { status: "accepted" };
     }
@@ -231,6 +234,7 @@ export class FeishuInbox {
       return { status: "retry", reason: "overloaded" };
     }
     this.rememberSeen(deduplicationKey, now);
+    this.prepareInput(message);
     this.pendingCount += 1;
     this.enqueue(message);
     return { status: "accepted" };
@@ -265,6 +269,16 @@ export class FeishuInbox {
     );
   }
 
+  private prepareInput(message: FeishuInboxMessage): void {
+    const release = this.options.receiveInput?.(message);
+    if (release) this.receivedInputs.set(message, release);
+  }
+
+  private releaseInput(message: FeishuInboxMessage): void {
+    this.receivedInputs.get(message)?.();
+    this.receivedInputs.delete(message);
+  }
+
   private runUrgent(
     message: Extract<FeishuInboxMessage, { kind: "text" }>,
   ): void {
@@ -278,6 +292,7 @@ export class FeishuInbox {
     }).catch((error) => {
       this.reportProcessingError(message, error);
     }).finally(() => {
+      this.releaseInput(message);
       this.pendingCount -= 1;
       this.urgentTasks.delete(task);
     });
@@ -327,6 +342,7 @@ export class FeishuInbox {
             this.reportProcessingError(message, error);
           }
         } finally {
+          for (const message of imageBatch) this.releaseInput(message);
           this.pendingCount -= imageBatch.length;
         }
         continue;
@@ -344,6 +360,7 @@ export class FeishuInbox {
       } catch (error) {
         this.reportProcessingError(message, error);
       } finally {
+        this.releaseInput(message);
         this.pendingCount -= 1;
       }
     }
@@ -398,6 +415,7 @@ export class FeishuInbox {
       // Timeout reporting must not make concurrent close callers diverge.
     }
     for (const worker of this.workers.values()) {
+      for (const message of worker.queue) this.releaseInput(message);
       this.pendingCount -= worker.queue.length;
       worker.queue.length = 0;
     }
