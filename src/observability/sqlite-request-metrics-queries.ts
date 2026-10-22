@@ -494,6 +494,14 @@ export class SqliteRequestMetricsQueries {
     return this.threadQueries.threadList(query);
   }
 
+  iterateThreadList(query: Omit<ModelRequestMetricsThreadQuery, "limit" | "offset">) {
+    return this.threadQueries.iterateThreadList(query);
+  }
+
+  iterateThreadTurnSummaries(threadId: string, query: Omit<ModelRequestMetricsThreadQuery, "limit" | "offset">) {
+    return this.threadQueries.iterateThreadTurnSummaries(threadId, query);
+  }
+
   threadSubagents(threadId: string, query: SubagentThreadsQuery): StoredThreadSubagentsPage {
     return this.subagentQueries.threadSubagents(threadId, query);
   }

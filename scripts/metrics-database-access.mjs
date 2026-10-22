@@ -254,15 +254,8 @@ export function readMetricsThreads(environment = process.env, options = {}) {
   const filters = metricsFilterOptions(options);
   const store = openReadOnlyMetricsDatabase(environment);
   try {
-    const queries = new RequestMetricsQueryService(store);
     return store.readSnapshot(() => {
-      const threads = [];
-      let offset = 0;
-      do {
-        const page = queries.threadList(range, { ...filters, offset, limit: 500 });
-        threads.push(...page.threads);
-        offset = page.nextOffset ?? -1;
-      } while (offset >= 0);
+      const threads = [...store.iterateThreadList({ ...filters, startAtMs: range.startAtMs, endAtMs: range.endAtMs })];
       return {
         format: "codex-connect-request-metrics-threads",
         version: 1,
@@ -282,15 +275,8 @@ export function readMetricsTurns(environment = process.env, threadId, options = 
   const filters = metricsFilterOptions({ ...options, threadId });
   const store = openReadOnlyMetricsDatabase(environment);
   try {
-    const queries = new RequestMetricsQueryService(store);
     return store.readSnapshot(() => {
-      const turns = [];
-      let offset = 0;
-      do {
-        const page = queries.threadTurnSummaries(threadId, range, { ...filters, offset, limit: 500 });
-        turns.push(...page.turns);
-        offset = page.nextOffset ?? -1;
-      } while (offset >= 0);
+      const turns = [...store.iterateThreadTurnSummaries(threadId, { ...filters, startAtMs: range.startAtMs, endAtMs: range.endAtMs })];
       return {
         format: "codex-connect-request-metrics-turns",
         version: 2,
