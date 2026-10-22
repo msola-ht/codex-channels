@@ -404,7 +404,9 @@ export class ModelSelectionService {
     const pending = this.pending(target);
     this.setPending(target, { ...pending, effort }, assertAuthorized);
     this.acceptSelectionChange(target, expected);
-    return this.resolveState(target, catalog, undefined, assertAuthorized, false, expected);
+    // Publish the same catalog scope and selectable projection as a page refresh;
+    // the directed current-model lookup is only for validating this operation.
+    return this.state(target, false, assertAuthorized, expected);
   }
 
   async selectFastMode(target: ConversationTarget, selector: string, assertAuthorized?: () => void, expected?: SelectionExpectation): Promise<ModelSelectionState> {

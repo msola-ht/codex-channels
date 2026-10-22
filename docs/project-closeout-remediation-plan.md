@@ -113,7 +113,7 @@ B 编号是责任边界，不强制一包一提交。每包实施时核对原编
 
 | 补充任务 | 当前证据与下一步 |
 | --- | --- |
-| Telegram effort 键盘目录快照 | B12 发现预存 selectEffort 返回未按 Provider filter 裁剪的目录，后续回调刷新目录可能使刚生成键盘过期；待独立复现并逐路径修复，随后独立 A 复审、单批提交。 |
+| Telegram effort 键盘目录快照 | B26已复现并修复，独立A全链复审无阻断：提交后的页面统一按state读取浏览目录并投影，当前模型能力验证仍使用定向目录。隔离生产入口连续选择成功；真实Telegram及共享AppServer待补证，准备提交。 |
 | 显式相对 CLI 路径 | B16 独立 A 源码推导安装 cwd 与服务 cwd 可产生不同选择；待明确已支持的相对路径基准、复现及全入口修复，随后独立 A 复审、单批提交。当前绝对路径与环境覆盖证据不关闭此任务。 |
 | 微信非成功响应正文清理 | B17 独立 A 确认 JSON/CDN 的既有非2xx分支未释放正文；redirect:error 的拒绝不经过该分支，本批未扩大缺口。待沿请求期限、错误映射和关闭链复现、修复，再独立 A 复审提交；不以正常响应或跳转观察关闭此任务。 |
 | 自定义Socket目录的日志归属 | B19 独立A源码发现状态摘要固定读取dataDir/runtime，日志路由与安装器按codex.socket_path父目录选取；配置自定义Socket目录可能产生不同日志来源。待隔离复现、明确共享目录合同并修复复审，当前尚未运行观察，不在脱敏批次改变路径选择。 |
@@ -515,7 +515,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立A核对全部关联链、GitHub条件默认success语义及文档，无本批阻断。Ubuntu默认run为bash -e，隔离观察使用更严格的-eo pipefail；本应用块无pipeline或启动脚本依赖，区别不影响基线拒绝或git apply退出传播。未实际执行含gh/push的完整提交步骤、GitHub输出传播或远程Draft页面；R19已修复待补证。所有自有资源和作业已收齐，准备正常Hook提交。
 - 本地提交 `b963f5d996cdcd1483acfd5f64bf0ff95b627c59`；正常Node22 Hook类型/版本/边界、84份Markdown及Gateway构建均通过，10.6秒；提交后工作区干净，未推送。
 
-### 第二十二批：B25（修复及独立复审完成，待提交）
+### 第二十二批：B25（已提交）
 
 - 输入 `b963f5d9`，R22/R31/R32/R14/R33。UI沿现有错误码翻译、数字accessor与Spinner props修复，不改业务请求、排序值或基础组件；主代理同期对齐异常组排序及Relay目录/耗时文档。适用i18n、shadcn及playwright-cli技能，不扩大为全UI重构，不写测试。
 - R14核SQL按last_occurred_at_ms倒序、再request_count倒序且limit20；渠道metrics-format按返回顺序展示，WebUI概览取前5。仅纠正文档，不改查询。R33核RelayProviderModels及relay-page只读模型表/失败刷新，移除已不存在的目录下载入口、Hook、额度和通知说明，保留模型管理及OpenAI目录刷新；thread-table按非零knownDurationMs展示，文档取消旧星号/缺失轮数/破折号承诺，API覆盖字段保持不变。
@@ -526,3 +526,13 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 完整实施报告已收齐：英文两Spinner实际DOM均role=status、aria-label=Loading…；请求结束后Spinner消失，模型错误受控，额度替身终态提示没有需要重置的用量窗口，关闭正常。失败列点击依次发送sort=failures、direction=desc/asc；这证明前端排序参数，真实数据库数值排序由SQL源码支持，未以替身顺序冒充数据库实观。未知错误显示通用英文提示，所有原始marker不显示。
 - 七张截图保留在output/playwright/b25，不进入提交；未运行读屏软件、未执行真实额度/服务/账户写入。现有WebUI oxlint、webui工作目录tsc -b与diff检查通过。命名浏览器b25-ui已关闭，Vite96625收SIGINT退出130、5193确认连接拒绝，任务工具目录及临时配置已删除。主代理读完整报告并核四源码blob与A输入一致；所有源码写权已移交，R22/R31/R32标已修复待补证，R14/R33按实现与文档闭环关闭。
 - 独立A最终全链报告已收齐，五项均无剩余阻断，主代理核当前文档与审查输入一致；A复用有效浏览器DOM/请求观察并直接看英文加载截图，没有宣称重复运行全部路径。准备正常Hook提交，原45项至此0待修复、41已修复待补证、4文档关闭；另4旁支继续逐批处理。
+- 本地提交 `527aa13d1a3a9363282f58bb9b8fe098bb815189`；正常Node22 Hook类型/版本/边界、84份Markdown、WebUI构建/Lint、2136翻译键及占位符、Gateway构建均通过，19.8秒；提交后工作区干净，未推送。
+
+### 第二十三批：B26（关联问题1，修复复审完成）
+
+- 输入 `527aa13d`，不计入原45项。B12发现Telegram effort结果使用完整目录、下一回调modelState使用筛选目录，token可能不一致；从ModelSelectionService返回状态、菜单投影/快照与Bot回调追踪，先复现多Provider/筛选范围，再核同合同的Fast返回分支是否需要同步调整。
+- 内部验证继续保留完整目录，菜单与下一回调范围一致；动态目录、Thread/Workspace变化及Actor隔离仍须拒绝旧卡。保留飞书精确快照与普通文本命令合同，不改变用户持久格式或真实账户默认值。隔离生产入口观察后新独立A复审，再单批提交。
+- 源码仅selectEffort末端改为state(target,false,guard,expected)，不仅投影旧目录，还按浏览范围重新读取，覆盖独立Provider总览。修前生产Service→renderer→token在Provider筛选、无订阅过滤、独立Provider总览三种情况下均不一致，修后均一致；内部完整目录、expected.catalog合并及守卫不变。
+- 生产TelegramSurface.handleUpdate→ConversationCommandService→ModelSelectionService→renderer隔离入口，注入目录、Router与Telegram API：/effort high→me low→me high连续成功，两次回调均提示正在选择，三份键盘回复且最终high。Actor/聊天/目录/Thread/Workspace变化拒绝旧按钮；无效effort保持low；最终读取时Thread改变返回authorization-changed，先前已提交high保留，不声称回滚。结构化选择浏览cp-b、当前openai时读取cp-b→openai→cp-b，新页按cp-b投影，与刷新令牌一致。
+- Fast经消费链区分后未改：Telegram fast不生成目录键盘，飞书fast快照不含models且精确提交mode，速度展示需要当前模型完整能力。隔离fast status返回当前模型元数据且写入0。全项目tsc noEmit、修改文件ESLint及diff检查均通过；源码blob491ed6de9f4acf458cf06d8a5b7cf7b2bab0a2bc，实施报告及全部作业已收齐，Surface已关闭，无临时脚本。未访问真实Telegram、共享AppServer或真实账户，平台网络行为仍待补证。
+- 新独立A已完成命令/结构化选择、完整目录验证与发布投影、Telegram回调、飞书快照、Fast差异、偏好持久化和Turn消费链复审，无阻断。主代理已读完整报告并定向核源码及blob一致；新读取可能增加目录等待，失败不重复写入或回滚，不能以隔离链路替代真实平台验收。相关README同步，准备正常Hook本地提交，不推送。
