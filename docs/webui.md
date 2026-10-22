@@ -185,6 +185,8 @@ codexc stop webui        # 停止
 
 ## 页面与 API
 
+普通指标查询（overview、daily、providers、requests、errors、threads、run、turns、subagents、accounts，以及管理接口需要的指标读取）由独立只读 Worker 执行，复用现有 Store/QueryService 与单任务快照，不截断精确总数、不修改数据库。全进程最多两个普通读取，无排队；满额返回 `429 metrics_read_busy`。初始化、读取、退出确认分别使用 10 秒、30 秒、3 秒预算；读取超时发起取消并返回受控 `503 metrics_read_timeout`，失败和取消分别为 `503 metrics_read_unavailable` / `503 metrics_read_cancelled`。30 秒不是同步原生 SQLite 的物理终止保证：真实 Worker 退出前继续占用原名额，3 秒仍未确认退出时返回不可用并以 `reasonCode` 保留原始超时或取消原因。Windows 辅助 ACL 进程须先退出。浏览器相关指标读取及 Relay/UA 管理读取使用 60 秒期限，账户刷新使用 90 秒，给初始化、读取、退出及相关 IPC 留出响应时间；离页或更改查询仍立即发起取消。线程详情依次读取运行摘要和轮次，为同页提供商筛选保留并发名额。导出继续使用独立的 64 MiB / 120 秒流式预算。
+
 控制台显示已观测执行线程和轮次，跟随汇总时间范围：只统计期间有 Thread 和 Turn 归属的非审查请求，
 线程按 Thread 去重，轮次按 Thread + Turn 去重；子代理是独立执行线程，不能把该数解释为用户会话数。
 这是本机保留指标中的观测，不代表完整官方会话历史。

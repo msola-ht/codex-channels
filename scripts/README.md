@@ -102,6 +102,8 @@
 - `metrics-output-renderer.mjs`：把指标查询结果渲染为 Markdown、JSON 或 CSV；集中处理报告、
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `metrics-export-limits.mjs` / `metrics-export-stream.mjs` / `metrics-export-worker.mjs`：CLI 与 WebUI 共用的只读导出 Worker、资源预算和分块背压；在同一 SQLite 快照中读取聚合与排序游标，不重复计算每页聚合。WebUI 显式请求版本化帧流，由 HTTP 导出入口包装数据、完成和受控错误终帧，浏览器确认完成后还原 JSON；默认 HTTP 与 CLI 保留原格式。取消和服务停止关闭读取与 Worker，未确认退出的任务继续占用并发名额；Windows 还确认 ACL 辅助进程退出。
+- `webui-metrics-read.mjs`：普通指标读取的白名单 Worker 宿主，全进程最多两个读取、无排队；初始化 10 秒、读取 30 秒、关闭确认 3 秒分别计时。取消、超时与失败只输出受控错误，真实 Worker 退出后才释放名额。读取期限用于发起取消，不保证同步原生 SQLite 已停止；退出确认超时返回不可用并保留原始取消/超时 `reasonCode`，仍占用原名额等待真实退出。
+- `webui-metrics-worker.mjs`：普通 WebUI 指标任务的只读执行入口，复用现有 Store/QueryService，在单任务快照读取完整分页、精确总数与相关聚合；不截断结果或修改数据库。Windows ACL 辅助进程退出确认后才交付成功结果。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务、共享 API 类型与管理路由组合入口；
   服务入口同时接收终端信号与父进程 `codexc-stop`，统一关闭 HTTP 监听、通知连接与尚未发送请求的浏览器预连接，并取消导出和投递只读 Worker；活动请求按共享停止预算收尾。超时关闭剩余连接并记录非零状态，后台读取或 Windows ACL 辅助进程未确认退出时保留归属，实际退出后再结束服务。Windows CLI 包装层异步转发停止消息。
