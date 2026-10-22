@@ -497,9 +497,19 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立A最终报告已收齐，复审覆盖Core原文、SurfaceManager快照/重放至SQLite确认删除及所有受影响发送入口，无剩余阻断；A复用实施者有效运行证据并独立形成源码判断，未宣称重复实机观察。上述阶段性“待收齐”现已完成，准备正常Hook提交。
 - 本地提交 `44390cdfb7790259ffe6fcea0f0af276dafd9712`；正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown与Gateway构建均通过，14.8秒；提交后工作区干净，未推送。
 
-### 第二十批：B23（修复及独立复审完成，待提交）
+### 第二十批：B23（已提交）
 
 - 输入 `44390cdf`，R40。主代理核parseUpdatesResponse→parseInboundContent→Monitor→Input/ConversationAdapter消费；微信上游HEAD与锁定43675b一致，官方voice_item.text属于语音转写，不等于独立text_item。
 - 修复前生产解析器实际输出：音频→文本返回audio且只保留转写，文本→音频返回ignored/unsupported-content；独立语音和文本正常。修复仅补文本分支已有音频的拒绝条件，两种顺序均按现有unsupported-content处理，不新增混合输入支持，不改变游标或存储格式。
 - 修复后七种输入依次为audio+text、text+audio、单语音转写、单文本、单音频媒体、audio+text+audio、重复文本；生产解析器返回ignored/ignored/audio/text/audio/ignored/ignored。生产Monitor→ConversationAdapter仅消费三条合法输入，提交口实际得到“转写正文”“独立说明”与localAudios引用，下载口调用1次、作用域释放2次、游标提交c1，无提示消息。下载、平台getUpdates及最终提交使用注入端口，没有真实微信或AppServer调用。初次观察使用不合合同的账号b23，被Monitor拒绝，改为b23@im.bot后完成观察，未因此改动产品校验。无持久脚本或临时资源。
 - 新独立A完成协议客户端→解析→Monitor去重/游标→Input授权与引用→Conversation提交及finally释放的关联复审，无剩余本批阻断。voice_item.text及ref_msg内部文字不经过新增判断；图片/文件/视频的合法说明组合不受影响。ignored正常参与批次完成，但结构畸形协议字段仍按原合同报错，不宣称所有无效数据都可忽略。主代理已读完整报告，源码blob `5c0c32783bd6b7ad4cfc34c96336fc16c973cb74` 与A一致；无活跃作业，准备正常Hook提交。R40标已修复待补证，真实平台是否生成混合组合仍未确认。
+- 本地提交 `3e5514150fa2ab90f9f686361a05abd7251b3b0c`；正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown与Gateway构建均通过，15.8秒；提交后工作区干净，未推送。
+
+### 第二十一批：B24（修复及独立复审完成，待提交）
+
+- 输入 `3e551415`，R19。追踪write-upgrade-report生成base-commit/patch→preview验证Artifact→独立propose检出默认分支→应用→Draft；在应用前拒绝缺失、畸形或与当前HEAD不一致的基线，不自动rebase或强行应用旧补丁。保持Draft、现有权限与CI边界。
+- 观察使用自有隔离Git仓库与产物运行实际应用步骤；同基线正常，漂移即使patch仍可应用也拒绝，失败不改工作区。不会触发远程workflow、真实升级或发布。源码完成后新独立A复审。
+- 实现限定workflow：严格要求base-commit为40位小写SHA及单LF，总计41字节，read须实际读到换行；在git apply前比较HEAD。成功应用输出基线，成功推送后输出实际提案commit/tree供Draft描述引用，不改变权限或后续门禁。
+- 实施者使用Node22与真实collectGitDiff生成隔离产物，实际Apply步骤同基线exit0，隔离提交parent等于base、结果树等于生成patch的目标树；漂移时裸git apply --check仍0，但workflow exit1。缺失、空、非hex、无LF、多LF、CRLF、NUL及额外行均exit1，HEAD/index/工作区快照未变且无成功outputs；匹配基线但坏patch由原git apply --check以128阻止。应用脚本bash -n通过，临时repo已清理；独立A及最终静态报告待收齐。
+- 实施者完整报告已收齐：PyYAML成功解析workflow，propose四个run块bash -n及diff检查均通过，step ids与Draft引用对应；本机无actionlint，未安装。隔离正常产物base为def8dda9、commit为c025355b、目标与实际tree同为23da3f51，未将结果树与基线树比较相等。主代理核workflow blob `2254558c0080522493e530886371c3ddf1191294` 与A输入一致。
+- 独立A核对全部关联链、GitHub条件默认success语义及文档，无本批阻断。Ubuntu默认run为bash -e，隔离观察使用更严格的-eo pipefail；本应用块无pipeline或启动脚本依赖，区别不影响基线拒绝或git apply退出传播。未实际执行含gh/push的完整提交步骤、GitHub输出传播或远程Draft页面；R19已修复待补证。所有自有资源和作业已收齐，准备正常Hook提交。
