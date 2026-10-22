@@ -505,7 +505,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 新独立A完成协议客户端→解析→Monitor去重/游标→Input授权与引用→Conversation提交及finally释放的关联复审，无剩余本批阻断。voice_item.text及ref_msg内部文字不经过新增判断；图片/文件/视频的合法说明组合不受影响。ignored正常参与批次完成，但结构畸形协议字段仍按原合同报错，不宣称所有无效数据都可忽略。主代理已读完整报告，源码blob `5c0c32783bd6b7ad4cfc34c96336fc16c973cb74` 与A一致；无活跃作业，准备正常Hook提交。R40标已修复待补证，真实平台是否生成混合组合仍未确认。
 - 本地提交 `3e5514150fa2ab90f9f686361a05abd7251b3b0c`；正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown与Gateway构建均通过，15.8秒；提交后工作区干净，未推送。
 
-### 第二十一批：B24（修复及独立复审完成，待提交）
+### 第二十一批：B24（已提交）
 
 - 输入 `3e551415`，R19。追踪write-upgrade-report生成base-commit/patch→preview验证Artifact→独立propose检出默认分支→应用→Draft；在应用前拒绝缺失、畸形或与当前HEAD不一致的基线，不自动rebase或强行应用旧补丁。保持Draft、现有权限与CI边界。
 - 观察使用自有隔离Git仓库与产物运行实际应用步骤；同基线正常，漂移即使patch仍可应用也拒绝，失败不改工作区。不会触发远程workflow、真实升级或发布。源码完成后新独立A复审。
@@ -513,3 +513,16 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 实施者使用Node22与真实collectGitDiff生成隔离产物，实际Apply步骤同基线exit0，隔离提交parent等于base、结果树等于生成patch的目标树；漂移时裸git apply --check仍0，但workflow exit1。缺失、空、非hex、无LF、多LF、CRLF、NUL及额外行均exit1，HEAD/index/工作区快照未变且无成功outputs；匹配基线但坏patch由原git apply --check以128阻止。应用脚本bash -n通过，临时repo已清理；独立A及最终静态报告待收齐。
 - 实施者完整报告已收齐：PyYAML成功解析workflow，propose四个run块bash -n及diff检查均通过，step ids与Draft引用对应；本机无actionlint，未安装。隔离正常产物base为def8dda9、commit为c025355b、目标与实际tree同为23da3f51，未将结果树与基线树比较相等。主代理核workflow blob `2254558c0080522493e530886371c3ddf1191294` 与A输入一致。
 - 独立A核对全部关联链、GitHub条件默认success语义及文档，无本批阻断。Ubuntu默认run为bash -e，隔离观察使用更严格的-eo pipefail；本应用块无pipeline或启动脚本依赖，区别不影响基线拒绝或git apply退出传播。未实际执行含gh/push的完整提交步骤、GitHub输出传播或远程Draft页面；R19已修复待补证。所有自有资源和作业已收齐，准备正常Hook提交。
+- 本地提交 `b963f5d996cdcd1483acfd5f64bf0ff95b627c59`；正常Node22 Hook类型/版本/边界、84份Markdown及Gateway构建均通过，10.6秒；提交后工作区干净，未推送。
+
+### 第二十二批：B25（修复及独立复审完成，待提交）
+
+- 输入 `b963f5d9`，R22/R31/R32/R14/R33。UI沿现有错误码翻译、数字accessor与Spinner props修复，不改业务请求、排序值或基础组件；主代理同期对齐异常组排序及Relay目录/耗时文档。适用i18n、shadcn及playwright-cli技能，不扩大为全UI重构，不写测试。
+- R14核SQL按last_occurred_at_ms倒序、再request_count倒序且limit20；渠道metrics-format按返回顺序展示，WebUI概览取前5。仅纠正文档，不改查询。R33核RelayProviderModels及relay-page只读模型表/失败刷新，移除已不存在的目录下载入口、Hook、额度和通知说明，保留模型管理及OpenAI目录刷新；thread-table按非零knownDurationMs展示，文档取消旧星号/缺失轮数/破折号承诺，API覆盖字段保持不变。
+- UI最小变更为4个源码文件：Relay服务卡渲染时按errorCode调用既有翻译，失败列零值留空且accessor未变，两处Spinner由调用方传当前语言common.loading。实际轮次页排序为服务端sort=failures，SQL仍按failed_request_count，不因显示空白改变数值。
+- 实施者浏览器首轮：隔离产品Relay页面中英文错误即时切换、内部marker不展示、Retry后恢复PID4242替身服务行；实际轮次表0留空、2/10正常。仅自有Vite与命名浏览器会话，请求使用隔离响应；剩余排序及加载状态观察和独立A最终报告待收齐。
+- A另核真正CLI入口scripts/metrics-output-renderer.mjs按result.errors.groups顺序for-of，主代理定向复核一致；渠道metrics-format与CLI是不同消费入口，两者均不重新按频次排序。纯文档项不运行无关服务。
+- 浏览器补充：HTTP504受控request_timeout显示英文超时提示且PRIVATE_TIMEOUT_MARKER未出现；route.abort网络中断显示英文连接失败提示。两处中文Spinner的实际DOM均role=status、aria-label=加载中…，按钮禁用；模型按钮文字加载中…，额度按钮仍确认使用。模型加载时关闭后dialogs=0/spinners=0，挂起替身请求已释放。英文对应DOM和完整排序输出待最终报告登记；主代理已查看中英文Relay、轮次表和模型/额度加载截图，中文无缺字、布局正常，截图不能单独证明可访问名称。
+- 完整实施报告已收齐：英文两Spinner实际DOM均role=status、aria-label=Loading…；请求结束后Spinner消失，模型错误受控，额度替身终态提示没有需要重置的用量窗口，关闭正常。失败列点击依次发送sort=failures、direction=desc/asc；这证明前端排序参数，真实数据库数值排序由SQL源码支持，未以替身顺序冒充数据库实观。未知错误显示通用英文提示，所有原始marker不显示。
+- 七张截图保留在output/playwright/b25，不进入提交；未运行读屏软件、未执行真实额度/服务/账户写入。现有WebUI oxlint、webui工作目录tsc -b与diff检查通过。命名浏览器b25-ui已关闭，Vite96625收SIGINT退出130、5193确认连接拒绝，任务工具目录及临时配置已删除。主代理读完整报告并核四源码blob与A输入一致；所有源码写权已移交，R22/R31/R32标已修复待补证，R14/R33按实现与文档闭环关闭。
+- 独立A最终全链报告已收齐，五项均无剩余阻断，主代理核当前文档与审查输入一致；A复用有效浏览器DOM/请求观察并直接看英文加载截图，没有宣称重复运行全部路径。准备正常Hook提交，原45项至此0待修复、41已修复待补证、4文档关闭；另4旁支继续逐批处理。
