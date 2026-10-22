@@ -245,7 +245,7 @@ function detectionSummary({ environment, configPath, document }) {
 }
 
 function codexCliStatus(environment, codex) {
-  const command = effectiveCodexBinary(stringValue(codex.binary) || "codex", environment);
+  const command = effectiveCodexBinary(codex.binary ?? "codex", environment);
   let expected;
   try {
     expected = JSON.parse(readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8")).codexCli;

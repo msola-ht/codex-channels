@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { appServerSocketAcceptsWebSocket, inspectAppServerSupervisorState, sameAppServerTopology } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { serviceCommandTarget, serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { loadConfigDocument } from "../dist/config/index.js";
@@ -155,7 +156,7 @@ export async function waitForCoreServiceTarget(
   const inspectSupervisorState = options.inspectSupervisorState
     ?? inspectAppServerSupervisorState;
   const socketHealthy = options.socketHealthy ?? (socketPath => appServerSocketAcceptsWebSocket(socketPath,
-    { ...environment, CODEX_BINARY: document.codex?.binary ?? environment.CODEX_BINARY ?? "codex" }));
+    { ...environment, CODEX_BINARY: effectiveCodexBinary(document.codex?.binary ?? "codex", environment) }));
   const gatewayHealthy = options.gatewayHealthy ?? gatewayOwnerIsReady;
   const deadline = now() + timeoutMs;
   let healthySince;

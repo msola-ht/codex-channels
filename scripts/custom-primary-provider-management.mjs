@@ -38,7 +38,7 @@ import {
   createCustomPrimaryProviderConfig,
   modelProviderBlockEdits,
 } from "../runtime/model-provider-profile.mjs";
-import { areCodexUserConfigEditsApplied, createCodexUserConfigClient } from "./codex-user-config.mjs";
+import { areCodexUserConfigEditsApplied, createCodexUserConfigClient, resolveCodexUserConfigBinary } from "./codex-user-config.mjs";
 import {
   writePrimaryProviderConfigEditsWithProfileRemoval,
 } from "./primary-provider-config-transaction.mjs";
@@ -918,7 +918,7 @@ function optionalString(value) {
 }
 
 export function bundledOfficialModelOptions(environment = process.env) {
-  return readOfficialModelCatalog(environment).models
+  return readOfficialModelCatalog(environment, resolveCodexUserConfigBinary(environment)).models
     .filter(model => model.supported_in_api && model.visibility === "list")
     .map(model => ({model: model.slug, available: true}));
 }

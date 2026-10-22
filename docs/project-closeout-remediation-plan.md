@@ -360,7 +360,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立 Astra/high 完整核对双协议每步模型归属、失败/取消/预算、CLI/WebUI 采用、管理鉴权/Origin、token/预览/目录事务及 runtime 逐模型消费，无剩余阻断。主代理已读完整报告并核对三源码 blob：probe `44df6489`、reason 映射 `6a01dfc8`、中英消息 `d55c336a`。token 仍是连接归属证明，不宣称服务端能力证明；手动声明合同保持。R09 标记已修复待补证，以上真实环境限制保留。
 - 本地提交 `186be82e96b5faf950b2ac6186b0fdec46e89c97`；正常 Hook 类型/版本/边界、局部 lint、84 份 Markdown、WebUI 构建/Lint/翻译和 Gateway 构建通过，耗时 18.2 秒。提交后工作区干净，未推送。
 
-### 第十一批：B14（独立复审通过，待本地提交）
+### 第十一批：B14（已提交 `f47cee98`）
 
 - 输入 `186be82e`，范围 R15。Chat 终态必须在全部可失败的构造检查成功后提交；错误路径应收尾此前已交付的文本/推理 Item，非法客户端工具始终整组拒绝。仅将 ended 后移不足以覆盖用量构造失败或 push 同帧切换内容后抛错导致已生成事件未返回。
 - 主代理修前生产 ChatToResponses 观察：content/reasoning/reasoning_content 三种先输出 already-visible，再积累非法 JSON 工具并 finish，均抛 Invalid Chat tool arguments；随后 fail 只有 response.failed、output_item.done=0，终态对应 content/summary 为空。另在先输出 reasoning 后，同一帧 content+非法工具 index=128 触发 push 错误，fail 只输出 message 的 done，之前 reasoning 的 done 已丢失。以上均为内联纯转换输入，无测试或 probe 文件。
@@ -374,3 +374,18 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 上述历史首轮日志误从分页 entry 顶层提取 type 得到空对象，核对生成类型 ThreadItemEntry.item 后重新完整运行修前链取得准确历史；这属于观察采集更正，不是协议修复。自有目录 `codexc-b14-history-before-eIxo5M`、`codexc-b14-history-YMKaV9`、`codexc-b14-history-vhiswY` 已在自有进程关闭后精确清理。当前证据覆盖已加载 Thread 的正式权威分页读回；进程重启后的磁盘重载、真实供应商、跨 OS 与客户端断线后的送达结果仍未观察。
 - 最终类型/版本/边界、局部 ESLint 与差异检查通过，实施者已交权，主代理核对最终源码 blob `fafc3ab0ff8c31a3894d33866611e4c7a1f88fa7` 并读完整报告；独立 A 全链复审中，尚未提交。
 - 独立 Astra/high 最终覆盖 HTTP/转换/hosted 续轮/失败交付/锁定官方完成 Item 与历史读取链，确认无剩余源码阻断，最终 blob 与上述一致。主代理已读完整报告；Message incomplete 和无 status 的 Reasoning 完整内容 done 均符合官方类型，未完成搜索不伪造完成，断连不承诺送达。R15 标记已修复待补证：Linux 自有官方 App Server 权威分页历史已实际观察，剩余限制是磁盘重载、其他 OS、真实供应商与不可达客户端的最终交付，不再把该已观察历史路径标为未实测。
+- 本地提交 `f47cee981f0b849b7b90abdd77daf9a390342b31`；正常 Hook 类型/版本/边界、局部 lint、84 份 Markdown 和 Gateway 构建通过，耗时 12.9 秒。提交后工作区干净，未推送。另实际核对当前 CLI 为 0.163.0；普通环境版本查询提示无法创建 PATH aliases（只读文件系统）但退出成功，此提示不影响此前隔离正式 RPC 观察，也没有修改环境或安装程序。
+
+### 第十二批：B16（复审通过，待提交，先于 B15）
+
+- 输入 `f47cee98`，范围 R17。按原包依赖建议，先统一二进制选择再观察 B15 的启动/退出预算，避免用错程序影响生命周期结论。合同沿用现有 effectiveCodexBinary：显式非默认配置优先，配置为 codex 时采用有效 CODEX_BINARY，否则使用 PATH 默认命令；不添加命令字符串解析或别名。
+- 只读初步确认 runtime-environment、Doctor、service-install-context、Desktop command/proxy 和 remote 有遗漏；Unix App Server systemd/launchd 模板也未固化所选 CODEX_BINARY，而 Gateway 与 Windows 服务已有相应字段。仅把自定义目录加入 PATH 不能支持文件名不是 codex 的合法路径。完整调用/渲染/激活边界仍在核对，暂不修改服务或用户定义。
+- 实施统一共享环境、Doctor、Remote（含聚合辅助 Client）、Desktop 两入口、服务安装及四处健康检查的有效程序选择；官方模型候选和业务模型目录校验读取用户配置选择。schema 与共享选择器拒绝空白配置，非空值保原义，不做命令拆分或无效路径回退。Unix 健康检查仅连接 UDS，Windows 才实际启动 Proxy，不以 Linux 观察代替 Windows 进程证据。
+- 独立 Astra/high 发现并补修：Init 摘要原先 trim 后再选择；模板维护工具需要独立候选 CLI 合同，新增校验函数可选明确 binary 参数并让导出、版本和校验共享一次选择；WebUI UA 读取应使用已验证且补齐默认值的配置计算有效 binary 并纳入缓存键；Unix WebUI 模板与 App Server 模板同样需要固化 binary。Relay 不调用 Codex，未机械增加其 Unix 字段。上述均仍待最终复审结论，不把首次实施者自审当独立验收。
+- Linux Node 22.23.4（CI 锁定版）真实 `bin/codexc.mjs remote --version`：PATH 仅 Node 与系统目录、无 codex，默认配置加环境覆盖及显式绝对路径均输出 codex-cli 0.163.0、exit 0；显式缺失路径 exit 1 且没有回退到有效环境程序。Doctor JSON 的 Codex CLI 项 success/0.163.0；整体 exit 1 来自隔离配置无渠道、无监管和 Socket，不称整体健康。临时 Home 下官方 CLI 的 PATH alias 警告不改变版本退出结果。
+- 将已安装官方原生程序复制到任务自有 `Codex custom & cli` 路径：环境覆盖和显式配置两种 Remote 调用均 exit 0；给路径添加文字引号或参数则明确找不到程序、exit 1，无 shell 拆分。三平台 writeServiceDefinitions 在隔离目录首次与覆盖生成后，App Server/Gateway/WebUI 均保存选中路径；launchd 中 & 正确编码为 &amp;，systemd 引号与 Windows JSON 保留完整路径。仅生成定义，不安装/激活，不宣称 Windows ACL、Proxy 或 macOS/Linux 服务运行验证。
+- 业务模型目录观察：显式真实 CLI 配合无效环境覆盖仍导出 11 个官方模型、8 个可选模型，完整目录加载校验成功；空 models 被官方 CLI 拒绝（首轮使用空目录失败，换完整目录确认原因），显式缺失路径不回退。维护入口 `update-model-templates.mjs --update-base` 配合无效用户 binary 和有效候选覆盖 exit 0，三份目录通过当前 Codex 加载，仅显示差异、不写仓库；报告底座模型差异属候选目录事实，未采用变更。
+- 纯函数 Hack 拒绝空串、空白、数字、null/undefined；空白环境覆盖视未设置，非空环境 trim，显式非默认保原值。实施者 Node 22 check/14 mjs lint 通过；A 补修后的检查另记。所有隔离 CLI/配置/生成定义目录已清理；Node 工具与原生副本暂保留在任务自有 `/var/tmp/codexc-b16-node.SgNTmC`，供后续生命周期批次复用，由主代理负责最终清理。
+- 原 R17 证据更正：当前 bin 的 config 直接使用 process.env，并非经 runScript；Setup 的父环境污染成立。原45项之外另记预存边界：显式相对 config.binary 按安装 cwd 解析，但服务启动可被配置原相对值覆盖并按服务 cwd 再解析，跨 cwd 一致性尚未修复，须另批明确相对路径基准和观察；本批不声称该路径已一致。另有此前 Telegram effort 键盘旁支仍待独立处理。
+- WebUI 生产状态子路由在自有 HTTP 服务中使用合法省略 binary 的配置：无 App Server 时两次均 HTTP 200/source=unavailable，不因缺省值抛错；改变环境 binary 后 cache key 同步变化。此观察仅覆盖默认值和缓存归属、降级合同，不含真实 WebUI 鉴权外壳或 Windows Proxy 成功路径；自有 HTTP 与目录已关闭清理。
+- 独立 Astra/high 完整复审已完成，4 项关联发现补修后无剩余本批阻断，主代理已读完整报告；审查源码差异 SHA-256 为 `86fd36ca595271e4e54b7bfb5bfe2a3868527a56218be475325787cec14ab234`。补修后 Node 22.23.4 类型/版本/边界检查与4个改动模块局部 ESLint 均 exit 0。R17 标记已修复待补证，保留上述跨 OS、服务和相对路径限制；尚未提交。

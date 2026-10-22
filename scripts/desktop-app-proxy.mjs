@@ -11,6 +11,7 @@ import {
 import { proxyDesktopAppStdioToUnixSocket } from "../runtime/desktop-app-bridge.mjs";
 import { readMacDesktopAppToolsEnabled } from "../runtime/desktop-app-host.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 try {
@@ -35,7 +36,7 @@ async function runDesktopAppProxy() {
     ...process.env,
     CODEX_CONNECT_HOME: located.dataDir,
     CODEX_CONNECT_CONFIG_FILE: located.configPath,
-    CODEX_BINARY: stringValue(codex.binary) || "codex",
+    CODEX_BINARY: effectiveCodexBinary(codex.binary ?? "codex", process.env),
   };
   const appServer = resolveAppServerRuntime(document, located.dataDir, environment);
   if (codex.desktop_app?.enabled !== true || appServer.primaryProvider !== "openai") {
@@ -106,8 +107,4 @@ function requiredEnvironmentValue(name) {
 
 function table(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value.trim() : "";
 }

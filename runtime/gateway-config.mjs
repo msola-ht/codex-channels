@@ -192,7 +192,10 @@ const telegramSchema = z.strictObject({
 export const officialTuiUserAgentPattern = /^codex-tui\/([0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9._+-]+)?) (\([^();\r\n]+; [A-Za-z0-9_+-]+\) [A-Za-z0-9._/-]+) \(codex-tui; \1\)$/u;
 
 const codexSchema = z.strictObject({
-  binary: z.string().min(1).default("codex"),
+  binary: z.string().min(1).refine(
+    (value) => value.trim().length > 0,
+    "binary 不能为空",
+  ).default("codex"),
   socket_path: z.string().min(1).default("runtime/codex-app-server.sock"),
   default_model: z.string().optional(),
   client_identity: clientIdentitySchema.optional(),

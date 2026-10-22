@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import {
   parseServiceTarget,
@@ -403,7 +404,7 @@ export async function inspectManagedServiceHealth(options = {}) {
           );
           const topology = await inspectAppServerSupervisor(primarySocketPath);
           rpcReachable = topology?.releasedProviders.includes(topology.primaryProvider) === true
-            || await appServerSocketAcceptsWebSocket(primarySocketPath, { ...environment, CODEX_BINARY: configDocument.codex?.binary ?? environment.CODEX_BINARY ?? "codex" });
+            || await appServerSocketAcceptsWebSocket(primarySocketPath, { ...environment, CODEX_BINARY: effectiveCodexBinary(configDocument.codex?.binary ?? "codex", environment) });
         }
       } catch {
         rpcReachable = false;

@@ -5,6 +5,9 @@ export function effectiveCodexBinary(
   configuredBinary,
   environment = process.env,
 ) {
+  if (typeof configuredBinary !== "string" || configuredBinary.trim() === "") {
+    throw new Error("Codex CLI 路径无效");
+  }
   const installedBinary = environmentVariable(environment, "CODEX_BINARY")?.trim();
   return configuredBinary === "codex" && installedBinary
     ? installedBinary

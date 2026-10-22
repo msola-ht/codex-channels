@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
 import { requireUserConfig, userDataDir } from "./runtime-config.mjs";
@@ -18,7 +19,7 @@ export function configuredEnvironment(sourceEnvironment = process.env) {
   const proxyEnvironment = resolveProxyEnvironment(network, environment);
   const unresolvedProxyEnvironment = {
     ...environment,
-    CODEX_BINARY: stringValue(codex.binary) || "codex",
+    CODEX_BINARY: effectiveCodexBinary(codex.binary ?? "codex", sourceEnvironment),
   };
   return {
     configPath,
@@ -46,8 +47,4 @@ export function serviceControlEnvironment(environment = process.env) {
 
 function table(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value : "";
 }

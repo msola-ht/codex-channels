@@ -1,4 +1,5 @@
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import { closePendingAppServerReads, readAppServerUserAgent } from "../runtime/app-server-read.mjs";
 import { readGatewayConfig, validateCodexConfigDocument } from "../runtime/gateway-config.mjs";
 import { resolveCodexRequestIdentity } from "../runtime/codex-request-identity.mjs";
@@ -108,7 +109,8 @@ async function handleUpstreamUserAgent(
     : null;
   const appServerUserAgent = configured !== null
     ? null
-    : await cachedAppServerUserAgent(document, paths.dataDir, cache, gatewayVersion, signal);
+    : await cachedAppServerUserAgent(document, paths.dataDir, cache, gatewayVersion, signal,
+      effectiveCodexBinary(codex.binary, environment));
   signal.throwIfAborted();
   const effectiveUserAgent = upstreamUserAgent ?? appServerUserAgent;
   const recentRequest = latestRecordedUserAgent(environment, openMetricsStore);
@@ -123,24 +125,24 @@ async function handleUpstreamUserAgent(
   });
 }
 
-async function cachedAppServerUserAgent(document, dataDir, cache, gatewayVersion, signal) {
+async function cachedAppServerUserAgent(document, dataDir, cache, gatewayVersion, signal, codexBinary) {
   signal.throwIfAborted();
   if (cache.closed) throw new Error("WebUI 正在关闭");
   const socketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
-  const key = JSON.stringify([socketPath, document.codex.binary, gatewayVersion]);
+  const key = JSON.stringify([socketPath, codexBinary, gatewayVersion]);
   if (cache.key === key && cache.expiresAtMs > Date.now()) return cache.value;
   // Retire the previous target before allocating another owned transport.
   if (cache.pending && (cache.pending.key !== key || cache.pending.controller.signal.aborted)) {
     cache.pending.controller.abort();
     await cache.pending.promise;
-    return cachedAppServerUserAgent(document, dataDir, cache, gatewayVersion, signal);
+    return cachedAppServerUserAgent(document, dataDir, cache, gatewayVersion, signal, codexBinary);
   }
   if (!cache.pending) {
     const entry = { key, controller: new AbortController(), subscribers: 0 };
     cache.pending = entry;
     entry.promise = readAppServerUserAgent({
       socketPath,
-      codexBinary: document.codex.binary,
+      codexBinary,
       clientInfo: { name: "codex_app_server_daemon", title: "Codex Connect WebUI", version: gatewayVersion },
       signal: entry.controller.signal,
     }).catch(() => null).then(value => {

@@ -9,6 +9,7 @@ import {
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { securePrivateDirectorySync } from "../runtime/private-file.mjs";
 import {
@@ -179,7 +180,7 @@ async function ensureAppServerTopology({
   const assertRunning = () => { if (isStopping()) throw new DevAllStoppedError(); };
   assertRunning();
   const document = readGatewayConfig(runtime.configPath);
-  const environment = { ...process.env, CODEX_BINARY: document.codex?.binary ?? process.env.CODEX_BINARY ?? "codex" };
+  const environment = { ...process.env, CODEX_BINARY: effectiveCodexBinary(document.codex?.binary ?? "codex", process.env) };
   const topology = appServerRuntime.topology;
   const paths = topology.socketPaths;
   const primaryPath = appServerRuntime.primarySocketPath;

@@ -106,7 +106,7 @@ codexc update
 ```
 
 更新统一从本机终端执行，不提供后台任务或任务状态查询。三平台使用同一用户目录中的独占锁，阻止并发更新。
-`codex.binary = "codex"` 使用 PATH 中的默认命令，缺失或版本不符时可确认同步；显式指定其他名称或路径时由操作者维护，更新会在停服前拒绝无效或版本不符的二进制，不尝试安装另一个全局 CLI 来替代。
+`codex.binary = "codex"` 优先采用非空 `CODEX_BINARY`，未设置覆盖时使用 PATH 中的默认命令；默认安装缺失或版本不符时可确认同步。显式指定其他名称或路径时由操作者维护，更新会在停服前拒绝无效或版本不符的二进制，不尝试安装另一个全局 CLI 来替代。
 
 受管源码更新在查询远程 `main` 前，核对当前命令所属 npm 全局目录与当前 `npm prefix --global`，
 以及已安装的 App Server、Gateway、Relay、WebUI 服务定义中的程序路径。服务必须指向本次将替换
@@ -265,6 +265,7 @@ Windows 构建使用现有 PowerShell 7 提前编译原生 Job/目录保护 DLL�
 `npm run install:global` 不拉取 Git，也不自动管理服务；上面的 `codexc install` 是另行执行的服务操作。自行选择分支并更新源码后重复执行程序安装；当前全局包不属于受管源码安装时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
 
 服务安装会在三个平台的四类定义中保存显式 `CODEX_HOME` 的规范化目录，未设置时不写该变量。Unix 已有定义需在设置了目标 Home 的终端重新执行 `codexc install` 才能加载此行为；Linux 的新定义同时关闭 ExecStart 变量展开，保留路径中的字面 `$`。普通 restart 不重建定义；重新安装的核心服务、Relay 与 WebUI 激活边界同上。
+App Server、Gateway 和 WebUI 的服务定义也会保存按上述优先级选出的 CLI 路径。Unix 旧定义缺少该值或需要更换 `CODEX_BINARY` 时，应在设置了目标环境的终端运行 `codexc install` 重新生成并激活定义；仅更新程序或普通 restart 不会补写。该命令启动核心服务，Relay 与 WebUI 按上面的既有状态恢复步骤处理。
 当前源码更新预检按新 ExecStart 格式核对 Linux 服务定义；旧定义被拒绝时，先按本节完成程序安装和 `codexc install`，再使用源码自动更新，不手工绕过路径检查。
 
 新设备先运行 `npm run install:global`，安装成功后在交互终端运行 `codexc init` 完成初始化、接入和后台服务安装；仅在跳过相应步骤时再按需运行 `codexc setup`、`codexc install`。非交互 `init` 只初始化用户数据，不提供无人值守接入；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。

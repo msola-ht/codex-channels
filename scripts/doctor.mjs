@@ -12,6 +12,7 @@ import { parse } from "smol-toml";
 
 import { createDoctorReport, createDoctorTextRenderer } from "./doctor-output.mjs";
 import {
+  effectiveCodexBinary,
   executableInvocation,
   resolveExecutable,
   resolveOptionalExecutable,
@@ -381,7 +382,7 @@ if (document) {
   }
 
   setSection("Codex 与 App Server");
-  const codexCommand = stringValue(codex.binary) || "codex";
+  const codexCommand = effectiveCodexBinary(codex.binary ?? "codex", process.env);
   let codexBinary;
   try {
     codexBinary = resolveExecutable(codexCommand);
