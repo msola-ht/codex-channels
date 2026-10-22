@@ -243,10 +243,13 @@ export class ChatCompletionsBridge {
         });
         upstreamRequest.on("error", () => undefined);
         const ready = once(upstreamRequest, "response", { signal: controller.signal });
-        timing ??= { submittedAt: performance.now() };
+        // A synchronous submission failure skips the await below; cancellation still settles it.
+        void ready.catch(() => undefined);
         phaseTimeout(modelRequestPolicy.headersTimeoutMs, "headers");
         converter.beginModelRound();
+        const submittedAt = performance.now();
         upstreamRequest.end(payload);
+        timing ??= { submittedAt };
         timing.requestBytes = (timing.requestBytes ?? 0) + payloadBytes;
         // Publish the submitted size before waiting for headers: a client disconnect
         // closes the outer proxy's subscription even if the upstream never responds.

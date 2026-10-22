@@ -412,7 +412,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立 Astra/high 完整覆盖 create/start/stop/最终退出、runner及Windows Job源码、release授权/绑定/身份/恢复、七个脚本worker消费者及打包包含，无剩余本批阻断；主代理已读完整报告。完整类型、局部 ESLint、Runtime边界、正式构建与diff格式通过。Windows helper/Restart Manager/Job/taskkill、macOS运行及真实force尚未观察；Linux既有PID复用窗口不因此关闭。R13/R37标记已修复待补证。
 - 本地提交 `fc940b9f4616607399920396b63be2239063a9aa`，正常 Node 22 Hook 的类型/版本/边界、局部 lint、84 份 Markdown、脚本语法和 Gateway 构建全部通过，耗时19.5秒；提交后工作区干净，未推送。
 
-### 第十四批：B17（复审通过，待提交）
+### 第十四批：B17（已提交）
 
 - 输入 `fc940b9f`，范围 R24/R25/R26。连接 hostname 去除 IPv6 外围方括号，HTTP Host 与 WebSocket URL authority 保留；共享 Fetch 固定 API 默认拒绝跳转、保留 manual，显式 follow 在出站前拒绝。微信 JSON API、AccountQuery 和 Runtime OCG 显式 error，不引入逐跳通用代理。锁定微信源默认 follow 不是本项目必须支持跳转的证据；本批采用本项目固定端点失败关闭合同，未声称供应商永不跳转。
 - OCG 正文按实际接收字节累计到64KiB，超限停止读取，非2xx及异常释放正文；取消不写失败缓存，成功后才产生 observedAtMs，模型终态仍只读已有快照、不等待额度网络。
@@ -423,3 +423,15 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 主代理另用生产 ProviderProxy 和自有 HTTP 上游、故意等待取消的额度回调观察：模型在31ms内返回200/completed，指标为completed且quotaWindows/quotaObservedAtMs均null；刷新仅启动一次且交付时尚未完成。关闭代理后该刷新收到一次取消并结算，全部自有连接关闭。这证明后台额度等待不阻本地模型交付及关闭归属，不是外部额度服务运行验收。
 - 实施者最终全量类型、六个实现文件ESLint、Runtime边界及diff格式均通过；声明文件由类型检查覆盖，首次ESLint对.d.mts仅报告无匹配配置的ignored警告，不作为声明检查成功。未运行或新增测试。运行观察没有覆盖Windows/macOS网络、TLS/SNI或真实供应商。
 - 新独立 Astra/high 全链复审完成，无剩余本批阻断；主代理已读完整报告并核对七个最终源码blob一致。审查差异SHA-256为 `5f9136db4c12f0bfecae3aa32d5e5f37e4515320d5fee5d2b14eaef85c1d70e4`。覆盖静态/动态上游、Responses/Chat/WS、全部共享Fetch消费者、Request与代理合同、额度账户归属/退避/取消/时间戳、后台关闭以及IPC/Writer/SQLite消费。R24/R25/R26标记已修复待补证；微信非2xx既有清理缺口已单列后续任务。
+- 本地提交 `a4e29016f75731eee3f305a2f5b79ae9072a742d`，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown和Gateway构建全部通过，15.4秒；提交后工作区干净，未推送。
+
+### 第十五批：B18（复审通过，待提交）
+
+- 输入 `a4e29016`，R05/R28。追踪普通Proxy的JSON/SSE/WS自由错误到IPC、Composition、BufferedWriter、SQLite、明细和导出；独立Relay已有errorMessage:null合同排除。拟在采集与IPC边界统一普通指标errorMessage:null，保留受限type/code/HTTP状态，Chat客户端固定错误不变；不改Schema、不重写或清理历史数据。HTTP/WS提交时点与实际发送对齐，未提交保持null，部分提交失败仍计时；Chat外层须沿真实上游诊断时钟关联转储。
+- 主代理改前在Node22生产链复现：自有HTTP/WS上游→ProviderProxy→真实私有指标Socket→ProviderMetricsComposition→BufferedWriter→SQLite；关闭后只读重开，四条JSON错误、SSE失败、WS错误、WS限额关闭记录均保存合成标记 `SYNTHETIC_B18_PRIVATE_BODY`，生产JSON和CSV导出均包含它。无写入错误；自有监听、Socket、数据库目录均清理。未访问真实模型、指标库或用户数据；该观察不包含MetricsWorker线程及真实WebUI浏览器。
+- 主代理修后复用同一生产持久/只读重开/导出链，四条errorMessage均null，原type/code与正常请求字节、耗时保留，JSON/CSV不再含合成标记；另故意经真实IPC发送带有界非null错误正文的旧格式帧，受理后持久null、两种导出不含标记。全程errors为空，全部自有资源已清理；没有修改历史库。
+- 实施者补齐Chat关联：真实桥的beginModelRound及end同步抛错前不建立timing；end接受后才保留首轮submittedAt，多轮已提交时钟不清空。外层普通Proxy和转储由同一真实诊断起点更新。尚在运行观察和独立A复审，未提交。
+- 实施者Node22生产路径观察：声明48MiB+1的HTTP请求返回413，上游请求0（TCP连接1不算提交），metrics无bytes/totalDuration，转储无callTiming；chunked 49MiB发送后超限返回413，上游请求1，已提交50331648字节、总耗时1033.913475ms，转储同值。正常JSON200/completed、bytes29、总耗时11.767383ms，转储同值。WS helper非OPEN和同步throw不标提交；send接受后异步callback失败仍保bytes1与耗时。真实WS Proxy交付completed、bytes54与上游一致，总耗时/转储0.677743ms。
+- Chat早期非法JSON返回400，上游0、bytes/totalDuration空、转储无时钟；正常stream:true/store:false请求返回200、正文hello及completed，上游1、bytes114、总耗时5.939304ms，多次诊断起点保持221.429976，转储同总耗时。首次输入遗漏stream被合同拒绝400，更正后才成功。独立IPC Hack有界旧帧接收后正文null且429/type/code保留，501字符帧拒绝；全部自有资源清理。A与实施者同时发现Chat同步end抛错可跳过等待ready并因取消形成未处理拒绝，正在补旁挂拒绝处理并观察。
+- 上述同步异常已补修：创建ready后立即旁挂catch，原await仍传播正常错误。A以Node事件循环观察确认旧机制产生AbortError/ABORT_ERR未处理拒绝；实施者对生产Chat的ClientRequest.end定向注入同步throw一次，返回502固定chat_upstream_error、上游请求0、bytes/totalDuration及转储callTiming空，unhandledRejection为空。补修后全量tsc、4个源码ESLint、Runtime边界及diff格式通过；全部自有资源与作业收齐。
+- 独立A完成全链审查，无剩余本批阻断；主代理已读实施者和A完整报告，核对四个最终源码blob一致。A发现的ready拒绝及README错误文本旧合同均已补修。R05/R28标记已修复待补证；MetricsWorker线程、浏览器、真实模型/平台和跨OS未运行，Chat多轮搜索续答起点仅源码核对，不冒称实测。历史错误文本仍可能被原有读出/导出消费，本批未清理或重写。

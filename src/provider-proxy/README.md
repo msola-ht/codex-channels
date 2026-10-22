@@ -97,7 +97,7 @@
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
   同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录。
-  `responseTimeMs`、`firstTokenMs` 与 `totalDurationMs` 从提交上游发送时刻计时，不含发送前路由、解析与 WS 连接等待；HTTP 提交后发生的连接等待计入耗时；Chat 桥以真实上游提交起点替换本地转发起点。
+  `responseTimeMs`、`firstTokenMs` 与 `totalDurationMs` 从提交上游发送时刻计时，不含发送前路由、解析与 WS 连接等待；HTTP 提交后发生的连接等待计入耗时；Chat 桥仅使用真实上游提交起点，调用转储沿用同一起点，本地桥接跳不建立提交时钟。
   `responseTimeMs` 到首个有效上游事件，`firstTokenMs` 到首段非空内容的接收回调入口，`totalDurationMs` 到首次终态或结束/失败。未提交发送不伪造耗时。
   可空 `requestBytes` 保存实际提交给模型上游出站传输的请求正文或 WebSocket `response.create` 请求帧字节合计；HTTP 归一化、采样补齐和 Chat 转换使用转换后的内容，多个受控续答累计到同一逻辑请求。HTTP 流式正文仅在交给 `ClientRequest.write` 时累计，不计仍留在上传队列的块；WS 在 `send` 提交后立即累计，不等待发送回调，因此取消或发送失败不抹掉已提交大小。该值不表示远端确认收到的字节量；未提交时为 null，不包含响应、请求头或传输开销。
   指标通过 `timingBasis: "submitted"` 标记新起点，IPC 拒绝无标记的旧计时；指标独立于调用记录传递；调用索引复用同一观测，不从 trace 反推，不表示客户端显示时间。
@@ -105,8 +105,7 @@
   HTTP JSON/SSE 与 WebSocket 共用终态提取 `usage_metadata.amount`，以可空 `responseUsageAmount`
   传递有界非负十进制字符串；保留精度和零值，缺失或畸形值为 null，不采集任意 metadata、换算单位或推断费用。
   两种传输同时采集出站 `service_tier` 为 `requestServiceTier`，不受响应层级覆盖，缺失为空；沿用指标 IPC 入库且不依赖调用转储。
-  生成计时持续观察有界 Responses 事件；错误消息、标识符和
-  `User-Agent` 继续执行既有限长与字符约束。
+  生成计时持续观察有界 Responses 事件；普通指标的 `errorMessage` 恒为 null，JSON/SSE/WS 的上游错误正文及关闭原因不进入指标，Chat 的客户端固定错误文案也不复制到指标。保留受限错误分类、代码与HTTP状态；标识符和 `User-Agent` 继续执行既有限长与字符约束。指标IPC对带有界错误文本的既有帧仍校验后投影为null，不向Writer透传；不改写已存历史记录。
 - `traffic-call-timing.ts`：记录单次调用从提交发送起的单调时钟耗时；只写调用响应索引，不进入指标 IPC 或数据库。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。

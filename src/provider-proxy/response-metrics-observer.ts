@@ -49,7 +49,8 @@ export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
   userAgent: string | null;
   errorType: string | null;
   errorCode: string | null;
-  errorMessage: string | null;
+  /** 普通指标不采集上游错误正文；保留字段以维持存储与 IPC 合同。 */
+  errorMessage: null;
   incompleteReason: string | null;
   inputTokens: number | null;
   cachedInputTokens: number | null;
@@ -319,7 +320,6 @@ export function observeResponseEvent(
     if (markMetricsFailed(metrics, errorType, receivedAtMs, undefined, receivedAtMonotonicMs)) {
       metrics.httpStatus = finiteNonNegativeNumber(event?.status);
       metrics.errorCode = boundedString(error?.code);
-      metrics.errorMessage = boundedMessage(error?.message);
     }
     return true;
   }
@@ -367,7 +367,6 @@ function observeResponseFields(
   const error = asRecord(response?.error) ?? asRecord(event?.error);
   metrics.errorType = boundedString(error?.type);
   metrics.errorCode = boundedString(error?.code);
-  metrics.errorMessage = boundedMessage(error?.message);
   metrics.incompleteReason = boundedString(
     asRecord(response?.incomplete_details)?.reason,
   );
@@ -561,16 +560,6 @@ export function boundedString(value: unknown): string | null {
     && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(value)
     ? value
     : null;
-}
-
-export function boundedMessage(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const message = value
-    .replace(/\p{Cc}/gu, "")
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (message.length === 0) return null;
-  return message.length <= 500 ? message : `${message.slice(0, 500)}…`;
 }
 
 function responseEventType(payload: string): string {
