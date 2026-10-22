@@ -37,6 +37,7 @@ import type {
 import {
   isThreadExecutionSettled,
   type SessionRouter,
+  type ThreadRestoreObserver,
 } from "../session-routing/index.js";
 import type {
   ThreadOccupancyPort,
@@ -571,7 +572,6 @@ export class ConversationService implements
       }
       if (!isCurrent() || isLocallyBusy()) return busy();
       const modelPreference = this.models.capturePreference?.(target);
-      const activity = this.core.trackThreadActivity?.(current.threadId);
       try {
         const released = await this.router.releaseIdle(target, current, snapshot, {
           isCurrent: () => isCurrent() && !isLocallyBusy(),
@@ -590,14 +590,12 @@ export class ConversationService implements
           },
           canRestore: () => !condition?.signal.aborted && (condition?.canRestore() ?? true),
           verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
-          restored: (thread) => activity?.restore(target, thread.activeTurnId),
+          observeRestore: this.observeThreadRestore,
         }, modelPreference);
         if (!released) return busy();
       } catch {
         if (condition?.canRestore() && !condition.signal.aborted) condition.restoreRequired?.();
         return busy();
-      } finally {
-        activity?.stop();
       }
       this.invalidateRevertSnapshot(target);
       this.invalidateQueueSnapshot(current.threadId);
@@ -1110,7 +1108,7 @@ export class ConversationService implements
             "原渠道或当前渠道仍有待处理交互，暂不能接管",
           );
         }
-        const transfer = await this.router.transferBinding(target, selected.id, assertAuthorized);
+        const transfer = await this.router.transferBinding(target, selected.id, assertAuthorized, this.observeThreadRestore);
         this.clearConversationState(owner);
         this.clearConversationState(target);
         transfers.notifyTransferred({
@@ -1151,32 +1149,24 @@ export class ConversationService implements
       const selectedHasQueue = await this.probeNativeQueueItems(selected.id, assertAuthorized);
       const active = this.core.activeTurn(target);
       const preserveCurrent = leavesCurrent && current !== undefined && !await this.isThreadIdle(current.threadId);
-      const activity = this.core.trackThreadActivity(selected.id);
-      const previousActivity = leavesCurrent && current ? this.core.trackThreadActivity(current.threadId) : undefined;
-      let binding;
-      try {
-        binding = await this.router.resume(target, selected.id, preserveCurrent, selected.cwd,
-          {
-            assertCurrent: () => {
-              if (this.router.workspace(target).cwd !== currentCwd
-                || this.router.current?.(target)?.threadId !== current?.threadId
-                || (leavesCurrent && this.core.activeTurn(target)?.turnId !== active?.turnId)
-                || (leavesCurrent && current && !preserveCurrent && this.hasLocalThreadWork(current.threadId))) {
-                throw new UserFacingError("thread.takeover.changed", "当前会话或工作区已变化，请重新选择");
-              }
-            },
-            restored: (restored, thread) => activity.restore(restored.target, thread.activeTurnId),
-            ...(leavesCurrent && current ? {
-              verifyPreviousIdle: () => this.isThreadIdle(current.threadId),
-              verifyPreviousAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
-              restoredPrevious: (thread: Awaited<ReturnType<SessionRouter["readThread"]>>) => previousActivity?.restore(target, thread.activeTurnId),
-              restorePreviousFailed: () => this.bindingLifecycle?.restoreRequired(current.threadId),
-            } : {}),
-          }, assertAuthorized);
-      } finally {
-        activity.stop();
-        previousActivity?.stop();
-      }
+      const binding = await this.router.resume(target, selected.id, preserveCurrent, selected.cwd,
+        {
+          assertCurrent: () => {
+            if (this.router.workspace(target).cwd !== currentCwd
+              || this.router.current?.(target)?.threadId !== current?.threadId
+              || (leavesCurrent && this.core.activeTurn(target)?.turnId !== active?.turnId)
+              || (leavesCurrent && current && !preserveCurrent && this.hasLocalThreadWork(current.threadId))) {
+              throw new UserFacingError("thread.takeover.changed", "当前会话或工作区已变化，请重新选择");
+            }
+          },
+          observeRestore: this.observeThreadRestore,
+          ...(leavesCurrent && current ? {
+            verifyPreviousIdle: () => this.isThreadIdle(current.threadId),
+            verifyPreviousAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
+            observePreviousRestore: this.observeThreadRestore,
+            restorePreviousFailed: () => this.bindingLifecycle?.restoreRequired(current.threadId),
+          } : {}),
+        }, assertAuthorized);
       this.invalidateRevertSnapshot(target);
       if (preserveCurrent && current) {
         this.pendingBackgroundReleases.set(current.threadId, false);
@@ -1209,17 +1199,14 @@ export class ConversationService implements
         );
       }
       const preserveCurrent = current !== undefined && !await this.isThreadIdle(current.threadId);
-      const activity = current ? this.core.trackThreadActivity(current.threadId) : undefined;
-      try {
-        await this.router.newSession(target, preserveCurrent, modelPreference, current ? {
-          isCurrent: () => this.router.current(target)?.threadId === current.threadId && !this.hasLocalThreadWork(current.threadId),
-          verifyIdle: () => this.isThreadIdle(current.threadId),
-          verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
-          canRestore: () => this.router.current(target)?.threadId === current.threadId,
-          restored: thread => activity?.restore(target, thread.activeTurnId),
-          restoreRequired: () => this.bindingLifecycle?.restoreRequired(current.threadId),
-        } : undefined, assertAuthorized);
-      } finally { activity?.stop(); }
+      await this.router.newSession(target, preserveCurrent, modelPreference, current ? {
+        isCurrent: () => this.router.current(target)?.threadId === current.threadId && !this.hasLocalThreadWork(current.threadId),
+        verifyIdle: () => this.isThreadIdle(current.threadId),
+        verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
+        canRestore: () => this.router.current(target)?.threadId === current.threadId,
+        observeRestore: this.observeThreadRestore,
+        restoreRequired: () => this.bindingLifecycle?.restoreRequired(current.threadId),
+      } : undefined, assertAuthorized);
       if (preserveCurrent && current) {
         this.pendingBackgroundReleases.set(current.threadId, false);
         this.bindingLifecycle?.backgrounded(current.threadId);
@@ -1272,7 +1259,7 @@ export class ConversationService implements
       );
       const selected = resolveThread(sessions, selector.trim(), "unarchive");
       this.requireIdle(target);
-      const binding = await this.router.unarchive(target, selected.id, assertAuthorized);
+      const binding = await this.router.unarchive(target, selected.id, assertAuthorized, this.observeThreadRestore);
       this.invalidateRevertSnapshot(target);
       this.clearPendingSelections(target);
       return binding.threadId;
@@ -1445,7 +1432,7 @@ export class ConversationService implements
         );
       }
       this.requireIdle(target);
-      const binding = await this.router.fork(target, {}, assertAuthorized);
+      const binding = await this.router.fork(target, {}, assertAuthorized, this.observeThreadRestore);
       this.invalidateRevertSnapshot(target);
       this.clearPendingSelections(target);
       return binding.threadId;
@@ -1486,9 +1473,14 @@ export class ConversationService implements
   review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void): Promise<Submission> {
     return this.authorizedLocked(target, assertAuthorized, async () => {
       const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized, true);
-      const result = await this.codex.startReview(binding.threadId, reviewTarget, beforeSubmit);
-      this.core.markTurnStarted(target, result.threadId, result.turnId);
-      return { threadId: result.threadId, turnId: result.turnId, steered: false };
+      const activity = this.core.trackThreadActivity(binding.threadId);
+      try {
+        const result = await this.codex.startReview(binding.threadId, reviewTarget, beforeSubmit);
+        activity.restore(target, result.turnId);
+        return { threadId: result.threadId, turnId: result.turnId, steered: false };
+      } finally {
+        activity.stop();
+      }
     });
   }
 
@@ -1708,6 +1700,14 @@ export class ConversationService implements
     return gitBranch ? { ...status, gitBranch } : status;
   }
 
+  private readonly observeThreadRestore: ThreadRestoreObserver = (threadId) => {
+    const activity = this.core.trackThreadActivity(threadId);
+    return {
+      restored: (binding, thread) => activity.restore(binding.target, thread.activeTurnId),
+      stop: () => activity.stop(),
+    };
+  };
+
   private async ensureSession(target: ConversationTarget, requireIdle = false, assertAuthorized?: () => void) {
     assertAuthorized?.();
     await this.models.validateUnboundPreference?.(target, assertAuthorized);
@@ -1715,22 +1715,20 @@ export class ConversationService implements
     const preference = !this.router.current?.(target) ? this.models.capturePreference?.(target) : undefined;
     const options = { ...this.models.threadStartOptions?.(target),
       ...(assertAuthorized ? { beforeSubmit: assertAuthorized } : {}) };
-    const current = this.router.current(target);
-    const activity = current ? this.core.trackThreadActivity(current.threadId) : undefined;
-    try {
-      const binding = await this.router.ensure(target, options, (restored, thread) => {
-        if (requireIdle && thread.status.type === "active" && thread.activeTurnId === null) {
-          throw new UserFacingError("conversation.busy", "会话仍有运行中的任务，请稍后重试或显式恢复会话", { reason: "activity-restored" });
-        }
-        if (restored.threadId === current?.threadId) {
-          activity?.restore(restored.target, thread.activeTurnId);
-        }
-      });
-      if (preference) this.models.restorePreference?.(target, preference);
-      return binding;
-    } finally {
-      activity?.stop();
-    }
+    const binding = await this.router.ensure(target, options, threadId => {
+      const observation = this.observeThreadRestore(threadId);
+      return {
+        restored: (restored, thread) => {
+          if (requireIdle && thread.status.type === "active" && thread.activeTurnId === null) {
+            throw new UserFacingError("conversation.busy", "会话仍有运行中的任务，请稍后重试或显式恢复会话", { reason: "activity-restored" });
+          }
+          observation.restored(restored, thread);
+        },
+        stop: () => observation.stop(),
+      };
+    });
+    if (preference) this.models.restorePreference?.(target, preference);
+    return binding;
   }
 
   private async startNewTurn(
@@ -1767,28 +1765,29 @@ export class ConversationService implements
         );
       }
     }
-    let result;
+    const activity = this.core.trackThreadActivity(binding.threadId);
     try {
-      assertCurrent?.(binding.threadId);
-      result = await this.codex.startTurn(
-        binding.threadId,
-        input,
-        clientUserMessageId,
-        workspace.cwd,
-        { ...overrides, beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); } },
-      );
-    } catch (error) {
-      this.recordTurnError("start", target, binding.threadId, null, error);
-      throw error;
+      let result;
+      try {
+        assertCurrent?.(binding.threadId);
+        result = await this.codex.startTurn(
+          binding.threadId,
+          input,
+          clientUserMessageId,
+          workspace.cwd,
+          { ...overrides, beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); } },
+        );
+      } catch (error) {
+        this.recordTurnError("start", target, binding.threadId, null, error);
+        throw error;
+      }
+      this.models.markApplied(target);
+      this.collaborationModes?.markApplied(target);
+      activity.restore(target, result.turnId, identity);
+      return { threadId: binding.threadId, turnId: result.turnId, steered: false };
+    } finally {
+      activity.stop();
     }
-    this.models.markApplied(target);
-    this.collaborationModes?.markApplied(target);
-    if (identity) {
-      this.core.markTurnStarted(target, binding.threadId, result.turnId, identity);
-    } else {
-      this.core.markTurnStarted(target, binding.threadId, result.turnId);
-    }
-    return { threadId: binding.threadId, turnId: result.turnId, steered: false };
   }
 
   private recordTurnError(
@@ -1937,17 +1936,13 @@ export class ConversationService implements
     }
     const target = this.router.targetForThread(threadId);
     if (!target || !canRelease() || this.hasLocalThreadWork(threadId)) return false;
-    const activity = this.core.trackThreadActivity(threadId);
-    let released;
-    try {
-      released = await this.router.releaseBackground(threadId, {
-        isCurrent: () => canRelease() && !this.hasLocalThreadWork(threadId),
-        verifyIdle: () => this.isThreadIdle(threadId),
-        verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(threadId, true),
-        canRestore: canRelease,
-        restored: thread => activity.restore(target, thread.activeTurnId),
-      });
-    } finally { activity.stop(); }
+    const released = await this.router.releaseBackground(threadId, {
+      isCurrent: () => canRelease() && !this.hasLocalThreadWork(threadId),
+      verifyIdle: () => this.isThreadIdle(threadId),
+      verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(threadId, true),
+      canRestore: canRelease,
+      observeRestore: this.observeThreadRestore,
+    });
     if (!released) return false;
     this.pendingBackgroundReleases.delete(threadId);
     return true;

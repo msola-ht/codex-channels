@@ -34,8 +34,20 @@ interface ReasoningState {
 type WithoutTarget<T> = T extends unknown ? Omit<T, "target"> : never;
 type UntargetedOutputEvent = WithoutTarget<OutputEvent>;
 
+type ThreadActivityObservation =
+  | { type: "active"; turnId: string }
+  | { type: "terminal"; turnId: string }
+  | { type: "invalidated" };
+
+type ThreadActivityState =
+  | { type: "untouched" }
+  | { type: "active"; turnId: string }
+  | { type: "terminal" }
+  | { type: "invalidated" }
+  | { type: "stopped" };
+
 export class ConversationCore {
-  private readonly turnRestoreObservers = new Map<string, Set<(turnId: string, active: boolean) => void>>();
+  private readonly threadActivityObservers = new Map<string, Set<(activity: ThreadActivityObservation) => void>>();
   private readonly activeByThread = new Map<string, ActiveTurn>();
   private readonly errorsByTurn = new Map<string, { message: string; errorCode?: TurnErrorCode }>();
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
@@ -62,32 +74,47 @@ export class ConversationCore {
   ) {}
 
   trackThreadActivity(threadId: string): {
-    restore: (target: ConversationTarget, activeTurnId: string | null) => void;
+    restore: (target: ConversationTarget, activeTurnId: string | null, identity?: TurnStartIdentity) => void;
     stop: () => void;
   } {
-    let latestActive: string | null | undefined;
-    const completed = new Set<string>();
-    const observe = (turnId: string, active: boolean) => {
-      if (active) latestActive = turnId;
-      else {
-        completed.add(turnId);
-        if (latestActive === turnId) latestActive = null;
+    // Notifications observed during the request supersede its response or
+    // resume snapshot. Keep this state only until the caller stops the window.
+    let state: ThreadActivityState = { type: "untouched" };
+    const observe = (activity: ThreadActivityObservation) => {
+      if (state.type === "invalidated" || state.type === "stopped") return;
+      if (activity.type === "terminal") {
+        // A preceding Turn may finish after a newer Turn has already started.
+        if (state.type !== "active" || state.turnId === activity.turnId) {
+          state = { type: "terminal" };
+        }
+      } else {
+        state = activity;
       }
     };
-    const observers = this.turnRestoreObservers.get(threadId) ?? new Set();
+    const observers = this.threadActivityObservers.get(threadId) ?? new Set();
     observers.add(observe);
-    this.turnRestoreObservers.set(threadId, observers);
+    this.threadActivityObservers.set(threadId, observers);
     return {
-      restore: (target, activeTurnId) => {
-        const current = latestActive !== undefined ? latestActive
-          : activeTurnId && !completed.has(activeTurnId) ? activeTurnId : null;
-        if (current) this.markTurnStarted(target, threadId, current);
+      restore: (target, activeTurnId, identity) => {
+        const owner = this.router.targetForThread(threadId);
+        if (!owner || this.key(owner) !== this.key(target)) return;
+        const current = state.type === "active" ? state.turnId
+          : state.type === "untouched" ? activeTurnId : null;
+        if (current) {
+          this.markTurnStarted(target, threadId, current, current === activeTurnId ? identity : undefined);
+        }
       },
       stop: () => {
+        if (state.type === "stopped") return;
+        state = { type: "stopped" };
         observers.delete(observe);
-        if (observers.size === 0) this.turnRestoreObservers.delete(threadId);
+        if (observers.size === 0) this.threadActivityObservers.delete(threadId);
       },
     };
+  }
+
+  private observeThreadActivity(threadId: string, activity: ThreadActivityObservation): void {
+    for (const observe of this.threadActivityObservers.get(threadId) ?? []) observe(activity);
   }
 
   markTurnStarted(
@@ -203,6 +230,9 @@ export class ConversationCore {
   }
 
   connectionLost(message: string, affectedThreadIds?: ReadonlySet<string>): void {
+    for (const threadId of affectedThreadIds ?? this.threadActivityObservers.keys()) {
+      this.observeThreadActivity(threadId, { type: "invalidated" });
+    }
     if (affectedThreadIds) {
       for (const [threadId, active] of this.activeByThread) {
         if (affectedThreadIds.has(active.threadId)) {
@@ -251,10 +281,12 @@ export class ConversationCore {
   }
 
   handle(event: ConversationInputEvent): void {
-    if (event.type === "turn.started" || event.type === "turn.completed") {
-      for (const observe of this.turnRestoreObservers.get(event.threadId) ?? []) {
-        observe(event.turnId, event.type === "turn.started");
-      }
+    if (event.type === "turn.started") {
+      this.observeThreadActivity(event.threadId, { type: "active", turnId: event.turnId });
+    } else if (event.type === "turn.completed" && event.status !== "inProgress") {
+      this.observeThreadActivity(event.threadId, { type: "terminal", turnId: event.turnId });
+    } else if (event.type === "thread.closed" || event.type === "thread.archived" || event.type === "thread.deleted") {
+      this.observeThreadActivity(event.threadId, { type: "invalidated" });
     }
     switch (event.type) {
       case "turn.started": {
@@ -472,14 +504,14 @@ export class ConversationCore {
         if (accumulator?.turnId === event.turnId) {
           this.timingByThread.delete(event.threadId);
         }
+        const active = this.activeByThread.get(event.threadId);
+        if (event.status !== "inProgress" && active?.turnId === event.turnId) {
+          this.activeByThread.delete(event.threadId);
+        }
         const target = this.router.targetForThread(event.threadId);
         if (!target) {
           this.errorsByTurn.delete(responseKey);
           return;
-        }
-        const active = this.activeByThread.get(event.threadId);
-        if (active?.turnId === event.turnId) {
-          this.activeByThread.delete(event.threadId);
         }
         const storedError = this.errorsByTurn.get(responseKey);
         const resolvedError = event.error === null
@@ -560,7 +592,6 @@ export class ConversationCore {
       case "thread.closed":
       case "thread.archived":
       case "thread.deleted": {
-        const target = this.router.targetForThread(event.threadId);
         this.usageByThread.delete(event.threadId);
         this.usageTurnByThread.delete(event.threadId);
         this.goalsByThread.delete(event.threadId);
@@ -571,9 +602,7 @@ export class ConversationCore {
         this.clearSeenUserMessages(event.threadId);
         this.clearItemPhases(event.threadId);
         this.artifactsByThread.delete(event.threadId);
-        if (target) {
-          this.activeByThread.delete(event.threadId);
-        }
+        this.activeByThread.delete(event.threadId);
         return;
       }
       case "account.updated": {

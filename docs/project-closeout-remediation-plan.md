@@ -276,9 +276,10 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 公共配置锁附带调用链已核对：Codex `.env`、自定义 Provider 注册表、Relay 管理、init 与 Desktop 都使用同步回调，保留各自 CAS、管理事务及业务结果；不把共享锁升级推断为这些入口全部重新实机验收。旧锁恢复/回滚约束也适用于这些资源的 `.lock`，须同时停止相关 CLI/WebUI writer 后再核对，不能只停 Workspace 操作。
 - 独立 Astra/high 已完成最终全链路源码复核，原问题及同 ID 清理、Windows staging、共享配置锁三项关联补充均无剩余 P1/P2 提交阻断。主代理已核对两实施代理与独立 A 完整报告、最终差异和上述观察。真实 Gateway→渠道通知、Windows/macOS 实机及全部管理入口的运行行为仍未观察；R20/R35 保留已修复待补证。
 
-### 第六批：B09（独立复审通过，待本地提交）
+### 第六批：B09（已提交 `c810b6a8`）
 
 - 输入 `a4e0c01d`。用户后续已授权逐批修复；本批只修改 Skill 管理实现和文档，观察仅使用任务自有材料，不执行真实用户技能卸载。
+- 本地提交 `c810b6a81f88d56a9812f86dc75cdaadc5e17f03`；正常 Hook 的类型、版本、模块边界、局部 lint、84 份 Markdown 与 Gateway 构建检查通过，耗时 9.84 秒。提交后工作区干净，未推送。
 - 数据处理方案：卸载确认绑定绝对目标、父目录身份和完整树修订；执行前复核，过期确认拒绝。卸载从安装位置移走实际原树并保留在私有隔离目录，不递归永久删除；原 descriptor 后续写入仍留在该树。已按下述上游发现合同选择 skills 根目录之外的父目录作为保留位置。
 - 失败恢复与回滚：移走后发现变化时保留实际树并输出位置，不覆盖任何后来出现的新目标；人工恢复须先停用相关写入者、核对安装目标不存在，再恢复保留材料，冲突时另选位置保留。无自动恢复覆盖、无自动扫除隔离目录或旧安装备份。后续永久清理仅在用户核对内容且无进程持有旧树后手工进行；取消卸载不产生写入。
 - 已核对锁定上游 HEAD `83086188ae0614bd882818ff1aa23f3194962012`：`codex-rs/ext/skills/src/loader/host.rs` 对隐藏目录使用 Skip，但 `loader/environment.rs` 使用 Include，`loader/discovery.rs` 按该策略遍历。因此新卸载保留目录放在 skills 根目录之外的同盘父目录下，不依赖名称隐藏阻止加载。原安装旧树保留不在本批迁移/清理范围；不修改上游或运行其测试。
@@ -287,3 +288,21 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 长恢复路径关联观察：实际 `runSetup(stayOnMenu)` 中注入 rename 后新目标，target 长 489、保留路径长 522；外层错误摘要会截断，但受控卸载错误在摘要前完整输出两路径，旧/新内容都保留，随后可正常退出。
 - 独立 A 实测发现 230 字节技能名可安装、却因保留目录前缀拼接完整名称而 ENAMETOOLONG；主代理改用固定 `.codexc-skill-uninstall-` 前缀（替代前述中间版本的带名称前缀），重做生产 install/uninstall 后 installed=true、removed=true、列表空、原文保留。rename 实际完成后注入 EIO 的完整 Setup 观察显示“移动结果未确认”，完整路径可见、target 空、previous 原文存在，无“原目标未移走”错误声明、不重试移动。`codexc-b09-final-piQXcj` 已清理。
 - 独立 Astra/high 最终检查确认、父/树修订、保留路径、后置失败、旧 descriptor、普通/JSONL 输出、列表及安装消费者和上游发现合同，无剩余 P1/P2 提交阻断。主代理已收齐实施与复审完整报告并核对最终差异；类型、版本、模块边界、局部 ESLint 与差异检查通过。真实终端、App Server 缓存加载和 Windows/macOS 文件系统/ACL 未观察；不声明能原子隔离任意同 UID 写者改名保留目录或祖先，记录路径仍须人工核对。R18 保留已修复待补证。
+
+### 第七批：B10（独立复审通过，待本地提交）
+
+- 输入 `c810b6a8`，范围 R03/R23。R03 的活动缓存只用于路由与展示，成功启动响应仍按提交事实结算，不推断续体执行时 Turn 仍运行；R23 保留现有列表排序、有效数字序号优先与后续权限检查，只修复精确匹配歧义被前缀绕过。
+- 已核对锁定上游 `83086188ae0614bd882818ff1aa23f3194962012`：`turn_processor.rs` 662–734 在提交后继续等待并构造固定 inProgress 响应，Review 1451–1472 也先提交再响应；`thread_lifecycle.rs` 323–389 通知有序但与响应独立，不能假设响应先于完成。
+- Core 复用请求作用域 `trackThreadActivity`，以 untouched/active/terminal/invalidated/stopped 有限状态替代完成 ID 集合。普通 start、inline Review、Scheduled 请求前登记、finally 释放；恢复、解绑补偿继续同一接口。完成 A 不清除活动 B，启动身份只附相同响应 Turn，合并前核对当前归属；断线、Thread 关闭/归档/删除永久使旧窗口失效。仅官方终态删除同 Turn 活动，单独 error 与 revert 不推断终态。未绑定时仍记录通知以支持后续合法绑定。
+- 关联路径已核对：ensure、resume、新会话切换、原绑定补偿、空闲释放、后台释放与重连恢复；两个 Queue start 路径没有乐观 mark，保持原职责。Scheduled 的准确 `onTurnStarted` 回调与 Run 协调器提前终态、精确历史读取保持独立，普通成功提交仍消费模型/模式选择。无协议、持久格式、用户材料或权限变更。
+- 主代理实际执行生产 `ConversationService.submit/review → Core → status` 及 `ConversationCommandService.execute(status)`，仅 Router/Turn/模型端口使用自有内存输入：completed 先于响应时 status 无活动 Turn；连续两条输入均新建、steer 调用 0、markApplied 为 2；Review 也不复活。第三次提交返回旧 turn-3 时状态保留 newer-turn；新轮次完成后命令 status 与 `hasActiveTurns=false` 一致，started 输出仅各真实注入启动一次。
+- Core 受控事件顺序观察：断线/恢复后的旧窗口不激活；未绑定 started 后建立绑定可恢复 before-binding，未附旧身份；完成 A 保留 B，inProgress 不删除 B；无 owner 时 closed 清理活动且旧窗口不恢复；重复 stop、stop 后 restore、归属转移后的 restore 均无效，最终 observer 数量 0。第一次内联调用漏提供 `contextCompactionItemIdsForThread` 导致注入端口 TypeError，补齐后完整重做成功，未据此修改产品代码。
+- Scheduled 生产 Executor/Core 注入观察：完成先于响应时 Executor 仍返回 running/准确 Thread 与 Turn，Core active=null，`onTurnStarted` 精确关联 run-task，observer=0；未知 transport 异常返回 uncertain，不新增 Run 关联，observer=0。该 running 是提交结果，不是宣称持久 Run 仍运行；本次未运行 Run Store 结算。
+- R23 实际选择器观察：重复名称 abcd 与唯一 abcd-third ID 前缀同时存在时返回 `session.selector.ambiguous`；唯一名称、唯一前缀、有效序号和越界数字的精确名称仍成功；普通前缀歧义、ID/名称交叉精确冲突、缺失及空参数返回各自结构化错误。生产 Command → Service 的 resume/unarchive 歧义入口均 writeCount=0、binding=null；正常 unarchive unique 返回 thread.unarchived/abcd-third 并准确调用该目标端口。
+- 首版实施者完整类型、版本、模块边界和三个实现文件局部 ESLint 通过；主代理已核对差异。上述内联观察不创建测试或 probe 文件，不连接真实 App Server、平台账号或用户 Thread；真实渠道消息、官方 RPC 竞态、计划 Run 持久结算及 Windows/macOS 运行仍未观察，保留验收限制。后续补偿修复和独立 A 最终结论见下述记录。
+- 独立 A 新发现 P2：既有 releaseIdle/newSession/background release 与 resume 原绑定补偿，在 unsubscribe 前建立的窗口可能收到 `thread.closed` 后永久失效，吞掉随后新补偿 resume 返回的活动 B。锁定上游 `thread_lifecycle.rs` 575–617 支持最后订阅解除后卸载并广播 closed；其他客户端在重订阅前启动 B 时，恢复快照可能是唯一当前证据。修复方向是为每次新的权威恢复请求在请求前建立独立窗口、请求结束释放，保持旧窗口失效；同时核对 ensure 等待生命周期队列后的恢复。此前已通过的启动竞态观察仍有效，但不能据此宣称补偿链已完成验证。
+- 主代理已复现该回归：生产 `ConversationService.newSession → SessionRouter → MemoryBindingStore/WorkspaceRegistry/Core`，仅 ThreadLifecyclePort 注入 unsubscribe 时 closed、随后权威 active B 而没有 started；补偿 resume 返回 B。修复前实际输出 `thread.takeover.changed`、原 binding=t 保留、Core active=null、权威 active=B、observer=0，确认是活动恢复缺失而非绑定丢失；同一调用链的修后观察如下。
+- 恢复窗口修正后的主代理观察：同一生产链分别执行 newSession、releaseIdle、background release；unsubscribe/closed 后补偿 resume active B，三者均保留 binding=t、Core active=B=权威 B、observer=0，结果分别为 `thread.takeover.changed`、busy、false。再次用实际 Router/MemoryBindingStore 运行普通输入两次、命令 Review 和 status：requests=2、steer=0、markApplied=2，Review 完成不复活；旧响应晚于 B 时保留 B，最终完成无活动且 observer=0。此前仅 Router 端口注入的入口记录由这一更完整生产链补充，不等同真实 RPC 验收。
+- 同合同扩展检查发现 transferBinding/fork 失败恢复与 unarchive 的原有活动快照交回缺口，一并接入新观察工厂，未改变成功绑定或权限合同；这三条不是本次引入的回归。主代理用生产 Command → Service → Router → MemoryBindingStore/Core 重做 resume/unarchive：重复名均拒绝且写入调用为空、无绑定；唯一名均精准选 abcd-third，resume 或 unarchive→resume 返回活动 B 后，绑定与 Core 活动均准确，observer=0。
+- 最后补证：ensure 读取 notLoaded 期间注入 closed，后续新 resume 返回 active B，普通 submit 返回 `conversation.busy`、startTurn 调用 0、binding=t、Core=B、observer=0。fork 入口注入绑定提交失败，实际顺序 unsubscribe t/closed → resume t(active B) → cleanup unsubscribe forked；原错误返回，原 binding=t、Core=B、observer=0。未将这些受控边界观察描述为真实平台或官方 RPC 竞态。
+- 独立 Astra/high 最终覆盖全部启动、恢复/补偿、解绑、断线、归属、输出与 Run 下游、Queue 和两个会话选择入口，确认原补偿窗口 P2 关闭，无剩余 P1/P2 提交阻断。主代理已读完整报告和最终 Router/Application/Bootstrap 差异；关键 blob 与复审一致：Router `0ba65ca4`、Service `de29d3b5`。补偿版完整类型、版本、模块边界与四文件局部 ESLint 通过；选择器局部 ESLint、84 份 Markdown 索引/链接与差异检查通过。接管失败、ensure 生命周期锁等待和批量重连的事件竞态完成源码关联复审，未单独运行；真实平台与跨 OS 限制仍保留。R03/R23 标记已修复待补证，未扩大为整体验收通过。

@@ -20,6 +20,7 @@
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，拒绝断线前连接代次迟到的问题通知，仍消费取消事件，避免入站或输出积压导致旧问题重新登记；等待前捕获唯一授权 Actor 与工作区 ID/目录，交互限定原用户，分批回答及最终 Turn 发送均复核原授权和 Thread。拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
   回答提交结束前持续保护原 Thread，整个问题流程结束后触发后台空闲复核；审批类交互则在官方 `serverRequest/resolved` 后解析绑定祖先并复核，避免只清理交互状态而遗留后台订阅。
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限；异步预检返回后及 Thread 创建后再次复核当前授权、取消、Workspace 与投递准入，撤权时释放新建后台绑定而不启动 Turn。临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
+  启动请求期间使用 Core 临时活动观察合并响应，迟到响应不覆盖期间归约的终态或更新轮次；无论 Core 当前是否仍活动，成功响应中的准确 Turn ID 都继续交给 Run 协调器关联，观察器在请求结束时释放。
   同一提交守卫穿过后台排队、投递准入和 Provider 准备到 Client 最终写入前；提交前取消或授权失效明确收敛，已发写入仍按真实响应处理，已知新 Thread 的取消保留身份并释放绑定。
   权限预检按实际 Provider 与授权 cwd 查询原生明确受限沙箱，未知缺省或命名 Profile 拒绝。
   创建不覆盖沙箱，仅设置无人值守 `never`；实际响应符合目录、审批策略和预检沙箱后才启动 Turn。
@@ -62,7 +63,7 @@
   同一组合根还把 Luna Reserve 状态机接到最终 `usageLimitExceeded`、Thread/账户生命周期和关闭顺序；
   切换通知复用平台无关输出事件，不让 App Server Reader 等待额度 RPC 或渠道网络。
 - `gateway-reconnect-coordinator.ts`：拥有断线检查去重、串行 Provider 重连、12 次有界退避和关闭取消；通过断线代次拒绝过期恢复确认，重复断线不会重置未完成恢复的重试预算。连接成功后的绑定恢复失败只重试恢复阶段，不重复握手。主动停止的 Provider 不自动重启。关闭时等待断线检查与重连任务，等待时限仍由顶层生命周期控制；绑定状态由 Binding Restore Coordinator 管理。
-- `binding-restore-coordinator.ts`：单独拥有待恢复 Thread、Provider 断线绑定、恢复中集合、写锁占用通知和有界退避任务；Provider 重连与 Gateway 停止通过显式方法恢复、取消并等待，不保存第二套绑定。恢复期间通过 Core 临时活动观察器合并实时 Turn 开始与完成，旧快照不重新激活已结束 Turn；观察器在成功、失败或取消后释放。成功恢复后通过回调触发耗时补齐，停止后的迟到恢复不触发回调。
+- `binding-restore-coordinator.ts`：单独拥有待恢复 Thread、Provider 断线绑定、恢复中集合、写锁占用通知和有界退避任务；Provider 重连与 Gateway 停止通过显式方法恢复、取消并等待，不保存第二套绑定。把 Core 临时活动观察工厂交给 Router，在每次实际恢复请求前建立窗口，合并实时 Turn 开始与完成，旧快照不重新激活已结束 Turn；观察器在成功、失败或取消后释放，不跨生命周期锁等待复用。成功恢复后通过回调触发耗时补齐，停止后的迟到恢复不触发回调。
   普通后台绑定在 Router 恢复锁释放后交给 Application 的统一释放入口，核对父 Turn、权威后代、Queue 与交互保护；仅确认释放后提示离线结束，暂时失败保留绑定并进入原恢复重试。正常后台清理的补偿失败也交回绑定恢复，避免失去订阅后依赖后续通知才能重试。恢复与清理复核原绑定、Provider 断线代次及停止状态，失效恢复不继续释放。
   恢复容器及退避计数只在协调器内部创建，组合根不持有或注入其可变状态。
 - `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、

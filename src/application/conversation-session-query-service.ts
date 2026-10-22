@@ -459,11 +459,14 @@ export function resolveThread<T extends Pick<ConversationSession, "id" | "name">
   if (exact.length === 1) {
     return exact[0]!;
   }
+  if (exact.length > 1) {
+    throw new UserFacingError("session.selector.ambiguous", "会话选择不唯一");
+  }
   const prefix = threads.filter((thread) => thread.id.startsWith(selector));
   if (prefix.length === 1) {
     return prefix[0]!;
   }
-  const ambiguous = prefix.length > 1 || exact.length > 1;
+  const ambiguous = prefix.length > 1;
   throw new UserFacingError(
     ambiguous ? "session.selector.ambiguous" : "session.selector.not-found",
     ambiguous ? "会话选择不唯一" : "找不到指定会话",

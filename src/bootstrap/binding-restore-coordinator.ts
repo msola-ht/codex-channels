@@ -176,8 +176,6 @@ export class BindingRestoreCoordinator {
     };
     const canRestore = (binding: ConversationBinding): boolean =>
       isConnectionCurrent(binding) && this.isCurrentBinding(binding);
-    const activity = new Map([...candidateThreadIds].map(threadId =>
-      [threadId, this.options.trackThreadActivity(threadId)]));
     let failures: SubscriptionRestoreFailure[];
     try {
       const scheduledProviders = new Map<string, string>();
@@ -189,14 +187,20 @@ export class BindingRestoreCoordinator {
       }
       failures = await this.options.router.restoreSubscriptions(
         (_target, binding) => canRestore(binding),
-        (binding, thread) => {
-          if (!canRestore(binding)) return;
-          bindingProviders.set(binding.threadId, this.options.codex.knownProvider(binding.threadId));
-          restoredThreadIds.add(binding.threadId);
-          restoredBindings.set(binding.threadId, binding);
-          // Notifications received during resume are newer than its snapshot.
-          activity.get(binding.threadId)?.restore(binding.target,
-            thread.status.type === "active" ? thread.activeTurnId : null);
+        (threadId) => {
+          const activity = this.options.trackThreadActivity(threadId);
+          return {
+            restored: (binding, thread) => {
+              if (!canRestore(binding)) return;
+              bindingProviders.set(binding.threadId, this.options.codex.knownProvider(binding.threadId));
+              restoredThreadIds.add(binding.threadId);
+              restoredBindings.set(binding.threadId, binding);
+              // Notifications received during resume are newer than its snapshot.
+              activity.restore(binding.target,
+                thread.status.type === "active" ? thread.activeTurnId : null);
+            },
+            stop: () => activity.stop(),
+          };
         },
         (binding) => {
           const modelProvider = scheduledProviders.get(binding.threadId);
@@ -252,7 +256,6 @@ export class BindingRestoreCoordinator {
         }
       }
     } finally {
-      for (const observer of activity.values()) observer.stop();
       for (const threadId of candidateThreadIds) {
         this.restoringThreadIds.delete(threadId);
       }

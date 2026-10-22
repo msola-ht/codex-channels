@@ -832,6 +832,7 @@ codexc uninstall
 
 `/r` 的完整 ID、短 ID、名称和序号都只在当前工作区查找。恢复其他工作区的历史前，
 请先使用 `/work` 切换到会话所属工作区；恢复不会自动切换工作区或改写历史会话的目录。
+`/resume` 与 `/unarchive` 优先解析有效列表序号，再查精确 ID/名称；多个精确匹配会直接提示歧义，不改用 ID 前缀选择其他会话。只有没有精确匹配时，才接受唯一的 ID 前缀。
 恢复时如果历史目录或实际权限与工作区不一致，会解除该绑定；下一条普通消息在当前工作区新建会话。
 `/fast on` 选择 Fast，`/fast ultrafast` 选择独立的 Ultrafast，`/fast off` 回到 Standard，
 `/fast status` 查看当前档位；无参数时在 Standard 与 Fast 之间切换，当前为 Ultrafast 时回到 Standard。

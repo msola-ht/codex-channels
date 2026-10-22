@@ -63,6 +63,13 @@ interface ApprovalResolution {
   overflowed: boolean;
 }
 
+/** Open immediately before an authoritative restore request; consume its
+ * snapshot only once the binding exists, and always stop the request window. */
+export type ThreadRestoreObserver = (threadId: string) => {
+  restored(binding: ConversationBinding, thread: ThreadSnapshot): void;
+  stop(): void;
+};
+
 interface ThreadReleaseCondition {
   isCurrent(): boolean;
   verifyIdle(): Promise<boolean>;
@@ -70,7 +77,7 @@ interface ThreadReleaseCondition {
    * releasing a proven terminal Turn; must not reuse invalidated evidence. */
   verifyAfterTerminalUnsubscribe?(): Promise<boolean>;
   canRestore(): boolean;
-  restored(thread: ThreadSnapshot): void;
+  observeRestore?: ThreadRestoreObserver;
   restoreRequired?(): void;
 }
 
@@ -311,7 +318,7 @@ export class SessionRouter {
       target: ConversationTarget,
       binding: ConversationBinding,
     ) => boolean = () => true,
-    onRestored: (binding: ConversationBinding, thread: ThreadSnapshot) => void = () => undefined,
+    observeRestore?: ThreadRestoreObserver,
     optionsForBinding: (binding: ConversationBinding) => ThreadStartOptions = () => ({}),
   ): Promise<SubscriptionRestoreFailure[]> {
     const failures: SubscriptionRestoreFailure[] = [];
@@ -320,68 +327,74 @@ export class SessionRouter {
         const isCurrent = () => this.sameBinding(binding, this.bindings.getByThread(binding.threadId))
           && shouldRestore(binding.target, binding);
         if (!isCurrent()) return undefined;
-        let restoredBinding: ConversationBinding;
-        let restoredThread: ThreadSnapshot;
-        const wasBackground = this.bindings.isBackground(binding.threadId);
+        let observation: ReturnType<ThreadRestoreObserver> | undefined;
         try {
-          const workspace = this.workspaces.require(binding.workspaceId);
-          const historical = await this.codex.readThread(binding.threadId);
-          if (!isCurrent()) return undefined;
-          const resumed = await this.resumeInWorkspace(
-            historical,
-            workspace,
-            optionsForBinding(binding),
-            false,
-            isCurrent,
-          );
-          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
-          this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-          this.contextCompactionItemIdsByThread.set(
-            resumed.thread.id,
-            resumed.contextCompactionItemIds,
-          );
-          restoredBinding = {
-            target: binding.target,
-            workspaceId: workspace.id,
-            threadId: resumed.thread.id,
-            sessionId: resumed.thread.sessionId,
-          };
-          restoredThread = resumed.thread;
-          if (wasBackground) {
-            this.bindings.bindBackground(restoredBinding);
-          } else {
-            this.bindings.bind(restoredBinding);
+          let restoredBinding: ConversationBinding;
+          let restoredThread: ThreadSnapshot;
+          const wasBackground = this.bindings.isBackground(binding.threadId);
+          try {
+            const workspace = this.workspaces.require(binding.workspaceId);
+            const historical = await this.codex.readThread(binding.threadId);
+            if (!isCurrent()) return undefined;
+            observation = observeRestore?.(binding.threadId);
+            const resumed = await this.resumeInWorkspace(
+              historical,
+              workspace,
+              optionsForBinding(binding),
+              false,
+              isCurrent,
+            );
+            this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+            this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+            this.contextCompactionItemIdsByThread.set(
+              resumed.thread.id,
+              resumed.contextCompactionItemIds,
+            );
+            restoredBinding = {
+              target: binding.target,
+              workspaceId: workspace.id,
+              threadId: resumed.thread.id,
+              sessionId: resumed.thread.sessionId,
+            };
+            restoredThread = resumed.thread;
+            if (wasBackground) {
+              this.bindings.bindBackground(restoredBinding);
+            } else {
+              this.bindings.bind(restoredBinding);
+            }
+            if (!this.sameBinding(binding, restoredBinding)) this.notifyBindingsChanged();
+          } catch (error) {
+            if (error instanceof SupersededRestoreError) return undefined;
+            const normalized = error instanceof Error ? error : new Error(String(error));
+            const incompatible = isIncompatibleRestoreError(normalized);
+            if (!incompatible && !isCurrent()) return undefined;
+            const bindingRemoved = incompatible || isUnavailableRestoreError(normalized);
+            if (incompatible) {
+              this.invalidateThreadBinding(binding.threadId);
+            } else if (bindingRemoved) {
+              this.bindings.removeThread(binding.threadId);
+              this.contextCompactionItemIdsByThread.delete(binding.threadId);
+              // Removing an unavailable Thread must not replace the saved Workspace
+              // selection, including an ID absent from the current configuration.
+              this.notifyBindingsChanged();
+            }
+            return {
+              binding,
+              error: normalized,
+              bindingRemoved,
+              reason: bindingRemoved
+                ? "unavailable"
+                : isActiveWriterRestoreError(normalized)
+                  ? "active-writer"
+                  : "other",
+            };
           }
-          if (!this.sameBinding(binding, restoredBinding)) this.notifyBindingsChanged();
-        } catch (error) {
-          if (error instanceof SupersededRestoreError) return undefined;
-          const normalized = error instanceof Error ? error : new Error(String(error));
-          const incompatible = isIncompatibleRestoreError(normalized);
-          if (!incompatible && !isCurrent()) return undefined;
-          const bindingRemoved = incompatible || isUnavailableRestoreError(normalized);
-          if (incompatible) {
-            this.invalidateThreadBinding(binding.threadId);
-          } else if (bindingRemoved) {
-            this.bindings.removeThread(binding.threadId);
-            this.contextCompactionItemIdsByThread.delete(binding.threadId);
-            // Removing an unavailable Thread must not replace the saved Workspace
-            // selection, including an ID absent from the current configuration.
-            this.notifyBindingsChanged();
-          }
-          return {
-            binding,
-            error: normalized,
-            bindingRemoved,
-            reason: bindingRemoved
-              ? "unavailable"
-              : isActiveWriterRestoreError(normalized)
-                ? "active-writer"
-                : "other",
-          };
+          this.unsubscribedBindings.delete(binding.threadId);
+          observation?.restored(restoredBinding, restoredThread);
+          return undefined;
+        } finally {
+          observation?.stop();
         }
-        this.unsubscribedBindings.delete(binding.threadId);
-        onRestored(restoredBinding, restoredThread);
-        return undefined;
       });
       if (failure) failures.push(failure);
     }
@@ -401,7 +414,7 @@ export class SessionRouter {
   async ensure(
     target: ConversationTarget,
     startOptions: ThreadStartOptions = {},
-    onRestored?: (binding: ConversationBinding, thread: ThreadSnapshot) => void,
+    observeRestore?: ThreadRestoreObserver,
   ): Promise<ConversationBinding> {
     startOptions.beforeSubmit?.();
     const current = this.bindings.get(target);
@@ -409,13 +422,29 @@ export class SessionRouter {
       const pending = this.threadLifecycleQueues.get(current.threadId);
       if (pending) {
         await pending;
-        return this.ensure(target, startOptions, onRestored);
+        return this.ensure(target, startOptions, observeRestore);
       }
-      const thread = await this.codex.readThread(current.threadId, undefined, startOptions.beforeSubmit);
-      startOptions.beforeSubmit?.();
+      const observation = observeRestore?.(current.threadId);
+      let thread: ThreadSnapshot;
+      try {
+        thread = await this.codex.readThread(current.threadId, undefined, startOptions.beforeSubmit);
+        startOptions.beforeSubmit?.();
+        if (this.sameBinding(current, this.bindings.get(target))
+          && !this.threadLifecycleQueues.has(current.threadId)) {
+          const workspace = this.workspaces.require(current.workspaceId);
+          if (thread.id === current.threadId && thread.cwd === workspace.cwd
+            && foregroundThreadSources.has(thread.source)
+            && thread.status.type !== "notLoaded"
+            && !this.unsubscribedBindings.has(current.threadId)) {
+            observation?.restored(current, thread);
+          }
+        }
+      } finally {
+        observation?.stop();
+      }
       if (!this.sameBinding(current, this.bindings.get(target))
         || this.threadLifecycleQueues.has(current.threadId)) {
-        return this.ensure(target, startOptions, onRestored);
+        return this.ensure(target, startOptions, observeRestore);
       }
       const workspace = this.workspaces.require(current.workspaceId);
       if (thread.id !== current.threadId || thread.cwd !== workspace.cwd
@@ -432,24 +461,23 @@ export class SessionRouter {
             ), true);
           }
         });
-        return this.ensure(target, startOptions, onRestored);
+        return this.ensure(target, startOptions, observeRestore);
       }
       if (thread.status.type === "notLoaded") this.unsubscribedBindings.add(current.threadId);
       if (this.unsubscribedBindings.has(current.threadId)) {
-        if (!onRestored && this.onSubscriptionRestoreRequired) {
+        if (!observeRestore && this.onSubscriptionRestoreRequired) {
           this.onSubscriptionRestoreRequired(current);
           throw new UserFacingError("conversation.busy", "会话订阅正在恢复，请稍后重试", { reason: "subscription-restoring" });
         }
         const failures = await this.restoreSubscriptions((_target, binding) =>
-          this.sameBinding(current, binding), onRestored,
+          this.sameBinding(current, binding), observeRestore,
         () => startOptions.beforeSubmit ? { beforeSubmit: startOptions.beforeSubmit } : {});
         if (failures[0]) throw failures[0].error;
         const restored = this.bindings.get(target);
         if (restored && this.sameBinding(current, restored)
           && !this.unsubscribedBindings.has(restored.threadId)) return restored;
-        return this.ensure(target, startOptions, onRestored);
+        return this.ensure(target, startOptions, observeRestore);
       }
-      onRestored?.(current, thread);
       return current;
     }
     const workspace = this.workspace(target);
@@ -473,27 +501,34 @@ export class SessionRouter {
           if (this.bindings.getByThread(candidate.id)) {
             throw new UserFacingError("thread.bound", "该 Codex Thread 已绑定到其他会话");
           }
-          const resumed = await this.resumeInWorkspace(await this.codex.readThread(candidate.id, undefined, startOptions.beforeSubmit), workspace, startOptions);
-          if (resumed.thread.status.type === "active") {
-            await this.cleanupFailedResume(candidate.id, new UserFacingError(
-              "conversation.busy", "历史会话已有运行中的任务，请显式恢复会话",
-            ));
-          }
-          const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
+          const historical = await this.codex.readThread(candidate.id, undefined, startOptions.beforeSubmit);
+          const observation = observeRestore?.(candidate.id);
           try {
-            this.bindings.bind(binding);
-          } catch (error) {
-            await this.cleanupFailedResume(resumed.thread.id, error);
+            const resumed = await this.resumeInWorkspace(historical, workspace, startOptions);
+            if (resumed.thread.status.type === "active") {
+              await this.cleanupFailedResume(candidate.id, new UserFacingError(
+                "conversation.busy", "历史会话已有运行中的任务，请显式恢复会话",
+              ));
+            }
+            const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
+            try {
+              this.bindings.bind(binding);
+            } catch (error) {
+              await this.cleanupFailedResume(resumed.thread.id, error);
+            }
+            this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+            this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+            this.contextCompactionItemIdsByThread.set(
+              resumed.thread.id,
+              resumed.contextCompactionItemIds,
+            );
+            this.clearForceNew(target, Date.now());
+            observation?.restored(binding, resumed.thread);
+            this.notifyBindingsChanged();
+            return binding;
+          } finally {
+            observation?.stop();
           }
-          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
-          this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-          this.contextCompactionItemIdsByThread.set(
-            resumed.thread.id,
-            resumed.contextCompactionItemIds,
-          );
-          this.clearForceNew(target, Date.now());
-          this.notifyBindingsChanged();
-          return binding;
         });
       }
     }
@@ -636,10 +671,10 @@ export class SessionRouter {
     expectedCwd?: string,
     transition?: {
       assertCurrent: () => void;
-      restored: (binding: ConversationBinding, thread: ThreadSnapshot) => void;
+      observeRestore?: ThreadRestoreObserver;
       verifyPreviousIdle?: () => Promise<boolean>;
       verifyPreviousAfterTerminalUnsubscribe?: () => Promise<boolean>;
-      restoredPrevious?: (thread: ThreadSnapshot) => void;
+      observePreviousRestore?: ThreadRestoreObserver;
       restorePreviousFailed?: () => void;
     },
     assertAuthorized?: () => void,
@@ -690,57 +725,67 @@ export class SessionRouter {
     if (!foregroundThreadSources.has(thread.source)) {
       throw new UserFacingError("session.selector.not-found", "找不到已授权工作区中的可恢复会话");
     }
-    const resumed = await this.resumeInWorkspace(thread, workspace, { beforeSubmit: assertCurrent });
-    let previousUnsubscribed = false;
+    const observation = transition?.observeRestore?.(threadId);
     try {
-      assertCurrent();
-      if (current && current.threadId !== resumed.thread.id && !preserveCurrent) {
-        const previous = await this.codex.readThread(current.threadId, undefined, assertCurrent);
-        const terminalRelease = previous.status.type === "systemError" && isThreadExecutionSettled(previous);
-        if (transition?.verifyPreviousIdle && !await transition.verifyPreviousIdle()) {
-          throw new UserFacingError("thread.takeover.changed", "原会话仍有活动，请重新选择会话");
+      const resumed = await this.resumeInWorkspace(thread, workspace, { beforeSubmit: assertCurrent });
+      let previousUnsubscribed = false;
+      try {
+        assertCurrent();
+        if (current && current.threadId !== resumed.thread.id && !preserveCurrent) {
+          const previous = await this.codex.readThread(current.threadId, undefined, assertCurrent);
+          const terminalRelease = previous.status.type === "systemError" && isThreadExecutionSettled(previous);
+          if (transition?.verifyPreviousIdle && !await transition.verifyPreviousIdle()) {
+            throw new UserFacingError("thread.takeover.changed", "原会话仍有活动，请重新选择会话");
+          }
+          assertCurrent();
+          await this.codex.unsubscribeThread(current.threadId, assertCurrent);
+          previousUnsubscribed = true;
+          const verifyPrevious = terminalRelease
+            ? transition?.verifyPreviousAfterTerminalUnsubscribe ?? transition?.verifyPreviousIdle
+            : transition?.verifyPreviousIdle;
+          if (verifyPrevious && !await verifyPrevious()) {
+            throw new UserFacingError("thread.takeover.changed", "原会话活动已变化，请重新选择会话");
+          }
         }
         assertCurrent();
-        await this.codex.unsubscribeThread(current.threadId, assertCurrent);
-        previousUnsubscribed = true;
-        const verifyPrevious = terminalRelease
-          ? transition?.verifyPreviousAfterTerminalUnsubscribe ?? transition?.verifyPreviousIdle
-          : transition?.verifyPreviousIdle;
-        if (verifyPrevious && !await verifyPrevious()) {
-          throw new UserFacingError("thread.takeover.changed", "原会话活动已变化，请重新选择会话");
+        const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
+        this.bindings.switchForeground(binding, preserveCurrent);
+      } catch (error) {
+        let failure = error;
+        if (previousUnsubscribed && current && this.sameBinding(current, this.bindings.get(target))) {
+          try {
+            const previous = await this.codex.readThread(current.threadId);
+            const previousObservation = transition?.observePreviousRestore?.(current.threadId);
+            try {
+              const restored = await this.resumeInWorkspace(
+                previous, this.workspaces.require(current.workspaceId), {}, false,
+              );
+              previousObservation?.restored(current, restored.thread);
+            } finally {
+              previousObservation?.stop();
+            }
+          } catch (restoreError) {
+            transition?.restorePreviousFailed?.();
+            failure = new AggregateError([error, restoreError], "绑定切换失败，且原订阅恢复失败", { cause: error });
+          }
         }
+        await this.cleanupFailedResume(threadId, failure);
       }
-      assertCurrent();
+      if (previousUnsubscribed && current) this.contextCompactionItemIdsByThread.delete(current.threadId);
+      this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+      this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+      this.contextCompactionItemIdsByThread.set(
+        resumed.thread.id,
+        resumed.contextCompactionItemIds,
+      );
       const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
-      this.bindings.switchForeground(binding, preserveCurrent);
-    } catch (error) {
-      let failure = error;
-      if (previousUnsubscribed && current && this.sameBinding(current, this.bindings.get(target))) {
-        try {
-          const restored = await this.resumeInWorkspace(
-            await this.codex.readThread(current.threadId), this.workspaces.require(current.workspaceId),
-            {}, false,
-          );
-          transition?.restoredPrevious?.(restored.thread);
-        } catch (restoreError) {
-          transition?.restorePreviousFailed?.();
-          failure = new AggregateError([error, restoreError], "绑定切换失败，且原订阅恢复失败", { cause: error });
-        }
-      }
-      await this.cleanupFailedResume(threadId, failure);
+      this.clearForceNew(target, Date.now());
+      observation?.restored(binding, resumed.thread);
+      this.notifyBindingsChanged();
+      return binding;
+    } finally {
+      observation?.stop();
     }
-    if (previousUnsubscribed && current) this.contextCompactionItemIdsByThread.delete(current.threadId);
-    this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
-    this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-    this.contextCompactionItemIdsByThread.set(
-      resumed.thread.id,
-      resumed.contextCompactionItemIds,
-    );
-    const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
-    this.clearForceNew(target, Date.now());
-    transition?.restored(binding, resumed.thread);
-    this.notifyBindingsChanged();
-    return binding;
   }
 
   private async resumeInWorkspace(
@@ -817,6 +862,7 @@ export class SessionRouter {
     target: ConversationTarget,
     threadId: string,
     assertAuthorized?: () => void,
+    observeRestore?: ThreadRestoreObserver,
   ): Promise<BindingTransfer> {
     const current = this.bindings.get(target);
     const owner = this.bindings.getByThread(threadId);
@@ -829,11 +875,12 @@ export class SessionRouter {
     };
     return this.withThreadLifecycle([threadId, ...(current ? [current.threadId] : [])], () => {
       assertTransferCurrent();
-      return this.transferBindingUnlocked(target, threadId, assertTransferCurrent);
+      return this.transferBindingUnlocked(target, threadId, assertTransferCurrent, observeRestore);
     });
   }
 
-  private async transferBindingUnlocked(target: ConversationTarget, threadId: string, assertAuthorized?: () => void): Promise<BindingTransfer> {
+  private async transferBindingUnlocked(target: ConversationTarget, threadId: string, assertAuthorized?: () => void,
+    observeRestore?: ThreadRestoreObserver): Promise<BindingTransfer> {
     const owner = this.bindings.getByThread(threadId);
     if (!owner) {
       throw new UserFacingError(
@@ -887,7 +934,7 @@ export class SessionRouter {
     } catch (error) {
       if (replaced && replaced.threadId !== threadId && this.sameBinding(replaced, this.bindings.get(target))) {
         try {
-          await this.resumeInWorkspace(await this.codex.readThread(replaced.threadId), workspace, {}, false);
+          await this.restoreUnsubscribedBinding(replaced, undefined, undefined, observeRestore);
         } catch (restoreError) {
           throw new AggregateError(
             [error, restoreError],
@@ -1028,13 +1075,18 @@ export class SessionRouter {
         }
         if (!verified) {
           if (this.sameBinding(binding, this.bindings.getByThread(threadId)) && condition.canRestore()) {
-            const resumed = await this.resumeInWorkspace(snapshot, this.workspaces.require(binding.workspaceId), {}, false,
-              () => this.sameBinding(binding, this.bindings.getByThread(threadId)) && condition.canRestore());
-            this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
-              resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
-            this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-            this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
-            condition.restored(resumed.thread);
+            const observation = condition.observeRestore?.(threadId);
+            try {
+              const resumed = await this.resumeInWorkspace(snapshot, this.workspaces.require(binding.workspaceId), {}, false,
+                () => this.sameBinding(binding, this.bindings.getByThread(threadId)) && condition.canRestore());
+              this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
+                resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+              this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+              this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
+              observation?.restored(binding, resumed.thread);
+            } finally {
+              observation?.stop();
+            }
           }
           if (verificationFailed) throw verificationError;
           return undefined;
@@ -1084,16 +1136,18 @@ export class SessionRouter {
     target: ConversationTarget,
     startOptions: ThreadStartOptions = {},
     assertAuthorized?: () => void,
+    observeRestore?: ThreadRestoreObserver,
   ): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
     const assertCurrent = this.lifecycleGuard(target, current, assertAuthorized);
     return this.withThreadLifecycle(current ? [current.threadId] : [], () => {
       assertCurrent();
-      return this.forkUnlocked(target, startOptions, assertCurrent);
+      return this.forkUnlocked(target, startOptions, assertCurrent, observeRestore);
     });
   }
 
-  private async forkUnlocked(target: ConversationTarget, startOptions: ThreadStartOptions, assertAuthorized?: () => void): Promise<ConversationBinding> {
+  private async forkUnlocked(target: ConversationTarget, startOptions: ThreadStartOptions, assertAuthorized?: () => void,
+    observeRestore?: ThreadRestoreObserver): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
     if (!current) {
       throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
@@ -1137,8 +1191,7 @@ export class SessionRouter {
       let failure = error;
       if (previousUnsubscribed && this.sameBinding(current, this.bindings.get(target))) {
         try {
-          await this.resumeInWorkspace(await this.codex.readThread(current.threadId), workspace, {}, false,
-            () => this.sameBinding(current, this.bindings.get(target)));
+          await this.restoreUnsubscribedBinding(current, undefined, undefined, observeRestore);
         } catch (restoreError) {
           failure = new AggregateError([error, restoreError], "分叉绑定切换失败，且原订阅恢复失败", { cause: error });
         }
@@ -1180,14 +1233,18 @@ export class SessionRouter {
     });
   }
 
-  async unarchive(target: ConversationTarget, threadId: string, assertAuthorized?: () => void): Promise<ConversationBinding> {
+  async unarchive(target: ConversationTarget, threadId: string, assertAuthorized?: () => void,
+    observeRestore?: ThreadRestoreObserver): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
     const assertCurrent = this.lifecycleGuard(target, current, assertAuthorized);
     return this.withThreadLifecycle([threadId, ...(current ? [current.threadId] : [])], async () => {
       assertCurrent();
       await this.codex.unarchiveThread(threadId, assertCurrent);
       assertCurrent();
-      return this.resumeUnlocked(target, threadId, false, undefined, undefined, assertCurrent);
+      return this.resumeUnlocked(target, threadId, false, undefined, {
+        assertCurrent,
+        ...(observeRestore ? { observeRestore, observePreviousRestore: observeRestore } : {}),
+      }, assertCurrent);
     });
   }
 
@@ -1250,6 +1307,7 @@ export class SessionRouter {
     expected: ConversationBinding,
     snapshot?: ThreadSnapshot,
     condition?: ThreadReleaseCondition,
+    observeRestore = condition?.observeRestore,
   ): Promise<void> {
     const isCurrent = () => this.sameBinding(expected, this.bindings.get(expected.target))
       && (condition?.canRestore() ?? true);
@@ -1258,13 +1316,18 @@ export class SessionRouter {
       const workspace = this.workspaces.require(expected.workspaceId);
       const historical = snapshot ?? await this.codex.readThread(expected.threadId);
       if (!isCurrent()) return;
-      const resumed = await this.resumeInWorkspace(historical, workspace, {}, false, isCurrent);
-      this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
-        resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
-      this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-      this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
-      this.unsubscribedBindings.delete(expected.threadId);
-      condition?.restored(resumed.thread);
+      const observation = observeRestore?.(expected.threadId);
+      try {
+        const resumed = await this.resumeInWorkspace(historical, workspace, {}, false, isCurrent);
+        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
+          resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+        this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+        this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
+        this.unsubscribedBindings.delete(expected.threadId);
+        observation?.restored(expected, resumed.thread);
+      } finally {
+        observation?.stop();
+      }
     } catch (error) {
       if (isCurrent()) condition?.restoreRequired?.();
       throw error;
