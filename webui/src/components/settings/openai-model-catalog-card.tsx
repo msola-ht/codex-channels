@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "@/hooks/use-translation"
 import type { OpenAiModelCatalogController } from "@/hooks/use-openai-model-catalog"
 import type { OpenAiModelRefreshResult } from "@/lib/types"
@@ -20,14 +20,26 @@ import { ModelDetailFields, OpenAiModelDetails } from "@/components/settings/ope
 import { ModelApprovals, ModelServiceTiers, type ModelCatalogGroup } from "@/components/settings/model-catalog-columns"
 import { ProviderWebSearchProbeDialog, type ProviderWebSearchProbeTarget } from "@/components/settings/provider-web-search-probe-dialog"
 
-export function OpenAiModelCatalogCard({ catalog, disabled = false, configurationRevision, renderCatalog }: {
+export function OpenAiModelCatalogCard({ catalog, disabled = false, configurationRevision, renderCatalog, defaultBadges, editDefaultsAction }: {
   catalog: OpenAiModelCatalogController
   disabled?: boolean
   configurationRevision: string | null
   renderCatalog: (group: ModelCatalogGroup) => ReactNode
+  defaultBadges?: ReactNode
+  editDefaultsAction?: ReactNode
 }) {
   const { t, language } = useTranslation()
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const headingRef = useRef<HTMLHeadingElement | null>(null)
+  const actionTriggers = useRef(new Map<string, HTMLButtonElement>())
+  const [focusAfterReadback, setFocusAfterReadback] = useState<{ model: string | null } | null>(null)
+  useEffect(() => {
+    if (focusAfterReadback === null || catalog.loading || catalog.busy || disabled) return
+    const target = focusAfterReadback.model === null ? null : actionTriggers.current.get(focusAfterReadback.model)
+    const focusTarget = target && !target.disabled ? target : headingRef.current
+    focusTarget?.focus()
+    setFocusAfterReadback(null)
+  }, [focusAfterReadback, catalog.loading, catalog.busy, disabled])
   const contextPreviewRef = useRef<HTMLButtonElement | null>(null)
   const [selectedModel, setSelectedModel] = useState<{ id: string; scope: string } | null>(null)
   const [webSearchTarget, setWebSearchTarget] = useState<(ProviderWebSearchProbeTarget & { scope: string; configurationRevision: string | null }) | null>(null)
@@ -40,6 +52,10 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
   const numbers = new Intl.NumberFormat(language === "zh" ? "zh-CN" : "en-US")
   const context = (value: number | null) => value === null ? t("common.unknown") : numbers.format(value)
   const pending = catalog.pendingPreview?.preview
+  const confirm = async () => {
+    const model = pending?.kind === "context" ? pending.value.model : null
+    if (await catalog.confirm() !== null) setFocusAfterReadback({ model })
+  }
   const result = catalog.actionResult?.value
   const warning = catalog.writeUnconfirmed || result?.consistency === "unknown"
   const metadata = catalog.data
@@ -51,11 +67,12 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
     id: "openai",
     header: <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="font-medium">{t("openAiModelCatalog.title")}</h3>
+          <h3 ref={headingRef} tabIndex={-1} className="font-medium">{t("openAiModelCatalog.title")}</h3>
           {showMetadata && <Tooltip>
             <TooltipTrigger render={<Badge variant="outline" tabIndex={0} />} aria-label={`${t("openAiModelCatalog.clientVersion")}: ${metadata.clientVersion ?? t("common.unknown")}`}>{metadata.clientVersion ?? t("common.unknown")}</TooltipTrigger>
             <TooltipContent>{t("openAiModelCatalog.clientVersion")}</TooltipContent>
           </Tooltip>}
+          {defaultBadges}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {showMetadata && <Tooltip>
@@ -64,12 +81,13 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
             </TooltipTrigger>
             <TooltipContent>{t("openAiModelCatalog.metadataHint")}</TooltipContent>
           </Tooltip>}
+          {editDefaultsAction}
           <Button variant="outline" disabled={disabled || catalog.locked || catalog.draft !== null || catalog.data === null || webSearchTarget !== null} onClick={() => void catalog.previewRefresh()}>{catalog.busy && !catalog.draft && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("openAiModelCatalog.refreshConfigured")}</Button>
         </div>
       </div>,
     models: !catalog.loading && !catalog.error ? catalog.data?.models ?? [] : [],
     onSelect: model => { if (metadata) setSelectedModel({ id: model.model, scope: metadata.scope }) },
-    renderAction: model => <DropdownMenu><DropdownMenuTrigger render={<Button variant="outline" size="sm" />} onFocus={event => { actionTriggerRef.current = event.currentTarget }} onPointerDown={event => { actionTriggerRef.current = event.currentTarget }} disabled={disabled || catalog.locked || catalog.draft !== null || webSearchTarget !== null}>{t("modelManagement.actions")}</DropdownMenuTrigger>
+    renderAction: model => <DropdownMenu><DropdownMenuTrigger ref={node => { if (node) actionTriggers.current.set(model.model, node); else actionTriggers.current.delete(model.model) }} render={<Button variant="outline" size="sm" />} onFocus={event => { actionTriggerRef.current = event.currentTarget }} onPointerDown={event => { actionTriggerRef.current = event.currentTarget }} disabled={disabled || catalog.locked || catalog.draft !== null || webSearchTarget !== null}>{t("modelManagement.actions")}</DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-2rem)]" finalFocus={catalog.draft !== null || webSearchTarget !== null ? false : undefined}><DropdownMenuGroup>
           <DropdownMenuItem disabled={disabled || catalog.locked || catalog.draft !== null || metadata === null} onClick={() => {
             if (disabled || catalog.locked || catalog.draft !== null || metadata === null) return
@@ -115,7 +133,7 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
         <DialogFooter><Button variant="outline" disabled={catalog.busy} onClick={catalog.closeEdit}>{t("modelManagement.cancel")}</Button><Button ref={contextPreviewRef} disabled={disabled || catalog.locked || catalog.stale || !catalog.valid || catalog.draft?.value === String(catalog.draft?.previousContextWindow)} onClick={() => void catalog.preview()}>{catalog.busy && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("modelManagement.preview")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
-    <ManagementConfirmationDialog finalFocus={pending?.kind === "context" ? () => { const preview = contextPreviewRef.current; return preview === null ? actionTriggerRef.current ?? true : preview.disabled ? false : preview } : undefined} className={pending?.kind === "context" ? modelOperationDialogClassName : undefined} open={pending !== undefined} title={t(pending?.kind === "refresh" ? "openAiModelCatalog.configuredTitle" : "openAiModelCatalog.confirmTitle")} description={t(pending?.kind === "refresh" ? "openAiModelCatalog.configuredConfirmation" : "openAiModelCatalog.editHint")} saving={catalog.busy} loading={catalog.loading} confirmDisabled={disabled || catalog.readbackRequired || catalog.error !== null} confirmVariant={pending?.kind === "refresh" ? "destructive" : "default"} confirmLabel={t(pending?.kind === "refresh" ? "openAiModelCatalog.refreshConfigured" : "accountConfirmation.confirmWrite")} onConfirm={() => void catalog.confirm()} onCancel={catalog.cancel}>
+    <ManagementConfirmationDialog finalFocus={() => { const preview = contextPreviewRef.current; return pending?.kind === "context" && preview?.isConnected && !preview.disabled ? preview : headingRef.current }} className={pending?.kind === "context" ? modelOperationDialogClassName : undefined} open={pending !== undefined} title={t(pending?.kind === "refresh" ? "openAiModelCatalog.configuredTitle" : "openAiModelCatalog.confirmTitle")} description={t(pending?.kind === "refresh" ? "openAiModelCatalog.configuredConfirmation" : "openAiModelCatalog.editHint")} saving={catalog.busy} loading={catalog.loading} confirmDisabled={disabled || catalog.readbackRequired || catalog.error !== null} confirmVariant={pending?.kind === "refresh" ? "destructive" : "default"} confirmLabel={t(pending?.kind === "refresh" ? "openAiModelCatalog.refreshConfigured" : "accountConfirmation.confirmWrite")} onConfirm={() => void confirm()} onCancel={catalog.cancel}>
       <div className="flex flex-col gap-4">
         {pending?.kind === "context" && <>
           <span>{pending.value.displayName}</span>

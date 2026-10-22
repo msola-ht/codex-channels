@@ -12,10 +12,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
-export function ProviderModelCatalogs({ local, management, onChanged, renderCatalog }: {
+export function ProviderModelCatalogs({ local, management, onChanged, renderCatalog, onEditingChange }: {
   local: ProviderModelCatalogsController
   management: ProviderSettingsController
   onChanged: () => void
+  onEditingChange?: (editing: boolean) => void
   renderCatalog: (groups: ModelCatalogGroup[]) => ReactNode
 }) {
   const { t } = useTranslation()
@@ -50,7 +51,7 @@ export function ProviderModelCatalogs({ local, management, onChanged, renderCata
     </AlertDescription></Alert>}
     {local.error !== null && <SettingsError title={t("modelCatalog.localLoadFailed")} message={`${translateApiErrorCode(t, local.errorCode)}${local.data === null ? "" : ` ${t("settingsUi.previousSnapshot")}`}`} retry={local.refetch} />}
     {management.settings === null && management.error !== null && <SettingsError title={t("settingsUi.providerLoadFailed")} message={management.error} retry={management.refetch} />}
-    <ProviderSettingsManagement management={management} section="models" catalogReadOnly={readOnly} onChanged={onChanged} renderCatalog={managed => renderCatalog(localOnly ? groups : managed)} />
+    <ProviderSettingsManagement management={management} section="models" catalogReadOnly={readOnly} onEditingChange={onEditingChange} onChanged={onChanged} renderCatalog={managed => renderCatalog(localOnly ? groups : managed)} />
     <OpenAiModelDetails model={detailModel} revision={selected?.revision ?? null} provider={selected?.provider} stale={stale} open={selected !== null} loading={local.loading} onClose={() => setSelected(null)} onReload={() => { setSelected(null); local.refetch() }} />
   </>
 }

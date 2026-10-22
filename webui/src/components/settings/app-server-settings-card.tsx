@@ -1,6 +1,7 @@
 import { useTranslation } from "@/hooks/use-translation"
 import { acceleratedServiceTierId, normalizeServiceTier } from "../../../../runtime/service-tier.mjs"
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
+import { cn } from "cn"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
@@ -15,7 +16,7 @@ import type { CodexSettingsController } from "@/lib/settings-management"
 import type { MessageKey } from "@/lib/i18n/messages"
 import { ToolAccessSettings } from "@/components/settings/tool-access-settings"
 
-export function AppServerSettingsCard({ management, onChanged, section = "general" }: { management: CodexSettingsController; onChanged?: () => void; section?: "general" | "permissions" | "models" | "context" }) {
+export function AppServerSettingsCard({ management, onChanged, section = "general", renderContent }: { management: CodexSettingsController; onChanged?: () => void; section?: "general" | "permissions" | "models" | "context"; renderContent?: (content: ReactNode) => ReactNode }) {
   const { t } = useTranslation()
   const settings = management.codexSettings
   const selectedModel = settings?.models.find((model) => settings.defaults.model === null ? model.isDefault : model.model === settings.defaults.model)
@@ -49,7 +50,7 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
   const modelOptions = settings.models.map((model) => [model.model, model.displayName])
   if (unavailableModel !== null) modelOptions.unshift([unavailableModel, t("settingsFields.modelUnavailable", { model: unavailableModel })])
   const effortOptions = selected?.reasoningEfforts.map((item) => [item.effort, item.effort]) ?? []
-  const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null
+  const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null || management.readbackRequired
   const officialDisabled = busy || !settings.defaultsEditable
   const serviceTier = settings.defaults.serviceTier === null
     ? ""
@@ -102,19 +103,16 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
     }, { key: "settingsFields.preferences" })
   }
 
-  return <>
-    <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
-    <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
-    <Card>
-      <CardHeader><CardTitle>{t(section === "models" ? "settingsFields.modelDefaults" : section === "context" ? "settingsFields.codexContext" : section === "permissions" ? "navigation.codexPermissions" : "navigation.codexGeneral")}</CardTitle><CardDescription>{t("navigation.configurationHint")}</CardDescription></CardHeader>
-      <CardContent className="flex flex-col gap-5 text-sm">
+  const feedback = <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
+  const content = <div className="flex min-w-0 flex-col gap-5 text-sm">
+      {renderContent && feedback}
       {management.error !== null ? <SettingsError title={t("settingsUi.codexLoadFailed")} message={`${management.error} ${t("settingsUi.previousSnapshot")}`} retry={management.refetch} /> : null}
-        {section !== "context" && <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
+        {section !== "context" && <FieldGroup className={cn("grid gap-x-8 gap-y-3", section !== "models" && "md:grid-cols-2")}>
           <SettingsRow label={t("settingsFields.currentProvider")} value={settings.provider} badge />
           {section === "models" && <>
-          <ManagedSelect label={t("settingsFields.defaultModel")} value={settings.defaults.model ?? ""} placeholder={t("settingsFields.selectValidModel")} options={modelOptions} disabledValues={unavailableModel !== null ? [unavailableModel] : []} description={selected === undefined ? t("settingsFields.selectValidModel") : undefined} disabled={officialDisabled} onChange={(value) => { const model = settings.models.find((candidate) => candidate.model === value); if (model !== undefined) void management.previewSetting({ kind: "defaults", model: value, reasoningEffort: model.defaultReasoningEffort }, { key: "settingsFields.defaultModel" }) }} />
-          <ManagedSelect label={t("settingsFields.reasoningEffort")} value={settings.defaults.reasoningEffort ?? ""} placeholder={selected === undefined ? t("settingsFields.selectValidModel") : undefined} options={effortOptions} disabled={officialDisabled || selected === undefined} onChange={(value) => { if (selected !== undefined) void management.previewSetting({ kind: "defaults", model: selected.model, reasoningEffort: value }, { key: "settingsFields.reasoningEffort" }) }} />
-          <ManagedSelect label={t("settingsFields.serviceTier")} value={serviceTier} placeholder={t("settingsFields.serviceTierDefault")} options={serviceTierOptions} disabledValues={serviceTierUnavailable ? [serviceTier] : []} description={t("settingsFields.serviceTierHint")} disabled={officialDisabled} onChange={(value) => { if (value === "default" || value === "fast" || value === "ultrafast") void management.previewSetting({ kind: "service-tier", serviceTier: value }, { key: "settingsFields.serviceTier" }) }} />
+          <ManagedSelect fullWidth label={t("settingsFields.defaultModel")} value={settings.defaults.model ?? ""} placeholder={t("settingsFields.selectValidModel")} options={modelOptions} disabledValues={unavailableModel !== null ? [unavailableModel] : []} description={selected === undefined ? t("settingsFields.selectValidModel") : undefined} disabled={officialDisabled} onChange={(value) => { const model = settings.models.find((candidate) => candidate.model === value); if (model !== undefined) void management.previewSetting({ kind: "defaults", model: value, reasoningEffort: model.defaultReasoningEffort }, { key: "settingsFields.defaultModel" }) }} />
+          <ManagedSelect fullWidth label={t("settingsFields.reasoningEffort")} value={settings.defaults.reasoningEffort ?? ""} placeholder={selected === undefined ? t("settingsFields.selectValidModel") : undefined} options={effortOptions} disabledValues={effortOptions.some(([effort]) => effort === settings.defaults.reasoningEffort) ? [] : [settings.defaults.reasoningEffort ?? ""]} disabled={officialDisabled || selected === undefined} onChange={(value) => { if (selected !== undefined) void management.previewSetting({ kind: "defaults", model: selected.model, reasoningEffort: value }, { key: "settingsFields.reasoningEffort" }) }} />
+          <ManagedSelect fullWidth label={t("settingsFields.serviceTier")} value={serviceTier} placeholder={t("settingsFields.serviceTierDefault")} options={serviceTierOptions} disabledValues={serviceTierUnavailable ? [serviceTier] : []} description={t("settingsFields.serviceTierHint")} disabled={officialDisabled} onChange={(value) => { if (value === "default" || value === "fast" || value === "ultrafast") void management.previewSetting({ kind: "service-tier", serviceTier: value }, { key: "settingsFields.serviceTier" }) }} />
           </>}
           {section === "general" && <>
           <ManagedSelect label={t("settingsFields.webSearch")} value={settings.defaults.webSearch ?? ""} placeholder={t("openAiModelCatalog.searchDefault")} description={t("openAiModelCatalog.searchDefaultHint")} options={[["live", t("settingsFields.live")], ["indexed", t("settingsFields.indexed")], ["cached", t("settingsFields.cached")], ["disabled", t("settingsFields.off")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "web-search", mode: value }, { key: "settingsFields.webSearch" })} />
@@ -167,7 +165,14 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
         {section === "permissions" && <><Separator /><ToolAccessSettings management={management} /></>}
         {localError !== null ? <Alert variant="destructive"><AlertDescription>{t(localError)}</AlertDescription></Alert> : null}
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
-      </CardContent>
-    </Card>
+      </div>
+  return <>
+    <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
+    {renderContent && management.error !== null && <SettingsError title={t("settingsUi.codexLoadFailed")} message={management.error} retry={management.refetch} />}
+    {feedback}
+    {renderContent ? renderContent(content) : <Card>
+      <CardHeader><CardTitle>{t(section === "models" ? "settingsFields.modelDefaults" : section === "context" ? "settingsFields.codexContext" : section === "permissions" ? "navigation.codexPermissions" : "navigation.codexGeneral")}</CardTitle><CardDescription>{t("navigation.configurationHint")}</CardDescription></CardHeader>
+      <CardContent>{content}</CardContent>
+    </Card>}
   </>
 }

@@ -1,4 +1,4 @@
-import { useCallback } from "react"
+import { useCallback, useRef, useState } from "react"
 import { Link } from "react-router"
 import { useApi } from "@/hooks/use-api"
 import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
@@ -18,7 +18,10 @@ import { ProviderModelCatalogs } from "@/components/settings/provider-model-cata
 import { AccountSettingsManagement } from "@/components/settings/account-settings-management"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
 import { ProviderStatusCard } from "@/components/settings/provider-channel-status"
-import { PendingSettingDialog, ManagedInputRow, SettingsMutationFeedback } from "@/components/settings/settings-controls"
+import { PendingSettingDialog, ManagedInputRow, SettingsMutationFeedback, modelOperationDialogClassName } from "@/components/settings/settings-controls"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { SettingsError, LoadingSettingsCard } from "@/components/settings/settings-feedback"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { FieldGroup } from "@/components/ui/field"
@@ -53,6 +56,10 @@ export function ModelAccountsPage() {
 
 export function ModelConfigurationPage() {
   const { t } = useTranslation()
+  const [codexEditorOpen, setCodexEditorOpen] = useState(false)
+  const [providerEditing, setProviderEditing] = useState(false)
+  const [groupsEditing, setGroupsEditing] = useState(false)
+  const codexEditorTrigger = useRef<HTMLButtonElement | null>(null)
   const catalog = useOpenAiModelCatalog()
   const reloadCatalog = catalog.refresh
   const codex = useCodexSettingsManagement()
@@ -63,17 +70,31 @@ export function ModelConfigurationPage() {
   const reloadLocalCatalogs = localCatalogs.refetch
   const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog(); reloadLocalCatalogs() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog, reloadLocalCatalogs])
   const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
-  return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy || localCatalogs.loading} refresh={refresh}>
-    <OpenAiModelCatalogCard catalog={catalog} disabled={busy || providers.error !== null} configurationRevision={providers.settings?.resourceRevision ?? null} renderCatalog={official =>
-      <ProviderModelCatalogs local={localCatalogs} management={providers} onChanged={reloadCodex} renderCatalog={thirdParty =>
+  const codexSettings = !codex.loading && codex.error === null && !codex.readbackRequired ? codex.codexSettings : null
+  const defaultModel = codexSettings?.models.find(model => codexSettings.defaults.model === null ? model.isDefault : model.model === codexSettings.defaults.model)
+  return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy || localCatalogs.loading || codexEditorOpen || providerEditing || groupsEditing} refresh={refresh}>
+    <OpenAiModelCatalogCard catalog={catalog} disabled={busy || providers.error !== null || codexEditorOpen} configurationRevision={providers.settings?.resourceRevision ?? null}
+      defaultBadges={codexSettings && <>
+        {codexSettings.provider !== "openai" && <Badge variant="outline">{t("settingsFields.currentProvider")}: {codexSettings.provider}</Badge>}
+        <Badge variant="secondary">{t("settingsFields.defaultModel")}: {defaultModel?.displayName ?? codexSettings.defaults.model ?? t("customModel.unset")}</Badge>
+        <Badge variant="secondary">{t("settingsFields.reasoningEffort")}: {codexSettings.defaults.reasoningEffort ?? t("customModel.unset")}</Badge>
+      </>}
+      editDefaultsAction={<Button ref={codexEditorTrigger} variant="outline" size="sm" disabled={busy || catalog.pageBusy || codexEditorOpen || codexSettings === null} onClick={() => setCodexEditorOpen(true)}>{t("modelManagement.actions")}</Button>}
+      renderCatalog={official =>
+      <ProviderModelCatalogs local={localCatalogs} management={providers} onChanged={reloadCodex} onEditingChange={setProviderEditing} renderCatalog={thirdParty =>
         <Card>
           <CardHeader><CardTitle>{t("modelCatalog.title")}</CardTitle><CardDescription>{t("modelCatalog.unifiedHint")} {t("openAiModelCatalog.searchReadOnlyHint")} <Link className="underline underline-offset-4" to="/settings">{t("openAiModelCatalog.editGlobalSearch")}</Link></CardDescription></CardHeader>
           <CardContent><ModelCatalogTable label={t("modelCatalog.title")} groups={[{ ...official, webSearchSettings: providers.settings?.webSearchSettings.filter(entry => entry.provider === "openai"), webSearchState: providers.loading ? "loading" : providers.error !== null ? "error" : undefined }, ...thirdParty]} /></CardContent>
         </Card>
       } />
     } />
-    <AppServerSettingsCard management={codex} section="models" onChanged={reloadProviders} />
-    <ModelDisplayGroups management={gateway} providers={providers.settings} disabled={busy || gateway.error !== null || providers.error !== null || localCatalogs.loading || localCatalogs.error !== null || !localCatalogs.matchesManagement} />
+    <AppServerSettingsCard management={codex} section="models" onChanged={reloadProviders} renderContent={content => <Dialog open={codexEditorOpen} onOpenChange={open => { if (!codex.saving && codex.pendingSetting === null) setCodexEditorOpen(open) }}>
+      <DialogContent finalFocus={codexEditorTrigger} closeLabel={t("common.close")} showCloseButton={!codex.saving && codex.pendingSetting === null} className={modelOperationDialogClassName}>
+        <DialogHeader><DialogTitle>{t("settingsFields.modelDefaults")}</DialogTitle><DialogDescription>{t("settingsFields.modelDefaultsHint")}</DialogDescription></DialogHeader>
+        {content}
+      </DialogContent>
+    </Dialog>} />
+    <ModelDisplayGroups management={gateway} onEditingChange={setGroupsEditing} providers={providers.settings} disabled={busy || gateway.error !== null || providers.error !== null || localCatalogs.loading || localCatalogs.error !== null || !localCatalogs.matchesManagement} />
     <Card><CardHeader><CardTitle>{t("modelManagement.channelModel")}</CardTitle><CardDescription>{t("modelManagement.channelModelHint")}</CardDescription></CardHeader><CardContent>
       {gateway.loading && gateway.managedSettings === null && <Skeleton className="h-9 w-full" />}
       {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup><ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={gateway.managedSettings.system.defaultModel ?? ""} placeholder={t("modelManagement.followDefault")} disabled={busy} saved={gateway.lastAppliedSetting?.kind === "system.default-model" ? gateway.lastAppliedSetting : null} onBlur={value => void gateway.previewSetting("system.default-model", value || null, { key: "modelManagement.channelModel" })} /></FieldGroup>}
