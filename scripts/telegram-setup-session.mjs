@@ -205,7 +205,7 @@ class TelegramSetupSession {
         this.#fail("save-failed");
         throw error;
       }
-      warnings.push({ code: "gateway-config-lock-release-failed" });
+      warnings.push({ code: "gateway-config-cleanup-failed" });
     }
     const botUsername = this.#bot.username;
     this.#token = undefined;

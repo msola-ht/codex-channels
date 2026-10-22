@@ -38,7 +38,7 @@ export interface WeixinSetupSessionResult {
   allowedUserIds: string[];
   configPath: string;
   activation: "restart-gateway";
-  warnings: Array<{ code: "old-credential-cleanup-failed" | "gateway-config-lock-release-failed" }>;
+  warnings: Array<{ code: "old-credential-cleanup-failed" | "gateway-config-cleanup-failed" }>;
 }
 
 export class WeixinSetupSessionError extends Error {

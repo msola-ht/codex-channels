@@ -34,6 +34,14 @@ import { invokeWindowsAcl, invokeWindowsAclSync } from "./windows-acl-bridge.mjs
 
 const defaultMaximumPrivateFileBytes = 1_048_576;
 
+/** The destination was replaced; only post-write staging cleanup failed. */
+export class PrivateFileWriteCommittedError extends Error {
+  constructor(cause) {
+    super("私有文件已保存，但临时目录清理失败", { cause });
+    this.name = "PrivateFileWriteCommittedError";
+  }
+}
+
 export class WindowsPrivatePathError extends Error {
   constructor(message) {
     super(message);
@@ -215,6 +223,7 @@ export function writePrivateFileAtomicSync(path, content) {
     staging = mkdtempSync(join(parent, ".codexc-write-"));
   }
   const temporaryPath = staging ? join(staging, "content") : privateTemporaryPath(path);
+  let stagingCleanupError;
   try {
     if (staging) securePrivateDirectorySync(staging);
     writeFileSync(temporaryPath, content, { mode: 0o600, flag: "wx" });
@@ -224,8 +233,13 @@ export function writePrivateFileAtomicSync(path, content) {
     rmSync(temporaryPath, { force: true });
     throw error;
   } finally {
-    if (staging) rmdirSync(staging);
+    if (staging) {
+      try { rmdirSync(staging); } catch (error) {
+        stagingCleanupError = error;
+      }
+    }
   }
+  if (stagingCleanupError !== undefined) throw new PrivateFileWriteCommittedError(stagingCleanupError);
 }
 
 export async function writePrivateFileAtomic(path, content, options = {}) {

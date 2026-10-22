@@ -217,7 +217,7 @@ class WeixinSetupSession {
       this.#writeConfig(this.#configPath, currentDocument);
     } catch (error) {
       const committed = configWriteAttempted && error instanceof GatewayConfigWriteCommittedError;
-      if (committed) warnings.push({ code: "gateway-config-lock-release-failed" });
+      if (committed) warnings.push({ code: "gateway-config-cleanup-failed" });
       const confirmation = committed ? { applied: true } : configWriteAttempted ? confirmWeixinConfig(
         this.#configPath,
         credential.accountId,

@@ -238,7 +238,9 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 独立 Astra/high 已完成本批源码及关联消费审查，无剩余提交阻断；覆盖 CLI/Config/Init、WebUI、共享 writer/声明、结果转交、终端安装记录与 App Server 环境消费。主代理已核对完整报告及实际差异。类型/版本/模块边界、局部 ESLint、84 个 Markdown 文档和差异空白检查均通过；本地提交继续执行正常 Hook。R04/R06/R30 保留已修复待补证，未把隔离 HTTP 或注入端口等同于真实 TTY/浏览器、上游异常或各 OS 服务安装。
 - 本地提交：`d74d7663320ea12606b762d13a157985376415d4`。正常 Hook 的类型/版本/模块边界、变更 Lint、文档及构建全部通过，总计 9.87 秒；提交后工作区 clean，没有推送。
 
-### 第四批子批次：B07（独立复审通过，待本地提交）
+### 第四批子批次：B07（已本地提交）
+
+- 提交 `84758a595a6259a1c6f1bc019d8fb0307dd55378`；正常提交 Hook 通过类型、版本、模块边界、局部 ESLint、84 份 Markdown 检查及构建，耗时 9.81 秒。未推送。
 
 - 输入为 `d74d7663`，仅处理 R10 自定义 Provider 连接原值保存。连接计划在完成模型默认值保护后计算真实变化，固定凭据版本仅为真实修改分配；CLI 与 WebUI 复用判断，并在管理锁内重新读取和核对预览 revision 后才返回 unchanged。
 - 必须保留的真实副作用：模式转换、备份候选消费、顶层 URL 移除、认证表示规范化、Origin 或 URL 变化、协议 metadata 删除均参与变化判断。显式 replace 若旧凭据不可读取仍可修复；不能为了证明同值而强制读取旧凭据。连接保存不重写模型、独立思考默认值或搜索设置。
@@ -251,3 +253,23 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 跨入口与转换：两模式实际 CLI 向导保存 CLI saved B07 后，生产 WebUI snapshot 读取同名与 active-model；CLI 提示 restart-all，switching 写 Profile（RPC 零次）、exclusive RPC 一次。取消后选择返回，业务摘要不变且写零次。switching→exclusive 实际 updated，主 Provider 为 cp-b07、切换列表清空；备份候选→switching 实际 updated，候选被消费、切换列表含 cp-b07。连接关闭 9/9。
 - 观察输入纠正：首轮隔离模型不支持所设 high 被既有 loader 拒绝，修正材料后重做；一次取消提示注入始终重新选择 connection 导致正常菜单循环，已 Ctrl-C 结束该自有命令，再按 cancel→back 完成无写入观察。不作为产品故障，未修改产品以适配错误观察输入。全部任务临时目录（含 HTTP 审计）、连接与作业已清理。
 - 主代理已收齐并核对实现及独立审查完整报告。现有类型/版本/模块边界、局部 ESLint、文档与差异空白检查通过。真实 App Server RPC、TTY/浏览器和三系统私有适配尚未实机观察，恢复入口对后来 revision 的保护未另行执行；R10 保留已修复待补证，不把接口注入或静态状态当作这些边界的验收。
+
+### 第五批：B08（独立复审通过，待本地提交）
+
+- 输入 `84758a59`，范围 R20/R35：Workspace 添加/移除 → 配置原子保存 → 持久事件 → reload 投递 → 精确 ID 确认。保持队列 schema v1、容量限制及至少一次通知语义。
+- 数据处理方案：不改队列 JSON，不迁移或删除用户材料。锁改为私有目录和唯一 owner 标记；仅明确死亡的 owner 才允许按宽限规则回收，活进程不按年龄抢锁。旧空文件锁、无 owner、未知格式和无法确认身份的锁保留并拒绝操作。人工恢复前须确认没有队列使用者，备份队列与锁材料后检查；不得自动清除未知锁。回滚源码前同样须停止队列使用者并检查锁格式，不能让旧实现自动接管新锁。
+- 结果合同：配置已提交后的解锁故障保留新事件；队列操作成功但解锁失败携带完成结果，由调用方分别报告配置锁、队列锁及实际事件清理失败，不重放已完成操作。真实渠道通知和 Windows/macOS 锁行为尚待观察，本批不授权发送消息或启停用户服务。
+- Linux 实际 CLI 入口：对任务自有配置执行 `runWorkspaceCommand` 的 add/list/remove，在配置原子写入后的精确 lock unlink 注入 EACCES。add 仍报告已添加和锁清理告警，list 读回新增项目，持久事件保留 1 条；remove 仍报告注册已删除，队列 0 条，项目磁盘目录保留。写前 rename 故障则抛失败，配置原字节不变，只清除本次未生效事件，先前有效事件仍在。
+- 队列完成结果观察：仅对任务队列 marker unlink 注入失败，入队完成后配置仍保存（2 个工作区、1 条事件），CLI 单独报告队列锁。实际 matching 对当前配置匹配 1 条，改名后 0 条；精确 ID ack 后解锁故障携带 void 完成结果，实际事件 0 条。移除注册时 discard 已完成但解锁失败，CLI 不误报旧事件清理未完成，实际剩 1 个默认工作区、0 条事件。
+- 上述观察均为真实生产管理/队列函数与隔离数据，仅文件系统故障点注入；没有启动真实 Gateway 或发渠道消息。首次观察材料遗漏必需 codex 表被现有校验拒绝，补全隔离材料后重做，不修改产品适配错误材料。任务目录 `codexc-b08-cli-*` 与 `codexc-b08-queue-result-*` 均由各命令 finally 精确清理，无遗留进程。
+- 独立 A 的关联发现已纳入：prune 后复用同一 Workspace ID，或 remove 与重新 add 竞争时，按 Workspace ID 清队列可能误删新通知。add 全操作改为同一配置锁事务，prune/remove 先取得旧事件 ID 快照，提交后只确认这些 ID；删除孤立的 discard 接口。上面的 discard 故障观察属于该调整前的中间版本，最终包装链需重新观察。
+- 同步私有 writer 在 Windows rename 已完成但 staging rmdir 失败的分类一并修正为 `PrivateFileWriteCommittedError`，Gateway 保留已提交事实，Workspace、三渠道 Setup、WebUI 双语告警按保存后清理失败解释。Linux 中通过平台/ACL 边界替身执行实际同步 writer：rename 后清理失败得到 committed=true、目标内容为 after、临时目录保留；rename 前失败 committed=false、目标仍为 after。此为故障路径注入，不代表 Windows ACL 或 Windows 文件系统实机验证。自有 `codexc-b08-staging-h5Sn6k` 已清理。
+- A 还确认共享配置旧文件锁存在双回收按路径误删继任锁的时序风险；本批将队列锁算法提取为窄公共同步目录锁，由两类 owner 保持自己的业务错误与重入语义。恢复/回滚方案同时涵盖 `config.toml.lock` 和事件队列锁：不兼容的旧 PID 文件锁不自动转换或删除；切换版本前须停止全部相关使用者、备份配置/队列/锁材料并核对，禁止新旧锁实现混跑。未知锁与崩溃留下的 ownerless/临时 owner 文件不自动扫除。
+- 锁算法实际观察：子进程真实持锁暂停 35,007 ms，对手在 31,270 ms 时尝试操作，等待 2,005 ms 后拒绝抢锁，owner 恢复后事件落盘且锁清理。32 enqueue 与 1 ack 进程最终 36 条唯一事件，精确保留 seed-4..7 和全部 32 新事件，全部 ack 后为空。两回收者被强制读取同一旧 snapshot，第二者旧 marker unlink 得到 ENOENT 后没有 rmdir 继任空目录，两者最终退出且两事件保留。EPERM/EIO 不能证明死亡，均不回收；超过 256 KiB 拒绝且释放锁。
+- 锁替换 Hack 曾复现 Linux 在外部删除空锁后立即复用 inode，已通过 Unix 删除期间持目录 FD 修正，同一注入重做后继任空目录保留。enqueue/read/ack 完成后换 owner 均保留继任 marker，并以完成错误保留 event/数组/void；操作失败仍优先抛原始错误。这些保证针对合作进程协议，不声明 Node 路径检查与 rmdir 能原子隔离任意同用户恶意文件系统替换。Windows/macOS 实机未观察。
+- 抽取后主代理重新观察完整 CLI：add/list/remove 在配置 marker 释放失败时保存事实与事件分别为 2/1、1/0；写前 rename 失败保留配置字节和原有效事件。prune 复用 project ID 后旧事件被精确删除，新 cwd 的新事件保留；展示快照后改名使旧移除确认被拒绝。remove 精确 ack 完成后释放失败仍为 1 个默认 Workspace、0 事件，CLI 只报告队列锁收尾。自有 `codexc-b08-final-cli-BFbzdB` 已清理。
+- 抽取后 Windows 分支注入链：在平台标识及 ACL 适配边界提供替身，实际同步 writer → Gateway writer → Workspace 管理 add 返回 cleanup=true、配置 2 项/事件 1 条；写前 rename 失败不改配置并保留有效事件；remove 返回 cleanup=true、配置 1 项/事件 0 条且目录保留。自有 `codexc-b08-staging-chain-LcGRrS` 已清理。这不替代 Windows 文件系统/ACL 实机证据。
+- WebUI 实际翻译入口按 `gateway_config_saved_cleanup_failed` 分别返回中英文“已保存、后续清理失败、核对锁和临时目录、勿重复保存”提示，键结构不变。最新类型、版本、运行时边界、局部 ESLint、WebUI TypeScript 和 84 份文档检查通过；WebUI 类型命令登录 shell 输出 fnm multishell 只读路径告警，但编译本身退出 0，未更改系统配置。
+- 公共锁最终接入观察：16 个配置事务进程把 900 累加为 916；32 个队列进程入队齐全，确认一半后保留 16。旧文档 CAS 被拒且当前值 1000 保留，重入返回 27。两包装对老化活 PID 均约 2,005 ms 拒绝，对明确 ESRCH 的过期 owner 回收成功；旧文件锁原样保留，配置父目录 755 不被收紧。释放 EACCES 时两业务错误保留完成结果，配置 writer 已提交分类正确；原操作错误优先，外层/重入/共享层 Promise 都拒绝且无未处理拒绝。所有自有进程与目录已收齐清理。
+- 公共配置锁附带调用链已核对：Codex `.env`、自定义 Provider 注册表、Relay 管理、init 与 Desktop 都使用同步回调，保留各自 CAS、管理事务及业务结果；不把共享锁升级推断为这些入口全部重新实机验收。旧锁恢复/回滚约束也适用于这些资源的 `.lock`，须同时停止相关 CLI/WebUI writer 后再核对，不能只停 Workspace 操作。
+- 独立 Astra/high 已完成最终全链路源码复核，原问题及同 ID 清理、Windows staging、共享配置锁三项关联补充均无剩余 P1/P2 提交阻断。主代理已核对两实施代理与独立 A 完整报告、最终差异和上述观察。真实 Gateway→渠道通知、Windows/macOS 实机及全部管理入口的运行行为仍未观察；R20/R35 保留已修复待补证。

@@ -49,8 +49,9 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `model-name-comparison.mjs` / `model-name-comparison.d.mts`：CLI 与 WebUI 共用的请求/响应模型名称对照；区分一致、不一致和信息不足，不推断模型身份或别名。
 - `model-display-name.mjs` / `model-display-name.d.mts`：配置、CLI、WebUI 与统计查询共用的模型统计分组校验；缺省为空，原始 ID 精确匹配仅用于查询归组，不修改模型展示、上游请求、路由、目录或存储的指标键。
 
-- `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
+- `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。私有目录锁绑定进程与唯一 owner 标记，活进程不按年龄抢锁，未知锁保留并拒绝操作；操作完成但解锁失败以 `ConfigEventQueueLockReleaseError` 携带结果，调用方不得将其当成未入队或未确认。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
+- `private-directory-lock.mjs` / `private-directory-lock.d.mts`：配置与事件队列共用的同步私有目录锁。唯一 owner 标记完整写入后原子发布，只有明确死亡且超过宽限的进程锁可回收，释放只删除本 owner 标记；Unix 删除阶段持目录描述符防止 inode 立即复用。操作失败与操作完成后的释放失败分开返回，由业务 owner 映射结果；不迁移未知旧锁，不提供任意同用户文件系统替换的原子隔离。
 - `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置；只读设置入口复用完整当前版本和结构 Schema，不要求 Gateway 启动前至少启用一个渠道，原启动校验仍保留该前置条件。提供复用同一
   子 Schema 的严格 `[codex]`、`[gateway]` 局部校验，失败以 `GatewayConfigValidationError` 携带不含输入值的字段路径和错误码；网关时区接受 `system` 或 Node.js 支持的 IANA 名称。
   在保留已有注释的前提下合并缺失的 Schema 安全默认值，
@@ -58,7 +59,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   更新 Gateway 配置与直接 API 凭据的同步管理事务复用该可重入锁，异步操作必须使用独立事务锁，
   拒绝并发覆盖；写入者可指定 `maximumBytes`，在保留注释后、原子替换前检查完整文件大小，
   并以 `0600` 权限写入 CLI、脚本和 Gateway 共享的 TOML 配置。
-  同步操作完成后释放锁失败用 `GatewayConfigLockReleaseError` 保留操作结果；仅原子配置写入已确认后转换为 `GatewayConfigWriteCommittedError`，调用方不得当作未保存而重试或删除有效备份。
+  同步操作完成后释放锁失败用 `GatewayConfigLockReleaseError` 保留操作结果；原子配置写入已确认后的解锁失败或 Windows 临时目录清理失败转换为 `GatewayConfigWriteCommittedError`，调用方不得当作未保存而重试或删除有效备份。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 - `chat-reasoning.mjs` / `chat-reasoning.d.mts`：无 I/O 的默认 Chat 关闭能力表、Relay 逐模型思考策略枚举及模型思考声明类型，供配置、管理和模型 API 共用；`resolveClinePassRequestProfile` 校验受管 CLP 的 `standard`／`deepseek-flash` 请求快照，未指定时保留精确 Flash ID 默认分支，显式 `standard` 可覆盖该默认。显式参数方式不声明上游一定支持。
 - `model-relay-config.mjs` / `model-relay-config.d.mts`：可选 Relay 严格配置、可选中文用途名称、仅结算使用的历史身份摘要、每 Key 多提供商模型授权、逐模型思考映射及仅全局限流策略投影；服务默认关闭和回环监听，允许显式 IPv4 内网/通配绑定、保留停用身份，不生成凭据；不接受旧 Relay 配置字段。
@@ -370,6 +371,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   Codex Home 顶层严格私有 TOML 的所有者、继承和访问规则拒绝会附带修复命令；共享主配置由 Doctor 提示检查文件及父目录的所有者和写入权限，目录、进程故障与修复操作自身失败不误报文件修复建议。
   Windows 同步及异步读取均在同一只读文件句柄内校验文件、父目录 ACL 并读取，禁止在途写入和替换，不修复权限、不缓存结论。默认上限 1 MiB；异步目录读取最多 2 MiB，同步调用保留既有恢复记录所需的最多 16 MiB。异步取消在句柄释放后完成。
   `securePrivateFile` / `securePrivateDirectory` 以及异步原子写入使用可取消 ACL 请求，供媒体与转储等持续流量路径复用；同步接口保留给同步管理入口。
+  同步原子写入在目标替换成功后若 Windows 临时目录清理失败，抛出 `PrivateFileWriteCommittedError` 保留已写入事实；Gateway 配置 writer 将其映射为自身的已保存清理告警。异步 writer 合同不变。
 - `windows-acl-bridge.mjs` / `windows-acl-bridge.d.mts`：进程内复用隐藏的 PowerShell ACL 适配器，通过 worker 和私有管道支持同步及异步调用；不缓存 ACL 结论。最多 16 个待处理请求，冷启动含 DLL 加载最多 5 秒，复用请求含排队最多 2 秒；每次检查期间固定完整祖先目录，拒绝重解析点及非本地盘路径。超时、输出超限或进程退出后停止该实例，确认子进程及线程退出后才能重新建立。临时只读 Worker 退出前调用 `closeWindowsAclBridge` 永久关闭当前隔离线程的准入并确认辅助进程关闭，超时保留引用及归属；`waitForWindowsAclBridgeExit` 让后台在真实退出后完成收尾。取消排队请求只移除本项；取消在途读取则丢弃结果，等本次读取关闭句柄后释放槽位，保留原期限，不中断其他请求。
 - `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器，支持逐行请求及单次调用；stdin/stdout 明确使用 UTF-8，不继承控制台代码页；只读取固定 JSON 请求，通过 .NET
   ACL 类型设置或校验 Owner、访问规则、继承、文件类型与 reparse point，并返回结构化结果，不解析

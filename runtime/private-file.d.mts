@@ -12,6 +12,10 @@ export function readPrivateConfigFile(
   options?: { signal?: AbortSignal; maximumBytes?: number },
 ): Promise<string>;
 
+export class PrivateFileWriteCommittedError extends Error {
+  constructor(cause: unknown);
+}
+
 export function writePrivateFileAtomicSync(
   path: string,
   content: string | Uint8Array,

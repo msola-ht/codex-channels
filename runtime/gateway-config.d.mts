@@ -87,7 +87,7 @@ export class GatewayConfigLockReleaseError<T = unknown> extends Error {
   constructor(result: T, cause: unknown);
   readonly result: T;
 }
-/** The atomic Gateway writer completed before configuration lock release failed. */
+/** The destination was atomically replaced before lock or staging cleanup failed. */
 export class GatewayConfigWriteCommittedError extends Error {
   constructor(cause: unknown);
 }

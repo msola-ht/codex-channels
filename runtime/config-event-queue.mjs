@@ -1,12 +1,9 @@
 import {
-  closeSync,
   existsSync,
   mkdirSync,
-  openSync,
   readFileSync,
   renameSync,
   statSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -16,12 +13,22 @@ import {
   securePrivateDirectorySync,
   securePrivateFileSync,
 } from "./private-file.mjs";
+import {
+  PrivateDirectoryLockReleaseError,
+  withPrivateDirectoryLockSync,
+} from "./private-directory-lock.mjs";
 
 const queueVersion = 1;
 const maximumEvents = 100;
 const maximumQueueBytes = 256 * 1024;
-const lockTimeoutMs = 2_000;
-const staleLockMs = 30_000;
+
+export class ConfigEventQueueLockReleaseError extends Error {
+  constructor(result, cause) {
+    super("配置事件队列操作已完成，但锁释放失败", { cause });
+    this.name = "ConfigEventQueueLockReleaseError";
+    Object.defineProperty(this, "result", { value: result });
+  }
+}
 
 export function configEventQueuePath(dataDir) {
   return join(dataDir, "data", "config-events.json");
@@ -35,7 +42,7 @@ export function enqueueWorkspaceAdded(queuePath, workspace) {
     createdAt: new Date().toISOString(),
     workspace: normalizedWorkspace(workspace),
   };
-  withQueueLock(queuePath, () => {
+  return withQueueLock(queuePath, () => {
     const events = readQueueUnlocked(queuePath);
     if (events.length >= maximumEvents) {
       throw new Error(`配置事件队列已满（最多 ${maximumEvents} 条），请确认 Gateway 正常运行`);
@@ -46,8 +53,8 @@ export function enqueueWorkspaceAdded(queuePath, workspace) {
       throw new Error("配置事件队列超过 256 KiB，请确认 Gateway 正常运行");
     }
     writeQueueUnlocked(queuePath, updated);
+    return event;
   });
-  return event;
 }
 
 export function readConfigEvents(queuePath) {
@@ -71,19 +78,6 @@ export function acknowledgeConfigEvents(queuePath, eventIds) {
   withQueueLock(queuePath, () => {
     const retained = readQueueUnlocked(queuePath).filter(
       (event) => !acknowledged.has(event.id),
-    );
-    writeQueueUnlocked(queuePath, retained);
-  });
-}
-
-export function discardWorkspaceConfigEvents(queuePath, workspaceIds) {
-  const discarded = new Set(workspaceIds);
-  if (discarded.size === 0 || !existsSync(queuePath)) {
-    return;
-  }
-  withQueueLock(queuePath, () => {
-    const retained = readQueueUnlocked(queuePath).filter(
-      (event) => !discarded.has(event.workspace.id),
     );
     writeQueueUnlocked(queuePath, retained);
   });
@@ -171,81 +165,11 @@ function ensureQueueDirectory(queuePath) {
 
 function withQueueLock(queuePath, operation) {
   ensureQueueDirectory(queuePath);
-  const lockPath = `${queuePath}.lock`;
-  const startedAt = Date.now();
-  let descriptor;
-  while (descriptor === undefined) {
-    try {
-      descriptor = openSync(lockPath, "wx", 0o600);
-    } catch (error) {
-      if (error?.code !== "EEXIST") {
-        throw error;
-      }
-      if (isStaleLock(lockPath)) {
-        try {
-          unlinkSync(lockPath);
-          continue;
-        } catch (unlinkError) {
-          if (unlinkError?.code !== "ENOENT") {
-            throw unlinkError;
-          }
-        }
-      }
-      if (Date.now() - startedAt >= lockTimeoutMs) {
-        throw new Error("配置事件队列正被其他进程使用，请稍后重试", {
-          cause: error,
-        });
-      }
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-    }
-  }
   try {
-    securePrivateFileSync(lockPath);
+    return withPrivateDirectoryLockSync(`${queuePath}.lock`, operation);
   } catch (error) {
-    closeSync(descriptor);
-    unlinkSync(lockPath);
-    throw error;
-  }
-  let result;
-  let operationFailed = false;
-  let operationError;
-  try {
-    result = operation();
-  } catch (error) {
-    operationFailed = true;
-    operationError = error;
-  }
-  let releaseFailed = false;
-  let releaseError;
-  try {
-    closeSync(descriptor);
-  } catch (error) {
-    releaseFailed = true;
-    releaseError = error;
-  }
-  try {
-    unlinkSync(lockPath);
-  } catch (error) {
-    if (error?.code !== "ENOENT" && !releaseFailed) {
-      releaseFailed = true;
-      releaseError = error;
-    }
-  }
-  if (operationFailed) {
-    throw operationError;
-  }
-  if (releaseFailed) {
-    throw releaseError;
-  }
-  return result;
-}
-
-function isStaleLock(lockPath) {
-  try {
-    return Date.now() - statSync(lockPath).mtimeMs > staleLockMs;
-  } catch (error) {
-    if (error?.code === "ENOENT") {
-      return false;
+    if (error instanceof PrivateDirectoryLockReleaseError) {
+      throw new ConfigEventQueueLockReleaseError(error.result, error);
     }
     throw error;
   }

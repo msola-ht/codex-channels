@@ -12,6 +12,11 @@ export interface WorkspaceAddedConfigEvent {
   workspace: QueuedWorkspace;
 }
 
+export class ConfigEventQueueLockReleaseError<T> extends Error {
+  readonly result: T;
+  constructor(result: T, cause: unknown);
+}
+
 export function configEventQueuePath(dataDir: string): string;
 export function enqueueWorkspaceAdded(
   queuePath: string,
@@ -23,7 +28,3 @@ export function matchingWorkspaceConfigEvents(
   workspaces: readonly QueuedWorkspace[],
 ): WorkspaceAddedConfigEvent[];
 export function acknowledgeConfigEvents(queuePath: string, eventIds: Iterable<string>): void;
-export function discardWorkspaceConfigEvents(
-  queuePath: string,
-  workspaceIds: Iterable<string>,
-): void;

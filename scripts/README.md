@@ -445,6 +445,7 @@
   默认工作区选择复用 `config-system-menu.mjs` 的版本化配置写入，移除操作仅移除注册；本次菜单循环保留上次选择。
   `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。交互菜单按精确 ID 移除，避免数字 ID 被解释为列表序号；目录状态复用共享只读检查。
+  添加和移除在配置事务内捕获旧事件 ID，提交后只确认该快照，避免同 ID 重新注册的新通知被清除。配置已提交后的清理失败保留新增事件；结果分别携带配置收尾、队列锁及旧事件清理状态，CLI 先报告保存事实，再提示核对与清理，不自动重放写入。
 
 ## 开发与协议
 

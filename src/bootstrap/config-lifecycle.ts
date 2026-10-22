@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 
 import {
   acknowledgeConfigEvents,
+  ConfigEventQueueLockReleaseError,
   configEventQueuePath,
   matchingWorkspaceConfigEvents,
   readConfigEvents,
@@ -347,7 +348,9 @@ async function startGatewayProcess(): Promise<void> {
         } catch (error) {
           logger.warn(
             { err: error, events: applicableEvents.length },
-            "配置事件投递或确认失败；事件已保留，等待下次配置加载",
+            error instanceof ConfigEventQueueLockReleaseError
+              ? "配置事件已投递并确认，但队列锁清理失败；请检查锁占用，不重放已确认事件"
+              : "配置事件投递或确认失败；事件已保留，等待下次配置加载",
           );
         }
       }
@@ -436,6 +439,10 @@ function readPendingConfigEvents(
   try {
     return readConfigEvents(queuePath);
   } catch (error) {
+    if (error instanceof ConfigEventQueueLockReleaseError) {
+      logger.warn({ err: error }, "配置事件已读取，但队列锁清理失败；请检查锁占用");
+      return error.result as WorkspaceAddedConfigEvent[];
+    }
     logger.error({ err: error }, "读取配置事件队列失败；事件将保留以便后续重试");
     return [];
   }
