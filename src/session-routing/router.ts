@@ -955,7 +955,7 @@ export class SessionRouter {
   }
 
   async newSession(target: ConversationTarget, preserveCurrent = false, preference?: ConversationModelPreference,
-    condition?: ThreadReleaseCondition, assertAuthorized?: () => void): Promise<void> {
+    condition?: ThreadReleaseCondition, assertAuthorized?: () => void, onCommitted?: () => void): Promise<void> {
     const current = this.bindings.get(target);
     const assertCurrent = this.lifecycleGuard(target, current, assertAuthorized);
     return this.withThreadLifecycle(current ? [current.threadId] : [], async () => {
@@ -963,15 +963,16 @@ export class SessionRouter {
       if (preserveCurrent) {
         if (this.bindings.get(target)) this.requireBackgroundCapacity(target, 1);
         this.bindings.demote(target, preference);
+        onCommitted?.();
       } else if (current && condition) {
         const snapshot = await this.codex.readThread(current.threadId);
         assertCurrent();
         if (!condition.isCurrent() || !await condition.verifyIdle()
-          || !await this.releaseIdleUnlocked(target, current, snapshot, condition, preference, assertCurrent)) {
+          || !await this.releaseIdleUnlocked(target, current, snapshot, condition, preference, assertCurrent, onCommitted)) {
           throw new UserFacingError("thread.takeover.changed", "当前会话活动已变化，请重新新建会话");
         }
       } else {
-        await this.detachUnlocked(target, preference, assertCurrent);
+        await this.detachUnlocked(target, preference, assertCurrent, onCommitted);
       }
       // Both unbind and demote persist the marker with the binding change.
       if (!current) {
@@ -999,6 +1000,7 @@ export class SessionRouter {
     condition: ThreadReleaseCondition,
     preference?: ConversationModelPreference,
     assertAuthorized?: () => void,
+    onCommitted?: () => void,
   ): Promise<boolean> {
     const ownsBinding = () => this.sameBinding(expected, this.bindings.get(target));
     if (!ownsBinding() || !condition.isCurrent()) return false;
@@ -1037,6 +1039,7 @@ export class SessionRouter {
       }
       throw error;
     }
+    onCommitted?.();
     this.unsubscribedBindings.delete(expected.threadId);
     this.contextCompactionItemIdsByThread.delete(expected.threadId);
     this.notifyBindingsChanged();
@@ -1275,7 +1278,7 @@ export class SessionRouter {
   }
 
   private async detachUnlocked(target: ConversationTarget, preference?: ConversationModelPreference,
-    assertAuthorized?: () => void): Promise<void> {
+    assertAuthorized?: () => void, onCommitted?: () => void): Promise<void> {
     const current = this.bindings.get(target);
     assertAuthorized?.();
     if (current) {
@@ -1295,11 +1298,13 @@ export class SessionRouter {
         }
         throw error;
       }
+      onCommitted?.();
       this.unsubscribedBindings.delete(current.threadId);
       this.contextCompactionItemIdsByThread.delete(current.threadId);
       this.notifyBindingsChanged();
     } else {
       this.bindings.setModelPreference(target, preference);
+      onCommitted?.();
     }
   }
 

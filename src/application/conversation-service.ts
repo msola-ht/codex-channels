@@ -63,6 +63,7 @@ import {
 import type {
   ModelSelectionPreference,
   ModelSelectionIdentity,
+  ModelSelectionRequest,
   ModelSelectionService,
   ModelSelectionState,
 } from "./model-selection-service.js";
@@ -270,6 +271,7 @@ export interface ConversationExtensionUseCases {
   browseProviderModels(target: ConversationTarget, provider: string, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   clearModelSelection(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity, assertAuthorized?: () => void): Promise<ModelSelectionState>;
+  selectModelSetting(target: ConversationTarget, selection: ModelSelectionRequest, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   selectEffort(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   selectFastMode(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   listSkills(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledSkill[]>;
@@ -1506,6 +1508,24 @@ export class ConversationService implements
 
   selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity, assertAuthorized?: () => void): Promise<ModelSelectionState> {
     return this.withGuardedSelection(target, (guard) => this.models.selectModel(target, selector, guard), assertAuthorized);
+  }
+
+  selectModelSetting(target: ConversationTarget, selection: ModelSelectionRequest, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    let guardedScope: string | undefined = selection.snapshot.selectionScope;
+    const guard = () => {
+      assertAuthorized?.();
+      if (guardedScope !== undefined && this.models.status(target).selectionScope !== guardedScope) {
+        throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片");
+      }
+    };
+    return this.withGuardedSelection(target, async selectionGuard => {
+      // The model operation guards and advances its own synchronous commits;
+      // keep the original scope for lock/Queue waits and the result scope after it.
+      guardedScope = undefined;
+      const state = await this.models.selectSetting(target, selection, selectionGuard);
+      guardedScope = state.selectionScope;
+      return state;
+    }, guard);
   }
 
   selectEffort(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {

@@ -308,7 +308,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 最后补证：ensure 读取 notLoaded 期间注入 closed，后续新 resume 返回 active B，普通 submit 返回 `conversation.busy`、startTurn 调用 0、binding=t、Core=B、observer=0。fork 入口注入绑定提交失败，实际顺序 unsubscribe t/closed → resume t(active B) → cleanup unsubscribe forked；原错误返回，原 binding=t、Core=B、observer=0。未将这些受控边界观察描述为真实平台或官方 RPC 竞态。
 - 独立 Astra/high 最终覆盖全部启动、恢复/补偿、解绑、断线、归属、输出与 Run 下游、Queue 和两个会话选择入口，确认原补偿窗口 P2 关闭，无剩余 P1/P2 提交阻断。主代理已读完整报告和最终 Router/Application/Bootstrap 差异；关键 blob 与复审一致：Router `0ba65ca4`、Service `de29d3b5`。补偿版完整类型、版本、模块边界与四文件局部 ESLint 通过；选择器局部 ESLint、84 份 Markdown 索引/链接与差异检查通过。接管失败、ensure 生命周期锁等待和批量重连的事件竞态完成源码关联复审，未单独运行；真实平台与跨 OS 限制仍保留。R03/R23 标记已修复待补证，未扩大为整体验收通过。
 
-### 第八批：B11（复审完成，待本地提交）
+### 第八批：B11（已提交 `3d87ed66`）
 
 - 输入 `0b9d5ff1`，范围 R11。独立 CP 的定向目录不应依赖无关主实例；官方兼容 CP 的克隆目录仍真实依赖主实例，不制造能力。总览隔离来源失败，不把故障当成未登录或自动切换 Provider；当前选择身份与本次查询覆盖范围分开，保留精确 Provider/model、已有 Thread 与 pending 权威设置。
 - 只读关联分析覆盖目录装配、模型/effort/fast、图片/音频能力、未绑定偏好校验和新 Thread 提交，以及 CollaborationMode/Luna Reserve 的共享状态消费。确认不能仅跳过主查询：主默认模型缺失判断与 `models[0]` 回退会继续阻断浏览或误把浏览目标当作当前 Provider，影响目标默认设置读取及跨 Provider 新会话语义。目录失败的空能力列表也不能展示为“不支持加速”或继承 none 作为真实思考等级。
@@ -322,3 +322,26 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 实施者最终完整类型、版本、模块边界与四文件 ESLint、差异检查通过。独立 Astra 正在复审，暂未提交；最终结论和提交状态在收齐后追加。
 - 独立 A 找到失败占位的两处关联泄漏，均已修正：未配置主默认时，不可用占位的 Provider ID 不能回退为当前模型；共享文本、飞书与 Telegram 当前模型呈现也不能从失败占位读取显示名或 defaultReasoningEffort=none。主代理过滤这些已确认目录的消费点，保留列表不可用原因，不涉及 B12 交互快照。实际观察无配置主失败的 state/status/browse 均为 默认模型/openai/effort=null；明确配置失败均保留 configured-main；健康主目录仍显示 actual-main/medium。实际生产共享 effort 文本、飞书 Provider 卡与 Telegram 渲染入口均显示 configured-main/模型默认，不再显示错误的 Provider 名称或“关闭思考”；Telegram reply 只记录到自有内存，未发送平台消息。
 - 独立 Astra/high 最终覆盖命令、Service、目录路由、固定/切换装配、同名精确身份、默认值、偏好存储与 Thread/Turn 消费、CollaborationMode/LunaReserve、关闭/授权和三端呈现，确认两项占位问题已关闭，无剩余 P1/P2 提交阻断。主代理已读完整报告并核对七源码 blob：Service `37965517`、Routing `d928b60f`、共享格式 `34aba1ed`、飞书 `57c44693`、Telegram `0769d1c5`；最终类型/版本/边界与变更呈现局部 ESLint 通过。用户指南进一步明确渠道按钮仍可能前置页面刷新；模式预设读取、首次自动接续历史查询等既有主依赖不属于本次解耦范围，不承诺主实例完全故障时所有操作可用。R11 标记已修复待补证，真实平台与跨 OS 限制保留。
+- 本地提交 `3d87ed66209c3044377dadf2c472a0c3fea7a5e1`；正常 Hook 类型/版本/模块边界、局部 lint、84 份 Markdown 与 Gateway 构建全部通过，耗时 13.7 秒。提交后工作区干净，未推送。
+
+### 第九批：B12（独立复审通过，待本地提交）
+
+- 输入 `3d87ed66`，范围 R44。飞书 Provider 导航、模型、effort 与 fast 卡片必须保持生成时的目标和设置身份；旧卡及点击后目录/默认读取等待中的状态变化不得把选择应用到后来目标。普通文字命令保留按执行时状态解释，不扩展为外部配置事务或跨入口 revision 改造。
+- 只读分析已沿 presentation → CommandCenter pending/Actor/Chat/message/TTL → adapter → CommandService → ConversationService 锁/Queue → ModelSelectionService → 默认配置 RPC beforeSubmit、Router/内存或 SQLite 偏好 → 新 Thread/下一 Turn 核对。现有卡片模型只保存 model.id、三种设置均通过字符串 execute，Provider 导航也依赖执行时 providerFilter；selectionScope 只有会话与工作区身份，不含当前/待生效设置或浏览范围。仅扩大 hash 不够，状态生成期间须固定原 scope 并在目录/默认等待后复核，避免旧值与新 scope 混合。
+- 主代理修前实际复现：生产飞书 CommandCenter.openResponse 生成 cp-a/same 模型卡；随后浏览 cp-b，再向 handleCardAction 注入原卡按钮。经真实 Adapter → Command → Service → Models → Router/MemoryBindingStore，返回 accepted，偏好实际保存 cp-b/same/medium/null，cards=2、warnings=[]，确认旧 A 卡选择被重解释到 B。只注入自有模型端口、内存卡片收发与 Actor 许可，未调用平台、用户服务或真实配置 writer；所有自有对象已关闭，无脚本文件或后台任务。
+- 实施采用平台无关结构化选择入口及本地快照，飞书 pending 保存准确选项，不把快照放进回调载荷；保留既有有界限时一次性 token。消费后捕获 TTL/关闭/授权守卫继续约束写入；合法自有解绑/偏好/浏览变更按提交阶段推进，不能把自己刚写成的状态误判过期，已提交默认值也不得伪称未保存或自动回滚。成功后生成新快照的后续卡片。下一步收齐实现、受控完整入口与失效观察，再开启新的独立 Astra 复审。
+- 关联实施补充：Router.newSession 未绑定路径先写偏好、await 返回后仍复核守卫，若仅扩大 scope 会把自身提交误判过期。新增窄同步 onCommitted 回调，在绑定/偏好提交后、通知或 await 返回前推进本操作预期；外部等待变化不能在 await 后一并吸收。effort/fast 返回状态统一携带实际浏览范围，避免成功后新卡与当前 scope 不一致；共享返回值保留 providerFilter，Telegram 既有目录裁剪差异另记，不宣称其完整 token 合同已通过运行验收。
+- 首轮修后完整飞书链观察：旧 A 卡在浏览 B 后回调返回 accepted（仅代表接收），内部返回 model.selection.expired，偏好为空，重放 invalid；新 A 卡准确保存 cp-a/same/medium/default，自动生成后续 effort 卡，连续选择 high、medium 都成功并产生新卡。随后 submit 创建 task-thread，Thread 参数精确 cp-a/same 且绑定一致。首次 Turn 日志误从第三参数读取 overrides，缺失字段仅为观察注入采集错误，未据此修改产品代码；准确第五参数补采另记。
+- 失败观察使用同一 CardCenter → Adapter → Command → Service → Models → Router/MemoryStore：旧 effort/fast 卡在 cp-a→cp-b 后拒绝；目录等待期间修改 tier、切 Workspace、TTL 100→101、撤权、关闭均拒绝后续写入，保留竞争后偏好、默认写入数组为空、cards=1，所有重放 invalid。TTL/撤权/关闭 texts=[]，无后续提示；其它过期返回结构化安全提示。自有卡片只进入内存，未发送平台消息。
+- 生产 Command 结构化 fast-off 到默认 writer 的受控边界观察：提交前撤权返回 command.authorization-changed、writes=[]、原 fast 偏好保留；已记录 default 提交后撤权返回相同授权错误、writes=[default]、后续偏好仍 fast，没有回滚或重试；正常 fast-off 返回 models/default、writes=[default]、偏好准确变为 default。writer 使用自有注入端口，未修改用户配置或执行真实 RPC。
+- 最终准确参数补采：生产 Command.selectModelSetting 依次精确选 cp-a/same、effort=high、fast on→off，再 Service.submit；输出 fastOn=fast、fastOff=default、task-thread/task-turn，Thread 参数准确 cp-a/same，Turn 第五参数准确 cp-a/same/high/default，input=[text]，绑定正确。修正前述日志采集位置，不是产品修复。
+- 已绑定路径补充观察：同 Thread 下当前 effort 改变或 Session ID 改变，旧卡入口立即 model.selection.expired，unsubscribe 调用为空、绑定保留、pending 为空；正常从 cp-a 切 cp-b 时 unsubscribe old-thread 一次、解除前台绑定、保存 cp-b/same/medium/null。自有解绑通知中注入竞争偏好 cp-a/competitor/high 后，原选择返回 model.selection.expired，保留竞争值，不用 await 后的快照推进吞掉它。未操作真实 Thread 或用户持久化。
+- 实施者最终完整类型/版本/模块边界、9 个源码局部 ESLint 与差异检查通过并已交权；主代理读完实现报告和差异，新的独立 Astra 正在沿完整选择、快照、写入及消费链复审。真实飞书、App Server RPC、SQLite 落盘与 Windows/macOS 运行尚未观察，已有静态与内存边界证据不替代这些验收。
+- 页面生成阶段额外观察：分别让生产 Models.state 等待目录、默认 tier 读取时写入 different/openai/high/default 偏好；两个入口都返回 model.selection.expired，保留新偏好，没有输出旧值搭配新 scope 的混合卡片。最后源码输入为 Models `0521d1c6`、Router `f010037d`、CommandCenter `61e5a291`，无新增脚本文件。
+- 独立 A 新发现必须修复的有效默认边界：selectSetting 首次完整快照核对后，effort/fast 再次读取目录；raw scope 未含动态目录默认，可能把原 A 卡应用给 B。主代理实测官方未登录、唯一独立 CP 无静态默认：卡片读取 a，第 2 次校验仍 a，第 3 次目录为 b，实际返回 b/high、pending={effort:high}，threadStartOptions=b/cp。生产受管目录的 refreshProviderModels → updateSupplementaryModels 更新 isDefault 也可改变默认选择，属于本包原卡身份合同，不是外部配置 revision 扩展。已启动补修，不能据前述 raw 状态观察宣布本批通过。
+- 独立 A 的有界元数据建议已采纳：CommandCenter 的本地模型元数据只保存与实际展示一致的前 18 项。实际构造 25 项卡片后 stored=18、allowed=18，伪造第 19 项 invalid，第 18 项准确执行 model-17，重放 invalid；未发平台消息。
+- 旁支发现（不计入原基线 45 项）：A 核对 Telegram 时发现原有 effort 返回路径使用未按 providerFilter 裁剪的 catalog.models，而下一次 me 回调的 modelState 会裁剪；多 Provider 目录可能让新键盘 token 立即失效。原 HEAD 已有同类不一致，本包没有引入，尚无真实 Telegram 观察。本批记录为待单独复现、核对 Telegram 菜单合同后处理，不混入飞书三卡快照修复，也不据此更改原清单的覆盖或关闭数。
+- 有效默认补修完成：结构化操作保存首次核对后的有效快照、实际查询目录来源与相关默认来源；后续解析比较有效状态，提交前复用已确认目录，只有继承档位需要重新读取。自有同步提交只推进本操作已写值；用户默认写入成功不代表 Workspace 覆盖已改变，不在该写入与明确偏好提交之间重新猜测继承值。修后独立目录默认 a→b、受管目录 isDefault a→b、继承 tier null→fast 三种等待期变化均返回 expired，pending={}、偏好为空。
+- 独立 A 又发现补修中的跨 Provider 导航新卡不自洽：操作内保留的旧来源能力与下一页定向刷新不同。已将提交前旧快照核对与提交后新页目录覆盖分开。修后新 cp-b 卡保留 m1、effort/tier=null，随后精确选择 cp-b/m2 成功，偏好准确为 cp-b/m2/medium/null。官方 fast on/off、Workspace 始终覆盖为 fast 时显式 off 和显式模型选择均成功；定向 CP 选择只查询 cp/cp/tiercp，没有主目录请求。
+- 最终完整飞书受控用户链：Command model 总览→CommandCenter 点击 cp-a 导航→模型序号 1→新 effort 卡 high→fast on→新卡 off→Service.submit，cards=7、warnings=[]、texts=[]、每张已消费卡重放均 invalid。Thread 参数准确 cp-a/same，Turn 第五参数准确 cp-a/same/high/default，返回 task-thread/task-turn。仅平台收发和模型/Thread/Turn 外部端口为自有内存输入，未发送真实消息或写用户配置；对象均已关闭。
+- 独立 Astra/high 最终全链复审与两轮修订复核无剩余阻断。主代理已读完整报告并核对最终 Models blob `d5f901f1eb50da5aba3638422b4456458b133f42`、CommandCenter `9ab87c0a01a8082ab7e2335297f29561abd3b3de`；其余七源码保持复审输入。类型、版本和模块边界检查通过。R44 标记已修复待补证；真实飞书/App Server RPC、SQLite 落盘和 Windows/macOS 未观察，独立 CLI/WebUI 配置写者与最后读取至写入间不具备跨进程原子 revision 保证，不以本批快照守卫宣称解决该外部事务问题。

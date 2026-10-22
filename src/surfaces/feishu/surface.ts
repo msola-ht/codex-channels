@@ -338,12 +338,13 @@ export class FeishuSurface implements SurfaceAdapter {
     this.commandCenter = new FeishuCommandCenter(
       this.output,
       options.access,
-      (target, action, actorId, input) =>
+      (target, action, actorId, input, modelSelection) =>
         this.adapter.handleCommandCenterAction(
           target,
           action,
           actorId,
           input,
+          modelSelection,
         ),
       options.logger,
     );

@@ -104,6 +104,7 @@ export { resolveThread } from "./conversation-session-query-service.js";
 export { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 export {
   ModelSelectionService,
+  modelSelectionSnapshot,
   fastServiceTierId,
   ultrafastServiceTierId,
   isFastServiceTier,
@@ -113,6 +114,8 @@ export {
   resolveProvider,
   type ModelSelectionPreference,
   type ModelSelectionIdentity,
+  type ModelSelectionRequest,
+  type ModelSelectionSnapshot,
   type ModelSelectionState,
   type OfficialModelCatalogProvider,
 } from "./model-selection-service.js";

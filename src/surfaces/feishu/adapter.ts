@@ -27,6 +27,7 @@ import type {
   FeishuCommandCenterAction,
   FeishuCommandCenterChoices,
   FeishuCommandCenterResponse,
+  FeishuModelSelectionInteraction,
 } from "./command-center.js";
 import {
   renderQueueCommandCenterChoices,
@@ -357,6 +358,7 @@ export class FeishuConversationAdapter {
     action: FeishuCommandCenterAction,
     actorId: string,
     input = "",
+    modelSelection?: FeishuModelSelectionInteraction,
   ): Promise<FeishuCommandCenterResponse | void> {
     this.conversations.touchActivity?.(target);
     try {
@@ -455,9 +457,12 @@ export class FeishuConversationAdapter {
         );
       }
       const cancelledInteraction = action === "stop" && this.interactions?.stopForActor(target, actorId);
-      const result = action === "fast" && input === ""
+      const result = modelSelection
+        ? await this.commands.selectModelSetting(target, modelSelection.selection, actorId, modelSelection.assertActive)
+        : action === "fast" && input === ""
         ? await this.commands.execute(target, "model", "", actorId)
         : await this.commands.execute(target, action, input, actorId);
+      modelSelection?.assertActive();
       if (cancelledInteraction) this.notifyText(target.conversationId, interactionStoppedText);
       const followUpChoices = action === "model"
         && result.kind === "models"
@@ -467,6 +472,7 @@ export class FeishuConversationAdapter {
       const choices = followUpChoices ?? (
         (
           input === ""
+          || modelSelection !== undefined
           || action === "model"
           || action === "sessions"
           || action === "archived"
@@ -488,6 +494,9 @@ export class FeishuConversationAdapter {
         this.notifyMarkdown(target.conversationId, rendered);
       }
     } catch (error) {
+      if (modelSelection) {
+        try { modelSelection.assertActive(); } catch { throw error; }
+      }
       if (error instanceof FeishuOutputQueueError) {
         throw error;
       }
