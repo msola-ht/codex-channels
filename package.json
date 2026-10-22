@@ -168,6 +168,7 @@
     "scripts/service-install-context.mjs",
     "scripts/service-install-management.mjs",
     "scripts/service-status.mjs",
+    "scripts/service-log-sanitizer.mjs",
     "scripts/service-target-query.mjs",
     "scripts/session-cleanup.mjs",
     "scripts/session-menu.mjs",

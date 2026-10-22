@@ -116,6 +116,7 @@ B 编号是责任边界，不强制一包一提交。每包实施时核对原编
 | Telegram effort 键盘目录快照 | B12 发现预存 selectEffort 返回未按 Provider filter 裁剪的目录，后续回调刷新目录可能使刚生成键盘过期；待独立复现并逐路径修复，随后独立 A 复审、单批提交。 |
 | 显式相对 CLI 路径 | B16 独立 A 源码推导安装 cwd 与服务 cwd 可产生不同选择；待明确已支持的相对路径基准、复现及全入口修复，随后独立 A 复审、单批提交。当前绝对路径与环境覆盖证据不关闭此任务。 |
 | 微信非成功响应正文清理 | B17 独立 A 确认 JSON/CDN 的既有非2xx分支未释放正文；redirect:error 的拒绝不经过该分支，本批未扩大缺口。待沿请求期限、错误映射和关闭链复现、修复，再独立 A 复审提交；不以正常响应或跳转观察关闭此任务。 |
+| 自定义Socket目录的日志归属 | B19 独立A源码发现状态摘要固定读取dataDir/runtime，日志路由与安装器按codex.socket_path父目录选取；配置自定义Socket目录可能产生不同日志来源。待隔离复现、明确共享目录合同并修复复审，当前尚未运行观察，不在脱敏批次改变路径选择。 |
 
 ## 数据、失败恢复与回滚
 
@@ -425,7 +426,7 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - 新独立 Astra/high 全链复审完成，无剩余本批阻断；主代理已读完整报告并核对七个最终源码blob一致。审查差异SHA-256为 `5f9136db4c12f0bfecae3aa32d5e5f37e4515320d5fee5d2b14eaef85c1d70e4`。覆盖静态/动态上游、Responses/Chat/WS、全部共享Fetch消费者、Request与代理合同、额度账户归属/退避/取消/时间戳、后台关闭以及IPC/Writer/SQLite消费。R24/R25/R26标记已修复待补证；微信非2xx既有清理缺口已单列后续任务。
 - 本地提交 `a4e29016f75731eee3f305a2f5b79ae9072a742d`，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown和Gateway构建全部通过，15.4秒；提交后工作区干净，未推送。
 
-### 第十五批：B18（复审通过，待提交）
+### 第十五批：B18（已提交）
 
 - 输入 `a4e29016`，R05/R28。追踪普通Proxy的JSON/SSE/WS自由错误到IPC、Composition、BufferedWriter、SQLite、明细和导出；独立Relay已有errorMessage:null合同排除。拟在采集与IPC边界统一普通指标errorMessage:null，保留受限type/code/HTTP状态，Chat客户端固定错误不变；不改Schema、不重写或清理历史数据。HTTP/WS提交时点与实际发送对齐，未提交保持null，部分提交失败仍计时；Chat外层须沿真实上游诊断时钟关联转储。
 - 主代理改前在Node22生产链复现：自有HTTP/WS上游→ProviderProxy→真实私有指标Socket→ProviderMetricsComposition→BufferedWriter→SQLite；关闭后只读重开，四条JSON错误、SSE失败、WS错误、WS限额关闭记录均保存合成标记 `SYNTHETIC_B18_PRIVATE_BODY`，生产JSON和CSV导出均包含它。无写入错误；自有监听、Socket、数据库目录均清理。未访问真实模型、指标库或用户数据；该观察不包含MetricsWorker线程及真实WebUI浏览器。
@@ -435,3 +436,17 @@ A4 已完成流程整合复核：确认 45 项归属完整唯一，25 包无需�
 - Chat早期非法JSON返回400，上游0、bytes/totalDuration空、转储无时钟；正常stream:true/store:false请求返回200、正文hello及completed，上游1、bytes114、总耗时5.939304ms，多次诊断起点保持221.429976，转储同总耗时。首次输入遗漏stream被合同拒绝400，更正后才成功。独立IPC Hack有界旧帧接收后正文null且429/type/code保留，501字符帧拒绝；全部自有资源清理。A与实施者同时发现Chat同步end抛错可跳过等待ready并因取消形成未处理拒绝，正在补旁挂拒绝处理并观察。
 - 上述同步异常已补修：创建ready后立即旁挂catch，原await仍传播正常错误。A以Node事件循环观察确认旧机制产生AbortError/ABORT_ERR未处理拒绝；实施者对生产Chat的ClientRequest.end定向注入同步throw一次，返回502固定chat_upstream_error、上游请求0、bytes/totalDuration及转储callTiming空，unhandledRejection为空。补修后全量tsc、4个源码ESLint、Runtime边界及diff格式通过；全部自有资源与作业收齐。
 - 独立A完成全链审查，无剩余本批阻断；主代理已读实施者和A完整报告，核对四个最终源码blob一致。A发现的ready拒绝及README错误文本旧合同均已补修。R05/R28标记已修复待补证；MetricsWorker线程、浏览器、真实模型/平台和跨OS未运行，Chat多轮搜索续答起点仅源码核对，不冒称实测。历史错误文本仍可能被原有读出/导出消费，本批未清理或重写。
+- 本地提交 `690935ff539685e413437b0e00f6b9c3f677cfbb`，正常Node22 Hook类型/版本/边界、局部Lint、84份Markdown和Gateway构建全部通过，15.6秒；提交后工作区干净，未推送。
+
+### 第十六批：B19（复审通过，待提交）
+
+- 输入 `690935ff`，R27。沿文件/journald错误分类到management `/services` recentError，以及日志安全文本到日志API梳理；拟抽现有日志投影为纯共享脚本，保日志入口公开导出、状态错误筛选/工具错误排除，先脱敏后压缩与截断。保留普通诊断可读性，与B18指标正文恒null不是同一合同。
+- 主代理改前用自有gateway.error.log三条Basic/Proxy-Authorization/双Cookie材料，经生产routeStatusManagement的 `/services` 子路由和自有HTTP返回200；recentError仍含三个合成值，日志sanitizeLogText对同材料均REDACTED。使用自有服务状态缓存、platform=null避免查询真实服务，未读用户日志/journald；该观察不包含外层管理鉴权。所有任务目录和HTTP已清理。
+- 抽取初版后，主代理实观发现带引号首Cookie只隐藏首项，sid仍残留；Set-Cookie同样成立。已补普通/不完整头隐藏到行尾，结构化JSON按字段处理；另将URL query与头匹配分开，敏感键解码后投影，正常status参数保留。主代理复跑生产/services子路由（含quoted首Cookie）返回200，摘要和日志均REDACTED、无合成值残留；结构化控制字符分隔的authorization键值也被隐藏。所有自有资源清理，独立A审查中。
+- 独立A发现另一同批解析绕过，主代理已实际确认：`Error: Cookie: sid={"opaque":"SYNTH_COOKIE"}` 和api_key的JSON尾部被当成独立结构化记录，在已脱敏前缀后重新拼回非敏感键的原值；普通journal前缀完整JSON记录本身仍正确保留诊断并隐藏cookie。已交实施者补解析边界，修复复核前不提交。
+- A另发现原摘要支持的 `api key` 空格拼写在迁移后漏匹配；主代理实际确认普通与带引号两例泄出，要求恢复。首轮JSON值范围补丁仅覆盖header/field，A继续指出敏感URL query的同根JSON尾部仍可拼回（含authorization/编码键）；已纳同批补修，未把局部修正当作整体完成。
+- 继续复审的中间补丁发现非敏感JSON query值吞后续敏感参数，以及新增无限反斜杠匹配/允许问号的query键导致潜在二次回溯；后两项为源码复杂度推断，未对旧补丁运行大输入。要求按参数key先判敏感再决定值范围、避免非敏感值遮蔽后续参数，并消除新增无界回溯。最终补丁需补最大允许输入规模观察，不能以中间局部结果关闭本批。
+- 实施者改为仅扫描?/&key=、key排除?、敏感key才扩展值范围，quote前仅有限反斜杠；4/16/64/256KiB反斜杠观察约0.13/0.47/1.84/7.44ms，问号约0.10/0.35/1.32/5.14ms，256KiB定时器延迟7.53/5.22ms。主代理最后定向发现未闭合单/双引号query值仍落空匹配后泄出；A指出先替sk令牌会制造数组形占位符并误吞安全status。均要求补齐后再定最终输入，未提前提交。
+- 最终sanitizer blob `45a86e6ccae2b53650bd1a605b2bc288fe3189b3` 已将敏感query未闭合引号保守消费到行尾，query投影前置于sk/sess等通用替换；主代理五组定向输入全无合成值且status保留，再经production `/services` HTTP子路由观察JSON Cookie/未闭合query/空格api key均返回200及REDACTED，资源全部清理。独立A读取四个最终blob并给无剩余本批阻断结论；主代理已读实施者与A完整报告。
+- 实施者14组及补修后的6组自有文件/注入journal/readServiceLogs观察无合成秘密残留，正常Pino/tracing诊断、工具/warn排除、depth32、失败503及600字边界保持；Node22类型/版本/Runtime边界、局部ESLint和diff检查通过。A报告引用的是较早打包清单；补充最终45a86版本的Node22 npm pack --dry-run --ignore-scripts --offline已完成，sanitizer4399B、status22337B、logs6711B全部收录，自有缓存清理，无安装或发布。
+- R27标记已修复待补证。外层鉴权、真实journald、浏览器与Windows/macOS服务未实机运行；只保证已识别凭据形式的安全投影，不声称可识别任意未知正文中的秘密。自定义Socket目录日志归属差异已另记待复现任务。
