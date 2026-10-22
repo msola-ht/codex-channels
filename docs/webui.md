@@ -39,7 +39,7 @@ WebUI 后台启动输出结构化日志，交互终端保留访问地址提示�
 
 模型目录以独立的“内置搜索”列只读显示各账户 config 中的搜索配置，使用普通文本区分关闭、缓存、索引、实时及跟随全局。共用模型目录的账户仍分别显示，不把一个账户的设置应用给其他账户；配置读取错误按账户返回脱敏状态，刷新中与失败时隐藏旧值。使用主 config 的固定提供商显示全局值。模式是请求策略，实际搜索执行仍受上游接口、模型及权限约束。
 
-`#/models/providers` 通过提供商行的“操作 → 提供商联网搜索”打开设置弹窗，覆盖具有独立 config 的第三方受管、Codex 兼容及自定义切换提供商。OpenAI 和使用主 `config.toml` 的固定提供商在通用设置中修改全局 `web_search`。第三方按精确 Provider ID 选择“跟随全局”或关闭、缓存、索引、实时，预览后明确确认；直接写入对应 config（例如 `sf-clp-main.config.toml`）顶层的 `web_search`，跟随全局则删除该字段。保存复用事务备份与并发修订保护，完成后回读并提示应用，不自动操作服务。旧 `codexc-provider-search.toml` 不读取、不迁移、不删除，仅保存在旧文件中的值需重新设置。新启动实例的新建／冷恢复会话采用设置，已加载会话不会即时更新；原生显式搜索参数仍优先。完整文件与恢复合同见[独立提供商的搜索模式](provider-integration-guide.md#独立提供商的搜索模式)。
+`#/models/providers` 通过提供商行的“操作 → 提供商联网搜索”打开设置弹窗，覆盖具有独立 config 的第三方受管、Codex 兼容及自定义切换提供商。OpenAI 和使用主 `config.toml` 的固定提供商在全局设置的行为与偏好分组修改全局 `web_search`。第三方按精确 Provider ID 选择“跟随全局”或关闭、缓存、索引、实时，预览后明确确认；直接写入对应 config（例如 `sf-clp-main.config.toml`）顶层的 `web_search`，跟随全局则删除该字段。保存复用事务备份与并发修订保护，完成后回读并提示应用，不自动操作服务。旧 `codexc-provider-search.toml` 不读取、不迁移、不删除，仅保存在旧文件中的值需重新设置。新启动实例的新建／冷恢复会话采用设置，已加载会话不会即时更新；原生显式搜索参数仍优先。完整文件与恢复合同见[独立提供商的搜索模式](provider-integration-guide.md#独立提供商的搜索模式)。
 
 「模型管理 → 模型配置」的 OpenAI 模型卡片统一读写 `$CODEX_HOME/models_cache.json`（未设置时为 `~/.codex/models_cache.json`）。展示缓存中的模型、上下文、可配置上限与思考等级；隐藏或不支持 API 的模型不展示。页面重新读取只查询文件，不导出、不联网，缓存缺失或结构不支持时明确报错，不用内置目录补齐。
 
@@ -217,7 +217,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 模型转发 / API Key | `#/relay` | `GET /api/v1/management/relay`（脱敏 Key 与账户模型能力）；`POST /api/v1/management/relay/preview`、`POST /api/v1/management/relay/apply`（版本化预览与一次性确认写入） |
 | 模型转发 / 请求队列 | `#/relay/queue` | `GET /api/v1/management/relay/queue`（当前请求快照）；`GET /api/v1/management/relay/queue/events`（SSE 变化通知） |
-| 设置与管理 | `#/settings`、`#/settings/permissions`、`#/settings/network`、`#/settings/data`、`#/settings/services`；模型管理见下文 | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和最近可操作错误；界面仅在服务停止时提示）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/调用记录维护任务） |
+| 设置与管理 | `#/settings/global`、`#/settings`、`#/settings/permissions`、`#/settings/network`、`#/settings/data`、`#/settings/services`；模型管理见下文 | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和最近可操作错误；界面仅在服务停止时提示）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/调用记录维护任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 | 渠道投递队列 | `#/delivery`（左侧导航） | `GET /api/v1/management/delivery/queue?before=&state=`；`GET /api/v1/management/delivery/events`（SSE 变化通知）；`POST /api/v1/management/delivery/content-batch`（批量摘要）；`GET /api/v1/management/delivery/content?id=&revision=`（单条内容预览）；`POST /api/v1/management/delivery/batch-preview`、`POST /api/v1/management/delivery/batch-apply`（批量重试/忽略）；`POST /api/v1/management/delivery/preview`、`POST /api/v1/management/delivery/retry`（单条重试） |
 
@@ -575,17 +575,17 @@ webui/src/
   pages/       概览、会话、会话详情、请求、错误、调用详情、模型管理、消息渠道、设置子页
 ```
 
-左侧「模型管理」使用可折叠二级菜单：提供商（`#/models/providers`）、模型配置（`#/models/configuration`）、全局上下文（`#/models/context`）。子页可直接打开，当前子页高亮并展开父级；点击父级文字或箭头仅展开或收起子菜单，不跳转页面；桌面图标模式点击父级同时展开侧栏，手机选择子页后关闭抽屉。
+左侧「模型管理」使用可折叠二级菜单：提供商（`#/models/providers`）、模型配置（`#/models/configuration`）。子页可直接打开，当前子页高亮并展开父级；点击父级文字或箭头仅展开或收起子菜单，不跳转页面；桌面图标模式点击父级同时展开侧栏，手机选择子页后关闭抽屉。
 
 提供商页统一展示 OpenAI、受管账户和自定义提供商，支持按平台筛选；新增入口选择平台，新增或编辑在弹窗内预览确认，凭据只写入。每行“操作”菜单按适用范围提供编辑、设为本平台默认账户、模型配置、联网搜索、切换主提供商和移除本地配置。主提供商、本平台默认账户与默认模型含义不同，分别管理；托管账户处于固定模式时阻止主提供商切换。“已配置登录凭据”仅表示存在登录凭据文件，其他配置状态来自相应配置快照，不代表上游连接或模型可用。OpenAI 登录与 CCG 账户在终端配置，相关命令通过弹窗查看。账户及凭据统一由此入口维护。
 
-行内“模型配置”携带精确 Provider ID 定位目录，匹配共享目录时仍展示其实际账户影响范围；找不到目录时明确提示并提供查看全部模型的入口。模型配置将默认模型、思考等级显示为目录标题标签；自定义与托管目录通过标题“操作”菜单选择“添加”或“编辑”，仅显示该目录支持的操作。共用目录按账户标识默认值与编辑目标。Codex 默认值在目录上方“Codex 主配置默认值”栏显示提供商与原始覆盖，通过“操作”打开设置弹窗；模型与思考等级一起预览确认，加速档位单独预览确认，目录刷新保留；不再展示独立的 Codex 与托管提供商默认值卡片。渠道新会话覆盖保持独立；全局上下文页提供全局窗口预设与精确输入，自动压缩支持 50%、60%、70%、80%、90% 比例预设，按明确配置的全局窗口向下取整为 Token 阈值。两项独立保存，清除窗口不会重算或清除压缩阈值；窗口未知时仍可直接输入阈值或清除覆盖。各模型窗口在模型配置表格内编辑：OpenAI 使用专用 272K、372K、500K 预设（K = 1000 Token）；托管账户及自定义目录与 CLI 共用 128K、256K、384K、512K、1M（K = 1024 Token），两组都保留最大值和自定义输入；第三方最低 1024 Token，OpenAI 保留正整数约束。托管目录按提供商家族分组，每家只展示一组模型；上下文、默认思考等级、模板和本地移除作用于该家共用目录，账户默认模型选择仍各自保存。用户偏好按所选字段独立预览保存，Plan 思考等级等仍保留在设置页。各子页手动刷新及恢复可见时读取当前配置，确认期间延后自动刷新；写入后刷新同页关联配置。
+行内“模型配置”携带精确 Provider ID 定位目录，匹配共享目录时仍展示其实际账户影响范围；找不到目录时明确提示并提供查看全部模型的入口。模型配置将默认模型、思考等级显示为目录标题标签；自定义与托管目录通过标题“操作”菜单选择“添加”或“编辑”，仅显示该目录支持的操作。共用目录按账户标识默认值与编辑目标。Codex 默认值在目录上方“Codex 主配置默认值”栏显示提供商与原始覆盖，通过关联入口进入“设置 → 全局设置”的模型默认值分组；模型与思考等级一起预览确认，加速档位单独预览确认，目录刷新保留；不再展示独立的 Codex 与托管提供商默认值卡片。渠道新会话覆盖保持独立；全局设置的上下文与压缩分组提供全局窗口预设与精确输入，自动压缩支持 50%、60%、70%、80%、90% 比例预设，按明确配置的全局窗口向下取整为 Token 阈值。两项独立保存，清除窗口不会重算或清除压缩阈值；窗口未知时仍可直接输入阈值或清除覆盖。各模型窗口在模型配置表格内编辑：OpenAI 使用专用 272K、372K、500K 预设（K = 1000 Token）；托管账户及自定义目录与 CLI 共用 128K、256K、384K、512K、1M（K = 1024 Token），两组都保留最大值和自定义输入；第三方最低 1024 Token，OpenAI 保留正整数约束。托管目录按提供商家族分组，每家只展示一组模型；上下文、默认思考等级、模板和本地移除作用于该家共用目录，账户默认模型选择仍各自保存。用户偏好按所选字段独立预览保存，Plan 思考等级等统一在全局设置管理。各子页手动刷新及恢复可见时读取当前配置，确认期间延后自动刷新；写入后刷新同页关联配置。
 
 自定义提供商首次配置使用通用编程提示词草稿，按准确模型 ID 填写名称、上下文及能力，不再选择官方模型列表或起点模板。已配置的 CCG、OCG、CLP 和自定义目录共用“添加模型”：独立填写或继承同一提供商保存的快照，预览后保存，不自动调用推理或证明能力。继承不复制凭据或模板关联，CLP 同时保存并展示请求格式和路由。模型编辑只管理已有模型与默认值；固定 DS 模型可从受管提供商的 DS 添加入口追加，CLP 候选及模板更新读取仓库 DS 模板。CLP Relay 与渠道共用目录，Key 授权和思考策略仍单独管理。
 
 DS、OCG、CLP 在统一提供商页中使用添加、编辑、设为本平台默认账户和移除本地配置操作。编辑预选已配置模式，缺失时显示未设置并要求明确选择；Key 可留空保留当前凭据。读取失败可在弹窗重试或取消；确认中展示平台、精确账户目标、模式前后值及凭据保留／替换，取消预览保留当前编辑草稿，关闭编辑或保存成功后清除 Key。配置无变化不写入、不备份、不要求重启。OCG 不再单列实例释放，新增无需邮箱或手机号，已有展示信息保留。CCG 账户仍在 Setup 管理，WebUI 保留既有模型管理能力。
 
-全局上下文与压缩写入用户主配置，不属于某个模型目录。自动压缩阈值按有效配置中的 `model_auto_compact_token_limit`、模型目录的 `auto_compact_token_limit`、上游窗口 90% 默认值依次取值；已知窗口时最终阈值不超过窗口的 90%。`effective_context_window_percent` 独立控制可用上下文比例，不参与上述覆盖顺序。聚合模式要求各模型独立管理窗口，存在全局窗口或压缩阈值覆盖时拒绝启用。
+全局上下文与压缩写入用户主配置，不属于某个模型目录。自动压缩阈值按有效配置中的 `model_auto_compact_token_limit`、模型目录的 `auto_compact_token_limit`、上游窗口 90% 默认值依次取值；已知窗口时最终阈值不超过窗口的 90%。`effective_context_window_percent` 独立控制可用上下文比例，不参与上述覆盖顺序。当前聚合入口关闭；保留实现要求各模型独立管理窗口，存在全局窗口或压缩阈值覆盖时拒绝启用。
 
 内置搜索读取全局 `web_search` 及精确 Provider ID 的独立覆盖，不使用额外的模型搜索能力声明过滤请求；搜索是否执行仍取决于上游接口和模型。模型目录提供全局设置与独立提供商搜索设置入口；保存确认按实际值展示修改前后的模式，缺项显示“跟随全局”。搜索诊断保留，不自动修改配置。
 
@@ -608,9 +608,13 @@ DS、CLP、CCG、OCG 和自定义独立目录的模型行提供“更新模板�
 
 侧栏「调用监控」归并请求、调用详情与错误，原有 `#/requests`、`#/traffic`、`#/errors` 地址和查询参数保留。「消息渠道」包含渠道配置（`#/channels`）、投递队列（`#/delivery`）和消息展示（`#/channels/display`）。渠道配置只显示 Gateway 配置快照，不代表实时连接状态；配置与授权继续使用对应 CLI 入口。消息展示集中管理 Telegram 格式、操作详情、计划更新和思考状态。
 
-「设置」分为常规与偏好（`#/settings`）、工作区与权限（`#/settings/permissions`）、网络与访问（`#/settings/network`）、数据与日志（`#/settings/data`）、服务与维护（`#/settings/services`）。常规页保留 Codex 用户偏好和 Gateway 会话/自动化选项；权限页展示原生 Codex 用户权限、Gateway 审批超时和默认 Workspace 选择；网络页管理 WebUI 监听/令牌、共享代理与整组官方 TUI 请求身份；数据页管理调用采集、日志、指标保留与清理；服务页管理服务及后台任务结果；源码安装与更新只在本机终端执行。Relay 服务仍在模型转发页操作。
+「设置」包含全局设置（`#/settings/global`）、常规与偏好（`#/settings`）、工作区与权限（`#/settings/permissions`）、网络与访问（`#/settings/network`）、数据与日志（`#/settings/data`）、服务与维护（`#/settings/services`）。全局页集中 Codex 用户主配置，常规页保留 Gateway 会话/自动化选项；工作区与权限页保留 Gateway 审批超时和默认 Workspace 选择；网络页管理 WebUI 监听/令牌、共享代理与整组官方 TUI 请求身份；数据页管理调用采集、日志、指标保留与清理；服务页管理服务及后台任务结果；源码安装与更新只在本机终端执行。Relay 服务仍在模型转发页操作。
 
 Codex 普通偏好按所选字段独立预览保存，选择继承会清除该字段的用户覆盖；未选择的字段不写入。历史保存、输出偏好和启动检查不依赖 OpenAI 模型目录；设置具体 Plan 思考等级仍受当前模型支持范围约束，清除覆盖不受该限制。未配置与当前版本不支持的值分别显示，模型目录或加速能力查询失败不阻断其他全局设置读取。
+
+全局设置按模型默认值、上下文与压缩、行为与偏好、权限与审批、工具策略分组，摘要旁的“操作”打开对应表单，不重复铺开低频设置。`#/settings/global?section=models|context|general|permissions|tools` 可直达相应分组；模型配置与提供商搜索入口关联到同一页。无效分组明确提示，不静默选择其他分组。原模型管理下的上下文页不再保留为独立入口。
+
+这些值写入 `$CODEX_HOME/config.toml` 的用户层；页面显示保存的覆盖，不冒充工作区或当前会话有效值。提供商启动参数、Profile、项目及组织配置仍按 Codex 合同参与归并。不同提供商模式对主配置字段的约束保留；不能因为归纳到同一页就绕过固定模式限制。Gateway 的渠道默认模型、身份、时区、工作区和服务设置仍保存到 Gateway 配置，模型目录字段及账户默认值仍在各自管理入口维护。MCP 创建删除、子代理规则与 Hook 信任保留原终端事务，不通过全局页复制实现。
 
 CLI 与 WebUI 共用用户配置写入及同连接回读核对。结果区分已确认保存、回读未确认和更高优先级覆盖；回读未确认时不自动重试写入，也不声称当前会话已采用该值。工具策略确认还绑定相关合并配置指纹，来源变化后必须重新预览。原生版本保护不提供跨进程全局串行化，其他进程同时写入仍存在竞争边界。
 
@@ -626,7 +630,7 @@ Codex 与 Provider 配置读取使用已有主 App Server 的短连接，读取�
 
 Gateway 与 Codex 设置写入响应都保留实际生效方式、审计状态及回读一致性。已完成写入后回读失败仍返回成功写入结果，修订为 `null`、`consistency` 为 `unknown`，不会把它报告成未保存；审计记录失败另标记 `auditStatus: degraded`。界面持续显示中英文生效提示及需要处理的警告，不将返回值覆盖到当前快照，而是重新读取权威配置。最新读取失败时禁止继续修改，刷新成功后才恢复；写入请求结果未确认时提示先核对实际配置，不自动重复写入。明确领域错误保留稳定代码和分类状态，未知内部错误不回显原始消息或任意代码。
 
-权限页的“Codex 默认审批方式”展示用户层 `approvals_reviewer` 偏好，自动审查写入 `auto_review`，手动审批写入 `user`，未配置时显示“未设置”，不推断新会话的最终生效值。
+全局设置中“权限与审批”的“Codex 默认审批方式”展示用户层 `approvals_reviewer` 偏好，自动审查写入 `auto_review`，手动审批写入 `user`，未配置时显示“未设置”，不推断新会话的最终生效值。
 变更经过预览、一次性确认令牌、修订校验和保存回读，只修改审核人；沙盒、审批策略和网络权限保持各自独立。
 策略读取不可用、已有值不受支持或受管 requirements 限制时只读，未知值不显示为手动审批。
 新 Thread 仍受 Profile、项目配置、显式参数与组织策略约束，已加载或恢复的会话不随默认审批方式切换。

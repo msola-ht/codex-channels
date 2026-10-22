@@ -37,8 +37,19 @@ export interface NavItem {
 export const modelNavItems: NavItem[] = [
   { to: "/models/providers", labelKey: "modelManagement.providers", icon: Boxes },
   { to: "/models/configuration", labelKey: "modelManagement.models", icon: Settings },
-  { to: "/models/context", labelKey: "modelManagement.context", icon: ListOrdered },
 ]
+
+export const globalSettingsSections = [
+  { id: "models", labelKey: "globalSettings.models", descriptionKey: "globalSettings.modelsHint" },
+  { id: "context", labelKey: "globalSettings.context", descriptionKey: "globalSettings.contextHint" },
+  { id: "general", labelKey: "globalSettings.general", descriptionKey: "globalSettings.generalHint" },
+  { id: "permissions", labelKey: "globalSettings.permissions", descriptionKey: "globalSettings.permissionsHint" },
+  { id: "tools", labelKey: "globalSettings.tools", descriptionKey: "globalSettings.toolsHint" },
+] as const
+export type GlobalSettingsSection = typeof globalSettingsSections[number]["id"]
+export function globalSettingsSection(value: string | null) {
+  return globalSettingsSections.find(section => section.id === value) ?? null
+}
 
 export const monitoringNavItems: NavItem[] = [
   { to: "/requests", labelKey: "pages.requests", icon: Activity },
@@ -56,6 +67,7 @@ export const channelNavItems: NavItem[] = [
   { to: "/channels/display", labelKey: "navigation.channelDisplay", icon: SlidersHorizontal },
 ]
 export const settingsNavItems: NavItem[] = [
+  { to: "/settings/global", labelKey: "globalSettings.title", icon: SlidersHorizontal },
   { to: "/settings", labelKey: "navigation.general", icon: Settings },
   { to: "/settings/permissions", labelKey: "navigation.permissions", icon: FolderKey },
   { to: "/settings/network", labelKey: "navigation.network", icon: Network },

@@ -21,11 +21,11 @@ import { ToolAccessSettings } from "@/components/settings/tool-access-settings"
 const compactPercentPresets = [50, 60, 70, 80, 90] as const
 const compactTokens = (window: number, percent: number) => String(BigInt(window) * BigInt(percent) / 100n)
 
-export function AppServerSettingsCard({ management, onChanged, onEditingChange, section = "general", renderContent }: { management: CodexSettingsController; onChanged?: () => void; onEditingChange?: (editing: boolean) => void; section?: "general" | "permissions" | "models" | "context"; renderContent?: (content: ReactNode) => ReactNode }) {
+export function AppServerSettingsCard({ management, onChanged, onEditingChange, section = "general", renderContent }: { management: CodexSettingsController; onChanged?: () => void; onEditingChange?: (editing: boolean) => void; section?: "general" | "permissions" | "models" | "context" | "tools"; renderContent?: (content: ReactNode) => ReactNode }) {
   const { t } = useTranslation()
   const settings = management.codexSettings
   const selectedModel = settings?.models.find((model) => settings.defaults.model === null ? model.isDefault : model.model === settings.defaults.model)
-  const [defaultDraft, patchDefaults, resetDefaults] = useSettingsDraft({ model: settings?.defaults.model ?? "", reasoning: settings?.defaults.reasoningEffort ?? "" })
+  const [defaultDraft, patchDefaults, resetDefaults] = useSettingsDraft({ model: settings?.defaults.configuredModel ?? "", reasoning: settings?.defaults.reasoningEffort ?? "" })
   const [tierDraft, patchTier, resetTier] = useSettingsDraft({ tier: settings?.defaults.serviceTier == null ? "" : normalizeServiceTier(settings.defaults.serviceTier) })
   const compactSource = { contextWindow: settings?.compact.contextWindow == null ? "" : String(settings.compact.contextWindow), autoCompactTokenLimit: settings?.compact.autoCompactTokenLimit == null ? "" : String(settings.compact.autoCompactTokenLimit) }
   const [compact, patchCompact, resetCompact] = useSettingsDraft(compactSource)
@@ -40,15 +40,18 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
     : autoCompactTokenLimit === "" ? "default" : matchingCompactPercents.length === 1 ? String(matchingCompactPercents[0]) : "custom"
   const windowPreset = customWindow ? "custom" : contextWindow === "" ? "default" : contextWindowPresetTokens.some(tokens => String(tokens) === contextWindow) ? contextWindow : "custom"
   const [compactError, setCompactError] = useState<{ field: "contextWindow" | "autoCompactTokenLimit"; value: string; message: MessageKey } | null>(null)
+  const [toolEditing, setToolEditing] = useState(false)
   const visibleCompactError = compactError !== null
     && compactError.value === compact[compactError.field]
       ? compactError : null
   const compactEditing = section === "context"
     && (contextWindow !== compactSource.contextWindow || autoCompactTokenLimit !== compactSource.autoCompactTokenLimit)
+  const modelEditing = section === "models" && (defaultDraft.model !== (settings?.defaults.configuredModel ?? "") || defaultDraft.reasoning !== (settings?.defaults.reasoningEffort ?? "") || tierDraft.tier !== (settings?.defaults.serviceTier == null ? "" : normalizeServiceTier(settings.defaults.serviceTier)))
+  const editing = compactEditing || modelEditing || section === "tools" && toolEditing
   useEffect(() => {
-    onEditingChange?.(compactEditing)
+    onEditingChange?.(editing)
     return () => onEditingChange?.(false)
-  }, [compactEditing, onEditingChange])
+  }, [editing, onEditingChange])
   useEffect(() => {
     if (management.lastAppliedSetting?.kind === "model-compact") { resetCompact(); setCustomWindow(false); setCompactChoice(null) }
     if (management.lastAppliedSetting?.kind === "defaults") resetDefaults()
@@ -65,7 +68,7 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
   const draftModel = settings.models.find(model => model.model === defaultDraft.model)
   const draftEfforts = draftModel?.reasoningEfforts.map(item => [item.effort, item.effort]) ?? []
   const draftEffortValid = draftEfforts.some(([effort]) => effort === defaultDraft.reasoning)
-  const unavailableModel = selected === undefined ? settings.defaults.model : null
+  const unavailableModel = selected === undefined ? settings.defaults.configuredModel : null
   const modelOptions = settings.models.map((model) => [model.model, model.displayName])
   if (unavailableModel !== null) modelOptions.unshift([unavailableModel, t("settingsFields.modelUnavailable", { model: unavailableModel })])
   const effortOptions = selected?.reasoningEfforts.map((item) => [item.effort, item.effort]) ?? []
@@ -113,26 +116,26 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
       {settings.defaults.unsupportedFields.length > 0 && <Alert><AlertDescription>{t("globalSettings.unsupported")}</AlertDescription></Alert>}
       {!settings.modelsAvailable && settings.provider === "openai" && <Alert><AlertDescription>{t("globalSettings.modelsUnavailable")}</AlertDescription></Alert>}
       {section === "models" && !settings.accelerationAvailable && <Alert><AlertDescription>{t("globalSettings.accelerationUnavailable")}</AlertDescription></Alert>}
-        {section !== "context" && <FieldGroup className={cn("grid gap-x-8 gap-y-3", section !== "models" && "md:grid-cols-2")}>
-          <SettingsRow label={t("settingsFields.currentProvider")} value={settings.provider} badge />
+        {section !== "context" && section !== "tools" && <FieldGroup className={cn("grid gap-x-8 gap-y-3", section !== "models" && "md:grid-cols-2")}>
           {section === "models" && <>
-          <ManagedSelect fullWidth label={t("settingsFields.defaultModel")} value={defaultDraft.model} placeholder={t("settingsFields.selectValidModel")} options={modelOptions} disabledValues={unavailableModel !== null ? [unavailableModel] : []} disabled={officialDisabled} onChange={value => { const model = settings.models.find(candidate => candidate.model === value); if (model) patchDefaults({ model: value, reasoning: model.reasoningEfforts.some(candidate => candidate.effort === defaultDraft.reasoning) ? defaultDraft.reasoning : model.defaultReasoningEffort }) }} />
+          <SettingsRow label={t("settingsFields.currentProvider")} value={settings.provider} badge />
+          <ManagedSelect fullWidth label={t("settingsFields.defaultModel")} value={defaultDraft.model} placeholder={t("settingsFields.notSet")} options={modelOptions} disabledValues={unavailableModel !== null ? [unavailableModel] : []} disabled={officialDisabled} onChange={value => { const model = settings.models.find(candidate => candidate.model === value); if (model) patchDefaults({ model: value, reasoning: model.reasoningEfforts.some(candidate => candidate.effort === defaultDraft.reasoning) ? defaultDraft.reasoning : model.defaultReasoningEffort }) }} />
           <ManagedSelect fullWidth label={t("settingsFields.reasoningEffort")} value={defaultDraft.reasoning} placeholder={t("managementUi.followModelDefault")} options={draftEfforts} disabledValues={draftEffortValid ? [] : [defaultDraft.reasoning]} disabled={officialDisabled || draftModel === undefined} onChange={reasoning => patchDefaults({ reasoning })} />
-          <Button className="self-start" variant="outline" disabled={officialDisabled || !draftModel || !draftEffortValid || defaultDraft.model === settings.defaults.model && defaultDraft.reasoning === settings.defaults.reasoningEffort} onClick={() => void management.previewSetting({ kind: "defaults", model: defaultDraft.model, reasoningEffort: defaultDraft.reasoning }, { key: "settingsFields.defaultModel" })}>{t("modelManagement.preview")}</Button>
+          <Button className="self-start" variant="outline" disabled={officialDisabled || !draftModel || !draftEffortValid || defaultDraft.model === settings.defaults.configuredModel && defaultDraft.reasoning === settings.defaults.reasoningEffort} onClick={() => void management.previewSetting({ kind: "defaults", model: defaultDraft.model, reasoningEffort: defaultDraft.reasoning }, { key: "settingsFields.defaultModel" })}>{t("modelManagement.preview")}</Button>
           <Separator />
           <ManagedSelect fullWidth label={t("settingsFields.serviceTier")} value={serviceTier} placeholder={t("settingsFields.serviceTierDefault")} options={serviceTierOptions} disabledValues={serviceTierUnavailable ? [serviceTier] : []} description={t("settingsFields.serviceTierHint")} disabled={officialDisabled} onChange={tier => patchTier({ tier })} />
-          <Button className="self-start" variant="outline" disabled={officialDisabled || serviceTierUnavailable || !["default", "fast", "ultrafast"].includes(serviceTier) || serviceTier === (settings.defaults.serviceTier === null ? "" : normalizeServiceTier(settings.defaults.serviceTier)) || defaultDraft.model !== (settings.defaults.model ?? "") || defaultDraft.reasoning !== (settings.defaults.reasoningEffort ?? "")} onClick={() => { if (serviceTier === "default" || serviceTier === "fast" || serviceTier === "ultrafast") void management.previewSetting({ kind: "service-tier", serviceTier }, { key: "settingsFields.serviceTier" }) }}>{t("modelManagement.preview")}</Button>
+          <Button className="self-start" variant="outline" disabled={officialDisabled || serviceTierUnavailable || !["default", "fast", "ultrafast"].includes(serviceTier) || serviceTier === (settings.defaults.serviceTier === null ? "" : normalizeServiceTier(settings.defaults.serviceTier)) || defaultDraft.model !== (settings.defaults.configuredModel ?? "") || defaultDraft.reasoning !== (settings.defaults.reasoningEffort ?? "")} onClick={() => { if (serviceTier === "default" || serviceTier === "fast" || serviceTier === "ultrafast") void management.previewSetting({ kind: "service-tier", serviceTier }, { key: "settingsFields.serviceTier" }) }}>{t("modelManagement.preview")}</Button>
           </>}
           {section === "general" && <>
-          <ManagedSelect fullWidth label={t("settingsFields.webSearch")} value={settings.defaults.webSearch ?? ""} placeholder={unsetLabel("webSearch")} description={t("openAiModelCatalog.searchDefaultHint")} options={[["live", t("settingsFields.live")], ["indexed", t("settingsFields.indexed")], ["cached", t("settingsFields.cached")], ["disabled", t("settingsFields.off")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "web-search", mode: value }, { key: "settingsFields.webSearch" })} />
+          <ManagedSelect fullWidth label={t("settingsFields.webSearch")} value={settings.defaults.webSearch ?? ""} placeholder={unsetLabel("webSearch")} description={t("globalSettings.searchHint")} options={[["live", t("settingsFields.live")], ["indexed", t("settingsFields.indexed")], ["cached", t("settingsFields.cached")], ["disabled", t("settingsFields.off")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "web-search", mode: value }, { key: "settingsFields.webSearch" })} />
           <ManagedSelect fullWidth label={t("settingsFields.updatePlan")} value={settings.defaults.updatePlanEnabled === null ? "" : String(settings.defaults.updatePlanEnabled)} placeholder={unsetLabel("updatePlanEnabled")} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "update-plan", enabled: value === "true" }, { key: "settingsFields.updatePlan" })} />
           <ManagedSelect fullWidth label={t("settingsFields.autoRecap")} value={settings.defaults.autoRecapEnabled === null ? "" : String(settings.defaults.autoRecapEnabled)} placeholder={unsetLabel("autoRecapEnabled")} options={[["false", t("settingsFields.off")], ["true", t("settingsFields.on")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "auto-recap", enabled: value === "true" }, { key: "settingsFields.autoRecap" })} />
           </>}
           {section === "permissions" && <>
-          <ManagedSelect label={t("settingsFields.approvalsReviewer")} value={settings.approvalsReviewer.value ?? ""} placeholder={t("settingsFields.approvalsReviewerUnset")} options={[["user", t("settingsFields.manualReview")], ["auto_review", t("settingsFields.autoReview")]]} disabled={busy || !settings.approvalsReviewer.editable} description={t(reviewerHint)} onChange={(value) => void management.previewSetting({ kind: "approvals-reviewer", value }, { key: "settingsFields.approvalsReviewer" })} />
-          <ManagedSelect label="Sandbox" value={settings.permissions.sandboxMode ?? ""} placeholder={t(settings.permissions.unsupportedFields.includes("sandboxMode") ? "settingsFields.permissionUnsupported" : "settingsFields.permissionInherited")} description={t("settingsFields.permissionSingleHint")} options={[["read-only", t("settingsFields.readOnly")], ["workspace-write", t("settingsFields.workspaceWrite")]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: value }, { key: "settingsFields.sandbox" })} />
-          <ManagedSelect label={t("settingsFields.approvalPolicy")} value={settings.permissions.approvalPolicy ?? ""} placeholder={t(settings.permissions.unsupportedFields.includes("approvalPolicy") ? "settingsFields.permissionUnsupported" : "settingsFields.permissionInherited")} description={t("settingsFields.permissionSingleHint")} options={[["on-request", t("settingsFields.onRequest")], ["never", t("settingsFields.never")]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", approvalPolicy: value }, { key: "settingsFields.approvalPolicy" })} />
-          <ManagedSelect label={t("settingsFields.networkAccess")} value={settings.permissions.networkAccess === null ? "" : String(settings.permissions.networkAccess)} placeholder={t(settings.permissions.unsupportedFields.includes("networkAccess") ? "settingsFields.permissionUnsupported" : "settingsFields.permissionInherited")} description={t("settingsFields.permissionSingleHint")} options={[["true", t("settingsFields.allowed")], ["false", t("settingsFields.denied")]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", networkAccess: value === "true" }, { key: "settingsFields.networkAccess" })} />
+          <ManagedSelect fullWidth label={t("settingsFields.approvalsReviewer")} value={settings.approvalsReviewer.value ?? ""} placeholder={t(settings.approvalsReviewer.reason === "unsupported-value" ? "globalSettings.unsupportedValue" : "settingsFields.approvalsReviewerUnset")} options={[["user", t("settingsFields.manualReview")], ["auto_review", t("settingsFields.autoReview")]]} disabled={busy || !settings.approvalsReviewer.editable} description={t(reviewerHint)} onChange={(value) => void management.previewSetting({ kind: "approvals-reviewer", value }, { key: "settingsFields.approvalsReviewer" })} />
+          <ManagedSelect fullWidth label="Sandbox" value={settings.permissions.sandboxMode ?? ""} placeholder={t(settings.permissions.unsupportedFields.includes("sandboxMode") ? "settingsFields.permissionUnsupported" : "settingsFields.permissionInherited")} description={t("settingsFields.permissionSingleHint")} options={[["read-only", t("settingsFields.readOnly")], ["workspace-write", t("settingsFields.workspaceWrite")]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: value }, { key: "settingsFields.sandbox" })} />
+          <ManagedSelect fullWidth label={t("settingsFields.approvalPolicy")} value={settings.permissions.approvalPolicy ?? ""} placeholder={t(settings.permissions.unsupportedFields.includes("approvalPolicy") ? "settingsFields.permissionUnsupported" : "settingsFields.permissionInherited")} description={t("settingsFields.permissionSingleHint")} options={[["on-request", t("settingsFields.onRequest")], ["never", t("settingsFields.never")]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", approvalPolicy: value }, { key: "settingsFields.approvalPolicy" })} />
+          <ManagedSelect fullWidth label={t("settingsFields.networkAccess")} value={settings.permissions.networkAccess === null ? "" : String(settings.permissions.networkAccess)} placeholder={t(settings.permissions.unsupportedFields.includes("networkAccess") ? "settingsFields.permissionUnsupported" : "settingsFields.permissionInherited")} description={t("settingsFields.permissionSingleHint")} options={[["true", t("settingsFields.allowed")], ["false", t("settingsFields.denied")]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", networkAccess: value === "true" }, { key: "settingsFields.networkAccess" })} />
           <SettingsRow label="Permission Profile" value={settings.permissions.defaultPermissions ?? t("settingsFields.notConfigured")} code />
           </>}
         </FieldGroup>}
@@ -195,15 +198,15 @@ export function AppServerSettingsCard({ management, onChanged, onEditingChange, 
         </section>
 
         </>}
-        {section === "permissions" && <><Separator /><ToolAccessSettings management={management} /></>}
+        {section === "tools" && <ToolAccessSettings management={management} onEditingChange={setToolEditing} />}
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
       </div>
   return <>
     <PendingSettingDialog className={section === "models" ? modelOperationDialogClassName : undefined} pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
     {renderContent && management.error !== null && <SettingsError title={t("settingsUi.codexLoadFailed")} message={management.error} retry={management.refetch} />}
-    {feedback}
+    {!renderContent && feedback}
     {renderContent ? renderContent(content) : <Card>
-      <CardHeader><CardTitle>{t(section === "models" ? "settingsFields.modelDefaults" : section === "context" ? "settingsFields.codexContext" : section === "permissions" ? "navigation.codexPermissions" : "navigation.codexGeneral")}</CardTitle><CardDescription>{t("navigation.configurationHint")}</CardDescription></CardHeader>
+      <CardHeader><CardTitle>{t(section === "models" ? "settingsFields.modelDefaults" : section === "context" ? "settingsFields.codexContext" : section === "tools" ? "globalSettings.tools" : section === "permissions" ? "navigation.codexPermissions" : "navigation.codexGeneral")}</CardTitle><CardDescription>{t("navigation.configurationHint")}</CardDescription></CardHeader>
       <CardContent>{content}</CardContent>
     </Card>}
   </>

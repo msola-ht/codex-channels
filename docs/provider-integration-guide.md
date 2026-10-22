@@ -477,13 +477,13 @@ JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行�
 
 CLI 使用 `codexc config → 提供商联网搜索`，也可从 `codexc setup → 模型与提供商 → 提供商联网搜索` 进入同一流程。选择精确提供商账户、搜索模式，查看变更前后值并确认后保存；“跟随全局”删除该提供商覆盖。官方和固定提供商共用主配置，菜单提示转到 `codexc config → Codex 新会话与用户偏好 → 联网搜索模式`。CLI 与 WebUI 共用预览、事务锁、备份、过期确认检查和回读流程；取消或值未变化不写入，不发搜索探测请求，也不自动重启服务。
 
-WebUI `#/models/providers` 的“提供商联网搜索”卡片为每个已配置的独立提供商设置搜索模式。
+WebUI `#/models/providers` 的行内“操作 → 提供商联网搜索”为选中的独立提供商设置搜索模式。
 支持具有独立 config 的第三方受管账户、Codex 兼容提供商和自定义切换提供商；
 按精确 Provider ID 隔离，不按家族、显示名称或共享模型目录联动。模型目录搜索列保持只读，
-全局模式仍在通用设置中管理。选择“跟随全局”或 `disabled`、`cached`、`indexed`、`live` 后，
+全局模式在“设置 → 全局设置 → 行为与偏好”中管理。选择“跟随全局”或 `disabled`、`cached`、`indexed`、`live` 后，
 先查看预览，再明确确认保存；保存后回读配置，并提示 `restart-app-server`，WebUI 不直接执行重启。
 运行中的 Gateway 可按现有活动与租约条件安全应用受管账户变更；自定义实例须按提示重启 App Server。
-OpenAI 官方账户和使用主配置的固定提供商读取 `config.toml` 的全局 `web_search`，在通用设置中修改，
+OpenAI 官方账户和使用主配置的固定提供商读取 `config.toml` 的全局 `web_search`，在全局设置中修改，
 不在提供商卡片中提供另一份覆盖。
 
 搜索值直接保存在对应提供商 config 的顶层，例如 `$CODEX_HOME/sf-clp-main.config.toml`：
