@@ -385,7 +385,10 @@ export async function updateManagedSourceInstallation(
     }
     if (metricsUpgrade.attempted && (!metricsUpgrade.completed || !switched || !completedStages.includes("refresh-command"))) {
       const candidatePath = switched ? checkout : stagedCheckout;
-      const message = `指标数据库升级已开始，更新未完成；服务保持停止，禁止启动旧 v31 程序。数据库备份候选路径：${metricsUpgrade.backupPath}；请核对备份是否完整。候选源码保留：${candidatePath}。先完成该候选的 npm run install:global 并核对 v32 数据库，再按原状态恢复服务；人工回退须先恢复完整 v31 备份和匹配旧程序。`;
+      const sourceRecovery = switched
+        ? `源码已切换，使用固定受管目录 ${checkout}。`
+        : `源码尚未切换成功；先核对候选 HEAD 为 ${remoteCommit}、目录归属及未提交修改，完整保留固定受管目录 ${checkout} 中的现有源码和修改${backupPath ? `以及旧源码备份 ${backupPath}` : ""}，再将候选目录整体移至该固定路径；目标存在时不得覆盖，也不要从临时候选目录安装全局包。`;
+      const message = `指标数据库升级已开始，更新未完成；服务保持停止，禁止启动旧 v31 程序。数据库备份候选路径：${metricsUpgrade.backupPath}；请核对备份是否完整，数据库可能仍为 v31，不要假定迁移成功。候选源码保留：${candidatePath}。${sourceRecovery}核对 npm prefix --global 仍为 ${plan.npmPrefix}，从固定受管目录执行 npm run install:global；保持全部写入方停止，再运行新命令 codexc update 完成数据库检查或迁移。确认指标库为 v32、安装来源指向固定受管目录、服务入口指向本次源码或全局包后，按失败前记录的运行状态恢复服务。人工回退须先恢复完整 v31 备份和匹配旧程序；详细步骤见 docs/source-install.md。`;
       writeMessageSafely(writeMessage, "remediation", message);
       throw annotateSourceUpdateFailure(new Error(`${message} ${errorMessage(updateError)}`, { cause: updateError }), {
         stage: activeStage,
@@ -396,6 +399,7 @@ export async function updateManagedSourceInstallation(
           ...(backupPath ? { backupPath } : {}),
           metricsBackupPath: metricsUpgrade.backupPath,
           candidatePath,
+          checkoutPath: checkout,
         },
         recommendation: message,
       });

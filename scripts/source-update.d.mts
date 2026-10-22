@@ -52,6 +52,8 @@ export interface SourceUpdateFailure {
     backupPath?: string;
     metricsBackupPath?: string;
     candidatePath?: string;
+    /** Canonical managed checkout required before installing a retained candidate. */
+    checkoutPath?: string;
   };
   recommendation: string;
 }
