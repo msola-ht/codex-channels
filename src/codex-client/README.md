@@ -195,8 +195,15 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   供跨 Provider 会话展示和冷恢复定位使用；macOS Desktop 启动前的只读检查使用官方分页
   `thread/loaded/list` 枚举当前内存中的持久及临时 Thread，再通过 `thread/read` 读取权威状态，只返回
   活动 Thread 数量。
-  新 Thread 可显式携带官方 `modelProvider`、受控 `threadSource=automation` 与实验
-  `dynamicTools`；前台新建、恢复和 Fork 不补网关权限默认值，由 App Server 处理原生配置及继承。
+  新 Thread 可显式携带官方 `modelProvider` 与实验 `dynamicTools`；普通新建和用户显式 Fork
+  与原生 CLI 一致发送稳定 `threadSource=user`，计划任务新建保留 `threadSource=automation`。
+  Fork 不继承父会话的功能来源；恢复接口没有来源覆盖字段，保留官方持久来源，不重写旧会话或历史用量。
+  普通会话入口的 `turn/start` 显式发送 `turnTrigger=user`；计划任务不填该字段，
+  `turn/steer` 与 Queue 使用各自原生协议，不附加不支持的字段。
+  新建、恢复和 Fork 的 `instructionSources` 透传为实际加载文件清单，供 `/status` 展示生命周期快照；
+  不读取文件正文，也不据此推断系统、开发者或其他动态指令是否存在。
+  功能来源与 `source` 的 CLI/App Server 入口分类独立，普通来源缺失可能影响官方用量页面归类，
+  最终分类及历史统计由官方服务决定。前台新建、恢复和 Fork 不补网关权限默认值，由 App Server 处理原生配置及继承。
   Thread 响应保留实际目录、沙箱、审批策略和 Profile 身份；恢复只核对显式请求的约束。
   无人值守预检按目标 Provider/CWD 读取原生明确受限沙箱配置，创建后的实际权限仍须复核。
   Fork 调用方只允许选择同一 Provider，不承担跨 Provider 权限或历史转换。

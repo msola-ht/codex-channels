@@ -188,6 +188,7 @@ const builtInAgentRoles: AgentRoleEntry[] = [
 ];
 
 export interface ConversationStatus {
+  instructionSources?: readonly string[];
   selectionScope?: string;
   threadId?: string;
   threadName?: string | null;
@@ -1666,6 +1667,7 @@ export class ConversationService implements
   status(target: ConversationTarget): ConversationStatus {
     const binding = this.router.current(target);
     const active = this.core.activeTurn(target);
+    const instructionSources = binding ? this.router.instructionSourcesForThread(binding.threadId) : undefined;
     const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
     const goal = binding ? this.core.goal(binding.threadId) : undefined;
@@ -1682,6 +1684,7 @@ export class ConversationService implements
     };
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
+      ...(instructionSources === undefined ? {} : { instructionSources }),
       ...(binding ? { threadName: this.router.threadNameForThread?.(binding.threadId) ?? null } : {}),
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
@@ -1717,10 +1720,11 @@ export class ConversationService implements
     const status = this.status(target);
     const gitBranch = await this.workspaceGitBranch(target, signal);
     signal?.throwIfAborted();
-    // Recheck the current Workspace after asynchronous IO; outer callers own authorization.
-    const workspace = this.router.workspace(target);
-    if (workspace.id !== status.workspaceId || workspace.cwd !== status.cwd) return this.status(target);
-    return gitBranch ? { ...status, gitBranch } : status;
+    // Refresh the bound Thread and its diagnostics after asynchronous IO;
+    // outer callers own authorization. Only reuse Git data for the same cwd.
+    const current = this.status(target);
+    if (current.workspaceId !== status.workspaceId || current.cwd !== status.cwd) return current;
+    return gitBranch ? { ...current, gitBranch } : current;
   }
 
   private readonly observeThreadRestore: ThreadRestoreObserver = (threadId) => {
@@ -1798,7 +1802,7 @@ export class ConversationService implements
           input,
           clientUserMessageId,
           workspace.cwd,
-          { ...overrides, beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); } },
+          { ...overrides, turnTrigger: "user", beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); } },
         );
       } catch (error) {
         this.recordTurnError("start", target, binding.threadId, null, error);

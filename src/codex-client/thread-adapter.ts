@@ -93,6 +93,12 @@ function toThreadModelProvider(thread: Thread): string {
 }
 
 export function toThreadSession(response: ThreadSessionResponse): ThreadSession {
+  if (!Array.isArray(response.instructionSources)) {
+    throw new Error("Codex Thread 响应缺少有效 instructionSources");
+  }
+  for (const source of response.instructionSources) {
+    requireString(source, "instruction source");
+  }
   requireString(response.cwd, "session cwd");
   requireString(response.model, "model");
   if (response.reasoningEffort !== null) {
@@ -109,6 +115,7 @@ export function toThreadSession(response: ThreadSessionResponse): ThreadSession 
     serviceTier: response.serviceTier,
     approvalsReviewer: toThreadApprovalsReviewer(response.approvalsReviewer),
     contextCompactionItemIds: contextCompactionItemIds(response.thread),
+    instructionSources: [...response.instructionSources],
     effectiveSettings: {
       cwd: response.cwd,
       approvalPolicy: typeof response.approvalPolicy === "string" ? response.approvalPolicy : "granular",

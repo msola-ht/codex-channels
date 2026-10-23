@@ -199,6 +199,8 @@ Workspace 只保存目录身份，不另存沙箱、审批策略、Permission Pr
 前台手动运行的 Gateway 退出后需手动重新启动。此过程不删除磁盘目录或 App Server Thread 历史，也不终止共享 App Server。
 渠道新会话由目标 App Server 按授权目录加载原生配置；恢复、重连和分叉遵循原生 Thread 权限继承规则，
 不会强制重置为当前项目默认。当前会话实际审批方式仍由 `/status`、`/autoreview` 及生命周期卡片展示。
+`/status` 的“指令文件来源”列出 App Server 最近一次新建、恢复或派生时返回的已加载文件路径，
+可用于核对 `AGENTS.md` 等规则来源；它不是文件实时检查，也不是全部系统或动态指令的清单。
 本机 CLI 与 WebUI 的 Codex 权限设置修改原生用户层配置；项目级差异使用受信任的 `.codex/config.toml`。
 用户层偏好不代表所有 Provider、项目或既有 Thread 的实际权限。渠道不再提供 `/workspaceperm`。
 

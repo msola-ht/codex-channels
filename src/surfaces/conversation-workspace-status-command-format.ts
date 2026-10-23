@@ -146,6 +146,16 @@ export function formatConversationStatus(status: ConversationStatus): string {
   if (status.contextCompactionCount !== undefined) {
     lines.push(`上下文压缩：${status.contextCompactionCount} 次`);
   }
+  if (status.threadId) {
+    lines.push("", "指令文件来源（最近一次新建、恢复或派生的加载快照）：");
+    if (status.instructionSources === undefined) {
+      lines.push("尚未取得 App Server 加载清单");
+    } else if (status.instructionSources.length === 0) {
+      lines.push("App Server 返回的文件清单为空（不代表没有其他指令）");
+    } else {
+      lines.push(...status.instructionSources.map((path) => `- ${path.replace(/[\r\n]/gu, " ")}`));
+    }
+  }
   if (status.goal) {
     lines.push(
       `Goal 状态：${formatGoalStatus(status.goal.status)}`,

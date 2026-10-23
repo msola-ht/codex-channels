@@ -97,7 +97,7 @@ export class SessionRouter {
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
   private readonly namesByThread = new Map<string, string | null>();
-  private readonly contextCompactionItemIdsByThread = new Map<string, readonly string[]>();
+  private readonly sessionDiagnosticsByThread = new Map<string, Pick<ThreadSession, "contextCompactionItemIds" | "instructionSources">>();
 
   constructor(
     private readonly codex: ThreadLifecyclePort,
@@ -285,7 +285,12 @@ export class SessionRouter {
   }
 
   contextCompactionItemIdsForThread(threadId: string): readonly string[] | undefined {
-    return this.contextCompactionItemIdsByThread.get(threadId);
+    return this.sessionDiagnosticsByThread.get(threadId)?.contextCompactionItemIds;
+  }
+
+  instructionSourcesForThread(threadId: string): readonly string[] | undefined {
+    if (!this.bindings.getByThread(threadId) || this.unsubscribedBindings.has(threadId)) return undefined;
+    return this.sessionDiagnosticsByThread.get(threadId)?.instructionSources;
   }
 
   updateModelSettings(threadId: string, settings: ThreadModelSettings): void {
@@ -346,9 +351,9 @@ export class SessionRouter {
             );
             this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
             this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-            this.contextCompactionItemIdsByThread.set(
+            this.sessionDiagnosticsByThread.set(
               resumed.thread.id,
-              resumed.contextCompactionItemIds,
+              { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources },
             );
             restoredBinding = {
               target: binding.target,
@@ -373,7 +378,7 @@ export class SessionRouter {
               this.invalidateThreadBinding(binding.threadId);
             } else if (bindingRemoved) {
               this.bindings.removeThread(binding.threadId);
-              this.contextCompactionItemIdsByThread.delete(binding.threadId);
+              this.sessionDiagnosticsByThread.delete(binding.threadId);
               // Removing an unavailable Thread must not replace the saved Workspace
               // selection, including an ID absent from the current configuration.
               this.notifyBindingsChanged();
@@ -518,9 +523,9 @@ export class SessionRouter {
             }
             this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
             this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-            this.contextCompactionItemIdsByThread.set(
+            this.sessionDiagnosticsByThread.set(
               resumed.thread.id,
-              resumed.contextCompactionItemIds,
+              { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources },
             );
             this.clearForceNew(target, Date.now());
             observation?.restored(binding, resumed.thread);
@@ -549,9 +554,9 @@ export class SessionRouter {
     }
     this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier, "default", started.approvalsReviewer);
     this.namesByThread.set(started.thread.id, started.thread.name);
-    this.contextCompactionItemIdsByThread.set(
+    this.sessionDiagnosticsByThread.set(
       started.thread.id,
-      started.contextCompactionItemIds,
+      { contextCompactionItemIds: started.contextCompactionItemIds, instructionSources: started.instructionSources },
     );
     this.clearForceNew(target, Date.now());
     this.notifyBindingsChanged();
@@ -655,9 +660,9 @@ export class SessionRouter {
         session.approvalsReviewer,
       );
       this.namesByThread.set(session.thread.id, session.thread.name);
-      this.contextCompactionItemIdsByThread.set(
+      this.sessionDiagnosticsByThread.set(
         session.thread.id,
-        session.contextCompactionItemIds,
+        { contextCompactionItemIds: session.contextCompactionItemIds, instructionSources: session.instructionSources },
       );
       this.notifyBindingsChanged();
       return { binding, session };
@@ -754,16 +759,7 @@ export class SessionRouter {
         let failure = error;
         if (previousUnsubscribed && current && this.sameBinding(current, this.bindings.get(target))) {
           try {
-            const previous = await this.codex.readThread(current.threadId);
-            const previousObservation = transition?.observePreviousRestore?.(current.threadId);
-            try {
-              const restored = await this.resumeInWorkspace(
-                previous, this.workspaces.require(current.workspaceId), {}, false,
-              );
-              previousObservation?.restored(current, restored.thread);
-            } finally {
-              previousObservation?.stop();
-            }
+            await this.restoreUnsubscribedBinding(current, undefined, undefined, transition?.observePreviousRestore);
           } catch (restoreError) {
             transition?.restorePreviousFailed?.();
             failure = new AggregateError([error, restoreError], "绑定切换失败，且原订阅恢复失败", { cause: error });
@@ -771,12 +767,12 @@ export class SessionRouter {
         }
         await this.cleanupFailedResume(threadId, failure);
       }
-      if (previousUnsubscribed && current) this.contextCompactionItemIdsByThread.delete(current.threadId);
+      if (previousUnsubscribed && current) this.sessionDiagnosticsByThread.delete(current.threadId);
       this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
       this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-      this.contextCompactionItemIdsByThread.set(
+      this.sessionDiagnosticsByThread.set(
         resumed.thread.id,
-        resumed.contextCompactionItemIds,
+        { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources },
       );
       const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
       this.clearForceNew(target, Date.now());
@@ -828,7 +824,7 @@ export class SessionRouter {
     if (!binding) return;
     const wasForeground = this.bindings.get(binding.target)?.threadId === threadId;
     this.bindings.removeThread(threadId);
-    this.contextCompactionItemIdsByThread.delete(threadId);
+    this.sessionDiagnosticsByThread.delete(threadId);
     if (wasForeground) this.markForceNew(binding.target, Date.now());
     this.notifyBindingsChanged();
   }
@@ -946,7 +942,7 @@ export class SessionRouter {
       throw error;
     }
     if (replaced && replaced.threadId !== threadId) {
-      this.contextCompactionItemIdsByThread.delete(replaced.threadId);
+      this.sessionDiagnosticsByThread.delete(replaced.threadId);
     }
     this.markForceNew(owner.target, Date.now());
     this.clearForceNew(target, Date.now());
@@ -1041,7 +1037,7 @@ export class SessionRouter {
     }
     onCommitted?.();
     this.unsubscribedBindings.delete(expected.threadId);
-    this.contextCompactionItemIdsByThread.delete(expected.threadId);
+    this.sessionDiagnosticsByThread.delete(expected.threadId);
     this.notifyBindingsChanged();
     return true;
   }
@@ -1085,7 +1081,7 @@ export class SessionRouter {
               this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
                 resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
               this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-              this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
+              this.sessionDiagnosticsByThread.set(resumed.thread.id, { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources });
               observation?.restored(binding, resumed.thread);
             } finally {
               observation?.stop();
@@ -1096,7 +1092,7 @@ export class SessionRouter {
         }
       }
       if (binding) this.bindings.removeThread(threadId);
-      this.contextCompactionItemIdsByThread.delete(threadId);
+      this.sessionDiagnosticsByThread.delete(threadId);
       this.notifyBindingsChanged();
       return binding?.target;
     });
@@ -1201,10 +1197,10 @@ export class SessionRouter {
       }
       await this.cleanupFailedResume(forked.thread.id, failure);
     }
-    this.contextCompactionItemIdsByThread.delete(current.threadId);
+    this.sessionDiagnosticsByThread.delete(current.threadId);
     this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier, "default", forked.approvalsReviewer);
     this.namesByThread.set(forked.thread.id, forked.thread.name);
-    this.contextCompactionItemIdsByThread.set(forked.thread.id, forked.contextCompactionItemIds);
+    this.sessionDiagnosticsByThread.set(forked.thread.id, { contextCompactionItemIds: forked.contextCompactionItemIds, instructionSources: forked.instructionSources });
     this.clearForceNew(target, Date.now());
     this.notifyBindingsChanged();
     return binding;
@@ -1253,7 +1249,7 @@ export class SessionRouter {
 
   forgetThread(threadId: string): ConversationTarget | undefined {
     const binding = this.bindings.getByThread(threadId);
-    this.contextCompactionItemIdsByThread.delete(threadId);
+    this.sessionDiagnosticsByThread.delete(threadId);
     this.namesByThread.delete(threadId);
     if (binding) {
       this.bindings.removeThread(threadId);
@@ -1300,7 +1296,7 @@ export class SessionRouter {
       }
       onCommitted?.();
       this.unsubscribedBindings.delete(current.threadId);
-      this.contextCompactionItemIdsByThread.delete(current.threadId);
+      this.sessionDiagnosticsByThread.delete(current.threadId);
       this.notifyBindingsChanged();
     } else {
       this.bindings.setModelPreference(target, preference);
@@ -1327,7 +1323,7 @@ export class SessionRouter {
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
           resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
         this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-        this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
+        this.sessionDiagnosticsByThread.set(resumed.thread.id, { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources });
         this.unsubscribedBindings.delete(expected.threadId);
         observation?.restored(expected, resumed.thread);
       } finally {
