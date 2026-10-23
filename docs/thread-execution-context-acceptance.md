@@ -1,11 +1,11 @@
 # Thread 执行上下文 Debian 与 macOS 验收记录
 
-本记录维护 2026-10-22 的运行证据及开放补证项，不替代[用户指南](user-guide.md)、
+本记录维护 2026-10-22 至 2026-10-23 的运行证据及开放补证项，不替代[用户指南](user-guide.md)、
 [协议支持矩阵](index.md)或模块契约。早期开发与独立审查见
 [历史记录](archive/thread-execution-context-plan.md)；其中的未观察结论属于当时基线，
 后续补证以本文明确列出的范围为准。Debian 章节补录此前对话中的操作与输出，
 不是本次重新执行的结果；macOS 章节保留 `b268b484` 已提交的证据及限制。
-随后授权执行的 Debian 定向补验单列于末节，不与前次补录混为同一批运行。
+随后授权执行的 Debian 定向补验、会话控制与真实 TG 补验分别单列，不与前次补录混为同一批运行。
 
 ## macOS 基线与环境
 
@@ -233,3 +233,85 @@ stdio Transport，不据此声称本次共享 Unix Socket 路径通过。直接�
 两个 stdio App Server 均退出 code 0，运行检查为 false；初次 Socket 启动进程退出 code 1。
 任务目录 `/tmp/codexc-cwd-V8lBx7` 删除后确认不存在，REPL 已退出。未读取内部 session 文件，
 未改动用户服务、发送真实平台消息或提交收费 Turn。
+
+## 会话控制与状态对齐补验（2026-10-23）
+
+本节对应已提交的 `19519cb6f92d798857e684a2854df37286ee5da4`，运行环境继续为
+Debian 13.7、Node v24.22.1、Codex CLI 0.163.0。独立临时 Codex Home 与任务自有
+stdio App Server 承担观察，不连接用户已部署服务。本轮未发现需要修改实现的确定问题。
+
+源码审查覆盖普通输入/Steer/中断的具体 Turn 身份、Core 活动状态和恢复观察窗口、
+Queue 六类操作的稳定 ID 选择与失效、Bootstrap 旧连接通知过滤、Provider 断线及
+BindingRestoreCoordinator 的恢复与后台清理。锁定上游确认：中断与 Steer 检查目标 Turn，
+Queue 启动依赖已加载 Thread；已提交操作按实际响应结算，不把本地取消表述为远端回滚。
+
+| 操作 | 实际结果 | 证据性质 |
+| --- | --- | --- |
+| 空闲停止与 Queue 查询 | `stop` 返回 false，Queue 返回空列表 | 真实 Client → Router → ConversationService，无平台调用 |
+| Core 人工旧活动状态对接真实空闲 App Server | 停止返回 `-32600 no active turn to interrupt`；Steer 返回 `-32600 no active turn to steer`；权威状态仍为 idle | 人工活动缓存、真实拒绝响应；无真实 Turn 或模型调用 |
+| 先开始旧 Turn、再开始新 Turn、最后完成旧 Turn | 活动 Turn 保持新 ID | Core 人工事件，不等于真实双 Turn 执行 |
+| 同一 Turn 完成及状态消费 | 活动状态清除；ConversationService status 的 turnId 从人工活动 ID 变为 undefined | Core → Application 状态投影，未投递渠道 |
+| 新开始事件早于旧恢复响应 | 恢复响应未覆盖新 Turn | 人工观察窗口与事件 |
+| 完成早于恢复响应、断线后旧恢复窗口返回 | 均没有重新激活旧 Turn | 人工事件与窗口失效 |
+| Queue 空启动、失效序号、不存在的完整 ID | 分别返回 `queue.empty`、`queue.snapshot.required`、`queue.item-not-found`；原生队列保持空 | 真实空 Queue，序号失效由本地显式通知；没有新增排队正文 |
+| 无 Turn 持久化历史关闭并重建 App Server | archive/unarchive 后重新连接，Router 结合 Core 观察窗口恢复；失败列表为空，权威 idle、Core 无活动、Queue 空、stop 返回 false，旧窗口不能复活活动 | 真实历史与进程重建；失效和组件编排由交互环境显式调用，未运行完整 Gateway 自动恢复 |
+
+未执行非空原生 Queue 增删、排序和自动派发，因为添加排队正文可能立即启动模型任务。
+这些路径只完成源码检查；真实活动 Turn 的成功中断/Steer、双客户端竞争、带内容恢复和
+渠道按钮/平台投递仍未观测。人工事件不能替代这些运行证据，已有其他章节的限制继续有效。
+本轮仅补验记录，复用未变化实现的静态与构建结果，文档执行现有文档检查；未运行历史测试，
+未新增测试、探针或守卫脚本。
+
+任务自有的两次 App Server 进程均退出 code 0，运行检查为 false；
+`/tmp/codexc-control-l8n7JP` 删除后确认不存在，交互 REPL 已退出。
+未读取内部 session 文件、修改用户服务或发送真实渠道消息。
+
+## 授权后的真实 TG 会话补验（2026-10-23）
+
+在上一节隔离观察之后，用户指定 TG 及已有 Thread，并授权由验收方发起观察。
+本节继续对应 `19519cb6f92d798857e684a2854df37286ee5da4`、Debian 13.7、
+Node v24.22.1、Codex CLI 0.163.0。已部署的相关模块产物与本地构建一致。
+使用 `ds-main` 的 `deepseek-flash`，在指定 Thread 上共发起 3 个短 Turn；
+余额不是费用上限，本轮没有取得独立账单差额，不能据此报告实际金额。
+
+交互环境使用真实私有 Unix WebSocket 与 Provider 生命周期租约，组合现有 Client、
+Router、ConversationService 和 Core；仅内存绑定，执行前核对指定会话的真实绑定没有变化。
+已部署 Gateway 继续订阅同一 Thread 并负责 TG 输出。本节覆盖业务入口到真实模型及
+TG 输出，不等于从 Telegram 收到命令或点击按钮的入口验收。
+
+| 操作 | 实际结果 | 证据边界 |
+| --- | --- | --- |
+| T1 普通提交后追加输入 | 追加返回同一 Turn ID，`steered: true` | 真实活动 Turn 成功 Steer；随后中断，未判断模型是否遵循追加文字 |
+| T1 期间 Queue 增、查、改、排序、删 | 新增两项，首项更新后移到第二位，另一项删除成功，最终仅保留更新项 | 真实非空原生 Queue，使用稳定条目 ID |
+| T1 中断 | `stop` 返回 true；官方完成事件为 `interrupted`；Queue 保留待启动项 | 成功中断且没有误清队列 |
+| T2 显式启动保留项 | 返回新 Turn，完成输出“队列更新与派发验收完成。”，队列变空 | 成功显式派发；未观察自然完成后的自动派发 |
+| T3 活动期间关闭观察连接并恢复 | 恢复失败列表为空，Core 恢复同一活动 ID；随后收到正文“活动会话重连验收完成。”及 completed 事件 | 真实连接恢复；失效和恢复编排由交互环境调用，未断开生产 Gateway 连接或重启 App Server |
+| TG 最终输出 | T2 正文消息 ID 13039、T3 正文消息 ID 13042；日志均明确记录“Telegram 完成正文投递完成”；三个 Turn 的结束输出任务均 completed | 平台投递日志证据，未观察客户端屏幕和按钮交互 |
+| 最终状态与清理 | 原生 idle、Core 无活动 Turn、Queue 空；观察连接、租约、只读数据库句柄关闭，REPL 退出 code 0 | 未删除授权产生的会话内容；用户绑定保持不变 |
+
+对应 Turn ID：T1 `01a167dc-5803-75c3-a4e2-25bd787f721d`，
+T2 `01a167dc-ca59-7a83-bdf5-86b7c7c598a6`，
+T3 `01a167dd-844a-7810-968f-4110aca4dd66`。
+重连时一次元数据读取的 `activeTurnId: null` 不作为空闲证据：
+`client.readThread` 使用 `includeTurns: false`，适配器从返回的 turns 推导该 ID；
+恢复响应及后续事件另行维护活动身份。最终 idle 由明确状态和完成事件共同确认。
+
+清理后 `codexc status --json` 为 healthy，四个服务 PID 与观察前一致：
+App Server 2884443、Gateway 2884551、Model Relay 2884797、WebUI 2884838。
+未重启或部署服务，未读取 Codex 内部 session 文件，未增加测试、探针或守卫脚本。
+本轮未确认新的实现缺陷；复用未变化实现的静态结果，补充文档后执行文档检查。
+尚未观察的边界为 TG 输入命令/按钮、生产 Gateway 故障恢复与 Provider 设置触发的重连、
+自然完成后的 Queue 自动派发以及跨原生客户端原子竞争；后续按实际故障或专项授权再观察，
+不为扩大覆盖持续产生模型请求。
+
+## 本阶段收尾结论（2026-10-23）
+
+本阶段实现与已授权观察完成，未确认新增代码缺陷。收尾关联复查核对了
+Application 普通输入、Steer、中断及 Queue 六操作，经 Router 精确目录与绑定守卫到
+Client 请求的链路，以及 Core 活动恢复窗口、连接代际失效和 TG 输出证据的适用范围。
+沿用同一实现基线的既有独立审查、静态检查和运行证据；本次文档收尾不声称重新运行全部路径。
+
+后续边界保持开放：渠道命令与按钮入口、生产 Gateway 故障及 Provider 设置触发的恢复、
+Queue 自然派发和跨客户端竞争均按各节已有证据分别判断。下一步是正常使用中按具体问题
+开展专项观察，不新增功能或持续发起模型请求。本文仍作为开放补证项的当前记录保留，
+不将这些边界归档为已验证，也不将其视为当前已确认故障。

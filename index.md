@@ -58,7 +58,7 @@
 
 ## 验收与开放补证
 
-- [`docs/thread-execution-context-acceptance.md`](docs/thread-execution-context-acceptance.md)：Debian 验收及 `8232b2ed` 修复审查补录、随后冷恢复与监管器定向补验，以及 macOS 完整 Gateway 恢复证据；区分人工挑战、真实组件链路与开放边界。
+- [`docs/thread-execution-context-acceptance.md`](docs/thread-execution-context-acceptance.md)：Debian 修复审查、冷恢复与监管器补验、`19519cb6` 会话控制及真实 TG 投递证据，以及 macOS 完整 Gateway 恢复证据；记录阶段收尾并区分人工挑战、真实组件链路与开放边界。
 - [`docs/project-closeout-review.md`](docs/project-closeout-review.md)：五轮收尾审查与45项历史问题状态，以及 Thread 执行上下文后续关联收尾；保留各批次关闭条件及运行验证边界。
 - [`docs/project-closeout-remediation-plan.md`](docs/project-closeout-remediation-plan.md)：Astra 分批复审、26批历史修复、169文件分支审查及 M01–M04、L01–L07 记录；另登记 Thread 执行上下文已推送批次与 Debian/macOS 验收，历史交付限制和开放补证按批次区分。
 - [`docs/project-closeout-file-inventory.csv`](docs/project-closeout-file-inventory.csv)：1,146 项逐文件关联阅读证据，清单范围已全部完成；不代表问题修复或运行验收。
