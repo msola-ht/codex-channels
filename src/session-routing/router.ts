@@ -41,7 +41,7 @@ export interface SubscriptionRestoreFailure {
   binding: ConversationBinding;
   error: Error;
   bindingRemoved: boolean;
-  reason: "active-writer" | "unavailable" | "other";
+  reason: "active-writer" | "unavailable" | "history-unavailable" | "other";
 }
 
 export interface ThreadListOptions {
@@ -98,6 +98,7 @@ export class SessionRouter {
   private readonly approvalResolutions = new Set<ApprovalResolution>();
   // Bindings survive unloads and failed detaches, but need a subscription before use.
   private readonly unsubscribedBindings = new Set<string>();
+  private readonly unavailableResumeHistories = new Map<string, UserFacingError>();
   // 模型设置保留到进程结束：thread/list 不返回 model，
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
@@ -150,6 +151,8 @@ export class SessionRouter {
     const revision = this.executionContextRevision;
     const assertCurrent = (): void => {
       beforeSubmit?.();
+      const blocked = this.subscriptionRestoreError(threadId);
+      if (blocked && this.sameBinding(binding, this.bindings.getByThread(threadId))) throw blocked;
       const changes = this.executionContextRevision - revision;
       if (!this.sameBinding(binding, this.bindings.getByThread(threadId))
         || this.bindings.isBackground(threadId) !== background
@@ -472,6 +475,7 @@ export class SessionRouter {
       executionContext: this.sessionExecutionContext(session),
     });
     this.unsubscribedBindings.delete(session.thread.id);
+    this.unavailableResumeHistories.delete(session.thread.id);
   }
 
   private async unsubscribeThread(threadId: string, beforeSubmit?: () => void): Promise<void> {
@@ -553,6 +557,13 @@ export class SessionRouter {
             const incompatible = isIncompatibleRestoreError(normalized);
             if (!incompatible && !isCurrent()) return undefined;
             const bindingRemoved = incompatible || isUnavailableRestoreError(normalized);
+            const historyUnavailable = normalized instanceof UserFacingError
+              && normalized.code === "thread.resume.history-unavailable";
+            if (historyUnavailable) {
+              this.markThreadUnsubscribed(binding.threadId);
+              this.unavailableResumeHistories.set(binding.threadId, normalized);
+            }
+            else this.unavailableResumeHistories.delete(binding.threadId);
             if (incompatible) {
               this.invalidateThreadBinding(binding.threadId);
             } else if (bindingRemoved) {
@@ -568,6 +579,7 @@ export class SessionRouter {
               bindingRemoved,
               reason: bindingRemoved
                 ? "unavailable"
+                : historyUnavailable ? "history-unavailable"
                 : isActiveWriterRestoreError(normalized)
                   ? "active-writer"
                   : "other",
@@ -648,6 +660,8 @@ export class SessionRouter {
       }
       if (thread.status.type === "notLoaded") this.unsubscribedBindings.add(current.threadId);
       if (this.unsubscribedBindings.has(current.threadId)) {
+        const blocked = this.subscriptionRestoreError(current.threadId);
+        if (blocked) throw blocked;
         if (!observeRestore && this.onSubscriptionRestoreRequired) {
           this.onSubscriptionRestoreRequired(current);
           throw new UserFacingError("conversation.busy", "会话订阅正在恢复，请稍后重试", { reason: "subscription-restoring" });
@@ -741,6 +755,11 @@ export class SessionRouter {
     const binding = this.bindings.getByThread(threadId);
     if (!binding || !this.unsubscribedBindings.has(threadId)) return;
     this.onSubscriptionRestoreRequired?.(binding);
+  }
+
+  /** Retained binding needs an explicit resume or a fresh Provider recovery. */
+  subscriptionRestoreError(threadId: string): UserFacingError | undefined {
+    return this.unavailableResumeHistories.get(threadId);
   }
 
   /**
@@ -1518,6 +1537,9 @@ export class SessionRouter {
   }
 
   private notifyBindingsChanged(): void {
+    for (const threadId of this.unavailableResumeHistories.keys()) {
+      if (!this.bindings.getByThread(threadId)) this.unavailableResumeHistories.delete(threadId);
+    }
     for (const threadId of this.unsubscribedBindings) {
       if (!this.bindings.getByThread(threadId)) this.unsubscribedBindings.delete(threadId);
     }

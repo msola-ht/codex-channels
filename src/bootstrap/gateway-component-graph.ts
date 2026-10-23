@@ -848,7 +848,10 @@ export abstract class GatewayComponentGraph {
         return false;
       },
       {
-        backgrounded: (threadId) => this.retrySettledBackground(threadId),
+        backgrounded: (threadId) => {
+          this.scheduleBindingRestore();
+          this.retrySettledBackground(threadId);
+        },
         restoreRequired: (threadId) => {
           if (!this.stopping && !this.isBindingRestoring(threadId)) void this.restoreIdleBinding(threadId);
         },

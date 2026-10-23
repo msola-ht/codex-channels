@@ -251,7 +251,7 @@ Windows/macOS 服务及回退恢复。部署后的新增证据及仍未验证的
   用户此前拒绝信任 Hook 的限制继续保留，未把“允许验证所有”解释为重新信任用户 Hook。
 - **清理**：上述自有 App Server、Socket 代理和 HTTP 服务均已关闭，临时目录删除；未读取官方内部会话文件。
 
-仍未观察的边界及下一步：
+该阶段仍未观察的边界及下一步（后续补证见“可行项扩展验收”）：
 
 | 边界 | 当前限制与后续条件 |
 | --- | --- |
@@ -264,6 +264,137 @@ Windows/macOS 服务及回退恢复。部署后的新增证据及仍未验证的
 | 回退恢复 | 尚无本次升级前一致备份证据；先确认实际备份和时点，不能用升级后新备份伪装升级前状态或覆盖现有用户数据 |
 
 这些项目保留为未验证，并不表示发现对应故障；本次补验未确认新的产品代码缺陷。
+
+### 2026-10-23 可行项扩展验收
+
+用户要求继续完成当前能做的验证后，以文档提交 `7b2d1374`、实现提交 `52917ac6976d9d66e7b5b6fd61183397e19630de`
+和精确 `0.164.0` CLI 为输入继续补证。以下模型输出均来自回环模拟服务；没有新增付费模型请求、
+用户 Hook 信任、生产任务启用、渠道外发或生产服务重启。未新增测试文件或修改冻结测试。
+
+- **动态工具并行和取消**：真实 App Server 在同一 Turn 发出两个 `schedule_task` 请求，经现有 Handler、
+  Tool Service、Application 和临时真实 SQLite。两个请求同时进入权限读取，先放行 B 后 A，B 先返回时 A 仍等待；
+  结果携带各自 call_id 和不同确认令牌，确认前任务数为零，仅人工确认 B 后保存一条 B，A 单独取消。
+  两个 rename 等待查询期间官方中断，收到 interrupted 后再放行，均失败且没有改名。
+  同一 RPC 连接提前回答一项请求以模拟并发处理方解决，官方 Item failed 只取消该 Handler，另一项仍成功写入；
+  没有将其描述为第二客户端的 `serverRequest/resolved` 实测。
+  权限准备、首次归属检查、已生成未交付预览三个窗口中断后，分别没有交付预览、没有继续读取或执行、撤销真实令牌；
+  该令牌随后确认返回 `scheduled-task.confirmation.invalid`。任务自有 App Server 真正退出后，等待中的请求也未继续执行。
+  已提交的 SQLite 写入在取消后保留，Handler 明确未确认结果，不承诺回滚。
+  两个真实 run 请求继续进入 Scheduler，第一项停在容量查询、第二项排队；中断后查询次数仍为一，
+  Executor 执行数及持久 Run 数均为零。异步窗口由人工门闩控制，未观察真实模型自主选工具、生产确认控件或后台跨平台执行。
+- **压缩失败与重启恢复**：先完成含 `ORIGINAL_USER_EVIDENCE` 和 `ORIGINAL_REPLY_1` 的真实 Turn，
+  随后通过 Client `compactThread` 请求压缩。本地模型输出 `DISCARDED_PARTIAL_SUMMARY` 后断流，
+  官方报告 `stream disconnected before completion: stream closed before response.completed`，压缩 Turn failed，
+  未发出 contextCompaction 完成 Item。重启任务自有 App Server、Resume 同一 Thread 后继续成功，
+  后续请求保留原用户输入及原回复，不含残缺摘要。共三次本地模型请求；未读取内部会话文件。
+  此证据覆盖手动本地压缩失败，不能外推到远端 Lite 或所有自动压缩失败方式。
+- **实际自动重连协调器**：使用生产 GatewayReconnectCoordinator、BindingRestoreCoordinator、ProviderRoutingClient、
+  Client、UDS、Router 和 Core。已完成一轮的空闲 Thread 断线后，第一次握手的 connected 回调等待期间再次切断连接；
+  两次真实断线、两次重连握手，只发出 lost/lost/restored，最终成功 attempt=2，旧代次没有恢复确认。
+  恢复后 pendingBinding 和 isRestoring 均为 false，router.ensure 返回同一 Thread，下一轮真实完成；
+  历史恰两条 completed，总共两次本地模型请求，恢复没有重放第一轮。
+  绑定恢复端口首轮注入失败时，只重试恢复，不重复握手；这一端口重试观察与前述成功订阅观察分开。
+  真实退避期间 stop 用时 2 ms，随后 650 ms 无新握手或 restored。
+  保留真实退避计时、每次握手失败时再注入断线，第十二次在约 138 秒发生，最终握手 12 次、恢复 0 次、停止回调 1 次；
+  重复断线未重置预算。关闭等待在途检查、握手和恢复，主动释放不重连，以及设置恢复再次断线均有隔离端口观察。
+  当前 dist 与六个相关源模块的转译结果一致；未启动整个 GatewayApplication，额度预热、监管释放登记及交互取消端口为注入。
+  自动恢复成功场景为已有历史的空闲 Thread；活动 Turn 仍只具有上一节 Client/Router 手动恢复证据。
+- **空 Thread 恢复边界**：零 Turn 新 Thread 断线后，官方读取仍为 idle，但 Resume 返回 `no rollout found for thread id`；
+  BindingRestore 保留绑定并安排 pending 重试，连接协调器同时可发布 connection.restored。
+  因而连接恢复不能被理解为所有 Thread 已可用。主代理随后用另一真实隔离 Thread 显式失效订阅，
+  实际 restoreSubscriptions 返回同一错误且 bindingRemoved=false；后续 router.ensure 返回 `conversation.busy`，
+  文案为“会话订阅正在恢复，请稍后重试”。显式 newSession 后 ensure 创建了不同 Thread 并回读 idle，零模型请求。
+  这是已复现的空会话恢复使用问题，涉及 `src/session-routing/router.ts` 的未订阅准入及
+  `src/bootstrap/binding-restore-coordinator.ts` 的暂时失败重试。建议后续明确区分连接恢复与订阅不可恢复，
+  提供显式新建的操作提示并评估重试收敛；不得仅凭错误文案自动删除绑定、改写历史或隐式创建替代会话。
+  相关本地模块在上述两个提交间未变，这不足以证明上游未变或确定升级归因；本轮未据此修改产品实现。
+- **人工审批与 Guardian 提权重审**：真实本地 Responses 工具调用进入 Client 解码、ApprovalCoordinator 和 Core，
+  人工端口拒绝后协议返回 decline，命令 Operation declined，后续模型收到 `Rejected("rejected by user")`，Turn completed、Thread idle。
+  未知 kind 的隔离输入同样安全拒绝。Guardian 由 stock CLI 自动发出真实审查请求，本地模拟模型返回结构化 deny 时，
+  started/completed 使用同一 review ID，Client 投影 denied；没有进入人工审批请求。
+  在任务临时 execpolicy prompt 规则和 read-only 沙箱下，安全 printf 写任务自有路径，首次实际审查输入为
+  `sandbox_permissions=use_default`，review `a0854bf2-3ba0-4854-892a-c2df2edda477` approved（50 ms）；
+  沙箱失败后的第二次同 Item 审查输入为 `require_escalated`，review `de0f3c97-a5f9-46cc-8eef-460cc0b92bdf` denied（52 ms）。
+  两次审查具有独立 ID，没有合并或沿用首审批准；最终命令 declined、主 Turn completed、目标文件不存在。
+  四次请求均为回环（主请求、两次 Guardian、主请求）；结构化审查决定由本地端点固定，不能代表真实审查模型判断质量，
+  也未覆盖 Bootstrap 审查指标落库和真实渠道卡片。
+- **多实例 Hook 配置刷新**：两个独立真实 App Server 共用任务临时 Codex Home，配置不同 Provider，
+  经实际 ProviderRoutingClient 禁用临时 PreModelRequest 后，两实例均读到 disabled，刷新失败列表为空。
+  提交前守卫拒绝时配置版本不变；人工注入 B 刷新失败后，返回 `refreshFailedProviders:["b"]`，B 后续操作也拒绝准入；
+  恢复刷新端口后 B 成功回读新状态。旧配置版本写入被官方拒绝，未覆盖新状态。
+  Hook 始终 untrusted，信任写入和模型请求均为零；只验证启停和刷新，不验证 Hook 执行。
+  最初启动尝试退出码为 1，未取得根因证据，已清理；带启动诊断的后续完整观察成功，不把首次失败隐去或归因为产品缺陷。
+- **真实浏览器管理路径**：使用独立临时 WebUI、空指标库和已安装 Chromium；Playwright CLI 仅临时安装，未改项目依赖。
+  无令牌进入登录页，错误令牌被拒绝；正确令牌遇缺少指标库时显示服务不可用，创建临时当前 Schema 空库后登录成功。
+  空闲设置预览取消后文件未变；显示详情从 compact 确认为 full，刷新仍为 full。
+  下一次浏览器预览期间，用 CLI 共用配置模块先保存 compact，旧确认显示“配置或确认已过期”，文件和回读仍为 compact。
+  计划任务保持关闭，未启动服务操作。此处竞争写入来自 CLI 共用模块，没有操作 CLI 菜单。
+- **新增提示词浏览器展示**：临时模型目录的 `permissions.approved_prefixes` 经真实管理 API、模型详情及提示词页，
+  显示中文“已批准命令前缀”；含 `<script>` 的输入保持纯文本，DOM 中没有对应脚本节点。
+  改为空字符串并重新加载后显示“字段已提供，但内容为空”，没有冒充缺省或内置文本。
+  隔离环境未运行 App Server，模型页面的 Codex 设置和 Provider 设置请求返回 503；提示词独立读取成功，
+  不能因此声称整个模型管理页面无错误。浏览器快照与控制台输出保留在 `output/playwright/upgrade-0164-20261023/`（未纳入提交）。
+
+上述动态工具实例、SQLite Worker、Scheduler、压缩及 Hook 实例、浏览器和临时 WebUI 均已关闭，
+任务临时配置和临时浏览器工具安装均清理；保留的浏览器输出不包含用户凭据或业务数据。
+
+扩展后仍未验收的条件与边界：
+
+| 边界 | 已有证据与剩余条件 |
+| --- | --- |
+| 生产计划任务、真实渠道确认与发送 | 并行/取消已补真实隔离 App Server→业务模块→SQLite/Scheduler；生产开关保持关闭，未指定专用外发目标或执行生产任务 |
+| 完整生产自动重连 | 实际协调器已恢复空闲 Thread 并继续完成下一轮；完整 GatewayApplication、监管释放状态、额度预热及活动 Turn 联合路径未全量运行，活动 Turn 保留此前独立恢复证据 |
+| Guardian 后续消费与真实模型判断 | 协议、权限重审、Client/审批/Core 已观察；统计持久化和渠道卡片未因此验收，模拟 allow/deny 不证明真实模型判断 |
+| Lite 中断、远端自动压缩 | 手动本地压缩失败及重启已观察；第三方路径按合同关闭 Lite，不为验收扩展现有功能或调用未授权远端模型 |
+| Reserve 真实额度、SCI、企业 MCP | 无对应账户、额度状态或企业认证环境；保留此前隔离类型/状态证据 |
+| 已信任 Hook 执行 | 禁用/启用、跨实例刷新、失败恢复已补；用户拒绝 Hook 信任仍有效，不执行用户 Hook |
+| Windows/macOS、远程 executor、回退 | 当前为 Linux；缺其他实机及本次升级前一致备份，不以模拟或新备份替代 |
+
+上述扩展验收阶段只修正文档，未改产品代码；当时留下的空 Thread 恢复问题已进入下节关联修复。
+
+### 2026-10-23 空 Thread 恢复关联修复
+
+用户随后授权全链路审查分析修复。以 `7b2d1374` 后的工作区为输入，核对 Client → Provider 路由 →
+Session Router → Binding Restore → Application 提交、Queue 守卫与三个 Surface 的共用错误展示，
+并区分普通前台、保留后台和运行中计划任务的恢复合同。只读上游合同调查与独立关联复查已完成；
+复查发现的新建偏好保留、后台任务不能暂停及前台转后台重新调度要求均已纳入最终实现。
+
+锁定 `0.164.0` 的 `thread_processor.rs::resume_running_thread` 仍先读取持久历史再建立订阅，
+`thread_resume_rejects_unmaterialized_thread` 明确覆盖尚未物化的 Thread；`0.163.0` 已有同一限制，
+因此不将该问题归因为本次升级新增回归。`thread/read` 返回 live idle 或预分配 path 不证明历史已保存、订阅已恢复。
+Client 仅把 `thread/resume` 的 `-32600` 且完整消息匹配当前请求 Thread ID 的缺失历史错误映射为
+`thread.resume.history-unavailable`；错误分类不等于“已删除”或“必然零 Turn”。
+
+实现保留原绑定和数据，只在内存标记订阅不可用：前台暂停定时恢复，普通输入及提交守卫给出明确提示；
+用户可新建，或在历史可用后显式恢复。成功恢复或解绑清除暂停记录。新建仍保留模型偏好合同，
+速度档位未知时先要求用户明确选择，不默认改成 Standard。后台和运行中计划任务继续原恢复重试，
+前台转后台时重新调度；不自动重跑已提交任务。恢复日志分别记录成功和待恢复数量，不再用绑定数量冒充恢复成功。
+无持久化格式变更、历史扫描、自动命名或隐式替换 Thread。
+
+使用任务自有临时 Codex Home、真实 `0.164.0` App Server、实际 Client/Router/Binding Restore/
+Application/Core 模块和回环 Responses 输出，人工执行得到：
+
+- **失败准入及暂停**：零 Turn Thread 恢复返回稳定错误，原绑定保留；首次恢复调用数为 1，
+  调度后等待超过首轮退避并再执行普通恢复检查，额外恢复调用数为 0。普通提交及 Workspace 提交守卫均返回
+  `thread.resume.history-unavailable`，模型请求数为 0。
+- **真实新建路径**：Application 新建先返回 `fast.selection.unknown`；明确 `/fast off` 后新建并提交，
+  新 Thread 与旧 ID 不同、旧暂停和 pending 均清除，Turn `completed`，回环模型请求数为 1。
+  同一新 Thread 写入历史后再失效订阅、执行恢复和下一次 Application 提交，原 ID 不变，第二轮 `completed`。
+- **显式恢复清理**：用户明确命名空 Thread 后，Router 显式恢复同一 ID，暂停、pending、restoring 均为 false；
+  随后 Application 提交完成一轮，有历史后 Application `/resume` 也保持同一 ID。
+  另一轮“命名后立即通过 Application 列表选择恢复”返回 `session.selector.not-found`，未将其记为成功，
+  也不把命名当作保证立即出现在列表的修复路径；该限制不影响已完成的新建路径。
+- **后台及暂时故障**：将暂停的绑定通过实际 Store 转为后台，再调用恢复调度，首轮退避后实际增加 1 次恢复请求，
+  绑定和 pending 保留。人工注入暂时 Transport 错误后，旧历史错误标记清除、原绑定保留，首轮自动重试后共 2 次尝试。
+  此处观察了实际调度器对后台身份的处理；生产 Application 转后台回调的连接经源码复核，未启动完整生产 Gateway。
+- **Hack 边界**：直接调用实际 Client，错误码不符、其他 Thread ID、额外后缀及普通 Error 均保持原错误，
+  只有精确合同映射新分类。在等待中的恢复请求返回前撤销 `shouldRestore`，迟到失败不产生记录，
+  结果 failures 为 0、historyError 为 false、原绑定不变。
+
+上述隔离实例与回环服务均已关闭，任务临时目录已清理。新运行没有外部模型费用、渠道发送、Hook 信任或生产重启。
+`npm run build`、`npm run check`、受影响 TypeScript 的 ESLint 和文档索引检查通过；这些仅是静态流程状态。
+真实渠道提示投递、生产全组合根、运行中定时任务恢复以及 Windows/macOS 原生环境未在本修复中实测；
+后台计划任务分支只完成调用链和合同审查，不能用普通后台绑定观察替代。上述观察在修复提交前完成，本次未部署。
 
 ## 延续的基线取舍
 

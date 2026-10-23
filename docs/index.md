@@ -599,6 +599,10 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 显式恢复、重连与接管校验明确不匹配时统一移除对应绑定；Core 活动查询排除已解绑 Thread，
 下一条前台消息强制新建 Thread，避免普通发送或 steer 绕过恢复校验。
 共享订阅的生命周期按 Thread 串行，后台恢复在 RPC 前后复核原绑定，避免过期结果覆盖用户切换。
+缺少历史与 Thread 已删除分别处理：[`client.ts`](../src/codex-client/client.ts) 只把 `thread/resume` 的精确 `-32600` 与同一请求 Thread ID 的 `no rollout found for thread id ...` 映射为 `thread.resume.history-unavailable`。
+[`router.ts`](../src/session-routing/router.ts) 保留绑定，以进程内暂停状态阻止 `ensure` 和输入及 Queue 提交；成功恢复订阅或解绑后清理。
+[`binding-restore-coordinator.ts`](../src/bootstrap/binding-restore-coordinator.ts) 暂停普通前台的定时重试，提示 `/new` 或历史可用后 `/resume`，档位选择未知时先显式 `/fast`；后台绑定和运行中的计划任务继续恢复重试，前台转后台时重新调度，不重跑已提交任务。
+官方恢复路径先读取可恢复历史；尚未落盘的空 Thread 也可能被拒绝。这一限制已存在于 [0.163.0 的 `thread_processor.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/src/request_processors/thread_processor.rs)，当前 [0.164.0](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/request_processors/thread_processor.rs) 仍保留，不能归为本次升级新增回归。此处记录本地处理合同，运行观察及未覆盖边界见[升级决策](codex-cli-upgrade-decisions.md#01640-升级决策)。
 后台清理在绑定已被撤权移除后仍取消当前 Client 的订阅；沿用固定版本 `thread/unsubscribe` 的 `notSubscribed`/`notLoaded` 幂等结果，不修改前台绑定。
 会话切换与空闲释放通过 `ThreadLifecyclePort.hasActiveDescendants` 使用对应 Provider 的 `thread/loaded/list`
 和 `thread/read` 核验父子活动，包括未持久化的已加载标准子代理 Thread；官方列表排除 `SessionSource::Internal`，不宣称枚举全部内部代理。

@@ -164,6 +164,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill。
   新建 Thread 隐式使用 Gateway 默认模型前核对当前实例 `model/list`，失效时不发送 `thread/start`；显式模型和历史恢复保持各自调用合同。
+  仅在 `thread/resume` 拒绝处，将 `-32600` 且完整消息精确等于 `no rollout found for thread id <请求的 Thread ID>` 的错误映射为稳定 `thread.resume.history-unavailable`；其他方法、错误码或 Thread 身份不复用该分类。此错误不证明 Thread 已删除，Client 不自动命名、创建替代 Thread 或重试写请求，保留绑定与恢复调度由 Router 和组合根负责。
   Workspace 的可选 `approvalsReviewer` 通过稳定 `thread/start`、`thread/resume`、`thread/fork` 参数传递；省略时保留 Codex 默认或历史持久设置，恢复响应核对明确请求的 reviewer。
   当前 Thread 审批方式通过 `updateThreadApprovalsReviewer` 更新；请求前注册合法设置通知观察器，等待 RPC 成功和最新同 Thread 同目标通知，超时、断线、关闭或 Thread 失效清理等待和请求，不启动 Turn、不重试设置写入。
   `account/read` 当前认证路由、账户与 Thread 用量及用户级配置

@@ -71,6 +71,8 @@ export function formatSurfaceUserFacingError(
       return "会话名称必须为 1–64 个字符";
     case "conversation.missing":
       return "当前还没有 Codex Session";
+    case "thread.resume.history-unavailable":
+      return "当前会话没有可恢复的历史记录，无法恢复订阅；未删除原会话，请用 /new 新建，或在历史可用后用 /resume 显式重试。新建时若提示速度档位未知，请先用 /fast 明确选择";
     case "conversation.busy":
       if (error.details.reason === "subscription-restoring") return "会话订阅正在恢复，请稍后重试";
       if (error.details.reason === "activity-restored") return "会话活动状态已恢复，请重新发送消息以继续当前任务";

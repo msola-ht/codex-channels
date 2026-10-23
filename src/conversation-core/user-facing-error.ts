@@ -58,6 +58,7 @@ export type UserFacingErrorCode =
   | "thread.takeover.workspace"
   | "thread.takeover.changed"
   | "thread.workspace.changed"
+  | "thread.resume.history-unavailable"
   | "goal.empty"
   | "goal.usage"
   | "release.usage"
