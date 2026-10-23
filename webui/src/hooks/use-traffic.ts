@@ -62,7 +62,8 @@ export function useTrafficExchange(
     const previous = resolveTrafficDetailSnapshot(current, snapshot.current)
     let value: TrafficDetailResponse
     try {
-      if (previous !== null && !previous.indexPending && previous.exchange.tracePage.complete && canReuseTrafficSummary(previous.exchange)) {
+      if (previous !== null && !previous.indexPending && previous.exchange.diagnosticsComplete
+        && previous.exchange.tracePage.complete && canReuseTrafficSummary(previous.exchange)) {
         const page = await fetchTrafficTrace({
           ...current, label: previous.label, session: previous.session,
         }, signal)
@@ -99,7 +100,15 @@ export function useTrafficExchange(
   const scope = JSON.stringify(resolved === null ? null : { label: resolved.label, session: resolved.session, detail: true })
   const watch = useCallback((signal: AbortSignal, receive: (event: QueueChangeEvent) => void) => watchTraffic(JSON.parse(scope), signal, receive), [scope])
   const history = (query?.traceOffset ?? 0) > 0
-  const status = useQueueEvents(result.refetch, result.loading, query !== null && !history && !pending, latest, read, query === null ? null : watch, true)
+  const current = resolveTrafficData(key, result.data)
+  // Completed details are reading snapshots. Batch notifications also include other calls;
+  // late diagnostics remain available through explicit refresh without disturbing reading.
+  const settled = current !== null && result.error === null && !pending && current.exchange.tracePage.complete
+    && current.exchange.diagnosticsComplete && current.exchange.response !== null
+    && ["completed", "failed", "incomplete"].includes(current.exchange.state)
+  const paused = history || settled
+  const status = useQueueEvents(result.refetch, result.loading, query !== null && !paused && !pending,
+    latest, read, query === null || paused ? null : watch, true)
   const unavailable = owner?.missing === true || result.error !== null && trafficMissingCodes.includes(result.errorCode ?? "")
   const data = unavailable ? null : resolveTrafficData(key, result.data)
   return { ...result, data,
@@ -113,7 +122,7 @@ export function useTrafficExchange(
     displayData: unavailable ? null : data ?? resolveTrafficDetailSnapshot(resolved, result.data?.value ?? null),
     loading: query !== null && result.error === null && data === null,
     refreshing: result.loading,
-    notificationStatus: history ? "paused" as const : status,
+    notificationStatus: paused ? "paused" as const : status,
   }
 }
 
