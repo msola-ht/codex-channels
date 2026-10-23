@@ -8,7 +8,8 @@
 
 后续补证说明（2026-10-22）：本文保留早期基线与当时的未观察限制。
 `8232b2ed` 的成功历史冷恢复、Provider 设置重连、完整 Gateway 队列挑战及仍开放边界，
-见[当前 macOS 验收记录](../thread-execution-context-acceptance.md)，不回写为本次早期审查已观察。
+见[当前 Debian 与 macOS 验收记录](../thread-execution-context-acceptance.md)，不回写为本次早期审查已观察。
+该记录另补录 Debian 验收、关联修复与独立审查，分别保留各平台的证据范围。
 
 目标是将登记 Workspace 与 App Server 返回的 Thread 执行目录分开投影，
 补齐生命周期、通知和诊断链路。保持现有精确目录准入，不开放递归子目录互通。
