@@ -1,5 +1,11 @@
 export const CODEX_REMOTE_USAGE: string;
 
+export function codexRemoteDirectoryArgs(
+  passthrough: readonly string[],
+  workdir: string,
+  explicitDirectory: boolean,
+): string[];
+
 export function parseCodexRemoteOptions(
   args: readonly string[],
   options?: {

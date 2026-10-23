@@ -449,14 +449,23 @@ DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSe
 ```bash
 codexc remote
 codexc remote resume
+codexc remote r
+codexc remote r --last
 codexc remote -p ds-main resume
 codexc remote -p cp-llm
 codexc remote --profile personal
 ```
 
 若要让新建终端会话使用渠道的登记目录，可运行 `codexc remote --workspace <ID>`。
-从登记目录的子目录启动时，Remote 保留子目录作为
-工作目录；渠道按登记根目录查询和恢复，不能保证列出或接续这些子目录会话。
+`r` 是本项目 `resume` 的显式快捷写法，可带 Session ID、`--last`、`--all` 等原生恢复参数；
+例如 `codexc remote -p ds-main r <Session ID>`。参数值和 `--` 后的文字不展开别名。
+普通新建未指定目录时，Remote 使用启动时的当前目录；`resume`／`fork` 未显式指定目录时，
+不注入 `-C`，由原生 Remote 与 App Server 处理会话目录继承、列表筛选和新建回退。
+因此恢复选择器的默认目录范围、`--last` 无匹配时的新建目录也遵循原生 Remote 语义，
+不保证使用包装器的启动目录。显式 `--workspace <ID>` 或 `-C`／`--cd` 仍作为目录覆盖传入；
+原生 `tui.resume_cwd="current"` 在 Remote 无显式目录时的限制也予以保留。
+从登记目录的子目录普通新建时，Remote 保留子目录作为工作目录；渠道按登记根目录查询和恢复，
+不能保证列出或接续这些子目录会话。
 直接使用原生 `codex --remote` 不会读取 Gateway Workspace 注册表。
 
 `codexc remote` 与 `codexc app` 的 `-p` / `--provider` 使用同一选择规则：接受已配置的完整

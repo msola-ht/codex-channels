@@ -468,11 +468,19 @@
   `codexc remote` 自有的 Workspace、Provider 与 Profile 参数；`-p` / `--provider` 使用共享选择映射，
   与 `--profile` 互斥，重复选择失败关闭。`--profile` 保留原生个人 Profile 与已登记规范受管 Profile；
   旧受管 Profile 名返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
+  `codexRemoteDirectoryArgs` 按锁定版原生根参数区分实际 `resume`／`fork` 子命令与参数值，
+  处理根提示词、图片多值、其他子命令及 `--` 边界；只有未显式选目录的恢复／派生不注入 `-C`。
+  原生参数与子命令判定表以 0.163.0 为基线，升级 CLI 时需同步核对。
+  显式快捷命令 `r` 经同一子命令定位逻辑展开为 `resume`，复用其目录语义；参数值、
+  其他子命令的参数及 `--` 后的文字保持原样。
+  分离写法的图片参数按原有边界转为重复的 `--image=路径`，避免提取 Gateway 参数后吞掉命令；
+  附着写法不消费后续位置参数，与锁定版 Clap 解析一致。
   不根据 OpenAI 登录状态自动选择第三方，不修改主配置。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；未显式选择时连接主实例，
   显式 Provider 通过共享映射选择相应 Socket 和规范 `sf-*` Profile，连接对应隔离实例并供 Remote TUI
   完成第三方 Provider 认证；受管及自定义切换 Provider 统一使用原生 Profile 加载，包括其中的搜索设置。
-  当前目录或显式 `--workspace` 只决定执行目录，第三方 Profile 不复制权限，
+  普通新建注入当前目录，未显式选目录的恢复／派生保留原生 Remote 的目录继承、列表与新建回退；
+  显式 `--workspace`／`-C` 始终传入目录覆盖。第三方 Profile 不复制权限，
   不注入 Gateway 权限；原生显式参数与个人 Profile 由 Codex 自行处理；
   聚合入口当前关闭，内部实现保留：聚合选择复用共享 Runtime 拓扑与 Supervisor 按需租约，不生成磁盘 Profile；启动前通过已有
   Codex Client 读取服务端默认模型与目录，投影启动设置，避免本地 OpenAI 默认模型覆盖聚合目录。
