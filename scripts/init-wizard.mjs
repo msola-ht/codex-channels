@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
 
@@ -233,7 +233,7 @@ function detectionSummary({ environment, configPath, document }) {
   return [
     "检测结果",
     `- 配置文件：${configPath}`,
-    `- Codex CLI：${codexCliStatus(environment, codex)}`,
+    `- Codex CLI：${codexCliStatus(environment, codex, dirname(configPath))}`,
     `- 官方登录：${hasCodexAuthFile(environment) ? "检测到鉴权文件（未验证登录方式、有效期或官方登录状态）" : `未检测到鉴权文件（${join(codexHomePath(environment), "auth.json")} 不存在；未验证其他凭据存储）`}`,
     `- 通讯渠道：${channels.join("、") || "未配置"}`,
     `- 默认模型：${stringValue(codex.default_model) || "跟随 Provider 默认模型"}`,
@@ -244,8 +244,8 @@ function detectionSummary({ environment, configPath, document }) {
   ];
 }
 
-function codexCliStatus(environment, codex) {
-  const command = effectiveCodexBinary(stringValue(codex.binary) || "codex", environment);
+function codexCliStatus(environment, codex, configurationDirectory) {
+  const command = effectiveCodexBinary(codex.binary ?? "codex", environment, configurationDirectory);
   let expected;
   try {
     expected = JSON.parse(readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8")).codexCli;

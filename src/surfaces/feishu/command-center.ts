@@ -5,8 +5,9 @@ import type { Logger } from "pino";
 import {
   isConversationCommandName,
   type ConversationCommandName,
+  type ModelSelectionRequest,
 } from "../../application/index.js";
-import type { ConversationTarget } from "../../conversation-core/index.js";
+import { UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import {
@@ -91,7 +92,13 @@ export interface FeishuCommandCenterChoices {
     action: FeishuCommandCenterAction;
     input: string;
     acceptedState?: FeishuCommandAcceptedState;
+    modelSelection?: ModelSelectionRequest;
   }>;
+}
+
+export interface FeishuModelSelectionInteraction {
+  selection: ModelSelectionRequest;
+  assertActive: () => void;
 }
 
 export interface FeishuCommandAcceptedState {
@@ -122,6 +129,7 @@ interface PendingCommandCenter {
   expiresAt: number;
   allowedSelections: ReadonlySet<string>;
   acceptedStates: ReadonlyMap<string, FeishuCommandAcceptedState>;
+  modelSelections: ReadonlyMap<string, ModelSelectionRequest>;
   form?: FeishuCommandCenterForm;
   consumeOnUse: boolean;
   limitsQueryInFlight?: boolean;
@@ -158,6 +166,7 @@ export class FeishuCommandCenter {
       action: FeishuCommandCenterAction,
       actorId: string,
       input: string,
+      modelSelection?: FeishuModelSelectionInteraction,
     ) => Promise<FeishuCommandCenterResponse | void>,
     private readonly logger: Logger,
     options: FeishuCommandCenterOptions = {},
@@ -187,6 +196,7 @@ export class FeishuCommandCenter {
     target: ConversationTarget,
     actorId: string,
     response: FeishuCommandCenterResponse,
+    assertActive?: () => void,
   ): Promise<void> {
     return this.openCard(
       target,
@@ -206,6 +216,16 @@ export class FeishuCommandCenter {
       "choices" in response && response.choices.some(choice => choice.action === "thread-autoreview-select")
         ? Math.min(this.tokenTtlMs, 5 * 60_000)
         : this.tokenTtlMs,
+      undefined,
+      "choices" in response
+        ? new Map(response.choices.slice(0, 18).flatMap(choice => choice.modelSelection
+          ? [[selectionKey(choice.action, choice.input), {
+              ...choice.modelSelection,
+              snapshot: { ...choice.modelSelection.snapshot },
+            }] as const]
+          : []))
+        : new Map(),
+      assertActive,
     );
   }
 
@@ -263,7 +283,10 @@ export class FeishuCommandCenter {
     tokenTtlMs = this.tokenTtlMs,
     sendCard: (card: FeishuCardDocument) => Promise<string> = card =>
       this.outbox.deliverCard(target.conversationId, card),
+    modelSelections: ReadonlyMap<string, ModelSelectionRequest> = new Map(),
+    assertActive?: () => void,
   ): Promise<void> {
+    assertActive?.();
     if (
       this.closed
       || !this.access.isAllowed({ target, actorId })
@@ -274,6 +297,7 @@ export class FeishuCommandCenter {
     const token = randomBytes(18).toString("base64url");
     const card = render(token);
     const messageId = await sendCard(card);
+    assertActive?.();
     if (this.closed || !this.access.isAllowed({ target, actorId })) {
       return;
     }
@@ -284,6 +308,7 @@ export class FeishuCommandCenter {
       expiresAt: this.now() + tokenTtlMs,
       allowedSelections: collectCommandSelections(card, token),
       acceptedStates,
+      modelSelections,
       ...(form ? { form } : {}),
       consumeOnUse,
     });
@@ -394,6 +419,16 @@ export class FeishuCommandCenter {
     const acceptedState = submittedSelection === undefined
       ? undefined
       : pending.acceptedStates.get(submittedSelection);
+    const selection = submittedSelection === undefined ? undefined : pending.modelSelections.get(submittedSelection);
+    const modelSelection: FeishuModelSelectionInteraction | undefined = selection === undefined ? undefined : {
+      selection,
+      assertActive: () => {
+        if (this.closed || pending.expiresAt <= this.now()
+          || !this.access.isAllowed({ target: pending.target, actorId: pending.actorId })) {
+          throw new UserFacingError("model.selection.expired", "模型选择已失效，请重新打开选择卡片");
+        }
+      },
+    };
     if (acceptedState && this.outbox.updateCard) {
       void this.track(
         this.outbox.updateCard(
@@ -429,9 +464,11 @@ export class FeishuCommandCenter {
               resolvedCommand,
               pending.actorId,
               submittedInput!,
+              modelSelection,
             );
+            modelSelection?.assertActive();
             if (response) {
-              await this.openResponse(pending.target, pending.actorId, response);
+              await this.openResponse(pending.target, pending.actorId, response, modelSelection?.assertActive);
             }
           }
         } finally {

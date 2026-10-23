@@ -39,6 +39,8 @@ import {
 } from "./updates-monitor.js";
 import { WeixinPollingHealth } from "./polling-health.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
+import { AttachmentInputLifecycle, type ReceivedAttachmentInput } from "../attachment-input-lifecycle.js";
+import { isEmergencyStopCommand } from "../slash-command.js";
 
 type WeixinSupportedMessage = Extract<
   WeixinInboundMessage,
@@ -107,6 +109,10 @@ export class WeixinInputAdapter {
   private readonly replyContextWrites = new Map<string, Promise<void>>();
   private readonly quotedTexts = new Map<string, WeixinCachedQuote>();
   private stopping = false;
+  private readonly attachmentInputs = new AttachmentInputLifecycle();
+  private readonly receivedAttachments = new WeakMap<object, ReceivedAttachmentInput>();
+  private readonly attachmentStops = new WeakSet<object>();
+  private readonly rejectedAttachmentStops = new WeakSet<object>();
 
   constructor(private readonly options: WeixinInputAdapterOptions) {
     this.accountId = options.accountId;
@@ -147,6 +153,7 @@ export class WeixinInputAdapter {
       client: options.client,
       cursorStore: options.cursorStore,
       handleMessage: (message, signal) => this.handle(message, signal),
+      receiveMessage: (message, signal) => this.receiveAttachment(message, signal),
       onPollStart: () => this.health.recordPollStart(),
       onPollSuccess: (atMs) => this.health.recordSuccess(atMs),
       onRetry: (event) => {
@@ -195,8 +202,32 @@ export class WeixinInputAdapter {
     }, () => observeSurfaceStage(this.options.logger, { stage: "input" }, () => this.handleMessage(message, signal)));
   }
 
+  private receiveAttachment(message: WeixinSupportedMessage, signal: AbortSignal): (() => void) | undefined {
+    const target: ConversationTarget = { surface: "weixin", accountId: this.accountId, conversationId: message.conversationId };
+    const allowed = () => !this.stopping && !signal.aborted
+      && this.options.access.isAllowed({ target, actorId: message.actorId });
+    if (message.kind === "text" && isEmergencyStopCommand(message.text)) {
+      if (!allowed()) {
+        this.rejectedAttachmentStops.add(message);
+        return;
+      }
+      const stop = this.attachmentInputs.receiveStop(target);
+      if (stop.cancelled) this.attachmentStops.add(message);
+      return stop;
+    }
+    const kind = message.kind === "audio" ? "audio"
+      : message.kind === "video" || (message.kind === "file" && /\.(?:mp4|webm)$/iu.test(message.file.fileName))
+        ? "video" : undefined;
+    if (!kind) return;
+    const receipt = this.attachmentInputs.receive(target, allowed, kind,
+      () => this.options.service.prepareAttachmentSubmission?.(target, allowed, kind));
+    this.receivedAttachments.set(message, receipt);
+    return () => { receipt.dispose(); this.receivedAttachments.delete(message); };
+  }
+
   private async handleMessage(message: WeixinSupportedMessage, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
+    if (this.rejectedAttachmentStops.has(message)) return;
     const receivedAtMs = this.now();
     this.options.logger?.debug(
       {
@@ -294,7 +325,7 @@ export class WeixinInputAdapter {
                 ...(quotedText === undefined ? {} : { quotedText }),
                 audio: message.audio,
               };
-      await this.conversations.handle(conversationMessage, signal);
+      await this.conversations.handle(conversationMessage, signal, this.receivedAttachments.get(message), this.attachmentStops.has(message));
     } catch (error) {
       throw new WeixinMessageProcessingError({ cause: error });
     }
@@ -345,6 +376,7 @@ export class WeixinInputAdapter {
   }
 
   private async stopOnce(): Promise<void> {
+    this.attachmentInputs.close();
     this.stopping = true;
     this.health.stop();
     this.quotedTexts.clear();

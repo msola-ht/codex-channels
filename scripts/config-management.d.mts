@@ -95,9 +95,9 @@ export type GatewaySettingInput =
       kind: "system.official-tui-identity";
       value: {
         clientIdentity: {
-          name?: string;
-          title?: string;
-          version?: string;
+          name?: string | null;
+          title?: string | null;
+          version?: string | null;
         } | null;
         followCliVersion: boolean;
         upstreamUserAgent: string | null;

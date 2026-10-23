@@ -769,6 +769,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
     return this.queries.threadList(query);
   }
 
+  iterateThreadList(query: Omit<ModelRequestMetricsThreadQuery, "limit" | "offset">) {
+    return this.queries.iterateThreadList(query);
+  }
+
+  iterateThreadTurnSummaries(threadId: string, query: Omit<ModelRequestMetricsThreadQuery, "limit" | "offset">) {
+    return this.queries.iterateThreadTurnSummaries(threadId, query);
+  }
+
   threadCounts(query: ModelRequestMetricsScope): { threadCount: number; turnCount: number } {
     return this.queries.threadCounts(query);
   }

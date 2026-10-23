@@ -64,8 +64,8 @@ GitHub Actions `Codex upgrade proposal` 每日检查一次，也可以手动触�
 - `logs/*.log`：协议、类型、Lint 和构建的逐阶段日志。
 
 同一摘要会显示在 GitHub Actions Job Summary。生成与验证 Job 保持只读；全部自动检查成功后，
-独立提案 Job 才申请 `contents: write` 和 `pull-requests: write`，把已验证 Patch 应用到自动化
-分支并创建 Draft PR。已有同版本开放提案时不重复创建。Draft PR 不自动转为 Ready、合并、发布
+独立提案 Job 才申请 `contents: write` 和 `pull-requests: write`。应用前严格检查 `base-commit.txt` 为生成器输出的40位小写提交哈希加单个换行，并与当前检出的默认分支 HEAD 精确比较；文件缺失、畸形或基线漂移时拒绝应用，要求重新生成，不自动重放到新基线。通过后把已验证 Patch 应用到自动化
+分支并创建 Draft PR，在描述中记录应用基线、实际提案提交及结果树。已有同版本开放提案时不重复创建。Draft PR 不自动转为 Ready、合并、发布
 或部署，仍需 Codex 完成协议语义、业务实现、稳定文档与 CI 锁定版本适配。协议生成或验证
 失败时不会创建 PR，但仍上传报告和日志，随后把工作流标为失败。
 

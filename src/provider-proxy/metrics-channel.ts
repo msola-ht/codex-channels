@@ -273,9 +273,8 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     ...metrics,
     userAgent: typeof userAgent === "string" ? userAgent : null,
     reasoningEffort: boundedString(record.reasoningEffort),
-    errorMessage: typeof record.errorMessage === "string"
-      ? record.errorMessage
-      : null,
+    // Prior senders may include bounded prose; never admit it across this boundary.
+    errorMessage: null,
     ...(metrics.traffic === undefined ? {} : { traffic: {
       label: metrics.traffic.label,
       session: metrics.traffic.session,

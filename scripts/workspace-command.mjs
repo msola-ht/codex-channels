@@ -336,6 +336,13 @@ async function removeWorkspaceInteractively({
 }
 
 function reportEventQueueCleanup(result, eventQueuePath) {
+  if (result.configCleanupPending) {
+    writeCliMessage("note", "Workspace 配置已保存，但保存后的锁或临时目录清理未完成；运行 codexc work list 核对结果并检查配置目录，请勿重复添加或移除。", { destination: "stderr" });
+  }
+  if (result.eventQueueLockReleasePending) {
+    writeCliMessage("note", "Workspace 配置已保存，但通知队列锁清理未完成；已完成的队列操作不会自动重放，通知可能延迟。", { destination: "stderr" });
+    writeCliMessage("remediation", `运行 codexc work list 核对配置，并检查通知队列锁占用：${eventQueuePath}.lock`, { destination: "stderr" });
+  }
   if (!result.eventQueueCleanupPending) return;
   writeCliMessage("note", "Workspace 配置已保存，但旧工作区通知队列清理未完成；请勿重复添加或移除。", { destination: "stderr" });
   writeCliMessage("remediation", `运行 codexc work list 核对配置，并检查通知队列及其目录的权限和占用：${eventQueuePath}`, { destination: "stderr" });

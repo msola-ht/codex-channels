@@ -1157,7 +1157,7 @@ export interface TrafficExchangeSummary {
   upstreamProvider?: string
 }
 
-export interface TrafficListResponse {
+interface TrafficListCatalog {
   directory: string
   enabled: boolean
   retentionDays: number
@@ -1166,11 +1166,21 @@ export interface TrafficListResponse {
   session: string | null
   sessions: Array<{ session: string; createdAtMs: number }>
   generatedAt: string
+}
+
+export type TrafficListResponse = TrafficListCatalog & ({
+  indexStatus: "ready"
+  indexPending: boolean
   exchanges: TrafficExchangeSummary[]
   total: number
-  maximumOffset: number
   nextOffset: number | null
-}
+} | {
+  indexStatus: "building" | "unavailable"
+  errorCode: "traffic_index_building" | "traffic_index_limit" | "traffic_index_timeout"
+  exchanges: []
+  total: null
+  nextOffset: null
+})
 
 export type TrafficHeaderValue = string | string[]
 
@@ -1184,8 +1194,11 @@ export interface TrafficDebugStage {
 }
 
 export interface TrafficExchangeDetail {
+  /** False when optional trace aggregation could not be completed within its budget. */
+  diagnosticsComplete: boolean
   continuation?: {
     scope: "same_writer_thread_turn"
+    complete: boolean
     next: { id: number; startedAtMs: number; gapMs: number; state: "completed" | "failed" | "incomplete" | "pending"; agentMessageObserved: boolean } | null
   }
   requestPurpose?: "autoApprovalReview" | null
@@ -1283,7 +1296,9 @@ export interface TrafficExchangeDetail {
   } | null
   tracePage: {
     offset: number
-    total: number
+    /** null means that a complete event-index snapshot is not yet available. */
+    total: number | null
+    complete: boolean
     previousOffset: number | null
     nextOffset: number | null
   }
@@ -1291,6 +1306,7 @@ export interface TrafficExchangeDetail {
 }
 
 export interface TrafficDetailResponse {
+  indexPending: boolean
   directory: string
   enabled: boolean
   retentionDays: number

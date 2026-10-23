@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { setImmediate } from "node:timers/promises";
 
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import {
   appServerSocketAcceptsWebSocket,
   inspectAppServerSupervisorState,
@@ -146,7 +147,7 @@ export async function assertConfiguredAppServersStopped(environment, directory) 
   const runtime = resolveAppServerRuntime(document, located.dataDir, environment);
   const supervisor = await inspectAppServerSupervisorState(runtime.primarySocketPath);
   const occupied = await Promise.all(runtime.socketPaths.map((socketPath) =>
-    appServerSocketAcceptsWebSocket(socketPath, { ...environment, CODEX_BINARY: document.codex?.binary ?? environment.CODEX_BINARY ?? "codex" })));
+    appServerSocketAcceptsWebSocket(socketPath, { ...environment, CODEX_BINARY: effectiveCodexBinary(document.codex?.binary ?? "codex", environment, located.dataDir) })));
   if (supervisor.status !== "missing" || occupied.some(Boolean)) {
     throw new Error("清理转储前必须先停止全部 App Server：codexc stop appserver");
   }

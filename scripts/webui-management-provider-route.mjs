@@ -47,7 +47,7 @@ export async function routeProviderManagement({
   configPath,
   environment,
   maximumBodyBytes,
-  openMetricsStore,
+  readMetrics,
   path,
   principalId,
   request,
@@ -194,7 +194,7 @@ export async function routeProviderManagement({
     } finally {
       response.removeListener("close", disconnect);
     }
-    await sendAccountSnapshots(environment, response, openMetricsStore, body.provider);
+    await sendAccountSnapshots(environment, response, readMetrics, body.provider);
     return true;
   }
   if (path === "/provider-settings" && request.method === "GET") {
@@ -377,66 +377,59 @@ export async function routeProviderManagement({
   return false;
 }
 
-export async function sendAccountSnapshots(environment, response, openMetricsStore, provider) {
-  const store = openMetricsStore(environment);
-  try {
-    // A refresh owns one Provider; the separate GET remains the authoritative list.
-    const single = provider === undefined ? null : store.latestAccountSnapshot(provider);
-    const storedSnapshots = provider === undefined
-      ? (typeof store.latestAccountSnapshots === "function" ? store.latestAccountSnapshots() : [])
-      : single === null ? [] : [single];
-    const { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, accountMetadata } = loadAccountSources(environment);
-    const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
-    const snapshots = storedSnapshots
-      .filter((snapshot) => {
-        if (["deepseek", "ocg", "ccg", "clp"].includes(snapshot.provider)) return false;
-        if (snapshot.provider.startsWith("clp-")) return clineAccounts === null || metadataByProvider.has(snapshot.provider);
-        const registry = snapshot.provider.startsWith("ds-")
-          ? dsAccounts
-          : snapshot.provider.startsWith("ocg-")
-            ? ocgAccounts
-            : snapshot.provider.startsWith("ccg-")
-              ? ccgAccounts
-              : null;
-        return registry === null || metadataByProvider.has(snapshot.provider);
-      })
-      .map((snapshot) => {
-        const account = metadataByProvider.get(snapshot.provider);
-        return {
-          ...snapshot,
-          displayName: account?.displayName ?? snapshot.provider,
-          default: account?.default ?? false,
-        };
-      });
-    for (const account of accountMetadata) {
-      if (provider !== undefined && account.provider !== provider) continue;
-      if (snapshots.some((snapshot) => snapshot.provider === account.provider)) continue;
-      snapshots.push({
-        provider: account.provider,
-        accountId: account.accountId,
-        observedAtMs: 0,
-        available: false,
-        usage: { kind: "unsupported", provider: account.provider },
-        limits: { kind: "unsupported", provider: account.provider },
-        displayName: account.displayName,
-        default: account.default,
-      });
-    }
-    for (const snapshot of snapshots) {
-      if (snapshot.provider !== "openai") continue;
-      const limits = snapshot.limits;
-      snapshot.credentialRefreshedAt = await readOpenAiCredentialRefreshTime(
-        limits?.kind === "rate-limits" && limits.provider === "openai" ? limits.limits?.accountId : null,
-        environment,
-      );
-    }
-    sendJson(response, 200, {
-      observedAtMs: snapshots.reduce((latest, item) => Math.max(latest, item.observedAtMs), 0),
-      snapshots,
-      warnings,
+export async function sendAccountSnapshots(environment, response, readMetrics, provider) {
+  // A refresh owns one Provider; the separate GET remains the authoritative list.
+  const storedSnapshots = await readMetrics({ operation: "accounts", nowMs: Date.now(), ...(provider === undefined ? {} : { provider }) }, response);
+  if (response.destroyed) return;
+  const { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, accountMetadata } = loadAccountSources(environment);
+  const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
+  const snapshots = storedSnapshots
+    .filter((snapshot) => {
+      if (["deepseek", "ocg", "ccg", "clp"].includes(snapshot.provider)) return false;
+      if (snapshot.provider.startsWith("clp-")) return clineAccounts === null || metadataByProvider.has(snapshot.provider);
+      const registry = snapshot.provider.startsWith("ds-")
+        ? dsAccounts
+        : snapshot.provider.startsWith("ocg-")
+          ? ocgAccounts
+          : snapshot.provider.startsWith("ccg-")
+            ? ccgAccounts
+            : null;
+      return registry === null || metadataByProvider.has(snapshot.provider);
+    })
+    .map((snapshot) => {
+      const account = metadataByProvider.get(snapshot.provider);
+      return {
+        ...snapshot,
+        displayName: account?.displayName ?? snapshot.provider,
+        default: account?.default ?? false,
+      };
     });
-  } finally {
-    store.close();
+  for (const account of accountMetadata) {
+    if (provider !== undefined && account.provider !== provider) continue;
+    if (snapshots.some((snapshot) => snapshot.provider === account.provider)) continue;
+    snapshots.push({
+      provider: account.provider,
+      accountId: account.accountId,
+      observedAtMs: 0,
+      available: false,
+      usage: { kind: "unsupported", provider: account.provider },
+      limits: { kind: "unsupported", provider: account.provider },
+      displayName: account.displayName,
+      default: account.default,
+    });
+  }
+  for (const snapshot of snapshots) {
+    if (snapshot.provider !== "openai") continue;
+    const limits = snapshot.limits;
+    snapshot.credentialRefreshedAt = await readOpenAiCredentialRefreshTime(
+      limits?.kind === "rate-limits" && limits.provider === "openai" ? limits.limits?.accountId : null,
+      environment,
+    );
+  }
+  if (!response.destroyed) {
+    sendJson(response, 200, {
+      observedAtMs: snapshots.reduce((latest, item) => Math.max(latest, item.observedAtMs), 0), snapshots, warnings,
+    });
   }
 }
 

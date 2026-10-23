@@ -17,7 +17,7 @@ import {
   inspectAppServerSupervisorState,
 } from "../runtime/app-server-supervisor.mjs";
 import { macDesktopAppPluginEnabledConfigKey } from "../runtime/desktop-app-host.mjs";
-import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { loadConfiguredCustomPrimaryModelProvider, loadOpenAiBaseUrl } from "../runtime/model-provider-runtime.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import { childProcessIsRunning, registerChildProcessGroup, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
@@ -94,7 +94,7 @@ export async function runDesktopAppCommand(args, options = {}) {
     ...environment,
     CODEX_CONNECT_HOME: located.dataDir,
     CODEX_CONNECT_CONFIG_FILE: located.configPath,
-    CODEX_BINARY: stringValue(codex.binary) || "codex",
+    CODEX_BINARY: effectiveCodexBinary(codex.binary ?? "codex", environment, located.dataDir),
   };
   const appServer = resolveAppServerRuntime(document, located.dataDir, runtimeEnvironment);
   const selectedProvider = parsed.provider === undefined ? appServer.primaryProvider

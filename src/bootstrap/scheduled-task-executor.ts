@@ -80,7 +80,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     private readonly bindings: BindingStore,
     private readonly workspaces: WorkspaceRegistry,
     private readonly models: ScheduledTaskModelPort,
-    private readonly core: Pick<ConversationCore, "markTurnStarted">,
+    private readonly core: Pick<ConversationCore, "trackThreadActivity">,
     options: ScheduledTaskExecutorOptions,
   ) {
     if (
@@ -254,31 +254,36 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       ...(task.reasoningEffort == null ? {} : { effort: task.reasoningEffort }),
       ...(task.serviceTier == null ? {} : { serviceTier: task.serviceTier }),
     };
-    let turnId: string;
+    const activity = this.core.trackThreadActivity(threadId);
     try {
-      const turn = await this.turns.startTurn(
-        threadId,
-        [{ type: "text", text: task.prompt }],
-        `scheduled-run-${run.runId}`,
-        workspace.cwd,
-        overrides,
-      );
-      turnId = turn.turnId;
-    } catch (error) {
-      if (error === rejectedBeforeSubmit) {
-        await this.releaseFreshBackground(threadId);
-        return withThreadId(submissionRejection, threadId);
+      let turnId: string;
+      try {
+        const turn = await this.turns.startTurn(
+          threadId,
+          [{ type: "text", text: task.prompt }],
+          `scheduled-run-${run.runId}`,
+          workspace.cwd,
+          overrides,
+        );
+        turnId = turn.turnId;
+      } catch (error) {
+        if (error === rejectedBeforeSubmit) {
+          await this.releaseFreshBackground(threadId);
+          return withThreadId(submissionRejection, threadId);
+        }
+        const result = writeFailure(error);
+        if (result.kind === "failed") {
+          await this.releaseFreshBackground(threadId);
+        }
+        return withThreadId(result, threadId);
       }
-      const result = writeFailure(error);
-      if (result.kind === "failed") {
-        await this.releaseFreshBackground(threadId);
-      }
-      return withThreadId(result, threadId);
-    }
 
-    this.onTurnStarted?.(run, target, threadId, turnId);
-    this.core?.markTurnStarted(target, threadId, turnId);
-    return { kind: "running", threadId, turnId };
+      this.onTurnStarted?.(run, target, threadId, turnId);
+      activity.restore(target, turnId);
+      return { kind: "running", threadId, turnId };
+    } finally {
+      activity.stop();
+    }
   }
 
   private async releaseFreshBackground(threadId: string): Promise<void> {

@@ -146,6 +146,10 @@ export class FeishuSurface implements SurfaceAdapter {
   readonly interactions: FeishuInteractionPort;
   readonly output: FeishuOutbox;
 
+  revalidateAccess(): void {
+    this.applicationSetup.revalidateAccess();
+  }
+
   private readonly inbox: FeishuInbox;
   private readonly adapter: FeishuConversationAdapter;
   private readonly commandCenter: FeishuCommandCenter;
@@ -338,12 +342,13 @@ export class FeishuSurface implements SurfaceAdapter {
     this.commandCenter = new FeishuCommandCenter(
       this.output,
       options.access,
-      (target, action, actorId, input) =>
+      (target, action, actorId, input, modelSelection) =>
         this.adapter.handleCommandCenterAction(
           target,
           action,
           actorId,
           input,
+          modelSelection,
         ),
       options.logger,
     );
@@ -355,6 +360,7 @@ export class FeishuSurface implements SurfaceAdapter {
         ? { actorRegistry: options.actorRegistry }
         : {}),
       handle: (message) => this.adapter.handle(message),
+      receiveInput: (message) => this.adapter.receiveInput(message),
       handleUrgent: (message) => this.adapter.handle(message),
       handleImageBatch: (messages) =>
         this.adapter.handleImageBatch(messages),

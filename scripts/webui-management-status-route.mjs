@@ -1,13 +1,13 @@
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import { closePendingAppServerReads, readAppServerUserAgent } from "../runtime/app-server-read.mjs";
 import { readGatewayConfig, validateCodexConfigDocument } from "../runtime/gateway-config.mjs";
 import { resolveCodexRequestIdentity } from "../runtime/codex-request-identity.mjs";
 import { invalidSetting } from "./config-management-error.mjs";
-import { RequestMetricsQueryService } from "../dist/observability/index.js";
-import { metricsRange } from "./metrics-database-access.mjs";
+import { webuiLogger } from "./webui-logger.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { readManagedServiceErrorAsync } from "./service-status.mjs";
-import { sendManagementJson } from "./webui-http.mjs";
+import { ApiError, sendManagementJson } from "./webui-http.mjs";
 import {
   loadServiceStatusSummary,
   serviceVersion,
@@ -20,7 +20,7 @@ export async function routeStatusManagement({
   codexCliVersion,
   environment,
   gatewayVersion,
-  openMetricsStore,
+  readMetrics,
   path,
   request,
   response,
@@ -45,7 +45,7 @@ export async function routeStatusManagement({
     try {
       await handleUpstreamUserAgent(
         environment, response, state.appServerUserAgentCache,
-        gatewayVersion, openMetricsStore, controller.signal,
+        gatewayVersion, readMetrics, controller.signal,
       );
     } finally {
       request.removeListener("aborted", abort);
@@ -93,7 +93,7 @@ async function handleUpstreamUserAgent(
   response,
   cache,
   gatewayVersion,
-  openMetricsStore,
+  readMetrics,
   signal,
 ) {
   const paths = runtimeConfig(environment);
@@ -108,10 +108,12 @@ async function handleUpstreamUserAgent(
     : null;
   const appServerUserAgent = configured !== null
     ? null
-    : await cachedAppServerUserAgent(document, paths.dataDir, cache, gatewayVersion, signal);
+    : await cachedAppServerUserAgent(document, paths.dataDir, cache, gatewayVersion, signal,
+      effectiveCodexBinary(codex.binary, environment, paths.dataDir));
   signal.throwIfAborted();
   const effectiveUserAgent = upstreamUserAgent ?? appServerUserAgent;
-  const recentRequest = latestRecordedUserAgent(environment, openMetricsStore);
+  const recentRequest = await latestRecordedUserAgent(response, readMetrics, signal);
+  signal.throwIfAborted();
   sendManagementJson(response, 200, {
     observedAt: new Date().toISOString(),
     configuredUserAgent: configured,
@@ -123,24 +125,24 @@ async function handleUpstreamUserAgent(
   });
 }
 
-async function cachedAppServerUserAgent(document, dataDir, cache, gatewayVersion, signal) {
+async function cachedAppServerUserAgent(document, dataDir, cache, gatewayVersion, signal, codexBinary) {
   signal.throwIfAborted();
   if (cache.closed) throw new Error("WebUI 正在关闭");
   const socketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
-  const key = JSON.stringify([socketPath, document.codex.binary, gatewayVersion]);
+  const key = JSON.stringify([socketPath, codexBinary, gatewayVersion]);
   if (cache.key === key && cache.expiresAtMs > Date.now()) return cache.value;
   // Retire the previous target before allocating another owned transport.
   if (cache.pending && (cache.pending.key !== key || cache.pending.controller.signal.aborted)) {
     cache.pending.controller.abort();
     await cache.pending.promise;
-    return cachedAppServerUserAgent(document, dataDir, cache, gatewayVersion, signal);
+    return cachedAppServerUserAgent(document, dataDir, cache, gatewayVersion, signal, codexBinary);
   }
   if (!cache.pending) {
     const entry = { key, controller: new AbortController(), subscribers: 0 };
     cache.pending = entry;
     entry.promise = readAppServerUserAgent({
       socketPath,
-      codexBinary: document.codex.binary,
+      codexBinary,
       clientInfo: { name: "codex_app_server_daemon", title: "Codex Connect WebUI", version: gatewayVersion },
       signal: entry.controller.signal,
     }).catch(() => null).then(value => {
@@ -178,27 +180,12 @@ export async function closeAppServerUserAgentReads(cache) {
 }
 
 /** 最近一条模型请求实际发往上游的 UA；指标库不可用或还没有请求时返回 null。 */
-function latestRecordedUserAgent(environment, openMetricsStore) {
-  let store;
+async function latestRecordedUserAgent(response, readMetrics, signal) {
   try {
-    store = openMetricsStore(environment);
-    const range = metricsRange("all", Date.now());
-    const page = new RequestMetricsQueryService(store).page(range, {
-      offset: 0,
-      limit: 1,
-      sortKey: "recordedAtMs",
-      sortDirection: "desc",
-    });
-    const record = page.records[0];
-    return record === undefined
-      ? null
-      : {
-          userAgent: record.userAgent ?? null,
-          recordedAtMs: record.recordedAtMs ?? null,
-        };
-  } catch {
+    return await readMetrics({ operation: "latestUserAgent", nowMs: Date.now() }, response);
+  } catch (error) {
+    signal.throwIfAborted();
+    webuiLogger.warn({ event: "status.metrics-unavailable", code: error instanceof ApiError ? error.code : "metrics_read_unavailable" }, "最近请求身份读取暂不可用");
     return null;
-  } finally {
-    store?.close();
   }
 }

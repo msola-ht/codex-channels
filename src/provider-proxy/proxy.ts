@@ -37,7 +37,6 @@ import {
 } from "./request-routing.js";
 import {
   asRecord,
-  boundedMessage,
   boundedString,
   createMetricsState,
   effectiveUpstreamUserAgent,
@@ -601,7 +600,10 @@ export class ProviderProxy {
       ? httpRequest
       : httpsRequest;
     const diagnosticObserver = this.chatDiagnostics?.subscribe(snapshot => {
-      if (snapshot.timing) observeChatTiming(metrics, snapshot.timing);
+      if (snapshot.timing) {
+        observeChatTiming(metrics, snapshot.timing);
+        exchange?.callTiming?.submitted(snapshot.timing.submittedAt);
+      }
       Object.assign(metrics, modelRequestDiagnostics(snapshot));
       exchange?.write({ kind: "chat_diagnostics", fields: snapshot.fields, truncated: snapshot.truncated });
     });
@@ -639,7 +641,7 @@ export class ProviderProxy {
     };
     const upstream = upstreamRequest({
       agent: upstreamTarget.agent ?? this.upstreamAgent,
-      hostname: upstreamTarget.host,
+      hostname: upstreamTarget.host.replace(/^\[(.*)\]$/u, "$1"),
       ...(upstreamTarget.port === undefined ? {} : { port: upstreamTarget.port }),
       path: upstreamPath(upstreamTarget.basePath, route.path),
       method: request.method,
@@ -800,12 +802,6 @@ export class ProviderProxy {
       observeRequestChunk(bufferedBody);
       observeRequestEnd();
     }
-    const submittedAt = performance.now();
-    observeRequestSubmitted(metrics, submittedAt);
-    exchange?.callTiming?.submitted(submittedAt);
-    if (!this.chatDiagnostics) {
-      headersTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("headers")), modelRequestPolicy.headersTimeoutMs);
-    }
     if (!request.complete) {
       uploadTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("upload")), modelRequestPolicy.preparationTimeoutMs);
       request.once("end", () => clearTimeout(uploadTimer));
@@ -867,7 +863,13 @@ export class ProviderProxy {
         });
       });
     }
+    const submittedAt = performance.now();
     upstream.flushHeaders();
+    if (!this.chatDiagnostics) {
+      observeRequestSubmitted(metrics, submittedAt);
+      exchange?.callTiming?.submitted(submittedAt);
+      headersTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("headers")), modelRequestPolicy.headersTimeoutMs);
+    }
     if (upstreamBody === undefined) {
       if (this.chatDiagnostics === undefined) metrics.requestBytes = 0;
       request.pipe(streamingWriter!);
@@ -1113,11 +1115,11 @@ export class ProviderProxy {
       client.pause();
       const next = sending.then(async () => {
         deliverySignal.throwIfAborted();
-        const submittedAt = performance.now();
-        timing?.submitted(submittedAt);
-        if (metrics) observeRequestSubmitted(metrics, submittedAt);
         await sendProxyWebSocket(upstream, data, isBinary, deliverySignal, modelRequestPolicy.deliveryTimeoutMs,
           undefined, "delivery", () => {
+            const submittedAt = performance.now();
+            timing?.submitted(submittedAt);
+            if (metrics) observeRequestSubmitted(metrics, submittedAt);
             if (metrics) metrics.requestBytes = (metrics.requestBytes ?? 0) + bytes;
           });
       });
@@ -1430,9 +1432,7 @@ export class ProviderProxy {
       if (!activeMetrics) return;
       const reasonType = failureType === "websocket_closed" ? websocketCloseErrorType(reason) : null;
       if (reasonType) {
-        if (markMetricsFailed(activeMetrics, reasonType, failureAtMs, undefined, failureAtMonotonicMs)) {
-          activeMetrics.errorMessage = boundedMessage(reason.toString("utf8"));
-        }
+        markMetricsFailed(activeMetrics, reasonType, failureAtMs, undefined, failureAtMonotonicMs);
       } else {
         markMetricsFailed(
           activeMetrics,

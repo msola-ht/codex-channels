@@ -237,16 +237,19 @@ export class ChatCompletionsBridge {
         status = 502;
         clearTimeout(timer);
         upstreamRequest = (upstream.protocol === "http" ? httpRequest : httpsRequest)({
-          hostname: upstream.host, port: upstream.port, agent: upstream.agent,
+          hostname: upstream.host.replace(/^\[(.*)\]$/u, "$1"), port: upstream.port, agent: upstream.agent,
           path: `${upstream.basePath?.replace(/\/$/u, "") ?? ""}/chat/completions`,
           method: "POST", headers, signal: controller.signal,
         });
         upstreamRequest.on("error", () => undefined);
         const ready = once(upstreamRequest, "response", { signal: controller.signal });
-        timing ??= { submittedAt: performance.now() };
+        // A synchronous submission failure skips the await below; cancellation still settles it.
+        void ready.catch(() => undefined);
         phaseTimeout(modelRequestPolicy.headersTimeoutMs, "headers");
         converter.beginModelRound();
+        const submittedAt = performance.now();
         upstreamRequest.end(payload);
+        timing ??= { submittedAt };
         timing.requestBytes = (timing.requestBytes ?? 0) + payloadBytes;
         // Publish the submitted size before waiting for headers: a client disconnect
         // closes the outer proxy's subscription even if the upstream never responds.

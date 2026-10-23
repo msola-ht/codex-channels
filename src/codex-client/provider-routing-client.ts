@@ -307,8 +307,16 @@ export class ProviderRoutingClient {
 
   listModelsForProvider(provider: string, beforeSubmit?: () => void): ReturnType<ProviderClientInstance["listModels"]> {
     beforeSubmit?.();
-    return this.withProviderActivity(provider, async () =>
-      (await this.ensureClient(provider)).listModels(beforeSubmit));
+    return this.withProviderActivity(provider, async () => {
+      beforeSubmit?.();
+      const client = await this.ensureClient(provider);
+      beforeSubmit?.();
+      return client.listModels(beforeSubmit);
+    });
+  }
+
+  assertModelCatalogActive(): void {
+    this.shutdown.signal.throwIfAborted();
   }
 
   /**
@@ -759,7 +767,7 @@ export class ProviderRoutingClient {
   listModels(
     ...args: Parameters<ProviderClientInstance["listModels"]>
   ): ReturnType<ProviderClientInstance["listModels"]> {
-    return this.withPrimaryActivity((client) => client.listModels(...args));
+    return this.withPrimaryActivity((client) => client.listModels(...args), args[0]);
   }
 
   writeDefaultServiceTier(

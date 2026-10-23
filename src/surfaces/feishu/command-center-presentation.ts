@@ -2,6 +2,7 @@ import {
   fastServiceTierId,
   ultrafastServiceTierId,
   listProviders,
+  modelSelectionSnapshot,
   type ConversationCommandResult,
 } from "../../application/index.js";
 import { UserFacingError } from "../../conversation-core/index.js";
@@ -634,9 +635,10 @@ export function renderCommandCenterChoices(
   if (result.kind !== "models") {
     return undefined;
   }
+  const snapshot = modelSelectionSnapshot(result.state);
   const currentModel = result.state.models.find(
     (model) =>
-      model.model === result.state.model
+      model.available !== false && model.model === result.state.model
       && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai"),
   );
   // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
@@ -666,6 +668,7 @@ export function renderCommandCenterChoices(
           label: `${provider === current ? "✓ " : ""}${formatCodexProviderLabel(provider)} · ${formatProviderModelSummary(result.state.models, provider)}`,
           action: "model",
           input: provider,
+          modelSelection: { kind: "browse-provider", provider, snapshot },
         })),
       };
     }
@@ -684,7 +687,8 @@ export function renderCommandCenterChoices(
         .map((model, index) => ({
         label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${modelListDisplayName(model.displayName, model.provider, model.model, index + 1)}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
         action: "model",
-        input: model.id,
+        input: String(index + 1),
+        modelSelection: { kind: "model", provider: model.provider ?? "openai", model: model.model, snapshot },
         })),
     };
   }
@@ -707,6 +711,7 @@ export function renderCommandCenterChoices(
           label: `${option.effort === result.state.effort ? "✓ " : ""}${formatReasoningEffort(option.effort)}`,
           action: "effort",
           input: option.effort,
+          modelSelection: { kind: "effort", effort: option.effort, snapshot },
         }),
       ),
     };
@@ -721,16 +726,19 @@ export function renderCommandCenterChoices(
           label: `${speed === "Standard" ? "✓ " : ""}Standard`,
           action: "fast",
           input: "off",
+          modelSelection: { kind: "fast", mode: "off", snapshot },
         },
         ...(currentModel && fastServiceTierId(currentModel) ? [{
           label: `${speed === "Fast" ? "✓ " : ""}Fast`,
           action: "fast",
           input: "on",
+          modelSelection: { kind: "fast", mode: "on", snapshot },
         } as const] : []),
         ...(currentModel && ultrafastServiceTierId(currentModel) ? [{
           label: `${speed === "Ultrafast" ? "✓ " : ""}Ultrafast`,
           action: "fast",
           input: "ultrafast",
+          modelSelection: { kind: "fast", mode: "ultrafast", snapshot },
         } as const] : []),
       ],
     };

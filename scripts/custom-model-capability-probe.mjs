@@ -123,6 +123,9 @@ async function probeModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, 
       let parsed;
       try { parsed = JSON.parse(body); } catch { return {status: "inconclusive", reason: "上游未返回有效 JSON", httpStatus}; }
       if (httpStatus !== 200) return classifyHttp(httpStatus, parsed, capability, payload.tools);
+      if (isObject(parsed) && validModelId(parsed.model) && parsed.model !== model) {
+        return {status: "inconclusive", reason: "上游响应模型与请求模型不一致", httpStatus};
+      }
       const output = upstreamWireApi === "responses" ? parseResponses(parsed) : parseChat(parsed, identities);
       if (!output) return {status: "inconclusive", reason: "上游未返回完整且可验证的模型响应", httpStatus};
       return {...output, httpStatus};

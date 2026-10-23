@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { TextAttachmentStore, textAttachmentBody } from "../text-attachment-store.js";
 import { videoAttachmentBody } from "../video-attachment-store.js";
 import { SurfaceShutdown } from "../surface-shutdown.js";
+import { AttachmentInputLifecycle, type ReceivedAttachmentInput } from "../attachment-input-lifecycle.js";
 import { Bot, type Context } from "grammy";
 import type { InlineKeyboardMarkup } from "grammy/types";
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -75,6 +76,7 @@ import {
   TelegramLifecycle,
   telegramConversationCommandName,
   telegramUpdateGroupSize,
+  isTelegramEmergencyStopUpdate,
 } from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
 import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
@@ -190,6 +192,11 @@ export class TelegramSurface {
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandExecutor;
   private readonly inputs: SurfaceInputBatcher;
+  private readonly attachmentInputs = new AttachmentInputLifecycle();
+  private readonly receivedAttachments = new WeakMap<object, ReceivedAttachmentInput>();
+  private readonly receivedUpdates = new WeakSet<object>();
+  private readonly attachmentStops = new WeakSet<object>();
+  private readonly rejectedAttachmentStops = new WeakSet<object>();
   private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
   private readonly now: () => number;
   private readonly idleResumeSelections = new Map<string, {
@@ -246,6 +253,11 @@ export class TelegramSurface {
       return next();
     });
     this.bot.use((context, next) => this.authorize(context, next));
+    this.bot.use(async (context, next) => {
+      const release = this.receivedUpdates.has(context.update)
+        ? undefined : this.receiveAttachmentUpdate(context.update);
+      try { await next(); } finally { release?.(); }
+    });
     this.bot.use((context, next) => {
       if (context.chat && context.from) {
         this.service.touchActivity?.(target(context));
@@ -258,7 +270,19 @@ export class TelegramSurface {
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = options.commands;
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
-    const apiExecutor = new TelegramApiExecutor(logger);
+    const apiExecutor = new TelegramApiExecutor(logger, (chatId, recipientNotification) => {
+      const outputTarget: ConversationTarget = {
+        surface: this.surface, accountId: this.accountId, conversationId: chatId,
+      };
+      if (recipientNotification) {
+        const userId = Number(chatId);
+        return Number.isSafeInteger(userId) && String(userId) === chatId
+          && this.notificationRecipients.has(userId)
+          && this.access.isAllowed({ target: outputTarget, actorId: chatId });
+      }
+      return (this.actorRegistry?.actors(outputTarget) ?? [])
+        .some(actorId => this.access.isAllowed({ target: outputTarget, actorId }));
+    });
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
         ? { finalMessageFormat: options.finalMessageFormat }
@@ -340,7 +364,10 @@ export class TelegramSurface {
         },
       },
       options.onFatal,
-      { isInteractionUpdate: update => this.interactions.isInteractionUpdate(update) },
+      {
+        isInteractionUpdate: update => this.interactions.isInteractionUpdate(update),
+        receiveUpdate: update => this.receiveAttachmentUpdate(update),
+      },
     );
     this.registerHandlers();
   }
@@ -433,6 +460,7 @@ export class TelegramSurface {
   private async stopOnce(): Promise<void> {
     const shutdown = new SurfaceShutdown();
     this.stopping = true;
+    this.attachmentInputs.close();
     const videoClose = shutdown.run("videos", () => this.videoInput?.close());
     const lifecycleStop = shutdown.run("lifecycle", () => this.lifecycle.stop());
     await videoClose;
@@ -454,6 +482,10 @@ export class TelegramSurface {
     this.notificationRecipients = new Set(recipients);
   }
 
+  revalidateAccess(): void {
+    this.outbox.revalidateAccess();
+  }
+
   configurationChanged(change: SurfaceConfigurationChange): void {
     const replyMarkup = workspaceSwitchKeyboard(change.addedWorkspaces);
     const text = formatConfigurationChange(change);
@@ -462,6 +494,7 @@ export class TelegramSurface {
         String(chatId),
         text,
         replyMarkup.inline_keyboard.length > 0 ? replyMarkup : undefined,
+        true,
       );
     }
   }
@@ -475,6 +508,7 @@ export class TelegramSurface {
           String(chatId),
           text,
           replyMarkup.inline_keyboard.length > 0 ? replyMarkup : undefined,
+          true,
         )),
     );
   }
@@ -1118,7 +1152,7 @@ export class TelegramSurface {
     const inputTarget = target(context);
     const actorId = String(context.from?.id ?? "");
     if (!this.access.isAllowed({ target: inputTarget, actorId })) return;
-    const submitAttachment = this.service.prepareAttachmentSubmission?.(
+    const submitAttachment = await this.receivedAttachments.get(context.update)?.prepare() ?? this.service.prepareAttachmentSubmission?.(
       inputTarget,
       () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
     );
@@ -1357,7 +1391,7 @@ export class TelegramSurface {
     }
     const inputTarget = target(context);
     const actorId = String(context.from?.id ?? "");
-    const scope = this.service.prepareAttachmentSubmission?.(
+    const scope = await this.receivedAttachments.get(context.update)?.prepare() ?? this.service.prepareAttachmentSubmission?.(
       inputTarget,
       () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
       "audio",
@@ -1428,6 +1462,8 @@ export class TelegramSurface {
       commandArguments(context),
       String(context.from.id),
     );
+    if (result.kind === "outcome" && result.outcome.type === "turn.stop-requested"
+      && this.attachmentStops.has(context.update)) result.outcome.stopped = true;
     if (result.kind === "auto-review") {
       await this.renderAutoReviewResult(context, result);
       return;
@@ -1478,6 +1514,34 @@ export class TelegramSurface {
     }
   }
 
+  private receiveAttachmentUpdate(update: Context["update"]): (() => void) | undefined {
+    this.receivedUpdates.add(update);
+    const message = update.message;
+    if (!message?.from || this.stopping) return;
+    const inputTarget: ConversationTarget = {
+      surface: "telegram", accountId: this.accountId, conversationId: String(message.chat.id),
+    };
+    const actorId = String(message.from.id);
+    const allowed = () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId });
+    if (isTelegramEmergencyStopUpdate(update, this.bot)) {
+      if (!allowed()) {
+        this.rejectedAttachmentStops.add(update);
+        return;
+      }
+      const stop = this.attachmentInputs.receiveStop(inputTarget);
+      if (stop.cancelled) this.attachmentStops.add(update);
+      return stop;
+    }
+    const kind = message.voice || message.audio ? "audio"
+      : message.video || message.video_note || (message.document && isVideoDocument(message.document.mime_type, message.document.file_name))
+        ? "video" : undefined;
+    if (!kind) return;
+    const receipt = this.attachmentInputs.receive(inputTarget, allowed, kind,
+      () => this.service.prepareAttachmentSubmission?.(inputTarget, allowed, kind));
+    this.receivedAttachments.set(update, receipt);
+    return () => { receipt.dispose(); this.receivedAttachments.delete(update); };
+  }
+
   private async authorize(context: Context, next: () => Promise<void>): Promise<void> {
     if (this.stopping) return;
     if (isWhoAmICommand(context, this.bot.botInfo.username)) {
@@ -1490,7 +1554,7 @@ export class TelegramSurface {
           actorId: String(context.from.id),
         }
       : undefined;
-    if (!accessContext || !this.access.isAllowed(accessContext)) {
+    if (!accessContext || !this.access.isAllowed(accessContext) || this.rejectedAttachmentStops.has(context.update)) {
       if (context.message) {
         await context.reply("无权使用此 Gateway。可用 /whoami 查看自己的 Telegram 用户 ID。");
       } else if (context.callbackQuery) {

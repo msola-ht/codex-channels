@@ -10,7 +10,6 @@ import {
   realpathSync,
   renameSync,
   rmdirSync,
-  rmSync,
   statSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
@@ -19,6 +18,7 @@ import { dirname, join, resolve } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
 
+import { securePrivateDirectorySync } from "../runtime/private-file.mjs";
 import { packageDir } from "./package-path.mjs";
 
 export function projectSkillsRoot(projectRoot = packageDir) {
@@ -158,16 +158,23 @@ export function installSkill({
 }
 
 function readSkillTargetState(target) {
-  const parentPath = dirname(target);
-  const parentStat = lstatSync(parentPath, { throwIfNoEntry: false, bigint: true });
-  let parent = null;
-  if (parentStat) {
-    const canonical = realpathSync(parentPath);
-    const actual = statSync(canonical, { bigint: true });
-    parent = JSON.stringify([canonical, String(actual.dev), String(actual.ino)]);
-  }
+  const parentState = readSkillDirectoryState(dirname(target));
+  const parent = parentState?.identity ?? null;
   const tree = readSkillTree(target);
-  return { parent, tree, revision: createHash("sha256").update(JSON.stringify([target, parent, tree])).digest("hex") };
+  return {
+    parent,
+    canonicalParent: parentState?.canonical ?? null,
+    tree,
+    revision: createHash("sha256").update(JSON.stringify([target, parent, tree])).digest("hex"),
+  };
+}
+
+function readSkillDirectoryState(path) {
+  if (!lstatSync(path, { throwIfNoEntry: false })) return null;
+  const canonical = realpathSync(path);
+  const actual = statSync(canonical, { bigint: true });
+  if (!actual.isDirectory()) throw new Error(`技能父路径不是目录：${path}`);
+  return { canonical, identity: JSON.stringify([canonical, String(actual.dev), String(actual.ino)]) };
 }
 
 function readSkillTree(root) {
@@ -205,14 +212,83 @@ function readSkillTree(root) {
   return hash.digest("hex");
 }
 
-export function uninstallSkill({ name, environment = process.env } = {}) {
+class SkillUninstallUnconfirmedError extends Error {
+  constructor(message, { cause, target, retainedDirectory }) {
+    super(message, { cause });
+    this.name = "SkillUninstallUnconfirmedError";
+    this.target = target;
+    this.retainedDirectory = retainedDirectory;
+  }
+}
+
+export function uninstallSkill({ name, environment = process.env, expectedTargetRevision } = {}) {
   validateSkillName(name);
-  const target = join(agentsSkillsDirectory(environment), name);
-  if (!existsSync(target)) {
+  const target = join(resolve(agentsSkillsDirectory(environment)), name);
+  const initialState = readSkillTargetState(target);
+  if (expectedTargetRevision !== undefined && initialState.revision !== expectedTargetRevision) {
+    throw new Error(`技能目标已在确认期间变化，请重新选择并确认：${target}`);
+  }
+  if (initialState.tree === null) {
     return { name, removed: false, target };
   }
-  rmSync(target, { recursive: true, force: true });
-  return { name, removed: true, target };
+  // Hidden directories inside a skills root can still be discovered upstream.
+  // Retain the actual tree outside that root, on the same filesystem if possible.
+  const retentionParent = dirname(initialState.canonicalParent);
+  if (retentionParent === initialState.canonicalParent) {
+    throw new Error(`无法在技能发现目录之外保留原目录，未卸载：${target}`);
+  }
+  const retentionParentState = readSkillDirectoryState(retentionParent);
+  let transaction;
+  let retainedDirectory;
+  let moveAttempted = false;
+  let movedPrevious = false;
+  let phase = "准备保留目录";
+  try {
+    transaction = mkdtempSync(join(retentionParent, ".codexc-skill-uninstall-"));
+    securePrivateDirectorySync(transaction);
+    const transactionState = readSkillDirectoryState(transaction);
+    retainedDirectory = join(transaction, "previous");
+    const assertRetentionLocation = () => {
+      if (readSkillDirectoryState(retentionParent)?.identity !== retentionParentState.identity
+        || readSkillDirectoryState(transaction)?.identity !== transactionState.identity
+        || dirname(transactionState.canonical) !== retentionParent) {
+        throw new Error("技能保留目录或其父目录已变化");
+      }
+    };
+    phase = "核对确认目标";
+    assertRetentionLocation();
+    if (readSkillTargetState(target).revision !== initialState.revision) {
+      throw new Error("技能目标在准备卸载期间已变化");
+    }
+    phase = "保留原目录";
+    // No copy-and-delete fallback: EXDEV or a sharing violation leaves the tree
+    // installed. Never delete this tree; old descriptors can still write to it.
+    moveAttempted = true;
+    renameSync(target, retainedDirectory);
+    movedPrevious = true;
+    phase = "核对卸载结果";
+    assertRetentionLocation();
+    if (readSkillTree(retainedDirectory) !== initialState.tree) {
+      throw new Error("技能原目录在移走期间已变化");
+    }
+    const finalState = readSkillTargetState(target);
+    if (finalState.parent !== initialState.parent || finalState.tree !== null) {
+      throw new Error("技能目标或父目录在移走后已变化");
+    }
+  } catch (error) {
+    const reason = typeof error?.code === "string" ? error.code : error.message;
+    const retained = movedPrevious
+      ? `原目录已移至 ${retainedDirectory}（路径和内容须人工核对）；不会自动恢复或覆盖目标 ${target}。`
+      : moveAttempted
+        ? `移动结果未确认，请核对目标 ${target} 与保留位置 ${retainedDirectory}；不会重试移动或覆盖目标。`
+        : `原目标未被本次操作移走：${target}。`;
+    const message = `技能卸载未确认（${phase}：${reason}）。${retained}${transaction ? `操作材料保留在 ${transaction}。` : ""}`;
+    if (moveAttempted) {
+      throw new SkillUninstallUnconfirmedError(message, { cause: error, target, retainedDirectory });
+    }
+    throw new Error(message, { cause: error });
+  }
+  return { name, removed: true, target, retainedDirectory };
 }
 
 export async function runSkillSetup({
@@ -234,7 +310,7 @@ export async function runSkillSetup({
         {
           value: "uninstall",
           label: "卸载",
-          hint: "从 ~/.agents/skills 删除技能",
+          hint: "移出安装位置，保留原目录",
         },
         { value: "back", label: "返回", hint: "返回设置类别" },
       ],
@@ -300,14 +376,27 @@ export async function runSkillSetup({
         ],
       });
       if (prompts.isCancel(skill) || skill === "back") continue;
+      validateSkillName(skill);
+      const target = join(resolve(agentsSkillsDirectory(environment)), skill);
+      const targetState = readSkillTargetState(target);
       const confirmed = await prompts.confirm({
-        message: `确认卸载技能 ${skill}？`,
+        message: `确认卸载技能 ${skill}（${target}）并保留原目录？`,
         initialValue: false,
       });
       if (prompts.isCancel(confirmed) || !confirmed) continue;
-      const result = uninstallSkill({ name: skill, environment });
+      let result;
+      try {
+        result = uninstallSkill({ name: skill, environment, expectedTargetRevision: targetState.revision });
+      } catch (error) {
+        if (error instanceof SkillUninstallUnconfirmedError) {
+          // Setup sanitizes and shortens error summaries. Keep controlled recovery
+          // paths complete here without exposing arbitrary underlying exceptions.
+          output.write(`技能卸载未确认。\n记录的原目录保留位置：${error.retainedDirectory}\n安装目标：${error.target}\n请人工核对路径与内容；不会自动恢复或覆盖目标。恢复前请停止相关写入者，并核对安装目标不存在。\n`);
+        }
+        throw error;
+      }
       output.write(result.removed
-        ? `已卸载技能 ${result.name}。\n`
+        ? `已卸载技能 ${result.name}：${result.target}\n原目录保留在 ${result.retainedDirectory}。\n恢复前请停止相关写入者，并核对安装目标不存在；内容核对完成且无进程继续使用后，可手动清理。\n`
         : `技能不存在：${result.name}\n`);
       continue;
     }

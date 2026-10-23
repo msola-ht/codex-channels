@@ -342,11 +342,10 @@ npm run docs:check
 实际交互、键盘焦点和视觉检查单独记录结果。
 普通提交通过现有提交钩子执行按范围选择的 `verify:commit`，开发阶段按实际改动选择检查，不重复运行全量门禁。
 
-`components/settings/relay-provider-models.tsx` 按提供商显示只读模型目录弹窗与目录更新入口。
-`components/settings/relay-key-models.tsx` 在 Key 编辑弹窗按提供商分组勾选模型，并为每个所选模型提供跟随客户端、直接选择思考等级及关闭方式二级菜单；关闭菜单仅提供显式参数方式，已有自动映射值仍显示并保留。可跨多个提供商，独立目录更新不扩大 Key 权限。
+`components/settings/relay-provider-models.tsx` 按提供商显示只读模型目录弹窗，读取失败时可刷新快照；目录与账户管理入口位于模型管理页。
+`components/settings/relay-key-models.tsx` 在 Key 编辑弹窗按提供商分组勾选模型，并为每个所选模型提供跟随客户端、直接选择思考等级及关闭方式二级菜单；关闭菜单仅提供显式参数方式，已有自动映射值仍显示并保留。可跨多个提供商，目录新增模型不会自动扩大 Key 权限。
 `components/settings/relay-reasoning-probe.tsx` 在所选模型的检测弹窗中手动对比基线与八种关闭方式；打开弹窗不发请求，开始后最多依次发送 9 次固定短文本、每次请求最多 64 个输出 Token，明确可能计费且不证明内部推理关闭。双协议提供商可选协议，结果仅适用于所选协议；服务端 NDJSON 进度驱动已结束项数、当前方式及渐进表格，不推算虚假进度。缺失指标显示未知，运行时不可采用；仅完整检测中已完成且有可用响应的具体关闭方式可手动采用到该模型草稿，保存仍走原预览与确认流程。
 `hooks/use-relay-reasoning-probe.ts` 通过 `/api/v1/management/relay/reasoning-probe` 维护单次检测，将请求绑定编辑 Key、配置版本、模型与协议；取消、关闭、卸载或上下文变化会中止请求并阻止迟到结果覆盖或采用。失败、取消和超时保留已收到的部分行供本次查看，但不可采用且不替换历史完整结果。缓存读写和采用时效统一使用现有服务端校准时钟，避免客户端时间偏差中断合法探测或提前清除记录。前端超时为 140 秒，服务端逐请求与整批预算见 Relay 管理接口。
 `lib/relay-reasoning-probe-cache.ts` 仅将完整终态的有限元数据保存到本浏览器 `localStorage` 的 `codex-webui:relay-reasoning-probes:v1`：每个模型与协议一条、最多 20 条、7 天，总编码大小不超过 128 KiB，读取已知有效版本时裁剪过期项。仅存配置版本、模型、协议、开始时间及九种方式的状态、HTTP 状态和可观察指标，不存 Key、提示词或响应正文。读取严格验证版本、键、字段类型、长度、行顺序及数量；异常或未知版本不自动删除或覆盖，存储禁用仅提示且不阻断检测。弹窗重开或页面刷新展示历史时间，不自动请求；不同 Key 可共享同模型和协议的观察，同版本历史可明确标为历史后手动采用，旧版本只读。清除按钮仅删除本功能专用缓存，不影响其他浏览器存储或服务端数据。
 `components/settings/relay-model-copy.tsx` 在 Key 列表中提供授权模型 ID 复制菜单、复制结果提示和剪贴板不可用时的手动复制入口。
-`hooks/use-relay-catalog.ts` 管理目录下载、一次自动尝试、取消和审计反馈。
 `hooks/use-relay-key-editor.ts` 管理 Key 草稿版本、逐模型思考设置、提交参数与一次性结果；移除模型同步清理草稿，新选模型默认跟随客户端。`components/settings/relay-key-table.tsx` 和 `relay-key-dialogs.tsx` 分别组合列表和编辑/逐模型确认/结果弹窗，`pages/relay-page.tsx` 保留页面组合和焦点恢复。

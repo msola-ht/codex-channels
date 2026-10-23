@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 
 import {
   acknowledgeConfigEvents,
+  ConfigEventQueueLockReleaseError,
   configEventQueuePath,
   matchingWorkspaceConfigEvents,
   readConfigEvents,
@@ -21,6 +22,7 @@ import { installProcessSignalHandlers, installServiceControlHandler } from "../.
 import { serviceShutdownTimeoutMs } from "../../runtime/shutdown-budget.mjs";
 import { closeSingleWorkerReaders, waitForSingleWorkerReadersExit } from "../../runtime/single-worker-reader.mjs";
 import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "../../runtime/windows-acl-bridge.mjs";
+import { closeOwnedCommandRunners, waitForOwnedCommandRunnersExit } from "../../runtime/owned-command-runner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { ResetCreditError } from "../application/index.js";
@@ -56,8 +58,8 @@ export async function runGatewayProcess(): Promise<void> {
   catch (error) {
     // Configuration/construction can already have created the main-thread ACL
     // bridge, even before the normal shutdown controls have been installed.
-    const closed = await Promise.allSettled([closeSingleWorkerReaders(), closeWindowsAclBridge()]);
-    await Promise.all([waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit()]);
+    const closed = await Promise.allSettled([closeSingleWorkerReaders(), closeWindowsAclBridge(), closeOwnedCommandRunners()]);
+    await Promise.all([waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit(), waitForOwnedCommandRunnersExit()]);
     const failures = closed.filter(result => result.status === "rejected").map(result => result.reason as unknown);
     if (failures.length) throw new AggregateError([error, ...failures], "Gateway 启动失败且资源关闭曾超时", { cause: error });
     throw error;
@@ -75,10 +77,10 @@ async function startGatewayProcess(): Promise<void> {
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config, { service: "gateway", module: "lifecycle" });
   const closeResourceOwners = async (): Promise<boolean> => {
-    const components = ["Delivery", "Metrics", "Scheduled Tasks", "Material Readers", "Windows ACL"];
+    const components = ["Delivery", "Metrics", "Scheduled Tasks", "Material Readers", "Windows ACL", "Auxiliary Commands"];
     const results = await Promise.allSettled([
       closeDeliveryJournals(), closeMetricsStores(), closeScheduledTaskStores(),
-      closeSingleWorkerReaders(), closeWindowsAclBridge(),
+      closeSingleWorkerReaders(), closeWindowsAclBridge(), closeOwnedCommandRunners(),
     ]);
     for (const [index, result] of results.entries()) {
       if (result.status === "rejected") {
@@ -87,7 +89,7 @@ async function startGatewayProcess(): Promise<void> {
     }
     await Promise.all([
       waitForDeliveryJournalsExit(), waitForMetricsStoresExit(), waitForScheduledTaskStoresExit(),
-      waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit(),
+      waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit(), waitForOwnedCommandRunnersExit(),
     ]);
     return results.every(result => result.status === "fulfilled");
   };
@@ -347,7 +349,9 @@ async function startGatewayProcess(): Promise<void> {
         } catch (error) {
           logger.warn(
             { err: error, events: applicableEvents.length },
-            "配置事件投递或确认失败；事件已保留，等待下次配置加载",
+            error instanceof ConfigEventQueueLockReleaseError
+              ? "配置事件已投递并确认，但队列锁清理失败；请检查锁占用，不重放已确认事件"
+              : "配置事件投递或确认失败；事件已保留，等待下次配置加载",
           );
         }
       }
@@ -436,6 +440,10 @@ function readPendingConfigEvents(
   try {
     return readConfigEvents(queuePath);
   } catch (error) {
+    if (error instanceof ConfigEventQueueLockReleaseError) {
+      logger.warn({ err: error }, "配置事件已读取，但队列锁清理失败；请检查锁占用");
+      return error.result as WorkspaceAddedConfigEvent[];
+    }
     logger.error({ err: error }, "读取配置事件队列失败；事件将保留以便后续重试");
     return [];
   }

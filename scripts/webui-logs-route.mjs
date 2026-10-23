@@ -9,6 +9,9 @@ import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import { ApiError, sendJson } from "./webui-http.mjs";
+import { sanitizeLogText, sanitizePlainLogText } from "./service-log-sanitizer.mjs";
+
+export { sanitizeLogText } from "./service-log-sanitizer.mjs";
 
 const maximumBytes = 256 * 1024;
 const targets = new Map(serviceDefinitions.map((definition) => [
@@ -27,49 +30,6 @@ export function parseLogQuery(params) {
     throw new ApiError(400, "invalid_parameter", "日志查询参数无效");
   }
   return { target, lines: Number(value) };
-}
-
-// Redact before returning any text, including structured and plain service output.
-function sanitizePlainText(value) {
-  return value
-    // eslint-disable-next-line no-control-regex -- Strip terminal escape sequences from service output.
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, "")
-    .replace(/(["']?(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n]*)/giu, "$1[REDACTED]")
-    .replace(/(?<![\w?&-])(["']?[\w-]*(?:tokens?|secrets?|password|passwd|api[_-]?key|credentials?)["']?\s*[:=]\s*)(?:[[{][^\r\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n]*)/giu, "$1[REDACTED]")
-    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/_.=-]+/giu, "$1 [REDACTED]")
-    .replace(/(https?:\/\/)[^\s/@]+@/giu, "$1[REDACTED]@")
-    .replace(/([?&][\w-]*(?:token|secret|password|api[_-]?key)=)[^&\s"']*/giu, "$1[REDACTED]")
-    .replace(/\b(?:sk|sess)-[A-Za-z0-9_-]{8,}/gu, "[REDACTED]")
-    // eslint-disable-next-line no-control-regex -- Preserve only printable output, tabs and newlines.
-    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/gu, "");
-}
-
-function sanitizeStructuredLog(value, depth = 0) {
-  if (depth > 32) return "[REDACTED]";
-  if (typeof value === "string") return sanitizePlainText(value);
-  if (Array.isArray(value)) return value.map((entry) => sanitizeStructuredLog(entry, depth + 1));
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key,
-      /(?:tokens?|secrets?|password|passwd|apikey|credentials?|authorization|cookies?)$/iu.test(key.replace(/[-_ ]/gu, ""))
-        ? "[REDACTED]" : sanitizeStructuredLog(entry, depth + 1),
-    ]));
-  }
-  return value;
-}
-
-export function sanitizeLogText(value) {
-  return value.split(/\r?\n/u).map((line) => {
-    // journald can prefix a JSON record with a timestamp and process name.
-    const start = line.indexOf("{");
-    if (start >= 0) {
-      try {
-        return sanitizePlainText(line.slice(0, start)) + JSON.stringify(sanitizeStructuredLog(JSON.parse(line.slice(start))));
-      } catch {
-        // Plain text and incomplete JSON are conservatively redacted below.
-      }
-    }
-    return sanitizePlainText(line);
-  }).join("\n");
 }
 
 function logLines(text, limit, truncated = false) {
@@ -96,7 +56,7 @@ function journalLines(text, limit) {
       if (typeof value === "string" && (key === "PRIORITY" ? /^[0-7]$/u : /^\d{1,16}$/u).test(value)) safe[key] = value;
     }
     for (const key of ["SYSLOG_IDENTIFIER", "_COMM"]) {
-      if (typeof entry[key] === "string") safe[key] = sanitizePlainText(entry[key]).slice(0, 256);
+      if (typeof entry[key] === "string") safe[key] = sanitizePlainLogText(entry[key]).slice(0, 256);
     }
     return JSON.stringify(safe);
   });

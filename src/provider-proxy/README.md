@@ -22,7 +22,7 @@
   异步快照复核不是文件状态与网络提交的原子操作；完成后复核取消状态才提交本地请求。
   原样交付状态码和 JSON/SSE 正文，过滤跳级头和响应凭据头，取消、断流及关闭清理连接。
 - `proxy.ts`：HTTP/SSE 与 WebSocket 转发、背压和连接生命周期协调。监听自动分配的回环地址，把精确
-  `/responses` 与只读 `/models` 路径转发到上游；官方 OpenAI
+  `/responses` 与只读 `/models` 路径转发到上游；HTTP连接的IPv6 hostname不带方括号，Host与WebSocket URL的authority保留方括号及端口，Chat桥遵循相同边界。官方 OpenAI
   主代理提供只读 `GET /_codexc/image-upload-route`，通过正在运行的路由解析器核验默认
   ChatGPT 图片引用后端，不转发上游、不读取凭据、不生成模型指标；独立后端返回不支持。
   受管 DeepSeek 原生 Responses 代理的同一路由描述入口和 `POST /_codexc/image-upload`
@@ -97,7 +97,7 @@
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
   同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录。
-  `responseTimeMs`、`firstTokenMs` 与 `totalDurationMs` 从提交上游发送时刻计时，不含发送前路由、解析与 WS 连接等待；HTTP 提交后发生的连接等待计入耗时；Chat 桥以真实上游提交起点替换本地转发起点。
+  `responseTimeMs`、`firstTokenMs` 与 `totalDurationMs` 从提交上游发送时刻计时，不含发送前路由、解析与 WS 连接等待；HTTP 提交后发生的连接等待计入耗时；Chat 桥仅使用真实上游提交起点，调用转储沿用同一起点，本地桥接跳不建立提交时钟。
   `responseTimeMs` 到首个有效上游事件，`firstTokenMs` 到首段非空内容的接收回调入口，`totalDurationMs` 到首次终态或结束/失败。未提交发送不伪造耗时。
   可空 `requestBytes` 保存实际提交给模型上游出站传输的请求正文或 WebSocket `response.create` 请求帧字节合计；HTTP 归一化、采样补齐和 Chat 转换使用转换后的内容，多个受控续答累计到同一逻辑请求。HTTP 流式正文仅在交给 `ClientRequest.write` 时累计，不计仍留在上传队列的块；WS 在 `send` 提交后立即累计，不等待发送回调，因此取消或发送失败不抹掉已提交大小。该值不表示远端确认收到的字节量；未提交时为 null，不包含响应、请求头或传输开销。
   指标通过 `timingBasis: "submitted"` 标记新起点，IPC 拒绝无标记的旧计时；指标独立于调用记录传递；调用索引复用同一观测，不从 trace 反推，不表示客户端显示时间。
@@ -105,8 +105,7 @@
   HTTP JSON/SSE 与 WebSocket 共用终态提取 `usage_metadata.amount`，以可空 `responseUsageAmount`
   传递有界非负十进制字符串；保留精度和零值，缺失或畸形值为 null，不采集任意 metadata、换算单位或推断费用。
   两种传输同时采集出站 `service_tier` 为 `requestServiceTier`，不受响应层级覆盖，缺失为空；沿用指标 IPC 入库且不依赖调用转储。
-  生成计时持续观察有界 Responses 事件；错误消息、标识符和
-  `User-Agent` 继续执行既有限长与字符约束。
+  生成计时持续观察有界 Responses 事件；普通指标的 `errorMessage` 恒为 null，JSON/SSE/WS 的上游错误正文及关闭原因不进入指标，Chat 的客户端固定错误文案也不复制到指标。保留受限错误分类、代码与HTTP状态；标识符和 `User-Agent` 继续执行既有限长与字符约束。指标IPC对带有界错误文本的既有帧仍校验后投影为null，不向Writer透传；不改写已存历史记录。
 - `traffic-call-timing.ts`：记录单次调用从提交发送起的单调时钟耗时；只写调用响应索引，不进入指标 IPC 或数据库。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
@@ -135,10 +134,17 @@
   `trace-*.jsonl`。HTTP 请求对应一次调用；同一 WebSocket 连接中的每个 `response.create` 分别对应
   一次调用。响应索引复用代理同一份 `firstTokenMs` 观测，精简模式也保留，不从 trace 反推。
   指标中的 `traffic` 使用同步分配的标签、writer session（时间戳加 128 位随机标识的十进制后缀）与 interaction；
-  manifest、目录和指标共享同一身份，目录或文件冲突时停止采集，不覆盖已有文件或改绑已发出的引用。
+  manifest、目录和指标共享同一身份，目录或文件冲突时停止采集，不改绑已发出的引用。
+  writer 独占创建私有 session 目录；manifest 在随机 pending 路径完成写入、私有权限准备和 Runtime 临时材料收尾后，
+  复核最终路径不存在，再原子 rename 发布，发布后不再修改权限。正常并发 reader/维护仅能看到缺失或完整的 manifest；
+  失败只清理本次 pending，不删除 session 或已有 manifest。已有 session 或发布前已发现的 manifest 均拒绝覆盖；
+  该发布依赖私有新目录的单 owner 合同，最后一次存在性检查与 rename 之间不提供针对同 UID 进程插入文件的原子拒绝覆盖保证。
   HTTP 和每次 WebSocket 调用分别绑定；未开启转储或 WS 握手失败、尚未创建逻辑调用时不提供关联。
-  每个逻辑调用绑定开始时的 writer session；长驻进程约每 24 小时让新调用进入新 session，
-  已在执行的并发调用继续在原 session 完成，因此请求与响应不会拆分。私有目录准备、ACL、文件创建与写入
+  每个逻辑调用绑定开始时的 writer session；长驻进程约每 24 小时，或当前 session 已接受的
+  manifest、索引、trace 与正文合计达到普通 writer 的 64 MiB、Relay 的 8 MiB 时，让下一次逻辑调用进入新 session。
+  已接受但尚未落盘的字节也参与轮转计数；已在执行的并发调用继续在原 session 完成，因此请求与响应不会拆分，
+  活动调用的后续写入可能使单个 session 超过轮转目标。既有历史批次不改写、不迁移，未来批次按既有保留规则整批清理。
+  私有目录准备、ACL、文件创建与写入
   均异步执行，写队列先落正文再落索引；每个普通 writer 最多接受 14 MiB / 4096 项待写数据，
   其中 trace 最多占用 4 MiB，并为索引与 session 收尾保留 256 KiB / 128 项。
   trace 或正文达到旁路容量时分别告警并丢弃；正文首个缺口后的片段不再拼接，索引使用既有
@@ -153,7 +159,14 @@
   迟到 I/O 仍由原 owner 持有并收尾。
   App Server 启动及新 session 建立时异步按 session
   最后活动时间与 `[debug].model_traffic_retention_days` 清理过期 V2 历史 session，`0` 关闭按时间清理。
-  历史完整 session 仍按 Provider 约保留 320 MiB；清理在删除前复核同进程所有 writer 的活动目录，
+  历史完整 session 仍按 Provider 约保留 320 MiB；容量规划先计入全部受保护批次，再按原有新旧顺序保留历史，
+  不因受保护批次较旧而重复分配容量。Relay 的保留预算同时扣除在途调用预留；受保护批次自身超过预算时仍不会被删除。
+  同步公开维护入口与异步 owner 均只读验证既有根目录和 session 的类型、owner 与平台私有访问，拒绝链接，不通过修改权限接受未知目录。
+  自动维护与 CLI/WebUI reader、显式 cleanup 共用 Runtime 的严格纯 manifest 四字段投影，未知字段、空身份及非有限数不纳入清理；读取预算各自保留，自动维护的 manifest 上限为 16 KiB。
+  删除前复核根、session 的设备/节点身份及 manifest 的身份、大小、修改时间与内容；校验失败停止本轮维护、保留尚未删除的对象并经 owner 报告固定维护故障，不迁移、不清除未知材料。
+  已发现 manifest 的候选在扫描或删除期间发生缺失错误时，只有复核原根身份未变且整个候选目录确已消失，才按其他维护 owner 已移除该批次继续；计划删除的批次仍只释放一次已记账容量。
+  仅 manifest 或内部文件消失、目录替换或链接、根消失或替换、权限失败和取消均不按此竞态跳过。
+  不含 manifest 的未知目录及非 V2 session 继续跳过；损坏的现有 manifest 会阻止本轮后续合法清理，Relay 采集进入 failed 状态，模型交付仍独立继续。清理同时复核同进程所有 writer 的活动目录，
   包含扫描期间新分配但尚未完成文件准备的 session；维护可取消且有时间和扫描项数上限。
   当前写入中的 session 不会被拆除，未知目录和旧版文件不会被自动删除；
   Authorization、Cookie 等凭据字段只保留认证
@@ -227,7 +240,7 @@ Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 
 小型请求按实际声明长度准入。生成、交付及取消清理完成后才释放。超限返回
 `503 chat_bridge_capacity_exceeded`，不排队、不自动重试；这不是 Node 总内存上限。每座桥拥有独立随机本地身份，统计代理覆盖客户端同名身份头，桥校验后才准入；该头不进入 resolver 或模型上游，原有 `Authorization` 语义不变。关闭等待本桥在途处理结束。
 
-- `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在其后复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 复核取消后立即尝试采集，首次容量初始化期间跳过并报告 initializing，不等待磁盘；共享存储报告实际接受的写入量，在途调用单独预留预算；后台单任务清理历史并保护活动及新建批次，整理期间继续采集；维护与关闭各有 5 秒预算，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。
+- `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在后台启动并复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 复核取消后立即尝试采集，首次容量初始化期间跳过并报告 initializing，不等待磁盘；ready 后仅采集新请求，不补录初始化期间跳过的请求。共享存储报告包含待落盘 manifest 的实际接受写入量，在途调用单独预留预算；容量不足时后台单任务先退休空闲的当前批次，等其已接受写入及文件关闭完成后再清理历史，活动及新建批次始终受保护。活动调用完成后若容量仍不足，会再请求维护；模型请求不等待退休或维护。维护与关闭各有 5 秒预算，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。
 - `relay-metric.ts`：直接模型调用的最小跨进程指标合同，不包含消息正文或凭据。
 - `relay-metrics-channel.ts`：版本化、受限帧与连接的私有指标 IPC；显式接收/拒绝，未知确认不判定为丢失；异步接收任务最多 8 个，断连时取消，任务实际结束才释放名额。
   协议/生成/交付状态及转储标签严格要求字符串枚举，不以强制转换接受数组，避免畸形样本进入批次影响其他指标。

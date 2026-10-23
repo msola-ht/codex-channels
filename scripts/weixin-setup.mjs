@@ -161,8 +161,8 @@ export async function runWeixinSetup({
     }
 
     output.write(`\n微信连接已安全保存，消息接收已设为启用：${result.configPath}\n`);
-    if (result.warnings.some(({ code }) => code === "gateway-config-lock-release-failed")) {
-      output.write("配置已保存，但配置锁释放失败；请检查配置和锁状态，勿重复保存。\n");
+    if (result.warnings.some(({ code }) => code === "gateway-config-cleanup-failed")) {
+      output.write("配置已保存，但保存后清理失败；请检查配置、锁和临时目录状态，勿重复保存。\n");
     }
     writeGatewayConfigActivationNotice(output);
     return {

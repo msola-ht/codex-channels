@@ -9,14 +9,10 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import {
-  MetricsDatabaseAccessError,
-  openReadOnlyMetricsDatabase,
-  readWeeklyQuota,
-} from "./metrics-database-access.mjs";
 import { metricsRangeOptions } from "./metrics-command-options.mjs";
 import { createMetricsExportOwner } from "./metrics-export-stream.mjs";
 import { MetricsExportError } from "./metrics-export-limits.mjs";
+import { createMetricsReadOwner, MetricsReadError } from "./webui-metrics-read.mjs";
 import { closeDeliveryReaders, waitForDeliveryReadersExit, closeDeliveryJournals, waitForDeliveryJournalsExit } from "../dist/delivery/index.js";
 import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "../runtime/windows-acl-bridge.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -37,7 +33,6 @@ import { requestGatewayAccountRefresh, requestGatewayResetCredits } from "../run
 import { requestGatewayThreadStates } from "../runtime/gateway-thread-state.mjs";
 import { modelRelayConfigSchema } from "../runtime/model-relay-config.mjs";
 import {
-  RequestMetricsQueryService,
   parseRequestMetricsFilters,
 } from "../dist/observability/index.js";
 import {
@@ -173,6 +168,7 @@ export function createWebuiServer({
   const gatewayConfigRead = { pending: null, controller: null, responses: new Set() };
   const providerStateCache = { expiresAtMs: 0, value: null, pending: null };
   const metricsExports = createMetricsExportOwner();
+  const metricsReads = createMetricsReadOwner();
   const management = createManagementState(
     environment,
     host,
@@ -192,10 +188,16 @@ export function createWebuiServer({
     refreshGatewayAccount,
     resetGatewayCredits,
   );
+  const readMetrics = (task, response) => readMetricsForResponse(metricsReads, environment, task, response, management.shutdownController.signal);
+  management.readMetrics = readMetrics;
   const server = createServer((request, response) => {
-    handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, metricsExports, management, request, response);
+    handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, metricsExports, readMetrics, management, request, response);
   });
-  server.on("close", () => gatewayConfigRead.controller?.abort());
+  server.on("close", () => {
+    gatewayConfigRead.controller?.abort();
+    management.shutdownController.abort();
+    void metricsReads.close().catch(() => logger.error({ event: "metrics.read-close-failed" }, "指标读取资源退出未确认"));
+  });
   return { host, server, staticDir, token, closeNotifications: async () => {
     management.shutdownController.abort();
     gatewayConfigRead.controller?.abort();
@@ -203,7 +205,7 @@ export function createWebuiServer({
       Promise.resolve().then(() => closeQueueStreams(management)),
       management.tasks.close(),
       waitForTrafficReads(management.shutdownController.signal),
-      metricsExports.close(), closeDeliveryReaders(), closeDeliveryJournals(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
+      metricsExports.close(), metricsReads.close(), closeDeliveryReaders(), closeDeliveryJournals(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
       closeOfficialModelOperations(management),
       closeAppServerUserAgentReads(management.appServerUserAgentCache),
       closeManagementSnapshotReads(management).then(() => closeCodexUserConfigClients()),
@@ -211,7 +213,7 @@ export function createWebuiServer({
     if (results.some(result => result.status === "rejected")) throw new Error("WebUI 后台资源退出未确认");
   }, waitForNotificationsExit: async () => {
     await waitForTrafficReads(management.shutdownController.signal);
-    await Promise.all([management.tasks.waitForExit(), closeQueueStreams(management), closeAppServerUserAgentReads(management.appServerUserAgentCache), metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management, { waitForExit: true }),
+    await Promise.all([management.tasks.waitForExit(), closeQueueStreams(management), closeAppServerUserAgentReads(management.appServerUserAgentCache), metricsExports.waitForExit(), metricsReads.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management, { waitForExit: true }),
       closeManagementSnapshotReads(management).then(() => closeCodexUserConfigClients())]);
   } };
 }
@@ -234,12 +236,13 @@ export function resolveWebuiSettings({
   };
 }
 
-async function handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, metricsExports, management, request, response) {
+async function handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, metricsExports, readMetrics, management, request, response) {
   let managementRequest = false;
   try {
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
     const managementPrefix = `${API_PREFIX}/management`;
     managementRequest = requestUrl.pathname === managementPrefix || requestUrl.pathname.startsWith(`${managementPrefix}/`);
+    if (token === null) validateAnonymousRequest(request);
     if (managementRequest) {
       await routeManagement(environment, requestUrl, request, response, management, token);
       return;
@@ -273,11 +276,12 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         openQueueStream(management, response, (signal, send) => watchQueueChanges(path(resolveGatewayConfigPath(environment)), signal, send));
         return;
       }
-      await routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports, management.shutdownController.signal);
+      await routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports, readMetrics, management.shutdownController.signal);
       return;
     }
     serveStatic(staticDir, url.pathname, response);
   } catch (error) {
+    if (response.destroyed) return;
     if (error instanceof GatewayConfigWriteCommittedError) {
       const sendError = managementRequest ? sendManagementJson : sendJson;
       sendError(response, 500, {
@@ -461,19 +465,41 @@ async function routeManagement(environment, url, request, response, state, token
   if (await routeProviderManagement({
     ...routeContext,
     configPath: resolveGatewayConfigPath(environment),
-    openMetricsStore,
+    readMetrics: state.readMetrics,
   })) return;
   if (await routeTaskManagement(routeContext)) return;
-  if (await routeRelayManagement({ ...routeContext, openMetricsStore })) return;
+  if (await routeRelayManagement({ ...routeContext, readMetrics: state.readMetrics })) return;
   if (await routeDeliveryManagement(routeContext)) return;
   if (await routeGatewaySettingsManagement({ ...routeContext, consumeHighRisk })) return;
   if (await routeStatusManagement({
     ...routeContext,
     codexCliVersion: CODEX_CLI_VERSION,
     gatewayVersion: GATEWAY_VERSION,
-    openMetricsStore,
+    readMetrics: state.readMetrics,
   })) return;
   throw new ApiError(404, "not_found", `未知管理 API：${path}`);
+}
+
+function validateAnonymousRequest(request) {
+  if (!isLoopbackAddress(request.socket.remoteAddress)) {
+    throw new ApiError(403, "loopback_required", "未配置访问令牌时只允许回环访问");
+  }
+  // 不经 URL 归一化接受数字 IP、尾点、凭据或其他主机别名，也不信任转发头。
+  const hostHeaders = request.rawHeaders.filter((name, index) => index % 2 === 0 && name.toLowerCase() === "host");
+  if (hostHeaders.length !== 1 || !isLoopbackAuthority(request.headers.host)) {
+    throw new ApiError(403, "host_invalid", "未配置访问令牌时 Host 必须是受支持的回环主机");
+  }
+  const origin = request.headers.origin;
+  if (origin !== undefined && origin !== new URL(`http://${request.headers.host}`).origin) {
+    throw new ApiError(403, "origin_invalid", "未配置访问令牌时 Origin 必须与请求 Host 的 HTTP 来源一致");
+  }
+}
+
+function isLoopbackAuthority(value) {
+  if (typeof value !== "string") return false;
+  const match = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::([0-9]+))?$/iu.exec(value);
+  // SSH 本机转发端口无需与服务器监听端口一致。
+  return match !== null && (match[1] === undefined || (Number(match[1]) >= 1 && Number(match[1]) <= 65_535));
 }
 
 function authenticatedManagementOrigin(request) {
@@ -519,7 +545,7 @@ function readJsonMetadata(path) {
   }
 }
 
-async function routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports, shutdownSignal) {
+async function routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports, readMetrics, shutdownSignal) {
   const path = url.pathname;
   if (!path.startsWith(`${API_PREFIX}/`)) {
     throw new ApiError(404, "not_found", `未知 API：${path}`);
@@ -535,48 +561,43 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
   }
   if (apiPath === "/providers") {
     if (url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "Provider 列表不接受查询参数");
-    const store = openMetricsStore(environment, Date.now());
-    try {
-      sendJson(response, 200, { providers: store.providers() });
-    } finally {
-      store.close();
-    }
+    sendJson(response, 200, await readMetrics({ operation: "providers", nowMs: Date.now() }, response));
     return;
   }
   if (apiPath === "/overview") {
-    await handleOverview(environment, url, response, gatewayConfigRead);
+    await handleOverview(environment, url, response, gatewayConfigRead, readMetrics);
     return;
   }
   if (apiPath === "/daily") {
-    handleDaily(environment, url, response);
+    await handleDaily(url, response, readMetrics);
     return;
   }
   if (apiPath === "/threads") {
-    handleThreads(environment, url, response);
+    await handleThreads(url, response, readMetrics);
     return;
   }
   if (apiPath === "/subagents") {
-    await handleSubagents(environment, url, response);
+    await handleSubagents(environment, url, response, readMetrics, shutdownSignal);
     return;
   }
   const subagentsMatch = apiPath.match(/^\/threads\/([^/]+)\/subagents$/u);
   if (subagentsMatch) {
-    await handleThreadSubagents(environment, subagentsMatch[1], url, response);
+    await handleSubagents(environment, url, response, readMetrics, shutdownSignal, parseThreadId(subagentsMatch[1]));
     return;
   }
   const threadMatch = apiPath.match(/^\/threads\/([^/]+)\/(run|turns)$/u);
   if (threadMatch) {
-    handleThreadDetail(
-      environment,
+    await handleThreadDetail(
       threadMatch[1],
       threadMatch[2],
       url,
       response,
+      readMetrics,
     );
     return;
   }
   if (apiPath === "/requests") {
-    await handleRequests(environment, url, response);
+    await handleRequests(environment, url, response, readMetrics);
     return;
   }
   if (apiPath === "/requests/export") {
@@ -584,7 +605,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     return;
   }
   if (apiPath === "/errors") {
-    await handleErrors(environment, url, response);
+    await handleErrors(url, response, readMetrics);
     return;
   }
   if (apiPath === "/settings/summary") {
@@ -600,22 +621,31 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     return;
   }
   if (apiPath === "/accounts") {
-    await sendAccountSnapshots(environment, response, openMetricsStore);
+    await sendAccountSnapshots(environment, response, readMetrics);
     return;
   }
   if (await routeTrafficApi({ apiPath, environment, request, response, url, signal: shutdownSignal })) return;
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
 }
-function openMetricsStore(environment, endAtMs = Date.now()) {
+async function readMetricsForResponse(owner, environment, task, response, shutdownSignal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  response.once("close", abort);
+  shutdownSignal.addEventListener("abort", abort, { once: true });
+  if (response.destroyed || shutdownSignal.aborted) abort();
   try {
-    return openReadOnlyMetricsDatabase(environment, endAtMs);
+    return await owner.read(environment, task, { signal: controller.signal });
   } catch (error) {
-    if (error instanceof MetricsDatabaseAccessError) {
-      throw new ApiError(503, error.code, error.code === "metrics_database_unavailable"
-        ? "指标数据库尚未创建，请先运行 Gateway 收集模型请求"
-        : "指标数据库版本或结构不兼容，仅支持当前 Schema；请核对版本及备份，勿删除数据库");
+    if (error instanceof MetricsReadError) {
+      if (error.code !== "metrics_read_cancelled") logger.warn({ event: "metrics.read-failed", operation: task.operation,
+        code: error.code, phase: error.phase, reasonCode: error.reasonCode,
+      }, "指标读取未完成");
+      throw new ApiError(error.code === "metrics_read_busy" ? 429 : 503, error.code, error.message);
     }
     throw error;
+  } finally {
+    response.off("close", abort);
+    shutdownSignal.removeEventListener("abort", abort);
   }
 }
 
@@ -626,7 +656,7 @@ function resolveGatewayConfigPath(environment) {
     : join(userDataDir(environment), "config.toml");
 }
 
-async function handleOverview(environment, url, response, configRead) {
+async function handleOverview(environment, url, response, configRead, readMetrics) {
   for (const key of url.searchParams.keys()) {
     if (!["range", "from", "to"].includes(key)) throw new ApiError(400, "unsupported_parameter", "控制台仅接受时间范围查询参数");
     if (url.searchParams.getAll(key).length !== 1) throw new ApiError(400, "invalid_parameter", "时间范围查询参数不能重复");
@@ -640,68 +670,25 @@ async function handleOverview(environment, url, response, configRead) {
   heatmapStart.setHours(0, 0, 0, 0);
   heatmapStart.setDate(heatmapStart.getDate() - 89);
   const heatmapRange = { name: "90d", startAtMs: heatmapStart.getTime(), endAtMs: nowMs };
-  const generatedAt = new Date(nowMs).toISOString();
-  const store = openMetricsStore(environment, nowMs);
-  try {
-    const snapshot = store.readSnapshot(() => {
-      const service = new RequestMetricsQueryService(store);
-      const overview = service.overview(range, modelAliases);
-      return {
-        range, generatedAt,
-        global: overview.global,
-        threadCount: overview.threadCount,
-        turnCount: overview.turnCount,
-        providers: overview.providers,
-        models: overview.models,
-        errors: overview.errors,
-        weeklyQuota: toWebuiWeeklyQuota(readWeeklyQuota(store, nowMs)),
-        trend: { range, generatedAt, ...service.trend(range) },
-        heatmap: { range: heatmapRange, generatedAt, daily: service.daily(heatmapRange) },
-      };
-    });
-    sendJson(response, 200, snapshot);
-  } finally {
-    store.close();
-  }
+  sendJson(response, 200, await readMetrics({ operation: "overview", nowMs, range, modelAliases, heatmapRange }, response));
 }
 
-function handleDaily(environment, url, response) {
+async function handleDaily(url, response, readMetrics) {
   const range = parseRange(url);
-  const store = openMetricsStore(environment, range.endAtMs);
-  try {
-    const daily = new RequestMetricsQueryService(store).daily(range);
-    sendJson(response, 200, {
-      range,
-      generatedAt: new Date(range.endAtMs).toISOString(),
-      daily,
-    });
-  } finally {
-    store.close();
-  }
+  const daily = await readMetrics({ operation: "daily", nowMs: range.endAtMs, range }, response);
+  sendJson(response, 200, { range, generatedAt: new Date(range.endAtMs).toISOString(), daily });
 }
 
-function handleThreads(environment, url, response) {
+async function handleThreads(url, response, readMetrics) {
   const range = parseRange(url, "all");
   const query = parseThreadQuery(url);
-  const store = openMetricsStore(environment, range.endAtMs);
-  try {
-    const { matchedTotal, ...page } = store.readSnapshot(() => new RequestMetricsQueryService(store).threadList(range, { ...query, mainThreadsOnly: true }));
-    sendJson(response, 200, {
-      generatedAt: new Date().toISOString(),
-      range,
-      ...page,
-      total: matchedTotal,
-    });
-  } finally {
-    store.close();
-  }
+  const { matchedTotal, ...page } = await readMetrics({ operation: "threads", nowMs: range.endAtMs, range, query }, response);
+  sendJson(response, 200, {
+    generatedAt: new Date().toISOString(), range, ...page, total: matchedTotal,
+  });
 }
 
-function handleThreadSubagents(environment, rawThreadId, url, response) {
-  return handleSubagents(environment, url, response, parseThreadId(rawThreadId));
-}
-
-async function handleSubagents(environment, url, response, threadId) {
+async function handleSubagents(environment, url, response, readMetrics, shutdownSignal, threadId) {
   const allowed = ["offset", "limit", "sortKey", "sortDirection", ...(threadId === undefined ? [] : ["parentTurnId"])];
   for (const key of url.searchParams.keys()) {
     if (!allowed.includes(key)) throw new ApiError(400, "unsupported_parameter", `子代理列表只接受 ${allowed.join("、")}`);
@@ -722,20 +709,13 @@ async function handleSubagents(environment, url, response, threadId) {
     sortKey,
     sortDirection,
   };
-  const store = openMetricsStore(environment);
-  let page;
-  try {
-    page = store.readSnapshot(() => {
-      const queries = new RequestMetricsQueryService(store);
-      return threadId === undefined ? queries.subagents(query) : queries.threadSubagents(threadId, query);
-    });
-  } finally {
-    store.close();
-  }
+  const page = await readMetrics({ operation: "subagents", nowMs: Date.now(), ...(threadId === undefined ? {} : { threadId }), query }, response);
   // Release the SQLite snapshot before querying the Gateway's existing connections.
   const controller = new AbortController();
   const disconnected = () => controller.abort();
   response.once("close", disconnected);
+  shutdownSignal.addEventListener("abort", disconnected, { once: true });
+  if (shutdownSignal.aborted) disconnected();
   try {
     if (response.destroyed) return;
     const states = page.subagents.length === 0 ? [] : await requestGatewayThreadStates(
@@ -752,50 +732,38 @@ async function handleSubagents(environment, url, response, threadId) {
     });
   } finally {
     response.off("close", disconnected);
+    shutdownSignal.removeEventListener("abort", disconnected);
   }
 }
 
-function handleThreadDetail(environment, rawThreadId, view, url, response) {
+async function handleThreadDetail(rawThreadId, view, url, response, readMetrics) {
   const threadId = parseThreadId(rawThreadId);
   if (view === "run" && url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "run 返回全部历史累计；期间查询请使用 turns");
   const range = parseRange(url, "all");
   const query = view === "run" ? null : parseThreadQuery(url, threadId);
-  const store = openMetricsStore(environment);
-  try {
-    const queries = new RequestMetricsQueryService(store);
-    if (view === "run") {
-      const { summary, subagent } = store.readSnapshot(() => ({
-        summary: queries.threadSummary(threadId),
-        subagent: queries.subagentThread(threadId),
-      }));
-      sendJson(response, 200, {
-        generatedAt: new Date().toISOString(),
-        threadId,
-        agentPath: subagent.agentPath,
-        parentThreadId: subagent.parentThreadId,
-        parentTurnId: subagent.parentTurnId,
-        latestTurn: summary.latestTurn,
-        sessionDurationMs: summary.sessionDurationMs,
-        sessionTiming: summary.sessionTiming,
-        latestExecution: summary.latestExecution,
-        threadAggregate: summary.threadAggregate,
-      });
-      return;
-    }
-    const { matchedTotal, ...page } = store.readSnapshot(() => queries.threadTurnSummaries(threadId, range, query));
+  if (view === "run") {
+    const { summary, subagent } = await readMetrics({ operation: "run", nowMs: Date.now(), threadId }, response);
     sendJson(response, 200, {
       generatedAt: new Date().toISOString(),
       threadId,
-      range,
-      ...page,
-      total: matchedTotal,
+      agentPath: subagent.agentPath,
+      parentThreadId: subagent.parentThreadId,
+      parentTurnId: subagent.parentTurnId,
+      latestTurn: summary.latestTurn,
+      sessionDurationMs: summary.sessionDurationMs,
+      sessionTiming: summary.sessionTiming,
+      latestExecution: summary.latestExecution,
+      threadAggregate: summary.threadAggregate,
     });
-  } finally {
-    store.close();
+    return;
   }
+  const { matchedTotal, ...page } = await readMetrics({ operation: "turns", nowMs: Date.now(), threadId, range, query }, response);
+  sendJson(response, 200, {
+    generatedAt: new Date().toISOString(), threadId, range, ...page, total: matchedTotal,
+  });
 }
 
-async function handleRequests(environment, url, response) {
+async function handleRequests(environment, url, response, readMetrics) {
   if (url.searchParams.has("afterId")) {
     throw new ApiError(
       400,
@@ -814,38 +782,25 @@ async function handleRequests(environment, url, response) {
     100,
   );
   const filters = parseMetricsFilters(url);
-  const store = openMetricsStore(environment, range.endAtMs);
-  try {
-    const page = store.readSnapshot(() => new RequestMetricsQueryService(store).page(range, {
-      offset,
-      limit,
-      sortKey: sort.key,
-      sortDirection: sort.direction,
-      ...filters,
-    }));
-    const records = page.records;
-    if (records.some(record => record.source === "relay")) {
-      const config = readGatewayConfig(resolveGatewayConfigPath(environment));
-      const relay = modelRelayConfigSchema.parse(config.model_relay ?? {});
-      const callers = new Map(relay.callers.map(caller => [caller.caller_id, caller]));
-      for (const record of records) {
-        const caller = callers.get(record.callerId);
-        if (record.source === "relay" && caller?.key_id === record.keyId && caller.display_name) {
-          record.callerDisplayName = caller.display_name;
-        }
+  const page = await readMetrics({ operation: "requests", nowMs: range.endAtMs, range, query: {
+    offset, limit, sortKey: sort.key, sortDirection: sort.direction, ...filters,
+  } }, response);
+  const records = page.records;
+  if (records.some(record => record.source === "relay")) {
+    const config = readGatewayConfig(resolveGatewayConfigPath(environment));
+    const relay = modelRelayConfigSchema.parse(config.model_relay ?? {});
+    const callers = new Map(relay.callers.map(caller => [caller.caller_id, caller]));
+    for (const record of records) {
+      const caller = callers.get(record.callerId);
+      if (record.source === "relay" && caller?.key_id === record.keyId && caller.display_name) {
+        record.callerDisplayName = caller.display_name;
       }
     }
-    sendJson(response, 200, {
-      range,
-      generatedAt: new Date(range.endAtMs).toISOString(),
-      records,
-      nextOffset: page.nextOffset,
-      total: page.matchedTotal,
-      aggregate: page.aggregate,
-    });
-  } finally {
-    store.close();
   }
+  sendJson(response, 200, {
+    range, generatedAt: new Date(range.endAtMs).toISOString(), records,
+    nextOffset: page.nextOffset, total: page.matchedTotal, aggregate: page.aggregate,
+  });
 }
 
 async function handleRequestsExport(environment, url, request, response, exports) {
@@ -903,7 +858,7 @@ async function handleRequestsExport(environment, url, request, response, exports
   }
 }
 
-async function handleErrors(environment, url, response) {
+async function handleErrors(url, response, readMetrics) {
   const range = parseRange(url);
   const filters = parseMetricsFilters(url);
   const sort = parseRequestSort(url);
@@ -915,32 +870,13 @@ async function handleErrors(environment, url, response) {
     500,
     100,
   );
-  const store = openMetricsStore(environment, range.endAtMs);
-  try {
-    const queries = new RequestMetricsQueryService(store);
-    const { page, errors } = store.readSnapshot(() => ({
-      page: queries.page(range, {
-        ...filters,
-        offset,
-        limit,
-        sortKey: sort.key,
-        sortDirection: sort.direction,
-        onlyFailures: true,
-      }),
-      errors: queries.errors(range, filters),
-    }));
-    sendJson(response, 200, {
-      range,
-      generatedAt: new Date(range.endAtMs).toISOString(),
-      errors,
-      records: page.records,
-      nextOffset: page.nextOffset,
-      total: page.matchedTotal,
-      aggregate: page.aggregate,
-    });
-  } finally {
-    store.close();
-  }
+  const { page, errors } = await readMetrics({ operation: "errors", nowMs: range.endAtMs, range, query: {
+    ...filters, offset, limit, sortKey: sort.key, sortDirection: sort.direction,
+  } }, response);
+  sendJson(response, 200, {
+    range, generatedAt: new Date(range.endAtMs).toISOString(), errors, records: page.records,
+    nextOffset: page.nextOffset, total: page.matchedTotal, aggregate: page.aggregate,
+  });
 }
 
 function loadAvailableGatewaySettings(environment) {
@@ -1042,15 +978,6 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
       { id: "service-restart", label: "重启全部后台服务", command: "codexc restart all", detail: "重启 Gateway、App Server、未关闭的 WebUI 和已启用 Relay" },
     ],
   });
-}
-
-function toWebuiWeeklyQuota(quota) {
-  if (quota === null) return null;
-  return {
-    ...quota,
-    // 指标库保存的是秒级重置时间，WebUI 统一使用毫秒时间戳。
-    resetsAt: quota.resetsAt === null ? null : quota.resetsAt * 1000,
-  };
 }
 
 function parseRange(url, defaultRange = "90d", nowMs = Date.now()) {

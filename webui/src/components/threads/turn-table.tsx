@@ -122,7 +122,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">
-          {row.original.requestOutcomes.failed}
+          {row.original.requestOutcomes.failed || ""}
         </span>
       ),
     },

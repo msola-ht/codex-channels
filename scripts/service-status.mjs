@@ -1,10 +1,11 @@
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { closeSync, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import {
   parseServiceTarget,
@@ -21,6 +22,7 @@ import { runtimeConfig } from "./runtime-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir } from "./package-path.mjs";
 import { serviceControlDefinitions, serviceSnapshotHealthy } from "./service-selection.mjs";
+import { sanitizeLogText } from "./service-log-sanitizer.mjs";
 
 const ANSI_SGR_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu");
 const JOURNAL_LINE_PREFIX_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})\s+\S+\s+[^\s:]+(?:\[\d+\])?:\s+/u;
@@ -136,15 +138,18 @@ export function readManagedServiceError({
   if (target !== "gateway" && target !== "app-server" && target !== "webui" && target !== "model-relay") {
     return null;
   }
-  let dataDir;
+  let directory;
   try {
-    dataDir = runtimeConfig(environment).dataDir;
+    const { configPath, dataDir } = runtimeConfig(environment);
+    directory = dirname(resolvePrimaryAppServerSocketPath(readGatewayConfig(configPath), dataDir));
+    const directoryStats = lstatSync(directory);
+    if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) return null;
   } catch {
     return null;
   }
   const logBase = target === "app-server" ? "codex-app-server" : target;
   const errors = [`${logBase}.error.log`, `${logBase}.log`]
-    .map(name => readManagedServiceLogError(join(dataDir, "runtime", name), now))
+    .map(name => readManagedServiceLogError(join(directory, name), now))
     .filter(error => error !== null);
   errors.sort((left, right) => (right.observedAt ?? "").localeCompare(left.observedAt ?? ""));
   return errors[0] ?? null;
@@ -264,12 +269,7 @@ function classifyManagedServiceError(value) {
 }
 
 function sanitizeServiceError(value) {
-  return String(value)
-    .replace(ANSI_SGR_PATTERN, "")
-    .replace(/authorization\s*[:=]\s*bearer\s+[^\s,;]+/giu, "authorization: Bearer [已隐藏]")
-    .replace(/(["']?)(access[-_ ]?token|refresh[-_ ]?token|api[-_ ]?key|client[-_ ]?secret|auth[-_ ]?token|token|secret|cookie|password)\1\s*([:=])\s*(["']?)[^"'\s,;}]+\4/giu, "$1$2$1$3$4[已隐藏]$4")
-    .replace(/https?:\/\/[^\s/@:]+:[^\s/@]+@/giu, "https://[已隐藏]@")
-    .replace(/([?&](?:access[-_ ]?token|api[-_ ]?key|token|secret)=)[^&\s]+/giu, "$1[已隐藏]")
+  return sanitizeLogText(String(value))
     .replace(/\s+/gu, " ")
     .trim()
     .slice(0, 240);
@@ -403,7 +403,7 @@ export async function inspectManagedServiceHealth(options = {}) {
           );
           const topology = await inspectAppServerSupervisor(primarySocketPath);
           rpcReachable = topology?.releasedProviders.includes(topology.primaryProvider) === true
-            || await appServerSocketAcceptsWebSocket(primarySocketPath, { ...environment, CODEX_BINARY: configDocument.codex?.binary ?? environment.CODEX_BINARY ?? "codex" });
+            || await appServerSocketAcceptsWebSocket(primarySocketPath, { ...environment, CODEX_BINARY: effectiveCodexBinary(configDocument.codex?.binary ?? "codex", environment, paths.dataDir) });
         }
       } catch {
         rpcReachable = false;

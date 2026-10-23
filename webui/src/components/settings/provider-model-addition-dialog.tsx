@@ -98,7 +98,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
               if (Object.hasOwn(changes, "supportsSearch")) setSearch(changes.supportsSearch === undefined ? "unknown" : changes.supportsSearch ? "yes" : "no")
             }} />}
         </> : null}
-        <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{loading && <Spinner data-icon="inline-start" />}{t(loading ? "common.loading" : mode === "manual" ? "modelAddition.load" : "modelAddition.discoverLoad")}</Button>
+        <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{loading && <Spinner aria-label={t("common.loading")} data-icon="inline-start" />}{t(loading ? "common.loading" : mode === "manual" ? "modelAddition.load" : "modelAddition.discoverLoad")}</Button>
       </FieldGroup> : <FieldGroup>
         <p>{t("modelCatalog.scope", { providers: options.providers.join(t("managementUi.listSeparator")) })}</p>
         {options.candidates.length === 0 ? <SettingsEmpty>{t("modelAddition.empty")}</SettingsEmpty> : <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.select")}</FieldLegend><FieldGroup>{options.candidates.map((entry, index) => <Field key={entry.model} orientation="horizontal"><Checkbox id={`addition-candidate-${index}`} checked={selected.includes(entry.model)} disabled={locked} onCheckedChange={checked => setSelected(previous => checked ? [...previous, entry.model] : previous.filter(model => model !== entry.model))} /><FieldLabel htmlFor={`addition-candidate-${index}`} className="break-all">{entry.displayName} ({entry.model})</FieldLabel></Field>)}</FieldGroup></FieldSet>}

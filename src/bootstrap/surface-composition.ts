@@ -37,6 +37,7 @@ import { createProxyFetch } from "./proxy-fetch.js";
 export interface TelegramRuntimeAdapter extends SurfaceAdapter {
   readonly surface: "telegram";
   replaceNotificationRecipients(recipients: ReadonlySet<number>): void;
+  revalidateAccess(): void;
 }
 
 export interface ReloadableTelegramAccess {
@@ -45,6 +46,7 @@ export interface ReloadableTelegramAccess {
 
 export interface FeishuRuntimeAdapter extends SurfaceAdapter {
   readonly surface: "feishu";
+  revalidateAccess(): void;
 }
 
 export interface ReloadableFeishuAccess {
@@ -407,6 +409,7 @@ export function createTelegramRuntimeModule(
         access.replace(next.telegramAllowedUserIds);
         adapter.replaceNotificationRecipients(next.telegramAllowedUserIds);
         notificationRecipients = new Set(next.telegramAllowedUserIds);
+        adapter.revalidateAccess();
       }
     },
     prepareRestartNotification(next) {
@@ -444,6 +447,7 @@ export function createFeishuRuntimeModule(
         throw new Error("飞书允许名单热加载缺少运行配置");
       }
       access.replace(next.feishu.allowedOpenIds);
+      adapter.revalidateAccess();
       const removedBindings = removeUnauthorizedFeishuBindings(
         bindings,
         next.feishu.allowedOpenIds,

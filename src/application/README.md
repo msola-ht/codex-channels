@@ -1,8 +1,8 @@
 # Application
 
-`ConversationTurnUseCases.prepareAttachmentSubmission` 在等待前序输入前登记音频或视频取消作用域；Surface 排空前序输入后调用一次 `captureTarget`，在下载前捕获当前工作区与 Thread，允许前序输入正常创建首个 Thread。下载完成后在会话锁内复核目标和调用方实时授权，并在异步会话准备之后、Turn 请求发出前再次复核已捕获的 Thread，再通过原有 Turn 提交入口发送文本视频引用或含 `localAudios` 的稳定输入。未捕获目标不得提交，取消后不得捕获；首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
+Surface 在接收音视频、首次进入队列前登记有界接收取消范围，并等待此前停止命令处理结束；之后调用 `ConversationTurnUseCases.prepareAttachmentSubmission`，在刷新前序输入前建立 Application 提交作用域。Surface 排空前序输入后调用一次 `captureTarget`，在下载前捕获当前工作区与 Thread，允许前序输入正常创建首个 Thread。下载完成后在会话锁内复核目标和调用方实时授权，并在异步会话准备之后、Turn 请求发出前再次复核已捕获的 Thread，再通过原有 Turn 提交入口发送文本视频引用或含 `localAudios` 的稳定输入。未捕获目标不得提交，取消后不得捕获；首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
 
-返回的提交作用域提供取消信号、一次性 `captureTarget` 和 `submit`、`mayHaveSubmitted` 和 `dispose`。Surface 在首次等待前创建作用域并在结束时释放；`/stop` 取消当前目标的附件准备，准备总时限为 120 秒，包含等待前序输入，捕获目标不重置时限。每个目标最多 4 个待处理作用域，全局最多 1000 个目标。RPC 可能发出后即使确认失败也保留附件至过期，避免删除已经进入 Thread 的引用；不自动重试提交。
+返回的提交作用域提供取消信号、一次性 `captureTarget` 和 `submit`、`mayHaveSubmitted` 和 `dispose`，覆盖前序输入刷新至锁内提交，并在结束时释放。Application 自身保留120秒期限；Surface接收范围另从接收起计算120秒预算，包含外层排队及停止等待，超时同时取消已建立的提交作用域，捕获目标不延长总预算。每个目标最多4个待处理作用域，全局最多1000个目标。RPC可能发出后即使确认失败也保留附件至过期，避免删除已经进入Thread的引用；不自动重试提交。
 
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 
@@ -11,6 +11,7 @@
 普通消息的 `submit` 接收 Surface 提供的实时授权闭包，在等待会话锁、Thread 准备及最终 Turn 写入前复核；
 输入同时固定接收时的 Workspace ID 与目录，变化时拒绝。图片准备后的 start/steer 也保留最终守卫。
 已经提交的请求仍按实际结果结算，不因后续撤权自动重试或丢弃响应。
+普通输入与 inline Review 在请求前登记 Core 临时活动观察，响应与期间收到的生命周期通知合并后才更新展示状态；迟到响应不重新激活已结束轮次，也不覆盖更新轮次。请求成功仍结算模型与模式选择，观察器在请求结束时释放。
 
 模型选择和会话生命周期命令显式传递实时授权闭包：在会话锁、目录/默认配置等待和后续写入前复核，
 模型选择的 Queue 检查也保留该守卫。默认速度已保存后撤权只阻止后续偏好更新，不回滚共享默认值。
@@ -35,6 +36,7 @@ MCP 登录与资源读取固定捕获的 Thread，目录查询后不得转向其
 已经提交的 OAuth/刷新结果仍照实际结算。OAuth 完成仅匹配本 Gateway 发起的最新登录：精确核对
 loginId、实际连接 Provider、Thread/server、原绑定与 Workspace 及授权；迟到、重复、转移后的结果不投递。
 会话列表固定查询开始时的工作区 ID/目录，目录搜索、轮数读取和缓存写入前复核，避免旧目录结果被记到新工作区。
+resume 与 unarchive 共用选择器，保留有效数字序号优先；精确 ID/名称匹配多个时直接拒绝，只有零个精确匹配才继续唯一 ID 前缀匹配。
 Permission Profile 分页与计划任务权限预检同样将实时守卫传到 Provider 等待及每次 RPC 尝试。
 显式账户查询携带原用户授权，后续 HTTP/RPC 与本地估算分别复核；带守卫的第三方请求独立执行，
 无守卫的后台请求仍按既有规则合并，已经提交的账户快照写入独立结算。
@@ -106,13 +108,16 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   通知失效贯穿在途列表、预览和最终提交，确认成功或失败均清理同会话其他令牌和快照。
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
-  Gateway 默认模型只在没有当前或待选模型时回退使用，并核对主 Provider 目录与可用性；显式选择模型不依赖旧默认值，失效默认值不阻断已有会话的模型设置。
+  Gateway 默认模型只在没有当前或待选模型时回退使用；主目录成功返回后才据其判断默认模型是否缺失。未查询或失败的目录不把浏览目标变成当前选择；显式选择模型不依赖旧默认值，失效默认值不阻断已有会话的模型设置。
   模型状态带不透明的 Conversation/Workspace/Thread/Session 页面身份；选择等待期间新 Turn 开始会取消在途选择。
+  页面身份同时覆盖当前与待生效模型设置、偏好和浏览范围；状态读取在目录及默认配置等待后复核原身份，避免旧设置与新身份混合。`ModelSelectionRequest` 区分精确 Provider 导航、Provider/model 选择、effort 与 fast，附原卡 `ModelSelectionSnapshot`；结构化选择在会话锁、目录及默认读取、最终配置提交与偏好写入之间持续复核快照和交互守卫。自身同步提交后只推进本次已写成的状态，外部变化仍使旧卡失效；文字命令保留按执行时状态解释。
+  结构化操作还核对目录默认和继承配置解析后的有效设置；操作内保留已查询来源的能力，后续新页面按其实际定向目录生成，避免把未查询能力伪装成已确认。默认配置写入成功后以明确偏好继续提交，不假定用户默认覆盖 Workspace 配置。
   加速档位的纯目录匹配复用 `runtime/service-tier.mjs`，与 CLI/WebUI 使用相同的 Fast、Ultrafast 能力判断；回到 Standard 不受当前目录项的不可用标记阻断。
   无 Thread 且无显式档位偏好时从目标 Provider 的 Workspace 有效配置读取服务层级，保留 null，不以目录默认层级推断已启用加速；开启加速前经窄端口核对同一作用域的 `features.fast_mode`，写入前后复核订阅。
   模型目录明确不可用时，浏览保留目录的不可用原因与未知档位，不为显示档位重新连接故障实例；启用加速仍严格检查目录和有效配置。
-  独立 CP 切换 Provider 经模型端口读取对应 App Server 目录，官方兼容目录与独立目录分别装配；默认选择保留精确 Provider 和平台模型 ID；总览隔离各 CP 的读取故障，定向操作只查询目标 CP，故障条目不参与能力选择。
+  独立 CP 切换 Provider 经模型端口读取对应 App Server 目录，官方兼容目录与独立目录分别装配；默认选择保留精确 Provider 和平台模型 ID。定向独立 CP 操作不查询无关主目录；总览隔离主目录与独立目录故障，官方兼容克隆仍依赖主目录。故障条目保留不可用身份，不参与能力选择，空能力列表不表示已确认不支持，也不提供真实默认思考等级。
   独立目录可从 `model/list` 的默认标记读取默认模型，聚合目录保留含多级路径的完整模型 ID；同一聚合 Provider 内模型选择仍只覆盖下一 Turn，保留当前 Thread。
+  目录读取按最多四个独立 Provider 并发，收齐已启动请求并复核授权后才发布默认模型缓存。`ModelSelectionPort.assertModelCatalogActive` 是可选同步本地守卫，生产 Routing 实现用整体停止信号拒绝后续读取、状态返回与选择写入；单个 Provider 关闭可降级为该目录不可用。文字命令的前置总览仍由共享命令解析负责，不等同定向目录方法。
   官方未登录时为未绑定会话解析唯一第三方，或组合根明确提供的同类账户默认 Provider，并使用其
   Profile 默认模型供状态、菜单与建线程复用；
   受管 Provider 设置应用后按精确 Provider 替换已确认的补充模型目录与默认标记，保留其他 Provider 的目录、已绑定模型及待生效的明确选择；
@@ -187,7 +192,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
 - `thread-occupancy-port.ts`：定义渠道 `/release` 使用的 Thread 占用查询与释放窄端口；只返回
-  稳定占用状态、持锁进程摘要和释放结果，不暴露进程级实现。
+  稳定占用状态、持锁进程摘要和释放结果，不暴露进程级实现。释放命令传递实时授权守卫，异步诊断后及终止前复核原绑定与 Workspace；已经发出的强制释放不因后续取消被视为撤销。
 - `thread-queue-port.ts`：定义原生 Thread Queue 的六个稳定用例及已知拒绝分类；Application 按分类映射反馈与释放策略，不识别官方英文异常。Application 只接收纯文本写入，
   通过 Client 返回条目种类、可编辑标记和有界安全预览，不传播官方 `UserInput` 或本地路径。
   切换到已有 Queue 的 Thread 时沿用该 Thread 自身设置并清除当前会话待生效偏好；后台完成释放前

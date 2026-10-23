@@ -9,6 +9,7 @@ __CODEX_HOME_ENVIRONMENT__
 Environment="CODEX_CONNECT_HOME=__CONFIG_DIR__"
 Environment="CODEX_CONNECT_CONFIG_FILE=__CONFIG_PATH_ENV__"
 Environment="CODEX_CONNECT_SERVICE_ROLE=app-server"
+Environment="CODEX_BINARY=__CODEX_BINARY_ENV__"
 Environment="PATH=__SYSTEMD_PATH__"
 UMask=0077
 KillMode=mixed

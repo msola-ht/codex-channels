@@ -31,7 +31,7 @@ export function formatConversationModels(
 ): string {
   const { state } = result;
   const current = state.models.find((model) =>
-    model.model === state.model
+    model.available !== false && model.model === state.model
     && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
   const speed = `速度：${formatServiceTier(state.serviceTier, current)}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`;
   const effortName = reasoningEffortSettingName(state.effort, current);
@@ -166,7 +166,7 @@ function formatModelStateLine(
   state: Extract<ConversationCommandResult, { kind: "models" }>["state"],
 ): string {
   const current = state.models.find((model) =>
-    model.model === state.model
+    model.available !== false && model.model === state.model
     && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
   // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
   const name = current === undefined

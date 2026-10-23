@@ -38,7 +38,7 @@ export function useTrafficQuery() {
       traceOffset: Number.isInteger(traceOffset) && traceOffset >= 0 ? traceOffset : 0,
       id: rawId !== null && /^[0-9]+$/u.test(rawId) ? Number(rawId) : null,
       limit: trafficPageSizeOptions.includes(limit) ? limit : defaultLimit,
-      offset: Number.isInteger(offset) && offset >= 0 ? offset : 0,
+      offset: Number.isSafeInteger(offset) && offset >= 0 ? offset : 0,
     } as TrafficQuery
   }, [encoded])
 

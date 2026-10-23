@@ -34,7 +34,7 @@ import {
 } from "./scheduled-task-command.js";
 import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
 import type { ScheduledTaskOperationContext } from "../scheduled-tasks/index.js";
-import { resolveProvider, type ModelSelectionIdentity, type ModelSelectionState } from "./model-selection-service.js";
+import { resolveProvider, type ModelSelectionIdentity, type ModelSelectionRequest, type ModelSelectionState } from "./model-selection-service.js";
 import { pageCountFor, pageSlice } from "./pagination.js";
 
 export {
@@ -325,6 +325,7 @@ export interface ConversationCommandExecutor {
   selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string): Promise<ConversationCommandResult>;
   selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult>;
   selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult>;
+  selectModelSetting(target: ConversationTarget, selection: ModelSelectionRequest, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
   execute(
     target: ConversationTarget,
     command: ConversationCommandName,
@@ -369,6 +370,18 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     const state = await this.conversations.selectModel(target, selection, assertAuthorized);
     assertAuthorized();
     return modelSelectionResult(state);
+  }
+
+  async selectModelSetting(target: ConversationTarget, selection: ModelSelectionRequest, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult> {
+    const authorize = this.commandGuard(target, actorId, false);
+    const guard = () => { authorize(); assertInteractionActive?.(); };
+    guard();
+    this.conversations.touchActivity?.(target);
+    const state = await this.conversations.selectModelSetting(target, selection, guard);
+    guard();
+    return selection.kind === "model"
+      ? modelSelectionResult(state)
+      : { kind: "models", view: selection.kind === "browse-provider" ? "model" : selection.kind, state };
   }
 
   async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult> {
@@ -768,7 +781,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
         return {
           kind: "occupancy",
-          result: await this.conversations.releaseThread(target, force),
+          result: await this.conversations.releaseThread(target, force, assertAuthorized),
         };
       }
       case "schedule":

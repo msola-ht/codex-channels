@@ -481,7 +481,9 @@ async function runCustomPrimaryProviderForm({
   await assertProviderFileSnapshots(openingFiles);
   const preview = prepared.preview;
   const previewModelDetails = custom && !editingCustom ? compileResponsesModelCatalog(preview.provider.models, preview.provider.model).models : [];
-  output.write(preview.provider.mode === "switching"
+  output.write(preview.willChange === false
+    ? "\n连接配置无变化，将复核当前配置：\n"
+    : preview.provider.mode === "switching"
     ? `\n将写入 ~/.codex/${customSwitchingProviderProfileName(normalizedId)}.config.toml：\n`
     : "\n将写入 ~/.codex/config.toml：\n");
   const previewLines = [
@@ -496,11 +498,13 @@ async function runCustomPrimaryProviderForm({
       ? [
           "- 主配置：保持官方 OpenAI",
           ...(editingCustom ? [] : [`- 默认思考等级：${custom ? models.find(entry => entry.id === normalizedModel).defaultReasoningEffort ?? "none" : "medium"}`, "- 服务层级：default"]),
-          "- 认证：API Key 将明文写入 0600 私有 Profile（不回显、不进入命令行和日志）",
+          preview.willChange === false ? "- 认证：沿用当前私有 Profile 中的 API Key（不回显）"
+            : "- 认证：API Key 将明文写入 0600 私有 Profile（不回显、不进入命令行和日志）",
         ]
       : [
-          "- 主配置：写入并启用该固定 Provider",
-          "- 认证：API Key 将明文写入当前用户私有凭据文件，主配置仅保存 env_key 引用（不回显、不进入命令行和日志）",
+          preview.willChange === false ? "- 主配置：已启用该固定 Provider" : "- 主配置：写入并启用该固定 Provider",
+          preview.willChange === false ? "- 认证：沿用当前私有凭据及 env_key 引用（不回显）"
+            : "- 认证：API Key 将明文写入当前用户私有凭据文件，主配置仅保存 env_key 引用（不回显、不进入命令行和日志）",
         ]),
     ...(editingCustom ? ["- 模型定义与默认模型：保留现有设置"] : []),
     ...(custom && !editingCustom ? preview.provider.models.flatMap((entry, index) => [
@@ -525,7 +529,7 @@ async function runCustomPrimaryProviderForm({
   output.write(previewLines.map((line) => `${line}\n`).join(""));
 
   const confirmed = await prompts.confirm({
-    message: "确认写入？",
+    message: preview.willChange === false ? "确认复核当前配置？" : "确认写入？",
     initialValue: true,
   });
   if (prompts.isCancel(confirmed) || confirmed !== true) {
@@ -534,6 +538,16 @@ async function runCustomPrimaryProviderForm({
   }
 
   const result = await prepared.apply();
+  if (result.action === "unchanged") {
+    output.write("配置无变化，未写入，无需重启。\n");
+    return {
+      action: result.action,
+      provider: result.provider.id,
+      model: result.provider.model,
+      activation: result.activation,
+      activationResult: configActivationResult(result.activation),
+    };
+  }
   const backupCleanupFailed = result.warnings.some(
     ({ code }) => code === "backup-cleanup-failed",
   );

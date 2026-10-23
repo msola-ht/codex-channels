@@ -4,6 +4,7 @@ export {
   type ThreadModelSettings,
   type ThreadListOptions,
   type ApprovalTarget,
+  type ThreadRestoreObserver,
 } from "./router.js";
 export {
   isThreadExecutionSettled,

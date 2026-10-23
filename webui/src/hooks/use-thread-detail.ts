@@ -9,7 +9,10 @@ export function useThreadDetail(threadId: string, query: MetricsQuery) {
     const batch = new AbortController()
     const batchSignal = signal === undefined ? batch.signal : AbortSignal.any([signal, batch.signal])
     try {
-      const [run, turns] = await Promise.all([fetchThreadRun(threadId, batchSignal), fetchThreadTurns(threadId, query, batchSignal)])
+      // Leave the second server read slot available for the page's Provider filter.
+      const run = await fetchThreadRun(threadId, batchSignal)
+      batchSignal.throwIfAborted()
+      const turns = await fetchThreadTurns(threadId, query, batchSignal)
       return { queryKey, data: { run, turns } }
     } catch (error) {
       batch.abort()

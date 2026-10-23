@@ -85,12 +85,13 @@ async function main() {
     if (base.models.length !== 1) throw new Error("公共底座必须仅包含一个模型");
     if (sources.official.model !== base.models[0].slug || sources.official.sha256 !== hash(previous.get(names[0]))) throw new Error("公共底座与来源记录不一致，请先检查仓库快照");
   }
+  const codexBinary = effectiveCodexBinary("codex", process.env);
   const temporary = mkdtempSync(join(tmpdir(), "codexc-template-export-"));
   let cliVersion;
   try {
     const environment = { ...process.env, CODEX_HOME: temporary };
     const run = args => {
-      const invocation = resolveExecutableInvocation(effectiveCodexBinary("codex", environment), args, environment);
+      const invocation = resolveExecutableInvocation(codexBinary, args, environment);
       const result = spawnSync(invocation.file, invocation.args, { cwd: temporary, env: environment,
         windowsVerbatimArguments: invocation.windowsVerbatimArguments, encoding: "utf8", timeout: 30_000,
         maxBuffer: 16 * maximumBytes, stdio: ["ignore", "pipe", "pipe"] });
@@ -127,7 +128,7 @@ async function main() {
     const changes = differences(previous.get(name) === undefined ? undefined : JSON.parse(previous.get(name)), JSON.parse(content));
     console.log(`${name}: ${changes.length ? changes.join("；") : "无变化"}`);
   }
-  for (const catalog of [base, source, completed]) await validateModelCatalogWithCodex(catalog);
+  for (const catalog of [base, source, completed]) await validateModelCatalogWithCodex(catalog, process.env, codexBinary);
   console.log("三份目录已通过 Codex 加载校验。");
   if (!args.includes("--write")) { console.log(`仅对比，未写入。确认差异后使用${updateBase ? " --update-base" : ""} --write 更新。`); return; }
 

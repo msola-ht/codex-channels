@@ -9,6 +9,7 @@ import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
 import { managementSecurityHeaders } from "./management-security.mjs";
 import { probeRelayReasoning } from "./relay-reasoning-probe.mjs";
+import { webuiLogger } from "./webui-logger.mjs";
 
 const activeReasoningProbes = new WeakSet();
 const reasoningProbe = z.strictObject({ revision: z.string().regex(/^[a-f0-9]{64}$/u), model: z.string().max(265), protocol: z.enum(["chat", "responses"]) });
@@ -45,7 +46,7 @@ async function readForRequest(request, response, read) {
   }
 }
 
-export async function routeRelayManagement({ environment, maximumBodyBytes, openMetricsStore, path, principalId, request, response, state }) {
+export async function routeRelayManagement({ environment, maximumBodyBytes, readMetrics, path, principalId, request, response, state }) {
   if (path === "/relay/reasoning-probe" && request.method === "POST") {
     if (new URL(request.url, "http://localhost").search) throw new ApiError(400, "relay_probe_invalid", "Relay 思考探测参数无效");
     let body;
@@ -136,15 +137,16 @@ export async function routeRelayManagement({ environment, maximumBodyBytes, open
     const observedAtMs = Date.now();
     const startAtMs = observedAtMs - 24 * 60 * 60 * 1000;
     let usage = null;
-    let store;
     try {
-      store = openMetricsStore(environment, observedAtMs);
-      usage = { observedAtMs, startAtMs, callers: store.relayCallerUsage(
-        snapshot.callers.map(caller => ({ callerId: caller.caller_id, keyId: caller.key_id })), startAtMs, observedAtMs,
-      ) };
-    } catch {
+      const callers = await readMetrics({ operation: "relayUsage", nowMs: observedAtMs, startAtMs,
+        callers: snapshot.callers.map(caller => ({ callerId: caller.caller_id, keyId: caller.key_id })),
+      }, response);
+      usage = { observedAtMs, startAtMs, callers };
+    } catch (error) {
+      if (response.destroyed || state.shutdownController.signal.aborted) return true;
       // 指标不可用不阻断 Key 管理，也不伪造零调用。
-    } finally { store?.close(); }
+      webuiLogger.warn({ event: "relay.metrics-unavailable", code: error instanceof ApiError ? error.code : "metrics_read_unavailable" }, "Relay 用量读取暂不可用");
+    }
     sendManagementJson(response, 200, { ...snapshot, runtime, usage }); return true;
   }
   if (!["/relay/preview", "/relay/apply"].includes(path) || request.method !== "POST") return false;

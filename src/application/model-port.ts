@@ -33,6 +33,8 @@ export interface ModelOption {
 }
 
 export interface ModelSelectionPort {
+  /** 本地目录生命周期守卫；整体停止后不得降级展示或启动后续目录请求。 */
+  assertModelCatalogActive?(): void;
   /** 本地守卫只约束新的请求提交，已提交请求仍按实际结果结算。 */
   listModels(beforeSubmit?: () => void): Promise<ModelOption[]>;
   listModelsForProvider?(provider: string, beforeSubmit?: () => void): Promise<ModelOption[]>;

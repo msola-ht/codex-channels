@@ -41,6 +41,44 @@ export interface ModelSelectionIdentity {
   model: string;
 }
 
+export type ModelSelectionSnapshot = Omit<ModelSelectionState, "models" | "selectionScope"> & {
+  selectionScope: string;
+};
+
+export type ModelSelectionRequest = { snapshot: ModelSelectionSnapshot } & (
+  | { kind: "browse-provider"; provider: string }
+  | { kind: "model"; provider: string; model: string }
+  | { kind: "effort"; effort: string }
+  | { kind: "fast"; mode: "on" | "off" | "ultrafast" }
+);
+
+export function modelSelectionSnapshot(state: Omit<ModelSelectionState, "models">): ModelSelectionSnapshot {
+  if (!state.selectionScope) {
+    throw new UserFacingError("model.selection.expired", "模型选项已失效，请重新打开选择卡片");
+  }
+  return {
+    selectionScope: state.selectionScope,
+    model: state.model,
+    ...(state.modelProvider === undefined ? {} : { modelProvider: state.modelProvider }),
+    ...(state.providerFilter === undefined ? {} : { providerFilter: state.providerFilter }),
+    effort: state.effort,
+    serviceTier: state.serviceTier,
+    pending: state.pending,
+    modelPending: state.modelPending,
+    effortPending: state.effortPending,
+    serviceTierPending: state.serviceTierPending,
+    ...(state.providerPending === undefined ? {} : { providerPending: state.providerPending }),
+  };
+}
+
+interface SelectionExpectation {
+  threadId: string | undefined;
+  scope?: string;
+  snapshot?: ModelSelectionSnapshot;
+  catalog?: ModelCatalog;
+  defaults?: string;
+}
+
 export interface OfficialModelCatalogProvider {
   provider: string;
   displayName: string;
@@ -54,6 +92,13 @@ export interface IndependentModelCatalogProvider {
 }
 
 const standardServiceTierRequestValue = "default";
+
+interface ModelCatalog {
+  models: ModelOption[];
+  queriedProviders: ReadonlySet<string>;
+  /** Only a successful source can prove that an identity is absent. */
+  confirmedProviders: ReadonlySet<string>;
+}
 
 export class ModelSelectionService {
   private readonly pendingByConversation = new Map<string, TurnOverrides>();
@@ -81,16 +126,21 @@ export class ModelSelectionService {
     ];
   }
 
-  async state(target: ConversationTarget, requireSelection = false, assertAuthorized?: () => void): Promise<ModelSelectionState> {
-    assertAuthorized = this.selectionGuard(target, assertAuthorized);
+  async state(target: ConversationTarget, requireSelection = false, assertAuthorized?: () => void, expected?: SelectionExpectation): Promise<ModelSelectionState> {
     assertAuthorized?.();
     let filter = this.providerFilterByConversation.get(this.key(target));
     if (filter !== undefined && this.providersWithoutSubscription().has(filter)) {
       this.providerFilterByConversation.delete(this.key(target));
       filter = undefined;
     }
-    const models = await this.listModels(requireSelection ? this.status(target).modelProvider : filter, assertAuthorized);
-    const state = await this.selectionState(target, models, filter, assertAuthorized);
+    assertAuthorized = this.selectionGuard(target, assertAuthorized, {
+      threadId: this.router.current(target)?.threadId,
+      scope: this.selectionScope(target),
+    });
+    assertAuthorized?.();
+    const catalog = await this.listModels(requireSelection ? this.status(target).modelProvider : filter, assertAuthorized);
+    const { models } = catalog;
+    const state = await this.selectionState(target, catalog, filter, assertAuthorized, expected);
     assertAuthorized?.();
     if (requireSelection && state.modelProvider === undefined) {
       throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
@@ -104,10 +154,39 @@ export class ModelSelectionService {
     return state;
   }
 
-  async browseProvider(target: ConversationTarget, provider: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
-    assertAuthorized = this.selectionGuard(target, assertAuthorized);
-    const models = await this.listModels(/^\d+$/.test(provider.trim()) ? undefined : provider.trim(), assertAuthorized);
-    const resolvedProvider = resolveProvider(this.selectableModels(models), provider);
+  async selectSetting(target: ConversationTarget, selection: ModelSelectionRequest, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    const expected: SelectionExpectation = {
+      threadId: this.router.current(target)?.threadId,
+      scope: selection.snapshot.selectionScope,
+    };
+    const guard = this.selectionGuard(target, assertAuthorized, expected);
+    guard();
+    const current = await this.state(target, false, guard, expected);
+    guard();
+    if (JSON.stringify(modelSelectionSnapshot(current)) !== JSON.stringify(modelSelectionSnapshot(selection.snapshot))) {
+      throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片");
+    }
+    expected.snapshot = modelSelectionSnapshot(current);
+    expected.defaults = this.selectionDefaults(target, expected.snapshot);
+    switch (selection.kind) {
+      case "browse-provider":
+        return this.browseProvider(target, selection.provider, assertAuthorized, expected);
+      case "model":
+        return this.selectModel(target, selection, assertAuthorized, expected);
+      case "effort":
+        return this.selectEffort(target, selection.effort, assertAuthorized, expected);
+      case "fast":
+        return this.selectFastMode(target, selection.mode, assertAuthorized, expected);
+    }
+  }
+
+  async browseProvider(target: ConversationTarget, provider: string, assertAuthorized?: () => void, expected?: SelectionExpectation): Promise<ModelSelectionState> {
+    assertAuthorized = this.selectionGuard(target, assertAuthorized, expected);
+    const catalog = await this.listModels(!expected && /^\d+$/.test(provider.trim()) ? undefined : provider.trim(), assertAuthorized);
+    const { models } = catalog;
+    const resolvedProvider = expected
+      ? listProviders(this.selectableModels(models)).find(entry => entry === provider)
+      : resolveProvider(this.selectableModels(models), provider);
     if (resolvedProvider === undefined) {
       throw new UserFacingError(
         "model.provider.not-found",
@@ -123,9 +202,13 @@ export class ModelSelectionService {
         { provider: resolvedProvider },
       );
     }
+    await this.validateSelection(target, catalog, assertAuthorized, expected);
     assertAuthorized?.();
     this.providerFilterByConversation.set(this.key(target), resolvedProvider);
-    return this.selectionState(target, models, resolvedProvider, assertAuthorized);
+    this.acceptSelectionChange(target, expected);
+    // A new page must use the same directed catalog coverage as its next
+    // refresh, not capabilities retained only by the preceding operation.
+    return this.selectionState(target, catalog, resolvedProvider, assertAuthorized);
   }
 
   clearProviderBrowse(target: ConversationTarget, assertAuthorized?: () => void): void {
@@ -138,6 +221,7 @@ export class ModelSelectionService {
     modality: ModelInputModality,
     assertAuthorized?: () => void,
   ): Promise<void> {
+    assertAuthorized = this.selectionGuard(target, assertAuthorized);
     const current = await this.resolveState(
       target, await this.listModels(this.status(target).modelProvider, assertAuthorized), undefined, assertAuthorized,
     );
@@ -178,11 +262,12 @@ export class ModelSelectionService {
     );
   }
 
-  async selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity, assertAuthorized?: () => void): Promise<ModelSelectionState> {
-    const expected = { threadId: this.router.current(target)?.threadId };
+  async selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity, assertAuthorized?: () => void,
+    expected: SelectionExpectation = { threadId: this.router.current(target)?.threadId }): Promise<ModelSelectionState> {
     assertAuthorized = this.selectionGuard(target, assertAuthorized, expected);
     const providerFilter = this.providerFilterByConversation.get(this.key(target));
-    const models = await this.listModels(typeof selector === "string" ? providerFilter : selector.provider, assertAuthorized);
+    const catalog = await this.listModels(typeof selector === "string" ? providerFilter : selector.provider, assertAuthorized);
+    const { models } = catalog;
     const eligible = this.selectableModels(models);
     const selectableModels = providerFilter === undefined
       ? eligible
@@ -194,7 +279,7 @@ export class ModelSelectionService {
       throw new UserFacingError("model.selection.expired", "模型选项已失效，请重新发送 /model 选择");
     }
     this.requireAvailableModel(selected);
-    const current = await this.resolveState(target, models, undefined, assertAuthorized, true);
+    const current = await this.resolveState(target, catalog, undefined, assertAuthorized, !expected.snapshot, expected);
     assertAuthorized?.();
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
@@ -219,11 +304,6 @@ export class ModelSelectionService {
       : undefined;
     assertAuthorized?.();
     this.requireSubscribedProvider(selectedProvider);
-    if (resetOfficialFast) {
-      // 与显式 /fast off 使用同一用户默认值，避免 App Server 重启后重新加载旧 Fast 偏好。
-      await this.codex.writeDefaultServiceTier("default", assertAuthorized);
-      assertAuthorized?.();
-    }
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
     const effort = !providerChanged && current.effort && supported.includes(current.effort)
       ? current.effort
@@ -269,29 +349,42 @@ export class ModelSelectionService {
         nextPending.serviceTier = standardServiceTierRequestValue;
       }
     }
+    await this.validateSelection(target, catalog, assertAuthorized, expected);
+    if (resetOfficialFast) {
+      // 与显式 /fast off 使用同一用户默认值，避免 App Server 重启后重新加载旧 Fast 偏好。
+      // Finish inherited-state checks first: a successful user-layer write need
+      // not replace a Workspace override. The explicit pending tier follows.
+      await this.codex.writeDefaultServiceTier("default", assertAuthorized);
+      assertAuthorized?.();
+    }
     if (providerChanged) {
       assertAuthorized?.();
       await this.router.newSession(target, false, {
         model: selected.model, modelProvider: selectedProvider,
         effort, serviceTier: nextPending.serviceTier ?? null,
-      }, undefined, assertAuthorized);
-      // Only our completed provider switch may replace the original target
-      // with an unbound conversation. External removal must fail the guard.
-      expected.threadId = undefined;
+      }, undefined, assertAuthorized, () => {
+        // Advance at the synchronous commit, before callbacks or an await can
+        // expose another actor's changes. Removal by anyone else still fails.
+        expected.threadId = undefined;
+        this.acceptSelectionChange(target, expected);
+      });
     }
+    if (!resetOfficialFast) await this.validateSelection(target, catalog, assertAuthorized, expected);
     assertAuthorized?.();
     this.requireSubscribedProvider(selectedProvider);
     this.setPending(target, nextPending, assertAuthorized);
-    assertAuthorized?.();
     if (leavesThread) this.pendingProviderSwitches.add(this.key(target));
     this.providerFilterByConversation.set(this.key(target), selectedProvider);
-    return this.selectionState(target, models, selectedProvider, assertAuthorized);
+    this.acceptSelectionChange(target, expected);
+    assertAuthorized?.();
+    return this.selectionState(target, catalog, selectedProvider, assertAuthorized, expected);
   }
 
-  async selectEffort(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
-    assertAuthorized = this.selectionGuard(target, assertAuthorized);
-    const models = await this.listModels(this.status(target).modelProvider, assertAuthorized);
-    const current = await this.resolveState(target, models, undefined, assertAuthorized);
+  async selectEffort(target: ConversationTarget, selector: string, assertAuthorized?: () => void, expected?: SelectionExpectation): Promise<ModelSelectionState> {
+    assertAuthorized = this.selectionGuard(target, assertAuthorized, expected);
+    const catalog = await this.listModels(this.status(target).modelProvider, assertAuthorized);
+    const { models } = catalog;
+    const current = await this.resolveState(target, catalog, undefined, assertAuthorized, false, expected);
     assertAuthorized?.();
     const model = findModel(models, current.model, current.modelProvider);
     if (!model) {
@@ -303,20 +396,28 @@ export class ModelSelectionService {
     }
     this.requireAvailableModel(model);
     const options = model.supportedReasoningEfforts.map((option) => option.effort);
-    const effort = resolveEffort(options, selector);
+    const effort = expected ? options.find(option => option === selector) : resolveEffort(options, selector);
+    if (effort === undefined) {
+      throw new UserFacingError("model.selection.expired", "思考等级选项已失效，请重新打开选择卡片");
+    }
+    await this.validateSelection(target, catalog, assertAuthorized, expected);
     const pending = this.pending(target);
     this.setPending(target, { ...pending, effort }, assertAuthorized);
-    return this.resolveState(target, models, undefined, assertAuthorized);
+    this.acceptSelectionChange(target, expected);
+    // Publish the same catalog scope and selectable projection as a page refresh;
+    // the directed current-model lookup is only for validating this operation.
+    return this.state(target, false, assertAuthorized, expected);
   }
 
-  async selectFastMode(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
-    assertAuthorized = this.selectionGuard(target, assertAuthorized);
+  async selectFastMode(target: ConversationTarget, selector: string, assertAuthorized?: () => void, expected?: SelectionExpectation): Promise<ModelSelectionState> {
+    assertAuthorized = this.selectionGuard(target, assertAuthorized, expected);
     const normalized = selector.trim().toLowerCase();
     if (normalized && !new Set(["on", "ultrafast", "off", "status"]).has(normalized)) {
       throw new UserFacingError("fast.usage", "加速参数必须是 on、ultrafast、off 或 status");
     }
-    const models = await this.listModels(this.status(target).modelProvider, assertAuthorized);
-    const current = await this.resolveState(target, models, undefined, assertAuthorized);
+    const catalog = await this.listModels(this.status(target).modelProvider, assertAuthorized);
+    const { models } = catalog;
+    const current = await this.resolveState(target, catalog, undefined, assertAuthorized, false, expected);
     assertAuthorized?.();
     const model = findModel(models, current.model, current.modelProvider);
     const currentFast = isFastServiceTier(current.serviceTier, model);
@@ -351,6 +452,7 @@ export class ModelSelectionService {
     }
     const selectedTier = requested === "off" ? standardServiceTierRequestValue : tierId!;
     this.requireSubscribedProvider(current.modelProvider ?? this.primaryProvider);
+    await this.validateSelection(target, catalog, assertAuthorized, expected);
     assertAuthorized?.();
     if (current.modelProvider === this.primaryProvider) {
       await this.codex.writeDefaultServiceTier(
@@ -368,7 +470,8 @@ export class ModelSelectionService {
       ...pending,
       serviceTier: selectedTier,
     }, assertAuthorized);
-    return this.resolveState(target, models, undefined, assertAuthorized);
+    this.acceptSelectionChange(target, expected);
+    return this.resolveState(target, catalog, undefined, assertAuthorized, false, expected);
   }
 
   turnOverrides(target: ConversationTarget): TurnOverrides {
@@ -485,7 +588,7 @@ export class ModelSelectionService {
     const pending = this.pending(target);
     const current = this.router.modelSettings(target);
     const fallback = !pending?.modelProvider && !current && this.officialUnavailable()
-      ? this.defaultThirdPartySelection()
+      ? this.defaultThirdPartySelection(false)
       : undefined;
     const serviceTierPending = hasServiceTierOverride(pending);
     const provider = pending?.modelProvider ?? this.normalizeProvider(current?.modelProvider)
@@ -507,12 +610,33 @@ export class ModelSelectionService {
 
   private async resolveState(
     target: ConversationTarget,
-    models: ModelOption[],
+    catalog: ModelCatalog,
     filter?: string,
     assertAuthorized?: () => void,
     skipConfiguredDefault = false,
+    expected?: SelectionExpectation,
   ): Promise<ModelSelectionState> {
     assertAuthorized?.();
+    if (expected?.catalog) {
+      // A directed lookup cannot disprove identities or capabilities from a
+      // source it did not query. Replace only sources represented by this read.
+      const providers = catalog.queriedProviders;
+      const previousProviders = new Set(expected.catalog.models.map(model => model.provider ?? "openai"));
+      catalog = {
+        models: [
+          ...expected.catalog.models.filter(model => !providers.has(model.provider ?? "openai")),
+          ...catalog.models.filter(model => providers.has(model.provider ?? "openai") || !previousProviders.has(model.provider ?? "openai")),
+        ],
+        queriedProviders: providers,
+        confirmedProviders: new Set([
+          ...[...expected.catalog.confirmedProviders].filter(provider => !providers.has(provider)),
+          ...catalog.confirmedProviders,
+        ]),
+      };
+    }
+    const selectionScope = this.selectionScope(target);
+    filter ??= this.providerFilterByConversation.get(this.key(target));
+    const { models, confirmedProviders } = catalog;
     if (models.length === 0) {
       throw new Error("App Server 没有返回可用模型");
     }
@@ -524,7 +648,7 @@ export class ModelSelectionService {
     const configuredDefault = useConfiguredDefault && this.configuredDefaultModel
       ? findModel(models, this.configuredDefaultModel, this.primaryProvider)
       : undefined;
-    if (useConfiguredDefault && this.configuredDefaultModel && !configuredDefault) {
+    if (useConfiguredDefault && this.configuredDefaultModel && !configuredDefault && confirmedProviders.has(this.primaryProvider)) {
       throw new UserFacingError(
         "model.configured-default.missing",
         `配置的默认模型不属于当前主 Provider ${this.primaryProvider}：${this.configuredDefaultModel}`,
@@ -534,25 +658,31 @@ export class ModelSelectionService {
         },
       );
     }
-    const thirdPartyDefault = !skipConfiguredDefault && !current && !pending?.modelProvider && this.officialUnavailable()
-      ? this.defaultThirdPartySelection()
+    const thirdPartyDefault = !current && !pending?.modelProvider && this.officialUnavailable()
+      ? this.defaultThirdPartySelection(false)
       : undefined;
-    if (configuredDefault) this.requireAvailableModel(configuredDefault);
+    if (thirdPartyDefault && thirdPartyDefault.model === undefined
+      && confirmedProviders.has(thirdPartyDefault.provider) && !skipConfiguredDefault) {
+      this.defaultThirdPartySelection();
+    }
     const fallback = this.officialUnavailable()
-      ? thirdPartyDefault && findModel(models, thirdPartyDefault.model, thirdPartyDefault.provider)
+      ? thirdPartyDefault?.model !== undefined
+        ? findModel(models, thirdPartyDefault.model, thirdPartyDefault.provider)
+        : undefined
       : configuredDefault
       ?? models.find((model) =>
-        model.isDefault && (model.provider ?? "openai") === this.primaryProvider)
-      ?? models.find((model) => (model.provider ?? "openai") === this.primaryProvider)
-      ?? models[0]!;
-    if (thirdPartyDefault && !fallback) {
+        model.available !== false && model.isDefault && (model.provider ?? "openai") === this.primaryProvider)
+      ?? models.find((model) => model.available !== false && (model.provider ?? "openai") === this.primaryProvider);
+    if (thirdPartyDefault?.model !== undefined && !fallback && confirmedProviders.has(thirdPartyDefault.provider) && !skipConfiguredDefault) {
       throw new UserFacingError("model.current.missing", "默认模型不在可用模型列表中", {
         model: thirdPartyDefault.model,
       });
     }
-    const model = pending?.model ?? current?.model ?? fallback?.model ?? "请选择模型";
+    const model = pending?.model ?? current?.model ?? thirdPartyDefault?.model
+      ?? (!this.officialUnavailable() ? this.configuredDefaultModel ?? fallback?.model ?? "默认模型" : "请选择模型");
     const provider = pending?.modelProvider ?? this.normalizeProvider(
-      current?.modelProvider ?? (fallback ? fallback.provider ?? this.primaryProvider : undefined),
+      current?.modelProvider ?? thirdPartyDefault?.provider
+        ?? (this.officialUnavailable() ? undefined : this.primaryProvider),
     );
     const catalogModel = provider === undefined ? undefined : findModel(models, model, provider);
     const serviceTierPending = hasServiceTierOverride(pending);
@@ -561,13 +691,17 @@ export class ModelSelectionService {
       ? await this.codex.readDefaultServiceTier(this.router.workspace(target).cwd, provider, assertAuthorized)
       : null;
     assertAuthorized?.();
-    return {
-      selectionScope: this.selectionScope(target),
+    if (this.selectionScope(target) !== selectionScope) {
+      throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片");
+    }
+    const state: ModelSelectionState = {
+      selectionScope,
       models,
       ...(filter === undefined ? {} : { providerFilter: filter }),
       model,
       ...(provider === undefined ? {} : { modelProvider: provider }),
-      effort: pending?.effort ?? current?.effort ?? catalogModel?.defaultReasoningEffort ?? null,
+      effort: pending?.effort ?? current?.effort
+        ?? (catalogModel?.available !== false ? catalogModel?.defaultReasoningEffort ?? null : null),
       serviceTier: serviceTierPending
         ? pending?.serviceTier ?? null
         : current
@@ -579,6 +713,12 @@ export class ModelSelectionService {
       serviceTierPending,
       providerPending: this.isProviderSwitchPending(target),
     };
+    if (expected?.snapshot
+      && JSON.stringify(modelSelectionSnapshot(state)) !== JSON.stringify(expected.snapshot)) {
+      throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片");
+    }
+    if (expected) expected.catalog = catalog;
+    return state;
   }
 
   private isProviderSwitchPending(target: ConversationTarget): boolean {
@@ -595,10 +735,52 @@ export class ModelSelectionService {
     const workspaceId = this.router.selectedWorkspaceId(target);
     const cwd = this.router.listWorkspaces().find(workspace => workspace.id === workspaceId)?.cwd;
     const binding = this.router.current(target);
+    const current = this.router.modelSettings(target);
+    const pending = this.pending(target);
     return createHash("sha256").update(JSON.stringify([
       conversationTargetKey(target), workspaceId, cwd ?? null,
       binding?.threadId ?? null, binding?.sessionId ?? null,
+      current ? [current.model, current.modelProvider, current.effort, current.serviceTier] : null,
+      pending ? [pending.model, pending.modelProvider, pending.effort, pending.serviceTier,
+        hasOverride(pending, "model"), hasOverride(pending, "effort"), hasServiceTierOverride(pending)] : null,
+      this.pendingProviderSwitches.has(this.key(target)),
+      this.providerFilterByConversation.get(this.key(target)) ?? null,
     ])).digest("base64url");
+  }
+
+  private acceptSelectionChange(target: ConversationTarget, expected?: SelectionExpectation): void {
+    if (expected?.scope !== undefined) expected.scope = this.selectionScope(target);
+    if (!expected?.snapshot) return;
+    const previous = expected.snapshot;
+    const pending = this.pending(target);
+    const current = this.router.modelSettings(target);
+    const status = this.status(target);
+    const filter = this.providerFilterByConversation.get(this.key(target));
+    expected.snapshot = modelSelectionSnapshot({
+      ...status,
+      ...(filter === undefined ? {} : { providerFilter: filter }),
+      model: pending?.model ?? current?.model ?? previous.model,
+      effort: pending?.effort ?? current?.effort ?? previous.effort,
+      serviceTier: hasServiceTierOverride(pending) || current ? status.serviceTier : previous.serviceTier,
+    });
+    expected.defaults = this.selectionDefaults(target, expected.snapshot);
+  }
+
+  private selectionDefaults(target: ConversationTarget, snapshot: ModelSelectionSnapshot): string {
+    const pending = this.pending(target);
+    const current = this.router.modelSettings(target);
+    const fallback = !pending?.modelProvider && !current && this.officialUnavailable()
+      ? this.defaultThirdPartySelection(false) : undefined;
+    const effort = !pending?.effort && !current?.effort
+      ? this.supplementaryModels.find(model => model.model === snapshot.model
+        && (model.provider ?? "openai") === snapshot.modelProvider)?.defaultReasoningEffort
+      : undefined;
+    return JSON.stringify([this.officialUnavailable(), fallback ?? null, effort ?? null]);
+  }
+
+  private async validateSelection(target: ConversationTarget, catalog: ModelCatalog, assertAuthorized?: () => void,
+    expected?: SelectionExpectation): Promise<void> {
+    if (expected?.snapshot) await this.resolveState(target, catalog, undefined, assertAuthorized, false, expected);
   }
 
   private requireAvailableModel(model: ModelOption): void {
@@ -630,7 +812,7 @@ export class ModelSelectionService {
     ])].filter((provider) => provider !== "openai" && !blocked.has(provider));
   }
 
-  private defaultThirdPartySelection(): ModelSelectionIdentity | undefined {
+  private defaultThirdPartySelection(requireModel = true): { provider: string; model?: string } | undefined {
     const providers = this.thirdPartyProviders();
     const provider = this.defaultThirdPartyProvider !== undefined
       && providers.includes(this.defaultThirdPartyProvider)
@@ -640,10 +822,10 @@ export class ModelSelectionService {
     const model = [...this.officialCatalogProviders, ...this.independentCatalogProviders].find((entry) => entry.provider === provider)?.defaultModel
       ?? this.independentCatalogDefaults.get(provider)
       ?? this.supplementaryModels.find((entry) => entry.provider === provider && entry.isDefault)?.model;
-    if (!model) {
+    if (!model && requireModel) {
       throw new UserFacingError("model.provider.default-missing", "提供商默认模型未配置", { provider });
     }
-    return { provider, model };
+    return { provider, ...(model === undefined ? {} : { model }) };
   }
 
   private selectableModels(models: ModelOption[]): ModelOption[] {
@@ -651,9 +833,10 @@ export class ModelSelectionService {
     return models.filter((model) => !blocked.has(model.provider ?? "openai"));
   }
 
-  private async selectionState(target: ConversationTarget, models: ModelOption[], filter?: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
-    const selectable = this.selectableModels(models);
-    const state = await this.resolveState(target, models, filter, assertAuthorized);
+  private async selectionState(target: ConversationTarget, catalog: ModelCatalog, filter?: string, assertAuthorized?: () => void,
+    expected?: SelectionExpectation): Promise<ModelSelectionState> {
+    const selectable = this.selectableModels(catalog.models);
+    const state = await this.resolveState(target, catalog, filter, assertAuthorized, false, expected);
     assertAuthorized?.();
     return {
       ...state,
@@ -687,6 +870,7 @@ export class ModelSelectionService {
 
   /** Recheck saved identities and explicit pending speed choices before submission. */
   async validateUnboundPreference(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
+    assertAuthorized = this.selectionGuard(target, assertAuthorized);
     assertAuthorized?.();
     const preference = this.router.modelPreference?.(target);
     if (!preference) {
@@ -701,7 +885,7 @@ export class ModelSelectionService {
       }
       return;
     }
-    const models = await this.listModels(preference.modelProvider, assertAuthorized);
+    const { models } = await this.listModels(preference.modelProvider, assertAuthorized);
     assertAuthorized?.();
     const model = findModel(models, preference.model, preference.modelProvider);
     if (!model) {
@@ -735,12 +919,19 @@ export class ModelSelectionService {
   private selectionGuard(
     target: ConversationTarget,
     assertAuthorized?: () => void,
-    expected = { threadId: this.router.current(target)?.threadId },
+    expected: SelectionExpectation = { threadId: this.router.current(target)?.threadId },
   ): () => void {
     return () => {
+      this.codex.assertModelCatalogActive?.();
       assertAuthorized?.();
       if (this.router.current(target)?.threadId !== expected.threadId) {
         throw new UserFacingError("command.authorization-changed", "模型选择期间会话已变化");
+      }
+      if (expected.scope !== undefined && this.selectionScope(target) !== expected.scope) {
+        throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片");
+      }
+      if (expected.snapshot && expected.defaults !== this.selectionDefaults(target, expected.snapshot)) {
+        throw new UserFacingError("model.selection.expired", "模型默认设置已变化，请重新打开选择卡片");
       }
     };
   }
@@ -752,21 +943,58 @@ export class ModelSelectionService {
       : provider;
   }
 
-  private async listModels(targetProvider?: string, assertAuthorized?: () => void): Promise<ModelOption[]> {
-    assertAuthorized?.();
-    const primary = (await this.codex.listModels(assertAuthorized)).map((model) => {
-      if (this.primaryProvider === "openai") return model;
-      const providerModel = withoutProviderUpgrade(model);
-      return { ...providerModel, provider: this.primaryProvider };
-    });
-    assertAuthorized?.();
+  private async listModels(targetProvider?: string, assertAuthorized?: () => void): Promise<ModelCatalog> {
+    let guardFailure: { error: unknown } | undefined;
+    const guard = () => {
+      if (guardFailure) throw guardFailure.error;
+      try {
+        this.codex.assertModelCatalogActive?.();
+        assertAuthorized?.();
+      } catch (error) {
+        guardFailure = { error };
+        throw error;
+      }
+    };
+    guard();
+    const confirmedProviders = new Set<string>();
+    const queriedProviders = new Set<string>();
+    const needsPrimary = targetProvider === undefined || targetProvider === this.primaryProvider
+      || this.officialCatalogProviders.some(provider => provider.provider === targetProvider);
+    let primary: ModelOption[] = [];
+    if (needsPrimary) {
+      queriedProviders.add(this.primaryProvider);
+      try {
+        primary = (await this.codex.listModels(guard)).map((model) => {
+          if (this.primaryProvider === "openai") return model;
+          return { ...withoutProviderUpgrade(model), provider: this.primaryProvider };
+        });
+        guard();
+        if (!primary.some(model => model.available !== false)) throw new Error("Primary catalog empty");
+        confirmedProviders.add(this.primaryProvider);
+      } catch {
+        guard();
+        primary = [];
+      }
+    }
     const combined = new Map<string, ModelOption>();
     if (this.primaryProvider !== "openai" || this.openaiAuthenticated()) {
       for (const model of primary) {
         combined.set(modelKey(model), model);
       }
+      if (needsPrimary && !confirmedProviders.has(this.primaryProvider)) {
+        const unavailable = unavailableCatalogModel(this.primaryProvider, this.primaryProvider, this.configuredDefaultModel);
+        combined.set(modelKey(unavailable), unavailable);
+      }
     }
     for (const provider of this.officialCatalogProviders) {
+      if (!needsPrimary) continue;
+      queriedProviders.add(provider.provider);
+      if (!confirmedProviders.has(this.primaryProvider)) {
+        const unavailable = unavailableCatalogModel(provider.provider, provider.displayName, provider.defaultModel);
+        combined.set(modelKey(unavailable), unavailable);
+        continue;
+      }
+      confirmedProviders.add(provider.provider);
       for (const model of primary) {
         const catalogModel = withoutProviderUpgrade(model);
         const aliased = {
@@ -779,43 +1007,48 @@ export class ModelSelectionService {
       }
     }
     for (const model of this.supplementaryModels) {
+      const provider = model.provider ?? "openai";
+      if (provider !== this.primaryProvider
+        && !this.officialCatalogProviders.some(entry => entry.provider === provider)
+        && !this.independentCatalogProviders.some(entry => entry.provider === provider)) {
+        queriedProviders.add(provider);
+      }
       combined.set(modelKey(model), model);
     }
     const providers = this.independentCatalogProviders.filter(provider =>
       targetProvider === undefined || provider.provider === targetProvider);
+    for (const provider of providers) queriedProviders.add(provider.provider);
+    const defaultUpdates = new Map<string, string | undefined>();
     // Limit concurrent instance connections, while isolating each catalog failure.
     for (let offset = 0; offset < providers.length; offset += 4) {
-      const catalogs = await Promise.all(providers.slice(offset, offset + 4).map(async provider => {
-        try {
-          assertAuthorized?.();
-          if (!this.codex.listModelsForProvider) throw new Error("Provider catalog port unavailable");
-          const models = await this.codex.listModelsForProvider(provider.provider, assertAuthorized);
-          assertAuthorized?.();
-          if (!models.some(model => model.available !== false)) throw new Error("Provider catalog empty");
-          const defaultModel = provider.defaultModel
-            ?? models.find(model => model.isDefault && model.available !== false)?.model;
-          if (defaultModel === undefined) this.independentCatalogDefaults.delete(provider.provider);
-          else this.independentCatalogDefaults.set(provider.provider, defaultModel);
-          return models.map(model => ({
+      guard();
+      const batch = providers.slice(offset, offset + 4);
+      const catalogs = await Promise.allSettled(batch.map(async provider => {
+        guard();
+        if (!this.codex.listModelsForProvider) throw new Error("Provider catalog port unavailable");
+        const models = await this.codex.listModelsForProvider(provider.provider, guard);
+        guard();
+        if (!models.some(model => model.available !== false)) throw new Error("Provider catalog empty");
+        const defaultModel = provider.defaultModel
+          ?? models.find(model => model.isDefault && model.available !== false)?.model;
+        return {
+          defaultModel,
+          models: models.map(model => ({
             ...withoutProviderUpgrade(model), provider: provider.provider,
             isDefault: model.model === defaultModel,
-          }));
-        } catch {
-          assertAuthorized?.();
-          this.independentCatalogDefaults.delete(provider.provider);
-          // Only expose configured identity; never invent capabilities or disclose upstream errors.
-          return [{
-            provider: provider.provider, id: provider.defaultModel ?? provider.provider,
-            model: provider.defaultModel ?? provider.provider,
-            displayName: provider.displayName, isDefault: true, available: false,
-            unavailableReason: "模型目录暂不可用，请检查对应 App Server 后重试",
-            supportedReasoningEfforts: [], defaultReasoningEffort: "none",
-            inputModalities: [], serviceTiers: [], defaultServiceTier: null,
-          } satisfies ModelOption];
-        }
+          })),
+        };
       }));
-      assertAuthorized?.();
-      for (const models of catalogs) for (const model of models) combined.set(modelKey(model), model);
+      guard();
+      for (const [index, catalog] of catalogs.entries()) {
+        const provider = batch[index]!;
+        defaultUpdates.set(provider.provider, catalog.status === "fulfilled" ? catalog.value.defaultModel : undefined);
+        const models = catalog.status === "fulfilled"
+          ? catalog.value.models
+          : [unavailableCatalogModel(provider.provider, provider.displayName, provider.defaultModel)];
+        if (catalog.status === "fulfilled") confirmedProviders.add(provider.provider);
+        for (const model of models) combined.set(modelKey(model), model);
+      }
     }
     if (
       combined.size === 0
@@ -828,8 +1061,24 @@ export class ModelSelectionService {
         { provider: "openai" },
       );
     }
-    return [...combined.values()];
+    guard();
+    for (const [provider, defaultModel] of defaultUpdates) {
+      if (defaultModel === undefined) this.independentCatalogDefaults.delete(provider);
+      else this.independentCatalogDefaults.set(provider, defaultModel);
+    }
+    return { models: [...combined.values()], confirmedProviders, queriedProviders };
   }
+}
+
+/** Preserve only configured identity; failed catalogs provide no capability evidence. */
+function unavailableCatalogModel(provider: string, displayName: string, defaultModel?: string): ModelOption {
+  return {
+    provider, id: defaultModel ?? provider, model: defaultModel ?? provider,
+    displayName, isDefault: true, available: false,
+    unavailableReason: "模型目录暂不可用，请检查对应 App Server 后重试",
+    supportedReasoningEfforts: [], defaultReasoningEffort: "none",
+    inputModalities: [], serviceTiers: [], defaultServiceTier: null,
+  };
 }
 
 function withoutProviderUpgrade(model: ModelOption): ModelOption {

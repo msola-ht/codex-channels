@@ -1,13 +1,7 @@
 import {
-  closeSync,
   existsSync,
-  fstatSync,
   mkdirSync,
-  openSync,
   readFileSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 
@@ -17,14 +11,18 @@ import { modelRelayConfigSchema } from "./model-relay-config.mjs";
 import { validateModelDisplayAliases } from "./model-display-name.mjs";
 
 import {
+  PrivateFileWriteCommittedError,
   securePrivateDirectorySync,
   writePrivateFileAtomicSync,
 } from "./private-file.mjs";
+import {
+  PrivateDirectoryLockBusyError,
+  PrivateDirectoryLockReleaseError,
+  withPrivateDirectoryLockSync,
+} from "./private-directory-lock.mjs";
 
 const sourceByDocument = new WeakMap();
 const activeGatewayConfigLocks = new Set();
-const gatewayConfigLockTimeoutMs = 2_000;
-const staleGatewayConfigLockMs = 30_000;
 
 export class GatewayConfigConflictError extends Error {
   constructor(message = "config.toml 在写入期间已发生变化") {
@@ -42,10 +40,10 @@ export class GatewayConfigLockReleaseError extends Error {
   }
 }
 
-/** Only emitted after the atomic Gateway writer has returned successfully. */
+/** Only emitted after the destination's atomic replacement is confirmed. */
 export class GatewayConfigWriteCommittedError extends Error {
   constructor(cause) {
-    super("Gateway 配置已保存，但配置锁释放失败；请先检查配置和锁状态，勿重复保存，仍需按原要求激活配置", { cause });
+    super("Gateway 配置已保存，但保存后清理失败；请先检查配置、锁和临时目录状态，勿重复保存，仍需按原要求激活配置", { cause });
     this.name = "GatewayConfigWriteCommittedError";
   }
 }
@@ -142,9 +140,9 @@ const upstreamUserAgentSchema = z.string().min(1).max(512).refine(
   "upstream_user_agent 必须是 1–512 个可显示 ASCII 字符，且不允许首尾空白或其他控制字符",
 );
 
-/** `[codex].terminal_identity` 的字面格式：`终端名` 或 `终端名/版本`。 */
+/** `[codex].terminal_identity` 的字面格式：`终端名` 或 `终端名/版本`，总长 1–64。 */
 export const terminalIdentityPattern =
-  /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/u;
+  /^(?=.{1,64}$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/u;
 
 const terminalIdentitySchema = z.string().max(
   64,
@@ -194,7 +192,10 @@ const telegramSchema = z.strictObject({
 export const officialTuiUserAgentPattern = /^codex-tui\/([0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9._+-]+)?) (\([^();\r\n]+; [A-Za-z0-9_+-]+\) [A-Za-z0-9._/-]+) \(codex-tui; \1\)$/u;
 
 const codexSchema = z.strictObject({
-  binary: z.string().min(1).default("codex"),
+  binary: z.string().min(1).refine(
+    (value) => value.trim().length > 0,
+    "binary 不能为空",
+  ).default("codex"),
   socket_path: z.string().min(1).default("runtime/codex-app-server.sock"),
   default_model: z.string().optional(),
   client_identity: clientIdentitySchema.optional(),
@@ -439,11 +440,18 @@ export function writeGatewayConfig(configPath, document, { maximumBytes } = {}) 
             workspaceIds(document),
           );
       if (maximumBytes !== undefined && Buffer.byteLength(content, "utf8") > maximumBytes) throw new Error("配置文件超过容量上限，未保存");
-      writePrivateFileAtomicSync(configPath, content);
+      let cleanupError;
+      try {
+        writePrivateFileAtomicSync(configPath, content);
+      } catch (error) {
+        if (!(error instanceof PrivateFileWriteCommittedError)) throw error;
+        cleanupError = error;
+      }
       sourceByDocument.set(document, {
         content,
         workspaceIds: workspaceIds(document),
       });
+      if (cleanupError !== undefined) throw new GatewayConfigWriteCommittedError(cleanupError);
     });
   } catch (error) {
     if (error instanceof GatewayConfigLockReleaseError) {
@@ -466,98 +474,35 @@ function currentGatewayConfig(configPath) {
 
 export function withGatewayConfigLock(configPath, operation) {
   const normalizedPath = resolve(configPath);
-  if (activeGatewayConfigLocks.has(normalizedPath)) return operation();
+  if (activeGatewayConfigLocks.has(normalizedPath)) return synchronousGatewayConfigOperation(operation);
   mkdirSync(dirname(normalizedPath), { recursive: true, mode: 0o700 });
-  const lockPath = `${normalizedPath}.lock`;
-  const lock = acquireGatewayConfigLock(lockPath);
-  activeGatewayConfigLocks.add(normalizedPath);
-  let result;
-  let operationFailed = false;
-  let operationError;
   try {
-    result = operation();
-    if (result && typeof result.then === "function") {
-      Promise.resolve(result).catch(() => undefined);
-      throw new TypeError("withGatewayConfigLock 只接受同步操作");
-    }
-  } catch (error) {
-    operationFailed = true;
-    operationError = error;
-  }
-  let releaseError;
-  try {
-    closeSync(lock.descriptor);
-  } catch (error) {
-    releaseError = error;
-  }
-  try {
-    const current = statSync(lockPath);
-    if (current.dev === lock.dev && current.ino === lock.ino) {
-      unlinkSync(lockPath);
-    }
-  } catch (error) {
-    if (error?.code !== "ENOENT" && releaseError === undefined) releaseError = error;
-  }
-  activeGatewayConfigLocks.delete(normalizedPath);
-  if (operationFailed) throw operationError;
-  if (releaseError !== undefined) throw new GatewayConfigLockReleaseError(result, releaseError);
-  return result;
-}
-
-function acquireGatewayConfigLock(lockPath) {
-  const startedAt = Date.now();
-  while (true) {
-    try {
-      const descriptor = openSync(lockPath, "wx", 0o600);
+    return withPrivateDirectoryLockSync(`${normalizedPath}.lock`, () => {
+      activeGatewayConfigLocks.add(normalizedPath);
       try {
-        writeFileSync(descriptor, `${process.pid}\n`);
-        const metadata = fstatSync(descriptor);
-        return { descriptor, dev: metadata.dev, ino: metadata.ino };
-      } catch (error) {
-        closeSync(descriptor);
-        try {
-          unlinkSync(lockPath);
-        } catch (unlinkError) {
-          if (unlinkError?.code !== "ENOENT") throw unlinkError;
-        }
-        throw error;
+        return synchronousGatewayConfigOperation(operation);
+      } finally {
+        activeGatewayConfigLocks.delete(normalizedPath);
       }
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-      if (staleGatewayConfigLock(lockPath)) {
-        try {
-          unlinkSync(lockPath);
-          continue;
-        } catch (unlinkError) {
-          if (unlinkError?.code !== "ENOENT") throw unlinkError;
-        }
-      }
-      if (Date.now() - startedAt >= gatewayConfigLockTimeoutMs) {
-        throw new GatewayConfigConflictError("config.toml 正在由其他进程修改，请稍后重试");
-      }
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-    }
-  }
-}
-
-function staleGatewayConfigLock(lockPath) {
-  try {
-    if (Date.now() - statSync(lockPath).mtimeMs <= staleGatewayConfigLockMs) return false;
-    const ownerPid = Number.parseInt(readFileSync(lockPath, "utf8").trim(), 10);
-    return !Number.isSafeInteger(ownerPid) || ownerPid <= 0 || !processIsAlive(ownerPid);
+    });
   } catch (error) {
-    if (error?.code === "ENOENT") return false;
+    if (error instanceof PrivateDirectoryLockReleaseError) {
+      throw new GatewayConfigLockReleaseError(error.result, error);
+    }
+    if (error instanceof PrivateDirectoryLockBusyError) {
+      throw new GatewayConfigConflictError("配置正被其他进程修改，或锁所有者无法确认；请稍后重试并核对锁状态");
+    }
     throw error;
   }
 }
 
-function processIsAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === "EPERM";
+function synchronousGatewayConfigOperation(operation) {
+  const result = operation();
+  if (result && typeof result.then === "function") {
+    Promise.resolve(result).catch(() => undefined);
+    throw new TypeError("withGatewayConfigLock 只接受同步操作");
   }
+  return result;
 }
 
 function mergeMissingDefaults(target, defaults) {

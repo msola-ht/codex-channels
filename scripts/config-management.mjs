@@ -129,6 +129,9 @@ export async function updateGatewayDefaultModelSetting(input, {
   if (input?.kind !== "system.default-model") {
     throw invalid("kind", "unknown-setting", "默认模型管理入口只接受渠道新会话模型设置");
   }
+  if (input.value === undefined) {
+    throw invalid("value", "required", "模型 ID 必须是字符串或 null");
+  }
   const value = optionalString(input.value, 256, "value", "模型 ID");
   const normalized = { kind: input.kind, value };
   const save = () => updateGatewaySettingValidated(normalized, { ...options, environment });
@@ -385,7 +388,12 @@ function applySetting(document, input) {
     }
     case "system.official-tui-identity": {
       const followCliVersion = booleanValue(input.value?.followCliVersion, "value.followCliVersion", "跟随 CLI 版本");
-      const identity = table(input.value?.clientIdentity);
+      const clientIdentityValue = input.value?.clientIdentity;
+      if (clientIdentityValue !== null && (typeof clientIdentityValue !== "object"
+        || Array.isArray(clientIdentityValue))) {
+        throw invalid("value.clientIdentity", "invalid-input", "客户端身份必须是对象或 null");
+      }
+      const identity = table(clientIdentityValue);
       const name = optionalStrictString(
         identity.name,
         64,
@@ -549,6 +557,9 @@ function applyNetworkProxyBatch(document, input) {
   for (const field of fields) {
     if (!Object.prototype.hasOwnProperty.call(input.values, field)) continue;
     const value = input.values[field];
+    if (value !== null && typeof value !== "string") {
+      throw invalid(`values.${field}`, "invalid-input", "代理 URL 必须是字符串或 null");
+    }
     if (value === null || stringValue(value) === "") {
       delete network[field];
       continue;
@@ -652,8 +663,12 @@ function requiredString(value, field, label) {
 }
 
 function optionalString(value, maximum, field, label) {
-  if (value === null || value === undefined || stringValue(value) === "") return null;
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") {
+    throw invalid(field, "invalid-input", `${label}必须是字符串或 null`);
+  }
   const normalized = stringValue(value);
+  if (normalized === "") return null;
   if (normalized.length > maximum) {
     throw invalid(field, "too-long", `${label}长度不能超过 ${maximum} 个字符`);
   }
@@ -662,7 +677,10 @@ function optionalString(value, maximum, field, label) {
 
 function optionalStrictString(value, maximum, field, label) {
   if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "string" && value.length > maximum) {
+  if (typeof value !== "string") {
+    throw invalid(field, "invalid-input", `${label}必须是字符串或 null`);
+  }
+  if (value.length > maximum) {
     throw invalid(field, "too-long", `${label}长度不能超过 ${maximum} 个字符`);
   }
   return value;

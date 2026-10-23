@@ -24,7 +24,7 @@ import {
   ReportedChildExitError,
   terminateChildProcess,
 } from "../runtime/process-lifecycle.mjs";
-import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import { parseCodexRemoteOptions } from "./codex-remote-options.mjs";
 import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
@@ -113,7 +113,7 @@ async function runRemoteCli() {
     leaseProvider = selectedProvider;
     assertAggregateProviderArguments(passthrough);
   }
-  const configuredBinary = stringValue(codex.binary) || "codex";
+  const configuredBinary = effectiveCodexBinary(codex.binary ?? "codex", process.env, runtime.dataDir);
   const supervisorActive = selectedDefinition !== undefined || selectedProvider === aggregateProviderId
     || await inspectAppServerSupervisor(primarySocketPath) !== undefined;
   try {
@@ -261,8 +261,4 @@ function aggregateModelOverrides(args) {
 
 function table(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value.trim() : "";
 }

@@ -31,7 +31,7 @@ export interface CustomPrimaryProviderSetupOptions {
 }
 
 export function runCustomPrimaryProviderSetup(options?: CustomPrimaryProviderSetupOptions): Promise<
-  | { provider: string; model: string }
+  | { provider: string; model: string; action?: "unchanged"; activation?: "restart-all" | "none"; activationResult?: import("./config-activation-result.mjs").ConfigActivationResult }
   | { action: string; activation?: string }
   | undefined
 >;
