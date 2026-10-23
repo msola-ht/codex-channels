@@ -59,7 +59,7 @@
 | 导出本机诊断 ZIP，便于排障 | 暂不接入新增稳定 `feedback/save`。渠道没有获授权的诊断导出入口；诊断可能包含敏感材料，不能把新增方法直接暴露给外部 Actor |
 | 在原会话之外生成实验样本或预测结果 | 暂不接入实验 `thread/sample`、其取消接口及预测分支 MCP 开关。当前 Thread/Fork/Queue 合同不需要这些能力，不扩大受控例外 |
 | 用文件引用表达生成图片及其输入图 | 仅同步生成结构，保持飞书/Telegram 通过 `imageGeneration.savedPath` 发送本地图片；不新建 `fileId` 下载或 Base64 回退路径。`ext/image-generation/src/tool.rs:249` 仍先落盘，随后选择 result/fileId 并保留 saved_path；`app-server-protocol/src/protocol/thread_history.rs:920` 保留历史路径。本地 `operation-adapter.ts:125`→Core→持久输出快照→Surface 只消费该路径，`surfaces/generated-image.ts` 继续校验文件。微信现有投递策略过滤普通操作事件，显式 `channel send-image` 另走授权文件发送，不能宣称三个渠道都自动发送此 Item。源码层面无需新增图片业务适配，实际生成和发送待观察；不传播 inputImages 路径和 hash |
-| 读取 MCP 工具列表的扩展元数据、管理 Desktop 存储要求 | 不消费新增 `McpServerStatus.toolListMeta`；`mcp-adapter.ts` 的 summary/full 投影均只使用既有字段。`ApplicationRequirements.storage` 的 defaultProjectParent/projectlessWorkspaceRoot 是 Desktop 存储位置，不是文件系统权限；Client 的 configRequirements 投影不消费 application，不改变 Gateway Workspace Registry 或 StateStore |
+| 解释或展示 MCP 工具列表扩展元数据、管理 Desktop 存储要求 | `McpServerStatus.toolListMeta` 后续按用户选择仅在详情链路内部保留，见下文“MCP 工具目录元数据内部透传”记录；仍不解释键或展示，概览不携带。`ApplicationRequirements.storage` 的 defaultProjectParent/projectlessWorkspaceRoot 是 Desktop 存储位置，不是文件系统权限；Client 的 configRequirements 投影不消费 application，不改变 Gateway Workspace Registry 或 StateStore |
 | 为请求附加 Responses 客户端元数据或语音产品会话 ID | 不接入实验 `TurnStartParams/TurnSteerParams.responsesapiClientMetadataPatch`、`ThreadRealtimeStartParams.voiceSessionId`；现有调用没有消费者，也不在受控例外内 |
 | 使用冻结云技能目录、启动配置发现、运行时注册、WebSocket 压缩或跨执行环境复制文件 | 当前共享本机 App Server 路径无对应需求，不主动启用实验功能或扩大初始化协商；继续原有实例租约与服务生命周期 |
 | 迁移 NFS 上的官方 SQLite 数据库 | 不接入、不执行实验 `migrate-nfs-db`。官方数据库由 App Server 管理；若以后确有运维需求，先独立制定备份、恢复与授权方案 |
@@ -395,6 +395,28 @@ Application/Core 模块和回环 Responses 输出，人工执行得到：
 `npm run build`、`npm run check`、受影响 TypeScript 的 ESLint 和文档索引检查通过；这些仅是静态流程状态。
 真实渠道提示投递、生产全组合根、运行中定时任务恢复以及 Windows/macOS 原生环境未在本修复中实测；
 后台计划任务分支只完成调用链和合同审查，不能用普通后台绑定观察替代。上述观察在修复提交前完成，本次未部署。
+
+### MCP 工具目录元数据内部透传
+
+用户在升级后选择只做内部字段保留。沿 `mcpServerStatus/list(detail: full)` → Client 适配器 →
+`McpServerDetail` → Provider 路由 → Application 详情查询已保留 `toolListMeta`，仍按锁定上游的
+“对应工具目录第一页 `_meta`，不可用时为 null”解释。概览不增加字段；不解释元数据键、展示、记录正文、
+持久化、注入模型或改变执行权限。使用本地递归 JSON 类型隔离生成协议，不增加 RPC 或数据库格式。
+仅新增详情字段及本地只读类型，概览/健康投影、权限判断、配置刷新、OAuth 与资源读取沿用原合同。
+Client 从 JSON-RPC 解码后的值直接传递，不递归解释或合并元数据；缺失字段拒绝而不是默认为 null。
+
+在 `af6239a2` 后的工作区，使用任务自有 Codex Home、真实 `0.164.0` App Server 和两个回环 HTTP MCP 服务观察：
+两服务各返回两页工具，A 的第一页含嵌套元数据、第二页给不同元数据，B 不提供 `_meta`。
+经实际 Client、ProviderRoutingClient、Application 扩展查询，A 完整保留第一页值，B 返回 null，
+两者均有 2 个工具且未混用元数据。概览没有此字段，健康摘要和渠道共用详情渲染没有带出标记、
+敏感内容哨兵或 HTML 字符串，现有服务器名与工具仍可显示。入口授权拒绝后没有新增 MCP 请求。
+模型请求及工具执行均为零；自有 App Server、HTTP 服务和临时目录已清理，不访问用户 MCP 或改生产配置。
+
+人工构造 RPC 响应补查：null、空对象、false、0、空字符串、数组及嵌套值均原样保留；
+`__proto__`/`constructor` 仅作为数据，未改变对象原型。缺少字段返回固定错误 `Codex 响应缺少 MCP toolListMeta`。
+两页 MCP Server 状态响应分别保留 A/B 归属，每页均带原 Thread ID 和 full 查询参数。
+这些响应构造观察与上述原生运行分开；未新增或修改测试文件。真实用户 MCP 的业务元数据、
+多 Provider 实例切换和真实渠道投递未因此验收，现有原样 Provider 转发及三个 Surface 共用显式字段渲染经源码核对。
 
 ## 延续的基线取舍
 

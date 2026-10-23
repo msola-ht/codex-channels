@@ -66,8 +66,12 @@ export function toMcpServerDetailPage(
       if (!Array.isArray(server.resources) || !Array.isArray(server.resourceTemplates)) {
         throw new Error("Codex 响应缺少有效 MCP resources");
       }
+      if (server.toolListMeta === undefined) {
+        throw new Error("Codex 响应缺少 MCP toolListMeta");
+      }
       return {
         ...summary,
+        toolListMeta: server.toolListMeta,
         serverTitle: serverInfo ? optionalText(serverInfo.title, "MCP server title") : null,
         serverVersion: serverInfo
           ? requiredText(serverInfo.version, "MCP server version")

@@ -116,6 +116,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   `<plugin>@<marketplace>` 字符规则的 `pluginId`，
   仅供 `/mcp` 详情展示来源 Plugin；工具发现错误只归约为布尔状态，不传播上游错误正文、工具 Schema
   或 Base64 正文。资源请求、内容、目录与模板 URI 的展示投影也隐藏常见凭据，不改变 RPC 请求 URI。
+  详情原样保留必需且可空的 `toolListMeta`，缺失字段明确拒绝；它是对应工具目录第一页的不透明 JSON，仅内部透传，不解析键或用于展示、日志、权限和模型输入，概览仍不携带。
 - `plugin-adapter.ts`：只映射已安装 Plugin，校验 Plugin ID、Marketplace、启用与管理员可用状态，
   裁剪版本、来源类型、安装时间、开发者、分类、能力、认证时机、不可用原因和适用套餐标识，
   不传播来源路径或 URL；保留 Marketplace 加载失败计数，

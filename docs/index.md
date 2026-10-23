@@ -97,7 +97,8 @@ Server Request、Server Notification 和 Client Notification 的方法名称未�
 新增 `sci` / `sci_plus` 套餐和模型请求前后 Hook 事件已同步到现有查询、通知与展示边界；
 Plugin Hook 信任沿用上游内容指纹，升级运行前的数据备份与回退边界见[升级决策](codex-cli-upgrade-decisions.md#上游数据处理与回退约束)。
 图片生成的 `result` / `fileId` 联合只同步类型，Gateway 继续只消费 `savedPath`；
-`toolListMeta`、Desktop 存储要求、Responses 客户端元数据、语音会话 ID 与预测 MCP 均不消费。
+`toolListMeta` 只在 MCP 详情查询中以本地只读 JSON 类型内部透传，保留对应工具目录第一页的元数据及 null/空值，不展示、记录正文、持久化、注入模型或改变权限；概览不携带。
+Desktop 存储要求、Responses 客户端元数据、语音会话 ID 与预测 MCP 均不消费。
 官方与第三方模型的提示词查询通过 [`model-catalog-presentation.mjs`](../runtime/model-catalog-presentation.mjs)
 只读展示 `model_messages.permissions.approved_prefixes`；缺省或 null 使用上游内置文本，显式空字符串表示抑制该段，不改写模型模板或授予权限。
 `thread/readState/update`、`thread/items/read`、`thread/readState/changed` 与相关响应字段不接入业务；
