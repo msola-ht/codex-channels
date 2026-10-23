@@ -848,7 +848,10 @@ export abstract class GatewayComponentGraph {
         return false;
       },
       {
-        backgrounded: (threadId) => this.retrySettledBackground(threadId),
+        backgrounded: (threadId) => {
+          this.scheduleBindingRestore();
+          this.retrySettledBackground(threadId);
+        },
         restoreRequired: (threadId) => {
           if (!this.stopping && !this.isBindingRestoring(threadId)) void this.restoreIdleBinding(threadId);
         },
@@ -1041,6 +1044,9 @@ export abstract class GatewayComponentGraph {
             this.accessPolicy(target)?.isAllowed({ target, actorId }) === true,
           creationContext: (target) => {
             const status = service.status(target);
+            if (status.serviceTierKnown !== true) {
+              throw new UserFacingError("fast.selection.unknown", "当前用户选择的速度档位未知，无法固定计划任务");
+            }
             const workspace = this.workspaces.require(status.workspaceId);
             return {
               workspaceId: workspace.id,
@@ -1049,7 +1055,9 @@ export abstract class GatewayComponentGraph {
               modelProvider: status.modelProvider ?? "openai",
               model: status.model,
               reasoningEffort: status.effort,
-              serviceTier: status.serviceTier,
+              // New tasks fix an observed absence as Standard. Historical null
+              // task rows retain their existing execution-time inheritance.
+              serviceTier: status.serviceTier ?? "default",
               modelPending: status.modelPending,
               effortPending: status.effortPending,
               serviceTierPending: status.fastModePending,
@@ -1344,9 +1352,6 @@ export abstract class GatewayComponentGraph {
       const threadStateEvent = toThreadStateEvent(notification);
       if (threadStateEvent) {
         this.threadState.handle(threadStateEvent);
-        if (threadStateEvent.type === "thread.settings.updated") {
-          this.conversations.observeLunaReserveSettings(threadStateEvent.threadId);
-        }
       }
       if (
         !coreEvent
@@ -1731,6 +1736,9 @@ export abstract class GatewayComponentGraph {
           const isCurrent = this.threadState.observeExecutionContext(threadStateEvent);
           if (isCurrent) this.notificationCurrent.set(notification, isCurrent);
           if (threadStateEvent.type === "thread.closed") this.core.observeThreadClosed(threadStateEvent.threadId);
+          if (threadStateEvent.type === "thread.settings.updated") {
+            this.conversations.observeLunaReserveSettings(threadStateEvent.threadId);
+          }
         }
         // Revoke live tools before bounded asynchronous notification consumers.
         const toolEvent = toConversationInputEvent(notification);

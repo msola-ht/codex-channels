@@ -1,6 +1,6 @@
 {
   "name": "@hegenai/codexc",
-  "version": "0.163.0",
+  "version": "0.164.0",
   "description": "Chat surface gateway for a shared Codex App Server",
   "keywords": [
     "codex",
@@ -28,7 +28,7 @@
     "provider-model-catalog.json",
     "bin/",
     "dist/",
-    "database-upgrades/metrics-to-v32.mjs",
+    "database-upgrades/metrics-to-v35.mjs",
     "src/codex-protocol/version.json",
     "src/codex-protocol/public-cli-contract.json",
     "launchd/",
@@ -139,6 +139,9 @@
     "scripts/metrics-database-access.mjs",
     "scripts/metrics-database-upgrade.mjs",
     "scripts/metrics-schema-v31.mjs",
+    "scripts/metrics-schema-v32.mjs",
+    "scripts/metrics-schema-v33.mjs",
+    "scripts/metrics-schema-v34.mjs",
     "scripts/metrics-database.mjs",
     "scripts/metrics-export-format.mjs",
     "scripts/metrics-export-limits.mjs",

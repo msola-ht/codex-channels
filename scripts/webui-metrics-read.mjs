@@ -33,7 +33,7 @@ const range = z.strictObject({ name: z.string().min(1).max(128), startAtMs: time
 const filters = {
   threadId: id.optional(), turnId: id.optional(), provider: z.union([id, z.array(id).min(1)]).optional(),
   model: id.optional(), filter: id.optional(), callerId: id.optional(),
-  source: z.enum(["owned", "relay"]).optional(), operation: z.enum(["response", "compact"]).optional(),
+  source: z.enum(["owned", "relay"]).optional(), operation: z.enum(["response", "compact", "imageGeneration", "imageEdit"]).optional(),
   requestPurpose: z.enum(["unmarked", "autoApprovalReview"]).optional(),
   status: z.enum(["completed", "failed", "incomplete", "unknown"]).optional(),
 };

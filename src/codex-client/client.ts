@@ -630,7 +630,16 @@ export class CodexAppServerClient implements
         threadId,
         ...settings,
       },
-    }, { retryOverload: false });
+    }, { retryOverload: false }).catch((error: unknown) => {
+      // Locked app-server rejects resume before subscription when stored history
+      // is missing, including loaded, not-yet-materialized Threads.
+      if (error instanceof JsonRpcError && error.code === -32600
+        && error.message === `no rollout found for thread id ${threadId}`) {
+        throw new UserFacingError("thread.resume.history-unavailable",
+          "Codex Thread resume history is unavailable");
+      }
+      throw error;
+    });
     return toThreadResumeSession(response, settings);
   }
 
@@ -1047,8 +1056,6 @@ export class CodexAppServerClient implements
 
   async readDefaultServiceTier(cwd: string, modelProvider?: string, beforeSubmit?: () => void): Promise<string | null> {
     const settings = await this.readModelAccelerationSettings(cwd, modelProvider, beforeSubmit);
-    if (settings.serviceTier === "ultrafast" && !settings.ultrafastEnabled) return null;
-    if ((settings.serviceTier === "fast" || settings.serviceTier === "priority") && !settings.fastEnabled) return null;
     return settings.serviceTier;
   }
 

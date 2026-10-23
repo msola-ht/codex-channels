@@ -1,5 +1,7 @@
 # Model Relay
 
+通过共享 Runtime 的纯 `RequestActivityObserver` 观察实际提交的 Chat/Responses 请求及通过协议校验的响应，统一采集有界行为摘要；该依赖不接触 App Server、文件或数据库。摘要经指标 IPC 交给 Gateway 单写者，关闭转储仍可用。
+
 独立模型 API 入口的身份、准入和请求生命周期模块，不依赖 App Server、Thread、Turn 或数据库。
 由 Runtime 的独立服务入口组合；生产运行验收与跨平台实机验收仍需单独完成。
 
@@ -15,6 +17,7 @@ HTTP 上游状态与 Relay 对外状态分别解释：上游 429/503/504 保留�
 自定义 Provider 的采样默认值随同一材料快照传入，按精确上游模型 ID 在 Chat/Responses 请求缺少对应字段时补齐；调用方显式值（包括零和 null）保持原样，其他模型不继承。材料版本复核与原有授权、取消和请求大小限制保持一致。
 协议验证通过 `model-api` 公共入口，网络能力通过 `provider-proxy` 公共入口。指标仅通过注入端口
 送往 Gateway 单写者，不生成 Core 事件或渠道输出。
+请求指标的可空 `upstreamUrl` 只在实际模型 HTTP 请求提交后从出站请求读取，保存最后一次已提交目标的 Origin 与路径；不保存用户信息、查询参数或片段，不从当前 Provider 配置回填历史。Chat 与 Responses 共用直接发送点，转储关闭时仍采集。
 Relay 只转发外部调用方自带的响应报文，不归一化 Codex 私有输入项（`agent_message`、`encrypted`
 参数标记）；Codex CLI 的子代理流量经 App Server 的 Provider Proxy，不经过 Relay。
 

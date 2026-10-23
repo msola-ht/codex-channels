@@ -3,6 +3,16 @@ import { formatElapsedDuration } from "./elapsed-duration.js";
 import { visibleUpstreamMessage } from "./output-copy.js";
 import type { OperationUpdateDisplay } from "./types.js";
 
+export const generatedImageUnavailableText = "图片已生成，但当前无法获取图片内容";
+
+/** File references remain opaque; recovery retains only the unavailable-content state. */
+export function isGeneratedImageUnavailable(record: OperationUpdate): boolean {
+  return record.kind === "imageGeneration"
+    && record.status === "completed"
+    && record.imagePath === undefined
+    && (record.imageFileId !== undefined || record.imageDeliveryUnavailable === true);
+}
+
 export function isComputerUseOperation(record: OperationUpdate): boolean {
   return record.kind === "mcpTool" && record.action === "computerUse";
 }

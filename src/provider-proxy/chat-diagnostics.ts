@@ -139,7 +139,7 @@ export class ChatDiagnostics {
   snapshot(): ChatDiagnosticSnapshot { return { fields: { ...this.fields }, truncated: this.truncated }; }
 }
 
-export interface ChatDiagnosticSnapshot { fields: Fields; truncated: boolean; timing?: UpstreamTiming }
+export interface ChatDiagnosticSnapshot { fields: Fields; truncated: boolean; timing?: UpstreamTiming; upstreamUrl?: string | null }
 
 /** Request-scoped in-process delivery; HTTP carries only an unguessable correlation ID. */
 export class ChatDiagnosticsChannel {

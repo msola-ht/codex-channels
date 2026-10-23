@@ -2,6 +2,14 @@
 
 本目录维护外部 Conversation、Workspace 与 Codex Thread 的前台绑定、后台绑定和订阅状态。
 
+模型设置中的 `serviceTier` 保留用户选择，`serviceTierKnown` 必须明确说明是否有选择证据；
+`effectiveServiceTier` 只保存生命周期响应确认的有效档位，缺省表示未知。0.164 的
+`get_service_tier`（`core/src/session/mod.rs`）只原样保留或丢弃选择，因此非空生命周期结果
+可同时确认选择；空值只能确认有效 Standard，不能判断原选择是否被过滤。设置通知只确认
+选择并失效有效档位；设置事实在同步收件边界归约，异步队列不重放旧设置，避免连续通知之间重建过期选择。
+生命周期请求期间出现设置通知时，不让竞争快照重建有效确认。
+连接或订阅失效后，两种证据都失效，重新恢复不从全局配置猜测既有 Thread 的选择。
+
 会话诊断只在内存保存最近一次成功新建、恢复或派生返回的压缩 Item ID 与指令文件来源；
 绑定释放时清理，待恢复订阅不展示指令清单。`instructionSourcesForThread` 提供加载快照，
 不扫描文件、不写入 StateStore，也不宣称反映后续文件修改或所有动态指令。
@@ -118,9 +126,13 @@ Gateway 重连或重启后，Client 必须从 `thread/resume` 返回的 `status`
 `activeTurnId`，组合根再恢复仍在运行的 Turn，不能只恢复绑定，否则 steer、停止和下一 Turn
 队列会误判为空闲。Provider 路由必须根据 Thread 的官方 `modelProvider` 选择已用对应启动配置
 加载模型目录的 App Server，不能让第三方 Thread 回到 OpenAI 实例或 fallback 元数据。
-恢复失败会区分永久不可用、固定版本官方 active-writer 冲突和其他暂时错误；Thread 已删除或归档、其 Workspace
+恢复失败会区分永久不可用、缺少可恢复历史、固定版本官方 active-writer 冲突和其他暂时错误；Thread 已删除或归档、其 Workspace
 已从注册表移除，或其 Provider 已由操作员移除时，绑定属于永久不可用并安全清除；Router 只返回稳定分类，
 由组合根决定重试与通知。active-writer 仍保留绑定，不在本模块删除锁、抢占写入方或复制 Thread。
+`thread.resume.history-unavailable` 则保留持久化绑定，并在内存标记该 Thread 的订阅不可用，
+以 `history-unavailable` 原因交回恢复协调器；`ensure` 与已有输入及 Queue 的最终提交守卫明确拒绝继续使用该绑定。
+该状态只在内存保留，不新增持久化历史或恢复格式；成功恢复订阅或解除绑定后清理。
+显式恢复允许重新请求同一 Thread，不能将缺少历史当作已删除，也不自动替换、命名或迁移原 Thread。
 
 本模块不得导入 `codex-client` 或 `codex-protocol`；具体 Client 由组合根作为
 `ThreadLifecyclePort` 实现注入。

@@ -11,7 +11,7 @@ import type {
   ModelSelectionPort,
 } from "./model-port.js";
 import type { TurnOverrides } from "./turn-port.js";
-import type { SessionRouter } from "../session-routing/index.js";
+import type { SessionRouter, ThreadModelSettings } from "../session-routing/index.js";
 
 export interface ModelSelectionState {
   /** Opaque identity for short-lived selection pages; contains no model input. */
@@ -22,6 +22,8 @@ export interface ModelSelectionState {
   providerFilter?: string;
   effort: string | null;
   serviceTier: string | null;
+  serviceTierKnown: boolean;
+  effectiveServiceTier?: string | null | undefined;
   pending: boolean;
   modelPending: boolean;
   effortPending: boolean;
@@ -34,6 +36,8 @@ export interface ModelSelectionPreference {
   modelProvider: string;
   effort: string | null;
   serviceTier: string | null;
+  /** Process-local provenance; never part of the stored preference schema. */
+  serviceTierExplicit?: boolean;
 }
 
 export interface ModelSelectionIdentity {
@@ -63,6 +67,8 @@ export function modelSelectionSnapshot(state: Omit<ModelSelectionState, "models"
     ...(state.providerFilter === undefined ? {} : { providerFilter: state.providerFilter }),
     effort: state.effort,
     serviceTier: state.serviceTier,
+    serviceTierKnown: state.serviceTierKnown === true,
+    ...(state.effectiveServiceTier === undefined ? {} : { effectiveServiceTier: state.effectiveServiceTier }),
     pending: state.pending,
     modelPending: state.modelPending,
     effortPending: state.effortPending,
@@ -102,6 +108,7 @@ interface ModelCatalog {
 
 export class ModelSelectionService {
   private readonly pendingByConversation = new Map<string, TurnOverrides>();
+  private readonly explicitServiceTierByConversation = new Set<string>();
   private readonly pendingProviderSwitches = new Set<string>();
   private readonly providerFilterByConversation = new Map<string, string>();
   private readonly independentCatalogDefaults = new Map<string, string>();
@@ -315,7 +322,7 @@ export class ModelSelectionService {
       delete pending.serviceTier;
     }
     const currentModel = findModel(current.models, current.model, current.modelProvider);
-    const currentFast = isFastServiceTier(current.serviceTier, currentModel);
+    const currentFast = current.serviceTierKnown && isFastServiceTier(current.serviceTier, currentModel);
     const nextPending: TurnOverrides = {
       ...pending,
       model: selected.model,
@@ -333,11 +340,11 @@ export class ModelSelectionService {
                   : standardServiceTierRequestValue,
             }
           : {}
-        : current.serviceTier === "ultrafast"
+        : current.serviceTierKnown && current.serviceTier === "ultrafast"
           ? { serviceTier: selectedUltrafastTier ?? standardServiceTierRequestValue }
           : currentFast
           ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
-          : current.serviceTier && current.serviceTier !== standardServiceTierRequestValue
+          : current.serviceTierKnown && current.serviceTier && current.serviceTier !== standardServiceTierRequestValue
             ? { serviceTier: standardServiceTierRequestValue }
             : {}),
     };
@@ -372,7 +379,7 @@ export class ModelSelectionService {
     if (!resetOfficialFast) await this.validateSelection(target, catalog, assertAuthorized, expected);
     assertAuthorized?.();
     this.requireSubscribedProvider(selectedProvider);
-    this.setPending(target, nextPending, assertAuthorized);
+    this.setPending(target, nextPending, assertAuthorized, true);
     if (leavesThread) this.pendingProviderSwitches.add(this.key(target));
     this.providerFilterByConversation.set(this.key(target), selectedProvider);
     this.acceptSelectionChange(target, expected);
@@ -424,6 +431,9 @@ export class ModelSelectionService {
     if (normalized === "status") {
       return current;
     }
+    if (!normalized && current.serviceTierKnown !== true) {
+      throw new UserFacingError("fast.selection.unknown", "当前用户选择未知，请明确指定速度档位");
+    }
     const accelerated = currentFast || current.serviceTier === "ultrafast";
     const requested = normalized || (accelerated ? "off" : "on");
     if (requested !== "off" && model) this.requireAvailableModel(model);
@@ -462,14 +472,15 @@ export class ModelSelectionService {
     }
     assertAuthorized?.();
     this.requireSubscribedProvider(current.modelProvider ?? this.primaryProvider);
-    if (current.serviceTier === selectedTier) {
+    this.explicitServiceTierByConversation.add(this.key(target));
+    if (current.serviceTierKnown === true && current.serviceTier === selectedTier) {
       return current;
     }
     const pending = this.pending(target);
     this.setPending(target, {
       ...pending,
       serviceTier: selectedTier,
-    }, assertAuthorized);
+    }, assertAuthorized, true);
     this.acceptSelectionChange(target, expected);
     return this.resolveState(target, catalog, undefined, assertAuthorized, false, expected);
   }
@@ -517,6 +528,9 @@ export class ModelSelectionService {
     const model = pending?.model ?? current?.model;
     if (!model) return undefined;
     const serviceTierPending = hasServiceTierOverride(pending);
+    if (!serviceTierPending && current && current.serviceTierKnown !== true) {
+      throw new UserFacingError("fast.selection.unknown", "当前用户选择的速度档位未知，无法固定保存");
+    }
     return {
       model,
       modelProvider: pending?.modelProvider ?? this.normalizeProvider(current?.modelProvider)
@@ -525,6 +539,7 @@ export class ModelSelectionService {
       serviceTier: serviceTierPending
         ? pending?.serviceTier ?? null
         : current?.serviceTier ?? null,
+      ...(this.explicitServiceTierByConversation.has(this.key(target)) ? { serviceTierExplicit: true } : {}),
     };
   }
 
@@ -534,6 +549,7 @@ export class ModelSelectionService {
   ): void {
     const key = this.key(target);
     this.pendingByConversation.delete(key);
+    this.explicitServiceTierByConversation.delete(key);
     this.pendingProviderSwitches.delete(key);
     if (!preference) {
       this.router.setModelPreference?.(target, undefined);
@@ -552,15 +568,17 @@ export class ModelSelectionService {
       modelProvider: preferredProvider,
       ...(preference.effort ? { effort: preference.effort } : {}),
       serviceTier: preference.serviceTier,
-    });
+    }, undefined, preference.serviceTierExplicit === true);
   }
 
-  markApplied(target: ConversationTarget): void {
+  markApplied(target: ConversationTarget, submittedSettings: ThreadModelSettings | undefined): void {
     const key = this.key(target);
     const pending = this.pending(target);
     const binding = this.router.current(target);
     const current = this.router.modelSettings(target);
-    if (pending && binding && current) {
+    // Notifications and subscription loss replace the snapshot synchronously.
+    // A late response must not overwrite newer settings or revive lost evidence.
+    if (pending && binding && current && current === submittedSettings) {
       this.router.updateModelSettings(binding.threadId, {
         model: pending.model ?? current.model,
         modelProvider: this.normalizeProvider(pending.modelProvider ?? current.modelProvider)
@@ -569,10 +587,14 @@ export class ModelSelectionService {
         serviceTier: hasServiceTierOverride(pending)
           ? pending.serviceTier ?? null
           : current.serviceTier,
+        serviceTierKnown: hasServiceTierOverride(pending) || current.serviceTierKnown === true,
+        // Successful submission proves acceptance, not the feature/model-filtered tier.
+        effectiveServiceTier: undefined,
         collaborationMode: current.collaborationMode,
       });
     }
     this.pendingByConversation.delete(key);
+    this.explicitServiceTierByConversation.delete(key);
     this.pendingProviderSwitches.delete(key);
   }
 
@@ -580,6 +602,7 @@ export class ModelSelectionService {
     assertAuthorized?.();
     this.router.setModelPreference?.(target, undefined);
     this.pendingByConversation.delete(this.key(target));
+    this.explicitServiceTierByConversation.delete(this.key(target));
     this.pendingProviderSwitches.delete(this.key(target));
     this.providerFilterByConversation.delete(this.key(target));
   }
@@ -600,6 +623,8 @@ export class ModelSelectionService {
       ...(provider === undefined ? {} : { modelProvider: provider }),
       effort: pending?.effort ?? current?.effort ?? null,
       serviceTier: serviceTierPending ? pending?.serviceTier ?? null : current?.serviceTier ?? null,
+      serviceTierKnown: serviceTierPending || current?.serviceTierKnown === true,
+      ...(current?.effectiveServiceTier === undefined ? {} : { effectiveServiceTier: current.effectiveServiceTier }),
       pending: pending !== undefined,
       modelPending: hasOverride(pending, "model"),
       effortPending: hasOverride(pending, "effort"),
@@ -686,8 +711,9 @@ export class ModelSelectionService {
     );
     const catalogModel = provider === undefined ? undefined : findModel(models, model, provider);
     const serviceTierPending = hasServiceTierOverride(pending);
-    const defaultServiceTier = !serviceTierPending && !current && provider !== undefined
-      && catalogModel !== undefined && catalogModel.available !== false
+    const canReadDefaultServiceTier = !serviceTierPending && !current && provider !== undefined
+      && catalogModel !== undefined && catalogModel.available !== false;
+    const defaultServiceTier = canReadDefaultServiceTier
       ? await this.codex.readDefaultServiceTier(this.router.workspace(target).cwd, provider, assertAuthorized)
       : null;
     assertAuthorized?.();
@@ -707,6 +733,8 @@ export class ModelSelectionService {
         : current
           ? current.serviceTier
           : defaultServiceTier,
+      serviceTierKnown: serviceTierPending || (current ? current.serviceTierKnown === true : canReadDefaultServiceTier),
+      ...(current?.effectiveServiceTier === undefined ? {} : { effectiveServiceTier: current.effectiveServiceTier }),
       pending: pending !== undefined,
       modelPending: hasOverride(pending, "model"),
       effortPending: hasOverride(pending, "effort"),
@@ -740,7 +768,8 @@ export class ModelSelectionService {
     return createHash("sha256").update(JSON.stringify([
       conversationTargetKey(target), workspaceId, cwd ?? null,
       binding?.threadId ?? null, binding?.sessionId ?? null,
-      current ? [current.model, current.modelProvider, current.effort, current.serviceTier] : null,
+      current ? [current.model, current.modelProvider, current.effort, current.serviceTier,
+        current.serviceTierKnown, current.effectiveServiceTier] : null,
       pending ? [pending.model, pending.modelProvider, pending.effort, pending.serviceTier,
         hasOverride(pending, "model"), hasOverride(pending, "effort"), hasServiceTierOverride(pending)] : null,
       this.pendingProviderSwitches.has(this.key(target)),
@@ -855,8 +884,15 @@ export class ModelSelectionService {
     } : undefined;
   }
 
-  private setPending(target: ConversationTarget, pending: TurnOverrides, assertAuthorized?: () => void): void {
+  private setPending(target: ConversationTarget, pending: TurnOverrides, assertAuthorized?: () => void,
+    explicitServiceTier = false): void {
     assertAuthorized?.();
+    const previous = this.pending(target);
+    if (explicitServiceTier && hasServiceTierOverride(pending)) {
+      this.explicitServiceTierByConversation.add(this.key(target));
+    } else if (pending.serviceTier !== previous?.serviceTier) {
+      this.explicitServiceTierByConversation.delete(this.key(target));
+    }
     if (this.router.setModelPreference && !this.router.current(target) && pending.model && pending.modelProvider) {
       this.router.setModelPreference(target, {
         model: pending.model, modelProvider: pending.modelProvider,
@@ -868,47 +904,45 @@ export class ModelSelectionService {
     }
   }
 
-  /** Recheck saved identities and explicit pending speed choices before submission. */
+  /** Recheck saved identities; App Server filters retained speed choices at execution. */
   async validateUnboundPreference(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
     assertAuthorized = this.selectionGuard(target, assertAuthorized);
     assertAuthorized?.();
     const preference = this.router.modelPreference?.(target);
-    if (!preference) {
-      const pending = this.pendingByConversation.get(this.key(target));
-      if (pending?.serviceTier && pending.serviceTier !== standardServiceTierRequestValue) {
-        const provider = pending.modelProvider ?? this.router.modelSettings(target)?.modelProvider ?? this.primaryProvider;
-        const acceleration = await this.codex.readModelAccelerationSettings(this.router.workspace(target).cwd, provider, assertAuthorized);
-        assertAuthorized?.();
-        if (!(pending.serviceTier === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
-          throw new UserFacingError("model.selection.expired", "待生效的加速档位已关闭或受策略限制，请发送 /fast off 或重新选择档位");
-        }
+    const pending = this.pending(target);
+    if (this.explicitServiceTierByConversation.has(this.key(target))
+      && pending?.serviceTier && pending.serviceTier !== standardServiceTierRequestValue) {
+      const provider = pending.modelProvider ?? this.router.modelSettings(target)?.modelProvider ?? this.primaryProvider;
+      const acceleration = await this.codex.readModelAccelerationSettings(this.router.workspace(target).cwd, provider, assertAuthorized);
+      assertAuthorized?.();
+      if (!(pending.serviceTier === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
+        throw new UserFacingError("model.selection.expired", "待生效的加速档位已关闭或受策略限制，请发送 /fast off 或重新选择档位");
       }
-      return;
     }
-    const { models } = await this.listModels(preference.modelProvider, assertAuthorized);
+    const explicitTier = this.explicitServiceTierByConversation.has(this.key(target));
+    const selection = preference ?? (explicitTier && pending ? {
+      model: pending.model ?? this.router.modelSettings(target)?.model,
+      modelProvider: pending.modelProvider ?? this.router.modelSettings(target)?.modelProvider ?? this.primaryProvider,
+      effort: pending.effort,
+      serviceTier: pending.serviceTier,
+    } : undefined);
+    if (!selection) return;
+    const { models } = await this.listModels(selection.modelProvider, assertAuthorized);
     assertAuthorized?.();
-    const model = findModel(models, preference.model, preference.modelProvider);
+    const model = selection.model === undefined ? undefined : findModel(models, selection.model, selection.modelProvider);
     if (!model) {
       throw new UserFacingError("model.selection.expired", "保存的模型已不可用，请重新发送 /model 选择");
     }
     this.requireAvailableModel(model);
-    this.requireSubscribedProvider(preference.modelProvider);
-    if (preference.effort && !model.supportedReasoningEfforts.some(option => option.effort === preference.effort)) {
+    this.requireSubscribedProvider(selection.modelProvider);
+    if (selection.effort && !model.supportedReasoningEfforts.some(option => option.effort === selection.effort)) {
       throw new UserFacingError("model.selection.expired", "保存的思考等级已不可用，请重新发送 /model 选择");
     }
-    if (preference.serviceTier && preference.serviceTier !== standardServiceTierRequestValue
-      && preference.serviceTier !== fastServiceTierId(model)
-      && preference.serviceTier !== ultrafastServiceTierId(model)) {
-      throw new UserFacingError("model.selection.expired", "保存的服务层级已不可用，请重新发送 /model 选择");
-    }
-    if (preference.serviceTier && preference.serviceTier !== standardServiceTierRequestValue) {
-      const acceleration = await this.codex.readModelAccelerationSettings(
-        this.router.workspace(target).cwd, preference.modelProvider, assertAuthorized,
-      );
-      assertAuthorized?.();
-      if (!(preference.serviceTier === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
-        throw new UserFacingError("model.selection.expired", "保存的加速档位已关闭或受策略限制，请发送 /fast off 或重新选择档位");
-      }
+    if (explicitTier
+      && selection.serviceTier && selection.serviceTier !== standardServiceTierRequestValue
+      && selection.serviceTier !== fastServiceTierId(model)
+      && selection.serviceTier !== ultrafastServiceTierId(model)) {
+      throw new UserFacingError("model.selection.expired", "待提交的服务层级已不可用，请重新发送 /model 选择");
     }
   }
 

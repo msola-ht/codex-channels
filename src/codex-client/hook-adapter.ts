@@ -9,7 +9,7 @@ import { sanitizeOperationText } from "./operation-adapter.js";
 const eventNames = new Set<HookMetadata["eventName"]>([
   "preToolUse", "permissionRequest", "postToolUse", "preCompact", "postCompact",
   "sessionStart", "sessionEnd", "userPromptSubmit", "subagentStart", "subagentStop",
-  "stop", "interrupt",
+  "stop", "interrupt", "preModelRequest", "postModelRequest",
 ]);
 const sources = new Set<HookMetadata["source"]>([
   "system", "user", "project", "mdm", "sessionFlags", "plugin", "cloudRequirements",

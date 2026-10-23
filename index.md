@@ -33,7 +33,7 @@
   与 Gateway 共享主 OpenAI App Server 的桥接架构、安全合同、跨平台边界与实机验收限制。
 - [`docs/index.md`](docs/index.md)：Codex 协议基线、支持矩阵和实现入口。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：Codex、飞书与微信的上游源码基线及待升级候选。
-- [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：当前项目的采用范围、
+- [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：当前项目的采用范围、0.164.0 关联适配与升级决策、
   不采用原因、重新评估条件与基线升级影响。
 - [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：原生 Thread Queue、
   分页历史与 Revert 的授权边界和验收链路。

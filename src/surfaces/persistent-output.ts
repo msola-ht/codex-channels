@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { OutputEvent } from "../conversation-core/index.js";
 import { readGeneratedImage } from "./generated-image.js";
-import { shouldDisplayOperation } from "./operation-presentation.js";
+import { isGeneratedImageUnavailable, shouldDisplayOperation } from "./operation-presentation.js";
 import type { OperationUpdateDisplay } from "./types.js";
 import { resolveSurfaceDelivery } from "./delivery-policy.js";
 import { securePrivateDirectorySync, securePrivateFileSync } from "../../runtime/private-file.mjs";
@@ -17,6 +17,7 @@ export function isPersistentOutput(event: OutputEvent, display: OperationUpdateD
     case "mcp.oauth.completed": case "warning": case "conversation.idle.released": return true;
     case "operation.updated": return event.operation.kind === "contextCompaction" || (event.operation.status !== "running" && (
       (event.operation.kind === "imageGeneration" && event.operation.status === "completed" && event.operation.imagePath !== undefined)
+      || isGeneratedImageUnavailable(event.operation)
       || shouldDisplayOperation(event.operation, display)
     ));
     case "hook.completed":
@@ -40,6 +41,12 @@ export interface PersistentOutputPayload {
 }
 
 export async function snapshotPersistentOutput(event: OutputEvent, owner: string): Promise<PersistentOutputPayload> {
+  if (event.type === "operation.updated") {
+    const operation = { ...event.operation };
+    delete operation.imageFileId;
+    if (isGeneratedImageUnavailable(event.operation)) operation.imageDeliveryUnavailable = true;
+    event = { ...event, operation };
+  }
   if (event.type === "operation.updated" && event.operation.imagePath !== undefined) {
     const overhead = Buffer.byteLength(JSON.stringify({ version: 1, event, owner })) + 256;
     const imageBudget = Math.floor((4 * 1024 * 1024 - overhead) * 3 / 4);

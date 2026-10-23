@@ -41,6 +41,8 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 
 - `model-request-policy.mjs` / `model-request-policy.d.mts`：共享纯请求阶段预算与锁定 Codex 默认重试值；完整事件空闲 300 秒、WebSocket 建连 15 秒、HTTP 重试 4 次、流重试 5 次，生成没有总期限。第三方与聚合显式注入并通过 `config/read` 核验，官方 OpenAI 保持内置默认；所有 Codex 实例保留原生网络重连及 WS→HTTP 降级，代理和 Relay 不重发。核验连接关闭失败保留以便重试清理；可能启动实例的 Supervisor 操作两端统一等待 60 秒，涵盖启动、核验及连接收尾，不限制模型生成。不加载凭据、不写用户配置。
 - `request-timing.mjs` / `request-timing.d.mts`：指标 IPC、存储、CLI 与 WebUI 共用的生成区间校验和观测速度计算；无 I/O、不依赖调试转储。
+- `model-request-address.mjs` / `model-request-address.d.mts`：出站模型地址清洗，只保留 HTTP/WS origin 与路径，剔除凭据、查询和片段；规范地址至多 2048 字符，未知或无效值为空。指标 IPC 与存储复核相同合同。
+- `request-activity.mjs` / `request-activity.d.mts`：无 I/O 的请求行为归约和严格验证，原生指标、Relay 与转储摘要共用。只保留当前请求末尾工具结果标记、当前响应的回复/工具调用和最多四个工具名；Chat 分段工具名按 choice/index 有界合并，未完成与超限标记部分可见，不保留参数或结果正文。
 - `service-tier.mjs` / `service-tier.d.mts`：Application、CLI 设置与 WebUI 共用的纯加速档位匹配和展示归一；Fast 仅匹配目录的 `fast`/`priority`，Ultrafast 仅匹配 `ultrafast`，返回原始目录 ID，不包含配置写入、功能开关或生命周期操作。
 - `auto-review-metadata.mjs` / `auto-review-metadata.d.mts`：Provider 指标与转储读取共用的自动审查来源、父任务及原始审查身份投影；只接受明确的 `guardian_review` 来源和有界标识，不读取文件或推断缺失归属。
 

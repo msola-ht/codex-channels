@@ -18,7 +18,7 @@ import { finished } from "node:stream/promises";
 import { setImmediate as yieldReading } from "node:timers/promises";
 import { createTrafficOffsetStore, sameRevision, sameSource } from "./traffic-offset-index.mjs";
 
-import { callTiming, createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestClientName, requestContent, requestMetadata, requestParameters, requestProtocol, responseFacts } from "./traffic-dump-presentation.mjs";
+import { callTiming, createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestActivity, requestClientName, requestContent, requestMetadata, requestParameters, requestProtocol, responseFacts } from "./traffic-dump-presentation.mjs";
 
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
@@ -365,10 +365,11 @@ export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst
   const exchanges = [];
   for (const entry of entries) {
     await context?.checkpoint();
-    const body = parseJson((await readPayload(entry.directory, entry.request.payload, 4 * 1_048_576, true, context)).text);
+    const payload = await readPayload(entry.directory, entry.request.payload, 4 * 1_048_576, true, context);
+    const body = parseJson(payload.text);
     const includeMetadata = entry.request.transport === "websocket"
       && (entry.request.requestKind === undefined || entry.request.requestKind === "prewarm");
-    exchanges.push(summaryOf(entry, body, includeMetadata, context));
+    exchanges.push(await summaryOf(entry, body, includeMetadata, context, payload.truncated));
   }
   return {
     exchanges,
@@ -426,8 +427,8 @@ export async function readDumpExchange(paths, id, context, retainSnapshot = fals
 export async function summarizeDumpExchange(paths, id, context) {
   const interaction = await readDumpExchange(paths, id, context);
   if (interaction === null) return null;
-  const body = parseJson((await readPayload(interaction.directory, interaction.request.payload, 4 * 1_048_576, true, context)).text);
-  return summaryOf(interaction, body, true, context);
+  const payload = await readPayload(interaction.directory, interaction.request.payload, 4 * 1_048_576, true, context);
+  return summaryOf(interaction, parseJson(payload.text), true, context, payload.truncated);
 }
 
 /** A CLI operation may pin one opening snapshot across bounded pages. */
@@ -519,8 +520,8 @@ export async function summarizeDumpChanges(paths, { afterOffset = 0, throughOffs
       for (let position = low; position < end; position++) {
         const entry = await indexedInteraction(directory, lease, order[position], context, source);
         if (lease.index.get(order[position], 3) - 1 + lease.index.get(order[position], 4) > watermark) entry.response = undefined;
-        const body = parseJson((await readPayload(directory, entry.request.payload, 4 * 1_048_576, true, context)).text);
-        exchanges.push(summaryOf(entry, body, true, context));
+        const payload = await readPayload(directory, entry.request.payload, 4 * 1_048_576, true, context);
+        exchanges.push(await summaryOf(entry, parseJson(payload.text), true, context, payload.truncated));
       }
       const current = await openTrafficIndexSource(directory, context);
       try {
@@ -593,7 +594,10 @@ export async function describeDumpExchange(
     interaction.response = { ...interaction.response, state: terminalResponse.status };
   }
   return {
-    ...summaryOf(interaction, requestBody, true, context),
+    ...await summaryOf(interaction, requestBody, true, context, requestPayload.truncated, {
+      text: Buffer.byteLength(responsePayload.text) <= 262_144 ? responsePayload.text : "",
+      truncated: responsePayload.truncated || Buffer.byteLength(responsePayload.text) > 262_144,
+    }),
     ...debug,
     diagnosticsComplete: trace.complete,
     modelEvidence: { ...models.result(), ...(!trace.complete ? { truncated: true } : {}) },
@@ -890,7 +894,7 @@ function compareInteraction(left, right, newestFirst) {
     : left.request.id - right.request.id;
 }
 
-function summaryOf(interaction, body, includeMetadata = true, context) {
+async function summaryOf(interaction, body, includeMetadata = true, context, requestTruncated = false, savedResponsePayload) {
   const request = interaction.request;
   const response = interaction.response;
   const relay = ["relay.chat", "relay.responses"].includes(labelOf(interaction.directory, context));
@@ -901,9 +905,13 @@ function summaryOf(interaction, body, includeMetadata = true, context) {
   const firstTokenMs = firstTokenMsOf(response);
   const clientName = requestClientName(request);
   const protocol = requestProtocol(request);
+  const activityPayload = !protocol ? { text: "", truncated: false }
+    : savedResponsePayload ?? await readPayload(interaction.directory, response?.payload, 262_144, true, context);
+  const activity = requestActivity(body, activityPayload.text, { protocol, requestTruncated, responseTruncated: activityPayload.truncated });
   const reasoningEffort = requestParameters(body, protocol).reasoningEffort;
   return {
     id: request.id,
+    activity,
     ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     ...(clientName === undefined ? {} : { clientName }),
     ...(protocol === undefined ? {} : { protocol }),

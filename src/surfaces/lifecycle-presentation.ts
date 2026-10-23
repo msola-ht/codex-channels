@@ -26,6 +26,7 @@ import {
 import {
   formatCodexProviderLabel,
   formatServiceTier,
+  formatServiceTierSetting,
 } from "./provider-format.js";
 import {
   formatCompactMetricsValue,
@@ -163,6 +164,8 @@ type StartupStatus = Pick<
   | "modelProvider"
   | "effort"
   | "serviceTier"
+  | "serviceTierKnown"
+  | "effectiveServiceTier"
   | "approvalsReviewer"
   | "modelPending"
   | "effortPending"
@@ -260,9 +263,9 @@ export function createStartupPresentation(
           },
           {
             label: "速度",
-            value: `${status.threadId || status.fastModePending
-              ? formatServiceTier(status.serviceTier)
-              : "未知"}${pendingSuffix(status.fastModePending)}`,
+            value: status.threadId || status.fastModePending
+              ? formatServiceTierSetting(status)
+              : "未知",
           },
           {
             label: "协作模式",

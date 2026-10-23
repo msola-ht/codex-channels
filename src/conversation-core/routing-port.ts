@@ -10,6 +10,8 @@ export interface RoutedThreadModelSettings {
   modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
+  serviceTierKnown: boolean;
+  effectiveServiceTier?: string | null | undefined;
   approvalsReviewer?: ThreadApprovalsReviewer | null;
 }
 

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AutoApprovalReviewStore, AutoApprovalReviewSummary } from "./request-metrics.js";
-import { validateThreadId } from "./sqlite-request-metrics-query-base.js";
+import { textTokenOperationSql, validateThreadId } from "./sqlite-request-metrics-query-base.js";
 import { reviewRunScope } from "./sqlite-review-run-scope.js";
 
 /** Minimal review identity and observation facts; no approval content or history. */
@@ -90,7 +90,7 @@ export class SqliteAutoApprovalReviewMetrics implements AutoApprovalReviewStore 
         SELECT COUNT(*) AS request_count,
           SUM(input_tokens) AS input_tokens,
           SUM(output_tokens) AS output_tokens,
-          COUNT(*) FILTER (WHERE input_tokens IS NULL OR output_tokens IS NULL) AS missing_token_request_count
+          COUNT(*) FILTER (WHERE ${textTokenOperationSql} AND (input_tokens IS NULL OR output_tokens IS NULL)) AS missing_token_request_count
         FROM model_request_metrics JOIN review_runs USING (thread_id, turn_id)
         WHERE request_purpose = 'autoApprovalReview'
       )

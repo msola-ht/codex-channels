@@ -1,7 +1,7 @@
 import type { GenerationTiming, RequestTimingSummary } from "../../runtime/request-timing.mjs";
 export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
-export type ModelRequestOperation = "response" | "compact";
+export type ModelRequestOperation = "response" | "compact" | "imageGeneration" | "imageEdit";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
 export interface RequestOutcomeCounts {
   completed: number;
@@ -17,6 +17,7 @@ export interface RequestInterruptionSummary {
   usageUnobserved: number;
 }
 export interface ModelRequestMetricSample {
+  activity?: import("../../runtime/request-activity.mjs").RequestActivity | null;
   /** 上游明确返回的诊断摘要；与可选报文转储独立，历史缺失为空。 */
   upstreamProvider?: string | null;
   upstreamAttemptCount?: number | null;
@@ -72,6 +73,8 @@ export interface ModelRequestMetricSample {
   totalDurationMs?: number | null;
   /** 本次逻辑请求实际发往模型上游的请求正文或 WebSocket 请求帧字节合计；未提交时为 null。 */
   requestBytes?: number | null;
+  /** 最后一次实际出站模型请求的 origin + pathname；剔除凭据、查询和片段，历史或未发送时为 null。 */
+  upstreamUrl?: string | null;
   requestModel?: string | null;
   responseModel?: string | null;
   /** 本地转储定位符；缺失不按时间或 Thread/Turn 推断。 */

@@ -139,7 +139,7 @@ const promptGroups = {
   approvals: ["approvals.on_request", "approvals.on_request_auto_review", "approvals.never", "approvals.unless_trusted"],
   collaboration: ["collaboration_modes.default", "collaboration_modes.plan"],
   review: ["auto_review.policy", "auto_review.policy_template", "auto_review.node_repl_policy", "auto_review.rejection_instructions", "auto_review.timeout_instructions", "guardian_v2.classifier_instructions"],
-  permissions: ["permissions.danger_full_access", "permissions.workspace_write", "permissions.read_only"],
+  permissions: ["permissions.danger_full_access", "permissions.workspace_write", "permissions.read_only", "permissions.approved_prefixes"],
   agents: ["multi_agent.role.root", "multi_agent.role.subagent", "multi_agent.mode.explicit", "multi_agent.mode.proactive", "multi_agent.mode.hint_text"],
   budget: ["token_budget.reminder_message_template", "token_budget.guidance_message", "token_budget.auto_compact_fallback_prompt"],
   confirmation: ["confirmation_policies.browser_use", "confirmation_policies.computer_use"],

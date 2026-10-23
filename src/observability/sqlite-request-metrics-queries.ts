@@ -358,8 +358,7 @@ export class SqliteRequestMetricsQueries {
       cacheUsage: toStoredCacheUsage(row),
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
-      cachedInputTokens: row.input_token_count === row.request_count
-        && row.cached_input_token_count === row.request_count
+      cachedInputTokens: row.cache_missing_request_count === 0
         ? row.cached_input_tokens ?? 0
         : null,
       outputTokens: row.output_tokens ?? 0,

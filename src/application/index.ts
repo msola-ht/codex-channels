@@ -156,6 +156,7 @@ export {
   type McpServerDetail,
   type McpServerSummary,
   type McpToolSummary,
+  type McpToolListMetadata,
 } from "./mcp-port.js";
 export {
   type InstalledPlugin,

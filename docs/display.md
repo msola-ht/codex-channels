@@ -180,7 +180,7 @@ Core 和投递路径保留经处理的有界纯文本。Telegram 在 HTML 面板
   “本轮耗时”与会话“总耗时”作为一级项，各自的“首 Token”和“速度”缩进为二级项；分组仅用于展示，不表示首 Token 或速度是官方耗时的组成项。
   会话的“上下文压缩”保留 App Server 次数；落库的“压缩请求”另列次数与 Token，复用本轮的模型去重和非零异常展示，二者统计来源不同，不相加。
   `/metrics`、子代理完成卡不显示速度或上游首 Token。请求明细与调用详情的列头为“首 Token”“速度”和“请求耗时”，具体见[WebUI 请求明细](webui.md)。本地观测的 `firstTokenMs` 与上游原始 `upstreamTtftMs` 不混用。
-  当前锁定 Codex 0.163.0 的首轮 `generate=false` WebSocket 预热不属于模型推理，
+  当前锁定 Codex 0.164.0 的首轮 `generate=false` WebSocket 预热不属于模型推理，
   不计入请求数或 Token。Turn 完成前会等待当前 Thread 与 Turn 已入队的指标写入，并从本地指标库重建本轮统计；因此 Gateway
   在长 Turn 中途重启后，完成卡片仍包含重启前后的本次用量，会话累计也包含本轮已经落库的请求。等待有总预算，
   指标库拥堵或不可用时按当前可用值生成卡片并记录告警，避免一个慢指标库阻塞其他 Surface 与 Conversation 的输出投递。
@@ -234,7 +234,7 @@ Core 和投递路径保留经处理的有界纯文本。Telegram 在 HTML 面板
 
 OpenAI `/usage` 先展示账户活动摘要；当前账户选择和 Conversation 实际绑定都属于 OpenAI 时，
 在同一回复追加“当前 Thread 官方估算”区块。待生效的第三方 Provider 选择仍按既有规则决定
-`/usage` 的账户来源，不会为其查询当前 OpenAI Thread。官方估算按当前锁定的 0.163.0 App Server 活动
+`/usage` 的账户来源，不会为其查询当前 OpenAI Thread。官方估算按当前锁定的 0.164.0 App Server 活动
 账户读取，只覆盖精确当前 Thread，不递归或合计子代理，也不写入本地指标库。
 
 - Credits 和可选美元费用按百万分之一整数单位转换为有界小数；缺少美元值时不显示费用行。
@@ -331,7 +331,7 @@ JSON 中的 `requestOutcomes` 提供四类精确计数；`unsuccessfulRequestCou
 统计代理把 `/responses` 上的上下文压缩（remote compaction v2）保留为
 `compact` 操作：其请求与 Token 继续计入总计，同时在完成卡片、会话指标和全局/提供商/
 模型汇总中单列压缩次数、实际请求模型与 Token。这里的模型是代理实际观测到的请求模型。
-当前锁定的 Codex CLI 0.163.0 没有独立压缩模型配置；常规压缩复用 Turn 模型，模型切换兼容压缩
+当前锁定的 Codex CLI 0.164.0 没有独立压缩模型配置；常规压缩复用 Turn 模型，模型切换兼容压缩
 可能先使用上一模型，并在受支持的失败条件下回退当前模型。
 
 完成卡片的模型/提供商之下会单列「自动压缩：X%」。受管第三方 Provider 只配置模型目录里的
@@ -599,6 +599,9 @@ Telegram 和飞书的渠道完成通知：成功运行只以 App Server 发给�
 `display.operation_updates = "compact"` 时，Telegram 和飞书仍展示子代理启动和失败，但不再为成功的
 `wait`、`sendInput`、`resumeAgent`、`closeAgent` 分别发送“已完成”卡片；`full` 保留这些操作详情，
 `hidden` 隐藏普通操作过程。该设置只控制这两个渠道的过程展示，不改变官方终态和子代理完成统计。
+飞书和 Telegram 在 `full`、`compact` 下显示原生图片生成的运行中状态与完成/失败摘要；
+飞书的开始提示使用可取消的内存快照，不写入持久结果日志，完成或 Turn 结束后不补发过时的开始提示。
+`hidden` 隐藏这些过程信息，但生成图片本身和只有文件引用时的内容不可获取提示仍独立投递。
 微信不主动发送普通操作或子代理过程事件，以保留单次回复窗口预算。
 上下文压缩属于生命周期通知：飞书、Telegram、微信均在官方 `contextCompaction` Item 开始时
 独立发送“开始压缩上下文…”，完成时发送“上下文压缩已完成。”，不受 `operation_updates` 影响。

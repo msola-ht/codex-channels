@@ -29,6 +29,10 @@ export interface ThreadModelSettings {
   modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
+  /** User selection. False means the lifecycle response did not reveal it. */
+  serviceTierKnown: boolean;
+  /** Last lifecycle-confirmed effective setting; notifications cannot confirm it. */
+  effectiveServiceTier?: string | null | undefined;
   approvalsReviewer?: ThreadApprovalsReviewer | null;
   collaborationMode: "default" | "plan";
 }
@@ -37,7 +41,7 @@ export interface SubscriptionRestoreFailure {
   binding: ConversationBinding;
   error: Error;
   bindingRemoved: boolean;
-  reason: "active-writer" | "unavailable" | "other";
+  reason: "active-writer" | "unavailable" | "history-unavailable" | "other";
 }
 
 export interface ThreadListOptions {
@@ -94,6 +98,7 @@ export class SessionRouter {
   private readonly approvalResolutions = new Set<ApprovalResolution>();
   // Bindings survive unloads and failed detaches, but need a subscription before use.
   private readonly unsubscribedBindings = new Set<string>();
+  private readonly unavailableResumeHistories = new Map<string, UserFacingError>();
   // 模型设置保留到进程结束：thread/list 不返回 model，
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
@@ -103,7 +108,9 @@ export class SessionRouter {
   private readonly executionContextChanges: (string | undefined | ((threadId: string) => boolean))[] = [];
   private subscriptionRevision = 0;
   private readonly subscriptionChanges: (string | ((threadId: string) => boolean))[] = [];
-  private readonly sessionContextRevisions = new WeakMap<ThreadSession, { context: number; subscription: number }>();
+  private settingsRevision = 0;
+  private readonly settingsChanges: string[] = [];
+  private readonly sessionContextRevisions = new WeakMap<ThreadSession, { context: number; subscription: number; settings: number }>();
 
   constructor(
     private readonly codex: ThreadLifecyclePort,
@@ -144,6 +151,8 @@ export class SessionRouter {
     const revision = this.executionContextRevision;
     const assertCurrent = (): void => {
       beforeSubmit?.();
+      const blocked = this.subscriptionRestoreError(threadId);
+      if (blocked && this.sameBinding(binding, this.bindings.getByThread(threadId))) throw blocked;
       const changes = this.executionContextRevision - revision;
       if (!this.sameBinding(binding, this.bindings.getByThread(threadId))
         || this.bindings.isBackground(threadId) !== background
@@ -368,6 +377,7 @@ export class SessionRouter {
       if (!isAffected(binding.threadId)) continue;
       this.invalidateExecutionContext(binding.threadId);
       this.unsubscribedBindings.add(binding.threadId);
+      this.invalidateServiceTier(binding.threadId);
     }
   }
 
@@ -377,6 +387,7 @@ export class SessionRouter {
     this.executionContextChanges.push(connectionScope ?? threadId);
     if (this.executionContextChanges.length > 256) this.executionContextChanges.shift();
     if (subscriptionLost && threadId !== undefined) {
+      this.invalidateServiceTier(threadId);
       this.subscriptionRevision += 1;
       this.subscriptionChanges.push(threadId);
       if (this.subscriptionChanges.length > 256) this.subscriptionChanges.shift();
@@ -394,7 +405,21 @@ export class SessionRouter {
     }
   }
 
+  private invalidateServiceTier(threadId: string): void {
+    const settings = this.modelSettingsByThread.get(threadId);
+    if (settings) this.modelSettingsByThread.set(threadId, {
+      ...settings, serviceTierKnown: false, effectiveServiceTier: undefined,
+    });
+  }
+
   observeThreadCwd(threadId: string, cwd: string): void {
+    this.settingsRevision += 1;
+    this.settingsChanges.push(threadId);
+    if (this.settingsChanges.length > 256) this.settingsChanges.shift();
+    const settings = this.modelSettingsByThread.get(threadId);
+    if (settings) this.modelSettingsByThread.set(threadId, {
+      ...settings, serviceTierKnown: false, effectiveServiceTier: undefined,
+    });
     const diagnostics = this.sessionDiagnosticsByThread.get(threadId);
     const context = this.executionContextForThread(threadId);
     // Unknown/closed contexts require a successful lifecycle response, not a late notification.
@@ -403,7 +428,8 @@ export class SessionRouter {
   }
 
   private async observeSessionContext<T extends ThreadSession>(operation: () => Promise<T>): Promise<T> {
-    const revision = { context: this.executionContextRevision, subscription: this.subscriptionRevision };
+    const revision = { context: this.executionContextRevision, subscription: this.subscriptionRevision,
+      settings: this.settingsRevision };
     const session = await operation();
     this.sessionContextRevisions.set(session, revision);
     return session;
@@ -449,6 +475,7 @@ export class SessionRouter {
       executionContext: this.sessionExecutionContext(session),
     });
     this.unsubscribedBindings.delete(session.thread.id);
+    this.unavailableResumeHistories.delete(session.thread.id);
   }
 
   private async unsubscribeThread(threadId: string, beforeSubmit?: () => void): Promise<void> {
@@ -508,7 +535,7 @@ export class SessionRouter {
               false,
               isCurrent,
             );
-            this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+            this.captureModelSettings(resumed, resumed.collaborationMode);
             this.namesByThread.set(resumed.thread.id, resumed.thread.name);
             this.captureSessionDiagnostics(resumed);
             restoredBinding = {
@@ -530,6 +557,13 @@ export class SessionRouter {
             const incompatible = isIncompatibleRestoreError(normalized);
             if (!incompatible && !isCurrent()) return undefined;
             const bindingRemoved = incompatible || isUnavailableRestoreError(normalized);
+            const historyUnavailable = normalized instanceof UserFacingError
+              && normalized.code === "thread.resume.history-unavailable";
+            if (historyUnavailable) {
+              this.markThreadUnsubscribed(binding.threadId);
+              this.unavailableResumeHistories.set(binding.threadId, normalized);
+            }
+            else this.unavailableResumeHistories.delete(binding.threadId);
             if (incompatible) {
               this.invalidateThreadBinding(binding.threadId);
             } else if (bindingRemoved) {
@@ -545,6 +579,7 @@ export class SessionRouter {
               bindingRemoved,
               reason: bindingRemoved
                 ? "unavailable"
+                : historyUnavailable ? "history-unavailable"
                 : isActiveWriterRestoreError(normalized)
                   ? "active-writer"
                   : "other",
@@ -625,6 +660,8 @@ export class SessionRouter {
       }
       if (thread.status.type === "notLoaded") this.unsubscribedBindings.add(current.threadId);
       if (this.unsubscribedBindings.has(current.threadId)) {
+        const blocked = this.subscriptionRestoreError(current.threadId);
+        if (blocked) throw blocked;
         if (!observeRestore && this.onSubscriptionRestoreRequired) {
           this.onSubscriptionRestoreRequired(current);
           throw new UserFacingError("conversation.busy", "会话订阅正在恢复，请稍后重试", { reason: "subscription-restoring" });
@@ -677,7 +714,7 @@ export class SessionRouter {
             } catch (error) {
               await this.cleanupFailedResume(resumed.thread.id, error);
             }
-            this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+            this.captureModelSettings(resumed, resumed.collaborationMode);
             this.namesByThread.set(resumed.thread.id, resumed.thread.name);
             this.captureSessionDiagnostics(resumed);
             this.clearForceNew(target, Date.now());
@@ -706,7 +743,7 @@ export class SessionRouter {
     } catch (error) {
       await this.cleanupFailedResume(started.thread.id, error);
     }
-    this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier, "default", started.approvalsReviewer);
+    this.captureModelSettings(started);
     this.namesByThread.set(started.thread.id, started.thread.name);
     this.captureSessionDiagnostics(started);
     this.clearForceNew(target, Date.now());
@@ -718,6 +755,11 @@ export class SessionRouter {
     const binding = this.bindings.getByThread(threadId);
     if (!binding || !this.unsubscribedBindings.has(threadId)) return;
     this.onSubscriptionRestoreRequired?.(binding);
+  }
+
+  /** Retained binding needs an explicit resume or a fresh Provider recovery. */
+  subscriptionRestoreError(threadId: string): UserFacingError | undefined {
+    return this.unavailableResumeHistories.get(threadId);
   }
 
   /**
@@ -801,15 +843,7 @@ export class SessionRouter {
       } catch (error) {
         await this.cleanupFailedResume(session.thread.id, error);
       }
-      this.captureModelSettings(
-        session.thread.id,
-        session.model,
-        session.modelProvider,
-        session.reasoningEffort,
-        session.serviceTier,
-        "default",
-        session.approvalsReviewer,
-      );
+      this.captureModelSettings(session);
       this.namesByThread.set(session.thread.id, session.thread.name);
       this.captureSessionDiagnostics(session);
       this.notifyBindingsChanged();
@@ -918,7 +952,7 @@ export class SessionRouter {
         await this.cleanupFailedResume(threadId, failure);
       }
       if (previousUnsubscribed && current) this.sessionDiagnosticsByThread.delete(current.threadId);
-      this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+      this.captureModelSettings(resumed, resumed.collaborationMode);
       this.namesByThread.set(resumed.thread.id, resumed.thread.name);
       this.captureSessionDiagnostics(resumed);
       const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
@@ -1225,8 +1259,7 @@ export class SessionRouter {
             try {
               const resumed = await this.resumeInWorkspace(snapshot, this.workspaces.require(binding.workspaceId), {}, false,
                 () => this.sameBinding(binding, this.bindings.getByThread(threadId)) && condition.canRestore());
-              this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
-                resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+              this.captureModelSettings(resumed, resumed.collaborationMode);
               this.namesByThread.set(resumed.thread.id, resumed.thread.name);
               this.captureSessionDiagnostics(resumed);
               observation?.restored(binding, resumed.thread);
@@ -1347,7 +1380,7 @@ export class SessionRouter {
       await this.cleanupFailedResume(forked.thread.id, failure);
     }
     this.sessionDiagnosticsByThread.delete(current.threadId);
-    this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier, "default", forked.approvalsReviewer);
+    this.captureModelSettings(forked);
     this.namesByThread.set(forked.thread.id, forked.thread.name);
     this.captureSessionDiagnostics(forked);
     this.clearForceNew(target, Date.now());
@@ -1469,8 +1502,7 @@ export class SessionRouter {
       const observation = observeRestore?.(expected.threadId);
       try {
         const resumed = await this.resumeInWorkspace(historical, workspace, {}, false, isCurrent);
-        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
-          resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+        this.captureModelSettings(resumed, resumed.collaborationMode);
         this.namesByThread.set(resumed.thread.id, resumed.thread.name);
         this.captureSessionDiagnostics(resumed);
         observation?.restored(expected, resumed.thread);
@@ -1505,6 +1537,9 @@ export class SessionRouter {
   }
 
   private notifyBindingsChanged(): void {
+    for (const threadId of this.unavailableResumeHistories.keys()) {
+      if (!this.bindings.getByThread(threadId)) this.unavailableResumeHistories.delete(threadId);
+    }
     for (const threadId of this.unsubscribedBindings) {
       if (!this.bindings.getByThread(threadId)) this.unsubscribedBindings.delete(threadId);
     }
@@ -1619,19 +1654,35 @@ export class SessionRouter {
   }
 
   private captureModelSettings(
-    threadId: string,
-    model: string,
-    modelProvider: string | undefined,
-    effort: string | null,
-    serviceTier: string | null | undefined,
+    session: ThreadSession,
     collaborationMode: ThreadModelSettings["collaborationMode"] = "default",
-    approvalsReviewer: ThreadApprovalsReviewer | null = null,
   ): void {
+    const { thread: { id: threadId }, model, modelProvider, reasoningEffort: effort,
+      serviceTier, approvalsReviewer = null } = session;
+    const revision = this.sessionContextRevisions.get(session)?.settings;
+    const changes = revision === undefined ? Infinity : this.settingsRevision - revision;
+    const snapshotCurrent = changes <= this.settingsChanges.length
+      && (changes === 0 || !this.settingsChanges.slice(-changes).includes(threadId));
+    // A competing settings notification makes this effective snapshot unconfirmed.
+    if (!snapshotCurrent) {
+      const current = this.modelSettingsByThread.get(threadId);
+      if (current) {
+        this.modelSettingsByThread.set(threadId, { ...current, effectiveServiceTier: undefined });
+        return;
+      }
+    }
+    const previous = this.modelSettingsByThread.get(threadId);
+    const retainedSelection = previous?.serviceTierKnown === true && !this.unsubscribedBindings.has(threadId);
     this.modelSettingsByThread.set(threadId, {
       model,
       modelProvider: modelProvider ?? "openai",
       effort,
-      serviceTier: serviceTier ?? null,
+      // 0.164 filters lifecycle snapshots, while settings notifications carry
+      // the unfiltered selection. Preserve a choice observed on the continuous
+      // subscription even when a later lifecycle response filters it out.
+      serviceTier: snapshotCurrent ? serviceTier ?? (retainedSelection ? previous.serviceTier : null) : null,
+      serviceTierKnown: snapshotCurrent && (serviceTier != null || retainedSelection),
+      effectiveServiceTier: snapshotCurrent ? serviceTier ?? null : undefined,
       collaborationMode,
       approvalsReviewer,
     });

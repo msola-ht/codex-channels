@@ -1,5 +1,11 @@
 # Provider Proxy
 
+原生 HTTP/WS 与 Chat 转换后的 Responses 指标采集 `activity` 行为摘要，与 Relay 共用纯归约器。流式 HTTP 请求的额外观察缓冲至多 1 MiB，已有缓冲请求及 WS 帧复用解析结果；超限标记部分可见。只记录末尾工具结果、当前响应回复/工具调用和有界工具名，包含 `tool_search_call` 与 `tool_search_output`；不采集参数、结果或历史内容，请求指标不读取调用转储。
+
+请求指标 `upstreamUrl` 仅在实际提交时采集最终 HTTP/WS 模型目标，去除凭据、查询和片段；路由失败或提交前拒绝保持未知。Chat 转换桥通过 `snapshot.upstreamUrl` 回传真实模型服务，外层不得保存本地桥地址；多轮只保留最后一次模型提交，不包含搜索出口，不依赖转储开关。原生和 Relay IPC 均复核规范地址，不能跨进程保存未清洗的 URL。
+
+图片请求的调用转储复用代理指标已观察的 HTTP 结果：2xx 且响应完整结束为完成，重定向及 HTTP 错误为失败；不将图片正文中的 Responses 形似事件当成终态或替换完整图片响应。普通 Responses 的终态归约保持原有行为。
+
 本目录提供模型 Provider 的本地回环转发代理及私有指标通道。模型数据通路由 App Server 服务
 持有，Gateway 只接收可丢失的脱敏请求指标，因此 Gateway 停止或重启不会中断模型请求。
 
@@ -35,7 +41,11 @@
   主代理还按当前锁定 Codex 0.163.0 的固定端点清单接受 POST `/alpha/search`、
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
   `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限
-  Call ID 的 `/v1/live/<call-id>` WebSocket。这些额外端点不解析为 Responses 指标；DeepSeek、
+  Call ID 的 `/v1/live/<call-id>` WebSocket。图片生成和编辑按精确路径分别记录
+  `imageGeneration` / `imageEdit` 请求指标；保存 HTTP 成败、实际提交字节、首响应字节和结束耗时，
+  HTTP 2xx 且响应完整结束记为请求完成，不代表图片业务结果成功；HTTP 200 内的 JSON/SSE 业务错误不解析。
+  不解析图片响应正文，不采集文本 Token、首 Token 或生成速率。JSON 请求只扫描模型名，multipart
+  编辑请求模型保持未知；指标与调用转储开关独立。其余额外端点不采集请求指标；DeepSeek、
   OpenCode Go、CCG 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
   CP 出站请求通过 `readModelCapabilities` 在同次目录复核中取得启用状态与默认采样，HTTP 和 WebSocket `response.create`
   只补齐请求中缺失的六种采样字段，显式零值或 null 保留；转储与指标仍观察客户端原始报文。

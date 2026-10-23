@@ -77,6 +77,7 @@ export class ProviderMetricsComposition {
         reasoningEffort:
           metrics.reasoningEffort
           ?? (metrics.requestPurpose === "autoApprovalReview" || metrics.threadId === null
+            || metrics.operation === "imageGeneration" || metrics.operation === "imageEdit"
             ? null
             : this.options.resolveModelSettings?.(metrics.threadId)?.effort ?? null),
       });
@@ -106,6 +107,8 @@ export function toModelTimingEvent(
 ): ModelTimingEvent | undefined {
   if (
     metrics.requestPurpose === "autoApprovalReview"
+    || metrics.operation === "imageGeneration"
+    || metrics.operation === "imageEdit"
     || metrics.threadId === null
     || metrics.turnId === null
   ) {

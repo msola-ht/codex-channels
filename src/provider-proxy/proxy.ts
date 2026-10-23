@@ -1,6 +1,7 @@
 import { modelRequestDiagnostics, chatDiagnosticsHeader, type ChatDiagnosticsChannel } from "./chat-diagnostics.js";
 import { autoReviewMetadata } from "../../runtime/auto-review-metadata.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
+import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
 import { ModelConversionError, normalizeResponsesRequest, type SamplingParameters } from "../model-api/index.js";
 import {
   createServer,
@@ -46,6 +47,8 @@ import {
   markMetricsFailed,
   observeResponseEvent,
   observeRequestSubmitted,
+  observeRequestActivity,
+  incompleteRequestActivity,
   observeChatTiming,
   invalidateGenerationTiming,
   parseJsonPayload,
@@ -514,6 +517,11 @@ export class ProviderProxy {
       } }));
       return;
     }
+    const pathname = new URL(route.path, "http://127.0.0.1").pathname;
+    const imageOperation = route.kind === "openai-http"
+      ? pathname === "/images/generations" ? "imageGeneration"
+        : pathname === "/images/edits" ? "imageEdit" : undefined
+      : undefined;
     let upstreamTarget: ProviderProxyUpstream;
     const onPendingError = () => response.destroy();
     request.on("error", onPendingError);
@@ -526,7 +534,7 @@ export class ProviderProxy {
       request.resume();
       const metadata = parseTurnMetadata(request.headers["x-codex-turn-metadata"]);
       const metrics = createMetricsState(metadata, startedAtMs, "http",
-        metadata.operation,
+        imageOperation ?? metadata.operation,
         effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent));
       metrics.httpStatus = error instanceof ModelRequestTimeoutError ? error.status : 502;
       markMetricsFailed(metrics, error instanceof ModelRequestTimeoutError ? error.code : "provider_proxy_route_error", Date.now(), error, failedAtMonotonicMs);
@@ -538,7 +546,7 @@ export class ProviderProxy {
       exchange?.responseHead(metrics.httpStatus, {});
       exchange?.observeRequestMetrics(metrics);
       exchange?.failure("upstream_route", undefined, failedAtMonotonicMs);
-      if (route.kind === "response") {
+      if (route.kind === "response" || imageOperation !== undefined) {
         await this.deliverMetrics(metrics, route.accountId, signal);
       }
       if (signal.aborted || response.destroyed) return;
@@ -573,7 +581,7 @@ export class ProviderProxy {
       turnMetadata,
       startedAtMs,
       "http",
-      turnMetadata.operation,
+      imageOperation ?? turnMetadata.operation,
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
     );
     const exchange = this.trafficDump?.beginHttpExchange({
@@ -589,10 +597,17 @@ export class ProviderProxy {
     const requestTierScanner = createJsonStringFieldScanner("service_tier");
     const requestEffortScanner = createJsonStringFieldScanner("effort", "reasoning");
     const requestModelDecoder = new StringDecoder("utf8");
+    const activityChunks: Buffer[] = [];
+    let activityBytes = 0;
+    let activityOverflow = false;
+    if (bufferedRequest) observeRequestActivity(metrics, bufferedRequest.parsed);
     const recordsResponseMetrics = route.kind === "response";
+    const recordsMetrics = recordsResponseMetrics || imageOperation !== undefined;
+    const scansRequestMetadata = imageOperation === undefined
+      || String(request.headers["content-type"] ?? "").split(";", 1)[0]?.trim().toLowerCase() === "application/json";
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
-      if (!recordsResponseMetrics) return Promise.resolve();
+      if (!recordsMetrics) return Promise.resolve();
       metricsDelivery ??= this.deliverMetrics(metrics, route.accountId, signal);
       return metricsDelivery;
     };
@@ -600,6 +615,7 @@ export class ProviderProxy {
       ? httpRequest
       : httpsRequest;
     const diagnosticObserver = this.chatDiagnostics?.subscribe(snapshot => {
+      if (snapshot.upstreamUrl !== undefined) metrics.upstreamUrl = snapshot.upstreamUrl;
       if (snapshot.timing) {
         observeChatTiming(metrics, snapshot.timing);
         exchange?.callTiming?.submitted(snapshot.timing.submittedAt);
@@ -712,7 +728,7 @@ export class ProviderProxy {
         exchange?.responseEnd(endedAtMonotonicMs);
         const ending = forwarding.then(async () => {
           signal.throwIfAborted();
-          if (completed || recordsResponseMetrics) await emitMetrics();
+          if (completed || recordsMetrics) await emitMetrics();
           await finishProxyResponse(response, signal, modelRequestPolicy.terminalDeliveryTimeoutMs);
         });
         forwarding = waitForProxyOperation(ending, signal, modelRequestPolicy.terminalDeliveryTimeoutMs, "terminal").catch(failDelivery);
@@ -776,23 +792,42 @@ export class ProviderProxy {
       }
     });
     const observeRequestChunk = (chunk: Buffer): void => {
-      const text = requestModelDecoder.write(chunk);
-      scanJsonStringField(requestModelScanner, text);
-      scanJsonStringField(requestTierScanner, text);
-      scanJsonStringField(requestEffortScanner, text);
-      metrics.requestModel = boundedString(requestModelScanner.value);
-      metrics.requestServiceTier = boundedString(requestTierScanner.value);
-      metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+      if (recordsResponseMetrics && !bufferedRequest && !activityOverflow) {
+        activityBytes += chunk.length;
+        if (activityBytes <= 1_048_576) activityChunks.push(chunk);
+        else { activityOverflow = true; activityChunks.length = 0; incompleteRequestActivity(metrics); }
+      }
+      if (scansRequestMetadata) {
+        const text = requestModelDecoder.write(chunk);
+        scanJsonStringField(requestModelScanner, text);
+        metrics.requestModel = boundedString(requestModelScanner.value);
+        if (imageOperation !== undefined) metrics.model = metrics.requestModel;
+        else {
+          scanJsonStringField(requestTierScanner, text);
+          scanJsonStringField(requestEffortScanner, text);
+          metrics.requestServiceTier = boundedString(requestTierScanner.value);
+          metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+        }
+      }
       exchange?.requestChunk(chunk);
     };
     const observeRequestEnd = (): void => {
-      const text = requestModelDecoder.end();
-      scanJsonStringField(requestModelScanner, text);
-      scanJsonStringField(requestTierScanner, text);
-      scanJsonStringField(requestEffortScanner, text);
-      metrics.requestModel = boundedString(requestModelScanner.value);
-      metrics.requestServiceTier = boundedString(requestTierScanner.value);
-      metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+      if (recordsResponseMetrics && !bufferedRequest && !activityOverflow) {
+        observeRequestActivity(metrics, parseJsonPayload(Buffer.concat(activityChunks).toString("utf8")));
+        activityChunks.length = 0;
+      }
+      if (scansRequestMetadata) {
+        const text = requestModelDecoder.end();
+        scanJsonStringField(requestModelScanner, text);
+        metrics.requestModel = boundedString(requestModelScanner.value);
+        if (imageOperation !== undefined) metrics.model = metrics.requestModel;
+        else {
+          scanJsonStringField(requestTierScanner, text);
+          scanJsonStringField(requestEffortScanner, text);
+          metrics.requestServiceTier = boundedString(requestTierScanner.value);
+          metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+        }
+      }
       exchange?.requestEnd();
     };
     if (bufferedBody === undefined) {
@@ -866,6 +901,8 @@ export class ProviderProxy {
     const submittedAt = performance.now();
     upstream.flushHeaders();
     if (!this.chatDiagnostics) {
+      metrics.upstreamUrl = sanitizeModelRequestUrl(/^https?:\/\//u.test(upstream.path)
+        ? upstream.path : `${upstream.protocol}//${String(upstream.getHeader("host"))}${upstream.path}`);
       observeRequestSubmitted(metrics, submittedAt);
       exchange?.callTiming?.submitted(submittedAt);
       headersTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("headers")), modelRequestPolicy.headersTimeoutMs);
@@ -1120,6 +1157,7 @@ export class ProviderProxy {
             const submittedAt = performance.now();
             timing?.submitted(submittedAt);
             if (metrics) observeRequestSubmitted(metrics, submittedAt);
+            if (metrics) metrics.upstreamUrl = sanitizeModelRequestUrl(upstream.url);
             if (metrics) metrics.requestBytes = (metrics.requestBytes ?? 0) + bytes;
           });
       });
@@ -1160,6 +1198,7 @@ export class ProviderProxy {
               effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
             );
         if (activeMetrics) {
+          observeRequestActivity(activeMetrics, inspected.requestBody);
           activeMetrics.model = inspected.model ?? null;
           activeMetrics.requestModel = inspected.model ?? null;
           exchange?.observeRequestMetrics(activeMetrics);
@@ -1570,6 +1609,7 @@ function inspectClientWebSocketMessage(
   model?: string;
   serviceTier?: string;
   reasoningEffort?: string;
+  requestBody?: Record<string, unknown>;
 } {
   if (isBinary) return {};
   const parsed = parseJsonPayload(rawDataText(data));
@@ -1591,6 +1631,7 @@ function inspectClientWebSocketMessage(
   );
   return {
     metadata,
+    requestBody: parsed,
     recordsMetrics,
     ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
     ...(model ? { model } : {}),

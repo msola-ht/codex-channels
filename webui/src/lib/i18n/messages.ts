@@ -69,6 +69,7 @@ const zh = {
     notProvided: "缓存未提供此组提示词。", empty: "字段已提供，但内容为空。",
     groups: { general: "基础指令", approvals: "审批模式", collaboration: "协作模式", review: "自动审查", permissions: "权限与沙箱", agents: "多代理", budget: "Token 预算与压缩", confirmation: "操作确认策略", tools: "工具指引" },
     main: "主指令", persistent: "持久模式指令", contentFilter: "内容过滤后的指引",
+    approvedPrefixes: "已批准命令前缀",
     onRequest: "按需审批", autoReview: "按需审批 · 自动审查", never: "不请求审批", untrusted: "不可信操作审批",
     defaultMode: "默认协作模式", planMode: "计划模式", rejection: "拒绝后的指引", timeout: "超时后的指引",
     reviewPolicy: "审查策略", reviewTemplate: "审查策略模板", nodePolicy: "Node REPL 审查策略",
@@ -1161,6 +1162,8 @@ const zh = {
   capture: { mode: "调用记录模式", production: "生产", debug: "调试", scope: "Codex 与 Relay 共用。Relay 刷新配置后用于新请求；Codex 需重启 App Server。调试仍会脱敏并限制容量。" },
   requestMethod: {
     label: "方式",
+    imageGeneration: "图片生成",
+    imageEdit: "图片编辑",
     review: "审查",
     compact: "压缩",
   },
@@ -1515,6 +1518,8 @@ const zh = {
       "enterprise": "Enterprise",
       "edu": "Edu",
       "unknown": "未知",
+      "sci": "SCI",
+      "sciPlus": "SCI Plus",
     },
   },
   accountConfirmation: {
@@ -1548,6 +1553,8 @@ const zh = {
   requestDetail: {"upstreamProvider": "实际上游提供商", "upstreamAttemptCount": "提供商尝试次数", "modelAttemptCount": "模型尝试次数", "finishReason": "结束原因", "errorStage": "错误阶段", "upstreamErrorCode": "内层上游错误码", "upstreamErrorType": "内层上游错误类型", "upstreamHttpStatus": "内层上游 HTTP 状态", "attemptHint": "上游报告的尝试次数，不代表切换次数。", "attemptBadge": "尝试 {count} 次", "httpStage": "HTTP 阶段", "streamStage": "流式阶段", "title": "请求详情", "open": "查看请求", "description": "当前所选指标记录的快照；无需开启调用采集。", "recordedModel": "记录模型", "requestModel": "请求模型", "responseModel": "响应模型", "reasoningEffort": "思考等级", "requestTier": "请求服务层级", "responseTier": "响应服务层级", "transport": "传输方式", "responseFormat": "响应格式", "callerId": "调用方 ID", "cached": "缓存", "uncached": "无缓存", "threadId": "会话 ID", "turnId": "轮次 ID", "requestId": "Relay 请求 ID", "back": "返回请求明细"},
   requests: {
     recordedAt: "记录时间",
+    addressColumn: "请求地址",
+    addressHint: "最后一次实际提交的模型上游地址；不含凭据、查询参数和片段。历史未采集或尚未提交时显示未记录。",
     detailColumn: "详情",
     viewDetail: "查看",
     historyUpdatesPaused: "浏览历史页时暂停自动更新",
@@ -1610,6 +1617,7 @@ const zh = {
     "listSeparator": "、"
   },
   traffic: {
+    requestAddress: "请求地址",
     readLimit: "读取超过整体工作预算，请缩小批次范围后重试。",
     readTimeout: "读取超过 10 秒期限，请缩小批次范围后重试。",
     readCancelled: "调用记录读取已取消。",
@@ -1633,6 +1641,13 @@ const zh = {
     protocol: "协议",
     client: "客户端",
     clientHint: "依据客户端自报的 User-Agent 识别，不代表已验证身份；无法识别时显示 —。",
+    activity: "请求行为",
+    activityHint: "依据本次响应和请求末尾识别；工具调用不代表已执行成功。历史工具和可用工具声明不计入，正文缺失或无法识别时不推测。",
+    activityToolResult: "工具结果续传",
+    activityReply: "生成回复",
+    activityTools: "调用工具",
+    activityUnknown: "未识别",
+    activityPartial: "部分可见",
     debugNote: "同一次调用的四个阶段。普通头与关联 ID 保留，凭据、URL 中的秘密和 CSP nonce 已脱敏；交付完成表示本地 HTTP 写入完成，不证明客户端已处理。",
     debugHeadersTruncated: "部分请求头或响应头超过记录上限，已省略。",
     debugChanges: "实际处理记录",
@@ -1640,8 +1655,6 @@ const zh = {
     debugChange: { headers_filtered: "已过滤跳级头、客户端凭据或保留身份头", headers_overridden: "已设置上游凭据与传输头", stream_defaulted: "客户端未指定 stream，已补入 false", store_defaulted: "客户端未指定 store，已补入 false", provider_routing_pinned: "已将 CLP 上游限定为 DeepSeek", json_unwrapped: "已解包 CLP JSON 响应" },
 
     "relayRetentionNote": "Relay 自动保留：{value}；新采集时清理过期非活动批次。",
-    "relayCapture": "Relay 上游报文（已脱敏）",
-    "relayCaptureHint": "这里保存上游响应，客户端交付结果单独记录。结构化凭据字段已遮蔽，自由文本仍可能包含敏感内容。",
     "detailIntro": "查看本次请求的结果、用量与诊断信息",
     "backToList": "返回列表",
     "listIntro": "记录的模型请求与响应字段；默认汇总全部采集来源、全部保留批次，按请求时间倒序展示",
@@ -1960,6 +1973,7 @@ const en: Messages = {
     notProvided: "The cache supplies no prompts for this group.", empty: "The field is present but empty.",
     groups: { general: "Base instructions", approvals: "Approval modes", collaboration: "Collaboration modes", review: "Automatic review", permissions: "Permissions and sandbox", agents: "Multi-agent", budget: "Token budget and compaction", confirmation: "Confirmation policies", tools: "Tool guidance" },
     main: "Main instructions", persistent: "Persistent mode instructions", contentFilter: "Post-filter guidance",
+    approvedPrefixes: "Approved command prefixes",
     onRequest: "On-request approval", autoReview: "On-request approval · automatic review", never: "Never request approval", untrusted: "Untrusted action approval",
     defaultMode: "Default collaboration mode", planMode: "Plan mode", rejection: "Rejection guidance", timeout: "Timeout guidance",
     reviewPolicy: "Review policy", reviewTemplate: "Review policy template", nodePolicy: "Node REPL review policy",
@@ -3052,6 +3066,8 @@ const en: Messages = {
   capture: { mode: "Capture mode", production: "Production", debug: "Debug", scope: "Shared by Codex and Relay. Relay applies refreshed settings to new requests; Codex requires an App Server restart. Debug capture still redacts data and enforces size limits." },
   requestMethod: {
     label: "Method",
+    imageGeneration: "Image generation",
+    imageEdit: "Image editing",
     review: "Review",
     compact: "Compact",
   },
@@ -3406,6 +3422,8 @@ const en: Messages = {
       "enterprise": "Enterprise",
       "edu": "Edu",
       "unknown": "Unknown",
+      "sci": "SCI",
+      "sciPlus": "SCI Plus",
     },
   },
   accountConfirmation: {
@@ -3439,6 +3457,8 @@ const en: Messages = {
   requestDetail: {"upstreamProvider": "Actual upstream provider", "upstreamAttemptCount": "Provider attempts", "modelAttemptCount": "Model attempts", "finishReason": "Finish reason", "errorStage": "Error stage", "upstreamErrorCode": "Inner upstream error code", "upstreamErrorType": "Inner upstream error type", "upstreamHttpStatus": "Inner upstream HTTP status", "attemptHint": "Attempts reported by the upstream; this is not a count of provider switches.", "attemptBadge": "Attempts: {count}", "httpStage": "HTTP phase", "streamStage": "Streaming phase", "title": "Request detail", "open": "View request", "description": "Snapshot of the selected metrics record; traffic capture is not required.", "recordedModel": "Recorded model", "requestModel": "Request model", "responseModel": "Response model", "reasoningEffort": "Reasoning effort", "requestTier": "Request service tier", "responseTier": "Response service tier", "transport": "Transport", "responseFormat": "Response format", "callerId": "Caller ID", "cached": "Cached", "uncached": "Uncached", "threadId": "Thread ID", "turnId": "Turn ID", "requestId": "Relay request ID", "back": "Back to requests"},
   requests: {
     recordedAt: "Recorded at",
+    addressColumn: "Request address",
+    addressHint: "Last model destination actually submitted; credentials, query parameters and fragments are omitted. Historical or unsubmitted requests show Not recorded.",
     detailColumn: "Detail",
     viewDetail: "View",
     historyUpdatesPaused: "Automatic updates paused on history pages",
@@ -3501,6 +3521,7 @@ const en: Messages = {
     "listSeparator": ", "
   },
   traffic: {
+    requestAddress: "Request address",
     readLimit: "The read exceeded its overall work budget. Select a smaller batch and try again.",
     readTimeout: "The read exceeded the 10-second deadline. Select a smaller batch and try again.",
     readCancelled: "The traffic read was cancelled.",
@@ -3524,6 +3545,13 @@ const en: Messages = {
     protocol: "Protocol",
     client: "Client",
     clientHint: "Identified from the client-reported User-Agent, not a verified identity. Unrecognized clients display —.",
+    activity: "Request activity",
+    activityHint: "Based on this response and the end of this request. A tool call does not prove successful execution. Historical tools and available tool declarations are excluded; missing or unrecognized content is not inferred.",
+    activityToolResult: "Tool result continuation",
+    activityReply: "Reply output",
+    activityTools: "Tool call",
+    activityUnknown: "Unidentified",
+    activityPartial: "Partially visible",
     debugNote: "Four stages of one call. Ordinary headers and correlation IDs are retained; credentials, URL secrets and CSP nonces are redacted. Finished means the local HTTP write completed, not that the client processed it.",
     debugHeadersTruncated: "Some request or response headers exceeded the capture limit and were omitted.",
     debugChanges: "Applied transformations",
@@ -3531,8 +3559,6 @@ const en: Messages = {
     debugChange: { headers_filtered: "Filtered hop-by-hop, client credential or reserved identity headers", headers_overridden: "Set upstream credentials and transport headers", stream_defaulted: "Defaulted missing stream to false", store_defaulted: "Defaulted missing store to false", provider_routing_pinned: "Restricted CLP routing to DeepSeek", json_unwrapped: "Unwrapped CLP JSON response" },
 
     "relayRetentionNote": "Relay retention: {value}; expired inactive sessions are removed when new captures begin.",
-    "relayCapture": "Relay upstream payload (redacted)",
-    "relayCaptureHint": "This is the upstream response; client delivery is recorded separately. Structured credential fields are redacted, but free text may contain sensitive content.",
     "detailIntro": "View the result, usage and diagnostics for this request",
     "backToList": "Back to list",
     "listIntro": "Recorded model request and response fields; by default aggregates all capture sources and retained sessions, newest request first",

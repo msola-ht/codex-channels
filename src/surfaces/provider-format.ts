@@ -46,10 +46,33 @@ export function formatCodexProviderLabel(provider?: string): string {
 }
 
 export function formatServiceTier(serviceTier: string | null | undefined, model?: ModelOption): string {
+  if (serviceTier === undefined) return "未知";
   if (serviceTier === "ultrafast") return "Ultrafast";
   if (isFastServiceTier(serviceTier ?? null, model)) return "Fast";
   if (serviceTier == null || serviceTier === "default") return "Standard";
   return `未知档位（${boundProviderLabel(serviceTier)}）`;
+}
+
+/** Selection is retained even when App Server filters the effective setting. */
+export function formatServiceTierSetting(
+  state: {
+    serviceTier: string | null;
+    serviceTierKnown?: boolean;
+    effectiveServiceTier?: string | null | undefined;
+    serviceTierPending?: boolean;
+    fastModePending?: boolean;
+  },
+  model?: ModelOption,
+): string {
+  const effective = formatServiceTier(state.effectiveServiceTier, model);
+  if (state.serviceTierKnown !== true) return `${effective}（用户选择未知）`;
+  const selected = formatServiceTier(state.serviceTier, model);
+  if (state.serviceTierPending || state.fastModePending) {
+    return `已选 ${selected}（下一次 Turn 提交；有效档位${effective === "未知" ? "未知" : `：${effective}`}）`;
+  }
+  return state.effectiveServiceTier !== undefined && selected === effective
+    ? selected
+    : `已选 ${selected}；有效档位${effective === "未知" ? "未知" : `：${effective}`}`;
 }
 
 export function formatModelSpeedSupport(model: ModelOption | undefined): string {

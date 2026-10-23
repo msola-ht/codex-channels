@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router"
-import { formatGenerationSpeed } from "@/lib/format"
+import { formatGenerationSpeed, requestOperationLabel, formatRequestActivity } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -24,6 +24,8 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     [t("requests.recordedAt"), `${formatTimestamp(record.recordedAtMs)} · ${getServerTimeZone()}`],
     [t("requestPurpose.label"), autoReview ? t("requestPurpose.autoApprovalReview") : t("requestPurpose.unmarked")],
     [t("metrics.provider"), record.provider],
+    [t("requests.addressColumn"), record.upstreamUrl ?? t("traffic.notRecorded")],
+    [t("traffic.activity"), formatRequestActivity(record, t)],
     [t("metrics.recordedStatus"), record.status],
     [t("requestDetail.upstreamProvider"), record.upstreamProvider],
     [t("requestDetail.upstreamAttemptCount"), formatCount(record.upstreamAttemptCount)],
@@ -51,7 +53,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     [t("requestDetail.reasoningEffort"), record.reasoningEffort],
     [t("requestDetail.requestTier"), record.requestServiceTier],
     [t("requestDetail.responseTier"), record.serviceTier],
-    [t("filters.operation"), record.operation === "compact" ? t("metrics.compact") : t("filters.response")],
+    [t("filters.operation"), requestOperationLabel(record.operation, t)],
     ["HTTP", record.httpStatus],
     [t("requestDetail.transport"), record.transport],
     [t("requestDetail.responseFormat"), record.responseFormat],
@@ -68,6 +70,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     ["User-Agent", record.userAgent],
   ] as const
   return <div className="flex flex-col gap-4">
+    {record.operation === "imageGeneration" || record.operation === "imageEdit" ? <Badge variant="secondary">{requestOperationLabel(record.operation, t)}</Badge> : null}
     {autoReview ? <Badge variant="outline">{t("requestPurpose.autoApprovalReview")}</Badge> : null}
     {record.source === "relay" ? <RelayRequestStatus record={record} /> : interrupted ? <Badge variant="secondary">{t("metrics.interrupted")}</Badge> : <StatusBadge status={record.status} />}
     {record.errorType || record.errorCode || record.errorMessage ? <div className="flex flex-col gap-1 break-words" role="note">

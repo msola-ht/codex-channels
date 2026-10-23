@@ -8,6 +8,7 @@
 
 `delivery-diagnostics/index.ts` 是离线投递诊断的窄公开入口，仅复用载荷解码和屏障分类，不加载平台 SDK 或数据库实现。
 `persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，持久结果发送未知或授权失效后解除顺序屏障并保留记录、检查点与容量计费，并将必要图片纳入同一有界快照；
+生成图片的上游 `fileId` 只在实时事件中传递，写入快照前一律剥离；只有引用、没有 `savedPath` 的完成结果仅保留内容不可获取标记，恢复后沿用相同提示，不把引用写入投递 Journal。
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
 等待实际操作结算，Bootstrap 才能确认持久记录；TG/飞书可靠正文还要求存在平台成功检查点，排队终态持有正文引用，独立于断线清理的临时流缓存；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。`snapshot-delivery.ts` 将状态展示的失效信号与排队操作关联；`SurfaceOutputPort.deliverSnapshot`
 允许按展示规则不产生消息，等待实际状态操作结束，并在平台调用前复核归属。普通 `handle` 继续用于中间输出。
@@ -194,7 +195,9 @@ Provider 分别生成固定凭据提示，不展示上游原文。Turn 完成在
 展示思考等级、请求次数和 Token：正式模式保留总计，调试模式才展开缓存与推理 Token 和缓存命中率；
 指标读取失败时省略无数值统计，保留子代理终态和任务身份。
 原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示
-OpenAI 周限；速度按实际服务档位统一显示为 Standard、Fast、Ultrafast 或未知档位，不根据 Provider 推测；自定义目录 Provider 使用 `CP <名称>`，其余 Codex 兼容类型保留原 ID，不追加“自定义”后缀。
+OpenAI 周限；速度区分用户选择与生命周期确认的有效设置，设置通知只显示“已选”并将有效档位标为未知，
+未知选择不会被标为 Standard；下一 Turn 的选择标为待提交，不承诺生效。完成输出只格式化已确认的有效档位，
+缺省显示未知，不根据 Provider 或模型目录猜测功能开关；自定义目录 Provider 使用 `CP <名称>`，其余 Codex 兼容类型保留原 ID，不追加“自定义”后缀。
 历史无 Turn 指标只在通用明细和时间范围聚合中按稳定 Provider ID 展示；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
@@ -283,6 +286,10 @@ Computer Use 的 MCP 操作也不进入查询缓冲；飞书在同一卡片展�
 `codexc channel send-image` 提交的渠道 spool 图片执行同一读取校验：绝对路径、拒绝符号链接、
 空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书与微信分别负责平台上传和发送，
 不读取 `imageView` 或用户上传图片路径。
+Telegram 和飞书收到仅含 `fileId`、没有 `savedPath` 的原生图片生成完成结果时，
+独立提示“图片已生成，但当前无法获取图片内容”，不受操作过程显示档位影响；不展示引用、
+不尝试下载或声称图片已发送。若同时有路径则沿用原有安全读取与平台发送链路。
+微信仍按回复窗口策略忽略这类操作事件，不新增引用结果通知。
 `SurfaceAdapter.sendChannelImage` 是可选的渠道图片发送入口，由 Gateway 的
 `channel-image-spool` 驱动，复用 `generated-image.ts` 的读取校验和各自平台上传发送；
 三个 Surface 都实现该入口，微信按目标 Conversation 复用其回复上下文与授权检查。

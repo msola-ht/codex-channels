@@ -62,7 +62,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
   富文本优先非空 `content_v2`，`media` 按视频解析，同一 Key 去重，多个不同视频或视频混合独立 `img` 失败关闭。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容，并集中提供飞书 Markdown 转义（输入卡与卡片展示共用同一核心实现，各自保留换行归一与花括号处理的开关）。
 - `operation-format.ts`：把操作状态渲染为包含脱敏详情的静态 CardKit Markdown；Computer Use
-  使用可原地更新的开始／终态卡片，不展示 MCP 读写声明标签，其他操作沿用终态展示。
+  使用可原地更新的开始／终态卡片，不展示 MCP 读写声明标签；原生图片生成分别展示运行中提示和终态，其他操作沿用终态展示。
 - `outbox-content.ts`：集中处理 Outbox 的纯文本缓冲、CardKit 字符分片、富文本字节分片与截断标记；围栏识别复用共享纯状态推进，分片按实际围栏长度预留关闭空间且保持分隔行完整。无法消费正文的分片返回明确的本地排版错误，由 Outbox 降级 Post 或保留完整附件发送。
 - `outbox-answer-file.ts`：长正文可靠结果的完整文件补发判定与编排，接收窄发送端口；字节阈值、文件名与失败提示集中在此，不持有 Outbox 状态。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪，保留回复事件的 `parent_id`。
@@ -105,7 +105,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口；在内存中按 Turn 关联
   原始输入消息，使开始确认、阶段性最终正文及首张流式卡片原生回复同一输入；回复目标
   保留到正文收尾与独立完成统计均结算；完成统计排在同会话已入队正文之后，正文失败不取消完成卡的独立投递回执；计划、思考和 Computer Use 复用消息前均核对 Conversation，Computer Use 按 Item 保存卡片消息 ID 并原地更新终态，更新失败时记录错误并
-  单独发送终态消息。完成的原生生成图片
+  单独发送终态消息。原生图片生成在 full/compact 下按 Item 显示运行中提示及完成/失败摘要，
+  开始提示复用可取消的内存状态快照，hidden 不显示过程；其他普通操作仍只显示终态。完成的原生生成图片
   独立于操作显示档位上传并发送。
 - `status-card.ts`：把 Session 状态和计划进度映射为可原地更新的轻量 CardKit 2.0 卡片。
   同时承接模型请求重试固定文案；Outbox 按完整目标、Thread 和 Turn 复用卡片，不与 Session 活动状态混用。
@@ -277,6 +278,9 @@ Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长�
 平台输出顺序和关闭边界。生成图片路径来自 App Server `imageGeneration.savedPath` 或
 渠道 spool（`codexc channel send-image`），两者都在共享读取边界验证绝对路径、无符号链接
 普通文件、10 MiB 与 PNG/JPEG 签名；`imageView` 和用户上传图片不会自动外发。
+原生图片生成完成结果若只有上游 `fileId` 而无 `savedPath`，独立提示
+“图片已生成，但当前无法获取图片内容”，不显示引用或声称图片已发送，不受操作过程显示档位影响；
+持久恢复保留该状态但不保存引用，同时有路径时仍走原有图片发送链路。
 静态 CardKit Markdown 按单元素 5,000 个 Unicode 字符、最多 5 张卡片
 分片；纯文本和 `post + md` 降级按 UTF-8 序列化后的 20,000 字节计量。每个逻辑结果
 最多发送 5 条，超出时明确标记截断，避免单个结果无限占用同一 Chat 的发送任务。消息创建失败

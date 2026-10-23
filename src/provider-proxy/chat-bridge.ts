@@ -22,6 +22,7 @@ import { ChatGenerationTimingObserver } from "./generation-timing.js";
 import { chatBridgeAuthorizationHeader, forwardedRequestHeaders } from "./request-routing.js";
 import type { UpstreamTiming } from "./response-metrics-observer.js";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
+import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
 import type { ClinePassRequestProfile } from "../../runtime/chat-reasoning.mjs";
 import {
   maximumModelRequestBytes,
@@ -147,9 +148,10 @@ export class ChatCompletionsBridge {
     const generation = new ChatGenerationTimingObserver();
     let generationBlocked = false;
     let timing: UpstreamTiming | undefined;
+    let upstreamUrl: string | null = null;
     let usage: Record<string, unknown> | undefined;
     let converter: ChatToResponses | undefined;
-    const publishDiagnostics = (): void => this.diagnostics.publish(request.headers[chatDiagnosticsHeader], { ...diagnostics.snapshot(), ...(timing ? { timing } : {}) });
+    const publishDiagnostics = (): void => this.diagnostics.publish(request.headers[chatDiagnosticsHeader], { ...diagnostics.snapshot(), upstreamUrl, ...(timing ? { timing } : {}) });
     const observeFirstResponse = (at: number): void => {
       if (!timing || timing.responseTimeMs !== undefined) return;
       timing.responseTimeMs = at - timing.submittedAt;
@@ -249,6 +251,8 @@ export class ChatCompletionsBridge {
         converter.beginModelRound();
         const submittedAt = performance.now();
         upstreamRequest.end(payload);
+        upstreamUrl = sanitizeModelRequestUrl(/^https?:\/\//u.test(upstreamRequest.path) ? upstreamRequest.path
+          : `${upstreamRequest.protocol}//${String(upstreamRequest.getHeader("host"))}${upstreamRequest.path}`);
         timing ??= { submittedAt };
         timing.requestBytes = (timing.requestBytes ?? 0) + payloadBytes;
         // Publish the submitted size before waiting for headers: a client disconnect

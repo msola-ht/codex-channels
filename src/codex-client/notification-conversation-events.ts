@@ -164,7 +164,8 @@ function toHookCompletedEvent(value: unknown): ConversationInputEvent | undefine
   const eventName = run?.eventName;
   const status = run?.status;
   const events = ["preToolUse", "permissionRequest", "postToolUse", "preCompact", "postCompact",
-    "sessionStart", "sessionEnd", "userPromptSubmit", "subagentStart", "subagentStop", "stop", "interrupt"] as const satisfies readonly HookRun["eventName"][];
+    "sessionStart", "sessionEnd", "userPromptSubmit", "subagentStart", "subagentStop", "stop", "interrupt",
+    "preModelRequest", "postModelRequest"] as const satisfies readonly HookRun["eventName"][];
   if (!threadId || !id
     || typeof eventName !== "string" || !events.some((event) => event === eventName)
     || (status !== "completed" && status !== "failed" && status !== "blocked" && status !== "stopped")) return undefined;

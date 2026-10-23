@@ -3,12 +3,14 @@ import type { Socket } from "node:net";
 import { requestPrivateIpcJson, PrivateIpcServer } from "../../runtime/private-ipc.mjs";
 import type { RelayMetric } from "./relay-metric.js";
 import { validRequestTiming } from "../../runtime/request-timing.mjs";
+import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
+import { validRequestActivity } from "../../runtime/request-activity.mjs";
 
 export interface RelayMetricEnvelope { version: 1; providerId: string; relayRequestId: string; sample: RelayMetric }
 export type RelayMetricRejection = "invalid_sample" | "unknown_provider" | "queue_full" | "closing" | "unsupported_version";
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const identity = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
-const sampleKeys = [...modelRequestDiagnosticKeys, "traffic", "source", "threadId", "turnId", "relayRequestId", "callerId", "keyId", "credentialGeneration", "provider", "requestModel", "userAgent",
+const sampleKeys = [...modelRequestDiagnosticKeys, "activity", "traffic", "source", "threadId", "turnId", "relayRequestId", "callerId", "keyId", "credentialGeneration", "provider", "requestModel", "userAgent", "upstreamUrl",
   "responseModel", "responseFormat", "status", "deliveryStatus", "requestStartedAtMs", "responseCompletedAtMs", "totalDurationMs", "firstTokenMs", "responseTimeMs", "generationTiming",
   "httpStatus", "errorCode", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens", "requestBytes"];
 
@@ -85,6 +87,8 @@ function validSample(value: unknown, provider: unknown, requestId: unknown): val
     }
     if (sample.userAgent !== undefined && (typeof sample.userAgent !== "string" || sample.userAgent.length < 1
       || sample.userAgent.length > 512 || [...sample.userAgent].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))) return false;
+    if (sample.upstreamUrl != null && (typeof sample.upstreamUrl !== "string" || sanitizeModelRequestUrl(sample.upstreamUrl) !== sample.upstreamUrl)) return false;
+    if (sample.activity != null && !validRequestActivity(sample.activity)) return false;
     for (const key of ["requestModel", "responseModel", "errorCode"]) {
       const text = sample[key];
       if (text === undefined && key !== "requestModel") continue;

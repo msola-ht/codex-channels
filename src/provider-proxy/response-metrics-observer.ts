@@ -3,6 +3,26 @@ import type { ModelRequestDiagnostics } from "./chat-diagnostics.js";
 import { StringDecoder } from "node:string_decoder";
 import type { GenerationTiming } from "../../runtime/request-timing.mjs";
 import { GenerationTimingObserver } from "./generation-timing.js";
+import { RequestActivityObserver } from "../../runtime/request-activity.mjs";
+
+const activityObservers = new WeakMap<MetricsState, RequestActivityObserver>();
+function activityObserver(metrics: MetricsState): RequestActivityObserver {
+  let observer = activityObservers.get(metrics);
+  if (!observer) { observer = new RequestActivityObserver(); activityObservers.set(metrics, observer); }
+  return observer;
+}
+export function observeRequestActivity(metrics: MetricsState, body: unknown): void {
+  if (metrics.operation !== "response") return;
+  const observer = activityObserver(metrics);
+  observer.request(body);
+  metrics.activity = observer.snapshot();
+}
+export function incompleteRequestActivity(metrics: MetricsState): void {
+  if (metrics.operation !== "response") return;
+  const observer = activityObserver(metrics);
+  observer.incomplete();
+  metrics.activity = observer.snapshot();
+}
 
 const maximumJsonMetadataBytes = 1_048_576;
 const maximumSseMetadataLineCharacters = 1_048_576;
@@ -29,9 +49,12 @@ export interface ProviderQuotaWindowsSnapshot {
 }
 
 export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
+  activity?: import("../../runtime/request-activity.mjs").RequestActivity | null;
+  /** 最后一次实际提交的模型上游地址；仅 origin 与路径，不含 URL 凭据或查询。 */
+  upstreamUrl?: string | null;
   transport: "http" | "websocket";
   responseFormat: "sse" | "json" | "websocket" | "unknown";
-  operation: "response" | "compact";
+  operation: "response" | "compact" | "imageGeneration" | "imageEdit";
   threadId: string | null;
   turnId: string | null;
   /** 官方自动审查用途与原始 reviewer 身份，独立于转储开关。 */
@@ -271,6 +294,11 @@ export function observeResponseEvent(
   receivedAtMonotonicMs: number,
 ): boolean {
   if (metrics.status === "completed" || metrics.status === "failed") return false;
+  if (metrics.operation === "response" && type.startsWith("response.")) {
+    const observer = activityObserver(metrics);
+    observer.response(event);
+    metrics.activity = observer.snapshot();
+  }
   if (!convertedMetrics.has(metrics) && requestClocks.has(metrics)) {
     if (event && type) observeResponseReceived(metrics, receivedAtMonotonicMs);
     if (!blockedGeneration.has(metrics) && metrics.operation === "response" && (type.startsWith("response.") || type === "error")) {
@@ -379,6 +407,11 @@ export function observeJsonResponse(
   receivedAtMonotonicMs = performance.now(),
 ): boolean {
   if (!response || metrics.status === "completed" || metrics.status === "failed") return false;
+  if (metrics.operation === "response") {
+    const observer = activityObserver(metrics);
+    observer.response(response);
+    metrics.activity = observer.snapshot();
+  }
   observeResponseReceived(metrics, receivedAtMonotonicMs);
   const status = response.status;
   const eventType = status === "completed"
@@ -409,6 +442,10 @@ export class HttpResponseMetricsObserver {
   constructor(private readonly metrics: MetricsState) {}
 
   observeChunk(chunk: Buffer, receivedAtMs: number, receivedAtMonotonicMs: number): boolean {
+    if (this.metrics.operation === "imageGeneration" || this.metrics.operation === "imageEdit") {
+      observeResponseReceived(this.metrics, receivedAtMonotonicMs);
+      return false;
+    }
     const completed = this.metrics.responseFormat === "sse"
       || this.metrics.responseFormat === "unknown"
       ? this.processText(this.decoder.write(chunk), receivedAtMs, receivedAtMonotonicMs)
@@ -418,6 +455,7 @@ export class HttpResponseMetricsObserver {
       if (this.jsonBytes <= maximumJsonMetadataBytes) this.jsonChunks.push(chunk);
       else {
         this.jsonOverflow = true;
+        incompleteRequestActivity(this.metrics);
         this.jsonChunks.length = 0;
       }
     }
@@ -425,6 +463,18 @@ export class HttpResponseMetricsObserver {
   }
 
   finish(receivedAtMs: number, receivedAtMonotonicMs: number): boolean {
+    if (this.metrics.operation === "imageGeneration" || this.metrics.operation === "imageEdit") {
+      if (this.metrics.status === "unknown") {
+        // This outcome describes completed HTTP transport. Image result/error
+        // semantics remain with Codex; no image JSON/SSE payload is retained or parsed.
+        this.metrics.responseCompletedAtMs = receivedAtMs;
+        const status = this.metrics.httpStatus;
+        this.metrics.status = status !== null && status >= 200 && status < 300 ? "completed" : "failed";
+        if (this.metrics.status === "failed") this.metrics.errorType ??= "http_error";
+      }
+      observeTotalDuration(this.metrics, receivedAtMonotonicMs);
+      return true;
+    }
     const completed = this.metrics.responseFormat === "sse"
       || this.metrics.responseFormat === "unknown"
       ? this.processText(this.decoder.end(), receivedAtMs, receivedAtMonotonicMs)
@@ -482,6 +532,7 @@ export class HttpResponseMetricsObserver {
       || lines.some((line) => line.length > maximumSseMetadataLineCharacters)
     ) {
       this.sseMetadataOverflow = true;
+      incompleteRequestActivity(this.metrics);
       this.pending = "";
       this.currentEvent = "";
       return false;

@@ -51,7 +51,18 @@ export interface McpResourceTemplateSummary {
   mimeType: string | null;
 }
 
+/** Opaque JSON from the first tools/list page; internal data, not display or authorization input. */
+export type McpToolListMetadata =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly McpToolListMetadata[]
+  | { readonly [key: string]: McpToolListMetadata | undefined };
+
 export interface McpServerDetail extends McpServerSummary {
+  /** null means unavailable. Preserve empty values; never render or log the raw metadata. */
+  readonly toolListMeta: McpToolListMetadata;
   serverTitle: string | null;
   serverVersion: string | null;
   serverDescription: string | null;

@@ -55,6 +55,7 @@ export interface ThreadSession {
   model: string;
   modelProvider?: string;
   reasoningEffort: string | null;
+  /** Effective lifecycle snapshot, not the unfiltered user selection. */
   serviceTier: string | null;
   /** Actual Thread reviewer returned by App Server; absent or null means unknown. */
   approvalsReviewer?: ThreadApprovalsReviewer | null;

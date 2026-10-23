@@ -567,7 +567,9 @@ export class ConversationCore {
                 model: modelSettings.model,
                 modelProvider: modelSettings.modelProvider ?? "openai",
                 effort: modelSettings.effort,
-                serviceTier: modelSettings.serviceTier,
+                ...(modelSettings.effectiveServiceTier === undefined
+                  ? {}
+                  : { serviceTier: modelSettings.effectiveServiceTier }),
                 approvalsReviewer: modelSettings.approvalsReviewer ?? null,
               }
             : {}),

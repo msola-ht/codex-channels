@@ -9,6 +9,7 @@ import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-e
 
 export function formatConversationScheduledTasks(
   result: Extract<ConversationCommandResult, { kind: "scheduled-tasks" }>,
+  selectionMode: "snapshot" | "id" = "snapshot",
 ): string {
   const { tasks, selectors, page, pageCount, totalTaskCount } = result.result;
   if (tasks.length === 0) {
@@ -21,7 +22,7 @@ export function formatConversationScheduledTasks(
   return toStructuredMarkdownList([
     `Gateway 计划任务（第 ${page}/${pageCount} 页 · 共 ${totalTaskCount} 项）：`,
     ...tasks.map((task, index) => [
-      `【${selectors[index] ?? "?"}】${task.name} · ${formatScheduledTaskStatusLabel(task.status)}`,
+      `${selectionMode === "snapshot" ? `【${selectors[index] ?? "?"}】` : ""}${task.name} · ${formatScheduledTaskStatusLabel(task.status)}`,
       `   ID：${task.taskId}`,
       `   计划：${formatSchedule(task.schedule, task.timezone)}`,
       `   下次运行：${formatScheduledAt(task.nextRunAt)}`,
@@ -29,7 +30,9 @@ export function formatConversationScheduledTasks(
     ].join("\n")),
     "",
     "此处列出循环任务定义；每次执行结果与终态：/schedule runs <任务>",
-    "数字序号只对最近五分钟的本会话列表有效。",
+    selectionMode === "snapshot"
+      ? "数字序号只对最近五分钟的本会话列表有效。"
+      : "schedule_task 的 selector 必须使用完整任务 ID；本次查询不更新 /schedule 的数字选择快照。",
     ...(page > 1 ? [`上一页：/schedule list ${page - 1}`] : []),
     ...(page < pageCount ? [`下一页：/schedule list ${page + 1}`] : []),
   ].join("\n"));
@@ -37,6 +40,7 @@ export function formatConversationScheduledTasks(
 
 export function formatConversationScheduledRuns(
   result: Extract<ConversationCommandResult, { kind: "scheduled-runs" }>,
+  selectionMode: "snapshot" | "id" = "snapshot",
 ): string {
   const { task, runs, page, pageCount, totalRunCount } = result.result;
   return toStructuredMarkdownList([
@@ -47,7 +51,7 @@ export function formatConversationScheduledRuns(
     ...(runs.length === 0
       ? ["当前没有运行记录。"]
       : runs.map((run) => [
-          `- 【${run.selector}】${run.runId} · ${scheduledRunStateLabel(run.state)}`,
+          `- ${selectionMode === "snapshot" ? `【${run.selector}】` : ""}${run.runId} · ${scheduledRunStateLabel(run.state)}`,
           `  - 计划时间：${formatScheduledAt(run.scheduledFor)}`,
           ...(run.dispatchStartedAt === null
             ? []
@@ -63,7 +67,9 @@ export function formatConversationScheduledRuns(
         ].join("\n"))),
     "",
     "可用操作：",
-    "uncertain Run 可使用 /schedule retry <Run ID 或列表序号>",
+    selectionMode === "snapshot"
+      ? "uncertain Run 可使用 /schedule retry <Run ID 或列表序号>"
+      : "uncertain Run 可使用 schedule_task action=retry，selector 必须为完整 Run ID；本次查询不更新 /schedule 的数字选择快照。",
     ...(page > 1 ? [`上一页：/schedule runs ${task.taskId} ${page - 1}`] : []),
     ...(page < pageCount ? [`下一页：/schedule runs ${task.taskId} ${page + 1}`] : []),
   ].join("\n"));

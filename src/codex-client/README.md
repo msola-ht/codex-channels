@@ -116,6 +116,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   `<plugin>@<marketplace>` 字符规则的 `pluginId`，
   仅供 `/mcp` 详情展示来源 Plugin；工具发现错误只归约为布尔状态，不传播上游错误正文、工具 Schema
   或 Base64 正文。资源请求、内容、目录与模板 URI 的展示投影也隐藏常见凭据，不改变 RPC 请求 URI。
+  详情原样保留必需且可空的 `toolListMeta`，缺失字段明确拒绝；它是对应工具目录第一页的不透明 JSON，仅内部透传，不解析键或用于展示、日志、权限和模型输入，概览仍不携带。
 - `plugin-adapter.ts`：只映射已安装 Plugin，校验 Plugin ID、Marketplace、启用与管理员可用状态，
   裁剪版本、来源类型、安装时间、开发者、分类、能力、认证时机、不可用原因和适用套餐标识，
   不传播来源路径或 URL；保留 Marketplace 加载失败计数，
@@ -145,8 +146,10 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   清洗命令、查询及上游错误中的敏感文本；`commandExecution.commandActions` 非空、全部为
   read/listFiles/search 且来源不是用户终端命令时输出只读探索归类与文件名摘要，任何未知或畸形片段都退回
   原始命令；该判定沿用上游 best-effort 解析，`find … -delete`、`… | tee` 之类写入形态可能一并归类；
-  只把 `imageGeneration.savedPath` 映射为稳定生成图片
-  产物路径，不把 `imageView` 当作可外发产物。
+  把 `imageGeneration.savedPath` 映射为生成图片产物路径；`fileId` 原样保留为所属
+  Thread/Item 内存事件的 `imageFileId`，不解释为 URL、不提交模型、不用于跨 Provider 查询。
+  Surface 在持久输出快照中移除引用，仅保留内容不可获取状态；不消费 `result` 或 `inputImages`，
+  不把 `imageView` 当作可外发产物。
   `cua_repl.js` / `js_reset` 归为 MCP 的 `computerUse` 操作，`js` 只提取参数中的操作标题并
   脱敏限长，不把执行代码或原始结果带入稳定事件。
 - `file-change-approval-context.ts`：按每个 Client 的 Thread、Turn、Item 精确关联批准前的
@@ -164,13 +167,14 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill。
   新建 Thread 隐式使用 Gateway 默认模型前核对当前实例 `model/list`，失效时不发送 `thread/start`；显式模型和历史恢复保持各自调用合同。
+  仅在 `thread/resume` 拒绝处，将 `-32600` 且完整消息精确等于 `no rollout found for thread id <请求的 Thread ID>` 的错误映射为稳定 `thread.resume.history-unavailable`；其他方法、错误码或 Thread 身份不复用该分类。此错误不证明 Thread 已删除，Client 不自动命名、创建替代 Thread 或重试写请求，保留绑定与恢复调度由 Router 和组合根负责。
   Workspace 的可选 `approvalsReviewer` 通过稳定 `thread/start`、`thread/resume`、`thread/fork` 参数传递；省略时保留 Codex 默认或历史持久设置，恢复响应核对明确请求的 reviewer。
   当前 Thread 审批方式通过 `updateThreadApprovalsReviewer` 更新；请求前注册合法设置通知观察器，等待 RPC 成功和最新同 Thread 同目标通知，超时、断线、关闭或 Thread 失效清理等待和请求，不启动 Turn、不重试设置写入。
   `account/read` 当前认证路由、账户与 Thread 用量及用户级配置
   读取等 App Server 方法的类型化封装；按 Workspace 读取有效思考等级与服务层级，模型、思考等级、服务层级默认值和受控 agents 设置统一通过
   同一个 `config/batchWrite` 用户配置事务写入；`writeDefaultServiceTier` 只接受 Standard 对应的
   `default`、`fast` 与 `ultrafast`，渠道通过模型目录检查可用性，下一 Turn 覆盖仍走 `turn/start.serviceTier`。
-  `readModelAccelerationSettings` 复用带 Workspace `cwd` 的 `config/read`，结合 `configRequirements/read` 独立速度合同和稳定 `featureRequirements`，只向 Application 返回配置服务层级与 Fast/Ultrafast 两个有效开关；受管精确值优先，缺失按锁定版本默认 true，异常响应拒绝。`readDefaultServiceTier` 排除被禁用的加速默认值；用户设置快照按需投影同一独立开关，原始用户配置仍用于版本化编辑。Provider 路由固定到目标实例，不暴露原始配置。
+  `readModelAccelerationSettings` 复用带 Workspace `cwd` 的 `config/read`，结合 `configRequirements/read` 独立速度合同和稳定 `featureRequirements`，只向 Application 返回配置服务层级与 Fast/Ultrafast 两个有效开关；受管精确值优先，缺失按锁定版本默认 true，异常响应拒绝。`readDefaultServiceTier` 保留未经功能过滤的配置选择，不证明既有 Thread 的选择或有效档位；用户设置快照按需投影同一独立开关，原始用户配置仍用于版本化编辑。Provider 路由固定到目标实例，不暴露原始配置。
   受控的读改写流程从原始用户层取得版本并通过
   `expectedVersion` 拒绝并发覆盖；Hook 目录和用户层版本通过独立窄端口读取，不把原始配置交给
   Application。Hook 状态写入携带 `expectedVersion` 和 `reloadUserConfig: true`，不自动重试；

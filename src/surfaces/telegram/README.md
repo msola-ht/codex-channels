@@ -58,6 +58,8 @@
   Telegram 原生 Rich Markdown；已完成且非 commentary 的短正文即使未提供 phase，也按该设置格式化，
   长回复展开为 HTML 分段，特别长的内容使用预览加附件；明确的格式拒绝只降级当前分段；网络结果不确定时停止本次发送，Turn 完成不重播失败正文；完成的原生 `imageGeneration`
   PNG/JPEG 经过共享安全读取边界后使用 `sendPhoto` 静默发送，且不受操作过程显示档位影响。
+  只有上游 `fileId` 而无 `savedPath` 的完成结果独立提示“图片已生成，但当前无法获取图片内容”，
+  不显示引用或声称图片已发送；持久恢复保留该状态但不保存引用，`hidden` 同样保留提示。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
 - `text-streams.ts`：拥有按 Conversation、Turn、Item 隔离的正文流、刷新计时器、消息 ID、首次发送结果未知状态及每 Turn 的正文提醒状态；处理最终 HTML/Rich Markdown、长回复与附件降级，复用 Outbox 的同一投递队列与只读回复目标。
   增量只接收实时 Turn 开始所建立的当前授权活动身份；最多保留 100 个身份，超限淘汰最旧的非关键预览并记录容量告警。
