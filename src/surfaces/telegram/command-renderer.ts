@@ -10,7 +10,7 @@ import type {
 import {
   listProviders,
 } from "../../application/index.js";
-import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTier, modelListDisplayName, modelListEntry } from "../provider-format.js";
+import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTierSetting, modelListDisplayName, modelListEntry } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
@@ -222,7 +222,7 @@ function modelProviderSelectionText(
   return toStructuredMarkdownList([
     `当前模型：${currentModelName}（Provider：${formatCodexProviderLabel(current)}）`,
     `${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort)}`,
-    `速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
+    `速度：${formatServiceTierSetting(result.state, currentModel)}`,
     "",
     `当前 Provider：${formatCodexProviderLabel(current)}`,
     "提供商列表：",

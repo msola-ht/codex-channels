@@ -69,6 +69,7 @@ const zh = {
     notProvided: "缓存未提供此组提示词。", empty: "字段已提供，但内容为空。",
     groups: { general: "基础指令", approvals: "审批模式", collaboration: "协作模式", review: "自动审查", permissions: "权限与沙箱", agents: "多代理", budget: "Token 预算与压缩", confirmation: "操作确认策略", tools: "工具指引" },
     main: "主指令", persistent: "持久模式指令", contentFilter: "内容过滤后的指引",
+    approvedPrefixes: "已批准命令前缀",
     onRequest: "按需审批", autoReview: "按需审批 · 自动审查", never: "不请求审批", untrusted: "不可信操作审批",
     defaultMode: "默认协作模式", planMode: "计划模式", rejection: "拒绝后的指引", timeout: "超时后的指引",
     reviewPolicy: "审查策略", reviewTemplate: "审查策略模板", nodePolicy: "Node REPL 审查策略",
@@ -1515,6 +1516,8 @@ const zh = {
       "enterprise": "Enterprise",
       "edu": "Edu",
       "unknown": "未知",
+      "sci": "SCI",
+      "sciPlus": "SCI Plus",
     },
   },
   accountConfirmation: {
@@ -1960,6 +1963,7 @@ const en: Messages = {
     notProvided: "The cache supplies no prompts for this group.", empty: "The field is present but empty.",
     groups: { general: "Base instructions", approvals: "Approval modes", collaboration: "Collaboration modes", review: "Automatic review", permissions: "Permissions and sandbox", agents: "Multi-agent", budget: "Token budget and compaction", confirmation: "Confirmation policies", tools: "Tool guidance" },
     main: "Main instructions", persistent: "Persistent mode instructions", contentFilter: "Post-filter guidance",
+    approvedPrefixes: "Approved command prefixes",
     onRequest: "On-request approval", autoReview: "On-request approval · automatic review", never: "Never request approval", untrusted: "Untrusted action approval",
     defaultMode: "Default collaboration mode", planMode: "Plan mode", rejection: "Rejection guidance", timeout: "Timeout guidance",
     reviewPolicy: "Review policy", reviewTemplate: "Review policy template", nodePolicy: "Node REPL review policy",
@@ -3406,6 +3410,8 @@ const en: Messages = {
       "enterprise": "Enterprise",
       "edu": "Edu",
       "unknown": "Unknown",
+      "sci": "SCI",
+      "sciPlus": "SCI Plus",
     },
   },
   accountConfirmation: {

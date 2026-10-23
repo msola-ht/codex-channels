@@ -194,7 +194,9 @@ Provider 分别生成固定凭据提示，不展示上游原文。Turn 完成在
 展示思考等级、请求次数和 Token：正式模式保留总计，调试模式才展开缓存与推理 Token 和缓存命中率；
 指标读取失败时省略无数值统计，保留子代理终态和任务身份。
 原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示
-OpenAI 周限；速度按实际服务档位统一显示为 Standard、Fast、Ultrafast 或未知档位，不根据 Provider 推测；自定义目录 Provider 使用 `CP <名称>`，其余 Codex 兼容类型保留原 ID，不追加“自定义”后缀。
+OpenAI 周限；速度区分用户选择与生命周期确认的有效设置，设置通知只显示“已选”并将有效档位标为未知，
+未知选择不会被标为 Standard；下一 Turn 的选择标为待提交，不承诺生效。完成输出只格式化已确认的有效档位，
+缺省显示未知，不根据 Provider 或模型目录猜测功能开关；自定义目录 Provider 使用 `CP <名称>`，其余 Codex 兼容类型保留原 ID，不追加“自定义”后缀。
 历史无 Turn 指标只在通用明细和时间范围聚合中按稳定 Provider ID 展示；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。

@@ -182,12 +182,12 @@ function formatToolResult(result: ScheduledTaskToolResult): string {
       return formatConversationScheduledTasks({
         kind: "scheduled-tasks",
         result: result.result,
-      });
+      }, "id");
     case "runs":
       return formatConversationScheduledRuns({
         kind: "scheduled-runs",
         result: result.result,
-      });
+      }, "id");
     case "outcome":
       return formatOutcome(result.outcome);
     case "error":

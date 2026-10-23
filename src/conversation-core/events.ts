@@ -66,6 +66,8 @@ export type PlanType =
   | "edu"
   | "edu_plus"
   | "edu_pro"
+  | "sci"
+  | "sci_plus"
   | "unknown";
 export type RateLimitReachedType =
   | "rate_limit_reached"

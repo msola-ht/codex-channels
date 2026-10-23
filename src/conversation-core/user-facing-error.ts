@@ -112,6 +112,7 @@ export type UserFacingErrorCode =
   | "fast.usage"
   | "fast.unsupported"
   | "fast.disabled"
+  | "fast.selection.unknown"
   | "provider.account.unavailable"
   | "collaboration-mode.unsupported"
   | "collaboration-mode.unavailable"

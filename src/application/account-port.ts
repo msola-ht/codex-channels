@@ -17,6 +17,8 @@ export type AccountPlanType =
   | "edu"
   | "edu_plus"
   | "edu_pro"
+  | "sci"
+  | "sci_plus"
   | "unknown";
 export type AccountRateLimitReachedType =
   | "rate_limit_reached"

@@ -18,7 +18,7 @@ import {
   formatTimeRemaining,
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
-import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListEntry } from "./provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTierSetting, modelListEntry } from "./provider-format.js";
 import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
@@ -33,7 +33,7 @@ export function formatConversationModels(
   const current = state.models.find((model) =>
     model.available !== false && model.model === state.model
     && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
-  const speed = `速度：${formatServiceTier(state.serviceTier, current)}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`;
+  const speed = `速度：${formatServiceTierSetting(state, current)}`;
   const effortName = reasoningEffortSettingName(state.effort, current);
   const providerSwitchNotice = state.providerPending
     ? ["提供商切换将在下一条消息中创建新 Session；当前 Session 会保留，可通过 /resume 恢复。", ""]

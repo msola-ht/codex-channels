@@ -2,6 +2,14 @@
 
 本目录维护外部 Conversation、Workspace 与 Codex Thread 的前台绑定、后台绑定和订阅状态。
 
+模型设置中的 `serviceTier` 保留用户选择，`serviceTierKnown` 必须明确说明是否有选择证据；
+`effectiveServiceTier` 只保存生命周期响应确认的有效档位，缺省表示未知。0.164 的
+`get_service_tier`（`core/src/session/mod.rs`）只原样保留或丢弃选择，因此非空生命周期结果
+可同时确认选择；空值只能确认有效 Standard，不能判断原选择是否被过滤。设置通知只确认
+选择并失效有效档位；设置事实在同步收件边界归约，异步队列不重放旧设置，避免连续通知之间重建过期选择。
+生命周期请求期间出现设置通知时，不让竞争快照重建有效确认。
+连接或订阅失效后，两种证据都失效，重新恢复不从全局配置猜测既有 Thread 的选择。
+
 会话诊断只在内存保存最近一次成功新建、恢复或派生返回的压缩 Item ID 与指令文件来源；
 绑定释放时清理，待恢复订阅不展示指令清单。`instructionSourcesForThread` 提供加载快照，
 不扫描文件、不写入 StateStore，也不宣称反映后续文件修改或所有动态指令。

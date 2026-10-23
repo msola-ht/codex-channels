@@ -15,7 +15,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 
 | 用途 | 本地目录 | 来源仓库 | 当前基线 |
 | --- | --- | --- | --- |
-| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.163.0` | `openai/codex` | `rust-v0.163.0`，提交 `83086188ae0614bd882818ff1aa23f3194962012` |
+| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.164.0` | `openai/codex` | `rust-v0.164.0`，提交 `6aaac694803004a63c6f393d153c96d22521a6b9` |
 | 微信 ClawBot HTTP、消息和媒体合同 | `upstream/openclaw-weixin` | `Tencent/openclaw-weixin` | `v2.4.9`，提交 `43675b66551d12d6853155a7869a50fb12a18a1e` |
 | 飞书官方 Node SDK | `upstream/larksuite-node-sdk-1.75.0` | `larksuite/node-sdk` | `@larksuiteoapi/node-sdk@1.75.0`，公开源码提交 `e34a66f0d20935ee77f94909d16d93292d58b6c7`；发布包核对边界见飞书资料索引 |
 | 飞书官方 OpenClaw 插件参考 | `upstream/openclaw-lark` | `larksuite/openclaw-lark` | 提交 `dde0be3680d6fd5443cab426c8f4b3216266346a` |
@@ -24,10 +24,28 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 编排、授权、卡片、媒体和错误处理，不替代官方 SDK。微信未发布独立 SDK，固定版本官方插件的
 源码、类型和测试是协议研究基线，真实合同仍以本项目的脱敏探针结果为准。
 
-本机 `upstream/openai-codex-0.163.0` 已核对为上述固定提交，工作树干净。
+本机 `upstream/openai-codex-0.164.0` 已核对为上述固定提交，工作树干净。
 其他机器缺少该目录时使用固定 Tag 链接，不能拿旧副本冒充当前基线。
 
-## Codex 0.163.0 同步记录
+## Codex 0.164.0 同步记录
+
+已按授权把官方 `rust-v0.164.0` 完整源码及随仓文档同步到独立目录
+`upstream/openai-codex-0.164.0`，固定提交
+`6aaac694803004a63c6f393d153c96d22521a6b9`，核对时工作树干净。
+官方 Release 发布于 2026-10-23 04:48:10 UTC，非 Draft、非 Pre-release。
+生成协议、公开 CLI 合同和当前源码开发基线已同步为 `0.164.0`；旧 `0.163.0` 目录保留为历史比较来源。
+本轮未替换全局 CLI 或重启、部署运行服务，源码基线不代表正在运行的共享服务版本。
+
+- [正式 Release](https://github.com/openai/codex/releases/tag/rust-v0.164.0)。
+- [固定版 App Server 文档](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/app-server/README.md)：本地对应同名路径；与 `0.163.0` 内容相同，不能因此推断协议未变。
+- [固定版协议定义](https://github.com/openai/codex/tree/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/app-server-protocol/src)。
+- [升级决策](codex-cli-upgrade-decisions.md#01640-升级决策)：采用范围、关联业务适配和验收限制。
+
+比较起点为此前固定的 `0.163.0`。本地两份固定源码可完整比较，不依赖 GitHub Compare API
+最多返回 300 个文件的列表。实验协议与公开命令合同已由隔离安装的精确目标 CLI 重新生成；
+生成结构不自动扩大 Gateway 支持范围，行为观察与未验证边界以升级决策及支持矩阵为准。
+
+## 历史比较来源：Codex 0.163.0
 
 已按授权将官方 `rust-v0.163.0` 的完整源码及随仓文档同步到独立目录
 `upstream/openai-codex-0.163.0`，固定提交
@@ -103,7 +121,7 @@ Cline 官方 SDK 仍是 Chat 参数语义的参考，而非模型能力验收结
 新工作区没有 `upstream/` 时，按当前锁定基线显式克隆：
 
 ```text
-git clone --depth 1 --branch rust-v0.163.0 https://github.com/openai/codex.git upstream/openai-codex-0.163.0
+git clone --depth 1 --branch rust-v0.164.0 https://github.com/openai/codex.git upstream/openai-codex-0.164.0
 git clone --branch v2.4.9 https://github.com/Tencent/openclaw-weixin.git upstream/openclaw-weixin
 git clone https://github.com/larksuite/node-sdk.git upstream/larksuite-node-sdk-1.75.0
 git -C upstream/larksuite-node-sdk-1.75.0 checkout e34a66f0d20935ee77f94909d16d93292d58b6c7

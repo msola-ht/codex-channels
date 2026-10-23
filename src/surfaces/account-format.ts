@@ -76,6 +76,8 @@ export function formatPlanType(value: string): string {
     edu: "Edu",
     edu_plus: "Edu Plus",
     edu_pro: "Edu Pro",
+    sci: "SCI",
+    sci_plus: "SCI Plus",
     unknown: "未知",
   };
   return names[value] ?? value;

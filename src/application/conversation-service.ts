@@ -203,6 +203,8 @@ export interface ConversationStatus {
   modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
+  serviceTierKnown: boolean;
+  effectiveServiceTier?: string | null | undefined;
   approvalsReviewer?: ThreadApprovalsReviewer | null;
   modelPending: boolean;
   effortPending: boolean;
@@ -579,6 +581,9 @@ export class ConversationService implements
         return busy();
       }
       if (!isCurrent() || isLocallyBusy()) return busy();
+      // An effective null lifecycle snapshot cannot prove the saved selection.
+      // Keep the binding rather than silently persisting Standard during release.
+      if (this.models.status(target).serviceTierKnown !== true) return busy();
       const modelPreference = this.models.capturePreference?.(target);
       try {
         const released = await this.router.releaseIdle(target, current, snapshot, {
@@ -1137,7 +1142,6 @@ export class ConversationService implements
       if (currentCwd !== selectionCwd || selected.cwd !== selectionCwd) {
         throw new UserFacingError("thread.takeover.changed", "Workspace 已变化，请重新选择会话");
       }
-      const modelPreference = this.models.capturePreference?.(target);
       const currentOwner = this.router.targetForThread(selected.id);
       if (
         currentOwner
@@ -1157,6 +1161,11 @@ export class ConversationService implements
         );
       }
       const selectedHasQueue = await this.probeNativeQueueItems(selected.id, assertAuthorized);
+      const sameThread = current?.threadId === selected.id;
+      // Resuming the same Thread preserves its pending choices. A queued target
+      // also does not inherit preferences, so neither path needs to capture them.
+      const modelPreference = sameThread || selectedHasQueue
+        ? undefined : this.models.capturePreference?.(target);
       const active = this.core.activeTurn(target);
       const preserveCurrent = leavesCurrent && current !== undefined && !await this.isThreadIdle(current.threadId);
       const binding = await this.router.resume(target, selected.id, preserveCurrent, selected.cwd,
@@ -1184,7 +1193,7 @@ export class ConversationService implements
       }
       if (selectedHasQueue) {
         this.clearPendingSelections(target);
-      } else {
+      } else if (!sameThread) {
         this.restoreSelectionsAfterBindingChange(target, modelPreference);
       }
       return {
@@ -1705,6 +1714,8 @@ export class ConversationService implements
       ...(model.modelProvider ? { modelProvider: model.modelProvider } : {}),
       effort: model.effort,
       serviceTier: model.serviceTier,
+      serviceTierKnown: model.serviceTierKnown === true,
+      ...(model.effectiveServiceTier === undefined ? {} : { effectiveServiceTier: model.effectiveServiceTier }),
       approvalsReviewer: binding
         ? this.router.modelSettingsForThread(binding.threadId)?.approvalsReviewer ?? null
         : null,
@@ -1800,6 +1811,7 @@ export class ConversationService implements
       }
     }
     const activity = this.core.trackThreadActivity(binding.threadId);
+    const submittedModelSettings = this.router.modelSettings(target);
     try {
       let result;
       try {
@@ -1815,7 +1827,7 @@ export class ConversationService implements
         this.recordTurnError("start", target, binding.threadId, null, error);
         throw error;
       }
-      this.models.markApplied(target);
+      this.models.markApplied(target, submittedModelSettings);
       this.collaborationModes?.markApplied(target);
       activity.restore(target, result.turnId, identity);
       return { threadId: binding.threadId, turnId: result.turnId, steered: false };

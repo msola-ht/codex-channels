@@ -96,6 +96,8 @@ export function renderFeishuStartupNotification(
     | "modelProvider"
     | "effort"
     | "serviceTier"
+    | "serviceTierKnown"
+    | "effectiveServiceTier"
     | "modelPending"
     | "effortPending"
     | "fastModePending"

@@ -108,6 +108,8 @@ function toThreadSettingsUpdatedEvent(
       model,
       effort: effort.value,
       serviceTier: serviceTier.value,
+      serviceTierKnown: true,
+      effectiveServiceTier: undefined,
       collaborationMode,
       approvalsReviewer: toThreadApprovalsReviewer(settings?.approvalsReviewer),
     },

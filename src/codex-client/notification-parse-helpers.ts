@@ -56,6 +56,8 @@ export function parsePlanType(
     || value === "edu"
     || value === "edu_plus"
     || value === "edu_pro"
+    || value === "sci"
+    || value === "sci_plus"
     || value === "unknown"
     ? { valid: true, value }
     : { valid: false };

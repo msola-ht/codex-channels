@@ -36,6 +36,8 @@
   输出只携带“思考中…”状态、每段独立耗时与最终标记，不携带摘要或原始思维链内容；同一 Thread
   开始新 Turn 时会结束并释放旧 Turn 遗留的推理段定时器。
 - `routing-port.ts`：Core 查询 Thread 的 Conversation、Workspace 和模型设置所需的窄路由接口。
+  完成输出只使用 `effectiveServiceTier` 的已确认值；用户选择和设置通知不被当作加速生效证据，
+  有效档位未知时省略完成事件的 `serviceTier`。
 - `session-display-cache.ts`：定义会话列表展示缓存的派生元数据接口；不包含消息正文、Turn 明细或协议状态事实。
 - `user-facing-error.ts`：用稳定错误代码和最小参数描述预期输入与状态错误；Surface 按平台独立渲染，未标记异常默认隐藏详情。
 

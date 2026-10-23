@@ -1,12 +1,175 @@
 # Codex CLI 升级决策
 
 本页说明当前项目采用什么、为什么采用，以及哪些上游能力仍不接入，供下一次升级直接复核。
-当前基线为 `codex-cli 0.163.0`；具体协议和实现以[支持矩阵](index.md#当前支持矩阵)为准，
+当前源码基线为 `codex-cli 0.164.0`；具体协议和实现以[支持矩阵](index.md#当前支持矩阵)为准，
 升级步骤与门禁见[升级流程](codex-cli-upgrade.md)。本页不重复协议数量、命令参数或逐版本更新日志。
 
-## 当前基线与升级取舍
+## 0.164.0 升级决策
 
-**决定：采用 `0.163.0` 正式版本，保留现有渠道能力边界，不为本次升级新增实验功能。**
+**决定：采用 `0.164.0` 正式版，并同步修复关联业务合同；不扩大渠道能力或实验协议范围。**
+初筛后继续沿会话、账户、目录、审批、计划任务、服务、Provider 和输出链路审查，确认下列关联问题。
+精确目标 CLI 在隔离目录安装，已通过项目升级预检、协议生成及生成复核；版本和生成结果已合入当前工作区。
+本轮业务适配与验证结果见下文；未替换全局 CLI、重启共享服务或部署。
+审查分支为 `chore/codex-0.164.0-review`，本地代码起点
+`5e3a5a4abe4eed6261dc44ef20c57a4a9fc29228`。目标固定提交与资料入口见
+[上游来源](upstream-sources.md)，以下上游路径均相对目标固定目录的 `codex-rs/`。
+
+### 修复前发现与方案依据
+
+本表保留修复前的触发链、方案分析及源码位置，便于复核原因；当前实现与实际观察见“实施结果”。
+其中数字快照问题最终采用完整 ID 方案，服务档位最终固定用户选择并单独记录有效值，均已落实。
+
+| 用户影响与触发条件 | 升级决定与本地边界 | 证据与实施要求 |
+| --- | --- | --- |
+| 同一会话并行查询两个任务的 Run 列表后，按数字重试可能操作错误任务 | 优先消除动态工具对共享数字快照的依赖。建议工具只接受完整 Task/Run ID，工具查询不覆写人类 `/schedule` 的选择快照；或设计显式快照令牌绑定原目标 | `scheduled-task-service.ts:439` 将 runs(A)、runs(B) 写入同一个 Conversation+Actor 的 `runSnapshots`，`:575` 的数字解析只取最后一份。工具结果复用 `conversation-scheduled-task-command-format.ts:50`、`:66`，两份列表都给出序号并允许按序号 retry。当两项均 uncertain 时，`retry("1")` 可领取另一项并在 `scheduled-tasks/sqlite-store.ts:460` 解除其 uncertain。Actor 检查和调度串行锁不能识别这个选错目标；单纯串行工具执行也不能区分两份同号结果。旧共享快照已存在，0.164 动态工具并行使隐含串行使用假设不再成立 |
+| 保存的 Fast/Ultrafast 未实际生效，却被设置通知显示成当前执行档位，并进入偏好或计划任务快照 | 在 Client→Routing 稳定合同区分已选档位与有效/未确认档位；设置通知更新选择，展示不得冒充实际生效。任务和偏好分别明确固定用户选择还是当前有效值，不清除上游保存选择 | 0.164 `core/src/session/mod.rs:925` 保存原始选择，`session/session.rs:664` 的有效快照仍过滤；`app-server/src/bespoke_event_handling.rs:1249` 又用 selected 值覆盖设置通知。本地 `notification-thread-state.ts:103`→`thread-state-sync.ts:30`→`router.ts:334` 混用同一 serviceTier；`core.ts:568` 及 Surface 显示 Fast，`model-selection-service.ts:514` 捕获偏好，`gateway-component-graph.ts:1042`→`scheduled-task-service.ts:287`→`scheduled-task-executor.ts:251` 保存并重传。实际请求仍由上游过滤，未发现绕过能力；旧版显式设置亦有潜在混淆，新版扩大到启动配置与历史恢复。`thread/read` 现有快照不足以读回有效 tier，不能只凭 model/list 推断 feature 允许 |
+| 新学术套餐会导致额度读取失败、账户与额度通知丢弃，并影响快照及 Luna Reserve 后台轮询 | 同步新增 `sci`、`sci_plus`，不能回退成其他套餐或推断权益 | 上游 `app-server-protocol/schema/typescript/PlanType.ts` 新增枚举；本地 `src/codex-client/account-adapter.ts:231`、`:383` 与 `notification-parse-helpers.ts:36` 使用白名单。实施须同步 `application/account-port.ts`、`conversation-core/events.ts` 的套餐类型、查询与通知解析；下游 `provider-account-service.ts`、`luna-reserve-service.ts:381` 和 `bootstrap/gateway-component-graph.ts:2200` 共用该转换。Surface/WebUI 已可显示原始字符串，正式标签另须补齐中英文字典 |
+| Hook 目录包含模型请求前后事件时，整个 `/hooks` 查询失败，依赖目录的管理操作受阻，完成通知被丢弃 | 同步 `preModelRequest`、`postModelRequest` 两处白名单，保留现有信任、启停确认和 hash/version 校验 | 上游 `v2/HookEventName.ts` 新增枚举；本地 `hook-adapter.ts:9`、`:41` 在 `entry.hooks.map(toHookEntry)` 中抛错，影响详情、trust/enable/disable 预览、确认及回读；`notification-conversation-events.ts:166` 另行过滤完成通知。Application/Core 的 eventName 已为 string，Surface 按字面显示，这些边界无需再引入枚举 |
+| Plugin 内容变化能使 Hook 信任失效，原有统一提示却称哈希不覆盖脚本内容 | 区分普通配置 Hook 与 Plugin Hook 的信任文案，并调整 modified 的说明；保留 opaque currentHash 透传、复核及写后回读 | `hooks/src/engine/discovery.rs:730` 返回 declaration/content 组合指纹，`app-server/src/config_manager_service.rs:364` 负责拆写，`hooks/src/engine/plugin_trust.rs:51` 执行时验证。`surfaces/conversation-hook-command-format.ts:59` 和 `docs/user-guide.md` 的旧说明须同步调整。内容指纹是 best-effort source identity，排除虚拟环境、字节码等运行产物，不能承诺所有依赖完整性；Gateway 不自己扫描或拆 hash |
+
+套餐修复还必须覆盖 `application/conversation-event-coordinator.ts:89` 的账户通知消费：
+`account.updated` 触发 Luna Reserve 账户状态清理，通知被丢弃会跳过这一步。
+账户快照只有成功读取才更新，失败保留旧观测时间，不能当成刷新成功。`limits_json` 为 JSON
+载荷，不需要为新增套餐改变指标数据库结构；Plugin 的 eligiblePlanTypes 本来就是字符串标签。
+
+另有一项较低优先级的展示缺口：上游 `protocol/src/openai_models.rs:790` 新增
+`model_messages.permissions.approved_prefixes`，缺省/null 使用内置文本、空字符串抑制该段。
+现已补齐 `runtime/model-catalog-presentation.mjs` 的只读投影及 WebUI 中英文标签，官方和第三方
+提示词查询共同展示此项，保留空值含义；不修改模型模板或写入权限。
+
+公开 CLI 合同已由精确目标 CLI 刷新：项目实际转发参数的快照仅版本变化。
+`cli/src/main.rs` 新增 `migrate-nfs-db`，上游明确拒绝其 remote 模式；本项目不开放或执行该数据库迁移。
+
+### 明确收益与随 CLI 采用的变化
+
+| 用户或管理员得到什么 | 决策和本地入口 | 固定源码证据及限制 |
+| --- | --- | --- |
+| 恢复会话、回退历史后保留已选设置 | 随 CLI 采用；保持 Client 恢复请求不注入全局模型默认值，Router 从权威响应刷新设置 | `app-server/src/request_processors/thread_processor.rs` 恢复 service tier、reasoning summary、personality，Revert 重建配置保留当前模型等；`persisted_resume_settings.rs::latest_persisted_model_settings` 按 Thread 身份选择历史快照。本地 `src/codex-client/client.ts::resumeThread` 和 `src/session-routing/router.ts::resumeInWorkspace` 已遵循这一方向。历史压缩查找修复亦拟随 CLI 采用，不读取或复制官方会话文件 |
+| 长会话压缩失败时避免残缺摘要污染和 panic | 随 CLI 采用，不在 Gateway 修补官方历史 | 官方 Release 的 #53932、#55581；本轮未复现压缩失败。Core 仍只消费官方 Item/Turn 状态，不将上游修复当作本地补偿成功 |
+| 沙箱失败后的提权重试接受新的自动审批 | 随 CLI 采用，保留现有安全摘要和审查次数语义 | `core/src/tools/orchestrator.rs` 不把 Guardian 首次批准当作更高权限重试的授权，并按实际升级权限重新审查；本地 `notification-review.ts` 与 `bootstrap/auto-approval-review-notifications.ts` 按独立 review ID 消费、去重，不把同一工具的多次审查合并为一次，也不扩大人工授权范围 |
+| 多个计划任务工具请求不必互相等待 | 在修复上表目标选择歧义后采用并行语义，保留每请求授权、确认和取消 | `core/src/tools/handlers/dynamic.rs::supports_parallel_tool_calls` 新增 true；本地 RPC 和每调用 AbortController 的身份隔离可保留，但这不能证明共享选择快照安全。创建、删除仍须各自确认；并发提交和乱序取消列入升级验收，不承诺模型调用顺序等于写入顺序 |
+| CLI 跨子命令配置覆盖不丢失，原生 TUI 操作更方便 | 随 CLI 采用；继续使用 `codexc remote`，不复制 `/presets` 或原生 `/model` 到渠道 | `cli/src/config_override_args.rs` 收集各层配置覆盖；Release 的行内模型/权限选择、图片预览和排队权限修复属于 TUI。需以目标 CLI 刷新合同并观察 Remote 路径 |
+| 官方工具目录和 MCP 凭据刷新更高效 | 随 CLI 默认采用，不增加本地凭据存储或模型协议转换 | `features/src/lib.rs` 将 `incremental_tools` 和 `mcp_oauth_refresh_coordination` 设为 Stable/默认开启；`core/src/session/step_context.rs:53` 还要求 use_responses_lite。本地 `app-server-service-runtime.mjs:557`→`third-party-model-catalog.mjs:64` 将第三方运行目录设为 false，因而不会仅因升级把 Lite 私有工具项送入第三方 Chat/Responses 桥。官方与第三方仍须分别验收 |
+| 平台安全与后台资源管理改善 | 随 CLI 采用，不改 Gateway 服务所有权 | Release 的 macOS 路径别名/符号链接检查、Windows 代理认证、远程凭据遮蔽、daemon 日志和安装目录清理属于对应上游执行链路；不能算作 Gateway 自有代理、日志或服务修复。本轮未做各平台实机观察 |
+
+### 暂不接入的能力
+
+| 用户价值 | 决定与理由 |
+| --- | --- |
+| 导出本机诊断 ZIP，便于排障 | 暂不接入新增稳定 `feedback/save`。渠道没有获授权的诊断导出入口；诊断可能包含敏感材料，不能把新增方法直接暴露给外部 Actor |
+| 在原会话之外生成实验样本或预测结果 | 暂不接入实验 `thread/sample`、其取消接口及预测分支 MCP 开关。当前 Thread/Fork/Queue 合同不需要这些能力，不扩大受控例外 |
+| 用文件引用表达生成图片及其输入图 | 仅同步生成结构，保持飞书/Telegram 通过 `imageGeneration.savedPath` 发送本地图片；不新建 `fileId` 下载或 Base64 回退路径。`ext/image-generation/src/tool.rs:249` 仍先落盘，随后选择 result/fileId 并保留 saved_path；`app-server-protocol/src/protocol/thread_history.rs:920` 保留历史路径。本地 `operation-adapter.ts:125`→Core→持久输出快照→Surface 只消费该路径，`surfaces/generated-image.ts` 继续校验文件。微信现有投递策略过滤普通操作事件，显式 `channel send-image` 另走授权文件发送，不能宣称三个渠道都自动发送此 Item。源码层面无需新增图片业务适配，实际生成和发送待观察；不传播 inputImages 路径和 hash |
+| 读取 MCP 工具列表的扩展元数据、管理 Desktop 存储要求 | 不消费新增 `McpServerStatus.toolListMeta`；`mcp-adapter.ts` 的 summary/full 投影均只使用既有字段。`ApplicationRequirements.storage` 的 defaultProjectParent/projectlessWorkspaceRoot 是 Desktop 存储位置，不是文件系统权限；Client 的 configRequirements 投影不消费 application，不改变 Gateway Workspace Registry 或 StateStore |
+| 为请求附加 Responses 客户端元数据或语音产品会话 ID | 不接入实验 `TurnStartParams/TurnSteerParams.responsesapiClientMetadataPatch`、`ThreadRealtimeStartParams.voiceSessionId`；现有调用没有消费者，也不在受控例外内 |
+| 使用冻结云技能目录、启动配置发现、运行时注册、WebSocket 压缩或跨执行环境复制文件 | 当前共享本机 App Server 路径无对应需求，不主动启用实验功能或扩大初始化协商；继续原有实例租约与服务生命周期 |
+| 迁移 NFS 上的官方 SQLite 数据库 | 不接入、不执行实验 `migrate-nfs-db`。官方数据库由 App Server 管理；若以后确有运维需求，先独立制定备份、恢复与授权方案 |
+
+### 全链路关联审查覆盖
+
+以下记录本轮审查的输入、处理和最终消费关系；“未发现需调整”仅指这些固定源码路径，
+不等于已经运行新版本。协议形状审查复用仍有效的前次证据，关联语义由本轮补全。
+
+| 边界 | 已核对的链路与结论 | 剩余风险或适配范围 |
+| --- | --- | --- |
+| 会话恢复与回退 | `thread/resume` 无模型默认覆盖→`thread-adapter` 权威响应→Router 绑定/目录/权限校验；Revert 的历史 summary、分页游标、确认快照及 Queue 指纹继续保留。上游 Thread Queue/状态/read-state 实现两版相同，新增 sample 被 loaded/list 隐藏 | 不复制上游历史或新增平行会话索引；服务档位的 selected/effective 分叉必须按上表调整 |
+| 通知、终态与取消 | Client 同订阅 started/completed 证据→Core 观察窗口→绑定与渠道归约；断线、取消订阅及 Thread 关闭使旧窗口失效，旧 Turn 终态不结束新 Turn。上游 outgoing 克隆优化未改显式目标顺序；压缩只在成功后提交历史，本地按完整压缩 Item 计数，不依赖被删除 warning | 新版真实断线、压缩失败、Lite 中断与原生 TUI 并用尚未观察；不得用 RPC 返回代替权威终态 |
+| 审批及指标 | 上游提权重审重新分配 UUID→Client 安全摘要→Bootstrap 精确父子归属/去重→SQLite 按 Thread/Turn/review ID 保存→Surface；同一 Item 的独立审查不会合并。内部 attempt retry 仍只对应一个 report，不建立人工交互或结束原 Turn | 本地 durationMs 仍由通知墙钟差计算，不能宣称已采用上游内部的单调耗时修复；真实提权拒绝、重审与渠道结果待观察 |
+| 动态工具与计划任务 | Provider 命名空间请求 ID→唯一 Actor/前台 Thread 校验→独立取消→Application 令牌→Store/调度领取→Executor 权限与最终 RPC 提交守卫。创建/删除须人工确认，后台不注册工具且拒绝递归，Store 对容量/重叠/uncertain 原子裁决 | 身份、取消及容量保护不解决共享序号选错目标；工具接口、工具结果、人工命令快照和文档须一起调整 |
+| 账户和模型目录 | 账户查询/通知→Application 清理与快照→后台轮询→指标 JSON→渠道/WebUI；model/list 每次按目标 Provider 查询。上游登录/登出后失效模型目录，瞬时刷新失败保留同身份最后成功目录及原 freshness，认证失败清空显式 Provider 目录 | 套餐值按上表全链补齐；非空模型列表不证明远端刷新成功。新 approved_prefixes 展示遗漏单独处理，不改用户模型模板 |
+| Hook/MCP/Plugin/Skill | Hook 目录、预览、确认、配置版本/hash 复核、原样写入、写后回读和跨实例配置修订；MCP 带 Thread 查询及 loginId/Provider/Thread/server 关联；Plugin 仅 installed/mention；Skill 仍筛 cwd/enabled/user-repo scope 与非 Plugin 直接安装项 | Hook 新事件与信任文案必须调整；不解析 toolListMeta、不接入 Desktop storage、不扩大 OAuth、市场安装或 Skill 别名。企业认证与跨实例刷新尚无运行观察 |
+| 共享服务与 Transport | Runtime 主/隔离实例仍使用 `app-server --listen unix://...`，Supervisor 与 Remote 持有租约；Unix/Windows Proxy 客户端均未请求 `x-codex-app-server-compression`，0.164 服务端仅在客户端明确协商时启用 zstd，因此继续文本协议。Socket 受保护路径与绑定所有权规则保留 | 不需因服务端新增压缩而添加本地解码器。上游 TUI 仅将通过校验的官方默认 Socket 识别为 LocalDaemon；项目默认路径不同，未改变默认 Remote 所有权。若管理员把 socket_path 指向官方默认地址，须单独确认 TUI 的本地配置/恢复语义，不以默认路径的结论覆盖这种配置 |
+| Provider 请求与指标 | Runtime 第三方目录关闭 Lite→现有 Responses/Chat 桥；官方 HTTP/WS 路径和端到端头转发、响应状态/Usage/配额观测保留。上游 prompt_cache_key 可省略且与 session-id 分开，本地 Chat 转换已允许省略；模型请求归属仍取受控 Thread/Turn 元数据，不靠 cache key。model-provider-info 的超时/重试默认未变 | 不新增代理端点或替上游重试；认证构造失败可在请求到达代理前结束，此时只能由 Turn 错误反映，不能虚构模型请求指标。运行时注册为默认关闭的实验能力，本轮不启用 |
+| 图片与可靠投递 | 上游落盘/历史投影→Client savedPath→Core→共享文件校验及有界快照→飞书/Telegram 图片出口；微信保持现有事件过滤与独立显式图片发送 | fileId/inputImages 不扩大本地能力；三个平台真实网络投递未观察 |
+
+### 上游数据处理与回退约束
+
+本次源码适配没有读取或修改用户数据。未来首次运行 0.164 时，Plugin Hook 的
+列表发现或执行可能通过 `PluginHookTrust.matches_hash`→`migrate_legacy_trust` 为旧信任建立
+**用户配置所在目录的 `.hook-trust/<identity>`**；实际位置由配置层的 User 文件决定，不能只假设
+主 Codex Home 根目录。显式信任还会由 App Server 写入 `hooks.state.*.trusted_content_hash`。
+因此正式升级不能承诺“完全不产生用户数据变化”。
+
+- **升级前**：确认实际用户配置与 Profile 文件、对应 `.hook-trust` 目录及使用它们的 App Server；在另行授权的停写窗口，以私有权限做一致备份并记录原运行状态、CLI 版本和受管源码版本。本轮不执行停服或备份，也不解析内部会话文件。
+- **升级中**：由官方 App Server 管理信任基线，Gateway 不复制迁移逻辑、不清理旧基线、不批量重新信任；旧内容无法确认或配置发生变化时保留数据并停止相关操作。
+- **失败恢复与回退**：保留新旧程序、备份、现有配置及新信任产物，先确认全部相关写入方停止，再决定恢复哪一个一致版本；不直接覆盖升级后新增修改或删除 `.hook-trust` 来绕过检查。旧版 HookStateToml 从源码看可忽略新增字段，但回退会失去新版内容校验，不等于安全语义保持；尚未实际验证回退。
+- **数据库边界**：两版 `state/migrations` 无新增 SQL 文件，本轮发现不要求更改 Gateway StateStore 或指标 Schema；上游 SQLite busy retry、journal 保留和 NFS 回收策略不是本地迁移授权。服务档位方案也不得自行改写已有任务/偏好来猜测历史意图；若实施决定改变磁盘合同或恢复语义，先补充具体数据方案。
+
+### 审查证据与验收范围
+
+本轮已核对官方正式 Release、两个固定版本的源码、随仓 App Server 文档、签入的 TypeScript
+Schema，以及受影响的本地消费者。随后使用精确 CLI 的 `--experimental` 生成结果复核：
+新增八个生成文件，新增三个 Client Request 方法：稳定 `feedback/save`，
+实验 `thread/sample`、`thread/sample/cancel`；没有新增 Server Request、Server Notification 或
+Client Notification 方法。App Server README 两版相同，不能替代类型与源码审查。
+
+动态工具已沿 RPC 派发、每调用身份、Application 确认令牌和调度提交边界检查；
+`scheduled-tasks/scheduler.ts::runManual` 在等待串行队列和容量检查后、claim 前复核调用有效性。
+Guardian 已核对上游重审权限与本地 review ID 投影；恢复已核对请求省略覆盖、权威响应及绑定校验。
+这些是源码结论，不是在线模型、渠道投递或竞争条件的运行观察。
+
+验收范围如下；是否实际观察以本节的实施结果为准，不以源码分析代替：
+
+1. 用隔离的精确 `0.164.0` CLI 运行项目升级 dry-run、协议生成、公开 CLI 合同刷新及现有静态门禁；逐项复核生成差异，再更新当前支持矩阵和版本索引。
+2. 先落实动态工具精确目标选择、服务档位语义分离、套餐及 Hook 全链适配，再刷新 CLI 合同；补齐 Plugin 信任文案和上游数据计划。复核图片仍可从 `savedPath` 形成可用产物，不依赖现已可缺省的 `result`。
+3. 观察显式恢复、断线恢复与 Revert 后的模型、思考等级、service tier、权限和原生 Queue；包含历史设置与全局默认不同、保存的档位不被当前模型/feature 支持的场景，确认状态展示及计划任务捕获语义一致。
+4. 观察并行 `schedule_task` 的独立确认、逆序完成、单调用取消、整轮中断与容量限制；特别用两个不同任务的同序号 uncertain Run 验证不会选错目标，并观察工具查询与人工 `/schedule` 交错。确认取消不会误伤另一调用或继续提交迟到写入。
+5. 观察 Guardian 拒绝和提权重新审查的独立结果，以及普通 Turn 的实际回复与图片输出；确认新增套餐的查询、通知、快照及账户状态清理，新增 Hook 查询/管理/完成通知及 Plugin 内容变更后的信任结果。不新增或修复测试文件。
+6. 对 Windows/macOS、企业 MCP、远程 executor、真实平台发送等不可用环境明确留待验证；不把 Linux 静态检查当作这些路径的成功证据。
+
+本轮未访问用户 Thread/数据库；发布和部署未执行。
+
+### 实施结果
+
+- 动态工具仅接受完整 Task/Run ID，工具 list/runs 不读写人工数字快照；人工 `/schedule` 继续使用自己的列表序号。
+  修复前隔离的实际 Store/Scheduler 路径复现 runs(A/B) 后按 A 的 `1` 却派发 B；修复后经真实工具 Handler、
+  Application 和内存 SQLite 观察到完整 ID 分别派发 A/B，工具查询不覆盖人工选择，数字、短 ID、名称及跨 Actor ID 被拒绝。
+  创建/删除仍先预览、由人工确认才写入；重复令牌拒绝，Turn 结束撤销未交付的预览，容量不足不解除旧 uncertain Run。
+- 档位合同拆为用户选择、选择是否已知和有效档位。通知只确认选择，生命周期空值仅确认有效 Standard，
+  不反推选择；竞争通知、断线及提交后无法确认的有效值显示未知。固定保存偏好/任务时拒绝未知选择，自动空闲释放保留绑定，普通对话仍可继续。
+  新显式选择保留提交前能力检查，恢复的已保存选择交由上游过滤；新任务已确认的 Standard 编码为 `default`，旧任务 null 仍继承，未迁移数据。
+  同一 Thread 显式恢复不固定捕获旧选择，未知时仍可恢复，已有待提交思考等级保留；目标有原生 Queue 时沿用清理待提交偏好的既有规则。
+  隔离的实际 Router/Core/ConversationService 入口观察确认：未知选择仍可提交普通消息；`/fast off` 后提交显式 default；
+  设置通知在收件时同步归约，异步处理不重放旧设置；竞争通知不被生命周期响应覆盖，断线后选择失效。
+  257 条其他 Thread 设置变化超过有界记录容量后，恢复不再保留旧有效 Fast 确认；已知选择仍保留。
+  未绑定的新显式选择在目录移除档位或功能关闭时分别拒绝，历史选择保持原值；空闲释放返回 busy 且不取消订阅，
+  提交失败保留 pending，撤权后不新增默认值写入。上述端口采用隔离注入，不等于在线模型或渠道实测。
+- 独立复查补齐四个关联缺口：首次绑定的 capture/restore 保留新显式选择的进程内来源，失败重试仍复核功能开关与模型目录；
+  `turn/start` 成功响应仅在提交前设置快照仍为当前值时更新选择；Luna Reserve 在选择未知时延后恢复，保留原模型记录；
+  设置通知及 Luna Reserve 的设置观察移到同步收件阶段，避免旧队列事件重新确认过时选择或覆盖断线状态。
+  来源标记没有进入持久化 Schema，同步观察只更新内存状态及计时器，不等待平台输出。
+  经实际 MemoryBindingStore、Router、ModelSelectionService、Core、ConversationService 及展示函数的隔离调用，
+  首次提交失败后关闭功能或移除档位均返回 `model.selection.expired`，没有新增 Turn RPC；恢复能力后重试成功。
+  迟到成功响应遇新通知仍显示“已选 Ultrafast；有效档位未知”，遇断线仍显示“未知（用户选择未知）”；
+  连续通知的旧队列事件与断线后队列事件均未覆盖最新状态。
+  Luna Reserve 的隔离调用在读取前或读取中选择变未知时，后续均恢复 ordinary 模型及 fast 选择（两次设置写入、两条通知）；
+  真实用户改选则保留用户设置（一次设置写入、一条通知），没有错误恢复旧模型。
+  独立复查另沿动态工具授权/确认/取消与 SQLite 领取、协议新增字段的实际消费者、套餐/Hook/图片及所有档位展示路径核对合同，
+  未新增其他确定性代码修复；当前专题的固定源码基线已更新，历史实际观察仍保留当时版本。
+- SCI/SCI Plus 已贯通稳定类型、查询与通知白名单、渠道及 WebUI 标签。隔离输入观察到两种套餐均保留原值并显示正确名称，
+  账户及额度通知均进入对应事件；未批准套餐仍拒绝。没有使用真实 SCI 账户，未据此宣称额度后端或 Luna Reserve 在线轮询已验收。
+- 使用独立 Codex Home 和精确 0.164.0 的真实 App Server，经项目 StdioTransport、Client、Hook 用例及文本渲染入口，
+  列出了用户来源的两个新事件和插件来源的 PreModelRequest；预览→确认→写后回读返回 trusted，重复令牌报 `hooks.review-expired`。
+  插件信任值含 declaration/content 两部分，修改临时插件 README 后再次读取返回 modified，所有自有进程已关闭。
+  Hook 完成通知的隔离输入分别产出两个新事件，未知事件仍忽略；未触发在线模型实际执行 Hook，未观察多 Provider 刷新。
+- `approved_prefixes` 的共同投影保留空字符串、忽略缺省/null，非字符串明确拒绝；WebUI 中英文标签已同步。
+  未修改用户模型目录，未把只读投影观察当作浏览器端交互验收。
+- 图片消费以仓库内已有 PNG 进行隔离观察：传入仅含 fileId 和 savedPath、没有 result 的 Item，Client 仍投影路径，
+  持久输出快照保存 1166 字节 PNG 并移除原路径，不暴露 fileId；Telegram 允许持久投递、微信按既有策略忽略。
+  相对路径与非图片文件分别被拒绝为 invalid-path、unsupported-image；未调用真实图片模型或平台发送。
+- 真实 App Server 在全局选择 Fast、功能开关关闭的临时配置下返回 `serviceTier: null`、idle Thread，印证不能从有效空值反推用户选择。
+  模型端点仅指向不可用的本地端口，未使用用户凭据或调用付费模型。
+
+精确协议、公开 CLI 合同、类型与版本、模块边界、Lint、Gateway/WebUI 构建、文档索引、中英文键及 Shell 语法检查已执行；
+首轮档位提交检查和通知竞争窗口修改已补做类型、Lint 与 Gateway 构建复核；独立复查补充修改的最终静态状态以正常提交门禁结果为准。
+统一报告位于本轮临时目录 `/tmp/codexc-0164-validation/validation-results.json`，其中文档阶段按脚本设计跳过，文档检查随后单独通过。
+静态工作流状态不代替上述行为证据。
+真实模型回复、Guardian 提权重审、在线动态工具整轮取消、原生 TUI 与渠道并用、真实图片生成/平台发送、企业 MCP、
+Windows/macOS 服务及回退恢复未观察；这些边界仍需对应环境和部署授权，不标为已验收。
+
+## 延续的基线取舍
+
+以下记录 `0.163.0` 已采用且本轮继续保留的行为，以及原版本观察；不能当作 `0.164.0` 的实测。
+**既有决定：保留现有渠道能力边界，不为升级新增无需求的实验功能。**
 源码、生成协议、公开 CLI 合同和 CI 已同步。升级实施阶段未修改全局 CLI 或运行中的共享服务；
 操作者随后已完成部署与重启，部署后只读审查确认运行版本为 `0.163.0`。
 部署状态不替代下文各项功能的行为验收。
@@ -389,7 +552,7 @@ Workspace 保留为渠道可选目录和 Conversation 路由配置；Thread、�
 
 ## 全表复核范围与结论
 
-本次 0.163.0 复核覆盖精确生成差异、Client 到 Core/Surface 的消费链、配置与权限恢复、动态工具
+此前 0.163.0 复核覆盖精确生成差异、Client 到 Core/Surface 的消费链、配置与权限恢复、动态工具
 取消、模型请求到 Provider Proxy/Relay 的边界，以及安装更新、启动版本核验、CI 和文档合同。
 本页开头记录的隔离运行观察仍有效；静态关联审查不等于重新执行所有既有能力的验收。
 此前全表复核中的能力分类、持续不采用与重新评估条件继续作为既有决定保留。

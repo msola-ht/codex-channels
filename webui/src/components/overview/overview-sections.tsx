@@ -75,6 +75,8 @@ const planTypeKeys: Readonly<Record<string, MessageKey>> = {
   enterprise_cbp_usage_based: "overview.planTypes.enterpriseUsageBased",
   enterprise: "overview.planTypes.enterprise",
   edu: "overview.planTypes.edu",
+  sci: "overview.planTypes.sci",
+  sci_plus: "overview.planTypes.sciPlus",
   unknown: "overview.planTypes.unknown",
 }
 

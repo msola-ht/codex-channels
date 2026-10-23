@@ -44,6 +44,8 @@ export function renderWeixinStartupNotification(
     | "modelProvider"
     | "effort"
     | "serviceTier"
+    | "serviceTierKnown"
+    | "effectiveServiceTier"
     | "modelPending"
     | "effortPending"
     | "fastModePending"

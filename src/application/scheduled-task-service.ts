@@ -167,13 +167,14 @@ export interface ScheduledTaskUseCases {
     token: string,
     operation?: ScheduledTaskOperationContext,
   ): Promise<{ action: "created" | "deleted"; task: ScheduledTaskView }>;
-  list(target: ConversationTarget, actorId: string, page?: number, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskListResult>;
+  list(target: ConversationTarget, actorId: string, page?: number, operation?: ScheduledTaskOperationContext, selectionMode?: "snapshot" | "id"): Promise<ScheduledTaskListResult>;
   runs(
     target: ConversationTarget,
     actorId: string,
     selector: string,
     page?: number,
     operation?: ScheduledTaskOperationContext,
+    selectionMode?: "snapshot" | "id",
   ): Promise<ScheduledTaskRunListResult>;
   rename(target: ConversationTarget, actorId: string, selector: string, name: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView>;
   pause(target: ConversationTarget, actorId: string, selector: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView>;
@@ -397,7 +398,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     return { action: "deleted", task: toTaskView(deleted, task) };
   }
 
-  async list(target: ConversationTarget, actorId: string, page = 1, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskListResult> {
+  async list(target: ConversationTarget, actorId: string, page = 1, operation?: ScheduledTaskOperationContext, selectionMode: "snapshot" | "id" = "snapshot"): Promise<ScheduledTaskListResult> {
     operation?.assertCurrent();
     this.requireActor(target, actorId);
     const tasks = (await this.store.listTasks({ conversation: target, actorId }))
@@ -409,10 +410,12 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       throw scheduledError("scheduled-task.command.invalid", "计划任务页码超出范围");
     });
     const visible = pageSlice(tasks, page, taskPageSize, pageCount);
-    this.rememberSnapshot(this.taskSnapshots, snapshotKey(target, actorId), tasks.map((task) => task.taskId));
+    if (selectionMode === "snapshot") {
+      this.rememberSnapshot(this.taskSnapshots, snapshotKey(target, actorId), tasks.map((task) => task.taskId));
+    }
     return {
       tasks: visible.map((task) => toTaskView(task)),
-      selectors: visible.map((_task, index) => pageSelector(page, index, taskPageSize)),
+      selectors: visible.map((task, index) => selectionMode === "id" ? task.taskId : pageSelector(page, index, taskPageSize)),
       page,
       pageCount,
       totalTaskCount: tasks.length,
@@ -425,8 +428,11 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     selector: string,
     page = 1,
     operation?: ScheduledTaskOperationContext,
+    selectionMode: "snapshot" | "id" = "snapshot",
   ): Promise<ScheduledTaskRunListResult> {
-    const task = await this.resolveTask(target, actorId, selector, operation);
+    const task = selectionMode === "id"
+      ? await this.requireOwnedTask(target, actorId, selector, operation)
+      : await this.resolveTask(target, actorId, selector, operation);
     operation?.assertCurrent();
     const runs = await this.store.listRuns(task.taskId, { limit: 1_000 });
     operation?.assertCurrent();
@@ -436,14 +442,16 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       throw scheduledError("scheduled-task.command.invalid", "计划任务页码超出范围");
     });
     const visible = pageSlice(runs, page, runPageSize, pageCount);
-    this.rememberSnapshot(
-      this.runSnapshots,
-      snapshotKey(target, actorId),
-      runs.map((run) => run.runId),
-    );
+    if (selectionMode === "snapshot") {
+      this.rememberSnapshot(
+        this.runSnapshots,
+        snapshotKey(target, actorId),
+        runs.map((run) => run.runId),
+      );
+    }
     return {
       task: toTaskView(task),
-      runs: visible.map((run, index) => ({ ...run, selector: pageSelector(page, index, runPageSize) })),
+      runs: visible.map((run, index) => ({ ...run, selector: selectionMode === "id" ? run.runId : pageSelector(page, index, runPageSize) })),
       page,
       pageCount,
       totalRunCount: runs.length,

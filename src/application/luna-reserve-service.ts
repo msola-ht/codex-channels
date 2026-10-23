@@ -156,6 +156,9 @@ export class LunaReserveService {
       thread: this.threadGenerations.get(threadId) ?? 0,
     };
     const settings = this.options.router.modelSettingsForThread(threadId);
+    // Lost subscription or an unconfirmed lifecycle snapshot can leave selection
+    // unknown. Defer without treating that absence as evidence of a user change.
+    if (settings?.serviceTierKnown !== true) return;
     if (settings) this.observedSettings.set(threadId, { current: settings });
     const operation = this.options.locks.forConversation(target, async () => {
       if (!this.isCurrentRefresh(threadId, generation)) return;
@@ -200,6 +203,7 @@ export class LunaReserveService {
       this.clearThread(threadId);
       return;
     }
+    if (current.serviceTierKnown !== true) return;
     const previous = this.returnByThread.get(threadId);
     if (previous && !sameModelSettings(current, previous.reserveSettings)) {
       this.clearThread(threadId);
@@ -223,6 +227,7 @@ export class LunaReserveService {
     const offer = limits.lunaReserve;
     if (
       !target
+      || current.serviceTierKnown !== true
       || !offer
       || !limits.accountId
       || this.hasPendingSelection(target)
@@ -247,7 +252,7 @@ export class LunaReserveService {
     this.returnByThread.set(threadId, {
       accountId: limits.accountId,
       settings: current,
-      reserveSettings: { ...settings, modelProvider: "openai" },
+      reserveSettings: { ...settings, modelProvider: "openai", serviceTierKnown: true },
     });
     this.ensureTimer();
     this.options.output.publish({
@@ -328,7 +333,7 @@ export class LunaReserveService {
         || this.deferWhileActive(threadId)
       ) throw invalidated;
       const observed = this.observedSettings.get(threadId);
-      if (observed) observed.submitted = { ...settings, modelProvider: "openai" };
+      if (observed) observed.submitted = { ...settings, modelProvider: "openai", serviceTierKnown: true };
     };
     try {
       await this.options.port.updateLunaReserveThreadSettings(threadId, settings, beforeSubmit);
@@ -354,6 +359,7 @@ export class LunaReserveService {
       || !sameModelSettings(this.options.router.modelSettingsForThread(threadId), {
         ...settings,
         modelProvider: "openai",
+        serviceTierKnown: true,
       })
     ) {
       this.returnByThread.delete(threadId);
@@ -446,6 +452,7 @@ function sameModelSettings(
     && (current.modelProvider ?? "openai") === (expected.modelProvider ?? "openai")
     && current.effort === expected.effort
     && current.serviceTier === expected.serviceTier
+    && (current.serviceTierKnown === true) === (expected.serviceTierKnown === true)
     && current.collaborationMode === expected.collaborationMode;
 }
 
@@ -457,16 +464,12 @@ function settingsForModel(
   const effort = previous.effort && efforts.has(previous.effort)
     ? previous.effort
     : model.defaultReasoningEffort;
-  const tiers = new Set(model.serviceTiers.map((tier) => tier.id));
-  const serviceTier = previous.serviceTier && tiers.has(previous.serviceTier)
-    ? previous.serviceTier
-    : model.defaultServiceTier;
   return {
     model: model.model,
     effort,
     // App Server represents an explicitly cleared tier as "default" in the
     // applied settings notification, rather than the catalog's null default.
-    serviceTier: serviceTier ?? "default",
+    serviceTier: previous.serviceTier ?? "default",
     collaborationMode: previous.collaborationMode,
   };
 }

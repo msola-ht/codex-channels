@@ -170,7 +170,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   读取等 App Server 方法的类型化封装；按 Workspace 读取有效思考等级与服务层级，模型、思考等级、服务层级默认值和受控 agents 设置统一通过
   同一个 `config/batchWrite` 用户配置事务写入；`writeDefaultServiceTier` 只接受 Standard 对应的
   `default`、`fast` 与 `ultrafast`，渠道通过模型目录检查可用性，下一 Turn 覆盖仍走 `turn/start.serviceTier`。
-  `readModelAccelerationSettings` 复用带 Workspace `cwd` 的 `config/read`，结合 `configRequirements/read` 独立速度合同和稳定 `featureRequirements`，只向 Application 返回配置服务层级与 Fast/Ultrafast 两个有效开关；受管精确值优先，缺失按锁定版本默认 true，异常响应拒绝。`readDefaultServiceTier` 排除被禁用的加速默认值；用户设置快照按需投影同一独立开关，原始用户配置仍用于版本化编辑。Provider 路由固定到目标实例，不暴露原始配置。
+  `readModelAccelerationSettings` 复用带 Workspace `cwd` 的 `config/read`，结合 `configRequirements/read` 独立速度合同和稳定 `featureRequirements`，只向 Application 返回配置服务层级与 Fast/Ultrafast 两个有效开关；受管精确值优先，缺失按锁定版本默认 true，异常响应拒绝。`readDefaultServiceTier` 保留未经功能过滤的配置选择，不证明既有 Thread 的选择或有效档位；用户设置快照按需投影同一独立开关，原始用户配置仍用于版本化编辑。Provider 路由固定到目标实例，不暴露原始配置。
   受控的读改写流程从原始用户层取得版本并通过
   `expectedVersion` 拒绝并发覆盖；Hook 目录和用户层版本通过独立窄端口读取，不把原始配置交给
   Application。Hook 状态写入携带 `expectedVersion` 和 `reloadUserConfig: true`，不自动重试；

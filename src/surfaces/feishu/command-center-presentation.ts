@@ -22,7 +22,7 @@ import {
   formatConversationAutoReview,
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
-import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListDisplayName, modelListEntry } from "../provider-format.js";
+import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, formatServiceTierSetting, modelListDisplayName, modelListEntry } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import type {
   FeishuCommandCenterAction,
@@ -659,7 +659,7 @@ export function renderCommandCenterChoices(
           `- 模型：${currentModelName}`,
           `- Provider：${formatCodexProviderLabel(result.state.modelProvider)}`,
           `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
-          `- 速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
+          `- 速度：${formatServiceTierSetting(result.state, currentModel)}`,
           "",
           "请先选择提供商，再选择该提供商下的模型。",
         ].join("\n"),
@@ -677,7 +677,7 @@ export function renderCommandCenterChoices(
       description: [
         "当前设置",
         `- Provider：${formatCodexProviderLabel(result.state.providerFilter)}`,
-        `- 速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
+        `- 速度：${formatServiceTierSetting(result.state, currentModel)}`,
         "",
         "已选择该 Provider，请继续选择模型。选择模型后将继续选择思考等级。",
       ].join("\n"),
@@ -703,7 +703,7 @@ export function renderCommandCenterChoices(
         "当前设置",
         `- 模型：${currentModelName}`,
         `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
-        `- 速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
+        `- 速度：${formatServiceTierSetting(result.state, currentModel)}`,
       ].join("\n"),
       descriptionFormat: "markdown",
       choices: efforts.map(
@@ -717,10 +717,11 @@ export function renderCommandCenterChoices(
     };
   }
   if (action === "fast") {
-    const speed = formatServiceTier(result.state.serviceTier, currentModel);
+    const speed = result.state.serviceTierKnown !== true
+      ? "未知" : formatServiceTier(result.state.serviceTier, currentModel);
     return {
       title: "切换速度",
-      description: `当前：${speed}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""} · 当前模型${formatModelSpeedSupport(currentModel)}`,
+      description: `当前：${formatServiceTierSetting(result.state, currentModel)} · 当前模型${formatModelSpeedSupport(currentModel)}`,
       choices: [
         {
           label: `${speed === "Standard" ? "✓ " : ""}Standard`,

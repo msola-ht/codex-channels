@@ -333,7 +333,7 @@ auto_recap = false
 
 Codex 0.156.1 已停用模型人格：CLI 与 WebUI 不再提供人格选择，保存其他偏好不会改写配置中已有的 `personality`。
 
-在 `codexc config → Codex 新会话与用户偏好 → 普通用户偏好` 中单独选择推理摘要，未配置时显示继承，不主动写入默认值。“配置默认值与用户偏好”的整组入口在尚未配置时预选“关闭”，与配套 CLI 0.163.0 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
+在 `codexc config → Codex 新会话与用户偏好 → 普通用户偏好` 中单独选择推理摘要，未配置时显示继承，不主动写入默认值。“配置默认值与用户偏好”的整组入口在尚未配置时预选“关闭”，与配套 CLI 0.164.0 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
 检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
 
@@ -499,7 +499,7 @@ Remote 的 `--profile` 继续支持原生个人 Profile 和已登记的规范受
 受管及自定义切换 Provider（包括 CP）统一通过原生 `--profile` 加载对应配置，其中显式的搜索值覆盖主配置；App Server 仍由受管启动器从同一配置生成必要参数。
 可用 `--workspace` 选择登记目录，或用一次 `-C DIR` / `--cd DIR` 指定目录；两者不能同时使用。原生 `resume` / `fork` 上的目录参数同样参与选择，重复目录参数被拒绝。不能透传 `--remote` 或 `--remote-auth-token-env` 替换受管连接；原生 `--` 之后的内容按字面参数保留。
 Remote 不按 Provider 或模型限制自动审查，也不为审批资格固定模型或限制个人 Profile。
-Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.163.0 不应用启动参数中的 reviewer 覆盖；
+Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.164.0 不应用启动参数中的 reviewer 覆盖；
 恢复后应核对实际模型与审批方式。
 
 ### Codex Desktop App 共享（macOS / Windows 预览）
@@ -568,7 +568,7 @@ Remote Control 或手机配对。Desktop 的连接环境属于未公开兼容入
 macOS 上使用 ChatGPT `26.908.70816` 的既有实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
 私有 UDS，并在首次附加当前工具 Pipe 时短暂重启目标 App Server 子进程，以 OpenAI 签名的 Desktop
-Node 托管项目锁定的 Codex CLI；开发基线为 0.163.0，既有私有 Pipe 与签名链实机验收使用 0.154.0，
+Node 托管项目锁定的 Codex CLI；开发基线为 0.164.0，既有私有 Pipe 与签名链实机验收使用 0.154.0，
 升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到目标实例，
 Host 租约存在时空闲释放不会停止目标实例。目标实例已空闲释放时，`codexc app` 会先获取临时租约，
 按需恢复实例并保护启动预检，再通过 App Server 的官方 `thread/loaded/list` 和 `thread/read`
@@ -869,7 +869,11 @@ Windows 占用诊断异步执行并限制等待时间，超时按无法诊断处
 加速档位必须由 App Server 的当前模型目录明确提供；模型、账号或 Provider 不支持时拒绝开启，不回退为其他档位。
 设置在下一次 Turn 生效；主 Provider 同时保存 Codex 用户级默认值，独立 Provider 不改写主实例默认值。
 飞书加速菜单按模型能力展示可选档位，Telegram 和微信使用相同命令语义。可用性和消耗以账号及上游规则为准；
-Fast 和 Ultrafast 分别受目标 Provider、当前 Workspace 的 `features.fast_mode` 和 `features.ultrafast_mode` 及受管策略约束，互不代替。对应档位关闭时，渠道在写入前拒绝开启，配置向导与 WebUI 不提供该选项；仍允许选择 Standard 或 `/fast off`。保存的偏好或待生效档位在提交前若已被禁用，会要求重新选择；被禁用的配置默认值不显示为有效加速。Gateway 不替用户打开功能开关，最终以 App Server 返回状态为准。
+Fast 和 Ultrafast 分别受目标 Provider、当前 Workspace 的 `features.fast_mode` 和 `features.ultrafast_mode` 及受管策略约束，互不代替。对应档位关闭时，渠道在写入前拒绝开启，配置向导与 WebUI 不提供该选项；仍允许选择 Standard 或 `/fast off`。新选择的待生效加速档位在提交前若已被禁用，会要求重新选择；恢复的历史选择保留，由 App Server 按实际模型及功能开关过滤。Gateway 不替用户打开功能开关。
+状态区分“已选档位”和“有效档位”；设置通知只确认用户选择，不证明已实际生效。启动或恢复响应返回空服务档位（有效 Standard）时，
+可能是明确选择 Standard，也可能是 Fast 被过滤，因此选择会显示未知。普通对话和同一 Thread 的显式恢复仍可继续；保存偏好、切换/释放会话前捕获设置或创建计划任务需要固定选择时，
+请先显式执行 `/fast off`、`/fast on` 或 `/fast ultrafast`。计划任务仍要求待生效设置已提交到会话后再创建；选择未知时自动空闲释放会保留绑定。
+新建计划任务将确认的 Standard 显式保存为 `default`；既有任务中空档位仍按原合同继承执行时配置，不自动改写历史数据。
 本地 `codexc config → Codex 新会话与用户偏好 → 默认加速档位` 和 WebUI 的“全局设置 → 模型默认值”同样提供
 Standard/Fast/Ultrafast；按当前模型能力和对应档位开关提供加速选项，两个加速档位均不可用时仍可选择 Standard。
 未显式配置时显示“跟随上游默认”，不会把它等同于明确的 Standard。配置入口沿用预览/确认和配置修订检查，
@@ -911,7 +915,11 @@ App Server；尚未绑定会话时使用已确定的模型 Provider，无法确�
 请在本地 Codex `/hooks` 审查。微信还会检查命令、匹配条件和来源路径能否原样展示；需要替换 Markdown 符号时不允许渠道信任，手动输入信任或确认命令也不能绕过。已信任的非受管项仍可启停。不能通过此入口注册 Hook、部署脚本或一次性信任全部 Hook。
 
 **信任和启用是独立状态。** 新增或变更的非受管 Hook 需要信任当前定义；信任一个已停用 Hook
-不会替它开启。信任哈希对应配置定义，不覆盖所引用脚本的文件内容。
+不会替它开启。普通 Hook 的信任哈希对应配置定义，不覆盖所引用脚本的文件内容。
+插件 Hook 还核对插件内容指纹；内容变化后需要重新审查，但该指纹不覆盖全部外部依赖，不能代替脚本审查。
+Codex 0.164.0 在首次列举或执行已有受信任插件 Hook 时可能在实际用户配置文件同级的
+`.hook-trust/` 建立基线；显式信任会写入内容哈希。升级前应连同该目录备份用户配置及插件内容，
+回退时保留这些数据；旧版不会提供新版的内容变化保护。
 这些操作持久写入 Codex Home 的用户配置。项目的主实例和 Provider 隔离实例共用该配置，
 因此会影响其他 Provider 和使用相同 Hook 的会话，并非仅当前聊天的一次授权。
 Gateway 数据库不保存另一份 Hook 定义、脚本或信任状态。

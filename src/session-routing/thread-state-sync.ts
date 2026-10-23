@@ -17,7 +17,10 @@ export class ThreadStateSynchronizer {
 
   /** Apply freshness facts before asynchronous presentation queues. */
   observeExecutionContext(event: ThreadStateEvent): (() => boolean) | undefined {
-    if (event.type === "thread.settings.updated") this.router.observeThreadCwd(event.threadId, event.cwd);
+    if (event.type === "thread.settings.updated") {
+      this.router.observeThreadCwd(event.threadId, event.cwd);
+      this.router.updateModelSettings(event.threadId, event.settings);
+    }
     else if (event.type === "thread.closed") return this.router.markThreadUnsubscribed(event.threadId);
     else if (event.type === "thread.archived" || event.type === "thread.deleted") {
       this.router.invalidateExecutionContext(event.threadId);
@@ -28,7 +31,8 @@ export class ThreadStateSynchronizer {
   handle(event: ThreadStateEvent): void {
     switch (event.type) {
       case "thread.settings.updated":
-        this.router.updateModelSettings(event.threadId, event.settings);
+        // Settings facts were reduced at admission. Replaying an older queued
+        // event here would overwrite a newer notification or lifecycle result.
         return;
       case "thread.name.updated":
         this.router.updateThreadName(event.threadId, event.name);

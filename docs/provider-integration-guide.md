@@ -391,7 +391,7 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 
 修改后运行 `codexc restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
-所有通过 Codex 的 Provider（官方、第三方固定及切换）统一采用锁定 Codex 0.163.0 的重试语义：HTTP 失败最多重试 4 次、流失败最多重试 5 次。第三方启动显式注入 `4/5`；代理和 Chat 桥不叠加重发。新建受管 Profile 写入相同值，已有配置文件不自动改写，启动覆盖统一实际行为；Profile 中已有重试字段仍按非负安全整数读取。
+所有通过 Codex 的 Provider（官方、第三方固定及切换）统一采用锁定 Codex 0.164.0 的重试语义：HTTP 失败最多重试 4 次、流失败最多重试 5 次。第三方启动显式注入 `4/5`；代理和 Chat 桥不叠加重发。新建受管 Profile 写入相同值，已有配置文件不自动改写，启动覆盖统一实际行为；Profile 中已有重试字段仍按非负安全整数读取。
 
 所有 Codex 实例保留原生网络重连、取消和 WebSocket→HTTP 降级，不注入第三方专属的 `unbounded_connection_retries` 开关。该功能由 Codex 的默认值、用户设置及受管要求共同决定；锁定版本默认开启，符合条件的普通采样连接失败可能持续退避重连。HTTP、流重试和传输降级是不同层，因此不承诺整个 Turn 的固定发送次数或总时长。HTTP 重试针对可恢复的 5xx 和传输错误，使用 Codex 退避及上游等待建议；Chat 桥保留经过校验的 `Retry-After`。独立 Relay 不经过 Codex，不自行重试，由调用方决定。
 
@@ -533,7 +533,7 @@ CLP 等 Chat 上游仍须通过 `codexc remote -p <提供商>` 连接受管转�
 `provider` 管理链路。WebUI 的 Provider 设置中选择“自定义提供商”。
 此类型使用 `cp-` 开头的 Provider ID（其后 1-61 位 ASCII 字母、数字、`-` 或 `_`）。CLI 添加时选择自定义标识符、或在 WebUI 添加此类型时，`cp-` 前缀固定，只填写后面的名称；例如输入 `llm`，保存为 `cp-llm`。编辑已有提供商时 ID 不变。
 例如 `cp-llm`，终端使用 `codexc remote -p cp-llm` 或 `codexc app -p cp-llm`，规范 Profile 与文件分别为 `sf-cp-llm` 和 `sf-cp-llm.config.toml`。`cp-` 表示自定义提供商，与上游协议无关；协议独立选择 Responses 或 Chat Completions。
-所有 Provider 的固定、切换模式以及独立 Relay 共用统一请求策略。完整协议事件空闲为 300 秒，WebSocket 建连为 15 秒，对齐锁定 Codex 0.163.0 的有效默认值；生成没有固定总期限。HTTP 首响应头额外保留 300 秒网络等待，错误正文最多 5 秒，非流式正文最多 300 秒；下游交付受阻最多 30 秒，终态和关闭收尾最多 5 秒。聚合与 Chat 桥外层不重复启动内层模型计时器。
+所有 Provider 的固定、切换模式以及独立 Relay 共用统一请求策略。完整协议事件空闲为 300 秒，WebSocket 建连为 15 秒，对齐锁定 Codex 0.164.0 的有效默认值；生成没有固定总期限。HTTP 首响应头额外保留 300 秒网络等待，错误正文最多 5 秒，非流式正文最多 300 秒；下游交付受阻最多 30 秒，终态和关闭收尾最多 5 秒。聚合与 Chat 桥外层不重复启动内层模型计时器。
 
 代理本地期限使用同一套错误分类：上传 408 `upload_timeout`、准备 504 `preparation_timeout`、上游等待 504 `upstream_timeout`、交付与收尾 504 `delivery_timeout`。可发送结构化错误时，用 `timeout_stage` 区分 `upload/prepare/headers/body/stream/delivery/terminal`；响应头已经发送时不改写 HTTP 状态。上游已返回的错误及安全 `Retry-After` 不因诊断正文读取失败而被替换。Chat 桥和 Relay 的直接适配器显式请求 `Accept-Encoding: identity`，成功响应只接受缺省或 `identity` 编码，并精确校验 JSON/SSE 媒体类型；透明 Responses 代理仍保留上游传输合同。
 

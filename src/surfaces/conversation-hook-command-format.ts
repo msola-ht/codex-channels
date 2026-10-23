@@ -10,7 +10,7 @@ const hookTrustLabels = {
   managed: "受管（只读）",
   untrusted: "未信任",
   trusted: "已信任",
-  modified: "配置已变化，需重新审查",
+  modified: "定义或插件内容已变化，需重新审查",
 } as const;
 
 export function formatConversationHooks(view: HookCommandView): string {
@@ -56,7 +56,7 @@ export function formatConversationHooks(view: HookCommandView): string {
   lines.push(
     "",
     "信任及启停会持久修改共享 Codex 用户目录中的 Hook 配置，影响使用该配置的其他 Provider 实例与会话。",
-    "信任只表示认可当前配置，不表示执行成功；配置哈希不覆盖脚本文件内容，修改脚本需另行审查。",
+    "信任只表示认可当前定义，不表示执行成功。普通 Hook 的配置哈希不覆盖脚本内容；插件 Hook 还核对插件内容指纹，但不覆盖全部外部依赖。",
   );
   if (view.confirmation) {
     lines.push(

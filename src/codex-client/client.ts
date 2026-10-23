@@ -1047,8 +1047,6 @@ export class CodexAppServerClient implements
 
   async readDefaultServiceTier(cwd: string, modelProvider?: string, beforeSubmit?: () => void): Promise<string | null> {
     const settings = await this.readModelAccelerationSettings(cwd, modelProvider, beforeSubmit);
-    if (settings.serviceTier === "ultrafast" && !settings.ultrafastEnabled) return null;
-    if ((settings.serviceTier === "fast" || settings.serviceTier === "priority") && !settings.fastEnabled) return null;
     return settings.serviceTier;
   }
 

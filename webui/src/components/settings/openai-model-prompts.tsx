@@ -20,6 +20,7 @@ const promptLabels: Record<string, MessageKey> = {
   "approvals.on_request_auto_review": "openAiModelPrompts.autoReview",
   "approvals.never": "openAiModelPrompts.never",
   "approvals.unless_trusted": "openAiModelPrompts.untrusted",
+  "permissions.approved_prefixes": "openAiModelPrompts.approvedPrefixes",
   "collaboration_modes.default": "openAiModelPrompts.defaultMode",
   "collaboration_modes.plan": "openAiModelPrompts.planMode",
   "auto_review.rejection_instructions": "openAiModelPrompts.rejection",

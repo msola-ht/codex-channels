@@ -259,6 +259,8 @@ export function formatSurfaceUserFacingError(
       return `当前模型不支持 ${error.details.tier === "Ultrafast" ? "Ultrafast" : "Fast"} 档位：${detail(error, "model", "未知")}`;
     case "fast.disabled":
       return "Codex features.fast_mode 已关闭，不能启用 Fast/Ultrafast；仍可用 /fast off 回到 Standard";
+    case "fast.selection.unknown":
+      return "App Server 尚未返回当前选择的速度档位，无法固定保存；请先用 /fast on、/fast ultrafast 或 /fast off 明确选择后重试";
     case "provider.account.unavailable":
       return `${detail(error, "provider", "当前提供商")}的账户查询失败，请检查配置或稍后重试`;
     case "collaboration-mode.unsupported":
