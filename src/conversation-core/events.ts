@@ -301,6 +301,10 @@ export interface OperationUpdate {
   action?: string;
   detail?: string;
   imagePath?: string;
+  /** 上游附件引用，仅在所属 Thread/Item 的内存事件中保留，不用于模型输入或持久输出。 */
+  imageFileId?: string;
+  /** Surface 输出快照保留的内容不可获取状态，不代表图片生成失败。 */
+  imageDeliveryUnavailable?: boolean;
   receiverThreadIds?: string[];
   subagentStates?: SubagentState[];
   status: OperationStatus;

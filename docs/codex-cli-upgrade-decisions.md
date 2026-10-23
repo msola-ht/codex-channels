@@ -58,11 +58,30 @@
 | --- | --- |
 | 导出本机诊断 ZIP，便于排障 | 暂不接入新增稳定 `feedback/save`。渠道没有获授权的诊断导出入口；诊断可能包含敏感材料，不能把新增方法直接暴露给外部 Actor |
 | 在原会话之外生成实验样本或预测结果 | 暂不接入实验 `thread/sample`、其取消接口及预测分支 MCP 开关。当前 Thread/Fork/Queue 合同不需要这些能力，不扩大受控例外 |
-| 用文件引用表达生成图片及其输入图 | 仅同步生成结构，保持飞书/Telegram 通过 `imageGeneration.savedPath` 发送本地图片；不新建 `fileId` 下载或 Base64 回退路径。`ext/image-generation/src/tool.rs:249` 仍先落盘，随后选择 result/fileId 并保留 saved_path；`app-server-protocol/src/protocol/thread_history.rs:920` 保留历史路径。本地 `operation-adapter.ts:125`→Core→持久输出快照→Surface 只消费该路径，`surfaces/generated-image.ts` 继续校验文件。微信现有投递策略过滤普通操作事件，显式 `channel send-image` 另走授权文件发送，不能宣称三个渠道都自动发送此 Item。源码层面无需新增图片业务适配，实际生成和发送待观察；不传播 inputImages 路径和 hash |
+| 用文件引用表达生成图片及其输入图 | 后续按用户选择接入第一阶段：在所属 Thread/Item 内存事件中原样保留 `fileId`；飞书/Telegram 对仅有引用且已完成的图片明确提示内容不可获取，持久输出移除引用并保留该状态。有 `savedPath` 继续沿原有图片校验、快照及发送链路；微信保持过滤普通操作事件。尚不接入文件解析、下载、Base64 回退或模型回传，也不传播 `inputImages`。上游默认 App Server 使用内联附件存储，UI 引用与 Core 模型图片准备分开；协议兼容不等于已验证远端文件解析或实际生成发送。 |
 | 解释或展示 MCP 工具列表扩展元数据、管理 Desktop 存储要求 | `McpServerStatus.toolListMeta` 后续按用户选择仅在详情链路内部保留，见下文“MCP 工具目录元数据内部透传”记录；仍不解释键或展示，概览不携带。`ApplicationRequirements.storage` 的 defaultProjectParent/projectlessWorkspaceRoot 是 Desktop 存储位置，不是文件系统权限；Client 的 configRequirements 投影不消费 application，不改变 Gateway Workspace Registry 或 StateStore |
 | 为请求附加 Responses 客户端元数据或语音产品会话 ID | 不接入实验 `TurnStartParams/TurnSteerParams.responsesapiClientMetadataPatch`、`ThreadRealtimeStartParams.voiceSessionId`；现有调用没有消费者，也不在受控例外内 |
 | 使用冻结云技能目录、启动配置发现、运行时注册、WebSocket 压缩或跨执行环境复制文件 | 当前共享本机 App Server 路径无对应需求，不主动启用实验功能或扩大初始化协商；继续原有实例租约与服务生命周期 |
 | 迁移 NFS 上的官方 SQLite 数据库 | 不接入、不执行实验 `migrate-nfs-db`。官方数据库由 App Server 管理；若以后确有运维需求，先独立制定备份、恢复与授权方案 |
+
+### 生成图片引用第一阶段接入
+
+后续授权范围为实时 Item 通知的引用兼容与内容不可获取提示。`fileId` 不进入模型输入、
+下载调用或持久载荷；App Server 历史读取没有新增图片引用重放，Journal 仅恢复提示状态。
+有路径的图片沿用既有快照和发送合同，不增加存储版本或隐式迁移。
+
+直接运行通知适配→Core→输出快照/解码，观察到非空引用原样保留、持久载荷移除引用、
+恢复后保留不可获取状态；空值、非字符串、外部伪造状态不被采纳，未绑定 Thread 不输出，
+进行中与失败状态不误报图片已生成。子代理独立审查了来源、路由、历史与投递边界。
+本地截获平台端口的飞书/Telegram `Outbox.deliver` 观察覆盖 full/compact/hidden、实时与恢复、
+路径优先、取消及平台端口失败：引用型完成结果只产生固定文字提示；有效 PNG 路径仍提交图片；
+取消不调用发送端口，发送失败不产生 confirmed 检查点；非法相对路径不回退引用。微信继续过滤。
+这些是隔离的入口运行观察，没有真实模型生成或平台外发，远端附件解析仍未实现和验证。
+重复上游完成通知可能重复投递，沿用既有语义，不承诺按 Item 恰好发送一次。
+提交前复审补齐 Telegram started→completed 的显示收尾：已有运行中操作记录时，
+完成事件更新同一记录为内容不可获取提示，避免独立通知后仍留下运行中状态。
+直接运行真实 Outbox 入口并截获平台端口，观察到一次运行中消息发送、一次同消息编辑，
+完成投递检查点为 started→confirmed；没有实际外发。
 
 ### 全链路关联审查覆盖
 

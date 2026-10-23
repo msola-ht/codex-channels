@@ -57,6 +57,7 @@
 - `outbound-image.ts`：读取 App Server `imageGeneration.savedPath` 映射的绝对路径或
   渠道 spool（`codexc channel send-image`）提交的图片；使用无符号链接文件句柄，限制为
   普通文件、10 MiB 和 PNG/JPEG 内容签名，不把路径或正文写入日志。
+  回复窗口仍忽略原生 `imageGeneration` 操作事件，包括只有 `fileId` 的完成结果；不新增引用下载或状态通知。
 - `updates-monitor.ts`：组合协议 Client 与游标 Store；按原始消息 ID 去重，普通消息在同一会话内保持
   顺序，不同会话可并行；交互回复命令使用独立的会话顺序通道，精确 `/stop` 绕过两类等待，
   均进入 Input Adapter 的既有授权边界。

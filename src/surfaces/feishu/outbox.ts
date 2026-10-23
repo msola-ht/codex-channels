@@ -23,7 +23,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { ContextCompactionNotices, isComputerUseOperation, isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
+import { ContextCompactionNotices, generatedImageUnavailableText, isComputerUseOperation, isExecutionOperation, isGeneratedImageUnavailable, shouldDisplayOperation } from "../operation-presentation.js";
 import {
   createPlanPresentation,
   type PlanPresentation,
@@ -315,6 +315,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
         this.textStreams.flushStreamsBeforeVisibleOutput(event.target.conversationId, event.threadId, event.turnId);
       };
       const imagePath = event.operation.imagePath;
+      if (isGeneratedImageUnavailable(event.operation)) {
+        flushStreamBeforeOutput();
+        this.delivery.enqueue(event.target.conversationId,
+          (signal) => this.sendMarkdown(event.target.conversationId, generatedImageUnavailableText, maximumFeishuMessageChunks, undefined, undefined, signal), true);
+        return;
+      }
       if (
         event.operation.kind === "imageGeneration"
         && event.operation.status === "completed"

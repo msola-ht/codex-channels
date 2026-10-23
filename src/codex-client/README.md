@@ -146,8 +146,10 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   清洗命令、查询及上游错误中的敏感文本；`commandExecution.commandActions` 非空、全部为
   read/listFiles/search 且来源不是用户终端命令时输出只读探索归类与文件名摘要，任何未知或畸形片段都退回
   原始命令；该判定沿用上游 best-effort 解析，`find … -delete`、`… | tee` 之类写入形态可能一并归类；
-  只把 `imageGeneration.savedPath` 映射为稳定生成图片
-  产物路径，不把 `imageView` 当作可外发产物。
+  把 `imageGeneration.savedPath` 映射为生成图片产物路径；`fileId` 原样保留为所属
+  Thread/Item 内存事件的 `imageFileId`，不解释为 URL、不提交模型、不用于跨 Provider 查询。
+  Surface 在持久输出快照中移除引用，仅保留内容不可获取状态；不消费 `result` 或 `inputImages`，
+  不把 `imageView` 当作可外发产物。
   `cua_repl.js` / `js_reset` 归为 MCP 的 `computerUse` 操作，`js` 只提取参数中的操作标题并
   脱敏限长，不把执行代码或原始结果带入稳定事件。
 - `file-change-approval-context.ts`：按每个 Client 的 Thread、Turn、Item 精确关联批准前的

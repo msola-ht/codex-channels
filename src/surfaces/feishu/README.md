@@ -277,6 +277,9 @@ Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长�
 平台输出顺序和关闭边界。生成图片路径来自 App Server `imageGeneration.savedPath` 或
 渠道 spool（`codexc channel send-image`），两者都在共享读取边界验证绝对路径、无符号链接
 普通文件、10 MiB 与 PNG/JPEG 签名；`imageView` 和用户上传图片不会自动外发。
+原生图片生成完成结果若只有上游 `fileId` 而无 `savedPath`，独立提示
+“图片已生成，但当前无法获取图片内容”，不显示引用或声称图片已发送，不受操作过程显示档位影响；
+持久恢复保留该状态但不保存引用，同时有路径时仍走原有图片发送链路。
 静态 CardKit Markdown 按单元素 5,000 个 Unicode 字符、最多 5 张卡片
 分片；纯文本和 `post + md` 降级按 UTF-8 序列化后的 20,000 字节计量。每个逻辑结果
 最多发送 5 条，超出时明确标记截断，避免单个结果无限占用同一 Chat 的发送任务。消息创建失败

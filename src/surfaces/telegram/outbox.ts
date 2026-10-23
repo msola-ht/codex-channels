@@ -26,7 +26,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { ContextCompactionNotices, isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
+import { ContextCompactionNotices, generatedImageUnavailableText, isExecutionOperation, isGeneratedImageUnavailable, shouldDisplayOperation } from "../operation-presentation.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createSubagentContactedPresentation,
@@ -383,6 +383,21 @@ export class TelegramOutbox {
           this.textStreams.flushBeforeVisibleOutput(chatId, turnKey);
         };
         const imagePath = event.operation.imagePath;
+        if (isGeneratedImageUnavailable(event.operation)) {
+          const state = this.operationLogFor(chatId, turnKey);
+          if (state?.records.has(event.operation.itemId)) {
+            state.records.set(event.operation.itemId, event.operation);
+            this.cancelOperationTimer(state);
+            flushStreamBeforeOutput();
+            this.enqueue(chatId, (signal) => this.flushOperationLog(state, false, signal), true, { purpose: "operation-log" });
+            return;
+          }
+          flushStreamBeforeOutput();
+          this.enqueue(chatId, async (signal) => {
+            await this.sendOperationMessage(chatId, generatedImageUnavailableText, undefined, signal);
+          }, true);
+          return;
+        }
         if (
           event.operation.kind === "imageGeneration"
           && event.operation.status === "completed"
@@ -1062,7 +1077,7 @@ export class TelegramOutbox {
       .map((itemId) => state.records.get(itemId))
       .filter((record): record is OperationUpdate => record !== undefined);
     for (const record of records) {
-      const text = formatOperationLog({
+      const text = isGeneratedImageUnavailable(record) ? generatedImageUnavailableText : formatOperationLog({
         order: [record.itemId],
         records: new Map([[record.itemId, record]]),
       }, display);
