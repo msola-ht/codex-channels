@@ -9,7 +9,7 @@
 **决定：采用 `0.164.0` 正式版，并同步修复关联业务合同；不扩大渠道能力或实验协议范围。**
 初筛后继续沿会话、账户、目录、审批、计划任务、服务、Provider 和输出链路审查，确认下列关联问题。
 精确目标 CLI 在隔离目录安装，已通过项目升级预检、协议生成及生成复核；版本和生成结果已合入当前工作区。
-本轮业务适配与验证结果见下文；未替换全局 CLI、重启共享服务或部署。
+业务适配阶段未替换全局 CLI、重启共享服务或部署；用户随后完成部署，新增观察见“部署后验收”。
 审查分支为 `chore/codex-0.164.0-review`，本地代码起点
 `5e3a5a4abe4eed6261dc44ef20c57a4a9fc29228`。目标固定提交与资料入口见
 [上游来源](upstream-sources.md)，以下上游路径均相对目标固定目录的 `codex-rs/`。
@@ -116,7 +116,7 @@ Guardian 已核对上游重审权限与本地 review ID 投影；恢复已核对
 5. 观察 Guardian 拒绝和提权重新审查的独立结果，以及普通 Turn 的实际回复与图片输出；确认新增套餐的查询、通知、快照及账户状态清理，新增 Hook 查询/管理/完成通知及 Plugin 内容变更后的信任结果。不新增或修复测试文件。
 6. 对 Windows/macOS、企业 MCP、远程 executor、真实平台发送等不可用环境明确留待验证；不把 Linux 静态检查当作这些路径的成功证据。
 
-本轮未访问用户 Thread/数据库；发布和部署未执行。
+源码适配阶段未访问用户 Thread/数据库，未执行发布和部署；用户部署后的专项观察另见下文。
 
 ### 实施结果
 
@@ -163,8 +163,107 @@ Guardian 已核对上游重审权限与本地 review ID 投影；恢复已核对
 首轮档位提交检查和通知竞争窗口修改已补做类型、Lint 与 Gateway 构建复核；独立复查补充修改的最终静态状态以正常提交门禁结果为准。
 统一报告位于本轮临时目录 `/tmp/codexc-0164-validation/validation-results.json`，其中文档阶段按脚本设计跳过，文档检查随后单独通过。
 静态工作流状态不代替上述行为证据。
-真实模型回复、Guardian 提权重审、在线动态工具整轮取消、原生 TUI 与渠道并用、真实图片生成/平台发送、企业 MCP、
-Windows/macOS 服务及回退恢复未观察；这些边界仍需对应环境和部署授权，不标为已验收。
+上述实施阶段尚未观察真实模型回复、Guardian 提权重审、在线动态工具整轮取消、原生 TUI 与渠道并用、真实图片生成/平台发送、企业 MCP、
+Windows/macOS 服务及回退恢复。部署后的新增证据及仍未验证的边界见下节，不追溯改写实施阶段的观察。
+
+### 2026-10-23 部署后验收
+
+用户完成部署后，对提交 `52917ac6976d9d66e7b5b6fd61183397e19630de` 对应的安装产物和运行实例进行审查。
+本节记录实际命令输出及协议观察的摘要；此阶段验收未修改全局配置、原有会话或重启共享服务。
+后续原生 TUI 补验经用户单独授权保存一条验收目录信任记录，详见下节。
+
+- **版本和产物**：全局 Gateway、CLI 及实际 App Server 握手均为 `0.164.0`；运行中 App Server 二进制与安装文件一致。
+  按 package.json 打包清单逐字节核对 4,493 个文件，无缺失或差异。使用已部署 CLI 执行 `npm run protocol:check`，
+  生成类型与公开 CLI 合同均通过。Doctor 返回 38 项成功、0 项失败。
+- **服务及渠道**：Linux 的 App Server、Gateway、Model Relay、WebUI 均运行，验收前后 PID 未变，自动重启计数均为 0。
+  本次 Gateway 启动日志观察到飞书 `text.completed/final_answer` 与 `turn.completed` 的投递任务结果均为 `completed`。
+  一条启动期 `account.updated` 展示因归属校验取消，观察窗口内未重复；日志不足以确认具体变化字段，不认定为升级缺陷。
+  WebUI 首页及引用的 8 个静态资源返回 200，无令牌 API 返回 401；没有浏览器交互或管理写入验收。
+- **双连接档位**：使用已安装的 Client、Router 和同步归约模块，连接真实 App Server；绑定只存在于独立的 MemoryBindingStore。
+  第二连接修改专用 Thread 为 Fast 后，通知实际值为 `priority`；改回 Standard 为 `default`。
+  连续通知后保留最新 Standard，设置通知不确认有效档位。关闭自有连接并显式调用订阅失效入口后，选择变未知、有效值清除；
+  重新连接恢复后取得权威 Standard。该观察不是网络意外断线，也未操作原生 TUI 界面。
+  初次恢复空 Thread 返回 `no rollout found`，包括 ephemeral 和尚未持久化的普通 Thread；没有将这些失败标为通过。
+  后续通过官方归档/取消归档持久化本任务空 Thread，才完成无模型请求的恢复观察。
+- **一次真实模型请求**：用户另行明确允许可能消耗额度的请求后，仅提交一次 `gpt-6.1-sol`、Standard、`low` 请求，
+  精确收到 `CODEXC_0164_OK`；无工具调用、审批请求或错误通知，Turn 为 `completed`。
+  验收 Thread 为 `01a16848-32de-71a3-96e8-4e0875761fa7`，Turn 为 `01a16848-32ec-73d3-b4b3-ce86da19d92b`。
+  官方历史回读仅有该 Turn，记录耗时 5,764 ms；完成后 Thread 为 idle、activeTurnId 为 null。
+  关闭连接并显式失效订阅状态后选择未知，重新连接恢复后仍为 `low` 和 Standard，且重新确认有效档位。
+  此请求通过已安装协议客户端执行，没有经过生产 ConversationService 的消息入口或发送到聊天渠道；渠道投递证据来自前述真实会话日志。
+- **清理与限制**：三个持久验收 Thread 均通过官方接口归档，ephemeral 验收连接已取消订阅，所有自有连接关闭、临时工作区清理。
+  当前计划任务配置关闭，未启用或派发任务。Luna Reserve 真实额度切换、Guardian 提权重审、在线动态工具整轮取消、
+  原生 TUI 与渠道并用、新 Hook 在线执行、多 Provider 刷新、真实图片生成/发送、企业 MCP、Windows/macOS 服务及回退恢复仍未观察。
+  已有隔离证据仅在输入和实现未变的范围内复用，不将部署健康或一次普通请求扩大为这些边界的验收。
+
+### 2026-10-23 Queue/Revert 与原生 TUI 补验
+
+仍以 `52917ac6976d9d66e7b5b6fd61183397e19630de` 的实现和 `0.164.0` CLI 为输入；没有新增或修改测试文件，
+没有修改生产代码、启用计划任务、增加外部模型请求或重启共享服务。
+
+- **Queue/Revert 联合观察**：使用独立临时 Codex Home、真实 App Server、项目 StdioTransport/Client 和回环模拟 Responses SSE 端点。
+  第一 Turn 完成，第二 Turn 保持活动时入队 A/B、编辑 A、排序为 B/A；重复 ID 排列返回 `reorder-conflict`，活动时启动队列返回 `busy`。
+  中断第二 Turn 后两项仍在，编辑结果和顺序保留。将当前设置改为 medium/Standard 后 Revert 到第二 Turn 之前，
+  官方历史只剩第一条 completed，Queue 仍为 B/A，本地响应端点请求数仍为 2，未因 Revert 自动派发。
+  Resume 返回 medium/Standard，随后两项被上游自动派发并完成，Queue 清空；后两次本地响应请求实际携带 medium。
+  观察覆盖 Client→官方 Queue/历史/设置→通知与回读，不包含渠道的 Revert 预览/确认、真实模型或生产数据库。
+  自有 App Server、HTTP 端点均关闭，临时数据清理。
+- **原生 TUI 与第二客户端**：通过 `codexc remote` 租约入口恢复上一节真实请求的同一个验收 Thread。
+  首次遇目录信任和 Hook 审查时未接受信任并退出；临时信任覆盖被自动审批拒绝，命令未执行。
+  用户随后明确允许信任空目录 `/tmp/codexc-live-turn-4eoX07`、拒绝 Hook，再次启动时按该范围确认。
+  TUI 显示既有 `CODEXC_0164_OK` 和 low；另一协议连接把该 Thread 改为 medium/Standard 后，TUI 底栏实际更新为 medium；
+  恢复 low/Standard 后底栏也恢复 low。TUI 正常退出，官方回读仍只有原来的一个 completed Turn，Thread idle、无活动 Turn。
+  此证据覆盖原生界面接收另一客户端设置，不等于生产聊天渠道与 TUI 并发提交或 Revert 确认的联合验收。
+  验收 Thread 已重新归档、目录已清理，用户授权保存的该目录信任记录保留；未确认新 Hook 信任。
+- **备份和回退状态**：只读核对安装/更新代码及已知配置目录、Gateway backups 目录的候选名称和修改时间，未读取备份内容。
+  观察到的候选早于本次升级，未取得本次升级前配置、Profile 与 Hook 信任目录一致备份的证据；不能据此断言其他位置没有备份。
+  源码更新保留旧源码、已知指标迁移产生数据库备份，不等于自动备份上述用户配置。
+  状态保留为“升级前备份未确认、回退演练未执行”；下一步需取得实际备份位置和对应时点，再在另行授权的维护窗口核验恢复。
+- **该阶段服务状态**：四个共享服务 PID 未变，均运行且自动重启计数为 0。继续补验及剩余边界见下节。
+
+### 2026-10-23 确认、断线与失败路径补验
+
+用户继续授权验证后，沿用上述代码和 CLI 基线。使用真实隔离 App Server、项目实际模块、内存绑定与回环模拟模型，
+没有新增外部模型请求、生产配置写入或服务重启，也没有新增测试文件。
+
+- **Revert 应用入口及一次性确认**：经实际 ConversationCommandService、ConversationService、Router、Core、
+  状态同步与事件协调链路，先完成两条 Turn，再从 `revert list` 生成预览。错误 Actor、错误 Conversation、
+  已消费令牌均返回 `revert.confirmation-invalid`；撤销注入的 Actor 授权后拒绝执行。
+  预览后新增活动 Turn 使旧确认失效；另一次预览后加入 `KEEP_QUEUE`，确认返回 `revert.concurrent`。
+  重新预览显示一个受影响 Turn、一个 Queue 条目及正确活动 Turn；确认收到 `thread.reverted`，活动 Turn 为 interrupted，
+  官方历史恢复到原两条 completed，Queue 保留。重复确认被拒绝；显式启动 Queue 后完成并清空，历史共三条。
+  共四次本地模型请求，无外部调用。这覆盖共享命令入口和应用授权守卫，Actor 授权为隔离注入，
+  不等于飞书、微信、Telegram 的真实身份鉴别、按钮回调与网络投递已验收。
+- **意外断线和恢复**：在独立 App Server 前设置任务自有私有 Unix Socket 代理，仅切断该代理连接。
+  实际触发一次 `onDisconnect`；原 App Server 及活动模型请求继续运行。Router 选择标为未知、有效值清除，
+  待提交 high 偏好保留。断线期间第二连接将同一 Thread 改为 medium/Standard，重连 Resume 后取得新设置，
+  high 待提交偏好仍保留。释放原模型响应后，收到与原活动 Turn ID 相同的 completed 通知，随后 Thread idle。
+  总请求数始终为两次，没有重提活动请求。元数据 `thread/read` 不含 Turns，不能据其空 activeTurnId 确认活动身份；
+  重连后未观察 started，Client 也未把该 completed 标为同订阅的终态证明，符合现有观察窗口约束。
+  此处真实执行 Client 重连、Router 恢复及订阅失效回调，没有运行生产 Bootstrap 的整个自动重连协调器。
+  首次准备时对目录未收录的本地模型显式选择 high 思考等级，返回 `model.current.missing`，已清理；
+  后续改为恢复 pending 快照以观察断线保留，不能将此结果表述为显式思考等级选择成功。
+- **新 Hook 未信任状态与请求终态**：独立 Codex Home 声明仅输出固定文字的 PreModelRequest/PostModelRequest，
+  实际目录均返回 untrusted，警告和错误数均为零。保持未信任，不写 Hook 信任记录。
+  本地模型依次正常完成、返回预设 HTTP 400、保持响应并由 Client 中断，实际终态分别为 completed、failed、interrupted；
+  共三次本地请求、零 Hook 完成通知。该观察支持未信任状态下的通知行为，不证明已信任 Hook 的执行与完成投影。
+  首次人工调用误读 ThreadSession 字段，官方拒绝缺失 threadId；修正调用后才完成上述观察，没有修改产品实现。
+  用户此前拒绝信任 Hook 的限制继续保留，未把“允许验证所有”解释为重新信任用户 Hook。
+- **清理**：上述自有 App Server、Socket 代理和 HTTP 服务均已关闭，临时目录删除；未读取官方内部会话文件。
+
+仍未观察的边界及下一步：
+
+| 边界 | 当前限制与后续条件 |
+| --- | --- |
+| 生产计划任务、动态工具整轮并行取消 | 生产开关关闭；已有 Store/Scheduler/Handler 隔离证据，但没有生产动态工具全过程。后续需专用启用环境和任务投递目标，不能直接改变现有生产开关 |
+| Reserve 真实额度切换、SCI 真实账户 | 本次没有对应额度状态或 SCI 账户；保留类型、通知、隔离恢复证据，待具备账户条件再观察 |
+| Guardian 提权重审、压缩失败、Lite 中断 | 未构造对应官方运行条件；源码审查不能替代真实重审、长上下文与 Lite 执行观察 |
+| 已信任 Hook 执行、多 Provider 配置刷新、企业 MCP | 保留此前隔离配置写入/内容变更证据；本阶段未信任 Hook，无多实例或企业认证验收环境 |
+| 真实图片生成/发送、渠道按钮、WebUI 管理交互 | 已有图片消费与静态资源证据；没有指定本次图片发送目标或执行这些管理写入，不以内部入口调用代替平台实测 |
+| Windows/macOS、远程 executor | 当前只有 Linux 环境；未扩展现有受控协议或把 Linux 结果外推 |
+| 回退恢复 | 尚无本次升级前一致备份证据；先确认实际备份和时点，不能用升级后新备份伪装升级前状态或覆盖现有用户数据 |
+
+这些项目保留为未验证，并不表示发现对应故障；本次补验未确认新的产品代码缺陷。
 
 ## 延续的基线取舍
 
