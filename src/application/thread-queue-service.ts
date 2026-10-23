@@ -63,7 +63,7 @@ export class ThreadQueueService {
     assertAuthorized?.();
     const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      const beforeSubmit = await this.threadGuard(target, threadId, assertAuthorized);
       beforeSubmit();
       const queue = this.requireQueue();
       this.rejectPendingOverrides(target);
@@ -92,7 +92,7 @@ export class ThreadQueueService {
     assertAuthorized?.();
     const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      const beforeSubmit = await this.threadGuard(target, threadId, assertAuthorized);
       beforeSubmit();
       requirePage(page, maximumNativeQueuePages, () => {
         throw new UserFacingError("queue.usage", "Queue 页码无效");
@@ -130,7 +130,7 @@ export class ThreadQueueService {
     assertAuthorized?.();
     const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      const beforeSubmit = await this.threadGuard(target, threadId, assertAuthorized);
       beforeSubmit();
       const queue = this.requireQueue();
       const item = await this.resolveSelector(target, threadId, selector, beforeSubmit);
@@ -160,7 +160,7 @@ export class ThreadQueueService {
     assertAuthorized?.();
     const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      const beforeSubmit = await this.threadGuard(target, threadId, assertAuthorized);
       beforeSubmit();
       const queue = this.requireQueue();
       const item = await this.resolveSelector(target, threadId, selector, beforeSubmit);
@@ -184,7 +184,7 @@ export class ThreadQueueService {
     assertAuthorized?.();
     const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      const beforeSubmit = await this.threadGuard(target, threadId, assertAuthorized);
       beforeSubmit();
       const queue = this.requireQueue();
       const resolved = await this.resolveSelectorSnapshot(target, threadId, selector, beforeSubmit);
@@ -214,7 +214,7 @@ export class ThreadQueueService {
     assertAuthorized?.();
     const threadId = this.requireCurrentThread(target);
     return this.locks.forConversation(target, async () => {
-      const beforeSubmit = this.threadGuard(target, threadId, assertAuthorized);
+      const beforeSubmit = await this.threadGuard(target, threadId, assertAuthorized);
       beforeSubmit();
       const queue = this.requireQueue();
       this.rejectPendingOverrides(target);
@@ -289,12 +289,12 @@ export class ThreadQueueService {
     return binding.threadId;
   }
 
-  private threadGuard(
+  private async threadGuard(
     target: ConversationTarget,
     threadId: string,
     assertAuthorized?: () => void,
-  ): () => void {
-    return () => {
+  ): Promise<() => void> {
+    return this.router.prepareThreadWorkspaceGuard(threadId, () => {
       assertAuthorized?.();
       if (this.router.current(target)?.threadId !== threadId) {
         throw new UserFacingError(
@@ -302,7 +302,7 @@ export class ThreadQueueService {
           "当前会话已切换，请重新执行 Queue 命令",
         );
       }
-    };
+    });
   }
 
   private requireQueue(): ThreadQueuePort {

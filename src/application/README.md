@@ -85,6 +85,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   普通 `status` 不执行 Git IO，展示入口 `statusForDisplay` 通过组合根注入的异步只读端口取得当前 Workspace Git 分支；完成卡仅调用 `workspaceGitBranch`，不连带查询模型与账户状态；
+  普通 Turn、活动 Turn 追加输入、渠道 Queue 操作及后台完成时的 Queue 启动通过 Router 权威目录校验，
+  并把变化守卫带到最终 RPC 提交；目录不匹配时不重放输入、不清空原生 Queue，中断与诊断入口保持可用。
   Git 查询结束后重新读取当前绑定及诊断，同工作区内切换 Thread 也不会返回旧会话来源；工作区变化时丢弃原 Git 结果。
   status 另投影 Router 的 Thread 执行上下文：最近确认 cwd 与带对应 cwd 的生命周期 roots 快照；
   未知时省略该字段，不从 Workspace 推断。异步 Git 查询后同样重新读取此投影。

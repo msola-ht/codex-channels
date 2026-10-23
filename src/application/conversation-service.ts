@@ -935,10 +935,12 @@ export class ConversationService implements
     const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
     if (active) {
       assertCurrent?.(active.threadId);
+      const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(active.threadId,
+        this.commandThreadGuard(target, active.threadId, () => { assertAuthorized?.(); assertCurrent?.(active.threadId); }));
       this.sessionQueries.invalidateSessionDisplayCache(active.threadId);
       try {
         await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId,
-          () => { assertAuthorized?.(); assertCurrent?.(active.threadId); });
+          beforeSubmit);
       } catch (error) {
         this.recordTurnError("steer", target, active.threadId, active.turnId, error);
         throw error;
@@ -1773,7 +1775,8 @@ export class ConversationService implements
     this.touchActivity(target);
     const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
     const binding = await this.ensureSession(target, true, beforePrepare);
-    const beforeSubmit = this.commandThreadGuard(target, binding.threadId, assertAuthorized);
+    const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(binding.threadId,
+      this.commandThreadGuard(target, binding.threadId, assertAuthorized));
     // Subscription restoration can publish an active Turn while ensure waits.
     // Do not start a new Turn using the idle decision made before that await.
     if (this.core.activeTurn(target)) {
@@ -1958,7 +1961,9 @@ export class ConversationService implements
       return false;
     }
     if (this.pendingBackgroundReleases.get(threadId) !== false) {
-      const queueState = await this.dispatchNativeQueueBeforeRelease(threadId);
+      const queueState = await this.dispatchNativeQueueBeforeRelease(threadId, () => {
+        if (!canRelease()) throw new UserFacingError("command.authorization-changed", "后台会话状态已变化");
+      });
       if (queueState !== "empty" && queueState !== "unavailable") {
         return false;
       }
@@ -2014,15 +2019,17 @@ export class ConversationService implements
 
   private async dispatchNativeQueueBeforeRelease(
     threadId: string,
+    assertAuthorized: () => void,
   ): Promise<"empty" | "started" | "busy" | "unavailable"> {
     const queue = this.threadQueue;
     if (!queue) return "unavailable";
+    const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(threadId, assertAuthorized);
     try {
       // `thread/queue/start` takes the same per-Thread dispatch lock as the
       // 0.148 idle contributor. It is used here as a completion barrier: an
       // already queued item is either started or observed empty only after
       // the native dispatcher has finished its own start/delete sequence.
-      await queue.startQueueItem(threadId);
+      await queue.startQueueItem(threadId, undefined, beforeSubmit);
       return "started";
     } catch (error) {
       const mapped = queueUserFacingError(error, "start");

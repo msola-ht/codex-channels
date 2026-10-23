@@ -100,7 +100,7 @@ export class SessionRouter {
   private readonly namesByThread = new Map<string, string | null>();
   private readonly sessionDiagnosticsByThread = new Map<string, Pick<ThreadSession, "contextCompactionItemIds" | "instructionSources"> & { executionContext: ThreadExecutionContext | undefined }>();
   private executionContextRevision = 0;
-  private readonly executionContextChanges: (string | undefined)[] = [];
+  private readonly executionContextChanges: (string | undefined | ((threadId: string) => boolean))[] = [];
   private subscriptionRevision = 0;
   private readonly subscriptionChanges: (string | ((threadId: string) => boolean))[] = [];
   private readonly sessionContextRevisions = new WeakMap<ThreadSession, { context: number; subscription: number }>();
@@ -132,6 +132,38 @@ export class SessionRouter {
 
   current(target: ConversationTarget): ConversationBinding | undefined {
     return this.bindings.get(target);
+  }
+
+  /** Authorize a bound Thread from a fresh read; diagnostic snapshots never grant access. */
+  async prepareThreadWorkspaceGuard(threadId: string, beforeSubmit?: () => void): Promise<() => void> {
+    beforeSubmit?.();
+    const binding = this.bindings.getByThread(threadId);
+    if (!binding) throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+    const workspace = this.workspaces.require(binding.workspaceId);
+    const background = this.bindings.isBackground(threadId);
+    const revision = this.executionContextRevision;
+    const assertCurrent = (): void => {
+      beforeSubmit?.();
+      const changes = this.executionContextRevision - revision;
+      if (!this.sameBinding(binding, this.bindings.getByThread(threadId))
+        || this.bindings.isBackground(threadId) !== background
+        || this.workspaces.get(binding.workspaceId)?.cwd !== workspace.cwd
+        || this.unsubscribedBindings.has(threadId)
+        || changes > this.executionContextChanges.length
+        || (changes > 0 && this.executionContextChanges.slice(-changes)
+          .some(changed => typeof changed === "function" ? changed(threadId)
+            : changed === undefined || changed === threadId))) {
+        throw new UserFacingError("thread.workspace.changed", "会话目录或订阅在等待期间已变化，请用 /status 核对后重试");
+      }
+    };
+    assertCurrent();
+    const thread = await this.codex.readThread(threadId, undefined, assertCurrent);
+    assertCurrent();
+    if (thread.id !== threadId || thread.cwd !== workspace.cwd
+      || (!foregroundThreadSources.has(thread.source) && !(background && thread.source === "automation"))) {
+      throw new UserFacingError("thread.workspace.changed", "会话执行目录或来源与授权工作区不一致；请在原生端恢复目录，或用 /workspace 选择已登记的工作区后重新选择会话");
+    }
+    return assertCurrent;
   }
 
   backgroundBindings(target: ConversationTarget): ConversationBinding[] {
@@ -328,7 +360,7 @@ export class SessionRouter {
 
   /** The connection owner resolves canonical Provider identity, including unbound responses. */
   invalidateSubscriptions(isAffected: (threadId: string) => boolean): void {
-    this.invalidateExecutionContext();
+    this.invalidateThreadContext(undefined, false, isAffected);
     this.subscriptionRevision += 1;
     this.subscriptionChanges.push(isAffected);
     if (this.subscriptionChanges.length > 256) this.subscriptionChanges.shift();
@@ -339,9 +371,10 @@ export class SessionRouter {
     }
   }
 
-  private invalidateThreadContext(threadId: string | undefined, subscriptionLost: boolean): void {
+  private invalidateThreadContext(threadId: string | undefined, subscriptionLost: boolean,
+    connectionScope?: (threadId: string) => boolean): void {
     this.executionContextRevision += 1;
-    this.executionContextChanges.push(threadId);
+    this.executionContextChanges.push(connectionScope ?? threadId);
     if (this.executionContextChanges.length > 256) this.executionContextChanges.shift();
     if (subscriptionLost && threadId !== undefined) {
       this.subscriptionRevision += 1;
@@ -393,7 +426,9 @@ export class SessionRouter {
     // Cwd-only diagnostic overflow cannot invalidate a live subscription.
     if (changes > history.length
       || (changes > 0 && history.slice(-changes)
-        .some(change => typeof change === "function" ? change(session.thread.id)
+        // Diagnostic snapshots retain their conservative disconnect behavior;
+        // submission guards use the connection scope stored in the same history.
+        .some(change => typeof change === "function" ? !subscriptionOnly || change(session.thread.id)
           : change === undefined || change === session.thread.id))) return false;
     return true;
   }

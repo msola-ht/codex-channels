@@ -57,6 +57,7 @@ export type UserFacingErrorCode =
   | "thread.takeover.busy"
   | "thread.takeover.workspace"
   | "thread.takeover.changed"
+  | "thread.workspace.changed"
   | "goal.empty"
   | "goal.usage"
   | "release.usage"

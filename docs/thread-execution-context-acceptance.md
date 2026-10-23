@@ -188,3 +188,48 @@ Codex CLI 0.163.0，固定上游 HEAD 已重新核对。
 其退出结果为 signal SIGTERM。随后实际进程检查未找到任务监管器或已记录子进程；
 两个入口、两个实际短路径 Socket 及 Supervisor Socket 均不存在。
 确认后删除任务目录并退出 REPL。没有以单独的退出信号代替清理确认，也没有停止或重启用户现有服务。
+
+## 单目录接续一致性修复观察（2026-10-23）
+
+本节对应 `5494c9bac3ee6202b759a99de5d29df98682f060` 之后随本节一并提交的单目录接续修复，
+不替换上述已提交版本的证据。范围为原生修改 cwd 后普通输入、Steer、渠道 Queue 和后台 Queue
+启动的精确目录校验；不开放子目录互通，不改变 Git、计划任务目录或 Hooks 管理范围。
+环境为 Debian 13.7、Node v24.22.1、Codex CLI 0.163.0，官方源码仍锁定
+`83086188ae0614bd882818ff1aa23f3194962012`。
+
+原有普通输入通过 `ensure` 检查目录，但活动输入和 Queue 没有等价的权威读取。
+修复在 Router 增加独立提交校验，读取 Thread 并核对精确目录、来源、绑定及订阅，
+利用已有有界失效记录拒绝准备期间的变化，不以诊断快照或 roots 授予权限。
+独立 Astra 源码审查发现并促成两项关联修正：后台 automation 来源保留既有准入；
+其他 Provider 的连接失效不误拒绝本 Thread，生命周期诊断的原有保守失效语义保持不变。
+
+| 操作 | 实际结果 | 证据范围 |
+| --- | --- | --- |
+| Client → Router → ConversationService 查询 Queue | 登记目录下返回空列表 | 真实隔离 App Server 与业务链，无平台投递 |
+| 原生 `thread/settings/update` 将目录 A 改为 B | Queue 查询、新增均返回 `thread.workspace.changed`；直接查询原生 Queue 仍为空 | 真实设置、读取和拒绝路径；未创建排队模型输入 |
+| 改回 A | 设置通知仍在读取窗口内时拒绝；通知处理后重新查询成功 | 真实协议；没有自动重试写入 |
+| 捕获回调后改出再改回 | 旧回调返回 `thread.workspace.changed` | 真实目录通知，人工保留并调用回调 |
+| 活动输入 | 人工注入 Core 活动状态后，提交在目录校验处被拒绝，绑定保留 | 不是真实活动 Turn 或成功 Steer；没有模型调用 |
+| 空闲普通输入 | 清除人工活动状态后，目录不符返回既有 `thread.takeover.changed` 并解除绑定 | 真实 Thread 读取，保持既有恢复策略；没有提交 Turn |
+| 空队列启动 | 返回 `queue.empty` | 真实 `thread/queue/start`，已确认任务独占空队列，无 Turn |
+| 无 Turn 历史及重连 | archive/unarchive 持久化后恢复成功；关闭自有 stdio App Server 再重连，旧回调失效，`restoreSubscriptions` 返回空失败列表，Queue 查询成功 | 真实进程重建；订阅失效由交互环境显式调用，不等于完整 Gateway 自动恢复 |
+| 后台来源及释放 | 真实 `startBackground` 返回 automation；最终 guard 通过，`releaseBackgroundIfComplete` 返回 true | 无 Turn、空 Queue 后台路径；不等于完整周期任务执行 |
+| 失效窗口与 Provider 范围 | 人工产生 257 次无关目录变化后旧回调拒绝，新查询成功；非目标 Provider 谓词不拒绝，目标谓词拒绝，恢复后新回调可用 | 人工事件和作用域谓词；不是双 Provider 服务故障复现 |
+| 三渠道错误文案 | 共用格式器给出目录/订阅变化及 `/status`、`/workspace` 恢复入口 | 本地输出，无真实消息 |
+
+本次 Unix Socket 启动失败：当前环境的 `/tmp/codex-daemon-0` 显示权限 000，
+原生返回 socket 目录必须为当前用户所有且 mode 0700。未修改该目录，后续观察使用任务自有
+stdio Transport，不据此声称本次共享 Unix Socket 路径通过。直接在 connected 状态调用
+`reconnect` 也被现有 Client 拒绝；实际恢复观察先关闭自有连接和进程，再重新连接。
+
+类型、版本及模块边界检查、构建和相关 ESLint 通过；文档另经现有文档检查。
+没有运行或修改历史测试，没有新增测试、探针或守卫脚本。独立审查覆盖最终提交回调、
+六类 Queue 命令、后台释放和恢复、错误显示，修正后未发现其他阻止交付的问题。
+提交前另开 Astra 完成最终独立全链路复审，覆盖本节对应的全部 9 个变更文件及关联调用链，
+未发现新的阻断问题；该复审仅提供源码结论，不新增运行验真证据。
+真实活动 Turn、带内容恢复、收费模型执行、完整平台入口及跨客户端原子性没有获得新证据；
+本地读取与提交之间仍存在原生客户端竞争窗口。
+
+两个 stdio App Server 均退出 code 0，运行检查为 false；初次 Socket 启动进程退出 code 1。
+任务目录 `/tmp/codexc-cwd-V8lBx7` 删除后确认不存在，REPL 已退出。未读取内部 session 文件，
+未改动用户服务、发送真实平台消息或提交收费 Turn。

@@ -134,6 +134,8 @@ export function formatSurfaceUserFacingError(
       return "只能恢复或接管当前工作区中的会话，请先使用 /work 切换到会话所属工作区";
     case "thread.takeover.changed":
       return "会话绑定或工作区已发生变化，请重新打开会话列表后再试";
+    case "thread.workspace.changed":
+      return "会话执行目录或订阅已变化，本次操作未通过会话校验。请用 /status 核对；目录不匹配时，在原生端恢复目录，或用 /workspace 选择对应的已登记工作区后重新选择会话。";
     case "goal.empty":
       return "目标不能为空";
     case "goal.usage":
