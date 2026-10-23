@@ -5,6 +5,7 @@
 [历史记录](archive/thread-execution-context-plan.md)；其中的未观察结论属于当时基线，
 后续补证以本文明确列出的范围为准。Debian 章节补录此前对话中的操作与输出，
 不是本次重新执行的结果；macOS 章节保留 `b268b484` 已提交的证据及限制。
+随后授权执行的 Debian 定向补验单列于末节，不与前次补录混为同一批运行。
 
 ## macOS 基线与环境
 
@@ -129,7 +130,7 @@ Provider 设置主动重连、完整恢复失败补偿、计划任务失败分�
 任务 App Server 正常退出（code 0），随后确认任务进程与 Socket 不存在，临时目录及 REPL 已清理。
 没有读取内部 session 文件、提交模型 Turn、投递平台消息、部署或重启用户现有服务。
 
-## Debian 是否需要继续验收
+## Debian 补验范围评估（执行前）
 
 `8232b2ed` 之后的 `b268b484` 仅补充 macOS 文档，本次也仅补录文档，未改变产品实现。
 已有 Debian 运行及静态证据无需因文档更新而全部重跑；这不等于 Debian 的未观察项已经关闭。
@@ -143,4 +144,47 @@ Provider 设置主动重连、完整恢复失败补偿、计划任务失败分�
 
 这些是剩余的 Linux 运行证据，不是已确认缺陷或重复全量验收的理由。自然 closed、带内容或活动 Turn
 恢复、完整周期调度和真实平台投递仍按上述开放边界处理；macOS 人工队列结果不能关闭自然通知缺口。
-本次文档补录没有启动这轮补验，也不包含 systemd 安装、服务激活或部署验收。
+`ef5a2d7b` 文档补录本身没有启动补验；用户随后授权执行，结果见下一节。
+本记录不包含 systemd 安装、服务激活或部署验收。
+
+## Debian 定向补验结果
+
+### 执行基线与隔离方式
+
+执行 HEAD 为 `ef5a2d7b8ad344eacd9edc9aea0e861a6fa0f071`，与 `8232b2ed` 之间仅有文档变化，
+产品实现及此前构建不变。环境仍为 Debian 13.7 x86_64、Node v24.22.1、npm 11.19.1、
+Codex CLI 0.163.0，固定上游 HEAD 已重新核对。
+使用仓库 `dist/` 与 `runtime/`，原生 CLI 来自
+`/root/.local/share/fnm/node-versions/v24.22.1/installation/lib/node_modules/@openai/codex/bin/codex.js`。
+没有安装覆盖全局 Gateway，也没有激活现有服务。
+
+任务目录为 `/tmp/codexc-debian-igR6rZ`，包含独立 Home、Workspace、Provider 配置、数据目录和私有 Socket。
+仅复制仓库模型目录，受管 DS 账户使用无效占位凭据；无模型 Turn、真实渠道发送或内部 session 文件读取。
+操作在交互式 Node 环境完成，没有新增测试、探针或守卫脚本。
+
+### 操作与关键输出
+
+| 范围 | 操作与结果 | 证据性质 |
+| --- | --- | --- |
+| 无 Turn 持久化 | 实际 start/archive/unarchive 成功；固定上游 `thread_processor.rs` 的 archive 路径明确先持久化已加载的非 ephemeral Thread | 真实 App Server API；无对话内容 |
+| 跨进程冷恢复 | 首个自有 App Server PID 2752805 退出 code 0，另启 PID 2753260；恢复前诊断为 undefined，Router resume 后同一 Thread `01a16712-a18c-72d3-aa8f-cf9d54dcd45a` 的 cwd、roots、AGENTS.md 来源重建，权威 read 返回 idle、activeTurnId 为 null | 真实新进程、Client 和 Router；恢复前失效标记由交互环境显式调用 |
+| 换绑失败补偿 | 第二个无 Turn 持久化 Thread 恢复时，人为令 `switchForeground` 抛错；记录实际 RPC 顺序为 resume 新 → unsubscribe 旧 → resume 旧 → unsubscribe 新；原绑定与执行上下文、指令来源保留 | 人工本地提交故障，真实恢复及退订；恢复原方法后继续运行 |
+| 监管器及 Provider | 运行实际 `runAppServerService`，Supervisor PID 2753988；主实例 openai 与受管 ds-isolated 均由任务监管器持有 | 真实服务 Runtime 与私有监管 IPC；不是 systemd 安装服务 |
+| 租约保护 | 获取 ds-isolated 租约，通过既有设置 writer 将默认思考等级 high 改为 low；设置应用返回 `applied:false, reason:"leased"` | 真实租约、隔离配置写入及监管响应 |
+| 设置应用重启 | 释放租约后再次应用，返回 `applied:true, changed:true`；服务日志记录 ds-isolated 释放及重新启动，官方 config/read 确认实例默认等级 low | 真实目标实例生命周期；不据默认值推断已恢复 Thread 的等级 |
+| 断线与绑定恢复 | 收到 ds-isolated 真实断线时隐藏诊断；调用实际 `GatewayReconnectCoordinator.recoverAppliedSettings`，经 ProviderRoutingClient、BindingRestoreCoordinator、Router 恢复同一持久化绑定，cwd、roots、来源重建，`isRestoring` 为 false | 手工装配真实组件；输出、交互取消及非目标回调使用本地空实现，未运行完整 Gateway 设置入口 |
+| 最终状态消费 | 使用真实 ModelSelectionService、ConversationService 和共享格式器，输出恢复后的最近确认目录、roots 快照及 AGENTS.md 文件路径 | 本地最终文案，无平台发送；不以先前临时模型状态替代值作为最终证据 |
+| Unix 路径与权限 | 两个 App Server 入口为官方 rendezvous 符号链接，指向 `/tmp/codex-daemon-0/` 下各自哈希 Socket；实际 Socket 均为当前 UID 0、0600，任务目录、入口父目录和短路径父目录均为 0700 | 实际文件类型、realpath、所有者与 mode；符号链接自身 0777 不作为 Socket 权限 |
+
+### 结论、检查与清理
+
+本轮没有新增确定的产品缺陷。Debian 的无 Turn 历史冷恢复、换绑失败补偿、监管器设置重启、
+租约保护及实际恢复协调器链路已补得运行证据，不再保留为完全未观察。
+完整 Gateway 设置入口的自动编排本次未重跑，其完整组件图证据仍来自 macOS；
+自然 closed、带内容或活动 Turn 恢复、完整周期调度、真实平台投递仍未因此关闭。
+没有代码变化，因此复用 `8232b2ed` 的静态与构建结果；本次仅对新增文档执行提交门禁。
+
+直接启动的两个 App Server 均正常退出；恢复协调器停止、连接关闭后向任务监管器发送 SIGTERM，
+其退出结果为 signal SIGTERM。随后实际进程检查未找到任务监管器或已记录子进程；
+两个入口、两个实际短路径 Socket 及 Supervisor Socket 均不存在。
+确认后删除任务目录并退出 REPL。没有以单独的退出信号代替清理确认，也没有停止或重启用户现有服务。
