@@ -371,7 +371,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           this.heldApprovalOperations.set(operationKey, event.operation);
           return;
         }
-        if (!isComputerUseOperation(event.operation)) return;
+        if (!isComputerUseOperation(event.operation) && event.operation.kind !== "imageGeneration") return;
       }
       flushStreamBeforeOutput();
       const markdown = formatFeishuOperation(event.operation, this.options.operationUpdateDisplay === "compact" ? "compact" : "full");

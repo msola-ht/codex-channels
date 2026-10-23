@@ -599,6 +599,9 @@ Telegram 和飞书的渠道完成通知：成功运行只以 App Server 发给�
 `display.operation_updates = "compact"` 时，Telegram 和飞书仍展示子代理启动和失败，但不再为成功的
 `wait`、`sendInput`、`resumeAgent`、`closeAgent` 分别发送“已完成”卡片；`full` 保留这些操作详情，
 `hidden` 隐藏普通操作过程。该设置只控制这两个渠道的过程展示，不改变官方终态和子代理完成统计。
+飞书和 Telegram 在 `full`、`compact` 下显示原生图片生成的运行中状态与完成/失败摘要；
+飞书的开始提示使用可取消的内存快照，不写入持久结果日志，完成或 Turn 结束后不补发过时的开始提示。
+`hidden` 隐藏这些过程信息，但生成图片本身和只有文件引用时的内容不可获取提示仍独立投递。
 微信不主动发送普通操作或子代理过程事件，以保留单次回复窗口预算。
 上下文压缩属于生命周期通知：飞书、Telegram、微信均在官方 `contextCompaction` Item 开始时
 独立发送“开始压缩上下文…”，完成时发送“上下文压缩已完成。”，不受 `operation_updates` 影响。
