@@ -565,9 +565,8 @@ export class CodexAppServerClient implements
           ? { model: options.model }
           : this.defaults.model ? { model: this.defaults.model } : {}),
         ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
-        ...(options.threadSource === "automation"
-          ? { threadSource: options.threadSource }
-          : {}),
+        // 与原生 CLI 一致标记普通会话；计划任务保留独立来源。
+        threadSource: options.threadSource === "automation" ? "automation" : "user",
         ...(options.ephemeral === true ? { ephemeral: true } : {}),
         ...(options.dynamicTools?.length
           ? { dynamicTools: options.dynamicTools.map(toProtocolDynamicTool) }
@@ -693,6 +692,7 @@ export class CodexAppServerClient implements
           clientUserMessageId,
           input: protocolInput,
           cwd,
+          ...(overrides.turnTrigger ? { turnTrigger: overrides.turnTrigger } : {}),
           ...(overrides.model ? { model: overrides.model } : {}),
           ...(overrides.effort ? { effort: overrides.effort } : {}),
           ...(Object.hasOwn(overrides, "serviceTier")
@@ -1245,6 +1245,8 @@ export class CodexAppServerClient implements
       params: {
         threadId,
         cwd,
+        // 用户显式派生是新的交互会话，不继承父会话的功能来源。
+        threadSource: "user",
         ...(options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy }),
         ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
         ...(options.permissions !== undefined

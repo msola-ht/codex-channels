@@ -187,6 +187,7 @@ export abstract class GatewayComponentGraph {
   private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
   private readonly notificationGenerations = new WeakMap<RpcNotification, { provider: string; generation: number }>();
+  private readonly notificationCurrent = new WeakMap<RpcNotification, () => boolean>();
   private readonly providerNotificationGenerations = new Map<string, number>();
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
@@ -1277,7 +1278,7 @@ export abstract class GatewayComponentGraph {
     }
     const conversationEvents = new ConversationEventCoordinator(service, {
       trackSubagent: (event) => this.subagentCompletion.handleInput(event),
-      reduce: (event) => this.core.handle(event),
+      reduce: (event) => this.core.handle(event, { threadClosureObserved: event.type === "thread.closed" }),
       isBackgroundThread: (threadId) => this.router.isBackgroundThread(threadId),
       retryBackgroundRelease: (threadId, trigger) => {
         void this.trackQueueLifecycleTask(() => service.retryPendingBackgroundRelease(threadId,
@@ -1293,6 +1294,12 @@ export abstract class GatewayComponentGraph {
       },
     });
     this.inbound.subscribe("conversation-core", (notification) => {
+      if (this.notificationCurrent.get(notification)?.() === false) return;
+      const source = this.notificationGenerations.get(notification);
+      const stale = source !== undefined
+        && source.generation !== (this.providerNotificationGenerations.get(source.provider) ?? 0);
+      // Connection-local state must be filtered before Application/Core side effects.
+      if (stale && (notification.method === "thread/closed" || notification.method === "thread/settings/updated")) return;
       const autoReview = toAutoApprovalReviewEvent(notification);
       if (autoReview) this.autoApprovalReviewNotifications.handle(autoReview);
       const queueChanged = toThreadQueueChangedEvent(notification);
@@ -1301,9 +1308,6 @@ export abstract class GatewayComponentGraph {
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
-        const source = this.notificationGenerations.get(notification);
-        const stale = source !== undefined
-          && source.generation !== (this.providerNotificationGenerations.get(source.provider) ?? 0);
         // Preserve accepted results, but never revive live status from a disconnected stream.
         if (stale && (coreEvent.type === "turn.started" || coreEvent.type === "item.reasoning.delta"
           || (coreEvent.type === "turn.error" && coreEvent.willRetry))) return;
@@ -1582,7 +1586,13 @@ export abstract class GatewayComponentGraph {
         if (!result.applied) return false;
         const disconnected = this.settingsDisconnects.has(provider);
         if (!result.changed && !disconnected) return true;
-        await this.codex.closeProvider(provider);
+        // Intentional close does not emit onDisconnect; invalidate this stream here too.
+        this.router.invalidateSubscriptions(threadId => this.codex.knownProvider(threadId) === provider);
+        try {
+          await this.codex.closeProvider(provider);
+        } finally {
+          this.providerNotificationGenerations.set(provider, (this.providerNotificationGenerations.get(provider) ?? 0) + 1);
+        }
         cancellation.throwIfAborted();
         if (connected || disconnected) {
           recovering = this.gatewayReconnectCoordinator().recoverAppliedSettings(provider, cancellation);
@@ -1716,6 +1726,12 @@ export abstract class GatewayComponentGraph {
         this.notificationGenerations.set(notification, {
           provider, generation: this.providerNotificationGenerations.get(provider) ?? 0,
         });
+        const threadStateEvent = toThreadStateEvent(notification);
+        if (threadStateEvent) {
+          const isCurrent = this.threadState.observeExecutionContext(threadStateEvent);
+          if (isCurrent) this.notificationCurrent.set(notification, isCurrent);
+          if (threadStateEvent.type === "thread.closed") this.core.observeThreadClosed(threadStateEvent.threadId);
+        }
         // Revoke live tools before bounded asynchronous notification consumers.
         const toolEvent = toConversationInputEvent(notification);
         if (toolEvent) this.scheduledTasks?.toolHandler.handleInput(toolEvent);
@@ -1752,12 +1768,15 @@ export abstract class GatewayComponentGraph {
         // A reconnect has no delta sequence numbers: never join text across connections.
         this.reasoningRepeatGuard.resetProvider(provider);
         this.providerNotificationGenerations.set(provider, (this.providerNotificationGenerations.get(provider) ?? 0) + 1);
+        this.router.invalidateSubscriptions(threadId => this.codex.knownProvider(threadId) === provider);
         this.scheduledTasks?.toolHandler.cancelThreads((threadId) => this.codex.knownProvider(threadId) === provider);
         const affectedThreads = new Set(this.router.allBindings()
           .filter((binding) => this.codex.knownProvider(binding.threadId) === provider)
           .map((binding) => binding.threadId));
         this.conversationIdleReleaser?.cancelPending(affectedThreads);
-        for (const threadId of affectedThreads) this.conversations.clearMcpLoginThread(threadId);
+        for (const threadId of affectedThreads) {
+          this.conversations.clearMcpLoginThread(threadId);
+        }
         this.turnExecution.reset(provider);
         this.autoApprovalReview.reset(provider);
         this.autoApprovalReviewNotifications.reset(provider);

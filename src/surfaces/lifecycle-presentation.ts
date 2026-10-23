@@ -915,7 +915,7 @@ function formatStructuredField(field: LifecyclePresentationField, escapeLiterals
   ].join("\n");
 }
 
-function escapeLifecycleLiteral(value: string): string {
+export function escapeLifecycleLiteral(value: string): string {
   return value.replace(/[\\`*_~[\]()<>#+\-.!|{}]/gu, "\\$&");
 }
 

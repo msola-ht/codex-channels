@@ -430,6 +430,11 @@ function withThreadId(
 
 function writeFailure(error: unknown): ScheduledTaskExecutionResult {
   if (error instanceof UserFacingError) {
+    // Creation rejected before binding after a connection loss is transient;
+    // it must not revoke authorization for future scheduled runs.
+    if (error.code === "conversation.busy" && error.details.reason === "subscription-restoring") {
+      return { kind: "failed", category: "provider" };
+    }
     const category = error.code === "conversation.background-limit" || error.code === "delivery.overloaded"
       ? "capacity"
       : error.code.startsWith("workspace.") || error.code === "thread.takeover.workspace"

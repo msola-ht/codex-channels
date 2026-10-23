@@ -7,7 +7,52 @@ import {
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
 import { resolveProviderSelection } from "./provider-selection.mjs";
 
-export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID | -C DIR | --cd DIR] [-p Provider-ID | --provider Provider-ID | --profile Profile] [Codex 参数...]\n-p / --provider 接受完整 Provider ID（如 cp-llm）或已配置的规范 sf- 名称（如 sf-cp-llm）；省略时连接主实例。个人 Profile 使用 --profile。聚合模式暂时关闭。";
+export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID | -C DIR | --cd DIR] [-p Provider-ID | --provider Provider-ID | --profile Profile] [Codex 参数...]\nr 是 resume 的快捷写法，例如 codexc remote r --last 或 codexc remote r <Session ID>。\n-p / --provider 接受完整 Provider ID（如 cp-llm）或已配置的规范 sf- 名称（如 sf-cp-llm）；省略时连接主实例。个人 Profile 使用 --profile。聚合模式暂时关闭。";
+
+// Codex 0.163.0 root TUI arguments that consume a value. Keep option values
+// (including a model named "resume") distinct from the actual subcommand.
+const nativeValueOptions = new Set([
+  "-c", "--config", "--enable", "--disable", "-m", "--model",
+  "--local-provider", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval",
+  "--add-dir",
+]);
+// Stop at another native command: its positional arguments are not TUI
+// subcommands. Include the locked CLI's aliases and hidden commands as well.
+const otherNativeCommands = new Set([
+  "agents", "tcp-tunnel", "exec", "e", "review", "login", "logout", "mcp", "plugin",
+  "app-server", "remote-control", "app", "completion", "update", "doctor", "sandbox",
+  "debug", "execpolicy", "apply", "a", "queue", "archive", "delete", "migrate-rollouts",
+  "unarchive", "cloud", "cloud-tasks", "responses-api-proxy", "stdio-to-uds", "exec-server",
+  "features", "help",
+]);
+
+export function codexRemoteDirectoryArgs(passthrough, workdir, explicitDirectory) {
+  return !explicitDirectory && remoteSessionCommandIndex(passthrough) !== -1 ? [] : ["-C", workdir];
+}
+
+function remoteSessionCommandIndex(passthrough) {
+  let hasRootPrompt = false;
+  for (let index = 0; index < passthrough.length; index += 1) {
+    const argument = passthrough[index];
+    if (argument === "--") break;
+    if (nativeValueOptions.has(argument)) {
+      index += 1;
+      continue;
+    }
+    // Only the separate-value form consumes following positional tokens.
+    // Clap ends the occurrence for --image=path, -i=path and -ipath.
+    if (argument === "--image" || argument === "-i") {
+      while (index + 1 < passthrough.length && !passthrough[index + 1].startsWith("-")) index += 1;
+      continue;
+    }
+    if (argument.startsWith("-")) continue;
+    if (argument === "resume" || argument === "r" || argument === "fork") return index;
+    if (otherNativeCommands.has(argument) || hasRootPrompt) break;
+    // Clap also accepts a root prompt before the interactive subcommand.
+    hasRootPrompt = true;
+  }
+  return -1;
+}
 
 export function parseCodexRemoteOptions(
   args,
@@ -41,6 +86,17 @@ export function parseCodexRemoteOptions(
     if (argument === "--") {
       passthrough.push(...args.slice(index));
       break;
+    }
+    if (argument === "--image" || argument === "-i") {
+      let consumed = false;
+      while (index + 1 < args.length && !args[index + 1].startsWith("-")) {
+        // Preserve the original image boundary even when a following Gateway
+        // option is removed. Repeated attached values retain native Vec order.
+        passthrough.push(`--image=${args[++index]}`);
+        consumed = true;
+      }
+      if (!consumed) throw new Error("--image / -i 需要至少一个图片路径");
+      continue;
     }
     if (argument === "--remote" || argument.startsWith("--remote=")
       || argument === "--remote-auth-token-env" || argument.startsWith("--remote-auth-token-env=")) {
@@ -136,6 +192,8 @@ export function parseCodexRemoteOptions(
   if (workspaceId !== undefined && cwd !== undefined) {
     throw new Error("--workspace 不能与 -C / --cd 同时使用");
   }
+  const sessionCommandIndex = remoteSessionCommandIndex(passthrough);
+  if (passthrough[sessionCommandIndex] === "r") passthrough[sessionCommandIndex] = "resume";
   return { passthrough, workspaceId, cwd, selectedProfile, selectedProvider };
 }
 

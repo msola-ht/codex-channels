@@ -199,6 +199,20 @@ Workspace 只保存目录身份，不另存沙箱、审批策略、Permission Pr
 前台手动运行的 Gateway 退出后需手动重新启动。此过程不删除磁盘目录或 App Server Thread 历史，也不终止共享 App Server。
 渠道新会话由目标 App Server 按授权目录加载原生配置；恢复、重连和分叉遵循原生 Thread 权限继承规则，
 不会强制重置为当前项目默认。当前会话实际审批方式仍由 `/status`、`/autoreview` 及生命周期卡片展示。
+`/status` 的“指令文件来源”列出 App Server 最近一次新建、恢复或派生时返回的已加载文件路径，
+可用于核对 `AGENTS.md` 等规则来源；它不是文件实时检查，也不是全部系统或动态指令的清单。
+`/status` 另列“会话执行目录”：最近确认目录来自 App Server 生命周期响应或设置通知；
+运行目录列表是最近一次新建、恢复或派生的加载快照，并显示快照对应目录，不表示实时权限。
+断线、关闭、等待恢复或无法确认响应新鲜度时明确显示上下文未知，不用登记目录代替。
+原有“工作目录”和 Git 分支仍指登记 Workspace；此诊断不开放子目录会话互通。
+普通输入（包括活动 Turn 的追加输入）和渠道 Queue 操作在提交前通过 App Server 核对 Thread
+仍处于登记 Workspace 的精确目录；等待期间目录或订阅发生变化时拒绝旧操作，需重新核对后操作。
+原生端把目录改到其他位置后，渠道不会替用户改回目录、清空 Queue 或重放输入。可在原生端恢复目录，
+或通过 `/workspace` 选择对应的已登记工作区后重新选择会话；`/status` 和中断入口仍可使用。
+后台会话完成时由 Gateway 发起的 Queue 启动也遵守目录校验；原生自身的队列调度不受此本地检查控制。
+这些检查不能提供与其他原生客户端之间的原子提交保证。
+空闲普通输入和重连仍沿用既有恢复策略：确认目录不兼容时解除失效绑定并拒绝本次操作；
+活动输入及 Queue 的提交校验本身不解除绑定，避免丢失当前任务的中断入口。
 本机 CLI 与 WebUI 的 Codex 权限设置修改原生用户层配置；项目级差异使用受信任的 `.codex/config.toml`。
 用户层偏好不代表所有 Provider、项目或既有 Thread 的实际权限。渠道不再提供 `/workspaceperm`。
 
@@ -447,14 +461,23 @@ DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSe
 ```bash
 codexc remote
 codexc remote resume
+codexc remote r
+codexc remote r --last
 codexc remote -p ds-main resume
 codexc remote -p cp-llm
 codexc remote --profile personal
 ```
 
 若要让新建终端会话使用渠道的登记目录，可运行 `codexc remote --workspace <ID>`。
-从登记目录的子目录启动时，Remote 保留子目录作为
-工作目录；渠道按登记根目录查询和恢复，不能保证列出或接续这些子目录会话。
+`r` 是本项目 `resume` 的显式快捷写法，可带 Session ID、`--last`、`--all` 等原生恢复参数；
+例如 `codexc remote -p ds-main r <Session ID>`。参数值和 `--` 后的文字不展开别名。
+普通新建未指定目录时，Remote 使用启动时的当前目录；`resume`／`fork` 未显式指定目录时，
+不注入 `-C`，由原生 Remote 与 App Server 处理会话目录继承、列表筛选和新建回退。
+因此恢复选择器的默认目录范围、`--last` 无匹配时的新建目录也遵循原生 Remote 语义，
+不保证使用包装器的启动目录。显式 `--workspace <ID>` 或 `-C`／`--cd` 仍作为目录覆盖传入；
+原生 `tui.resume_cwd="current"` 在 Remote 无显式目录时的限制也予以保留。
+从登记目录的子目录普通新建时，Remote 保留子目录作为工作目录；渠道按登记根目录查询和恢复，
+不能保证列出或接续这些子目录会话。
 直接使用原生 `codex --remote` 不会读取 Gateway Workspace 注册表。
 
 `codexc remote` 与 `codexc app` 的 `-p` / `--provider` 使用同一选择规则：接受已配置的完整

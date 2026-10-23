@@ -377,11 +377,14 @@ Workspace 保留为渠道可选目录和 Conversation 路由配置；Thread、�
 实例间的项目身份；不能把 Project 分组直接提升为授权。
 
 共享范围也须区分：`codexc remote --workspace` 读取 Gateway 注册表选择目录，不注入权限默认值，
-原生 `codex --remote` 本身不读取该注册表。在登记目录的子目录启动 Remote，
-仍保留子目录 cwd；渠道按登记根目录精确查询和恢复，不能保证接续该 Thread。
+原生 `codex --remote` 本身不读取该注册表。在登记目录的子目录普通新建 Remote 会话，
+仍保留子目录 cwd；恢复／派生未显式选目录时不再注入 `-C`，由原生 Remote 处理目录继承与新建回退；
+渠道按登记根目录精确查询和恢复，不能保证接续子目录 Thread。
 `codexc remote --workspace <ID>` 使用登记根目录。此差异已沿
 `scripts/codex-remote.mjs`、`src/session-routing/router.ts`、`src/codex-client/client.ts`
-及上游 Thread 列表过滤实现核对，尚未运行复现，也没有证据将其归因于本次升级。
+及上游 Thread 列表过滤实现核对。Remote 的普通新建、恢复、派生和显式 `-C` 已通过隔离的
+0.163.0 App Server 与真实 TUI 入口观察：新建使用启动目录，恢复／派生保留会话目录，显式目录覆盖生效。
+渠道的子目录恢复限制尚未运行复现，也没有证据将其归因于本次升级。
 若扩展子目录互通，必须一并审查列表、恢复、嵌套工作区归属与权限，不能只放宽查询过滤。
 
 ## 全表复核范围与结论

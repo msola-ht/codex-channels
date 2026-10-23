@@ -26,7 +26,7 @@ import {
 } from "../runtime/process-lifecycle.mjs";
 import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
-import { parseCodexRemoteOptions } from "./codex-remote-options.mjs";
+import { codexRemoteDirectoryArgs, parseCodexRemoteOptions } from "./codex-remote-options.mjs";
 import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
@@ -126,8 +126,7 @@ async function runRemoteCli() {
     const invocation = resolveExecutableInvocation(configuredBinary, [
       "--remote",
       `unix://${socketPath}`,
-      "-C",
-      workdir,
+      ...codexRemoteDirectoryArgs(passthrough, workdir, workspaceId !== undefined || cwd !== undefined),
       ...(selectedDefinition
         ? ["--profile", selectedDefinition.profileName]
         : []),

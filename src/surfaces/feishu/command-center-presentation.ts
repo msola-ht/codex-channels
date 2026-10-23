@@ -607,7 +607,7 @@ export function renderCommandCenterChoices(
   if (action === "status" && result.kind === "status") {
     return {
       title: "Codex 状态",
-      description: stripMarkdownHeading(formatConversationStatus(result.status)),
+      description: stripMarkdownHeading(formatConversationStatus(result.status, escapeFeishuCardMarkdown)),
       descriptionFormat: "markdown",
       choices: [
         { label: "模型设置", action: "model", input: "" },

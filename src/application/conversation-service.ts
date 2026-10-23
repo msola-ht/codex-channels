@@ -38,6 +38,7 @@ import {
   isThreadExecutionSettled,
   type SessionRouter,
   type ThreadRestoreObserver,
+  type ThreadExecutionContext,
 } from "../session-routing/index.js";
 import type {
   ThreadOccupancyPort,
@@ -188,6 +189,8 @@ const builtInAgentRoles: AgentRoleEntry[] = [
 ];
 
 export interface ConversationStatus {
+  instructionSources?: readonly string[];
+  executionContext?: ThreadExecutionContext;
   selectionScope?: string;
   threadId?: string;
   threadName?: string | null;
@@ -932,10 +935,12 @@ export class ConversationService implements
     const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
     if (active) {
       assertCurrent?.(active.threadId);
+      const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(active.threadId,
+        this.commandThreadGuard(target, active.threadId, () => { assertAuthorized?.(); assertCurrent?.(active.threadId); }));
       this.sessionQueries.invalidateSessionDisplayCache(active.threadId);
       try {
         await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId,
-          () => { assertAuthorized?.(); assertCurrent?.(active.threadId); });
+          beforeSubmit);
       } catch (error) {
         this.recordTurnError("steer", target, active.threadId, active.turnId, error);
         throw error;
@@ -1666,6 +1671,8 @@ export class ConversationService implements
   status(target: ConversationTarget): ConversationStatus {
     const binding = this.router.current(target);
     const active = this.core.activeTurn(target);
+    const instructionSources = binding ? this.router.instructionSourcesForThread(binding.threadId) : undefined;
+    const executionContext = binding ? this.router.executionContextForThread(binding.threadId) : undefined;
     const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
     const goal = binding ? this.core.goal(binding.threadId) : undefined;
@@ -1682,6 +1689,8 @@ export class ConversationService implements
     };
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
+      ...(instructionSources === undefined ? {} : { instructionSources }),
+      ...(executionContext === undefined ? {} : { executionContext }),
       ...(binding ? { threadName: this.router.threadNameForThread?.(binding.threadId) ?? null } : {}),
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
@@ -1717,10 +1726,11 @@ export class ConversationService implements
     const status = this.status(target);
     const gitBranch = await this.workspaceGitBranch(target, signal);
     signal?.throwIfAborted();
-    // Recheck the current Workspace after asynchronous IO; outer callers own authorization.
-    const workspace = this.router.workspace(target);
-    if (workspace.id !== status.workspaceId || workspace.cwd !== status.cwd) return this.status(target);
-    return gitBranch ? { ...status, gitBranch } : status;
+    // Refresh the bound Thread and its diagnostics after asynchronous IO;
+    // outer callers own authorization. Only reuse Git data for the same cwd.
+    const current = this.status(target);
+    if (current.workspaceId !== status.workspaceId || current.cwd !== status.cwd) return current;
+    return gitBranch ? { ...current, gitBranch } : current;
   }
 
   private readonly observeThreadRestore: ThreadRestoreObserver = (threadId) => {
@@ -1765,7 +1775,8 @@ export class ConversationService implements
     this.touchActivity(target);
     const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
     const binding = await this.ensureSession(target, true, beforePrepare);
-    const beforeSubmit = this.commandThreadGuard(target, binding.threadId, assertAuthorized);
+    const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(binding.threadId,
+      this.commandThreadGuard(target, binding.threadId, assertAuthorized));
     // Subscription restoration can publish an active Turn while ensure waits.
     // Do not start a new Turn using the idle decision made before that await.
     if (this.core.activeTurn(target)) {
@@ -1798,7 +1809,7 @@ export class ConversationService implements
           input,
           clientUserMessageId,
           workspace.cwd,
-          { ...overrides, beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); } },
+          { ...overrides, turnTrigger: "user", beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); } },
         );
       } catch (error) {
         this.recordTurnError("start", target, binding.threadId, null, error);
@@ -1950,7 +1961,9 @@ export class ConversationService implements
       return false;
     }
     if (this.pendingBackgroundReleases.get(threadId) !== false) {
-      const queueState = await this.dispatchNativeQueueBeforeRelease(threadId);
+      const queueState = await this.dispatchNativeQueueBeforeRelease(threadId, () => {
+        if (!canRelease()) throw new UserFacingError("command.authorization-changed", "后台会话状态已变化");
+      });
       if (queueState !== "empty" && queueState !== "unavailable") {
         return false;
       }
@@ -2006,15 +2019,17 @@ export class ConversationService implements
 
   private async dispatchNativeQueueBeforeRelease(
     threadId: string,
+    assertAuthorized: () => void,
   ): Promise<"empty" | "started" | "busy" | "unavailable"> {
     const queue = this.threadQueue;
     if (!queue) return "unavailable";
+    const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(threadId, assertAuthorized);
     try {
       // `thread/queue/start` takes the same per-Thread dispatch lock as the
       // 0.148 idle contributor. It is used here as a completion barrier: an
       // already queued item is either started or observed empty only after
       // the native dispatcher has finished its own start/delete sequence.
-      await queue.startQueueItem(threadId);
+      await queue.startQueueItem(threadId, undefined, beforeSubmit);
       return "started";
     } catch (error) {
       const mapped = queueUserFacingError(error, "start");

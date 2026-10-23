@@ -21,6 +21,8 @@ export interface TurnCollaborationMode {
 }
 
 export interface TurnOverrides {
+  /** Explicit user input origin; scheduled execution leaves this unset. */
+  turnTrigger?: "user";
   /** Local guard; never serialized, and does not cancel an already submitted write. */
   beforeSubmit?: () => void;
   model?: string;

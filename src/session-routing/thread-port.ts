@@ -59,6 +59,10 @@ export interface ThreadSession {
   /** Actual Thread reviewer returned by App Server; absent or null means unknown. */
   approvalsReviewer?: ThreadApprovalsReviewer | null;
   contextCompactionItemIds: readonly string[];
+  /** Actual instruction file paths returned by the lifecycle response, not a live file scan. */
+  instructionSources: readonly string[];
+  /** Runtime roots returned by this lifecycle response; not a live permission list. */
+  runtimeWorkspaceRoots: readonly string[];
   /** Actual runtime permission settings returned by App Server, not Gateway defaults. */
   effectiveSettings: {
     cwd: string;
@@ -66,6 +70,13 @@ export interface ThreadSession {
     sandbox: "read-only" | "workspace-write" | "danger-full-access" | "external-sandbox";
     permissions: string | null;
   };
+}
+
+export interface ThreadExecutionContext {
+  /** Last cwd confirmed by a lifecycle response or settings notification. */
+  cwd: string;
+  /** Historical lifecycle snapshot, not updated by settings notifications. */
+  workspaceRootsSnapshot: { cwd: string; roots: readonly string[] };
 }
 
 export interface ThreadResumeSession extends ThreadSession {
@@ -86,7 +97,7 @@ export interface ThreadStartOptions {
   beforeSubmit?: () => void;
   model?: string;
   modelProvider?: string;
-  /** The only non-interactive source exposed by the stable Gateway port. */
+  /** Omission creates a user thread; automation is reserved for scheduled starts. User forks always use user. */
   threadSource?: "automation";
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy?: "untrusted" | "on-request" | "never";
