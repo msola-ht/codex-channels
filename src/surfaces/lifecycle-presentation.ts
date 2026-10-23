@@ -488,6 +488,26 @@ function formatTurnErrorMessage(
   return formatOpenAiErrorMessage(value);
 }
 
+function formatCompletedServiceTier(event: Extract<OutputEvent, { type: "turn.completed" }>): string {
+  const summary = event.timing?.serviceTierSummary;
+  // Retained events may have a confirmed snapshot but predate tier metrics.
+  if (!summary) return formatServiceTier(event.serviceTier);
+  const { requestCount, requested, returned } = summary;
+  if (requested.observedCount === 0 && returned.observedCount === 0 && event.serviceTier !== undefined) {
+    return formatServiceTier(event.serviceTier);
+  }
+  // Once observations exist, never fill partial/mixed evidence with the snapshot.
+  if (returned.distinctCount > 1) return "多档位（上游返回）";
+  if (requestCount > 0 && returned.observedCount === requestCount && returned.value !== null) {
+    return formatServiceTier(returned.value);
+  }
+  if (requested.distinctCount > 1) return "多档位（请求档位）";
+  if (requestCount > 0 && requested.observedCount === requestCount && requested.value !== null) {
+    return `${formatServiceTier(requested.value)}（请求档位）`;
+  }
+  return "未知（档位未完整观测）";
+}
+
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
   debug = false,
@@ -560,7 +580,7 @@ export function createTurnCompletedPresentation(
   if (event.model) {
     runFields.push({
       label: "模型",
-      value: `${event.model} · ${formatReasoningEffort(event.effort)} · ${formatServiceTier(event.serviceTier)}`,
+      value: `${event.model} · ${formatReasoningEffort(event.effort)} · ${formatCompletedServiceTier(event)}`,
     });
     runFields.push({
       label: "提供商",

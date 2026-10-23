@@ -78,7 +78,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   可空 `request_activity` 保存经共享合同校验的行为 JSON：回复、工具调用、末尾工具结果及部分可见标记，最多四个 128 字符工具名；禁止额外字段、参数或结果正文。读取、写入与 IPC 均校验同一合同；旧记录为 null，JSON/CSV 导出保留 `activity`，不依赖调用转储。
   可空 `quota_observed_at_ms` 保存额度快照的本机采集时间，未观测时为空。
   数据库使用严格 Schema v35、Unix `0600` / Windows 当前 SID 私有文件权限，
-  可空 `request_service_tier` 独立保留出站请求层级。
+  可空 `request_service_tier` 独立保留出站请求层级。精确 Thread/Turn 完成汇总分别计算普通 owned response 请求的出站和响应档位、观测数及不同值数量；排除自动审查与其他操作，不合并后代。响应档位还要求响应解码器提供的 `response_model`，避免把 WebSocket 初始请求值当作返回值；旧记录缺此证据时保持未观测。`priority`/`fast` 统一比较，null 保留缺失含义；只增加查询投影，不修改 Schema 或历史记录。
   只接受当前 Schema；已有库先只读核验版本和结构，再保护权限、创建 Writer 锁与启用 WAL；不兼容库原样拒绝。
   首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为

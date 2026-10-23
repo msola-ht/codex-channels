@@ -183,6 +183,12 @@ export interface ResponseUsageSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
+  /** Exact Turn's owned response requests; null values are missing observations, not Standard. */
+  serviceTierSummary?: {
+    requestCount: number;
+    requested: { value: string | null; observedCount: number; distinctCount: number };
+    returned: { value: string | null; observedCount: number; distinctCount: number };
+  };
   usageCoverage: UsageCoverage;
   performance?: RequestTimingSummary;
   requestOutcomes: RequestOutcomeCounts;

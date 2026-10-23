@@ -24,6 +24,7 @@ export function mergeCompletionTiming(
   );
   assignOptionalMetric(timing, "performance", latestTurn.performance ?? null);
   assignOptionalMetric(timing, "responseUsage", latestTurn.responseUsage ?? null);
+  assignOptionalMetric(timing, "serviceTierSummary", latestTurn.serviceTierSummary ?? null);
   assignOptionalMetric(timing, "upstreamTtftMs", latestTurn.upstreamTtftMs ?? null);
   assignOptionalMetric(
     timing,

@@ -226,6 +226,38 @@ export class SqliteRequestMetricsThreadQueries {
       durationMs: this.turnExecutionDuration(threadId, turnId),
       responseUsage: this.turnResponseUsage(threadId, turnId),
       performance: this.turnPerformance(threadId, turnId),
+      serviceTierSummary: this.turnServiceTiers(threadId, turnId),
+    };
+  }
+
+  private turnServiceTiers(threadId: string, turnId: string): NonNullable<StoredTurnRequestMetricsSummary["serviceTierSummary"]> {
+    const row = this.reader.prepare(`
+      WITH tiers AS (
+        SELECT CASE request_service_tier WHEN 'priority' THEN 'fast' ELSE request_service_tier END AS requested,
+          -- WebSocket observations may start with the requested tier. Only
+          -- response field decoding sets response_model and replaces that tier.
+          CASE WHEN response_model IS NOT NULL THEN
+            CASE service_tier WHEN 'priority' THEN 'fast' ELSE service_tier END
+          END AS returned
+        FROM model_request_metrics
+        WHERE thread_id = ? AND turn_id = ? AND source = 'owned'
+          AND operation = 'response' AND request_purpose IS NULL
+      )
+      SELECT COUNT(*) AS requestCount,
+        MIN(requested) AS requestedValue, COUNT(requested) AS requestedCount,
+        COUNT(DISTINCT requested) AS requestedDistinct,
+        MIN(returned) AS returnedValue, COUNT(returned) AS returnedCount,
+        COUNT(DISTINCT returned) AS returnedDistinct
+      FROM tiers
+    `).get(threadId, turnId) as {
+      requestCount: number;
+      requestedValue: string | null; requestedCount: number; requestedDistinct: number;
+      returnedValue: string | null; returnedCount: number; returnedDistinct: number;
+    };
+    return {
+      requestCount: row.requestCount,
+      requested: { value: row.requestedValue, observedCount: row.requestedCount, distinctCount: row.requestedDistinct },
+      returned: { value: row.returnedValue, observedCount: row.returnedCount, distinctCount: row.returnedDistinct },
     };
   }
 
