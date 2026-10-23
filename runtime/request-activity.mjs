@@ -1,4 +1,4 @@
-const toolTypes = new Set(["function_call", "custom_tool_call", "web_search_call", "file_search_call", "computer_call", "image_generation_call", "code_interpreter_call", "mcp_call"]);
+const toolTypes = new Set(["function_call", "custom_tool_call", "tool_search_call", "web_search_call", "file_search_call", "computer_call", "image_generation_call", "code_interpreter_call", "mcp_call"]);
 const fields = ["toolResult", "reply", "toolCalls", "tools", "partial"];
 const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const nameValid = value => typeof value === "string" && /^[A-Za-z0-9_.:/-]{1,128}$/u.test(value);
@@ -22,7 +22,7 @@ export class RequestActivityObserver {
     const input = protocol === "chat" ? body.messages : body.input;
     const last = Array.isArray(input) ? input.at(-1) : undefined;
     this.#value.toolResult ||= protocol === "chat" ? last?.role === "tool"
-      : ["function_call_output", "custom_tool_call_output"].includes(last?.type);
+      : ["function_call_output", "custom_tool_call_output", "tool_search_output"].includes(last?.type);
   }
   incomplete() { this.#seen = true; this.#value.partial = true; }
   #tool(name) {

@@ -62,7 +62,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
   富文本优先非空 `content_v2`，`media` 按视频解析，同一 Key 去重，多个不同视频或视频混合独立 `img` 失败关闭。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容，并集中提供飞书 Markdown 转义（输入卡与卡片展示共用同一核心实现，各自保留换行归一与花括号处理的开关）。
 - `operation-format.ts`：把操作状态渲染为包含脱敏详情的静态 CardKit Markdown；Computer Use
-  使用可原地更新的开始／终态卡片，不展示 MCP 读写声明标签，其他操作沿用终态展示。
+  使用可原地更新的开始／终态卡片，不展示 MCP 读写声明标签；原生图片生成分别展示运行中提示和终态，其他操作沿用终态展示。
 - `outbox-content.ts`：集中处理 Outbox 的纯文本缓冲、CardKit 字符分片、富文本字节分片与截断标记；围栏识别复用共享纯状态推进，分片按实际围栏长度预留关闭空间且保持分隔行完整。无法消费正文的分片返回明确的本地排版错误，由 Outbox 降级 Post 或保留完整附件发送。
 - `outbox-answer-file.ts`：长正文可靠结果的完整文件补发判定与编排，接收窄发送端口；字节阈值、文件名与失败提示集中在此，不持有 Outbox 状态。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪，保留回复事件的 `parent_id`。

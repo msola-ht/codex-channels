@@ -1,6 +1,6 @@
 # Provider Proxy
 
-原生 HTTP/WS 与 Chat 转换后的 Responses 指标采集 `activity` 行为摘要，与 Relay 共用纯归约器。流式 HTTP 请求的额外观察缓冲至多 1 MiB，已有缓冲请求及 WS 帧复用解析结果；超限标记部分可见。只记录末尾工具结果、当前响应回复/工具调用和有界工具名，不采集参数、结果或历史内容；请求指标不读取调用转储。
+原生 HTTP/WS 与 Chat 转换后的 Responses 指标采集 `activity` 行为摘要，与 Relay 共用纯归约器。流式 HTTP 请求的额外观察缓冲至多 1 MiB，已有缓冲请求及 WS 帧复用解析结果；超限标记部分可见。只记录末尾工具结果、当前响应回复/工具调用和有界工具名，包含 `tool_search_call` 与 `tool_search_output`；不采集参数、结果或历史内容，请求指标不读取调用转储。
 
 请求指标 `upstreamUrl` 仅在实际提交时采集最终 HTTP/WS 模型目标，去除凭据、查询和片段；路由失败或提交前拒绝保持未知。Chat 转换桥通过 `snapshot.upstreamUrl` 回传真实模型服务，外层不得保存本地桥地址；多轮只保留最后一次模型提交，不包含搜索出口，不依赖转储开关。原生和 Relay IPC 均复核规范地址，不能跨进程保存未清洗的 URL。
 
