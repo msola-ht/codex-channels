@@ -58,6 +58,7 @@
 
 ## 验收与开放补证
 
+- [`docs/thread-execution-context-acceptance.md`](docs/thread-execution-context-acceptance.md)：`8232b2ed` 的 macOS 执行上下文验收，区分真实历史恢复、Provider 设置重连、人工队列竞态与开放补证边界。
 - [`docs/project-closeout-review.md`](docs/project-closeout-review.md)：五轮收尾审查汇总与逐批处理状态，记录 45 项问题、关联证据、修复建议、关闭条件及运行验证边界。
 - [`docs/project-closeout-remediation-plan.md`](docs/project-closeout-remediation-plan.md)：Astra 分批关联复审与26批历史修复记录；包含基于main的169文件整分支审查、M01–M04及部署后10万请求L01–L07七批本地提交、保留风险与实际观察；暂停推送PR，生产与跨OS验收限制明确保留。
 - [`docs/project-closeout-file-inventory.csv`](docs/project-closeout-file-inventory.csv)：1,146 项逐文件关联阅读证据，清单范围已全部完成；不代表问题修复或运行验收。
@@ -74,6 +75,8 @@
 ## 历史审查与研究记录
 
 以下记录保留原基线、结论及未观察限制；其中的旧执行顺序不是当前开发流程，重新使用证据前须确认适用范围。
+
+- [`docs/archive/thread-execution-context-plan.md`](docs/archive/thread-execution-context-plan.md)：Thread 执行上下文投影与渠道诊断的早期分批开发、独立审查和历史观察；后续证据见当前验收记录。
 
 - [`docs/archive/global-settings-consolidation.md`](docs/archive/global-settings-consolidation.md)：全局设置归纳的历史实施步骤、三轮 Astra 关联审查、隔离观察与交付边界；现行合同见 WebUI 与用户指南。
 

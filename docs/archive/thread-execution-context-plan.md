@@ -6,6 +6,10 @@
 `83086188ae0614bd882818ff1aa23f3194962012`。本记录为历史开发与审查证据，
 不替代[用户指南](../user-guide.md)或[协议支持矩阵](../index.md)的当前契约。
 
+后续补证说明（2026-10-22）：本文保留早期基线与当时的未观察限制。
+`8232b2ed` 的成功历史冷恢复、Provider 设置重连、完整 Gateway 队列挑战及仍开放边界，
+见[当前 macOS 验收记录](../thread-execution-context-acceptance.md)，不回写为本次早期审查已观察。
+
 目标是将登记 Workspace 与 App Server 返回的 Thread 执行目录分开投影，
 补齐生命周期、通知和诊断链路。保持现有精确目录准入，不开放递归子目录互通。
 不改变 Turn/resume/fork 请求、计划任务目录、Hooks 管理范围或数据库格式；
