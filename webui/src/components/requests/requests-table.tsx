@@ -121,7 +121,7 @@ export function RequestsTable({
     {
       id: "upstreamUrl", enableSorting: false,
       header: () => <TableHint hint={t("requests.addressHint")}>{t("requests.addressColumn")}</TableHint>,
-      cell: ({ row }) => <TruncatedText text={row.original.upstreamUrl ?? t("traffic.notRecorded")} className="max-w-72 font-mono text-xs" />,
+      cell: ({ row }) => <TruncatedText text={row.original.upstreamUrl ?? t("traffic.notRecorded")} className="max-w-40 font-mono text-xs" />,
     },
     {
       id: "requestPurpose", enableSorting: false, header: t("requestMethod.label"),

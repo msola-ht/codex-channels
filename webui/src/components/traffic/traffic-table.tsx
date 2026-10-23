@@ -72,7 +72,7 @@ export function TrafficTable({
                 : exchange.category === "prewarm" ? t("traffic.categoryPrewarm") : exchange.requestKind ?? t("traffic.categoryRequest")}</>
     } },
     { id: "requestAddress", enableSorting: false, header: () => <>{t("traffic.requestAddress")}</>, cell: ({ row: { original: exchange } }) => {
-      return <><TruncatedText text={formatTrafficRequestAddress(exchange)} className="max-w-72 font-mono text-xs" /></>
+      return <><TruncatedText text={formatTrafficRequestAddress(exchange)} className="max-w-40 font-mono text-xs" /></>
     } },
     { id: "detail", enableSorting: false, enableHiding: false, header: t("requests.detailColumn"), cell: ({ row: { original: exchange } }) => (
       <Button variant="link" size="sm" className="border-0 px-0" aria-label={t("traffic.openDetailAria", { provider: exchange.label, time: formatRequestTime(exchange.startedAtMs) })}
