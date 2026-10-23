@@ -102,6 +102,25 @@
 本地磁盘保存、客户端附件引用、模型图片输入与 `previous_response_id` 接续是不同合同；
 后续继续核对附件解析入口，不把已有本地文件或响应接续误称为可解析的 `fileId`。
 
+#### 文件引用解析后续接入状态
+
+2026-10-23 继续审查后，第二阶段状态为**待宿主解析合同，尚未实现**。锁定版 App Server
+在 `message_processor.rs` 注入 `passthrough_image_store()`；`InlineAttachmentStore.upload`
+返回原字节，`resolve` 返回 NotFound。公开生成的 ClientRequest 未提供附件 ID 解析/下载方法；
+`fs/readFile` 仅接受绝对路径，`thread/attachment/*` 仅管理资源关联，不读取底层资源内容。
+现有 Gateway `ImageReferenceUpload` 面向用户输入上传，不能据此推导生成图片 ID 的下载接口。
+
+官方 [Files 内容接口](https://developers.openai.com/api/reference/resources/files/methods/content)
+使用 Platform API 的文件及 API Key；[ChatGPT 组件文件接口](https://developers.openai.com/plugins/reference#file-apis)
+依赖宿主提供的 `window.openai` 和插件获授权文件。两者均未建立当前 Codex 生成图片 ID 的解析合同，
+不直接复用，不猜测私有下载路由，也不把现有本地图片重新上传来伪造上游编号。
+
+继续实现所需输入为：实际返回 File 引用的宿主、该宿主支持的解析接口及鉴权、文件身份和
+Provider/账户/Thread 的作用域、有效期与错误语义，以及获授权的真实引用样本。
+合同具备后先在 Client/组合边界传递并复核来源身份，再进行有界、可取消的内容读取，
+复用 Surface 图片签名校验与持久内容快照；重新核对授权撤销、过期、错账户、超限与恢复路径。
+上述为待实现设计，不代表已接入或已验证；当前引用兼容与明确不可获取提示继续有效。
+
 ### 全链路关联审查覆盖
 
 以下记录本轮审查的输入、处理和最终消费关系；“未发现需调整”仅指这些固定源码路径，
