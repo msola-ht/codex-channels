@@ -10,7 +10,7 @@ type Initialization = Awaited<ReturnType<ProviderRoutingClient["reconnectProvide
 
 export interface GatewayReconnectOptions {
   codex: Pick<ProviderRoutingClient, "knownProvider" | "reconnectProvider" | "connectProvider" | "closeProvider">;
-  router: Pick<SessionRouter, "allBindings">;
+  router: Pick<SessionRouter, "allBindings" | "invalidateExecutionContext">;
   core: Pick<ConversationCore, "connectionLost" | "connectionRestored">;
   interactions: Pick<InteractionRouter, "cancelThreads">;
   bindings: Pick<BindingRestoreCoordinator, "hasDisconnectedProviders" | "nextDisconnectedProvider"
@@ -155,7 +155,10 @@ export class GatewayReconnectCoordinator {
         .map((binding) => binding.threadId)
         .filter((threadId) => this.options.codex.knownProvider(threadId) === provider),
     );
-    for (const threadId of affectedThreadIds) this.options.cancelQuestions(threadId);
+    for (const threadId of affectedThreadIds) {
+      this.options.router.invalidateExecutionContext(threadId);
+      this.options.cancelQuestions(threadId);
+    }
     let intentionallyReleased = false;
     try {
       intentionallyReleased = await this.options.intentionallyReleased(provider);
@@ -195,7 +198,10 @@ export class GatewayReconnectCoordinator {
     const affectedThreadIds = new Set(this.options.router.allBindings()
       .map((binding) => binding.threadId)
       .filter((threadId) => this.options.codex.knownProvider(threadId) === provider));
-    for (const threadId of affectedThreadIds) this.options.cancelQuestions(threadId);
+    for (const threadId of affectedThreadIds) {
+      this.options.router.invalidateExecutionContext(threadId);
+      this.options.cancelQuestions(threadId);
+    }
     this.options.bindings.markProviderDisconnected(provider, affectedThreadIds);
     this.options.interactions.cancelThreads(affectedThreadIds);
     this.options.core.connectionLost(message, affectedThreadIds);

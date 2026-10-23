@@ -5,6 +5,7 @@ export type ThreadStateEvent =
       type: "thread.settings.updated";
       threadId: string;
       settings: ThreadModelSettings;
+      cwd: string;
     }
   | { type: "thread.name.updated"; threadId: string; name: string | null }
   | { type: "thread.archived"; threadId: string }
@@ -13,6 +14,14 @@ export type ThreadStateEvent =
 
 export class ThreadStateSynchronizer {
   constructor(private readonly router: SessionRouter) {}
+
+  /** Apply freshness facts before asynchronous presentation queues. */
+  observeExecutionContext(event: ThreadStateEvent): void {
+    if (event.type === "thread.settings.updated") this.router.observeThreadCwd(event.threadId, event.cwd);
+    else if (event.type === "thread.closed" || event.type === "thread.archived" || event.type === "thread.deleted") {
+      this.router.invalidateExecutionContext(event.threadId);
+    }
+  }
 
   handle(event: ThreadStateEvent): void {
     switch (event.type) {

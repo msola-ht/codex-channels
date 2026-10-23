@@ -60,6 +60,11 @@ Workspace 与上游 Project 的职责、共享范围及重新评估条件见
 
 ## 版本与数字
 
+Thread 执行上下文分批开发与审查记录见 [执行上下文计划](thread-execution-context-plan.md)。
+Client 从稳定生命周期响应读取 `cwd/runtimeWorkspaceRoots`，从 `thread/settings/updated`
+读取 cwd；Router 仅作内存诊断，断线或关闭失效，roots 保持生命周期快照语义。
+不把此投影当作实时授权状态，也不向执行请求自动回传 roots。运行观察与限制见计划记录。
+
 当前索引对应 [`src/codex-protocol/version.json`](../src/codex-protocol/version.json) 锁定的
 `codex-cli 0.163.0`。生成时启用实验类型；业务采用范围及 Plugin 入口以
 [受控协议边界](#受控协议边界)为准，其他生成类型不表示已支持。

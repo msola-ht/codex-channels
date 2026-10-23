@@ -200,6 +200,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   Fork 不继承父会话的功能来源；恢复接口没有来源覆盖字段，保留官方持久来源，不重写旧会话或历史用量。
   普通会话入口的 `turn/start` 显式发送 `turnTrigger=user`；计划任务不填该字段，
   `turn/steer` 与 Queue 使用各自原生协议，不附加不支持的字段。
+  新建、恢复和 Fork 的 `runtimeWorkspaceRoots` 校验后透传为生命周期目录快照；设置通知只提供 cwd，不能更新该 roots 快照。
   新建、恢复和 Fork 的 `instructionSources` 透传为实际加载文件清单，供 `/status` 展示生命周期快照；
   不读取文件正文，也不据此推断系统、开发者或其他动态指令是否存在。
   功能来源与 `source` 的 CLI/App Server 入口分类独立，普通来源缺失可能影响官方用量页面归类，

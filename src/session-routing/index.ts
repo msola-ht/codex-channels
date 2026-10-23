@@ -12,6 +12,7 @@ export {
   type ThreadDynamicToolSpec,
   type ThreadQueryOptions,
   type ThreadSession,
+  type ThreadExecutionContext,
   type ThreadResumeSession,
   type ThreadStartOptions,
   type ThreadSnapshot,

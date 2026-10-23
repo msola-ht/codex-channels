@@ -1339,6 +1339,9 @@ export abstract class GatewayComponentGraph {
       }
       const threadStateEvent = toThreadStateEvent(notification);
       if (threadStateEvent) {
+        const source = this.notificationGenerations.get(notification);
+        if (source && source.generation !== (this.providerNotificationGenerations.get(source.provider) ?? 0)
+          && (threadStateEvent.type === "thread.settings.updated" || threadStateEvent.type === "thread.closed")) return;
         this.threadState.handle(threadStateEvent);
         if (threadStateEvent.type === "thread.settings.updated") {
           this.conversations.observeLunaReserveSettings(threadStateEvent.threadId);
@@ -1716,6 +1719,8 @@ export abstract class GatewayComponentGraph {
         this.notificationGenerations.set(notification, {
           provider, generation: this.providerNotificationGenerations.get(provider) ?? 0,
         });
+        const threadStateEvent = toThreadStateEvent(notification);
+        if (threadStateEvent) this.threadState.observeExecutionContext(threadStateEvent);
         // Revoke live tools before bounded asynchronous notification consumers.
         const toolEvent = toConversationInputEvent(notification);
         if (toolEvent) this.scheduledTasks?.toolHandler.handleInput(toolEvent);
@@ -1752,12 +1757,16 @@ export abstract class GatewayComponentGraph {
         // A reconnect has no delta sequence numbers: never join text across connections.
         this.reasoningRepeatGuard.resetProvider(provider);
         this.providerNotificationGenerations.set(provider, (this.providerNotificationGenerations.get(provider) ?? 0) + 1);
+        this.router.invalidateExecutionContext();
         this.scheduledTasks?.toolHandler.cancelThreads((threadId) => this.codex.knownProvider(threadId) === provider);
         const affectedThreads = new Set(this.router.allBindings()
           .filter((binding) => this.codex.knownProvider(binding.threadId) === provider)
           .map((binding) => binding.threadId));
         this.conversationIdleReleaser?.cancelPending(affectedThreads);
-        for (const threadId of affectedThreads) this.conversations.clearMcpLoginThread(threadId);
+        for (const threadId of affectedThreads) {
+          this.router.invalidateExecutionContext(threadId);
+          this.conversations.clearMcpLoginThread(threadId);
+        }
         this.turnExecution.reset(provider);
         this.autoApprovalReview.reset(provider);
         this.autoApprovalReviewNotifications.reset(provider);

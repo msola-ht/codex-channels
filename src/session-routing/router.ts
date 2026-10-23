@@ -15,6 +15,7 @@ import type {
 } from "../storage/index.js";
 import type {
   ThreadLifecyclePort,
+  ThreadExecutionContext,
   ThreadSession,
   ThreadResumeSession,
   ThreadSnapshot,
@@ -97,7 +98,10 @@ export class SessionRouter {
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
   private readonly namesByThread = new Map<string, string | null>();
-  private readonly sessionDiagnosticsByThread = new Map<string, Pick<ThreadSession, "contextCompactionItemIds" | "instructionSources">>();
+  private readonly sessionDiagnosticsByThread = new Map<string, Pick<ThreadSession, "contextCompactionItemIds" | "instructionSources"> & { executionContext: ThreadExecutionContext | undefined }>();
+  private executionContextRevision = 0;
+  private readonly executionContextChanges: (string | undefined)[] = [];
+  private readonly sessionContextRevisions = new WeakMap<ThreadSession, number>();
 
   constructor(
     private readonly codex: ThreadLifecyclePort,
@@ -308,6 +312,65 @@ export class SessionRouter {
     }
   }
 
+  executionContextForThread(threadId: string): ThreadExecutionContext | undefined {
+    if (!this.bindings.getByThread(threadId) || this.unsubscribedBindings.has(threadId)) return undefined;
+    const context = this.sessionDiagnosticsByThread.get(threadId)?.executionContext;
+    return context && { cwd: context.cwd, workspaceRootsSnapshot: {
+      cwd: context.workspaceRootsSnapshot.cwd, roots: [...context.workspaceRootsSnapshot.roots],
+    } };
+  }
+
+  invalidateExecutionContext(threadId?: string): void {
+    this.executionContextRevision += 1;
+    this.executionContextChanges.push(threadId);
+    if (this.executionContextChanges.length > 256) this.executionContextChanges.shift();
+    if (threadId === undefined) return; // A disconnect also invalidates unbound in-flight creations.
+    const diagnostics = this.sessionDiagnosticsByThread.get(threadId);
+    if (diagnostics) diagnostics.executionContext = undefined;
+    for (const resolution of this.approvalResolutions) {
+      resolution.changedThreads.add(threadId);
+      if (resolution.changedThreads.size > 1_024) {
+        resolution.overflowed = true;
+        resolution.changedThreads.clear();
+        this.approvalResolutions.delete(resolution);
+      }
+    }
+  }
+
+  observeThreadCwd(threadId: string, cwd: string): void {
+    const diagnostics = this.sessionDiagnosticsByThread.get(threadId);
+    const context = this.executionContextForThread(threadId);
+    // Unknown/closed contexts require a successful lifecycle response, not a late notification.
+    if (!context || context.cwd !== cwd) this.invalidateExecutionContext(threadId);
+    if (context && diagnostics) diagnostics.executionContext = { ...context, cwd };
+  }
+
+  private async observeSessionContext<T extends ThreadSession>(operation: () => Promise<T>): Promise<T> {
+    const revision = this.executionContextRevision;
+    const session = await operation();
+    this.sessionContextRevisions.set(session, revision);
+    return session;
+  }
+
+  private sessionExecutionContext(session: ThreadSession): ThreadExecutionContext | undefined {
+    const revision = this.sessionContextRevisions.get(session);
+    if (revision === undefined) return undefined;
+    const changes = this.executionContextRevision - revision;
+    // Only diagnostic freshness is tracked. Overflow is unknown, never a permission decision.
+    if (changes > this.executionContextChanges.length
+      || (changes > 0 && this.executionContextChanges.slice(-changes)
+        .some(id => id === undefined || id === session.thread.id))) return undefined;
+    return { cwd: session.effectiveSettings.cwd, workspaceRootsSnapshot: {
+      cwd: session.effectiveSettings.cwd, roots: [...session.runtimeWorkspaceRoots],
+    } };
+  }
+
+  private async unsubscribeThread(threadId: string, beforeSubmit?: () => void): Promise<void> {
+    await this.codex.unsubscribeThread(threadId, beforeSubmit);
+    this.invalidateExecutionContext(threadId);
+    if (this.bindings.getByThread(threadId)) this.unsubscribedBindings.add(threadId);
+  }
+
   updateCollaborationMode(
     threadId: string,
     collaborationMode: ThreadModelSettings["collaborationMode"],
@@ -353,7 +416,7 @@ export class SessionRouter {
             this.namesByThread.set(resumed.thread.id, resumed.thread.name);
             this.sessionDiagnosticsByThread.set(
               resumed.thread.id,
-              { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources },
+              { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources, executionContext: this.sessionExecutionContext(resumed) },
             );
             restoredBinding = {
               target: binding.target,
@@ -525,7 +588,7 @@ export class SessionRouter {
             this.namesByThread.set(resumed.thread.id, resumed.thread.name);
             this.sessionDiagnosticsByThread.set(
               resumed.thread.id,
-              { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources },
+              { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources, executionContext: this.sessionExecutionContext(resumed) },
             );
             this.clearForceNew(target, Date.now());
             observation?.restored(binding, resumed.thread);
@@ -538,12 +601,12 @@ export class SessionRouter {
       }
     }
 
-    const started = await this.codex.startThread(workspace.cwd, {
+    const started = await this.observeSessionContext(() => this.codex.startThread(workspace.cwd, {
       ...startOptions,
       ...(this.dynamicTools.length > 0
         ? { dynamicTools: this.dynamicTools }
         : {}),
-    });
+    }));
     try { startOptions.beforeSubmit?.(); }
     catch (error) { await this.cleanupFailedResume(started.thread.id, error, false); }
     const binding = { target, workspaceId: workspace.id, threadId: started.thread.id, sessionId: started.thread.sessionId };
@@ -556,7 +619,7 @@ export class SessionRouter {
     this.namesByThread.set(started.thread.id, started.thread.name);
     this.sessionDiagnosticsByThread.set(
       started.thread.id,
-      { contextCompactionItemIds: started.contextCompactionItemIds, instructionSources: started.instructionSources },
+      { contextCompactionItemIds: started.contextCompactionItemIds, instructionSources: started.instructionSources, executionContext: this.sessionExecutionContext(started) },
     );
     this.clearForceNew(target, Date.now());
     this.notifyBindingsChanged();
@@ -564,6 +627,7 @@ export class SessionRouter {
   }
 
   markThreadClosed(threadId: string): void {
+    this.invalidateExecutionContext(threadId);
     const binding = this.bindings.getByThread(threadId);
     if (!binding) return;
     this.unsubscribedBindings.add(threadId);
@@ -629,10 +693,10 @@ export class SessionRouter {
       const workspace = workspaceId === undefined
         ? this.workspace(target)
         : this.workspaces.require(workspaceId);
-      const session = await this.codex.startThread(workspace.cwd, {
+      const session = await this.observeSessionContext(() => this.codex.startThread(workspace.cwd, {
         ...backgroundStartOptions,
         threadSource: "automation",
-      });
+      }));
       if (this.bindings.getByThread(session.thread.id)) {
         throw new UserFacingError(
           "thread.bound",
@@ -662,7 +726,7 @@ export class SessionRouter {
       this.namesByThread.set(session.thread.id, session.thread.name);
       this.sessionDiagnosticsByThread.set(
         session.thread.id,
-        { contextCompactionItemIds: session.contextCompactionItemIds, instructionSources: session.instructionSources },
+        { contextCompactionItemIds: session.contextCompactionItemIds, instructionSources: session.instructionSources, executionContext: this.sessionExecutionContext(session) },
       );
       this.notifyBindingsChanged();
       return { binding, session };
@@ -743,7 +807,7 @@ export class SessionRouter {
             throw new UserFacingError("thread.takeover.changed", "原会话仍有活动，请重新选择会话");
           }
           assertCurrent();
-          await this.codex.unsubscribeThread(current.threadId, assertCurrent);
+          await this.unsubscribeThread(current.threadId, assertCurrent);
           previousUnsubscribed = true;
           const verifyPrevious = terminalRelease
             ? transition?.verifyPreviousAfterTerminalUnsubscribe ?? transition?.verifyPreviousIdle
@@ -772,7 +836,7 @@ export class SessionRouter {
       this.namesByThread.set(resumed.thread.id, resumed.thread.name);
       this.sessionDiagnosticsByThread.set(
         resumed.thread.id,
-        { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources },
+        { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources, executionContext: this.sessionExecutionContext(resumed) },
       );
       const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
       this.clearForceNew(target, Date.now());
@@ -797,7 +861,7 @@ export class SessionRouter {
       ), preserveSubscription);
     }
     const threadId = thread.id;
-    const session = await this.codex.resumeThread(threadId, workspace.cwd, options);
+    const session = await this.observeSessionContext(() => this.codex.resumeThread(threadId, workspace.cwd, options));
     try { options.beforeSubmit?.(); }
     catch (error) { await this.cleanupFailedResume(threadId, error, preserveSubscription); }
     if (isCurrent && !isCurrent()) {
@@ -846,7 +910,7 @@ export class SessionRouter {
   ): Promise<never> {
     if (!preserveSubscription) {
       try {
-        await this.codex.unsubscribeThread(threadId);
+        await this.unsubscribeThread(threadId);
       } catch (cleanupError) {
         throw new AggregateError([error, cleanupError], "恢复失败，且新订阅清理失败", { cause: cleanupError });
       }
@@ -921,7 +985,7 @@ export class SessionRouter {
     }
     if (replaced && replaced.threadId !== threadId) {
       assertAuthorized?.();
-      await this.codex.unsubscribeThread(replaced.threadId, assertAuthorized);
+      await this.unsubscribeThread(replaced.threadId, assertAuthorized);
     }
     let transfer: BindingTransfer;
     try {
@@ -1007,7 +1071,7 @@ export class SessionRouter {
     if (terminalRelease && !await condition.verifyIdle()) return false;
     if (!ownsBinding() || !condition.isCurrent()) return false;
     assertAuthorized?.();
-    await this.codex.unsubscribeThread(expected.threadId, assertAuthorized);
+    await this.unsubscribeThread(expected.threadId, assertAuthorized);
     this.unsubscribedBindings.add(expected.threadId);
     let verified = false;
     try {
@@ -1059,7 +1123,7 @@ export class SessionRouter {
       }
       const terminalRelease = snapshot?.status.type === "systemError" && isThreadExecutionSettled(snapshot);
       if (terminalRelease && condition && (!await condition.verifyIdle() || !isCurrent())) return undefined;
-      await this.codex.unsubscribeThread(threadId, condition ? () => {
+      await this.unsubscribeThread(threadId, condition ? () => {
         if (!isCurrent()) throw new UserFacingError("thread.takeover.changed", "会话活动或绑定已变化，请重新操作");
       } : undefined);
       if (condition && binding && snapshot) {
@@ -1081,7 +1145,8 @@ export class SessionRouter {
               this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
                 resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
               this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-              this.sessionDiagnosticsByThread.set(resumed.thread.id, { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources });
+              this.sessionDiagnosticsByThread.set(resumed.thread.id, { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources, executionContext: this.sessionExecutionContext(resumed) });
+              this.unsubscribedBindings.delete(threadId);
               observation?.restored(binding, resumed.thread);
             } finally {
               observation?.stop();
@@ -1152,7 +1217,7 @@ export class SessionRouter {
       throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
     }
     const workspace = this.workspaces.require(current.workspaceId);
-    const forked = await this.codex.forkThread(
+    const forked = await this.observeSessionContext(() => this.codex.forkThread(
       current.threadId,
       workspace.cwd,
       {
@@ -1165,7 +1230,7 @@ export class SessionRouter {
           ? {}
           : { modelProvider: startOptions.modelProvider }),
       },
-    );
+    ));
     const binding = {
       target,
       workspaceId: workspace.id,
@@ -1182,7 +1247,7 @@ export class SessionRouter {
     };
     try {
       assertCurrent();
-      await this.codex.unsubscribeThread(current.threadId, assertCurrent);
+      await this.unsubscribeThread(current.threadId, assertCurrent);
       previousUnsubscribed = true;
       assertCurrent();
       this.bindings.switchForeground(binding, false);
@@ -1200,7 +1265,7 @@ export class SessionRouter {
     this.sessionDiagnosticsByThread.delete(current.threadId);
     this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier, "default", forked.approvalsReviewer);
     this.namesByThread.set(forked.thread.id, forked.thread.name);
-    this.sessionDiagnosticsByThread.set(forked.thread.id, { contextCompactionItemIds: forked.contextCompactionItemIds, instructionSources: forked.instructionSources });
+    this.sessionDiagnosticsByThread.set(forked.thread.id, { contextCompactionItemIds: forked.contextCompactionItemIds, instructionSources: forked.instructionSources, executionContext: this.sessionExecutionContext(forked) });
     this.clearForceNew(target, Date.now());
     this.notifyBindingsChanged();
     return binding;
@@ -1278,7 +1343,7 @@ export class SessionRouter {
     const current = this.bindings.get(target);
     assertAuthorized?.();
     if (current) {
-      await this.codex.unsubscribeThread(current.threadId, assertAuthorized);
+      await this.unsubscribeThread(current.threadId, assertAuthorized);
       this.unsubscribedBindings.add(current.threadId);
       try {
         assertAuthorized?.();
@@ -1323,7 +1388,7 @@ export class SessionRouter {
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
           resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
         this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-        this.sessionDiagnosticsByThread.set(resumed.thread.id, { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources });
+        this.sessionDiagnosticsByThread.set(resumed.thread.id, { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources, executionContext: this.sessionExecutionContext(resumed) });
         this.unsubscribedBindings.delete(expected.threadId);
         observation?.restored(expected, resumed.thread);
       } finally {

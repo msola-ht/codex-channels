@@ -86,11 +86,13 @@ function toThreadSettingsUpdatedEvent(
   const settings = asRecord(params?.threadSettings);
   const threadId = nonEmptyString(params?.threadId);
   const model = nonEmptyString(settings?.model);
+  const cwd = nonEmptyString(settings?.cwd);
   const effort = strictNullableString(settings?.effort);
   const serviceTier = strictNullableString(settings?.serviceTier);
   const collaborationMode = parseCollaborationMode(settings?.collaborationMode);
   if (
     !threadId
+    || !cwd
     || !model
     || !effort.valid
     || !serviceTier.valid
@@ -101,6 +103,7 @@ function toThreadSettingsUpdatedEvent(
   return {
     type: "thread.settings.updated",
     threadId,
+    cwd,
     settings: {
       model,
       effort: effort.value,

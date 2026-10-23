@@ -61,6 +61,8 @@ export interface ThreadSession {
   contextCompactionItemIds: readonly string[];
   /** Actual instruction file paths returned by the lifecycle response, not a live file scan. */
   instructionSources: readonly string[];
+  /** Runtime roots returned by this lifecycle response; not a live permission list. */
+  runtimeWorkspaceRoots: readonly string[];
   /** Actual runtime permission settings returned by App Server, not Gateway defaults. */
   effectiveSettings: {
     cwd: string;
@@ -68,6 +70,13 @@ export interface ThreadSession {
     sandbox: "read-only" | "workspace-write" | "danger-full-access" | "external-sandbox";
     permissions: string | null;
   };
+}
+
+export interface ThreadExecutionContext {
+  /** Last cwd confirmed by a lifecycle response or settings notification. */
+  cwd: string;
+  /** Historical lifecycle snapshot, not updated by settings notifications. */
+  workspaceRootsSnapshot: { cwd: string; roots: readonly string[] };
 }
 
 export interface ThreadResumeSession extends ThreadSession {
