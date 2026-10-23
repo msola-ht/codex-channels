@@ -60,7 +60,10 @@ export function isClinePassProvider(provider: string | null | undefined): boolea
 
 export function formatModelName(model: string | null | undefined, provider: string | null | undefined): string | null {
   if (model == null) return null
-  return isClinePassProvider(provider) ? model.replace(/^cline-pass\//, "") : model
+  if (!isClinePassProvider(provider)) return model
+  const prefix = `${provider}/`
+  const unqualified = model.startsWith(prefix) ? model.slice(prefix.length) : model
+  return unqualified.replace(/^cline-pass\//, "")
 }
 
 export type DisplayLanguage = "zh" | "en"
