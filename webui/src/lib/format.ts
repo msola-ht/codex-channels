@@ -7,7 +7,35 @@ import { formatGenerationSpeed as requestGenerationSpeed } from "../../../runtim
 export function requestMethodDisplay(record: RequestRecord | TrafficExchangeSummary, t: Translate): { label: string; variant: "secondary" | "outline" } {
   if (record.requestPurpose === "autoApprovalReview") return { label: t("requestMethod.review"), variant: "secondary" }
   if (("operation" in record && record.operation === "compact") || ("requestKind" in record && record.requestKind === "compaction")) return { label: t("requestMethod.compact"), variant: "secondary" }
+  if ("operation" in record && (record.operation === "imageGeneration" || record.operation === "imageEdit")) return { label: t(`requestMethod.${record.operation}`), variant: "secondary" }
+  if (record.transport === "http" && "path" in record && record.method === "POST") {
+    const path = record.path?.split(/[?#]/u)[0]
+    if (path === "/images/generations") return { label: t("requestMethod.imageGeneration"), variant: "secondary" }
+    if (path === "/images/edits") return { label: t("requestMethod.imageEdit"), variant: "secondary" }
+  }
   return { label: record.transport === "websocket" ? "wss" : record.transport === "http" ? "http" : "—", variant: "outline" }
+}
+
+export function requestOperationLabel(operation: RequestRecord["operation"], t: Translate): string {
+  if (operation === "imageGeneration" || operation === "imageEdit") return t(`requestMethod.${operation}`)
+  return operation === "compact" ? t("metrics.compact") : t("filters.response")
+}
+
+/** Display recorded destinations without credentials, query parameters or fragments. */
+export function formatTrafficRequestAddress(record: Pick<TrafficExchangeSummary, "transport" | "method" | "path" | "url">): string {
+  const raw = record.transport === "websocket" ? record.url : record.path
+  if (!raw) return "—"
+  let address: string
+  if (raw.startsWith("/") && !raw.startsWith("//")) {
+    address = raw.split(/[?#]/u)[0]!
+  } else {
+    try {
+      const url = new URL(raw)
+      if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)) return "—"
+      address = `${url.origin}${url.pathname}`
+    } catch { return "—" }
+  }
+  return `${record.transport === "websocket" ? "WS" : record.method ?? "HTTP"} ${address}`
 }
 
 /** 调用转储使用 clp，请求指标使用精确账户 Provider clp-<id>。 */

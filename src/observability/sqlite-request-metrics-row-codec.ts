@@ -23,7 +23,7 @@ export interface MetricRow {
   provider: string;
   transport: "http" | "websocket";
   response_format: "sse" | "json" | "websocket" | "unknown";
-  operation: "response" | "compact";
+  operation: "response" | "compact" | "imageGeneration" | "imageEdit";
   thread_id: string | null;
   turn_id: string | null;
   request_purpose: "autoApprovalReview" | null;
@@ -305,7 +305,7 @@ export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetri
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
     inputTokens: row.input_tokens ?? 0,
-    cachedInputTokens: row.cache_observed_request_count === row.request_count
+    cachedInputTokens: row.input_missing_request_count === 0
       && row.cache_observed_request_count === row.input_token_count
       && row.cache_observed_request_count === row.cached_input_token_count
       ? row.cached_input_tokens ?? 0

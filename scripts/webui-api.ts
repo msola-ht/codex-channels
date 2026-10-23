@@ -40,7 +40,7 @@ export interface MetricsQuery {
   turnId?: string
   provider?: string[]
   model?: string
-  operation?: "response" | "compact"
+  operation?: "response" | "compact" | "imageGeneration" | "imageEdit"
   status?: "completed" | "failed" | "incomplete" | "unknown"
   filter?: string
   offset?: number
@@ -389,7 +389,7 @@ export interface RequestRecord {
   id: number
   provider: string | null
   model: string | null
-  operation: "response" | "compact"
+  operation: "response" | "compact" | "imageGeneration" | "imageEdit"
   status: string
   httpStatus: number | null
   errorType: string | null

@@ -82,7 +82,8 @@
   账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   模型请求入口；IPC 只投影约定字段，Provider 归属由组合层确定，不接受入站扩展字段覆盖。
-  模型请求统计端口。合法脱敏样本尝试入队；具备 Thread 与 Turn 关联的非审查样本按 Turn 聚合
+  模型请求统计端口。合法脱敏样本尝试入队；生图请求只保存请求指标，不回填文本模型思考等级，
+  不更新 Core 的模型重试或完成卡实时请求状态。具备 Thread 与 Turn 关联的非审查文本样本按 Turn 聚合
   到完成卡片。持久化通过 Observability 有界 Writer 延迟分片执行，入队失败明确拒绝 IPC 确认，
   但仍保留普通请求的 Core 实时统计；已受理不等于落库成功，延迟写入失败独立上报。
   优先使用代理指标携带的 HTTP/WS 请求中明确提供的 `reasoning.effort`，

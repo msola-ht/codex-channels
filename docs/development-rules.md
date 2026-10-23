@@ -97,7 +97,7 @@ For configuration changes exposed through CLI, Setup, WebUI or another managemen
 - A Conversation is uniquely identified by `surface + accountId + conversationId`.
 - StateStore must not persist message bodies, Turn/Item history, Diff, Plan, approval content or copies of Codex session files.
 - Runtime accepts only the current schema and performs no implicit migration; unsupported versions must fail closed.
-  Use fresh installations as the baseline. The explicitly supported `codexc update` metrics v31 → v32 conversion runs only after read-only preflight and writer shutdown, with a private full backup; runtime never migrates. Do not add other database upgrades, legacy-account removal or legacy-installation cleanup paths.
+  Use fresh installations as the baseline. The explicitly supported `codexc update` metrics v31/v32 → v33 conversion adds image request operations and runs only after read-only preflight and writer shutdown, with a private full backup; runtime never migrates. Do not add other database upgrades, legacy-account removal or legacy-installation cleanup paths.
   Reject unsupported data without modifying it; never replace compatibility checks with database deletion.
 - Keep StateStore replaceable. Business modules may depend only on its public interface.
 - Do not store user configuration, databases, sockets, logs or temporary uploads in package directories replaced by npm upgrades.

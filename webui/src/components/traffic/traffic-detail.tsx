@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { requestFailureReason } from "@/lib/request-failure"
 import { formatTrafficFailureStage } from "@/lib/format"
-import { formatGenerationSpeed } from "@/lib/format"
+import { formatGenerationSpeed, formatTrafficRequestAddress } from "@/lib/format"
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
 import { TrafficParameterComparison, TrafficRequestContent } from "@/components/traffic/traffic-request-content"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -76,6 +76,7 @@ export function TrafficDetail({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <dl className="grid min-w-0 gap-3 text-sm sm:grid-cols-2">
+            <div className="min-w-0 sm:col-span-2"><dt className="text-muted-foreground">{t("traffic.requestAddress")}</dt><dd className="break-all font-mono">{requestLabel(detail)}</dd></div>
             {[
               [t("requestPurpose.label"), autoReview ? t("requestPurpose.autoApprovalReview") : null],
               [t(autoReview ? "requestPurpose.ownerThread" : "traffic.fieldThread"), detail.threadId],
@@ -348,8 +349,8 @@ function outputLabel(t: Translate, item: NonNullable<TrafficExchangeDetail["resp
 }
 
 function requestLabel(detail: TrafficExchangeDetail): string {
-  if (detail.transport === "websocket") return `WebSocket ${detail.request.url ?? detail.url ?? ""}`
-  return `${detail.request.method ?? "HTTP"} ${detail.request.path ?? ""}`.trim()
+  return formatTrafficRequestAddress({ transport: detail.transport, method: detail.request.method,
+    path: detail.request.path, url: detail.request.url ?? detail.url })
 }
 
 function HeaderTable({ title, headers, truncated }: { title: string; headers: Record<string, TrafficHeaderValue>; truncated?: boolean }) {

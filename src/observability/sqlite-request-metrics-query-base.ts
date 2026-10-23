@@ -9,6 +9,8 @@ export interface MetricsQueryReader {
 }
 
 export const observableCompletionSql = "status = 'completed'";
+/** Image endpoints do not expose text-token/cache usage through this collector. */
+export const textTokenOperationSql = "operation IN ('response', 'compact')";
 /** Representative agent settings come from ordinary responses, never review/compact requests. */
 export const agentResponseSql = "source = 'owned' AND operation = 'response' AND request_purpose IS NULL";
 export const interruptedRequestSql = `NOT (${observableCompletionSql}) AND COALESCE(
@@ -37,7 +39,7 @@ export const compactAggregateSql = `
 export const cacheUsageSql = `
   SUM(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS known_cached_input_tokens,
   SUM(CASE WHEN cached_input_tokens IS NOT NULL THEN input_tokens END) AS cache_observed_input_tokens,
-  SUM(CASE WHEN input_tokens IS NULL OR cached_input_tokens IS NULL THEN 1 ELSE 0 END) AS cache_missing_request_count
+  SUM(CASE WHEN ${textTokenOperationSql} AND (input_tokens IS NULL OR cached_input_tokens IS NULL) THEN 1 ELSE 0 END) AS cache_missing_request_count
 `;
 export const metricsAggregateSql = `
   ${usageCoverageSql()},
@@ -59,7 +61,7 @@ export const metricsAggregateSql = `
 
 export function usageCoverageSql(condition = "1", prefix = ""): string {
   return ["input", "output", "reasoning_output"].map((field) =>
-    `COUNT(CASE WHEN (${condition}) AND ${field}_tokens IS NULL THEN 1 END) AS ${prefix}${field}_missing_request_count`,
+    `COUNT(CASE WHEN (${condition}) AND ${textTokenOperationSql} AND ${field}_tokens IS NULL THEN 1 END) AS ${prefix}${field}_missing_request_count`,
   ).join(", ");
 }
 
@@ -123,7 +125,7 @@ export function metricsScopeSql(query: ModelRequestMetricsScope, selectThreadRoo
     params.push(...providers);
   }
   if (query.turnId !== undefined && query.threadId === undefined) throw new Error("查询 Turn 必须同时指定 Thread ID");
-  if (query.operation !== undefined && !["response", "compact"].includes(query.operation)) throw new Error("operation 筛选值无效");
+  if (query.operation !== undefined && !["response", "compact", "imageGeneration", "imageEdit"].includes(query.operation)) throw new Error("operation 筛选值无效");
   if (query.status !== undefined && !["completed", "failed", "incomplete", "unknown"].includes(query.status)) throw new Error("status 筛选值无效");
   if (query.source !== undefined && !["owned", "relay"].includes(query.source)) throw new Error("source 筛选值无效");
   if (query.onlyFailures) conditions.push(`NOT (${observableCompletionSql})`);

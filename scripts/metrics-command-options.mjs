@@ -42,7 +42,7 @@ export function isPrunableMetricsProviderId(value) {
 
 const metricsRangeUsage = requestMetricsRangeNames.join("|");
 const rangeUsage = `[--range <${metricsRangeUsage}> | --from YYYY-MM-DD --to YYYY-MM-DD]`;
-const filtersUsage = "[--source owned|relay] [--caller ID] [--provider ID] [--model ID] [--operation response|compact] [--status completed|failed|incomplete|unknown] [--filter 关键字]";
+const filtersUsage = "[--source owned|relay] [--caller ID] [--provider ID] [--model ID] [--operation response|compact|imageGeneration|imageEdit] [--status completed|failed|incomplete|unknown] [--filter 关键字]";
 export const metricsQueryOptions = ["--range", "--from", "--to", "--source", "--caller", "--provider", "--model", "--operation", "--status", "--filter", "--thread", "--turn"];
 export const metricsRequestPurposeOption = "--request-purpose";
 const requestPurposeUsage = "[--request-purpose unmarked|autoApprovalReview]";

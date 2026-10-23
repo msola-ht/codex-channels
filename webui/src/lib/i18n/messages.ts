@@ -1162,6 +1162,8 @@ const zh = {
   capture: { mode: "调用记录模式", production: "生产", debug: "调试", scope: "Codex 与 Relay 共用。Relay 刷新配置后用于新请求；Codex 需重启 App Server。调试仍会脱敏并限制容量。" },
   requestMethod: {
     label: "方式",
+    imageGeneration: "图片生成",
+    imageEdit: "图片编辑",
     review: "审查",
     compact: "压缩",
   },
@@ -1613,6 +1615,7 @@ const zh = {
     "listSeparator": "、"
   },
   traffic: {
+    requestAddress: "请求地址",
     readLimit: "读取超过整体工作预算，请缩小批次范围后重试。",
     readTimeout: "读取超过 10 秒期限，请缩小批次范围后重试。",
     readCancelled: "调用记录读取已取消。",
@@ -3056,6 +3059,8 @@ const en: Messages = {
   capture: { mode: "Capture mode", production: "Production", debug: "Debug", scope: "Shared by Codex and Relay. Relay applies refreshed settings to new requests; Codex requires an App Server restart. Debug capture still redacts data and enforces size limits." },
   requestMethod: {
     label: "Method",
+    imageGeneration: "Image generation",
+    imageEdit: "Image editing",
     review: "Review",
     compact: "Compact",
   },
@@ -3507,6 +3512,7 @@ const en: Messages = {
     "listSeparator": ", "
   },
   traffic: {
+    requestAddress: "Request address",
     readLimit: "The read exceeded its overall work budget. Select a smaller batch and try again.",
     readTimeout: "The read exceeded the 10-second deadline. Select a smaller batch and try again.",
     readCancelled: "The traffic read was cancelled.",

@@ -388,7 +388,7 @@ export async function updateManagedSourceInstallation(
       const sourceRecovery = switched
         ? `源码已切换，使用固定受管目录 ${checkout}。`
         : `源码尚未切换成功；先核对候选 HEAD 为 ${remoteCommit}、目录归属及未提交修改，完整保留固定受管目录 ${checkout} 中的现有源码和修改${backupPath ? `以及旧源码备份 ${backupPath}` : ""}，再将候选目录整体移至该固定路径；目标存在时不得覆盖，也不要从临时候选目录安装全局包。`;
-      const message = `指标数据库升级已开始，更新未完成；服务保持停止，禁止启动旧 v31 程序。数据库备份候选路径：${metricsUpgrade.backupPath}；请核对备份是否完整，数据库可能仍为 v31，不要假定迁移成功。候选源码保留：${candidatePath}。${sourceRecovery}核对 npm prefix --global 仍为 ${plan.npmPrefix}，从固定受管目录执行 npm run install:global；保持全部写入方停止，再运行新命令 codexc update 完成数据库检查或迁移。确认指标库为 v32、安装来源指向固定受管目录、服务入口指向本次源码或全局包后，按失败前记录的运行状态恢复服务。人工回退须先恢复完整 v31 备份和匹配旧程序；详细步骤见 docs/source-install.md。`;
+      const message = `指标数据库升级已开始，更新未完成；服务保持停止，禁止启动旧 Schema 程序。数据库备份候选路径：${metricsUpgrade.backupPath}；请核对备份是否完整，数据库可能仍为原版本，不要假定迁移成功。候选源码保留：${candidatePath}。${sourceRecovery}核对 npm prefix --global 仍为 ${plan.npmPrefix}，从固定受管目录执行 npm run install:global；保持全部写入方停止，再运行新命令 codexc update 完成数据库检查或迁移。确认指标库为 v33、安装来源指向固定受管目录、服务入口指向本次源码或全局包后，按失败前记录的运行状态恢复服务。人工回退须先恢复原 Schema 的完整备份和匹配旧程序；详细步骤见 docs/source-install.md。`;
       writeMessageSafely(writeMessage, "remediation", message);
       throw annotateSourceUpdateFailure(new Error(`${message} ${errorMessage(updateError)}`, { cause: updateError }), {
         stage: activeStage,
@@ -955,17 +955,17 @@ async function upgradeInspectedDatabases(checkout, environment, inspection, prog
   }
   if (!expected) return;
   // Keep the backup next to user data, outside the disposable candidate and npm package.
-  progress.backupPath = `${expected.databasePath}.pre-update-v31-${randomUUID()}.bak`;
-  writeMessageSafely(writeMessage, "note", `指标数据库将从 v31 升级至 v32，完整私有备份：${progress.backupPath}`);
+  progress.backupPath = `${expected.databasePath}.pre-update-v${expected.from}-${randomUUID()}.bak`;
+  writeMessageSafely(writeMessage, "note", `指标数据库将从 v${expected.from} 升级至 v${expected.to}，完整私有备份：${progress.backupPath}`);
   const { upgradeMetrics } = await import(pathToFileURL(join(checkout, "scripts", "metrics-database-upgrade.mjs")).href);
   progress.attempted = true;
   const result = await upgradeMetrics(checkout, expected.databasePath, progress.backupPath, expected);
-  if (result.upgraded !== true || result.from !== 31 || result.to !== 32 || result.backup !== progress.backupPath) {
-    throw new Error("指标升级未返回完整的 v31 → v32 完成证据");
+  if (result.upgraded !== true || result.from !== expected.from || result.to !== expected.to || result.backup !== progress.backupPath) {
+    throw new Error(`指标升级未返回完整的 v${expected.from} → v${expected.to} 完成证据`);
   }
   await inspectStagedInstallation(checkout, environment, false);
   progress.completed = true;
-  writeMessageSafely(writeMessage, "note", `指标数据库已升级至 v32，原始数据与私有备份已保留：${progress.backupPath}`);
+  writeMessageSafely(writeMessage, "note", `指标数据库已升级至 v${expected.to}，原始数据与私有备份已保留：${progress.backupPath}`);
 }
 
 async function disableCandidateDaemonAutoStart(checkout, environment, options) {
@@ -1276,7 +1276,7 @@ export async function updateInstalledPackage(environment = process.env, options 
     );
   } catch (error) {
     if (metricsUpgrade.attempted && (!metricsUpgrade.completed || !commandReady)) {
-      const message = `指标升级已开始但安装未就绪，服务保持停止，禁止启动旧 v31 程序。备份候选路径：${metricsUpgrade.backupPath}；候选程序：${checkout}。请核对完整备份及数据库版本，完成匹配 v32 程序安装后按原状态恢复服务。`;
+      const message = `指标升级已开始但安装未就绪，服务保持停止，禁止启动旧 Schema 程序。备份候选路径：${metricsUpgrade.backupPath}；候选程序：${checkout}。请核对完整备份及数据库版本，完成匹配 v33 程序安装后按原状态恢复服务。`;
       writeMessageSafely(writeMessage, "remediation", message);
       throw annotateSourceUpdateFailure(new Error(`${message} ${errorMessage(error)}`, { cause: error }), {
         stage: activeStage,

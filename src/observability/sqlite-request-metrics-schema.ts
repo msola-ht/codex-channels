@@ -23,6 +23,13 @@ export const metricStorageColumns = [
 ] as const;
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
 
+const imageMetricCheckSql = `operation NOT IN ('imageGeneration', 'imageEdit') OR (
+  transport = 'http' AND input_tokens IS NULL AND cached_input_tokens IS NULL
+  AND output_tokens IS NULL AND reasoning_output_tokens IS NULL AND total_tokens IS NULL
+  AND first_token_ms IS NULL AND upstream_ttft_ms IS NULL AND generation_timing IS NULL
+  AND response_usage_amount IS NULL
+)`;
+
 const baseMetricsTableSql = `
   CREATE TABLE model_request_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,7 +38,7 @@ const baseMetricsTableSql = `
     response_format TEXT NOT NULL CHECK (
       response_format IN ('sse', 'json', 'websocket', 'unknown')
     ),
-    operation TEXT NOT NULL CHECK (operation IN ('response', 'compact')),
+    operation TEXT NOT NULL CHECK (operation IN ('response', 'compact', 'imageGeneration', 'imageEdit')),
     thread_id TEXT,
     turn_id TEXT,
     model TEXT,
@@ -82,7 +89,8 @@ const baseMetricsTableSql = `
       OR (traffic_label IS NOT NULL AND length(traffic_label) > 0
         AND traffic_session IS NOT NULL AND length(traffic_session) > 0
         AND traffic_interaction IS NOT NULL AND traffic_interaction > 0)
-    )
+    ),
+    CHECK (${imageMetricCheckSql})
   );
 `;
 
@@ -331,6 +339,10 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
     `).all();
     const tableSql = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'model_request_metrics'").get()?.sql;
     const normalize = (text: string): string => text.replace(/\s+/gu, " ").trim();
+    if (typeof tableSql !== "string" || !normalize(tableSql).includes("operation TEXT NOT NULL CHECK (operation IN ('response', 'compact', 'imageGeneration', 'imageEdit'))")) {
+      throw new Error("模型请求操作约束缺失");
+    }
+    if (!normalize(tableSql).includes(normalize(`CHECK (${imageMetricCheckSql})`))) throw new Error("生图指标约束缺失");
     for (const statement of (turnExecutionSchemaSql + autoApprovalReviewSchemaSql).split(";").filter(sql => sql.trim())) {
       const name = /CREATE (?:TABLE|INDEX) (\w+)/u.exec(statement)?.[1];
       const actual = database.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name!)?.sql;

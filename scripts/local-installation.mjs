@@ -39,7 +39,7 @@ export function inspectDatabases(environment = process.env) {
 // inspectDatabases, which accepts only the current schema.
 export async function inspectDatabasesForUpdate(environment = process.env) {
   const metrics = inspectMetricsDatabase(environment);
-  if (!metrics.exists || metrics.schemaVersion !== 31 || modelRequestMetricsSchemaVersion !== 32) return inspectDatabases(environment);
+  if (!metrics.exists || ![31, 32].includes(metrics.schemaVersion) || modelRequestMetricsSchemaVersion !== 33) return inspectDatabases(environment);
   const state = validateStateDatabaseStructure(environment);
   const sessionDisplayCache = inspectSessionDisplayCache(environment);
   if (!sessionDisplayCache.compatible) throw new Error("会话展示缓存版本不兼容；请停止服务并备份后重建缓存");

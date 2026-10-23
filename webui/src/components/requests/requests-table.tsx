@@ -32,6 +32,7 @@ import {
   formatRequestError,
   formatRequestTime,
   requestMethodDisplay,
+  requestOperationLabel,
   formatTimestamp,
   getServerTimeZone,
   formatTokens,
@@ -296,7 +297,7 @@ export function RequestsTable({
         <SortableHeader column={column}>{t("filters.operation")}</SortableHeader>
       ),
       cell: ({ row }) =>
-        row.original.operation === "compact" ? t("metrics.compact") : t("filters.response"),
+        requestOperationLabel(row.original.operation, t),
     },
     {
       id: "http",

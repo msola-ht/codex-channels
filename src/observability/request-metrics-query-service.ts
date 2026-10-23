@@ -133,7 +133,10 @@ export function parseRequestMetricsFilters(input: Record<string, unknown>): Mode
   }
   if (filters.turnId !== undefined && filters.threadId === undefined) throw new Error("查询 Turn 必须同时指定 Thread ID");
   if (input.operation !== undefined) {
-    if (input.operation !== "response" && input.operation !== "compact") throw new Error("operation 只支持 response、compact");
+    if (input.operation !== "response" && input.operation !== "compact"
+      && input.operation !== "imageGeneration" && input.operation !== "imageEdit") {
+      throw new Error("operation 只支持 response、compact、imageGeneration、imageEdit");
+    }
     filters.operation = input.operation;
   }
   if (input.requestPurpose !== undefined) {

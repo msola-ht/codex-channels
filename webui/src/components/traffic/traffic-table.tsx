@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge"
-import { formatGenerationSpeed } from "@/lib/format"
+import { formatGenerationSpeed, formatTrafficRequestAddress } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { DataTable, TableHint, TruncatedText, type DataTableColumn, type DataTableProps } from "@/components/metrics/data-table"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -71,20 +71,20 @@ export function TrafficTable({
       return <>{exchange.category === "models" ? t("traffic.categoryModels")
                 : exchange.category === "prewarm" ? t("traffic.categoryPrewarm") : exchange.requestKind ?? t("traffic.categoryRequest")}</>
     } },
-    { id: "request", enableSorting: false, header: () => <>{t("metrics.requests")}</>, cell: ({ row: { original: exchange } }) => {
-      return <><TruncatedText text={requestLabel(exchange)} className="max-w-72 font-mono text-xs" /></>
+    { id: "requestAddress", enableSorting: false, header: () => <>{t("traffic.requestAddress")}</>, cell: ({ row: { original: exchange } }) => {
+      return <><TruncatedText text={formatTrafficRequestAddress(exchange)} className="max-w-72 font-mono text-xs" /></>
     } },
     { id: "detail", enableSorting: false, enableHiding: false, header: t("requests.detailColumn"), cell: ({ row: { original: exchange } }) => (
       <Button variant="link" size="sm" className="border-0 px-0" aria-label={t("traffic.openDetailAria", { provider: exchange.label, time: formatRequestTime(exchange.startedAtMs) })}
         onClick={(event) => { event.stopPropagation(); onOpen(exchange) }}>{t("requests.viewDetail")}</Button>
     ) },
   ]
-  const order = ["time", "provider", "requestPurpose", "model", "reasoningEffort", "status", "first", "generationSpeed", "duration", "client", "protocol", "type", "request", "detail"]
+  const order = ["time", "provider", "requestPurpose", "model", "requestAddress", "reasoningEffort", "status", "first", "generationSpeed", "duration", "client", "protocol", "type", "detail"]
   const orderedColumns = [...columns].sort((a, b) => order.indexOf(a.id!) - order.indexOf(b.id!))
   return <DataTable title={t("traffic.listTitle", { count: pagination.mode === "server" ? pagination.serverTotal ?? exchanges.length : exchanges.length })}
     description={() => description} data={exchanges} columns={orderedColumns} loading={loading}
-    storageKey="codex-webui:traffic-table-v2" defaultColumnVisibility={{ request: false }} getRowId={trafficCallKey} onRowClick={onOpen}
-    columnLabels={{requestPurpose: t("requestMethod.label"), time: t("traffic.startedAt"), provider: t("metrics.provider"), client: t("traffic.client"), model: t("metrics.model"), reasoningEffort: t("metrics.reasoningEffort"), protocol: t("traffic.protocol"), status: t("filters.status"), first: t("requests.firstColumn"), generationSpeed: t("requests.speedColumn"), duration: t("requests.durationColumn"), type: t("metrics.type"), request: t("metrics.requests"), detail: t("requests.detailColumn")}}
+    storageKey="codex-webui:traffic-table-v2" getRowId={trafficCallKey} onRowClick={onOpen}
+    columnLabels={{requestPurpose: t("requestMethod.label"), time: t("traffic.startedAt"), provider: t("metrics.provider"), client: t("traffic.client"), model: t("metrics.model"), reasoningEffort: t("metrics.reasoningEffort"), protocol: t("traffic.protocol"), status: t("filters.status"), first: t("requests.firstColumn"), generationSpeed: t("requests.speedColumn"), duration: t("requests.durationColumn"), type: t("metrics.type"), requestAddress: t("traffic.requestAddress"), detail: t("requests.detailColumn")}}
     numericColumnIds={["first", "generationSpeed", "duration"]} emptyText={t("traffic.empty")} pagination={pagination} />
 }
 
@@ -93,12 +93,4 @@ function stateLabel(t: Translate, state: TrafficExchangeSummary["state"]): strin
   if (state === "failed") return t("traffic.stateFailed")
   if (state === "incomplete") return t("traffic.stateIncomplete")
   return t("traffic.statePending")
-}
-
-function requestLabel(exchange: TrafficExchangeSummary): string {
-  if (exchange.transport === "websocket") {
-    return exchange.url === undefined ? "WebSocket" : `WS ${exchange.url}`
-  }
-  if (exchange.method === undefined && exchange.path === undefined) return "—"
-  return `${exchange.method ?? ""} ${exchange.path ?? ""}`
 }

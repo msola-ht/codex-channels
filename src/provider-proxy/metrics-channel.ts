@@ -200,6 +200,11 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     return undefined;
   }
   const record = parsed as Record<string, unknown>;
+  if ((record.operation === "imageGeneration" || record.operation === "imageEdit")
+    && (record.transport !== "http" || record.inputTokens !== null || record.cachedInputTokens !== null
+      || record.outputTokens !== null || record.reasoningOutputTokens !== null || record.totalTokens !== null
+      || record.firstTokenMs != null || record.upstreamTtftMs != null || record.generationTiming != null
+      || record.responseUsageAmount != null)) return undefined;
   if (
     !validModelRequestDiagnostics(record) || !validRequestTiming(record)
     || Object.hasOwn(record, "firstContentMs")
@@ -208,7 +213,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || (record.timingBasis !== undefined && record.timingBasis !== "submitted")
     || !oneOf(record.transport, ["http", "websocket"])
     || !oneOf(record.responseFormat, ["sse", "json", "websocket", "unknown"])
-    || !oneOf(record.operation, ["response", "compact"])
+    || !oneOf(record.operation, ["response", "compact", "imageGeneration", "imageEdit"])
     || !nullableString(record.threadId)
     || !nullableString(record.turnId)
     || !validAutoReviewIdentity(record)

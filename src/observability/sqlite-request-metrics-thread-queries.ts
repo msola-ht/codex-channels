@@ -31,6 +31,7 @@ import {
   metricsPageOffset,
   metricsScopeSql as requestMetricsScopeSql,
   observableCompletionSql,
+  textTokenOperationSql,
   interruptedRequestSql,
   requestOutcomeSql,
   usageCoverageSql,
@@ -252,7 +253,7 @@ export class SqliteRequestMetricsThreadQueries {
 
   private scopedResponseUsage(scopeSql: string, parameters: SQLInputValue[]): ResponseUsageSummary | null {
     return summarizeResponseUsage(this.reader.iterateRows(`${scopeSql}
-      SELECT response_usage_amount FROM scoped WHERE provider = 'openai'
+      SELECT response_usage_amount FROM scoped WHERE provider = 'openai' AND ${textTokenOperationSql}
     `, ...parameters) as Iterable<{ response_usage_amount: string | null }>);
   }
 
@@ -291,7 +292,7 @@ export class SqliteRequestMetricsThreadQueries {
 
   private turnResponseUsage(threadId: string, turnId: string): ResponseUsageSummary | null {
     return this.scopedResponseUsage(`WITH scoped AS (
-      SELECT provider, response_usage_amount FROM model_request_metrics WHERE thread_id = ? AND turn_id = ? AND request_purpose IS NULL
+      SELECT provider, operation, response_usage_amount FROM model_request_metrics WHERE thread_id = ? AND turn_id = ? AND request_purpose IS NULL
     )`, [threadId, turnId]);
   }
 
@@ -310,7 +311,9 @@ export class SqliteRequestMetricsThreadQueries {
     // the selected scope and compares real response completion times.
     return this.reader.prepare(`${scopeSql}, observed AS (
       SELECT *, MAX(CASE WHEN ${observableCompletionSql} THEN response_completed_at_ms END)
-        OVER (PARTITION BY thread_id, turn_id) AS latest_completion_at_ms
+        OVER (PARTITION BY thread_id, turn_id,
+          CASE WHEN operation IN ('imageGeneration', 'imageEdit') THEN operation ELSE 'text' END
+        ) AS latest_completion_at_ms
       FROM scoped
     )
     SELECT ${byTurn ? "turn_id," : ""}
@@ -318,7 +321,7 @@ export class SqliteRequestMetricsThreadQueries {
         AND latest_completion_at_ms > response_completed_at_ms THEN 1 END) AS followed_by_completion,
       COUNT(*) - COUNT(CASE WHEN thread_id IS NOT NULL AND turn_id IS NOT NULL AND TRIM(turn_id) <> ''
         AND latest_completion_at_ms > response_completed_at_ms THEN 1 END) AS no_observed_completion,
-      COUNT(CASE WHEN input_tokens IS NULL OR output_tokens IS NULL THEN 1 END) AS usage_unobserved
+      COUNT(CASE WHEN ${textTokenOperationSql} AND (input_tokens IS NULL OR output_tokens IS NULL) THEN 1 END) AS usage_unobserved
     FROM observed
     WHERE ${interruptedRequestSql}
     ${byTurn ? "GROUP BY turn_id" : ""}
@@ -622,7 +625,7 @@ export class SqliteRequestMetricsThreadQueries {
             THEN cached_input_tokens END) AS subagent_known_cached_input_tokens,
           SUM(CASE WHEN thread_id != root_thread_id AND cached_input_tokens IS NOT NULL
             THEN input_tokens END) AS subagent_cache_observed_input_tokens,
-          SUM(CASE WHEN thread_id != root_thread_id AND (input_tokens IS NULL OR cached_input_tokens IS NULL)
+          SUM(CASE WHEN thread_id != root_thread_id AND ${textTokenOperationSql} AND (input_tokens IS NULL OR cached_input_tokens IS NULL)
             THEN 1 ELSE 0 END) AS subagent_cache_missing_request_count,
           MIN(request_started_at_ms) AS tree_first_request_started_at_ms,
           MAX(recorded_at_ms) AS tree_recorded_at_ms

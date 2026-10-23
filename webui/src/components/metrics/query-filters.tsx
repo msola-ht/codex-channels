@@ -141,7 +141,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
         </FieldSet> : null}
         {([
           ["source", t("filters.source"), [["owned", t("filters.owned")], ["relay", t("filters.relay")]]],
-          ["operation", t("filters.operation"), [["response", t("filters.response")], ["compact", t("metrics.compact")]]],
+          ["operation", t("filters.operation"), [["response", t("filters.response")], ["compact", t("metrics.compact")], ["imageGeneration", t("requestMethod.imageGeneration")], ["imageEdit", t("requestMethod.imageEdit")]]],
           ["status", t("filters.status"), [["completed", t("filters.completed")], ["failed", t("filters.failed")], ["incomplete", t("filters.incomplete")], ["unknown", t("filters.unknown")]]],
         ] as const).map(([key, label, options]) => (
           <Field key={key}><FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel>

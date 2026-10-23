@@ -514,6 +514,11 @@ export class ProviderProxy {
       } }));
       return;
     }
+    const pathname = new URL(route.path, "http://127.0.0.1").pathname;
+    const imageOperation = route.kind === "openai-http"
+      ? pathname === "/images/generations" ? "imageGeneration"
+        : pathname === "/images/edits" ? "imageEdit" : undefined
+      : undefined;
     let upstreamTarget: ProviderProxyUpstream;
     const onPendingError = () => response.destroy();
     request.on("error", onPendingError);
@@ -526,7 +531,7 @@ export class ProviderProxy {
       request.resume();
       const metadata = parseTurnMetadata(request.headers["x-codex-turn-metadata"]);
       const metrics = createMetricsState(metadata, startedAtMs, "http",
-        metadata.operation,
+        imageOperation ?? metadata.operation,
         effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent));
       metrics.httpStatus = error instanceof ModelRequestTimeoutError ? error.status : 502;
       markMetricsFailed(metrics, error instanceof ModelRequestTimeoutError ? error.code : "provider_proxy_route_error", Date.now(), error, failedAtMonotonicMs);
@@ -538,7 +543,7 @@ export class ProviderProxy {
       exchange?.responseHead(metrics.httpStatus, {});
       exchange?.observeRequestMetrics(metrics);
       exchange?.failure("upstream_route", undefined, failedAtMonotonicMs);
-      if (route.kind === "response") {
+      if (route.kind === "response" || imageOperation !== undefined) {
         await this.deliverMetrics(metrics, route.accountId, signal);
       }
       if (signal.aborted || response.destroyed) return;
@@ -573,7 +578,7 @@ export class ProviderProxy {
       turnMetadata,
       startedAtMs,
       "http",
-      turnMetadata.operation,
+      imageOperation ?? turnMetadata.operation,
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
     );
     const exchange = this.trafficDump?.beginHttpExchange({
@@ -590,9 +595,12 @@ export class ProviderProxy {
     const requestEffortScanner = createJsonStringFieldScanner("effort", "reasoning");
     const requestModelDecoder = new StringDecoder("utf8");
     const recordsResponseMetrics = route.kind === "response";
+    const recordsMetrics = recordsResponseMetrics || imageOperation !== undefined;
+    const scansRequestMetadata = imageOperation === undefined
+      || String(request.headers["content-type"] ?? "").split(";", 1)[0]?.trim().toLowerCase() === "application/json";
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
-      if (!recordsResponseMetrics) return Promise.resolve();
+      if (!recordsMetrics) return Promise.resolve();
       metricsDelivery ??= this.deliverMetrics(metrics, route.accountId, signal);
       return metricsDelivery;
     };
@@ -712,7 +720,7 @@ export class ProviderProxy {
         exchange?.responseEnd(endedAtMonotonicMs);
         const ending = forwarding.then(async () => {
           signal.throwIfAborted();
-          if (completed || recordsResponseMetrics) await emitMetrics();
+          if (completed || recordsMetrics) await emitMetrics();
           await finishProxyResponse(response, signal, modelRequestPolicy.terminalDeliveryTimeoutMs);
         });
         forwarding = waitForProxyOperation(ending, signal, modelRequestPolicy.terminalDeliveryTimeoutMs, "terminal").catch(failDelivery);
@@ -776,23 +784,33 @@ export class ProviderProxy {
       }
     });
     const observeRequestChunk = (chunk: Buffer): void => {
-      const text = requestModelDecoder.write(chunk);
-      scanJsonStringField(requestModelScanner, text);
-      scanJsonStringField(requestTierScanner, text);
-      scanJsonStringField(requestEffortScanner, text);
-      metrics.requestModel = boundedString(requestModelScanner.value);
-      metrics.requestServiceTier = boundedString(requestTierScanner.value);
-      metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+      if (scansRequestMetadata) {
+        const text = requestModelDecoder.write(chunk);
+        scanJsonStringField(requestModelScanner, text);
+        metrics.requestModel = boundedString(requestModelScanner.value);
+        if (imageOperation !== undefined) metrics.model = metrics.requestModel;
+        else {
+          scanJsonStringField(requestTierScanner, text);
+          scanJsonStringField(requestEffortScanner, text);
+          metrics.requestServiceTier = boundedString(requestTierScanner.value);
+          metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+        }
+      }
       exchange?.requestChunk(chunk);
     };
     const observeRequestEnd = (): void => {
-      const text = requestModelDecoder.end();
-      scanJsonStringField(requestModelScanner, text);
-      scanJsonStringField(requestTierScanner, text);
-      scanJsonStringField(requestEffortScanner, text);
-      metrics.requestModel = boundedString(requestModelScanner.value);
-      metrics.requestServiceTier = boundedString(requestTierScanner.value);
-      metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+      if (scansRequestMetadata) {
+        const text = requestModelDecoder.end();
+        scanJsonStringField(requestModelScanner, text);
+        metrics.requestModel = boundedString(requestModelScanner.value);
+        if (imageOperation !== undefined) metrics.model = metrics.requestModel;
+        else {
+          scanJsonStringField(requestTierScanner, text);
+          scanJsonStringField(requestEffortScanner, text);
+          metrics.requestServiceTier = boundedString(requestTierScanner.value);
+          metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+        }
+      }
       exchange?.requestEnd();
     };
     if (bufferedBody === undefined) {

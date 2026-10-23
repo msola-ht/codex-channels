@@ -1,7 +1,7 @@
 import type { GenerationTiming, RequestTimingSummary } from "../../runtime/request-timing.mjs";
 export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
-export type ModelRequestOperation = "response" | "compact";
+export type ModelRequestOperation = "response" | "compact" | "imageGeneration" | "imageEdit";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
 export interface RequestOutcomeCounts {
   completed: number;

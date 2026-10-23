@@ -31,7 +31,7 @@ export interface ProviderQuotaWindowsSnapshot {
 export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
   transport: "http" | "websocket";
   responseFormat: "sse" | "json" | "websocket" | "unknown";
-  operation: "response" | "compact";
+  operation: "response" | "compact" | "imageGeneration" | "imageEdit";
   threadId: string | null;
   turnId: string | null;
   /** 官方自动审查用途与原始 reviewer 身份，独立于转储开关。 */
@@ -409,6 +409,10 @@ export class HttpResponseMetricsObserver {
   constructor(private readonly metrics: MetricsState) {}
 
   observeChunk(chunk: Buffer, receivedAtMs: number, receivedAtMonotonicMs: number): boolean {
+    if (this.metrics.operation === "imageGeneration" || this.metrics.operation === "imageEdit") {
+      observeResponseReceived(this.metrics, receivedAtMonotonicMs);
+      return false;
+    }
     const completed = this.metrics.responseFormat === "sse"
       || this.metrics.responseFormat === "unknown"
       ? this.processText(this.decoder.write(chunk), receivedAtMs, receivedAtMonotonicMs)
@@ -425,6 +429,18 @@ export class HttpResponseMetricsObserver {
   }
 
   finish(receivedAtMs: number, receivedAtMonotonicMs: number): boolean {
+    if (this.metrics.operation === "imageGeneration" || this.metrics.operation === "imageEdit") {
+      if (this.metrics.status === "unknown") {
+        // This outcome describes completed HTTP transport. Image result/error
+        // semantics remain with Codex; no image JSON/SSE payload is retained or parsed.
+        this.metrics.responseCompletedAtMs = receivedAtMs;
+        const status = this.metrics.httpStatus;
+        this.metrics.status = status !== null && status >= 200 && status < 300 ? "completed" : "failed";
+        if (this.metrics.status === "failed") this.metrics.errorType ??= "http_error";
+      }
+      observeTotalDuration(this.metrics, receivedAtMonotonicMs);
+      return true;
+    }
     const completed = this.metrics.responseFormat === "sse"
       || this.metrics.responseFormat === "unknown"
       ? this.processText(this.decoder.end(), receivedAtMs, receivedAtMonotonicMs)
