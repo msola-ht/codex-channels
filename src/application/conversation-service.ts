@@ -38,6 +38,7 @@ import {
   isThreadExecutionSettled,
   type SessionRouter,
   type ThreadRestoreObserver,
+  type ThreadExecutionContext,
 } from "../session-routing/index.js";
 import type {
   ThreadOccupancyPort,
@@ -189,6 +190,7 @@ const builtInAgentRoles: AgentRoleEntry[] = [
 
 export interface ConversationStatus {
   instructionSources?: readonly string[];
+  executionContext?: ThreadExecutionContext;
   selectionScope?: string;
   threadId?: string;
   threadName?: string | null;
@@ -1668,6 +1670,7 @@ export class ConversationService implements
     const binding = this.router.current(target);
     const active = this.core.activeTurn(target);
     const instructionSources = binding ? this.router.instructionSourcesForThread(binding.threadId) : undefined;
+    const executionContext = binding ? this.router.executionContextForThread(binding.threadId) : undefined;
     const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
     const goal = binding ? this.core.goal(binding.threadId) : undefined;
@@ -1685,6 +1688,7 @@ export class ConversationService implements
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
       ...(instructionSources === undefined ? {} : { instructionSources }),
+      ...(executionContext === undefined ? {} : { executionContext }),
       ...(binding ? { threadName: this.router.threadNameForThread?.(binding.threadId) ?? null } : {}),
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),

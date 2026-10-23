@@ -1,5 +1,6 @@
 import {
   type ConversationStatus,
+  type ConversationCommandResult,
 } from "../../application/index.js";
 import type {
   OutputEvent,
@@ -15,14 +16,20 @@ import {
   createSubagentCompletedPresentation,
   createTurnCompletedPresentation,
   renderStructuredLifecyclePresentation,
+  escapeLifecycleLiteral,
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 
-export {
-  renderConversationCommandResult as renderWeixinCommandResult,
-} from "../conversation-command-renderer.js";
+import { renderConversationCommandResult } from "../conversation-command-renderer.js";
+import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
+
+export function renderWeixinCommandResult(result: ConversationCommandResult): string | null {
+  return result.kind === "status"
+    ? formatConversationStatus(result.status, escapeLifecycleLiteral)
+    : renderConversationCommandResult(result);
+}
 
 export type WeixinStartupRuntimeInfo = LifecycleStartupRuntimeInfo;
 

@@ -124,7 +124,10 @@ export function formatThreadApprovalsReviewer(reviewer: ThreadApprovalsReviewer 
   }
 }
 
-export function formatConversationStatus(status: ConversationStatus): string {
+export function formatConversationStatus(
+  status: ConversationStatus,
+  formatExecutionPath: (path: string) => string = path => path,
+): string {
   const lines = [
     "Codex 状态",
     formatTimezoneLine(),
@@ -147,6 +150,21 @@ export function formatConversationStatus(status: ConversationStatus): string {
     lines.push(`上下文压缩：${status.contextCompactionCount} 次`);
   }
   if (status.threadId) {
+    const context = status.executionContext;
+    lines.push("", "会话执行目录：");
+    if (!context) {
+      lines.push("尚未取得有效的 App Server 执行上下文（可能正在恢复），不使用 Workspace 目录代替");
+    } else {
+      const cleanPath = (path: string): string => formatExecutionPath(path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
+      lines.push(`最近确认目录：${cleanPath(context.cwd)}`,
+        `运行目录列表（最近一次新建、恢复或派生的加载快照；不是实时权限清单）：`,
+        `快照对应目录：${cleanPath(context.workspaceRootsSnapshot.cwd)}`);
+      if (context.workspaceRootsSnapshot.roots.length === 0) {
+        lines.push("App Server 返回的运行目录列表为空");
+      } else {
+        lines.push(...context.workspaceRootsSnapshot.roots.map((path, index) => `- 目录 ${index + 1}：${cleanPath(path)}`));
+      }
+    }
     lines.push("", "指令文件来源（最近一次新建、恢复或派生的加载快照）：");
     if (status.instructionSources === undefined) {
       lines.push("尚未取得 App Server 加载清单");

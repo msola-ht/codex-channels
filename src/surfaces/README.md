@@ -21,6 +21,9 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 当前实现：
 
 工作区只选择登记目录；`/status` 和生命周期卡片的权限相关状态取 App Server 实际值。
+`/status` 经共享格式化入口另展示 Thread 最近确认目录和运行目录加载快照，明确区分登记
+Workspace、未知执行上下文和历史快照；清理路径控制字符，飞书与微信使用字面值转义，
+Telegram 使用已有 HTML 字段值转义，不把 roots 描述为实时权限。
 `/autoreview [on|off]` 查询或切换当前已绑定 Thread，统一结果由共享格式化器呈现；飞书命令中心与
 Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌。
 平台只提交结构化选择，Application 在锁内复核 Thread 与空闲状态，确认权威设置后才返回更新成功。

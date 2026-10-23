@@ -86,6 +86,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   普通 `status` 不执行 Git IO，展示入口 `statusForDisplay` 通过组合根注入的异步只读端口取得当前 Workspace Git 分支；完成卡仅调用 `workspaceGitBranch`，不连带查询模型与账户状态；
   Git 查询结束后重新读取当前绑定及诊断，同工作区内切换 Thread 也不会返回旧会话来源；工作区变化时丢弃原 Git 结果。
+  status 另投影 Router 的 Thread 执行上下文：最近确认 cwd 与带对应 cwd 的生命周期 roots 快照；
+  未知时省略该字段，不从 Workspace 推断。异步 Git 查询后同样重新读取此投影。
   `/stop` 同时取消当前目标的视频准备及当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
   当前 Thread Auto-review 写入则在同一锁内要求已有绑定、空闲且无待处理交互，未知或 Guardian 实际值只读；已确认的相同值不写。等待 Client 的权威通知确认后再核对绑定，返回 Router 的实际值，不创建 Thread、启动 Turn 或乐观修改缓存。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；

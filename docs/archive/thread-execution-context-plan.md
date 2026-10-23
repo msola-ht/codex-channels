@@ -1,9 +1,10 @@
-# Thread 执行上下文对齐计划
+# Thread 执行上下文对齐计划与审查记录（已完成归档）
 
 ## 范围与基线
 
 基线：`e188ced0`；官方 Codex CLI `0.163.0`，固定源码提交
-`83086188ae0614bd882818ff1aa23f3194962012`。本记录是开发与审查工作记录。
+`83086188ae0614bd882818ff1aa23f3194962012`。本记录为历史开发与审查证据，
+不替代[用户指南](../user-guide.md)或[协议支持矩阵](../index.md)的当前契约。
 
 目标是将登记 Workspace 与 App Server 返回的 Thread 执行目录分开投影，
 补齐生命周期、通知和诊断链路。保持现有精确目录准入，不开放递归子目录互通。
@@ -28,7 +29,7 @@ fork 有独立配置加载逻辑。响应实际值不能由请求值替代。
 
 ## 第一批：权威上下文投影与生命周期
 
-状态：实现和独立审查修复已完成，准备提交。
+状态：已提交 `b802d264`，提交 hook 全部通过。
 
 - Client 校验并保留生命周期响应中的 cwd、runtimeWorkspaceRoots。
 - Router 为已绑定 Thread 保存内存诊断投影，区分最近确认 cwd 与生命周期 roots 快照。
@@ -41,7 +42,7 @@ fork 有独立配置加载逻辑。响应实际值不能由请求值替代。
 
 ## 第二批：渠道诊断与公开契约
 
-状态：待实施，依赖第一批提交。
+状态：实现、独立审查和关联修复完成，随本记录归档提交。
 
 - status 保留登记 Workspace cwd 的既有语义，另展示 Thread 最近确认目录与 roots 加载快照。
 - 有绑定但上下文未知时明确显示未知，不回退成登记目录；无绑定不伪造会话信息。
@@ -75,5 +76,27 @@ fork 有独立配置加载逻辑。响应实际值不能由请求值替代。
 - 隔离会话没有提交模型 Turn。恢复返回 `no rollout found for thread id …`，因此不宣称
   成功恢复已实测；恢复补偿、Provider 设置重连、实际审批交互与队列积压竞态仅有源码证据。
   无真实用户 Thread、平台消息或服务操作。临时 App Server 已退出，exitCode=0。
-- 静态：最初 check/build 的可选属性类型错误已修正，后续 build 成功；最终提交 hook
-  状态以实际提交结果为准。Windows/Linux 未实机观测。
+- 静态：最初 check/build 的可选属性类型错误已修正，后续 build 成功；`b802d264`
+  提交 hook 的类型/版本/边界、Lint、文档、构建全部通过。Windows/Linux 未实机观测。
+
+### 第二批记录
+
+- Astra 独立审查：`review_context_batch2`，覆盖 Application 状态及异步重读、命令授权、
+  Telegram、飞书普通命令与命令中心、微信最终出口，以及第一批投影失效的直接依赖。
+- 发现并修复一项 P2：路径的 Markdown 标点会被平台解析。roots 改为有标签字段，
+  Telegram 复用字段 HTML 转义；飞书普通消息/命令中心分别使用现有 Markdown 转义；
+  微信复用原有生命周期字面值转义。其他命令格式不变。
+- 真实路径：隔离 App Server → Client → Router → 实际 ConversationService、
+  ModelSelectionService、Core → statusForDisplay → 共享格式器，得到完整状态文本。
+  原生通知改 cwd 后，登记目录、当前子目录与创建时快照目录分别展示。
+- 人工 Hack：换行、ESC、U+2028 清为空格；空 roots 显示明确文案；失效后显示未知；
+  无绑定不显示执行上下文段。人为延迟 Git 端口期间，通过真实 Router 新建并换绑，
+  返回的展示 Thread ID 与新绑定相等，并带新执行上下文，保留同 Workspace 的 Git 结果。
+- 最终格式观察：输入 `/tmp/**demo**/[a](https://example.invalid)/x\\y`，
+  Telegram HTML 仅加粗字段名，路径内星号和括号原样保留；飞书两出口及微信输出均对
+  星号、括号、链接和反斜杠完成字面值转义。没有向真实平台发送消息，不宣称平台实机呈现。
+- build 成功，最终提交由既有 hook 执行静态门禁。任务 App Server exitCode=0，
+  隔离目录已清理、Node 交互会话已退出，没有遗留任务进程。
+
+当前产品契约位于用户指南、Session Routing/Application/Surfaces README 和协议支持矩阵。
+本记录归档保存实施与审查证据；后续互通范围需另立工作记录，不将其列为本轮未完成实现。

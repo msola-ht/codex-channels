@@ -36,6 +36,8 @@ import {
 } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
+import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
+import { escapeFeishuMarkdown } from "./message-content.js";
 import {
   formatRuntimeAccountUpdate,
   formatRuntimeMcpOAuthCompleted,
@@ -54,6 +56,7 @@ import { formatFeishuCommandMarkdown } from "./command-format.js";
 export function renderFeishuCommandResult(
   result: ConversationCommandResult,
 ): string | null {
+  if (result.kind === "status") return formatConversationStatus(result.status, escapeFeishuMarkdown);
   const rendered = renderConversationCommandResult(result, formatFeishuCommandMarkdown);
   if (rendered === null || result.kind !== "artifacts") {
     return rendered;
