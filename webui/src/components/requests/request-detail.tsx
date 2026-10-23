@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router"
-import { formatGenerationSpeed, requestOperationLabel } from "@/lib/format"
+import { formatGenerationSpeed, requestOperationLabel, formatRequestActivity } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -25,6 +25,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     [t("requestPurpose.label"), autoReview ? t("requestPurpose.autoApprovalReview") : t("requestPurpose.unmarked")],
     [t("metrics.provider"), record.provider],
     [t("requests.addressColumn"), record.upstreamUrl ?? t("traffic.notRecorded")],
+    [t("traffic.activity"), formatRequestActivity(record, t)],
     [t("metrics.recordedStatus"), record.status],
     [t("requestDetail.upstreamProvider"), record.upstreamProvider],
     [t("requestDetail.upstreamAttemptCount"), formatCount(record.upstreamAttemptCount)],

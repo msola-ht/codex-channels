@@ -6,10 +6,10 @@ import { pathToFileURL } from 'node:url';
 
 import { assertPrivateDirectoryAccessSync, assertPrivateFileAccessSync, securePrivateFileSync } from '../runtime/private-file.mjs';
 
-export const metricsUpgradeHelp = `Usage: node database-upgrades/metrics-to-v34.mjs REPOSITORY METRICS_DATABASE NEW_BACKUP_PATH
+export const metricsUpgradeHelp = `Usage: node database-upgrades/metrics-to-v35.mjs REPOSITORY METRICS_DATABASE NEW_BACKUP_PATH
 
-Manual, offline metrics database upgrade: schema 31, 32 or 33 -> 34.
-Requires Node.js with node:sqlite and current schema-34 dist/ (run npm run build first).
+Manual, offline metrics database upgrade: schema 31, 32, 33 or 34 -> 35.
+Requires Node.js with node:sqlite and current schema-35 dist/ (run npm run build first).
 Stop Gateway and Model Relay and all other metrics writers before running; do not restart
 until the command succeeds. This tool acquires Gateway's metrics writer lock.
 The source must be a regular file, not a symbolic link. The backup must not exist;
@@ -23,8 +23,9 @@ archived definition and preserved unchanged; it does not enable runtime cost tra
 Historical request_bytes values remain null because schema 31 did not record them.
 Schema 32 request_bytes and all other existing values are preserved. Existing requests
 are not reclassified as images; schema 33 adds explicit image generation/edit operations.
-Historical upstream_url values remain null because earlier schemas did not record
-the actual outbound address; current configuration is never used to reconstruct it.
+Schemas 31-33 upstream_url values remain null; schema 34 addresses are preserved.
+Historical request_activity values remain null; neither configuration nor traffic
+dumps are used to reconstruct missing evidence.
 Failure rolls back the transaction and retains a completed backup. For manual rollback,
 keep all writers stopped and restore that backup, including removing stale SQLite
 WAL/SHM sidecars before reopening. Never run this tool automatically at startup.
@@ -105,7 +106,7 @@ export async function inspectMetricsUpgrade(databasePath) {
     integrity(database);
     const current = lstatSync(source);
     if (current.dev !== stat.dev || current.ino !== stat.ino) throw new Error('Source changed during inspection');
-    return { databasePath: source, from: version, to: 34, dev: stat.dev, ino: stat.ino };
+    return { databasePath: source, from: version, to: 35, dev: stat.dev, ino: stat.ino };
   } finally {
     database.close();
   }
@@ -115,7 +116,8 @@ function historicalSchema(version) {
   if (version === 31) return import('./metrics-schema-v31.mjs');
   if (version === 32) return import('./metrics-schema-v32.mjs');
   if (version === 33) return import('./metrics-schema-v33.mjs');
-  throw new Error('Only source schema 31, 32 or 33 is supported; no changes made');
+  if (version === 34) return import('./metrics-schema-v34.mjs');
+  throw new Error('Only source schema 31, 32, 33 or 34 is supported; no changes made');
 }
 
 export async function upgradeMetrics(repository, databasePath, backupPath, expectedSource) {
@@ -131,7 +133,7 @@ export async function upgradeMetrics(repository, databasePath, backupPath, expec
   requireBackupParent(backup);
   const runtime = await import(pathToFileURL(resolve(repository, 'dist/observability/index.js')).href);
   const target = runtime;
-  if (runtime.modelRequestMetricsSchemaVersion !== 34) throw new Error('Current dist must use schema 34; build the current repository first');
+  if (runtime.modelRequestMetricsSchemaVersion !== 35) throw new Error('Current dist must use schema 35; build the current repository first');
   const lock = runtime.acquireRequestMetricsDatabaseLock(source);
   let database;
   let backupIdentity;
@@ -142,7 +144,7 @@ export async function upgradeMetrics(repository, databasePath, backupPath, expec
     const currentStat = lstatSync(source);
     if (currentStat.dev !== sourceStat.dev || currentStat.ino !== sourceStat.ino) throw new Error('Source changed during opening');
     const version = database.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value;
-    if (expectedSource && (version !== expectedSource.from || expectedSource.to !== 34)) {
+    if (expectedSource && (version !== expectedSource.from || expectedSource.to !== 35)) {
       throw new Error('Source schema changed after update inspection');
     }
     const historical = await historicalSchema(version);
@@ -185,14 +187,17 @@ export async function upgradeMetrics(repository, databasePath, backupPath, expec
       for (const row of sequences.filter(row => row.name === 'model_request_metrics')) {
         database.prepare('INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)').run(row.name, row.seq);
       }
-      database.exec("UPDATE schema_metadata SET value = 34 WHERE name = 'schema_version'");
+      database.exec("UPDATE schema_metadata SET value = 35 WHERE name = 'schema_version'");
       target.requireCurrentModelRequestMetricsSchema(database);
       preserveRows(database, tables);
       if (version === 31 && database.prepare('SELECT 1 FROM model_request_metrics WHERE request_bytes IS NOT NULL LIMIT 1').get()) {
         throw new Error('Historical request_bytes values must remain null');
       }
-      if (database.prepare('SELECT 1 FROM model_request_metrics WHERE upstream_url IS NOT NULL LIMIT 1').get()) {
+      if (version < 34 && database.prepare('SELECT 1 FROM model_request_metrics WHERE upstream_url IS NOT NULL LIMIT 1').get()) {
         throw new Error('Historical upstream_url values must remain null');
+      }
+      if (database.prepare('SELECT 1 FROM model_request_metrics WHERE request_activity IS NOT NULL LIMIT 1').get()) {
+        throw new Error('Historical request_activity values must remain null');
       }
       integrity(database);
       database.exec('COMMIT');
@@ -200,7 +205,7 @@ export async function upgradeMetrics(repository, databasePath, backupPath, expec
       database.exec('ROLLBACK');
       throw error;
     }
-    return { upgraded: true, from: version, to: 34, preservedTables: tables.length, backup };
+    return { upgraded: true, from: version, to: 35, preservedTables: tables.length, backup };
   } finally {
     try { database?.close(); } finally {
       try {

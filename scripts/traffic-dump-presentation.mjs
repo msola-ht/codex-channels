@@ -1,4 +1,5 @@
 import { autoReviewMetadata } from "../runtime/auto-review-metadata.mjs";
+import { RequestActivityObserver } from "../runtime/request-activity.mjs";
 
 /** Protocol of the recorded model endpoint, independent of Provider capabilities or stream mode. */
 export function requestProtocol(request) {
@@ -68,6 +69,26 @@ export function requestMetadata(body, headers) {
     turnId: stringValue(metadata?.turn_id) ?? stringValue(client?.turn_id),
     ...review,
   };
+}
+
+/** Only the current input tail and this response provide activity evidence. */
+export function requestActivity(body, responseText, { protocol, requestTruncated = false, responseTruncated = false } = {}) {
+  const observer = new RequestActivityObserver();
+  if (requestTruncated) observer.incomplete();
+  else observer.request(body ?? {}, protocol);
+  if (responseTruncated) observer.incomplete();
+  if (!protocol || !responseText || responseTruncated) return observer.snapshot();
+  const parsed = parseObject(responseText);
+  const response = parsed?.response ?? (parsed?.success === true ? parsed.data : parsed);
+  if (parsed !== undefined) observer.response(response, protocol);
+  else {
+    const collector = createOutputCollector(262_144, undefined, value => {
+      if (value !== undefined) observer.response(value, protocol);
+    }, false);
+    collector.consume({ kind: "response_body", encoding: "utf8", text: responseText });
+    if (collector.result().outputTruncated) observer.incomplete();
+  }
+  return observer.snapshot();
 }
 
 export function requestParameters(body, protocol) {

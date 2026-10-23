@@ -353,6 +353,7 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  activity: import("../runtime/request-activity.mjs").RequestActivity | null
   /** 最后一次实际模型出站的 origin + 路径；历史未采集时为 null。 */
   upstreamUrl: string | null
   /** 是否关联已登记的子代理；false 不代表已确认是主代理。 */
@@ -1121,6 +1122,8 @@ export interface TrafficLabel {
 }
 
 export interface TrafficExchangeSummary {
+  /** 本次响应及请求末尾的有界行为证据；不表示工具已执行成功。 */
+  activity?: import("../runtime/request-activity.mjs").RequestActivity | null
   requestPurpose?: "autoApprovalReview" | null
   reviewerThreadId?: string | null
   reviewerTurnId?: string | null
@@ -1196,6 +1199,7 @@ export interface TrafficDebugStage {
 }
 
 export interface TrafficExchangeDetail {
+  activity?: TrafficExchangeSummary["activity"]
   /** False when optional trace aggregation could not be completed within its budget. */
   diagnosticsComplete: boolean
   continuation?: {

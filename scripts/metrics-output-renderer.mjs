@@ -709,6 +709,7 @@ function csvColumns() {
     ["totalDurationMs", (record) => record.totalDurationMs],
     ["requestBytes", (record) => record.requestBytes],
     ["upstreamUrl", (record) => record.upstreamUrl],
+    ["activity", (record) => record.activity == null ? null : JSON.stringify(record.activity)],
     ["upstreamTtftMs", (record) => record.upstreamTtftMs],
     ["responseUsageAmount", (record) => record.responseUsageAmount],
     ["upstreamProvider", (record) => record.upstreamProvider],

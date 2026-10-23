@@ -16,6 +16,21 @@ export function requestMethodDisplay(record: RequestRecord | TrafficExchangeSumm
   return { label: record.transport === "websocket" ? "wss" : record.transport === "http" ? "http" : "—", variant: "outline" }
 }
 
+export function formatRequestActivity(record: RequestRecord | TrafficExchangeSummary, t: Translate): string {
+  const method = requestMethodDisplay(record, t)
+  const activity = record.activity
+  const labels: string[] = []
+  if (method.variant === "secondary") labels.push(method.label)
+  else if ("category" in record && record.category === "models") labels.push(t("traffic.categoryModels"))
+  else if ("category" in record && record.category === "prewarm") labels.push(t("traffic.categoryPrewarm"))
+  if (activity?.toolResult) labels.push(t("traffic.activityToolResult"))
+  if (activity?.reply) labels.push(t("traffic.activityReply"))
+  if (activity?.toolCalls) labels.push(activity.tools.length ? `${t("traffic.activityTools")} · ${activity.tools.join(", ")}` : t("traffic.activityTools"))
+  if (!labels.length) labels.push(t(activity == null ? "traffic.notRecorded" : "traffic.activityUnknown"))
+  if (activity?.partial) labels.push(t("traffic.activityPartial"))
+  return labels.join(" / ")
+}
+
 export function requestOperationLabel(operation: RequestRecord["operation"], t: Translate): string {
   if (operation === "imageGeneration" || operation === "imageEdit") return t(`requestMethod.${operation}`)
   return operation === "compact" ? t("metrics.compact") : t("filters.response")

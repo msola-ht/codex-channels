@@ -17,6 +17,7 @@ export interface RequestInterruptionSummary {
   usageUnobserved: number;
 }
 export interface ModelRequestMetricSample {
+  activity?: import("../../runtime/request-activity.mjs").RequestActivity | null;
   /** 上游明确返回的诊断摘要；与可选报文转储独立，历史缺失为空。 */
   upstreamProvider?: string | null;
   upstreamAttemptCount?: number | null;

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { formatBytes, formatGenerationSpeed } from "@/lib/format"
+import { formatBytes, formatGenerationSpeed, formatRequestActivity } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -92,6 +92,7 @@ export function RequestsTable({
     setSelected(record)
   }, [])
   const columnLabels: Record<string, string> = {
+    activity: t("traffic.activity"),
     source: t("filters.source"),
     requestPurpose: t("requestMethod.label"),
     caller: t("filters.caller"),
@@ -118,6 +119,11 @@ export function RequestsTable({
   }
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
+    {
+      id: "activity", enableSorting: false,
+      header: () => <TableHint hint={t("traffic.activityHint")}>{t("traffic.activity")}</TableHint>,
+      cell: ({ row }) => <TruncatedText text={formatRequestActivity(row.original, t)} className="max-w-48 text-xs" />,
+    },
     {
       id: "upstreamUrl", enableSorting: false,
       header: () => <TableHint hint={t("requests.addressHint")}>{t("requests.addressColumn")}</TableHint>,
@@ -358,7 +364,7 @@ export function RequestsTable({
     },
   ], [t, language, openRequest])
 
-  const order = ["time", "provider", "requestPurpose", "model", "upstreamUrl", "reasoningEffort", "status", "requestBytes", "input", "cacheHitRate", "output", "reasoningOutput", "firstContent", "generationSpeed", "duration", "source", "caller", "delivery", "ua", "operation", "http", "error", "traffic"]
+  const order = ["time", "provider", "requestPurpose", "model", "activity", "upstreamUrl", "reasoningEffort", "status", "requestBytes", "input", "cacheHitRate", "output", "reasoningOutput", "firstContent", "generationSpeed", "duration", "source", "caller", "delivery", "ua", "operation", "http", "error", "traffic"]
   const orderedColumns = [...columns].sort((a, b) => (order.includes(a.id!) ? order.indexOf(a.id!) : order.length) - (order.includes(b.id!) ? order.indexOf(b.id!) : order.length))
 
   return (

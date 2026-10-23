@@ -65,7 +65,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   Thread 列表额外返回同筛选范围的 `totalTokens`、自身缓存与后代输入/缓存/输出分项，以及按请求去重的 `treeAggregate`，支持总计 Token 排序；缓存是输入子集，不重复累加，自身与后代分别判断缓存完整性。自身 `cacheUsage` 与后代 `subagentUsage.cacheUsage` 分别保留输入和缓存均已观测的缓存样本及缺失请求数，供部分采集时展示已知缓存；完整缓存合计仍在任意请求缺失时返回 null。WebUI 主会话查询允许只有后代匹配的根入选。普通 Thread 查询仍保留自身有匹配记录的行集合，自身聚合与 Turn 查询口径不变；不新增持久化汇总或 Schema 字段。
 - `sqlite-request-metrics-thread-queries.ts`：Thread/Turn 列表、汇总与耗时查询，只被请求查询组合根持有；不接触写入、事务或数据库生命周期。代表会话或轮次的提供商、模型和思考等级只取相应范围内最近的普通响应（`source = owned`、`operation = response`、用途为空），不使用自动审查、压缩或后代请求兜底；有非审查请求但无普通响应时仍保留聚合与列表行，模型字段返回未知。子代理列表采用相同选择，单次轮次首 Token 时间、用量和请求统计均排除明确标记的审查请求。
 - `sqlite-request-metrics-subagent-queries.ts`：子代理线程列表、单线程往返与同步游标查询，同样只被组合根持有并保持只读。
-- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v34 建库 SQL、存储列定义、版本错误和
+- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v35 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 持有初始化事务，仅在空库建表，已有非空库必须具有当前版本与结构。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、
   逐请求上游 `User-Agent` 和额度快照写入独立 `request-metrics.sqlite3`。新采集请求不解析上游时间戳；
@@ -75,8 +75,9 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   可空 `total_duration_ms` 保存提交发送至首次模型终态或结束/失败的单调时钟耗时，支持明细排序与导出，不聚合为 Turn 耗时。
   可空 `request_bytes` 保存发往模型上游的请求正文或 WebSocket 请求帧字节合计；旧 v31 记录经更新器停服备份升级后保持 null，不从 Token、转储或历史耗时推算。
   可空 `upstream_url` 保留净化后且不超过 2048 字符的实际出站地址；Store 拒绝非规范值，不截断或保存凭据与查询参数。
+  可空 `request_activity` 保存经共享合同校验的行为 JSON：回复、工具调用、末尾工具结果及部分可见标记，最多四个 128 字符工具名；禁止额外字段、参数或结果正文。读取、写入与 IPC 均校验同一合同；旧记录为 null，JSON/CSV 导出保留 `activity`，不依赖调用转储。
   可空 `quota_observed_at_ms` 保存额度快照的本机采集时间，未观测时为空。
-  数据库使用严格 Schema v34、Unix `0600` / Windows 当前 SID 私有文件权限，
+  数据库使用严格 Schema v35、Unix `0600` / Windows 当前 SID 私有文件权限，
   可空 `request_service_tier` 独立保留出站请求层级。
   只接受当前 Schema；已有库先只读核验版本和结构，再保护权限、创建 Writer 锁与启用 WAL；不兼容库原样拒绝。
   首次初始化在单一事务内完成；使用 WAL
@@ -162,15 +163,15 @@ WebUI 还通过同一只读 Store 的 `daily()` / `hourly()` 按系统本地日�
 查询服务 `trend()` 为今天、昨天和自定义单日返回补零的小时统计，其他范围返回日统计。
 热力图固定展示含今天的最近 90 天，趋势图跟随控制台汇总范围；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
-HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v34，不在启动或查询时自动迁移。
+HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v35，不在启动或查询时自动迁移。
 `imageGeneration` / `imageEdit` 按代理实际请求路径区分，进入请求列表、筛选、导出及请求结果汇总；
 它们保留 HTTP 成败、请求大小与耗时；完成只表示 HTTP 2xx 且传输结束，不判断 JSON/SSE 内的图片业务结果。
 文本 Token 和生成区间保持未知，不参与文本生成速率、Token/缓存缺失计数或代表模型选择。
-保留 v31/v32/v33 历史时，`codexc update` 在只读检查后停止原运行服务，调用包内
+保留 v31/v32/v33/v34 历史时，`codexc update` 在只读检查后停止原运行服务，调用包内
 `scripts/metrics-database-upgrade.mjs` 建立私有完整备份并执行单事务转换，再完成程序切换与服务恢复；
-`database-upgrades/metrics-to-v34.mjs` 作为显式离线入口复用同一实现。
+`database-upgrades/metrics-to-v35.mjs` 作为显式离线入口复用同一实现。
 其他写入方必须先退出；未知结构拒绝，v31 历史记录新增的请求发送大小为 null，v32 保留已有值，不补造历史生图请求。
-所有旧版本记录的实际上游地址均为 null，既有请求与其他表不变。
+v34 的已有上游地址原样保留，更早版本地址为 null；所有旧记录的请求行为摘要为 null，既有请求与其他表不变。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
 `warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。
 

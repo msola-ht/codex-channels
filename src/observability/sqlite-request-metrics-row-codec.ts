@@ -1,4 +1,5 @@
 import { validGenerationTiming } from "../../runtime/request-timing.mjs";
+import { validRequestActivity } from "../../runtime/request-activity.mjs";
 import type {
   RequestOutcomeCounts,
   StoredCacheUsage,
@@ -13,6 +14,7 @@ import type {
 } from "./request-metrics.js";
 
 export interface MetricRow {
+  request_activity: string | null;
   source: "owned" | "relay";
   caller_id: string | null;
   key_id: string | null;
@@ -208,6 +210,8 @@ export interface ErrorGroupRow {
 }
 
 export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
+  const activity: unknown = row.request_activity == null ? null : JSON.parse(row.request_activity);
+  if (activity !== null && !validRequestActivity(activity)) throw new Error("请求行为摘要无效");
   const generationTiming: unknown = row.generation_timing == null ? null : JSON.parse(row.generation_timing);
   if (generationTiming !== null && !validGenerationTiming(generationTiming)) throw new Error("请求生成计时无效");
   return {
@@ -229,6 +233,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     totalDurationMs: row.total_duration_ms,
     requestBytes: row.request_bytes,
     upstreamUrl: row.upstream_url,
+    activity,
     requestModel: row.request_model,
     responseModel: row.response_model,
     traffic: row.traffic_label === null ? null : {

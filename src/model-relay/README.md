@@ -1,5 +1,7 @@
 # Model Relay
 
+通过共享 Runtime 的纯 `RequestActivityObserver` 观察实际提交的 Chat/Responses 请求及通过协议校验的响应，统一采集有界行为摘要；该依赖不接触 App Server、文件或数据库。摘要经指标 IPC 交给 Gateway 单写者，关闭转储仍可用。
+
 独立模型 API 入口的身份、准入和请求生命周期模块，不依赖 App Server、Thread、Turn 或数据库。
 由 Runtime 的独立服务入口组合；生产运行验收与跨平台实机验收仍需单独完成。
 

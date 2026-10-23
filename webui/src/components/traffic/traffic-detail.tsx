@@ -98,15 +98,13 @@ export function TrafficDetail({
         <Card size="sm" className="min-w-0 shrink-0">
           <CardHeader>
             <CardTitle>{t(detail.debug ? "traffic.debugUpstream" : "filters.response")}</CardTitle>
-            <CardDescription>{[detail.response.status === null ? null : `HTTP ${detail.response.status}`, detail.response.eventType].filter(Boolean).join(" · ") || t("traffic.savedResponse")}</CardDescription>
+            <CardDescription>{[detail.response.status === null ? null : `HTTP ${detail.response.status}`, detail.response.eventType].filter(Boolean).join(" · ") || t("traffic.savedResponse")}
+              {["redacted_upstream_chat", "redacted_upstream_responses"].includes(detail.response.capture ?? "") && detail.response.deliveryStatus != null
+                ? ` · ${detail.response.deliveryStatus === "finished" ? t("filters.deliveryFinished")
+                  : detail.response.deliveryStatus === "disconnected" ? t("filters.deliveryDisconnected") : t("filters.deliveryFailed")}` : null}
+            </CardDescription>
           </CardHeader>
             <CardContent className="flex flex-col gap-3">
-            {["redacted_upstream_chat", "redacted_upstream_responses"].includes(detail.response.capture ?? "") ? <Alert>
-              <AlertTitle>{t("traffic.relayCapture")}</AlertTitle>
-              <AlertDescription>{t("traffic.relayCaptureHint")} · {detail.response.deliveryStatus === "finished"
-                ? t("filters.deliveryFinished") : detail.response.deliveryStatus === "disconnected"
-                  ? t("filters.deliveryDisconnected") : t("filters.deliveryFailed")}</AlertDescription>
-            </Alert> : null}
             <ResponseFailure response={detail.response} diagnostics={detail.chatDiagnostics} />
             {detail.continuation === undefined ? null : <Alert>
               <AlertTitle>{t("traffic.continuationTitle")}</AlertTitle>

@@ -47,6 +47,8 @@ import {
   markMetricsFailed,
   observeResponseEvent,
   observeRequestSubmitted,
+  observeRequestActivity,
+  incompleteRequestActivity,
   observeChatTiming,
   invalidateGenerationTiming,
   parseJsonPayload,
@@ -595,6 +597,10 @@ export class ProviderProxy {
     const requestTierScanner = createJsonStringFieldScanner("service_tier");
     const requestEffortScanner = createJsonStringFieldScanner("effort", "reasoning");
     const requestModelDecoder = new StringDecoder("utf8");
+    const activityChunks: Buffer[] = [];
+    let activityBytes = 0;
+    let activityOverflow = false;
+    if (bufferedRequest) observeRequestActivity(metrics, bufferedRequest.parsed);
     const recordsResponseMetrics = route.kind === "response";
     const recordsMetrics = recordsResponseMetrics || imageOperation !== undefined;
     const scansRequestMetadata = imageOperation === undefined
@@ -786,6 +792,11 @@ export class ProviderProxy {
       }
     });
     const observeRequestChunk = (chunk: Buffer): void => {
+      if (recordsResponseMetrics && !bufferedRequest && !activityOverflow) {
+        activityBytes += chunk.length;
+        if (activityBytes <= 1_048_576) activityChunks.push(chunk);
+        else { activityOverflow = true; activityChunks.length = 0; incompleteRequestActivity(metrics); }
+      }
       if (scansRequestMetadata) {
         const text = requestModelDecoder.write(chunk);
         scanJsonStringField(requestModelScanner, text);
@@ -801,6 +812,10 @@ export class ProviderProxy {
       exchange?.requestChunk(chunk);
     };
     const observeRequestEnd = (): void => {
+      if (recordsResponseMetrics && !bufferedRequest && !activityOverflow) {
+        observeRequestActivity(metrics, parseJsonPayload(Buffer.concat(activityChunks).toString("utf8")));
+        activityChunks.length = 0;
+      }
       if (scansRequestMetadata) {
         const text = requestModelDecoder.end();
         scanJsonStringField(requestModelScanner, text);
@@ -1183,6 +1198,7 @@ export class ProviderProxy {
               effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
             );
         if (activeMetrics) {
+          observeRequestActivity(activeMetrics, inspected.requestBody);
           activeMetrics.model = inspected.model ?? null;
           activeMetrics.requestModel = inspected.model ?? null;
           exchange?.observeRequestMetrics(activeMetrics);
@@ -1593,6 +1609,7 @@ function inspectClientWebSocketMessage(
   model?: string;
   serviceTier?: string;
   reasoningEffort?: string;
+  requestBody?: Record<string, unknown>;
 } {
   if (isBinary) return {};
   const parsed = parseJsonPayload(rawDataText(data));
@@ -1614,6 +1631,7 @@ function inspectClientWebSocketMessage(
   );
   return {
     metadata,
+    requestBody: parsed,
     recordsMetrics,
     ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
     ...(model ? { model } : {}),

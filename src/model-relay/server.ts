@@ -2,6 +2,7 @@ import { parseRelayModelId, relayModelId } from "../../runtime/model-relay-model
 import { isRelayListenHost } from "../../runtime/model-relay-listen-host.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { randomUUID } from "node:crypto";
+import { RequestActivityObserver } from "../../runtime/request-activity.mjs";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
@@ -143,6 +144,7 @@ export class ModelRelayServer {
     let phase: "input" | "queue" | "prepare" | "upstream" | "delivery" = "input";
     const protocol = request.url === "/v1/responses" ? "responses" : "chat";
     const observer = protocol === "responses" ? new DirectResponsesObserver() : new DirectChatResponse();
+    const activityObserver = new RequestActivityObserver();
     const receivedAt = performance.now();
     const relayRequestId = randomUUID();
     response.setHeader("x-relay-request-id", relayRequestId);
@@ -257,6 +259,7 @@ export class ModelRelayServer {
       const call = { timing: (value: typeof outputTiming) => { outputTiming = value; }, diagnostics: (summary: ModelRequestDiagnostics) => { diagnostics = summary; }, ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
         recheck: () => { lease!.check(requestModel); prepared.recheck(); },
         submitted: (ua: string | null, requestBytes: number, address: string | null) => {
+          activityObserver.request(body, protocol);
           userAgent = ua;
           upstreamUrl = address;
           outboundBytes += requestBytes;
@@ -266,6 +269,7 @@ export class ModelRelayServer {
         headers: (status: number) => { httpStatus = status; },
         content: () => { firstTokenMs ??= performance.now() - started!; },
         emit: async (value: Record<string, unknown> | undefined, terminal: boolean, rawFrame?: string) => {
+          if (value !== undefined) activityObserver.response(value, protocol);
           delivering = true;
           if (terminal) { completedAt = performance.now(); phase = "delivery"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.(); }
           const deliveryController = new AbortController();
@@ -362,7 +366,7 @@ export class ModelRelayServer {
           provider: provider!, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",
           status: modelStatus, deliveryStatus,
           requestStartedAtMs: submittedAt!, responseCompletedAtMs: submittedAt! + (ended - started), totalDurationMs: ended - started,
-          requestBytes: outboundBytes, upstreamUrl,
+          requestBytes: outboundBytes, upstreamUrl, activity: activityObserver.snapshot(),
           ...observer.usage, ...outputTiming, ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
           ...(observer.responseModel === undefined ? {} : { responseModel: observer.responseModel }),
           ...(httpStatus === undefined ? {} : { httpStatus }), ...(errorCode === undefined ? {} : { errorCode }) };

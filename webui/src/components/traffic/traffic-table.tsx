@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge"
-import { formatGenerationSpeed, formatTrafficRequestAddress } from "@/lib/format"
+import { formatGenerationSpeed, formatTrafficRequestAddress, formatRequestActivity } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { DataTable, TableHint, TruncatedText, type DataTableColumn, type DataTableProps } from "@/components/metrics/data-table"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -24,6 +24,9 @@ export function TrafficTable({
 }) {
   const { t } = useTranslation()
   const columns: DataTableColumn<TrafficExchangeSummary>[] = [
+    { id: "activity", enableSorting: false, header: () => <TableHint hint={t("traffic.activityHint")}>{t("traffic.activity")}</TableHint>, cell: ({ row }) => {
+      return <TruncatedText text={formatRequestActivity(row.original, t)} className="max-w-48 text-xs" />
+    } },
     { id: "requestPurpose", enableSorting: false, header: t("requestMethod.label"), cell: ({ row }) => {
       const method = requestMethodDisplay(row.original, t)
       return <Badge variant={method.variant}>{method.label}</Badge>
@@ -79,12 +82,12 @@ export function TrafficTable({
         onClick={(event) => { event.stopPropagation(); onOpen(exchange) }}>{t("requests.viewDetail")}</Button>
     ) },
   ]
-  const order = ["time", "provider", "requestPurpose", "model", "requestAddress", "reasoningEffort", "status", "first", "generationSpeed", "duration", "client", "protocol", "type", "detail"]
+  const order = ["time", "provider", "requestPurpose", "model", "activity", "requestAddress", "reasoningEffort", "status", "first", "generationSpeed", "duration", "client", "protocol", "type", "detail"]
   const orderedColumns = [...columns].sort((a, b) => order.indexOf(a.id!) - order.indexOf(b.id!))
   return <DataTable title={t("traffic.listTitle", { count: pagination.mode === "server" ? pagination.serverTotal ?? exchanges.length : exchanges.length })}
     description={() => description} data={exchanges} columns={orderedColumns} loading={loading}
     storageKey="codex-webui:traffic-table-v2" getRowId={trafficCallKey} onRowClick={onOpen}
-    columnLabels={{requestPurpose: t("requestMethod.label"), time: t("traffic.startedAt"), provider: t("metrics.provider"), client: t("traffic.client"), model: t("metrics.model"), reasoningEffort: t("metrics.reasoningEffort"), protocol: t("traffic.protocol"), status: t("filters.status"), first: t("requests.firstColumn"), generationSpeed: t("requests.speedColumn"), duration: t("requests.durationColumn"), type: t("metrics.type"), requestAddress: t("traffic.requestAddress"), detail: t("requests.detailColumn")}}
+    columnLabels={{activity: t("traffic.activity"), requestPurpose: t("requestMethod.label"), time: t("traffic.startedAt"), provider: t("metrics.provider"), client: t("traffic.client"), model: t("metrics.model"), reasoningEffort: t("metrics.reasoningEffort"), protocol: t("traffic.protocol"), status: t("filters.status"), first: t("requests.firstColumn"), generationSpeed: t("requests.speedColumn"), duration: t("requests.durationColumn"), type: t("metrics.type"), requestAddress: t("traffic.requestAddress"), detail: t("requests.detailColumn")}}
     numericColumnIds={["first", "generationSpeed", "duration"]} emptyText={t("traffic.empty")} pagination={pagination} />
 }
 

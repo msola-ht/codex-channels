@@ -1,6 +1,7 @@
 import { modelRequestDiagnosticKeys, validModelRequestDiagnostics } from "./chat-diagnostics.js";
 import { validRequestTiming } from "../../runtime/request-timing.mjs";
 import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
+import { validRequestActivity } from "../../runtime/request-activity.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import type { Socket } from "node:net";
 
@@ -18,7 +19,7 @@ import {
 const maximumMetricsBytes = 8_192;
 const maximumConfirmationBytes = 16;
 const metricsFields = [
-  "upstreamUrl", "transport", "responseFormat", "operation", "threadId", "turnId", "requestPurpose",
+  "activity", "upstreamUrl", "transport", "responseFormat", "operation", "threadId", "turnId", "requestPurpose",
   "reviewerThreadId", "reviewerTurnId", "model", "serviceTier", "requestServiceTier",
   "reasoningEffort", "status", "httpStatus", "userAgent", "errorType", "errorCode",
   "errorMessage", "incompleteReason", "inputTokens", "cachedInputTokens", "outputTokens",
@@ -201,6 +202,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     return undefined;
   }
   const record = parsed as Record<string, unknown>;
+  if (record.activity != null && !validRequestActivity(record.activity)) return undefined;
   if (record.upstreamUrl != null && sanitizeModelRequestUrl(record.upstreamUrl) !== record.upstreamUrl) return undefined;
   if ((record.operation === "imageGeneration" || record.operation === "imageEdit")
     && (record.transport !== "http" || record.inputTokens !== null || record.cachedInputTokens !== null

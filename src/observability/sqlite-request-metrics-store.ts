@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { validRequestTiming } from "../../runtime/request-timing.mjs";
 import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
+import { validRequestActivity } from "../../runtime/request-activity.mjs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { SqliteQuotaQueries } from "./sqlite-quota-queries.js";
@@ -384,6 +385,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       throw new Error("请求发送大小无效");
     }
     if (!validRequestTiming(sample)) throw new Error("请求生成计时无效");
+    if (sample.activity != null && !validRequestActivity(sample.activity)) throw new Error("请求行为摘要无效");
     if (sample.upstreamUrl != null && (typeof sample.upstreamUrl !== "string"
       || sanitizeModelRequestUrl(sample.upstreamUrl) !== sample.upstreamUrl)) {
       throw new Error("实际上游地址无效");
@@ -449,6 +451,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       sample.reviewerThreadId ?? null,
       sample.reviewerTurnId ?? null,
       sample.upstreamUrl ?? null,
+      sample.activity == null ? null : JSON.stringify(sample.activity),
     );
   }
 
