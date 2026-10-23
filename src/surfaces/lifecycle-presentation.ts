@@ -489,23 +489,22 @@ function formatTurnErrorMessage(
 }
 
 function formatCompletedServiceTier(event: Extract<OutputEvent, { type: "turn.completed" }>): string {
+  // Request tier is the display contract. A priority request may return default;
+  // never use response service_tier to replace or fill missing request evidence.
   const summary = event.timing?.serviceTierSummary;
   // Retained events may have a confirmed snapshot but predate tier metrics.
-  if (!summary) return formatServiceTier(event.serviceTier);
-  const { requestCount, requested, returned } = summary;
-  if (requested.observedCount === 0 && returned.observedCount === 0 && event.serviceTier !== undefined) {
-    return formatServiceTier(event.serviceTier);
+  if (!summary || summary.requested.observedCount === 0) {
+    return event.serviceTier === undefined
+      ? "未知（请求档位未观测）"
+      : `${formatServiceTier(event.serviceTier)}（设置快照）`;
   }
+  const { requestCount, requested } = summary;
   // Once observations exist, never fill partial/mixed evidence with the snapshot.
-  if (returned.distinctCount > 1) return "多档位（上游返回）";
-  if (requestCount > 0 && returned.observedCount === requestCount && returned.value !== null) {
-    return formatServiceTier(returned.value);
-  }
   if (requested.distinctCount > 1) return "多档位（请求档位）";
   if (requestCount > 0 && requested.observedCount === requestCount && requested.value !== null) {
-    return `${formatServiceTier(requested.value)}（请求档位）`;
+    return formatServiceTier(requested.value);
   }
-  return "未知（档位未完整观测）";
+  return "未知（请求档位未完整观测）";
 }
 
 export function createTurnCompletedPresentation(

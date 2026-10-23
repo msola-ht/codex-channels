@@ -46,7 +46,7 @@ export interface ModelRequestMetricSample {
   reviewerTurnId?: string | null;
   model: string | null;
   serviceTier: string | null;
-  /** 出站请求层级；历史未采集时为空，不从响应推断。 */
+  /** 出站请求层级；完整解析确认未请求加速记 default，未采集为空，不从响应推断。 */
   requestServiceTier?: string | null;
   reasoningEffort: string | null;
   status: ModelRequestStatus;
@@ -187,7 +187,6 @@ export interface StoredTurnRequestMetricsSummary {
   serviceTierSummary?: {
     requestCount: number;
     requested: { value: string | null; observedCount: number; distinctCount: number };
-    returned: { value: string | null; observedCount: number; distinctCount: number };
   };
   usageCoverage: UsageCoverage;
   performance?: RequestTimingSummary;
