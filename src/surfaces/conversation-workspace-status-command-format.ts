@@ -150,12 +150,12 @@ export function formatConversationStatus(
     lines.push(`上下文压缩：${status.contextCompactionCount} 次`);
   }
   if (status.threadId) {
+    const cleanPath = (path: string): string => formatExecutionPath(path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
     const context = status.executionContext;
     lines.push("", "会话执行目录：");
     if (!context) {
       lines.push("尚未取得有效的 App Server 执行上下文（可能正在恢复），不使用 Workspace 目录代替");
     } else {
-      const cleanPath = (path: string): string => formatExecutionPath(path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
       lines.push(`最近确认目录：${cleanPath(context.cwd)}`,
         `运行目录列表（最近一次新建、恢复或派生的加载快照；不是实时权限清单）：`,
         `快照对应目录：${cleanPath(context.workspaceRootsSnapshot.cwd)}`);
@@ -171,7 +171,7 @@ export function formatConversationStatus(
     } else if (status.instructionSources.length === 0) {
       lines.push("App Server 返回的文件清单为空（不代表没有其他指令）");
     } else {
-      lines.push(...status.instructionSources.map((path) => `- ${path.replace(/[\r\n]/gu, " ")}`));
+      lines.push(...status.instructionSources.map((path, index) => `- 文件 ${index + 1}：${cleanPath(path)}`));
     }
   }
   if (status.goal) {

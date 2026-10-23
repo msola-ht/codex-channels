@@ -280,12 +280,18 @@ export class ConversationCore {
     this.publishConnectionNotice("connection.restored", message, affectedThreadIds);
   }
 
-  handle(event: ConversationInputEvent): void {
+  /** Record close ordering before an asynchronous reducer can reach a newer restore window. */
+  observeThreadClosed(threadId: string): void {
+    this.observeThreadActivity(threadId, { type: "invalidated" });
+  }
+
+  handle(event: ConversationInputEvent, options: { threadClosureObserved?: boolean } = {}): void {
     if (event.type === "turn.started") {
       this.observeThreadActivity(event.threadId, { type: "active", turnId: event.turnId });
     } else if (event.type === "turn.completed" && event.status !== "inProgress") {
       this.observeThreadActivity(event.threadId, { type: "terminal", turnId: event.turnId });
-    } else if (event.type === "thread.closed" || event.type === "thread.archived" || event.type === "thread.deleted") {
+    } else if ((event.type === "thread.closed" && !options.threadClosureObserved)
+      || event.type === "thread.archived" || event.type === "thread.deleted") {
       this.observeThreadActivity(event.threadId, { type: "invalidated" });
     }
     switch (event.type) {

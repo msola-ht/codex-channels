@@ -101,7 +101,9 @@ export class SessionRouter {
   private readonly sessionDiagnosticsByThread = new Map<string, Pick<ThreadSession, "contextCompactionItemIds" | "instructionSources"> & { executionContext: ThreadExecutionContext | undefined }>();
   private executionContextRevision = 0;
   private readonly executionContextChanges: (string | undefined)[] = [];
-  private readonly sessionContextRevisions = new WeakMap<ThreadSession, number>();
+  private subscriptionRevision = 0;
+  private readonly subscriptionChanges: (string | ((threadId: string) => boolean))[] = [];
+  private readonly sessionContextRevisions = new WeakMap<ThreadSession, { context: number; subscription: number }>();
 
   constructor(
     private readonly codex: ThreadLifecyclePort,
@@ -321,9 +323,31 @@ export class SessionRouter {
   }
 
   invalidateExecutionContext(threadId?: string): void {
+    this.invalidateThreadContext(threadId, false);
+  }
+
+  /** The connection owner resolves canonical Provider identity, including unbound responses. */
+  invalidateSubscriptions(isAffected: (threadId: string) => boolean): void {
+    this.invalidateExecutionContext();
+    this.subscriptionRevision += 1;
+    this.subscriptionChanges.push(isAffected);
+    if (this.subscriptionChanges.length > 256) this.subscriptionChanges.shift();
+    for (const binding of this.bindings.list()) {
+      if (!isAffected(binding.threadId)) continue;
+      this.invalidateExecutionContext(binding.threadId);
+      this.unsubscribedBindings.add(binding.threadId);
+    }
+  }
+
+  private invalidateThreadContext(threadId: string | undefined, subscriptionLost: boolean): void {
     this.executionContextRevision += 1;
     this.executionContextChanges.push(threadId);
     if (this.executionContextChanges.length > 256) this.executionContextChanges.shift();
+    if (subscriptionLost && threadId !== undefined) {
+      this.subscriptionRevision += 1;
+      this.subscriptionChanges.push(threadId);
+      if (this.subscriptionChanges.length > 256) this.subscriptionChanges.shift();
+    }
     if (threadId === undefined) return; // A disconnect also invalidates unbound in-flight creations.
     const diagnostics = this.sessionDiagnosticsByThread.get(threadId);
     if (diagnostics) diagnostics.executionContext = undefined;
@@ -346,29 +370,66 @@ export class SessionRouter {
   }
 
   private async observeSessionContext<T extends ThreadSession>(operation: () => Promise<T>): Promise<T> {
-    const revision = this.executionContextRevision;
+    const revision = { context: this.executionContextRevision, subscription: this.subscriptionRevision };
     const session = await operation();
     this.sessionContextRevisions.set(session, revision);
     return session;
   }
 
   private sessionExecutionContext(session: ThreadSession): ThreadExecutionContext | undefined {
-    const revision = this.sessionContextRevisions.get(session);
-    if (revision === undefined) return undefined;
-    const changes = this.executionContextRevision - revision;
-    // Only diagnostic freshness is tracked. Overflow is unknown, never a permission decision.
-    if (changes > this.executionContextChanges.length
-      || (changes > 0 && this.executionContextChanges.slice(-changes)
-        .some(id => id === undefined || id === session.thread.id))) return undefined;
+    if (!this.isSessionContextCurrent(session)) return undefined;
     return { cwd: session.effectiveSettings.cwd, workspaceRootsSnapshot: {
       cwd: session.effectiveSettings.cwd, roots: [...session.runtimeWorkspaceRoots],
     } };
   }
 
+  private isSessionContextCurrent(session: ThreadSession, subscriptionOnly = false): boolean {
+    const revision = this.sessionContextRevisions.get(session);
+    if (revision === undefined) return false;
+    const changes = subscriptionOnly
+      ? this.subscriptionRevision - revision.subscription
+      : this.executionContextRevision - revision.context;
+    const history = subscriptionOnly ? this.subscriptionChanges : this.executionContextChanges;
+    // Cwd-only diagnostic overflow cannot invalidate a live subscription.
+    if (changes > history.length
+      || (changes > 0 && history.slice(-changes)
+        .some(change => typeof change === "function" ? change(session.thread.id)
+          : change === undefined || change === session.thread.id))) return false;
+    return true;
+  }
+
+  private requireCurrentSubscription(session: ThreadSession): void {
+    if (!this.isSessionContextCurrent(session, true)) {
+      this.markThreadUnsubscribed(session.thread.id);
+      this.requestSubscriptionRestore(session.thread.id);
+      throw new UserFacingError("conversation.busy", "会话订阅已失效，请等待恢复后重试", { reason: "subscription-restoring" });
+    }
+  }
+
+  private captureSessionDiagnostics(session: ThreadSession): void {
+    this.requireCurrentSubscription(session);
+    this.sessionDiagnosticsByThread.set(session.thread.id, {
+      contextCompactionItemIds: session.contextCompactionItemIds,
+      instructionSources: session.instructionSources,
+      executionContext: this.sessionExecutionContext(session),
+    });
+    this.unsubscribedBindings.delete(session.thread.id);
+  }
+
   private async unsubscribeThread(threadId: string, beforeSubmit?: () => void): Promise<void> {
     await this.codex.unsubscribeThread(threadId, beforeSubmit);
-    this.invalidateExecutionContext(threadId);
+    this.markThreadUnsubscribed(threadId);
+  }
+
+  /** Record subscription loss without scheduling recovery before its owner is ready. */
+  markThreadUnsubscribed(threadId: string): () => boolean {
+    this.invalidateThreadContext(threadId, true);
     if (this.bindings.getByThread(threadId)) this.unsubscribedBindings.add(threadId);
+    const diagnostics = this.sessionDiagnosticsByThread.get(threadId);
+    return () => {
+      const current = this.sessionDiagnosticsByThread.get(threadId);
+      return current === undefined || current === diagnostics;
+    };
   }
 
   updateCollaborationMode(
@@ -414,10 +475,7 @@ export class SessionRouter {
             );
             this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
             this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-            this.sessionDiagnosticsByThread.set(
-              resumed.thread.id,
-              { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources, executionContext: this.sessionExecutionContext(resumed) },
-            );
+            this.captureSessionDiagnostics(resumed);
             restoredBinding = {
               target: binding.target,
               workspaceId: workspace.id,
@@ -457,7 +515,6 @@ export class SessionRouter {
                   : "other",
             };
           }
-          this.unsubscribedBindings.delete(binding.threadId);
           observation?.restored(restoredBinding, restoredThread);
           return undefined;
         } finally {
@@ -580,16 +637,14 @@ export class SessionRouter {
             }
             const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
             try {
+              this.requireCurrentSubscription(resumed);
               this.bindings.bind(binding);
             } catch (error) {
               await this.cleanupFailedResume(resumed.thread.id, error);
             }
             this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
             this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-            this.sessionDiagnosticsByThread.set(
-              resumed.thread.id,
-              { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources, executionContext: this.sessionExecutionContext(resumed) },
-            );
+            this.captureSessionDiagnostics(resumed);
             this.clearForceNew(target, Date.now());
             observation?.restored(binding, resumed.thread);
             this.notifyBindingsChanged();
@@ -611,26 +666,22 @@ export class SessionRouter {
     catch (error) { await this.cleanupFailedResume(started.thread.id, error, false); }
     const binding = { target, workspaceId: workspace.id, threadId: started.thread.id, sessionId: started.thread.sessionId };
     try {
+      this.requireCurrentSubscription(started);
       this.bindings.bind(binding);
     } catch (error) {
       await this.cleanupFailedResume(started.thread.id, error);
     }
     this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier, "default", started.approvalsReviewer);
     this.namesByThread.set(started.thread.id, started.thread.name);
-    this.sessionDiagnosticsByThread.set(
-      started.thread.id,
-      { contextCompactionItemIds: started.contextCompactionItemIds, instructionSources: started.instructionSources, executionContext: this.sessionExecutionContext(started) },
-    );
+    this.captureSessionDiagnostics(started);
     this.clearForceNew(target, Date.now());
     this.notifyBindingsChanged();
     return binding;
   }
 
-  markThreadClosed(threadId: string): void {
-    this.invalidateExecutionContext(threadId);
+  requestSubscriptionRestore(threadId: string): void {
     const binding = this.bindings.getByThread(threadId);
-    if (!binding) return;
-    this.unsubscribedBindings.add(threadId);
+    if (!binding || !this.unsubscribedBindings.has(threadId)) return;
     this.onSubscriptionRestoreRequired?.(binding);
   }
 
@@ -710,6 +761,7 @@ export class SessionRouter {
         sessionId: session.thread.sessionId,
       };
       try {
+        this.requireCurrentSubscription(session);
         this.bindings.bindBackground(binding);
       } catch (error) {
         await this.cleanupFailedResume(session.thread.id, error);
@@ -724,10 +776,7 @@ export class SessionRouter {
         session.approvalsReviewer,
       );
       this.namesByThread.set(session.thread.id, session.thread.name);
-      this.sessionDiagnosticsByThread.set(
-        session.thread.id,
-        { contextCompactionItemIds: session.contextCompactionItemIds, instructionSources: session.instructionSources, executionContext: this.sessionExecutionContext(session) },
-      );
+      this.captureSessionDiagnostics(session);
       this.notifyBindingsChanged();
       return { binding, session };
     });
@@ -800,6 +849,7 @@ export class SessionRouter {
       let previousUnsubscribed = false;
       try {
         assertCurrent();
+        this.requireCurrentSubscription(resumed);
         if (current && current.threadId !== resumed.thread.id && !preserveCurrent) {
           const previous = await this.codex.readThread(current.threadId, undefined, assertCurrent);
           const terminalRelease = previous.status.type === "systemError" && isThreadExecutionSettled(previous);
@@ -817,6 +867,7 @@ export class SessionRouter {
           }
         }
         assertCurrent();
+        this.requireCurrentSubscription(resumed);
         const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
         this.bindings.switchForeground(binding, preserveCurrent);
       } catch (error) {
@@ -834,10 +885,7 @@ export class SessionRouter {
       if (previousUnsubscribed && current) this.sessionDiagnosticsByThread.delete(current.threadId);
       this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
       this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-      this.sessionDiagnosticsByThread.set(
-        resumed.thread.id,
-        { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources, executionContext: this.sessionExecutionContext(resumed) },
-      );
+      this.captureSessionDiagnostics(resumed);
       const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
       this.clearForceNew(target, Date.now());
       observation?.restored(binding, resumed.thread);
@@ -1145,8 +1193,7 @@ export class SessionRouter {
               this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
                 resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
               this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-              this.sessionDiagnosticsByThread.set(resumed.thread.id, { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources, executionContext: this.sessionExecutionContext(resumed) });
-              this.unsubscribedBindings.delete(threadId);
+              this.captureSessionDiagnostics(resumed);
               observation?.restored(binding, resumed.thread);
             } finally {
               observation?.stop();
@@ -1247,9 +1294,11 @@ export class SessionRouter {
     };
     try {
       assertCurrent();
+      this.requireCurrentSubscription(forked);
       await this.unsubscribeThread(current.threadId, assertCurrent);
       previousUnsubscribed = true;
       assertCurrent();
+      this.requireCurrentSubscription(forked);
       this.bindings.switchForeground(binding, false);
     } catch (error) {
       let failure = error;
@@ -1265,7 +1314,7 @@ export class SessionRouter {
     this.sessionDiagnosticsByThread.delete(current.threadId);
     this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier, "default", forked.approvalsReviewer);
     this.namesByThread.set(forked.thread.id, forked.thread.name);
-    this.sessionDiagnosticsByThread.set(forked.thread.id, { contextCompactionItemIds: forked.contextCompactionItemIds, instructionSources: forked.instructionSources, executionContext: this.sessionExecutionContext(forked) });
+    this.captureSessionDiagnostics(forked);
     this.clearForceNew(target, Date.now());
     this.notifyBindingsChanged();
     return binding;
@@ -1388,8 +1437,7 @@ export class SessionRouter {
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
           resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
         this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-        this.sessionDiagnosticsByThread.set(resumed.thread.id, { contextCompactionItemIds: resumed.contextCompactionItemIds, instructionSources: resumed.instructionSources, executionContext: this.sessionExecutionContext(resumed) });
-        this.unsubscribedBindings.delete(expected.threadId);
+        this.captureSessionDiagnostics(resumed);
         observation?.restored(expected, resumed.thread);
       } finally {
         observation?.stop();

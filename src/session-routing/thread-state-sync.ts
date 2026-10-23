@@ -16,11 +16,13 @@ export class ThreadStateSynchronizer {
   constructor(private readonly router: SessionRouter) {}
 
   /** Apply freshness facts before asynchronous presentation queues. */
-  observeExecutionContext(event: ThreadStateEvent): void {
+  observeExecutionContext(event: ThreadStateEvent): (() => boolean) | undefined {
     if (event.type === "thread.settings.updated") this.router.observeThreadCwd(event.threadId, event.cwd);
-    else if (event.type === "thread.closed" || event.type === "thread.archived" || event.type === "thread.deleted") {
+    else if (event.type === "thread.closed") return this.router.markThreadUnsubscribed(event.threadId);
+    else if (event.type === "thread.archived" || event.type === "thread.deleted") {
       this.router.invalidateExecutionContext(event.threadId);
     }
+    return undefined;
   }
 
   handle(event: ThreadStateEvent): void {
@@ -38,7 +40,7 @@ export class ThreadStateSynchronizer {
         this.router.forgetDeletedThread(event.threadId);
         return;
       case "thread.closed":
-        this.router.markThreadClosed(event.threadId);
+        this.router.requestSubscriptionRestore(event.threadId);
         return;
     }
   }
