@@ -353,6 +353,8 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  /** 最后一次实际模型出站的 origin + 路径；历史未采集时为 null。 */
+  upstreamUrl: string | null
   /** 是否关联已登记的子代理；false 不代表已确认是主代理。 */
   isSubagent: boolean
   requestPurpose?: "autoApprovalReview" | null

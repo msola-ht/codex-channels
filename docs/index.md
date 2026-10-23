@@ -473,7 +473,7 @@ Unix 公开端点通过独占硬链接发布，绑定名保留至监听关闭，
 
 完成卡分别查询本轮任务和当前会话累计，包含精确关联子代理；总数分为通过、拒绝、超时、中止、进行中和历史结果未知，不把未区分的旧终态当作拒绝。Provider 请求指标仅将官方 `thread_source=guardian_review` 且父 Thread/Turn 完整的审查请求归到父任务；缺少父身份时保留无会话的全局用量，不生成独立用户会话、不改变普通子代理分类。
 
-指标只接受当前 Schema v33，首次安装直接建库，不自动迁移或重解释历史格式。字段、时间口径、
+指标只接受当前 Schema v34，首次安装直接建库，不自动迁移或重解释历史格式。字段、时间口径、
 权限和只读查询合同见 [Observability](../src/observability/README.md)；安装检查见[源码安装与更新](source-install.md)。
 请求用途与原始审查 Thread/Turn 作为最小身份指标独立落库；Provider 和转储读取通过
 `runtime/auto-review-metadata.mjs` 共用明确来源与父归属投影。请求页筛选和转储身份展示见

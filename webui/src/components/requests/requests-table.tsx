@@ -99,6 +99,7 @@ export function RequestsTable({
     time: t("requests.recordedAt"),
     provider: t("metrics.provider"),
     model: t("metrics.model"),
+    upstreamUrl: t("requests.addressColumn"),
     reasoningEffort: t("metrics.reasoningEffort"),
     ua: "User-Agent",
     operation: t("filters.operation"),
@@ -117,6 +118,11 @@ export function RequestsTable({
   }
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
+    {
+      id: "upstreamUrl", enableSorting: false,
+      header: () => <TableHint hint={t("requests.addressHint")}>{t("requests.addressColumn")}</TableHint>,
+      cell: ({ row }) => <TruncatedText text={row.original.upstreamUrl ?? t("traffic.notRecorded")} className="max-w-72 font-mono text-xs" />,
+    },
     {
       id: "requestPurpose", enableSorting: false, header: t("requestMethod.label"),
       cell: ({ row }) => {
@@ -352,7 +358,7 @@ export function RequestsTable({
     },
   ], [t, language, openRequest])
 
-  const order = ["time", "provider", "requestPurpose", "model", "reasoningEffort", "status", "requestBytes", "input", "cacheHitRate", "output", "reasoningOutput", "firstContent", "generationSpeed", "duration", "source", "caller", "delivery", "ua", "operation", "http", "error", "traffic"]
+  const order = ["time", "provider", "requestPurpose", "model", "upstreamUrl", "reasoningEffort", "status", "requestBytes", "input", "cacheHitRate", "output", "reasoningOutput", "firstContent", "generationSpeed", "duration", "source", "caller", "delivery", "ua", "operation", "http", "error", "traffic"]
   const orderedColumns = [...columns].sort((a, b) => (order.includes(a.id!) ? order.indexOf(a.id!) : order.length) - (order.includes(b.id!) ? order.indexOf(b.id!) : order.length))
 
   return (

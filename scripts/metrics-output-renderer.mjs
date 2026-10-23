@@ -259,14 +259,15 @@ function* renderMetricsExportBody(iterator, result, format) {
       yield "\n本时间范围没有请求记录。\n";
       return;
     }
-    yield "\n| 时间 | 提供商 | 模型 | 操作 | 用途 | 思考等级 | 状态 | 输入 | 其中缓存 | 输出 | 首 Token | 速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |\n";
-    yield "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n";
+    yield "\n| 时间 | 提供商 | 上游地址 | 模型 | 操作 | 用途 | 思考等级 | 状态 | 输入 | 其中缓存 | 输出 | 首 Token | 速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |\n";
+    yield "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n";
     for (let next = first; !next.done; next = iterator.next()) {
       const record = next.value.value;
       yield (
         [
           markdownCell(formatLocalTime(record.recordedAtMs)),
           markdownCell(record.provider ?? ""),
+          markdownCell(record.upstreamUrl ?? "未知"),
           markdownCell(record.model ?? ""),
           markdownCell(record.operation),
           markdownCell(record.requestPurpose === "autoApprovalReview" ? "自动审批审查" : "未标记（含历史未知）"),
@@ -707,6 +708,7 @@ function csvColumns() {
     ["toolTimeMs", (record) => record.generationTiming?.toolMs],
     ["totalDurationMs", (record) => record.totalDurationMs],
     ["requestBytes", (record) => record.requestBytes],
+    ["upstreamUrl", (record) => record.upstreamUrl],
     ["upstreamTtftMs", (record) => record.upstreamTtftMs],
     ["responseUsageAmount", (record) => record.responseUsageAmount],
     ["upstreamProvider", (record) => record.upstreamProvider],

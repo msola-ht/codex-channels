@@ -131,6 +131,7 @@ export class ModelRelayServer {
     let delivering = false;
     let httpStatus: number | undefined;
     let userAgent: string | null = null;
+    let upstreamUrl: string | null = null;
     let errorCode: string | undefined;
     let timeoutStage: ModelRequestTimeoutError["stage"] | undefined;
     let requestModel = "";
@@ -255,8 +256,9 @@ export class ModelRelayServer {
       inbound = undefined;
       const call = { timing: (value: typeof outputTiming) => { outputTiming = value; }, diagnostics: (summary: ModelRequestDiagnostics) => { diagnostics = summary; }, ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
         recheck: () => { lease!.check(requestModel); prepared.recheck(); },
-        submitted: (ua: string | null, requestBytes: number) => {
+        submitted: (ua: string | null, requestBytes: number, address: string | null) => {
           userAgent = ua;
+          upstreamUrl = address;
           outboundBytes += requestBytes;
           started = performance.now();
           submittedAt = Date.now();
@@ -360,7 +362,7 @@ export class ModelRelayServer {
           provider: provider!, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",
           status: modelStatus, deliveryStatus,
           requestStartedAtMs: submittedAt!, responseCompletedAtMs: submittedAt! + (ended - started), totalDurationMs: ended - started,
-          requestBytes: outboundBytes,
+          requestBytes: outboundBytes, upstreamUrl,
           ...observer.usage, ...outputTiming, ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
           ...(observer.responseModel === undefined ? {} : { responseModel: observer.responseModel }),
           ...(httpStatus === undefined ? {} : { httpStatus }), ...(errorCode === undefined ? {} : { errorCode }) };

@@ -2,6 +2,7 @@ import { once } from "node:events";
 import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeaders } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
+import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
 import { ChatUpstreamError, ModelRequestTimeoutError, readChatHttpError } from "./chat-errors.js";
 import { ChatBodyEncodingError, readChatBody } from "./chat-io.js";
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
@@ -50,7 +51,7 @@ interface DirectModelHttpCall {
   clientHeaders?: IncomingHttpHeaders;
   signal: AbortSignal;
   recheck(): void;
-  submitted(userAgent: string | null, headers: OutgoingHttpHeaders, path: string, requestBytes: number): void;
+  submitted(userAgent: string | null, headers: OutgoingHttpHeaders, path: string, requestBytes: number, upstreamUrl: string | null): void;
   transformed?(operation: "headers_filtered" | "headers_overridden"): void;
 }
 
@@ -86,7 +87,8 @@ export async function withDirectModelResponse(call: DirectModelHttpCall, consume
     const observedUa = effectiveUpstreamUserAgent({ "user-agent": typeof ua === "string" ? ua : undefined }, undefined);
     request.end(payload);
     call.submitted(observedUa !== null && [...observedUa].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) ? null : observedUa,
-      request.getHeaders(), request.path, payloadBytes);
+      request.getHeaders(), request.path, payloadBytes,
+      sanitizeModelRequestUrl(/^https?:\/\//u.test(request.path) ? request.path : `${request.protocol}//${String(request.getHeader("host"))}${request.path}`));
     const [incoming] = await ready as [IncomingMessage];
     clearTimeout(timer);
     await consume(incoming);

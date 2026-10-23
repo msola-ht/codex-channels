@@ -70,6 +70,7 @@ export interface MetricRow {
   generation_timing: string | null;
   total_duration_ms: number | null;
   request_bytes: number | null;
+  upstream_url: string | null;
   request_model: string | null;
   response_model: string | null;
   traffic_label: string | null;
@@ -227,6 +228,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     generationTiming,
     totalDurationMs: row.total_duration_ms,
     requestBytes: row.request_bytes,
+    upstreamUrl: row.upstream_url,
     requestModel: row.request_model,
     responseModel: row.response_model,
     traffic: row.traffic_label === null ? null : {

@@ -72,6 +72,8 @@ export interface ModelRequestMetricSample {
   totalDurationMs?: number | null;
   /** 本次逻辑请求实际发往模型上游的请求正文或 WebSocket 请求帧字节合计；未提交时为 null。 */
   requestBytes?: number | null;
+  /** 最后一次实际出站模型请求的 origin + pathname；剔除凭据、查询和片段，历史或未发送时为 null。 */
+  upstreamUrl?: string | null;
   requestModel?: string | null;
   responseModel?: string | null;
   /** 本地转储定位符；缺失不按时间或 Thread/Turn 推断。 */

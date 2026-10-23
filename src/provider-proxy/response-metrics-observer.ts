@@ -29,6 +29,8 @@ export interface ProviderQuotaWindowsSnapshot {
 }
 
 export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
+  /** 最后一次实际提交的模型上游地址；仅 origin 与路径，不含 URL 凭据或查询。 */
+  upstreamUrl?: string | null;
   transport: "http" | "websocket";
   responseFormat: "sse" | "json" | "websocket" | "unknown";
   operation: "response" | "compact" | "imageGeneration" | "imageEdit";

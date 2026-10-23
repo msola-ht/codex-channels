@@ -33,7 +33,7 @@ export interface CoreServiceInstallation { installed: boolean; }
 export function inspectCoreServiceInstallation(environment?: LocalUpdateEnvironment, platform?: NodeJS.Platform): CoreServiceInstallation;
 export function inspectGatewayConfiguration(environment?: LocalUpdateEnvironment): { configPath: string };
 export function inspectDatabases(environment?: LocalUpdateEnvironment): { state: DatabaseInspection; metrics: DatabaseInspection; sessionDisplayCache: DatabaseInspection };
-export interface MetricsUpgradePlan { databasePath: string; from: 31 | 32; to: 33; dev: number; ino: number; }
+export interface MetricsUpgradePlan { databasePath: string; from: 31 | 32 | 33; to: 34; dev: number; ino: number; }
 export interface UpdateDatabaseInspection {
   state: DatabaseInspection;
   metrics: DatabaseInspection;

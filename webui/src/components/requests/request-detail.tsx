@@ -24,6 +24,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     [t("requests.recordedAt"), `${formatTimestamp(record.recordedAtMs)} · ${getServerTimeZone()}`],
     [t("requestPurpose.label"), autoReview ? t("requestPurpose.autoApprovalReview") : t("requestPurpose.unmarked")],
     [t("metrics.provider"), record.provider],
+    [t("requests.addressColumn"), record.upstreamUrl ?? t("traffic.notRecorded")],
     [t("metrics.recordedStatus"), record.status],
     [t("requestDetail.upstreamProvider"), record.upstreamProvider],
     [t("requestDetail.upstreamAttemptCount"), formatCount(record.upstreamAttemptCount)],

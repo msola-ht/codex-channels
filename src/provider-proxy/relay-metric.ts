@@ -15,6 +15,7 @@ export interface RelayMetric extends DirectChatUsage, ModelRequestDiagnostics {
   requestModel: string;
   responseModel?: string;
   userAgent?: string;
+  upstreamUrl?: string | null;
   responseFormat: "json" | "sse";
   status: "completed" | "incomplete" | "failed";
   deliveryStatus: "finished" | "disconnected" | "failed";

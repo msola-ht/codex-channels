@@ -1553,6 +1553,8 @@ const zh = {
   requestDetail: {"upstreamProvider": "实际上游提供商", "upstreamAttemptCount": "提供商尝试次数", "modelAttemptCount": "模型尝试次数", "finishReason": "结束原因", "errorStage": "错误阶段", "upstreamErrorCode": "内层上游错误码", "upstreamErrorType": "内层上游错误类型", "upstreamHttpStatus": "内层上游 HTTP 状态", "attemptHint": "上游报告的尝试次数，不代表切换次数。", "attemptBadge": "尝试 {count} 次", "httpStage": "HTTP 阶段", "streamStage": "流式阶段", "title": "请求详情", "open": "查看请求", "description": "当前所选指标记录的快照；无需开启调用采集。", "recordedModel": "记录模型", "requestModel": "请求模型", "responseModel": "响应模型", "reasoningEffort": "思考等级", "requestTier": "请求服务层级", "responseTier": "响应服务层级", "transport": "传输方式", "responseFormat": "响应格式", "callerId": "调用方 ID", "cached": "缓存", "uncached": "无缓存", "threadId": "会话 ID", "turnId": "轮次 ID", "requestId": "Relay 请求 ID", "back": "返回请求明细"},
   requests: {
     recordedAt: "记录时间",
+    addressColumn: "请求地址",
+    addressHint: "最后一次实际提交的模型上游地址；不含凭据、查询参数和片段。历史未采集或尚未提交时显示未记录。",
     detailColumn: "详情",
     viewDetail: "查看",
     historyUpdatesPaused: "浏览历史页时暂停自动更新",
@@ -3450,6 +3452,8 @@ const en: Messages = {
   requestDetail: {"upstreamProvider": "Actual upstream provider", "upstreamAttemptCount": "Provider attempts", "modelAttemptCount": "Model attempts", "finishReason": "Finish reason", "errorStage": "Error stage", "upstreamErrorCode": "Inner upstream error code", "upstreamErrorType": "Inner upstream error type", "upstreamHttpStatus": "Inner upstream HTTP status", "attemptHint": "Attempts reported by the upstream; this is not a count of provider switches.", "attemptBadge": "Attempts: {count}", "httpStage": "HTTP phase", "streamStage": "Streaming phase", "title": "Request detail", "open": "View request", "description": "Snapshot of the selected metrics record; traffic capture is not required.", "recordedModel": "Recorded model", "requestModel": "Request model", "responseModel": "Response model", "reasoningEffort": "Reasoning effort", "requestTier": "Request service tier", "responseTier": "Response service tier", "transport": "Transport", "responseFormat": "Response format", "callerId": "Caller ID", "cached": "Cached", "uncached": "Uncached", "threadId": "Thread ID", "turnId": "Turn ID", "requestId": "Relay request ID", "back": "Back to requests"},
   requests: {
     recordedAt: "Recorded at",
+    addressColumn: "Request address",
+    addressHint: "Last model destination actually submitted; credentials, query parameters and fragments are omitted. Historical or unsubmitted requests show Not recorded.",
     detailColumn: "Detail",
     viewDetail: "View",
     historyUpdatesPaused: "Automatic updates paused on history pages",

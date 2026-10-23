@@ -1,6 +1,7 @@
 import { modelRequestDiagnostics, chatDiagnosticsHeader, type ChatDiagnosticsChannel } from "./chat-diagnostics.js";
 import { autoReviewMetadata } from "../../runtime/auto-review-metadata.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
+import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
 import { ModelConversionError, normalizeResponsesRequest, type SamplingParameters } from "../model-api/index.js";
 import {
   createServer,
@@ -608,6 +609,7 @@ export class ProviderProxy {
       ? httpRequest
       : httpsRequest;
     const diagnosticObserver = this.chatDiagnostics?.subscribe(snapshot => {
+      if (snapshot.upstreamUrl !== undefined) metrics.upstreamUrl = snapshot.upstreamUrl;
       if (snapshot.timing) {
         observeChatTiming(metrics, snapshot.timing);
         exchange?.callTiming?.submitted(snapshot.timing.submittedAt);
@@ -884,6 +886,8 @@ export class ProviderProxy {
     const submittedAt = performance.now();
     upstream.flushHeaders();
     if (!this.chatDiagnostics) {
+      metrics.upstreamUrl = sanitizeModelRequestUrl(/^https?:\/\//u.test(upstream.path)
+        ? upstream.path : `${upstream.protocol}//${String(upstream.getHeader("host"))}${upstream.path}`);
       observeRequestSubmitted(metrics, submittedAt);
       exchange?.callTiming?.submitted(submittedAt);
       headersTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("headers")), modelRequestPolicy.headersTimeoutMs);
@@ -1138,6 +1142,7 @@ export class ProviderProxy {
             const submittedAt = performance.now();
             timing?.submitted(submittedAt);
             if (metrics) observeRequestSubmitted(metrics, submittedAt);
+            if (metrics) metrics.upstreamUrl = sanitizeModelRequestUrl(upstream.url);
             if (metrics) metrics.requestBytes = (metrics.requestBytes ?? 0) + bytes;
           });
       });
