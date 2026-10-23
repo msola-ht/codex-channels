@@ -161,6 +161,10 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "surface.weixin.account": "微信账号",
     "surface.weixin.credentials": "微信连接凭据",
     "surface.weixin.allowed-users": "微信允许用户",
+    "surface.qq.enabled": "QQ 启用状态",
+    "surface.qq.account": "QQ 应用账号",
+    "surface.qq.credentials": "QQ 应用凭据",
+    "surface.qq.allowed-users": "QQ 允许用户",
   };
   return labels[code];
 }

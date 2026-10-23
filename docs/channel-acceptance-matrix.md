@@ -1,6 +1,6 @@
 # 通讯渠道验收矩阵
 
-本表是 Telegram、飞书和微信功能验收状态的统一入口，只记录外部行为是否经过真实平台验证，
+本表是 Telegram、飞书、微信和 QQ 功能验收状态的统一入口，只记录外部行为是否经过真实平台验证，
 不重复各模块的实现与协议细节。实现范围以根目录
 [`README.md`](../README.md) 为准；模块边界分别见
 [`src/surfaces/telegram/README.md`](../src/surfaces/telegram/README.md)、
@@ -33,6 +33,11 @@
   使用受约束降级或明确标记为未支持。
 
 ## 当前结论
+
+QQ 首个文本切片为**本地实现**，真实平台收发未观察。统一 Setup 的隔离终端录入、保存、取消、
+no-op 和竞争修改拒绝已观察，管理读面和 Doctor 已回读；这不证明 Token、WebSocket、模型执行或 QQ 送达。
+审批及提问安全拒绝，扫码、Webhook、媒体、流式、计划任务和旧结果新回复依据重发为**未支持**。
+具体范围与后续门槛见 [QQ 设计](qq-surface-plan.md) 和 [QQ 模块](../src/surfaces/qq/README.md)。
 
 基础主路径在 2026-08-12 已有验收记录；下表已纳入后续分项证据。三个渠道的授权私聊、Codex Turn 主路径、基础命令、引用、命令审批和官方
 Plan 用户输入已经可以使用；飞书还完成了 MCP 管理与 Plugin mention 的真实平台主路径验收。

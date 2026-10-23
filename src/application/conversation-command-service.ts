@@ -331,6 +331,8 @@ export interface ConversationCommandExecutor {
     command: ConversationCommandName,
     input: string,
     actorId: string,
+    isAllowed?: () => boolean,
+    captureReplyAuthorization?: (authorize: () => void) => void,
   ): Promise<ConversationCommandResult>;
 }
 
@@ -397,12 +399,32 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     command: ConversationCommandName,
     input: string,
     actorId: string,
+    isAllowed?: () => boolean,
+    captureReplyAuthorization?: (authorize: () => void) => void,
   ): Promise<ConversationCommandResult> {
-    const assertAuthorized = this.commandGuard(target, actorId, command === "workspace");
+    const assertActive = () => {
+      if (isAllowed?.() === false) throw new UserFacingError("command.authorization-changed", "命令来源已关闭或授权已变化");
+    };
+    assertActive();
+    const guard = this.commandGuard(target, actorId, command === "workspace");
+    const assertAuthorized = () => { assertActive(); guard(); };
     const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
     try {
+      assertActive();
       if (command === "workspace" && input.trim()) this.authorize(target, actorId);
       else assertAuthorized();
+      if (captureReplyAuthorization) {
+        const replyGuard = this.commandGuard(target, actorId, command === "workspace");
+        const hasWorkspace = this.conversations.listWorkspaces().some(workspace =>
+          workspace.id === this.conversations.selectedWorkspaceId(target));
+        const replyThread = hasWorkspace ? this.conversations.status(target).threadId : undefined;
+        captureReplyAuthorization(() => {
+          assertActive(); replyGuard();
+          if (hasWorkspace && this.conversations.status(target).threadId !== replyThread) {
+            throw new UserFacingError("command.authorization-changed", "命令回复对应的会话已变化");
+          }
+        });
+      }
     } catch (error) {
       if (result.kind === "scheduled-confirmation") this.scheduledTasks?.cancelConfirmation(result.preview.token);
       throw error;

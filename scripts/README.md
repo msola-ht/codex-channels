@@ -417,12 +417,13 @@
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
   从同一受审查来源分别生成账户模型目录；重复配置时保留仍受支持的
   默认模型与逐模型设置。
-- `channel-setup-presentation.mjs`：三个通讯渠道共用的 Clack 选择、输入、确认与取消适配器，以及微信、飞书共用的紧凑二维码渲染；保留完整模块、使用 L 级纠错，终端过窄或渲染失败时向调用方报告错误，由渠道取消扫码会话并返回向导。
+- `channel-setup-presentation.mjs`：通讯渠道共用的 Clack 选择、输入、确认与取消适配器，以及微信、飞书共用的紧凑二维码渲染；保留完整模块、使用 L 级纠错，终端过窄或渲染失败时向调用方报告错误，由渠道取消扫码会话并返回向导。
 - `terminal-prompter.mjs`：为本机维护命令统一提供 Clack 确认接口，保留调用方的默认选项；取消确认不执行操作，
   `AbortSignal` 中止返回 `AbortError`，关闭时释放在途交互；非终端调用要求使用显式参数。
 - `telegram-setup.mjs`：把 Telegram Bot 来源、长轮询冲突确认、允许名单输入和中文输出适配到
   `telegram-setup-session.mjs` 的结构化会话；复用统一 Codex `.env`、环境变量和系统代理解析；交互输入的
   Token 使用隐藏输入，验证错误继续脱敏；新建 Bot 仅引导使用官方 BotFather。
+- `qq-setup.mjs`：统一 Setup 的 QQ 手工应用凭据和单聊用户 OpenID 输入；App Secret 隐藏，确认与 JSONL 结果只报告配置状态和允许用户数量，不回显凭据或名单。明确选择启用或禁用后完整确认，复用严格配置校验、源修订保护和原子保存；取消、无变化不写入，并发修改使确认失效。仅支持 WebSocket，不扫码、不联网验证、不连接或发送消息；保存与运行时生效分开报告。
 - `telegram-setup-session.mjs` / `telegram-setup-session.d.mts`：提供所有者绑定的 Telegram Setup
   开始、状态、自动配对、允许名单预览、确认与取消接口；Bot Token 和一次性配对码只保存在有期限的
   进程内会话中，状态、预览和结果不返回 Token，取消和超时通过 grammY `AbortSignal` 中止验证或

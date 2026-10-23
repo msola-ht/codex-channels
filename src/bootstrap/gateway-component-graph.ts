@@ -126,7 +126,7 @@ import {
   metricsWorkerFailureMetadata,
   modelRequestMetricsDatabasePath,
 } from "../observability/index.js";
-import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy } from "../policy/index.js";
+import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy, QqAccessPolicy } from "../policy/index.js";
 import {
   SessionRouter,
   ThreadStateSynchronizer,
@@ -1038,7 +1038,7 @@ export abstract class GatewayComponentGraph {
           core: this.core,
           output: this.output,
           logger,
-          isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
+          isSurfaceEnabled: (target) => target.surface !== "qq" && this.surfaces.some((surface) =>
             surface.surface === target.surface && surface.accountId === target.accountId),
           isActorAuthorized: (target, actorId) =>
             this.accessPolicy(target)?.isAllowed({ target, actorId }) === true,
@@ -1989,6 +1989,8 @@ export abstract class GatewayComponentGraph {
       ? new FeishuAccessPolicy(this.config.feishu.allowedOpenIds, this.config.feishu.appId)
       : target.surface === "weixin" && this.config.weixin
       ? new WeixinAccessPolicy(this.config.weixin.allowedUserIds, this.config.weixin.accountId)
+      : target.surface === "qq" && this.config.qq
+      ? new QqAccessPolicy(this.config.qq.allowedUserOpenIds, this.config.qq.appId)
       : undefined;
   }
 
@@ -2406,6 +2408,8 @@ function surfaceLabel(surface: string): string {
       return "飞书";
     case "weixin":
       return "微信";
+    case "qq":
+      return "QQ";
     default:
       return "其他渠道";
   }

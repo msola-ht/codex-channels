@@ -2,11 +2,13 @@
 
 本目录保存外部交互平台适配器。Surface 负责把平台输入转换为 Application 命令，并把 Core 输出和审批交互渲染为平台消息。
 
-`index.ts` 是 Gateway 装配各 Surface 的主公开入口；通过显式异步加载函数提供三个渠道实现，
-纯共享能力与凭据检查不静态加载飞书或 Telegram SDK。
+`index.ts` 是 Gateway 装配各 Surface 的主公开入口；通过显式异步加载函数提供四个渠道实现，
+纯共享能力与凭据检查不静态加载飞书或 Telegram SDK；QQ 窄协议也通过独立异步入口加载。
 该入口也向本机图片提交命令公开 `readGeneratedImage` 与 `GeneratedImageError`，复用普通文件、符号链接、大小与格式校验；读取后的字节才允许进入渠道待发送目录。
 
 `delivery-diagnostics/index.ts` 是离线投递诊断的窄公开入口，仅复用载荷解码和屏障分类，不加载平台 SDK 或数据库实现。
+可靠 `deliver` 可接收组合根的实时 `authorized` 闭包；QQ 在等待 Token 后、每个实际平台请求前复核原持久 owner，
+不会只依赖入队时的 Actor 名单。既有平台检查点授权规则不变。
 `persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，持久结果发送未知或授权失效后解除顺序屏障并保留记录、检查点与容量计费，并将必要图片纳入同一有界快照；
 生成图片的上游 `fileId` 只在实时事件中传递，写入快照前一律剥离；只有引用、没有 `savedPath` 的完成结果仅保留内容不可获取标记，恢复后沿用相同提示，不把引用写入投递 Journal。
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
@@ -20,6 +22,8 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 原生功能。
 
 当前实现：
+
+- [`qq/`](qq/README.md)：手工凭据的 WebSocket 单聊文本切片，复用共享授权、会话命令和可靠投递；真实账号尚未验收，审批安全拒绝，媒体与流式暂不开放。
 
 工作区只选择登记目录；`/status` 和生命周期卡片的权限相关状态取 App Server 实际值。
 `/status` 经共享格式化入口另展示 Thread 最近确认目录和运行目录加载快照，明确区分登记

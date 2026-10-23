@@ -9,6 +9,8 @@ export function loadWeixinSurface() {
   return import("./weixin/index.js");
 }
 export { telegramDefaultAccountId } from "./telegram/constants.js";
+export async function loadQqSurface() { return import("./qq/index.js"); }
+export type { QqNetwork } from "./qq/index.js";
 export { createWeixinCredentialStore } from "./weixin/credential-store.js";
 export { createWeixinCredentialChangeCheck } from "./weixin/credential-client.js";
 export type { FeishuSurfaceOptions } from "./feishu/index.js";

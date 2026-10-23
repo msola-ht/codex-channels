@@ -230,6 +230,7 @@
     "scripts/weixin-qr-contract-probe.mjs",
     "scripts/weixin-setup-session.mjs",
     "scripts/weixin-setup.mjs",
+    "scripts/qq-setup.mjs",
     "scripts/windows-desktop-app-inspect.ps1",
     "scripts/windows-log-follow.ps1",
     "scripts/windows-scheduled-task.ps1",

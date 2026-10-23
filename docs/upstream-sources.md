@@ -104,6 +104,38 @@ Cline 官方 SDK 仍是 Chat 参数语义的参考，而非模型能力验收结
 不导入运行时代码、不安装或运行上游依赖、不自动更新。指标公式及回归用例见
 `apps/web/src/features/monitoring/model/eventRows.ts` 和相邻 `eventRows.test.ts`；首 Token 采集需同时核对实际 CPA 后端版本。
 
+## QQ 接入研究基线
+
+以下资料按用户授权下载并保留在 `upstream/`，用于[QQ 设计与实现](qq-surface-plan.md)的只读协议参考。
+它们不是已接入的运行依赖或真实账号验收基线，不替换上表现行渠道与 Codex 基线。未安装、执行上游代码，未修改源码。
+
+| 本地目录 | 官方来源 | 固定研究版本 |
+| --- | --- | --- |
+| `upstream/qqbot-nodejs` | [tencent-connect/qqbot-nodejs](https://github.com/tencent-connect/qqbot-nodejs) | `1.0.5`，`429a0f1b798f3b0fcef3679e207dbc0469a1df2d` |
+| `upstream/openclaw-qqbot` | [tencent-connect/openclaw-qqbot](https://github.com/tencent-connect/openclaw-qqbot) | `2.0.4`，`89988812442583bf47c34b89f9abf5fd4b85df0b` |
+| `upstream/dsh-qqbot` | [tencent-connect/dsh-qqbot](https://github.com/tencent-connect/dsh-qqbot) | `0.5.2`，`c8b9158b37817b0dbc1e514e62e16204ad47a6ce` |
+| `upstream/qq-bot-node-sdk` | [tencent-connect/bot-node-sdk](https://github.com/tencent-connect/bot-node-sdk) | `998051528aaa21fd952c31bcf60389ea8094e361`，旧频道 SDK |
+| `upstream/qq-botgo` | [tencent-connect/botgo](https://github.com/tencent-connect/botgo) | `fe31c0dfe469001e0f783d2f07e7de7bd08b403f` |
+| `upstream/qq-bot-docs` | [tencent-connect/bot-docs](https://github.com/tencent-connect/bot-docs) | `645787a45937e5d9c4f0f61afefdffde0f38696e`，2025 文档源码，不能代替当前在线文档 |
+| `upstream/qqbot-connector` | [npm Connector](https://www.npmjs.com/package/@tencent-connect/qqbot-connector) | npm `1.2.0` 发布包、解包内容及 registry 元数据，公开入口仅扫码连接 |
+| `upstream/qq-api-v2-2026-10-23` | [当前 QQ API v2](https://bot.q.qq.com/wiki/develop/api-v2/) | 2026-10-23 下载的相关 HTML 快照，不是整个站点镜像 |
+
+Connector 发布包 SHA-256 为 `f3cca8f961051697d0ffc00e784755dfef637d89164725cb441eaf9e616b2bd9`，
+已核验 registry 的 SHA-512 integrity 与下载包一致。其发布元数据标为 `UNLICENSED` 且没有 repository 字段，
+两个新官方插件的 package.json 均声明依赖 `1.2.0`；职责、采用条件与安全边界见 QQ 设计。
+新版 Node SDK 当前只核对 Git 源码版本，尚未核对 npm 发布物一致性，不把源码版本号当作发布包验证。
+
+HTML 快照包括启动、访问凭证、API 调用、单聊事件/发送/流式、Webhook、签名、富媒体、Markdown 和按钮。
+`access-token.html` 来自 `dev-prepare/access-token.html`；早期尝试旧地址得到的 `token.html` 实为启动页，
+按用户要求保留但排除为 Token 证据。核心快照 SHA-256：
+
+- `c2c-send.html`：`d0ef0695966f9ee35cc2dbe37d820032a8f8308caac9f46f86c5302d2c93348f`。
+- `c2c-stream.html`：`ed351023b14c4be084282b50b3d7bfd44481c3e49ea0146d071377b5160730d1`。
+- `webhook.html`：`329d9d9131f0ba7bc2ba5320f2f95111f1fc1fda66678d5b7521b9e12a0e023e`。
+
+新仓库通过独立目录首次获取；后续只读复用，不自动 fetch、切换或删除。旧 Node/Go SDK 的下线说明、
+新 SDK 双传输实现与在线文档冲突必须按版本区分，不能任取一个来源作为当前账号可用保证。
+
 ## 查阅顺序
 
 

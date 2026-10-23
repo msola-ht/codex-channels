@@ -30,6 +30,7 @@ export {
   type ConfigChangeScope,
   type FeishuConfigChangeCode,
   type GlobalConfigChangeCode,
+  type QQConfigChangeCode,
   type TelegramConfigChangeCode,
   type WeixinConfigChangeCode,
 } from "./config-change.js";
@@ -53,6 +54,11 @@ export interface GatewayConfig {
   weixin?: {
     accountId: string;
     allowedUserIds: ReadonlySet<string>;
+  };
+  qq?: {
+    appId: string;
+    appSecret: string;
+    allowedUserOpenIds: ReadonlySet<string>;
   };
   codexBinary: string;
   networkProxy: {
@@ -276,6 +282,15 @@ function loadValidatedConfigDocument(
           weixin: {
             accountId: raw.weixin.account_id,
             allowedUserIds: new Set(raw.weixin.allowed_user_ids),
+          },
+        }
+      : {}),
+    ...(raw.qq?.enabled
+      ? {
+          qq: {
+            appId: raw.qq.app_id,
+            appSecret: raw.qq.app_secret,
+            allowedUserOpenIds: new Set(raw.qq.allowed_user_openids),
           },
         }
       : {}),
