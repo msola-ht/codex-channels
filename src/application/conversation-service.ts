@@ -748,20 +748,31 @@ export class ConversationService implements
     };
   }
 
-  submitAsyncAnswer(target: ConversationTarget, threadId: string, text: string, isCurrent: () => boolean): Promise<Submission> {
-    return this.locked(target, () => {
-      const assertCurrent = () => {
-        if (!isCurrent() || this.router.current(target)?.threadId !== threadId) {
-          throw new UserFacingError("conversation.missing", "问题已失效或所属会话已切换，回答未发送。");
+  async submitAsyncAnswer(
+    target: ConversationTarget,
+    threadId: string,
+    text: string,
+    isCurrent: () => boolean,
+    observer?: SubmissionObserver,
+  ): Promise<Submission> {
+    const observation = observer ? new SubmissionObservation(observer) : undefined;
+    try {
+      return await this.locked(target, () => {
+        const assertCurrent = () => {
+          if (!isCurrent() || this.router.current(target)?.threadId !== threadId) {
+            throw new UserFacingError("conversation.missing", "问题已失效或所属会话已切换，回答未发送。");
+          }
+        };
+        assertCurrent();
+        const input = normalizeInput(text);
+        if (input.length === 0) {
+          throw new UserFacingError("message.empty", "回答不能为空");
         }
-      };
-      assertCurrent();
-      const input = normalizeInput(text);
-      if (input.length === 0) {
-        throw new UserFacingError("message.empty", "回答不能为空");
-      }
-      return this.submitInputLocked(target, input, undefined, assertCurrent, assertCurrent);
-    });
+        return this.submitInputLocked(target, input, undefined, assertCurrent, assertCurrent, observation);
+      });
+    } finally {
+      observation?.settle();
+    }
   }
 
   async invokeSkill(

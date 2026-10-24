@@ -9,7 +9,7 @@ export class QqSendBudget {
   private account: number[] = [];
   private readonly turns = new Map<string, { text: number; status: number; until: number }>();
 
-  reserve(recipient: string, parts: number, scope?: { key: string; status: boolean } | "startup"): {
+  reserve(recipient: string, parts: number, scope?: { key: string; status: boolean } | "startup" | "interaction"): {
     runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
   } {
     const now = performance.now();

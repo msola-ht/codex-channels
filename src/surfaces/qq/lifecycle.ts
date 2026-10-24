@@ -18,5 +18,5 @@ export function renderQqTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
   autoCompactPercent?: (provider: string | null | undefined, model: string | null | undefined) => number | null,
 ): string {
-  return `${toStructuredMarkdownList(renderPlainLifecyclePresentation(createTurnCompletedPresentation(event, false, autoCompactPercent)))}\n\n正文送达情况以各条结果为准；缺失结果请核对本机投递箱。${event.status === "failed" ? "QQ 暂不支持审批或问题回应。" : ""}`;
+  return `${toStructuredMarkdownList(renderPlainLifecyclePresentation(createTurnCompletedPresentation(event, false, autoCompactPercent)))}\n\n正文送达情况以各条结果为准；缺失结果请核对本机投递箱。`;
 }

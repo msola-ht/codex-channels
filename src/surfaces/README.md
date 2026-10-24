@@ -1,6 +1,6 @@
 # Surface Adapters
 
-[QQ](qq/README.md) 已接入普通单聊文字任务、必要命令和共享持久投递；审批、附件、计划任务与旧来源恢复不开放。
+[QQ](qq/README.md) 已接入普通单聊文字任务、必要命令、共享持久投递及共享审批/问题回应；交互源码待部署实机验收，附件、计划任务与旧来源恢复不开放。
 
 本目录保存外部交互平台适配器。Surface 负责把平台输入转换为 Application 命令，并把 Core 输出和审批交互渲染为平台消息。
 
@@ -64,7 +64,8 @@ Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录�
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。可选 `output.deliverySource` 提供来源引用的捕获、可取消等待和同步复核；引用不能单独授予发送资格。持久 `deliver` 的第四参数可接收共享同步授权守卫，用于最终网络发送前复核。
 普通输出 `handle` 的可选第三参数传递共享会话队列取消信号；QQ 正文流在该队列内等待单帧完成，并将取消传递到来源等待、节流及 HTTP。
-可选 capabilities 分别约束自动绑定恢复、交互、计划任务及配置广播；QQ 明确关闭这些能力，同时允许普通文字输入和共享持久输出，其他渠道缺省行为不变。
+可选 capabilities 分别约束自动绑定恢复、交互、计划任务及配置广播；QQ 启用绑定恢复与交互，关闭计划任务和配置广播，同时允许普通文字输入和共享持久输出，其他渠道缺省行为不变。QQ 交互仍经过 `PersistentInteractionPort` 的前序持久投递屏障，按原用户、工作区和当前请求归属授权，不恢复旧来源或令牌。
+可选 `takeAsyncAnswerSubmission(target, requestId)` 按原目标与请求单次领取异步回答的 `observer/isCurrent/cancel` 及可选 `failed` 通知端口；Bootstrap 将其接入 `ConversationService.submitAsyncAnswer`，提交前及等待后复核，失败取消来源并尝试受控提示。QQ 必须取得该次回答来信的新来源才可提交；确认后保留来源至正常释放，不恢复旧来源，其他渠道未实现此可选端口时沿用原路径。
 每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
 只通过编译期内置插件注册表显式注册。
@@ -92,7 +93,7 @@ Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不
 等待重启、重启中、已生效和失败；Surface 只渲染结果，不得接收原始配置值或异常详情。普通
 生命周期通知可通过可选的 `configurationChanged` 异步入队；`deliverConfigurationChange` 必须等待
 所有目标的平台 API 实际发送成功，失败时抛出错误，以便 Bootstrap 保留尚未确认的持久化配置事件。
-没有通知订阅对象时按空集合完成；QQ 基础接入当前属于此情形，不产生消息发送。
+没有配置通知订阅对象时按空集合完成；QQ 当前属于此情形，不产生配置广播消息。
 全局变更投递给所有 Surface；平台作用域变更只投递给匹配 Surface。进程重启和重装会影响所有
 Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台私有原因的生命周期通知。
 
@@ -266,7 +267,7 @@ Telegram 使用当前页按钮和绑定 Actor 的十分钟一次性 ForceReply�
 Markdown、纯文本布局和发送方式。
 `interaction-copy.ts` 统一审批、用户输入和 MCP 交互的处理、取消、超时、跨客户端解决及提交结果
 语义；平台仍各自使用按钮、卡片或可复制命令完成交互。
-`pending-interaction-registry.ts` 统一三个渠道待处理交互的请求 ID 与一次性令牌索引、容量限制、
+`pending-interaction-registry.ts` 统一四个渠道待处理交互的请求 ID 与一次性令牌索引、容量限制、
 请求级取消信号、准备期失效与立即释放身份及容量、完成清理和超时计时器释放；
 旧请求的迟到清理不能释放同 ID 新请求的占用。平台仍各自负责授权复核、消息准备、输入解析、
 决定映射和结果更新。

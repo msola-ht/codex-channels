@@ -64,6 +64,7 @@ export { canPreserveWeixinHookReviewText } from "./weixin/markdown-sanitize.js";
 export type {
   OperationUpdateDisplay,
   SurfaceAdapter,
+  SurfaceAsyncAnswerSubmission,
   SurfaceConfigurationChange,
   SurfaceOutputPort,
   SurfaceDeliverySource,

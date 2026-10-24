@@ -27,7 +27,9 @@ export class QqTextOutbox {
   /** One complete text, one shared queue operation and receipt. Never retries or changes mode. */
   async deliver(
     input: QqTextMessage,
-    context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; keyboard?: QqCommandKeyboard; allowResultFile?: boolean; reserve?(parts: number): {
+    context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; keyboard?: QqCommandKeyboard; allowResultFile?: boolean;
+      interactionControls?: { content: string; keyboard: QqCommandKeyboard };
+      reserve?(parts: number): {
       runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
     } },
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>,
@@ -43,6 +45,10 @@ export class QqTextOutbox {
     };
     const guard = (): undefined => {
       signal.throwIfAborted();
+      if (context.interactionControls && (input.mode !== "active" || context.representation
+        || context.preferMarkdown || context.keyboard || context.allowResultFile)) {
+        throw new QqProtocolError("message", "invalid-input");
+      }
       if (context.preferMarkdown && (context.representation || context.keyboard || context.allowResultFile)) {
         throw new QqProtocolError("message", "invalid-input");
       }
@@ -85,6 +91,13 @@ export class QqTextOutbox {
         // particularly the two-part completion-notification allowance.
         if (formatted && formatted.length <= parts.length) { parts = formatted; markdown = true; }
       }
+      if (context.interactionControls) {
+        const controls = planText({ ...input, content: context.interactionControls.content });
+        if (controls.length !== 1 || parts.length >= MAX_PARTS) throw new QqProtocolError("message", "invalid-input");
+        // Reserve the entire preview and final controls before the first send.
+        // Only the trusted final panel is Markdown; privileged details stay literal.
+        parts = [...parts, controls[0]!];
+      }
       const first = parts[0]!;
       if (first.mode === "passive") {
         const age = Date.now() - first.sourceTimestampMs;
@@ -101,12 +114,13 @@ export class QqTextOutbox {
           for (const [index, part] of parts.entries()) {
             active.throwIfAborted();
             guard();
+            const controls = index === parts.length - 1 ? context.interactionControls : undefined;
             const send = () => file
               ? this.client.sendResultFile({ recipient: part.recipient, content: part.content }, { signal: active, beforeSend: guard })
-              : markdown
-                ? this.client.sendMarkdown(part, { signal: active, beforeSend: guard }, context.keyboard)
+              : markdown || controls
+                ? this.client.sendMarkdown(part, { signal: active, beforeSend: guard }, controls?.keyboard ?? context.keyboard)
               : this.client.sendText(part, { signal: active, beforeSend: guard });
-            await checkpointDelivery(file ? "qq-result-file" : markdown
+            await checkpointDelivery(file ? "qq-result-file" : controls ? "qq-interaction-controls" : markdown
               ? parts.length === 1 ? "qq-markdown" : `qq-markdown:${index + 1}/${parts.length}`
               : `qq-text:${index + 1}/${parts.length}`,
               () => reservation ? reservation.runPart(active, send) : send(),

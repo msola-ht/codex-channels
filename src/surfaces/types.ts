@@ -1,5 +1,5 @@
 import type { InteractionPort } from "../approval/index.js";
-import type { ScheduledTaskConfirmation } from "../application/index.js";
+import type { ScheduledTaskConfirmation, SubmissionObserver } from "../application/index.js";
 import type {
   ConfigChange,
   OperationUpdateDisplay,
@@ -38,6 +38,14 @@ export interface SurfaceDeliverySource {
   readonly turnId: string;
 }
 
+/** One-time answer submission participation; retain confirmed sources until their normal release. */
+export interface SurfaceAsyncAnswerSubmission {
+  readonly observer: SubmissionObserver;
+  isCurrent(): boolean;
+  cancel(): void;
+  failed?(): Promise<void>;
+}
+
 export interface SurfaceOutputPort {
   deliverySource?: {
     capture(event: OutputEvent): SurfaceDeliverySource | undefined;
@@ -71,6 +79,7 @@ export interface SurfaceAdapter {
   };
   readonly interactions: InteractionPort;
   readonly output: SurfaceOutputPort;
+  takeAsyncAnswerSubmission?(target: ConversationTarget, requestId: string): SurfaceAsyncAnswerSubmission | undefined;
   sendChannelImage?(conversationId: string, imagePath: string): Promise<void>;
   presentScheduledTaskConfirmation?(
     target: ConversationTarget,

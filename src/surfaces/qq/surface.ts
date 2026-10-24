@@ -19,13 +19,15 @@ export interface CreateQqSurfaceOptions extends QqMessageOptions {
 /** Text-only adapter; shares Application and persistent delivery with other Surfaces. */
 export class QqSurface implements SurfaceAdapter {
   readonly surface = "qq";
-  readonly capabilities = { recoverBindings: true, interactions: false, scheduledTasks: false, configurationNotifications: false } as const;
+  readonly capabilities = { recoverBindings: true, interactions: true, scheduledTasks: false, configurationNotifications: false } as const;
   readonly accountId: string;
   readonly interactions: InteractionPort = {
-    request: (_target, request) => Promise.resolve(safeInteractionDecision(request)),
-    resolved: () => {},
-    cancelAll: () => {},
+    request: (target, request) => this.current?.messages.interactions.request(target, request) ?? Promise.resolve(safeInteractionDecision(request)),
+    resolved: id => this.current?.messages.interactions.resolved(id),
+    cancelAll: () => this.current?.messages.interactions.cancelAll(),
   };
+  readonly takeAsyncAnswerSubmission = (target: Parameters<QqMessages["takeAsyncAnswerSubmission"]>[0], requestId: string) =>
+    this.current?.messages.takeAsyncAnswerSubmission(target, requestId);
   readonly output: SurfaceOutputPort = {
     deliverySource: {
       capture: event => this.current?.messages.deliverySource.capture(event),

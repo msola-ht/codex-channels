@@ -88,7 +88,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
   普通 `submit` 第四参数可选提交观察器；已有调用方不传时沿用原路径，显式 steer 必须核对响应 Turn 与预期一致。
   `Submission.steered=false` 仅表示走普通 start-or-steer 请求路径，不能证明新建 Turn；QQ 结果资格还需其独立来源作用域校验。
-  `submitAsyncAnswer` 在同一 Conversation 锁内、发送前校验原 Thread 绑定和问题有效性，再复用普通 start/steer 路径；
+  `submitAsyncAnswer` 在同一 Conversation 锁内、发送前校验原 Thread 绑定和问题有效性，再复用普通 start/steer 路径；可选第五参数透传相同提交观察器并在所有退出路径结算，供 QQ 回答建立精确结果来源，不改写上游协议；
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   普通 `status` 不执行 Git IO，展示入口 `statusForDisplay` 通过组合根注入的异步只读端口取得当前 Workspace Git 分支；完成卡仅调用 `workspaceGitBranch`，不连带查询模型与账户状态；

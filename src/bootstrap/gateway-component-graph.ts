@@ -1260,7 +1260,24 @@ export abstract class GatewayComponentGraph {
           } catch { return false; }
         } };
       },
-      submit: (target, threadId, text, isCurrent) => service.submitAsyncAnswer(target, threadId, text, isCurrent),
+      submit: async (target, threadId, text, isCurrent, requestId) => {
+        const surface = this.surfaces.find(candidate => candidate.surface === target.surface
+          && candidate.accountId === target.accountId);
+        const submission = surface?.takeAsyncAnswerSubmission?.(target, requestId);
+        if (target.surface === "qq" && !submission) {
+          throw new UserFacingError("input.authorization-changed", "回答来源已失效，请重新发送。");
+        }
+        try {
+          return await service.submitAsyncAnswer(target, threadId, text,
+            () => isCurrent() && (submission?.isCurrent() ?? true), submission?.observer);
+        } catch (error) {
+          submission?.cancel();
+          try {
+            await submission?.failed?.();
+          } catch { /* Notification failure must preserve the submission error. */ }
+          throw error;
+        }
+      },
       warn: (event, message) => this.output.publish({
         type: "warning", target: event.target, threadId: event.threadId, message,
       }, true),
