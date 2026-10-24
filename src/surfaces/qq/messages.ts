@@ -116,6 +116,7 @@ export class QqMessages implements SurfaceOutputPort {
       await this.outbox.deliver({ mode: "active", recipient: event.target.conversationId.slice(4), content: text }, {
         signal: AbortSignal.any([signal, this.lifetime.signal]),
         ...(markdown ? { representation: "markdown" as const } : {}),
+        ...(event.type === "turn.completed" ? { preferMarkdown: true } : {}),
         allowResultFile: event.type === "text.completed" && !markdown,
         beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
         reserve: parts => this.budget.reserve(event.target.conversationId.slice(4), parts,
@@ -127,6 +128,7 @@ export class QqMessages implements SurfaceOutputPort {
           await this.outbox.deliver({ mode: "active", recipient: event.target.conversationId.slice(4),
             content: "正文未完整送达或发送结果未确认；这不等于任务执行失败。请在本机 WebUI 投递箱核对，完整内容可在原生 Codex 会话查看。人工重试可能重复已收到的内容。" }, {
             signal: AbortSignal.any([signal, this.lifetime.signal, AbortSignal.timeout(10_000)]),
+            preferMarkdown: true,
             beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
             reserve: parts => this.budget.reserve(event.target.conversationId.slice(4), parts,
               { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: true }),
@@ -158,6 +160,7 @@ export class QqMessages implements SurfaceOutputPort {
         signal.throwIfAborted();
         await this.outbox.deliver({ mode: "active", recipient: actorId, content }, {
           signal,
+          preferMarkdown: true,
           beforeSend: () => { if (!this.current(scope)) throw new Error("QQ 上线通知授权失效"); },
           reserve: parts => this.budget.reserve(actorId, parts, "startup"),
         }, async () => {});
@@ -299,7 +302,7 @@ export class QqMessages implements SurfaceOutputPort {
     }
     this.replied.add(message);
     await this.outbox.deliver(input, {
-      ...(keyboard ? { representation: "markdown", keyboard } : {}),
+      ...(keyboard ? { representation: "markdown", keyboard } : { preferMarkdown: true }),
       signal: this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
       reserve: parts => this.budget.reserve(message.actorId, parts),

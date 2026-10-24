@@ -3,6 +3,7 @@ import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { QQ_TEXT_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT_FILE_BYTES, QqProtocolError, QqTextSendError,
   type QqProtocolClient, type QqTextMessage, type QqTextSendContext, type QqCommandKeyboard } from "./protocol.js";
+import { planQqMessageMarkdown } from "./message-markdown.js";
 
 const MAX_PARTS = 8;
 const PLAN_TIMEOUT_MS = 45_000;
@@ -26,7 +27,7 @@ export class QqTextOutbox {
   /** One complete text, one shared queue operation and receipt. Never retries or changes mode. */
   async deliver(
     input: QqTextMessage,
-    context: QqTextSendContext & { representation?: "markdown"; keyboard?: QqCommandKeyboard; allowResultFile?: boolean; reserve?(parts: number): {
+    context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; keyboard?: QqCommandKeyboard; allowResultFile?: boolean; reserve?(parts: number): {
       runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
     } },
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>,
@@ -42,6 +43,9 @@ export class QqTextOutbox {
     };
     const guard = (): undefined => {
       signal.throwIfAborted();
+      if (context.preferMarkdown && (context.representation || context.keyboard || context.allowResultFile)) {
+        throw new QqProtocolError("message", "invalid-input");
+      }
       checkTime();
       try {
         const result: unknown = beforeSend();
@@ -64,6 +68,7 @@ export class QqTextOutbox {
         throw new QqProtocolError("message", "invalid-input");
       }
       let file = false;
+      let markdown = context.representation === "markdown";
       let parts: readonly QqTextMessage[];
       try { parts = planText(input); }
       catch (error) {
@@ -73,6 +78,12 @@ export class QqTextOutbox {
           || input.content.length > QQ_RESULT_FILE_BYTES || Buffer.byteLength(input.content) > QQ_RESULT_FILE_BYTES) throw error;
         file = true;
         parts = [{ ...input }];
+      }
+      if (context.preferMarkdown) {
+        const formatted = planQqMessageMarkdown(input);
+        // Rendering must not require more quota than the existing text plan,
+        // particularly the two-part completion-notification allowance.
+        if (formatted && formatted.length <= parts.length) { parts = formatted; markdown = true; }
       }
       const first = parts[0]!;
       if (first.mode === "passive") {
@@ -92,10 +103,12 @@ export class QqTextOutbox {
             guard();
             const send = () => file
               ? this.client.sendResultFile({ recipient: part.recipient, content: part.content }, { signal: active, beforeSend: guard })
-              : context.representation === "markdown"
+              : markdown
                 ? this.client.sendMarkdown(part, { signal: active, beforeSend: guard }, context.keyboard)
               : this.client.sendText(part, { signal: active, beforeSend: guard });
-            await checkpointDelivery(file ? "qq-result-file" : context.representation === "markdown" ? "qq-markdown" : `qq-text:${index + 1}/${parts.length}`,
+            await checkpointDelivery(file ? "qq-result-file" : markdown
+              ? parts.length === 1 ? "qq-markdown" : `qq-markdown:${index + 1}/${parts.length}`
+              : `qq-text:${index + 1}/${parts.length}`,
               () => reservation ? reservation.runPart(active, send) : send(),
               error => error instanceof QqTextSendError && error.outcome === "rejected");
           }
