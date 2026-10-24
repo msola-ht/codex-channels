@@ -1,5 +1,6 @@
 import type { Agent } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
+import { join } from "node:path";
 import type { Logger } from "pino";
 import { safeInteractionDecision, type InteractionPort } from "../../approval/index.js";
 import { isConversationCommandName, type ConversationCommandExecutor, type ConversationTurnUseCases, type Submission } from "../../application/index.js";
@@ -11,6 +12,8 @@ import { isEmergencyStopCommand, parseSlashCommand } from "../slash-command.js";
 import { AttachmentInputLifecycle, type ReceivedAttachmentInput } from "../attachment-input-lifecycle.js";
 import { SurfaceInputBatcher, imageBatchLimitError } from "../surface-input-batcher.js";
 import type { StoredManagedImage } from "../managed-image-store.js";
+import type { StoredManagedAudio } from "../managed-audio-store.js";
+import { videoAttachmentBody, type PreparedVideoAttachment } from "../video-attachment-store.js";
 import type { SurfaceAdapter, SurfaceOutputPort } from "../types.js";
 import { createQqLedger } from "./ledger.js";
 import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, maximumQqImageBytes, type QqMessageBody } from "./protocol.js";
@@ -19,7 +22,10 @@ import { generatedImageUnavailableText } from "../operation-presentation.js";
 import { planQqDelivery, planQqMessage, qqCommandNames, qqHelp, QqConfirmationPreviewError, renderQqCommandResult, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 import { QqInteractionDeliveryError, QqInteractionPort } from "./interactions.js";
-import { QqImageStore, isSupportedQqImageUrl, type QqImageReference } from "./image-store.js";
+import { QqImageStore, type QqImageReference } from "./image-store.js";
+import { QqAudioStore, type QqAudioReference } from "./audio-store.js";
+import { QqVideoStore, type QqVideoReference } from "./video-store.js";
+import { isSupportedQqAttachmentUrl } from "./media-download.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { decodeQqReference } from "./quoted-reference.js";
 
@@ -35,6 +41,7 @@ export interface CreateQqSurfaceOptions {
   appSecret: string;
   directory: string;
   uploadsDirectory: string;
+  videoDirectory: string;
   createNetwork(): QqNetwork;
   access: SurfaceAccessPolicy;
   actors: ConversationActorRegistry;
@@ -109,6 +116,8 @@ class QqGeneration implements SurfaceAdapter {
   private readonly ledger: ReturnType<typeof createQqLedger>;
   private readonly queue: ConversationDeliveryQueue;
   private readonly images: QqImageStore;
+  private readonly audios: QqAudioStore;
+  private readonly videos: QqVideoStore;
   private readonly attachmentInputs = new AttachmentInputLifecycle();
   private readonly controller = new AbortController();
   private readonly pending = new Map<string, Set<Promise<Submission>>>();
@@ -124,6 +133,10 @@ class QqGeneration implements SurfaceAdapter {
     this.network = options.createNetwork();
     this.images = new QqImageStore(options.uploadsDirectory, this.network.fetchImpl,
       () => options.logger.warn({ reason: "qq-image-cleanup-failed" }, "QQ 图片暂存清理失败"));
+    this.audios = new QqAudioStore(join(options.uploadsDirectory, "audio"), this.network.fetchImpl,
+      () => options.logger.warn({ reason: "qq-audio-cleanup-failed" }, "QQ 音频暂存清理失败"));
+    this.videos = new QqVideoStore(options.videoDirectory, this.network.fetchImpl,
+      () => options.logger.warn({ reason: "qq-video-cleanup-failed" }, "QQ 视频暂存清理失败"));
     this.client = new QqProtocolClient({ appId: options.appId, appSecret: options.appSecret, fetchImpl: this.network.fetchImpl });
     this.ledger = createQqLedger(options.directory, options.appId, () => this.fatal(new Error("QQ 传输登记不可用")));
     this.queue = new ConversationDeliveryQueue(options.logger, { component: "qq", capacity: 32, maximumPendingOperations: 256, errorMetadata: () => ({ reason: "qq-delivery-failed" }) });
@@ -187,6 +200,8 @@ class QqGeneration implements SurfaceAdapter {
     this.controller.signal.throwIfAborted();
     await this.ledger.open();
     await this.images.start();
+    await this.audios.start();
+    await this.videos.start();
     if (this.ledger.unconfirmedCount > 0) this.options.logger.warn({
       reason: "qq-unconfirmed-input", count: this.ledger.unconfirmedCount,
     }, "QQ 保留了未确认输入登记，请核对原生会话；不会自动重新执行");
@@ -203,9 +218,11 @@ class QqGeneration implements SurfaceAdapter {
     for (const input of this.inputTails.values()) input.cancellation.abort();
     this.attachmentInputs.close();
     this.images.close();
+    this.audios.close();
     this.client.close();
     const results = await Promise.allSettled([
       this.transport.stop(), this.queue.close(), waitBounded(this.interactions.close(), undefined, 5_000),
+      waitBounded(this.videos.close(), undefined, 5_000),
       waitBounded(Promise.allSettled([...this.jobs]).then(() => this.ledger.close()), undefined, 5_000),
       waitBounded(this.network.close(), undefined, 5_000),
     ]);
@@ -232,17 +249,18 @@ class QqGeneration implements SurfaceAdapter {
     this.controller.signal.throwIfAborted();
     this.options.actors.rememberActor(target, message.actor);
     const allowed = (): boolean => this.allowed(target, message.actor);
-    const receipt = message.supported && message.images.length > 0
-      ? this.attachmentInputs.receive(target, allowed, "image",
-        () => this.options.service.prepareAttachmentSubmission?.(target, allowed, "image")) : undefined;
-    const stop = message.supported && message.images.length === 0 && isEmergencyStopCommand(message.text)
+    const mediaKind = message.supported ? message.audio ? "audio" : message.video ? "video" : message.images.length > 0 ? "image" : undefined : undefined;
+    const receipt = mediaKind
+      ? this.attachmentInputs.receive(target, allowed, mediaKind,
+        () => this.options.service.prepareAttachmentSubmission?.(target, allowed, mediaKind)) : undefined;
+    const stop = message.supported && !mediaKind && isEmergencyStopCommand(message.text)
       ? this.attachmentInputs.receiveStop(target) : undefined;
     const previousInput = this.inputTails.get(target.conversationId);
     const cancelledInputs = !!stop && (stop.cancelled || !!previousInput && !previousInput.cancellation.signal.aborted);
     if (stop) previousInput?.cancellation.abort();
     // Commands and interaction replies bypass slow media preparation; ordinary
     // messages retain receipt order, including the first Thread's creation.
-    const ordinary = message.supported && (message.images.length > 0 || !message.text.trim().startsWith("/"));
+    const ordinary = message.supported && (mediaKind !== undefined || !message.text.trim().startsWith("/"));
     const inputCancellation = ordinary
       ? previousInput && !previousInput.cancellation.signal.aborted ? previousInput.cancellation : new AbortController()
       : undefined;
@@ -277,10 +295,15 @@ class QqGeneration implements SurfaceAdapter {
     cancelledInputs = false, inputSignal?: AbortSignal): Promise<void> {
     if (!this.allowed(target, message.actor)) throw new Error("QQ 输入已取消");
     if (!message.supported) {
-      await this.notify(target, message.actor, message.id, "QQ 当前支持默认聊天中的文字、PNG、JPEG、非动画 GIF 图片及原生引用上下文；不受支持的附件、地址、消息类型或引用结构未提交。");
+      await this.notify(target, message.actor, message.id, "QQ 当前支持默认聊天中的文字、PNG/JPEG/非动画 GIF 图片、带可信 WAV 的 PCM 语音、单个 MP4 视频及原生引用上下文；混合媒体、不受支持的附件、地址、消息类型或引用结构未提交。");
       return;
     }
     this.observeMilestone("first-input", "QQ 本运行代次首条授权完整输入已接收；尚不代表已提交模型");
+    if (message.audio || message.video) {
+      if (!receipt) throw new UserFacingError(message.audio ? "audio.unavailable" : "video.unavailable", "QQ 附件输入不可用，当前消息未提交。");
+      await this.submitMedia(target, message, receipt);
+      return;
+    }
     if (message.images.length > 0) {
       if (!receipt) throw new UserFacingError("image.unavailable", "QQ 图片输入不可用，当前消息未提交。");
       await this.submitImages(target, message, receipt);
@@ -318,6 +341,49 @@ class QqGeneration implements SurfaceAdapter {
     }
     await this.submit(target, message, () => this.options.service.submit(target, formatQuotedInput(message.text, message.quotedText),
       () => !inputSignal?.aborted && this.allowed(target, message.actor)));
+  }
+  private async submitMedia(target: ConversationTarget, message: Inbound, receipt: ReceivedAttachmentInput): Promise<Submission> {
+    const scope = await receipt.prepare();
+    let audio: StoredManagedAudio | undefined;
+    let video: PreparedVideoAttachment | undefined;
+    let submitted = false;
+    const kind = message.audio ? "audio" : "video";
+    const current = (): void => {
+      scope.signal.throwIfAborted();
+      if (!this.allowed(target, message.actor)) throw new UserFacingError(`${kind}.unavailable`, "QQ 附件输入授权已失效，当前消息未提交。");
+    };
+    try {
+      current();
+      scope.captureTarget();
+      let result: Submission;
+      if (message.audio) {
+        audio = await this.audios.download(message.audio, scope.signal, current);
+        current();
+        const text = formatQuotedInput(message.text.trim() ? message.text : "请听取这段语音并根据内容协助我。", message.quotedText);
+        result = await this.submit(target, message, () => scope.submit({ text, localAudios: [{ path: audio!.path }] }));
+      } else if (message.video) {
+        video = await this.videos.download(message.video, { target, actorId: message.actor }, scope.signal, current);
+        current();
+        const text = formatQuotedInput([
+          ...(message.text.trim() ? ["用户说明：", message.text, ""] : []), videoAttachmentBody(video),
+        ].join("\n"), message.quotedText);
+        result = await this.submit(target, message, () => scope.submit(text));
+      } else throw new Error("QQ 附件类型缺失");
+      submitted = true;
+      return result;
+    } catch (error) {
+      if (scope.signal.aborted && !scope.mayHaveSubmitted) {
+        throw new UserFacingError(`${kind}.unavailable`, "QQ 附件输入已取消或超时，当前消息未提交。");
+      }
+      throw error;
+    } finally {
+      // Paths may already be referenced by App Server even when its acknowledgment was lost.
+      if (video) {
+        if (submitted || scope.mayHaveSubmitted) this.videos.retain(video);
+        else await this.videos.discard(video);
+      }
+      if (audio && !submitted && !scope.mayHaveSubmitted) await this.audios.discard(audio);
+    }
   }
   private async submitImages(target: ConversationTarget, message: Inbound, receipt: ReceivedAttachmentInput): Promise<Submission> {
     const scope = await receipt.prepare();
@@ -531,7 +597,10 @@ class QqGeneration implements SurfaceAdapter {
   }
 }
 
-interface Inbound { id: string; msgId: string; actor: string; createdAt: number; text: string; quotedText?: string; images: QqImageReference[]; supported: boolean }
+interface Inbound {
+  id: string; msgId: string; actor: string; createdAt: number; text: string; quotedText?: string;
+  images: QqImageReference[]; audio?: QqAudioReference; video?: QqVideoReference; supported: boolean;
+}
 function decodeMessage(value: unknown): Inbound {
   if (!record(value) || !record(value.author) || !identifier(value.id) || !identifier(value.author.user_openid)
     || typeof value.timestamp !== "string"
@@ -545,27 +614,38 @@ function decodeMessage(value: unknown): Inbound {
   if (indexes.length !== 1 || !identifier(indexes[0]!.slice(8))) throw new Error("QQ 消息去重身份缺失");
   const text = typeof value.content === "string" ? value.content : "";
   const images: QqImageReference[] = [];
+  let audio: QqAudioReference | undefined;
+  let video: QqVideoReference | undefined;
   let supportedAttachments = value.attachments === undefined;
   if (Array.isArray(value.attachments) && value.attachments.length <= 4) {
     supportedAttachments = true;
     for (const attachment of value.attachments) {
-      if (!record(attachment) || typeof attachment.url !== "string" || !isSupportedQqImageUrl(attachment.url)
-        || (attachment.content_type !== "image/png" && attachment.content_type !== "image/jpeg" && attachment.content_type !== "image/gif")
-        || (attachment.size !== undefined && (!Number.isSafeInteger(attachment.size) || Number(attachment.size) <= 0))
-        || attachment.voice_wav_url !== undefined || attachment.asr_refer_text !== undefined) {
+      if (!record(attachment) || typeof attachment.url !== "string"
+        || (attachment.size !== undefined && (!Number.isSafeInteger(attachment.size) || Number(attachment.size) <= 0))) {
         supportedAttachments = false;
         break;
       }
-      images.push({ url: attachment.url, mimeType: attachment.content_type,
-        ...(attachment.size === undefined ? {} : { size: attachment.size as number }) });
+      if (attachment.content_type === "voice" && value.attachments.length === 1
+        && typeof attachment.voice_wav_url === "string" && isSupportedQqAttachmentUrl(attachment.voice_wav_url)
+        && (attachment.asr_refer_text === undefined || typeof attachment.asr_refer_text === "string")) {
+        audio = { wavUrl: attachment.voice_wav_url };
+      } else if (attachment.content_type === "video/mp4" && value.attachments.length === 1
+        && isSupportedQqAttachmentUrl(attachment.url) && attachment.voice_wav_url === undefined && attachment.asr_refer_text === undefined) {
+        video = { url: attachment.url, ...(attachment.size === undefined ? {} : { size: attachment.size as number }) };
+      } else if ((attachment.content_type === "image/png" || attachment.content_type === "image/jpeg" || attachment.content_type === "image/gif")
+        && isSupportedQqAttachmentUrl(attachment.url) && attachment.voice_wav_url === undefined && attachment.asr_refer_text === undefined) {
+        images.push({ url: attachment.url, mimeType: attachment.content_type,
+          ...(attachment.size === undefined ? {} : { size: attachment.size as number }) });
+      } else { supportedAttachments = false; break; }
     }
   }
   const reference = decodeQqReference(value, extensions, indexes[0]!.slice(8));
   const id = createHash("sha256").update(JSON.stringify([value.id, value.author.user_openid, indexes[0]])).digest("hex");
   return { id, msgId: value.id, actor: value.author.user_openid, createdAt: Date.parse(value.timestamp), text, images,
+    ...(audio === undefined ? {} : { audio }), ...(video === undefined ? {} : { video }),
     ...(reference.supported && reference.quotedText !== undefined ? { quotedText: reference.quotedText } : {}),
     supported: typeof value.content === "string"
-      && (text.trim().length > 0 || images.length > 0) && Buffer.byteLength(text, "utf8") <= 32_000
+      && (text.trim().length > 0 || images.length > 0 || audio !== undefined || video !== undefined) && Buffer.byteLength(text, "utf8") <= 32_000
       && supportedAttachments
       && reference.supported };
 }

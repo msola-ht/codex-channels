@@ -141,6 +141,7 @@ function createQqModule(
     appId: config.appId, appSecret: config.appSecret,
     directory: join(options.config.credentialsDirectory, "qq-transport"),
     uploadsDirectory: join(dirname(options.config.stateDatabasePath), "uploads", "qq"),
+    videoDirectory: join(dirname(options.config.stateDatabasePath), "uploads", "video"),
     createNetwork: () => createQqNetwork(options.config.networkProxy),
     access, actors: options.bindings,
     service: options.service, commands: options.commands, logger: options.logger,

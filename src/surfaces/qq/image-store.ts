@@ -3,23 +3,12 @@ import { Readable } from "node:stream";
 import type { ReadableStream } from "node:stream/web";
 import { UserFacingError } from "../../conversation-core/index.js";
 import { ManagedImageStore, maximumManagedImageBytes, type StoredManagedImage } from "../managed-image-store.js";
+import { isSupportedQqAttachmentUrl } from "./media-download.js";
 
 export interface QqImageReference {
   url: string;
   mimeType: "image/png" | "image/jpeg" | "image/gif";
   size?: number;
-}
-
-/** Only the HTTPS download endpoint present in the locked official attachment examples. */
-export function isSupportedQqImageUrl(value: string): boolean {
-  if (value.length > 8192 || /[\s\\]/u.test(value)
-    || [...value].some(character => { const code = character.codePointAt(0)!; return code < 32 || code >= 127 && code <= 159; })) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "multimedia.nt.qq.com.cn"
-      && url.port === "" && url.username === "" && url.password === ""
-      && url.pathname === "/download" && url.hash === "";
-  } catch { return false; }
 }
 
 /** Platform transfer only; shared storage verifies private files, signatures and byte limits. */
@@ -33,7 +22,7 @@ export class QqImageStore {
   close(): void { this.storage.close(); }
 
   async download(reference: QqImageReference, signal: AbortSignal, beforeDownload: () => void): Promise<StoredManagedImage> {
-    if (!isSupportedQqImageUrl(reference.url)) {
+    if (!isSupportedQqAttachmentUrl(reference.url)) {
       throw new UserFacingError("image.unsupported", "QQ 图片下载地址不受支持，当前消息未提交。");
     }
     if (reference.size !== undefined && reference.size > maximumManagedImageBytes) {

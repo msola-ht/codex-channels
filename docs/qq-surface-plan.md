@@ -674,7 +674,7 @@ P0 只做即将实施能力的核定，不要求先发送所有类型；每一�
 | 共享命令提交关联 | review/plan/skill/plugin/agents 的列表、详情、调用及结果 | 已本地实现并完成独立复审；共享命令保留完整 Submission，QQ 在命令提交期间关联原来信，不从当前 status 猜 Thread；steer 不更新原 Grant，真实 QQ 待验收 |
 | 其余共享管理命令 | autoreview/compact/revert/release/mcp/hooks/limits 的查询与操作 | 已本地实现并完成独立复审修复；完整预览、确认和回复守卫复用现有用例，QQ 确认预览必须单条完整显示 |
 | 完整输出与素材 | 长结果文件交付、正文 Markdown 素材、显式发图归属 | 完整长结果文件已本地实现并完成独立复审；素材与显式发图待实施，普通 file_info 与 Markdown 素材生命周期分开 |
-| 音视频输入 | 既有音频模型能力、视频 MCP、私有暂存及停止 | 依赖前述媒体输入边界；不新增转码或直接模型视频语义 |
+| 音视频输入 | 既有音频模型能力、视频 MCP、私有暂存及停止 | 已本地实现受限 PCM WAV 和单 MP4并完成独立复审；不新增转码或直接模型视频语义，真实 QQ 待验收 |
 | 流式与后台结果 | 增量/终态确认、窗口与额度、恢复；计划任务与通知的发送依据 | 条件性批次；先核定流式计次和完整性、后台发送授权及拒收合同，不能借最新来信或放宽主动发送作为兜底 |
 
 各批之间的源码依赖完成后再开始下一批写入；可并行只读调查独立门槛。无法从当前合同建立的能力应记录具体缺口和下一步，
@@ -694,7 +694,7 @@ QQ 单聊附件页中 `file` 仍标为群文件，不能据此开放任意单聊
 语音时长可在后续批次从严格核验的 PCM WAV 数据帧计算，不能从文件总大小推算；初步范围为单/双声道、8/16 位整数 PCM，
 核对 RIFF/chunk 长度与补齐、唯一 fmt/data、采样率、帧对齐和实际数据长度，拒绝压缩或不明格式，不引入转码。
 依据为 Microsoft 的 [WAVEFORMATEX](https://learn.microsoft.com/en-us/windows/win32/api/mmreg/ns-mmreg-waveformatex)
-和 [RIFF 结构](https://learn.microsoft.com/en-us/windows/win32/xaudio2/resource-interchange-file-format--riff-)；此处是实施设计，尚未表示音频已接入。
+和 [RIFF 结构](https://learn.microsoft.com/en-us/windows/win32/xaudio2/resource-interchange-file-format--riff-)；当前实现及观察见下方音视频批次。
 这些门槛应逐批解决或明确保留未开放，不把共享能力或官方字段存在等同于可用链路。
 
 1. 每批实施先确定飞书/TG 的对应责任模块与共享合同，再列 QQ 平台差异、输入到最终消费的路径及所需上游核验。
@@ -1108,6 +1108,29 @@ Astra 独立复审覆盖解码、顶层身份、命令分流、附件提交、Ap
 其直接运行补充确认：引用中的伪造作者、内网 URL、文件名和 auth_token 不进入提交；31997 UTF-8 字节 emoji 引用接受，
 8000 码点展示边界保留完整 emoji；重复索引、孤立 surrogate、五层结构及截断后隐藏非法类型均拒绝。
 未连接真实 QQ 或模型，客户端引用形状与实际上下文效果仍待验收；跨模块模型能力及最终 RPC 守卫结论来自源码追踪。
+
+## 共享音视频输入
+
+接续 `5ee7aa6c`，语音复用 ManagedAudioStore、附件取消作用域和 localAudio 模型能力；视频复用 VideoAttachmentStore、共享附件提示及视频 MCP。
+QQ 只接单 voice 的可信 voice_wav_url 或单 video/mp4，允许附文字/引用，多音视频或与独立图片混合整条拒绝。
+WAV 校验 RIFF/分块长度、唯一顺序 fmt/data、整数 PCM 单/双声道 8/16 位、帧对齐及最多五分钟/20 MiB；其他分块和扩展格式明确拒绝。
+不使用原 SILK URL/size 或 ASR 推定 WAV 内容/时长。MP4 沿共享 64 MiB/24 小时/八文件限制，声明长度与实收相符；容器签名不保证服务能解码。
+图片 URL 约束抽到共用模块，保持原合同；视频 namespace 同时贯通 store 与 MCP 消费者，组合根注入既有 uploads/video 根。
+
+主代理隔离 TLS Surface、Ledger、媒体 store 与替代业务端口观察：音频、视频各一次下载/提交，后续回复使用原 msg_id；
+单 MP4 随机引用再交实际 MCP client，向本地替代 Strata HTTP 请求发送完整 2215 字节视频并取得受控替代结果。视频为本机生成的一秒纯色 MP4，不是实际模型分析。
+混合、缺 WAV、内网 WAV、双音频均零下载/提交；重定向及非法音频内容拒绝，音频说明 `/stop` 未执行命令。
+确定未提交时音视频各零新增保留文件；模拟 RPC 回执丢失时各保留一个文件。慢音频独立 stop 和慢视频关闭均零提交且文件数不增，fatal 为零、连接清空、监听关闭。
+自审修正 WAV ASCII 高位字符可能误识别块名，以及共享错误文案误称 QQ 支持 MP3/WebM 等格式的问题。
+关联修复共享视频容器识别的同类高位误判：ftyp、主品牌及兼容品牌精确比较；实际共享 Store 接受原合法 MP4/WebM 头，三类高位伪造均拒绝且无残留。
+实施代理实际音频下载/暂存观察接受 PCM16 单声道、双声道 fmt18、PCM8 奇数 padding 及恰好 300 秒；301 秒、坏长度、未知块、非法 PCM 参数和高位伪造块名均拒绝。
+302/500、负或超限 Content-Length、实收长度矛盾均受控失败；内网 URL 零 fetch，取消后迟到响应 body 被取消且无文件。
+真实 ConversationService 与 ModelSelectionService 配替代目录/路由/RPC 观察：模型不支持 audio、捕获后换 Thread、撤权、未捕获目标，均在 RPC 前拒绝且 mayHaveSubmitted=false。
+Astra 独立审查覆盖官方输入、共享提交与模型能力、文件生命周期、原 Grant、取消关闭、视频 MCP 最终消费及其他渠道共同容器校验，未发现需追加源码修复的缺陷。
+其实际 QqVideoStore 观察同 Actor retain 后复用引用、另一 Actor 不同引用、discard 复用句柄不删除原文件；错误 Content-Length 拒绝并保留原有效文件。
+实际 QqAudioStore 接受正常 PCM，拒绝高位 fmt 且无残留；四次下载均 manual/omit、无 headers。帮助实际规划为两条 Markdown，2908/2002 UTF-8 字节。
+复审指出的模块/组合根渠道数量与旧未开放文案已同步修正。
+上述隔离业务端口不证明真实 App Server/模型端到端消费成功；真实 QQ 附件、音频模型目录、Strata 分析和客户端结果仍待验收。
 
 ## 独立复审记录
 
