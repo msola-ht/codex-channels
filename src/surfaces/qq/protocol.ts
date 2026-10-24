@@ -28,6 +28,18 @@ export interface QqTextSendContext {
   beforeSend: () => undefined;
 }
 
+/** One passive replace stream; sequence and source stay fixed across frames. */
+export interface QqStreamFrame {
+  recipient: string;
+  messageId: string;
+  sourceTimestampMs: number;
+  content: string;
+  index: number;
+  streamId?: string;
+  finished: boolean;
+}
+export const QQ_STREAM_BYTES = 16_000;
+
 export type QqTextRejection = "permission" | "refused" | "expired" | "reply-window-or-limit"
   | "rate-limit" | "duplicate" | "length" | "format" | "content" | "unavailable";
 export type QqTextOutcome = "not-sent" | "rejected" | "unknown";
@@ -161,9 +173,37 @@ export class QqProtocolClient {
 
   /** No retries, mode fallback, splitting, task submission or delivery checkpoint side effects. */
   async sendText(input: QqTextMessage, context: QqTextSendContext): Promise<{ messageId: string }> {
+    return this.sendPlan(() => textRequest(input), context);
+  }
+
+  async sendStream(input: QqStreamFrame, context: QqTextSendContext): Promise<{ messageId: string }> {
+    return this.sendPlan(() => {
+      if (!record(input) || !identifier(input.recipient) || !identifier(input.messageId)
+        || typeof input.content !== "string" || !input.content.trim() || !wellFormed(input.content)
+        || input.content.length > QQ_STREAM_BYTES || Buffer.byteLength(input.content) > QQ_STREAM_BYTES
+        || !Number.isSafeInteger(input.index) || input.index < 0 || input.index > 120
+        || typeof input.finished !== "boolean"
+        || (input.index === 0 ? input.streamId !== undefined : !identifier(input.streamId))
+        || Object.keys(input).some(key => !["recipient", "messageId", "sourceTimestampMs", "content", "index", "streamId", "finished"].includes(key))) {
+        throw new QqProtocolError("message", "invalid-input");
+      }
+      const age = Date.now() - input.sourceTimestampMs;
+      if (!Number.isSafeInteger(input.sourceTimestampMs) || input.sourceTimestampMs < 0 || age < 0) {
+        throw new QqProtocolError("message", "invalid-input");
+      }
+      if (age >= QQ_PASSIVE_WINDOW_MS) throw new QqProtocolError("message", "expired");
+      return { path: `/v2/users/${encodeURIComponent(input.recipient)}/stream_messages`,
+        body: { input_mode: "replace", content_type: "text", content_raw: input.content,
+          input_state: input.finished ? 10 : 1, index: input.index, msg_id: input.messageId, msg_seq: 2,
+          ...(input.streamId ? { stream_msg_id: input.streamId } : {}) },
+        deadline: performance.now() + QQ_PASSIVE_WINDOW_MS - age };
+    }, context);
+  }
+
+  private async sendPlan(makePlan: () => { path: string; body: Record<string, unknown>; deadline?: number }, context: QqTextSendContext): Promise<{ messageId: string }> {
     let attempted = false;
     try {
-      const plan = textRequest(input);
+      const plan = makePlan();
       if (!context || !(context.signal instanceof AbortSignal) || typeof context.beforeSend !== "function") {
         throw new QqProtocolError("message", "invalid-input");
       }

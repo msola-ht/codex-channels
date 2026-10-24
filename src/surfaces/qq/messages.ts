@@ -15,6 +15,7 @@ import { QqTextOutbox } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
 import type { QqProtocolClient } from "./protocol.js";
 import { renderQqTurnCompleted } from "./lifecycle.js";
+import { QqBodyStreaming } from "./streaming.js";
 
 export interface QqMessageOptions {
   appId: string;
@@ -43,6 +44,7 @@ export class QqMessages implements SurfaceOutputPort {
   private readonly tasks = new Set<Promise<void>>();
   private readonly sources: QqTaskSources;
   private readonly outbox: QqTextOutbox;
+  private readonly streaming: QqBodyStreaming;
   private readonly budget = new QqSendBudget();
   private readonly admitted = new WeakMap<OutputEvent, QqTaskSourceReference>();
   private readonly replied = new WeakSet<QqInboundTextMessage>();
@@ -50,6 +52,9 @@ export class QqMessages implements SurfaceOutputPort {
   constructor(private readonly options: QqMessageOptions, client: QqProtocolClient) {
     this.sources = new QqTaskSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.current(scope, threadId) });
     this.outbox = new QqTextOutbox(client, options.logger);
+    this.streaming = new QqBodyStreaming(client, this.sources, this.budget,
+      () => options.logger.warn({ reason: "body-stream-unconfirmed" }, "QQ 正文流未确认；最终正文仍由共享投递核对"),
+      frames => options.logger.info({ frames }, "QQ 正文流结束帧与完整结果已确认"));
   }
 
   readonly deliverySource = {
@@ -59,21 +64,26 @@ export class QqMessages implements SurfaceOutputPort {
   };
 
   admitLive(event: OutputEvent): void {
-    if (!this.supported(event) || !("threadId" in event) || !("turnId" in event)) return;
+    if (event.target.surface !== "qq" || event.target.accountId !== this.options.appId) return;
+    if ((!this.supported(event) && event.type !== "turn.started") || !("threadId" in event) || !("turnId" in event)) return;
     const source = this.sources.capture(event.target, event.threadId, event.turnId);
     if (source) this.admitted.set(event, source);
   }
   observe(event: OutputEvent): void {
     const source = this.admitted.get(event);
+    if (source && event.type === "turn.started") this.streaming.started(source);
+    if (event.type === "text.delta" || event.type === "text.completed") this.streaming.observe(event, source);
     if (source && event.type === "turn.completed") this.sources.terminal(source);
   }
-  retains(event: OutputEvent): boolean { return this.supported(event) && this.admitted.has(event); }
-  handle(event: OutputEvent): void {
+  retains(event: OutputEvent): boolean { return event.type !== "text.delta" && this.supported(event) && this.admitted.has(event); }
+  async handle(event: OutputEvent, _context?: { liveAdmitted: true }, signal?: AbortSignal): Promise<void> {
+    if (event.type === "text.delta") { if (this.admitted.has(event)) await this.streaming.update(event, signal); return; }
     if (this.supported(event)) throw new Error("QQ 任务结果必须通过共享持久投递");
   }
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void> {
     if (!this.supported(event) || !authorized) throw new Error("QQ 输出未获授权");
     if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
+    if (event.type === "text.completed" && await this.streaming.finish(event, signal, checkpoint, authorized)) return;
     const text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.autoCompactPercent);
     await this.outbox.deliver({ mode: "active", recipient: event.target.conversationId.slice(4), content: text }, {
       signal: AbortSignal.any([signal, this.lifetime.signal]),
@@ -224,7 +234,7 @@ export class QqMessages implements SurfaceOutputPort {
   }
   async close(): Promise<void> {
     this.lifetime.abort(); this.sources.close();
-    await this.outbox.close();
+    await Promise.all([this.streaming.close(), this.outbox.close()]);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([Promise.allSettled(this.tasks), new Promise<never>((_resolve, reject) => {

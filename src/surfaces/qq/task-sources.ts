@@ -175,6 +175,14 @@ export class QqTaskSources {
     return current && !this.closed && !entry.controller.signal.aborted && entry.source === source;
   }
 
+  /** Original inbound anchor only, never a newer message or renewed reply window. */
+  streamSource(reference: QqTaskSourceReference): { messageId: string; sourceTimestampMs: number; signal: AbortSignal } | undefined {
+    if (!this.isCurrent(reference)) return undefined;
+    const entry = this.resolve(reference)!;
+    return { messageId: entry.message.id, sourceTimestampMs: entry.message.sentAtMs,
+      signal: AbortSignal.any([entry.controller.signal, entry.source!.controller.signal]) };
+  }
+
   async awaitSource(reference: QqTaskSourceReference, signal: AbortSignal): Promise<boolean> {
     if (signal.aborted) return false;
     const captured = Object.freeze({ ...reference });

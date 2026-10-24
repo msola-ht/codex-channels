@@ -853,7 +853,7 @@ export class SurfaceManager {
     const runtime = this.requireRuntime(surface);
     const enqueuedAt = performance.now();
     const coalesceKey = this.outputCoalescer.key(event);
-    runtime.delivery.enqueue(event.target.conversationId, async () => {
+    runtime.delivery.enqueue(event.target.conversationId, async (signal) => {
       const started = performance.now();
       if (!this.active.has(surface)) {
         if (!this.stopping && decision.critical) {
@@ -861,7 +861,7 @@ export class SurfaceManager {
         }
         return;
       }
-      await this.deliverOne(surface, event, order);
+      await this.deliverOne(surface, event, order, signal);
       const fields = {
         surface: surface.surface, accountId: surface.accountId,
         conversationId: event.target.conversationId, eventType: event.type,
@@ -883,6 +883,7 @@ export class SurfaceManager {
     surface: SurfaceAdapter,
     event: OutputEvent,
     order: number,
+    signal: AbortSignal,
   ): Promise<void> {
     const routedEvent = await this.enrichSafely(event);
     if (!this.acceptingOutput) return;
@@ -894,7 +895,7 @@ export class SurfaceManager {
       return;
     }
     try {
-      await surface.output.handle(routedEvent, this.liveOutput.get(event));
+      await surface.output.handle(routedEvent, this.liveOutput.get(event), signal);
       if (routedEvent.type !== "text.delta") {
         this.logger.debug(
           {

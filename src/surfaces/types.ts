@@ -50,7 +50,7 @@ export interface SurfaceOutputPort {
   observe?(event: OutputEvent): void;
   retains?(event: OutputEvent): boolean;
   /** Successful live admission also applies to enriched copies; handle still owns ordinary lifecycle observation. */
-  handle(event: OutputEvent, context?: { liveAdmitted: true }): Promise<void> | void;
+  handle(event: OutputEvent, context?: { liveAdmitted: true }, signal?: AbortSignal): Promise<void> | void;
   /** Settle actual transient operations (including intentional no-op); validate ownership before sending. */
   deliverSnapshot?(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void>;
   deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void>;
