@@ -144,6 +144,7 @@ function createQqModule(
     videoDirectory: join(dirname(options.config.stateDatabasePath), "uploads", "video"),
     createNetwork: () => createQqNetwork(options.config.networkProxy),
     access, actors: options.bindings,
+    captureLiveOutputAuthorization: event => options.captureLiveOutputAuthorization(event),
     service: options.service, commands: options.commands, logger: options.logger,
     onFatal: error => options.onFatal("qq", config.appId, error),
   });

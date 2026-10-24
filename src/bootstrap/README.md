@@ -11,6 +11,9 @@
 
 渠道组合统一将数据库旁的 `uploads/video` 作为视频附件根传给 Telegram、飞书、微信和 QQ 四个 Surface，各渠道拥有独立暂存器生命周期。该目录不作为普通本地视频目录开放；MCP 通过显式 `STRATA_VIDEO_CHANNEL_ROOT` 和当前会话的随机附件引用读取单个文件，不由 Gateway 自动改写 Codex 配置。
 
+QQ 实时原生流由组合根同步捕获输出 owner，并要求原 Thread 仍绑定同一目标；HTTP 前重核 Workspace、Provider、Actor 与绑定。最终持久结果继续使用既有持久授权合同。
+持久调度接收按事件选择的有限预算；仅 QQ 为主动限流整批预留、实际发送门控及最多四片 HTTP 提供 480 秒，其余渠道保持 60 秒，交互和原任务期限独立。
+
 ## 文件
 
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。

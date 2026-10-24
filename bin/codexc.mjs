@@ -229,7 +229,7 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，发送回该 Thread 绑定的
 飞书/微信/Telegram/QQ 会话。不指定 --thread 且存在多个绑定时会拒绝并提示指定。
-QQ 图片最大 3 MiB，必须显式 --turn 指定原 Turn ID；共用原来信五分钟、四次回复额度。
+QQ 图片最大 3 MiB，必须显式 --turn 指定原 Turn ID；原任务来源最长24小时，使用主动发送额度。
 图片会被复制到状态数据库所在目录的 channel-outbox/pending/，由网关轮询发送；
 成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
   webui: `用法：codexc webui [--host 地址] [--port 端口]

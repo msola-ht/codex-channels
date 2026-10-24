@@ -181,7 +181,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，由 Thread 绑定渠道的机器人凭据发送回对应会话。
 不指定 --thread 时，只有当前仅存在一个会话绑定才会自动选择目标。
-QQ 图片最大 3 MiB，必须显式 --turn 指定原 Turn ID，并仍受原来信五分钟、四次回复额度限制。`);
+QQ 图片最大 3 MiB，必须显式 --turn 指定原 Turn ID；原任务来源最长24小时，使用主动发送额度。`);
       process.exit(0);
     }
     const parsed = parseChannelSendImageArgs(args);

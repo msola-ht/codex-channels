@@ -1089,6 +1089,18 @@ export abstract class GatewayComponentGraph {
     });
     const constructedSurfaces = new Set<SurfaceAdapter>();
     this.surfaceModules = createSurfaceModules({
+      captureLiveOutputAuthorization: event => {
+        const owner = this.outputOwner(event);
+        return () => {
+          if (!("threadId" in event) || typeof event.threadId !== "string") return false;
+          const binding = this.bindings.getByThread(event.threadId);
+          return binding !== undefined
+            && binding.target.surface === event.target.surface
+            && binding.target.accountId === event.target.accountId
+            && binding.target.conversationId === event.target.conversationId
+            && this.outputAuthorized(event, owner);
+        };
+      },
       config,
       service,
       commands,
@@ -1125,6 +1137,9 @@ export abstract class GatewayComponentGraph {
           directory: join(dirname(config.stateDatabasePath), "delivery-outbox"),
           workerUrl: new URL(import.meta.url.endsWith(".ts") ? "../../dist/delivery/worker.js" : "../delivery/worker.js", import.meta.url),
           owner: (event) => this.outputOwner(event),
+          // QQ can reserve four ordinary messages and wait at every actual HTTP boundary.
+          // 65s + 4*(65s + 15s token + 15s HTTP) + 15s upload fits within 480s.
+          deliveryTimeoutMs: event => event.target.surface === "qq" ? 480_000 : 60_000,
           authorized: (event, owner) => this.outputAuthorized(event, owner),
           fault: (code, account, persistentDeliveryId, failure) => {
             logger.error({ code, account, persistentDeliveryId, ...(failure ? { deliveryFailure: failure } : {}) }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");

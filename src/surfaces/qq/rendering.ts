@@ -50,10 +50,10 @@ export const qqHelp = [
   "语音需平台提供可信 PCM WAV，仅支持单/双声道 8/16 位、单一 fmt/data 块，最长 5 分钟、20 MiB，且模型须支持音频。视频每条限一个 MP4、64 MiB，需配置视频分析 MCP，仅分析画面；音视频可带说明，混合媒体需拆开发送。",
   "审批按当前请求显示一次、会话或持久规则选项；临时权限仅本次 Turn，终端输入只批准一次或中止。普通问题按提示回应。",
   "MCP 工具审批按提示提供一次、会话或始终批准；仅原用户、原请求和有效回复窗口内生效。",
-  "支持生成图片回传，受大小、回复窗口和剩余额度限制；普通文件输入、流式和计划任务仍未开放。",
-  "Queue 由 App Server 持久保存；QQ 结果只沿本次运行中登记的原 add 来信回复，仍共用原消息五分钟/四次额度。重启、过期或原生客户端加入的条目可执行，但不会借 start 或新来信补发结果。",
-  "官方同 Thread 根 Turn 工作链（含工具创建 Goal 后的自主续跑）只继承已确认的原来信回复依据，共用五分钟/四次额度；未知来源不借新来信补发。",
-  "长回答、长 Diff 和完整命令结果超过文本预算或剩余额度时，以完整 UTF-8 文件交付；文件上限 1000000 字节。",
+  "支持生成图片主动回传，受大小、原任务授权和主动频率限制；原生流式预览仍需原来信的被动窗口，普通文件输入和计划任务未开放。",
+  "Queue 由 App Server 持久保存；QQ 结果只沿本次运行中登记的原 add 来源主动发送，最长24小时。重启、来源过期或原生客户端加入的条目可执行，但不会借 start 或新来信补发结果。",
+  "官方同 Thread 根 Turn 工作链（含工具创建 Goal 后的自主续跑）只继承已确认的原任务来源，不延长24小时授权；未知来源不借新来信补发。",
+  "长回答、长 Diff 和完整命令结果超过本地文本或单次分片预算时，以完整 UTF-8 文件交付；文件上限 1000000 字节。",
   "普通 MCP 表单按提示填写 JSON；异步/敏感问题及 MCP URL 交互暂不支持。",
 ].join("\n");
 
@@ -219,7 +219,7 @@ export function renderQqCommandResult(result: ConversationCommandResult): QqRend
 
 function queueReplyNotice(result: ConversationCommandResult): string {
   if (result.kind !== "outcome" || result.outcome.type !== "thread-queue.added" && result.outcome.type !== "thread-queue.started") return "";
-  return "\n- QQ 结果只沿本次运行登记的原 add 来信回复，共用原消息五分钟/四次额度；原生条目、重启或过期后没有回复依据，start 和新来信不会刷新额度。";
+  return "\n- QQ 结果只沿本次运行登记的原 add 来源主动发送，授权最长24小时；原生条目、重启或来源过期后没有发送依据，start 和新来信不会延长期限。";
 }
 
 function requireSingleReview(text: string): void {

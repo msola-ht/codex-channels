@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 const API_ORIGIN = "https://api.bot.qq.com";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
@@ -31,13 +33,25 @@ export type QqMessageBody =
 
 type QqOutgoingMessage = QqMessageBody | { kind: "image"; fileInfo: string } | { kind: "file"; fileInfo: string };
 
-export interface QqSendMessageInput {
+export type QqSendMode = { mode: "active" } | { mode: "passive"; msgId: string; msgSeq: number };
+
+export type QqSendMessageInput = QqSendMode & {
+  userOpenid: string;
+  message: QqOutgoingMessage;
+  signal?: AbortSignal;
+  beforeSend?: () => void | Promise<void>;
+};
+
+export interface QqStreamMessageInput {
   userOpenid: string;
   msgId: string;
   msgSeq: number;
-  message: QqOutgoingMessage;
-  signal?: AbortSignal;
-  beforeSend?: () => void;
+  index: number;
+  streamMessageId?: string;
+  text: string;
+  finished: boolean;
+  signal: AbortSignal;
+  beforeSend(): void;
 }
 
 /** Explicit format refusals only; an unknown send outcome must never cause fallback. */
@@ -60,6 +74,8 @@ export class QqProtocolClient {
   private cachedToken: { value: string; expiresAt: number } | undefined;
   private tokenFlight: Promise<string> | undefined;
   private generation = 0;
+  private streamGate = Promise.resolve();
+  private nextStreamRequest = 0;
   private readonly appId: string;
   private readonly appSecret: string;
   private readonly fetchImpl: typeof fetch;
@@ -89,10 +105,10 @@ export class QqProtocolClient {
     this.cachedToken = undefined;
   }
 
-  async getAccessToken(signal?: AbortSignal): Promise<string> {
+  async getAccessToken(signal?: AbortSignal, minimumRemainingMs = 60_000): Promise<string> {
     this.ensureOpen("token", signal);
     const cached = this.cachedToken;
-    if (cached && cached.expiresAt - Date.now() > 60_000) return cached.value;
+    if (cached && cached.expiresAt - Date.now() > minimumRemainingMs) return cached.value;
     if (!this.tokenFlight) {
       const generation = this.generation;
       const startedAt = Date.now();
@@ -146,8 +162,9 @@ export class QqProtocolClient {
   }
 
   async sendC2CMessage(input: QqSendMessageInput): Promise<{ messageId: string }> {
-    if (!validId(input.userOpenid) || !validId(input.msgId)
-      || !Number.isSafeInteger(input.msgSeq) || input.msgSeq < 1 || input.msgSeq > 65535
+    if (!validId(input.userOpenid) || (input.mode !== "active" && input.mode !== "passive")
+      || input.mode === "passive" && (!validId(input.msgId)
+        || !Number.isSafeInteger(input.msgSeq) || input.msgSeq < 1 || input.msgSeq > 65535)
       || !record(input.message)
       || (input.message.kind === "image" || input.message.kind === "file"
         ? Object.keys(input.message).some(key => key !== "kind" && key !== "fileInfo") || !validFileInfo(input.message.fileInfo)
@@ -164,15 +181,54 @@ export class QqProtocolClient {
         : input.message.kind === "text"
         ? { msg_type: 0, content: input.message.content }
         : { msg_type: 2, markdown: { content: input.message.content, force_verify_image_resource: true } }),
-      msg_id: input.msgId,
-      msg_seq: input.msgSeq,
+      ...(input.mode === "passive" ? { msg_id: input.msgId, msg_seq: input.msgSeq } : {}),
     };
+    // Ordinary sends may wait 65 seconds at the actual rate gate. Refresh early,
+    // without moving token work after the persisted HTTP-time accounting.
+    const token = await this.getAccessToken(input.signal, 85_000);
+    const expiresAt = this.cachedToken?.value === token ? this.cachedToken.expiresAt : 0;
+    await input.beforeSend?.();
+    if (expiresAt - Date.now() <= REQUEST_TIMEOUT_MS) throw new QqProtocolError("token", "timeout");
     return await this.withRequest("send", input.signal, async (signal) => {
-      const token = await this.getAccessToken(signal);
-      input.beforeSend?.();
       const data = await this.requestJson("send", path, body, signal, token);
       if (!validId(data.id)) throw new QqProtocolError("send", "invalid-response");
       return { messageId: data.id };
+    });
+  }
+
+  /** Only the documented passive stream contract is enabled; no wakeup or inferred active stream. */
+  async sendC2CStream(input: QqStreamMessageInput): Promise<{ messageId: string; remainingCharacters?: number }> {
+    if (!validId(input.userOpenid) || !validId(input.msgId)
+      || !Number.isSafeInteger(input.msgSeq) || input.msgSeq < 1 || input.msgSeq > 65535
+      || !Number.isSafeInteger(input.index) || input.index < 0 || input.index > 127
+      || (input.index === 0 ? input.streamMessageId !== undefined : !validId(input.streamMessageId))
+      || typeof input.finished !== "boolean" || typeof input.text !== "string"
+      || (!input.finished && input.text.length === 0) || Buffer.byteLength(input.text, "utf8") > 3000
+      || Buffer.from(input.text, "utf8").toString("utf8") !== input.text) {
+      throw new QqProtocolError("send", "invalid-input");
+    }
+    const body = { input_mode: "append", input_state: input.finished ? 10 : 1, index: input.index,
+      content_type: "markdown", content_raw: input.text, msg_id: input.msgId, msg_seq: input.msgSeq,
+      ...(input.streamMessageId ? { stream_msg_id: input.streamMessageId } : {}) };
+    const path = `/v2/users/${encodeURIComponent(input.userOpenid)}/stream_messages`;
+    const expectedMessageId = input.streamMessageId;
+    return this.withRequest("send", input.signal, async signal => {
+      const token = await this.getAccessToken(signal);
+      const gate = this.streamGate.then(async () => {
+        const wait = this.nextStreamRequest - performance.now();
+        if (wait > 0) await delay(Math.ceil(wait), undefined, { signal });
+        this.ensureOpen("send", signal);
+        this.nextStreamRequest = performance.now() + 25;
+      });
+      this.streamGate = gate.catch(() => {});
+      await gate;
+      input.beforeSend();
+      const data = await this.requestJson("send", path, body, signal, token);
+      if (!validId(data.id) || expectedMessageId !== undefined && data.id !== expectedMessageId
+        || data.remain_msg_len !== undefined && (!Number.isSafeInteger(data.remain_msg_len) || Number(data.remain_msg_len) < 0)) {
+        throw new QqProtocolError("send", "invalid-response");
+      }
+      return { messageId: data.id, ...(data.remain_msg_len === undefined ? {} : { remainingCharacters: Number(data.remain_msg_len) }) };
     });
   }
 

@@ -57,12 +57,12 @@ export function resolveSurfaceDelivery(
   // Source correlation is synchronous live admission, never platform output or a replay backlog.
   if (event.type === "user.message.identity" || event.type === "turn.root.identity") return { disposition: "ignore", critical: false };
   if (surface === "qq") {
-    const deliver = event.type === "text.completed" && event.phase !== "commentary"
+    const deliver = (event.type === "text.delta" || event.type === "text.completed") && event.phase !== "commentary"
       || event.type === "turn.completed"
       || event.type === "warning" && !event.globalIdle
       || event.type === "operation.updated" && (event.operation.status === "failed" || event.operation.status === "declined"
         || event.operation.kind === "imageGeneration" && event.operation.status === "completed");
-    return { disposition: deliver ? "deliver" : "ignore", critical: deliver };
+    return { disposition: deliver ? "deliver" : "ignore", critical: deliver && event.type !== "text.delta" };
   }
   if (surface === "weixin") {
     return isWeixinWindowEvent(event)
