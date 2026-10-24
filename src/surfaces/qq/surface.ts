@@ -2,12 +2,15 @@ import type { Agent } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 import { safeInteractionDecision, type InteractionPort } from "../../approval/index.js";
-import { isConversationCommandName, type ConversationCommandExecutor, type ConversationTurnUseCases } from "../../application/index.js";
+import { isConversationCommandName, type ConversationCommandExecutor, type ConversationTurnUseCases, type Submission } from "../../application/index.js";
 import { UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import type { ConversationActorRegistry, SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { captureDelivery, checkpointDelivery } from "../delivery-receipt.js";
-import { parseSlashCommand } from "../slash-command.js";
+import { isEmergencyStopCommand, parseSlashCommand } from "../slash-command.js";
+import { AttachmentInputLifecycle, type ReceivedAttachmentInput } from "../attachment-input-lifecycle.js";
+import { SurfaceInputBatcher, imageBatchLimitError } from "../surface-input-batcher.js";
+import type { StoredManagedImage } from "../managed-image-store.js";
 import type { SurfaceAdapter, SurfaceOutputPort } from "../types.js";
 import { createQqLedger } from "./ledger.js";
 import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, maximumQqImageBytes, type QqMessageBody } from "./protocol.js";
@@ -16,6 +19,7 @@ import { generatedImageUnavailableText } from "../operation-presentation.js";
 import { planQqMessage, qqCommandNames, qqHelp, renderQqCommandResult, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 import { QqInteractionDeliveryError, QqInteractionPort } from "./interactions.js";
+import { QqImageStore, isSupportedQqImageUrl, type QqImageReference } from "./image-store.js";
 
 export interface QqNetwork {
   fetchImpl: typeof fetch;
@@ -28,10 +32,11 @@ export interface CreateQqSurfaceOptions {
   appId: string;
   appSecret: string;
   directory: string;
+  uploadsDirectory: string;
   createNetwork(): QqNetwork;
   access: SurfaceAccessPolicy;
   actors: ConversationActorRegistry;
-  service: Pick<ConversationTurnUseCases, "submit">;
+  service: Pick<ConversationTurnUseCases, "submit" | "prepareAttachmentSubmission">;
   commands: ConversationCommandExecutor;
   logger: Logger;
   onFatal(error: Error): void;
@@ -99,8 +104,11 @@ class QqGeneration implements SurfaceAdapter {
   private readonly transport: QqWebSocketTransport;
   private readonly ledger: ReturnType<typeof createQqLedger>;
   private readonly queue: ConversationDeliveryQueue;
+  private readonly images: QqImageStore;
+  private readonly attachmentInputs = new AttachmentInputLifecycle();
   private readonly controller = new AbortController();
-  private readonly pending = new Map<string, Set<Promise<void>>>();
+  private readonly pending = new Map<string, Set<Promise<Submission>>>();
+  private readonly inputTails = new Map<string, { job: Promise<void>; cancellation: AbortController }>();
   private readonly jobs = new Set<Promise<void>>();
   private readonly generationId = randomUUID();
   private readonly observedMilestones = new Set<"first-input" | "first-submission" | "first-reply">();
@@ -110,6 +118,8 @@ class QqGeneration implements SurfaceAdapter {
   constructor(private readonly options: CreateQqSurfaceOptions) {
     this.accountId = options.appId;
     this.network = options.createNetwork();
+    this.images = new QqImageStore(options.uploadsDirectory, this.network.fetchImpl,
+      () => options.logger.warn({ reason: "qq-image-cleanup-failed" }, "QQ 图片暂存清理失败"));
     this.client = new QqProtocolClient({ appId: options.appId, appSecret: options.appSecret, fetchImpl: this.network.fetchImpl });
     this.ledger = createQqLedger(options.directory, options.appId, () => this.fatal(new Error("QQ 传输登记不可用")));
     this.queue = new ConversationDeliveryQueue(options.logger, { component: "qq", capacity: 32, maximumPendingOperations: 256, errorMetadata: () => ({ reason: "qq-delivery-failed" }) });
@@ -183,6 +193,7 @@ class QqGeneration implements SurfaceAdapter {
   async start(): Promise<void> {
     this.controller.signal.throwIfAborted();
     await this.ledger.open();
+    await this.images.start();
     if (this.ledger.unconfirmedCount > 0) this.options.logger.warn({
       reason: "qq-unconfirmed-input", count: this.ledger.unconfirmedCount,
     }, "QQ 保留了未确认输入登记，请核对原生会话；不会自动重新执行");
@@ -196,6 +207,9 @@ class QqGeneration implements SurfaceAdapter {
   private async close(): Promise<void> {
     this.closed = true;
     this.controller.abort();
+    for (const input of this.inputTails.values()) input.cancellation.abort();
+    this.attachmentInputs.close();
+    this.images.close();
     this.client.close();
     const results = await Promise.allSettled([
       this.transport.stop(), this.queue.close(), waitBounded(this.interactions.close(), undefined, 5_000),
@@ -224,8 +238,28 @@ class QqGeneration implements SurfaceAdapter {
     admissionSignal.throwIfAborted();
     this.controller.signal.throwIfAborted();
     this.options.actors.rememberActor(target, message.actor);
+    const allowed = (): boolean => this.allowed(target, message.actor);
+    const receipt = message.supported && message.images.length > 0
+      ? this.attachmentInputs.receive(target, allowed, "image",
+        () => this.options.service.prepareAttachmentSubmission?.(target, allowed, "image")) : undefined;
+    const stop = message.supported && message.images.length === 0 && isEmergencyStopCommand(message.text)
+      ? this.attachmentInputs.receiveStop(target) : undefined;
+    const previousInput = this.inputTails.get(target.conversationId);
+    const cancelledInputs = !!stop && (stop.cancelled || !!previousInput && !previousInput.cancellation.signal.aborted);
+    if (stop) previousInput?.cancellation.abort();
+    // Commands and interaction replies bypass slow media preparation; ordinary
+    // messages retain receipt order, including the first Thread's creation.
+    const ordinary = message.supported && (message.images.length > 0 || !message.text.trim().startsWith("/"));
+    const inputCancellation = ordinary
+      ? previousInput && !previousInput.cancellation.signal.aborted ? previousInput.cancellation : new AbortController()
+      : undefined;
     const job = Promise.resolve().then(async () => {
-      try { await this.process(target, message); await this.ledger.handled(message.id); }
+      try {
+        if (ordinary) await previousInput?.job;
+        if (inputCancellation?.signal.aborted) throw new UserFacingError("input.authorization-changed", "输入已取消，当前消息未提交。");
+        await this.process(target, message, receipt, cancelledInputs, inputCancellation?.signal);
+        await this.ledger.handled(message.id);
+      }
       catch (error) {
         const replyFailure = error instanceof QqCommandReplyError;
         this.options.logger.warn({ reason: replyFailure ? "qq-command-reply-unconfirmed" : "qq-input-failed" },
@@ -237,18 +271,28 @@ class QqGeneration implements SurfaceAdapter {
         }
       }
     }).finally(() => {
+      receipt?.dispose();
+      stop?.();
+      if (this.inputTails.get(target.conversationId)?.job === job) this.inputTails.delete(target.conversationId);
       this.jobs.delete(job);
     });
+    if (inputCancellation) this.inputTails.set(target.conversationId, { job, cancellation: inputCancellation });
     this.jobs.add(job);
   }
 
-  private async process(target: ConversationTarget, message: Inbound): Promise<void> {
+  private async process(target: ConversationTarget, message: Inbound, receipt?: ReceivedAttachmentInput,
+    cancelledInputs = false, inputSignal?: AbortSignal): Promise<void> {
     if (!this.allowed(target, message.actor)) throw new Error("QQ 输入已取消");
     if (!message.supported) {
-      await this.notify(target, message.actor, message.id, "QQ 当前仅支持完整纯文本输入，附件和混合消息未提交。");
+      await this.notify(target, message.actor, message.id, "QQ 当前仅支持默认聊天中的完整纯文本或 PNG、JPEG、非动画 GIF 图片消息；不受支持的附件、地址、引用或混合类型消息未提交。");
       return;
     }
-    this.observeMilestone("first-input", "QQ 本运行代次首条授权完整文本已接收；尚不代表已提交模型");
+    this.observeMilestone("first-input", "QQ 本运行代次首条授权完整输入已接收；尚不代表已提交模型");
+    if (message.images.length > 0) {
+      if (!receipt) throw new UserFacingError("image.unavailable", "QQ 图片输入不可用，当前消息未提交。");
+      await this.submitImages(target, message, receipt);
+      return;
+    }
     const interactionReply = this.interactions.handleText(target, message.actor, message.text);
     if (interactionReply !== null) {
       await this.notify(target, message.actor, message.id, interactionReply);
@@ -268,6 +312,7 @@ class QqGeneration implements SurfaceAdapter {
       let authorizeReply: (() => void) | undefined;
       const result = await this.options.commands.execute(target, command.name, command.argumentsText, message.actor,
         () => this.allowed(target, message.actor), authorize => { authorizeReply = authorize; });
+      if (cancelledInputs && result.kind === "outcome" && result.outcome.type === "turn.stop-requested") result.outcome.stopped = true;
       const replyAllowed = (): boolean => {
         if (!authorizeReply) return false;
         try { authorizeReply(); return true; } catch { return false; }
@@ -281,16 +326,59 @@ class QqGeneration implements SurfaceAdapter {
       }
       return;
     }
-    // Only submission/association is awaited by output, never a command reply queued behind it.
-    const submission = this.options.service.submit(target, message.text, () => this.allowed(target, message.actor))
+    await this.submit(target, message, () => this.options.service.submit(target, message.text,
+      () => !inputSignal?.aborted && this.allowed(target, message.actor)));
+  }
+  private async submitImages(target: ConversationTarget, message: Inbound, receipt: ReceivedAttachmentInput): Promise<Submission> {
+    const scope = await receipt.prepare();
+    const downloaded: StoredManagedImage[] = [];
+    const current = (): void => {
+      scope.signal.throwIfAborted();
+      if (!this.allowed(target, message.actor)) throw new UserFacingError("image.unavailable", "QQ 图片输入授权已失效，当前消息未提交。");
+    };
+    // No aggregation key: one QQ message, including all its images, is one submission.
+    const inputs = new SurfaceInputBatcher((_target, input) => {
+      current();
+      return this.submit(target, message, () => scope.submit(input));
+    });
+    try {
+      current();
+      const limit = imageBatchLimitError(message.images.map(image => image.size === undefined ? {} : { bytes: image.size }), 4, 20 * 1024 * 1024);
+      if (limit) throw limit;
+      scope.captureTarget();
+      for (const reference of message.images) {
+        current();
+        downloaded.push(await this.images.download(reference, scope.signal, current));
+        const actualLimit = imageBatchLimitError(downloaded, 4, 20 * 1024 * 1024);
+        if (actualLimit) throw actualLimit;
+      }
+      current();
+      const result = await inputs.enqueue({ target, actorId: message.actor, sequence: 0,
+        ...(message.text.trim() ? { text: message.text } : {}), localImages: downloaded });
+      return result.submission;
+    } catch (error) {
+      if (scope.signal.aborted && !scope.mayHaveSubmitted) {
+        throw new UserFacingError("image.unavailable", "QQ 图片输入已取消或超时，当前消息未提交。");
+      }
+      throw error;
+    } finally {
+      await inputs.close();
+      await Promise.all(downloaded.map(image => this.images.discard(image)));
+    }
+  }
+  private async submit(target: ConversationTarget, message: Inbound, operation: () => Promise<Submission>): Promise<Submission> {
+    // Output awaits only the actual submission/association, never downloads,
+    // earlier input work or a command reply queued behind it.
+    const submission = Promise.resolve().then(operation)
       .then(async result => {
         await this.ledger.associate(message.id, result.threadId, result.turnId, result.steered);
         this.observeMilestone("first-submission", "QQ 本运行代次首次会话提交已返回并登记；尚不代表模型完成");
+        return result;
       });
-    const entries = this.pending.get(target.conversationId) ?? new Set<Promise<void>>();
+    const entries = this.pending.get(target.conversationId) ?? new Set<Promise<Submission>>();
     entries.add(submission);
     this.pending.set(target.conversationId, entries);
-    try { await submission; }
+    try { return await submission; }
     finally {
       entries.delete(submission);
       if (!entries.size) this.pending.delete(target.conversationId);
@@ -401,7 +489,7 @@ class QqGeneration implements SurfaceAdapter {
   }
 }
 
-interface Inbound { id: string; msgId: string; actor: string; createdAt: number; text: string; supported: boolean }
+interface Inbound { id: string; msgId: string; actor: string; createdAt: number; text: string; images: QqImageReference[]; supported: boolean }
 function decodeMessage(value: unknown): Inbound {
   if (!record(value) || !record(value.author) || !identifier(value.id) || !identifier(value.author.user_openid)
     || typeof value.timestamp !== "string"
@@ -414,10 +502,27 @@ function decodeMessage(value: unknown): Inbound {
   const indexes = extensions.filter(entry => entry.startsWith("msg_idx="));
   if (indexes.length !== 1 || !identifier(indexes[0]!.slice(8))) throw new Error("QQ 消息去重身份缺失");
   const text = typeof value.content === "string" ? value.content : "";
+  const images: QqImageReference[] = [];
+  let supportedAttachments = value.attachments === undefined;
+  if (Array.isArray(value.attachments) && value.attachments.length <= 4) {
+    supportedAttachments = true;
+    for (const attachment of value.attachments) {
+      if (!record(attachment) || typeof attachment.url !== "string" || !isSupportedQqImageUrl(attachment.url)
+        || (attachment.content_type !== "image/png" && attachment.content_type !== "image/jpeg" && attachment.content_type !== "image/gif")
+        || (attachment.size !== undefined && (!Number.isSafeInteger(attachment.size) || Number(attachment.size) <= 0))
+        || attachment.voice_wav_url !== undefined || attachment.asr_refer_text !== undefined) {
+        supportedAttachments = false;
+        break;
+      }
+      images.push({ url: attachment.url, mimeType: attachment.content_type,
+        ...(attachment.size === undefined ? {} : { size: attachment.size as number }) });
+    }
+  }
   const id = createHash("sha256").update(JSON.stringify([value.id, value.author.user_openid, indexes[0]])).digest("hex");
-  return { id, msgId: value.id, actor: value.author.user_openid, createdAt: Date.parse(value.timestamp), text,
-    supported: text.trim().length > 0 && Buffer.byteLength(text, "utf8") <= 32_000
-      && (value.attachments === undefined || Array.isArray(value.attachments) && value.attachments.length === 0)
+  return { id, msgId: value.id, actor: value.author.user_openid, createdAt: Date.parse(value.timestamp), text, images,
+    supported: typeof value.content === "string"
+      && (text.trim().length > 0 || images.length > 0) && Buffer.byteLength(text, "utf8") <= 32_000
+      && supportedAttachments
       && value.message_type === 0 && value.ark_data === undefined && value.msg_elements === undefined
       && !extensions.some(entry => entry.startsWith("ref_msg_idx=")) };
 }

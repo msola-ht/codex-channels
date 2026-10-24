@@ -20,7 +20,7 @@ export class AttachmentInputLifecycle {
   receive(
     target: ConversationTarget,
     allowed: () => boolean,
-    kind: "audio" | "video",
+    kind: "audio" | "video" | "image",
     create: () => PreparedAttachmentSubmission | undefined,
   ): ReceivedAttachmentInput {
     const key = conversationTargetKey(target);

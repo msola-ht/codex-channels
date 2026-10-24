@@ -234,7 +234,7 @@ export interface PreparedAttachmentSubmission {
 
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
-  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio"): PreparedAttachmentSubmission;
+  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio" | "image"): PreparedAttachmentSubmission;
   submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean): Promise<Submission>;
   stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean>;
   rename(target: ConversationTarget, name: string, assertAuthorized?: () => void): Promise<void>;
@@ -655,7 +655,7 @@ export class ConversationService implements
     this.extensionQueries.closeMcpLogins();
   }
 
-  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" = "video"): PreparedAttachmentSubmission {
+  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" | "image" = "video"): PreparedAttachmentSubmission {
     const key = conversationTargetKey(target);
     const pending = this.attachmentInputs.get(key) ?? new Set<AbortController>();
     if (!isAllowed() || pending.size >= 4 || (!this.attachmentInputs.has(key) && this.attachmentInputs.size >= 1000)) {

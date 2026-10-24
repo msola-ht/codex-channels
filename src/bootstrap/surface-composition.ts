@@ -140,6 +140,7 @@ function createQqModule(
   const adapter = new QqSurface({
     appId: config.appId, appSecret: config.appSecret,
     directory: join(options.config.credentialsDirectory, "qq-transport"),
+    uploadsDirectory: join(dirname(options.config.stateDatabasePath), "uploads", "qq"),
     createNetwork: () => createQqNetwork(options.config.networkProxy),
     access, actors: options.bindings,
     service: options.service, commands: options.commands, logger: options.logger,
