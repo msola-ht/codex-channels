@@ -267,7 +267,7 @@ export class QqWebSocketTransport {
               settle(payload.d ? 1000 : 4006);
               break;
             case 0: {
-              if (!helloReceived || typeof payload.t !== "string" || !/^[A-Z_]{1,80}$/.test(payload.t)
+              if (!helloReceived || typeof payload.t !== "string" || !/^[A-Z][A-Z0-9_]{0,79}$/.test(payload.t)
                 || typeof payload.s !== "number" || !Number.isSafeInteger(payload.s) || payload.s < 0
                 || (payload.id !== undefined && (typeof payload.id !== "string" || payload.id.length > 512))) {
                 throw new QqTransportError("invalid-payload");

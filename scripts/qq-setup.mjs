@@ -7,7 +7,8 @@ import {
   validateGatewayConfigStructureDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
-import { ChannelSetupCancelled, createChannelPrompter } from "./channel-setup-presentation.mjs";
+import { ChannelSetupCancelled, createChannelPrompter, renderTerminalQRCode } from "./channel-setup-presentation.mjs";
+import { registerQqApplication } from "./qq-registration.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
@@ -17,6 +18,8 @@ export async function runQqSetup({
   input = process.stdin,
   output = process.stdout,
   prompter,
+  registerApplication = registerQqApplication,
+  renderQRCode = renderTerminalQRCode,
 } = {}) {
   const prompt = prompter ?? createChannelPrompter(input, output);
   try {
@@ -26,11 +29,35 @@ export async function runQqSetup({
     validateGatewayConfigStructureDocument(document);
     const initialDocument = structuredClone(document);
     output.write("\n通讯渠道 · QQ 接入\n\n");
-    output.write("仅支持手工应用凭据与 WebSocket 单聊；请先在 QQ 开放平台配置机器人。\n");
-    output.write("本向导不联网验证凭据、不扫码、不连接 QQ、不发送消息。App Secret 输入隐藏。\n");
-    const appId = await readField(prompt, output, "QQ App ID", "app_id", document);
-    const appSecret = await readField(prompt, output, "QQ App Secret", "app_secret", document, true);
+    const mode = await prompt.select("选择 QQ 接入方式", [
+      { value: "scan", label: "手机 QQ 扫码连接（推荐）", hint: "获取应用凭据和本次扫码用户 OpenID" },
+      { value: "manual", label: "手工填写应用凭据和 OpenID" },
+      { value: "back", label: "返回" },
+    ]);
+    if (mode === "back") return undefined;
+    if (mode !== "scan" && mode !== "manual") throw new Error("不支持的 QQ 接入方式");
+    let appId;
+    let appSecret;
     let allowedUserOpenids;
+    if (mode === "scan") {
+      output.write("扫码将通过腾讯官方 Connector 连接机器人；请在手机 QQ 页面确认机器人与授权。\n");
+      output.write("此步骤直连 q.qq.com，不使用共享代理；最多等待五分钟，按 Esc/Ctrl+C 取消。\n");
+      output.write("最终确认后，应用凭据保存到现有私有 TOML，仅授权本次扫码用户；原 QQ 配置和名单将被替换。\n");
+      output.write("取消本地保存不会撤销手机端已完成的授权。扫码完成不代表消息收发已验证。\n");
+      if (!await prompt.confirm("开始 QQ 扫码连接？", true)) return undefined;
+      const result = await scanQq({ input, output, registerApplication, renderQRCode });
+      appId = result.appId;
+      appSecret = result.appSecret;
+      allowedUserOpenids = [result.userOpenid];
+      validateGatewayConfigStructureDocument({ ...document, qq: {
+        enabled: true, app_id: appId, app_secret: appSecret, allowed_user_openids: allowedUserOpenids,
+      } });
+      output.write("QQ 扫码已完成，已取得应用凭据与扫码用户身份（内容不回显）。\n");
+    } else {
+      output.write("手工方式不联网验证凭据；App Secret 输入隐藏。OpenID 不是 QQ 号码。\n");
+      appId = await readField(prompt, output, "QQ App ID", "app_id", document);
+      appSecret = await readField(prompt, output, "QQ App Secret", "app_secret", document, true);
+    }
     while (!allowedUserOpenids) {
       const entered = await prompt.ask("允许的单聊用户 OpenID（英文逗号分隔；留空拒绝所有用户）");
       const values = entered.trim() === "" ? [] : entered.split(",").map(value => value.trim());
@@ -58,7 +85,7 @@ export async function runQqSetup({
     validateGatewayConfigStructureDocument(document);
     output.write("\n准备保存 QQ 配置（完整替换此应用的凭据和允许名单）：\n");
     output.write(`- 状态：${enabled ? "启用" : "禁用"}\n`);
-    output.write("- 传输：WebSocket 单聊\n- 应用凭据：已填写（内容已隐藏，未联网验证）\n");
+    output.write(`- 传输：WebSocket 单聊\n- 应用凭据：${mode === "scan" ? "扫码取得" : "已填写"}（内容已隐藏，收发尚未验证）\n`);
     output.write(`- 允许用户：${allowedUserOpenids.length} 个（内容已隐藏）\n`);
     if (allowedUserOpenids.length === 0) output.write("- 空名单：拒绝所有用户输入。\n");
     if (!await prompt.confirm("确认保存以上配置？", false)) {
@@ -95,8 +122,13 @@ export async function runQqSetup({
       appId: value.app_id, appSecret: value.app_secret, allowedUserOpenIds: value.allowed_user_openids,
     } : undefined;
     const changes = classifyQqConfigChanges(runtimeAccount(initialDocument.qq), runtimeAccount(document.qq));
-    const activation = changes.some(change => change.restart) ? "restart-gateway" : "reload";
-    writeGatewayConfigActivationNotice(output, environment, configActivationResult(activation));
+    const activation = changes.some(change => change.restart) ? "restart-gateway"
+      : changes.length > 0 ? "reload" : "none";
+    if (activation === "none") {
+      output.write("QQ 配置已保存，当前仍为禁用，无需热加载或重启；启用时再建立连接。\n");
+    } else {
+      writeGatewayConfigActivationNotice(output, environment, configActivationResult(activation));
+    }
     return {
       action: "configured", channel: "qq", configured: true, enabled, configPath,
       allowedUserCount: allowedUserOpenids.length,
@@ -108,6 +140,49 @@ export async function runQqSetup({
     return undefined;
   } finally {
     prompt.close();
+  }
+}
+
+async function scanQq({ input, output, registerApplication, renderQRCode }) {
+  const controller = new AbortController();
+  let renderError;
+  const cancel = () => controller.abort();
+  const wasRaw = input.isRaw === true;
+  const wasPaused = input.isPaused?.() === true;
+  const onData = chunk => {
+    const value = chunk.toString();
+    if (value.includes("\u0003") || value.includes("\u001b")) cancel();
+  };
+  process.once("SIGINT", cancel);
+  try {
+    if (input.isTTY && input.setRawMode) {
+      input.setRawMode(true);
+      input.on("data", onData);
+      input.resume();
+    }
+    const result = await registerApplication({
+      signal: controller.signal,
+      onQRCodeReady: url => {
+        controller.signal.throwIfAborted();
+        output.write("\n请使用手机 QQ 扫描二维码，并在手机上完成连接：\n\n");
+        try { renderQRCode(url, output); }
+        catch (error) { renderError = error; controller.abort(); }
+      },
+      onQrExpired: () => output.write("二维码已过期，正在获取新的二维码。\n"),
+    });
+    controller.signal.throwIfAborted();
+    return result;
+  } catch (error) {
+    if (error?.code === "shutdown-failed") throw error;
+    if (renderError) throw renderError;
+    if (controller.signal.aborted) throw new ChannelSetupCancelled();
+    throw error;
+  } finally {
+    controller.abort();
+    process.removeListener("SIGINT", cancel);
+    input.removeListener("data", onData);
+    if (input.isTTY && input.setRawMode) input.setRawMode(wasRaw);
+    if (wasPaused) input.pause();
   }
 }
 

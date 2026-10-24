@@ -372,7 +372,7 @@ async function runChannelSetup({
       {
         value: "qq",
         label: "QQ",
-        hint: "手工应用凭据与单聊用户授权（WebSocket）",
+        hint: "扫码连接与单聊用户授权（WebSocket）",
       },
       {
         value: "back",

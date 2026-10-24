@@ -423,7 +423,8 @@
 - `telegram-setup.mjs`：把 Telegram Bot 来源、长轮询冲突确认、允许名单输入和中文输出适配到
   `telegram-setup-session.mjs` 的结构化会话；复用统一 Codex `.env`、环境变量和系统代理解析；交互输入的
   Token 使用隐藏输入，验证错误继续脱敏；新建 Bot 仅引导使用官方 BotFather。
-- `qq-setup.mjs`：统一 Setup 的 QQ 手工应用凭据和单聊用户 OpenID 输入；App Secret 隐藏，确认与 JSONL 结果只报告配置状态和允许用户数量，不回显凭据或名单。明确选择启用或禁用后完整确认，复用严格配置校验、源修订保护和原子保存；取消、无变化不写入，并发修改使确认失效。仅支持 WebSocket，不扫码、不联网验证、不连接或发送消息；保存与运行时生效分开报告。
+- `qq-setup.mjs`：统一 Setup 的 QQ 扫码与手工输入入口，复用渠道二维码渲染；扫码仅授权本次扫码用户，缺少 OpenID 拒绝保存。凭据和名单不回显，最终确认后写入同一私有 TOML，复用严格校验、源修订保护与原子保存。扫码最多五分钟，可用 Esc/Ctrl+C 取消；取消本地保存不撤销手机端授权。只支持 WebSocket，保存与运行时生效分开报告，不发送试验消息。
+- `qq-registration.mjs` / `qq-registration-worker.mjs`：在独占 Worker 中调用锁定官方 Connector 的公开扫码接口；SDK 直连 q.qq.com，不注入或悄悄绕用共享代理。控制总期限、迟到回调、单账号及 OpenID 校验，丢弃 SDK 控制台输出；成功、失败和取消均等待 Worker 终止，关闭未确认不报告成功。
 - `telegram-setup-session.mjs` / `telegram-setup-session.d.mts`：提供所有者绑定的 Telegram Setup
   开始、状态、自动配对、允许名单预览、确认与取消接口；Bot Token 和一次性配对码只保存在有期限的
   进程内会话中，状态、预览和结果不返回 Token，取消和超时通过 grammY `AbortSignal` 中止验证或

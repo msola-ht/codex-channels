@@ -21,7 +21,7 @@ enabled = false
 # allowed_user_ids = ["不透明用户@im.wechat"]
 
 [qq]
-# QQ 首版仅支持手工填写 AppID/AppSecret、WebSocket 单聊；填写后改为 true。
+# QQ 可通过 codexc setup 扫码取得凭据和用户 OpenID，也可手工填写；仅支持 WebSocket 单聊。
 # 空允许名单不会授权任何用户；用户 OpenID 必须来自同一 QQ 应用。
 enabled = false
 # app_id = "1234567890"

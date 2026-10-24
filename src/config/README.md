@@ -121,10 +121,11 @@ Gateway 设置，并提供不显示凭据、令牌或代理值的配置总览。
 账号或启用状态变化需要重启 Gateway；允许用户新增可热加载，允许名单收窄需要重启 Gateway，
 并在重新组合 Surface 时清理被撤权 Actor 的绑定和 App Server 订阅。
 
-QQ 首版严格配置只支持 `enabled`、数字字符串 `app_id`、手工 `app_secret` 和
+QQ 首版严格配置只支持 `enabled`、数字字符串 `app_id`、`app_secret` 和
 `allowed_user_openids`；传输固定为 WebSocket 单聊。整表缺失或 `enabled = false` 时运行配置
 不包含 QQ 账号，禁用表可省略其余三项；启用时三项必须齐全。允许名单可为空，此时不授权任何用户，
 但不得包含重复项、空项、空白或误用的逗号/分号分隔符。运行配置投影为 `qq.appId`、
 `qq.appSecret` 与 `qq.allowedUserOpenIds`，不补入账号、凭据或允许名单默认值。启停、AppID 或
 AppSecret 变化需要重启 Gateway；允许用户纯新增可热加载，收缩需要重启，并由重新组合 Surface
-清理已撤权 Actor 的绑定与在途交互。扫码、Webhook、群聊和多账号配置不在当前 Schema 中。
+清理已撤权 Actor 的绑定与在途交互。Setup 扫码和手工输入均写入同一私有配置合同，不增加凭据来源字段；
+Webhook、群聊和多账号配置不在当前 Schema 中。
