@@ -271,7 +271,7 @@ function* renderMetricsExportBody(iterator, result, format) {
           markdownCell(record.model ?? ""),
           markdownCell(record.operation),
           markdownCell(record.requestPurpose === "autoApprovalReview" ? "自动审批审查" : "未标记（含历史未知）"),
-          markdownCell(record.reasoningEffort ?? "模型默认"),
+          markdownCell(record.reasoningEffort ?? "未观测"),
           markdownCell(formatRequestStatus(record)),
           markdownCell(formatObservedTokens(record.inputTokens)),
           markdownCell(formatObservedTokens(record.cachedInputTokens)),
@@ -579,7 +579,7 @@ export function printMetricsTurns(result, format) {
         markdownCell(turn.turnId),
         markdownCell(formatLocalTime(turn.recordedAtMs)),
         markdownCell(turn.model ?? "未观测"),
-        markdownCell(turn.reasoningEffort ?? "模型默认"),
+        markdownCell(turn.reasoningEffort ?? "未观测"),
         formatPositiveCount(turn.requestCount),
         formatRequestOutcomes(turn.requestOutcomes),
         formatInterruptionSummary(turn.interruptionSummary),
@@ -643,7 +643,7 @@ export function printMetricsThreads(result, format) {
         String(index + 1),
         markdownCell(thread.threadId),
         markdownCell(thread.model ?? "未观测"),
-        markdownCell(thread.reasoningEffort ?? "模型默认"),
+        markdownCell(thread.reasoningEffort ?? "未观测"),
         markdownCell(thread.agentPath === null
           ? "主会话"
           : `子代理 · ${thread.agentPath}`),
