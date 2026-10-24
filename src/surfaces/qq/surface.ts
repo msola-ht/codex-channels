@@ -6,7 +6,7 @@ import { isConversationCommandName, type ConversationCommandExecutor, type Conve
 import { UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import type { ConversationActorRegistry, SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
-import { captureDelivery, checkpointDelivery } from "../delivery-receipt.js";
+import { captureDelivery, checkpointDelivery, DeliveryReceipt } from "../delivery-receipt.js";
 import { isEmergencyStopCommand, parseSlashCommand } from "../slash-command.js";
 import { AttachmentInputLifecycle, type ReceivedAttachmentInput } from "../attachment-input-lifecycle.js";
 import { SurfaceInputBatcher, imageBatchLimitError } from "../surface-input-batcher.js";
@@ -16,7 +16,7 @@ import { createQqLedger } from "./ledger.js";
 import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, maximumQqImageBytes, type QqMessageBody } from "./protocol.js";
 import { readGeneratedImage } from "../generated-image.js";
 import { generatedImageUnavailableText } from "../operation-presentation.js";
-import { planQqMessage, qqCommandNames, qqHelp, renderQqCommandResult, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
+import { planQqDelivery, planQqMessage, qqCommandNames, qqHelp, renderQqCommandResult, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 import { QqInteractionDeliveryError, QqInteractionPort } from "./interactions.js";
 import { QqImageStore, isSupportedQqImageUrl, type QqImageReference } from "./image-store.js";
@@ -418,7 +418,13 @@ class QqGeneration implements SurfaceAdapter {
     signal.throwIfAborted();
     if (!this.allowed(target, actor)) throw new Error("QQ 发送授权已失效");
     const remaining = this.ledger.remaining(grant, actor);
-    const messages = planQqMessage(result, remaining);
+    const plan = planQqDelivery(result, remaining);
+    if (plan.kind === "file") {
+      this.options.logger.info({ reason: "qq-output-plan", remaining, messageCount: 1, formats: ["file"] }, "QQ 完整输出计划已生成");
+      await this.sendMedia(target, actor, grant, { kind: "file", bytes: plan.bytes }, signal, authorized);
+      return;
+    }
+    const messages = plan.messages;
     this.options.logger.info({ reason: "qq-output-plan", remaining, messageCount: messages.length,
       formats: messages.map(message => message.kind) }, "QQ 完整输出计划已生成");
     try {
@@ -449,25 +455,35 @@ class QqGeneration implements SurfaceAdapter {
     current();
     const image = await readGeneratedImage(path, maximumQqImageBytes);
     current();
+    await this.sendMedia(target, actor, grant, { kind: "image", ...image }, signal, authorized);
+  }
+  private async sendMedia(target: ConversationTarget, actor: string, grant: string,
+    media: { kind: "image"; bytes: Buffer; format: "png" | "jpeg" } | { kind: "file"; bytes: Buffer },
+    signal: AbortSignal, authorized?: () => boolean): Promise<void> {
+    signal.throwIfAborted();
+    if (!this.allowed(target, actor) || authorized?.() === false) throw new Error("QQ 附件发送授权已失效");
     const reservation = await this.ledger.reserve(grant, actor, 1);
     const remainingMs = this.ledger.remainingMs(grant, actor);
     const sendSignal = AbortSignal.any([signal, AbortSignal.timeout(Math.ceil(remainingMs))]);
     const beforeSend = (): void => {
       sendSignal.throwIfAborted();
-      if (!this.allowed(target, actor) || !authorized() || Date.now() >= reservation.expiresAt) throw new Error("QQ 图片回复依据已失效");
+      if (!this.allowed(target, actor) || authorized?.() === false || Date.now() >= reservation.expiresAt) throw new Error("QQ 附件回复依据已失效");
       this.ledger.remainingMs(grant, actor);
     };
-    const uploaded = await checkpointDelivery("qq.c2c.upload-image", () => this.client.uploadC2CImage({
-      userOpenid: actor, bytes: image.bytes, format: image.format, signal: sendSignal, beforeSend,
-    }));
-    await checkpointDelivery("qq.c2c.image", () => this.client.sendC2CMessage({ userOpenid: actor,
+    if (media.kind === "file") DeliveryReceipt.current()?.markContentIncomplete();
+    const uploadInput = { userOpenid: actor, bytes: media.bytes, signal: sendSignal, beforeSend };
+    const uploaded = await checkpointDelivery(`qq.c2c.upload-${media.kind}`, () => media.kind === "image"
+      ? this.client.uploadC2CImage({ ...uploadInput, format: media.format })
+      : this.client.uploadC2CFile(uploadInput));
+    await checkpointDelivery(`qq.c2c.${media.kind}`, () => this.client.sendC2CMessage({ userOpenid: actor,
       msgId: reservation.msgId, msgSeq: reservation.msgSeq,
-      message: { kind: "image", fileInfo: uploaded.fileInfo }, signal: sendSignal,
+      message: { kind: media.kind, fileInfo: uploaded.fileInfo }, signal: sendSignal,
       beforeSend: () => {
         beforeSend();
-        if (performance.now() >= uploaded.expiresAt) throw new Error("QQ 图片上传凭据已过期");
+        if (performance.now() >= uploaded.expiresAt) throw new Error("QQ 附件上传凭据已过期");
       },
     }));
+    if (media.kind === "file") DeliveryReceipt.current()?.confirmCompleteContent();
     this.observeMilestone("first-reply", "QQ 本运行代次首个完整回复已获平台确认；不代表客户端已读或模型完成");
   }
   private async sendMessages(target: ConversationTarget, actor: string, grant: string, messages: QqMessageBody[],

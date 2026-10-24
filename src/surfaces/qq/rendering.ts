@@ -5,7 +5,7 @@ import { renderConversationCommandResult } from "../conversation-command-rendere
 import { createTurnCompletedPresentation, renderPlainLifecyclePresentation, renderStructuredLifecyclePresentation } from "../lifecycle-presentation.js";
 import { operationMetadata, operationStatus, operationTitle, redactOperationDetail } from "../operation-presentation.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
-import type { QqMessageBody } from "./protocol.js";
+import { maximumQqTextFileBytes, type QqMessageBody } from "./protocol.js";
 import { renderQqContent, type QqContentBlock } from "./content.js";
 import { formatCodexProviderLabel, formatDisplayedProvider } from "../provider-format.js";
 
@@ -40,6 +40,7 @@ export const qqHelp = [
   "审批按当前请求显示一次、会话或持久规则选项；临时权限仅本次 Turn，终端输入只批准一次或中止。普通问题按提示回应。",
   "MCP 工具审批按提示提供一次、会话或始终批准；仅原用户、原请求和有效回复窗口内生效。",
   "支持生成图片回传，受大小、回复窗口和剩余额度限制；文件、音视频输入、流式和计划任务仍未开放。",
+  "长回答、长 Diff 和完整命令结果超过文本预算或剩余额度时，以完整 UTF-8 文件交付；文件上限 1000000 字节。",
   "普通 MCP 表单按提示填写 JSON；异步/敏感问题及 MCP URL 交互暂不支持。",
 ].join("\n");
 
@@ -47,14 +48,46 @@ export interface QqRenderedMessage {
   /** Complete readable content; the persistent event retains the original source. */
   text: string;
   blocks: QqContentBlock[];
+  /** Only final answers and shared command results may become complete files. Never a rendered preview. */
+  source?: string;
   /** Command panels prefer fewer complete messages over splitting literal fields from headings. */
   compact?: boolean;
 }
 
+class QqMessageBudgetError extends Error {}
+
+function validateSource(text: string): void {
+  if (!text.trim() || Buffer.from(text, "utf8").toString("utf8") !== text) {
+    throw new Error("QQ 完整结果为空或包含无效 Unicode，保留待核对");
+  }
+}
+
 function validateText(text: string): void {
-  if (!text.trim() || Buffer.byteLength(text, "utf8") > MAX_RESULT_BYTES
-    || Buffer.from(text, "utf8").toString("utf8") !== text) {
-    throw new Error("QQ 完整结果为空、包含无效 Unicode 或超过文本预算，保留待核对");
+  validateSource(text);
+  if (Buffer.byteLength(text, "utf8") > MAX_RESULT_BYTES) {
+    throw new QqMessageBudgetError("QQ 完整结果超过文本预算，保留待核对");
+  }
+}
+
+/** Oversize sources bypass Markdown parsing, whose work remains bounded by the text budget. */
+function completeFileCandidate(source: string): QqRenderedMessage | undefined {
+  validateSource(source);
+  const bytes = Buffer.byteLength(source, "utf8");
+  if (bytes > maximumQqTextFileBytes) throw new Error("QQ 完整结果超过文件预算，保留待核对");
+  return bytes > MAX_RESULT_BYTES ? { source, text: source, blocks: [] } : undefined;
+}
+
+export type QqDeliveryPlan = { kind: "messages"; messages: QqMessageBody[] } | { kind: "file"; bytes: Buffer };
+
+/** Select complete delivery before any send. Only a planning budget failure permits a file. */
+export function planQqDelivery(result: QqRenderedMessage, maximum: number): QqDeliveryPlan {
+  if (!Number.isInteger(maximum) || maximum < 0 || maximum > MAX_MESSAGE_COUNT) throw new Error("QQ 回复额度无效");
+  if (result.source !== undefined) completeFileCandidate(result.source);
+  if (maximum === 0) throw new QqMessageBudgetError("QQ 回复额度不足以发送完整结果");
+  try { return { kind: "messages", messages: planQqMessage(result, maximum) }; }
+  catch (error) {
+    if (!(error instanceof QqMessageBudgetError) || result.source === undefined || maximum < 1) throw error;
+    return { kind: "file", bytes: Buffer.from(result.source, "utf8") };
   }
 }
 
@@ -87,7 +120,8 @@ function plainChunks(text: string, preferBoundaries = true): QqMessageBody[] {
 /** Plan against this grant's current budget. Adjacent blocks share messages; blocks are not sends. */
 export function planQqMessage(result: QqRenderedMessage, maximum = MAX_MESSAGE_COUNT, literalOnly = false): QqMessageBody[] {
   validateText(result.text);
-  if (!Number.isInteger(maximum) || maximum < 1 || maximum > MAX_MESSAGE_COUNT) throw new Error("QQ 回复额度不足以发送完整结果");
+  if (!Number.isInteger(maximum) || maximum < 0 || maximum > MAX_MESSAGE_COUNT) throw new Error("QQ 回复额度无效");
+  if (maximum === 0) throw new QqMessageBudgetError("QQ 回复额度不足以发送完整结果");
   const messages: QqMessageBody[] = [];
   const append = (message: QqMessageBody): void => {
     const previous = messages.at(-1);
@@ -112,7 +146,7 @@ export function planQqMessage(result: QqRenderedMessage, maximum = MAX_MESSAGE_C
     && !(result.compact && plain.length < messages.length)
     ? messages : plain;
   if (planned.length > maximum || planned.some(message => !message.content.trim())) {
-    throw new Error("QQ 当前额度无法发送完整结果，保留待核对");
+    throw new QqMessageBudgetError("QQ 当前额度无法发送完整结果，保留待核对");
   }
   return planned;
 }
@@ -133,6 +167,18 @@ function hasMultilineField(value: unknown): boolean {
 
 /** Diff is source data: leading +, -, # and indentation must not become panel syntax. */
 export function renderQqCommandResult(result: ConversationCommandResult): QqRenderedMessage | null {
+  const source = renderConversationCommandResult(result);
+  if (source === null) return null;
+  const candidate = completeFileCandidate(source);
+  if (candidate) return candidate;
+  try { return { ...renderQqCommandPanel(result, source), source }; }
+  catch (error) {
+    if (!(error instanceof QqMessageBudgetError)) throw error;
+    return { source, text: source, blocks: [] };
+  }
+}
+
+function renderQqCommandPanel(result: ConversationCommandResult, text: string): QqRenderedMessage {
   if (result.kind === "outcome" && result.outcome.type === "thread.renamed") {
     const title = "会话已重命名";
     const value = `名称：${result.outcome.name}`;
@@ -156,8 +202,6 @@ export function renderQqCommandResult(result: ConversationCommandResult): QqRend
     validateText(text);
     return { text, blocks: [{ text: title, markdown: `## ${title}` }, { text: values }], compact: true };
   }
-  const text = renderConversationCommandResult(result);
-  if (text === null) return null;
   if (result.kind === "artifacts") {
     validateText(text);
     return { text, blocks: [{ text }] };
@@ -287,9 +331,10 @@ function mapQqQueryFields(
 
 export function renderQqOutput(event: OutputEvent): QqRenderedMessage {
   if (event.type === "text.completed") {
-    validateText(event.text);
+    const candidate = completeFileCandidate(event.text);
+    if (candidate) return candidate;
     const blocks = renderQqContent(event.text);
-    return { text: blocks.map(block => block.text).join("\n"), blocks };
+    return { source: event.text, text: blocks.map(block => block.text).join("\n"), blocks };
   }
   if (event.type === "operation.updated") {
     const panel = renderQqPanel([

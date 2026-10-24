@@ -4,6 +4,8 @@ const MAX_RESPONSE_BYTES = 64 * 1024;
 
 export type QqProtocolOperation = "token" | "gateway" | "upload" | "send";
 export const maximumQqImageBytes = 3 * 1024 * 1024;
+export const maximumQqTextFileBytes = 1_000_000;
+export const qqCompleteContentFileName = "codex-complete-result.txt";
 export type QqProtocolFailure =
   | "invalid-input" | "closed" | "cancelled" | "timeout" | "network"
   | "http" | "business" | "invalid-response" | "response-too-large";
@@ -27,7 +29,7 @@ export type QqMessageBody =
   | { kind: "text"; content: string }
   | { kind: "markdown"; content: string };
 
-type QqOutgoingMessage = QqMessageBody | { kind: "image"; fileInfo: string };
+type QqOutgoingMessage = QqMessageBody | { kind: "image"; fileInfo: string } | { kind: "file"; fileInfo: string };
 
 export interface QqSendMessageInput {
   userOpenid: string;
@@ -147,7 +149,7 @@ export class QqProtocolClient {
     if (!validId(input.userOpenid) || !validId(input.msgId)
       || !Number.isSafeInteger(input.msgSeq) || input.msgSeq < 1 || input.msgSeq > 65535
       || !record(input.message)
-      || (input.message.kind === "image"
+      || (input.message.kind === "image" || input.message.kind === "file"
         ? Object.keys(input.message).some(key => key !== "kind" && key !== "fileInfo") || !validFileInfo(input.message.fileInfo)
         : (input.message.kind !== "text" && input.message.kind !== "markdown")
           || Object.keys(input.message).some(key => key !== "kind" && key !== "content")
@@ -158,7 +160,7 @@ export class QqProtocolClient {
     // Snapshot the validated payload before token refresh or any other asynchronous work.
     const path = `/v2/users/${encodeURIComponent(input.userOpenid)}/messages`;
     const body = {
-      ...(input.message.kind === "image" ? { msg_type: 7, media: { file_info: input.message.fileInfo } }
+      ...(input.message.kind === "image" || input.message.kind === "file" ? { msg_type: 7, media: { file_info: input.message.fileInfo } }
         : input.message.kind === "text"
         ? { msg_type: 0, content: input.message.content }
         : { msg_type: 2, markdown: { content: input.message.content, force_verify_image_resource: true } }),
@@ -180,8 +182,26 @@ export class QqProtocolClient {
       || input.bytes.length > maximumQqImageBytes || !["png", "jpeg"].includes(input.format)) {
       throw new QqProtocolError("upload", "invalid-input");
     }
+    return this.uploadC2CMedia(input, 1, input.format === "png" ? "image.png" : "image.jpg");
+  }
+
+  async uploadC2CFile(input: { userOpenid: string; bytes: Buffer;
+    signal: AbortSignal; beforeSend(): void }): Promise<{ fileInfo: string; expiresAt: number }> {
+    if (!validId(input.userOpenid) || !Buffer.isBuffer(input.bytes) || input.bytes.length === 0
+      || input.bytes.length > maximumQqTextFileBytes) {
+      throw new QqProtocolError("upload", "invalid-input");
+    }
+    const text = input.bytes.toString("utf8");
+    if (!text.trim() || !Buffer.from(text, "utf8").equals(input.bytes)) {
+      throw new QqProtocolError("upload", "invalid-input");
+    }
+    return this.uploadC2CMedia(input, 4, qqCompleteContentFileName);
+  }
+
+  private async uploadC2CMedia(input: { userOpenid: string; bytes: Buffer;
+    signal: AbortSignal; beforeSend(): void }, fileType: 1 | 4, fileName: string): Promise<{ fileInfo: string; expiresAt: number }> {
     const path = `/v2/users/${encodeURIComponent(input.userOpenid)}/files`;
-    const body = { file_type: 1, srv_send_msg: false, file_name: input.format === "png" ? "image.png" : "image.jpg",
+    const body = { file_type: fileType, srv_send_msg: false, file_name: fileName,
       file_data: input.bytes.toString("base64") };
     const started = performance.now();
     return this.withRequest("upload", input.signal, async signal => {
