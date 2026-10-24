@@ -7,7 +7,22 @@ QQ Adapter 已移除 connectionOnly，启用共享自动绑定恢复，独立能
 
 ## 当前状态与首版范围
 
-当前命令为 /help（含 /h）、/status、/stop、/workspace（含 /work）、/model、/new、/sessions、/resume（含 /r）；其他斜杠命令拒绝。
+当前基础命令为 /help（含 /h）、/status、/stop、/workspace（含 /work）、/model、/new、/sessions、/resume（含 /r）；此外开放下述查询命令，其他斜杠命令拒绝。
+新增只读查询 /usage、/limits、/diff（不接受参数）及 /metrics；后者复用共享解析器，支持 session 或
+global/providers/models/errors 与 24h/7d/30d/90d/all 时间范围。/limits 的 reset 等参数在 Surface 入口拒绝，不进入重置券服务。
+查询复用共享 Actor/Workspace 守卫、账户/指标/当前 Turn Diff 用例及结果格式器，不创建 Turn 或撤销任务来源。
+关联审查补齐异步查询边界：会话统计在查询前后复核授权与原 Thread；QQ 四项查询在每片写出前复核原 Thread，
+账户查询还复核原 Provider 和订阅就绪状态，防止等待查询、队列或 Token 时切换会话后仍发送旧结果。
+账户查询在绑定尚未恢复时拒绝，等待期间会话切换或订阅失效也拒绝交付，不以默认 Provider 查询其他账户。
+结果在发送前复用 Outbox 的完整规划，无法在原来信被动预算内完整展示时仅发送受控查看提示；
+不发送半份结果、不自动转主动或文件、不对已尝试发送的来信递归重发。当前 Diff 为空不意味着工作区没有文件变化。
+本批查询命令尚未部署；真实 QQ 参数提示、长查询提示及结果显示仍待部署后验收。
+本地直接调用既有解析与规划入口：空参数/session、models 7d、errors all 解析成功，session 7d 和非法时间范围返回 metrics.usage；
+2000 字节单片、7900 字节四片，8100 字节被动计划返回 invalid-input；空 Diff 呈现“当前 Session 暂无 Turn Diff。”。
+这些无网络观察只验证解析、规划和空结果呈现，不代替 QQ 入站到客户端收件。
+本次审查覆盖解析白名单与只读参数、共享授权、Provider 查询及快照结算、统计读取与会话关联、当前 Diff 读取、
+格式器、完整分片预规划、Outbox 队列/Token 后守卫、被动窗口、失败不重试和关闭取消。
+真实客户端的查询收件、查询期间切换会话和分片期间撤权未观察；不以静态检查或先前任务收件替代该批命令验收。
 普通任务沿共享 submit 提交，明确参与的精确 Turn 可回传完整非 commentary Item 和任务终态；过程事件不发送。
 完整计划、账号/接收人/Turn 预算已实现，主动配额预留按最长 45 秒计划保守延后释放；被动命令每来信只尝试一次完整计划。
 用户已选择沿用现有人工重试，不增加 Journal 策略字段或迁移；可能重复已收到分片，旧来源仍禁止重发。

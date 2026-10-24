@@ -11,9 +11,9 @@ import { resolveSurfaceDelivery } from "../delivery-policy.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import { parseQqTextEvent, type QqInboundTextMessage } from "./inbound.js";
 import { QqTaskSources, type QqTaskScope, type QqTaskSourceReference } from "./task-sources.js";
-import { QqTextOutbox } from "./outbox.js";
+import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
-import type { QqProtocolClient } from "./protocol.js";
+import { QqProtocolError, type QqProtocolClient, type QqTextMessage } from "./protocol.js";
 import { renderQqTurnCompleted } from "./lifecycle.js";
 import { QqBodyStreaming } from "./streaming.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
@@ -21,7 +21,7 @@ import { surfaceErrorMetadata } from "../error-metadata.js";
 export interface QqMessageOptions {
   appId: string;
   access: SurfaceAccessPolicy;
-  service: Pick<ConversationTurnUseCases, "submit" | "touchActivity"> & Pick<ConversationSessionUseCases, "selectedWorkspaceId" | "listWorkspaces">;
+  service: Pick<ConversationTurnUseCases, "submit" | "touchActivity"> & Pick<ConversationSessionUseCases, "selectedWorkspaceId" | "listWorkspaces" | "status">;
   commands: ConversationCommandExecutor;
   actors: ConversationActorRegistry;
   ownsThread(target: ConversationTarget, threadId: string): boolean;
@@ -33,7 +33,8 @@ export interface QqMessageOptions {
   };
 }
 
-const HELP = "QQ 文字任务\n直接发送文字提交到当前工作区。\n/help · /status · /stop\n/workspace [序号、ID 或名称]\n/model [共享模型选择参数]\n/new\n/sessions [页码] [search 关键词]\n/resume [序号、名称或 Session ID]（/r）\n恢复会话不补发旧任务结果；发送新消息后建立新的回传关联。\n暂不支持附件、审批、问题交互或计划任务。结果投递失败请在本机投递箱核对。";
+const HELP = "QQ 文字任务\n直接发送文字提交到当前工作区。\n/help · /status · /stop\n/workspace [序号、ID 或名称]\n/model [共享模型选择参数]\n/new\n/sessions [页码] [search 关键词]\n/resume [序号、名称或 Session ID]（/r）\n/usage · /limits · /diff（均不带参数）\n/metrics [session]\n/metrics <global|providers|models|errors> [24h|7d|30d|90d|all]\n/limits 仅查询，不支持重置券操作。/diff 仅查看当前已取得的 Turn Diff，重启不补读历史。\n恢复会话不补发旧任务结果；发送新消息后建立新的回传关联。\n暂不支持附件输入、审批、问题交互或计划任务。结果投递失败请在本机投递箱核对。";
+const QUERY_COMMANDS = new Set(["usage", "limits", "metrics", "diff"]);
 
 /** Owns one connection generation's input tasks and disposable source authority. */
 export class QqMessages implements SurfaceOutputPort {
@@ -192,21 +193,32 @@ export class QqMessages implements SurfaceOutputPort {
     let stage: "command" | "render" | "reply" | "submit" = "command";
     try {
       if (command) {
-        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume"].includes(command.name)
-          || (["help", "status", "stop", "new"].includes(command.name) && command.argumentsText.trim())) {
+        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", ...QUERY_COMMANDS].includes(command.name)
+          || (["help", "status", "stop", "new", "usage", "limits", "diff"].includes(command.name) && command.argumentsText.trim())) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;
         }
         if (command.name === "help") { await this.reply(message, HELP, () => this.allowed(target, message.actorId)); return; }
         if (((command.name === "workspace" || command.name === "model" || command.name === "resume") && command.argumentsText.trim()) || command.name === "new") this.sources.cancelTarget(target);
         const commandScope = this.scope(message.actorId);
-        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume", command.argumentsText, message.actorId);
+        const queryStatus = QUERY_COMMANDS.has(command.name) ? this.options.service.status(target) : undefined;
+        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "usage" | "limits" | "metrics" | "diff", command.argumentsText, message.actorId);
         stage = "render";
         const scope = command.name === "workspace" && command.argumentsText.trim() ? this.scope(message.actorId) : commandScope;
         const text = result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
           : renderConversationCommandResult(result.kind === "models" ? { kind: "models", view: "model", state: result.state } : result);
         if (!text) throw new Error("QQ 命令没有可交付结果");
         stage = "reply";
-        await this.reply(message, text, () => !!scope && this.current(scope));
+        await this.reply(message, text, () => {
+          if (!scope || !this.current(scope)) return false;
+          if (!queryStatus) return true;
+          const current = this.options.service.status(target);
+          if (current.threadId !== queryStatus.threadId) return false;
+          return command.name !== "usage" && command.name !== "limits"
+            || (current.modelProvider === queryStatus.modelProvider && !current.sessionRestoring);
+        }, QUERY_COMMANDS.has(command.name)
+          ? command.name === "diff" ? "Diff 无法在本次 QQ 回复中完整展示，本次仅发送此提示。请在原生 Codex 会话查看。"
+            : "查询结果无法在本次 QQ 回复中完整展示，本次仅发送此提示。统计可缩小 /metrics 查询范围，或在本机 WebUI 查看；账户信息也可从其他已接入渠道查询。"
+          : undefined);
         return;
       }
       const scope = this.scope(message.actorId);
@@ -235,12 +247,20 @@ export class QqMessages implements SurfaceOutputPort {
     } finally { if (!stop) this.busy.delete(target.conversationId); }
   }
 
-  private async reply(message: QqInboundTextMessage, content: string, allowed: () => boolean): Promise<void> {
+  private async reply(message: QqInboundTextMessage, content: string, allowed: () => boolean, oversizedNotice?: string): Promise<void> {
     // A send failure must not recursively send another reply with the same msg_seq.
     if (this.replied.has(message)) throw new Error("QQ 来信回复已尝试，不重复发送");
+    const input: QqTextMessage = { mode: "passive", recipient: message.actorId, content,
+      messageId: message.id, sequence: 1, sourceTimestampMs: message.sentAtMs };
+    if (oversizedNotice) {
+      try { planText(input); }
+      catch (error) {
+        if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
+        input.content = oversizedNotice;
+      }
+    }
     this.replied.add(message);
-    await this.outbox.deliver({ mode: "passive", recipient: message.actorId, content,
-      messageId: message.id, sequence: 1, sourceTimestampMs: message.sentAtMs }, {
+    await this.outbox.deliver(input, {
       signal: this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
       reserve: parts => this.budget.reserve(message.actorId, parts),

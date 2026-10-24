@@ -108,7 +108,7 @@ export class QqTextOutbox {
   }
 }
 
-function planText(input: QqTextMessage): readonly QqTextMessage[] {
+export function planText(input: QqTextMessage): readonly QqTextMessage[] {
   const snapshot = { ...input };
   const text = snapshot.content;
   if (typeof text !== "string" || !text.trim() || /[\uD800-\uDFFF]/u.test(text)

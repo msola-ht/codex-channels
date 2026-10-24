@@ -728,6 +728,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           summary: await this.conversations.requestMetrics(
             target,
             parseMetricsCommand(argumentsText),
+            assertAuthorized,
           ),
         };
       case "limits":

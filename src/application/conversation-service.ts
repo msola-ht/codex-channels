@@ -378,6 +378,7 @@ export interface ConversationAccountMetricsUseCases {
   requestMetrics(
     target: ConversationTarget,
     query?: RequestMetricsCommandQuery,
+    assertAuthorized?: () => void,
   ): Promise<RequestMetricsResult | null>;
 }
 
@@ -623,8 +624,9 @@ export class ConversationService implements
   requestMetrics(
     target: ConversationTarget,
     query: RequestMetricsCommandQuery = { view: "session" },
+    assertAuthorized?: () => void,
   ): Promise<RequestMetricsResult | null> {
-    return this.accountMetrics.requestMetrics(target, query);
+    return this.accountMetrics.requestMetrics(target, query, assertAuthorized);
   }
 
   async submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver): Promise<Submission> {

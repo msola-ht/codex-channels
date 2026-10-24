@@ -11,6 +11,12 @@ Gateway 的 QQ 连接使用共享代理。QQ 凭据编辑使用 Setup，WebUI �
 启停、账号、凭据或移除允许用户后按提示重启 Gateway；新增允许用户可热加载。
 使用 `codexc doctor` 查看脱敏配置状态，使用 `codexc logs gateway -n 100` 查看连接状态。
 QQ 支持普通文字、`/help`（`/h`）、`/status`、`/stop`、`/workspace`（`/work`）、`/model`、`/new`、`/sessions` 和 `/resume`（`/r`）。
+另支持只读查询：`/usage`、`/limits`、`/diff`（均不带参数），以及 `/metrics [session]`、
+`/metrics <global|providers|models|errors> [24h|7d|30d|90d|all]`。统计范围与其他渠道一致；不带参数时查询当前会话。
+QQ 的 `/limits` 不开放重置券操作；账户查询在已有会话订阅尚未恢复时明确拒绝，不猜默认 Provider。
+`/diff` 显示 Gateway 当前已取得的 Turn Diff，不扫描磁盘或补读重启前历史。查询结果沿原来信被动回复，
+超出完整分片预算时在发送前改为查看提示，不截断、转主动消息或转文件；查询不会撤销当前任务回传资格。
+查询或回复等待期间切换会话后不再发送旧查询结果；账户查询还会复核 Provider 和订阅状态，变化后请重新查询。
 `/sessions` 沿用共享分页、筛选和标题搜索语法；无参数 `/resume` 显示列表，带序号、名称或 Session ID 时恢复当前工作区内的会话。
 QQ 在尝试带参数恢复前撤销旧任务的回传资格，即使选择失败也不会恢复该资格；查看列表不撤销。恢复不会补发旧结果，发送新消息才建立新的任务回传关联。
 先选择预配置工作区和模型，再发送任务；审批/问题交互、附件输入、引用、群聊与计划任务不开放。
