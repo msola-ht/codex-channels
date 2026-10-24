@@ -192,6 +192,7 @@ if (document) {
       ? `已配置 ${qq.allowed_user_openids.length} 个允许用户（内容已隐藏）`
       : "无允许用户，拒绝所有用户输入");
     note("QQ 账号能力", "未知；Doctor 不获取 Access Token、不连接 QQ、不发送消息");
+    note("QQ 运行核对", "配置不等于连接或收发成功；用 codexc logs gateway -n 100 核对连接与首收/首回，授权 QQ 账号可发送 /help 和 /status");
   } else {
     note("QQ", "未配置");
   }

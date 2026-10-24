@@ -8,6 +8,7 @@ import type {
 } from "../../conversation-core/index.js";
 import {
   formatConversationCommandHelpLines,
+  conversationSessionEntryHelpLines,
 } from "../conversation-command-help.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import {
@@ -117,7 +118,7 @@ export function renderFeishuHelp(): string {
   return toStructuredMarkdownList([
     "飞书 Codex 命令",
     "",
-    "普通文本会发送到当前 Codex Session。",
+    ...conversationSessionEntryHelpLines,
     "",
     ...formatConversationCommandHelpLines(formatFeishuCommandMarkdown),
     "飞书：",

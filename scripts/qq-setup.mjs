@@ -101,6 +101,7 @@ export async function runQqSetup({
     const unchanged = isDeepStrictEqual(current.qq, document.qq);
     if (unchanged) {
       output.write("QQ 配置未变化，未写入文件，无需重启。\n");
+      writeVerificationSteps(output, enabled, allowedUserOpenids.length);
       return {
         action: "unchanged", channel: "qq", configured: true, enabled,
         allowedUserCount: allowedUserOpenids.length,
@@ -129,6 +130,7 @@ export async function runQqSetup({
     } else {
       writeGatewayConfigActivationNotice(output, environment, configActivationResult(activation));
     }
+    writeVerificationSteps(output, enabled, allowedUserOpenids.length);
     return {
       action: "configured", channel: "qq", configured: true, enabled, configPath,
       allowedUserCount: allowedUserOpenids.length,
@@ -141,6 +143,20 @@ export async function runQqSetup({
   } finally {
     prompt.close();
   }
+}
+
+function writeVerificationSteps(output, enabled, allowedUserCount) {
+  if (!enabled) {
+    output.write("QQ 当前禁用；需要接收消息时，通过渠道配置启用并按提示激活。\n");
+    return;
+  }
+  if (allowedUserCount === 0) {
+    output.write("QQ 当前没有允许用户；先配置允许的 OpenID，否则来信不会提交。\n");
+    return;
+  }
+  output.write("下一步：完成上面的激活要求后，用允许名单内的 QQ 账号发送 /help，再用 /status 核对工作区和会话。\n");
+  output.write("普通消息沿用共享会话策略，可能接续已有空闲会话；希望新建时先发送 /new。\n");
+  output.write("保存与连接就绪不等于收发成功；用 codexc logs gateway -n 100 核对连接、首条授权输入和完整回复确认。\n");
 }
 
 async function scanQq({ input, output, registerApplication, renderQRCode }) {

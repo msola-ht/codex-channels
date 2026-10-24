@@ -1,5 +1,5 @@
 import type { Agent } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 import { safeInteractionDecision, type InteractionPort } from "../../approval/index.js";
 import { isConversationCommandName, type ConversationCommandExecutor, type ConversationTurnUseCases } from "../../application/index.js";
@@ -12,7 +12,7 @@ import { parseSlashCommand } from "../slash-command.js";
 import type { SurfaceAdapter, SurfaceOutputPort } from "../types.js";
 import { createQqLedger } from "./ledger.js";
 import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, type QqMessageBody } from "./protocol.js";
-import { planQqMessage, qqHelp, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
+import { planQqMessage, qqCommandNames, qqHelp, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 
 export interface QqNetwork {
@@ -35,7 +35,7 @@ export interface CreateQqSurfaceOptions {
   onFatal(error: Error): void;
 }
 // Commands which can start a Turn need their own verified submission association.
-const supportedCommands = new Set(["status", "stop", "workspace", "sessions", "resume", "new", "model", "effort", "fast", "usage", "limits"]);
+const supportedCommands = new Set<string>(qqCommandNames);
 
 export class QqSurface implements SurfaceAdapter {
   readonly surface = "qq";
@@ -90,6 +90,8 @@ class QqGeneration implements SurfaceAdapter {
   private readonly controller = new AbortController();
   private readonly pending = new Map<string, Set<Promise<void>>>();
   private readonly jobs = new Set<Promise<void>>();
+  private readonly generationId = randomUUID();
+  private readonly observedMilestones = new Set<"first-input" | "first-submission" | "first-reply">();
   private stopping: Promise<void> | undefined;
   private closed = false;
 
@@ -103,6 +105,8 @@ class QqGeneration implements SurfaceAdapter {
       agentForUrl: (url, signal) => this.network.agentForUrl(url, signal),
       releaseAgent: agent => this.network.releaseAgent(agent),
       onDispatch: (envelope, signal) => this.receive(envelope, signal),
+      onStatus: status => this.options.logger.info({ surface: "qq", accountId: this.accountId, generationId: this.generationId,
+        stage: "connection", status }, "QQ 连接阶段变化；连接就绪不代表消息收发已验证"),
     });
     void this.transport.finished.catch(error => this.fatal(error));
     this.output = {
@@ -194,6 +198,7 @@ class QqGeneration implements SurfaceAdapter {
       await this.notify(target, message.actor, message.id, "QQ 当前仅支持完整纯文本输入，附件和混合消息未提交。");
       return;
     }
+    this.observeMilestone("first-input", "QQ 本运行代次首条授权完整文本已接收；尚不代表已提交模型");
     const command = parseSlashCommand(message.text);
     if (command) {
       if (command.name === "help") { await this.notify(target, message.actor, message.id, qqHelp); return; }
@@ -217,7 +222,10 @@ class QqGeneration implements SurfaceAdapter {
     }
     // Only submission/association is awaited by output, never a command reply queued behind it.
     const submission = this.options.service.submit(target, message.text, () => this.allowed(target, message.actor))
-      .then(result => this.ledger.associate(message.id, result.threadId, result.turnId, result.steered));
+      .then(async result => {
+        await this.ledger.associate(message.id, result.threadId, result.turnId, result.steered);
+        this.observeMilestone("first-submission", "QQ 本运行代次首次会话提交已返回并登记；尚不代表模型完成");
+      });
     const entries = this.pending.get(target.conversationId) ?? new Set<Promise<void>>();
     entries.add(submission);
     this.pending.set(target.conversationId, entries);
@@ -251,6 +259,12 @@ class QqGeneration implements SurfaceAdapter {
         ? { httpStatus: error.httpStatus, bizCode: error.bizCode } : {}) }, "QQ Markdown 被明确拒绝，将使用完整纯文本");
       await this.sendMessages(target, actor, grant, planQqMessage(result, this.ledger.remaining(grant, actor), true), signal, authorized, false);
     }
+    this.observeMilestone("first-reply", "QQ 本运行代次首个完整回复已获平台确认；不代表客户端已读或模型轮次完成");
+  }
+  private observeMilestone(stage: "first-input" | "first-submission" | "first-reply", message: string): void {
+    if (this.observedMilestones.has(stage)) return;
+    this.observedMilestones.add(stage);
+    this.options.logger.info({ surface: "qq", accountId: this.accountId, generationId: this.generationId, stage }, message);
   }
   private async sendMessages(target: ConversationTarget, actor: string, grant: string, messages: QqMessageBody[],
     signal: AbortSignal, authorized: (() => boolean) | undefined, allowFormatRejection: boolean): Promise<void> {

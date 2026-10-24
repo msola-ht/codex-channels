@@ -1,4 +1,6 @@
 import type { OutputEvent } from "../../conversation-core/index.js";
+import type { ConversationCommandName } from "../../application/index.js";
+import { conversationCommandDescriptions, conversationSessionEntryHelpLines } from "../conversation-command-help.js";
 import { createTurnCompletedPresentation, renderPlainLifecyclePresentation, renderStructuredLifecyclePresentation } from "../lifecycle-presentation.js";
 import { operationMetadata, operationStatus, operationTitle, redactOperationDetail } from "../operation-presentation.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
@@ -9,11 +11,19 @@ const MAX_RESULT_BYTES = 12_000;
 const MAX_MESSAGE_BYTES = 3_000;
 const MAX_MESSAGE_COUNT = 4;
 
+const qqCommandGroups = [
+  { title: "状态与运行：", commands: ["status", "stop"] },
+  { title: "工作区与会话：", commands: ["workspace", "sessions", "resume", "new"] },
+  { title: "模型与用量：", commands: ["model", "effort", "fast", "usage", "limits"] },
+] satisfies { title: string; commands: ConversationCommandName[] }[];
+export const qqCommandNames: readonly ConversationCommandName[] = qqCommandGroups.flatMap(group => group.commands);
+
 export const qqHelp = [
-  "QQ 单聊", "", "状态与运行：", "/status：查看状态", "/stop：停止当前任务", "",
-  "工作区与会话：", "/workspace：查看或切换工作区", "/sessions：查看会话", "/resume：恢复会话", "/new：新建会话", "",
-  "模型与用量：", "/model：查看或选择模型", "/effort：查看或调整思考等级", "/fast：查看或调整速度档位",
-  "/usage：查询用量", "/limits：查询限额", "",
+  "QQ 单聊", "", ...conversationSessionEntryHelpLines, "",
+  ...qqCommandGroups.flatMap(group => [group.title,
+    ...group.commands.map(name => `/${name}：${conversationCommandDescriptions[name]}`), ""]),
+  "快捷命令：/h → /help，/work → /workspace，/r → /resume。",
+  "QQ 的 /limits 仅查询，额度操作请在原生客户端处理。",
   "直接发送文字开始对话；回复按 QQ 格式呈现，代码和不支持的结构保留为完整文本。",
   "审批、问题、流式、附件、计划任务暂不支持；审批请求安全拒绝，请在原生客户端处理。",
 ].join("\n");
