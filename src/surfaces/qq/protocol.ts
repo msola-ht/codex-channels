@@ -39,6 +39,8 @@ export interface QqStreamFrame {
   finished: boolean;
 }
 export const QQ_STREAM_BYTES = 16_000;
+/** Local complete-result file budget, below QQ's documented direct-upload limit. */
+export const QQ_RESULT_FILE_BYTES = 256 * 1024;
 
 export type QqTextRejection = "permission" | "refused" | "expired" | "reply-window-or-limit"
   | "rate-limit" | "duplicate" | "length" | "format" | "content" | "unavailable";
@@ -197,6 +199,21 @@ export class QqProtocolClient {
           input_state: input.finished ? 10 : 1, index: input.index, msg_id: input.messageId, msg_seq: 2,
           ...(input.streamId ? { stream_msg_id: input.streamId } : {}) },
         deadline: performance.now() + QQ_PASSIVE_WINDOW_MS - age };
+    }, context);
+  }
+
+  async sendResultFile(input: { recipient: string; content: string }, context: QqTextSendContext): Promise<{ messageId: string }> {
+    return this.sendPlan(() => {
+      if (!record(input) || !identifier(input.recipient) || typeof input.content !== "string"
+        || !input.content.trim() || !wellFormed(input.content) || input.content.length > QQ_RESULT_FILE_BYTES
+        || Buffer.byteLength(input.content) > QQ_RESULT_FILE_BYTES
+        || Object.keys(input).some(key => key !== "recipient" && key !== "content")) {
+        throw new QqProtocolError("message", "invalid-input");
+      }
+      return { path: `/v2/users/${encodeURIComponent(input.recipient)}/files`, body: {
+        file_type: 4, srv_send_msg: true, file_name: "codex-result.txt",
+        file_data: Buffer.from(input.content, "utf8").toString("base64"),
+      } };
     }, context);
   }
 

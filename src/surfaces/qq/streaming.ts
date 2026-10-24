@@ -17,6 +17,9 @@ interface Stream {
   attempted: boolean;
   completed: boolean;
   failed: boolean;
+  limited?: boolean;
+  sealed?: boolean;
+  sealTimer?: ReturnType<typeof setTimeout>;
   tail?: Promise<void>;
   anchor?: { messageId: string; sourceTimestampMs: number; signal: AbortSignal };
   deadline?: number;
@@ -54,10 +57,12 @@ export class QqBodyStreaming {
         index: 0, attempted: false, completed: false, failed: false };
       this.streams.set(key, stream);
     }
-    if (stream.failed || stream.completed) return;
+    if (stream.failed || stream.completed || stream.sealed || stream.limited) return;
     if (stream.text.length + event.text.length > QQ_STREAM_BYTES
       || Buffer.byteLength(stream.text) + Buffer.byteLength(event.text) > QQ_STREAM_BYTES) {
-      stream.failed = true; stream.text = ""; this.failed(); return;
+      stream.limited = true; stream.text = "";
+      if (stream.id) this.scheduleSeal(stream, 0);
+      return;
     }
     stream.text += event.text;
   }
@@ -65,7 +70,7 @@ export class QqBodyStreaming {
   /** Router permission to start best-effort work; one bounded owner per Item. */
   async update(event: Body, signal?: AbortSignal): Promise<void> {
     const stream = this.streams.get(this.key(event));
-    if (!stream || stream.failed || stream.completed || this.lifetime.signal.aborted) return;
+    if (!stream || stream.failed || stream.completed || stream.sealed || this.lifetime.signal.aborted) return;
     if (stream.tail) return stream.tail;
     const task = this.flush(stream, signal).catch(() => { stream.failed = true; this.failed(); })
       .finally(() => { if (stream.tail === task) delete stream.tail; });
@@ -73,33 +78,51 @@ export class QqBodyStreaming {
     await task;
   }
 
-  /** Returns false only when no frame could have reached QQ. No implicit full replay after partial output. */
+  /** Only a confirmed closed prefix permits active continuation; uncertain streams never switch modes. */
   async finish(event: Extract<Body, { type: "text.completed" }>, signal: AbortSignal,
-    checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean): Promise<boolean> {
+    checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean): Promise<
+      { kind: "ordinary" } | { kind: "complete" } | { kind: "continue"; text: string }> {
     const key = this.key(event);
     const stream = this.streams.get(key);
-    if (!stream) return false;
+    if (!stream) return { kind: "ordinary" };
     stream.completed = true;
+    clearTimeout(stream.sealTimer);
     const bounded = AbortSignal.any([signal, this.lifetime.signal, AbortSignal.timeout(45_000)]);
     const abort = () => stream.controller.abort();
     bounded.addEventListener("abort", abort, { once: true });
     if (bounded.aborted) abort();
     try {
       await stream.tail;
-      if (!stream.attempted) return false;
+      if (!stream.attempted) return { kind: "ordinary" };
       // A prior preview is already externally visible or uncertain, even if the final send is never attempted.
-      await checkpoint({ operation: "qq-stream:complete", state: "started" });
+      const continuation = stream.sealed || stream.limited || Buffer.byteLength(event.text) > QQ_STREAM_BYTES
+        || performance.now() >= (stream.deadline ?? 0) - 45_000;
+      const operation = continuation ? "qq-stream:prefix" : "qq-stream:complete";
+      await checkpoint({ operation, state: "started" });
       if (stream.failed || !stream.id || !event.text.startsWith(stream.sent)) {
         throw new QqProtocolError("message", "invalid-response");
       }
-      const result = await this.send(stream, event.text, true, bounded, authorized);
-      await checkpoint({ operation: "qq-stream:complete", state: "confirmed",
-        ...(result.messageId.length <= 256 ? { messageId: result.messageId } : {}) });
-      this.confirmed(stream.index);
-      return true;
+      if (!stream.sealed) {
+        await this.send(stream, continuation ? stream.sent : event.text, true, bounded, authorized);
+        stream.sealed = true;
+      }
+      await checkpoint({ operation, state: "confirmed",
+        ...(stream.id.length <= 256 ? { messageId: stream.id } : {}) });
+      const suffix = event.text.slice(stream.sent.length);
+      if (!suffix) { this.confirmed(stream.index); return { kind: "complete" }; }
+      // Never split a completed grapheme across the old bubble and the continuation.
+      let boundary = false;
+      for (const segment of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(event.text)) {
+        if (segment.index < stream.sent.length) continue;
+        boundary = segment.index === stream.sent.length;
+        break;
+      }
+      if (!boundary) throw new QqProtocolError("message", "invalid-input");
+      return { kind: "continue", text: `[正文续接]\n${suffix}` };
     } finally {
       bounded.removeEventListener("abort", abort);
       stream.controller.abort();
+      clearTimeout(stream.sealTimer);
       // A later explicit journal retry uses the existing complete-text path and may duplicate previews.
       this.streams.delete(key);
       stream.text = ""; stream.sent = "";
@@ -108,6 +131,7 @@ export class QqBodyStreaming {
 
   async close(): Promise<void> {
     this.lifetime.abort();
+    for (const stream of this.streams.values()) clearTimeout(stream.sealTimer);
     await Promise.allSettled([...this.streams.values()].flatMap(value => value.tail ? [value.tail] : []));
     this.streams.clear(); this.usedSources.clear(); this.startedSources.clear();
   }
@@ -125,7 +149,9 @@ export class QqBodyStreaming {
     const timeLeft = Math.ceil(stream.deadline - performance.now());
     if (timeLeft <= 0) return;
     const signal = AbortSignal.any([local, anchor.signal, AbortSignal.timeout(timeLeft)]);
-    if (stream.completed || stream.failed || stream.index >= 120 || stream.text === stream.sent) return;
+    if (stream.completed || stream.failed || stream.sealed) return;
+    if (stream.limited || stream.index >= 120) { await this.seal(stream, signal); return; }
+    if (stream.text === stream.sent) return;
     stream.nextUpdateAt ??= performance.now() + 1000;
     const wait = Math.ceil(stream.nextUpdateAt - performance.now());
     if (wait > 0) await delay(wait, undefined, { signal });
@@ -136,6 +162,30 @@ export class QqBodyStreaming {
     if (/[\uD800-\uDFFF]/u.test(text)) return;
     await this.send(stream, text, false, signal, () => this.sources.isCurrent(stream.source));
     stream.nextUpdateAt = performance.now() + 1000;
+    this.scheduleSeal(stream, stream.limited || stream.index >= 120 ? 0 : Math.max(0, stream.deadline - performance.now() - 45_000));
+  }
+
+  /** One owned boundary timer, only closes the already confirmed prefix; never emits newly buffered body. */
+  private scheduleSeal(stream: Stream, wait: number): void {
+    clearTimeout(stream.sealTimer);
+    if (stream.completed || stream.failed || stream.sealed || this.lifetime.signal.aborted) return;
+    stream.sealTimer = setTimeout(() => {
+      const preceding = stream.tail;
+      const task = Promise.resolve(preceding).then(async () => {
+        if (!stream.completed && !stream.failed && !stream.sealed) await this.seal(stream, this.lifetime.signal);
+      }).catch(() => { stream.failed = true; this.failed(); })
+        .finally(() => { if (stream.tail === task) delete stream.tail; });
+      stream.tail = task;
+    }, wait);
+    stream.sealTimer.unref();
+  }
+
+  private async seal(stream: Stream, signal: AbortSignal): Promise<void> {
+    if (!stream.id || !stream.sent || stream.sealed) return;
+    await this.send(stream, stream.sent, true, AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+      () => this.sources.isCurrent(stream.source));
+    stream.sealed = true;
+    stream.text = "";
   }
 
   private async send(stream: Stream, content: string, finished: boolean, caller: AbortSignal,

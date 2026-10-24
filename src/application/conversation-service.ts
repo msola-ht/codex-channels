@@ -191,6 +191,7 @@ const builtInAgentRoles: AgentRoleEntry[] = [
 ];
 
 export interface ConversationStatus {
+  sessionRestoring?: boolean;
   instructionSources?: readonly string[];
   executionContext?: ThreadExecutionContext;
   selectionScope?: string;
@@ -1718,6 +1719,7 @@ export class ConversationService implements
     };
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
+      ...(binding ? { sessionRestoring: !this.router.isSubscriptionReady(binding.threadId) } : {}),
       ...(instructionSources === undefined ? {} : { instructionSources }),
       ...(executionContext === undefined ? {} : { executionContext }),
       ...(binding ? { threadName: this.router.threadNameForThread?.(binding.threadId) ?? null } : {}),

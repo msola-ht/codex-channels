@@ -19,7 +19,7 @@ export interface CreateQqSurfaceOptions extends QqMessageOptions {
 /** Text-only adapter; shares Application and persistent delivery with other Surfaces. */
 export class QqSurface implements SurfaceAdapter {
   readonly surface = "qq";
-  readonly capabilities = { recoverBindings: false, interactions: false, scheduledTasks: false, configurationNotifications: false } as const;
+  readonly capabilities = { recoverBindings: true, interactions: false, scheduledTasks: false, configurationNotifications: false } as const;
   readonly accountId: string;
   readonly interactions: InteractionPort = {
     request: (_target, request) => Promise.resolve(safeInteractionDecision(request)),

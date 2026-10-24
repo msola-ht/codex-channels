@@ -16,6 +16,7 @@ import { QqSendBudget } from "./send-budget.js";
 import type { QqProtocolClient } from "./protocol.js";
 import { renderQqTurnCompleted } from "./lifecycle.js";
 import { QqBodyStreaming } from "./streaming.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 
 export interface QqMessageOptions {
   appId: string;
@@ -83,14 +84,39 @@ export class QqMessages implements SurfaceOutputPort {
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void> {
     if (!this.supported(event) || !authorized) throw new Error("QQ 输出未获授权");
     if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
-    if (event.type === "text.completed" && await this.streaming.finish(event, signal, checkpoint, authorized)) return;
-    const text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.autoCompactPercent);
-    await this.outbox.deliver({ mode: "active", recipient: event.target.conversationId.slice(4), content: text }, {
-      signal: AbortSignal.any([signal, this.lifetime.signal]),
-      beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
-      reserve: parts => this.budget.reserve(event.target.conversationId.slice(4), parts,
-        { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: event.type === "turn.completed" }),
-    }, checkpoint);
+    let text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.autoCompactPercent);
+    let checkpointFailed = false;
+    const record = async (value: DeliveryCheckpoint) => {
+      try { await checkpoint(value); }
+      catch (error) { checkpointFailed = true; throw error; }
+    };
+    try {
+      if (event.type === "text.completed") {
+        const result = await this.streaming.finish(event, signal, record, authorized);
+        if (result.kind === "complete") return;
+        if (result.kind === "continue") text = result.text;
+      }
+      await this.outbox.deliver({ mode: "active", recipient: event.target.conversationId.slice(4), content: text }, {
+        signal: AbortSignal.any([signal, this.lifetime.signal]),
+        allowResultFile: event.type === "text.completed",
+        beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
+        reserve: parts => this.budget.reserve(event.target.conversationId.slice(4), parts,
+          { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: event.type === "turn.completed" }),
+      }, record);
+    } catch (error) {
+      if (event.type === "text.completed" && !checkpointFailed && !signal.aborted && authorized()) {
+        try {
+          await this.outbox.deliver({ mode: "active", recipient: event.target.conversationId.slice(4),
+            content: "正文未完整送达或发送结果未确认；这不等于任务执行失败。请在本机 WebUI 投递箱核对，完整内容可在原生 Codex 会话查看。人工重试可能重复已收到的内容。" }, {
+            signal: AbortSignal.any([signal, this.lifetime.signal, AbortSignal.timeout(10_000)]),
+            beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
+            reserve: parts => this.budget.reserve(event.target.conversationId.slice(4), parts,
+              { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: true }),
+          }, async () => {});
+        } catch { this.options.logger.warn({ reason: "body-failure-notice-unconfirmed" }, "QQ 正文失败提示未确认"); }
+      }
+      throw error;
+    }
   }
 
   startNotifications(): void {
@@ -163,6 +189,7 @@ export class QqMessages implements SurfaceOutputPort {
       await this.reply(message, "上一条输入仍在处理中，请稍后重试；/stop 可取消当前准备和任务。", () => this.allowed(target, message.actorId)); return;
     }
     if (!stop) this.busy.add(target.conversationId);
+    let stage: "command" | "render" | "reply" | "submit" = "command";
     try {
       if (command) {
         if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume"].includes(command.name)
@@ -173,10 +200,12 @@ export class QqMessages implements SurfaceOutputPort {
         if (((command.name === "workspace" || command.name === "model" || command.name === "resume") && command.argumentsText.trim()) || command.name === "new") this.sources.cancelTarget(target);
         const commandScope = this.scope(message.actorId);
         const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume", command.argumentsText, message.actorId);
+        stage = "render";
         const scope = command.name === "workspace" && command.argumentsText.trim() ? this.scope(message.actorId) : commandScope;
         const text = result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
           : renderConversationCommandResult(result.kind === "models" ? { kind: "models", view: "model", state: result.state } : result);
         if (!text) throw new Error("QQ 命令没有可交付结果");
+        stage = "reply";
         await this.reply(message, text, () => !!scope && this.current(scope));
         return;
       }
@@ -185,17 +214,22 @@ export class QqMessages implements SurfaceOutputPort {
       const reservation = this.sources.reserve(scope, message);
       if (reservation.kind !== "accepted") { await this.reply(message, "当前输入无法接纳，请稍后核对任务状态再重试。", () => this.current(scope)); return; }
       const { ticket } = reservation;
+      stage = "submit";
       try {
         this.options.service.touchActivity?.(target);
         await this.options.service.submit(target, message.content, () => ticket.isCurrent(), ticket.observer);
       } catch (error) {
         ticket.cancel();
-        this.options.logger.warn({ reason: error instanceof UserFacingError ? error.code : "submission-unconfirmed" }, "QQ 任务提交未确认");
+        const { errorType, errorCode, errorReason } = surfaceErrorMetadata(error);
+        this.options.logger.warn({ reason: error instanceof UserFacingError ? error.code : "submission-unconfirmed",
+          errorType, errorCode, errorReason }, "QQ 任务提交未确认");
         await this.reply(message, error instanceof UserFacingError ? formatSurfaceUserFacingError(error, "QQ")
           : "任务提交未确认；请用 /status 或在本机核对，勿直接重复提交。", () => this.current(scope));
       }
     } catch (error) {
-      this.options.logger.warn({ reason: error instanceof UserFacingError ? error.code : "operation-unconfirmed" }, "QQ 操作未确认");
+      const { errorType, errorCode, errorReason } = surfaceErrorMetadata(error);
+      this.options.logger.warn({ reason: error instanceof UserFacingError ? error.code : "operation-unconfirmed",
+        stage, emergencyStop: stop, errorType, errorCode, errorReason }, "QQ 操作未确认");
       await this.reply(message, error instanceof UserFacingError ? formatSurfaceUserFacingError(error, "QQ")
         : "操作未确认。请检查 /status、工作区和模型选择；本机日志可核对受控错误。", () => this.allowed(target, message.actorId));
     } finally { if (!stop) this.busy.delete(target.conversationId); }

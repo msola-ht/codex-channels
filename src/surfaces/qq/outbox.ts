@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
-import { QQ_TEXT_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QqProtocolError, QqTextSendError,
+import { QQ_TEXT_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT_FILE_BYTES, QqProtocolError, QqTextSendError,
   type QqProtocolClient, type QqTextMessage, type QqTextSendContext } from "./protocol.js";
 
 const MAX_PARTS = 8;
@@ -13,12 +13,12 @@ export class QqTextOutbox {
   private readonly lifetime = new AbortController();
   private readonly queue: ConversationDeliveryQueue;
 
-  constructor(private readonly client: Pick<QqProtocolClient, "sendText">, logger: Logger) {
+  constructor(private readonly client: Pick<QqProtocolClient, "sendText" | "sendResultFile">, logger: Logger) {
     this.queue = new ConversationDeliveryQueue(logger, {
       component: "QqTextOutbox", capacity: 128, maximumPendingOperations: 128,
       drainOnClose: false,
       errorMetadata: error => error instanceof QqProtocolError
-        ? { reason: error.reason, operation: error.operation }
+        ? { reason: error.reason, operation: error.operation, httpStatus: error.httpStatus, businessCode: error.bizCode }
         : { reason: "output-failed" },
     });
   }
@@ -26,7 +26,7 @@ export class QqTextOutbox {
   /** One complete text, one shared queue operation and receipt. Never retries or changes mode. */
   async deliver(
     input: QqTextMessage,
-    context: QqTextSendContext & { reserve?(parts: number): {
+    context: QqTextSendContext & { allowResultFile?: boolean; reserve?(parts: number): {
       runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
     } },
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>,
@@ -57,7 +57,17 @@ export class QqTextOutbox {
     timer.unref();
     try {
       signal.throwIfAborted();
-      const parts = planText(input);
+      let file = false;
+      let parts: readonly QqTextMessage[];
+      try { parts = planText(input); }
+      catch (error) {
+        if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input"
+          || !context.allowResultFile || input.mode !== "active" || typeof input.content !== "string"
+          || !input.content.trim() || /[\uD800-\uDFFF]/u.test(input.content)
+          || input.content.length > QQ_RESULT_FILE_BYTES || Buffer.byteLength(input.content) > QQ_RESULT_FILE_BYTES) throw error;
+        file = true;
+        parts = [{ ...input }];
+      }
       const first = parts[0]!;
       if (first.mode === "passive") {
         const age = Date.now() - first.sourceTimestampMs;
@@ -74,8 +84,10 @@ export class QqTextOutbox {
           for (const [index, part] of parts.entries()) {
             active.throwIfAborted();
             guard();
-            const send = () => this.client.sendText(part, { signal: active, beforeSend: guard });
-            await checkpointDelivery(`qq-text:${index + 1}/${parts.length}`,
+            const send = () => file
+              ? this.client.sendResultFile({ recipient: part.recipient, content: part.content }, { signal: active, beforeSend: guard })
+              : this.client.sendText(part, { signal: active, beforeSend: guard });
+            await checkpointDelivery(file ? "qq-result-file" : `qq-text:${index + 1}/${parts.length}`,
               () => reservation ? reservation.runPart(active, send) : send(),
               error => error instanceof QqTextSendError && error.outcome === "rejected");
           }

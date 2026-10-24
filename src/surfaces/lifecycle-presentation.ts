@@ -158,6 +158,7 @@ export interface StartupRuntimeInfo {
 type StartupStatus = Pick<
   ConversationStatus,
   | "threadId"
+  | "sessionRestoring"
   | "threadName"
   | "workspaceId"
   | "model"
@@ -251,25 +252,25 @@ export function createStartupPresentation(
           },
           {
             label: "模型",
-            value: `${status.model}${pendingSuffix(status.modelPending)}`,
+            value: status.sessionRestoring ? "尚未恢复" : `${status.model}${pendingSuffix(status.modelPending)}`,
           },
           {
             label: "提供商",
-            value: formatCodexProviderLabel(status.modelProvider),
+            value: status.sessionRestoring ? "尚未恢复" : formatCodexProviderLabel(status.modelProvider),
           },
           {
             label: reasoningEffortSettingName(status.effort),
-            value: `${formatReasoningEffort(status.effort)}${pendingSuffix(status.effortPending)}`,
+            value: status.sessionRestoring ? "尚未恢复" : `${formatReasoningEffort(status.effort)}${pendingSuffix(status.effortPending)}`,
           },
           {
             label: "速度",
-            value: status.threadId || status.fastModePending
+            value: status.sessionRestoring ? "尚未恢复" : status.threadId || status.fastModePending
               ? formatServiceTierSetting(status)
               : "未知",
           },
           {
             label: "协作模式",
-            value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
+            value: status.sessionRestoring ? "尚未恢复" : `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
           },
           ...(isAutoApprovalReviewer(status.approvalsReviewer)
             ? [{ label: "审批方式", value: "自动审批" }]

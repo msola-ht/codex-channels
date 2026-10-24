@@ -323,6 +323,12 @@ export class SessionRouter {
     return this.modelSettingsByThread.get(threadId);
   }
 
+  isSubscriptionReady(threadId: string): boolean {
+    return this.bindings.getByThread(threadId) !== undefined
+      && this.modelSettingsByThread.has(threadId)
+      && !this.unsubscribedBindings.has(threadId);
+  }
+
   threadNameForThread(threadId: string): string | null | undefined {
     return this.namesByThread.get(threadId);
   }
@@ -518,6 +524,9 @@ export class SessionRouter {
         const isCurrent = () => this.sameBinding(binding, this.bindings.getByThread(binding.threadId))
           && shouldRestore(binding.target, binding);
         if (!isCurrent()) return undefined;
+        // A retained binding is not proof that this connection subscribed.
+        // Keep failed restores closed until a lifecycle response confirms it.
+        this.markThreadUnsubscribed(binding.threadId);
         let observation: ReturnType<ThreadRestoreObserver> | undefined;
         try {
           let restoredBinding: ConversationBinding;

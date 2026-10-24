@@ -125,7 +125,7 @@ function rpcErrorReason(
   if (errorType !== "JsonRpcError" || typeof message !== "string") {
     return {};
   }
-  if (message === "no active turn to steer") {
+  if (message === "no active turn to steer" || message === "no active turn to interrupt") {
     return { errorReason: "no-active-turn" };
   }
   if (/^expected active turn id `?[^`]+`? but found `?[^`]+`?$/u.test(message)) {
