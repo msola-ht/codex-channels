@@ -120,6 +120,7 @@ Cline 官方 SDK 仍是 Chat 参数语义的参考，而非模型能力验收结
 | `upstream/qq-bot-docs` | [tencent-connect/bot-docs](https://github.com/tencent-connect/bot-docs) | `645787a45937e5d9c4f0f61afefdffde0f38696e`，2025 文档源码，不能代替当前在线文档 |
 | `upstream/qqbot-connector` | [npm Connector](https://www.npmjs.com/package/@tencent-connect/qqbot-connector) | npm `1.2.0` 发布包、解包内容及 registry 元数据，公开入口仅扫码连接 |
 | `upstream/qq-api-v2-2026-10-23` | [当前 QQ API v2](https://bot.q.qq.com/wiki/develop/api-v2/) | 2026-10-23 下载的相关 HTML 快照，不是整个站点镜像 |
+| `upstream/qq-api-v2-2026-10-23-message-reference` | [QQ API v2 消息收发](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html)及关联接口 | 本地日期 2026-10-23 补齐；72 个有效页面、1 个排除的跳转响应；保留旧快照，不替换 SDK 基线 |
 
 Connector 发布包 SHA-256 为 `f3cca8f961051697d0ffc00e784755dfef637d89164725cb441eaf9e616b2bd9`，
 已核验 registry 的 SHA-512 integrity 与下载包一致。其发布元数据标为 `UNLICENSED` 且没有 repository 字段，
@@ -133,6 +134,18 @@ HTML 快照包括启动、访问凭证、API 调用、单聊事件/发送/流式
 - `c2c-send.html`：`d0ef0695966f9ee35cc2dbe37d820032a8f8308caac9f46f86c5302d2c93348f`。
 - `c2c-stream.html`：`ed351023b14c4be084282b50b3d7bfd44481c3e49ea0146d071377b5160730d1`。
 - `webhook.html`：`329d9d9131f0ba7bc2ba5320f2f95111f1fc1fda66678d5b7521b9e12a0e023e`。
+
+补齐包按官网 `v1.42.0` 导航及正文关联链接发现路径，覆盖消息概述/类型、单聊收发/撤回/流式、
+群聊与频道消息参考、素材/富媒体/分片上传、按钮/互动回应、菜单/面板、机器人详情/分享链接，
+以及关联的鉴权、事件、错误与变更记录；不包含整个官网或全部群/频道管理接口。
+下载发生于 UTC 2026-10-24，本地日期为 2026-10-23；逐页获取时间保存在包内 `manifest.json`。
+每页保存原始 HTML 和从 `main` 提取的同名 `.txt`，清单记录来源 URL、最终 URL、HTTP 状态、
+标题、H1、字节数、SHA-256 和校验状态，并保留用于发现链接的官网导航 HTML/JS。
+逐页回读核验全部 73 份下载响应的哈希；72 页为无跳转的有效内容。
+`gateway/message/model.html` 实际跳转至启动页，状态为 `excluded-redirect`，仅保留失败取证，不能作为消息模型依据。
+目录页的有效状态只表示下载正确，不表示提供完整接口合同；正文提取供阅读，原 HTML 是留存原件。
+清单 SHA-256：`973c2b70b2f362fd1435cfd937704695925f710b9d72ea88bbb8c7f87071fdc9`。
+资料包仍属于本地只读参考，不提交或发布到 Gateway；获取成功不代表账号权限、接口调用或客户端验收成功。
 
 Setup 扫码通过锁定依赖 `@tencent-connect/qqbot-connector@1.2.0` 的公开 `startQrConnect` 调用，
 不复制上游源码。该包仅承担扫码材料取得，不参与消息收发；独占 Worker 隔离取消与关闭，网络直连且不支持项目代理注入。

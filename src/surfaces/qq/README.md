@@ -2,7 +2,8 @@
 
 首个实现切片采用 AppID/AppSecret、WebSocket 和允许名单内的纯文本单聊；凭据由 Setup 扫码取得或手工填写。
 接入统一配置、Policy、Application、SurfaceManager 与加密投递箱，不维护会话历史。
-用户已反馈扫码保存并收到 QQ 回复；完整模型轮次及异常恢复尚未验收。
+用户实录与 App Server 只读历史已交叉确认普通模型轮次及 QQ 回复，`/help`、`/status` 已有用户实测记录；
+人工交互、停止/恢复及异常边界尚未验收，详见 [QQ 推进计划](../../../docs/qq-surface-plan.md#真实对话核对与下一阶段推进)。
 协议参考固定 SDK 与 2026-10-23 官网快照，不能据此保证所有账号权限。
 
 ## 文件
