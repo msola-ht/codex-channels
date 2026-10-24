@@ -16,7 +16,7 @@ import { createQqLedger } from "./ledger.js";
 import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, maximumQqImageBytes, type QqMessageBody } from "./protocol.js";
 import { readGeneratedImage } from "../generated-image.js";
 import { generatedImageUnavailableText } from "../operation-presentation.js";
-import { planQqDelivery, planQqMessage, qqCommandNames, qqHelp, renderQqCommandResult, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
+import { planQqDelivery, planQqMessage, qqCommandNames, qqHelp, QqConfirmationPreviewError, renderQqCommandResult, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 import { QqInteractionDeliveryError, QqInteractionPort } from "./interactions.js";
 import { QqImageStore, isSupportedQqImageUrl, type QqImageReference } from "./image-store.js";
@@ -45,8 +45,10 @@ export interface CreateQqSurfaceOptions {
 const supportedCommands = new Set<string>(qqCommandNames);
 
 class QqCommandReplyError extends Error {
-  constructor(readonly authorized: () => boolean) {
-    super("命令已返回结果，但 QQ 回复未确认送达；请先核对会话状态，不要重复执行写操作。较长查询请缩小范围或在原生客户端查看。");
+  constructor(readonly authorized: () => boolean, previewTooLarge = false) {
+    super(previewTooLarge
+      ? "QQ 无法在单条文字中完整展示确认预览；未发送确认令牌，未执行确认操作，请在原生客户端操作。"
+      : "命令已返回结果，但 QQ 回复未确认送达；请先核对会话状态，不要重复执行写操作。较长查询请缩小范围或在原生客户端查看。");
   }
 }
 
@@ -294,10 +296,6 @@ class QqGeneration implements SurfaceAdapter {
         await this.notify(target, message.actor, message.id, "当前 QQ 切片不支持该命令，请发送 /help。");
         return;
       }
-      if (command.name === "limits" && command.argumentsText.trim()) {
-        await this.notify(target, message.actor, message.id, "QQ 当前仅支持 /limits 查询，账户额度操作请在原生客户端处理。");
-        return;
-      }
       let authorizeReply: (() => void) | undefined;
       const result = await this.options.commands.execute(target, command.name, command.argumentsText, message.actor,
         () => this.allowed(target, message.actor), authorize => { authorizeReply = authorize; },
@@ -310,9 +308,9 @@ class QqGeneration implements SurfaceAdapter {
       try {
         const rendered = renderQqCommandResult(result);
         if (rendered) await this.notify(target, message.actor, message.id, rendered, replyAllowed);
-      } catch {
+      } catch (error) {
         // The command returned; a failed reply must neither imply failed execution nor lose its binding guard.
-        throw new QqCommandReplyError(replyAllowed);
+        throw new QqCommandReplyError(replyAllowed, error instanceof QqConfirmationPreviewError);
       }
       return;
     }

@@ -48,6 +48,7 @@ import { formatConversationMetrics } from "./metrics-format.js";
 export function renderConversationCommandResult(
   result: ConversationCommandResult,
   formatCommand?: (command: string) => string,
+  formatLiteralField?: (value: string) => string,
 ): string | null {
   switch (result.kind) {
     case "outcome":
@@ -84,17 +85,17 @@ export function renderConversationCommandResult(
     case "agents":
       return formatConversationAgents(result);
     case "mcp":
-      return formatConversationMcp(result);
+      return formatConversationMcp(result, formatLiteralField);
     case "mcp-health":
-      return formatConversationMcpHealth(result);
+      return formatConversationMcpHealth(result, formatLiteralField);
     case "mcp-reload":
       return formatConversationMcpReload(result);
     case "mcp-detail":
-      return formatConversationMcpDetail(result);
+      return formatConversationMcpDetail(result, formatLiteralField);
     case "mcp-login":
-      return formatConversationMcpLogin(result);
+      return formatConversationMcpLogin(result, formatLiteralField);
     case "mcp-resource":
-      return formatConversationMcpResource(result);
+      return formatConversationMcpResource(result, formatLiteralField);
     case "plugins":
       return formatConversationPlugins(result);
     case "hooks":
@@ -118,7 +119,7 @@ export function renderConversationCommandResult(
     case "goal":
       return formatConversationGoal(result);
     case "occupancy":
-      return formatConversationOccupancy(result, formatCommand);
+      return formatConversationOccupancy(result, formatCommand, formatLiteralField);
   }
   return null;
 }

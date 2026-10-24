@@ -410,15 +410,18 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     };
     assertActive();
     const guard = this.commandGuard(target, actorId, command === "workspace");
-    const sessionMetrics = command === "metrics" && parseMetricsCommand(input.trim()).view === "session"
+    const threadQuery = (command === "metrics" && parseMetricsCommand(input.trim()).view === "session")
+      || (command === "mcp" && input.trim() !== "reload")
       ? { threadId: this.conversations.status(target).threadId }
       : undefined;
-    const assertMetricsThread = (): void => {
-      if (sessionMetrics && this.conversations.status(target).threadId !== sessionMetrics.threadId) {
-        throw new UserFacingError("command.authorization-changed", "指标查询对应的会话已变化，请重新查询。");
+    const assertQueryThread = (): void => {
+      if (threadQuery && this.conversations.status(target).threadId !== threadQuery.threadId) {
+        throw new UserFacingError("command.authorization-changed", command === "metrics"
+          ? "指标查询对应的会话已变化，请重新查询。"
+          : "MCP 查询对应的会话已变化，请重新查询。");
       }
     };
-    const assertAuthorized = () => { assertActive(); guard(); assertMetricsThread(); };
+    const assertAuthorized = () => { assertActive(); guard(); assertQueryThread(); };
     const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, captureSubmission);
     try {
       assertActive();
@@ -430,7 +433,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           workspace.id === this.conversations.selectedWorkspaceId(target));
         const replyThread = hasWorkspace ? this.conversations.status(target).threadId : undefined;
         captureReplyAuthorization(() => {
-          assertActive(); replyGuard(); assertMetricsThread();
+          assertActive(); replyGuard(); assertQueryThread();
           if (hasWorkspace && this.conversations.status(target).threadId !== replyThread) {
             throw new UserFacingError("command.authorization-changed", "命令回复对应的会话已变化");
           }
@@ -472,7 +475,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     const argumentsText = input.trim();
     switch (command) {
       case "hooks":
-        return { kind: "hooks", view: await this.conversations.hooks(target, argumentsText, actorId) };
+        return { kind: "hooks", view: await this.conversations.hooks(target, argumentsText, actorId, assertAuthorized) };
       case "autoreview": {
         if (!argumentsText) return { kind: "auto-review", state: this.conversations.autoReview(target) };
         if (argumentsText !== "on" && argumentsText !== "off") {
@@ -768,7 +771,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "limits":
         if (argumentsText) {
           if (!this.resetCredits) throw new UserFacingError("reset-credit.failed", "重置券功能不可用", { reason: "reset_unavailable" });
-          return { kind: "reset-credit", result: await this.resetCredits.execute(target, actorId, argumentsText) };
+          return { kind: "reset-credit", result: await this.resetCredits.execute(target, actorId, argumentsText, assertAuthorized) };
         }
         return {
           kind: "limits",

@@ -60,6 +60,7 @@ export {
 } from "./conversation-scheduled-task-command-format.js";
 export { canReviewConversationHook } from "./conversation-hook-command-format.js";
 export { canPreserveWeixinHookReviewText } from "./weixin/markdown-sanitize.js";
+export { canReviewQqConversationHook } from "./qq/rendering.js";
 export type {
   OperationUpdateDisplay,
   SurfaceAdapter,

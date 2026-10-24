@@ -32,6 +32,8 @@ Telegram 使用已有 HTML 字段值转义，不把 roots 描述为实时权限�
 `/autoreview [on|off]` 查询或切换当前已绑定 Thread，统一结果由共享格式化器呈现；飞书命令中心与
 Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌。
 平台只提交结构化选择，Application 在锁内复核 Thread 与空闲状态，确认权威设置后才返回更新成功。
+QQ 的共享管理命令使用相同业务服务；Hook、回退与重置券确认预览必须完整单条显示，禁止分片或长结果附件代替预览。
+`canReviewQqConversationHook` 经本模块公开导出给 Bootstrap，按共享字段保真与 QQ 展示预算决定是否可在渠道审查。
 三个渠道共用 `lifecycle-presentation.ts` 仅在自动审批完成后呈现结果与结构化内容摘要；Client 提供经脱敏和限长的纯文本，Telegram HTML 面板与飞书 Markdown 呈现边界转义字面字段，微信纯文本保留字符原样；通知经共享关键投递路径发送，不生成审批交互。
 普通状态与生命周期卡只在 Thread 权威设置启用自动审批时显示审批方式，完成卡的自动审批统计也受此条件约束；专用查询与设置入口保留完整状态和操作回执。
 
@@ -230,6 +232,7 @@ Workspace/状态与操作结果分派隔离。它们统一 Telegram、飞书与�
 未支持的 Provider 明确说明能力缺失。计划任务确认、列表、运行记录和命令结果格式也通过本目录
 `index.ts` 供 Bootstrap 动态工具回调复用。
 `conversation-command-renderer.ts` 把完整 `ConversationCommandResult` 穷尽映射为共享纯文本结果；
+MCP 与占用结果允许渠道在已选定的展示字段上提供字面保护回调，默认输出不变；MCP 搜索、分页和长度预算始终按原数据/原文计算。
 `conversation-hook-command-format.ts` 只接收 Application 的 Hook 展示快照，集中生成纯文本列表、详情、
 持久配置确认文案和合法操作选项；原样使用 Application 选择标识与确认令牌，不展示内部 Key 或哈希。
 向组合根公开共享文案的保真检查并接收窄文字保真能力；组合根显式组合飞书、Telegram 与微信策略，未知渠道拒绝审查。Application 在列表、预览与确认时复核；微信格式中和会改变审查字段时拒绝信任。结果区分共享配置保存和实例刷新未确认。

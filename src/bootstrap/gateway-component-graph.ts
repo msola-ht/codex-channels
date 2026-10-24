@@ -137,6 +137,7 @@ import {
 } from "../storage/index.js";
 import {
   canReviewConversationHook,
+  canReviewQqConversationHook,
   canPreserveWeixinHookReviewText,
   formatProviderIdleReleaseNotice,
   type SurfaceAdapter,
@@ -844,6 +845,7 @@ export abstract class GatewayComponentGraph {
       },
       (surface, hook) => {
         if (surface === "weixin") return canReviewConversationHook(hook, canPreserveWeixinHookReviewText);
+        if (surface === "qq") return canReviewQqConversationHook(hook);
         if (surface === "feishu" || surface === "telegram") return canReviewConversationHook(hook, () => true);
         return false;
       },

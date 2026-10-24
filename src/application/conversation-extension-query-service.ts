@@ -105,18 +105,23 @@ export class ConversationExtensionQueryService {
   }
 
   async listMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpServerSummary[]> {
-    assertAuthorized?.();
-    const servers = await this.queries.listMcpServers(this.router.current(target)?.threadId, undefined, assertAuthorized);
-    assertAuthorized?.();
+    const threadId = this.router.current(target)?.threadId;
+    const beforeSubmit = this.mcpThreadGuard(target, threadId, assertAuthorized);
+    beforeSubmit();
+    const servers = await this.queries.listMcpServers(threadId, undefined, beforeSubmit);
+    beforeSubmit();
     return servers;
   }
 
   async mcpHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpHealthReport> {
-    assertAuthorized?.();
+    const threadId = this.router.current(target)?.threadId;
+    const beforeSubmit = this.mcpThreadGuard(target, threadId, assertAuthorized);
+    beforeSubmit();
     const servers = await this.queries.listMcpServerDetails(
-      this.router.current(target)?.threadId,
-      assertAuthorized,
+      threadId,
+      beforeSubmit,
     );
+    beforeSubmit();
     return {
       serverCount: servers.length,
       toolCount: servers.reduce((total, server) => total + server.tools.length, 0),
@@ -197,11 +202,15 @@ export class ConversationExtensionQueryService {
     selector: string,
     assertAuthorized?: () => void,
   ): Promise<McpServerDetail> {
-    assertAuthorized?.();
-    return resolveMcpServer(
+    const threadId = this.router.current(target)?.threadId;
+    const beforeSubmit = this.mcpThreadGuard(target, threadId, assertAuthorized);
+    beforeSubmit();
+    const server = resolveMcpServer(
       selector,
-      await this.queries.listMcpServerDetails(this.router.current(target)?.threadId, assertAuthorized),
+      await this.queries.listMcpServerDetails(threadId, beforeSubmit),
     );
+    beforeSubmit();
+    return server;
   }
 
   async loginMcpServer(

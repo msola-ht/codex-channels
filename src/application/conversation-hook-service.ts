@@ -46,9 +46,11 @@ export class ConversationHookService {
     private readonly reviewPolicy: HookReviewPolicy = () => false,
   ) {}
 
-  async execute(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView> {
+  async execute(target: ConversationTarget, input: string, actorId?: string, assertAuthorized?: () => void): Promise<HookCommandView> {
+    assertAuthorized?.();
     const context = this.context(target, actorId);
     const beforeSubmit = () => {
+      assertAuthorized?.();
       if (!sameContext(this.context(target, actorId), context)) throw expired();
     };
     return this.locks.forConversation(target, async () => {
