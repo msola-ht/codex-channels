@@ -9,6 +9,7 @@ export interface ProviderModelAdditionCandidate {
   fields: Record<string, unknown>;
   inheritedFrom?: string;
   clineRequestProfile?: import("../runtime/chat-reasoning.mjs").ClinePassRequestProfile;
+  clineProviderOptions?: import("../runtime/cline-provider-options.mjs").ClineProviderOptions;
   template?: { source: "deepseek" | "cline"; model: string };
 }
 export interface ProviderModelAdditionOptions {

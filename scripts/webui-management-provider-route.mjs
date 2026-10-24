@@ -40,6 +40,7 @@ import { routeOfficialModelManagement } from "./webui-management-official-model-
 import { loadProviderModelCatalogPresentations, loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadProviderModelTemplateOptions } from "./provider-model-template-management.mjs";
 import { loadProviderModelAdditionOptions } from "./provider-model-additions.mjs";
+import { loadManagedProviderModelRequestOptions } from "./managed-provider-model-edit.mjs";
 
 const activeTemplateOptionsReads = new WeakSet();
 
@@ -97,6 +98,26 @@ export async function routeProviderManagement({
     } finally {
       response.removeListener("close", disconnect);
       activeTemplateOptionsReads.delete(state);
+    }
+    return true;
+  }
+  if (path === "/provider-model-request-options" && request.method === "GET") {
+    const params = new URL(request.url, "http://localhost").searchParams;
+    if (params.size !== 2 || params.getAll("provider").length !== 1 || params.getAll("model").length !== 1) {
+      throw new ApiError(400, "provider_models_invalid_input", "请求改写读取参数无效");
+    }
+    try {
+      const result = await loadManagedProviderModelRequestOptions(
+        params.get("provider"), params.get("model"), { environment });
+      sendManagementJson(response, 200, result);
+    } catch (error) {
+      if (error instanceof ProviderModelManagementError && error.code === "stale-preview") {
+        throw new ApiError(409, "provider_models_stale_revision", "模型目录已变化，请刷新");
+      }
+      if (error instanceof ProviderModelManagementError && error.code === "invalid-input") {
+        throw new ApiError(400, "provider_models_invalid_input", error.message);
+      }
+      throw new ApiError(503, "provider_models_unavailable", "请求改写暂不可用，请检查模型目录");
     }
     return true;
   }
@@ -516,7 +537,7 @@ function recordProviderAudit(state, details, failureMessage) {
 
 function providerSettingsAuditTarget(input) {
   if (input.operation === "model.add") return `models:${fingerprintManagementValue({ provider: input.provider, models: input.models })}`;
-  if (input.operation === "model.remove" || input.operation === "model.custom.save" || input.operation === "model.context" || input.operation === "model.rename" || input.operation === "model.template.update") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
+  if (input.operation === "model.remove" || input.operation === "model.custom.save" || input.operation === "model.context" || input.operation === "model.rename" || input.operation === "model.template.update" || input.operation === "model.request-options") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
   if (input.operation === "primary.custom.save" || input.operation === "primary.custom.connection.save") return String(input.provider?.providerId ?? "unknown");
   if (input.operation === "managed.default" || input.operation === "provider.web-search") return String(input.provider ?? "unknown");
   return String(input.providerId ?? "unknown");

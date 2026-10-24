@@ -24,21 +24,28 @@ CLP 不再下载 Cline 官方生成目录。首次配置使用仓库 DS 模板�
 
 | CLP 调用 ID | 本地模板 | 请求处理 |
 | --- | --- | --- |
-| `cline-pass/deepseek-v4.1-flash` | `deepseek-flash` | Flash 思考格式及 DeepSeek 路由限定 |
-| `cline-pass/deepseek-v4.1-flash-1017` | `deepseek-flash` | Flash 思考格式及 DeepSeek 路由限定 |
+| `cline-pass/deepseek-v4.1-flash` | `deepseek-flash` | Flash 思考格式；路由仅由显式请求改写决定 |
+| `cline-pass/deepseek-v4.1-flash-1017` | `deepseek-flash` | Flash 思考格式；路由仅由显式请求改写决定 |
 | `cline-pass/deepseek-v4-pro` | `deepseek-v4-pro` | 标准 Cline Chat 格式 |
 
-模板提供提示词、上下文、压缩／截断及模型能力的起点，CLP 投影关闭 Chat 桥不支持的 original 图片精度和思考摘要控制，不复制 DS Responses 的服务档位或专属协议字段。固定映射不是逐模型云端验收结论；路由限定只保证本地发出相应参数，不保证上游执行，见[路由观察](#上游路由限定探测)。CLI 可选择初始启用模型，Flash 被选中时优先作为新账户默认，否则使用所选名单中的第一项；WebUI 首次配置采用全部固定模型。
+模板提供提示词、上下文、压缩／截断及模型能力的起点，CLP 投影关闭 Chat 桥不支持的 original 图片精度和思考摘要控制，不复制 DS Responses 的服务档位或专属协议字段。固定映射不是逐模型云端验收结论；请求改写只保证在本机合并并发出，不保证上游执行，见[路由观察](#上游路由限定探测)。CLI 可选择初始启用模型，Flash 被选中时优先作为新账户默认，否则使用所选名单中的第一项；WebUI 首次配置采用全部固定模型。
 
 已有共用目录继续使用保存的内容，不因升级、重新配置 Key 或添加账户而覆盖。所有 CLP 账户共用 `~/.codex-connect/providers/clp/models.json` 和 `models.manifest.json`，默认模型按账户独立设置；共享模型的上下文、思考及提示词修改会影响同族账户，不联动原生 DS、CCG 或 OCG。
 
 CLI 和 WebUI 使用统一的“添加模型”流程：填写准确 ID 与名称，选择“独立填写”或“继承已有模型”，再预览完整新增内容与影响账户并确认保存。名称默认取 ID 最后一个路径段。独立填写明确声明上下文、思考等级与默认值、图片、自由格式 `apply_patch` 和客户端 `tool_search`，使用通用编程提示词；仅支持思考开关时选择 `none/enabled`。CLP ID 须以 `cline-pass/` 开头，且需自行确认 Cline Chat Completions 支持文本和工具调用。保存不调用模型、不证明上游可用，重复 ID 明确拒绝。
 
-继承一次性复制当前目录中来源模型的提示词、上下文、压缩／截断、思考和工具能力，并保存来源的请求格式与路由快照；不复制凭据或模板关联。发送 ID 始终为新填写的值，来源后续编辑或移除不影响副本。Flash 模式使用 `reasoning.effort` 并发出 DeepSeek 路由限定，标准模式使用通用 Cline 映射。请求快照保存在可选 `cline_request_profile: standard | deepseek-flash` 中，未知值失败关闭；未保存该字段的已有模型仍只对精确原 Flash ID 使用历史默认分支。
+继承一次性复制当前目录中来源模型的提示词、上下文、压缩／截断、思考、工具能力及可选请求改写，并保存来源的请求格式快照；不复制凭据或模板关联。发送 ID 始终为新填写的值，来源后续编辑或移除不影响副本。Flash 模式使用 `reasoning.effort`，标准模式使用通用 Cline 映射；两种格式都不自动限定上游路由。请求格式快照保存在可选 `cline_request_profile: standard | deepseek-flash` 中，未知值失败关闭；未保存该字段的已有模型仍只对精确原 Flash ID 使用历史默认分支。
 
 “添加内置 DS 模型”只追加选中的固定模型，已有条目保持原值；没有新增或取消时不写入、不备份。其他模型均按 ID 添加。既有 Cline 来源记录仍可读取，不隐式转换或删除；“更新模板”从仓库读取本地 DS 模板，显式选择来源与更新范围后对比保存，不联网下载 Cline 目录。候选仅在当前进程保留十分钟，绑定目录修订；过期或目录变化须重新读取。更新提示词、能力或上下文与压缩设置各自仅影响确认范围，当前上下文和默认思考等本地设置依现有模板更新合同保留。
 
 CLI 的“本地编辑已有模型”直接读取保存内容，不下载模板，ID、请求快照、其他模型及未选字段保持不变。完整本地编辑当前由 CLI 提供，WebUI 保留名称、上下文、默认值和模板更新入口。当前任一账户的默认模型须先切换后才能移除；最后一个模型也不能移除。
+
+## 请求改写
+
+凭据字段检查同样覆盖任意嵌套层级中的 Cookie、Set-Cookie 和 cookie 集合字段，大小写不敏感。
+目录读取和出站准备复用该校验；已有目录若包含这些不支持的字段会拒绝使用，不会自动删除、迁移或回显其值。
+
+每个 CLP 模型还可保存可选的 `cline_provider_options` JSON 对象，作为发送前的 `providerOptions` 出站覆盖。对象递归合并到出站 Chat 请求的 `providerOptions`（Relay 原生 Chat 还会合并客户端同名值），数组、字符串、数字、布尔值和 `null` 覆盖同名值。受管 CLP 的 Responses→Chat 桥与 Relay 原生 Chat 共用该规则。只有模型显式保存该对象时才执行改写；未保存或清除为 `{}` 时不添加、不覆盖任何路由或其他 `providerOptions`，也不会自动补 DeepSeek 默认路由。字段不设白名单，保存后原样发出，具体字段和取值由上游判断；本地只校验 JSON 对象格式、大小、嵌套深度和顶层 Provider 选项对象，并拒绝 `gateway.byok`、凭据字段和原型污染键。所有内容始终位于 `providerOptions` 内，不能改写 `model`、`messages`、`tools` 等请求体顶层字段。WebUI 模型操作中的“编辑请求改写”和 CLI 模型管理中的同名入口只提供 JSON 编辑与差异预览。该配置只保证本地发出，上游可能忽略或拒绝，实际错误以请求返回为准，不能据此宣称云端已执行。
 
 CLP Relay 与渠道读取同一份受管模型目录和请求快照，仍使用原生 Chat 协议及各 Key 的精确模型授权、独立思考策略。添加目录条目不自动授权；移除会限制 Relay 后续调用，目录材料变化可能撤销在途请求。旧 `cline-relay-models.json` 及其备份不再读取或自动清理；升级后应先核对曾只存在于旧 Relay 目录中的模型，明确按 ID 加入共用目录。Key 中原有授权不会被重写。
 
@@ -80,11 +87,11 @@ Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘�
 工具结果中的内联图片不能放进 Chat 的 `tool` 消息，转换时按原顺序收集，在该组工具结果之后作为紧随的一条 `user` 消息图片段写出，并用相同的调用 ID 与图片序号标记关联原 `tool` 文本位置和图片；并行结果只写出一条，结果文本仍留在对应 `tool` 消息里，因此上下文中的截图不会再让整次请求失败。
 不支持图片文件引用、远程图片 URL 或 `detail: original`；`auto`、`low`、`high` 原样传递。
 新账户从模板生成自己的图片能力和思考等级。
-Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；Flash 请求配置将等级通过 Chat `reasoning.effort` 原样传递，包括 `none`，并限定 DeepSeek 上游路由；不因一次观察自动改成其他关闭格式。标准请求配置普通等级使用 `reasoning_effort`，`none` 使用 `reasoning.enabled=false`，由 Cline 按模型 ID 路由。两种配置的开关选项 `enabled` 均使用 `reasoning.enabled=true`，不发送 `reasoning_effort=enabled`。没有显式请求配置时，仅精确 Flash ID 使用 Flash 分支；继承副本按其保存的 `cline_request_profile` 处理。桥在出站前按当前启用目录复核选项，未声明的选项明确拒绝。固定 DS 条目沿用仓库模板的默认等级；手填及继承使用其明确保存的等级。
+Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；Flash 请求配置将等级通过 Chat `reasoning.effort` 原样传递，包括 `none`，不因一次观察自动改成其他关闭格式，也不自动限定上游路由。标准请求配置普通等级使用 `reasoning_effort`，`none` 使用 `reasoning.enabled=false`，由 Cline 按模型 ID 路由。两种配置的开关选项 `enabled` 均使用 `reasoning.enabled=true`，不发送 `reasoning_effort=enabled`。没有显式请求配置时，仅精确 Flash ID 使用 Flash 分支；继承副本按其保存的 `cline_request_profile` 处理。桥在出站前按当前启用目录复核选项，未声明的选项明确拒绝。固定 DS 条目沿用仓库模板的默认等级；手填及继承使用其明确保存的等级。
 
 当前关闭限制：历史记录中，相同的 `reasoning.effort=none` 和 `gateway.only=["deepseek"]` 在 2026-10-14 04:56 UTC 返回 `deepseek` 路由、0 推理 Token；12:22 UTC 返回的路由已变为 `openai-compatible-private`、模型为 `private/deepseek-v4p1-flash-contributor`，报告 145 推理 Token。这是路由变化与失效同时出现的证据，不能据此确定服务端变更机制或某次本地提交为根因。2026-10-15 12:27 UTC 经授权直接请求同一 Cline 上游，固定文本、模型、路由限定及 `max_tokens=64`，各执行一次：旧 `none` 返回思考正文和 15 推理 Token；`enabled=false` 不返回思考正文但报告 27 推理 Token；不设控制返回思考正文和 16 推理 Token。三次均为上述私有路由、HTTP 200、`finish_reason=stop`，收到流终帧。该对比支持新参数影响正文返回，但不证明内部推理已关闭，也不替代部署后完整客户端链路验证。
 
-2026-10-16 00:45:40–00:46:02 UTC，通过 WebUI 共用的 `probeRelayReasoning` 入口对 `clp-main/deepseek-v4.1-flash` 原生 Chat 执行九项检测，每项一次、固定文本 `Reply with exactly OK.`、`max_tokens=64`，沿用 Flash 路由限定。所有项目均为 HTTP 200、completed，整组未提前停止；响应模型均为 `vmc/deepseek-v4p1-flash-contributor-fallbacks`。基线、`reasoning.effort=none`、`reasoning_effort=none`、`thinking.type=disabled` 均报告推理/输出 13/16 并返回思考正文；`reasoning.enabled=false` 为 13/16、不返回思考正文；顶层 `enable_thinking=false` 为 24/27；模板 `chat_template_kwargs.enable_thinking=false` 为 15/18；Google 零预算为 24/27，后三项均返回思考正文。新增组合 `reasoning.enabled=false` 加 `thinking.type=disabled` 为 15/18、不返回思考正文，仍未观察到推理用量归零。组合对应 [Cline 官方参数规则](https://github.com/cline/cline/blob/23791b9323aadd91d7dbaea8a8fa262cd2f7ad0b/sdk/packages/llms/src/providers/routing/provider-option-rules.ts) 中通用关闭与 DeepSeek 家族规则的合并；源码依据不证明云端执行了关闭。此次直接调用检测后端，未操作浏览器保存或修改账户设置；没有采集路由元数据，不能仅凭响应模型名称判定实际 Provider。
+2026-10-16 00:45:40–00:46:02 UTC，通过 WebUI 共用的 `probeRelayReasoning` 入口对 `clp-main/deepseek-v4.1-flash` 原生 Chat 执行九项检测，每项一次、固定文本 `Reply with exactly OK.`、`max_tokens=64`，当时沿用 Flash 自动路由限定。所有项目均为 HTTP 200、completed，整组未提前停止；响应模型均为 `vmc/deepseek-v4p1-flash-contributor-fallbacks`。基线、`reasoning.effort=none`、`reasoning_effort=none`、`thinking.type=disabled` 均报告推理/输出 13/16 并返回思考正文；`reasoning.enabled=false` 为 13/16、不返回思考正文；顶层 `enable_thinking=false` 为 24/27；模板 `chat_template_kwargs.enable_thinking=false` 为 15/18；Google 零预算为 24/27，后三项均返回思考正文。新增组合 `reasoning.enabled=false` 加 `thinking.type=disabled` 为 15/18、不返回思考正文，仍未观察到推理用量归零。组合对应 [Cline 官方参数规则](https://github.com/cline/cline/blob/23791b9323aadd91d7dbaea8a8fa262cd2f7ad0b/sdk/packages/llms/src/providers/routing/provider-option-rules.ts) 中通用关闭与 DeepSeek 家族规则的合并；源码依据不证明云端执行了关闭。此次直接调用检测后端，未操作浏览器保存或修改账户设置；没有采集路由元数据，不能仅凭响应模型名称判定实际 Provider。当前版本已取消自动路由默认值。
 
 已有目录的开关选项继续保留；当前固定 DS 模板只声明其原有思考等级，不额外增加 `enabled`。手填新增时可明确声明开关，继承沿用来源快照；安装代码和添加其他模型不改写已有条目或默认选择。聚合入口当前关闭。回退到不支持 `enabled` 的旧版本前，先把相关默认值和会话选择改为 `none`，再按上述成对目录备份流程回退。此开关适配用于受管 CLP 的 Responses→Chat 桥；Relay 的逐 Key 策略另按其原生 Chat 合同处理，不自动改写其他提供商的原生 Responses 参数。
 未传入思考选项时沿用上游默认值；需要开启思考时，选择目录提供的 `enabled` 或非 `none` 等级。
@@ -119,7 +126,7 @@ Gateway 加载账户适配器并通过账户快照链路提供额度查询。
 
 2026-10-16 00:51 UTC 追加三次短请求核查（固定文本、`max_tokens=64`、单次限时 15 秒），响应中的 `choices[].delta.provider_metadata.gateway.routing` 均报告 `resolvedProvider=finalProvider=openai-compatible-private`，响应模型均为 `vmc/deepseek-v4p1-flash-contributor-fallbacks`。组合关闭加 `gateway.only=["deepseek"]` 返回推理/输出 14/18、不返回思考正文；`providerOptions.deepseek.thinking.type=disabled` 加相同限定返回 22/25、有思考正文；将组合关闭的允许列表改为不存在的 `codexc-nonexistent-provider`，仍返回 13/16、无思考正文。三次均 HTTP 200、completed 且收到流终帧。负对照表明当前 CLP Flash 路径未执行请求中的 Provider 限制，下面 2026-10-02 的成功限定仅为历史观察。
 
-[Vercel 虚拟模型文档](https://vercel.com/docs/ai-gateway/models-and-providers/virtual-models)说明 `vmc/` 用于虚拟模型，虚拟模型配置的 `only` 和同名 Provider 参数优先于请求。该机制与本次现象一致，但未取得 Cline 私有虚拟模型配置，不能确定是 Cline 转发层、虚拟模型覆盖还是最终私有服务造成思考关闭失效。本项目仅保证发出路由限定，不保证云端执行；没有通过切换未授权模型或直接复用 Cline 凭据访问 Vercel 来绕过该路径。
+[Vercel 虚拟模型文档](https://vercel.com/docs/ai-gateway/models-and-providers/virtual-models)说明 `vmc/` 用于虚拟模型，虚拟模型配置的 `only` 和同名 Provider 参数优先于请求。该机制与本次现象一致，但未取得 Cline 私有虚拟模型配置，不能确定是 Cline 转发层、虚拟模型覆盖还是最终私有服务造成思考关闭失效。本项目只保证显式保存的请求改写被发出，不保证云端执行；没有通过切换未授权模型或直接复用 Cline 凭据访问 Vercel 来绕过该路径。
 
 2026-10-02（UTC）使用当前默认 CLP 账户，对官方 Chat Completions 端点进行了三次隔离短请求，
 模型均为 `cline-pass/deepseek-v4.1-flash`，关闭思考、输出上限 32 Token、使用 SSE。
@@ -141,12 +148,11 @@ Gateway 加载账户适配器并通过账户快照链路提供额度查询。
 
 [Vercel 官方路由文档](https://vercel.com/docs/ai-gateway/models-and-providers/provider-options)
 定义了 `only` 的上游允许列表语义；Cline 透传行为以上述实测为依据。项目在 CLP 的 Responses 转 Chat
-与 Relay 直接 Chat（JSON/SSE）两条出站链路都消费共用目录中的请求快照：`deepseek-flash` 设置该参数，`standard` 不固定路由；未保存快照的旧条目仅对精确 `cline-pass/deepseek-v4.1-flash` 使用历史默认。其他
-Provider 不受影响。Relay 对需要限定的模型覆盖客户端已有的 `only`，保留其他合法对象字段；`providerOptions` 或
-其 `gateway` 不是对象时在出站前返回 400。限定失败不自动撤销参数或重试。路由规则由
-Provider Proxy 公共能力提供，通用协议转换器保持独立；Relay 调用转储记录实际注入后的出站请求；调试模式同时保留原始入站正文，并在实际补入或覆盖
-路由时标记 `provider_routing_pinned`，WebUI 显示「已将 CLP 上游限定为 DeepSeek」。已有单一
-`deepseek` 限定不重复标记。未记录的标记不补推，WebUI 按转储实际字段展示。
+与 Relay 直接 Chat（JSON/SSE）两条出站链路都消费共用目录中的可选 `cline_provider_options`：只有模型显式保存该对象时才改写 `providerOptions`，`deepseek-flash` 与 `standard` 都不再自动添加或覆盖 `gateway.only`。其他
+Provider 不受影响。未保存改写时保持请求原值；改写对象存在时按共享规则合并，`providerOptions` 或
+其 `gateway` 不是对象时由保存值替换或按原值发送，不在本地按字段拒绝。上游拒绝不自动撤销参数或重试。路由规则由
+Provider Proxy 公共能力提供，通用协议转换器保持独立；Relay 调用转储记录实际改写后的出站请求；调试模式同时保留原始入站正文。历史版本自动注入时可能记录
+`provider_routing_pinned`，WebUI 继续识别已有记录；当前版本不再生成该标记，也不补推历史缺失字段。
 源码更新后，App Server 与已启用的 Relay 在重启时加载当前规则，按安装更新指南操作。
 
 模型窗口直接写入 CLP 共用目录，不复制广播到多份模型文件。历史目录迁移事务须使用产生该事务的对应旧版本恢复；当前模型设置事务仍使用其既有恢复入口。不要删除事务记录绕过保护。

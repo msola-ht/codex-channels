@@ -1,20 +1,36 @@
-import { DirectChatRequestError } from "../model-api/index.js";
-import { resolveClinePassRequestProfile, type ClinePassRequestProfile } from "../../runtime/chat-reasoning.mjs";
+import type { ClineProviderOptions } from "../../runtime/cline-provider-options.mjs";
 
-/** CLP-only outbound policy; never mutate the caller's request or fall back to other providers. */
-export function pinClinePassRouting<T extends object>(request: T, profile?: ClinePassRequestProfile): T {
-  const model = (request as Record<string, unknown>).model;
-  if (resolveClinePassRequestProfile(typeof model === "string" ? model : "", profile) !== "deepseek-flash") return request;
-  const options = routingObject((request as Record<string, unknown>).providerOptions, "providerOptions");
-  const gateway = routingObject(options.gateway, "providerOptions.gateway");
-  if (Array.isArray(gateway.only) && gateway.only.length === 1 && gateway.only[0] === "deepseek") return request;
-  return { ...request, providerOptions: { ...options, gateway: { ...gateway, only: ["deepseek"] } } };
+/**
+ * Apply the model's saved providerOptions overlay. Plain objects merge
+ * recursively; arrays, scalars and null replace the client value. A client
+ * providerOptions container that is not an object is replaced by the overlay
+ * rather than rejected here; the upstream owns field semantics. No overlay
+ * means the request is unchanged; no automatic routing is applied.
+ */
+export function applyClinePassProviderOptions<T extends object>(request: T, options?: ClineProviderOptions): T {
+  if (options === undefined || Object.keys(options).length === 0) return request;
+  const value = (request as Record<string, unknown>).providerOptions;
+  const current: Record<string, unknown> = isPlainRecord(value) ? value : {};
+  return { ...request, providerOptions: mergeProviderOptions(current, options) };
 }
 
-function routingObject(value: unknown, path: string): Record<string, unknown> {
-  if (value === undefined) return {};
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new DirectChatRequestError(path, "Expected a JSON object");
+function mergeProviderOptions(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    const current = result[key];
+    result[key] = isPlainRecord(current) && isPlainRecord(value)
+      ? mergeProviderOptions(current, value)
+      : cloneJson(value);
   }
-  return value as Record<string, unknown>;
+  return result;
+}
+
+function cloneJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneJson);
+  if (isPlainRecord(value)) return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneJson(entry)]));
+  return value;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

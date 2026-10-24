@@ -1,5 +1,6 @@
 import { readPrivateConfigFile } from "./private-file.mjs";
 import { resolveClinePassRequestProfile } from "./chat-reasoning.mjs";
+import { validateClinePassProviderOptions } from "./cline-provider-options.mjs";
 import { lstat } from "node:fs/promises";
 
 /** Re-read the provider's enabled Codex catalogue before each outbound request. */
@@ -70,6 +71,7 @@ export class ProviderModelGuard {
         throw new Error("Provider 模型目录无效");
       }
       resolveClinePassRequestProfile(entry.slug, entry.cline_request_profile);
+      validateClinePassProviderOptions(entry.cline_provider_options);
       enabled.add(entry.slug);
     }
     const entry = catalog.models.find(entry => entry.slug === model);
@@ -95,6 +97,9 @@ export class ProviderModelGuard {
     const sampling = catalog.definitions?.find(definition => definition.id === model)?.sampling;
     return { reasoningEfforts: levels.map(level => level.effort),
       ...(entry.cline_request_profile === undefined ? {} : { clineRequestProfile: entry.cline_request_profile }),
+      ...(entry.cline_provider_options === undefined ? {} : {
+        clineProviderOptions: validateClinePassProviderOptions(entry.cline_provider_options),
+      }),
       ...(sampling === undefined ? {} : { sampling }) };
   }
 

@@ -10,6 +10,7 @@ import { createResponsesModelCatalog, readResponsesModelCatalog, writeResponsesM
 import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { withThirdPartyLocalTools } from "../runtime/third-party-model-catalog.mjs";
 import { resolveClinePassRequestProfile } from "../runtime/chat-reasoning.mjs";
+import { validateClinePassProviderOptions } from "../runtime/cline-provider-options.mjs";
 import { createIndependentModelDraft, isValidCustomModelId } from "../runtime/model-catalog.mjs";
 import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
@@ -117,6 +118,9 @@ export async function loadProviderModelAdditionOptions(provider, {
       return { model: idOf(model), displayName: state.custom ? model.name : model.display_name ?? model.slug, fields: model,
         ...(source.kind === "inherited" ? { inheritedFrom: source.model } : {}),
         ...(source.clineRequestProfile === undefined ? {} : { clineRequestProfile: source.clineRequestProfile }),
+        ...(state.family.storageId === "clp" && model.cline_provider_options !== undefined ? {
+          clineProviderOptions: validateClinePassProviderOptions(model.cline_provider_options),
+        } : {}),
         ...(Object.hasOwn(bindings, model.slug) ? { template: bindings[model.slug] } : {}) };
     });
     if (candidates.length > maximumCandidates) throw invalid("addition-source-too-large", "models", "新增候选超过 128 个，请缩小源目录后重试");
@@ -281,6 +285,10 @@ function validModelId(state, id) {
 function validateModel(model, state) {
   if (state.custom) { compileResponsesModelCatalog([model], model.id); return; }
   if (!isManagedProviderModelValid(state.definition, model.slug)) throw invalid("addition-source-invalid", "models", "新增模型 ID 不符合该提供商约束");
+  if (state.family.storageId === "clp") {
+    try { validateClinePassProviderOptions(model.cline_provider_options); }
+    catch (error) { throw invalid("addition-source-invalid", "models", "新增模型的请求改写无效", error); }
+  }
   withManagedModelCatalogSettings({ models: [model] }, state.definition, { model: model.slug, reasoningEffort: model.default_reasoning_level });
 }
 

@@ -16,7 +16,7 @@ import {
   waitForChatOperation,
   writeChatData,
 } from "./chat-io.js";
-import { pinClinePassRouting } from "./cline-pass-routing.js";
+import { applyClinePassProviderOptions } from "./cline-pass-routing.js";
 import { executeClineWebSearch } from "./cline-web-search.js";
 import { ChatGenerationTimingObserver } from "./generation-timing.js";
 import { chatBridgeAuthorizationHeader, forwardedRequestHeaders } from "./request-routing.js";
@@ -24,6 +24,7 @@ import type { UpstreamTiming } from "./response-metrics-observer.js";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
 import type { ClinePassRequestProfile } from "../../runtime/chat-reasoning.mjs";
+import type { ClineProviderOptions } from "../../runtime/cline-provider-options.mjs";
 import {
   maximumModelRequestBytes,
   maximumRetainedModelRequestBytes,
@@ -32,6 +33,7 @@ import {
 interface ClinePassModelCapabilities {
   reasoningEfforts: readonly string[];
   clineRequestProfile?: ClinePassRequestProfile;
+  clineProviderOptions?: ClineProviderOptions;
 }
 
 const maximumRequestBytes = maximumModelRequestBytes;
@@ -232,7 +234,9 @@ export class ChatCompletionsBridge {
           if (!current) throw new ChatUpstreamError("clp_model_disabled", "该 CLP 模型已停用或不在当前目录中，请重新选择已启用的模型。", false, undefined, 409);
           if (JSON.stringify(current) !== JSON.stringify(modelCapabilities)) throw new ChatUpstreamError("clp_catalog_unavailable", "CLP 模型配置在搜索期间发生变化，请重新发起请求。", false, undefined, 503);
         }
-        const payload = JSON.stringify(this.options.clinePass ? pinClinePassRouting(outbound, modelCapabilities?.clineRequestProfile) : outbound);
+        const outboundWithOptions = this.options.clinePass
+          ? applyClinePassProviderOptions(outbound, modelCapabilities?.clineProviderOptions) : outbound;
+        const payload = JSON.stringify(outboundWithOptions);
         const payloadBytes = Buffer.byteLength(payload);
         if (payloadBytes > maximumRequestBytes) throw new ModelConversionError("Chat continuation exceeds size limit");
         headers["content-length"] = String(payloadBytes);

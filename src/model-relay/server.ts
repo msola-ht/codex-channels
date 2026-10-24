@@ -7,7 +7,7 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, type RelayModelCapability, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
-import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
+import { applyClinePassProviderOptions, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 import { ModelRequestTimeoutError } from "../provider-proxy/index.js";
 import type { SamplingParameters } from "../model-api/index.js";
@@ -169,7 +169,6 @@ export class ModelRelayServer {
       const signal = AbortSignal.any([controller.signal, lease.signal]);
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new RelayAdmissionError(415, "unsupported_encoding");
       let body: DirectChatRequest | DirectResponsesRequest | undefined;
-      let clineRoutingChanged = false;
       if (!models) {
         if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") throw new RelayAdmissionError(415, "unsupported_media_type");
         if (Number(request.headers["content-length"] ?? 0) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
@@ -237,9 +236,8 @@ export class ModelRelayServer {
       body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, provider!, reasoningPolicy)
         : applyChatReasoningPolicy(body as DirectChatRequest, provider!, reasoningPolicy, prepared.modelCapabilities?.find(model => model.id === body!.model));
       if (protocol === "chat" && provider!.startsWith("clp-")) {
-        const routed = pinClinePassRouting(body, prepared.modelCapabilities?.find(model => model.id === body!.model)?.cline_request_profile);
-        clineRoutingChanged = routed !== body;
-        body = routed;
+        const capability = prepared.modelCapabilities?.find(model => model.id === body!.model);
+        body = applyClinePassProviderOptions(body, capability?.cline_provider_options);
       }
       if (Buffer.byteLength(JSON.stringify(body)) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
       // Preparation includes optional capture initialization and the material/proxy resolver.
@@ -252,7 +250,6 @@ export class ModelRelayServer {
       signal.throwIfAborted(); clearTimeout(preparationTimer);
       phase = "upstream"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
       capture?.inbound?.(inbound, request.headers);
-      if (clineRoutingChanged) capture?.transformed?.("provider_routing_pinned");
       if (inbound && typeof inbound === "object" && !("stream" in inbound)) capture?.transformed?.("stream_defaulted");
       if (protocol === "responses" && inbound && typeof inbound === "object" && !("store" in inbound)) capture?.transformed?.("store_defaulted");
       inbound = undefined;

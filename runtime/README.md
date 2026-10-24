@@ -64,6 +64,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   同步操作完成后释放锁失败用 `GatewayConfigLockReleaseError` 保留操作结果；原子配置写入已确认后的解锁失败或 Windows 临时目录清理失败转换为 `GatewayConfigWriteCommittedError`，调用方不得当作未保存而重试或删除有效备份。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 - `chat-reasoning.mjs` / `chat-reasoning.d.mts`：无 I/O 的默认 Chat 关闭能力表、Relay 逐模型思考策略枚举及模型思考声明类型，供配置、管理和模型 API 共用；`resolveClinePassRequestProfile` 校验受管 CLP 的 `standard`／`deepseek-flash` 请求快照，未指定时保留精确 Flash ID 默认分支，显式 `standard` 可覆盖该默认。显式参数方式不声明上游一定支持。
+- `cline-provider-options.mjs` / `cline-provider-options.d.mts`：CLP 模型级 `providerOptions` 覆盖的无 I/O 格式校验。只接受 JSON 对象和顶层 Provider 选项对象，限制深度、节点、字段和字节数，拒绝原型污染键、凭据字段及 `gateway.byok`；字段名和取值不设白名单，由上游判断。
 - `model-relay-config.mjs` / `model-relay-config.d.mts`：可选 Relay 严格配置、可选中文用途名称、仅结算使用的历史身份摘要、每 Key 多提供商模型授权、逐模型思考映射及仅全局限流策略投影；服务默认关闭和回环监听，允许显式 IPv4 内网/通配绑定、保留停用身份，不生成凭据；不接受旧 Relay 配置字段。
 - `network-proxy.mjs`：按 Codex `.env`、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
@@ -139,7 +140,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `managed-model-catalog.mjs`：受管目录的纯数据校验、单模型设置读取、窗口与思考等级更新及刷新时保留设置；窗口按精确 Token 数保留，百分比仅派生、不取整后反向还原；窗口变更与原自动压缩阈值冲突时拒绝，不截小阈值；新上限小于原窗口或不再支持原思考等级时拒绝刷新，不静默替换非默认模型的等级。DS、OCG、CCG、CLP 共用，完整保留未修改的上游元数据，不执行文件读写。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile，复用 `managed-model-catalog` 处理目录数据；
   管理各受管提供商家族的共用模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
-  CLP 单模型可保存 `cline_request_profile: standard | deepseek-flash`，作为一次性继承的独立请求格式与固定路由快照；读取入口拒绝未知值，不保存源模型引用，源删除或后续修改不影响快照。
+  CLP 单模型可保存 `cline_request_profile: standard | deepseek-flash`，作为一次性继承的独立请求格式快照；还可保存可选的 `cline_provider_options` 对象，作为出站 `providerOptions` 覆盖。读取与受管目录写入入口拒绝未知快照、非对象覆盖、凭据字段和原型污染键；覆盖字段不设白名单，由上游判断。没有请求改写时不添加或覆盖 `providerOptions`，也不自动限定路由。不保存源模型引用，源删除或后续修改不影响快照。
   设置写入、单模型移除与 CLP 账户目录更新共用私有 `.settings-backup`／`.settings-pending`，记录共用目录、相关 Profile 或来源文件及旧备份的前后快照，并保存只读前置条件，复核所有相关配置并回读一致后结束事务；未完成时阻止读取及出站，显式恢复严格限定同一家族路径，拒绝覆盖后续修改并复核目录来源与当前模型选择。固定模式允许保留原始目录中已经缺失的选择，以便默认模型入口随后修复主配置；不得移除原本有效的选择，恢复也按事务原始目录判断。
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
   镜像所选模型的默认思考等级。Profile 位于 `~/.codex`，模型目录与清单位于

@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { fetch as undiciFetch, ProxyAgent } from "undici";
 
 import { DirectChatResponse, clinePassChatReasoningControl, responsesToChat } from "../dist/model-api/index.js";
-import { pinClinePassRouting, chatUpstreamError, chatStreamError } from "../dist/provider-proxy/index.js";
+import { applyClinePassProviderOptions, chatUpstreamError, chatStreamError } from "../dist/provider-proxy/index.js";
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { createRefreshableHttpProxySelector } from "../runtime/network-proxy.mjs";
 import { isValidCustomProviderApiKey, validProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
@@ -102,7 +102,7 @@ async function probeModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, 
         payload = {...converted.request, stream};
         if (requestContext?.clinePass) {
           const {reasoning, ...parameters} = payload;
-          payload = pinClinePassRouting(reasoning ? {...parameters, ...clinePassChatReasoningControl(model, reasoning.effort, requestContext.clineRequestProfile)} : parameters, requestContext.clineRequestProfile);
+          payload = applyClinePassProviderOptions(reasoning ? {...parameters, ...clinePassChatReasoningControl(model, reasoning.effort, requestContext.clineRequestProfile)} : parameters, requestContext.clineProviderOptions);
         }
         if (!stream) delete payload.stream_options;
         identities = converted.toolNames;

@@ -17,7 +17,7 @@ export async function runManagedProviderModelEditSetup(provider, {
   });
   if (prompts.isCancel(model)) return { action: "back", activation: "none" };
   const current = await loadManagedProviderModelEdit(provider, model, { environment });
-  output.write(`直接编辑已保存配置，不下载模板；模型 ID、请求路由和来源关联保持不变。\n影响账户：${current.providers.join("、")}。\n`);
+  output.write(`直接编辑已保存配置，不下载模板；模型 ID、请求格式和来源关联保持不变。\n影响账户：${current.providers.join("、")}。\n`);
   const definitions = await promptResponsesModels(prompts, model, [current.definition], output,
     "chat_completions", [model], { allowAdd: false, managedClinePass: true });
   if (definitions === undefined) return { action: "back", activation: "none" };
