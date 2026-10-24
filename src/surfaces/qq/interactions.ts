@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { resolveApprovalChoice, safeInteractionDecision, type InteractionDecision, type InteractionPort, type InteractionRequest } from "../../approval/index.js";
+import { resolveApprovalChoice, safeInteractionDecision, type ApprovalChoice, type InteractionDecision, type InteractionPort, type InteractionRequest } from "../../approval/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
 import type { QqRenderedMessage } from "./rendering.js";
@@ -99,8 +99,8 @@ export class QqInteractionPort implements InteractionPort {
   /** Reserved response verbs never fall through to ordinary model input, even for obsolete tokens. */
   handleText(target: ConversationTarget, actor: string, text: string): string | null {
     const normalized = text.trim();
-    if (!/^\/(?:批准一次|拒绝|取消|选择|填写)(?:\s|$)/u.test(normalized)) return null;
-    const match = /^\/(批准一次|拒绝|取消|选择|填写)\s+([A-Za-z0-9_-]{16})(?:\s+([\s\S]+))?$/u.exec(normalized);
+    if (!/^\/(?:批准一次|批准会话|保存命令规则|保存网络规则|拒绝|取消|选择|填写)(?:\s|$)/u.test(normalized)) return null;
+    const match = /^\/(批准一次|批准会话|保存命令规则|保存网络规则|拒绝|取消|选择|填写)\s+([A-Za-z0-9_-]{16})(?:\s+([\s\S]+))?$/u.exec(normalized);
     if (!match) return "交互回应格式无效，请使用当前提示中的完整操作。";
     const [, action, token, input] = match;
     const entry = this.pending.get(token!);
@@ -115,8 +115,8 @@ export class QqInteractionPort implements InteractionPort {
       return "已接收取消选择。";
     }
     if (entry.request.type === "approval") {
-      if (input !== undefined || (action !== "批准一次" && action !== "拒绝")) return "当前审批只接受一次批准、拒绝或取消。";
-      const choice = resolveApprovalChoice(entry.request, { type: action === "批准一次" ? "once" : "reject" });
+      const offered = approvalActions(entry.request).find(candidate => candidate.verb === action && candidate.argument === input);
+      const choice = offered && resolveApprovalChoice(entry.request, offered.choice);
       if (!choice) return "当前请求不支持该选择。";
       this.finish(token!, choice.decision);
       return "已接收审批选择；实际执行结果以随后会话回复为准。";
@@ -164,12 +164,41 @@ export class QqInteractionPort implements InteractionPort {
 }
 
 function supports(request: InteractionRequest): boolean {
-  if (request.type === "approval") return (request.kind === "command" || request.kind === "file")
-    && !request.networkApprovalContext && !request.networkPolicyAmendments?.length;
+  if (request.type === "approval") return ["command", "file", "permissions", "stdin"].includes(request.kind);
   return request.type === "user-input" && !request.asynchronous && request.questions.length > 0 && request.questions.length <= 3
     && new Set(request.questions.map(question => question.id)).size === request.questions.length
     && request.questions.every(question => !question.secret && question.id.length > 0 && question.options.length <= 8
       && question.options.every(option => option.length > 0));
+}
+
+/** Display and acceptance use the same offered choices; never infer a broader scope from response text. */
+function approvalActions(request: Extract<InteractionRequest, { type: "approval" }>): Array<{
+  verb: string; argument?: string; choice: ApprovalChoice; description: string;
+}> {
+  const actions: ReturnType<typeof approvalActions> = [{ verb: "批准一次", choice: { type: "once" },
+    description: request.kind === "permissions" ? "仅授予上文列出的本次 Turn 临时权限。"
+      : request.kind === "stdin" ? "仅批准本次终端输入，不保存授权规则。" : "仅批准当前请求一次。" }];
+  if ((request.kind === "command" || request.kind === "file") && request.allowSession) {
+    actions.push({ verb: "批准会话", choice: { type: "session" }, description: request.networkApprovalContext
+      ? `本会话允许上文的网络目标（JSON）：${approvalHost(request.networkApprovalContext.host)}` : "在当前 App Server 会话范围内批准。" });
+  }
+  if (request.kind === "command" && request.execPolicyAmendment) {
+    actions.push({ verb: "保存命令规则", choice: { type: "execpolicy" }, description: "持久保存上文的完整命令前缀规则，由 App Server 执行。" });
+  }
+  if (request.kind === "command") {
+    for (const [index, amendment] of (request.networkPolicyAmendments ?? []).entries()) {
+      actions.push({ verb: "保存网络规则", argument: String(index + 1), choice: { type: "networkpolicy", amendmentIndex: index },
+        description: `持久${amendment.action === "allow" ? "允许" : "拒绝"}主机（JSON）${approvalHost(amendment.host)}；只提交此条规则，由 App Server 执行。` });
+    }
+  }
+  actions.push({ verb: "拒绝", choice: { type: "reject" }, description: request.kind === "stdin" ? "中止本次终端输入。" : "拒绝当前请求。" });
+  return actions;
+}
+
+function approvalHost(host: string): string {
+  // Keep scope labels readable without letting upstream control characters alter them.
+  return JSON.stringify(host).replace(/[\p{Cf}\u2028\u2029]/gu,
+    character => character.split("").map(unit => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`).join(""));
 }
 
 function sameTarget(left: ConversationTarget, right: ConversationTarget): boolean {
@@ -190,9 +219,11 @@ function prompt(request: InteractionRequest, token: string): QqRenderedMessage {
   };
   body.push(`${request.title}\n有效期至多 ${Math.ceil(request.expiresInMs / 1000)} 秒；仅当前用户可回应。`);
   if (request.type === "approval") {
-    body.push(`${request.detail}\n仅提供一次批准；不保存会话授权或持久规则。`);
-    action(`/批准一次 ${token}`);
-    action(`/拒绝 ${token}`);
+    body.push(request.detail, "授权选项（仅当前请求提供的范围）：");
+    for (const offered of approvalActions(request)) {
+      body.push(`${offered.verb}${offered.argument ? ` ${offered.argument}` : ""}：${offered.description}`);
+      action(`/${offered.verb} ${token}${offered.argument ? ` ${offered.argument}` : ""}`);
+    }
   } else if (request.type === "user-input") {
     request.questions.forEach((question, index) => {
       body.push(`问题 ${index + 1}：${question.header}\n${question.question}`);
