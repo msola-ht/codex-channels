@@ -286,6 +286,7 @@ export class TelegramOutbox {
     const chatId = event.target.conversationId;
     switch (event.type) {
       case "user.message.identity":
+      case "turn.root.identity":
         return;
       case "turn.retry": {
         const run = this.retryMessages.prepare(event);

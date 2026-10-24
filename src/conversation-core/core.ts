@@ -304,6 +304,10 @@ export class ConversationCore {
         );
         const target = this.router.targetForThread(event.threadId);
         if (target) {
+          // Submission responses may have already marked this Turn started. Its
+          // authoritative work-chain identity must still reach live admission.
+          if (event.rootTurnId) this.publish({ type: "turn.root.identity", target,
+            threadId: event.threadId, turnId: event.turnId, rootTurnId: event.rootTurnId });
           this.markTurnStarted(target, event.threadId, event.turnId);
         }
         return;

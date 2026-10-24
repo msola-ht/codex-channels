@@ -26,6 +26,8 @@ QQ review/plan/skill/plugin/agents 通过共享命令提交捕获关联既有 Su
 适配范围和未实机边界见[共享命令提交关联](qq-surface-plan.md#共享命令提交关联)。
 QQ 原生 Queue 复用既有六请求与官方 userMessage.clientId；Core 在回显过滤前只发布内部身份事件，
 关联入队前登记的来源，不新增 RPC 或本地队列正文持久化；实现及未实机边界见[Queue 来源](qq-surface-plan.md#原生-queue-来源适配)。
+QQ 还消费官方 `Turn.rootTurnId` 的同 Thread 工作链身份，通过内部无正文事件关联已有原根回复依据，包含工具 Goal 续跑；
+仅开放共享 Goal 查询/清除，直接 set 仍缺少启动关联。不是新增 Goal 协议，也不把 rootTurnId 当作 Goal 专属标记，见[根 Turn 工作链](qq-surface-plan.md#根-turn-工作链与-goal-查询)。
 
 `0.164.0` 固定源码、随仓文档和生成协议已同步；位置和固定提交见
 [上游来源](upstream-sources.md)，取舍与验收限制见[升级决策](codex-cli-upgrade-decisions.md)。

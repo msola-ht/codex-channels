@@ -314,6 +314,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private render(event: OutputEvent): string | null {
     switch (event.type) {
       case "user.message.identity":
+      case "turn.root.identity":
         return null;
       case "hook.completed":
         return formatWeixinCommandText(

@@ -1648,7 +1648,9 @@ export class ConversationService implements
   getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null> {
     return this.authorizedLocked(target, assertAuthorized, async () => {
       const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
-      return this.codex.getGoal(binding.threadId, beforeSubmit);
+      const goal = await this.codex.getGoal(binding.threadId, beforeSubmit);
+      beforeSubmit();
+      return goal;
     });
   }
 
@@ -1677,6 +1679,7 @@ export class ConversationService implements
         type: "thread.goal.cleared",
         threadId: binding.threadId,
       });
+      beforeSubmit();
     });
   }
 

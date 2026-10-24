@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { Logger } from "pino";
 import { safeInteractionDecision, type InteractionPort } from "../../approval/index.js";
-import { isConversationCommandName, type ConversationCommandExecutor, type ConversationTurnUseCases, type Submission, type ThreadQueueSubmissionOrigin } from "../../application/index.js";
+import { isConversationCommandName, parseGoalCommand, type ConversationCommandExecutor, type ConversationTurnUseCases, type Submission, type ThreadQueueSubmissionOrigin } from "../../application/index.js";
 import { UserFacingError, conversationTargetKey, type ConversationTarget, type OutputEvent } from "../../conversation-core/index.js";
 import type { ConversationActorRegistry, SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
@@ -124,6 +124,9 @@ class QqGeneration implements SurfaceAdapter {
   private readonly queueOrigins = new Map<string, {
     target: ConversationTarget; actor: string; grant: string; deadline: number; turnId?: string;
   }>();
+  private readonly rootOrigins = new Map<string, {
+    target: ConversationTarget; actor: string; rootTurnId: string; deadline: number; grant: string | undefined; rejected: boolean;
+  }>();
   private readonly inputTails = new Map<string, { job: Promise<void>; cancellation: AbortController }>();
   private readonly jobs = new Set<Promise<void>>();
   private readonly generationId = randomUUID();
@@ -150,13 +153,14 @@ class QqGeneration implements SurfaceAdapter {
       send: async (target, request, result, signal, authorized) => {
         const actor = this.actor(target);
         if (typeof request.turnId !== "string") throw new QqInteractionDeliveryError("missing-turn-grant");
+        const turnId = request.turnId;
         let grant: string | undefined;
-        try { grant = await this.waitForTurnGrant(target, actor, request.threadId, request.turnId, signal); }
+        try { grant = await this.waitForTurnGrant(target, actor, request.threadId, turnId, signal); }
         catch { throw new QqInteractionDeliveryError("turn-association-unconfirmed"); }
         if (!grant) throw new QqInteractionDeliveryError("missing-turn-grant");
         const originalGrant = grant;
         const current = (): boolean => {
-          if (!this.allowed(target, actor)) return false;
+          if (this.turnGrant(target, actor, request.threadId, turnId) !== originalGrant) return false;
           try { this.ledger.remaining(originalGrant, actor); return true; } catch { return false; }
         };
         if (!current()) throw new QqInteractionDeliveryError("grant-expired");
@@ -174,7 +178,7 @@ class QqGeneration implements SurfaceAdapter {
     });
     void this.transport.finished.catch(error => this.fatal(error));
     this.output = {
-      admitLive: event => this.observeQueueOrigin(event),
+      admitLive: event => { this.observeQueueOrigin(event); this.observeRootOrigin(event); },
       handle: () => {},
       deliver: (event, signal, checkpoint, authorized) => captureDelivery(() => {
         this.queue.enqueue(event.target.conversationId, async queueSignal => {
@@ -183,18 +187,21 @@ class QqGeneration implements SurfaceAdapter {
           if (!authorized || !authorized()) throw new Error("QQ 可靠输出缺少有效归属授权");
           const actor = this.actor(event.target);
           if (!("threadId" in event) || !("turnId" in event) || typeof event.turnId !== "string") throw new Error("QQ 输出缺少轮次归属");
-          const grant = await this.waitForTurnGrant(event.target, actor, event.threadId, event.turnId, combined);
+          const { threadId, turnId } = event;
+          const grant = await this.waitForTurnGrant(event.target, actor, threadId, turnId, combined);
           if (!grant) throw new Error("QQ 输出回复来源未确认");
+          const sourceAuthorized = (): boolean => authorized()
+            && this.turnGrant(event.target, actor, threadId, turnId) === grant;
           if (event.type === "operation.updated" && event.operation.kind === "imageGeneration" && event.operation.status === "completed") {
             if (event.operation.imagePath !== undefined) {
-              await this.sendGeneratedImage(event.target, actor, grant, event.operation.imagePath, combined, authorized);
+              await this.sendGeneratedImage(event.target, actor, grant, event.operation.imagePath, combined, sourceAuthorized);
             } else {
-              await this.send(event.target, actor, grant, renderQqPanel(generatedImageUnavailableText), combined, authorized);
+              await this.send(event.target, actor, grant, renderQqPanel(generatedImageUnavailableText), combined, sourceAuthorized);
             }
             return;
           }
           const result = renderQqOutput(event);
-          await this.send(event.target, actor, grant, result, combined, authorized);
+          await this.send(event.target, actor, grant, result, combined, sourceAuthorized);
         }, true);
       }, signal, checkpoint, { requireConfirmation: true }),
     };
@@ -219,6 +226,7 @@ class QqGeneration implements SurfaceAdapter {
   private async close(): Promise<void> {
     this.closed = true;
     this.queueOrigins.clear();
+    this.rootOrigins.clear();
     this.controller.abort();
     for (const input of this.inputTails.values()) input.cancellation.abort();
     this.attachmentInputs.close();
@@ -324,6 +332,11 @@ class QqGeneration implements SurfaceAdapter {
       if (command.name === "help") { await this.notify(target, message.actor, message.id, qqHelp); return; }
       if (!supportedCommands.has(command.name) || !isConversationCommandName(command.name)) {
         await this.notify(target, message.actor, message.id, "当前 QQ 切片不支持该命令，请发送 /help。");
+        return;
+      }
+      if (command.name === "goal" && parseGoalCommand(command.argumentsText).kind === "set") {
+        await this.notify(target, message.actor, message.id,
+          "QQ 当前仅支持 /goal 查询和 /goal clear。直接 set 不提供可关联的根 Turn；请在普通任务中使用 Goal 工具创建。");
         return;
       }
       let authorizeReply: (() => void) | undefined;
@@ -475,6 +488,56 @@ class QqGeneration implements SurfaceAdapter {
     }).finally(() => this.jobs.delete(job));
     this.jobs.add(job);
   }
+  private observeRootOrigin(event: OutputEvent): void {
+    if (event.type !== "turn.root.identity" || this.closed) return;
+    let actor: string;
+    try { actor = this.actor(event.target); } catch { return; }
+    const now = performance.now();
+    for (const [key, entry] of this.rootOrigins) {
+      if (entry.deadline <= now) this.rootOrigins.delete(key);
+      else if (!this.allowed(entry.target, entry.actor)) entry.rejected = true;
+    }
+    const key = JSON.stringify([event.threadId, event.turnId]);
+    const previous = this.rootOrigins.get(key);
+    if (previous) {
+      if (previous.rootTurnId !== event.rootTurnId || previous.actor !== actor
+        || conversationTargetKey(previous.target) !== conversationTargetKey(event.target)) {
+        previous.rejected = true;
+        this.options.logger.warn({ reason: "qq-root-origin-conflict" }, "QQ 根轮次身份冲突，后续结果保留待核对");
+      }
+      return;
+    }
+    // A root identifies itself. It must already have its own original submission
+    // grant; it cannot create a new alias or acquire a later incoming message.
+    if (event.rootTurnId === event.turnId) return;
+    if (this.rootOrigins.size >= 500) {
+      this.options.logger.warn({ reason: "qq-root-origin-capacity" }, "QQ 根轮次来源容量已满，结果保留待核对");
+      return;
+    }
+    const origin = { target: { ...event.target }, actor, rootTurnId: event.rootTurnId,
+      deadline: now + 5 * 60_000, grant: undefined as string | undefined, rejected: false };
+    this.rootOrigins.set(key, origin);
+    // Capture the original pending submissions before registering this alias's
+    // own wait. Root resolution accepts only ledger originals, never aliases.
+    const original = this.waitForTurnGrant(event.target, actor, event.threadId, event.rootTurnId,
+      this.controller.signal, true);
+    const association = this.trackSubmission(event.target, original.then(grant => {
+      if (!grant || origin.rejected || this.rootOrigins.get(key) !== origin
+        || !this.allowed(origin.target, actor)
+        || this.ledger.forTurn(actor, event.threadId, event.rootTurnId) !== grant) {
+        throw new Error("QQ 原根轮次回复来源未确认");
+      }
+      origin.deadline = Math.min(origin.deadline, performance.now() + this.ledger.remainingMs(grant, actor));
+      if (performance.now() >= origin.deadline) throw new Error("QQ 原根轮次回复来源已过期");
+      origin.grant = grant;
+      return { threadId: event.threadId, turnId: event.turnId, steered: false };
+    }));
+    const job = association.then(() => {}, () => {
+      origin.rejected = true;
+      this.options.logger.warn({ reason: "qq-root-association-unconfirmed" }, "QQ 根轮次来源未确认，结果保留待核对");
+    }).finally(() => this.jobs.delete(job));
+    this.jobs.add(job);
+  }
   private async associateSubmission(target: ConversationTarget, message: Inbound, operation: Promise<Submission>): Promise<Submission> {
     // Output awaits only the actual submission/association, never downloads,
     // earlier input work or a command reply queued behind it.
@@ -497,9 +560,9 @@ class QqGeneration implements SurfaceAdapter {
     }
   }
   private async waitForTurnGrant(target: ConversationTarget, actor: string, threadId: string, turnId: string,
-    signal: AbortSignal): Promise<string | undefined> {
+    signal: AbortSignal, directOnly = false): Promise<string | undefined> {
     signal.throwIfAborted();
-    const current = (): string | undefined => this.ledger.forTurn(actor, threadId, turnId);
+    const current = (): string | undefined => this.turnGrant(target, actor, threadId, turnId, directOnly);
     const grant = current();
     if (grant) return grant;
     const waiting = [...(this.pending.get(target.conversationId) ?? [])];
@@ -526,6 +589,22 @@ class QqGeneration implements SurfaceAdapter {
       };
       for (const submission of waiting) void submission.then(completed, completed);
     });
+  }
+  private turnGrant(target: ConversationTarget, actor: string, threadId: string, turnId: string,
+    directOnly = false): string | undefined {
+    if (!this.allowed(target, actor)) return undefined;
+    const direct = this.ledger.forTurn(actor, threadId, turnId);
+    if (direct || directOnly) return direct;
+    const origin = this.rootOrigins.get(JSON.stringify([threadId, turnId]));
+    if (!origin || origin.rejected || !origin.grant || origin.actor !== actor
+      || conversationTargetKey(origin.target) !== conversationTargetKey(target)) return undefined;
+    if (performance.now() >= origin.deadline
+      || this.ledger.forTurn(actor, threadId, origin.rootTurnId) !== origin.grant) {
+      origin.rejected = true;
+      return undefined;
+    }
+    try { this.ledger.remainingMs(origin.grant, actor); return origin.grant; }
+    catch { origin.rejected = true; return undefined; }
   }
   private notify(target: ConversationTarget, actor: string, grant: string, text: string | QqRenderedMessage, authorized?: () => boolean): Promise<void> {
     const result = typeof text === "string" ? renderQqPanel(text) : text;

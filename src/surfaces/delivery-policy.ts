@@ -55,7 +55,7 @@ export function resolveSurfaceDelivery(
   event: OutputEvent,
 ): SurfaceDeliveryDecision {
   // Source correlation is synchronous live admission, never platform output or a replay backlog.
-  if (event.type === "user.message.identity") return { disposition: "ignore", critical: false };
+  if (event.type === "user.message.identity" || event.type === "turn.root.identity") return { disposition: "ignore", critical: false };
   if (surface === "qq") {
     const deliver = event.type === "text.completed" && event.phase !== "commentary"
       || event.type === "turn.completed"

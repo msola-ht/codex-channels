@@ -15,7 +15,7 @@ const MAX_MESSAGE_BYTES = 3_000;
 const MAX_MESSAGE_COUNT = 4;
 
 const qqCommandGroups = [
-  { title: "状态与运行：", commands: ["status", "stop", "queue", "permissions", "diff", "review", "autoreview", "compact", "revert", "release"] },
+  { title: "状态与运行：", commands: ["status", "stop", "queue", "goal", "permissions", "diff", "review", "autoreview", "compact", "revert", "release"] },
   { title: "工作区与会话：", commands: ["workspace", "sessions", "resume", "new", "archived", "archive", "unarchive", "pin", "unpin", "rename", "fork"] },
   { title: "模型与用量：", commands: ["model", "effort", "fast", "plan", "usage", "limits", "metrics"] },
   { title: "扩展与代理：", commands: ["skill", "plugin", "agents", "mcp", "hooks"] },
@@ -37,6 +37,7 @@ export const qqHelp = [
   "/plugin：不填列出，health 查健康，list 后可选页码及 search 搜索词；填写名称、完整 ID 或序号查看详情，再加任务调用。",
   "/autoreview：查询；填写 on 或 off 切换审批方式。/compact：请求压缩，稍后用 /status 核对。",
   "/queue：add 文本、list 页码、update 选择器 文本、delete 选择器、reorder 选择器 位置；start 可带选择器，省略时启动队首条目。",
+  "/goal：不填查询，clear 清除；set 暂不支持，请通过普通任务中的 Goal 工具创建。",
   "/revert：list 后可填页码；填写选择编号预览，再按返回的 confirm 令牌确认；不恢复文件或外部副作用。",
   "/release：诊断占用；显式 /release force 沿共享约束尝试结束可释放进程，可能影响其他会话。",
   "/mcp：不填列出，health 查健康，reload 请求重载；名称或序号查详情，tools、resources 或 templates 支持分页和 search。",
@@ -51,6 +52,7 @@ export const qqHelp = [
   "MCP 工具审批按提示提供一次、会话或始终批准；仅原用户、原请求和有效回复窗口内生效。",
   "支持生成图片回传，受大小、回复窗口和剩余额度限制；普通文件输入、流式和计划任务仍未开放。",
   "Queue 由 App Server 持久保存；QQ 结果只沿本次运行中登记的原 add 来信回复，仍共用原消息五分钟/四次额度。重启、过期或原生客户端加入的条目可执行，但不会借 start 或新来信补发结果。",
+  "官方同 Thread 根 Turn 工作链（含工具创建 Goal 后的自主续跑）只继承已确认的原来信回复依据，共用五分钟/四次额度；未知来源不借新来信补发。",
   "长回答、长 Diff 和完整命令结果超过文本预算或剩余额度时，以完整 UTF-8 文件交付；文件上限 1000000 字节。",
   "普通 MCP 表单按提示填写 JSON；异步/敏感问题及 MCP URL 交互暂不支持。",
 ].join("\n");
@@ -190,7 +192,9 @@ function hasMultilineField(value: unknown): boolean {
 
 /** Diff is source data: leading +, -, # and indentation must not become panel syntax. */
 export function renderQqCommandResult(result: ConversationCommandResult): QqRenderedMessage | null {
-  const shared = renderConversationCommandResult(result);
+  const shared = result.kind === "goal" && result.goal === null
+    ? "当前 Session 没有 Goal。请在普通任务中使用 Goal 工具创建。"
+    : renderConversationCommandResult(result);
   if (shared === null) return null;
   const source = shared + queueReplyNotice(result);
   if (result.kind === "thread-revert-preview" || result.kind === "hooks" && result.view.confirmation
@@ -239,6 +243,7 @@ export function canReviewQqConversationHook(hook: HookEntry): boolean {
 }
 
 function renderQqCommandPanel(result: ConversationCommandResult, text: string): QqRenderedMessage {
+  if (result.kind === "goal" && result.goal === null) return renderQqPanel(text);
   if (result.kind === "thread-queue" || result.kind === "outcome" && result.outcome.type.startsWith("thread-queue.")) {
     return renderQqFieldPanel(field => renderConversationCommandResult(mapQqQueryFields(result, field))! + queueReplyNotice(result), text);
   }
@@ -286,13 +291,14 @@ function renderQqCommandPanel(result: ConversationCommandResult, text: string): 
     return { text, blocks: [{ text }] };
   }
   if (result.kind === "sessions" || result.kind === "metrics" || result.kind === "skills"
-    || result.kind === "auto-review"
+    || result.kind === "auto-review" || result.kind === "goal"
     || result.kind === "reset-credit" || result.kind === "thread-revert" || result.kind === "thread-revert-preview"
     || result.kind === "agents" || result.kind === "plugins" || result.kind === "plugin-health"
     || result.kind === "plugin-detail" || result.kind === "outcome" && (
       result.outcome.type === "review.started" || result.outcome.type === "plan.started"
       || result.outcome.type === "skill.started" || result.outcome.type === "plugin.started"
-      || result.outcome.type === "agents.started" || result.outcome.type === "thread.reverted")) {
+      || result.outcome.type === "agents.started" || result.outcome.type === "thread.reverted"
+      || result.outcome.type === "goal.updated")) {
     return renderQqFieldPanel(field => renderConversationCommandResult(mapQqQueryFields(result, field))!, text);
   }
   if (hasMultilineField(result)) {
@@ -332,13 +338,15 @@ function renderQqFieldPanel(render: (field: (value: string) => string) => string
 /** Only fields consumed by these command formatters; session names/previews keep shared normalization. */
 type QqLiteralCommandResult = Extract<ConversationCommandResult, {
   kind: "sessions" | "metrics" | "skills" | "agents" | "plugins" | "plugin-health" | "plugin-detail" | "outcome"
-    | "reset-credit" | "thread-revert" | "thread-revert-preview" | "thread-queue" | "auto-review";
+    | "reset-credit" | "thread-revert" | "thread-revert-preview" | "thread-queue" | "auto-review" | "goal";
 }>;
 
 function mapQqQueryFields(
   result: QqLiteralCommandResult,
   field: (value: string) => string,
 ): QqLiteralCommandResult {
+  if (result.kind === "goal") return { ...result, goal: result.goal
+    ? { ...result.goal, objective: field(result.goal.objective) } : null };
   if (result.kind === "thread-queue") return { ...result, result: { ...result.result,
     selectors: result.result.selectors.map(field), items: result.result.items.map(item => ({ ...item,
       id: field(item.id), textPreview: item.textPreview === null ? null : field(item.textPreview),
@@ -403,6 +411,8 @@ function mapQqQueryFields(
   if (result.kind === "outcome") {
     const outcome = result.outcome;
     switch (outcome.type) {
+      case "goal.updated":
+        return { ...result, outcome: { ...outcome, goal: { ...outcome.goal, objective: field(outcome.goal.objective) } } };
       case "thread-queue.added": case "thread-queue.updated":
         return { ...result, outcome: { ...outcome, item: { ...outcome.item,
           id: field(outcome.item.id), textPreview: outcome.item.textPreview === null ? null : field(outcome.item.textPreview),

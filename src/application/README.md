@@ -64,6 +64,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
   命令和模型/审批按钮必须传原 Actor，由组合根注入当前 Surface 账号策略；缺少授权实现失败关闭。
   Queue 命令把当前 Workspace 作用域的授权闭包传到锁、选择器和最终请求边界，拒绝后不自动撤销已提交写入。
+  Goal 查询/清除复用公开 `parseGoalCommand` 与同一用例；已绑定命令固定原 Thread 至回复，未绑定时仍允许共享会话准备。
+  get 响应后复核原目标；clear 先归约已确认的原 Thread 清除，再复核回复守卫，不因迟到撤权将已经完成的写入当作未发生。
   按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。
   `/autoreview [on|off]` 查询或修改当前 Thread 实际审批方式；审批方式不受本地 Provider 与模型白名单限制；`selectAutoReview` 的按钮固定原 Thread ID，由会话用例在锁内复核。
   会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；

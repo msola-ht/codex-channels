@@ -7,6 +7,7 @@ import {
 import {
   defaultSessionListView,
   parseAgentInvocation,
+  parseGoalCommand,
   parseMcpOperation,
   parseMetricsCommand,
   parsePluginOperation,
@@ -413,15 +414,23 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     };
     assertActive();
     const guard = this.commandGuard(target, actorId, command === "workspace");
-    const threadQuery = (command === "metrics" && parseMetricsCommand(input.trim()).view === "session")
+    let threadQuery = (command === "metrics" && parseMetricsCommand(input.trim()).view === "session")
       || (command === "mcp" && input.trim() !== "reload")
+      || (command === "goal" && this.conversations.status(target).threadId !== undefined)
       ? { threadId: this.conversations.status(target).threadId }
       : undefined;
     const assertQueryThread = (): void => {
+      // Goal may prepare the first Thread. Pin it as soon as the shared
+      // preparation invokes the final guard, before its RPC can be submitted.
+      if (command === "goal" && !threadQuery) {
+        const threadId = this.conversations.status(target).threadId;
+        if (threadId !== undefined) threadQuery = { threadId };
+      }
       if (threadQuery && this.conversations.status(target).threadId !== threadQuery.threadId) {
         throw new UserFacingError("command.authorization-changed", command === "metrics"
           ? "指标查询对应的会话已变化，请重新查询。"
-          : "MCP 查询对应的会话已变化，请重新查询。");
+          : command === "mcp" ? "MCP 查询对应的会话已变化，请重新查询。"
+          : "Goal 操作对应的会话已变化，请重新查询。");
       }
     };
     const assertAuthorized = () => { assertActive(); guard(); assertQueryThread(); };
@@ -1157,25 +1166,20 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     input: string,
     assertAuthorized?: () => void,
   ): Promise<ConversationCommandResult> {
-    if (input === "clear") {
+    const command = parseGoalCommand(input);
+    if (command.kind === "clear") {
       await this.conversations.clearGoal(target, assertAuthorized);
       return {
         kind: "outcome",
         outcome: { type: "goal.cleared" },
       };
     }
-    if (input.startsWith("set ")) {
-      const goal = await this.conversations.setGoal(target, input.slice(4), assertAuthorized);
+    if (command.kind === "set") {
+      const goal = await this.conversations.setGoal(target, command.objective, assertAuthorized);
       return {
         kind: "outcome",
         outcome: { type: "goal.updated", goal },
       };
-    }
-    if (input) {
-      throw new UserFacingError(
-        "goal.usage",
-        "Goal 参数无效",
-      );
     }
     const goal = await this.conversations.getGoal(target, assertAuthorized);
     return { kind: "goal", goal };

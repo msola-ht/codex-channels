@@ -63,6 +63,7 @@ P1 的共享命令结果、操作错误及完成呈现已实现；用户截图�
 共享 review/plan/skill/plugin/agents 调用已贯通提交身份与原回复依据，隔离早到结果、steer 和查询路径已有观察；真实调用结果仍待验收。
 autoreview、compact、revert、release、MCP、Hook 和重置券管理适配沿共享服务与确认流程；QQ 确认预览使用单条完整文字，真实管理操作与客户端展示仍待验收。
 QQ 原生 Queue 已本地接入共享操作和 clientId 来源关联；隔离早到结果、手动 start、跨目标、过期和共享额度已有观察，真实自动派发及客户端结果仍待验收。
+QQ 同 Thread 官方根 Turn 工作链、Goal 查询/清除已本地实现；隔离等待原提交、原根共享额度、冲突/过期/撤权拒绝已有观察，真实工具 Goal 续跑与客户端结果仍待验收。直接 set 未开放。
 隔离 Surface 链路曾观察发送计划、格式拒绝降级、未知结果不重发与撤权拒绝；具体构建适用范围见计划记录，不升级为全部实机通过。
 具体范围与后续门槛见 [QQ 设计](qq-surface-plan.md) 和 [QQ 模块](../src/surfaces/qq/README.md)。
 
