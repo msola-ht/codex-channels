@@ -122,6 +122,29 @@ export class QqInteractionPort implements InteractionPort {
       return "已接收审批选择；实际执行结果以随后会话回复为准。";
     }
     if (entry.request.type === "elicitation") {
+      if (entry.request.mode === "form") {
+        if (action !== "填写" || !input || Buffer.byteLength(input, "utf8") > 4_000) return "请使用当前填写操作提交有效 JSON（最多 4000 UTF-8 字节），或取消。";
+        try {
+          const depths = new WeakMap<object, number>();
+          const content: unknown = JSON.parse(input, (_key: string, value: unknown) => {
+            if (typeof value === "number" && !Number.isFinite(value)) throw new Error("非有限 JSON 数值");
+            if (value !== null && typeof value === "object") {
+              let depth = 1;
+              for (const child of Object.values(value as Record<string, unknown>)) {
+                if (child !== null && typeof child === "object") depth = Math.max(depth, 1 + depths.get(child)!);
+              }
+              // Leave room for the RPC envelope within App Server's 128-level JSON parser limit.
+              if (depth > 64) throw new Error("JSON 嵌套过深");
+              depths.set(value, depth);
+            }
+            return value;
+          });
+          this.finish(token!, { type: "elicitation", action: "accept", content });
+          return "已接收表单回应；实际处理结果以随后会话回复为准。";
+        } catch {
+          return "JSON 格式无效、包含非有限数值或嵌套超过 64 层，请修改后使用原填写操作重试，或取消。";
+        }
+      }
       const offered = input === undefined && toolApprovalActions(entry.request).find(candidate => candidate.verb === action);
       if (!offered) return "当前请求不支持该选择。";
       this.finish(token!, offered.decision);
@@ -171,7 +194,8 @@ export class QqInteractionPort implements InteractionPort {
 
 function supports(request: InteractionRequest): boolean {
   if (request.type === "approval") return ["command", "file", "permissions", "stdin"].includes(request.kind);
-  if (request.type === "elicitation") return request.mode === "tool-approval" && !!request.toolApproval && typeof request.turnId === "string";
+  if (request.type === "elicitation") return typeof request.turnId === "string"
+    && (request.mode === "form" || request.mode === "tool-approval" && !!request.toolApproval);
   return request.type === "user-input" && !request.asynchronous && request.questions.length > 0 && request.questions.length <= 3
     && new Set(request.questions.map(question => question.id)).size === request.questions.length
     && request.questions.every(question => !question.secret && question.id.length > 0 && question.options.length <= 8
@@ -246,11 +270,17 @@ function prompt(request: InteractionRequest, token: string): QqRenderedMessage {
       action(`/${offered.verb} ${token}${offered.argument ? ` ${offered.argument}` : ""}`);
     }
   } else if (request.type === "elicitation") {
-    body.push(request.message, `工具：${request.toolApproval?.toolTitle ?? "未命名工具"}`, request.toolApproval?.detail ?? "",
-      "授权选项（仅当前请求提供的范围）：");
-    for (const offered of toolApprovalActions(request)) {
-      body.push(`${offered.verb}：${offered.description}`);
-      action(`/${offered.verb} ${token}`);
+    body.push(request.message);
+    if (request.mode === "form") {
+      body.push("请按上文要求填写有效 JSON（最多 4000 UTF-8 字节，嵌套最多 64 层）；填写操作后直接输入 JSON，不加问题序号。勿在聊天中填写密码或令牌等敏感信息，请改在原生客户端处理。");
+      action(`/填写 ${token} `, true);
+    } else {
+      body.push(`工具：${request.toolApproval?.toolTitle ?? "未命名工具"}`, request.toolApproval?.detail ?? "",
+        "授权选项（仅当前请求提供的范围）：");
+      for (const offered of toolApprovalActions(request)) {
+        body.push(`${offered.verb}：${offered.description}`);
+        action(`/${offered.verb} ${token}`);
+      }
     }
   } else if (request.type === "user-input") {
     request.questions.forEach((question, index) => {
@@ -263,7 +293,9 @@ function prompt(request: InteractionRequest, token: string): QqRenderedMessage {
     });
   }
   action(`/取消 ${token}`);
-  body.push("操作区按问题与选项序号对应上文；填写时在问题序号后输入答案。点击不可用时可复制完整操作回应。");
+  body.push(request.type === "user-input"
+    ? "操作区按问题与选项序号对应上文；填写时在问题序号后输入答案。点击不可用时可复制完整操作回应。"
+    : "点击不可用时可复制完整操作回应。");
   const blocks: QqRenderedMessage["blocks"] = [{ text: body.join("\n") }, { text: actions.join("\n"), markdown: markup.join("\n") }];
   const text = blocks.map(block => block.text).join("\n");
   if (Buffer.byteLength(text, "utf8") > 12_000) throw new Error("QQ 交互详情无法完整展示");
