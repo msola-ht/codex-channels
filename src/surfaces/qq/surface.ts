@@ -14,7 +14,7 @@ import { SurfaceInputBatcher, imageBatchLimitError } from "../surface-input-batc
 import type { StoredManagedImage } from "../managed-image-store.js";
 import type { StoredManagedAudio } from "../managed-audio-store.js";
 import { videoAttachmentBody, type PreparedVideoAttachment } from "../video-attachment-store.js";
-import type { SurfaceAdapter, SurfaceOutputPort } from "../types.js";
+import type { ChannelImageSource, SurfaceAdapter, SurfaceOutputPort } from "../types.js";
 import { createQqLedger } from "./ledger.js";
 import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, maximumQqImageBytes, type QqMessageBody } from "./protocol.js";
 import { readGeneratedImage } from "../generated-image.js";
@@ -85,6 +85,10 @@ export class QqSurface implements SurfaceAdapter {
     if (this.closed) return Promise.reject(new Error("QQ 已关闭"));
     return this.starting ??= this.begin().finally(() => { this.starting = undefined; });
   }
+  sendChannelImage(conversationId: string, imagePath: string, source?: ChannelImageSource): Promise<void> {
+    if (this.closed || !this.current) return Promise.reject(new Error("QQ 当前连接不可用"));
+    return this.current.sendChannelImage(conversationId, imagePath, source);
+  }
   private async begin(): Promise<void> {
     await this.current?.stop();
     if (this.closed) throw new Error("QQ 已关闭");
@@ -103,6 +107,7 @@ export class QqSurface implements SurfaceAdapter {
     })();
   }
   deliverConfigurationChange(): Promise<void> { return Promise.reject(new Error("QQ 配置通知没有被动回复依据")); }
+
 }
 
 class QqGeneration implements SurfaceAdapter {
@@ -283,6 +288,21 @@ class QqGeneration implements SurfaceAdapter {
       waitBounded(this.network.close(), undefined, 5_000),
     ]);
     if (results.some(result => result.status === "rejected")) throw new Error("QQ 关闭未全部确认");
+  }
+
+  async sendChannelImage(conversationId: string, imagePath: string, source?: ChannelImageSource): Promise<void> {
+    if (!source) throw new Error("QQ 图片发送缺少原 Turn 身份");
+    const target: ConversationTarget = { surface: "qq", accountId: this.accountId, conversationId };
+    const actor = this.actor(target);
+    const original = { threadId: source.threadId, turnId: source.turnId };
+    const grant = await this.waitForTurnGrant(target, actor, original.threadId, original.turnId, this.controller.signal);
+    if (!grant) throw new Error("QQ 图片发送没有已确认的原 Turn 回复依据");
+    const authorized = (): boolean => source.authorized()
+      && this.options.actors.actors(target).includes(actor)
+      && this.turnGrant(target, actor, original.threadId, original.turnId) === grant;
+    if (!authorized()) throw new Error("QQ 图片原目标或授权已失效");
+    await this.queue.runOrdered(conversationId, signal => this.sendGeneratedImage(target, actor, grant, imagePath,
+      AbortSignal.any([signal, this.controller.signal]), authorized), this.controller.signal);
   }
 
   private async receive(envelope: { t: string; d: unknown }, admissionSignal: AbortSignal): Promise<void> {
@@ -716,6 +736,8 @@ class QqGeneration implements SurfaceAdapter {
     const uploaded = await checkpointDelivery(`qq.c2c.upload-${media.kind}`, () => media.kind === "image"
       ? this.client.uploadC2CImage({ ...uploadInput, format: media.format })
       : this.client.uploadC2CFile(uploadInput));
+    // Upload completion is a new resource boundary; retain its explicit guard failure.
+    beforeSend();
     await checkpointDelivery(`qq.c2c.${media.kind}`, () => this.client.sendC2CMessage({ userOpenid: actor,
       msgId: reservation.msgId, msgSeq: reservation.msgSeq,
       message: { kind: media.kind, fileInfo: uploaded.fileInfo }, signal: sendSignal,

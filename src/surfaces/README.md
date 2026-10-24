@@ -296,7 +296,7 @@ Computer Use 的 MCP 操作也不进入查询缓冲；飞书在同一卡片展�
 顺序队列及 `hidden` 模式。具体操作说明已在 Client 边界提取并清洗，过程展示不使用 MCP 读写声明标签。
 `generated-image.ts` 对 App Server `imageGeneration.savedPath` 指向的生成图片和
 `codexc channel send-image` 提交的渠道 spool 图片执行同一读取校验：绝对路径、拒绝符号链接、
-空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书与微信分别负责平台上传和发送，
+空文件、超过大小限制（默认 10 MiB，QQ 为 3 MiB）的内容和非 PNG/JPEG 签名；Telegram、飞书、微信与 QQ 分别负责平台上传和发送，
 不读取 `imageView` 或用户上传图片路径。
 Telegram 和飞书收到仅含 `fileId`、没有 `savedPath` 的原生图片生成完成结果时，
 独立提示“图片已生成，但当前无法获取图片内容”，不受操作过程显示档位影响；不展示引用、
@@ -304,7 +304,10 @@ Telegram 和飞书收到仅含 `fileId`、没有 `savedPath` 的原生图片生�
 微信仍按回复窗口策略忽略这类操作事件，不新增引用结果通知。
 `SurfaceAdapter.sendChannelImage` 是可选的渠道图片发送入口，由 Gateway 的
 `channel-image-spool` 驱动，复用 `generated-image.ts` 的读取校验和各自平台上传发送；
-三个 Surface 都实现该入口，微信按目标 Conversation 复用其回复上下文与授权检查。
+四个 Surface 都实现该入口，微信按目标 Conversation 复用其回复上下文与授权检查。
+QQ 必须接收 `ChannelImageSource` 的精确 Thread/Turn 和组合根实时路由守卫，固定原 Actor、目标与 Grant，
+排队和每次平台请求前复核当前策略及原绑定；复用生成图片的 3 MiB 读取、上传、消息确认和原回复预算。
+正文 Markdown 链接没有可信图片资产合同，不由 Surface 自动下载 URL 或读取任意路径。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Bootstrap 注入的 Application `ConversationCommandExecutor`；Surface 只保留普通输入、状态或菜单实际需要的能力切片，并负责提取命令名、参数和渲染类型化结果。

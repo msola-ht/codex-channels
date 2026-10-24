@@ -19,6 +19,7 @@ import {
   resolveSurfaceDelivery,
   surfaceErrorMetadata,
   type SurfaceAdapter,
+  type ChannelImageSource,
   type SurfaceConfigurationChange,
 } from "../surfaces/index.js";
 
@@ -307,6 +308,7 @@ export class SurfaceManager {
   async sendChannelImage(
     target: ConversationTarget,
     imagePath: string,
+    source?: ChannelImageSource,
   ): Promise<void> {
     if (this.stopping) {
       throw new Error("Gateway 正在停止，无法发送渠道图片");
@@ -325,7 +327,7 @@ export class SurfaceManager {
     if (surface.sendChannelImage === undefined) {
       throw new Error(`${target.surface} 渠道不支持发送图片`);
     }
-    return surface.sendChannelImage(target.conversationId, imagePath);
+    return surface.sendChannelImage(target.conversationId, imagePath, source);
   }
 
   presentScheduledTaskConfirmation(

@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 
-export const CHANNEL_SEND_IMAGE_USAGE = "用法：codexc channel send-image <图片路径> [--thread <Thread ID>]";
+export const CHANNEL_SEND_IMAGE_USAGE = "用法：codexc channel send-image <图片路径> [--thread <Thread ID>] [--turn <Turn ID>]";
 
 export function assertAbsoluteChannelImagePath(value) {
   if (!isAbsolute(value)) {
@@ -10,6 +10,7 @@ export function assertAbsoluteChannelImagePath(value) {
 
 export function parseChannelSendImageArgs(args) {
   let threadId;
+  let turnId;
   const positional = [];
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === "--thread") {
@@ -17,6 +18,15 @@ export function parseChannelSendImageArgs(args) {
       threadId = args[index + 1];
       if (!threadId || threadId.startsWith("--")) {
         throw new Error("--thread 缺少值");
+      }
+      index += 1;
+      continue;
+    }
+    if (args[index] === "--turn") {
+      if (turnId !== undefined) throw new Error("--turn 只能指定一次");
+      turnId = args[index + 1];
+      if (!turnId || turnId.startsWith("--") || /\s/u.test(turnId) || turnId.length > 256) {
+        throw new Error("--turn 缺少有效 Turn ID");
       }
       index += 1;
       continue;
@@ -30,5 +40,5 @@ export function parseChannelSendImageArgs(args) {
     throw new Error(CHANNEL_SEND_IMAGE_USAGE);
   }
   assertAbsoluteChannelImagePath(positional[0]);
-  return { imagePath: positional[0], threadId };
+  return { imagePath: positional[0], threadId, turnId };
 }

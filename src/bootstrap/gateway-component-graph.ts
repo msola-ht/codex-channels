@@ -1221,8 +1221,8 @@ export abstract class GatewayComponentGraph {
     this.channelImageSpool = new ChannelImageSpool({
       directory: join(dirname(config.stateDatabasePath), "channel-outbox"),
       resolveTarget: (threadId) => this.router.targetForThread(threadId),
-      sendImage: (target, imagePath) =>
-        this.surfaceManager.sendChannelImage(target, imagePath),
+      sendImage: (target, imagePath, source) =>
+        this.surfaceManager.sendChannelImage(target, imagePath, source),
       logger,
     });
     for (const surface of this.surfaces) {

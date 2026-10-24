@@ -85,9 +85,11 @@
   导出规范用法行；不访问配置、数据库或服务，
   `metrics-database.mjs` 保留原有公开入口与 `metricsRange` 导出。
 - `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。
+  QQ 使用显式 `--turn`，不推断最新活动来源。
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，校验配置与状态库 Schema，解析前台或后台 Thread 绑定；通过 Surface 公开入口校验并有界读取本地图片，私有原子写入
   状态库目录下的 `channel-outbox/pending/` 后发布 manifest，失败时清理本次暂存；由 Gateway 轮询后按 Thread 绑定
   会话发送并归档，详见 `docs/channel-image.md`。
+  非 QQ 保持 version 1；QQ 发布固定原目标和 Turn 的 version 2，不迁移既有请求。
 - `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc cleanup sessions`，通过
   主 App Server 按 Workspace 枚举全部 Provider 历史，最多并行检查四组候选；跨已连接实例核对活动状态，已移除 Provider 的历史仍可由共享历史连接维护。后代参与绑定、活动、固定与 Workspace 检查，确认后每个父会话只发一次官方归档，批次结束按 Workspace 复用官方双状态根列表核验。
   执行确认后的失败、部分成功、未确认、复核跳过及缓存清理失败返回非零状态，逐组结果保留，不自动重试或回滚。

@@ -247,6 +247,8 @@
   pending 目录内与 manifest 同编号的绝对图片路径。发送只交给已经成功启动的活动 Surface。
   每次轮询只处理一批快照，发送前将 manifest 原子改名为 `.sending`；失败归档未完成或重启
   遗留领取记录时仅重试归档，不再次发送图片，停止时不继续处理下一条。
+  显式支持原 version 1 与仅用于 QQ 的 version 2；后者固定提交时目标和显式原 Turn，消费与渠道实际请求前均通过窄守卫核对原 Thread 仍绑定同一目标。
+  version 1 不补全 Turn 或转发 QQ；新版本的备份、恢复与回滚隔离见[渠道图片](../../docs/channel-image.md#恢复与回退)。
 
 业务状态和平台逻辑应留在对应模块，只有具体实现选择、交互端口注册与生命周期协调放在这里。
 Provider 账户能力同样通过编译期显式注册：OpenAI 复用 Codex Client，第三方实现 Application

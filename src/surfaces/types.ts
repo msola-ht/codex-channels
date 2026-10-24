@@ -43,12 +43,19 @@ export interface SurfaceOutputPort {
 
 export type { OperationUpdateDisplay };
 
+/** Exact original source for passive replies; never inferred from the latest activity. */
+export interface ChannelImageSource {
+  threadId: string;
+  turnId: string;
+  authorized(): boolean;
+}
+
 export interface SurfaceAdapter {
   readonly surface: SurfaceId;
   readonly accountId: string;
   readonly interactions: InteractionPort;
   readonly output: SurfaceOutputPort;
-  sendChannelImage?(conversationId: string, imagePath: string): Promise<void>;
+  sendChannelImage?(conversationId: string, imagePath: string, source?: ChannelImageSource): Promise<void>;
   presentScheduledTaskConfirmation?(
     target: ConversationTarget,
     actorId: string,
