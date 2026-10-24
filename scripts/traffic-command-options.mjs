@@ -19,10 +19,18 @@ export const TRAFFIC_USAGE = `用法：codexc traffic [选项] [V2 session 目�
 
 不传路径时读取 --dir 下最新标签、最新 writer session。位置参数只接受一个 V2 session 目录。
 --follow 从当前末尾开始，显式传入 session 时从已有调用开始输出。
+默认跟随锁定首次选中的标签，依次读取该标签的新批次，并继续等待旧批次中已观察到的未终态调用。
+轮转后仍按标签、批次与编号输出；批次或调用缺失会明确报告，不跨标签关联。
+跟随保留旧批次游标，以接收轮转后才写入的请求；同号调用的重复请求记录不会重复输出。
+跟随最多保留 2048 个批次、2000000 个已观察编号和 100000 个未终态调用，超限请缩小范围重新跟随。
+只保存标识和文件水位，不缓存正文；目录或索引被替换会明确失败。
+交互与 trace 共用 256 项索引缓存；缓存回收后重建也会停止跟随，需选择较小范围重新开始。
+索引每次最多等待 35 秒；诊断未完成会明确标记，不表示未发生。
+每次读取共用 128 MiB、10 万记录和 10 秒预算，大正文自动缩小摘要页；单条仍超限会明确失败。
 
 清理使用 codexc cleanup traffic -h 查看预览与确认删除的要求。`;
 
-export const TRAFFIC_CLEANUP_USAGE = `用法：codexc cleanup traffic [--dir 目录] [--confirm]
+export const TRAFFIC_CLEANUP_USAGE = `用法：codexc cleanup traffic [--dir 目录] [--confirm] [--expected-fingerprint 指纹]
 
 预览或清空转储目录中可识别的全部 V2 session。默认只预览；加 --confirm 才会
 删除，删除前必须停止全部 App Server 与 Relay。未知文件和目录不会删除。
@@ -30,6 +38,7 @@ export const TRAFFIC_CLEANUP_USAGE = `用法：codexc cleanup traffic [--dir 目
 选项：
   --dir <目录>         指定预览目录；确认删除只允许当前配置的数据目录下的 traffic
   --confirm            确认永久删除预览范围内的全部转储
+  --expected-fingerprint <SHA-256>  仅清理与已确认预览完全一致的范围
   -h, --help           显示本帮助`;
 
 export function parseTrafficCommandArgs(args) {
@@ -97,7 +106,7 @@ export function parseTrafficCommandArgs(args) {
 }
 
 export function parseTrafficCleanupArgs(args) {
-  const options = { confirm: false, directory: undefined };
+  const options = { confirm: false, directory: undefined, expectedFingerprint: undefined };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -109,6 +118,13 @@ export function parseTrafficCleanupArgs(args) {
     }
     if (argument === "--dir") {
       options.directory = resolve(requiredValue(args[index + 1], "--dir"));
+      index += 1;
+      continue;
+    }
+    if (argument === "--expected-fingerprint") {
+      const value = requiredValue(args[index + 1], argument);
+      if (!/^[a-f0-9]{64}$/u.test(value)) throw new Error("清理预览指纹必须是 SHA-256");
+      options.expectedFingerprint = value;
       index += 1;
       continue;
     }

@@ -2,10 +2,11 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { securePrivateDirectorySync, writePrivateFileAtomic } from "../runtime/private-file.mjs";
+import { resolveCodexUserConfigBinary } from "./codex-user-config.mjs";
 
-export async function validateModelCatalogWithCodex(catalog, environment = process.env) {
+export async function validateModelCatalogWithCodex(catalog, environment = process.env, codexBinary = resolveCodexUserConfigBinary(environment)) {
   const maximumBytes = 2 * 1024 * 1024;
   const content = `${JSON.stringify(catalog, null, 2)}\n`;
   if (Buffer.byteLength(content) > maximumBytes) throw new Error("模型目录不能超过 2 MiB");
@@ -16,7 +17,7 @@ export async function validateModelCatalogWithCodex(catalog, environment = proce
     await writePrivateFileAtomic(path, content);
     const validationEnvironment = { ...environment, CODEX_HOME: directory };
     const invocation = resolveExecutableInvocation(
-      effectiveCodexBinary("codex", environment),
+      codexBinary,
       ["-c", `model_catalog_json=${JSON.stringify(path)}`, "debug", "models"],
       validationEnvironment,
     );

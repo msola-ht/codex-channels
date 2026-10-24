@@ -13,7 +13,9 @@ export class ModelRelayControl {
     this.#server = new PrivateIpcServer(path, socket => {
       let bytes = 0; const chunks = []; let handled = false;
       const controller = new AbortController();
-      socket.on("error", () => {}); socket.once("close", () => controller.abort());
+      socket.on("error", () => {});
+      socket.once("end", () => socket.destroy());
+      socket.once("close", () => controller.abort());
       socket.on("data", chunk => {
         bytes += chunk.length;
         if (handled || bytes > 8192) { socket.destroy(); return; }
@@ -44,13 +46,14 @@ export class ModelRelayControl {
   close() { this.#closed = true; return Promise.all([this.#server.close(), this.#events.close()]).then(() => undefined); }
 }
 
-export async function queryModelRelayControl(path, operation, digest) {
+export async function queryModelRelayControl(path, operation, digest, { signal } = {}) {
+  if (signal?.aborted) return { result: "unconfirmed" };
   if (!privateIpcEndpointExists(path)) return { result: "not_running" };
   const requestId = randomUUID();
   try {
     const response = await requestPrivateIpcJson(path,
       { version: 6, requestId, operation, ...(digest === undefined ? {} : { digest }) },
-      { timeoutMs: 2000, maximumBytes: operation === "queue" ? 128 * 1024 : 8192 });
+      { timeoutMs: 2000, maximumBytes: operation === "queue" ? 128 * 1024 : 8192, signal });
     if (response.version !== 6 || response.requestId !== requestId
       || (operation === "apply" && (response.result !== "applied" || response.digest !== digest))
       || (operation === "status" && response.result !== "status")

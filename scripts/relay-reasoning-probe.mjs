@@ -1,6 +1,6 @@
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { applyChatReasoningPolicy, applyResponsesReasoningPolicy, DirectChatResponse, validateDirectChatRequest, validateDirectResponsesRequest } from "../dist/model-api/index.js";
-import { DirectResponsesObserver, pinClinePassRouting, sendDirectChat, sendDirectResponses, waitForChatOperation } from "../dist/provider-proxy/index.js";
+import { DirectResponsesObserver, applyClinePassProviderOptions, sendDirectChat, sendDirectResponses, waitForChatOperation } from "../dist/provider-proxy/index.js";
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { parseRelayModelId, relayModelId } from "../runtime/model-relay-model-id.mjs";
 import { loadConfiguredRelayProviderMaterial } from "../runtime/model-provider-runtime.mjs";
@@ -34,6 +34,7 @@ export async function probeRelayReasoning(input, { environment = process.env, si
   const models = material.models.filter(model => relayModelId(identity.provider, model) === input.model);
   if (models.length !== 1 || !material.protocols.includes(input.protocol)) throw invalid();
   const model = models[0];
+  const capability = material.modelCapabilities?.find(entry => entry.id === model);
   const rows = modes.map(emptyRow);
   const result = { model: input.model, protocol: input.protocol, revision: input.revision, observedAtMs: Date.now(), rows, stoppedReason: null };
   const controller = new AbortController();
@@ -85,9 +86,11 @@ export async function probeRelayReasoning(input, { environment = process.env, si
         agent = proxy ? new HttpsProxyAgent(proxy, { maxSockets: 1, maxFreeSockets: 0 }) : undefined;
         const sampling = material.modelSampling && Object.hasOwn(material.modelSampling, model) ? material.modelSampling[model] : {};
         let request = input.protocol === "chat"
-          ? applyChatReasoningPolicy(validateDirectChatRequest({ ...sampling, model, stream: true, stream_options: { include_usage: true }, max_tokens: 64, messages: [{ role: "user", content: prompt }] }), identity.provider, row.mode)
+          ? applyChatReasoningPolicy(validateDirectChatRequest({ ...sampling, model, stream: true, stream_options: { include_usage: true }, max_tokens: 64, messages: [{ role: "user", content: prompt }] }), identity.provider, row.mode, capability)
           : applyResponsesReasoningPolicy(validateDirectResponsesRequest(identity.provider, { ...sampling, model, stream: true, store: false, max_output_tokens: 64, input: prompt }), identity.provider, row.mode);
-        if (identity.provider.startsWith("clp-")) request = pinClinePassRouting(request);
+        if (identity.provider.startsWith("clp-")) {
+          request = applyClinePassProviderOptions(request, capability?.cline_provider_options);
+        }
         const call = { request, observer, signal: requestSignal, maximumResponseBytes,
           target: { host: endpoint.hostname.replace(/^\[|\]$/gu, ""), port: endpoint.port ? Number(endpoint.port) : endpoint.protocol === "http:" ? 80 : 443,
             protocol: endpoint.protocol === "http:" ? "http" : "https", basePath: endpoint.pathname, authorization: `Bearer ${material.apiKey}`, ...(agent ? { agent } : {}) },

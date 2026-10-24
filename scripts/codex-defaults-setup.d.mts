@@ -5,10 +5,14 @@ import type { CodexUserSettingActivation } from "./codex-user-settings-managemen
 export type CodexDefaultsClient = CodexDefaultSettingsClient;
 
 export interface CodexDefaultsSetupResult {
+  action: "updated" | "unchanged";
+  consistency: "confirmed" | "unknown";
+  revision: string | null;
+  writeStatus: "ok" | "okOverridden" | null;
   model: string;
   effort: string;
   activation: CodexUserSettingActivation;
-  activationResult: ConfigActivationResult;
+  activationResult: ConfigActivationResult | null;
 }
 
 export interface CodexDefaultsSetupBackResult {

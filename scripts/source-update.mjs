@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -35,6 +36,10 @@ import { withCliProgress, writeCliSection } from "./cli-operation-progress.mjs";
 import { installCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
 import { supervisedCliInvocation } from "./cli-command-worker.mjs";
 import { formatCliMessage } from "../runtime/cli-presentation.mjs";
+import { isGatewayVersionCompatible } from "./gateway-version-policy.mjs";
+import { buildSourceCheckout } from "./source-build.mjs";
+
+export { isGatewayVersionCompatible } from "./gateway-version-policy.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
@@ -81,6 +86,7 @@ export function inspectManagedSourceUpdatePlan(
   }
   const repository = options.repository ?? officialRepository;
   assertManagedRepository(checkout, repository, environment, options.captureCommand);
+  const checkoutIdentity = sourceCheckoutIdentity(checkout);
   readManagedNpmPrefixes(checkout, environment);
   const npmPrefix = assertSourceUpdateInstallation(checkout, environment, options);
   const targetCommit = resolveMainCommit(
@@ -102,6 +108,7 @@ export function inspectManagedSourceUpdatePlan(
     operation: "source-update",
     managed: true,
     checkout,
+    checkoutIdentity,
     currentCommit,
     currentVersion,
     npmPrefix,
@@ -118,6 +125,7 @@ export function inspectManagedSourceUpdatePlan(
             "prepare-codex-cli",
             "validate-codex-contract",
             "stop-services",
+            "upgrade-databases",
             "install-codex-cli",
             "switch-source",
             "refresh-command",
@@ -199,6 +207,7 @@ export async function updateManagedSourceInstallation(
   let servicesRestored = false;
   let servicesBeforeUpdate = [];
   let backupPath;
+  const metricsUpgrade = { attempted: false, completed: false };
   const renamePath = options.renamePath ?? renameSync;
   try {
     if (!options.runStage) writeMessageSafely(writeMessage, "note", "正在克隆 Git main 候选源码。");
@@ -287,6 +296,7 @@ export async function updateManagedSourceInstallation(
           throw new Error("npm 全局目录在候选构建期间发生变化，拒绝更新；请重新运行 codexc update");
         }
         recordManagedSourceMetadata(stagedCheckout, [...readManagedNpmPrefixes(checkout, environment), plan.npmPrefix], environment);
+        assertSourceCheckoutUnchanged(plan, repository, environment, options);
       },
     );
     if (inspection.services.installed) {
@@ -297,6 +307,8 @@ export async function updateManagedSourceInstallation(
         () => (options.stopServices ?? stopCoreServices)(checkout, environment, options, servicesBeforeUpdate),
       );
     }
+    await runStage("upgrade-databases", () =>
+      upgradeInspectedDatabases(stagedCheckout, environment, inspection, metricsUpgrade, writeMessage));
     await runStage(
       "install-codex-cli",
       () => installPreparedCodexVersion(
@@ -311,6 +323,8 @@ export async function updateManagedSourceInstallation(
     if (!options.runStage) writeMessageSafely(writeMessage, "note", "候选源码已通过校验，准备切换。");
     const proposedBackupPath = `${checkout}.pre-update-${Date.now()}`;
     await runStage("switch-source", () => {
+      assertSourceCheckoutUnchanged(plan, repository, environment, options);
+      if (existsSync(proposedBackupPath)) throw new Error("旧源码备份路径已存在，拒绝覆盖");
       renamePath(checkout, proposedBackupPath);
       backupPath = proposedBackupPath;
       try {
@@ -348,8 +362,9 @@ export async function updateManagedSourceInstallation(
       servicesMayNeedRestore = false;
     }
     await runStage("cleanup", () => {
-      rmSync(backupPath, { recursive: true, force: true });
-      backupPath = undefined;
+      // Editors may still hold descriptors into the renamed tree. No snapshot
+      // can prove that deleting it is safe after the final check.
+      writeMessageSafely(writeMessage, "note", `旧源码已保留：${backupPath}。确认没有待保留修改且旧目录已无人使用后，可手动清理；更新不会自动删除旧源码副本。`);
     });
     return {
       changed: true,
@@ -357,6 +372,8 @@ export async function updateManagedSourceInstallation(
       managed: true,
       previousVersion: currentVersion,
       version: candidate.targetVersion,
+      backupPath,
+      ...(metricsUpgrade.backupPath ? { metricsBackupPath: metricsUpgrade.backupPath } : {}),
     };
   } catch (error) {
     let updateError = error;
@@ -365,6 +382,27 @@ export async function updateManagedSourceInstallation(
         `main 源码已切换，但更新未完成；旧源码保留在 ${backupPath}。${errorMessage(error)}`,
         { cause: error },
       );
+    }
+    if (metricsUpgrade.attempted && (!metricsUpgrade.completed || !switched || !completedStages.includes("refresh-command"))) {
+      const candidatePath = switched ? checkout : stagedCheckout;
+      const sourceRecovery = switched
+        ? `源码已切换，使用固定受管目录 ${checkout}。`
+        : `源码尚未切换成功；先核对候选 HEAD 为 ${remoteCommit}、目录归属及未提交修改，完整保留固定受管目录 ${checkout} 中的现有源码和修改${backupPath ? `以及旧源码备份 ${backupPath}` : ""}，再将候选目录整体移至该固定路径；目标存在时不得覆盖，也不要从临时候选目录安装全局包。`;
+      const message = `指标数据库升级已开始，更新未完成；服务保持停止，禁止启动旧 Schema 程序。数据库备份候选路径：${metricsUpgrade.backupPath}；请核对备份是否完整，数据库可能仍为原版本，不要假定迁移成功。候选源码保留：${candidatePath}。${sourceRecovery}核对 npm prefix --global 仍为 ${plan.npmPrefix}，从固定受管目录执行 npm run install:global；保持全部写入方停止，再运行新命令 codexc update 完成数据库检查或迁移。确认指标库为 v35、安装来源指向固定受管目录、服务入口指向本次源码或全局包后，按失败前记录的运行状态恢复服务。人工回退须先恢复原 Schema 的完整备份和匹配旧程序；详细步骤见 docs/source-install.md。`;
+      writeMessageSafely(writeMessage, "remediation", message);
+      throw annotateSourceUpdateFailure(new Error(`${message} ${errorMessage(updateError)}`, { cause: updateError }), {
+        stage: activeStage,
+        completedStages,
+        recovery: {
+          services: "stopped",
+          source: sourceRecoveryStatus(switched, backupPath),
+          ...(backupPath ? { backupPath } : {}),
+          metricsBackupPath: metricsUpgrade.backupPath,
+          candidatePath,
+          checkoutPath: checkout,
+        },
+        recommendation: message,
+      });
     }
     if (servicesMayNeedRestore) {
       try {
@@ -411,7 +449,7 @@ export async function updateManagedSourceInstallation(
         : "修复失败原因后重新运行 codexc update",
     });
   } finally {
-    if (stagingRoot && existsSync(stagingRoot)) {
+    if (stagingRoot && existsSync(stagingRoot) && !(metricsUpgrade.attempted && !switched)) {
       rmSync(stagingRoot, { recursive: true, force: true });
     }
   }
@@ -541,9 +579,10 @@ function assertSourceUpdateInstallation(checkout, environment, options, prefix =
       if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("服务定义不是普通文件");
       if (platform === "systemd") {
         const starts = readFileSync(path, "utf8").split(/\r?\n/u).filter(line => /^\s*ExecStart\s*=/u.test(line));
-        const nodeArgument = starts.length === 1 ? /^ExecStart=("(?:\\.|[^"\\])*") /u.exec(starts[0])?.[1] : undefined;
-        matches = nodeArgument !== undefined && cliEntries.some(entry =>
-          starts[0] === `ExecStart=${nodeArgument} --disable-warning=ExperimentalWarning ${systemdArgument(entry)} ${command}`);
+        const nodeArgument = starts.length === 1 ? /^ExecStart=:("(?:\\.|[^"\\])*") /u.exec(starts[0])?.[1] : undefined;
+        if (nodeArgument === undefined) throw new Error("ExecStart 不符合当前服务定义格式");
+        matches = cliEntries.some(entry =>
+          starts[0] === `ExecStart=:${nodeArgument} --disable-warning=ExperimentalWarning ${systemdArgument(entry)} ${command}`);
       } else {
         const value = platform === "launchd"
           ? JSON.parse(capture("/usr/bin/plutil", ["-extract", "ProgramArguments", "json", "-o", "-", path], checkout, environment, options.captureCommand))
@@ -611,6 +650,21 @@ function resolveMainCommit(repository, checkout, environment, captureCommand) {
     throw new Error("无法解析官方 main 分支的唯一 commit");
   }
   return commit;
+}
+
+function sourceCheckoutIdentity(checkout) {
+  const stat = lstatSync(checkout);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("受管源码目录类型已变化，拒绝更新");
+  return { path: realpathSync(checkout), dev: stat.dev, ino: stat.ino };
+}
+
+function assertSourceCheckoutUnchanged(plan, repository, environment, options) {
+  if (JSON.stringify(sourceCheckoutIdentity(plan.checkout)) !== JSON.stringify(plan.checkoutIdentity)) {
+    throw new Error("受管源码目录身份在预检后发生变化，拒绝切换");
+  }
+  assertManagedRepository(plan.checkout, repository, environment, options.captureCommand);
+  const head = capture("git", ["rev-parse", "HEAD"], plan.checkout, environment, options.captureCommand).trim();
+  if (head !== plan.currentCommit) throw new Error("受管源码 HEAD 在预检后发生变化，拒绝切换");
 }
 
 function assertManagedRepository(checkout, repository, environment, captureCommand) {
@@ -851,26 +905,10 @@ async function installCodexCli(version, checkout, environment, options) {
 }
 
 export async function buildCheckout(checkout, environment, options) {
-  const ignoreScripts = (await captureAsync("npm", ["config", "get", "ignore-scripts"], checkout, environment, options.captureCommand, options.getCommandSignal?.())).trim();
-  if (ignoreScripts !== "true" && ignoreScripts !== "false") {
-    throw new Error("无法确认 npm ignore-scripts 设置，拒绝构建候选源码");
-  }
-  for (const [cwd, args] of [
-    [checkout, ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]],
-    ...(ignoreScripts === "false" ? [[checkout, ["run", "hooks:install"]]] : []),
-    [checkout, ["run", "build"]],
-    [checkout, ["run", "check"]],
-    [join(checkout, "webui"), ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]],
-    [join(checkout, "webui"), ["run", "build"]],
-  ]) {
-    await runQuiet("npm", args, cwd, environment, options.runCommand, options.getCommandSignal?.());
-  }
-  if (
-    !existsSync(join(checkout, "dist", "main.js"))
-    || !existsSync(join(checkout, "webui", "dist", "index.html"))
-  ) {
-    throw new Error("候选源码构建结果不完整");
-  }
+  await buildSourceCheckout(checkout, {
+    readIgnoreScripts: () => captureAsync("npm", ["config", "get", "ignore-scripts"], checkout, environment, options.captureCommand, options.getCommandSignal?.()),
+    runStage: (_label, args, cwd) => runQuiet("npm", args, cwd, environment, options.runCommand, options.getCommandSignal?.()),
+  });
 }
 
 async function runQuiet(command, args, cwd, environment, implementation, signal) {
@@ -886,18 +924,48 @@ async function runQuiet(command, args, cwd, environment, implementation, signal)
   throw new Error(`${command} 执行失败：exit=${result.status ?? 1}`);
 }
 
-async function inspectStagedInstallation(checkout, environment) {
+async function inspectStagedInstallation(checkout, environment, forUpdate = true) {
   const moduleUrl = `${pathToFileURL(join(checkout, "scripts", "local-installation.mjs")).href}?staged`;
   const staged = await import(moduleUrl);
   const config = staged.inspectGatewayConfiguration(environment);
-  staged.inspectDatabases(environment);
+  const databases = forUpdate
+    ? await staged.inspectDatabasesForUpdate(environment)
+    : staged.inspectDatabases(environment);
   const services = staged.inspectCoreServiceInstallation(environment);
   if (!services.installed && await gatewayOwnerIsActive(config.configPath)) {
     throw new Error(
       "核心后台服务未安装，但检测到前台 Gateway 正在运行；请先按 Ctrl-C 结束后再更新",
     );
   }
-  return { config, services };
+  return { config, services, databases };
+}
+
+async function upgradeInspectedDatabases(checkout, environment, inspection, progress, writeMessage) {
+  const current = await inspectStagedInstallation(checkout, environment);
+  const previous = inspection.databases;
+  if (!previous) throw new Error("更新预检缺少数据库计划，拒绝继续");
+  const expected = previous.metricsUpgrade;
+  if (JSON.stringify(current.databases.metricsUpgrade) !== JSON.stringify(expected)
+    || current.databases.metrics.databasePath !== previous.metrics.databasePath
+    || current.databases.metrics.schemaVersion !== previous.metrics.schemaVersion
+    || current.databases.state.databasePath !== previous.state.databasePath
+    || current.databases.sessionDisplayCache.databasePath !== previous.sessionDisplayCache.databasePath
+    || current.config.configPath !== inspection.config.configPath) {
+    throw new Error("配置或指标数据库在更新预检后发生变化，拒绝升级或切换程序；请重新运行 codexc update");
+  }
+  if (!expected) return;
+  // Keep the backup next to user data, outside the disposable candidate and npm package.
+  progress.backupPath = `${expected.databasePath}.pre-update-v${expected.from}-${randomUUID()}.bak`;
+  writeMessageSafely(writeMessage, "note", `指标数据库将从 v${expected.from} 升级至 v${expected.to}，完整私有备份：${progress.backupPath}`);
+  const { upgradeMetrics } = await import(pathToFileURL(join(checkout, "scripts", "metrics-database-upgrade.mjs")).href);
+  progress.attempted = true;
+  const result = await upgradeMetrics(checkout, expected.databasePath, progress.backupPath, expected);
+  if (result.upgraded !== true || result.from !== expected.from || result.to !== expected.to || result.backup !== progress.backupPath) {
+    throw new Error(`指标升级未返回完整的 v${expected.from} → v${expected.to} 完成证据`);
+  }
+  await inspectStagedInstallation(checkout, environment, false);
+  progress.completed = true;
+  writeMessageSafely(writeMessage, "note", `指标数据库已升级至 v${expected.to}，原始数据与私有备份已保留：${progress.backupPath}`);
 }
 
 async function disableCandidateDaemonAutoStart(checkout, environment, options) {
@@ -931,7 +999,7 @@ async function inspectUpdateServices(environment) {
 async function startCoreServices(checkout, environment, options, services) {
   // A failed CLI/package switch must not restart services against an unverified installation.
   await assertCodexVersionAsync(codexVersion(checkout), environment, options.captureCommand);
-  await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
+  await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment, false);
   const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
   // 恢复范围沿用同一份启动选择：关闭的 WebUI 与未启用的 Relay 不再被重新拉起。
   const restartable = new Set(
@@ -994,19 +1062,6 @@ function versionParts(value) {
     ? Number(suffix.slice(3))
     : suffix?.startsWith("fix") ? Number(suffix.slice(3)) : 0;
   return [...stable.split(".").map(Number), stage, sequence];
-}
-
-export function isGatewayVersionCompatible(gatewayVersion, expectedCodexVersion) {
-  return gatewayVersion === expectedCodexVersion
-    || new RegExp(
-      `^${escapeRegExp(expectedCodexVersion)}-(?:fix[1-9]\\d*|rc\\.[1-9]\\d*)$`,
-      "u",
-    )
-      .test(gatewayVersion);
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function capture(command, args, cwd, environment, implementation, options = {}) {
@@ -1153,18 +1208,33 @@ function errorMessage(error) {
 
 export async function updateInstalledPackage(environment = process.env, options = {}) {
   assertSourceUpdateCaller(environment);
+  let activeStage = "inspect-candidate";
+  const completedStages = [];
+  const runStage = (stage, operation, recovery = false) => {
+    if (!recovery) activeStage = stage;
+    return runUpdateStage(options, stage, async () => {
+      const result = await operation();
+      if (!recovery) completedStages.push(stage);
+      return result;
+    }, recovery);
+  };
   const checkout = options.projectDir ?? packageDir;
   const expected = codexVersion(checkout);
   const writeMessage = options.writeMessage ?? writeCliMessage;
   if (!options.runStage) writeMessageSafely(writeMessage, "note", "正在检查配套 Codex CLI、当前配置和数据库结构。");
-  const inspection = await runUpdateStage(options, "inspect-candidate", () =>
+  const inspection = await runStage("inspect-candidate", () =>
     (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment));
+  const pendingMetricsUpgrade = inspection.databases?.metricsUpgrade;
+  if (pendingMetricsUpgrade) await inspectSourceInstallation(checkout, environment, options);
   let temporaryDirectory;
   let servicesStopped = false;
   let servicesBeforeUpdate = [];
+  const metricsUpgrade = { attempted: false, completed: false };
+  let commandReady = !pendingMetricsUpgrade || Boolean(inferNpmGlobalPrefix(checkout));
   try {
     const prepared = await prepareCodexVersion(expected, checkout, environment, writeMessage, {
       ...options,
+      runStage: (stage, operation, { recovery }) => runStage(stage, operation, recovery),
       installCodexCliForValidation: options.installCodexCliForValidation
         ?? ((version, directory, validationEnvironment, validationOptions) => {
           temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-cli-update-"));
@@ -1173,20 +1243,27 @@ export async function updateInstalledPackage(environment = process.env, options 
           );
         }),
     });
-    await runUpdateStage(options, "validate-codex-contract", () =>
+    await runStage("validate-codex-contract", () =>
       (options.validateCodexContract ?? validateCodexContract)(checkout, prepared.validationEnvironment, options));
-    if (prepared.installRequired && inspection.services.installed) {
+    if ((prepared.installRequired || pendingMetricsUpgrade) && inspection.services.installed) {
       servicesBeforeUpdate = await (options.inspectServices ?? inspectUpdateServices)(environment);
       servicesStopped = true;
-      await runUpdateStage(options, "stop-services", () =>
+      await runStage("stop-services", () =>
         (options.stopServices ?? stopCoreServices)(checkout, environment, options, servicesBeforeUpdate));
     }
-    await runUpdateStage(options, "install-codex-cli", () =>
+    await runStage("upgrade-databases", () =>
+      upgradeInspectedDatabases(checkout, environment, inspection, metricsUpgrade, writeMessage));
+    await runStage("install-codex-cli", () =>
       installPreparedCodexVersion(prepared, expected, checkout, environment, writeMessage, options));
-    await runUpdateStage(options, "configure-codex-daemon", () =>
+    if (pendingMetricsUpgrade && !commandReady) {
+      await runStage("refresh-command", () =>
+        installManagedSourceCommand(checkout, environment, writeMessage, options));
+      commandReady = true;
+    }
+    await runStage("configure-codex-daemon", () =>
       disableCandidateDaemonAutoStart(checkout, environment, options));
     if (servicesStopped) {
-      await runUpdateStage(options, "restore-services", () =>
+      await runStage("restore-services", () =>
         (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate));
       servicesStopped = false;
     }
@@ -1198,9 +1275,24 @@ export async function updateInstalledPackage(environment = process.env, options 
         : `检查完成：配套 Codex CLI ${expected} 无需更新，数据库结构有效。`,
     );
   } catch (error) {
+    if (metricsUpgrade.attempted && (!metricsUpgrade.completed || !commandReady)) {
+      const message = `指标升级已开始但安装未就绪，服务保持停止，禁止启动旧 Schema 程序。备份候选路径：${metricsUpgrade.backupPath}；候选程序：${checkout}。请核对完整备份及数据库版本，完成匹配 v35 程序安装后按原状态恢复服务。`;
+      writeMessageSafely(writeMessage, "remediation", message);
+      throw annotateSourceUpdateFailure(new Error(`${message} ${errorMessage(error)}`, { cause: error }), {
+        stage: activeStage,
+        completedStages,
+        recovery: {
+          services: "stopped",
+          source: "unchanged",
+          metricsBackupPath: metricsUpgrade.backupPath,
+          candidatePath: checkout,
+        },
+        recommendation: message,
+      });
+    }
     if (servicesStopped) {
       try {
-        await runUpdateStage(options, "restore-services", () =>
+        await runStage("restore-services", () =>
           (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate), true);
       } catch (restoreError) {
         throw new AggregateError([error, restoreError], "配套 CLI 更新失败，且核心服务恢复失败", { cause: restoreError });
@@ -1251,6 +1343,7 @@ async function main() {
     "prepare-codex-cli": ["准备更新", "准备配套 Codex CLI 候选环境"],
     "validate-codex-contract": ["准备更新", "校验 Codex CLI 公开合同"],
     "stop-services": ["切换安装", "按原运行状态停止后台服务"],
+    "upgrade-databases": ["切换安装", "复核数据库并备份升级已知指标结构"],
     "install-codex-cli": ["切换安装", "同步配套 Codex CLI"],
     "switch-source": ["切换安装", "切换候选源码"],
     "refresh-command": ["切换安装", "刷新 npm 全局命令"],
@@ -1263,7 +1356,7 @@ async function main() {
       getCommandSignal: () => switching ? undefined : controller.signal,
       runStage: async (stage, operation, { recovery }) => {
         if (!recovery && !switching) controller.signal.throwIfAborted();
-        if (["stop-services", "install-codex-cli", "switch-source"].includes(stage)) switching = true;
+        if (["stop-services", "upgrade-databases", "install-codex-cli", "switch-source"].includes(stage)) switching = true;
         const [category, label] = stages[stage];
         const section = stage === "inspect-candidate" && currentSection === "准备更新" ? currentSection : category;
         if (section !== currentSection) {

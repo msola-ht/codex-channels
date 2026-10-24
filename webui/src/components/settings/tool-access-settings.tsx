@@ -43,36 +43,41 @@ function toolSettingLabel(path: readonly string[]): SettingLabel {
   return path.join(".")
 }
 
-export function ToolAccessSettings({ management }: { management: CodexSettingsController }) {
+export function ToolAccessSettings({ management, onEditingChange }: { management: CodexSettingsController; onEditingChange?: (editing: boolean) => void }) {
   const { t } = useTranslation()
   const [selected, setSelected] = useState("")
+  const [editing, setEditing] = useState(false)
+  useEffect(() => { onEditingChange?.(editing); return () => onEditingChange?.(false) }, [editing, onEditingChange])
   const settings = management.codexSettings?.toolSettings
-  if (!settings || settings.fields.length === 0) return null
+  if (!settings || settings.fields.length === 0) return <p className="text-sm text-muted-foreground">{t("globalSettings.noToolSettings")}</p>
   const field = settings.fields.find((item) => JSON.stringify(item.path) === selected) ?? settings.fields[0]
-  const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null
+  const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null || management.readbackRequired
   return <section className="flex flex-col gap-3">
     <div><h3 className="font-medium">{t("settingsFields.toolsTitle")}</h3><p className="text-xs text-muted-foreground">{t("settingsFields.toolsHint")}</p></div>
-    <ManagedSelect label={t("settingsFields.toolSetting")} value={JSON.stringify(field.path)} options={settings.fields.map((item) => { const label = toolSettingLabel(item.path); return [JSON.stringify(item.path), typeof label === "string" ? label : t(label.key, label.params)] })} disabled={busy} onChange={setSelected} />
-    <ToolSettingEditor key={JSON.stringify(field.path)} field={field} management={management} mergedAvailable={settings.mergedAvailable} />
+    <ManagedSelect fullWidth label={t("settingsFields.toolSetting")} value={JSON.stringify(field.path)} options={settings.fields.map((item) => { const label = toolSettingLabel(item.path); return [JSON.stringify(item.path), typeof label === "string" ? label : t(label.key, label.params)] })} disabled={busy || editing} onChange={setSelected} />
+    <ToolSettingEditor key={JSON.stringify(field.path)} field={field} management={management} mergedAvailable={settings.mergedAvailable} onEditingChange={setEditing} />
     <p className="text-xs text-muted-foreground">{t("settingsFields.toolsPolicyHint")}</p>
   </section>
 }
 
-function ToolSettingEditor({ field, management, mergedAvailable }: {
+function ToolSettingEditor({ field, management, mergedAvailable, onEditingChange }: {
   field: CodexUserSettingsResponse["toolSettings"]["fields"][number]
   management: CodexSettingsController
   mergedAvailable: boolean
+  onEditingChange: (editing: boolean) => void
 }) {
   const { t } = useTranslation()
   const [draft, patch, reset] = useSettingsDraft({ text: field.userValue === null ? "" : JSON.stringify(field.userValue) })
   const { text } = draft
+  const editing = text !== (field.userValue === null ? "" : JSON.stringify(field.userValue))
+  useEffect(() => { onEditingChange(editing); return () => onEditingChange(false) }, [editing, onEditingChange])
   const path = JSON.stringify(field.path)
   useEffect(() => {
     const saved = management.lastAppliedSetting
     if (saved?.kind === "tool-access" && JSON.stringify(saved.path) === path) reset()
   }, [management.lastAppliedSetting, path, reset])
   const [error, setError] = useState<MessageKey | null>(null)
-  const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null
+  const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null || management.readbackRequired
   const preview = (value: unknown) => {
     setError(null)
     void management.previewSetting({ kind: "tool-access", path: field.path, value }, toolSettingLabel(field.path))
@@ -89,13 +94,14 @@ function ToolSettingEditor({ field, management, mergedAvailable }: {
       <SettingsRow label={t("settingsFields.userSetting")} value={field.userValue === null ? t("settingsFields.notSet") : JSON.stringify(field.userValue)} />
       <SettingsRow label={t("settingsFields.mergedConfig")} value={!mergedAvailable ? t("settingsFields.unavailable") : field.mergedValue === null ? t("settingsFields.upstreamDecides") : JSON.stringify(field.mergedValue)} />
       {field.type === "choice" || field.type === "boolean"
-        ? <ManagedSelect label={t("settingsFields.editUserSetting")} value={field.userValue === null ? "inherit" : JSON.stringify(field.userValue)} options={[["inherit", t("settingsFields.inheritUserSetting")], ...(field.type === "boolean" ? [true, false] : field.options ?? []).map((value) => [JSON.stringify(value), String(value)])]} disabled={busy} onChange={(value) => preview(value === "inherit" ? null : JSON.parse(value))} />
+        ? <ManagedSelect fullWidth label={t("settingsFields.editUserSetting")} value={field.userValue === null ? "inherit" : JSON.stringify(field.userValue)} options={[["inherit", t("settingsFields.inheritUserSetting")], ...(field.type === "boolean" ? [true, false] : field.options ?? []).map((value) => [JSON.stringify(value), String(value)])]} disabled={busy} onChange={(value) => preview(value === "inherit" ? null : JSON.parse(value))} />
         : <Field data-disabled={busy} data-invalid={error !== null}>
             <FieldLabel htmlFor="tool-setting-value">{t("settingsFields.newValue")}</FieldLabel>
             <Input id="tool-setting-value" value={text} disabled={busy} aria-invalid={error !== null} aria-describedby={error === null ? "tool-setting-value-description" : "tool-setting-value-description tool-setting-value-error"} onChange={(event) => { patch({ text: event.target.value }); setError(null) }} />
             <FieldDescription id="tool-setting-value-description">{t(field.type === "list" ? "settingsFields.toolListHint" : "settingsFields.toolNumberHint")}</FieldDescription>
             {error !== null ? <FieldError id="tool-setting-value-error">{t(error)}</FieldError> : null}
             <Button className="self-start" variant="outline" disabled={busy} onClick={saveText}>{t("settingsFields.preview")}</Button>
+            {editing && <Button className="self-start" variant="ghost" disabled={busy} onClick={() => { reset(); setError(null) }}>{t("globalSettings.discardDraft")}</Button>}
           </Field>}
     </FieldGroup>
   </>

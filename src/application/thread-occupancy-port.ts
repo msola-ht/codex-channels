@@ -18,11 +18,16 @@ export type ThreadOccupancyReleaseResult =
       releasable: boolean;
       stuck: boolean;
     }
-  | { status: "unidentifiable"; threadId: string };
+  | {
+      status: "unidentifiable";
+      threadId: string;
+      reason: "unsupported-platform" | "inspection-unavailable";
+    };
 
 export interface ThreadOccupancyPort {
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
+    assertAuthorized?: () => void,
   ): Promise<ThreadOccupancyReleaseResult>;
 }

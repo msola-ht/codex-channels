@@ -57,17 +57,17 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
   Chat 内任务、Worktree、模型、权限和 RRULE 的当前产品行为。
 - [OpenAI App Server 文档](https://learn.chatgpt.com/docs/app-server)：App Server 定位、JSON-RPC、
   Thread/Turn 与实验动态工具；官方建议自动化作业或 CI 使用 Codex SDK。
-- [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)：
+- [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)：
   `threadSource` 与实验 `dynamicTools`。
-- [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)：
+- [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)：
   实验 `additionalContext`。
-- [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs)：
+- [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs)：
   `ScheduledTaskSummary` 及其有限 Schedule 类型。
-- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/README.md)：
+- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/README.md)：
   `dynamicTools` 与 `item/tool/call` 的宿主回调合同。
 
-参考源码必须匹配 `rust-v0.163.0` 的提交
-`83086188ae0614bd882818ff1aa23f3194962012`；本机副本状态见[上游来源](upstream-sources.md)。当前网页文档描述的新产品能力不能反向当作固定版
+参考源码必须匹配 `rust-v0.164.0` 的提交
+`6aaac694803004a63c6f393d153c96d22521a6b9`；本机副本状态见[上游来源](upstream-sources.md)。当前网页文档描述的新产品能力不能反向当作固定版
 协议字段。
 
 ## 采用方案
@@ -102,6 +102,8 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
 - 执行权限使用目标 Provider 按 Workspace cwd 解析的当前原生配置；历史任务快照不作为运行时权限上限。
 - 新 Thread 作为当前 Conversation 的后台绑定；不替换前台绑定。完成后沿用现有后台释放逻辑，
   Thread 历史仍由 App Server 保存，用户可显式 `/resume`。
+- 离线终态写入后再次核对原后台绑定身份，归属变化不再发布旧恢复通知或清理新绑定；释放复用
+  当前 Turn、子代理和 Queue 的完成检查，恢复流程不自动启动积压 Queue。
 
 后台绑定仍受每个 Conversation 最多三个的既有上限约束。没有空位时不抢占前台或其他后台任务，
 本次运行记为 `skipped_capacity`，并显示在运行记录中。
@@ -122,6 +124,7 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
 
 每个任务必须保存有效 IANA 时区，例如 `Asia/Shanghai`。不得静默采用 Gateway 主机时区；创建命令
 没有提供时区时必须要求补充。`time` 固定为 `HH:mm`，工作日使用 `MO` 至 `SU`。
+不接受 `+01:00` 等固定偏移字符串，即使当前 JavaScript Intl 可以解析它们。
 
 `interval.anchorAt` 是确认创建成功的 UTC 时间，后续 occurrence 始终由上一计划时间增加固定分钟数，
 不因 DST 改变间隔；固定版插件摘要允许 Hourly 附带可选工作日，但当前明确拒绝该组合。`once` 只计算
@@ -255,6 +258,12 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 `surface + accountId` 精确交给当前 Surface；飞书复用 CardKit 2.0 确认卡，Telegram 复用内联按钮，
 微信保留 `/schedule confirm <令牌>` 文本输入。三条路径使用同一个五分钟令牌。
 
+动态工具调用可以并行；所有需要 `selector` 的工具操作只接受完整任务 ID，`retry` 则只接受完整
+Run ID，不接受数字序号、短 ID 或名称。工具 `list`/`runs` 返回完整 ID，不读写人工 `/schedule`
+命令的数字选择快照，避免并行查询不同任务的 Run 时，相同序号指向另一项。人工命令继续使用
+最近五分钟的本会话、同一 Actor 快照；工具产生的创建/删除预览经用户确认，或工具完成重试后，
+仍按共享用例使旧快照失效。
+
 该工具只在 Gateway 前台会话注册；后台计划任务 Thread 不携带 `dynamicTools`，工具处理器在
 登记取消生命周期后先查询恢复协调器并拒绝无人值守调用，其余审批仍由
 `createScheduledTaskServerRequestHandler` 拒绝，防止计划任务递归创建更多计划任务。
@@ -301,7 +310,7 @@ Provider、模型和上下文，并可使用 `/schedule` 确定性入口。只�
 ```
 
 `add` 和 `delete` 先返回预览，再由 `confirm` 执行。序号只在当前 Conversation 最近五分钟的列表
-快照内有效；任务列表与 Run 列表分别维护快照。多行列表使用不会被渠道 Markdown 重编号的显式
+快照内有效；任务列表与 Run 列表分别维护快照。人工命令的多行列表使用不会被渠道 Markdown 重编号的显式
 `【序号】` 标记，Run 的计划、触发、开始、完成时间以及 Thread 和错误分类使用二级列表。Surface 只渲染结构化结果；无论预览来自显式命令还是 `schedule_task`，飞书和 Telegram 的创建/删除预览都提供确认与取消按钮，微信使用文本确认，
 确认按钮与文本命令调用同一 Application 用例和五分钟令牌，不能复制或绕过调度逻辑。飞书预览使用 CardKit 2.0；动作被接受后原卡片更新为不含按钮的终态，
 实际创建或删除结果仍由 Application 结果消息确认。重命名、暂停和恢复不改变列表顺序，
@@ -331,7 +340,7 @@ WebUI 接入 Run 与指标关联，只能根据 Run 的 Thread ID 查询现有�
 - `src/application/scheduled-task-service.ts`：拥有平台无关的创建预览、确认、列表、启停、手动运行、
   Run 查询和执行结果类型。
 
-新增一级模块前必须同步 `src/README.md` 与 `scripts/check-runtime-boundaries.mjs`。依赖方向固定为：
+模块职责见 [`src/scheduled-tasks/README.md`](../src/scheduled-tasks/README.md)；依赖方向固定为：
 
 ```text
 Surface -> Application -> Scheduled Tasks
@@ -386,7 +395,7 @@ enabled = false
 
 ## 验证链路
 
-实施至少覆盖：
+修改计划任务时，按受影响合同选择以下观察范围；这份清单不表示部署验收已经通过：
 
 - Schedule 解析、非法日期/时区、DST 缺失和重复时间、稳定 nextRunAt。
 - SQLite 当前 Schema、文件权限、事务领取、保留清理、备份及不支持版本拒绝。
@@ -399,9 +408,9 @@ enabled = false
   以及参数校验、唯一 Actor 解析和现有命令渲染复用。
 - 三 Surface 命令、确认、按钮令牌、输出顺序、超时隔离和敏感信息清洗。
 
-每个 PR 先运行改动直接相关的类型、Lint 或文档检查；提交
-门禁由 pre-commit 统一运行 `npm run verify:commit`。协议或真实 App Server 行为变化应核对锁定版本
-源码与实际行为，并明确记录未验证的范围。
+执行方式与静态门禁遵循[开发流程](development-rules.md#development-workflow)和
+[验证规则](development-rules.md#verification)。协议或真实 App Server 行为变化应核对锁定版本
+源码与实际行为；部署验收须记录实际代码/CLI 基线、所用 Surface 与 Provider，以及未观察的范围。
 
 ## 完成标准与停止条件
 

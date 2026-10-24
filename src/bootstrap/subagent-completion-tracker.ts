@@ -128,6 +128,24 @@ export class SubagentCompletionTracker {
     return [...this.pendingParentRuns.values()].map(run => ({ threadId: run.parentThreadId, turnId: run.parentTurnId }));
   }
 
+  /** Admit known terminal notices before the parent's durable completion record. */
+  flushCompletedForParent(parentThreadId: string, parentTurnId: string): number {
+    if (this.closed) return 0;
+    for (const entry of [...this.active.values(), ...this.detached]) {
+      if (entry.parentThreadId !== parentThreadId || entry.parentTurnId !== parentTurnId
+        || !entry.terminalStatus || entry.emitted) continue;
+      if (entry.timer) clearTimeout(entry.timer);
+      entry.timer = undefined;
+      // Invalidate timer callbacks and metrics reads already awaiting completion.
+      entry.revision++;
+      this.publishCompletion(entry.agentThreadId, entry, null, "unavailable");
+    }
+    const pending = new Set([...this.pendingParentRuns.values()].filter(run =>
+      run.parentThreadId === parentThreadId && run.parentTurnId === parentTurnId
+    ).map(run => run.agentThreadId));
+    return pending.size;
+  }
+
   resetRunAttribution(isAffected: (threadId: string) => boolean = () => true): void {
     const affectedChildren = new Set<string>();
     for (const [threadId, parent] of this.metricParents) {
@@ -805,10 +823,20 @@ export class SubagentCompletionTracker {
     }
     if (this.closed || entry.emitted || entry.revision !== revision
       || (!detached && this.active.get(agentThreadId) !== entry)) return;
-    const aggregate = summary?.threadAggregate ?? null;
     if (metricsStatus === "empty") {
       this.options.onMissingMetrics?.(agentThreadId);
     }
+    this.publishCompletion(agentThreadId, entry, summary, metricsStatus);
+  }
+
+  private publishCompletion(
+    agentThreadId: string,
+    entry: ActiveSubagent,
+    summary: SubagentMetricsSummary | null,
+    metricsStatus: SubagentCompletedEvent["metricsStatus"],
+  ): void {
+    if (this.closed || entry.emitted) return;
+    const aggregate = summary?.threadAggregate ?? null;
     const event: SubagentCompletedEvent = {
       type: "subagent.completed",
       target: entry.target,
@@ -832,7 +860,7 @@ export class SubagentCompletionTracker {
     };
     entry.emitted = true;
     this.detached.delete(entry);
-    if (!detached) this.active.delete(agentThreadId);
+    if (this.active.get(agentThreadId) === entry) this.active.delete(agentThreadId);
     this.options.publish(event);
     this.options.onCompleted?.(event);
   }

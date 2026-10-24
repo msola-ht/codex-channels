@@ -134,6 +134,7 @@ export type ConversationInputEvent =
   | {
       type: "mcp.oauth.completed";
       threadId: string | null;
+      loginId: string;
       name: string;
       success: boolean;
       error: string | null;

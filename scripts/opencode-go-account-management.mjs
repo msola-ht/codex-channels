@@ -24,7 +24,6 @@ import {
 import {
   assertProviderFileSnapshots,
   readOptionalProviderFile,
-  replaceOptionalProviderFile,
   removeOptionalProviderFile,
   refreshProviderFileSnapshot,
   restoreProviderFileSnapshots,
@@ -32,6 +31,7 @@ import {
 } from "./managed-provider-files.mjs";
 import { restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision } from "./managed-provider-account-plan.mjs";
 import {
   managedAccountPrimarySocket as defaultPrimarySocket,
   inspectManagedAccountRuntime,
@@ -77,9 +77,13 @@ async function applyOpencodeGoDefaultAccountChangeUnlocked(
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
     writeAccounts = writeOpencodeGoAccounts,
+    expectedRevision,
   } = {},
 ) {
   const plan = buildDefaultPlan(accountId, { environment, loadAccounts });
+  assertManagedAccountRevision(expectedRevision, plan.revision);
+  await assertProviderFileSnapshots(plan.snapshots);
+  if (!plan.willChange) return { action: "unchanged", ...publicDefaultPreview(plan) };
   try {
     writeAccounts(environment, plan.nextAccounts);
   } catch (error) {
@@ -130,7 +134,7 @@ export async function applyOpencodeGoAccountStop(
     resolvePrimarySocket,
     inspectSupervisor,
   });
-  if (!plan.running) {
+  if (!plan.registered) {
     return { action: "not-running", ...publicStopPreview(plan) };
   }
   let action;
@@ -186,6 +190,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
   {
     accountId,
     confirmHistoryLoss = false,
+    expectedRevision,
   },
   {
     environment = process.env,
@@ -213,8 +218,10 @@ async function applyOpencodeGoAccountRemovalUnlocked(
       "删除 OpenCode Go 账户前必须确认历史 Thread 将不可恢复",
     );
   }
+  assertManagedAccountRevision(expectedRevision, managedAccountRevision(plan.snapshots));
   let stopResult;
   try {
+    await assertProviderFileSnapshots(plan.snapshots);
     stopResult = await stopAccount(plan.account.id, {
       environment,
       loadAccounts: () => plan.accounts,
@@ -240,6 +247,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
   }
   const paths = plan.paths;
   try {
+    await assertProviderFileSnapshots(plan.snapshots);
     mkdirSync(paths.backupDirectory, { recursive: true, mode: 0o700 });
     const profile = await readOptionalProviderFile(paths.profilePath, environment);
     if (profile !== undefined) {
@@ -259,13 +267,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
         runtime: stopResult.action,
       });
     }
-    const transactionPaths = [
-      opencodeGoAccountsFilePath(environment),
-      paths.profilePath,
-      paths.markerPath,
-    ];
-    if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
-    const snapshots = snapshotProviderFiles(transactionPaths, environment);
+    const snapshots = plan.snapshots;
     let guards = snapshots;
     try {
       await assertProviderFileSnapshots(guards);
@@ -288,6 +290,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
       guards = refreshProviderFileSnapshot(guards, paths.profilePath);
       await assertProviderFileSnapshots(guards);
       if (existsSync(paths.markerPath)) unlinkSync(paths.markerPath);
+      guards = refreshProviderFileSnapshot(guards, paths.markerPath);
     } catch (error) {
       try {
         await restoreProviderFileSnapshots(snapshots, guards);
@@ -319,6 +322,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
 
 function buildDefaultPlan(accountId, { environment, loadAccounts }) {
   const normalizedId = validAccountId(accountId);
+  const snapshots = snapshotProviderFiles([opencodeGoAccountsFilePath(environment)], environment);
   const accounts = loadAccountsSafely(loadAccounts, environment);
   const account = accounts.find((candidate) => candidate.id === normalizedId);
   if (account === undefined) {
@@ -330,6 +334,8 @@ function buildDefaultPlan(accountId, { environment, loadAccounts }) {
   }
   const currentDefault = accounts.find((candidate) => candidate.default);
   return {
+    snapshots,
+    revision: managedAccountRevision(snapshots),
     account,
     accounts,
     nextAccounts: accounts.map((candidate) => ({
@@ -412,6 +418,17 @@ async function buildRemovalPlan(
     );
   }
   const mode = marker.mode;
+  // Capture the files that produced the plan before any supervisor/baseline wait.
+  // A later snapshot must not legitimize overwriting an externally changed registry.
+  const transactionPaths = [
+    opencodeGoAccountsFilePath(environment),
+    paths.profilePath,
+    paths.markerPath,
+  ];
+  if (mode === "exclusive") {
+    transactionPaths.push(paths.configPath, join(paths.backupDirectory, "config.toml"));
+  }
+  const snapshots = snapshotManagedAccountFiles(transactionPaths, opencodeGoAccountDefinition(normalizedId), environment);
   if (mode === "exclusive") {
     const initialConfig = await readOpencodeGoRestoreBaseline(paths, environment);
     if (initialConfig === undefined) {
@@ -437,9 +454,9 @@ async function buildRemovalPlan(
     removesLastAccount,
     mode,
     restoresInitialConfig: mode === "exclusive",
-    removesManagedCatalog: removesLastAccount,
     stop,
     paths,
+    snapshots,
   };
 }
 
@@ -458,14 +475,7 @@ async function applyLastAccountRemovalFiles(
       "删除最后一个 OpenCode Go 固定账户需要安装前配置备份；未找到备份，无法安全恢复官方主配置",
     );
   }
-  const transactionPaths = [
-    opencodeGoAccountsFilePath(environment),
-    paths.profilePath,
-    paths.markerPath,
-  ];
-  if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
-  if (plan.removesManagedCatalog) transactionPaths.push(paths.catalogPath, paths.manifestPath);
-  const snapshots = snapshotProviderFiles(transactionPaths, environment);
+  const snapshots = plan.snapshots;
   let guards = snapshots;
   try {
     await assertProviderFileSnapshots(guards);
@@ -490,14 +500,6 @@ async function applyLastAccountRemovalFiles(
     }
     guards = refreshProviderFileSnapshot(guards, paths.markerPath);
     await assertProviderFileSnapshots(guards);
-    if (plan.removesManagedCatalog) {
-      await removeOptionalProviderFile(paths.catalogPath);
-      guards = refreshProviderFileSnapshot(guards, paths.catalogPath);
-      await assertProviderFileSnapshots(guards);
-      await removeOptionalProviderFile(paths.manifestPath);
-      guards = refreshProviderFileSnapshot(guards, paths.manifestPath);
-      await assertProviderFileSnapshots(guards);
-    }
   } catch (error) {
     try {
       await restoreProviderFileSnapshots(snapshots, guards);
@@ -533,13 +535,7 @@ async function restoreOpencodeGoBaseConfig(plan, initialConfig, environment) {
       plan.account.phone,
     ),
   );
-  if (Object.keys(restored).length === 0) {
-    if (existsSync(plan.paths.configPath)) {
-      await removeOptionalProviderFile(plan.paths.configPath);
-    }
-  } else {
-    await replaceOptionalProviderFile(plan.paths.configPath, stringify(restored), environment);
-  }
+  await plan.snapshots.find(snapshot => snapshot.path === plan.paths.configPath).writeCurrent(stringify(restored));
 }
 
 function parseConfig(content) {
@@ -553,6 +549,7 @@ function parseConfig(content) {
 
 function publicDefaultPreview(plan) {
   return {
+    revision: plan.revision,
     operation: "set-default",
     account: {
       id: plan.account.id,
@@ -563,7 +560,7 @@ function publicDefaultPreview(plan) {
     currentDefaultAccountId: plan.currentDefaultAccountId,
     updatesExternalAgent: plan.updatesExternalAgent,
     willChange: plan.willChange,
-    activation: "restart-all",
+    activation: plan.willChange ? "restart-all" : "none",
   };
 }
 
@@ -575,24 +572,24 @@ function publicStopPreview(plan) {
       provider: plan.provider,
     },
     status: plan.running ? "running" : "not-running",
-    willChange: plan.running,
+    willChange: plan.registered,
     activation: "none",
   };
 }
 
 function publicRemovalPreview(plan) {
   const effects = {
-    stopsRunningAppServer: plan.stop.status === "running",
+    stopsRunningAppServer: plan.stop.willChange,
     promotesDefaultAccountId: plan.promotedDefaultAccountId,
     preservesPrivateBackup: true,
     historyThreadsBecomeUnavailable: true,
   };
   if (plan.removesLastAccount) {
     effects.removesLastAccount = true;
-    effects.removesManagedCatalog = true;
   }
   if (plan.restoresInitialConfig) effects.restoresInitialConfig = true;
   return {
+    revision: managedAccountRevision(plan.snapshots),
     operation: "remove",
     account: {
       id: plan.account.id,

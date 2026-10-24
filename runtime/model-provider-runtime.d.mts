@@ -94,25 +94,30 @@ export function loadManagedModelProviderSettings(
 ): ManagedModelProviderSettings[];
 
 export interface ManagedModelWindowEntry {
+  provider: string;
   model: string;
   displayName: string;
   contextWindow: number;
   maxContextWindow: number;
   windowPercent?: number;
   providers: string[];
-  perProvider?: Record<string, number | undefined>;
-  conflicts?: boolean;
-  windowConflict?: boolean;
+  reasoningEfforts: Array<{ effort: string; description: string }>;
 }
 
 export function loadManagedModelWindow(
   environment?: NodeJS.ProcessEnv,
 ): ManagedModelWindowEntry[];
 
-export function writeManagedModelWindowGlobal(options: {
+export function recoverManagedCatalogSettings(provider: string, action: "keep" | "rollback", environment?: NodeJS.ProcessEnv): boolean;
+
+export function writeManagedModelProviderCatalogUpdates(provider: string, updates: Map<string, string>, originals: Map<string, string | undefined>, environment?: NodeJS.ProcessEnv): void;
+
+export function writeManagedModelWindow(options: {
+  provider: string;
   model: string;
   environment?: NodeJS.ProcessEnv;
 } & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never })): {
+  provider: string;
   model: string;
   windowPercent: number;
   contextWindow: number;
@@ -126,7 +131,7 @@ export function readCodexConfigModelOverride(
 
 export function managedProviderDirectory(
   environment: NodeJS.ProcessEnv | undefined,
-  definition: Pick<ModelProviderDefinition, "id" | "storageId">,
+  definition: Pick<ModelProviderDefinition, "id" | "storageId" | "accountId">,
 ): string;
 export function managedProviderMarkerPath(
   environment: NodeJS.ProcessEnv,
@@ -218,6 +223,7 @@ export interface ConfiguredCustomPrimaryModelProvider {
 }
 
 export const customPrimaryProviderProfileName: "sf-custom";
+export function isValidCustomProviderApiKey(value: unknown): value is string;
 export function customSwitchingProviderProfileName(provider: string): string;
 export function customPrimaryProviderCredentialEnvironmentKey(provider: string, version?: string): string;
 export function customPrimaryProviderCredentialPath(environment: NodeJS.ProcessEnv | undefined, provider: string, environmentKey: string): string;
@@ -272,6 +278,10 @@ export function writeCustomPrimaryProviderSwitchingProfile(
     catalogSource?: { kind: "official" } | { kind: "custom"; reasoningEffort: string | null };
     /** Only update the model defaults in an existing guarded custom Profile. */
     modelOnly?: boolean;
+    /** Preserve model defaults while updating a guarded custom connection. */
+    connectionOnly?: boolean;
+    /** Proposed protocol used to validate a connection before its metadata is written. */
+    upstreamWireApi?: "responses" | "chat_completions";
   },
   environment?: NodeJS.ProcessEnv,
   guards?: {

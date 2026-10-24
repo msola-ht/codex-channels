@@ -4,7 +4,6 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
-  mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
@@ -42,6 +41,7 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
   repairWindowsPrivateFileSync,
   assertCodexConfigAccessSync,
+  ensurePrivateDirectorySync,
 } from "../runtime/private-file.mjs";
 import {
   CODEX_REMOTE_USAGE,
@@ -64,6 +64,11 @@ import {
 } from "../scripts/cli-command-usage.mjs";
 import {
   metricsCommandUsage,
+  metricsQueryOptions,
+  metricsRequestPurposeOption,
+  parseMetricsOptions,
+  parseMetricsRunArgs,
+  parseMetricsTurnsArgs,
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
 import { configuredEnvironment, serviceControlEnvironment } from "../scripts/runtime-environment.mjs";
@@ -85,6 +90,7 @@ const helpText = {
   remote [参数]                启动共享 App Server 的 Codex TUI
   app                          启动 Codex Desktop App 或管理共享连接（macOS / Windows）
   webui                        前台运行本地管理 WebUI
+  video-mcp                    启动独立视频分析 MCP（stdio）
   run                          前台运行核心服务
 
 工作区：
@@ -143,6 +149,7 @@ const helpText = {
 
 常用入口：
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
+  codexc setup → 模型与提供商 → 检测原生网页搜索（选择官方或第三方账户及模型，费用确认后仅诊断）
   codexc setup → 模型与提供商 → 第三方 Provider → DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / Cline Pass 官方
   codexc setup → 模型与提供商 → 第三方 Provider → Codex 兼容 Provider 接入 / 自定义模型 Provider 接入
   codexc setup → 模型与提供商 → 第三方 Provider → 受管 Provider 默认模型与思考等级 / 受管模型目录上下文窗口
@@ -159,7 +166,6 @@ DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开�
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
 与 codexc app 使用相同的 -p / --provider 选择：推荐 -p ds-main、-p clp-main 或 -p cp-llm，
 也接受已配置的规范 sf- 名称，例如 -p sf-ds-main、-p sf-cp-llm。
-至少两个 API Key 切换提供商已配置时，可用 -p agg 或 -p sf-agg 连接聚合实例，
 默认模型从服务端读取。自动审批沿用工作区或显式设置；终端退出时释放实例租约。
 Provider 选择不能与 --profile 同用；个人 Profile 请显式使用 --profile，-- 后参数原样透传。
 不指定 Provider 或 Profile 时连接主实例，不根据登录状态自动选择第三方。`,
@@ -185,14 +191,15 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
 修复 Windows Codex Home 顶层私有 TOML 的 ACL；主 config.toml 完整性有效时保留上游读取权限。
 管理员所有的文件仅在当前用户已有完全控制且无拒绝规则时恢复为当前用户所有；不接管其他用户文件。
 不修改配置内容或 Codex 沙箱目录权限，其他平台明确提示无需处理。`,
-  provider: `${primaryProviderUsage}\n\n受管账户：\n  codexc provider deepseek <add|list|reconfigure|remove|default> [id]\n  codexc provider opencode-go <add|list|remove|default|release> [id]\n  codexc provider ccg remove <id>\n\n各家只开放已有能力；CCG 新增与设置使用 codexc setup。release 释放账户 App Server 实例，后续请求可重新拉起，不禁用账户。`,
+  provider: `${primaryProviderUsage}\n\n受管账户：\n  codexc provider deepseek <add|list|reconfigure|remove|default> [id]\n  codexc provider opencode-go <add|list|reconfigure|remove|default|release> [id]\n  codexc provider ccg remove <id>\n\n各家只开放已有能力；CCG 新增与设置使用 codexc setup。release 释放账户 App Server 实例，后续请求可重新拉起，不禁用账户。`,
   update: `用法：codexc update
 
 Git 源码安装检查并构建官方 main 最新提交，校验当前配置、数据库与配套 Codex CLI 合同后，
 在一个停机窗口更新程序与所需 CLI，再恢复核心服务。
-CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI，不更新 Gateway 程序包。
-数据库只接受当前 Schema，不迁移或删除数据；关闭 Codex daemon 自动启动，其他用户偏好与模型目录不改写。
-预检失败时不停止服务；更新按原运行状态恢复核心服务和 WebUI，失败报告阶段并尝试恢复。
+CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI；源码入口迁移数据库后会刷新全局命令。
+精确的指标 v31 在停服后私有备份并升级至 v32；其他旧结构拒绝，不删除数据。
+关闭 Codex daemon 自动启动，其他用户偏好与模型目录不改写。
+预检失败时不停止服务；更新按原运行状态恢复仍启用的服务。迁移开始后程序未就绪时保持停止并保留恢复材料。
 须在本机执行，不能从 Gateway/App Server 服务进程调用；需要安装配套 CLI 时必须在交互终端确认。`,
   uninstall: `用法：codexc uninstall [--services]
 
@@ -307,12 +314,15 @@ async function executeCommand(command, args) {
   const startedAt = performance.now();
   try { await dispatchCommand(command, args); }
   finally {
-    printCliMessage("note", `命令总耗时 ${((performance.now() - startedAt) / 1000).toFixed(2)} 秒。`, { destination: "stderr" });
+    if (command !== "video-mcp") printCliMessage("note", `命令总耗时 ${((performance.now() - startedAt) / 1000).toFixed(2)} 秒。`, { destination: "stderr" });
   }
 }
 
 async function dispatchCommand(command, args) {
   switch (command) {
+    case "video-mcp":
+      await (await import("../scripts/video-analysis-mcp.mjs")).runVideoMcp(args);
+      break;
     case undefined:
       printHelp();
       break;
@@ -447,7 +457,7 @@ async function dispatchCommand(command, args) {
       const [family, ...values] = args;
       if (["deepseek", "opencode-go", "ccg"].includes(family)) {
         const actions = family === "deepseek" ? ["add", "list", "reconfigure", "remove", "default"]
-          : family === "opencode-go" ? ["add", "list", "remove", "default", "release"] : ["remove"];
+          : family === "opencode-go" ? ["add", "list", "reconfigure", "remove", "default", "release"] : ["remove"];
         const usage = `用法：codexc provider ${family} <${actions.join("|")}> [id]${family === "ccg" ? "" : "（list 支持 --json）"}`;
         if (values.length === 0 || isCommandHelp(values, [[], ...actions.map(action => [action])], usage)) {
           console.log(values.length === 2
@@ -536,7 +546,8 @@ async function dispatchCommand(command, args) {
       }
       await (await import("../scripts/cleanup-menu.mjs")).runCleanupMenu({
         runSessionCleanup: (values, options) => runMaintenanceScript("scripts/session-cleanup.mjs", values, options),
-        runTrafficCleanup: (values, options) => runMaintenanceScript("scripts/traffic-cleanup.mjs", values, options, false),
+        runTrafficCleanup: async (values, options) =>
+          (await import("../scripts/traffic-cleanup.mjs")).runTrafficCleanup(values, options),
         runDatabaseCommand: (values, options) => runMaintenanceScript("scripts/metrics-database.mjs", values, options),
       });
       break;
@@ -916,10 +927,9 @@ async function runMetricsCommand(args) {
   const withoutStdout = args.filter((argument) => argument !== "--stdout");
   const writeFile = withoutStdout.length === args.length;
   if (!writeFile) {
-    const runtime = configuredEnvironment();
     await withCliProgress("查询指标", ({ signal }) => runCliLifecycleCommand(
       join(packageDir, "scripts/metrics-database.mjs"), withoutStdout,
-      { environment: runtime.environment, cwd: runtime.dataDir, signal },
+      { environment: process.env, cwd: process.cwd(), signal },
     ), { output: process.stderr, delayMs: 250 });
     return;
   }
@@ -947,8 +957,9 @@ function openMetricsExportFile(subcommand, args) {
   const { dataDir } = requireUserConfig();
   const dateDirectory = new Date().toLocaleDateString("en-CA");
   const directory = join(dataDir, "output", dateDirectory);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  chmodSync(directory, 0o700);
+  for (const path of [dataDir, join(dataDir, "output"), directory]) {
+    ensurePrivateDirectorySync(path);
+  }
   const formatOption = args.findIndex((argument) => argument === "--format");
   const format = formatOption >= 0
     ? args[formatOption + 1] ?? "markdown"
@@ -977,26 +988,11 @@ function openMetricsExportFile(subcommand, args) {
 }
 
 function metricsPositionalIdentifier(subcommand, args) {
-  if (subcommand !== "run" && subcommand !== "turns" && subcommand !== "export") {
-    return undefined;
-  }
+  const rest = args.slice(1);
+  if (subcommand === "run") return parseMetricsRunArgs(rest).threadId;
+  if (subcommand === "turns") return parseMetricsTurnsArgs(rest).threadId;
   if (subcommand === "export") {
-    const threadOption = args.findIndex((argument) => argument === "--thread");
-    return threadOption >= 0 ? args[threadOption + 1] : undefined;
-  }
-  const valueOptions = new Set(["--range", "--group", "--format"]);
-  for (let index = 1; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--thread") {
-      return args[index + 1];
-    }
-    if (valueOptions.has(argument)) {
-      index += 1;
-      continue;
-    }
-    if (!argument.startsWith("--")) {
-      return argument;
-    }
+    return parseMetricsOptions(rest, new Set([...metricsQueryOptions, metricsRequestPurposeOption, "--format"])).thread;
   }
   return undefined;
 }

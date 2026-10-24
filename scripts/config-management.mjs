@@ -4,10 +4,11 @@ import { readFileSync, unlinkSync } from "node:fs";
 
 import {
   GatewayConfigConflictError,
-  officialTuiUserAgentPattern,
+  GatewayConfigValidationError,
+  GatewayConfigWriteCommittedError,
   parseGatewayConfig,
-  timezonePattern,
   validateCodexConfigDocument,
+  validateDebugConfigDocument,
   validateGatewayConfigStructureDocument,
   validateGatewayProcessConfigDocument,
   writeGatewayConfig,
@@ -15,7 +16,7 @@ import {
 import { readCodexProxySnapshot, renderCodexProxySettings, validateCodexProxyValue, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { validateModelDisplayAliases } from "../runtime/model-display-name.mjs";
-import { invalidSetting } from "./config-management-error.mjs";
+import { ConfigManagementError, invalidSetting } from "./config-management-error.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import {
   applyMetricsSetting,
@@ -28,6 +29,7 @@ import {
 } from "./config-webui-management.mjs";
 import { detectTerminalIdentity } from "../runtime/terminal-identity.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
+import { createSharedCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
 
 const operationUpdateValues = ["full", "compact", "hidden"];
 const messageFormatValues = ["html", "rich"];
@@ -40,16 +42,17 @@ export function loadGatewaySettings(environment = process.env) {
   const { configPath } = requireUserConfig(environment);
   const snapshot = readConfigSnapshot(configPath, readFileSync, environment);
   const document = snapshot.document;
-  const display = table(document.display);
+  const effective = snapshot.effective;
+  const display = effective.display;
   const codex = table(document.codex);
   const gateway = table(document.gateway);
   const requestIdentity = resolveCodexRequestIdentity(codex);
   const clientIdentity = table(requestIdentity.clientIdentity);
-  const approval = table(document.approval);
-  const conversation = table(document.conversation);
-  const scheduledTasks = table(document.scheduled_tasks);
-  const logging = table(document.logging);
-  const debug = table(document.debug);
+  const approval = effective.approval;
+  const conversation = effective.conversation;
+  const scheduledTasks = effective.scheduled_tasks;
+  const logging = effective.logging;
+  const debug = effective.debug ?? validateDebugConfigDocument({});
   const network = snapshot.proxy.settings;
   const telegram = table(document.telegram);
   const workspaces = workspaceOptions(document);
@@ -57,29 +60,19 @@ export function loadGatewaySettings(environment = process.env) {
     configPath,
     revision: snapshot.revision,
     display: {
-      operationUpdates: operationUpdateValues.includes(display.operation_updates)
-        ? display.operation_updates
-        : "compact",
-      planUpdatesEnabled: display.plan_updates !== false,
-      reasoningEnabled: display.reasoning === true,
-      modelAliases: validateModelDisplayAliases(display.model_aliases === undefined ? {} : display.model_aliases),
+      operationUpdates: display.operation_updates,
+      planUpdatesEnabled: display.plan_updates,
+      reasoningEnabled: display.reasoning,
+      modelAliases: display.model_aliases ?? {},
     },
     system: {
-      approvalTimeoutSeconds: integerInRange(approval.timeout_seconds, 30, 3_600) ?? 900,
-      idleReleaseMinutes: integerInRange(
-        conversation.idle_release_minutes,
-        0,
-        1_440,
-      ) ?? 15,
+      approvalTimeoutSeconds: approval.timeout_seconds,
+      idleReleaseMinutes: conversation.idle_release_minutes,
       defaultWorkspace: stringValue(document.default_workspace) || null,
       defaultModel: stringValue(codex.default_model) || null,
       modelTrafficMode: debug.model_traffic_input_items === 0 && debug.model_traffic_item_max_bytes === 0 ? "debug" : "production",
-      modelTrafficDumpEnabled: debug.model_traffic_dump === true,
-      modelTrafficRetentionDays: integerInRange(
-        debug.model_traffic_retention_days,
-        0,
-        36_500,
-      ) ?? 30,
+      modelTrafficDumpEnabled: debug.model_traffic_dump,
+      modelTrafficRetentionDays: debug.model_traffic_retention_days,
       officialTuiIdentity: {
         followCliVersion: codex.follow_cli_version === true,
         clientIdentity: {
@@ -98,26 +91,73 @@ export function loadGatewaySettings(environment = process.env) {
       workspaces,
     },
     automation: {
-      scheduledTasksEnabled: scheduledTasks.enabled === true,
+      scheduledTasksEnabled: scheduledTasks.enabled,
     },
     network: Object.fromEntries(proxyFields.map((field) => [
       field,
       { configured: stringValue(network[field]) !== "" },
     ])),
     advanced: {
-      loggingLevel: loggingLevelValues.includes(logging.level) ? logging.level : "info",
+      loggingLevel: logging.level,
     },
     telegram: {
       configured: stringValue(telegram.bot_token) !== "",
-      messageFormat: telegram.message_format === "rich" ? "rich" : "html",
+      messageFormat: effective.telegram?.message_format ?? "html",
     },
     webui: projectWebuiSettings(document),
-    metrics: projectMetricsSettings(document),
+    metrics: projectMetricsSettings(effective),
     channels: gatewayChannelStates(document),
   };
 }
 
 export function updateGatewaySetting(
+  input,
+  options = {},
+) {
+  if (input?.kind === "system.default-model") {
+    throw invalid("kind", "model-validation-required", "渠道新会话模型必须通过默认模型管理入口校验后保存");
+  }
+  return updateGatewaySettingValidated(input, options);
+}
+
+/** Preview and save both validate against the connected primary's own catalog. */
+export async function updateGatewayDefaultModelSetting(input, {
+  environment = process.env,
+  createClient = createSharedCodexUserConfigClient,
+  ...options
+} = {}) {
+  if (input?.kind !== "system.default-model") {
+    throw invalid("kind", "unknown-setting", "默认模型管理入口只接受渠道新会话模型设置");
+  }
+  if (input.value === undefined) {
+    throw invalid("value", "required", "模型 ID 必须是字符串或 null");
+  }
+  const value = optionalString(input.value, 256, "value", "模型 ID");
+  const normalized = { kind: input.kind, value };
+  const save = () => updateGatewaySettingValidated(normalized, { ...options, environment });
+  // Clearing the override does not select a model and must remain available offline.
+  if (value === null) return save();
+  assertExpectedRevision(options.expectedRevision);
+  try {
+    await withCodexUserConfigClient(environment, createClient, undefined, async client => {
+      const before = await client.readUserConfigSnapshot();
+      const models = await client.listModels();
+      const after = await client.readUserConfigSnapshot();
+      if (before.version !== after.version) {
+        throw invalid("revision", "stale-revision", "主 Provider 配置已变化，请重新读取设置");
+      }
+      if (!models.some(model => model.model === value && model.available !== false)) {
+        throw invalid("value", "unknown-model", "模型不在当前主 Provider 的可用目录中，请重新选择");
+      }
+    });
+  } catch (error) {
+    if (error instanceof ConfigManagementError) throw error;
+    throw invalid("value", "model-catalog-unavailable", "无法确认当前主 Provider 模型目录；请检查 App Server 后重新读取设置");
+  }
+  return save();
+}
+
+function updateGatewaySettingValidated(
   input,
   {
     environment = process.env,
@@ -188,6 +228,7 @@ export function updateGatewaySetting(
   try {
     writeConfig(configPath, document);
   } catch (error) {
+    if (error instanceof GatewayConfigWriteCommittedError) throw error;
     if (backupPath !== null) {
       try {
         unlinkSync(backupPath);
@@ -213,6 +254,7 @@ export function updateGatewaySetting(
     value: result.value,
     activation: result.activation,
     activationResult: configActivationResult(result.activation),
+    ...(result.generatedWebuiToken === undefined ? {} : { generatedWebuiToken: result.generatedWebuiToken }),
     ...(result.generatedTokens === undefined ? {} : { generatedTokens: result.generatedTokens }),
     ...(backupPath === null ? {} : { backupPath }),
   };
@@ -292,7 +334,7 @@ function applySetting(document, input) {
         throw Object.assign(invalid("value", "invalid-model-aliases", error.message), { cause: error });
       }
       document.display = { ...table(document.display), model_aliases: value };
-      return { value, activation: "restart-gateway", backupRequired: true };
+      return { value, activation: "next-read", backupRequired: true };
     }
     case "telegram.message-format": {
       const value = enumValue(input.value, messageFormatValues, "value", "Telegram 消息格式");
@@ -346,7 +388,12 @@ function applySetting(document, input) {
     }
     case "system.official-tui-identity": {
       const followCliVersion = booleanValue(input.value?.followCliVersion, "value.followCliVersion", "跟随 CLI 版本");
-      const identity = table(input.value?.clientIdentity);
+      const clientIdentityValue = input.value?.clientIdentity;
+      if (clientIdentityValue !== null && (typeof clientIdentityValue !== "object"
+        || Array.isArray(clientIdentityValue))) {
+        throw invalid("value.clientIdentity", "invalid-input", "客户端身份必须是对象或 null");
+      }
+      const identity = table(clientIdentityValue);
       const name = optionalStrictString(
         identity.name,
         64,
@@ -392,19 +439,19 @@ function applySetting(document, input) {
       );
       const codex = { ...table(document.codex) };
       codex.follow_cli_version = followCliVersion;
-      if (followCliVersion && name !== null && name !== "codex-tui") {
-        throw invalid("value.clientIdentity.name", "invalid-value", "跟随 CLI 版本时客户端名称必须为 codex-tui");
-      }
-      if (followCliVersion && typeof upstreamUserAgent === "string" && !officialTuiUserAgentPattern.test(upstreamUserAgent)) {
-        throw invalid("value.upstreamUserAgent", "invalid-value", "跟随 CLI 版本需要两处版本一致的完整官方 TUI UA，请重新一键设置或关闭跟随");
-      }
       if (clientIdentity === null) delete codex.client_identity;
       else codex.client_identity = clientIdentity;
       if (upstreamUserAgent === null) delete codex.upstream_user_agent;
       else codex.upstream_user_agent = upstreamUserAgent;
       if (terminalIdentity === null) delete codex.terminal_identity;
       else codex.terminal_identity = terminalIdentity;
-      document.codex = validateCodexConfigDocument(codex);
+      document.codex = validateSettingDocument(codex, validateCodexConfigDocument, {
+        "client_identity.name": ["value.clientIdentity.name", "客户端名称格式无效；跟随 CLI 版本时必须为 codex-tui"],
+        "client_identity.title": ["value.clientIdentity.title", "客户端标题格式无效"],
+        "client_identity.version": ["value.clientIdentity.version", "客户端版本格式无效"],
+        upstream_user_agent: ["value.upstreamUserAgent", "上游 User-Agent 格式无效；跟随 CLI 版本时请使用完整官方 TUI UA"],
+        terminal_identity: ["value.terminalIdentity", "终端标识须为终端名或终端名/版本，仅允许字母、数字、.、_、-，且以字母或数字开头"],
+      });
       const effective = resolveCodexRequestIdentity(document.codex);
       if (effective.upstreamUserAgent !== undefined && effective.upstreamUserAgent.length > 512) {
         throw invalid("value.upstreamUserAgent", "too-long", "上游 User-Agent 更新 Codex 版本后超过 512 个字符，请缩短系统或终端信息");
@@ -428,17 +475,12 @@ function applySetting(document, input) {
         "value",
         "时区",
       );
-      if (timezone !== null && !timezonePattern.test(timezone)) {
-        throw invalid(
-          "value",
-          "invalid-value",
-          "时区必须是 IANA 名称（如 Asia/Shanghai、America/Los_Angeles）",
-        );
-      }
       const codex = { ...table(document.codex) };
       if (timezone === null) delete codex.timezone;
       else codex.timezone = timezone;
-      document.codex = validateCodexConfigDocument(codex);
+      document.codex = validateSettingDocument(codex, validateCodexConfigDocument, {
+        timezone: ["value", "时区必须是有效的 IANA 名称"],
+      });
       return changed(timezone, "restart-app-server-gateway-webui");
     }
     case "system.gateway-timezone": {
@@ -446,7 +488,9 @@ function applySetting(document, input) {
       const gateway = { ...table(document.gateway) };
       if (timezone === null) delete gateway.timezone;
       else gateway.timezone = timezone;
-      const validated = validateGatewayProcessConfigDocument(gateway);
+      const validated = validateSettingDocument(gateway, validateGatewayProcessConfigDocument, {
+        timezone: ["value", "网关时区必须是 system 或 Node.js 支持的 IANA 名称"],
+      });
       if (timezone === null) delete document.gateway;
       else document.gateway = validated;
       return changed(timezone, "restart-gateway");
@@ -463,6 +507,20 @@ function applySetting(document, input) {
     }
     default:
       throw invalid("kind", "unknown-setting", `未知 Gateway 设置：${String(input.kind)}`);
+  }
+}
+
+// Only candidate fields owned by this operation become user input errors.
+// Existing-document validation and I/O remain outside this boundary.
+function validateSettingDocument(document, validate, fields) {
+  try {
+    return validate(document);
+  } catch (error) {
+    if (!(error instanceof GatewayConfigValidationError) || error.issues.length === 0
+      || error.issues.some(issue => !Object.hasOwn(fields, issue.path.join(".")))) throw error;
+    const issue = error.issues[0];
+    const [field, message] = fields[issue.path.join(".")];
+    throw invalid(field, issue.code === "too_big" ? "too-long" : "invalid-value", message);
   }
 }
 
@@ -499,6 +557,9 @@ function applyNetworkProxyBatch(document, input) {
   for (const field of fields) {
     if (!Object.prototype.hasOwnProperty.call(input.values, field)) continue;
     const value = input.values[field];
+    if (value !== null && typeof value !== "string") {
+      throw invalid(`values.${field}`, "invalid-input", "代理 URL 必须是字符串或 null");
+    }
     if (value === null || stringValue(value) === "") {
       delete network[field];
       continue;
@@ -525,13 +586,14 @@ function changed(value, activation) {
 function readConfigSnapshot(configPath, readConfig = readFileSync, environment = process.env) {
   const content = readConfig(configPath, "utf8");
   const document = parseGatewayConfig(content, configPath);
-  // 校验不接收补入默认值的返回文档，以保留原文来源、注释和未配置字段。
-  validateGatewayConfigStructureDocument(document);
+  // 有效视图仅供读取；写入和 revision 仍使用原文及其来源信息。
+  const effective = validateGatewayConfigStructureDocument(document);
   const proxy = readCodexProxySnapshot(environment);
   return {
     content,
     proxy,
     document,
+    effective,
     revision: createHash("sha256").update(JSON.stringify([content, proxy.content])).digest("hex"),
   };
 }
@@ -601,8 +663,12 @@ function requiredString(value, field, label) {
 }
 
 function optionalString(value, maximum, field, label) {
-  if (value === null || value === undefined || stringValue(value) === "") return null;
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") {
+    throw invalid(field, "invalid-input", `${label}必须是字符串或 null`);
+  }
   const normalized = stringValue(value);
+  if (normalized === "") return null;
   if (normalized.length > maximum) {
     throw invalid(field, "too-long", `${label}长度不能超过 ${maximum} 个字符`);
   }
@@ -611,7 +677,10 @@ function optionalString(value, maximum, field, label) {
 
 function optionalStrictString(value, maximum, field, label) {
   if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "string" && value.length > maximum) {
+  if (typeof value !== "string") {
+    throw invalid(field, "invalid-input", `${label}必须是字符串或 null`);
+  }
+  if (value.length > maximum) {
     throw invalid(field, "too-long", `${label}长度不能超过 ${maximum} 个字符`);
   }
   return value;
@@ -619,10 +688,6 @@ function optionalStrictString(value, maximum, field, label) {
 
 function invalid(field, code, message) {
   return invalidSetting(field, code, message);
-}
-
-function integerInRange(value, minimum, maximum) {
-  return Number.isInteger(value) && value >= minimum && value <= maximum ? value : undefined;
 }
 
 function stringValue(value) {

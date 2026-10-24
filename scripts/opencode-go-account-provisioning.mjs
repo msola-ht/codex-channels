@@ -9,9 +9,9 @@ import {
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import {
-  loadManagedModelWindow,
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
+  loadOpencodeGoAccountCredentialFor,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   loadOpencodeGoAccounts,
@@ -31,7 +31,7 @@ import {
   writePrivateFileAtomic,
 } from "../runtime/private-file.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import { createOpencodeGoCatalog } from "./provider-model-catalog.mjs";
+import { createOpencodeGoCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import {
   createManagedProviderConfiguration,
@@ -39,6 +39,7 @@ import {
   resolveManagedCatalogModel,
 } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { assertManagedAccountMode, snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision } from "./managed-provider-account-plan.mjs";
 import {
   opencodeGoAccountPaths,
 } from "./opencode-go-account-files.mjs";
@@ -65,14 +66,14 @@ export class OpenCodeGoAccountProvisioningError extends Error {
 }
 
 export async function previewOpencodeGoAccountConfiguration(
-  { accountId, email, phone, contact, mode = "switching", reconfigure = false },
+  { accountId, email, phone, contact, mode, reconfigure = false, apiKey },
   {
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
     loadPrimaryProvider = loadPrimaryModelProvider,
   } = {},
 ) {
-  return publicPreview(await buildPlan({ accountId, email, phone, contact, mode, reconfigure }, {
+  return publicPreview(await buildPlan({ accountId, email, phone, contact, mode, reconfigure, apiKey }, {
     environment,
     loadAccounts,
     loadPrimaryProvider,
@@ -93,12 +94,13 @@ export async function applyOpencodeGoAccountConfiguration(
 async function applyOpencodeGoAccountConfigurationUnlocked(
   {
     accountId,
-    mode = "switching",
+    mode,
     reconfigure = false,
     email,
     phone,
     contact,
     apiKey,
+    expectedRevision,
     confirmExclusiveConfigChange = false,
   },
   {
@@ -109,20 +111,19 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     loadPrimaryProvider = loadPrimaryModelProvider,
   } = {},
 ) {
-  const plan = await buildPlan({ accountId, email, phone, contact, mode, reconfigure }, {
+  const plan = await buildPlan({ accountId, email, phone, contact, mode, reconfigure, apiKey }, {
     environment,
     loadAccounts,
     loadPrimaryProvider,
   });
-  if ((plan.mode === "exclusive" || plan.previousMode === "exclusive") && confirmExclusiveConfigChange !== true) {
+  mode = plan.mode;
+  assertManagedAccountRevision(expectedRevision, plan.revision);
+  if (plan.willChange && (plan.mode === "exclusive" || plan.previousMode === "exclusive") && confirmExclusiveConfigChange !== true) {
     throw invalid(
       "confirmation-required",
       "confirmExclusiveConfigChange",
       "修改 Codex 主配置前必须明确确认",
     );
-  }
-  if (typeof apiKey !== "string" || !/^sk-[^\s"]+$/u.test(apiKey) || apiKey.length > 4_096) {
-    throw invalid("invalid-api-key", "apiKey", "OpenCode Go API Key 无效");
   }
 
   let catalogState;
@@ -139,17 +140,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   } catch (error) {
     throw normalize("provider-state-unavailable", "accountId", error);
   }
-  let contextWindowByModel;
-  try {
-    contextWindowByModel = plan.downloadsCatalog
-      ? configuredContextWindowByModel(
-          environment,
-          new Set(catalogState.catalog.models.map((model) => model.slug)),
-        )
-      : {};
-  } catch (error) {
-    throw normalize("provider-state-unavailable", "accountId", error);
-  }
   let managedCatalog;
   try {
     managedCatalog = plan.downloadsCatalog ? createManagedProviderCatalog(
@@ -157,7 +147,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       definition,
       {
         previousModels: previous?.models,
-        modelContextWindowByModel: contextWindowByModel,
       },
     ) : catalogState.catalog;
     await validateModelCatalogWithCodex(managedCatalog, environment);
@@ -169,6 +158,10 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     definition,
     previous?.model,
   );
+  if (!plan.willChange) {
+    await assertProviderFileSnapshots(plan.snapshots);
+    return { ...publicPreview(plan), action: "unchanged", paths: publicPaths(plan.paths), model: selectedModel };
+  }
   const previousMode = readOpencodeGoAccountMarker(environment, accountId)?.mode;
   if (previousMode === "exclusive" && confirmExclusiveConfigChange !== true) {
     throw invalid(
@@ -184,19 +177,12 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   const archivedBaselinePath = capturesExclusiveBaseline && existsSync(exclusiveBaselinePath)
     ? join(plan.paths.backupDirectory, `config-${randomUUID()}.toml`)
     : undefined;
-  const transactionPaths = [
-    plan.paths.configPath,
-    plan.paths.profilePath,
-    plan.paths.markerPath,
-    plan.paths.catalogPath,
-    plan.paths.manifestPath,
-    exclusiveBaselinePath,
-    ...(archivedBaselinePath === undefined ? [] : [archivedBaselinePath]),
-    opencodeGoAccountsFilePath(environment),
-  ];
-  let snapshots;
+  const snapshots = plan.snapshots;
   try {
-    snapshots = snapshotProviderFiles(transactionPaths, environment);
+    if (archivedBaselinePath !== undefined) {
+      snapshots.push(...snapshotProviderFiles([archivedBaselinePath], environment));
+    }
+    await assertProviderFileSnapshots(snapshots);
   } catch (error) {
     throw normalize("operation-failed", "action", error);
   }
@@ -222,7 +208,8 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       {
         mode,
         previousMode,
-        apiKey, catalogPath: plan.paths.catalogPath, catalog: managedCatalog, model: selectedModel,
+        previousProfile: snapshots.find(item => item.path === plan.paths.profilePath)?.content?.toString("utf8"),
+        apiKey: plan.apiKey, catalogPath: plan.paths.catalogPath, catalog: managedCatalog, model: selectedModel,
       },
     );
     const profileContent = profile === undefined ? undefined : stringify(profile);
@@ -234,36 +221,33 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       await replaceOptionalProviderFile(path, content, environment);
       guards = refreshProviderFileSnapshot(guards, path);
     }
-    const catalogContent = `${JSON.stringify(managedCatalog, null, 2)}\n`;
     if (archivedBaselinePath !== undefined) {
       const previousBaseline = await readOptionalProviderFile(exclusiveBaselinePath, environment);
       if (previousBaseline === undefined) throw new Error("OpenCode Go 固定账户恢复基线缺失");
+      await assertProviderFileSnapshots(guards);
       await writePrivateFileAtomic(archivedBaselinePath, previousBaseline);
       guards = refreshProviderFileSnapshot(guards, archivedBaselinePath);
     }
     if (capturesExclusiveBaseline) {
+      await assertProviderFileSnapshots(guards);
       await writePrivateFileAtomic(exclusiveBaselinePath, stringify(initialConfig));
       guards = refreshProviderFileSnapshot(guards, exclusiveBaselinePath);
     }
-    await assertProviderFileSnapshots(guards);
-    await writePrivateFileAtomic(plan.paths.catalogPath, catalogContent);
-    guards = refreshProviderFileSnapshot(guards, plan.paths.catalogPath);
-    await assertProviderFileSnapshots(guards);
-    await replaceOptionalProviderFile(
-      plan.paths.manifestPath,
-      catalogState.manifest === undefined
-        ? undefined
-        : `${JSON.stringify(catalogState.manifest, null, 2)}\n`,
-      environment,
-    );
-    guards = refreshProviderFileSnapshot(guards, plan.paths.manifestPath);
-    await assertProviderFileSnapshots(guards);
-    if (mode === "exclusive" || previousMode === "exclusive") {
+    if (plan.downloadsCatalog) {
+      await assertProviderFileSnapshots(guards);
+      await writePrivateFileAtomic(plan.paths.catalogPath, `${JSON.stringify(managedCatalog, null, 2)}\n`);
+      guards = refreshProviderFileSnapshot(guards, plan.paths.catalogPath);
+      await assertProviderFileSnapshots(guards);
       await replaceOptionalProviderFile(
-        plan.paths.configPath,
-        Object.keys(nextConfig).length === 0 ? undefined : stringify(nextConfig),
+        plan.paths.manifestPath,
+        `${JSON.stringify(catalogState.manifest, null, 2)}\n`,
         environment,
       );
+      guards = refreshProviderFileSnapshot(guards, plan.paths.manifestPath);
+    }
+    await assertProviderFileSnapshots(guards);
+    if (mode === "exclusive" || previousMode === "exclusive") {
+      await guards.find(snapshot => snapshot.path === plan.paths.configPath).writeCurrent(stringify(nextConfig));
       guards = refreshProviderFileSnapshot(guards, plan.paths.configPath);
     }
     await assertProviderFileSnapshots(guards);
@@ -299,7 +283,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
 }
 
 async function buildPlan(
-  { accountId, email, phone, contact, mode, reconfigure },
+  { accountId, email, phone, contact, mode, reconfigure, apiKey },
   { environment, loadAccounts, loadPrimaryProvider },
 ) {
   try {
@@ -307,8 +291,8 @@ async function buildPlan(
   } catch (error) {
     throw normalize("invalid-account-id", "accountId", error);
   }
-  if (mode !== "switching" && mode !== "exclusive") {
-    throw invalid("invalid-mode", "mode", "OpenCode Go 账户管理模式无效");
+  if (typeof reconfigure !== "boolean") {
+    throw invalid("invalid-input", "reconfigure", "reconfigure 必须为布尔值");
   }
   let accounts;
   try {
@@ -329,10 +313,17 @@ async function buildPlan(
       const configured = loadManagedModelProviderSettings(environment)
         .find((provider) => provider.provider === opencodeGoProviderId(accountId));
       if (configured === undefined) throw new Error("OpenCode Go 账户配置不完整，请先恢复缺失文件");
+      if (!configured.models.some(model => model.model === configured.model)) {
+        throw invalid("account-default-model-missing", "model", "账户默认模型不在当前目录中，请先在模型管理中设置有效的账户默认模型");
+      }
       previousMode = configured.mode;
     } catch (error) {
       throw normalize("provider-state-unavailable", "accountId", error);
     }
+  }
+  if (mode === undefined) mode = previousMode ?? "switching";
+  if (mode !== "switching" && mode !== "exclusive") {
+    throw invalid("invalid-mode", "mode", "OpenCode Go 账户管理模式无效");
   }
   if ([contact, email, phone].filter((value) => value !== undefined).length > 1) {
     throw invalid(
@@ -360,27 +351,47 @@ async function buildPlan(
       throw normalize("invalid-contact", "contact", error);
     }
   }
-  if (normalizedEmail === undefined && normalizedPhone === undefined) {
-    throw invalid("invalid-contact", "contact", "OpenCode Go 账户必须提供邮箱或手机号码");
-  }
-  if (mode === "exclusive") {
-    let primary;
-    try {
-      primary = loadPrimaryProvider(environment);
-    } catch (error) {
-      throw normalize("provider-state-unavailable", "mode", error);
-    }
-    if (primary !== "openai" && primary !== opencodeGoProviderId(accountId)) {
-      throw invalid("primary-provider-conflict", "mode", `请先恢复当前固定 Provider：${primary}`);
-    }
-  }
+  assertManagedAccountMode(mode, opencodeGoAccountDefinition(accountId), environment, loadPrimaryProvider);
   const paths = opencodeGoAccountPaths(environment, accountId);
+  let snapshots;
+  try {
+    // Keep the files that produced this plan across every asynchronous wait.
+    // A later snapshot must not accept external changes as the rollback baseline.
+    snapshots = snapshotManagedAccountFiles([
+      paths.configPath,
+      paths.profilePath,
+      paths.markerPath,
+      paths.catalogPath,
+      paths.manifestPath,
+      join(paths.backupDirectory, "config.toml"),
+      opencodeGoAccountsFilePath(environment),
+    ], opencodeGoAccountDefinition(accountId), environment);
+  } catch (error) {
+    throw normalize("operation-failed", "action", error);
+  }
   try {
     await assertProfileOwnership(paths, accountId, environment);
   } catch (error) {
     throw normalize("profile-conflict", "accountId", error);
   }
+  const preservesApiKey = apiKey === undefined;
+  let currentApiKey;
+  if (existing !== undefined) {
+    try { currentApiKey = loadOpencodeGoAccountCredentialFor(opencodeGoProviderId(accountId), environment); }
+    catch {
+      if (preservesApiKey) throw invalid("invalid-api-key", "apiKey", "现有 API Key 无法安全读取，请显式填写新 Key");
+    }
+  }
+  if (preservesApiKey) apiKey = currentApiKey;
+  if (typeof apiKey !== "string" || !/^sk-[^\s"]+$/u.test(apiKey) || apiKey.length > 4_096) {
+    throw invalid("invalid-api-key", "apiKey", "OpenCode Go API Key 无效；新增账户必须填写 Key");
+  }
+  await assertProviderFileSnapshots(snapshots);
   return {
+    apiKey,
+    credentialAction: apiKey === currentApiKey ? "preserve" : "replace",
+    willChange: existing === undefined || apiKey !== currentApiKey || mode !== previousMode
+      || normalizedEmail !== existing.email || normalizedPhone !== existing.phone,
     account: {
       id: accountId,
       provider: opencodeGoProviderId(accountId),
@@ -415,6 +426,8 @@ async function buildPlan(
     reconfigure,
     previousMode,
     paths,
+    snapshots,
+    revision: managedAccountRevision(snapshots),
     downloadsCatalog: !existsSync(paths.catalogPath),
     updatesExternalAgent: false,
   };
@@ -433,32 +446,38 @@ async function loadCatalog(plan, { fetchImpl, downloadCatalog }) {
     };
   }
   const downloaded = await downloadCatalog(fetchImpl);
+  const { catalog, templateBindings } = createOpencodeGoCatalogWithTemplateBindings(downloaded.catalog);
   return {
-    catalog: createOpencodeGoCatalog(downloaded.catalog),
+    catalog,
     manifest: {
       source: deepseekSetupScriptUrl,
       sha256: downloaded.sha256,
       downloadedAt: new Date().toISOString(),
+      modelTemplates: templateBindings,
     },
   };
 }
 
 function publicPreview(plan) {
   return {
+    revision: plan.revision,
     operation: plan.account.exists ? "reconfigure" : "add",
     account: plan.account,
     mode: plan.mode,
+    previousMode: plan.previousMode,
+    credentialAction: plan.credentialAction,
+    willChange: plan.willChange,
     effects: {
-      writesMainConfig: plan.mode === "exclusive" || plan.previousMode === "exclusive",
-      writesIsolatedProfile: plan.mode === "switching",
+      writesMainConfig: plan.willChange && (plan.mode === "exclusive" || plan.previousMode === "exclusive"),
+      writesIsolatedProfile: plan.willChange && plan.mode === "switching",
       downloadsCatalog: plan.downloadsCatalog,
       updatesExternalAgent: plan.updatesExternalAgent,
     },
     confirmation: {
-      required: plan.mode === "exclusive" || plan.previousMode === "exclusive",
+      required: plan.willChange && (plan.mode === "exclusive" || plan.previousMode === "exclusive"),
       field: "confirmExclusiveConfigChange",
     },
-    activation: "restart-all",
+    activation: plan.willChange ? "restart-all" : "none",
   };
 }
 
@@ -499,19 +518,6 @@ function normalize(code, field, error) {
     field,
     error instanceof Error ? error.message : String(error),
     error,
-  );
-}
-
-export function configuredContextWindowByModel(environment, modelSlugs) {
-  return Object.fromEntries(
-    loadManagedModelWindow(environment)
-      .filter((entry) => modelSlugs.has(entry.model) && entry.contextWindow !== undefined)
-      .map((entry) => {
-        if (entry.conflicts || entry.windowConflict) {
-          throw new Error(`同名模型的窗口设置冲突，请先统一设置：${entry.model}`);
-        }
-        return [entry.model, entry.contextWindow];
-      }),
   );
 }
 

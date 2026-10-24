@@ -67,9 +67,10 @@ implements FeishuUserTokenStore {
     userOpenId: string,
   ): Promise<StoredFeishuUserToken | null> {
     const value = await this.records.get(accountKey(appId, userOpenId));
-    return value === null
-      ? null
-      : parseStoredToken(value, appId, userOpenId);
+    if (value === null) return null;
+    const token = parseStoredToken(value, appId, userOpenId);
+    if (!token) throw new Error("飞书钥匙串凭据载荷无效");
+    return token;
   }
 
   async set(token: StoredFeishuUserToken): Promise<void> {

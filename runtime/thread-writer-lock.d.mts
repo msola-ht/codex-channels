@@ -1,3 +1,5 @@
+import type { OwnedCommandRunner } from "./owned-command-runner.mjs";
+
 export interface ThreadWriterLockHolder {
   pid: number;
   command: string;
@@ -7,7 +9,8 @@ export interface ThreadWriterLockHolder {
 
 export type ThreadWriterLockInspection =
   | { held: false }
-  | { held: true; holder: ThreadWriterLockHolder | null };
+  | { held: true; holder: ThreadWriterLockHolder }
+  | { held: true; holder: null; reason: "unsupported-platform" | "inspection-unavailable" };
 
 export function threadWriterLockPath(
   threadId: string,
@@ -18,7 +21,8 @@ export function inspectThreadWriterLock(
   threadId: string,
   environment?: NodeJS.ProcessEnv,
   procRoot?: string,
-): ThreadWriterLockInspection;
+  options?: { runner?: OwnedCommandRunner; signal?: AbortSignal; timeoutMs?: number },
+): Promise<ThreadWriterLockInspection>;
 
 export function threadWriterLockHolders(
   lockPath: string,
@@ -36,5 +40,7 @@ export function terminateThreadWriterHolder(
     timeoutMs?: number;
     startedAt?: string;
     environment?: NodeJS.ProcessEnv;
+    runner?: OwnedCommandRunner;
+    signal?: AbortSignal;
   },
 ): Promise<boolean>;

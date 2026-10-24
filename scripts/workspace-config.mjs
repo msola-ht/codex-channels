@@ -8,13 +8,16 @@ import { basename, isAbsolute, resolve } from "node:path";
 
 import {
   acknowledgeConfigEvents,
-  discardWorkspaceConfigEvents,
+  ConfigEventQueueLockReleaseError,
   enqueueWorkspaceAdded,
   readConfigEvents,
 } from "../runtime/config-event-queue.mjs";
 import {
+  GatewayConfigLockReleaseError,
+  GatewayConfigWriteCommittedError,
   readGatewayConfig,
   validateGatewayConfigStructureDocument,
+  withGatewayConfigLock,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { securePrivateFileSync } from "../runtime/private-file.mjs";
@@ -51,7 +54,18 @@ export function inspectWorkspaceConfig(document) {
   };
 }
 
-export function addWorkspaceToConfig({
+export function addWorkspaceToConfig(options) {
+  try {
+    return withGatewayConfigLock(options.configPath, () => addWorkspaceUnderConfigLock(options));
+  } catch (error) {
+    if (error instanceof GatewayConfigLockReleaseError) {
+      return { ...error.result, configCleanupPending: true };
+    }
+    throw error;
+  }
+}
+
+function addWorkspaceUnderConfigLock({
   configPath,
   cwd,
   id,
@@ -119,29 +133,38 @@ export function addWorkspaceToConfig({
     || previousDefault.name !== defaultWorkspace.name
     || previousDefault.cwd !== defaultWorkspace.cwd;
   let eventQueueCleanupPending = false;
+  let configCleanupPending = false;
+  const queueStatus = { eventQueueLockReleasePending: false };
   if (added || removedWorkspaces.length > 0 || defaultChanged) {
-    if (eventQueuePath && removedWorkspaces.length > 0 && !added) {
-      readConfigEvents(eventQueuePath);
-    }
+    const removedIds = new Set(removedWorkspaces.map((removed) => removed.id));
+    const obsoleteEventIds = eventQueuePath && removedIds.size > 0
+      ? completedQueueOperation(() => readConfigEvents(eventQueuePath), queueStatus)
+        .filter((event) => removedIds.has(event.workspace.id)).map((event) => event.id)
+      : [];
     const queuedEvent = added && eventQueuePath
-      ? enqueueWorkspaceAdded(eventQueuePath, workspace)
+      ? completedQueueOperation(() => enqueueWorkspaceAdded(eventQueuePath, workspace), queueStatus)
       : undefined;
     try {
       writeWorkspaceConfig(configPath, document, workspaces, defaultWorkspace.id);
     } catch (error) {
-      if (queuedEvent) {
-        try {
-          acknowledgeConfigEvents(eventQueuePath, [queuedEvent.id]);
-        } catch {
-          // 保留原始配置写入错误；无效事件不会在 Workspace 生效前被消费。
+      if (error instanceof GatewayConfigWriteCommittedError) {
+        configCleanupPending = true;
+      } else {
+        if (queuedEvent) {
+          try {
+            acknowledgeConfigEvents(eventQueuePath, [queuedEvent.id]);
+          } catch {
+            // 保留原始配置写入错误；无效事件不会在 Workspace 生效前被消费。
+          }
         }
+        throw error;
       }
-      throw error;
     }
     if (eventQueuePath && removedWorkspaces.length > 0) {
       eventQueueCleanupPending = cleanupCommittedWorkspaceEvents(
         eventQueuePath,
-        removedWorkspaces.map((removed) => removed.id),
+        obsoleteEventIds,
+        queueStatus,
       );
     }
   }
@@ -152,6 +175,8 @@ export function addWorkspaceToConfig({
     defaultChanged,
     removedWorkspaces,
     eventQueueCleanupPending,
+    configCleanupPending,
+    ...queueStatus,
   };
 }
 
@@ -160,46 +185,79 @@ export function removeWorkspaceFromConfig({
   selector,
   fallbackDefaultWorkspace,
   eventQueuePath,
+  expectedDocument,
 }) {
-  const document = readGatewayConfig(configPath);
-  const parsed = parseWorkspaceConfig(document);
-  securePrivateFileSync(configPath);
-  const selected = resolveWorkspaceSelector(parsed.workspaces, selector);
-  if (
-    selected.id === fallbackDefaultWorkspace.id
-    || resolve(selected.cwd) === resolve(fallbackDefaultWorkspace.cwd)
-  ) {
-    throw new Error("固定默认 Workspace 不能删除");
-  }
+  try {
+    return withGatewayConfigLock(configPath, () => {
+      const document = readGatewayConfig(configPath);
+      if (expectedDocument !== undefined && JSON.stringify(document) !== JSON.stringify(expectedDocument)) {
+        throw new Error("Workspace 配置在展示后发生变化，请重新选择；未移除任何注册");
+      }
+      const parsed = parseWorkspaceConfig(document);
+      securePrivateFileSync(configPath);
+      const selected = resolveWorkspaceSelector(parsed.workspaces, selector);
+      if (
+        selected.id === fallbackDefaultWorkspace.id
+        || resolve(selected.cwd) === resolve(fallbackDefaultWorkspace.cwd)
+      ) {
+        throw new Error("固定默认 Workspace 不能删除");
+      }
 
-  const workspaces = parsed.workspaces.filter(
-    (workspace) => workspace.id !== selected.id,
-  );
-  let defaultWorkspace = workspaces.find(
-    (workspace) => workspace.id === parsed.defaultWorkspaceId,
-  );
-  if (!defaultWorkspace) {
-    const fallback = ensureFallbackWorkspace(fallbackDefaultWorkspace);
-    defaultWorkspace = upsertFallbackWorkspace(workspaces, fallback);
+      const workspaces = parsed.workspaces.filter(
+        (workspace) => workspace.id !== selected.id,
+      );
+      let defaultWorkspace = workspaces.find(
+        (workspace) => workspace.id === parsed.defaultWorkspaceId,
+      );
+      if (!defaultWorkspace) {
+        const fallback = ensureFallbackWorkspace(fallbackDefaultWorkspace);
+        defaultWorkspace = upsertFallbackWorkspace(workspaces, fallback);
+      }
+      const queueStatus = { eventQueueLockReleasePending: false };
+      const obsoleteEventIds = eventQueuePath
+        ? completedQueueOperation(() => readConfigEvents(eventQueuePath), queueStatus)
+          .filter((event) => event.workspace.id === selected.id).map((event) => event.id)
+        : [];
+      let configCleanupPending = false;
+      try {
+        writeWorkspaceConfig(configPath, document, workspaces, defaultWorkspace.id);
+      } catch (error) {
+        if (!(error instanceof GatewayConfigWriteCommittedError)) throw error;
+        configCleanupPending = true;
+      }
+      const eventQueueCleanupPending = eventQueuePath
+        ? cleanupCommittedWorkspaceEvents(eventQueuePath, obsoleteEventIds, queueStatus)
+        : false;
+      return {
+        removedWorkspace: selected,
+        defaultWorkspace,
+        defaultChanged: defaultWorkspace.id !== parsed.defaultWorkspaceId,
+        eventQueueCleanupPending,
+        configCleanupPending,
+        ...queueStatus,
+      };
+    });
+  } catch (error) {
+    if (error instanceof GatewayConfigLockReleaseError) {
+      return { ...error.result, configCleanupPending: true };
+    }
+    throw error;
   }
-  if (eventQueuePath) {
-    readConfigEvents(eventQueuePath);
-  }
-  writeWorkspaceConfig(configPath, document, workspaces, defaultWorkspace.id);
-  const eventQueueCleanupPending = eventQueuePath
-    ? cleanupCommittedWorkspaceEvents(eventQueuePath, [selected.id])
-    : false;
-  return {
-    removedWorkspace: selected,
-    defaultWorkspace,
-    defaultChanged: defaultWorkspace.id !== parsed.defaultWorkspaceId,
-    eventQueueCleanupPending,
-  };
 }
 
-function cleanupCommittedWorkspaceEvents(eventQueuePath, workspaceIds) {
+function completedQueueOperation(operation, status) {
   try {
-    discardWorkspaceConfigEvents(eventQueuePath, workspaceIds);
+    return operation();
+  } catch (error) {
+    if (!(error instanceof ConfigEventQueueLockReleaseError)) throw error;
+    status.eventQueueLockReleasePending = true;
+    return error.result;
+  }
+}
+
+function cleanupCommittedWorkspaceEvents(eventQueuePath, eventIds, status) {
+  try {
+    completedQueueOperation(() => acknowledgeConfigEvents(eventQueuePath, eventIds), status);
     return false;
   } catch {
     // 配置已经提交，清理通知失败不能再报告为注册操作未成功。

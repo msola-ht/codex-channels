@@ -163,10 +163,10 @@ export class ModelTrafficDump {
 /** 单次 HTTP 交换或 WebSocket 连接；V2 索引按逻辑模型调用记录请求与终态响应。 */
 export class ModelTrafficExchange {
   callTiming: TrafficCallTiming | undefined;
-  private requestMetrics: Pick<ProviderProxyMetrics, "firstTokenMs" | "totalDurationMs" | "responseTimeMs" | "generationTiming"> & { outputTokens?: number | null } | undefined;
+  private requestMetrics: Pick<ProviderProxyMetrics, "operation" | "status" | "firstTokenMs" | "totalDurationMs" | "responseTimeMs" | "generationTiming"> & { outputTokens?: number | null } | undefined;
 
   /** 复用代理观测，不从可裁剪或缓冲后的 trace 反推首 Token 时间。 */
-  observeRequestMetrics(metrics: Pick<ProviderProxyMetrics, "firstTokenMs" | "totalDurationMs" | "traffic" | "responseTimeMs" | "generationTiming"> & { outputTokens?: number | null }): void {
+  observeRequestMetrics(metrics: Pick<ProviderProxyMetrics, "operation" | "status" | "firstTokenMs" | "totalDurationMs" | "traffic" | "responseTimeMs" | "generationTiming"> & { outputTokens?: number | null }): void {
     this.requestMetrics = metrics;
     const interaction = this.transport === "http"
       ? this.httpInteractionId : this.activeWebSocket?.id;
@@ -544,7 +544,10 @@ export class ModelTrafficExchange {
   ): void {
     if (this.transport !== "http" || this.responseRecorded) return;
     this.responseRecorded = true;
-    const terminal = this.sseTerminal.terminal;
+    const imageRequest = this.requestMetrics?.operation === "imageGeneration"
+      || this.requestMetrics?.operation === "imageEdit";
+    // 图片请求使用代理观察的 HTTP 结果，不按 Responses 事件重新解释正文或终态。
+    const terminal = imageRequest ? undefined : this.sseTerminal.terminal;
     let payload = { ...payloadOf(this.responsePayload.parts), truncated: this.responsePayload.truncated };
     if (terminal !== undefined) {
       const compacted = compactText(terminal.text, this.inputItems, this.itemMaxBytes);
@@ -554,7 +557,9 @@ export class ModelTrafficExchange {
     const terminalState = terminal === undefined
       ? undefined
       : status !== null && status >= 400 ? "failed" : responseStateOf(terminal.type);
-    const state = terminalState ?? forcedState ?? (this.responseIsSse
+    const imageState = imageRequest && this.requestMetrics?.status !== "unknown"
+      ? this.requestMetrics?.status : undefined;
+    const state = imageState ?? terminalState ?? forcedState ?? (this.responseIsSse
       ? "incomplete"
       : status !== null && status >= 200 && status < 400 ? "completed" : "failed");
     this.interactionSink(this.initialSession, {

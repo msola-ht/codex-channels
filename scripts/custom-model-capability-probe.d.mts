@@ -1,4 +1,4 @@
-export type CustomModelProbeCapability = "applyPatch" | "toolSearch";
+export type CustomModelProbeCapability = "applyPatch" | "toolSearch" | "webSearch";
 export type CustomModelProbeReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export interface CustomModelCapabilityCheck {
   capability: CustomModelProbeCapability;
@@ -17,7 +17,7 @@ export interface CustomModelCapabilityProbeInput {
   reasoningEffort: CustomModelProbeReasoningEffort;
   environment?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
-  /** 单项探测的总预算，含代理发现及正文读取；默认及上限 45000ms，每请求最多15000ms。 */
+  /** 单项探测总预算含代理发现及正文读取，默认及上限45000ms；原生搜索单请求共用总预算，其他请求最多15000ms。 */
   timeoutMs?: number;
 }
 export interface CustomModelCapabilityProbeResult {
@@ -29,5 +29,22 @@ export interface CustomModelCapabilityProbeResult {
   /** cancelled 时为 inconclusive；调用方必须拒绝应用取消结果。 */
   check: CustomModelCapabilityCheck;
 }
-/** 短非流式探测；不证明流式、上下文容量或并发能力，不执行返回的工具。 */
+/** 补丁/客户端检索为短非流式模拟；原生搜索为单次流式真实搜索，只有完成的结构化搜索调用才证明执行。 */
 export function probeCustomModelCapabilities(input: CustomModelCapabilityProbeInput): Promise<CustomModelCapabilityProbeResult>;
+export interface NativeModelWebSearchProbeInput extends Omit<CustomModelCapabilityProbeInput, "capability" | "reasoningEffort"> {
+  reasoningEffort: CustomModelProbeReasoningEffort | "enabled" | null;
+  /** 可信配置解析结果，禁止直接接受浏览器字段。 */
+  requestContext: {
+    clinePass?: boolean;
+    clineRequestProfile?: import("../runtime/chat-reasoning.mjs").ClinePassRequestProfile;
+    clineProviderOptions?: import("../runtime/cline-provider-options.mjs").ClineProviderOptions;
+    chatgpt?: boolean;
+    reasoningEfforts?: string[];
+    headers?: Record<string, string>;
+    sampling?: import("../runtime/model-catalog.mjs").SamplingParameters;
+  };
+}
+export function probeNativeWebSearch(input: NativeModelWebSearchProbeInput): Promise<Omit<CustomModelCapabilityProbeResult, "reasoningEffort" | "capability"> & {
+  capability: "webSearch";
+  reasoningEffort: NativeModelWebSearchProbeInput["reasoningEffort"];
+}>;

@@ -24,9 +24,9 @@ import {
   ReportedChildExitError,
   terminateChildProcess,
 } from "../runtime/process-lifecycle.mjs";
-import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
-import { parseCodexRemoteOptions } from "./codex-remote-options.mjs";
+import { codexRemoteDirectoryArgs, parseCodexRemoteOptions } from "./codex-remote-options.mjs";
 import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
@@ -113,7 +113,7 @@ async function runRemoteCli() {
     leaseProvider = selectedProvider;
     assertAggregateProviderArguments(passthrough);
   }
-  const configuredBinary = stringValue(codex.binary) || "codex";
+  const configuredBinary = effectiveCodexBinary(codex.binary ?? "codex", process.env, runtime.dataDir);
   const supervisorActive = selectedDefinition !== undefined || selectedProvider === aggregateProviderId
     || await inspectAppServerSupervisor(primarySocketPath) !== undefined;
   try {
@@ -126,8 +126,7 @@ async function runRemoteCli() {
     const invocation = resolveExecutableInvocation(configuredBinary, [
       "--remote",
       `unix://${socketPath}`,
-      "-C",
-      workdir,
+      ...codexRemoteDirectoryArgs(passthrough, workdir, workspaceId !== undefined || cwd !== undefined),
       ...(selectedDefinition
         ? ["--profile", selectedDefinition.profileName]
         : []),
@@ -223,7 +222,6 @@ async function aggregateModelArguments(socketPath, codexBinary, passthrough) {
       "-c", `model=${JSON.stringify(selectedModel.model)}`,
       ...(overrides.effort ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(selectedEffort)}`]),
       "-c", "service_tier=\"default\"",
-      "-c", "web_search=\"disabled\"",
     ];
   } finally {
     await client.close();
@@ -262,8 +260,4 @@ function aggregateModelOverrides(args) {
 
 function table(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value.trim() : "";
 }

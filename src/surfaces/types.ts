@@ -21,6 +21,7 @@ export interface SurfaceConfigurationChange {
     | "provider-settings-scheduled"
     | "provider-settings-restarting"
     | "provider-settings-applied"
+    | "provider-settings-restart-required"
     | "provider-settings-failed";
   changes: readonly ConfigChange[];
   addedWorkspaces: readonly (Workspace & { readonly listNumber: number })[];
@@ -28,10 +29,13 @@ export interface SurfaceConfigurationChange {
 }
 
 export interface SurfaceOutputPort {
+  /** Fix disposable live admission identities before routing waits; never change presentation lifecycle. */
+  admitLive?(event: OutputEvent): void;
   /** Apply live local lifecycle state synchronously; never await platform delivery. Not called on replay. */
   observe?(event: OutputEvent): void;
   retains?(event: OutputEvent): boolean;
-  handle(event: OutputEvent): Promise<void> | void;
+  /** Successful live admission also applies to enriched copies; handle still owns ordinary lifecycle observation. */
+  handle(event: OutputEvent, context?: { liveAdmitted: true }): Promise<void> | void;
   /** Settle actual transient operations (including intentional no-op); validate ownership before sending. */
   deliverSnapshot?(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void>;
   deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void>;

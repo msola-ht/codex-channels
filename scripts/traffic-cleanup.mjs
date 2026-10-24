@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import { lstatSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setImmediate } from "node:timers/promises";
 
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import {
   appServerSocketAcceptsWebSocket,
   inspectAppServerSupervisorState,
@@ -27,6 +29,7 @@ export async function runTrafficCleanup(
   {
     assertAppServersStopped = assertConfiguredAppServersStopped,
     environment = process.env,
+    expectedFingerprint,
     output = console,
     signal,
   } = {},
@@ -35,34 +38,71 @@ export async function runTrafficCleanup(
   const options = parseTrafficCleanupArgs(args);
   const located = locateOptionalUserConfig(environment);
   const directory = options.directory ?? join(located?.dataDir ?? userDataDir(environment), "traffic");
-  const preview = trafficCleanupPreview(directory);
+  const { preview } = trafficCleanupSnapshot(directory);
+  const fingerprint = preview.fingerprint;
+  const plan = { ...preview, fingerprint };
   renderPreview(preview, output);
-  if (preview.targets.length === 0) return preview;
+  const expected = expectedFingerprint ?? options.expectedFingerprint;
+  if (expected !== undefined && expected !== fingerprint) {
+    throw new Error("转储范围在预览后发生变化，请重新预览并确认；未删除任何文件");
+  }
+  if (preview.targets.length === 0) return plan;
   if (!options.confirm) {
     output.log("未删除。停止全部 App Server 与 Relay 后，加 --confirm 再执行。");
-    return preview;
+    return plan;
   }
   await assertAppServersStopped(environment, directory);
   signal?.throwIfAborted();
-  const confirmed = trafficCleanupPreview(directory);
+  const { preview: confirmed, identity: current } = trafficCleanupSnapshot(directory);
+  if (preview.fingerprint !== confirmed.fingerprint) {
+    throw new Error("转储范围在预览后发生变化，请重新预览并确认；未删除任何文件");
+  }
   let deleted = 0;
-  for (const target of confirmed.targets) {
+  for (const [index, target] of confirmed.targets.entries()) {
     await setImmediate();
     if (signal?.aborted) {
       output.log(`清理已中止，已删除 ${deleted}/${confirmed.targets.length} 个 V2 session。`);
       signal.throwIfAborted();
     }
+    if (JSON.stringify(directoryIdentity(directory)) !== JSON.stringify(current.root)
+      || JSON.stringify(targetIdentity(target)) !== JSON.stringify(current.targets[index])) {
+      throw new Error(`转储对象在删除前发生变化，已停止；已删除 ${deleted}/${confirmed.targets.length} 个 V2 session`);
+    }
     rmSync(target, { force: true, recursive: true });
+    // Removing our own child changes the root directory's timestamps, not its identity.
     deleted++;
   }
   output.log(`已删除 ${confirmed.v2Sessions} 个 V2 session（${formatBytes(confirmed.bytes)}）。`);
-  return confirmed;
+  return { ...confirmed, fingerprint };
+}
+
+function directoryIdentity(path) {
+  const metadata = lstatSync(path);
+  if (!metadata.isDirectory()) throw new Error("转储清理目录类型无效");
+  return { dev: metadata.dev, ino: metadata.ino };
+}
+
+function targetIdentity(path) {
+  const directory = directoryIdentity(path);
+  const metadata = lstatSync(join(path, "manifest.json"));
+  if (!metadata.isFile()) throw new Error("转储清理 manifest 类型无效");
+  return { path, directory, dev: metadata.dev, ino: metadata.ino, size: metadata.size,
+    mtimeMs: metadata.mtimeMs, ctimeMs: metadata.ctimeMs };
+}
+
+function cleanupIdentity(preview) {
+  return { root: directoryIdentity(preview.directory), resources: preview.resources, bytes: preview.bytes,
+    targets: preview.targets.map(targetIdentity) };
 }
 
 export function trafficCleanupPreview(directory) {
+  return trafficCleanupSnapshot(directory).preview;
+}
+
+function trafficCleanupSnapshot(directory) {
   const catalog = dumpCatalog(directory);
   const targets = catalog.files;
-  return {
+  const preview = {
     bytes: targets.reduce((total, target) => total + pathSize(target), 0),
     directory,
     labels: catalog.labels.length,
@@ -77,6 +117,10 @@ export function trafficCleanupPreview(directory) {
     targets,
     v2Sessions: catalog.files.length,
   };
+  // Empty previews also bind the selected directory, never newly added data.
+  const identity = targets.length === 0 ? { directory, targets: [] } : cleanupIdentity(preview);
+  preview.fingerprint = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+  return { preview, identity };
 }
 
 export async function assertConfiguredAppServersStopped(environment, directory) {
@@ -92,15 +136,18 @@ export async function assertConfiguredAppServersStopped(environment, directory) 
   }
   const relay = await queryModelRelayControl(modelRelayPaths(located.configPath).control, "status");
   if (relay.result !== "not_running") throw new Error("清理转储前必须停止 Relay 并确认进程退出：codexc stop relay");
-  const managed = inspectManagedServiceStatus({ environment, target: "model-relay" });
-  if (managed.services.some(service => service.running || !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state))) {
-    throw new Error("Relay 服务仍在运行或状态未确认；请先停止 Relay 再清理转储");
+  for (const target of ["model-relay", "app-server"]) {
+    const managed = inspectManagedServiceStatus({ environment: { ...environment, CODEX_CONNECT_HOME: located.dataDir }, target });
+    if (managed.services.length === 0 || managed.services.some(service => service.running
+      || !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state))) {
+      throw new Error(`${target} 服务仍在运行或状态未确认；请先停止服务再清理转储`);
+    }
   }
   const document = readGatewayConfig(located.configPath);
   const runtime = resolveAppServerRuntime(document, located.dataDir, environment);
   const supervisor = await inspectAppServerSupervisorState(runtime.primarySocketPath);
   const occupied = await Promise.all(runtime.socketPaths.map((socketPath) =>
-    appServerSocketAcceptsWebSocket(socketPath, { ...environment, CODEX_BINARY: document.codex?.binary ?? environment.CODEX_BINARY ?? "codex" })));
+    appServerSocketAcceptsWebSocket(socketPath, { ...environment, CODEX_BINARY: effectiveCodexBinary(document.codex?.binary ?? "codex", environment, located.dataDir) })));
   if (supervisor.status !== "missing" || occupied.some(Boolean)) {
     throw new Error("清理转储前必须先停止全部 App Server：codexc stop appserver");
   }

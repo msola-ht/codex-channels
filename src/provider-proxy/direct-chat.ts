@@ -23,7 +23,7 @@ export interface DirectChatCall {
   observer: DirectChatResponse;
   unwrapClpEnvelope: boolean;
   recheck(): void;
-  submitted(userAgent: string | null): void;
+  submitted(userAgent: string | null, requestBytes: number, upstreamUrl: string | null): void;
   headers(status: number): void;
   content(): void;
   emit(value: Record<string, unknown> | undefined, terminal: boolean): Promise<void>;
@@ -49,9 +49,9 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
       ...(call.clientHeaders ? { clientHeaders: call.clientHeaders } : {}),
       signal: call.signal, recheck: () => call.recheck(),
       transformed: operation => call.capture?.transformed?.(operation),
-      submitted: (userAgent, headers, path) => {
+      submitted: (userAgent, headers, path, requestBytes, upstreamUrl) => {
         submittedAt = performance.now();
-        call.submitted(userAgent);
+        call.submitted(userAgent, requestBytes, upstreamUrl);
         call.capture?.submitted(call.request, headers, path);
       },
     }, async incoming => {
@@ -63,7 +63,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
           diagnostics.push(value); call.capture?.value(value, stream);
         },
         invalid: count => call.capture?.invalid(count),
-      }, call.signal);
+      }, call.signal, call.request.tools);
       if (call.request.stream) errorStage = "stream";
       if (call.request.stream) {
         for await (const { data, receivedAt: at } of readModelFrames(incoming, call.signal, {
@@ -77,7 +77,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
           const value: unknown = parseDirectModelJson(data, call.capture);
           diagnostics.push(value);
           call.capture?.value(value, true);
-          const error = chatStreamError(value);
+          const error = chatStreamError(value, call.request.tools);
           if (error) { responseTimeMs ??= at - submittedAt!; throw error; }
           call.observer.push(value, true);
           responseTimeMs ??= at - submittedAt!;
@@ -91,12 +91,12 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
       const parsed: unknown = parseDirectModelJson(body, call.capture);
       const receivedAt = performance.now();
       call.capture?.value(parsed, false);
-      const envelopeError = chatStreamError(parsed);
+      const envelopeError = chatStreamError(parsed, call.request.tools);
       if (envelopeError) { responseTimeMs ??= receivedAt - submittedAt!; diagnostics.push(parsed); throw envelopeError; }
       const value = call.unwrapClpEnvelope ? directChatJsonPayload(parsed, () => { responseTimeMs ??= receivedAt - submittedAt!; }) : parsed;
       if (value !== parsed) call.capture?.transformed?.("json_unwrapped");
       diagnostics.push(value);
-      const error = chatStreamError(value);
+      const error = chatStreamError(value, call.request.tools);
       if (error) { responseTimeMs ??= receivedAt - submittedAt!; throw error; }
       call.observer.push(value, false);
       responseTimeMs ??= receivedAt - submittedAt!;

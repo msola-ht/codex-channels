@@ -443,7 +443,7 @@ async function runController(plan, action, environment, options, isolateSignals 
   const child = spawn(plan.shell, args, {
     ...controllerOptions,
     // Finish the current service-manager operation before cancellation recovery.
-    detached: isolateSignals,
+    detached: isolateSignals && environment.CODEX_CONNECT_MANAGEMENT_TASK !== "1",
     windowsHide: true,
   });
   const readers = [];
@@ -564,13 +564,14 @@ function renderSystemdTemplate(template, context) {
     CODEX_BINARY_ENV: context.codexBinary,
     SYSTEMD_PATH: context.executablePath,
   };
-  let rendered = replaceValues(
-    template,
-    argumentValues,
-    (value) => `"${systemdEscape(value)}"`,
-  );
-  rendered = replaceValues(rendered, directiveValues, systemdEscape);
-  return replaceValues(rendered, environmentValues, systemdEscape);
+  return replaceValues(template, {
+    ...argumentValues,
+    ...directiveValues,
+    ...environmentValues,
+    CODEX_HOME_ENVIRONMENT: context.codexHome
+      ? `Environment="CODEX_HOME=${systemdEscape(context.codexHome)}"` : "",
+  }, (value, key) => key === "CODEX_HOME_ENVIRONMENT" ? value
+    : Object.hasOwn(argumentValues, key) ? `"${systemdEscape(value)}"` : systemdEscape(value));
 }
 
 function renderLaunchdTemplate(template, context) {
@@ -586,15 +587,14 @@ function renderLaunchdTemplate(template, context) {
     CODEX_BINARY: context.codexBinary,
     LAUNCHD_PATH: context.executablePath,
     STOP_TIMEOUT_SECONDS: String(serviceStopTimeoutSeconds),
-  }, xmlEscape);
+    CODEX_HOME_ENVIRONMENT: context.codexHome
+      ? `<key>CODEX_HOME</key>\n    <string>${xmlEscape(context.codexHome)}</string>` : "",
+  }, (value, key) => key === "CODEX_HOME_ENVIRONMENT" ? value : xmlEscape(value));
 }
 
 function replaceValues(template, values, escape) {
-  return Object.entries(values).reduce(
-    (content, [key, value]) =>
-      content.replaceAll(`__${key}__`, escape(value)),
-    template,
-  );
+  return template.replace(/__([A-Z_]+)__/gu, (placeholder, key) =>
+    Object.hasOwn(values, key) ? escape(values[key], key) : placeholder);
 }
 
 function systemdEscape(value) {

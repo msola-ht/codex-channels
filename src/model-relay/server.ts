@@ -2,11 +2,12 @@ import { parseRelayModelId, relayModelId } from "../../runtime/model-relay-model
 import { isRelayListenHost } from "../../runtime/model-relay-listen-host.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { randomUUID } from "node:crypto";
+import { RequestActivityObserver } from "../../runtime/request-activity.mjs";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, type RelayModelCapability, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
-import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
+import { applyClinePassProviderOptions, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 import { ModelRequestTimeoutError } from "../provider-proxy/index.js";
 import type { SamplingParameters } from "../model-api/index.js";
@@ -131,6 +132,7 @@ export class ModelRelayServer {
     let delivering = false;
     let httpStatus: number | undefined;
     let userAgent: string | null = null;
+    let upstreamUrl: string | null = null;
     let errorCode: string | undefined;
     let timeoutStage: ModelRequestTimeoutError["stage"] | undefined;
     let requestModel = "";
@@ -138,10 +140,12 @@ export class ModelRelayServer {
     let outboundReasoningEffort: string | null = null;
     let provider: string | null = null;
     let bodyBytes = 0;
+    let outboundBytes = 0;
     let stream = false;
     let phase: "input" | "queue" | "prepare" | "upstream" | "delivery" = "input";
     const protocol = request.url === "/v1/responses" ? "responses" : "chat";
     const observer = protocol === "responses" ? new DirectResponsesObserver() : new DirectChatResponse();
+    const activityObserver = new RequestActivityObserver();
     const receivedAt = performance.now();
     const relayRequestId = randomUUID();
     response.setHeader("x-relay-request-id", relayRequestId);
@@ -166,7 +170,6 @@ export class ModelRelayServer {
       const signal = AbortSignal.any([controller.signal, lease.signal]);
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new RelayAdmissionError(415, "unsupported_encoding");
       let body: DirectChatRequest | DirectResponsesRequest | undefined;
-      let clineRoutingChanged = false;
       if (!models) {
         if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") throw new RelayAdmissionError(415, "unsupported_media_type");
         if (Number(request.headers["content-length"] ?? 0) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
@@ -228,13 +231,11 @@ export class ModelRelayServer {
         ? lease.caller.modelReasoning[requestModel]! : lease.caller.reasoning ?? "passthrough";
       body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, provider!, reasoningPolicy)
         : applyChatReasoningPolicy(body as DirectChatRequest, provider!, reasoningPolicy, prepared.modelCapabilities?.find(model => model.id === body!.model));
-      if (protocol === "chat" && provider!.startsWith("clp-") && body.model === "cline-pass/deepseek-v4.1-flash") {
-        const routed = pinClinePassRouting(body);
-        clineRoutingChanged = routed !== body;
-        body = routed;
+      if (protocol === "chat" && provider!.startsWith("clp-")) {
+        const capability = prepared.modelCapabilities?.find(model => model.id === body!.model);
+        body = applyClinePassProviderOptions(body, capability?.cline_provider_options);
       }
       if (Buffer.byteLength(JSON.stringify(body)) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
-      outboundReasoningEffort = requestReasoningEffort(body, protocol);
       // Preparation includes optional capture initialization and the material/proxy resolver.
       phase = "prepare";
       const pendingCapture = Promise.resolve(this.options.capture?.(provider!, signal, protocol));
@@ -245,16 +246,24 @@ export class ModelRelayServer {
       signal.throwIfAborted(); clearTimeout(preparationTimer);
       phase = "upstream"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
       capture?.inbound?.(inbound, request.headers);
-      if (clineRoutingChanged) capture?.transformed?.("provider_routing_pinned");
       if (inbound && typeof inbound === "object" && !("stream" in inbound)) capture?.transformed?.("stream_defaulted");
       if (protocol === "responses" && inbound && typeof inbound === "object" && !("store" in inbound)) capture?.transformed?.("store_defaulted");
       inbound = undefined;
       const call = { timing: (value: typeof outputTiming) => { outputTiming = value; }, diagnostics: (summary: ModelRequestDiagnostics) => { diagnostics = summary; }, ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
         recheck: () => { lease!.check(requestModel); prepared.recheck(); },
-        submitted: (ua: string | null) => { userAgent = ua; started = performance.now(); submittedAt = Date.now(); },
+        submitted: (ua: string | null, requestBytes: number, address: string | null) => {
+          outboundReasoningEffort = requestReasoningEffort(body, protocol);
+          activityObserver.request(body, protocol);
+          userAgent = ua;
+          upstreamUrl = address;
+          outboundBytes += requestBytes;
+          started = performance.now();
+          submittedAt = Date.now();
+        },
         headers: (status: number) => { httpStatus = status; },
         content: () => { firstTokenMs ??= performance.now() - started!; },
         emit: async (value: Record<string, unknown> | undefined, terminal: boolean, rawFrame?: string) => {
+          if (value !== undefined) activityObserver.response(value, protocol);
           delivering = true;
           if (terminal) { completedAt = performance.now(); phase = "delivery"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.(); }
           const deliveryController = new AbortController();
@@ -352,6 +361,7 @@ export class ModelRelayServer {
           ...(outboundReasoningEffort === null ? {} : { reasoningEffort: outboundReasoningEffort }),
           status: modelStatus, deliveryStatus,
           requestStartedAtMs: submittedAt!, responseCompletedAtMs: submittedAt! + (ended - started), totalDurationMs: ended - started,
+          requestBytes: outboundBytes, upstreamUrl, activity: activityObserver.snapshot(),
           ...observer.usage, ...outputTiming, ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
           ...(observer.responseModel === undefined ? {} : { responseModel: observer.responseModel }),
           ...(httpStatus === undefined ? {} : { httpStatus }), ...(errorCode === undefined ? {} : { errorCode }) };

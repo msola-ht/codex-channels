@@ -1,8 +1,8 @@
 import type { AccountRefreshAttempts } from "@/lib/account-refresh-state"
-import { navItems, navGroups, decodeThreadPath } from "@/lib/navigation"
+import { navItems, navGroups, decodeThreadPath, providerPlatform, providerPlatformLabel, globalSettingsSection } from "@/lib/navigation"
 import { translateApiError } from "@/lib/i18n/translate"
 import { lazy, Suspense, useEffect, useState } from "react"
-import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
+import { createHashRouter, RouterProvider, Link, Route, Routes, useLocation } from "react-router"
 
 import { AuthGate } from "@/components/layout/auth-gate"
 import { PageErrorBoundary, PageRecovery } from "@/components/layout/page-recovery"
@@ -28,7 +28,6 @@ import { useTranslation } from "@/hooks/use-translation"
 import { ServerTimeContext, useServerTime } from "@/hooks/use-server-time"
 import { useApi, useApiPolling } from "@/hooks/use-api"
 import { ModelTrafficSettingsContext } from "@/hooks/use-model-traffic-settings"
-import { ModelDisplayRefreshContext, useModelDisplaySettings } from "@/hooks/use-model-display-settings"
 import { fetchModelTrafficSettings } from "@/lib/api"
 import type { Translate } from "@/lib/i18n/messages"
 import { observeServerClock, type ServerClockSnapshot } from "@/lib/server-time"
@@ -60,9 +59,8 @@ const TrafficPage = lazy(() =>
   import("@/pages/traffic-page").then((module) => ({ default: module.TrafficPage })))
 
 const ProvidersPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ProvidersPage })))
-const ModelAccountsPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelAccountsPage })))
 const ModelConfigurationPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelConfigurationPage })))
-const ModelContextPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelContextPage })))
+const GlobalSettingsPage = lazy(() => import("@/pages/global-settings-page").then(module => ({ default: module.GlobalSettingsPage })))
 
 const NetworkSettingsPage = lazy(() => import("@/pages/settings-page").then(module => ({ default: module.NetworkSettingsPage })))
 const DataSettingsPage = lazy(() => import("@/pages/settings-page").then(module => ({ default: module.DataSettingsPage })))
@@ -82,6 +80,22 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
   const { search } = useLocation()
   const { t } = useTranslation()
   const params = new URLSearchParams(search)
+  if (pathname === "/settings/global" && params.has("section")) {
+    const section = globalSettingsSection(params.get("section"))
+    return <>
+      <BreadcrumbItem className="hidden md:block"><BreadcrumbLink render={<Link to="/settings/global" />}>{t("globalSettings.title")}</BreadcrumbLink></BreadcrumbItem>
+      <BreadcrumbSeparator className="hidden md:block" />
+      <BreadcrumbItem><BreadcrumbPage>{t(section?.labelKey ?? "globalSettings.unknownSection")}</BreadcrumbPage></BreadcrumbItem>
+    </>
+  }
+  if (pathname === "/models/configuration" || pathname === "/models/providers") {
+    const scope = pathname === "/models/configuration" ? params.get("provider") || t("providerDirectory.allModelsLabel") : providerPlatformLabel(providerPlatform(params.get("platform")), t)
+    return <>
+      <BreadcrumbItem className="hidden md:block"><span>{t("modelManagement.title")}</span></BreadcrumbItem>
+      <BreadcrumbSeparator className="hidden md:block" />
+      <BreadcrumbItem className="min-w-0"><BreadcrumbPage className="min-w-0"><TruncatedText text={t("providerDirectory.scopedPage", { page: pageTitle(pathname, t), scope })} /></BreadcrumbPage></BreadcrumbItem>
+    </>
+  }
   if (pathname === "/traffic" && params.has("id")) {
     for (const key of ["id", "exchangeLabel", "exchangeSession", "traceOffset"]) params.delete(key)
     return <>
@@ -139,8 +153,6 @@ function Layout() {
   const { t, language, setLanguage } = useTranslation()
   const [consoleRange, setConsoleRange] = useState<MetricsRangeQuery>({ range: "30d" })
   const time = useServerTime()
-  const modelDisplay = useModelDisplaySettings()
-  useApiPolling(modelDisplay.refetch, modelDisplay.loading, true, 10_000)
   const settings = useApi(fetchModelTrafficSettings, [], { retainDataOnError: false })
   useApiPolling(settings.refetch, settings.loading, true, 10_000)
 
@@ -157,7 +169,6 @@ function Layout() {
   return (
     <ServerTimeContext.Provider value={time.data}>
       <ModelTrafficSettingsContext.Provider value={settings}>
-      <ModelDisplayRefreshContext.Provider value={modelDisplay.refetch}>
       <AppSidebarProvider>
         <AppSidebar />
         <SidebarInset className="min-w-0">
@@ -185,7 +196,6 @@ function Layout() {
               <ServerClock snapshot={time.data} syncFailed={time.error !== null} />
             </p>
             <PageErrorBoundary key={pathname}>
-            {modelDisplay.error && <ErrorBanner error={translateApiError(t, modelDisplay.error, modelDisplay.errorCode)} />}
             <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">{t("common.loading")}</div>}>
               {invalidThreadPath ? <PageRecovery invalidAddress /> :
               <Routes>
@@ -202,12 +212,11 @@ function Layout() {
                 <Route path="/relay/queue" element={<RelayQueuePage />} />
                 <Route path="/delivery" element={<DeliveryPage />} />
                 <Route path="/models/providers" element={<ProvidersPage />} />
-                <Route path="/models/accounts" element={<ModelAccountsPage />} />
                 <Route path="/models/configuration" element={<ModelConfigurationPage />} />
-                <Route path="/models/context" element={<ModelContextPage />} />
                 <Route path="/channels" element={<ChannelsPage />} />
                 <Route path="/channels/display" element={<ChannelDisplayPage />} />
                 <Route path="/settings" element={<SettingsPage key="general" />} />
+                <Route path="/settings/global" element={<GlobalSettingsPage />} />
                 <Route path="/settings/permissions" element={<SettingsPage key="permissions" section="permissions" />} />
                 <Route path="/settings/network" element={<NetworkSettingsPage />} />
                 <Route path="/settings/data" element={<DataSettingsPage />} />
@@ -219,7 +228,6 @@ function Layout() {
           </div>
         </SidebarInset>
       </AppSidebarProvider>
-      </ModelDisplayRefreshContext.Provider>
       </ModelTrafficSettingsContext.Provider>
     </ServerTimeContext.Provider>
   )
@@ -230,15 +238,21 @@ function AppToaster() {
   return <Toaster timeout={3000} closeLabel={t("common.close")} label={t("common.notifications")} />
 }
 
+let applicationRouter: ReturnType<typeof createHashRouter> | undefined
+function AppRouter() {
+  // main.tsx removes query tokens before the first render. Initialize history
+  // here so the router cannot retain the URL from before that cleanup.
+  applicationRouter ??= createHashRouter([{ path: "*", element: <Layout />, errorElement: <PageRecovery /> }])
+  return <RouterProvider router={applicationRouter} />
+}
+
 export default function App({ initialTokenStorageFailed = false }: { initialTokenStorageFailed?: boolean }) {
   return (
     <TooltipProvider delay={400} timeout={0}>
       <LanguageProvider>
         <AppToaster />
         <AuthGate initialTokenStorageFailed={initialTokenStorageFailed}>
-          <HashRouter>
-            <Layout />
-          </HashRouter>
+          <AppRouter />
         </AuthGate>
       </LanguageProvider>
     </TooltipProvider>

@@ -31,7 +31,7 @@ export interface CreateWeixinDoctorOptions {
   accountId: string;
   credentialStore: Pick<WeixinCredentialStore, "get">;
   replyContextPersistence: Pick<WeixinReplyContextPersistence, "get">;
-  cursorStore: Pick<WeixinUpdatesCursorStore, "get">;
+  cursorStore: Pick<WeixinUpdatesCursorStore, "inspect">;
   pollingHealth: { snapshot(): WeixinPollingHealthSnapshot };
 }
 
@@ -49,7 +49,7 @@ export function createWeixinDoctor(
       const [credential, replyContext, cursor] = await Promise.all([
         inspectRecord(() => options.credentialStore.get(options.accountId)),
         inspectRecord(() => options.replyContextPersistence.get(target)),
-        inspectRecord(() => options.cursorStore.get(options.accountId)),
+        inspectRecord(() => options.cursorStore.inspect(options.accountId)),
       ]);
       return {
         credential,

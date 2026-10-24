@@ -9,10 +9,11 @@ export class RelayMetricsComposition {
   private desired = false;
   private closed = false;
   private task: Promise<void> | undefined;
+  private closeTask: Promise<void> | undefined;
   constructor(private readonly options: {
     path: string;
     writer: ModelRequestMetricsWriter;
-    authorize: ((sample: RelayMetric, signal: AbortSignal) => RelayMetricRejection | undefined | Promise<RelayMetricRejection | undefined>) & { close?(): Promise<void> };
+    authorize: ((sample: RelayMetric, signal: AbortSignal) => RelayMetricRejection | undefined | Promise<RelayMetricRejection | undefined>) & { prepare(): Promise<void>; close(): Promise<void> };
   }) {}
 
   apply(enabled: boolean): Promise<void> {
@@ -22,24 +23,44 @@ export class RelayMetricsComposition {
     if (!this.task) {
       this.task = this.reconcile().finally(() => { this.task = undefined; });
     }
-    return this.task;
+    return this.task.then(() => {
+      // An apply may arrive after reconcile settles but before its finally runs.
+      if (!this.closed && Boolean(this.server) !== this.desired) return this.apply(this.desired);
+    });
   }
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.closed = true; this.desired = false;
-    const failures: unknown[] = [];
-    try { await this.task; } catch (error) { failures.push(error); }
     this.serverReady = false;
-    try { await this.server?.close(); this.server = undefined; } catch (error) { failures.push(error); }
-    try { await this.options.authorize.close?.(); } catch (error) { failures.push(error); }
-    if (failures.length > 0) throw new AggregateError(failures, "Relay 指标组件未完全关闭");
+    if (this.closeTask) return this.closeTask;
+    const failures: unknown[] = [];
+    // Cancel the owned reader before waiting for startup, including Worker/ACL initialization.
+    const authorizationClose = Promise.resolve().then(() => this.options.authorize.close()).catch(error => { failures.push(error); });
+    this.closeTask = (async () => {
+      try { await this.task; } catch (error) { failures.push(error); }
+      try { await this.server?.close(); this.server = undefined; } catch (error) { failures.push(error); }
+      await authorizationClose;
+      if (failures.length > 0) throw new AggregateError(failures, "Relay 指标组件未完全关闭");
+    })().finally(() => { this.closeTask = undefined; });
+    return this.closeTask;
   }
   private async reconcile(): Promise<void> {
-    while (Boolean(this.server) !== this.desired) {
+    while (!this.closed && Boolean(this.server) !== this.desired) {
       if (!this.desired) { this.serverReady = false; await this.server?.close(); this.server = undefined; }
       else {
+        try { await this.options.authorize.prepare(); }
+        catch (error) { if (this.closed) return; throw error; }
+        if (this.closed || !this.desired) continue;
         const server = new RelayMetricsServer(this.options.path, (sample, signal) => this.receive(sample, signal));
         this.server = server;
-        try { await server.start(); this.serverReady = true; } catch (error) {
+        try {
+          await server.start();
+          // Stop or a newer apply may arrive while the private listener is starting.
+          if (this.closed || !this.desired) {
+            await server.close(); this.server = undefined;
+            continue;
+          }
+          this.serverReady = true;
+        } catch (error) {
           await server.close();
           this.server = undefined;
           throw error;

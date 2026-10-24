@@ -36,6 +36,8 @@ import {
 } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
+import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
+import { escapeFeishuMarkdown } from "./message-content.js";
 import {
   formatRuntimeAccountUpdate,
   formatRuntimeMcpOAuthCompleted,
@@ -54,6 +56,7 @@ import { formatFeishuCommandMarkdown } from "./command-format.js";
 export function renderFeishuCommandResult(
   result: ConversationCommandResult,
 ): string | null {
+  if (result.kind === "status") return formatConversationStatus(result.status, escapeFeishuMarkdown);
   const rendered = renderConversationCommandResult(result, formatFeishuCommandMarkdown);
   if (rendered === null || result.kind !== "artifacts") {
     return rendered;
@@ -93,6 +96,8 @@ export function renderFeishuStartupNotification(
     | "modelProvider"
     | "effort"
     | "serviceTier"
+    | "serviceTierKnown"
+    | "effectiveServiceTier"
     | "modelPending"
     | "effortPending"
     | "fastModePending"
@@ -284,5 +289,5 @@ function threadStatusLabel(status: string): string {
     ? "运行中"
     : status === "idle"
       ? "空闲"
-      : "未知";
+      : status === "systemError" ? "发生错误" : status === "notLoaded" ? "会话未加载" : "未知";
 }

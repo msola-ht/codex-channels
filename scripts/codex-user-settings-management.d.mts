@@ -2,6 +2,15 @@ import type { CodexUserConfigClient } from "./codex-user-config.mjs";
 import type { CodexUserConfigValue } from "./codex-user-config.mjs";
 import type { CodexToolSettings } from "./codex-tool-settings.mjs";
 
+export interface CodexPermissionValues {
+  sandboxMode: "read-only" | "workspace-write";
+  approvalPolicy: "on-request" | "never";
+  networkAccess: boolean;
+}
+export type CodexPermissionChange = { kind: "permissions" } & Partial<CodexPermissionValues> & (
+  Pick<CodexPermissionValues, "sandboxMode"> | Pick<CodexPermissionValues, "approvalPolicy"> | Pick<CodexPermissionValues, "networkAccess">
+);
+
 export type CodexUserSettingInput =
   | { kind: "tool-access"; path: string[]; value: CodexUserConfigValue }
   | {
@@ -29,28 +38,26 @@ export type CodexUserSettingInput =
   | {
       kind: "model-compact";
       contextWindow: number | null;
-      autoCompactPercent: number | null;
+      autoCompactTokenLimit: number | null;
     }
   | {
       kind: "preferences";
-      reasoningSummary: "auto" | "concise" | "detailed" | "none";
-      planModeReasoningEffort: string;
-      verbosity: "low" | "medium" | "high";
-      checkForUpdateOnStartup: boolean;
-      historyPersistence: "save-all" | "none";
+      reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null;
+      planModeReasoningEffort?: string | null;
+      verbosity?: "low" | "medium" | "high" | null;
+      checkForUpdateOnStartup?: boolean | null;
+      historyPersistence?: "save-all" | "none" | null;
     }
-  | {
-      kind: "permissions";
-      sandboxMode: "read-only" | "workspace-write";
-      approvalPolicy: "on-request" | "never";
-      networkAccess: boolean;
-    };
+  | CodexPermissionChange;
 
 export interface CodexUserSettingsState {
   toolSettings: CodexToolSettings;
   version: string;
   provider: string;
   defaultsEditable: boolean;
+  modelsAvailable: boolean;
+  accelerationAvailable: boolean;
+  contextEditable: boolean;
   approvalsReviewer: {
     value: "user" | "auto_review" | null;
     editable: boolean;
@@ -65,14 +72,16 @@ export interface CodexUserSettingsState {
     isDefault: boolean;
   }>;
   defaults: {
+    configuredModel: string | null;
     model: string | null;
     reasoningEffort: string | null;
     serviceTier: string | null;
     fastEnabled: boolean;
     ultrafastEnabled: boolean;
     webSearch: "live" | "indexed" | "cached" | "disabled" | null;
-    updatePlanEnabled: boolean;
-    autoRecapEnabled: boolean;
+    updatePlanEnabled: boolean | null;
+    autoRecapEnabled: boolean | null;
+    unsupportedFields: string[];
     reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null;
     planModeReasoningEffort?: string | null;
     verbosity?: "low" | "medium" | "high" | null;
@@ -82,13 +91,14 @@ export interface CodexUserSettingsState {
   permissions: {
     editable: boolean;
     defaultPermissions: string | null;
+    unsupportedFields: Array<keyof CodexPermissionValues>;
     sandboxMode: "read-only" | "workspace-write" | null;
     approvalPolicy: "on-request" | "never" | null;
     networkAccess: boolean | null;
   };
   compact: {
     contextWindow: number | null;
-    autoCompactPercent: number | null;
+    autoCompactTokenLimit: number | null;
   };
 }
 
@@ -106,22 +116,29 @@ export interface CodexUserSettingsDependencies {
 }
 
 export type CodexUserSettingActivation =
+  | "none"
   | "next-thread"
   | "next-tui"
   | "next-thread-and-tui";
 
 export function loadCodexUserSettings(
-  options?: CodexUserSettingsDependencies,
+  options?: CodexUserSettingsDependencies & { signal?: AbortSignal },
 ): Promise<CodexUserSettingsState>;
 
 export function updateCodexUserSetting(
   input: CodexUserSettingInput,
-  options: CodexUserSettingsDependencies & { expectedVersion: string },
+  options: CodexUserSettingsDependencies & { expectedVersion: string; expectedTargetFingerprint?: string },
 ): Promise<{
   kind: CodexUserSettingInput["kind"];
   previousVersion: string;
   value: Record<string, unknown>;
+  action: "updated" | "unchanged";
+  willChange: boolean;
   activation: CodexUserSettingActivation;
+  revision: string | null;
+  consistency: "confirmed" | "unknown";
+  writeStatus: "ok" | "okOverridden" | null;
+  targetFingerprint?: string;
 }>;
 
 export function previewCodexUserSetting(
@@ -131,5 +148,11 @@ export function previewCodexUserSetting(
   kind: CodexUserSettingInput["kind"];
   previousVersion: string;
   value: Record<string, unknown>;
+  action: "updated" | "unchanged";
+  willChange: boolean;
   activation: CodexUserSettingActivation;
+  revision: string | null;
+  consistency: "confirmed" | "unknown";
+  writeStatus: "ok" | "okOverridden" | null;
+  targetFingerprint?: string;
 }>;

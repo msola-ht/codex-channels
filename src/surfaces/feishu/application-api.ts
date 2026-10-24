@@ -72,8 +72,8 @@ export interface FeishuApplicationSnapshot {
 }
 
 export interface FeishuApplicationApi {
-  inspect(signal?: AbortSignal): Promise<FeishuApplicationSnapshot>;
-  configureApplication(signal?: AbortSignal): Promise<{
+  inspect(signal?: AbortSignal, assertAuthorized?: () => void): Promise<FeishuApplicationSnapshot>;
+  configureApplication(signal?: AbortSignal, assertAuthorized?: () => void): Promise<{
     changed: boolean;
     versionId?: string;
   }>;
@@ -108,6 +108,14 @@ export interface FeishuApplicationAuthorizationDiagnostic {
   apiCode?: number;
 }
 
+type ConfigurationOperation = "patchAbility" | "patchConfig" | "publish";
+
+interface ConfigurationProgress {
+  completedOperations: readonly ConfigurationOperation[];
+  unconfirmedOperation?: ConfigurationOperation;
+  rejectedOperation?: ConfigurationOperation;
+}
+
 export class FeishuApplicationSetupError extends Error {
   constructor(
     readonly code: FeishuApplicationSetupErrorCode,
@@ -116,6 +124,7 @@ export class FeishuApplicationSetupError extends Error {
       FeishuApplicationAuthorizationFailure,
     readonly authorizationDiagnostic?:
       FeishuApplicationAuthorizationDiagnostic,
+    readonly configurationProgress?: ConfigurationProgress,
   ) {
     super(message);
     this.name = "FeishuApplicationSetupError";
@@ -182,7 +191,10 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
 
   async inspect(
     signal?: AbortSignal,
+    assertAuthorized?: () => void,
   ): Promise<FeishuApplicationSnapshot> {
+    const guard = (): void => { signal?.throwIfAborted(); assertAuthorized?.(); };
+    guard();
     let response: unknown;
     try {
       response = await this.dependencies.client.getApplication(
@@ -195,6 +207,7 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
         "飞书应用配置读取失败",
       );
     }
+    guard();
     const app = parseApplicationResponse(response, this.options.appId);
     const {
       onlineVersionId,
@@ -217,6 +230,7 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
       };
     }
     let versionResponse: unknown;
+    guard();
     try {
       versionResponse = await this.dependencies.client.getVersion(
         this.options.appId,
@@ -229,6 +243,7 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
         "飞书应用版本读取失败",
       );
     }
+    guard();
     const bot = parseVersionBot(versionResponse, this.options.appId);
     return {
       ...snapshot,
@@ -259,6 +274,7 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
     tenantScopes: readonly FeishuApplicationTenantScope[] =
       requiredFeishuApplicationTenantScopes,
   ): Promise<void> {
+    signal.throwIfAborted();
     const requestedScopes = validateRequestedTenantScopes(tenantScopes);
     let result: Awaited<ReturnType<typeof registerApp>>;
     try {
@@ -283,6 +299,7 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
           },
         },
         onQRCodeReady: ({ url, expireIn }) => {
+          signal.throwIfAborted();
           onAuthorizationReady(
             validateAuthorizationUrl(url),
             positiveInteger(expireIn, 600),
@@ -300,6 +317,7 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
         registrationDiagnostic(error),
       );
     }
+    signal.throwIfAborted();
     if (result.client_id !== this.options.appId) {
       throw new FeishuApplicationSetupError(
         "authorization-invalid",
@@ -318,8 +336,12 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
 
   async configureApplication(
     signal?: AbortSignal,
+    assertAuthorized?: () => void,
   ): Promise<{ changed: boolean; versionId?: string }> {
-    const snapshot = await this.inspect(signal);
+    const guard = (): void => { signal?.throwIfAborted(); assertAuthorized?.(); };
+    guard();
+    const snapshot = await this.inspect(signal, guard);
+    guard();
     if (snapshot.hasPendingVersion) {
       throw new FeishuApplicationSetupError(
         "configuration-conflict",
@@ -358,39 +380,49 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
     ) {
       return { changed: false };
     }
+    const completedOperations: ConfigurationOperation[] = [];
+    let unconfirmedOperation: ConfigurationOperation | undefined;
+    let rejectedOperation: ConfigurationOperation | undefined;
+    const write = async (operation: ConfigurationOperation, run: () => Promise<unknown>): Promise<Record<string, unknown>> => {
+      guard();
+      unconfirmedOperation = operation;
+      const response = record(await run());
+      if (typeof response.code === "number" && response.code !== 0) {
+        rejectedOperation = operation;
+        unconfirmedOperation = undefined;
+      }
+      ensureResponseSuccess(response);
+      completedOperations.push(operation);
+      unconfirmedOperation = undefined;
+      guard();
+      return response;
+    };
     try {
       if (abilityChanged) {
-        ensureResponseSuccess(record(
-          await this.dependencies.client.patchAbility(
-            this.options.appId,
-            menus,
-            feishuFloatingMenuDisplayStrategy,
-            signal,
-          ),
+        await write("patchAbility", () => this.dependencies.client.patchAbility(
+          this.options.appId,
+          menus,
+          feishuFloatingMenuDisplayStrategy,
+          signal,
         ));
       }
       if (messageEventChanged || menuEventChanged || callbackChanged) {
-        ensureResponseSuccess(record(
-          await this.dependencies.client.patchConfig(
-            this.options.appId,
-            messageEventChanged,
-            menuEventChanged,
-            callbackChanged,
-            signal,
-          ),
+        await write("patchConfig", () => this.dependencies.client.patchConfig(
+          this.options.appId,
+          messageEventChanged,
+          menuEventChanged,
+          callbackChanged,
+          signal,
         ));
       }
-      const published = record(
-        await this.dependencies.client.publish(
-          this.options.appId,
-          {
-            mobileDefaultAbility: "bot",
-            pcDefaultAbility: "bot",
-          },
-          signal,
-        ),
-      );
-      ensureResponseSuccess(published);
+      const published = await write("publish", () => this.dependencies.client.publish(
+        this.options.appId,
+        {
+          mobileDefaultAbility: "bot",
+          pcDefaultAbility: "bot",
+        },
+        signal,
+      ));
       const versionId = optionalIdentifier(
         optionalRecord(published.data)?.version_id,
       );
@@ -402,6 +434,13 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
       throw new FeishuApplicationSetupError(
         "configuration-failed",
         "飞书应用自动配置失败",
+        undefined,
+        undefined,
+        {
+          completedOperations,
+          ...(unconfirmedOperation ? { unconfirmedOperation } : {}),
+          ...(rejectedOperation ? { rejectedOperation } : {}),
+        },
       );
     }
   }

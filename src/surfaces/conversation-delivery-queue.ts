@@ -91,7 +91,10 @@ export class ConversationDeliveryQueue {
         conversationId, critical, reason: "closed" }, "Surface 输出未入队");
       return false;
     }
-    if (DeliveryReceipt.current()?.controller.signal.aborted || options?.signal?.aborted) return false;
+    if (DeliveryReceipt.current()?.controller.signal.aborted || options?.signal?.aborted) {
+      DeliveryReceipt.current()?.fail(new Error("可靠输出在入队前已取消"));
+      return false;
+    }
     const replacesPending = options?.coalesceKey !== undefined
       && this.workers.get(conversationId)?.queue.hasPendingKey(options.coalesceKey) === true;
     if (!replacesPending && !this.hasCapacity()) return false;
@@ -104,7 +107,10 @@ export class ConversationDeliveryQueue {
       const signal = AbortSignal.any([...(operation.receipt ? [operation.receipt.controller.signal] : []),
         ...(options?.signal ? [options.signal] : [])]);
       const cancel = (): void => {
-        if (worker.queue.remove(operation)) operation.release?.();
+        if (worker.queue.remove(operation)) {
+          operation.receipt?.fail(new Error("可靠输出在执行前已取消"));
+          operation.release?.();
+        }
       };
       operation.cleanup = () => signal.removeEventListener("abort", cancel);
       signal.addEventListener("abort", cancel, { once: true });

@@ -70,7 +70,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useRender } from "@base-ui/react/use-render"
 
 export function TableHint({ hint, children }: { hint: string | null; children: React.ReactNode }) {
-  if (hint === null) return <>{children}</>
+  if (!hint) return <>{children}</>
   return (
     <Tooltip>
       <TooltipTrigger aria-description={hint} render={<span tabIndex={0} className="inline-flex min-w-0 max-w-full cursor-help focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>
@@ -245,6 +245,7 @@ type DataTablePagination =
     }
 
 export interface DataTableProps<TData extends RowData> {
+  layout?: "fill" | "content"
   loading?: boolean
   numericColumnIds?: readonly string[]
   title: string
@@ -268,6 +269,7 @@ export interface DataTableProps<TData extends RowData> {
 }
 
 export function DataTable<TData extends RowData>({
+  layout = "fill",
   loading = false,
   numericColumnIds = [],
   title,
@@ -437,7 +439,7 @@ export function DataTable<TData extends RowData>({
           {loading ? <span className="absolute inset-0 inline-flex items-center gap-2"><Spinner aria-label={t("common.loading")} />{t("common.loadingRecords")}</span> : null}
         </CardDescription> : null}
       </CardHeader>
-      <CardContent className="grid min-h-min min-w-0 flex-1 gap-4" style={{ gridTemplateRows: `${showToolbar ? "auto " : ""}minmax(10rem,1fr)${pagination.mode === "none" ? "" : " auto"}` }} inert={loading}>
+      <CardContent className="grid min-h-min min-w-0 flex-1 gap-4" style={{ gridTemplateRows: `${showToolbar ? "auto " : ""}${layout === "content" ? "auto" : "minmax(10rem,1fr)"}${pagination.mode === "none" ? "" : " auto"}` }} inert={loading}>
         {showToolbar ? <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
           {toolbar}
           {showFilter ? (
@@ -465,9 +467,9 @@ export function DataTable<TData extends RowData>({
           ) : null}
         </div> : null}
 
-        {/* 行数不参与卡片固有高度；网格为表格保留最小视口，为工具栏和分页保留实际高度。 */}
+        {/* 填充布局约束表格视口；设置目录按内容高度展示当前页。 */}
         <div
-          className="min-h-0 min-w-0 overflow-y-auto [contain:size]"
+          className={cn("min-h-0 min-w-0 overflow-y-auto", layout === "fill" && "[contain:size]")}
           style={{ scrollbarWidth: "thin" }}
           onScroll={onViewportScroll}
         >

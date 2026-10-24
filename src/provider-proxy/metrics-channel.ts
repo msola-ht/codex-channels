@@ -1,5 +1,7 @@
 import { modelRequestDiagnosticKeys, validModelRequestDiagnostics } from "./chat-diagnostics.js";
 import { validRequestTiming } from "../../runtime/request-timing.mjs";
+import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
+import { validRequestActivity } from "../../runtime/request-activity.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import type { Socket } from "node:net";
 
@@ -17,13 +19,13 @@ import {
 const maximumMetricsBytes = 8_192;
 const maximumConfirmationBytes = 16;
 const metricsFields = [
-  "transport", "responseFormat", "operation", "threadId", "turnId", "requestPurpose",
+  "activity", "upstreamUrl", "transport", "responseFormat", "operation", "threadId", "turnId", "requestPurpose",
   "reviewerThreadId", "reviewerTurnId", "model", "serviceTier", "requestServiceTier",
   "reasoningEffort", "status", "httpStatus", "userAgent", "errorType", "errorCode",
   "errorMessage", "incompleteReason", "inputTokens", "cachedInputTokens", "outputTokens",
   "reasoningOutputTokens", "totalTokens", "responseUsageAmount", "upstreamTtftMs",
   "firstTokenMs", "responseTimeMs", "generationTiming", "timingBasis", "totalDurationMs",
-  "requestModel", "responseModel", "traffic", "requestStartedAtMs", "responseCompletedAtMs",
+  "requestBytes", "requestModel", "responseModel", "traffic", "requestStartedAtMs", "responseCompletedAtMs",
   "weeklyQuota", "quotaObservedAtMs", "quotaWindows", ...modelRequestDiagnosticKeys,
 ] as const satisfies readonly (keyof ProviderProxyMetrics)[];
 
@@ -200,6 +202,13 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     return undefined;
   }
   const record = parsed as Record<string, unknown>;
+  if (record.activity != null && !validRequestActivity(record.activity)) return undefined;
+  if (record.upstreamUrl != null && sanitizeModelRequestUrl(record.upstreamUrl) !== record.upstreamUrl) return undefined;
+  if ((record.operation === "imageGeneration" || record.operation === "imageEdit")
+    && (record.transport !== "http" || record.inputTokens !== null || record.cachedInputTokens !== null
+      || record.outputTokens !== null || record.reasoningOutputTokens !== null || record.totalTokens !== null
+      || record.firstTokenMs != null || record.upstreamTtftMs != null || record.generationTiming != null
+      || record.responseUsageAmount != null)) return undefined;
   if (
     !validModelRequestDiagnostics(record) || !validRequestTiming(record)
     || Object.hasOwn(record, "firstContentMs")
@@ -208,7 +217,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || (record.timingBasis !== undefined && record.timingBasis !== "submitted")
     || !oneOf(record.transport, ["http", "websocket"])
     || !oneOf(record.responseFormat, ["sse", "json", "websocket", "unknown"])
-    || !oneOf(record.operation, ["response", "compact"])
+    || !oneOf(record.operation, ["response", "compact", "imageGeneration", "imageEdit"])
     || !nullableString(record.threadId)
     || !nullableString(record.turnId)
     || !validAutoReviewIdentity(record)
@@ -238,6 +247,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || (record.totalDurationMs !== undefined
       && (typeof record.totalDurationMs !== "number"
         || !Number.isFinite(record.totalDurationMs) || record.totalDurationMs < 0))
+    || (record.requestBytes !== undefined && !nullableByteCount(record.requestBytes))
     || (record.firstTokenMs !== undefined
       && (typeof record.firstTokenMs !== "number"
         || !Number.isFinite(record.firstTokenMs) || record.firstTokenMs < 0))
@@ -272,9 +282,8 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     ...metrics,
     userAgent: typeof userAgent === "string" ? userAgent : null,
     reasoningEffort: boundedString(record.reasoningEffort),
-    errorMessage: typeof record.errorMessage === "string"
-      ? record.errorMessage
-      : null,
+    // Prior senders may include bounded prose; never admit it across this boundary.
+    errorMessage: null,
     ...(metrics.traffic === undefined ? {} : { traffic: {
       label: metrics.traffic.label,
       session: metrics.traffic.session,
@@ -342,6 +351,11 @@ function nullableQuotaWindows(value: unknown): boolean {
         )
       );
   });
+}
+
+function nullableByteCount(value: unknown): boolean {
+  return value === null
+    || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
 }
 
 function nullableWeeklyQuota(value: unknown): boolean {

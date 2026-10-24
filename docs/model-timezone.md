@@ -15,8 +15,8 @@ Responses 请求 `input` 的一部分发给模型：
 </environment_context>
 ```
 
-- 时区名来自 `iana_time_zone`，日期来自本地时间（[`turn_context.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/session/turn_context.rs)）。
-- Codex 的 `include_environment_context_time` 默认开启；用户显式关闭后，environment context 不再包含日期和时区，设置 `TZ` 也不会恢复这两项提示内容（[`environment.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/context/world_state/environment.rs)）。
+- 时区名来自 `iana_time_zone`，日期来自本地时间（[`turn_context.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/session/turn_context.rs)）。
+- Codex 的 `include_environment_context_time` 默认开启；用户显式关闭后，environment context 不再包含日期和时区，设置 `TZ` 也不会恢复这两项提示内容（[`environment.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/context/world_state/environment.rs)）。
 - 它是 prompt 内容，不是协议字段：请求头、`client_metadata`、时间戳都不含时区。
 - 未配置 `[codex].timezone` 时，App Server 子进程继承服务环境的时区，即系统时区。
 
@@ -45,6 +45,8 @@ codexc timezone --json             # 只读输出当前配置
 改变配置；不在常见列表里的当前值会单独列在「当前配置」下。
 
 同一入口也位于 `codexc config` → 身份与时区 → 服务时区。
+
+设置时加 `--json` 返回 `action`（`saved` 或 `unchanged`）、`timezone`、`configPath`、`activation` 及结构化 `activationResult`（状态、目标和命令）。等值设置不写入，生效状态为 `none`，命令列表为空；返回重启命令不会自动执行它们。单独 `--json` 仍只读查询当前配置。
 
 ## 网关时区
 

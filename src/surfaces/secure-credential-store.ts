@@ -5,16 +5,21 @@ import {
   randomBytes,
 } from "node:crypto";
 import { execFile } from "node:child_process";
+import { constants, type Stats } from "node:fs";
 import {
-  chmod,
+  lstat,
   mkdir,
-  readFile,
+  open,
+  readdir,
+  realpath,
   rename,
+  stat,
   unlink,
-  writeFile,
+  type FileHandle,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { inspectPrivateDirectoryAccess } from "../../runtime/private-file.mjs";
 
 import {
   readWindowsSecureRecord,
@@ -38,6 +43,12 @@ const keychainCommandTimeoutMs = 5_000;
 const keyBytes = 32;
 const ivBytes = 12;
 const tagBytes = 16;
+const maximumRecordBytes = 1_048_576;
+
+interface CredentialFileSnapshot {
+  content: Buffer;
+  metadata: Stats;
+}
 
 type KeychainOperation = "get" | "set" | "remove";
 type KeychainFailureReason = "timeout" | "unavailable" | "permission-denied" | "command-failed";
@@ -147,99 +158,255 @@ function safeKeychainError(error: unknown, operation: KeychainOperation): Keycha
 
 export class EncryptedFileCredentialRecordStore
 implements SecureCredentialRecordStore {
-  private readonly masterKeyPath: string;
-
-  constructor(private readonly directory: string) {
-    this.masterKeyPath = join(directory, "master.key");
-  }
+  constructor(private readonly directory: string) {}
 
   async get(key: string): Promise<string | null> {
-    let payload: Buffer;
-    try {
-      payload = await readFile(this.recordPath(key));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return null;
+    return this.inDirectory(false, async (directory, verifyDirectory) => {
+      const path = this.recordPath(directory, key);
+      let payload: CredentialFileSnapshot;
+      try {
+        payload = await readCredentialFile(path, maximumRecordBytes, verifyDirectory);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
       }
-      throw error;
-    }
-    return decrypt(payload, await this.readMasterKey());
+      const encryptionKey = await this.readMasterKey(directory, verifyDirectory);
+      const value = decrypt(payload.content, encryptionKey.content);
+      await verifyDirectory();
+      await requireCredentialIdentity(path, payload.metadata, verifyDirectory);
+      await requireCredentialIdentity(join(directory, "master.key"), encryptionKey.metadata, verifyDirectory);
+      return value;
+    });
   }
 
   async set(key: string, value: string): Promise<void> {
-    await this.ensureDirectory();
-    const encryptionKey = await this.readOrCreateMasterKey();
-    const path = this.recordPath(key);
-    const temporaryPath =
-      `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-    try {
-      await writeFile(temporaryPath, encrypt(value, encryptionKey), {
-        flag: "wx",
-        mode: 0o600,
-      });
-      await chmod(temporaryPath, 0o600);
-      await rename(temporaryPath, path);
-    } catch (error) {
-      try {
-        await unlink(temporaryPath);
-      } catch {
-        // The temporary file may not exist or may already have been renamed.
-      }
-      throw error;
+    if (Buffer.byteLength(value, "utf8") + ivBytes + tagBytes > maximumRecordBytes) {
+      throw new Error("凭据记录超过大小上限");
     }
+    await this.inDirectory(true, async (directory, verifyDirectory) => {
+      const path = this.recordPath(directory, key);
+      const previous = await credentialMetadata(path, verifyDirectory);
+      const encryptionKey = await this.readOrCreateMasterKey(directory, verifyDirectory);
+      const temporaryPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+      let temporary: FileHandle | undefined;
+      try {
+        await verifyDirectory();
+        temporary = await open(temporaryPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+        await temporary.writeFile(encrypt(value, encryptionKey.content));
+        await temporary.sync();
+        const temporaryMetadata = await temporary.stat();
+        validateCredentialMetadata(temporaryMetadata, maximumRecordBytes);
+        await verifyDirectory();
+        const current = await credentialMetadata(path, verifyDirectory);
+        if (!sameCredentialRevision(previous, current)) throw new Error("凭据记录在保存期间发生变化");
+        await requireCredentialIdentity(temporaryPath, temporaryMetadata, verifyDirectory);
+        await requireCredentialIdentity(join(directory, "master.key"), encryptionKey.metadata, verifyDirectory);
+        await rename(temporaryPath, path);
+      } finally {
+        if (temporary) {
+          // Operate through the held Linux directory descriptor, never a replaced parent path.
+          try {
+            await requireCredentialIdentity(temporaryPath, await temporary.stat(), verifyDirectory);
+            await unlink(temporaryPath);
+          } catch {
+            // A renamed/missing/replaced temporary entry is not ours to remove.
+          }
+          await temporary.close();
+        }
+      }
+      await verifyDirectory();
+      await requireCredentialIdentity(join(directory, "master.key"), encryptionKey.metadata, verifyDirectory);
+    });
   }
 
   async remove(key: string): Promise<void> {
+    await this.inDirectory(false, async (directory, verifyDirectory) => {
+      const path = this.recordPath(directory, key);
+      const metadata = await credentialMetadata(path, verifyDirectory);
+      if (!metadata) return;
+      await verifyDirectory();
+      await requireCredentialIdentity(path, metadata, verifyDirectory);
+      await unlink(path);
+    });
+  }
+
+  private async inDirectory<T>(
+    create: boolean,
+    operation: (directory: string, verify: () => Promise<void>) => Promise<T>,
+  ): Promise<T | null> {
+    // This backend is Linux-only; macOS and Windows use their dedicated stores.
+    if (process.platform !== "linux") throw new Error("加密文件凭据后端仅支持 Linux");
+    const path = resolve(this.directory);
+    await rejectCredentialAncestorLinks(path);
+    let identity;
     try {
-      await unlink(this.recordPath(key));
+      identity = await inspectPrivateDirectoryAccess(path);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (!create) return null;
+      await mkdir(path, { recursive: true, mode: 0o700 });
+      identity = await inspectPrivateDirectoryAccess(path);
+    }
+    const descriptor = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW | constants.O_DIRECTORY);
+    try {
+      const held = await descriptor.stat();
+      const directory = `/proc/self/fd/${descriptor.fd}`;
+      const verify = async (): Promise<void> => {
+        // A missing procfs capability is an infrastructure failure, never a missing record.
+        let reachable: Stats;
+        try {
+          reachable = await stat(directory);
+        } catch {
+          throw new Error("凭据目录描述符访问不可用");
+        }
+        if (!reachable.isDirectory() || reachable.dev !== held.dev || reachable.ino !== held.ino) {
+          throw new Error("凭据目录描述符身份无效");
+        }
+        try {
+          await rejectCredentialAncestorLinks(path);
+          const current = await inspectPrivateDirectoryAccess(path);
+          if (!held.isDirectory() || held.dev !== identity.dev || held.ino !== identity.ino
+            || current.dev !== held.dev || current.ino !== held.ino) {
+            throw new Error("凭据目录在操作期间发生变化");
+          }
+        } catch (error) {
+          // Once held, losing the configured directory must not resemble a missing leaf.
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            throw new Error("凭据目录在操作期间发生变化", { cause: error });
+          }
+          throw error;
+        }
+      };
+      await verify();
+      const result = await operation(directory, verify);
+      await verify();
+      return result;
+    } finally {
+      await descriptor.close();
     }
   }
 
-  private async ensureDirectory(): Promise<void> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    await chmod(this.directory, 0o700);
-  }
-
-  private async readMasterKey(): Promise<Buffer> {
-    const key = await readFile(this.masterKeyPath);
-    if (key.length !== keyBytes) {
+  private async readMasterKey(directory: string, verifyDirectory: () => Promise<void>): Promise<CredentialFileSnapshot> {
+    const key = await readCredentialFile(join(directory, "master.key"), keyBytes, verifyDirectory);
+    if (key.content.length !== keyBytes) {
       throw new Error("凭据主密钥无效");
     }
     return key;
   }
 
-  private async readOrCreateMasterKey(): Promise<Buffer> {
+  private async readOrCreateMasterKey(directory: string, verifyDirectory: () => Promise<void>): Promise<CredentialFileSnapshot> {
     try {
-      return await this.readMasterKey();
+      return await this.readMasterKey(directory, verifyDirectory);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
       }
     }
-    await this.ensureDirectory();
+    // Never replace a lost key for a directory that already contains records.
+    const entries = await readdir(directory);
+    if (entries.includes("master.key")) return this.readMasterKey(directory, verifyDirectory);
+    if (entries.length > 0) throw new Error("凭据主密钥缺失，保留现有材料");
     const key = randomBytes(keyBytes);
+    await verifyDirectory();
+    let descriptor: FileHandle;
     try {
-      await writeFile(this.masterKeyPath, key, {
-        flag: "wx",
-        mode: 0o600,
-      });
+      descriptor = await open(join(directory, "master.key"), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        return this.readMasterKey();
+        return this.readMasterKey(directory, verifyDirectory);
       }
       throw error;
     }
-    await chmod(this.masterKeyPath, 0o600);
-    return key;
+    try {
+      await descriptor.writeFile(key);
+      await descriptor.sync();
+      await verifyDirectory();
+      const metadata = await descriptor.stat();
+      validateCredentialMetadata(metadata, keyBytes);
+      await requireCredentialIdentity(join(directory, "master.key"), metadata, verifyDirectory);
+      return { content: key, metadata };
+    } finally {
+      await descriptor.close();
+    }
   }
 
-  private recordPath(key: string): string {
+  private recordPath(directory: string, key: string): string {
     const digest = createHash("sha256").update(key).digest("hex");
-    return join(this.directory, `${digest}.enc`);
+    return join(directory, `${digest}.enc`);
+  }
+}
+
+async function rejectCredentialAncestorLinks(path: string): Promise<void> {
+  let existing = path;
+  for (;;) {
+    try {
+      if (await realpath(existing) !== existing) throw new Error("凭据目录路径不能包含符号链接");
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = dirname(existing);
+      if (parent === existing) throw error;
+      existing = parent;
+    }
+  }
+}
+
+function validateCredentialMetadata(metadata: Stats, maximumBytes = Number.POSITIVE_INFINITY): void {
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1
+    || metadata.uid !== process.getuid?.() || (metadata.mode & 0o077) !== 0
+    || metadata.size > maximumBytes) throw new Error("凭据文件类型、权限、归属或大小无效");
+}
+
+async function credentialMetadata(path: string, verifyDirectory: () => Promise<void>): Promise<Stats | null> {
+  try {
+    const metadata = await lstat(path);
+    validateCredentialMetadata(metadata);
+    return metadata;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      await verifyDirectory();
+      return null;
+    }
+    throw error;
+  }
+}
+
+function sameCredentialRevision(left: Stats | null, right: Stats | null): boolean {
+  return left === null || right === null ? left === right
+    : left.dev === right.dev && left.ino === right.ino && left.size === right.size
+      && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
+}
+
+async function requireCredentialIdentity(path: string, expected: Stats, verifyDirectory: () => Promise<void>): Promise<void> {
+  const current = await credentialMetadata(path, verifyDirectory);
+  if (!sameCredentialRevision(expected, current)) throw new Error("凭据文件在操作期间发生变化");
+}
+
+async function readCredentialFile(path: string, maximumBytes: number, verifyDirectory: () => Promise<void>): Promise<CredentialFileSnapshot> {
+  let descriptor: FileHandle;
+  try {
+    descriptor = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") await verifyDirectory();
+    throw error;
+  }
+  try {
+    const before = await descriptor.stat();
+    validateCredentialMetadata(before, maximumBytes);
+    const buffer = Buffer.alloc(maximumBytes + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await descriptor.read(buffer, length, buffer.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > maximumBytes || !sameCredentialRevision(before, await descriptor.stat())) {
+      throw new Error("凭据文件在读取期间发生变化或超过上限");
+    }
+    await requireCredentialIdentity(path, before, verifyDirectory);
+    return { content: buffer.subarray(0, length), metadata: before };
+  } finally {
+    await descriptor.close();
   }
 }
 

@@ -2,6 +2,7 @@ export interface ProviderFileSnapshot {
   path: string;
   content: Buffer | undefined;
   readCurrent: () => Buffer | undefined;
+  /** Main config uses versioned field edits and readback, including rollback. */
   writeCurrent: (content: string | Uint8Array | undefined) => Promise<void>;
 }
 
@@ -10,6 +11,7 @@ export function stageManagedPrimaryCredential(credential: { environmentKey: stri
   environment: NodeJS.ProcessEnv, snapshots: ProviderFileSnapshot[], updates: Map<string, string | Uint8Array | undefined>): void;
 
 export function readOptionalProviderFile(path: string, environment: Record<string, string | undefined>): Promise<Buffer | undefined>;
+/** Private files only; main config must use its transaction snapshot writer. */
 export function replaceOptionalProviderFile(path: string, content: string | Uint8Array | undefined, environment: Record<string, string | undefined>): Promise<void>;
 export function removeOptionalProviderFile(path: string): Promise<void>;
 export function snapshotProviderFiles(paths: string[], environment: Record<string, string | undefined>): ProviderFileSnapshot[];

@@ -5,13 +5,24 @@ import type {
 } from "./codex-user-config.mjs";
 
 export const primaryProviderId: "OpenAI";
+export type CustomProviderConnectionSaveInput = Omit<CustomPrimaryProviderSaveInput, "operation" | "model" | "catalog" | "probeConnections"> & { operation: "update" };
+export function previewCustomProviderConnectionSave(input: CustomProviderConnectionSaveInput, options?: CustomPrimaryProviderSaveOptions): ReturnType<typeof previewCustomPrimaryProviderSave>;
+export function prepareCustomProviderConnectionSave(input: CustomProviderConnectionSaveInput, options?: CustomPrimaryProviderSaveOptions): Promise<{ preview: Awaited<ReturnType<typeof previewCustomPrimaryProviderSave>>; apply(): ReturnType<typeof applyCustomPrimaryProviderSave> }>;
+export function applyCustomProviderConnectionSave(input: CustomProviderConnectionSaveInput, options: CustomPrimaryProviderSaveOptions & { preview: { revision?: string } }): ReturnType<typeof applyCustomPrimaryProviderSave>;
 export interface CustomProviderModelsSaveInput {
   provider: string;
   model: string;
   models: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[];
   probeConnections?: CustomPrimaryProviderSaveInput["probeConnections"];
 }
-export function previewCustomProviderModelsSave(input: CustomProviderModelsSaveInput, options?: CustomPrimaryProviderSaveOptions): Promise<Omit<Awaited<ReturnType<typeof previewCustomPrimaryProviderSave>>, "operation"> & { operation: "model.custom.save"; revision: string }>;
+export interface CustomProviderModelDefaultsPreview {
+  catalog: { before: string; after: string };
+  selection: {
+    before: { model: string | null; reasoningEffort: string | null };
+    after: { model: string | null; reasoningEffort: string | null };
+  };
+}
+export function previewCustomProviderModelsSave(input: CustomProviderModelsSaveInput, options?: CustomPrimaryProviderSaveOptions): Promise<Omit<Awaited<ReturnType<typeof previewCustomPrimaryProviderSave>>, "operation"> & { operation: "model.custom.save"; revision: string; modelDefaults: CustomProviderModelDefaultsPreview }>;
 export function applyCustomProviderModelsSave(input: CustomProviderModelsSaveInput, options: CustomPrimaryProviderSaveOptions & { preview: { revision?: string } }): Promise<Awaited<ReturnType<typeof applyCustomPrimaryProviderSave>> & { operation: "model.custom.save" }>;
 export function customModelProbeConnection(input: { baseUrl: string; upstreamWireApi: "responses" | "chat_completions"; apiKey: string; model: string; reasoningEffort: string; capability: "applyPatch" | "toolSearch" }): string;
 
@@ -35,7 +46,10 @@ export interface CustomPrimaryProviderSaveInput {
 
 export interface CustomPrimaryProviderSaveOptions {
   environment?: NodeJS.ProcessEnv;
+  preview?: { revision?: string };
   expectedCatalogContent?: string;
+  /** Internal capability-only saves preserve both catalog and connection selections. */
+  preserveDefaults?: boolean;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CodexUserConfigTransactionClient & {
@@ -72,9 +86,11 @@ export function previewCustomPrimaryProviderSave(
   options?: CustomPrimaryProviderSaveOptions,
 ): Promise<{
   operation: "create" | "update";
+  revision: string;
   provider: CustomPrimaryProviderSaveSummary;
   transport: { scheme: "http" | "https"; cleartext: boolean };
-  activation: "restart-all";
+  willChange: boolean;
+  activation: "restart-all" | "none";
   effects: {
     removesTopLevelBaseUrl: boolean;
     convertsSwitchingProfile: boolean;
@@ -98,11 +114,11 @@ export function prepareCustomPrimaryProviderSave(
 
 export function applyCustomPrimaryProviderSave(
   input: CustomPrimaryProviderSaveInput,
-  options?: CustomPrimaryProviderSaveOptions,
+  options: CustomPrimaryProviderSaveOptions & { preview: { revision?: string } },
 ): Promise<{
-  action: "created" | "updated";
+  action: "created" | "updated" | "unchanged";
   provider: CustomPrimaryProviderSaveSummary;
-  activation: "restart-all";
+  activation: "restart-all" | "none";
   effects: {
     removesTopLevelBaseUrl: boolean;
     convertsSwitchingProfile: boolean;

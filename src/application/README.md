@@ -1,20 +1,60 @@
 # Application
 
-`ConversationTurnUseCases.prepareAttachmentSubmission` 在等待前序输入前登记音频或视频取消作用域；Surface 排空前序输入后调用一次 `captureTarget`，在下载前捕获当前工作区与 Thread，允许前序输入正常创建首个 Thread。下载完成后在会话锁内复核目标和调用方实时授权，并在异步会话准备之后、Turn 请求发出前再次复核已捕获的 Thread，再通过原有 Turn 提交入口发送文本视频引用或含 `localAudios` 的稳定输入。未捕获目标不得提交，取消后不得捕获；首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
+Surface 在接收音视频、首次进入队列前登记有界接收取消范围，并等待此前停止命令处理结束；之后调用 `ConversationTurnUseCases.prepareAttachmentSubmission`，在刷新前序输入前建立 Application 提交作用域。Surface 排空前序输入后调用一次 `captureTarget`，在下载前捕获当前工作区与 Thread，允许前序输入正常创建首个 Thread。下载完成后在会话锁内复核目标和调用方实时授权，并在异步会话准备之后、Turn 请求发出前再次复核已捕获的 Thread，再通过原有 Turn 提交入口发送文本视频引用或含 `localAudios` 的稳定输入。未捕获目标不得提交，取消后不得捕获；首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
 
-返回的提交作用域提供取消信号、一次性 `captureTarget` 和 `submit`、`mayHaveSubmitted` 和 `dispose`。Surface 在首次等待前创建作用域并在结束时释放；`/stop` 取消当前目标的附件准备，准备总时限为 120 秒，包含等待前序输入，捕获目标不重置时限。每个目标最多 4 个待处理作用域，全局最多 1000 个目标。RPC 可能发出后即使确认失败也保留附件至过期，避免删除已经进入 Thread 的引用；不自动重试提交。
+返回的提交作用域提供取消信号、一次性 `captureTarget` 和 `submit`、`mayHaveSubmitted` 和 `dispose`，覆盖前序输入刷新至锁内提交，并在结束时释放。Application 自身保留120秒期限；Surface接收范围另从接收起计算120秒预算，包含外层排队及停止等待，超时同时取消已建立的提交作用域，捕获目标不延长总预算。每个目标最多4个待处理作用域，全局最多1000个目标。RPC可能发出后即使确认失败也保留附件至过期，避免删除已经进入Thread的引用；不自动重试提交。
 
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 
-Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的禁用档位回到 Standard，保存偏好与显式待生效覆盖在提交前复核，失效时拒绝并要求用户重新选择，不清除保存数据或重解释已有 Thread 的实际设置。
+工作区文字命令保留序号、ID、名称选择；`ConversationCommandExecutor.selectWorkspace` 为渠道按钮提供精确 ID 入口，复用同一授权、会话锁、空闲检查及绑定切换。旧工作区选择已失效时仍允许显式重选，不自动选择默认目录或重试失败请求。
+
+普通消息的 `submit` 接收 Surface 提供的实时授权闭包，在等待会话锁、Thread 准备及最终 Turn 写入前复核；
+输入同时固定接收时的 Workspace ID 与目录，变化时拒绝。图片准备后的 start/steer 也保留最终守卫。
+已经提交的请求仍按实际结果结算，不因后续撤权自动重试或丢弃响应。
+普通新 Turn 在用例入口标记 `turnTrigger=user`，计划任务共用底层端口时不自动继承该标记。
+普通输入与 inline Review 在请求前登记 Core 临时活动观察，响应与期间收到的生命周期通知合并后才更新展示状态；迟到响应不重新激活已结束轮次，也不覆盖更新轮次。请求成功仍结算模型与模式选择，观察器在请求结束时释放。
+
+模型选择和会话生命周期命令显式传递实时授权闭包：在会话锁、目录/默认配置等待和后续写入前复核，
+模型选择的 Queue 检查也保留该守卫。默认速度已保存后撤权只阻止后续偏好更新，不回滚共享默认值。
+模型目录、模型/effort/速度选择还固定操作开始时的 Thread；官方归档/删除导致原绑定消失时，
+不得把旧模型偏好写给下一会话。跨 Provider 切换仅在自身解绑完成后接受未绑定状态。
+恢复、接管、解绑和工作区切换的订阅补偿独立执行，避免撤权阻断必要清理。
+当前 Thread 的自动审批设置在锁等待及最终发送前复核 Actor、Workspace、Thread、空闲状态和待处理交互；
+已发设置仍等待权威确认和共享归约，撤权只阻止后续操作与结果展示，不回滚已生效设置。
+Revert 的列表、预览和确认固定接收时的绑定，Thread/历史分页/Queue 读取与最终回退均传递实时授权守卫；
+确认令牌的 Actor 归属不代替实时授权。已提交成功的回退仍清理选择快照，不因后续撤权重发或撤销。
+`stop` 保持无锁即时取消本地准备；等待 Provider 后发送中断前复核授权和原 Thread 归属，
+原 Thread 仍归属同一 Conversation 的后台状态不单独构成拒绝条件。命令结果出口复核捕获的工作区范围，
+只有显式 Workspace 切换按其新范围返回，不用旧工作区守卫阻止合法切换结果。
+rename、pin、compact、review 和 Goal 命令固定锁前目标，Thread 准备及最终请求前复核授权和绑定；
+需要空闲的操作在最终发送前再次核对空闲。Goal 查询可能准备 Thread，也受同一守卫约束。
+已经提交的 Review/Goal 结果继续归约，不能因为输出时撤权丢弃真实已发生状态。
+Plan 预设/模型读取、模式保存、Queue 复核与 Turn 提交均保留实时守卫；模式保存前还核对原 Thread。
+授权有效时已经保存的模式不因稍后 Turn 提交失败自动回滚，仍以待生效状态查询；成功 Turn 才消费它。
+新 Turn 准备固定原绑定，创建成功后最终提交守卫改为核对新绑定，防止后续 Provider 等待把输入发到过期目标。
+Skill、Plugin、Agent 命令固定锁前目标，目录解析后复核，并将守卫传到最终 start/steer；扩展列表返回前也复核。
+MCP 登录与资源读取固定捕获的 Thread，目录查询后不得转向其他绑定；刷新各 Provider 的新请求分别守卫，
+已经提交的 OAuth/刷新结果仍照实际结算。OAuth 完成仅匹配本 Gateway 发起的最新登录：精确核对
+loginId、实际连接 Provider、Thread/server、原绑定与 Workspace 及授权；迟到、重复、转移后的结果不投递。
+会话列表固定查询开始时的工作区 ID/目录，目录搜索、轮数读取和缓存写入前复核，避免旧目录结果被记到新工作区。
+resume 与 unarchive 共用选择器，保留有效数字序号优先；精确 ID/名称匹配多个时直接拒绝，只有零个精确匹配才继续唯一 ID 前缀匹配。
+Permission Profile 分页与计划任务权限预检同样将实时守卫传到 Provider 等待及每次 RPC 尝试。
+显式账户查询携带原用户授权，后续 HTTP/RPC 与本地估算分别复核；带守卫的第三方请求独立执行，
+无守卫的后台请求仍按既有规则合并，已经提交的账户快照写入独立结算。
+
+Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提交档位在提交前复核，失效时拒绝并要求重新选择；历史偏好保留用户选择，由 App Server 过滤有效档位，不清除保存数据或重解释已有 Thread 的实际设置。
 
 ## 文件
 
+- `reasoning-repeat-guard.ts`：第三方当前已绑定轮次的重复思考保护；按推理 Item 与内容段分隔，原始思考和摘要各持有独立检测器，用有界内存比较 200–4096 个 Unicode 码点片段的连续三次重复。检测分批让出事件循环，不读历史、不保存正文；通过注入端口精确中断原 Turn，收到官方中断终态才报告已停止，失败与确认超时可见。对应连接变化、绑定失效、轮次结束及关闭清理缓冲，不自动继续或修改 Queue／Goal。
+
 - `hook-port.ts`：定义 Hook 列表、安全审查摘要和精确版本信任/启停的窄端口；不暴露任意配置写入。
-- `conversation-hook-service.ts`：在会话锁内执行 `/hooks` 列表、详情、预览和一次性确认；查询、写入和回读固定到同一 Provider，运行配置刷新由 Client 协调共享配置的实例。选择快照与确认仅在内存保留五分钟，绑定 Actor、渠道会话、Workspace、Thread、Hook key/hash 和配置版本；写入尝试后使各 Provider 的旧交互失效，复核 Surface 的无损审查能力，明确展示部分刷新失败，不把保存成功当作实际执行成功。
+- `conversation-hook-service.ts`：锁前捕获 `/hooks` 的 Actor、Workspace/目录、Provider 和 Thread，锁内执行列表、详情、预览和一次性确认；读取与最终写入均保留实时守卫，写前复核确认期限及 Surface 无损审查能力。查询、写入和回读固定到同一 Provider，运行配置刷新由 Client 协调共享配置的实例。选择快照与确认仅在内存保留五分钟，绑定 Hook key/hash 和配置版本；已提交写入继续失效旧交互、刷新与权威回读，不因撤权中断结算；本地守卫拒绝不误报写入结果未知，不把保存成功当作实际执行成功。
 
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
+  命令和模型/审批按钮必须传原 Actor，由组合根注入当前 Surface 账号策略；缺少授权实现失败关闭。
+  Queue 命令把当前 Workspace 作用域的授权闭包传到锁、选择器和最终请求边界，拒绝后不自动撤销已提交写入。
   按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。
   `/autoreview [on|off]` 查询或修改当前 Thread 实际审批方式；审批方式不受本地 Provider 与模型白名单限制；`selectAutoReview` 的按钮固定原 Thread ID，由会话用例在锁内复核。
   会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；
@@ -22,29 +62,40 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   展示可复制的 `恢复会话：/r <Thread ID>`。
 - `conversation-command-parser.ts`：集中定义会话命令的参数语法、用法提示和查询视图；只做纯解析，不调用 Application 用例。
 - `scheduled-task-command.ts`：定义计划任务命令的解析结果与创建请求类型，解析固定句式和模型标记，不依赖具体用例服务。
-- `scheduled-task-service.ts`：通过异步存储端口执行计划任务用例，持有列表选择器和一次性确认状态；消费命令解析结果，并通过注入端口检查授权、取得创建上下文及触发运行。数据库读取后复核 Actor，创建数量上限同时由存储原子约束。
+- `scheduled-task-service.ts`：通过异步存储端口执行计划任务用例，持有列表选择器和一次性确认状态；消费命令解析结果，并通过注入端口检查授权、取得创建上下文及触发运行。渠道命令复用 operation 守卫，数据库读取、领取与派发前复核原 Actor/工作区；创建上下文在容量等待前捕获。确认最终写入前复核有效期，失权而未展示的预览令牌取消；已提交结果继续结算。创建数量上限同时由存储原子约束。
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
   参数校验后映射到 `ScheduledTaskApplicationService`；将工具请求的取消和当前归属复核传到预览、写入及手动调度边界，失效请求不展示预览并撤销未交付确认令牌。创建和删除仍返回待确认预览，不直接改写 Store；已提交的写入不因取消而回滚。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标异步查询；`ConversationService` 作为统一用例入口委托执行。`/metrics`、可见会话页的本地 Turn 计数与周额度估算等待数据库 Worker，不在调用线程执行 SQL；账户快照按 Provider 排队，执行前拒绝取消及早于已确认额度序号的结果。只有写入成功才推进序号，较新观测保存失败不阻断旧有效结果；调用方取消等待后，已派发写入仍按实际确认结果更新缓存与序号。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
+  OAuth 关联最多保留 128 个、各十分钟；响应前每次请求暂存至多 8 条完成通知，每条错误上限 4,096 字符。
+  超限且无法匹配结果时明确要求查询实际状态；失败、Thread 关闭、断线及服务关闭清理关联，不撤销已提交登录。
 - `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态，并提供会话选择器 `resolveThread`（序号、精确 ID/名称或唯一 ID 前缀，歧义与缺失明确失败）；不修改绑定，不建立独立会话索引。派生轮数扫描每轮最多 10 秒、100 页，同 Thread 后台刷新合并，后台最多 3 个并发；关闭取消扫描和本地指标等待，拒绝迟到列表结果及缓存写入，超限时轮数保持未知。本地轮数指标读取失败降级为展示缓存或未知，不阻止权威列表返回。缓存读写、失效或删除失败后，本实例停止使用该缓存并报告固定操作分类；不返回旧缓存，不阻止权威事件归约或用户输入。失效和删除先更新代次，迟到扫描与本地指标结果既不回写也不展示。
-- `conversation-event-coordinator.ts`：在稳定输入事件归约前失效选择快照与展示缓存、处理待生效偏好和 Reserve 标记，归约后执行 Reserve 收尾；子代理跟踪和后台释放调度通过注入端口保持原顺序，不等待 RPC 或渠道输出。
+- `conversation-event-coordinator.ts`：在稳定输入事件归约前失效选择快照与展示缓存、处理待生效偏好和 Reserve 标记；OAuth 完成先经过 Application 登录关联，再交 Core 呈现。归约后执行 Reserve 收尾；子代理跟踪和后台释放调度通过注入端口保持原顺序，不等待 RPC 或渠道输出。
 - `turn-errors.ts`：把单次 Turn 失败归约为稳定的错误类型、错误码与安全文案；只读取已归约的错误对象，不执行 RPC、不生成平台输出。
 - `pagination.ts`：提供 Application 层共用的分页总数、页码校验、偏移/切片与一基序号；错误类型与文案仍由各调用点提供，不持有列表状态。
+- `bounded-map.ts`：只提供按插入顺序裁剪 Map 容量的内部操作；过期、键刷新、确认消费及计时器清理由服务保留。
 - `conversation-service.ts`：按 Turn、Session/Workspace、Queue/Revert、扩展与账户指标五类稳定能力接口公开用例，
   新建与恢复切换将仍有活动 Turn、子代理或交互的旧会话保留在后台；释放前核验已加载后代的权威状态，
   包括冷启动后尚无本地活动记录的子代理。后台释放与恢复清理共用 Queue、交互、父子活动复核，无法确认时保留绑定。
   成功转后台后通知生命周期所有者补做空闲复核，主动切换的订阅补偿失败则交回绑定恢复，避免遗漏切换期间的终态。
+  后台释放单飞期间收到的新生命周期事件会合并为下一次复核，不复用已经过时的活动结论；只由新事件触发续查，连续续查超过时间预算交回生命周期所有者恢复，不静默丢弃重试。失败状态仅在 Client 提供连续连接内的明确 Turn 终态证据时允许释放，恢复后缺少证据仍保留。
   具体 `ConversationService` 负责新建、恢复、切换、归档和固定 Thread，列表查询委托给会话查询组件；提交、steer 或将纯文本
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
   `submitAsyncAnswer` 在同一 Conversation 锁内、发送前校验原 Thread 绑定和问题有效性，再复用普通 start/steer 路径；
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   普通 `status` 不执行 Git IO，展示入口 `statusForDisplay` 通过组合根注入的异步只读端口取得当前 Workspace Git 分支；完成卡仅调用 `workspaceGitBranch`，不连带查询模型与账户状态；
+  普通 Turn、活动 Turn 追加输入、渠道 Queue 操作及后台完成时的 Queue 启动通过 Router 权威目录校验，
+  并把变化守卫带到最终 RPC 提交；目录不匹配时不重放输入、不清空原生 Queue，中断与诊断入口保持可用。
+  Git 查询结束后重新读取当前绑定及诊断，同工作区内切换 Thread 也不会返回旧会话来源；工作区变化时丢弃原 Git 结果。
+  status 另投影 Router 的 Thread 执行上下文：最近确认 cwd 与带对应 cwd 的生命周期 roots 快照；
+  未知时省略该字段，不从 Workspace 推断。异步 Git 查询后同样重新读取此投影。
   `/stop` 同时取消当前目标的视频准备及当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
   当前 Thread Auto-review 写入则在同一锁内要求已有绑定、空闲且无待处理交互，未知或 Guardian 实际值只读；已确认的相同值不写。等待 Client 的权威通知确认后再核对绑定，返回 Router 的实际值，不创建 Thread、启动 Turn 或乐观修改缓存。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；
   通过 Core 跟踪恢复期间的 Turn 通知，在绑定成功后恢复仍有效的活动状态。
+  普通新 Turn 在 `ensureSession` 等待旧绑定恢复期间同样跟踪活动通知；未加载 Thread 恢复成功后继续
+  原次输入。只读快照报告活动但不含 Turn ID 时拒绝启动新 Turn，不把缺少本地活动缓存解释为空闲。
   恢复已由其他渠道绑定的空闲 Thread 时，同时锁定新旧 Conversation，确认双方无活动 Turn、
   排队消息或待处理交互后调用路由层原子转移，并向原渠道发布关键解绑通知；
   扩展与账户查询分别委托给独立组件，通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile 均使用稳定结果。
@@ -55,15 +106,31 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
 - `conversation-lock-coordinator.ts`：为同一 Conversation、多个 Conversation 的有序加锁；Queue、Revert
   与主会话生命周期共用同一实例。
 - `thread-queue-service.ts`：维护原生 Thread Queue 的增删改查、启动、分页选择快照、错误映射和待生效设置冲突检查；
+  只有列表发布更新数字选择，内部复核不重排或续期旧页；读取期间的失效不允许重新发布旧快照。
   不负责 Thread 绑定切换或后台释放。
+  用户命令固定接收时的 Thread，异步读取与提交前复核 Actor、Workspace 和 Thread；写入响应仍正常结算，
+  不因后续撤权重发或回滚。内部生命周期查询继续使用其所属生命周期约束。
 - `thread-revert-service.ts`：维护分页历史选择快照、一次性确认令牌、Queue 指纹与执行前并发复核；
+  通知失效贯穿在途列表、预览和最终提交，确认成功或失败均清理同会话其他令牌和快照。
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
+  `serviceTier` 为原始用户选择，必需的 `serviceTierKnown` 区分未知，`effectiveServiceTier` 单独携带
+  生命周期确认值。选择未知时普通对话继续；固定保存偏好和创建计划任务要求先显式 `/fast` 选择，
+  自动空闲释放保留绑定。历史偏好恢复保留原选择并由 App Server 过滤，新显式待提交加速选择仍复核有效开关及模型目录。
+  进程内偏好捕获/恢复保留显式选择来源，首次绑定后启动失败的重试继续复核，不增加持久化字段。
+  Turn 提交成功仅在设置快照未变化时更新待提交选择；竞争通知或订阅失效后的状态不被迟到响应覆盖。
+  新计划任务把已确认的空选择写作 `default`，预览和确认均从同一创建上下文规范化；旧任务的 `null`
+  继续表示执行时继承，不重写已有存储。Luna Reserve 只在选择已知时启动自动切换，并保留原速度选择用于恢复。
+  Gateway 默认模型只在没有当前或待选模型时回退使用；主目录成功返回后才据其判断默认模型是否缺失。未查询或失败的目录不把浏览目标变成当前选择；显式选择模型不依赖旧默认值，失效默认值不阻断已有会话的模型设置。
+  模型状态带不透明的 Conversation/Workspace/Thread/Session 页面身份；选择等待期间新 Turn 开始会取消在途选择。
+  页面身份同时覆盖当前与待生效模型设置、偏好和浏览范围；状态读取在目录及默认配置等待后复核原身份，避免旧设置与新身份混合。`ModelSelectionRequest` 区分精确 Provider 导航、Provider/model 选择、effort 与 fast，附原卡 `ModelSelectionSnapshot`；结构化选择在会话锁、目录及默认读取、最终配置提交与偏好写入之间持续复核快照和交互守卫。自身同步提交后只推进本次已写成的状态，外部变化仍使旧卡失效；文字命令保留按执行时状态解释。
+  结构化操作还核对目录默认和继承配置解析后的有效设置；操作内保留已查询来源的能力，后续新页面按其实际定向目录生成，避免把未查询能力伪装成已确认。默认配置写入成功后以明确偏好继续提交，不假定用户默认覆盖 Workspace 配置。
   加速档位的纯目录匹配复用 `runtime/service-tier.mjs`，与 CLI/WebUI 使用相同的 Fast、Ultrafast 能力判断；回到 Standard 不受当前目录项的不可用标记阻断。
   无 Thread 且无显式档位偏好时从目标 Provider 的 Workspace 有效配置读取服务层级，保留 null，不以目录默认层级推断已启用加速；开启加速前经窄端口核对同一作用域的 `features.fast_mode`，写入前后复核订阅。
   模型目录明确不可用时，浏览保留目录的不可用原因与未知档位，不为显示档位重新连接故障实例；启用加速仍严格检查目录和有效配置。
-  独立 CP 切换 Provider 经模型端口读取对应 App Server 目录，官方兼容目录与独立目录分别装配；默认选择保留精确 Provider 和平台模型 ID；总览隔离各 CP 的读取故障，定向操作只查询目标 CP，故障条目不参与能力选择。
+  独立 CP 切换 Provider 经模型端口读取对应 App Server 目录，官方兼容目录与独立目录分别装配；默认选择保留精确 Provider 和平台模型 ID。定向独立 CP 操作不查询无关主目录；总览隔离主目录与独立目录故障，官方兼容克隆仍依赖主目录。故障条目保留不可用身份，不参与能力选择，空能力列表不表示已确认不支持，也不提供真实默认思考等级。
   独立目录可从 `model/list` 的默认标记读取默认模型，聚合目录保留含多级路径的完整模型 ID；同一聚合 Provider 内模型选择仍只覆盖下一 Turn，保留当前 Thread。
+  目录读取按最多四个独立 Provider 并发，收齐已启动请求并复核授权后才发布默认模型缓存。`ModelSelectionPort.assertModelCatalogActive` 是可选同步本地守卫，生产 Routing 实现用整体停止信号拒绝后续读取、状态返回与选择写入；单个 Provider 关闭可降级为该目录不可用。文字命令的前置总览仍由共享命令解析负责，不等同定向目录方法。
   官方未登录时为未绑定会话解析唯一第三方，或组合根明确提供的同类账户默认 Provider，并使用其
   Profile 默认模型供状态、菜单与建线程复用；
   受管 Provider 设置应用后按精确 Provider 替换已确认的补充模型目录与默认标记，保留其他 Provider 的目录、已绑定模型及待生效的明确选择；
@@ -86,7 +153,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   覆盖；保存失败不更新选择或解绑旧 Thread，App Server 重启后不再加载旧加速默认值。
   Fast 与 Ultrafast 只允许当前模型目录明确声明支持时开启，Standard 可显式退出已有加速档位；
   主 Provider 通过模型窄端口保存用户级默认层级，独立 Provider 不改写主配置。
-  无绑定偏好恢复时重新检查档位；选择 OpenAI 模型统一重置 Fast/Ultrafast 为 Standard。
+  无绑定偏好恢复时重新检查模型和思考等级，新显式档位另做能力复核；选择 OpenAI 模型统一重置 Fast/Ultrafast 为 Standard。
 - `luna-reserve-port.ts`：定义可取消的账户额度读取、隐藏 Reserve 模型解析和带最终提交守卫的 Thread 设置更新窄端口；
   Application 不接收生成协议类型。
 - `luna-reserve-service.ts`：在同一 Conversation 锁内处理最终用量错误后的后端授权切换，并按 Thread
@@ -94,10 +161,14 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   失效期间的新触发会在旧操作结束后继续；账户、Thread 生命周期与关闭均有取消路径，设置写入失败不重试，
   账户失效前已被 App Server 接受的写入会提示用户确认当前模型，不执行可能覆盖后续选择的补偿写入；
   切换成功须由 RPC 与实际设置通知共同确认并完成共享归约，不乐观改写 Router；原生客户端修改受支持模型设置后放弃自动切回。
+  组合根在每次设置通知同步收件归约后观察变更，刷新等待期间与已确认 Reserve 状态都受保护；
+  选择暂时未知时延后额度刷新与设置比较，不把缺少证据解释为用户改选并删除返回记录。
+  手动改变后改回原值也不恢复自动写入资格。自身已提交目标的匹配通知允许继续确认。
   未确认写入不由恢复定时器重试，失败消息不在 Gateway 重放。
 - `collaboration-mode-port.ts`：定义 Default/Plan 预设的稳定查询边界，不向 Application
   暴露完整实验协议。
 - `collaboration-mode-service.ts`：把官方预设与当前模型设置组合为下一 Turn 的协作模式覆盖；
+  取得 Turn 覆盖时合入后续明确选择的模型和思考等级，避免模式快照覆盖较新的用户选择。
   模式按 Thread 同步，只在内存保存尚未生效的选择。
 - `model-port.ts`：定义项目拥有的 Provider、`text/image/audio` 输入能力、思考等级、服务层级、
   Codex 多代理运行时与可选模型替代提示，以及
@@ -107,8 +178,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   Luna Reserve 后端授权摘要、第三方余额、Credits/配额窗口和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
-- `conversation-reset-credit-service.ts`：`/limits reset` 的分页查询、预览和确认归属，绑定 Actor、Conversation、Workspace 与当前 Thread，复用共用重置券服务并在消费前复核授权。
-- `openai-reset-credit-service.ts`：OpenAI 重置券查询、短期选券确认与单次消费；复核账户/券修订、过期及并发，消费结果与额度刷新分离，不保存凭据或自动重试写操作。
+- `conversation-reset-credit-service.ts`：`/limits reset` 的分页查询、预览和确认归属，绑定 Actor、Conversation、Workspace 与当前 Thread；查询、预览和消费的实时授权贯穿 Provider 等待及最终 RPC，已发送消费按真实结果结算。
+- `openai-reset-credit-service.ts`：OpenAI 重置券查询、短期选券确认与单次消费；复核账户/券修订、过期及并发，预览与券期限贯穿最终消费提交守卫；本地明确拒绝保留 stale/授权分类，消费结果与额度刷新分离，不保存凭据或自动重试写操作。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未注册的聚合或自定义 Provider 返回不支持，不创建占位账户快照，不回退到 OpenAI。
   OpenAI 额度可在快照保存后附加由组合根提供的凭证刷新时间，仅供展示，不写入官方账户快照。
@@ -129,14 +200,15 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
 - `mcp-port.ts`：定义 MCP Server 概览、当前 Thread 的未启动/连接中/已连接/需认证/失败/取消/禁用或未知运行状态、可空 Plugin 来源、只表示工具发现是否失败的布尔状态、带只读/可能写入/未知属性的工具摘要、资源/模板详情、共享 OAuth
   能力判断、登录结果和有界只读资源内容；Plugin 来源只供 `/mcp` 详情展示，不用于授权或 OAuth；不向 Surface 暴露工具 Schema、二进制正文或完整官方响应。
+  详情另保留只供内部传递的 `toolListMeta`，使用本地只读递归 JSON 类型表示对应工具目录第一页的原始 `_meta`；`null` 表示不可用，空值不归一化。不解释键、不用于授权或健康判断、不渲染或记录正文，也不进入持久化或模型输入；概览不携带此字段。
 - `plugin-port.ts`：定义 Plugin 的已安装摘要、版本、来源、安装时间、开发者、分类、能力、
   认证时机、可用原因、适用套餐标识、Marketplace 加载失败计数与只供 Turn 调用的官方 mention 引用；
-  不提供市场搜索、安装、卸载或分享能力；已安装目录的本地搜索由命令层处理。
+  查询显式携带目标 Provider，不提供市场搜索、安装、卸载或分享能力；已安装目录的本地搜索由命令层处理。
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
 - `thread-occupancy-port.ts`：定义渠道 `/release` 使用的 Thread 占用查询与释放窄端口；只返回
-  稳定占用状态、持锁进程摘要和释放结果，不暴露进程级实现。
-- `thread-queue-port.ts`：定义原生 Thread Queue 的六个稳定用例；Application 只接收纯文本写入，
+  稳定占用状态、持锁进程摘要和释放结果，不暴露进程级实现。释放命令传递实时授权守卫，异步诊断后及终止前复核原绑定与 Workspace；已经发出的强制释放不因后续取消被视为撤销。
+- `thread-queue-port.ts`：定义原生 Thread Queue 的六个稳定用例及已知拒绝分类；Application 按分类映射反馈与释放策略，不识别官方英文异常。Application 只接收纯文本写入，
   通过 Client 返回条目种类、可编辑标记和有界安全预览，不传播官方 `UserInput` 或本地路径。
   切换到已有 Queue 的 Thread 时沿用该 Thread 自身设置并清除当前会话待生效偏好；后台完成释放前
   重新查询 Queue、按 Thread 活动 Turn 和待结算子代理运行，避免自动派发或子代理仍在运行时解除绑定。
@@ -169,6 +241,8 @@ Gateway 计划任务通过 `ScheduledTaskApplicationService` 暴露创建预览�
 Conversation，数字选择器只使用最近五分钟的内存快照，完整 ID 仍重新复核 Store 归属。
 `ScheduledTaskToolService` 把前台 Agent 的 `schedule_task` 参数解码为上述同一批用例，并返回稳定的
 确认、列表或生命周期结果；模型不接触 Store 和权限选择，创建和删除仍必须由用户确认一次性令牌。
+工具只接受完整任务或 Run ID；工具列表查询使用 ID 模式，不读写人工命令的数字选择快照，
+并行查询各自返回的完整 ID 不依赖查询完成顺序。人工 `/schedule` 命令保留原有数字选择语义。
 固定句式仍由 `parseNaturalScheduledTaskDraft` 直接解析，不再创建后台临时 Thread。
 重命名、暂停和恢复不会改变列表序号，成功后保留当前快照供连续管理；创建和删除会使快照失效。
 每个 Surface Actor 在同一 Conversation 最多保留 100 个未删除任务；创建预览和确认都会复核该固定上限。
@@ -177,12 +251,15 @@ Conversation，数字选择器只使用最近五分钟的内存快照，完整 I
 Thread 返回稳定概览与详情；命令结果携带工具、资源或模板的有界分页搜索视图，OAuth 登录不自动
 重试、要求当前会话已经绑定 Thread，且只对共享能力判断允许的认证状态开放；详情结果保留用户本次使用的原始选择器，供 Surface
 生成可继续执行的登录、浏览和资源读取命令；Bearer Token 返回结构化认证结果并明确提示无需 OAuth，
-资源读取只展示已经隐藏常见凭据的有界文本或二进制元数据。
-Plugin 列表与详情只查询当前 Workspace 已安装项，
+资源读取只展示已经隐藏常见凭据的有界文本或二进制元数据；请求/内容/目录/模板 URI 也在 Client 输出投影脱敏，
+实际读取仍使用用户提交的原 URI，展示值不能用作新的读取身份。
+Plugin 列表与详情只查询当前 Provider 实例在当前 Workspace 的已安装项，
+会话尚未解析出 Provider 时要求先通过 `/model` 选择，不回退到官方实例；
 详情只使用同一次 `plugin/installed` 返回的安全摘要，能力与适用套餐有界展示，不读取本机路径或远端 URL；
 Application 对同一已安装目录提供每页 8 项的本地分页过滤和只含需处理项的健康归约，保留原目录全局
-数字选择器，不调用 `plugin/search`；同时保留 Marketplace 加载失败计数，并仅在互斥区内确认仍为
-OpenAI Thread 后发送官方 mention；
+数字选择器，不调用 `plugin/search`；同时保留 Marketplace 加载失败计数，在互斥区内解析并发送官方 mention，
+支持官方与第三方；自动恢复确定实际 Thread 后与最终 start/steer 提交前再次复核 Provider 与解析时一致，
+变化时拒绝并要求重发，不借用主实例的账户可用状态放行其他 Provider；
 三个 Surface 共用同一 Application 边界。
 成功启动 Turn 后，模型、思考等级、服务层级和协作模式以 App Server 的 Thread 设置为准；
 Gateway 重启时通过恢复 Thread 和设置通知重新取得这些设置。`/plan` 无参数切换
@@ -214,7 +291,7 @@ Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安
 MCP 查询与配置刷新只依赖 `McpQueryPort`；Application 从官方详情归约只含需处理项与提示的健康
 摘要，连接失败、取消或工具发现失败只建议显式刷新，并把刷新交给 Client，不把运行状态读取冒充远端网络探测，也不接收工具发现错误正文。官方状态分页、Thread 配置上下文、OAuth
 URL 校验、资源限长与响应裁剪由 Client 适配器处理，渠道查询分页与搜索由共享命令结果表达。Plugin 查询与调用只依赖
-`PluginQueryPort`，Workspace、可用性与调用时的 Provider 限制由 Application 执行。
+`PluginQueryPort`，Workspace、可用性与调用时的 Provider 一致性由 Application 执行。
 Permission Profile 查询只依赖 `PermissionQueryPort`；CWD、分页和官方响应裁剪由 Client 处理。
 命令成功文案、命令菜单说明和平台交互形式由各 Surface 维护，并通过类型穷尽检查保持完整。
 `/whoami`、交互取消、图片下载等平台能力不属于通用会话命令，继续由具体 Surface 实现。

@@ -22,7 +22,7 @@ import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatTokens, formatUsageTokens, formatTotalUsage } from "@/lib/format"
+import { formatTokens, formatTotalUsage } from "@/lib/format"
 import type { Translate } from "@/lib/i18n/messages"
 import { fillRecentDays, usageTrendRows, type UsageTrendRow } from "@/lib/trend"
 import type { DailyUsageRow, RangeName, UsageTrendResponse } from "@/lib/types"
@@ -113,14 +113,17 @@ function UsageTrendCard({
               <XAxis dataKey="period" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} interval="preserveStartEnd" tickFormatter={(period) => String(period).slice(granularity === "hour" ? 11 : 5)} />
               <YAxis yAxisId="input" domain={[0, "auto"]} tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
               <YAxis yAxisId="output" orientation="right" domain={[0, "auto"]} tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} tick={{ style: { fill: "var(--color-outputTokens)" } }} />
-              <ChartTooltip filterNull={false} content={<ChartTooltipContent formatter={(_value, name, item) => {
+              <ChartTooltip filterNull={false} content={({ payload, active, label }) => {
+                const visible = payload?.filter(item => typeof item.value === "number" && item.value !== 0)
+                return visible?.length ? <ChartTooltipContent active={active} label={label} payload={visible} formatter={(_value, name, item) => {
                 const row = item.payload as UsageTrendRow
                 const key = String(name)
-                const value = key === "inputTokens" ? formatUsageTokens(row.inputTokens ?? 0, row.requestCount, row.usageCoverage.inputMissingRequestCount)
-                  : key === "outputTokens" ? formatUsageTokens(row.outputTokens ?? 0, row.requestCount, row.usageCoverage.outputMissingRequestCount)
+                const value = key === "inputTokens" ? formatTokens(row.inputTokens)
+                  : key === "outputTokens" ? formatTokens(row.outputTokens)
                   : formatTokens(row.cachedInputTokens)
-                return <span>{chartConfig[key]?.label}: {value}</span>
-              }} />} />
+                return value ? <span>{chartConfig[key]?.label}: {value}</span> : null
+                }} /> : null
+              }} />
               <Area yAxisId="input" dataKey="inputTokens" type="monotone" stroke="var(--color-inputTokens)" fill="url(#fillInput)" dot={data.length === 1} />
               <Area yAxisId="input" dataKey="cachedInputTokens" type="monotone" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" dot={data.length === 1} />
               <Area yAxisId="output" dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} dot={data.length === 1} />
@@ -216,13 +219,14 @@ function ActivityHeatmapCard({
                 tooltips={{
                   activity: { text: (activity) => {
                     const row = rows.find(item => item.day === activity.date)!
-                    return t("overview.heatmapActivity", { date: activity.date, tokens: formatTotalUsage(row) })
+                    const tokens = formatTotalUsage(row)
+                    return tokens ? t("overview.heatmapActivity", { date: activity.date, tokens }) : activity.date
                   } },
                 }}
               />
             </div>
             <p className="mt-2 text-center text-xs text-muted-foreground">
-              {t("overview.heatmapSummary", { total: formatTotalUsage(totalUsage), days: activeDays })}
+              {t("overview.heatmapSummary", { total: formatTotalUsage(totalUsage), days: activeDays }).split(" · ").filter((_, index) => index === 0 ? Boolean(formatTotalUsage(totalUsage)) : activeDays > 0).join(" · ")}
             </p>
           </>
         )}

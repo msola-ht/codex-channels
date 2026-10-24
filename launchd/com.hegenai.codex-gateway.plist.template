@@ -25,6 +25,7 @@
     <string>1</string>
     <key>CODEX_BINARY</key>
     <string>__CODEX_BINARY__</string>
+    __CODEX_HOME_ENVIRONMENT__
     <key>PATH</key>
     <string>__LAUNCHD_PATH__</string>
   </dict>

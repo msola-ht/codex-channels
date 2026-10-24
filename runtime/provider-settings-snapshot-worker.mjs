@@ -3,11 +3,12 @@ import { lstatSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 import { codexHomePath } from "./codex-home.mjs";
-import { aggregateProviderId, aggregateProviderMaterialFiles, readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
+import { AggregateProviderTopologyChangedError, aggregateProviderId, aggregateProviderMaterialFiles, readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
 import { loadManagedModelProviderDefinitions, loadManagedModelProviderWatcherDefinitions } from "./model-provider-definitions.mjs";
 import { managedProviderDirectory, managedProviderMarkerPath, readManagedMarker, validateConfiguredModelProviders } from "./model-provider-runtime.mjs";
 import { readCodexConfigFile } from "./provider-file-access.mjs";
 import { readPrivateFileSync } from "./private-file.mjs";
+import { readProviderWebSearchFingerprint } from "./provider-web-search.mjs";
 import { withWindowsAclDeadline, closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "./windows-acl-bridge.mjs";
 
 if (!parentPort) throw new Error("Provider settings worker requires a parent");
@@ -25,20 +26,30 @@ async function close() {
 }
 
 function fingerprints() {
+  let aggregateRestartRequired = false;
   const files = new Map();
   const groups = new Map();
+  const configuredProviders = new Set();
   const home = codexHomePath(environment);
   for (const definition of loadManagedModelProviderWatcherDefinitions(environment)) {
+    const marker = readManagedMarker(environment, definition);
+    if (marker) configuredProviders.add(definition.id);
     const paths = [join(managedProviderDirectory(environment, definition), definition.catalogFileName)];
     if ("profileFileName" in definition) paths.push(
-      join(home, readManagedMarker(environment, definition)?.mode === "exclusive" ? "config.toml" : definition.profileFileName),
+      join(home, marker?.mode === "exclusive" ? "config.toml" : definition.profileFileName),
       managedProviderMarkerPath(environment, definition),
     );
+    if ("profileFileName" in definition) paths.push(`${paths[1]}.search-pending`);
     groups.set(definition.id, [...new Set([...(groups.get(definition.id) ?? []), ...paths])]);
     for (const path of paths) files.set(path, { path, maximumBytes: path === paths[0] ? 2_097_152 : 1_048_576 });
   }
   if (aggregateMembers.length) {
-    for (const file of aggregateProviderMaterialFiles(environment, aggregateMembers)) files.set(file.path, file);
+    try {
+      for (const file of aggregateProviderMaterialFiles(environment, aggregateMembers)) files.set(file.path, file);
+    } catch (error) {
+      if (!(error instanceof AggregateProviderTopologyChangedError)) throw error;
+      aggregateRestartRequired = true;
+    }
   }
   if (files.size > maximumSnapshotFiles) throw new Error("Provider settings file budget exceeded");
   let bytes = 0;
@@ -60,10 +71,13 @@ function fingerprints() {
         return [path, createHash("sha256").update(content).digest("hex")];
       } catch (error) { if (error?.code === "ENOENT") return [path, "missing"]; throw error; }
     });
+    // Registered accounts without a marker are not configured for Codex yet.
+    // Keep watching their material paths so adding the marker changes the digest.
+    if (configuredProviders.has(provider)) values.push(["provider-web-search", readProviderWebSearchFingerprint(provider, environment)]);
     digests.set(provider, createHash("sha256").update(JSON.stringify(values)).digest("hex"));
   }
-  if (aggregateMembers.length) digests.set(aggregateProviderId, readAggregateProviderSettingsFingerprint(environment, aggregateMembers));
-  return [...digests];
+  if (aggregateMembers.length && !aggregateRestartRequired) digests.set(aggregateProviderId, readAggregateProviderSettingsFingerprint(environment, aggregateMembers));
+  return { fingerprints: [...digests], aggregateRestartRequired };
 }
 
 parentPort.on("message", ({ deadline, operation }) => {
@@ -82,7 +96,7 @@ parentPort.on("message", ({ deadline, operation }) => {
       if (JSON.stringify(visibleProviders) !== JSON.stringify(loadManagedModelProviderDefinitions(environment).map(definition => definition.id))) {
         throw new Error("Provider settings topology changed during validation");
       }
-      return { ok: true, visibleProviders, fingerprints: after };
+      return { ok: true, visibleProviders, ...after };
     });
     parentPort.postMessage(snapshot);
   } catch { parentPort.postMessage({ ok: false, phase }); }

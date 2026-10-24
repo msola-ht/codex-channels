@@ -1,4 +1,3 @@
-import { downloadClineRelayCatalog, saveClineRelayCatalog } from "./cline-relay-catalog.mjs";
 import { openQueueStream } from "./webui-queue-events.mjs";
 import { watchRelayChanges } from "../runtime/model-relay-control.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
@@ -10,6 +9,7 @@ import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
 import { managementSecurityHeaders } from "./management-security.mjs";
 import { probeRelayReasoning } from "./relay-reasoning-probe.mjs";
+import { webuiLogger } from "./webui-logger.mjs";
 
 const activeReasoningProbes = new WeakSet();
 const reasoningProbe = z.strictObject({ revision: z.string().regex(/^[a-f0-9]{64}$/u), model: z.string().max(265), protocol: z.enum(["chat", "responses"]) });
@@ -29,7 +29,24 @@ const mutation = z.discriminatedUnion("command", [
 });
 const envelope = z.strictObject({ input: mutation, revision: z.string().regex(/^[a-f0-9]{64}$/u), confirmationToken: z.string().max(128).optional() });
 
-export async function routeRelayManagement({ environment, maximumBodyBytes, openMetricsStore, path, principalId, request, response, state }) {
+async function readForRequest(request, response, read) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  request.once("aborted", cancel);
+  response.once("close", cancel);
+  if (request.aborted || response.destroyed) cancel();
+  try {
+    controller.signal.throwIfAborted();
+    const result = await read(controller.signal);
+    controller.signal.throwIfAborted();
+    return result;
+  } finally {
+    request.off("aborted", cancel);
+    response.off("close", cancel);
+  }
+}
+
+export async function routeRelayManagement({ environment, maximumBodyBytes, readMetrics, path, principalId, request, response, state }) {
   if (path === "/relay/reasoning-probe" && request.method === "POST") {
     if (new URL(request.url, "http://localhost").search) throw new ApiError(400, "relay_probe_invalid", "Relay 思考探测参数无效");
     let body;
@@ -97,33 +114,6 @@ export async function routeRelayManagement({ environment, maximumBodyBytes, open
     }
     return true;
   }
-  if (path === "/relay/catalog/update" && request.method === "POST") {
-    if (new URL(request.url, "http://localhost").search || !z.strictObject({}).safeParse(await readJsonBody(request, maximumBodyBytes)).success) {
-      throw new ApiError(400, "relay_invalid", "Cline 目录更新参数无效");
-    }
-    try { state.audit.assertWritable(); }
-    catch { throw new ApiError(503, "management_audit_unavailable", "审计不可用，未更新目录"); }
-    const controller = new AbortController();
-    const cancel = () => controller.abort();
-    response.once("close", cancel);
-    const signal = globalThis.AbortSignal.any([controller.signal, globalThis.AbortSignal.timeout(25_000)]);
-    try {
-      const catalog = await downloadClineRelayCatalog(environment, signal);
-      signal.throwIfAborted();
-      const result = await withRelayManagementTransaction(environment, async () => {
-        signal.throwIfAborted();
-        state.audit.assertWritable();
-        return { activation: "saved", catalog: saveClineRelayCatalog(catalog, environment) };
-      });
-      let auditStatus = result.cleanupStatus === "failed" ? "failed" : "recorded";
-      try { state.audit.record({ sessionId: principalId, source: "webui", operation: "relay.catalog.update",
-        inputFingerprint: fingerprintManagementValue({ commit: catalog.commit }), phase: "completed", resultCode: "saved", recovery: "none" }); }
-      catch { auditStatus = "failed"; }
-      sendManagementJson(response, 200, { catalog: result.catalog, auditStatus });
-    } catch { throw new ApiError(502, "relay_invalid", "Cline 目录下载或保存失败，原目录保留"); }
-    finally { response.off("close", cancel); }
-    return true;
-  }
   if (path === "/relay/queue/events" && request.method === "GET") {
     if (new URL(request.url, "http://localhost").search) throw new ApiError(400, "relay_invalid", "Relay 管理参数无效");
     const { configPath } = locateUserConfig(environment);
@@ -131,11 +121,12 @@ export async function routeRelayManagement({ environment, maximumBodyBytes, open
     return true;
   }
   if (path === "/relay/queue" && request.method === "GET") {
-    sendManagementJson(response, 200, await readRelayQueue(environment)); return true;
+    const queue = await readForRequest(request, response, signal => readRelayQueue(environment, { signal }));
+    sendManagementJson(response, 200, queue); return true;
   }
   if (path === "/relay" && request.method === "GET") {
     const snapshot = readRelayManagement(environment);
-    const status = await manageModelRelay({ command: "status" }, environment);
+    const status = await readForRequest(request, response, signal => manageModelRelay({ command: "status" }, environment, { signal }));
     const runtime = status.result === "status" ? {
       state: "running", listening: status.listening, configurationValid: status.configurationValid,
       active: status.active, waiting: status.queue.waiting, uploading: status.queue.pending - status.queue.waiting,
@@ -146,15 +137,16 @@ export async function routeRelayManagement({ environment, maximumBodyBytes, open
     const observedAtMs = Date.now();
     const startAtMs = observedAtMs - 24 * 60 * 60 * 1000;
     let usage = null;
-    let store;
     try {
-      store = openMetricsStore(environment, observedAtMs);
-      usage = { observedAtMs, startAtMs, callers: store.relayCallerUsage(
-        snapshot.callers.map(caller => ({ callerId: caller.caller_id, keyId: caller.key_id })), startAtMs, observedAtMs,
-      ) };
-    } catch {
+      const callers = await readMetrics({ operation: "relayUsage", nowMs: observedAtMs, startAtMs,
+        callers: snapshot.callers.map(caller => ({ callerId: caller.caller_id, keyId: caller.key_id })),
+      }, response);
+      usage = { observedAtMs, startAtMs, callers };
+    } catch (error) {
+      if (response.destroyed || state.shutdownController.signal.aborted) return true;
       // 指标不可用不阻断 Key 管理，也不伪造零调用。
-    } finally { store?.close(); }
+      webuiLogger.warn({ event: "relay.metrics-unavailable", code: error instanceof ApiError ? error.code : "metrics_read_unavailable" }, "Relay 用量读取暂不可用");
+    }
     sendManagementJson(response, 200, { ...snapshot, runtime, usage }); return true;
   }
   if (!["/relay/preview", "/relay/apply"].includes(path) || request.method !== "POST") return false;

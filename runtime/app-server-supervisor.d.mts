@@ -23,6 +23,13 @@ export interface AppServerProviderLease {
   close(): Promise<void>;
 }
 
+export interface AppServerImageUploadRoute {
+  endpoint: string;
+  modelEndpoint: string;
+  revision: string;
+  authorization: string;
+}
+
 export type AppServerProviderReleaseResult =
   | { released: true; reason: "released" }
   | { released: false; reason: "leased" | "not-running" };
@@ -51,6 +58,7 @@ export class AppServerSupervisorOwner {
       releaseProvider?: (provider: string) => Promise<boolean>;
       applyProviderSettings?: (provider: string, signal: AbortSignal, canApply: () => boolean) => Promise<AppServerProviderSettingsResult>;
       providerSettingsSnapshot?: (provider: string) => AppServerProviderSettingsSnapshot | undefined;
+      imageUploadRoute?: (provider: string, signal: AbortSignal) => Promise<AppServerImageUploadRoute>;
       attachDesktopApp?: (attachment: {
         provider: string;
         appPath: string;
@@ -70,17 +78,24 @@ export class AppServerSupervisorOwner {
 export function appServerSupervisorSocketPath(primarySocketPath: string): string;
 export function inspectAppServerSupervisor(
   primarySocketPath: string,
+  signal?: AbortSignal,
 ): Promise<InspectedAppServerTopology | undefined>;
 export function inspectAppServerSupervisorState(
   primarySocketPath: string,
+  signal?: AbortSignal,
 ): Promise<AppServerSupervisorInspection>;
 export function ensureAppServerProvider(
   primarySocketPath: string,
   provider: string,
+  signal?: AbortSignal,
 ): Promise<void>;
+export function readAppServerImageUploadRoute(
+  primarySocketPath: string, provider: string, signal?: AbortSignal,
+): Promise<AppServerImageUploadRoute>;
 export function acquireAppServerProviderLease(
   primarySocketPath: string,
   provider: string,
+  signal?: AbortSignal,
 ): Promise<AppServerProviderLease>;
 export function acquireMacDesktopAppHostLease(
   primarySocketPath: string,
@@ -90,10 +105,12 @@ export function acquireMacDesktopAppHostLease(
     appPath: string;
     toolsEnabled: boolean;
   },
+  signal?: AbortSignal,
 ): Promise<AppServerProviderLease>;
 export function releaseAppServerProvider(
   primarySocketPath: string,
   provider: string,
+  signal?: AbortSignal,
 ): Promise<AppServerProviderReleaseResult>;
 export function applyAppServerProviderSettings(
   primarySocketPath: string,

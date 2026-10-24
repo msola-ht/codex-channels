@@ -103,7 +103,7 @@ export async function listPrimaryProviders({
     return;
   }
 
-  output.write("\nCodex Connect 自定义 Provider（Codex 兼容 / Responses）\n");
+  output.write("\nCodex Connect 自定义提供商（官方模型目录 / 自定义模型目录）\n");
   output.write(`当前主实例：${activeLabel}\n`);
   if (state.customProviders.fixedCandidates.length === 0) {
     output.write("自定义固定候选：无\n");
@@ -130,7 +130,8 @@ export async function listPrimaryProviders({
   }
   output.write(
     "\n设为固定主 Provider：codexc provider switch <Provider ID>；"
-    + "新增：codexc provider add；编辑：codexc setup → 模型与提供商 → 第三方 Provider → Codex 兼容 Provider 接入或自定义模型 Provider 接入 → 编辑。\n",
+    + "新增：codexc provider add（官方模型目录）或 codexc provider add --custom-models（自定义模型目录）；"
+    + "编辑：codexc setup → 模型与提供商 → 第三方提供商 → 自定义提供商 → 编辑。\n",
   );
 }
 
@@ -236,7 +237,7 @@ export async function removePrimaryProvider(
     { environment, createClient, preview },
   );
   if (result.target.state === "orphan-catalog") {
-    output.write(`已清理 ${result.target.id} 的残留模型目录、私有 Profile 与恢复备份。\n`);
+    output.write(`Provider ${result.target.id} 配置已不存在，已执行其精确残留清理。\n`);
   } else if (result.target.state === "stale-switching") {
     output.write(`已清理缺失 Profile 的自定义切换 Provider ${result.target.id}。\n`);
   } else if (result.target.state === "switching") {
@@ -268,9 +269,19 @@ export async function removePrimaryProvider(
   if (result.warnings.some(({ code }) => code === "credential-cleanup-failed")) {
     output.write(`Provider ${result.target.id} 已删除，但私有凭据版本无法安全检查或清理，文件保持保留；请检查其 primary-credentials 目录。\n`);
   }
+  if (result.warnings.some(({ code }) => code === "catalog-cleanup-failed")) {
+    output.write(`Provider ${result.target.id} 配置已删除，但模型目录或恢复材料清理未完成；请修复对应文件权限或类型后再次运行 codexc provider remove ${result.target.id}。\n`);
+  }
+  if (result.warnings.some(({ code }) => code === "metadata-cleanup-failed")) {
+    output.write(`Provider ${result.target.id} 配置已删除，但 provider.json 元数据清理未完成；请修复对应文件权限或类型后再次运行 codexc provider remove ${result.target.id}。\n`);
+  }
+  if (result.warnings.some(({ code }) => code === "lock-cleanup-failed")) {
+    output.write(`Provider ${result.target.id} 删除处理已完成，但管理锁释放失败；请检查锁文件权限和持有进程，不要重复删除。\n`);
+  }
   if (result.activation === "restart-all") {
     writeCliRemediationRestartAll();
   }
+  return result;
 }
 
 export async function addPrimaryProvider(options = {}) {
@@ -286,28 +297,31 @@ export async function runCustomPrimaryProviderMenu({
   prompts = clackPrompts,
   allowBack = false,
   createClient = createCodexUserConfigClient,
-  catalogKind = "official",
+  catalogKind,
 } = {}) {
+  let lastAction;
   while (true) {
     const action = await prompts.select({
-      message: catalogKind === "custom" ? "自定义提供商" : "Codex 兼容 Provider",
+      message: catalogKind === "official" ? "Codex 兼容 Provider" : "自定义提供商",
       showInstructions: false,
+      initialValue: lastAction,
       options: [
-        { value: "add", label: "新增", hint: "新增固定或切换 Provider" },
-        { value: "edit", label: "编辑", hint: "修改已有 Provider；Provider ID 保持不变" },
-        ...(catalogKind === "custom" ? [{ value: "recover", label: "恢复未完成的模型目录保存", hint: "先停止服务；核对当前配置后恢复" }] : []),
-        { value: "list", label: "列表", hint: "查看主实例、切换 Provider、固定候选与备份" },
-        { value: "switch", label: "设为固定主 Provider", hint: "切换模式将转换为固定模式" },
-        { value: "official", label: "恢复官方主 Provider", hint: "固定候选移入备份；切换 Provider 保持启用" },
-        { value: "remove", label: "删除", hint: "删除 Provider；删除当前固定主 Provider 时恢复官方" },
+        { value: "list", label: "查看提供商", hint: "查看当前主实例、切换模式、固定候选与备份" },
+        { value: "add", label: "添加提供商", hint: catalogKind === undefined ? "先选择模型目录，再选择运行模式" : "选择固定模式或切换模式" },
+        { value: "edit", label: "编辑提供商", hint: "连接、凭据与运行模式；自定义目录还可管理模型" },
+        { value: "switch", label: "设为固定主提供商", hint: "切换模式将转换为固定模式" },
+        { value: "official", label: "恢复 OpenAI 为主提供商", hint: "固定候选移入备份；切换提供商保持启用" },
+        ...(catalogKind !== "official" ? [{ value: "recover", label: "恢复未完成的模型目录保存", hint: "自定义目录；先停止服务并核对当前配置" }] : []),
+        { value: "remove", label: "移除本地提供商配置", hint: "移除当前固定主提供商时恢复 OpenAI" },
         ...(allowBack
-          ? [{ value: "back", label: "返回", hint: "返回第三方 Provider 设置" }]
+          ? [{ value: "back", label: "返回", hint: "返回第三方提供商" }]
           : []),
       ],
     });
     if (prompts.isCancel(action) || action === "back") {
       return { action: allowBack ? "back" : "cancel" };
     }
+    lastAction = action;
     if (action === "recover") {
       const id = await prompts.text({ message: "自定义提供商 ID" });
       if (prompts.isCancel(id)) continue;
@@ -317,17 +331,34 @@ export async function runCustomPrimaryProviderMenu({
       continue;
     }
     if (action === "add") {
-      const result = await addPrimaryProvider({
-        catalogKind,
-        environment,
-        output,
-        prompts,
-        createClient,
-      });
-      if (result === undefined || result?.action !== undefined) {
-        continue;
+      let lastCatalogKind;
+      while (true) {
+        const selectedCatalogKind = catalogKind ?? await prompts.select({
+          message: "添加提供商使用哪个模型目录？",
+          showInstructions: false,
+          initialValue: lastCatalogKind,
+          options: [
+            { value: "official", label: "Codex 官方模型目录", hint: "上游模型 ID 必须在 Codex 官方目录中；Responses 接口" },
+            { value: "custom", label: "自定义模型目录", hint: "自行声明模型与能力；Responses 或 Chat Completions 接口" },
+            { value: "back", label: "返回", hint: "返回自定义提供商" },
+          ],
+        });
+        if (prompts.isCancel(selectedCatalogKind) || selectedCatalogKind === "back") break;
+        lastCatalogKind = selectedCatalogKind;
+        const result = await addPrimaryProvider({
+          catalogKind: selectedCatalogKind,
+          environment,
+          output,
+          prompts,
+          createClient,
+        });
+        if (result === undefined || result?.action !== undefined) {
+          if (catalogKind === undefined) continue;
+          break;
+        }
+        output.write("已保存自定义 Provider；可继续选择其他操作或返回。\n");
+        break;
       }
-      output.write("已保存自定义 Provider；可继续选择其他操作或返回。\n");
       continue;
     }
     if (action === "edit") {
@@ -514,7 +545,7 @@ export async function runPrimaryProviderCli(
     const [id, action, yes] = rest;
     if (!id || !["keep", "rollback"].includes(action) || rest.length > 3 || (yes !== undefined && yes !== "--yes")) throw new Error("用法：codexc provider recover <Provider ID> <keep|rollback> [--yes]");
     if (yes !== "--yes") {
-      const confirmed = await prompts.confirm({ message: `恢复 ${id} 模型目录（如有上下文联动事务，将同时恢复关联的 DS、CP、CLP 目录及 Profile）：${action === "keep" ? "保留新目录" : "回滚上一目录"}？请先停止对应服务并核对配置。`, initialValue: false });
+      const confirmed = await prompts.confirm({ message: `恢复 ${id} 模型目录及对应配置：${action === "keep" ? "保留新目录" : "回滚上一目录"}？请先停止对应服务并核对配置；旧上下文联动事务会恢复其记录的全部关联目录。`, initialValue: false });
       if (prompts.isCancel(confirmed) || confirmed !== true) return;
     }
     await recoverResponsesProviderCatalog(id, action, environment);
@@ -551,7 +582,10 @@ export async function runPrimaryProviderCli(
     if (rest.length !== 1) {
       throw new Error("用法：codexc provider remove <Provider ID>");
     }
-    await removePrimaryProvider(rest[0], { environment, output, createClient });
+    const result = await removePrimaryProvider(rest[0], { environment, output, createClient });
+    if (result?.warnings.length > 0) {
+      throw new Error("Provider 配置已删除，但清理未全部完成；请按上方提示核对已完成操作与残留状态。");
+    }
     return;
   }
   throw new Error(`未知子命令：${subcommand}\n${primaryProviderUsage}`);

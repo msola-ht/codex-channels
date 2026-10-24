@@ -1,4 +1,11 @@
+import { createHmac, randomBytes } from "node:crypto";
+import { join, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import { loadManagedModelProviderDefinitions, managedProviderAccountFamilyForDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
+  managedProviderDirectory,
+  managedProviderMarkerPath,
   readManagedModelProviderCatalogContent,
   restoreManagedModelProviderCatalogContent,
   loadManagedModelProviderSettings,
@@ -11,6 +18,9 @@ import {
   writeCodexUserConfigEdits,
 } from "./codex-user-config.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
+
+const revisionSecret = randomBytes(32);
 
 export class ModelProviderDefaultManagementError extends Error {
   constructor(code, field, message, options) {
@@ -23,12 +33,9 @@ export class ModelProviderDefaultManagementError extends Error {
 
 export function previewManagedProviderDefaultChange(
   input,
-  {
-    environment = process.env,
-    loadProviders = loadManagedModelProviderSettings,
-  } = {},
+  options = {},
 ) {
-  return publicPreview(buildPlan(input, loadProviders(environment)));
+  return publicPreview(buildPlan(input, options));
 }
 
 export async function applyManagedProviderDefaultChange(
@@ -54,31 +61,55 @@ async function applyManagedProviderDefaultChangeUnlocked(
     restoreCatalogContent = restoreManagedModelProviderCatalogContent,
     writeConfigEdits = writeCodexUserConfigEdits,
     readConfigSnapshot = readCodexUserConfigSnapshot,
+    loadDefinitions = loadManagedModelProviderDefinitions,
+    preview,
   } = {},
 ) {
-  const plan = buildPlan(input, loadProviders(environment));
+  const plan = buildPlan(input, { environment, loadProviders, loadDefinitions });
+  const confirmed = { ...preview };
+  delete confirmed.operation;
+  if (!preview || !isDeepStrictEqual(confirmed, publicPreview(plan))) {
+    throw invalid("stale-preview", "revision", "账户模型、共享目录或相关配置已变化，请重新预览并确认");
+  }
   try {
+    await assertProviderFileSnapshots(plan.snapshots);
+    if (!plan.willChange) {
+      return { action: "unchanged", ...publicPreview(plan) };
+    }
     if (plan.provider.mode === "switching") {
       writeProfileDefault(plan.provider.provider, plan.settings, environment);
     } else {
       const edits = exclusiveConfigEdits(plan.model.model);
       const snapshot = await readConfigSnapshot(environment);
+      await assertProviderFileSnapshots(plan.snapshots);
       const previousContent = readCatalogContent(plan.provider.provider, environment);
       writeCatalogSettings(plan.provider.provider, plan.settings, environment);
+      // A failed asynchronous config write must not roll back a later edit to
+      // the catalog, its mirrored profiles, membership, or primary selection.
+      let rollbackSnapshots;
+      try {
+        rollbackSnapshots = snapshotProviderFiles(plan.snapshots.map(entry => entry.path), environment);
+      } catch (error) {
+        throw invalid("save-unconfirmed", "action", "目录已保存，但无法确认恢复材料；请核对当前配置与目录备份，勿自动重试", error);
+      }
+      let current;
       try {
         await writeConfigEdits(environment, edits, { expectedVersion: snapshot.version });
       } catch (error) {
-        let current;
         try {
           current = await readConfigSnapshot(environment);
         } catch (confirmationError) {
-          throw new AggregateError(
-            [error, confirmationError],
-            "Codex 配置写入结果无法确认，模型目录保持新设置",
-            { cause: confirmationError },
-          );
+          throw invalid("save-unconfirmed", "action", "默认模型保存结果无法确认，已保留当前配置与目录备份；请核对后处理，勿自动重试", confirmationError);
+        }
+        if (current.config.model_provider !== plan.provider.provider) {
+          throw invalid("save-unconfirmed", "action", "保存期间主 Provider 已变化，已保留当前配置与目录备份；请核对后处理，勿自动重试", error);
         }
         if (!areCodexUserConfigEditsApplied(current.config, edits)) {
+          try {
+            await assertProviderFileSnapshots(rollbackSnapshots);
+          } catch (error) {
+            throw invalid("save-unconfirmed", "action", "保存后配置或目录存在后续修改，拒绝自动回滚；请核对当前文件与目录备份", error);
+          }
           try {
             restoreCatalogContent(plan.provider.provider, previousContent, environment);
           } catch (rollbackError) {
@@ -91,13 +122,35 @@ async function applyManagedProviderDefaultChangeUnlocked(
           throw error;
         }
       }
+      try {
+        current ??= await readConfigSnapshot(environment);
+        if (current.config.model_provider !== plan.provider.provider
+          || !areCodexUserConfigEditsApplied(current.config, edits)) {
+          throw new Error("主配置回读与已确认设置不一致");
+        }
+      } catch (error) {
+        throw invalid("save-unconfirmed", "action", "默认模型保存结果无法确认，已保留当前配置与目录备份；请核对后处理，勿自动重试", error);
+      }
+    }
+    try {
+      const observed = loadProviders(environment);
+      for (const member of plan.providers) {
+        const saved = observed.find(candidate => candidate.provider === member.provider);
+        const expectedDefault = member.provider === plan.provider.provider ? plan.model.model : member.model;
+        if (!saved || saved.mode !== member.mode || saved.model !== expectedDefault
+          || saved.models.find(candidate => candidate.model === plan.model.model)?.reasoningEffort !== plan.settings.reasoningEffort) {
+          throw new Error("账户默认模型或共享思考等级回读不一致");
+        }
+      }
+    } catch (error) {
+      throw invalid("save-unconfirmed", "action", "默认模型或共享等级保存结果无法确认，已保留当前配置与目录备份；请核对后处理，勿自动重试", error);
     }
   } catch (error) {
     if (error instanceof ModelProviderDefaultManagementError) throw error;
     throw invalid(
       "operation-failed",
       "action",
-      error instanceof Error ? error.message : String(error),
+      "默认模型设置未完成；请检查提供商配置与目录备份后重新读取状态",
       error,
     );
   }
@@ -107,7 +160,33 @@ async function applyManagedProviderDefaultChangeUnlocked(
   };
 }
 
-function buildPlan(input, configured) {
+function buildPlan(input, {
+  environment = process.env,
+  loadProviders = loadManagedModelProviderSettings,
+  loadDefinitions = loadManagedModelProviderDefinitions,
+} = {}) {
+  const values = record(input);
+  if (Object.keys(values).some(key => !["provider", "model", "reasoningEffort"].includes(key))) {
+    throw invalid("invalid-input", "action", "默认模型设置包含不支持的字段；上下文请使用模型目录管理入口");
+  }
+  const providerId = requiredString(values.provider, "provider", "Provider 不能为空");
+  const definitions = loadDefinitions(environment);
+  const definition = definitions.find(candidate => candidate.id === providerId);
+  if (!definition) throw invalid("provider-not-configured", "provider", `第三方 Provider 未配置：${providerId}`);
+  const family = managedProviderAccountFamilyForDefinition(definition);
+  const members = definitions.filter(candidate => (candidate.storageId ?? candidate.id) === (definition.storageId ?? definition.id));
+  const catalogPath = join(managedProviderDirectory(environment, definition), definition.catalogFileName);
+  const snapshots = snapshotProviderFiles([
+    catalogPath, join(managedProviderDirectory(environment, definition), definition.catalogManifestFileName),
+    `${catalogPath}.settings-pending`,
+    join(codexHomePath(environment), "config.toml"),
+    ...members.flatMap(member => [join(codexHomePath(environment), member.profileFileName), managedProviderMarkerPath(environment, member)]),
+    ...(family ? [family.accountsFilePath(environment)] : []),
+  ], environment);
+  const configured = loadProviders(environment);
+  if (!isDeepStrictEqual(definitions, loadDefinitions(environment))) {
+    throw invalid("stale-preview", "revision", "账户注册表在预览期间发生变化，请重新预览");
+  }
   if (!Array.isArray(configured) || configured.length === 0) {
     throw invalid(
       "provider-not-configured",
@@ -115,8 +194,6 @@ function buildPlan(input, configured) {
       "尚未配置受管 Provider，请先在 Setup 中完成第三方账户接入",
     );
   }
-  const values = record(input);
-  const providerId = requiredString(values.provider, "provider", "Provider 不能为空");
   const provider = configured.find((candidate) => candidate.provider === providerId);
   if (provider === undefined) {
     throw invalid(
@@ -146,33 +223,34 @@ function buildPlan(input, configured) {
       `${model.displayName} 不支持思考等级：${reasoningEffort}`,
     );
   }
-  const windowPercent = values.windowPercent;
-  if (
-    windowPercent !== undefined
-    && (!Number.isInteger(windowPercent)
-      || windowPercent < 10
-      || windowPercent > 100)
-  ) {
-    throw invalid(
-      "invalid-window-percent",
-      "windowPercent",
-      `${provider.displayName} 模型上下文窗口百分比无效`,
-    );
-  }
-  const contextWindow = windowPercent === undefined
-    ? undefined
-    : Math.round(model.maxContextWindow * windowPercent / 100);
-  return {
+  const providers = configured.filter(candidate => members.some(member => member.id === candidate.provider));
+  const plan = {
     provider,
+    providers,
     model,
-    settings: contextWindow === undefined
-      ? { model: model.model, reasoningEffort }
-      : { model: model.model, reasoningEffort, contextWindow },
-    windowPercent,
+    settings: { model: model.model, reasoningEffort },
+    effects: {
+      defaultModelProviders: [provider.provider],
+      reasoningEffortProviders: providers.map(candidate => candidate.provider),
+      profileReasoningEffortProviders: providers.filter(candidate => candidate.mode === "switching"
+        && (candidate.provider === provider.provider || candidate.model === model.model)).map(candidate => candidate.provider),
+    },
     willChange: provider.model !== model.model
-      || provider.reasoningEffort !== reasoningEffort
-      || (windowPercent !== undefined && model.windowPercent !== windowPercent),
+      || model.reasoningEffort !== reasoningEffort,
+    snapshots,
   };
+  for (const snapshot of snapshots) {
+    const current = snapshot.readCurrent();
+    if (current === undefined || snapshot.content === undefined
+      ? current !== snapshot.content : !current.equals(snapshot.content)) {
+      throw invalid("stale-preview", "revision", "账户配置在预览期间发生变化，请重新预览");
+    }
+  }
+  plan.revision = createHmac("sha256", revisionSecret).update(JSON.stringify({
+    scope: resolve(codexHomePath(environment)), provider: providerId, model: modelId, reasoningEffort,
+    providers, snapshots: snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("base64") ?? null]),
+  })).digest("hex");
+  return plan;
 }
 
 function publicPreview(plan) {
@@ -189,14 +267,14 @@ function publicPreview(plan) {
       maxContextWindow: plan.model.maxContextWindow,
     },
     reasoningEffort: plan.settings.reasoningEffort,
-    ...(plan.windowPercent === undefined
-      ? {}
-      : { windowPercent: plan.windowPercent }),
-    ...(plan.settings.contextWindow === undefined
-      ? {}
-      : { contextWindow: plan.settings.contextWindow }),
+    revision: plan.revision,
+    effects: structuredClone(plan.effects),
+    before: {
+      defaultModel: plan.provider.model,
+      reasoningEffort: plan.model.reasoningEffort,
+    },
     willChange: plan.willChange,
-    activation: "restart-app-server",
+    activation: plan.willChange ? "restart-app-server" : "none",
   };
 }
 

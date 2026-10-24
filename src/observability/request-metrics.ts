@@ -1,7 +1,7 @@
 import type { GenerationTiming, RequestTimingSummary } from "../../runtime/request-timing.mjs";
 export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
-export type ModelRequestOperation = "response" | "compact";
+export type ModelRequestOperation = "response" | "compact" | "imageGeneration" | "imageEdit";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
 export interface RequestOutcomeCounts {
   completed: number;
@@ -17,6 +17,7 @@ export interface RequestInterruptionSummary {
   usageUnobserved: number;
 }
 export interface ModelRequestMetricSample {
+  activity?: import("../../runtime/request-activity.mjs").RequestActivity | null;
   /** 上游明确返回的诊断摘要；与可选报文转储独立，历史缺失为空。 */
   upstreamProvider?: string | null;
   upstreamAttemptCount?: number | null;
@@ -45,7 +46,7 @@ export interface ModelRequestMetricSample {
   reviewerTurnId?: string | null;
   model: string | null;
   serviceTier: string | null;
-  /** 出站请求层级；历史未采集时为空，不从响应推断。 */
+  /** 出站请求层级；完整解析确认未请求加速记 default，未采集为空，不从响应推断。 */
   requestServiceTier?: string | null;
   reasoningEffort: string | null;
   status: ModelRequestStatus;
@@ -70,6 +71,10 @@ export interface ModelRequestMetricSample {
   responseTimeMs?: number | null;
   generationTiming?: GenerationTiming | null;
   totalDurationMs?: number | null;
+  /** 本次逻辑请求实际发往模型上游的请求正文或 WebSocket 请求帧字节合计；未提交时为 null。 */
+  requestBytes?: number | null;
+  /** 最后一次实际出站模型请求的 origin + pathname；剔除凭据、查询和片段，历史或未发送时为 null。 */
+  upstreamUrl?: string | null;
   requestModel?: string | null;
   responseModel?: string | null;
   /** 本地转储定位符；缺失不按时间或 Thread/Turn 推断。 */
@@ -178,6 +183,11 @@ export interface ResponseUsageSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
+  /** Exact Turn's owned response requests; null values are missing observations, not Standard. */
+  serviceTierSummary?: {
+    requestCount: number;
+    requested: { value: string | null; observedCount: number; distinctCount: number };
+  };
   usageCoverage: UsageCoverage;
   performance?: RequestTimingSummary;
   requestOutcomes: RequestOutcomeCounts;
@@ -442,7 +452,8 @@ export type ModelRequestMetricsSortKey =
   | "error"
   | "inputTokens"
   | "outputTokens"
-  | "reasoningOutputTokens";
+  | "reasoningOutputTokens"
+  | "requestBytes";
 
 export interface StoredModelRequestMetricsPage {
   startAtMs: number;

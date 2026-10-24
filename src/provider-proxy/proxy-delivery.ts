@@ -18,12 +18,34 @@ export function waitForProxyOperation<T>(pending: Promise<T>, signal: AbortSigna
   });
 }
 
-export function writeResponseChunk(response: ServerResponse, chunk: Buffer, signal: AbortSignal, timeoutMs: number, backpressure?: () => void, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
-  return waitForDelivery(response, signal, timeoutMs, "drain", () => {
-    const written = response.write(chunk);
-    if (!written) backpressure?.();
-    return written;
-  }, stage);
+/** Bound downstream drain waiting; synchronous writes need no timer. */
+export async function writeResponseChunk(response: ServerResponse, data: string | Buffer, signal: AbortSignal, timeoutMs: number, backpressure?: () => void, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
+  signal.throwIfAborted();
+  if (response.destroyed || response.writableEnded) throw new Error("Response disconnected");
+  await new Promise<void>((resolve, reject) => {
+    let timer: NodeJS.Timeout | undefined;
+    let settled = false;
+    const cleanup = (): void => {
+      clearTimeout(timer); response.off("drain", drain); response.off("close", close); response.off("error", error);
+      signal.removeEventListener("abort", abort);
+    };
+    const error = (reason: unknown): void => {
+      if (settled) return;
+      settled = true; cleanup(); reject(reason instanceof Error ? reason : new Error("Response disconnected"));
+    };
+    const drain = (): void => { if (!settled) { settled = true; cleanup(); resolve(); } };
+    const close = (): void => error(new Error("Response disconnected"));
+    const abort = (): void => error(signal.reason);
+    response.once("drain", drain); response.once("close", close); response.once("error", error);
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      if (response.write(data)) drain();
+      else {
+        backpressure?.();
+        if (!settled) timer = setTimeout(() => error(new ModelRequestTimeoutError(stage)), timeoutMs);
+      }
+    } catch (reason) { error(reason); }
+  });
 }
 
 export function finishProxyResponse(response: ServerResponse, signal: AbortSignal, timeoutMs: number): Promise<void> {
@@ -50,7 +72,7 @@ function waitForDelivery(response: ServerResponse, signal: AbortSignal, timeoutM
   });
 }
 
-export function sendProxyWebSocket(target: WebSocket, data: RawData | string, isBinary: boolean, signal: AbortSignal, timeoutMs: number, backpressure?: () => void, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
+export function sendProxyWebSocket(target: WebSocket, data: RawData | string, isBinary: boolean, signal: AbortSignal, timeoutMs: number, backpressure?: () => void, stage: "delivery" | "terminal" = "delivery", submitted?: () => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => failed(new ModelRequestTimeoutError(stage)), timeoutMs);
     const cleanup = (): void => {
@@ -70,6 +92,7 @@ export function sendProxyWebSocket(target: WebSocket, data: RawData | string, is
         if (error) failed(error);
         else { cleanup(); resolve(); }
       });
+      submitted?.();
       if (target.bufferedAmount > 0) backpressure?.();
     } catch (error) { failed(error); }
   });

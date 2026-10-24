@@ -14,6 +14,8 @@ interface PendingQuestion {
   event: QuestionEvent;
   requestId?: string;
   cancelled: boolean;
+  actorId: string;
+  isAuthorized(): boolean;
   cancel(): void;
   timer: NodeJS.Timeout;
 }
@@ -23,6 +25,7 @@ interface AsyncQuestionOptions {
   timeoutMs: number;
   targetForThread(threadId: string): ConversationTarget | undefined;
   currentThread(target: ConversationTarget): string | undefined;
+  captureAuthorization(target: ConversationTarget): { actorId: string; isCurrent(): boolean } | undefined;
   submit(target: ConversationTarget, threadId: string, text: string, isCurrent: () => boolean): Promise<unknown>;
   warn(event: QuestionEvent, message: string): void;
   settled?(threadId: string): void;
@@ -38,13 +41,15 @@ export class AsyncQuestionCoordinator {
 
   constructor(private readonly options: AsyncQuestionOptions) {}
 
-  handleInput(event: ConversationInputEvent): void {
+  handleInput(event: ConversationInputEvent, streamIsCurrent = true): void {
     if ((event.type === "turn.completed" && event.status !== "completed")
       || event.type === "thread.reverted" || event.type === "thread.closed"
       || event.type === "thread.archived" || event.type === "thread.deleted") {
       this.cancelThread(event.threadId);
       return;
     }
+    // Queued notifications from a disconnected stream must not reopen cancelled questions.
+    if (!streamIsCurrent) return;
     if (event.type !== "item.agentMessage.completed" || event.delivery !== "async" || !event.questions) return;
     const target = this.options.targetForThread(event.threadId);
     if (target) this.handle({ ...event, target, questions: event.questions });
@@ -59,6 +64,11 @@ export class AsyncQuestionCoordinator {
       this.options.warn(event, "异步问题未打开：问题所属会话不是当前前台会话。");
       return;
     }
+    const authorization = this.options.captureAuthorization(event.target);
+    if (!authorization || !authorization.isCurrent()) {
+      this.options.warn(event, "异步问题未打开：无法确认原用户及工作区授权。");
+      return;
+    }
     if (this.pending.size >= 100) {
       this.options.warn(event, "待回答的异步问题过多，本次问题未打开。");
       return;
@@ -68,6 +78,8 @@ export class AsyncQuestionCoordinator {
     const pending: PendingQuestion = {
       event,
       cancelled: false,
+      actorId: authorization.actorId,
+      isAuthorized: () => authorization.isCurrent(),
       cancel,
       timer: setTimeout(() => this.cancel(pending), this.options.timeoutMs),
     };
@@ -90,7 +102,8 @@ export class AsyncQuestionCoordinator {
   }
 
   cancelStale(): void {
-    this.cancelMatching((pending) => this.options.currentThread(pending.event.target) !== pending.event.threadId);
+    this.cancelMatching((pending) => !pending.isAuthorized()
+      || this.options.currentThread(pending.event.target) !== pending.event.threadId);
   }
 
   hasPendingForThread(threadId: string): boolean {
@@ -143,13 +156,17 @@ export class AsyncQuestionCoordinator {
 
   private async ask(pending: PendingQuestion, cancelled: Promise<undefined>): Promise<void> {
     const { event } = pending;
+    const isCurrent = () => !pending.cancelled && !this.stopped && pending.isAuthorized()
+      && this.options.currentThread(event.target) === event.threadId;
     // All three existing channel forms support three questions per interaction.
     for (let offset = 0; offset < event.questions.length; offset += 3) {
-      if (pending.cancelled) return;
+      if (!isCurrent()) return;
       const questions = event.questions.slice(offset, offset + 3);
       const request: InteractionRequest = {
         type: "user-input",
         asynchronous: true,
+        expectedActorId: pending.actorId,
+        isCurrent,
         requestId: `async-question:${randomUUID()}`,
         threadId: event.threadId,
         turnId: event.turnId,
@@ -168,7 +185,7 @@ export class AsyncQuestionCoordinator {
       pending.requestId = request.requestId;
       const decision = await Promise.race([this.options.interactions.request(event.target, request), cancelled]);
       delete pending.requestId;
-      if (pending.cancelled || decision?.type !== "user-input") return;
+      if (!isCurrent() || decision?.type !== "user-input") return;
       const answers = request.questions.map((question) => {
         const values = decision.answers[question.id];
         return values?.length && values.every((value) => value.trim())
@@ -181,7 +198,7 @@ export class AsyncQuestionCoordinator {
           event.target,
           event.threadId,
           `异步问题回答：\n\n${answers.join("\n\n")}`,
-          () => !pending.cancelled && !this.stopped,
+          isCurrent,
         );
       } catch {
         this.options.warn(event, "异步回答未确认送达，请核对原会话后重新发送；Gateway 不会自动重发。");

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type {
   AdditionalFileSystemPermissions,
   AdditionalPermissionProfile,
@@ -115,6 +116,7 @@ function decodeCommandRequest(
   }
   const base = approvalIdentity(request, params);
   const command = nullableOptionalString(params?.command);
+  const cwd = nullableOptionalString(params?.cwd);
   const reason = nullableOptionalString(params?.reason);
   const additionalPermissions = parseOptionalPermissionProfile(
     params?.additionalPermissions,
@@ -134,6 +136,7 @@ function decodeCommandRequest(
   if (
     !base
     || !command.valid
+    || !cwd.valid
     || !reason.valid
     || !additionalPermissions.valid
     || !networkApprovalContext.valid
@@ -147,6 +150,7 @@ function decodeCommandRequest(
     type: "command",
     ...base,
     command: command.value,
+    cwd: cwd.value,
     reason: reason.value,
     additionalPermissions: additionalPermissions.value,
     networkApprovalContext: networkApprovalContext.value,
@@ -347,7 +351,12 @@ function parseMcpToolApproval(
   }
   const persist = parseMcpToolApprovalPersist(meta.persist);
   const parameters = parseMcpToolApprovalParameters(meta.tool_params_display);
-  if (!persist.valid || !parameters.valid) {
+  const rawParameters = asRecord(meta.tool_params);
+  if (!persist.valid || !parameters.valid || !rawParameters
+    || Object.keys(rawParameters).length !== parameters.value.length
+    || new Set(parameters.value.map(parameter => parameter.name)).size !== parameters.value.length
+    || parameters.value.some(parameter => !Object.hasOwn(rawParameters, parameter.name)
+      || !isDeepStrictEqual(rawParameters[parameter.name], parameter.value))) {
     return { kind: "invalid" };
   }
   return {
@@ -387,9 +396,6 @@ function parseMcpToolApprovalParameters(
   valid: true;
   value: McpToolApproval["parameters"];
 } | { valid: false } {
-  if (value === undefined) {
-    return { valid: true, value: [] };
-  }
   if (!Array.isArray(value)) {
     return { valid: false };
   }

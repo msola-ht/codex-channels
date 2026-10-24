@@ -22,6 +22,16 @@ import { sessionCleanupUsage as usage } from "./cli-command-usage.mjs";
 import { assertStateDatabaseSchema } from "./state-database.mjs";
 import { withCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
 
+const unclosedClients = new Set();
+async function closeClients(clients) {
+  const results = await Promise.allSettled([...clients].map(async client => {
+    unclosedClients.add(client);
+    await client.close();
+    unclosedClients.delete(client);
+  }));
+  return results.every(result => result.status === "fulfilled");
+}
+
 export async function runSessionCleanup(args, { environment = process.env, output = console, signal } = {}) {
   signal?.throwIfAborted();
   if (args.length === 0 || args.some((arg) => arg === "-h" || arg === "--help")) {
@@ -30,6 +40,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     return;
   }
   const { confirm, maxTurns, idleDays } = parseSessionCleanupArgs(args);
+  if (!(await closeClients(unclosedClients))) throw new Error("上次归档检查连接清理未确认，已拒绝启动新的扫描");
   if (confirm && (!process.stdin.isTTY || !process.stdout.isTTY)) {
     throw new Error("归档确认必须在交互终端执行；请先不加 --confirm 预览，再在本机终端加 --confirm 重试");
   }
@@ -39,7 +50,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
   const document = readGatewayConfig(config.configPath);
   const workspaces = readWorkspaceConfig(document).workspaces;
   const runtime = resolveAppServerRuntime(document, config.dataDir, environment);
-  const codexBinary = resolveExecutable(effectiveCodexBinary(document.codex.binary, environment), environment);
+  const codexBinary = resolveExecutable(effectiveCodexBinary(document.codex.binary, environment, config.dataDir), environment);
   const databasePath = resolveConfiguredPath(document.storage?.database_path, config.dataDir, "data/gateway.sqlite3");
   readBoundThreadIds(databasePath);
   const clients = new Map();
@@ -64,13 +75,12 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
         connectTimeoutMs: 3_000,
       });
       const client = new CodexAppServerClient(new JsonRpcClient(transport), {});
+      clients.set(provider, client);
       try {
         await client.connect();
       } catch (error) {
-        await client.close().catch(() => undefined);
         throw new Error("Provider " + provider + " 无法连接，已拒绝不完整扫描", { cause: error });
       }
-      clients.set(provider, client);
     };
     for (const entry of socketEntries) {
       if (entry.provider === runtime.primaryProvider || entry.provider !== aggregateProviderId) {
@@ -223,7 +233,11 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     return { maxTurns, idleDays, candidates, skipped, results };
   } finally {
     try { cache?.close(); }
-    finally { await Promise.all([...clients.values()].map((client) => client.close().catch(() => undefined))); }
+    finally {
+      if (!(await closeClients(clients.values()))) {
+        output.log("归档检查连接清理未确认，已保留资源归属；已报告的归档结果不变，请勿因此重复提交。");
+      }
+    }
   }
 }
 

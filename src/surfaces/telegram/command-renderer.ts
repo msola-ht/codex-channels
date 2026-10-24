@@ -10,7 +10,7 @@ import type {
 import {
   listProviders,
 } from "../../application/index.js";
-import { formatCodexProviderLabel, formatModelDisplayName, formatProviderModelSummary, formatServiceTier, modelListDisplayName, modelListEntry } from "../provider-format.js";
+import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTierSetting, modelListDisplayName, modelListEntry } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
@@ -94,14 +94,14 @@ export async function renderTelegramCommandResult(
             ? modelProviderSelectionText(result)
             : formatConversationModels(result),
           providerOnly
-            ? modelProviderSelectionKeyboard(result)
-            : modelSelectionKeyboard(result),
+            ? modelProviderSelectionKeyboard(result, String(context.from?.id ?? ""))
+            : modelSelectionKeyboard(result, String(context.from?.id ?? "")),
         );
       } else {
         await replyTelegramPanel(
           context,
           formatConversationModels(result),
-          modelEffortKeyboard(result),
+          modelEffortKeyboard(result, String(context.from?.id ?? "")),
         );
       }
       return;
@@ -187,8 +187,9 @@ export function telegramWorkspaceSwitchToken(workspaceId: string): string {
 
 export function modelEffortKeyboard(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
+  actorId = "",
 ): InlineKeyboardMarkup | undefined {
-  if (result.nextSelection !== "effort") {
+  if (result.view !== "effort") {
     return undefined;
   }
   const model = result.state.models.find((candidate) =>
@@ -197,7 +198,7 @@ export function modelEffortKeyboard(
   if (!model || model.supportedReasoningEfforts.length <= 1) {
     return undefined;
   }
-  const token = telegramModelSelectionToken(result.state);
+  const token = telegramModelSelectionToken(result.state, actorId);
   return {
     inline_keyboard: model.supportedReasoningEfforts.map((option, index) => [{
       text: `${option.effort === result.state.effort ? "✓ " : ""}${formatReasoningEffort(option.effort)}`,
@@ -212,16 +213,16 @@ function modelProviderSelectionText(
   const providers = listProviders(result.state.models);
   const current = result.state.modelProvider ?? "openai";
   const currentModel = result.state.models.find((model) =>
-    model.model === result.state.model
+    model.available !== false && model.model === result.state.model
     && (model.provider ?? "openai") === current);
   // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
   const currentModelName = currentModel === undefined
-    ? formatModelDisplayName(result.state.model)
+    ? result.state.model
     : modelListEntry(currentModel.displayName, currentModel.provider, currentModel.model).modelName;
   return toStructuredMarkdownList([
     `当前模型：${currentModelName}（Provider：${formatCodexProviderLabel(current)}）`,
     `${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort)}`,
-    `速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
+    `速度：${formatServiceTierSetting(result.state, currentModel)}`,
     "",
     `当前 Provider：${formatCodexProviderLabel(current)}`,
     "提供商列表：",
@@ -234,6 +235,7 @@ function modelProviderSelectionText(
 
 export function modelProviderSelectionKeyboard(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
+  actorId = "",
 ): InlineKeyboardMarkup | undefined {
   if (
     result.view !== "model"
@@ -244,7 +246,7 @@ export function modelProviderSelectionKeyboard(
   }
   const providers = listProviders(result.state.models);
   const current = result.state.modelProvider ?? "openai";
-  const token = telegramModelSelectionToken(result.state);
+  const token = telegramModelSelectionToken(result.state, actorId);
   return {
     inline_keyboard: providers.map((provider, index) => [{
       text: boundedButtonLabel(
@@ -257,6 +259,7 @@ export function modelProviderSelectionKeyboard(
 
 export function modelSelectionKeyboard(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
+  actorId = "",
 ): InlineKeyboardMarkup | undefined {
   const models = result.state.providerFilter === undefined
     ? result.state.models
@@ -266,7 +269,7 @@ export function modelSelectionKeyboard(
   if (result.view !== "model" || models.length === 0) {
     return undefined;
   }
-  const token = telegramModelSelectionToken(result.state);
+  const token = telegramModelSelectionToken(result.state, actorId);
   return {
     inline_keyboard: models.map((model, index) => [{
       text: boundedButtonLabel(
@@ -280,8 +283,9 @@ export function modelSelectionKeyboard(
 const maximumModelSelectionSnapshots = 1_000;
 const modelSelectionTokens = new Map<string, string>();
 
-export function telegramModelSelectionToken(state: ModelSelectionState): string {
+export function telegramModelSelectionToken(state: ModelSelectionState, actorId = ""): string {
   const key = JSON.stringify([
+    state.selectionScope ?? null, actorId,
     state.model, state.modelProvider ?? "openai", state.providerFilter ?? null,
     state.models.map((model) => [
       model.id, model.model, model.provider ?? "openai", model.available !== false,

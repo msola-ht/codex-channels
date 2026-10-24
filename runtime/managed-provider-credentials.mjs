@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { providerStorageRoot } from "./connect-home.mjs";
-import { isManagedProviderApiKeyValid } from "./model-provider-definitions.mjs";
+import { isManagedProviderApiKeyValid, managedProviderAccountFamilyForDefinition } from "./model-provider-definitions.mjs";
 import { readPrivateFileSync } from "./private-file.mjs";
 import { decodeProviderCredentialDocument, encodeProviderCredentialDocument, maximumProviderCredentialBytes, providerCredentialMatchesIdentity } from "./provider-credential-document.mjs";
 
@@ -15,8 +15,10 @@ export function managedPrimaryCredentialPath(environment, definition, environmen
   const version = typeof environmentKey === "string" && environmentKey.startsWith(prefix)
     ? environmentKey.slice(prefix.length) : "";
   if (!/^[a-f0-9]{32}$/u.test(version)) throw new Error("受管主 Provider 凭据引用无效");
-  return join(providerStorageRoot(environment), definition.storageId ?? definition.id,
-    "primary-credentials", definition.id, `${version}.json`);
+  const directory = definition.accountId === undefined
+    ? join(providerStorageRoot(environment), definition.id)
+    : dirname(managedProviderAccountFamilyForDefinition(definition).markerPath(environment, definition.accountId));
+  return join(directory, "primary-credentials", `${version}.json`);
 }
 
 export function createManagedPrimaryCredential(definition, apiKey) {

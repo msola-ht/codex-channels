@@ -2,12 +2,18 @@ import { isCustomCatalogProvider, responsesProviderCatalogPath, parseResponsesMo
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { resolveCodexRequestIdentity } from "./codex-request-identity.mjs";
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArguments, loadAggregateModelMaterial,
-  readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
+  readAggregateProviderSettingsFingerprint, AggregateProviderTopologyChangedError } from "./aggregate-model-provider.mjs";
+import { readCustomProviderUpstreamWireApi } from "./model-provider-upstream-metadata.mjs";
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 import { ProviderModelGuard } from "./provider-model-guard.mjs";
+import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
+import { DeepseekImageMaterialReader } from "./deepseek-image-material-reader.mjs";
+import { closeSingleWorkerReaders, waitForSingleWorkerReadersExit } from "./single-worker-reader.mjs";
+import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "./windows-acl-bridge.mjs";
+import { writeThirdPartyRuntimeModelCatalog } from "./third-party-model-catalog.mjs";
 import { assertProviderModelRequestPolicy, assertProviderModelRetryPolicy } from "./model-request-policy.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -36,7 +42,6 @@ import {
   managedProviderAccountFamilies,
   isManagedProviderModelValid,
   opencodeGoProviderDefinition,
-  sharedManagedProviderDefinition,
 } from "./model-provider-definitions.mjs";
 import {
   loadConfiguredCustomPrimaryModelProvider,
@@ -59,7 +64,6 @@ import {
 } from "./opencode-go-accounts.mjs";
 import {
   managedProviderAccountIdFromProvider,
-  sharedProviderProxyKey,
 } from "./managed-provider-account-routing.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "./opencode-go-quota-windows.mjs";
 import { createRefreshableHttpProxySelector } from "./network-proxy.mjs";
@@ -82,7 +86,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const startupFinished = new Promise(resolve => { finishStartup = resolve; });
   const lifecycle = forwardChildrenLifecycle(children, async () => {
     await startupFinished;
-    await closeResources();
+    const results = await Promise.allSettled([closeResources(), closeAppServerMaterialOwners()]);
+    const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
+    if (errors.length) throw new AggregateError(errors, "App Server 资源清理未完成");
   });
   let startupError;
   try {
@@ -103,6 +109,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     if (startupError && !lifecycle.stopRequested
       && !(startupError instanceof AppServerStoppedError)) throw startupError;
   }
+}
+
+async function closeAppServerMaterialOwners() {
+  const results = await Promise.allSettled([closeSingleWorkerReaders(), closeWindowsAclBridge()]);
+  await Promise.all([waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit()]);
+  const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
+  if (errors.length) throw new AggregateError(errors, "App Server 材料读取资源退出未确认");
 }
 
 class AppServerStoppedError extends Error {
@@ -199,6 +212,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     ProviderProxy,
     AggregateModelProxy,
     ChatCompletionsBridge,
+    uploadDeepseekImage,
     pruneModelTrafficDumpSessionsAsync,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
@@ -226,12 +240,86 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     upstreamAgentsByProxyUrl.set(proxyUrl, agent);
     return agent;
   };
+  const imageUploadGenerations = new Map();
+  const imageUploadRoutes = new Map();
+  const deepseekImageUploadFor = (provider) => {
+    const reader = new DeepseekImageMaterialReader(provider, runtime.environment);
+    const material = async signal => {
+      signal?.throwIfAborted();
+      const generation = imageUploadGenerations.get(provider);
+      const active = settingsSnapshots.get(provider);
+      if (!generation || !active || generation.controller.signal.aborted
+        || !childProcessIsRunning(childrenByProvider.get(provider))) {
+        throw new Error("DeepSeek 图片上传实例尚未确认");
+      }
+      const observed = await reader.readFresh();
+      signal?.throwIfAborted();
+      if (imageUploadGenerations.get(provider) !== generation || settingsSnapshots.get(provider) !== active
+        || observed.settingsFingerprint !== active.fingerprint || generation.controller.signal.aborted) {
+        throw new Error("DeepSeek 配置尚未应用到运行实例，请等待设置应用后重试");
+      }
+      const configured = observed.material;
+      const url = new URL(configured.baseUrl);
+      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash
+        || !configured.protocols.includes("responses")) {
+        throw new Error("DeepSeek 图片上传地址无效");
+      }
+      const revision = createHash("sha256")
+        .update(JSON.stringify([configured.revision, provider, active.fingerprint, generation.token, url.origin, url.pathname]))
+        .digest("hex");
+      return { configured, url, revision, generation };
+    };
+    return {
+      kind: "deepseek",
+      authorize(authorization) {
+        const generation = imageUploadGenerations.get(provider);
+        if (!generation || generation.controller.signal.aborted || typeof authorization !== "string"
+          || !/^Bearer [a-f0-9]{64}$/u.test(authorization)
+          || !childProcessIsRunning(childrenByProvider.get(provider))) return false;
+        const expected = `Bearer ${generation.token}`;
+        return authorization.length === expected.length
+          && timingSafeEqual(Buffer.from(authorization), Buffer.from(expected));
+      },
+      async route(signal) {
+        const observed = await material(signal);
+        return { revision: observed.revision, authorization: `Bearer ${observed.generation.token}` };
+      },
+      async describe(signal) {
+        return { revision: (await material(signal)).revision };
+      },
+      async upload({ bytes, mediaType, revision, signal }) {
+        const before = await material(signal);
+        if (before.revision !== revision) throw new Error("DeepSeek 图片上传配置已变化");
+        const agent = await upstreamAgentFor(before.url, signal);
+        // Proxy discovery is asynchronous; recheck the running generation and
+        // disk snapshot after it, immediately before spending the private Key.
+        const current = await material(signal);
+        if (current.revision !== revision || current.generation !== before.generation) {
+          throw new Error("DeepSeek 图片上传配置已变化");
+        }
+        signal?.throwIfAborted();
+        const fileId = await uploadDeepseekImage({
+          host: current.url.hostname.replace(/^\[|\]$/gu, ""),
+          ...(current.url.port ? { port: Number(current.url.port) } : {}),
+          protocol: "https",
+          basePath: current.url.pathname,
+          ...(agent ? { agent } : {}),
+          authorization: `Bearer ${current.configured.apiKey}`,
+        }, bytes, mediaType, globalThis.AbortSignal.any([signal, current.generation.controller.signal]));
+        if ((await material(signal)).revision !== revision) {
+          throw new Error("DeepSeek 图片上传配置在传输期间发生变化");
+        }
+        return fileId;
+      },
+      close: () => reader.close(),
+    };
+  };
   const proxyProviderIds = new Map();
   const proxyTargetSignatures = new Map();
   // 上游接口：受管 Provider 来自定义；自定义第三方 Provider 来自其网关侧元数据。
   // 聚合会给自定义成员派生 `provider@<hash>` 路由键，因此先解析真实 Provider 身份。
   const upstreamWireApiFor = (provider, routeKey = provider) => {
-    const managed = providerDefinitions.get(routeKey) ?? sharedManagedProviderDefinition(routeKey);
+    const managed = providerDefinitions.get(routeKey);
     if (managed?.upstreamWireApi !== undefined) return managed.upstreamWireApi;
     if (customPrimaryProvider !== undefined
       && (provider === customPrimaryProvider.id || routeKey === primaryProvider)) {
@@ -250,7 +338,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const upstreamProvider = provider === primaryProvider
       ? customPrimaryProvider?.id ?? metricsProvider
       : metricsProvider;
-    const definition = providerDefinitions.get(provider) ?? sharedManagedProviderDefinition(provider);
+    const definition = providerDefinitions.get(provider);
     let bridge;
     let modelProxy;
     const ownedResources = new Set();
@@ -264,11 +352,13 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       if (errors.length) throw new AggregateError(errors, "模型代理资源未能完全关闭");
     } } };
     retain(proxyRuntime);
-    const guardedDefinition = definition && ["ocg", "opencode-go", "ccg", "clp"].includes(definition.storageId ?? definition.id)
-      ? definition : undefined;
+    const guardedDefinition = definition;
     const modelGuard = guardedDefinition
       ? new ProviderModelGuard(join(managedProviderDirectory(runtime.environment, guardedDefinition),
-        guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model))
+        guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model), {
+        blockedPaths: [providerCatalogIsolationPath(runtime.environment),
+          `${join(managedProviderDirectory(runtime.environment, guardedDefinition), guardedDefinition.catalogFileName)}.settings-pending`],
+      })
       : isCustomCatalogProvider(upstreamProvider)
         ? new ProviderModelGuard(responsesProviderCatalogPath(runtime.environment, upstreamProvider), model =>
           typeof model === "string" && model.trim() === model && model.length > 0 && model.length <= 200 && !/\p{Cc}/u.test(model), {
@@ -276,8 +366,10 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           blockedPaths: [
             `${responsesProviderCatalogPath(runtime.environment, upstreamProvider)}.pending`,
             responsesContextSyncPath(runtime.environment),
+            providerCatalogIsolationPath(runtime.environment),
           ],
         })
+        // Codex 兼容 Provider 共用的官方目录只读，不启用可编辑目录的模型名单复核。
         : undefined;
     if (modelGuard) ownedResources.add(modelGuard);
     // 官方 OpenAI 端点理解 Codex 私有输入项；自定义固定 Provider 复用 openai 路由键但换成第三方上游。
@@ -317,8 +409,13 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
             },
           }),
     };
-    const opencodeGo = provider === "ocg";
-    const accountFamily = managedProviderAccountFamilies.find(family => family.proxyKey === provider);
+    const accountFamily = managedProviderAccountFamilies.find(family => family.matches(upstreamProvider));
+    const accountId = accountFamily?.accountId(upstreamProvider);
+    const opencodeGo = accountFamily?.proxyKey === "ocg";
+    const imageUpload = definition?.storageId === "deepseek" && !bridge
+      ? deepseekImageUploadFor(upstreamProvider)
+      : undefined;
+    if (imageUpload) ownedResources.add(imageUpload);
     const managedAccountProxyOptions = (accounts, providerId, label) => ({
       accountIds: accounts.map((account) => account.id),
       defaultAccountId: accounts.find((account) => account.default)?.id,
@@ -333,26 +430,24 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
       // CLP 桥在桥内按目录校验模型；通用 Chat 桥没有该校验，继续由统计代理拒绝目录外或已停用模型。
-      ...(modelGuard && !bridgedClinePass ? isCustomCatalogProvider(upstreamProvider)
-        ? { readModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) }
-        : { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
+      ...(modelGuard && !bridgedClinePass
+        ? { readModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) } : {}),
+      ...(imageUpload ? { imageUpload } : {}),
       // 除官方 OpenAI 端点外的 Responses 上游都不理解 Codex 私有输入项与参数标记，
       // 必须在上游收到正文前归一化；Chat 上游由桥转换，不在此处改写。
       ...(!bridge && !officialOpenAiRoute ? { normalizeResponsesInput: true } : {}),
       ...(opencodeGo
         ? {
-            accountIds: goAccountIds.length === 0 ? undefined : goAccountIds,
-            ...(goDefaultAccountId === undefined
-              ? {}
-              : { defaultAccountId: goDefaultAccountId }),
-            quotaWindowsProvider: (accountId, signal) => {
+            accountIds: [accountId],
+            defaultAccountId: accountId,
+            quotaWindowsProvider: (requestedAccountId, signal) => {
               const quota = opencodeGoQuotaWindows.get(
-                accountId ?? goDefaultAccountId,
+                requestedAccountId ?? accountId,
               );
               return quota ? quota(signal) : Promise.resolve(null);
             },
-            onMetrics: (metrics, accountId) => {
-              const targetAccountId = accountId ?? goDefaultAccountId;
+            onMetrics: (metrics, requestedAccountId) => {
+              const targetAccountId = requestedAccountId ?? accountId;
               if (targetAccountId === undefined) return undefined;
               const targetProvider = opencodeGoProviderId(targetAccountId);
               return sendProviderProxyMetrics(
@@ -362,7 +457,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
             },
           }
         : accountFamily
-          ? managedAccountProxyOptions(accountsByProxyKey.get(provider), accountFamily.providerId, accountFamily.definition.displayName)
+          ? managedAccountProxyOptions([{id: accountId, default: true}], accountFamily.providerId, accountFamily.definition.displayName)
               : {
                 onMetrics: (metrics) => sendProviderProxyMetrics(
                   providerMetricsSocketPath(socketPath, metricsProvider),
@@ -381,6 +476,13 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     await modelProxy.start();
     assertRunning();
     proxyRuntime.baseUrl = `http://${modelProxy.address()}`;
+    if (imageUpload) {
+      const route = { runtime: proxyRuntime, upload: imageUpload };
+      imageUploadRoutes.set(upstreamProvider, route);
+      ownedResources.add({ close: async () => {
+        if (imageUploadRoutes.get(upstreamProvider) === route) imageUploadRoutes.delete(upstreamProvider);
+      } });
+    }
     console.log(
       `${opencodeGo ? "opencode-go" : provider} 模型统计代理已启动：${modelProxy.address()}`,
     );
@@ -414,9 +516,6 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   ]));
   const goAccounts = accountsByProxyKey.get("ocg");
   const proxyAccountId = managedProviderAccountIdFromProvider;
-  const goAccountIds = goAccounts.map((account) => account.id);
-  const goDefaultAccount = goAccounts.find((account) => account.default);
-  const goDefaultAccountId = goDefaultAccount?.id;
   const opencodeGoQuotaWindows = new Map(goAccounts.map((account) => [
     account.id,
     createOpencodeGoQuotaWindowsProvider({
@@ -455,14 +554,49 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   const goProxyOptions = () =>
     proxyOptionsForUrl(new URL(opencodeGoProviderDefinition.baseUrl));
   let primaryArguments = [];
+  const withThirdPartyCatalog = (provider, argumentsList) => {
+    if (provider === aggregateProviderId || (provider === "openai" && !customPrimaryProvider)) return argumentsList;
+    const definition = providerDefinitions.get(provider);
+    const sourcePath = provider === primaryProvider && customPrimaryProvider
+      ? customPrimaryProvider.catalogPath ?? officialCatalogPath
+      : definition
+        ? join(managedProviderDirectory(runtime.environment, definition), definition.catalogFileName)
+        : isCustomCatalogProvider(provider)
+          ? responsesProviderCatalogPath(runtime.environment, provider)
+          : officialCatalogPath;
+    if (!sourcePath) throw new Error("第三方 App Server 缺少模型目录");
+    const path = writeThirdPartyRuntimeModelCatalog(sourcePath, runtime.dataDir, customPrimaryProvider && provider === primaryProvider
+      ? customPrimaryProvider.id : provider);
+    // Third-party model APIs use hosted search, not OpenAI's separate /alpha/search executor.
+    return withOfficialModelCatalog([...argumentsList, "-c", "features.standalone_web_search=false"], path);
+  };
   let desktopAppAttachment;
   const managedByProvider = new Map(managedProviders.map((provider, index) => [
     provider.provider,
     { runtime: provider, socketPath: managedSocketPaths[index] },
   ]));
-  const providerSettingsFingerprint = provider => provider === aggregateProviderId
-    ? readAggregateProviderSettingsFingerprint(runtime.environment, appServerRuntime.aggregateMembers)
-    : readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+  const assertAggregateProtocols = (profiles) => {
+    for (const profile of profiles) {
+      if (isCustomCatalogProvider(profile.provider)
+        && profile.upstreamWireApi !== customSwitchingProvidersById.get(profile.provider)?.upstreamWireApi) {
+        // Member proxies retain the host's launch protocol, including proxies
+        // created later for a refreshed URL. Only a full host restart replaces it.
+        throw new AggregateProviderTopologyChangedError();
+      }
+    }
+  };
+  const providerSettingsFingerprint = (provider) => {
+    if (provider !== aggregateProviderId) return readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+    // Check even before the first aggregate instance exists, and before an
+    // unchanged/active result can acknowledge or defer new protocol material.
+    assertCurrentAggregateProtocols();
+    return readAggregateProviderSettingsFingerprint(runtime.environment, appServerRuntime.aggregateMembers);
+  };
+  const assertCurrentAggregateProtocols = () => assertAggregateProtocols(
+    appServerRuntime.aggregateMembers.filter(isCustomCatalogProvider).map(provider => ({
+      provider, upstreamWireApi: readCustomProviderUpstreamWireApi(runtime.environment, provider),
+    })),
+  );
   const prepareProviderSettings = (provider) => {
     const aggregate = provider === aggregateProviderId;
     if (!providerDefinitions.has(provider) && !aggregate) return undefined;
@@ -471,13 +605,14 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const next = resolveAppServerRuntime(runtime.document, runtime.dataDir, runtime.environment);
     const aggregateMaterial = aggregate
       ? loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers) : undefined;
+    if (aggregateMaterial) assertAggregateProtocols(aggregateMaterial.profiles);
     const defaultModel = aggregate ? aggregateMaterial.defaultModel
       : loadManagedModelProviderSettings(runtime.environment).find(value => value.provider === provider)?.model ?? null;
     if (providerSettingsFingerprint(provider) !== fingerprint || aggregateMaterial && aggregateMaterial.fingerprint !== fingerprint) {
       throw new Error("Provider 设置在读取期间发生变化");
     }
     if (JSON.stringify(next.topology) !== JSON.stringify(appServerRuntime.topology)) {
-      throw new Error("App Server 拓扑已变化，需要显式重启服务");
+      throw Object.assign(new Error("App Server 拓扑已变化，需要显式重启服务"), { code: "PROVIDER_TOPOLOGY_CHANGED" });
     }
     const managed = managedByProvider.get(provider);
     const material = next.managedProviders.find(value => value.provider === provider);
@@ -491,10 +626,15 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       throw new Error("Provider 设置在应用期间发生变化");
     }
     settingsSnapshots.set(provider, snapshot);
+    if (/^ds-[a-z0-9_-]{1,32}$/u.test(provider)) {
+      imageUploadGenerations.get(provider)?.controller.abort();
+      imageUploadGenerations.set(provider, { token: randomBytes(32).toString("hex"), controller: new AbortController() });
+    }
   };
   const instanceLaunches = new Map();
   let aggregateProxy;
   let aggregateGuard;
+  let aggregateLaunchPolicy;
   let aggregateClosing;
   let aggregateCleanupRequired = false;
   const aggregateProxyKeys = new Set();
@@ -519,6 +659,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       }));
       const errors = [...results, ...proxyResults].filter(result => result.status === "rejected").map(result => result.reason);
       if (errors.length) throw new AggregateError(errors, "聚合模型资源未能完全关闭");
+      aggregateLaunchPolicy = undefined;
       aggregateCleanupRequired = false;
     })().finally(() => { if (aggregateClosing === closure) aggregateClosing = undefined; });
     aggregateClosing = closure;
@@ -531,6 +672,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       throw new Error("聚合模型旧资源尚未确认释放");
     }
     const material = loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers);
+    assertAggregateProtocols(material.profiles);
     if (material.fingerprint !== snapshot.fingerprint || material.defaultModel !== snapshot.defaultModel) {
       throw new Error("聚合设置在启动材料读取期间发生变化");
     }
@@ -543,7 +685,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const token = randomBytes(32).toString("hex");
     const urls = new Map();
     for (const profile of material.profiles) {
-      let key = sharedProviderProxyKey(profile.provider);
+      let key = profile.provider;
       const options = await proxyOptionsForUrl(new URL(profile.baseUrl));
       const signature = proxyTargetSignature(options);
       // A live standalone custom instance can retain its original upstream.
@@ -578,14 +720,14 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   const failedInstanceStarts = new Set();
   const providerProxyIsInUse = (proxyKey) =>
     providerProxyRuntimes.hasUsers(proxyKey)
-    || sharedProviderProxyKey(primaryProvider) === proxyKey;
+    || primaryProvider === proxyKey;
   const { watchChild, detachChild } = lifecycle;
   const cleanFailedInstance = async (provider, child) => {
     failedInstanceStarts.add(provider);
     const errors = [];
     try { await terminateChildProcess(child); }
     catch (error) { errors.push(error); }
-    if (childProcessIsRunning(child)) {
+    if (errors.length > 0 || childProcessIsRunning(child)) {
       // A healthy socket cannot turn an unconfirmed launch into readiness.
       // Keep both ownership indexes so release and service shutdown can retry.
       watchChild(child);
@@ -639,7 +781,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     await retryTemporaryClientCleanup(targetSocket);
     const expectedProvider = provider === primaryProvider ? customPrimaryProvider?.id ?? provider : provider;
     await verifyAppServerRequestPolicy(targetSocket, expectedProvider, defaultWorkspace.cwd, runtime.environment,
-      ownTemporaryClient, closeTemporaryClient);
+      ownTemporaryClient, closeTemporaryClient, aggregateLaunchPolicy);
     assertRunning();
   };
   const ensureInstance = (provider) => {
@@ -687,7 +829,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         }
         const primaryLaunch = isolateProviderCredential(
           customPrimaryProvider?.id ?? primaryProvider,
-          primaryArguments,
+          withThirdPartyCatalog(provider, primaryArguments),
           primaryChildEnvironment,
           primaryCredential,
         );
@@ -766,7 +908,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         return;
       }
       await prepareAppServerSocketPaths([managed.socketPath], runtime.environment);
-      const proxyKey = sharedProviderProxyKey(provider);
+      const proxyKey = provider;
       if (!aggregate) providerProxyRuntimes.addUser(proxyKey, provider);
       let proxy;
       let child;
@@ -795,8 +937,17 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         const credentials = Object.entries(managed.runtime.childEnvironment);
         if (credentials.length !== 1) throw new Error("隔离 App Server 必须使用唯一 Provider 凭据");
         const [[environmentKey, apiKey]] = credentials;
-        const managedLaunch = isolateProviderCredential(provider, argumentsList,
+        const managedLaunch = isolateProviderCredential(provider, withThirdPartyCatalog(provider, argumentsList),
           withoutManagedProviderApiKeys(runtime.environment, customPrimaryCredential?.environmentKey), { environmentKey, apiKey });
+        if (aggregate) {
+          aggregateLaunchPolicy = {
+            base_url: providerBaseUrl,
+            env_key: managedLaunch.credentialEnvironmentKey,
+            wire_api: "responses",
+            requires_openai_auth: false,
+            supports_websockets: false,
+          };
+        }
         const managedAppServerArguments = [
           ...managedLaunch.arguments,
           ...(attachment ? ["-c", `${macDesktopAppPluginEnabledConfigKey}=${attachment.toolsEnabled}`] : []),
@@ -831,7 +982,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         console.log(`${provider} App Server 已按需启动：${managed.socketPath}`);
       } catch (error) {
         const cleanupErrors = child ? await cleanFailedInstance(provider, child) : [];
-        const childSurvives = child && childProcessIsRunning(child);
+        const childSurvives = child && childrenByProvider.get(provider) === child;
         if (!childSurvives) providerProxyRuntimes.removeUser(proxyKey, provider);
         if (!childSurvives && proxy && !providerProxyIsInUse(proxyKey)) {
           try {
@@ -865,6 +1016,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     if (provider !== primaryProvider && !managedByProvider.has(provider)) {
       throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
     }
+    imageUploadGenerations.get(provider)?.controller.abort();
+    imageUploadGenerations.delete(provider);
     const child = childrenByProvider.get(provider);
     if (child) {
       detachChild(child, { retainOwnership: true });
@@ -883,7 +1036,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     settingsSnapshots.delete(provider);
     if (provider === aggregateProviderId) await closeAggregateProxy();
     if (provider !== primaryProvider) {
-      const proxyKey = sharedProviderProxyKey(provider);
+      const proxyKey = provider;
       providerProxyRuntimes.removeUser(proxyKey, provider);
       if (!providerProxyIsInUse(proxyKey)) {
         const proxy = providerProxyRuntimes.get(proxyKey)?.proxy;
@@ -1096,7 +1249,6 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         localBaseUrl,
       );
       primaryArguments = withOfficialModelCatalog(primaryArguments, customPrimaryProvider.catalogPath ?? officialCatalogPath);
-      if (customPrimaryProvider.catalogPath) primaryArguments.push("-c", 'web_search="disabled"');
     } else if (primaryProvider === "openai") {
       const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
       const configuredOpenAiUrl = configuredOpenAiBaseUrl
@@ -1136,8 +1288,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
-      if (definition.webSearch === "disabled") primaryArguments.push("-c", 'web_search="disabled"');
-      const providerKey = sharedProviderProxyKey(definition.id);
+      const providerKey = definition.id;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         isGoProvider(definition.id)
@@ -1161,7 +1312,23 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         ensureProvider: ensureInstance,
         releaseProvider: releaseInstance,
         applyProviderSettings,
-        providerSettingsSnapshot: provider => settingsSnapshots.get(provider),
+        providerSettingsSnapshot: provider => {
+          // The supervisor skips applyProviderSettings while a native client
+          // holds a lease. A lease cannot make a protocol change hot-applicable.
+          if (provider === aggregateProviderId) assertCurrentAggregateProtocols();
+          return settingsSnapshots.get(provider);
+        },
+        imageUploadRoute: async (provider, signal) => {
+          assertRunning();
+          if (!childrenByProvider.has(provider)) throw new Error("DeepSeek 图片上传实例未运行");
+          const route = imageUploadRoutes.get(provider);
+          if (!route?.runtime.baseUrl) throw new Error("DeepSeek 图片上传路由未就绪");
+          const capability = await route.upload.route(signal);
+          signal.throwIfAborted();
+          if (imageUploadRoutes.get(provider) !== route) throw new Error("DeepSeek 图片上传路由已变化");
+          return { endpoint: route.runtime.baseUrl,
+            modelEndpoint: `${route.runtime.baseUrl}/go/${proxyAccountId(provider)}`, ...capability };
+        },
         attachDesktopApp,
         detachDesktopApp,
         desktopAppProviderSelectionEnabled: validatedCodex.desktop_app?.enabled === true
@@ -1215,6 +1382,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   }
 
   async function closeResources() {
+    for (const generation of imageUploadGenerations.values()) generation.controller.abort();
+    imageUploadGenerations.clear();
     // Launch continuations can register proxies after their awaited start finishes.
     // Drain them before taking the resource snapshot used by cleanup.
     await Promise.allSettled([...instanceLaunches.values()]);
@@ -1296,7 +1465,7 @@ function spawnCodexProcess(codexBinary, args, options, environment) {
  * Built-in OpenAI ignores same-name provider overlays in the locked version;
  * third-party providers must retain the explicit policy injected at launch.
  */
-async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environment, ownClient, closeClient) {
+async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environment, ownClient, closeClient, aggregateLaunchPolicy) {
   const { createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
   const rpc = new JsonRpcClient(createAppServerTransport(
     { kind: "local-app-server", socketPath },
@@ -1319,6 +1488,17 @@ async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environme
       const configured = config.model_providers?.[provider];
       assertProviderModelRequestPolicy(configured, true);
       assertProviderModelRetryPolicy(configured);
+      if (provider === aggregateProviderId && (!aggregateLaunchPolicy
+        || typeof aggregateLaunchPolicy.env_key !== "string"
+        || Object.entries(aggregateLaunchPolicy).some(([key, value]) => configured[key] !== value))) {
+        throw new Error("聚合 Provider 的有效路由或认证配置与本次启动不一致；请移除用户、项目或受管配置中的 model_providers.codexc-aggregate 覆盖");
+      }
+      if (provider === aggregateProviderId && [
+        "query_params", "http_headers", "env_http_headers", "experimental_bearer_token",
+        "auth", "gateway_oauth", "aws", "model_catalog_url",
+      ].some(key => configured[key] !== undefined && configured[key] !== null)) {
+        throw new Error("聚合 Provider 存在额外路由或认证配置；请移除用户、项目或受管配置中的 model_providers.codexc-aggregate 覆盖");
+      }
     }
   } catch (error) {
     operationFailure = { error };
@@ -1404,8 +1584,8 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     settled = true;
     cancellation.abort(new AppServerStoppedError());
     const deadline = setTimeout(() => {
-      printCliMessage("failure", "App Server 停止等待超时，监管进程将以故障状态退出");
-      process.exit(1);
+      printCliMessage("failure", "App Server 停止等待超时，等待自有材料读取资源退出后以故障状态退出");
+      void closeAppServerMaterialOwners().then(() => process.exit(1), () => process.exit(1));
     }, serviceShutdownTimeoutMs);
     cleanup();
     for (const [child, watcher] of watchers) {

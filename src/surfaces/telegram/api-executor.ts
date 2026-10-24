@@ -9,10 +9,54 @@ interface TelegramApiCall {
   chatId: string;
   operation: string;
   critical: boolean;
+  recipientNotification?: boolean;
 }
 
 export class TelegramApiExecutor {
-  constructor(private readonly logger: Logger) {}
+  private readonly authorizations = new Map<string, { chatId: string; recipientNotification: boolean; controller: AbortController }>();
+
+  constructor(
+    private readonly logger: Logger,
+    private readonly authorized: (chatId: string, recipientNotification: boolean) => boolean = () => true,
+  ) {}
+
+  isAuthorized(chatId: string): boolean {
+    return this.authorized(chatId, false);
+  }
+
+  authorizationSignal(chatId: string, recipientNotification = false): AbortSignal {
+    const key = `${recipientNotification ? "notification" : "conversation"}:${chatId}`;
+    let authorization = this.authorizations.get(key);
+    if (!this.authorized(chatId, recipientNotification)) {
+      authorization?.controller.abort();
+      this.authorizations.delete(key);
+      const cancelled = new AbortController();
+      cancelled.abort();
+      return cancelled.signal;
+    }
+    if (!authorization || authorization.controller.signal.aborted) {
+      authorization = { chatId, recipientNotification, controller: new AbortController() };
+      this.authorizations.set(key, authorization);
+    }
+    return authorization.controller.signal;
+  }
+
+  revalidateAccess(): string[] {
+    const revoked = new Set<string>();
+    for (const [key, authorization] of this.authorizations) {
+      if (!this.authorized(authorization.chatId, authorization.recipientNotification)) {
+        authorization.controller.abort();
+        this.authorizations.delete(key);
+        if (!authorization.recipientNotification) revoked.add(authorization.chatId);
+      }
+    }
+    return [...revoked];
+  }
+
+  close(): void {
+    for (const authorization of this.authorizations.values()) authorization.controller.abort();
+    this.authorizations.clear();
+  }
 
   /** A verified unchanged edit confirms the requested content, before receipt settlement. */
   async editMessageText(
@@ -20,6 +64,7 @@ export class TelegramApiExecutor {
     operation: (signal: AbortSignal) => Promise<unknown>,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<void> {
+    signal = AbortSignal.any([signal, this.authorizationSignal(context.chatId, context.recipientNotification)]);
     await checkpointDelivery("editMessageText", async () => {
       try { await this.execute({ ...context, operation: "editMessageText" }, operation, signal); }
       catch (error) {
@@ -33,6 +78,7 @@ export class TelegramApiExecutor {
     operation: (signal: AbortSignal) => Promise<T>,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<T> {
+    signal = AbortSignal.any([signal, this.authorizationSignal(context.chatId, context.recipientNotification)]);
     return checkpointDelivery(context.operation, () => this.execute(context, operation, signal),
       (error) => error instanceof GrammyError && error.error_code >= 400 && error.error_code < 500);
   }
@@ -44,6 +90,11 @@ export class TelegramApiExecutor {
   ): Promise<T> {
     const maximumAttempts = context.critical ? 3 : 1;
     for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+      signal.throwIfAborted();
+      if (!this.authorized(context.chatId, context.recipientNotification ?? false)) {
+        this.revalidateAccess();
+        throw new Error("Telegram 输出授权已变化");
+      }
       try {
         return await withSurfaceDiagnosticContext({
           ...surfaceDiagnosticContext(), component: "Telegram", conversationId: context.chatId,

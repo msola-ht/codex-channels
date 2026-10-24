@@ -11,6 +11,7 @@ export function runCodexUserSettingsSetup(options?: {
   subagentsSetup?: typeof import("./codex-subagents-setup.mjs").runCodexSubagentsSetup;
   loadSettings?: typeof import("./codex-user-settings-management.mjs").loadCodexUserSettings;
   updateSetting?: typeof import("./codex-user-settings-management.mjs").updateCodexUserSetting;
+  previewSetting?: typeof import("./codex-user-settings-management.mjs").previewCodexUserSetting;
   createClient?: import("./codex-user-settings-management.mjs").CodexUserSettingsDependencies["createClient"];
   primaryProvider?: import("./codex-user-settings-management.mjs").CodexUserSettingsDependencies["primaryProvider"];
 }): Promise<unknown>;

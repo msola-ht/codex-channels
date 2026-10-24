@@ -5,6 +5,7 @@ import { Bot } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
 import {
+  GatewayConfigWriteCommittedError,
   readGatewayConfig,
   validateGatewayConfigStructureDocument,
   writeGatewayConfig,
@@ -196,11 +197,15 @@ class TelegramSetupSession {
     validateGatewayConfigStructureDocument(currentDocument);
     this.#clearTimeout();
     this.#setState("saving");
+    const warnings = [];
     try {
       this.#writeConfig(this.#configPath, currentDocument);
     } catch (error) {
-      this.#fail("save-failed");
-      throw error;
+      if (!(error instanceof GatewayConfigWriteCommittedError)) {
+        this.#fail("save-failed");
+        throw error;
+      }
+      warnings.push({ code: "gateway-config-cleanup-failed" });
     }
     const botUsername = this.#bot.username;
     this.#token = undefined;
@@ -214,6 +219,7 @@ class TelegramSetupSession {
       allowedUserIds,
       configPath: this.#configPath,
       activation: "restart-gateway",
+      warnings,
     };
   }
 

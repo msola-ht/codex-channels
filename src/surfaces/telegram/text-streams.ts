@@ -19,6 +19,8 @@ import { replyOptions, htmlSendOptions, operationEditOptions } from "./message-o
 interface StreamState {
   chatId: string;
   turnKey: string;
+  authorization: AbortSignal;
+  activity: StreamActivity | undefined;
   text: string;
   messageId: number | undefined;
   creationUncertain: boolean;
@@ -26,6 +28,13 @@ interface StreamState {
   completed: boolean;
   truncated: boolean;
   timer: NodeJS.Timeout | undefined;
+}
+
+interface StreamActivity {
+  chatId: string;
+  turnKey: string;
+  authorization: AbortSignal;
+  controller: AbortController;
 }
 
 const maximumRichMarkdownCharacters = 32_000;
@@ -38,8 +47,11 @@ export type TelegramFinalMessageFormat = "html" | "rich";
 /** Owns text delivery state; all sends use the Outbox's existing Conversation queue. */
 export class TelegramTextStreams {
   private readonly streams = new Map<string, StreamState>();
+  private readonly activities = new Map<string, StreamActivity>();
+  private readonly observedDeltas = new WeakMap<Extract<OutputEvent, { type: "text.delta" }>, StreamActivity | undefined>();
   private readonly notifiedTurns = new Set<string>();
   private streamCapacityWarningIssued = false;
+  private activityCapacityWarningIssued = false;
 
   constructor(
     private readonly api: Api,
@@ -52,11 +64,51 @@ export class TelegramTextStreams {
     private readonly sendPlain: (chatId: string, text: string, replyTo?: number, silent?: boolean, signal?: AbortSignal) => Promise<number>,
   ) {}
 
+  startTurn(chatId: string, threadId: string, turnId: string): void {
+    const turnKey = this.turnKey(threadId, turnId);
+    const key = this.activityKey(chatId, turnKey);
+    const authorization = this.executor.authorizationSignal(chatId);
+    if (authorization.aborted || this.activities.get(key)?.authorization === authorization) return;
+    for (const [activityKey, activity] of this.activities) {
+      if (activity.chatId === chatId && activity.turnKey.startsWith(`${threadId}:`)) {
+        this.removeActivity(activityKey, activity);
+      }
+    }
+    // These are disposable live admission identities, never a history of revoked Items.
+    // Eviction only loses an intermediate preview; complete Items have their own delivery.
+    if (this.activities.size >= maximumTelegramActiveStreams) {
+      const oldest = this.activities.entries().next().value!;
+      this.removeActivity(...oldest);
+      if (!this.activityCapacityWarningIssued) {
+        this.activityCapacityWarningIssued = true;
+        this.logger.warn({ ...surfaceDiagnosticContext(), component: "Telegram",
+          maximumActiveTurns: maximumTelegramActiveStreams }, "Telegram 活动轮次预览已满，已取消最旧的非关键预览");
+      }
+    } else {
+      this.activityCapacityWarningIssued = false;
+    }
+    this.activities.set(key, { chatId, turnKey, authorization, controller: new AbortController() });
+  }
+
+  observeDelta(event: Extract<OutputEvent, { type: "text.delta" }>): void {
+    // Reader observation precedes routing waits. Re-observing the same live event
+    // must not attach it to a later authorization or restored Turn identity.
+    if (!this.observedDeltas.has(event)) {
+      this.observedDeltas.set(event, this.activities.get(this.activityKey(
+        event.target.conversationId, this.turnKey(event.threadId, event.turnId),
+      )));
+    }
+  }
+
   delta(event: Extract<OutputEvent, { type: "text.delta" }>): void {
     const chatId = event.target.conversationId;
     const turnKey = this.turnKey(event.threadId, event.turnId);
     const key = this.streamKey(chatId, turnKey, event.itemId);
+    const activity = this.activities.get(this.activityKey(chatId, turnKey));
+    if (!this.executor.isAuthorized(chatId) || !activity || this.observedDeltas.get(event) !== activity
+      || activity.authorization.aborted || activity.controller.signal.aborted) return;
     const existing = this.streams.get(key);
+    if (existing?.authorization.aborted) return;
     if (!existing && this.streams.size >= maximumTelegramActiveStreams) {
       if (!this.streamCapacityWarningIssued) {
         this.streamCapacityWarningIssued = true;
@@ -77,7 +129,7 @@ export class TelegramTextStreams {
     if (!existing) {
       this.beforeNewStream(chatId, turnKey);
     }
-    const state = existing ?? this.createStream(chatId, turnKey);
+    const state = existing ?? this.createStream(chatId, turnKey, activity);
     const bounded = boundedTelegramStreamText(`${state.text}${event.text}`);
     state.text = bounded.text;
     state.truncated ||= bounded.truncated;
@@ -88,7 +140,7 @@ export class TelegramTextStreams {
     if (!state.timer) {
       state.timer = setTimeout(() => {
         state.timer = undefined;
-        this.enqueue(chatId, (signal) => this.flush(chatId, key, false, undefined, signal), false);
+        this.enqueue(chatId, (signal) => this.flush(chatId, key, false, state, signal), false, { signal: state.authorization });
       }, 1_000);
       state.timer.unref();
     }
@@ -107,7 +159,11 @@ export class TelegramTextStreams {
     const turnKey = this.turnKey(event.threadId, event.turnId);
     const key = this.streamKey(chatId, turnKey, event.itemId);
     const existing = this.streams.get(key);
-    const state = existing ?? this.createStream(chatId, turnKey);
+    // A reliable complete Item owns the full content and the current authorization.
+    // Never reuse a revoked preview's cache, message handle or cancellation scope.
+    const state = existing && !existing.authorization.aborted ? existing : this.createStream(chatId, turnKey);
+    state.authorization = this.executor.authorizationSignal(chatId);
+    state.activity = undefined;
     const completedText = `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`;
     // Durable admission already bounds the full payload. A truncated preview
     // must never become the source of the acknowledged final document.
@@ -120,34 +176,29 @@ export class TelegramTextStreams {
     if (event.phase !== undefined) {
       state.phase = event.phase;
     }
-    if (state.timer) {
-      clearTimeout(state.timer);
-      state.timer = undefined;
-    }
-    if (existing) {
-      this.streams.set(key, state);
-    }
+    if (existing?.timer) clearTimeout(existing.timer);
+    state.timer = undefined;
+    this.streams.delete(key);
     this.enqueue(
       chatId,
       // Reliable output owns this state even if lifecycle observation clears the live Map.
-      (signal) => this.flush(chatId, key, true, state, signal),
+      (signal) => this.flush(chatId, key, true, state, signal, true),
       true,
-      { purpose: "answer" },
+      { purpose: "answer", signal: state.authorization },
     );
     return;
   }
 
   prepareTurnCompletion(chatId: string, threadId: string, turnId: string): (chatId: string, signal?: AbortSignal) => Promise<void> {
-    const keys = this.streamKeysForTurn(chatId, threadId, turnId);
-    for (const key of keys) {
-      const stream = this.streams.get(key);
-      if (stream?.timer) {
+    const streams = this.streamKeysForTurn(chatId, threadId, turnId).map((key) => [key, this.streams.get(key)!] as const);
+    for (const [, stream] of streams) {
+      if (stream.timer) {
         clearTimeout(stream.timer);
         stream.timer = undefined;
       }
     }
     return async (chatId, signal) => {
-      for (const key of keys) await this.flush(chatId, key, true, undefined, signal);
+      for (const [key, state] of streams) await this.flush(chatId, key, true, state, signal);
     };
   }
 
@@ -156,20 +207,41 @@ export class TelegramTextStreams {
   }
 
   prepareClose(): void {
-    for (const [key, state] of this.streams) {
+    for (const state of this.streams.values()) {
       if (state.timer) {
         clearTimeout(state.timer);
         state.timer = undefined;
-      }
-      if (state.completed) {
-        this.enqueue(state.chatId, (signal) => this.flush(state.chatId, key, true, undefined, signal), true);
       }
     }
   }
 
   clear(): void {
+    for (const state of this.streams.values()) {
+      if (state.timer) clearTimeout(state.timer);
+      state.activity?.controller.abort();
+    }
+    for (const activity of this.activities.values()) activity.controller.abort();
     this.streams.clear();
+    this.activities.clear();
     this.notifiedTurns.clear();
+  }
+
+  revalidateAccess(): void {
+    for (const [key, activity] of this.activities) {
+      if (activity.authorization.aborted || !this.executor.isAuthorized(activity.chatId)) this.removeActivity(key, activity);
+    }
+    for (const [key, state] of this.streams) {
+      if (!state.authorization.aborted && this.executor.isAuthorized(state.chatId)) continue;
+      if (state.timer) clearTimeout(state.timer);
+      state.activity?.controller.abort();
+      this.streams.delete(key);
+      this.notifiedTurns.delete(state.turnKey);
+    }
+  }
+
+  completeTurn(chatId: string, threadId: string, turnId: string): void {
+    const turnKey = this.turnKey(threadId, turnId);
+    this.activities.delete(this.activityKey(chatId, turnKey));
   }
 
   prepareInteraction(chatId: string): void {
@@ -181,7 +253,13 @@ export class TelegramTextStreams {
         clearTimeout(state.timer);
         state.timer = undefined;
       }
-      this.enqueue(chatId, (signal) => this.flush(chatId, key, state.completed, undefined, signal), true);
+      this.enqueue(chatId, (signal) => this.flush(chatId, key, state.completed, state, signal), true, { signal: state.authorization });
+    }
+  }
+
+  invalidateThread(threadId: string): void {
+    for (const [key, activity] of this.activities) {
+      if (activity.turnKey.startsWith(`${threadId}:`)) this.removeActivity(key, activity);
     }
   }
 
@@ -209,7 +287,7 @@ export class TelegramTextStreams {
       }
       clearTimeout(state.timer);
       state.timer = undefined;
-      this.enqueue(chatId, (signal) => this.flush(chatId, key, false, undefined, signal), true);
+      this.enqueue(chatId, (signal) => this.flush(chatId, key, false, state, signal), true, { signal: state.authorization });
     }
   }
 
@@ -217,13 +295,13 @@ export class TelegramTextStreams {
     chatId: string,
     key: string,
     final: boolean,
-    standaloneState?: StreamState,
+    state: StreamState,
     signal?: AbortSignal,
+    detached = false,
   ): Promise<void> {
-    const state = standaloneState ?? this.streams.get(key);
-    if (!state) {
-      return;
-    }
+    if (!detached && this.streams.get(key) !== state) return;
+    signal = signal ? AbortSignal.any([signal, state.authorization]) : state.authorization;
+    signal.throwIfAborted();
     // 终态尝试从活动流脱离，Turn 完成不能从头重播一次已部分发送或结果不确定的回复。
     if (final && this.streams.get(key) === state) this.streams.delete(key);
     await this.flushState(chatId, state, final, signal);
@@ -308,10 +386,12 @@ export class TelegramTextStreams {
     }
   }
 
-  private createStream(chatId: string, turnKey: string): StreamState {
+  private createStream(chatId: string, turnKey: string, activity?: StreamActivity): StreamState {
     return {
       chatId,
       turnKey,
+      authorization: activity ? AbortSignal.any([activity.authorization, activity.controller.signal]) : this.executor.authorizationSignal(chatId),
+      activity,
       text: "",
       messageId: undefined,
       creationUncertain: false,
@@ -320,6 +400,21 @@ export class TelegramTextStreams {
       truncated: false,
       timer: undefined,
     };
+  }
+
+  private activityKey(chatId: string, turnKey: string): string {
+    return JSON.stringify([chatId, turnKey]);
+  }
+
+  private removeActivity(key: string, activity: StreamActivity): void {
+    activity.controller.abort();
+    this.activities.delete(key);
+    for (const [streamKey, state] of this.streams) {
+      if (state.activity !== activity) continue;
+      if (state.timer) clearTimeout(state.timer);
+      this.streams.delete(streamKey);
+    }
+    this.notifiedTurns.delete(activity.turnKey);
   }
 
   private streamKey(chatId: string, turnKey: string, itemId: string): string {
@@ -336,7 +431,11 @@ export class TelegramTextStreams {
   }
 
   private enqueue(chatId: string, run: (signal: AbortSignal) => Promise<void>, critical: boolean, options?: ConversationDeliveryOptions): boolean {
-    return this.delivery.enqueue(chatId, run, critical, options);
+    const authorization = this.executor.authorizationSignal(chatId);
+    return this.delivery.enqueue(chatId, run, critical, {
+      ...options,
+      signal: options?.signal ? AbortSignal.any([authorization, options.signal]) : authorization,
+    });
   }
 
   private async sendFirstChunk(chatId: string, state: StreamState, text: string, signal?: AbortSignal): Promise<number> {

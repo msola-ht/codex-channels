@@ -4,22 +4,23 @@
 
 本文定义 Setup、Config、服务管理和数据维护的本机可视化接口安全边界。源码安装与更新只从本机终端执行，不提供 HTTP 更新任务。
 当前 WebUI 已开放低风险设置读写，以及经过一次性确认和白名单任务保护的部分高风险操作；回环监听未配置
-WebUI Token 时以真实回环连接和回环 Origin 识别管理主体，配置 Token 时指标读取和设置写入复用同一个
+WebUI Token 时以真实回环连接、回环 Host 和同源 HTTP Origin 识别管理主体，配置 Token 时指标读取和设置写入复用同一个
 Bearer Token，不建立第二套浏览器登录。
 
 这是当前架构的稳定约束：后续扩展不能恢复独立管理凭据、管理登录/登出接口、管理 Cookie 或第二套浏览器
-会话；高风险能力若未来接入，只能在现有回环访问约束和可选 Bearer 鉴权上增加操作级安全门槛。
+会话；高风险能力若未来接入，只能在现有监听模式对应的访问约束和 Bearer 鉴权上增加操作级安全门槛。
 
 管理能力必须继续调用 `scripts/` 中不依赖终端的结构化接口。HTTP 层只负责认证、请求约束、预览确认、
 任务生命周期和结果映射，不复制配置、Provider、渠道 Setup 或服务管理语义。
 
 ## 监听与认证
 
-- 管理写接口只接受来自回环地址的连接。WebUI 即使绑定 `0.0.0.0` 提供指标直连，公网连接也不能调用
-  管理写接口；远程管理通过 SSH 隧道访问服务器回环地址。非回环管理在单独完成 TLS、可信反向代理和
-  来源配置前保持关闭。
+- 回环监听的管理接口只接受来自真实回环地址的连接，远程用户可通过 SSH 隧道访问。显式绑定 `0.0.0.0`
+  且配置非空 WebUI Token 后，支持直连或保留原始 Host 的域名反代管理；每次管理请求先验证 Bearer。
+  远程公网访问应使用 HTTPS 反代保护令牌。原始调用转储及其事件流仍只接受真实回环连接，即使令牌有效也不放开。
 - WebUI 的 `webui.token` 配置后同时保护指标读取和管理读写；高风险写入另需一次性确认令牌。回环监听未配置
-  Token 时管理路由仍要求真实回环连接和回环 Origin，不提供独立的管理凭据、登录或登出接口。
+  Token 时所有 HTTP 入口共用真实回环连接、回环 Host 和存在的 Origin 校验，不提供独立的管理凭据、登录或登出接口。
+  域名反代只读访问也须配置 WebUI Token，代理层鉴权不能替代此令牌。
 - 浏览器令牌保存在 `localStorage`，重新打开浏览器仍可复用，并通过 `Authorization: Bearer` 发送；服务端不把令牌
   写入 Cookie、响应正文或日志。绑定非回环地址时仍必须配置令牌。
 - 配置 Token 时管理请求使用常数时间 Bearer 比较；管理请求按已验证 Token 或回环 Origin 的主体指纹进行
@@ -27,12 +28,20 @@ Bearer Token，不建立第二套浏览器登录。
 
 ## Origin 与浏览器边界
 
-- 管理请求不开放 CORS。同源 GET 读取始终受回环地址保护，并在配置后受 WebUI Bearer 令牌保护；修改状态的请求必须携带
-  HTTP 回环 `Origin`（`127.0.0.1`、`localhost` 或 `[::1]`），SSH 隧道的本机转发端口可以与服务端
-  监听端口不同；不得从 `Host`、`X-Forwarded-Host` 或任意转发头自动扩展可信来源。
+- WebUI 不开放 CORS。未配置 Token 时，静态页面、普通 API、管理 API、日志、调用详情及事件流在分派前统一
+  校验真实回环连接和 Host；Host 仅接受 `127.0.0.1`、`localhost` 或 `[::1]`，可带 1–65535 端口，
+  `localhost` 大小写不敏感。缺失、重复、畸形、非回环 Host 及数字 IP 别名、尾点、URL 凭据均拒绝。
+  GET 可省略 Origin，携带时必须是与当前 Host 相同主机和有效端口的精确 HTTP Origin，默认端口按 HTTP 规则省略。
+  SSH 本机转发端口可与服务器监听端口不同，浏览器请求的 Host 与 Origin 仍须同源；管理写请求必须携带 Origin。
+- 配置 Token 的回环监听管理仍要求真实回环连接和 HTTP 回环 Origin。绑定 `0.0.0.0` 的管理请求先验证 Bearer，
+  再校验存在的精确 HTTP(S) Origin；远程直连或域名反代的 Origin 主机和有效端口必须与请求 Host 一致。
+  管理 GET 可省略 Origin；写请求必须携带。经过真实回环连接的 SSH 转发继续接受 HTTP 回环 Origin，端口可不同于服务配置。
+  远程管理使用 Host 推导同站点来源前必须通过 Bearer 验证；不信任 `Forwarded`、`X-Forwarded-Host`、`X-Forwarded-Proto` 等转发头。
 - Bearer 令牌不通过 Cookie 自动附带；Origin 检查始终阻止跨站管理请求。
 - 管理响应统一设置 `Cache-Control: no-store`、严格 CSP、`frame-ancestors 'none'`、
-  `X-Content-Type-Options: nosniff` 和禁止 Referrer 泄露的策略。
+  `X-Content-Type-Options: nosniff` 和禁止 Referrer 泄露的策略。WebUI 正常页面与未构建回退页也设置
+  同源脚本 CSP、`frame-ancestors 'none'`、`X-Frame-Options: DENY` 和 `Referrer-Policy: no-referrer`；
+  页面所需内联样式仍在 `style-src` 中显式放行，不因此放宽脚本来源。
 - 不接受表单编码、跨站简单请求或通过 GET 触发修改；管理 API 只接受明确的 JSON Content-Type。
 
 ## 修订、防重放与确认
@@ -45,6 +54,8 @@ Bearer Token，不建立第二套浏览器登录。
   修订和预览结果，不能跨会话、跨操作或修改输入后复用。
 - 确认令牌在开始执行前原子消费。重复提交只返回已消费或过期，不重放写入；需要重试时重新读取状态并
   生成预览。普通请求不以请求 ID 绕过修订或确认。
+- Codex 批量设置 `kind: all` 可能包含权限变更，与独立权限、工具访问和审批审核人设置使用同一高风险确认门禁。
+  Provider 切换/删除、账户设置和管理任务拒绝操作合同之外的字段，不能静默丢弃后再签发确认。
 - 预览必须明确显示将修改的资源、是否写入凭据、是否中断服务、预计执行阶段、失败恢复方式和生效动作；
   不返回已有 Key、Token、Secret、代理值、配置正文或备份内容。
 
@@ -66,6 +77,9 @@ Bearer Token，不建立第二套浏览器登录。
   前失败关闭，运行中任务则保留主结果并明确记录审计降级状态。
 - 外部错误只使用稳定代码、字段、阶段、是否可重试和修复动作。内部异常保留在脱敏日志中，不原样返回
   堆栈、路径之外的敏感上下文或子进程完整输出。
+- 管理任务在启动前审计不可写时不执行。启动或终态审计失败会在任务的 `auditStatus` 中保留
+  `degraded`，列表/详情与变更通知均可观察；后续审计成功不清除先前缺口，WebUI 提示核对而不是重跑任务。
+  任务结果与审计状态分开；未配置审计回调的内部 Runner 返回 `null`，不宣称已记录。
 
 ## 接入门槛
 
@@ -73,15 +87,16 @@ Bearer Token，不建立第二套浏览器登录。
 
 1. 所有拟暴露修改项已具备脱敏读取、明确输入、修订保护和稳定生效动作。
 2. 所有高风险操作已具备预览、一次性确认、阶段进度、取消或恢复路径。
-3. 回环访问约束、可选 WebUI Bearer 认证、Origin、限速、请求上限与审计由共享层实现。
+3. 监听模式对应的访问约束、匿名 Host/Origin 门禁、WebUI Bearer 认证、管理 Origin、限速、请求上限与审计由共享层实现。
 4. 指标 API 与管理 API 明确分路由；配置后同一 WebUI Token 的写权限仅限受控设置和已具备确认/任务契约的白名单操作。
 5. 真实服务中断和凭据事务继续在现有管理模块或独立任务中执行，HTTP 层不直接操作文件、
    服务管理器、数据库或 App Server Transport。
 
 ## 当前实现映射
 
-- `management-access.mjs`：回环 Origin、分类限速、请求元数据上限和安全响应头；配置 WebUI Token 后，Bearer 认证在
-  `webui-server.mjs` 与普通 API 共用常数时间比较。
+- `webui-server.mjs`：所有匿名 HTTP 入口共用真实回环、Host 和存在的 Origin 门禁；管理访问按监听模式应用
+  回环约束或强制 Bearer 与同站点 Origin。配置 WebUI Token 后，管理与普通 API 共用常数时间 Bearer 比较。
+- `management-access.mjs`：管理精确 Origin、分类限速、请求元数据上限和安全响应头。
 - `management-confirmations.mjs`：稳定 JSON 指纹与绑定管理主体、操作、输入、修订和预览的一次性确认令牌。
 - `management-audit.mjs`：固定事件版本、固定脱敏字段、`0600` 私有 JSONL 与有界轮转。
 - `management-security.mjs` / `management-security.d.mts`：本机管理适配器唯一应导入的共享入口。

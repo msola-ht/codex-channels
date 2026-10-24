@@ -17,6 +17,8 @@ export function formatSurfaceUserFacingError(
   surfaceLabel: "Telegram" | "飞书" | "微信",
 ): string {
   switch (error.code) {
+    case "mcp.oauth.unavailable":
+      return "MCP 登录跟踪暂不可用，请先用 /mcp 核对实际认证状态，再决定是否重新登录";
     case "hooks.usage":
       return "用法：/hooks [page N|列表选择标识|trust <标识>|enable <标识>|disable <标识>|confirm <一次性令牌>]";
     case "hooks.actor-required":
@@ -59,12 +61,18 @@ export function formatSurfaceUserFacingError(
       return "文本附件暂存空间已满，请稍后重试或发送较小片段";
     case "message.empty":
       return "消息不能为空";
+    case "input.authorization-changed":
+      return "输入授权或工作区已变化，本次输入未继续提交；请核对权限和工作区后重新发送";
+    case "command.authorization-changed":
+      return "命令授权或工作区已变化，未继续后续操作；已提交的操作不会自动撤销，请重新查询实际状态";
     case "oauth.closing":
       return "飞书用户授权正在关闭，请稍后重试";
     case "conversation.name.invalid":
       return "会话名称必须为 1–64 个字符";
     case "conversation.missing":
       return "当前还没有 Codex Session";
+    case "thread.resume.history-unavailable":
+      return "当前会话没有可恢复的历史记录，无法恢复订阅；未删除原会话，请用 /new 新建，或在历史可用后用 /resume 显式重试。新建时若提示速度档位未知，请先用 /fast 明确选择";
     case "conversation.busy":
       if (error.details.reason === "subscription-restoring") return "会话订阅正在恢复，请稍后重试";
       if (error.details.reason === "activity-restored") return "会话活动状态已恢复，请重新发送消息以继续当前任务";
@@ -128,6 +136,8 @@ export function formatSurfaceUserFacingError(
       return "只能恢复或接管当前工作区中的会话，请先使用 /work 切换到会话所属工作区";
     case "thread.takeover.changed":
       return "会话绑定或工作区已发生变化，请重新打开会话列表后再试";
+    case "thread.workspace.changed":
+      return "会话执行目录或订阅已变化，本次操作未通过会话校验。请用 /status 核对；目录不匹配时，在原生端恢复目录，或用 /workspace 选择对应的已登记工作区后重新选择会话。";
     case "goal.empty":
       return "目标不能为空";
     case "goal.usage":
@@ -191,7 +201,7 @@ export function formatSurfaceUserFacingError(
     case "revert.result-unknown":
       return "Revert 结果未知；请求不会自动重试，请重新执行 /revert list 核对历史";
     case "workspace.missing":
-      return `Workspace 不存在或未获授权：${detail(error, "workspaceId", "未知")}`;
+      return `当前 Workspace 已移除或未获授权：${detail(error, "workspaceId", "未知")}。请发送 /workspace 查看可用工作区，再显式选择；不会自动切换目录，也不会自动重试本次操作。`;
     case "workspace.selector.required":
       return "用法：/workspace <序号、ID 或名称>";
     case "workspace.selector.ambiguous":
@@ -210,8 +220,12 @@ export function formatSurfaceUserFacingError(
       return "尚未确认当前会话审批方式更新结果；请求不会自动重试，请用 /autoreview 核对实际状态";
     case "model.current.missing":
       return `当前模型不在可用模型列表中：${detail(error, "model", "未知")}`;
-    case "model.configured-default.missing":
-      return `配置的默认模型不属于当前主 Provider ${detail(error, "provider", "未知")}：${detail(error, "model", "未知")}`;
+    case "model.configured-default.missing": {
+      const provider = detail(error, "provider", "");
+      return provider
+        ? `配置的默认模型不属于当前主 Provider ${provider}：${detail(error, "model", "未知")}`
+        : `配置的默认模型不在当前主 Provider 的可用目录中：${detail(error, "model", "未知")}`;
+    }
     case "model.official.not-logged-in":
       return "OpenAI 官方未登录，当前没有可用模型；请先运行 codex login";
     case "model.provider.selection-required":
@@ -247,6 +261,8 @@ export function formatSurfaceUserFacingError(
       return `当前模型不支持 ${error.details.tier === "Ultrafast" ? "Ultrafast" : "Fast"} 档位：${detail(error, "model", "未知")}`;
     case "fast.disabled":
       return "Codex features.fast_mode 已关闭，不能启用 Fast/Ultrafast；仍可用 /fast off 回到 Standard";
+    case "fast.selection.unknown":
+      return "App Server 尚未返回当前选择的速度档位，无法固定保存；请先用 /fast on、/fast ultrafast 或 /fast off 明确选择后重试";
     case "provider.account.unavailable":
       return `${detail(error, "provider", "当前提供商")}的账户查询失败，请检查配置或稍后重试`;
     case "collaboration-mode.unsupported":
@@ -279,8 +295,6 @@ export function formatSurfaceUserFacingError(
       return "Plugin 名称不唯一，请使用序号或完整 ID";
     case "plugin.unavailable":
       return "指定的 Plugin 未启用、被管理员禁用或暂不可调用";
-    case "plugin.provider.unsupported":
-      return "Plugin 调用当前只支持 OpenAI Session";
     case "agents.usage":
       return "用法：/agents <角色名称或序号> <任务>";
     case "agents.not-found":

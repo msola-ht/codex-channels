@@ -17,16 +17,16 @@ const hostSource = `
   const child = spawn(command, args, { env: process.env, stdio: "inherit" });
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     // Supervisor signals our dedicated group, including the native child.
-    // Keep the signed parent alive until the child exits without a second signal.
+    // The child handle keeps this leader alive until native exit or group KILL.
     process.on(signal, () => {});
   }
-  child.on("error", (error) => { console.error(error.message); process.exit(1); });
+  const closeGroup = () => process.kill(-process.pid, "SIGKILL");
+  child.on("error", (error) => { console.error(error.message); closeGroup(); });
   child.on("exit", (code, signal) => {
-    if (signal) {
-      process.removeAllListeners(signal);
-      process.kill(process.pid, signal);
-    }
-    else process.exit(code ?? 1);
+    console.error(JSON.stringify({ event: "desktop-host-native-exit", code, signal }));
+    // Never abandon descendants, including when native exit precedes our
+    // signal callback. This live leader still pins its own process-group ID.
+    closeGroup();
   });
 `;
 const protocolVersionPath = fileURLToPath(

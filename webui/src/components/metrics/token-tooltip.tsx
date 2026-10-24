@@ -4,29 +4,25 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatCount, formatTokens, formatUsageTokens, formatTotalUsage } from "@/lib/format"
-import type { CacheUsage, ReviewUsage, UsageCoverage } from "@/lib/types"
+import { formatCount, formatTokens, formatTotalUsage } from "@/lib/format"
+import type { CacheUsage, ReviewUsage } from "@/lib/types"
 
 export function InputTokenTooltip({
   inputTokens,
   cachedInputTokens,
   cacheUsage,
-  usageCoverage,
   requestCount,
 }: {
   inputTokens: number | null
   cachedInputTokens: number | null
   cacheUsage?: CacheUsage
-  usageCoverage?: UsageCoverage
   requestCount?: number
 }) {
   const { t } = useTranslation()
-  const display = usageCoverage && requestCount !== undefined
-    ? formatUsageTokens(inputTokens ?? 0, requestCount, usageCoverage.inputMissingRequestCount)
-    : formatTokens(inputTokens)
+  const display = formatTokens(inputTokens)
   const knownCacheSubset = cachedInputTokens === null && cacheUsage?.cachedInputTokens != null
   const cached = knownCacheSubset ? cacheUsage.cachedInputTokens : cachedInputTokens
-  if (cached === null || requestCount === 0 || display === "—") return <span className="tabular-nums">{display}</span>
+  if (cached === null || requestCount === 0 || !display) return <span className="tabular-nums">{display}</span>
   const knownInput = knownCacheSubset ? cacheUsage.inputTokens : inputTokens
   const uncached =
     knownInput === null
@@ -34,19 +30,19 @@ export function InputTokenTooltip({
       : Math.max(0, knownInput - cached)
   const cachedText = formatTokens(cached)
   const uncachedText = formatTokens(uncached)
+  const details = [
+    cachedText ? t("metrics.cached", { count: cachedText }) : "",
+    uncachedText ? t("metrics.uncached", { count: uncachedText }) : "",
+  ].filter(Boolean)
+  if (details.length === 0) return <span className="tabular-nums">{display}</span>
   return (
     <Tooltip>
-      <TooltipTrigger aria-description={[t("metrics.cached", { count: cachedText }), t("metrics.uncached", { count: uncachedText })].join("; ")} render={<span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>
+      <TooltipTrigger aria-description={details.join("; ")} render={<span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>
           {display}
         </TooltipTrigger>
       <TooltipContent side="right" align="start">
         <ul className="flex flex-col gap-1">
-          <li className="whitespace-nowrap">
-            {t("metrics.cached", { count: cachedText })}
-          </li>
-          <li className="whitespace-nowrap">
-            {t("metrics.uncached", { count: uncachedText })}
-          </li>
+          {details.map(detail => <li key={detail} className="whitespace-nowrap">{detail}</li>)}
         </ul>
       </TooltipContent>
     </Tooltip>
@@ -56,24 +52,21 @@ export function InputTokenTooltip({
 export function OutputTokenTooltip({
   outputTokens,
   reasoningOutputTokens,
-  usageCoverage,
   requestCount,
 }: {
   outputTokens: number | null
   reasoningOutputTokens: number | null
-  usageCoverage?: UsageCoverage
   requestCount?: number
 }) {
   const { t } = useTranslation()
-  const display = usageCoverage && requestCount !== undefined
-    ? formatUsageTokens(outputTokens ?? 0, requestCount, usageCoverage.outputMissingRequestCount)
-    : formatTokens(outputTokens)
-  if (outputTokens === null || requestCount === 0 || display === "—") return <span className="tabular-nums">{display}</span>
+  const display = formatTokens(outputTokens)
+  if (outputTokens === null || requestCount === 0 || !display) return <span className="tabular-nums">{display}</span>
   const reasoning = reasoningOutputTokens ?? 0
   const details = [
-    t("metrics.reasoning", { count: formatTokens(reasoning) }),
-    t("metrics.nonReasoning", { count: formatTokens(Math.max(0, outputTokens - reasoning)) }),
-  ]
+    reasoning > 0 ? t("metrics.reasoning", { count: formatTokens(reasoning) }) : "",
+    outputTokens > reasoning ? t("metrics.nonReasoning", { count: formatTokens(outputTokens - reasoning) }) : "",
+  ].filter(Boolean)
+  if (details.length === 0) return <span className="tabular-nums">{display}</span>
   return (
     <Tooltip>
       <TooltipTrigger aria-description={details.join("; ")} render={<span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>
@@ -95,11 +88,11 @@ export function TokenHint({ value }: { value: string }) {
 export function ReviewUsageSummary({ usage }: { usage: ReviewUsage }) {
   const { t } = useTranslation()
   const total = formatTotalUsage(usage)
-  if (usage.requestCount === 0) return <span className="tabular-nums">{total}</span>
+  if (usage.requestCount === 0 || !total) return <span className="tabular-nums">{total}</span>
   const detail = t("metrics.reviewSubset", {
     count: formatCount(usage.requestCount),
-    input: formatUsageTokens(usage.inputTokens, usage.requestCount, usage.usageCoverage.inputMissingRequestCount),
-    output: formatUsageTokens(usage.outputTokens, usage.requestCount, usage.usageCoverage.outputMissingRequestCount),
-  })
+    input: formatTokens(usage.inputTokens),
+    output: formatTokens(usage.outputTokens),
+  }).split("\n").filter((_, index) => [usage.requestCount, usage.inputTokens, usage.outputTokens][index] !== 0).join("\n")
   return <Tooltip><TooltipTrigger aria-description={detail} render={<span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>{total}</TooltipTrigger><TooltipContent><ul className="flex flex-col gap-1">{detail.split("\n").map((line) => <li key={line} className="whitespace-nowrap">{line}</li>)}</ul></TooltipContent></Tooltip>
 }

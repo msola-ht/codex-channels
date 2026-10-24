@@ -1,4 +1,4 @@
-import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
+import { promptManagedAccountId, promptManagedAccountEdit, confirmManagedAccountEdit } from "./managed-provider-account-prompt.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
 import { pathToFileURL } from "node:url";
 import * as clackPrompts from "@clack/prompts";
@@ -7,28 +7,40 @@ import { loadDeepseekAccounts, deepseekProviderId, validateDeepseekAccountId } f
 import {
   applyDeepseekAccountConfiguration,
   previewDeepseekAccountConfiguration,
-  removeDeepseekAccount, setDeepseekDefaultAccount,
+  removeDeepseekAccount, previewDeepseekAccountRemoval, setDeepseekDefaultAccount,
 } from "./deepseek-account-management.mjs";
-import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
+import { runProviderModelSetup } from "./provider-model-setup.mjs";
+import { loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
+import { deepseekAccountDefinition } from "../runtime/model-provider-definitions.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 
-export async function runDeepseekSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout, action: requestedAction, accountId: requestedId } = {}) {
+export async function runDeepseekSetup(options = {}) {
+  while (true) {
+    const result = await runDeepseekSetupOperation(options);
+    if (result.action === "menu-back") return { action: "back" };
+    if (result.action === "back" && options.action === undefined) continue;
+    return result;
+  }
+}
+
+async function runDeepseekSetupOperation({ environment = process.env, prompts = clackPrompts, output = process.stdout, action: requestedAction, accountId: requestedId } = {}) {
   const accounts = loadDeepseekAccounts(environment);
   const action = requestedAction ?? await prompts.select({
-    message: "DeepSeek 账户管理",
+    message: "DeepSeek 官方",
     options: [
-      { value: "add", label: "新增账户" },
+      { value: "add", label: "添加账户" },
       ...(accounts.length === 0 ? [] : [
-        { value: "reconfigure", label: "重新配置账户" },
-        { value: "settings", label: "修改默认模型与思考等级" },
-        { value: "default", label: "设置默认账户" },
-        { value: "remove", label: "删除账户" },
+        { value: "reconfigure", label: "编辑账户", hint: "API Key 与运行模式" },
+        { value: "models", label: "模型管理", hint: "所有 DS 账户共用目录；默认模型按账户设置" },
+        { value: "default", label: "设置默认账户", hint: "用于渠道默认选择，已有会话保持原账户" },
+        { value: "remove", label: "移除本地账户配置" },
       ]),
       { value: "back", label: "返回" },
     ],
   });
-  if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (prompts.isCancel(action) || action === "back") return { action: "menu-back" };
+  if (action === "models") return runProviderModelSetup({ environment, prompts, output, provider: "deepseek" });
   const accountId = requestedId ?? (action === "add"
     ? await promptManagedAccountId(prompts, accounts)
     : await prompts.select({ message: "选择 DS 账户", options: accounts.map((account) => ({ value: account.id, label: `${account.id}${account.default ? "（默认）" : ""}` })) }));
@@ -36,24 +48,20 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
   validateDeepseekAccountId(accountId);
   let result;
   if (action === "remove") {
-    if (await prompts.confirm({ message: `删除 DS 账户 ${accountId}？将停止对应 App Server，历史 Thread 将不可恢复；保留历史统计和安装前备份。`, initialValue: false }) !== true) return { action: "back" };
-    result = await removeDeepseekAccount({ accountId, confirmRemove: true }, { environment });
+    const preview = await previewDeepseekAccountRemoval(accountId, { environment });
+    if (await prompts.confirm({ message: `确认移除 DS 账户 ${accountId} 的本地配置？将停止对应实例，该账户历史会话将不可用；保留共享模型目录、备份和历史统计。${preview.effects.restoresInitialConfig ? "将恢复该账户接管的主配置字段，保留其他设置。" : ""}`, initialValue: false }) !== true) return { action: "back" };
+    result = await removeDeepseekAccount({ accountId, confirmRemove: true, expectedRevision: preview.revision }, { environment });
   } else if (action === "default") {
     result = await setDeepseekDefaultAccount(accountId, { environment });
-  } else if (action === "settings") {
-    return runModelProviderDefaultSetup({ provider: deepseekProviderId(accountId), allowBack: true, environment, prompts, output });
   } else if (["add", "reconfigure"].includes(action)) {
-    const mode = await prompts.select({ message: "运行模式", options: [{ value: "switching", label: "切换模式" }, { value: "exclusive", label: "固定主 Provider" }] });
-    if (prompts.isCancel(mode)) return { action: "back" };
-    const preview = previewDeepseekAccountConfiguration({ accountId, mode, reconfigure: action === "reconfigure" }, { environment });
-    let confirmExclusiveConfigChange = false;
-    if (preview.effects.writesMainConfig) {
-      confirmExclusiveConfigChange = await prompts.confirm({ message: "此操作会修改或恢复 Codex 主配置，确认继续？", initialValue: false }) === true;
-      if (!confirmExclusiveConfigChange) return { action: "back" };
-    }
-    const apiKey = await prompts.password({ message: "DeepSeek API Key" });
-    if (prompts.isCancel(apiKey)) return { action: "back" };
-    result = await applyDeepseekAccountConfiguration({ accountId, apiKey, mode, reconfigure: action === "reconfigure", confirmExclusiveConfigChange }, { environment });
+    const current = loadManagedModelProviderSettings(environment).find(entry => entry.provider === deepseekProviderId(accountId));
+    const edit = await promptManagedAccountEdit({ prompts, current, definition: deepseekAccountDefinition(accountId), reconfigure: action === "reconfigure" });
+    if (!edit) return { action: "back" };
+    const input = { accountId, ...edit, reconfigure: action === "reconfigure" };
+    const preview = previewDeepseekAccountConfiguration(input, { environment });
+    if (!await confirmManagedAccountEdit(preview, { prompts, output })) return { action: "back" };
+    result = await applyDeepseekAccountConfiguration({ ...input, confirmExclusiveConfigChange: preview.effects.writesMainConfig, expectedRevision: preview.revision }, { environment });
+    output.write(result.action === "unchanged" ? "账户配置未变化，无需保存或重启。\n" : `DS 账户 ${accountId} 配置已保存。\n`);
   } else throw new Error("未知 DeepSeek 账户操作");
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;

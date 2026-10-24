@@ -24,18 +24,32 @@ export class AccountQuery {
   stage: Stage = "configuration";
   operation = "credentials";
   private readonly started = performance.now();
+  private authorizationFailed = false;
+  private authorizationError: unknown;
 
-  constructor(private readonly provider: string, private readonly caller?: AbortSignal) {
+  constructor(private readonly provider: string, private readonly caller?: AbortSignal,
+    private readonly beforeSubmit?: () => void) {
     this.signal = AbortSignal.any([AbortSignal.timeout(10_000), ...(caller ? [caller] : [])]);
+  }
+
+  assertCurrent(): void {
+    this.signal.throwIfAborted();
+    try { this.beforeSubmit?.(); }
+    catch (error) {
+      this.authorizationFailed = true;
+      this.authorizationError = error;
+      throw error;
+    }
   }
 
   async run<T>(action: () => Promise<T>): Promise<T> {
     try {
-      this.signal.throwIfAborted();
+      this.assertCurrent();
       const result = await action();
-      this.signal.throwIfAborted();
+      this.assertCurrent();
       return result;
     } catch (error) {
+      if (this.authorizationFailed) throw this.authorizationError;
       if (this.caller?.aborted) throw this.caller.reason;
       const networkCode = safeNetworkCode(error);
       const reason: AccountQueryReason = this.signal.aborted ? "timeout"
@@ -58,10 +72,10 @@ export class AccountQuery {
   ): Promise<{ body: unknown; status: number }> {
     this.operation = operation;
     this.stage = "request";
-    this.signal.throwIfAborted();
+    this.assertCurrent();
     const response = await fetchImpl(url, {
       method: "GET", headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
-      signal: this.signal, ...(options.redirect ? { redirect: options.redirect } : {}),
+      signal: this.signal, redirect: options.redirect ?? "error",
     });
     this.signal.throwIfAborted();
     if (!response.ok && !(options.allowForbidden && response.status === 403)) {

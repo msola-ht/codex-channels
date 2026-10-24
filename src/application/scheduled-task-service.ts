@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { trimOldestEntries } from "./bounded-map.js";
 
 import {
   UserFacingError,
@@ -54,7 +55,7 @@ export interface ScheduledTaskCreationContext {
 export interface ScheduledTaskApplicationPort {
   isActorAuthorized(target: ConversationTarget, actorId: string): boolean;
   creationContext(target: ConversationTarget): ScheduledTaskCreationContext;
-  readPermissionSettings(cwd: string, modelProvider: string, signal?: AbortSignal): Promise<{
+  readPermissionSettings(cwd: string, modelProvider: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<{
     readonly sandbox: ScheduledTaskSandbox;
     readonly permissions: null;
   }>;
@@ -152,6 +153,7 @@ export interface ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     description: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskCreatePreview>;
   previewCreate(
     target: ConversationTarget,
@@ -163,14 +165,16 @@ export interface ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     token: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<{ action: "created" | "deleted"; task: ScheduledTaskView }>;
-  list(target: ConversationTarget, actorId: string, page?: number, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskListResult>;
+  list(target: ConversationTarget, actorId: string, page?: number, operation?: ScheduledTaskOperationContext, selectionMode?: "snapshot" | "id"): Promise<ScheduledTaskListResult>;
   runs(
     target: ConversationTarget,
     actorId: string,
     selector: string,
     page?: number,
     operation?: ScheduledTaskOperationContext,
+    selectionMode?: "snapshot" | "id",
   ): Promise<ScheduledTaskRunListResult>;
   rename(target: ConversationTarget, actorId: string, selector: string, name: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView>;
   pause(target: ConversationTarget, actorId: string, selector: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView>;
@@ -202,9 +206,10 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     description: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskCreatePreview> {
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
-    await this.requireTaskCapacity(target, actorId);
     const normalizedDescription = normalizeDraftDescription(description);
     const { rest, model } = splitModelMarker(normalizedDescription);
     const deterministic = parseNaturalScheduledTaskDraft(rest, this.now());
@@ -213,6 +218,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
         target,
         actorId,
         model === undefined ? deterministic : { ...deterministic, model },
+        operation,
       );
     }
     throw scheduledError(
@@ -229,18 +235,29 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
   ): Promise<ScheduledTaskCreatePreview> {
     operation?.assertCurrent();
     this.requireActor(target, actorId);
+    const context = this.requireCreationContext(target);
     await this.requireTaskCapacity(target, actorId);
     operation?.assertCurrent();
     this.requireActor(target, actorId);
+    if (!sameCreationContext(context, this.requireCreationContext(target))) {
+      throw scheduledError("scheduled-task.state.invalid", "计划任务创建上下文已变化，请重新预览");
+    }
     const prompt = normalizePrompt(request.prompt);
     const timezone = validateIanaTimeZone(request.timezone);
     const schedule = normalizeSchedule(request.schedule);
-    const context = this.requireCreationContext(target);
     const modelSelection = resolveCreationModel(request.model, context, this.application);
     const permission = await this.application.readPermissionSettings(
       context.cwd,
       modelSelection.modelProvider,
       operation?.signal,
+      () => {
+        operation?.assertCurrent();
+        this.requireActor(target, actorId);
+        if (!sameCreationContext(context, this.requireCreationContext(target))
+          || !this.application.isProviderConfigured(modelSelection.modelProvider)) {
+          throw scheduledError("scheduled-task.state.invalid", "计划任务创建上下文已变化，请重新预览");
+        }
+      },
     );
     operation?.assertCurrent();
     this.requireActor(target, actorId);
@@ -317,20 +334,39 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     token: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<{ action: "created" | "deleted"; task: ScheduledTaskView }> {
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
     const confirmation = this.consumeConfirmation(target, actorId, token);
     if (confirmation.kind === "create") {
-      await this.requireTaskCapacity(target, actorId);
-      this.requireActor(target, actorId);
       const current = this.requireCreationContext(target);
+      await this.requireTaskCapacity(target, actorId);
+      operation?.assertCurrent();
+      this.requireActor(target, actorId);
+      if (!sameCreationContext(current, this.requireCreationContext(target))
+        || current.workspaceId !== confirmation.input.workspaceId
+        || current.cwd !== confirmation.cwd) {
+        throw scheduledError("scheduled-task.confirmation.invalid", "计划任务创建上下文已变化，请重新预览");
+      }
       if (!this.application.isProviderConfigured(confirmation.input.modelProvider)) {
         throw scheduledError("scheduled-task.confirmation.invalid", "计划任务模型 Provider 已变化，请重新预览");
       }
       const permission = await this.application.readPermissionSettings(
         current.cwd,
         confirmation.input.modelProvider,
+        operation?.signal,
+        () => {
+          operation?.assertCurrent();
+          this.requireActor(target, actorId);
+          if (confirmation.expiresAt < this.now()
+            || !sameCreationContext(current, this.requireCreationContext(target))
+            || !this.application.isProviderConfigured(confirmation.input.modelProvider)) {
+            throw scheduledError("scheduled-task.confirmation.invalid", "计划任务创建上下文已变化，请重新预览");
+          }
+        },
       );
+      operation?.assertCurrent();
       this.requireActor(target, actorId);
       if (
         confirmation.expiresAt < this.now()
@@ -352,13 +388,18 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       this.invalidateTarget(target, actorId);
       return { action: "created", task: toTaskView(task) };
     }
-    const task = await this.requireOwnedTask(target, actorId, confirmation.taskId);
+    const task = await this.requireOwnedTask(target, actorId, confirmation.taskId, operation);
+    operation?.assertCurrent();
+    if (confirmation.expiresAt < this.now()) {
+      throw scheduledError("scheduled-task.confirmation.invalid", "计划任务确认令牌已过期，请重新预览");
+    }
     const deleted = await this.mutateTask(() => this.store.deleteTask(task.taskId, this.now()));
     this.invalidateTarget(target, actorId);
     return { action: "deleted", task: toTaskView(deleted, task) };
   }
 
-  async list(target: ConversationTarget, actorId: string, page = 1, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskListResult> {
+  async list(target: ConversationTarget, actorId: string, page = 1, operation?: ScheduledTaskOperationContext, selectionMode: "snapshot" | "id" = "snapshot"): Promise<ScheduledTaskListResult> {
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
     const tasks = (await this.store.listTasks({ conversation: target, actorId }))
       .filter((task) => task.actorId === actorId);
@@ -369,10 +410,12 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       throw scheduledError("scheduled-task.command.invalid", "计划任务页码超出范围");
     });
     const visible = pageSlice(tasks, page, taskPageSize, pageCount);
-    this.rememberSnapshot(this.taskSnapshots, snapshotKey(target, actorId), tasks.map((task) => task.taskId));
+    if (selectionMode === "snapshot") {
+      this.rememberSnapshot(this.taskSnapshots, snapshotKey(target, actorId), tasks.map((task) => task.taskId));
+    }
     return {
       tasks: visible.map((task) => toTaskView(task)),
-      selectors: visible.map((_task, index) => pageSelector(page, index, taskPageSize)),
+      selectors: visible.map((task, index) => selectionMode === "id" ? task.taskId : pageSelector(page, index, taskPageSize)),
       page,
       pageCount,
       totalTaskCount: tasks.length,
@@ -385,8 +428,12 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     selector: string,
     page = 1,
     operation?: ScheduledTaskOperationContext,
+    selectionMode: "snapshot" | "id" = "snapshot",
   ): Promise<ScheduledTaskRunListResult> {
-    const task = await this.resolveTask(target, actorId, selector);
+    const task = selectionMode === "id"
+      ? await this.requireOwnedTask(target, actorId, selector, operation)
+      : await this.resolveTask(target, actorId, selector, operation);
+    operation?.assertCurrent();
     const runs = await this.store.listRuns(task.taskId, { limit: 1_000 });
     operation?.assertCurrent();
     this.requireActor(target, actorId);
@@ -395,14 +442,16 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       throw scheduledError("scheduled-task.command.invalid", "计划任务页码超出范围");
     });
     const visible = pageSlice(runs, page, runPageSize, pageCount);
-    this.rememberSnapshot(
-      this.runSnapshots,
-      snapshotKey(target, actorId),
-      runs.map((run) => run.runId),
-    );
+    if (selectionMode === "snapshot") {
+      this.rememberSnapshot(
+        this.runSnapshots,
+        snapshotKey(target, actorId),
+        runs.map((run) => run.runId),
+      );
+    }
     return {
       task: toTaskView(task),
-      runs: visible.map((run, index) => ({ ...run, selector: pageSelector(page, index, runPageSize) })),
+      runs: visible.map((run, index) => ({ ...run, selector: selectionMode === "id" ? run.runId : pageSelector(page, index, runPageSize) })),
       page,
       pageCount,
       totalRunCount: runs.length,
@@ -416,7 +465,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     name: string,
     operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskView> {
-    const task = await this.resolveTask(target, actorId, selector);
+    const task = await this.resolveTask(target, actorId, selector, operation);
     operation?.assertCurrent();
     const updated = await this.mutateTask(() =>
       this.store.renameTask(task.taskId, normalizeName(name), this.now())
@@ -425,14 +474,14 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
   }
 
   async pause(target: ConversationTarget, actorId: string, selector: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView> {
-    const task = await this.resolveTask(target, actorId, selector);
+    const task = await this.resolveTask(target, actorId, selector, operation);
     operation?.assertCurrent();
     const updated = await this.mutateTask(() => this.store.pauseTask(task.taskId, this.now()));
     return toTaskView(updated);
   }
 
   async resume(target: ConversationTarget, actorId: string, selector: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView> {
-    const task = await this.resolveTask(target, actorId, selector);
+    const task = await this.resolveTask(target, actorId, selector, operation);
     operation?.assertCurrent();
     const updated = await this.mutateTask(() => this.store.resumeTask(task.taskId, this.now()));
     return toTaskView(updated);
@@ -444,7 +493,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     selector: string,
     operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledRun> {
-    const task = await this.resolveTask(target, actorId, selector);
+    const task = await this.resolveTask(target, actorId, selector, operation);
     operation?.assertCurrent();
     if (task.status === "blocked") {
       throw scheduledError("scheduled-task.state.invalid", "阻塞的计划任务不能立即运行");
@@ -458,8 +507,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     selector: string,
     operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledRun> {
-    const run = await this.resolveRun(target, actorId, selector);
-    await this.requireOwnedTask(target, actorId, run.taskId);
+    const run = await this.resolveRun(target, actorId, selector, operation);
     operation?.assertCurrent();
     if (run.state !== "uncertain") {
       throw scheduledError("scheduled-task.state.invalid", "只有 uncertain Run 可以显式解除后重试");
@@ -475,7 +523,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     selector: string,
     operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskDeletePreview> {
-    const task = await this.resolveTask(target, actorId, selector);
+    const task = await this.resolveTask(target, actorId, selector, operation);
     operation?.assertCurrent();
     const token = randomUUID();
     const expiresAt = this.now() + confirmationLifetimeMs;
@@ -504,7 +552,9 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     selector: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTask> {
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
     const normalized = selector.trim();
     if (!normalized) throw scheduledError("scheduled-task.command.invalid", "需要提供任务 ID 或列表序号");
@@ -515,16 +565,18 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       }
       const taskId = snapshot.ids[Number(normalized) - 1];
       if (!taskId) throw scheduledError("scheduled-task.not-found", "计划任务列表序号不存在");
-      return this.requireOwnedTask(target, actorId, taskId);
+      return this.requireOwnedTask(target, actorId, taskId, operation);
     }
-    return this.requireOwnedTask(target, actorId, normalized);
+    return this.requireOwnedTask(target, actorId, normalized, operation);
   }
 
   private async resolveRun(
     target: ConversationTarget,
     actorId: string,
     selector: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledRun> {
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
     const normalized = selector.trim();
     if (!normalized) throw scheduledError("scheduled-task.command.invalid", "需要提供 Run ID");
@@ -536,13 +588,15 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       const runId = snapshot.ids[Number(normalized) - 1];
       if (!runId) throw scheduledError("scheduled-task.not-found", "Run 列表序号不存在");
       const run = await this.store.getRun(runId);
+      operation?.assertCurrent();
       if (!run) throw scheduledError("scheduled-task.not-found", "找不到指定 Run");
-      await this.requireOwnedTask(target, actorId, run.taskId);
+      await this.requireOwnedTask(target, actorId, run.taskId, operation);
       return run;
     }
     const run = await this.store.getRun(normalized);
+    operation?.assertCurrent();
     if (!run) throw scheduledError("scheduled-task.not-found", "找不到指定 Run");
-    await this.requireOwnedTask(target, actorId, run.taskId);
+    await this.requireOwnedTask(target, actorId, run.taskId, operation);
     return run;
   }
 
@@ -550,9 +604,12 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     taskId: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTask> {
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
     const task = await this.store.getTask(taskId);
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
     if (
       !task
@@ -656,7 +713,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
   ): void {
     snapshots.delete(key);
     snapshots.set(key, { capturedAt: this.now(), ids });
-    trimMap(snapshots, maximumSnapshots);
+    trimOldestEntries(snapshots, maximumSnapshots);
   }
 
   private invalidateTarget(target: ConversationTarget, actorId: string): void {
@@ -768,14 +825,6 @@ function boundedPreview(value: string): string {
 
 function snapshotKey(target: ConversationTarget, actorId: string): string {
   return `${conversationTargetKey(target)}:${actorId}`;
-}
-
-function trimMap<K, V>(map: Map<K, V>, maximum: number): void {
-  while (map.size > maximum) {
-    const oldest = map.keys().next().value;
-    if (oldest === undefined) return;
-    map.delete(oldest);
-  }
 }
 
 function scheduledError(

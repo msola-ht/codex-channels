@@ -22,6 +22,7 @@ export type SettingLabel = string | { key: MessageKey; params?: TranslateParams 
 
 export type PendingSetting = {
   kind: string
+  intent?: "set" | "clear" | "generate"
   before: unknown
   value: unknown
   label: SettingLabel
@@ -96,6 +97,9 @@ export interface ProviderSettingsController {
 }
 
 export interface AccountSettingsController {
+  actionResult: ManagementSettingMutationResponse | null
+  writeUnconfirmed: boolean
+  readbackRequired: boolean
   settings: ManagementAccountSettingsResponse | null
   loading: boolean
   error: string | null

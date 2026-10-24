@@ -29,7 +29,7 @@ export function ccgAccountsFilePath(environment = process.env) {
 }
 
 export function ccgAccountDirectory(environment, id) {
-  return join(providerStorageRoot(environment), "ccg", "accounts", validateCcgAccountId(id));
+  return join(providerStorageRoot(environment), "ccg", ccgProviderId(id));
 }
 
 export function ccgAccountMarkerPath(environment, id) {

@@ -39,6 +39,12 @@ interface PendingSetup {
   expiresAt: number;
 }
 
+interface SetupScope {
+  target: ConversationTarget;
+  actorId: string;
+  controller: AbortController;
+}
+
 interface FeishuApplicationSetupOptions {
   tokenTtlMs?: number;
   closeTimeoutMs?: number;
@@ -48,10 +54,10 @@ interface FeishuApplicationSetupOptions {
 export class FeishuApplicationSetupController {
   private readonly pending = new Map<string, PendingSetup>();
   private readonly tasks = new Set<Promise<void>>();
+  private readonly scopes = new Set<SetupScope>();
   private readonly tokenTtlMs: number;
   private readonly closeTimeoutMs: number;
   private readonly now: () => number;
-  private activeController: AbortController | undefined;
   private active = false;
   private closed = false;
 
@@ -82,12 +88,32 @@ export class FeishuApplicationSetupController {
     ) {
       return;
     }
+    const scope = this.createScope(target, actorId);
+    const task = this.runDoctor(target, actorId, runtime, scope).catch((error: unknown) => {
+      if (!this.isActive(scope)) return;
+      throw error;
+    }).finally(() => {
+      this.scopes.delete(scope);
+      this.tasks.delete(task);
+    });
+    this.tasks.add(task);
+    await task;
+  }
+
+  private async runDoctor(
+    target: ConversationTarget,
+    actorId: string,
+    runtime: FeishuPermissionRuntimeStatus,
+    scope: SetupScope,
+  ): Promise<void> {
     let snapshot: FeishuApplicationSnapshot | undefined;
     try {
-      snapshot = await this.api.inspect();
+      snapshot = await this.api.inspect(scope.controller.signal, () => this.assertActive(scope));
     } catch (error) {
+      if (!this.isActive(scope)) return;
       this.logFailure(target, "inspect", error);
     }
+    this.assertActive(scope);
     const missingTenantScopes = missingRequiredTenantScopes(snapshot);
     const configurationNeeded = snapshot !== undefined
       && !snapshot.hasPendingVersion
@@ -103,9 +129,10 @@ export class FeishuApplicationSetupController {
         snapshot,
         actionAvailable ? token : undefined,
       ),
+      scope.controller.signal,
     );
     if (
-      this.closed
+      !this.isActive(scope)
       || !actionAvailable
     ) {
       return;
@@ -178,7 +205,7 @@ export class FeishuApplicationSetupController {
   async close(): Promise<void> {
     this.closed = true;
     this.pending.clear();
-    this.activeController?.abort();
+    for (const scope of this.scopes) scope.controller.abort();
     if (this.tasks.size === 0) {
       return;
     }
@@ -193,12 +220,42 @@ export class FeishuApplicationSetupController {
     }
   }
 
+  revalidateAccess(): void {
+    for (const [token, pending] of this.pending) {
+      if (!this.access.isAllowed(pending)) this.pending.delete(token);
+    }
+    for (const scope of this.scopes) {
+      if (!this.access.isAllowed(scope)) scope.controller.abort();
+    }
+  }
+
+  private createScope(target: ConversationTarget, actorId: string): SetupScope {
+    const scope = { target, actorId, controller: new AbortController() };
+    this.scopes.add(scope);
+    return scope;
+  }
+
+  private isActive(scope: SetupScope): boolean {
+    return !this.closed && !scope.controller.signal.aborted && this.access.isAllowed(scope);
+  }
+
+  private assertActive(scope: SetupScope): void {
+    if (this.isActive(scope)) return;
+    scope.controller.abort();
+    throw new Error("飞书应用配置任务授权已变化或任务已取消");
+  }
+
   private async authorize(pending: PendingSetup): Promise<void> {
-    const controller = new AbortController();
-    this.activeController = controller;
+    const scope = this.createScope(pending.target, pending.actorId);
+    const controller = scope.controller;
+    const registrationController = new AbortController();
+    let phase = "progress-card";
     let authorizationMessageId: string | undefined;
+    let authorizationDelivery: Promise<string> | undefined;
     let authorizationDeliveryFailed = false;
+    let configurationCompleted = false;
     try {
+      this.assertActive(scope);
       await this.outbox.updateCard(
         pending.target.conversationId,
         pending.messageId,
@@ -207,32 +264,41 @@ export class FeishuApplicationSetupController {
             ? "正在通过飞书官方流程授权当前应用…"
             : "正在自动配置当前飞书应用…",
         ),
+        controller.signal,
       );
+      this.assertActive(scope);
       if (pending.missingTenantScopes.length > 0) {
-        let delivery: Promise<string> | undefined;
+        phase = "authorization";
         await this.api.authorizeApplication(
-          controller.signal,
+          AbortSignal.any([controller.signal, registrationController.signal]),
           (url, expiresInSeconds) => {
-            delivery = this.outbox.deliverCard(
+            this.assertActive(scope);
+            authorizationDelivery = this.outbox.deliverCard(
               pending.target.conversationId,
               renderConfigurationAuthorizationCard(
                 url,
                 expiresInSeconds,
               ),
+              controller.signal,
             );
-            void delivery.catch(() => {
+            void authorizationDelivery.catch(() => {
               authorizationDeliveryFailed = true;
-              controller.abort();
+              registrationController.abort();
             });
           },
           pending.missingTenantScopes,
         );
-        authorizationMessageId = await delivery;
+        this.assertActive(scope);
+        authorizationMessageId = await authorizationDelivery;
+        this.assertActive(scope);
         if (!authorizationMessageId) {
           throw new Error("飞书应用授权卡片未发送");
         }
       }
-      const snapshot = await this.api.inspect(controller.signal);
+      phase = "inspect";
+      this.assertActive(scope);
+      const snapshot = await this.api.inspect(controller.signal, () => this.assertActive(scope));
+      this.assertActive(scope);
       if (applicationConfigurationComplete(snapshot, pending.runtime)) {
         await this.outbox.updateCard(
           pending.target.conversationId,
@@ -241,17 +307,25 @@ export class FeishuApplicationSetupController {
             true,
             "官方授权已完成，当前应用配置检测也已通过。",
           ),
+          controller.signal,
         );
+        this.assertActive(scope);
         if (authorizationMessageId) {
           await this.updateAuthorizationOutcome(
             pending,
             authorizationMessageId,
+            scope,
           );
         }
         return;
       }
-      await this.api.configureApplication(controller.signal);
-      const configured = await this.api.inspect(controller.signal);
+      phase = "configure";
+      await this.api.configureApplication(controller.signal, () => this.assertActive(scope));
+      configurationCompleted = true;
+      this.assertActive(scope);
+      phase = "configured-inspect";
+      const configured = await this.api.inspect(controller.signal, () => this.assertActive(scope));
+      this.assertActive(scope);
       const outcome = configured.hasPendingVersion
         ? "菜单、事件与回调已自动配置并提交发布，正在等待管理员审核。"
         : applicationConfigurationComplete(configured, pending.runtime)
@@ -264,19 +338,30 @@ export class FeishuApplicationSetupController {
           true,
           outcome,
         ),
+        controller.signal,
       );
+      this.assertActive(scope);
       if (authorizationMessageId) {
         await this.updateAuthorizationOutcome(
           pending,
           authorizationMessageId,
+          scope,
         );
       }
     } catch (error) {
-      if (controller.signal.aborted && !authorizationDeliveryFailed) {
+      if (!this.isActive(scope)) {
+        this.logger.info({
+          surface: pending.target.surface, accountId: pending.target.accountId,
+          conversationId: pending.target.conversationId, phase,
+          configurationCompleted,
+          ...(error instanceof FeishuApplicationSetupError && error.configurationProgress
+            ? error.configurationProgress : {}),
+        }, "飞书应用配置任务已取消；已提交的远端更改不会回滚");
         return;
       }
-      this.logFailure(pending.target, "configure", error);
+      this.logFailure(pending.target, authorizationDeliveryFailed ? "authorization-card" : "configure", error);
       try {
+        this.assertActive(scope);
         await this.outbox.updateCard(
           pending.target.conversationId,
           pending.messageId,
@@ -284,14 +369,16 @@ export class FeishuApplicationSetupController {
             false,
             setupFailureText(error),
           ),
+          controller.signal,
         );
       } catch {
         this.logFailure(pending.target, "outcome", error);
       }
     } finally {
-      if (this.activeController === controller) {
-        this.activeController = undefined;
-      }
+      registrationController.abort();
+      controller.abort();
+      await authorizationDelivery?.catch(() => undefined);
+      this.scopes.delete(scope);
     }
   }
 
@@ -307,12 +394,15 @@ export class FeishuApplicationSetupController {
   private async updateAuthorizationOutcome(
     pending: PendingSetup,
     messageId: string,
+    scope: SetupScope,
   ): Promise<void> {
     try {
+      this.assertActive(scope);
       await this.outbox.updateCard(
         pending.target.conversationId,
         messageId,
         renderSetupOutcomeCard(true, "飞书官方授权已完成。"),
+        scope.controller.signal,
       );
     } catch (error) {
       this.logFailure(pending.target, "authorization-outcome", error);
@@ -341,6 +431,8 @@ export class FeishuApplicationSetupController {
           error instanceof FeishuApplicationSetupError
             ? error.authorizationDiagnostic
             : undefined,
+        configurationProgress: error instanceof FeishuApplicationSetupError
+          ? error.configurationProgress : undefined,
         ...surfaceErrorMetadata(error),
       },
       "飞书应用授权失败",

@@ -5,7 +5,7 @@ export class DeliveryControlServer {
   changed(): void;
   close(): Promise<void>;
 }
-export function requestDeliveryResolution(directory: string, entries: DeliveryResolutionEntry[], action: "retry" | "ignore"): Promise<"applied" | "stale" | "busy" | "unconfirmed" | null>;
+export function requestDeliveryResolution(directory: string, entries: DeliveryResolutionEntry[], action: "retry" | "ignore", signal?: AbortSignal): Promise<"applied" | "stale" | "busy" | "unconfirmed" | null>;
 
 export function deliveryControlSocketPath(directory: string): string;
 export function watchDeliveryChanges(directory: string, signal: AbortSignal, receive: (type: "changed" | "heartbeat") => void): Promise<void>;

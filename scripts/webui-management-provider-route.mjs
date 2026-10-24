@@ -26,6 +26,7 @@ import {
   loadProviderManagementSummary,
   managementOperationError,
   assertManagementAuditWritable,
+  readManagementSnapshot,
 } from "./webui-management-operations.mjs";
 import {
   loadProviderSettingsResource,
@@ -35,18 +36,135 @@ import {
 import { invalidateServiceStatusSummary } from "./webui-service-status.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
 import { routeCustomModelCapabilityProbe } from "./webui-custom-model-probe.mjs";
+import { routeOfficialModelManagement } from "./webui-management-official-model-route.mjs";
+import { loadProviderModelCatalogPresentations, loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
+import { loadProviderModelTemplateOptions } from "./provider-model-template-management.mjs";
+import { loadProviderModelAdditionOptions } from "./provider-model-additions.mjs";
+import { loadManagedProviderModelRequestOptions } from "./managed-provider-model-edit.mjs";
+
+const activeTemplateOptionsReads = new WeakSet();
 
 export async function routeProviderManagement({
   configPath,
   environment,
   maximumBodyBytes,
-  openMetricsStore,
+  readMetrics,
   path,
   principalId,
   request,
   response,
   state,
 }) {
+  if (path === "/provider-model-catalogs" && request.method === "GET") {
+    if (new URL(request.url, "http://localhost").searchParams.size !== 0) {
+      throw new ApiError(400, "provider_models_invalid_input", "模型目录读取不接受查询参数");
+    }
+    try {
+      sendManagementJson(response, 200, await loadProviderModelCatalogPresentations({ environment }));
+    } catch {
+      throw new ApiError(503, "provider_models_unavailable", "本地模型目录暂不可用，请检查配置文件");
+    }
+    return true;
+  }
+  if (await routeOfficialModelManagement({ environment, maximumBodyBytes, path, principalId, request, response, state })) return true;
+  if (path === "/provider-model-additions" && request.method === "POST") {
+    if (new URL(request.url, "http://localhost").searchParams.size !== 0) {
+      throw new ApiError(400, "provider_models_invalid_input", "新增模型候选请求不接受查询参数");
+    }
+    const input = await readJsonBody(request, maximumBodyBytes);
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || Object.keys(input).some(key => !["provider", "manualModel"].includes(key))
+      || typeof input.provider !== "string") {
+      throw new ApiError(400, "provider_models_invalid_input", "新增模型候选参数无效");
+    }
+    if (activeTemplateOptionsReads.has(state)) {
+      throw new ApiError(503, "provider_templates_busy", "已有模型候选读取正在进行，请稍后重试");
+    }
+    const controller = new AbortController();
+    const disconnect = () => { if (!response.writableEnded) controller.abort(); };
+    activeTemplateOptionsReads.add(state);
+    response.once("close", disconnect);
+    if (response.destroyed) controller.abort();
+    try {
+      const options = await loadProviderModelAdditionOptions(input.provider, {
+        environment, signal: controller.signal,
+        ...(Object.hasOwn(input, "manualModel") ? { manualModel: input.manualModel } : {}),
+      });
+      controller.signal.throwIfAborted();
+      sendManagementJson(response, 200, options);
+    } catch (error) {
+      if (controller.signal.aborted && response.destroyed) return true;
+      throw managementOperationError(error, [ProviderModelManagementError], "provider_models_unavailable");
+    } finally {
+      response.removeListener("close", disconnect);
+      activeTemplateOptionsReads.delete(state);
+    }
+    return true;
+  }
+  if (path === "/provider-model-request-options" && request.method === "GET") {
+    const params = new URL(request.url, "http://localhost").searchParams;
+    if (params.size !== 2 || params.getAll("provider").length !== 1 || params.getAll("model").length !== 1) {
+      throw new ApiError(400, "provider_models_invalid_input", "请求改写读取参数无效");
+    }
+    try {
+      const result = await loadManagedProviderModelRequestOptions(
+        params.get("provider"), params.get("model"), { environment });
+      sendManagementJson(response, 200, result);
+    } catch (error) {
+      if (error instanceof ProviderModelManagementError && error.code === "stale-preview") {
+        throw new ApiError(409, "provider_models_stale_revision", "模型目录已变化，请刷新");
+      }
+      if (error instanceof ProviderModelManagementError && error.code === "invalid-input") {
+        throw new ApiError(400, "provider_models_invalid_input", error.message);
+      }
+      throw new ApiError(503, "provider_models_unavailable", "请求改写暂不可用，请检查模型目录");
+    }
+    return true;
+  }
+  if (path === "/provider-model-templates" && request.method === "GET") {
+    const params = new URL(request.url, "http://localhost").searchParams;
+    if (params.size !== 1 || params.getAll("provider").length !== 1) {
+      throw new ApiError(400, "provider_models_invalid_input", "模型模板请求参数无效");
+    }
+    if (activeTemplateOptionsReads.has(state)) {
+      throw new ApiError(503, "provider_templates_busy", "已有模型模板读取正在进行，请稍后重试");
+    }
+    const controller = new AbortController();
+    const disconnect = () => { if (!response.writableEnded) controller.abort(); };
+    activeTemplateOptionsReads.add(state);
+    response.once("close", disconnect);
+    if (response.destroyed) controller.abort();
+    try {
+      const options = await loadProviderModelTemplateOptions(params.get("provider"), { environment, signal: controller.signal });
+      controller.signal.throwIfAborted();
+      sendManagementJson(response, 200, options);
+    } catch (error) {
+      throw managementOperationError(error, [ProviderModelManagementError], "provider_models_unavailable");
+    } finally {
+      response.removeListener("close", disconnect);
+      activeTemplateOptionsReads.delete(state);
+    }
+    return true;
+  }
+  if (path === "/provider-model-prompts" && request.method === "GET") {
+    const params = new URL(request.url, "http://localhost").searchParams;
+    if (params.size !== 3 || ["provider", "model", "revision"].some(key => params.getAll(key).length !== 1)) {
+      throw new ApiError(400, "provider_models_invalid_input", "模型提示词请求参数无效");
+    }
+    try {
+      const result = await loadProviderModelPrompts(Object.fromEntries(params), { environment });
+      sendManagementJson(response, 200, result);
+    } catch (error) {
+      if (error instanceof ProviderModelManagementError && error.code === "stale-preview") {
+        throw new ApiError(409, "provider_models_stale_revision", "模型目录已变化，请刷新");
+      }
+      if (error instanceof ProviderModelManagementError && error.code === "invalid-input") {
+        throw new ApiError(400, "provider_models_invalid_input", "模型提示词请求参数无效");
+      }
+      throw new ApiError(503, "provider_models_unavailable", "模型目录无法安全读取");
+    }
+    return true;
+  }
   if (await routeCustomModelCapabilityProbe({ environment, maximumBodyBytes, path, request, response, state })) return true;
   if (await routeResetCredits({ configPath, maximumBodyBytes, path, principalId, request, response, state })) return true;
   if (path === "/accounts/sources" && request.method === "GET") {
@@ -97,11 +215,18 @@ export async function routeProviderManagement({
     } finally {
       response.removeListener("close", disconnect);
     }
-    await sendAccountSnapshots(environment, response, openMetricsStore, body.provider);
+    await sendAccountSnapshots(environment, response, readMetrics, body.provider);
     return true;
   }
   if (path === "/provider-settings" && request.method === "GET") {
-    const resource = await readProviderSettings(environment, state);
+    let resource;
+    try {
+      resource = await readManagementSnapshot(request, response, state,
+        signal => readProviderSettings(environment, state, signal));
+    } catch {
+      if (response.destroyed) return true;
+      throw new ApiError(503, "provider_state_unavailable", "Provider 设置暂不可用，请检查 Codex 配置");
+    }
     sendManagementJson(response, 200, {
       observedAt: new Date().toISOString(),
       resourceRevision: fingerprintManagementValue(resource),
@@ -184,12 +309,19 @@ export async function routeProviderManagement({
   if (path === "/provider-settings/preview" && request.method === "POST") {
     const body = await readJsonBody(request, maximumBodyBytes);
     const input = normalizeProviderSettingsMutation(body);
+    if (input.operation === "provider.web-search" || input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update") {
+      const current = await readProviderSettings(environment, state);
+      if (input.resourceRevision !== fingerprintManagementValue(current)) {
+        throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
+      }
+    }
     const preview = await state.previewProviderSettings(input, environment);
     const safePreview = redactProviderSettingsResult(preview);
     const resource = await readProviderSettings(environment, state);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
-    if (input.operation === "model.custom.save" && input.resourceRevision !== resourceRevision) {
+    if ((input.operation === "provider.web-search" || input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
+      && input.resourceRevision !== resourceRevision) {
       throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
     }
     const issued = state.confirmations.issue({
@@ -214,13 +346,14 @@ export async function routeProviderManagement({
     }
     const input = normalizeProviderSettingsMutation(body);
     const resource = await readProviderSettings(environment, state);
-    const preview = await state.previewProviderSettings(input, environment);
-    const safePreview = redactProviderSettingsResult(preview);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
-    if (input.operation === "model.custom.save" && input.resourceRevision !== resourceRevision) {
+    if ((input.operation === "provider.web-search" || input.operation === "model.custom.save" || input.operation === "primary.custom.connection.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
+      && input.resourceRevision !== resourceRevision) {
       throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
     }
+    const preview = await state.previewProviderSettings(input, environment);
+    const safePreview = redactProviderSettingsResult(preview);
     state.confirmations.consume(body.confirmationToken, {
       sessionId: principalId,
       operation: "provider-settings.write",
@@ -253,12 +386,10 @@ export async function routeProviderManagement({
   if (path === "/providers" && request.method === "GET") {
     let providers;
     try {
-      providers = await loadProviderManagementSummary(
-        environment,
-        state.providerStateCache,
-        state.loadProviderState,
-      );
+      providers = await readManagementSnapshot(request, response, state,
+        signal => loadProviderManagementSummary(environment, state, signal));
     } catch {
+      if (response.destroyed) return true;
       throw new ApiError(503, "provider_state_unavailable", "Provider 状态暂不可用，请使用 codexc setup 查看");
     }
     sendManagementJson(response, 200, providers);
@@ -267,66 +398,59 @@ export async function routeProviderManagement({
   return false;
 }
 
-export async function sendAccountSnapshots(environment, response, openMetricsStore, provider) {
-  const store = openMetricsStore(environment);
-  try {
-    // A refresh owns one Provider; the separate GET remains the authoritative list.
-    const single = provider === undefined ? null : store.latestAccountSnapshot(provider);
-    const storedSnapshots = provider === undefined
-      ? (typeof store.latestAccountSnapshots === "function" ? store.latestAccountSnapshots() : [])
-      : single === null ? [] : [single];
-    const { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, accountMetadata } = loadAccountSources(environment);
-    const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
-    const snapshots = storedSnapshots
-      .filter((snapshot) => {
-        if (["deepseek", "ocg", "ccg", "clp"].includes(snapshot.provider)) return false;
-        if (snapshot.provider.startsWith("clp-")) return clineAccounts === null || metadataByProvider.has(snapshot.provider);
-        const registry = snapshot.provider.startsWith("ds-")
-          ? dsAccounts
-          : snapshot.provider.startsWith("ocg-")
-            ? ocgAccounts
-            : snapshot.provider.startsWith("ccg-")
-              ? ccgAccounts
-              : null;
-        return registry === null || metadataByProvider.has(snapshot.provider);
-      })
-      .map((snapshot) => {
-        const account = metadataByProvider.get(snapshot.provider);
-        return {
-          ...snapshot,
-          displayName: account?.displayName ?? snapshot.provider,
-          default: account?.default ?? false,
-        };
-      });
-    for (const account of accountMetadata) {
-      if (provider !== undefined && account.provider !== provider) continue;
-      if (snapshots.some((snapshot) => snapshot.provider === account.provider)) continue;
-      snapshots.push({
-        provider: account.provider,
-        accountId: account.accountId,
-        observedAtMs: 0,
-        available: false,
-        usage: { kind: "unsupported", provider: account.provider },
-        limits: { kind: "unsupported", provider: account.provider },
-        displayName: account.displayName,
-        default: account.default,
-      });
-    }
-    for (const snapshot of snapshots) {
-      if (snapshot.provider !== "openai") continue;
-      const limits = snapshot.limits;
-      snapshot.credentialRefreshedAt = await readOpenAiCredentialRefreshTime(
-        limits?.kind === "rate-limits" && limits.provider === "openai" ? limits.limits?.accountId : null,
-        environment,
-      );
-    }
-    sendJson(response, 200, {
-      observedAtMs: snapshots.reduce((latest, item) => Math.max(latest, item.observedAtMs), 0),
-      snapshots,
-      warnings,
+export async function sendAccountSnapshots(environment, response, readMetrics, provider) {
+  // A refresh owns one Provider; the separate GET remains the authoritative list.
+  const storedSnapshots = await readMetrics({ operation: "accounts", nowMs: Date.now(), ...(provider === undefined ? {} : { provider }) }, response);
+  if (response.destroyed) return;
+  const { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, accountMetadata } = loadAccountSources(environment);
+  const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
+  const snapshots = storedSnapshots
+    .filter((snapshot) => {
+      if (["deepseek", "ocg", "ccg", "clp"].includes(snapshot.provider)) return false;
+      if (snapshot.provider.startsWith("clp-")) return clineAccounts === null || metadataByProvider.has(snapshot.provider);
+      const registry = snapshot.provider.startsWith("ds-")
+        ? dsAccounts
+        : snapshot.provider.startsWith("ocg-")
+          ? ocgAccounts
+          : snapshot.provider.startsWith("ccg-")
+            ? ccgAccounts
+            : null;
+      return registry === null || metadataByProvider.has(snapshot.provider);
+    })
+    .map((snapshot) => {
+      const account = metadataByProvider.get(snapshot.provider);
+      return {
+        ...snapshot,
+        displayName: account?.displayName ?? snapshot.provider,
+        default: account?.default ?? false,
+      };
     });
-  } finally {
-    store.close();
+  for (const account of accountMetadata) {
+    if (provider !== undefined && account.provider !== provider) continue;
+    if (snapshots.some((snapshot) => snapshot.provider === account.provider)) continue;
+    snapshots.push({
+      provider: account.provider,
+      accountId: account.accountId,
+      observedAtMs: 0,
+      available: false,
+      usage: { kind: "unsupported", provider: account.provider },
+      limits: { kind: "unsupported", provider: account.provider },
+      displayName: account.displayName,
+      default: account.default,
+    });
+  }
+  for (const snapshot of snapshots) {
+    if (snapshot.provider !== "openai") continue;
+    const limits = snapshot.limits;
+    snapshot.credentialRefreshedAt = await readOpenAiCredentialRefreshTime(
+      limits?.kind === "rate-limits" && limits.provider === "openai" ? limits.limits?.accountId : null,
+      environment,
+    );
+  }
+  if (!response.destroyed) {
+    sendJson(response, 200, {
+      observedAtMs: snapshots.reduce((latest, item) => Math.max(latest, item.observedAtMs), 0), snapshots, warnings,
+    });
   }
 }
 
@@ -412,10 +536,10 @@ function recordProviderAudit(state, details, failureMessage) {
 }
 
 function providerSettingsAuditTarget(input) {
-  if (input.operation === "model.remove" || input.operation === "model.custom.save") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
-  if (input.operation === "primary.custom.save") return String(input.provider?.providerId ?? "unknown");
-  if (input.operation === "managed.default") return String(input.provider ?? "unknown");
-  if (input.operation === "managed.window") return String(input.model ?? "unknown");
+  if (input.operation === "model.add") return `models:${fingerprintManagementValue({ provider: input.provider, models: input.models })}`;
+  if (input.operation === "model.remove" || input.operation === "model.custom.save" || input.operation === "model.context" || input.operation === "model.rename" || input.operation === "model.template.update" || input.operation === "model.request-options") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
+  if (input.operation === "primary.custom.save" || input.operation === "primary.custom.connection.save") return String(input.provider?.providerId ?? "unknown");
+  if (input.operation === "managed.default" || input.operation === "provider.web-search") return String(input.provider ?? "unknown");
   return String(input.providerId ?? "unknown");
 }
 
@@ -425,9 +549,10 @@ function accountSettingsAuditTarget(input) {
   return input.operation.startsWith("deepseek.") ? "deepseek" : "unknown";
 }
 
-async function readProviderSettings(environment, state) {
+async function readProviderSettings(environment, state, signal) {
   try {
-    return await loadProviderSettingsResource(environment, state.loadProviderState);
+    return await loadProviderSettingsResource(environment,
+      options => state.loadProviderState({ ...options, signal }));
   } catch {
     throw new ApiError(503, "provider_state_unavailable", "Provider 设置暂不可用，请检查 Codex 配置");
   }

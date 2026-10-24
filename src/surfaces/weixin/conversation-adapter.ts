@@ -1,7 +1,7 @@
 import { textAttachmentBody } from "../text-attachment-store.js";
 import { videoAttachmentBody } from "../video-attachment-store.js";
 import type { WeixinVideoStore } from "./video-store.js";
-import type { WeixinVideoReference } from "./protocol-types.js";
+import type { ReceivedAttachmentInput } from "../attachment-input-lifecycle.js";
 import type { Logger } from "pino";
 
 import {
@@ -28,7 +28,7 @@ import {
 } from "../output-copy.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { sanitizeWeixinMarkdownText } from "./markdown-sanitize.js";
-import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { SurfaceInputBatcher } from "../surface-input-batcher.js";
 import {
   formatWeixinCommandText,
   renderWeixinCommandResult,
@@ -58,7 +58,8 @@ import type {
   WeixinAudioReference,
   WeixinFileReference,
   WeixinImageReference,
-} from "./protocol-client.js";
+  WeixinVideoReference,
+} from "./protocol-types.js";
 
 const maximumInboundImageBatchBytes = 20 * 1024 * 1024;
 
@@ -105,9 +106,10 @@ export type WeixinConversationMessage =
     };
 
 export class WeixinConversationAdapter {
-  private readonly inputs: SurfaceInputCoalescer;
+  private readonly inputs: SurfaceInputBatcher;
   private readonly handlingLocks = new Map<string, Promise<void>>();
   private nextSequence = 0;
+  private closed = false;
 
   constructor(
     private readonly conversations: Pick<
@@ -130,29 +132,33 @@ export class WeixinConversationAdapter {
     private readonly audios?: Pick<WeixinAudioPort, "download">,
     private readonly videos?: Pick<WeixinVideoStore, "download" | "retain" | "discard">,
   ) {
-    this.inputs = new SurfaceInputCoalescer(
-      (target, input) => conversations.submit(target, input),
+    this.inputs = new SurfaceInputBatcher(
+      (target, input, actorId) => conversations.submit(
+        target,
+        input,
+        () => !this.closed && this.inputOptions.isAllowed?.(target, actorId) === true,
+      ),
       inputOptions,
     );
   }
 
-  handle(message: WeixinConversationMessage, signal?: AbortSignal): Promise<void> {
+  handle(message: WeixinConversationMessage, signal?: AbortSignal, receipt?: ReceivedAttachmentInput, cancelledAttachments = false): Promise<void> {
     this.conversations.touchActivity?.(message.target);
     if (message.kind === "text" && isEmergencyStopCommand(message.text)) {
-      return this.handleOnce(message, signal);
+      return this.handleOnce(message, signal, receipt, cancelledAttachments);
     }
     return this.handleOrdered(
       conversationTargetKey(message.target),
-      () => this.handleOnce(message, signal),
+      () => this.handleOnce(message, signal, receipt, cancelledAttachments),
     );
   }
 
-  private async handleOnce(message: WeixinConversationMessage, signal?: AbortSignal): Promise<void> {
+  private async handleOnce(message: WeixinConversationMessage, signal?: AbortSignal, receipt?: ReceivedAttachmentInput, cancelledAttachments = false): Promise<void> {
     try {
       signal?.throwIfAborted();
       if (message.kind === "video" || (message.kind === "file" && /\.(?:mp4|webm)$/iu.test(message.file.fileName))) {
         if (!this.videos) throw new UserFacingError("video.unavailable", "微信视频附件输入未启用");
-        const submit = this.conversations.prepareAttachmentSubmission?.(message.target,
+        const submit = await receipt?.prepare() ?? this.conversations.prepareAttachmentSubmission?.(message.target,
           () => !signal?.aborted && this.inputOptions.isAllowed?.(message.target, message.actorId) === true);
         if (!submit) throw new UserFacingError("video.unavailable", "视频附件会话授权入口不可用");
         const videoSignal = AbortSignal.any([submit.signal, ...(signal ? [signal] : [])]);
@@ -191,7 +197,7 @@ export class WeixinConversationAdapter {
         return;
       }
       if (message.kind === "audio") {
-        const scope = this.conversations.prepareAttachmentSubmission?.(
+        const scope = await receipt?.prepare() ?? this.conversations.prepareAttachmentSubmission?.(
           message.target,
           () => !signal?.aborted && this.inputOptions.isAllowed?.(message.target, message.actorId) === true,
           "audio",
@@ -342,6 +348,8 @@ export class WeixinConversationAdapter {
         await this.conversations.submit(
           message.target,
           formatQuotedInput(message.text, message.quotedText),
+          () => !this.closed && !signal?.aborted
+            && this.inputOptions.isAllowed?.(message.target, message.actorId) === true,
         );
         return;
       }
@@ -380,6 +388,8 @@ export class WeixinConversationAdapter {
         command.argumentsText,
         message.actorId,
       );
+      if (result.kind === "outcome" && result.outcome.type === "turn.stop-requested"
+        && cancelledAttachments) result.outcome.stopped = true;
       const rendered = renderWeixinCommandResult(
         result,
       );
@@ -446,6 +456,7 @@ export class WeixinConversationAdapter {
   }
 
   close(): Promise<void> {
+    this.closed = true;
     return this.inputs.close();
   }
 

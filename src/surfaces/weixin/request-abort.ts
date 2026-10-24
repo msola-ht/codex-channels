@@ -49,5 +49,7 @@ export async function withWeixinRequestAbort<T>(
   } finally {
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", abort);
+    // The callback owns all body consumption; stop any remaining request work.
+    controller.abort();
   }
 }

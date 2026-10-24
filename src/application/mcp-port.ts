@@ -51,7 +51,18 @@ export interface McpResourceTemplateSummary {
   mimeType: string | null;
 }
 
+/** Opaque JSON from the first tools/list page; internal data, not display or authorization input. */
+export type McpToolListMetadata =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly McpToolListMetadata[]
+  | { readonly [key: string]: McpToolListMetadata | undefined };
+
 export interface McpServerDetail extends McpServerSummary {
+  /** null means unavailable. Preserve empty values; never render or log the raw metadata. */
+  readonly toolListMeta: McpToolListMetadata;
   serverTitle: string | null;
   serverVersion: string | null;
   serverDescription: string | null;
@@ -85,6 +96,9 @@ export interface McpHealthReport {
 export interface McpOAuthLogin {
   server: string;
   authorizationUrl: string;
+  loginId: string;
+  /** Local App Server routing key, not an upstream OAuth field. */
+  provider: string;
 }
 
 export type McpLoginResult =
@@ -117,13 +131,14 @@ export interface McpResourceReadResult {
 }
 
 export interface McpQueryPort {
-  listMcpServers(threadId?: string): Promise<McpServerSummary[]>;
-  listMcpServerDetails(threadId?: string): Promise<McpServerDetail[]>;
-  reloadMcpServers(): Promise<void>;
-  startMcpOAuthLogin(name: string, threadId?: string): Promise<McpOAuthLogin>;
+  listMcpServers(threadId?: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<McpServerSummary[]>;
+  listMcpServerDetails(threadId?: string, beforeSubmit?: () => void): Promise<McpServerDetail[]>;
+  reloadMcpServers(signal?: AbortSignal, beforeSubmit?: () => void): Promise<void>;
+  startMcpOAuthLogin(name: string, threadId?: string, beforeSubmit?: () => void): Promise<McpOAuthLogin>;
   readMcpResource(
     server: string,
     uri: string,
     threadId?: string,
+    beforeSubmit?: () => void,
   ): Promise<McpResourceReadResult>;
 }

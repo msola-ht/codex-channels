@@ -34,10 +34,20 @@ export interface ThreadSnapshot {
   source: ThreadSource;
   historyMode: ThreadHistoryMode;
   activeTurnId: string | null;
+  /** Matching live start/terminal notifications observed on the current subscription;
+   * never inferred from metadata or stored history. Absent means unknown. */
+  observedTerminalTurnId?: string;
   /** Unix timestamp (seconds) when the Thread was last updated by App Server. */
   updatedAt?: number;
   /** Unix timestamp (seconds) used by App Server for recency ordering. */
   recencyAt?: number | null;
+}
+
+/** A system error alone is not a terminal event. Callers must still check local
+ * work, interactions, descendants and Queue. Unsubscribe invalidates evidence. */
+export function isThreadExecutionSettled(thread: Pick<ThreadSnapshot, "status" | "activeTurnId" | "observedTerminalTurnId">): boolean {
+  return thread.activeTurnId === null && (thread.status.type === "idle" || thread.status.type === "notLoaded"
+    || (thread.status.type === "systemError" && Boolean(thread.observedTerminalTurnId)));
 }
 
 export interface ThreadSession {
@@ -45,10 +55,15 @@ export interface ThreadSession {
   model: string;
   modelProvider?: string;
   reasoningEffort: string | null;
+  /** Effective lifecycle snapshot, not the unfiltered user selection. */
   serviceTier: string | null;
   /** Actual Thread reviewer returned by App Server; absent or null means unknown. */
   approvalsReviewer?: ThreadApprovalsReviewer | null;
   contextCompactionItemIds: readonly string[];
+  /** Actual instruction file paths returned by the lifecycle response, not a live file scan. */
+  instructionSources: readonly string[];
+  /** Runtime roots returned by this lifecycle response; not a live permission list. */
+  runtimeWorkspaceRoots: readonly string[];
   /** Actual runtime permission settings returned by App Server, not Gateway defaults. */
   effectiveSettings: {
     cwd: string;
@@ -56,6 +71,13 @@ export interface ThreadSession {
     sandbox: "read-only" | "workspace-write" | "danger-full-access" | "external-sandbox";
     permissions: string | null;
   };
+}
+
+export interface ThreadExecutionContext {
+  /** Last cwd confirmed by a lifecycle response or settings notification. */
+  cwd: string;
+  /** Historical lifecycle snapshot, not updated by settings notifications. */
+  workspaceRootsSnapshot: { cwd: string; roots: readonly string[] };
 }
 
 export interface ThreadResumeSession extends ThreadSession {
@@ -72,11 +94,11 @@ export interface ThreadDynamicToolSpec {
 }
 
 export interface ThreadStartOptions {
-  /** Local start-only guard, called after preparation immediately before the RPC write. */
+  /** Local lifecycle guard, called after preparation immediately before the RPC write. */
   beforeSubmit?: () => void;
   model?: string;
   modelProvider?: string;
-  /** The only non-interactive source exposed by the stable Gateway port. */
+  /** Omission creates a user thread; automation is reserved for scheduled starts. User forks always use user. */
   threadSource?: "automation";
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy?: "untrusted" | "on-request" | "never";
@@ -89,6 +111,7 @@ export interface ThreadStartOptions {
 }
 
 export interface ThreadQueryOptions {
+  beforeSubmit?: () => void;
   fullScan?: boolean;
   archived?: boolean;
   searchTerm?: string;
@@ -104,7 +127,7 @@ export interface ThreadLifecyclePort {
    */
   isProviderConfigured?(provider: string): boolean;
   listThreads(cwd: string, options?: ThreadQueryOptions): Promise<ThreadSnapshot[]>;
-  readThread(threadId: string, signal?: AbortSignal): Promise<ThreadSnapshot>;
+  readThread(threadId: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ThreadSnapshot>;
   /** Authoritative loaded descendants, including ephemeral threads; uncertainty rejects. */
   hasActiveDescendants(threadId: string, signal?: AbortSignal): Promise<boolean>;
   startThread(cwd: string, options?: ThreadStartOptions): Promise<ThreadSession>;
@@ -118,7 +141,7 @@ export interface ThreadLifecyclePort {
     cwd: string,
     options?: ThreadStartOptions,
   ): Promise<ThreadSession>;
-  archiveThread(threadId: string): Promise<void>;
-  unarchiveThread(threadId: string): Promise<ThreadSnapshot>;
-  unsubscribeThread(threadId: string): Promise<void>;
+  archiveThread(threadId: string, beforeSubmit?: () => void): Promise<void>;
+  unarchiveThread(threadId: string, beforeSubmit?: () => void): Promise<ThreadSnapshot>;
+  unsubscribeThread(threadId: string, beforeSubmit?: () => void): Promise<void>;
 }

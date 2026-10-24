@@ -1,11 +1,8 @@
 import {
   existsSync,
   lstatSync,
-  readFileSync,
   readdirSync,
   renameSync,
-  statSync,
-  writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 
@@ -13,7 +10,9 @@ import type { Logger } from "pino";
 
 import {
   ensurePrivateDirectorySync,
+  readPrivateFileSync,
   securePrivateFileSync,
+  writePrivateFileAtomicSync,
 } from "../../runtime/private-file.mjs";
 
 import type { ConversationTarget } from "../conversation-core/index.js";
@@ -49,7 +48,7 @@ export class ChannelImageSpool {
   private timer: NodeJS.Timeout | undefined;
   private running: Promise<void> | undefined;
   private stopped = false;
-  // A failed archive must never turn a possibly delivered image into a fresh send.
+  // Details are bounded in memory; the .sending claim owns retry safety on disk.
   private readonly failedArchives = new Map<string, string>();
 
   constructor(
@@ -128,7 +127,7 @@ export class ChannelImageSpool {
     let entries: string[];
     try {
       entries = readdirSync(this.pendingDirectory)
-        .filter((name) => name.endsWith(".json"))
+        .filter((name) => name.endsWith(".json") || name.endsWith(".sending"))
         .sort();
     } catch (error) {
       this.options.logger.warn(
@@ -143,21 +142,35 @@ export class ChannelImageSpool {
     }
     for (const name of entries) {
       if (this.stopped) break;
-      const archiveFailure = this.failedArchives.get(name);
-      if (archiveFailure !== undefined) {
+      if (name.endsWith(".sending")) {
+        const archiveFailure = this.failedArchives.get(name)
+          ?? "渠道图片发送结果未知：先前已领取，不会自动重新发送";
         if (this.archiveEntry(name, archiveFailure)) this.failedArchives.delete(name);
         result.failed += 1;
         continue;
       }
       if (this.failedArchives.size >= maximumFailedArchives) continue;
+      const claimedName = name.replace(/\.json$/u, ".sending");
       try {
-        await this.processEntry(name);
+        this.assertOwnedFile(join(this.pendingDirectory, name));
+        if (existsSync(join(this.pendingDirectory, claimedName))) {
+          throw new Error("渠道图片已有发送领取记录，拒绝覆盖");
+        }
+        // Publish the non-retryable claim before any operation can send bytes.
+        renameSync(join(this.pendingDirectory, name), join(this.pendingDirectory, claimedName));
+      } catch (error) {
+        result.failed += 1;
+        this.options.logger.warn({ err: error, manifest: name }, "渠道图片发送领取失败");
+        continue;
+      }
+      try {
+        await this.processEntry(claimedName);
         result.processed += 1;
       } catch (error) {
         result.failed += 1;
         const message = error instanceof Error ? error.message : String(error);
-        this.failedArchives.set(name, message);
-        if (this.archiveEntry(name, message)) this.failedArchives.delete(name);
+        this.failedArchives.set(claimedName, message);
+        if (this.archiveEntry(claimedName, message)) this.failedArchives.delete(claimedName);
       }
     }
     return result;
@@ -169,17 +182,24 @@ export class ChannelImageSpool {
     if (!this.isInsidePendingDirectory(manifest.imagePath)) {
       throw new Error("图片路径必须位于渠道发送 spool 的 pending 目录内");
     }
+    const base = name.replace(/\.sending$/u, "");
+    if (!["png", "jpg"].some(extension => manifest.imagePath === join(this.pendingDirectory, `${base}.${extension}`))) {
+      throw new Error("渠道图片必须与 manifest 同名，不能引用其他发送请求的文件");
+    }
+    this.assertOwnedFile(manifest.imagePath);
     const target = this.options.resolveTarget(manifest.threadId);
     if (target === undefined) {
       throw new Error(`Thread 未绑定会话：${manifest.threadId}`);
     }
     await this.options.sendImage(target, manifest.imagePath);
+    this.assertOwnedFile(manifest.imagePath);
+    this.assertOwnedFile(manifestPath);
     const imageName = basename(manifest.imagePath);
     renameSync(
       manifest.imagePath,
       join(this.doneDirectory, imageName),
     );
-    renameSync(manifestPath, join(this.doneDirectory, name));
+    renameSync(manifestPath, join(this.doneDirectory, `${base}.json`));
     this.options.logger.info(
       {
         surface: target.surface,
@@ -193,7 +213,7 @@ export class ChannelImageSpool {
   }
 
   private readManifest(manifestPath: string): ChannelImageManifest {
-    const raw = readFileSync(manifestPath, "utf8");
+    const raw = readPrivateFileSync(manifestPath);
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -225,7 +245,7 @@ export class ChannelImageSpool {
     }
     if (
       !existsSync(manifest.imagePath)
-      || !statSync(manifest.imagePath).isFile()
+      || !lstatSync(manifest.imagePath).isFile()
     ) {
       throw new Error(`渠道图片文件不存在：${manifest.imagePath}`);
     }
@@ -247,18 +267,17 @@ export class ChannelImageSpool {
   private archiveEntry(name: string, message: string): boolean {
     try {
       const manifestPath = join(this.pendingDirectory, name);
-      const base = name.replace(/\.json$/u, "");
+      this.assertOwnedFile(manifestPath);
+      const base = name.replace(/\.sending$/u, "");
       const imagePath = this.imagePathForBase(base);
       if (imagePath !== undefined) {
         renameSync(imagePath, join(this.failedDirectory, basename(imagePath)));
       }
-      writeFileSync(
+      writePrivateFileAtomicSync(
         join(this.failedDirectory, `${base}.error.txt`),
         `${message}\n`,
-        { mode: 0o600 },
       );
-      securePrivateFileSync(join(this.failedDirectory, `${base}.error.txt`));
-      renameSync(manifestPath, join(this.failedDirectory, name));
+      renameSync(manifestPath, join(this.failedDirectory, `${base}.json`));
       return true;
     } catch (error) {
       this.options.logger.error(
@@ -270,13 +289,21 @@ export class ChannelImageSpool {
   }
 
   private imagePathForBase(base: string): string | undefined {
-    const entries = readdirSync(this.pendingDirectory);
-    const prefix = `${base}.`;
-    const matched = entries.find(
-      (name) => name.startsWith(prefix) && !name.endsWith(".json"),
-    );
-    return matched === undefined
-      ? undefined
-      : join(this.pendingDirectory, matched);
+    for (const extension of ["png", "jpg"]) {
+      const imagePath = join(this.pendingDirectory, `${base}.${extension}`);
+      if (!existsSync(imagePath)) continue;
+      this.assertOwnedFile(imagePath);
+      return imagePath;
+    }
+    return undefined;
+  }
+
+  private assertOwnedFile(path: string): void {
+    const metadata = lstatSync(path);
+    if (!metadata.isFile()
+      || (process.getuid !== undefined && metadata.uid !== process.getuid())) {
+      throw new Error("渠道图片暂存文件类型或所有者无效");
+    }
+    securePrivateFileSync(path);
   }
 }

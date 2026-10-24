@@ -1,11 +1,13 @@
 # Model Relay
 
+通过共享 Runtime 的纯 `RequestActivityObserver` 观察实际提交的 Chat/Responses 请求及通过协议校验的响应，统一采集有界行为摘要；该依赖不接触 App Server、文件或数据库。摘要经指标 IPC 交给 Gateway 单写者，关闭转储仍可用。
+
 独立模型 API 入口的身份、准入和请求生命周期模块，不依赖 App Server、Thread、Turn 或数据库。
 由 Runtime 的独立服务入口组合；生产运行验收与跨平台实机验收仍需单独完成。
 
 - `index.ts`：公开模块能力。
 - `admission.ts`：内存身份快照、常数时间秘密哈希比较、全局令牌桶与并发许可、有界上传/等待预算及按 Key 公平调度、撤销和关闭。
-- `server.ts`：默认回环、可显式 IPv4 局域网监听的 HTTP、异步准备后的出站复核、Key 多提供商模型授权、公共 ID 到精确上游 ID 映射及按当前 Key 和公共模型 ID 选择思考策略、CLP 精确 DeepSeek 模型的上游限定（复用 Provider Proxy 公共投影）、原生 Chat/Responses JSON/SSE 交付、请求关闭及一次性指标生成（含实际出站 User-Agent，缺失不推断）；错误响应提供受控原因、阶段、上游状态与指标关联编号。
+- `server.ts`：默认回环、可显式 IPv4 局域网监听的 HTTP、异步准备后复核、Key 精确模型授权及公共 ID 映射、逐模型思考策略和 CLP 共用请求快照。CLP 只在模型显式保存 `cline_provider_options` 时通过 Provider Proxy 公共投影改写 `providerOptions`；未保存时不自动添加或覆盖路由，原生 Chat/Responses JSON/SSE 交付及指标合同保持独立，错误只提供受控原因、阶段、上游状态和关联编号。
 - `metrics-sender.ts`：有界单次指标发送、四类确认结果、零重试与限时关闭。
 
 Runtime 注入已验证的配置、Provider 材料与网络目标；本模块不解析账户文件或凭据路径。
@@ -16,6 +18,7 @@ HTTP 上游状态与 Relay 对外状态分别解释：上游 429/503/504 保留�
 协议验证通过 `model-api` 公共入口，网络能力通过 `provider-proxy` 公共入口。指标仅通过注入端口
 送往 Gateway 单写者，不生成 Core 事件或渠道输出。
 单次指标中的思考等级读取 Key 策略处理后的明确出站字段，经受限 IPC 写入既有指标列；缺失或只有思考开关时不推断等级，不回填历史空值。队列快照继续保留入站口径。
+请求指标的可空 `upstreamUrl` 只在实际模型 HTTP 请求提交后从出站请求读取，保存最后一次已提交目标的 Origin 与路径；不保存用户信息、查询参数或片段，不从当前 Provider 配置回填历史。Chat 与 Responses 共用直接发送点，转储关闭时仍采集。
 Relay 只转发外部调用方自带的响应报文，不归一化 Codex 私有输入项（`agent_message`、`encrypted`
 参数标记）；Codex CLI 的子代理流量经 App Server 的 Provider Proxy，不经过 Relay。
 

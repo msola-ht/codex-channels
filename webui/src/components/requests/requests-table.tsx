@@ -1,5 +1,5 @@
 import * as React from "react"
-import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
+import { formatBytes, formatGenerationSpeed, formatRequestActivity } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -32,6 +32,7 @@ import {
   formatRequestError,
   formatRequestTime,
   requestMethodDisplay,
+  requestOperationLabel,
   formatTimestamp,
   getServerTimeZone,
   formatTokens,
@@ -91,6 +92,7 @@ export function RequestsTable({
     setSelected(record)
   }, [])
   const columnLabels: Record<string, string> = {
+    activity: t("traffic.activity"),
     source: t("filters.source"),
     requestPurpose: t("requestMethod.label"),
     caller: t("filters.caller"),
@@ -98,6 +100,7 @@ export function RequestsTable({
     time: t("requests.recordedAt"),
     provider: t("metrics.provider"),
     model: t("metrics.model"),
+    upstreamUrl: t("requests.addressColumn"),
     reasoningEffort: t("metrics.reasoningEffort"),
     ua: "User-Agent",
     operation: t("filters.operation"),
@@ -111,10 +114,21 @@ export function RequestsTable({
     firstContent: t("requests.firstColumn"),
     generationSpeed: t("requests.speedColumn"),
     duration: t("requests.durationColumn"),
+    requestBytes: t("requests.requestBytesColumn"),
     traffic: t("requests.detailColumn"),
   }
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
+    {
+      id: "activity", enableSorting: false,
+      header: () => <TableHint hint={t("traffic.activityHint")}>{t("traffic.activity")}</TableHint>,
+      cell: ({ row }) => <TruncatedText text={formatRequestActivity(row.original, t)} className="max-w-48 text-xs" />,
+    },
+    {
+      id: "upstreamUrl", enableSorting: false,
+      header: () => <TableHint hint={t("requests.addressHint")}>{t("requests.addressColumn")}</TableHint>,
+      cell: ({ row }) => <TruncatedText text={row.original.upstreamUrl ?? t("traffic.notRecorded")} className="max-w-40 font-mono text-xs" />,
+    },
     {
       id: "requestPurpose", enableSorting: false, header: t("requestMethod.label"),
       cell: ({ row }) => {
@@ -222,10 +236,22 @@ export function RequestsTable({
       cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} />,
     },
     {
+      id: "requestBytes",
+      accessorFn: (record) => record.requestBytes ?? Number.NEGATIVE_INFINITY,
+      header: ({ column }) => (
+        <SortableHeader column={column} hint={t("requests.requestBytesHint")}>{t("requests.requestBytesColumn")}</SortableHeader>
+      ),
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap tabular-nums">
+          {formatBytes(row.original.requestBytes)}
+        </span>
+      ),
+    },
+    {
       id: "cacheHitRate",
       enableSorting: false,
       header: () => <TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.cacheHitRate == null ? "—" : `${(row.original.cacheHitRate * 100).toFixed(1)}%`}</span>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{!row.original.cacheHitRate ? "" : `${(row.original.cacheHitRate * 100).toFixed(1)}%`}</span>,
     },
     {
       id: "output",
@@ -242,7 +268,7 @@ export function RequestsTable({
       header: () => <TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint>,
       cell: ({ row }) => (
         <span className="tabular-nums">
-          {row.original.firstTokenMs == null ? "—"
+          {!row.original.firstTokenMs ? ""
             : formatElapsedDuration(row.original.firstTokenMs)}
         </span>
       ),
@@ -256,7 +282,7 @@ export function RequestsTable({
     {
       id: "duration", enableSorting: false,
       header: t("requests.durationColumn"),
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{!row.original.totalDurationMs ? "" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
       id: "traffic", header: t("requests.detailColumn"), enableSorting: false, enableHiding: false,
@@ -283,7 +309,7 @@ export function RequestsTable({
         <SortableHeader column={column}>{t("filters.operation")}</SortableHeader>
       ),
       cell: ({ row }) =>
-        row.original.operation === "compact" ? t("metrics.compact") : t("filters.response"),
+        requestOperationLabel(row.original.operation, t),
     },
     {
       id: "http",
@@ -338,13 +364,13 @@ export function RequestsTable({
     },
   ], [t, language, openRequest])
 
-  const order = ["time", "provider", "requestPurpose", "model", "reasoningEffort", "status", "input", "cacheHitRate", "output", "reasoningOutput", "firstContent", "generationSpeed", "duration", "source", "caller", "delivery", "ua", "operation", "http", "error", "traffic"]
+  const order = ["time", "provider", "requestPurpose", "model", "activity", "upstreamUrl", "reasoningEffort", "status", "requestBytes", "input", "cacheHitRate", "output", "reasoningOutput", "firstContent", "generationSpeed", "duration", "source", "caller", "delivery", "ua", "operation", "http", "error", "traffic"]
   const orderedColumns = [...columns].sort((a, b) => (order.includes(a.id!) ? order.indexOf(a.id!) : order.length) - (order.includes(b.id!) ? order.indexOf(b.id!) : order.length))
 
   return (
     <>
     <DataTable
-      numericColumnIds={["input", "cacheHitRate", "output", "firstContent", "generationSpeed", "duration", "http", "reasoningOutput"]}
+      numericColumnIds={["requestBytes", "input", "cacheHitRate", "output", "firstContent", "generationSpeed", "duration", "http", "reasoningOutput"]}
       loading={loading}
       title={t("requests.tableTitle")}
       description={() => t("requests.tableDescription", { total, count: records.length, page: pageNumber })}

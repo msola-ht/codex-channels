@@ -3,22 +3,24 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { clineRelayCatalogSchema } from "../runtime/cline-relay-catalog.mjs";
 import { managedProviderAccountFamilies, loadManagedModelProviderDefinitions, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
-import { managedProviderDirectory, managedProviderMarkerPath, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath, primaryProviderBackupPath, loadConfiguredCustomPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
+import { managedProviderDirectory, managedProviderMarkerPath, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath, primaryProviderBackupPath, loadConfiguredCustomPrimaryModelProvider, writeManagedModelWindow, writeManagedModelProviderCatalogUpdates } from "../runtime/model-provider-runtime.mjs";
 import { customProviderUpstreamMetadataPath } from "../runtime/model-provider-upstream-metadata.mjs";
 import { customOfficialModelCatalogPath } from "../runtime/model-provider-official-catalog.mjs";
-import { createResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog, responsesProviderCatalogPath, responsesContextSyncPath, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { compileResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog, responsesProviderCatalogPath, responsesContextSyncPath, writeResponsesModelCatalog, writeResponsesModelContextWindow, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { validateGatewayConfigStructureDocument, parseGatewayConfig } from "../runtime/gateway-config.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
-import { snapshotProviderFiles, assertProviderFileSnapshots, applyProviderFileUpdates, readOptionalProviderFile } from "./managed-provider-files.mjs";
+import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
+import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
+import { projectModelCatalogEntries, projectModelPrompts } from "../runtime/model-catalog-presentation.mjs";
+import { providerCatalogIsolationPath } from "../runtime/provider-catalog-isolation.mjs";
+import { readModelTemplateBindings, validateClinePassCatalogManifest } from "../runtime/model-template-bindings.mjs";
 
 // Revisions cover private profiles too; avoid exposing a reusable credential fingerprint.
 const revisionSecret = randomBytes(32);
-const clineSourceMetadataSchema = clineRelayCatalogSchema.pick({ commit: true, downloadedAt: true });
 
 export class ProviderModelManagementError extends Error {
   constructor(code, field, message, options) {
@@ -33,33 +35,282 @@ export class ProviderModelManagementError extends Error {
 export async function loadProviderModelCatalogs({ environment = process.env } = {}) {
   try {
     const state = await readManagementState(environment, true);
+    const gatewayDefault = readGatewayDefault(gatewaySnapshot(environment));
     const catalogs = [];
     const definitions = loadManagedModelProviderDefinitions(environment);
-    for (const family of managedProviderAccountFamilies) {
-      const members = state.managedProviders.filter(provider => definitions.some(definition => definition.id === provider.id
-        && (definition.storageId ?? definition.id) === family.storageId));
-      if (!members.length) continue;
-      const complete = definitions.filter(definition => (definition.storageId ?? definition.id) === family.storageId).length === members.length;
-      const canRemove = family.proxyKey !== "deepseek" && complete;
-      const defaults = new Set(members.map(provider => provider.model));
-      catalogs.push({ provider: family.proxyKey, displayName: family.definition.displayName, providers: members.map(provider => provider.id),
-        models: members[0].models.map(model => ({ id: model.id, displayName: model.displayName, isDefault: defaults.has(model.id) })), canRemove,
-        ...(!canRemove ? { unavailableReason: complete ? "deepseek-template-source" : "shared-accounts-incomplete" } : {}),
+    const seenFamilies = new Set();
+    for (const definition of definitions) {
+      const member = state.managedProviders.find(provider => provider.id === definition.id);
+      if (!member) continue;
+      if (seenFamilies.has(definition.storageId)) continue;
+      seenFamilies.add(definition.storageId);
+      const family = managedProviderAccountFamilies.find(entry => entry.storageId === definition.storageId);
+      const members = state.managedProviders.filter(provider => definitions.some(entry => entry.storageId === definition.storageId && entry.id === provider.id));
+      const canRemove = definition.storageId !== "deepseek";
+      const providers = members.map(entry => entry.id);
+      catalogs.push({ provider: definition.id, displayName: family.definition.displayName, providers,
+        models: member.models.map(model => ({ id: model.id, displayName: model.displayName, isDefault: members.some(entry => entry.model === model.id),
+          removalBlockedReason: removalBlockedReason(model.id, { canRemove, modelCount: member.models.length,
+            accountDefaults: members.map(entry => entry.model), providers, primary: state.primary.id, gatewayDefault }) })), canRemove,
+        ...(!canRemove ? { unavailableReason: "deepseek-template-source" } : {}),
       });
     }
     const candidates = [...state.customProviders.fixedCandidates.filter(provider => provider.active), ...state.customProviders.switchingProviders];
     let officialModels;
     for (const provider of candidates) {
       const custom = isCustomCatalogProvider(provider.id);
+      const catalogDefault = custom ? readResponsesModelCatalog(environment, provider.id).defaultModel : undefined;
       if (!custom && officialModels === undefined) officialModels = await savedOfficialModels(environment);
-      const models = custom ? provider.models.map(model => ({ id: model.id, displayName: model.name, isDefault: model.id === provider.model }))
+      const sourceModels = custom ? provider.models.map(model => ({ id: model.id, displayName: model.name, isDefault: model.id === provider.model }))
         : officialModels.map(model => ({ ...model, isDefault: model.id === (provider.model ?? state.defaults.model) }));
+      const models = sourceModels.map(model => ({ ...model, removalBlockedReason: removalBlockedReason(model.id, {
+        canRemove: custom, modelCount: sourceModels.length, accountDefaults: [provider.model], catalogDefault,
+        providers: [provider.id], primary: state.primary.id, gatewayDefault,
+      }) }));
       catalogs.push({ provider: provider.id, displayName: provider.displayName, providers: [provider.id], models, canRemove: custom,
         ...(!custom ? { unavailableReason: models.length ? "official-shared-catalog" : "official-catalog-unavailable" } : {}),
       });
     }
     return { catalogs };
   } catch (error) { throw stateError(error); }
+}
+
+/** Presentation is derived from the saved source, never from global window aggregates. */
+export async function loadProviderModelCatalogPresentations({ environment = process.env } = {}) {
+  try {
+    const { catalogs } = await loadProviderModelCatalogs({ environment });
+    const result = catalogs.map(catalog => {
+      const snapshot = readPresentationSnapshot(catalog, environment);
+      return { ...catalog, source: snapshot.source, revision: snapshot.revision,
+        models: snapshot.models.map(presentation => ({
+          id: presentation.model, displayName: presentation.displayName,
+          isDefault: catalog.models.some(model => model.id === presentation.model && model.isDefault),
+          removalBlockedReason: catalog.models.find(model => model.id === presentation.model).removalBlockedReason,
+          presentation,
+        })) };
+    });
+    // Defaults, removal protections and membership must not change during projection.
+    const current = await loadProviderModelCatalogs({ environment });
+    if (JSON.stringify(current.catalogs) !== JSON.stringify(catalogs)) {
+      throw invalid("stale-preview", "provider", "模型目录或账户已变化，请刷新");
+    }
+    return { catalogs: result };
+  } catch (error) { throw stateError(error); }
+}
+
+export async function loadProviderModelPrompts(input, { environment = process.env } = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || Object.keys(input).some(key => !["provider", "model", "revision"].includes(key))
+    || typeof input.revision !== "string" || !/^[a-f0-9]{64}$/u.test(input.revision)) {
+    throw invalid("invalid-input", "revision", "模型提示词请求参数无效");
+  }
+  validateInput({ provider: input.provider, model: input.model });
+  try {
+    const { catalogs } = await loadProviderModelCatalogs({ environment });
+    const catalog = catalogs.find(entry => entry.providers.includes(input.provider));
+    if (!catalog) throw invalid("stale-preview", "provider", "提供商目录已变化，请刷新");
+    const snapshot = readPresentationSnapshot(catalog, environment);
+    if (snapshot.revision !== input.revision) throw invalid("stale-preview", "revision", "模型目录已变化，请刷新");
+    if (!snapshot.models.some(model => model.model === input.model)) {
+      throw invalid("invalid-input", "model", "模型不在当前可见目录中");
+    }
+    const model = snapshot.document.models.find(entry => entry.slug === input.model);
+    const definition = snapshot.document.definitions?.find(entry => entry.id === input.model);
+    return { revision: snapshot.revision, model: input.model, groups: projectModelPrompts(model.model_messages),
+      ...(definition?.template === undefined ? {} : { template: definition.template }),
+      ...(definition?.sampling === undefined ? {} : { sampling: definition.sampling }) };
+  } catch (error) { throw stateError(error); }
+}
+
+function readPresentationSnapshot(catalog, environment) {
+  const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === catalog.provider);
+  const custom = isCustomCatalogProvider(catalog.provider);
+  const source = definition ? "managed" : custom ? "custom" : "official-shared";
+  let content, document;
+  if (custom) {
+    const saved = readResponsesModelCatalog(environment, catalog.provider);
+    content = saved.content;
+    document = saved;
+  } else {
+    const path = definition
+      ? join(managedProviderDirectory(environment, definition), definition.catalogFileName)
+      : customOfficialModelCatalogPath(environment);
+    try { content = createProviderFileReader(environment)(path, definition ? 2_097_152 : 8_388_608); }
+    catch (error) {
+      if (!definition && error?.code === "ENOENT" && catalog.models.length === 0) content = "";
+      else throw error;
+    }
+    document = content === "" ? { models: [] } : parseJson(content);
+    if (definition) validateManagedCatalog(document, definition);
+  }
+  // Managed catalogs allow an omitted maximum: managed-model-catalog uses the
+  // current window as the upper bound until an explicit maximum is saved.
+  const entries = definition ? document.models.map(model => ({
+    ...model, max_context_window: model.max_context_window ?? model.context_window,
+  })) : document.models;
+  const models = entries.length === 0 ? [] : projectModelCatalogEntries(entries, false, custom ? document.definitions : undefined);
+  const expected = catalog.models.map(model => model.id).sort();
+  if (JSON.stringify(models.map(model => model.model).sort()) !== JSON.stringify(expected)) {
+    throw invalid("stale-preview", "provider", "目录模型已变化，请刷新");
+  }
+  const revision = createHmac("sha256", revisionSecret)
+    .update(JSON.stringify([catalog.provider, catalog.providers, catalog.models, content])).digest("hex");
+  return { source, revision, document, models, content };
+}
+
+export async function previewProviderModelRename(input, { environment = process.env } = {}) {
+  try { return (await buildRenamePlan(input, environment)).preview; }
+  catch (error) { throw stateError(error); }
+}
+
+export async function applyProviderModelRename(input, { environment = process.env, preview } = {}) {
+  return withModelProviderManagementTransaction(environment, async () => {
+    let plan;
+    try { plan = await buildRenamePlan(input, environment); }
+    catch (error) { throw stateError(error); }
+    if (!preview || preview.operation !== "model.rename" || preview.provider !== plan.preview.provider
+      || preview.model?.id !== input.model || preview.displayName !== input.displayName
+      || preview.revision !== plan.preview.revision) {
+      throw invalid("stale-preview", "revision", "模型目录已变化，请重新预览");
+    }
+    if (!plan.preview.willChange) return { ...plan.preview, action: "unchanged" };
+    try {
+      await assertProviderFileSnapshots(plan.snapshots);
+      if (plan.snapshot.source === "managed") {
+        writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
+          new Map(plan.snapshots.map(entry => [entry.path, entry.content?.toString("utf8")])), environment);
+      } else {
+        const previous = plan.snapshot.document;
+        const definitions = previous.definitions.map(entry => entry.id === input.model ? { ...entry, name: input.displayName } : entry);
+        const transaction = writeResponsesModelCatalog(environment, input.provider, definitions, previous.defaultModel, previous.revision);
+        await withResponsesModelCatalogWrite(transaction, async () => {
+          const read = createProviderFileReader(environment);
+          if (readResponsesModelCatalog(environment, input.provider).content !== transaction.content
+            || read(`${transaction.path}.backup`, 2_097_152) !== transaction.previous.content
+            || read(`${transaction.path}.pending`, 1024) !== transaction.pendingContent) {
+            throw invalid("readback-failed", "displayName", "模型名称保存结果无法确认，已保留备份和 pending；勿自动重试");
+          }
+          finishResponsesModelCatalogWrite(transaction);
+        });
+      }
+    } catch (error) {
+      if (error instanceof ProviderModelManagementError) throw error;
+      throw invalid("operation-failed", "displayName", "模型名称保存未完成；请检查目录与备份，勿自动重试", error);
+    }
+    return { ...plan.preview, action: "updated" };
+  });
+}
+
+async function buildRenamePlan(input, environment) {
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || Object.keys(input).some(key => !["provider", "model", "displayName", "revision"].includes(key))
+    || typeof input.revision !== "string" || !/^[a-f0-9]{64}$/u.test(input.revision)) {
+    throw invalid("invalid-input", "revision", "模型名称请求参数无效，请刷新后重新编辑");
+  }
+  validateInput({ provider: input.provider, model: input.model });
+  if (typeof input.displayName !== "string" || input.displayName.trim() !== input.displayName
+    || !input.displayName || input.displayName.length > 120 || /\p{Cc}/u.test(input.displayName)) {
+    throw invalid("invalid-display-name", "displayName", "显示名称须为 1–120 个字符，且不能包含控制字符");
+  }
+  const { catalogs } = await loadProviderModelCatalogs({ environment });
+  const catalog = catalogs.find(entry => entry.provider === input.provider);
+  if (!catalog) throw invalid("stale-preview", "provider", "提供商目录已变化，请刷新");
+  const snapshot = readPresentationSnapshot(catalog, environment);
+  if (snapshot.revision !== input.revision) throw invalid("stale-preview", "revision", "模型目录已变化，请刷新");
+  if (snapshot.source === "official-shared") throw invalid("rename-not-supported", "provider", "官方共享目录只读");
+  const model = snapshot.models.find(entry => entry.model === input.model);
+  if (!model) throw invalid("model-not-found", "model", "模型不在当前目录中");
+  let snapshots = [], updates;
+  if (snapshot.source === "managed") {
+    const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === input.provider);
+    const directory = managedProviderDirectory(environment, definition);
+    const path = join(directory, definition.catalogFileName);
+    const manifest = join(directory, definition.catalogManifestFileName);
+    snapshots = snapshotProviderFiles([path, manifest, `${path}.backup`, `${manifest}.backup`], environment);
+    if (requiredContent(snapshots, path).toString("utf8") !== snapshot.content) throw invalid("stale-preview", "revision", "模型目录已变化，请刷新");
+    const source = requiredContent(snapshots, manifest).toString("utf8");
+    const next = { ...snapshot.document, models: snapshot.document.models.map(entry => entry.slug === input.model ? { ...entry, display_name: input.displayName } : entry) };
+    validateManagedCatalog(next, definition);
+    updates = new Map([[path, `${JSON.stringify(next, null, 2)}\n`], [manifest, source],
+      [`${path}.backup`, snapshot.content], [`${manifest}.backup`, source]]);
+  }
+  const willChange = model.displayName !== input.displayName;
+  return { snapshot, snapshots, updates, preview: { operation: "model.rename", provider: input.provider,
+    model: { id: input.model, displayName: model.displayName }, displayName: input.displayName,
+    providers: catalog.providers, revision: snapshot.revision, willChange, activation: willChange ? "restart-app-server" : "none" } };
+}
+
+export async function previewProviderModelContextChange(input, { environment = process.env } = {}) {
+  try { return (await buildContextPlan(input, environment)).preview; }
+  catch (error) { throw stateError(error); }
+}
+
+export async function applyProviderModelContextChange(input, { environment = process.env, preview } = {}) {
+  return withModelProviderManagementTransaction(environment, async () => {
+    let plan;
+    try { plan = await buildContextPlan(input, environment); }
+    catch (error) { throw stateError(error); }
+    if (!preview || preview.operation !== "model.context" || preview.provider !== plan.preview.provider
+      || preview.model?.id !== plan.preview.model.id || preview.contextWindow !== plan.preview.contextWindow
+      || preview.revision !== plan.preview.revision) {
+      throw invalid("stale-preview", "revision", "模型目录已变化，请重新预览");
+    }
+    if (plan.preview.willChange) {
+      try {
+        if (plan.snapshot.source === "managed") {
+          writeManagedModelWindow({ provider: input.provider, model: input.model, contextWindow: input.contextWindow, environment });
+        } else {
+          const transaction = writeResponsesModelContextWindow(environment, input.provider, input.model, input.contextWindow, plan.snapshot.document.revision);
+          await withResponsesModelCatalogWrite(transaction, async () => {
+            const saved = readResponsesModelCatalog(environment, input.provider);
+            const read = createProviderFileReader(environment);
+            if (saved.content !== transaction.content
+              || read(`${transaction.path}.backup`, 2_097_152) !== transaction.previous.content
+              || read(`${transaction.path}.pending`, 1024) !== transaction.pendingContent) {
+              throw invalid("readback-failed", "contextWindow", "模型上下文保存结果无法确认，已保留 pending 和备份；勿自动重试");
+            }
+            finishResponsesModelCatalogWrite(transaction);
+          });
+        }
+      } catch (error) {
+        if (error instanceof ProviderModelManagementError) throw error;
+        throw invalid("operation-failed", "contextWindow", "模型上下文保存未完成；请检查目录与备份，勿自动重试", error);
+      }
+    }
+    return { ...plan.preview, action: plan.preview.willChange ? "updated" : "unchanged" };
+  });
+}
+
+async function buildContextPlan(input, environment) {
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || Object.keys(input).some(key => !["provider", "model", "contextWindow", "revision"].includes(key))
+    || typeof input.revision !== "string" || !/^[a-f0-9]{64}$/u.test(input.revision)) {
+    throw invalid("invalid-input", "revision", "模型上下文请求参数无效，请刷新模型目录后重新编辑");
+  }
+  validateInput({ provider: input.provider, model: input.model });
+  const { catalogs } = await loadProviderModelCatalogs({ environment });
+  const catalog = catalogs.find(entry => entry.providers.includes(input.provider));
+  if (!catalog) throw invalid("stale-preview", "provider", "提供商目录已变化，请刷新");
+  const snapshot = readPresentationSnapshot(catalog, environment);
+  if (snapshot.revision !== input.revision) throw invalid("stale-preview", "revision", "模型目录已变化，请刷新");
+  if (snapshot.source === "official-shared") throw invalid("context-not-supported", "provider", "官方共享模型目录仅支持只读查看");
+  const model = snapshot.models.find(entry => entry.model === input.model);
+  if (!model) throw invalid("invalid-input", "model", "模型不在当前可见目录中");
+  if (!Number.isSafeInteger(model.maxContextWindow) || !Number.isSafeInteger(input.contextWindow)
+    || input.contextWindow < 1024 || input.contextWindow > model.maxContextWindow) {
+    throw invalid("invalid-window", "contextWindow", `模型上下文窗口必须是 1024-${model.maxContextWindow} 的整数`);
+  }
+  const definition = snapshot.document.definitions?.find(entry => entry.id === input.model);
+  const compactLimit = snapshot.source === "custom" ? definition?.autoCompactTokenLimit
+    : snapshot.document.models.find(entry => entry.slug === input.model)?.auto_compact_token_limit;
+  if (compactLimit > Math.floor(input.contextWindow * 9 / 10)) {
+    throw invalid("context-auto-compact-limit", "contextWindow", "自动压缩阈值不能超过当前上下文窗口的 90%；请增大窗口，或先调整模型的自动压缩阈值");
+  }
+  return { snapshot, preview: { operation: "model.context", provider: input.provider,
+    model: { id: model.model, displayName: model.displayName, contextWindow: model.contextWindow, maxContextWindow: model.maxContextWindow },
+    contextWindow: input.contextWindow, providers: catalog.providers, revision: snapshot.revision,
+    willChange: model.contextWindow !== input.contextWindow,
+    activation: model.contextWindow !== input.contextWindow ? "restart-app-server" : "none" } };
 }
 
 export async function previewProviderModelRemoval(input, { environment = process.env } = {}) {
@@ -82,7 +333,8 @@ export async function applyProviderModelRemoval(input, { environment = process.e
     try {
       if (plan.custom) await applyCustomRemoval(plan, environment);
       else {
-        await applyProviderFileUpdates(plan.updates, plan.snapshots);
+        writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
+          new Map(plan.snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
         // An uncertain readback preserves the backup; never repeat the write automatically.
         assertSavedUpdates(plan);
       }
@@ -95,23 +347,25 @@ export async function applyProviderModelRemoval(input, { environment = process.e
 }
 
 async function buildRemovalPlan(input, environment) {
-  validateInput(input);
+  // Existing v5 catalogs may contain format characters accepted at creation.
+  // Permit only exact lookup for removal; never normalize or rename that ID.
+  validateInput(input, { allowStoredCustomModel: isCustomCatalogProvider(input?.provider) });
   const definitions = loadManagedModelProviderDefinitions(environment);
-  const family = managedProviderAccountFamilies.find(candidate => candidate.proxyKey === input.provider
-    || definitions.some(definition => definition.id === input.provider && (definition.storageId ?? definition.id) === candidate.storageId));
+  const definition = definitions.find(entry => entry.id === input.provider);
+  const family = definition && managedProviderAccountFamilies.find(candidate => definition.storageId === candidate.storageId);
   if (!family && !isCustomCatalogProvider(input.provider)) throw invalid("removal-not-supported", "provider", "该提供商不支持本地模型移除");
   if (family?.proxyKey === "deepseek") throw invalid("removal-not-supported", "provider", "DeepSeek 暂不支持单模型移除");
-  const memberDefinitions = family ? definitions.filter(definition => (definition.storageId ?? definition.id) === family.storageId) : [];
+  const memberDefinitions = definition ? definitions.filter(entry => entry.storageId === definition.storageId) : [];
   const configPath = join(codexHomePath(environment), "config.toml");
-  const paths = [configPath, customSwitchingProviderRegistryPath(environment), primaryProviderBackupPath(environment), responsesContextSyncPath(environment),
-    ...managedProviderAccountFamilies.map(candidate => candidate.accountsFilePath(environment)),
+  const paths = [configPath, customSwitchingProviderRegistryPath(environment), primaryProviderBackupPath(environment), responsesContextSyncPath(environment), providerCatalogIsolationPath(environment),
+    ...(family ? [family.accountsFilePath(environment)] : []),
     ...memberDefinitions.flatMap(definition => [managedProviderMarkerPath(environment, definition), join(codexHomePath(environment), definition.profileFileName)]),
   ];
   let catalogPath, manifestPath;
   if (family) {
-    const directory = managedProviderDirectory(environment, family.definition);
-    catalogPath = join(directory, family.definition.catalogFileName);
-    manifestPath = join(directory, family.definition.catalogManifestFileName);
+    const directory = managedProviderDirectory(environment, definition);
+    catalogPath = join(directory, definition.catalogFileName);
+    manifestPath = join(directory, definition.catalogManifestFileName);
     paths.push(catalogPath, manifestPath, `${catalogPath}.backup`, `${manifestPath}.backup`);
   } else {
     catalogPath = responsesProviderCatalogPath(environment, input.provider);
@@ -122,44 +376,51 @@ async function buildRemovalPlan(input, environment) {
   snapshots.push(gateway);
   requiredContent(snapshots, configPath);
   const state = await readManagementState(environment);
-  if (family && JSON.stringify(memberDefinitions.map(definition => definition.id)) !== JSON.stringify(
-    loadManagedModelProviderDefinitions(environment).filter(definition => (definition.storageId ?? definition.id) === family.storageId).map(definition => definition.id),
-  )) throw invalid("stale-preview", "revision", "共享账户已变化，请重新预览");
-  const gatewayContent = gateway.content?.toString("utf8");
-  const gatewayDefault = gatewayContent === undefined ? undefined
-    : validateGatewayConfigStructureDocument(parseGatewayConfig(gatewayContent)).codex?.default_model;
+  if (family && !loadManagedModelProviderDefinitions(environment).some(entry => entry.id === definition.id)) {
+    throw invalid("stale-preview", "revision", "账户已变化，请重新预览");
+  }
+  const gatewayDefault = readGatewayDefault(gateway);
   let catalog, nextManifest, custom;
-  let providers, displayName, defaults;
+  let providers, displayName, accountDefaults, catalogDefault;
   if (family) {
     const members = state.managedProviders.filter(provider => memberDefinitions.some(definition => definition.id === provider.id));
-    if (!members.length || members.length !== memberDefinitions.length) throw invalid("provider-not-configured", "provider", "请先完成全部共享账户配置");
+    if (!members.some(member => member.id === input.provider)) throw invalid("provider-not-configured", "provider", "请先完成该账户配置");
     providers = members.map(provider => provider.id);
     displayName = family.definition.displayName;
-    defaults = members.map(provider => provider.model);
+    accountDefaults = members.map(provider => provider.model);
     catalog = parseJson(requiredContent(snapshots, catalogPath));
     const manifest = parseJson(requiredContent(snapshots, manifestPath));
     if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || typeof manifest.source !== "string" || !manifest.source) {
       throw invalid("provider-state-unavailable", "provider", "模型来源文件无效，未执行移除");
     }
-    validateManagedCatalog(catalog, family.definition);
+    validateManagedCatalog(catalog, definition);
+    const templateBindings = readModelTemplateBindings(manifest, catalog.models.map(model => model.slug));
     if (members.some(member => !catalog.models.some(model => model.slug === member.model
       && model.default_reasoning_level === member.reasoningEffort))) {
-      throw invalid("provider-state-unavailable", "provider", "共享账户默认模型或思考等级与目录不一致，请先修复默认设置");
+      throw invalid("provider-state-unavailable", "provider", "账户默认模型或思考等级与目录不一致，请先修复默认设置");
     }
     if (family.proxyKey === "clp") {
-      if (!clineSourceMetadataSchema.safeParse(manifest.cline).success
-        || !["deepseek", "cline"].includes(manifest.source)
-        || (manifest.source === "deepseek" && manifest.model !== "deepseek-flash")) {
-        throw invalid("catalog-source-invalid", "provider", "CLP 模型来源信息无效，请先核对共享目录来源，未执行移除");
+      try { validateClinePassCatalogManifest(manifest, catalog.models.map(model => model.slug), family.definition.defaultModel); }
+      catch {
+        throw invalid("catalog-source-invalid", "provider", "CLP 模型来源信息无效，请先核对账户目录来源，未执行移除");
       }
-      const follows = catalog.models.some(model => model.slug === family.definition.defaultModel);
-      if (follows !== (manifest.source === "deepseek")) throw invalid("catalog-source-invalid", "provider", "CLP 目录与来源跟随关系不一致，未执行移除");
       nextManifest = { ...manifest };
-      if (input.model === family.definition.defaultModel) {
+      if (manifest.cline !== undefined && input.model === family.definition.defaultModel) {
         nextManifest.source = "cline";
         delete nextManifest.model;
       }
-    } else nextManifest = { source: "user-configured", updatedAt: new Date().toISOString() };
+    } else nextManifest = { ...manifest, updatedAt: new Date().toISOString() };
+    if (Object.hasOwn(manifest, "modelTemplates")) {
+      nextManifest.modelTemplates = { ...templateBindings };
+      delete nextManifest.modelTemplates[input.model];
+    }
+    if (Object.hasOwn(manifest, "templateUpdates")) {
+      if (!manifest.templateUpdates || typeof manifest.templateUpdates !== "object" || Array.isArray(manifest.templateUpdates)) {
+        throw invalid("catalog-source-invalid", "provider", "模型模板更新记录无效，未执行移除");
+      }
+      nextManifest.templateUpdates = { ...manifest.templateUpdates };
+      delete nextManifest.templateUpdates[input.model];
+    }
   } else {
     const provider = [...state.customProviders.fixedCandidates.filter(candidate => candidate.active), ...state.customProviders.switchingProviders]
       .find(candidate => candidate.id === input.provider);
@@ -175,28 +436,31 @@ async function buildRemovalPlan(input, environment) {
     catalog = custom;
     providers = [provider.id];
     displayName = provider.displayName;
-    defaults = [custom.defaultModel, provider.model];
+    accountDefaults = [provider.model];
+    catalogDefault = custom.defaultModel;
   }
   const models = catalog.models;
   const model = models.find(candidate => candidate.slug === input.model);
   if (!model) throw invalid("model-not-found", "model", "模型 ID 不在当前目录中");
-  if (models.length === 1) throw invalid("last-model-protected", "model", "不能移除最后一个启用模型");
-  if (defaults.includes(input.model)) throw invalid("default-model-protected", "model", "模型是账户或目录默认值，请先更改默认模型");
-  if (gatewayDefault === input.model && providers.includes(state.primary.id)) throw invalid("gateway-default-protected", "model", "模型是当前主提供商的 Gateway 显式默认值，请先更改配置");
-  const nextCatalog = custom ? createResponsesModelCatalog(custom.definitions.filter(model => model.id !== input.model), custom.defaultModel)
+  const blocked = removalBlockedReason(input.model, { canRemove: true, modelCount: models.length, accountDefaults,
+    catalogDefault, gatewayDefault, providers, primary: state.primary.id });
+  if (blocked === "last-model-protected") throw invalid(blocked, "model", "不能移除最后一个启用模型");
+  if (blocked === "account-default-protected" || blocked === "catalog-default-protected") {
+    throw invalid("default-model-protected", "model", "模型是账户或目录默认值，请先更改默认模型");
+  }
+  if (blocked === "gateway-default-protected") throw invalid(blocked, "model", "模型是当前主提供商的 Gateway 显式默认值，请先更改配置");
+  const nextCatalog = custom ? compileResponsesModelCatalog(custom.definitions.filter(model => model.id !== input.model), custom.defaultModel)
     : { ...catalog, models: models.filter(model => model.slug !== input.model) };
   await assertProviderFileSnapshots(snapshots);
   const revision = createHmac("sha256", revisionSecret).update(JSON.stringify({ provider: input.provider, model: input.model,
     files: snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("base64") ?? null]),
   })).digest("hex");
-  const warnings = [{ code: "historical-references" }, ...(family?.proxyKey === "clp"
-    ? [{ code: "clp-relay-independent" }]
-    : [{ code: "provider-relay-inflight" }, { code: "shared-relay-grants-retained" }])];
+  const warnings = [{ code: "historical-references" }, { code: "provider-relay-inflight" }, { code: "shared-relay-grants-retained" }];
   const preview = { operation: "model.remove", provider: { id: input.provider, displayName },
     model: { id: input.model, displayName: model.display_name ?? input.model }, providers, revision, warnings, activation: "restart-all" };
   return { preview, snapshots, catalog: nextCatalog, catalogPath, custom,
     updates: new Map(custom ? [] : [
-      [`${catalogPath}.backup`, requiredContent(snapshots, catalogPath)], [`${manifestPath}.backup`, requiredContent(snapshots, manifestPath)],
+      [`${catalogPath}.backup`, requiredContent(snapshots, catalogPath).toString("utf8")], [`${manifestPath}.backup`, requiredContent(snapshots, manifestPath).toString("utf8")],
       [catalogPath, `${JSON.stringify(nextCatalog, null, 2)}\n`], [manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`],
     ]),
   };
@@ -209,7 +473,7 @@ async function applyCustomRemoval(plan, environment) {
     if (current.content !== `${JSON.stringify(plan.catalog, null, 2)}\n`) throw invalid("readback-failed", "model", "模型目录保存结果无法确认，已保留 pending 和备份；勿自动重试");
     const backup = plan.snapshots.find(snapshot => snapshot.path === `${plan.catalogPath}.backup`).readCurrent();
     const pending = plan.snapshots.find(snapshot => snapshot.path === `${plan.catalogPath}.pending`).readCurrent();
-    if (!backup?.equals(Buffer.from(plan.custom.content)) || pending?.toString("utf8") !== JSON.stringify({ schemaVersion: 1, previous: true })) {
+    if (!backup?.equals(Buffer.from(plan.custom.content)) || pending?.toString("utf8") !== transaction.pendingContent) {
       throw invalid("readback-failed", "model", "目录备份或 pending 已变化，请人工核对，勿自动重试");
     }
     const unchanged = plan.snapshots.filter(snapshot => ![plan.catalogPath, `${plan.catalogPath}.backup`, `${plan.catalogPath}.pending`].includes(snapshot.path));
@@ -255,9 +519,26 @@ function gatewaySnapshot(environment) {
   return { ...snapshot, writeCurrent: () => { throw new Error("模型移除不能写入 Gateway 配置"); } };
 }
 
+function readGatewayDefault(snapshot) {
+  const content = snapshot.content?.toString("utf8");
+  return content === undefined ? undefined
+    : validateGatewayConfigStructureDocument(parseGatewayConfig(content)).codex?.default_model;
+}
+
+/** Account selection and catalog fallback remain distinct even when both protect the same model. */
+function removalBlockedReason(model, { canRemove, modelCount, accountDefaults, catalogDefault, gatewayDefault, providers, primary }) {
+  if (!canRemove) return "removal-not-supported";
+  if (modelCount <= 1) return "last-model-protected";
+  if (accountDefaults.includes(model)) return "account-default-protected";
+  if (catalogDefault === model) return "catalog-default-protected";
+  if (gatewayDefault === model && providers.includes(primary)) return "gateway-default-protected";
+  return null;
+}
+
 async function savedOfficialModels(environment) {
-  const content = await readOptionalProviderFile(customOfficialModelCatalogPath(environment), environment);
-  if (content === undefined) return [];
+  let content;
+  try { content = createProviderFileReader(environment)(customOfficialModelCatalogPath(environment), 8_388_608); }
+  catch (error) { if (error?.code === "ENOENT") return []; throw error; }
   const catalog = parseJson(content);
   if (!Array.isArray(catalog.models)) throw invalid("provider-state-unavailable", "provider", "官方共享模型目录无效");
   return catalog.models.filter(model => model.supported_in_api && model.visibility === "list")
@@ -268,15 +549,16 @@ function validateManagedCatalog(catalog, definition) {
   if (!Array.isArray(catalog?.models) || !catalog.models.length
     || catalog.models.some(model => !isManagedProviderModelValid(definition, model?.slug))
     || new Set(catalog.models.map(model => model.slug)).size !== catalog.models.length) {
-    throw invalid("provider-state-unavailable", "model", "共享模型目录为空或包含无效、重复的模型 ID");
+    throw invalid("provider-state-unavailable", "model", "账户模型目录为空或包含无效、重复的模型 ID");
   }
 }
 
-function validateInput(input) {
+function validateInput(input, { allowStoredCustomModel = false } = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !["provider", "model"].includes(key))
     || typeof input.provider !== "string" || !input.provider.length || input.provider.trim() !== input.provider || input.provider.length > 100
     || typeof input.model !== "string" || !input.model.length || input.model.trim() !== input.model || input.model.length > 200
-    || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(input.provider + input.model)) throw invalid("invalid-input", "model", "必须提供准确的 provider 和 model ID，不能包含额外字段");
+    || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(input.provider)
+    || (allowStoredCustomModel ? /\p{Cc}/u : /[\p{Cc}\p{Cf}\p{Cs}]/u).test(input.model)) throw invalid("invalid-input", "model", "必须提供准确的 provider 和 model ID，不能包含额外字段");
 }
 
 function requiredContent(snapshots, path) {
@@ -296,5 +578,5 @@ function invalid(code, field, message, cause) {
 
 function stateError(error) {
   return error instanceof ProviderModelManagementError ? error
-    : invalid("provider-state-unavailable", "provider", "模型目录或关联配置无法安全读取，未执行移除", error);
+    : invalid("provider-state-unavailable", "provider", "模型目录或关联配置无法安全读取，未执行模型操作", error);
 }

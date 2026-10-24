@@ -1,5 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { validRequestTiming } from "../../runtime/request-timing.mjs";
+import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
+import { validRequestActivity } from "../../runtime/request-activity.mjs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { SqliteQuotaQueries } from "./sqlite-quota-queries.js";
@@ -7,6 +9,7 @@ import { sumProviderQuotaTokens, type ProviderQuotaTokenRange } from "./provider
 import { SqliteAutoApprovalReviewMetrics } from "./sqlite-auto-approval-review-metrics.js";
 import { SqliteRequestMetricsQueries } from "./sqlite-request-metrics-queries.js";
 import { validateThreadId } from "./sqlite-request-metrics-query-base.js";
+import { reviewRunScope } from "./sqlite-review-run-scope.js";
 import type { MetricsWriteScopeQuery } from "./metrics-worker-protocol.js";
 
 import {
@@ -240,25 +243,12 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
         JOIN tree parent ON child.parent_thread_id = parent.thread_id
       ) SELECT thread_id AS threadId FROM tree`).all(threadId) as unknown as { threadId: string }[];
     }
-    let seed: string;
-    let parameters: string[];
     if (scope.type === "task") {
       validateThreadId(scope.turnId, "Turn ID");
-      seed = "SELECT ? AS thread_id, ? AS turn_id";
-      parameters = [threadId, scope.turnId];
-    } else if (scope.type === "sessionReview") {
-      // Keep the same run-level seed as sessionAutoApprovalReviewSummary.
-      seed = `SELECT thread_id, turn_id FROM auto_approval_review_turns WHERE thread_id = ?
-        UNION SELECT thread_id, turn_id FROM turn_execution_metrics WHERE thread_id = ?
-        UNION SELECT thread_id, turn_id FROM model_request_metrics WHERE thread_id = ? AND turn_id IS NOT NULL
-        UNION SELECT parent_thread_id, parent_turn_id FROM subagent_turns WHERE parent_thread_id = ?`;
-      parameters = [threadId, threadId, threadId, threadId];
-    } else throw new Error("不支持的指标写入范围");
-    const scopes = this.database.prepare(`WITH RECURSIVE runs(thread_id, turn_id) AS (
-      ${seed} UNION
-      SELECT child.thread_id, child.turn_id FROM subagent_turns child
-      JOIN runs parent ON child.parent_thread_id = parent.thread_id AND child.parent_turn_id = parent.turn_id
-    ) SELECT thread_id AS threadId, turn_id AS turnId FROM runs`).all(...parameters) as unknown as { threadId: string; turnId: string }[];
+    } else if (scope.type !== "sessionReview") throw new Error("不支持的指标写入范围");
+    const { cte, parameters } = reviewRunScope(threadId, scope.type === "task" ? scope.turnId : undefined);
+    const scopes = this.database.prepare(`WITH RECURSIVE ${cte}
+      SELECT thread_id AS threadId, turn_id AS turnId FROM review_runs`).all(...parameters) as unknown as { threadId: string; turnId: string }[];
     // A failed root request may have left no retained row to seed the query.
     return scope.type === "sessionReview" ? [{ threadId }, ...scopes.filter(run => run.threadId !== threadId)] : scopes;
   }
@@ -390,7 +380,16 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       !Number.isSafeInteger(sample.quotaObservedAtMs) || sample.quotaObservedAtMs < 0
       || (sample.weeklyQuota == null && !sample.quotaWindows?.length)
     )) throw new Error("额度快照采集时间无效");
+    if (sample.requestBytes != null
+      && (!Number.isSafeInteger(sample.requestBytes) || sample.requestBytes < 0)) {
+      throw new Error("请求发送大小无效");
+    }
     if (!validRequestTiming(sample)) throw new Error("请求生成计时无效");
+    if (sample.activity != null && !validRequestActivity(sample.activity)) throw new Error("请求行为摘要无效");
+    if (sample.upstreamUrl != null && (typeof sample.upstreamUrl !== "string"
+      || sanitizeModelRequestUrl(sample.upstreamUrl) !== sample.upstreamUrl)) {
+      throw new Error("实际上游地址无效");
+    }
     const recordedAtMs = sample.recordedAtMs ?? Date.now();
     this.insert!.run(
       sample.provider,
@@ -432,6 +431,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       sample.traffic?.session ?? null,
       sample.traffic?.interaction ?? null,
       sample.totalDurationMs ?? null,
+      sample.requestBytes ?? null,
       sample.requestServiceTier ?? null,
       sample.source ?? "owned", sample.callerId ?? null, sample.keyId ?? null,
       sample.credentialGeneration ?? null, sample.relayRequestId ?? null, sample.deliveryStatus ?? null,
@@ -450,6 +450,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       sample.requestPurpose ?? null,
       sample.reviewerThreadId ?? null,
       sample.reviewerTurnId ?? null,
+      sample.upstreamUrl ?? null,
+      sample.activity == null ? null : JSON.stringify(sample.activity),
     );
   }
 
@@ -774,6 +776,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
 
   threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage {
     return this.queries.threadList(query);
+  }
+
+  iterateThreadList(query: Omit<ModelRequestMetricsThreadQuery, "limit" | "offset">) {
+    return this.queries.iterateThreadList(query);
+  }
+
+  iterateThreadTurnSummaries(threadId: string, query: Omit<ModelRequestMetricsThreadQuery, "limit" | "offset">) {
+    return this.queries.iterateThreadTurnSummaries(threadId, query);
   }
 
   threadCounts(query: ModelRequestMetricsScope): { threadCount: number; turnCount: number } {

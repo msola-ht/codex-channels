@@ -22,13 +22,13 @@ export interface ModelProviderDefaultSetupOptions {
         maxContextWindow: number;
         reasoningEffort: string;
         reasoningEfforts: Array<{ effort: string; description: string }>;
-        windowPercent?: number;
       }>;
     }): Promise<string>;
     selectReasoningEffort(
       provider: Record<string, unknown>,
       model: Record<string, unknown>,
     ): Promise<string>;
+    confirm(preview: import("./model-provider-default-management.mjs").ManagedProviderDefaultChangePreview): Promise<boolean>;
   };
   readConfigSnapshot?: typeof import("./codex-user-config.mjs").readCodexUserConfigSnapshot;
   writeConfigEdits?: (
@@ -43,10 +43,12 @@ export function runModelProviderDefaultSetup(
 ): Promise<
   | { action: "back" }
   | {
-      action: "configured";
+      action: "configured" | "unchanged";
       provider: ManagedModelProviderId;
       model: string;
       reasoningEffort: string;
       mode: "switching" | "exclusive";
+      activation: "restart-app-server" | "none";
+      activationResult: import("./config-activation-result.mjs").ConfigActivationResult;
     }
 >;

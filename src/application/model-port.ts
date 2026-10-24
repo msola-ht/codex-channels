@@ -33,12 +33,15 @@ export interface ModelOption {
 }
 
 export interface ModelSelectionPort {
-  listModels(): Promise<ModelOption[]>;
-  listModelsForProvider?(provider: string): Promise<ModelOption[]>;
-  writeDefaultServiceTier(tier: "fast" | "ultrafast" | "default"): Promise<void>;
-  readDefaultReasoningEffort(cwd: string, modelProvider?: string): Promise<string | null>;
-  readDefaultServiceTier(cwd: string, modelProvider?: string): Promise<string | null>;
-  readModelAccelerationSettings(cwd: string, modelProvider?: string): Promise<{
+  /** 本地目录生命周期守卫；整体停止后不得降级展示或启动后续目录请求。 */
+  assertModelCatalogActive?(): void;
+  /** 本地守卫只约束新的请求提交，已提交请求仍按实际结果结算。 */
+  listModels(beforeSubmit?: () => void): Promise<ModelOption[]>;
+  listModelsForProvider?(provider: string, beforeSubmit?: () => void): Promise<ModelOption[]>;
+  writeDefaultServiceTier(tier: "fast" | "ultrafast" | "default", beforeSubmit?: () => void): Promise<void>;
+  readDefaultReasoningEffort(cwd: string, modelProvider?: string, beforeSubmit?: () => void): Promise<string | null>;
+  readDefaultServiceTier(cwd: string, modelProvider?: string, beforeSubmit?: () => void): Promise<string | null>;
+  readModelAccelerationSettings(cwd: string, modelProvider?: string, beforeSubmit?: () => void): Promise<{
     fastEnabled: boolean;
     ultrafastEnabled: boolean;
     serviceTier: string | null;

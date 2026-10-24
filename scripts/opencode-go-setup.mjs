@@ -21,116 +21,72 @@ import {
   loadManagedModelProviderSettings,
 } from "../runtime/model-provider-runtime.mjs";
 import {
-  isOpencodeGoProvider,
   loadOpencodeGoAccounts,
   opencodeGoProviderId,
   opencodeGoAccountDisplayName,
   readOpencodeGoAccountMarker,
-  validateOpencodeGoContact,
 } from "../runtime/opencode-go-accounts.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
+import { isManagedProviderApiKeyValid, opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import { runManagedProviderModelSetup } from "./managed-provider-model-management.mjs";
-import { opencodeGoAccountPaths } from "./opencode-go-account-files.mjs";
+import { runProviderModelSetup } from "./provider-model-setup.mjs";
 
 class OpenCodeGoSetupCancelled extends Error {}
 
-export async function runOpenCodeGoSetup({
+export async function runOpenCodeGoSetup(options = {}) {
+  while (true) {
+    const result = await runOpenCodeGoSetupOperation(options);
+    if (result.action === "menu-back") return { action: "back" };
+    if (result.action === "back" || result.action === "cancelled") continue;
+    return result;
+  }
+}
+
+async function runOpenCodeGoSetupOperation({
   allowBack = false,
   environment = process.env,
   output = process.stdout,
   fetchImpl = globalThis.fetch,
   downloadCatalog = downloadDeepseekCatalog,
   prompts = clackPrompts,
-  prompter,
 } = {}) {
   const accounts = loadOpencodeGoAccounts(environment);
-  const defaultAccount = accounts.find((account) => account.default);
-  const hasModelSettings = loadManagedModelProviderSettings(environment)
-    .some((candidate) => isOpencodeGoProvider(candidate.provider));
-  const prompt = prompter ?? createPrompter(prompts, {
-    allowBack,
-    accounts,
-    hasModelSettings,
-    hasAccounts: accounts.length > 0,
-  });
   try {
-    const action = await prompt.select();
-    if (action === "back") return { action: "back" };
-    if (action === "model-settings") {
-      if (!defaultAccount) return { action: "back" };
-      return runModelProviderDefaultSetup({
-        allowBack: true,
-        provider: opencodeGoProviderId(defaultAccount.id),
-        environment,
-        output,
-        prompts,
-      });
-    }
-    if (action === "catalog") return runManagedProviderModelSetup("ocg", { environment, prompts, output, downloadCatalog });
-    if (action === "account-add") {
-      const accountId = await prompt.accountId();
-      const contact = await prompt.contact();
-      return addOpencodeGoAccount(accountId, {
-        contact,
-        environment,
-        output,
-        fetchImpl,
-        downloadCatalog,
-        prompts,
-        prompter: prompt,
-      });
-    }
+    const action = await prompts.select({ message: "OpenCode Go 官方", options: [
+      { value: "account-add", label: "添加账户" },
+      ...(accounts.length ? [
+        { value: "account-edit", label: "编辑账户", hint: "API Key 与运行模式" },
+        { value: "models", label: "模型管理", hint: "所有 OCG 账户共用目录；默认模型按账户设置" },
+        { value: "account-default", label: "设置默认账户", hint: "用于渠道默认选择，已有会话保持原账户" },
+        { value: "account-remove", label: "移除本地账户配置" },
+      ] : []),
+      ...(allowBack ? [{ value: "back", label: "返回" }] : []),
+    ] });
+    if (prompts.isCancel(action) || action === "back") return { action: "menu-back" };
+    if (action === "models") return runProviderModelSetup({ environment, prompts, output, provider: "ocg" });
+    if (!["account-add", "account-edit", "account-default", "account-remove"].includes(action)) throw new Error("未知 OpenCode Go 账户操作");
+    const accountId = action === "account-add"
+      ? await promptManagedAccountId(prompts, accounts, opencodeGoReservedAccountIds)
+      : await prompts.select({ message: "选择 OCG 账户", options: accounts.map(account => ({
+        value: account.id, label: `${account.id}${account.default ? "（默认）" : ""}`,
+      })) });
+    if (prompts.isCancel(accountId)) return { action: "back" };
     if (action === "account-default") {
-      const accountId = await prompt.selectAccount(accounts);
-      if (accountId === undefined) return { action: "back" };
-      await setOpencodeGoDefaultAccount(accountId, { environment });
-      output.write(`默认 OpenCode Go 账户已设置为 ${accountId}。\n`);
-      writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
-      return {
-        action: "default-set",
-        activation: "restart-all",
-        activationResult: configActivationResult("restart-all"),
-      };
-    }
-    if (action === "account-stop") {
-      const accountId = await prompt.selectAccount(accounts);
-      if (accountId === undefined) return { action: "back" };
-      return stopOpencodeGoAccount(accountId, { environment, output });
+      const result = await setOpencodeGoDefaultAccount(accountId, { environment });
+      output.write(result.action === "unchanged" ? `默认 OpenCode Go 账户仍为 ${accountId}，无需修改。\n` : `默认 OpenCode Go 账户已设置为 ${accountId}。\n`);
+      writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+      return { ...result, activationResult: configActivationResult(result.activation) };
     }
     if (action === "account-remove") {
-      const accountId = await prompt.selectAccount(accounts);
-      if (accountId === undefined) return { action: "back" };
-      return removeOpencodeGoAccount(accountId, {
+      return await removeOpencodeGoAccount(accountId, {
         environment,
         output,
         prompts,
       });
     }
-    if (action === "list") {
-      printAccounts(environment, output);
-      return { action: "listed" };
-    }
-    if (action === "switching" || action === "exclusive") {
-      const accountId = defaultAccount?.id
-        ?? (typeof prompt.accountId === "function" ? await prompt.accountId() : undefined);
-      if (accountId === undefined) return { action: "back" };
-      const contact = defaultAccount?.email ?? defaultAccount?.phone
-        ?? (typeof prompt.contact === "function" ? await prompt.contact() : undefined);
-      return addOpencodeGoAccount(accountId, {
-        mode: action,
-        reconfigure: defaultAccount !== undefined,
-        contact,
-        environment,
-        output,
-        fetchImpl,
-        downloadCatalog,
-        prompts,
-        prompter: prompt,
-      });
-    }
-    return { action: "back" };
+    return await addOpencodeGoAccount(accountId, {
+      reconfigure: action === "account-edit", environment, output, fetchImpl, downloadCatalog, prompts,
+    });
   } catch (error) {
     if (allowBack && error instanceof OpenCodeGoSetupCancelled) return { action: "back" };
     throw error;
@@ -141,68 +97,48 @@ export async function addOpencodeGoAccount(accountId, {
   email,
   phone,
   contact,
-  mode = "switching",
+  mode,
   reconfigure = false,
   environment = process.env,
   output = process.stdout,
   fetchImpl = globalThis.fetch,
   downloadCatalog = downloadDeepseekCatalog,
   prompts = clackPrompts,
-  prompter,
 } = {}) {
-  let resolvedContact = contact;
-  if (resolvedContact === undefined && email === undefined && phone === undefined) {
-    if (prompter && typeof prompter.contact === "function") {
-      resolvedContact = await prompter.contact();
-    } else if (prompts && typeof prompts.text === "function") {
-      resolvedContact = await contactPrompt(prompts);
-    }
+  const current = loadManagedModelProviderSettings(environment).find(provider => provider.provider === opencodeGoProviderId(accountId));
+  const selectedMode = mode ?? await prompts.select({ message: "运行模式", initialValue: current?.mode ?? "switching", options: [
+    { value: "switching", label: "切换模式", hint: "保留 OpenAI 主实例，使用独立实例" },
+    { value: "exclusive", label: "固定模式", hint: "修改主实例配置，使用此账户" },
+  ] });
+  if (prompts.isCancel(selectedMode)) return { action: "back" };
+  const key = await prompts.password({
+    message: reconfigure ? "OpenCode Go API Key（留空保留当前 Key）" : "OpenCode Go API Key",
+    validate: (value = "") => reconfigure && value === "" || isManagedProviderApiKeyValid(opencodeGoProviderDefinition, value)
+      ? undefined : "请输入有效 API Key",
+  });
+  if (prompts.isCancel(key)) return { action: "back" };
+  const input = { accountId, email, phone, contact, mode: selectedMode, reconfigure, ...(reconfigure && (key === undefined || key === "") ? {} : { apiKey: key }) };
+  const preview = await previewOpencodeGoAccountConfiguration(input, { environment });
+  if (preview.willChange) {
+    const modeLabel = value => value === "exclusive" ? "固定模式" : "切换模式";
+    output.write(`账户：${accountId}\n运行模式：${preview.previousMode === undefined ? "未配置" : modeLabel(preview.previousMode)} → ${modeLabel(preview.mode)}\nAPI Key：${preview.credentialAction === "preserve" ? "保留当前 Key" : "写入新 Key"}\n`);
+    if (preview.effects.writesMainConfig) output.write("此操作会修改或恢复该账户接管的 Codex 主配置字段。\n");
+    if (await prompts.confirm({ message: "确认保存上述账户配置？", initialValue: false }) !== true) return { action: "back" };
   }
-  const preview = await previewOpencodeGoAccountConfiguration({
-    accountId,
-    email,
-    phone,
-    contact: resolvedContact,
-    mode,
-    reconfigure,
-  }, { environment });
-  let confirmExclusiveConfigChange = false;
-  if (preview.effects.writesMainConfig) {
-    const message = `此操作会修改或恢复 Codex 主配置 ${opencodeGoAccountPaths(environment, accountId).configPath}，确认继续？`;
-    const confirmed = prompter
-      ? await prompter.confirm(message, false)
-      : await confirmPrompt(
-          prompts,
-          message,
-          false,
-        );
-    if (confirmed !== true) {
-      output.write("已取消，未修改任何文件。\n");
-      return { action: "cancelled", accountId };
-    }
-    confirmExclusiveConfigChange = true;
+  const result = await applyOpencodeGoAccountConfiguration({ ...input, confirmExclusiveConfigChange: preview.effects.writesMainConfig, expectedRevision: preview.revision }, { environment, fetchImpl, downloadCatalog });
+  if (result.action === "unchanged") {
+    output.write("账户配置未变化，无需保存或重启。\n");
+    return result;
   }
-  const apiKey = prompter
-    ? await prompter.secret("OpenCode Go API Key（以 sk- 开头）")
-    : await secretPrompt(prompts);
-  const result = await applyOpencodeGoAccountConfiguration({
-    accountId: preview.account.id,
-    email: preview.account.email,
-    phone: preview.account.phone,
-    mode,
-    reconfigure,
-    apiKey,
-    confirmExclusiveConfigChange,
-  }, { environment, fetchImpl, downloadCatalog });
   const paths = result.paths;
-  output.write(mode === "switching"
+  output.write(selectedMode === "switching"
     ? `OpenCode Go 账户 Profile 已保存：${paths.profilePath}\n`
     : `OpenCode Go 账户固定配置已保存：${paths.configPath}\n`);
   output.write(`模型目录：${paths.catalogPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return {
     action: "configured",
-    mode,
+    mode: selectedMode,
     accountId,
     ...paths,
     activation: "restart-all",
@@ -249,11 +185,7 @@ export async function removeOpencodeGoAccount(accountId, {
 } = {}) {
   const preview = await previewOpencodeGoAccountRemoval(accountId, { environment });
   const removesLastAccount = preview.effects?.removesLastAccount === true;
-  const confirmationMessage = removesLastAccount
-    ? preview.effects?.restoresInitialConfig === true
-      ? `确认删除最后一个 OpenCode Go 账户 ${accountId}？将恢复安装前 Codex 主配置，历史 Thread 将不可恢复。`
-      : `确认删除最后一个 OpenCode Go 账户 ${accountId}？将删除 OpenCode Go 全部配置与共享模型目录，历史 Thread 将不可恢复。`
-    : `确认删除 OpenCode Go 账户 ${accountId}？历史 Thread 将不可恢复。`;
+  const confirmationMessage = `确认移除 OpenCode Go 账户 ${accountId} 的本地配置？将停止对应实例，该账户历史会话将不可用；保留共享模型目录、备份和历史统计。${preview.effects?.restoresInitialConfig === true ? "将恢复该账户接管的主配置字段，保留其他设置。" : ""}`;
   if (confirm && !await confirmPrompt(prompts, confirmationMessage, false)) {
     output.write("已取消，未修改任何文件。\n");
     return { action: "cancelled" };
@@ -261,13 +193,14 @@ export async function removeOpencodeGoAccount(accountId, {
   const result = await applyOpencodeGoAccountRemoval({
     accountId: preview.account.id,
     confirmHistoryLoss: true,
+    expectedRevision: preview.revision,
   }, {
     environment,
   });
   const cleanupSummary = removesLastAccount
     ? result.effects?.restoresInitialConfig === true
-      ? "，主配置已恢复为安装前状态"
-      : "，OpenCode Go 配置与共享模型目录已清理"
+      ? "，该账户接管的主配置字段已恢复，其他设置已保留"
+      : "，账户配置已清理，共享模型目录已保留"
     : "";
   output.write(
     `OpenCode Go 账户已删除：${accountId}${cleanupSummary}（备份保留在 ${result.backupDirectory}）。\n`,
@@ -288,7 +221,7 @@ export async function setOpencodeGoDefaultAccount(accountId, {
     accountId,
     { environment },
   );
-  return { action: result.action, accountId };
+  return { action: result.action, accountId, activation: result.activation };
 }
 
 export async function stopOpencodeGoAccount(accountId, {
@@ -316,13 +249,13 @@ export async function stopOpencodeGoAccount(accountId, {
 }
 
 export async function runOpencodeGoAccountCli(args, options = {}) {
-  const usage = "用法：codexc provider opencode-go <add|list|remove|default|release> [id]";
-  if (isCommandHelp(args, [[], ["account"], ["account", "add"], ["account", "list"], ["account", "remove"], ["account", "default"], ["account", "stop"]], usage)) {
+  const usage = "用法：codexc provider opencode-go <add|list|reconfigure|remove|default|release> [id]";
+  if (isCommandHelp(args, [[], ["account"], ["account", "add"], ["account", "list"], ["account", "reconfigure"], ["account", "remove"], ["account", "default"], ["account", "stop"]], usage)) {
     (options.output ?? process.stdout).write(`${usage}\n`);
     return;
   }
   const [command, action, id, ...extra] = args;
-  if (command !== "account" || !["add", "list", "remove", "default", "stop"].includes(action)) {
+  if (command !== "account" || !["add", "list", "reconfigure", "remove", "default", "stop"].includes(action)) {
     throw new Error(
       usage,
     );
@@ -338,23 +271,18 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
     );
     return;
   }
-  if (id === undefined || extra.length > 0 || (action === "add" && !options.prompter && !process.stdin.isTTY)) {
+  if (id === undefined || extra.length > 0 || (["add", "reconfigure"].includes(action) && !options.prompts && !process.stdin.isTTY)) {
     throw new Error(
       `用法：codexc provider opencode-go ${action === "stop" ? "release" : action} <id>`,
     );
   }
-  if (action === "add") {
+  if (action === "add" || action === "reconfigure") {
     const result = await addOpencodeGoAccount(id, {
       ...options,
       environment: options.environment ?? process.env,
       output: options.output ?? process.stdout,
-      prompter: options.prompter ?? createPrompter(options.prompts ?? clackPrompts, {
-        allowBack: false,
-        hasModelSettings: false,
-        hasAccounts: true,
-      }),
+      reconfigure: action === "reconfigure",
     });
-    writeCliMessage("success", `OpenCode Go 账户 ${id} 已添加。`);
     return result;
   }
   if (action === "remove") {
@@ -369,11 +297,11 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
       environment: options.environment ?? process.env,
     });
     const output = options.output ?? process.stdout;
-    output.write(`默认 OpenCode Go 账户已设置为 ${id}。\n`);
+    output.write(result.action === "unchanged" ? `默认 OpenCode Go 账户仍为 ${id}，无需修改。\n` : `默认 OpenCode Go 账户已设置为 ${id}。\n`);
     writeGatewayConfigActivationNotice(
       output,
       options.environment ?? process.env,
-      configActivationResult("restart-all"),
+      configActivationResult(result.activation),
     );
     return result;
   }
@@ -381,106 +309,6 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
     environment: options.environment ?? process.env,
     output: options.output ?? process.stdout,
   });
-}
-
-function printAccounts(environment, output) {
-  printOpencodeGoAccounts(environment, output);
-}
-
-function createPrompter(prompts, { accounts = [], allowBack, hasModelSettings, hasAccounts }) {
-  return {
-    select: async () => {
-      const options = [];
-      if (hasAccounts) {
-        options.push(
-          { value: "account-add", label: "添加账户" },
-          { value: "list", label: "列出账户" },
-          { value: "account-default", label: "设置默认账户" },
-          { value: "account-stop", label: "释放账户 App Server 实例（可自动重新拉起）" },
-          { value: "account-remove", label: "删除账户" },
-        );
-      }
-      options.push(
-        { value: "switching", label: hasAccounts
-          ? "切换模式（配置默认账户为切换模式）"
-          : "OpenAI + OpenCode Go 切换模式（先输入账户 ID）" },
-        { value: "exclusive", label: hasAccounts
-          ? "固定模式（配置默认账户为固定模式）"
-          : "仅 OpenCode Go 固定模式（先输入账户 ID）" },
-      );
-      if (hasModelSettings) {
-        options.push({ value: "model-settings", label: "修改模型设置（思考等级）" });
-        options.push({ value: "catalog", label: "管理共享模型（添加／启用／更新）" });
-      }
-      if (allowBack) options.push({ value: "back", label: "返回上一级" });
-      const value = await prompts.select({ message: "OpenCode Go Provider", options });
-      if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
-      return value;
-    },
-    accountId: async () => {
-      const value = await promptManagedAccountId(prompts, accounts, opencodeGoReservedAccountIds);
-      if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
-      return value;
-    },
-    contact: async () => {
-      const value = await prompts.text({
-        message: "OpenCode Go 账户邮箱或手机号码（仅用于本机展示，二选一）",
-        validate: (candidate) => {
-          try {
-            validateOpencodeGoContact(candidate);
-            return undefined;
-          } catch (error) {
-            return error instanceof Error ? error.message : "邮箱无效";
-          }
-        },
-      });
-      if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
-      return value.trim();
-    },
-    selectAccount: async (accounts) => {
-      const value = await prompts.select({
-        message: "选择 OpenCode Go 账户",
-        options: accounts.map((account) => ({
-          value: account.id,
-          label: `${opencodeGoAccountDisplayName(account)}${account.default ? "（默认）" : ""}`,
-        })),
-      });
-      if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
-      return value;
-    },
-    secret: async (message) => {
-      const value = await prompts.password({ message });
-      if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
-      return value;
-    },
-    confirm: async (message, initialValue) => {
-      const value = await prompts.confirm({ message, initialValue });
-      if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
-      return value;
-    },
-  };
-}
-
-async function secretPrompt(prompts) {
-  const value = await prompts.password({ message: "OpenCode Go API Key（以 sk- 开头）" });
-  if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
-  return value;
-}
-
-async function contactPrompt(prompts) {
-  const value = await prompts.text({
-    message: "OpenCode Go 账户邮箱或手机号码（仅用于本机展示，二选一）",
-    validate: (candidate) => {
-      try {
-        validateOpencodeGoContact(candidate);
-        return undefined;
-      } catch (error) {
-        return error instanceof Error ? error.message : "邮箱或手机号码无效";
-      }
-    },
-  });
-  if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
-  return value.trim();
 }
 
 async function confirmPrompt(prompts, message, initialValue) {

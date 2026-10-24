@@ -1,4 +1,4 @@
-import { fetch as undiciFetch, ProxyAgent } from "undici";
+import { ProxyAgent } from "undici";
 
 import { selectHttpProxyUrl } from "./network-proxy.mjs";
 
@@ -10,21 +10,27 @@ export function createProxyFetch(proxy, dependencies = {}) {
     ?? ((proxyUrl) => new ProxyAgent(proxyUrl));
   const dispatchers = new Map();
   return async (input, init) => {
+    const redirect = init?.redirect
+      ?? (typeof input === "string" || input instanceof URL ? "error" : input.redirect);
+    if (redirect !== "error" && redirect !== "manual") {
+      throw new TypeError("Proxy Fetch supports only error or manual redirects");
+    }
+    const requestInit = { ...init, redirect };
     const proxyUrl = selectHttpProxyUrl(proxy, requestUrl(input));
     if (!proxyUrl) {
-      return await directFetch(input, init);
+      return await directFetch(input, requestInit);
     }
     let dispatcher = dispatchers.get(proxyUrl);
     if (!dispatcher) {
       dispatcher = createDispatcher(proxyUrl);
       dispatchers.set(proxyUrl, dispatcher);
     }
-    return await fetchWithDispatcher(input, { ...init, dispatcher });
+    return await fetchWithDispatcher(input, { ...requestInit, dispatcher });
   };
 }
 
 async function defaultFetchWithDispatcher(input, init) {
-  return await undiciFetch(input, init);
+  return await fetch(input, init);
 }
 
 function requestUrl(input) {

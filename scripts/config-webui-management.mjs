@@ -1,13 +1,15 @@
 import { invalidSetting } from "./config-management-error.mjs";
+import { randomBytes } from "node:crypto";
+import { validateWebuiConfigDocument } from "../runtime/gateway-config.mjs";
 
 const hosts = ["127.0.0.1", "::1", "0.0.0.0"];
 
 export function projectWebuiSettings(document) {
-  const webui = table(document.webui);
+  const webui = validateWebuiConfigDocument(document);
   return {
-    enabled: typeof webui.enabled === "boolean" ? webui.enabled : undefined,
-    host: hosts.includes(webui.host) ? webui.host : "127.0.0.1",
-    port: integerInRange(webui.port, 1, 65_535) ?? 8_787,
+    ...(webui.enabled === undefined ? {} : { enabled: webui.enabled }),
+    host: webui.host,
+    port: webui.port,
     tokenConfigured: nonEmptyString(webui.token),
   };
 }
@@ -15,6 +17,7 @@ export function projectWebuiSettings(document) {
 export function applyWebuiSetting(document, input) {
   const webui = { ...table(document.webui) };
   let activation = "restart-webui";
+  let generatedWebuiToken;
   switch (input.kind) {
     case "webui.enabled": {
       if (typeof input.value !== "boolean") {
@@ -28,7 +31,12 @@ export function applyWebuiSetting(document, input) {
     case "webui.host": {
       const value = nullableChoice(input.value, hosts, "value", "WebUI 监听地址");
       if (value === "0.0.0.0" && !nonEmptyString(webui.token)) {
-        webui.token = requiredSecret(input.token, "token", "WebUI 访问令牌");
+        if (input.token === undefined) {
+          generatedWebuiToken = randomBytes(32).toString("hex");
+          webui.token = generatedWebuiToken;
+        } else {
+          webui.token = requiredSecret(input.token, "token", "WebUI 访问令牌");
+        }
       }
       if (value === null) delete webui.host;
       else webui.host = value;
@@ -41,12 +49,15 @@ export function applyWebuiSetting(document, input) {
       break;
     }
     case "webui.token": {
-      const action = choice(input.action, ["set", "clear"], "action", "WebUI 令牌操作");
+      const action = choice(input.action, ["set", "clear", "generate"], "action", "WebUI 令牌操作");
       if (action === "clear") {
         if (webui.host === "0.0.0.0") {
           throw invalidSetting("action", "public-token-required", "WebUI 绑定 0.0.0.0 时必须保留访问令牌");
         }
         delete webui.token;
+      } else if (action === "generate") {
+        generatedWebuiToken = randomBytes(32).toString("hex");
+        webui.token = generatedWebuiToken;
       } else {
         webui.token = requiredSecret(input.value, "value", "WebUI 访问令牌");
       }
@@ -57,8 +68,12 @@ export function applyWebuiSetting(document, input) {
   }
   document.webui = webui;
   return {
-    value: projectWebuiSettings(document),
+    value: {
+      ...projectWebuiSettings(document),
+      ...(input.kind === "webui.token" && input.action === "generate" ? { action: "generate" } : {}),
+    },
     activation,
+    ...(generatedWebuiToken === undefined ? {} : { generatedWebuiToken }),
   };
 }
 
@@ -89,10 +104,6 @@ function nullableInteger(value, minimum, maximum, field, label) {
     throw invalidSetting(field, "invalid-integer", `${label}必须为 ${minimum}–${maximum} 之间的整数`);
   }
   return value;
-}
-
-function integerInRange(value, minimum, maximum) {
-  return Number.isInteger(value) && value >= minimum && value <= maximum ? value : undefined;
 }
 
 function nonEmptyString(value) {

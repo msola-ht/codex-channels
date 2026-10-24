@@ -22,8 +22,8 @@ export function createDeepseekAccountAdapter(
   }
   return {
     provider,
-    async accountUsage(signal) {
-      const query = new AccountQuery("DeepSeek", signal);
+    async accountUsage(signal, beforeSubmit) {
+      const query = new AccountQuery("DeepSeek", signal, beforeSubmit);
       return query.run(async () => {
         const apiKey = loadDeepseekAccountCredential(environment, provider);
         const { body } = await query.json(fetchImpl, deepseekBalanceUrl, apiKey, "balance");

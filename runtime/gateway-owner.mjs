@@ -1,9 +1,7 @@
 import { dirname, join } from "node:path";
 
 import {
-  createPrivateIpcConnection,
-  privateIpcAcceptsConnections,
-  privateIpcEndpointExists,
+  createPrivateIpcConnectionAsync,
   PrivateIpcServer,
 } from "./private-ipc.mjs";
 
@@ -77,51 +75,65 @@ export function gatewayOwnerSocketPath(configPath) {
   return join(dirname(configPath), "runtime", "gateway-owner.sock");
 }
 
-export function gatewayOwnerIsActive(configPath) {
+export function gatewayOwnerIsActive(configPath, signal) {
   const socketPath = gatewayOwnerSocketPath(configPath);
-  if (!privateIpcEndpointExists(socketPath)) return Promise.resolve(false);
-  return privateIpcAcceptsConnections(socketPath);
+  return readGatewayOwnerStatus(socketPath, signal, true).then(Boolean);
 }
 
-export async function gatewayOwnerIsReady(configPath) {
+export async function gatewayOwnerIsReady(configPath, signal) {
   const socketPath = gatewayOwnerSocketPath(configPath);
-  if (!privateIpcEndpointExists(socketPath)) return false;
-  const owner = await readGatewayOwnerStatus(socketPath);
+  const owner = await readGatewayOwnerStatus(socketPath, signal);
   return owner?.version === 1
     && Number.isSafeInteger(owner.pid)
     && owner.pid > 0
     && owner.ready === true;
 }
 
-function readGatewayOwnerStatus(socketPath) {
-  return new Promise((resolveStatus) => {
-    const socket = createPrivateIpcConnection(socketPath);
+function readGatewayOwnerStatus(socketPath, signal, activeOnly = false) {
+  signal?.throwIfAborted();
+  return new Promise((resolveStatus, rejectStatus) => {
+    let socket;
+    const cancellation = new AbortController();
     const chunks = [];
     let bytes = 0;
     let settled = false;
-    const finish = (value) => {
+    const unconfirmed = () => new Error("Gateway 活动状态未确认，请确认服务状态后重试");
+    const finish = (value, error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      socket.destroy();
-      resolveStatus(value);
+      signal?.removeEventListener("abort", abort);
+      cancellation.abort();
+      socket?.destroy();
+      if (error !== undefined) rejectStatus(error);
+      else resolveStatus(value);
     };
-    const timer = setTimeout(() => finish(undefined), connectionTimeoutMs);
-    socket.on("data", (chunk) => {
-      bytes += chunk.length;
-      if (bytes > maximumStatusBytes) {
-        finish(undefined);
-        return;
-      }
-      chunks.push(chunk);
-    });
-    socket.once("end", () => {
-      try {
-        finish(JSON.parse(Buffer.concat(chunks).toString("utf8").trim()));
-      } catch {
-        finish(undefined);
-      }
-    });
-    socket.once("error", () => finish(undefined));
+    const timer = setTimeout(() => finish(undefined, activeOnly ? unconfirmed() : undefined), connectionTimeoutMs);
+    const abort = () => finish(undefined, signal.reason);
+    signal?.addEventListener("abort", abort, { once: true });
+    void createPrivateIpcConnectionAsync(socketPath, { signal: cancellation.signal }).then(connection => {
+      socket = connection;
+      socket.on("error", error => finish(undefined,
+        activeOnly && !["ENOENT", "ECONNREFUSED"].includes(error?.code) ? unconfirmed() : undefined));
+      if (settled) { socket.destroy(); return; }
+      if (activeOnly) socket.once("connect", () => finish(true));
+      socket.on("data", (chunk) => {
+        bytes += chunk.length;
+        if (bytes > maximumStatusBytes) {
+          finish(undefined);
+          return;
+        }
+        chunks.push(chunk);
+      });
+      socket.once("end", () => {
+        try {
+          finish(JSON.parse(Buffer.concat(chunks).toString("utf8").trim()));
+        } catch {
+          finish(undefined);
+        }
+      });
+      socket.once("close", () => finish(undefined, activeOnly ? unconfirmed() : undefined));
+    }).catch(error => finish(undefined, error?.code === "ENOENT" ? undefined : activeOnly ? unconfirmed() : error));
+    if (signal?.aborted) abort();
   });
 }

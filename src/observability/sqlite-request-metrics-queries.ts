@@ -68,6 +68,7 @@ const pageSortSql = {
   outputTokens: "output_tokens",
   reasoningOutputTokens: "reasoning_output_tokens",
   totalDurationMs: "total_duration_ms",
+  requestBytes: "request_bytes",
 } as const;
 
 /** 只读查询共用 Store 的连接和生命周期，不持有事务、写入口或独立连接。 */
@@ -357,8 +358,7 @@ export class SqliteRequestMetricsQueries {
       cacheUsage: toStoredCacheUsage(row),
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
-      cachedInputTokens: row.input_token_count === row.request_count
-        && row.cached_input_token_count === row.request_count
+      cachedInputTokens: row.cache_missing_request_count === 0
         ? row.cached_input_tokens ?? 0
         : null,
       outputTokens: row.output_tokens ?? 0,
@@ -491,6 +491,14 @@ export class SqliteRequestMetricsQueries {
 
   threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage {
     return this.threadQueries.threadList(query);
+  }
+
+  iterateThreadList(query: Omit<ModelRequestMetricsThreadQuery, "limit" | "offset">) {
+    return this.threadQueries.iterateThreadList(query);
+  }
+
+  iterateThreadTurnSummaries(threadId: string, query: Omit<ModelRequestMetricsThreadQuery, "limit" | "offset">) {
+    return this.threadQueries.iterateThreadTurnSummaries(threadId, query);
   }
 
   threadSubagents(threadId: string, query: SubagentThreadsQuery): StoredThreadSubagentsPage {

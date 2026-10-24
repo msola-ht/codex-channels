@@ -1,6 +1,7 @@
 import { modelRequestDiagnostics, chatDiagnosticsHeader, type ChatDiagnosticsChannel } from "./chat-diagnostics.js";
 import { autoReviewMetadata } from "../../runtime/auto-review-metadata.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
+import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
 import { ModelConversionError, normalizeResponsesRequest, type SamplingParameters } from "../model-api/index.js";
 import {
   createServer,
@@ -8,11 +9,12 @@ import {
   type Agent,
   type IncomingHttpHeaders,
   type IncomingMessage,
+  type ClientRequest,
   type Server,
   type ServerResponse,
 } from "node:http";
 import { request as httpsRequest } from "node:https";
-import type { Duplex } from "node:stream";
+import { Writable, type Duplex } from "node:stream";
 import { once } from "node:events";
 import { StringDecoder } from "node:string_decoder";
 
@@ -23,6 +25,7 @@ import WebSocket, {
 
 import {
   endToEndHeaders,
+  chatBridgeAuthorizationHeader,
   forwardedRequestHeaders,
   forwardedWebSocketHeaders,
   isSupportedHttpRoute,
@@ -35,7 +38,6 @@ import {
 } from "./request-routing.js";
 import {
   asRecord,
-  boundedMessage,
   boundedString,
   createMetricsState,
   effectiveUpstreamUserAgent,
@@ -45,9 +47,12 @@ import {
   markMetricsFailed,
   observeResponseEvent,
   observeRequestSubmitted,
+  observeRequestActivity,
+  incompleteRequestActivity,
   observeChatTiming,
   invalidateGenerationTiming,
   parseJsonPayload,
+  requestServiceTier,
   websocketCloseErrorType,
   weeklyQuotaFromEvent,
   weeklyQuotaFromHeaders,
@@ -58,9 +63,21 @@ import {
 import { ModelTrafficDump } from "./traffic-dump.js";
 import type { TrafficCallTiming } from "./traffic-call-timing.js";
 import { createJsonStringFieldScanner, scanJsonStringField } from "./traffic-dump-content.js";
-import { ChatBodyTooLargeError, readModelBody, waitForChatOperation } from "./chat-io.js";
+import {
+  ChatBodyTooLargeError,
+  drainRejectedRequest,
+  readModelBody,
+  waitForChatOperation,
+} from "./chat-io.js";
 import { finishProxyResponse, sendProxyWebSocket, waitForProxyOperation, writeResponseChunk } from "./proxy-delivery.js";
 import { ModelRequestTimeoutError, type ModelRequestStage } from "./chat-errors.js";
+import {
+  maximumBufferedModelRequests,
+  maximumModelRequestBytes,
+  maximumModelWebSocketQueueBytes,
+  maximumProviderImageUploadBytes,
+} from "./model-request-limits.js";
+import { deepseekImageMediaType, type DeepseekImageMediaType } from "./deepseek-file-upload.js";
 
 export type {
   ProviderProxyMetrics,
@@ -79,6 +96,18 @@ export interface ProviderProxyUpstream {
   basePath?: string;
 }
 
+export interface ProviderImageUpload {
+  kind: "deepseek";
+  authorize(authorization: string | undefined): boolean;
+  describe(signal: AbortSignal): Promise<{ revision: string }>;
+  upload(input: {
+    bytes: Buffer;
+    mediaType: DeepseekImageMediaType;
+    revision: string;
+    signal: AbortSignal;
+  }): Promise<string>;
+}
+
 export interface ProviderProxyOptions {
   upstreamAgent?: Agent;
   upstreamHost: string;
@@ -95,6 +124,10 @@ export interface ProviderProxyOptions {
   upstreamUserAgent?: string;
   /** Only enable for the local Chat conversion bridge. Never forwarded to App Server. */
   chatDiagnostics?: ChatDiagnosticsChannel;
+  /** Private local-hop identity; never replaces upstream Authorization. */
+  localChatBridgeToken?: string;
+  /** Server-owned upload path for a Provider that accepts file references. */
+  imageUpload?: ProviderImageUpload;
   /**
    * 模型请求与响应的完整报文转储；缺省时不记录。
    * 仅在 `[debug].model_traffic_dump` 开启时由组合层传入。
@@ -112,7 +145,7 @@ export interface ProviderProxyOptions {
   resolveUpstream?: (headers: IncomingHttpHeaders, signal: AbortSignal) => ProviderProxyUpstream | Promise<ProviderProxyUpstream>;
   /** Re-read this provider's enabled model catalogue before sending Responses requests. */
   isModelEnabled?: (model: string, signal: AbortSignal) => Promise<boolean>;
-  /** Read enablement and gateway sampling defaults from one validated catalogue snapshot. */
+  /** Read enablement and sampling from one validated catalogue snapshot. */
   readModelCapabilities?: (model: string, signal: AbortSignal) => Promise<{ sampling?: SamplingParameters } | undefined>;
   /**
    * 第三方 Responses 上游不认识 Codex 私有输入项时改写发往上游的正文：
@@ -158,12 +191,16 @@ export class ProviderProxy {
   private readonly modelAuthorizations = new Set<AbortController>();
   private readonly pendingUpgrades = new Set<Duplex>();
   private readonly pendingRequests = new Set<AbortController>();
+  private readonly activeImageUploads = new Set<AbortController>();
+  private readonly imageUploadOperations = new Set<Promise<string>>();
   private readonly shutdownController = new AbortController();
   private readonly accountIds: readonly string[] | undefined;
   private readonly defaultAccountId: string | undefined;
   private readonly upstreamUserAgent: string | undefined;
   private readonly allowOpenAiApiPaths: boolean;
   private readonly chatDiagnostics: ChatDiagnosticsChannel | undefined;
+  private readonly localChatBridgeToken: string | undefined;
+  private readonly imageUpload: ProviderImageUpload | undefined;
   private readonly trafficDump: ModelTrafficDump | undefined;
   private readonly quotaWindowsProvider:
     | ((
@@ -191,8 +228,7 @@ export class ProviderProxy {
 
   constructor(private readonly listenAddress: string, options: ProviderProxyOptions) {
     this.websocketServer = new WebSocketServer({ noServer: true,
-      ...(options.isModelEnabled !== undefined || options.readModelCapabilities !== undefined || options.normalizeResponsesInput
-        ? { maxPayload: 16 * 1024 * 1024 } : {}),
+      maxPayload: maximumModelRequestBytes,
     });
     this.upstreamAgent = options.upstreamAgent;
     this.defaultUpstream = {
@@ -211,6 +247,8 @@ export class ProviderProxy {
     this.defaultAccountId = options.defaultAccountId;
     this.upstreamUserAgent = options.upstreamUserAgent;
     this.chatDiagnostics = options.chatDiagnostics;
+    this.localChatBridgeToken = options.localChatBridgeToken;
+    this.imageUpload = options.imageUpload;
     this.allowOpenAiApiPaths = options.allowOpenAiApiPaths ?? false;
     this.onError = options.onError;
     this.trafficDump = options.trafficDump === undefined
@@ -293,6 +331,7 @@ export class ProviderProxy {
   private async finishClose(): Promise<void> {
     this.shutdownController.abort(new Error("模型代理已关闭"));
     for (const controller of this.pendingRequests) controller.abort();
+    for (const controller of this.activeImageUploads) controller.abort();
     for (const controller of this.modelAuthorizations) controller.abort();
     for (const socket of this.pendingUpgrades) socket.destroy();
     const quotaRefreshes = [...this.quotaRefreshByAccount.values()];
@@ -308,6 +347,7 @@ export class ProviderProxy {
         this.listenerClosed = true;
       }),
       settleWithin(quotaRefreshes.map((refresh) => refresh.promise), quotaRefreshCloseTimeoutMs),
+      Promise.allSettled([...this.imageUploadOperations]),
       Promise.resolve().then(() => this.trafficDump?.close()),
     ]);
     const failures: unknown[] = [];
@@ -315,22 +355,140 @@ export class ProviderProxy {
     if (failures.length) throw new AggregateError(failures, "模型代理资源未完全关闭");
   }
 
+  private async handleImageUpload(
+    request: IncomingMessage,
+    response: ServerResponse,
+    requestSignal: AbortSignal,
+  ): Promise<void> {
+    const reject = (status: number, code: string, message: string): void => {
+      if (response.destroyed || response.headersSent) return;
+      request.resume();
+      response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", connection: "close" });
+      response.end(JSON.stringify({ error: { code, message } }));
+    };
+    const remote = request.socket.remoteAddress;
+    if (remote !== "127.0.0.1" && remote !== "::1" && remote !== "::ffff:127.0.0.1") {
+      reject(403, "image_upload_forbidden", "图片上传只接受本机回环请求");
+      return;
+    }
+    if (!this.imageUpload!.authorize(request.headers.authorization)) {
+      reject(403, "image_upload_forbidden", "图片上传调用身份无效");
+      return;
+    }
+    if (this.activeImageUploads.size >= maximumBufferedModelRequests) {
+      reject(503, "image_upload_capacity_exceeded", "图片上传容量已满");
+      return;
+    }
+    const revision = request.headers["x-codexc-image-upload-revision"];
+    if (typeof revision !== "string" || !/^[a-f0-9]{64}$/u.test(revision)) {
+      reject(400, "image_upload_invalid", "图片上传版本无效");
+      return;
+    }
+    const contentType = request.headers["content-type"];
+    const contentEncoding = request.headers["content-encoding"];
+    if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(contentType ?? "")
+      || (contentEncoding !== undefined && contentEncoding !== "identity")) {
+      reject(400, "image_upload_invalid", "图片上传格式无效");
+      return;
+    }
+    const declared = Number(request.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > maximumProviderImageUploadBytes) {
+      await drainRejectedRequest(request);
+      reject(413, "image_upload_too_large", "图片超过 10 MiB 限制");
+      return;
+    }
+    const controller = new AbortController();
+    const signal = AbortSignal.any([requestSignal, controller.signal]);
+    let timedOut = false;
+    const timer = setTimeout(
+      () => {
+        timedOut = true;
+        controller.abort(new ModelRequestTimeoutError("upload"));
+      },
+      modelRequestPolicy.preparationTimeoutMs,
+    );
+    this.activeImageUploads.add(controller);
+    try {
+      const current = await waitForChatOperation(this.imageUpload!.describe(signal), signal);
+      if (current.revision !== revision) {
+        reject(409, "image_upload_stale", "模型配置已变化，请重新发送图片");
+        return;
+      }
+      let bytes: Buffer;
+      try {
+        bytes = await readModelBody(request, signal, maximumProviderImageUploadBytes);
+      } catch (error) {
+        if (error instanceof ChatBodyTooLargeError) {
+          await drainRejectedRequest(request);
+          reject(413, "image_upload_too_large", "图片超过 10 MiB 限制");
+          return;
+        }
+        throw error;
+      }
+      const mediaType = deepseekImageMediaType(bytes);
+      if (mediaType === undefined || mediaType !== contentType) {
+        reject(400, "image_upload_invalid", "图片内容与声明格式不一致");
+        return;
+      }
+      const checked = await waitForChatOperation(this.imageUpload!.describe(signal), signal);
+      if (checked.revision !== revision) {
+        reject(409, "image_upload_stale", "模型配置已变化，请重新发送图片");
+        return;
+      }
+      const operation = this.imageUpload!.upload({ bytes, mediaType, revision, signal });
+      this.imageUploadOperations.add(operation);
+      void operation.finally(() => this.imageUploadOperations.delete(operation)).catch(() => undefined);
+      const fileId = await waitForChatOperation(operation, signal);
+      signal.throwIfAborted();
+      if (!/^file-api-[A-Za-z0-9_-]{1,128}$/u.test(fileId)) throw new Error("Invalid image file ID");
+      response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify({ fileId }));
+    } catch {
+      if (timedOut) reject(504, "image_upload_timeout", "图片上传超时，请稍后重试");
+      else if (!signal.aborted) reject(502, "image_upload_failed", "图片上传失败，请稍后重试");
+    } finally {
+      clearTimeout(timer);
+      this.activeImageUploads.delete(controller);
+      controller.abort();
+    }
+  }
+
   private async handleHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const signal = this.requestSignal(response);
-    if (request.method === "GET" && request.url === "/_codexc/image-upload-route" && this.allowOpenAiApiPaths) {
+    if (request.method === "GET" && request.url === "/_codexc/image-upload-route") {
       request.resume();
+      if (this.imageUpload && !this.imageUpload.authorize(request.headers.authorization)) {
+        response.writeHead(403, { "content-type": "application/json", "cache-control": "no-store" });
+        response.end(JSON.stringify({ error: { code: "image_upload_forbidden", message: "图片上传调用身份无效" } }));
+        return;
+      }
       try {
-        // Query the same live resolver as model traffic. No upstream request or
-        // credentials are needed: this header selects the ChatGPT route.
-        const upstream = await this.upstreamFor({ "chatgpt-account-id": "route-inspection" }, signal);
-        const supported = upstream.protocol === "https" && upstream.host === "chatgpt.com"
-          && (upstream.port === undefined || upstream.port === 443)
-          && upstream.basePath === "/backend-api/codex";
+        let result: Record<string, unknown>;
+        if (this.allowOpenAiApiPaths) {
+          // Query the same live resolver as model traffic. No upstream request or
+          // credentials are needed: this header selects the ChatGPT route.
+          const upstream = await this.upstreamFor({ "chatgpt-account-id": "route-inspection" }, signal);
+          const supported = upstream.protocol === "https" && upstream.host === "chatgpt.com"
+            && (upstream.port === undefined || upstream.port === 443)
+            && upstream.basePath === "/backend-api/codex";
+          result = supported
+            ? { supported: true, kind: "openai", backendOrigin: "https://chatgpt.com" }
+            : { supported: false };
+        } else if (this.imageUpload !== undefined) {
+          const { revision } = await waitForChatOperation(this.imageUpload.describe(signal), signal);
+          result = { supported: true, kind: this.imageUpload.kind, revision };
+        } else {
+          result = { supported: false };
+        }
         response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-        response.end(JSON.stringify({ supported, backendOrigin: supported ? "https://chatgpt.com" : null }));
+        response.end(JSON.stringify(result));
       } catch {
         if (!response.destroyed) response.writeHead(503).end();
       }
+      return;
+    }
+    if (request.method === "POST" && request.url === "/_codexc/image-upload" && this.imageUpload !== undefined) {
+      await this.handleImageUpload(request, response, signal);
       return;
     }
     const startedAtMonotonicMs = performance.now();
@@ -349,6 +507,22 @@ export class ProviderProxy {
       rejectUnsupportedPath(response);
       return;
     }
+    const contentEncoding = request.headers["content-encoding"];
+    if (contentEncoding !== undefined && contentEncoding !== "identity") {
+      request.resume();
+      response.writeHead(400, { "content-type": "application/json", "connection": "close" });
+      response.end(JSON.stringify({ error: {
+        type: "provider_model_request_invalid",
+        code: "provider_model_request_invalid",
+        message: "模型请求不支持压缩正文。",
+      } }));
+      return;
+    }
+    const pathname = new URL(route.path, "http://127.0.0.1").pathname;
+    const imageOperation = route.kind === "openai-http"
+      ? pathname === "/images/generations" ? "imageGeneration"
+        : pathname === "/images/edits" ? "imageEdit" : undefined
+      : undefined;
     let upstreamTarget: ProviderProxyUpstream;
     const onPendingError = () => response.destroy();
     request.on("error", onPendingError);
@@ -361,7 +535,7 @@ export class ProviderProxy {
       request.resume();
       const metadata = parseTurnMetadata(request.headers["x-codex-turn-metadata"]);
       const metrics = createMetricsState(metadata, startedAtMs, "http",
-        metadata.operation,
+        imageOperation ?? metadata.operation,
         effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent));
       metrics.httpStatus = error instanceof ModelRequestTimeoutError ? error.status : 502;
       markMetricsFailed(metrics, error instanceof ModelRequestTimeoutError ? error.code : "provider_proxy_route_error", Date.now(), error, failedAtMonotonicMs);
@@ -373,7 +547,7 @@ export class ProviderProxy {
       exchange?.responseHead(metrics.httpStatus, {});
       exchange?.observeRequestMetrics(metrics);
       exchange?.failure("upstream_route", undefined, failedAtMonotonicMs);
-      if (route.kind === "response") {
+      if (route.kind === "response" || imageOperation !== undefined) {
         await this.deliverMetrics(metrics, route.accountId, signal);
       }
       if (signal.aborted || response.destroyed) return;
@@ -408,7 +582,7 @@ export class ProviderProxy {
       turnMetadata,
       startedAtMs,
       "http",
-      turnMetadata.operation,
+      imageOperation ?? turnMetadata.operation,
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
     );
     const exchange = this.trafficDump?.beginHttpExchange({
@@ -424,10 +598,17 @@ export class ProviderProxy {
     const requestTierScanner = createJsonStringFieldScanner("service_tier");
     const requestEffortScanner = createJsonStringFieldScanner("effort", "reasoning");
     const requestModelDecoder = new StringDecoder("utf8");
+    const activityChunks: Buffer[] = [];
+    let activityBytes = 0;
+    let activityOverflow = false;
+    if (bufferedRequest) observeRequestActivity(metrics, bufferedRequest.parsed);
     const recordsResponseMetrics = route.kind === "response";
+    const recordsMetrics = recordsResponseMetrics || imageOperation !== undefined;
+    const scansRequestMetadata = imageOperation === undefined
+      || String(request.headers["content-type"] ?? "").split(";", 1)[0]?.trim().toLowerCase() === "application/json";
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
-      if (!recordsResponseMetrics) return Promise.resolve();
+      if (!recordsMetrics) return Promise.resolve();
       metricsDelivery ??= this.deliverMetrics(metrics, route.accountId, signal);
       return metricsDelivery;
     };
@@ -435,7 +616,11 @@ export class ProviderProxy {
       ? httpRequest
       : httpsRequest;
     const diagnosticObserver = this.chatDiagnostics?.subscribe(snapshot => {
-      if (snapshot.timing) observeChatTiming(metrics, snapshot.timing);
+      if (snapshot.upstreamUrl !== undefined) metrics.upstreamUrl = snapshot.upstreamUrl;
+      if (snapshot.timing) {
+        observeChatTiming(metrics, snapshot.timing);
+        exchange?.callTiming?.submitted(snapshot.timing.submittedAt);
+      }
       Object.assign(metrics, modelRequestDiagnostics(snapshot));
       exchange?.write({ kind: "chat_diagnostics", fields: snapshot.fields, truncated: snapshot.truncated });
     });
@@ -443,8 +628,10 @@ export class ProviderProxy {
     const upstreamHeaders = forwardedRequestHeaders(request.headers, upstreamTarget.host, upstreamTarget.port, this.upstreamUserAgent);
     delete upstreamHeaders[chatDiagnosticsHeader];
     if (diagnosticObserver) upstreamHeaders[chatDiagnosticsHeader] = diagnosticObserver.id;
+    if (this.localChatBridgeToken !== undefined) upstreamHeaders[chatBridgeAuthorizationHeader] = this.localChatBridgeToken;
     // 归一化会改变正文长度；按实际提交字节重写，避免沿用客户端长度造成上游等待或截断。
     if (upstreamBody !== undefined) upstreamHeaders["content-length"] = String(upstreamBody.length);
+    let streamingWriter: Writable | undefined;
     let closingRejectedUpload = false;
     let headersTimer: NodeJS.Timeout | undefined;
     let bodyTimer: NodeJS.Timeout | undefined;
@@ -471,7 +658,7 @@ export class ProviderProxy {
     };
     const upstream = upstreamRequest({
       agent: upstreamTarget.agent ?? this.upstreamAgent,
-      hostname: upstreamTarget.host,
+      hostname: upstreamTarget.host.replace(/^\[(.*)\]$/u, "$1"),
       ...(upstreamTarget.port === undefined ? {} : { port: upstreamTarget.port }),
       path: upstreamPath(upstreamTarget.basePath, route.path),
       method: request.method,
@@ -500,9 +687,13 @@ export class ProviderProxy {
         upstreamResponse.statusCode ?? null,
         upstreamResponse.headers,
       );
-      if (!request.complete && (upstreamResponse.statusCode ?? 0) >= 400) {
+      if ((upstreamResponse.statusCode ?? 0) >= 400
+        && (!request.complete || (streamingWriter !== undefined && !streamingWriter.writableFinished))) {
         // 上游提前拒绝上传：保留错误响应，响应发送完成后关闭本跳连接。
-        request.unpipe(upstream);
+        if (streamingWriter) {
+          request.unpipe(streamingWriter);
+          streamingWriter.destroy();
+        }
         request.pause();
         clearTimeout(uploadTimer);
         response.setHeader("connection", "close");
@@ -538,7 +729,7 @@ export class ProviderProxy {
         exchange?.responseEnd(endedAtMonotonicMs);
         const ending = forwarding.then(async () => {
           signal.throwIfAborted();
-          if (completed || recordsResponseMetrics) await emitMetrics();
+          if (completed || recordsMetrics) await emitMetrics();
           await finishProxyResponse(response, signal, modelRequestPolicy.terminalDeliveryTimeoutMs);
         });
         forwarding = waitForProxyOperation(ending, signal, modelRequestPolicy.terminalDeliveryTimeoutMs, "terminal").catch(failDelivery);
@@ -602,23 +793,47 @@ export class ProviderProxy {
       }
     });
     const observeRequestChunk = (chunk: Buffer): void => {
-      const text = requestModelDecoder.write(chunk);
-      scanJsonStringField(requestModelScanner, text);
-      scanJsonStringField(requestTierScanner, text);
-      scanJsonStringField(requestEffortScanner, text);
-      metrics.requestModel = boundedString(requestModelScanner.value);
-      metrics.requestServiceTier = boundedString(requestTierScanner.value);
-      metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+      if (recordsResponseMetrics && !bufferedRequest && !activityOverflow) {
+        activityBytes += chunk.length;
+        if (activityBytes <= 1_048_576) activityChunks.push(chunk);
+        else { activityOverflow = true; activityChunks.length = 0; incompleteRequestActivity(metrics); }
+      }
+      if (scansRequestMetadata) {
+        const text = requestModelDecoder.write(chunk);
+        scanJsonStringField(requestModelScanner, text);
+        metrics.requestModel = boundedString(requestModelScanner.value);
+        if (imageOperation !== undefined) metrics.model = metrics.requestModel;
+        else {
+          scanJsonStringField(requestTierScanner, text);
+          scanJsonStringField(requestEffortScanner, text);
+          metrics.requestServiceTier = boundedString(requestTierScanner.value);
+          metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+        }
+      }
       exchange?.requestChunk(chunk);
     };
     const observeRequestEnd = (): void => {
-      const text = requestModelDecoder.end();
-      scanJsonStringField(requestModelScanner, text);
-      scanJsonStringField(requestTierScanner, text);
-      scanJsonStringField(requestEffortScanner, text);
-      metrics.requestModel = boundedString(requestModelScanner.value);
-      metrics.requestServiceTier = boundedString(requestTierScanner.value);
-      metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+      let parsedRequest = bufferedRequest?.parsed;
+      if (recordsResponseMetrics && !bufferedRequest && !activityOverflow) {
+        parsedRequest = parseJsonPayload(Buffer.concat(activityChunks).toString("utf8"));
+        observeRequestActivity(metrics, parsedRequest);
+        activityChunks.length = 0;
+      }
+      if (scansRequestMetadata) {
+        const text = requestModelDecoder.end();
+        scanJsonStringField(requestModelScanner, text);
+        metrics.requestModel = boundedString(requestModelScanner.value);
+        if (imageOperation !== undefined) metrics.model = metrics.requestModel;
+        else {
+          scanJsonStringField(requestTierScanner, text);
+          scanJsonStringField(requestEffortScanner, text);
+          metrics.requestServiceTier = boundedString(requestTierScanner.value);
+          metrics.reasoningEffort = boundedString(requestEffortScanner.value);
+        }
+      }
+      if (recordsResponseMetrics && parsedRequest !== undefined) {
+        metrics.requestServiceTier = requestServiceTier(asRecord(parsedRequest));
+      }
       exchange?.requestEnd();
     };
     if (bufferedBody === undefined) {
@@ -628,19 +843,83 @@ export class ProviderProxy {
       observeRequestChunk(bufferedBody);
       observeRequestEnd();
     }
-    const submittedAt = performance.now();
-    observeRequestSubmitted(metrics, submittedAt);
-    exchange?.callTiming?.submitted(submittedAt);
-    if (!this.chatDiagnostics) {
-      headersTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("headers")), modelRequestPolicy.headersTimeoutMs);
-    }
     if (!request.complete) {
       uploadTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("upload")), modelRequestPolicy.preparationTimeoutMs);
       request.once("end", () => clearTimeout(uploadTimer));
     }
+    if (upstreamBody === undefined) {
+      const declared = Number(request.headers["content-length"]);
+      if (Number.isFinite(declared) && declared > maximumModelRequestBytes) {
+        clearDeadlines();
+        closingRejectedUpload = true;
+        request.resume();
+        await drainRejectedRequest(request);
+        upstream.destroy();
+        const failedAtMonotonicMs = performance.now();
+        markMetricsFailed(metrics, "provider_model_request_invalid", Date.now(), undefined, failedAtMonotonicMs);
+        exchange?.failure("client_request", undefined, failedAtMonotonicMs);
+        void emitMetrics();
+        deliveryFailed = true;
+        if (!response.destroyed && !response.headersSent) {
+          response.writeHead(413, { "content-type": "application/json", "connection": "close" });
+          response.end(JSON.stringify({ error: {
+            type: "provider_model_request_invalid",
+            code: "provider_model_request_invalid",
+            message: "模型请求正文超过 48 MiB。",
+          } }));
+        }
+        return;
+      }
+      const writer = createModelRequestBodyWriter(upstream, this.chatDiagnostics === undefined
+        ? bytes => { metrics.requestBytes = (metrics.requestBytes ?? 0) + bytes; }
+        : undefined);
+      streamingWriter = writer;
+      writer.once("error", (error) => {
+        if (closingRejectedUpload || deliveryFailed || signal.aborted) return;
+        if (!(error instanceof ChatBodyTooLargeError)) {
+          upstream.destroy(error);
+          return;
+        }
+        clearDeadlines();
+        closingRejectedUpload = true;
+        request.unpipe(writer);
+        upstream.destroy();
+        void drainRejectedRequest(request).then(() => {
+          const failedAtMonotonicMs = performance.now();
+          markMetricsFailed(metrics, "provider_model_request_invalid", Date.now(), error, failedAtMonotonicMs);
+          exchange?.failure("client_request", error, failedAtMonotonicMs);
+          void emitMetrics();
+          deliveryFailed = true;
+          if (!response.destroyed && !response.headersSent) {
+            response.writeHead(413, { "content-type": "application/json", "connection": "close" });
+            response.end(JSON.stringify({ error: {
+              type: "provider_model_request_invalid",
+              code: "provider_model_request_invalid",
+              message: "模型请求正文超过 48 MiB。",
+            } }));
+          } else {
+            response.destroy();
+          }
+          this.onError?.(asError(error));
+        });
+      });
+    }
+    const submittedAt = performance.now();
     upstream.flushHeaders();
-    if (upstreamBody === undefined) request.pipe(upstream);
-    else upstream.end(upstreamBody);
+    if (!this.chatDiagnostics) {
+      metrics.upstreamUrl = sanitizeModelRequestUrl(/^https?:\/\//u.test(upstream.path)
+        ? upstream.path : `${upstream.protocol}//${String(upstream.getHeader("host"))}${upstream.path}`);
+      observeRequestSubmitted(metrics, submittedAt);
+      exchange?.callTiming?.submitted(submittedAt);
+      headersTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("headers")), modelRequestPolicy.headersTimeoutMs);
+    }
+    if (upstreamBody === undefined) {
+      if (this.chatDiagnostics === undefined) metrics.requestBytes = 0;
+      request.pipe(streamingWriter!);
+    } else {
+      upstream.end(upstreamBody);
+      if (this.chatDiagnostics === undefined) metrics.requestBytes = upstreamBody.length;
+    }
   }
 
   /**
@@ -677,11 +956,17 @@ export class ProviderProxy {
       }
       return null;
     };
-    if (this.stopped || this.modelAuthorizations.size >= 16) {
+    if (this.stopped || this.modelAuthorizations.size >= maximumBufferedModelRequests) {
       return reject(503, "provider_catalog_unavailable", "模型请求暂不可用，请稍后重试。");
     }
     if (request.headers["content-encoding"] !== undefined && request.headers["content-encoding"] !== "identity") {
       return reject(400, "provider_model_request_invalid", "模型请求不支持压缩正文。");
+    }
+    const declared = Number(request.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > maximumModelRequestBytes) {
+      request.resume();
+      await drainRejectedRequest(request);
+      return reject(413, "provider_model_request_invalid", "模型请求正文超过 48 MiB。");
     }
     const isModelEnabled = this.isModelEnabled;
     const readModelCapabilities = this.readModelCapabilities;
@@ -692,7 +977,7 @@ export class ProviderProxy {
     let timer = setTimeout(() => controller.abort(new ModelRequestTimeoutError("upload")), modelRequestPolicy.preparationTimeoutMs);
     let checkingCatalog = false;
     try {
-      const body = await readModelBody(request, controller.signal, 16 * 1024 * 1024);
+      const body = await readModelBody(request, controller.signal, maximumModelRequestBytes);
       clearTimeout(timer);
       const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
       let sampling: SamplingParameters | undefined;
@@ -717,8 +1002,13 @@ export class ProviderProxy {
       const reason: unknown = controller.signal.reason;
       if (reason instanceof ModelRequestTimeoutError) return reject(reason.status, reason.code, reason.message, reason.stage);
       if (checkingCatalog) return reject(503, "provider_catalog_unavailable", "模型目录暂时无法安全读取，请检查目录后重试。");
-      return reject(error instanceof ChatBodyTooLargeError ? 413 : controller.signal.aborted ? 408 : 400,
-        "provider_model_request_invalid", "模型请求正文无效、超过 16 MiB 或上传超时。");
+      if (error instanceof ChatBodyTooLargeError) {
+        request.resume();
+        await drainRejectedRequest(request);
+        return reject(413, "provider_model_request_invalid", "模型请求正文超过 48 MiB。");
+      }
+      return reject(controller.signal.aborted ? 408 : 400,
+        "provider_model_request_invalid", "模型请求正文无效、超过 48 MiB 或上传超时。");
     } finally {
       clearTimeout(timer);
       response.off("close", disconnected);
@@ -861,17 +1151,21 @@ export class ProviderProxy {
       const bytes = rawDataBytes(data);
       queuedUpstreamBytes += bytes;
       queuedUpstreamFrames += 1;
-      if (queuedUpstreamBytes > 16 * 1024 * 1024 || queuedUpstreamFrames > 16) {
+      if (queuedUpstreamBytes > maximumModelWebSocketQueueBytes || queuedUpstreamFrames > 16) {
         failForwarding(new Error("模型 WebSocket 上游交付队列已满"), "upstream_delivery");
         return;
       }
       client.pause();
       const next = sending.then(async () => {
         deliverySignal.throwIfAborted();
-        const submittedAt = performance.now();
-        timing?.submitted(submittedAt);
-        if (metrics) observeRequestSubmitted(metrics, submittedAt);
-        await sendProxyWebSocket(upstream, data, isBinary, deliverySignal, modelRequestPolicy.deliveryTimeoutMs);
+        await sendProxyWebSocket(upstream, data, isBinary, deliverySignal, modelRequestPolicy.deliveryTimeoutMs,
+          undefined, "delivery", () => {
+            const submittedAt = performance.now();
+            timing?.submitted(submittedAt);
+            if (metrics) observeRequestSubmitted(metrics, submittedAt);
+            if (metrics) metrics.upstreamUrl = sanitizeModelRequestUrl(upstream.url);
+            if (metrics) metrics.requestBytes = (metrics.requestBytes ?? 0) + bytes;
+          });
       });
       sending = waitForProxyOperation(next, deliverySignal, modelRequestPolicy.deliveryTimeoutMs, "delivery")
         .catch(error => failForwarding(error, "upstream_delivery")).finally(() => {
@@ -889,7 +1183,7 @@ export class ProviderProxy {
       recorded: RawData | string = data,
     ): void => {
       if (upstream.readyState === WebSocket.CONNECTING
-        && (pending.length >= 16 || pending.reduce((bytes, message) => bytes + rawDataBytes(message.data), rawDataBytes(data)) > 16 * 1024 * 1024)) {
+        && (pending.length >= 16 || pending.reduce((bytes, message) => bytes + rawDataBytes(message.data), rawDataBytes(data)) > maximumModelWebSocketQueueBytes)) {
         rejectModelFrame(503, "provider_catalog_unavailable", "模型上游连接等待队列已满，请稍后重试。");
         return;
       }
@@ -910,10 +1204,10 @@ export class ProviderProxy {
               effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
             );
         if (activeMetrics) {
+          observeRequestActivity(activeMetrics, inspected.requestBody);
           activeMetrics.model = inspected.model ?? null;
           activeMetrics.requestModel = inspected.model ?? null;
           exchange?.observeRequestMetrics(activeMetrics);
-          activeMetrics.serviceTier = inspected.serviceTier ?? null;
           activeMetrics.requestServiceTier = inspected.serviceTier ?? null;
           activeMetrics.reasoningEffort = inspected.reasoningEffort ?? null;
         }
@@ -951,13 +1245,13 @@ export class ProviderProxy {
         return;
       }
       const bytes = rawDataBytes(data);
-      if (isBinary || bytes > 16 * 1024 * 1024) {
-        rejectModelFrame(400, "provider_model_request_invalid", "模型请求必须为不超过 16 MiB 的 JSON 文本帧。");
+      if (isBinary || bytes > maximumModelRequestBytes) {
+        rejectModelFrame(400, "provider_model_request_invalid", "模型请求必须为不超过 48 MiB 的 JSON 文本帧。");
         return;
       }
       queuedAuthorizationBytes += bytes;
       queuedAuthorizationFrames += 1;
-      if (queuedAuthorizationBytes > 16 * 1024 * 1024 || queuedAuthorizationFrames > 16) {
+      if (queuedAuthorizationBytes > maximumModelWebSocketQueueBytes || queuedAuthorizationFrames > 16) {
         rejectModelFrame(503, "provider_catalog_unavailable", "模型目录复核队列已满，请稍后重试。");
         return;
       }
@@ -982,7 +1276,7 @@ export class ProviderProxy {
             rejectModelFrame(400, "provider_model_request_invalid", "模型请求必须包含明确的 response.create 和 model ID。");
             return;
           }
-          if (this.modelAuthorizations.size >= 16) {
+          if (this.modelAuthorizations.size >= maximumBufferedModelRequests) {
             rejectModelFrame(503, "provider_catalog_unavailable", "模型目录复核暂时不可用，请稍后重试。");
             return;
           }
@@ -1101,7 +1395,7 @@ export class ProviderProxy {
       queuedClientBytes += bytes;
       queuedClientFrames += 1;
       if (frameMetrics && queuedClientFrames > 1) invalidateGenerationTiming(frameMetrics);
-      if (queuedClientBytes > 16 * 1024 * 1024 || queuedClientFrames > 4096) {
+      if (queuedClientBytes > maximumModelWebSocketQueueBytes || queuedClientFrames > 4096) {
         if (completedMetrics) void this.deliverMetrics(completedMetrics, route.accountId, deliverySignal);
         failForwarding(new Error("模型 WebSocket 客户端交付队列已满"));
         return;
@@ -1182,9 +1476,7 @@ export class ProviderProxy {
       if (!activeMetrics) return;
       const reasonType = failureType === "websocket_closed" ? websocketCloseErrorType(reason) : null;
       if (reasonType) {
-        if (markMetricsFailed(activeMetrics, reasonType, failureAtMs, undefined, failureAtMonotonicMs)) {
-          activeMetrics.errorMessage = boundedMessage(reason.toString("utf8"));
-        }
+        markMetricsFailed(activeMetrics, reasonType, failureAtMs, undefined, failureAtMonotonicMs);
       } else {
         markMetricsFailed(
           activeMetrics,
@@ -1322,6 +1614,7 @@ function inspectClientWebSocketMessage(
   model?: string;
   serviceTier?: string;
   reasoningEffort?: string;
+  requestBody?: Record<string, unknown>;
 } {
   if (isBinary) return {};
   const parsed = parseJsonPayload(rawDataText(data));
@@ -1330,7 +1623,7 @@ function inspectClientWebSocketMessage(
   const rawMetadata = clientMetadata?.["x-codex-turn-metadata"];
   const requestStartedAtMs = requestStartTimestamp(clientMetadata);
   const model = boundedString(parsed.model) ?? undefined;
-  const serviceTier = boundedString(parsed.service_tier) ?? undefined;
+  const serviceTier = requestServiceTier(parsed) ?? undefined;
   const reasoning = asRecord(parsed.reasoning);
   const reasoningEffort = boundedString(reasoning?.effort) ?? undefined;
   const parsedMetadata = typeof rawMetadata === "string"
@@ -1343,6 +1636,7 @@ function inspectClientWebSocketMessage(
   );
   return {
     metadata,
+    requestBody: parsed,
     recordsMetrics,
     ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
     ...(model ? { model } : {}),
@@ -1381,6 +1675,35 @@ function applySamplingDefaults(value: unknown, sampling?: SamplingParameters): {
     return { body: value, changed: false };
   }
   return { body: { ...sampling, ...source }, changed: true };
+}
+
+function createModelRequestBodyWriter(
+  upstream: ClientRequest,
+  submitted?: (bytes: number) => void,
+): Writable {
+  let bytes = 0;
+  const writer = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      bytes += chunk.length;
+      if (bytes > maximumModelRequestBytes) {
+        callback(new ChatBodyTooLargeError("Model request exceeds size limit"));
+        return;
+      }
+      if (upstream.destroyed || upstream.writableEnded) {
+        callback(new Error("模型请求出站连接已关闭"));
+        return;
+      }
+      // Count only chunks submitted to ClientRequest, not this writer's queue.
+      // Its write callback bounds buffering without delaying submission accounting.
+      upstream.write(chunk, callback);
+      submitted?.(chunk.length);
+    },
+    final(callback) { upstream.end(callback); },
+  });
+  const closed = (): void => { writer.destroy(); };
+  upstream.once("close", closed);
+  writer.once("close", () => upstream.off("close", closed));
+  return writer;
 }
 
 function writeUpstreamHead(response: ServerResponse, upstream: IncomingMessage): void {

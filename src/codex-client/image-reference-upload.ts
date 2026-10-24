@@ -5,6 +5,13 @@ import type { ConfigReadResponse, GetAccountResponse, GetAuthStatusResponse, Thr
 import { UserFacingError } from "../conversation-core/index.js";
 import { JsonRpcError, type JsonRpcClient } from "./json-rpc.js";
 
+export interface ProviderImageUploadRoute {
+  endpoint: string;
+  modelEndpoint: string;
+  revision: string;
+  authorization: string;
+}
+
 /** Uploads only caller-supplied images; subsequent history belongs to App Server. */
 export class ImageReferenceUpload {
   private readonly pending = new Map<string, PendingUpload>();
@@ -14,6 +21,7 @@ export class ImageReferenceUpload {
     private readonly fetchImpl: typeof fetch,
     private readonly localFetch: typeof fetch,
     private readonly readAuth: (signal: AbortSignal) => Promise<GetAuthStatusResponse>,
+    private readonly readProviderUploadRoute?: (provider: string, signal: AbortSignal) => Promise<ProviderImageUploadRoute>,
   ) {
     rpc.onDisconnect(() => this.cancelAll());
     rpc.onNotification(notification => {
@@ -33,13 +41,22 @@ export class ImageReferenceUpload {
     for (const pending of this.pending.values()) pending.controller.abort(failure("图片发送已因连接关闭而取消。", "disconnected"));
   }
 
-  async submit<T>(threadId: string, input: UserInput[], submit: (input: UserInput[]) => Promise<T>): Promise<T> {
+  async submit<T>(threadId: string, input: UserInput[], submit: (input: UserInput[]) => Promise<T>, beforeSubmit?: () => void): Promise<T> {
     if (this.pending.has(threadId) || this.pending.size >= 4) {
       throw failure("图片上传繁忙，请稍后重试。");
     }
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]);
-    const pending: PendingUpload = { controller, signal, dirty: false,
+    let guardRejected = false;
+    const assertAllowed = () => {
+      try {
+        beforeSubmit?.();
+      } catch (error) {
+        guardRejected = true;
+        throw error;
+      }
+    };
+    const pending: PendingUpload = { controller, signal, assertAllowed, dirty: false,
       stage: "thread-read", startedAt: performance.now(), stageStartedAt: performance.now(), diagnosticId: randomUUID() };
     this.pending.set(threadId, pending);
     let dispatched = false;
@@ -54,9 +71,26 @@ export class ImageReferenceUpload {
     try {
       const thread = await this.rpc.request<ThreadReadResponse>({ method: "thread/read", params: { threadId, includeTurns: false } },
         { retryOverload: true, signal });
-      if (thread.thread.modelProvider !== "openai") return await dispatch(input);
-      const modelRoute = await this.modelRoute(thread.thread.cwd, pending);
+      const provider = thread.thread.modelProvider;
+      const modelRoute = await this.modelRoute(thread.thread.cwd, provider, pending);
       if (modelRoute === null) return await dispatch(input);
+      if (modelRoute.kind === "deepseek") {
+        if (!/^ds-[a-z0-9_-]{1,32}$/u.test(provider)) {
+          throw failure("会话 Provider 与图片上传路由不一致。");
+        }
+        const converted = await this.prepareImages(input, pending,
+          (bytes, mediaType) => this.uploadDeepseek(modelRoute.endpoint, modelRoute.revision, modelRoute.authorization, bytes, mediaType, pending));
+        stage(pending, "account-recheck");
+        const current = await this.modelRoute(thread.thread.cwd, provider, pending);
+        if (current?.kind !== "deepseek" || current.endpoint !== modelRoute.endpoint
+          || current.modelEndpoint !== modelRoute.modelEndpoint
+          || current.revision !== modelRoute.revision || current.authorization !== modelRoute.authorization) {
+          throw failure("模型后端已变化，请重新发送图片。");
+        }
+        pending.signal.throwIfAborted();
+        return await dispatch(converted);
+      }
+      if (provider !== "openai") throw failure("会话 Provider 与图片上传路由不一致。");
       stage(pending, "account-check");
       const account = await this.account(pending.signal);
       if (account.account?.type === "apiKey" || !account.requiresOpenaiAuth) {
@@ -77,37 +111,20 @@ export class ImageReferenceUpload {
         "chatgpt-account-id": route.chatgptAccountId,
         "content-type": "application/json",
       };
-      const converted: UserInput[] = [];
-      let count = 0;
-      let total = 0;
-      for (const item of input) {
-        if (item.type !== "image" || !("url" in item)) {
-          converted.push(item);
-          continue;
-        }
-        stage(pending, "input-validation");
-        const match = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/.exec(item.url);
-        if (!match) throw failure("图片输入格式不受支持。");
-        if (match[2]!.length > 14_000_000) throw failure("图片超过上传大小限制。");
-        const bytes = Buffer.from(match[2]!, "base64");
-        total += bytes.length;
-        if (++count > 4 || bytes.length > 10 * 1024 * 1024 || total > 20 * 1024 * 1024) {
-          throw failure("图片超过上传数量或大小限制。");
-        }
-        const fileId = await this.upload(route.backendOrigin, headers, bytes, match[1]!, pending);
-        converted.push({ type: "image", fileId, ...(item.detail ? { detail: item.detail } : {}) });
-      }
+      const converted = await this.prepareImages(input, pending,
+        (bytes, mediaType) => this.upload(route.backendOrigin, headers, bytes, mediaType, pending));
       stage(pending, "account-recheck");
       await this.assertAccount(route, token, pending.signal);
-      const currentModelRoute = await this.modelRoute(thread.thread.cwd, pending);
-      if (currentModelRoute?.endpoint !== modelRoute.endpoint || currentModelRoute.origin !== route.backendOrigin) {
+      const currentModelRoute = await this.modelRoute(thread.thread.cwd, provider, pending);
+      if (currentModelRoute?.kind !== "openai" || currentModelRoute.endpoint !== modelRoute.endpoint
+        || currentModelRoute.origin !== route.backendOrigin) {
         throw failure("模型后端已变化，请重新发送图片。");
       }
       await pending.validation;
       pending.signal.throwIfAborted();
       return await dispatch(converted);
     } catch (error) {
-      if (dispatched) throw error;
+      if (dispatched || guardRejected) throw error;
       const reason: unknown = pending.signal.aborted ? pending.signal.reason : error;
       const classified = classifyFailure(reason, pending.stage);
       throw new UserFacingError("image.reference.failed", classified.message, {
@@ -150,27 +167,118 @@ export class ImageReferenceUpload {
     })();
   }
 
-  private async modelRoute(cwd: string, pending: PendingUpload): Promise<{ endpoint: string; origin: string } | null> {
+  private async modelRoute(cwd: string, provider: string, pending: PendingUpload): Promise<ModelRoute | null> {
     stage(pending, "model-config");
     const response = await this.rpc.request<ConfigReadResponse>({ method: "config/read", params: { cwd, includeLayers: false } },
       { retryOverload: true, signal: pending.signal });
-    const base = response.config.openai_base_url;
+    const config = response.config as ConfigReadResponse["config"] & {
+      openai_base_url?: unknown;
+      model_providers?: unknown;
+    };
+    const providerBase = providerBaseUrl(config.model_providers, provider);
+    const openaiBase = typeof config.openai_base_url === "string" ? config.openai_base_url : undefined;
+    const base = provider === "openai" ? openaiBase ?? providerBase : providerBase ?? openaiBase;
     if (typeof base !== "string") throw failure("无法确认当前 App Server 的模型代理地址。");
     const endpoint = new URL(base);
+    const deepseek = /^ds-[a-z0-9_-]{1,32}$/u.test(provider);
     // Only the service's private loopback proxy can attest its running route.
     // Independent model endpoints retain inline input; never probe them with credentials.
     if (endpoint.protocol !== "http:" || endpoint.hostname !== "127.0.0.1" || !endpoint.port
-      || endpoint.pathname !== "/" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) return null;
+      || (!deepseek && endpoint.pathname !== "/") || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+      if (deepseek) throw failure("DeepSeek 图片上传未连接受管实例。", "invalid-response");
+      return null;
+    }
     stage(pending, "model-route");
+    if (deepseek) {
+      if (!this.readProviderUploadRoute) throw failure("图片上传私有路由不可用，请重启 Gateway 与 App Server。", "invalid-response");
+      pending.assertAllowed();
+      const route = await this.readProviderUploadRoute(provider, pending.signal);
+      pending.assertAllowed();
+      if (route.endpoint !== endpoint.origin || route.modelEndpoint !== endpoint.href
+        || !/^Bearer [a-f0-9]{64}$/u.test(route.authorization)
+        || !/^[a-f0-9]{64}$/u.test(route.revision)) {
+        throw failure("图片上传私有路由与当前模型实例不一致。", "invalid-response");
+      }
+      return { kind: "deepseek", ...route };
+    }
     const result = await this.localFetch(new URL("/_codexc/image-upload-route", endpoint), {
       method: "GET", redirect: "error", signal: pending.signal,
     });
     const inspected = await this.readJson(result);
-    if (inspected.supported === false && inspected.backendOrigin === null) return null;
-    if (inspected.supported !== true || inspected.backendOrigin !== "https://chatgpt.com") {
-      throw failure("当前模型代理无法确认图片引用后端。", "invalid-response");
+    if (inspected.supported === false
+      && (inspected.backendOrigin === undefined || inspected.backendOrigin === null)
+      && !Object.hasOwn(inspected, "revision")) return null;
+    if (inspected.supported !== true) throw failure("当前模型代理无法确认图片引用后端。", "invalid-response");
+    if ((inspected.kind === undefined || inspected.kind === "openai")
+      && inspected.backendOrigin === "https://chatgpt.com") {
+      return { kind: "openai", endpoint: endpoint.origin, origin: inspected.backendOrigin };
     }
-    return { endpoint: endpoint.origin, origin: inspected.backendOrigin };
+    throw failure("当前模型代理无法确认图片引用后端。", "invalid-response");
+  }
+
+  private async prepareImages(
+    input: UserInput[],
+    pending: PendingUpload,
+    upload: (bytes: Buffer, mediaType: ImageMediaType) => Promise<string>,
+  ): Promise<UserInput[]> {
+    const converted: UserInput[] = [];
+    let count = 0;
+    let total = 0;
+    for (const item of input) {
+      if (item.type !== "image" || !("url" in item)) {
+        converted.push(item);
+        continue;
+      }
+      stage(pending, "input-validation");
+      const match = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/u.exec(item.url);
+      if (!match) throw failure("图片输入格式不受支持。");
+      if (match[2]!.length > 14_000_000) throw failure("图片超过上传大小限制。");
+      const bytes = Buffer.from(match[2]!, "base64");
+      total += bytes.length;
+      if (++count > 4 || bytes.length > 10 * 1024 * 1024 || total > 20 * 1024 * 1024) {
+        throw failure("图片超过上传数量或大小限制。");
+      }
+      const mediaType = imageMediaType(match[1]!);
+      const fileId = await upload(bytes, mediaType);
+      converted.push({ type: "image", fileId, ...(item.detail ? { detail: item.detail } : {}) });
+    }
+    return converted;
+  }
+
+  private async uploadDeepseek(
+    endpoint: string,
+    revision: string,
+    authorization: string,
+    bytes: Buffer,
+    mediaType: ImageMediaType,
+    pending: PendingUpload,
+  ): Promise<string> {
+    pending.assertAllowed();
+    stage(pending, "file-transfer");
+    const response = await this.localFetch(new URL("/_codexc/image-upload", endpoint), {
+      method: "POST",
+      headers: {
+        "content-type": mediaType,
+        authorization,
+        "x-codexc-image-upload-revision": revision,
+      },
+      body: new Uint8Array(bytes),
+      redirect: "error",
+      signal: pending.signal,
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      if (response.status === 409) throw failure("模型配置已变化，请重新发送图片。", "stale");
+      if (response.status === 413) throw failure("图片超过上传大小限制。", "validation");
+      if (response.status === 503) throw failure("图片上传繁忙，请稍后重试。", "capacity");
+      if (response.status === 504) throw failure("图片上传超时，请稍后重试。", "timeout");
+    }
+    const result = await this.readJson(response);
+    if (typeof result.fileId !== "string" || !/^file-api-[A-Za-z0-9_-]{1,128}$/u.test(result.fileId)) {
+      throw failure("图片上传服务返回无效编号。", "invalid-response");
+    }
+    pending.assertAllowed();
+    return result.fileId;
   }
 
   private account(signal: AbortSignal): Promise<GetAccountResponse> {
@@ -195,13 +303,14 @@ export class ImageReferenceUpload {
     }
   }
 
-  private async upload(origin: string, headers: Record<string, string>, bytes: Buffer, extension: string, pending: PendingUpload): Promise<string> {
+  private async upload(origin: string, headers: Record<string, string>, bytes: Buffer, mediaType: ImageMediaType, pending: PendingUpload): Promise<string> {
     stage(pending, "file-create");
     delete pending.transferDiagnostics;
     const base = `${origin}/backend-api/files`;
+    const extension = mediaType === "image/jpeg" ? "jpg" : mediaType.slice("image/".length);
     const created = await this.json(base, headers, {
       file_name: `image.${extension}`, file_size: bytes.length, use_case: "codex",
-    }, pending.signal);
+    }, pending);
     if (typeof created.file_id !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(created.file_id)
       || typeof created.upload_url !== "string") throw failure("图片上传服务返回无效编号或地址。", "invalid-response");
     let uploadUrl: URL;
@@ -218,7 +327,7 @@ export class ImageReferenceUpload {
     stage(pending, "file-finalize");
     const deadline = Date.now() + 30_000;
     for (;;) {
-      const finalized = await this.json(`${base}/${created.file_id}/uploaded`, headers, {}, pending.signal);
+      const finalized = await this.json(`${base}/${created.file_id}/uploaded`, headers, {}, pending);
       if (finalized.status === "success" && typeof finalized.download_url === "string") return created.file_id;
       if (finalized.status !== "retry") throw failure("图片上传完成确认响应无效。", "invalid-response");
       if (Date.now() >= deadline) throw failure("图片上传尚未完成，请稍后重新发送。");
@@ -232,6 +341,7 @@ export class ImageReferenceUpload {
     // Replay only the same blob PUT, never file creation or Turn submission.
     for (let attempt = 1; attempt <= 5; attempt++) {
       signal.throwIfAborted();
+      pending.assertAllowed();
       const clientRequestId = randomUUID();
       pending.transferDiagnostics = { host: url.hostname, attempt: String(attempt), clientRequestId };
       let retryAfter: number | undefined;
@@ -261,7 +371,10 @@ export class ImageReferenceUpload {
     }
   }
 
-  private async json(url: string, headers: Record<string, string>, body: object, signal: AbortSignal): Promise<Record<string, unknown>> {
+  private async json(url: string, headers: Record<string, string>, body: object, pending: PendingUpload): Promise<Record<string, unknown>> {
+    const { signal } = pending;
+    signal.throwIfAborted();
+    pending.assertAllowed();
     const response = await this.fetchImpl(url, { method: "POST", headers, body: JSON.stringify(body), redirect: "error", signal });
     return this.readJson(response);
   }
@@ -296,6 +409,7 @@ export class ImageReferenceUpload {
 interface PendingUpload {
   controller: AbortController;
   signal: AbortSignal;
+  assertAllowed(): void;
   identity?: { route: Routing; token: string };
   stage: UploadStage;
   startedAt: number;
@@ -304,6 +418,29 @@ interface PendingUpload {
   dirty: boolean;
   validation?: Promise<void>;
   transferDiagnostics?: { host: string; attempt: string; clientRequestId: string };
+}
+
+type ImageMediaType = "image/gif" | "image/jpeg" | "image/png" | "image/webp";
+type ModelRoute =
+  | { kind: "openai"; endpoint: string; origin: "https://chatgpt.com" }
+  | ({ kind: "deepseek" } & ProviderImageUploadRoute);
+
+function providerBaseUrl(value: unknown, provider: string): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entry = (value as Record<string, unknown>)[provider];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return undefined;
+  const base = (entry as Record<string, unknown>).base_url;
+  return typeof base === "string" ? base : undefined;
+}
+
+function imageMediaType(extension: string): ImageMediaType {
+  switch (extension) {
+    case "gif": return "image/gif";
+    case "jpeg": return "image/jpeg";
+    case "png": return "image/png";
+    case "webp": return "image/webp";
+    default: throw failure("图片输入格式不受支持。");
+  }
 }
 
 type Routing = NonNullable<GetAccountResponse["workspaceRouting"]>;

@@ -40,8 +40,12 @@ export function supportsFeishuInputRequest(
     return request.questions.length > 0
       && request.questions.length <= maximumQuestionCount;
   }
+  if (request.mode === "tool-approval") {
+    return request.toolApproval !== undefined && Buffer.byteLength([
+      request.title, request.message, request.toolApproval.toolTitle ?? "", request.toolApproval.detail,
+    ].join("\n\n"), "utf8") <= 3_000;
+  }
   return request.mode === "form"
-    || (request.mode === "tool-approval" && request.toolApproval !== undefined)
     || (request.url !== undefined && safeHttpUrl(request.url) !== undefined);
 }
 
@@ -201,8 +205,8 @@ function renderToolApprovalCard(
   request: Extract<InteractionRequest, { type: "elicitation" }>,
   interactionToken: string,
 ): FeishuCardDocument {
-  if (!request.toolApproval) {
-    throw new Error("飞书 MCP 工具审批信息缺失");
+  if (!request.toolApproval || !supportsFeishuInputRequest(request)) {
+    throw new Error("飞书 MCP 工具审批信息缺失或无法完整展示");
   }
   const actions = [
     actionButton("允许一次", "primary", interactionToken, "mcp-once"),
@@ -225,24 +229,15 @@ function renderToolApprovalCard(
     actionButton("拒绝", "danger", interactionToken, "mcp-decline"),
     actionButton("取消", "default", interactionToken, "cancel"),
   ];
-  return cardKitWithTitle(
+  return feishuCardShell(
+    "blue",
     "MCP 工具请求批准",
-    request.title,
     [
-      feishuCardMarkdown(escapeFeishuMarkdown(truncate(request.message, maximumDisplayLength))),
-      feishuCardMarkdown(
-        `**工具：** ${escapeFeishuMarkdown(truncate(
-          request.toolApproval.toolTitle ?? "未命名工具",
-          maximumLabelLength,
-        ))}`,
-      ),
+      feishuCardPlainText(request.title),
+      feishuCardPlainText(request.message),
+      feishuCardPlainText(`工具：${request.toolApproval.toolTitle ?? "未命名工具"}`),
       ...(request.toolApproval.detail
-        ? [feishuCardMarkdown(
-            `**参数：** ${escapeFeishuMarkdown(truncate(
-              request.toolApproval.detail,
-              maximumDisplayLength,
-            ))}`,
-          )]
+        ? [feishuCardPlainText(request.toolApproval.detail)]
         : []),
       ...buttonRows(actions),
     ],

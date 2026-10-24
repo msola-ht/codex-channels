@@ -42,11 +42,15 @@ export function customPrimaryProviderCredentialPath(environment, provider, envir
   const version = typeof environmentKey === "string" && environmentKey.startsWith(prefix)
     ? environmentKey.slice(prefix.length).replace(/_API_KEY$/u, "") : "";
   if (!/^[a-f0-9]{32}$/u.test(version) || environmentKey !== `${prefix}${version}_API_KEY`) throw new Error("自定义主 Provider 凭据引用无效");
-  return join(providerStorageRoot(environment), "custom", provider, "primary-credentials", `${version}.json`);
+  return join(providerStorageRoot(environment), ...(isCustomCatalogProvider(provider) ? [provider] : ["custom", provider]), "primary-credentials", `${version}.json`);
+}
+
+export function isValidCustomProviderApiKey(apiKey) {
+  return typeof apiKey === "string" && apiKey.trim() !== "" && apiKey.length <= 4096 && !/\p{Cc}/u.test(apiKey);
 }
 
 function validateCustomApiKey(apiKey) {
-  if (typeof apiKey !== "string" || apiKey.trim() === "" || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) throw new Error("自定义 Provider API Key 缺失或无效");
+  if (!isValidCustomProviderApiKey(apiKey)) throw new Error("自定义 Provider API Key 缺失或无效");
   return apiKey;
 }
 
@@ -74,7 +78,16 @@ export function readCustomPrimaryProviderApiKey(provider, block, environment = p
   if (block.env_key.startsWith("CODEX_CONNECT_CUSTOM_") && block.env_key.includes("_PRIMARY_")) {
     return readCustomPrimaryCredential(environment, provider, block.base_url, block.env_key);
   }
-  return environment[block.env_key] === undefined ? undefined : validateCustomApiKey(environment[block.env_key]);
+  let key = block.env_key;
+  if (process.platform === "win32") {
+    // A copied process.env is a plain object, without Windows' case-insensitive lookup.
+    const matches = Object.keys(environment).filter(name => name.toLowerCase() === key.toLowerCase()
+      && environment[name] !== undefined);
+    if (matches.length > 1) throw new Error("自定义 Provider 凭据环境变量存在大小写歧义");
+    if (matches.length === 0) return undefined;
+    key = matches[0];
+  }
+  return environment[key] === undefined ? undefined : validateCustomApiKey(environment[key]);
 }
 
 export function writeCustomPrimaryProviderCredential({ providerId, baseUrl, apiKey, environmentKey }, environment = process.env) {
@@ -94,7 +107,7 @@ export function removeCustomPrimaryProviderCredential(environment, provider, env
 /** Explicit Provider deletion; preserve unrelated names and validate every owned revision before removal. */
 export function removeCustomPrimaryProviderCredentials(environment, provider) {
   const key = customPrimaryProviderCredentialEnvironmentKey(provider, "0".repeat(32));
-  const directory = join(providerStorageRoot(environment), "custom", provider, "primary-credentials");
+  const directory = join(providerStorageRoot(environment), ...(isCustomCatalogProvider(provider) ? [provider] : ["custom", provider]), "primary-credentials");
   let names;
   try { names = readdirSync(directory); } catch (error) { if (error?.code === "ENOENT") return; throw error; }
   const owned = names.filter(name => /^[a-f0-9]{32}\.json$/u.test(name));
@@ -318,7 +331,7 @@ export function loadConfiguredCustomPrimaryRelayProfile(providerId, environment 
     throw new Error("Relay requires unambiguous independent API credentials");
   }
   const apiKey = readCustomPrimaryProviderApiKey(providerId, provider, environment);
-  if (typeof apiKey !== "string" || !apiKey.length || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) {
+  if (apiKey === undefined) {
     throw new Error("Relay Provider has no usable independent API credentials");
   }
   return { ...primary, apiKey, apiKeyEnvironmentKey: provider.env_key };
@@ -434,11 +447,26 @@ function loadCustomSwitchingProfile(environment, registeredProvider) {
   );
 }
 
+function assertCustomProfileSearchComplete(environment, registeredProvider) {
+  let searchPending = true;
+  try { readPrivateFileSync(`${customPrimaryProviderProfilePath(environment, registeredProvider)}.search-pending`, 4096); }
+  catch (error) {
+    if (error?.code !== "ENOENT") {
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error("Provider 搜索设置事务记录无法安全读取");
+    }
+    searchPending = false;
+  }
+  if (searchPending) throw new Error("Provider 搜索设置保存尚未完成；请保留事务记录及备份并核对文件，勿自动重试");
+}
+
 function configuredCustomSwitchingProfileFromContent(
   environment,
   registeredProvider,
   profileContent,
+  proposedUpstreamWireApi,
 ) {
+  assertCustomProfileSearchComplete(environment, registeredProvider);
   let profile;
   try {
     profile = record(parse(profileContent));
@@ -453,7 +481,8 @@ function configuredCustomSwitchingProfileFromContent(
   const reasoningEffort = custom ? custom.reasoningEffort ?? "none" : customSwitchingDefaultReasoningEffort;
   if (custom && profile.model_catalog_json !== custom.catalog.path) throw new Error("自定义提供商模型目录引用无效");
   const supportedProfileKeys = new Set([
-    ...(custom ? ["model_catalog_json", "web_search"] : []),
+    ...(custom ? ["model_catalog_json"] : []),
+    "web_search",
     "model",
     "model_provider",
     "model_reasoning_effort",
@@ -464,7 +493,7 @@ function configuredCustomSwitchingProfileFromContent(
     Object.keys(profile).some((key) => !supportedProfileKeys.has(key))
     || profile.service_tier !== "default"
     || profile.model_reasoning_effort !== (reasoningEffort ?? undefined)
-    || (custom && profile.web_search !== "disabled")
+    || (profile.web_search !== undefined && !["disabled", "cached", "indexed", "live"].includes(profile.web_search))
   ) {
     throw new Error("Codex 自定义切换 Provider Profile 包含不受支持的配置");
   }
@@ -540,7 +569,7 @@ function configuredCustomSwitchingProfileFromContent(
     : id;
   if (custom && name === "OpenAI") throw new Error("自定义提供商不能使用 OpenAI 名称");
   const supportsWebsockets = provider.supports_websockets === true;
-  const upstreamWireApi = custom === undefined ? "responses" : readCustomProviderUpstreamWireApi(environment, id);
+  const upstreamWireApi = custom === undefined ? "responses" : proposedUpstreamWireApi ?? readCustomProviderUpstreamWireApi(environment, id);
   if (upstreamWireApi === "chat_completions" && supportsWebsockets) {
     throw new Error(`Codex 自定义切换 Provider ${id} 的 Chat 上游不支持 WebSocket`);
   }
@@ -563,8 +592,9 @@ function configuredCustomSwitchingProfileFromContent(
       "-c", `model=${JSON.stringify(model.trim())}`,
       "-c", `model_provider=${JSON.stringify(id)}`,
       "-c", 'service_tier="default"',
+      ...(profile.web_search === undefined ? [] : ["-c", `web_search=${JSON.stringify(profile.web_search)}`]),
       ...(reasoningEffort === null ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`]),
-      ...(custom ? ["-c", `model_catalog_json=${JSON.stringify(custom.catalog.path)}`, "-c", 'web_search="disabled"'] : []),
+      ...(custom ? ["-c", `model_catalog_json=${JSON.stringify(custom.catalog.path)}`] : []),
       "-c", `model_providers.${id}.name=${JSON.stringify(name)}`,
       "-c", `model_providers.${id}.base_url=${JSON.stringify(validProviderBaseUrl(provider.base_url, `Codex 自定义切换 Provider ${id}`))}`,
       "-c", `model_providers.${id}.wire_api="responses"`,
@@ -597,6 +627,8 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
     supportsWebsockets = false,
     catalogSource = { kind: "official" },
     modelOnly = false,
+    connectionOnly = false,
+    upstreamWireApi,
   },
   environment = process.env,
   {
@@ -625,6 +657,7 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
   }
   const ids = loadCustomSwitchingProviderIds(environment);
   const profilePath = customPrimaryProviderProfilePath(environment, provider);
+  assertCustomProfileSearchComplete(environment, provider);
   let previousProfile;
   try {
     previousProfile = readPrivateFileSync(profilePath);
@@ -638,16 +671,40 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
   ) {
     throw customSwitchingProfileChangedError(provider);
   }
-  if (modelOnly) {
+  if (connectionOnly && (modelOnly || catalogSource.kind !== "custom"
+    || expectedProfilePresent === undefined || expectedProviderIds === undefined)) {
+    throw customSwitchingProfileChangedError(provider);
+  }
+  if (upstreamWireApi !== undefined && (!connectionOnly || !["responses", "chat_completions"].includes(upstreamWireApi))) {
+    throw new Error("连接编辑的上游接口不受支持");
+  }
+  // Connection edits must retain the search preference now owned by this Profile.
+  let previousWebSearch;
+  if (previousProfile !== undefined) {
+    try { previousWebSearch = parse(previousProfile).web_search; }
+    catch { throw new Error("原 Provider Profile 无法安全解析"); }
+    if (previousWebSearch !== undefined && !["disabled", "cached", "indexed", "live"].includes(previousWebSearch)) {
+      throw new Error("原 Provider 搜索设置无效");
+    }
+  }
+  if (modelOnly || connectionOnly && previousProfile !== undefined) {
     if (catalogSource.kind !== "custom" || previousProfile === undefined || expectedProfileContent === undefined
       || expectedProfilePresent !== true || expectedProviderIds === undefined || !ids.includes(provider)) {
       throw customSwitchingProfileChangedError(provider);
     }
     const profile = parse(previousProfile);
-    profile.model = model;
-    profile.model_reasoning_effort = catalogSource.reasoningEffort;
+    if (connectionOnly) {
+      if (modelOnly || profile.model !== model) throw customSwitchingProfileChangedError(provider);
+      Object.assign(profile.model_providers[provider], {
+        name, base_url: normalizedBaseUrl, supports_websockets: supportsWebsockets === true,
+        experimental_bearer_token: apiKey,
+      });
+    } else {
+      profile.model = model;
+      profile.model_reasoning_effort = catalogSource.reasoningEffort;
+    }
     const content = stringify(profile);
-    configuredCustomSwitchingProfileFromContent(environment, provider, content);
+    configuredCustomSwitchingProfileFromContent(environment, provider, content, upstreamWireApi);
     writePrivateFileAtomicSync(profilePath, content);
     return;
   }
@@ -656,9 +713,9 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
     stringify({
       model: model.trim(),
       model_provider: provider,
+      ...(previousWebSearch === undefined ? {} : { web_search: previousWebSearch }),
       ...(catalogSource.kind === "custom" ? {
         model_catalog_json: responsesProviderCatalogPath(environment, provider),
-        web_search: "disabled",
         model_reasoning_effort: catalogSource.reasoningEffort ?? "none",
       } : { model_reasoning_effort: customSwitchingDefaultReasoningEffort }),
       service_tier: "default",

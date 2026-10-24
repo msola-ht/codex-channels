@@ -28,17 +28,6 @@ import {
   throwForApiError,
 } from "./response-validation.js";
 
-export { WeixinProtocolError } from "./protocol-types.js";
-export type {
-  WeixinAudioReference,
-  WeixinFileReference,
-  WeixinIgnoredMessageReason,
-  WeixinImageReference,
-  WeixinInboundMessage,
-  WeixinProtocolErrorCode,
-  WeixinUpdatesBatch,
-} from "./protocol-types.js";
-
 export interface WeixinProtocolClient {
   getUpdates(
     cursor: string,
@@ -764,6 +753,7 @@ async function request(options: {
               "iLink-App-ClientVersion": String(appClientVersion),
             },
             body: JSON.stringify(options.body),
+            redirect: "error",
             signal,
           },
         );
@@ -778,6 +768,7 @@ async function request(options: {
           response,
           options.maximumResponseBytes,
           options.operation,
+          signal,
         );
       },
     );
@@ -919,6 +910,7 @@ async function readLimitedResponseText(
   response: Response,
   maximumBytes: number,
   operation: string,
+  signal: AbortSignal,
 ): Promise<string> {
   const content = await readBoundedFetchBody(
     response,
@@ -931,6 +923,7 @@ async function readLimitedResponseText(
       "invalid-response",
       `${operation}响应正文过大`,
     ),
+    signal,
   );
   return new TextDecoder().decode(content);
 }

@@ -2,7 +2,10 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { TextAttachmentStore, textAttachmentBody } from "../text-attachment-store.js";
 import { videoAttachmentBody } from "../video-attachment-store.js";
+import { SurfaceShutdown } from "../surface-shutdown.js";
+import { AttachmentInputLifecycle, type ReceivedAttachmentInput } from "../attachment-input-lifecycle.js";
 import { Bot, type Context } from "grammy";
+import type { InlineKeyboardMarkup } from "grammy/types";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
@@ -20,6 +23,7 @@ import {
 import {
   UserFacingError,
   type ConversationTarget,
+  type OutputEvent,
 } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -42,7 +46,7 @@ import {
   interactionStoppedText,
 } from "../output-copy.js";
 import { formatTextFileTooLarge } from "../text-file-copy.js";
-import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { SurfaceInputBatcher } from "../surface-input-batcher.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { surfaceCommandAliases } from "../slash-command.js";
@@ -72,6 +76,7 @@ import {
   TelegramLifecycle,
   telegramConversationCommandName,
   telegramUpdateGroupSize,
+  isTelegramEmergencyStopUpdate,
 } from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
 import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
@@ -150,7 +155,7 @@ export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
 
 export type TelegramConversationUseCases =
   & Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">
-  & Pick<ConversationSessionUseCases, "status" | "statusForDisplay" | "listWorkspaces">
+  & Pick<ConversationSessionUseCases, "status" | "statusForDisplay" | "listWorkspaces" | "selectedWorkspaceId">
   & Pick<ConversationExtensionUseCases, "modelState" | "listPlugins">;
 
 export function createTelegramSurface(
@@ -186,9 +191,21 @@ export class TelegramSurface {
   private readonly videoInput: TelegramVideoInput | undefined;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandExecutor;
-  private readonly inputs: SurfaceInputCoalescer;
+  private readonly inputs: SurfaceInputBatcher;
+  private readonly attachmentInputs = new AttachmentInputLifecycle();
+  private readonly receivedAttachments = new WeakMap<object, ReceivedAttachmentInput>();
+  private readonly receivedUpdates = new WeakSet<object>();
+  private readonly attachmentStops = new WeakSet<object>();
+  private readonly rejectedAttachmentStops = new WeakSet<object>();
   private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
   private readonly now: () => number;
+  private readonly idleResumeSelections = new Map<string, {
+    target: ConversationTarget;
+    actorId: string;
+    threadId: string;
+    messageId: number;
+    expiresAt: number;
+  }>();
   private readonly autoReviewSelections = new Map<string, {
     target: ConversationTarget;
     actorId: string;
@@ -198,6 +215,7 @@ export class TelegramSurface {
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
   private stopping = false;
+  private stopPromise: Promise<void> | undefined;
 
   constructor(
     token: string,
@@ -235,6 +253,11 @@ export class TelegramSurface {
       return next();
     });
     this.bot.use((context, next) => this.authorize(context, next));
+    this.bot.use(async (context, next) => {
+      const release = this.receivedUpdates.has(context.update)
+        ? undefined : this.receiveAttachmentUpdate(context.update);
+      try { await next(); } finally { release?.(); }
+    });
     this.bot.use((context, next) => {
       if (context.chat && context.from) {
         this.service.touchActivity?.(target(context));
@@ -247,7 +270,19 @@ export class TelegramSurface {
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = options.commands;
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
-    const apiExecutor = new TelegramApiExecutor(logger);
+    const apiExecutor = new TelegramApiExecutor(logger, (chatId, recipientNotification) => {
+      const outputTarget: ConversationTarget = {
+        surface: this.surface, accountId: this.accountId, conversationId: chatId,
+      };
+      if (recipientNotification) {
+        const userId = Number(chatId);
+        return Number.isSafeInteger(userId) && String(userId) === chatId
+          && this.notificationRecipients.has(userId)
+          && this.access.isAllowed({ target: outputTarget, actorId: chatId });
+      }
+      return (this.actorRegistry?.actors(outputTarget) ?? [])
+        .some(actorId => this.access.isAllowed({ target: outputTarget, actorId }));
+    });
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
         ? { finalMessageFormat: options.finalMessageFormat }
@@ -265,10 +300,15 @@ export class TelegramSurface {
         ? {}
         : { autoCompactPercent: options.autoCompactPercent }),
       debugEnabled: this.debugEnabled,
+      deliverIdleReleased: (event, send) => this.deliverIdleReleased(event, send),
     });
     this.output = this.outbox;
-    this.inputs = new SurfaceInputCoalescer(
-      (inputTarget, input) => service.submit(inputTarget, input),
+    this.inputs = new SurfaceInputBatcher(
+      (inputTarget, input, actorId) => service.submit(
+        inputTarget,
+        input,
+        () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
+      ),
       {
         quietWindowMs: options.inputQuietWindowMs ?? 1_000,
       },
@@ -324,13 +364,29 @@ export class TelegramSurface {
         },
       },
       options.onFatal,
-      { isInteractionUpdate: update => this.interactions.isInteractionUpdate(update) },
+      {
+        isInteractionUpdate: update => this.interactions.isInteractionUpdate(update),
+        receiveUpdate: update => this.receiveAttachmentUpdate(update),
+      },
     );
     this.registerHandlers();
   }
 
   sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
     return this.output.sendChannelImage(conversationId, imagePath);
+  }
+
+  private queryGuard(target: ConversationTarget, actorId: string): () => void {
+    const workspaceId = this.service.selectedWorkspaceId(target);
+    const cwd = this.service.listWorkspaces().find(workspace => workspace.id === workspaceId)?.cwd;
+    return () => {
+      const currentId = this.service.selectedWorkspaceId(target);
+      const currentCwd = this.service.listWorkspaces().find(workspace => workspace.id === currentId)?.cwd;
+      if (this.stopping || !this.access.isAllowed({ target, actorId })
+        || cwd === undefined || currentId !== workspaceId || currentCwd !== cwd) {
+        throw new UserFacingError("command.authorization-changed", "命令授权已变化，请重新发起操作");
+      }
+    };
   }
 
   async presentScheduledTaskConfirmation(
@@ -364,28 +420,70 @@ export class TelegramSurface {
     this.lifecycle.start();
   }
 
-  async stop(): Promise<void> {
-    this.stopping = true;
-    const videoClose = this.videoInput?.close();
-    try {
-      const lifecycleStop = this.lifecycle.stop();
-      await videoClose;
-      await this.inputs.close();
-      await this.textFileInput.close?.();
-      this.imageStore.close();
-      this.audioStore.close();
-      this.pluginTaskPrompts.clear();
-      this.autoReviewSelections.clear();
-      await this.interactions.close();
-      await this.outbox.close();
-      await lifecycleStop;
-    } finally {
-      this.proxyAgent?.destroy();
+  private async deliverIdleReleased(
+    event: Extract<OutputEvent, { type: "conversation.idle.released" }>,
+    send: (keyboard?: InlineKeyboardMarkup) => Promise<number | undefined>,
+  ): Promise<void> {
+    if (this.stopping) throw new Error("Telegram 正在关闭");
+    const actors = [...new Set(this.actorRegistry?.actors(event.target) ?? [])]
+      .filter(actorId => this.access.isAllowed({ target: event.target, actorId }));
+    const actorId = actors.length === 1 ? actors[0] : undefined;
+    if (actorId === undefined) {
+      await send();
+      return;
     }
+    const token = randomBytes(18).toString("base64url");
+    // The Outbox already owns ordering, cancellation and the delivery receipt.
+    const messageId = await send({ inline_keyboard: [[{
+      text: "恢复此会话",
+      callback_data: `idle:resume:${token}`,
+    }]] });
+    if (this.stopping || messageId === undefined
+      || !this.access.isAllowed({ target: event.target, actorId })) return;
+    for (const [key, selection] of this.idleResumeSelections) {
+      if (selection.expiresAt <= this.now()) this.idleResumeSelections.delete(key);
+    }
+    this.idleResumeSelections.set(token, {
+      target: event.target, actorId, threadId: event.threadId, messageId,
+      expiresAt: this.now() + 10 * 60_000,
+    });
+    while (this.idleResumeSelections.size > 100) {
+      this.idleResumeSelections.delete(this.idleResumeSelections.keys().next().value!);
+    }
+  }
+
+  stop(): Promise<void> {
+    this.stopPromise ??= this.stopOnce();
+    return this.stopPromise;
+  }
+
+  private async stopOnce(): Promise<void> {
+    const shutdown = new SurfaceShutdown();
+    this.stopping = true;
+    this.attachmentInputs.close();
+    const videoClose = shutdown.run("videos", () => this.videoInput?.close());
+    const lifecycleStop = shutdown.run("lifecycle", () => this.lifecycle.stop());
+    await videoClose;
+    await shutdown.run("inputs", () => this.inputs.close());
+    await shutdown.run("files", () => this.textFileInput.close?.());
+    await shutdown.run("images", () => this.imageStore.close());
+    await shutdown.run("audios", () => this.audioStore.close());
+    this.pluginTaskPrompts.clear();
+    this.autoReviewSelections.clear();
+    this.idleResumeSelections.clear();
+    await shutdown.run("interactions", () => this.interactions.close());
+    await shutdown.run("outbox", () => this.outbox.close());
+    await lifecycleStop;
+    await shutdown.run("proxy agent", () => this.proxyAgent?.destroy());
+    shutdown.finish();
   }
 
   replaceNotificationRecipients(recipients: ReadonlySet<number>): void {
     this.notificationRecipients = new Set(recipients);
+  }
+
+  revalidateAccess(): void {
+    this.outbox.revalidateAccess();
   }
 
   configurationChanged(change: SurfaceConfigurationChange): void {
@@ -396,6 +494,7 @@ export class TelegramSurface {
         String(chatId),
         text,
         replyMarkup.inline_keyboard.length > 0 ? replyMarkup : undefined,
+        true,
       );
     }
   }
@@ -409,6 +508,7 @@ export class TelegramSurface {
           String(chatId),
           text,
           replyMarkup.inline_keyboard.length > 0 ? replyMarkup : undefined,
+          true,
         )),
     );
   }
@@ -452,6 +552,28 @@ export class TelegramSurface {
     this.bot.callbackQuery(/^(?:wp|ar):/, async (context) => {
       await context.answerCallbackQuery({ text: "工作区权限设置入口已停用，请使用原生 Codex 权限配置。" });
     });
+    this.bot.callbackQuery(/^idle:resume:([A-Za-z0-9_-]{24})$/, async (context) => {
+      const token = context.match[1]!;
+      const pending = this.idleResumeSelections.get(token);
+      const callbackTarget = target(context);
+      if (this.stopping || !pending || pending.expiresAt <= this.now()
+        || pending.actorId !== String(context.from.id)
+        || pending.target.conversationId !== callbackTarget.conversationId
+        || pending.target.accountId !== callbackTarget.accountId
+        || pending.messageId !== context.callbackQuery.message?.message_id
+      ) {
+        if (pending && pending.expiresAt <= this.now()) this.idleResumeSelections.delete(token);
+        await context.answerCallbackQuery({ text: "恢复按钮已失效，请使用通知中的 /r 命令。" });
+        return;
+      }
+      this.idleResumeSelections.delete(token);
+      await context.answerCallbackQuery({ text: "正在恢复会话" });
+      if (this.stopping || !this.access.isAllowed({ target: callbackTarget, actorId: pending.actorId })) return;
+      const result = await this.commands.execute(callbackTarget, "resume", pending.threadId, pending.actorId);
+      try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
+      catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "空闲恢复按钮清理失败"); }
+      await renderTelegramCommandResult(context, result);
+    });
     this.bot.callbackQuery(/^tar:(on|off):([A-Za-z0-9_-]{24})$/, async (context) => {
       const token = context.match[2]!;
       const pending = this.autoReviewSelections.get(token);
@@ -466,7 +588,7 @@ export class TelegramSurface {
       const result = await this.commands.selectAutoReview(callbackTarget, {
         threadId: pending.threadId,
         enabled: context.match[1] === "on",
-      });
+      }, String(context.from.id));
       try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
       catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "当前会话审批按钮清理失败"); }
       await renderTelegramCommandResult(context, result);
@@ -481,10 +603,10 @@ export class TelegramSurface {
           "Workspace 切换按钮已失效",
         );
       }
-      const result = await this.commands.execute(
+      const result = await this.commands.selectWorkspace(
         target(context),
-        "workspace",
         workspace.id,
+        String(context.from.id),
       );
       await context.answerCallbackQuery({ text: `已切换到 ${workspace.id}` });
       await renderTelegramCommandResult(
@@ -496,9 +618,11 @@ export class TelegramSurface {
       /^mp:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget);
+        const guard = this.queryGuard(modelTarget, String(context.from.id));
+        const selectionScope = this.service.status(modelTarget).selectionScope;
+        const state = await this.service.modelState(modelTarget, guard);
         if (
-          telegramModelSelectionToken(state) !== context.match[2]
+          telegramModelSelectionToken(state, String(context.from.id)) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -517,10 +641,15 @@ export class TelegramSurface {
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
+        guard();
+        if (this.service.status(modelTarget).selectionScope !== selectionScope) {
+          throw new UserFacingError("model.selection.expired", "会话已变化，请重新发送 /model 选择");
+        }
         const result = await this.commands.execute(
           modelTarget,
           "model",
           provider,
+          String(context.from.id),
         );
         await renderTelegramCommandResult(
           context,
@@ -532,9 +661,11 @@ export class TelegramSurface {
       /^ms:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget);
+        const guard = this.queryGuard(modelTarget, String(context.from.id));
+        const selectionScope = this.service.status(modelTarget).selectionScope;
+        const state = await this.service.modelState(modelTarget, guard);
         if (
-          telegramModelSelectionToken(state) !== context.match[2]
+          telegramModelSelectionToken(state, String(context.from.id)) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -552,10 +683,14 @@ export class TelegramSurface {
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
+        guard();
+        if (this.service.status(modelTarget).selectionScope !== selectionScope) {
+          throw new UserFacingError("model.selection.expired", "会话已变化，请重新发送 /model 选择");
+        }
         const result = await this.commands.selectModel(modelTarget, {
           provider: selected.provider ?? "openai",
           model: selected.model,
-        });
+        }, String(context.from.id));
         await renderTelegramCommandResult(
           context,
           result,
@@ -566,9 +701,11 @@ export class TelegramSurface {
       /^me:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
-        const state = await this.service.modelState(modelTarget);
+        const guard = this.queryGuard(modelTarget, String(context.from.id));
+        const selectionScope = this.service.status(modelTarget).selectionScope;
+        const state = await this.service.modelState(modelTarget, guard);
         if (
-          telegramModelSelectionToken(state) !== context.match[2]
+          telegramModelSelectionToken(state, String(context.from.id)) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -589,10 +726,15 @@ export class TelegramSurface {
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
+        guard();
+        if (this.service.status(modelTarget).selectionScope !== selectionScope) {
+          throw new UserFacingError("model.selection.expired", "会话已变化，请重新发送 /model 选择");
+        }
         const result = await this.commands.execute(
           modelTarget,
           "effort",
           effort,
+          String(context.from.id),
         );
         await renderTelegramCommandResult(
           context,
@@ -658,6 +800,7 @@ export class TelegramSurface {
         target(context),
         "plugin",
         `list ${context.match[1]}`,
+        String(context.from.id),
       );
       await renderTelegramCommandResult(
         context,
@@ -684,7 +827,7 @@ export class TelegramSurface {
       async (context) => {
         await context.answerCallbackQuery({ text: "正在选择 Plugin" });
         const pluginTarget = target(context);
-        const matches = (await this.service.listPlugins(pluginTarget)).plugins.filter(
+        const matches = (await this.service.listPlugins(pluginTarget, this.queryGuard(pluginTarget, String(context.from.id)))).plugins.filter(
           (plugin) => telegramPluginSelectionToken(plugin.id) === context.match[1],
         );
         if (matches.length !== 1) {
@@ -865,6 +1008,7 @@ export class TelegramSurface {
           target(context),
           "plugin",
           `${pluginPrompt.pluginId} ${context.message.text.trim()}`,
+          String(context.from.id),
         );
         await renderTelegramCommandResult(
           context,
@@ -1008,7 +1152,7 @@ export class TelegramSurface {
     const inputTarget = target(context);
     const actorId = String(context.from?.id ?? "");
     if (!this.access.isAllowed({ target: inputTarget, actorId })) return;
-    const submitAttachment = this.service.prepareAttachmentSubmission?.(
+    const submitAttachment = await this.receivedAttachments.get(context.update)?.prepare() ?? this.service.prepareAttachmentSubmission?.(
       inputTarget,
       () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
     );
@@ -1247,7 +1391,7 @@ export class TelegramSurface {
     }
     const inputTarget = target(context);
     const actorId = String(context.from?.id ?? "");
-    const scope = this.service.prepareAttachmentSubmission?.(
+    const scope = await this.receivedAttachments.get(context.update)?.prepare() ?? this.service.prepareAttachmentSubmission?.(
       inputTarget,
       () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
       "audio",
@@ -1311,12 +1455,15 @@ export class TelegramSurface {
     context: Context,
     command: ConversationCommandName,
   ): Promise<void> {
+    if (!context.from) throw new UserFacingError("command.authorization-changed", "无法确认命令操作者");
     const result = await this.commands.execute(
       target(context),
       command,
       commandArguments(context),
-      context.from ? String(context.from.id) : undefined,
+      String(context.from.id),
     );
+    if (result.kind === "outcome" && result.outcome.type === "turn.stop-requested"
+      && this.attachmentStops.has(context.update)) result.outcome.stopped = true;
     if (result.kind === "auto-review") {
       await this.renderAutoReviewResult(context, result);
       return;
@@ -1367,6 +1514,34 @@ export class TelegramSurface {
     }
   }
 
+  private receiveAttachmentUpdate(update: Context["update"]): (() => void) | undefined {
+    this.receivedUpdates.add(update);
+    const message = update.message;
+    if (!message?.from || this.stopping) return;
+    const inputTarget: ConversationTarget = {
+      surface: "telegram", accountId: this.accountId, conversationId: String(message.chat.id),
+    };
+    const actorId = String(message.from.id);
+    const allowed = () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId });
+    if (isTelegramEmergencyStopUpdate(update, this.bot)) {
+      if (!allowed()) {
+        this.rejectedAttachmentStops.add(update);
+        return;
+      }
+      const stop = this.attachmentInputs.receiveStop(inputTarget);
+      if (stop.cancelled) this.attachmentStops.add(update);
+      return stop;
+    }
+    const kind = message.voice || message.audio ? "audio"
+      : message.video || message.video_note || (message.document && isVideoDocument(message.document.mime_type, message.document.file_name))
+        ? "video" : undefined;
+    if (!kind) return;
+    const receipt = this.attachmentInputs.receive(inputTarget, allowed, kind,
+      () => this.service.prepareAttachmentSubmission?.(inputTarget, allowed, kind));
+    this.receivedAttachments.set(update, receipt);
+    return () => { receipt.dispose(); this.receivedAttachments.delete(update); };
+  }
+
   private async authorize(context: Context, next: () => Promise<void>): Promise<void> {
     if (this.stopping) return;
     if (isWhoAmICommand(context, this.bot.botInfo.username)) {
@@ -1379,7 +1554,7 @@ export class TelegramSurface {
           actorId: String(context.from.id),
         }
       : undefined;
-    if (!accessContext || !this.access.isAllowed(accessContext)) {
+    if (!accessContext || !this.access.isAllowed(accessContext) || this.rejectedAttachmentStops.has(context.update)) {
       if (context.message) {
         await context.reply("无权使用此 Gateway。可用 /whoami 查看自己的 Telegram 用户 ID。");
       } else if (context.callbackQuery) {

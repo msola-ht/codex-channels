@@ -124,6 +124,9 @@ export function toOperationUpdate(
     }
     case "imageGeneration": {
       const imagePath = trimmedString(item.savedPath);
+      const imageFileId = typeof item.fileId === "string" && item.fileId.trim().length > 0
+        ? item.fileId
+        : undefined;
       const failure = recordValue(item.failure);
       const detail = trimmedString(failure?.type) === "usageLimitExceeded"
         ? "图片生成额度已用尽"
@@ -133,6 +136,7 @@ export function toOperationUpdate(
         kind: "imageGeneration",
         ...(detail ? { detail } : {}),
         ...(imagePath ? { imagePath } : {}),
+        ...(imageFileId !== undefined ? { imageFileId } : {}),
       };
     }
     case "sleep":

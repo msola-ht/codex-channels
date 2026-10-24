@@ -1,10 +1,12 @@
 import { desktopAppCommandUsage } from "./cli-command-usage.mjs";
 export { desktopAppCommandUsage } from "./cli-command-usage.mjs";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import WebSocket from "ws";
 
@@ -15,7 +17,8 @@ import {
   inspectAppServerSupervisorState,
 } from "../runtime/app-server-supervisor.mjs";
 import { macDesktopAppPluginEnabledConfigKey } from "../runtime/desktop-app-host.mjs";
-import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { loadConfiguredCustomPrimaryModelProvider, loadOpenAiBaseUrl } from "../runtime/model-provider-runtime.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import { childProcessIsRunning, registerChildProcessGroup, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import {
@@ -23,8 +26,13 @@ import {
   readDesktopAppBridgeToken,
 } from "../runtime/desktop-app-bridge.mjs";
 import {
+  GatewayConfigConflictError,
+  GatewayConfigLockReleaseError,
+  GatewayConfigWriteCommittedError,
+  parseGatewayConfig,
   readGatewayConfig,
   validateGatewayConfigDocument,
+  withGatewayConfigLock,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
@@ -78,18 +86,25 @@ export async function runDesktopAppCommand(args, options = {}) {
   const located = parsed.action === "status"
     ? locateUserConfig(environment)
     : requireUserConfig(environment);
-  const document = validateGatewayConfigDocument(readGatewayConfig(located.configPath));
+  let configurationContent = readFileSync(located.configPath, "utf8");
+  const configurationDocument = parseGatewayConfig(configurationContent, located.configPath);
+  const document = validateGatewayConfigDocument(configurationDocument);
   const codex = table(document.codex);
   const runtimeEnvironment = {
     ...environment,
     CODEX_CONNECT_HOME: located.dataDir,
     CODEX_CONNECT_CONFIG_FILE: located.configPath,
-    CODEX_BINARY: stringValue(codex.binary) || "codex",
+    CODEX_BINARY: effectiveCodexBinary(codex.binary ?? "codex", environment, located.dataDir),
   };
   const appServer = resolveAppServerRuntime(document, located.dataDir, runtimeEnvironment);
   const selectedProvider = parsed.provider === undefined ? appServer.primaryProvider
     : resolveProviderSelection(parsed.provider, { environment: runtimeEnvironment }).provider;
   const selectedSocketPath = resolveDesktopAppSocketPath(appServer, selectedProvider);
+  const targetSnapshot = parsed.action === "status" ? undefined : JSON.stringify({
+    appServer, selectedProvider, selectedSocketPath,
+    customPrimaryProvider: loadConfiguredCustomPrimaryModelProvider(runtimeEnvironment),
+    openAiBaseUrl: appServer.primaryProvider === "openai" ? loadOpenAiBaseUrl(runtimeEnvironment) : undefined,
+  });
   let desktopConfig = desktopAppConfig(codex.desktop_app);
   const progressOptions = { output: parsed.json ? null : output, delayMs: 250, signal: options.signal };
   const app = supported
@@ -125,7 +140,54 @@ export async function runDesktopAppCommand(args, options = {}) {
       : "无法确认 ChatGPT Desktop App 是否已退出");
   }
 
+  function assertCurrentConfiguration() {
+    if (readFileSync(located.configPath, "utf8") !== configurationContent) {
+      throw new GatewayConfigConflictError("Desktop 共享配置在检查或确认后已变化，请重新运行命令");
+    }
+    const currentRuntime = resolveAppServerRuntime(document, located.dataDir, runtimeEnvironment);
+    const currentProvider = parsed.provider === undefined ? currentRuntime.primaryProvider
+      : resolveProviderSelection(parsed.provider, { environment: runtimeEnvironment }).provider;
+    const currentSocketPath = resolveDesktopAppSocketPath(currentRuntime, currentProvider);
+    if (JSON.stringify({
+      appServer: currentRuntime,
+      selectedProvider: currentProvider,
+      selectedSocketPath: currentSocketPath,
+      customPrimaryProvider: loadConfiguredCustomPrimaryModelProvider(runtimeEnvironment),
+      openAiBaseUrl: currentRuntime.primaryProvider === "openai" ? loadOpenAiBaseUrl(runtimeEnvironment) : undefined,
+    }) !== targetSnapshot) {
+      throw new GatewayConfigConflictError("Desktop 目标 Provider 或 App Server 已变化，请重新运行命令");
+    }
+  }
+
+  function saveConfiguration(next, prepare = () => undefined) {
+    let saved = false;
+    try {
+      return withGatewayConfigLock(located.configPath, () => {
+        assertCurrentConfiguration();
+        const prepared = prepare();
+        const previous = writeDesktopAppConfig(located.configPath, next, configurationDocument);
+        saved = true;
+        const savedContent = readFileSync(located.configPath, "utf8");
+        if (!isDeepStrictEqual(parseGatewayConfig(savedContent, located.configPath), configurationDocument)) {
+          throw new GatewayConfigConflictError("Desktop 共享配置保存后已被其他操作修改");
+        }
+        configurationContent = savedContent;
+        return { previous, prepared };
+      });
+    } catch (error) {
+      if (error instanceof GatewayConfigLockReleaseError) {
+        throw new Error("Desktop 共享配置已保存，但配置锁未能释放；未继续激活，请检查配置和锁状态，勿重复保存", { cause: error });
+      }
+      if (error instanceof GatewayConfigWriteCommittedError) {
+        throw new Error("Desktop 共享配置已保存，但写入收尾失败；未继续激活，请检查配置和锁状态，勿重复保存", { cause: error });
+      }
+      if (saved) throw new Error("Desktop 共享配置已保存，但回读未能确认；未继续激活，请检查当前配置，勿重复保存", { cause: error });
+      throw error;
+    }
+  }
+
   async function withStartupLease(provider, operation, progress) {
+    assertCurrentConfiguration();
     let lease;
     try {
       progress.signal.throwIfAborted();
@@ -139,6 +201,7 @@ export async function runDesktopAppCommand(args, options = {}) {
     let operationError;
     try {
       progress.signal.throwIfAborted();
+      assertCurrentConfiguration();
       await operation();
     } catch (error) {
       operationFailed = true;
@@ -157,12 +220,15 @@ export async function runDesktopAppCommand(args, options = {}) {
   }
 
   async function enableSharing(port) {
-    const token = platform === "darwin" ? undefined : loadOrCreateDesktopAppBridgeToken(located.dataDir);
+    options.signal?.throwIfAborted();
     const applied = { enabled: true, port };
-    const previous = writeDesktopAppConfig(located.configPath, applied);
+    const { previous, prepared: token } = saveConfiguration(applied, () =>
+      platform === "darwin" ? undefined : loadOrCreateDesktopAppBridgeToken(located.dataDir));
     let phase = "重启 App Server";
     try {
+      assertCurrentConfiguration();
       await restartAppServer();
+      assertCurrentConfiguration();
       phase = "确认 Desktop 共享入口就绪";
       await withCliProgress(phase, async (progress) => {
         if (platform === "darwin") {
@@ -178,8 +244,12 @@ export async function runDesktopAppCommand(args, options = {}) {
           }, progress);
         }
       }, progressOptions);
+      assertCurrentConfiguration();
     } catch (error) {
-      await rollbackDesktopAppConfig({ configPath: located.configPath, previous, applied, restartAppServer, cause: error, phase });
+      await rollbackDesktopAppConfig({
+        configPath: located.configPath, previous, applied, restartAppServer, cause: error, phase,
+        assertCurrentConfiguration, saveConfiguration,
+      });
     }
     desktopConfig = applied;
   }
@@ -189,7 +259,10 @@ export async function runDesktopAppCommand(args, options = {}) {
       throw new Error("Codex Desktop App 共享只支持 OpenAI 主 Provider");
     }
     if (desktopConfig?.enabled !== true) {
-      const confirmed = await (options.confirmEnable ?? confirmDesktopAppEnable)();
+      const confirmed = await (options.confirmEnable ?? confirmDesktopAppEnable)({
+        provider: selectedProvider,
+        port: platform === "win32" ? desktopConfig?.port ?? defaultBridgePort : null,
+      });
       if (confirmed !== true) {
         writeMessage("note", "已取消启动；共享配置和服务未改动。");
         return { action: "open", opened: false };
@@ -204,6 +277,7 @@ export async function runDesktopAppCommand(args, options = {}) {
           appServer.primarySocketPath,
           inspectSupervisorState,
         );
+        assertCurrentConfiguration();
         if (topology.desktopAppAttached === true) {
           throw new Error("现有 Codex Desktop App Host 租约尚未释放；请稍后重试");
         }
@@ -238,8 +312,10 @@ export async function runDesktopAppCommand(args, options = {}) {
         }, progress);
       }, progressOptions);
       writeMessage("note", `已确认 Provider ${selectedProvider} 当前没有活动 Turn；启动时会短暂重启该 Provider 的 App Server。`);
-      await withCliProgress("发送 Desktop 启动请求", ({ signal }) =>
-        openDesktop(app.path, "", selectedProvider, { signal }), progressOptions);
+      await withCliProgress("发送 Desktop 启动请求", ({ signal }) => {
+        assertCurrentConfiguration();
+        return openDesktop(app.path, "", selectedProvider, { signal });
+      }, progressOptions);
     } else {
       await withCliProgress("检查并启动 Desktop", async (progress) => {
         await assertDesktopAppProviderSelectionReady(appServer.primarySocketPath, inspectSupervisorState);
@@ -251,6 +327,7 @@ export async function runDesktopAppCommand(args, options = {}) {
             throw new Error(`Provider ${selectedProvider} 已就绪，但 Desktop App 桥连接失败；请检查桥配置与 App Server 服务日志`);
           }
           progress.signal.throwIfAborted();
+          assertCurrentConfiguration();
           progress.message("发送 Desktop 启动请求");
           await openDesktop(app.path, endpoint, selectedProvider, { signal: progress.signal });
         }, progress);
@@ -276,9 +353,12 @@ export async function runDesktopAppCommand(args, options = {}) {
     writeMessage("note", "Codex Desktop App 共享已经处于禁用状态。");
     return { action: "disable", enabled: false };
   }
-  const previous = writeDesktopAppConfig(located.configPath, undefined);
+  options.signal?.throwIfAborted();
+  const { previous } = saveConfiguration(undefined);
   try {
+    assertCurrentConfiguration();
     await restartAppServer();
+    assertCurrentConfiguration();
   } catch (error) {
     await rollbackDesktopAppConfig({
       configPath: located.configPath,
@@ -287,19 +367,21 @@ export async function runDesktopAppCommand(args, options = {}) {
       restartAppServer,
       cause: error,
       phase: "禁用共享后重启 App Server",
+      assertCurrentConfiguration,
+      saveConfiguration,
     });
   }
   writeMessage("success", "Codex Desktop App 共享已禁用。");
   return { action: "disable", enabled: false };
 }
 
-async function confirmDesktopAppEnable() {
+async function confirmDesktopAppEnable({ provider, port }) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("首次启动需要在本机终端确认启用共享；非交互使用请先显式运行 codexc app enable");
   }
   const prompts = createPrompter(process.stdin, process.stdout);
   try {
-    return await prompts.confirm("首次启动将启用共享并重启 App Server，现有连接与进行中的任务可能中断。是否继续？", false);
+    return await prompts.confirm(`首次启动将启用共享${port === null ? "（受管 stdio）" : `（桥端口 ${port}）`}，目标 Provider 为 ${provider}，并重启 App Server，现有连接与进行中的任务可能中断。是否继续？`, false);
   } finally {
     prompts.close();
   }
@@ -619,7 +701,7 @@ function parseDesktopAppArgs(args) {
       } else if ((flags[index] === "--provider" || flags[index] === "-p") && parsed.provider === undefined) {
         const provider = flags[index + 1];
         if (typeof provider !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(provider)) {
-          throw new Error("-p / --provider 必须指定 Provider ID、已配置的 sf- 名称或 agg");
+          throw new Error("-p / --provider 必须指定 Provider ID 或已配置的 sf- 名称");
         }
         parsed.provider = provider;
         index += 1;
@@ -769,8 +851,7 @@ function writeDesktopAppStatus(status, writeMessage) {
   }
 }
 
-function writeDesktopAppConfig(configPath, next) {
-  const document = readGatewayConfig(configPath);
+function writeDesktopAppConfig(configPath, next, document) {
   validateGatewayConfigDocument(document);
   const codex = table(document.codex);
   const previous = codex.desktop_app;
@@ -792,26 +873,26 @@ async function rollbackDesktopAppConfig({
   restartAppServer,
   cause,
   phase,
+  assertCurrentConfiguration,
+  saveConfiguration,
 }) {
   let rollbackError;
-  let rollbackPhase = "读取并校验当前配置";
+  let rollbackPhase = "确认配置及目标未变化（变化时拒绝覆盖）";
   try {
+    assertCurrentConfiguration();
     const document = readGatewayConfig(configPath);
     const validated = validateGatewayConfigDocument(document);
-    const codex = table(document.codex);
     const current = desktopAppConfig(validated.codex.desktop_app);
     if (JSON.stringify(current) !== JSON.stringify(applied)) {
       rollbackPhase = "配置已被其他操作修改，拒绝覆盖";
       throw new Error("config.toml 在 Desktop App 配置回滚前已发生变化");
     }
     rollbackPhase = "保存原共享配置";
-    if (previous === undefined) delete codex.desktop_app;
-    else codex.desktop_app = previous;
-    document.codex = codex;
-    validateGatewayConfigDocument(document);
-    writeGatewayConfig(configPath, document);
+    saveConfiguration(previous);
     rollbackPhase = "原共享配置已恢复，重启 App Server";
+    assertCurrentConfiguration();
     await restartAppServer();
+    assertCurrentConfiguration();
   } catch (error) {
     rollbackError = error;
   }
@@ -1167,7 +1248,7 @@ function resolveDesktopAppSocketPath(appServer, provider) {
   const socketPath = index < 0 ? undefined : appServer.socketPaths[index + 1];
   if (typeof socketPath !== "string" || socketPath.length === 0) {
     if (provider === aggregateProviderId) {
-      throw new Error("聚合模式需要至少两个已配置的 API Key 切换提供商；Desktop 共享另要求主 Provider 为 OpenAI");
+      throw new Error("聚合模式暂时关闭，请选择独立 Provider；已有聚合会话和数据保留");
     }
     throw new Error("Desktop Provider 未配置；请使用完整、已配置的 Provider ID");
   }

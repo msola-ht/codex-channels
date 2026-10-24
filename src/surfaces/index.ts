@@ -30,11 +30,11 @@ export {
   supersedesSurfaceSnapshot,
 } from "./delivery-policy.js";
 export {
-  SurfaceInputCoalescer,
-  type SurfaceInputBatchResult,
-  type SurfaceInputCoalescerOptions,
+  SurfaceInputBatcher,
+  type SurfaceInputSubmissionResult,
+  type SurfaceInputBatcherOptions,
   type SurfaceInputPart,
-} from "./surface-input-coalescer.js";
+} from "./surface-input-batcher.js";
 export {
   ManagedAudioStore,
   maximumManagedAudioBytes,
@@ -56,7 +56,6 @@ export {
   formatConversationScheduledRuns,
   formatConversationScheduledTasks,
 } from "./conversation-scheduled-task-command-format.js";
-export { setModelDisplayAliases } from "./provider-format.js";
 export { canReviewConversationHook } from "./conversation-hook-command-format.js";
 export { canPreserveWeixinHookReviewText } from "./weixin/markdown-sanitize.js";
 export type {

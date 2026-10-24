@@ -3,14 +3,16 @@ import type { Socket } from "node:net";
 import { requestPrivateIpcJson, PrivateIpcServer } from "../../runtime/private-ipc.mjs";
 import type { RelayMetric } from "./relay-metric.js";
 import { validRequestTiming } from "../../runtime/request-timing.mjs";
+import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
+import { validRequestActivity } from "../../runtime/request-activity.mjs";
 
 export interface RelayMetricEnvelope { version: 1; providerId: string; relayRequestId: string; sample: RelayMetric }
 export type RelayMetricRejection = "invalid_sample" | "unknown_provider" | "queue_full" | "closing" | "unsupported_version";
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const identity = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
-const sampleKeys = [...modelRequestDiagnosticKeys, "traffic", "source", "threadId", "turnId", "relayRequestId", "callerId", "keyId", "credentialGeneration", "provider", "requestModel", "userAgent",
+const sampleKeys = [...modelRequestDiagnosticKeys, "activity", "traffic", "source", "threadId", "turnId", "relayRequestId", "callerId", "keyId", "credentialGeneration", "provider", "requestModel", "userAgent", "upstreamUrl",
   "responseModel", "reasoningEffort", "responseFormat", "status", "deliveryStatus", "requestStartedAtMs", "responseCompletedAtMs", "totalDurationMs", "firstTokenMs", "responseTimeMs", "generationTiming",
-  "httpStatus", "errorCode", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"];
+  "httpStatus", "errorCode", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens", "requestBytes"];
 
 export class RelayMetricsServer {
   private readonly server: PrivateIpcServer;
@@ -73,11 +75,13 @@ function validSample(value: unknown, provider: unknown, requestId: unknown): val
       || typeof provider !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(provider) || sample.provider !== provider
       || typeof sample.callerId !== "string" || !identity.test(sample.callerId) || typeof sample.keyId !== "string" || !identity.test(sample.keyId)
       || !Number.isSafeInteger(sample.credentialGeneration) || Number(sample.credentialGeneration) < 1
-      || !["json", "sse"].includes(String(sample.responseFormat)) || !["completed", "failed", "incomplete"].includes(String(sample.status))
-      || !["finished", "disconnected", "failed"].includes(String(sample.deliveryStatus))) return false;
+      || typeof sample.responseFormat !== "string" || !["json", "sse"].includes(sample.responseFormat)
+      || typeof sample.status !== "string" || !["completed", "failed", "incomplete"].includes(sample.status)
+      || typeof sample.deliveryStatus !== "string" || !["finished", "disconnected", "failed"].includes(sample.deliveryStatus)) return false;
     if (sample.traffic !== undefined) {
       const traffic = record(sample.traffic);
-      if (Object.keys(traffic).some(key => !["label", "session", "interaction"].includes(key)) || !["relay.chat", "relay.responses"].includes(String(traffic.label))
+      if (Object.keys(traffic).some(key => !["label", "session", "interaction"].includes(key))
+        || typeof traffic.label !== "string" || !["relay.chat", "relay.responses"].includes(traffic.label)
         || typeof traffic.session !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:-[1-9][0-9]*)?$/u.test(traffic.session)
         || !Number.isSafeInteger(traffic.interaction) || Number(traffic.interaction) < 1) return false;
     }
@@ -85,6 +89,8 @@ function validSample(value: unknown, provider: unknown, requestId: unknown): val
       || sample.userAgent.length > 512 || [...sample.userAgent].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))) return false;
     if (sample.reasoningEffort !== undefined && (typeof sample.reasoningEffort !== "string" || sample.reasoningEffort.length < 1
       || sample.reasoningEffort.length > 64 || [...sample.reasoningEffort].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))) return false;
+    if (sample.upstreamUrl != null && (typeof sample.upstreamUrl !== "string" || sanitizeModelRequestUrl(sample.upstreamUrl) !== sample.upstreamUrl)) return false;
+    if (sample.activity != null && !validRequestActivity(sample.activity)) return false;
     for (const key of ["requestModel", "responseModel", "errorCode"]) {
       const text = sample[key];
       if (text === undefined && key !== "requestModel") continue;
@@ -95,7 +101,7 @@ function validSample(value: unknown, provider: unknown, requestId: unknown): val
     for (const key of ["requestStartedAtMs", "responseCompletedAtMs", "totalDurationMs"]) {
       if (typeof sample[key] !== "number" || !Number.isFinite(sample[key]) || Number(sample[key]) < 0) return false;
     }
-    for (const key of ["firstTokenMs", "httpStatus", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]) {
+    for (const key of ["firstTokenMs", "httpStatus", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens", "requestBytes"]) {
       const number = sample[key];
       if (number === undefined) continue;
       if (typeof number !== "number" || !Number.isFinite(number) || number < 0

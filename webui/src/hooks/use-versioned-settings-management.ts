@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { useApi } from "@/hooks/use-api"
+import { isUnconfirmedManagementWrite, useManagementReadback } from "@/hooks/use-management-readback"
 import { ApiClientError } from "@/lib/api"
 import { useTranslation } from "@/hooks/use-translation"
 import { translateApiError, translateSettingErrorCode } from "@/lib/i18n/translate"
@@ -17,6 +18,7 @@ interface VersionedSettingsManagementOptions<Snapshot extends VersionedSnapshot,
   update: UpdateRequest<Setting>
   revisionOf: (snapshot: Snapshot) => string
   currentValue: (snapshot: Snapshot, setting: Setting) => unknown
+  confirmationIntent?: (setting: Setting) => PendingSetting["intent"]
 }
 
 export function useVersionedSettingsManagement<Snapshot extends VersionedSnapshot, Setting>({
@@ -25,6 +27,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
   update,
   revisionOf,
   currentValue,
+  confirmationIntent,
 }: VersionedSettingsManagementOptions<Snapshot, Setting>) {
   const { t } = useTranslation()
   const request = useApi(load, [])
@@ -34,20 +37,14 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
   const [saving, setSaving] = useState(false)
   const [pending, setPending] = useState<{ setting: Setting; revision: string; value: PendingSetting } | null>(null)
   const [actionResult, setActionResult] = useState<SettingMutationPreview | null>(null)
-  const [writeUnconfirmed, setWriteUnconfirmed] = useState(false)
-  const [readbackBaseline, setReadbackBaseline] = useState<Snapshot | null>(null)
+  const { writeUnconfirmed, readbackRequired, requireReadback } = useManagementReadback(request)
   const operation = useRef<AbortController | null>(null)
   useEffect(() => () => operation.current?.abort(), [])
   useEffect(() => { if (request.error !== null && operation.current === null) setPending(null) }, [request.error, saving])
-  useEffect(() => {
-    if (readbackBaseline !== null && data !== null && data !== readbackBaseline && !request.loading && request.error === null) {
-      setReadbackBaseline(null)
-    }
-  }, [data, readbackBaseline, request.loading, request.error])
 
   const previewSetting = useCallback(async (setting: Setting, label: SettingLabel) => {
     const snapshot = data
-    if (snapshot === null || readbackBaseline !== null || request.loading || request.error !== null || saving || operation.current !== null || pending !== null) return
+    if (snapshot === null || readbackRequired || request.loading || request.error !== null || saving || operation.current !== null || pending !== null) return
     const controller = new AbortController()
     operation.current = controller
     setSaving(true)
@@ -62,6 +59,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
           kind: typeof setting === "object" && setting !== null && "kind" in setting ? String(setting.kind) : typeof label === "string" ? label : label.key,
           before: currentValue(snapshot, setting),
           value: result.value,
+          intent: confirmationIntent?.(setting),
           label,
           activation: result.activation,
           ...(result.confirmationToken === undefined ? {} : { confirmationToken: result.confirmationToken }),
@@ -75,12 +73,12 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
       if (operation.current === controller) operation.current = null
       if (!controller.signal.aborted) setSaving(false)
     }
-  }, [currentValue, data, preview, refetch, revisionOf, request.loading, request.error, saving, pending, readbackBaseline])
+  }, [confirmationIntent, currentValue, data, preview, refetch, revisionOf, request.loading, request.error, saving, pending, readbackRequired])
 
   const confirmSetting = useCallback(async (): Promise<boolean> => {
     const snapshot = data
     const pendingSetting = pending
-    if (snapshot === null || readbackBaseline !== null || pendingSetting === null || operation.current !== null || saving || request.loading || request.error !== null) return false
+    if (snapshot === null || readbackRequired || pendingSetting === null || operation.current !== null || saving || request.loading || request.error !== null) return false
     const controller = new AbortController()
     operation.current = controller
     setSaving(true)
@@ -89,19 +87,22 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
       const result = await update(pendingSetting.revision, pendingSetting.setting, pendingSetting.value.confirmationToken, controller.signal)
       if (controller.signal.aborted) return false
       setPending(null)
-      setLastAppliedSetting(pendingSetting.setting)
+      if (result.consistency !== "unknown") setLastAppliedSetting(pendingSetting.setting)
       setActionResult(result)
-      setWriteUnconfirmed(false)
-      setReadbackBaseline(snapshot)
+      requireReadback(snapshot, result.consistency === "unknown")
       refetch()
-      return true
+      return result.consistency !== "unknown"
     } catch (error) {
       if (!controller.signal.aborted) {
         setPending(null)
         handleError(error, pendingSetting.setting, refetch, () => setPending(null), setActionError)
-        if (!(error instanceof ApiClientError) || (error.status >= 500 && error.code !== "management_audit_unavailable")) {
-          setWriteUnconfirmed(true)
-          setReadbackBaseline(snapshot)
+        if (isUnconfirmedManagementWrite(error)) {
+          const committed = error instanceof ApiClientError && error.code === "gateway_config_saved_cleanup_failed"
+          if (committed) {
+            setLastAppliedSetting(pendingSetting.setting)
+            setActionResult(null)
+          }
+          requireReadback(snapshot, !committed)
           refetch()
         }
       }
@@ -110,7 +111,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
       if (operation.current === controller) operation.current = null
       if (!controller.signal.aborted) setSaving(false)
     }
-  }, [data, pending, refetch, update, request.loading, request.error, saving, readbackBaseline])
+  }, [data, pending, refetch, update, request.loading, request.error, saving, readbackRequired, requireReadback])
 
   const cancelSetting = useCallback(() => {
     if (operation.current !== null) return
@@ -132,7 +133,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
     lastAppliedSetting,
     actionResult,
     writeUnconfirmed,
-    readbackRequired: readbackBaseline !== null,
+    readbackRequired,
     actionError: actionError === null ? null : translateSettingErrorCode(t, actionError.code, actionError.kind),
     saving,
     previewSetting,

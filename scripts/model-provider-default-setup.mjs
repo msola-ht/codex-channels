@@ -1,10 +1,8 @@
 import * as clackPrompts from "@clack/prompts";
-import { join } from "node:path";
-import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   loadManagedModelProviderSettings,
-  managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   readCodexUserConfigSnapshot,
@@ -12,6 +10,7 @@ import {
 } from "./codex-user-config.mjs";
 import {
   applyManagedProviderDefaultChange,
+  previewManagedProviderDefaultChange,
 } from "./model-provider-default-management.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
@@ -44,22 +43,26 @@ export async function runModelProviderDefaultSetup({
     if (!selectedModel) {
       throw new Error(`${selected.displayName} 不支持模型：${model}`);
     }
-    output.write("默认模型只修改所选账户；该模型的默认思考等级由共享模型目录的账户共用，其他账户使用同一模型时也会采用新等级。\n");
-    const definitions = loadManagedModelProviderDefinitions(environment);
-    const definition = definitions.find((entry) => entry.id === selected.provider);
-    if (!definition) throw new Error("Provider 定义已变化，请重新选择");
-    const catalogPath = join(managedProviderDirectory(environment, definition), definition.catalogFileName);
-    const sharedIds = new Set(definitions.filter((entry) =>
-      join(managedProviderDirectory(environment, entry), entry.catalogFileName) === catalogPath).map((entry) => entry.id));
-    output.write(`当前共享目录且包含此模型的账户：${configured.filter((entry) => sharedIds.has(entry.provider)
-      && entry.models.some((candidate) => candidate.model === model)).map((entry) => entry.displayName).join("、")}。\n`);
     const reasoningEffort = await prompt.selectReasoningEffort(selected, selectedModel);
-    const result = await applyManagedProviderDefaultChange({
+    if (!isDeepStrictEqual(selected, loadManagedModelProviderSettings(environment).find(candidate => candidate.provider === selected.provider))) {
+      throw new Error("账户或模型目录在选择期间已变化，请重新打开默认模型设置");
+    }
+    const input = {
       provider: selected.provider,
       model,
       reasoningEffort,
-    }, {
+    };
+    const preview = previewManagedProviderDefaultChange(input, { environment });
+    output.write(`默认模型仅设置账户：${preview.effects.defaultModelProviders.join("、")}；${preview.before.defaultModel} → ${model}。\n`);
+    output.write(`共享模型 ${model} 的默认思考等级：${preview.before.reasoningEffort} → ${reasoningEffort}；影响账户：${preview.effects.reasoningEffortProviders.join("、")}。\n`);
+    output.write(`默认选择此模型的 Profile 等级同步账户：${preview.effects.profileReasoningEffortProviders.join("、") || "无"}。\n`);
+    if (!preview.willChange) {
+      output.write("当前默认模型与共享思考等级未变化；确认后仅复核配置，不写入文件。\n");
+    }
+    if (await prompt.confirm(preview) !== true) return { action: "back" };
+    const result = await applyManagedProviderDefaultChange(input, {
       environment,
+      preview,
       loadProviders: () => {
         const current = loadManagedModelProviderSettings(environment);
         if (current.find((candidate) => candidate.provider === selected.provider)?.mode !== selected.mode) {
@@ -70,20 +73,33 @@ export async function runModelProviderDefaultSetup({
       readConfigSnapshot,
       writeConfigEdits,
     });
+    const activationResult = configActivationResult(result.activation);
+    if (result.action === "unchanged") {
+      writeGatewayConfigActivationNotice(output, environment, activationResult);
+      return {
+        action: "unchanged",
+        provider: selected.provider,
+        model,
+        reasoningEffort,
+        mode: result.provider.mode,
+        activation: result.activation,
+        activationResult,
+      };
+    }
     output.write(`${result.provider.displayName} 默认模型已设为 ${result.model.id}。\n`);
     output.write(`模型上下文：${result.model.contextWindow} tokens。\n`);
-    output.write(`共享模型目录中的默认思考等级：${reasoningEffort}。\n`);
+    output.write(`共享模型 ${model} 的默认思考等级：${reasoningEffort}；影响账户：${result.effects.reasoningEffortProviders.join("、")}。\n`);
     output.write("新会话使用该默认值；恢复历史会话仍使用 Thread 原有模型。\n");
-    output.write("已清除当前主配置或 Provider Profile 的上下文窗口与自动压缩覆盖，恢复模型目录与上游默认规则；窗口请在「受管模型目录上下文窗口」中按模型名统一设置。\n");
-    writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
+    output.write("窗口请在「模型管理 → 所属提供商 → 模型上下文窗口」中设置；同族账户共享。\n");
+    writeGatewayConfigActivationNotice(output, environment, activationResult);
     return {
       action: "configured",
       provider: selected.provider,
       model,
       reasoningEffort,
       mode: result.provider.mode,
-      activation: "restart-app-server",
-      activationResult: configActivationResult("restart-app-server"),
+      activation: result.activation,
+      activationResult,
     };
   } catch (error) {
     if (allowBack && error instanceof ModelProviderDefaultSetupCancelled) {
@@ -123,7 +139,7 @@ function createPrompter(prompts, configured, { allowBack }) {
     },
     selectReasoningEffort: async (_provider, model) => {
       const value = await prompts.select({
-        message: `选择 ${model.displayName} 默认思考等级`,
+        message: `选择 ${model.displayName} 的共享默认思考等级（影响同族账户）`,
         initialValue: model.reasoningEffort,
         options: model.reasoningEfforts.map((option) => ({
           value: option.effort,
@@ -133,6 +149,10 @@ function createPrompter(prompts, configured, { allowBack }) {
       });
       return requirePromptValue(prompts, value);
     },
+    confirm: async () => requirePromptValue(prompts, await prompts.confirm({
+      message: "确认保存账户默认模型与共享模型思考等级？",
+      initialValue: false,
+    })),
   };
 }
 

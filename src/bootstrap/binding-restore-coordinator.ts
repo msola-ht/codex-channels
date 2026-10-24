@@ -21,6 +21,7 @@ interface PendingBindingRestore {
   binding: ConversationBinding;
   occupiedNotified: boolean;
   failureCount: number;
+  retryable: boolean;
 }
 
 export interface ScheduledBindingRecoveryPort {
@@ -59,6 +60,7 @@ export class BindingRestoreCoordinator {
   constructor(private readonly options: BindingRestoreCoordinatorOptions) {}
 
   isRestoring(threadId: string): boolean {
+    this.prunePendingRestores();
     const provider = this.options.codex.knownProvider(threadId);
     return this.pendingBindingRestores.has(threadId)
       || this.restoringThreadIds.has(threadId)
@@ -66,6 +68,7 @@ export class BindingRestoreCoordinator {
   }
 
   hasPending(threadId: string): boolean {
+    this.prunePendingRestores();
     return this.pendingBindingRestores.has(threadId);
   }
 
@@ -143,6 +146,8 @@ export class BindingRestoreCoordinator {
               || scheduledThreadIds.has(binding.threadId)
             )
             && !this.restoringThreadIds.has(binding.threadId)
+            && (provider !== undefined || requestedThreadIds !== undefined
+              || this.pendingBindingRestores.get(binding.threadId)?.retryable !== false)
             && (requestedThreadIds === undefined
               || requestedThreadIds.has(binding.threadId))
             && (provider === undefined || bindingProvider === provider)
@@ -176,8 +181,6 @@ export class BindingRestoreCoordinator {
     };
     const canRestore = (binding: ConversationBinding): boolean =>
       isConnectionCurrent(binding) && this.isCurrentBinding(binding);
-    const activity = new Map([...candidateThreadIds].map(threadId =>
-      [threadId, this.options.trackThreadActivity(threadId)]));
     let failures: SubscriptionRestoreFailure[];
     try {
       const scheduledProviders = new Map<string, string>();
@@ -189,14 +192,20 @@ export class BindingRestoreCoordinator {
       }
       failures = await this.options.router.restoreSubscriptions(
         (_target, binding) => canRestore(binding),
-        (binding, thread) => {
-          if (!canRestore(binding)) return;
-          bindingProviders.set(binding.threadId, this.options.codex.knownProvider(binding.threadId));
-          restoredThreadIds.add(binding.threadId);
-          restoredBindings.set(binding.threadId, binding);
-          // Notifications received during resume are newer than its snapshot.
-          activity.get(binding.threadId)?.restore(binding.target,
-            thread.status.type === "active" ? thread.activeTurnId : null);
+        (threadId) => {
+          const activity = this.options.trackThreadActivity(threadId);
+          return {
+            restored: (binding, thread) => {
+              if (!canRestore(binding)) return;
+              bindingProviders.set(binding.threadId, this.options.codex.knownProvider(binding.threadId));
+              restoredThreadIds.add(binding.threadId);
+              restoredBindings.set(binding.threadId, binding);
+              // Notifications received during resume are newer than its snapshot.
+              activity.restore(binding.target,
+                thread.status.type === "active" ? thread.activeTurnId : null);
+            },
+            stop: () => activity.stop(),
+          };
         },
         (binding) => {
           const modelProvider = scheduledProviders.get(binding.threadId);
@@ -235,7 +244,7 @@ export class BindingRestoreCoordinator {
               target: binding.target,
               threadId,
               background: true,
-              message: "后台任务已在 Gateway 离线期间结束，可通过 /resume 查看完整会话。",
+              message: "恢复检查确认原后台会话已无待处理任务，已解除后台绑定；可通过 /resume 查看完整会话。",
             }, true);
           } else if (!canRestore(binding)) {
             restoredThreadIds.delete(threadId);
@@ -252,7 +261,6 @@ export class BindingRestoreCoordinator {
         }
       }
     } finally {
-      for (const observer of activity.values()) observer.stop();
       for (const threadId of candidateThreadIds) {
         this.restoringThreadIds.delete(threadId);
       }
@@ -281,6 +289,11 @@ export class BindingRestoreCoordinator {
     if (this.stopped) return;
     for (const failure of failures) {
       if (!failure.bindingRemoved && !canRestore(failure.binding)) continue;
+      const background = this.options.router.isBackgroundThread(failure.binding.threadId);
+      // Background/scheduled Runs have a separate authoritative recovery owner;
+      // keep retrying rather than stranding a Run that cannot be resumed by /resume.
+      const retryable = failure.reason !== "history-unavailable"
+        || background || scheduledThreadIds.has(failure.binding.threadId);
       this.options.logger.warn(
         {
           err: failure.error,
@@ -289,6 +302,8 @@ export class BindingRestoreCoordinator {
         },
         failure.bindingRemoved
           ? "恢复 Codex Thread 订阅永久失败，已移除持久化绑定"
+          : !retryable
+          ? "恢复 Codex Thread 缺少历史记录，已保留绑定并暂停自动重试"
           : "恢复 Codex Thread 订阅暂时失败，已保留持久化绑定",
       );
       if (failure.bindingRemoved) {
@@ -298,14 +313,28 @@ export class BindingRestoreCoordinator {
       const previous = this.pendingBindingRestores.get(failure.binding.threadId);
       const failureCount = (previous?.failureCount ?? 0) + 1;
       const shouldNotifyOccupied = failure.reason === "active-writer"
-        || (failure.reason === "other" && failureCount >= escalationAttempts);
+        || ((failure.reason === "other" || (failure.reason === "history-unavailable" && retryable))
+          && failureCount >= escalationAttempts);
       const occupiedNotified = previous?.occupiedNotified === true
         || shouldNotifyOccupied;
       this.pendingBindingRestores.set(failure.binding.threadId, {
         binding: failure.binding,
         occupiedNotified,
         failureCount,
+        retryable,
       });
+      if (failure.reason === "history-unavailable"
+        && (retryable ? !previous : previous?.retryable !== false)) {
+        this.options.output.publish({
+          type: "warning",
+          target: failure.binding.target,
+          threadId: failure.binding.threadId,
+          background,
+          message: retryable
+            ? "后台会话缺少可恢复的历史记录，原会话和绑定已保留，将继续尝试恢复订阅。请核对后台任务及 /schedule 状态；已提交的任务不会自动重跑。"
+            : "会话缺少可恢复的历史记录，自动恢复已暂停，原会话和绑定已保留。请用 /new 新建，或在历史可用后用 /resume 显式重试；新建时若提示速度档位未知，请先用 /fast 明确选择。",
+        }, true);
+      }
       if (shouldNotifyOccupied && !previous?.occupiedNotified) {
         this.publishAvailability(failure.binding, "occupied");
       }
@@ -313,8 +342,9 @@ export class BindingRestoreCoordinator {
     const bindingCount = this.options.router.allBindings().length;
     if (bindingCount > 0) {
       this.options.logger.info(
-        { bindings: bindingCount },
-        "已恢复外部会话与 Codex Thread 绑定",
+        { bindings: bindingCount, restored: restoredThreadIds.size,
+          pending: this.pendingBindingRestores.size },
+        "Codex Thread 订阅恢复检查已完成",
       );
     }
     if (this.pendingBindingRestores.size === 0) {
@@ -335,7 +365,7 @@ export class BindingRestoreCoordinator {
     this.prunePendingRestores();
     if (
       this.stopped
-      || this.pendingBindingRestores.size === 0
+      || ![...this.pendingBindingRestores.values()].some(pending => pending.retryable)
       || this.restoreTimer
       || this.restoreTasks.size > 0
     ) {
@@ -347,7 +377,8 @@ export class BindingRestoreCoordinator {
     this.restoreTimer = setTimeout(() => {
       this.restoreTimer = undefined;
       if (this.stopped) return;
-      const requestedThreadIds = new Set(this.pendingBindingRestores.keys());
+      const requestedThreadIds = new Set([...this.pendingBindingRestores]
+        .filter(([, pending]) => pending.retryable).map(([threadId]) => threadId));
       void this.restore(undefined, requestedThreadIds)
         .catch((error) => {
           if (!this.stopped) {
@@ -381,7 +412,12 @@ export class BindingRestoreCoordinator {
 
   private prunePendingRestores(): void {
     for (const [threadId, pending] of this.pendingBindingRestores) {
-      if (!this.isCurrentBinding(pending.binding)) this.pendingBindingRestores.delete(threadId);
+      if (!this.isCurrentBinding(pending.binding)
+        || (!pending.retryable && !this.options.router.subscriptionRestoreError(threadId))) {
+        this.pendingBindingRestores.delete(threadId);
+      } else if (!pending.retryable && this.options.router.isBackgroundThread(threadId)) {
+        pending.retryable = true;
+      }
     }
   }
 

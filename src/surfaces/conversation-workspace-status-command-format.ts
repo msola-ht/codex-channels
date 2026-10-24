@@ -9,7 +9,7 @@ import {
 } from "../conversation-core/index.js";
 
 import { formatRemainingRateLimitWindow, formatTimezoneLine } from "./account-format.js";
-import { formatCodexProviderLabel, formatModelDisplayName, formatServiceTier } from "./provider-format.js";
+import { formatCodexProviderLabel, formatServiceTierSetting } from "./provider-format.js";
 import { formatCacheHitRate, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
@@ -19,6 +19,9 @@ export function formatConversationWorkspaces(
 ): string {
   return toStructuredMarkdownList([
     `Workspace（${result.workspaces.length}）：`,
+    ...(!result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId)
+      ? [`原选择已失效：${result.currentWorkspaceId}。请选择下列工作区后重新发起操作。`]
+      : []),
     ...result.workspaces.flatMap((workspace, index) => [
       `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
       `工作目录：${workspace.cwd}`,
@@ -121,7 +124,10 @@ export function formatThreadApprovalsReviewer(reviewer: ThreadApprovalsReviewer 
   }
 }
 
-export function formatConversationStatus(status: ConversationStatus): string {
+export function formatConversationStatus(
+  status: ConversationStatus,
+  formatExecutionPath: (path: string) => string = path => path,
+): string {
   const lines = [
     "Codex 状态",
     formatTimezoneLine(),
@@ -131,10 +137,10 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
-    `模型：${formatModelDisplayName(status.model)}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
+    `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
     `${reasoningEffortSettingName(status.effort)}：${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    `速度：${status.threadId || status.fastModePending ? formatServiceTier(status.serviceTier) : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
+    `速度：${status.threadId || status.fastModePending ? formatServiceTierSetting(status) : "未知"}`,
     `协作模式：${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`,
     ...(isAutoApprovalReviewer(status.approvalsReviewer)
       ? [`审批方式：${formatThreadApprovalsReviewer(status.approvalsReviewer)}`]
@@ -142,6 +148,31 @@ export function formatConversationStatus(status: ConversationStatus): string {
   ];
   if (status.contextCompactionCount !== undefined) {
     lines.push(`上下文压缩：${status.contextCompactionCount} 次`);
+  }
+  if (status.threadId) {
+    const cleanPath = (path: string): string => formatExecutionPath(path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
+    const context = status.executionContext;
+    lines.push("", "会话执行目录：");
+    if (!context) {
+      lines.push("尚未取得有效的 App Server 执行上下文（可能正在恢复），不使用 Workspace 目录代替");
+    } else {
+      lines.push(`最近确认目录：${cleanPath(context.cwd)}`,
+        `运行目录列表（最近一次新建、恢复或派生的加载快照；不是实时权限清单）：`,
+        `快照对应目录：${cleanPath(context.workspaceRootsSnapshot.cwd)}`);
+      if (context.workspaceRootsSnapshot.roots.length === 0) {
+        lines.push("App Server 返回的运行目录列表为空");
+      } else {
+        lines.push(...context.workspaceRootsSnapshot.roots.map((path, index) => `- 目录 ${index + 1}：${cleanPath(path)}`));
+      }
+    }
+    lines.push("", "指令文件来源（最近一次新建、恢复或派生的加载快照）：");
+    if (status.instructionSources === undefined) {
+      lines.push("尚未取得 App Server 加载清单");
+    } else if (status.instructionSources.length === 0) {
+      lines.push("App Server 返回的文件清单为空（不代表没有其他指令）");
+    } else {
+      lines.push(...status.instructionSources.map((path, index) => `- 文件 ${index + 1}：${cleanPath(path)}`));
+    }
   }
   if (status.goal) {
     lines.push(

@@ -25,14 +25,13 @@ export interface CustomPrimaryProviderSetupOptions {
   providerId?: string;
   probeWebSocket?: typeof import("./responses-websocket-probe.mjs").probeResponsesWebSocket;
   probeModelCapabilities?: typeof import("./custom-model-capability-probe.mjs").probeCustomModelCapabilities;
-  loadModelTemplates?: (source: import("./responses-model-templates.mjs").ResponsesTemplateSource) => Promise<import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[]>;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CustomPrimaryProviderSetupClient>;
 }
 
 export function runCustomPrimaryProviderSetup(options?: CustomPrimaryProviderSetupOptions): Promise<
-  | { provider: string; model: string }
-  | { action: "back" | "cancel" }
+  | { provider: string; model: string; action?: "unchanged"; activation?: "restart-all" | "none"; activationResult?: import("./config-activation-result.mjs").ConfigActivationResult }
+  | { action: string; activation?: string }
   | undefined
 >;

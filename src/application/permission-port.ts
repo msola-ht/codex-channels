@@ -5,5 +5,5 @@ export interface PermissionProfileOption {
 }
 
 export interface PermissionQueryPort {
-  listPermissionProfiles(cwd: string): Promise<PermissionProfileOption[]>;
+  listPermissionProfiles(cwd: string, beforeSubmit?: () => void): Promise<PermissionProfileOption[]>;
 }

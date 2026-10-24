@@ -6,6 +6,7 @@ export class OpenCodeGoAccountProvisioningError extends Error {
 }
 
 export interface OpenCodeGoAccountConfigurationPreview {
+  revision: string;
   operation: "add" | "reconfigure";
   account: {
     id: string;
@@ -17,6 +18,9 @@ export interface OpenCodeGoAccountConfigurationPreview {
     default: boolean;
   };
   mode: "switching" | "exclusive";
+  previousMode?: "switching" | "exclusive";
+  credentialAction: "preserve" | "replace";
+  willChange: boolean;
   effects: {
     writesMainConfig: boolean;
     writesIsolatedProfile: boolean;
@@ -27,7 +31,7 @@ export interface OpenCodeGoAccountConfigurationPreview {
     required: boolean;
     field: "confirmExclusiveConfigChange";
   };
-  activation: "restart-all";
+  activation: "none" | "restart-all";
 }
 
 interface ProvisioningOptions {
@@ -49,6 +53,7 @@ export function previewOpencodeGoAccountConfiguration(
     contact?: string;
     mode?: "switching" | "exclusive";
     reconfigure?: boolean;
+    apiKey?: string;
   },
   options?: ProvisioningOptions,
 ): Promise<OpenCodeGoAccountConfigurationPreview>;
@@ -61,8 +66,9 @@ export function applyOpencodeGoAccountConfiguration(
     contact?: string;
     mode?: "switching" | "exclusive";
     reconfigure?: boolean;
-    apiKey: string;
+    apiKey?: string;
     confirmExclusiveConfigChange?: boolean;
+    expectedRevision?: string;
   },
   options?: ProvisioningOptions & {
     fetchImpl?: typeof fetch;
@@ -72,7 +78,7 @@ export function applyOpencodeGoAccountConfiguration(
     }>;
   },
 ): Promise<{
-  action: "configured";
+  action: "configured" | "unchanged";
   model: string;
   paths: {
     configPath: string;
@@ -81,8 +87,3 @@ export function applyOpencodeGoAccountConfiguration(
     catalogPath: string;
   };
 } & OpenCodeGoAccountConfigurationPreview>;
-
-export function configuredContextWindowByModel(
-  environment: NodeJS.ProcessEnv,
-  modelSlugs: ReadonlySet<string>,
-): Record<string, number>;

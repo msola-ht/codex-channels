@@ -3,6 +3,7 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  GatewayConfigWriteCommittedError,
   readGatewayConfig,
   validateGatewayConfigStructureDocument,
   writeGatewayConfig,
@@ -200,21 +201,24 @@ class WeixinSetupSession {
     this.#setState("saving");
     let store;
     let previous;
-    let credentialWriteAttempted = false;
+    let credentialWriteConfirmed = false;
     let configWriteAttempted = false;
     let configBeforeWrite;
+    const warnings = [];
     try {
       store = await this.#createCredentialStore(
         join(this.#dataDir, "credentials", "weixin"),
       );
       previous = await store.get(credential.accountId);
-      credentialWriteAttempted = true;
       await store.set(credential);
+      credentialWriteConfirmed = true;
       configBeforeWrite = statSync(this.#configPath, { bigint: true });
       configWriteAttempted = true;
       this.#writeConfig(this.#configPath, currentDocument);
     } catch (error) {
-      const confirmation = configWriteAttempted ? confirmWeixinConfig(
+      const committed = configWriteAttempted && error instanceof GatewayConfigWriteCommittedError;
+      if (committed) warnings.push({ code: "gateway-config-cleanup-failed" });
+      const confirmation = committed ? { applied: true } : configWriteAttempted ? confirmWeixinConfig(
         this.#configPath,
         credential.accountId,
         allowedUserIds,
@@ -231,7 +235,9 @@ class WeixinSetupSession {
         );
       } else {
         try {
-          if (store && credentialWriteAttempted) {
+          // A rejected credential write may have committed or detected concurrent
+          // material. Compensate only a write that actually confirmed success.
+          if (store && credentialWriteConfirmed) {
             if (previous) {
               await store.set(previous);
             } else {
@@ -244,7 +250,6 @@ class WeixinSetupSession {
         throw error;
       }
     }
-    const warnings = [];
     const oldAccountId = stringValue(currentExisting.account_id);
     if (oldAccountId && oldAccountId !== credential.accountId) {
       try {

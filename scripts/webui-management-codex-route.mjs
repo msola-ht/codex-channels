@@ -5,13 +5,15 @@ import {
   codexManagementError,
   assertManagementAuditWritable,
   invalidateProviderManagementSummary,
+  readManagementSnapshot,
 } from "./webui-management-operations.mjs";
 import {
   fingerprintManagementValue,
   ManagementSecurityError,
 } from "./management-security.mjs";
 
-const highRiskCodexSettingKinds = new Set(["permissions", "tool-access", "approvals-reviewer"]);
+// Bulk settings can include permission edits and must use the same confirmation gate.
+const highRiskCodexSettingKinds = new Set(["all", "permissions", "tool-access", "approvals-reviewer"]);
 
 export async function routeCodexSettingsManagement({
   environment,
@@ -25,8 +27,11 @@ export async function routeCodexSettingsManagement({
 }) {
   if (path === "/codex/settings" && request.method === "GET") {
     try {
-      sendManagementJson(response, 200, await state.loadCodexSettings({ environment }));
+      const settings = await readManagementSnapshot(request, response, state,
+        signal => state.loadCodexSettings({ environment, signal }));
+      sendManagementJson(response, 200, settings);
     } catch {
+      if (response.destroyed) return true;
       throw new ApiError(503, "codex_settings_unavailable", "App Server 用户设置暂不可用，请检查 App Server 状态");
     }
     return true;
@@ -44,7 +49,10 @@ export async function routeCodexSettingsManagement({
       const payload = {
         revision: result.previousVersion,
         value: result.value,
+        action: result.action,
+        willChange: result.willChange,
         activation: configActivationResult(result.activation),
+        ...(result.targetFingerprint === undefined ? {} : { targetFingerprint: result.targetFingerprint }),
       };
       if (highRiskCodexSettingKinds.has(body.setting?.kind)) {
         consumeHighRisk();
@@ -72,6 +80,7 @@ export async function routeCodexSettingsManagement({
       throw new ApiError(400, "invalid_json", "管理请求正文必须是对象");
     }
     let result;
+    let expectedTargetFingerprint;
     try {
       if (highRiskCodexSettingKinds.has(body.setting?.kind)) {
         consumeHighRisk();
@@ -82,7 +91,10 @@ export async function routeCodexSettingsManagement({
         const preview = {
           revision: previewResult.previousVersion,
           value: previewResult.value,
+          action: previewResult.action,
+          willChange: previewResult.willChange,
           activation: configActivationResult(previewResult.activation),
+          ...(previewResult.targetFingerprint === undefined ? {} : { targetFingerprint: previewResult.targetFingerprint }),
         };
         state.confirmations.consume(body.confirmationToken, {
           sessionId: principalId,
@@ -91,23 +103,19 @@ export async function routeCodexSettingsManagement({
           resourceRevision: body.revision,
           previewFingerprint: fingerprintManagementValue(preview),
         });
+        expectedTargetFingerprint = previewResult.targetFingerprint;
       }
       assertManagementAuditWritable(state.audit);
       result = await state.updateCodexSetting(body.setting, {
         environment,
         expectedVersion: body.revision,
+        ...(expectedTargetFingerprint === undefined ? {} : { expectedTargetFingerprint }),
       });
     } catch (error) {
       if (error instanceof ManagementSecurityError) throw error;
       throw codexManagementError(error);
     }
     invalidateProviderManagementSummary(state.providerStateCache);
-    let current = null;
-    try {
-      current = await state.loadCodexSettings({ environment });
-    } catch (error) {
-      webuiLogger.warn({ module: "settings", event: "settings.readback_failed", err: error }, "App Server 用户设置已写入，但新修订读取失败");
-    }
     let auditStatus = "recorded";
     try {
       state.audit.record({
@@ -118,18 +126,21 @@ export async function routeCodexSettingsManagement({
         inputFingerprint: fingerprintManagementValue(body.setting),
         revision: fingerprintManagementValue(result.previousVersion),
         phase: "completed",
-        resultCode: "updated",
-        recovery: current === null ? "re-read" : "none",
+        resultCode: result.action,
+        recovery: result.consistency === "unknown" ? "re-read" : "none",
       });
     } catch (error) {
       auditStatus = "degraded";
-      webuiLogger.error({ module: "audit", event: "settings.audit_failed", err: error }, "App Server 用户设置已写入，但审计记录失败");
+      webuiLogger.error({ module: "audit", event: "settings.audit_failed", err: error }, "App Server 用户设置操作已完成，但审计记录失败");
     }
     sendManagementJson(response, 200, {
-      revision: current?.version ?? null,
+      revision: result.revision,
       value: result.value,
+      action: result.action,
+      willChange: result.willChange,
       activation: configActivationResult(result.activation),
-      consistency: current === null ? "unknown" : "confirmed",
+      consistency: result.consistency,
+      writeStatus: result.writeStatus,
       auditStatus,
     });
     return true;

@@ -1,4 +1,4 @@
-import { lunaReserveModel } from "../application/index.js";
+import { lunaReserveModel, ThreadQueueError } from "../application/index.js";
 import type { ApprovalRequest } from "../approval/index.js";
 import { FileChangeApprovalContext } from "./file-change-approval-context.js";
 import type {
@@ -52,6 +52,7 @@ import type {
   ConsumeAccountRateLimitResetCreditResponse,
   ConfigReadParams,
   ConfigReadResponse,
+  ConfigWriteResponse,
   ConfigRequirementsReadResponse,
   CollaborationModeListResponse,
   GetAccountParams,
@@ -120,10 +121,12 @@ import type {
   ThreadSnapshot,
   ThreadModelSettings,
 } from "../session-routing/index.js";
+import { isThreadExecutionSettled } from "../session-routing/index.js";
 import { JsonRpcClient, JsonRpcError, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
 import { UserFacingError } from "../conversation-core/index.js";
-import { ImageReferenceUpload } from "./image-reference-upload.js";
-import { toThreadStateEvent } from "./notification-adapter.js";
+import { ImageReferenceUpload, type ProviderImageUploadRoute } from "./image-reference-upload.js";
+import { toConversationInputEvent, toThreadStateEvent } from "./notification-adapter.js";
+import { asRecord, nonEmptyString } from "./notification-parse-helpers.js";
 import {
   PINNED_THREAD_SECTION_ID,
   toThreadSession,
@@ -162,6 +165,7 @@ import {
 import { toPermissionProfilePage } from "./permission-adapter.js";
 import { toHookCatalog, toHookStateWrite } from "./hook-adapter.js";
 import {
+  rethrowThreadQueueError,
   toProtocolQueueText,
   toThreadQueueAddResult,
   toThreadQueueDeleteResult,
@@ -177,6 +181,11 @@ import {
 export interface ThreadDefaults {
   model?: string;
 }
+
+type ObservedTurnState =
+  | { type: "running"; turnId: string }
+  | { type: "completed"; turnId: string }
+  | { type: "unknown" };
 
 export class CodexAppServerClient implements
   ThreadLifecyclePort,
@@ -197,19 +206,25 @@ export class CodexAppServerClient implements
   private readonly imageUpload: ImageReferenceUpload | undefined;
   private readonly fileChanges = new FileChangeApprovalContext();
   private readonly pendingSettingsUpdates = new Set<() => void>();
+  private readonly observedTurns = new Map<string, ObservedTurnState>();
 
   constructor(
     private readonly rpc: JsonRpcClient,
     private readonly defaults: ThreadDefaults,
-    imageUploadHttp?: { upload: typeof fetch; local?: typeof fetch },
+    imageUploadHttp?: { upload: typeof fetch; local?: typeof fetch;
+      readProviderUploadRoute?: (provider: string, signal: AbortSignal) => Promise<ProviderImageUploadRoute> },
   ) {
     this.rpc.onNotification(notification => this.fileChanges.observe(notification));
-    this.rpc.onDisconnect(() => this.fileChanges.clear());
+    this.rpc.onNotification(notification => this.observeTurnState(notification));
+    this.rpc.onDisconnect(() => {
+      this.fileChanges.clear();
+      this.observedTurns.clear();
+    });
     this.imageUpload = imageUploadHttp ? new ImageReferenceUpload(rpc, imageUploadHttp.upload, imageUploadHttp.local ?? fetch,
       signal => this.rpc.request<GetAuthStatusResponse>({
         method: "getAuthStatus",
         params: { includeToken: true, refreshToken: false },
-      }, { retryOverload: false, signal })) : undefined;
+      }, { retryOverload: false, signal }), imageUploadHttp.readProviderUploadRoute) : undefined;
   }
 
   connect(): Promise<InitializeResponse> {
@@ -219,12 +234,14 @@ export class CodexAppServerClient implements
   reconnect(): Promise<InitializeResponse> {
     for (const cancel of this.pendingSettingsUpdates) cancel();
     this.fileChanges.clear();
+    this.observedTurns.clear();
     return this.rpc.reconnect();
   }
 
   close(): Promise<void> {
     for (const cancel of this.pendingSettingsUpdates) cancel();
     this.fileChanges.clear();
+    this.observedTurns.clear();
     this.imageUpload?.cancelAll();
     return this.rpc.close();
   }
@@ -245,6 +262,60 @@ export class CodexAppServerClient implements
     return this.fileChanges.get(request.threadId, request.turnId, request.itemId);
   }
 
+  private observeTurnState(notification: RpcNotification): void {
+    if (notification.method === "thread/started") {
+      const threadId = nonEmptyString(asRecord(asRecord(notification.params)?.thread)?.id);
+      if (threadId) this.observedTurns.delete(threadId);
+      return;
+    }
+    if (!["turn/started", "turn/completed", "error", "thread/status/changed", "thread/closed",
+      "thread/archived", "thread/deleted", "thread/reverted"].includes(notification.method)) return;
+    const event = toConversationInputEvent(notification);
+    const threadId = nonEmptyString(asRecord(notification.params)?.threadId);
+    if (!threadId) return;
+    const current = this.observedTurns.get(threadId);
+    if (event?.type === "thread.closed" || event?.type === "thread.archived"
+      || event?.type === "thread.deleted" || event?.type === "thread.reverted") {
+      this.observedTurns.delete(threadId);
+      return;
+    }
+    if (event?.type === "turn.started") {
+      this.rememberTurnState(threadId, { type: "running", turnId: event.turnId });
+    } else if (event?.type === "turn.completed" && event.status !== "inProgress") {
+      // A completion for an old Turn must not settle a newer Turn. Requiring
+      // its start also makes eviction and missed subscription intervals safe.
+      if (current?.type === "running" && current.turnId === event.turnId) {
+        this.rememberTurnState(threadId, { type: "completed", turnId: event.turnId });
+      } else if (current?.type === "completed" && current.turnId !== event.turnId) {
+        this.rememberTurnState(threadId, { type: "unknown" });
+      }
+    } else if (notification.method === "turn/started" || notification.method === "turn/completed") {
+      // Malformed execution boundaries cannot preserve an older terminal proof.
+      this.rememberTurnState(threadId, { type: "unknown" });
+    } else if (notification.method === "error") {
+      // Error notifications can describe a failed operation while a task stays
+      // alive. Only a later completion of the known running Turn can settle it.
+      if (event?.type !== "turn.error" || current?.type !== "running" || current.turnId !== event.turnId) {
+        this.rememberTurnState(threadId, { type: "unknown" });
+      }
+    } else if (notification.method === "thread/status/changed") {
+      if (event?.type !== "thread.status.changed" || event.status === "notLoaded") {
+        this.observedTurns.delete(threadId);
+      } else if (event.status === "active" && current?.type !== "running") {
+        this.rememberTurnState(threadId, { type: "unknown" });
+      }
+    }
+  }
+
+  private rememberTurnState(threadId: string, state: ObservedTurnState): void {
+    this.observedTurns.delete(threadId);
+    if (this.observedTurns.size >= 2_000) {
+      const oldest = this.observedTurns.keys().next().value;
+      if (oldest !== undefined) this.observedTurns.delete(oldest);
+    }
+    this.observedTurns.set(threadId, state);
+  }
+
   async listThreads(
     cwd: string,
     options: ThreadQueryOptions = {},
@@ -259,7 +330,7 @@ export class CodexAppServerClient implements
       archived: options.archived ?? false,
       ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
       ...(options.sectionId ? { sectionId: options.sectionId } : {}),
-    });
+    }, options.beforeSubmit);
   }
 
   /** CLI archive preview: include descendants across cwd and source boundaries. */
@@ -276,7 +347,7 @@ export class CodexAppServerClient implements
     });
   }
 
-  private async listThreadPages(params: ThreadListParams): Promise<ThreadSnapshot[]> {
+  private async listThreadPages(params: ThreadListParams, beforeSubmit?: () => void): Promise<ThreadSnapshot[]> {
     const threads: ThreadSnapshot[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -288,7 +359,7 @@ export class CodexAppServerClient implements
           limit: 100,
           ...(cursor ? { cursor } : {}),
         },
-      }, { retryOverload: true });
+      }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
       threads.push(...result.data.map(toThreadSnapshot));
       cursor = result.nextCursor;
       if (cursor) {
@@ -334,11 +405,11 @@ export class CodexAppServerClient implements
     return activeThreadIds.size;
   }
 
-  async listCollaborationModes(): Promise<CollaborationModePreset[]> {
+  async listCollaborationModes(beforeSubmit?: () => void): Promise<CollaborationModePreset[]> {
     const response = await this.rpc.request<CollaborationModeListResponse>({
       method: "collaborationMode/list",
       params: {},
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return response.data.flatMap((preset) => {
       if (preset.mode !== "default" && preset.mode !== "plan") {
         return [];
@@ -352,16 +423,26 @@ export class CodexAppServerClient implements
     });
   }
 
-  async readThread(threadId: string, signal?: AbortSignal): Promise<ThreadSnapshot> {
+  async readThread(threadId: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ThreadSnapshot> {
     const result = await this.rpc.request<ThreadReadResponse>({
       method: "thread/read",
       params: { threadId, includeTurns: false },
-    }, { retryOverload: true, ...(signal ? { signal } : {}) });
+    }, { retryOverload: true, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
     if (result.thread.parentThreadId !== null
       && (typeof result.thread.parentThreadId !== "string" || !result.thread.parentThreadId.trim())) {
       throw new Error("Codex Thread 响应缺少有效 parentThreadId");
     }
-    return toThreadSnapshot(result.thread);
+    const snapshot = toThreadSnapshot(result.thread);
+    if (snapshot.id !== threadId) throw new Error("Codex Thread 读取目标不一致");
+    if (snapshot.status.type === "active" || snapshot.status.type === "notLoaded"
+      || snapshot.activeTurnId !== null) {
+      const current = this.observedTurns.get(threadId);
+      if (current?.type === "completed") this.rememberTurnState(threadId, { type: "unknown" });
+    }
+    const observed = this.observedTurns.get(threadId);
+    return observed?.type === "completed"
+      ? { ...snapshot, observedTerminalTurnId: observed.turnId }
+      : snapshot;
   }
 
   async hasActiveDescendants(threadId: string, signal?: AbortSignal): Promise<boolean> {
@@ -432,7 +513,7 @@ export class CodexAppServerClient implements
     for (const id of loadedIds) {
       if (id === threadId) continue;
       const thread = await read(id);
-      if (thread.status.type === "idle" || thread.status.type === "notLoaded") continue;
+      if (isThreadExecutionSettled(thread)) continue;
       const ancestors = new Set<string>([id]);
       let parentId = thread.parentThreadId;
       let depth = 0;
@@ -461,6 +542,15 @@ export class CodexAppServerClient implements
 
   async startThread(cwd: string, options: ThreadStartOptions = {}): Promise<ThreadSession> {
     options.beforeSubmit?.();
+    if (!options.model && this.defaults.model) {
+      const models = await this.listModels(options.beforeSubmit);
+      options.beforeSubmit?.();
+      if (!models.some(model => model.model === this.defaults.model && model.available !== false)) {
+        throw new UserFacingError("model.configured-default.missing", "Configured default model unavailable in connected provider catalog", {
+          model: this.defaults.model,
+        });
+      }
+    }
     const response = await this.rpc.request<ThreadStartResponse>({
       method: "thread/start",
       params: {
@@ -475,9 +565,8 @@ export class CodexAppServerClient implements
           ? { model: options.model }
           : this.defaults.model ? { model: this.defaults.model } : {}),
         ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
-        ...(options.threadSource === "automation"
-          ? { threadSource: options.threadSource }
-          : {}),
+        // 与原生 CLI 一致标记普通会话；计划任务保留独立来源。
+        threadSource: options.threadSource === "automation" ? "automation" : "user",
         ...(options.ephemeral === true ? { ephemeral: true } : {}),
         ...(options.dynamicTools?.length
           ? { dynamicTools: options.dynamicTools.map(toProtocolDynamicTool) }
@@ -504,7 +593,7 @@ export class CodexAppServerClient implements
         sortDirection: options.sortDirection ?? "desc",
         itemsView: "summary",
       } satisfies ThreadTurnsListParams,
-    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}) });
+    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}), ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) });
     const page = toThreadTurnsPage(response);
     if (page.turns.length > limit) {
       throw new Error("Codex Turn 列表响应超过请求页大小");
@@ -512,11 +601,11 @@ export class CodexAppServerClient implements
     return page;
   }
 
-  async revertThread(threadId: string, beforeTurnId: string): Promise<ThreadRevertResult> {
+  async revertThread(threadId: string, beforeTurnId: string, beforeSubmit?: () => void): Promise<ThreadRevertResult> {
     const response = await this.rpc.request<ThreadRevertResponse>({
       method: "thread/revert",
       params: { threadId, beforeTurnId } satisfies ThreadRevertParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toThreadRevertResult(response);
   }
 
@@ -525,6 +614,7 @@ export class CodexAppServerClient implements
     cwd: string,
     options: ThreadStartOptions = {},
   ): Promise<ThreadResumeSession> {
+    options.beforeSubmit?.();
     const settings = {
       cwd,
       ...(options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy }),
@@ -533,23 +623,43 @@ export class CodexAppServerClient implements
         ? { permissions: options.permissions }
         : options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
     };
+    this.observedTurns.delete(threadId);
     const response = await this.rpc.request<ThreadResumeResponse>({
       method: "thread/resume",
       params: {
         threadId,
         ...settings,
       },
-    }, { retryOverload: false });
+    }, { retryOverload: false }).catch((error: unknown) => {
+      // Locked app-server rejects resume before subscription when stored history
+      // is missing, including loaded, not-yet-materialized Threads.
+      if (error instanceof JsonRpcError && error.code === -32600
+        && error.message === `no rollout found for thread id ${threadId}`) {
+        throw new UserFacingError("thread.resume.history-unavailable",
+          "Codex Thread resume history is unavailable");
+      }
+      throw error;
+    });
     return toThreadResumeSession(response, settings);
   }
 
-  async unsubscribeThread(threadId: string): Promise<void> {
+  async unsubscribeThread(threadId: string, beforeSubmit?: () => void): Promise<void> {
+    beforeSubmit?.();
     this.fileChanges.clearThread(threadId);
     this.cancelPendingInput(threadId);
-    await this.rpc.request<ThreadUnsubscribeResponse>({
-      method: "thread/unsubscribe",
-      params: { threadId },
-    }, { retryOverload: true });
+    try {
+      await this.rpc.request<ThreadUnsubscribeResponse>({
+        method: "thread/unsubscribe",
+        params: { threadId },
+      }, { retryOverload: true, beforeSubmit: () => {
+        beforeSubmit?.();
+        this.observedTurns.delete(threadId);
+      } });
+    } finally {
+      // Notifications already in flight may have arrived while unsubscribing;
+      // none can prove continued observation across the subscription gap.
+      this.observedTurns.delete(threadId);
+    }
   }
 
   async deleteThread(threadId: string): Promise<void> {
@@ -559,18 +669,18 @@ export class CodexAppServerClient implements
     }, { retryOverload: false });
   }
 
-  async archiveThread(threadId: string): Promise<void> {
+  async archiveThread(threadId: string, beforeSubmit?: () => void): Promise<void> {
     await this.rpc.request<ThreadArchiveResponse>({
       method: "thread/archive",
       params: { threadId },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
-  async unarchiveThread(threadId: string): Promise<ThreadSnapshot> {
+  async unarchiveThread(threadId: string, beforeSubmit?: () => void): Promise<ThreadSnapshot> {
     const response = await this.rpc.request<ThreadUnarchiveResponse>({
       method: "thread/unarchive",
       params: { threadId },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toThreadSnapshot(response.thread);
   }
 
@@ -583,6 +693,7 @@ export class CodexAppServerClient implements
   ): Promise<TurnStarted> {
     return this.submitTurnInput(threadId, input, async (protocolInput) => {
       overrides.beforeSubmit?.();
+      this.observedTurns.delete(threadId);
       const response = await this.rpc.request<TurnStartResponse>({
         method: "turn/start",
         params: {
@@ -590,6 +701,7 @@ export class CodexAppServerClient implements
           clientUserMessageId,
           input: protocolInput,
           cwd,
+          ...(overrides.turnTrigger ? { turnTrigger: overrides.turnTrigger } : {}),
           ...(overrides.model ? { model: overrides.model } : {}),
           ...(overrides.effort ? { effort: overrides.effort } : {}),
           ...(Object.hasOwn(overrides, "serviceTier")
@@ -611,13 +723,14 @@ export class CodexAppServerClient implements
         },
       }, { retryOverload: false });
       return toTurnStarted(response);
-    });
+    }, overrides.beforeSubmit);
   }
 
   async addQueueItem(
     threadId: string,
     text: string,
     clientUserMessageId: string,
+    beforeSubmit?: () => void,
   ): Promise<ThreadQueueItem> {
     const response = await this.rpc.request<ThreadQueueAddResponse>({
       method: "thread/queue/add",
@@ -626,7 +739,7 @@ export class CodexAppServerClient implements
         input: toProtocolQueueText(text),
         clientUserMessageId,
       } satisfies ThreadQueueAddParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
     return toThreadQueueAddResult(response);
   }
 
@@ -645,7 +758,8 @@ export class CodexAppServerClient implements
         ...(options.cursor ? { cursor: options.cursor } : {}),
         limit,
       } satisfies ThreadQueueListParams,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) })
+      .catch(rethrowThreadQueueError);
     const page = toThreadQueuePage(response);
     if (page.items.length > limit) {
       throw new Error("Codex Queue 列表响应超过请求页大小");
@@ -657,6 +771,7 @@ export class CodexAppServerClient implements
     threadId: string,
     queuedSubmissionId: string,
     text: string,
+    beforeSubmit?: () => void,
   ): Promise<ThreadQueueItem> {
     const response = await this.rpc.request<ThreadQueueUpdateResponse>({
       method: "thread/queue/update",
@@ -665,39 +780,60 @@ export class CodexAppServerClient implements
         queuedSubmissionId,
         input: toProtocolQueueText(text),
       } satisfies ThreadQueueUpdateParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
     return toThreadQueueUpdateResult(response);
   }
 
   async deleteQueueItem(
     threadId: string,
     queuedSubmissionId: string,
+    beforeSubmit?: () => void,
   ): Promise<{ deleted: boolean }> {
     const response = await this.rpc.request<ThreadQueueDeleteResponse>({
       method: "thread/queue/delete",
       params: { threadId, queuedSubmissionId } satisfies ThreadQueueDeleteParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
     return toThreadQueueDeleteResult(response);
   }
 
-  async reorderQueue(threadId: string, queuedSubmissionIds: string[]): Promise<void> {
+  async reorderQueue(
+    threadId: string,
+    queuedSubmissionIds: string[],
+    beforeSubmit?: () => void,
+  ): Promise<void> {
     await this.rpc.request<ThreadQueueReorderResponse>({
       method: "thread/queue/reorder",
       params: { threadId, queuedSubmissionIds } satisfies ThreadQueueReorderParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) }).catch(rethrowThreadQueueError);
   }
 
   async startQueueItem(
     threadId: string,
     queuedSubmissionId?: string,
+    beforeSubmit?: () => void,
   ): Promise<{ turnId: string }> {
+    let previous: ObservedTurnState | undefined;
+    const pending: ObservedTurnState = { type: "unknown" };
     const response = await this.rpc.request<ThreadQueueStartResponse>({
       method: "thread/queue/start",
       params: {
         threadId,
         ...(queuedSubmissionId === undefined ? {} : { queuedSubmissionId }),
       } satisfies ThreadQueueStartParams,
-    }, { retryOverload: false });
+    }, { retryOverload: false, beforeSubmit: () => {
+      beforeSubmit?.();
+      previous = this.observedTurns.get(threadId);
+      this.rememberTurnState(threadId, pending);
+    } }).catch(rethrowThreadQueueError).catch((error: unknown) => {
+      // Background cleanup uses queue/start as a dispatch barrier. A confirmed
+      // empty queue did not start a Turn; restore only if no notification,
+      // reconnect or competing submission changed the pending observation.
+      if (error instanceof ThreadQueueError && error.failure === "empty"
+        && previous && this.observedTurns.get(threadId) === pending) {
+        this.rememberTurnState(threadId, previous);
+      }
+      throw error;
+    });
     return toThreadQueueStartResult(response);
   }
 
@@ -706,8 +842,10 @@ export class CodexAppServerClient implements
     turnId: string,
     input: TurnInput[],
     clientUserMessageId: string,
+    beforeSubmit?: () => void,
   ): Promise<TurnStarted> {
     return this.submitTurnInput(threadId, input, async (protocolInput) => {
+      beforeSubmit?.();
       const response = await this.rpc.request<TurnSteerResponse>({
         method: "turn/steer",
         params: {
@@ -718,7 +856,7 @@ export class CodexAppServerClient implements
         },
       }, { retryOverload: false });
       return toTurnStarted(response);
-    });
+    }, beforeSubmit);
   }
 
   cancelPendingInput(threadId: string): boolean {
@@ -729,13 +867,15 @@ export class CodexAppServerClient implements
     threadId: string,
     input: TurnInput[],
     submit: (input: ReturnType<typeof toProtocolTurnInput>) => Promise<TurnStarted>,
+    beforeSubmit?: () => void,
   ): Promise<TurnStarted> {
     const protocolInput = toProtocolTurnInput(input);
     if (!this.imageUpload || !input.some(item => item.type === "image")) return submit(protocolInput);
-    return this.imageUpload.submit(threadId, protocolInput, submit);
+    return this.imageUpload.submit(threadId, protocolInput, submit, beforeSubmit);
   }
 
-  async interruptTurn(threadId: string, turnId: string): Promise<void> {
+  async interruptTurn(threadId: string, turnId: string, beforeSubmit?: () => void): Promise<void> {
+    beforeSubmit?.();
     this.cancelPendingInput(threadId);
     await this.rpc.request({
       method: "turn/interrupt",
@@ -743,18 +883,18 @@ export class CodexAppServerClient implements
     }, { retryOverload: false });
   }
 
-  async setThreadName(threadId: string, name: string): Promise<void> {
+  async setThreadName(threadId: string, name: string, beforeSubmit?: () => void): Promise<void> {
     await this.rpc.request({
       method: "thread/name/set",
       params: { threadId, name },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
-  async setThreadPinned(threadId: string, pinned: boolean): Promise<boolean> {
+  async setThreadPinned(threadId: string, pinned: boolean, beforeSubmit?: () => void): Promise<boolean> {
     const observed = await this.rpc.request<ThreadReadResponse>({
       method: "thread/read",
       params: { threadId, includeTurns: false },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     const current = toThreadSnapshot(observed.thread);
     if (current.id !== threadId) {
       throw new Error("Codex Thread 固定状态更新目标不一致");
@@ -766,6 +906,8 @@ export class CodexAppServerClient implements
       threadId,
       observed,
       pinned ? PINNED_THREAD_SECTION_ID : null,
+      undefined,
+      beforeSubmit,
     );
     if (updated.id !== threadId || updated.isPinned !== pinned) {
       throw new Error("Codex Thread 固定状态更新结果不一致");
@@ -778,6 +920,7 @@ export class CodexAppServerClient implements
     observed: ThreadReadResponse,
     sectionId: string | null,
     beforeThreadId?: string,
+    beforeSubmit?: () => void,
   ): Promise<ThreadSnapshot> {
     const materialized = await this.rpc.request<ThreadMetadataUpdateResponse>({
       method: "thread/metadata/update",
@@ -785,7 +928,7 @@ export class CodexAppServerClient implements
         threadId,
         gitInfo: { sha: observed.thread.gitInfo?.sha ?? null },
       },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     const stored = toThreadSnapshot(materialized.thread);
     if (stored.id !== threadId) {
       throw new Error("Codex Thread 分区元数据更新目标不一致");
@@ -797,19 +940,20 @@ export class CodexAppServerClient implements
         sectionId,
         beforeThreadId: beforeThreadId ?? null,
       },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
+    // Reconcile a submitted move even if authorization changes after the write.
     return this.readThread(threadId);
   }
 
-  async compactThread(threadId: string): Promise<void> {
+  async compactThread(threadId: string, beforeSubmit?: () => void): Promise<void> {
     await this.rpc.request({
       method: "thread/compact/start",
       params: { threadId },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
-  async listModels(): Promise<ModelOption[]> {
-    return this.listModelCatalog(false);
+  async listModels(beforeSubmit?: () => void): Promise<ModelOption[]> {
+    return this.listModelCatalog(false, false, beforeSubmit);
   }
 
   async lunaReserveModel(): Promise<ModelOption | null> {
@@ -820,6 +964,7 @@ export class CodexAppServerClient implements
   private async listModelCatalog(
     includeHidden: boolean,
     hiddenOnly = false,
+    beforeSubmit?: () => void,
   ): Promise<ModelOption[]> {
     const models: ModelOption[] = [];
     const cursors = new Set<string>();
@@ -828,7 +973,7 @@ export class CodexAppServerClient implements
       const result: ModelListResponse = await this.rpc.request<ModelListResponse>({
         method: "model/list",
         params: { limit: 100, includeHidden, ...(cursor ? { cursor } : {}) },
-      }, { retryOverload: true });
+      }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
       for (const model of result.data) {
         const mapped = toModelOption(model, includeHidden);
         if (mapped && (!hiddenOnly || model.hidden)) {
@@ -841,11 +986,11 @@ export class CodexAppServerClient implements
     return models;
   }
 
-  async writeDefaultServiceTier(tier: "fast" | "ultrafast" | "default"): Promise<void> {
+  async writeDefaultServiceTier(tier: "fast" | "ultrafast" | "default", beforeSubmit?: () => void): Promise<void> {
     await this.writeUserConfigEdits([{
       keyPath: "service_tier",
       value: tier,
-    }]);
+    }], { ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
   async writeDefaultModelSettings(model: string, effort: string): Promise<void> {
@@ -878,12 +1023,12 @@ export class CodexAppServerClient implements
     return { model, effort };
   }
 
-  async readDefaultReasoningEffort(cwd: string): Promise<string | null> {
+  async readDefaultReasoningEffort(cwd: string, _modelProvider?: string, beforeSubmit?: () => void): Promise<string | null> {
     const params: ConfigReadParams = { cwd, includeLayers: false };
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
       params,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     const effort = response.config.model_reasoning_effort;
     if (effort !== null && (typeof effort !== "string" || effort.trim() === "")) {
       throw new Error("Codex 响应缺少有效 config model_reasoning_effort");
@@ -895,11 +1040,12 @@ export class CodexAppServerClient implements
   async readUnattendedPermissionSettings(
     cwd: string,
     signal?: AbortSignal,
+    beforeSubmit?: () => void,
   ): Promise<{ sandbox: "read-only" | "workspace-write"; permissions: null }> {
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
       params: { cwd, includeLayers: false } satisfies ConfigReadParams,
-    }, { retryOverload: true, ...(signal === undefined ? {} : { signal }) });
+    }, { retryOverload: true, ...(signal === undefined ? {} : { signal }), ...(beforeSubmit ? { beforeSubmit } : {}) });
     const sandbox = response.config.sandbox_mode;
     if (response.config.default_permissions != null || (sandbox !== "read-only" && sandbox !== "workspace-write")) {
       throw new UserFacingError("scheduled-task.state.invalid",
@@ -908,27 +1054,25 @@ export class CodexAppServerClient implements
     return { sandbox, permissions: null };
   }
 
-  async readDefaultServiceTier(cwd: string): Promise<string | null> {
-    const settings = await this.readModelAccelerationSettings(cwd);
-    if (settings.serviceTier === "ultrafast" && !settings.ultrafastEnabled) return null;
-    if ((settings.serviceTier === "fast" || settings.serviceTier === "priority") && !settings.fastEnabled) return null;
+  async readDefaultServiceTier(cwd: string, modelProvider?: string, beforeSubmit?: () => void): Promise<string | null> {
+    const settings = await this.readModelAccelerationSettings(cwd, modelProvider, beforeSubmit);
     return settings.serviceTier;
   }
 
-  async readModelAccelerationSettings(cwd: string): Promise<{ fastEnabled: boolean; ultrafastEnabled: boolean; serviceTier: string | null }> {
+  async readModelAccelerationSettings(cwd: string, _modelProvider?: string, beforeSubmit?: () => void): Promise<{ fastEnabled: boolean; ultrafastEnabled: boolean; serviceTier: string | null }> {
     const params: ConfigReadParams = { cwd, includeLayers: false };
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
       params,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     const serviceTier = response.config.service_tier;
     if (serviceTier !== null && typeof serviceTier !== "string") {
       throw new Error("Codex 响应缺少有效 config service_tier");
     }
-    return { serviceTier, ...await this.readAccelerationFlags(response.config.features) };
+    return { serviceTier, ...await this.readAccelerationFlags(response.config.features, beforeSubmit) };
   }
 
-  private async readAccelerationFlags(features: unknown): Promise<{ fastEnabled: boolean; ultrafastEnabled: boolean }> {
+  private async readAccelerationFlags(features: unknown, beforeSubmit?: () => void): Promise<{ fastEnabled: boolean; ultrafastEnabled: boolean }> {
     if (features !== undefined && (features === null || typeof features !== "object" || Array.isArray(features))) {
       throw new Error("Codex 响应包含无效 config features");
     }
@@ -936,7 +1080,7 @@ export class CodexAppServerClient implements
     const { requirements, supportsIndependentSpeedModes } = await this.rpc.request<ConfigRequirementsReadResponse>({
       method: "configRequirements/read",
       params: undefined,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     if (supportsIndependentSpeedModes !== true || requirements === undefined || (requirements !== null
       && (typeof requirements !== "object" || Array.isArray(requirements)
         || requirements.featureRequirements === undefined
@@ -959,9 +1103,9 @@ export class CodexAppServerClient implements
 
   async writeUserConfigEdits(
     edits: Array<{ keyPath: string; value: JsonValue }>,
-    options: { expectedVersion?: string } = {},
-  ): Promise<void> {
-    await this.rpc.request({
+    options: { expectedVersion?: string; beforeSubmit?: () => void } = {},
+  ): Promise<Pick<ConfigWriteResponse, "status" | "version">> {
+    const response = await this.rpc.request<ConfigWriteResponse>({
       method: "config/batchWrite",
       params: {
         edits: edits.map((edit) => ({
@@ -973,20 +1117,26 @@ export class CodexAppServerClient implements
           : { expectedVersion: options.expectedVersion }),
         reloadUserConfig: true,
       },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) });
+    // Keep persistence/override semantics without exposing paths or source values.
+    return { status: response.status, version: response.version };
   }
 
-  async readUserConfigSnapshot(options: { includeApprovalsReviewerPolicy?: boolean; includeAcceleration?: boolean } = {}): Promise<{
+  async readUserConfigSnapshot(options: { includeApprovalsReviewerPolicy?: boolean; includeAcceleration?: boolean; beforeSubmit?: () => void } = {}): Promise<{
     config: Record<string, JsonValue | undefined>;
     version: string;
     toolConfig: Record<string, JsonValue | undefined>;
     approvalsReviewerPolicy?: { allowedReviewers: string[] | null; autoReviewDisabled: boolean };
     acceleration?: { fastEnabled: boolean; ultrafastEnabled: boolean };
   }> {
+    let submissionDenied = false;
+    const beforeSubmit = options.beforeSubmit && (() => {
+      try { options.beforeSubmit!(); } catch (error) { submissionDenied = true; throw error; }
+    });
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
       params: { includeLayers: true },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     const userLayer = response.layers?.find((layer) =>
       layer.name.type === "user" && layer.name.profile === null
     );
@@ -1009,7 +1159,7 @@ export class CodexAppServerClient implements
         const { requirements } = await this.rpc.request<ConfigRequirementsReadResponse>({
           method: "configRequirements/read",
           params: undefined,
-        }, { retryOverload: true });
+        }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
         if (requirements === undefined || (requirements !== null
           && (typeof requirements !== "object" || Array.isArray(requirements)
             || requirements.allowedApprovalsReviewers === undefined
@@ -1026,10 +1176,20 @@ export class CodexAppServerClient implements
           autoReviewDisabled: requirements?.featureRequirements?.auto_review === false
             || requirements?.featureRequirements?.guardian_approval === false,
         };
-      } catch {
+      } catch (error) {
+        if (submissionDenied) throw error;
         // The optional policy is unavailable; retain the valid user snapshot.
         // Settings projection exposes this as read-only and rejects writes.
         approvalsReviewerPolicy = undefined;
+      }
+    }
+    let acceleration;
+    if (options.includeAcceleration) {
+      try {
+        acceleration = await this.readAccelerationFlags(response.config.features, beforeSubmit);
+      } catch (error) {
+        if (submissionDenied) throw error;
+        // This optional capability must not hide the valid user configuration.
       }
     }
     return {
@@ -1042,23 +1202,23 @@ export class CodexAppServerClient implements
         plugins: response.config.plugins,
       },
       ...(approvalsReviewerPolicy === undefined ? {} : { approvalsReviewerPolicy }),
-      ...(options.includeAcceleration ? { acceleration: await this.readAccelerationFlags(response.config.features) } : {}),
+      ...(acceleration === undefined ? {} : { acceleration }),
     };
   }
 
-  async listHooks(cwd: string, _modelProvider: string): Promise<HookCatalog> {
+  async listHooks(cwd: string, _modelProvider: string, beforeSubmit?: () => void): Promise<HookCatalog> {
     void _modelProvider;
     const params: HooksListParams = { cwds: [cwd] };
     const response = await this.rpc.request<HooksListResponse>({
       method: "hooks/list",
       params,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toHookCatalog(response, cwd);
   }
 
-  async readHookConfigVersion(_modelProvider: string): Promise<string> {
+  async readHookConfigVersion(_modelProvider: string, beforeSubmit?: () => void): Promise<string> {
     void _modelProvider;
-    return (await this.readUserConfigSnapshot()).version;
+    return (await this.readUserConfigSnapshot({ ...(beforeSubmit ? { beforeSubmit } : {}) })).version;
   }
 
   async writeHookState(_modelProvider: string, input: {
@@ -1066,11 +1226,11 @@ export class CodexAppServerClient implements
     currentHash: string;
     action: HookAction;
     expectedVersion: string;
-  }): Promise<{ refreshFailedProviders: string[] }> {
+  }, beforeSubmit?: () => void): Promise<{ refreshFailedProviders: string[] }> {
     await this.rpc.request({
       method: "config/batchWrite",
       params: toHookStateWrite(input),
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return { refreshFailedProviders: [] };
   }
 
@@ -1092,6 +1252,8 @@ export class CodexAppServerClient implements
       params: {
         threadId,
         cwd,
+        // 用户显式派生是新的交互会话，不继承父会话的功能来源。
+        threadSource: "user",
         ...(options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy }),
         ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
         ...(options.permissions !== undefined
@@ -1100,31 +1262,35 @@ export class CodexAppServerClient implements
         ...(options.model ? { model: options.model } : {}),
         ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) });
     return toThreadSession(response);
   }
 
-  async startReview(threadId: string, target: ReviewTarget): Promise<ReviewStarted> {
+  async startReview(threadId: string, target: ReviewTarget, beforeSubmit?: () => void): Promise<ReviewStarted> {
     const response = await this.rpc.request<ReviewStartResponse>({
       method: "review/start",
       params: { threadId, target: toProtocolReviewTarget(target), delivery: "inline" },
-    }, { retryOverload: false });
+    }, { retryOverload: false, beforeSubmit: () => {
+      beforeSubmit?.();
+      this.observedTurns.delete(threadId);
+    } });
     return toReviewStarted(response);
   }
 
-  async listSkills(cwd: string): Promise<InstalledSkill[]> {
-    const response = await this.readSkills(cwd);
+  async listSkills(cwd: string, beforeSubmit?: () => void): Promise<InstalledSkill[]> {
+    const response = await this.readSkills(cwd, beforeSubmit);
     return toInstalledSkills(response, cwd);
   }
 
   async resolveSkill(
     cwd: string,
     name: string,
+    beforeSubmit?: () => void,
   ): Promise<InvocableSkill | undefined> {
-    return resolveInvocableSkill(await this.readSkills(cwd), cwd, name);
+    return resolveInvocableSkill(await this.readSkills(cwd, beforeSubmit), cwd, name);
   }
 
-  async listMcpServers(threadId?: string, signal?: AbortSignal): Promise<McpServerSummary[]> {
+  async listMcpServers(threadId?: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<McpServerSummary[]> {
     const servers: McpServerSummary[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -1138,7 +1304,7 @@ export class CodexAppServerClient implements
             ...(threadId ? { threadId } : {}),
             ...(cursor ? { cursor } : {}),
           },
-        }, { retryOverload: true, ...(signal ? { signal } : {}) });
+        }, { retryOverload: true, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
       const page = toMcpServerSummaryPage(response);
       servers.push(...page.servers);
       cursor = page.nextCursor;
@@ -1147,7 +1313,7 @@ export class CodexAppServerClient implements
     return servers;
   }
 
-  async listMcpServerDetails(threadId?: string): Promise<McpServerDetail[]> {
+  async listMcpServerDetails(threadId?: string, beforeSubmit?: () => void): Promise<McpServerDetail[]> {
     const servers: McpServerDetail[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -1160,7 +1326,7 @@ export class CodexAppServerClient implements
           ...(threadId ? { threadId } : {}),
           ...(cursor ? { cursor } : {}),
         },
-      }, { retryOverload: true });
+      }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
       const page = toMcpServerDetailPage(response);
       servers.push(...page.servers);
       cursor = page.nextCursor;
@@ -1169,21 +1335,22 @@ export class CodexAppServerClient implements
     return servers;
   }
 
-  async reloadMcpServers(signal?: AbortSignal): Promise<void> {
+  async reloadMcpServers(signal?: AbortSignal, beforeSubmit?: () => void): Promise<void> {
     await this.rpc.request<Record<string, never>>({
       method: "config/mcpServer/reload",
       params: undefined,
-    }, { retryOverload: false, ...(signal ? { signal } : {}) });
+    }, { retryOverload: false, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
   async startMcpOAuthLogin(
     name: string,
     threadId?: string,
+    beforeSubmit?: () => void,
   ): Promise<McpOAuthLogin> {
     const response = await this.rpc.request<McpServerOauthLoginResponse>({
       method: "mcpServer/oauth/login",
       params: { name, ...(threadId ? { threadId } : {}) },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toMcpOAuthLogin(name, response);
   }
 
@@ -1191,70 +1358,71 @@ export class CodexAppServerClient implements
     server: string,
     uri: string,
     threadId?: string,
+    beforeSubmit?: () => void,
   ): Promise<McpResourceReadResult> {
     const response = await this.rpc.request<McpResourceReadResponse>({
       method: "mcpServer/resource/read",
       params: { server, uri, ...(threadId ? { threadId } : {}) },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toMcpResourceReadResult(server, uri, response);
   }
 
-  async listPlugins(cwd: string): Promise<InstalledPluginCatalog> {
-    return toInstalledPlugins(await this.readInstalledPlugins(cwd));
+  async listPlugins(cwd: string, _modelProvider: string, beforeSubmit?: () => void): Promise<InstalledPluginCatalog> {
+    return toInstalledPlugins(await this.readInstalledPlugins(cwd, beforeSubmit));
   }
 
   async resolvePlugin(
     cwd: string,
     id: string,
+    _modelProvider: string,
+    beforeSubmit?: () => void,
   ): Promise<InvocablePlugin | undefined> {
-    return resolveInvocablePlugin(await this.readInstalledPlugins(cwd), id);
+    return resolveInvocablePlugin(await this.readInstalledPlugins(cwd, beforeSubmit), id);
   }
 
-  private readInstalledPlugins(cwd: string): Promise<PluginInstalledResponse> {
+  private readInstalledPlugins(cwd: string, beforeSubmit?: () => void): Promise<PluginInstalledResponse> {
     return this.rpc.request<PluginInstalledResponse>({
       method: "plugin/installed",
       params: { cwds: [cwd] },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
-  private readSkills(cwd: string): Promise<SkillsListResponse> {
+  private readSkills(cwd: string, beforeSubmit?: () => void): Promise<SkillsListResponse> {
     return this.rpc.request<SkillsListResponse>({
       method: "skills/list",
       params: { cwds: [cwd], forceReload: false },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 
-  async accountUsage(): Promise<AccountUsage> {
+  async accountUsage(beforeSubmit?: () => void): Promise<AccountUsage> {
     const response = await this.rpc.request<GetAccountTokenUsageResponse>({
       method: "account/usage/read",
       params: undefined,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toAccountUsage(response);
   }
 
-  async openAiAccountRoute(signal?: AbortSignal): Promise<OpenAiAccountRoute> {
+  async openAiAccountRoute(signal?: AbortSignal, beforeSubmit?: () => void): Promise<OpenAiAccountRoute> {
     const response = await this.rpc.request<GetAccountResponse>({
       method: "account/read",
       params: { refreshToken: false } satisfies GetAccountParams,
-    }, signal === undefined
-      ? { retryOverload: true }
-      : { retryOverload: true, signal });
+    }, { retryOverload: true, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toOpenAiAccountRoute(response);
   }
 
-  async accountThreadUsage(threadId: string): Promise<AccountThreadUsage> {
+  async accountThreadUsage(threadId: string, beforeSubmit?: () => void): Promise<AccountThreadUsage> {
     if (threadId.length === 0) {
       throw new Error("Codex Thread 用量查询缺少 threadId");
     }
     const response = await this.rpc.request<GetAccountTokenUsageResponse>({
       method: "account/usage/read",
       params: { threadId } satisfies GetAccountTokenUsageParams,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
     return toAccountThreadUsage(response, threadId);
   }
 
   async accountRateLimits(
-    options: { background?: boolean; signal?: AbortSignal } = {},
+    options: { background?: boolean; signal?: AbortSignal; beforeSubmit?: () => void } = {},
   ): Promise<AccountRateLimits> {
     const params = {
       supportsLunaReserve: true,
@@ -1263,15 +1431,15 @@ export class CodexAppServerClient implements
     const response = await this.rpc.request<GetAccountRateLimitsResponse>({
       method: "account/rateLimits/read",
       params,
-    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}) });
+    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}), ...(options.beforeSubmit ? { beforeSubmit: options.beforeSubmit } : {}) });
     return toAccountRateLimits(response);
   }
 
-  async readResetCredits(signal?: AbortSignal): Promise<OpenAiResetCreditSnapshot> {
-    if (await this.openAiAccountRoute(signal) !== "chatgpt") throw new Error("ChatGPT account required");
+  async readResetCredits(signal?: AbortSignal, beforeSubmit?: () => void): Promise<OpenAiResetCreditSnapshot> {
+    if (await this.openAiAccountRoute(signal, beforeSubmit) !== "chatgpt") throw new Error("ChatGPT account required");
     const response = await this.rpc.request<GetAccountRateLimitsResponse>({
       method: "account/rateLimits/read", params: { supportsLunaReserve: true, excludeResetCreditDetails: false },
-    }, { retryOverload: true, ...(signal ? { signal } : {}) });
+    }, { retryOverload: true, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
     const summary = response.rateLimitResetCredits;
     if (typeof response.accountId !== "string" || !response.accountId || !summary
       || !((typeof summary.availableCount === "bigint" && summary.availableCount >= 0n)
@@ -1289,11 +1457,11 @@ export class CodexAppServerClient implements
       }).sort((a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity)) };
   }
 
-  async consumeResetCredit(creditId: string, idempotencyKey: string, signal?: AbortSignal): Promise<ResetCreditOutcome> {
+  async consumeResetCredit(creditId: string, idempotencyKey: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ResetCreditOutcome> {
     const response = await this.rpc.request<ConsumeAccountRateLimitResetCreditResponse>({
       method: "account/rateLimitResetCredit/consume",
       params: { creditId, idempotencyKey } satisfies ConsumeAccountRateLimitResetCreditParams,
-    }, { retryOverload: false, ...(signal ? { signal } : {}) });
+    }, { retryOverload: false, ...(signal ? { signal } : {}), ...(beforeSubmit ? { beforeSubmit } : {}) });
     if (!["reset", "nothingToReset", "noCredit", "alreadyRedeemed"].includes(response.outcome)) throw new Error("Invalid reset outcome");
     return response.outcome;
   }
@@ -1334,14 +1502,18 @@ export class CodexAppServerClient implements
     );
   }
 
-  async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review"): Promise<void> {
+  async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review", beforeSubmit?: () => void): Promise<void> {
+    beforeSubmit?.();
     await this.confirmThreadSettings(
       threadId,
       settings => settings.approvalsReviewer === reviewer,
-      signal => this.rpc.request<ThreadSettingsUpdateResponse>({
+      signal => {
+        beforeSubmit?.();
+        return this.rpc.request<ThreadSettingsUpdateResponse>({
         method: "thread/settings/update",
         params: { threadId, approvalsReviewer: reviewer } satisfies ThreadSettingsUpdateParams,
-      }, { retryOverload: false, signal }),
+        }, { retryOverload: false, signal });
+      },
       () => new UserFacingError("autoreview.update-unconfirmed", "会话审批方式更新结果尚未确认，请重新查询状态"),
       () => new UserFacingError("autoreview.update-failed", "会话审批方式更新失败，请重新查询状态"),
     );
@@ -1406,7 +1578,7 @@ export class CodexAppServerClient implements
     });
   }
 
-  async listPermissionProfiles(cwd: string): Promise<PermissionProfileOption[]> {
+  async listPermissionProfiles(cwd: string, beforeSubmit?: () => void): Promise<PermissionProfileOption[]> {
     const profiles: PermissionProfileOption[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -1415,7 +1587,7 @@ export class CodexAppServerClient implements
         await this.rpc.request<PermissionProfileListResponse>({
           method: "permissionProfile/list",
           params: { cwd, limit: 100, ...(cursor ? { cursor } : {}) },
-        }, { retryOverload: true });
+        }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
       const page = toPermissionProfilePage(response);
       profiles.push(...page.profiles);
       cursor = page.nextCursor;
@@ -1424,27 +1596,27 @@ export class CodexAppServerClient implements
     return profiles;
   }
 
-  async getGoal(threadId: string): Promise<ThreadGoal | null> {
+  async getGoal(threadId: string, beforeSubmit?: () => void): Promise<ThreadGoal | null> {
     const response = await this.rpc.request<ThreadGoalGetResponse>({
       method: "thread/goal/get",
       params: { threadId },
-    }, { retryOverload: true });
-    return response.goal ? toThreadGoal(response.goal) : null;
+    }, { retryOverload: true, ...(beforeSubmit ? { beforeSubmit } : {}) });
+    return response.goal ? toThreadGoal(response.goal, threadId) : null;
   }
 
-  async setGoal(threadId: string, objective: string): Promise<ThreadGoal> {
+  async setGoal(threadId: string, objective: string, beforeSubmit?: () => void): Promise<ThreadGoal> {
     const response = await this.rpc.request<ThreadGoalSetResponse>({
       method: "thread/goal/set",
       params: { threadId, objective, status: "active", origin: "user" },
-    }, { retryOverload: false });
-    return toThreadGoal(response.goal);
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
+    return toThreadGoal(response.goal, threadId);
   }
 
-  async clearGoal(threadId: string): Promise<void> {
+  async clearGoal(threadId: string, beforeSubmit?: () => void): Promise<void> {
     await this.rpc.request({
       method: "thread/goal/clear",
       params: { threadId, origin: "user" },
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
   }
 }
 

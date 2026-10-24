@@ -60,7 +60,17 @@ export class ConversationSessionQueryService {
   async listSessions(
     target: ConversationTarget,
     options: ConversationSessionQuery = {},
+    assertAuthorized?: () => void,
   ): Promise<ConversationSession[]> {
+    assertAuthorized?.();
+    const { id: workspaceId, cwd } = this.router.workspace(target);
+    const beforeSubmit = () => {
+      assertAuthorized?.();
+      const current = this.router.workspace(target);
+      if (current.id !== workspaceId || current.cwd !== cwd) {
+        throw new UserFacingError("command.authorization-changed", "会话查询期间工作区已变化");
+      }
+    };
     this.cancellation.signal.throwIfAborted();
     const archiveOptions = options.archived === undefined ? {} : { archived: options.archived };
     const needsCompleteCatalog = Boolean(
@@ -70,16 +80,20 @@ export class ConversationSessionQueryService {
     );
     const all = pinnedFirst(await this.router.list(target, {
       ...archiveOptions,
+      beforeSubmit,
       ...(needsCompleteCatalog ? { fullScan: true } : {}),
     }));
+    beforeSubmit();
     this.cancellation.signal.throwIfAborted();
     const ordered = options.searchTerm
         ? await this.router.list(target, {
             ...archiveOptions,
             fullScan: true,
             searchTerm: options.searchTerm,
+            beforeSubmit,
           })
         : all;
+    beforeSubmit();
     this.cancellation.signal.throwIfAborted();
     const selectors = new Map(all.map((thread, index) => [thread.id, String(index + 1)]));
     const normalizedProvider = options.provider?.trim().toLowerCase() || null;
@@ -113,11 +127,11 @@ export class ConversationSessionQueryService {
     const start = (page - 1) * sessionListPageSize;
     const visible = sessions.slice(start, start + sessionListPageSize);
     if (this.sessionDisplayCache && !this.sessionDisplayCacheDisabled) {
-      const workspaceId = this.router.workspace(target).id;
       const archived = options.archived === true;
       // Only the page that will be rendered needs a display-cache row. Writing
       // the complete catalog on every list command was the dominant local I/O cost.
       for (const session of visible) {
+        beforeSubmit();
         const thread = ordered.find((item) => item.id === session.id);
         if (!thread) continue;
         const previous = this.useSessionDisplayCache("get", (cache) => cache.get(thread.id));
@@ -145,7 +159,9 @@ export class ConversationSessionQueryService {
       for (const session of visible) {
         // Prefer the direct local metric count. It is a single indexed query
         // and, unlike the full summary, never traverses subagent Threads.
+        beforeSubmit();
         const metricsCount = await this.localThreadTurnCount(session.id);
+        beforeSubmit();
         this.cancellation.signal.throwIfAborted();
         if ((this.sessionDisplayCacheGenerations.get(session.id) ?? 0) !== generations.get(session.id)) continue;
         if (metricsCount !== undefined && metricsCount !== null) {
@@ -173,8 +189,9 @@ export class ConversationSessionQueryService {
     ]));
     const counts = await mapWithConcurrency(visible, sessionScanConcurrency, async (session) => [
       session.id,
-      await this.cachedOrCountThreadTurns(session.id),
+      await this.cachedOrCountThreadTurns(session.id, beforeSubmit),
     ] as const);
+    beforeSubmit();
     this.cancellation.signal.throwIfAborted();
     const countByThread = new Map(
       counts.filter((entry): entry is readonly [string, number] => entry[1] !== undefined),
@@ -301,7 +318,8 @@ export class ConversationSessionQueryService {
     }
   }
 
-  private async cachedOrCountThreadTurns(threadId: string): Promise<number | undefined> {
+  private async cachedOrCountThreadTurns(threadId: string, beforeSubmit?: () => void): Promise<number | undefined> {
+    beforeSubmit?.();
     const cached = this.useSessionDisplayCache("get", (cache) => cache.get(threadId));
     if (
       cached?.turnCount !== null
@@ -313,7 +331,8 @@ export class ConversationSessionQueryService {
     }
     const signal = AbortSignal.any([this.cancellation.signal, AbortSignal.timeout(sessionScanTimeoutMs)]);
     const generation = this.sessionDisplayCacheGenerations.get(threadId) ?? 0;
-    const count = await countThreadTurns(this.threadHistory!, threadId, signal);
+    const count = await countThreadTurns(this.threadHistory!, threadId, signal, beforeSubmit);
+    beforeSubmit?.();
     if (signal.aborted || (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) !== generation) {
       return undefined;
     }
@@ -352,20 +371,28 @@ async function countThreadTurns(
   history: ThreadHistoryPort,
   threadId: string,
   signal: AbortSignal,
+  beforeSubmit?: () => void,
 ): Promise<number | undefined> {
   let count = 0;
   let cursor: string | null = null;
   const cursors = new Set<string>();
   let pages = 0;
+  let authorizationRejected = false;
+  const guard = beforeSubmit && (() => {
+    try { beforeSubmit(); } catch (error) { authorizationRejected = true; throw error; }
+  });
   try {
     do {
+      guard?.();
       signal.throwIfAborted();
       if (++pages > sessionScanMaximumPages) return undefined;
       const page = await history.listThreadTurns(threadId, {
         limit: 100,
         signal,
+        ...(guard ? { beforeSubmit: guard } : {}),
         ...(cursor ? { cursor } : {}),
       });
+      guard?.();
       signal.throwIfAborted();
       count += page.turns.length;
       cursor = page.nextCursor;
@@ -375,7 +402,8 @@ async function countThreadTurns(
       }
     } while (cursor);
     return count;
-  } catch {
+  } catch (error) {
+    if (authorizationRejected) throw error;
     return undefined;
   }
 }
@@ -431,11 +459,14 @@ export function resolveThread<T extends Pick<ConversationSession, "id" | "name">
   if (exact.length === 1) {
     return exact[0]!;
   }
+  if (exact.length > 1) {
+    throw new UserFacingError("session.selector.ambiguous", "会话选择不唯一");
+  }
   const prefix = threads.filter((thread) => thread.id.startsWith(selector));
   if (prefix.length === 1) {
     return prefix[0]!;
   }
-  const ambiguous = prefix.length > 1 || exact.length > 1;
+  const ambiguous = prefix.length > 1;
   throw new UserFacingError(
     ambiguous ? "session.selector.ambiguous" : "session.selector.not-found",
     ambiguous ? "会话选择不唯一" : "找不到指定会话",

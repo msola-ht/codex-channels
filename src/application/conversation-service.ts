@@ -34,8 +34,11 @@ import type {
 import type {
   PermissionProfileOption,
 } from "./permission-port.js";
-import type {
-  SessionRouter,
+import {
+  isThreadExecutionSettled,
+  type SessionRouter,
+  type ThreadRestoreObserver,
+  type ThreadExecutionContext,
 } from "../session-routing/index.js";
 import type {
   ThreadOccupancyPort,
@@ -49,6 +52,7 @@ import {
   gatewayUserMessageClientIdPrefix,
   usesOpenAiAccount,
   type ConversationTarget,
+  type ConversationInputEvent,
   type RateLimitSnapshot,
   type SurfaceId,
   type ThreadGoal,
@@ -60,6 +64,7 @@ import {
 import type {
   ModelSelectionPreference,
   ModelSelectionIdentity,
+  ModelSelectionRequest,
   ModelSelectionService,
   ModelSelectionState,
 } from "./model-selection-service.js";
@@ -184,6 +189,9 @@ const builtInAgentRoles: AgentRoleEntry[] = [
 ];
 
 export interface ConversationStatus {
+  instructionSources?: readonly string[];
+  executionContext?: ThreadExecutionContext;
+  selectionScope?: string;
   threadId?: string;
   threadName?: string | null;
   turnId?: string;
@@ -195,6 +203,8 @@ export interface ConversationStatus {
   modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
+  serviceTierKnown: boolean;
+  effectiveServiceTier?: string | null | undefined;
   approvalsReviewer?: ThreadApprovalsReviewer | null;
   modelPending: boolean;
   effortPending: boolean;
@@ -225,18 +235,18 @@ export interface PreparedAttachmentSubmission {
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
   prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio"): PreparedAttachmentSubmission;
-  submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission>;
-  stop(target: ConversationTarget): Promise<boolean>;
-  rename(target: ConversationTarget, name: string): Promise<void>;
-  setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean>;
-  compact(target: ConversationTarget): Promise<void>;
-  fork(target: ConversationTarget): Promise<string>;
-  togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState>;
-  startPlan(target: ConversationTarget, prompt: string): Promise<Submission>;
-  review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission>;
-  getGoal(target: ConversationTarget): Promise<ThreadGoal | null>;
-  setGoal(target: ConversationTarget, objective: string): Promise<ThreadGoal>;
-  clearGoal(target: ConversationTarget): Promise<void>;
+  submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean): Promise<Submission>;
+  stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean>;
+  rename(target: ConversationTarget, name: string, assertAuthorized?: () => void): Promise<void>;
+  setPinned(target: ConversationTarget, pinned: boolean, assertAuthorized?: () => void): Promise<boolean>;
+  compact(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
+  fork(target: ConversationTarget, assertAuthorized?: () => void): Promise<string>;
+  togglePlanMode(target: ConversationTarget, assertAuthorized?: () => void): Promise<CollaborationModeState>;
+  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void): Promise<Submission>;
+  review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void): Promise<Submission>;
+  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null>;
+  setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal>;
+  clearGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
 }
 
 /** Stable model and installed-extension boundary. */
@@ -246,95 +256,107 @@ export interface ConversationExtensionUseCases {
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { skillName: string }>;
   invokePlugin(
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { pluginName: string }>;
   listAgentRoles(): AgentRoleEntry[];
   invokeAgent(
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { roleName: string }>;
-  modelState(target: ConversationTarget): Promise<ModelSelectionState>;
-  clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState>;
-  browseProviderModels(target: ConversationTarget, provider: string): Promise<ModelSelectionState>;
-  clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState>;
-  selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity): Promise<ModelSelectionState>;
-  selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
-  selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
-  listSkills(target: ConversationTarget): Promise<InstalledSkill[]>;
-  listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]>;
-  mcpServerDetail(target: ConversationTarget, selector: string): Promise<McpServerDetail>;
-  mcpHealth(target: ConversationTarget): Promise<McpHealthReport>;
-  reloadMcpServers(target: ConversationTarget): Promise<void>;
-  loginMcpServer(target: ConversationTarget, selector: string): Promise<McpLoginResult>;
+  modelState(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
+  clearModelBrowse(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
+  browseProviderModels(target: ConversationTarget, provider: string, assertAuthorized?: () => void): Promise<ModelSelectionState>;
+  clearModelSelection(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
+  selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity, assertAuthorized?: () => void): Promise<ModelSelectionState>;
+  selectModelSetting(target: ConversationTarget, selection: ModelSelectionRequest, assertAuthorized?: () => void): Promise<ModelSelectionState>;
+  selectEffort(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState>;
+  selectFastMode(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState>;
+  listSkills(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledSkill[]>;
+  listMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpServerSummary[]>;
+  mcpServerDetail(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<McpServerDetail>;
+  mcpHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpHealthReport>;
+  reloadMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
+  loginMcpServer(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<McpLoginResult>;
   readMcpResource(
     target: ConversationTarget,
     selector: string,
     uri: string,
+    assertAuthorized?: () => void,
   ): Promise<McpResourceReadResult>;
-  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog>;
-  pluginHealth(target: ConversationTarget): Promise<PluginHealthReport>;
-  pluginDetail(target: ConversationTarget, selector: string): Promise<InstalledPlugin>;
-  listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]>;
+  listPlugins(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledPluginCatalog>;
+  pluginHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<PluginHealthReport>;
+  pluginDetail(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<InstalledPlugin>;
+  listPermissionProfiles(target: ConversationTarget, assertAuthorized?: () => void): Promise<PermissionProfileOption[]>;
 }
 
 /** Stable native Queue and paginated Revert boundary. */
 export interface ConversationQueueRevertUseCases {
-  queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem>;
-  queueList(target: ConversationTarget, page?: number): Promise<ThreadQueueListResult>;
+  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem>;
+  queueList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadQueueListResult>;
   queueUpdate(
     target: ConversationTarget,
     selector: string,
     value: string,
+    assertAuthorized?: () => void,
   ): Promise<ThreadQueueItem>;
-  queueDelete(target: ConversationTarget, selector: string): Promise<{ deleted: boolean }>;
+  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<{ deleted: boolean }>;
   queueReorder(
     target: ConversationTarget,
     selector: string,
     position: number,
+    assertAuthorized?: () => void,
   ): Promise<ThreadQueueReorderResult>;
-  queueStart(target: ConversationTarget, selector?: string): Promise<{ turnId: string }>;
-  revertList(target: ConversationTarget, page?: number): Promise<ThreadRevertListResult>;
+  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void): Promise<{ turnId: string }>;
+  revertList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadRevertListResult>;
   revertPreview(
     target: ConversationTarget,
     selector: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<ThreadRevertPreview>;
   revertConfirm(
     target: ConversationTarget,
     token: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<{ threadId: string; beforeTurnId: string }>;
 }
 
 /** Stable Session, Workspace and local project boundary. */
 export interface ConversationSessionUseCases {
   autoReview(target: ConversationTarget): ConversationAutoReviewState;
-  updateAutoReview(target: ConversationTarget, enabled: boolean, expectedThreadId?: string): Promise<ConversationAutoReviewState>;
+  updateAutoReview(target: ConversationTarget, enabled: boolean, expectedThreadId?: string, assertAuthorized?: () => void): Promise<ConversationAutoReviewState>;
   listSessions(
     target: ConversationTarget,
     options?: ConversationSessionQuery,
+    assertAuthorized?: () => void,
   ): Promise<ConversationSession[]>;
   backgroundThreadIds?(target: ConversationTarget): string[];
-  resume(target: ConversationTarget, selector: string): Promise<ConversationResumeResult>;
-  newSession(target: ConversationTarget): Promise<{
+  resume(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ConversationResumeResult>;
+  newSession(target: ConversationTarget, assertAuthorized?: () => void): Promise<{
     previousThreadId?: string;
     backgroundedThreadId?: string;
   }>;
-  archive(target: ConversationTarget): Promise<string>;
+  archive(target: ConversationTarget, assertAuthorized?: () => void): Promise<string>;
   /** Invalidate derived session display statistics after an external App Server event. */
   invalidateSessionDisplayCache?(threadId: string): void;
-  unarchive(target: ConversationTarget, selector: string): Promise<string>;
+  unarchive(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<string>;
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
   listWorkspaces(): Workspace[];
-  selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace>;
+  selectedWorkspaceId(target: ConversationTarget): string;
+  selectWorkspace(target: ConversationTarget, selector: string | { id: string }, assertAuthorized?: () => void): Promise<Workspace>;
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
+    assertAuthorized?: () => void,
   ): Promise<ThreadOccupancyReleaseResult>;
   releaseIdle?(
     target: ConversationTarget,
@@ -348,8 +370,8 @@ export interface ConversationSessionUseCases {
 export interface ConversationAccountMetricsUseCases {
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
-  providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
-  providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits>;
+  providerAccountUsage(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountUsage>;
+  providerAccountLimits(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountLimits>;
   requestMetrics(
     target: ConversationTarget,
     query?: RequestMetricsCommandQuery,
@@ -364,6 +386,7 @@ export class ConversationService implements
   ConversationAccountMetricsUseCases {
   private readonly locks = new ConversationLockCoordinator();
   private readonly attachmentInputs = new Map<string, Set<AbortController>>();
+  private readonly pendingSelections = new Set<{ threadId: string | undefined; invalidated: boolean }>();
   private readonly hookUseCases: ConversationHookService;
   private readonly queueUseCases: ThreadQueueService;
   private readonly revertUseCases: ThreadRevertService;
@@ -371,7 +394,11 @@ export class ConversationService implements
   private readonly accountMetrics: ConversationAccountMetricsService;
   private readonly lunaReserve: LunaReserveService | undefined;
   private readonly pendingBackgroundReleases = new Map<string, boolean>();
-  private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
+  private readonly backgroundReleaseAttempts = new Map<string, {
+    promise: Promise<boolean>;
+    retryRequested: boolean;
+    latestGuard: (() => boolean) | undefined;
+  }>();
   private idleReleaseEnabled = true;
   private idleReleaseGeneration = 0;
   private readonly sessionQueries: ConversationSessionQueryService;
@@ -417,6 +444,7 @@ export class ConversationService implements
       router,
       models,
       queries,
+      event => this.core.handle(event),
     );
     this.accountMetrics = new ConversationAccountMetricsService(
       queries,
@@ -464,6 +492,10 @@ export class ConversationService implements
     this.lunaReserve?.clearThread(threadId);
   }
 
+  observeLunaReserveSettings(threadId: string): void {
+    this.lunaReserve?.observeSettings(threadId);
+  }
+
   clearLunaReserveAccountState(): void {
     this.lunaReserve?.clearAccountState();
   }
@@ -475,6 +507,7 @@ export class ConversationService implements
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
+    assertAuthorized?: () => void,
   ): Promise<ThreadOccupancyReleaseResult> {
     if (!this.threadOccupancy) {
       return Promise.reject(new UserFacingError(
@@ -482,7 +515,8 @@ export class ConversationService implements
         "当前环境不支持释放会话占用",
       ));
     }
-    return this.threadOccupancy.releaseThread(target, force);
+    assertAuthorized?.();
+    return this.threadOccupancy.releaseThread(target, force, assertAuthorized);
   }
 
   touchActivity(target: ConversationTarget): void {
@@ -538,10 +572,7 @@ export class ConversationService implements
       if (!isCurrent() || isLocallyBusy()) return busy();
       const snapshot = await this.router.readThread(current.threadId, condition?.signal);
       if (!isCurrent() || isLocallyBusy()) return busy();
-      if (
-        snapshot.status.type !== "idle"
-        && snapshot.status.type !== "notLoaded"
-      ) {
+      if (!isThreadExecutionSettled(snapshot)) {
         this.touchActivity(target);
         return { status: "busy", threadId: current.threadId };
       }
@@ -550,8 +581,10 @@ export class ConversationService implements
         return busy();
       }
       if (!isCurrent() || isLocallyBusy()) return busy();
+      // An effective null lifecycle snapshot cannot prove the saved selection.
+      // Keep the binding rather than silently persisting Standard during release.
+      if (this.models.status(target).serviceTierKnown !== true) return busy();
       const modelPreference = this.models.capturePreference?.(target);
-      const activity = this.core.trackThreadActivity?.(current.threadId);
       try {
         const released = await this.router.releaseIdle(target, current, snapshot, {
           isCurrent: () => isCurrent() && !isLocallyBusy(),
@@ -564,19 +597,18 @@ export class ConversationService implements
             if (!isCurrent() || isLocallyBusy()) return false;
             const latest = await this.router.readThread(current.threadId, condition?.signal);
             return isCurrent() && !isLocallyBusy()
-              && (latest.status.type === "idle" || latest.status.type === "notLoaded")
+              && isThreadExecutionSettled(latest)
               && !await this.router.hasActiveDescendants(current.threadId, condition?.signal)
               && isCurrent() && !isLocallyBusy();
           },
           canRestore: () => !condition?.signal.aborted && (condition?.canRestore() ?? true),
-          restored: (thread) => activity?.restore(target, thread.activeTurnId),
+          verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
+          observeRestore: this.observeThreadRestore,
         }, modelPreference);
         if (!released) return busy();
       } catch {
         if (condition?.canRestore() && !condition.signal.aborted) condition.restoreRequired?.();
         return busy();
-      } finally {
-        activity?.stop();
       }
       this.invalidateRevertSnapshot(target);
       this.invalidateQueueSnapshot(current.threadId);
@@ -592,7 +624,7 @@ export class ConversationService implements
     return this.accountMetrics.requestMetrics(target, query);
   }
 
-  submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
+  async submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean): Promise<Submission> {
     let input: TurnInput[];
     try {
       input = normalizeInput(value);
@@ -604,11 +636,23 @@ export class ConversationService implements
     if (input.length === 0) {
       return Promise.reject(new UserFacingError("message.empty", "消息不能为空"));
     }
-    return this.submitInput(target, input);
+    const workspace = this.router.workspace(target);
+    const assertAllowed = () => {
+      const current = this.router.workspace(target);
+      if (isAllowed?.() === false || current.id !== workspace.id || current.cwd !== workspace.cwd) {
+        throw new UserFacingError("input.authorization-changed", "输入授权或工作区已变化，请重新发送。");
+      }
+    };
+    assertAllowed();
+    return this.locked(target, () => {
+      assertAllowed();
+      return this.submitInputLocked(target, input, undefined, assertAllowed, assertAllowed);
+    });
   }
 
   closeSessionQueries(): void {
     this.sessionQueries.close();
+    this.extensionQueries.closeMcpLogins();
   }
 
   prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" = "video"): PreparedAttachmentSubmission {
@@ -680,7 +724,7 @@ export class ConversationService implements
           }
           // Once the RPC may start, a lost acknowledgment must not delete its file.
           mayHaveSubmitted = true;
-        });
+        }, assertAllowed);
       }),
     };
   }
@@ -697,7 +741,7 @@ export class ConversationService implements
       if (input.length === 0) {
         throw new UserFacingError("message.empty", "回答不能为空");
       }
-      return this.submitInputLocked(target, input, undefined, assertCurrent);
+      return this.submitInputLocked(target, input, undefined, assertCurrent, assertCurrent);
     });
   }
 
@@ -705,6 +749,7 @@ export class ConversationService implements
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { skillName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -714,13 +759,17 @@ export class ConversationService implements
         "需要提供 Skill 名称或序号及任务内容",
       );
     }
-    return this.locked(target, async () => {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
       const workspace = this.router.workspace(target);
       const skillName = await this.extensionQueries.resolveSkillName(
         workspace.cwd,
         normalizedSelector,
+        beforePrepare,
       );
-      const skill = await this.queries.resolveSkill(workspace.cwd, skillName);
+      beforePrepare();
+      const skill = await this.queries.resolveSkill(workspace.cwd, skillName, beforePrepare);
+      beforePrepare();
       if (!skill) {
         throw new UserFacingError(
           "skill.not-found",
@@ -737,7 +786,8 @@ export class ConversationService implements
           name: skill.name,
           path: skill.path,
         },
-      ], { kind: "skill", name: skill.name });
+      ], { kind: "skill", name: skill.name },
+      threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized);
       return { ...submission, skillName: skill.name };
     });
   }
@@ -746,6 +796,7 @@ export class ConversationService implements
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { pluginName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -755,19 +806,24 @@ export class ConversationService implements
         "需要提供 Plugin 名称或序号及任务内容",
       );
     }
-    return this.locked(target, async () => {
-      if ((this.models.status(target).modelProvider ?? "openai") !== "openai") {
-        throw new UserFacingError(
-          "plugin.provider.unsupported",
-          "Plugin 调用当前只支持 OpenAI Session",
-        );
-      }
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const threadGuard = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
+      const provider = this.extensionQueries.pluginProvider(target);
+      const requirePluginProvider = () => {
+        if (this.extensionQueries.pluginProvider(target) !== provider) {
+          throw new UserFacingError("command.authorization-changed", "Plugin 调用所属 Provider 已变化，请重新发送任务");
+        }
+      };
+      const beforePrepare = () => { threadGuard(); requirePluginProvider(); };
       const workspace = this.router.workspace(target);
       const plugin = await this.extensionQueries.resolvePlugin(
-        workspace.cwd,
+        target,
         normalizedSelector,
+        beforePrepare,
       );
-      const resolved = await this.queries.resolvePlugin(workspace.cwd, plugin.id);
+      beforePrepare();
+      const resolved = await this.queries.resolvePlugin(workspace.cwd, plugin.id, provider, beforePrepare);
+      beforePrepare();
       if (!resolved) {
         throw new UserFacingError(
           "plugin.unavailable",
@@ -784,7 +840,11 @@ export class ConversationService implements
           name: resolved.displayName,
           path: resolved.path,
         },
-      ], { kind: "plugin", name: resolved.displayName });
+      ], { kind: "plugin", name: resolved.displayName },
+      threadId => {
+        this.commandThreadGuard(target, threadId, assertAuthorized)();
+        requirePluginProvider();
+      }, assertAuthorized);
       return { ...submission, pluginName: resolved.displayName };
     });
   }
@@ -819,6 +879,7 @@ export class ConversationService implements
     target: ConversationTarget,
     selector: string,
     task: string,
+    assertAuthorized?: () => void,
   ): Promise<Submission & { roleName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -841,7 +902,7 @@ export class ConversationService implements
         type: "text",
         text: `请使用 agent_type="${role.name}"、fork_turns="1" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
       },
-    ], { kind: "agent", name: role.name });
+    ], { kind: "agent", name: role.name }, assertAuthorized);
     return { ...submission, roleName: role.name };
   }
 
@@ -849,11 +910,14 @@ export class ConversationService implements
     target: ConversationTarget,
     input: TurnInput[],
     identity?: TurnStartIdentity,
+    assertAuthorized?: () => void,
   ): Promise<Submission> {
     this.touchActivity(target);
-    return this.locked(
+    return this.authorizedLocked(
       target,
-      () => this.submitInputLocked(target, input, identity),
+      assertAuthorized,
+      () => this.submitInputLocked(target, input, identity,
+        threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized),
     );
   }
 
@@ -862,80 +926,89 @@ export class ConversationService implements
     input: TurnInput[],
     identity?: TurnStartIdentity,
     assertCurrent?: (threadId: string) => void,
+    assertAuthorized?: () => void,
   ): Promise<Submission> {
+    assertAuthorized?.();
     this.touchActivity(target);
     if (input.some((item) => item.type === "image")) {
-      await this.models.requireInputModality(target, "image");
+      await this.models.requireInputModality(target, "image", assertAuthorized);
     }
     if (input.some((item) => item.type === "localAudio")) {
-      await this.models.requireInputModality(target, "audio");
+      await this.models.requireInputModality(target, "audio", assertAuthorized);
     }
     const active = this.core.activeTurn(target);
     const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
     if (active) {
       assertCurrent?.(active.threadId);
+      const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(active.threadId,
+        this.commandThreadGuard(target, active.threadId, () => { assertAuthorized?.(); assertCurrent?.(active.threadId); }));
       this.sessionQueries.invalidateSessionDisplayCache(active.threadId);
       try {
-        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
+        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId,
+          beforeSubmit);
       } catch (error) {
         this.recordTurnError("steer", target, active.threadId, active.turnId, error);
         throw error;
       }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
-    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent);
+    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized);
   }
 
-  queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem> {
-    return this.queueUseCases.add(target, value);
+  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem> {
+    return this.queueUseCases.add(target, value, assertAuthorized);
   }
 
-  queueList(target: ConversationTarget, page = 1): Promise<ThreadQueueListResult> {
-    return this.queueUseCases.list(target, page);
+  queueList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadQueueListResult> {
+    return this.queueUseCases.list(target, page, assertAuthorized);
   }
 
   queueUpdate(
     target: ConversationTarget,
     selector: string,
     value: string,
+    assertAuthorized?: () => void,
   ): Promise<ThreadQueueItem> {
-    return this.queueUseCases.update(target, selector, value);
+    return this.queueUseCases.update(target, selector, value, assertAuthorized);
   }
 
-  queueDelete(target: ConversationTarget, selector: string): Promise<{ deleted: boolean }> {
-    return this.queueUseCases.delete(target, selector);
+  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<{ deleted: boolean }> {
+    return this.queueUseCases.delete(target, selector, assertAuthorized);
   }
 
   queueReorder(
     target: ConversationTarget,
     selector: string,
     position: number,
+    assertAuthorized?: () => void,
   ): Promise<ThreadQueueReorderResult> {
-    return this.queueUseCases.reorder(target, selector, position);
+    return this.queueUseCases.reorder(target, selector, position, assertAuthorized);
   }
 
-  queueStart(target: ConversationTarget, selector?: string): Promise<{ turnId: string }> {
-    return this.queueUseCases.start(target, selector);
+  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void): Promise<{ turnId: string }> {
+    return this.queueUseCases.start(target, selector, assertAuthorized);
   }
 
-  revertList(target: ConversationTarget, page = 1): Promise<ThreadRevertListResult> {
-    return this.revertUseCases.list(target, page);
+  revertList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadRevertListResult> {
+    return this.revertUseCases.list(target, page, assertAuthorized);
   }
 
   revertPreview(
     target: ConversationTarget,
     selector: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<ThreadRevertPreview> {
-    return this.revertUseCases.preview(target, selector, actorId);
+    return this.revertUseCases.preview(target, selector, actorId, assertAuthorized);
   }
 
   revertConfirm(
     target: ConversationTarget,
     token: string,
     actorId?: string,
+    assertAuthorized?: () => void,
   ): Promise<{ threadId: string; beforeTurnId: string }> {
-    return this.revertUseCases.confirm(target, token, actorId);
+    return this.revertUseCases.confirm(target, token, actorId, assertAuthorized);
   }
 
   invalidateQueueSnapshot(threadId: string): void {
@@ -955,6 +1028,9 @@ export class ConversationService implements
   clearPendingSelectionsForThread(threadId: string): void {
     const target = this.router.targetForThread(threadId);
     if (target && this.router.current(target)?.threadId === threadId) {
+      for (const pending of this.pendingSelections) {
+        if (pending.threadId === threadId) pending.invalidated = true;
+      }
       this.clearPendingSelections(target);
     }
   }
@@ -962,8 +1038,9 @@ export class ConversationService implements
   listSessions(
     target: ConversationTarget,
     options: ConversationSessionQuery = {},
+    assertAuthorized?: () => void,
   ): Promise<ConversationSession[]> {
-    return this.sessionQueries.listSessions(target, options);
+    return this.sessionQueries.listSessions(target, options, assertAuthorized);
   }
 
   backgroundThreadIds(target: ConversationTarget): string[] {
@@ -973,12 +1050,15 @@ export class ConversationService implements
   async resume(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<ConversationResumeResult> {
+    assertAuthorized?.();
     this.touchActivity(target);
-    const { selected, selectionCwd } = await this.locked(target, async () => ({
+    const { selected, selectionCwd } = await this.authorizedLocked(target, assertAuthorized, async () => ({
       selectionCwd: this.router.workspace(target).cwd,
-      selected: resolveThread(pinnedFirst(await this.router.list(target)), selector.trim()),
+      selected: resolveThread(pinnedFirst(await this.router.list(target, { ...(assertAuthorized ? { beforeSubmit: assertAuthorized } : {}) })), selector.trim()),
     }));
+    assertAuthorized?.();
     const owner = this.router.targetForThread(selected.id);
     if (owner && conversationTargetKey(owner) !== conversationTargetKey(target)) {
       if (this.router.isBackgroundThread?.(selected.id)) {
@@ -1001,6 +1081,7 @@ export class ConversationService implements
       }
       const transfers = this.transfers;
       return this.lockedTargets([owner, target], async () => {
+        assertAuthorized?.();
         if (selected.cwd !== this.router.workspace(target).cwd) {
           throw new UserFacingError("thread.takeover.workspace", "只能接管当前 Workspace 中的 Codex Thread");
         }
@@ -1017,10 +1098,10 @@ export class ConversationService implements
         this.requireIdle(owner);
         this.requireIdle(target);
         const destination = this.router.current(target);
-        const ownerHasQueue = await this.probeNativeQueueItems(selected.id);
+        const ownerHasQueue = await this.probeNativeQueueItems(selected.id, assertAuthorized);
         const destinationHasQueue = destination
           && destination.threadId !== selected.id
-          ? await this.probeNativeQueueItems(destination.threadId)
+          ? await this.probeNativeQueueItems(destination.threadId, assertAuthorized)
           : false;
         this.requireIdle(owner);
         this.requireIdle(target);
@@ -1042,7 +1123,7 @@ export class ConversationService implements
             "原渠道或当前渠道仍有待处理交互，暂不能接管",
           );
         }
-        const transfer = await this.router.transferBinding(target, selected.id);
+        const transfer = await this.router.transferBinding(target, selected.id, assertAuthorized, this.observeThreadRestore);
         this.clearConversationState(owner);
         this.clearConversationState(target);
         transfers.notifyTransferred({
@@ -1056,12 +1137,11 @@ export class ConversationService implements
         };
       });
     }
-    return this.locked(target, async () => {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       const currentCwd = this.router.workspace(target).cwd;
       if (currentCwd !== selectionCwd || selected.cwd !== selectionCwd) {
         throw new UserFacingError("thread.takeover.changed", "Workspace 已变化，请重新选择会话");
       }
-      const modelPreference = this.models.capturePreference?.(target);
       const currentOwner = this.router.targetForThread(selected.id);
       if (
         currentOwner
@@ -1074,40 +1154,38 @@ export class ConversationService implements
       }
       const current = this.router.current?.(target);
       const leavesCurrent = current !== undefined && current.threadId !== selected.id;
-      if (leavesCurrent && current && await this.probeNativeQueueItems(current.threadId)) {
+      if (leavesCurrent && current && await this.probeNativeQueueItems(current.threadId, assertAuthorized)) {
         throw new UserFacingError(
           "conversation.background-queued",
           "当前任务仍有下一 Turn 排队消息，暂不能转入后台",
         );
       }
-      const selectedHasQueue = await this.probeNativeQueueItems(selected.id);
+      const selectedHasQueue = await this.probeNativeQueueItems(selected.id, assertAuthorized);
+      const sameThread = current?.threadId === selected.id;
+      // Resuming the same Thread preserves its pending choices. A queued target
+      // also does not inherit preferences, so neither path needs to capture them.
+      const modelPreference = sameThread || selectedHasQueue
+        ? undefined : this.models.capturePreference?.(target);
       const active = this.core.activeTurn(target);
       const preserveCurrent = leavesCurrent && current !== undefined && !await this.isThreadIdle(current.threadId);
-      const activity = this.core.trackThreadActivity(selected.id);
-      const previousActivity = leavesCurrent && current ? this.core.trackThreadActivity(current.threadId) : undefined;
-      let binding;
-      try {
-        binding = await this.router.resume(target, selected.id, preserveCurrent, selected.cwd,
-          {
-            assertCurrent: () => {
-              if (this.router.workspace(target).cwd !== currentCwd
-                || this.router.current?.(target)?.threadId !== current?.threadId
-                || (leavesCurrent && this.core.activeTurn(target)?.turnId !== active?.turnId)
-                || (leavesCurrent && current && !preserveCurrent && this.hasLocalThreadWork(current.threadId))) {
-                throw new UserFacingError("thread.takeover.changed", "当前会话或工作区已变化，请重新选择");
-              }
-            },
-            restored: (restored, thread) => activity.restore(restored.target, thread.activeTurnId),
-            ...(leavesCurrent && current ? {
-              verifyPreviousIdle: () => this.isThreadIdle(current.threadId),
-              restoredPrevious: (thread: Awaited<ReturnType<SessionRouter["readThread"]>>) => previousActivity?.restore(target, thread.activeTurnId),
-              restorePreviousFailed: () => this.bindingLifecycle?.restoreRequired(current.threadId),
-            } : {}),
-          });
-      } finally {
-        activity.stop();
-        previousActivity?.stop();
-      }
+      const binding = await this.router.resume(target, selected.id, preserveCurrent, selected.cwd,
+        {
+          assertCurrent: () => {
+            if (this.router.workspace(target).cwd !== currentCwd
+              || this.router.current?.(target)?.threadId !== current?.threadId
+              || (leavesCurrent && this.core.activeTurn(target)?.turnId !== active?.turnId)
+              || (leavesCurrent && current && !preserveCurrent && this.hasLocalThreadWork(current.threadId))) {
+              throw new UserFacingError("thread.takeover.changed", "当前会话或工作区已变化，请重新选择");
+            }
+          },
+          observeRestore: this.observeThreadRestore,
+          ...(leavesCurrent && current ? {
+            verifyPreviousIdle: () => this.isThreadIdle(current.threadId),
+            verifyPreviousAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
+            observePreviousRestore: this.observeThreadRestore,
+            restorePreviousFailed: () => this.bindingLifecycle?.restoreRequired(current.threadId),
+          } : {}),
+        }, assertAuthorized);
       this.invalidateRevertSnapshot(target);
       if (preserveCurrent && current) {
         this.pendingBackgroundReleases.set(current.threadId, false);
@@ -1115,7 +1193,7 @@ export class ConversationService implements
       }
       if (selectedHasQueue) {
         this.clearPendingSelections(target);
-      } else {
+      } else if (!sameThread) {
         this.restoreSelectionsAfterBindingChange(target, modelPreference);
       }
       return {
@@ -1126,30 +1204,28 @@ export class ConversationService implements
     });
   }
 
-  newSession(target: ConversationTarget): Promise<{
+  newSession(target: ConversationTarget, assertAuthorized?: () => void): Promise<{
     previousThreadId?: string;
     backgroundedThreadId?: string;
   }> {
-    return this.locked(target, async () => {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       const modelPreference = this.models.capturePreference?.(target);
       const current = this.router.current?.(target);
-      if (current && await this.probeNativeQueueItems(current.threadId)) {
+      if (current && await this.probeNativeQueueItems(current.threadId, assertAuthorized)) {
         throw new UserFacingError(
           "conversation.background-queued",
           "当前任务仍有下一 Turn 排队消息，暂不能转入后台",
         );
       }
       const preserveCurrent = current !== undefined && !await this.isThreadIdle(current.threadId);
-      const activity = current ? this.core.trackThreadActivity(current.threadId) : undefined;
-      try {
-        await this.router.newSession(target, preserveCurrent, modelPreference, current ? {
-          isCurrent: () => this.router.current(target)?.threadId === current.threadId && !this.hasLocalThreadWork(current.threadId),
-          verifyIdle: () => this.isThreadIdle(current.threadId),
-          canRestore: () => this.router.current(target)?.threadId === current.threadId,
-          restored: thread => activity?.restore(target, thread.activeTurnId),
-          restoreRequired: () => this.bindingLifecycle?.restoreRequired(current.threadId),
-        } : undefined);
-      } finally { activity?.stop(); }
+      await this.router.newSession(target, preserveCurrent, modelPreference, current ? {
+        isCurrent: () => this.router.current(target)?.threadId === current.threadId && !this.hasLocalThreadWork(current.threadId),
+        verifyIdle: () => this.isThreadIdle(current.threadId),
+        verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(current.threadId, true),
+        canRestore: () => this.router.current(target)?.threadId === current.threadId,
+        observeRestore: this.observeThreadRestore,
+        restoreRequired: () => this.bindingLifecycle?.restoreRequired(current.threadId),
+      } : undefined, assertAuthorized);
       if (preserveCurrent && current) {
         this.pendingBackgroundReleases.set(current.threadId, false);
         this.bindingLifecycle?.backgrounded(current.threadId);
@@ -1167,10 +1243,10 @@ export class ConversationService implements
     });
   }
 
-  archive(target: ConversationTarget): Promise<string> {
-    return this.locked(target, async () => {
+  archive(target: ConversationTarget, assertAuthorized?: () => void): Promise<string> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       this.requireIdle(target);
-      const threadId = await this.router.archive(target);
+      const threadId = await this.router.archive(target, assertAuthorized);
       this.sessionQueries.removeSessionDisplayCache(threadId);
       this.invalidateRevertSnapshot(target);
       this.clearPendingSelections(target);
@@ -1186,11 +1262,11 @@ export class ConversationService implements
     this.sessionQueries.invalidateSessionDisplayCache(threadId);
   }
 
-  unarchive(target: ConversationTarget, selector: string): Promise<string> {
-    return this.locked(target, async () => {
+  unarchive(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<string> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       this.requireIdle(target);
       const current = this.router.current?.(target);
-      if (current && await this.probeNativeQueueItems(current.threadId)) {
+      if (current && await this.probeNativeQueueItems(current.threadId, assertAuthorized)) {
         throw new UserFacingError(
           "conversation.background-queued",
           "当前会话仍有排队消息，暂不能切换 Session",
@@ -1198,11 +1274,11 @@ export class ConversationService implements
       }
       this.requireIdle(target);
       const sessions = pinnedFirst(
-        await this.router.list(target, { archived: true }),
+        await this.router.list(target, { archived: true, ...(assertAuthorized ? { beforeSubmit: assertAuthorized } : {}) }),
       );
       const selected = resolveThread(sessions, selector.trim(), "unarchive");
       this.requireIdle(target);
-      const binding = await this.router.unarchive(target, selected.id);
+      const binding = await this.router.unarchive(target, selected.id, assertAuthorized, this.observeThreadRestore);
       this.invalidateRevertSnapshot(target);
       this.clearPendingSelections(target);
       return binding.threadId;
@@ -1218,8 +1294,12 @@ export class ConversationService implements
     return this.router.listWorkspaces();
   }
 
-  selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace> {
-    return this.locked(target, async () => {
+  selectedWorkspaceId(target: ConversationTarget): string {
+    return this.router.selectedWorkspaceId(target);
+  }
+
+  selectWorkspace(target: ConversationTarget, selector: string | { id: string }, assertAuthorized?: () => void): Promise<Workspace> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       this.requireIdle(target);
       if ((this.router.backgroundBindings?.(target).length ?? 0) > 0) {
         throw new UserFacingError(
@@ -1227,8 +1307,11 @@ export class ConversationService implements
           "仍有后台任务运行，暂不能切换 Workspace",
         );
       }
-      const selected = this.router.resolveWorkspace(selector);
-      const currentWorkspaceId = this.router.workspace(target).id;
+      const selected = typeof selector === "string"
+        ? this.router.resolveWorkspace(selector)
+        : this.router.listWorkspaces().find(workspace => workspace.id === selector.id);
+      if (!selected) throw new UserFacingError("workspace.selector.not-found", "找不到指定 Workspace");
+      const currentWorkspaceId = this.router.selectedWorkspaceId(target);
       const current = this.router.current?.(target);
       if (current && currentWorkspaceId !== selected.id
         && await this.probeNativeQueueItems(current.threadId)) {
@@ -1241,7 +1324,7 @@ export class ConversationService implements
       const modelPreference = selected.id === currentWorkspaceId
         ? undefined
         : this.models.capturePreference?.(target);
-      const workspace = await this.router.selectWorkspace(target, selected.id, modelPreference);
+      const workspace = await this.router.selectWorkspace(target, selected.id, modelPreference, assertAuthorized);
       if (workspace.id !== currentWorkspaceId) {
         this.invalidateRevertSnapshot(target);
         this.restoreSelectionsAfterBindingChange(target, modelPreference);
@@ -1255,8 +1338,8 @@ export class ConversationService implements
     return { threadId, reviewer: threadId ? this.router.modelSettingsForThread(threadId)?.approvalsReviewer ?? null : null, updated: false };
   }
 
-  updateAutoReview(target: ConversationTarget, enabled: boolean, expectedThreadId?: string): Promise<ConversationAutoReviewState> {
-    return this.locked(target, async () => {
+  updateAutoReview(target: ConversationTarget, enabled: boolean, expectedThreadId?: string, assertAuthorized?: () => void): Promise<ConversationAutoReviewState> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       const state = this.autoReview(target);
       if (expectedThreadId !== undefined && expectedThreadId !== state.threadId) {
         throw new UserFacingError("autoreview.stale-selection", "当前会话已变化，请重新发送 /autoreview");
@@ -1272,10 +1355,20 @@ export class ConversationService implements
       const reviewer = enabled ? "auto_review" : "user";
       if (state.reviewer === reviewer) return state;
       if (!this.threadApprovalsReviewer) throw new UserFacingError("autoreview.unavailable", "当前 Gateway 不支持修改会话审批方式");
+      const beforeSubmit = () => {
+        assertAuthorized?.();
+        if (this.router.current(target)?.threadId !== state.threadId) {
+          throw new UserFacingError("autoreview.stale-selection", "当前会话已变化，请重新发送 /autoreview");
+        }
+        this.requireIdle(target);
+        if (this.transfers?.hasPendingInteraction(state.threadId)) {
+          throw new UserFacingError("conversation.busy", "当前会话有待处理审批，请先处理审批", { reason: "pending-interaction" });
+        }
+      };
       try {
-        await this.threadApprovalsReviewer.updateThreadApprovalsReviewer(state.threadId, reviewer);
+        await this.threadApprovalsReviewer.updateThreadApprovalsReviewer(state.threadId, reviewer, beforeSubmit);
       } catch (error) {
-        if (error instanceof UserFacingError && (error.code === "autoreview.update-failed" || error.code === "autoreview.update-unconfirmed")) throw error;
+        if (error instanceof UserFacingError && ["autoreview.update-failed", "autoreview.update-unconfirmed", "autoreview.stale-selection", "command.authorization-changed", "conversation.busy"].includes(error.code)) throw error;
         throw new UserFacingError("autoreview.update-failed", "会话审批方式更新失败，请重新查询状态");
       }
       // The injected port waits for both Client confirmation and shared inbound
@@ -1291,7 +1384,8 @@ export class ConversationService implements
     });
   }
 
-  async stop(target: ConversationTarget): Promise<boolean> {
+  async stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean> {
+    assertAuthorized?.();
     const attachments = this.attachmentInputs.get(conversationTargetKey(target));
     const cancelledAttachments = (attachments?.size ?? 0) > 0;
     for (const controller of [...attachments ?? []]) controller.abort();
@@ -1301,92 +1395,85 @@ export class ConversationService implements
     if (!active) {
       return cancelled || cancelledAttachments;
     }
-    await this.codex.interruptTurn(active.threadId, active.turnId);
+    const beforeSubmit = () => {
+      assertAuthorized?.();
+      const owner = this.router.targetForThread(active.threadId);
+      if (!owner || conversationTargetKey(owner) !== conversationTargetKey(target)) {
+        throw new UserFacingError("command.authorization-changed", "停止目标的会话归属已变化");
+      }
+    };
+    await this.codex.interruptTurn(active.threadId, active.turnId, beforeSubmit);
     return true;
   }
 
-  rename(target: ConversationTarget, name: string): Promise<void> {
+  rename(target: ConversationTarget, name: string, assertAuthorized?: () => void): Promise<void> {
     const normalized = name.trim();
     if (!normalized || normalized.length > 64) {
       return Promise.reject(
         new UserFacingError("conversation.name.invalid", "会话名称必须为 1–64 个字符"),
       );
     }
-    return this.locked(target, async () => {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       this.requireIdle(target);
       const binding = this.router.current(target);
       if (!binding) {
         throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
       }
-      await this.codex.setThreadName(binding.threadId, normalized);
+      await this.codex.setThreadName(binding.threadId, normalized, this.commandThreadGuard(target, binding.threadId, assertAuthorized, true));
     });
   }
 
-  setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean> {
-    return this.locked(target, async () => {
+  setPinned(target: ConversationTarget, pinned: boolean, assertAuthorized?: () => void): Promise<boolean> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       const binding = this.router.current(target);
       if (!binding) {
         throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
       }
-      return this.codex.setThreadPinned(binding.threadId, pinned);
+      return this.codex.setThreadPinned(binding.threadId, pinned, this.commandThreadGuard(target, binding.threadId, assertAuthorized));
     });
   }
 
-  compact(target: ConversationTarget): Promise<void> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      const binding = await this.ensureSession(target);
-      this.requireIdle(target);
-      await this.codex.compactThread(binding.threadId);
+  compact(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized, true);
+      await this.codex.compactThread(binding.threadId, beforeSubmit);
     });
   }
 
-  fork(target: ConversationTarget): Promise<string> {
-    return this.locked(target, async () => {
+  fork(target: ConversationTarget, assertAuthorized?: () => void): Promise<string> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
       this.requireIdle(target);
-      const current = await this.ensureSession(target);
-      if (await this.probeNativeQueueItems(current.threadId)) {
+      const current = await this.ensureSession(target, true, assertAuthorized);
+      if (await this.probeNativeQueueItems(current.threadId, assertAuthorized)) {
         throw new UserFacingError(
           "conversation.background-queued",
           "当前会话仍有排队消息，暂不能分叉 Session",
         );
       }
       this.requireIdle(target);
-      const binding = await this.router.fork(target);
+      const binding = await this.router.fork(target, {}, assertAuthorized, this.observeThreadRestore);
       this.invalidateRevertSnapshot(target);
       this.clearPendingSelections(target);
       return binding.threadId;
     });
   }
 
-  togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target);
-      try {
-        const state = await this.requireCollaborationModes().toggle(target);
-        await this.rejectQueueWhenPendingOverrideChanges(target);
-        return state;
-      } catch (error) {
-        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
-          this.clearPendingSelections(target);
-        }
-        throw error;
-      }
-    });
+  togglePlanMode(target: ConversationTarget, assertAuthorized?: () => void): Promise<CollaborationModeState> {
+    return this.withGuardedSelection(target, (guard) => this.requireCollaborationModes().toggle(target, guard), assertAuthorized);
   }
 
-  startPlan(target: ConversationTarget, prompt: string): Promise<Submission> {
+  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void): Promise<Submission> {
     const normalized = prompt.trim();
     if (!normalized) {
       return Promise.reject(new UserFacingError("plan.prompt.empty", "Plan 需求不能为空"));
     }
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target);
-      await this.requireCollaborationModes().select(target, "plan");
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const beforeSelection = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized, true);
+      beforeSelection();
+      await this.rejectQueueWhenPendingOverrideChanges(target, beforeSelection);
+      await this.requireCollaborationModes().select(target, "plan", beforeSelection);
       try {
-        await this.rejectQueueWhenPendingOverrideChanges(target);
+        await this.rejectQueueWhenPendingOverrideChanges(target, beforeSelection);
       } catch (error) {
         this.clearPendingSelections(target);
         throw error;
@@ -1395,147 +1482,144 @@ export class ConversationService implements
         target,
         [{ type: "text", text: normalized }],
         `${gatewayUserMessageClientIdPrefix}${randomUUID()}`,
+        undefined,
+        undefined,
+        assertAuthorized,
       );
     });
   }
 
-  review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      const binding = await this.ensureSession(target);
-      this.requireIdle(target);
-      const result = await this.codex.startReview(binding.threadId, reviewTarget);
-      this.core.markTurnStarted(target, result.threadId, result.turnId);
-      return { threadId: result.threadId, turnId: result.turnId, steered: false };
+  review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void): Promise<Submission> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized, true);
+      const activity = this.core.trackThreadActivity(binding.threadId);
+      try {
+        const result = await this.codex.startReview(binding.threadId, reviewTarget, beforeSubmit);
+        activity.restore(target, result.turnId);
+        return { threadId: result.threadId, turnId: result.turnId, steered: false };
+      } finally {
+        activity.stop();
+      }
     });
   }
 
-  modelState(target: ConversationTarget): Promise<ModelSelectionState> {
-    return this.extensionQueries.modelState(target);
+  modelState(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    return this.extensionQueries.modelState(target, assertAuthorized);
   }
 
   hooks(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView> {
     return this.hookUseCases.execute(target, input, actorId);
   }
 
-  clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState> {
-    return this.extensionQueries.clearModelBrowse(target);
+  clearModelBrowse(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    return this.extensionQueries.clearModelBrowse(target, assertAuthorized);
   }
 
-  browseProviderModels(target: ConversationTarget, provider: string): Promise<ModelSelectionState> {
-    return this.extensionQueries.browseProviderModels(target, provider);
+  browseProviderModels(target: ConversationTarget, provider: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    return this.extensionQueries.browseProviderModels(target, provider, assertAuthorized);
   }
 
-  clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState> {
-    return this.extensionQueries.clearModelSelection(target);
+  clearModelSelection(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    return this.extensionQueries.clearModelSelection(target, assertAuthorized);
   }
 
-  selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity): Promise<ModelSelectionState> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target);
-      try {
-        const state = await this.models.selectModel(target, selector);
-        await this.rejectQueueWhenPendingOverrideChanges(target);
-        return state;
-      } catch (error) {
-        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
-          this.clearPendingSelections(target);
-        }
-        throw error;
+  selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    return this.withGuardedSelection(target, (guard) => this.models.selectModel(target, selector, guard), assertAuthorized);
+  }
+
+  selectModelSetting(target: ConversationTarget, selection: ModelSelectionRequest, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    let guardedScope: string | undefined = selection.snapshot.selectionScope;
+    const guard = () => {
+      assertAuthorized?.();
+      if (guardedScope !== undefined && this.models.status(target).selectionScope !== guardedScope) {
+        throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片");
       }
-    });
+    };
+    return this.withGuardedSelection(target, async selectionGuard => {
+      // The model operation guards and advances its own synchronous commits;
+      // keep the original scope for lock/Queue waits and the result scope after it.
+      guardedScope = undefined;
+      const state = await this.models.selectSetting(target, selection, selectionGuard);
+      guardedScope = state.selectionScope;
+      return state;
+    }, guard);
   }
 
-  selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target);
-      try {
-        const state = await this.models.selectEffort(target, selector);
-        await this.rejectQueueWhenPendingOverrideChanges(target);
-        return state;
-      } catch (error) {
-        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
-          this.clearPendingSelections(target);
-        }
-        throw error;
-      }
-    });
+  selectEffort(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    return this.withGuardedSelection(target, (guard) => this.models.selectEffort(target, selector, guard), assertAuthorized);
   }
 
-  selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
+  selectFastMode(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<ModelSelectionState> {
     if (selector.trim().toLowerCase() === "status") {
-      return this.models.selectFastMode(target, selector);
+      return this.models.selectFastMode(target, selector, assertAuthorized);
     }
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.rejectQueueWhenPendingOverrideChanges(target);
-      try {
-        const state = await this.models.selectFastMode(target, selector);
-        await this.rejectQueueWhenPendingOverrideChanges(target);
-        return state;
-      } catch (error) {
-        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
-          this.clearPendingSelections(target);
-        }
-        throw error;
-      }
-    });
+    return this.withGuardedSelection(target, (guard) => this.models.selectFastMode(target, selector, guard), assertAuthorized);
   }
 
-  listSkills(target: ConversationTarget): Promise<InstalledSkill[]> {
-    return this.extensionQueries.listSkills(target);
+  listSkills(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledSkill[]> {
+    return this.extensionQueries.listSkills(target, assertAuthorized);
   }
 
-  listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]> {
-    return this.extensionQueries.listMcpServers(target);
+  listMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpServerSummary[]> {
+    return this.extensionQueries.listMcpServers(target, assertAuthorized);
   }
 
-  mcpHealth(target: ConversationTarget): Promise<McpHealthReport> {
-    return this.extensionQueries.mcpHealth(target);
+  mcpHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpHealthReport> {
+    return this.extensionQueries.mcpHealth(target, assertAuthorized);
   }
 
-  reloadMcpServers(target: ConversationTarget): Promise<void> {
+  reloadMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
     void target;
-    return this.extensionQueries.reloadMcpServers();
+    return this.extensionQueries.reloadMcpServers(assertAuthorized);
   }
 
   mcpServerDetail(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<McpServerDetail> {
-    return this.extensionQueries.mcpServerDetail(target, selector);
+    return this.extensionQueries.mcpServerDetail(target, selector, assertAuthorized);
   }
 
   loginMcpServer(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<McpLoginResult> {
-    return this.extensionQueries.loginMcpServer(target, selector);
+    return this.extensionQueries.loginMcpServer(target, selector, assertAuthorized);
+  }
+
+  handleMcpOAuthCompleted(event: Extract<ConversationInputEvent, { type: "mcp.oauth.completed" }>): void {
+    this.extensionQueries.handleMcpOAuthCompleted(event);
+  }
+
+  clearMcpLoginThread(threadId: string): void {
+    this.extensionQueries.clearMcpLoginThread(threadId);
   }
 
   readMcpResource(
     target: ConversationTarget,
     selector: string,
     uri: string,
+    assertAuthorized?: () => void,
   ): Promise<McpResourceReadResult> {
-    return this.extensionQueries.readMcpResource(target, selector, uri);
+    return this.extensionQueries.readMcpResource(target, selector, uri, assertAuthorized);
   }
 
-  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog> {
-    return this.extensionQueries.listPlugins(target);
+  listPlugins(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledPluginCatalog> {
+    return this.extensionQueries.listPlugins(target, assertAuthorized);
   }
 
-  pluginHealth(target: ConversationTarget): Promise<PluginHealthReport> {
-    return this.extensionQueries.pluginHealth(target);
+  pluginHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<PluginHealthReport> {
+    return this.extensionQueries.pluginHealth(target, assertAuthorized);
   }
 
   pluginDetail(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<InstalledPlugin> {
-    return this.extensionQueries.pluginDetail(target, selector);
+    return this.extensionQueries.pluginDetail(target, selector, assertAuthorized);
   }
 
   accountUsage(): Promise<AccountUsage> {
@@ -1546,33 +1630,33 @@ export class ConversationService implements
     return this.accountMetrics.accountRateLimits();
   }
 
-  providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage> {
-    return this.accountMetrics.providerAccountUsage(target);
+  providerAccountUsage(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountUsage> {
+    return this.accountMetrics.providerAccountUsage(target, assertAuthorized);
   }
 
-  providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits> {
-    return this.accountMetrics.providerAccountLimits(target);
+  providerAccountLimits(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountLimits> {
+    return this.accountMetrics.providerAccountLimits(target, assertAuthorized);
   }
 
-  listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]> {
-    return this.extensionQueries.listPermissionProfiles(target);
+  listPermissionProfiles(target: ConversationTarget, assertAuthorized?: () => void): Promise<PermissionProfileOption[]> {
+    return this.extensionQueries.listPermissionProfiles(target, assertAuthorized);
   }
 
-  getGoal(target: ConversationTarget): Promise<ThreadGoal | null> {
-    return this.locked(target, async () => {
-      const binding = await this.ensureSession(target);
-      return this.codex.getGoal(binding.threadId);
+  getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
+      return this.codex.getGoal(binding.threadId, beforeSubmit);
     });
   }
 
-  setGoal(target: ConversationTarget, objective: string): Promise<ThreadGoal> {
+  setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal> {
     const normalized = objective.trim();
     if (!normalized) {
       return Promise.reject(new UserFacingError("goal.empty", "目标不能为空"));
     }
-    return this.locked(target, async () => {
-      const binding = await this.ensureSession(target);
-      const goal = await this.codex.setGoal(binding.threadId, normalized);
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
+      const goal = await this.codex.setGoal(binding.threadId, normalized, beforeSubmit);
       this.core.handle({
         type: "thread.goal.updated",
         threadId: binding.threadId,
@@ -1582,10 +1666,10 @@ export class ConversationService implements
     });
   }
 
-  clearGoal(target: ConversationTarget): Promise<void> {
-    return this.locked(target, async () => {
-      const binding = await this.ensureSession(target);
-      await this.codex.clearGoal(binding.threadId);
+  clearGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
+    return this.authorizedLocked(target, assertAuthorized, async () => {
+      const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
+      await this.codex.clearGoal(binding.threadId, beforeSubmit);
       this.core.handle({
         type: "thread.goal.cleared",
         threadId: binding.threadId,
@@ -1596,6 +1680,8 @@ export class ConversationService implements
   status(target: ConversationTarget): ConversationStatus {
     const binding = this.router.current(target);
     const active = this.core.activeTurn(target);
+    const instructionSources = binding ? this.router.instructionSourcesForThread(binding.threadId) : undefined;
+    const executionContext = binding ? this.router.executionContextForThread(binding.threadId) : undefined;
     const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
     const goal = binding ? this.core.goal(binding.threadId) : undefined;
@@ -1612,6 +1698,8 @@ export class ConversationService implements
     };
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
+      ...(instructionSources === undefined ? {} : { instructionSources }),
+      ...(executionContext === undefined ? {} : { executionContext }),
       ...(binding ? { threadName: this.router.threadNameForThread?.(binding.threadId) ?? null } : {}),
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
@@ -1621,10 +1709,13 @@ export class ConversationService implements
       workspaceId: workspace.id,
       workspaceName: workspace.name,
       cwd: workspace.cwd,
+      ...(model.selectionScope ? { selectionScope: model.selectionScope } : {}),
       model: model.model,
       ...(model.modelProvider ? { modelProvider: model.modelProvider } : {}),
       effort: model.effort,
       serviceTier: model.serviceTier,
+      serviceTierKnown: model.serviceTierKnown === true,
+      ...(model.effectiveServiceTier === undefined ? {} : { effectiveServiceTier: model.effectiveServiceTier }),
       approvalsReviewer: binding
         ? this.router.modelSettingsForThread(binding.threadId)?.approvalsReviewer ?? null
         : null,
@@ -1646,19 +1737,40 @@ export class ConversationService implements
     const status = this.status(target);
     const gitBranch = await this.workspaceGitBranch(target, signal);
     signal?.throwIfAborted();
-    // Recheck the current Workspace after asynchronous IO; outer callers own authorization.
-    const workspace = this.router.workspace(target);
-    if (workspace.id !== status.workspaceId || workspace.cwd !== status.cwd) return this.status(target);
-    return gitBranch ? { ...status, gitBranch } : status;
+    // Refresh the bound Thread and its diagnostics after asynchronous IO;
+    // outer callers own authorization. Only reuse Git data for the same cwd.
+    const current = this.status(target);
+    if (current.workspaceId !== status.workspaceId || current.cwd !== status.cwd) return current;
+    return gitBranch ? { ...current, gitBranch } : current;
   }
 
-  private async ensureSession(target: ConversationTarget) {
-    await this.models.validateUnboundPreference?.(target);
+  private readonly observeThreadRestore: ThreadRestoreObserver = (threadId) => {
+    const activity = this.core.trackThreadActivity(threadId);
+    return {
+      restored: (binding, thread) => activity.restore(binding.target, thread.activeTurnId),
+      stop: () => activity.stop(),
+    };
+  };
+
+  private async ensureSession(target: ConversationTarget, requireIdle = false, assertAuthorized?: () => void) {
+    assertAuthorized?.();
+    await this.models.validateUnboundPreference?.(target, assertAuthorized);
+    assertAuthorized?.();
     const preference = !this.router.current?.(target) ? this.models.capturePreference?.(target) : undefined;
-    const options = this.models.threadStartOptions?.(target) ?? {};
-    const binding = Object.keys(options).length > 0
-      ? await this.router.ensure(target, options)
-      : await this.router.ensure(target);
+    const options = { ...this.models.threadStartOptions?.(target),
+      ...(assertAuthorized ? { beforeSubmit: assertAuthorized } : {}) };
+    const binding = await this.router.ensure(target, options, threadId => {
+      const observation = this.observeThreadRestore(threadId);
+      return {
+        restored: (restored, thread) => {
+          if (requireIdle && thread.status.type === "active" && thread.activeTurnId === null) {
+            throw new UserFacingError("conversation.busy", "会话仍有运行中的任务，请稍后重试或显式恢复会话", { reason: "activity-restored" });
+          }
+          observation.restored(restored, thread);
+        },
+        stop: () => observation.stop(),
+      };
+    });
     if (preference) this.models.restorePreference?.(target, preference);
     return binding;
   }
@@ -1669,9 +1781,13 @@ export class ConversationService implements
     clientUserMessageId: string,
     identity?: TurnStartIdentity,
     assertCurrent?: (threadId: string) => void,
+    assertAuthorized?: () => void,
   ): Promise<Submission> {
     this.touchActivity(target);
-    const binding = await this.ensureSession(target);
+    const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
+    const binding = await this.ensureSession(target, true, beforePrepare);
+    const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(binding.threadId,
+      this.commandThreadGuard(target, binding.threadId, assertAuthorized));
     // Subscription restoration can publish an active Turn while ensure waits.
     // Do not start a new Turn using the idle decision made before that await.
     if (this.core.activeTurn(target)) {
@@ -1694,28 +1810,30 @@ export class ConversationService implements
         );
       }
     }
-    let result;
+    const activity = this.core.trackThreadActivity(binding.threadId);
+    const submittedModelSettings = this.router.modelSettings(target);
     try {
-      assertCurrent?.(binding.threadId);
-      result = await this.codex.startTurn(
-        binding.threadId,
-        input,
-        clientUserMessageId,
-        workspace.cwd,
-        overrides,
-      );
-    } catch (error) {
-      this.recordTurnError("start", target, binding.threadId, null, error);
-      throw error;
+      let result;
+      try {
+        assertCurrent?.(binding.threadId);
+        result = await this.codex.startTurn(
+          binding.threadId,
+          input,
+          clientUserMessageId,
+          workspace.cwd,
+          { ...overrides, turnTrigger: "user", beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); } },
+        );
+      } catch (error) {
+        this.recordTurnError("start", target, binding.threadId, null, error);
+        throw error;
+      }
+      this.models.markApplied(target, submittedModelSettings);
+      this.collaborationModes?.markApplied(target);
+      activity.restore(target, result.turnId, identity);
+      return { threadId: binding.threadId, turnId: result.turnId, steered: false };
+    } finally {
+      activity.stop();
     }
-    this.models.markApplied(target);
-    this.collaborationModes?.markApplied(target);
-    if (identity) {
-      this.core.markTurnStarted(target, binding.threadId, result.turnId, identity);
-    } else {
-      this.core.markTurnStarted(target, binding.threadId, result.turnId);
-    }
-    return { threadId: binding.threadId, turnId: result.turnId, steered: false };
   }
 
   private recordTurnError(
@@ -1748,17 +1866,55 @@ export class ConversationService implements
     };
   }
 
+  /** Local selection guard; native clients can still change Queue concurrently. */
+  private withGuardedSelection<T>(target: ConversationTarget, select: (guard: () => void) => Promise<T>, assertAuthorized?: () => void): Promise<T> {
+    const threadId = this.router.current(target)?.threadId;
+    const pending = { threadId, invalidated: false };
+    this.pendingSelections.add(pending);
+    const guard = () => {
+      assertAuthorized?.();
+      if (pending.invalidated) {
+        throw new UserFacingError("command.authorization-changed", "模型选择期间已有新轮次开始，请重新选择");
+      }
+      this.requireIdle(target);
+    };
+    return this.locked(target, async () => {
+      guard();
+      if (this.router.current(target)?.threadId !== threadId) {
+        throw new UserFacingError("command.authorization-changed", "模型选择期间会话已变化");
+      }
+      await this.rejectQueueWhenPendingOverrideChanges(target, guard);
+      guard();
+      if (this.router.current(target)?.threadId !== threadId) {
+        throw new UserFacingError("command.authorization-changed", "模型选择期间会话已变化");
+      }
+      try {
+        const state = await select(guard);
+        guard();
+        await this.rejectQueueWhenPendingOverrideChanges(target, guard);
+        guard();
+        return state;
+      } catch (error) {
+        if (pending.invalidated || error instanceof UserFacingError
+          && (error.code === "queue.pending-overrides" || error.code === "conversation.busy")) {
+          this.clearPendingSelections(target);
+        }
+        throw error;
+      }
+    }).finally(() => this.pendingSelections.delete(pending));
+  }
+
   private clearPendingSelections(target: ConversationTarget): void {
     this.models.clear(target);
     this.collaborationModes?.clear(target);
   }
 
-  private async rejectQueueWhenPendingOverrideChanges(target: ConversationTarget): Promise<void> {
-    await this.queueUseCases.rejectPendingOverrideChange(target);
+  private async rejectQueueWhenPendingOverrideChanges(target: ConversationTarget, assertAuthorized?: () => void): Promise<void> {
+    await this.queueUseCases.rejectPendingOverrideChange(target, assertAuthorized);
   }
 
-  private async probeNativeQueueItems(threadId: string): Promise<boolean> {
-    return this.queueUseCases.hasItems(threadId);
+  private async probeNativeQueueItems(threadId: string, assertAuthorized?: () => void): Promise<boolean> {
+    return this.queueUseCases.hasItems(threadId, assertAuthorized);
   }
 
   async releaseBackgroundIfComplete(
@@ -1769,11 +1925,34 @@ export class ConversationService implements
     // preserves Queue entries even when subagent settlement delays release.
     this.pendingBackgroundReleases.set(threadId, options.dispatchQueued !== false);
     const current = this.backgroundReleaseAttempts.get(threadId);
-    if (current) return current;
-    const attempt = this.performBackgroundRelease(threadId, options.isCurrent);
+    if (current) {
+      current.retryRequested = true;
+      if (options.isCurrent) current.latestGuard = options.isCurrent;
+      return current.promise;
+    }
+    const attempt = {
+      promise: Promise.resolve(false),
+      retryRequested: false,
+      latestGuard: options.isCurrent,
+    };
+    // Register before starting asynchronous work so a terminal event cannot be
+    // folded into an obsolete observation without requesting another pass.
     this.backgroundReleaseAttempts.set(threadId, attempt);
+    attempt.promise = Promise.resolve().then(async () => {
+      const deadline = performance.now() + 10_000;
+      const canRelease = () => (options.isCurrent?.() ?? true) && (attempt.latestGuard?.() ?? true);
+      do {
+        attempt.retryRequested = false;
+        if (await this.performBackgroundRelease(threadId, canRelease)) return true;
+        if (!attempt.retryRequested || !canRelease()) return false;
+        // Only a new lifecycle event requests another pass; never poll. Bound
+        // event storms and let the lifecycle owner handle recovery on failure.
+        if (performance.now() >= deadline) throw new Error("后台释放复核超过时间预算，需要重新恢复绑定");
+      } while (attempt.retryRequested);
+      return false;
+    });
     try {
-      return await attempt;
+      return await attempt.promise;
     } finally {
       if (this.backgroundReleaseAttempts.get(threadId) === attempt) {
         this.backgroundReleaseAttempts.delete(threadId);
@@ -1794,7 +1973,9 @@ export class ConversationService implements
       return false;
     }
     if (this.pendingBackgroundReleases.get(threadId) !== false) {
-      const queueState = await this.dispatchNativeQueueBeforeRelease(threadId);
+      const queueState = await this.dispatchNativeQueueBeforeRelease(threadId, () => {
+        if (!canRelease()) throw new UserFacingError("command.authorization-changed", "后台会话状态已变化");
+      });
       if (queueState !== "empty" && queueState !== "unavailable") {
         return false;
       }
@@ -1803,16 +1984,13 @@ export class ConversationService implements
     }
     const target = this.router.targetForThread(threadId);
     if (!target || !canRelease() || this.hasLocalThreadWork(threadId)) return false;
-    const activity = this.core.trackThreadActivity(threadId);
-    let released;
-    try {
-      released = await this.router.releaseBackground(threadId, {
-        isCurrent: () => canRelease() && !this.hasLocalThreadWork(threadId),
-        verifyIdle: () => this.isThreadIdle(threadId),
-        canRestore: canRelease,
-        restored: thread => activity.restore(target, thread.activeTurnId),
-      });
-    } finally { activity.stop(); }
+    const released = await this.router.releaseBackground(threadId, {
+      isCurrent: () => canRelease() && !this.hasLocalThreadWork(threadId),
+      verifyIdle: () => this.isThreadIdle(threadId),
+      verifyAfterTerminalUnsubscribe: () => this.isThreadIdle(threadId, true),
+      canRestore: canRelease,
+      observeRestore: this.observeThreadRestore,
+    });
     if (!released) return false;
     this.pendingBackgroundReleases.delete(threadId);
     return true;
@@ -1824,11 +2002,15 @@ export class ConversationService implements
       || this.transfers?.hasPendingInteraction(threadId) === true;
   }
 
-  private async isThreadIdle(threadId: string): Promise<boolean> {
+  private async isThreadIdle(threadId: string, terminalUnsubscribed = false): Promise<boolean> {
     if (this.hasLocalThreadWork(threadId)) return false;
     const signal = AbortSignal.timeout(10_000);
     const snapshot = await this.router.readThread(threadId, signal);
-    if (snapshot.status.type !== "idle" && snapshot.status.type !== "notLoaded") return false;
+    // Only Router's post-unsubscribe phase may use the already established
+    // terminal boundary. This does not turn fresh systemError metadata into
+    // terminal evidence. Still veto observable activity and recheck dependents.
+    if (!isThreadExecutionSettled(snapshot)
+      && !(terminalUnsubscribed && snapshot.status.type === "systemError" && snapshot.activeTurnId === null)) return false;
     if (await this.router.hasActiveDescendants(threadId, signal)) return false;
     if (await this.probeNativeQueueItems(threadId)) return false;
     return !this.hasLocalThreadWork(threadId);
@@ -1849,22 +2031,21 @@ export class ConversationService implements
 
   private async dispatchNativeQueueBeforeRelease(
     threadId: string,
+    assertAuthorized: () => void,
   ): Promise<"empty" | "started" | "busy" | "unavailable"> {
     const queue = this.threadQueue;
     if (!queue) return "unavailable";
+    const beforeSubmit = await this.router.prepareThreadWorkspaceGuard(threadId, assertAuthorized);
     try {
       // `thread/queue/start` takes the same per-Thread dispatch lock as the
       // 0.148 idle contributor. It is used here as a completion barrier: an
       // already queued item is either started or observed empty only after
       // the native dispatcher has finished its own start/delete sequence.
-      await queue.startQueueItem(threadId);
+      await queue.startQueueItem(threadId, undefined, beforeSubmit);
       return "started";
     } catch (error) {
-      const message = error instanceof Error ? error.message.toLowerCase() : "";
-      if (message.includes("queue is empty")) {
-        return "empty";
-      }
       const mapped = queueUserFacingError(error, "start");
+      if (mapped.code === "queue.empty") return "empty";
       if (mapped.code === "queue.unavailable") return "unavailable";
       if (mapped.code === "queue.busy") return "busy";
       if (mapped.code === "queue.item-not-found") return "busy";
@@ -1908,6 +2089,38 @@ export class ConversationService implements
     action: () => Promise<T> | T,
   ): Promise<T> {
     return this.locks.forConversation(target, action);
+  }
+
+  private async authorizedLocked<T>(target: ConversationTarget, assertAuthorized: (() => void) | undefined,
+    action: () => Promise<T> | T): Promise<T> {
+    assertAuthorized?.();
+    const threadId = this.router.current(target)?.threadId;
+    return this.locked(target, () => {
+      assertAuthorized?.();
+      if (this.router.current(target)?.threadId !== threadId) {
+        throw new UserFacingError("command.authorization-changed", "命令等待期间会话已变化");
+      }
+      return action();
+    });
+  }
+
+  private commandThreadGuard(target: ConversationTarget, threadId: string | undefined,
+    assertAuthorized?: () => void, requireIdle = false): () => void {
+    return () => {
+      assertAuthorized?.();
+      if (this.router.current(target)?.threadId !== threadId) {
+        throw new UserFacingError("command.authorization-changed", "命令目标会话已变化");
+      }
+      if (requireIdle) this.requireIdle(target);
+    };
+  }
+
+  private async prepareCommandThread(target: ConversationTarget, assertAuthorized?: () => void, requireIdle = false) {
+    const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized, requireIdle);
+    const binding = await this.ensureSession(target, requireIdle, beforePrepare);
+    const beforeSubmit = this.commandThreadGuard(target, binding.threadId, assertAuthorized, requireIdle);
+    beforeSubmit();
+    return { binding, beforeSubmit };
   }
 
   private lockedTargets<T>(

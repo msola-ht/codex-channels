@@ -4,24 +4,25 @@
 
 ## 文件
 
-- `ci.yml`：在 Pull Request 和手动触发时，使用 Ubuntu 与 macOS、Node.js 22.13.0 执行
+- `ci.yml`：在 Pull Request 和手动触发时，使用 Ubuntu 与 macOS、Node.js 22.23.4 执行
   `npm run verify:ci` 静态检查与构建，并使用 Windows latest 执行独立的构建、类型、文档和
-  PowerShell 语法检查。Windows Job 不运行 Unix 专属服务检查。Branch Protection 要求 PR 的当前
+  PowerShell 语法检查。Windows 的完整类型与边界检查、独立构建分成两个步骤，任一步失败均阻止后续步骤，
+  Job 不运行 Unix 专属服务检查。Branch Protection 要求 PR 的当前
   merge ref 通过全部门禁并禁止直接写入 `main`，因此 push 不再重复运行同一检查。检查覆盖提交
   差异、类型和版本、生产 Lint、文档链接和索引、Shell
   及平台模板检查；macOS 通过现有验证入口枚举四类 launchd 模板，替换共享停止预算的整数占位符后交给 `plutil` 校验，不直接将未渲染的整数占位符当作 plist 值。此检查不注册或启动服务。WebUI 字典检查通过 `npm run i18n:check` 校验键与占位符。
   CI 只校验已有字典，不生成翻译报告、调用翻译服务或自动写回译文；差异报告可在本地按需运行 `npm run i18n:report`。
   类型检查使用 TypeScript 原生增量缓存跟踪源码及其依赖，版本与边界检查每次执行；完整类型检查通过后，
   Gateway 清理旧产物并以 `--noCheck` 构建，避免重复类型分析。独立 `npm run build` 仍执行完整类型检查。
-  Ubuntu 与 macOS 安装锁定的 Codex CLI 0.163.0，静态核对协议版本与生成类型。日志记录各阶段和总耗时。
+  Ubuntu 与 macOS 安装锁定的 Codex CLI 0.164.0，静态核对协议版本与生成类型。日志记录各阶段和总耗时。
 - `codex-upgrade-preview.yml`：每日及手动检查 `openai/codex` 正式发行版本；版本留空时使用
   最新正式 Release。项目已经同步时跳过，发现更新时安装对应 npm CLI、生成协议与版本
   差异，在安装根目录与 WebUI 锁定依赖后独立运行协议、类型、Lint 与 Gateway/WebUI
   构建。把逐项结果写入 Job
   Summary，并上传结构化结果、逐阶段日志、协议结构影响、清单、统计、完整 Patch 和摘要
   Artifact。单项失败不阻止其他检查，最终仍把任务标为失败。该工作流拒绝 Draft、Pre-release
-  和降级；自动检查全部通过时，独立的最小写权限 Job 将已验证 Patch 提交到自动化分支并创建
-  Draft PR，同版本已有开放提案时不重复创建。它不自动转为 Ready、合并、发布或部署。官方
+  和降级；自动检查全部通过时，独立的最小写权限 Job 先严格校验产物 `base-commit.txt` 的完整提交格式，并要求与当前检出的默认分支 HEAD 一致；缺失、畸形或分支已前进时拒绝应用，需重新生成提案。校验通过后将已验证 Patch 提交到自动化分支并创建
+  Draft PR，描述记录实际应用基线、提案提交及结果树；同版本已有开放提案时不重复创建。它不自动转为 Ready、合并、发布或部署。官方
   Release 解析失败时仍上传以 `unresolved-<run id>` 命名的失败 Artifact 和 `resolve.log`，
   不会因目标版本为空丢失现场。
 - `codex-upgrade-pr.yml`：统一检查 PR 描述；Draft 阶段允许模板或自动占位内容，所有 Ready PR
@@ -43,7 +44,9 @@ hook 配置；随后直接调用 `npm run verify:ci`。本地 `npm ci`、`npm in
 `npm run hooks:install` 则启用仓库内 `.githooks/pre-commit`。
 
 本地 Hook 使用 `verify:commit`，按本次提交范围执行必要静态检查与构建。
-改动文件由 `scripts/verification-scope.mjs` 读取，PR CI 通过 `verify:ci` 执行完整静态检查与构建。
+改动文件由 `scripts/verification-scope.mjs` 读取；WebUI 的共享输入按其 TypeScript 配置和源码导入追踪，
+包含声明、浏览器实际加载的 JavaScript 实现及传递依赖，依赖无法确定时拒绝继续。
+PR CI 通过 `verify:ci` 执行完整静态检查与构建。
 
 项目不维护独立基础版本号；`@hegenai/codexc`、Gateway 和发布 Tag 使用锁定的 Codex CLI
 正式发行版本，候选版和修复版只允许增加受控的 `-rc.N` 或 `-fixN` 后缀。升级提案只认

@@ -3,6 +3,26 @@ import type { ModelRequestDiagnostics } from "./chat-diagnostics.js";
 import { StringDecoder } from "node:string_decoder";
 import type { GenerationTiming } from "../../runtime/request-timing.mjs";
 import { GenerationTimingObserver } from "./generation-timing.js";
+import { RequestActivityObserver } from "../../runtime/request-activity.mjs";
+
+const activityObservers = new WeakMap<MetricsState, RequestActivityObserver>();
+function activityObserver(metrics: MetricsState): RequestActivityObserver {
+  let observer = activityObservers.get(metrics);
+  if (!observer) { observer = new RequestActivityObserver(); activityObservers.set(metrics, observer); }
+  return observer;
+}
+export function observeRequestActivity(metrics: MetricsState, body: unknown): void {
+  if (metrics.operation !== "response") return;
+  const observer = activityObserver(metrics);
+  observer.request(body);
+  metrics.activity = observer.snapshot();
+}
+export function incompleteRequestActivity(metrics: MetricsState): void {
+  if (metrics.operation !== "response") return;
+  const observer = activityObserver(metrics);
+  observer.incomplete();
+  metrics.activity = observer.snapshot();
+}
 
 const maximumJsonMetadataBytes = 1_048_576;
 const maximumSseMetadataLineCharacters = 1_048_576;
@@ -29,9 +49,12 @@ export interface ProviderQuotaWindowsSnapshot {
 }
 
 export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
+  activity?: import("../../runtime/request-activity.mjs").RequestActivity | null;
+  /** 最后一次实际提交的模型上游地址；仅 origin 与路径，不含 URL 凭据或查询。 */
+  upstreamUrl?: string | null;
   transport: "http" | "websocket";
   responseFormat: "sse" | "json" | "websocket" | "unknown";
-  operation: "response" | "compact";
+  operation: "response" | "compact" | "imageGeneration" | "imageEdit";
   threadId: string | null;
   turnId: string | null;
   /** 官方自动审查用途与原始 reviewer 身份，独立于转储开关。 */
@@ -49,7 +72,8 @@ export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
   userAgent: string | null;
   errorType: string | null;
   errorCode: string | null;
-  errorMessage: string | null;
+  /** 普通指标不采集上游错误正文；保留字段以维持存储与 IPC 合同。 */
+  errorMessage: null;
   incompleteReason: string | null;
   inputTokens: number | null;
   cachedInputTokens: number | null;
@@ -68,6 +92,8 @@ export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
   timingBasis?: "submitted";
   /** 提交发送至首个终态或结束/失败；单调时钟，不含发送前准备。 */
   totalDurationMs?: number;
+  /** 本次逻辑请求实际提交给模型上游的请求正文或 WebSocket 请求帧字节合计。 */
+  requestBytes?: number;
   requestModel?: string | null;
   responseModel?: string | null;
   /** 精确定位本次调用的 V2 转储；未开启转储时不提供。 */
@@ -112,6 +138,7 @@ export interface UpstreamTiming {
   responseTimeMs?: number;
   generationTiming?: GenerationTiming;
   totalDurationMs?: number;
+  requestBytes?: number;
 }
 
 /** Only the in-process Chat bridge can replace synthetic-event timing. */
@@ -122,6 +149,7 @@ export function observeChatTiming(metrics: MetricsState, timing: UpstreamTiming)
   if (timing.responseTimeMs !== undefined) metrics.responseTimeMs = timing.responseTimeMs;
   if (timing.generationTiming !== undefined && !blockedGeneration.has(metrics)) metrics.generationTiming = timing.generationTiming;
   if (timing.totalDurationMs !== undefined) metrics.totalDurationMs = timing.totalDurationMs;
+  if (timing.requestBytes !== undefined) metrics.requestBytes = timing.requestBytes;
 }
 
 export function createMetricsState(
@@ -266,6 +294,11 @@ export function observeResponseEvent(
   receivedAtMonotonicMs: number,
 ): boolean {
   if (metrics.status === "completed" || metrics.status === "failed") return false;
+  if (metrics.operation === "response" && type.startsWith("response.")) {
+    const observer = activityObserver(metrics);
+    observer.response(event);
+    metrics.activity = observer.snapshot();
+  }
   if (!convertedMetrics.has(metrics) && requestClocks.has(metrics)) {
     if (event && type) observeResponseReceived(metrics, receivedAtMonotonicMs);
     if (!blockedGeneration.has(metrics) && metrics.operation === "response" && (type.startsWith("response.") || type === "error")) {
@@ -315,7 +348,6 @@ export function observeResponseEvent(
     if (markMetricsFailed(metrics, errorType, receivedAtMs, undefined, receivedAtMonotonicMs)) {
       metrics.httpStatus = finiteNonNegativeNumber(event?.status);
       metrics.errorCode = boundedString(error?.code);
-      metrics.errorMessage = boundedMessage(error?.message);
     }
     return true;
   }
@@ -363,7 +395,6 @@ function observeResponseFields(
   const error = asRecord(response?.error) ?? asRecord(event?.error);
   metrics.errorType = boundedString(error?.type);
   metrics.errorCode = boundedString(error?.code);
-  metrics.errorMessage = boundedMessage(error?.message);
   metrics.incompleteReason = boundedString(
     asRecord(response?.incomplete_details)?.reason,
   );
@@ -376,6 +407,11 @@ export function observeJsonResponse(
   receivedAtMonotonicMs = performance.now(),
 ): boolean {
   if (!response || metrics.status === "completed" || metrics.status === "failed") return false;
+  if (metrics.operation === "response") {
+    const observer = activityObserver(metrics);
+    observer.response(response);
+    metrics.activity = observer.snapshot();
+  }
   observeResponseReceived(metrics, receivedAtMonotonicMs);
   const status = response.status;
   const eventType = status === "completed"
@@ -406,6 +442,10 @@ export class HttpResponseMetricsObserver {
   constructor(private readonly metrics: MetricsState) {}
 
   observeChunk(chunk: Buffer, receivedAtMs: number, receivedAtMonotonicMs: number): boolean {
+    if (this.metrics.operation === "imageGeneration" || this.metrics.operation === "imageEdit") {
+      observeResponseReceived(this.metrics, receivedAtMonotonicMs);
+      return false;
+    }
     const completed = this.metrics.responseFormat === "sse"
       || this.metrics.responseFormat === "unknown"
       ? this.processText(this.decoder.write(chunk), receivedAtMs, receivedAtMonotonicMs)
@@ -415,6 +455,7 @@ export class HttpResponseMetricsObserver {
       if (this.jsonBytes <= maximumJsonMetadataBytes) this.jsonChunks.push(chunk);
       else {
         this.jsonOverflow = true;
+        incompleteRequestActivity(this.metrics);
         this.jsonChunks.length = 0;
       }
     }
@@ -422,6 +463,18 @@ export class HttpResponseMetricsObserver {
   }
 
   finish(receivedAtMs: number, receivedAtMonotonicMs: number): boolean {
+    if (this.metrics.operation === "imageGeneration" || this.metrics.operation === "imageEdit") {
+      if (this.metrics.status === "unknown") {
+        // This outcome describes completed HTTP transport. Image result/error
+        // semantics remain with Codex; no image JSON/SSE payload is retained or parsed.
+        this.metrics.responseCompletedAtMs = receivedAtMs;
+        const status = this.metrics.httpStatus;
+        this.metrics.status = status !== null && status >= 200 && status < 300 ? "completed" : "failed";
+        if (this.metrics.status === "failed") this.metrics.errorType ??= "http_error";
+      }
+      observeTotalDuration(this.metrics, receivedAtMonotonicMs);
+      return true;
+    }
     const completed = this.metrics.responseFormat === "sse"
       || this.metrics.responseFormat === "unknown"
       ? this.processText(this.decoder.end(), receivedAtMs, receivedAtMonotonicMs)
@@ -479,6 +532,7 @@ export class HttpResponseMetricsObserver {
       || lines.some((line) => line.length > maximumSseMetadataLineCharacters)
     ) {
       this.sseMetadataOverflow = true;
+      incompleteRequestActivity(this.metrics);
       this.pending = "";
       this.currentEvent = "";
       return false;
@@ -551,22 +605,19 @@ export function httpResponseFormat(
   return "unknown";
 }
 
+/** Only a fully parsed request can prove that acceleration was omitted. */
+export function requestServiceTier(body: Record<string, unknown> | undefined): string | null {
+  if (body === undefined) return null;
+  if (!Object.hasOwn(body, "service_tier") || body.service_tier === null) return "default";
+  return boundedString(body.service_tier);
+}
+
 export function boundedString(value: unknown): string | null {
   return typeof value === "string"
     && value.length <= 128
     && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(value)
     ? value
     : null;
-}
-
-export function boundedMessage(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const message = value
-    .replace(/\p{Cc}/gu, "")
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (message.length === 0) return null;
-  return message.length <= 500 ? message : `${message.slice(0, 500)}…`;
 }
 
 function responseEventType(payload: string): string {

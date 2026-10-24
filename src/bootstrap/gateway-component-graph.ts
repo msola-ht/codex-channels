@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { currentGitBranch } from "./git-workspace-status.js";
 import { dirname, join } from "node:path";
 
@@ -19,6 +18,7 @@ import { assertAppServerSocketPathSupported } from "../../runtime/app-server-run
 import {
   applyAppServerProviderSettings,
   readAppServerProviderSettingsFingerprint,
+  readAppServerImageUploadRoute,
   ensureAppServerProvider,
   releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
@@ -50,6 +50,7 @@ import {
   terminateThreadWriterHolder,
 } from "../../runtime/thread-writer-lock.mjs";
 import { terminateChildProcess } from "../../runtime/process-lifecycle.mjs";
+import { OwnedCommandRunner } from "../../runtime/owned-command-runner.mjs";
 import {
   inspectAppServerSupervisor,
   inspectAppServerSupervisorState,
@@ -78,6 +79,7 @@ import {
   supportedCodexCliVersion,
   toAutoApprovalReviewEvent,
   toConversationInputEvent,
+  toReasoningGuardInput,
   toThreadQueueChangedEvent,
   toThreadStateEvent,
   type CodexTransport,
@@ -95,6 +97,7 @@ import {
   CollaborationModeSelectionService,
   ConversationCommandService,
   ConversationEventCoordinator,
+  ReasoningRepeatGuard,
   ConversationService,
   ModelSelectionService,
   ProviderAccountService,
@@ -110,6 +113,7 @@ import {
   ConversationCore,
   UserFacingError,
   isCriticalOutputEvent,
+  usesOpenAiAccount,
   type ConversationTarget,
   type OutputEvent,
   type TurnErrorCode,
@@ -135,7 +139,6 @@ import {
   canReviewConversationHook,
   canPreserveWeixinHookReviewText,
   formatProviderIdleReleaseNotice,
-  setModelDisplayAliases,
   type SurfaceAdapter,
   SurfaceOutputCoalescer,
 } from "../surfaces/index.js";
@@ -179,10 +182,12 @@ export abstract class GatewayComponentGraph {
   private readonly metricsReady: Promise<void>;
   private readonly autoApprovalReview: AutoApprovalReviewTracker;
   private readonly autoApprovalReviewNotifications: AutoApprovalReviewNotifications;
+  private readonly reasoningRepeatGuard: ReasoningRepeatGuard;
   private readonly primaryProvider: string;
   private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
   private readonly notificationGenerations = new WeakMap<RpcNotification, { provider: string; generation: number }>();
+  private readonly notificationCurrent = new WeakMap<RpcNotification, () => boolean>();
   private readonly providerNotificationGenerations = new Map<string, number>();
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
@@ -231,6 +236,7 @@ export abstract class GatewayComponentGraph {
   private startupNetworkRecovery: StartupNetworkRecovery | undefined;
   private openAiConnectivityAbort: AbortController | undefined;
   private startupAbort: AbortController | undefined;
+  private readonly auxiliaryCommands: OwnedCommandRunner;
   private stopping = false;
 
   protected abstract requestStop(): Promise<void>;
@@ -244,7 +250,8 @@ export abstract class GatewayComponentGraph {
   ) {
     logger = logger.child({ module: "gateway" });
     this.logger = logger;
-    verifyCodexVersion(config);
+    this.auxiliaryCommands = new OwnedCommandRunner();
+    registerConstructionCleanup("Auxiliary Commands", () => this.auxiliaryCommands.close());
     const primaryProvider = loadPrimaryModelProvider();
     const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider();
     const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders();
@@ -306,14 +313,29 @@ export abstract class GatewayComponentGraph {
     this.transport = createTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
     this.customPrimaryProviderId = customPrimaryProvider?.id;
-    setModelDisplayAliases(config.modelDisplayAliases);
     const clients = new Map<string, CodexAppServerClient>();
+    const imageUploadFetch = createProxyFetch(config.networkProxy);
+    const supportsImageReferenceUpload = (provider: string): boolean =>
+      provider === "openai" || /^ds-[a-z0-9_-]{1,32}$/u.test(provider);
+    const imageUploadOptions = (provider: string) =>
+      supportsImageReferenceUpload(provider) ? { upload: imageUploadFetch,
+        ...(/^ds-[a-z0-9_-]{1,32}$/u.test(provider) ? {
+          readProviderUploadRoute: async (target: string, signal: AbortSignal) => {
+            try { return await readAppServerImageUploadRoute(config.codexSocketPath, target, signal); }
+            catch {
+              signal.throwIfAborted();
+              throw new UserFacingError("image.reference.failed",
+                "图片上传私有路由不可用，请确认 Provider 配置已应用并重启 App Server 与 Gateway。",
+                { reason: "private-route-unavailable" });
+            }
+          },
+        } : {}) } : undefined;
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger, 64, config.codexClientIdentity),
       {
         ...(config.codexModel ? { model: config.codexModel } : {}),
       },
-      primaryProvider === "openai" ? { upload: createProxyFetch(config.networkProxy) } : undefined,
+      imageUploadOptions(primaryProvider),
     ));
     for (const managedProvider of managedProviders) {
       const providerTransport = createTransport(
@@ -322,6 +344,7 @@ export abstract class GatewayComponentGraph {
       clients.set(managedProvider.provider, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
         {},
+        imageUploadOptions(managedProvider.provider),
       ));
     }
     for (const customSwitchingProvider of customSwitchingProviders) {
@@ -410,6 +433,7 @@ export abstract class GatewayComponentGraph {
       config.scheduledTasksEnabled ? [scheduledTaskToolSpec] : [],
       () => {
         this.core?.pruneUnboundTurns();
+        this.reasoningRepeatGuard?.prune();
         this.asyncQuestions?.cancelStale();
         this.approval?.cancelStale();
         void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
@@ -426,7 +450,14 @@ export abstract class GatewayComponentGraph {
       },
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
-    this.core = new ConversationCore(this.router, this.output);
+    this.core = new ConversationCore(this.router, {
+      publish: (event, critical) => {
+        if (event.type === "turn.completed" && event.status !== "inProgress") {
+          const runningSubagentCount = this.subagentCompletion.flushCompletedForParent(event.threadId, event.turnId);
+          this.output.publish({ ...event, ...(runningSubagentCount > 0 ? { runningSubagentCount } : {}) }, critical);
+        } else this.output.publish(event, critical);
+      },
+    });
     this.metricsDatabase = new AsyncMetricsStore(
       modelRequestMetricsDatabasePath(config.stateDatabasePath),
       {
@@ -462,6 +493,23 @@ export abstract class GatewayComponentGraph {
         logger.error({ err: error, ...metricsWorkerFailureMetadata(error) }, "轮次耗时覆盖无法持久降级，Gateway 正在停止");
         void this.requestStop().catch(() => logger.error("指标故障后的 Gateway 清理失败"));
       });
+    this.reasoningRepeatGuard = new ReasoningRepeatGuard({
+      route: (threadId) => {
+        if (this.stopping) return undefined;
+        const provider = this.codex.knownProvider(threadId);
+        const target = this.router.targetForThread(threadId);
+        const official = usesOpenAiAccount(provider) && this.customPrimaryProviderId === undefined;
+        return provider && !official && target
+          ? { target, provider } : undefined;
+      },
+      active: (threadId, turnId) => this.core.activeTurnForThread(threadId)?.turnId === turnId,
+      interrupt: async (threadId, turnId, beforeSubmit) => {
+        await this.trackQueueLifecycleTask(() => this.codex.interruptTurn(threadId, turnId, beforeSubmit));
+      },
+      notify: (route, threadId, message) => this.output.publish({ type: "warning", target: route.target,
+        threadId, message, ...(this.router.isBackgroundThread(threadId) ? { background: true } : {}) }, true),
+    });
+    registerConstructionCleanup("Reasoning Repeat Guard", () => this.reasoningRepeatGuard.close());
     this.autoApprovalReview = new AutoApprovalReviewTracker(metricsStore,
       (threadId) => this.codex.knownProvider(threadId),
       (error, threadId) => logger.warn({ module: "metrics", event: "auto_review.write_failed", err: error, threadId, ...metricsWorkerFailureMetadata(error) }, "自动审查统计记录失败，统计覆盖不完整"),
@@ -597,6 +645,7 @@ export abstract class GatewayComponentGraph {
         );
       },
     });
+    this.output.observe((event) => this.subagentCompletion.handle(event));
     this.output.subscribe("subagent-metrics", async (event) => {
       if (event.type === "subagent.spawned") {
         try {
@@ -622,7 +671,6 @@ export abstract class GatewayComponentGraph {
           "子代理活动已登记，等待官方终态",
         );
       }
-      this.subagentCompletion.handle(event);
     });
     this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(
@@ -758,7 +806,7 @@ export abstract class GatewayComponentGraph {
         listAgentRoles: () => listConfiguredAgentRoles(process.env),
       },
       {
-        releaseThread: (target, force) => this.releaseThread(target, force),
+        releaseThread: (target, force, assertAuthorized) => this.releaseThread(target, force, assertAuthorized),
       },
       execution,
       this.codex,
@@ -785,8 +833,8 @@ export abstract class GatewayComponentGraph {
         },
       },
       {
-        updateThreadApprovalsReviewer: (threadId, reviewer) =>
-          this.updateThreadApprovalsReviewer(threadId, reviewer),
+        updateThreadApprovalsReviewer: (threadId, reviewer, beforeSubmit) =>
+          this.updateThreadApprovalsReviewer(threadId, reviewer, beforeSubmit),
       },
       (target, actorId) => {
         this.requireRunning();
@@ -800,7 +848,10 @@ export abstract class GatewayComponentGraph {
         return false;
       },
       {
-        backgrounded: (threadId) => this.retrySettledBackground(threadId),
+        backgrounded: (threadId) => {
+          this.scheduleBindingRestore();
+          this.retrySettledBackground(threadId);
+        },
         restoreRequired: (threadId) => {
           if (!this.stopping && !this.isBindingRestoring(threadId)) void this.restoreIdleBinding(threadId);
         },
@@ -975,6 +1026,9 @@ export abstract class GatewayComponentGraph {
       ? new ScheduledTaskComposition({
           stateDatabasePath: config.stateDatabasePath,
           registerConstructionCleanup,
+          releaseRecoveredThread: (threadId, isCurrent) => service.releaseBackgroundIfComplete(threadId, {
+            dispatchQueued: false, isCurrent,
+          }),
           router: this.router,
           codex: this.codex,
           turns: execution,
@@ -990,6 +1044,9 @@ export abstract class GatewayComponentGraph {
             this.accessPolicy(target)?.isAllowed({ target, actorId }) === true,
           creationContext: (target) => {
             const status = service.status(target);
+            if (status.serviceTierKnown !== true) {
+              throw new UserFacingError("fast.selection.unknown", "当前用户选择的速度档位未知，无法固定计划任务");
+            }
             const workspace = this.workspaces.require(status.workspaceId);
             return {
               workspaceId: workspace.id,
@@ -998,7 +1055,9 @@ export abstract class GatewayComponentGraph {
               modelProvider: status.modelProvider ?? "openai",
               model: status.model,
               reasoningEffort: status.effort,
-              serviceTier: status.serviceTier,
+              // New tasks fix an observed absence as Standard. Historical null
+              // task rows retain their existing execution-time inheritance.
+              serviceTier: status.serviceTier ?? "default",
               modelPending: status.modelPending,
               effortPending: status.effortPending,
               serviceTierPending: status.fastModePending,
@@ -1020,7 +1079,12 @@ export abstract class GatewayComponentGraph {
       const workspace = this.workspaces.require(status.workspaceId);
       return JSON.stringify([workspace.id, workspace.cwd, status.threadId]);
     });
-    const commands = new ConversationCommandService(service, scheduledTaskUseCases, channelResetCredits);
+    const commands = new ConversationCommandService(service, scheduledTaskUseCases, channelResetCredits, (target, actorId) => {
+      this.requireRunning();
+      if (!actorId || !this.accessPolicy(target)?.isAllowed({ target, actorId })) {
+        throw new UserFacingError("command.authorization-changed", "当前命令操作者未获授权");
+      }
+    });
     const constructedSurfaces = new Set<SurfaceAdapter>();
     this.surfaceModules = createSurfaceModules({
       config,
@@ -1175,6 +1239,23 @@ export abstract class GatewayComponentGraph {
       timeoutMs: config.approvalTimeoutMs,
       targetForThread: (threadId) => this.router.targetForThread(threadId),
       currentThread: (target) => this.router.current(target)?.threadId,
+      captureAuthorization: (target) => {
+        const actors = this.bindings.actors(target).filter(actorId => this.accessPolicy(target)?.isAllowed({ target, actorId }));
+        if (this.stopping || actors.length !== 1) return undefined;
+        const actorId = actors[0]!;
+        let workspace: ReturnType<SessionRouter["workspace"]>;
+        try { workspace = this.router.workspace(target); } catch { return undefined; }
+        const workspaceId = workspace.id;
+        const cwd = workspace.cwd;
+        return { actorId, isCurrent: () => {
+          if (this.stopping || !this.bindings.actors(target).includes(actorId)
+            || !this.accessPolicy(target)?.isAllowed({ target, actorId })) return false;
+          try {
+            const current = this.router.workspace(target);
+            return current.id === workspaceId && current.cwd === cwd;
+          } catch { return false; }
+        } };
+      },
       submit: (target, threadId, text, isCurrent) => service.submitAsyncAnswer(target, threadId, text, isCurrent),
       warn: (event, message) => this.output.publish({
         type: "warning", target: event.target, threadId: event.threadId, message,
@@ -1205,7 +1286,7 @@ export abstract class GatewayComponentGraph {
     }
     const conversationEvents = new ConversationEventCoordinator(service, {
       trackSubagent: (event) => this.subagentCompletion.handleInput(event),
-      reduce: (event) => this.core.handle(event),
+      reduce: (event) => this.core.handle(event, { threadClosureObserved: event.type === "thread.closed" }),
       isBackgroundThread: (threadId) => this.router.isBackgroundThread(threadId),
       retryBackgroundRelease: (threadId, trigger) => {
         void this.trackQueueLifecycleTask(() => service.retryPendingBackgroundRelease(threadId,
@@ -1221,6 +1302,12 @@ export abstract class GatewayComponentGraph {
       },
     });
     this.inbound.subscribe("conversation-core", (notification) => {
+      if (this.notificationCurrent.get(notification)?.() === false) return;
+      const source = this.notificationGenerations.get(notification);
+      const stale = source !== undefined
+        && source.generation !== (this.providerNotificationGenerations.get(source.provider) ?? 0);
+      // Connection-local state must be filtered before Application/Core side effects.
+      if (stale && (notification.method === "thread/closed" || notification.method === "thread/settings/updated")) return;
       const autoReview = toAutoApprovalReviewEvent(notification);
       if (autoReview) this.autoApprovalReviewNotifications.handle(autoReview);
       const queueChanged = toThreadQueueChangedEvent(notification);
@@ -1229,9 +1316,6 @@ export abstract class GatewayComponentGraph {
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
-        const source = this.notificationGenerations.get(notification);
-        const stale = source !== undefined
-          && source.generation !== (this.providerNotificationGenerations.get(source.provider) ?? 0);
         // Preserve accepted results, but never revive live status from a disconnected stream.
         if (stale && (coreEvent.type === "turn.started" || coreEvent.type === "item.reasoning.delta"
           || (coreEvent.type === "turn.error" && coreEvent.willRetry))) return;
@@ -1242,7 +1326,7 @@ export abstract class GatewayComponentGraph {
           const timingProvider = this.codex.knownProvider(coreEvent.threadId);
           if (timingProvider) this.turnExecution.handle(coreEvent, timingProvider);
         }
-        this.asyncQuestions.handleInput(coreEvent);
+        this.asyncQuestions.handleInput(coreEvent, !stale);
         if (coreEvent.type === "mcp.status.updated"
           && (coreEvent.modelProvider === "openai"
             || (coreEvent.threadId !== null && this.codex.knownProvider(coreEvent.threadId) === "openai"))) {
@@ -1320,8 +1404,8 @@ export abstract class GatewayComponentGraph {
     this.bindingRestoreCoordinator();
   }
 
-  private async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review"): Promise<void> {
-    await this.codex.updateThreadApprovalsReviewer(threadId, reviewer);
+  private async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review", beforeSubmit?: () => void): Promise<void> {
+    await this.codex.updateThreadApprovalsReviewer(threadId, reviewer, beforeSubmit);
     // RPC confirmation observes notifications before the asynchronous inbound
     // consumers reduce them. Wait for the shared reducer before Application
     // reads the actual reviewer or the next command checks a same-value no-op.
@@ -1507,7 +1591,13 @@ export abstract class GatewayComponentGraph {
         if (!result.applied) return false;
         const disconnected = this.settingsDisconnects.has(provider);
         if (!result.changed && !disconnected) return true;
-        await this.codex.closeProvider(provider);
+        // Intentional close does not emit onDisconnect; invalidate this stream here too.
+        this.router.invalidateSubscriptions(threadId => this.codex.knownProvider(threadId) === provider);
+        try {
+          await this.codex.closeProvider(provider);
+        } finally {
+          this.providerNotificationGenerations.set(provider, (this.providerNotificationGenerations.get(provider) ?? 0) + 1);
+        }
         cancellation.throwIfAborted();
         if (connected || disconnected) {
           recovering = this.gatewayReconnectCoordinator().recoverAppliedSettings(provider, cancellation);
@@ -1602,6 +1692,7 @@ export abstract class GatewayComponentGraph {
       | "provider-settings-scheduled"
       | "provider-settings-restarting"
       | "provider-settings-applied"
+      | "provider-settings-restart-required"
       | "provider-settings-failed",
     providers: readonly string[],
   ): void {
@@ -1617,6 +1708,8 @@ export abstract class GatewayComponentGraph {
     try {
       this.requireRunning();
       this.startupAbort = new AbortController();
+      await verifyCodexVersion(this.config, this.auxiliaryCommands, this.startupAbort.signal);
+      this.requireRunning();
       await this.metricsReady;
       this.requireRunning();
       await this.scheduledTasks?.prepareStore(this.startupAbort.signal);
@@ -1638,9 +1731,36 @@ export abstract class GatewayComponentGraph {
         this.notificationGenerations.set(notification, {
           provider, generation: this.providerNotificationGenerations.get(provider) ?? 0,
         });
+        const threadStateEvent = toThreadStateEvent(notification);
+        if (threadStateEvent) {
+          const isCurrent = this.threadState.observeExecutionContext(threadStateEvent);
+          if (isCurrent) this.notificationCurrent.set(notification, isCurrent);
+          if (threadStateEvent.type === "thread.closed") this.core.observeThreadClosed(threadStateEvent.threadId);
+          if (threadStateEvent.type === "thread.settings.updated") {
+            this.conversations.observeLunaReserveSettings(threadStateEvent.threadId);
+          }
+        }
         // Revoke live tools before bounded asynchronous notification consumers.
         const toolEvent = toConversationInputEvent(notification);
         if (toolEvent) this.scheduledTasks?.toolHandler.handleInput(toolEvent);
+        // Guard input precedes the lossy presentation queue; raw text never enters that queue via Core.
+        if (toolEvent && "threadId" in toolEvent && toolEvent.threadId
+          && provider === this.codex.knownProvider(toolEvent.threadId)) {
+          if (toolEvent.type === "turn.completed") {
+            this.reasoningRepeatGuard.completed(toolEvent.threadId, toolEvent.turnId, toolEvent.status);
+          } else if (toolEvent.type === "turn.started") {
+            this.reasoningRepeatGuard.started(toolEvent.threadId, toolEvent.turnId);
+          } else if (toolEvent.type === "turn.error") {
+            this.reasoningRepeatGuard.requestFailed(toolEvent.threadId, toolEvent.turnId);
+          } else if (toolEvent.type === "thread.closed" || toolEvent.type === "thread.archived"
+            || toolEvent.type === "thread.deleted" || toolEvent.type === "thread.reverted") {
+            this.reasoningRepeatGuard.reset(toolEvent.threadId);
+          }
+        }
+        const reasoningInput = toReasoningGuardInput(notification);
+        if (reasoningInput && provider === this.codex.knownProvider(reasoningInput.threadId)) {
+          this.reasoningRepeatGuard.observe(reasoningInput);
+        }
         if (notification.method === "serverRequest/resolved" && typeof notification.params === "object"
           && notification.params !== null && !Array.isArray(notification.params)) {
           const params = notification.params as { requestId?: unknown; threadId?: unknown };
@@ -1653,11 +1773,18 @@ export abstract class GatewayComponentGraph {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        // A reconnect has no delta sequence numbers: never join text across connections.
+        this.reasoningRepeatGuard.resetProvider(provider);
         this.providerNotificationGenerations.set(provider, (this.providerNotificationGenerations.get(provider) ?? 0) + 1);
+        this.router.invalidateSubscriptions(threadId => this.codex.knownProvider(threadId) === provider);
         this.scheduledTasks?.toolHandler.cancelThreads((threadId) => this.codex.knownProvider(threadId) === provider);
-        this.conversationIdleReleaser?.cancelPending(new Set(this.router.allBindings()
+        const affectedThreads = new Set(this.router.allBindings()
           .filter((binding) => this.codex.knownProvider(binding.threadId) === provider)
-          .map((binding) => binding.threadId)));
+          .map((binding) => binding.threadId));
+        this.conversationIdleReleaser?.cancelPending(affectedThreads);
+        for (const threadId of affectedThreads) {
+          this.conversations.clearMcpLoginThread(threadId);
+        }
         this.turnExecution.reset(provider);
         this.autoApprovalReview.reset(provider);
         this.autoApprovalReviewNotifications.reset(provider);
@@ -1763,6 +1890,7 @@ export abstract class GatewayComponentGraph {
     this.surfaceManager.beginShutdown?.();
     this.conversations?.closeSessionQueries();
     this.startupAbort?.abort();
+    this.auxiliaryCommands.cancel();
     void this.startupNetworkRecovery?.stop();
     this.openAiConnectivityAbort?.abort(new Error("Gateway 正在停止"));
     const reconnecting = this.stopReconnect();
@@ -1878,6 +2006,7 @@ export abstract class GatewayComponentGraph {
     this.surfaceManager.beginShutdown?.();
     this.conversations?.closeSessionQueries();
     this.startupAbort?.abort();
+    this.auxiliaryCommands.cancel();
     const restoringBindings = this.bindingRestoreCoordinator().close();
     this.openAiConnectivityAbort?.abort();
     this.openAiConnectivityAbort = undefined;
@@ -1887,8 +2016,10 @@ export abstract class GatewayComponentGraph {
     this.removeRpcDisconnect = undefined;
     const failures: unknown[] = [];
     for (const [component, close] of [
+      ["Auxiliary Commands", () => this.auxiliaryCommands.close()],
       ["Startup Network Recovery", () => this.startupNetworkRecovery?.stop()],
       ["Scheduled Task Scheduler", () => this.scheduledTasks?.stop()],
+      ["Reasoning Repeat Guard", () => this.reasoningRepeatGuard.close()],
       ["Queue Lifecycle", () => this.closeQueueLifecycleTasks()],
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
@@ -2047,13 +2178,13 @@ export abstract class GatewayComponentGraph {
   }
 
   private resolveAutoCompactPercent(
-    _provider: string | null | undefined,
+    provider: string | null | undefined,
     model: string | null | undefined,
   ): number | null {
     if (!model) return null;
     // 受管第三方 Provider 只配置模型窗口，压缩阈值由上游按窗口推导。
     const managed = loadManagedModelWindow(process.env).some(
-      (candidate: { model: string }) => candidate.model === model,
+      (candidate: { provider: string; model: string }) => candidate.provider === provider && candidate.model === model,
     );
     if (managed) return null;
     const override = readCodexConfigModelOverride(process.env);
@@ -2160,19 +2291,35 @@ export abstract class GatewayComponentGraph {
   private async releaseThread(
     target: ConversationTarget,
     force?: boolean,
+    assertAuthorized?: () => void,
   ): Promise<ThreadOccupancyReleaseResult> {
+    this.requireRunning();
+    assertAuthorized?.();
     const current = this.router.current(target);
     if (!current) {
       return { status: "unbound" };
     }
+    const workspace = this.router.workspace(target);
+    const assertCurrent = () => {
+      this.requireRunning();
+      assertAuthorized?.();
+      if (this.router.current(target) !== current || this.router.workspace(target) !== workspace) {
+        throw new UserFacingError("thread.takeover.changed", "等待期间会话或 Workspace 已变化，请重新查询占用");
+      }
+    };
     const threadId = current.threadId;
-    const inspection = inspectThreadWriterLock(threadId);
+    const options = {
+      runner: this.auxiliaryCommands,
+      ...(this.startupAbort ? { signal: this.startupAbort.signal } : {}),
+    };
+    const inspection = await inspectThreadWriterLock(threadId, process.env, "/proc", options);
+    assertCurrent();
     if (!inspection.held) {
       this.retryPendingBindingRestore(threadId);
       return { status: "free", threadId };
     }
     if (inspection.holder === null) {
-      return { status: "unidentifiable", threadId };
+      return { status: "unidentifiable", threadId, reason: inspection.reason };
     }
     const holder = inspection.holder;
     const releasable = isReleaseableThreadWriterHolder(holder);
@@ -2186,30 +2333,37 @@ export abstract class GatewayComponentGraph {
         stuck,
       };
     }
-    const recheck = inspectThreadWriterLock(threadId);
+    const recheck = await inspectThreadWriterLock(threadId, process.env, "/proc", options);
+    assertCurrent();
     if (!recheck.held) {
       this.retryPendingBindingRestore(threadId);
       return { status: "released", threadId, holder };
     }
-    const recheckedReleasable = recheck.holder !== null
-      && isReleaseableThreadWriterHolder(recheck.holder);
+    if (recheck.holder === null) {
+      return { status: "unidentifiable", threadId, reason: recheck.reason };
+    }
+    const recheckedReleasable = isReleaseableThreadWriterHolder(recheck.holder);
     if (
-      recheck.holder === null
-      || recheck.holder.pid !== holder.pid
+      recheck.holder.pid !== holder.pid
       || recheck.holder.startedAt !== holder.startedAt
       || !recheckedReleasable
     ) {
       return {
         status: "held",
         threadId,
-        holder: recheck.holder ?? holder,
+        holder: recheck.holder,
         releasable: recheckedReleasable,
         stuck,
       };
     }
+    assertCurrent();
     const exited = await terminateThreadWriterHolder(holder.pid, {
       ...(holder.startedAt === undefined ? {} : { startedAt: holder.startedAt }),
+      ...options,
     });
+    // Termination may already have happened. A stale result never restores a
+    // replacement binding, and cancellation does not imply rollback of force.
+    assertCurrent();
     if (!exited) {
       return {
         status: "held",
@@ -2296,24 +2450,19 @@ export async function waitAtMost(task: Promise<void>, timeoutMs: number): Promis
   }
 }
 
-function verifyCodexVersion(config: GatewayConfig): void {
+async function verifyCodexVersion(config: GatewayConfig, runner: OwnedCommandRunner, signal: AbortSignal): Promise<void> {
   const invocation = executableInvocation(
     resolveExecutable(effectiveCodexBinary(config.codexBinary)),
     ["--version"],
   );
-  const result = spawnSync(invocation.file, invocation.args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-  });
-  if (result.error) throw result.error;
+  const result = await runner.run(invocation, { timeoutMs: 5_000, maxOutputBytes: 4_096, signal });
   if (result.status !== 0) {
     throw new Error("无法读取 Codex 版本");
   }
   const actual = result.stdout.trim();
   if (actual !== supportedCodexCliVersion) {
     throw new Error(
-      `Codex 版本不受支持：当前 ${actual}，协议基线 ${supportedCodexCliVersion}`,
+      `Codex 版本不受支持：需要协议基线 ${supportedCodexCliVersion}`,
     );
   }
 }

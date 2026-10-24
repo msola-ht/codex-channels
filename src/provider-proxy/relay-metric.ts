@@ -17,12 +17,15 @@ export interface RelayMetric extends DirectChatUsage, ModelRequestDiagnostics {
   reasoningEffort?: string;
   responseModel?: string;
   userAgent?: string;
+  upstreamUrl?: string | null;
+  activity?: import("../../runtime/request-activity.mjs").RequestActivity | null;
   responseFormat: "json" | "sse";
   status: "completed" | "incomplete" | "failed";
   deliveryStatus: "finished" | "disconnected" | "failed";
   requestStartedAtMs: number;
   responseCompletedAtMs: number;
   totalDurationMs: number;
+  requestBytes: number;
   firstTokenMs?: number;
   responseTimeMs?: number;
   generationTiming?: GenerationTiming;

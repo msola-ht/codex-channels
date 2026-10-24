@@ -9,12 +9,15 @@ export interface SkillInstallResult {
   installed: boolean;
   target: string;
   reason?: "exists";
+  backup?: string;
+  retainedDirectory?: string;
 }
 
 export interface SkillUninstallResult {
   name: string;
   removed: boolean;
   target: string;
+  retainedDirectory?: string;
 }
 
 export function projectSkillsRoot(projectRoot?: string): string;
@@ -35,11 +38,13 @@ export function installSkill(options?: {
   projectRoot?: string;
   environment?: NodeJS.ProcessEnv;
   overwrite?: boolean;
+  expectedTargetRevision?: string;
 }): SkillInstallResult;
 
 export function uninstallSkill(options?: {
   name: string;
   environment?: NodeJS.ProcessEnv;
+  expectedTargetRevision?: string;
 }): SkillUninstallResult;
 
 export function runSkillSetup(options?: {

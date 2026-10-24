@@ -1,5 +1,6 @@
 import type { ResetCreditSnapshot, ResetCreditPreview, ResetCreditResult } from "./types"
 import type {
+  ManagementProviderWebSearchProbeInput, ManagementProviderWebSearchProbeResult,
   ManagementCustomModelProbeInput, ManagementCustomModelProbeResult,
   ServiceLogTarget, ServiceLogsResponse,
   QueueChangeEvent,
@@ -7,7 +8,6 @@ import type {
   RelayQueueSnapshot, RelayManagementSnapshot, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   RelayReasoningProbeInput, RelayReasoningProbeResult, RelayReasoningProbeEvent,
   ServerTimeResponse,
-  ModelDisplaySettingsResponse,
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
   OfficialAccountSourcesResponse,
@@ -21,6 +21,16 @@ import type {
   ManagementSettingsResponse,
   ManagementServicesResponse,
   ManagementProvidersResponse,
+  OpenAiModelCatalogResponse,
+  OpenAiModelPromptsResponse,
+  ProviderModelPromptsResponse,
+  ProviderModelTemplateOptionsResponse,
+  OpenAiModelContextInput,
+  OpenAiModelContextPreview,
+  OpenAiModelContextResult,
+  OpenAiModelRefreshInput,
+  OpenAiModelRefreshPreview,
+  OpenAiModelRefreshResult,
   UpstreamUserAgentResponse,
   ManagementSettingInput,
   ManagementSettingMutationResponse,
@@ -30,6 +40,7 @@ import type {
   ManagementTaskInput,
   ManagementTaskPreview,
   ManagementProviderSettingsResponse,
+  ManagementProviderModelCatalogsResponse,
   ManagementProviderSettingsMutationInput,
   ManagementProviderSettingsPreviewResponse,
   ManagementProviderSettingsMutationResponse,
@@ -47,6 +58,8 @@ import type {
   TrafficListResponse,
 } from "@/lib/types"
 import { getToken } from "@/lib/token-storage"
+import type { ManagedManualModelDefinition, ProviderModelAdditionOptions } from "../../../scripts/provider-model-additions.mjs"
+import type { ManagedProviderModelRequestOptions } from "../../../scripts/managed-provider-model-edit.mjs"
 import { metricsQueryParams } from "@/lib/metrics-query"
 
 export { getToken, setToken } from "@/lib/token-storage"
@@ -178,16 +191,18 @@ async function requestJson<T>(path: string, init: RequestInit = {}, signal?: Abo
   return await response.json() as T
 }
 
-async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  return requestJson<T>(path, {}, signal)
+async function getJson<T>(path: string, signal?: AbortSignal, timeoutMs = 30_000): Promise<T> {
+  return requestJson<T>(path, {}, signal, timeoutMs)
 }
+
+// Include initialization (10s), reading (30s), exit confirmation/retry (3s each),
+// bounded ancillary reads and response delivery. Account refresh adds its 20s IPC.
+const metricsReadTimeoutMs = 60_000
+const accountRefreshTimeoutMs = 90_000
+const getMetricsJson = <T>(path: string, signal?: AbortSignal) => getJson<T>(path, signal, metricsReadTimeoutMs)
 
 export function fetchServerTime(signal?: AbortSignal): Promise<ServerTimeResponse> {
   return getJson<ServerTimeResponse>(`${API_PREFIX}/time`, signal)
-}
-
-export function fetchModelDisplaySettings(signal?: AbortSignal): Promise<ModelDisplaySettingsResponse> {
-  return getJson<ModelDisplaySettingsResponse>(`${API_PREFIX}/settings/model-display`, signal)
 }
 
 export function fetchManagementSettings(signal?: AbortSignal): Promise<ManagementSettingsResponse> {
@@ -219,28 +234,28 @@ export function fetchOverview(
   query: MetricsRangeQuery,
   signal?: AbortSignal,
 ): Promise<OverviewResponse> {
-  return getJson<OverviewResponse>(
+  return getMetricsJson<OverviewResponse>(
     `${API_PREFIX}/overview?${metricsQueryParams(query)}`,
     signal,
   )
 }
 
 export function fetchMetricsProviders(signal?: AbortSignal): Promise<MetricsProvidersResponse> {
-  return getJson<MetricsProvidersResponse>(`${API_PREFIX}/providers`, signal)
+  return getMetricsJson<MetricsProvidersResponse>(`${API_PREFIX}/providers`, signal)
 }
 
 export function fetchThreads(
   query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<ThreadsResponse> {
-  return getJson<ThreadsResponse>(`${API_PREFIX}/threads?${metricsQueryParams(query)}`, signal)
+  return getMetricsJson<ThreadsResponse>(`${API_PREFIX}/threads?${metricsQueryParams(query)}`, signal)
 }
 
 export function fetchThreadRun(
   threadId: string,
   signal?: AbortSignal,
 ): Promise<ThreadRunResponse> {
-  return getJson<ThreadRunResponse>(
+  return getMetricsJson<ThreadRunResponse>(
     `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/run`,
     signal,
   )
@@ -255,7 +270,7 @@ export function fetchThreadSubagents(
   if (page.sortKey !== undefined) params.set("sortKey", page.sortKey)
   if (page.sortDirection !== undefined) params.set("sortDirection", page.sortDirection)
   if (page.parentTurnId !== undefined) params.set("parentTurnId", page.parentTurnId)
-  return getJson<ThreadSubagentsResponse>(`${API_PREFIX}/threads/${encodeURIComponent(threadId)}/subagents?${params}`, signal)
+  return getMetricsJson<ThreadSubagentsResponse>(`${API_PREFIX}/threads/${encodeURIComponent(threadId)}/subagents?${params}`, signal)
 }
 
 export function fetchSubagents(
@@ -265,7 +280,7 @@ export function fetchSubagents(
   const params = new URLSearchParams({ offset: String(page.offset), limit: String(page.limit) })
   if (page.sortKey !== undefined) params.set("sortKey", page.sortKey)
   if (page.sortDirection !== undefined) params.set("sortDirection", page.sortDirection)
-  return getJson<SubagentsResponse>(`${API_PREFIX}/subagents?${params}`, signal)
+  return getMetricsJson<SubagentsResponse>(`${API_PREFIX}/subagents?${params}`, signal)
 }
 
 export function fetchThreadTurns(
@@ -273,7 +288,7 @@ export function fetchThreadTurns(
   query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<ThreadTurnsResponse> {
-  return getJson<ThreadTurnsResponse>(
+  return getMetricsJson<ThreadTurnsResponse>(
     `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns?${metricsQueryParams(query)}`,
     signal,
   )
@@ -283,7 +298,7 @@ export function fetchRequests(
   query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<RequestsResponse> {
-  return getJson<RequestsResponse>(`${API_PREFIX}/requests?${metricsQueryParams(query)}`, signal)
+  return getMetricsJson<RequestsResponse>(`${API_PREFIX}/requests?${metricsQueryParams(query)}`, signal)
 }
 
 export async function fetchMetricsExport(query: MetricsQuery, signal?: AbortSignal): Promise<Blob> {
@@ -363,7 +378,7 @@ export function fetchErrors(
   query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<ErrorsResponse> {
-  return getJson<ErrorsResponse>(
+  return getMetricsJson<ErrorsResponse>(
     `${API_PREFIX}/errors?${metricsQueryParams(query)}`,
     signal,
   )
@@ -382,15 +397,76 @@ export function fetchManagementServices(signal?: AbortSignal): Promise<Managemen
 }
 
 export function fetchUpstreamUserAgent(signal?: AbortSignal): Promise<UpstreamUserAgentResponse> {
-  return getJson<UpstreamUserAgentResponse>(`${API_PREFIX}/management/upstream-user-agent`, signal)
+  return getJson<UpstreamUserAgentResponse>(`${API_PREFIX}/management/upstream-user-agent`, signal, metricsReadTimeoutMs)
 }
 
 export function fetchManagementProviders(signal?: AbortSignal): Promise<ManagementProvidersResponse> {
   return getJson<ManagementProvidersResponse>(`${API_PREFIX}/management/providers`, signal)
 }
 
+export function fetchOpenAiModelCatalog(signal?: AbortSignal): Promise<OpenAiModelCatalogResponse> {
+  return getJson<OpenAiModelCatalogResponse>(`${API_PREFIX}/management/models/official`, signal)
+}
+
+export function fetchOpenAiModelPrompts(model: string, revision: string, signal?: AbortSignal): Promise<OpenAiModelPromptsResponse> {
+  return getJson(`${API_PREFIX}/management/models/official/prompts?${new URLSearchParams({ model, revision })}`, signal)
+}
+
+export function fetchProviderModelPrompts(provider: string, model: string, revision: string, signal?: AbortSignal): Promise<ProviderModelPromptsResponse> {
+  return getJson(`${API_PREFIX}/management/provider-model-prompts?${new URLSearchParams({ provider, model, revision })}`, signal)
+}
+
+export function previewOpenAiModelContext(input: OpenAiModelContextInput, signal?: AbortSignal): Promise<{ preview: OpenAiModelContextPreview; confirmationToken: string; confirmationExpiresAt: number }> {
+  return requestJson(`${API_PREFIX}/management/models/official/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+
+export function updateOpenAiModelContext(input: OpenAiModelContextInput, confirmationToken: string, signal?: AbortSignal): Promise<OpenAiModelContextResult> {
+  return requestJson(`${API_PREFIX}/management/models/official/context`, { method: "POST", body: JSON.stringify({ ...input, confirmationToken }) }, signal)
+}
+
+export function previewOpenAiModelRefresh(input: OpenAiModelRefreshInput, signal?: AbortSignal): Promise<{ preview: OpenAiModelRefreshPreview; confirmationToken: string; confirmationExpiresAt: number }> {
+  return requestJson(`${API_PREFIX}/management/models/official/refresh/preview`, { method: "POST", body: JSON.stringify(input) }, signal, 45_000)
+}
+
+export function refreshOpenAiModelCatalog(input: OpenAiModelRefreshInput, confirmationToken: string, signal?: AbortSignal): Promise<OpenAiModelRefreshResult> {
+  return requestJson(`${API_PREFIX}/management/models/official/refresh`, { method: "POST", body: JSON.stringify({ ...input, confirmationToken }) }, signal, 45_000)
+}
+
 export function fetchCodexUserSettings(signal?: AbortSignal): Promise<CodexUserSettingsResponse> {
-  return getJson<CodexUserSettingsResponse>(`${API_PREFIX}/management/codex/settings`, signal)
+  return readAppServerSettings<CodexUserSettingsResponse>("codex/settings", "codex_settings_unavailable", signal)
+}
+
+/** These two GET snapshots depend on App Server readiness during service startup. */
+async function readAppServerSettings<T>(path: string, unavailableCode: string, signal?: AbortSignal): Promise<T> {
+  const startedAt = Date.now()
+  const delays = [1_000, 2_000, 4_000]
+  for (let attempt = 0; ; attempt++) {
+    signal?.throwIfAborted()
+    try {
+      return await getJson<T>(`${API_PREFIX}/management/${path}`, signal)
+    } catch (error) {
+      signal?.throwIfAborted()
+      const delay = delays[attempt]
+      const unavailable = error instanceof ApiClientError
+        ? error.status === 503 && error.code === unavailableCode
+        : error instanceof TypeError
+      // Do not repeat authentication failures, writes or already slow reads.
+      if (!unavailable || delay === undefined || Date.now() - startedAt + delay > 10_000) throw error
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => {
+          clearTimeout(timer)
+          reject(signal?.reason)
+        }
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", abort)
+          resolve()
+        }, delay)
+        signal?.addEventListener("abort", abort, { once: true })
+      })
+      // Background tabs can delay timers beyond the startup recovery window.
+      if (Date.now() - startedAt > 10_000) throw error
+    }
+  }
 }
 
 export function previewCodexUserSetting(
@@ -431,11 +507,36 @@ export function cancelManagementTask(id: string, signal?: AbortSignal): Promise<
 }
 
 export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<ManagementProviderSettingsResponse> {
-  return getJson<ManagementProviderSettingsResponse>(`${API_PREFIX}/management/provider-settings`, signal)
+  return readAppServerSettings<ManagementProviderSettingsResponse>("provider-settings", "provider_state_unavailable", signal)
 }
+
+export function fetchManagementProviderModelCatalogs(signal?: AbortSignal): Promise<ManagementProviderModelCatalogsResponse> {
+  return getJson(`${API_PREFIX}/management/provider-model-catalogs`, signal)
+}
+
+export function fetchProviderModelTemplateOptions(provider: string, signal?: AbortSignal): Promise<ProviderModelTemplateOptionsResponse> {
+  return getJson(`${API_PREFIX}/management/provider-model-templates?${new URLSearchParams({ provider })}`, signal)
+}
+
+export function fetchProviderModelAdditionOptions(provider: string, manualModel: ManagedManualModelDefinition | undefined, signal: AbortSignal): Promise<ProviderModelAdditionOptions> {
+  return requestJson(`${API_PREFIX}/management/provider-model-additions`, {
+    method: "POST", body: JSON.stringify({ provider, ...(manualModel ? { manualModel } : {}) }),
+  }, signal, 100_000)
+}
+
+export function fetchManagedProviderModelRequestOptions(provider: string, model: string, signal: AbortSignal): Promise<ManagedProviderModelRequestOptions> {
+  return getJson(`${API_PREFIX}/management/provider-model-request-options?${new URLSearchParams({ provider, model })}`, signal)
+}
+
 
 export function probeManagementCustomModel(input: ManagementCustomModelProbeInput, signal: AbortSignal): Promise<ManagementCustomModelProbeResult> {
   return requestJson<ManagementCustomModelProbeResult>(`${API_PREFIX}/management/provider-settings/probe`, {
+    method: "POST", body: JSON.stringify(input),
+  }, signal, 50_000)
+}
+
+export function probeManagementProviderWebSearch(input: ManagementProviderWebSearchProbeInput, signal: AbortSignal): Promise<ManagementProviderWebSearchProbeResult> {
+  return requestJson<ManagementProviderWebSearchProbeResult>(`${API_PREFIX}/management/provider-settings/web-search-probe`, {
     method: "POST", body: JSON.stringify(input),
   }, signal, 50_000)
 }
@@ -489,7 +590,7 @@ export function applyManagementAccountSettings(
 export function fetchOfficialAccountSnapshots(
   signal?: AbortSignal,
 ): Promise<OfficialAccountSnapshotsResponse> {
-  return getJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/accounts`, signal)
+  return getMetricsJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/accounts`, signal)
 }
 
 export function fetchOfficialAccountSources(signal?: AbortSignal): Promise<OfficialAccountSourcesResponse> {
@@ -542,11 +643,11 @@ export function refreshOfficialAccountSnapshot(
   return requestJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/management/accounts/refresh`, {
     method: "POST",
     body: JSON.stringify({ provider }),
-  }, signal)
+  }, signal, accountRefreshTimeoutMs)
 }
 
 export function fetchRelayManagement(signal?: AbortSignal): Promise<RelayManagementSnapshot> {
-  return getJson(`${API_PREFIX}/management/relay`, signal)
+  return getJson(`${API_PREFIX}/management/relay`, signal, metricsReadTimeoutMs)
 }
 export async function probeRelayReasoning(
   input: RelayReasoningProbeInput,
@@ -681,9 +782,4 @@ export function consumeResetCredit(attemptId: string, confirmationToken: string,
 
 export function cancelResetCredit(attemptId: string, confirmationToken: string, signal?: AbortSignal): Promise<{ cancelled: true }> {
   return requestJson(`${API_PREFIX}/management/accounts/openai/reset-credits/cancel`, { method: "POST", body: JSON.stringify({ attemptId, confirmationToken }) }, signal)
-}
-
-
-export function updateRelayCatalog(signal?: AbortSignal): Promise<{ auditStatus: "recorded" | "failed" }> {
-  return requestJson(`${API_PREFIX}/management/relay/catalog/update`, { method: "POST", body: "{}" }, signal)
 }

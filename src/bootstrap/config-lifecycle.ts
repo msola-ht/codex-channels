@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 
 import {
   acknowledgeConfigEvents,
+  ConfigEventQueueLockReleaseError,
   configEventQueuePath,
   matchingWorkspaceConfigEvents,
   readConfigEvents,
@@ -19,6 +20,9 @@ import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { installProcessSignalHandlers, installServiceControlHandler } from "../../runtime/process-lifecycle.mjs";
 import { serviceShutdownTimeoutMs } from "../../runtime/shutdown-budget.mjs";
+import { closeSingleWorkerReaders, waitForSingleWorkerReadersExit } from "../../runtime/single-worker-reader.mjs";
+import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "../../runtime/windows-acl-bridge.mjs";
+import { closeOwnedCommandRunners, waitForOwnedCommandRunnersExit } from "../../runtime/owned-command-runner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { ResetCreditError } from "../application/index.js";
@@ -39,15 +43,30 @@ const providerSettingsAction: Record<
   | "provider-settings-scheduled"
   | "provider-settings-restarting"
   | "provider-settings-applied"
+  | "provider-settings-restart-required"
   | "provider-settings-failed"
 > = {
   scheduled: "provider-settings-scheduled",
   restarting: "provider-settings-restarting",
   applied: "provider-settings-applied",
+  "restart-required": "provider-settings-restart-required",
   failed: "provider-settings-failed",
 };
 
 export async function runGatewayProcess(): Promise<void> {
+  try { await startGatewayProcess(); }
+  catch (error) {
+    // Configuration/construction can already have created the main-thread ACL
+    // bridge, even before the normal shutdown controls have been installed.
+    const closed = await Promise.allSettled([closeSingleWorkerReaders(), closeWindowsAclBridge(), closeOwnedCommandRunners()]);
+    await Promise.all([waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit(), waitForOwnedCommandRunnersExit()]);
+    const failures = closed.filter(result => result.status === "rejected").map(result => result.reason as unknown);
+    if (failures.length) throw new AggregateError([error, ...failures], "Gateway 启动失败且资源关闭曾超时", { cause: error });
+    throw error;
+  }
+}
+
+async function startGatewayProcess(): Promise<void> {
   const runtime = loadRuntimeConfig();
   const config = runtime.config;
   if (config.gatewayTimezone !== undefined) {
@@ -57,18 +76,20 @@ export async function runGatewayProcess(): Promise<void> {
   const eventQueuePath = configEventQueuePath(dirname(runtime.configPath));
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config, { service: "gateway", module: "lifecycle" });
-  const closeStorageOwners = async (): Promise<boolean> => {
-    const components = ["Delivery", "Metrics", "Scheduled Tasks"];
+  const closeResourceOwners = async (): Promise<boolean> => {
+    const components = ["Delivery", "Metrics", "Scheduled Tasks", "Material Readers", "Windows ACL", "Auxiliary Commands"];
     const results = await Promise.allSettled([
       closeDeliveryJournals(), closeMetricsStores(), closeScheduledTaskStores(),
+      closeSingleWorkerReaders(), closeWindowsAclBridge(), closeOwnedCommandRunners(),
     ]);
     for (const [index, result] of results.entries()) {
       if (result.status === "rejected") {
-        logger.error({ err: result.reason, component: components[index] }, "Gateway 存储关闭未确认");
+        logger.error({ err: result.reason, component: components[index] }, "Gateway 资源关闭未确认");
       }
     }
     await Promise.all([
       waitForDeliveryJournalsExit(), waitForMetricsStoresExit(), waitForScheduledTaskStoresExit(),
+      waitForSingleWorkerReadersExit(), waitForWindowsAclBridgeExit(), waitForOwnedCommandRunnersExit(),
     ]);
     return results.every(result => result.status === "fulfilled");
   };
@@ -81,8 +102,8 @@ export async function runGatewayProcess(): Promise<void> {
     // an early stop must stay bounded even before controls.stop is installed.
     shutdownTimer = setTimeout(() => {
       shutdownTimedOut = true;
-      logger.error({ timeoutMs: serviceShutdownTimeoutMs }, "Gateway 停止等待超时，等待存储资源退出后以故障状态退出");
-      void closeStorageOwners().then(() => process.exit(1));
+      logger.error({ timeoutMs: serviceShutdownTimeoutMs }, "Gateway 停止等待超时，等待自有资源退出后以故障状态退出");
+      void closeResourceOwners().then(() => process.exit(1));
     }, serviceShutdownTimeoutMs);
   };
   const clearShutdownDeadline = (): void => { clearTimeout(shutdownTimer); };
@@ -105,13 +126,19 @@ export async function runGatewayProcess(): Promise<void> {
     SIGINT: requestStop, SIGTERM: requestStop, SIGHUP: requestReload,
   });
   const cleanupHandlers = (): void => { cleanupControl(); cleanupSignals(); };
+  const finishEarlyStop = async (): Promise<void> => {
+    await gatewayOwner.close();
+    if (!(await closeResourceOwners())) process.exitCode = 1;
+    cleanupHandlers();
+    clearShutdownDeadline();
+  };
   let application: GatewayApplication;
   let weixinCredentialChange: (() => Promise<"changed" | "unchanged" | "unavailable">) | undefined;
   try {
     await gatewayOwner.start();
-    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
+    if (earlyStop) { await finishEarlyStop(); return; }
     const surfacePlugins = await loadBuiltInSurfacePlugins(config);
-    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
+    if (earlyStop) { await finishEarlyStop(); return; }
     if (config.weixin) {
       weixinCredentialChange = await createWeixinCredentialChangeCheck(
         createWeixinCredentialStore(join(config.credentialsDirectory, "weixin")),
@@ -119,7 +146,7 @@ export async function runGatewayProcess(): Promise<void> {
         () => logger.warn({ surface: "weixin" }, "微信凭据检查失败；其他渠道继续运行，下次配置重载重新检查"),
       );
     }
-    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
+    if (earlyStop) { await finishEarlyStop(); return; }
     application = await GatewayApplication.create(
       config,
       logger,
@@ -251,7 +278,7 @@ export async function runGatewayProcess(): Promise<void> {
           reportCloseFailure(error, "Gateway 所有权 Socket 关闭失败");
         }
         clearShutdownDeadline();
-        if (!(await closeStorageOwners())) finalExitCode = 1;
+        if (!(await closeResourceOwners())) finalExitCode = 1;
         process.exit(shutdownTimedOut ? 1 : finalExitCode);
       });
   };
@@ -272,11 +299,21 @@ export async function runGatewayProcess(): Promise<void> {
         && weixinCredentialChange !== undefined
         && await weixinCredentialChange() === "changed";
       if (stopping) return;
-      const result = application.reloadConfig(
-        next.config,
-        applicableEvents.map((event) => event.workspace),
-        credentialsChanged,
-      );
+      let result: ReturnType<GatewayApplication["reloadConfig"]>;
+      try {
+        result = application.reloadConfig(
+          next.config,
+          applicableEvents.map((event) => event.workspace),
+          credentialsChanged,
+        );
+      } catch (error) {
+        // Applying a validated config can already have changed access policies
+        // before a later persistence operation fails. Do not keep serving with
+        // consumers that no longer match the configuration snapshot.
+        logger.error({ err: error }, "Gateway 配置应用失败，运行状态可能已部分更新；停止 Gateway");
+        stop(1);
+        return;
+      }
       if (result.action === "reinstall") {
         logger.error(
           { changes: result.changes.map((change) => change.code) },
@@ -312,7 +349,9 @@ export async function runGatewayProcess(): Promise<void> {
         } catch (error) {
           logger.warn(
             { err: error, events: applicableEvents.length },
-            "配置事件投递或确认失败；事件已保留，等待下次配置加载",
+            error instanceof ConfigEventQueueLockReleaseError
+              ? "配置事件已投递并确认，但队列锁清理失败；请检查锁占用，不重放已确认事件"
+              : "配置事件投递或确认失败；事件已保留，等待下次配置加载",
           );
         }
       }
@@ -401,6 +440,10 @@ function readPendingConfigEvents(
   try {
     return readConfigEvents(queuePath);
   } catch (error) {
+    if (error instanceof ConfigEventQueueLockReleaseError) {
+      logger.warn({ err: error }, "配置事件已读取，但队列锁清理失败；请检查锁占用");
+      return error.result as WorkspaceAddedConfigEvent[];
+    }
     logger.error({ err: error }, "读取配置事件队列失败；事件将保留以便后续重试");
     return [];
   }

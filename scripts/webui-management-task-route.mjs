@@ -1,5 +1,6 @@
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
-import { webuiLogger } from "./webui-logger.mjs";
+import { ManagementTaskInputError } from "./webui-management-tasks.mjs";
+import { assertManagementAuditWritable, managementOperationError } from "./webui-management-operations.mjs";
 import { openQueueStream } from "./webui-queue-events.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
 import {
@@ -40,7 +41,8 @@ export async function routeTaskManagement({
     try {
       preview = state.tasks.preview(body);
     } catch (error) {
-      throw new ApiError(400, "invalid_task", error instanceof Error ? error.message : "任务输入无效");
+      if (error instanceof ManagementTaskInputError) throw new ApiError(400, "invalid_task", error.message);
+      throw managementOperationError(error, [], "task_preview_failed");
     }
     const normalized = normalizeTaskRequestShape(body);
     const inputFingerprint = fingerprintManagementValue(normalized);
@@ -74,9 +76,10 @@ export async function routeTaskManagement({
     const normalized = normalizeTaskRequestShape(body);
     let preview;
     try {
-      preview = state.tasks.preview(normalized);
+      preview = state.tasks.preview(body);
     } catch (error) {
-      throw new ApiError(400, "invalid_task", error instanceof Error ? error.message : "任务输入无效");
+      if (error instanceof ManagementTaskInputError) throw new ApiError(400, "invalid_task", error.message);
+      throw managementOperationError(error, [], "task_preview_failed");
     }
     const inputFingerprint = fingerprintManagementValue(normalized);
     const resource = await taskResource(
@@ -93,11 +96,15 @@ export async function routeTaskManagement({
       resourceRevision,
       previewFingerprint: fingerprintManagementValue(preview),
     });
+    assertManagementAuditWritable(state.audit);
     try {
-      state.audit.assertWritable();
       const task = state.tasks.start(normalized, {
         owner: principalId,
         environment,
+        trafficConfirmation: normalized.operation === "traffic" ? {
+          directory: resource.dumps.directory,
+          fingerprint: resource.dumps.fingerprint,
+        } : null,
         auditMetadata: {
           sessionId: principalId,
           source: "webui",
@@ -109,28 +116,10 @@ export async function routeTaskManagement({
           confirmationId: fingerprintManagementValue(body.confirmationToken),
         },
       });
-      let auditStatus = "recorded";
-      try {
-        state.audit.record({
-          sessionId: principalId,
-          source: "webui",
-          operation: "management.task",
-          target: `${normalized.operation}:${normalized.action}:${normalized.target ?? ""}`,
-          inputFingerprint,
-          revision: resourceRevision,
-          previewId: fingerprintManagementValue(preview),
-          confirmationId: fingerprintManagementValue(body.confirmationToken),
-          phase: "started",
-          resultCode: "queued",
-          recovery: "retry-task",
-        });
-      } catch (error) {
-        auditStatus = "degraded";
-        webuiLogger.error({ module: "audit", event: "task.start_audit_failed", err: error }, "管理任务已启动，但启动审计记录失败");
-      }
-      sendManagementJson(response, 202, { ...task, auditStatus });
+      sendManagementJson(response, 202, task);
     } catch (error) {
-      throw new ApiError(400, "task_start_failed", error instanceof Error ? error.message : "任务启动失败");
+      if (error instanceof ManagementTaskInputError) throw new ApiError(400, "task_start_failed", error.message);
+      throw managementOperationError(error, [], "task_start_failed");
     }
     return true;
   }

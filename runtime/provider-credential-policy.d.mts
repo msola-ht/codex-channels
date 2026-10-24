@@ -3,4 +3,4 @@ export function isolateProviderCredential(
   argumentsList: readonly string[],
   environment: NodeJS.ProcessEnv,
   credential?: { environmentKey: string; apiKey: string },
-): { arguments: string[]; childEnvironment: NodeJS.ProcessEnv };
+): { arguments: string[]; childEnvironment: NodeJS.ProcessEnv; credentialEnvironmentKey?: string };

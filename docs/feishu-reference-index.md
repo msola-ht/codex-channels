@@ -228,7 +228,7 @@ EventDispatcher`。
 不把飞书官方文档整站或整页复制到仓库。仓库只保存：
 
 - `package-lock.json` 锁定的 SDK 版本和必要的固定源码链接；
-- 从测试应用取得、已脱敏且最小化的事件 Fixture；
+- 已有脱敏事件材料的来源引用，以及必要的最小字段说明；不新增或维护测试 Fixture；
 - 真实合同实验的命令、结构化结果和不含凭据的结论；
 - 官方动态页面无法固定时，对影响实现的约束所做的简短转述、来源链接和查阅日期。
 
@@ -239,21 +239,24 @@ EventDispatcher`。
 
 实施或排查飞书行为时：
 
+通用开发与验证遵循[开发流程](development-rules.md#development-workflow)，资料查阅遵循
+[官方来源规则](development-rules.md#consulting-official-sources)。以下只补充飞书专题入口，不授予真实平台操作权限。
+
 1. 从本页按能力找到官方入口、已知约束和项目状态。
 2. 查看项目锁定版本；未锁定时只能进行隔离研究，不能写稳定适配。
-3. 阅读对应固定版本 SDK 类型和源码，再查开放平台动态文档。
+3. 阅读对应固定版本 SDK 类型和源码；本地证据不足或需核对动态语义时，再查对应开放平台文档。
 4. 对照 [`飞书 Surface 设计决策`](feishu-surface-plan.md) 和
    [`通讯渠道 Surface 接入指南`](surface-integration-guide.md) 确认模块归属。
-5. 用测试应用验证仍不明确的投递、重试、权限和回调行为。
+5. 在具备环境和授权时，用测试应用观察仍不明确的投递、重试、权限和回调行为；缺少条件时记录具体未观察项。
 6. 实现后更新支持矩阵、本地映射和查阅日期。
 
 出现以下变化时必须更新本页：
 
 - 首次安装或升级飞书 SDK；
 - 改变事件、权限、卡片动作、身份或传输方式；
-- 新增飞书公开能力或真实测试入口；
+- 新增飞书公开能力或真实平台观察证据；
 - 官方资料与实际行为不一致；
-- 计划文件或本地实现入口发生移动。
+- 设计文档或本地实现入口发生移动。
 
 富文本 `media` 的视频语义依据[官方消息内容结构](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/im-v1/message/create_json)；
 锁定 SDK 的 `channel/normalize/converters/post.ts` 将 `media.file_key` 记为 `type=file` 下载资源，

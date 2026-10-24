@@ -21,7 +21,6 @@ export function createManagedProviderCatalog(
   options?: {
     previousModels?: Array<Record<string, unknown>>;
     windowPercent?: number | null;
-    modelContextWindowByModel?: Record<string, number>;
   },
 ): { models: Array<Record<string, unknown>> };
 
@@ -32,6 +31,7 @@ export function createManagedProviderConfiguration(
   options: {
     mode: "switching" | "exclusive";
     previousMode?: "switching" | "exclusive";
+    previousProfile?: string;
     apiKey: string;
     catalogPath: string;
     catalog: { models: Array<Record<string, unknown>> };

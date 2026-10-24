@@ -1,5 +1,6 @@
 import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { resolveCodexRequestIdentity } from "../../runtime/codex-request-identity.mjs";
+import { effectiveCodexBinary } from "../../runtime/executable.mjs";
 import {
   lstatSync,
   readFileSync,
@@ -74,7 +75,6 @@ export interface GatewayConfig {
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
   reasoningEnabled: boolean;
-  modelDisplayAliases?: Record<string, string>;
   scheduledTasksEnabled: boolean;
   credentialsDirectory: string;
   stateDatabasePath: string;
@@ -225,9 +225,11 @@ function loadValidatedConfigDocument(
 ): GatewayConfig {
   const workspaces = validateWorkspaces(raw.workspaces);
   const { clientIdentity, upstreamUserAgent } = resolveCodexRequestIdentity(raw.codex);
+  let codexBinary: string;
   try {
     // Also used by candidate-upgrade preflight, before any services are stopped.
     validateCodexConfigDocument({ upstream_user_agent: upstreamUserAgent });
+    codexBinary = effectiveCodexBinary(raw.codex.binary, {}, baseDirectory);
   } catch (error) {
     throw new ConfigurationError(error instanceof Error ? error.message : String(error));
   }
@@ -277,7 +279,7 @@ function loadValidatedConfigDocument(
           },
         }
       : {}),
-    codexBinary: raw.codex.binary,
+    codexBinary,
     networkProxy: {
       ...(proxyEnvironment.HTTP_PROXY ? { http: proxyEnvironment.HTTP_PROXY } : {}),
       ...(proxyEnvironment.HTTPS_PROXY ? { https: proxyEnvironment.HTTPS_PROXY } : {}),
@@ -296,7 +298,6 @@ function loadValidatedConfigDocument(
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
     reasoningEnabled: raw.display.reasoning,
-    modelDisplayAliases: raw.display.model_aliases ?? {},
     scheduledTasksEnabled: raw.scheduled_tasks.enabled,
     ...(raw.model_relay === undefined ? {} : { modelRelay: raw.model_relay }),
     credentialsDirectory: resolve(baseDirectory, "credentials"),

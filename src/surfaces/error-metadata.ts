@@ -147,7 +147,7 @@ function rpcErrorReason(
 function imageFailureMetadata(error: UserFacingError): Record<string, string> {
   const patterns: Record<string, RegExp> = {
     stage: /^(thread-read|model-config|model-route|account-check|auth-read|input-validation|file-create|file-transfer|file-finalize|account-recheck)$/,
-    reason: /^(validation|cancelled|disconnected|http|timeout|invalid-response|network-timeout|network|rpc|unknown)$/,
+    reason: /^(validation|cancelled|disconnected|http|timeout|invalid-response|private-route-unavailable|network-timeout|network|rpc|unknown)$/,
     networkCode: /^(UND_ERR_(CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET)|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|CERT_HAS_EXPIRED|UNABLE_TO_VERIFY_LEAF_SIGNATURE)$/,
     rpcCode: /^-?[0-9]{1,16}$/,
     httpStatus: /^[1-5][0-9]{2}$/,

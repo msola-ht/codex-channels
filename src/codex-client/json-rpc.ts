@@ -38,6 +38,7 @@ export interface RpcRequestOptions {
   retryOverload: boolean;
   attempts?: number;
   signal?: AbortSignal;
+  beforeSubmit?: () => void;
 }
 
 export interface RpcNotification {
@@ -215,6 +216,8 @@ export class JsonRpcClient {
   ): Promise<T> {
     const attempts = options.retryOverload ? (options.attempts ?? 4) : 1;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      // A rejected local guard must never enter the overload retry path.
+      options.beforeSubmit?.();
       try {
         return await this.requestOnce<T>(request, options.signal);
       } catch (error) {

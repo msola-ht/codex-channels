@@ -25,11 +25,11 @@ export function TrafficModel({ request, responses, fallback, upstream, provider:
   const autoReview = requestPurpose === "autoApprovalReview"
   const name = formatModelName(rawName, source)
   const provider = typeof upstream === "string" && upstream.trim() !== "" ? upstream.trim() : null
-  const unexpectedProvider = isClinePass && (request === "cline-pass/deepseek-v4.1-flash" || request === `${source}/deepseek-v4.1-flash`)
-    && provider !== null && provider !== "deepseek"
-  if (names.length === 0 && provider === null && !autoReview) return <TruncatedText text={name} className="max-w-64" />
+  if (names.length === 0 && provider === null && !autoReview) return name !== rawName && rawName !== null
+    ? <TableHint hint={rawName}><span className="block max-w-64 truncate">{name}</span></TableHint>
+    : <TruncatedText text={name} className="max-w-64" />
   const comparisonHint = isClinePass
-    ? t("modelComparison.requestOnly", { name: request ?? notProvided })
+    ? t("modelComparison.requestOnly", { name: rawName ?? notProvided })
     : t(compareNames ? "modelComparison.requestAndResponses" : "modelComparison.requestAndEcho", { request: request ?? notProvided, responses: echo })
   const upstreamHint = provider === null ? "" : t("modelComparison.upstream", { provider })
   return (
@@ -47,8 +47,7 @@ export function TrafficModel({ request, responses, fallback, upstream, provider:
           </Badge>
         })}
         {provider === null ? null : (
-          <Badge size="sm" variant={unexpectedProvider ? "destructive" : "outline"} className="max-w-48" title="routing.finalProvider">
-            {unexpectedProvider ? <TriangleAlertIcon data-icon="inline-start" /> : null}
+          <Badge size="sm" variant="outline" className="max-w-48" title="routing.finalProvider">
             <span className="truncate">{provider}</span>
           </Badge>
         )}

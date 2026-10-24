@@ -4,6 +4,7 @@ export const TRAFFIC_CLEANUP_USAGE: string;
 export interface TrafficCleanupOptions {
   confirm: boolean;
   directory: string | undefined;
+  expectedFingerprint: string | undefined;
 }
 
 export interface TrafficCommandOptions {

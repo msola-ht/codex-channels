@@ -27,6 +27,7 @@ export const scheduledTaskToolSpec = {
     "用户用日常语言描述计划时，由你提取 scheduleType、时区、提示词和规则字段。",
     "action=create 只创建确认预览，不会立即保存；必须把返回的确认令牌展示给用户，并提示回复 /schedule confirm <令牌>。",
     "确认必须由用户通过 /schedule confirm <令牌> 完成；你不得在工具内直接创建任务。",
+    "selector 必须使用 list/runs 返回的完整任务 ID 或 Run ID，不能使用数字序号、短 ID 或名称；工具查询不会更新 /schedule 命令的数字选择快照。",
     "model 为可选：可以是模型 ID，或 provider/model 复合串（如 deepseek/deepseek-v4-flash）；不传则使用当前会话的模型和 Provider。",
     "时间格式：intervalMinutes 为分钟数；afterMinutes 为一次性延后分钟数；date 使用 YYYY-MM-DD；time 使用 HH:mm；days 使用 MO/TU/WE/TH/FR/SA/SU。",
     "时区必须是 IANA 名称；用户说北京时间可转换为 Asia/Shanghai、纽约时间转换为 America/New_York。绝不猜测未提供的时区。",
@@ -69,7 +70,7 @@ export const scheduledTaskToolSpec = {
       timezone: { type: "string", maxLength: 128 },
       prompt: { type: "string", maxLength: 20000 },
       model: { type: "string", maxLength: 128 },
-      selector: { type: "string", maxLength: 256 },
+      selector: { type: "string", maxLength: 256, description: "完整任务 ID；retry 时为完整 Run ID，不接受列表序号、短 ID 或名称" },
       page: { type: "integer", minimum: 1, maximum: 100 },
       name: { type: "string", maxLength: 80 },
     },
@@ -124,11 +125,11 @@ export class ScheduledTaskToolService {
             }, operation),
           };
         case "list":
-          return { kind: "tasks", result: await this.tasks.list(target, actorId, request.page, operation) };
+          return { kind: "tasks", result: await this.tasks.list(target, actorId, request.page, operation, "id") };
         case "runs":
           return {
             kind: "runs",
-            result: await this.tasks.runs(target, actorId, request.selector, request.page, operation),
+            result: await this.tasks.runs(target, actorId, request.selector, request.page, operation, "id"),
           };
         case "rename":
           return outcome(
@@ -183,13 +184,13 @@ function parseToolRequest(args: unknown, nowMs: number): ToolRequest {
     case "runs":
       return {
         action,
-        selector: requiredString(value.selector, "selector"),
+        selector: requiredId(value.selector),
         page: optionalPage(value.page),
       };
     case "rename":
       return {
         action,
-        selector: requiredString(value.selector, "selector"),
+        selector: requiredId(value.selector),
         name: requiredString(value.name, "name"),
       };
     case "pause":
@@ -197,10 +198,18 @@ function parseToolRequest(args: unknown, nowMs: number): ToolRequest {
     case "run":
     case "retry":
     case "delete":
-      return { action, selector: requiredString(value.selector, "selector") };
+      return { action, selector: requiredId(value.selector) };
     default:
       throw toolError(`不支持的 schedule_task action：${action}`);
   }
+}
+
+function requiredId(value: unknown): string {
+  const id = requiredString(value, "selector").trim();
+  if (!id || /^\d+$/u.test(id)) {
+    throw toolError("selector 必须使用 list/runs 返回的完整任务 ID 或 Run ID，不能使用数字序号");
+  }
+  return id;
 }
 
 function parseCreate(

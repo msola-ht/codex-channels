@@ -26,4 +26,13 @@ export function toolSettingEdits(
   config: Record<string, CodexUserConfigValue | undefined>,
   merged: Record<string, CodexUserConfigValue | undefined> | undefined,
   invalid: (field: string, code: string, message: string) => Error,
-): { edits: CodexUserConfigEdit[]; value: Record<string, unknown> };
+): Promise<{ edits: CodexUserConfigEdit[]; value: Record<string, unknown> }>;
+export function isStrataServer(server: unknown): boolean;
+export function validateStrataMcpEdit(
+  config: Record<string, CodexUserConfigValue | undefined>,
+  merged: Record<string, CodexUserConfigValue | undefined> | undefined,
+  name: string,
+  field: string,
+  value: CodexUserConfigValue,
+): Promise<{ timeoutSeconds: number; toolTimeoutSeconds: number; root: string; channelRoot?: string } | undefined>;
+export const mcpToolApprovalModes: readonly ["auto", "prompt", "writes", "approve"];

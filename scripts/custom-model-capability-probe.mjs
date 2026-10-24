@@ -1,12 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { fetch as undiciFetch, ProxyAgent } from "undici";
 
-import { responsesToChat } from "../dist/model-api/index.js";
+import { DirectChatResponse, clinePassChatReasoningControl, responsesToChat } from "../dist/model-api/index.js";
+import { applyClinePassProviderOptions, chatUpstreamError, chatStreamError } from "../dist/provider-proxy/index.js";
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { createRefreshableHttpProxySelector } from "../runtime/network-proxy.mjs";
-import { validProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
+import { isValidCustomProviderApiKey, validProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
 
-const capabilityNames = ["applyPatch", "toolSearch"];
+const capabilityNames = ["applyPatch", "toolSearch", "webSearch"];
 const reasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const maximumResponseBytes = 128 * 1024;
 const maximumRequests = 3;
@@ -40,16 +41,26 @@ const marker = () => `PROBE_${randomBytes(8).toString("hex")}`;
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const validModelId = value => typeof value === "string" && value.trim().length > 0 && value.length <= 200 && !/\p{Cc}/u.test(value);
 
-/** 按用户选择检测单项工具能力，不保存历史、不执行工具、不自动重试。 */
+/** 按用户选择检测单项工具能力；原生搜索可能由上游执行，不保存历史或自动重试。 */
 export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, capability, reasoningEffort, environment = process.env, signal, timeoutMs = 45000}) {
+  return probeModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, capability, reasoningEffort, environment, signal, timeoutMs});
+}
+
+/** 已配置 Provider 诊断复用相同的请求预算和证据判定；连接上下文只由服务器配置解析。 */
+export async function probeNativeWebSearch(input) {
+  return probeModelCapabilities({...input, capability: "webSearch"});
+}
+
+async function probeModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, capability, reasoningEffort,
+  environment = process.env, signal, timeoutMs = 45000, requestContext}) {
   let endpoint;
   try { endpoint = new URL(validProviderBaseUrl(baseUrl, "模型能力检测")); }
   catch { throw new Error("模型能力检测需要有效的 Provider Base URL"); }
-  if (typeof apiKey !== "string" || !apiKey.trim() || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) throw new Error("模型能力检测需要有效 API Key");
+  if (!isValidCustomProviderApiKey(apiKey)) throw new Error("模型能力检测需要有效 API Key");
   if (!validModelId(model)) throw new Error("模型能力检测需要有效模型 ID");
   if (upstreamWireApi !== "responses" && upstreamWireApi !== "chat_completions") throw new Error("模型能力检测不支持此上游协议");
-  if (!capabilityNames.includes(capability)) throw new Error("模型能力检测仅支持 apply_patch 或 tool_search 单项探测");
-  if (!reasoningEfforts.includes(reasoningEffort)) throw new Error("模型能力检测需要有效思考强度");
+  if (!capabilityNames.includes(capability)) throw new Error("模型能力检测仅支持 apply_patch、tool_search 或 web_search 单项探测");
+  if (!reasoningEfforts.includes(reasoningEffort) && !(requestContext && (reasoningEffort === null || reasoningEffort === "enabled" && requestContext.clinePass))) throw new Error("模型能力检测需要有效思考强度");
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 45000) throw new Error("模型能力检测总预算必须在 1 到 45000 毫秒之间");
   endpoint.pathname = `${endpoint.pathname.replace(/\/$/u, "")}/${upstreamWireApi === "responses" ? "responses" : "chat/completions"}`;
   let check;
@@ -70,35 +81,51 @@ export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upst
   const failedTask = response => ({status: "inconclusive", reason: "本次短任务的输出或工具关联未通过验证", httpStatus: response.httpStatus});
   const request = async source => {
     if (controller.signal.aborted || performance.now() >= deadline) return unknown(signal?.aborted ? "模型能力检测已取消" : "模型能力检测总预算已耗尽");
-    if (requests >= maximumRequests) return unknown("模型能力检测请求次数已达到上限");
+    if (requests >= (capability === "webSearch" ? 1 : maximumRequests)) return unknown("模型能力检测请求次数已达到上限");
     const requestController = new AbortController();
     const forwardAbort = () => requestController.abort();
     controller.signal.addEventListener("abort", forwardAbort, {once: true});
-    const requestTimer = setTimeout(forwardAbort, Math.min(15000, Math.max(1, deadline - performance.now())));
+    const requestTimer = setTimeout(forwardAbort, Math.min(capability === "webSearch" ? timeoutMs : 15000, Math.max(1, deadline - performance.now())));
     let httpStatus;
     try {
-      let payload = {...source, reasoning: {effort: reasoningEffort}, model, store: false, stream: false, max_output_tokens: 768};
+      const stream = capability === "webSearch";
+      let payload = {...source, ...(reasoningEffort === null ? {} : {reasoning: {effort: reasoningEffort}}), model, store: false, stream, max_output_tokens: 768,
+        ...(requestContext?.sampling ?? {})};
+      if (requestContext?.chatgpt) {
+        delete payload.max_output_tokens;
+        payload.instructions = "Complete the requested short diagnostic task.";
+      }
       let identities;
       if (upstreamWireApi === "chat_completions") {
-        const converted = responsesToChat({...payload, stream: true});
-        // 与通用自定义 Chat 桥相同：保留 reasoning.effort，不使用 CLP 专属参数映射。
-        payload = {...converted.request, stream: false};
-        delete payload.stream_options;
+        const converted = responsesToChat({...payload, stream: true}, requestContext?.reasoningEfforts,
+          requestContext?.clinePass ? {clinePass: true} : {structuredOutputWithTools: "prompt"});
+        payload = {...converted.request, stream};
+        if (requestContext?.clinePass) {
+          const {reasoning, ...parameters} = payload;
+          payload = applyClinePassProviderOptions(reasoning ? {...parameters, ...clinePassChatReasoningControl(model, reasoning.effort, requestContext.clineRequestProfile)} : parameters, requestContext.clineProviderOptions);
+        }
+        if (!stream) delete payload.stream_options;
         identities = converted.toolNames;
       }
       requests += 1;
       const response = await undiciFetch(endpoint, {
-        method: "POST", headers: {"content-type": "application/json", authorization: `Bearer ${apiKey}`},
+        method: "POST", headers: {"content-type": "application/json", accept: stream ? "text/event-stream" : "application/json",
+          "accept-encoding": "identity", authorization: `Bearer ${apiKey}`, ...(requestContext?.headers ?? {})},
         body: JSON.stringify(payload), signal: requestController.signal, redirect: "error",
         ...(dispatcher === undefined ? {} : {dispatcher}),
       });
       httpStatus = response.status;
-      const body = await readBoundedBody(response, requestController);
+      const body = await readBoundedBody(response, requestController,
+        httpStatus === 200 && stream && /^text\/event-stream(?:\s*;|\s*$)/iu.test(response.headers.get("content-type") ?? "") ? upstreamWireApi : undefined);
       requestController.signal.throwIfAborted();
       if (body === undefined) return {status: "inconclusive", reason: "上游响应超过模型能力检测大小限制", httpStatus};
+      if (httpStatus === 200 && stream) return {...parseWebSearchStream(body, response.headers.get("content-type"), upstreamWireApi, model, payload.tools), httpStatus};
       let parsed;
       try { parsed = JSON.parse(body); } catch { return {status: "inconclusive", reason: "上游未返回有效 JSON", httpStatus}; }
-      if (httpStatus !== 200) return classifyHttp(httpStatus, parsed, capability);
+      if (httpStatus !== 200) return classifyHttp(httpStatus, parsed, capability, payload.tools);
+      if (isObject(parsed) && validModelId(parsed.model) && parsed.model !== model) {
+        return {status: "inconclusive", reason: "上游响应模型与请求模型不一致", httpStatus};
+      }
       const output = upstreamWireApi === "responses" ? parseResponses(parsed) : parseChat(parsed, identities);
       if (!output) return {status: "inconclusive", reason: "上游未返回完整且可验证的模型响应", httpStatus};
       return {...output, httpStatus};
@@ -148,6 +175,11 @@ export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upst
             ? good(upstreamWireApi === "responses" ? "自由格式补丁调用及模拟结果回传已通过；未执行补丁" : "经 Chat 桥的 input 函数补丁调用及模拟结果回传已通过；未执行补丁", last) : failedTask(last));
         }
       }
+    } else if (capability === "webSearch") {
+      add(await request({
+        input: [message("Use the native web_search tool to search the web for the current UTC date and one current news headline. Return a brief answer with a source URL. Do not answer from memory.")],
+        tools: [{type: "web_search", external_web_access: true}], tool_choice: "auto",
+      }));
     } else {
       const discovered = {...toolsFor("lookup_probe_marker", "key"), defer_loading: true};
       const searchInput = [message("Call tool_search with query lookup_probe_marker and limit 1, then call the discovered tool with key K7. Reply only with its final marker.")];
@@ -191,7 +223,7 @@ export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upst
   return {model, upstreamWireApi, capability, reasoningEffort, status: cancelled ? "cancelled" : "completed", check};
 }
 
-async function readBoundedBody(response, controller) {
+async function readBoundedBody(response, controller, streamProtocol) {
   if (!response.body) return "";
   const reader = response.body.getReader();
   const chunks = [];
@@ -207,13 +239,35 @@ async function readBoundedBody(response, controller) {
       }
       chunks.push(value);
       controller.signal.throwIfAborted();
+      if (streamProtocol !== undefined) {
+        const body = Buffer.concat(chunks, size).toString("utf8").replace(/\r\n|\r/gu, "\n");
+        const boundary = body.lastIndexOf("\n\n");
+        if (boundary >= 0) {
+          const complete = body.slice(0, boundary + 2);
+          const frames = readProbeEvents(complete);
+          const terminal = frames?.some(frame => {
+            if (streamProtocol === "chat_completions") return frame.data === "[DONE]";
+            try { return ["response.completed", "response.failed", "response.incomplete", "error", "stream_error"].includes(JSON.parse(frame.data)?.type); }
+            catch { return false; }
+          });
+          if (terminal) {
+            await reader.cancel().catch(() => undefined);
+            return complete;
+          }
+        }
+      }
     }
   } finally { reader.releaseLock(); }
 }
 
-function classifyHttp(httpStatus, parsed, capability) {
+function classifyHttp(httpStatus, parsed, capability, tools) {
   if (httpStatus === 401 || httpStatus === 403) return {status: "inconclusive", reason: "模型能力检测认证或权限失败", httpStatus};
   if (httpStatus === 429) return {status: "inconclusive", reason: "模型能力检测受到上游限流", httpStatus};
+  if (capability === "webSearch") {
+    const rejected = [400, 404, 422].includes(httpStatus) && rejectsWebSearch(parsed, tools, httpStatus);
+    return {status: rejected ? "unsupported" : "inconclusive",
+      reason: rejected ? "上游明确拒绝原生 web_search 工具或参数" : "上游拒绝请求，无法确认本项能力", httpStatus};
+  }
   const error = isObject(parsed) ? parsed.error : undefined;
   const context = typeof error === "string" ? error : isObject(error) ? [error.param, error.code, error.message].filter(value => typeof value === "string").join(" ") : "";
   const relevant = {applyPatch: /\b(?:apply_patch|custom|grammar|freeform)\b/iu,
@@ -222,12 +276,93 @@ function classifyHttp(httpStatus, parsed, capability) {
     reason: [400, 404, 422].includes(httpStatus) && relevant.test(context) ? "上游明确拒绝本项检测使用的输入或参数" : "上游拒绝请求，无法确认本项能力", httpStatus};
 }
 
+function rejectsWebSearch(value, tools, httpStatus) {
+  const error = isObject(value) ? value.error ?? value.response?.error ?? value : value;
+  if (chatUpstreamError(error, httpStatus, tools).code === "web_search_unsupported") return true;
+  const context = typeof error === "string" ? error : isObject(error)
+    ? [error.param, error.code, error.message].filter(part => typeof part === "string").join(" ") : "";
+  // 必须明确指向原生工具；例如额度、思考参数或认证错误中提及 web_search 不代表工具不受支持。
+  const target = "(?:web_search|external_web_access)";
+  const rejection = "(?:unsupported|unknown|unrecognized|disallowed|not[ _-]+supported|not[ _-]+allowed|does[ _-]+not[ _-]+support|cannot[ _-]+support|invalid[ _-]+(?:tool|parameter|value|type))";
+  const connector = "(?:[ :\"'`_-]|the\\b|native\\b|tool\\b|parameter\\b|type\\b|value\\b|is\\b|are\\b){0,80}";
+  return new RegExp(`\\b${rejection}\\b${connector}\\b${target}\\b|\\b${target}\\b${connector}\\b${rejection}\\b`, "iu").test(context)
+    || /(?:不支持|不允许|未知|无法识别)[ ：“”"'的原生工具参数]*(?:web_search|external_web_access)|(?:web_search|external_web_access)[ ：“”"'的原生工具参数]*(?:不支持|不允许|未知|无法识别)/iu.test(context);
+}
+
+/** 正文已由 readBoundedBody 限制到 128KiB；只接受以空行提交的完整 SSE 事件。 */
+function readProbeEvents(body) {
+  const events = [];
+  let event = "";
+  let data = [];
+  const lines = body.replace(/^\uFEFF/u, "").split(/\r\n|\r|\n/u);
+  if (/[\r\n]$/u.test(body)) lines.pop();
+  for (const line of lines) {
+    if (line === "") {
+      if (data.length) events.push({event, data: data.join("\n")});
+      event = ""; data = [];
+    } else if (!line.startsWith(":")) {
+      const separator = line.indexOf(":");
+      const field = separator < 0 ? line : line.slice(0, separator);
+      const value = separator < 0 ? "" : line.slice(separator + 1).replace(/^ /u, "");
+      if (field === "event") event = value;
+      if (field === "data") data.push(value);
+    }
+  }
+  return data.length || event ? undefined : events;
+}
+
+function parseWebSearchStream(body, contentType, upstreamWireApi, requestedModel, tools) {
+  const invalid = () => ({status: "inconclusive", reason: "上游未返回完整且可验证的流式响应"});
+  if (!/^text\/event-stream(?:\s*;|\s*$)/iu.test(contentType ?? "")) return invalid();
+  const events = readProbeEvents(body);
+  if (!events?.length) return invalid();
+  const chat = upstreamWireApi === "chat_completions" ? new DirectChatResponse() : undefined;
+  let completed;
+  let done = false;
+  try {
+    for (const frame of events) {
+      if (frame.data === "[DONE]") {
+        if (done || (!chat && !completed)) return invalid();
+        chat?.finish();
+        done = true;
+        continue;
+      }
+      let value;
+      try { value = JSON.parse(frame.data); } catch { return invalid(); }
+      if (!isObject(value)) return invalid();
+      const chatError = chat ? chatStreamError(value, tools) : undefined;
+      if (["error", "stream_error", "response.failed"].includes(frame.event)
+        || ["error", "stream_error", "response.failed"].includes(value.type) || value.error != null || value.response?.error != null || chatError) {
+        return chatError?.code === "web_search_unsupported" || rejectsWebSearch(value, tools)
+          ? {status: "unsupported", reason: "上游明确拒绝原生 web_search 工具或参数"}
+          : {status: "inconclusive", reason: "上游返回流内错误，无法确认原生 web_search 能力"};
+      }
+      if (done) return invalid();
+      if (chat) {
+        chat.push(value, true);
+      } else {
+        if (typeof value.type !== "string" || frame.event && frame.event !== value.type) return invalid();
+        if (completed || value.type === "response.incomplete") return invalid();
+        if (value.type === "response.completed") {
+          if (value.response?.model !== requestedModel) return invalid();
+          completed = parseResponses(value.response, true);
+          if (!completed) return invalid();
+        }
+      }
+    }
+    if (chat ? !done || chat.status !== "completed" : !completed) return invalid();
+    return completed?.calls.some(call => call.type === "web_search_call" && call.action.type === "search")
+      ? {status: "supported", reason: "已收到完成的 web_search_call 搜索事件"}
+      : {status: "inconclusive", reason: "请求已完成，但未取得原生 web_search 搜索执行证据"};
+  } catch { return invalid(); }
+}
+
 function parseArguments(value) {
   if (typeof value !== "string") return undefined;
   try { return JSON.parse(value); } catch { return undefined; }
 }
 
-function parseResponses(value) {
+function parseResponses(value, allowWebSearch = false) {
   if (!isObject(value) || value.error != null || value.object !== "response" || !validModelId(value.model) || value.status !== "completed" || !Array.isArray(value.output)) return undefined;
   const calls = [];
   const ids = new Set();
@@ -244,6 +379,13 @@ function parseResponses(value) {
       for (const part of [...(item.summary ?? []), ...(item.content ?? [])]) {
         if (!isObject(part) || !["summary_text", "reasoning_text"].includes(part.type) || typeof part.text !== "string") return undefined;
       }
+    } else if (allowWebSearch && item.type === "web_search_call") {
+      if (item.status !== "completed" || !isObject(item.action) || !["search", "open_page", "find_in_page"].includes(item.action.type)) return undefined;
+      if (item.id != null && (typeof item.id !== "string" || !item.id || ids.has(item.id))) return undefined;
+      if (item.action.query != null && typeof item.action.query !== "string") return undefined;
+      if (item.action.queries != null && (!Array.isArray(item.action.queries) || item.action.queries.some(query => typeof query !== "string"))) return undefined;
+      if (item.id != null) ids.add(item.id);
+      calls.push(item);
     } else if (["function_call", "custom_tool_call", "tool_search_call"].includes(item.type)) {
       if (typeof item.call_id !== "string" || !item.call_id || ids.has(item.call_id) || (item.status != null && item.status !== "completed")) return undefined;
       if (item.type === "function_call" && (typeof item.name !== "string" || !isObject(parseArguments(item.arguments)))) return undefined;

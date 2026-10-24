@@ -9,11 +9,12 @@ export class TurnExecutionTracker {
   // Connection freshness only; completeness is always read from the database.
   private readonly observed = new Map<string, string>();
   private readonly abort = new AbortController();
-  private active: { threadId: string; provider: string; invalidated: boolean } | undefined;
+  private active: { threadId: string; provider: string; invalidated: boolean; reset: boolean; retryAfterInvalidation: boolean } | undefined;
   private task: Promise<void> | undefined;
   private readonly writes = new Set<Promise<void>>();
   private invalidation: Promise<void> | undefined;
   private reliable = true;
+  private failureGeneration = 0;
 
   constructor(
     private readonly history: Pick<ThreadHistoryPort, "listThreadTurns">,
@@ -73,14 +74,12 @@ export class TurnExecutionTracker {
 
   private write(threadId: string, operation: () => Promise<void>, recover?: () => void): void {
     if (this.writes.size >= 128) {
-      this.reliable = false;
       this.failed(new Error("轮次耗时写入队列已满"), threadId);
       this.invalidateCoverage();
       recover?.();
       return;
     }
     const task = operation().catch(error => {
-      this.reliable = false;
       this.failed(error, threadId);
       if (this.active?.threadId === threadId) this.active.invalidated = true;
       this.invalidateCoverage();
@@ -90,11 +89,35 @@ export class TurnExecutionTracker {
   }
 
   private invalidateCoverage(): void {
+    this.reliable = false;
+    this.failureGeneration += 1;
+    // 失效前发起的历史读取不能在全库降级后重新认证旧快照。
+    if (this.active) {
+      this.active.invalidated = true;
+      this.active.retryAfterInvalidation = true;
+    }
+    this.startInvalidation();
+  }
+
+  private startInvalidation(): void {
     if (this.invalidation) return;
-    this.invalidation = Promise.all([...this.writes]).then(async () => {
-      await this.store.invalidateAllThreadExecutions();
+    let confirmedGeneration: number | undefined;
+    this.invalidation = (async () => {
+      let generation: number;
+      do {
+        generation = this.failureGeneration;
+        await Promise.all([...this.writes]);
+        await this.store.invalidateAllThreadExecutions();
+        // 只有最新故障的持久降级得到确认后，数据库完整性标记才重新可信。
+      } while (generation !== this.failureGeneration);
+      confirmedGeneration = generation;
+      this.reliable = true;
       this.changed();
-    }).catch(error => this.fatal(error)).finally(() => { this.invalidation = undefined; });
+    })().catch(error => this.fatal(error)).finally(() => {
+      this.invalidation = undefined;
+      // 提交确认到释放任务句柄之间到达的新故障同样需要持久降级。
+      if (confirmedGeneration !== undefined && confirmedGeneration !== this.failureGeneration) this.startInvalidation();
+    });
   }
 
   private notify(threadId: string): void {
@@ -104,7 +127,6 @@ export class TurnExecutionTracker {
   private enqueue(threadId: string, provider: string, throughTurnId?: string): void {
     if (this.abort.signal.aborted) return;
     if (this.pending.size >= 64 && !this.pending.has(threadId)) {
-      this.reliable = false;
       this.invalidateCoverage();
       this.failed(new Error("轮次耗时同步队列已满"), threadId);
       return;
@@ -126,7 +148,11 @@ export class TurnExecutionTracker {
   }
 
   reset(provider?: string): void {
-    if (this.active && (provider === undefined || this.active.provider === provider)) this.active.invalidated = true;
+    if (this.active && (provider === undefined || this.active.provider === provider)) {
+      this.active.invalidated = true;
+      // 后续全局故障不能重新排入这个已断线代次；新同步自行创建任务。
+      this.active.reset = true;
+    }
     for (const [threadId, pending] of this.pending) {
       if (provider === undefined || pending.provider === provider) this.pending.delete(threadId);
     }
@@ -153,10 +179,12 @@ export class TurnExecutionTracker {
     while (this.pending.size > 0 && !this.abort.signal.aborted) {
       const [threadId, { provider, throughTurnId }] = this.pending.entries().next().value!;
       this.pending.delete(threadId);
-      const active = { threadId, provider, invalidated: false };
+      const active = { threadId, provider, invalidated: false, reset: false, retryAfterInvalidation: false };
       this.active = active;
       const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(5_000)]);
       try {
+        // 先确认旧快照已经持久失效，再允许新历史建立自己的完整性。
+        await this.invalidation;
         await Promise.all([...this.writes]);
         if (signal.aborted || active.invalidated) continue;
         const store = this.scopedStore(signal);
@@ -186,10 +214,15 @@ export class TurnExecutionTracker {
           this.notify(threadId);
         }
       } catch (error) {
-        this.reliable = false;
+        const report = !this.abort.signal.aborted && !active.invalidated;
         this.invalidateCoverage();
-        if (!this.abort.signal.aborted && !active.invalidated) this.failed(error, threadId);
-      } finally { this.active = undefined; }
+        // 本次存储失败保持原有有界行为，不由失效恢复触发无穷重试。
+        active.retryAfterInvalidation = false;
+        if (report) this.failed(error, threadId);
+      } finally {
+        this.active = undefined;
+        if (active.retryAfterInvalidation && !active.reset && !this.pending.has(threadId)) this.enqueue(threadId, provider, throughTurnId);
+      }
     }
   }
 }

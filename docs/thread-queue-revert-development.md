@@ -1,6 +1,6 @@
 # Thread Queue 与 Revert
 
-本文定义锁定 Codex CLI `0.163.0` 的实验 `thread/queue/*`、`thread/queue/changed`、
+本文定义锁定 Codex CLI `0.164.0` 的实验 `thread/queue/*`、`thread/queue/changed`、
 `thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的使用合同。
 当前实现使用原生 Queue、分页历史与 Revert，以下定义授权和状态协调合同。
 三个 Surface 的当前支持范围和静态检查入口以
@@ -29,6 +29,8 @@ App Server 是待提交用户消息和 Thread 历史的唯一事实来源。Gate
 - Application 分别持有有界的页面选择快照和一次性确认注册表；二者都不持久化正文。
   `thread/queue/changed`、`thread/reverted`、Thread 解绑/切换以及成功或失败的确认消费都会使相关
   快照失效。Surface 只解析规范命令和渲染结构化结果，不保存历史镜像。
+  失效同时作用于正在等待的列表、预览与确认，最终 RPC 守卫也检查它；已提交请求按实际响应结算。
+  Queue 内部写前读取不更新数字选择快照，只有成功返回给列表调用方的页面建立新序号。
 - Queue 复核使用 Client 从完整有序 Queue 原始输入计算的不可逆摘要；摘要覆盖条目 ID、
   `clientUserMessageId`、输入类型与完整输入值，但 Application 只接收摘要和条目数量。
   不得用有界展示预览计算摘要，否则预览截断可能隐藏并发变化。
@@ -36,20 +38,28 @@ App Server 是待提交用户消息和 Thread 历史的唯一事实来源。Gate
   不调用用户账户或真实模型。历史实测确认 Queue 条目在 Revert 后按原顺序保留，但不会由 Revert
   自动启动；用户显式 `/queue start` 后按队列顺序继续派发。
   此前升级到 0.162.1 时，仅核对相关上游源码与 0.162.0 无差异，没有重跑 Queue/Revert 联合实测。
-  升级到 0.163.0 时，Queue 处理器与 Queue/Revert 上游合同测试保持不变；本次仍未重跑联合实测。
+  升级到 0.163.0 时，Queue 处理器与 Queue/Revert 上游合同测试保持不变；该版本升级期间仍未重跑联合实测。
+- 0.164.0 补验使用独立 Codex Home、真实 App Server 与回环模拟 Responses SSE：活动 Turn 下编辑/排序 Queue，
+  重复 ID 排列及 busy 启动均拒绝；中断和 Revert 保留队列，Revert 不自动派发，Resume 后队列完成并排空，
+  当前 medium/Standard 设置在回退恢复后保留。
+  具体输入、观察与清理见[升级补验记录](codex-cli-upgrade-decisions.md#2026-10-23-queuerevert-与原生-tui-补验)。
+- 随后经实际共享命令与 Application 入口补验预览、一次性确认、错误 Actor/Conversation、撤权、活动 Turn 变化及 Queue 并发变化，
+  均按合同拒绝过期或越界确认；有效确认中断活动 Turn、保留 Queue，显式启动后完成并清空。
+  授权端口采用隔离注入，尚不代表真实渠道身份、按钮及投递验收；详见
+  [确认与断线补验](codex-cli-upgrade-decisions.md#2026-10-23-确认断线与失败路径补验)。
 
 ## 固定事实来源
 
-当前实现只以正式 Tag `rust-v0.163.0` 为准：
+当前实现只以正式 Tag `rust-v0.164.0` 为准：
 
-- [`thread_queue_processor.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/src/request_processors/thread_queue_processor.rs)：Queue 请求处理、分页和错误边界。
-- [`thread_queue.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/tests/suite/v2/thread_queue.rs)：实验握手、容量、持久化、自动派发、中断和手动启动合同。
-- [`thread_revert.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/tests/suite/v2/thread_revert.rs)：分页历史回退、活动 Turn 中断、通知和重启合同。
-- [`thread_processor.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/src/request_processors/thread_processor.rs)：Revert 只接受分页历史 Thread，并在回退后重新加载同一 Thread。
+- [`thread_queue_processor.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/request_processors/thread_queue_processor.rs)：Queue 请求处理、分页和错误边界。
+- [`thread_queue.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/tests/suite/v2/thread_queue.rs)：实验握手、容量、持久化、自动派发、中断和手动启动合同。
+- [`thread_revert.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/tests/suite/v2/thread_revert.rs)：分页历史回退、活动 Turn 中断、通知和重启合同。
+- [`thread_processor.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/request_processors/thread_processor.rs)：Revert 只接受分页历史 Thread，并在回退后重新加载同一 Thread。
 - 本地生成类型：[`codex-protocol/generated/v2/`](../src/codex-protocol/generated/v2/)。生成类型是字段名称和可空性的最终事实来源。
 
 参考源码应匹配提交
-`83086188ae0614bd882818ff1aa23f3194962012`，即 `rust-v0.163.0`；本机副本状态见[上游来源](upstream-sources.md)。不得用官方 `main`
+`6aaac694803004a63c6f393d153c96d22521a6b9`，即 `rust-v0.164.0`；本机副本状态见[上游来源](upstream-sources.md)。不得用官方 `main`
 补充或替代本设计。
 
 ## Queue 原生合同
@@ -197,7 +207,8 @@ Turn ID 与数字序号都必须来自最近一次 `/revert list` 的同一页�
 固定版本源码中 Revert 与 Queue 使用独立存储，Revert 请求没有清空 Queue；官方 0.148 测试没有
 覆盖二者同时存在的合同。升级前的真实 App Server 联合合同实测已确认：Revert 后 Queue 条目和顺序保留，
 Revert 本身不自动派发；显式启动队首后，后续条目继续按原生顺序派发。因此 Gateway 允许 Queue
-非空时预览和执行 Revert，执行前后都用完整有序输入摘要复核，不自行清空、重放或启动 Queue。
+非空时预览和执行 Revert，在预览与执行前用完整有序输入摘要复核，不自行清空、重放或启动 Queue。
+当前没有执行后 Queue 回读；不能把回退响应成功解释为事后 Queue 状态已经再次核验。
 
 ### 状态协调
 
@@ -205,7 +216,8 @@ Revert 成功后：
 
 - 先正常处理 App Server 对活动 Turn 发出的 `turn/completed: interrupted`，使相关审批、用户输入和 MCP 交互失效。
 - 校验并消费 `thread/reverted`，只使用 `threadId` 触发状态校正，不伪造被保留的历史。
-- 重新 `thread/read` 或使用 Revert 返回的 Thread 元数据校正模型设置、状态和绑定；Thread ID 不变。
+- 锁定 App Server 在内部恢复 Thread 设置并保留 ID 与订阅；Client 投影返回的 Thread 元数据，
+  当前 Application 不据此改写 Router，也没有额外 `thread/read`，后续仍由权威通知和既有读取收敛。
 - 清除只属于被删除 Turn 的 Core 界面缓存，包括最近 Diff、Plan、Goal 展示和操作摘要；权威 Goal 是否保留以回退后的 App Server 读取结果为准。
 - 不自动启动新的 Turn，不重放被中断输入，不重试 Revert。
 - 其他客户端并发执行 Revert 时，以通知和下一次权威读取收敛；本地过期确认全部失效。
@@ -238,7 +250,7 @@ Revert 成功后：
 - 修改根 `AGENTS.md` 中受控实验例外，精确加入 `thread/turns/list`、`thread/revert` 与
   `thread/reverted`，不借机开放 `thread/items/list` 或其他实验 API。
 - 更新 `docs/index.md` 的受控导出数、直接调用方法数、支持矩阵、固定源码说明和复核命令结果。
-- 不增加运行时兼容层；运行中的 App Server 不是精确 `0.163.0` 时仍由现有版本门禁拒绝。
+- 不增加运行时兼容层；运行中的 App Server 不是精确 `0.164.0` 时仍由现有版本门禁拒绝。
 - 不新增 Gateway SQLite Schema，也不新增消息正文持久化配置。
 
 Queue 是对现有 `/queue` 的完整替换，实施后默认可用，不另设功能开关。Revert 是新的破坏性实验
@@ -248,15 +260,14 @@ Queue 是对现有 `/queue` 的完整替换，实施后默认可用，不另设�
 
 ## 验证链路
 
-相关实现变更按项目门禁执行静态检查与构建，并核对锁定版本的 Queue/Revert 行为。
-提交由 pre-commit 运行按范围选择的 `verify:commit`，不手动重复执行。
+相关实现变更遵循[统一验证规则](development-rules.md#verification)，并核对锁定版本的 Queue/Revert 行为。
 
 
 ## 完成标准与停止条件
 
 ### Queue 阶段完成标准
 
-Queue 是否已采用只按本节判断，不以前置完成尚未实施的 Revert 为条件：
+Queue 已接入；以下为持续维护的实现与验收要求，不以 Revert 联合验收是否补齐作为接入状态判断：
 
 - 旧 Gateway Queue 已完全删除，生产代码不存在第二套消息正文队列。
 - 原生六个 Queue 请求、100 条容量和 25/100 分页与锁定协议一致。
@@ -265,13 +276,19 @@ Queue 是否已采用只按本节判断，不以前置完成尚未实施的 Reve
 
 ### Revert 阶段完成标准
 
-Revert 仍需单独满足以下条件，完成前保持失败关闭：
+Revert 已接入，以下为持续维护的实现要求；运行时历史模式、能力、授权、确认或状态复核不满足时拒绝操作：
 
 - 新建 Thread 使用 paginated；legacy Thread 明确拒绝 Revert，且没有隐式迁移。
 - Revert 具有一次性确认、执行前复核、活动 Turn 中断处理和“不会恢复文件”提示。
-- Queue/Revert 联合行为在所声明的验收版本上完成真实 App Server 复核；本次 0.163.0 未重跑该项，
-  仅保留历史实测及 Queue 处理器、Queue/Revert 上游合同测试未变的核对结果，不声明新版联合验收已完成。
 - `docs/index.md`、根 README、模块 README 与三个 Surface 帮助和实现一致。
+
+**验收范围。** 0.164.0 已补齐真实隔离 App Server 的 Queue/Revert 联合行为及共享命令入口确认守卫观察，
+详见本文“当前实现约束”链接的实际记录；模型响应来自回环模拟端点。后续
+[扩展验收](codex-cli-upgrade-decisions.md#2026-10-23-可行项扩展验收)补齐实际 Bootstrap 自动重连协调器恢复已有历史的空闲 Thread，
+不等于自动重连与 Queue/Revert 的完整联合观察。真实渠道身份、按钮、网络投递与多 Provider Queue/Revert 并用
+仍未因此验收，不能把内部入口结果外推到这些边界。
+这些未观察项不表示 Revert 尚未实现，也不单独构成关闭已接入功能的运行时条件；
+后续具备环境时补证，发现实际合同或状态问题则按下述停止条件处理。
 
 遇到以下任一情况必须停止实施并重新审查设计：
 

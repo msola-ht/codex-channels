@@ -15,7 +15,7 @@ import {
   formatConversationModel,
   formatNextMessageModel,
 } from "./conversation-model-account-command-format.js";
-import { formatDisplayedProvider, formatModelDisplayNameWithId } from "./provider-format.js";
+import { formatDisplayedProvider } from "./provider-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
@@ -41,7 +41,7 @@ export function formatConversationCommandOutcome(
               ? ["Queue 中有待派发条目，已沿用该 Session 自身设置，未应用当前会话的待生效偏好。"]
               : []),
             ...(outcome.backgroundedThreadId
-              ? [`原任务已转入后台：${outcome.backgroundedThreadId}`]
+              ? [`原会话已保留为后台会话：${outcome.backgroundedThreadId}`]
               : []),
           ].join("\n"));
     case "session.new":
@@ -51,7 +51,7 @@ export function formatConversationCommandOutcome(
         return toStructuredMarkdownList([
           ...(outcome.backgroundedThreadId
             ? [
-                "新会话已准备，原任务继续在后台运行。",
+                "新会话已准备，原会话尚不满足释放条件，已保留在后台。",
                 `后台 Session ID：${outcome.backgroundedThreadId}`,
               ]
             : ["已退出当前会话。"]),
@@ -211,7 +211,7 @@ export function formatConversationCommandOutcome(
         `状态：${formatScheduledTaskStatusLabel(outcome.task.status)}`,
         `计划：${formatSchedule(outcome.task.schedule, outcome.task.timezone)}`,
         `下次运行：${formatScheduledAt(outcome.task.nextRunAt)}`,
-        `模型：${formatDisplayedProvider(outcome.task.modelProvider)}/${outcome.task.model ? formatModelDisplayNameWithId(outcome.task.model) : "默认"}`,
+        `模型：${formatDisplayedProvider(outcome.task.modelProvider)}/${outcome.task.model || "默认"}`,
         `${reasoningEffortSettingName(outcome.task.reasoningEffort)}：${formatReasoningEffort(outcome.task.reasoningEffort, "默认")}`,
       ].join("\n"));
     case "scheduled-task.run-requested":

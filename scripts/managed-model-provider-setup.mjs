@@ -7,6 +7,7 @@ import {
   withPreservedManagedModelCatalogSettings,
 } from "../runtime/managed-model-catalog.mjs";
 import { createManagedPrimaryCredential } from "../runtime/managed-provider-credentials.mjs";
+import { parse } from "smol-toml";
 
 const managedRootKeys = Object.freeze([
   "model",
@@ -51,6 +52,7 @@ export function createManagedProviderConfiguration(current, initial, definition,
   catalogPath,
   catalog,
   model,
+  previousProfile,
 }) {
   if (mode === "exclusive") {
     const credential = createManagedPrimaryCredential(definition, apiKey);
@@ -73,18 +75,25 @@ export function createManagedProviderConfiguration(current, initial, definition,
   if (typeof reasoningEffort !== "string") {
     throw new Error(`${definition.displayName} 模型目录缺少默认思考等级`);
   }
+  let webSearch;
+  if (previousMode === "switching" && previousProfile !== undefined) {
+    try { webSearch = parse(previousProfile).web_search; }
+    catch { throw new Error("原 Provider Profile 无法安全解析"); }
+    if (webSearch !== undefined && !["disabled", "cached", "indexed", "live"].includes(webSearch)) {
+      throw new Error("原 Provider 搜索设置无效");
+    }
+  }
   return {
     config,
-    profile: createSwitchingProviderProfile(definition, {
+    profile: { ...createSwitchingProviderProfile(definition, {
       apiKey, catalogPath, model, reasoningEffort,
-    }),
+    }), ...(webSearch === undefined ? {} : { web_search: webSearch }) },
   };
 }
 
 export function createManagedProviderCatalog(catalog, definition, {
   previousModels = [],
   windowPercent = null,
-  modelContextWindowByModel = {},
 } = {}) {
   const models = Array.isArray(catalog?.models) ? catalog.models : [];
   const defaultEntry = selectCatalogDefaultModel(models, definition);
@@ -102,14 +111,9 @@ export function createManagedProviderCatalog(catalog, definition, {
     definition,
     previousModels,
   );
-  const windowsApplied = applyModelContextWindowByModel(
-    preserved,
-    definition,
-    modelContextWindowByModel,
-  );
-  if (windowPercent === null) return windowsApplied;
-  const selected = windowsApplied.models.find((entry) => entry.slug === defaultEntry.slug);
-  return withManagedModelCatalogSettings(windowsApplied, definition, {
+  if (windowPercent === null) return preserved;
+  const selected = preserved.models.find((entry) => entry.slug === defaultEntry.slug);
+  return withManagedModelCatalogSettings(preserved, definition, {
     model: defaultEntry.slug,
     reasoningEffort: selected.default_reasoning_level,
     contextWindow: Math.round(managedCatalogWindowBase(defaultEntry) * windowPercent / 100),
@@ -136,34 +140,6 @@ export function resolveManagedCatalogModel(catalog, definition, preferred) {
     return preferred;
   }
   return selectCatalogDefaultModel(models, definition).slug;
-}
-
-function applyModelContextWindowByModel(catalog, definition, windows) {
-  let next = catalog;
-  const models = Array.isArray(catalog?.models) ? catalog.models : [];
-  for (const candidate of models) {
-    const slug = candidate?.slug;
-    const contextWindow = typeof slug === "string" ? windows[slug] : undefined;
-    if (contextWindow === undefined) continue;
-    const windowBase = managedCatalogWindowBase(candidate);
-    const reasoningEffort = candidate?.default_reasoning_level;
-    if (
-      !Number.isSafeInteger(windowBase)
-      || windowBase <= 0
-      || typeof reasoningEffort !== "string"
-    ) {
-      throw new Error(`${definition.displayName} 模型目录缺少窗口所需字段：${slug}`);
-    }
-    if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > windowBase) {
-      throw new Error(`${definition.displayName} 模型上下文窗口必须是 1024-${windowBase} 的整数：${slug}`);
-    }
-    next = withManagedModelCatalogSettings(next, definition, {
-      model: slug,
-      reasoningEffort,
-      contextWindow,
-    });
-  }
-  return next;
 }
 
 function managedCatalogWindowBase(entry) {

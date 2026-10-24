@@ -1,11 +1,6 @@
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openPrivateDatabase } from "./open-private-database.js";
 
-import {
-  securePrivateDirectorySync,
-  securePrivateFileSync,
-} from "../../runtime/private-file.mjs";
 import type {
   SessionDisplayCacheEntry,
   SessionDisplayCachePort,
@@ -58,36 +53,14 @@ export class SqliteSessionDisplayCache implements SessionDisplayCachePort {
   private closed = false;
 
   constructor(readonly path: string) {
-    const existed = existsSync(path);
-    if (existed) {
-      const existing = new DatabaseSync(path, { readOnly: true });
-      try {
-        assertSessionDisplayCacheSchema(existing, { allowEmpty: true });
-      } finally {
-        existing.close();
-      }
-    }
-    const parent = dirname(path);
-    mkdirSync(parent, { recursive: true, mode: 0o700 });
-    if (!existed) securePrivateDirectorySync(parent);
-    this.database = new DatabaseSync(path);
-    try {
-      assertSessionDisplayCacheSchema(this.database, { allowEmpty: true });
-      if (existed) securePrivateDirectorySync(parent);
-      securePrivateFileSync(path);
-      // Derived-cache contention fails immediately instead of blocking all conversations for five seconds.
-      this.database.exec("PRAGMA busy_timeout = 0; PRAGMA journal_mode = DELETE;");
-      this.initializeSchema();
-    } catch (error) {
-      try {
-        this.database.close();
-      } catch (closeError) {
-        throw new AggregateError([error, closeError], "会话缓存数据库初始化和清理均失败", {
-          cause: closeError,
-        });
-      }
-      throw error;
-    }
+    this.database = openPrivateDatabase(
+      path,
+      database => assertSessionDisplayCacheSchema(database, { allowEmpty: true }),
+      database => {
+        this.initializeSchema(database);
+      },
+      "会话缓存数据库初始化和清理均失败",
+    );
   }
 
   get(threadId: string): SessionDisplayCacheEntry | undefined {
@@ -154,14 +127,14 @@ export class SqliteSessionDisplayCache implements SessionDisplayCachePort {
     this.database.close();
   }
 
-  private initializeSchema(): void {
-    const row = this.database.prepare("PRAGMA user_version").get() as { user_version: number };
+  private initializeSchema(database: DatabaseSync): void {
+    const row = database.prepare("PRAGMA user_version").get() as { user_version: number };
     if (row.user_version === schemaVersion) return;
-    this.database.exec("BEGIN IMMEDIATE");
+    database.exec("BEGIN IMMEDIATE");
     try {
-      assertSessionDisplayCacheSchema(this.database, { allowEmpty: true });
-      if (this.database.prepare("PRAGMA user_version").get()?.user_version === 0) {
-        this.database.exec(`
+      assertSessionDisplayCacheSchema(database, { allowEmpty: true });
+      if (database.prepare("PRAGMA user_version").get()?.user_version === 0) {
+        database.exec(`
         CREATE TABLE session_display_cache (
           thread_id TEXT PRIMARY KEY CHECK (length(thread_id) > 0),
           workspace_id TEXT NOT NULL CHECK (length(workspace_id) > 0),
@@ -179,9 +152,9 @@ export class SqliteSessionDisplayCache implements SessionDisplayCachePort {
         PRAGMA user_version = ${schemaVersion};
         `);
       }
-      this.database.exec("COMMIT");
+      database.exec("COMMIT");
     } catch (error) {
-      this.database.exec("ROLLBACK");
+      database.exec("ROLLBACK");
       throw error;
     }
   }

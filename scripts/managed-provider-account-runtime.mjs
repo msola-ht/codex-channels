@@ -1,11 +1,11 @@
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { inspectAppServerSupervisorState, releaseAppServerProvider } from "../runtime/app-server-supervisor.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { runtimeConfig } from "./runtime-config.mjs";
+import { locateUserConfig } from "./runtime-config.mjs";
 import { AccountManagementError } from "./account-management-error.mjs";
 
 export function managedAccountPrimarySocket(environment) {
-  const { configPath, dataDir } = runtimeConfig(environment);
+  const { configPath, dataDir } = locateUserConfig(environment);
   return resolvePrimaryAppServerSocketPath(readGatewayConfig(configPath), dataDir);
 }
 
@@ -22,6 +22,9 @@ export async function inspectManagedAccountRuntime(provider, {
   return {
     provider,
     primarySocketPath,
+    registered: inspection.status === "ready" && (
+      inspection.topology.primaryProvider === provider || inspection.topology.managedProviders.includes(provider)
+    ),
     running: inspection.status === "ready" && inspection.topology.runningProviders.includes(provider),
   };
 }
@@ -29,7 +32,7 @@ export async function inspectManagedAccountRuntime(provider, {
 export async function releaseManagedAccountRuntime(plan, {
   releaseProvider = releaseAppServerProvider,
 } = {}) {
-  if (!plan.running) return "not-running";
+  if (!plan.registered) return "not-running";
   const release = await releaseProvider(plan.primarySocketPath, plan.provider);
   return release.reason === "released" ? "stopped"
     : release.reason === "leased" ? "in-use" : "not-running";

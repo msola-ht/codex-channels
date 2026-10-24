@@ -104,6 +104,7 @@ export { resolveThread } from "./conversation-session-query-service.js";
 export { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 export {
   ModelSelectionService,
+  modelSelectionSnapshot,
   fastServiceTierId,
   ultrafastServiceTierId,
   isFastServiceTier,
@@ -113,6 +114,8 @@ export {
   resolveProvider,
   type ModelSelectionPreference,
   type ModelSelectionIdentity,
+  type ModelSelectionRequest,
+  type ModelSelectionSnapshot,
   type ModelSelectionState,
   type OfficialModelCatalogProvider,
 } from "./model-selection-service.js";
@@ -153,6 +156,7 @@ export {
   type McpServerDetail,
   type McpServerSummary,
   type McpToolSummary,
+  type McpToolListMetadata,
 } from "./mcp-port.js";
 export {
   type InstalledPlugin,
@@ -198,6 +202,8 @@ export {
   type TurnStarted,
 } from "./turn-port.js";
 export {
+  ThreadQueueError,
+  type ThreadQueueFailure,
   type ThreadQueueInputType,
   type ThreadQueueItem,
   type ThreadQueueListOptions,
@@ -223,3 +229,4 @@ export {
 export { OpenAiResetCreditService, ResetCreditError, type OpenAiResetCredit, type OpenAiResetCreditSnapshot, type OpenAiResetCreditPort, type ResetCreditOutcome } from "./openai-reset-credit-service.js";
 
 export { ConversationResetCreditService, resetCreditCommandUsage, type ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
+export { ReasoningRepeatGuard, type ReasoningGuardInput } from "./reasoning-repeat-guard.js";

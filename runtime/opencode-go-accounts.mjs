@@ -121,17 +121,12 @@ export function validateOpencodeGoAccountId(accountId) {
   return accountId;
 }
 
-export function opencodeGoAccountsDirectory(environment = process.env) {
-  return join(providerStorageRoot(environment), "opencode-go", "accounts");
-}
-
 export function opencodeGoAccountsFilePath(environment = process.env) {
   return join(providerStorageRoot(environment), "opencode-go", "accounts.json");
 }
 
 export function opencodeGoAccountDirectory(environment, accountId) {
-  validateOpencodeGoAccountId(accountId);
-  return join(opencodeGoAccountsDirectory(environment), accountId);
+  return join(providerStorageRoot(environment), "opencode-go", opencodeGoProviderId(accountId));
 }
 
 export function opencodeGoAccountMarkerPath(environment, accountId) {
@@ -236,7 +231,16 @@ export function loadOpencodeGoDefaultAccount(environment = process.env) {
 
 export function readOpencodeGoAccountMarker(environment, accountId) {
   const path = opencodeGoAccountMarkerPath(environment, accountId);
-  if (!existsSync(path)) return undefined;
+  if (!existsSync(path)) {
+    const provider = opencodeGoProviderId(accountId);
+    if (loadOpencodeGoAccounts(environment).some(account => account.id === accountId) && [
+      join(providerStorageRoot(environment), "opencode-go", "accounts", accountId),
+      join(providerStorageRoot(environment), provider),
+    ].some(directory => existsSync(join(directory, "managed.toml")))) {
+      throw new Error(`Provider ${provider} 仍使用不受支持的旧账户目录；请保留配置与目录完整备份，停止相关服务后使用对应原版本处理，当前版本不提供目录迁移`);
+    }
+    return undefined;
+  }
   let marker;
   try {
     marker = parse(readPrivateFile(path));

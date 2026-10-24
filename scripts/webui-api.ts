@@ -1,20 +1,22 @@
-export type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { GenerationTiming } from "../runtime/request-timing.mjs"
-import type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 import type { CustomModelCapabilityProbeResult } from "./custom-model-capability-probe.mjs"
+export type { ProviderWebSearchProbeInput as ManagementProviderWebSearchProbeInput, ProviderWebSearchProbeResult as ManagementProviderWebSearchProbeResult } from "./provider-web-search-probe.mjs"
 import type { RelayModelReasoning } from "../runtime/chat-reasoning.mjs";
 export type { RelayModelReasoning } from "../runtime/chat-reasoning.mjs";
 import type { RelayReasoningProbeInput, RelayReasoningProbeResult } from "./relay-reasoning-probe.mjs";
 export type { RelayReasoningProbeInput, RelayReasoningProbeResult, RelayReasoningProbeEvent } from "./relay-reasoning-probe.mjs";
 
-export type ManagementCustomModelProbeResult = CustomModelCapabilityProbeResult & { connectionToken: string }
+export type ManagementCustomModelProbeResult = CustomModelCapabilityProbeResult & (
+  | { capability: "webSearch"; connectionToken?: never }
+  | { capability: "applyPatch" | "toolSearch"; connectionToken: string }
+)
 export interface ManagementCustomModelProbeInput {
   providerId?: string
   baseUrl: string
   model: string
   upstreamWireApi: "responses" | "chat_completions"
-  capability: "applyPatch" | "toolSearch"
+  capability: "applyPatch" | "toolSearch" | "webSearch"
   reasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
   credential: { action: "preserve" } | { action: "replace"; apiKey: string }
 }
@@ -38,7 +40,7 @@ export interface MetricsQuery {
   turnId?: string
   provider?: string[]
   model?: string
-  operation?: "response" | "compact"
+  operation?: "response" | "compact" | "imageGeneration" | "imageEdit"
   status?: "completed" | "failed" | "incomplete" | "unknown"
   filter?: string
   offset?: number
@@ -351,6 +353,9 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  activity: import("../runtime/request-activity.mjs").RequestActivity | null
+  /** 最后一次实际模型出站的 origin + 路径；历史未采集时为 null。 */
+  upstreamUrl: string | null
   /** 是否关联已登记的子代理；false 不代表已确认是主代理。 */
   isSubagent: boolean
   requestPurpose?: "autoApprovalReview" | null
@@ -374,6 +379,8 @@ export interface RequestRecord {
   relayRequestId?: string | null
   deliveryStatus?: "finished" | "disconnected" | "failed" | null
   totalDurationMs: number | null
+  /** 本次逻辑请求实际发往模型上游的正文或 WebSocket 请求帧字节合计。 */
+  requestBytes: number | null
   traffic: { label: string; session: string; interaction: number } | null
   firstTokenMs: number | null
   responseTimeMs?: number | null
@@ -385,7 +392,7 @@ export interface RequestRecord {
   id: number
   provider: string | null
   model: string | null
-  operation: "response" | "compact"
+  operation: "response" | "compact" | "imageGeneration" | "imageEdit"
   status: string
   httpStatus: number | null
   errorType: string | null
@@ -422,6 +429,7 @@ export type RequestSortKey =
   | "input"
   | "output"
   | "reasoningOutput"
+  | "requestBytes"
 
 export type RequestSortDirection = "asc" | "desc"
 
@@ -448,10 +456,6 @@ export interface ErrorsResponse {
 
 export interface ModelTrafficSettingsResponse {
   modelTrafficDumpEnabled: boolean
-}
-
-export interface ModelDisplaySettingsResponse {
-  modelAliases: Record<string, string>
 }
 
 export interface SettingsSummaryResponse {
@@ -582,64 +586,61 @@ export interface ManagementSettingsResponse {
 
 export interface ManagementSettingInput { kind: string; value: unknown; [key: string]: unknown }
 export interface ManagementSettingMutationResponse {
+  action?: string
+  willChange?: boolean
   revision: string | null
   value: unknown
   activation: { status: string; target: string; commands: readonly string[] }
   auditStatus?: "recorded" | "degraded"
   consistency?: "confirmed" | "unknown"
+  writeStatus?: "ok" | "okOverridden" | null
+  targetFingerprint?: string
+  warnings?: Array<{ code: string; providerId?: string }>
   confirmationRequired?: boolean
   confirmationToken?: string
   confirmationExpiresAt?: number
+  generatedWebuiToken?: string
 }
 
-export interface CodexUserSettingsResponse {
-  toolSettings: import("./codex-tool-settings.mjs").CodexToolSettings
-  version: string
-  provider: string
-  defaultsEditable: boolean
-  models: Array<{
-    model: string
-    displayName: string
-    reasoningEfforts: Array<{ effort: string; description: string }>
-    defaultReasoningEffort: string
-    serviceTiers: Array<{ id: string; name: string }>
-    isDefault: boolean
-  }>
-  defaults: {
-    model: string | null
-    reasoningEffort: string | null
-    serviceTier: string | null
-    fastEnabled: boolean
-    ultrafastEnabled: boolean
-    webSearch: "live" | "indexed" | "cached" | "disabled" | null
-    updatePlanEnabled: boolean
-    autoRecapEnabled: boolean
-    reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null
-    planModeReasoningEffort?: string | null
-    verbosity?: "low" | "medium" | "high" | null
-    personality?: "none" | "friendly" | "pragmatic" | null
-    checkForUpdateOnStartup?: boolean | null
-    historyPersistence?: "save-all" | "none" | null
-  }
-  permissions: {
-    editable: boolean
-    defaultPermissions: string | null
-    sandboxMode: "read-only" | "workspace-write" | null
-    approvalPolicy: "on-request" | "never" | null
-    networkAccess: boolean | null
-  }
-  approvalsReviewer: {
-    value: "user" | "auto_review" | null
-    editable: boolean
-    reason?: string
-  }
-  compact: {
-    contextWindow: number | null
-    autoCompactPercent: number | null
-  }
+export type OpenAiModelCatalogEntry = import("./webui-official-model-catalog.mjs").OpenAiModelCatalogEntry
+
+export interface OpenAiModelCatalogResponse {
+  source: "codex-cache"
+  revision: string
+  scope: string
+  fetchedAt: string
+  clientVersion: string | null
+  models: OpenAiModelCatalogEntry[]
 }
+
+export interface OpenAiModelContextInput {
+  revision: string
+  model: string
+  contextWindow: number
+}
+
+export type OpenAiModelContextPreview = import("./webui-official-model-catalog.mjs").OpenAiModelContextPreview
+
+export type OpenAiModelContextResult = import("./webui-official-model-catalog.mjs").OpenAiModelContextResult & {
+  auditStatus: "recorded" | "degraded"
+}
+
+export interface OpenAiModelRefreshInput { revision: string }
+export type OpenAiModelPromptsResponse = import("./webui-official-model-catalog.mjs").OpenAiModelPrompts
+export type ProviderModelPromptsResponse = OpenAiModelPromptsResponse & Pick<ResponsesModelDefinition, "template" | "sampling">
+export type OpenAiModelRefreshPreview = import("./webui-official-model-catalog.mjs").OpenAiModelRefreshPreview
+export type OpenAiModelRefreshResult = import("./webui-official-model-catalog.mjs").OpenAiModelRefreshResult & {
+  auditStatus: "recorded" | "degraded"
+}
+
+export type CodexUserSettingsResponse = import("./codex-user-settings-management.mjs").CodexUserSettingsState
 
 export interface CodexUserSettingInput { kind: string; [key: string]: unknown }
+
+export interface ManagementTaskResult {
+  commitState: "not_started" | "unchanged" | "committed" | "not_committed" | "unknown"
+  failurePhases: Array<"commit" | "vacuum" | "count" | "close" | "lock-release" | "gateway-restart">
+}
 
 export interface ManagementTask {
   id: string
@@ -650,8 +651,9 @@ export interface ManagementTask {
   createdAt: string
   updatedAt: string
   error: string | null
-  result: { output: string | null } | null
-  auditStatus?: "recorded" | "degraded"
+  errorCode: "start_failed" | "execution_failed" | "cancellation_unconfirmed" | "process_cleanup_unconfirmed" | "result_unconfirmed" | null
+  result: ManagementTaskResult | null
+  auditStatus: "recorded" | "degraded" | null
 }
 
 export type ManagementTaskInput =
@@ -668,10 +670,14 @@ export interface ManagementTaskPreview {
   target: string | null
   effects: string[]
   preconditions: string[]
-  recovery: string
+  recovery: "traffic_irreversible" | "metrics_restore" | "metrics_backup" | "service_check"
   activation: string | { status: string; target: string; commands: readonly string[] }
   resource?: unknown
   requiresConfirmation: true
+}
+
+export interface ManagementProviderModelCatalogsResponse {
+  catalogs: ManagementProviderSettingsResponse["modelCatalogs"]
 }
 
 export interface ManagementProviderSettingsResponse {
@@ -679,11 +685,14 @@ export interface ManagementProviderSettingsResponse {
   resourceRevision: string
   configVersion: string | number | null
   defaults: { model: string | null; reasoningEffort: string | null }
+  webSearchSettings: import("./model-provider-management.mjs").ProviderWebSearchSetting[]
   modelCatalogs: Array<{
     provider: string
+    source: "managed" | "custom" | "official-shared"
+    revision: string
     displayName: string
     providers: string[]
-    models: Array<{ id: string; displayName: string; isDefault: boolean }>
+    models: Array<{ id: string; displayName: string; isDefault: boolean; removalBlockedReason: import("./provider-model-management.mjs").ProviderModelRemovalBlockedReason | null; presentation: OpenAiModelCatalogEntry & { editable: false } }>
     canRemove: boolean
     unavailableReason?: string
   }>
@@ -747,25 +756,49 @@ export interface ManagementProviderSettingsResponse {
       baseUrl: string
     }>
   }
-  modelWindow: Array<{
-    id: string
-    displayName: string
-    contextWindow: number
-    maxContextWindow: number
-    providers: string[]
-    windowPercent?: number
-    conflicts?: boolean
-    perProvider?: Record<string, number>
-  }>
+}
+
+export type ProviderModelTemplateSource = "official" | "deepseek" | "cline"
+export type ProviderModelTemplateSection = "prompts" | "capabilities" | "settings"
+export type ProviderModelTemplateValue = { present: false } | { present: true; value: unknown }
+export interface ProviderModelTemplateOptionsResponse {
+  provider: string
+  revision: string
+  sourceToken: string
+  expiresAt: number
+  availableSections: ProviderModelTemplateSection[]
+  targets: Array<{ model: string; displayName: string; template: { source: ProviderModelTemplateSource; model: string } | null }>
+  templates: Array<{ source: ProviderModelTemplateSource; model: string; displayName: string }>
+}
+export interface ProviderModelTemplateUpdateInput {
+  operation: "model.template.update"
+  provider: string
+  model: string
+  sections: ProviderModelTemplateSection[]
+  revision: string
+  sourceToken: string
+  template: { source: ProviderModelTemplateSource; model: string }
 }
 
 export type ManagementProviderSettingsMutationInput =
+  | ({ operation: "provider.web-search" } & import("./provider-web-search-management.mjs").ProviderWebSearchChangeInput)
+  | ({ operation: "model.add" } & import("./provider-model-additions.mjs").ProviderModelAdditionInput)
+  | import("./managed-provider-model-edit.mjs").ManagedProviderModelRequestOptionsInput & { operation: "model.request-options" }
+  | ProviderModelTemplateUpdateInput
   | { operation: "model.remove"; provider: string; model: string }
+  | { operation: "model.context"; provider: string; model: string; contextWindow: number; revision: string }
+  | { operation: "model.rename"; provider: string; model: string; displayName: string; revision: string }
   | { operation: "model.custom.save"; resourceRevision: string; provider: string; models: ResponsesModelDefinition[]; model: string; probeConnections?: Array<{ model: string; capability: "applyPatch" | "toolSearch"; token: string }> }
   | { operation: "primary.switch"; providerId: string; model?: string }
   | { operation: "primary.remove"; providerId: string }
   | {
+      operation: "primary.custom.connection.save"
+      resourceRevision: string
+      provider: import("./custom-primary-provider-management.mjs").CustomProviderConnectionSaveInput
+    }
+  | {
       operation: "primary.custom.save"
+      resourceRevision?: string
       provider: {
         operation: "create" | "update"
         providerId: string
@@ -786,16 +819,19 @@ export type ManagementProviderSettingsMutationInput =
       provider: string
       model: string
       reasoningEffort: string
-      windowPercent?: number
     }
-  | ({
-      operation: "managed.window"
-      model: string
-    } & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never }))
 
-export interface ManagementProviderSettingsPreview {
-  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.window" | "model.remove" | "model.custom.save"
+export interface ManagementProviderSettingsStandardPreview {
+  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "model.remove" | "model.context" | "model.rename" | "model.custom.save"
   revision?: string
+  before?: { defaultModel: string; reasoningEffort: string }
+  modelDefaults?: {
+    catalog: { before: string; after: string }
+    selection: {
+      before: { model: string | null; reasoningEffort: string | null }
+      after: { model: string | null; reasoningEffort: string | null }
+    }
+  }
   warnings?: Array<{ code: string }>
   activation: string
   target?: {
@@ -806,23 +842,22 @@ export interface ManagementProviderSettingsPreview {
     baseUrl?: string
     model?: string | null
   }
-  provider?: {
+  provider?: string | {
     id: string
     displayName?: string
     name?: string
     model?: string
     baseUrl?: string
     mode?: string
+    supportsWebsockets?: boolean
     upstreamWireApi?: "responses" | "chat_completions"
     catalog?: string
     models?: ResponsesModelDefinition[]
     apiKeyChange?: boolean
   }
-  model?: { id: string; displayName: string; contextWindow?: number }
+  model?: { id: string; displayName: string; contextWindow?: number; maxContextWindow?: number }
+  displayName?: string
   providers?: string[]
-  conflicts?: boolean
-  windowConflict?: boolean
-  overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
   windowPercent?: number
   contextWindow?: number
@@ -835,6 +870,30 @@ export interface ManagementProviderSettingsPreview {
   }
   transport?: { scheme?: "http" | "https"; cleartext?: boolean }
 }
+
+export interface ProviderModelTemplateUpdatePreview extends Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "model"> {
+  operation: "model.template.update"
+  provider: string
+  model: string
+  source: ProviderModelTemplateSource
+  sourceModel: string
+  sections: ProviderModelTemplateSection[]
+  changes: Array<{ field: string; before: ProviderModelTemplateValue; after: ProviderModelTemplateValue }>
+  willChange: boolean
+}
+export type ProviderModelAdditionManagementPreview = Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "revision" | "activation" | "providers" | "willChange"> & import("./provider-model-additions.mjs").ProviderModelAdditionPreview & {
+  operation: "model.add"
+}
+export type ProviderModelRequestOptionsManagementPreview = Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "model" | "revision" | "activation" | "providers" | "willChange"> & import("./managed-provider-model-edit.mjs").ManagedProviderModelRequestOptionsPreview & {
+  operation: "model.request-options"
+}
+export interface ProviderWebSearchManagementPreview extends Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "before" | "effects"> {
+  operation: "provider.web-search"
+  provider: string
+  before: { mode: import("../runtime/provider-web-search.mjs").ProviderWebSearchMode | null }
+  mode: import("../runtime/provider-web-search.mjs").ProviderWebSearchMode | null
+}
+export type ManagementProviderSettingsPreview = ManagementProviderSettingsStandardPreview | ProviderModelTemplateUpdatePreview | ProviderModelAdditionManagementPreview | ProviderModelRequestOptionsManagementPreview | ProviderWebSearchManagementPreview
 
 export interface ManagementProviderSettingsPreviewResponse {
   preview: ManagementProviderSettingsPreview
@@ -850,14 +909,13 @@ export interface ManagementProviderSettingsMutationResponse {
   provider?: ManagementProviderSettingsPreview["provider"]
   model?: ManagementProviderSettingsPreview["model"]
   providers?: string[]
-  conflicts?: boolean
-  windowConflict?: boolean
-  overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
   windowPercent?: number
   contextWindow?: number
   effects?: Record<string, boolean | string[] | string | null>
   warnings?: Array<{ code: string; providerId?: string }>
+  configuration?: import("./primary-provider-management.mjs").PrimaryProviderRemovalResult["configuration"]
+  cleanup?: import("./primary-provider-management.mjs").PrimaryProviderRemovalResult["cleanup"]
   activation?: string
   auditStatus?: "recorded" | "degraded"
 }
@@ -870,20 +928,22 @@ export interface ManagementAccountSettingsResponse {
     defaultAccountId: string | null
     accounts: Array<{
       id: string
+      provider: string
       displayName: string
       email?: string
       phone?: string
       mode?: "switching" | "exclusive"
+      model: string | null
       default: boolean
     }>
   }
   clinePass: {
     configured: boolean
-    accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
+    accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
   deepseek: {
     configured: boolean
-    accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
+    accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
 }
 
@@ -896,7 +956,7 @@ export type ManagementAccountSettingsMutationInput =
       phone?: string
       mode?: "switching" | "exclusive"
       reconfigure?: boolean
-      apiKey: string
+      apiKey?: string
       confirmExclusiveConfigChange?: boolean
     }
   | { operation: "opencode.account.default"; accountId: string }
@@ -907,13 +967,14 @@ export type ManagementAccountSettingsMutationInput =
       accountId: string
       reconfigure?: boolean
       mode?: "switching" | "exclusive"
-      apiKey: string
+      apiKey?: string
       confirmExclusiveConfigChange?: boolean
     }
   | { operation: "deepseek.default" | "deepseek.remove" | "clp.default" | "clp.remove"; accountId: string }
 
 export interface ManagementAccountSettingsPreview {
   operation: string
+  revision?: string
   activation?: string
   account?: {
     id?: string
@@ -926,6 +987,8 @@ export interface ManagementAccountSettingsPreview {
   }
   provider?: { id?: string; name?: string }
   mode?: string
+  previousMode?: string
+  credentialAction?: "preserve" | "replace"
   model?: string
   status?: string
   willChange?: boolean
@@ -1063,6 +1126,8 @@ export interface TrafficLabel {
 }
 
 export interface TrafficExchangeSummary {
+  /** 本次响应及请求末尾的有界行为证据；不表示工具已执行成功。 */
+  activity?: import("../runtime/request-activity.mjs").RequestActivity | null
   requestPurpose?: "autoApprovalReview" | null
   reviewerThreadId?: string | null
   reviewerTurnId?: string | null
@@ -1101,7 +1166,7 @@ export interface TrafficExchangeSummary {
   upstreamProvider?: string
 }
 
-export interface TrafficListResponse {
+interface TrafficListCatalog {
   directory: string
   enabled: boolean
   retentionDays: number
@@ -1110,11 +1175,21 @@ export interface TrafficListResponse {
   session: string | null
   sessions: Array<{ session: string; createdAtMs: number }>
   generatedAt: string
+}
+
+export type TrafficListResponse = TrafficListCatalog & ({
+  indexStatus: "ready"
+  indexPending: boolean
   exchanges: TrafficExchangeSummary[]
   total: number
-  maximumOffset: number
   nextOffset: number | null
-}
+} | {
+  indexStatus: "building" | "unavailable"
+  errorCode: "traffic_index_building" | "traffic_index_limit" | "traffic_index_timeout"
+  exchanges: []
+  total: null
+  nextOffset: null
+})
 
 export type TrafficHeaderValue = string | string[]
 
@@ -1128,8 +1203,12 @@ export interface TrafficDebugStage {
 }
 
 export interface TrafficExchangeDetail {
+  activity?: TrafficExchangeSummary["activity"]
+  /** False when optional trace aggregation could not be completed within its budget. */
+  diagnosticsComplete: boolean
   continuation?: {
     scope: "same_writer_thread_turn"
+    complete: boolean
     next: { id: number; startedAtMs: number; gapMs: number; state: "completed" | "failed" | "incomplete" | "pending"; agentMessageObserved: boolean } | null
   }
   requestPurpose?: "autoApprovalReview" | null
@@ -1227,7 +1306,9 @@ export interface TrafficExchangeDetail {
   } | null
   tracePage: {
     offset: number
-    total: number
+    /** null means that a complete event-index snapshot is not yet available. */
+    total: number | null
+    complete: boolean
     previousOffset: number | null
     nextOffset: number | null
   }
@@ -1235,6 +1316,7 @@ export interface TrafficExchangeDetail {
 }
 
 export interface TrafficDetailResponse {
+  indexPending: boolean
   directory: string
   enabled: boolean
   retentionDays: number
@@ -1254,7 +1336,6 @@ export interface RelayManagedCaller {
   models: string[]; reasoning: RelayReasoning; model_reasoning?: Record<string, RelayModelReasoning>;
 }
 export interface RelayManagementSnapshot {
-  clineCatalog?: ClineRelayCatalogSnapshot;
   revision: string; enabled: boolean; maxConcurrency: number; callers: RelayManagedCaller[];
   usage: { observedAtMs: number; startAtMs: number; callers: Array<{
     callerId: string; keyId: string; lastRequestAtMs: number | null; requestCount: number; unsuccessfulRequestCount: number;

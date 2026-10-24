@@ -25,8 +25,8 @@ import {
 } from "./elapsed-duration.js";
 import {
   formatCodexProviderLabel,
-  formatModelDisplayName,
   formatServiceTier,
+  formatServiceTierSetting,
 } from "./provider-format.js";
 import {
   formatCompactMetricsValue,
@@ -35,7 +35,6 @@ import { missingFinalResponseText } from "./output-copy.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 import {
   formatCacheHitRate,
-  formatObservedTokens,
   formatObservedTotal,
   formatRequestCount,
   formatTokenCount,
@@ -165,6 +164,8 @@ type StartupStatus = Pick<
   | "modelProvider"
   | "effort"
   | "serviceTier"
+  | "serviceTierKnown"
+  | "effectiveServiceTier"
   | "approvalsReviewer"
   | "modelPending"
   | "effortPending"
@@ -250,7 +251,7 @@ export function createStartupPresentation(
           },
           {
             label: "模型",
-            value: `${formatModelDisplayName(status.model)}${pendingSuffix(status.modelPending)}`,
+            value: `${status.model}${pendingSuffix(status.modelPending)}`,
           },
           {
             label: "提供商",
@@ -262,9 +263,9 @@ export function createStartupPresentation(
           },
           {
             label: "速度",
-            value: `${status.threadId || status.fastModePending
-              ? formatServiceTier(status.serviceTier)
-              : "未知"}${pendingSuffix(status.fastModePending)}`,
+            value: status.threadId || status.fastModePending
+              ? formatServiceTierSetting(status)
+              : "未知",
           },
           {
             label: "协作模式",
@@ -368,7 +369,7 @@ export function createSubagentStartedPresentation(
     title: `子代理开始 · ${subagentTaskName(event.agentPath)}`,
     fields: [
       { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
-      { label: "模型设置", value: event.model ? formatModelDisplayName(event.model) : "未提供" },
+      { label: "模型设置", value: event.model || "未提供" },
       { label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort, "未提供") },
     ],
   };
@@ -381,7 +382,7 @@ export function createSubagentContactedPresentation(
     title: `子代理继续 · ${subagentTaskName(event.agentPath)}`,
     fields: [
       { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
-      { label: "模型设置", value: event.model ? formatModelDisplayName(event.model) : "未提供" },
+      { label: "模型设置", value: event.model || "未提供" },
       { label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort, "未提供") },
     ],
   };
@@ -393,7 +394,7 @@ export function createSubagentCompletedPresentation(
 ): LifecyclePresentation {
   const fields: LifecyclePresentationField[] = [];
   if (event.model) {
-    fields.push({ label: "模型", value: formatModelDisplayName(event.model) });
+    fields.push({ label: "模型", value: event.model });
   }
   if (event.modelProvider) {
     fields.push({
@@ -404,13 +405,6 @@ export function createSubagentCompletedPresentation(
   if (event.reasoningEffort) {
     fields.push({ label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort) });
   }
-  if (event.metricsStatus === "unavailable") {
-    fields.push({ label: "统计", value: "暂不可用" });
-    return {
-      title: `${subagentStatusLabel(event.status)} · ${subagentTaskName(event.agentPath)}`,
-      fields,
-    };
-  }
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
@@ -418,7 +412,7 @@ export function createSubagentCompletedPresentation(
     value: formatObservedTotal(event),
     fields: debug ? [
       ...(cachedInputTokens === null
-        ? [{ label: "输入", value: formatObservedTokens(event.inputTokens, event.requestCount, event.usageCoverage?.inputMissingRequestCount) }]
+        ? [{ label: "输入", value: formatTokenCount(event.inputTokens) }]
         : [
             {
               label: "缓存",
@@ -429,11 +423,11 @@ export function createSubagentCompletedPresentation(
               value: formatTokenCount(Math.max(0, event.inputTokens - cachedInputTokens)),
             },
           ]),
-      { label: "输出", value: formatObservedTokens(event.outputTokens, event.requestCount, event.usageCoverage?.outputMissingRequestCount) },
+      { label: "输出", value: formatTokenCount(event.outputTokens) },
       ...(event.reasoningOutputTokens > 0
         ? [{
             label: "其中推理输出",
-            value: formatObservedTokens(event.reasoningOutputTokens, event.requestCount, event.usageCoverage?.reasoningMissingRequestCount),
+            value: formatTokenCount(event.reasoningOutputTokens),
           }]
         : []),
       ...(cachedInputTokens === null
@@ -449,7 +443,7 @@ export function createSubagentCompletedPresentation(
   });
   return {
     title: `${subagentStatusLabel(event.status)} · ${subagentTaskName(event.agentPath)}`,
-    fields,
+    fields: visibleCompletionStatistics(fields),
   };
 }
 
@@ -492,6 +486,25 @@ function formatTurnErrorMessage(
       : "当前提供商凭据已失效，请通过 codexc setup 更新对应 Provider 的密钥或账户后重试。";
   }
   return formatOpenAiErrorMessage(value);
+}
+
+function formatCompletedServiceTier(event: Extract<OutputEvent, { type: "turn.completed" }>): string {
+  // Request tier is the display contract. A priority request may return default;
+  // never use response service_tier to replace or fill missing request evidence.
+  const summary = event.timing?.serviceTierSummary;
+  // Retained events may have a confirmed snapshot but predate tier metrics.
+  if (!summary || summary.requested.observedCount === 0) {
+    return event.serviceTier === undefined
+      ? "未知（请求档位未观测）"
+      : `${formatServiceTier(event.serviceTier)}（设置快照）`;
+  }
+  const { requestCount, requested } = summary;
+  // Once observations exist, never fill partial/mixed evidence with the snapshot.
+  if (requested.distinctCount > 1) return "多档位（请求档位）";
+  if (requestCount > 0 && requested.observedCount === requestCount && requested.value !== null) {
+    return formatServiceTier(requested.value);
+  }
+  return "未知（请求档位未完整观测）";
 }
 
 export function createTurnCompletedPresentation(
@@ -546,6 +559,9 @@ export function createTurnCompletedPresentation(
         value: capacity === null || capacity <= 0
           ? formatTokenCount(current)
           : `${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
+        ...((event.contextCompactionCount ?? 0) > 0
+          ? { subfields: [{ label: "压缩", value: `${event.contextCompactionCount} 次` }] }
+          : {}),
       },
     );
     if (
@@ -563,7 +579,7 @@ export function createTurnCompletedPresentation(
   if (event.model) {
     runFields.push({
       label: "模型",
-      value: `${formatModelDisplayName(event.model)} · ${formatReasoningEffort(event.effort)} · ${formatServiceTier(event.serviceTier)}`,
+      value: `${event.model} · ${formatReasoningEffort(event.effort)} · ${formatCompletedServiceTier(event)}`,
     });
     runFields.push({
       label: "提供商",
@@ -577,10 +593,10 @@ export function createTurnCompletedPresentation(
       });
     }
   }
-  if (event.contextCompactionCount !== undefined) {
+  if (!event.tokenUsage && (event.contextCompactionCount ?? 0) > 0) {
     sessionFields.push({
-      label: "其中上下文压缩",
-      value: `${event.contextCompactionCount} 次`,
+      title: "上下文",
+      fields: [{ label: "压缩", value: `${event.contextCompactionCount} 次` }],
     });
   }
   let accountHasResetTime = false;
@@ -646,8 +662,8 @@ export function createTurnCompletedPresentation(
   }
   if (event.timing?.reasoningRequestCount !== undefined) {
     runFields.push({
-      label: "含推理输出的请求",
-      value: `${event.timing.usageCoverage?.reasoningMissingRequestCount ? "至少 " : ""}${formatRequestCount(event.timing.reasoningRequestCount)} 次`,
+      label: "推理次数",
+      value: `${formatRequestCount(event.timing.reasoningRequestCount)} 次`,
     });
   }
   if (fallbackCacheField) {
@@ -660,14 +676,12 @@ export function createTurnCompletedPresentation(
     const cachedInputTokens = event.timing.requestCachedInputTokens;
     const reasoningOutputTokens = event.timing.reasoningTokens ?? 0;
     const outputTokens = event.timing.requestOutputTokens ?? 0;
-    const coverage = event.timing.usageCoverage;
-    const requestCount = event.timing.modelRequestCount;
     runFields.push({
       title: "Token",
-      value: formatObservedTotal({ inputTokens, outputTokens, requestCount, usageCoverage: coverage }),
+      value: formatObservedTotal({ inputTokens, outputTokens }),
       fields: debug ? [
         ...(cachedInputTokens === undefined
-          ? [{ label: "输入", value: formatObservedTokens(inputTokens, requestCount, coverage?.inputMissingRequestCount) }]
+          ? [{ label: "输入", value: formatTokenCount(inputTokens) }]
           : [
               {
                 label: "缓存",
@@ -680,12 +694,12 @@ export function createTurnCompletedPresentation(
             ]),
         {
           label: "输出",
-          value: formatObservedTokens(outputTokens, requestCount, coverage?.outputMissingRequestCount),
+          value: formatTokenCount(outputTokens),
         },
         ...(reasoningOutputTokens > 0
           ? [{
               label: "其中推理输出",
-              value: formatObservedTokens(reasoningOutputTokens, requestCount, coverage?.reasoningMissingRequestCount),
+              value: formatTokenCount(reasoningOutputTokens),
             }]
           : []),
         ...(cachedInputTokens === undefined
@@ -717,10 +731,15 @@ export function createTurnCompletedPresentation(
     value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs),
     fields: performanceFields(event.timing?.performance),
   });
-  if (isAutoApprovalReviewer(event.approvalsReviewer) && event.autoApprovalReview) {
+  if (event.runningSubagentCount !== undefined && event.runningSubagentCount > 0) {
+    runFields.push({ label: "后台子代理", value: `${event.runningSubagentCount} 个尚未结束` });
+  }
+  const hasRunReviews = isAutoApprovalReviewer(event.approvalsReviewer) && (event.autoApprovalReview?.total ?? 0) > 0;
+  if (hasRunReviews && event.autoApprovalReview) {
     runFields.push(autoApprovalReviewField(event.autoApprovalReview));
   }
-  if (isAutoApprovalReviewer(event.approvalsReviewer) && event.sessionAutoApprovalReview) {
+  if (hasRunReviews && event.sessionAutoApprovalReview
+    && event.sessionAutoApprovalReview.total > 0) {
     sessionFields.push(autoApprovalReviewField(event.sessionAutoApprovalReview));
   }
   if (event.taskAggregate) {
@@ -736,7 +755,7 @@ export function createTurnCompletedPresentation(
         value: formatObservedTotal(task),
         fields: debug ? [
           ...(task.cachedInputTokens === null
-            ? [{ label: "输入", value: formatObservedTokens(task.inputTokens, task.requestCount, task.usageCoverage?.inputMissingRequestCount) }]
+            ? [{ label: "输入", value: formatTokenCount(task.inputTokens) }]
             : [
                 {
                   label: "缓存",
@@ -749,11 +768,11 @@ export function createTurnCompletedPresentation(
                   ),
                 },
               ]),
-          { label: "输出", value: formatObservedTokens(task.outputTokens, task.requestCount, task.usageCoverage?.outputMissingRequestCount) },
+          { label: "输出", value: formatTokenCount(task.outputTokens) },
           ...(task.reasoningOutputTokens > 0
             ? [{
                 label: "其中推理输出",
-                value: formatObservedTokens(task.reasoningOutputTokens, task.requestCount, task.usageCoverage?.reasoningMissingRequestCount),
+                value: formatTokenCount(task.reasoningOutputTokens),
               }]
             : []),
           ...(task.cachedInputTokens === null
@@ -819,9 +838,32 @@ export function createTurnCompletedPresentation(
   ];
   return {
     title: `${event.background ? "后台任务" : "本次运行"} · ${event.missingFinalResponse ? "无最终回复" : turnStatusLabel(event.status)}`,
-    fields: runFields,
-    ...(sections.length > 0 ? { sections } : {}),
+    fields: visibleCompletionStatistics(runFields),
+    ...(sections.length > 0 ? { sections: sections.map(section => ({
+      ...section, fields: visibleCompletionStatistics(section.fields),
+    })).filter(section => section.fields.length > 0) } : {}),
   };
+}
+
+/** Only completion statistics are optional; identity, configuration and error fields retain their semantics. */
+function visibleCompletionStatistics(fields: readonly LifecyclePresentationField[]): LifecyclePresentationField[] {
+  const statistics = new Set([
+    "Token", "输入", "输出", "缓存", "无缓存", "其中推理输出", "模型请求", "推理次数",
+    "缓存命中率", "最近请求缓存命中率", "本轮耗时", "总耗时", "首 Token", "速度",
+    "OpenAI Credits", "压缩请求", "上下文压缩",
+  ]);
+  const hasValue = (label: string, value: string | undefined): boolean => !statistics.has(label)
+    || (value !== undefined && !["", "—", "未知", "未提供", "统计查询超时", "统计查询失败", "统计暂未就绪"].includes(value)
+      && Number.parseFloat(value) !== 0);
+  const leaf = (field: LifecyclePresentationLeafField): LifecyclePresentationLeafField[] => hasValue(field.label, field.value)
+    ? [{ ...field, ...(field.subfields ? { subfields: field.subfields.flatMap(leaf) } : {}) }] : [];
+  return fields.flatMap((field): LifecyclePresentationField[] => {
+    if (!("title" in field)) return leaf(field);
+    const children = visibleCompletionStatistics(field.fields);
+    if (!hasValue(field.title, field.value)) return children;
+    if (field.value === undefined && children.length === 0) return [];
+    return [{ ...field, fields: children }];
+  });
 }
 
 export function renderPlainLifecyclePresentation(
@@ -852,23 +894,12 @@ function autoApprovalReviewField(
   ] as const;
   return {
     label: "自动审批",
-    value: review.coverage === "complete"
-      ? `${review.total} 次（含子代理）`
-      : review.coverage === "partial"
-        ? `已记录 ${review.total} 次（含子代理）`
-        : review.total > 0
-          ? `至少 ${review.total} 次（含子代理）`
-          : "未知（含子代理）",
+    value: [`请求 ${review.total}`, ...outcomes.filter(([, count]) => count > 0)
+      .map(([label, count]) => `${label} ${count}`)].join(" · "),
     subfields: [
-      ...outcomes.filter(([, count]) => count > 0).map(([label, count]) => ({ label, value: `${count} 次` })),
-      ...(review.usage === undefined ? [] : [{ label: "已记录审查请求", value: `${formatRequestCount(review.usage.requestCount)} 次` }]),
       ...(review.usage === undefined ? [] : [{
-        label: "已记录审查 Token",
-        value: review.usage.inputTokens === null && review.usage.outputTokens === null
-          ? "未观测到用量"
-          : `${formatTokenCount((review.usage.inputTokens ?? 0) + (review.usage.outputTokens ?? 0))}${
-            review.usage.coverage === "partial" ? "（用量不完整）" : ""
-          }`,
+        label: "Token",
+        value: formatTokenCount((review.usage.inputTokens ?? 0) + (review.usage.outputTokens ?? 0)),
       }]),
     ],
   };
@@ -906,7 +937,7 @@ function formatStructuredField(field: LifecyclePresentationField, escapeLiterals
   ].join("\n");
 }
 
-function escapeLifecycleLiteral(value: string): string {
+export function escapeLifecycleLiteral(value: string): string {
   return value.replace(/[\\`*_~[\]()<>#+\-.!|{}]/gu, "\\$&");
 }
 
@@ -997,27 +1028,21 @@ function performanceFields(
 
 function requestOutcomeFields(summary: TurnTaskMetricsSummary): LifecyclePresentationField[] {
   const { completed, interrupted, failed, incomplete } = summary.requestOutcomes;
-  return [{
-    label: "请求结果",
-    value: `完成 ${formatRequestCount(completed)} · 中断 ${formatRequestCount(interrupted)} · 失败 ${formatRequestCount(failed)} · 不完整 ${formatRequestCount(incomplete)}`,
-  }];
+  const value = ([["完成", completed], ["中断", interrupted], ["失败", failed], ["不完整", incomplete]] as const)
+    .filter(([, count]) => count > 0).map(([label, count]) => `${label} ${formatRequestCount(count)}`).join(" · ");
+  return value ? [{ label: "请求结果", value }] : [];
 }
 
 function formatResponseUsage(usage: ResponseUsageSummary | null | undefined): string {
   if (!usage || usage.amount === null) return "未提供";
-  if (usage.missingRequestCount > 0) return `${usage.amount}（部分，${usage.missingRequestCount} 次请求未提供）`;
   return usage.amount;
 }
 
 function formatSessionExecutionTiming(event: Extract<OutputEvent, { type: "turn.completed" }>): string {
-  const timing = event.sessionTiming;
-  if (!timing) return event.sessionDurationMs === undefined ? "未提供" : formatElapsedDuration(event.sessionDurationMs);
-  const incomplete = !timing.historyComplete || timing.missingTurnCount > 0;
-  const value = timing.knownDurationMs === null ? "未提供"
-    : `${incomplete ? "已知累计 " : ""}${formatElapsedDuration(timing.knownDurationMs)}`;
-  const notes = [
-    ...(timing.missingTurnCount > 0 ? [`${timing.missingTurnCount} 轮耗时缺失`] : []),
-    ...(!timing.historyComplete ? ["历史未补齐"] : []),
-  ];
-  return notes.length === 0 ? value : `${value}（${notes.join("；")}）`;
+  const duration = event.sessionTiming?.knownDurationMs ?? event.sessionDurationMs;
+  if (duration !== undefined && duration !== null) return formatElapsedDuration(duration);
+  if (event.executionTimingStatus === "timeout") return "统计查询超时";
+  if (event.executionTimingStatus === "failed") return "统计查询失败";
+  if (event.executionTimingStatus === "notReady") return "统计暂未就绪";
+  return "未提供";
 }

@@ -133,18 +133,19 @@ function initializeWorkspaceRepository(workspaceDir, environment) {
   }
 }
 
-export function requireUserConfig(environment = process.env) {
+export function requireUserConfig(environment = process.env, { readOnly = false } = {}) {
   const result = locateUserConfig(environment);
   const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   prepareExistingUserConfig(
     result.configPath,
     result.dataDir,
     !explicitConfigFile,
+    readOnly,
   );
   return result;
 }
 
-function prepareExistingUserConfig(configPath, dataDir, manageDataDirectory) {
+function prepareExistingUserConfig(configPath, dataDir, manageDataDirectory, readOnly = false) {
   let configStatus;
   let parentStatus;
   try {
@@ -157,8 +158,10 @@ function prepareExistingUserConfig(configPath, dataDir, manageDataDirectory) {
     throw new Error("config.toml 必须是普通文件且不能是符号链接");
   }
   if (process.platform === "win32") {
-    if (manageDataDirectory) securePrivateDirectorySync(dataDir);
-    securePrivateFileSync(configPath);
+    if (!readOnly) {
+      if (manageDataDirectory) securePrivateDirectorySync(dataDir);
+      securePrivateFileSync(configPath);
+    }
     assertPrivateConfigAccessSync(configPath);
     return;
   }
@@ -171,6 +174,12 @@ function prepareExistingUserConfig(configPath, dataDir, manageDataDirectory) {
   }
   if (!parentStatus.isDirectory() || (parentStatus.mode & 0o022) !== 0) {
     throw new Error("config.toml 父目录权限不安全：不能允许组或其他用户写入");
+  }
+  if (readOnly) {
+    if ((configStatus.mode & 0o077) !== 0) {
+      throw new Error("config.toml 权限不安全：不能允许组或其他用户访问");
+    }
+    return;
   }
   if (manageDataDirectory) chmodSync(dataDir, 0o700);
   chmodSync(configPath, 0o600);

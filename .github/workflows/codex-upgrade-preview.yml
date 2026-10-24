@@ -36,7 +36,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22.13.0
+          node-version: 22.23.4
           cache: npm
 
       - name: Install dependencies
@@ -189,14 +189,31 @@ jobs:
           path: ${{ runner.temp }}/codex-upgrade-report
 
       - name: Apply validated upgrade patch
+        id: apply
         if: steps.existing.outputs.url == ''
         env:
           REPORT_DIRECTORY: ${{ runner.temp }}/codex-upgrade-report
         run: |
+          base_commit_file="$REPORT_DIRECTORY/base-commit.txt"
+          if [[ ! -f "$base_commit_file" ]]; then
+            echo "::error::升级产物缺少 base-commit.txt；请重新生成升级提案。"
+            exit 1
+          fi
+          if ! IFS= read -r base_commit < "$base_commit_file" || [[ ! "$base_commit" =~ ^[0-9a-f]{40}$ ]] || [[ "$(wc -c < "$base_commit_file")" -ne 41 ]]; then
+            echo "::error::升级产物的 base-commit.txt 格式无效；请重新生成升级提案。"
+            exit 1
+          fi
+          current_head="$(git rev-parse HEAD)"
+          if [[ "$current_head" != "$base_commit" ]]; then
+            echo "::error::升级产物基线 $base_commit 与当前 HEAD $current_head 不一致；请重新生成升级提案。"
+            exit 1
+          fi
           git apply --check "$REPORT_DIRECTORY/upgrade.patch"
           git apply "$REPORT_DIRECTORY/upgrade.patch"
+          echo "base_commit=$base_commit" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push proposal branch
+        id: commit
         if: steps.existing.outputs.url == ''
         env:
           BRANCH_NAME: automation/codex-upgrade-${{ needs.preview.outputs.version }}-${{ github.run_id }}
@@ -210,6 +227,8 @@ jobs:
           git commit -m "准备升级 Codex CLI 至 $CODEX_VERSION"
           gh auth setup-git
           git push --set-upstream origin "$BRANCH_NAME"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
 
       - name: Create draft pull request
         if: steps.existing.outputs.url == ''
@@ -222,6 +241,10 @@ jobs:
             这是由 Codex 正式版升级工作流生成的 Draft PR。
 
             自动阶段已经完成协议生成与静态一致性检查、类型检查、Lint 和构建。完整 Patch、协议影响、结构化结果与逐阶段日志保存在本次运行的 Artifact 中。
+
+            生成并应用 Patch 的基线提交：`${{ steps.apply.outputs.base_commit }}`
+            提案提交：`${{ steps.commit.outputs.commit }}`
+            提案结果树：`${{ steps.commit.outputs.tree }}`
 
             官方发布说明：${{ needs.preview.outputs.release_url }}
 

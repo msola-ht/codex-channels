@@ -6,6 +6,7 @@ import {
   removeDeepseekAccount,
   previewDeepseekAccountRemoval,
   setDeepseekDefaultAccount,
+  previewDeepseekDefaultAccount,
 } from "./deepseek-account-management.mjs";
 import { loadDeepseekAccounts, deepseekProviderId, validateDeepseekAccountId } from "../runtime/deepseek-accounts.mjs";
 import {
@@ -25,6 +26,7 @@ import {
 import {
   loadOpencodeGoAccounts,
   opencodeGoAccountDisplayName,
+  opencodeGoProviderId,
   readOpencodeGoAccountMarker,
 } from "../runtime/opencode-go-accounts.mjs";
 import { loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
@@ -47,12 +49,16 @@ export async function loadAccountSettingsResource(
         defaultAccountId: accounts.find((account) => account.default)?.id ?? null,
         accounts: accounts.map((account) => {
           const marker = readOpencodeGoAccountMarker(environment, account.id);
+          const providerId = opencodeGoProviderId(account.id);
+          const provider = providers.find((entry) => entry.provider === providerId);
           return {
             id: account.id,
+            provider: providerId,
             displayName: opencodeGoAccountDisplayName(account),
             ...(account.email === undefined ? {} : { email: account.email }),
             ...(account.phone === undefined ? {} : { phone: account.phone }),
             ...(marker?.mode === undefined ? {} : { mode: marker.mode }),
+            model: provider?.model ?? null,
             default: account.default === true,
           };
         }),
@@ -60,15 +66,17 @@ export async function loadAccountSettingsResource(
       clinePass: {
         configured: clineAccounts.length > 0,
         accounts: clineAccounts.map(account => {
-          const provider = providers.find(entry => entry.provider === clinePassProviderId(account.id));
-          return { ...account, mode: provider?.mode ?? null, model: provider?.model ?? null };
+          const providerId = clinePassProviderId(account.id);
+          const provider = providers.find(entry => entry.provider === providerId);
+          return { ...account, provider: providerId, mode: provider?.mode ?? null, model: provider?.model ?? null };
         }),
       },
       deepseek: {
         configured: dsAccounts.length > 0,
         accounts: dsAccounts.map((account) => {
-          const provider = providers.find((entry) => entry.provider === deepseekProviderId(account.id));
-          return { ...account, mode: provider?.mode ?? null, model: provider?.model ?? null };
+          const providerId = deepseekProviderId(account.id);
+          const provider = providers.find((entry) => entry.provider === providerId);
+          return { ...account, provider: providerId, mode: provider?.mode ?? null, model: provider?.model ?? null };
         }),
       },
     };
@@ -78,6 +86,14 @@ export async function loadAccountSettingsResource(
 }
 
 export function normalizeAccountSettingsMutation(input) {
+  const normalized = accountSettingsMutation(input);
+  if (Object.keys(input).some(key => key !== "confirmationToken" && !Object.hasOwn(normalized, key))) {
+    throw new ManagementOperationError("invalid_account_operation", "账户设置请求包含不支持的字段");
+  }
+  return normalized;
+}
+
+function accountSettingsMutation(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new ManagementOperationError("invalid_json", "账户设置操作正文必须是对象");
   }
@@ -158,9 +174,7 @@ export async function previewAccountSettingsMutation(input, environment) {
       case "deepseek.remove":
         return await previewDeepseekAccountRemoval(input.accountId, { environment });
       case "deepseek.default": {
-        const account = loadDeepseekAccounts(environment).find((entry) => entry.id === input.accountId);
-        if (!account) throw new ManagementOperationError("account-not-found", "DeepSeek 账户不存在");
-        return { operation: input.operation, account: { ...account, provider: deepseekProviderId(account.id) }, activation: "restart-all" };
+        return { ...previewDeepseekDefaultAccount(input.accountId, { environment }), operation: input.operation };
       }
       default:
         throw new ManagementOperationError("invalid_account_operation", "账户设置操作不受支持");
@@ -176,23 +190,23 @@ export async function applyAccountSettingsMutation(input, environment, confirmed
       case "opencode.account.configure":
         return await applyOpencodeGoAccountProvisioning(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "opencode.account.default":
-        return await applyOpencodeGoDefaultAccountChange(input.accountId, { environment });
+        return await applyOpencodeGoDefaultAccountChange(input.accountId, { environment, expectedRevision: confirmedPreview?.revision });
       case "opencode.account.stop":
         return await applyOpencodeGoAccountStop(input.accountId, { environment });
       case "opencode.account.remove":
-        return await applyOpencodeGoAccountRemoval(accountSettingsApplyInput(input), { environment });
+        return await applyOpencodeGoAccountRemoval(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "clp.configure":
         return await applyClinePassConfiguration(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "clp.default":
-        return await setClinePassDefaultAccount(input.accountId, { environment });
+        return await setClinePassDefaultAccount(input.accountId, { environment, expectedRevision: confirmedPreview?.revision });
       case "clp.remove":
-        return await removeClinePassConfiguration(accountSettingsApplyInput(input), { environment });
+        return await removeClinePassConfiguration(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "deepseek.configure":
         return await applyDeepseekAccountConfiguration(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "deepseek.default":
-        return await setDeepseekDefaultAccount(input.accountId, { environment });
+        return await setDeepseekDefaultAccount(input.accountId, { environment, expectedRevision: confirmedPreview?.revision });
       case "deepseek.remove":
-        return await removeDeepseekAccount(accountSettingsApplyInput(input), { environment });
+        return await removeDeepseekAccount(accountSettingsApplyInput(input, confirmedPreview), { environment });
       default:
         throw new ManagementOperationError("invalid_account_operation", "账户设置操作不受支持");
     }
@@ -206,14 +220,15 @@ export function accountSettingsApplyInput(input, confirmedPreview) {
     case "opencode.account.configure":
     case "clp.configure":
     case "deepseek.configure":
-      return confirmedPreview?.effects?.writesMainConfig === true
-        ? { ...input, confirmExclusiveConfigChange: true }
-        : input;
+      return { ...input,
+        ...(confirmedPreview?.revision === undefined ? {} : { expectedRevision: confirmedPreview.revision }),
+        ...(confirmedPreview?.effects?.writesMainConfig === true ? { confirmExclusiveConfigChange: true } : {}),
+      };
     case "opencode.account.remove":
-      return { ...input, confirmHistoryLoss: true };
+      return { ...input, confirmHistoryLoss: true, expectedRevision: confirmedPreview?.revision };
     case "clp.remove":
     case "deepseek.remove":
-      return { ...input, confirmRemove: true };
+      return { ...input, confirmRemove: true, expectedRevision: confirmedPreview?.revision };
     default:
       return input;
   }
@@ -223,10 +238,13 @@ export function redactAccountSettingsResult(result) {
   if (!result || typeof result !== "object") return { action: "completed" };
   return {
     ...(typeof result.action === "string" ? { action: result.action } : {}),
+    ...(typeof result.revision === "string" ? { revision: result.revision } : {}),
     ...(typeof result.operation === "string" ? { operation: result.operation } : {}),
     ...(result.account !== undefined ? { account: redactAccount(result.account) } : {}),
     ...(result.provider !== undefined ? { provider: redactProvider(result.provider) } : {}),
     ...(result.mode !== undefined ? { mode: result.mode } : {}),
+    ...(["switching", "exclusive"].includes(result.previousMode) ? { previousMode: result.previousMode } : {}),
+    ...(["preserve", "replace"].includes(result.credentialAction) ? { credentialAction: result.credentialAction } : {}),
     ...(result.model !== undefined ? { model: result.model } : {}),
     ...(result.status !== undefined ? { status: result.status } : {}),
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),

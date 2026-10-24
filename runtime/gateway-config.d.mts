@@ -82,6 +82,19 @@ export interface GatewayConfigDocument {
 }
 
 export class GatewayConfigConflictError extends Error {}
+/** The operation returned successfully; its result does not imply a file commit. */
+export class GatewayConfigLockReleaseError<T = unknown> extends Error {
+  constructor(result: T, cause: unknown);
+  readonly result: T;
+}
+/** The destination was atomically replaced before lock or staging cleanup failed. */
+export class GatewayConfigWriteCommittedError extends Error {
+  constructor(cause: unknown);
+}
+export class GatewayConfigValidationError extends Error {
+  constructor(message: string, issues: readonly { path: readonly PropertyKey[]; code: string }[]);
+  readonly issues: { path: PropertyKey[]; code: string }[];
+}
 
 export function parseGatewayConfig(content: string, source?: string): TomlTable;
 export const terminalIdentityPattern: RegExp;

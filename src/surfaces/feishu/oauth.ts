@@ -105,7 +105,7 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
       try {
         await this.outbox.deliverText(
           chatId,
-          "飞书授权处理失败，请确认应用已开通 application:application:self_manage 后重试；凭据未保存。",
+          "飞书授权处理失败，未能确认授权完成。请先检查应用权限和本地授权状态；如需清除本地凭据，请显式撤销授权。",
         );
       } catch {
         this.logger.warn(
@@ -362,12 +362,9 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
       scopes: result.token.scopes,
       grantedAt: now,
     };
-    try {
-      await this.tokens.set(nextToken);
-    } catch (error) {
-      await this.restoreToken(userOpenId, previousToken);
-      throw error;
-    }
+    // A failed write may have committed or detected another writer. Never restore
+    // an old value (or delete a new one) without ownership of the current record.
+    await this.tokens.set(nextToken);
     if (signal.aborted) {
       await this.restoreToken(userOpenId, previousToken);
       return;

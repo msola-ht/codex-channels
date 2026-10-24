@@ -1,5 +1,4 @@
 import { parseRelayModelId, relayModelId } from "../runtime/model-relay-model-id.mjs";
-import { readClineRelayCatalog, downloadClineRelayCatalog, saveClineRelayCatalog } from "./cline-relay-catalog.mjs";
 import { stringify } from "smol-toml";
 import { createHash, randomBytes } from "node:crypto";
 import { parseGatewayConfig, validateGatewayConfigDocument, withGatewayConfigLock } from "../runtime/gateway-config.mjs";
@@ -20,9 +19,11 @@ const invalid = message => new ConfigManagementError("relay_invalid", "relay", m
 const conflict = () => new ConfigManagementError("stale-revision", "relay", "Relay 配置或模型目录已变化，请刷新后重新预览");
 
 /** Read-only runtime snapshot, independent of provider catalogs and edit revisions. */
-export async function readRelayQueue(environment = process.env) {
+export async function readRelayQueue(environment = process.env, { signal } = {}) {
+  signal?.throwIfAborted();
   const { configPath } = locateUserConfig(environment);
-  const result = await queryModelRelayControl(modelRelayPaths(configPath).control, "queue");
+  const result = await queryModelRelayControl(modelRelayPaths(configPath).control, "queue", undefined, { signal });
+  signal?.throwIfAborted();
   return result.result === "queue" ? { state: "running", configurationValid: result.configurationValid, enabled: result.enabled,
     listening: result.listening, requests: result.requests }
     : { state: result.result === "not_running" ? "stopped" : "unknown" };
@@ -34,7 +35,6 @@ export function readRelayManagement(environment = process.env) {
   const content = readPrivateFileSync(configPath, 1024 * 1024);
   const document = validateGatewayConfigDocument(parseGatewayConfig(content));
   const config = document.model_relay ?? modelRelayConfigSchema.parse({});
-  const clineCatalog = readClineRelayCatalog(environment);
   const materialRevisions = [];
   const providers = listRelayProviderIds(environment).map(id => {
     try {
@@ -47,8 +47,8 @@ export function readRelayManagement(environment = process.env) {
       }) };
     } catch { return { id, available: false, protocols: [], reason: "provider_material_unavailable", models: [] }; }
   });
-  return { revision: createHash("sha256").update(content).update(JSON.stringify([providers, materialRevisions, clineCatalog])).digest("hex"),
-    clineCatalog, enabled: config.enabled, maxConcurrency: config.max_concurrency, providers, callers: safeCallers(config.callers) };
+  return { revision: createHash("sha256").update(content).update(JSON.stringify([providers, materialRevisions])).digest("hex"),
+    enabled: config.enabled, maxConcurrency: config.max_concurrency, providers, callers: safeCallers(config.callers) };
 }
 
 /** Listener settings do not depend on Provider catalog availability. */
@@ -108,19 +108,6 @@ export async function manageModelRelay(input, environment = process.env, options
     if (!parsed.success) throw invalid("逐模型思考策略包含无效模型、策略或超过数量限制");
     input = { ...input, modelReasoning: parsed.data };
   }
-  // Revision-bound confirmation must use exactly the catalog reviewed in its preview.
-  if (!options.preview && options.expectedRevision === undefined && readClineRelayCatalog(environment).status === "missing"
-    && (input.command === "providers" || ["issue", "edit"].includes(input.command) && input.models?.some(id => id.startsWith("clp-")))
-    && listRelayProviderIds(environment).some(id => input.command === "providers" ? id.startsWith("clp-") : input.models?.some(model => model.startsWith(`${id}/`)))) {
-    try {
-      const catalog = await downloadClineRelayCatalog(environment);
-      await withRelayManagementTransaction(environment, () => {
-        // Downloads must not block revocation. Another owner may have saved a catalog meanwhile.
-        if (readClineRelayCatalog(environment).status !== "missing") return {};
-        return { activation: "catalog_saved", catalog: saveClineRelayCatalog(catalog, environment) };
-      });
-    } catch { throw invalid("Cline 模型目录自动下载失败，请检查网络后重试，或在 WebUI 手动下载"); }
-  }
   if (["listen", "issue", "edit", "delete", "rotate", "disable", "enable"].includes(input.command)) {
     return withRelayManagementTransaction(environment, () => executeModelRelay(input, environment, options));
   }
@@ -131,7 +118,7 @@ async function executeModelRelay(input, environment, options) {
   const modelReasoning = input.modelReasoning;
   const { configPath } = locateUserConfig(environment);
   const endpoint = modelRelayPaths(configPath).control;
-  if (input.command === "status") return { ...await queryModelRelayControl(endpoint, "status"),
+  if (input.command === "status") return { ...await queryModelRelayControl(endpoint, "status", undefined, { signal: options.signal }),
     metricsNotice: "指标计数仅覆盖当前进程；accepted 仅表示接收队列确认，unconfirmed 可能已落盘，崩溃后的计数与样本不完整。" };
   assertPrivateConfigAccessSync(configPath);
   if (input.command === "providers") return { providers: readRelayManagement(environment).providers };

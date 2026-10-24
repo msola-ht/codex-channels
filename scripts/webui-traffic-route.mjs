@@ -13,9 +13,13 @@ import {
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import {
   TrafficDumpDebugError,
+  TrafficDumpReadError,
+  createTrafficReadContext,
+  createTrafficIndexStore,
   describeDumpExchange,
   describeDumpTrace,
-  dumpCatalog,
+  readDumpCatalog,
+  readDumpSession,
   selectFilesOfLabel,
   summarizeDumpFiles,
   writerSessionOf,
@@ -26,11 +30,23 @@ import { watchTrafficChanges } from "./webui-traffic-events.mjs";
 
 const defaultPageSize = 100;
 const maximumPageSize = 500;
-const maximumPageOffset = 50_000;
 /** 单段正文回传上限；浏览器可承受该体量，超出时响应里带截断标记。 */
 const maximumSectionBytes = 4 * 1_048_576;
 /** Trace 页同时受正文总量和记录数约束，避免大量空记录绕过字节上限。 */
 const maximumTracePageSize = 100;
+const maximumActiveReads = 2;
+const activeReads = new Set();
+const indexStores = new Map();
+
+/** 服务先发停止信号，再等待其全部读取释放真实文件资源。 */
+export async function waitForTrafficReads(signal) {
+  await Promise.all([...activeReads].filter(read => read.signal === signal).map(read => read.done));
+  const store = indexStores.get(signal);
+  if (store) {
+    await store.close();
+    indexStores.delete(signal);
+  }
+}
 
 export function routeTrafficEvents({ environment, request, response, url, state }) {
   if (!isLoopbackAddress(request.socket.remoteAddress)) {
@@ -57,22 +73,67 @@ export function routeTrafficEvents({ environment, request, response, url, state 
   openQueueStream(state, response, (signal, send) => watchTrafficChanges(directory, scope, signal, send));
 }
 
-export async function routeTrafficApi({ apiPath, environment, request, response, url }) {
+export async function routeTrafficApi({ apiPath, environment, request, response, url, signal }) {
   if (!["/traffic", "/traffic/exchange", "/traffic/trace"].includes(apiPath)) return false;
   if (!isLoopbackAddress(request.socket.remoteAddress)) {
     throw new ApiError(503, "traffic_unavailable", "调用记录查看只允许回环访问");
   }
+  if (activeReads.size >= maximumActiveReads) throw new ApiError(429, "traffic_read_busy", "调用记录读取忙，请稍后重试");
+  const controller = new AbortController();
+  const cancel = () => controller.abort(new TrafficDumpReadError("traffic_read_cancelled", "调用记录读取已取消"));
+  const disconnected = () => { if (!response.writableFinished) cancel(); };
+  request.once("aborted", cancel);
+  response.once("close", disconnected);
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted || request.aborted || response.destroyed) cancel();
+  const timer = setTimeout(() => controller.abort(new TrafficDumpReadError("traffic_read_timeout", "调用记录读取超过 10 秒期限，请缩小批次范围")), 10_000);
+  timer.unref();
+  const context = createTrafficReadContext(controller.signal);
+  let indexes = indexStores.get(signal);
+  if (!indexes) { indexes = createTrafficIndexStore(signal); indexStores.set(signal, indexes); }
+  context.indexes = indexes;
+  let release;
+  const read = { signal, done: new Promise(resolveDone => { release = resolveDone; }) };
+  activeReads.add(read);
+  try {
+    context.check();
+    return await readTrafficApi({ apiPath, environment, response, url, context });
+  } catch (cause) {
+    const error = controller.signal.aborted ? controller.signal.reason : cause;
+    if (error instanceof ApiError) throw error;
+    if (error instanceof TrafficDumpReadError || error instanceof TrafficDumpDebugError) {
+      throw new ApiError(error.code === "invalid_parameter" ? 400 : error.code === "traffic_read_timeout" ? 504 : 503, error.code, error.message);
+    }
+    throw new ApiError(503, "traffic_unavailable", "调用记录不可读取：文件缺失、损坏或已被替换，请刷新后重试");
+  } finally {
+    // 内层迭代器等待流与文件句柄关闭之后才进入此处，不提前释放名额。
+    clearTimeout(timer);
+    request.off("aborted", cancel);
+    response.off("close", disconnected);
+    signal?.removeEventListener("abort", cancel);
+    activeReads.delete(read);
+    release();
+  }
+}
+
+async function readTrafficApi({ apiPath, environment, response, url, context }) {
+  assertParameters(url, apiPath === "/traffic" ? ["label", "limit", "offset", "session"] : ["id", "label", "session", "traceOffset"]);
   const located = locateOptionalUserConfig(environment);
   const directory = join(located?.dataDir ?? userDataDir(environment), "traffic");
   let catalog;
-  try {
-    catalog = dumpCatalog(directory);
-  } catch (error) {
-    throw new ApiError(
-      503,
-      "traffic_unsupported_version",
-      error instanceof Error ? error.message : "模型调用记录版本无效",
-    );
+  if (apiPath !== "/traffic" && url.searchParams.has("label") && url.searchParams.has("session")) {
+    const labels = url.searchParams.getAll("label");
+    const sessions = url.searchParams.getAll("session");
+    if (labels.length !== 1 || sessions.length !== 1) throw new ApiError(400, "unsupported_parameter", "label 与 session 只能出现一次");
+    let path;
+    try { path = await readDumpSession(directory, labels[0], sessions[0], context); }
+    catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      throw new ApiError(404, "traffic_session_not_found", "关联调用记录不可用：批次尚未写入、写入失败或已被清理；不会匹配其他请求");
+    }
+    catalog = { files: [path], labels: [{ label: labels[0] }], sessions: [] };
+  } else {
+    catalog = await readDumpCatalog(directory, context);
   }
   const labels = catalog.labels;
   if (apiPath !== "/traffic" && url.searchParams.has("session") && labels.length === 0) {
@@ -87,33 +148,35 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
   }
   const dump = dumpSettings(environment);
   if (apiPath === "/traffic") {
-    assertParameters(url, ["label", "limit", "offset", "session"]);
     const label = url.searchParams.has("label") ? readLabel(url, labels) : null;
-    const { files, session } = readSessionFiles(url, catalog.files, label);
-    const page = await summarizeDumpFiles(files, {
-      newestFirst: true,
-      limit: readInteger(url, "limit", defaultPageSize, 1, maximumPageSize),
-      offset: readInteger(url, "offset", 0, 0, maximumPageOffset),
-    });
-    sendJson(response, 200, {
+    const { files, session } = readSessionFiles(url, catalog.files, label, context);
+    const limit = readInteger(url, "limit", defaultPageSize, 1, maximumPageSize);
+    const offset = readInteger(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER);
+    const selection = {
       directory,
       enabled: dump.enabled,
       retentionDays: dump.retentionDays,
       generatedAt: new Date().toISOString(),
       label,
       labels,
-      maximumOffset: maximumPageOffset,
       session,
       sessions: catalog.sessions.filter((entry) => label === null || entry.label === label)
         .map(({ session, createdAtMs }) => ({ session, createdAtMs })).reverse(),
-      ...page,
-      nextOffset: page.nextOffset !== null && page.nextOffset <= maximumPageOffset
-        ? page.nextOffset
-        : null,
-    });
+    };
+    let page;
+    try { page = await summarizeDumpFiles(files, { newestFirst: true, limit, offset, context }); }
+    catch (error) {
+      context.check();
+      if (!(error instanceof TrafficDumpReadError) || !["traffic_index_building", "traffic_index_limit", "traffic_index_timeout"].includes(error.code)) throw error;
+      const building = error.code === "traffic_index_building";
+      sendJson(response, building ? 202 : 200, { ...selection, indexStatus: building ? "building" : "unavailable",
+        errorCode: error.code, exchanges: [], total: null, nextOffset: null });
+      return true;
+    }
+    context.check();
+    sendJson(response, 200, { ...selection, indexStatus: "ready", indexPending: context.indexPending === true, ...page });
     return true;
   }
-  assertParameters(url, ["id", "label", "session", "traceOffset"]);
   const label = readLabel(url, labels);
   const id = readInteger(url, "id", undefined, 1, Number.MAX_SAFE_INTEGER);
   const traceOffset = readInteger(
@@ -123,24 +186,23 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     0,
     Number.MAX_SAFE_INTEGER,
   );
-  const { files } = readSessionFiles(url, catalog.files, label);
+  const { files } = readSessionFiles(url, catalog.files, label, context);
   if (files.length !== 1) {
     throw new ApiError(400, "missing_parameter", "查看模型调用明细需指定 session");
   }
-  const session = writerSessionOf(files[0]);
+  const session = writerSessionOf(files[0], context);
   const describe = apiPath === "/traffic/trace" ? describeDumpTrace : describeDumpExchange;
   const exchange = await describe(files, id, {
     traceOffset,
     maxTracePageSize: maximumTracePageSize,
     maxSectionBytes: maximumSectionBytes,
-  }).catch(error => {
-    if (error instanceof TrafficDumpDebugError) throw new ApiError(503, error.code, error.message);
-    throw error;
+    context,
   });
   if (exchange === null) {
     throw new ApiError(404, "traffic_exchange_not_found", `没有找到关联模型调用 #${id}：记录可能尚未写入、写入失败或已被清理；不会匹配其他请求`);
   }
-  if (traceOffset > 0 && traceOffset >= exchange.tracePage.total) {
+  context.check();
+  if (traceOffset > 0 && exchange.tracePage.total !== null && traceOffset >= exchange.tracePage.total) {
     throw new ApiError(400, "invalid_parameter", "traceOffset 超出允许范围");
   }
   sendJson(response, 200, {
@@ -148,6 +210,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     enabled: dump.enabled,
     retentionDays: dump.retentionDays,
     exchange,
+    indexPending: context.indexPending === true,
     generatedAt: new Date().toISOString(),
     label,
     session,
@@ -194,15 +257,15 @@ function readLabel(url, labels) {
   return label;
 }
 
-function readSessionFiles(url, catalogFiles, label) {
+function readSessionFiles(url, catalogFiles, label, context) {
   const values = url.searchParams.getAll("session");
   if (values.length > 1) {
     throw new ApiError(400, "unsupported_parameter", "session 只能出现一次");
   }
   const requested = values[0];
   const files = label === null
-    ? catalogFiles.filter((file) => requested === undefined || writerSessionOf(file) === requested)
-    : selectFilesOfLabel(catalogFiles, label, requested);
+    ? catalogFiles.filter((file) => requested === undefined || writerSessionOf(file, context) === requested)
+    : selectFilesOfLabel(catalogFiles, label, requested, context);
   if (files.length === 0) {
     throw new ApiError(
       404,

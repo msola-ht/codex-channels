@@ -15,7 +15,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 
 | 用途 | 本地目录 | 来源仓库 | 当前基线 |
 | --- | --- | --- | --- |
-| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.163.0` | `openai/codex` | `rust-v0.163.0`，提交 `83086188ae0614bd882818ff1aa23f3194962012` |
+| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.164.0` | `openai/codex` | `rust-v0.164.0`，提交 `6aaac694803004a63c6f393d153c96d22521a6b9` |
 | 微信 ClawBot HTTP、消息和媒体合同 | `upstream/openclaw-weixin` | `Tencent/openclaw-weixin` | `v2.4.9`，提交 `43675b66551d12d6853155a7869a50fb12a18a1e` |
 | 飞书官方 Node SDK | `upstream/larksuite-node-sdk-1.75.0` | `larksuite/node-sdk` | `@larksuiteoapi/node-sdk@1.75.0`，公开源码提交 `e34a66f0d20935ee77f94909d16d93292d58b6c7`；发布包核对边界见飞书资料索引 |
 | 飞书官方 OpenClaw 插件参考 | `upstream/openclaw-lark` | `larksuite/openclaw-lark` | 提交 `dde0be3680d6fd5443cab426c8f4b3216266346a` |
@@ -24,10 +24,28 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 编排、授权、卡片、媒体和错误处理，不替代官方 SDK。微信未发布独立 SDK，固定版本官方插件的
 源码、类型和测试是协议研究基线，真实合同仍以本项目的脱敏探针结果为准。
 
-本机 `upstream/openai-codex-0.163.0` 已核对为上述固定提交，工作树干净。
+本机 `upstream/openai-codex-0.164.0` 已核对为上述固定提交，工作树干净。
 其他机器缺少该目录时使用固定 Tag 链接，不能拿旧副本冒充当前基线。
 
-## Codex 0.163.0 同步记录
+## Codex 0.164.0 同步记录
+
+已按授权把官方 `rust-v0.164.0` 完整源码及随仓文档同步到独立目录
+`upstream/openai-codex-0.164.0`，固定提交
+`6aaac694803004a63c6f393d153c96d22521a6b9`，核对时工作树干净。
+官方 Release 发布于 2026-10-23 04:48:10 UTC，非 Draft、非 Pre-release。
+生成协议、公开 CLI 合同和当前源码开发基线已同步为 `0.164.0`；旧 `0.163.0` 目录保留为历史比较来源。
+本轮未替换全局 CLI 或重启、部署运行服务，源码基线不代表正在运行的共享服务版本。
+
+- [正式 Release](https://github.com/openai/codex/releases/tag/rust-v0.164.0)。
+- [固定版 App Server 文档](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/app-server/README.md)：本地对应同名路径；与 `0.163.0` 内容相同，不能因此推断协议未变。
+- [固定版协议定义](https://github.com/openai/codex/tree/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/app-server-protocol/src)。
+- [升级决策](codex-cli-upgrade-decisions.md#01640-升级决策)：采用范围、关联业务适配和验收限制。
+
+比较起点为此前固定的 `0.163.0`。本地两份固定源码可完整比较，不依赖 GitHub Compare API
+最多返回 300 个文件的列表。实验协议与公开命令合同已由隔离安装的精确目标 CLI 重新生成；
+生成结构不自动扩大 Gateway 支持范围，行为观察与未验证边界以升级决策及支持矩阵为准。
+
+## 历史比较来源：Codex 0.163.0
 
 已按授权将官方 `rust-v0.163.0` 的完整源码及随仓文档同步到独立目录
 `upstream/openai-codex-0.163.0`，固定提交
@@ -73,14 +91,11 @@ TTFT 参考 `internal/runtime/executor/helps/responses_ttft_helpers.go`、`chat_
 
 ## Cline 模型目录来源
 
-Relay 与 CLP Codex 目录共用下载器读取 [Cline 官方模型文件](https://github.com/cline/cline/blob/c269dbb7f97256d53d4aedabb6c245b9ec54b1b6/sdk/packages/llms/src/catalog/catalog.generated.ts)，
-首次解析格式审查基线为 `c269dbb7f97256d53d4aedabb6c245b9ec54b1b6`，未建立本地源码仓库。
-同时核对该提交的 `catalog-cline-recommended.ts`、`scripts/generate-models.ts` 和共享 `reasoning-options.ts`；输入类型映射核对同一提交的 `providers/model-capabilities.ts` 与 `catalog/catalog-live.ts`。
-思考参数映射另核对同一提交 `providers/routing/portable-reasoning.ts`、`providers/routing/anthropic-compatible.ts`、`providers/routing/provider-option-rules.ts`、`providers/vendors/cline.ts` 及相邻测试；Cline/Cline Pass 共用 `cline` SDK 适配器，通用关闭请求使用 `reasoning.enabled=false`；本项目保留精确 Flash 原有的 `reasoning.effort=none` 默认映射，由独立 Relay 的逐模型策略显式选择其他关闭字段。锁定源码证明该字段被适配器保留，不证明当前云端内部推理关闭。历史记录显示旧 `reasoning.effort=none` 曾返回零推理 Token，实际路由变更后仍返回推理；2026-10-15 三次受限实测中，新字段不返回思考正文但仍报告推理 Token，观察条件与限制见 [CLP 文档](cline-pass.md)。锁定依赖 `@ai-sdk/openai-compatible@3.0.37` 的 [Chat 出站映射](https://github.com/vercel/ai/blob/%40ai-sdk%2Fopenai-compatible%403.0.37/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts)将指定等级序列化为 `reasoning_effort`；Flash 非关闭等级仍保留既有映射，不据此复制其他原生提供商适配器。
-此处是可由用户显式更新的模型元数据，不是 Codex 协议基线；每次下载记录实际 SHA，不加载上游代码。
-开关启用语义另核对本机目录记录的提交 `cd80a20e96481f5f5d413789f6847accf846487b`：`providers/routing/provider-option-rules.ts` 的 Cline 规则调用 `providers/routing/anthropic-compatible.ts` 中的 `buildGatewayReasoningOptions`，保留显式 `enabled: true/false`。目录中的 `toggle` 投影为 Codex `none/enabled`，不虚构上游思考等级；该投影不更改独立 Relay 的参数保留合同。
-下载入口为 `runtime/cline-relay-catalog-update.mjs`，共用读取入口为 `runtime/cline-relay-catalog.mjs`；
-Relay 更新和回退见[Relay 模型设置](provider-api-relay-development.md#clp-转发模型目录与设置)；CLP Codex 目录由独立的[共享目录更新入口](cline-pass.md)显式生成，双方不隐式覆盖彼此目录。
+CLP 不再使用 Cline 官方生成目录作为模型名单或能力来源。固定 DS 模型由仓库 `runtime/model-catalog-deepseek.json` 和 `provider-model-catalog.json` 的明确映射生成，入口为 `scripts/provider-model-catalog.mjs`；其他模型通过统一的按 ID 添加入口独立声明或继承本地快照。渠道和 Relay 共用受管目录；旧独立 Relay 文件及 Cline 来源记录保留，不自动迁移或删除，见[CLP 配置与恢复](cline-pass.md)。
+
+Cline 官方 SDK 仍是 Chat 参数语义的参考，而非模型能力验收结论。曾核对提交 `c269dbb7f97256d53d4aedabb6c245b9ec54b1b6` 的 `providers/routing/portable-reasoning.ts`、`anthropic-compatible.ts`、`provider-option-rules.ts` 和 `providers/vendors/cline.ts`。锁定的 `@ai-sdk/openai-compatible@3.0.37` 将指定等级序列化为 `reasoning_effort`；通用开关使用 `reasoning.enabled`。另核对提交 `cd80a20e96481f5f5d413789f6847accf846487b` 中保留显式 `enabled: true/false` 的规则。手填 `none/enabled` 仅用于 CLP 明确声明的开关能力，不虚构其他等级。
+
+上述源码证明请求字段被适配器保留，不证明云端停止内部推理。Flash 请求格式由保存的 `cline_request_profile` 明确选择；未保存时仅精确原 Flash ID 使用历史默认映射。实际路由、思考正文和推理 Token 的受限观察及其限制见[CLP 文档](cline-pass.md)。
 
 ### CPAMP 指标展示参考
 
@@ -106,7 +121,7 @@ Relay 更新和回退见[Relay 模型设置](provider-api-relay-development.md#c
 新工作区没有 `upstream/` 时，按当前锁定基线显式克隆：
 
 ```text
-git clone --depth 1 --branch rust-v0.163.0 https://github.com/openai/codex.git upstream/openai-codex-0.163.0
+git clone --depth 1 --branch rust-v0.164.0 https://github.com/openai/codex.git upstream/openai-codex-0.164.0
 git clone --branch v2.4.9 https://github.com/Tencent/openclaw-weixin.git upstream/openclaw-weixin
 git clone https://github.com/larksuite/node-sdk.git upstream/larksuite-node-sdk-1.75.0
 git -C upstream/larksuite-node-sdk-1.75.0 checkout e34a66f0d20935ee77f94909d16d93292d58b6c7

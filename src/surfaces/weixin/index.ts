@@ -22,23 +22,25 @@ export {
   type WeixinUpdatesCursorStore,
 } from "./updates-cursor-store.js";
 export {
-  WeixinProtocolError,
   createWeixinProtocolClient,
   type CreateWeixinProtocolClientOptions,
-  type WeixinAudioReference,
-  type WeixinFileReference,
   type WeixinFileSendProtocolClient,
-  type WeixinIgnoredMessageReason,
-  type WeixinImageReference,
   type WeixinImageSendProtocolClient,
-  type WeixinInboundMessage,
   type WeixinLifecycleProtocolClient,
   type WeixinProtocolClient,
-  type WeixinProtocolErrorCode,
   type WeixinRuntimeProtocolClient,
-  type WeixinUpdatesBatch,
   maximumWeixinOutboundFileBytes,
 } from "./protocol-client.js";
+export {
+  WeixinProtocolError,
+  type WeixinAudioReference,
+  type WeixinFileReference,
+  type WeixinIgnoredMessageReason,
+  type WeixinImageReference,
+  type WeixinInboundMessage,
+  type WeixinProtocolErrorCode,
+  type WeixinUpdatesBatch,
+} from "./protocol-types.js";
 export {
   maximumWeixinImageBytes,
   WeixinImageDownloadError,

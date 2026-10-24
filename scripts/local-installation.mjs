@@ -4,18 +4,20 @@ import { DatabaseSync } from "node:sqlite";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { appServerSocketAcceptsWebSocket, inspectAppServerSupervisorState, sameAppServerTopology } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { serviceCommandTarget, serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { loadConfigDocument } from "../dist/config/index.js";
 import { assertSessionDisplayCacheSchema, sessionDisplayCacheSchemaVersion } from "../dist/storage/index.js";
-import { validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
+import { modelRequestMetricsSchemaVersion } from "../dist/observability/index.js";
+import { inspectMetricsDatabase, validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
 import { validateStateDatabaseStructure } from "./state-database.mjs";
 import { requireUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
 
 export function inspectGatewayConfiguration(environment = process.env) {
-  const { configPath } = requireUserConfig(environment);
+  const { configPath } = requireUserConfig(environment, { readOnly: true });
   loadConfigDocument(readFileSync(configPath, "utf8"), dirname(configPath), {
     environment,
     detectSystemProxy: true,
@@ -31,6 +33,19 @@ export function inspectDatabases(environment = process.env) {
     throw new Error("会话展示缓存版本不兼容；请停止服务并备份后重建缓存");
   }
   return { state, metrics, sessionDisplayCache };
+}
+
+// Update planning is read-only. Runtime and service restoration continue to use
+// inspectDatabases, which accepts only the current schema.
+export async function inspectDatabasesForUpdate(environment = process.env) {
+  const metrics = inspectMetricsDatabase(environment);
+  if (!metrics.exists || ![31, 32, 33, 34].includes(metrics.schemaVersion) || modelRequestMetricsSchemaVersion !== 35) return inspectDatabases(environment);
+  const state = validateStateDatabaseStructure(environment);
+  const sessionDisplayCache = inspectSessionDisplayCache(environment);
+  if (!sessionDisplayCache.compatible) throw new Error("会话展示缓存版本不兼容；请停止服务并备份后重建缓存");
+  const { inspectMetricsUpgrade } = await import("./metrics-database-upgrade.mjs");
+  const metricsUpgrade = await inspectMetricsUpgrade(metrics.databasePath);
+  return { state, metrics, sessionDisplayCache, metricsUpgrade };
 }
 
 export function inspectSessionDisplayCache(environment = process.env) {
@@ -111,7 +126,7 @@ function serviceDefinitionContext(environment, platform) {
   }
   if (platform === "win32") {
     return {
-      definitionsDirectory: join(requireUserConfig(environment).dataDir, "services"),
+      definitionsDirectory: join(requireUserConfig(environment, { readOnly: true }).dataDir, "services"),
       identifierKey: "windows",
     };
   }
@@ -128,7 +143,7 @@ export async function waitForCoreServiceTarget(
   }
   const requiresAppServer = target === "app-server" || target === "all";
   const requiresGateway = target === "gateway" || target === "all";
-  const { configPath, dataDir } = requireUserConfig(environment);
+  const { configPath, dataDir } = requireUserConfig(environment, { readOnly: true });
   const document = readGatewayConfig(configPath);
   const descriptor = resolveAppServerRuntime(document, dataDir, environment);
   const timeoutMs = options.timeoutMs ?? defaultCoreServiceReadinessTimeoutMs;
@@ -141,7 +156,7 @@ export async function waitForCoreServiceTarget(
   const inspectSupervisorState = options.inspectSupervisorState
     ?? inspectAppServerSupervisorState;
   const socketHealthy = options.socketHealthy ?? (socketPath => appServerSocketAcceptsWebSocket(socketPath,
-    { ...environment, CODEX_BINARY: document.codex?.binary ?? environment.CODEX_BINARY ?? "codex" }));
+    { ...environment, CODEX_BINARY: effectiveCodexBinary(document.codex?.binary ?? "codex", environment, dataDir) }));
   const gatewayHealthy = options.gatewayHealthy ?? gatewayOwnerIsReady;
   const deadline = now() + timeoutMs;
   let healthySince;
@@ -214,7 +229,7 @@ export async function waitForCoreServiceTarget(
 }
 
 function resolveSessionDisplayCachePath(environment) {
-  const { configPath, dataDir } = requireUserConfig(environment);
+  const { configPath, dataDir } = requireUserConfig(environment, { readOnly: true });
   const document = readGatewayConfig(configPath);
   const storage = isRecord(document.storage) ? document.storage : {};
   const databasePath = resolveConfiguredPath(

@@ -12,6 +12,7 @@ import { parse } from "smol-toml";
 
 import { createDoctorReport, createDoctorTextRenderer } from "./doctor-output.mjs";
 import {
+  effectiveCodexBinary,
   executableInvocation,
   resolveExecutable,
   resolveOptionalExecutable,
@@ -82,8 +83,8 @@ const requiredAppServerVersion = codexPackageVersion(protocolMetadata.codexCli);
 record("Codex Connect", true, `${packageMetadata.name}@${packageMetadata.version}`);
 record(
   "Node.js",
-  versionAtLeast(process.versions.node, "22.13.0"),
-  `${process.version}（要求 >=22.13.0）`,
+  versionAtLeast(process.versions.node, "22.23.4"),
+  `${process.version}（要求 >=22.23.4）`,
 );
 if (process.platform === "linux") {
   const bubblewrap = resolveOptionalExecutable("bwrap");
@@ -381,7 +382,7 @@ if (document) {
   }
 
   setSection("Codex 与 App Server");
-  const codexCommand = stringValue(codex.binary) || "codex";
+  const codexCommand = effectiveCodexBinary(codex.binary ?? "codex", process.env, dataDir);
   let codexBinary;
   try {
     codexBinary = resolveExecutable(codexCommand);

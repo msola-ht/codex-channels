@@ -5,7 +5,7 @@ import type {
 } from "../application/index.js";
 
 import { toStructuredMarkdownList } from "./markdown-list.js";
-import { formatDisplayedProvider, formatModelDisplayName } from "./provider-format.js";
+import { formatDisplayedProvider } from "./provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
 const maximumSessionEntries = 20;
@@ -29,7 +29,7 @@ export function formatConversationSessions(
     `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${result.view.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
-        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${formatModelDisplayName(session.model)}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${formatReasoningEffort(session.reasoningEffort)}` : ""}${session.modelProvider ? ` · Provider：${formatDisplayedProvider(session.modelProvider)}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
+        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${formatReasoningEffort(session.reasoningEffort)}` : ""}${session.modelProvider ? ` · Provider：${formatDisplayedProvider(session.modelProvider)}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
     ...(hiddenCount > 0
       ? [
@@ -202,8 +202,11 @@ export function formatConversationOccupancy(
       ].join("\n"));
     case "unidentifiable":
       return toStructuredMarkdownList([
-        "无法识别占用 Codex Session 的进程（当前平台不支持进程诊断）。",
-        "请关闭占用该 Session 的 Codex 客户端，或重启 App Server 服务后等待自动恢复。",
+        release.reason === "unsupported-platform"
+          ? "当前平台尚不支持 Session 持锁进程诊断，无法执行释放占用。"
+          : "Session 持锁进程诊断未能取得可靠结果，未执行释放占用。",
+        "检测到锁文件不代表 Session 仍被占用；当前占用状态尚未确认。",
+        `请先通过 ${formatCommand("/status")} 和 App Server 日志确认故障；此结果不表示需要结束进程或重启服务。`,
         `Session ID：${release.threadId}`,
       ].join("\n"));
   }

@@ -4,6 +4,6 @@ export class ModelRelayControl {
   changed(): void;
   close(): Promise<void>;
 }
-export function queryModelRelayControl(path: string, operation: "apply" | "status" | "queue", digest?: string): Promise<Record<string, unknown>>;
+export function queryModelRelayControl(path: string, operation: "apply" | "status" | "queue", digest?: string, options?: { signal?: AbortSignal }): Promise<Record<string, unknown>>;
 
 export function watchRelayChanges(path: string, signal: AbortSignal, receive: (type: "changed" | "heartbeat") => void): Promise<void>;

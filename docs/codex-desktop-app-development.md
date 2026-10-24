@@ -1,15 +1,20 @@
 # Codex Desktop App 共享 App Server
 
+本页维护共享连接的现行设计、安全合同和平台支持边界。逐项实机结果与待补证项由
+[跨平台验收与交接](codex-desktop-app-acceptance.md)维护；本页只引用影响设计和支持结论的证据。
+
 ## 当前结论
 
 目标不是接入 Codex Remote Control，也不是让手机或另一台设备通过配对码控制本机。目标是让同一
 台电脑上的 Codex Desktop App 与 `codex-channels` 同时连接本项目监管的同一个 App Server。
 默认连接主 OpenAI 实例；切换模式可在启动时指定已配置的 Provider 隔离实例，使 Desktop、渠道和
 `codexc remote` 共享该实例的 Thread、Turn、Item 与实时通知。
-至少有两个 API Key 切换提供商时，还派生按需启动的虚拟 Provider
-`codexc-aggregate`，把这些成员的模型提供给同一个模型选择器；Desktop 共享另要求主 Provider 为 OpenAI。
+聚合提供商当前关闭，不派生或登记虚拟 Provider `codexc-aggregate`；`agg`、`sf-agg` 与内部 ID
+选择均明确拒绝。Desktop 继续支持独立切换提供商，主 Provider 仍须为 OpenAI。
+原聚合代码、派生材料、历史 Thread 和旧绑定保留；旧服务需正常重启 App Server 与 Gateway
+加载关闭策略，代码更新不会自动停止服务。下文标明的聚合设计及历史观察不表示当前功能可用。
 
-当前锁定的 Codex CLI 0.163.0 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
+当前锁定的 Codex CLI 0.164.0 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
 包含未公开的 WebSocket 与强制 CLI 启动入口。macOS 使用强制 CLI 与受管 stdio Proxy，Windows
 继续使用 `CODEX_APP_SERVER_WS_URL`。这些入口不属于公开稳定合同，因此功能必须默认关闭、严格做
 平台兼容探测，并在入口消失或行为改变时失败关闭。官方 Remote Control 的云端配对、Environment
@@ -32,19 +37,58 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 
 ## 实现与验收状态
 
+- 2026-10-18 20:23 起（UTC+8）更新后续验收：全局安装两项交接修复哈希及共同存在的 467 个
+  运行文件与交接源码一致。macOS ChatGPT `26.1013.40934 / 20770`、CLI `0.163.0` 的主
+  OpenAI 实例已观察到 Desktop 实际标记回复、重复启动拒绝、Gateway 重启后共享进程保留，
+  以及 App Server 重启后人工退出重开恢复原 Thread；两次退出重开均能保留历史并继续，未证明自动恢复。
+  专用文本任务通过官方接口取消后读回 `interrupted`，Desktop 停止按钮的自动化操作未完成。
+  **当前内置工具启动失败**：精确验收 Thread 的 `codex_app` 状态为 `failed`、工具为空，
+  错误为 `Codex app tools pipe closed`；本次 Desktop 进程日志明确记录
+  `dynamic_app_tools_peer_rejected reason=untrusted-process-ancestry`。
+  这是当前主实例的新观察，不是将 10 月 8 日的聚合历史失败推广到当前版本。基础会话与工具
+  状态分别记录；私有校验拒绝的具体祖先进程尚未确定，未修改信任链或引入替代桥接。
+  详见[更新后续验收](codex-desktop-app-acceptance.md#2026-10-18-macos-更新后续验收)。
+- 同日继续完成 macOS 原生 TUI 租约专项：真实 `codexc remote` 连接期间 Desktop 启动明确拒绝，
+  Ctrl-D 正常退出 Remote 后允许重新打开，Host 恢复附加。进一步只读核查确认当前安装包调用
+  原生 peer-authorizer；签名匹配不足以证明祖先链受信任。另发现 Desktop 的 `CODEX_CLI_PATH`
+  同时传入 Node REPL，与受管 Proxy 只接受 App Server 的入口存在冲突线索；尚未验证独立修复，
+  不与 `codex_app` 祖先链拒绝混为一谈。上游相关 Issue 仍无维护者确认的修复合同，未改变架构。
+  详见[继续核查与 Remote 专项](codex-desktop-app-acceptance.md#2026-10-18-2055-继续核查与-remote-租约专项)。
+- 同日用户交互补录：用户在原验收 Thread 点击 Desktop 停止按钮，代理仅只读核对对应
+  `UI-CANCEL` Turn 为 `interrupted`、Thread 为 `idle`。本机停止路径通过，补齐此前自动化
+  未完成的操作。用户随后确认飞书交互此前实测无问题，同意 C3/C4 按用户确认通过记录；本轮
+  未重新取得双向续接证据，另一渠道的事件一致性仍未验证。飞书 `/thread` 请求的
+  `rpc:-32600` 异常另行保留，未确认根因；不据此否定此前交互，也不覆盖内置工具失败。
+  用户另提供 21:05 的 `Web run` 搜索成功记录，按用户反馈补录搜索能力可用；未独立核对
+  原始返回及工具归属，不作为 `codex_app` 具名工具调用通过的证据。内置工具故障不代表所有
+  MCP 或搜索工具不可用。
+  详见[用户交互补录](codex-desktop-app-acceptance.md#2026-10-18-用户交互补录)。
+- 2026-10-18 更新前的 macOS 无人值守补录（后续结果见本节上方）：macOS 15.8.1 / 24H32 arm64，ChatGPT
+  `26.1013.40934` / `20770`（Bundle 信息），Codex CLI `0.163.0`，Node `v24.19.0`。
+  源码为交接提交 `23f9907578213e75ee302498b341031bc38c359e`，但全局安装包尚缺两项交接修复。
+  真实主 OpenAI 实例只读查询确认 1 个活动 Thread，因此没有停服更新、打开 Desktop 或重启服务；
+  当前会话桌面自动化入口也未能初始化。状态查询与 macOS 端口参数拒绝已观察，当前版本的
+  双向共享、明确命名的 `codex_app` 工具、清理和恢复仍未观察，不据此判定当前功能不可用。
+  详细安装证据和逐项原因见[本轮 macOS 记录](codex-desktop-app-acceptance.md#2026-10-18-macos-无人值守核查)。
+- 2026-10-18 验收开始时，操作者确认当前功能可以使用，当时尚未归档实际平台、Desktop 构建及能力范围。
+  本轮任务是补齐记录，不将缺少记录判定为功能不可用。当前代码标识、CLI 0.163.0 的 Linux
+  隔离运行证据和两平台操作表见 [跨平台验收与交接](codex-desktop-app-acceptance.md)。
+  以下保留历史版本的成功与失败记录；当前组合由新验收记录确认，不直接套用历史结论。
 - 2026-10-08 的 macOS ChatGPT `26.1002.52244` 聚合实例实机日志确认：共享连接和 Host
   租约附加成功，但 Desktop 工具 Pipe 返回 `untrusted-process-ancestry`，随后 `codex_app`
-  MCP 启动报 `Codex app tools pipe closed` / `write EPIPE`。当前签名 Host 路径未通过该次
+  MCP 启动报 `Codex app tools pipe closed` / `write EPIPE`。当时的签名 Host 路径未通过该次
   进程祖先链校验；日志没有确定被拒绝的具体祖先进程，也不能证明所有构建均存在同一问题。
   `compatible` 只验证入口标记，`toolHostAttached` 只表示租约连接，二者均不是工具可用性验收。
   本地缺少该 Desktop 构建及 macOS 环境，尚未验证可接受的替代启动链；不能以关闭通知或重试
   代替工具修复，也不绕过 Desktop 的信任校验。以下历史成功记录不覆盖本次失败组合。
-- macOS 已验收，操作者于 2026-10-07 确认；使用受管 stdio Proxy、私有 Supervisor Host 租约、签名校验与主实例串行切换。
+- 2026-10-07 操作者曾确认 macOS 可用；该历史反馈不覆盖 10 月 18 日已记录的工具故障。
+  实现使用受管 stdio Proxy、私有 Supervisor Host 租约、签名校验
+  与主实例串行切换。
 - Windows 使用当前用户包探测、受认证回环桥与隔离启动环境，仍为开发预览，未完成实机双向验收。
 - 启动时选择 Provider 隔离实例是新增能力，尚未完成 macOS 或 Windows 实机验收；下述主 OpenAI
   实例的历史验收不覆盖第三方模型目录、会话继续或内置工具兼容性。
-- 聚合模式复用同一个受监管 App Server 与工具 Host；聚合 Thread 的跨模型历史兼容及
-  Desktop 内置工具尚未完成实机观察。现有主实例验收不覆盖此路径。
+- 关闭前的聚合设计复用同一个受监管 App Server 与工具 Host；跨模型历史兼容及
+  Desktop 内置工具未完成实机观察，当前停止该路径验收。现有主实例验收不覆盖此路径。
 - Linux 隔离观察使用真实 CLI 0.160.1、聚合 HTTP 出口、原 ProviderProxy 和 CLP Chat 桥，
   上游为本地可控服务而非真实账户。同一 Thread 完成 DS→CLP→DS，后续请求保留前轮历史，
   两家均完成 `pwd` 工具调用及结果回程，指标保留 Thread/Turn 和实际账户。
@@ -65,18 +109,17 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   桌面连接关闭但启动回调未返回时临时租约仍保护目标；命令成功、受控桌面启动失败和桥不可用后
   租约均清空。该观察替代了 Windows 桌面启动边界，不代表 Windows App 或 Windows Proxy 已实测。
 - 2026-09-16/17 的 macOS 历史实测覆盖 Thread 双向共享、内置工具启动与 App Server 重启恢复；
-  实测 CLI 为 0.154.0、ChatGPT 为 `26.908.70816`。这些结果不是当前 CLI 0.163.0 或任意新 App 构建的验收。
-- 本次操作者确认未附新的 CLI 与 Desktop 构建号，保留已有版本记录，不据此声明特定新版本组合已重测。
-  Windows 尚未验收；平台验收结论分别记录，不宣称全平台正式支持。
+  实测 CLI 为 0.154.0、ChatGPT 为 `26.908.70816`。这些结果不是当前 CLI 0.164.0 或任意新 App 构建的验收。
+- Windows 尚未验收；平台验收结论分别记录，不宣称全平台正式支持。
 
 
 ## 事实基线
 
 ### 官方锁定版本
 
-- 项目固定 `codex-cli 0.163.0`，协议与实现仍以 [`Codex 协议索引`](index.md)和
-  `rust-v0.163.0` 锁定源码为准；本机参考副本状态见[上游来源](upstream-sources.md)。下文 0.154.0 与 0.160.1 的实机结果是历史验收，
-  不代表 0.163.0 已完成打包 Desktop 私有工具 Pipe 与签名链的实机复核。
+- 项目固定 `codex-cli 0.164.0`，协议与实现仍以 [`Codex 协议索引`](index.md)和
+  `rust-v0.164.0` 锁定源码为准；本机参考副本状态见[上游来源](upstream-sources.md)。下文 0.154.0 与 0.160.1 的实机结果是历史验收，
+  不代表 0.164.0 已完成打包 Desktop 私有工具 Pipe 与签名链的实机复核。
 - 官方远程客户端以 WebSocket 连接 App Server；每个连接独立执行一次
   `initialize` / `initialized`。
 - Unix 客户端可以直接通过 WebSocket-over-UDS 连接。官方
@@ -85,9 +128,9 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   裸中继。
 - 官方 `app-server daemon` 是实验性生命周期工具，会自行选择二进制、环境、控制 Socket 与更新
   方式。它不能代替本项目现有的 Provider 代理、指标采集和 Supervisor，因此本轮不采用。
-- 锁定源码 [`core/src/session/step_settings.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/session/step_settings.rs)
+- 锁定源码 [`core/src/session/step_settings.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/session/step_settings.rs)
   的 `apply_update` 在模型改变时重新解析 `ModelInfo`，构成同 Provider 目录内换模型采用模型元数据
-  的实现依据；[`model-provider/src/provider.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/model-provider/src/provider.rs)
+  的实现依据；[`model-provider/src/provider.rs`](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/model-provider/src/provider.rs)
   对自定义目录使用 `StaticModelsManager`，不能据此承诺运行中目录热刷新。这些源码依据不替代
   Desktop 跨模型历史与工具的实机验收。
 
@@ -107,7 +150,7 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   已通过真实 Pipe 验证。因此修复必须同时满足动态环境交付和可信父进程链，不能只补变量或转发
   Socket。
 - Desktop 随包 Codex 为 `0.154.0-alpha.6.2`，与项目锁定协议基线不同，不能成为共享主 App
-  Server。实施只能继续运行项目解析出的精确 Codex CLI 0.163.0 原生可执行文件；Desktop 随包内容
+  Server。实施只能继续运行项目解析出的精确 Codex CLI 0.164.0 原生可执行文件；Desktop 随包内容
   只提供同一 OpenAI Team 签名的 Node 托管进程和 MCP 资源。
 - 这些变量没有公开稳定文档。支持结论只能按经过真实验收的 Desktop 版本与平台记录，不能把
   “安装包中存在字符串”解释为完成兼容。
@@ -133,11 +176,9 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 ### 非目标
 
 - 不接入 Remote Control、移动端、二维码、配对码或云端 Environment。
-- 不支持第三方主 Provider；主 Provider 仍必须为 `openai`，第三方通过切换模式的已配置账户实例
-  或聚合实例连接。
-- 聚合范围包含 DS、CLP、OCG、CCG 和自定义 API Key 切换提供商，不合并官方 OAuth 主账户或独立 Relay 目录。
-  更换 App Server 实例必须完全退出 Desktop，再用 `codexc app --provider <ID>` 启动；
-  聚合实例内已加载模型间切换无需退出。
+- 不支持第三方主 Provider；主 Provider 仍必须为 `openai`，第三方通过切换模式的已配置账户实例连接。
+  更换 App Server 实例必须完全退出 Desktop，再用 `codexc app --provider <ID>` 启动。
+- 聚合入口当前关闭，不合并任何第三方目录、官方 OAuth 主账户或独立 Relay 目录。
 - 不复制 Desktop UI，不让渠道模拟 Desktop 的审批界面，不跨连接转发审批决定。
 - 不支持两端同时向同一活动 Thread 写入。App Server 的活动状态仍是唯一依据；发现活动 Turn 时
   另一端只能观察、排队或等待完成。
@@ -209,7 +250,11 @@ Windows 使用独立的私有凭据文件，不改变 StateStore、指标库或�
 本次 Provider 选择不持久化只描述 `codexc app` 启动行为。各实例仍使用共享 Codex Home；
 Desktop 经上游配置 RPC 保存设置时可能写入共享用户配置，而非 Provider 私有 Profile，须纳入实机验收。
 
-### 聚合模型目录
+### 聚合模型目录（已关闭的设计）
+
+本节保留关闭前的设计边界，供后续评估参考。当前共享开关为 `enabled=false`，
+Supervisor 不登记聚合实例，Desktop、Remote、渠道模型选择和旧绑定的聚合请求均明确拒绝。
+以下按需启动、目录刷新及跨模型切换流程当前不执行，不应按本节操作或重新启用聚合验收。
 
 聚合拓扑由至少两个当前 API Key 切换提供商派生，允许同类多个账户，不增加账户或 TOML 配置字段。
 `desktop_app.enabled` 仍控制 Desktop 共享；首次选择聚合时沿用既有启用确认流程。服务启动时
@@ -231,8 +276,8 @@ Remote 通过 `--provider agg` 取得实例租约，不能同时指定 Profile�
 
 目录包含当前全部受管及自定义 API Key 切换提供商，账户内模型不另造别名。聚合 HTTP 代理按精确 slug 白名单
 还原原模型 ID，路由至原 ProviderProxy；CLP 继续通过现有 Chat 桥转换。每次请求用目标账户
-真实 Key 替换本地随机认证令牌，不维护对话历史。聚合关闭模型 API WebSocket、网页搜索及
-自动重试；审批 reviewer 使用 `user`，Remote 拒绝显式 `auto_review`；独立 Relay 不接入聚合路由。
+真实 Key 替换本地随机认证令牌，不维护对话历史。聚合关闭模型 API WebSocket，网页搜索按目标模型声明放行；
+审批 reviewer 使用 `user`，Remote 拒绝显式 `auto_review`；独立 Relay 不接入聚合路由。
 
 唯一新增磁盘材料为 `<dataDir>/runtime/aggregate-models.json`，它是无密钥、可重建的派生目录；
 账户注册表、私有 Profile、Gateway TOML 和数据库格式均不变。源目录仍由各提供商拥有。
@@ -301,9 +346,8 @@ codexc app status [--provider <Provider ID>] [--json]
 ### `codexc app`
 
 - `-p` / `--provider` 与 Remote 共用选择映射，接受已配置的精确 Provider ID（包含账户隔离 ID）
-  和已登记的规范 `sf-*` Profile 名称；缺省连接主 OpenAI。至少两个 API Key 切换提供商已配置时可选聚合。
-  `agg` / `sf-agg` 在公开命令解析时映射为内部 `codexc-aggregate`；命令不接受内部 ID，状态 JSON、Thread、租约与绑定仍使用内部 ID。
-  聚合选择值与已配置 Provider 或 Profile 重名时明确拒绝。Remote 的个人 Profile 使用 `--profile`，与 Provider 选择互斥。
+  和已登记的规范 `sf-*` Profile 名称；缺省连接主 OpenAI。聚合已关闭，`agg`、`sf-agg` 和内部
+  `codexc-aggregate` 选择均拒绝。Remote 的个人 Profile 使用 `--profile`，与 Provider 选择互斥。
   参数仅对本次启动生效，不写入 TOML、Desktop 配置或系统环境；普通模型名称和任意 Socket 路径均不接受。
   选择其他实例不重启整个服务，macOS 需要替换子进程时只处理目标实例。
   旧服务不支持 Provider 选择能力时拒绝启动并提示重启服务，不静默连接主实例。
@@ -340,9 +384,8 @@ codexc app status [--provider <Provider ID>] [--json]
   `thread/list` 显式请求多个 Provider，`thread/resume` 也可能沿用历史的 Provider。Desktop
   是否会从缓存恢复其他 Provider 的 Thread、传入模型覆盖，以及第三方是否能使用内置工具，均须实机确认。
   使用时应在目标实例新建会话，不以连接参数推断历史会话已转换 Provider。
-- 聚合实例的目录由各成员提供商目录派生，在上游仍归属同一个 `codexc-aggregate` Provider。
-  旧单账户 Thread 不迁移，必须新建聚合 Thread 再用；目录内模型切换的实现依据不证明历史中的
-  reasoning 或工具内容跨模型兼容，尚无该路径及聚合 Desktop 内置工具的实机验收。
+- 聚合实例当前不登记；旧聚合 Thread 与绑定保留但不自动迁移或继续执行。用户须显式选择独立
+  Provider 后新建会话。关闭前目录内切换的实现和隔离观察不证明跨模型历史及 Desktop 内置工具兼容。
 - Desktop 创建、恢复、归档、改名或更新 Thread 后，Gateway 只根据官方通知和后续
   `thread/list` / `thread/read` 观察结果，不从桥连接事件推断业务状态。
 - 渠道自动接续仍执行现有来源、Workspace、活动状态和绑定独占检查；桥不绕过这些检查。
@@ -463,7 +506,7 @@ Supervisor 只接受当前用户、已配置的目标 Provider、已启用配置
 8. macOS 与 Windows 各自在真实 Desktop 上通过；任一平台未通过时必须单独标为预览或不支持，
    不能宣称全平台完成。
 9. Desktop 随包提供的 `codex_app` MCP 在共享模式下通过实机验证。
-10. macOS 受管路径必须继续使用项目锁定的 Codex CLI 0.163.0；不得以 Desktop 随包的预发布 CLI
+10. macOS 受管路径必须继续使用项目锁定的 Codex CLI 0.164.0；不得以 Desktop 随包的预发布 CLI
     替换协议事实来源，也不得让动态 Pipe、完整启动环境或工具消息进入日志与状态输出。
 
 ## 失败与回滚
@@ -490,7 +533,9 @@ Supervisor 只接受当前用户、已配置的目标 Provider、已启用配置
 
 第 7 项曾在旧版本隔离实测中解除；该记录不代表后续 Desktop 构建的祖先链校验必然通过。
 2026-10-08 的 `26.1002.52244` 聚合实例用户路径出现明确的祖先链拒绝，重新触发内置工具
-兼容路径的停止条件；保留会话共享预览，但不宣称该组合内置工具可用。不得以 Pipe Relay、
+兼容路径的停止条件；2026-10-18 主 OpenAI 实例的 `26.1013.40934 / 20770` 与 CLI `0.163.0`
+组合再次观察到祖先链拒绝，详见[更新后续验收](codex-desktop-app-acceptance.md#2026-10-18-macos-更新后续验收)。
+保留会话共享预览，不宣称这些失败组合的内置工具可用。不得以 Pipe Relay、
 签名绕过、应用包修改或替换为 Desktop 预发布 CLI 规避；恢复实现前须确认上游接受的启动合同。
 
 ## 私有入口变化时的处置

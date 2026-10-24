@@ -9,6 +9,7 @@ import { ManagementTaskConfirmationDialog } from "@/components/settings/manageme
 import { SettingsError } from "@/components/settings/settings-feedback"
 import type { useRelayServiceManagement } from "@/hooks/use-relay-service-management"
 import { useTranslation } from "@/hooks/use-translation"
+import { translateApiErrorCode } from "@/lib/i18n/translate"
 
 export function RelayServiceManagement({ controller, snapshot, loading, current }: { controller: ReturnType<typeof useRelayServiceManagement>; snapshot: RelayManagementSnapshot | null; loading: boolean; current: boolean }) {
   const { t } = useTranslation()
@@ -25,11 +26,11 @@ export function RelayServiceManagement({ controller, snapshot, loading, current 
         {!current || !snapshot ? <Badge variant="outline">{t(loading ? "relay.refreshing" : "relay.runtimeUnknown")}</Badge> : snapshot.runtime?.state === "running"
           ? <Badge variant={snapshot.runtime.listening && snapshot.runtime.configurationValid ? "secondary" : "outline"}>{t(snapshot.runtime.listening && snapshot.runtime.configurationValid ? "relay.listening" : "relay.notListening")}</Badge>
           : <Badge variant="outline">{t(snapshot.runtime?.state === "stopped" ? "relay.stopped" : "relay.runtimeUnknown")}</Badge>}
-        <Link to="/models/accounts" className="text-muted-foreground underline">{t("relay.providers")}</Link>
+        <Link to="/models/providers" className="text-muted-foreground underline">{t("relay.providers")}</Link>
       </div>
     </CardHeader>
     <CardContent className="flex flex-col gap-3">
-      {services.loading && !services.data ? <Skeleton className="h-16 w-full" /> : services.error ? <SettingsError message={services.error} retry={services.refetch} /> : services.data && <div inert={services.loading || undefined} aria-busy={services.loading}><ManagedServices services={services.data} tasks={tasks} scope="model-relay" /></div>}
+      {services.loading && !services.data ? <Skeleton className="h-16 w-full" /> : services.error ? <SettingsError message={translateApiErrorCode(t, services.errorCode)} retry={services.refetch} /> : services.data && <div inert={services.loading || undefined} aria-busy={services.loading}><ManagedServices services={services.data} tasks={tasks} scope="model-relay" /></div>}
       {taskError && <SettingsError message={taskError} retry={tasks.refetch} />}
       {tasks.actionError && <Alert variant="destructive"><AlertDescription>{tasks.actionError}</AlertDescription></Alert>}
     </CardContent>

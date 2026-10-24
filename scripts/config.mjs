@@ -64,7 +64,8 @@ export async function runConfig({
           label: "Codex 新会话与用户偏好",
           hint: "模型、思考等级、Fast、权限与用户偏好",
         },
-        { value: "mcp", label: "工具与 MCP", hint: "新增 MCP、电脑、浏览器与已有 MCP 访问管理" },
+        { value: "mcp", label: "工具与 MCP", hint: "添加、编辑、删除 MCP，以及电脑、浏览器与工具访问管理" },
+        { value: "provider_web_search", label: "提供商联网搜索", hint: "按账户修改搜索模式，预览确认后保存" },
         { value: "display", label: "Gateway 显示设置", hint: "渠道操作详情、计划更新、思考状态" },
         {
           value: "system",
@@ -93,6 +94,7 @@ export async function runConfig({
     selected = section;
     const handlers = {
       codex_user: () => codexUserSettingsSetup({ environment, output, prompts }),
+      provider_web_search: async (options) => (await import("./provider-web-search-setup.mjs")).runProviderWebSearchSettingsSetup(options),
       mcp: runMcpSettings,
       display: async (options) => (await import("./config-display-menu.mjs")).runDisplaySettings(options),
       system: async (options) => (await import("./config-system-menu.mjs")).runSystemSettings(options),
@@ -108,7 +110,7 @@ export async function runConfig({
       throw new Error(`未知 Config 类别：${String(section)}`);
     }
     try {
-      if (!["codex_user", "mcp", "paths"].includes(section) && gatewayConfigError !== undefined) {
+      if (!["codex_user", "provider_web_search", "mcp", "paths"].includes(section) && gatewayConfigError !== undefined) {
         throw gatewayConfigError;
       }
       if (section === "paths") {
@@ -138,13 +140,15 @@ async function runMcpSettings(options) {
     message: "工具与 MCP",
     showInstructions: false,
     options: [
-      { value: "add", label: "新增 MCP", hint: "本地 stdio、远程 HTTP 或 Strata 视频预设" },
+      { value: "add", label: "新增 MCP", hint: "本地 stdio、远程 HTTP、AnySearch 搜索或 Strata 视频预设" },
+      { value: "edit", label: "编辑 MCP", hint: "修改用户 MCP 的连接、密钥、超时、启用与工具审批" },
+      { value: "delete", label: "删除 MCP", hint: "确认后移除用户配置中的 MCP 条目" },
       { value: "manage", label: "电脑、浏览器与已有 MCP", hint: "查看并设置启用状态、工具开关与调用审批" },
       { value: "back", label: "返回配置菜单" },
     ],
   });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
-  if (action === "add") return (await import("./mcp-setup.mjs")).runMcpSetup(options);
+  if (["add", "edit", "delete"].includes(action)) return (await import("./mcp-setup.mjs")).runMcpSetup({ ...options, operation: action });
   if (action === "manage") return (await import("./codex-user-settings-setup.mjs")).runCodexToolAccess(options);
   throw new Error(`未知 MCP 设置：${String(action)}`);
 }

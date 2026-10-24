@@ -1,9 +1,25 @@
 import { readFileSync } from "node:fs";
+import { normalizeDeepseekCatalogCapabilities, modelDefinitionsFromCatalog } from "../runtime/model-catalog.mjs";
+import { completeCatalogPrompts } from "../runtime/model-template-catalog.mjs";
+import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { withThirdPartyLocalTools } from "../runtime/third-party-model-catalog.mjs";
 
 const settings = JSON.parse(readFileSync(new URL("../provider-model-catalog.json", import.meta.url), "utf8"));
 
-function appendFlashClone(source, slug) {
-  const catalog = structuredClone(source);
+/** DS endpoint restrictions do not establish capabilities for CCG or OCG. */
+export function createDeepseekTemplateCatalog(source, family) {
+  if (!["deepseek", "ccg", "opencode-go"].includes(family)) throw new Error("DS 模板目标提供商无效");
+  const catalog = completeCatalogPrompts(source);
+  // Service offerings are not reusable model-template capabilities.
+  for (const model of catalog.models) {
+    delete model.service_tiers;
+    delete model.additional_speed_tiers;
+  }
+  return family === "deepseek" ? normalizeDeepseekCatalogCapabilities(catalog) : catalog;
+}
+
+function appendFlashClone(source, slug, family) {
+  const catalog = createDeepseekTemplateCatalog(source, family);
   const matches = catalog.models.filter((entry) => entry.slug === settings.flashSourceModel);
   if (matches.length !== 1) throw new Error("DS 模型目录必须包含唯一的 Flash 模板");
   if (catalog.models.some((entry) => entry.slug === slug)) {
@@ -13,17 +29,44 @@ function appendFlashClone(source, slug) {
   return catalog;
 }
 
-export function createOpencodeGoCatalog(source) {
-  return appendFlashClone(source, settings.ocg.v41Model);
+export function createOpencodeGoCatalogWithTemplateBindings(source) {
+  const catalog = appendFlashClone(source, settings.ocg.v41Model, "opencode-go");
+  const templateBindings = Object.fromEntries(catalog.models.map(entry => [entry.slug, {
+    source: "deepseek", model: entry.slug === settings.ocg.v41Model ? settings.flashSourceModel : entry.slug,
+  }]));
+  return { catalog, templateBindings };
 }
 
-export function createCcgCatalog(source) {
-  const catalog = appendFlashClone(source, settings.ccg.v41Model);
+export function createCcgCatalogWithTemplateBindings(source) {
+  const catalog = appendFlashClone(source, settings.ccg.v41Model, "ccg");
+  const templateBindings = {};
   catalog.models = catalog.models.map((entry) => {
-    if (entry.slug === settings.ccg.v41Model) return entry;
-    const slug = settings.ccg.modelIds[entry.slug];
+    const clone = entry.slug === settings.ccg.v41Model;
+    const slug = clone ? entry.slug : settings.ccg.modelIds[entry.slug];
     if (typeof slug !== "string") throw new Error(`CCG 缺少 DS 模型 ID 映射：${entry.slug}`);
+    if (Object.hasOwn(templateBindings, slug)) throw new Error(`CCG DS 模型 ID 映射重复：${slug}`);
+    templateBindings[slug] = { source: "deepseek", model: clone ? settings.flashSourceModel : entry.slug };
     return { ...entry, slug };
   });
-  return catalog;
+  return { catalog, templateBindings };
+}
+
+/** Fixed upstream IDs; DS supplies reusable metadata, never CLP Responses capabilities. */
+export function createClinePassCatalogWithTemplateBindings(source) {
+  const templates = modelDefinitionsFromCatalog(completeCatalogPrompts(source), "deepseek");
+  const templateBindings = {};
+  const definitions = Object.entries(settings.clp.modelIds).map(([id, sourceId]) => {
+    const matches = templates.filter(model => model.id === sourceId);
+    if (matches.length !== 1) throw new Error(`CLP 缺少唯一的 DS 模板：${sourceId}`);
+    const model = structuredClone(matches[0]);
+    delete model.template;
+    templateBindings[id] = { source: "deepseek", model: sourceId };
+    return { ...model, id, name: id.slice("cline-pass/".length),
+      reasoningEfforts: [...new Set(["none", ...(model.reasoningEfforts ?? [])])],
+      supportsImageDetailOriginal: false, supportsReasoningSummary: false, defaultReasoningSummary: "none",
+      supportsVerbosity: true, defaultVerbosity: "medium", applyPatchToolType: "freeform", supportsSearchTool: true };
+  });
+  const catalog = withThirdPartyLocalTools(createResponsesModelCatalog(definitions, definitions[0].id));
+  for (const model of catalog.models) model.cline_request_profile = templateBindings[model.slug].model === settings.flashSourceModel ? "deepseek-flash" : "standard";
+  return { catalog: { models: catalog.models }, templateBindings };
 }

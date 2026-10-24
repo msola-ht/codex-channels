@@ -1,5 +1,9 @@
 export const aggregateProviderId: "codexc-aggregate";
 export const aggregateTokenEnvironmentKey: "CODEX_CONNECT_AGGREGATE_TOKEN";
+export const aggregateProviderEnabled: boolean;
+export class AggregateProviderTopologyChangedError extends Error {
+  readonly code: "PROVIDER_TOPOLOGY_CHANGED";
+}
 /** The same eligibility rule for service topology, Gateway and native Remote. */
 export function aggregateProviderMembers(
   primaryProvider: string,
@@ -13,7 +17,7 @@ export interface AggregateMaterialFile {
 export interface AggregateModelMaterial {
   catalog: { models: Record<string, unknown>[] };
   routes: Map<string, { provider: string; model: string; apiKey: string }>;
-  profiles: { provider: string; baseUrl: string }[];
+  profiles: { provider: string; baseUrl: string; upstreamWireApi?: "responses" | "chat_completions" }[];
   files: AggregateMaterialFile[];
   fingerprint: string;
   defaultModel: string;

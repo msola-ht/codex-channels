@@ -168,7 +168,8 @@ export class WeixinInteractionPort implements InteractionPort {
     const actors = this.actorRegistry.actors(target).filter(
       (actorId) => this.access!.isAllowed({ target, actorId }),
     );
-    if (actors.length !== 1) {
+    if (actors.length !== 1 || (request.type === "user-input"
+      && request.expectedActorId !== undefined && request.expectedActorId !== actors[0])) {
       return safeInteractionDecision(request);
     }
     const token = this.createToken();

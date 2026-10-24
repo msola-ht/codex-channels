@@ -4,6 +4,7 @@ export {
   type ProviderWeeklyQuotaSnapshot,
   type ProviderQuotaWindowsSnapshot,
   type ProviderProxyOptions,
+  type ProviderImageUpload,
 } from "./proxy.js";
 export {
   ProviderProxyMetricsServer,
@@ -13,13 +14,14 @@ export { pruneModelTrafficDumpSessions, pruneModelTrafficDumpSessionsAsync } fro
 
 export { ChatCompletionsBridge } from "./chat-bridge.js";
 export { sendDirectChat, type DirectChatTarget } from "./direct-chat.js";
+export { uploadDeepseekImage, type DeepseekImageMediaType } from "./deepseek-file-upload.js";
 export { sendDirectResponses, DirectResponsesObserver } from "./direct-responses.js";
 export { ChatBodyTooLargeError, readChatBody, waitForChatOperation, writeChatData } from "./chat-io.js";
-export { ChatUpstreamError, ModelRequestTimeoutError } from "./chat-errors.js";
+export { ChatUpstreamError, ModelRequestTimeoutError, chatUpstreamError, chatStreamError } from "./chat-errors.js";
 export type { RelayMetric } from "./relay-metric.js";
 export { RelayMetricsServer, sendRelayMetrics, type RelayMetricEnvelope, type RelayMetricRejection } from "./relay-metrics-channel.js";
 
 export { RelayTrafficDump, type DirectChatCapture } from "./relay-traffic-dump.js";
 export type { ModelRequestDiagnostics } from "./chat-diagnostics.js";
-export { pinClinePassRouting } from "./cline-pass-routing.js";
+export { applyClinePassProviderOptions } from "./cline-pass-routing.js";
 export { AggregateModelProxy, type AggregateModelProxyOptions, type AggregateModelRoute } from "./aggregate-proxy.js";

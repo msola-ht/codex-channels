@@ -18,6 +18,7 @@ import type {
 } from "../types.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
+import { SurfaceShutdown } from "../surface-shutdown.js";
 
 import {
   WeixinInputAdapter,
@@ -39,7 +40,7 @@ import type {
   WeixinLifecycleProtocolClient,
   WeixinProtocolClient,
 } from "./protocol-client.js";
-import { WeixinProtocolError } from "./protocol-client.js";
+import { WeixinProtocolError } from "./protocol-types.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
 import type { WeixinReplyContextPersistence } from "./reply-context-persistence.js";
 import {
@@ -316,19 +317,18 @@ export class WeixinSurface implements SurfaceAdapter {
   }
 
   private async stopOnce(): Promise<void> {
+    const shutdown = new SurfaceShutdown();
     this.startupAbort.abort();
-    const videoClose = this.videos?.close();
-    try {
-      await this.input.stop();
-    } finally {
-      await this.notifyLifecycle("stop");
-      await this.files?.close?.();
-      await videoClose;
-      this.images?.close();
-      this.audios?.close();
-      this.interactions.close();
-      await this.output.close();
-    }
+    const videoClose = shutdown.run("videos", () => this.videos?.close());
+    await shutdown.run("input", () => this.input.stop());
+    await shutdown.run("lifecycle notification", () => this.notifyLifecycle("stop"));
+    await shutdown.run("files", () => this.files?.close?.());
+    await videoClose;
+    await shutdown.run("images", () => this.images?.close());
+    await shutdown.run("audios", () => this.audios?.close());
+    await shutdown.run("interactions", () => this.interactions.close());
+    await shutdown.run("output", () => this.output.close());
+    shutdown.finish();
   }
 
   private async startOnce(): Promise<void> {

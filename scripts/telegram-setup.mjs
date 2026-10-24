@@ -209,6 +209,9 @@ export async function runTelegramSetup({
     }
     const result = await session.confirm(ownerId);
     output.write(`\nTelegram 配置已保存：${result.configPath}\n`);
+    if (result.warnings?.some(({ code }) => code === "gateway-config-cleanup-failed")) {
+      output.write("配置已保存，但保存后清理失败；请检查配置、锁和临时目录状态，勿重复保存。\n");
+    }
     output.write("下一步运行：codexc doctor\n");
     writeGatewayConfigActivationNotice(output);
     return {
@@ -217,6 +220,7 @@ export async function runTelegramSetup({
       configPath: result.configPath,
       activation: result.activation,
       activationResult: configActivationResult(result.activation),
+      warnings: result.warnings,
     };
   } catch (error) {
     if (!(error instanceof ChannelSetupCancelled)) throw error;

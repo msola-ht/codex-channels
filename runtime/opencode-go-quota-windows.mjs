@@ -16,6 +16,7 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
   let cached = null;
   let inflight = null;
   return async (signal) => {
+    if (signal?.aborted) return null;
     const nowMs = options.nowMs?.() ?? Date.now();
     if (cached !== null && nowMs < cached.expiresAtMs) {
       return cached.snapshot;
@@ -29,8 +30,8 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
             provider,
             signal,
           );
+          if (signal?.aborted) return null;
           if (windows === null) {
-            if (signal?.aborted) return null;
             cached = { snapshot: null, expiresAtMs: nowMs + fallbackCacheMs };
             return null;
           }
@@ -46,6 +47,7 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
           };
           return snapshot;
         } catch {
+          if (signal?.aborted) return null;
           cached = { snapshot: null, expiresAtMs: nowMs + fallbackCacheMs };
           return null;
         } finally {
@@ -66,6 +68,12 @@ async function fetchQuotaWindows(environment, fetchImpl, provider, signal) {
   } catch {
     return null;
   }
+  const requestSignal = signal === undefined
+    ? globalThis.AbortSignal.timeout(requestTimeoutMs)
+    : globalThis.AbortSignal.any([
+        signal,
+        globalThis.AbortSignal.timeout(requestTimeoutMs),
+      ]);
   let response;
   try {
     response = await fetchImpl(usageUrl, {
@@ -74,24 +82,22 @@ async function fetchQuotaWindows(environment, fetchImpl, provider, signal) {
         accept: "application/json",
         authorization: `Bearer ${apiKey}`,
       },
-      signal: signal === undefined
-        ? globalThis.AbortSignal.timeout(requestTimeoutMs)
-        : globalThis.AbortSignal.any([
-            signal,
-            globalThis.AbortSignal.timeout(requestTimeoutMs),
-          ]),
+      redirect: "error",
+      signal: requestSignal,
     });
   } catch {
     return null;
   }
-  if (!response.ok) return null;
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
   let body;
   try {
-    body = await response.text();
+    body = await readQuotaResponseBody(response, requestSignal);
   } catch {
     return null;
   }
-  if (body.length > maximumResponseBytes) return null;
   let parsed;
   try {
     parsed = JSON.parse(body);
@@ -122,6 +128,34 @@ async function fetchQuotaWindows(environment, fetchImpl, provider, signal) {
     });
   }
   return windows.length === 0 ? null : windows;
+}
+
+async function readQuotaResponseBody(response, signal) {
+  if (!response.body) throw new Error("Missing quota response body");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let bytes = 0;
+  let complete = false;
+  const abort = () => { void reader.cancel().catch(() => undefined); };
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    while (true) {
+      signal.throwIfAborted();
+      const chunk = await reader.read();
+      signal.throwIfAborted();
+      if (chunk.done) {
+        complete = true;
+        return Buffer.concat(chunks, bytes).toString("utf8");
+      }
+      bytes += chunk.value.byteLength;
+      if (bytes > maximumResponseBytes) throw new Error("Quota response too large");
+      chunks.push(chunk.value);
+    }
+  } finally {
+    signal.removeEventListener("abort", abort);
+    if (!complete) await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
 }
 
 function record(value) {

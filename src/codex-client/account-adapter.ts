@@ -398,6 +398,8 @@ const accountPlanTypes = new Set<AccountPlanType>([
   "edu",
   "edu_plus",
   "edu_pro",
+  "sci",
+  "sci_plus",
   "unknown",
 ]);
 

@@ -1,5 +1,7 @@
 import {
   UserFacingError,
+  conversationTargetKey,
+  type ConversationInputEvent,
   type ConversationTarget,
 } from "../conversation-core/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
@@ -35,39 +37,58 @@ export type ConversationExtensionQueryPort =
   & PluginQueryPort
   & PermissionQueryPort;
 
+type McpOAuthCompletion = Extract<ConversationInputEvent, { type: "mcp.oauth.completed" }>;
+interface PendingMcpLogin {
+  threadId: string;
+  server: string;
+  expiresAt: number;
+  isCurrent: () => void;
+  identity?: { loginId: string; provider: string };
+  early: McpOAuthCompletion[];
+  earlyOverflow?: boolean;
+}
+
 export class ConversationExtensionQueryService {
+  private readonly pendingMcpLogins = new Map<string, PendingMcpLogin>();
+  private mcpLoginsClosed = false;
   constructor(
     private readonly router: SessionRouter,
     private readonly models: ModelSelectionService,
     private readonly queries: ConversationExtensionQueryPort,
+    private readonly publishMcpCompletion: (event: McpOAuthCompletion) => void,
   ) {}
 
-  modelState(target: ConversationTarget): Promise<ModelSelectionState> {
-    return this.models.state(target);
+  modelState(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    return this.models.state(target, false, assertAuthorized);
   }
 
-  clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState> {
-    this.models.clearProviderBrowse(target);
-    return this.models.state(target);
+  clearModelBrowse(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    this.models.clearProviderBrowse(target, assertAuthorized);
+    return this.models.state(target, false, assertAuthorized);
   }
 
   browseProviderModels(
     target: ConversationTarget,
     provider: string,
+    assertAuthorized?: () => void,
   ): Promise<ModelSelectionState> {
-    return this.models.browseProvider(target, provider);
+    return this.models.browseProvider(target, provider, assertAuthorized);
   }
 
-  clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState> {
-    this.models.clear(target);
-    return this.models.state(target);
+  clearModelSelection(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
+    this.models.clear(target, assertAuthorized);
+    return this.models.state(target, false, assertAuthorized);
   }
 
-  listSkills(target: ConversationTarget): Promise<InstalledSkill[]> {
-    return this.queries.listSkills(this.router.workspace(target).cwd);
+  async listSkills(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledSkill[]> {
+    assertAuthorized?.();
+    const skills = await this.queries.listSkills(this.router.workspace(target).cwd, assertAuthorized);
+    assertAuthorized?.();
+    return skills;
   }
 
-  async resolveSkillName(cwd: string, selector: string): Promise<string> {
+  async resolveSkillName(cwd: string, selector: string, assertAuthorized?: () => void): Promise<string> {
+    assertAuthorized?.();
     if (!/^[1-9]\d*$/u.test(selector)) {
       return selector;
     }
@@ -75,20 +96,26 @@ export class ConversationExtensionQueryService {
     if (!Number.isSafeInteger(index)) {
       throw new UserFacingError("skill.not-found", "Skill 序号不存在");
     }
-    const skill = (await this.queries.listSkills(cwd))[index - 1];
+    const skill = (await this.queries.listSkills(cwd, assertAuthorized))[index - 1];
+    assertAuthorized?.();
     if (!skill) {
       throw new UserFacingError("skill.not-found", "Skill 序号不存在");
     }
     return skill.name;
   }
 
-  listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]> {
-    return this.queries.listMcpServers(this.router.current(target)?.threadId);
+  async listMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpServerSummary[]> {
+    assertAuthorized?.();
+    const servers = await this.queries.listMcpServers(this.router.current(target)?.threadId, undefined, assertAuthorized);
+    assertAuthorized?.();
+    return servers;
   }
 
-  async mcpHealth(target: ConversationTarget): Promise<McpHealthReport> {
+  async mcpHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpHealthReport> {
+    assertAuthorized?.();
     const servers = await this.queries.listMcpServerDetails(
       this.router.current(target)?.threadId,
+      assertAuthorized,
     );
     return {
       serverCount: servers.length,
@@ -160,29 +187,40 @@ export class ConversationExtensionQueryService {
     };
   }
 
-  reloadMcpServers(): Promise<void> {
-    return this.queries.reloadMcpServers();
+  reloadMcpServers(assertAuthorized?: () => void): Promise<void> {
+    assertAuthorized?.();
+    return this.queries.reloadMcpServers(undefined, assertAuthorized);
   }
 
   async mcpServerDetail(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<McpServerDetail> {
+    assertAuthorized?.();
     return resolveMcpServer(
       selector,
-      await this.queries.listMcpServerDetails(this.router.current(target)?.threadId),
+      await this.queries.listMcpServerDetails(this.router.current(target)?.threadId, assertAuthorized),
     );
   }
 
   async loginMcpServer(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<McpLoginResult> {
+    assertAuthorized?.();
     const threadId = this.router.current(target)?.threadId;
+    const binding = this.router.current(target);
+    const sessionId = binding?.sessionId;
+    const workspace = this.router.workspace(target);
+    const beforeSubmit = this.mcpThreadGuard(target, threadId, assertAuthorized);
+    beforeSubmit();
     const server = resolveMcpServer(
       selector,
-      await this.queries.listMcpServers(threadId),
+      await this.queries.listMcpServers(threadId, undefined, beforeSubmit),
     );
+    beforeSubmit();
     if (server.authStatus === "bearerToken") {
       return { type: "bearerToken", server: server.name };
     }
@@ -198,17 +236,90 @@ export class ConversationExtensionQueryService {
         "请先发送消息创建 Session，或使用 /resume 恢复 Session 后再登录 MCP Server",
       );
     }
-    return {
-      type: "oauth",
-      ...await this.queries.startMcpOAuthLogin(server.name, threadId),
+    if (this.mcpLoginsClosed) throw new UserFacingError("mcp.oauth.unavailable", "MCP 登录处理已关闭");
+    this.pruneMcpLogins();
+    const key = JSON.stringify([conversationTargetKey(target), server.name]);
+    if (!this.pendingMcpLogins.has(key) && this.pendingMcpLogins.size >= 128) {
+      throw new UserFacingError("mcp.oauth.unavailable", "待处理 MCP 登录过多，请稍后重试");
+    }
+    const pending: PendingMcpLogin = {
+      threadId, server: server.name, expiresAt: Date.now() + 10 * 60_000, early: [],
+      isCurrent: () => {
+        beforeSubmit();
+        const current = this.router.current(target);
+        const currentWorkspace = this.router.workspace(target);
+        if (current !== binding || current?.sessionId !== sessionId
+          || currentWorkspace.id !== workspace.id || currentWorkspace.cwd !== workspace.cwd) {
+          throw new UserFacingError("command.authorization-changed", "MCP 登录所属会话已变化");
+        }
+      },
     };
+    this.pendingMcpLogins.set(key, pending);
+    try {
+      const login = await this.queries.startMcpOAuthLogin(server.name, threadId, () => {
+        pending.isCurrent();
+        if (this.pendingMcpLogins.get(key) !== pending || Date.now() >= pending.expiresAt) {
+          throw new UserFacingError("command.authorization-changed", "MCP 登录请求已失效");
+        }
+      });
+      if (this.pendingMcpLogins.get(key) === pending) {
+        pending.identity = { loginId: login.loginId, provider: login.provider };
+        const early = pending.early;
+        pending.early = [];
+        for (const event of early) this.handleMcpOAuthCompleted(event);
+        if (pending.earlyOverflow && this.pendingMcpLogins.get(key) === pending) {
+          throw new UserFacingError("mcp.oauth.unavailable", "MCP 登录完成通知超限，请查询实际认证状态");
+        }
+      }
+      return { type: "oauth", ...login };
+    } catch (error) {
+      if (this.pendingMcpLogins.get(key) === pending) this.pendingMcpLogins.delete(key);
+      throw error;
+    }
+  }
+
+  handleMcpOAuthCompleted(event: McpOAuthCompletion): void {
+    this.pruneMcpLogins();
+    for (const [key, pending] of this.pendingMcpLogins) {
+      if (pending.threadId !== event.threadId || pending.server !== event.name) continue;
+      try { pending.isCurrent(); } catch { this.pendingMcpLogins.delete(key); continue; }
+      if (!pending.identity) {
+        // Completion may precede the RPC response. Never buffer unbounded upstream text.
+        if (pending.early.length < 8 && (event.error?.length ?? 0) <= 4_096) pending.early.push(event);
+        else pending.earlyOverflow = true;
+        continue;
+      }
+      if (pending.identity.loginId !== event.loginId
+        || pending.identity.provider !== event.modelProvider) continue;
+      this.pendingMcpLogins.delete(key);
+      this.publishMcpCompletion(event);
+    }
+  }
+
+  closeMcpLogins(): void {
+    this.mcpLoginsClosed = true;
+    this.pendingMcpLogins.clear();
+  }
+
+  clearMcpLoginThread(threadId: string): void {
+    for (const [key, pending] of this.pendingMcpLogins) {
+      if (pending.threadId === threadId) this.pendingMcpLogins.delete(key);
+    }
+  }
+
+  private pruneMcpLogins(): void {
+    for (const [key, pending] of this.pendingMcpLogins) {
+      if (Date.now() >= pending.expiresAt) this.pendingMcpLogins.delete(key);
+    }
   }
 
   async readMcpResource(
     target: ConversationTarget,
     selector: string,
     uri: string,
+    assertAuthorized?: () => void,
   ): Promise<McpResourceReadResult> {
+    assertAuthorized?.();
     const normalizedUri = uri.trim();
     if (
       normalizedUri.length === 0
@@ -218,19 +329,46 @@ export class ConversationExtensionQueryService {
       throw new UserFacingError("mcp.resource.usage", "需要提供有效的 MCP Resource URI");
     }
     const threadId = this.router.current(target)?.threadId;
+    const beforeSubmit = this.mcpThreadGuard(target, threadId, assertAuthorized);
+    beforeSubmit();
     const server = resolveMcpServer(
       selector,
-      await this.queries.listMcpServers(threadId),
+      await this.queries.listMcpServers(threadId, undefined, beforeSubmit),
     );
-    return this.queries.readMcpResource(server.name, normalizedUri, threadId);
+    beforeSubmit();
+    return this.queries.readMcpResource(server.name, normalizedUri, threadId, beforeSubmit);
   }
 
-  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog> {
-    return this.queries.listPlugins(this.router.workspace(target).cwd);
+  async listPlugins(target: ConversationTarget, assertAuthorized?: () => void): Promise<InstalledPluginCatalog> {
+    assertAuthorized?.();
+    const workspace = this.router.workspace(target);
+    const threadId = this.router.current(target)?.threadId;
+    const provider = this.pluginProvider(target);
+    const beforeSubmit = () => {
+      assertAuthorized?.();
+      const currentWorkspace = this.router.workspace(target);
+      if (this.router.current(target)?.threadId !== threadId
+        || this.pluginProvider(target) !== provider
+        || currentWorkspace.id !== workspace.id || currentWorkspace.cwd !== workspace.cwd) {
+        throw new UserFacingError("command.authorization-changed", "Plugin 查询所属会话已变化，请重新查询");
+      }
+    };
+    const catalog = await this.queries.listPlugins(workspace.cwd, provider, beforeSubmit);
+    beforeSubmit();
+    return catalog;
   }
 
-  async pluginHealth(target: ConversationTarget): Promise<PluginHealthReport> {
-    const catalog = await this.listPlugins(target);
+  pluginProvider(target: ConversationTarget): string {
+    const provider = this.router.modelSettings(target)?.modelProvider
+      ?? this.models.status(target).modelProvider;
+    if (provider === undefined) {
+      throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
+    }
+    return provider;
+  }
+
+  async pluginHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<PluginHealthReport> {
+    const catalog = await this.listPlugins(target, assertAuthorized);
     const issues: PluginHealthReport["issues"] = [];
     catalog.plugins.forEach((plugin, index) => {
       if (!plugin.available) {
@@ -263,12 +401,14 @@ export class ConversationExtensionQueryService {
   pluginDetail(
     target: ConversationTarget,
     selector: string,
+    assertAuthorized?: () => void,
   ): Promise<InstalledPlugin> {
-    return this.resolvePlugin(this.router.workspace(target).cwd, selector);
+    assertAuthorized?.();
+    return this.resolvePlugin(target, selector, assertAuthorized);
   }
 
-  async resolvePlugin(cwd: string, selector: string): Promise<InstalledPlugin> {
-    const { plugins } = await this.queries.listPlugins(cwd);
+  async resolvePlugin(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<InstalledPlugin> {
+    const { plugins } = await this.listPlugins(target, assertAuthorized);
     if (/^[1-9]\d*$/u.test(selector)) {
       const index = Number(selector);
       const plugin = Number.isSafeInteger(index) ? plugins[index - 1] : undefined;
@@ -294,10 +434,27 @@ export class ConversationExtensionQueryService {
     return matches[0]!;
   }
 
-  listPermissionProfiles(
+  async listPermissionProfiles(
     target: ConversationTarget,
+    assertAuthorized?: () => void,
   ): Promise<PermissionProfileOption[]> {
-    return this.queries.listPermissionProfiles(this.router.workspace(target).cwd);
+    assertAuthorized?.();
+    const profiles = await this.queries.listPermissionProfiles(this.router.workspace(target).cwd, assertAuthorized);
+    assertAuthorized?.();
+    return profiles;
+  }
+
+  private mcpThreadGuard(
+    target: ConversationTarget,
+    threadId: string | undefined,
+    assertAuthorized?: () => void,
+  ): () => void {
+    return () => {
+      assertAuthorized?.();
+      if (this.router.current(target)?.threadId !== threadId) {
+        throw new UserFacingError("command.authorization-changed", "命令目标会话已变化");
+      }
+    };
   }
 }
 

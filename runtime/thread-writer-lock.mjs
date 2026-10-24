@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,22 +12,23 @@ export function threadWriterLockPath(threadId, environment = process.env) {
   return join(codexHomePath(environment), "thread-writer-locks", `${threadId}.lock`);
 }
 
-export function inspectThreadWriterLock(threadId, environment = process.env, procRoot = "/proc") {
+export async function inspectThreadWriterLock(threadId, environment = process.env, procRoot = "/proc", options = {}) {
+  if (options.signal?.aborted) return { held: true, holder: null, reason: "inspection-unavailable" };
   const lockPath = threadWriterLockPath(threadId, environment);
   if (!existsSync(lockPath)) {
     return { held: false };
   }
   if (process.platform === "win32") {
-    return inspectWindowsThreadWriterLock(lockPath, environment);
+    return inspectWindowsThreadWriterLock(lockPath, environment, options);
   }
   if (process.platform !== "linux") {
-    return { held: true, holder: null };
+    return { held: true, holder: null, reason: "unsupported-platform" };
   }
   try {
     readdirSync(procRoot);
   } catch {
     // /proc 不可读时无法确认锁是否仍被持有，不能误报未占用。
-    return { held: true, holder: null };
+    return { held: true, holder: null, reason: "inspection-unavailable" };
   }
   const holders = threadWriterLockHolders(lockPath, procRoot);
   if (holders.length === 0) {
@@ -92,15 +92,18 @@ export async function terminateThreadWriterHolder(pid, {
   timeoutMs = 8_000,
   startedAt,
   environment = process.env,
+  runner,
+  signal,
 } = {}) {
+  if (signal?.aborted) return false;
   if (process.platform === "win32") {
     if (typeof startedAt !== "string" || !/^\d+$/u.test(startedAt)) return false;
-    const response = invokeWindowsThreadWriterLock({
+    const response = await invokeWindowsThreadWriterLock({
       operation: "terminate",
       pid,
       startedAt,
       timeoutMs,
-    }, environment);
+    }, environment, { runner, signal, timeoutMs });
     return response?.ok === true && response.exited === true;
   }
   if (!isRunningProcess(pid)) {
@@ -121,6 +124,7 @@ export async function terminateThreadWriterHolder(pid, {
   }
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (signal?.aborted) return false;
     if (!isRunningProcess(pid)) {
       return true;
     }
@@ -129,16 +133,16 @@ export async function terminateThreadWriterHolder(pid, {
   return !isRunningProcess(pid);
 }
 
-function inspectWindowsThreadWriterLock(lockPath, environment) {
-  const response = invokeWindowsThreadWriterLock({
+async function inspectWindowsThreadWriterLock(lockPath, environment, options) {
+  const response = await invokeWindowsThreadWriterLock({
     operation: "inspect",
     path: lockPath,
-  }, environment);
+  }, environment, options);
   if (response?.ok !== true || !Array.isArray(response.holders)) {
-    return { held: true, holder: null };
+    return { held: true, holder: null, reason: "inspection-unavailable" };
   }
   if (response.holders.length === 0) return { held: false };
-  if (response.holders.length !== 1) return { held: true, holder: null };
+  if (response.holders.length !== 1) return { held: true, holder: null, reason: "inspection-unavailable" };
   const [holder] = response.holders;
   if (
     !Number.isSafeInteger(holder?.pid)
@@ -147,7 +151,7 @@ function inspectWindowsThreadWriterLock(lockPath, environment) {
     || !/^\d+$/u.test(holder.startedAt)
     || typeof holder.executable !== "string"
   ) {
-    return { held: true, holder: null };
+    return { held: true, holder: null, reason: "inspection-unavailable" };
   }
   return {
     held: true,
@@ -160,7 +164,9 @@ function inspectWindowsThreadWriterLock(lockPath, environment) {
   };
 }
 
-function invokeWindowsThreadWriterLock(request, environment) {
+async function invokeWindowsThreadWriterLock(request, environment, { runner, signal, timeoutMs = 8_000 } = {}) {
+  if (!runner || signal?.aborted) return undefined;
+  const deadline = Date.now() + timeoutMs;
   const script = join(
     dirname(fileURLToPath(import.meta.url)),
     "windows-thread-writer-lock.ps1",
@@ -183,15 +189,15 @@ function invokeWindowsThreadWriterLock(request, environment) {
   } catch {
     return undefined;
   }
-  const result = spawnSync(invocation.file, invocation.args, {
-    input: JSON.stringify(request),
-    encoding: "utf8",
-    maxBuffer: 1_048_576,
-    windowsHide: true,
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-  });
-  if (result.error || result.status !== 0) return undefined;
   try {
+    const result = await runner.run(invocation, {
+      input: JSON.stringify({ ...request, deadline }),
+      timeoutMs,
+      environment,
+      ...(signal ? { signal } : {}),
+      maxOutputBytes: 1_048_576,
+    });
+    if (signal?.aborted || result.status !== 0) return undefined;
     return JSON.parse(result.stdout.trim());
   } catch {
     return undefined;

@@ -1,6 +1,9 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { acceleratedServiceTierId } from "../runtime/service-tier.mjs";
-import { createCodexUserConfigClient } from "./codex-user-config.mjs";
+import { areCodexUserConfigEditsApplied, createCodexUserConfigClient, readWithCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
+import { fingerprintManagementValue } from "./management-confirmations.mjs";
 import { supportedPublicApprovalPolicies } from "./codex-public-cli-contract.mjs";
 import { projectToolSettings, toolSettingEdits } from "./codex-tool-settings.mjs";
 
@@ -25,19 +28,16 @@ export async function loadCodexUserSettings({
   environment = process.env,
   createClient = createCodexUserConfigClient,
   primaryProvider = loadPrimaryModelProvider,
+  signal,
 } = {}) {
   const provider = primaryProvider(environment);
-  const client = await createClient({ environment });
-  try {
-    await client.connect();
+  return readWithCodexUserConfigClient(environment, createClient, signal, async (client) => {
     const [snapshot, models] = await Promise.all([
       client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: true, includeAcceleration: true }),
-      provider === "openai" ? client.listModels() : Promise.resolve([]),
+      provider === "openai" ? client.listModels().catch(() => null) : Promise.resolve(null),
     ]);
     return projectSettings(snapshot, provider, models);
-  } finally {
-    await client.close().catch(() => undefined);
-  }
+  });
 }
 
 export async function updateCodexUserSetting(
@@ -45,6 +45,7 @@ export async function updateCodexUserSetting(
   {
     environment = process.env,
     expectedVersion,
+    expectedTargetFingerprint,
     createClient = createCodexUserConfigClient,
     primaryProvider = loadPrimaryModelProvider,
   } = {},
@@ -53,33 +54,37 @@ export async function updateCodexUserSetting(
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
   const provider = primaryProvider(environment);
-  if (["all", "defaults", "preferences", "model-compact", "service-tier"].includes(input?.kind)) {
+  if (requiresOfficialModels(input) || input?.kind === "model-compact" || input?.kind === "service-tier") {
     assertOfficialDefaults(provider);
   }
-  const client = await createClient({ environment });
-  try {
-    await client.connect();
+  return withCodexUserConfigClient(environment, createClient, undefined, async (client) => {
     const [snapshot, models] = await Promise.all([
       client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer", includeAcceleration: input?.kind === "all" || input?.kind === "service-tier" }),
-      ["all", "defaults", "preferences", "service-tier"].includes(input?.kind)
+      requiresOfficialModels(input)
         ? client.listModels()
         : Promise.resolve([]),
     ]);
     if (snapshot.version !== expectedVersion) {
       throw invalid("revision", "stale-revision", "Codex 用户配置已变化，请重新读取设置");
     }
-    const { edits, value } = createEdits(input, {
+    const { edits, result } = await planSettingChange(input, {
       config: snapshot.config,
       toolConfig: snapshot.toolConfig,
       approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
       acceleration: snapshot.acceleration,
       provider,
       models,
-    });
+    }, expectedVersion);
+    if (expectedTargetFingerprint !== undefined && result.targetFingerprint !== expectedTargetFingerprint) {
+      throw invalid("revision", "stale-revision", "工具合并配置已变化，请重新预览并确认");
+    }
+    if (edits.length === 0) return result;
+    let written;
     try {
-      await client.writeUserConfigEdits(edits, { expectedVersion });
+      written = await client.writeUserConfigEdits(edits, { expectedVersion });
     } catch (error) {
-      if (configWriteErrorCode(error) === "configVersionConflict") {
+      const code = configWriteErrorCode(error);
+      if (code === "configVersionConflict") {
         throw invalid(
           "revision",
           "stale-revision",
@@ -87,17 +92,25 @@ export async function updateCodexUserSetting(
           { cause: error },
         );
       }
-      throw error;
+      if (["configLayerReadonly", "configRequirementReadonly", "configValidationError"].includes(code)) {
+        throw invalid("input", "unsupported-value", "Codex 拒绝本次配置修改：目标只读、受策略限制或配置无效；本次未写入，请重新读取后检查。", { cause: error });
+      }
+      // A lost response (or userLayerNotFound after persistence) cannot prove no write.
+      throw invalid("input", "save-unconfirmed", "Codex 配置保存结果未确认，修改可能已写入；请先重新读取并核对，勿直接重复提交。", { cause: error });
     }
-    return {
-      kind: input.kind,
-      previousVersion: expectedVersion,
-      value,
-      activation: codexUserSettingActivation(input.kind),
-    };
-  } finally {
-    await client.close().catch(() => undefined);
-  }
+    const writeStatus = ["ok", "okOverridden"].includes(written?.status) ? written.status : null;
+    const saved = { ...result, revision: null, consistency: "unknown", writeStatus };
+    try {
+      const current = await client.readUserConfigSnapshot();
+      if (writeStatus !== null && typeof written.version === "string"
+        && written.version === current.version && settingEditsApplied(current.config, edits, input)) {
+        return { ...saved, revision: current.version, consistency: "confirmed" };
+      }
+    } catch {
+      // The write already returned. Read failure never implies a failed save or replay.
+    }
+    return saved;
+  }, { preserveOperationResult: true });
 }
 
 /** Validate and project a change without writing the App Server config. */
@@ -114,38 +127,90 @@ export async function previewCodexUserSetting(
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
   const provider = primaryProvider(environment);
-  if (["all", "defaults", "preferences", "model-compact", "service-tier"].includes(input?.kind)) {
+  if (requiresOfficialModels(input) || input?.kind === "model-compact" || input?.kind === "service-tier") {
     assertOfficialDefaults(provider);
   }
-  const client = await createClient({ environment });
-  try {
-    await client.connect();
+  return readWithCodexUserConfigClient(environment, createClient, undefined, async (client) => {
     const [snapshot, models] = await Promise.all([
       client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer", includeAcceleration: input?.kind === "all" || input?.kind === "service-tier" }),
-      ["all", "defaults", "preferences", "service-tier"].includes(input?.kind)
+      requiresOfficialModels(input)
         ? client.listModels()
         : Promise.resolve([]),
     ]);
     if (snapshot.version !== expectedVersion) {
       throw invalid("revision", "stale-revision", "Codex 用户配置已变化，请重新读取设置");
     }
-    const { value } = createEdits(input, {
+    const { result } = await planSettingChange(input, {
       config: snapshot.config,
       toolConfig: snapshot.toolConfig,
       approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
       acceleration: snapshot.acceleration,
       provider,
       models,
-    });
-    return {
-      kind: input.kind,
-      previousVersion: expectedVersion,
-      value,
-      activation: codexUserSettingActivation(input.kind),
-    };
-  } finally {
-    await client.close().catch(() => undefined);
+    }, expectedVersion);
+    return result;
+  });
+}
+
+async function planSettingChange(input, context, previousVersion) {
+  // Validate the full proposed setting, including effective tool policy, before
+  // comparing user overrides. An inherited default is not a stored override.
+  const { edits: proposed, value } = await createEdits(input, context);
+  const edits = proposed.filter(edit => {
+    // Tool keys may contain dots, quotes or backslashes; retain their original
+    // segments rather than reparsing the encoded App Server key path.
+    const path = input.kind === "tool-access" ? input.path : edit.keyPath.split(".");
+    let current = context.config;
+    for (const segment of path) {
+      current = current !== null && typeof current === "object" && !Array.isArray(current)
+        && Object.hasOwn(current, segment) ? current[segment] : undefined;
+    }
+    return edit.value === null ? current !== undefined : !isDeepStrictEqual(current, edit.value);
+  });
+  const willChange = edits.length > 0;
+  return { edits, result: {
+    kind: input.kind,
+    previousVersion,
+    value,
+    action: willChange ? "updated" : "unchanged",
+    willChange,
+    activation: willChange ? codexUserSettingActivation(input.kind) : "none",
+    revision: previousVersion,
+    consistency: "confirmed",
+    writeStatus: null,
+    ...(input.kind === "tool-access" ? { targetFingerprint: toolTargetFingerprint(input.path, context.toolConfig) } : {}),
+  } };
+}
+
+function requiresOfficialModels(input) {
+  return ["all", "defaults"].includes(input?.kind)
+    || (input?.kind === "service-tier" && input.serviceTier !== "default")
+    || (input?.kind === "preferences" && Object.hasOwn(input, "planModeReasoningEffort")
+      && input.planModeReasoningEffort !== null);
+}
+
+function settingEditsApplied(config, edits, input) {
+  if (input.kind !== "tool-access") return areCodexUserConfigEditsApplied(config, edits);
+  // Tool identifiers are opaque segments. The public helper only accepts plain
+  // dot paths, while native encoded tool paths may include quoted dots/escapes.
+  let current = config;
+  for (const key of input.path) current = record(current)[key];
+  return input.value === null ? current === undefined : isDeepStrictEqual(current, input.value);
+}
+
+function toolTargetFingerprint(path, merged) {
+  if (merged === undefined) {
+    throw invalid("path", "tool-target-unavailable", "无法确认工具合并目标，请重新读取设置");
   }
+  // Hash the complete relevant transport/policy target; raw commands and credentials
+  // remain inside the management boundary and never enter a preview response.
+  const root = path[0] === "mcp_servers" ? ["mcp_servers", path[1]]
+    : path[0] === "plugins" ? ["plugins", path[1]] : [path[0]];
+  let target = merged;
+  for (const key of root) target = record(target)[key];
+  return fingerprintManagementValue({ root, target: target ?? null,
+    ...(path[0] === "plugins" ? { defaultEnabled: record(record(merged.plugins)._default).enabled ?? null } : {}),
+  });
 }
 
 function codexUserSettingActivation(kind) {
@@ -156,17 +221,10 @@ function codexUserSettingActivation(kind) {
 
 function projectSettings(snapshot, provider, rawModels) {
   const config = record(snapshot.config);
-  const models = rawModels.filter((model) => model.available !== false).map(projectModel);
+  const modelsAvailable = rawModels !== null;
+  const models = (rawModels ?? []).filter((model) => model.available !== false).map(projectModel);
   const configuredModel = optionalString(config.model);
-  const selectedModel = configuredModel === null
-    ? models.find((model) => model.isDefault)
-    : models.find((model) => model.model === configuredModel);
   const configuredEffort = optionalString(config.model_reasoning_effort);
-  const effort = selectedModel?.reasoningEfforts.some(
-    (candidate) => candidate.effort === configuredEffort,
-  )
-    ? configuredEffort
-    : selectedModel?.defaultReasoningEffort ?? configuredEffort;
   const serviceTier = optionalString(config.service_tier);
   const webSearch = webSearchModes.has(config.web_search) ? config.web_search : null;
   const reasoningSummary = reasoningSummaries.has(config.model_reasoning_summary)
@@ -177,9 +235,7 @@ function projectSettings(snapshot, provider, rawModels) {
   const updatePlan = record(tools.update_plan);
   const tui = record(config.tui);
   const configuredPlanEffort = optionalString(config.plan_mode_reasoning_effort);
-  const planModeReasoningEffort = models.some((model) => model.reasoningEfforts
-    .some((option) => option.effort === configuredPlanEffort))
-    ? configuredPlanEffort : null;
+  const planModeReasoningEffort = configuredPlanEffort;
   const sandboxMode = sandboxModes.has(config.sandbox_mode) ? config.sandbox_mode : null;
   const approvalPolicy = approvalPolicies.has(config.approval_policy)
     ? config.approval_policy
@@ -189,27 +245,47 @@ function projectSettings(snapshot, provider, rawModels) {
     version: snapshot.version,
     toolSettings: projectToolSettings(config, snapshot.toolConfig),
     provider,
-    defaultsEditable: provider === "openai",
+    modelsAvailable,
+    accelerationAvailable: snapshot.acceleration !== undefined,
+    contextEditable: provider === "openai",
+    defaultsEditable: provider === "openai" && modelsAvailable,
     approvalsReviewer: projectApprovalsReviewer(config, snapshot.approvalsReviewerPolicy),
     models,
     defaults: {
-      model: configuredModel ?? selectedModel?.model ?? null,
-      reasoningEffort: effort ?? null,
+      configuredModel,
+      model: configuredModel ?? models.find((model) => model.isDefault)?.model ?? null,
+      reasoningEffort: configuredEffort,
       serviceTier,
-      ...accelerationFlags(snapshot.acceleration),
+      fastEnabled: snapshot.acceleration?.fastEnabled ?? false,
+      ultrafastEnabled: snapshot.acceleration?.ultrafastEnabled ?? false,
       webSearch,
-      updatePlanEnabled: updatePlan.enabled === true,
-      autoRecapEnabled: tui.auto_recap === true,
+      updatePlanEnabled: typeof updatePlan.enabled === "boolean" ? updatePlan.enabled : null,
+      autoRecapEnabled: typeof tui.auto_recap === "boolean" ? tui.auto_recap : null,
       reasoningSummary,
       planModeReasoningEffort,
       verbosity,
       checkForUpdateOnStartup: typeof config.check_for_update_on_startup === "boolean"
         ? config.check_for_update_on_startup : null,
       historyPersistence: historyPersistences.has(history.persistence) ? history.persistence : null,
+      unsupportedFields: [
+        ...(config.web_search != null && webSearch === null ? ["webSearch"] : []),
+        ...(config.model_reasoning_summary != null && reasoningSummary === null ? ["reasoningSummary"] : []),
+        ...(config.plan_mode_reasoning_effort != null && planModeReasoningEffort === null ? ["planModeReasoningEffort"] : []),
+        ...(config.model_verbosity != null && verbosity === null ? ["verbosity"] : []),
+        ...(history.persistence != null && !historyPersistences.has(history.persistence) ? ["historyPersistence"] : []),
+        ...(updatePlan.enabled != null && typeof updatePlan.enabled !== "boolean" ? ["updatePlanEnabled"] : []),
+        ...(tui.auto_recap != null && typeof tui.auto_recap !== "boolean" ? ["autoRecapEnabled"] : []),
+        ...(config.check_for_update_on_startup != null && typeof config.check_for_update_on_startup !== "boolean" ? ["checkForUpdateOnStartup"] : []),
+      ],
     },
     permissions: {
       editable: optionalString(config.default_permissions) === null,
       defaultPermissions: optionalString(config.default_permissions),
+      unsupportedFields: [
+        ...(config.sandbox_mode != null && sandboxMode === null ? ["sandboxMode"] : []),
+        ...(config.approval_policy != null && approvalPolicy === null ? ["approvalPolicy"] : []),
+        ...(workspaceSandbox.network_access != null && typeof workspaceSandbox.network_access !== "boolean" ? ["networkAccess"] : []),
+      ],
       sandboxMode,
       approvalPolicy,
       networkAccess: typeof workspaceSandbox.network_access === "boolean"
@@ -217,24 +293,10 @@ function projectSettings(snapshot, provider, rawModels) {
         : null,
     },
     compact: {
-      contextWindow: optionalSafeInteger(config.model_context_window),
-      autoCompactPercent: compactPercent(config),
+      contextWindow: optionalSafeInteger(config.model_context_window, "contextWindow"),
+      autoCompactTokenLimit: optionalSafeInteger(config.model_auto_compact_token_limit, "autoCompactTokenLimit"),
     },
   };
-}
-
-function compactPercent(config) {
-  const contextWindow = optionalSafeInteger(config.model_context_window);
-  const autoCompactLimit = optionalSafeInteger(config.model_auto_compact_token_limit);
-  if (
-    contextWindow === null
-    || autoCompactLimit === null
-    || contextWindow <= 0
-    || autoCompactLimit <= 0
-  ) {
-    return null;
-  }
-  return Math.round(Math.min(100, autoCompactLimit * 100 / contextWindow));
 }
 
 function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, acceleration, provider, models }) {
@@ -252,7 +314,7 @@ function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, accel
       assertOfficialDefaults(provider);
       return serviceTierEdit(input.serviceTier, config, models, acceleration);
     case "permissions":
-      return permissionEdits(input, config);
+      return permissionEdits(input, config, true);
     case "approvals-reviewer":
       return approvalsReviewerEdits(input, config, approvalsReviewerPolicy);
     case "web-search":
@@ -386,43 +448,51 @@ function preferenceEdits(input, models) {
     throw invalid("personality", "unsupported-field", "当前 Codex 已停用模型人格设置");
   }
   const fields = [
-    ["reasoningSummary", reasoningSummaries],
-    ["verbosity", verbosities],
-    ["historyPersistence", historyPersistences],
+    ["reasoningSummary", "model_reasoning_summary", reasoningSummaries],
+    ["planModeReasoningEffort", "plan_mode_reasoning_effort", null],
+    ["verbosity", "model_verbosity", verbosities],
+    ["checkForUpdateOnStartup", "check_for_update_on_startup", null],
+    ["historyPersistence", "history.persistence", historyPersistences],
   ];
-  for (const [field, allowed] of fields) {
-    if (!allowed.has(input?.[field])) {
-      throw invalid(field, `invalid-${field}`, `用户偏好无效：${String(input?.[field])}`);
+  if (input.kind === "preferences" && Object.keys(input).some(key => key !== "kind"
+    && !fields.some(([field]) => field === key))) {
+    throw invalid("input", "unsupported-field", "用户偏好包含不支持的字段");
+  }
+  const selected = fields.filter(([field]) => input.kind === "all" || Object.hasOwn(input, field));
+  if (selected.length === 0) {
+    throw invalid("input", "invalid-input", "请至少选择一项用户偏好");
+  }
+  const edits = [];
+  const value = {};
+  for (const [field, keyPath, allowed] of selected) {
+    let candidate = input[field];
+    if (candidate !== null) {
+      if (allowed !== null && !allowed.has(candidate)) {
+        throw invalid(field, `invalid-${field}`, `用户偏好无效：${String(candidate)}`);
+      }
+      if (field === "checkForUpdateOnStartup" && typeof candidate !== "boolean") {
+        throw invalid(field, "invalid-boolean", "启动更新检查必须是布尔值");
+      }
+      if (field === "planModeReasoningEffort") {
+        const effort = requiredString(candidate, field, "Plan 思考等级");
+        if (!models.some(model => model.available !== false
+          && model.supportedReasoningEfforts.some(option => option.effort === effort))) {
+          throw invalid(field, "invalid-reasoning-effort", `Plan 思考等级不可用：${effort}`);
+        }
+        candidate = effort;
+      }
     }
+    edits.push({ keyPath, value: candidate });
+    value[field] = candidate;
   }
-  if (typeof input.checkForUpdateOnStartup !== "boolean") {
-    throw invalid("checkForUpdateOnStartup", "invalid-boolean", "启动更新检查必须是布尔值");
-  }
-  const effort = requiredString(input.planModeReasoningEffort, "planModeReasoningEffort", "Plan 思考等级");
-  if (!models.some((model) => model.supportedReasoningEfforts.some((option) => option.effort === effort))) {
-    throw invalid("planModeReasoningEffort", "invalid-reasoning-effort", `Plan 思考等级不可用：${effort}`);
-  }
-  return {
-    edits: [
-      { keyPath: "model_reasoning_summary", value: input.reasoningSummary },
-      { keyPath: "plan_mode_reasoning_effort", value: effort },
-      { keyPath: "model_verbosity", value: input.verbosity },
-      { keyPath: "check_for_update_on_startup", value: input.checkForUpdateOnStartup },
-      { keyPath: "history.persistence", value: input.historyPersistence },
-    ],
-    value: {
-      reasoningSummary: input.reasoningSummary,
-      planModeReasoningEffort: effort,
-      verbosity: input.verbosity,
-      checkForUpdateOnStartup: input.checkForUpdateOnStartup,
-      historyPersistence: input.historyPersistence,
-    },
-  };
+  return { edits, value };
 }
 
 function modelCompactEdits(input) {
-  const contextWindow = input?.contextWindow ?? null;
-  const autoCompactPercent = input?.autoCompactPercent ?? null;
+  if (Object.keys(input).some((key) => !["kind", "contextWindow", "autoCompactTokenLimit"].includes(key))) {
+    throw invalid("input", "invalid-input", "模型上下文与自动压缩仅接受上下文窗口和精确 Token 阈值");
+  }
+  const { contextWindow, autoCompactTokenLimit } = input;
   if (
     contextWindow !== null
     && (!Number.isSafeInteger(contextWindow) || contextWindow <= 0)
@@ -430,29 +500,17 @@ function modelCompactEdits(input) {
     throw invalid("contextWindow", "invalid-window", "模型上下文窗口必须是正整数");
   }
   if (
-    autoCompactPercent !== null
-    && (!Number.isInteger(autoCompactPercent)
-      || autoCompactPercent < 10
-      || autoCompactPercent > 90)
+    autoCompactTokenLimit !== null
+    && (!Number.isSafeInteger(autoCompactTokenLimit) || autoCompactTokenLimit <= 0)
   ) {
-    throw invalid("autoCompactPercent", "invalid-percent", "自动压缩百分比必须是 10 到 90 的整数");
+    throw invalid("autoCompactTokenLimit", "invalid-token-limit", "自动压缩阈值必须是正整数");
   }
-  if (autoCompactPercent !== null && contextWindow === null) {
-    throw invalid(
-      "contextWindow",
-      "window-required",
-      "设置自动压缩百分比前必须先设置模型上下文窗口",
-    );
-  }
-  const autoCompactLimit = contextWindow !== null && autoCompactPercent !== null
-    ? Math.round(contextWindow * autoCompactPercent / 100)
-    : null;
   return {
     edits: [
-      { keyPath: "model_context_window", value: contextWindow === null ? null : contextWindow },
-      { keyPath: "model_auto_compact_token_limit", value: autoCompactLimit },
+      { keyPath: "model_context_window", value: contextWindow },
+      { keyPath: "model_auto_compact_token_limit", value: autoCompactTokenLimit },
     ],
-    value: { contextWindow, autoCompactPercent },
+    value: { contextWindow, autoCompactTokenLimit },
   };
 }
 
@@ -489,7 +547,7 @@ function serviceTierEdit(serviceTier, config, models, acceleration, selectedMode
   };
 }
 
-function permissionEdits(input, config) {
+function permissionEdits(input, config, partial = false) {
   const defaultPermissions = optionalString(record(config).default_permissions);
   if (defaultPermissions !== null) {
     throw invalid(
@@ -498,33 +556,32 @@ function permissionEdits(input, config) {
       `当前使用 Permission Profile（${defaultPermissions}），不能同时写入传统 Sandbox 设置`,
     );
   }
-  if (!sandboxModes.has(input.sandboxMode)) {
+  const keys = ["sandboxMode", "approvalPolicy", "networkAccess"];
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || Object.keys(input).some(key => !keys.includes(key) && !(partial && key === "kind"))) {
+    throw invalid("permissions", "invalid-input", "权限设置包含不支持的字段");
+  }
+  const fields = keys.filter(key => Object.hasOwn(input, key));
+  if (fields.length === 0 || !partial && fields.length !== keys.length) {
+    throw invalid("permissions", "missing-permissions", partial ? "请选择至少一项权限设置" : "批量配置必须明确选择完整权限默认值");
+  }
+  if (fields.includes("sandboxMode") && !sandboxModes.has(input.sandboxMode)) {
     throw invalid("sandboxMode", "invalid-sandbox", `Sandbox 无效：${String(input.sandboxMode)}`);
   }
-  if (!approvalPolicies.has(input.approvalPolicy)) {
+  if (fields.includes("approvalPolicy") && !approvalPolicies.has(input.approvalPolicy)) {
     throw invalid(
       "approvalPolicy",
       "invalid-approval-policy",
       `审批策略无效：${String(input.approvalPolicy)}`,
     );
   }
-  if (typeof input.networkAccess !== "boolean") {
+  if (fields.includes("networkAccess") && typeof input.networkAccess !== "boolean") {
     throw invalid("networkAccess", "invalid-boolean", "网络权限必须是布尔值");
   }
+  const paths = { sandboxMode: "sandbox_mode", approvalPolicy: "approval_policy", networkAccess: "sandbox_workspace_write.network_access" };
   return {
-    edits: [
-      { keyPath: "sandbox_mode", value: input.sandboxMode },
-      { keyPath: "approval_policy", value: input.approvalPolicy },
-      {
-        keyPath: "sandbox_workspace_write.network_access",
-        value: input.networkAccess,
-      },
-    ],
-    value: {
-      sandboxMode: input.sandboxMode,
-      approvalPolicy: input.approvalPolicy,
-      networkAccess: input.networkAccess,
-    },
+    edits: fields.map(field => ({ keyPath: paths[field], value: input[field] })),
+    value: Object.fromEntries(fields.map(field => [field, input[field]])),
   };
 }
 
@@ -563,14 +620,17 @@ function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
-function optionalSafeInteger(value) {
+function optionalSafeInteger(value, field) {
   if (value === null || value === undefined) return null;
   const normalized = typeof value === "bigint"
     ? Number(value)
     : typeof value === "string"
       ? Number(value)
       : value;
-  return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
+  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+    throw invalid(field, "unsupported-value", "当前上下文或压缩配置无法安全表示为正整数，请先在原生 Codex 配置中调整");
+  }
+  return normalized;
 }
 
 function record(value) {

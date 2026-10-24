@@ -2,6 +2,8 @@ $ErrorActionPreference = 'Stop'
 
 $requestText = [Console]::In.ReadToEnd()
 $request = $requestText | ConvertFrom-Json -Depth 4
+$remainingMs = [long]$request.deadline - [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+if ($remainingMs -le 0) { throw 'Windows Thread Writer Lock 操作已超时' }
 
 if ($request.operation -eq 'terminate') {
     $pidValue = [int]$request.pid
@@ -19,10 +21,12 @@ if ($request.operation -eq 'terminate') {
         [pscustomobject]@{ ok = $true; exited = $false } | ConvertTo-Json -Compress
         exit 0
     }
+    $remainingMs = [long]$request.deadline - [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    if ($remainingMs -le 0) { throw 'Windows Thread Writer Lock 操作已超时' }
     $target.Kill()
     [pscustomobject]@{
         ok = $true
-        exited = $target.WaitForExit($timeoutMs)
+        exited = $target.WaitForExit([int][Math]::Max(0, [Math]::Min($timeoutMs, [long]$request.deadline - [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())))
     } | ConvertTo-Json -Compress
     exit 0
 }

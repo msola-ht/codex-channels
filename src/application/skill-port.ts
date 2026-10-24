@@ -9,6 +9,6 @@ export interface InvocableSkill {
 }
 
 export interface SkillQueryPort {
-  listSkills(cwd: string): Promise<InstalledSkill[]>;
-  resolveSkill(cwd: string, name: string): Promise<InvocableSkill | undefined>;
+  listSkills(cwd: string, beforeSubmit?: () => void): Promise<InstalledSkill[]>;
+  resolveSkill(cwd: string, name: string, beforeSubmit?: () => void): Promise<InvocableSkill | undefined>;
 }

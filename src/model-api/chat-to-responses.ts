@@ -1,4 +1,4 @@
-import type { ChatToolIdentity } from "./responses-to-chat.js";
+import type { ChatMessage, ChatToolIdentity } from "./responses-to-chat.js";
 import { isChatUsageTrailer } from "./chat-response.js";
 import { array, customToolInput, ModelConversionError, object, string, toolArguments, toolSearchArguments } from "./validation.js";
 import type { JsonObject } from "./validation.js";
@@ -6,28 +6,52 @@ import type { JsonObject } from "./validation.js";
 type OutputItem = JsonObject & { id: string; type: string };
 interface ToolState { name: string; arguments: string; callId: string }
 interface ActiveContent { item: OutputItem; index: number; text: string; kind: "message" | "reasoning" | "reasoning_content" }
+export interface HostedSearchCall { id: string; query: string }
+export interface HostedSearchResult extends HostedSearchCall { sources: Array<{ url: string; title: string }>; text: string }
 
-/** One instance per upstream response; no cross-request history or provider configuration. */
+/** One instance per downstream response, including hosted-search Chat rounds; no cross-request history. */
 export class ChatToResponses {
   private sequence = 0;
   private readonly items: OutputItem[] = [];
   private readonly tools = new Map<number, ToolState>();
   private activeContent: ActiveContent | undefined;
   private usage: JsonObject | undefined;
+  private readonly previousUsage: Array<JsonObject | undefined> = [];
+  private awaitingNextRound = false;
+  private readonly hostedItems = new Map<string, { item: OutputItem; index: number }>();
+  private roundText = "";
+  private roundReasoning = "";
+  private roundReasoningContent = "";
   private finishReason: string | undefined;
   private ended = false;
   private bytes = 0;
   constructor(private readonly id: string, private readonly model: string, private readonly toolNames?: ReadonlyMap<string, ChatToolIdentity>) {}
 
-  start(): JsonObject[] { return [this.event("response.created", { response: this.response("in_progress") })]; }
+  start(): JsonObject[] { return [this.event("response.created", { response: this.response("in_progress", this.aggregateUsage()) })]; }
+
+  /** Called immediately before submitting a model round, not while preparing it. */
+  beginModelRound(): void { this.awaitingNextRound = false; }
+
+  fail(error: JsonObject): JsonObject[] {
+    let usage: JsonObject | undefined;
+    try { usage = this.aggregateUsage(); }
+    catch (failure) { if (!(failure instanceof ModelConversionError)) throw failure; }
+    if (this.ended) return [this.event("response.failed", { response: { ...this.response("failed", usage), error } })];
+    this.ended = true;
+    return [...this.closeContent("incomplete"), this.event("response.failed", { response: { ...this.response("failed", usage), error } })];
+  }
 
   push(value: unknown): JsonObject[] {
     if (this.ended) throw new ModelConversionError("Chat stream continued after completion");
     const chunk = object(value);
-    this.bytes += JSON.stringify(chunk).length;
-    if (this.bytes > 16 * 1024 * 1024) throw new ModelConversionError("Chat response exceeds size limit");
+    this.addBytes(JSON.stringify(chunk));
     if (chunk.error != null) throw new ModelConversionError("Chat upstream returned an error");
-    if (chunk.usage != null) this.usage = convertUsage(chunk.usage);
+    if (chunk.usage != null) {
+      // Usage is independent evidence, including on an otherwise invalid frame.
+      // An invalid replacement must not leave an older snapshot looking final.
+      this.usage = undefined;
+      this.usage = convertUsage(chunk.usage);
+    }
     const choices = array(chunk.choices);
     if (choices.length === 0) return [];
     if (choices.length !== 1) throw new ModelConversionError("Multiple Chat choices are unsupported");
@@ -37,50 +61,151 @@ export class ChatToResponses {
     if (this.finishReason && isChatUsageTrailer(delta, choice.finish_reason, this.finishReason, chunk.usage)) return [];
     if (this.finishReason && Object.keys(delta).length) throw new ModelConversionError("Chat delta after finish reason");
     if (delta.refusal != null) throw new ModelConversionError("Unsupported Chat content");
-    const events: JsonObject[] = [];
     const thought = reasoningText(delta);
-    events.push(...this.appendContent(thought.kind, thought.text));
-    if (delta.content != null) events.push(...this.appendContent("message", string(delta.content)));
-    if (delta.tool_calls != null) for (const raw of array(delta.tool_calls)) {
+    const content = delta.content == null ? "" : string(delta.content);
+    const tools = delta.tool_calls == null ? undefined : new Map(this.tools);
+    if (tools) for (const raw of array(delta.tool_calls)) {
       const call = object(raw);
       const index = call.index;
       if (!Number.isSafeInteger(index) || Number(index) < 0 || Number(index) >= 128) throw new ModelConversionError("Invalid Chat tool index");
-      let state = this.tools.get(Number(index));
-      if (!state) {
+      const previous = tools.get(Number(index));
+      let state: ToolState;
+      if (!previous) {
         if (call.type !== "function") throw new ModelConversionError("Unsupported Chat tool type");
         const callId = string(call.id);
-        if (!callId || [...this.tools.values()].some(entry => entry.callId === callId)) throw new ModelConversionError("Invalid Chat tool identity");
+        if (!callId || [...tools.values()].some(entry => entry.callId === callId)) throw new ModelConversionError("Invalid Chat tool identity");
         state = { callId, name: "", arguments: "" };
-        this.tools.set(Number(index), state);
-      } else if ((call.id != null && call.id !== state.callId) || (call.type != null && call.type !== "function")) throw new ModelConversionError("Chat tool identity changed");
+      } else {
+        if ((call.id != null && call.id !== previous.callId) || (call.type != null && call.type !== "function")) throw new ModelConversionError("Chat tool identity changed");
+        state = { ...previous };
+      }
       const fn = object(call.function);
       if (fn.name != null) state.name += string(fn.name);
       if (fn.arguments != null) {
         state.arguments += string(fn.arguments);
       }
+      tools.set(Number(index), state);
     }
+    let finishReason = this.finishReason;
     if (choice.finish_reason != null) {
       if (this.finishReason || !["stop", "tool_calls", "length", "content_filter"].includes(string(choice.finish_reason))) throw new ModelConversionError("Chat upstream failed to finish normally");
-      this.finishReason = string(choice.finish_reason);
+      finishReason = string(choice.finish_reason);
     }
+    // No content lifecycle or tool mutation is committed until the whole frame
+    // is valid; otherwise generated close events could be lost on an exception.
+    if (tools) { this.tools.clear(); for (const [index, state] of tools) this.tools.set(index, state); }
+    this.finishReason = finishReason;
+    const events: JsonObject[] = [];
+    if (thought.kind === "reasoning_content") this.roundReasoningContent += thought.text;
+    else this.roundReasoning += thought.text;
+    events.push(...this.appendContent(thought.kind, thought.text));
+    this.roundText += content;
+    events.push(...this.appendContent("message", content));
     return events;
+  }
+
+  /** 所有并行调用先一起校验，保证无效客户端调用不能伴随已执行的搜索。 */
+  hostedSearchCalls(name: string): HostedSearchCall[] {
+    if (this.ended || !this.finishReason) throw new ModelConversionError("Chat stream ended without a finish reason");
+    if (this.finishReason === "length" || this.finishReason === "content_filter") return [];
+    this.validateCalls();
+    return [...this.tools.values()].filter(state => state.name === name).map(state => {
+      if (this.toolNames?.get(name)?.kind !== "web_search") throw new ModelConversionError("Unknown hosted web search tool");
+      return { id: state.callId, query: hostedSearchQuery(state.arguments) };
+    });
+  }
+
+  lastRoundOutputTokens(): number | undefined { return this.usage ? Number(this.usage.output_tokens) : undefined; }
+
+  beginHostedSearch(call: HostedSearchCall): JsonObject[] {
+    const state = [...this.tools.values()].find(state => state.callId === call.id);
+    if (!state || this.hostedItems.has(call.id) || this.toolNames?.get(state.name)?.kind !== "web_search"
+      || !this.hostedSearchCalls(state.name).some(entry => entry.id === call.id && entry.query === call.query)) throw new ModelConversionError("Invalid hosted web search call");
+    const events = this.closeContent();
+    const item: OutputItem = { id: `${this.id}_search_${this.items.length}`, type: "web_search_call", status: "in_progress" };
+    const index = this.items.length;
+    this.hostedItems.set(call.id, { item, index });
+    events.push(...this.addItem(item));
+    events.push(this.event("response.web_search_call.in_progress", { item_id: item.id, output_index: index }));
+    events.push(this.event("response.web_search_call.searching", { item_id: item.id, output_index: index }));
+    return events;
+  }
+
+  completeHostedSearches(name: string, results: HostedSearchResult[]): {
+    events: JsonObject[]; message: ChatMessage; toolMessages: ChatMessage[]; deferredClientCalls: number;
+  } {
+    const calls = this.hostedSearchCalls(name);
+    if (!calls.length || results.length !== calls.length || new Set(results.map(result => result.id)).size !== calls.length) throw new ModelConversionError("Missing hosted web search results");
+    const completed = calls.map(call => {
+      const result = results.find(result => result.id === call.id);
+      const active = this.hostedItems.get(call.id);
+      if (!result || !active || result.query !== call.query || typeof result.text !== "string") throw new ModelConversionError("Invalid hosted web search result");
+      const sources = result.sources.map(source => {
+        let url: URL;
+        try { url = new URL(source.url); } catch { throw new ModelConversionError("Invalid hosted web search source"); }
+        if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || typeof source.title !== "string") throw new ModelConversionError("Invalid hosted web search source");
+        return { type: "url", url: source.url, title: source.title };
+      });
+      return { active, item: { ...active.item, status: "completed", action: { type: "search", query: call.query, queries: [call.query], sources } } };
+    });
+    this.addBytes(JSON.stringify(results));
+    // These calls stay inside this response. Give each model round distinct
+    // Chat IDs even if the upstream reuses a call ID on its next HTTP request.
+    const roundCalls = [...this.tools].map(([index, state]) => ({
+      state, id: `${this.id}_round_${this.previousUsage.length}_call_${index}`,
+    }));
+    const message: ChatMessage = { role: "assistant", content: this.roundText || null,
+      ...(this.roundReasoning ? { reasoning: this.roundReasoning } : {}),
+      ...(this.roundReasoningContent ? { reasoning_content: this.roundReasoningContent } : {}),
+      tool_calls: roundCalls.map(({ state, id }) => ({ id, type: "function", function: { name: state.name, arguments: state.arguments } })),
+    };
+    const deferred = JSON.stringify({
+      status: "not_executed",
+      reason: "This client tool was not dispatched because this response also requested hosted web search. Review the search results and issue the client tool again in a separate model response without hosted search. No client action or approval has occurred.",
+    });
+    const toolMessages: ChatMessage[] = roundCalls.map(({ state, id }) => ({
+      role: "tool", tool_call_id: id,
+      content: state.name === name ? results.find(result => result.id === state.callId)!.text : deferred,
+    }));
+    const deferredClientCalls = roundCalls.filter(({ state }) => state.name !== name).length;
+    this.addBytes(deferred.repeat(deferredClientCalls));
+    const events: JsonObject[] = [];
+    for (const { active, item } of completed) {
+      this.items[active.index] = item;
+      events.push(this.event("response.web_search_call.completed", { item_id: item.id, output_index: active.index }));
+      events.push(this.event("response.output_item.done", { item, output_index: active.index }));
+    }
+    // No client call from the mixed round was published or executed. Its
+    // explicit non-execution result lets the model reconsider after searching.
+    this.tools.clear();
+    this.hostedItems.clear();
+    this.previousUsage.push(this.usage);
+    this.usage = undefined;
+    this.awaitingNextRound = true;
+    this.finishReason = undefined;
+    this.roundText = ""; this.roundReasoning = ""; this.roundReasoningContent = "";
+    return { events, message, toolMessages, deferredClientCalls };
   }
 
   finish(): JsonObject[] {
     if (this.ended || !this.finishReason) throw new ModelConversionError("Chat stream ended without a finish reason");
-    this.ended = true;
     if (this.finishReason === "length" || this.finishReason === "content_filter") {
+      const usage = this.aggregateUsage();
+      this.ended = true;
       const events = this.closeContent("incomplete");
-      return [...events, this.event("response.incomplete", { response: { ...this.response("incomplete"), incomplete_details: { reason: this.finishReason === "length" ? "max_output_tokens" : "content_filter" } } })];
+      return [...events, this.event("response.incomplete", { response: { ...this.response("incomplete", usage), incomplete_details: { reason: this.finishReason === "length" ? "max_output_tokens" : "content_filter" } } })];
     }
-    if ((this.tools.size > 0) !== (this.finishReason === "tool_calls")) throw new ModelConversionError("Chat tool finish reason mismatch");
-    const calls: OutputItem[] = [];
-    for (const [index, state] of this.tools) {
-      if (!state.name) throw new ModelConversionError("Missing Chat tool name");
-      const identity = this.toolNames?.get(state.name);
-      if (this.toolNames && !identity) throw new ModelConversionError("Unknown Chat tool name");
-      calls.push(toolCallItem(`${this.id}_call_${index}`, state, identity));
-    }
+    const calls = this.validateCalls().map(([index, state, identity]) => {
+      if (identity?.kind === "web_search") throw new ModelConversionError("Unexecuted hosted web search call");
+      const id = `${this.id}_call_${index}`;
+      // A hosted-search continuation is another upstream request and can reuse
+      // an earlier raw call ID. Publish a response-scoped ID so the next full
+      // Responses history can pair its actual client result without collisions.
+      return toolCallItem(id, this.previousUsage.length > 0 ? { ...state, callId: id } : state, identity);
+    });
+    if (!this.roundText && !this.roundReasoning && !this.roundReasoningContent && !calls.length) throw new ModelConversionError("Empty Chat response");
+    const usage = this.aggregateUsage();
+    this.ended = true;
     const events = this.closeContent();
     // Keep partial or invalid tool calls away from the client. Publish validated
     // calls after content, each with a complete identity and paired lifecycle.
@@ -99,8 +224,7 @@ export class ChatToResponses {
       }
       events.push(this.event("response.output_item.done", { item, output_index }));
     }
-    if (!this.items.length) throw new ModelConversionError("Empty Chat response");
-    events.push(this.event("response.completed", { response: this.response("completed") }));
+    events.push(this.event("response.completed", { response: this.response("completed", usage) }));
     return events;
   }
 
@@ -161,10 +285,55 @@ export class ChatToResponses {
     this.items.push(item);
     return [this.event("response.output_item.added", { item: { ...item }, output_index })];
   }
-  private response(status: string): JsonObject {
-    return { id: this.id, object: "response", model: this.model, status, output: [...this.items], ...(this.usage ? { usage: this.usage } : {}) };
+  private aggregateUsage(): JsonObject | undefined {
+    return aggregateUsage(this.awaitingNextRound ? this.previousUsage : [...this.previousUsage, this.usage]);
+  }
+  private response(status: string, usage?: JsonObject): JsonObject {
+    return { id: this.id, object: "response", model: this.model, status, output: [...this.items], ...(usage ? { usage } : {}) };
+  }
+  private addBytes(text: string): void {
+    this.bytes += Buffer.byteLength(text, "utf8");
+    if (this.bytes > 16 * 1024 * 1024) throw new ModelConversionError("Chat response exceeds size limit");
+  }
+  private validateCalls(): Array<[number, ToolState, ChatToolIdentity | undefined]> {
+    if ((this.tools.size > 0) !== (this.finishReason === "tool_calls")) throw new ModelConversionError("Chat tool finish reason mismatch");
+    return [...this.tools].map(([index, state]) => {
+      if (!state.name) throw new ModelConversionError("Missing Chat tool name");
+      const identity = this.toolNames?.get(state.name);
+      if (this.toolNames && !identity) throw new ModelConversionError("Unknown Chat tool name");
+      if (identity?.kind === "web_search") hostedSearchQuery(state.arguments);
+      else toolCallItem(`${this.id}_validate_${index}`, state, identity);
+      return [index, state, identity];
+    });
   }
   private event(type: string, fields: JsonObject): JsonObject { return { type, sequence_number: this.sequence++, ...fields }; }
+}
+
+function hostedSearchQuery(text: string): string {
+  const source = toolArguments(text, "Invalid hosted web search arguments");
+  if (Object.keys(source).some(key => key !== "query")) throw new ModelConversionError("Unsupported hosted web search arguments");
+  const query = string(source.query);
+  if (!query.trim() || query.length > 2048) throw new ModelConversionError("Invalid hosted web search query");
+  return query;
+}
+
+function aggregateUsage(rounds: Array<JsonObject | undefined>): JsonObject | undefined {
+  if (rounds.some(usage => usage === undefined)) return undefined;
+  const known = rounds as JsonObject[];
+  const sum = (key: string): number => {
+    const value = known.reduce((total, usage) => total + Number(usage[key]), 0);
+    if (!Number.isSafeInteger(value)) throw new ModelConversionError("Invalid accumulated Chat usage");
+    return value;
+  };
+  const result: JsonObject = { input_tokens: sum("input_tokens"), output_tokens: sum("output_tokens"), total_tokens: sum("total_tokens") };
+  for (const [key, field] of [["input_tokens_details", "cached_tokens"], ["output_tokens_details", "reasoning_tokens"]] as const) {
+    if (known.every(usage => usage[key] != null && object(usage[key])[field] != null)) {
+      const value = known.reduce((total, usage) => total + Number(object(usage[key])[field]), 0);
+      if (!Number.isSafeInteger(value)) throw new ModelConversionError("Invalid accumulated Chat usage");
+      result[key] = { [field]: value };
+    }
+  }
+  return result;
 }
 
 /**
@@ -179,6 +348,7 @@ function toolCallItem(id: string, state: ToolState, identity: ChatToolIdentity |
     name: identity?.name ?? state.name,
     ...(identity?.namespace === undefined ? {} : { namespace: identity.namespace }),
   };
+  if (kind === "web_search") throw new ModelConversionError("Hosted web search cannot become a client tool call");
   if (kind === "custom") {
     return { ...fields, type: "custom_tool_call", input: customToolInput(toolArguments(state.arguments, "Invalid custom tool arguments")), status: "completed" };
   }
@@ -224,7 +394,7 @@ function convertUsage(value: unknown): JsonObject {
     return Number(value);
   };
   const input = count(source.prompt_tokens), output = count(source.completion_tokens);
-  const result: JsonObject = { input_tokens: input, output_tokens: output, total_tokens: input + output };
+  const result: JsonObject = { input_tokens: input, output_tokens: output, total_tokens: count(input + output) };
   if (source.prompt_tokens_details != null) {
     const cached = object(source.prompt_tokens_details).cached_tokens;
     if (cached != null) {

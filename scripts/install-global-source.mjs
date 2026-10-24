@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -73,8 +73,8 @@ catch (error) {
 
 async function assertPreparedBuild() {
   if (
-    !existsSync(join(packageDir, "dist", "main.js"))
-    || !existsSync(join(webuiDir, "dist", "index.html"))
+    !lstatSync(join(packageDir, "dist", "main.js"), { throwIfNoEntry: false })?.isFile()
+    || !lstatSync(join(webuiDir, "dist", "index.html"), { throwIfNoEntry: false })?.isFile()
   ) {
     throw new Error("预构建源码缺少 Gateway 或 WebUI 构建结果");
   }

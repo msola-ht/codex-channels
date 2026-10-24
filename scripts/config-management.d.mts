@@ -1,5 +1,6 @@
 export type GatewaySettingActivation =
   | "none"
+  | "next-read"
   | "reload"
   | "restart-gateway"
   | "restart-webui"
@@ -94,9 +95,9 @@ export type GatewaySettingInput =
       kind: "system.official-tui-identity";
       value: {
         clientIdentity: {
-          name?: string;
-          title?: string;
-          version?: string;
+          name?: string | null;
+          title?: string | null;
+          version?: string | null;
         } | null;
         followCliVersion: boolean;
         upstreamUserAgent: string | null;
@@ -124,7 +125,7 @@ export type GatewaySettingInput =
   | { kind: "webui.enabled"; value: boolean }
   | { kind: "webui.host"; value: "127.0.0.1" | "::1" | "0.0.0.0" | null; token?: string }
   | { kind: "webui.port"; value: number | null }
-  | { kind: "webui.token"; action: "set" | "clear"; value?: string }
+  | { kind: "webui.token"; action: "set" | "clear" | "generate"; value?: string }
   | { kind: "metrics.storage"; retentionDays: number; maxRows: number };
 
 export function loadGatewaySettings(environment?: NodeJS.ProcessEnv): GatewaySettings;
@@ -139,7 +140,7 @@ export function validateNetworkProxyValue(
 ): string | undefined;
 
 export function updateGatewaySetting(
-  input: GatewaySettingInput,
+  input: Exclude<GatewaySettingInput, { kind: "system.default-model" }>,
   options: {
     environment?: NodeJS.ProcessEnv;
     expectedRevision: string;
@@ -156,4 +157,14 @@ export function updateGatewaySetting(
   value: unknown;
   activation: GatewaySettingActivation;
   activationResult: ConfigActivationResult;
+  generatedWebuiToken?: string;
 };
+
+export function updateGatewayDefaultModelSetting(
+  input: Extract<GatewaySettingInput, { kind: "system.default-model" }>,
+  options: Parameters<typeof updateGatewaySetting>[1] & {
+    createClient?: (options: { environment: NodeJS.ProcessEnv }) => Promise<
+      import("./codex-user-config.mjs").CodexUserConfigClient
+    >;
+  },
+): Promise<ReturnType<typeof updateGatewaySetting>>;

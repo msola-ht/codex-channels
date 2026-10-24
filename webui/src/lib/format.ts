@@ -1,24 +1,56 @@
-import type { CacheUsage, UsageCoverage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
+import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
 import { messages, type Translate } from "./i18n/messages"
 import { translate } from "./i18n/translate"
 import { failureLabelKeys, recordedRequestFailure } from "./request-failure"
-import { modelDisplayName } from "../../../runtime/model-display-name.mjs"
-
-let modelDisplayAliases: Readonly<Record<string, string>> = {}
-
-export function setModelDisplayAliases(aliases: Readonly<Record<string, string>>): void {
-  modelDisplayAliases = aliases
-}
-
-export function formatModelLabel(model: string, displayName: string): string {
-  const name = modelDisplayName(model, modelDisplayAliases, displayName)
-  return Object.hasOwn(modelDisplayAliases, model) && name !== model ? `${name}（${model}）` : name
-}
+import { formatGenerationSpeed as requestGenerationSpeed } from "../../../runtime/request-timing.mjs"
 
 export function requestMethodDisplay(record: RequestRecord | TrafficExchangeSummary, t: Translate): { label: string; variant: "secondary" | "outline" } {
   if (record.requestPurpose === "autoApprovalReview") return { label: t("requestMethod.review"), variant: "secondary" }
   if (("operation" in record && record.operation === "compact") || ("requestKind" in record && record.requestKind === "compaction")) return { label: t("requestMethod.compact"), variant: "secondary" }
+  if ("operation" in record && (record.operation === "imageGeneration" || record.operation === "imageEdit")) return { label: t(`requestMethod.${record.operation}`), variant: "secondary" }
+  if (record.transport === "http" && "path" in record && record.method === "POST") {
+    const path = record.path?.split(/[?#]/u)[0]
+    if (path === "/images/generations") return { label: t("requestMethod.imageGeneration"), variant: "secondary" }
+    if (path === "/images/edits") return { label: t("requestMethod.imageEdit"), variant: "secondary" }
+  }
   return { label: record.transport === "websocket" ? "wss" : record.transport === "http" ? "http" : "—", variant: "outline" }
+}
+
+export function formatRequestActivity(record: RequestRecord | TrafficExchangeSummary, t: Translate): string {
+  const method = requestMethodDisplay(record, t)
+  const activity = record.activity
+  const labels: string[] = []
+  if (method.variant === "secondary") labels.push(method.label)
+  else if ("category" in record && record.category === "models") labels.push(t("traffic.categoryModels"))
+  else if ("category" in record && record.category === "prewarm") labels.push(t("traffic.categoryPrewarm"))
+  if (activity?.toolResult) labels.push(t("traffic.activityToolResult"))
+  if (activity?.reply) labels.push(t("traffic.activityReply"))
+  if (activity?.toolCalls) labels.push(activity.tools.length ? `${t("traffic.activityTools")} · ${activity.tools.join(", ")}` : t("traffic.activityTools"))
+  if (!labels.length) labels.push(t(activity == null ? "traffic.notRecorded" : "traffic.activityUnknown"))
+  if (activity?.partial) labels.push(t("traffic.activityPartial"))
+  return labels.join(" / ")
+}
+
+export function requestOperationLabel(operation: RequestRecord["operation"], t: Translate): string {
+  if (operation === "imageGeneration" || operation === "imageEdit") return t(`requestMethod.${operation}`)
+  return operation === "compact" ? t("metrics.compact") : t("filters.response")
+}
+
+/** Display recorded destinations without credentials, query parameters or fragments. */
+export function formatTrafficRequestAddress(record: Pick<TrafficExchangeSummary, "transport" | "method" | "path" | "url">): string {
+  const raw = record.transport === "websocket" ? record.url : record.path
+  if (!raw) return "—"
+  let address: string
+  if (raw.startsWith("/") && !raw.startsWith("//")) {
+    address = raw.split(/[?#]/u)[0]!
+  } else {
+    try {
+      const url = new URL(raw)
+      if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)) return "—"
+      address = `${url.origin}${url.pathname}`
+    } catch { return "—" }
+  }
+  return `${record.transport === "websocket" ? "WS" : record.method ?? "HTTP"} ${address}`
 }
 
 /** 调用转储使用 clp，请求指标使用精确账户 Provider clp-<id>。 */
@@ -28,7 +60,10 @@ export function isClinePassProvider(provider: string | null | undefined): boolea
 
 export function formatModelName(model: string | null | undefined, provider: string | null | undefined): string | null {
   if (model == null) return null
-  return modelDisplayName(model, modelDisplayAliases, isClinePassProvider(provider) ? model.replace(/^cline-pass\//, "") : model)
+  if (!isClinePassProvider(provider)) return model
+  const prefix = `${provider}/`
+  const unqualified = model.startsWith(prefix) ? model.slice(prefix.length) : model
+  return unqualified.replace(/^cline-pass\//, "")
 }
 
 export type DisplayLanguage = "zh" | "en"
@@ -83,35 +118,24 @@ const compactThreeDecimalFormatter = new Intl.NumberFormat("en-US", {
 })
 
 export function formatTokens(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—"
+  if (value == null || value === 0) return ""
   return Math.abs(value) >= 1_000_000_000
     ? compactThreeDecimalFormatter.format(value)
     : compactTwoDecimalFormatter.format(value)
 }
 
-/** Aggregates retain known sums; missingness is independent for every token field. */
-export function formatUsageTokens(value: number, requestCount: number, missingRequestCount: number): string {
-  if (requestCount === 0) return formatTokens(0)
-  if (missingRequestCount === requestCount) return "—"
-  return formatTokens(value)
-}
-
-export function formatTotalUsage(value: { inputTokens: number; outputTokens: number; requestCount: number; usageCoverage: UsageCoverage }): string {
-  const { inputMissingRequestCount: input, outputMissingRequestCount: output } = value.usageCoverage
-  if (value.requestCount > 0 && input === value.requestCount && output === value.requestCount) return "—"
+/** Display recorded aggregate sums independently of coverage metadata. */
+export function formatTotalUsage(value: { inputTokens: number; outputTokens: number }): string {
   return formatTokens(value.inputTokens + value.outputTokens)
 }
 
-export function mergeUsageCoverage(left: UsageCoverage, right: UsageCoverage): UsageCoverage {
-  return {
-    inputMissingRequestCount: left.inputMissingRequestCount + right.inputMissingRequestCount,
-    outputMissingRequestCount: left.outputMissingRequestCount + right.outputMissingRequestCount,
-    reasoningMissingRequestCount: left.reasoningMissingRequestCount + right.reasoningMissingRequestCount,
-  }
+export function formatCount(value: number): string {
+  return value === 0 ? "" : compactTwoDecimalFormatter.format(value)
 }
 
-export function formatCount(value: number): string {
-  return compactTwoDecimalFormatter.format(value)
+export function formatGenerationSpeed(value: Parameters<typeof requestGenerationSpeed>[0]): string {
+  const display = requestGenerationSpeed(value)
+  return display === "—" || display === "0.0 /s" ? "" : display
 }
 
 export function formatBytes(value: number | null | undefined): string {
@@ -226,22 +250,24 @@ export function formatErrorMessage(value: string, language: DisplayLanguage): st
 }
 
 export function formatSuccessRate(requestCount: number, unsuccessful: number): string {
-  if (requestCount <= 0) return "—"
+  if (requestCount <= 0 || requestCount === unsuccessful) return ""
   return `${((requestCount - unsuccessful) / requestCount * 100).toFixed(1)}%`
 }
 
 export function formatFailureRate(requestCount: number, unsuccessful: number): string {
-  if (requestCount <= 0) return "—"
+  if (requestCount <= 0 || unsuccessful === 0) return ""
   return `${(unsuccessful / requestCount * 100).toFixed(1)}%`
 }
 
 export function formatRequestOutcomes(outcomes: RequestOutcomeCounts | null, t: Translate): string {
-  return t("metrics.requestOutcomes", {
-    completed: formatCount(outcomes?.completed ?? 0),
-    interrupted: formatCount(outcomes?.interrupted ?? 0),
-    failed: formatCount(outcomes?.failed ?? 0),
-    incomplete: formatCount(outcomes?.incomplete ?? 0),
-  })
+  if (outcomes === null) return ""
+  const categories: [string, number][] = [
+    [t("filters.completed"), outcomes.completed],
+    [t("metrics.interrupted"), outcomes.interrupted],
+    [t("filters.failed"), outcomes.failed],
+    [t("filters.incomplete"), outcomes.incomplete],
+  ]
+  return categories.filter(([, count]) => count !== 0).map(([label, count]) => `${label} ${formatCount(count)}`).join(" · ")
 }
 
 export function isClientInterruption(record: Pick<RequestRecord, "source" | "status" | "deliveryStatus" | "errorCode" | "errorType" | "httpStatus">): boolean {
@@ -253,7 +279,7 @@ export function formatInterruptionSummary(summary: RequestInterruptionSummary, t
     completed: formatCount(summary.followedByCompletion),
     unobserved: formatCount(summary.noObservedCompletion),
     usage: formatCount(summary.usageUnobserved),
-  })
+  }).split(" · ").filter((_, index) => [summary.followedByCompletion, summary.noObservedCompletion, summary.usageUnobserved][index] !== 0).join(" · ")
 }
 
 export function shortThreadId(threadId: string): string {
@@ -263,9 +289,9 @@ export { formatElapsedDuration } from "../../../src/surfaces/elapsed-duration.js
 
 export function formatCacheUsage(usage: CacheUsage | null) {
   const cached = formatTokens(usage?.cachedInputTokens)
-  const rate = usage !== null && usage.inputTokens > 0 && usage.cachedInputTokens !== null
+  const rate = usage !== null && usage.inputTokens > 0 && usage.cachedInputTokens !== null && usage.cachedInputTokens > 0
     ? `${(usage.cachedInputTokens / usage.inputTokens * 100).toFixed(1)}%`
-    : "—"
+    : ""
   return {
     cached,
     rate,

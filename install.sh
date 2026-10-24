@@ -49,9 +49,9 @@ for command in git node npm; do
 done
 
 node -e '
-const [major, minor] = process.versions.node.split(".").map(Number);
-if (major < 22 || (major === 22 && minor < 13)) process.exit(1);
-' || fail "Node.js 版本过低；需要 22.13.0 或更高版本"
+const [major, minor, patch] = process.versions.node.split(".").map(Number);
+if (major < 22 || (major === 22 && (minor < 23 || (minor === 23 && patch < 4)))) process.exit(1);
+' || fail "Node.js 版本过低；需要 22.23.4 或更高版本"
 
 npm_version="$(npm --version 2>/dev/null)" || fail "无法读取 npm 版本"
 npm_global_root="$(npm root --global 2>/dev/null)" || fail "无法读取 npm 全局安装目录"
@@ -91,18 +91,25 @@ global_launcher="$npm_global_prefix/bin/codexc"
 if [ -e "$checkout" ] || [ -L "$checkout" ]; then
   fail "源码目录已存在：${checkout}；已有源码安装请使用 codexc update"
 fi
-mkdir -p "$install_root"
-chmod 700 "$install_root"
+node --input-type=module -e '
+import { chmodSync, lstatSync, mkdirSync } from "node:fs";
+const path = process.argv[1];
+mkdirSync(path, { recursive: true, mode: 0o700 });
+const metadata = lstatSync(path);
+if (!metadata.isDirectory() || metadata.isSymbolicLink()
+  || (process.getuid && metadata.uid !== process.getuid())) {
+  throw new Error("安装根目录必须是当前用户拥有的真实目录");
+}
+chmodSync(path, 0o700);
+' "$install_root" || fail "安装根目录类型、归属或权限无效：$install_root"
 staging="$(mktemp -d "$install_root/.codex-channels-install.XXXXXX")"
-completed=false
+source_placed=false
 cleanup() {
   if [ -n "${staging:-}" ] && [ -d "$staging" ]; then
     rm -rf "$staging"
   fi
-  if [ "$completed" != true ]; then
-    if [ -d "$checkout" ]; then
-      rm -rf "$checkout"
-    fi
+  if [ "$source_placed" = true ]; then
+    note "安装未完成；源码已保留在 $checkout。请修复错误后在该目录运行 npm run install:global。"
   fi
 }
 trap cleanup EXIT
@@ -133,7 +140,7 @@ if [ "$codex_version" != "$version" ]; then
   else
     note "Codex CLI 当前 ${codex_version:-未知}，正在同步为项目锁定版本 $version"
   fi
-  npm install --global --no-audit --no-fund "@openai/codex@$version" \
+  npm install --global --include=optional --no-audit --no-fund "@openai/codex@$version" \
     || fail "Codex CLI 安装失败；请检查 npm 全局目录权限"
   codex_command="$(command -v codex 2>/dev/null || true)"
   [ -n "$codex_command" ] \
@@ -156,31 +163,21 @@ fi
 node "$staging/repository/scripts/sandbox-dependencies.mjs" \
   || fail "沙盒运行依赖检查或安装失败"
 
-(cd "$staging/repository" \
-  && ignore_scripts="$(npm config get ignore-scripts)" \
-  && case "$ignore_scripts" in
-    true|false) ;;
-    *) fail "无法确认 npm ignore-scripts 设置，拒绝构建源码" ;;
-  esac \
-  && node scripts/installation-command.mjs '安装 Gateway 依赖' -- npm ci --ignore-scripts --no-audit --no-fund \
-  && { [ "$ignore_scripts" = true ] || npm run hooks:install; } \
-  && node scripts/installation-command.mjs '构建 Gateway' -- npm run build \
-  && node scripts/installation-command.mjs '检查 Gateway' -- npm run check) \
-  || fail "Gateway 依赖安装或构建失败"
-(cd "$staging/repository/webui" \
-  && node ../scripts/installation-command.mjs '安装 WebUI 依赖' -- npm ci --ignore-scripts --no-audit --no-fund \
-  && node ../scripts/installation-command.mjs '构建 WebUI' -- npm run build) \
-  || fail "WebUI 依赖安装或构建失败"
-
-[ -f "$staging/repository/dist/main.js" ] || fail "构建结果缺少 dist/main.js"
-[ -f "$staging/repository/webui/dist/index.html" ] \
-  || fail "构建结果缺少 webui/dist/index.html"
+(cd "$staging/repository" && node scripts/source-build.mjs) \
+  || fail "源码依赖安装或构建失败"
 
 git -C "$staging/repository" config --local codex-connect.managed-source true \
   || fail "无法标记受管源码安装"
 git -C "$staging/repository" config --local codex-connect.npm-prefix "$npm_global_prefix" \
   || fail "无法记录 npm 全局目录"
-mv "$staging/repository" "$checkout"
+node --input-type=module -e '
+import { lstatSync, renameSync } from "node:fs";
+if (lstatSync(process.argv[2], { throwIfNoEntry: false })) {
+  throw new Error("源码目录在安装期间出现，拒绝覆盖");
+}
+renameSync(process.argv[1], process.argv[2]);
+' "$staging/repository" "$checkout" || fail "无法安全放置源码目录：$checkout"
+source_placed=true
 package_directory="$staging/package"
 mkdir -p "$package_directory"
 note "正在打包 Codex Connect 源码"
@@ -204,7 +201,7 @@ node "$checkout/scripts/source-install-metadata.mjs" record "$checkout" "$npm_gl
   || fail "无法记录源码安装来源"
 [ -x "$global_launcher" ] \
   || fail "npm 全局命令入口不存在：$global_launcher"
-completed=true
+source_placed=false
 
 rm -rf "$staging"
 staging=""

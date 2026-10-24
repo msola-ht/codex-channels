@@ -1,6 +1,6 @@
 # CLI 入口
 
-本目录保存 npm 包对用户暴露的 `codexc` 可执行入口。
+本目录保存 npm 包对用户暴露的 `codexc` 和独立 `strata-video-mcp` 可执行入口。
 
 ## 文件
 
@@ -8,6 +8,8 @@
   命令；帮助数据与执行实现分离，命中命令或交互菜单后才加载相应实现；自身不持有 Gateway、App Server 或后台服务状态机。`doctor` 会执行安装、配置和服务连通性诊断。
 
 ## 命令范围
+
+独立入口 `strata-video-mcp.mjs` 直接调用视频分析模块，由 npm 安装为跨平台的 `strata-video-mcp` 命令。不经过 Gateway CLI 分派，不启动服务或连接 App Server。
 
 `delivery` 委托 `scripts/delivery-command.mjs` 离线查看和处理未确认渠道投递；参数与备份恢复步骤见 [投递箱运维](../docs/delivery.md)。
 
@@ -38,7 +40,8 @@
   就绪、单次子进程环境和令牌脱敏由 `scripts/desktop-app-command.mjs` 负责。macOS 通过受管 stdio
   Proxy 附加带生命周期保护的可信工具 Host，不再依赖桥端口或令牌，并由 `status` 单独报告；
   Windows 仍只承诺未实机验收的会话共享预览。
-- `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；菜单区分新建目录、注册当前目录和注册已有目录；
+- `video-mcp`：在当前进程内调用当前安装的视频分析模块，保持 stdio 仅承载 MCP 协议，复用模块的取消、EOF 和信号退出；不加载 Gateway 配置、不连接 App Server。此入口供显式调用；新增 Strata 预设通过宿主 PATH 调用独立的 `strata-video-mcp`，不保存 Node 或脚本的安装路径，详见[视频分析 MCP](../docs/video-analysis-mcp.md)。
+- `work`：把参数交给 `scripts/workspace-command.mjs`，列出、设置默认、注册或移除 Workspace，或进入交互工作区菜单；菜单区分新建目录、注册当前目录和注册已有目录；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
 - `cleanup sessions <最大轮数>`：直接预览或确认归档旧会话；无参数 `cleanup` 提供交互入口。转储与指标维护分别使用 `cleanup traffic`、`cleanup metrics [prune|reset]`，原领域命令只负责查询。
 - `cleanup`：统一交互选择会话归档、转储删除、旧指标清理、Provider 指标清理与指标库重置；复用各自执行入口与服务状态检查，完成或取消单项后返回菜单，非交互终端只显示帮助。
@@ -47,15 +50,15 @@
 - `provider opencode-go`：新增、列出、删除、设置默认或释放 OpenCode Go 账户实例；`release` 不禁用账户，后续请求可重新拉起。新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
   释放对应隔离实例。
-- `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令，再恢复核心服务。数据库只读校验当前 Schema，不迁移或清空数据；流程见[源码安装与更新](../docs/source-install.md)。用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并校验数据库，不更新 Gateway 包。
+- `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令，再恢复原运行且仍启用的服务。更新专用预检识别精确指标 v31，停服后私有备份并单事务升级至 v32，其他结构仍拒绝，不清空数据；流程见[源码安装与更新](../docs/source-install.md)。用户设置和 Provider 模型目录不改写。本地或同提交路径也执行受控迁移，源码入口迁移后刷新全局命令；无迁移的 npm 安装仅同步配套 CLI 并校验数据库，不更新 Gateway 包。
 - `uninstall`：自动识别当前受管源码、本地构建包或 npm 全局安装；先卸载后台服务，再卸载对应 npm 全局命令，仅在精确来源与受管标记匹配时删除仓库，
   保留普通工作树、缺少来源记录的旧安装源码，以及用户配置、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置。
 - `reset-credit`：通过 Gateway 查询 OpenAI 重置券，交互选券、预览后默认拒绝消费；明确确认才提交，非交互终端仅支持查询。
-- `metrics`：交互菜单提供运行、会话明细、会话列表、聚合、请求明细、历史额度窗口和数据库状态；清理与重置交互集中在 `cleanup`，直接维护子命令保留；`status --json` 返回稳定的路径、Schema
-  兼容性与记录数；数据库只接受当前 Schema，`update` 不执行数据库迁移。
+- `metrics`：交互菜单提供运行、会话明细、会话列表、聚合、请求明细、历史额度窗口和数据库状态；清理与重置统一使用 `cleanup metrics`（含 `prune`、`reset`），不接受 `metrics` 下的维护子命令；`status --json` 返回稳定的路径、Schema
+  兼容性与记录数；查询只接受当前 Schema，指标 v31 → v32 由 `update` 在停服后备份迁移。
 - `traffic`：把 `[debug].model_traffic_dump` 生成的 V2 session 转储渲染成人可读文本，支持列出
   exchange 摘要、展开指定 exchange 的完整请求与响应、关键字与长度过滤，以及持续跟随新写入的
-  记录；参数在读取用户配置前完成校验，查询只读转储目录，不访问网络或凭据。`traffic cleanup` 默认预览，确认删除要求全部 App Server 与 Relay 已停止。
+  记录；参数在读取用户配置前完成校验，查询只读转储目录，不访问网络或凭据。`cleanup traffic` 默认预览，确认删除要求全部 App Server 与 Relay 已停止。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
   发送回对应会话；见 `docs/channel-image.md`。
 - `relay`：管理独立模型 API 转发的监听、调用方、Key 和运行状态；边界与操作见[模型 API 转发](../docs/user-guide.md#可选模型-api-转发)。

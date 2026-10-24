@@ -55,7 +55,7 @@ function ResetCreditDialog({ onClose, onChanged }: { onClose: () => void; onChan
         <Button variant="outline" disabled={busy} onClick={() => void cancel(false)}>{t("resetCredits.cancel")}</Button>
         {!pending ? <Button variant="outline" disabled={busy || management.loading} onClick={() => void refresh()}>{t("common.refresh")}</Button> : null}
         {pending ? <Button disabled={busy || management.loading || management.error !== null} onClick={() => void confirm()}>
-          {management.busy ? <Spinner data-icon="inline-start" /> : null}{t("resetCredits.confirm")}
+          {management.busy ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : null}{t("resetCredits.confirm")}
         </Button> : <Button disabled={busy || management.loading || !credit || management.error !== null}
           onClick={() => void preview()}>{t("resetCredits.preview")}</Button>}
       </DialogFooter>

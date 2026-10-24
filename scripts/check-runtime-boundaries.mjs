@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import ts from "typescript";
 
 const root = resolve(import.meta.dirname, "..");
 const sourceDirectories = ["runtime", "scripts", "bin"];
@@ -68,7 +69,7 @@ const runtimeExceptions = new Map([
   ["src/model-api/index.ts", new Set(["runtime/model-catalog.mjs"])],
   ["src/model-api/responses-request.ts", new Set(["runtime/chat-reasoning.mjs"])],
   // Pure stage budgets shared with Codex startup and model transports; no service or file access.
-  ["src/model-relay/server.ts", new Set(["runtime/model-relay-listen-host.mjs", "runtime/model-relay-model-id.mjs", "runtime/model-request-policy.mjs"])],
+  ["src/model-relay/server.ts", new Set(["runtime/model-relay-listen-host.mjs", "runtime/model-relay-model-id.mjs", "runtime/model-request-policy.mjs", "runtime/request-activity.mjs"])],
   ["src/model-relay/admission.ts", new Set(["runtime/model-relay-model-id.mjs"])],
   ["src/codex-client/unix-websocket-transport.ts", new Set(["runtime/app-server-unix-socket.mjs"])],
 ]);
@@ -242,11 +243,22 @@ function sourceFiles(directory) {
 }
 
 function importSpecifiers(source) {
-  return [
-    ...source.matchAll(/\bfrom\s+["']([^"']+)["']/gu),
-    ...source.matchAll(/\bimport\s+["']([^"']+)["']/gu),
-    ...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']/gu),
-  ].map((match) => match[1]).filter(Boolean);
+  const specifiers = [];
+  const parsed = ts.createSourceFile("source.ts", source, ts.ScriptTarget.Latest);
+  visit(parsed);
+  return specifiers;
+
+  function visit(node) {
+    const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
+      ? node.moduleSpecifier
+      : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+        ? node.arguments[0]
+        : ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
+          ? node.argument.literal
+          : undefined;
+    if (specifier && ts.isStringLiteralLike(specifier)) specifiers.push(specifier.text);
+    ts.forEachChild(node, visit);
+  }
 }
 
 function display(file) {

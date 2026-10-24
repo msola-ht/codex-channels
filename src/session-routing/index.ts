@@ -4,12 +4,15 @@ export {
   type ThreadModelSettings,
   type ThreadListOptions,
   type ApprovalTarget,
+  type ThreadRestoreObserver,
 } from "./router.js";
 export {
+  isThreadExecutionSettled,
   type ThreadLifecyclePort,
   type ThreadDynamicToolSpec,
   type ThreadQueryOptions,
   type ThreadSession,
+  type ThreadExecutionContext,
   type ThreadResumeSession,
   type ThreadStartOptions,
   type ThreadSnapshot,

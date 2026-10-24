@@ -7,6 +7,7 @@
 - `index.ts`：本模块的公开导出入口；导出状态库与会话展示缓存的 Schema 版本常量和只读结构校验，供运行时与更新预检共用。
 - `binding-store.ts`：定义 Conversation、Workspace、Thread 和必要偏好的存储接口。
 - `memory-binding-store.ts`：用于临时运行的内存实现。
+- `open-private-database.ts`：绑定库与展示缓存共用的同步打开流程；先只读校验已有库，再复核写连接、保护权限并初始化，加载完成前失败则关闭连接。
 - `sqlite-binding-store.ts`：单机 Gateway 使用的 SQLite 实现，负责当前 Schema、Unix owner-only 权限、
   Windows 当前 SID 私有 ACL 和持久恢复。
 - `sqlite-session-display-cache.ts`：独立的会话展示缓存 SQLite 实现，保存状态和最近一次权威轮数结果，
@@ -33,6 +34,8 @@ Schema v6 保存前台、后台绑定、`conversation_idle_state` 和 `conversat
 输出的时间，以及下一次普通消息必须新建 Thread 的持久化标记；前台绑定删除与强制新建标记在同一
 事务中原子写入，常规活动以一分钟粒度写库，
 强制新建标记会立即写库，确保 Gateway 重启后普通消息仍不会自动接续已释放的旧 Thread。
+重开数据库直接恢复后台归属，不经过前台切换或降级；保留已保存的 Workspace 选择和活动时间，
+不将后台 Thread 的历史工作区当作当前选择，也不把加载数据库当作用户活动。
 撤权导致所有绑定时也会原子写入强制新建标记，重新授权后的普通消息仍从新会话开始。
 已有非空状态库只接受 Schema v6，初始化仅用于新库或明确空库；不提供旧版本迁移，也不删除 App Server Thread。安装预检与运行时均拒绝其他非空版本。
 

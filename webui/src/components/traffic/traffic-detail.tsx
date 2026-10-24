@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { requestFailureReason } from "@/lib/request-failure"
 import { formatTrafficFailureStage } from "@/lib/format"
-import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
+import { formatGenerationSpeed, formatTrafficRequestAddress } from "@/lib/format"
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
 import { TrafficParameterComparison, TrafficRequestContent } from "@/components/traffic/traffic-request-content"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -76,6 +76,7 @@ export function TrafficDetail({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <dl className="grid min-w-0 gap-3 text-sm sm:grid-cols-2">
+            <div className="min-w-0 sm:col-span-2"><dt className="text-muted-foreground">{t("traffic.requestAddress")}</dt><dd className="break-all font-mono">{requestLabel(detail)}</dd></div>
             {[
               [t("requestPurpose.label"), autoReview ? t("requestPurpose.autoApprovalReview") : null],
               [t(autoReview ? "requestPurpose.ownerThread" : "traffic.fieldThread"), detail.threadId],
@@ -87,6 +88,7 @@ export function TrafficDetail({
         </CardContent>
       </Card>
       {traceLoading ? <p role="status" className="text-sm text-muted-foreground">{t("traffic.refreshingTrace")}</p> : null}
+      {!detail.diagnosticsComplete || !detail.tracePage.complete ? <Alert><AlertTitle>{t("traffic.readLimitedTitle")}</AlertTitle><AlertDescription>{t("traffic.readLimitedDescription")}</AlertDescription></Alert> : null}
       {detail.response === null ? (
         <Card size="sm" aria-label={t("filters.response")}>
           <CardHeader><CardTitle>{t(detail.debug ? "traffic.debugUpstream" : "filters.response")}</CardTitle></CardHeader>
@@ -96,20 +98,18 @@ export function TrafficDetail({
         <Card size="sm" className="min-w-0 shrink-0">
           <CardHeader>
             <CardTitle>{t(detail.debug ? "traffic.debugUpstream" : "filters.response")}</CardTitle>
-            <CardDescription>{[detail.response.status === null ? null : `HTTP ${detail.response.status}`, detail.response.eventType].filter(Boolean).join(" · ") || t("traffic.savedResponse")}</CardDescription>
+            <CardDescription>{[detail.response.status === null ? null : `HTTP ${detail.response.status}`, detail.response.eventType].filter(Boolean).join(" · ") || t("traffic.savedResponse")}
+              {["redacted_upstream_chat", "redacted_upstream_responses"].includes(detail.response.capture ?? "") && detail.response.deliveryStatus != null
+                ? ` · ${detail.response.deliveryStatus === "finished" ? t("filters.deliveryFinished")
+                  : detail.response.deliveryStatus === "disconnected" ? t("filters.deliveryDisconnected") : t("filters.deliveryFailed")}` : null}
+            </CardDescription>
           </CardHeader>
             <CardContent className="flex flex-col gap-3">
-            {["redacted_upstream_chat", "redacted_upstream_responses"].includes(detail.response.capture ?? "") ? <Alert>
-              <AlertTitle>{t("traffic.relayCapture")}</AlertTitle>
-              <AlertDescription>{t("traffic.relayCaptureHint")} · {detail.response.deliveryStatus === "finished"
-                ? t("filters.deliveryFinished") : detail.response.deliveryStatus === "disconnected"
-                  ? t("filters.deliveryDisconnected") : t("filters.deliveryFailed")}</AlertDescription>
-            </Alert> : null}
             <ResponseFailure response={detail.response} diagnostics={detail.chatDiagnostics} />
             {detail.continuation === undefined ? null : <Alert>
               <AlertTitle>{t("traffic.continuationTitle")}</AlertTitle>
               <AlertDescription>
-                {detail.continuation.next === null ? <p>{t("traffic.continuationMissing")}</p> : <>
+                {!detail.continuation.complete ? <p>{t("traffic.continuationLimited")}</p> : detail.continuation.next === null ? <p>{t("traffic.continuationMissing")}</p> : <>
                   <p>{t("traffic.continuationFound", { id: detail.continuation.next.id, gap: formatElapsedDuration(detail.continuation.next.gapMs) })}</p>
                   <div className="flex flex-wrap items-center gap-2">
                     <StateBadge state={detail.continuation.next.state} />
@@ -220,9 +220,9 @@ export function TrafficDetail({
           <TrafficDisclosure title={t("traffic.modelEvidenceTitle")}><ModelEvidence detail={detail} /></TrafficDisclosure>
           <TrafficParameterComparison rows={detail.parameterComparison} />
           {detail.tracePage.total === 0 ? null : (
-            <TrafficDisclosure title={t("traffic.traceTitle", { count: detail.tracePage.total })}>
+            <TrafficDisclosure title={detail.tracePage.total === null ? t("traffic.traceTitleUnknown") : t("traffic.traceTitle", { count: detail.tracePage.total })}>
               <div className="flex min-w-0 flex-col gap-3" aria-busy={traceLoading}>
-                {traceLoading ? <><p role="status">{t("traffic.traceLoading")}</p><Skeleton className="h-32 w-full" /></> : traceError ? <><p>{t("traffic.traceError")}</p><Button type="button" variant="outline" onClick={onRetry}>{t("traffic.traceRetry")}</Button></> : <><p className="text-xs text-muted-foreground">{t("traffic.traceRange", { from: detail.tracePage.offset + 1, to: detail.tracePage.offset + detail.trace.length, total: detail.tracePage.total })}</p>{detail.trace.map((item, index) => (
+                {traceLoading ? <><p role="status">{t("traffic.traceLoading")}</p><Skeleton className="h-32 w-full" /></> : traceError ? <><p>{t("traffic.traceError")}</p><Button type="button" variant="outline" onClick={onRetry}>{t("traffic.traceRetry")}</Button></> : <><p className="text-xs text-muted-foreground">{detail.tracePage.total === null ? t("traffic.traceRangeUnknown", { count: detail.trace.length }) : t("traffic.traceRange", { from: detail.tracePage.offset + 1, to: detail.tracePage.offset + detail.trace.length, total: detail.tracePage.total })}</p>{detail.trace.map((item, index) => (
                   <section key={`${item.atMs}-${item.kind}-${index}`} className="flex min-w-0 flex-col gap-1">
                     <p className="font-mono text-xs text-muted-foreground">
                       {formatTime(item.atMs)} [{item.kind}]{item.truncated ? t("traffic.truncatedInline") : ""}
@@ -276,21 +276,22 @@ function CallSummary({ detail }: { detail: TrafficExchangeDetail }) {
   const { t } = useTranslation()
   const usage = detail.response?.usage
   const isModel = detail.category !== "models" && detail.category !== "prewarm"
-  const rate = usage?.inputTokens !== undefined && usage.inputTokens > 0 && usage.cachedTokens !== undefined
-    ? `${(usage.cachedTokens / usage.inputTokens * 100).toFixed(1)}%` : "—"
-  const elapsed = (value: number | undefined) => value === undefined ? "—" : formatElapsedDuration(value)
+  const rate = usage?.inputTokens !== undefined && usage.inputTokens > 0 && usage.cachedTokens !== undefined && usage.cachedTokens > 0
+    ? `${(usage.cachedTokens / usage.inputTokens * 100).toFixed(1)}%` : ""
+  const elapsed = (value: number | undefined) => !value ? "" : formatElapsedDuration(value)
   return <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
     {isModel ? <SummaryMetric label={<TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint>} value={elapsed(detail.response?.firstTokenMs)} /> : null}
     {isModel ? <SummaryMetric label={<TableHint hint={t("requests.speedHint")}>{t("requests.speedColumn")}</TableHint>} value={formatGenerationSpeed({ ...detail.response, status: detail.response?.state, totalDurationMs: detail.response?.durationMs })} /> : null}
     <SummaryMetric label={t("requests.durationColumn")} value={elapsed(detail.response?.durationMs)} />
     {isModel ? <>
-      <SummaryMetric label={t("metrics.input")} value={usage?.inputTokens?.toLocaleString() ?? "—"} description={usage?.cachedTokens === undefined ? undefined : t("traffic.cachedTokens", { count: usage.cachedTokens.toLocaleString(), rate })} />
-      <SummaryMetric label={t("metrics.output")} value={usage?.outputTokens?.toLocaleString() ?? "—"} description={usage?.reasoningTokens === undefined ? undefined : t("traffic.reasoningTokens", { count: usage.reasoningTokens.toLocaleString() })} />
+      <SummaryMetric label={t("metrics.input")} value={usage?.inputTokens ? usage.inputTokens.toLocaleString() : ""} description={!usage?.cachedTokens ? undefined : t("traffic.cachedTokens", { count: usage.cachedTokens.toLocaleString(), rate })} />
+      <SummaryMetric label={t("metrics.output")} value={usage?.outputTokens ? usage.outputTokens.toLocaleString() : ""} description={!usage?.reasoningTokens ? undefined : t("traffic.reasoningTokens", { count: usage.reasoningTokens.toLocaleString() })} />
     </> : null}
   </dl>
 }
 
 function SummaryMetric({ label, value, description }: { label: ReactNode; value: string; description?: string }) {
+  if (!value && !description) return null
   return <div className="flex min-w-0 flex-col gap-1">
     <dt className="text-muted-foreground">{label}</dt>
     <dd className="tabular-nums">{value}</dd>
@@ -346,8 +347,8 @@ function outputLabel(t: Translate, item: NonNullable<TrafficExchangeDetail["resp
 }
 
 function requestLabel(detail: TrafficExchangeDetail): string {
-  if (detail.transport === "websocket") return `WebSocket ${detail.request.url ?? detail.url ?? ""}`
-  return `${detail.request.method ?? "HTTP"} ${detail.request.path ?? ""}`.trim()
+  return formatTrafficRequestAddress({ transport: detail.transport, method: detail.request.method,
+    path: detail.request.path, url: detail.request.url ?? detail.url })
 }
 
 function HeaderTable({ title, headers, truncated }: { title: string; headers: Record<string, TrafficHeaderValue>; truncated?: boolean }) {

@@ -28,10 +28,12 @@ export function useProviderSettingsManagement(): ProviderSettingsController {
   })
   const result = management.actionResult
   const actionResult: ManagementSettingMutationResponse | null = result === null ? null : {
+    action: result.action,
     revision: null,
     value: null,
     activation: configActivationResult(result.activation ?? "unknown"),
     auditStatus: result.auditStatus,
+    warnings: result.warnings,
     consistency: management.readbackRequired ? "unknown" : "confirmed",
   }
   return { ...management, actionResult, settings: management.data }

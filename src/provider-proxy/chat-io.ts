@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { ModelConversionError } from "../model-api/index.js";
 import { ChatUpstreamError, ModelRequestTimeoutError } from "./chat-errors.js";
+import { writeResponseChunk } from "./proxy-delivery.js";
 
 export class ChatBodyTooLargeError extends ModelConversionError {}
 export class ChatBodyEncodingError extends ModelConversionError {}
@@ -47,33 +48,30 @@ export function readModelBody(request: IncomingMessage, signal: AbortSignal, max
   });
 }
 
-export async function writeChatData(response: ServerResponse, data: string, signal: AbortSignal, backpressure?: () => void, timeoutMs: number = modelRequestPolicy.deliveryTimeoutMs, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
-  signal.throwIfAborted();
-  if (response.destroyed || response.writableEnded) throw new Error("Response disconnected");
-  await new Promise<void>((resolve, reject) => {
-    let timer: NodeJS.Timeout | undefined;
-    let settled = false;
-    const cleanup = (): void => {
-      clearTimeout(timer); response.off("drain", drain); response.off("close", close); response.off("error", error);
-      signal.removeEventListener("abort", abort);
+/** Drain a rejected upload long enough to deliver the terminal response without resetting the client. */
+export function drainRejectedRequest(request: IncomingMessage, maximumWaitMs = 5_000): Promise<void> {
+  if (request.complete || request.readableEnded || request.destroyed) return Promise.resolve();
+  return new Promise(resolve => {
+    const finish = (): void => {
+      clearTimeout(timer);
+      request.off("end", finish);
+      request.off("close", finish);
+      request.off("error", finish);
+      request.off("aborted", finish);
+      resolve();
     };
-    const error = (reason: unknown): void => {
-      if (settled) return;
-      settled = true; cleanup(); reject(reason instanceof Error ? reason : new Error("Response disconnected"));
-    };
-    const drain = (): void => { if (!settled) { settled = true; cleanup(); resolve(); } };
-    const close = (): void => error(new Error("Response disconnected"));
-    const abort = (): void => error(signal.reason);
-    response.once("drain", drain); response.once("close", close); response.once("error", error);
-    signal.addEventListener("abort", abort, { once: true });
-    try {
-      if (response.write(data)) drain();
-      else {
-        backpressure?.();
-        if (!settled) timer = setTimeout(() => error(new ModelRequestTimeoutError(stage)), timeoutMs);
-      }
-    } catch (reason) { error(reason); }
+    const timer = setTimeout(finish, maximumWaitMs);
+    request.once("end", finish);
+    request.once("close", finish);
+    request.once("error", finish);
+    request.once("aborted", finish);
+    if (request.complete || request.readableEnded || request.destroyed) finish();
+    else request.resume();
   });
+}
+
+export function writeChatData(response: ServerResponse, data: string, signal: AbortSignal, backpressure?: () => void, timeoutMs: number = modelRequestPolicy.deliveryTimeoutMs, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
+  return writeResponseChunk(response, data, signal, timeoutMs, backpressure, stage);
 }
 
 export interface ChatStreamBounds {

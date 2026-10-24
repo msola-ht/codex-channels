@@ -5,11 +5,18 @@ import type { Socket } from "node:net";
 import { Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
-import { ChatBodyEncodingError, ChatBodyTooLargeError, readChatBody, waitForChatOperation } from "./chat-io.js";
+import {
+  ChatBodyEncodingError,
+  ChatBodyTooLargeError,
+  drainRejectedRequest,
+  readChatBody,
+  waitForChatOperation,
+} from "./chat-io.js";
 import { endToEndHeaders } from "./request-routing.js";
+import { maximumModelRequestBytes } from "./model-request-limits.js";
 import { ModelRequestTimeoutError, type ModelRequestStage } from "./chat-errors.js";
 
-const maximumBodyBytes = 16 * 1024 * 1024;
+const maximumBodyBytes = maximumModelRequestBytes;
 const uploadTimeoutMs = 30_000;
 const snapshotTimeoutMs = 15_000;
 const correlationHeaders = new Set([
@@ -195,9 +202,10 @@ export class AggregateModelProxy {
       });
       await pipeline(incoming, delivery, { signal });
     } catch (error) {
+      if (error instanceof ChatBodyTooLargeError) await drainRejectedRequest(request);
       const failure = signal.reason instanceof AggregateRequestError || signal.reason instanceof ModelRequestTimeoutError ? signal.reason
         : error instanceof AggregateRequestError || error instanceof ModelRequestTimeoutError ? error
-        : error instanceof ChatBodyTooLargeError ? new AggregateRequestError(413, "body_too_large", "聚合模型请求正文超过 16 MiB。")
+        : error instanceof ChatBodyTooLargeError ? new AggregateRequestError(413, "body_too_large", "聚合模型请求正文超过 48 MiB。")
         : error instanceof ChatBodyEncodingError ? new AggregateRequestError(400, "invalid_payload", "聚合模型请求包含无效 UTF-8。")
         : new AggregateRequestError(502, "local_proxy_failed", "本地模型代理连接失败或响应中断。");
       if (!response.destroyed && !response.headersSent) reject(request, response, failure);

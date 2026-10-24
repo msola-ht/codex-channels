@@ -6,16 +6,13 @@ export const desktopAppCommandUsage = `用法：codexc app [--provider <Provider
       codexc app status [--provider <Provider ID>] [--json]
 
   不带子命令             启动 Desktop App；首次使用确认后自动启用共享
-  -p, --provider ID     选择完整 Provider ID 或已配置的 sf- 名称；聚合用 agg / sf-agg，省略连接主实例
+  -p, --provider ID     选择完整 Provider ID 或已配置的 sf- 名称；省略连接主实例
   enable [--port 端口]   单独启用共享并重启 App Server；--port 仅 Windows，范围 1 到 65535（十进制整数）
   disable                禁用共享连接并重启 App Server 服务
   status                 只读检查 Desktop、配置和所选 Provider 连接状态
 
-主 Provider 为 OpenAI，且至少有两个 API Key 切换提供商时，可用：
-  codexc app --provider agg
-聚合目录包含 DS、CLP、OCG、CCG 和自定义切换提供商的模型，已加载模型间切换无需退出 Desktop。
+聚合模式暂时关闭；请使用独立 Provider，已有聚合会话和数据保留。
 更换实例前须完全退出 Desktop；Provider 选择不保存，不修改聊天渠道或原生 TUI 绑定。
-安装新代码或增删聚合成员后须重启服务；Gateway 运行时自动检测成员目录变更，待活动和租约释放后刷新聚合实例。
 日常只需 codexc app。首次启用会重启 App Server，可能中断现有连接与任务；确认默认选择“否”。`;
 
 export const timezoneCommandUsage = `用法：codexc timezone [<IANA 时区>|--system] [--json]

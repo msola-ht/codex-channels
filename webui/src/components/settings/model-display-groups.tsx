@@ -15,10 +15,11 @@ import { LoadingSettingsCard, SettingsEmpty, SettingsError } from "@/components/
 
 type Draft = { original: string | null; name: string; members: string[]; revision: string; lastApplied: GatewaySettingsController["lastAppliedSetting"] }
 
-export function ModelDisplayGroups({ management, providers, disabled }: {
+export function ModelDisplayGroups({ management, providers, disabled, onEditingChange }: {
   management: GatewaySettingsController
   providers: ManagementProviderSettingsResponse | null
   disabled: boolean
+  onEditingChange?: (editing: boolean) => void
 }) {
   const { t } = useTranslation()
   const aliases = management.managedSettings?.display.modelAliases ?? {}
@@ -26,6 +27,11 @@ export function ModelDisplayGroups({ management, providers, disabled }: {
   for (const [model, name] of Object.entries(aliases)) groups.set(name, [...(groups.get(name) ?? []), model])
   const [editor, setDraft] = useState<Draft | null>(null)
   const draft = editor && (management.lastAppliedSetting === editor.lastApplied || management.lastAppliedSetting?.kind !== "display.model-aliases") ? editor : null
+  const editing = draft !== null
+  useEffect(() => {
+    onEditingChange?.(editing)
+    return () => onEditingChange?.(false)
+  }, [editing, onEditingChange])
   useEffect(() => {
     if (editor && management.lastAppliedSetting !== editor.lastApplied && management.lastAppliedSetting?.kind === "display.model-aliases") setDraft(null)
   }, [editor, management.lastAppliedSetting])

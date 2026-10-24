@@ -19,6 +19,15 @@ import {
 
 import type { MessageKey } from "@/lib/i18n/messages"
 
+export const providerPlatformNames = ["OpenAI", "OpenCode Go", "DeepSeek", "Cline Pass", "managed", "custom"] as const
+export function providerPlatform(value: string | null): string {
+  if (value === null) return "all"
+  return providerPlatformNames.some(platform => platform === value) ? value! : "invalid"
+}
+export function providerPlatformLabel(platform: string, t: (key: MessageKey) => string): string {
+  return platform === "invalid" ? t("providerDirectory.invalidPlatform") : platform === "all" ? t("modelManagement.allPlatforms") : platform === "custom" ? t("providerDirectory.custom") : platform === "managed" ? t("providerDirectory.managed") : platform
+}
+
 export interface NavItem {
   to: string
   labelKey: MessageKey
@@ -27,10 +36,20 @@ export interface NavItem {
 
 export const modelNavItems: NavItem[] = [
   { to: "/models/providers", labelKey: "modelManagement.providers", icon: Boxes },
-  { to: "/models/accounts", labelKey: "modelManagement.accounts", icon: KeyRound },
   { to: "/models/configuration", labelKey: "modelManagement.models", icon: Settings },
-  { to: "/models/context", labelKey: "modelManagement.context", icon: ListOrdered },
 ]
+
+export const globalSettingsSections = [
+  { id: "models", labelKey: "globalSettings.models", descriptionKey: "globalSettings.modelsHint" },
+  { id: "context", labelKey: "globalSettings.context", descriptionKey: "globalSettings.contextHint" },
+  { id: "general", labelKey: "globalSettings.general", descriptionKey: "globalSettings.generalHint" },
+  { id: "permissions", labelKey: "globalSettings.permissions", descriptionKey: "globalSettings.permissionsHint" },
+  { id: "tools", labelKey: "globalSettings.tools", descriptionKey: "globalSettings.toolsHint" },
+] as const
+export type GlobalSettingsSection = typeof globalSettingsSections[number]["id"]
+export function globalSettingsSection(value: string | null) {
+  return globalSettingsSections.find(section => section.id === value) ?? null
+}
 
 export const monitoringNavItems: NavItem[] = [
   { to: "/requests", labelKey: "pages.requests", icon: Activity },
@@ -48,6 +67,7 @@ export const channelNavItems: NavItem[] = [
   { to: "/channels/display", labelKey: "navigation.channelDisplay", icon: SlidersHorizontal },
 ]
 export const settingsNavItems: NavItem[] = [
+  { to: "/settings/global", labelKey: "globalSettings.title", icon: SlidersHorizontal },
   { to: "/settings", labelKey: "navigation.general", icon: Settings },
   { to: "/settings/permissions", labelKey: "navigation.permissions", icon: FolderKey },
   { to: "/settings/network", labelKey: "navigation.network", icon: Network },

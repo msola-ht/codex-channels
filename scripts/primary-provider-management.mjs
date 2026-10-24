@@ -1,15 +1,22 @@
 import { readOfficialModelCatalog } from "../runtime/model-provider-official-catalog.mjs";
 import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import { isCustomCatalogProvider, responsesModelSettings, responsesProviderCatalogPath, responsesProviderBackupPath, removeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
-import { removeCustomProviderUpstreamMetadata } from "../runtime/model-provider-upstream-metadata.mjs";
-import { readPrivateFileSync } from "../runtime/private-file.mjs";
-import { existsSync } from "node:fs";
+import { customProviderUpstreamMetadataPath, removeCustomProviderUpstreamMetadata } from "../runtime/model-provider-upstream-metadata.mjs";
+import { assertPrivateDirectoryAccessSync, readPrivateFileSync } from "../runtime/private-file.mjs";
+import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { createHmac, randomBytes } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { parse } from "smol-toml";
 
 import {
   backupPrimaryProviderCandidates,
   customPrimaryProviderProfilePath,
+  customSwitchingProviderRegistryPath,
+  primaryProviderBackupPath,
+  customPrimaryProviderCredentialPath,
   listCustomPrimaryProviderCandidates,
   loadConfiguredCustomSwitchingModelProviders,
   loadCustomSwitchingProviderIds,
@@ -27,11 +34,16 @@ import { thirdPartyProviderRequestMaxRetries, thirdPartyProviderStreamMaxRetries
 import {
   createCodexUserConfigClient,
   readCodexUserConfigSnapshot,
+  resolveCodexUserConfigBinary,
 } from "./codex-user-config.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { PrivateFileLockReleaseError } from "../runtime/private-file-lock.mjs";
+import { GatewayConfigLockReleaseError } from "../runtime/gateway-config.mjs";
 import {
   writePrimaryProviderConfigEditsWithProfileRemoval,
 } from "./primary-provider-config-transaction.mjs";
+
+const sourceRevisionSecret = randomBytes(32);
 
 export class PrimaryProviderManagementError extends Error {
   constructor(code, field, message, options) {
@@ -46,7 +58,11 @@ export async function previewPrimaryProviderSwitch(
   input,
   options = {},
 ) {
-  return publicSwitchPreview(await buildSwitchPlan(input, options));
+  const environment = options.environment ?? process.env;
+  const revision = providerSourceRevision(input.providerId, environment);
+  const preview = publicSwitchPreview(await buildSwitchPlan(input, options));
+  assertSourceRevision(input.providerId, environment, revision);
+  return { ...preview, revision };
 }
 
 export async function applyPrimaryProviderSwitch(
@@ -55,8 +71,10 @@ export async function applyPrimaryProviderSwitch(
 ) {
   const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
+    const revision = providerSourceRevision(input.providerId, environment);
     const plan = await buildSwitchPlan(input, options);
-    if (options.switchPreview !== undefined && !isDeepStrictEqual(options.switchPreview, publicSwitchPreview(plan))) {
+    assertSourceRevision(input.providerId, environment, revision);
+    if (options.switchPreview !== undefined && !isDeepStrictEqual(options.switchPreview, { ...publicSwitchPreview(plan), revision })) {
       throw invalid("stale-preview", "preview", "Provider 状态已变化，请重新生成切换预览并确认");
     }
     return applyPrimaryProviderSwitchPlan(plan, options);
@@ -106,7 +124,11 @@ export async function previewPrimaryProviderRemoval(
   input,
   options = {},
 ) {
-  return publicRemovalPreview(await buildRemovalPlan(input, options));
+  const environment = options.environment ?? process.env;
+  const revision = providerSourceRevision(input.providerId, environment);
+  const preview = publicRemovalPreview(await buildRemovalPlan(input, options));
+  assertSourceRevision(input.providerId, environment, revision);
+  return { ...preview, revision };
 }
 
 export async function applyPrimaryProviderRemoval(
@@ -114,10 +136,23 @@ export async function applyPrimaryProviderRemoval(
   options = {},
 ) {
   const environment = options.environment ?? process.env;
-  return withModelProviderManagementTransaction(environment, async () => {
-    const plan = await removalPlanForExecution(input, options.preview, options);
-    return applyPrimaryProviderRemovalPlan(plan, options);
-  });
+  try {
+    return await withModelProviderManagementTransaction(environment, async () => {
+      const revision = providerSourceRevision(input.providerId, environment);
+      const preview = options.preview && { ...options.preview };
+      if (preview) {
+        if (preview.revision !== revision) throw invalid("stale-preview", "preview", "Provider 源配置已变化，请重新生成删除预览");
+        delete preview.revision;
+      }
+      const plan = await removalPlanForExecution(input, preview, options);
+      assertSourceRevision(input.providerId, environment, revision);
+      return applyPrimaryProviderRemovalPlan(plan, options);
+    });
+  } catch (error) {
+    if (!(error instanceof PrivateFileLockReleaseError) || error.result?.action !== "removed") throw error;
+    return { ...error.result, warnings: [...error.result.warnings,
+      { code: "lock-cleanup-failed", providerId: error.result.target.id }] };
+  }
 }
 
 async function applyPrimaryProviderRemovalPlan(plan, options) {
@@ -126,18 +161,23 @@ async function applyPrimaryProviderRemovalPlan(plan, options) {
     createClient = createCodexUserConfigClient,
   } = options;
   let backupCleaned = true;
+  let profileLockCleaned = true;
+  const removeProfile = (expectedContent) => {
+    try { return removeCustomPrimaryProviderSwitchingProfile(environment, plan.target.id, expectedContent); }
+    catch (error) {
+      if (!(error instanceof GatewayConfigLockReleaseError) || typeof error.result !== "boolean") throw error;
+      profileLockCleaned = false;
+      return error.result;
+    }
+  };
   if (plan.target.state === "orphan-catalog") {
-    removeCustomPrimaryProviderSwitchingProfile(environment, plan.target.id);
+    removeProfile();
   } else if (plan.target.state === "stale-switching") {
-    removeCustomPrimaryProviderSwitchingProfile(environment, plan.target.id);
+    removeProfile();
     backupCleaned = removeBackupCandidateSafely(plan.target.id, environment);
   } else if (plan.target.state === "switching") {
     try {
-      removeCustomPrimaryProviderSwitchingProfile(
-        environment,
-        plan.target.id,
-        plan.expectedProfileContent,
-      );
+      removeProfile(plan.expectedProfileContent);
     } catch (error) {
       if (error?.code === "CUSTOM_SWITCHING_PROFILE_CHANGED") {
         throw invalid(
@@ -167,18 +207,33 @@ async function applyPrimaryProviderRemovalPlan(plan, options) {
     try { removeCustomPrimaryProviderCredentials(environment, plan.target.id); }
     catch { credentialsCleaned = false; }
   }
-  if (backupCleaned && isCustomCatalogProvider(plan.target.id)) {
-    removeResponsesModelCatalog(environment, plan.target.id);
-    removeCustomProviderUpstreamMetadata(environment, plan.target.id);
+  let catalogCleaned = true;
+  let metadataCleaned = true;
+  const customCatalog = isCustomCatalogProvider(plan.target.id);
+  if (backupCleaned && customCatalog) {
+    try { removeResponsesModelCatalog(environment, plan.target.id); }
+    catch { catalogCleaned = false; }
+    try { removeCustomProviderUpstreamMetadata(environment, plan.target.id); }
+    catch { metadataCleaned = false; }
   }
   return {
     action: "removed",
+    configuration: plan.target.state === "orphan-catalog" ? "already-absent" : "removed",
     target: plan.target,
     activation: plan.activation,
     effects: plan.effects,
+    cleanup: {
+      backup: backupCleaned ? "completed" : "failed",
+      credentials: !backupCleaned ? "retained" : credentialsCleaned ? "completed" : "failed",
+      catalog: !customCatalog ? "not-applicable" : !backupCleaned ? "retained" : catalogCleaned ? "completed" : "failed",
+      metadata: !customCatalog ? "not-applicable" : !backupCleaned ? "retained" : metadataCleaned ? "completed" : "failed",
+    },
     warnings: [
       ...(!backupCleaned ? [{ code: "backup-cleanup-failed", providerId: plan.target.id }] : []),
       ...(!credentialsCleaned ? [{ code: "credential-cleanup-failed", providerId: plan.target.id }] : []),
+      ...(!catalogCleaned ? [{ code: "catalog-cleanup-failed", providerId: plan.target.id }] : []),
+      ...(!metadataCleaned ? [{ code: "metadata-cleanup-failed", providerId: plan.target.id }] : []),
+      ...(!profileLockCleaned ? [{ code: "lock-cleanup-failed", providerId: plan.target.id }] : []),
     ],
   };
 }
@@ -298,31 +353,21 @@ async function buildSwitchPlan(
     );
   }
   const normalizedModel = optionalString(model);
-  const { snapshot, officialModels } = await loadSwitchContext(
-    environment,
-    createClient,
-    normalizedModel !== undefined && !isCustomCatalogProvider(normalizedId),
-  );
-  if (
-    normalizedModel !== undefined
-    && !isCustomCatalogProvider(normalizedId)
-    && !officialModels.some(
-      (candidate) => candidate.available !== false && candidate.model === normalizedModel,
-    )
-  ) {
-    throw invalid(
-      "unknown-model",
-      "model",
-      `模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`,
-    );
-  }
-  const config = record(snapshot.config);
-  const providers = record(config.model_providers);
-  const currentProvider = optionalString(config.model_provider) ?? "openai";
   // 只加载目标 Provider：其他 Provider 的目录不可读不应阻塞本次切换，注册表只读 ID 列表。
   const switchingProviderIds = loadCustomSwitchingProviderIds(environment);
   const switching = loadConfiguredCustomSwitchingModelProviders(environment, normalizedId)[0];
+  const { snapshot, officialModels } = await loadSwitchContext(
+    environment,
+    createClient,
+    (config) => !isCustomCatalogProvider(normalizedId)
+      && (normalizedModel !== undefined || (normalizedId !== "openai"
+        && (switching?.model ?? optionalString(config.model)) !== undefined)),
+  );
+  const config = record(snapshot.config);
+  const providers = record(config.model_providers);
+  const currentProvider = optionalString(config.model_provider) ?? "openai";
   if (normalizedId === "openai") {
+    assertOfficialModel(normalizedModel, officialModels, normalizedId);
     const candidateIds = listCustomPrimaryProviderCandidates(providers);
     const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
     const clearsCustomModel = currentProvider !== "openai";
@@ -413,6 +458,8 @@ async function buildSwitchPlan(
   }
   assertCustomPrimaryProviderAuthentication(targetProvider);
   const custom = isCustomCatalogProvider(normalizedId) ? responsesModelSettings(environment, normalizedId, normalizedModel ?? switching?.model) : undefined;
+  const targetModel = custom?.model ?? normalizedModel ?? switching?.model ?? optionalString(config.model);
+  if (custom === undefined) assertOfficialModel(targetModel, officialModels, normalizedId);
   const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   return {
     target: {
@@ -420,7 +467,7 @@ async function buildSwitchPlan(
       displayName: optionalString(provider.name) ?? normalizedId,
       source,
       baseUrl: optionalString(provider.base_url) ?? "",
-      model: custom?.model ?? normalizedModel ?? switching?.model ?? optionalString(config.model) ?? null,
+      model: targetModel ?? null,
     },
     providers,
     expectedVersion: snapshot.version,
@@ -443,7 +490,7 @@ async function buildSwitchPlan(
       ] : []),
       ...(custom || (normalizedModel === undefined && switching === undefined)
         ? []
-        : [{ keyPath: "model", value: normalizedModel ?? switching?.model }]),
+        : [{ keyPath: "model", value: targetModel }]),
     ],
     effects: {
       currentProviderId: currentProvider,
@@ -456,20 +503,30 @@ async function buildSwitchPlan(
   };
 }
 
-async function loadSwitchContext(environment, createClient, includeModels) {
+async function loadSwitchContext(environment, createClient, needsModels) {
   const client = await createClient({ environment });
   try {
     await client.connect();
-    const [snapshot, officialModels] = await Promise.all([
-      client.readUserConfigSnapshot(),
-      includeModels ? client.listModels() : [],
-    ]);
-    return { snapshot, officialModels: includeModels && isCustomCatalogProvider(record(snapshot.config).model_provider)
-      ? readOfficialModelCatalog(environment).models.filter(model => model.supported_in_api && model.visibility === "list").map(model => ({model: model.slug, available:true}))
-      : officialModels };
+    const snapshot = await client.readUserConfigSnapshot();
+    const includeModels = needsModels(record(snapshot.config));
+    const officialModels = !includeModels ? [] : isCustomCatalogProvider(record(snapshot.config).model_provider)
+      ? readOfficialModelCatalog(environment, resolveCodexUserConfigBinary(environment)).models.filter(model => model.supported_in_api && model.visibility === "list").map(model => ({model: model.slug, available:true}))
+      : await client.listModels();
+    return { snapshot, officialModels };
   } finally {
     await client.close().catch(() => undefined);
   }
+}
+
+function assertOfficialModel(model, officialModels, providerId) {
+  if (model === undefined || officialModels.some(
+    candidate => candidate.available !== false && candidate.model === model,
+  )) return;
+  throw invalid(
+    "unknown-model",
+    "model",
+    `模型 ID 不在 Codex 官方模型目录中：${model}；请通过 codexc provider switch ${providerId} <模型 ID> 明确选择官方目录中的模型`,
+  );
 }
 
 /**
@@ -538,9 +595,26 @@ async function buildRemovalPlan(
   const switching = registeredSwitchingProviderForRemoval(environment, normalizedId);
   const configured = candidateIds.includes(normalizedId);
   const backedUp = Object.prototype.hasOwnProperty.call(backup, normalizedId);
-  if (!configured && !backedUp && switching === undefined && isCustomCatalogProvider(normalizedId)) {
-    const path = responsesProviderCatalogPath(environment, normalizedId);
-    if ([path, `${path}.backup`, `${path}.pending`, responsesProviderBackupPath(environment, normalizedId), customPrimaryProviderProfilePath(environment, normalizedId)].some(path => existsSync(path))) {
+  if (!configured && !backedUp && switching === undefined) {
+    const residuePaths = [customPrimaryProviderProfilePath(environment, normalizedId)];
+    if (isCustomCatalogProvider(normalizedId)) {
+      const path = responsesProviderCatalogPath(environment, normalizedId);
+      residuePaths.push(path, `${path}.backup`, `${path}.pending`, responsesProviderBackupPath(environment, normalizedId),
+        customProviderUpstreamMetadataPath(environment, normalizedId));
+    }
+    const credentialDirectory = dirname(customPrimaryProviderCredentialPath(environment, normalizedId,
+      customPrimaryProviderCredentialEnvironmentKey(normalizedId, "0".repeat(32))));
+    let hasCredentials = false;
+    try {
+      const stat = lstatSync(credentialDirectory);
+      if (!stat.isDirectory()) throw invalid("unsafe-credentials", "providerId", "Provider 私有凭据目录类型无效，拒绝清理");
+      assertPrivateDirectoryAccessSync(credentialDirectory);
+      hasCredentials = readdirSync(credentialDirectory).some(name => /^[a-f0-9]{32}\.json$/u.test(name));
+    } catch (error) { if (error?.code !== "ENOENT") throw error; }
+    if (hasCredentials || residuePaths.some(path => {
+      try { lstatSync(path); return true; }
+      catch (error) { if (error?.code === "ENOENT") return false; throw error; }
+    })) {
       return {
         target: {id: normalizedId, displayName: normalizedId, baseUrl: "", state: "orphan-catalog", active: false},
         activation: "none",
@@ -609,6 +683,53 @@ function publicRemovalPreview(plan) {
     activation: plan.activation,
     effects: plan.effects,
   };
+}
+
+function assertSourceRevision(providerId, environment, expected) {
+  if (providerSourceRevision(providerId, environment) !== expected) {
+    throw invalid("stale-preview", "preview", "Provider 源配置已变化，请重新预览");
+  }
+}
+
+function providerSourceRevision(providerId, environment) {
+  const id = normalizeProviderId(providerId, { allowOfficial: true });
+  const paths = [join(codexHomePath(environment), "config.toml"), primaryProviderBackupPath(environment),
+    customSwitchingProviderRegistryPath(environment)];
+  if (id !== "openai") {
+    paths.push(customPrimaryProviderProfilePath(environment, id));
+    const credentialDirectory = dirname(customPrimaryProviderCredentialPath(environment, id,
+      customPrimaryProviderCredentialEnvironmentKey(id, "0".repeat(32))));
+    paths.push(credentialDirectory);
+    try {
+      if (lstatSync(credentialDirectory).isDirectory()) {
+        assertPrivateDirectoryAccessSync(credentialDirectory);
+        paths.push(...readdirSync(credentialDirectory).filter(name => /^[a-f0-9]{32}\.json$/u.test(name)).sort().map(name => join(credentialDirectory, name)));
+      }
+    } catch (error) { if (error?.code !== "ENOENT") throw error; }
+  }
+  if (isCustomCatalogProvider(id)) {
+    const catalog = responsesProviderCatalogPath(environment, id);
+    paths.push(catalog, `${catalog}.backup`, `${catalog}.pending`, responsesProviderBackupPath(environment, id), customProviderUpstreamMetadataPath(environment, id));
+  }
+  const hash = createHmac("sha256", sourceRevisionSecret).update(id);
+  const read = createProviderFileReader(environment);
+  for (const path of paths) {
+    let stat;
+    try { stat = lstatSync(path, { bigint: true }); }
+    catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      hash.update(JSON.stringify([path, null]));
+      continue;
+    }
+    hash.update(JSON.stringify([path, ...[stat.dev, stat.ino, stat.mode, stat.uid, stat.size, stat.mtimeNs, stat.ctimeNs].map(String)]));
+    // Invalid catalogs must remain removable. Bind unreadable objects by identity
+    // without following unsafe links or parsing an unsupported storage format.
+    if (stat.isFile()) {
+      try { hash.update(read(path, 2_097_152)); }
+      catch { hash.update("unreadable"); }
+    }
+  }
+  return hash.digest("hex");
 }
 
 function removeBackupCandidateSafely(providerId, environment) {

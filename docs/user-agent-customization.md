@@ -31,7 +31,7 @@ version = 当前锁定 Codex CLI 版本（`src/codex-protocol/version.json`）
 `version = env!("CARGO_PKG_VERSION")`），由 `src/codex-client` 按锁定版本派生，不写入用户配置，
 因此升级 Codex CLI 后自动使用新版本。
 
-当前锁定的 Codex 0.163.0 使用进程级全局 UA 状态：首个会改变全局身份的普通客户端
+当前锁定的 Codex 0.164.0 使用进程级全局 UA 状态：首个会改变全局身份的普通客户端
 `initialize` 设置 originator 前缀（进程已设置或存在 `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`
 时不再覆盖），之后每次普通客户端 `initialize` 更新 `clientInfo.name; clientInfo.version`
 组成的 UA 后缀。因此原生 TUI 与 Gateway 同时连接时，返回的 UA 可能是“前缀来自先连接
@@ -39,10 +39,10 @@ version = 当前锁定 Codex CLI 版本（`src/codex-protocol/version.json`）
 下面示例按单个普通客户端（Gateway 默认身份）描述模型请求的原始 UA 结构：
 
 ```text
-codex-tui/0.163.0 (<系统与架构>) <终端标识> (codex-tui; 0.163.0)
+codex-tui/0.164.0 (<系统与架构>) <终端标识> (codex-tui; 0.164.0)
 ```
 
-第一个 `0.163.0` 来自 App Server 的真实构建版本，不等于 `clientInfo.version`。Provider Proxy
+第一个 `0.164.0` 来自 App Server 的真实构建版本，不等于 `clientInfo.version`。Provider Proxy
 收到该原始 Header 后，移除 Hop-by-hop Header；配置了 `upstream_user_agent`
 时在该层覆盖整条 `User-Agent`，缺省则原样转发到上游。HTTP/SSE 与 WebSocket 遵循相同规则。
 
@@ -134,7 +134,7 @@ Gateway -> App Server initialize
   clientInfo = my_client / My Codex Client / 1.0.0
 
 App Server -> 本地 Provider Proxy
-  User-Agent = my_client/0.163.0 (<系统与架构>) iTerm.app/3.5.14 (my_client; 1.0.0)
+  User-Agent = my_client/0.164.0 (<系统与架构>) iTerm.app/3.5.14 (my_client; 1.0.0)
 
 本地 Provider Proxy -> 模型上游
   User-Agent = Mozilla/5.0 MyClient/1.0
@@ -243,7 +243,8 @@ Provider ID 字符串插值到全局 UA。
   `model_request_metrics.user_agent`（限长 512），供 WebUI 请求明细逐条展示。
 - `runtime/terminal-identity.mjs`：按当前锁定 Codex CLI 的探测顺序从进程环境推导终端标识；
   `detectTerminalUserAgentToken` 复现官方取值供 UA 文本预填使用，`detectTerminalIdentity`
-  只在结果可作为 `terminal_identity` 记录时返回，探不到终端或只探测到 `dumb` 时返回 `null`。
+  只在结果满足 `terminal_identity` 的字符规则和总长 1–64 时返回；超长、探不到终端或只探测到 `dumb`
+  时返回 `null`，不截断标识，UA 探测原值不受此保存约束影响。
 - `runtime/app-server-service-runtime.mjs`：App Server 服务进程启动每个 Provider Proxy 时统一读取
   `[codex].upstream_user_agent`，主代理、按需 Provider 代理和 OpenCode Go 共享代理复用同一值；
   启动主 App Server 与 Provider App Server 前把 `[codex].terminal_identity` 写入子进程的
