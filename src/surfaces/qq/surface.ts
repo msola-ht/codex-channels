@@ -73,6 +73,9 @@ interface QqTextStream {
   deadline: number;
   expiresAt: number;
 }
+type QqStreamFallbackReason = "invalid-or-oversize-preview" | "missing-turn-source" | "send-guard"
+  | "unsupported-format" | "changed-prefix" | "oversize-line" | "index-limit" | "remaining-length"
+  | "passive-reservation" | "stream-registration" | "request-not-started";
 
 class QqCommandReplyError extends Error {
   constructor(readonly authorized: () => boolean, previewTooLarge = false) {
@@ -780,7 +783,7 @@ class QqGeneration implements SurfaceAdapter {
     if (stream.state !== "pending" && stream.state !== "streaming") return;
     if (Buffer.byteLength(stream.text, "utf8") + Buffer.byteLength(event.text, "utf8") > 12_000
       || Buffer.from(event.text, "utf8").toString("utf8") !== event.text) {
-      stream.state = "fallback";
+      this.fallbackStream(stream, "invalid-or-oversize-preview");
       return;
     }
     stream.text += event.text;
@@ -791,7 +794,8 @@ class QqGeneration implements SurfaceAdapter {
         || current.lastSend !== 0 && performance.now() - current.lastSend < 1000) return;
       const combined = AbortSignal.any([signal, this.controller.signal]);
       const grant = await this.waitForTurnGrant(event.target, actor, event.threadId, event.turnId, combined);
-      if (!grant || this.stoppedSources.has(grant)) { current.state = "fallback"; return; }
+      if (current.previewClosed) return;
+      if (!grant || this.stoppedSources.has(grant)) { this.fallbackStream(current, "missing-turn-source"); return; }
       const authorized = (): boolean => current.authorized()
         && this.turnGrant(event.target, actor, event.threadId, event.turnId) === grant;
       await this.flushStream(key, current, actor, grant, false, combined, authorized);
@@ -830,6 +834,8 @@ class QqGeneration implements SurfaceAdapter {
   }
   private async flushStream(key: string, stream: QqTextStream, actor: string, grant: string, finished: boolean,
     signal: AbortSignal, authorized: () => boolean): Promise<boolean> {
+    if (stream.state === "unknown") throw new Error("QQ 原生流响应未知，不自动重播正文");
+    if (stream.state === "fallback" || stream.state === "done" || !finished && stream.previewClosed) return false;
     const beforeSend = (): void => {
       signal.throwIfAborted();
       if (!finished && (stream.previewClosed || this.stoppedSources.has(grant))) throw new Error("QQ 原生流预览已停止");
@@ -838,38 +844,45 @@ class QqGeneration implements SurfaceAdapter {
       this.ledger.remainingMs(grant, actor);
     };
     try { beforeSend(); }
-    catch { stream.state = "fallback"; return false; }
-    if (stream.state === "unknown") throw new Error("QQ 原生流响应未知，不自动重播正文");
-    if (stream.state === "fallback" || stream.state === "done") return false;
+    catch { this.fallbackStream(stream, "send-guard"); return false; }
     const rendered = qqStreamMarkdown(stream.text, finished);
     if (rendered === undefined) {
-      if (finished) stream.state = "fallback";
+      if (finished) this.fallbackStream(stream, "unsupported-format");
       return !finished;
     }
-    if (!rendered.startsWith(stream.sent)) { stream.state = "fallback"; return false; }
+    // A partial last line can become temporarily unrepresentable. Its withheld
+    // rendering is not a rewrite of the prefix already confirmed by QQ.
+    if (!finished && stream.sent.startsWith(rendered)) return true;
+    if (!rendered.startsWith(stream.sent)) { this.fallbackStream(stream, "changed-prefix"); return false; }
     const suffix = rendered.slice(stream.sent.length);
     const chunks = splitQqStreamText(suffix);
-    if (!chunks) { stream.state = "fallback"; return false; }
+    if (!chunks) { this.fallbackStream(stream, "oversize-line"); return false; }
     if (chunks.length === 0 && !finished) return true;
-    if (stream.index + Math.max(1, chunks.length) > (finished ? 128 : 127)
-      || stream.remaining !== undefined && [...suffix].length > stream.remaining) {
-      stream.state = "fallback";
+    if (stream.index + Math.max(1, chunks.length) > (finished ? 128 : 127)) {
+      this.fallbackStream(stream, "index-limit");
+      return false;
+    }
+    if (stream.remaining !== undefined && [...suffix].length > stream.remaining) {
+      this.fallbackStream(stream, "remaining-length");
       return false;
     }
     if (!stream.reservation) {
       try { stream.reservation = await this.ledger.reserve(grant, actor); }
-      catch { stream.state = "fallback"; return false; }
+      catch { this.fallbackStream(stream, "passive-reservation"); return false; }
       // Persist before the first HTTP side effect; restarts cannot replay a sent prefix.
       try { await this.activeLedger.startStream(key); }
-      catch { stream.state = "fallback"; return false; }
+      catch { this.fallbackStream(stream, "stream-registration"); return false; }
     }
     if (chunks.length === 0) chunks.push("");
     for (const [index, text] of chunks.entries()) {
-      beforeSend();
       const finalChunk = finished && index === chunks.length - 1;
       const previousState = stream.state;
       let requestStarted = false;
       try {
+        // Recheck after reservation/persistence and between acknowledged chunks.
+        // Completion before HTTP must leave the confirmed stream resumable.
+        if (!finished && stream.previewClosed) return false;
+        beforeSend();
         const response = await checkpointDelivery("qq.c2c.stream", () => this.client.sendC2CStream({
           userOpenid: actor, msgId: stream.reservation!.msgId, msgSeq: stream.reservation!.msgSeq,
           index: stream.index, ...(stream.messageId ? { streamMessageId: stream.messageId } : {}),
@@ -892,16 +905,27 @@ class QqGeneration implements SurfaceAdapter {
           stream.state = previousState;
           return false;
         }
-        stream.state = requestStarted ? "unknown" : "fallback";
+        if (requestStarted) stream.state = "unknown";
+        else this.fallbackStream(stream, "request-not-started");
         throw error;
       }
       const remainingText = chunks.slice(index + 1).join("");
       if (stream.remaining !== undefined && [...remainingText].length > stream.remaining) {
-        stream.state = "fallback";
+        this.fallbackStream(stream, "remaining-length");
         return false;
       }
     }
     return true;
+  }
+  private fallbackStream(stream: QqTextStream, fallbackReason: QqStreamFallbackReason): void {
+    if (stream.state !== "fallback") {
+      this.options.logger.info({ reason: "qq-stream-fallback", fallbackReason, generationId: this.generationId,
+        threadId: stream.event.threadId, turnId: stream.event.turnId, itemId: stream.event.itemId,
+        index: stream.index, previewConfirmed: stream.messageId !== undefined, previewClosed: stream.previewClosed,
+        bufferedBytes: Buffer.byteLength(stream.text, "utf8"), sentCharacters: [...stream.sent].length,
+        ...(stream.remaining === undefined ? {} : { remainingCharacters: stream.remaining }) }, "QQ 原生流改用完整输出规划");
+    }
+    stream.state = "fallback";
   }
   private async closeStream(key: string, stream: QqTextStream, actor: string, grant: string, signal: AbortSignal,
     authorized: () => boolean): Promise<void> {
@@ -913,7 +937,7 @@ class QqGeneration implements SurfaceAdapter {
       this.ledger.remainingMs(grant, actor);
     };
     try { beforeSend(); }
-    catch { stream.state = "fallback"; return; }
+    catch { this.fallbackStream(stream, "send-guard"); return; }
     try {
       await checkpointDelivery("qq.c2c.stream-close", () => this.client.sendC2CStream({ userOpenid: actor,
         msgId: stream.reservation!.msgId, msgSeq: stream.reservation!.msgSeq, index: stream.index,
@@ -944,6 +968,8 @@ class QqGeneration implements SurfaceAdapter {
         this.observeMilestone("first-reply", "QQ 本运行代次首个完整回复已获平台确认；不代表客户端已读或模型轮次完成");
         return;
       }
+    } else if (stream.state !== "fallback") {
+      this.fallbackStream(stream, "invalid-or-oversize-preview");
     }
     if (!stream.messageId) {
       await this.send(event.target, actor, grant, result, signal, authorized);
@@ -952,29 +978,10 @@ class QqGeneration implements SurfaceAdapter {
       stream.state = "done";
       return;
     }
-    // A known preview can no longer carry the complete result. Close that preview,
-    // then explicitly identify the independent complete artifact before sending it.
+    // A known preview can no longer carry the complete result. Only the ordinary
+    // complete-result planner decides whether its replacement needs a file.
     await this.closeStream(key, stream, actor, grant, signal, authorized);
-    const bytes = Buffer.from(event.text, "utf8");
-    if (!event.text.trim() || bytes.toString("utf8") !== event.text || bytes.length > 1_000_000) {
-      throw new Error("QQ 完整正文不能作为有效文件发送");
-    }
-    const reservation = await this.activeLedger.reserve(actor, 2, signal);
-    const beforeSend = (): void => {
-      signal.throwIfAborted();
-      if (!authorized()) throw new Error("QQ 最终文件授权已失效");
-      this.sourceRemaining(grant, event.target, actor);
-    };
-    const uploaded = await checkpointDelivery("qq.c2c.upload-file", () => this.client.uploadC2CFile({ userOpenid: actor, bytes, signal, beforeSend }));
-    await checkpointDelivery("qq.c2c.text", () => this.client.sendC2CMessage({ mode: "active", userOpenid: actor,
-      message: { kind: "text", content: "以上为生成过程预览；最终完整正文请以随后发送的 codex-complete-result.txt 文件为准。" }, signal,
-      beforeSend: async () => { await reservation.beforeSend(signal); beforeSend(); } }));
-    await checkpointDelivery("qq.c2c.file", () => this.client.sendC2CMessage({ mode: "active", userOpenid: actor,
-      message: { kind: "file", fileInfo: uploaded.fileInfo }, signal, beforeSend: async () => {
-        await reservation.beforeSend(signal);
-        beforeSend();
-        if (performance.now() >= uploaded.expiresAt) throw new Error("QQ 最终文件上传凭据已过期");
-      } }));
+    await this.send(event.target, actor, grant, result, signal, authorized, true);
     DeliveryReceipt.current()?.confirmCompleteContent();
     await this.activeLedger.completeStream(key);
     stream.state = "done";
@@ -985,19 +992,21 @@ class QqGeneration implements SurfaceAdapter {
       result, signal, authorized), this.controller.signal);
   }
   private async send(target: ConversationTarget, actor: string, grant: string, result: QqRenderedMessage, signal: AbortSignal,
-    authorized?: () => boolean): Promise<void> {
+    authorized?: () => boolean, replacesPreview = false): Promise<void> {
     signal.throwIfAborted();
     if (!this.allowed(target, actor)) throw new Error("QQ 发送授权已失效");
     this.sourceRemaining(grant, target, actor);
     const maximumParts = 4;
     const plan = planQqDelivery(result, maximumParts);
     if (plan.kind === "file") {
-      this.options.logger.info({ reason: "qq-output-plan", mode: "active", maximumParts, messageCount: 1, formats: ["file"] }, "QQ 完整输出计划已生成");
-      await this.sendMedia(target, actor, grant, { kind: "file", bytes: plan.bytes }, signal, authorized);
+      this.options.logger.info({ reason: "qq-output-plan", mode: "active", maximumParts, replacesPreview,
+        messageCount: replacesPreview ? 2 : 1, formats: replacesPreview ? ["text", "file"] : ["file"] }, "QQ 完整输出计划已生成");
+      await this.sendMedia(target, actor, grant, { kind: "file", bytes: plan.bytes }, signal, authorized,
+        replacesPreview ? "以上为生成过程预览；最终完整正文请以随后发送的 codex-complete-result.txt 文件为准。" : undefined);
       return;
     }
     const messages = plan.messages;
-    this.options.logger.info({ reason: "qq-output-plan", mode: "active", maximumParts, messageCount: messages.length,
+    this.options.logger.info({ reason: "qq-output-plan", mode: "active", maximumParts, replacesPreview, messageCount: messages.length,
       formats: messages.map(message => message.kind) }, "QQ 完整输出计划已生成");
     try {
       await this.sendMessages(target, actor, grant, messages, signal, authorized,
@@ -1031,10 +1040,10 @@ class QqGeneration implements SurfaceAdapter {
   }
   private async sendMedia(target: ConversationTarget, actor: string, grant: string,
     media: { kind: "image"; bytes: Buffer; format: "png" | "jpeg" } | { kind: "file"; bytes: Buffer },
-    signal: AbortSignal, authorized?: () => boolean): Promise<void> {
+    signal: AbortSignal, authorized?: () => boolean, previewNotice?: string): Promise<void> {
     signal.throwIfAborted();
     if (!this.allowed(target, actor) || authorized?.() === false) throw new Error("QQ 附件发送授权已失效");
-    const reservation = await this.activeLedger.reserve(actor, 1, signal);
+    const reservation = await this.activeLedger.reserve(actor, previewNotice === undefined ? 1 : 2, signal);
     const remainingMs = this.sourceRemaining(grant, target, actor);
     const sendSignal = AbortSignal.any([signal, AbortSignal.timeout(Math.ceil(remainingMs))]);
     const beforeSend = (): void => {
@@ -1049,6 +1058,11 @@ class QqGeneration implements SurfaceAdapter {
       : this.client.uploadC2CFile(uploadInput));
     // Upload completion is a new resource boundary; retain its explicit guard failure.
     beforeSend();
+    if (previewNotice !== undefined) {
+      await checkpointDelivery("qq.c2c.text", () => this.client.sendC2CMessage({ mode: "active", userOpenid: actor,
+        message: { kind: "text", content: previewNotice }, signal: sendSignal,
+        beforeSend: async () => { await reservation.beforeSend(sendSignal); beforeSend(); } }));
+    }
     await checkpointDelivery(`qq.c2c.${media.kind}`, () => this.client.sendC2CMessage({ userOpenid: actor,
       mode: "active",
       message: { kind: media.kind, fileInfo: uploaded.fileInfo }, signal: sendSignal,
@@ -1128,6 +1142,10 @@ function qqStreamMarkdown(source: string, finished: boolean): string | undefined
     if (renderQqLiteral(lastLine).markdown === undefined || /^(?:\s*[-+#>\d]|\s*$)/u.test(lastLine)) {
       stable = source.slice(0, newline + 1);
     }
+    // A later child can change the inferred indent unit of earlier list items.
+    // Keep the whole indented portion pending until the complete source is known.
+    const indentedList = /^ +(?:[-+*]|\d+[.)])\s/gmu.exec(stable);
+    if (indentedList) stable = stable.slice(0, indentedList.index);
   }
   if (!stable) return "";
   const blocks = renderQqContent(stable);
