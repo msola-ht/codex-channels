@@ -128,6 +128,12 @@ export function formatConversationStatus(
   status: ConversationStatus,
   formatExecutionPath: (path: string) => string = path => path,
 ): string {
+  const cleanPath = (path: string): string => formatExecutionPath(path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
+  const context = status.threadId ? status.executionContext : undefined;
+  const sharedDirectory = context?.cwd === status.cwd;
+  const directoryReference = (path: string): string => path === status.cwd
+    ? sharedDirectory ? "同工作目录" : "同工作区目录"
+    : path === context?.cwd ? "同会话执行目录" : cleanPath(path);
   const lines = [
     "Codex 状态",
     formatTimezoneLine(),
@@ -135,7 +141,11 @@ export function formatConversationStatus(
     `Session：${status.threadId ? status.threadName ?? "未命名" : "尚未绑定"}`,
     `Session ID：${status.threadId ?? "尚未绑定"}`,
     `Turn：${status.turnId ?? "空闲"}`,
-    `工作目录：${status.cwd}`,
+    sharedDirectory ? `- 工作目录：${cleanPath(status.cwd)}（工作区与会话一致）`
+      : `- 工作区目录：${cleanPath(status.cwd)}`,
+    ...(status.threadId && !sharedDirectory
+      ? [`- 会话执行目录：${context ? cleanPath(context.cwd) : "尚未取得有效的 App Server 执行上下文，不使用工作区目录代替"}`]
+      : []),
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
@@ -150,32 +160,32 @@ export function formatConversationStatus(
     lines.push(`上下文压缩：${status.contextCompactionCount} 次`);
   }
   if (status.threadId) {
-    const cleanPath = (path: string): string => formatExecutionPath(path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
-    const context = status.executionContext;
-    lines.push("", "会话执行目录：");
+    lines.push("", "会话加载快照：", "说明：最近一次新建、恢复或派生时加载，不是实时权限清单。");
     if (!context) {
-      lines.push("尚未取得有效的 App Server 执行上下文（可能正在恢复），不使用 Workspace 目录代替");
+      lines.push("运行目录：尚未取得有效快照");
     } else {
-      lines.push(`最近确认目录：${cleanPath(context.cwd)}`,
-        `运行目录列表（最近一次新建、恢复或派生的加载快照；不是实时权限清单）：`,
-        `快照对应目录：${cleanPath(context.workspaceRootsSnapshot.cwd)}`);
+      if (context.workspaceRootsSnapshot.cwd !== context.cwd) {
+        lines.push(`- 快照对应目录：${directoryReference(context.workspaceRootsSnapshot.cwd)}`);
+      }
       if (context.workspaceRootsSnapshot.roots.length === 0) {
-        lines.push("App Server 返回的运行目录列表为空");
+        lines.push("运行目录：App Server 返回的列表为空");
       } else {
-        lines.push(...context.workspaceRootsSnapshot.roots.map((path, index) => `- 目录 ${index + 1}：${cleanPath(path)}`));
+        lines.push(...context.workspaceRootsSnapshot.roots.map((path, index, roots) =>
+          `- 运行目录${roots.length === 1 ? "" : ` ${index + 1}`}：${directoryReference(path)}`));
       }
     }
-    lines.push("", "指令文件来源（最近一次新建、恢复或派生的加载快照）：");
     if (status.instructionSources === undefined) {
-      lines.push("尚未取得 App Server 加载清单");
+      lines.push("指令文件：尚未取得 App Server 加载清单");
     } else if (status.instructionSources.length === 0) {
-      lines.push("App Server 返回的文件清单为空（不代表没有其他指令）");
+      lines.push("指令文件：App Server 返回的清单为空（不代表没有其他指令）");
     } else {
-      lines.push(...status.instructionSources.map((path, index) => `- 文件 ${index + 1}：${cleanPath(path)}`));
+      lines.push(...status.instructionSources.map((path, index, sources) =>
+        `- 指令文件${sources.length === 1 ? "" : ` ${index + 1}`}：${cleanPath(path)}`));
     }
   }
   if (status.goal) {
     lines.push(
+      "", "当前 Goal：",
       `Goal 状态：${formatGoalStatus(status.goal.status)}`,
       `Goal 目标：${status.goal.objective}`,
       `Goal 用量：${formatGoalUsage(status.goal)}`,
