@@ -6,13 +6,12 @@ import { isConversationCommandName, type ConversationCommandExecutor, type Conve
 import { UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import type { ConversationActorRegistry, SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
-import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { captureDelivery, checkpointDelivery } from "../delivery-receipt.js";
 import { parseSlashCommand } from "../slash-command.js";
 import type { SurfaceAdapter, SurfaceOutputPort } from "../types.js";
 import { createQqLedger } from "./ledger.js";
 import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, type QqMessageBody } from "./protocol.js";
-import { planQqMessage, qqCommandNames, qqHelp, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
+import { planQqMessage, qqCommandNames, qqHelp, renderQqCommandResult, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 
 export interface QqNetwork {
@@ -36,6 +35,12 @@ export interface CreateQqSurfaceOptions {
 }
 // Commands which can start a Turn need their own verified submission association.
 const supportedCommands = new Set<string>(qqCommandNames);
+
+class QqCommandReplyError extends Error {
+  constructor(readonly authorized: () => boolean) {
+    super("命令已返回结果，但 QQ 回复未确认送达；请先核对会话状态，不要重复执行写操作。较长查询请缩小范围或在原生客户端查看。");
+  }
+}
 
 export class QqSurface implements SurfaceAdapter {
   readonly surface = "qq";
@@ -179,11 +184,13 @@ class QqGeneration implements SurfaceAdapter {
     const job = Promise.resolve().then(async () => {
       try { await this.process(target, message); await this.ledger.handled(message.id); }
       catch (error) {
-        this.options.logger.warn({ reason: "qq-input-failed" }, "QQ 输入未确认完成，不自动重试");
+        const replyFailure = error instanceof QqCommandReplyError;
+        this.options.logger.warn({ reason: replyFailure ? "qq-command-reply-unconfirmed" : "qq-input-failed" },
+          replyFailure ? "QQ 命令已返回结果，但回复未确认送达，不自动重试" : "QQ 输入未确认完成，不自动重试");
         if (!this.ledger.available) return;
         if (this.allowed(target, message.actor)) {
-          const text = error instanceof UserFacingError ? error.message : "请求未确认完成，请先核对会话状态；不会自动重复执行。";
-          await this.notify(target, message.actor, message.id, text).catch(() => {});
+          const text = replyFailure || error instanceof UserFacingError ? error.message : "请求未确认完成，请先核对会话状态；不会自动重复执行。";
+          await this.notify(target, message.actor, message.id, text, replyFailure ? error.authorized : undefined).catch(() => {});
         }
       }
     }).finally(() => {
@@ -213,11 +220,17 @@ class QqGeneration implements SurfaceAdapter {
       let authorizeReply: (() => void) | undefined;
       const result = await this.options.commands.execute(target, command.name, command.argumentsText, message.actor,
         () => this.allowed(target, message.actor), authorize => { authorizeReply = authorize; });
-      const text = renderConversationCommandResult(result);
-      if (text) await this.notify(target, message.actor, message.id, text, () => {
+      const replyAllowed = (): boolean => {
         if (!authorizeReply) return false;
         try { authorizeReply(); return true; } catch { return false; }
-      });
+      };
+      try {
+        const rendered = renderQqCommandResult(result);
+        if (rendered) await this.notify(target, message.actor, message.id, rendered, replyAllowed);
+      } catch {
+        // The command returned; a failed reply must neither imply failed execution nor lose its binding guard.
+        throw new QqCommandReplyError(replyAllowed);
+      }
       return;
     }
     // Only submission/association is awaited by output, never a command reply queued behind it.
@@ -235,8 +248,8 @@ class QqGeneration implements SurfaceAdapter {
       if (!entries.size) this.pending.delete(target.conversationId);
     }
   }
-  private notify(target: ConversationTarget, actor: string, grant: string, text: string, authorized?: () => boolean): Promise<void> {
-    const result = renderQqPanel(text);
+  private notify(target: ConversationTarget, actor: string, grant: string, text: string | QqRenderedMessage, authorized?: () => boolean): Promise<void> {
+    const result = typeof text === "string" ? renderQqPanel(text) : text;
     return this.queue.runOrdered(target.conversationId, signal => this.send(target, actor, grant,
       result, signal, authorized), this.controller.signal);
   }

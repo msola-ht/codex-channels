@@ -407,7 +407,15 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     };
     assertActive();
     const guard = this.commandGuard(target, actorId, command === "workspace");
-    const assertAuthorized = () => { assertActive(); guard(); };
+    const sessionMetrics = command === "metrics" && parseMetricsCommand(input.trim()).view === "session"
+      ? { threadId: this.conversations.status(target).threadId }
+      : undefined;
+    const assertMetricsThread = (): void => {
+      if (sessionMetrics && this.conversations.status(target).threadId !== sessionMetrics.threadId) {
+        throw new UserFacingError("command.authorization-changed", "指标查询对应的会话已变化，请重新查询。");
+      }
+    };
+    const assertAuthorized = () => { assertActive(); guard(); assertMetricsThread(); };
     const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
     try {
       assertActive();
@@ -419,7 +427,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           workspace.id === this.conversations.selectedWorkspaceId(target));
         const replyThread = hasWorkspace ? this.conversations.status(target).threadId : undefined;
         captureReplyAuthorization(() => {
-          assertActive(); replyGuard();
+          assertActive(); replyGuard(); assertMetricsThread();
           if (hasWorkspace && this.conversations.status(target).threadId !== replyThread) {
             throw new UserFacingError("command.authorization-changed", "命令回复对应的会话已变化");
           }

@@ -68,6 +68,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
   参数校验后映射到 `ScheduledTaskApplicationService`；将工具请求的取消和当前归属复核传到预览、写入及手动调度边界，失效请求不展示预览并撤销未交付确认令牌。创建和删除仍返回待确认预览，不直接改写 Store；已提交的写入不因取消而回滚。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标异步查询；`ConversationService` 作为统一用例入口委托执行。`/metrics`、可见会话页的本地 Turn 计数与周额度估算等待数据库 Worker，不在调用线程执行 SQL；账户快照按 Provider 排队，执行前拒绝取消及早于已确认额度序号的结果。只有写入成功才推进序号，较新观测保存失败不阻断旧有效结果；调用方取消等待后，已派发写入仍按实际确认结果更新缓存与序号。
+  会话指标固定查询开始时的 Thread，等待后复核；共享命令入口把该归属保留到最终回复授权，
+  包括原先未绑定的查询。换绑后要求重新查询，不把旧指标归入新 Thread；全局聚合不增加 Thread 约束。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
   OAuth 关联最多保留 128 个、各十分钟；响应前每次请求暂存至多 8 条完成通知，每条错误上限 4,096 字符。
   超限且无法匹配结果时明确要求查询实际状态；失败、Thread 关闭、断线及服务关闭清理关联，不撤销已提交登录。
