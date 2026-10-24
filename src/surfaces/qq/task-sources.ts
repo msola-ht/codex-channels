@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { SubmissionObserver, SubmissionOutcome, SubmissionPreparation } from "../../application/index.js";
 import type { QqInboundTextMessage } from "./inbound.js";
+import type { SurfaceDeliverySource } from "../types.js";
 
 const MAX_ENTRIES = 4096;
 const MAX_SOURCES = 128;
@@ -19,14 +20,7 @@ export interface QqTaskScope {
 }
 
 /** A reference, never persisted authorization. No message body or credentials. */
-export interface QqTaskSourceReference {
-  readonly generation: string;
-  readonly sourceToken: string;
-  readonly accountId: string;
-  readonly conversationId: string;
-  readonly threadId: string;
-  readonly turnId: string;
-}
+export type QqTaskSourceReference = SurfaceDeliverySource;
 
 export interface QqTaskTicket {
   readonly sourceToken: string;

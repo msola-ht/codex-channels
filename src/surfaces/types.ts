@@ -28,7 +28,22 @@ export interface SurfaceConfigurationChange {
   providers?: readonly string[];
 }
 
+/** Disposable input participation identity; a stored reference alone grants no authority. */
+export interface SurfaceDeliverySource {
+  readonly generation: string;
+  readonly sourceToken: string;
+  readonly accountId: string;
+  readonly conversationId: string;
+  readonly threadId: string;
+  readonly turnId: string;
+}
+
 export interface SurfaceOutputPort {
+  deliverySource?: {
+    capture(event: OutputEvent): SurfaceDeliverySource | undefined;
+    await(reference: SurfaceDeliverySource, signal: AbortSignal): Promise<boolean>;
+    current(reference: SurfaceDeliverySource): boolean;
+  };
   /** Fix disposable live admission identities before routing waits; never change presentation lifecycle. */
   admitLive?(event: OutputEvent): void;
   /** Apply live local lifecycle state synchronously; never await platform delivery. Not called on replay. */
@@ -38,7 +53,7 @@ export interface SurfaceOutputPort {
   handle(event: OutputEvent, context?: { liveAdmitted: true }): Promise<void> | void;
   /** Settle actual transient operations (including intentional no-op); validate ownership before sending. */
   deliverSnapshot?(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void>;
-  deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void>;
+  deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void>;
 }
 
 export type { OperationUpdateDisplay };

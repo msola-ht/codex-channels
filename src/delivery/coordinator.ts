@@ -3,7 +3,7 @@ import { defaultDeliveryLimits, DeliveryError, type DeliveryRecord, type Deliver
 
 export interface DeliveryCoordinatorOptions {
   accounts(): string[];
-  authorized(record: DeliveryRecord): boolean | Promise<boolean>;
+  authorized(record: DeliveryRecord, signal: AbortSignal): boolean | Promise<boolean>;
   deliver(record: DeliveryRecord, signal: AbortSignal): Promise<void>;
   fault(code: string, account?: string, persistentDeliveryId?: string): void;
   concurrency?: number;
@@ -172,7 +172,16 @@ export class DeliveryCoordinator {
     });
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 60_000);
     try {
-      if (!(await Promise.race([this.options.authorized(record), cancelled]))) {
+      let authorized = false;
+      try {
+        authorized = (await Promise.race([this.options.authorized(record, controller.signal), cancelled])) === true;
+      } catch (error) {
+        if (error instanceof DeliveryError && error.code === "storage") throw error;
+        // Authorization failure is not evidence of a broken journal. Never send
+        // after a rejected, timed out or cancelled authorization wait.
+      }
+      if (this.stopped) return;
+      if (!authorized || controller.signal.aborted) {
         if (!(await this.journal.transition(record.id, "pending", "blocked"))) throw new DeliveryError("conflict");
         this.options.changed?.();
         await this.releaseRetainedBarrier({ ...record, state: "blocked" });
@@ -202,7 +211,11 @@ export class DeliveryCoordinator {
       this.release(record.conversation);
       this.updateUsage(record.account, -record.bytes, -1);
     } catch { this.storageFailed(record.account, record.id); }
-    finally { clearTimeout(timer); controller.signal.removeEventListener("abort", cancel); }
+    finally {
+      clearTimeout(timer);
+      controller.signal.removeEventListener("abort", cancel);
+      controller.abort();
+    }
   }
 
   private storageFailed(account?: string, id?: string): void {

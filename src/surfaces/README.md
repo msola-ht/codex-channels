@@ -62,7 +62,8 @@ Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录�
 `surface-shutdown.ts` 收集各渠道关闭步骤的同步和异步失败；渠道仍决定启动与等待各步骤的顺序，
 保留各资源原有预算，全部清理尝试完成后统一抛出失败。停止结果由实例缓存，失败不伪装为成功，也不隐式重新启动资源。
 
-`types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
+`types.ts` 定义最小 `SurfaceAdapter` 契约。可选 `output.deliverySource` 提供来源引用的捕获、可取消等待和同步复核；引用不能单独授予发送资格。持久 `deliver` 的第四参数可接收共享同步授权守卫，用于最终网络发送前复核。
+每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
 只通过编译期内置插件注册表显式注册。
 Bootstrap 的内置插件注册表负责把一个渠道插件展开为零到多个账号实例并验证身份唯一性；

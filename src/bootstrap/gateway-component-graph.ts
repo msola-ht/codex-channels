@@ -126,7 +126,7 @@ import {
   metricsWorkerFailureMetadata,
   modelRequestMetricsDatabasePath,
 } from "../observability/index.js";
-import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy } from "../policy/index.js";
+import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy, QqAccessPolicy } from "../policy/index.js";
 import {
   SessionRouter,
   ThreadStateSynchronizer,
@@ -140,6 +140,7 @@ import {
   canPreserveWeixinHookReviewText,
   formatProviderIdleReleaseNotice,
   type SurfaceAdapter,
+  type SurfaceDeliverySource,
   SurfaceOutputCoalescer,
 } from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
@@ -1124,6 +1125,7 @@ export abstract class GatewayComponentGraph {
           workerUrl: new URL(import.meta.url.endsWith(".ts") ? "../../dist/delivery/worker.js" : "../delivery/worker.js", import.meta.url),
           owner: (event) => this.outputOwner(event),
           authorized: (event, owner) => this.outputAuthorized(event, owner),
+          authorizeAtDispatch: (event, owner, signal) => this.authorizeOutputAtDispatch(event, owner, signal),
           fault: (code, account, persistentDeliveryId, failure) => {
             logger.error({ code, account, persistentDeliveryId, ...(failure ? { deliveryFailure: failure } : {}) }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
             if (code === "delivery-uncertain" || code === "authorization-changed") return;
@@ -1928,7 +1930,38 @@ export abstract class GatewayComponentGraph {
   }
 
   private outputOwner(event: OutputEvent): string {
-    return JSON.stringify(this.outputIdentity(event));
+    const identity = JSON.stringify(this.outputIdentity(event));
+    if (event.target.surface !== "qq") return identity;
+    const source = this.outputSourcePort(event)?.capture(event) ?? null;
+    return JSON.stringify({ version: 3, kind: "qq-live", identity, source });
+  }
+
+  private outputSourcePort(event: OutputEvent) {
+    const surface = this.surfaces.find(candidate => candidate.surface === event.target.surface
+      && candidate.accountId === event.target.accountId);
+    return surface && !surface.connectionOnly ? surface.output.deliverySource : undefined;
+  }
+
+  private outputSourceOwner(event: OutputEvent, owner: string): { identity: string; source: SurfaceDeliverySource } | undefined {
+    const value = JSON.parse(owner) as { version?: unknown; kind?: unknown; identity?: unknown; source?: SurfaceDeliverySource | null };
+    const source = value?.source;
+    if (value?.version !== 3 || value.kind !== "qq-live" || typeof value.identity !== "string" || !source
+      || ![source.generation, source.sourceToken, source.accountId, source.conversationId, source.threadId, source.turnId]
+        .every(field => typeof field === "string" && field.length > 0 && Buffer.byteLength(field) <= 512)
+      || source.accountId !== event.target.accountId || source.conversationId !== event.target.conversationId
+      || !("threadId" in event) || event.threadId !== source.threadId
+      || !("turnId" in event) || event.turnId !== source.turnId) return undefined;
+    return { identity: value.identity, source: Object.freeze({ ...source }) };
+  }
+
+  private async authorizeOutputAtDispatch(event: OutputEvent, owner: string, signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return false;
+    if (event.target.surface !== "qq") return this.outputAuthorized(event, owner);
+    const original = this.outputSourceOwner(event, owner);
+    const port = this.outputSourcePort(event);
+    if (!original || !port || !this.outputIdentityAuthorized(event, original.identity)) return false;
+    if (!(await port.await(original.source, signal))) return false;
+    return !signal.aborted && this.outputAuthorized(event, owner);
   }
 
   private outputIdentity(event: OutputEvent) {
@@ -1949,6 +1982,13 @@ export abstract class GatewayComponentGraph {
   }
 
   private outputAuthorized(event: OutputEvent, owner: string): boolean {
+    if (event.target.surface !== "qq") return this.outputIdentityAuthorized(event, owner);
+    const original = this.outputSourceOwner(event, owner);
+    return !!original && this.outputIdentityAuthorized(event, original.identity)
+      && this.outputSourcePort(event)?.current(original.source) === true;
+  }
+
+  private outputIdentityAuthorized(event: OutputEvent, owner: string): boolean {
     const original = JSON.parse(owner) as ReturnType<typeof this.outputIdentity>;
     // Older owners cannot prove the directory that was authorized at admission.
     // Preserve their records, but never infer or upgrade their identity here.
@@ -1989,6 +2029,8 @@ export abstract class GatewayComponentGraph {
       ? new FeishuAccessPolicy(this.config.feishu.allowedOpenIds, this.config.feishu.appId)
       : target.surface === "weixin" && this.config.weixin
       ? new WeixinAccessPolicy(this.config.weixin.allowedUserIds, this.config.weixin.accountId)
+      : target.surface === "qq" && this.config.qq
+      ? new QqAccessPolicy(this.config.qq.allowedUserOpenIds, this.config.qq.appId)
       : undefined;
   }
 

@@ -78,7 +78,7 @@ interface PendingSnapshot {
 }
 
 export interface SurfaceManagerOptions extends CompletionOutputEnricherOptions {
-  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "fault" | "workerUrl">;
+  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "authorizeAtDispatch" | "fault" | "workerUrl">;
   retryDelaysMs?: readonly number[];
   maximumPendingCriticalOutput?: number;
   setInteractionAvailable?(
@@ -185,7 +185,7 @@ export class SurfaceManager {
         await this.requireRuntime(surface).delivery.runOrdered(event.target.conversationId, async (active) => {
           if (!this.acceptingOutput) throw new Error("可靠投递已停止");
           if (!authorized()) throw new Error("可靠投递授权已变化");
-          await surface.output.deliver!(enriched, active, checkpoint);
+          await surface.output.deliver!(enriched, active, checkpoint, authorized);
         }, signal);
       },
     }) : undefined;

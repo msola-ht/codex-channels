@@ -10,7 +10,7 @@ export type QqProtocolFailure =
 
 /** Local policy, not a discovered QQ platform maximum. One already planned part. */
 export const QQ_TEXT_PART_BYTES = 2000;
-const PASSIVE_WINDOW_MS = 300_000;
+export const QQ_PASSIVE_WINDOW_MS = 300_000;
 
 export type QqTextMessage = {
   recipient: string;
@@ -318,9 +318,9 @@ function textRequest(input: QqTextMessage): { path: string; body: Record<string,
     || !Number.isSafeInteger(input.sourceTimestampMs) || input.sourceTimestampMs < 0 || age < 0) {
     throw new QqProtocolError("message", "invalid-input");
   }
-  if (age >= PASSIVE_WINDOW_MS) throw new QqProtocolError("message", "expired");
+  if (age >= QQ_PASSIVE_WINDOW_MS) throw new QqProtocolError("message", "expired");
   return { path, body: { ...body, msg_id: input.messageId, msg_seq: input.sequence },
-    deadline: performance.now() + PASSIVE_WINDOW_MS - age };
+    deadline: performance.now() + QQ_PASSIVE_WINDOW_MS - age };
 }
 
 function wellFormed(value: string): boolean {

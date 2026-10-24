@@ -45,7 +45,7 @@ HTTP 200 必须有合法非空 ID；相互冲突的 code/err_code、错误与 ID
 重复索引、无效日期和引用伪装成普通文字等失败分支；这是源码反证，不是运行成功记录。
 用户禁止再次探测，因此本轮不新增测试、不执行模拟或真实收发；已有脚本样例仅支持所用协议样例，
 不能证明新方法的取消、错误分类及解析分支已实际跑通。静态检查与独立复审状态在交付时分别报告。
-`surface.ts` 仍为 connectionOnly，不调用上述入口；QQ 运行时来源接线、完整交付及 Journal 升级均未实现。
+`surface.ts` 仍为 connectionOnly，不调用上述入口；QQ 运行时来源接线与完整交付均未实现，Journal 升级不再预设为接入前提。
 
 本轮独立复审覆盖 Transport→解析及输入快照→Token→HTTP→回执/取消→公共出口/未接线 Adapter。
 发现并修复 `() => void` 容许 async 授权守卫、拒绝可能被忽略的问题：改为 `() => undefined` 并在运行时拒绝非 undefined 返回值，
@@ -255,7 +255,7 @@ QQ 为整个计划持有一个 retain，各片串行等待 started/confirmed 检
 | 本次运行、来源有效的新输出 | 通过共享身份和 QQ 来源双重检查后才可发送 |
 | 重启后的旧 pending / blocked | 保留供核对，禁止自动发送；失效授权不得由恢复绑定推导回来 |
 | sending 恢复、部分发送、结果未知 | 保留未知边界与已有检查点，禁止自动续发或重发全文 |
-| 管理端 retry | 首版拒绝 QQ 旧授权/部分/未知记录的重试；不能先清空进度再校验 |
+| 管理端 retry | 旧代次或失效来源始终不能发送；是否允许本代次记录复用现有显式人工重试待用户选择，不把人工重试描述为无重复续传 |
 | 管理端 ignore | 仅在现有显式管理授权下解除对应记录，不宣称平台已送达，不清理其他数据 |
 
 当前共享重试会将记录置为 pending 并清空进度，不能直接继承为 QQ 的安全续传。
@@ -305,7 +305,7 @@ QQ 为整个计划持有一个 retain，各片串行等待 started/confirmed 检
 ### 开发顺序
 
 基础接入已存在；有界预探测已结束，用户已选择按权威确认的输入参与关系授予回传资格，解除必须证明首次新建的设计门槛。
-阶段 1 的独立协议/解析已提交；阶段 2 的共享提交观察与内存来源注册已进入源码实现，Adapter/投递接线、阶段 3–5 仍未实现。
+阶段 1 的独立协议/解析已提交；阶段 2 的共享提交观察与内存来源注册已进入源码实现，完整文字 Outbox 已复用共享队列和回执。Adapter/持久投递接线及后续事件、预算与交互仍未完成。
 不以提交次数表示阶段完成。不能把文档写完等同任务接入门槛已通过。
 
 | 阶段 | 实际产物与涉及边界 | 开放门槛与仍关闭的能力 |
@@ -372,10 +372,22 @@ Client 输入准备及 RPC、响应校验、模型/模式和 Core 结算。重�
 
 需要对应调整 `conversation-service.ts`、`turn-port.ts`、Client/Provider 路由、Surface 输出准入与 Bootstrap 持久准备链。
 不扩展 Codex RPC 字段；共享回调抛错应在请求前失败关闭，请求后的记账失败只能导致未知/禁发，不能重新执行请求。
-Surface 公共输出端口拟增加 `captureDeliverySource(event)`、`awaitDeliverySource(reference, signal)`、
-`isDeliverySourceCurrent(reference)` 三个窄方法；引用类型只含代次、sourceToken、Thread/Turn，不含 SDK 或凭据。
-Bootstrap 同步捕获并序列化引用，候选 pending 与完全无候选分开；异步富化/持久解码后传明确引用，不靠对象引用相等或“最近来源”找回授权。
-共享身份授权仍由 Bootstrap 负责，等待来源与发送前来源检查由 QQ 注册表负责，非 QQ 未提供方法时沿用现有路径。
+Surface 公共输出端口已增加可选的 `deliverySource` 端口，统一提供 `capture(event)`、`await(reference, signal)`、
+`current(reference)`；共享引用类型包含代次、sourceToken、账号/会话、Thread/Turn，不含 SDK 或凭据，QQ 注册表复用此类型。
+Bootstrap 已同步捕获并序列化引用；没有候选写为 null 并拒绝发送，不靠对象引用相等或“最近来源”找回授权。
+共享身份授权仍由 Bootstrap 负责，等待来源与发送前来源检查委托此端口；QQ Adapter 尚未装配该端口，仍为 connectionOnly。
+`authorizeAtDispatch` 已沿 SurfaceManager、PersistentSurfaceOutput、Coordinator 接通取消信号；授权拒绝、异常或等待超时进入 blocked，
+不误报 storage；关闭时取消等待并保留未发记录。等待完成后、富化后、排队后、每个 started 检查点后仍同步复核授权。
+Surface 的 deliver 第四参数透传该同步守卫，供 QQ 在 Token 等待后和最终 HTTP 前复核；其余三渠道可不消费新增参数。
+上述共享接线不代表 QQ 已收发任务；实际来源端口装配、事件白名单、预算与文本发送仍待接入。
+
+2026-10-24，本地隔离投递箱观察使用实际 DeliveryJournal Worker、加密 SQLite 与 Coordinator：
+授权抛错、80 毫秒授权超时和明确拒绝均落为 blocked，发送端口调用数为 0；超时信号到达等待方，
+故障分类均为 authorization-changed，随后 acceptsExecution 仍为 true。
+关闭中的授权等待收到取消，离线维护入口回读为 pending、无故障；显式 storage 错误仍报告 storage 并保留 pending，均未发送。
+临时库已关闭并清理。首次终端观察因 stdin 的 input-type 影响 Worker 启动而未执行场景，改用普通 stdin 后完成；
+首次关闭后回读误用维护模式不支持的 read，被 conflict 拒绝，改用该模式支持的 queueEntry 完成回读。
+这些证据覆盖本地调度与落库，不证明 QQ 实际账号、来源端口装配或其他渠道的真实收发；没有修改用户库、配置或服务。
 
 **先前严格新建方案的协议限制（已由参与授权决定替代）。** 锁定上游 `turn_processor.rs` 的 start 处理调用
 `start_or_steer_turn`，把 Started/Steered 统一编码成同一响应，返回 items 为空且 itemsView=notLoaded。
@@ -475,7 +487,8 @@ close 后新准入返回 closed。旧时间与未来时间输入均返回 stale�
 waitCancelledDuringGuard=false，以及 reservationDuringClose=rejected/closed。没有运行平台收发或模型任务。
 
 现有持久链路尚不能直接承载 QQ 来源：owner 仍为共享 v2，授权端口未给来源等待透传 AbortSignal，
-历史解码仍调用实时投递策略，人工 retry 仍缺 QQ 不可重试的最终存储约束；这些是下文已列出的接线前置工作。
+历史解码仍调用实时投递策略；这些是接线前置工作。当时还预设了完全禁止人工 retry 的存储改造，
+该额外前提已在后续复用审查中撤回为待用户选择，不代表必须改造数据库。
 本次没有改变上述数据/恢复合同或打开接线，`connectionOnly` 仍排除 QQ 的执行与持久账号准入。
 因此复审结论覆盖已写入的共享观察/来源代码及其交接边界，不代表尚未实现的 QQ 持久交付闭环通过验收。
 
@@ -491,8 +504,8 @@ waitCancelledDuringGuard=false，以及 reservationDuringClose=rejected/closed�
 终态后最多再保留 60 秒用于排空投递。撤权、Workspace/Thread 归属变化和 Adapter 关闭立即禁发；新来信不续期。
 `/stop` 取消未提交准备及未发出的普通结果，仍允许它自己的被动确认；已发请求照实结算。
 
-持久结果继续使用共享加密 Delivery，只有其 owner 需要新的 QQ 版本：拟用 `version: 3, kind: qq-live`，
-包含既有共享身份快照、代次、来源 token、精确 Thread/Turn 和关联状态；不存 Token、原来信正文或可重建授权的秘密。
+持久结果继续使用共享加密 Delivery，QQ owner 已实现 `version: 3, kind: qq-live, identity, source`：
+identity 为既有共享身份快照字符串，source 为代次、来源 token、账号/会话和精确 Thread/Turn 引用，或无候选的 null；不存 Token、原来信正文或可重建授权的秘密。
 非 QQ 保持 owner v2；当前 QQ v2 或缺少字段的记录保留但禁发。QQ v3 只有与内存来源、精确事件和实时共享身份都匹配才可发送。
 因此 Decode 只读理解记录不等于恢复授权，重启后旧 v3 也禁止发送。owner 序列化与 `outputAuthorized` 必须同时调整，
 不能把新增字段直接塞入现有 v2 字符串等值比较，也不能让事件富化副本丢失来源身份。
@@ -501,8 +514,8 @@ waitCancelledDuringGuard=false，以及 reservationDuringClose=rejected/closed�
 QQ 旧来源在授权层禁发并按既有策略释放屏障；不得因新白名单在解码时抛错，导致整个 Coordinator 进入 storageFailed。
 未知格式或认证失败仍失败关闭，不用宽松强制转换绕过格式校验；新准入和实际发送继续严格执行同一 QQ 白名单。
 
-来源 owner 子版本不改变 Surface payload v1，但下文不可绕过的 retry 策略需要单独升级 Delivery Journal，
-不能把两种版本混为一谈。QQ 来源只持久记录身份凭据的引用，不持久恢复发送授权。
+来源 owner 子版本不改变 Surface payload v1，也不因此要求升级 Delivery Journal。
+QQ 来源只持久记录身份凭据的引用，不持久恢复发送授权；人工重试策略另见管理操作，不与 owner 版本绑定。
 
 #### 命令与门控
 
@@ -548,37 +561,36 @@ QQ 旧来源在授权层禁发并按既有策略释放屏障；不得因新白�
 
 #### 管理操作与实施顺序
 
-QQ 首版**所有人工 retry 都拒绝**，包括本代次失败记录，避免把现有清空进度的 retry 当成安全续传。
-守卫必须进入 Delivery 最终原子写入边界，在整个批次改为 pending/清空检查点之前判断；混合批次含 QQ 则整批不变。
-CLI、WebUI/API 和 ControlServer 复用该结果；ignore 仍按既有显式管理授权处理，不宣称送达。
-非 QQ 的重试语义保持不变，离线管理和 Gateway 不可用时也不能绕过 QQ 守卫。
+复用审查确认：`DeliveryCoordinator` 已经不自动重发 uncertain，三个渠道共用队列、Receipt、Journal 和管理入口。
+此前“QQ 所有人工 retry 都拒绝 → retryPolicy 持久字段 → Journal v1 → v2 升级”是额外设计约束，
+不是 QQ 协议接入的既定要求；撤回其作为阶段 2 必经步骤的结论，不修改现有数据库或管理行为。
 
-具体采用通用持久字段 `retryPolicy: manual | never`，QQ 新记录由 Bootstrap 提交为 never；Delivery 不导入 QQ 模块，
-不把平台账号前缀当隐藏策略。`DeliverySubmission/Record`、Worker 协议和 SQLite 行均显式传递此字段。
-`sqlite-journal.ts` 的单条 resolve 与批量 resolveBatch 在删除 releasedBarriers 或修改任何行之前检查，
-批量版本核验与策略核验处于同一事务；拒绝保留 state、progress、revision 与屏障状态。管理端显示受控的不可重试原因。
-策略拒绝使用独立 `retry-forbidden`，Coordinator 不得将其当作 storageFailed 停掉整个投递器；Control IPC 增加 forbidden，
-WebUI/API 映射受控 409，CLI 显示记录未变。不能把策略拒绝误报为修订过期，也不能在线拒绝后转离线方式绕过。
-现有 CLI confirm 的操作者送达确认与 WebUI ignore 的放弃处理仍保持各自含义，不相互改名或自动调用。
+本代次人工重试策略尚待用户选择：建议复用现有显式重试，并告知可能重复已收到的分片；
+发送时仍须复核精确来源、Actor/Workspace、期限及预算，清空 Journal 检查点不重置这些资格或计数。
+旧代次/已失效来源不因 retry 重新获得发送资格。CLI confirm 与 WebUI ignore 继续保留既有含义，不自动调用或互相改名。
+如果用户仍要求完全禁止 QQ 人工重试，再单独审查在线/离线最终写入约束及是否确需数据格式变更；
+届时才给出实际版本、备份、失败恢复和回退计划，不能以本段授权执行升级。策略未确定前不开放正式 QQ。
 
-这要求 **Delivery Journal v1 → v2 的显式升级计划**，是阶段 2 的数据门槛，不能为了 QQ 静默改库或仅修改前端：
+实现收敛为一条共享链：QQ Adapter/来源 → SurfaceManager → 共享持久投递 → QQ 文本 Outbox → 现有协议客户端。
+Outbox 复用 `ConversationDeliveryQueue`、`captureDelivery`、`checkpointDelivery`，不新增正文恢复队列、回执状态机或 Journal。
+微信的最新会话回复上下文、飞书/Telegram 的回复引用表不等于 QQ 的输入参与授权，来源模块保留这一窄职责。
 
-- 本轮只批准设计，不执行升级。运行时与只读诊断继续严格拒绝非当前版本；实施时同步更新 Journal、只读 queue reader、
-  CLI/WebUI 管理、Worker、安装/更新兼容预检及 Delivery 文档，不能只改建表语句。
-- 真正升级前先只读验证数据库、payload.key、metadata proof 与全部记录认证，预览记录数和影响范围；
-  按现有服务控制取得无写入者状态及独占锁，私有完整备份投递目录和密钥关联材料，不能停共享 App Server。
-- 独立升级工具认证解密 Surface payload 后，以结构化 `event.target.surface` 为既有 QQ 记录写 never、其他已支持渠道写 manual，
-  并核对 account/conversation 与事件身份一致；身份不明则整次拒绝，
-  不推测或删除数据。Delivery 运行库本身只理解通用策略；不把升级映射塞进平台发送代码。
-- 保留 ID、顺序、状态、检查点及载荷语义。现有 AES-GCM AAD 包含 schemaVersion，必须先用 v1 AAD 验证解密，
-  再用绑定版本、投递身份及 retryPolicy 的 v2 AAD、新 nonce 重封装，并重建版本对应的 proof；仅 ALTER TABLE 或改 user_version 会破坏认证。
-  升级副本完整核对后再按既有原子替换/同步约束切换，任何失败保留原库和备份，不留半升级库。
-- 回退程序前先禁用 QQ；旧程序不能读取 v2 Journal，不能直接启动旧版本假装兼容。
-  只有尚无升级后写入时才能在独占状态下恢复原备份；已有新记录时保留两份数据并另作明确处置，不覆盖或丢弃新记录。
-  若用户不选择这项数据升级，则停在阶段 1，生产 QQ 不开放；不得靠删除投递箱或忽略门控绕过。
+`qq/outbox.ts` 已实现独立的完整文本执行组件：先规划全部字素分片（包装后每片最多 2000 UTF-8 字节、最多 8 片），
+再以一个共享队列操作发送；被动计划在任何发送前核对完整序号范围不超过 4。非法 Unicode、过大字素或完整计划超限均拒绝，
+不截断正文。每片通过共享 checkpoint 记录，失败即停后片，不自动重试或换模式；全部完成后才标记完整内容确认。
+45 秒期限覆盖规划、排队和发送，Token/HTTP 仍复用协议层的 15 秒期限；授权守卫在等待后和 HTTP 前复核。
+关联复审修复了被动计划逐片重新换算窗口可能受墙钟回退影响的问题：整条计划固定原来信的单调截止时间，
+与协议单次窗口同时约束发送。隔离本地观察中，在剩余约 10 毫秒时于守卫内回退墙钟 60 秒并消耗 25 毫秒，
+实际返回 expired、守卫调用 1 次、检查点 0；未读取真实凭据或联网发送。
+该组件尚未接到 SurfaceOutputPort。调用方仍须完成事件白名单、来源引用和账号/Turn/接收人预算预留；
+本组件不自行授予来源资格、不提供全账号频控或每日配额，不以其完成表示生产门槛已通过。
 
-实施依赖依次为：有界文本协议与解析 → 共享提交观察/来源关联 → 输出白名单与完整规划 →
-owner/恢复及最终 retry 守卫 → 分路径能力门控与命令 → 用户另行决定实际接入。
+共享 owner/可取消来源等待已接通，下一步装配 QQ 来源端口、分离历史解码与实时策略，再接事件、预算和必要命令。
+正式接通的最小剩余范围是：Adapter 的允许名单/Workspace/普通提交/来源生命周期与输出端口装配，
+统一事件白名单和账号/Turn/被动预算，及真实 QQ → App Server → 完整文本/任务终态的验收。
+同时验证撤权、取消和重启后旧来源禁发；人工重试沿前述待决策略收口。上述完成后才移除 connectionOnly，
+不以基础组件提交、静态检查或历史脚本成功代替接通验收。本轮复审覆盖当前组件与共享接线，未完成的 Adapter 链路不计为已验收。
+不增加任务 Queue 替代 submit，不为了接 QQ 默认升级数据库；实际启用仍需完整链路验收。
 每步先完成代码和文档审查，不为了演示临时开放入口。优先复用输入不变的已有证据，必要探测遵循本文最新授权范围；
 未来生产真实路径若无法观察，按未观察报告，不将有限探测授权扩大为正式接入。
 
@@ -637,6 +649,8 @@ Surface 同步准入、Delivery 检查点/恢复/人工重试及能力门控完�
 功能实现或恢复演练，不能将此记录作为阶段 1–5 已完成的证据。
 
 ### 本轮阶段 0 审查（2026-10-24）
+
+以下保留当时的审查结论。后续用户已允许回传明确关联到本次 QQ 输入的 Turn，故“证明 QQ 新建 Turn”不再是当前阻塞；人工重试禁令及数据库升级也已撤回为默认前提，以前文当前合同为准。
 
 主代理沿普通 submit/start/steer、Core 输出入口、持久准入、身份授权及 QQ 基础 Adapter 核对，
 独立链路审查覆盖 Delivery、Receipt、单条/批量管理写入和恢复门控；另一次独立全案复审核对当前设计与锁定上游。

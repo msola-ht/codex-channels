@@ -9,6 +9,8 @@ export interface PersistentSurfaceOutputOptions {
   directory: string;
   owner(event: OutputEvent): string;
   authorized(event: OutputEvent, owner: string): boolean;
+  /** Optional source settlement wait; synchronous checks below remain mandatory. */
+  authorizeAtDispatch?(event: OutputEvent, owner: string, signal: AbortSignal): Promise<boolean>;
   accounts(): string[];
   deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number): Promise<void>;
   fault(code: string, account?: string, persistentDeliveryId?: string, failure?: DeliveryFailure): void;
@@ -39,9 +41,13 @@ export class PersistentSurfaceOutput {
         const payload = decodePersistentOutput(record.payload);
         return mayReleaseUncertainOutputBarrier(payload.event);
       },
-      authorized: (record) => {
-        const payload = decodePersistentOutput(record.payload);
-        return options.authorized(payload.event, payload.owner);
+      authorized: async (record, signal) => {
+        let payload: ReturnType<typeof decodePersistentOutput>;
+        try { payload = decodePersistentOutput(record.payload); }
+        catch { throw new DeliveryError("storage"); }
+        if (signal.aborted) return false;
+        if (options.authorizeAtDispatch && !(await options.authorizeAtDispatch(payload.event, payload.owner, signal))) return false;
+        return !signal.aborted && options.authorized(payload.event, payload.owner);
       },
       deliver: async (record, signal) => {
         const liveOrder = this.liveOrders.get(record.id);

@@ -66,6 +66,7 @@ export type {
   SurfaceAdapter,
   SurfaceConfigurationChange,
   SurfaceOutputPort,
+  SurfaceDeliverySource,
 } from "./types.js";
 export { mayReleaseUncertainOutputBarrier, isPersistentOutput, snapshotPersistentOutput, decodePersistentOutput, withPersistentOutputImage } from "./persistent-output.js";
 export type { DeliveryCheckpoint } from "./delivery-receipt.js";
