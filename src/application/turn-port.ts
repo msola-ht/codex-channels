@@ -25,6 +25,8 @@ export interface TurnOverrides {
   turnTrigger?: "user";
   /** Local guard; never serialized, and does not cancel an already submitted write. */
   beforeSubmit?: () => void;
+  /** Local notification immediately before the write RPC; no retry or delivery guarantee. */
+  requestAttempted?: () => undefined;
   model?: string;
   modelProvider?: string;
   effort?: string;
@@ -73,6 +75,7 @@ export interface TurnExecutionPort {
     input: TurnInput[],
     clientUserMessageId: string,
     beforeSubmit?: () => void,
+    requestAttempted?: () => undefined,
   ): Promise<TurnStarted>;
   interruptTurn(threadId: string, turnId: string, beforeSubmit?: () => void): Promise<void>;
   setThreadName(threadId: string, name: string, beforeSubmit?: () => void): Promise<void>;

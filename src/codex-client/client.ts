@@ -693,6 +693,8 @@ export class CodexAppServerClient implements
   ): Promise<TurnStarted> {
     return this.submitTurnInput(threadId, input, async (protocolInput) => {
       overrides.beforeSubmit?.();
+      requireSynchronousAttempt(overrides.requestAttempted);
+      if (overrides.requestAttempted) overrides.beforeSubmit?.();
       this.observedTurns.delete(threadId);
       const response = await this.rpc.request<TurnStartResponse>({
         method: "turn/start",
@@ -843,9 +845,12 @@ export class CodexAppServerClient implements
     input: TurnInput[],
     clientUserMessageId: string,
     beforeSubmit?: () => void,
+    requestAttempted?: () => undefined,
   ): Promise<TurnStarted> {
     return this.submitTurnInput(threadId, input, async (protocolInput) => {
       beforeSubmit?.();
+      requireSynchronousAttempt(requestAttempted);
+      if (requestAttempted) beforeSubmit?.();
       const response = await this.rpc.request<TurnSteerResponse>({
         method: "turn/steer",
         params: {
@@ -855,7 +860,9 @@ export class CodexAppServerClient implements
           input: protocolInput,
         },
       }, { retryOverload: false });
-      return toTurnStarted(response);
+      const result = toTurnStarted(response);
+      if (result.turnId !== turnId) throw new Error("Codex 追加输入响应与预期 Turn 不一致");
+      return result;
     }, beforeSubmit);
   }
 
@@ -1617,6 +1624,15 @@ export class CodexAppServerClient implements
       method: "thread/goal/clear",
       params: { threadId, origin: "user" },
     }, { retryOverload: false, ...(beforeSubmit ? { beforeSubmit } : {}) });
+  }
+}
+
+function requireSynchronousAttempt(callback?: () => undefined): void {
+  if (!callback) return;
+  const result: unknown = callback();
+  if (result !== undefined) {
+    void Promise.resolve(result).catch(() => undefined);
+    throw new Error("提交请求观察必须同步返回 undefined");
   }
 }
 

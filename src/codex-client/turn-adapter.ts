@@ -48,6 +48,7 @@ export function toProtocolReviewTarget(target: ReviewTarget): ProtocolReviewTarg
 export function toTurnStarted(response: TurnStartResponse | TurnSteerResponse): TurnStarted {
   const turnId = "turn" in response ? response.turn.id : response.turnId;
   requireString(turnId, "turn id");
+  if (!turnId.trim()) throw new Error("Codex 响应缺少有效 turn id");
   return { turnId };
 }
 

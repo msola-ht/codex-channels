@@ -24,7 +24,7 @@
 
 ## 协议与现行设计
 
-- [`docs/qq-message-contract.md`](docs/qq-message-contract.md)：QQ 消息开发流程与合同，覆盖第一层源码实现、后续全链路责任、阶段门槛、恢复处置及证据缺口。
+- [`docs/qq-message-contract.md`](docs/qq-message-contract.md)：QQ 消息开发流程与合同，覆盖协议/解析、共享提交观察与内存来源注册的源码进度，以及后续接线、阶段门槛、恢复处置和证据缺口。
 
 - [`docs/unified-model-management-design.md`](docs/unified-model-management-design.md)：第三方模型统一管理的现行合同、设计取舍、关联审查结论与证据边界，明确默认保护、调用影响与暂不支持范围。
 - [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。

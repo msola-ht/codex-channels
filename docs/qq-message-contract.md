@@ -18,8 +18,10 @@
 - 主动发送权限未确认时，只允许明确授权的短文本协议观察，不开放 Codex 长任务。
 
 当前账号到唯一允许用户的主动/被动样例、文字样例、五个回复序号、311 秒被动回复及 Resume 后回复已有证据。
-2026-10-24 用户明确要求**不再探测**：本轮只收口设计与审查，不执行或新增探测，不发送样例，不启用正式 QQ；
-未验证项作为实施风险保留，不能通过重复真实账号观察消除。手动脚本保留但不自动运行，改动不主动提交。
+2026-10-24 第一层实现期间，用户要求不再探测，因此当时只做源码审查和静态检查。
+第一层已提交为 `65cbea8f`。随后用户授权继续下一步，**必要时可以探测**，替代先前的探测禁令；
+下文关于未运行探测的叙述保留为对应阶段的证据边界，不表示新实现已运行验证。
+后续观察须有具体未决问题、有限输入/次数、退出与清理边界，不重复已确认样例，不因此开放正式 QQ 或自动追加提交。
 
 ## 第一层源码实现状态
 
@@ -43,7 +45,7 @@ HTTP 200 必须有合法非空 ID；相互冲突的 code/err_code、错误与 ID
 重复索引、无效日期和引用伪装成普通文字等失败分支；这是源码反证，不是运行成功记录。
 用户禁止再次探测，因此本轮不新增测试、不执行模拟或真实收发；已有脚本样例仅支持所用协议样例，
 不能证明新方法的取消、错误分类及解析分支已实际跑通。静态检查与独立复审状态在交付时分别报告。
-`surface.ts` 仍为 connectionOnly，不调用上述入口；首次 Turn 来源阻塞、完整交付及 Journal 升级均未实现。
+`surface.ts` 仍为 connectionOnly，不调用上述入口；QQ 运行时来源接线、完整交付及 Journal 升级均未实现。
 
 本轮独立复审覆盖 Transport→解析及输入快照→Token→HTTP→回执/取消→公共出口/未接线 Adapter。
 发现并修复 `() => void` 容许 async 授权守卫、拒绝可能被忽略的问题：改为 `() => undefined` 并在运行时拒绝非 undefined 返回值，
@@ -145,11 +147,15 @@ QQ Transport 的接收序号只用于连接 Resume，不证明 Application 已�
 当前 Application `submit()` 会新建 Turn 或 steer 当前 Turn，返回 `{ threadId, turnId, steered }`；
 响应前也可能已经到达输出。实现必须在提交前登记临时来源，并在共享提交边界取得可关联身份；
 早到输出只允许有界等待关联确认，不能借用同会话最近来信。无法关联则保留待核对或失败，不发送。
-当前普通提交端口尚未暴露完整的来源关联/可能已提交状态；阶段 0 必须选定最小共享接口调整及所有调用方的保持行为，
-不能把仅供附件的提交作用域强行当作普通文字合同，也不能往 Core 塞入 QQ SDK 或凭据。
+普通提交端口现已实现可选 `SubmissionObserver`，提供精确准备身份、可能已提交与权威响应确认；QQ 内存注册表已实现，Adapter 和输出接线仍待实现。
+不把仅供附件的提交作用域强行当作普通文字合同，也不往 Core 塞入 QQ SDK 或凭据。
 
 同一 Turn 的 steer 来信有自己的去重和即时响应来源；不得替换该 Turn 已确认的结果发送授权、期限或被动额度。
-首版没有本次运行已确认发送授权的活动 Turn，不接受通过新来信 steer 来为旧任务补授权；不得自动中断或转移该 Turn。
+用户已明确选择“允许参与任务回传”：即使 Turn 由 TUI 先启动，只要本次 QQ 输入经权威响应确认加入该 Turn，
+且原 Actor/Workspace/账号/代次仍有效，就可为它建立本次运行的结果发送资格。不得自动中断或转移该 Turn。
+这不是历史补发授权：只处理本次提交进入 requestAttempted 后准入的实时输出，不扫描或重放此前已完成 Item；
+之后完成的完整 Item 可以包含本次输入之前的同轮内容。早到候选只有在确认同一 Thread/Turn 后才可发送。
+若该 Turn 已有有效 QQ 来源，继续使用原来源，不延长期限或改换目标；来源已撤销的旧票据与旧投递记录不复活。
 新来信属于新 Turn 时，建立独立关联。Thread 切换、Workspace 变化、账号变化和撤权均使不再匹配的待发送计划失效。
 `/stop` 必须能绕过普通输入等待取消本地准备，并通过共享用例中断精确原 Turn；确认只描述已观察到的结果。
 
@@ -298,8 +304,9 @@ QQ 为整个计划持有一个 retain，各片串行等待 started/confirmed 检
 
 ### 开发顺序
 
-基础接入已存在；本轮有界预探测已结束，阶段 0 已形成下列决定，但首次 Turn 来源证明仍有硬阻塞；
-阶段 1 的独立协议/解析已进入源码实现，阶段 2–5 尚未实施，不以提交次数表示阶段完成。不能把文档写完等同任务接入门槛已通过。
+基础接入已存在；有界预探测已结束，用户已选择按权威确认的输入参与关系授予回传资格，解除必须证明首次新建的设计门槛。
+阶段 1 的独立协议/解析已提交；阶段 2 的共享提交观察与内存来源注册已进入源码实现，Adapter/投递接线、阶段 3–5 仍未实现。
+不以提交次数表示阶段完成。不能把文档写完等同任务接入门槛已通过。
 
 | 阶段 | 实际产物与涉及边界 | 开放门槛与仍关闭的能力 |
 | --- | --- | --- |
@@ -318,23 +325,35 @@ QQ 为整个计划持有一个 retain，各片串行等待 started/confirmed 检
 真实客户端收到消息与平台成功回执分别确认；一条短文本成功只证明该样例，不证明全部长度、权限或恢复行为。
 预探测结果及未验证项先交用户确认，再开始生产消息实现；已知阻塞未解决时不开放任务入口。
 
-### 阶段 0 实施决定（待实现）
+### 阶段 0 实施决定与阶段 2 进度
 
-本节给出接口方向、所有者和有界失败行为；源码尚未具有这些能力。本轮只写设计，不改用户数据或运行配置。
+本节给出接口方向、所有者和有界失败行为。共享提交观察已实现，其余按下文待实施边界推进，不改用户数据或运行配置。
 以本地锁定 `rust-v0.164.0`（`6aaac694803004a63c6f393d153c96d22521a6b9`）核对：
 `turn/start` 返回 `turn.id`，但上游实际上执行 start-or-steer；`turn/steer` 通过 `expectedTurnId` 指定活动轮次并返回 `turnId`；
 `clientUserMessageId` 不是可假定具有幂等保证的重试键，也不能只凭 `turn/started` 推断是哪次请求。
 
 #### 提交关联与早到输出
 
-选择给 `ConversationTurnUseCases.submit` 增加可选第四参数 `SubmissionObserver`，保留既有第三参数实时授权闭包。
+已给 `ConversationTurnUseCases.submit` 增加可选第四参数 `SubmissionObserver`，保留既有第三参数实时授权闭包。
 该接口在 Application 公共出口定义，不包含 QQ 字段；现有三渠道及附件调用未传观察器时保持行为。
-拟定的同步观察点为 `prepared({ threadId, kind, expectedTurnId?, clientUserMessageId })`、`requestAttempted()`、
+已实现的同步观察点为 `prepared({ threadId, kind, expectedTurnId?, clientUserMessageId })`、`requestAttempted()`、
 `confirmed(Submission)`、`settled({ outcome: not-submitted | confirmed | unknown })`。调用方在提交前持有自己的随机来源 token。
+kind 明确为 start-or-steer 或 steer；Submission.steered 只描述本地所走分支，false 不证明新建。
+观察接口不包含消息正文；prepared/confirmed/settled 参数为冻结副本，回调必须同步返回 undefined，误传 Promise 会被拒绝并消费其 rejection。
+输入无效、授权失败、锁内准备失败也会 settled；进入请求观察点前为 not-submitted，之后未确认的错误为 unknown。
+confirmed 回调失败保持 unknown；确认后 Core 结算失败仍保留已确认的提交事实，不以本地错误重发输入。
+确认回调失败也不跳过已成功请求的模型/模式及 Core 活动结算，避免渠道记账错误改变其他客户端看到的状态。
+观察器的最终结算必须撤销 unknown 的临时候选；结算自身失败必须由调用者禁发，不能以 submit 抛错推断未提交。
+这些本地回调经 Provider 路由和执行门透传，未加入官方协议字段；目前没有生产 QQ 调用方。
+本次源码关联审查覆盖普通 submit、附件/Plan/异步回答的既有提交调用、Provider 与执行门透传、
+Client 输入准备及 RPC、响应校验、模型/模式和 Core 结算。重点反证了异步回调、回调中撤权、错配/空白 Turn ID、
+请求后错误与确认回调异常；这是源码审查，不是这些失败分支已运行成功的证明。
+`check`、变更文件 ESLint、完整类型构建和文档检查通过；没有调用运行中的 App Server 或 QQ，
+也未新增/运行测试或探测。真实任务观察留待 QQ 注册表与输出接线具备后，按最新必要探测授权安排。
 
 1. QQ 先占用入站去重键、捕获 Actor/Workspace/代次，再进入既有 Conversation 锁；每目标只容许一次普通提交准备。
 2. Application 沿 `submitInputLocked/startNewTurn` 准备精确 Thread，并在调用执行端口前触发一次 `prepared`。
-   steer 的守卫要求原 Turn 已有本代次有效来源；新来信只增加输入，不替换原结果授权。
+   steer 可以关联 TUI 原先启动的活动 Turn；新来信不替换该 Turn 已有有效结果授权。
 3. `TurnOverrides` 和 steer 端口补可选本地请求观察回调，由 Client 在最终授权守卫之后、调用 `rpc.request` 之前触发。
    Provider 路由透传回调；它不序列化为协议字段。此点只表示可能发出，后续网络失败仍可能未知，不能宣称平台未接收。
 4. 只在合法、非空 Turn ID 响应后 `confirmed` 记录请求实际作用的 Turn，再结算 Core 活动与返回值；这个回调不是首次来源授权证明。
@@ -346,7 +365,7 @@ QQ 为整个计划持有一个 retain，各片串行等待 started/confirmed 检
    `retains` 不因候选 pending 丢弃完整正文，`PersistentSurfaceOutput.accept` 冻结候选 owner 后按既有预算入箱。
    首次调度增加 `authorizeAtDispatch` 异步核验，等待对应提交结算，最多为提交剩余 30 秒且受关闭取消；
    Coordinator 的授权端口同步增加 AbortSignal 透传，并取其剩余总期限的较小值，停止后不得留下无所有者等待。
-   响应确认、来源资格已独立成立后才放行精确 Thread/Turn 匹配事件。发送前及 checkpoint started 后仍用同步 `isAuthorizedNow`，
+   响应确认且原输入作用域仍有效后，按用户选择的参与授权放行精确 Thread/Turn 匹配事件。发送前及 checkpoint started 后仍用同步 `isAuthorizedNow`，
    不能把现有同步布尔函数直接换为 Promise 后沿用 `if (!authorized(...))`。同期 TUI 其他 Turn 不获得来源。
 6. 关联超时、提交未知或候选容量不足时不发送、不猜 Turn。已能保存的输出转 blocked 保留核对；
    未入箱的输出只报告实际失败及 Thread 身份，不声称已保留。后续通知不会补授该未知提交的资格。
@@ -358,21 +377,21 @@ Surface 公共输出端口拟增加 `captureDeliverySource(event)`、`awaitDeliv
 Bootstrap 同步捕获并序列化引用，候选 pending 与完全无候选分开；异步富化/持久解码后传明确引用，不靠对象引用相等或“最近来源”找回授权。
 共享身份授权仍由 Bootstrap 负责，等待来源与发送前来源检查由 QQ 注册表负责，非 QQ 未提供方法时沿用现有路径。
 
-**尚未解决的硬门槛：首次 Turn 的来源证明。** 锁定上游 `turn_processor.rs` 的 start 处理调用
+**先前严格新建方案的协议限制（已由参与授权决定替代）。** 锁定上游 `turn_processor.rs` 的 start 处理调用
 `start_or_steer_turn`，把 Started/Steered 统一编码成同一响应，返回 items 为空且 itemsView=notLoaded。
 如果 Application 检查空闲之后另一个客户端启动 Turn，QQ 的 start 可能实际追加到该 Turn；合法响应只证明输入作用于该轮，
 不能证明该轮由 QQ 发起，也不能给它补上结果发送资格。再加一次 read/空闲守卫不能消除检查与写入之间的竞态。
 
-现阶段安全决定：响应 Turn 若已有本代次有效来源，按追加输入处理并保留原授权；否则先标记“提交已确认、来源未证明”，
+先前严格方案的安全决定：响应 Turn 若已有本代次有效来源，按追加输入处理并保留原授权；否则先标记“提交已确认、来源未证明”，
 禁止结果发送，不把所有者设为最近 QQ 来信。这是过渡失败关闭规则，**不能作为可用生产闭环验收**。
 仅 `turn/started`、Turn 时间戳或历史中首个 userMessage.clientId 匹配也不足：上游允许空输入和工具输出启动 Turn，
 随后 QQ 可能成为该 Turn 的首个 userMessage。官方 `turn_start.rs` 的空输入及活动 Turn 追加案例明确支持这两个反例。
 换成完整历史的首个可见 Item 也不能补足：空输入 Turn 在模型产生输出前可能没有任何可见 Item，QQ 追加仍可能排在第一项。
 
-后续只能通过静态协议/设计分析选择可证明的新建路径，不再探测。已识别候选 `thread/queue/start` 使用原子 StartIfIdleSubmission，
+先通过静态协议/设计分析选择可证明的新建路径；用户后来允许必要探测，但观察成功不能消除协议允许的竞态。已识别候选 `thread/queue/start` 使用原子 StartIfIdleSubmission，
 但采用它会增加先入官方持久 Queue 再启动的行为，涉及指定 queuedSubmissionId、取消/未知入队、其他客户端启动、模型覆盖和自动排队消费；
 这些不能靠把普通 submit 偷换成 Queue 完成。本轮未选择或实施该改动，也不假定存在未公开的 startOnly 参数。
-阶段 2/3 开工前必须完成这一决定及共享调用链审查；阶段 1 的纯文本协议/解析不依赖任务来源，后续经用户授权单独实现，状态见本文第一层源码实现状态。
+后续用户已完成参与授权选择；保留上述反例，避免再把本地 steered 标记解释为上游新建证明。阶段 1 状态见本文第一层源码实现状态。
 
 #### 提交后续查：原子 Queue 路径的代价
 
@@ -392,10 +411,73 @@ Bootstrap 同步捕获并序列化引用，候选 pending 与完全无候选分�
 提交前登记来源/输入摘要，add 前就进入可能执行状态，按精确 clientId、输入摘要和权威 Turn 关联核对自动或手动消费，
 取消只报告已证明的删除或中断结果；来源失效/重启后即使 Queue 后续启动也不恢复 QQ 发送资格。
 还需单独决定模型覆盖的受支持范围，以及是否允许 Gateway 退出后仍启动排队任务；这些尚未纳入本轮首版合同。
-因此维持原合同，不暗中改成持久 Queue；来源阻塞仍保留。该次续查后，阶段 1 有界文字协议层已单独实现，
-其实现不能被表述为任务闭环已经完成。第一层提交后的下一步仍是来源关联决策；不再次探测，不自动追加提交。
+该次续查没有选择持久 Queue，严格新建方案当时仍阻塞。随后阶段 1 有界文字协议层已单独实现，
+其实现不能被表述为任务闭环已经完成。第一层提交后的下一步仍是来源关联决策；必要探测按最新授权执行，不自动追加提交。
+
+#### 第一层提交后的来源决策续查
+
+继续核对锁定上游和生成的 `TurnStartParams`、`TurnStartResponse`、`TurnStartedNotification`：
+`rootTurnId`/`parentTurnId` 表示真实任务继承关系，用户直接发起的工作不应伪造父任务或根任务；
+不能填入随机来源 token，借 on-start 字段充当协议没有提供的请求关联回执。
+`turn/started` 也没有请求 ID 或新建/追加分类。Queue add 参数只有 Thread、输入、clientUserMessageId，
+没有暂停自动消费的选项；源码 enqueue 持久写入后会 wake_if_loaded。
+
+当前有两种不同的业务合同，不能由实现暗中互换：
+
+- 保持严格来源：只给可证明由 QQ 发起的任务建立结果授权。当前普通 submit 仍缺首次新建证明，不能开放闭环。
+- 放宽到明确参与：允许本次 QQ 输入经权威响应确认所参与的 Turn 回传结果，即使 Turn 由其他客户端先启动。
+  这会改变首版“不为其他来源的活动任务补授权”的约束，须先取得用户选择，再定义已有输出、早到输出和原授权的处理。
+
+用户已选择第二项：允许明确关联到本次 QQ 输入的 Turn 回传结果，接受该 Turn 可能由 TUI 先启动。
+现行授权和历史输出边界见“来源与 start/steer 关联”；不再以首次新建证明阻塞实现，不采用持久 Queue 替代提交。
+此轮未发送消息、启动模型任务或操作运行服务。
 
 #### 去重、来源与恢复
+
+`src/surfaces/qq/task-sources.ts` 已实现本节的内存注册边界，尚未接入 Adapter、共享 owner 或 Delivery。
+`reserve(scope, messageIdentity)` 只存原账号/Actor/Conversation/Workspace、来信 ID/索引/时间及关联状态，不接收正文。
+调用方须先完成真实授权，再将精确 Actor/Workspace/Thread 的同步实时检查交给注册表；解析成功或注册表自身都不能替代 Policy。
+标识符各最多 512 UTF-8 字节、Workspace 目录最多 32 KiB，属于本地元数据预算，不宣称为平台上限。
+调用者还须在撤权、Workspace/Thread 归属切换时调用 cancelTarget，Adapter 重建时 close；实时检查不能代替变化通知，
+注册表不自行监听配置，不能发现两次检查之间发生且已经恢复的权限变化。
+票据含取消信号、Application 观察器和提交守卫；prepared 固定 Thread，请求尝试之前不捕获新候选，
+confirmed 仅记录返回 Turn，settled=confirmed 且作用域仍有效才建立结果资格。错误结算不能把已尝试请求降回未提交。
+`capture` 返回冻结的代次/sourceToken/目标/Thread/Turn 引用，`awaitSource` 等待时另取冻结快照，
+`isCurrent` 只允许最终确认的精确 Turn；错误 Turn、旧代次、取消、撤权及旧引用重新获准均不恢复资格。
+同一 Turn 已有有效来源时，新输入引用可以关联原来源，但不能替换 Actor/Workspace、刷新授权期限或复活旧引用。
+`terminal` 支持终态先于提交响应到达：只保存每票据最多 8 个候选 Turn 的单调排空期限，溢出禁发，重复终态不续期。
+输入总期限 30 秒；来源最久 24 小时，终态最多再排空 60 秒。每账号 4096 条去重记录、128 个活动/预留来源、
+128 个等待；未知及未结算条目不靠 TTL 驱逐，已结算条目至少保留至最后结算/失效后 10 分钟且来源不再活动。
+取消会唤醒等待、取消票据并清理所属计时器；没有 App Server 中断副作用，实际 `/stop` 仍须调用共享用例。
+取消/超时也释放目标的待提交名额：尚未尝试的输入记为未提交，已尝试的输入记为未知并保留去重占位。
+迟到的 Application 结算只收尾，不能复活来源或把未知写入降为未提交；取消发生在调用 Application 前也不会一直占住目标。
+注册表仅管理普通任务的主动结果资格，不管理被动命令预算、分片、频控、正文或持久授权。
+
+本轮通过公开 QQ 懒加载入口对隔离的内存作用域做了手动接口观察，未连接平台或 App Server：
+请求尝试前 capture=null；confirmed 后、settled 前 isCurrent=false；settled 后匹配 Turn=true、其他 Turn=false；
+重复输入 rejected，后续追加保持原 sourceToken；撤权以及重新允许后旧引用均 false；取消等待返回 false 且票据 signal 已取消；
+close 后新准入返回 closed。旧时间与未来时间输入均返回 stale；真实计时的未确认等待在约 30,006ms 返回 false 并取消票据。
+这些观察只证明相应内存接口路径，不证明 Application 实际提交、跨进程恢复、24 小时过期或 QQ 结果交付。
+随后源码复核补齐等待引用快照和结算/失效后的去重保留期；不新增测试文件，不把隔离观察当作真实聊天验收。
+快照补齐后的手动观察：修改调用方引用后，原等待仍按原 Turn 返回 true，修改后的引用检查为 false；
+终态先于响应时仍允许原 Turn 在排空期内交付；实时守卫撤权会结束等待为 false；新实例拒绝旧代次引用。
+去重十分钟、终态六十秒、二十四小时到期和容量极限未做长时/满量运行观察；源码预算与静态检查不替代这些证据。
+最终取消修复后的观察：提交前取消后同目标新输入 accepted，原输入仍 duplicate；尝试后取消会结束等待为 false，
+迟到 confirmed 结算不恢复资格，同目标后续新输入可以准入；513 字节标识返回 invalid-input。
+当前注册表通过类型/模块边界检查、变更文件 ESLint、完整构建、文档及差异检查；所有隔离观察均已关闭自有实例与计时器。
+
+本次全链路关联复审沿 reserve → Application submit/观察器 → 执行门/Provider → Client/RPC → 回执与共享结算 →
+来源等待/取消追查，并核对 SurfaceManager、持久 owner、载荷解码及 Delivery 调度/人工重试入口。
+确认并修复守卫返回后的状态缺口：守卫内部取消票据时，旧实现会返回 current=true；守卫内部 close 时，旧实现仍会返回 accepted。
+准备守卫、有效来源守卫、来源复用及准入现在均在回调后复核关闭、取消和期限，等待在守卫后再次复核调用方 AbortSignal。
+入站 ID/索引/时间先取快照；30 秒预算从 reserve 入口开始，包含同步守卫与清理耗时，不能到创建票据时重新计时。
+修复后实际观察为 currentReturned=false/actuallyCancelled=true、sourceCancelledDuringGuard=false、
+waitCancelledDuringGuard=false，以及 reservationDuringClose=rejected/closed。没有运行平台收发或模型任务。
+
+现有持久链路尚不能直接承载 QQ 来源：owner 仍为共享 v2，授权端口未给来源等待透传 AbortSignal，
+历史解码仍调用实时投递策略，人工 retry 仍缺 QQ 不可重试的最终存储约束；这些是下文已列出的接线前置工作。
+本次没有改变上述数据/恢复合同或打开接线，`connectionOnly` 仍排除 QQ 的执行与持久账号准入。
+因此复审结论覆盖已写入的共享观察/来源代码及其交接边界，不代表尚未实现的 QQ 持久交付闭环通过验收。
 
 首版选择**进程代次内的有界元数据**，不改 StateStore v6，不复用旧 QQ Ledger，不新增消息历史库。
 代次由每个 QQ Adapter 生命周期创建，网络 Resume 沿用代次；Adapter 重建、配置重载或 Gateway 重启重新生成。
@@ -426,14 +508,14 @@ QQ 旧来源在授权层禁发并按既有策略释放屏障；不得因新白�
 
 | 路径 | 首版决定与具体调整边界 |
 | --- | --- |
-| 普通文字 | QQ 只在授权、容量、来源与共享执行门均通过时调用 `submit`；活动旧 Turn 无本代次来源时拒绝 steer |
+| 普通文字 | QQ 只在授权、容量与共享执行门均通过时调用 `submit`；精确确认输入参与的 Turn 后建立来源，不替换已有有效来源 |
 | `/help`、`/status`、`/stop` | 无参数；帮助只展示 QQ 支持范围，状态复用共享事实；stop 在输入准入前识别，绕过普通准备等待，但保留 Actor/Workspace 守卫 |
 | `/workspace [序号或 ID 或名称]` | 复用共享解析和 `selectWorkspace`，只选预配置目录；合法切换结果按新工作区授权返回，旧来源失效 |
 | `/model [共享选择参数]` | 复用共享提供商/模型选择，解决多 Provider 尚未选择时无法提交的问题；文字面板无按钮、无新别名，切换后的旧来源失效 |
 | `/new` | 复用共享新会话用例；现有活动任务按共享规则保留后台，但旧 QQ 来源失效，不能借新会话继续发送旧结果 |
 | 其他斜杠输入 | 共享解析后按 QQ 白名单拒绝，不降为普通任务；沿用已有 `/h`、`/work` 别名，不新增别名。resume、Queue、计划任务、审批设置均不开放 |
 | Adapter 能力 | 保留 connectionOnly 作为总关闭门；拟增可选 `recoverBindings/interactions/scheduledTasks/configurationNotifications` 四个布尔声明，QQ 开放文字后均为 false，其他渠道缺省行为不变。不新增动态插件框架 |
-| 恢复和持久账号 | `gateway-component-graph.ts` 的 BindingRestoreCoordinator.enabledSurfaces 与 `surface-manager.ts` 的持久 accounts 选择分开：运行中 QQ 新输出可入箱，旧绑定不在后台自动恢复；新用户输入仍可经 Application.ensureSession/router.ensure 读取/恢复原 Thread 的权威状态，但活动旧 Turn 无本代次来源就拒绝 steer，不给旧输出补授权；执行门与来源守卫共同限制任务 |
+| 恢复和持久账号 | `gateway-component-graph.ts` 的 BindingRestoreCoordinator.enabledSurfaces 与 `surface-manager.ts` 的持久 accounts 选择分开：运行中 QQ 新输出可入箱，旧绑定不在后台自动恢复；新用户输入可经 Application.ensureSession/router.ensure 读取/恢复原 Thread 的权威状态并追加输入，权威确认后建立新的参与来源；旧来源与旧投递记录不复活，执行门与来源守卫共同限制任务 |
 | 交互与工具 | 审批、问题、elicitation 仍走共享安全决定；`persistent-interaction-port.ts` 不等待 QQ 可批准交互，必要不可用提示只能使用原任务授权。注册执行工具的计划任务能力同时拒绝，不能只隐藏命令 |
 | 配置通知、图片与旧记录 | 无 QQ 配置广播订阅对象；`surface-manager.ts` 在检查 active/等待发送之前排除 configurationNotifications=false，避免 QQ 离线阻塞其他渠道通知确认；`sendChannelImage` 不实现；历史投递只供核对，不因新消息、连接 ready 或管理员 retry 获得资格 |
 
@@ -497,8 +579,8 @@ WebUI/API 映射受控 409，CLI 显示记录未变。不能把策略拒绝误�
 
 实施依赖依次为：有界文本协议与解析 → 共享提交观察/来源关联 → 输出白名单与完整规划 →
 owner/恢复及最终 retry 守卫 → 分路径能力门控与命令 → 用户另行决定实际接入。
-每步先完成代码和文档审查，不为了演示临时开放入口。用户已要求不再探测，现阶段只复用已有证据；
-未来生产真实路径若无法观察，按未观察报告，不自行恢复本次发送授权。
+每步先完成代码和文档审查，不为了演示临时开放入口。优先复用输入不变的已有证据，必要探测遵循本文最新授权范围；
+未来生产真实路径若无法观察，按未观察报告，不将有限探测授权扩大为正式接入。
 
 平台真实上限无法从少量样例穷尽证明。本地预算可以在证据范围内保守确定，但必须把样例成功、
 已观察拒绝和未知范围分开；不能以“等所有上游歧义消失”无限阻塞，也不能把猜测写成保证。
@@ -509,7 +591,7 @@ owner/恢复及最终 retry 守卫 → 分路径能力门控与命令 → 用户
 
 ### 已有证据与未观察边界
 
-以下区分已有证据和仍未知的边界，不是继续探测的执行计划。用户已要求不再探测，当前基础接入不发送这些消息。
+以下区分已有证据和仍未知的边界，不是全部重新探测的执行计划。当前基础接入不发送这些消息。
 
 | 待观察问题 | 证据要求 |
 | --- | --- |

@@ -74,6 +74,9 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 - `turn-errors.ts`：把单次 Turn 失败归约为稳定的错误类型、错误码与安全文案；只读取已归约的错误对象，不执行 RPC、不生成平台输出。
 - `pagination.ts`：提供 Application 层共用的分页总数、页码校验、偏移/切片与一基序号；错误类型与文案仍由各调用点提供，不持有列表状态。
 - `bounded-map.ts`：只提供按插入顺序裁剪 Map 容量的内部操作；过期、键刷新、确认消费及计时器清理由服务保留。
+- `submission-observer.ts`：普通 `submit` 的可选同步提交观察合同及单次调用状态；准备时固定 Thread、请求种类和 clientUserMessageId，
+  最终写 RPC 前记录可能提交，权威响应后确认精确 Turn，所有退出路径结算 not-submitted/confirmed/unknown。
+  回调必须返回 undefined；拒绝异步回调，观察结果不证明 Turn 最初由哪个客户端创建，不存输入正文、不授予平台发送权限。
 - `conversation-service.ts`：按 Turn、Session/Workspace、Queue/Revert、扩展与账户指标五类稳定能力接口公开用例，
   新建与恢复切换将仍有活动 Turn、子代理或交互的旧会话保留在后台；释放前核验已加载后代的权威状态，
   包括冷启动后尚无本地活动记录的子代理。后台释放与恢复清理共用 Queue、交互、父子活动复核，无法确认时保留绑定。
@@ -81,6 +84,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
   后台释放单飞期间收到的新生命周期事件会合并为下一次复核，不复用已经过时的活动结论；只由新事件触发续查，连续续查超过时间预算交回生命周期所有者恢复，不静默丢弃重试。失败状态仅在 Client 提供连续连接内的明确 Turn 终态证据时允许释放，恢复后缺少证据仍保留。
   具体 `ConversationService` 负责新建、恢复、切换、归档和固定 Thread，列表查询委托给会话查询组件；提交、steer 或将纯文本
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
+  普通 `submit` 第四参数可选提交观察器；已有调用方不传时沿用原路径，显式 steer 必须核对响应 Turn 与预期一致。
+  `Submission.steered=false` 仅表示走普通 start-or-steer 请求路径，不能证明新建 Turn；QQ 结果资格还需其独立来源作用域校验。
   `submitAsyncAnswer` 在同一 Conversation 锁内、发送前校验原 Thread 绑定和问题有效性，再复用普通 start/steer 路径；
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，

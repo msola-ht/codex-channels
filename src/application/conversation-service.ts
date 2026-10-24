@@ -115,6 +115,7 @@ import {
   type SessionDisplayCacheOperation,
 } from "./conversation-session-query-service.js";
 import { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
+import { SubmissionObservation, type SubmissionObserver } from "./submission-observer.js";
 
 export type { ConversationSession, ConversationSessionQuery } from "./conversation-session-query-service.js";
 export type {
@@ -125,6 +126,7 @@ export type {
 export interface Submission {
   threadId: string;
   turnId: string;
+  /** True only for the explicit steer path; false does not prove a newly created Turn. */
   steered: boolean;
 }
 
@@ -235,7 +237,7 @@ export interface PreparedAttachmentSubmission {
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
   prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio"): PreparedAttachmentSubmission;
-  submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean): Promise<Submission>;
+  submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver): Promise<Submission>;
   stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean>;
   rename(target: ConversationTarget, name: string, assertAuthorized?: () => void): Promise<void>;
   setPinned(target: ConversationTarget, pinned: boolean, assertAuthorized?: () => void): Promise<boolean>;
@@ -624,7 +626,21 @@ export class ConversationService implements
     return this.accountMetrics.requestMetrics(target, query);
   }
 
-  async submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean): Promise<Submission> {
+  async submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver): Promise<Submission> {
+    const observation = observer ? new SubmissionObservation(observer) : undefined;
+    try {
+      return await this.submitObserved(target, value, isAllowed, observation);
+    } finally {
+      observation?.settle();
+    }
+  }
+
+  private async submitObserved(
+    target: ConversationTarget,
+    value: string | ConversationInput,
+    isAllowed?: () => boolean,
+    observation?: SubmissionObservation,
+  ): Promise<Submission> {
     let input: TurnInput[];
     try {
       input = normalizeInput(value);
@@ -646,7 +662,7 @@ export class ConversationService implements
     assertAllowed();
     return this.locked(target, () => {
       assertAllowed();
-      return this.submitInputLocked(target, input, undefined, assertAllowed, assertAllowed);
+      return this.submitInputLocked(target, input, undefined, assertAllowed, assertAllowed, observation);
     });
   }
 
@@ -927,6 +943,7 @@ export class ConversationService implements
     identity?: TurnStartIdentity,
     assertCurrent?: (threadId: string) => void,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<Submission> {
     assertAuthorized?.();
     this.touchActivity(target);
@@ -944,15 +961,18 @@ export class ConversationService implements
         this.commandThreadGuard(target, active.threadId, () => { assertAuthorized?.(); assertCurrent?.(active.threadId); }));
       this.sessionQueries.invalidateSessionDisplayCache(active.threadId);
       try {
-        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId,
-          beforeSubmit);
+        observation?.prepare({ threadId: active.threadId, kind: "steer", expectedTurnId: active.turnId, clientUserMessageId });
+        const result = await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId,
+          beforeSubmit, observation ? () => observation.attempt() : undefined);
+        if (result.turnId !== active.turnId) throw new Error("追加输入响应与预期 Turn 不一致");
+        observation?.confirm({ threadId: active.threadId, turnId: result.turnId, steered: true });
       } catch (error) {
         this.recordTurnError("steer", target, active.threadId, active.turnId, error);
         throw error;
       }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
-    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized);
+    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized, observation);
   }
 
   queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem> {
@@ -1782,6 +1802,7 @@ export class ConversationService implements
     identity?: TurnStartIdentity,
     assertCurrent?: (threadId: string) => void,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<Submission> {
     this.touchActivity(target);
     const beforePrepare = this.commandThreadGuard(target, this.router.current(target)?.threadId, assertAuthorized);
@@ -1816,20 +1837,27 @@ export class ConversationService implements
       let result;
       try {
         assertCurrent?.(binding.threadId);
+        observation?.prepare({ threadId: binding.threadId, kind: "start-or-steer", clientUserMessageId });
         result = await this.codex.startTurn(
           binding.threadId,
           input,
           clientUserMessageId,
           workspace.cwd,
-          { ...overrides, turnTrigger: "user", beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); } },
+          { ...overrides, turnTrigger: "user", beforeSubmit: () => { beforeSubmit(); assertCurrent?.(binding.threadId); },
+            ...(observation ? { requestAttempted: () => observation.attempt() } : {}) },
         );
       } catch (error) {
         this.recordTurnError("start", target, binding.threadId, null, error);
         throw error;
       }
-      this.models.markApplied(target, submittedModelSettings);
-      this.collaborationModes?.markApplied(target);
-      activity.restore(target, result.turnId, identity);
+      try {
+        observation?.confirm({ threadId: binding.threadId, turnId: result.turnId, steered: false });
+      } finally {
+        // Observer failure cannot undo an accepted input or skip shared state settlement.
+        this.models.markApplied(target, submittedModelSettings);
+        this.collaborationModes?.markApplied(target);
+        activity.restore(target, result.turnId, identity);
+      }
       return { threadId: binding.threadId, turnId: result.turnId, steered: false };
     } finally {
       activity.stop();

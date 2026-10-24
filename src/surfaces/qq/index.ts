@@ -10,4 +10,8 @@ export {
   type QqInboundFailureCategory, type QqInboundFailureField, type QqInboundFailureReason,
 } from "./inbound.js";
 export type { QqNetwork } from "./network.js";
+export {
+  QqTaskSources,
+  type QqTaskScope, type QqTaskSourceReference, type QqTaskTicket, type QqTaskReservation,
+} from "./task-sources.js";
 export { QqSurface, type CreateQqSurfaceOptions } from "./surface.js";

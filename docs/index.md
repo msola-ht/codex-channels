@@ -1,4 +1,9 @@
 # Codex 官方文档与源码索引
+普通 Turn 提交的本地关联入口见 [`SubmissionObserver`](../src/application/submission-observer.ts)：
+准备精确 Thread、标记可能提交、确认响应 Turn 并结算失败。它经 Client/Provider 透传而不添加 RPC 字段，
+`turn/start` 仍可能实际追加；显式 `turn/steer` 响应必须匹配 expectedTurnId，空白 ID 不作成功。
+QQ 内存来源注册已实现，Adapter/输出接线仍待实现；本地观察接口的真实任务路径尚未验证，不能据此宣称 QQ 收发已可用。
+
 本页用于定位 Codex App Server 的官方说明、`0.164.0` 固定版本源码，以及本项目对应实现。
 它是查询入口，不替代生成协议类型，也不声明本项目支持官方协议的全部能力。
 
