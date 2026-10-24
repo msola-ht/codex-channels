@@ -20,6 +20,8 @@ import { planQqDelivery, planQqMessage, qqCommandNames, qqHelp, QqConfirmationPr
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 import { QqInteractionDeliveryError, QqInteractionPort } from "./interactions.js";
 import { QqImageStore, isSupportedQqImageUrl, type QqImageReference } from "./image-store.js";
+import { formatQuotedInput } from "../quoted-input.js";
+import { decodeQqReference } from "./quoted-reference.js";
 
 export interface QqNetwork {
   fetchImpl: typeof fetch;
@@ -275,7 +277,7 @@ class QqGeneration implements SurfaceAdapter {
     cancelledInputs = false, inputSignal?: AbortSignal): Promise<void> {
     if (!this.allowed(target, message.actor)) throw new Error("QQ 输入已取消");
     if (!message.supported) {
-      await this.notify(target, message.actor, message.id, "QQ 当前仅支持默认聊天中的完整纯文本或 PNG、JPEG、非动画 GIF 图片消息；不受支持的附件、地址、引用或混合类型消息未提交。");
+      await this.notify(target, message.actor, message.id, "QQ 当前支持默认聊天中的文字、PNG、JPEG、非动画 GIF 图片及原生引用上下文；不受支持的附件、地址、消息类型或引用结构未提交。");
       return;
     }
     this.observeMilestone("first-input", "QQ 本运行代次首条授权完整输入已接收；尚不代表已提交模型");
@@ -314,7 +316,7 @@ class QqGeneration implements SurfaceAdapter {
       }
       return;
     }
-    await this.submit(target, message, () => this.options.service.submit(target, message.text,
+    await this.submit(target, message, () => this.options.service.submit(target, formatQuotedInput(message.text, message.quotedText),
       () => !inputSignal?.aborted && this.allowed(target, message.actor)));
   }
   private async submitImages(target: ConversationTarget, message: Inbound, receipt: ReceivedAttachmentInput): Promise<Submission> {
@@ -341,8 +343,10 @@ class QqGeneration implements SurfaceAdapter {
         if (actualLimit) throw actualLimit;
       }
       current();
+      const currentText = message.text.trim() ? message.text : message.images.length === 1
+        ? "请查看这张图片并根据图片内容协助我。" : "请查看这些图片并根据图片内容协助我。";
       const result = await inputs.enqueue({ target, actorId: message.actor, sequence: 0,
-        ...(message.text.trim() ? { text: message.text } : {}), localImages: downloaded });
+        text: formatQuotedInput(currentText, message.quotedText), localImages: downloaded });
       return result.submission;
     } catch (error) {
       if (scope.signal.aborted && !scope.mayHaveSubmitted) {
@@ -527,7 +531,7 @@ class QqGeneration implements SurfaceAdapter {
   }
 }
 
-interface Inbound { id: string; msgId: string; actor: string; createdAt: number; text: string; images: QqImageReference[]; supported: boolean }
+interface Inbound { id: string; msgId: string; actor: string; createdAt: number; text: string; quotedText?: string; images: QqImageReference[]; supported: boolean }
 function decodeMessage(value: unknown): Inbound {
   if (!record(value) || !record(value.author) || !identifier(value.id) || !identifier(value.author.user_openid)
     || typeof value.timestamp !== "string"
@@ -556,13 +560,14 @@ function decodeMessage(value: unknown): Inbound {
         ...(attachment.size === undefined ? {} : { size: attachment.size as number }) });
     }
   }
+  const reference = decodeQqReference(value, extensions, indexes[0]!.slice(8));
   const id = createHash("sha256").update(JSON.stringify([value.id, value.author.user_openid, indexes[0]])).digest("hex");
   return { id, msgId: value.id, actor: value.author.user_openid, createdAt: Date.parse(value.timestamp), text, images,
+    ...(reference.supported && reference.quotedText !== undefined ? { quotedText: reference.quotedText } : {}),
     supported: typeof value.content === "string"
       && (text.trim().length > 0 || images.length > 0) && Buffer.byteLength(text, "utf8") <= 32_000
       && supportedAttachments
-      && value.message_type === 0 && value.ark_data === undefined && value.msg_elements === undefined
-      && !extensions.some(entry => entry.startsWith("ref_msg_idx=")) };
+      && reference.supported };
 }
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function identifier(value: unknown): value is string {
