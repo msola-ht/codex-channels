@@ -16,7 +16,6 @@ import { usesOpenAiAccount } from "../conversation-core/index.js";
 import {
   formatOpenAiErrorMessage,
   formatPercent,
-  formatRemainingRateLimitFields,
   formatRemainingRateLimitWindow,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
@@ -607,7 +606,7 @@ export function createTurnCompletedPresentation(
   ) {
     accountFields.push({
       label: "周限",
-      ...formatRemainingRateLimitFields(event.weeklyLimit, { includeDuration: false }),
+      value: formatWeeklyLimit(event.weeklyLimit),
     });
     accountHasResetTime = event.weeklyLimit.resetsAt !== null;
   }
@@ -619,7 +618,7 @@ export function createTurnCompletedPresentation(
       accountFields.push({ label: "剩余额度", value: `$${event.accountStatus.credits}` });
     }
     for (const window of event.accountStatus.windows) {
-      accountFields.push({ label: window.label, ...formatRemainingRateLimitFields({ ...window, windowDurationMins: null }) });
+      accountFields.push({ label: window.label, value: formatRemainingRateLimitWindow({ ...window, windowDurationMins: null }) });
       accountHasResetTime ||= window.resetsAt !== null;
     }
   }

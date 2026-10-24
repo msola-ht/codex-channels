@@ -85,11 +85,9 @@
   导出规范用法行；不访问配置、数据库或服务，
   `metrics-database.mjs` 保留原有公开入口与 `metricsRange` 导出。
 - `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。
-  QQ 使用显式 `--turn`，不推断最新活动来源。
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，校验配置与状态库 Schema，解析前台或后台 Thread 绑定；通过 Surface 公开入口校验并有界读取本地图片，私有原子写入
   状态库目录下的 `channel-outbox/pending/` 后发布 manifest，失败时清理本次暂存；由 Gateway 轮询后按 Thread 绑定
   会话发送并归档，详见 `docs/channel-image.md`。
-  非 QQ 保持 version 1；QQ 发布固定原目标和 Turn 的 version 2，不迁移既有请求。
 - `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc cleanup sessions`，通过
   主 App Server 按 Workspace 枚举全部 Provider 历史，最多并行检查四组候选；跨已连接实例核对活动状态，已移除 Provider 的历史仍可由共享历史连接维护。后代参与绑定、活动、固定与 Workspace 检查，确认后每个父会话只发一次官方归档，批次结束按 Workspace 复用官方双状态根列表核验。
   执行确认后的失败、部分成功、未确认、复核跳过及缓存清理失败返回非零状态，逐组结果保留，不自动重试或回滚。
@@ -419,14 +417,12 @@
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
   从同一受审查来源分别生成账户模型目录；重复配置时保留仍受支持的
   默认模型与逐模型设置。
-- `channel-setup-presentation.mjs`：通讯渠道共用的 Clack 选择、输入、确认与取消适配器，以及微信、飞书共用的紧凑二维码渲染；保留完整模块、使用 L 级纠错，终端过窄或渲染失败时向调用方报告错误，由渠道取消扫码会话并返回向导。
+- `channel-setup-presentation.mjs`：三个通讯渠道共用的 Clack 选择、输入、确认与取消适配器，以及微信、飞书共用的紧凑二维码渲染；保留完整模块、使用 L 级纠错，终端过窄或渲染失败时向调用方报告错误，由渠道取消扫码会话并返回向导。
 - `terminal-prompter.mjs`：为本机维护命令统一提供 Clack 确认接口，保留调用方的默认选项；取消确认不执行操作，
   `AbortSignal` 中止返回 `AbortError`，关闭时释放在途交互；非终端调用要求使用显式参数。
 - `telegram-setup.mjs`：把 Telegram Bot 来源、长轮询冲突确认、允许名单输入和中文输出适配到
   `telegram-setup-session.mjs` 的结构化会话；复用统一 Codex `.env`、环境变量和系统代理解析；交互输入的
   Token 使用隐藏输入，验证错误继续脱敏；新建 Bot 仅引导使用官方 BotFather。
-- `qq-setup.mjs`：统一 Setup 的 QQ 扫码与手工输入入口，复用渠道二维码渲染；扫码仅授权本次扫码用户，缺少 OpenID 拒绝保存。凭据和名单不回显，最终确认后写入同一私有 TOML，复用严格校验、源修订保护与原子保存。扫码最多五分钟，可用 Esc/Ctrl+C 取消；取消本地保存不撤销手机端授权。只支持 WebSocket，保存与运行时生效分开报告，不发送试验消息。
-- `qq-registration.mjs` / `qq-registration-worker.mjs`：在独占 Worker 中调用锁定官方 Connector 的公开扫码接口；SDK 直连 q.qq.com，不注入或悄悄绕用共享代理。控制总期限、迟到回调、单账号及 OpenID 校验，丢弃 SDK 控制台输出；成功、失败和取消均等待 Worker 终止，关闭未确认不报告成功。
 - `telegram-setup-session.mjs` / `telegram-setup-session.d.mts`：提供所有者绑定的 Telegram Setup
   开始、状态、自动配对、允许名单预览、确认与取消接口；Bot Token 和一次性配对码只保存在有期限的
   进程内会话中，状态、预览和结果不返回 Token，取消和超时通过 grammY `AbortSignal` 中止验证或

@@ -161,7 +161,7 @@ function checkSourceBoundaries() {
           failures.push(`${sourcePath} -> ${specifier} 业务模块依赖具体 Codex Client`);
         }
       }
-      const channels = ["feishu", "telegram", "weixin", "qq"];
+      const channels = ["feishu", "telegram", "weixin"];
       const sourceChannel = channels.find(channel => isInside(resolve(sourceRoot, "surfaces", channel), file));
       if (sourceChannel && channels.some(channel => channel !== sourceChannel
         && isInside(resolve(sourceRoot, "surfaces", channel), target))) {

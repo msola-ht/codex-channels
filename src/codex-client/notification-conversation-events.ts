@@ -207,15 +207,12 @@ function toTurnStartedEvent(
 ): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = nonEmptyString(params?.threadId);
-  const turn = asRecord(params?.turn);
-  const turnId = nonEmptyString(turn?.id);
-  const rootTurnId = nonEmptyString(turn?.rootTurnId);
+  const turnId = nonEmptyString(asRecord(params?.turn)?.id);
   return threadId && turnId
     ? {
         type: "turn.started",
         threadId,
         turnId,
-        ...(rootTurnId ? { rootTurnId } : {}),
       }
     : undefined;
 }

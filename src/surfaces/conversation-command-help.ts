@@ -1,13 +1,5 @@
 import type { ConversationCommandName } from "../application/index.js";
 
-/** Describe the shared SessionRouter policy; channels must not invent their own first-session default. */
-export const conversationSessionEntryHelpLines = [
-  "普通文本会发送到当前 Codex Session。",
-  "未绑定会话时，默认尝试接续当前 Workspace 可恢复的空闲 CLI/App Server 会话；没有合适会话时新建。",
-  "切换 Workspace 或空闲自动解绑后，下一条消息会新建会话，不自动接续历史会话。",
-  "希望从新会话开始，先用 /new；用 /status 核对当前工作区和会话，用 /resume 显式恢复。",
-] as const;
-
 export const conversationCommandDescriptions = {
   resume: "列出或恢复 Codex 会话",
   sessions: "搜索可恢复会话",

@@ -9,10 +9,7 @@
 最终显式退出前统一关闭并等待 Delivery、Metrics、Scheduled Tasks、材料 Reader 和主线程 Windows ACL bridge 的真实退出；有界关闭失败仍保留归属并报告故障。初始配置或构造失败也清理已创建的材料 Reader／ACL 资源。
 启动期间提前停止同样传播资源清理失败的非零退出状态，不能在等待资源最终退出后将曾超时的关闭改报成功。
 
-渠道组合统一将数据库旁的 `uploads/video` 作为视频附件根传给 Telegram、飞书、微信和 QQ 四个 Surface，各渠道拥有独立暂存器生命周期。该目录不作为普通本地视频目录开放；MCP 通过显式 `STRATA_VIDEO_CHANNEL_ROOT` 和当前会话的随机附件引用读取单个文件，不由 Gateway 自动改写 Codex 配置。
-
-QQ 实时原生流由组合根同步捕获输出 owner，并要求原 Thread 仍绑定同一目标；HTTP 前重核 Workspace、Provider、Actor 与绑定。最终持久结果继续使用既有持久授权合同。
-持久调度接收按事件选择的有限预算；仅 QQ 为主动限流整批预留、实际发送门控及最多四片 HTTP 提供 480 秒，其余渠道保持 60 秒，交互和原任务期限独立。
+渠道组合统一将数据库旁的 `uploads/video` 作为视频附件根传给三个 Surface，各渠道拥有独立暂存器生命周期。该目录不作为普通本地视频目录开放；MCP 通过显式 `STRATA_VIDEO_CHANNEL_ROOT` 和当前会话的随机附件引用读取单个文件，不由 Gateway 自动改写 Codex 配置。
 
 ## 文件
 
@@ -130,17 +127,15 @@ QQ 实时原生流由组合根同步捕获输出 owner，并要求原 Thread 仍
   该期限同时取消汇总前的指标水位等待；排空结束后组合根取消被新结算替代的旧等待，不终止底层指标写入。迟到结算不重复发布，不为仍运行的子代理伪造终态，持久接收入口在结算后才关闭。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、窄会话能力与共享命令执行器上下文及运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
-- `surface-composition.ts`：在组件图构造前按已验证配置异步加载 Telegram、飞书、微信和 QQ 内置插件，再同步创建渠道；创建渠道前初始化共享 `uploads` 根并收紧私有权限，拒绝符号链接或非当前用户所有的根，无渠道插件时不创建目录。把组合根创建的共享命令执行器注入各端，并保留各平台访问策略、
-  热加载钩子、故障上报装配和全局生命周期通知的安全收件人。四个插件都只在严格运行配置启用时创建实例；Telegram 由非空 Token
-  决定是否启用，飞书、微信和 QQ 使用显式开关；飞书和微信启动通知从仍有授权 Actor 的已知 Conversation
+- `surface-composition.ts`：在组件图构造前按已验证配置异步加载 Telegram、飞书和微信内置插件，再同步创建渠道；创建渠道前初始化共享 `uploads` 根并收紧私有权限，拒绝符号链接或非当前用户所有的根，无渠道插件时不创建目录。把组合根创建的共享命令执行器注入各端，并保留各平台访问策略、
+  热加载钩子、故障上报装配和全局生命周期通知的安全收件人。三个插件都只在严格运行配置启用时创建实例；Telegram 由非空 Token
+  决定是否启用，飞书和微信使用显式开关；飞书和微信启动通知从仍有授权 Actor 的已知 Conversation
   解析收件人，不要求当时已有 Thread 绑定。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
   读取凭据，不把 Token 放入运行配置。
   组合根同时向 Surface 上下文提供官方主路由的鉴权文件可用性，非官方主路由返回未知；该值只用于
   上线通知和失效降级提示，不替代 App Server 的认证判断，也不改变 Thread 的 Provider 绑定。
 - `proxy-fetch.ts`：向 Bootstrap 组合代码转发 Runtime 共享的代理 Fetch 接口；代理选择与
   Dispatcher 复用由 `runtime/proxy-fetch.mjs` 实现。
-- `qq-network.ts`：每个 QQ 运行代次独占代理感知 Fetch 与 HTTP Dispatcher；WebSocket 按实际目标选择代理，
-  CONNECT 底层连接绑定每次连接的取消信号，关闭等待代理连接及池退出，不复用已销毁代次。
 - `openai-connectivity.ts`：在 OpenAI Provider 启动时复用同一代理做有界、无凭据的 HTTP
   连通探测；缺少当前 Codex Home 的 `auth.json` 时跳过。存在鉴权文件时，组合根先通过稳定 `account/read` 判断当前使用 API Key 还是 ChatGPT 路由，再按官方
   Doctor 的端点规则只探测活动线路。API 与自定义 `openai_base_url` 使用 `/responses` 传输探测和
@@ -250,8 +245,6 @@ QQ 实时原生流由组合根同步捕获输出 owner，并要求原 Thread 仍
   pending 目录内与 manifest 同编号的绝对图片路径。发送只交给已经成功启动的活动 Surface。
   每次轮询只处理一批快照，发送前将 manifest 原子改名为 `.sending`；失败归档未完成或重启
   遗留领取记录时仅重试归档，不再次发送图片，停止时不继续处理下一条。
-  显式支持原 version 1 与仅用于 QQ 的 version 2；后者固定提交时目标和显式原 Turn，消费与渠道实际请求前均通过窄守卫核对原 Thread 仍绑定同一目标。
-  version 1 不补全 Turn 或转发 QQ；新版本的备份、恢复与回滚隔离见[渠道图片](../../docs/channel-image.md#恢复与回退)。
 
 业务状态和平台逻辑应留在对应模块，只有具体实现选择、交互端口注册与生命周期协调放在这里。
 Provider 账户能力同样通过编译期显式注册：OpenAI 复用 Codex Client，第三方实现 Application

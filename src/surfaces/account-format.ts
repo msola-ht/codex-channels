@@ -22,40 +22,13 @@ function formatQuotaWindow(
   options: { includeDuration?: boolean },
   prefix: string,
 ): string {
-  const parts = quotaWindowParts(window, options, prefix);
-  return `${parts.value}${parts.reset === undefined ? "" : `\n  - 重置：${parts.reset}\n  - ${parts.remaining}`}`;
-}
-
-function quotaWindowParts(window: RateLimitWindowView | null, options: { includeDuration?: boolean }, prefix: string): {
-  value: string; reset?: string; remaining?: string;
-} {
   if (window === null) {
-    return { value: "暂无数据" };
+    return "暂无数据";
   }
   const duration = options.includeDuration === false || window.windowDurationMins === null
     ? "" : `（${formatMinutes(window.windowDurationMins).replaceAll(" ", "")}）`;
-  return {
-    value: `${prefix}${formatPercent(Math.min(100, Math.max(0, 100 - window.usedPercent)))}${duration}`,
-    ...(window.resetsAt === null ? {} : {
-      reset: formatResetTime(window.resetsAt), remaining: formatTimeRemaining(window.resetsAt, Date.now(), "reset"),
-    }),
-  };
-}
-
-/** Typed quota details for lifecycle panels; never parse arbitrary field values as a list. */
-export function formatRemainingRateLimitFields(window: RateLimitWindowView, options: { includeDuration?: boolean } = {}): {
-  value: string; subfields?: { label: string; value: string }[];
-} {
-  const parts = quotaWindowParts(window, options, "剩余 ");
-  return {
-    value: parts.value,
-    ...(parts.reset === undefined || parts.remaining === undefined ? {} : { subfields: [
-      { label: "重置", value: parts.reset },
-      parts.remaining.startsWith("剩余：")
-        ? { label: "剩余", value: parts.remaining.slice("剩余：".length) }
-        : { label: "重置状态", value: parts.remaining },
-    ] }),
-  };
+  const reset = window.resetsAt === null ? "" : `\n  - 重置：${formatResetTime(window.resetsAt)}\n  - ${formatTimeRemaining(window.resetsAt, Date.now(), "reset")}`;
+  return `${prefix}${formatPercent(Math.min(100, Math.max(0, 100 - window.usedPercent)))}${duration}${reset}`;
 }
 
 export function formatRemainingRateLimitWindow(

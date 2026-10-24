@@ -120,11 +120,6 @@ export class ConversationAccountMetricsService {
       );
     }
     const threadId = this.router.current(target)?.threadId;
-    if (!threadId) return null;
-    const result = await this.requestMetricsQuery.forThread(threadId);
-    if (this.router.current(target)?.threadId !== threadId) {
-      throw new UserFacingError("command.authorization-changed", "指标查询对应的会话已变化，请重新查询。");
-    }
-    return result;
+    return threadId ? this.requestMetricsQuery.forThread(threadId) : null;
   }
 }

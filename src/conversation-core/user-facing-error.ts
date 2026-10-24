@@ -40,7 +40,6 @@ export type UserFacingErrorCode =
   | "image.too-large"
   | "image.too-many"
   | "image.unsupported"
-  | "image.unavailable"
   | "audio.path.invalid"
   | "audio.duration-missing"
   | "audio.too-large"

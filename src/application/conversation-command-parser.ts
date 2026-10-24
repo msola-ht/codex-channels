@@ -41,17 +41,6 @@ const requestMetricsTimeRanges = new Set<RequestMetricsTimeRange>([
   "all",
 ]);
 
-export function parseGoalCommand(input: string):
-  | { kind: "get" }
-  | { kind: "clear" }
-  | { kind: "set"; objective: string } {
-  const value = input.trim();
-  if (!value) return { kind: "get" };
-  if (value === "clear") return { kind: "clear" };
-  if (value.startsWith("set ")) return { kind: "set", objective: value.slice(4) };
-  throw new UserFacingError("goal.usage", "Goal 参数无效");
-}
-
 export function parseMetricsCommand(input: string): RequestMetricsCommandQuery {
   if (!input) return { view: "session" };
   const parts = input.split(/\s+/u);

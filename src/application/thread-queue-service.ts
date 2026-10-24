@@ -16,7 +16,6 @@ import type {
   ThreadQueueItem,
   ThreadQueuePage,
   ThreadQueuePort,
-  ThreadQueueSubmissionOrigin,
 } from "./thread-queue-port.js";
 import { pageCountFor, pageSelector, pageSlice, requirePage } from "./pagination.js";
 
@@ -60,7 +59,6 @@ export class ThreadQueueService {
     target: ConversationTarget,
     value: string,
     assertAuthorized?: () => void,
-    captureOrigin?: (origin: ThreadQueueSubmissionOrigin) => void,
   ): Promise<ThreadQueueItem> {
     assertAuthorized?.();
     const threadId = this.requireCurrentThread(target);
@@ -71,13 +69,11 @@ export class ThreadQueueService {
       this.rejectPendingOverrides(target);
       const text = normalizeQueueText(value);
       beforeSubmit();
-      const clientId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
-      captureOrigin?.({ threadId, clientId });
       try {
         const item = await queue.addQueueItem(
           threadId,
           text,
-          clientId,
+          `${gatewayUserMessageClientIdPrefix}${randomUUID()}`,
           beforeSubmit,
         );
         this.invalidateSnapshot(threadId);

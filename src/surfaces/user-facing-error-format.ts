@@ -91,7 +91,6 @@ export function formatSurfaceUserFacingError(
     case "video.unsupported":
     case "video.capacity":
     case "video.unavailable":
-    case "image.unavailable":
       return error.message;
     case "image.url.invalid":
       return "图片必须使用 PNG、JPEG、WebP 或非动画 GIF Base64 Data URL";

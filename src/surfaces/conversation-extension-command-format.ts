@@ -13,7 +13,6 @@ const maximumMcpDescriptionCharacters = 240;
 const maximumMcpOutputCharacters = 20_000;
 const mcpToolAccessNotice =
   "工具读写属性来自 MCP 上游声明，仅供提示；实际调用仍按审批策略处理。";
-const literalMcpField = (value: string): string => value;
 
 export function formatConversationSkills(
   result: Extract<ConversationCommandResult, { kind: "skills" }>,
@@ -48,7 +47,6 @@ export function formatConversationAgents(
 
 export function formatConversationMcp(
   result: Extract<ConversationCommandResult, { kind: "mcp" }>,
-  field = literalMcpField,
 ): string {
   if (result.servers.length === 0) {
     return toStructuredMarkdownList("MCP Servers（0）：");
@@ -57,7 +55,7 @@ export function formatConversationMcp(
     `MCP Servers（${result.servers.length}）：`,
     ...result.servers.flatMap(
       (server, index) => [
-        `${index + 1}. ${field(server.name)} · 运行：${formatMcpRuntimeStatus(server.runtimeStatus)} · 认证：${formatMcpAuthStatus(server.authStatus)} · 工具：${server.toolCount}`,
+        `${index + 1}. ${server.name} · 运行：${formatMcpRuntimeStatus(server.runtimeStatus)} · 认证：${formatMcpAuthStatus(server.authStatus)} · 工具：${server.toolCount}`,
         `  - 详情：/mcp ${index + 1}`,
       ],
     ),
@@ -66,7 +64,6 @@ export function formatConversationMcp(
 
 export function formatConversationMcpHealth(
   result: Extract<ConversationCommandResult, { kind: "mcp-health" }>,
-  field = literalMcpField,
 ): string {
   const report = result.report;
   const visibleActions = report.actions.slice(0, maximumMcpHealthFindings);
@@ -92,14 +89,14 @@ export function formatConversationMcpHealth(
           ...visibleActions.flatMap((action) => {
             if (action.type === "loginRequired") {
               return [
-                `- ${field(action.server)}：尚未登录`,
-                `  - 处理：/mcp login ${field(action.selector)}`,
+                `- ${action.server}：尚未登录`,
+                `  - 处理：/mcp login ${action.selector}`,
               ];
             }
             return [
               action.type === "toolDiscoveryFailed"
-                ? `- ${field(action.server)}：工具目录读取失败`
-                : `- ${field(action.server)}：连接失败或已取消`,
+                ? `- ${action.server}：工具目录读取失败`
+                : `- ${action.server}：连接失败或已取消`,
               "  - 处理：/mcp reload",
             ];
           }),
@@ -111,15 +108,15 @@ export function formatConversationMcpHealth(
           ...visibleNotices.map((notice) => {
             switch (notice.type) {
               case "authUnknown":
-                return `- ${field(notice.server)}：认证状态未知，可检查配置或尝试 /mcp login ${field(notice.selector)}`;
+                return `- ${notice.server}：认证状态未知，可检查配置或尝试 /mcp login ${notice.selector}`;
               case "noCapabilities":
-                return `- ${field(notice.server)}：未公开工具、资源或资源模板`;
+                return `- ${notice.server}：未公开工具、资源或资源模板`;
               case "notStarted":
-                return `- ${field(notice.server)}：尚未启动`;
+                return `- ${notice.server}：尚未启动`;
               case "starting":
-                return `- ${field(notice.server)}：正在连接`;
+                return `- ${notice.server}：正在连接`;
               case "disabled":
-                return `- ${field(notice.server)}：已禁用`;
+                return `- ${notice.server}：已禁用`;
             }
           }),
           ...(omittedFindings > 0
@@ -144,41 +141,42 @@ export function formatConversationMcpReload(
 
 export function formatConversationMcpDetail(
   result: Extract<ConversationCommandResult, { kind: "mcp-detail" }>,
-  field = literalMcpField,
 ): string {
   const server = result.server;
   const selector = result.selector;
   const detailSections = result.view
-    ? formatSelectedMcpDetailSection(server, result.view, selector, field)
+    ? formatSelectedMcpDetailSection(server, result.view, selector)
     : [
-        ...formatMcpDetailEntries("工具", server.tools, formatMcpToolLine, field),
+        ...formatMcpDetailEntries("工具", server.tools, (tool) =>
+          formatMcpToolLine(tool)
+        ),
         mcpToolAccessNotice,
-        ...formatMcpDetailEntries("资源", server.resources, (resource, text) =>
-          `- ${text(resource.title ?? resource.name)} · ${text(resource.uri)}${resource.mimeType ? ` · ${text(formatMcpDescription(resource.mimeType))}` : ""}`,
-        field),
-        ...formatMcpDetailEntries("资源模板", server.resourceTemplates, (template, text) =>
-          `- ${text(template.title ?? template.name)} · ${text(template.uriTemplate)}`,
-        field),
+        ...formatMcpDetailEntries("资源", server.resources, (resource) =>
+          `- ${resource.title ?? resource.name} · ${resource.uri}${resource.mimeType ? ` · ${formatMcpDescription(resource.mimeType)}` : ""}`
+        ),
+        ...formatMcpDetailEntries("资源模板", server.resourceTemplates, (template) =>
+          `- ${template.title ?? template.name} · ${template.uriTemplate}`
+        ),
       ];
   return toStructuredMarkdownList([
-    `MCP Server：${field(server.serverTitle ?? server.name)}`,
-    `名称：${field(server.name)}`,
+    `MCP Server：${server.serverTitle ?? server.name}`,
+    `名称：${server.name}`,
     `运行：${formatMcpRuntimeStatus(server.runtimeStatus)}`,
-    ...(server.pluginId ? [`来源 Plugin：${field(server.pluginId)}`] : []),
-    `版本：${field(server.serverVersion ?? "未提供")}`,
+    ...(server.pluginId ? [`来源 Plugin：${server.pluginId}`] : []),
+    `版本：${server.serverVersion ?? "未提供"}`,
     `认证：${formatMcpAuthStatus(server.authStatus)}`,
     ...(server.serverDescription
-      ? [`说明：${field(formatMcpDescription(server.serverDescription))}`]
+      ? [`说明：${formatMcpDescription(server.serverDescription)}`]
       : []),
     ...detailSections,
     "",
     ...(supportsMcpOAuthLogin(server.authStatus)
-      ? [`OAuth：/mcp login ${field(selector)}`]
+      ? [`OAuth：/mcp login ${selector}`]
       : []),
-    `浏览工具：/mcp ${field(selector)} tools`,
-    `浏览资源：/mcp ${field(selector)} resources`,
-    `浏览资源模板：/mcp ${field(selector)} templates`,
-    `读取资源：/mcp resource ${field(selector)} <URI>`,
+    `浏览工具：/mcp ${selector} tools`,
+    `浏览资源：/mcp ${selector} resources`,
+    `浏览资源模板：/mcp ${selector} templates`,
+    `读取资源：/mcp resource ${selector} <URI>`,
   ].join("\n"));
 }
 
@@ -213,7 +211,6 @@ function formatSelectedMcpDetailSection(
   server: Extract<ConversationCommandResult, { kind: "mcp-detail" }>["server"],
   view: NonNullable<Extract<ConversationCommandResult, { kind: "mcp-detail" }>["view"]>,
   selector: string,
-  field: (value: string) => string,
 ): string[] {
   if (view.section === "tools") {
     return [
@@ -224,7 +221,6 @@ function formatSelectedMcpDetailSection(
         selector,
         (tool) => [tool.name, tool.title, tool.description],
         formatMcpToolLine,
-        field,
       ),
       mcpToolAccessNotice,
     ];
@@ -242,9 +238,8 @@ function formatSelectedMcpDetailSection(
         resource.uri,
         resource.mimeType,
       ],
-      (resource, text) =>
-        `- ${text(resource.title ?? resource.name)} · ${text(resource.uri)}${resource.mimeType ? ` · ${text(formatMcpDescription(resource.mimeType))}` : ""}`,
-      field,
+      (resource) =>
+        `- ${resource.title ?? resource.name} · ${resource.uri}${resource.mimeType ? ` · ${formatMcpDescription(resource.mimeType)}` : ""}`,
     );
   }
   return formatMcpDetailPage(
@@ -259,21 +254,19 @@ function formatSelectedMcpDetailSection(
       template.uriTemplate,
       template.mimeType,
     ],
-    (template, text) => `- ${text(template.title ?? template.name)} · ${text(template.uriTemplate)}`,
-    field,
+    (template) => `- ${template.title ?? template.name} · ${template.uriTemplate}`,
   );
 }
 
 function formatMcpToolLine(
   tool: Extract<ConversationCommandResult, { kind: "mcp-detail" }>["server"]["tools"][number],
-  field = literalMcpField,
 ): string {
   const access = ({
     readOnly: "上游标记只读",
     writeCapable: "可能写入",
     unknown: "读写属性未知",
   } as const)[tool.access];
-  return `- ${field(tool.title ?? tool.name)} · ${field(tool.name)} · ${access}${tool.description ? ` · ${field(formatMcpDescription(tool.description))}` : ""}`;
+  return `- ${tool.title ?? tool.name} · ${tool.name} · ${access}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`;
 }
 
 function formatMcpDetailPage<T>(
@@ -282,8 +275,7 @@ function formatMcpDetailPage<T>(
   view: NonNullable<Extract<ConversationCommandResult, { kind: "mcp-detail" }>["view"]>,
   selector: string,
   searchableValues: (entry: T) => ReadonlyArray<string | null>,
-  format: (entry: T, field: (value: string) => string) => string,
-  field: (value: string) => string,
+  format: (entry: T) => string,
 ): string[] {
   const normalizedSearch = view.searchTerm?.toLowerCase() ?? null;
   const matches = normalizedSearch
@@ -294,12 +286,12 @@ function formatMcpDetailPage<T>(
       )
     : [...entries];
   const pageCount = Math.max(1, Math.ceil(matches.length / maximumMcpDetailEntries));
-  const commandSuffix = view.searchTerm ? ` search ${field(view.searchTerm)}` : "";
+  const commandSuffix = view.searchTerm ? ` search ${view.searchTerm}` : "";
   if (view.page > pageCount) {
     return [
       `${label}（${view.searchTerm ? `匹配 ${matches.length} · ` : ""}共 ${pageCount} 页）：`,
       `- 第 ${view.page} 页不存在，共 ${pageCount} 页`,
-      `返回第一页：/mcp ${field(selector)} ${view.section} 1${commandSuffix}`,
+      `返回第一页：/mcp ${selector} ${view.section} 1${commandSuffix}`,
     ];
   }
   const pageStart = (view.page - 1) * maximumMcpDetailEntries;
@@ -307,9 +299,9 @@ function formatMcpDetailPage<T>(
   const visible: string[] = [];
   let sectionCharacters = 0;
   for (const entry of pageEntries) {
-    const line = format(entry, literalMcpField);
+    const line = format(entry);
     if (sectionCharacters + line.length > maximumMcpDetailSectionCharacters) break;
-    visible.push(format(entry, field));
+    visible.push(line);
     sectionCharacters += line.length;
   }
   return [
@@ -319,10 +311,10 @@ function formatMcpDetailPage<T>(
       ? [`- 当前页其余 ${pageEntries.length - visible.length} 项因展示上限省略`]
       : []),
     ...(view.page > 1
-      ? [`上一页：/mcp ${field(selector)} ${view.section} ${view.page - 1}${commandSuffix}`]
+      ? [`上一页：/mcp ${selector} ${view.section} ${view.page - 1}${commandSuffix}`]
       : []),
     ...(view.page < pageCount
-      ? [`下一页：/mcp ${field(selector)} ${view.section} ${view.page + 1}${commandSuffix}`]
+      ? [`下一页：/mcp ${selector} ${view.section} ${view.page + 1}${commandSuffix}`]
       : []),
   ];
 }
@@ -330,15 +322,14 @@ function formatMcpDetailPage<T>(
 function formatMcpDetailEntries<T>(
   label: string,
   entries: readonly T[],
-  format: (entry: T, field: (value: string) => string) => string,
-  field: (value: string) => string,
+  format: (entry: T) => string,
 ): string[] {
   const visible: string[] = [];
   let sectionCharacters = 0;
   for (const entry of entries.slice(0, maximumMcpDetailEntries)) {
-    const line = format(entry, literalMcpField);
+    const line = format(entry);
     if (sectionCharacters + line.length > maximumMcpDetailSectionCharacters) break;
-    visible.push(format(entry, field));
+    visible.push(line);
     sectionCharacters += line.length;
   }
   return [
@@ -359,35 +350,32 @@ function formatMcpDescription(value: string): string {
 
 export function formatConversationMcpLogin(
   result: Extract<ConversationCommandResult, { kind: "mcp-login" }>,
-  field = literalMcpField,
 ): string {
   if (result.login.type === "bearerToken") {
     return toStructuredMarkdownList([
       "MCP 认证",
-      `Server：${field(result.login.server)}`,
+      `Server：${result.login.server}`,
       "状态：已使用 Bearer Token 认证，无需 OAuth 登录",
     ].join("\n"));
   }
   return toStructuredMarkdownList([
     "MCP OAuth 登录已启动",
-    `Server：${field(result.login.server)}`,
-    `请在浏览器完成授权：${field(result.login.authorizationUrl)}`,
+    `Server：${result.login.server}`,
+    `请在浏览器完成授权：${result.login.authorizationUrl}`,
     "授权完成后再次发送 /mcp 查看登录状态。",
   ].join("\n"));
 }
 
 export function formatConversationMcpResource(
   result: Extract<ConversationCommandResult, { kind: "mcp-resource" }>,
-  field = literalMcpField,
 ): string {
   const resource = result.resource;
-  const heading = (text: (value: string) => string) => [
+  const heading = [
     "MCP Resource（外部不可信内容）",
-    `Server：${text(resource.server)}`,
-    `请求 URI：${text(resource.requestedUri)}`,
+    `Server：${resource.server}`,
+    `请求 URI：${resource.requestedUri}`,
   ];
   const blocks: string[] = [];
-  const displayedBlocks: string[] = [];
   let visibleContentCount = 0;
   for (const content of resource.contents) {
     const block = formatMcpResourceContent(content, visibleContentCount);
@@ -396,7 +384,7 @@ export function formatConversationMcpResource(
       + resource.contents.length
       - nextVisibleCount;
     const candidate = toStructuredMarkdownList([
-      ...heading(literalMcpField),
+      ...heading,
       ...blocks,
       ...block,
       ...(omittedContentCount > 0
@@ -405,15 +393,14 @@ export function formatConversationMcpResource(
     ].join("\n"));
     if (candidate.length > maximumMcpOutputCharacters) break;
     blocks.push(...block);
-    displayedBlocks.push(...formatMcpResourceContent(content, visibleContentCount, field));
     visibleContentCount = nextVisibleCount;
   }
   const omittedContentCount = resource.omittedContentCount
     + resource.contents.length
     - visibleContentCount;
   return toStructuredMarkdownList([
-    ...heading(field),
-    ...displayedBlocks,
+    ...heading,
+    ...blocks,
     ...(omittedContentCount > 0
       ? [`其余 ${omittedContentCount} 个内容已省略。`]
       : []),
@@ -423,18 +410,17 @@ export function formatConversationMcpResource(
 function formatMcpResourceContent(
   content: McpResourceContent,
   index: number,
-  field = literalMcpField,
 ): string[] {
   if (content.kind === "blob") {
     return [
-      `内容 ${index + 1}：${field(content.uri)}`,
-      `二进制内容未在渠道中展开 · MIME=${field(formatMcpDescription(content.mimeType ?? "未知"))} · Base64 字符=${content.encodedCharacters}`,
+      `内容 ${index + 1}：${content.uri}`,
+      `二进制内容未在渠道中展开 · MIME=${formatMcpDescription(content.mimeType ?? "未知")} · Base64 字符=${content.encodedCharacters}`,
     ];
   }
   return [
-    `内容 ${index + 1}：${field(content.uri)}${content.mimeType ? ` · ${field(formatMcpDescription(content.mimeType))}` : ""}`,
+    `内容 ${index + 1}：${content.uri}${content.mimeType ? ` · ${formatMcpDescription(content.mimeType)}` : ""}`,
     "```text",
-    escapeCodeFence(field(content.text)),
+    escapeCodeFence(content.text),
     "```",
     ...(content.truncated ? ["文本展示达到整次读取 8000 字符上限，当前内容已截断。"] : []),
   ];

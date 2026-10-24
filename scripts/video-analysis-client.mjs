@@ -154,7 +154,7 @@ function validateArguments(args) {
       || (Object.hasOwn(args, "video") && (typeof args.video !== "string" || !args.video || args.video.length > 4096
         || [...args.video].some((character) => character.charCodeAt(0) < 32)))
       || (Object.hasOwn(args, "attachment") && (typeof args.attachment !== "string"
-        || !/^(?:telegram|feishu|weixin|qq)\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:mp4|webm)$/u.test(args.attachment)))
+        || !/^(?:telegram|feishu|weixin)\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:mp4|webm)$/u.test(args.attachment)))
       || typeof args.question !== "string" || !args.question.trim() || args.question.length > 16000
       || (args.context !== undefined && (typeof args.context !== "string" || !args.context.trim() || args.context.length > 8000))
       || (args.reasoning_effort !== undefined && !reasoningEfforts.includes(args.reasoning_effort))) {
