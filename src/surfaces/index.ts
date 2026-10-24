@@ -8,6 +8,9 @@ export function loadTelegramSurface() {
 export function loadWeixinSurface() {
   return import("./weixin/index.js");
 }
+export function loadQqSurface() {
+  return import("./qq/index.js");
+}
 export { telegramDefaultAccountId } from "./telegram/constants.js";
 export { createWeixinCredentialStore } from "./weixin/credential-store.js";
 export { createWeixinCredentialChangeCheck } from "./weixin/credential-client.js";
@@ -68,3 +71,4 @@ export { mayReleaseUncertainOutputBarrier, isPersistentOutput, snapshotPersisten
 export type { DeliveryCheckpoint } from "./delivery-receipt.js";
 export { withPersistentDeliveryDiagnostics } from "./diagnostics.js";
 export { readGeneratedImage, GeneratedImageError } from "./generated-image.js";
+export type { QqNetwork } from "./qq/index.js";

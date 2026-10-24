@@ -1,5 +1,8 @@
 # Config
 
+QQ 的 `[qq]` 配置复用共享严格 TOML Schema，仅在显式启用且 AppID、Secret、允许名单齐全时投影运行配置。
+当前 QQ 仅提供连接骨架，没有消息处理能力；名单新增热加载，删除、账号、凭据或启停变化要求重启 Gateway。
+
 Workspace 仅定义 `id`、`name` 和 `cwd`；执行权限由 App Server 原生配置及 Thread 继承规则决定，Gateway 不提供工作区权限覆盖字段。
 
 本目录负责把共享运行时已完成结构校验的 TOML 文档转换为 Gateway 运行配置。

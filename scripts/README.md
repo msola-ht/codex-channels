@@ -450,6 +450,8 @@
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
   稳定错误；每次凭据验证使用独立 Token 缓存，鉴权和 Bot 查询均受请求期限与会话取消约束。
 - `feishu-registration.mjs` / `feishu-registration-worker.mjs`：在独立 Worker 内复用锁定 SDK 的扫码注册，限定注册开始和轮询请求期限；父端取消、失败或完成后等待 Worker 终止，不在后台遗留注册请求，也不更改主进程的 SDK HTTP 默认值。
+- `qq-registration.mjs` / `qq-registration-worker.mjs`：迁入旧 QQ 分支的扫码基础模块，使用锁定 Connector 并等待自有 Worker 退出，不自行写配置。
+- `qq-setup.mjs`：QQ 扫码或手工配置入口，复用私有 TOML、修订检查和激活提示；可启用基础连接，但明确不支持消息处理或回复。
 - `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单、目录创建与已有目录注册，不保存或写入执行权限；
   默认工作区选择复用 `config-system-menu.mjs` 的版本化配置写入，移除操作仅移除注册；本次菜单循环保留上次选择。
   `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。

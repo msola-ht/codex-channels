@@ -97,6 +97,7 @@
 - [`src/model-api/README.md`](src/model-api/README.md)：纯模型 API 消息与流式转换模块。
 - [`src/model-relay/README.md`](src/model-relay/README.md)：独立模型 API 的身份、准入与撤销模块。
 - [`src/surfaces/README.md`](src/surfaces/README.md)：通讯渠道公共边界。
+- [`src/surfaces/qq/README.md`](src/surfaces/qq/README.md)：QQ 基础接入、连接生命周期与尚未接入的消息范围。
 - [`bin/README.md`](bin/README.md)：npm CLI 入口。
 - [`runtime/README.md`](runtime/README.md)：CLI 与 Gateway 共享运行时。
 - [`scripts/README.md`](scripts/README.md)：配置、构建、验证和服务脚本。

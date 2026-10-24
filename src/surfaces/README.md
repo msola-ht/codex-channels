@@ -1,8 +1,10 @@
 # Surface Adapters
 
+[QQ](qq/README.md) 当前仅接入配置、鉴权与 WebSocket 连接生命周期。消息层尚未接入，不提交任务、不发送回复，也不建立会话绑定。
+
 本目录保存外部交互平台适配器。Surface 负责把平台输入转换为 Application 命令，并把 Core 输出和审批交互渲染为平台消息。
 
-`index.ts` 是 Gateway 装配各 Surface 的主公开入口；通过显式异步加载函数提供三个渠道实现，
+`index.ts` 是 Gateway 装配各 Surface 的主公开入口；通过显式异步加载函数提供三个消息渠道与 QQ 基础连接，
 纯共享能力与凭据检查不静态加载飞书或 Telegram SDK。
 该入口也向本机图片提交命令公开 `readGeneratedImage` 与 `GeneratedImageError`，复用普通文件、符号链接、大小与格式校验；读取后的字节才允许进入渠道待发送目录。
 
@@ -74,6 +76,8 @@ Telegram、飞书目录仍只实现平台 Adapter，不导入插件宿主或组�
 会取消对应旧状态的未发送操作。状态发送失败或结果未知会向调用方报告，不自动重试整个状态。
 Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不再各自订阅全局事件总线。
 平台投递只交给成功启动且仍处于运行状态的 Surface；本地生命周期观察不依赖渠道就绪。单个输出端口拒绝事件不得中断后续路由。
+`connectionOnly: true` 明确标记仅连接的 Adapter：不参与旧绑定恢复、消息准入、持久投递账号选择或审批可用性，
+没有配置通知订阅对象，其连接故障也不阻塞其他渠道配置事件确认。未声明时保持完整消息渠道的现有行为。
 运行连接失败后，同一 Adapter 的 `start()` 必须能重新建立输入连接；Bootstrap 对每个账号实例
 独立退避，不通过重启 Gateway 恢复单个渠道。`stop()` 用于 Gateway 关闭或账号永久隔离，必须可在部分启动后
 安全调用并保持幂等。生产装配中的关键终态由 Bootstrap 提交独立持久投递箱，不写入 StateStore；
@@ -84,7 +88,8 @@ Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不
 配置变更通知使用结构化动作区分热加载、自动重启、需要重装、加载失败，以及第三方模型设置的
 等待重启、重启中、已生效和失败；Surface 只渲染结果，不得接收原始配置值或异常详情。普通
 生命周期通知可通过可选的 `configurationChanged` 异步入队；`deliverConfigurationChange` 必须等待
-平台 API 实际发送成功，失败时抛出错误，以便 Bootstrap 保留尚未确认的持久化配置事件。
+所有目标的平台 API 实际发送成功，失败时抛出错误，以便 Bootstrap 保留尚未确认的持久化配置事件。
+没有通知订阅对象时按空集合完成；QQ 基础接入当前属于此情形，不产生消息发送。
 全局变更投递给所有 Surface；平台作用域变更只投递给匹配 Surface。进程重启和重装会影响所有
 Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台私有原因的生命周期通知。
 

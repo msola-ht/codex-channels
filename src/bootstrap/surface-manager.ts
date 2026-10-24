@@ -161,7 +161,8 @@ export class SurfaceManager {
           if (surface) this.scheduleSnapshot(surface, key, snapshot);
         }
       },
-      accounts: () => [...this.active].map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
+      accounts: () => [...this.active].filter(surface => !surface.connectionOnly)
+        .map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
       deliver: async (event, signal, checkpoint, authorized, liveOrder) => {
         const surface = this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId));
         if (!surface || !this.active.has(surface) || !surface.output.deliver) throw new Error("可靠投递端口不可用");
@@ -193,6 +194,11 @@ export class SurfaceManager {
       const key = surfaceAccountKey(event.target.surface, event.target.accountId);
       const surface = this.surfacesByAccount.get(key);
       if (!surface || this.suspended.has(key)) return;
+      if (surface.connectionOnly) {
+        this.logger.warn({ surface: surface.surface, accountId: surface.accountId, eventType: event.type },
+          "仅连接的 Surface 不接收消息输出，事件未投递");
+        return;
+      }
       try {
         surface.output.admitLive?.(event);
         if (this.persistent) surface.output.observe?.(event);
@@ -218,6 +224,9 @@ export class SurfaceManager {
     this.removeOutputSubscription = output.subscribe(
       "surface-output-router",
       (event, _signal, eventBusWaitMs) => {
+        // The observer already records rejection; do not report ignored terminal
+        // events as successfully queued by the ordinary routing path.
+        if (this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId))?.connectionOnly) return;
         if (this.persistent) {
           if (isPersistentOutput(event) || surfaceOutputSnapshotKey(event) !== undefined) return;
           const surface = this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId));
@@ -269,7 +278,8 @@ export class SurfaceManager {
 
   executionBlockReason(target: ConversationTarget): "unavailable" | "global-capacity" | "account-capacity" | undefined {
     const account = surfaceAccountKey(target.surface, target.accountId);
-    if (this.stopping || this.suspended.has(account)) return "unavailable";
+    if (this.stopping || this.suspended.has(account)
+      || this.surfacesByAccount.get(account)?.connectionOnly) return "unavailable";
     return this.persistent?.executionBlockReason(target);
   }
 
@@ -485,10 +495,10 @@ export class SurfaceManager {
   }
 
   async deliverConfigurationChange(change: SurfaceConfigurationChange): Promise<void> {
-    if (this.active.size !== this.surfaces.length) {
+    const surfaces = this.surfaces.filter(surface => !surface.connectionOnly);
+    if (surfaces.some(surface => !this.active.has(surface))) {
       throw new Error("部分 Surface 当前不可用，不能确认持久化配置事件");
     }
-    const surfaces = [...this.surfaces];
     const results = await Promise.allSettled(
       surfaces.map(async (surface) => {
         const scopedChange = configurationChangeForSurface(surface, change);
@@ -713,7 +723,7 @@ export class SurfaceManager {
     }
     runtime.state = "running";
     runtime.retryAttempt = 0;
-    this.setInteractionAvailable(surface, true);
+    this.setInteractionAvailable(surface, !surface.connectionOnly);
     this.active.add(surface);
     this.persistent?.wake();
     for (const [key, snapshot] of this.snapshots) {

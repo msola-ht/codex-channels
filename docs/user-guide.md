@@ -4,6 +4,15 @@
 
 ## 1. 工作方式
 
+QQ 当前处于基础接入阶段：`codexc setup → 通讯渠道 → QQ` 可扫码或手工保存 AppID、
+App Secret 与同应用下的用户 OpenID 允许名单，默认不启用，确认后可开启基础连接。
+空名单拒绝所有用户，OpenID 不是 QQ 号码。扫码直连腾讯，不使用共享代理；
+Gateway 的 QQ 连接使用共享代理。QQ 凭据编辑使用 Setup，WebUI 显示已配置及启用状态。
+启停、账号、凭据或移除允许用户后按提示重启 Gateway；新增允许用户可热加载。
+使用 `codexc doctor` 查看脱敏配置状态，使用 `codexc logs gateway -n 100` 查看连接状态。
+**QQ 消息层尚未接入**：当前不支持普通任务、`/help`、`/status` 或审批回复，不发送任何消息；
+收到的事件不会提交 Codex、留存或重放。详细边界见 [QQ 基础接入](../src/surfaces/qq/README.md)。
+
 Gateway 把 Telegram、飞书和微信消息接入本机 Codex App Server。`codexc remote` 连接对应 Provider 的同一个 App Server，原生 TUI 与聊天渠道可在工作区与 Provider 匹配时接续同一 Thread，并共享实时运行状态。Workspace 注册表由 Gateway 管理，终端包装入口读取同一份配置；它不是上游 Project 的同步副本。
 
 App Server 是 Thread、Turn、Item 和会话历史的唯一事实来源。Gateway 的 StateStore 只保存渠道与 Workspace 的最小绑定，不复制完整会话历史。独立投递箱按[投递合同](delivery.md)加密保存待送达结果；显式开启的调用转储另按下文保存模型报文。

@@ -17,12 +17,14 @@ import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
   WeixinAccessPolicy,
+  QqAccessPolicy,
 } from "../policy/index.js";
 import type { BindingStore } from "../storage/index.js";
 import {
   loadFeishuSurface,
   loadTelegramSurface,
   loadWeixinSurface,
+  loadQqSurface,
   telegramDefaultAccountId,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
@@ -33,6 +35,7 @@ import {
   type SurfaceRuntimeModule,
 } from "./surface-plugin.js";
 import { createProxyFetch } from "./proxy-fetch.js";
+import { createQqNetwork } from "./qq-network.js";
 
 export interface TelegramRuntimeAdapter extends SurfaceAdapter {
   readonly surface: "telegram";
@@ -91,6 +94,10 @@ export async function loadBuiltInSurfacePlugins(
   config: GatewayConfig,
 ): Promise<readonly BuiltInSurfacePlugin[]> {
   const plugins: BuiltInSurfacePlugin[] = [];
+  if (config.qq) {
+    const channel = await loadQqSurface();
+    plugins.push({ id: "qq", create: options => options.config.qq ? [createQqModule(options, channel)] : [] });
+  }
   if (config.telegramEnabled) {
     const channel = await loadTelegramSurface();
     plugins.push({
@@ -116,6 +123,27 @@ export async function loadBuiltInSurfacePlugins(
     });
   }
   return plugins;
+}
+
+function createQqModule(
+  options: SurfacePluginContext,
+  { QqSurface }: Awaited<ReturnType<typeof loadQqSurface>>,
+): SurfaceRuntimeModule {
+  const config = options.config.qq;
+  if (!config) throw new Error("QQ 运行配置不存在");
+  const access = new QqAccessPolicy(config.allowedUserOpenIds, config.appId);
+  const adapter = new QqSurface({
+    appId: config.appId, appSecret: config.appSecret, access,
+    createNetwork: () => createQqNetwork(options.config.networkProxy),
+    logger: options.logger, onFatal: error => options.onFatal("qq", config.appId, error),
+  });
+  return {
+    adapter,
+    applyHotReload(next, changes) {
+      if (changes.some(change => change.code === "surface.qq.allowed-users") && next.qq) access.replace(next.qq.allowedUserOpenIds);
+    },
+    prepareRestartNotification() { return () => {}; },
+  };
 }
 
 function createWeixinModule(

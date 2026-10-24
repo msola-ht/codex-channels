@@ -1,5 +1,10 @@
 import type { TomlTable } from "smol-toml";
 
+export function classifyQqConfigChanges(
+  current: { appId: string; appSecret: string; allowedUserOpenIds: Iterable<string> } | undefined,
+  next: { appId: string; appSecret: string; allowedUserOpenIds: Iterable<string> } | undefined,
+): Array<{ kind: "enabled" | "account" | "credentials" | "allowed-users"; restart: boolean }>;
+
 export interface GatewayConfigDocument {
   version: 1;
   default_workspace: string;
@@ -24,6 +29,17 @@ export interface GatewayConfigDocument {
     enabled: boolean;
     account_id: string;
     allowed_user_ids: string[];
+  };
+  qq?: {
+    enabled: false;
+    app_id?: string;
+    app_secret?: string;
+    allowed_user_openids?: string[];
+  } | {
+    enabled: true;
+    app_id: string;
+    app_secret: string;
+    allowed_user_openids: string[];
   };
   codex: {
     binary: string;

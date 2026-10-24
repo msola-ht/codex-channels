@@ -46,6 +46,8 @@ export type { OperationUpdateDisplay };
 export interface SurfaceAdapter {
   readonly surface: SurfaceId;
   readonly accountId: string;
+  /** Connection lifecycle only: no conversation recovery, output or notification recipients. */
+  readonly connectionOnly?: true;
   readonly interactions: InteractionPort;
   readonly output: SurfaceOutputPort;
   sendChannelImage?(conversationId: string, imagePath: string): Promise<void>;

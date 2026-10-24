@@ -1039,7 +1039,7 @@ export abstract class GatewayComponentGraph {
           output: this.output,
           logger,
           isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
-            surface.surface === target.surface && surface.accountId === target.accountId),
+            !surface.connectionOnly && surface.surface === target.surface && surface.accountId === target.accountId),
           isActorAuthorized: (target, actorId) =>
             this.accessPolicy(target)?.isAllowed({ target, actorId }) === true,
           creationContext: (target) => {
@@ -1427,7 +1427,7 @@ export abstract class GatewayComponentGraph {
       codex: this.codex,
       router: this.router,
       output: this.output,
-      enabledSurfaces: () => this.surfaces,
+      enabledSurfaces: () => this.surfaces.filter(surface => !surface.connectionOnly),
       scheduledRecovery: () => this.scheduledTasks?.coordinator,
       releaseBackground: async (threadId, isCurrent) =>
         await this.trackQueueLifecycleTask(() =>

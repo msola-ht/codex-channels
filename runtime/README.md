@@ -1,5 +1,8 @@
 # 共享运行时基础设施
 
+`gateway-config.mjs` / `gateway-config.d.mts` 同时定义 QQ 配置与变更分类，供 Setup、Doctor、WebUI 摘要及 Gateway 复用；
+QQ 当前仅支持基础连接，配置成功不代表消息收发可用。
+
 本目录保存 npm CLI 与已编译 Gateway 必须直接共享的稳定 JavaScript 模块，不承载会话业务。
 
 ## 跨平台边界

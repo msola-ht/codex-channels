@@ -71,7 +71,7 @@ export interface GatewaySettings {
     storage: { retentionDays: number; maxRows: number };
   };
   channels: Array<{
-    id: "telegram" | "feishu" | "weixin";
+    id: "telegram" | "feishu" | "weixin" | "qq";
     displayName: string;
     configured: true;
     enabled: boolean;
