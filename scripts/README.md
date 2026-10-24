@@ -10,7 +10,7 @@
   正式 QQ 禁用且配置生效后，用 `--run` 启动；Gateway 的其他渠道可继续运行，独立 QQ 探测锁阻止同配置同账号的重复探测。
   默认 `--run` 最多 180 秒等待唯一允许用户的随机口令，使用原消息 ID 被动回复一次；另有固定数量文字样例、重复序号/次数、
   310 秒延迟回复及自有网络连接中断恢复模式，不自动重试业务请求；检测到 QQ 启用、凭据或名单变化取消。
-  QQ 协议通过 Surface 公共加载入口取得；仅此脚本获准导入 Bootstrap 的 QQ 网络所有者，复用正式代理及清理语义，不加载 Gateway 组合根。
+  QQ 协议通过 Surface 公共加载入口取得；此脚本与正式 `qq-menu-setup.mjs` 获准导入 Bootstrap 的 QQ 网络所有者，复用正式代理及清理语义，不加载 Gateway 组合根。
   退出关闭自有资源并释放探测锁，不占用 Gateway 所有权，不启停服务或调用 App Server。
   具体步骤与观察限制见 [QQ 消息开发流程](../docs/qq-message-contract.md#手动被动探测)。
 
@@ -459,7 +459,8 @@
   稳定错误；每次凭据验证使用独立 Token 缓存，鉴权和 Bot 查询均受请求期限与会话取消约束。
 - `feishu-registration.mjs` / `feishu-registration-worker.mjs`：在独立 Worker 内复用锁定 SDK 的扫码注册，限定注册开始和轮询请求期限；父端取消、失败或完成后等待 Worker 终止，不在后台遗留注册请求，也不更改主进程的 SDK HTTP 默认值。
 - `qq-registration.mjs` / `qq-registration-worker.mjs`：迁入旧 QQ 分支的扫码基础模块，使用锁定 Connector 并等待自有 Worker 退出，不自行写配置。
-- `qq-setup.mjs`：QQ 扫码或手工配置入口，复用私有 TOML、修订检查和激活提示；可启用基础连接，但明确不支持消息处理或回复。
+- `qq-setup.mjs`：QQ 扫码或手工配置入口，复用私有 TOML、修订检查和激活提示；另提供独立的机器人常驻菜单配置操作，选中后才加载相关实现。
+- `qq-menu-setup.mjs`：复用已有 QQ 凭据、共享代理网络和协议客户端，通过全局 `/v2/menu` 为单聊新增只填入 `/help` 的 Codex 菜单。严格保留四种已知菜单和顺序，未知字段、同名冲突或满十项拒绝；同值不写。预览确认后重读本机凭据/代理及远程版本/完整内容，PUT 后回读核对版本与计划；允许平台为 send_message 补充 HTTPS icon，保留既有图标。平台未配置时实测返回 `{menu:{}}` 且无版本，保留该明确空态，不虚构版本。平台无 CAS，仍有复核与 PUT 之间的并发窗口，不自动重试或回滚不确定写入。独立关闭客户端与网络，不打开 WebSocket、不写 TOML、不重启 Gateway；当前账号菜单保存已只读确认，用户已确认手机显示，桌面端支持范围未确认。
 - `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单、目录创建与已有目录注册，不保存或写入执行权限；
   默认工作区选择复用 `config-system-menu.mjs` 的版本化配置写入，移除操作仅移除注册；本次菜单循环保留上次选择。
   `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。

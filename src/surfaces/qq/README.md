@@ -17,6 +17,12 @@
 ## 文件与边界
 
 - `index.ts`：QQ 模块公开出口。
+- `command-menu.ts`：固定 `/help` 首页与统一 style=0 的 type=2 命令按钮构造器；首页仅显示 Codex 标题，不重复长说明。
+- `command-menu-controller.ts`：工作区、模型/思考等级/速度、会话恢复和统计选择菜单；列表读取及选项执行复用共享命令服务，模型选择复用共享快照和选择守卫。
+  本代次持有有界、十分钟、单次消费的选项令牌，仅保存具体 ID/选择请求与授权上下文，不保存会话历史或模型正文；关闭清理，跨用户、工作区、会话或过期选择拒绝。
+  动态名称只用于经过转义及限长的显示，不拼入可执行指令；选择来信仍走普通消息准入，无 INTERACTION_CREATE 回调。模型翻页保留提供商筛选和共享快照；客户端反馈与未观察边界见消息合同。
+- `bot-menu.ts`：应用级常驻菜单的严格结构校验与 Codex 入口追加计划；保留现有菜单，拒绝同名冲突、未知结构与容量不足。
+  接受并保留实测由 QQ 补充的 send_message HTTPS icon；新项回读允许补图标，既有项及确认快照仍精确比较。
 - `lifecycle.ts`：复用共享上线信息与 Turn 完成统计，输出 QQ 纯文本通知；完成通知不承诺正文已全部送达。
 - `surface.ts`：文字 Adapter，接入共享启停与故障重试；每代次拥有独立网络、Token、WebSocket 和 messages。
   capabilities 启用共享绑定和订阅恢复，关闭审批、计划任务和配置广播；持久结果使用共享投递账号。
@@ -40,6 +46,8 @@
 - `send-budget.ts`：每代次账号级预算，完整计划先预留；正文每 Turn 16 片、终态 2 片，主动账号/接收人滚动分钟 24/16 次、接收人滚动日 800 次，未知结果不退额度。
   完整协议调用串行并间隔至少 250ms，覆盖 Token 等待后的并发突发；限速不另建恢复投递箱，等待受完整计划期限和取消约束。
 - `protocol.ts`：AppID/AppSecret 校验、Token 合并刷新、Gateway 地址发现、有界 HTTP 响应、取消和结构化错误。
+  `sendMarkdown` 仅发送完整单片，复用文字收件人/来源/期限校验与消息 ID 回执；使用 msg_type=2 与 markdown.content，不同时保留 content。
+  `getBotMenu`/`putBotMenu` 为 Setup 独立管理入口提供有界 GET/PUT；不参与 Gateway 启动、事件连接或消息投递。
   `sendStream` 为被动 text/replace 帧，固定原来信、序号、索引和流 ID，复用有界请求、同步授权守卫及保守结果分类；不使用 event_id 或 is_wakeup。
   `sendResultFile` 使用固定文件名的 UTF-8/Base64 直传、file_type=4 和 srv_send_msg=true，单次主动发送，正文最多 256 KiB；
   不开放任意本地文件路径、下载 URL 或附件输入，收到合法消息 ID 后才认定平台接受。

@@ -23,20 +23,25 @@ export async function runQqSetup({
 } = {}) {
   const prompt = prompter ?? createChannelPrompter(input, output);
   try {
+    output.write("\n通讯渠道 · QQ 接入\n\n");
+    output.write("支持允许名单内的单聊文字任务与必要命令；不支持附件、审批交互、计划任务或历史结果补发。启用后普通文字会提交 Codex。\n");
+    const mode = await prompt.select("选择 QQ 操作", [
+      { value: "scan", label: "手机 QQ 扫码连接（推荐）", hint: "获取应用凭据和本次扫码用户 OpenID" },
+      { value: "manual", label: "手工填写应用凭据和 OpenID" },
+      { value: "bot-menu", label: "配置机器人常驻 Codex 菜单", hint: "复用已有凭据；全应用单聊生效，不改本机配置" },
+      { value: "back", label: "返回" },
+    ]);
+    if (mode === "back") return undefined;
+    if (mode === "bot-menu") {
+      const { runQqMenuSetup } = await import("./qq-menu-setup.mjs");
+      return await runQqMenuSetup({ environment, output, prompter: prompt });
+    }
+    if (mode !== "scan" && mode !== "manual") throw new Error("不支持的 QQ 接入方式");
     const { configPath } = requireUserConfig(environment);
     // 保留读取时的源修订，由现有原子写入器拒绝确认期间的任何并发修改。
     const document = readGatewayConfig(configPath);
     validateGatewayConfigStructureDocument(document);
     const initialDocument = structuredClone(document);
-    output.write("\n通讯渠道 · QQ 接入\n\n");
-    output.write("支持允许名单内的单聊文字任务与必要命令；不支持附件、审批交互、计划任务或历史结果补发。启用后普通文字会提交 Codex。\n");
-    const mode = await prompt.select("选择 QQ 接入方式", [
-      { value: "scan", label: "手机 QQ 扫码连接（推荐）", hint: "获取应用凭据和本次扫码用户 OpenID" },
-      { value: "manual", label: "手工填写应用凭据和 OpenID" },
-      { value: "back", label: "返回" },
-    ]);
-    if (mode === "back") return undefined;
-    if (mode !== "scan" && mode !== "manual") throw new Error("不支持的 QQ 接入方式");
     let appId;
     let appSecret;
     let allowedUserOpenids;
@@ -141,7 +146,7 @@ export async function runQqSetup({
     };
   } catch (error) {
     if (!(error instanceof ChannelSetupCancelled)) throw error;
-    output.write("已取消 QQ 接入，未保存配置。\n");
+    output.write("已取消 QQ 操作；已完成的手机授权或远程变更不会自动撤销。\n");
     return undefined;
   } finally {
     prompt.close();

@@ -233,6 +233,7 @@
     "scripts/weixin-setup.mjs",
     "scripts/qq-registration.mjs",
     "scripts/qq-setup.mjs",
+    "scripts/qq-menu-setup.mjs",
     "scripts/qq-registration-worker.mjs",
     "scripts/windows-desktop-app-inspect.ps1",
     "scripts/windows-log-follow.ps1",

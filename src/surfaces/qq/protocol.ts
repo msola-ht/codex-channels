@@ -2,7 +2,7 @@ const API_ORIGIN = "https://api.bot.qq.com";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
-export type QqProtocolOperation = "token" | "gateway" | "message";
+export type QqProtocolOperation = "token" | "gateway" | "message" | "menu";
 export type QqProtocolFailure =
   | "invalid-input" | "closed" | "cancelled" | "timeout" | "network"
   | "http" | "business" | "invalid-response" | "response-too-large"
@@ -21,6 +21,15 @@ export type QqTextMessage = {
   sequence: number;
   sourceTimestampMs: number;
 });
+
+/** Only command buttons; callback actions require a separate event/acknowledgment contract. */
+export interface QqCommandKeyboard {
+  content: { rows: Array<{ buttons: Array<{
+    id: string;
+    render_data: { label: string; style: 0 | 1 };
+    action: { type: 2; permission: { type: 2 }; data: string; enter: boolean; reply: false };
+  }> }> };
+}
 
 export interface QqTextSendContext {
   signal: AbortSignal;
@@ -173,9 +182,58 @@ export class QqProtocolClient {
     });
   }
 
+  /** Application-wide menu management; never called by Gateway startup or message delivery. */
+  async getBotMenu(context: QqTextSendContext): Promise<{ version: number | undefined; menu: unknown }> {
+    return await this.withRequest("menu", context.signal, async signal => {
+      context.beforeSend();
+      const token = await this.getAccessToken(signal);
+      const data = await this.requestJson("menu", "/v2/menu", undefined, signal, token, context.beforeSend);
+      // Observed unconfigured response is { menu: {} }, without a version. Preserve absence;
+      // never invent revision zero or accept an existing unversioned menu for replacement.
+      if (!Object.hasOwn(data, "version") && record(data.menu) && Object.keys(data.menu).length === 0) {
+        return { version: undefined, menu: {} };
+      }
+      if (typeof data.version !== "number" || !Number.isSafeInteger(data.version) || data.version < 0) {
+        throw new QqProtocolError("menu", "invalid-response");
+      }
+      return { version: data.version, menu: data.menu };
+    });
+  }
+
+  /** Full replacement, no automatic retries. The management owner validates and confirms the snapshot. */
+  async putBotMenu(menu: Record<string, unknown>, context: QqTextSendContext): Promise<{ version: number }> {
+    if (!record(menu)) throw new QqProtocolError("menu", "invalid-input");
+    // Freeze the exact confirmed payload before any asynchronous credential wait.
+    let body: Record<string, unknown>;
+    try {
+      const serialized = JSON.stringify({ menu });
+      if (Buffer.byteLength(serialized) > MAX_RESPONSE_BYTES) throw new Error();
+      body = JSON.parse(serialized) as Record<string, unknown>;
+    } catch { throw new QqProtocolError("menu", "invalid-input"); }
+    return await this.withRequest("menu", context.signal, async signal => {
+      context.beforeSend();
+      const token = await this.getAccessToken(signal);
+      const data = await this.requestJson("menu", "/v2/menu", body, signal, token, context.beforeSend, "PUT");
+      if (typeof data.version !== "number" || !Number.isSafeInteger(data.version) || data.version < 0) {
+        throw new QqProtocolError("menu", "invalid-response");
+      }
+      return { version: data.version };
+    });
+  }
+
   /** No retries, mode fallback, splitting, task submission or delivery checkpoint side effects. */
   async sendText(input: QqTextMessage, context: QqTextSendContext): Promise<{ messageId: string }> {
     return this.sendPlan(() => textRequest(input), context);
+  }
+
+  /** A single complete trusted menu, using the same recipient, deadline and response contract as text. */
+  async sendMarkdown(input: QqTextMessage, context: QqTextSendContext, keyboard?: QqCommandKeyboard): Promise<{ messageId: string }> {
+    return this.sendPlan(() => {
+      const plan = textRequest(input);
+      const { content, ...body } = plan.body;
+      return { ...plan, body: { ...body, msg_type: 2, markdown: { content },
+        ...(keyboard === undefined ? {} : { keyboard: commandKeyboard(keyboard) }) } };
+    }, context);
   }
 
   async sendStream(input: QqStreamFrame, context: QqTextSendContext): Promise<{ messageId: string }> {
@@ -302,6 +360,7 @@ export class QqProtocolClient {
     signal?: AbortSignal,
     token?: string,
     beforeSend?: () => void,
+    method?: "PUT",
   ): Promise<Record<string, unknown>> {
     return await this.withRequest(operation, signal, async (requestSignal) => {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -309,7 +368,7 @@ export class QqProtocolClient {
       requestSignal.throwIfAborted();
       beforeSend?.();
       const response = await this.fetchImpl(`${API_ORIGIN}${path}`, {
-        method: body ? "POST" : "GET",
+        method: method ?? (body ? "POST" : "GET"),
         headers,
         ...(body ? { body: JSON.stringify(body) } : {}),
         signal: requestSignal,
@@ -378,6 +437,36 @@ function textRequest(input: QqTextMessage): { path: string; body: Record<string,
   if (age >= QQ_PASSIVE_WINDOW_MS) throw new QqProtocolError("message", "expired");
   return { path, body: { ...body, msg_id: input.messageId, msg_seq: input.sequence },
     deadline: performance.now() + QQ_PASSIVE_WINDOW_MS - age };
+}
+
+function commandKeyboard(value: unknown): QqCommandKeyboard {
+  const fail = (): never => { throw new QqProtocolError("message", "invalid-input"); };
+  const exact = (item: unknown, keys: string[]): item is Record<string, unknown> =>
+    record(item) && Object.keys(item).length === keys.length && keys.every(key => Object.hasOwn(item, key));
+  if (!exact(value, ["content"]) || !exact(value.content, ["rows"]) || !Array.isArray(value.content.rows)
+    || value.content.rows.length < 1 || value.content.rows.length > 5) return fail();
+  const ids = new Set<string>();
+  const rows = value.content.rows.map((row: unknown) => {
+    if (!exact(row, ["buttons"]) || !Array.isArray(row.buttons) || row.buttons.length < 1 || row.buttons.length > 3) return fail();
+    return { buttons: row.buttons.map((button: unknown): QqCommandKeyboard["content"]["rows"][number]["buttons"][number] => {
+      if (!exact(button, ["id", "render_data", "action"]) || typeof button.id !== "string"
+        || !/^[a-z0-9_-]{1,32}$/u.test(button.id) || ids.has(button.id)
+        || !exact(button.render_data, ["label", "style"]) || typeof button.render_data.label !== "string"
+        || !button.render_data.label.trim() || [...button.render_data.label].length > 10
+        || !wellFormed(button.render_data.label) || /\p{Cc}/u.test(button.render_data.label)
+        || (button.render_data.style !== 0 && button.render_data.style !== 1)
+        || !exact(button.action, ["type", "permission", "data", "enter", "reply"])
+        || button.action.type !== 2 || !exact(button.action.permission, ["type"]) || button.action.permission.type !== 2
+        || typeof button.action.data !== "string" || !button.action.data.trim() || [...button.action.data].length > 100
+        || !wellFormed(button.action.data) || /\p{Cc}/u.test(button.action.data)
+        || typeof button.action.enter !== "boolean" || button.action.reply !== false) return fail();
+      ids.add(button.id);
+      return { id: button.id, render_data: { label: button.render_data.label, style: button.render_data.style },
+        action: { type: 2 as const, permission: { type: 2 as const }, data: button.action.data,
+          enter: button.action.enter, reply: false as const } };
+    }) };
+  });
+  return { content: { rows } };
 }
 
 function wellFormed(value: string): boolean {

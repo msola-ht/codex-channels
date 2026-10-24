@@ -40,6 +40,8 @@ const failures = [];
 // without importing the Gateway composition root or duplicating its network pools.
 const allowedFileDistEntries = new Map([
   ["scripts/qq-passive-observation.mjs", new Set(["dist/bootstrap/qq-network.js"])],
+  // Explicit menu setup owns a short-lived QQ network, reusing Gateway proxy/cleanup policy.
+  ["scripts/qq-menu-setup.mjs", new Set(["dist/bootstrap/qq-network.js"])],
 ]);
 const sourceRoot = resolve(root, "src");
 const allowedModuleDependencies = new Map(Object.entries({

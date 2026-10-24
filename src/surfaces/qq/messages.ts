@@ -13,10 +13,11 @@ import { parseQqTextEvent, type QqInboundTextMessage } from "./inbound.js";
 import { QqTaskSources, type QqTaskScope, type QqTaskSourceReference } from "./task-sources.js";
 import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
-import { QqProtocolError, type QqProtocolClient, type QqTextMessage } from "./protocol.js";
+import { QqProtocolError, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard } from "./protocol.js";
 import { renderQqTurnCompleted } from "./lifecycle.js";
 import { QqBodyStreaming } from "./streaming.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
+import { QqCommandMenuController } from "./command-menu-controller.js";
 
 export interface QqMessageOptions {
   appId: string;
@@ -33,7 +34,6 @@ export interface QqMessageOptions {
   };
 }
 
-const HELP = "QQ 文字任务\n直接发送文字提交到当前工作区。\n/help · /status · /stop\n/workspace [序号、ID 或名称]\n/model [共享模型选择参数]\n/new\n/sessions [页码] [search 关键词]\n/resume [序号、名称或 Session ID]（/r）\n/usage · /limits · /diff（均不带参数）\n/metrics [session]\n/metrics <global|providers|models|errors> [24h|7d|30d|90d|all]\n/limits 仅查询，不支持重置券操作。/diff 仅查看当前已取得的 Turn Diff，重启不补读历史。\n恢复会话不补发旧任务结果；发送新消息后建立新的回传关联。\n暂不支持附件输入、审批、问题交互或计划任务。结果投递失败请在本机投递箱核对。";
 const QUERY_COMMANDS = new Set(["usage", "limits", "metrics", "diff"]);
 
 /** Owns one connection generation's input tasks and disposable source authority. */
@@ -48,11 +48,21 @@ export class QqMessages implements SurfaceOutputPort {
   private readonly outbox: QqTextOutbox;
   private readonly streaming: QqBodyStreaming;
   private readonly budget = new QqSendBudget();
+  private readonly menus: QqCommandMenuController;
   private readonly admitted = new WeakMap<OutputEvent, QqTaskSourceReference>();
   private readonly replied = new WeakSet<QqInboundTextMessage>();
 
   constructor(private readonly options: QqMessageOptions, client: QqProtocolClient) {
     this.sources = new QqTaskSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.current(scope, threadId) });
+    this.menus = new QqCommandMenuController({
+      commands: options.commands,
+      scope: target => this.menuScope(target),
+      workspaceScope: target => this.menuWorkspaceScope(target),
+      selectionScope: target => this.options.service.status(target).selectionScope,
+      allowed: (target, actorId) => this.allowed(target, actorId),
+      beforeMutation: target => this.sources.cancelTarget(target),
+      signal: this.lifetime.signal,
+    });
     this.outbox = new QqTextOutbox(client, options.logger);
     this.streaming = new QqBodyStreaming(client, this.sources, this.budget,
       () => options.logger.warn({ reason: "body-stream-unconfirmed" }, "QQ 正文流未确认；最终正文仍由共享投递核对"),
@@ -194,18 +204,38 @@ export class QqMessages implements SurfaceOutputPort {
     try {
       if (command) {
         if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", ...QUERY_COMMANDS].includes(command.name)
-          || (["help", "status", "stop", "new", "usage", "limits", "diff"].includes(command.name) && command.argumentsText.trim())) {
+          || (["status", "stop", "new", "usage", "limits", "diff"].includes(command.name) && command.argumentsText.trim())) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;
         }
-        if (command.name === "help") { await this.reply(message, HELP, () => this.allowed(target, message.actorId)); return; }
+        if (command.name === "help") {
+          const menu = await this.menus.open(target, message.actorId, command.argumentsText);
+          stage = "reply";
+          await this.reply(message, menu.content, () => this.allowed(target, message.actorId) && menu.isCurrent(), undefined, menu.keyboard);
+          return;
+        }
         if (((command.name === "workspace" || command.name === "model" || command.name === "resume") && command.argumentsText.trim()) || command.name === "new") this.sources.cancelTarget(target);
         const commandScope = this.scope(message.actorId);
+        const hasSelectionMenu = ["workspace", "model", "sessions", "resume"].includes(command.name);
+        const menuScope = hasSelectionMenu ? this.menuScope(target) : undefined;
+        const menuWorkspaceScope = hasSelectionMenu ? this.menuWorkspaceScope(target) : undefined;
         const queryStatus = QUERY_COMMANDS.has(command.name) ? this.options.service.status(target) : undefined;
         const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "usage" | "limits" | "metrics" | "diff", command.argumentsText, message.actorId);
         stage = "render";
         const scope = command.name === "workspace" && command.argumentsText.trim() ? this.scope(message.actorId) : commandScope;
+        const menu = this.menus.fromResult(target, message.actorId, result);
+        if (menu) {
+          stage = "reply";
+          await this.reply(message, menu.content, () => {
+            const sameContext = result.kind === "models" && command.argumentsText.trim()
+              ? this.menuWorkspaceScope(target) === menuWorkspaceScope && !!result.state.selectionScope
+                && result.state.selectionScope === this.options.service.status(target).selectionScope
+              : this.menuScope(target) === menuScope;
+            return sameContext && menu.isCurrent() && this.allowed(target, message.actorId);
+          }, undefined, menu.keyboard);
+          return;
+        }
         const text = result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
-          : renderConversationCommandResult(result.kind === "models" ? { kind: "models", view: "model", state: result.state } : result);
+          : renderConversationCommandResult(result);
         if (!text) throw new Error("QQ 命令没有可交付结果");
         stage = "reply";
         await this.reply(message, text, () => {
@@ -247,7 +277,8 @@ export class QqMessages implements SurfaceOutputPort {
     } finally { if (!stop) this.busy.delete(target.conversationId); }
   }
 
-  private async reply(message: QqInboundTextMessage, content: string, allowed: () => boolean, oversizedNotice?: string): Promise<void> {
+  private async reply(message: QqInboundTextMessage, content: string, allowed: () => boolean,
+    oversizedNotice?: string, keyboard?: QqCommandKeyboard): Promise<void> {
     // A send failure must not recursively send another reply with the same msg_seq.
     if (this.replied.has(message)) throw new Error("QQ 来信回复已尝试，不重复发送");
     const input: QqTextMessage = { mode: "passive", recipient: message.actorId, content,
@@ -261,6 +292,7 @@ export class QqMessages implements SurfaceOutputPort {
     }
     this.replied.add(message);
     await this.outbox.deliver(input, {
+      ...(keyboard ? { representation: "markdown", keyboard } : {}),
       signal: this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
       reserve: parts => this.budget.reserve(message.actorId, parts),
@@ -269,6 +301,18 @@ export class QqMessages implements SurfaceOutputPort {
   private target(actorId: string): ConversationTarget { return { surface: "qq", accountId: this.options.appId, conversationId: `c2c:${actorId}` }; }
   private allowed(target: ConversationTarget, actorId: string): boolean {
     return !this.lifetime.signal.aborted && this.options.access.isAllowed({ target, actorId });
+  }
+  private menuScope(target: ConversationTarget): string {
+    const workspaceId = this.options.service.selectedWorkspaceId(target);
+    const exists = this.options.service.listWorkspaces().some(value => value.id === workspaceId);
+    // The workspace picker must remain reachable when the previous workspace was removed.
+    return JSON.stringify([this.menuWorkspaceScope(target), exists
+      ? this.options.service.status(target).threadId : "workspace-missing"]);
+  }
+  private menuWorkspaceScope(target: ConversationTarget): string {
+    const workspaceId = this.options.service.selectedWorkspaceId(target);
+    const workspace = this.options.service.listWorkspaces().find(value => value.id === workspaceId);
+    return JSON.stringify([workspaceId, workspace?.cwd]);
   }
   private scope(actorId: string): QqTaskScope | undefined {
     const target = this.target(actorId);
@@ -287,7 +331,7 @@ export class QqMessages implements SurfaceOutputPort {
       && event.target.conversationId.startsWith("c2c:") && resolveSurfaceDelivery("qq", event).disposition === "deliver";
   }
   async close(): Promise<void> {
-    this.lifetime.abort(); this.sources.close();
+    this.lifetime.abort(); this.sources.close(); this.menus.clear();
     await Promise.all([this.streaming.close(), this.outbox.close()]);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
