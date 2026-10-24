@@ -1,5 +1,4 @@
 export { ConversationEventCoordinator } from "./conversation-event-coordinator.js";
-export { parseGoalCommand } from "./conversation-command-parser.js";
 export type { HookAction, HookEntry, HookCatalog, HookConfigPort, HookCommandView, HookReviewPolicy } from "./hook-port.js";
 export {
   type AccountMetric,
@@ -207,7 +206,6 @@ export {
   type ThreadQueueFailure,
   type ThreadQueueInputType,
   type ThreadQueueItem,
-  type ThreadQueueSubmissionOrigin,
   type ThreadQueueListOptions,
   type ThreadQueuePage,
   type ThreadQueuePort,

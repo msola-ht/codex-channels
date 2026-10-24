@@ -7,7 +7,7 @@ import type {
   ConversationTurnUseCases,
 } from "../application/index.js";
 import type { ConfigChange, GatewayConfig } from "../config/index.js";
-import type { ConversationTarget, OutputEvent } from "../conversation-core/index.js";
+import type { ConversationTarget } from "../conversation-core/index.js";
 import type { BindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
 
@@ -32,7 +32,6 @@ export interface SurfacePluginContext {
   officialOpenAiAuthenticated: () => boolean | undefined;
   openAiConnectivity: () => OpenAiConnectivityStatus | "recovering";
   onFatal(surface: string, accountId: string, error: Error): void;
-  captureLiveOutputAuthorization(event: OutputEvent): () => boolean;
   autoCompactPercent: (
     provider: string | null | undefined,
     model: string | null | undefined,

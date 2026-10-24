@@ -8,7 +8,6 @@ import type {
 } from "../../conversation-core/index.js";
 import {
   formatConversationCommandHelpLines,
-  conversationSessionEntryHelpLines,
 } from "../conversation-command-help.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import {
@@ -118,7 +117,7 @@ export function renderFeishuHelp(): string {
   return toStructuredMarkdownList([
     "飞书 Codex 命令",
     "",
-    ...conversationSessionEntryHelpLines,
+    "普通文本会发送到当前 Codex Session。",
     "",
     ...formatConversationCommandHelpLines(formatFeishuCommandMarkdown),
     "飞书：",
@@ -159,9 +158,6 @@ export function renderFeishuOutput(
   ) => number | null,
 ): string | null {
   switch (event.type) {
-    case "user.message.identity":
-    case "turn.root.identity":
-      return null;
     case "turn.retry":
       // The Outbox owns the editable retry card and its transient message handle.
       return null;

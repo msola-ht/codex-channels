@@ -55,7 +55,6 @@
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 当前设计决策与停止条件。
 - [`docs/feishu-reference-index.md`](docs/feishu-reference-index.md)：飞书资料与实现映射。
 - [`docs/weixin-surface-plan.md`](docs/weixin-surface-plan.md)：微信 Surface 当前设计决策与停止条件。
-- [`docs/qq-surface-plan.md`](docs/qq-surface-plan.md)：QQ 单聊渠道的设计、首个实现切片状态、官方参考边界和剩余验收门槛。
 
 ## 验收与开放补证
 
@@ -65,7 +64,7 @@
 - [`docs/project-closeout-file-inventory.csv`](docs/project-closeout-file-inventory.csv)：1,146 项逐文件关联阅读证据，清单范围已全部完成；不代表问题修复或运行验收。
 - [`docs/webui-component-remediation.md`](docs/webui-component-remediation.md)：WebUI 组件浏览器发现、关联修复、A 独立复查与最终证据；保留未观察的 UI 验收范围。
 - [`docs/ipc-readiness-development.md`](docs/ipc-readiness-development.md)：IPC 读取与启动恢复改造的阶段计划、关联审查、观察证据及平台限制。
-- [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书、微信和 QQ 的持续验收入口，分别记录已观察能力与未完成平台边界。
+- [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信的持续验收入口，分别记录已观察能力与未完成平台边界。
 - [`docs/codex-desktop-app-acceptance.md`](docs/codex-desktop-app-acceptance.md)：Desktop 专项验收主记录，保留 Linux 证据及 macOS、Windows 等开放事项。
 - [`docs/provider-transaction-review.md`](docs/provider-transaction-review.md)：Provider 事务修复的历史证据与仍开放的 V03/V04 环境补证清单。
 
@@ -98,7 +97,6 @@
 - [`src/model-api/README.md`](src/model-api/README.md)：纯模型 API 消息与流式转换模块。
 - [`src/model-relay/README.md`](src/model-relay/README.md)：独立模型 API 的身份、准入与撤销模块。
 - [`src/surfaces/README.md`](src/surfaces/README.md)：通讯渠道公共边界。
-- [`src/surfaces/qq/README.md`](src/surfaces/qq/README.md)：QQ 单聊文本实现边界、传输登记与恢复限制。
 - [`bin/README.md`](bin/README.md)：npm CLI 入口。
 - [`runtime/README.md`](runtime/README.md)：CLI 与 Gateway 共享运行时。
 - [`scripts/README.md`](scripts/README.md)：配置、构建、验证和服务脚本。

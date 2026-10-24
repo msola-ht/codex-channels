@@ -3,7 +3,6 @@ import {
   type ConfigChange,
 } from "./config-change.js";
 import type { GatewayConfig } from "./index.js";
-import { classifyQqConfigChanges } from "../../runtime/gateway-config.mjs";
 
 export type ConfigReloadResult =
   | { action: "reload"; changes: ConfigChange[] }
@@ -167,9 +166,6 @@ function restartRequiredReasons(
   ) {
     reasons.push(configChange("surface.weixin.allowed-users", "weixin"));
   }
-  for (const change of classifyQqConfigChanges(current.qq, next.qq)) {
-    if (change.restart) reasons.push(configChange(`surface.qq.${change.kind}`, "qq"));
-  }
   if (!preservesExistingWorkspaces(current.workspaces, next.workspaces)) {
     reasons.push(configChange("workspace.registry"));
   }
@@ -229,9 +225,6 @@ function hotReloadReasons(
     )
   ) {
     reasons.push(configChange("surface.weixin.allowed-users", "weixin"));
-  }
-  for (const change of classifyQqConfigChanges(current.qq, next.qq)) {
-    if (!change.restart) reasons.push(configChange(`surface.qq.${change.kind}`, "qq"));
   }
   return reasons;
 }

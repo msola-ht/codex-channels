@@ -48,7 +48,6 @@ import { formatConversationMetrics } from "./metrics-format.js";
 export function renderConversationCommandResult(
   result: ConversationCommandResult,
   formatCommand?: (command: string) => string,
-  formatLiteralField?: (value: string) => string,
 ): string | null {
   switch (result.kind) {
     case "outcome":
@@ -57,7 +56,7 @@ export function renderConversationCommandResult(
       }
       return formatConversationCommandOutcome(result.outcome);
     case "sessions":
-      return formatConversationSessions(result, formatLiteralField);
+      return formatConversationSessions(result);
     case "thread-queue":
       return formatConversationThreadQueue(result);
     case "thread-revert":
@@ -71,13 +70,13 @@ export function renderConversationCommandResult(
     case "scheduled-confirmation":
       return formatConversationScheduledConfirmation(result);
     case "status":
-      return formatConversationStatus(result.status, undefined, formatLiteralField);
+      return formatConversationStatus(result.status);
     case "workspaces":
-      return formatConversationWorkspaces(result, formatLiteralField);
+      return formatConversationWorkspaces(result);
     case "auto-review":
       return formatConversationAutoReview(result, formatCommand);
     case "models":
-      return formatConversationModels(result, formatCommand, formatLiteralField);
+      return formatConversationModels(result, formatCommand);
     case "collaboration-mode":
       return formatConversationCollaborationMode(result);
     case "skills":
@@ -85,17 +84,17 @@ export function renderConversationCommandResult(
     case "agents":
       return formatConversationAgents(result);
     case "mcp":
-      return formatConversationMcp(result, formatLiteralField);
+      return formatConversationMcp(result);
     case "mcp-health":
-      return formatConversationMcpHealth(result, formatLiteralField);
+      return formatConversationMcpHealth(result);
     case "mcp-reload":
       return formatConversationMcpReload(result);
     case "mcp-detail":
-      return formatConversationMcpDetail(result, formatLiteralField);
+      return formatConversationMcpDetail(result);
     case "mcp-login":
-      return formatConversationMcpLogin(result, formatLiteralField);
+      return formatConversationMcpLogin(result);
     case "mcp-resource":
-      return formatConversationMcpResource(result, formatLiteralField);
+      return formatConversationMcpResource(result);
     case "plugins":
       return formatConversationPlugins(result);
     case "hooks":
@@ -105,13 +104,13 @@ export function renderConversationCommandResult(
     case "plugin-detail":
       return formatConversationPluginDetail(result);
     case "usage":
-      return formatConversationUsage(result, formatLiteralField);
+      return formatConversationUsage(result);
     case "metrics":
       return formatConversationMetrics(result);
     case "reset-credit":
       return formatConversationResetCredits(result);
     case "limits":
-      return formatConversationLimits(result, formatLiteralField);
+      return formatConversationLimits(result);
     case "permissions":
       return formatConversationPermissions(result);
     case "artifacts":
@@ -119,7 +118,7 @@ export function renderConversationCommandResult(
     case "goal":
       return formatConversationGoal(result);
     case "occupancy":
-      return formatConversationOccupancy(result, formatCommand, formatLiteralField);
+      return formatConversationOccupancy(result, formatCommand);
   }
   return null;
 }

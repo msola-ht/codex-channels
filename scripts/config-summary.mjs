@@ -99,14 +99,6 @@ export function gatewayChannelStates(document) {
       enabled: table(document.weixin).enabled === true,
     });
   }
-  if (isTable(document.qq)) {
-    channels.push({
-      id: "qq",
-      displayName: "QQ",
-      configured: true,
-      enabled: table(document.qq).enabled === true,
-    });
-  }
   return channels;
 }
 

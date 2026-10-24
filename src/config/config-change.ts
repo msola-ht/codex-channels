@@ -38,27 +38,19 @@ export type WeixinConfigChangeCode =
   | "surface.weixin.credentials"
   | "surface.weixin.allowed-users";
 
-export type QQConfigChangeCode =
-  | "surface.qq.enabled"
-  | "surface.qq.account"
-  | "surface.qq.credentials"
-  | "surface.qq.allowed-users";
-
 export type ConfigChangeCode =
   | GlobalConfigChangeCode
   | TelegramConfigChangeCode
   | FeishuConfigChangeCode
-  | WeixinConfigChangeCode
-  | QQConfigChangeCode;
+  | WeixinConfigChangeCode;
 
-export type ConfigChangeScope = "global" | "telegram" | "feishu" | "weixin" | "qq";
+export type ConfigChangeScope = "global" | "telegram" | "feishu" | "weixin";
 
 export type ConfigChange =
   | { code: GlobalConfigChangeCode; scope: "global" }
   | { code: TelegramConfigChangeCode; scope: "telegram" }
   | { code: FeishuConfigChangeCode; scope: "feishu" }
-  | { code: WeixinConfigChangeCode; scope: "weixin" }
-  | { code: QQConfigChangeCode; scope: "qq" };
+  | { code: WeixinConfigChangeCode; scope: "weixin" };
 
 export function configChange(code: GlobalConfigChangeCode): ConfigChange;
 export function configChange(
@@ -74,10 +66,6 @@ export function configChange(
   scope: "weixin",
 ): ConfigChange;
 export function configChange(
-  code: QQConfigChangeCode,
-  scope: "qq",
-): ConfigChange;
-export function configChange(
   code: ConfigChangeCode,
   scope: ConfigChangeScope = "global",
 ): ConfigChange {
@@ -87,9 +75,7 @@ export function configChange(
       ? "feishu"
       : code.startsWith("surface.weixin.")
         ? "weixin"
-        : code.startsWith("surface.qq.")
-          ? "qq"
-          : "global";
+      : "global";
   if (scope !== expectedScope) {
     throw new Error(`配置变更 ${code} 的 scope 必须为 ${expectedScope}`);
   }

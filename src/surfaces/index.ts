@@ -9,8 +9,6 @@ export function loadWeixinSurface() {
   return import("./weixin/index.js");
 }
 export { telegramDefaultAccountId } from "./telegram/constants.js";
-export async function loadQqSurface() { return import("./qq/index.js"); }
-export type { QqNetwork } from "./qq/index.js";
 export { createWeixinCredentialStore } from "./weixin/credential-store.js";
 export { createWeixinCredentialChangeCheck } from "./weixin/credential-client.js";
 export type { FeishuSurfaceOptions } from "./feishu/index.js";
@@ -60,10 +58,8 @@ export {
 } from "./conversation-scheduled-task-command-format.js";
 export { canReviewConversationHook } from "./conversation-hook-command-format.js";
 export { canPreserveWeixinHookReviewText } from "./weixin/markdown-sanitize.js";
-export { canReviewQqConversationHook } from "./qq/rendering.js";
 export type {
   OperationUpdateDisplay,
-  ChannelImageSource,
   SurfaceAdapter,
   SurfaceConfigurationChange,
   SurfaceOutputPort,

@@ -14,13 +14,11 @@ export class ConversationResetCreditService {
   constructor(private readonly credits: OpenAiResetCreditService,
     private readonly authorizedContext: (target: ConversationTarget, actorId: string) => string) {}
 
-  async execute(target: ConversationTarget, actorId: string | undefined, input: string, assertAuthorized?: () => void): Promise<ConversationResetCreditResult> {
+  async execute(target: ConversationTarget, actorId: string | undefined, input: string): Promise<ConversationResetCreditResult> {
     try {
-      assertAuthorized?.();
       if (!actorId) throw failure("forbidden");
       const context = this.authorizedContext(target, actorId);
       const validateAuthorization = () => {
-        assertAuthorized?.();
         if (this.authorizedContext(target, actorId) !== context) throw failure("reset_stale");
       };
       const owner = JSON.stringify([conversationTargetKey(target), actorId]);

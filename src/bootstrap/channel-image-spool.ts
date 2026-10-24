@@ -16,25 +16,21 @@ import {
 } from "../../runtime/private-file.mjs";
 
 import type { ConversationTarget } from "../conversation-core/index.js";
-import type { ChannelImageSource } from "../surfaces/index.js";
 
 const defaultPollIntervalMs = 3_000;
 const maximumFailedArchives = 128;
 
-interface ChannelImageManifestFields {
+export interface ChannelImageManifest {
+  version: 1;
   threadId: string;
   imagePath: string;
   createdAtMs: number;
 }
-export type ChannelImageManifest = ChannelImageManifestFields & (
-  | { version: 1 }
-  | { version: 2; turnId: string; target: ConversationTarget }
-);
 
 export interface ChannelImageSpoolOptions {
   directory: string;
   resolveTarget(threadId: string): ConversationTarget | undefined;
-  sendImage(target: ConversationTarget, imagePath: string, source?: ChannelImageSource): Promise<void>;
+  sendImage(target: ConversationTarget, imagePath: string): Promise<void>;
   logger: Logger;
   pollIntervalMs?: number;
 }
@@ -195,20 +191,7 @@ export class ChannelImageSpool {
     if (target === undefined) {
       throw new Error(`Thread 未绑定会话：${manifest.threadId}`);
     }
-    let source: ChannelImageSource | undefined;
-    if (manifest.version === 2) {
-      const original = manifest.target;
-      const authorized = (): boolean => {
-        const current = this.options.resolveTarget(manifest.threadId);
-        return !this.stopped && current?.surface === original.surface && current.accountId === original.accountId
-          && current.conversationId === original.conversationId;
-      };
-      if (!authorized()) throw new Error("渠道图片原目标绑定已失效，拒绝改投其他会话");
-      source = { threadId: manifest.threadId, turnId: manifest.turnId, authorized };
-    } else if (target.surface === "qq") {
-      throw new Error("QQ 图片发送需要 version 2 的原目标与 Turn 身份，不接受 version 1 请求");
-    }
-    await this.options.sendImage(target, manifest.imagePath, source);
+    await this.options.sendImage(target, manifest.imagePath);
     this.assertOwnedFile(manifest.imagePath);
     this.assertOwnedFile(manifestPath);
     const imageName = basename(manifest.imagePath);
@@ -237,13 +220,8 @@ export class ChannelImageSpool {
     } catch {
       throw new Error("渠道图片 manifest 不是有效 JSON");
     }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error("渠道图片 manifest 内容无效");
-    }
-    const manifest = parsed as Partial<ChannelImageManifestFields> & {
-      version?: unknown; turnId?: unknown; target?: unknown;
-    };
-    if (manifest.version !== 1 && manifest.version !== 2) {
+    const manifest = parsed as Partial<ChannelImageManifest>;
+    if (manifest.version !== 1) {
       throw new Error("渠道图片 manifest 版本不支持");
     }
     if (
@@ -271,23 +249,12 @@ export class ChannelImageSpool {
     ) {
       throw new Error(`渠道图片文件不存在：${manifest.imagePath}`);
     }
-    const fields = {
+    return {
+      version: 1,
       threadId: manifest.threadId,
       imagePath: manifest.imagePath,
       createdAtMs: manifest.createdAtMs,
     };
-    if (manifest.version === 1) return { version: 1, ...fields };
-    const { target, turnId } = manifest;
-    if (Object.keys(manifest).some(key => !["version", "threadId", "turnId", "target", "imagePath", "createdAtMs"].includes(key))
-      || typeof turnId !== "string" || !turnId || turnId.length > 256 || /\s/u.test(turnId)
-      || !target || typeof target !== "object" || Array.isArray(target)
-      || Object.keys(target).sort().join() !== "accountId,conversationId,surface"
-      || !("surface" in target) || target.surface !== "qq"
-      || !("accountId" in target) || typeof target.accountId !== "string" || !target.accountId
-      || !("conversationId" in target) || typeof target.conversationId !== "string" || !target.conversationId.startsWith("c2c:") || target.conversationId.length <= 4) {
-      throw new Error("渠道图片 version 2 原目标或 Turn 身份无效");
-    }
-    return { version: 2, ...fields, target: { surface: "qq", accountId: target.accountId, conversationId: target.conversationId }, turnId };
   }
 
   private isInsidePendingDirectory(imagePath: string): boolean {

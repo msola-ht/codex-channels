@@ -2,9 +2,6 @@
 
 本目录封装 Codex App Server Transport、JSON-RPC 会话和类型化 API，是 Gateway 访问 App Server 的唯一底层入口。
 
-`turn/started` 的官方非空 `Turn.rootTurnId` 映射为稳定输入中的可选根身份，null/空值/非法类型不推断来源。
-此字段表示通用工作链根 Turn，不是 Goal 专属触发标记；Client 不生成渠道授权或回复依据。
-
 Thread 启动/恢复、Turn 启动/追加及中断的本地 `beforeSubmit` 守卫透过 Provider 准备保留到 RPC 发送前同步执行，不编码为
 协议字段；守卫拒绝时不发请求，已经发出的写请求仍等待实际响应，不以取消丢弃写入结果。
 图片引用准备同样在创建文件、每次字节上传及完成确认前复核该守卫；受管 DS 还在私有上传路由

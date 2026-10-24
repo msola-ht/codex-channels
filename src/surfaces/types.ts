@@ -38,24 +38,17 @@ export interface SurfaceOutputPort {
   handle(event: OutputEvent, context?: { liveAdmitted: true }): Promise<void> | void;
   /** Settle actual transient operations (including intentional no-op); validate ownership before sending. */
   deliverSnapshot?(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void>;
-  deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void>;
+  deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void>;
 }
 
 export type { OperationUpdateDisplay };
-
-/** Exact original source for passive replies; never inferred from the latest activity. */
-export interface ChannelImageSource {
-  threadId: string;
-  turnId: string;
-  authorized(): boolean;
-}
 
 export interface SurfaceAdapter {
   readonly surface: SurfaceId;
   readonly accountId: string;
   readonly interactions: InteractionPort;
   readonly output: SurfaceOutputPort;
-  sendChannelImage?(conversationId: string, imagePath: string, source?: ChannelImageSource): Promise<void>;
+  sendChannelImage?(conversationId: string, imagePath: string): Promise<void>;
   presentScheduledTaskConfirmation?(
     target: ConversationTarget,
     actorId: string,

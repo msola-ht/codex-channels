@@ -351,8 +351,6 @@ export type OutputEvent =
   | { type: "autoApprovalReview.updated"; target: ConversationTarget; threadId: string; turnId: string; sourceThreadId: string; sourceTurnId: string; reviewId: string; phase: "started" | "completed"; status: "inProgress" | "approved" | "denied" | "timedOut" | "aborted"; details?: AutoApprovalReviewDetails; background?: boolean }
   | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; approvalsReviewer?: ThreadApprovalsReviewer | null; identity?: TurnStartIdentity; background?: boolean }
   | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; background?: boolean }
-  | { type: "user.message.identity"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; clientId: string }
-  | { type: "turn.root.identity"; target: ConversationTarget; threadId: string; turnId: string; rootTurnId: string }
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
   | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate; background?: boolean }
@@ -388,7 +386,7 @@ export type OutputEvent =
     };
 
 export function isCriticalOutputEvent(event: OutputEvent): boolean {
-  return event.type !== "user.message.identity" && event.type !== "turn.root.identity" && event.type !== "text.delta" && event.type !== "turn.started" &&
+  return event.type !== "text.delta" && event.type !== "turn.started" &&
     event.type !== "plan.updated" &&
     event.type !== "subagent.spawned" &&
     event.type !== "subagent.contacted" &&

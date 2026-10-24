@@ -7,7 +7,7 @@ export interface DeliveryCoordinatorOptions {
   deliver(record: DeliveryRecord, signal: AbortSignal): Promise<void>;
   fault(code: string, account?: string, persistentDeliveryId?: string): void;
   concurrency?: number;
-  timeoutMs?: number | ((record: DeliveryRecord) => number);
+  timeoutMs?: number;
   changed?(): void;
   /** Explicit opt-in for retained uncertain or authorization-blocked records; never grants delivery permission. */
   mayReleaseUncertainBarrier?(record: DeliveryRecord): boolean;
@@ -170,11 +170,8 @@ export class DeliveryCoordinator {
       controller.signal.addEventListener("abort", cancel, { once: true });
       if (controller.signal.aborted) cancel();
     });
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 60_000);
     try {
-      const timeoutMs = (typeof this.options.timeoutMs === "function" ? this.options.timeoutMs(record) : this.options.timeoutMs) ?? 60_000;
-      if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 480_000) throw new DeliveryError("conflict");
-      timer = setTimeout(() => controller.abort(), timeoutMs);
       if (!(await Promise.race([this.options.authorized(record), cancelled]))) {
         if (!(await this.journal.transition(record.id, "pending", "blocked"))) throw new DeliveryError("conflict");
         this.options.changed?.();

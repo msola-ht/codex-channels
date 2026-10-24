@@ -60,7 +60,7 @@
   exchange 摘要、展开指定 exchange 的完整请求与响应、关键字与长度过滤，以及持续跟随新写入的
   记录；参数在读取用户配置前完成校验，查询只读转储目录，不访问网络或凭据。`cleanup traffic` 默认预览，确认删除要求全部 App Server 与 Relay 已停止。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
-  发送回对应会话；QQ 必须显式 `--turn` 指定原 Turn，其他渠道不接受该参数；见 `docs/channel-image.md`。
+  发送回对应会话；见 `docs/channel-image.md`。
 - `relay`：管理独立模型 API 转发的监听、调用方、Key 和运行状态；边界与操作见[模型 API 转发](../docs/user-guide.md#可选模型-api-转发)。
 - `webui`：启动本机指标查询与受控设置界面；监听参数在读取用户配置前完成校验。
 - `restart [目标]`：统一重启入口，默认全部后台服务。服务管理层预检后依次停止所选服务，再逐项启动并确认就绪；覆盖已安装且未关闭的 WebUI 与按启用状态选取的 Relay，失败中止后续步骤，禁止在 App Server 内自中断。

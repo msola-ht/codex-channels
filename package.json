@@ -230,9 +230,6 @@
     "scripts/weixin-qr-contract-probe.mjs",
     "scripts/weixin-setup-session.mjs",
     "scripts/weixin-setup.mjs",
-    "scripts/qq-setup.mjs",
-    "scripts/qq-registration.mjs",
-    "scripts/qq-registration-worker.mjs",
     "scripts/windows-desktop-app-inspect.ps1",
     "scripts/windows-log-follow.ps1",
     "scripts/windows-scheduled-task.ps1",
@@ -280,7 +277,6 @@
   "dependencies": {
     "@clack/prompts": "^1.7.0",
     "@larksuiteoapi/node-sdk": "1.75.0",
-    "@tencent-connect/qqbot-connector": "1.2.0",
     "grammy": "^1.45.1",
     "https-proxy-agent": "^9.1.0",
     "pino": "^10.3.1",

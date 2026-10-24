@@ -104,62 +104,6 @@ Cline 官方 SDK 仍是 Chat 参数语义的参考，而非模型能力验收结
 不导入运行时代码、不安装或运行上游依赖、不自动更新。指标公式及回归用例见
 `apps/web/src/features/monitoring/model/eventRows.ts` 和相邻 `eventRows.test.ts`；首 Token 采集需同时核对实际 CPA 后端版本。
 
-## QQ 接入研究基线
-
-以下资料按用户授权下载并保留在 `upstream/`，用于[QQ 设计与实现](qq-surface-plan.md)的只读协议参考。
-除下文锁定安装并调用公开接口的扫码 Connector 外，其余 SDK 与宿主仅作为只读参考，不作为运行依赖。
-本地副本未修改；这些资料不等于真实账号验收，也不替换上表现行渠道与 Codex 基线。
-
-| 本地目录 | 官方来源 | 固定研究版本 |
-| --- | --- | --- |
-| `upstream/qqbot-nodejs` | [tencent-connect/qqbot-nodejs](https://github.com/tencent-connect/qqbot-nodejs) | `1.0.5`，`429a0f1b798f3b0fcef3679e207dbc0469a1df2d` |
-| `upstream/openclaw-qqbot` | [tencent-connect/openclaw-qqbot](https://github.com/tencent-connect/openclaw-qqbot) | `2.0.4`，`89988812442583bf47c34b89f9abf5fd4b85df0b` |
-| `upstream/dsh-qqbot` | [tencent-connect/dsh-qqbot](https://github.com/tencent-connect/dsh-qqbot) | `0.5.2`，`c8b9158b37817b0dbc1e514e62e16204ad47a6ce` |
-| `upstream/qq-bot-node-sdk` | [tencent-connect/bot-node-sdk](https://github.com/tencent-connect/bot-node-sdk) | `998051528aaa21fd952c31bcf60389ea8094e361`，旧频道 SDK |
-| `upstream/qq-botgo` | [tencent-connect/botgo](https://github.com/tencent-connect/botgo) | `fe31c0dfe469001e0f783d2f07e7de7bd08b403f` |
-| `upstream/qq-bot-docs` | [tencent-connect/bot-docs](https://github.com/tencent-connect/bot-docs) | `645787a45937e5d9c4f0f61afefdffde0f38696e`，2025 文档源码，不能代替当前在线文档 |
-| `upstream/qqbot-connector` | [npm Connector](https://www.npmjs.com/package/@tencent-connect/qqbot-connector) | npm `1.2.0` 发布包、解包内容及 registry 元数据，公开入口仅扫码连接 |
-| `upstream/qq-api-v2-2026-10-23` | [当前 QQ API v2](https://bot.q.qq.com/wiki/develop/api-v2/) | 2026-10-23 下载的相关 HTML 快照，不是整个站点镜像 |
-| `upstream/qq-api-v2-2026-10-23-message-reference` | [QQ API v2 消息收发](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html)及关联接口 | 本地日期 2026-10-23 补齐；72 个有效页面、1 个排除的跳转响应；保留旧快照，不替换 SDK 基线 |
-
-Connector 发布包 SHA-256 为 `f3cca8f961051697d0ffc00e784755dfef637d89164725cb441eaf9e616b2bd9`，
-已核验 registry 的 SHA-512 integrity 与下载包一致。其发布元数据标为 `UNLICENSED` 且没有 repository 字段，
-两个新官方插件的 package.json 均声明依赖 `1.2.0`；职责、采用条件与安全边界见 QQ 设计。
-新版 Node SDK 当前只核对 Git 源码版本，尚未核对 npm 发布物一致性，不把源码版本号当作发布包验证。
-
-HTML 快照包括启动、访问凭证、API 调用、单聊事件/发送/流式、Webhook、签名、富媒体、Markdown 和按钮。
-`access-token.html` 来自 `dev-prepare/access-token.html`；早期尝试旧地址得到的 `token.html` 实为启动页，
-按用户要求保留但排除为 Token 证据。核心快照 SHA-256：
-
-- `c2c-send.html`：`d0ef0695966f9ee35cc2dbe37d820032a8f8308caac9f46f86c5302d2c93348f`。
-- `c2c-stream.html`：`ed351023b14c4be084282b50b3d7bfd44481c3e49ea0146d071377b5160730d1`。
-- `webhook.html`：`329d9d9131f0ba7bc2ba5320f2f95111f1fc1fda66678d5b7521b9e12a0e023e`。
-
-补齐包按官网 `v1.42.0` 导航及正文关联链接发现路径，覆盖消息概述/类型、单聊收发/撤回/流式、
-群聊与频道消息参考、素材/富媒体/分片上传、按钮/互动回应、菜单/面板、机器人详情/分享链接，
-以及关联的鉴权、事件、错误与变更记录；不包含整个官网或全部群/频道管理接口。
-下载发生于 UTC 2026-10-24，本地日期为 2026-10-23；逐页获取时间保存在包内 `manifest.json`。
-每页保存原始 HTML 和从 `main` 提取的同名 `.txt`，清单记录来源 URL、最终 URL、HTTP 状态、
-标题、H1、字节数、SHA-256 和校验状态，并保留用于发现链接的官网导航 HTML/JS。
-逐页回读核验全部 73 份下载响应的哈希；72 页为无跳转的有效内容。
-`gateway/message/model.html` 实际跳转至启动页，状态为 `excluded-redirect`，仅保留失败取证，不能作为消息模型依据。
-目录页的有效状态只表示下载正确，不表示提供完整接口合同；正文提取供阅读，原 HTML 是留存原件。
-清单 SHA-256：`973c2b70b2f362fd1435cfd937704695925f710b9d72ea88bbb8c7f87071fdc9`。
-资料包仍属于本地只读参考，不提交或发布到 Gateway；获取成功不代表账号权限、接口调用或客户端验收成功。
-
-Setup 扫码通过锁定依赖 `@tencent-connect/qqbot-connector@1.2.0` 的公开 `startQrConnect` 调用，
-不复制上游源码。该包仅承担扫码材料取得，不参与消息收发；独占 Worker 隔离取消与关闭，网络直连且不支持项目代理注入。
-移除扫码入口时同时移除该直接依赖及仅由它使用的 `qrcode-terminal` 间接依赖；手工接入和运行时不依赖该 SDK。
-
-新仓库通过独立目录首次获取；后续只读复用，不自动 fetch、切换或删除。旧 Node/Go SDK 的下线说明、
-新 SDK 双传输实现与在线文档冲突必须按版本区分，不能任取一个来源作为当前账号可用保证。
-
-QQ 渠道协议以此处保存的 API V2 文档为准，SDK 只用于实现对照。WebSocket 的详细关闭码表优先于同页
-“其他错误重新 Identify”的简化说明：4009 保留 Session 和已处理序号，先 Resume 补发；4006/4007
-才因 Session/序号无效改 Identify。4001/4002/4010–4014/4914/4915 终止自动连接，修正后需重启 Gateway。
-锁定新版 SDK 将 4009 清会话的行为不予采用；V2 详细表虽允许 4009 Identify，本地选择保留补发能力。
-这不改变输入五分钟窗口、重启前输入不重放及旧任务发送来源不恢复的本地边界。
-
 ## 查阅顺序
 
 
