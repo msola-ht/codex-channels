@@ -10,6 +10,11 @@ import { securePrivateDirectorySync, securePrivateFileSync } from "../../runtime
 /** Result and compaction lifecycle retention is separate from other live intermediate output. */
 export function isPersistentOutput(event: OutputEvent, display: OperationUpdateDisplay = "full"): boolean {
   if (resolveSurfaceDelivery(event.target.surface, event).disposition === "ignore") return false;
+  return isSupportedPersistentOutput(event, display);
+}
+
+/** Payload v1 event classification, independent of current per-Surface admission policy. */
+function isSupportedPersistentOutput(event: OutputEvent, display: OperationUpdateDisplay = "full"): boolean {
   switch (event.type) {
     case "text.completed": case "turn.completed": case "subagent.completed": case "autoApprovalReview.updated":
     case "turn.started": case "subagent.spawned": case "subagent.contacted":
@@ -30,7 +35,7 @@ export function isPersistentOutput(event: OutputEvent, display: OperationUpdateD
 
 /** Retain every failed result for inspection without fencing later delivery or interactions. */
 export function mayReleaseUncertainOutputBarrier(event: OutputEvent): boolean {
-  return isPersistentOutput(event);
+  return event.target.surface === "qq" ? isSupportedPersistentOutput(event) : isPersistentOutput(event);
 }
 
 export interface PersistentOutputPayload {
@@ -62,7 +67,8 @@ export async function snapshotPersistentOutput(event: OutputEvent, owner: string
 /** The input was authenticated by the version-locked journal, never received from an external caller. */
 export function decodePersistentOutput(payload: string): PersistentOutputPayload {
   const value = JSON.parse(payload) as PersistentOutputPayload;
-  if (value.version !== 1 || typeof value.owner !== "string" || !isPersistentOutput(value.event)) throw new Error("持久输出格式不受支持");
+  if (value.version !== 1 || typeof value.owner !== "string"
+    || !(value.event.target.surface === "qq" ? isSupportedPersistentOutput(value.event) : isPersistentOutput(value.event))) throw new Error("持久输出格式不受支持");
   return value;
 }
 

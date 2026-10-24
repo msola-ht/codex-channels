@@ -495,7 +495,7 @@ export class SurfaceManager {
   }
 
   async deliverConfigurationChange(change: SurfaceConfigurationChange): Promise<void> {
-    const surfaces = this.surfaces.filter(surface => !surface.connectionOnly);
+    const surfaces = this.surfaces.filter(surface => !surface.connectionOnly && surface.capabilities?.configurationNotifications !== false);
     if (surfaces.some(surface => !this.active.has(surface))) {
       throw new Error("部分 Surface 当前不可用，不能确认持久化配置事件");
     }
@@ -723,7 +723,7 @@ export class SurfaceManager {
     }
     runtime.state = "running";
     runtime.retryAttempt = 0;
-    this.setInteractionAvailable(surface, !surface.connectionOnly);
+    this.setInteractionAvailable(surface, !surface.connectionOnly && surface.capabilities?.interactions !== false);
     this.active.add(surface);
     this.persistent?.wake();
     for (const [key, snapshot] of this.snapshots) {

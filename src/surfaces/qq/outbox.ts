@@ -26,7 +26,9 @@ export class QqTextOutbox {
   /** One complete text, one shared queue operation and receipt. Never retries or changes mode. */
   async deliver(
     input: QqTextMessage,
-    context: QqTextSendContext,
+    context: QqTextSendContext & { reserve?(parts: number): {
+      runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
+    } },
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>,
   ): Promise<void> {
     const deadline = performance.now() + PLAN_TIMEOUT_MS;
@@ -65,14 +67,16 @@ export class QqTextOutbox {
         passiveDeadline = performance.now() + QQ_PASSIVE_WINDOW_MS - age;
       }
       guard();
+      const reservation = context.reserve?.(parts.length);
       await captureDelivery(() => {
         const accepted = this.queue.enqueue(parts[0]!.recipient, async active => {
           const receipt = DeliveryReceipt.current()!;
           for (const [index, part] of parts.entries()) {
             active.throwIfAborted();
             guard();
+            const send = () => this.client.sendText(part, { signal: active, beforeSend: guard });
             await checkpointDelivery(`qq-text:${index + 1}/${parts.length}`,
-              () => this.client.sendText(part, { signal: active, beforeSend: guard }),
+              () => reservation ? reservation.runPart(active, send) : send(),
               error => error instanceof QqTextSendError && error.outcome === "rejected");
           }
           receipt.confirmCompleteContent();

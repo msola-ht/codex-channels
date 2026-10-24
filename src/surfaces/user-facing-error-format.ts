@@ -14,7 +14,7 @@ import { formatReasoningEffort } from "./reasoning-effort-format.js";
 
 export function formatSurfaceUserFacingError(
   error: UserFacingError,
-  surfaceLabel: "Telegram" | "飞书" | "微信",
+  surfaceLabel: "Telegram" | "飞书" | "微信" | "QQ",
 ): string {
   switch (error.code) {
     case "mcp.oauth.unavailable":

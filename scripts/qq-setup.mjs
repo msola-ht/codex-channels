@@ -29,7 +29,7 @@ export async function runQqSetup({
     validateGatewayConfigStructureDocument(document);
     const initialDocument = structuredClone(document);
     output.write("\n通讯渠道 · QQ 接入\n\n");
-    output.write("当前仅支持鉴权与 WebSocket 基础连接；消息层尚未接入，收到消息不会提交 Codex 或回复，也不会留存待重放。\n");
+    output.write("支持允许名单内的单聊文字任务与必要命令；不支持附件、审批交互、计划任务或历史结果补发。启用后普通文字会提交 Codex。\n");
     const mode = await prompt.select("选择 QQ 接入方式", [
       { value: "scan", label: "手机 QQ 扫码连接（推荐）", hint: "获取应用凭据和本次扫码用户 OpenID" },
       { value: "manual", label: "手工填写应用凭据和 OpenID" },
@@ -76,7 +76,7 @@ export async function runQqSetup({
         output.write("OpenID 格式无效：不能重复或包含空白、逗号、分号及控制字符。\n");
       }
     }
-    const enabled = await prompt.confirm("保存后启用 QQ 基础连接（暂不处理或回复消息）？", false);
+    const enabled = await prompt.confirm("保存后启用 QQ 文字渠道（普通文字会提交 Codex）？", false);
     document.qq = {
       enabled,
       app_id: appId,
@@ -150,14 +150,14 @@ export async function runQqSetup({
 
 function writeVerificationSteps(output, enabled, allowedUserCount) {
   if (!enabled) {
-    output.write("QQ 当前禁用；可通过渠道配置启用基础连接，消息层尚未接入。\n");
+    output.write("QQ 当前禁用；可通过渠道配置启用单聊文字任务。\n");
     return;
   }
   if (allowedUserCount === 0) {
     output.write("QQ 当前没有允许用户；任何用户事件都不会进入业务处理。\n");
   }
-  output.write("下一步：按激活要求启动或重启 Gateway，用 codexc logs gateway -n 100 核对 QQ 基础连接状态。\n");
-  output.write("消息层尚未接入：不支持 /help、/status 或普通任务，不发送回复，收到的事件不留存或重放。连接就绪不代表收发可用。\n");
+  output.write("下一步：按激活要求启动或重启 Gateway，用 codexc logs gateway -n 100 核对 QQ 连接状态。\n");
+  output.write("先发送 /help、/workspace 和 /model 核对，再提交普通文字任务。连接就绪不代表任务送达；重启不恢复旧结果发送资格。\n");
 }
 
 async function scanQq({ input, output, registerApplication, renderQRCode }) {

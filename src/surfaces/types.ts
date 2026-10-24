@@ -63,6 +63,12 @@ export interface SurfaceAdapter {
   readonly accountId: string;
   /** Connection lifecycle only: no conversation recovery, output or notification recipients. */
   readonly connectionOnly?: true;
+  readonly capabilities?: {
+    readonly recoverBindings?: boolean;
+    readonly interactions?: boolean;
+    readonly scheduledTasks?: boolean;
+    readonly configurationNotifications?: boolean;
+  };
   readonly interactions: InteractionPort;
   readonly output: SurfaceOutputPort;
   sendChannelImage?(conversationId: string, imagePath: string): Promise<void>;

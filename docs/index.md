@@ -2,7 +2,7 @@
 普通 Turn 提交的本地关联入口见 [`SubmissionObserver`](../src/application/submission-observer.ts)：
 准备精确 Thread、标记可能提交、确认响应 Turn 并结算失败。它经 Client/Provider 透传而不添加 RPC 字段，
 `turn/start` 仍可能实际追加；显式 `turn/steer` 响应必须匹配 expectedTurnId，空白 ID 不作成功。
-QQ 内存来源注册已实现，Adapter/输出接线仍待实现；本地观察接口的真实任务路径尚未验证，不能据此宣称 QQ 收发已可用。
+QQ 普通单聊文字沿共享 submit、来源注册、持久投递与纯文本 Outbox 接线；支持必要工作区/模型/状态命令，审批、附件、计划任务与旧来源恢复不开放。用户自行部署重启后已确认普通文字任务闭环及 QQ 回复；异常与恢复场景尚未完成真实端到端观察，见 [QQ 消息合同](qq-message-contract.md)。
 
 本页用于定位 Codex App Server 的官方说明、`0.164.0` 固定版本源码，以及本项目对应实现。
 它是查询入口，不替代生成协议类型，也不声明本项目支持官方协议的全部能力。

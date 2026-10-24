@@ -54,6 +54,11 @@ export function resolveSurfaceDelivery(
   surface: SurfaceId,
   event: OutputEvent,
 ): SurfaceDeliveryDecision {
+  if (surface === "qq") {
+    return (event.type === "text.completed" && event.phase !== "commentary") || event.type === "turn.completed"
+      ? { disposition: "deliver", critical: true }
+      : { disposition: "ignore", critical: false };
+  }
   if (surface === "weixin") {
     return isWeixinWindowEvent(event)
       ? { disposition: "deliver", critical: true }

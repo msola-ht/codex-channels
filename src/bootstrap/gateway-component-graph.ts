@@ -1040,7 +1040,8 @@ export abstract class GatewayComponentGraph {
           output: this.output,
           logger,
           isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
-            !surface.connectionOnly && surface.surface === target.surface && surface.accountId === target.accountId),
+            !surface.connectionOnly && surface.capabilities?.scheduledTasks !== false
+            && surface.surface === target.surface && surface.accountId === target.accountId),
           isActorAuthorized: (target, actorId) =>
             this.accessPolicy(target)?.isAllowed({ target, actorId }) === true,
           creationContext: (target) => {
@@ -1226,8 +1227,9 @@ export abstract class GatewayComponentGraph {
       logger,
     });
     for (const surface of this.surfaces) {
-      this.interactions.register(surface.surface, surface.accountId, new PersistentInteractionPort(surface.interactions,
-        (target, signal) => this.surfaceManager.waitForPersistentOutput(target, signal)));
+      this.interactions.register(surface.surface, surface.accountId, surface.capabilities?.interactions === false
+        ? surface.interactions : new PersistentInteractionPort(surface.interactions,
+          (target, signal) => this.surfaceManager.waitForPersistentOutput(target, signal)));
       this.interactions.setAvailable(surface.surface, surface.accountId, false);
     }
     this.approval = new ApprovalCoordinator(
@@ -1429,7 +1431,7 @@ export abstract class GatewayComponentGraph {
       codex: this.codex,
       router: this.router,
       output: this.output,
-      enabledSurfaces: () => this.surfaces.filter(surface => !surface.connectionOnly),
+      enabledSurfaces: () => this.surfaces.filter(surface => !surface.connectionOnly && surface.capabilities?.recoverBindings !== false),
       scheduledRecovery: () => this.scheduledTasks?.coordinator,
       releaseBackground: async (threadId, isCurrent) =>
         await this.trackQueueLifecycleTask(() =>

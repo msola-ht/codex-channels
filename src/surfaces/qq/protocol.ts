@@ -6,7 +6,7 @@ export type QqProtocolOperation = "token" | "gateway" | "message";
 export type QqProtocolFailure =
   | "invalid-input" | "closed" | "cancelled" | "timeout" | "network"
   | "http" | "business" | "invalid-response" | "response-too-large"
-  | "authorization" | "expired";
+  | "authorization" | "expired" | "budget";
 
 /** Local policy, not a discovered QQ platform maximum. One already planned part. */
 export const QQ_TEXT_PART_BYTES = 2000;

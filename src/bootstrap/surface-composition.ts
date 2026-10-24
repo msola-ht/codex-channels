@@ -134,6 +134,12 @@ function createQqModule(
   const access = new QqAccessPolicy(config.allowedUserOpenIds, config.appId);
   const adapter = new QqSurface({
     appId: config.appId, appSecret: config.appSecret, access,
+    service: options.service, commands: options.commands, actors: options.bindings,
+    ownsThread: (target, threadId) => {
+      const binding = options.bindings.getByThread(threadId);
+      return binding?.target.surface === target.surface && binding.target.accountId === target.accountId
+        && binding.target.conversationId === target.conversationId;
+    },
     createNetwork: () => createQqNetwork(options.config.networkProxy),
     logger: options.logger, onFatal: error => options.onFatal("qq", config.appId, error),
   });

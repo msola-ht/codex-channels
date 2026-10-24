@@ -5,8 +5,9 @@ import type { SurfaceAdapter, SurfaceOutputPort } from "../types.js";
 import type { QqNetwork } from "./network.js";
 import { QqProtocolClient, QqProtocolError } from "./protocol.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
+import { QqMessages, type QqMessageOptions } from "./messages.js";
 
-export interface CreateQqSurfaceOptions {
+export interface CreateQqSurfaceOptions extends QqMessageOptions {
   appId: string;
   appSecret: string;
   createNetwork(): QqNetwork;
@@ -15,10 +16,10 @@ export interface CreateQqSurfaceOptions {
   onFatal(error: Error): void;
 }
 
-/** Connection-only adapter. No Application capabilities are available in this phase. */
+/** Text-only adapter; shares Application and persistent delivery with other Surfaces. */
 export class QqSurface implements SurfaceAdapter {
   readonly surface = "qq";
-  readonly connectionOnly = true;
+  readonly capabilities = { recoverBindings: false, interactions: false, scheduledTasks: false, configurationNotifications: false } as const;
   readonly accountId: string;
   readonly interactions: InteractionPort = {
     request: (_target, request) => Promise.resolve(safeInteractionDecision(request)),
@@ -26,8 +27,17 @@ export class QqSurface implements SurfaceAdapter {
     cancelAll: () => {},
   };
   readonly output: SurfaceOutputPort = {
-    handle: () => { throw new Error("QQ 消息层尚未接入，输出未发送"); },
-    deliver: () => Promise.reject(new Error("QQ 消息层尚未接入，输出未发送")),
+    deliverySource: {
+      capture: event => this.current?.messages.deliverySource.capture(event),
+      await: (reference, signal) => this.current?.messages.deliverySource.await(reference, signal) ?? Promise.resolve(false),
+      current: reference => this.current?.messages.deliverySource.current(reference) === true,
+    },
+    admitLive: event => this.current?.messages.admitLive(event),
+    observe: event => this.current?.messages.observe(event),
+    retains: event => this.current?.messages.retains(event) === true,
+    handle: event => this.current?.messages.handle(event),
+    deliver: (event, signal, checkpoint, authorized) => this.current?.messages.deliver(event, signal, checkpoint, authorized)
+      ?? Promise.reject(new Error("QQ 消息连接不可用")),
   };
   private current: QqConnection | undefined;
   private starting: Promise<void> | undefined;
@@ -78,46 +88,37 @@ export class QqSurface implements SurfaceAdapter {
   }
 
   deliverConfigurationChange(): Promise<void> {
-    // This connection-only adapter has no notification recipients. An empty
+    // This adapter has no notification recipients. An empty
     // broadcast must not prevent other channels' durable events being acknowledged.
     return Promise.resolve();
   }
 }
 
 class QqConnection {
+  readonly messages: QqMessages;
   private readonly network: QqNetwork;
   private readonly client: QqProtocolClient;
   private readonly transport: QqWebSocketTransport;
   private closed = false;
   private stopping: Promise<void> | undefined;
-  private observedIgnoredInput = false;
 
   constructor(private readonly options: CreateQqSurfaceOptions) {
     // Validate credentials before acquiring network resources.
     this.client = new QqProtocolClient({ appId: options.appId, appSecret: options.appSecret,
       fetchImpl: (input, init) => this.network.fetchImpl(input, init) });
     this.network = options.createNetwork();
+    this.messages = new QqMessages(options, this.client);
     this.transport = new QqWebSocketTransport({
       client: this.client,
       agentForUrl: (url, signal) => this.network.agentForUrl(url, signal),
       releaseAgent: agent => this.network.releaseAgent(agent),
       onDispatch: (event, signal) => Promise.resolve().then(() => {
         signal.throwIfAborted();
-        if (this.closed || event.t !== "C2C_MESSAGE_CREATE") return;
-        const value = event.d;
-        const author = value && typeof value === "object" && "author" in value ? value.author : undefined;
-        const actor = author && typeof author === "object" && "user_openid" in author ? author.user_openid : undefined;
-        if (typeof actor !== "string" || !options.access.isAllowed({
-          target: { surface: "qq", accountId: options.appId, conversationId: `c2c:${actor}` }, actorId: actor,
-        })) return;
-        if (!this.observedIgnoredInput) {
-          this.observedIgnoredInput = true;
-          options.logger.warn({ surface: "qq", accountId: options.appId, reason: "message-layer-unavailable" },
-            "QQ 已收到允许用户的事件，但消息层尚未接入；本代次不提交任务、不回复，事件不会留存或重放");
-        }
+        if (this.closed) return;
+        this.messages.receive(event);
       }),
       onStatus: status => options.logger.info({ surface: "qq", accountId: options.appId, status },
-        "QQ 基础连接状态；消息层尚未接入，不代表收发可用"),
+        "QQ 文字渠道连接状态；连接就绪不代表任务送达"),
     });
     void this.transport.finished.catch((error: unknown) => {
       if (this.closed) return;
@@ -136,7 +137,7 @@ class QqConnection {
   }
 
   private async closeResources(): Promise<void> {
-    const work = Promise.allSettled([this.transport.stop(), this.network.close()]).then(results => {
+    const work = Promise.allSettled([this.messages.close(), this.transport.stop(), this.network.close()]).then(results => {
       if (results.some(result => result.status === "rejected")) throw new Error("QQ 连接资源关闭未确认");
     });
     let timer: ReturnType<typeof setTimeout> | undefined;

@@ -1,10 +1,10 @@
 # Surface Adapters
 
-[QQ](qq/README.md) 当前仅接入配置、鉴权与 WebSocket 连接生命周期。消息层尚未接入，不提交任务、不发送回复，也不建立会话绑定。
+[QQ](qq/README.md) 已接入普通单聊文字任务、必要命令和共享持久投递；审批、附件、计划任务与旧来源恢复不开放。
 
 本目录保存外部交互平台适配器。Surface 负责把平台输入转换为 Application 命令，并把 Core 输出和审批交互渲染为平台消息。
 
-`index.ts` 是 Gateway 装配各 Surface 的主公开入口；通过显式异步加载函数提供三个消息渠道与 QQ 基础连接，
+`index.ts` 是 Gateway 装配各 Surface 的主公开入口；通过显式异步加载函数提供飞书、微信、Telegram 和 QQ 四个消息渠道，
 纯共享能力与凭据检查不静态加载飞书或 Telegram SDK。
 该入口也向本机图片提交命令公开 `readGeneratedImage` 与 `GeneratedImageError`，复用普通文件、符号链接、大小与格式校验；读取后的字节才允许进入渠道待发送目录。
 
@@ -63,6 +63,7 @@ Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录�
 保留各资源原有预算，全部清理尝试完成后统一抛出失败。停止结果由实例缓存，失败不伪装为成功，也不隐式重新启动资源。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。可选 `output.deliverySource` 提供来源引用的捕获、可取消等待和同步复核；引用不能单独授予发送资格。持久 `deliver` 的第四参数可接收共享同步授权守卫，用于最终网络发送前复核。
+可选 capabilities 分别约束自动绑定恢复、交互、计划任务及配置广播；QQ 明确关闭这些能力，同时允许普通文字输入和共享持久输出，其他渠道缺省行为不变。
 每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
 只通过编译期内置插件注册表显式注册。
