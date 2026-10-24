@@ -7,6 +7,8 @@
 
 在 Telegram、飞书或微信中使用本机 Codex。Gateway 与 `codexc remote` 共享同一个 Codex App Server，聊天渠道和原生 TUI 可在工作区与 Provider 匹配时接续同一 Thread，并共享运行状态。工作区选择与终端入口见[使用指南](docs/user-guide.md#4-workspaceprovider-与终端)。
 
+QQ 单聊可从统一 Setup 扫码或手工配置，复用共享会话能力并独立适配消息呈现；基础对话已有真实账号验证，后续新增能力与异常边界仍待实机验收，当前范围见[QQ 接入](docs/user-guide.md#qq-单聊接入)。
+
 当前源码开发基线：`0.164.0`。项目通过 Git 源码安装和更新，不再发布新的 npm 版本。
 
 完整安装、配置、渠道命令、服务管理、升级、排障和开发说明见[《Codex Connect 使用指导》](docs/user-guide.md)。

@@ -14,6 +14,7 @@ export interface PersistentSurfaceOutputOptions {
   fault(code: string, account?: string, persistentDeliveryId?: string, failure?: DeliveryFailure): void;
   changed?(): void;
   workerUrl?: URL;
+  deliveryTimeoutMs?(event: OutputEvent): number;
 }
 
 export class PersistentSurfaceOutput {
@@ -34,6 +35,7 @@ export class PersistentSurfaceOutput {
       onFailure: (failure) => options.fault("storage", undefined, undefined, failure),
     });
     this.coordinator = new DeliveryCoordinator(this.journal, {
+      timeoutMs: record => options.deliveryTimeoutMs?.(decodePersistentOutput(record.payload).event) ?? 60_000,
       accounts: () => options.accounts(),
       mayReleaseUncertainBarrier: (record) => {
         const payload = decodePersistentOutput(record.payload);

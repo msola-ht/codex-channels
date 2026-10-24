@@ -15,7 +15,7 @@ import type {
 
 export type ConversationInputEvent =
   | { type: "hook.completed"; threadId: string; hook: HookCompletion }
-  | { type: "turn.started"; threadId: string; turnId: string }
+  | { type: "turn.started"; threadId: string; turnId: string; rootTurnId?: string }
   | {
       type: "thread.tokenUsage.updated";
       threadId: string;

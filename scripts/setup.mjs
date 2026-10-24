@@ -16,6 +16,7 @@ export async function runSetup({
   clinePassSetup = async (options) => (await import("./cline-pass-setup.mjs")).runClinePassSetup(options),
   telegramSetup = async (options) => (await import("./telegram-setup.mjs")).runTelegramSetup(options),
   weixinSetup = async (options) => (await import("./weixin-setup.mjs")).runWeixinSetup(options),
+  qqSetup = async (options) => (await import("./qq-setup.mjs")).runQqSetup(options),
   skillSetup = async (options) => (await import("./skill-setup.mjs")).runSkillSetup(options),
   openCodeGoSetup = async (options) => (await import("./opencode-go-setup.mjs")).runOpenCodeGoSetup(options),
   customPrimarySetup = async (options) => (await import("./primary-provider-cli.mjs")).runCustomPrimaryProviderMenu(options),
@@ -102,6 +103,7 @@ export async function runSetup({
             feishuSetup,
             telegramSetup,
             weixinSetup,
+            qqSetup,
           });
           if (isBackResult(result)) continue;
           const enriched = enrichSetupResult(result);
@@ -345,6 +347,7 @@ async function runChannelSetup({
   feishuSetup,
   telegramSetup,
   weixinSetup,
+  qqSetup,
 }) {
   const channel = await prompts.select({
     message: "通讯渠道",
@@ -367,6 +370,11 @@ async function runChannelSetup({
         hint: "扫码连接与用户授权",
       },
       {
+        value: "qq",
+        label: "QQ",
+        hint: "扫码连接与单聊用户授权（WebSocket）",
+      },
+      {
         value: "back",
         label: "返回",
         hint: "返回设置类别",
@@ -386,6 +394,9 @@ async function runChannelSetup({
     case "weixin":
       selection.channel = channel;
       return weixinSetup({ input, output });
+    case "qq":
+      selection.channel = channel;
+      return qqSetup({ input, output });
     default:
       throw new Error(`未知通讯渠道：${String(channel)}`);
   }

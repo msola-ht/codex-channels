@@ -20,6 +20,14 @@ enabled = false
 # account_id = "不透明账号@im.bot"
 # allowed_user_ids = ["不透明用户@im.wechat"]
 
+[qq]
+# QQ 可通过 codexc setup 扫码取得凭据和用户 OpenID，也可手工填写；仅支持 WebSocket 单聊。
+# 空允许名单不会授权任何用户；用户 OpenID 必须来自同一 QQ 应用。
+enabled = false
+# app_id = "1234567890"
+# app_secret = "你的_QQ_AppSecret"
+# allowed_user_openids = ["当前应用下的用户_OpenID"]
+
 # 共享网络代理通过 codexc config 写入 ~/.codex/.env，不在 Gateway TOML 中保存。
 
 [codex]

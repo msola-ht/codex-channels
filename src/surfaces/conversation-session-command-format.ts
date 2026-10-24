@@ -14,6 +14,7 @@ const maximumProcessCommandCharacters = 160;
 
 export function formatConversationSessions(
   result: Extract<ConversationCommandResult, { kind: "sessions" }>,
+  field: (value: string) => string = value => value,
 ): string {
   if (result.sessions.length === 0) {
     const scope = result.archived ? "已归档会话" : "可恢复会话";
@@ -29,7 +30,7 @@ export function formatConversationSessions(
     `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${result.view.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
-        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${formatReasoningEffort(session.reasoningEffort)}` : ""}${session.modelProvider ? ` · Provider：${formatDisplayedProvider(session.modelProvider)}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
+        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${field(formatSessionLabel(session.name ?? session.preview))}${session.model ? ` · 模型：${session.model}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${field(formatReasoningEffort(session.reasoningEffort))}` : ""}${session.modelProvider ? ` · Provider：${formatDisplayedProvider(session.modelProvider)}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
     ...(hiddenCount > 0
       ? [
@@ -170,6 +171,7 @@ function formatSessionLabel(value: string): string {
 export function formatConversationOccupancy(
   result: Extract<ConversationCommandResult, { kind: "occupancy" }>,
   formatCommand: (command: string) => string = (command) => command,
+  field: (value: string) => string = value => value,
 ): string {
   const { result: release } = result;
   switch (release.status) {
@@ -180,25 +182,25 @@ export function formatConversationOccupancy(
     case "free":
       return toStructuredMarkdownList([
         "当前会话的 Codex Session 未被占用。",
-        `Session ID：${release.threadId}`,
+        `Session ID：${field(release.threadId)}`,
       ].join("\n"));
     case "released":
       return toStructuredMarkdownList([
         "已释放 Codex Session 占用，正在自动恢复订阅。",
-        `Session ID：${release.threadId}`,
+        `Session ID：${field(release.threadId)}`,
         `占用进程：PID ${release.holder.pid}`,
-        formatProcessCommand(release.holder.command),
+        field(formatProcessCommand(release.holder.command)),
       ].join("\n"));
     case "held":
       return toStructuredMarkdownList([
         `Codex Session 被 PID ${release.holder.pid} 占用。`,
-        `进程：${formatProcessCommand(release.holder.command)}`,
+        `进程：${field(formatProcessCommand(release.holder.command))}`,
         release.releasable
           ? release.stuck
             ? `当前会话恢复失败，可确认释放：${formatCommand("/release force")}（会向该进程发送结束信号；若是 App Server 子进程，服务会自动重启并重连所有会话）。`
             : "当前会话运行正常，通常无需释放；如确认需要，/release force 会结束该进程（App Server 子进程会重启并重连所有会话）。"
           : "该进程无法自动释放，请关闭占用 Session 的 Codex 客户端，或重启 App Server 服务。",
-        `Session ID：${release.threadId}`,
+        `Session ID：${field(release.threadId)}`,
       ].join("\n"));
     case "unidentifiable":
       return toStructuredMarkdownList([
@@ -207,7 +209,7 @@ export function formatConversationOccupancy(
           : "Session 持锁进程诊断未能取得可靠结果，未执行释放占用。",
         "检测到锁文件不代表 Session 仍被占用；当前占用状态尚未确认。",
         `请先通过 ${formatCommand("/status")} 和 App Server 日志确认故障；此结果不表示需要结束进程或重启服务。`,
-        `Session ID：${release.threadId}`,
+        `Session ID：${field(release.threadId)}`,
       ].join("\n"));
   }
 }

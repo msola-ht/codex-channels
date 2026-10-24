@@ -22,6 +22,21 @@ import {
 } from "./private-directory-lock.mjs";
 
 const sourceByDocument = new WeakMap();
+
+/** Compare validated runtime QQ identities; disabled configurations project to undefined. */
+export function classifyQqConfigChanges(current, next) {
+  const changes = [];
+  if (Boolean(current) !== Boolean(next)) changes.push({ kind: "enabled", restart: true });
+  if (current && next) {
+    if (current.appId !== next.appId) changes.push({ kind: "account", restart: true });
+    if (current.appSecret !== next.appSecret) changes.push({ kind: "credentials", restart: true });
+    const before = new Set(current.allowedUserOpenIds);
+    const after = new Set(next.allowedUserOpenIds);
+    const removed = [...before].some(id => !after.has(id));
+    if (removed || [...after].some(id => !before.has(id))) changes.push({ kind: "allowed-users", restart: removed });
+  }
+  return changes;
+}
 const activeGatewayConfigLocks = new Set();
 
 export class GatewayConfigConflictError extends Error {
@@ -103,6 +118,35 @@ const weixinSetupSchema = z.strictObject({
     (values) => new Set(values).size === values.length,
     "allowed_user_ids 不能包含重复项",
   ),
+});
+
+const qqSchema = z.strictObject({
+  enabled: z.boolean(),
+  app_id: z.string().regex(/^[0-9]+$/u, "app_id 必须是 QQ 应用的数字标识").optional(),
+  app_secret: z.string().min(1).refine(
+    (value) => !/\s/u.test(value) && !containsControlCharacter(value),
+    "app_secret 不能为空或包含空白及控制字符",
+  ).optional(),
+  allowed_user_openids: z.array(
+    z.string().min(1).refine(
+      (value) => !/[\s,，;；]/u.test(value) && !containsControlCharacter(value),
+      "每个 QQ 用户 OpenID 不能为空或包含空白、逗号、分号及控制字符",
+    ),
+  ).refine(
+    (values) => new Set(values).size === values.length,
+    "allowed_user_openids 不能包含重复项",
+  ).optional(),
+}).superRefine((value, context) => {
+  if (!value.enabled) return;
+  for (const field of ["app_id", "app_secret", "allowed_user_openids"]) {
+    if (value[field] === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `QQ 启用时必须配置 ${field}`,
+      });
+    }
+  }
 });
 
 const webuiSchema = z.strictObject({
@@ -253,6 +297,7 @@ const gatewayConfigStructureSchema = z.strictObject({
   telegram: telegramSchema.optional(),
   feishu: feishuSchema.optional(),
   weixin: weixinSetupSchema.optional(),
+  qq: qqSchema.optional(),
   codex: codexSchema,
   gateway: gatewaySchema.optional(),
   model_relay: modelRelayConfigSchema.optional(),
@@ -299,11 +344,12 @@ const gatewayDocumentSchema = gatewayConfigStructureSchema.superRefine((value, c
     !value.telegram?.bot_token?.trim()
     && value.feishu?.enabled !== true
     && value.weixin?.enabled !== true
+    && value.qq?.enabled !== true
   ) {
     context.addIssue({
       code: "custom",
       path: ["telegram", "bot_token"],
-      message: "至少需要配置一个通讯渠道：Telegram、飞书或微信",
+      message: "至少需要配置一个通讯渠道：Telegram、飞书、微信或 QQ",
     });
   }
 

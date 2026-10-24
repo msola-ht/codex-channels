@@ -19,6 +19,7 @@ import {
   resolveSurfaceDelivery,
   surfaceErrorMetadata,
   type SurfaceAdapter,
+  type ChannelImageSource,
   type SurfaceConfigurationChange,
 } from "../surfaces/index.js";
 
@@ -78,7 +79,7 @@ interface PendingSnapshot {
 }
 
 export interface SurfaceManagerOptions extends CompletionOutputEnricherOptions {
-  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "fault" | "workerUrl">;
+  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "fault" | "workerUrl" | "deliveryTimeoutMs">;
   retryDelaysMs?: readonly number[];
   maximumPendingCriticalOutput?: number;
   setInteractionAvailable?(
@@ -184,7 +185,7 @@ export class SurfaceManager {
         await this.requireRuntime(surface).delivery.runOrdered(event.target.conversationId, async (active) => {
           if (!this.acceptingOutput) throw new Error("可靠投递已停止");
           if (!authorized()) throw new Error("可靠投递授权已变化");
-          await surface.output.deliver!(enriched, active, checkpoint);
+          await surface.output.deliver!(enriched, active, checkpoint, authorized);
         }, signal);
       },
     }) : undefined;
@@ -307,6 +308,7 @@ export class SurfaceManager {
   async sendChannelImage(
     target: ConversationTarget,
     imagePath: string,
+    source?: ChannelImageSource,
   ): Promise<void> {
     if (this.stopping) {
       throw new Error("Gateway 正在停止，无法发送渠道图片");
@@ -325,7 +327,7 @@ export class SurfaceManager {
     if (surface.sendChannelImage === undefined) {
       throw new Error(`${target.surface} 渠道不支持发送图片`);
     }
-    return surface.sendChannelImage(target.conversationId, imagePath);
+    return surface.sendChannelImage(target.conversationId, imagePath, source);
   }
 
   presentScheduledTaskConfirmation(

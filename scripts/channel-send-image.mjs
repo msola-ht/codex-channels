@@ -29,6 +29,7 @@ export async function submitChannelImage({
   environment = process.env,
   imagePath,
   threadId,
+  turnId,
   stateDatabasePath,
   spoolDirectory,
   now = () => Date.now(),
@@ -60,6 +61,17 @@ export async function submitChannelImage({
   if (target === undefined) {
     throw new Error(`Thread 未绑定会话：${resolvedThreadId}`);
   }
+  if (target.surface === "qq") {
+    if (typeof turnId !== "string" || !turnId || turnId.length > 256 || /\s/u.test(turnId)) {
+      throw new Error("QQ 图片发送需要显式 --turn <原 Turn ID>；不能从最新轮次或来信推断回复依据");
+    }
+    if (!target.conversationId.startsWith("c2c:") || target.conversationId.length <= 4) {
+      throw new Error("QQ 图片发送目标不是受支持的单聊会话");
+    }
+    if (image.bytes.length > 3 * 1024 * 1024) throw new Error("QQ 图片不能超过 3 MiB");
+  } else if (turnId !== undefined) {
+    throw new Error("--turn 仅用于 QQ 图片发送");
+  }
 
   const pendingDirectory = join(runtime.spoolDirectory, "pending");
   ensurePrivateDirectorySync(runtime.spoolDirectory);
@@ -72,7 +84,11 @@ export async function submitChannelImage({
     writePrivateFileAtomicSync(pendingImage, image.bytes);
     // Publish only after the validated bytes are complete and private.
     writePrivateFileAtomicSync(stagedManifestPath, `${JSON.stringify({
-        version: 1,
+        ...(target.surface === "qq" ? {
+          version: 2,
+          turnId,
+          target: { surface: target.surface, accountId: target.accountId, conversationId: target.conversationId },
+        } : { version: 1 }),
         threadId: resolvedThreadId,
         imagePath: pendingImage,
         createdAtMs: now(),
@@ -164,7 +180,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       console.log(`${CHANNEL_SEND_IMAGE_USAGE}
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，由 Thread 绑定渠道的机器人凭据发送回对应会话。
-不指定 --thread 时，只有当前仅存在一个会话绑定才会自动选择目标。`);
+不指定 --thread 时，只有当前仅存在一个会话绑定才会自动选择目标。
+QQ 图片最大 3 MiB，必须显式 --turn 指定原 Turn ID；原任务来源最长24小时，使用主动发送额度。`);
       process.exit(0);
     }
     const parsed = parseChannelSendImageArgs(args);

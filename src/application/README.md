@@ -4,11 +4,20 @@ Surface 在接收音视频、首次进入队列前登记有界接收取消范围
 
 返回的提交作用域提供取消信号、一次性 `captureTarget` 和 `submit`、`mayHaveSubmitted` 和 `dispose`，覆盖前序输入刷新至锁内提交，并在结束时释放。Application 自身保留120秒期限；Surface接收范围另从接收起计算120秒预算，包含外层排队及停止等待，超时同时取消已建立的提交作用域，捕获目标不延长总预算。每个目标最多4个待处理作用域，全局最多1000个目标。RPC可能发出后即使确认失败也保留附件至过期，避免删除已经进入Thread的引用；不自动重试提交。
 
+QQ 图片也使用该作用域，kind 为 image，复用停止、工作区/Thread 守卫与模型图片能力检查；
+Surface 提交已校验的内存 Data URL，暂存路径不进入 Thread，因此其本地图片在提交结束后可删除，不适用音视频路径引用的保留要求。
+
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 
 工作区文字命令保留序号、ID、名称选择；`ConversationCommandExecutor.selectWorkspace` 为渠道按钮提供精确 ID 入口，复用同一授权、会话锁、空闲检查及绑定切换。旧工作区选择已失效时仍允许显式重选，不自动选择默认目录或重试失败请求。
 
 普通消息的 `submit` 接收 Surface 提供的实时授权闭包，在等待会话锁、Thread 准备及最终 Turn 写入前复核；
+命令 `execute` 也接受可选实时来源守卫，QQ 用它拒绝连接代次关闭后尚未提交的命令；已有 RPC 按实际结果结算。
+Hook 和重置券分支将该守卫显式传至共享服务的读取等待与最终写入前，不能只依赖业务 Policy 或外层回复检查判断渠道仍在运行。
+`execute` 的可选 `captureSubmission` 接收即将执行的真实提交 Promise，仅用于 review、带任务的 plan、Skill/Plugin/Agent 调用；
+调用方在用例微任务执行前登记关联，完整保留 Submission 的 Thread/Turn/steer，不从展示结果或当前 status 推断。
+提交与关联结算后才继续既有结果守卫和回复；回调失败仍消费底层结果，不重试已发生的写入。列表、详情和模式切换不产生该回调。
+QQ 同步捕获命令结果的回复授权守卫，队列与 Token 等待后重新检查工作区及来源；合法工作区切换的回执使用操作后的工作区。
 输入同时固定接收时的 Workspace ID 与目录，变化时拒绝。图片准备后的 start/steer 也保留最终守卫。
 已经提交的请求仍按实际结果结算，不因后续撤权自动重试或丢弃响应。
 普通新 Turn 在用例入口标记 `turnTrigger=user`，计划任务共用底层端口时不自动继承该标记。
@@ -55,6 +64,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
   命令和模型/审批按钮必须传原 Actor，由组合根注入当前 Surface 账号策略；缺少授权实现失败关闭。
   Queue 命令把当前 Workspace 作用域的授权闭包传到锁、选择器和最终请求边界，拒绝后不自动撤销已提交写入。
+  Goal 查询/清除复用公开 `parseGoalCommand` 与同一用例；已绑定命令固定原 Thread 至回复，未绑定时仍允许共享会话准备。
+  get 响应后复核原目标；clear 先归约已确认的原 Thread 清除，再复核回复守卫，不因迟到撤权将已经完成的写入当作未发生。
   按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。
   `/autoreview [on|off]` 查询或修改当前 Thread 实际审批方式；审批方式不受本地 Provider 与模型白名单限制；`selectAutoReview` 的按钮固定原 Thread ID，由会话用例在锁内复核。
   会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；
@@ -66,7 +77,10 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
   参数校验后映射到 `ScheduledTaskApplicationService`；将工具请求的取消和当前归属复核传到预览、写入及手动调度边界，失效请求不展示预览并撤销未交付确认令牌。创建和删除仍返回待确认预览，不直接改写 Store；已提交的写入不因取消而回滚。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标异步查询；`ConversationService` 作为统一用例入口委托执行。`/metrics`、可见会话页的本地 Turn 计数与周额度估算等待数据库 Worker，不在调用线程执行 SQL；账户快照按 Provider 排队，执行前拒绝取消及早于已确认额度序号的结果。只有写入成功才推进序号，较新观测保存失败不阻断旧有效结果；调用方取消等待后，已派发写入仍按实际确认结果更新缓存与序号。
+  会话指标固定查询开始时的 Thread，等待后复核；共享命令入口把该归属保留到最终回复授权，
+  包括原先未绑定的查询。换绑后要求重新查询，不把旧指标归入新 Thread；全局聚合不增加 Thread 约束。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
+  MCP 列表、健康、详情、资源和 OAuth 查询固定初始 Thread，在异步等待与 RPC 前后复核；换绑或从未绑定变为已绑定时拒绝旧结果。
   OAuth 关联最多保留 128 个、各十分钟；响应前每次请求暂存至多 8 条完成通知，每条错误上限 4,096 字符。
   超限且无法匹配结果时明确要求查询实际状态；失败、Thread 关闭、断线及服务关闭清理关联，不撤销已提交登录。
 - `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态，并提供会话选择器 `resolveThread`（序号、精确 ID/名称或唯一 ID 前缀，歧义与缺失明确失败）；不修改绑定，不建立独立会话索引。派生轮数扫描每轮最多 10 秒、100 页，同 Thread 后台刷新合并，后台最多 3 个并发；关闭取消扫描和本地指标等待，拒绝迟到列表结果及缓存写入，超限时轮数保持未知。本地轮数指标读取失败降级为展示缓存或未知，不阻止权威列表返回。缓存读写、失效或删除失败后，本实例停止使用该缓存并报告固定操作分类；不返回旧缓存，不阻止权威事件归约或用户输入。失效和删除先更新代次，迟到扫描与本地指标结果既不回写也不展示。
@@ -106,6 +120,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 - `conversation-lock-coordinator.ts`：为同一 Conversation、多个 Conversation 的有序加锁；Queue、Revert
   与主会话生命周期共用同一实例。
 - `thread-queue-service.ts`：维护原生 Thread Queue 的增删改查、启动、分页选择快照、错误映射和待生效设置冲突检查；
+  add 在请求前生成 clientId，通过可选 `ThreadQueueSubmissionOrigin` 捕获口通知调用 Surface；只携带精确 Thread/clientId，不包含正文或平台身份，也不推定 Turn 已启动。
+  命令服务与 ConversationService 原样传递该捕获口；失败使入队停止，RPC 结果未知不重试。update/delete/reorder/start 不重新登记来源。
   只有列表发布更新数字选择，内部复核不重排或续期旧页；读取期间的失效不允许重新发布旧快照。
   不负责 Thread 绑定切换或后台释放。
   用户命令固定接收时的 Thread，异步读取与提交前复核 Actor、Workspace 和 Thread；写入响应仍正常结算，

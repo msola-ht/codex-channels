@@ -7,6 +7,7 @@ import {
 import {
   defaultSessionListView,
   parseAgentInvocation,
+  parseGoalCommand,
   parseMcpOperation,
   parseMetricsCommand,
   parsePluginOperation,
@@ -26,8 +27,10 @@ import type {
   ConversationQueueRevertUseCases,
   ConversationSessionUseCases,
   ConversationTurnUseCases,
+  Submission,
 } from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
+import type { ThreadQueueSubmissionOrigin } from "./thread-queue-port.js";
 import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
 import {
   parseScheduledTaskOperation,
@@ -331,6 +334,10 @@ export interface ConversationCommandExecutor {
     command: ConversationCommandName,
     input: string,
     actorId: string,
+    isAllowed?: () => boolean,
+    captureReplyAuthorization?: (authorize: () => void) => void,
+    captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
+    captureQueueOrigin?: (origin: ThreadQueueSubmissionOrigin) => void,
   ): Promise<ConversationCommandResult>;
 }
 
@@ -397,12 +404,53 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     command: ConversationCommandName,
     input: string,
     actorId: string,
+    isAllowed?: () => boolean,
+    captureReplyAuthorization?: (authorize: () => void) => void,
+    captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
+    captureQueueOrigin?: (origin: ThreadQueueSubmissionOrigin) => void,
   ): Promise<ConversationCommandResult> {
-    const assertAuthorized = this.commandGuard(target, actorId, command === "workspace");
-    const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
+    const assertActive = () => {
+      if (isAllowed?.() === false) throw new UserFacingError("command.authorization-changed", "命令来源已关闭或授权已变化");
+    };
+    assertActive();
+    const guard = this.commandGuard(target, actorId, command === "workspace");
+    let threadQuery = (command === "metrics" && parseMetricsCommand(input.trim()).view === "session")
+      || (command === "mcp" && input.trim() !== "reload")
+      || (command === "goal" && this.conversations.status(target).threadId !== undefined)
+      ? { threadId: this.conversations.status(target).threadId }
+      : undefined;
+    const assertQueryThread = (): void => {
+      // Goal may prepare the first Thread. Pin it as soon as the shared
+      // preparation invokes the final guard, before its RPC can be submitted.
+      if (command === "goal" && !threadQuery) {
+        const threadId = this.conversations.status(target).threadId;
+        if (threadId !== undefined) threadQuery = { threadId };
+      }
+      if (threadQuery && this.conversations.status(target).threadId !== threadQuery.threadId) {
+        throw new UserFacingError("command.authorization-changed", command === "metrics"
+          ? "指标查询对应的会话已变化，请重新查询。"
+          : command === "mcp" ? "MCP 查询对应的会话已变化，请重新查询。"
+          : "Goal 操作对应的会话已变化，请重新查询。");
+      }
+    };
+    const assertAuthorized = () => { assertActive(); guard(); assertQueryThread(); };
+    const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, captureSubmission, captureQueueOrigin);
     try {
+      assertActive();
       if (command === "workspace" && input.trim()) this.authorize(target, actorId);
       else assertAuthorized();
+      if (captureReplyAuthorization) {
+        const replyGuard = this.commandGuard(target, actorId, command === "workspace");
+        const hasWorkspace = this.conversations.listWorkspaces().some(workspace =>
+          workspace.id === this.conversations.selectedWorkspaceId(target));
+        const replyThread = hasWorkspace ? this.conversations.status(target).threadId : undefined;
+        captureReplyAuthorization(() => {
+          assertActive(); replyGuard(); assertQueryThread();
+          if (hasWorkspace && this.conversations.status(target).threadId !== replyThread) {
+            throw new UserFacingError("command.authorization-changed", "命令回复对应的会话已变化");
+          }
+        });
+      }
     } catch (error) {
       if (result.kind === "scheduled-confirmation") this.scheduledTasks?.cancelConfirmation(result.preview.token);
       throw error;
@@ -433,12 +481,14 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     input: string,
     actorId: string,
     assertAuthorized: () => void,
+    captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
+    captureQueueOrigin?: (origin: ThreadQueueSubmissionOrigin) => void,
   ): Promise<ConversationCommandResult> {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
     switch (command) {
       case "hooks":
-        return { kind: "hooks", view: await this.conversations.hooks(target, argumentsText, actorId) };
+        return { kind: "hooks", view: await this.conversations.hooks(target, argumentsText, actorId, assertAuthorized) };
       case "autoreview": {
         if (!argumentsText) return { kind: "auto-review", state: this.conversations.autoReview(target) };
         if (argumentsText !== "on" && argumentsText !== "off") {
@@ -574,7 +624,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "queue":
-        return this.executeQueueCommand(target, argumentsText, assertAuthorized);
+        return this.executeQueueCommand(target, argumentsText, assertAuthorized, captureQueueOrigin);
       case "revert":
         return this.executeRevertCommand(target, argumentsText, actorId, assertAuthorized);
       case "rename":
@@ -597,11 +647,12 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "review": {
-        const submission = await this.conversations.review(
+        const reviewTarget = parseReviewTarget(argumentsText);
+        const submission = await this.submitCommand(() => this.conversations.review(
           target,
-          parseReviewTarget(argumentsText),
+          reviewTarget,
           assertAuthorized,
-        );
+        ), captureSubmission);
         return {
           kind: "outcome",
           outcome: { type: "review.started", turnId: submission.turnId },
@@ -673,12 +724,12 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           };
         }
         const invocation = parseSkillInvocation(argumentsText);
-        const submission = await this.conversations.invokeSkill(
+        const submission = await this.submitCommand(() => this.conversations.invokeSkill(
           target,
           invocation.selector,
           invocation.task,
           assertAuthorized,
-        );
+        ), captureSubmission);
         return {
           kind: "outcome",
           outcome: {
@@ -697,12 +748,12 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           };
         }
         const invocation = parseAgentInvocation(argumentsText);
-        const submission = await this.conversations.invokeAgent(
+        const submission = await this.submitCommand(() => this.conversations.invokeAgent(
           target,
           invocation.selector,
           invocation.task,
           assertAuthorized,
-        );
+        ), captureSubmission);
         return {
           kind: "outcome",
           outcome: {
@@ -716,7 +767,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "mcp":
         return this.executeMcpCommand(target, argumentsText, assertAuthorized);
       case "plugin":
-        return this.executePluginCommand(target, argumentsText, assertAuthorized);
+        return this.executePluginCommand(target, argumentsText, assertAuthorized, captureSubmission);
       case "usage":
         return {
           kind: "usage",
@@ -733,7 +784,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "limits":
         if (argumentsText) {
           if (!this.resetCredits) throw new UserFacingError("reset-credit.failed", "重置券功能不可用", { reason: "reset_unavailable" });
-          return { kind: "reset-credit", result: await this.resetCredits.execute(target, actorId, argumentsText) };
+          return { kind: "reset-credit", result: await this.resetCredits.execute(target, actorId, argumentsText, assertAuthorized) };
         }
         return {
           kind: "limits",
@@ -759,7 +810,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "plan":
         if (argumentsText) {
-          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized);
+          const submission = await this.submitCommand(() => this.conversations.startPlan(target, argumentsText, assertAuthorized), captureSubmission);
           return {
             kind: "outcome",
             outcome: { type: "plan.started", turnId: submission.turnId },
@@ -798,6 +849,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     target: ConversationTarget,
     input: string,
     assertAuthorized: () => void,
+    captureOrigin?: (origin: ThreadQueueSubmissionOrigin) => void,
   ): Promise<ConversationCommandResult> {
     const operation = parseThreadQueueOperation(input);
     if (operation.type === "list") {
@@ -811,7 +863,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         kind: "outcome",
         outcome: {
           type: "thread-queue.added",
-          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized),
+          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized, captureOrigin),
         },
       };
     }
@@ -951,6 +1003,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     target: ConversationTarget,
     input: string,
     assertAuthorized?: () => void,
+    captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
   ): Promise<ConversationCommandResult> {
     const operation = parsePluginOperation(input);
     if (operation.type === "list") {
@@ -969,12 +1022,12 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         plugin: await this.conversations.pluginDetail(target, operation.selector, assertAuthorized),
       };
     }
-    const submission = await this.conversations.invokePlugin(
+    const submission = await this.submitCommand(() => this.conversations.invokePlugin(
       target,
       operation.selector,
       operation.task,
       assertAuthorized,
-    );
+    ), captureSubmission);
     return {
       kind: "outcome",
       outcome: {
@@ -984,6 +1037,19 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         steered: submission.steered,
       },
     };
+  }
+
+  private async submitCommand<T extends Submission>(operation: () => Promise<T>,
+    captureSubmission?: (submission: Promise<Submission>) => Promise<void>): Promise<T> {
+    // Register before the use case can emit early output or approval requests. Capture only
+    // actual submission work, never a catalog query or the command's queued platform reply.
+    const submission = Promise.resolve().then(operation);
+    const association = (async () => { await captureSubmission?.(submission); })();
+    // A broken observer must still consume and settle a request which may already have run.
+    const [submitted, associated] = await Promise.allSettled([submission, association] as const);
+    if (submitted.status === "rejected") throw submitted.reason;
+    if (associated.status === "rejected") throw associated.reason;
+    return submitted.value;
   }
 
   private async executeScheduledTaskCommand(
@@ -1100,25 +1166,20 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     input: string,
     assertAuthorized?: () => void,
   ): Promise<ConversationCommandResult> {
-    if (input === "clear") {
+    const command = parseGoalCommand(input);
+    if (command.kind === "clear") {
       await this.conversations.clearGoal(target, assertAuthorized);
       return {
         kind: "outcome",
         outcome: { type: "goal.cleared" },
       };
     }
-    if (input.startsWith("set ")) {
-      const goal = await this.conversations.setGoal(target, input.slice(4), assertAuthorized);
+    if (command.kind === "set") {
+      const goal = await this.conversations.setGoal(target, command.objective, assertAuthorized);
       return {
         kind: "outcome",
         outcome: { type: "goal.updated", goal },
       };
-    }
-    if (input) {
-      throw new UserFacingError(
-        "goal.usage",
-        "Goal 参数无效",
-      );
     }
     const goal = await this.conversations.getGoal(target, assertAuthorized);
     return { kind: "goal", goal };

@@ -28,12 +28,13 @@ const maximumThreadUsageGroups = 8;
 export function formatConversationModels(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
   formatCommand: (command: string) => string = (command) => command,
+  field: (value: string) => string = value => value,
 ): string {
   const { state } = result;
   const current = state.models.find((model) =>
     model.available !== false && model.model === state.model
     && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
-  const speed = `速度：${formatServiceTierSetting(state, current)}`;
+  const speed = `速度：${field(formatServiceTierSetting(state, current))}`;
   const effortName = reasoningEffortSettingName(state.effort, current);
   const providerSwitchNotice = state.providerPending
     ? ["提供商切换将在下一条消息中创建新 Session；当前 Session 会保留，可通过 /resume 恢复。", ""]
@@ -45,7 +46,7 @@ export function formatConversationModels(
       );
   if (result.view === "fast") {
     return toStructuredMarkdownList([
-      formatModelStateLine(state),
+      field(formatModelStateLine(state)),
       speed,
       `模型支持：${formatModelSpeedSupport(current)}`,
       "",
@@ -54,20 +55,20 @@ export function formatConversationModels(
   }
   if (result.view === "effort") {
     return toStructuredMarkdownList([
-      formatModelStateLine(state),
-      `当前${effortName}：${formatReasoningEffort(state.effort ?? current?.defaultReasoningEffort)}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
+      field(formatModelStateLine(state)),
+      `当前${effortName}：${field(formatReasoningEffort(state.effort ?? current?.defaultReasoningEffort))}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
       speed,
       "",
       ...providerSwitchNotice,
       ...(result.nextSelection === "effort"
         ? [`模型已选择，请继续选择${effortName}。`, ""]
         : []),
-      ...formatCurrentModelNotices(current),
+      ...formatCurrentModelNotices(current).map(field),
       "",
       `可用${effortName}：`,
       ...(current?.supportedReasoningEfforts ?? []).map(
         (option, index) =>
-          `${index + 1}. ${formatReasoningEffort(option.effort)}${option.effort === state.effort ? " ← 当前" : ""} · ${option.description}`,
+          `${index + 1}. ${field(formatReasoningEffort(option.effort))}${option.effort === state.effort ? " ← 当前" : ""} · ${field(option.description)}`,
       ),
       "",
       "切换：/effort <序号或档位>",
@@ -76,7 +77,7 @@ export function formatConversationModels(
   const providers = listProviders(state.models);
   if (providers.length === 0) {
     return toStructuredMarkdownList([
-      formatModelStateLine(state),
+      field(formatModelStateLine(state)),
       speed,
       "当前没有可选模型。请检查账户配置与订阅状态；续订后可在 WebUI 或当前账户的 /usage 刷新。",
     ].join("\n"));
@@ -84,32 +85,33 @@ export function formatConversationModels(
   if (state.providerFilter === undefined && providers.length > 1) {
     const currentProvider = state.modelProvider;
     return toStructuredMarkdownList([
-      formatModelStateLine(state),
-      `${effortName}：${formatReasoningEffort(state.effort)}`,
+      field(formatModelStateLine(state)),
+      `${effortName}：${field(formatReasoningEffort(state.effort))}`,
       speed,
       "",
-      `当前 Provider：${currentProvider === undefined ? "待选择" : formatCodexProviderLabel(currentProvider)}`,
+      `当前 Provider：${currentProvider === undefined ? "待选择" : field(formatCodexProviderLabel(currentProvider))}`,
       "提供商列表：",
       ...providers.map((provider, index) =>
-        `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${formatProviderModelSummary(state.models, provider)}`,
+        `${index + 1}. ${field(formatCodexProviderLabel(provider))}${provider === currentProvider ? " ← 当前" : ""} · ${field(formatProviderModelSummary(state.models, provider))}`,
       ),
       "",
       "下一步：/model <提供商序号>",
     ].join("\n"));
   }
   return toStructuredMarkdownList([
-    formatModelStateLine(state),
-    `${effortName}：${formatReasoningEffort(state.effort)}`,
+    field(formatModelStateLine(state)),
+    `${effortName}：${field(formatReasoningEffort(state.effort))}`,
     speed,
-    ...formatCurrentModelNotices(current),
+    ...formatCurrentModelNotices(current).map(field),
     "",
     ...providerSwitchNotice,
-    `当前 Provider：${formatCodexProviderLabel(state.providerFilter ?? state.modelProvider ?? providers[0])}`,
+    `当前 Provider：${field(formatCodexProviderLabel(state.providerFilter ?? state.modelProvider ?? providers[0]))}`,
     `模型列表（${scopedModels.length}）：`,
     ...scopedModels.map((model, index) => {
       // 列表项使用提供商与原目录名称，统计分组不参与模型选择。
       const entry = modelListEntry(model.displayName, model.provider, model.model);
-      return `${index + 1}. ${entry.name}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`;
+      const upgrade = formatModelUpgradeBadge(model);
+      return `${index + 1}. ${field(entry.name)}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${field(model.unavailableReason)}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${upgrade ? field(upgrade) : ""}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`;
     }),
     "",
     "切换：/model <模型序号>",
@@ -179,35 +181,36 @@ function formatModelStateLine(
 
 export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
+  field: (value: string) => string = value => value,
 ): string {
   if (result.result.kind === "subscription-required") {
-    return `${formatCodexProviderLabel(result.result.provider)} 无有效订阅，可能已到期或尚未开通。请检查订阅状态；续订后可重新执行 /usage 查询。`;
+    return `${field(formatCodexProviderLabel(result.result.provider))} 无有效订阅，可能已到期或尚未开通。请检查订阅状态；续订后可重新执行 /usage 查询。`;
   }
   if (result.result.kind === "unsupported") {
-    return `${formatCodexProviderLabel(result.result.provider)} 仅提供模型请求，不提供账户余额/额度查询。请求次数与 Token 可通过 /metrics 查看。`;
+    return `${field(formatCodexProviderLabel(result.result.provider))} 仅提供模型请求，不提供账户余额/额度查询。请求次数与 Token 可通过 /metrics 查看。`;
   }
   if (result.result.kind === "balance") {
     return toStructuredMarkdownList([
-      `${formatCodexProviderLabel(result.result.provider)} 账户余额：`,
+      `${field(formatCodexProviderLabel(result.result.provider))} 账户余额：`,
       formatTimezoneLine(),
       `API 可用：${result.result.available ? "是" : "否"}`,
       ...(result.result.balances.length === 0
         ? ["暂无余额信息"]
         : result.result.balances.flatMap((balance) => [
             "",
-            `${balance.currency}：`,
-            `总余额：${balance.totalBalance}`,
-            `赠金余额：${balance.grantedBalance}`,
-            `充值余额：${balance.toppedUpBalance}`,
+            `${field(balance.currency)}：`,
+            `总余额：${field(balance.totalBalance)}`,
+            `赠金余额：${field(balance.grantedBalance)}`,
+            `充值余额：${field(balance.toppedUpBalance)}`,
         ])),
     ].join("\n"));
   }
   if (result.result.kind === "credit-usage") {
     return toStructuredMarkdownList([
-      `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,
+      `${field(formatCodexProviderLabel(result.result.provider))} 账户用量：`,
       formatTimezoneLine(),
       `API 可用：${result.result.available ? "是" : "否"}`,
-      `计划：${result.result.planId ?? "未知"}`,
+      `计划：${field(result.result.planId ?? "未知")}`,
       `剩余额度：$${result.result.totalRemaining}`,
       `月度额度：$${result.result.monthlyRemaining}`,
       `额外充值：$${result.result.purchasedRemaining}`,
@@ -215,12 +218,12 @@ export function formatConversationUsage(
       ...(result.result.windows.length === 0
         ? []
         : result.result.windows.map((window) =>
-            `- ${window.label}：${formatRemainingRateLimitWindow({ ...window, windowDurationMins: null })}`)),
+            `- ${field(window.label)}：${formatRemainingRateLimitWindow({ ...window, windowDurationMins: null })}`)),
     ].join("\n"));
   }
   if (result.result.kind === "quota-windows") {
     return toStructuredMarkdownList([
-      `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,
+      `${field(formatCodexProviderLabel(result.result.provider))} 账户用量：`,
       formatTimezoneLine(),
       `API 可用：${result.result.available ? "是" : "否"}`,
       ...(result.result.windows.length === 0
@@ -230,7 +233,7 @@ export function formatConversationUsage(
               || window.localTokens === null
               ? ""
               : `\n  - 本地 Token 约 ${formatTokenCount(window.localTokens)}`;
-            return `- ${window.label}：${formatRemainingRateLimitWindow({ ...window, windowDurationMins: null })}${localTokens}`;
+            return `- ${field(window.label)}：${formatRemainingRateLimitWindow({ ...window, windowDurationMins: null })}${localTokens}`;
           })),
     ].join("\n"));
   }
@@ -250,16 +253,17 @@ export function formatConversationUsage(
     ...(daily.length === 0
       ? ["暂无每日数据"]
       : daily.map(
-          (entry) => `- ${entry.startDate}：${formatUsageTokens(entry.tokens)}`,
+          (entry) => `- ${field(entry.startDate)}：${formatUsageTokens(entry.tokens)}`,
         )),
   ];
-  appendThreadUsage(lines, result.result.threadUsage);
+  appendThreadUsage(lines, result.result.threadUsage, field);
   return toStructuredMarkdownList(lines.join("\n"));
 }
 
 function appendThreadUsage(
   lines: string[],
   threadUsage: AccountThreadUsage | undefined,
+  field: (value: string) => string,
 ): void {
   if (!threadUsage) {
     return;
@@ -286,7 +290,7 @@ function appendThreadUsage(
   const visibleGroups = threadUsage.groups.slice(0, maximumThreadUsageGroups);
   lines.push(
     ...visibleGroups.map((group) =>
-      `${group.model === null ? "其他" : group.model} · ${formatReasoningEffort(group.reasoningEffort, "其他")} · ${group.speed ?? "其他"}`
+      `${group.model === null ? "其他" : field(group.model)} · ${field(formatReasoningEffort(group.reasoningEffort, "其他"))} · ${field(group.speed ?? "其他")}`
       + `：${formatMicros(group.estimatedUsageCreditsMicros)} Credits`),
   );
   if (threadUsage.groups.length > visibleGroups.length) {
@@ -343,9 +347,10 @@ function formatMicros(value: AccountMetric): string {
 
 export function formatConversationLimits(
   result: Extract<ConversationCommandResult, { kind: "limits" }>,
+  field: (value: string) => string = value => value,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatCodexProviderLabel(result.result.provider)} 仅提供模型请求，不提供账户限额查询。请求统计可通过 /metrics 查看。`;
+    return `${field(formatCodexProviderLabel(result.result.provider))} 仅提供模型请求，不提供账户限额查询。请求统计可通过 /metrics 查看。`;
   }
   const planType = result.result.limits.limits.find(
     (limit) => limit.planType,
@@ -359,11 +364,11 @@ export function formatConversationLimits(
     "OpenAI Codex 额度：",
     formatTimezoneLine(),
     `当前时间：${formatResetTime(Date.now() / 1_000, true)}`,
-    `套餐：${planType ? formatPlanType(planType) : "未知"}`,
+    `套餐：${planType ? field(formatPlanType(planType)) : "未知"}`,
     `凭证刷新时间：${result.result.credentialRefreshedAt == null ? "未提供" : formatResetTime(result.result.credentialRefreshedAt, true)}`,
     ...result.result.limits.limits.flatMap((limit) => [
       "",
-      `${limit.limitName ?? limit.limitId}：`,
+      `${field(limit.limitName ?? limit.limitId)}：`,
       formatRateLimitWindow(limit.primary),
       ...(limit.secondary
         ? [formatRateLimitWindow(limit.secondary)]
@@ -372,7 +377,7 @@ export function formatConversationLimits(
         ? [`Credits：${limit.credits.unlimited
           ? "无限"
           : limit.credits.hasCredits
-            ? `余额 ${limit.credits.balance ?? "未知"}`
+            ? `余额 ${field(limit.credits.balance ?? "未知")}`
             : "无可用 Credits"}`]
         : []),
       ...(limit.individualLimit

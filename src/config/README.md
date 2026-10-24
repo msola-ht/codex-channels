@@ -29,9 +29,9 @@ Gateway，以刷新进程时区或渠道启动卡配置。
 允许名单，也不处理未知字段或不受支持的版本。运行语义校验失败、文件发生并发修改或原子写回失败时
 不得修改原配置，并以配置错误失败关闭。
 
-Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bot_token` 缺失或空白时运行配置
+Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺失；`bot_token` 缺失或空白时运行配置
 将其视为未启用，不创建 Telegram Surface，也不要求允许用户列表。Token 非空时
-`allowed_user_ids` 必须至少包含一个正整数。飞书和微信继续以各自的 `enabled` 字段决定是否启用。
+`allowed_user_ids` 必须至少包含一个正整数。飞书、微信和 QQ 以各自的 `enabled` 字段决定是否启用。
 
 共享代理由 Codex Home 的 `.env` 统一保存，供 Telegram、飞书、微信和模型统计代理共用，按 `.env`、标准代理环境变量、受支持系统代理的
 顺序合并；系统自动发现当前只支持 macOS 和 GNOME，Windows 不读取 WinINET/WinHTTP，需使用 `.env`
@@ -120,3 +120,12 @@ Gateway 设置，并提供不显示凭据、令牌或代理值的配置总览。
 位于独立安全凭据后端。整表缺失或 `enabled = false` 时运行配置不包含微信账号；显式启用后
 账号或启用状态变化需要重启 Gateway；允许用户新增可热加载，允许名单收窄需要重启 Gateway，
 并在重新组合 Surface 时清理被撤权 Actor 的绑定和 App Server 订阅。
+
+QQ 首版严格配置只支持 `enabled`、数字字符串 `app_id`、`app_secret` 和
+`allowed_user_openids`；传输固定为 WebSocket 单聊。整表缺失或 `enabled = false` 时运行配置
+不包含 QQ 账号，禁用表可省略其余三项；启用时三项必须齐全。允许名单可为空，此时不授权任何用户，
+但不得包含重复项、空项、空白或误用的逗号/分号分隔符。运行配置投影为 `qq.appId`、
+`qq.appSecret` 与 `qq.allowedUserOpenIds`，不补入账号、凭据或允许名单默认值。启停、AppID 或
+AppSecret 变化需要重启 Gateway；允许用户纯新增可热加载，收缩需要重启，并由重新组合 Surface
+清理已撤权 Actor 的绑定与在途交互。Setup 扫码和手工输入均写入同一私有配置合同，不增加凭据来源字段；
+Webhook、群聊和多账号配置不在当前 Schema 中。

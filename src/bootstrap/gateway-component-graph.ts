@@ -126,7 +126,7 @@ import {
   metricsWorkerFailureMetadata,
   modelRequestMetricsDatabasePath,
 } from "../observability/index.js";
-import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy } from "../policy/index.js";
+import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy, QqAccessPolicy } from "../policy/index.js";
 import {
   SessionRouter,
   ThreadStateSynchronizer,
@@ -137,6 +137,7 @@ import {
 } from "../storage/index.js";
 import {
   canReviewConversationHook,
+  canReviewQqConversationHook,
   canPreserveWeixinHookReviewText,
   formatProviderIdleReleaseNotice,
   type SurfaceAdapter,
@@ -844,6 +845,7 @@ export abstract class GatewayComponentGraph {
       },
       (surface, hook) => {
         if (surface === "weixin") return canReviewConversationHook(hook, canPreserveWeixinHookReviewText);
+        if (surface === "qq") return canReviewQqConversationHook(hook);
         if (surface === "feishu" || surface === "telegram") return canReviewConversationHook(hook, () => true);
         return false;
       },
@@ -1038,7 +1040,7 @@ export abstract class GatewayComponentGraph {
           core: this.core,
           output: this.output,
           logger,
-          isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
+          isSurfaceEnabled: (target) => target.surface !== "qq" && this.surfaces.some((surface) =>
             surface.surface === target.surface && surface.accountId === target.accountId),
           isActorAuthorized: (target, actorId) =>
             this.accessPolicy(target)?.isAllowed({ target, actorId }) === true,
@@ -1087,6 +1089,18 @@ export abstract class GatewayComponentGraph {
     });
     const constructedSurfaces = new Set<SurfaceAdapter>();
     this.surfaceModules = createSurfaceModules({
+      captureLiveOutputAuthorization: event => {
+        const owner = this.outputOwner(event);
+        return () => {
+          if (!("threadId" in event) || typeof event.threadId !== "string") return false;
+          const binding = this.bindings.getByThread(event.threadId);
+          return binding !== undefined
+            && binding.target.surface === event.target.surface
+            && binding.target.accountId === event.target.accountId
+            && binding.target.conversationId === event.target.conversationId
+            && this.outputAuthorized(event, owner);
+        };
+      },
       config,
       service,
       commands,
@@ -1123,6 +1137,9 @@ export abstract class GatewayComponentGraph {
           directory: join(dirname(config.stateDatabasePath), "delivery-outbox"),
           workerUrl: new URL(import.meta.url.endsWith(".ts") ? "../../dist/delivery/worker.js" : "../delivery/worker.js", import.meta.url),
           owner: (event) => this.outputOwner(event),
+          // QQ can reserve four ordinary messages and wait at every actual HTTP boundary.
+          // 65s + 4*(65s + 15s token + 15s HTTP) + 15s upload fits within 480s.
+          deliveryTimeoutMs: event => event.target.surface === "qq" ? 480_000 : 60_000,
           authorized: (event, owner) => this.outputAuthorized(event, owner),
           fault: (code, account, persistentDeliveryId, failure) => {
             logger.error({ code, account, persistentDeliveryId, ...(failure ? { deliveryFailure: failure } : {}) }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
@@ -1219,8 +1236,8 @@ export abstract class GatewayComponentGraph {
     this.channelImageSpool = new ChannelImageSpool({
       directory: join(dirname(config.stateDatabasePath), "channel-outbox"),
       resolveTarget: (threadId) => this.router.targetForThread(threadId),
-      sendImage: (target, imagePath) =>
-        this.surfaceManager.sendChannelImage(target, imagePath),
+      sendImage: (target, imagePath, source) =>
+        this.surfaceManager.sendChannelImage(target, imagePath, source),
       logger,
     });
     for (const surface of this.surfaces) {
@@ -1989,6 +2006,8 @@ export abstract class GatewayComponentGraph {
       ? new FeishuAccessPolicy(this.config.feishu.allowedOpenIds, this.config.feishu.appId)
       : target.surface === "weixin" && this.config.weixin
       ? new WeixinAccessPolicy(this.config.weixin.allowedUserIds, this.config.weixin.accountId)
+      : target.surface === "qq" && this.config.qq
+      ? new QqAccessPolicy(this.config.qq.allowedUserOpenIds, this.config.qq.appId)
       : undefined;
   }
 
@@ -2406,6 +2425,8 @@ function surfaceLabel(surface: string): string {
       return "飞书";
     case "weixin":
       return "微信";
+    case "qq":
+      return "QQ";
     default:
       return "其他渠道";
   }

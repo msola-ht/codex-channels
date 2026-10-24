@@ -77,6 +77,7 @@ import type {
 import type {
   ThreadQueueItem,
   ThreadQueuePort,
+  ThreadQueueSubmissionOrigin,
 } from "./thread-queue-port.js";
 import type {
   ThreadHistoryPort,
@@ -234,7 +235,7 @@ export interface PreparedAttachmentSubmission {
 
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
-  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio"): PreparedAttachmentSubmission;
+  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio" | "image"): PreparedAttachmentSubmission;
   submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean): Promise<Submission>;
   stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean>;
   rename(target: ConversationTarget, name: string, assertAuthorized?: () => void): Promise<void>;
@@ -251,7 +252,7 @@ export interface ConversationTurnUseCases {
 
 /** Stable model and installed-extension boundary. */
 export interface ConversationExtensionUseCases {
-  hooks(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView>;
+  hooks(target: ConversationTarget, input: string, actorId?: string, assertAuthorized?: () => void): Promise<HookCommandView>;
   invokeSkill(
     target: ConversationTarget,
     selector: string,
@@ -299,7 +300,8 @@ export interface ConversationExtensionUseCases {
 
 /** Stable native Queue and paginated Revert boundary. */
 export interface ConversationQueueRevertUseCases {
-  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem>;
+  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void,
+    captureOrigin?: (origin: ThreadQueueSubmissionOrigin) => void): Promise<ThreadQueueItem>;
   queueList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadQueueListResult>;
   queueUpdate(
     target: ConversationTarget,
@@ -655,7 +657,7 @@ export class ConversationService implements
     this.extensionQueries.closeMcpLogins();
   }
 
-  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" = "video"): PreparedAttachmentSubmission {
+  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" | "image" = "video"): PreparedAttachmentSubmission {
     const key = conversationTargetKey(target);
     const pending = this.attachmentInputs.get(key) ?? new Set<AbortController>();
     if (!isAllowed() || pending.size >= 4 || (!this.attachmentInputs.has(key) && this.attachmentInputs.size >= 1000)) {
@@ -955,8 +957,9 @@ export class ConversationService implements
     return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized);
   }
 
-  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem> {
-    return this.queueUseCases.add(target, value, assertAuthorized);
+  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void,
+    captureOrigin?: (origin: ThreadQueueSubmissionOrigin) => void): Promise<ThreadQueueItem> {
+    return this.queueUseCases.add(target, value, assertAuthorized, captureOrigin);
   }
 
   queueList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadQueueListResult> {
@@ -1507,8 +1510,8 @@ export class ConversationService implements
     return this.extensionQueries.modelState(target, assertAuthorized);
   }
 
-  hooks(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView> {
-    return this.hookUseCases.execute(target, input, actorId);
+  hooks(target: ConversationTarget, input: string, actorId?: string, assertAuthorized?: () => void): Promise<HookCommandView> {
+    return this.hookUseCases.execute(target, input, actorId, assertAuthorized);
   }
 
   clearModelBrowse(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
@@ -1645,7 +1648,9 @@ export class ConversationService implements
   getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null> {
     return this.authorizedLocked(target, assertAuthorized, async () => {
       const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized);
-      return this.codex.getGoal(binding.threadId, beforeSubmit);
+      const goal = await this.codex.getGoal(binding.threadId, beforeSubmit);
+      beforeSubmit();
+      return goal;
     });
   }
 
@@ -1674,6 +1679,7 @@ export class ConversationService implements
         type: "thread.goal.cleared",
         threadId: binding.threadId,
       });
+      beforeSubmit();
     });
   }
 

@@ -1,0 +1,459 @@
+import { setTimeout as delay } from "node:timers/promises";
+
+const API_ORIGIN = "https://api.bot.qq.com";
+const REQUEST_TIMEOUT_MS = 15_000;
+const MAX_RESPONSE_BYTES = 64 * 1024;
+
+export type QqProtocolOperation = "token" | "gateway" | "upload" | "send";
+export const maximumQqImageBytes = 3 * 1024 * 1024;
+export const maximumQqTextFileBytes = 1_000_000;
+/** Local bound for the complete Markdown body of one replace frame. */
+export const maximumQqStreamBytes = 12_000;
+export const qqCompleteContentFileName = "codex-complete-result.txt";
+export type QqProtocolFailure =
+  | "invalid-input" | "closed" | "cancelled" | "timeout" | "network"
+  | "http" | "business" | "invalid-response" | "response-too-large";
+
+/** Contains local classifications only; upstream text and credentials never escape. */
+export class QqProtocolError extends Error {
+  constructor(
+    readonly operation: QqProtocolOperation,
+    readonly reason: QqProtocolFailure,
+    readonly httpStatus?: number,
+    readonly bizCode?: number,
+    readonly traceId?: string,
+  ) {
+    super(`QQ ${operation}: ${reason}`);
+    this.name = "QqProtocolError";
+  }
+}
+
+/** Only one content representation is permitted by the C2C message endpoint. */
+export type QqMessageBody =
+  | { kind: "text"; content: string }
+  | { kind: "markdown"; content: string };
+
+type QqOutgoingMessage = QqMessageBody | { kind: "image"; fileInfo: string } | { kind: "file"; fileInfo: string };
+
+export type QqSendMode = { mode: "active" } | { mode: "passive"; msgId: string; msgSeq: number };
+
+export type QqSendMessageInput = QqSendMode & {
+  userOpenid: string;
+  message: QqOutgoingMessage;
+  signal?: AbortSignal;
+  /** After each rate wait, await prepareRequest with the gate's bounded signal before persisting HTTP-time accounting. */
+  beforeSend?: (prepareRequest: (signal: AbortSignal) => Promise<void>) => void | Promise<void>;
+};
+
+export interface QqStreamMessageInput {
+  userOpenid: string;
+  msgId: string;
+  msgSeq: number;
+  index: number;
+  streamMessageId?: string;
+  /** Complete current Markdown body, including the previously confirmed prefix. */
+  text: string;
+  finished: boolean;
+  signal: AbortSignal;
+  beforeSend(): void;
+}
+
+/** Explicit format refusals only; an unknown send outcome must never cause fallback. */
+export function isQqMarkdownFormatRejection(error: unknown): boolean {
+  return error instanceof QqProtocolError && error.operation === "send"
+    && ((error.reason === "http" && error.httpStatus === 400)
+      || (error.reason === "business" && error.httpStatus === 200))
+    && (error.bizCode === 40034011 || error.bizCode === 40034124);
+}
+
+export interface QqProtocolClientOptions {
+  appId: string;
+  appSecret: string;
+  fetchImpl: typeof fetch;
+}
+
+/** One immutable account/credential generation. Replace the client on configuration changes. */
+export class QqProtocolClient {
+  private readonly lifetime = new AbortController();
+  private cachedToken: { value: string; expiresAt: number } | undefined;
+  private tokenFlight: Promise<string> | undefined;
+  private generation = 0;
+  private streamGate = Promise.resolve();
+  private nextStreamRequest = 0;
+  private readonly appId: string;
+  private readonly appSecret: string;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(options: QqProtocolClientOptions) {
+    if (!/^[0-9]+$/u.test(options.appId)
+      || options.appSecret.length === 0 || /\s/u.test(options.appSecret)
+      || [...options.appSecret].some((character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return code <= 31 || code === 127;
+      })) {
+      throw new QqProtocolError("token", "invalid-input");
+    }
+    this.appId = options.appId;
+    this.appSecret = options.appSecret;
+    this.fetchImpl = options.fetchImpl;
+  }
+
+  close(): void {
+    this.generation++;
+    this.cachedToken = undefined;
+    this.lifetime.abort();
+  }
+
+  invalidateAccessToken(): void {
+    this.generation++;
+    this.cachedToken = undefined;
+  }
+
+  async getAccessToken(signal?: AbortSignal, minimumRemainingMs = 60_000): Promise<string> {
+    this.ensureOpen("token", signal);
+    const cached = this.cachedToken;
+    if (cached && cached.expiresAt - Date.now() > minimumRemainingMs) return cached.value;
+    if (!this.tokenFlight) {
+      const generation = this.generation;
+      const startedAt = Date.now();
+      const flight = this.requestJson("token", "/app/getAppAccessToken", {
+        appId: this.appId,
+        clientSecret: this.appSecret,
+      }).then((data) => {
+        const expiresIn = typeof data.expires_in === "string"
+          && /^[1-9][0-9]{0,3}$/.test(data.expires_in)
+          ? Number(data.expires_in) : data.expires_in;
+        if (typeof data.access_token !== "string"
+          || !/^[\x21-\x7e]{1,4096}$/.test(data.access_token)
+          || typeof expiresIn !== "number" || !Number.isInteger(expiresIn)
+          || expiresIn <= 0 || expiresIn > 7200) {
+          throw new QqProtocolError("token", "invalid-response");
+        }
+        this.ensureOpen("token");
+        if (generation !== this.generation) {
+          throw new QqProtocolError("token", "cancelled");
+        }
+        this.cachedToken = { value: data.access_token, expiresAt: startedAt + expiresIn * 1000 };
+        return data.access_token;
+      });
+      this.tokenFlight = flight;
+      void flight.finally(() => {
+        if (this.tokenFlight === flight) this.tokenFlight = undefined;
+      }).catch(() => undefined);
+    }
+    // A cancelled caller leaves the bounded, account-owned refresh available to other callers.
+    const token = await abortable(this.tokenFlight, signal, "token");
+    this.ensureOpen("token", signal);
+    if (this.cachedToken?.value !== token || this.cachedToken.expiresAt - Date.now() <= minimumRemainingMs) {
+      throw new QqProtocolError("token", "timeout");
+    }
+    return token;
+  }
+
+  async getGatewayUrl(signal?: AbortSignal): Promise<string> {
+    return await this.withRequest("gateway", signal, async (requestSignal) => {
+      const token = await this.getAccessToken(requestSignal);
+      const data = await this.requestJson("gateway", "/gateway", undefined, requestSignal, token);
+      if (typeof data.url !== "string" || data.url.length > 2048) {
+        throw new QqProtocolError("gateway", "invalid-response");
+      }
+      let url: URL;
+      try { url = new URL(data.url); } catch {
+        throw new QqProtocolError("gateway", "invalid-response");
+      }
+      // Discovery is authenticated against the fixed official API; no caller-supplied endpoint.
+      if (url.protocol !== "wss:" || url.username || url.password || url.hash
+        || (url.port && url.port !== "443")) {
+        throw new QqProtocolError("gateway", "invalid-response");
+      }
+      return url.href;
+    });
+  }
+
+  async sendC2CMessage(input: QqSendMessageInput): Promise<{ messageId: string }> {
+    if (!validId(input.userOpenid) || (input.mode !== "active" && input.mode !== "passive")
+      || input.mode === "passive" && (!validId(input.msgId)
+        || !Number.isSafeInteger(input.msgSeq) || input.msgSeq < 1 || input.msgSeq > 65535)
+      || !record(input.message)
+      || (input.message.kind === "image" || input.message.kind === "file"
+        ? Object.keys(input.message).some(key => key !== "kind" && key !== "fileInfo") || !validFileInfo(input.message.fileInfo)
+        : (input.message.kind !== "text" && input.message.kind !== "markdown")
+          || Object.keys(input.message).some(key => key !== "kind" && key !== "content")
+          || typeof input.message.content !== "string" || input.message.content.trim().length === 0
+          || Buffer.byteLength(input.message.content, "utf8") > 4000)) {
+      throw new QqProtocolError("send", "invalid-input");
+    }
+    // Snapshot the validated payload before token refresh or any other asynchronous work.
+    const path = `/v2/users/${encodeURIComponent(input.userOpenid)}/messages`;
+    const body = {
+      ...(input.message.kind === "image" || input.message.kind === "file" ? { msg_type: 7, media: { file_info: input.message.fileInfo } }
+        : input.message.kind === "text"
+        ? { msg_type: 0, content: input.message.content }
+        : { msg_type: 2, markdown: { content: input.message.content, force_verify_image_resource: true } }),
+      ...(input.mode === "passive" ? { msg_id: input.msgId, msg_seq: input.msgSeq } : {}),
+    };
+    // The platform only refreshes within its final 60 seconds. Reacquire after
+    // each rate wait, before its persisted HTTP-time accounting, instead of
+    // assuming an early refresh can cover the entire 65-second gate.
+    let token = await this.getAccessToken(input.signal, REQUEST_TIMEOUT_MS);
+    const prepareRequest = async (signal: AbortSignal): Promise<void> => {
+      token = await this.getAccessToken(signal, REQUEST_TIMEOUT_MS);
+    };
+    await input.beforeSend?.(prepareRequest);
+    const expiresAt = this.cachedToken?.value === token ? this.cachedToken.expiresAt : 0;
+    if (expiresAt - Date.now() <= REQUEST_TIMEOUT_MS) throw new QqProtocolError("token", "timeout");
+    return await this.withRequest("send", input.signal, async (signal) => {
+      const data = await this.requestJson("send", path, body, signal, token);
+      if (!validId(data.id)) throw new QqProtocolError("send", "invalid-response");
+      return { messageId: data.id };
+    });
+  }
+
+  /** Only the documented passive stream contract is enabled; no wakeup or inferred active stream. */
+  async sendC2CStream(input: QqStreamMessageInput): Promise<{ messageId: string; remainingCharacters?: number }> {
+    if (!validId(input.userOpenid) || !validId(input.msgId)
+      || !Number.isSafeInteger(input.msgSeq) || input.msgSeq < 1 || input.msgSeq > 65535
+      || !Number.isSafeInteger(input.index) || input.index < 0 || input.index > 127
+      || (input.index === 0 ? input.streamMessageId !== undefined : !validId(input.streamMessageId))
+      || typeof input.finished !== "boolean" || typeof input.text !== "string"
+      || input.text.length === 0 || Buffer.byteLength(input.text, "utf8") > maximumQqStreamBytes
+      || Buffer.from(input.text, "utf8").toString("utf8") !== input.text) {
+      throw new QqProtocolError("send", "invalid-input");
+    }
+    const body = { input_mode: "replace", input_state: input.finished ? 10 : 1, index: input.index,
+      content_type: "markdown", content_raw: input.text, msg_id: input.msgId, msg_seq: input.msgSeq,
+      ...(input.streamMessageId ? { stream_msg_id: input.streamMessageId } : {}) };
+    const path = `/v2/users/${encodeURIComponent(input.userOpenid)}/stream_messages`;
+    const expectedMessageId = input.streamMessageId;
+    return this.withRequest("send", input.signal, async signal => {
+      const token = await this.getAccessToken(signal);
+      const gate = this.streamGate.then(async () => {
+        const wait = this.nextStreamRequest - performance.now();
+        if (wait > 0) await delay(Math.ceil(wait), undefined, { signal });
+        this.ensureOpen("send", signal);
+        this.nextStreamRequest = performance.now() + 25;
+      });
+      this.streamGate = gate.catch(() => {});
+      await gate;
+      input.beforeSend();
+      const data = await this.requestJson("send", path, body, signal, token);
+      if (!validId(data.id) || expectedMessageId !== undefined && data.id !== expectedMessageId
+        || data.remain_msg_len !== undefined && (!Number.isSafeInteger(data.remain_msg_len) || Number(data.remain_msg_len) < 0)) {
+        throw new QqProtocolError("send", "invalid-response");
+      }
+      return { messageId: data.id, ...(data.remain_msg_len === undefined ? {} : { remainingCharacters: Number(data.remain_msg_len) }) };
+    });
+  }
+
+  async uploadC2CImage(input: { userOpenid: string; bytes: Buffer; format: "png" | "jpeg";
+    signal: AbortSignal; beforeSend(): void }): Promise<{ fileInfo: string; expiresAt: number }> {
+    if (!validId(input.userOpenid) || !Buffer.isBuffer(input.bytes) || input.bytes.length === 0
+      || input.bytes.length > maximumQqImageBytes || !["png", "jpeg"].includes(input.format)) {
+      throw new QqProtocolError("upload", "invalid-input");
+    }
+    return this.uploadC2CMedia(input, 1, input.format === "png" ? "image.png" : "image.jpg");
+  }
+
+  async uploadC2CFile(input: { userOpenid: string; bytes: Buffer;
+    signal: AbortSignal; beforeSend(): void }): Promise<{ fileInfo: string; expiresAt: number }> {
+    if (!validId(input.userOpenid) || !Buffer.isBuffer(input.bytes) || input.bytes.length === 0
+      || input.bytes.length > maximumQqTextFileBytes) {
+      throw new QqProtocolError("upload", "invalid-input");
+    }
+    const text = input.bytes.toString("utf8");
+    if (!text.trim() || !Buffer.from(text, "utf8").equals(input.bytes)) {
+      throw new QqProtocolError("upload", "invalid-input");
+    }
+    return this.uploadC2CMedia(input, 4, qqCompleteContentFileName);
+  }
+
+  private async uploadC2CMedia(input: { userOpenid: string; bytes: Buffer;
+    signal: AbortSignal; beforeSend(): void }, fileType: 1 | 4, fileName: string): Promise<{ fileInfo: string; expiresAt: number }> {
+    const path = `/v2/users/${encodeURIComponent(input.userOpenid)}/files`;
+    const body = { file_type: fileType, srv_send_msg: false, file_name: fileName,
+      file_data: input.bytes.toString("base64") };
+    const started = performance.now();
+    return this.withRequest("upload", input.signal, async signal => {
+      const token = await this.getAccessToken(signal);
+      input.beforeSend();
+      const data = await this.requestJson("upload", path, body, signal, token);
+      // The API may serialize the unused message ID as an empty string for upload-only requests.
+      if (!validId(data.file_uuid) || !validFileInfo(data.file_info) || typeof data.ttl !== "number"
+        || !Number.isSafeInteger(data.ttl) || data.ttl < 0 || ("id" in data && data.id !== "")) {
+        throw new QqProtocolError("upload", "invalid-response");
+      }
+      const expiresAt = data.ttl === 0 ? Infinity : started + data.ttl * 1000;
+      if (performance.now() >= expiresAt) throw new QqProtocolError("upload", "invalid-response");
+      return { fileInfo: data.file_info, expiresAt };
+    });
+  }
+
+  private ensureOpen(operation: QqProtocolOperation, signal?: AbortSignal): void {
+    if (this.lifetime.signal.aborted) throw new QqProtocolError(operation, "closed");
+    if (signal?.aborted) throw new QqProtocolError(operation, "cancelled");
+  }
+
+  private async withRequest<T>(
+    operation: QqProtocolOperation,
+    signal: AbortSignal | undefined,
+    work: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    this.ensureOpen(operation, signal);
+    const deadline = new AbortController();
+    const timeout = setTimeout(() => deadline.abort(), REQUEST_TIMEOUT_MS);
+    timeout.unref();
+    const combined = AbortSignal.any([this.lifetime.signal, deadline.signal, ...(signal ? [signal] : [])]);
+    try {
+      return await abortable(work(combined), combined, operation);
+    } catch (error) {
+      if (this.lifetime.signal.aborted) throw new QqProtocolError(operation, "closed");
+      if (signal?.aborted) throw new QqProtocolError(operation, "cancelled");
+      if (deadline.signal.aborted) throw new QqProtocolError(operation, "timeout");
+      if (error instanceof QqProtocolError) throw error;
+      throw new QqProtocolError(operation, "network");
+    } finally {
+      clearTimeout(timeout);
+      deadline.abort();
+    }
+  }
+
+  private async requestJson(
+    operation: QqProtocolOperation,
+    path: string,
+    body?: Record<string, unknown>,
+    signal?: AbortSignal,
+    token?: string,
+  ): Promise<Record<string, unknown>> {
+    return await this.withRequest(operation, signal, async (requestSignal) => {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `QQBot ${token}`;
+      const response = await this.fetchImpl(`${API_ORIGIN}${path}`, {
+        method: body ? "POST" : "GET",
+        headers,
+        ...(body ? { body: JSON.stringify(body) } : {}),
+        signal: requestSignal,
+        redirect: "error",
+      });
+      const traceId = safeTraceId(response.headers.get("x-tps-trace-id"));
+      if (response.status !== 200 || response.redirected) {
+        let code: number | undefined;
+        let responseTrace: string | undefined;
+        let conflictingSendResult = false;
+        if (!response.redirected && response.body) {
+          try {
+            const failure: unknown = JSON.parse(await readBody(response, requestSignal, operation));
+            if (record(failure)) {
+              conflictingSendResult = operation === "send" && ("id" in failure
+                || "code" in failure && "err_code" in failure && failure.code !== failure.err_code);
+              const candidate = failure.code ?? failure.err_code;
+              if (typeof candidate === "number" && Number.isSafeInteger(candidate)) code = candidate;
+              responseTrace = safeTraceId(failure.trace_id);
+            }
+          } catch { /* Malformed error bodies never replace the known HTTP failure. */ }
+        } else void response.body?.cancel().catch(() => undefined);
+        if (conflictingSendResult) throw new QqProtocolError(operation, "invalid-response", response.status, undefined, traceId ?? responseTrace);
+        throw new QqProtocolError(operation, "http", response.status, code, traceId ?? responseTrace);
+      }
+      const raw = await readBody(response, requestSignal, operation);
+      let data: unknown;
+      try { data = JSON.parse(raw); } catch {
+        throw new QqProtocolError(operation, "invalid-response", response.status, undefined, traceId);
+      }
+      if (!record(data)) throw new QqProtocolError(operation, "invalid-response", response.status);
+      if (operation === "send" && "code" in data && "err_code" in data && data.code !== data.err_code) {
+        throw new QqProtocolError(operation, "invalid-response", response.status, undefined, traceId);
+      }
+      for (const key of ["code", "err_code"]) {
+        if (!(key in data)) continue;
+        const code = data[key];
+        if (typeof code !== "number" || !Number.isSafeInteger(code)) {
+          throw new QqProtocolError(operation, "invalid-response", response.status, undefined, traceId);
+        }
+        if (code !== 0) {
+          if (operation === "send" && "id" in data) {
+            throw new QqProtocolError(operation, "invalid-response", response.status, undefined, traceId);
+          }
+          throw new QqProtocolError(operation, "business", response.status, code,
+            traceId ?? safeTraceId(data.trace_id));
+        }
+      }
+      requestSignal.throwIfAborted();
+      return data;
+    });
+  }
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validFileInfo(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && Buffer.byteLength(value, "utf8") <= 32_768
+    && !/[\p{Cc}]/u.test(value) && Buffer.from(value, "utf8").toString("utf8") === value;
+}
+
+function validId(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 512
+    || /\s/u.test(value)
+    || [...value].some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code < 32 || (code >= 127 && code <= 159);
+    })) return false;
+  try { encodeURIComponent(value); return true; }
+  catch { return false; }
+}
+
+function safeTraceId(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : undefined;
+}
+
+async function readBody(response: Response, signal: AbortSignal, operation: QqProtocolOperation): Promise<string> {
+  const length = response.headers.get("content-length");
+  if (length !== null && (!/^[0-9]+$/.test(length) || Number(length) > MAX_RESPONSE_BYTES)) {
+    void response.body?.cancel().catch(() => undefined);
+    throw new QqProtocolError(operation, "response-too-large");
+  }
+  if (!response.body) throw new QqProtocolError(operation, "invalid-response");
+  const reader = response.body.getReader();
+  const cancel = () => { void reader.cancel().catch(() => undefined); };
+  signal.addEventListener("abort", cancel, { once: true });
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      signal.throwIfAborted();
+      const chunk = await reader.read();
+      signal.throwIfAborted();
+      if (chunk.done) {
+        try { return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, bytes)); }
+        catch { throw new QqProtocolError(operation, "invalid-response"); }
+      }
+      bytes += chunk.value.byteLength;
+      if (bytes > MAX_RESPONSE_BYTES) {
+        cancel();
+        throw new QqProtocolError(operation, "response-too-large");
+      }
+      chunks.push(chunk.value);
+    }
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    reader.releaseLock();
+  }
+}
+
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined, operation: QqProtocolOperation): Promise<T> {
+  if (!signal) return await promise;
+  if (signal.aborted) {
+    // Work may synchronously abort while creating this promise. Consume its later rejection
+    // even though cancellation must return immediately instead of waiting for that work.
+    void promise.catch(() => {});
+    throw new QqProtocolError(operation, "cancelled");
+  }
+  let abort: () => void = () => {};
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(new QqProtocolError(operation, "cancelled"));
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try { return await Promise.race([promise, cancelled]); }
+  finally { signal.removeEventListener("abort", abort); }
+}
