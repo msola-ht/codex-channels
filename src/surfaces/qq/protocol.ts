@@ -208,8 +208,9 @@ export class QqProtocolClient {
       const token = await this.getAccessToken(signal);
       input.beforeSend();
       const data = await this.requestJson("upload", path, body, signal, token);
+      // The API may serialize the unused message ID as an empty string for upload-only requests.
       if (!validId(data.file_uuid) || !validFileInfo(data.file_info) || typeof data.ttl !== "number"
-        || !Number.isSafeInteger(data.ttl) || data.ttl < 0 || "id" in data) {
+        || !Number.isSafeInteger(data.ttl) || data.ttl < 0 || ("id" in data && data.id !== "")) {
         throw new QqProtocolError("upload", "invalid-response");
       }
       const expiresAt = data.ttl === 0 ? Infinity : started + data.ttl * 1000;

@@ -3,13 +3,15 @@ import { advanceMarkdownFence } from "../markdown-fence.js";
 /** A complete semantic block and its optional QQ representation. Text is never a truncated preview. */
 export interface QqContentBlock { text: string; markdown?: string }
 
-function literal(text: string): QqContentBlock {
+export function renderQqLiteral(text: string): QqContentBlock {
   // QQ's escape/entity behavior is not documented. Unrepresentable literal fields stay text.
   const safe = !/[<>&\\`|*[\]~\p{Cc}]/u.test(text)
     && !/(?:^|[^\p{L}\p{N}])_|_(?:$|[^\p{L}\p{N}])/u.test(text)
     && !/qqbot[-:]/iu.test(text);
   return { text, ...(safe ? { markdown: text } : {}) };
 }
+
+const literal = renderQqLiteral;
 
 /** Read a complete link before interpreting its label; destinations are always literal. */
 function readLink(source: string): { raw: string; image: boolean; label: string; destination: string } | undefined {

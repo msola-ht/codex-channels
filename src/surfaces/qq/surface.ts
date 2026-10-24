@@ -131,6 +131,8 @@ class QqGeneration implements SurfaceAdapter {
   private readonly jobs = new Set<Promise<void>>();
   private readonly generationId = randomUUID();
   private readonly observedMilestones = new Set<"first-input" | "first-submission" | "first-reply">();
+  private readonly unconfirmedContent = new Map<string, number>();
+  private unconfirmedContentOverflowUntil = 0;
   private stopping: Promise<void> | undefined;
   private closed = false;
 
@@ -145,7 +147,9 @@ class QqGeneration implements SurfaceAdapter {
       () => options.logger.warn({ reason: "qq-video-cleanup-failed" }, "QQ 视频暂存清理失败"));
     this.client = new QqProtocolClient({ appId: options.appId, appSecret: options.appSecret, fetchImpl: this.network.fetchImpl });
     this.ledger = createQqLedger(options.directory, options.appId, () => this.fatal(new Error("QQ 传输登记不可用")));
-    this.queue = new ConversationDeliveryQueue(options.logger, { component: "qq", capacity: 32, maximumPendingOperations: 256, errorMetadata: () => ({ reason: "qq-delivery-failed" }) });
+    this.queue = new ConversationDeliveryQueue(options.logger, { component: "qq", capacity: 32, maximumPendingOperations: 256,
+      errorMetadata: error => ({ reason: "qq-delivery-failed", ...(error instanceof QqProtocolError
+        ? { operation: error.operation, protocolReason: error.reason, httpStatus: error.httpStatus, bizCode: error.bizCode } : {}) }) });
     this.interactions = new QqInteractionPort({
       allowed: (target, actor) => target.surface === "qq" && target.accountId === this.accountId && this.allowed(target, actor),
       rejected: reason => this.options.logger.warn({ surface: "qq", accountId: this.accountId,
@@ -180,31 +184,69 @@ class QqGeneration implements SurfaceAdapter {
     this.output = {
       admitLive: event => { this.observeQueueOrigin(event); this.observeRootOrigin(event); },
       handle: () => {},
-      deliver: (event, signal, checkpoint, authorized) => captureDelivery(() => {
-        this.queue.enqueue(event.target.conversationId, async queueSignal => {
-          const combined = AbortSignal.any([signal, queueSignal, this.controller.signal]);
-          combined.throwIfAborted();
-          if (!authorized || !authorized()) throw new Error("QQ 可靠输出缺少有效归属授权");
-          const actor = this.actor(event.target);
-          if (!("threadId" in event) || !("turnId" in event) || typeof event.turnId !== "string") throw new Error("QQ 输出缺少轮次归属");
-          const { threadId, turnId } = event;
-          const grant = await this.waitForTurnGrant(event.target, actor, threadId, turnId, combined);
-          if (!grant) throw new Error("QQ 输出回复来源未确认");
-          const sourceAuthorized = (): boolean => authorized()
-            && this.turnGrant(event.target, actor, threadId, turnId) === grant;
-          if (event.type === "operation.updated" && event.operation.kind === "imageGeneration" && event.operation.status === "completed") {
-            if (event.operation.imagePath !== undefined) {
-              await this.sendGeneratedImage(event.target, actor, grant, event.operation.imagePath, combined, sourceAuthorized);
-            } else {
-              await this.send(event.target, actor, grant, renderQqPanel(generatedImageUnavailableText), combined, sourceAuthorized);
-            }
-            return;
-          }
-          const result = renderQqOutput(event);
-          await this.send(event.target, actor, grant, result, combined, sourceAuthorized);
-        }, true);
-      }, signal, checkpoint, { requireConfirmation: true }),
+      deliver: async (event, signal, checkpoint, authorized) => {
+        const cancelled = (): void => this.markContentUnconfirmed(event, new Error("QQ 正文投递已取消"));
+        signal.addEventListener("abort", cancelled, { once: true });
+        if (signal.aborted) cancelled();
+        try {
+          await captureDelivery(() => {
+            const accepted = this.queue.enqueue(event.target.conversationId, async queueSignal => {
+              try {
+                const combined = AbortSignal.any([signal, queueSignal, this.controller.signal]);
+                combined.throwIfAborted();
+                if (!authorized || !authorized()) throw new Error("QQ 可靠输出缺少有效归属授权");
+                const actor = this.actor(event.target);
+                if (!("threadId" in event) || !("turnId" in event) || typeof event.turnId !== "string") throw new Error("QQ 输出缺少轮次归属");
+                const { threadId, turnId } = event;
+                const grant = await this.waitForTurnGrant(event.target, actor, threadId, turnId, combined);
+                if (!grant) throw new Error("QQ 输出回复来源未确认");
+                const sourceAuthorized = (): boolean => authorized()
+                  && this.turnGrant(event.target, actor, threadId, turnId) === grant;
+                if (event.type === "operation.updated" && event.operation.kind === "imageGeneration" && event.operation.status === "completed") {
+                  if (event.operation.imagePath !== undefined) {
+                    await this.sendGeneratedImage(event.target, actor, grant, event.operation.imagePath, combined, sourceAuthorized);
+                  } else {
+                    await this.send(event.target, actor, grant, renderQqPanel(generatedImageUnavailableText), combined, sourceAuthorized);
+                  }
+                  return;
+                }
+                const contentKey = JSON.stringify([conversationTargetKey(event.target), threadId, turnId]);
+                const now = performance.now();
+                for (const [key, deadline] of this.unconfirmedContent) if (deadline <= now) this.unconfirmedContent.delete(key);
+                // An overflow loses exact attribution. Retain completion for reconciliation instead
+                // of attributing another Turn's failure to this one.
+                if (event.type === "turn.completed" && this.unconfirmedContentOverflowUntil > now) {
+                  throw new Error("QQ 正文交付状态跟踪已达容量，完成信息保留待核对");
+                }
+                const result = renderQqOutput(event, this.unconfirmedContent.has(contentKey));
+                await this.send(event.target, actor, grant, result, combined, sourceAuthorized);
+              } catch (error) {
+                this.markContentUnconfirmed(event, error);
+                throw error;
+              }
+            }, true);
+            if (!accepted) this.markContentUnconfirmed(event, new Error("QQ 正文未入队"));
+          }, signal, checkpoint, { requireConfirmation: true });
+        } catch (error) {
+          this.markContentUnconfirmed(event, error);
+          throw error;
+        } finally { signal.removeEventListener("abort", cancelled); }
+      },
     };
+  }
+
+  private markContentUnconfirmed(event: OutputEvent, error: unknown): void {
+    if (this.closed || event.type !== "text.completed" || typeof event.turnId !== "string") return;
+    const contentKey = JSON.stringify([conversationTargetKey(event.target), event.threadId, event.turnId]);
+    const now = performance.now();
+    for (const [key, deadline] of this.unconfirmedContent) if (deadline <= now) this.unconfirmedContent.delete(key);
+    if (this.unconfirmedContent.has(contentKey)) return;
+    // A later successful Item cannot prove an earlier Item of this Turn was delivered.
+    if (this.unconfirmedContent.size < 1_000) this.unconfirmedContent.set(contentKey, now + 300_000);
+    else this.unconfirmedContentOverflowUntil = now + 300_000;
+    this.options.logger.warn({ reason: "qq-content-unconfirmed", eventType: event.type,
+      ...(error instanceof QqProtocolError ? { operation: error.operation, protocolReason: error.reason,
+        httpStatus: error.httpStatus, bizCode: error.bizCode } : {}) }, "QQ 正文交付未确认；完成信息将标明交付状态");
   }
 
   async start(): Promise<void> {
@@ -227,6 +269,7 @@ class QqGeneration implements SurfaceAdapter {
     this.closed = true;
     this.queueOrigins.clear();
     this.rootOrigins.clear();
+    this.unconfirmedContent.clear();
     this.controller.abort();
     for (const input of this.inputTails.values()) input.cancellation.abort();
     this.attachmentInputs.close();

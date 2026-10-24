@@ -2,11 +2,11 @@ import type { OutputEvent } from "../../conversation-core/index.js";
 import type { ConversationCommandName, ConversationCommandResult, HookEntry } from "../../application/index.js";
 import { conversationCommandDescriptions, conversationSessionEntryHelpLines } from "../conversation-command-help.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
-import { createTurnCompletedPresentation, renderPlainLifecyclePresentation, renderStructuredLifecyclePresentation } from "../lifecycle-presentation.js";
+import { createTurnCompletedPresentation, type LifecyclePresentation, type LifecyclePresentationField } from "../lifecycle-presentation.js";
 import { operationMetadata, operationStatus, operationTitle, redactOperationDetail } from "../operation-presentation.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { maximumQqTextFileBytes, type QqMessageBody } from "./protocol.js";
-import { renderQqContent, type QqContentBlock } from "./content.js";
+import { renderQqContent, renderQqLiteral, type QqContentBlock } from "./content.js";
 import { formatCodexProviderLabel, formatDisplayedProvider } from "../provider-format.js";
 import { canReviewConversationHook, formatConversationHooks } from "../conversation-hook-command-format.js";
 
@@ -154,7 +154,7 @@ export function planQqMessage(result: QqRenderedMessage, maximum = MAX_MESSAGE_C
       previous.content += message.content;
     } else messages.push(message);
   };
-  if (!literalOnly && maximum > 1) {
+  if (!literalOnly) {
     for (const [index, block] of result.blocks.entries()) {
       const separator = index === 0 ? "" : "\n";
       const candidate = separator + (block.markdown ?? block.text);
@@ -472,7 +472,48 @@ function mapQqQueryFields(
   } };
 }
 
-export function renderQqOutput(event: OutputEvent): QqRenderedMessage {
+/** Consume typed fields directly: a multiline quota must not flatten the whole completion panel. */
+export function renderQqLifecycle(presentation: LifecyclePresentation): QqRenderedMessage {
+  const blocks: QqContentBlock[] = [];
+  const heading = (title: string): void => {
+    const value = renderQqLiteral(title);
+    blocks.push({ text: title, ...(value.markdown === undefined ? {} : { markdown: `## ${value.markdown}` }) });
+  };
+  const field = (entry: LifecyclePresentationField, depth = 0): QqContentBlock => {
+    const grouped = "title" in entry;
+    const label = grouped ? entry.title : entry.label;
+    const lines = (entry.value ?? "").split(/\r\n|\r|\n/u);
+    const parts = lines.map((line, index): QqContentBlock => {
+      const level = depth + (index > 0 ? 1 : 0);
+      const text = index === 0 ? `${label}${entry.value === undefined ? "" : `：${line}`}` : line;
+      const literal = renderQqLiteral(text);
+      // A continuation is external field content, never another heading/list/quote.
+      const safe = literal.markdown !== undefined && !/^\s*(?:[#>]|[-+*]\s|\d+[.)]\s)/u.test(text);
+      const markdown = index === 0 && grouped && safe
+        ? `**${label}**${entry.value === undefined ? "" : `：${line}`}` : literal.markdown;
+      return { text: `${"  ".repeat(level)}• ${text}`,
+        ...(safe ? { markdown: `${"    ".repeat(level)}- ${markdown}` } : {}) };
+    });
+    // Keep the parent and all descendants in one semantic block; a message boundary
+    // must not leave a safe child looking detached from its literal/oversize parent.
+    parts.push(...(grouped ? entry.fields : entry.subfields ?? []).map(child => field(child, depth + 1)));
+    return { text: parts.map(part => part.text).join("\n"), ...(parts.every(part => part.markdown !== undefined)
+      ? { markdown: parts.map(part => part.markdown).join("\n") } : {}) };
+  };
+  heading(presentation.title);
+  blocks.push(...presentation.fields.map(entry => field(entry)));
+  for (const section of presentation.sections ?? []) {
+    blocks.push({ text: "", markdown: "" });
+    heading(section.title);
+    blocks.push(...section.fields.map(entry => field(entry)));
+  }
+  if (presentation.footer) blocks.push(field(presentation.footer));
+  const text = blocks.map(block => block.text).join("\n");
+  validateText(text);
+  return { text, blocks };
+}
+
+export function renderQqOutput(event: OutputEvent, contentUnconfirmed = false): QqRenderedMessage {
   if (event.type === "text.completed") {
     const candidate = completeFileCandidate(event.text);
     if (candidate) return candidate;
@@ -492,15 +533,11 @@ export function renderQqOutput(event: OutputEvent): QqRenderedMessage {
   }
   if (event.type === "turn.completed") {
     const presentation = createTurnCompletedPresentation(event);
-    const text = renderPlainLifecyclePresentation(presentation);
-    if (hasMultilineField(presentation)) {
-      validateText(text);
-      return { text, blocks: [{ text }] };
+    if (contentUnconfirmed) {
+      presentation.title += "（正文交付未确认）";
+      presentation.fields = [{ label: "正文交付", value: "未确认完整送达，请在原生客户端查看；未确认结果仍保留待核对。" }, ...presentation.fields];
     }
-    return {
-      text,
-      blocks: renderQqContent(renderStructuredLifecyclePresentation(presentation, false), true),
-    };
+    return renderQqLifecycle(presentation);
   }
   throw new Error("QQ 尚不支持此类结果");
 }
