@@ -127,7 +127,7 @@ export async function loadBuiltInSurfacePlugins(
 
 function createQqModule(
   options: SurfacePluginContext,
-  { QqSurface }: Awaited<ReturnType<typeof loadQqSurface>>,
+  { QqSurface, renderQqStartupNotification }: Awaited<ReturnType<typeof loadQqSurface>>,
 ): SurfaceRuntimeModule {
   const config = options.config.qq;
   if (!config) throw new Error("QQ 运行配置不存在");
@@ -135,6 +135,22 @@ function createQqModule(
   const adapter = new QqSurface({
     appId: config.appId, appSecret: config.appSecret, access,
     service: options.service, commands: options.commands, actors: options.bindings,
+    autoCompactPercent: options.autoCompactPercent,
+    startupNotification: {
+      recipients: () => [...config.allowedUserOpenIds],
+      text: async (target, signal) => {
+        const status = await options.service.statusForDisplay(target, signal);
+        const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
+        return renderQqStartupNotification(options.config.workspaces, status, {
+          platform: process.platform, architecture: process.arch,
+          gatewayVersion: options.gatewayVersion, nodeVersion: process.version,
+          transport: "Unix WebSocket", codexUpstreamUserAgent: options.codexUpstreamUserAgent() ?? null,
+          ...(options.config.codexTimezone === undefined ? {} : { appServerTimezone: options.config.codexTimezone }),
+          ...(officialOpenAiAuthenticated === undefined ? {} : { officialOpenAiAuthenticated }),
+          openAiConnectivity: options.openAiConnectivity(),
+        });
+      },
+    },
     ownsThread: (target, threadId) => {
       const binding = options.bindings.getByThread(threadId);
       return binding?.target.surface === target.surface && binding.target.accountId === target.accountId

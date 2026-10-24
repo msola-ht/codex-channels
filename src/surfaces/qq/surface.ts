@@ -44,6 +44,7 @@ export class QqSurface implements SurfaceAdapter {
   private stopping: Promise<void> | undefined;
   private closed = false;
   private terminalFailure: QqTransportError | undefined;
+  private startupAttempted = false;
 
   constructor(private readonly options: CreateQqSurfaceOptions) {
     this.accountId = options.appId;
@@ -72,6 +73,10 @@ export class QqSurface implements SurfaceAdapter {
       throw error;
     }
     if (this.closed) { await connection.stop(); throw new Error("QQ 已关闭"); }
+    if (!this.startupAttempted) {
+      this.startupAttempted = true;
+      connection.messages.startNotifications();
+    }
   }
 
   private rememberTerminalFailure(error: unknown): void {
@@ -88,8 +93,8 @@ export class QqSurface implements SurfaceAdapter {
   }
 
   deliverConfigurationChange(): Promise<void> {
-    // This adapter has no notification recipients. An empty
-    // broadcast must not prevent other channels' durable events being acknowledged.
+    // Startup notifications are independent of configuration broadcasts.
+    // This disabled broadcast must not block other channels' durable events.
     return Promise.resolve();
   }
 }

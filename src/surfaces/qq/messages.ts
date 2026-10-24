@@ -14,6 +14,7 @@ import { QqTaskSources, type QqTaskScope, type QqTaskSourceReference } from "./t
 import { QqTextOutbox } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
 import type { QqProtocolClient } from "./protocol.js";
+import { renderQqTurnCompleted } from "./lifecycle.js";
 
 export interface QqMessageOptions {
   appId: string;
@@ -23,6 +24,11 @@ export interface QqMessageOptions {
   actors: ConversationActorRegistry;
   ownsThread(target: ConversationTarget, threadId: string): boolean;
   logger: Logger;
+  autoCompactPercent?: (provider: string | null | undefined, model: string | null | undefined) => number | null;
+  startupNotification?: {
+    recipients(): readonly string[];
+    text(target: ConversationTarget, signal: AbortSignal): Promise<string>;
+  };
 }
 
 const HELP = "QQ 文字任务\n直接发送文字提交到当前工作区。\n/help · /status · /stop\n/workspace [序号、ID 或名称]\n/model [共享模型选择参数]\n/new\n/sessions [页码] [search 关键词]\n/resume [序号、名称或 Session ID]（/r）\n恢复会话不补发旧任务结果；发送新消息后建立新的回传关联。\n暂不支持附件、审批、问题交互或计划任务。结果投递失败请在本机投递箱核对。";
@@ -68,15 +74,44 @@ export class QqMessages implements SurfaceOutputPort {
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void> {
     if (!this.supported(event) || !authorized) throw new Error("QQ 输出未获授权");
     if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
-    const text = event.type === "text.completed" ? event.text : event.status === "completed"
-      ? "任务执行已结束。正文是否完整送达以各条结果为准；缺失结果请核对本机投递箱。"
-      : event.status === "interrupted" ? "任务已中断。" : "任务未成功完成，请在本机核对任务状态。QQ 不提供审批或问题回应。";
+    const text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.autoCompactPercent);
     await this.outbox.deliver({ mode: "active", recipient: event.target.conversationId.slice(4), content: text }, {
       signal: AbortSignal.any([signal, this.lifetime.signal]),
       beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
       reserve: parts => this.budget.reserve(event.target.conversationId.slice(4), parts,
         { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: event.type === "turn.completed" }),
     }, checkpoint);
+  }
+
+  startNotifications(): void {
+    if (!this.options.startupNotification || this.lifetime.signal.aborted) return;
+    const task = this.sendStartupNotifications().catch(() => {
+      if (!this.lifetime.signal.aborted) this.options.logger.warn({ reason: "startup-notification-failed" }, "QQ 上线通知未确认，不自动重试");
+    }).finally(() => this.tasks.delete(task));
+    this.tasks.add(task);
+  }
+
+  private async sendStartupNotifications(): Promise<void> {
+    const notification = this.options.startupNotification;
+    if (!notification) return;
+    const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(60_000)]);
+    for (const actorId of new Set(notification.recipients())) {
+      signal.throwIfAborted();
+      const scope = this.scope(actorId);
+      if (!scope || !this.current(scope)) continue;
+      try {
+        const content = await notification.text(this.target(actorId), signal);
+        signal.throwIfAborted();
+        await this.outbox.deliver({ mode: "active", recipient: actorId, content }, {
+          signal,
+          beforeSend: () => { if (!this.current(scope)) throw new Error("QQ 上线通知授权失效"); },
+          reserve: parts => this.budget.reserve(actorId, parts, "startup"),
+        }, async () => {});
+      } catch {
+        if (signal.aborted) throw signal.reason;
+        this.options.logger.warn({ reason: "startup-notification-unconfirmed" }, "QQ 上线通知未确认，不影响文字接入，不自动重试");
+      }
+    }
   }
 
   /** Synchronous bounded admission: Transport must remain free to receive /stop. */

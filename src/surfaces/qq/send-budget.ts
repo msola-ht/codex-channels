@@ -9,10 +9,11 @@ export class QqSendBudget {
   private account: number[] = [];
   private readonly turns = new Map<string, { text: number; status: number; until: number }>();
 
-  reserve(recipient: string, parts: number, turn?: { key: string; status: boolean }): {
+  reserve(recipient: string, parts: number, scope?: { key: string; status: boolean } | "startup"): {
     runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
   } {
     const now = performance.now();
+    const turn = typeof scope === "object" ? scope : undefined;
     const day = 86_400_000;
     for (const [key, values] of this.recipients) {
       const retained = values.filter(value => value > now - day);
@@ -25,7 +26,7 @@ export class QqSendBudget {
     if (!Number.isSafeInteger(parts) || parts < 1 || parts > 8) throw new QqProtocolError("message", "invalid-input");
     if ((!this.recipients.has(recipient) && this.recipients.size >= 4096)
       || (turn && !this.turns.has(turn.key) && this.turns.size >= 4096)
-      || (turn && (this.account.length + parts > 24
+      || (scope !== undefined && (this.account.length + parts > 24
         || recipientTimes.filter(value => value > now - 60_000).length + parts > 16
         || recipientTimes.length + parts > 800))
       || (usage && turn && (turn.status ? usage.status + parts > 2 : usage.text + parts > 16))) {
@@ -34,6 +35,8 @@ export class QqSendBudget {
     if (usage && turn) {
       if (turn.status) usage.status += parts; else usage.text += parts;
       this.turns.set(turn.key, usage);
+    }
+    if (scope !== undefined) {
       // Hold the full reservation through the entire possible 45-second plan.
       // This conservatively counts queued requests in all rolling windows.
       const reserved = Array<number>(parts).fill(now + 45_000);
