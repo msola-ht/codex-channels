@@ -488,6 +488,25 @@ function formatTurnErrorMessage(
   return formatOpenAiErrorMessage(value);
 }
 
+function formatCompletedServiceTier(event: Extract<OutputEvent, { type: "turn.completed" }>): string {
+  // Request tier is the display contract. A priority request may return default;
+  // never use response service_tier to replace or fill missing request evidence.
+  const summary = event.timing?.serviceTierSummary;
+  // Retained events may have a confirmed snapshot but predate tier metrics.
+  if (!summary || summary.requested.observedCount === 0) {
+    return event.serviceTier === undefined
+      ? "未知（请求档位未观测）"
+      : `${formatServiceTier(event.serviceTier)}（设置快照）`;
+  }
+  const { requestCount, requested } = summary;
+  // Once observations exist, never fill partial/mixed evidence with the snapshot.
+  if (requested.distinctCount > 1) return "多档位（请求档位）";
+  if (requestCount > 0 && requested.observedCount === requestCount && requested.value !== null) {
+    return formatServiceTier(requested.value);
+  }
+  return "未知（请求档位未完整观测）";
+}
+
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
   debug = false,
@@ -560,7 +579,7 @@ export function createTurnCompletedPresentation(
   if (event.model) {
     runFields.push({
       label: "模型",
-      value: `${event.model} · ${formatReasoningEffort(event.effort)} · ${formatServiceTier(event.serviceTier)}`,
+      value: `${event.model} · ${formatReasoningEffort(event.effort)} · ${formatCompletedServiceTier(event)}`,
     });
     runFields.push({
       label: "提供商",
