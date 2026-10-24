@@ -16,7 +16,7 @@ import type { StoredManagedAudio } from "../managed-audio-store.js";
 import { videoAttachmentBody, type PreparedVideoAttachment } from "../video-attachment-store.js";
 import type { ChannelImageSource, SurfaceAdapter, SurfaceOutputPort } from "../types.js";
 import { createQqActiveLedger, createQqLedger } from "./ledger.js";
-import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, maximumQqImageBytes, type QqMessageBody } from "./protocol.js";
+import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, maximumQqImageBytes, maximumQqStreamBytes, type QqMessageBody } from "./protocol.js";
 import { readGeneratedImage } from "../generated-image.js";
 import { generatedImageUnavailableText } from "../operation-presentation.js";
 import { planQqDelivery, planQqMessage, qqCommandNames, qqHelp, QqConfirmationPreviewError, renderQqCommandResult, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
@@ -74,7 +74,7 @@ interface QqTextStream {
   expiresAt: number;
 }
 type QqStreamFallbackReason = "invalid-or-oversize-preview" | "missing-turn-source" | "send-guard"
-  | "unsupported-format" | "changed-prefix" | "oversize-line" | "index-limit" | "remaining-length"
+  | "unsupported-format" | "changed-prefix" | "index-limit"
   | "passive-reservation" | "stream-registration" | "request-not-started";
 
 class QqCommandReplyError extends Error {
@@ -781,14 +781,14 @@ class QqGeneration implements SurfaceAdapter {
     const stream = this.streams.get(key);
     if (!stream || stream.previewClosed || !stream.authorized()) return;
     if (stream.state !== "pending" && stream.state !== "streaming") return;
-    if (Buffer.byteLength(stream.text, "utf8") + Buffer.byteLength(event.text, "utf8") > 12_000
+    if (Buffer.byteLength(stream.text, "utf8") + Buffer.byteLength(event.text, "utf8") > maximumQqStreamBytes
       || Buffer.from(event.text, "utf8").toString("utf8") !== event.text) {
       this.fallbackStream(stream, "invalid-or-oversize-preview");
       return;
     }
     stream.text += event.text;
     const current = stream;
-    // Coalesce pending wakeups, while the stream owns its complete unconsumed suffix.
+    // Coalesce pending wakeups, while the stream owns the complete current source.
     this.queue.enqueue(event.target.conversationId, async signal => {
       if (current.previewClosed || (current.state !== "pending" && current.state !== "streaming")
         || current.lastSend !== 0 && performance.now() - current.lastSend < 1000) return;
@@ -854,16 +854,12 @@ class QqGeneration implements SurfaceAdapter {
     // rendering is not a rewrite of the prefix already confirmed by QQ.
     if (!finished && stream.sent.startsWith(rendered)) return true;
     if (!rendered.startsWith(stream.sent)) { this.fallbackStream(stream, "changed-prefix"); return false; }
-    const suffix = rendered.slice(stream.sent.length);
-    const chunks = splitQqStreamText(suffix);
-    if (!chunks) { this.fallbackStream(stream, "oversize-line"); return false; }
-    if (chunks.length === 0 && !finished) return true;
-    if (stream.index + Math.max(1, chunks.length) > (finished ? 128 : 127)) {
-      this.fallbackStream(stream, "index-limit");
+    if (Buffer.byteLength(rendered, "utf8") > maximumQqStreamBytes) {
+      this.fallbackStream(stream, "invalid-or-oversize-preview");
       return false;
     }
-    if (stream.remaining !== undefined && [...suffix].length > stream.remaining) {
-      this.fallbackStream(stream, "remaining-length");
+    if (stream.index >= (finished ? 128 : 127)) {
+      this.fallbackStream(stream, "index-limit");
       return false;
     }
     if (!stream.reservation) {
@@ -873,49 +869,47 @@ class QqGeneration implements SurfaceAdapter {
       try { await this.activeLedger.startStream(key); }
       catch { this.fallbackStream(stream, "stream-registration"); return false; }
     }
-    if (chunks.length === 0) chunks.push("");
-    for (const [index, text] of chunks.entries()) {
-      const finalChunk = finished && index === chunks.length - 1;
-      const previousState = stream.state;
-      let requestStarted = false;
-      try {
-        // Recheck after reservation/persistence and between acknowledged chunks.
-        // Completion before HTTP must leave the confirmed stream resumable.
-        if (!finished && stream.previewClosed) return false;
-        beforeSend();
-        const response = await checkpointDelivery("qq.c2c.stream", () => this.client.sendC2CStream({
-          userOpenid: actor, msgId: stream.reservation!.msgId, msgSeq: stream.reservation!.msgSeq,
-          index: stream.index, ...(stream.messageId ? { streamMessageId: stream.messageId } : {}),
-          text, finished: finalChunk, signal, beforeSend: () => {
-            beforeSend();
-            requestStarted = true;
-          },
-        }));
-        stream.messageId = response.messageId;
-        stream.remaining = response.remainingCharacters;
-        stream.sent += text;
-        stream.index++;
-        stream.lastSend = performance.now();
-        stream.state = finalChunk ? "done" : "streaming";
-        if (finalChunk) await this.activeLedger.completeStream(key);
-      } catch (error) {
-        // Completion can close a preview while token acquisition or the account
-        // gate is pending. No HTTP was issued if its final guard did not pass.
-        if (!requestStarted && !finished && stream.previewClosed) {
-          stream.state = previousState;
-          return false;
-        }
-        if (requestStarted) stream.state = "unknown";
-        else this.fallbackStream(stream, "request-not-started");
-        throw error;
-      }
-      const remainingText = chunks.slice(index + 1).join("");
-      if (stream.remaining !== undefined && [...remainingText].length > stream.remaining) {
-        this.fallbackStream(stream, "remaining-length");
+    const previousState = stream.state;
+    let requestStarted = false;
+    try {
+      // Completion before HTTP must leave the confirmed stream resumable.
+      if (!finished && stream.previewClosed) return false;
+      beforeSend();
+      const response = await checkpointDelivery("qq.c2c.stream", () => this.client.sendC2CStream({
+        userOpenid: actor, msgId: stream.reservation!.msgId, msgSeq: stream.reservation!.msgSeq,
+        index: stream.index, ...(stream.messageId ? { streamMessageId: stream.messageId } : {}),
+        text: rendered, finished, signal, beforeSend: () => {
+          beforeSend();
+          requestStarted = true;
+        },
+      }));
+      stream.messageId = response.messageId;
+      // The official contract does not define remaining length as a terminal signal.
+      stream.remaining = response.remainingCharacters;
+      stream.sent = rendered;
+      stream.index++;
+      stream.lastSend = performance.now();
+      stream.state = finished ? "done" : "streaming";
+      this.observeStreamConfirmation(stream, finished);
+      if (finished) await this.activeLedger.completeStream(key);
+    } catch (error) {
+      // Completion can close a preview while token acquisition or the account
+      // gate is pending. No HTTP was issued if its final guard did not pass.
+      if (!requestStarted && !finished && stream.previewClosed) {
+        stream.state = previousState;
         return false;
       }
+      if (requestStarted) stream.state = "unknown";
+      else this.fallbackStream(stream, "request-not-started");
+      throw error;
     }
     return true;
+  }
+  private observeStreamConfirmation(stream: QqTextStream, finished: boolean): void {
+    this.options.logger.info({ reason: "qq-stream-confirmed", generationId: this.generationId,
+      threadId: stream.event.threadId, turnId: stream.event.turnId, itemId: stream.event.itemId,
+      index: stream.index - 1, finished, fullBytes: Buffer.byteLength(stream.sent, "utf8"),
+      ...(stream.remaining === undefined ? {} : { remainingCharacters: stream.remaining }) }, "QQ 原生流完整帧已获平台确认");
   }
   private fallbackStream(stream: QqTextStream, fallbackReason: QqStreamFallbackReason): void {
     if (stream.state !== "fallback") {
@@ -939,11 +933,13 @@ class QqGeneration implements SurfaceAdapter {
     try { beforeSend(); }
     catch { this.fallbackStream(stream, "send-guard"); return; }
     try {
-      await checkpointDelivery("qq.c2c.stream-close", () => this.client.sendC2CStream({ userOpenid: actor,
+      const response = await checkpointDelivery("qq.c2c.stream-close", () => this.client.sendC2CStream({ userOpenid: actor,
         msgId: stream.reservation!.msgId, msgSeq: stream.reservation!.msgSeq, index: stream.index,
-        streamMessageId: stream.messageId!, text: "", finished: true, signal, beforeSend }));
+        streamMessageId: stream.messageId!, text: stream.sent, finished: true, signal, beforeSend }));
+      stream.remaining = response.remainingCharacters;
       stream.index++;
       stream.state = "done";
+      this.observeStreamConfirmation(stream, true);
       await this.activeLedger.completeStream(key);
     } catch (error) { stream.state = "unknown"; throw error; }
   }
@@ -960,7 +956,7 @@ class QqGeneration implements SurfaceAdapter {
     }
     DeliveryReceipt.current()?.markContentIncomplete();
     if (stream.state === "unknown" || stream.state === "done") throw new Error("QQ 原生流已发送或结果未知，不自动重复正文");
-    if (Buffer.byteLength(event.text, "utf8") <= 12_000
+    if (Buffer.byteLength(event.text, "utf8") <= maximumQqStreamBytes
       && Buffer.from(event.text, "utf8").toString("utf8") === event.text && stream.state !== "fallback") {
       stream.text = event.text;
       if (await this.flushStream(key, stream, actor, grant, true, signal, authorized)) {
@@ -1117,20 +1113,6 @@ class QqGeneration implements SurfaceAdapter {
     if (!actor || !this.allowed(target, actor)) throw new Error("QQ 输出目标未授权");
     return actor;
   }
-}
-
-function splitQqStreamText(text: string): string[] | undefined {
-  const chunks: string[] = [];
-  let chunk = "";
-  for (const line of text.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
-    if (Buffer.byteLength(line, "utf8") > 3000) return undefined;
-    if (Buffer.byteLength(chunk, "utf8") + Buffer.byteLength(line, "utf8") > 3000) {
-      chunks.push(chunk); chunk = "";
-    }
-    chunk += line;
-  }
-  if (chunk) chunks.push(chunk);
-  return chunks;
 }
 
 function qqStreamMarkdown(source: string, finished: boolean): string | undefined {

@@ -18,7 +18,7 @@ MCP 工具审批的实现与验收边界见 [P4 工具审批](qq-surface-plan.md
 普通 MCP 表单的实现与验收边界见 [P4 表单交互](qq-surface-plan.md#p4-mcp-表单适配)。
 QQ 生成图片结果复用已有 `imageGeneration` 完成事件、安全图片读取与持久输出，仅新增渠道上传/发送适配；
 实现及未实机观察边界见[生成图片回传](qq-surface-plan.md#共享生成图片回传)。
-QQ 的真实 `text.delta` 接入独立原生被动流，稳定 QQ Markdown 通过 append 分片，完整 `text.completed` 结束片沿可靠投递确认；
+QQ 的真实 `text.delta` 接入独立原生被动流，稳定 QQ Markdown 通过 replace 全量更新，完整 `text.completed` 全文结束帧沿可靠投递确认；
 普通正文、图片、审批和终态改用明确主动消息。原任务授权、限流、流式未知屏障及未实机观察边界见[QQ 模块](../src/surfaces/qq/README.md)。
 QQ 图片输入沿用既有模型图片能力检查、Provider 图片引用和附件取消作用域，不新增 App Server 字段；
 渠道准入与隔离观察见[图片输入批次](qq-surface-plan.md#共享图片输入)。

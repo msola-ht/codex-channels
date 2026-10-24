@@ -7,6 +7,8 @@ const MAX_RESPONSE_BYTES = 64 * 1024;
 export type QqProtocolOperation = "token" | "gateway" | "upload" | "send";
 export const maximumQqImageBytes = 3 * 1024 * 1024;
 export const maximumQqTextFileBytes = 1_000_000;
+/** Local bound for the complete Markdown body of one replace frame. */
+export const maximumQqStreamBytes = 12_000;
 export const qqCompleteContentFileName = "codex-complete-result.txt";
 export type QqProtocolFailure =
   | "invalid-input" | "closed" | "cancelled" | "timeout" | "network"
@@ -48,6 +50,7 @@ export interface QqStreamMessageInput {
   msgSeq: number;
   index: number;
   streamMessageId?: string;
+  /** Complete current Markdown body, including the previously confirmed prefix. */
   text: string;
   finished: boolean;
   signal: AbortSignal;
@@ -203,11 +206,11 @@ export class QqProtocolClient {
       || !Number.isSafeInteger(input.index) || input.index < 0 || input.index > 127
       || (input.index === 0 ? input.streamMessageId !== undefined : !validId(input.streamMessageId))
       || typeof input.finished !== "boolean" || typeof input.text !== "string"
-      || (!input.finished && input.text.length === 0) || Buffer.byteLength(input.text, "utf8") > 3000
+      || input.text.length === 0 || Buffer.byteLength(input.text, "utf8") > maximumQqStreamBytes
       || Buffer.from(input.text, "utf8").toString("utf8") !== input.text) {
       throw new QqProtocolError("send", "invalid-input");
     }
-    const body = { input_mode: "append", input_state: input.finished ? 10 : 1, index: input.index,
+    const body = { input_mode: "replace", input_state: input.finished ? 10 : 1, index: input.index,
       content_type: "markdown", content_raw: input.text, msg_id: input.msgId, msg_seq: input.msgSeq,
       ...(input.streamMessageId ? { stream_msg_id: input.streamMessageId } : {}) };
     const path = `/v2/users/${encodeURIComponent(input.userOpenid)}/stream_messages`;
