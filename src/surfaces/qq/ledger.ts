@@ -23,6 +23,7 @@ const maximumGrants = 500;
 export class QqLedger {
   private readonly generation = randomUUID();
   private readonly startup = Date.now();
+  private readonly deadlines = new Map<string, number>();
   private state: Ledger;
   private serial = Promise.resolve();
   private failed = false;
@@ -50,9 +51,15 @@ export class QqLedger {
       // Timestamp is mandatory; no receive-time fallback can renew an old grant.
       if (createdAt <= this.startup || createdAt > now || now - createdAt >= windowMs) return false;
       this.state.grants = this.state.grants.filter(grant => now - grant.createdAt < windowMs);
+      const retained = new Set(this.state.grants.map(grant => grant.id));
+      for (const key of this.deadlines.keys()) if (!retained.has(key)) this.deadlines.delete(key);
       if (this.state.grants.some(grant => grant.id === id)) return false;
       if (this.state.grants.length >= maximumGrants) throw new Error("QQ 接收登记容量已满");
       this.state.grants.push({ id, msgId, actor, createdAt, sequence: 0, state: "claimed", generation: this.generation });
+      // Keep the platform timestamp contract without allowing wall-clock rollback to renew it.
+      const related = this.state.grants.filter(grant => grant.msgId === msgId && grant.actor === actor);
+      this.deadlines.set(id, Math.min(performance.now() + Math.min(...related.map(grant => grant.createdAt)) + windowMs - now,
+        ...related.flatMap(grant => this.deadlines.has(grant.id) ? [this.deadlines.get(grant.id)!] : [])));
       return true;
     });
   }
@@ -80,13 +87,22 @@ export class QqLedger {
     const { used } = this.budget(id, actor);
     return 4 - used;
   }
-  private budget(id: string, actor: string): { grant: Grant; related: Grant[]; used: number } {
+  remainingMs(id: string, actor: string): number {
+    return this.budget(id, actor).remainingMs;
+  }
+  private budget(id: string, actor: string): { grant: Grant; related: Grant[]; used: number; remainingMs: number } {
     if (this.failed) throw new Error("QQ 传输登记写入状态未知，请重启后核对");
     const grant = this.state.grants.find(value => value.id === id && value.actor === actor);
     if (!grant || grant.generation !== this.generation || Date.now() - grant.createdAt >= windowMs
       || grant.createdAt > Date.now()) throw new Error("QQ 回复窗口或额度不可用");
     const related = this.state.grants.filter(value => value.msgId === grant.msgId && value.actor === actor);
-    return { grant, related, used: Math.max(...related.map(value => value.sequence)) };
+    // Every alias spends the same message window, including an earlier timestamp learned later.
+    const deadline = Math.min(...related.filter(value => value.generation === this.generation)
+      .map(value => this.deadlines.get(value.id) ?? 0));
+    const remainingMs = Math.min(deadline - performance.now(),
+      Math.min(...related.map(value => value.createdAt)) + windowMs - Date.now());
+    if (remainingMs <= 0) throw new Error("QQ 回复窗口已过期");
+    return { grant, related, used: Math.max(...related.map(value => value.sequence)), remainingMs };
   }
   reserve(id: string, actor: string, count = 1): Promise<{ msgId: string; msgSeq: number; expiresAt: number }> {
     return this.change(() => {

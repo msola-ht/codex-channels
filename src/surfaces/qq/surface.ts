@@ -13,6 +13,7 @@ import { createQqLedger } from "./ledger.js";
 import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, type QqMessageBody } from "./protocol.js";
 import { planQqMessage, qqCommandNames, qqHelp, renderQqCommandResult, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
+import { QqInteractionDeliveryError, QqInteractionPort } from "./interactions.js";
 
 export interface QqNetwork {
   fetchImpl: typeof fetch;
@@ -45,7 +46,11 @@ class QqCommandReplyError extends Error {
 export class QqSurface implements SurfaceAdapter {
   readonly surface = "qq";
   readonly accountId: string;
-  readonly interactions: InteractionPort = { request: (_target, request) => Promise.resolve(safeInteractionDecision(request)) };
+  readonly interactions: InteractionPort = {
+    request: (target, request) => this.closed || !this.current ? Promise.resolve(safeInteractionDecision(request)) : this.current.interactions.request(target, request),
+    resolved: requestId => this.current?.interactions.resolved(requestId),
+    cancelAll: () => this.current?.interactions.cancelAll(),
+  };
   readonly output: SurfaceOutputPort;
   private current: QqGeneration | undefined;
   private starting: Promise<void> | undefined;
@@ -86,7 +91,7 @@ class QqGeneration implements SurfaceAdapter {
   readonly surface = "qq";
   readonly accountId: string;
   readonly output: SurfaceOutputPort;
-  readonly interactions: InteractionPort = { request: (_target, request) => Promise.resolve(safeInteractionDecision(request)) };
+  readonly interactions: QqInteractionPort;
   private readonly client: QqProtocolClient;
   private readonly network: QqNetwork;
   private readonly transport: QqWebSocketTransport;
@@ -106,6 +111,34 @@ class QqGeneration implements SurfaceAdapter {
     this.client = new QqProtocolClient({ appId: options.appId, appSecret: options.appSecret, fetchImpl: this.network.fetchImpl });
     this.ledger = createQqLedger(options.directory, options.appId, () => this.fatal(new Error("QQ 传输登记不可用")));
     this.queue = new ConversationDeliveryQueue(options.logger, { component: "qq", capacity: 32, maximumPendingOperations: 256, errorMetadata: () => ({ reason: "qq-delivery-failed" }) });
+    this.interactions = new QqInteractionPort({
+      allowed: (target, actor) => target.surface === "qq" && target.accountId === this.accountId && this.allowed(target, actor),
+      rejected: reason => this.options.logger.warn({ surface: "qq", accountId: this.accountId,
+        generationId: this.generationId, reason }, "QQ 交互已安全拒绝或取消，请在原生客户端核对"),
+      send: async (target, request, result, signal, authorized) => {
+        const actor = this.actor(target);
+        if (typeof request.turnId !== "string") throw new QqInteractionDeliveryError("missing-turn-grant");
+        let grant = this.ledger.forTurn(actor, request.threadId, request.turnId);
+        if (!grant) {
+          const waiting = [...(this.pending.get(target.conversationId) ?? [])];
+          if (waiting.length) {
+            try { await waitBounded(Promise.allSettled(waiting), signal, 15_000); }
+            catch { throw new QqInteractionDeliveryError("turn-association-unconfirmed"); }
+          }
+          grant = this.ledger.forTurn(actor, request.threadId, request.turnId);
+        }
+        if (!grant) throw new QqInteractionDeliveryError("missing-turn-grant");
+        const originalGrant = grant;
+        const current = (): boolean => {
+          if (!this.allowed(target, actor)) return false;
+          try { this.ledger.remaining(originalGrant, actor); return true; } catch { return false; }
+        };
+        if (!current()) throw new QqInteractionDeliveryError("grant-expired");
+        await this.queue.runOrdered(target.conversationId, queueSignal => this.send(target, actor, originalGrant,
+          result, AbortSignal.any([signal, queueSignal, this.controller.signal]), () => authorized() && current()), signal);
+        return { current, remainingMs: this.ledger.remainingMs(originalGrant, actor) };
+      },
+    });
     this.transport = new QqWebSocketTransport({ client: this.client,
       agentForUrl: (url, signal) => this.network.agentForUrl(url, signal),
       releaseAgent: agent => this.network.releaseAgent(agent),
@@ -155,7 +188,7 @@ class QqGeneration implements SurfaceAdapter {
     this.controller.abort();
     this.client.close();
     const results = await Promise.allSettled([
-      this.transport.stop(), this.queue.close(),
+      this.transport.stop(), this.queue.close(), waitBounded(this.interactions.close(), undefined, 5_000),
       waitBounded(Promise.allSettled([...this.jobs]).then(() => this.ledger.close()), undefined, 5_000),
       waitBounded(this.network.close(), undefined, 5_000),
     ]);
@@ -206,6 +239,11 @@ class QqGeneration implements SurfaceAdapter {
       return;
     }
     this.observeMilestone("first-input", "QQ 本运行代次首条授权完整文本已接收；尚不代表已提交模型");
+    const interactionReply = this.interactions.handleText(target, message.actor, message.text);
+    if (interactionReply !== null) {
+      await this.notify(target, message.actor, message.id, interactionReply);
+      return;
+    }
     const command = parseSlashCommand(message.text);
     if (command) {
       if (command.name === "help") { await this.notify(target, message.actor, message.id, qqHelp); return; }
@@ -285,14 +323,15 @@ class QqGeneration implements SurfaceAdapter {
     if (!this.allowed(target, actor) || authorized?.() === false) throw new Error("QQ 发送授权已失效");
     // Reserve the complete result before the first side effect, including Unicode boundary overhead.
     const reservation = await this.ledger.reserve(grant, actor, messages.length);
-    const remaining = reservation.expiresAt - Date.now();
+    const remaining = this.ledger.remainingMs(grant, actor);
     if (remaining <= 0) throw new Error("QQ 回复窗口已过期");
-    const sendSignal = AbortSignal.any([signal, AbortSignal.timeout(remaining)]);
+    const sendSignal = AbortSignal.any([signal, AbortSignal.timeout(Math.ceil(remaining))]);
     const beforeSend = (): void => {
       sendSignal.throwIfAborted();
       if (Date.now() >= reservation.expiresAt || !this.allowed(target, actor) || authorized?.() === false) {
         throw new Error("QQ 发送依据已失效");
       }
+      this.ledger.remainingMs(grant, actor);
     };
     for (const [index, message] of messages.entries()) {
       beforeSend();
