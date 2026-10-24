@@ -24,6 +24,10 @@ import {
 import { ManagementOperationError, managementOperationError } from "./webui-management-operations.mjs";
 import { previewProviderModelTemplateUpdate, applyProviderModelTemplateUpdate } from "./provider-model-template-management.mjs";
 import { previewProviderModelAddition, applyProviderModelAddition } from "./provider-model-additions.mjs";
+import {
+  previewManagedProviderModelRequestOptions,
+  applyManagedProviderModelRequestOptions,
+} from "./managed-provider-model-edit.mjs";
 import { applyProviderWebSearchChange, previewProviderWebSearchChange, ProviderWebSearchManagementError } from "./provider-web-search-management.mjs";
 
 export async function loadProviderSettingsResource(
@@ -69,6 +73,14 @@ export function normalizeProviderSettingsMutation(input) {
         throw new ManagementOperationError("invalid_provider_operation", "新增模型请求包含不支持的字段");
       }
       return { operation: input.operation, ...additionMutationInput(input) };
+    case "model.request-options":
+      if (Object.keys(input).some(key => !["operation", "provider", "model", "revision", "providerOptions", "confirmationToken"].includes(key))
+        || typeof input.provider !== "string" || typeof input.model !== "string"
+        || typeof input.revision !== "string" || input.providerOptions === undefined) {
+        throw new ManagementOperationError("invalid_provider_operation", "请求改写参数无效");
+      }
+      return { operation: input.operation, provider: input.provider, model: input.model,
+        revision: input.revision, providerOptions: input.providerOptions };
     case "model.template.update":
       if (Object.keys(input).some(key => !["operation", "provider", "model", "sections", "revision", "sourceToken", "template", "confirmationToken"].includes(key))) {
         throw new ManagementOperationError("invalid_provider_operation", "模板更新请求包含不支持的字段");
@@ -170,6 +182,13 @@ export async function previewProviderSettingsMutation(input, environment) {
         return await previewProviderWebSearchChange(webSearchMutationInput(input), { environment });
       case "model.add":
         return { operation: input.operation, ...await previewProviderModelAddition(additionMutationInput(input), { environment }) };
+      case "model.request-options":
+        {
+          const requestOptionsInput = { provider: input.provider, model: input.model,
+            revision: input.revision, providerOptions: input.providerOptions };
+        return { operation: input.operation, provider: input.provider, model: input.model,
+          ...await previewManagedProviderModelRequestOptions(requestOptionsInput, { environment }) };
+        }
       case "model.template.update":
         return { operation: input.operation, ...await previewProviderModelTemplateUpdate(templateMutationInput(input), { environment }) };
       case "model.context":
@@ -221,6 +240,15 @@ export async function applyProviderSettingsMutation(input, environment, preview)
         const additionPreview = { ...preview };
         delete additionPreview.operation;
         return await applyProviderModelAddition(additionMutationInput(input), { environment, preview: additionPreview });
+      }
+      case "model.request-options": {
+        const requestOptionsInput = { provider: input.provider, model: input.model,
+          revision: input.revision, providerOptions: input.providerOptions };
+        const requestPreview = { ...preview };
+        delete requestPreview.operation;
+        delete requestPreview.requestProfile;
+        delete requestPreview.providerOptions;
+        return await applyManagedProviderModelRequestOptions(requestOptionsInput, { environment, preview: requestPreview });
       }
       case "model.template.update": {
         const templatePreview = { ...preview };
@@ -276,6 +304,15 @@ export function redactProviderSettingsResult(result) {
   if (result.operation === "model.add") {
     return { operation: result.operation, provider: result.provider, providers: [...result.providers],
       additions: structuredClone(result.additions), revision: result.revision, willChange: result.willChange, activation: result.activation };
+  }
+  if (result.operation === "model.request-options") {
+    return { operation: result.operation, provider: result.provider, model: result.model,
+      providers: [...result.providers],
+      ...(result.requestProfile === undefined ? {} : { requestProfile: result.requestProfile }),
+      ...(result.providerOptions === undefined ? {} : { providerOptions: structuredClone(result.providerOptions) }),
+      ...(result.changes === undefined ? {} : { changes: structuredClone(result.changes) }),
+      revision: result.revision, willChange: result.willChange, activation: result.activation,
+      ...(result.action === undefined ? {} : { action: result.action }) };
   }
   if (result.operation === "model.template.update") {
     return {

@@ -59,6 +59,7 @@ import type {
 } from "@/lib/types"
 import { getToken } from "@/lib/token-storage"
 import type { ManagedManualModelDefinition, ProviderModelAdditionOptions } from "../../../scripts/provider-model-additions.mjs"
+import type { ManagedProviderModelRequestOptions } from "../../../scripts/managed-provider-model-edit.mjs"
 import { metricsQueryParams } from "@/lib/metrics-query"
 
 export { getToken, setToken } from "@/lib/token-storage"
@@ -521,6 +522,10 @@ export function fetchProviderModelAdditionOptions(provider: string, manualModel:
   return requestJson(`${API_PREFIX}/management/provider-model-additions`, {
     method: "POST", body: JSON.stringify({ provider, ...(manualModel ? { manualModel } : {}) }),
   }, signal, 100_000)
+}
+
+export function fetchManagedProviderModelRequestOptions(provider: string, model: string, signal: AbortSignal): Promise<ManagedProviderModelRequestOptions> {
+  return getJson(`${API_PREFIX}/management/provider-model-request-options?${new URLSearchParams({ provider, model })}`, signal)
 }
 
 

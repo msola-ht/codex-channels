@@ -1,5 +1,6 @@
 import { isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
 import { resolveClinePassRequestProfile } from "./chat-reasoning.mjs";
+import { validateClinePassProviderOptions } from "./cline-provider-options.mjs";
 import { readModelTemplateBindings, validateClinePassCatalogManifest } from "./model-template-bindings.mjs";
 import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 import { createHash } from "node:crypto";
@@ -734,7 +735,8 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
   return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs, protocols,
     ...(definition.storageId === "clp" ? { modelCapabilities: settings.map(model => ({ id: model.model,
       reasoning_efforts: model.reasoningEfforts.map(level => level.effort).filter(effort => effort !== "enabled"),
-      cline_request_profile: model.clineRequestProfile })) } : {}),
+      cline_request_profile: model.clineRequestProfile,
+      ...(model.clineProviderOptions === undefined ? {} : { cline_provider_options: model.clineProviderOptions }) })) } : {}),
     paths: [...paths, responsesContextSyncPath(environment), providerCatalogIsolationPath(environment), `${join(directory, definition.catalogFileName)}.settings-pending`], revision: before };
 }
 
@@ -897,8 +899,15 @@ function loadModelCatalogSettings(path, definition) {
   const content = readPrivateFile(path, maximumCatalogBytes);
   const entries = definition.storageId === "clp" ? JSON.parse(content).models : undefined;
   return [...readCatalogSlugSet(content, definition)]
-    .map((slug) => ({ ...modelCatalogSetting(content, definition, slug),
-      ...(entries ? { clineRequestProfile: resolveClinePassRequestProfile(slug, entries.find(model => model.slug === slug)?.cline_request_profile) } : {}) }));
+    .map((slug) => {
+      const entry = entries?.find(model => model.slug === slug);
+      return { ...modelCatalogSetting(content, definition, slug),
+        ...(entries ? { clineRequestProfile: resolveClinePassRequestProfile(slug, entry?.cline_request_profile) } : {}),
+        ...(entry?.cline_provider_options === undefined ? {} : {
+          clineProviderOptions: validateClinePassProviderOptions(entry.cline_provider_options),
+        }),
+      };
+    });
 }
 
 function readCatalogSlugSet(content, definition) {
@@ -916,6 +925,7 @@ function validateClinePassRequestProfiles(catalog, definition) {
   if ((definition.storageId ?? definition.id) !== "clp" || !Array.isArray(catalog?.models)) return;
   for (const entry of catalog.models) {
     resolveClinePassRequestProfile(entry?.slug, entry?.cline_request_profile);
+    validateClinePassProviderOptions(entry?.cline_provider_options);
   }
 }
 

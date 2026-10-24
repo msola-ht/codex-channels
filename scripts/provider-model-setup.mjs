@@ -10,6 +10,7 @@ import { previewCustomProviderModelsSave, applyCustomProviderModelsSave } from "
 import { promptResponsesModels } from "./responses-model-setup.mjs";
 import { runManagedProviderModelSetup } from "./managed-provider-model-management.mjs";
 import { runManagedProviderModelEditSetup } from "./managed-provider-model-edit-setup.mjs";
+import { runClinePassRequestOptionsSetup } from "./cline-pass-request-options-setup.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { runModelWindowSetup } from "./model-window-setup.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
@@ -199,6 +200,7 @@ async function runProviderModelOperation({ environment, prompts, output, provide
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "编辑模型与默认值" }] : []),
     ...(custom || family ? [{ value: "rename", label: "编辑模型显示名称", hint: "模型 ID 保持不变" }] : []),
     ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求路由" }] : []),
+    ...(family === "clp" ? [{ value: "request-options", label: "编辑请求改写", hint: "providerOptions JSON；字段原样透传" }] : []),
     ...(family && catalog.providers.length ? [{ value: "default", label: "账户默认模型与共享思考等级", hint: "默认模型仅影响所选账户；模型思考等级由同族账户共用" }] : []),
     ...(family ? [{ value: "window", label: "模型上下文窗口", hint: "按模型设置，同族账户共享" }] : []),
     ...(catalog.source !== "official-shared" && (custom || family) ? [{ value: "template-update", label: "对比并更新模型模板", hint: "选择本地来源和更新内容，预览差异后保存" }] : []),
@@ -229,6 +231,7 @@ async function runProviderModelOperation({ environment, prompts, output, provide
   }
   if (action === "web-search") return runProviderWebSearchSetup({ environment, prompts, output, provider: selected });
   if (action === "local-edit") return runManagedProviderModelEditSetup(selected, { environment, prompts, output });
+  if (action === "request-options") return runClinePassRequestOptionsSetup(selected, { environment, prompts, output });
   if (action === "template-update") return runProviderModelTemplateSetup(catalog.provider, { environment, prompts, output });
   if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });
   if (action === "window") return runModelWindowSetup({ environment, prompts, output, provider: selected, allowBack: true });

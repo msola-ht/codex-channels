@@ -80,7 +80,8 @@ export async function runProviderModelAdditionSetup(provider, {
     output.write(`影响账户：${preview.providers.join("、")}。\n`);
     for (const candidate of preview.additions) {
       if (candidate.inheritedFrom) output.write(`继承来源：${candidate.inheritedFrom}（一次性复制，后续独立修改）。发送模型 ID 仍为 ${candidate.model}。\n`);
-      if (candidate.clineRequestProfile) output.write(`请求处理：${candidate.clineRequestProfile === "deepseek-flash" ? "Flash 思考参数格式；固定 DeepSeek 路由" : "通用 Cline 思考参数格式；由 Cline 选择上游"}。\n`);
+      if (candidate.clineRequestProfile) output.write(`请求处理：${candidate.clineRequestProfile === "deepseek-flash" ? "Flash 思考参数格式；未显式设置 gateway.only 时补 DeepSeek 默认路由" : "通用 Cline 思考参数格式；由 Cline 选择上游"}。\n`);
+      if (candidate.clineProviderOptions) output.write(`请求改写：${JSON.stringify(candidate.clineProviderOptions)}\n`);
       output.write(`新增模型 ${candidate.model}：\n${JSON.stringify({ fields: candidate.fields, ...(candidate.template ? { template: candidate.template } : {}) }, null, 2)}\n`);
     }
     output.write("保存前备份原目录及来源；保存不会自动重启服务。\n");

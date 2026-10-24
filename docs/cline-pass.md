@@ -40,6 +40,10 @@ CLI 和 WebUI 使用统一的“添加模型”流程：填写准确 ID 与名�
 
 CLI 的“本地编辑已有模型”直接读取保存内容，不下载模板，ID、请求快照、其他模型及未选字段保持不变。完整本地编辑当前由 CLI 提供，WebUI 保留名称、上下文、默认值和模板更新入口。当前任一账户的默认模型须先切换后才能移除；最后一个模型也不能移除。
 
+## 请求改写
+
+每个 CLP 模型还可保存可选的 `cline_provider_options` JSON 对象，作为发送前的 `providerOptions` 出站覆盖。对象递归合并到出站 Chat 请求的 `providerOptions`（Relay 原生 Chat 还会合并客户端同名值），数组、字符串、数字、布尔值和 `null` 覆盖同名值。受管 CLP 的 Responses→Chat 桥与 Relay 原生 Chat 共用该规则。字段不设白名单，保存后原样发出，具体字段和取值由上游判断；本地只校验 JSON 对象格式、大小、嵌套深度和顶层 Provider 选项对象，并拒绝 `gateway.byok`、凭据字段和原型污染键。Flash 在未显式设置 `gateway.only` 时补 `["deepseek"]`；显式设置的值按原样保留。所有内容始终位于 `providerOptions` 内，不能改写 `model`、`messages`、`tools` 等请求体顶层字段。WebUI 模型操作中的“编辑请求改写”和 CLI 模型管理中的同名入口只提供 JSON 编辑与差异预览。该配置只保证本地发出，上游可能忽略或拒绝，实际错误以请求返回为准，不能据此宣称云端已执行。
+
 CLP Relay 与渠道读取同一份受管模型目录和请求快照，仍使用原生 Chat 协议及各 Key 的精确模型授权、独立思考策略。添加目录条目不自动授权；移除会限制 Relay 后续调用，目录材料变化可能撤销在途请求。旧 `cline-relay-models.json` 及其备份不再读取或自动清理；升级后应先核对曾只存在于旧 Relay 目录中的模型，明确按 ID 加入共用目录。Key 中原有授权不会被重写。
 
 目录保存沿用原有备份、修订校验和事务恢复：显式修改前备份 `models.json` 与 `models.manifest.json`，可恢复失败回滚；并发修改或结果不确定时保留恢复材料，不覆盖后续写入、不自动重试。手工回退须先停止使用该目录的客户端及服务，成对核对和恢复备份，再按服务管理流程重启；备份仅保留最近一次修改。回退到旧版本前还需恢复该版本支持的目录来源格式，旧 Relay 独立目录可在旧版本中继续使用。保存不自动重启服务，按结果提示刷新 App Server；Relay 按材料修订刷新，Key 授权仍单独管理。
@@ -142,8 +146,8 @@ Gateway 加载账户适配器并通过账户快照链路提供额度查询。
 [Vercel 官方路由文档](https://vercel.com/docs/ai-gateway/models-and-providers/provider-options)
 定义了 `only` 的上游允许列表语义；Cline 透传行为以上述实测为依据。项目在 CLP 的 Responses 转 Chat
 与 Relay 直接 Chat（JSON/SSE）两条出站链路都消费共用目录中的请求快照：`deepseek-flash` 设置该参数，`standard` 不固定路由；未保存快照的旧条目仅对精确 `cline-pass/deepseek-v4.1-flash` 使用历史默认。其他
-Provider 不受影响。Relay 对需要限定的模型覆盖客户端已有的 `only`，保留其他合法对象字段；`providerOptions` 或
-其 `gateway` 不是对象时在出站前返回 400。限定失败不自动撤销参数或重试。路由规则由
+Provider 不受影响。`deepseek-flash` 只在请求未显式设置 `gateway.only` 时补默认值，显式值按原样保留；`providerOptions` 或
+其 `gateway` 不是对象时原样发送，不在本地按字段拒绝。限定失败不自动撤销参数或重试。路由规则由
 Provider Proxy 公共能力提供，通用协议转换器保持独立；Relay 调用转储记录实际注入后的出站请求；调试模式同时保留原始入站正文，并在实际补入或覆盖
 路由时标记 `provider_routing_pinned`，WebUI 显示「已将 CLP 上游限定为 DeepSeek」。已有单一
 `deepseek` 限定不重复标记。未记录的标记不补推，WebUI 按转储实际字段展示。

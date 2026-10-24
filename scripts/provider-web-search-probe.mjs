@@ -7,6 +7,7 @@ import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-d
 import { loadConfiguredManagedProviderMaterial, readCodexConfigFile } from "../runtime/model-provider-managed-runtime.mjs";
 import { loadConfiguredRelayProviderMaterial, loadOpenAiBaseUrl, managedProviderDirectory } from "../runtime/model-provider-runtime.mjs";
 import { resolveClinePassRequestProfile } from "../runtime/chat-reasoning.mjs";
+import { validateClinePassProviderOptions } from "../runtime/cline-provider-options.mjs";
 import { readPrivateFileSync } from "../runtime/private-file.mjs";
 import { readResponsesModelCatalog, isCustomCatalogProvider } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
@@ -92,11 +93,13 @@ async function resolveMaterial(input, environment) {
   if (!material.models.includes(input.model)) throw new ProviderWebSearchProbeError("stale_revision");
   const clinePass = definition?.upstreamWireApi === "chat_completions";
   let clineRequestProfile;
+  let clineProviderOptions;
   if (clinePass) {
     const document = JSON.parse(readPrivateFileSync(join(managedProviderDirectory(environment, definition), definition.catalogFileName), 2_097_152));
     const entry = document.models.find(entry => entry.slug === input.model);
     if (!entry) throw new ProviderWebSearchProbeError("stale_revision");
     clineRequestProfile = resolveClinePassRequestProfile(entry.slug, entry.cline_request_profile);
+    clineProviderOptions = validateClinePassProviderOptions(entry.cline_provider_options);
   }
   const upstreamWireApi = definition ? definition.upstreamWireApi ?? "responses"
     : isCustomCatalogProvider(input.provider) ? readCustomProviderUpstreamWireApi(environment, input.provider) : "responses";
@@ -104,7 +107,8 @@ async function resolveMaterial(input, environment) {
     ? readResponsesModelCatalog(environment, input.provider).definitions.find(entry => entry.id === input.model)?.sampling : undefined;
   const connection = {baseUrl: material.baseUrl, apiKey: material.apiKey, upstreamWireApi,
     reasoningEffort: model.presentation.defaultReasoningEffort ?? (isCustomCatalogProvider(input.provider) ? "none" : null),
-    requestContext: {clinePass, ...(clinePass ? {reasoningEfforts: model.presentation.reasoningEfforts, clineRequestProfile} : {}), ...(sampling ? {sampling} : {})}};
+    requestContext: {clinePass, ...(clinePass ? {reasoningEfforts: model.presentation.reasoningEfforts, clineRequestProfile,
+      ...(clineProviderOptions === undefined ? {} : {clineProviderOptions})} : {}), ...(sampling ? {sampling} : {})}};
   return {connection, fingerprint: fingerprint([input.provider, catalog.revision, material.revision, connection])};
 }
 

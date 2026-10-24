@@ -35,6 +35,7 @@ import type { CustomModelDraft } from "@/components/settings/custom-model-detail
 import { createIndependentModelDraft, defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
 import { ProviderModelTemplateDialog, ProviderModelTemplateConfirmation, type ProviderModelTemplateTarget } from "@/components/settings/provider-model-template-dialog"
 import { ProviderModelAdditionDialog, ProviderModelAdditionConfirmation, type ProviderModelAdditionTarget } from "@/components/settings/provider-model-addition-dialog"
+import { ProviderModelRequestOptionsDialog, ProviderModelRequestOptionsConfirmation, type ProviderModelRequestOptionsTarget } from "@/components/settings/provider-model-request-options-dialog"
 import { ProviderWebSearchProbeDialog, type ProviderWebSearchProbeTarget } from "@/components/settings/provider-web-search-probe-dialog"
 import { ProviderWebSearchConfirmation } from "@/components/settings/provider-web-search-settings"
 
@@ -127,6 +128,7 @@ function ProviderSettingsCard({
   const renamePreviewRef = useRef<HTMLButtonElement | null>(null)
   const [templateTarget, setTemplateTarget] = useState<ProviderModelTemplateTarget | null>(null)
   const [additionTarget, setAdditionTarget] = useState<ProviderModelAdditionTarget | null>(null)
+  const [requestOptionsTarget, setRequestOptionsTarget] = useState<ProviderModelRequestOptionsTarget | null>(null)
   const additionTriggerRef = useRef<HTMLButtonElement | null>(null)
   const additionPreviewRef = useRef<HTMLButtonElement | null>(null)
   const actionTargets = useRef(new Map<string, HTMLElement>())
@@ -176,7 +178,7 @@ function ProviderSettingsCard({
 
   const managedId = managed?.id
   useEffect(() => { resetManaged() }, [managedId, resetManaged])
-  const editing = editorOpen || managedEditorRevision !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null
+  const editing = editorOpen || managedEditorRevision !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || requestOptionsTarget !== null || webSearchTarget !== null
   useEffect(() => {
     onEditingChange?.(editing)
     return () => onEditingChange?.(false)
@@ -332,6 +334,9 @@ function ProviderSettingsCard({
     if (result !== null && operation === "model.add") {
       setAdditionTarget(null)
     }
+    if (result !== null && operation === "model.request-options") {
+      setRequestOptionsTarget(null)
+    }
     if (result !== null && operation === "model.template.update") {
       setTemplateTarget(null)
     }
@@ -346,7 +351,7 @@ function ProviderSettingsCard({
       model: "model" in custom ? custom.model : settings.defaults.model,
       reasoning: "reasoningEffort" in custom ? custom.reasoningEffort : settings.defaults.reasoningEffort,
     }] : accounts.map(account => ({ id: account.id, model: account.model, reasoning: account.reasoningEffort }))
-    const locked = busy || pending !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || webSearchTarget !== null || editorOpen || managedEditorRevision !== null
+    const locked = busy || pending !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || requestOptionsTarget !== null || webSearchTarget !== null || editorOpen || managedEditorRevision !== null
     const canAdd = catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) || catalog.source === "custom"
     return {
       id: `provider:${catalog.provider}`,
@@ -386,7 +391,7 @@ function ProviderSettingsCard({
             const target = templateTarget
             if (target?.provider === catalog.provider && target.model === model.model) templateTriggerRef.current = node
           }} render={<Button variant="outline" size="sm" />} onFocus={event => { currentActionTarget.current = { provider: catalog.provider, model: model.model }; actionTriggerRef.current = event.currentTarget }} onPointerDown={event => { currentActionTarget.current = { provider: catalog.provider, model: model.model }; actionTriggerRef.current = event.currentTarget }} aria-disabled={locked}>{t("modelManagement.actions")}</DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-2rem)]" finalFocus={editorOpen || contextDraft !== null || renameDraft !== null || templateTarget !== null || webSearchTarget !== null || pending !== null ? false : undefined}><DropdownMenuGroup>
+          <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-2rem)]" finalFocus={editorOpen || contextDraft !== null || renameDraft !== null || templateTarget !== null || requestOptionsTarget !== null || webSearchTarget !== null || pending !== null ? false : undefined}><DropdownMenuGroup>
           {custom && <DropdownMenuItem disabled={locked} onClick={() => { if (!locked) edit(custom) }}>{t("modelCatalog.editCustom")}</DropdownMenuItem>}
           {catalog.source !== "official-shared" && catalog.source !== "custom" ? <DropdownMenuItem disabled={locked} onClick={() => {
             if (locked) return
@@ -403,6 +408,7 @@ function ProviderSettingsCard({
             setContextDraft({ provider: catalog.provider, model: model.model, revision: catalog.revision, displayName: model.displayName, previousContextWindow: model.contextWindow, maxContextWindow: model.maxContextWindow, value: String(model.contextWindow), preset: contextWindowPreset(model.contextWindow, model.maxContextWindow, "third-party") })
           }}>{t("openAiModelCatalog.adjustContext")}</DropdownMenuItem>
           {catalog.source !== "official-shared" ? <DropdownMenuItem disabled={locked} onClick={() => { if (locked) return; management.clearError(); setTemplateTarget({ provider: catalog.provider, model: model.model, revision: catalog.revision }) }}>{t("modelTemplate.title")}</DropdownMenuItem> : null}
+          {catalog.provider.startsWith("clp-") ? <DropdownMenuItem disabled={locked} onClick={() => { if (locked) return; management.clearError(); setRequestOptionsTarget({ provider: catalog.provider, model: model.model, displayName: model.displayName, resourceRevision: settings.resourceRevision }) }}>{t("clineRequestOptions.action")}</DropdownMenuItem> : null}
           <DropdownMenuItem variant="destructive" className="flex-col items-start whitespace-normal" disabled={locked || reason !== undefined} onClick={() => { if (locked || reason !== undefined) return; void management.mutate({ operation: "model.remove", provider: catalog.provider, model: model.model }) }}><span>{t("modelCatalog.remove")}</span>{reason ? <span className="text-xs">{reason}</span> : null}</DropdownMenuItem>
           </DropdownMenuGroup></DropdownMenuContent>
         </DropdownMenu>
@@ -568,6 +574,7 @@ function ProviderSettingsCard({
       </DialogContent>
     </Dialog>
     {additionTarget !== null ? <ProviderModelAdditionDialog key={`${additionTarget.provider}:${additionTarget.revision}`} target={additionTarget} open={pending === null} stale={catalogReadOnly || settings.resourceRevision !== additionTarget.revision} management={management} previewRef={additionPreviewRef} finalFocus={additionTriggerRef} onClose={() => setAdditionTarget(null)} /> : null}
+    {requestOptionsTarget !== null ? <ProviderModelRequestOptionsDialog key={`${requestOptionsTarget.provider}:${requestOptionsTarget.model}:${requestOptionsTarget.resourceRevision}`} target={requestOptionsTarget} open={pending === null} stale={catalogReadOnly || settings.resourceRevision !== requestOptionsTarget.resourceRevision} management={management} finalFocus={actionTriggerRef} onClose={() => setRequestOptionsTarget(null)} /> : null}
     {templateTarget !== null ? <ProviderModelTemplateDialog key={`${templateTarget.provider}:${templateTarget.model}:${templateTarget.revision}`} target={templateTarget} open={pending === null} stale={catalogReadOnly || settings.modelCatalogs.find(catalog => catalog.provider === templateTarget.provider)?.revision !== templateTarget.revision} management={management} previewRef={templatePreviewRef} finalFocus={templateTriggerRef} onClose={() => setTemplateTarget(null)} /> : null}
     {section === "models" && <OpenAiModelDetails model={detailModel} revision={selectedModel?.revision ?? null} provider={selectedModel?.provider} stale={detailsStale} open={selectedModel !== null} loading={management.loading} onClose={() => setSelectedModel(null)} onReload={() => { setSelectedModel(null); management.refetch() }} />}
   </>
@@ -628,6 +635,7 @@ function ProviderSettingsConfirmationDialog({
 }) {
   const { t } = useTranslation()
   if (pending.operation === "model.add") return <ProviderModelAdditionConfirmation preview={pending} saving={saving} loading={loading ?? false} finalFocus={finalFocus} onConfirm={onConfirm} onCancel={onCancel} />
+  if (pending.operation === "model.request-options") return <ProviderModelRequestOptionsConfirmation preview={pending} saving={saving} loading={loading ?? false} finalFocus={finalFocus} onConfirm={onConfirm} onCancel={onCancel} />
   if (pending.operation === "model.template.update") return <ProviderModelTemplateConfirmation preview={pending} saving={saving} loading={loading} finalFocus={finalFocus} onConfirm={onConfirm} onCancel={onCancel} />
   if (pending.operation === "provider.web-search") return <ProviderWebSearchConfirmation preview={pending} saving={saving} loading={loading} finalFocus={finalFocus} onConfirm={onConfirm} onCancel={onCancel} />
   const localRemoval = pending.operation === "model.remove"

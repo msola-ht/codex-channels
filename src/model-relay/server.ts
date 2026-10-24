@@ -7,7 +7,7 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, type RelayModelCapability, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
-import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
+import { applyClinePassProviderOptions, pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 import { ModelRequestTimeoutError } from "../provider-proxy/index.js";
 import type { SamplingParameters } from "../model-api/index.js";
@@ -237,8 +237,10 @@ export class ModelRelayServer {
       body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, provider!, reasoningPolicy)
         : applyChatReasoningPolicy(body as DirectChatRequest, provider!, reasoningPolicy, prepared.modelCapabilities?.find(model => model.id === body!.model));
       if (protocol === "chat" && provider!.startsWith("clp-")) {
-        const routed = pinClinePassRouting(body, prepared.modelCapabilities?.find(model => model.id === body!.model)?.cline_request_profile);
-        clineRoutingChanged = routed !== body;
+        const capability = prepared.modelCapabilities?.find(model => model.id === body!.model);
+        const customized = applyClinePassProviderOptions(body, capability?.cline_provider_options);
+        const routed = pinClinePassRouting(customized, capability?.cline_request_profile);
+        clineRoutingChanged = routed !== customized;
         body = routed;
       }
       if (Buffer.byteLength(JSON.stringify(body)) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");

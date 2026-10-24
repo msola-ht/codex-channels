@@ -7,6 +7,6 @@ export class ProviderModelGuard {
     blockedPaths?: readonly string[];
   });
   isEnabled(model: string, signal?: AbortSignal): Promise<boolean>;
-  modelCapabilities(model: string, signal?: AbortSignal): Promise<{ reasoningEfforts: string[]; sampling?: SamplingParameters; clineRequestProfile?: ClinePassRequestProfile } | undefined>;
+  modelCapabilities(model: string, signal?: AbortSignal): Promise<{ reasoningEfforts: string[]; sampling?: SamplingParameters; clineRequestProfile?: ClinePassRequestProfile; clineProviderOptions?: import("./cline-provider-options.mjs").ClineProviderOptions } | undefined>;
   close(): Promise<void>;
 }

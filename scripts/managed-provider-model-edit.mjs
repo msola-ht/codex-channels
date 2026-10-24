@@ -12,6 +12,8 @@ import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provi
 import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
+import { validateClinePassProviderOptions } from "../runtime/cline-provider-options.mjs";
+import { resolveClinePassRequestProfile } from "../runtime/chat-reasoning.mjs";
 
 const revisionSecret = randomBytes(32);
 const revisionOf = value => createHmac("sha256", revisionSecret).update(JSON.stringify(value)).digest("hex");
@@ -24,7 +26,63 @@ const fields = new Set(["id", "name", "description", "contextWindow", "maxContex
 export async function loadManagedProviderModelEdit(provider, model, { environment = process.env } = {}) {
   try {
     const state = await readState(provider, model, environment);
-    return { provider, model, providers: state.providers, revision: state.revision, definition: state.definition };
+    return { provider, model, providers: state.providers, revision: state.revision, definition: state.definition,
+      requestProfile: resolveClinePassRequestProfile(model, state.original.cline_request_profile),
+      providerOptions: structuredClone(state.original.cline_provider_options ?? {}) };
+  } catch (error) { throw stateError(error); }
+}
+
+/** Read the raw CLP request-overlay revision without exposing unrelated model fields. */
+export async function loadManagedProviderModelRequestOptions(provider, model, { environment = process.env } = {}) {
+  try {
+    const state = await readState(provider, model, environment);
+    return { provider, model, providers: state.providers, revision: state.revision,
+      requestProfile: resolveClinePassRequestProfile(model, state.original.cline_request_profile),
+      providerOptions: structuredClone(state.original.cline_provider_options ?? {}) };
+  } catch (error) { throw stateError(error); }
+}
+
+export async function previewManagedProviderModelRequestOptions(input, { environment = process.env } = {}) {
+  try {
+    if (!record(input) || Object.keys(input).some(key => !["provider", "model", "revision", "providerOptions"].includes(key))
+      || typeof input.revision !== "string") {
+      throw invalid("invalid-input", "providerOptions", "请提供准确账户、模型、目录修订及请求改写对象");
+    }
+    const state = await readState(input.provider, input.model, environment);
+    const preview = (await buildPlan({ provider: input.provider, model: input.model, revision: input.revision,
+      definition: state.definition, providerOptions: input.providerOptions }, environment, true)).preview;
+    return { ...preview, requestProfile: resolveClinePassRequestProfile(input.model, state.original.cline_request_profile),
+      providerOptions: validateClinePassProviderOptions(input.providerOptions) ?? {} };
+  } catch (error) { throw stateError(error); }
+}
+
+export async function applyManagedProviderModelRequestOptions(input, { environment = process.env, preview } = {}) {
+  try {
+    return await withModelProviderManagementTransaction(environment, async () => {
+      if (!record(input) || Object.keys(input).some(key => !["provider", "model", "revision", "providerOptions"].includes(key))
+        || typeof input.revision !== "string") {
+        throw invalid("invalid-input", "providerOptions", "请提供准确账户、模型、目录修订及请求改写对象");
+      }
+      const state = await readState(input.provider, input.model, environment);
+      const plan = await buildPlan({ provider: input.provider, model: input.model, revision: input.revision,
+        definition: state.definition, providerOptions: input.providerOptions }, environment, false);
+      if (!preview) throw stale();
+      const expected = { ...preview };
+      delete expected.operation;
+      delete expected.requestProfile;
+      delete expected.providerOptions;
+      if (!isDeepStrictEqual(expected, plan.preview)) throw stale();
+      if (!plan.preview.willChange) return { action: "unchanged", activation: "none" };
+      await assertProviderFileSnapshots(plan.state.snapshots).catch(() => { throw stale(); });
+      try {
+        writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
+          new Map(plan.state.snapshots.filter(file => !file.path.endsWith(".settings-pending"))
+            .map(file => [file.path, file.content?.toString("utf8")])), environment);
+      } catch (error) {
+        throw invalid("operation-failed", "definition", "请求改写保存未完成或结果无法确认；请核对目录、备份及恢复记录，勿自动重试", error);
+      }
+      return { action: "updated", activation: plan.preview.activation };
+    });
   } catch (error) { throw stateError(error); }
 }
 
@@ -53,7 +111,7 @@ export async function applyManagedProviderModelEdit(input, { environment = proce
 }
 
 async function buildPlan(input, environment, validateCatalog) {
-  if (!record(input) || Object.keys(input).some(key => !["provider", "model", "revision", "definition"].includes(key))
+  if (!record(input) || Object.keys(input).some(key => !["provider", "model", "revision", "definition", "providerOptions"].includes(key))
     || typeof input.revision !== "string" || !/^[a-f0-9]{64}$/u.test(input.revision)) {
     throw invalid("invalid-input", "revision", "请提供准确账户、原模型 ID、完整模型定义及有效目录修订");
   }
@@ -91,6 +149,16 @@ async function buildPlan(input, environment, validateCatalog) {
   }
   if (after.slug !== state.original.slug || !isDeepStrictEqual(presence(after, "cline_request_profile"), presence(state.original, "cline_request_profile"))) {
     throw invalid("invalid-input", "definition", "模型编辑不能改变模型身份或请求路由");
+  }
+  if (Object.hasOwn(input, "providerOptions")) {
+    let options;
+    try {
+      options = validateClinePassProviderOptions(input.providerOptions);
+    } catch (error) {
+      throw invalid("invalid-input", "providerOptions", error instanceof Error ? error.message : "请求改写无效", error);
+    }
+    if (options === undefined) delete after.cline_provider_options;
+    else after.cline_provider_options = options;
   }
   const changes = [...new Set([...Object.keys(state.original), ...Object.keys(after)])].sort()
     .filter(field => !isDeepStrictEqual(presence(state.original, field), presence(after, field)))

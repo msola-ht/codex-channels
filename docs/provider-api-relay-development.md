@@ -71,7 +71,7 @@ Relay 重启取消自身在途请求，不停止共享 App Server。
 仅开放 `POST /v1/chat/completions`、`POST /v1/responses` 和 `GET /v1/models`。
 模型列表返回 Key 授权列表与对应提供商当前目录的交集；不提供响应读取、取消或服务端会话管理端点。
 
-请求保留解析后的普通 JSON 字段和值，由上游判断模型参数、工具、图片与扩展内容。CLP 鉴权与精确模型匹配后读取共用目录的请求快照；Flash 快照固定出站 `providerOptions.gateway.only = ["deepseek"]`，覆盖客户端同名值，保留其他合法字段，畸形容器在出站前拒绝。标准快照不固定路由；未保存快照时仅精确原 Flash ID 使用历史默认。JSON/SSE 一致，不取消限定重试；其他 Provider 不注入。历史云端探测及限制见[CLP 路由记录](cline-pass.md#上游路由限定探测)。
+请求保留解析后的普通 JSON 字段和值，由上游判断模型参数、工具、图片与扩展内容。CLP 鉴权与精确模型匹配后读取共用目录的请求快照与可选 `cline_provider_options`：后者先递归合并到出站 `providerOptions`，数组、标量和 null 覆盖客户端值。字段不设白名单，保存值原样发出；非对象容器由覆盖替换或保留，不在本地按字段拒绝。Flash 在未显式设置 `providerOptions.gateway.only` 时补 `["deepseek"]`，显式值按原样保留。标准快照不固定路由；未保存快照时仅精确原 Flash ID 使用历史默认。JSON/SSE 一致，不取消限定重试；其他 Provider 不注入。历史云端探测及限制见[CLP 路由记录](cline-pass.md#上游路由限定探测)。
 Relay 不下载远程图片，不读取请求里的本机路径。具体本地边界如下：
 
 | 字段或条件 | 当前处理 |

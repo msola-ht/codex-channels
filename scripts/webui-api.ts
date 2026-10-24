@@ -783,6 +783,7 @@ export interface ProviderModelTemplateUpdateInput {
 export type ManagementProviderSettingsMutationInput =
   | ({ operation: "provider.web-search" } & import("./provider-web-search-management.mjs").ProviderWebSearchChangeInput)
   | ({ operation: "model.add" } & import("./provider-model-additions.mjs").ProviderModelAdditionInput)
+  | import("./managed-provider-model-edit.mjs").ManagedProviderModelRequestOptionsInput & { operation: "model.request-options" }
   | ProviderModelTemplateUpdateInput
   | { operation: "model.remove"; provider: string; model: string }
   | { operation: "model.context"; provider: string; model: string; contextWindow: number; revision: string }
@@ -883,13 +884,25 @@ export interface ProviderModelTemplateUpdatePreview extends Omit<ManagementProvi
 export type ProviderModelAdditionManagementPreview = Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "revision" | "activation" | "providers" | "willChange"> & import("./provider-model-additions.mjs").ProviderModelAdditionPreview & {
   operation: "model.add"
 }
+export interface ProviderModelRequestOptionsManagementPreview extends Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "model" | "revision" | "activation" | "providers" | "willChange"> {
+  operation: "model.request-options"
+  provider: string
+  model: string
+  providers: string[]
+  requestProfile: import("../runtime/chat-reasoning.mjs").ClinePassRequestProfile
+  providerOptions: import("../runtime/cline-provider-options.mjs").ClineProviderOptions
+  changes: Array<{ field: string; before: import("./managed-provider-model-edit.mjs").ManagedProviderModelEditField; after: import("./managed-provider-model-edit.mjs").ManagedProviderModelEditField }>
+  revision: string
+  willChange: boolean
+  activation: "restart-app-server" | "none"
+}
 export interface ProviderWebSearchManagementPreview extends Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "before" | "effects"> {
   operation: "provider.web-search"
   provider: string
   before: { mode: import("../runtime/provider-web-search.mjs").ProviderWebSearchMode | null }
   mode: import("../runtime/provider-web-search.mjs").ProviderWebSearchMode | null
 }
-export type ManagementProviderSettingsPreview = ManagementProviderSettingsStandardPreview | ProviderModelTemplateUpdatePreview | ProviderModelAdditionManagementPreview | ProviderWebSearchManagementPreview
+export type ManagementProviderSettingsPreview = ManagementProviderSettingsStandardPreview | ProviderModelTemplateUpdatePreview | ProviderModelAdditionManagementPreview | ProviderModelRequestOptionsManagementPreview | ProviderWebSearchManagementPreview
 
 export interface ManagementProviderSettingsPreviewResponse {
   preview: ManagementProviderSettingsPreview

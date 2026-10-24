@@ -23,5 +23,5 @@ export { RelayMetricsServer, sendRelayMetrics, type RelayMetricEnvelope, type Re
 
 export { RelayTrafficDump, type DirectChatCapture } from "./relay-traffic-dump.js";
 export type { ModelRequestDiagnostics } from "./chat-diagnostics.js";
-export { pinClinePassRouting } from "./cline-pass-routing.js";
+export { applyClinePassProviderOptions, pinClinePassRouting } from "./cline-pass-routing.js";
 export { AggregateModelProxy, type AggregateModelProxyOptions, type AggregateModelRoute } from "./aggregate-proxy.js";
