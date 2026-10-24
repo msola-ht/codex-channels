@@ -222,7 +222,7 @@
 - `custom-model-capability-probe.mjs` / `custom-model-capability-probe.d.mts`：CLI 与 WebUI 共用的单项工具探测；按用户选择验证 apply_patch 或 tool_search 的调用及模拟结果接续，不执行返回的工具。另支持一次有界流式原生 web_search 诊断，上游可能实际搜索并计费，仅完整结构化搜索证据算通过；结构化工具拒绝复用 Provider Proxy 分类器及实际出站工具索引，覆盖 HTTP、顶层和选择项流错误；使用手填思考等级和安全结果，不写配置。
   工具探测的每步非流式成功响应必须声明与请求精确相同的模型 ID；缺失、无效或错模型返回无法确认，不以请求 ID 代替响应证据，也不自动解析模型别名。
 - `custom-model-capability-setup.mjs` / `custom-model-capability-setup.d.mts`：CLI 逐模型、逐项询问 apply_patch 和 tool_search，支持手动选择或显式探测本项；用户选择采用结果后才回填草稿，最终复用 Provider 预览和目录事务。原生网页搜索默认跳过，仅诊断，不回填工具能力或改变搜索策略。
-- `provider-web-search-probe.mjs` / `provider-web-search-probe.d.mts`：已配置提供商共用的原生网页搜索诊断，按目录修订和明确账户解析模型、协议及凭据；CLP 读取已保存的请求配置，使继承模型的思考参数与固定路由和正常桥一致。复用单请求探测引擎，不写目录或搜索策略，不自动刷新登录或启动服务。CLI 和 WebUI 共用同一执行入口。
+- `provider-web-search-probe.mjs` / `provider-web-search-probe.d.mts`：已配置提供商共用的原生网页搜索诊断，按目录修订和明确账户解析模型、协议及凭据；CLP 读取共享模型目录中已保存的思考格式和请求改写，与正常桥保持一致，不自动补入路由。复用单请求探测引擎，不写目录或搜索策略，不自动刷新登录或启动服务。CLI 和 WebUI 共用同一执行入口。
 - `provider-web-search-setup.mjs`：Config 与 Setup 共用的提供商联网搜索菜单，按精确账户选择并展示当前模式，复用 `provider-web-search-management.mjs` 的预览确认、备份事务和回读；共用全局配置的提供商提示转到用户偏好菜单。取消或无变化不写入，不执行搜索探测或服务重启。
 - `responses-websocket-probe.mjs` / `responses-websocket-probe.d.mts`：按锁定 Codex 协议探测第三方 Responses WS 握手、预热及可选文字请求；复用代理，限制超时与响应大小，取消时释放连接，不保存凭据或原始响应。
 - `responses-websocket-setup.mjs` / `responses-websocket-setup.d.mts`：新增、编辑 Codex 兼容 Provider 时选择自动检测或手动 WS 开关，模型请求须确认可能计费，结果只进入最终保存预览；CP 自定义提供商仅手动选择 WS 开关。

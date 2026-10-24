@@ -884,17 +884,8 @@ export interface ProviderModelTemplateUpdatePreview extends Omit<ManagementProvi
 export type ProviderModelAdditionManagementPreview = Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "revision" | "activation" | "providers" | "willChange"> & import("./provider-model-additions.mjs").ProviderModelAdditionPreview & {
   operation: "model.add"
 }
-export interface ProviderModelRequestOptionsManagementPreview extends Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "model" | "revision" | "activation" | "providers" | "willChange"> {
+export type ProviderModelRequestOptionsManagementPreview = Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "model" | "revision" | "activation" | "providers" | "willChange"> & import("./managed-provider-model-edit.mjs").ManagedProviderModelRequestOptionsPreview & {
   operation: "model.request-options"
-  provider: string
-  model: string
-  providers: string[]
-  requestProfile: import("../runtime/chat-reasoning.mjs").ClinePassRequestProfile
-  providerOptions: import("../runtime/cline-provider-options.mjs").ClineProviderOptions
-  changes: Array<{ field: string; before: import("./managed-provider-model-edit.mjs").ManagedProviderModelEditField; after: import("./managed-provider-model-edit.mjs").ManagedProviderModelEditField }>
-  revision: string
-  willChange: boolean
-  activation: "restart-app-server" | "none"
 }
 export interface ProviderWebSearchManagementPreview extends Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "before" | "effects"> {
   operation: "provider.web-search"

@@ -42,9 +42,13 @@ export interface ManagedProviderModelEditPreview {
   willChange: boolean;
   activation: "restart-app-server" | "none";
 }
+export interface ManagedProviderModelRequestOptionsPreview extends ManagedProviderModelEditPreview {
+  requestProfile: ClinePassRequestProfile;
+  providerOptions: ClineProviderOptions;
+}
 export function loadManagedProviderModelEdit(provider: string, model: string, options?: { environment?: NodeJS.ProcessEnv }): Promise<ManagedProviderModelEdit>;
 export function loadManagedProviderModelRequestOptions(provider: string, model: string, options?: { environment?: NodeJS.ProcessEnv }): Promise<ManagedProviderModelRequestOptions>;
 export function previewManagedProviderModelEdit(input: ManagedProviderModelEditInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ManagedProviderModelEditPreview>;
 export function applyManagedProviderModelEdit(input: ManagedProviderModelEditInput, options: { environment?: NodeJS.ProcessEnv; preview: ManagedProviderModelEditPreview }): Promise<{ action: "updated" | "unchanged"; activation: "restart-app-server" | "none" }>;
-export function previewManagedProviderModelRequestOptions(input: ManagedProviderModelRequestOptionsInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ManagedProviderModelEditPreview>;
+export function previewManagedProviderModelRequestOptions(input: ManagedProviderModelRequestOptionsInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ManagedProviderModelRequestOptionsPreview>;
 export function applyManagedProviderModelRequestOptions(input: ManagedProviderModelRequestOptionsInput, options: { environment?: NodeJS.ProcessEnv; preview: ManagedProviderModelEditPreview }): Promise<{ action: "updated" | "unchanged"; activation: "restart-app-server" | "none" }>;

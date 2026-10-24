@@ -87,7 +87,7 @@ async function resolveMaterial(input, environment) {
   const model = catalog.models.find(entry => entry.id === input.model);
   if (!model) throw new ProviderWebSearchProbeError("invalid_input");
   const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === input.provider);
-  // CLP Codex 启用名单与 Relay 的独立转发目录不同，必须读取前者。
+  // CLP 与 Relay 共用受管模型目录，探测须与该目录的当前启用模型一致。
   const material = definition ? loadConfiguredManagedProviderMaterial(input.provider, environment)
     : loadConfiguredRelayProviderMaterial(input.provider, environment);
   if (!material.models.includes(input.model)) throw new ProviderWebSearchProbeError("stale_revision");

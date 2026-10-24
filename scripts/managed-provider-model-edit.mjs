@@ -218,6 +218,9 @@ async function readState(provider, model, environment) {
     || !record(manifest) || typeof manifest.source !== "string" || !manifest.source) {
     throw invalid("provider-state-unavailable", "provider", "账户模型目录或来源清单无效");
   }
+  // Validate the captured values, not only the earlier management-state read:
+  // this snapshot supplies preview fields, backups and the eventual write.
+  for (const entry of catalog.models) validateClinePassProviderOptions(entry.cline_provider_options);
   readModelTemplateBindings(manifest, catalog.models.map(model => model.slug));
   if (!isDeepStrictEqual(catalog.models.map(model => model.slug).sort(), visible.models.map(model => model.id).sort())) throw stale();
   const original = catalog.models.find(entry => entry.slug === model);

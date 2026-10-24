@@ -6,7 +6,8 @@ const maximumArrayItems = 64;
 const maximumStringLength = 4096;
 const maximumKeyLength = 128;
 const forbiddenKeys = new Set(["__proto__", "prototype", "constructor"]);
-const credentialSuffix = /(?:api[-_]?key|authorization|password|secret|token)$/iu;
+// Includes Cookie/Set-Cookie headers and cookie collections at any nesting level.
+const credentialSuffix = /(?:api[-_]?key|authorization|password|secret|token|cookies?)$/iu;
 
 /**
  * One CLP model's providerOptions overlay. Field names and values are passed
