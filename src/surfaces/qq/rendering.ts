@@ -38,6 +38,8 @@ export interface QqRenderedMessage {
   /** Complete readable content; the persistent event retains the original source. */
   text: string;
   blocks: QqContentBlock[];
+  /** Command panels prefer fewer complete messages over splitting literal fields from headings. */
+  compact?: boolean;
 }
 
 function validateText(text: string): void {
@@ -98,6 +100,7 @@ export function planQqMessage(result: QqRenderedMessage, maximum = MAX_MESSAGE_C
   if (plain.length > maximum) plain = plainChunks(result.text, false);
   const planned = messages.length > 0 && messages.length <= maximum && messages.every(message => message.content.trim())
     && !(messages.length === maximum && plain.length < maximum)
+    && !(result.compact && plain.length < messages.length)
     ? messages : plain;
   if (planned.length > maximum || planned.some(message => !message.content.trim())) {
     throw new Error("QQ 当前额度无法发送完整结果，保留待核对");
@@ -119,7 +122,7 @@ export function renderQqCommandResult(result: ConversationCommandResult): QqRend
     const value = `名称：${result.outcome.name}`;
     const text = `${title}\n${value}`;
     validateText(text);
-    return { text, blocks: [{ text: title, markdown: `## ${title}` }, { text: value }] };
+    return { text, blocks: [{ text: title, markdown: `## ${title}` }, { text: value }], compact: true };
   }
   if (result.kind === "permissions") {
     // Profile descriptions can contain newlines. Keep their structure outside the panel parser.
@@ -131,11 +134,11 @@ export function renderQqCommandResult(result: ConversationCommandResult): QqRend
         : "当前 Workspace：未能从当前会话读取。",
       "可选择的 Permission Profiles（可选择不代表当前正在使用）：",
       ...result.profiles.map(profile =>
-        `- ${profile.id} · ${profile.allowed ? "可选择" : "不可选择（受策略禁止）"}${profile.description ? ` · ${profile.description}` : ""}`),
+        `• ${profile.id} · ${profile.allowed ? "可选择" : "不可选择（受策略禁止）"}${profile.description ? ` · ${profile.description}` : ""}`),
     ].join("\n");
     const text = `${title}\n${values}`;
     validateText(text);
-    return { text, blocks: [{ text: title, markdown: `## ${title}` }, { text: values }] };
+    return { text, blocks: [{ text: title, markdown: `## ${title}` }, { text: values }], compact: true };
   }
   const text = renderConversationCommandResult(result);
   if (text === null) return null;
@@ -164,7 +167,7 @@ export function renderQqCommandResult(result: ConversationCommandResult): QqRend
     });
     const restoredText = blocks.map(block => block.text).join("\n");
     validateText(restoredText);
-    return { text: restoredText, blocks };
+    return { text: restoredText, blocks, compact: true };
   }
   return renderQqPanel(text);
 }

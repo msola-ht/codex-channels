@@ -118,6 +118,7 @@ export function renderQqContent(source: string, panel = false): QqContentBlock[]
     return match ? [match[1]!.length] : [];
   });
   const indentUnit = panel ? 2 : Math.min(4, ...indents);
+  const listStart = panel ? /^( *)(?:[-+*•]|\d+[.)]) /u : /^( *)(?:[-+*]|\d+[.)]) /u;
   let listContext = false;
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!;
@@ -162,9 +163,10 @@ export function renderQqContent(source: string, panel = false): QqContentBlock[]
     const marker = list ? (/^\d/u.test(list[2]!) ? list[2]!.replace(")", ".") : "-") : "";
     const prefix = heading ? `${"#".repeat(Math.min(2, heading[1]!.length))} `
       : list ? `${" ".repeat(indent)}${marker} ` : quote ? "> " : "";
-    const plainPrefix = list ? `${list[1]}${list[2]} ` : quote ? "> " : "";
+    const plainPrefix = list ? `${list[1]}${panel && !/^\d/u.test(list[2]!) ? "•" : list[2]} ` : quote ? "> " : "";
     const previous = blocks.at(-1);
-    if (list && previous?.text.trim() && !/^(?: *[-+*] | *\d+[.)] |>|#{1,2} )/u.test(previous.markdown ?? previous.text)) {
+    if (list && previous?.text.trim() && !listStart.test(previous.markdown ?? previous.text)
+      && !/^(?:>|#{1,2} )/u.test(previous.markdown ?? previous.text)) {
       blocks.push({ text: "", markdown: "" });
     }
     blocks.push({ text: plainPrefix + part.text,
@@ -173,9 +175,8 @@ export function renderQqContent(source: string, panel = false): QqContentBlock[]
   const grouped: QqContentBlock[] = [];
   for (const block of blocks) {
     const previous = grouped.at(-1);
-    const list = /^( *)(?:[-+*]|\d+[.)]) /u;
     const quote = /^> /u;
-    if (previous && ((list.test(previous.text) && list.test(block.text))
+    if (previous && ((listStart.test(previous.text) && listStart.test(block.text))
       || (quote.test(previous.text) && quote.test(block.text)))) {
       previous.text += `\n${block.text}`;
       if (previous.markdown !== undefined && block.markdown !== undefined) previous.markdown += `\n${block.markdown}`;
