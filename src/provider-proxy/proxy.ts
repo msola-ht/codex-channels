@@ -52,6 +52,7 @@ import {
   observeChatTiming,
   invalidateGenerationTiming,
   parseJsonPayload,
+  requestServiceTier,
   websocketCloseErrorType,
   weeklyQuotaFromEvent,
   weeklyQuotaFromHeaders,
@@ -812,8 +813,10 @@ export class ProviderProxy {
       exchange?.requestChunk(chunk);
     };
     const observeRequestEnd = (): void => {
+      let parsedRequest = bufferedRequest?.parsed;
       if (recordsResponseMetrics && !bufferedRequest && !activityOverflow) {
-        observeRequestActivity(metrics, parseJsonPayload(Buffer.concat(activityChunks).toString("utf8")));
+        parsedRequest = parseJsonPayload(Buffer.concat(activityChunks).toString("utf8"));
+        observeRequestActivity(metrics, parsedRequest);
         activityChunks.length = 0;
       }
       if (scansRequestMetadata) {
@@ -827,6 +830,9 @@ export class ProviderProxy {
           metrics.requestServiceTier = boundedString(requestTierScanner.value);
           metrics.reasoningEffort = boundedString(requestEffortScanner.value);
         }
+      }
+      if (recordsResponseMetrics && parsedRequest !== undefined) {
+        metrics.requestServiceTier = requestServiceTier(asRecord(parsedRequest));
       }
       exchange?.requestEnd();
     };
@@ -1202,7 +1208,6 @@ export class ProviderProxy {
           activeMetrics.model = inspected.model ?? null;
           activeMetrics.requestModel = inspected.model ?? null;
           exchange?.observeRequestMetrics(activeMetrics);
-          activeMetrics.serviceTier = inspected.serviceTier ?? null;
           activeMetrics.requestServiceTier = inspected.serviceTier ?? null;
           activeMetrics.reasoningEffort = inspected.reasoningEffort ?? null;
         }
@@ -1618,7 +1623,7 @@ function inspectClientWebSocketMessage(
   const rawMetadata = clientMetadata?.["x-codex-turn-metadata"];
   const requestStartedAtMs = requestStartTimestamp(clientMetadata);
   const model = boundedString(parsed.model) ?? undefined;
-  const serviceTier = boundedString(parsed.service_tier) ?? undefined;
+  const serviceTier = requestServiceTier(parsed) ?? undefined;
   const reasoning = asRecord(parsed.reasoning);
   const reasoningEffort = boundedString(reasoning?.effort) ?? undefined;
   const parsedMetadata = typeof rawMetadata === "string"

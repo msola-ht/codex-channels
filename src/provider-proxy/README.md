@@ -114,7 +114,7 @@
   HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
   HTTP JSON/SSE 与 WebSocket 共用终态提取 `usage_metadata.amount`，以可空 `responseUsageAmount`
   传递有界非负十进制字符串；保留精度和零值，缺失或畸形值为 null，不采集任意 metadata、换算单位或推断费用。
-  两种传输同时采集出站 `service_tier` 为 `requestServiceTier`，不受响应层级覆盖，缺失为空；沿用指标 IPC 入库且不依赖调用转储。
+  两种传输同时采集出站 `service_tier` 为 `requestServiceTier`，不受响应层级覆盖；完整解析的请求明确省略该字段或为 null 时，规范记录 `default` 表示未请求加速。未完成解析、畸形字段及历史未采集仍为空。WebSocket 从完整请求帧解析；HTTP 复用已有完整缓冲或不超过 1 MiB 的活动采集缓冲，超限时仅保留扫描到的显式字符串，不推断省略。不改写出站正文、响应档位或旧数据，沿用指标 IPC 入库且不依赖调用转储。
   生成计时持续观察有界 Responses 事件；普通指标的 `errorMessage` 恒为 null，JSON/SSE/WS 的上游错误正文及关闭原因不进入指标，Chat 的客户端固定错误文案也不复制到指标。保留受限错误分类、代码与HTTP状态；标识符和 `User-Agent` 继续执行既有限长与字符约束。指标IPC对带有界错误文本的既有帧仍校验后投影为null，不向Writer透传；不改写已存历史记录。
 - `traffic-call-timing.ts`：记录单次调用从提交发送起的单调时钟耗时；只写调用响应索引，不进入指标 IPC 或数据库。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接

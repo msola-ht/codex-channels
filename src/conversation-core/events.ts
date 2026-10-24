@@ -142,6 +142,11 @@ export interface ResponseUsageSummary {
 }
 
 export interface TurnOutputTiming {
+  /** Outgoing request tiers only; excludes child/review/compact requests. */
+  serviceTierSummary?: {
+    requestCount: number;
+    requested: { value: string | null; observedCount: number; distinctCount: number };
+  };
   usageCoverage?: TokenUsageCoverage;
   performance?: {
     requestCount: number;

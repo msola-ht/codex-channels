@@ -605,6 +605,13 @@ export function httpResponseFormat(
   return "unknown";
 }
 
+/** Only a fully parsed request can prove that acceleration was omitted. */
+export function requestServiceTier(body: Record<string, unknown> | undefined): string | null {
+  if (body === undefined) return null;
+  if (!Object.hasOwn(body, "service_tier") || body.service_tier === null) return "default";
+  return boundedString(body.service_tier);
+}
+
 export function boundedString(value: unknown): string | null {
   return typeof value === "string"
     && value.length <= 128

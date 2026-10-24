@@ -226,6 +226,29 @@ export class SqliteRequestMetricsThreadQueries {
       durationMs: this.turnExecutionDuration(threadId, turnId),
       responseUsage: this.turnResponseUsage(threadId, turnId),
       performance: this.turnPerformance(threadId, turnId),
+      serviceTierSummary: this.turnServiceTiers(threadId, turnId),
+    };
+  }
+
+  private turnServiceTiers(threadId: string, turnId: string): NonNullable<StoredTurnRequestMetricsSummary["serviceTierSummary"]> {
+    const row = this.reader.prepare(`
+      WITH tiers AS (
+        SELECT CASE request_service_tier WHEN 'priority' THEN 'fast' ELSE request_service_tier END AS requested
+        FROM model_request_metrics
+        WHERE thread_id = ? AND turn_id = ? AND source = 'owned'
+          AND operation = 'response' AND request_purpose IS NULL
+      )
+      SELECT COUNT(*) AS requestCount,
+        MIN(requested) AS requestedValue, COUNT(requested) AS requestedCount,
+        COUNT(DISTINCT requested) AS requestedDistinct
+      FROM tiers
+    `).get(threadId, turnId) as {
+      requestCount: number;
+      requestedValue: string | null; requestedCount: number; requestedDistinct: number;
+    };
+    return {
+      requestCount: row.requestCount,
+      requested: { value: row.requestedValue, observedCount: row.requestedCount, distinctCount: row.requestedDistinct },
     };
   }
 
