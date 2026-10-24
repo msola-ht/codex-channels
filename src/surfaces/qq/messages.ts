@@ -25,7 +25,7 @@ export interface QqMessageOptions {
   logger: Logger;
 }
 
-const HELP = "QQ 文字任务\n直接发送文字提交到当前工作区。\n/help · /status · /stop\n/workspace [序号、ID 或名称]\n/model [共享模型选择参数]\n/new\n暂不支持附件、审批、问题交互或计划任务。结果投递失败请在本机投递箱核对。";
+const HELP = "QQ 文字任务\n直接发送文字提交到当前工作区。\n/help · /status · /stop\n/workspace [序号、ID 或名称]\n/model [共享模型选择参数]\n/new\n/sessions [页码] [search 关键词]\n/resume [序号、名称或 Session ID]（/r）\n恢复会话不补发旧任务结果；发送新消息后建立新的回传关联。\n暂不支持附件、审批、问题交互或计划任务。结果投递失败请在本机投递箱核对。";
 
 /** Owns one connection generation's input tasks and disposable source authority. */
 export class QqMessages implements SurfaceOutputPort {
@@ -120,16 +120,16 @@ export class QqMessages implements SurfaceOutputPort {
     if (!stop) this.busy.add(target.conversationId);
     try {
       if (command) {
-        if (!["help", "status", "stop", "workspace", "model", "new"].includes(command.name)
+        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume"].includes(command.name)
           || (["help", "status", "stop", "new"].includes(command.name) && command.argumentsText.trim())) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;
         }
         if (command.name === "help") { await this.reply(message, HELP, () => this.allowed(target, message.actorId)); return; }
-        if (((command.name === "workspace" || command.name === "model") && command.argumentsText.trim()) || command.name === "new") this.sources.cancelTarget(target);
+        if (((command.name === "workspace" || command.name === "model" || command.name === "resume") && command.argumentsText.trim()) || command.name === "new") this.sources.cancelTarget(target);
         const commandScope = this.scope(message.actorId);
-        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new", command.argumentsText, message.actorId);
+        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume", command.argumentsText, message.actorId);
         const scope = command.name === "workspace" && command.argumentsText.trim() ? this.scope(message.actorId) : commandScope;
-        const text = result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome, { resumeCommandAvailable: false })
+        const text = result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
           : renderConversationCommandResult(result.kind === "models" ? { kind: "models", view: "model", state: result.state } : result);
         if (!text) throw new Error("QQ 命令没有可交付结果");
         await this.reply(message, text, () => !!scope && this.current(scope));

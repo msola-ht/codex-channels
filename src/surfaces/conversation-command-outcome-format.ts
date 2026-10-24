@@ -21,7 +21,6 @@ import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-e
 
 export function formatConversationCommandOutcome(
   outcome: ConversationCommandOutcome,
-  options: { resumeCommandAvailable?: boolean } = {},
 ): string {
   switch (outcome.type) {
     case "thread.resumed":
@@ -59,9 +58,7 @@ export function formatConversationCommandOutcome(
           ...(recoverableThreadId
             ? [
                 ...(outcome.backgroundedThreadId ? [] : [`Session ID：${recoverableThreadId}`]),
-                ...(options.resumeCommandAvailable === false
-                  ? ["当前渠道暂不支持恢复旧会话。"]
-                  : [`恢复会话：/r ${recoverableThreadId}`]),
+                `恢复会话：/r ${recoverableThreadId}`,
               ]
             : []),
           "发送下一条普通消息时才会创建新的 Codex Session。",
