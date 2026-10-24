@@ -10,7 +10,9 @@ import { captureDelivery, checkpointDelivery } from "../delivery-receipt.js";
 import { parseSlashCommand } from "../slash-command.js";
 import type { SurfaceAdapter, SurfaceOutputPort } from "../types.js";
 import { createQqLedger } from "./ledger.js";
-import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, type QqMessageBody } from "./protocol.js";
+import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, maximumQqImageBytes, type QqMessageBody } from "./protocol.js";
+import { readGeneratedImage } from "../generated-image.js";
+import { generatedImageUnavailableText } from "../operation-presentation.js";
 import { planQqMessage, qqCommandNames, qqHelp, renderQqCommandResult, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 import { QqInteractionDeliveryError, QqInteractionPort } from "./interactions.js";
@@ -163,6 +165,14 @@ class QqGeneration implements SurfaceAdapter {
             grant = this.ledger.forTurn(actor, event.threadId, event.turnId);
           }
           if (!grant) throw new Error("QQ 输出回复来源未确认");
+          if (event.type === "operation.updated" && event.operation.kind === "imageGeneration" && event.operation.status === "completed") {
+            if (event.operation.imagePath !== undefined) {
+              await this.sendGeneratedImage(event.target, actor, grant, event.operation.imagePath, combined, authorized);
+            } else {
+              await this.send(event.target, actor, grant, renderQqPanel(generatedImageUnavailableText), combined, authorized);
+            }
+            return;
+          }
           const result = renderQqOutput(event);
           await this.send(event.target, actor, grant, result, combined, authorized);
         }, true);
@@ -316,6 +326,37 @@ class QqGeneration implements SurfaceAdapter {
     if (this.observedMilestones.has(stage)) return;
     this.observedMilestones.add(stage);
     this.options.logger.info({ surface: "qq", accountId: this.accountId, generationId: this.generationId, stage }, message);
+  }
+  private async sendGeneratedImage(target: ConversationTarget, actor: string, grant: string, path: string,
+    signal: AbortSignal, authorized: () => boolean): Promise<void> {
+    const current = (): void => {
+      signal.throwIfAborted();
+      if (!this.allowed(target, actor) || !authorized()) throw new Error("QQ 图片发送授权已失效");
+      if (this.ledger.remaining(grant, actor) < 1) throw new Error("QQ 图片回复额度不足");
+    };
+    current();
+    const image = await readGeneratedImage(path, maximumQqImageBytes);
+    current();
+    const reservation = await this.ledger.reserve(grant, actor, 1);
+    const remainingMs = this.ledger.remainingMs(grant, actor);
+    const sendSignal = AbortSignal.any([signal, AbortSignal.timeout(Math.ceil(remainingMs))]);
+    const beforeSend = (): void => {
+      sendSignal.throwIfAborted();
+      if (!this.allowed(target, actor) || !authorized() || Date.now() >= reservation.expiresAt) throw new Error("QQ 图片回复依据已失效");
+      this.ledger.remainingMs(grant, actor);
+    };
+    const uploaded = await checkpointDelivery("qq.c2c.upload-image", () => this.client.uploadC2CImage({
+      userOpenid: actor, bytes: image.bytes, format: image.format, signal: sendSignal, beforeSend,
+    }));
+    await checkpointDelivery("qq.c2c.image", () => this.client.sendC2CMessage({ userOpenid: actor,
+      msgId: reservation.msgId, msgSeq: reservation.msgSeq,
+      message: { kind: "image", fileInfo: uploaded.fileInfo }, signal: sendSignal,
+      beforeSend: () => {
+        beforeSend();
+        if (performance.now() >= uploaded.expiresAt) throw new Error("QQ 图片上传凭据已过期");
+      },
+    }));
+    this.observeMilestone("first-reply", "QQ 本运行代次首个完整回复已获平台确认；不代表客户端已读或模型完成");
   }
   private async sendMessages(target: ConversationTarget, actor: string, grant: string, messages: QqMessageBody[],
     signal: AbortSignal, authorized: (() => boolean) | undefined, allowFormatRejection: boolean): Promise<void> {

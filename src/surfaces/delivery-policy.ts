@@ -58,7 +58,8 @@ export function resolveSurfaceDelivery(
     const deliver = event.type === "text.completed" && event.phase !== "commentary"
       || event.type === "turn.completed"
       || event.type === "warning" && !event.globalIdle
-      || event.type === "operation.updated" && (event.operation.status === "failed" || event.operation.status === "declined");
+      || event.type === "operation.updated" && (event.operation.status === "failed" || event.operation.status === "declined"
+        || event.operation.kind === "imageGeneration" && event.operation.status === "completed");
     return { disposition: deliver ? "deliver" : "ignore", critical: deliver };
   }
   if (surface === "weixin") {

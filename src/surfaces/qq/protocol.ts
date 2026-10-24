@@ -2,7 +2,8 @@ const API_ORIGIN = "https://api.bot.qq.com";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
-export type QqProtocolOperation = "token" | "gateway" | "send";
+export type QqProtocolOperation = "token" | "gateway" | "upload" | "send";
+export const maximumQqImageBytes = 3 * 1024 * 1024;
 export type QqProtocolFailure =
   | "invalid-input" | "closed" | "cancelled" | "timeout" | "network"
   | "http" | "business" | "invalid-response" | "response-too-large";
@@ -26,11 +27,13 @@ export type QqMessageBody =
   | { kind: "text"; content: string }
   | { kind: "markdown"; content: string };
 
+type QqOutgoingMessage = QqMessageBody | { kind: "image"; fileInfo: string };
+
 export interface QqSendMessageInput {
   userOpenid: string;
   msgId: string;
   msgSeq: number;
-  message: QqMessageBody;
+  message: QqOutgoingMessage;
   signal?: AbortSignal;
   beforeSend?: () => void;
 }
@@ -144,16 +147,19 @@ export class QqProtocolClient {
     if (!validId(input.userOpenid) || !validId(input.msgId)
       || !Number.isSafeInteger(input.msgSeq) || input.msgSeq < 1 || input.msgSeq > 65535
       || !record(input.message)
-      || (input.message.kind !== "text" && input.message.kind !== "markdown")
-      || Object.keys(input.message).some((key) => key !== "kind" && key !== "content")
-      || typeof input.message.content !== "string" || input.message.content.trim().length === 0
-      || Buffer.byteLength(input.message.content, "utf8") > 4000) {
+      || (input.message.kind === "image"
+        ? Object.keys(input.message).some(key => key !== "kind" && key !== "fileInfo") || !validFileInfo(input.message.fileInfo)
+        : (input.message.kind !== "text" && input.message.kind !== "markdown")
+          || Object.keys(input.message).some(key => key !== "kind" && key !== "content")
+          || typeof input.message.content !== "string" || input.message.content.trim().length === 0
+          || Buffer.byteLength(input.message.content, "utf8") > 4000)) {
       throw new QqProtocolError("send", "invalid-input");
     }
     // Snapshot the validated payload before token refresh or any other asynchronous work.
     const path = `/v2/users/${encodeURIComponent(input.userOpenid)}/messages`;
     const body = {
-      ...(input.message.kind === "text"
+      ...(input.message.kind === "image" ? { msg_type: 7, media: { file_info: input.message.fileInfo } }
+        : input.message.kind === "text"
         ? { msg_type: 0, content: input.message.content }
         : { msg_type: 2, markdown: { content: input.message.content, force_verify_image_resource: true } }),
       msg_id: input.msgId,
@@ -165,6 +171,30 @@ export class QqProtocolClient {
       const data = await this.requestJson("send", path, body, signal, token);
       if (!validId(data.id)) throw new QqProtocolError("send", "invalid-response");
       return { messageId: data.id };
+    });
+  }
+
+  async uploadC2CImage(input: { userOpenid: string; bytes: Buffer; format: "png" | "jpeg";
+    signal: AbortSignal; beforeSend(): void }): Promise<{ fileInfo: string; expiresAt: number }> {
+    if (!validId(input.userOpenid) || !Buffer.isBuffer(input.bytes) || input.bytes.length === 0
+      || input.bytes.length > maximumQqImageBytes || !["png", "jpeg"].includes(input.format)) {
+      throw new QqProtocolError("upload", "invalid-input");
+    }
+    const path = `/v2/users/${encodeURIComponent(input.userOpenid)}/files`;
+    const body = { file_type: 1, srv_send_msg: false, file_name: input.format === "png" ? "image.png" : "image.jpg",
+      file_data: input.bytes.toString("base64") };
+    const started = performance.now();
+    return this.withRequest("upload", input.signal, async signal => {
+      const token = await this.getAccessToken(signal);
+      input.beforeSend();
+      const data = await this.requestJson("upload", path, body, signal, token);
+      if (!validId(data.file_uuid) || !validFileInfo(data.file_info) || typeof data.ttl !== "number"
+        || !Number.isSafeInteger(data.ttl) || data.ttl < 0 || "id" in data) {
+        throw new QqProtocolError("upload", "invalid-response");
+      }
+      const expiresAt = data.ttl === 0 ? Infinity : started + data.ttl * 1000;
+      if (performance.now() >= expiresAt) throw new QqProtocolError("upload", "invalid-response");
+      return { fileInfo: data.file_info, expiresAt };
     });
   }
 
@@ -267,6 +297,11 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function validFileInfo(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && Buffer.byteLength(value, "utf8") <= 32_768
+    && !/[\p{Cc}]/u.test(value) && Buffer.from(value, "utf8").toString("utf8") === value;
+}
+
 function validId(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0 || value.length > 512
     || /\s/u.test(value)
@@ -318,7 +353,12 @@ async function readBody(response: Response, signal: AbortSignal, operation: QqPr
 
 async function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined, operation: QqProtocolOperation): Promise<T> {
   if (!signal) return await promise;
-  if (signal.aborted) throw new QqProtocolError(operation, "cancelled");
+  if (signal.aborted) {
+    // Work may synchronously abort while creating this promise. Consume its later rejection
+    // even though cancellation must return immediately instead of waiting for that work.
+    void promise.catch(() => {});
+    throw new QqProtocolError(operation, "cancelled");
+  }
   let abort: () => void = () => {};
   const cancelled = new Promise<never>((_resolve, reject) => {
     abort = () => reject(new QqProtocolError(operation, "cancelled"));

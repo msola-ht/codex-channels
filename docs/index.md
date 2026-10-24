@@ -14,6 +14,8 @@ QQ 审批与普通同步问题通过共享 Coordinator/InteractionRouter 接入�
 实现与观察范围见 [P4 首批记录](qq-surface-plan.md#p4-一次性审批与普通问题)及[审批范围适配](qq-surface-plan.md#p4-审批范围适配)。
 MCP 工具审批的实现与验收边界见 [P4 工具审批](qq-surface-plan.md#p4-mcp-工具审批适配)。
 普通 MCP 表单的实现与验收边界见 [P4 表单交互](qq-surface-plan.md#p4-mcp-表单适配)。
+QQ 生成图片结果复用已有 `imageGeneration` 完成事件、安全图片读取与持久输出，仅新增渠道上传/发送适配；
+实现及未实机观察边界见[生成图片回传](qq-surface-plan.md#共享生成图片回传)。
 
 `0.164.0` 固定源码、随仓文档和生成协议已同步；位置和固定提交见
 [上游来源](upstream-sources.md)，取舍与验收限制见[升级决策](codex-cli-upgrade-decisions.md)。
