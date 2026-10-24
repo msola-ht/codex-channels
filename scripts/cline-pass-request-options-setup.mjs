@@ -22,8 +22,8 @@ export async function runClinePassRequestOptionsSetup(provider, {
   if (prompts.isCancel(model)) return { action: "back", activation: "none" };
   const current = await loadManagedProviderModelEdit(provider, model, { environment });
   output.write(`模型：${model}\n影响账户：${current.providers.join("、")}\n`);
-  output.write(`请求格式：${current.requestProfile === "deepseek-flash" ? "Flash 格式；未显式设置 gateway.only 时默认使用 deepseek" : "标准格式，由 Cline 选择上游"}。\n`);
-  output.write("内容会原样合并到出站 providerOptions；字段不设白名单，格式或取值错误以上游返回为准。\n");
+  output.write(`请求格式：${current.requestProfile === "deepseek-flash" ? "Flash 格式；路由仅由已保存的请求改写决定" : "标准格式，由 Cline 选择上游"}。\n`);
+  output.write("内容会按已保存值合并到出站 providerOptions；未保存改写时保持原请求。字段不设白名单，格式或取值错误以上游返回为准。\n");
   output.write("只校验 JSON 对象、大小与嵌套深度，并拒绝凭据字段、gateway.byok 和原型污染键。\n");
   const value = await prompts.text({
     message: "providerOptions JSON（清除改为 {}）",

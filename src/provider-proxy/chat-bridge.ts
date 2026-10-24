@@ -16,7 +16,7 @@ import {
   waitForChatOperation,
   writeChatData,
 } from "./chat-io.js";
-import { applyClinePassProviderOptions, pinClinePassRouting } from "./cline-pass-routing.js";
+import { applyClinePassProviderOptions } from "./cline-pass-routing.js";
 import { executeClineWebSearch } from "./cline-web-search.js";
 import { ChatGenerationTimingObserver } from "./generation-timing.js";
 import { chatBridgeAuthorizationHeader, forwardedRequestHeaders } from "./request-routing.js";
@@ -236,8 +236,7 @@ export class ChatCompletionsBridge {
         }
         const outboundWithOptions = this.options.clinePass
           ? applyClinePassProviderOptions(outbound, modelCapabilities?.clineProviderOptions) : outbound;
-        const payload = JSON.stringify(this.options.clinePass
-          ? pinClinePassRouting(outboundWithOptions, modelCapabilities?.clineRequestProfile) : outboundWithOptions);
+        const payload = JSON.stringify(outboundWithOptions);
         const payloadBytes = Buffer.byteLength(payload);
         if (payloadBytes > maximumRequestBytes) throw new ModelConversionError("Chat continuation exceeds size limit");
         headers["content-length"] = String(payloadBytes);

@@ -1,29 +1,11 @@
-import { resolveClinePassRequestProfile, type ClinePassRequestProfile } from "../../runtime/chat-reasoning.mjs";
 import type { ClineProviderOptions } from "../../runtime/cline-provider-options.mjs";
-
-/**
- * CLP-only outbound policy; never mutate the caller's request or fall back to
- * other providers. An explicit gateway.only value is respected. The DeepSeek
- * default applies only when the request does not already set it.
- */
-export function pinClinePassRouting<T extends object>(request: T, profile?: ClinePassRequestProfile): T {
-  const model = (request as Record<string, unknown>).model;
-  if (resolveClinePassRequestProfile(typeof model === "string" ? model : "", profile) !== "deepseek-flash") return request;
-  const current = (request as Record<string, unknown>).providerOptions;
-  if (current !== undefined && !isPlainRecord(current)) return request;
-  const options: Record<string, unknown> = current ?? {};
-  const gateway = options.gateway;
-  if (gateway === undefined) return { ...request, providerOptions: { ...options, gateway: { only: ["deepseek"] } } };
-  if (!isPlainRecord(gateway)) return request;
-  if (Object.hasOwn(gateway, "only")) return request;
-  return { ...request, providerOptions: { ...options, gateway: { ...gateway, only: ["deepseek"] } } };
-}
 
 /**
  * Apply the model's saved providerOptions overlay. Plain objects merge
  * recursively; arrays, scalars and null replace the client value. A client
  * providerOptions container that is not an object is replaced by the overlay
- * rather than rejected here; the upstream owns field semantics.
+ * rather than rejected here; the upstream owns field semantics. No overlay
+ * means the request is unchanged; no automatic routing is applied.
  */
 export function applyClinePassProviderOptions<T extends object>(request: T, options?: ClineProviderOptions): T {
   if (options === undefined || Object.keys(options).length === 0) return request;

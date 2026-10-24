@@ -230,8 +230,8 @@
 - `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：Provider 保存前的 Codex 模型目录合同校验；先将自身新建的隔离临时目录设为私有，再写入目录数据，限制运行时间并清理临时文件，不修改系统 TEMP 根目录权限。
 - `responses-model-setup.mjs` / `responses-model-setup.d.mts`：新提供商从共用独立草稿填写准确 ID、名称、窗口及能力，使用通用编程提示词；已有模型按设置组编辑，未选项保留。已配置提供商的新模型由统一添加入口处理，编辑不夹带添加或移除。高级设置保留现有能力、提示词、压缩／截断及采样编辑，工具诊断仍需单独明确触发。
 - `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义提供商共用的 1–64 个模型多选、预览确认与默认模型保护。
-- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：CCG、OCG、CLP 和自定义目录共用按 ID 添加的 CLI 交互、独立填写／继承选择、全字段预览及确认保存。继承只复制当前提供商保存的快照，CLP 附带请求格式和路由；不关联模板。受管提供商另可明确追加 DS 模板映射，已有模型保持原值，取消返回目录菜单。
-- `managed-provider-model-edit.mjs` / `managed-provider-model-edit.d.mts`：CLP 已保存模型的本地读取、按字段差异预览与锁内保存，不依赖远程模板或模型 ID 匹配。保留精确 ID、请求路由、来源关联及未改字段；复用受管目录事务、备份、回读与同族账户等级镜像。
+- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：CCG、OCG、CLP 和自定义目录共用按 ID 添加的 CLI 交互、独立填写／继承选择、全字段预览及确认保存。继承只复制当前提供商保存的快照，CLP 附带请求格式及可选请求改写；不关联模板。受管提供商另可明确追加 DS 模板映射，已有模型保持原值，取消返回目录菜单。
+- `managed-provider-model-edit.mjs` / `managed-provider-model-edit.d.mts`：CLP 已保存模型的本地读取、按字段差异预览与锁内保存，不依赖远程模板或模型 ID 匹配。保留精确 ID、请求格式、来源关联及未改字段；复用受管目录事务、备份、回读与同族账户等级镜像。
 - `managed-provider-model-edit-setup.mjs` / `managed-provider-model-edit-setup.d.mts`：CLI 本地编辑 CLP 已有模型，按设置组选项修改并确认前后差异；支持思考开关 `enabled`，不新增模型、不下载模板，不提供 CLP 不支持的采样、原图或摘要控制。
 - `cline-pass-request-options-setup.mjs` / `cline-pass-request-options-setup.d.mts`：CLI 编辑 CLP 模型级 `providerOptions` 出站覆盖，只提供 JSON 输入和格式校验，字段原样透传；预览差异并在备份后保存，不发起模型请求。
 - `provider-model-management.mjs` / `provider-model-management.d.mts`：CLI/WebUI 共用的提供商目录能力、本地移除、单模型窗口及显示名称预览和锁内保存；修改绑定 Provider、模型和目录修订，并显示家族共用账户范围。显示名称修改保留模型 ID、默认值及能力参数，无变化不写入；自定义修改仅重编译已保存定义，不重新应用提示词模板；官方共享目录只读。WebUI 从对应保存目录投影完整能力，按目录身份、精确模型 ID 和内容修订读取白名单提示词。列表不携带提示正文。保护账户和 Gateway 显式默认值、非空目录及文件修订；受管修改纳入账户目录／来源持久恢复，自定义写入统一前后摘要 pending 与回读校验。

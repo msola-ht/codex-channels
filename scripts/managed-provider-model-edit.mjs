@@ -119,7 +119,7 @@ async function buildPlan(input, environment, validateCatalog) {
   if (input.revision !== state.revision) throw stale();
   if (!record(input.definition) || Object.keys(input.definition).some(key => !fields.has(key))
     || input.definition.id !== input.model) {
-    throw invalid("invalid-input", "definition", "仅可编辑已保存模型的支持字段；模型 ID、请求路由及模板关联不能修改");
+    throw invalid("invalid-input", "definition", "仅可编辑已保存模型的支持字段；模型 ID、请求格式及模板关联不能修改");
   }
   for (const field of ["experimentalSupportedTools", "supportsWebSearch"]) {
     if (!isDeepStrictEqual(presence(input.definition, field), presence(state.definition, field))) {
@@ -141,14 +141,14 @@ async function buildPlan(input, environment, validateCatalog) {
   const newCompiled = compileModelDefinitions([definition], input.model, { allowReasoningToggle: true }).models[0];
   const after = { ...state.original };
   // Apply compilation differences to this raw model only. Compiler defaults must
-  // not rewrite saved metadata, routes, other models, or an untouched field.
+  // not rewrite saved metadata, request formats, other models, or an untouched field.
   for (const field of new Set([...Object.keys(oldCompiled), ...Object.keys(newCompiled)])) {
     if (isDeepStrictEqual(presence(oldCompiled, field), presence(newCompiled, field))) continue;
     if (Object.hasOwn(newCompiled, field)) after[field] = newCompiled[field];
     else delete after[field];
   }
   if (after.slug !== state.original.slug || !isDeepStrictEqual(presence(after, "cline_request_profile"), presence(state.original, "cline_request_profile"))) {
-    throw invalid("invalid-input", "definition", "模型编辑不能改变模型身份或请求路由");
+    throw invalid("invalid-input", "definition", "模型编辑不能改变模型身份或请求格式");
   }
   if (Object.hasOwn(input, "providerOptions")) {
     let options;

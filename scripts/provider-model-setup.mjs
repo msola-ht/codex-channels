@@ -199,7 +199,7 @@ async function runProviderModelOperation({ environment, prompts, output, provide
     ...(["ccg", "ocg", "clp"].includes(family) || custom && catalog.canRemove ? [{ value: "manage", label: "查看／添加新模型", hint: "按 ID 独立填写或继承已有模型；已有模型保持不变" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "编辑模型与默认值" }] : []),
     ...(custom || family ? [{ value: "rename", label: "编辑模型显示名称", hint: "模型 ID 保持不变" }] : []),
-    ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求路由" }] : []),
+    ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求格式" }] : []),
     ...(family === "clp" ? [{ value: "request-options", label: "编辑请求改写", hint: "providerOptions JSON；字段原样透传" }] : []),
     ...(family && catalog.providers.length ? [{ value: "default", label: "账户默认模型与共享思考等级", hint: "默认模型仅影响所选账户；模型思考等级由同族账户共用" }] : []),
     ...(family ? [{ value: "window", label: "模型上下文窗口", hint: "按模型设置，同族账户共享" }] : []),
