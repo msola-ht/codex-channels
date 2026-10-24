@@ -26,6 +26,7 @@ import type {
   ConversationQueueRevertUseCases,
   ConversationSessionUseCases,
   ConversationTurnUseCases,
+  Submission,
 } from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
 import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
@@ -333,6 +334,7 @@ export interface ConversationCommandExecutor {
     actorId: string,
     isAllowed?: () => boolean,
     captureReplyAuthorization?: (authorize: () => void) => void,
+    captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
   ): Promise<ConversationCommandResult>;
 }
 
@@ -401,6 +403,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     actorId: string,
     isAllowed?: () => boolean,
     captureReplyAuthorization?: (authorize: () => void) => void,
+    captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
   ): Promise<ConversationCommandResult> {
     const assertActive = () => {
       if (isAllowed?.() === false) throw new UserFacingError("command.authorization-changed", "命令来源已关闭或授权已变化");
@@ -416,7 +419,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       }
     };
     const assertAuthorized = () => { assertActive(); guard(); assertMetricsThread(); };
-    const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
+    const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, captureSubmission);
     try {
       assertActive();
       if (command === "workspace" && input.trim()) this.authorize(target, actorId);
@@ -463,6 +466,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     input: string,
     actorId: string,
     assertAuthorized: () => void,
+    captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
   ): Promise<ConversationCommandResult> {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
@@ -627,11 +631,12 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "review": {
-        const submission = await this.conversations.review(
+        const reviewTarget = parseReviewTarget(argumentsText);
+        const submission = await this.submitCommand(() => this.conversations.review(
           target,
-          parseReviewTarget(argumentsText),
+          reviewTarget,
           assertAuthorized,
-        );
+        ), captureSubmission);
         return {
           kind: "outcome",
           outcome: { type: "review.started", turnId: submission.turnId },
@@ -703,12 +708,12 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           };
         }
         const invocation = parseSkillInvocation(argumentsText);
-        const submission = await this.conversations.invokeSkill(
+        const submission = await this.submitCommand(() => this.conversations.invokeSkill(
           target,
           invocation.selector,
           invocation.task,
           assertAuthorized,
-        );
+        ), captureSubmission);
         return {
           kind: "outcome",
           outcome: {
@@ -727,12 +732,12 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           };
         }
         const invocation = parseAgentInvocation(argumentsText);
-        const submission = await this.conversations.invokeAgent(
+        const submission = await this.submitCommand(() => this.conversations.invokeAgent(
           target,
           invocation.selector,
           invocation.task,
           assertAuthorized,
-        );
+        ), captureSubmission);
         return {
           kind: "outcome",
           outcome: {
@@ -746,7 +751,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "mcp":
         return this.executeMcpCommand(target, argumentsText, assertAuthorized);
       case "plugin":
-        return this.executePluginCommand(target, argumentsText, assertAuthorized);
+        return this.executePluginCommand(target, argumentsText, assertAuthorized, captureSubmission);
       case "usage":
         return {
           kind: "usage",
@@ -789,7 +794,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "plan":
         if (argumentsText) {
-          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized);
+          const submission = await this.submitCommand(() => this.conversations.startPlan(target, argumentsText, assertAuthorized), captureSubmission);
           return {
             kind: "outcome",
             outcome: { type: "plan.started", turnId: submission.turnId },
@@ -981,6 +986,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     target: ConversationTarget,
     input: string,
     assertAuthorized?: () => void,
+    captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
   ): Promise<ConversationCommandResult> {
     const operation = parsePluginOperation(input);
     if (operation.type === "list") {
@@ -999,12 +1005,12 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         plugin: await this.conversations.pluginDetail(target, operation.selector, assertAuthorized),
       };
     }
-    const submission = await this.conversations.invokePlugin(
+    const submission = await this.submitCommand(() => this.conversations.invokePlugin(
       target,
       operation.selector,
       operation.task,
       assertAuthorized,
-    );
+    ), captureSubmission);
     return {
       kind: "outcome",
       outcome: {
@@ -1014,6 +1020,19 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         steered: submission.steered,
       },
     };
+  }
+
+  private async submitCommand<T extends Submission>(operation: () => Promise<T>,
+    captureSubmission?: (submission: Promise<Submission>) => Promise<void>): Promise<T> {
+    // Register before the use case can emit early output or approval requests. Capture only
+    // actual submission work, never a catalog query or the command's queued platform reply.
+    const submission = Promise.resolve().then(operation);
+    const association = (async () => { await captureSubmission?.(submission); })();
+    // A broken observer must still consume and settle a request which may already have run.
+    const [submitted, associated] = await Promise.allSettled([submission, association] as const);
+    if (submitted.status === "rejected") throw submitted.reason;
+    if (associated.status === "rejected") throw associated.reason;
+    return submitted.value;
   }
 
   private async executeScheduledTaskCommand(

@@ -14,9 +14,10 @@ const MAX_MESSAGE_BYTES = 3_000;
 const MAX_MESSAGE_COUNT = 4;
 
 const qqCommandGroups = [
-  { title: "状态与运行：", commands: ["status", "stop", "permissions", "diff"] },
+  { title: "状态与运行：", commands: ["status", "stop", "permissions", "diff", "review"] },
   { title: "工作区与会话：", commands: ["workspace", "sessions", "resume", "new", "archived", "archive", "unarchive", "pin", "unpin", "rename", "fork"] },
-  { title: "模型与用量：", commands: ["model", "effort", "fast", "usage", "limits", "metrics"] },
+  { title: "模型与用量：", commands: ["model", "effort", "fast", "plan", "usage", "limits", "metrics"] },
+  { title: "扩展与代理：", commands: ["skill", "plugin", "agents"] },
 ] satisfies { title: string; commands: ConversationCommandName[] }[];
 export const qqCommandNames: readonly ConversationCommandName[] = qqCommandGroups.flatMap(group => group.commands);
 
@@ -30,6 +31,9 @@ export const qqHelp = [
   "/unarchive：填写序号、名称或 Session ID；/rename：填写名称。",
   "/metrics：填写 session、global、providers、models 或 errors。",
   "聚合指标时间范围：global、providers、models、errors 后可选填 24h、7d、30d、90d 或 all。",
+  "/review：可选 branch 分支、commit SHA 或 custom 说明；不填审查未提交改动。",
+  "/plan：不填切换模式，填写需求直接开始规划。/skill、/agents：不填列出，填写名称或序号及任务调用。",
+  "/plugin：不填列出，health 查健康，list 后可选页码及 search 搜索词；填写名称、完整 ID 或序号查看详情，再加任务调用。",
   "功能说明：",
   "QQ 的 /limits 仅查询，额度操作请在原生客户端处理。",
   "可发送文字、图片或图文；同消息最多四张图片。回复按 QQ 格式呈现，代码和不支持的结构保留为完整文本。",
@@ -158,7 +162,12 @@ export function renderQqCommandResult(result: ConversationCommandResult): QqRend
     validateText(text);
     return { text, blocks: [{ text }] };
   }
-  if (result.kind === "sessions" || result.kind === "metrics") {
+  if (result.kind === "sessions" || result.kind === "metrics" || result.kind === "skills"
+    || result.kind === "agents" || result.kind === "plugins" || result.kind === "plugin-health"
+    || result.kind === "plugin-detail" || result.kind === "outcome" && (
+      result.outcome.type === "review.started" || result.outcome.type === "plan.started"
+      || result.outcome.type === "skill.started" || result.outcome.type === "plugin.started"
+      || result.outcome.type === "agents.started")) {
     const values: string[] = [];
     mapQqQueryFields(result, value => { values.push(value); return value; });
     let markerId = 0;
@@ -188,11 +197,56 @@ export function renderQqCommandResult(result: ConversationCommandResult): QqRend
   return renderQqPanel(text);
 }
 
-/** Only fields consumed by these query formatters; names/previews keep the shared list normalization. */
+/** Only fields consumed by these command formatters; session names/previews keep shared normalization. */
+type QqLiteralCommandResult = Extract<ConversationCommandResult, {
+  kind: "sessions" | "metrics" | "skills" | "agents" | "plugins" | "plugin-health" | "plugin-detail" | "outcome";
+}>;
+
 function mapQqQueryFields(
-  result: Extract<ConversationCommandResult, { kind: "sessions" | "metrics" }>,
+  result: QqLiteralCommandResult,
   field: (value: string) => string,
-): Extract<ConversationCommandResult, { kind: "sessions" | "metrics" }> {
+): QqLiteralCommandResult {
+  if (result.kind === "skills") return { ...result, entries: result.entries.map(entry => ({ ...entry,
+    name: field(entry.name), description: field(entry.description),
+  })) };
+  if (result.kind === "agents") return { ...result, roles: result.roles.map(role => ({ ...role,
+    name: field(role.name), ...(role.description ? { description: field(role.description) } : {}),
+  })) };
+  if (result.kind === "plugins") return { ...result,
+    selectors: result.selectors.map(field), searchTerm: result.searchTerm === null ? null : field(result.searchTerm),
+    plugins: result.plugins.map(plugin => ({ ...plugin, id: field(plugin.id), displayName: field(plugin.displayName),
+      ...(plugin.description ? { description: field(plugin.description) } : {}),
+    })),
+  };
+  if (result.kind === "plugin-health") return { ...result, report: { ...result.report,
+    issues: result.report.issues.map(issue => ({ ...issue, plugin: field(issue.plugin), selector: field(issue.selector) })),
+  } };
+  if (result.kind === "plugin-detail") {
+    const plugin = result.plugin;
+    return { ...result, plugin: { ...plugin,
+      id: field(plugin.id), displayName: field(plugin.displayName), marketplaceName: field(plugin.marketplaceName),
+      ...(plugin.developerName ? { developerName: field(plugin.developerName) } : {}),
+      ...(plugin.category ? { category: field(plugin.category) } : {}),
+      ...(plugin.description ? { description: field(plugin.description) } : {}),
+      version: plugin.version === null ? null : field(plugin.version),
+      localVersion: plugin.localVersion === null ? null : field(plugin.localVersion),
+      capabilities: plugin.capabilities.map(field), eligiblePlanTypes: plugin.eligiblePlanTypes.map(field),
+    } };
+  }
+  if (result.kind === "outcome") {
+    const outcome = result.outcome;
+    switch (outcome.type) {
+      case "review.started": case "plan.started":
+        return { ...result, outcome: { ...outcome, turnId: field(outcome.turnId) } };
+      case "skill.started":
+        return { ...result, outcome: { ...outcome, skillName: field(outcome.skillName), turnId: field(outcome.turnId) } };
+      case "plugin.started":
+        return { ...result, outcome: { ...outcome, pluginName: field(outcome.pluginName), turnId: field(outcome.turnId) } };
+      case "agents.started":
+        return { ...result, outcome: { ...outcome, roleName: field(outcome.roleName), turnId: field(outcome.turnId) } };
+      default: return result;
+    }
+  }
   if (result.kind === "sessions") {
     return { ...result, view: { ...result.view,
       searchTerm: result.view.searchTerm === null ? null : field(result.view.searchTerm),

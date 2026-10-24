@@ -13,6 +13,9 @@ Surface 提交已校验的内存 Data URL，暂存路径不进入 Thread，因�
 
 普通消息的 `submit` 接收 Surface 提供的实时授权闭包，在等待会话锁、Thread 准备及最终 Turn 写入前复核；
 命令 `execute` 也接受可选实时来源守卫，QQ 用它拒绝连接代次关闭后尚未提交的命令；已有 RPC 按实际结果结算。
+`execute` 的可选 `captureSubmission` 接收即将执行的真实提交 Promise，仅用于 review、带任务的 plan、Skill/Plugin/Agent 调用；
+调用方在用例微任务执行前登记关联，完整保留 Submission 的 Thread/Turn/steer，不从展示结果或当前 status 推断。
+提交与关联结算后才继续既有结果守卫和回复；回调失败仍消费底层结果，不重试已发生的写入。列表、详情和模式切换不产生该回调。
 QQ 同步捕获命令结果的回复授权守卫，队列与 Token 等待后重新检查工作区及来源；合法工作区切换的回执使用操作后的工作区。
 输入同时固定接收时的 Workspace ID 与目录，变化时拒绝。图片准备后的 start/steer 也保留最终守卫。
 已经提交的请求仍按实际结果结算，不因后续撤权自动重试或丢弃响应。

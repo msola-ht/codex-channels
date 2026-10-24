@@ -41,7 +41,7 @@ export interface CreateQqSurfaceOptions {
   logger: Logger;
   onFatal(error: Error): void;
 }
-// Commands which can start a Turn need their own verified submission association.
+// This directory is shared with help; Turn-producing commands capture their exact submission below.
 const supportedCommands = new Set<string>(qqCommandNames);
 
 class QqCommandReplyError extends Error {
@@ -130,15 +130,9 @@ class QqGeneration implements SurfaceAdapter {
       send: async (target, request, result, signal, authorized) => {
         const actor = this.actor(target);
         if (typeof request.turnId !== "string") throw new QqInteractionDeliveryError("missing-turn-grant");
-        let grant = this.ledger.forTurn(actor, request.threadId, request.turnId);
-        if (!grant) {
-          const waiting = [...(this.pending.get(target.conversationId) ?? [])];
-          if (waiting.length) {
-            try { await waitBounded(Promise.allSettled(waiting), signal, 15_000); }
-            catch { throw new QqInteractionDeliveryError("turn-association-unconfirmed"); }
-          }
-          grant = this.ledger.forTurn(actor, request.threadId, request.turnId);
-        }
+        let grant: string | undefined;
+        try { grant = await this.waitForTurnGrant(target, actor, request.threadId, request.turnId, signal); }
+        catch { throw new QqInteractionDeliveryError("turn-association-unconfirmed"); }
         if (!grant) throw new QqInteractionDeliveryError("missing-turn-grant");
         const originalGrant = grant;
         const current = (): boolean => {
@@ -168,12 +162,7 @@ class QqGeneration implements SurfaceAdapter {
           if (!authorized || !authorized()) throw new Error("QQ 可靠输出缺少有效归属授权");
           const actor = this.actor(event.target);
           if (!("threadId" in event) || !("turnId" in event) || typeof event.turnId !== "string") throw new Error("QQ 输出缺少轮次归属");
-          let grant = this.ledger.forTurn(actor, event.threadId, event.turnId);
-          if (!grant) {
-            const waiting = [...(this.pending.get(event.target.conversationId) ?? [])];
-            if (waiting.length) await waitBounded(Promise.allSettled(waiting), combined, 15_000);
-            grant = this.ledger.forTurn(actor, event.threadId, event.turnId);
-          }
+          const grant = await this.waitForTurnGrant(event.target, actor, event.threadId, event.turnId, combined);
           if (!grant) throw new Error("QQ 输出回复来源未确认");
           if (event.type === "operation.updated" && event.operation.kind === "imageGeneration" && event.operation.status === "completed") {
             if (event.operation.imagePath !== undefined) {
@@ -311,7 +300,8 @@ class QqGeneration implements SurfaceAdapter {
       }
       let authorizeReply: (() => void) | undefined;
       const result = await this.options.commands.execute(target, command.name, command.argumentsText, message.actor,
-        () => this.allowed(target, message.actor), authorize => { authorizeReply = authorize; });
+        () => this.allowed(target, message.actor), authorize => { authorizeReply = authorize; },
+        async submission => { await this.associateSubmission(target, message, submission); });
       if (cancelledInputs && result.kind === "outcome" && result.outcome.type === "turn.stop-requested") result.outcome.stopped = true;
       const replyAllowed = (): boolean => {
         if (!authorizeReply) return false;
@@ -367,9 +357,12 @@ class QqGeneration implements SurfaceAdapter {
     }
   }
   private async submit(target: ConversationTarget, message: Inbound, operation: () => Promise<Submission>): Promise<Submission> {
+    return this.associateSubmission(target, message, Promise.resolve().then(operation));
+  }
+  private async associateSubmission(target: ConversationTarget, message: Inbound, operation: Promise<Submission>): Promise<Submission> {
     // Output awaits only the actual submission/association, never downloads,
     // earlier input work or a command reply queued behind it.
-    const submission = Promise.resolve().then(operation)
+    const submission = operation
       .then(async result => {
         await this.ledger.associate(message.id, result.threadId, result.turnId, result.steered);
         this.observeMilestone("first-submission", "QQ 本运行代次首次会话提交已返回并登记；尚不代表模型完成");
@@ -383,6 +376,37 @@ class QqGeneration implements SurfaceAdapter {
       entries.delete(submission);
       if (!entries.size) this.pending.delete(target.conversationId);
     }
+  }
+  private async waitForTurnGrant(target: ConversationTarget, actor: string, threadId: string, turnId: string,
+    signal: AbortSignal): Promise<string | undefined> {
+    signal.throwIfAborted();
+    const current = (): string | undefined => this.ledger.forTurn(actor, threadId, turnId);
+    const grant = current();
+    if (grant) return grant;
+    const waiting = [...(this.pending.get(target.conversationId) ?? [])];
+    if (!waiting.length) return undefined;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let remaining = waiting.length;
+      const finish = (associated?: string, error?: Error): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        signal.removeEventListener("abort", abort);
+        if (error) reject(error);
+        else resolve(associated);
+      };
+      const abort = (): void => finish(undefined, new Error("QQ 轮次关联等待已取消或超时"));
+      const timeout = setTimeout(abort, 15_000);
+      signal.addEventListener("abort", abort, { once: true });
+      const completed = (): void => {
+        if (settled) return;
+        const associated = current();
+        remaining--;
+        if (associated || remaining === 0) finish(associated);
+      };
+      for (const submission of waiting) void submission.then(completed, completed);
+    });
   }
   private notify(target: ConversationTarget, actor: string, grant: string, text: string | QqRenderedMessage, authorized?: () => boolean): Promise<void> {
     const result = typeof text === "string" ? renderQqPanel(text) : text;

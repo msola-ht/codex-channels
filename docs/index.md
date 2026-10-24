@@ -18,6 +18,8 @@ QQ 生成图片结果复用已有 `imageGeneration` 完成事件、安全图片�
 实现及未实机观察边界见[生成图片回传](qq-surface-plan.md#共享生成图片回传)。
 QQ 图片输入沿用既有模型图片能力检查、Provider 图片引用和附件取消作用域，不新增 App Server 字段；
 渠道准入与隔离观察见[图片输入批次](qq-surface-plan.md#共享图片输入)。
+QQ review/plan/skill/plugin/agents 通过共享命令提交捕获关联既有 Submission，不改变上游 RPC；
+适配范围和未实机边界见[共享命令提交关联](qq-surface-plan.md#共享命令提交关联)。
 
 `0.164.0` 固定源码、随仓文档和生成协议已同步；位置和固定提交见
 [上游来源](upstream-sources.md)，取舍与验收限制见[升级决策](codex-cli-upgrade-decisions.md)。
