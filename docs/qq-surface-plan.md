@@ -840,6 +840,23 @@ Astra 独立关联复查覆盖 Client 解码/编码、共享提议匹配、完�
 定向 ESLint 和差异检查通过。以上均为受控输入与传输，没有执行真实命令或修改真实权限、用户规则。
 真实 QQ 客户端与 App Server 授权效果仍待部署后验收，本批不改变当前会话审批方式。
 
+## P4 MCP 工具审批适配
+
+接续 `887b4dab`，本批仅对齐飞书/TG 的 MCP tool-approval：复用 Client 的完整参数/持久范围核验、
+Coordinator 的字面预览与响应映射，QQ 按请求显示一次、会话、始终批准及拒绝/取消。
+展示与接受共用选项目录，普通 MCP form/URL、异步/敏感问题不开放，不改变协议或执行用户工具。
+原 Thread/Turn Grant 必须有效；无 Turn、子线程无原 Grant、完整预览无法投递时安全取消。
+
+隔离 TLS 实际经过 QQ WebSocket 来信、Surface、Client 请求适配、共享 Coordinator/Router/Persistent、
+回复选择与 Client 响应编码：一次批准返回 `_meta: null`，会话/始终分别返回 `persist: session/always`，
+拒绝为 decline、取消为 cancel；未提供的始终批准不结算，随后一次批准仍可用，重放不产生新模型输入。
+无 Turn、无原 Grant、普通 form/URL 均取消且发送 0 次；第二片提示发送失败返回 cancel；跨用户回应被拒绝。
+结束时无 fatal，隔离 WebSocket 客户端为 0、监听已关闭。以上使用受控请求与 HTTP，没有调用真实 MCP 工具或保存真实授权。
+Astra 独立复查覆盖上述关联链及组合根注册、祖先路由和飞书/TG 范围对齐，未发现本批需修复缺陷。
+其内存受控观察另外确认未完整送达、错误账号、原 Grant 失效、发送期间跨客户端解决均不能授权；
+含换行或伪造 QQ 标签的参数仍在纯文本详情块中，真正操作标签只来自独立操作区。类型及定向 Lint 检查通过。
+真实客户端点击和 App Server 保存/执行授权仍待用户部署验收。
+
 ## 独立复审记录
 
 2026-10-23，设计初稿完成后由 `gpt-6-astra`（high）独立只读复审，覆盖官方来源适用性、输入到提交、

@@ -9,8 +9,10 @@ QQ 会话管理与诊断批次通过共享命令服务接入归档/取消归档�
 参数与业务语义保持一致，Diff 在 QQ 以完整字面文本发送，仍受渠道回复预算约束。实施证据与未观察边界见
 [QQ 推进计划](qq-surface-plan.md#共享会话管理与诊断适配)。
 QQ 审批与普通同步问题通过共享 Coordinator/InteractionRouter 接入本渠道端口，按原请求支持会话及持久规则、
-网络、临时权限和终端输入；原 Thread/Turn 的回复依据无法证明时安全拒绝，MCP/异步/敏感交互仍不开放。
+网络、临时权限和终端输入；MCP 工具审批按原请求支持一次/会话/始终范围。
+原 Thread/Turn 的回复依据无法证明时安全拒绝，普通 MCP 表单/URL、异步/敏感交互仍不开放。
 实现与观察范围见 [P4 首批记录](qq-surface-plan.md#p4-一次性审批与普通问题)及[审批范围适配](qq-surface-plan.md#p4-审批范围适配)。
+MCP 工具审批的实现与验收边界见 [P4 工具审批](qq-surface-plan.md#p4-mcp-工具审批适配)。
 
 `0.164.0` 固定源码、随仓文档和生成协议已同步；位置和固定提交见
 [上游来源](upstream-sources.md)，取舍与验收限制见[升级决策](codex-cli-upgrade-decisions.md)。

@@ -99,8 +99,8 @@ export class QqInteractionPort implements InteractionPort {
   /** Reserved response verbs never fall through to ordinary model input, even for obsolete tokens. */
   handleText(target: ConversationTarget, actor: string, text: string): string | null {
     const normalized = text.trim();
-    if (!/^\/(?:批准一次|批准会话|保存命令规则|保存网络规则|拒绝|取消|选择|填写)(?:\s|$)/u.test(normalized)) return null;
-    const match = /^\/(批准一次|批准会话|保存命令规则|保存网络规则|拒绝|取消|选择|填写)\s+([A-Za-z0-9_-]{16})(?:\s+([\s\S]+))?$/u.exec(normalized);
+    if (!/^\/(?:批准一次|批准会话|始终批准|保存命令规则|保存网络规则|拒绝|取消|选择|填写)(?:\s|$)/u.test(normalized)) return null;
+    const match = /^\/(批准一次|批准会话|始终批准|保存命令规则|保存网络规则|拒绝|取消|选择|填写)\s+([A-Za-z0-9_-]{16})(?:\s+([\s\S]+))?$/u.exec(normalized);
     if (!match) return "交互回应格式无效，请使用当前提示中的完整操作。";
     const [, action, token, input] = match;
     const entry = this.pending.get(token!);
@@ -121,7 +121,13 @@ export class QqInteractionPort implements InteractionPort {
       this.finish(token!, choice.decision);
       return "已接收审批选择；实际执行结果以随后会话回复为准。";
     }
-    if (entry.request.type !== "user-input" || !input || (action !== "选择" && action !== "填写")) return "请使用当前问题提供的选项或填写操作。";
+    if (entry.request.type === "elicitation") {
+      const offered = input === undefined && toolApprovalActions(entry.request).find(candidate => candidate.verb === action);
+      if (!offered) return "当前请求不支持该选择。";
+      this.finish(token!, offered.decision);
+      return "已接收工具审批选择；实际执行结果以随后会话回复为准。";
+    }
+    if (!input || (action !== "选择" && action !== "填写")) return "请使用当前问题提供的选项或填写操作。";
     const answer = /^([1-9]\d*)\s+([\s\S]+)$/u.exec(input);
     const question = answer && entry.request.questions[Number(answer[1]) - 1];
     if (!answer || !question || entry.answers.has(question.id)) return "问题序号无效或该问题已经回答。";
@@ -165,10 +171,25 @@ export class QqInteractionPort implements InteractionPort {
 
 function supports(request: InteractionRequest): boolean {
   if (request.type === "approval") return ["command", "file", "permissions", "stdin"].includes(request.kind);
+  if (request.type === "elicitation") return request.mode === "tool-approval" && !!request.toolApproval && typeof request.turnId === "string";
   return request.type === "user-input" && !request.asynchronous && request.questions.length > 0 && request.questions.length <= 3
     && new Set(request.questions.map(question => question.id)).size === request.questions.length
     && request.questions.every(question => !question.secret && question.id.length > 0 && question.options.length <= 8
       && question.options.every(option => option.length > 0));
+}
+
+function toolApprovalActions(request: Extract<InteractionRequest, { type: "elicitation" }>): Array<{
+  verb: string; description: string; decision: Extract<InteractionDecision, { type: "elicitation" }>;
+}> {
+  if (request.mode !== "tool-approval" || !request.toolApproval) return [];
+  const actions: ReturnType<typeof toolApprovalActions> = [{ verb: "批准一次", description: "仅批准当前工具调用一次。",
+    decision: { type: "elicitation", action: "accept", content: null, scope: "once" } }];
+  if (request.toolApproval.allowSession) actions.push({ verb: "批准会话", description: "按上文工具授权范围批准当前会话。",
+    decision: { type: "elicitation", action: "accept", content: null, scope: "session" } });
+  if (request.toolApproval.allowAlways) actions.push({ verb: "始终批准", description: "按上文工具授权范围持久批准，由 App Server 保存。",
+    decision: { type: "elicitation", action: "accept", content: null, scope: "always" } });
+  actions.push({ verb: "拒绝", description: "拒绝当前工具调用。", decision: { type: "elicitation", action: "decline", content: null } });
+  return actions;
 }
 
 /** Display and acceptance use the same offered choices; never infer a broader scope from response text. */
@@ -223,6 +244,13 @@ function prompt(request: InteractionRequest, token: string): QqRenderedMessage {
     for (const offered of approvalActions(request)) {
       body.push(`${offered.verb}${offered.argument ? ` ${offered.argument}` : ""}：${offered.description}`);
       action(`/${offered.verb} ${token}${offered.argument ? ` ${offered.argument}` : ""}`);
+    }
+  } else if (request.type === "elicitation") {
+    body.push(request.message, `工具：${request.toolApproval?.toolTitle ?? "未命名工具"}`, request.toolApproval?.detail ?? "",
+      "授权选项（仅当前请求提供的范围）：");
+    for (const offered of toolApprovalActions(request)) {
+      body.push(`${offered.verb}：${offered.description}`);
+      action(`/${offered.verb} ${token}`);
     }
   } else if (request.type === "user-input") {
     request.questions.forEach((question, index) => {
