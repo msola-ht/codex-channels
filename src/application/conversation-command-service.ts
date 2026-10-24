@@ -29,6 +29,7 @@ import type {
   Submission,
 } from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
+import type { ThreadQueueSubmissionOrigin } from "./thread-queue-port.js";
 import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
 import {
   parseScheduledTaskOperation,
@@ -335,6 +336,7 @@ export interface ConversationCommandExecutor {
     isAllowed?: () => boolean,
     captureReplyAuthorization?: (authorize: () => void) => void,
     captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
+    captureQueueOrigin?: (origin: ThreadQueueSubmissionOrigin) => void,
   ): Promise<ConversationCommandResult>;
 }
 
@@ -404,6 +406,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     isAllowed?: () => boolean,
     captureReplyAuthorization?: (authorize: () => void) => void,
     captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
+    captureQueueOrigin?: (origin: ThreadQueueSubmissionOrigin) => void,
   ): Promise<ConversationCommandResult> {
     const assertActive = () => {
       if (isAllowed?.() === false) throw new UserFacingError("command.authorization-changed", "命令来源已关闭或授权已变化");
@@ -422,7 +425,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       }
     };
     const assertAuthorized = () => { assertActive(); guard(); assertQueryThread(); };
-    const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, captureSubmission);
+    const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, captureSubmission, captureQueueOrigin);
     try {
       assertActive();
       if (command === "workspace" && input.trim()) this.authorize(target, actorId);
@@ -470,6 +473,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     actorId: string,
     assertAuthorized: () => void,
     captureSubmission?: (submission: Promise<Submission>) => Promise<void>,
+    captureQueueOrigin?: (origin: ThreadQueueSubmissionOrigin) => void,
   ): Promise<ConversationCommandResult> {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
@@ -611,7 +615,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "queue":
-        return this.executeQueueCommand(target, argumentsText, assertAuthorized);
+        return this.executeQueueCommand(target, argumentsText, assertAuthorized, captureQueueOrigin);
       case "revert":
         return this.executeRevertCommand(target, argumentsText, actorId, assertAuthorized);
       case "rename":
@@ -836,6 +840,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     target: ConversationTarget,
     input: string,
     assertAuthorized: () => void,
+    captureOrigin?: (origin: ThreadQueueSubmissionOrigin) => void,
   ): Promise<ConversationCommandResult> {
     const operation = parseThreadQueueOperation(input);
     if (operation.type === "list") {
@@ -849,7 +854,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         kind: "outcome",
         outcome: {
           type: "thread-queue.added",
-          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized),
+          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized, captureOrigin),
         },
       };
     }

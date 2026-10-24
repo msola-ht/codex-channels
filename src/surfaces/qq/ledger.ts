@@ -72,6 +72,18 @@ export class QqLedger {
       if (!steered) { grant.thread = thread; grant.turn = turn; }
     });
   }
+  associateQueuedTurn(id: string, actor: string, thread: string, turn: string, assertAuthorized: () => void): Promise<void> {
+    return this.change(() => {
+      assertAuthorized();
+      const { grant } = this.budget(id, actor);
+      if (grant.thread !== undefined && (grant.thread !== thread || grant.turn !== turn)) {
+        throw new Error("QQ 原回复来源已关联其他轮次");
+      }
+      grant.state = "submitted";
+      grant.thread = thread;
+      grant.turn = turn;
+    });
+  }
   forTurn(actor: string, thread: string, turn: string): string | undefined {
     // Keep the original grant; a later steer does not refresh an existing result's budget.
     return this.state.grants.find(grant => grant.actor === actor && grant.thread === thread

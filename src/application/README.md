@@ -118,6 +118,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 - `conversation-lock-coordinator.ts`：为同一 Conversation、多个 Conversation 的有序加锁；Queue、Revert
   与主会话生命周期共用同一实例。
 - `thread-queue-service.ts`：维护原生 Thread Queue 的增删改查、启动、分页选择快照、错误映射和待生效设置冲突检查；
+  add 在请求前生成 clientId，通过可选 `ThreadQueueSubmissionOrigin` 捕获口通知调用 Surface；只携带精确 Thread/clientId，不包含正文或平台身份，也不推定 Turn 已启动。
+  命令服务与 ConversationService 原样传递该捕获口；失败使入队停止，RPC 结果未知不重试。update/delete/reorder/start 不重新登记来源。
   只有列表发布更新数字选择，内部复核不重排或续期旧页；读取期间的失效不允许重新发布旧快照。
   不负责 Thread 绑定切换或后台释放。
   用户命令固定接收时的 Thread，异步读取与提交前复核 Actor、Workspace 和 Thread；写入响应仍正常结算，

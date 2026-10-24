@@ -159,6 +159,8 @@ export function renderFeishuOutput(
   ) => number | null,
 ): string | null {
   switch (event.type) {
+    case "user.message.identity":
+      return null;
     case "turn.retry":
       // The Outbox owns the editable retry card and its transient message handle.
       return null;

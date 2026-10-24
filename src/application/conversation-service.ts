@@ -77,6 +77,7 @@ import type {
 import type {
   ThreadQueueItem,
   ThreadQueuePort,
+  ThreadQueueSubmissionOrigin,
 } from "./thread-queue-port.js";
 import type {
   ThreadHistoryPort,
@@ -299,7 +300,8 @@ export interface ConversationExtensionUseCases {
 
 /** Stable native Queue and paginated Revert boundary. */
 export interface ConversationQueueRevertUseCases {
-  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem>;
+  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void,
+    captureOrigin?: (origin: ThreadQueueSubmissionOrigin) => void): Promise<ThreadQueueItem>;
   queueList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadQueueListResult>;
   queueUpdate(
     target: ConversationTarget,
@@ -955,8 +957,9 @@ export class ConversationService implements
     return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized);
   }
 
-  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem> {
-    return this.queueUseCases.add(target, value, assertAuthorized);
+  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void,
+    captureOrigin?: (origin: ThreadQueueSubmissionOrigin) => void): Promise<ThreadQueueItem> {
+    return this.queueUseCases.add(target, value, assertAuthorized, captureOrigin);
   }
 
   queueList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadQueueListResult> {

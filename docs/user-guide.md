@@ -191,6 +191,9 @@ Setup 保存或确认配置未变化后会提示后续核对；禁用或空允�
 音频可能提交后保留一小时，视频保留 24 小时；确定未提交时清理。真实 QQ 音视频附件地址、模型能力及视频服务分析仍待验收。
 QQ 会话管理可使用 `/archived`、`/archive`、`/unarchive <序号|名称|Session ID>`、`/pin`、`/unpin`、
 `/rename <名称>`、`/fork`；沿用飞书/TG 的同一会话与工作区规则。归档后下一条文字新建，取消归档和分叉成功后切换到对应会话。
+QQ 也支持共享 `/queue` 的 add、list、update、delete、reorder、start；队列由 App Server 持久保存，Gateway 重启不会清空。
+结果只能沿本次运行登记的原 add 来信回复，入队回执与未来结果共用原消息五分钟、四次额度；自动消费和手动 start 使用同一来源。
+start 只回复自己的操作回执，不刷新旧任务额度。原生端创建、重启前或过期的条目可继续执行，但 QQ 没有有效回复依据，需在原生客户端核对结果。
 诊断使用 `/permissions`、`/diff`、`/metrics session`，或 `/metrics <global|providers|models|errors> [24h|7d|30d|90d|all]`。
 权限列表不表示当前已授予权限；Diff 按原文保留增删符号及缩进。长回答、长 Diff 和命令结果超出文本预算或剩余额度时，
 发送完整 UTF-8 文件 `codex-complete-result.txt`，保留原文，文件上限 1000000 字节且至少需要一次剩余回复额度。

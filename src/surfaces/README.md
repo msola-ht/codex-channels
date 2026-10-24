@@ -34,6 +34,8 @@ Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌�
 平台只提交结构化选择，Application 在锁内复核 Thread 与空闲状态，确认权威设置后才返回更新成功。
 QQ 的共享管理命令使用相同业务服务；Hook、回退与重置券确认预览必须完整单条显示，禁止分片或长结果附件代替预览。
 `canReviewQqConversationHook` 经本模块公开导出给 Bootstrap，按共享字段保真与 QQ 展示预算决定是否可在渠道审查。
+`user.message.identity` 经同步 live admission 供 QQ 关联原生 Queue 的原来信，不进入持久输出或平台展示；其他渠道明确忽略。
+QQ 队列操作复用共享命令，只有 add 在 RPC 前登记来源，自动消费与手动 start 都沿原输入 Grant，不用 start 来信续期。
 三个渠道共用 `lifecycle-presentation.ts` 仅在自动审批完成后呈现结果与结构化内容摘要；Client 提供经脱敏和限长的纯文本，Telegram HTML 面板与飞书 Markdown 呈现边界转义字面字段，微信纯文本保留字符原样；通知经共享关键投递路径发送，不生成审批交互。
 普通状态与生命周期卡只在 Thread 权威设置启用自动审批时显示审批方式，完成卡的自动审批统计也受此条件约束；专用查询与设置入口保留完整状态和操作回执。
 

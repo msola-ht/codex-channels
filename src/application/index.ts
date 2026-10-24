@@ -206,6 +206,7 @@ export {
   type ThreadQueueFailure,
   type ThreadQueueInputType,
   type ThreadQueueItem,
+  type ThreadQueueSubmissionOrigin,
   type ThreadQueueListOptions,
   type ThreadQueuePage,
   type ThreadQueuePort,

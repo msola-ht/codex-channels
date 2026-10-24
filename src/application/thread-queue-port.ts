@@ -37,6 +37,12 @@ export interface ThreadQueueItem {
   editable: boolean;
 }
 
+/** Local submission identity, captured before an add RPC can dispatch the item. */
+export interface ThreadQueueSubmissionOrigin {
+  threadId: string;
+  clientId: string;
+}
+
 export interface ThreadQueuePage {
   items: ThreadQueueItem[];
   nextCursor: string | null;

@@ -24,6 +24,8 @@ QQ 受限 PCM WAV 输入沿用 localAudio 与模型 audio 能力检查，MP4 输
 不新增视频模型或转码协议，隔离观察和真实平台未验收边界见[音视频批次](qq-surface-plan.md#共享音视频输入)。
 QQ review/plan/skill/plugin/agents 通过共享命令提交捕获关联既有 Submission，不改变上游 RPC；
 适配范围和未实机边界见[共享命令提交关联](qq-surface-plan.md#共享命令提交关联)。
+QQ 原生 Queue 复用既有六请求与官方 userMessage.clientId；Core 在回显过滤前只发布内部身份事件，
+关联入队前登记的来源，不新增 RPC 或本地队列正文持久化；实现及未实机边界见[Queue 来源](qq-surface-plan.md#原生-queue-来源适配)。
 
 `0.164.0` 固定源码、随仓文档和生成协议已同步；位置和固定提交见
 [上游来源](upstream-sources.md)，取舍与验收限制见[升级决策](codex-cli-upgrade-decisions.md)。

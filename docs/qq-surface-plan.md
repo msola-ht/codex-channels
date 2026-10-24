@@ -675,13 +675,18 @@ P0 只做即将实施能力的核定，不要求先发送所有类型；每一�
 | 其余共享管理命令 | autoreview/compact/revert/release/mcp/hooks/limits 的查询与操作 | 已本地实现并完成独立复审修复；完整预览、确认和回复守卫复用现有用例，QQ 确认预览必须单条完整显示 |
 | 完整输出与素材 | 长结果文件交付、正文 Markdown 素材、显式发图归属 | 完整长结果文件已本地实现并完成独立复审；素材与显式发图待实施，普通 file_info 与 Markdown 素材生命周期分开 |
 | 音视频输入 | 既有音频模型能力、视频 MCP、私有暂存及停止 | 已本地实现受限 PCM WAV 和单 MP4并完成独立复审；不新增转码或直接模型视频语义，真实 QQ 待验收 |
+| 原生 Queue 来源 | 共享入队/编辑/删除/排序/启动 → 官方 clientId 身份事件 → 原消息 Grant | 已本地实现并完成独立复审；入队前登记，自动消费与手动启动沿原来源，不修改 Ledger 磁盘格式，不用 start 来信延长旧结果窗口 |
 | 流式与后台结果 | 增量/终态确认、窗口与额度、恢复；计划任务与通知的发送依据 | 条件性批次；先核定流式计次和完整性、后台发送授权及拒收合同，不能借最新来信或放宽主动发送作为兜底 |
 
 各批之间的源码依赖完成后再开始下一批写入；可并行只读调查独立门槛。无法从当前合同建立的能力应记录具体缺口和下一步，
 不为凑齐功能列表猜测协议，也不以尚未取得的真实平台证据宣布可用。
 
-后续调查已确认：原生 Queue 自动消费沿锁定上游保留 `clientUserMessageId → userMessage.clientId`；本地 Core 的回显过滤尚未输出独立身份事件。
-该项属于本地适配缺口，可以在发送 Queue RPC 前登记来源、按精确身份关联新 Turn，不能只处理 `/queue start` 或猜最近来信。
+后续调查已确认：原生 Queue 自动消费沿锁定上游保留 `clientUserMessageId → userMessage.clientId`；该身份现已由本地 Core 在回显过滤前输出独立事件。
+QQ 在发送 Queue RPC 前登记来源、按精确身份关联新 Turn，覆盖自动消费，不只处理 `/queue start` 或猜最近来信。
+本批设计为共享命令可选来源捕获口贯通 queueAdd，Core 在 Gateway 回显过滤前发布不含正文的独立身份事件；
+QQ 经同步 admitLive 登记关联等待，逐项核对 actor/target/thread/clientId 及原窗口，Ledger 原子关联拒绝覆盖已有不同 Turn。
+映射只在当前进程有界保留；RPC 结果未知时保留到原窗口结束，不重试入队。update/delete/reorder/start 不刷新来源；
+原生客户端创建或重启前的队列项仍可执行，但没有 QQ 被动回复依据，不借 start 消息的额度补发。
 工具 `create_goal` 的自主续跑沿官方 `rootTurnId` 保留根身份，本地 Client 尚未传递，可在原 Grant 窗口/共享额度内适配。
 直接 `thread/goal/set` 则清除续跑来源选项，响应不含所启动 Turn；查询/清除和工具创建链可独立推进，直接 set 的结果归属需另立明确合同。
 上述核定来自锁定 Codex `0.164.0` 的 Queue processor、Goal extension/runtime 及公开 Turn 字段，未运行真实 Queue/Goal。
@@ -1131,6 +1136,28 @@ Astra 独立审查覆盖官方输入、共享提交与模型能力、文件生�
 实际 QqAudioStore 接受正常 PCM，拒绝高位 fmt 且无残留；四次下载均 manual/omit、无 headers。帮助实际规划为两条 Markdown，2908/2002 UTF-8 字节。
 复审指出的模块/组合根渠道数量与旧未开放文案已同步修正。
 上述隔离业务端口不证明真实 App Server/模型端到端消费成功；真实 QQ 附件、音频模型目录、Strata 分析和客户端结果仍待验收。
+
+## 原生 Queue 来源适配
+
+接续 `f1d32400`，通过共享命令及 ThreadQueueService 的可选捕获口，在 add RPC 前登记官方 clientId；
+Core 在 Gateway 回显过滤前发布不含正文的身份事件，QQ 同步 admitLive 建立关联等待，Ledger 原子校验原 actor/窗口/Thread/Turn，不覆盖不同轮次。
+不改 Ledger v1 格式，不复制队列正文；来源 Map 最多 500 项且只在当前代次保留，update/delete/reorder/start 不续期。
+所有渠道对该身份事件不展示、不持久；正文及终态仍用原可靠输出。QQ 队列列表和操作结果沿共享格式化器，动态字段按字面值保护。
+
+主代理以隔离 TLS Surface、真实 CommandService/Ledger/协议客户端、替代 Queue 用例观察：add 响应前 identity 与最终结果到达，仍使用原 add msg_id；
+模拟 add RPC 回执丢失但已有身份事件，结果仍关联原来源，无自动重试。手动 start 回执归 start 来信，未来结果归原 add 来信。
+同 client 冲突 Turn、未知原生 client、跨目标身份、模拟过期、撤权、关闭均零发送；错误目标事件不污染后续正确目标关联。
+add 回执与最终结果合计四次后，第五次发送被拒绝，start 未增加旧来源预算；fatal 为零，连接清空且监听关闭。
+实施代理以真实 CommandService、ThreadQueueService、Core 及替代 QueuePort 观察 capture → RPC → identity → response；同 Item 重复事件只有一次身份、没有正文。
+update/reorder/start/delete 保留 clientId 且不增加 capture；缺正文、capture 拒绝及锁等待后撤权/换绑均零 RPC。
+身份事件在四渠道均 ignore、非关键、非持久且无快照。真实 Ledger 拒绝冲突 Turn/错误 Actor/撤权且零新增写入；重建实例后旧来源不可用。
+Queue 列表与操作动态字段含反引号、加粗标记、井号和多行时保持字面内容。check 与 scoped lint 通过。
+一次未经过正常 prebuild 清理的手动声明 emit 因既有 dist 声明输入报 TS5055，未改配置或删除产物绕过；上述业务观察均直接由 tsx 导入源码，不依赖该 emit。
+Astra 独立复审核对官方手动/自动消费、捕获与授权、Core/EventBus 同步观察、全部事件消费者、来源等待、Ledger 和发送预算，未发现其他必修缺陷。
+主代理实际规划发现新增帮助方括号使 Queue 参数行单独成为纯文本；Astra 复现并改成自然语言说明，不改命令语法或放宽 Markdown。
+修后规划在剩余额度 4/3/2 时均两片 Markdown（2977/2390 字节），1/0 时拒绝；动态字段仍完整保留字面内容。
+主代理再走实际隔离 Surface 的 `/help` → HTTP 发送，收到两条 msg_type=2、2977/2390 字节、同原 msg_id；fatal 为零且连接/监听关闭。
+此路径没有调用真实 App Server/QQ，实际队列自动消费、重启后用户核对与客户端结果仍待验收。
 
 ## 独立复审记录
 

@@ -796,6 +796,9 @@ export class ConversationCore {
     }
     this.seenUserMessages.add(messageKey);
     if (event.clientId?.startsWith(gatewayUserMessageClientIdPrefix)) {
+      const target = this.router.targetForThread(event.threadId);
+      if (target) this.publish({ type: "user.message.identity", target, threadId: event.threadId,
+        turnId: event.turnId, itemId: event.itemId, clientId: event.clientId });
       return;
     }
     const target = this.router.targetForThread(event.threadId);

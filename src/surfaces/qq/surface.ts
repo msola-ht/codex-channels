@@ -3,8 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { Logger } from "pino";
 import { safeInteractionDecision, type InteractionPort } from "../../approval/index.js";
-import { isConversationCommandName, type ConversationCommandExecutor, type ConversationTurnUseCases, type Submission } from "../../application/index.js";
-import { UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
+import { isConversationCommandName, type ConversationCommandExecutor, type ConversationTurnUseCases, type Submission, type ThreadQueueSubmissionOrigin } from "../../application/index.js";
+import { UserFacingError, conversationTargetKey, type ConversationTarget, type OutputEvent } from "../../conversation-core/index.js";
 import type { ConversationActorRegistry, SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { captureDelivery, checkpointDelivery, DeliveryReceipt } from "../delivery-receipt.js";
@@ -76,7 +76,7 @@ export class QqSurface implements SurfaceAdapter {
   private closed = false;
   constructor(private readonly options: CreateQqSurfaceOptions) {
     this.accountId = options.appId;
-    this.output = { handle: () => {}, deliver: (event, signal, checkpoint, authorized) => {
+    this.output = { admitLive: event => this.current?.output.admitLive?.(event), handle: () => {}, deliver: (event, signal, checkpoint, authorized) => {
       if (this.closed || !this.current?.output.deliver) return Promise.reject(new Error("QQ 当前连接不可用"));
       return this.current.output.deliver(event, signal, checkpoint, authorized);
     } };
@@ -121,6 +121,9 @@ class QqGeneration implements SurfaceAdapter {
   private readonly attachmentInputs = new AttachmentInputLifecycle();
   private readonly controller = new AbortController();
   private readonly pending = new Map<string, Set<Promise<Submission>>>();
+  private readonly queueOrigins = new Map<string, {
+    target: ConversationTarget; actor: string; grant: string; deadline: number; turnId?: string;
+  }>();
   private readonly inputTails = new Map<string, { job: Promise<void>; cancellation: AbortController }>();
   private readonly jobs = new Set<Promise<void>>();
   private readonly generationId = randomUUID();
@@ -171,6 +174,7 @@ class QqGeneration implements SurfaceAdapter {
     });
     void this.transport.finished.catch(error => this.fatal(error));
     this.output = {
+      admitLive: event => this.observeQueueOrigin(event),
       handle: () => {},
       deliver: (event, signal, checkpoint, authorized) => captureDelivery(() => {
         this.queue.enqueue(event.target.conversationId, async queueSignal => {
@@ -214,6 +218,7 @@ class QqGeneration implements SurfaceAdapter {
 
   private async close(): Promise<void> {
     this.closed = true;
+    this.queueOrigins.clear();
     this.controller.abort();
     for (const input of this.inputTails.values()) input.cancellation.abort();
     this.attachmentInputs.close();
@@ -324,7 +329,8 @@ class QqGeneration implements SurfaceAdapter {
       let authorizeReply: (() => void) | undefined;
       const result = await this.options.commands.execute(target, command.name, command.argumentsText, message.actor,
         () => this.allowed(target, message.actor), authorize => { authorizeReply = authorize; },
-        async submission => { await this.associateSubmission(target, message, submission); });
+        async submission => { await this.associateSubmission(target, message, submission); },
+        origin => this.captureQueueOrigin(target, message, origin));
       if (cancelledInputs && result.kind === "outcome" && result.outcome.type === "turn.stop-requested") result.outcome.stopped = true;
       const replyAllowed = (): boolean => {
         if (!authorizeReply) return false;
@@ -427,6 +433,48 @@ class QqGeneration implements SurfaceAdapter {
   private async submit(target: ConversationTarget, message: Inbound, operation: () => Promise<Submission>): Promise<Submission> {
     return this.associateSubmission(target, message, Promise.resolve().then(operation));
   }
+  private captureQueueOrigin(target: ConversationTarget, message: Inbound, origin: ThreadQueueSubmissionOrigin): void {
+    if (!this.allowed(target, message.actor)) throw new Error("QQ Queue 来源已失效");
+    const deadline = performance.now() + this.ledger.remainingMs(message.id, message.actor);
+    for (const [key, entry] of this.queueOrigins) {
+      if (entry.deadline <= performance.now() || !this.allowed(entry.target, entry.actor)) this.queueOrigins.delete(key);
+    }
+    const key = JSON.stringify([origin.threadId, origin.clientId]);
+    if (this.queueOrigins.has(key) || this.queueOrigins.size >= 500
+      || [...this.queueOrigins.values()].some(entry => entry.grant === message.id)) {
+      throw new Error("QQ Queue 来源登记冲突或容量已满");
+    }
+    this.queueOrigins.set(key, { target: { ...target }, actor: message.actor, grant: message.id, deadline });
+  }
+  private observeQueueOrigin(event: OutputEvent): void {
+    if (event.type !== "user.message.identity") return;
+    const key = JSON.stringify([event.threadId, event.clientId]);
+    const origin = this.queueOrigins.get(key);
+    if (!origin) return;
+    if (origin.deadline <= performance.now() || !this.allowed(origin.target, origin.actor)) {
+      this.queueOrigins.delete(key);
+      return;
+    }
+    if (conversationTargetKey(origin.target) !== conversationTargetKey(event.target)
+      || origin.turnId !== undefined && origin.turnId !== event.turnId) {
+      this.options.logger.warn({ reason: "qq-queue-origin-conflict" }, "QQ Queue 消费身份与原来源冲突，未关联新轮次");
+      return;
+    }
+    if (origin.turnId !== undefined) return;
+    origin.turnId = event.turnId;
+    // Publish a pending handle synchronously, before the next final output can be admitted.
+    // Its asynchronous ledger write never blocks the App Server Reader.
+    const association = this.trackSubmission(origin.target, this.ledger.associateQueuedTurn(origin.grant, origin.actor,
+      event.threadId, event.turnId, () => {
+        if (!this.allowed(origin.target, origin.actor) || origin.deadline <= performance.now()) {
+          throw new Error("QQ Queue 原回复来源已失效");
+        }
+      }).then(() => ({ threadId: event.threadId, turnId: event.turnId, steered: false })));
+    const job = association.then(() => {}, () => {
+      this.options.logger.warn({ reason: "qq-queue-association-unconfirmed" }, "QQ Queue 轮次关联未确认，结果保留待核对");
+    }).finally(() => this.jobs.delete(job));
+    this.jobs.add(job);
+  }
   private async associateSubmission(target: ConversationTarget, message: Inbound, operation: Promise<Submission>): Promise<Submission> {
     // Output awaits only the actual submission/association, never downloads,
     // earlier input work or a command reply queued behind it.
@@ -436,6 +484,9 @@ class QqGeneration implements SurfaceAdapter {
         this.observeMilestone("first-submission", "QQ 本运行代次首次会话提交已返回并登记；尚不代表模型完成");
         return result;
       });
+    return this.trackSubmission(target, submission);
+  }
+  private async trackSubmission(target: ConversationTarget, submission: Promise<Submission>): Promise<Submission> {
     const entries = this.pending.get(target.conversationId) ?? new Set<Promise<Submission>>();
     entries.add(submission);
     this.pending.set(target.conversationId, entries);

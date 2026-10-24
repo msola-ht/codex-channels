@@ -2,6 +2,9 @@
 
 本目录归约 App Server 的 Thread、Turn 和 Item 通知，输出平台无关事件，是会话状态与流式内容处理的核心。
 
+Gateway 前缀的用户消息在回显过滤前发布 `user.message.identity`，仅含当前路由目标和 Thread/Turn/Item/clientId，
+不发布正文。它供 Surface 同步关联实际执行来源，不持久投递、不展示、不改变现有用户回显抑制。
+
 ## 文件
 
 - `index.ts`：本模块的公开导出入口。
