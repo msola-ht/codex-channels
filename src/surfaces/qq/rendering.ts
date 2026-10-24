@@ -63,7 +63,7 @@ export interface QqRenderedMessage {
   blocks: QqContentBlock[];
   /** Only final answers and shared command results may become complete files. Never a rendered preview. */
   source?: string;
-  /** Command panels prefer fewer complete messages over splitting literal fields from headings. */
+  /** Complete results and panels prefer fewer messages over separating literal blocks from headings. */
   compact?: boolean;
   /** A confirmation token must never precede a partial or attached review. */
   singleMessage?: boolean;
@@ -251,7 +251,9 @@ function renderQqCommandPanel(result: ConversationCommandResult, text: string): 
     return renderQqPanel("已请求压缩当前 Codex Session。尚未确认完成，请稍后用 /status 核对。");
   }
   if (result.kind === "mcp" || result.kind === "mcp-health" || result.kind === "mcp-detail"
-    || result.kind === "mcp-login" || result.kind === "mcp-resource" || result.kind === "occupancy") {
+    || result.kind === "mcp-login" || result.kind === "mcp-resource" || result.kind === "occupancy"
+    || result.kind === "status" || result.kind === "workspaces" || result.kind === "models"
+    || result.kind === "usage" || result.kind === "limits") {
     return renderQqFieldPanel(field => renderConversationCommandResult(result, undefined, field)!, text, result.kind === "mcp-resource");
   }
   if (result.kind === "hooks") {
@@ -298,8 +300,11 @@ function renderQqCommandPanel(result: ConversationCommandResult, text: string): 
       result.outcome.type === "review.started" || result.outcome.type === "plan.started"
       || result.outcome.type === "skill.started" || result.outcome.type === "plugin.started"
       || result.outcome.type === "agents.started" || result.outcome.type === "thread.reverted"
-      || result.outcome.type === "goal.updated")) {
-    return renderQqFieldPanel(field => renderConversationCommandResult(mapQqQueryFields(result, field))!, text);
+      || result.outcome.type === "goal.updated" || result.outcome.type === "thread.resumed"
+      || result.outcome.type === "session.new" || result.outcome.type === "workspace.selected"
+      || result.outcome.type === "thread.archived" || result.outcome.type === "thread.unarchived"
+      || result.outcome.type === "thread.forked")) {
+    return renderQqFieldPanel(field => renderConversationCommandResult(mapQqQueryFields(result, field), undefined, field)!, text);
   }
   if (hasMultilineField(result)) {
     validateText(text);
@@ -308,7 +313,7 @@ function renderQqCommandPanel(result: ConversationCommandResult, text: string): 
   return renderQqPanel(text);
 }
 
-/** Parse only shared structure; restoring a field makes its entire block literal. */
+/** Parse only shared structure; unsafe restored fields make their entire block literal. */
 function renderQqFieldPanel(render: (field: (value: string) => string) => string, source: string, resource = false): QqRenderedMessage {
   const values: string[] = [];
   render(value => { values.push(value); return value; });
@@ -328,7 +333,17 @@ function renderQqFieldPanel(render: (field: (value: string) => string) => string
     .filter(block => !resource || block.text !== "```text" && block.text !== "```")
     .map(block => {
       const restored = block.text.replace(tokenPattern, token => literals.get(token)!);
-      return restored === block.text ? block : { text: restored };
+      if (restored === block.text) return block;
+      // No undocumented escaping: only fields already safe as literal QQ text may
+      // rejoin the trusted structure. A field must not introduce another block.
+      const safe = [...block.text.matchAll(tokenPattern)].every(([token]) => {
+        const value = literals.get(token)!;
+        return value.length > 0 && value === value.trim() && renderQqLiteral(value).markdown !== undefined
+          && !/[\p{Zl}\p{Zp}]/u.test(value)
+          && !/^(?:[#>]|[-+*]\s|\d+[.)]\s|-{3,}$)/u.test(value);
+      });
+      return { text: restored, ...(safe && block.markdown !== undefined
+        ? { markdown: block.markdown.replace(tokenPattern, token => literals.get(token)!) } : {}) };
     });
   const text = blocks.map(block => block.text).join("\n");
   validateText(text);
@@ -410,7 +425,25 @@ function mapQqQueryFields(
   }
   if (result.kind === "outcome") {
     const outcome = result.outcome;
+    const model = <T extends { model: string; modelProvider?: string }>(value: T): T => ({ ...value,
+      model: field(value.model), ...(value.modelProvider ? { modelProvider: field(formatDisplayedProvider(value.modelProvider)) } : {}),
+    });
     switch (outcome.type) {
+      case "thread.resumed":
+        return { ...result, outcome: { ...outcome, threadId: field(outcome.threadId), model: model(outcome.model),
+          ...(outcome.backgroundedThreadId ? { backgroundedThreadId: field(outcome.backgroundedThreadId) } : {}),
+        } };
+      case "session.new":
+        return { ...result, outcome: { ...outcome, nextModel: model(outcome.nextModel),
+          ...(outcome.previousThreadId ? { previousThreadId: field(outcome.previousThreadId) } : {}),
+          ...(outcome.backgroundedThreadId ? { backgroundedThreadId: field(outcome.backgroundedThreadId) } : {}),
+        } };
+      case "workspace.selected":
+        return { ...result, outcome: { ...outcome, nextModel: model(outcome.nextModel), workspace: { ...outcome.workspace,
+          name: field(outcome.workspace.name), cwd: field(outcome.workspace.cwd),
+        } } };
+      case "thread.archived": case "thread.unarchived": case "thread.forked":
+        return { ...result, outcome: { ...outcome, threadId: field(outcome.threadId) } };
       case "goal.updated":
         return { ...result, outcome: { ...outcome, goal: { ...outcome.goal, objective: field(outcome.goal.objective) } } };
       case "thread-queue.added": case "thread-queue.updated":
@@ -510,7 +543,7 @@ export function renderQqLifecycle(presentation: LifecyclePresentation): QqRender
   if (presentation.footer) blocks.push(field(presentation.footer));
   const text = blocks.map(block => block.text).join("\n");
   validateText(text);
-  return { text, blocks };
+  return { text, blocks, compact: true };
 }
 
 export function renderQqOutput(event: OutputEvent, contentUnconfirmed = false): QqRenderedMessage {
@@ -518,7 +551,7 @@ export function renderQqOutput(event: OutputEvent, contentUnconfirmed = false): 
     const candidate = completeFileCandidate(event.text);
     if (candidate) return candidate;
     const blocks = renderQqContent(event.text);
-    return { source: event.text, text: blocks.map(block => block.text).join("\n"), blocks };
+    return { source: event.text, text: blocks.map(block => block.text).join("\n"), blocks, compact: true };
   }
   if (event.type === "operation.updated") {
     const panel = renderQqPanel([
@@ -529,7 +562,7 @@ export function renderQqOutput(event: OutputEvent, contentUnconfirmed = false): 
     const detail = redactOperationDetail(event.operation.detail);
     const text = `${panel.text}\n${detail}`;
     validateText(text);
-    return { text, blocks: [...panel.blocks, { text: detail }] };
+    return { text, blocks: [...panel.blocks, { text: detail }], compact: true };
   }
   if (event.type === "turn.completed") {
     const presentation = createTurnCompletedPresentation(event);

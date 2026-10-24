@@ -16,15 +16,16 @@ import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-e
 
 export function formatConversationWorkspaces(
   result: Extract<ConversationCommandResult, { kind: "workspaces" }>,
+  field: (value: string) => string = value => value,
 ): string {
   return toStructuredMarkdownList([
     `Workspace（${result.workspaces.length}）：`,
     ...(!result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId)
-      ? [`原选择已失效：${result.currentWorkspaceId}。请选择下列工作区后重新发起操作。`]
+      ? [`原选择已失效：${field(result.currentWorkspaceId)}。请选择下列工作区后重新发起操作。`]
       : []),
     ...result.workspaces.flatMap((workspace, index) => [
-      `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
-      `工作目录：${workspace.cwd}`,
+      `${index + 1}. ${field(workspace.name)} · ${field(workspace.id)}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
+      `工作目录：${field(workspace.cwd)}`,
     ]),
     "",
     "切换：/workspace <序号、ID 或名称>",
@@ -127,8 +128,9 @@ export function formatThreadApprovalsReviewer(reviewer: ThreadApprovalsReviewer 
 export function formatConversationStatus(
   status: ConversationStatus,
   formatExecutionPath: (path: string) => string = path => path,
+  field: (value: string) => string = value => value,
 ): string {
-  const cleanPath = (path: string): string => formatExecutionPath(path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
+  const cleanPath = (path: string): string => field(formatExecutionPath(path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")));
   const context = status.threadId ? status.executionContext : undefined;
   const sharedDirectory = context?.cwd === status.cwd;
   const directoryReference = (path: string): string => path === status.cwd
@@ -137,20 +139,20 @@ export function formatConversationStatus(
   const lines = [
     "Codex 状态",
     formatTimezoneLine(),
-    `Workspace：${status.workspaceName} (${status.workspaceId})`,
-    `Session：${status.threadId ? status.threadName ?? "未命名" : "尚未绑定"}`,
-    `Session ID：${status.threadId ?? "尚未绑定"}`,
-    `Turn：${status.turnId ?? "空闲"}`,
+    `Workspace：${field(status.workspaceName)} (${field(status.workspaceId)})`,
+    `Session：${status.threadId ? field(status.threadName ?? "未命名") : "尚未绑定"}`,
+    `Session ID：${field(status.threadId ?? "尚未绑定")}`,
+    `Turn：${field(status.turnId ?? "空闲")}`,
     sharedDirectory ? `- 工作目录：${cleanPath(status.cwd)}（工作区与会话一致）`
       : `- 工作区目录：${cleanPath(status.cwd)}`,
     ...(status.threadId && !sharedDirectory
       ? [`- 会话执行目录：${context ? cleanPath(context.cwd) : "尚未取得有效的 App Server 执行上下文，不使用工作区目录代替"}`]
       : []),
-    `Git 分支：${status.gitBranch ?? "未检测到"}`,
-    `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
-    `${reasoningEffortSettingName(status.effort)}：${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    `速度：${status.threadId || status.fastModePending ? formatServiceTierSetting(status) : "未知"}`,
+    `Git 分支：${field(status.gitBranch ?? "未检测到")}`,
+    `模型：${field(status.model)}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
+    `提供商：${field(formatCodexProviderLabel(status.modelProvider))}`,
+    `${reasoningEffortSettingName(status.effort)}：${field(formatReasoningEffort(status.effort))}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
+    `速度：${status.threadId || status.fastModePending ? field(formatServiceTierSetting(status)) : "未知"}`,
     `协作模式：${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`,
     ...(isAutoApprovalReviewer(status.approvalsReviewer)
       ? [`审批方式：${formatThreadApprovalsReviewer(status.approvalsReviewer)}`]
@@ -187,7 +189,7 @@ export function formatConversationStatus(
     lines.push(
       "", "当前 Goal：",
       `Goal 状态：${formatGoalStatus(status.goal.status)}`,
-      `Goal 目标：${status.goal.objective}`,
+      `Goal 目标：${field(status.goal.objective)}`,
       `Goal 用量：${formatGoalUsage(status.goal)}`,
     );
   }

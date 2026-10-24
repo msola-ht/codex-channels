@@ -178,7 +178,9 @@ const digest = (value: string): string => createHash("sha256").update(value).dig
 class QqRateWait extends Error {
   constructor(readonly milliseconds: number) { super("QQ 主动发送等待频率额度"); }
 }
-export interface QqActiveReservation { beforeSend(signal: AbortSignal): Promise<void> }
+export interface QqActiveReservation {
+  beforeSend(signal: AbortSignal, prepareRequest?: (signal: AbortSignal) => Promise<void>): Promise<void>;
+}
 
 /** Independent transport accounting. Never contains text, attachments, credentials or conversation history. */
 export class QqActiveLedger {
@@ -236,16 +238,21 @@ export class QqActiveLedger {
       }
     }));
     let used = 0;
-    return { beforeSend: async requestSignal => {
+    return { beforeSend: async (requestSignal, prepareRequest) => {
       const entry = entries[used];
       if (!entry) throw new Error("QQ 主动发送预留次数已耗尽");
-      await this.waitForRate(requestSignal, () => this.change(now => {
-        if (performance.now() < this.nextRequest) throw new QqRateWait(this.nextRequest - performance.now());
-        // A token/upload wait must not turn older reservations into a burst at HTTP time.
-        this.checkRate(entry.actor, 1, now, entry);
-        if (entry.at <= now - dayMs || !this.state.attempts.includes(entry)) throw new Error("QQ 主动发送预留已过期");
-        entry.at = now;
-      }, () => { this.nextRequest = performance.now() + 250; }));
+      await this.waitForRate(requestSignal, async bounded => {
+        await prepareRequest?.(bounded);
+        bounded.throwIfAborted();
+        await this.change(now => {
+          bounded.throwIfAborted();
+          if (performance.now() < this.nextRequest) throw new QqRateWait(this.nextRequest - performance.now());
+          // A token/upload wait must not turn older reservations into a burst at HTTP time.
+          this.checkRate(entry.actor, 1, now, entry);
+          if (entry.at <= now - dayMs || !this.state.attempts.includes(entry)) throw new Error("QQ 主动发送预留已过期");
+          entry.at = now;
+        }, () => { this.nextRequest = performance.now() + 250; });
+      });
       used++;
     } };
   }
@@ -262,11 +269,11 @@ export class QqActiveLedger {
       }
     }
   }
-  private async waitForRate(signal: AbortSignal, operation: () => Promise<void>): Promise<void> {
+  private async waitForRate(signal: AbortSignal, operation: (signal: AbortSignal) => Promise<void>): Promise<void> {
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(65_000)]);
     while (true) {
       bounded.throwIfAborted();
-      try { await operation(); return; }
+      try { await operation(bounded); return; }
       catch (error) {
         if (!(error instanceof QqRateWait)) throw error;
         await delay(Math.max(1, Math.ceil(error.milliseconds)), undefined, { signal: bounded });

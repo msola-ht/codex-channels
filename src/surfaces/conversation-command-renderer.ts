@@ -57,7 +57,7 @@ export function renderConversationCommandResult(
       }
       return formatConversationCommandOutcome(result.outcome);
     case "sessions":
-      return formatConversationSessions(result);
+      return formatConversationSessions(result, formatLiteralField);
     case "thread-queue":
       return formatConversationThreadQueue(result);
     case "thread-revert":
@@ -71,13 +71,13 @@ export function renderConversationCommandResult(
     case "scheduled-confirmation":
       return formatConversationScheduledConfirmation(result);
     case "status":
-      return formatConversationStatus(result.status);
+      return formatConversationStatus(result.status, undefined, formatLiteralField);
     case "workspaces":
-      return formatConversationWorkspaces(result);
+      return formatConversationWorkspaces(result, formatLiteralField);
     case "auto-review":
       return formatConversationAutoReview(result, formatCommand);
     case "models":
-      return formatConversationModels(result, formatCommand);
+      return formatConversationModels(result, formatCommand, formatLiteralField);
     case "collaboration-mode":
       return formatConversationCollaborationMode(result);
     case "skills":
@@ -105,13 +105,13 @@ export function renderConversationCommandResult(
     case "plugin-detail":
       return formatConversationPluginDetail(result);
     case "usage":
-      return formatConversationUsage(result);
+      return formatConversationUsage(result, formatLiteralField);
     case "metrics":
       return formatConversationMetrics(result);
     case "reset-credit":
       return formatConversationResetCredits(result);
     case "limits":
-      return formatConversationLimits(result);
+      return formatConversationLimits(result, formatLiteralField);
     case "permissions":
       return formatConversationPermissions(result);
     case "artifacts":

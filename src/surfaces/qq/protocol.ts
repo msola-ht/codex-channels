@@ -41,7 +41,8 @@ export type QqSendMessageInput = QqSendMode & {
   userOpenid: string;
   message: QqOutgoingMessage;
   signal?: AbortSignal;
-  beforeSend?: () => void | Promise<void>;
+  /** After each rate wait, await prepareRequest with the gate's bounded signal before persisting HTTP-time accounting. */
+  beforeSend?: (prepareRequest: (signal: AbortSignal) => Promise<void>) => void | Promise<void>;
 };
 
 export interface QqStreamMessageInput {
@@ -141,7 +142,12 @@ export class QqProtocolClient {
       }).catch(() => undefined);
     }
     // A cancelled caller leaves the bounded, account-owned refresh available to other callers.
-    return await abortable(this.tokenFlight, signal, "token");
+    const token = await abortable(this.tokenFlight, signal, "token");
+    this.ensureOpen("token", signal);
+    if (this.cachedToken?.value !== token || this.cachedToken.expiresAt - Date.now() <= minimumRemainingMs) {
+      throw new QqProtocolError("token", "timeout");
+    }
+    return token;
   }
 
   async getGatewayUrl(signal?: AbortSignal): Promise<string> {
@@ -186,11 +192,15 @@ export class QqProtocolClient {
         : { msg_type: 2, markdown: { content: input.message.content, force_verify_image_resource: true } }),
       ...(input.mode === "passive" ? { msg_id: input.msgId, msg_seq: input.msgSeq } : {}),
     };
-    // Ordinary sends may wait 65 seconds at the actual rate gate. Refresh early,
-    // without moving token work after the persisted HTTP-time accounting.
-    const token = await this.getAccessToken(input.signal, 85_000);
+    // The platform only refreshes within its final 60 seconds. Reacquire after
+    // each rate wait, before its persisted HTTP-time accounting, instead of
+    // assuming an early refresh can cover the entire 65-second gate.
+    let token = await this.getAccessToken(input.signal, REQUEST_TIMEOUT_MS);
+    const prepareRequest = async (signal: AbortSignal): Promise<void> => {
+      token = await this.getAccessToken(signal, REQUEST_TIMEOUT_MS);
+    };
+    await input.beforeSend?.(prepareRequest);
     const expiresAt = this.cachedToken?.value === token ? this.cachedToken.expiresAt : 0;
-    await input.beforeSend?.();
     if (expiresAt - Date.now() <= REQUEST_TIMEOUT_MS) throw new QqProtocolError("token", "timeout");
     return await this.withRequest("send", input.signal, async (signal) => {
       const data = await this.requestJson("send", path, body, signal, token);

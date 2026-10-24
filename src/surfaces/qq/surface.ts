@@ -28,7 +28,7 @@ import { QqVideoStore, type QqVideoReference } from "./video-store.js";
 import { isSupportedQqAttachmentUrl } from "./media-download.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { decodeQqReference } from "./quoted-reference.js";
-import { renderQqContent, renderQqLiteral } from "./content.js";
+import { renderQqContent } from "./content.js";
 
 export interface QqNetwork {
   fetchImpl: typeof fetch;
@@ -98,6 +98,7 @@ export class QqSurface implements SurfaceAdapter {
   private starting: Promise<void> | undefined;
   private stopping: Promise<void> | undefined;
   private closed = false;
+  private terminalFailure: QqTransportError | undefined;
   constructor(private readonly options: CreateQqSurfaceOptions) {
     this.accountId = options.appId;
     this.output = { admitLive: event => this.current?.output.admitLive?.(event), handle: event => this.current?.output.handle(event), deliver: (event, signal, checkpoint, authorized) => {
@@ -107,6 +108,7 @@ export class QqSurface implements SurfaceAdapter {
   }
   start(): Promise<void> {
     if (this.closed) return Promise.reject(new Error("QQ 已关闭"));
+    if (this.terminalFailure) return Promise.reject(this.terminalFailure);
     return this.starting ??= this.begin().finally(() => { this.starting = undefined; });
   }
   sendChannelImage(conversationId: string, imagePath: string, source?: ChannelImageSource): Promise<void> {
@@ -116,10 +118,19 @@ export class QqSurface implements SurfaceAdapter {
   private async begin(): Promise<void> {
     await this.current?.stop();
     if (this.closed) throw new Error("QQ 已关闭");
-    const generation = new QqGeneration(this.options);
+    if (this.terminalFailure) throw this.terminalFailure;
+    const generation = new QqGeneration({ ...this.options, onFatal: error => {
+      // The shared manager retries surfaces; a V2 terminal close must survive generation replacement.
+      if (error instanceof QqTransportError && error.reason === "fatal-close" && error.closeCode !== undefined) this.terminalFailure = error;
+      this.options.onFatal(error);
+    } });
     this.current = generation;
     try { await generation.start(); }
-    catch (error) { await generation.stop(); throw error; }
+    catch (error) {
+      if (error instanceof QqTransportError && error.reason === "fatal-close" && error.closeCode !== undefined) this.terminalFailure = error;
+      await generation.stop();
+      throw error;
+    }
     if (this.closed) { await generation.stop(); throw new Error("QQ 已关闭"); }
   }
   stop(): Promise<void> {
@@ -259,7 +270,7 @@ class QqGeneration implements SurfaceAdapter {
                   for (const [key, stream] of this.streams) {
                     if (stream.event.threadId === threadId && stream.event.turnId === turnId
                       && conversationTargetKey(stream.event.target) === conversationTargetKey(event.target)
-                      && stream.state === "streaming") {
+                      && (stream.state === "streaming" || stream.state === "fallback")) {
                       await this.closeStream(key, stream, actor, grant, combined, sourceAuthorized);
                     }
                   }
@@ -1057,13 +1068,13 @@ class QqGeneration implements SurfaceAdapter {
     if (previewNotice !== undefined) {
       await checkpointDelivery("qq.c2c.text", () => this.client.sendC2CMessage({ mode: "active", userOpenid: actor,
         message: { kind: "text", content: previewNotice }, signal: sendSignal,
-        beforeSend: async () => { await reservation.beforeSend(sendSignal); beforeSend(); } }));
+        beforeSend: async prepareRequest => { await reservation.beforeSend(sendSignal, prepareRequest); beforeSend(); } }));
     }
     await checkpointDelivery(`qq.c2c.${media.kind}`, () => this.client.sendC2CMessage({ userOpenid: actor,
       mode: "active",
       message: { kind: media.kind, fileInfo: uploaded.fileInfo }, signal: sendSignal,
-      beforeSend: async () => {
-        await reservation.beforeSend(sendSignal);
+      beforeSend: async prepareRequest => {
+        await reservation.beforeSend(sendSignal, prepareRequest);
         beforeSend();
         if (performance.now() >= uploaded.expiresAt) throw new Error("QQ 附件上传凭据已过期");
       },
@@ -1091,7 +1102,7 @@ class QqGeneration implements SurfaceAdapter {
       beforeSend();
       await checkpointDelivery(`qq.c2c.${message.kind}`, () => this.client.sendC2CMessage({ userOpenid: actor,
         mode: "active", message, signal: sendSignal,
-        beforeSend: async () => { await reservation.beforeSend(sendSignal); beforeSend(); } }),
+        beforeSend: async prepareRequest => { await reservation.beforeSend(sendSignal, prepareRequest); beforeSend(); } }),
       allowFormatRejection ? isQqMarkdownFormatRejection : undefined);
     }
   }
@@ -1104,8 +1115,11 @@ class QqGeneration implements SurfaceAdapter {
       ? { operation: error.operation, reason: error.reason, httpStatus: error.httpStatus, bizCode: error.bizCode, traceId: error.traceId }
       : error instanceof QqTransportError ? { reason: error.reason, closeCode: error.closeCode }
       : { reason: "transport-storage-unavailable" };
-    this.options.logger.error(fields, "QQ 运行代次失败，将关闭后恢复");
-    this.options.onFatal(new Error("QQ 运行代次失败"));
+    const terminal = error instanceof QqTransportError && error.reason === "fatal-close" && error.closeCode !== undefined;
+    this.options.logger.error(fields, terminal
+      ? "QQ 连接被终止，自动重连已禁用；请核对关闭码和配置，修正后重启 Gateway"
+      : "QQ 运行代次失败，将关闭后恢复");
+    this.options.onFatal(terminal ? error : new Error("QQ 运行代次失败"));
     void this.stop().catch(() => this.options.logger.warn({ reason: "qq-close-failed" }, "QQ 关闭未完成"));
   }
   private actor(target: ConversationTarget): string {
@@ -1119,11 +1133,9 @@ function qqStreamMarkdown(source: string, finished: boolean): string | undefined
   let stable = source;
   if (!finished) {
     const newline = source.lastIndexOf("\n");
-    const lastLine = source.slice(newline + 1);
-    // An unfinished structural line can change meaning when later text arrives.
-    if (renderQqLiteral(lastLine).markdown === undefined || /^(?:\s*[-+#>\d]|\s*$)/u.test(lastLine)) {
-      stable = source.slice(0, newline + 1);
-    }
+    // Even a plain first token may become an inline-code/link line. Wait for a
+    // complete line so fallback cannot strand an irreversible one-word preview.
+    stable = source.slice(0, newline + 1);
     // A later child can change the inferred indent unit of earlier list items.
     // Keep the whole indented portion pending until the complete source is known.
     const indentedList = /^ +(?:[-+*]|\d+[.)])\s/gmu.exec(stable);
@@ -1184,6 +1196,7 @@ function decodeMessage(value: unknown): Inbound {
     ...(reference.supported && reference.quotedText !== undefined ? { quotedText: reference.quotedText } : {}),
     supported: typeof value.content === "string"
       && (text.trim().length > 0 || images.length > 0 || audio !== undefined || video !== undefined) && Buffer.byteLength(text, "utf8") <= 32_000
+      && Buffer.from(text, "utf8").toString("utf8") === text
       && supportedAttachments
       && reference.supported };
 }

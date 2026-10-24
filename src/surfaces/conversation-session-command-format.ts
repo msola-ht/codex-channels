@@ -14,6 +14,7 @@ const maximumProcessCommandCharacters = 160;
 
 export function formatConversationSessions(
   result: Extract<ConversationCommandResult, { kind: "sessions" }>,
+  field: (value: string) => string = value => value,
 ): string {
   if (result.sessions.length === 0) {
     const scope = result.archived ? "已归档会话" : "可恢复会话";
@@ -29,7 +30,7 @@ export function formatConversationSessions(
     `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${result.view.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
-        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${formatReasoningEffort(session.reasoningEffort)}` : ""}${session.modelProvider ? ` · Provider：${formatDisplayedProvider(session.modelProvider)}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
+        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${field(formatSessionLabel(session.name ?? session.preview))}${session.model ? ` · 模型：${session.model}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${field(formatReasoningEffort(session.reasoningEffort))}` : ""}${session.modelProvider ? ` · Provider：${formatDisplayedProvider(session.modelProvider)}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
     ...(hiddenCount > 0
       ? [

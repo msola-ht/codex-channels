@@ -158,11 +158,13 @@ export class QqWebSocketTransport {
       }
       if (this.lifetime.signal.aborted) return;
       this.status("disconnected");
-      if (closeCode === 4914 || closeCode === 4915) {
+      // API V2's per-code table takes precedence over its abbreviated retry advice.
+      if (closeCode !== undefined && [4001, 4002, 4010, 4011, 4012, 4013, 4014, 4914, 4915].includes(closeCode)) {
         throw new QqTransportError("fatal-close", closeCode);
       }
       if (closeCode === 4004) this.options.client.invalidateAccessToken();
-      if (closeCode === 4006 || closeCode === 4007 || closeCode === 4009
+      // 4009 retains the session and admitted sequence so Resume can replay missed events.
+      if (closeCode === 4006 || closeCode === 4007
         || (closeCode !== undefined && closeCode >= 4900 && closeCode <= 4913)) {
         this.sessionId = undefined;
         this.lastSeq = null;

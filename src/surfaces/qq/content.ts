@@ -1,4 +1,4 @@
-import { advanceMarkdownFence } from "../markdown-fence.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 /** A complete semantic block and its optional QQ representation. Text is never a truncated preview. */
 export interface QqContentBlock { text: string; markdown?: string }
@@ -139,7 +139,12 @@ function inline(source: string, depth = 0): QqContentBlock {
 export function renderQqContent(source: string, panel = false): QqContentBlock[] {
   const lines = source.replaceAll("\r\n", "\n").split("\n");
   const blocks: Array<QqContentBlock & { listIndent?: number }> = [];
+  let indentFence: MarkdownFence | undefined;
   const indents = lines.flatMap(line => {
+    const previous = indentFence;
+    indentFence = advanceMarkdownFence(indentFence, line);
+    // Code examples must not change the indentation unit of the surrounding lists.
+    if (previous || indentFence) return [];
     const match = /^( +)(?:[-+*]|\d+[.)]) /u.exec(line);
     return match ? [match[1]!.length] : [];
   });
@@ -148,6 +153,28 @@ export function renderQqContent(source: string, panel = false): QqContentBlock[]
   let listContext = false;
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!;
+    const list = /^( *)([-+*]|\d+[.)])\s+(.+)$/u.exec(line);
+    if (!panel && list) {
+      let end = index + 1;
+      let lastContent = end;
+      let continuation = false;
+      while (end < lines.length) {
+        const next = lines[end]!;
+        if (!next.trim()) { end++; continue; }
+        const indentation = /^[ \t]*/u.exec(next)![0];
+        if (indentation.length <= list[1]!.length) break;
+        if (!/^( *)(?:[-+*]|\d+[.)])\s+\S/u.test(next)) continuation = true;
+        lastContent = ++end;
+      }
+      // V2 only documents simple nested list items. Keep continuation paragraphs
+      // and nested code together literally, rather than detach their child list.
+      if (continuation) {
+        blocks.push({ text: lines.slice(index, lastContent).join("\n") });
+        index = lastContent - 1;
+        listContext = false;
+        continue;
+      }
+    }
     const fence = advanceMarkdownFence(undefined, line);
     if (fence && !panel) {
       listContext = false;
@@ -169,7 +196,6 @@ export function renderQqContent(source: string, panel = false): QqContentBlock[]
       continue;
     }
     const heading = /^ {0,3}(#{1,6})\s+(.+)$/u.exec(line);
-    const list = /^( *)([-+*]|\d+[.)])\s+(.+)$/u.exec(line);
     if (!panel && (!list || !listContext) && /^(?: {4}|\t)/u.test(line)) {
       blocks.push({ text: line });
       continue;
