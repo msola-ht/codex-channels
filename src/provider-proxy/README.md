@@ -251,6 +251,6 @@ Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 
 `503 chat_bridge_capacity_exceeded`，不排队、不自动重试；这不是 Node 总内存上限。每座桥拥有独立随机本地身份，统计代理覆盖客户端同名身份头，桥校验后才准入；该头不进入 resolver 或模型上游，原有 `Authorization` 语义不变。关闭等待本桥在途处理结束。
 
 - `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在后台启动并复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 复核取消后立即尝试采集，首次容量初始化期间跳过并报告 initializing，不等待磁盘；ready 后仅采集新请求，不补录初始化期间跳过的请求。共享存储报告包含待落盘 manifest 的实际接受写入量，在途调用单独预留预算；容量不足时后台单任务先退休空闲的当前批次，等其已接受写入及文件关闭完成后再清理历史，活动及新建批次始终受保护。活动调用完成后若容量仍不足，会再请求维护；模型请求不等待退休或维护。维护与关闭各有 5 秒预算，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。
-- `relay-metric.ts`：直接模型调用的最小跨进程指标合同，不包含消息正文或凭据。
+- `relay-metric.ts`：直接模型调用的最小跨进程指标合同，包含策略处理后的明确出站思考等级；不包含消息正文或凭据。
 - `relay-metrics-channel.ts`：版本化、受限帧与连接的私有指标 IPC；显式接收/拒绝，未知确认不判定为丢失；异步接收任务最多 8 个，断连时取消，任务实际结束才释放名额。
   协议/生成/交付状态及转储标签严格要求字符串枚举，不以强制转换接受数组，避免畸形样本进入批次影响其他指标。

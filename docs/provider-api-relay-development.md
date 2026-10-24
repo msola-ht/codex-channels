@@ -169,6 +169,10 @@ CLI/WebUI 共用预览、确认、配置锁、revision、私有备份与原子�
 Thread/Turn 为空，不伪造成 Codex 会话。指标发送有界且不重试；`accepted` 仅表示接收确认，
 不等于落盘，`unconfirmed` 也不能直接当作丢失。指标不能充当可靠账本。
 
+请求明细的思考等级来自 Key 策略处理后的实际出站参数：Chat 优先读取 `reasoning_effort`，未提供时读取 `reasoning.effort`；Responses 读取 `reasoning.effort`。
+只保留 1–64 字符且无控制字符的明确等级；仅有 thinking 开关、不合法形状或缺失等级时为空，不推断默认值。等级经私有指标 IPC 写入现有数据库列，不依赖调用转储；队列仍显示入站等级。
+此修复更新程序后需重启 Gateway 和 Relay，使指标接收端与发送端同步生效；无需重新安装服务或修改数据库格式。历史空值不回填，可在已采集的调用详情中查看原始请求参数。
+
 Relay 与 Codex 共用全局 debug 转储开关与 production/debug 模式。V2 转储使用
 `relay.chat` / `relay.responses` 标签，共用容量与待写预算；生产与调试模式均脱敏必要凭据，
 保留普通头及关联信息。调试模式可对照入站、出站和实际交付；历史版本自动补入或覆盖 CLP 路由时可能记录 `provider_routing_pinned`，读取器和中英文 WebUI 继续识别已有记录；当前版本仅应用模型显式保存的请求改写，不再生成该标记。非法、截断、未采集与未交付分别显示。

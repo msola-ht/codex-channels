@@ -137,6 +137,7 @@ export class ModelRelayServer {
     let timeoutStage: ModelRequestTimeoutError["stage"] | undefined;
     let requestModel = "";
     let reasoningEffort: string | null = null;
+    let outboundReasoningEffort: string | null = null;
     let provider: string | null = null;
     let bodyBytes = 0;
     let outboundBytes = 0;
@@ -184,12 +185,7 @@ export class ModelRelayServer {
           bodyBytes = Buffer.byteLength(text);
           const routed = { ...(inbound as Record<string, unknown>), model: route.model };
           body = protocol === "responses" ? validateDirectResponsesRequest(provider, routed) : validateDirectChatRequest(routed);
-          const reasoning = body.reasoning;
-          const effort = protocol === "chat" && body.reasoning_effort !== undefined ? body.reasoning_effort
-            : reasoning !== null && typeof reasoning === "object" && !Array.isArray(reasoning)
-              ? (reasoning as Record<string, unknown>).effort : undefined;
-          if (typeof effort === "string" && effort.length > 0 && effort.length <= 64
-            && ![...effort].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) reasoningEffort = effort;
+          reasoningEffort = requestReasoningEffort(body, protocol);
           stream = body.stream;
         } finally { clearTimeout(uploadTimer); }
 
@@ -256,6 +252,7 @@ export class ModelRelayServer {
       const call = { timing: (value: typeof outputTiming) => { outputTiming = value; }, diagnostics: (summary: ModelRequestDiagnostics) => { diagnostics = summary; }, ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
         recheck: () => { lease!.check(requestModel); prepared.recheck(); },
         submitted: (ua: string | null, requestBytes: number, address: string | null) => {
+          outboundReasoningEffort = requestReasoningEffort(body, protocol);
           activityObserver.request(body, protocol);
           userAgent = ua;
           upstreamUrl = address;
@@ -361,6 +358,7 @@ export class ModelRelayServer {
           ...(traffic ? { traffic } : {}),
           callerId: lease.caller.callerId, keyId: lease.caller.keyId, credentialGeneration: lease.caller.credentialGeneration,
           provider: provider!, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",
+          ...(outboundReasoningEffort === null ? {} : { reasoningEffort: outboundReasoningEffort }),
           status: modelStatus, deliveryStatus,
           requestStartedAtMs: submittedAt!, responseCompletedAtMs: submittedAt! + (ended - started), totalDurationMs: ended - started,
           requestBytes: outboundBytes, upstreamUrl, activity: activityObserver.snapshot(),
@@ -371,6 +369,16 @@ export class ModelRelayServer {
       }
     }
   }
+}
+
+/** Observe explicit wire fields only; thinking toggles do not establish an effort level. */
+function requestReasoningEffort(body: DirectChatRequest | DirectResponsesRequest, protocol: "chat" | "responses"): string | null {
+  const reasoning = body.reasoning;
+  const effort = protocol === "chat" && body.reasoning_effort !== undefined ? body.reasoning_effort
+    : reasoning !== null && typeof reasoning === "object" && !Array.isArray(reasoning)
+      ? (reasoning as Record<string, unknown>).effort : undefined;
+  return typeof effort === "string" && effort.length > 0 && effort.length <= 64
+    && ![...effort].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) ? effort : null;
 }
 
 function deliveryTimeout(): ModelRequestTimeoutError {
