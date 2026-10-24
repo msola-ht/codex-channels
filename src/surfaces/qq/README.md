@@ -17,6 +17,7 @@
 ## 文件与边界
 
 - `index.ts`：QQ 模块公开出口。
+- `body-markdown.ts`：任务正文的原生 Markdown 安全前缀选择；保留原文，不补围栏或改写已发送前缀。标签、实体、图片及未确认链接留给普通文字；只允许完整的简单 HTTP(S) 链接，不生成按钮。
 - `command-menu.ts`：固定 `/help` 首页与统一 style=0 的 type=2 命令按钮构造器；首页仅显示 Codex 标题，不重复长说明。
 - `command-menu-controller.ts`：工作区、模型/思考等级/速度、会话恢复和统计选择菜单；列表读取及选项执行复用共享命令服务，模型选择复用共享快照和选择守卫。
   本代次持有有界、十分钟、单次消费的选项令牌，仅保存具体 ID/选择请求与授权上下文，不保存会话历史或模型正文；关闭清理，跨用户、工作区、会话或过期选择拒绝。
@@ -48,7 +49,7 @@
 - `protocol.ts`：AppID/AppSecret 校验、Token 合并刷新、Gateway 地址发现、有界 HTTP 响应、取消和结构化错误。
   `sendMarkdown` 仅发送完整单片，复用文字收件人/来源/期限校验与消息 ID 回执；使用 msg_type=2 与 markdown.content，不同时保留 content。
   `getBotMenu`/`putBotMenu` 为 Setup 独立管理入口提供有界 GET/PUT；不参与 Gateway 启动、事件连接或消息投递。
-  `sendStream` 为被动 text/replace 帧，固定原来信、序号、索引和流 ID，复用有界请求、同步授权守卫及保守结果分类；不使用 event_id 或 is_wakeup。
+  `sendStream` 显式指定 text/markdown 格式，生产正文使用被动 markdown/replace 帧，固定原来信、序号、索引和流 ID，复用有界请求、同步授权守卫及保守结果分类；不使用 event_id 或 is_wakeup。
   `sendResultFile` 使用固定文件名的 UTF-8/Base64 直传、file_type=4 和 srv_send_msg=true，单次主动发送，正文最多 256 KiB；
   不开放任意本地文件路径、下载 URL 或附件输入，收到合法消息 ID 后才认定平台接受。
   `sendText` 显式主动/被动模式，单片最多 2000 UTF-8 字节；被动序号取本地保守 1–4，

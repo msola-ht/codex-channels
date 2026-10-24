@@ -57,7 +57,7 @@ export class QqTextOutbox {
     timer.unref();
     try {
       signal.throwIfAborted();
-      // One Markdown panel and keyboard must never enter text splitting or file fallback.
+      // A Markdown body or menu must never enter text splitting or file fallback.
       if (context.keyboard && context.representation !== "markdown") throw new QqProtocolError("message", "invalid-input");
       if (context.representation === "markdown" && (context.allowResultFile
         || typeof input.content !== "string" || Buffer.byteLength(input.content) > QQ_TEXT_PART_BYTES)) {
@@ -95,7 +95,7 @@ export class QqTextOutbox {
               : context.representation === "markdown"
                 ? this.client.sendMarkdown(part, { signal: active, beforeSend: guard }, context.keyboard)
               : this.client.sendText(part, { signal: active, beforeSend: guard });
-            await checkpointDelivery(file ? "qq-result-file" : context.representation === "markdown" ? "qq-markdown-menu" : `qq-text:${index + 1}/${parts.length}`,
+            await checkpointDelivery(file ? "qq-result-file" : context.representation === "markdown" ? "qq-markdown" : `qq-text:${index + 1}/${parts.length}`,
               () => reservation ? reservation.runPart(active, send) : send(),
               error => error instanceof QqTextSendError && error.outcome === "rejected");
           }

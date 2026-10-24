@@ -4,6 +4,7 @@ import type { DeliveryCheckpoint } from "../delivery-receipt.js";
 import { QQ_PASSIVE_WINDOW_MS, QQ_STREAM_BYTES, QqProtocolError, QqTextSendError, type QqProtocolClient } from "./protocol.js";
 import type { QqTaskSources, QqTaskSourceReference } from "./task-sources.js";
 import type { QqSendBudget } from "./send-budget.js";
+import { qqBodyMarkdownPrefix } from "./body-markdown.js";
 
 type Body = Extract<OutputEvent, { type: "text.delta" | "text.completed" }>;
 interface Stream {
@@ -96,7 +97,8 @@ export class QqBodyStreaming {
       if (!stream.attempted) return { kind: "ordinary" };
       // A prior preview is already externally visible or uncertain, even if the final send is never attempted.
       const continuation = stream.sealed || stream.limited || Buffer.byteLength(event.text) > QQ_STREAM_BYTES
-        || performance.now() >= (stream.deadline ?? 0) - 45_000;
+        || performance.now() >= (stream.deadline ?? 0) - 45_000
+        || qqBodyMarkdownPrefix(event.text, true).length !== event.text.length;
       const operation = continuation ? "qq-stream:prefix" : "qq-stream:complete";
       await checkpoint({ operation, state: "started" });
       if (stream.failed || !stream.id || !event.text.startsWith(stream.sent)) {
@@ -123,7 +125,7 @@ export class QqBodyStreaming {
       bounded.removeEventListener("abort", abort);
       stream.controller.abort();
       clearTimeout(stream.sealTimer);
-      // A later explicit journal retry uses the existing complete-text path and may duplicate previews.
+      // A later explicit journal retry selects a full-result representation and may duplicate previews.
       this.streams.delete(key);
       stream.text = ""; stream.sent = "";
     }
@@ -156,7 +158,7 @@ export class QqBodyStreaming {
     const wait = Math.ceil(stream.nextUpdateAt - performance.now());
     if (wait > 0) await delay(wait, undefined, { signal });
     if (stream.completed || stream.failed || performance.now() >= stream.deadline - 15_000) return;
-    const text = stream.text;
+    const text = qqBodyMarkdownPrefix(stream.text);
     if (!text.trim() || text === stream.sent) return;
     // A delta may split a UTF-16 surrogate pair; wait for the next delta instead of emitting invalid Unicode.
     if (/[\uD800-\uDFFF]/u.test(text)) return;
@@ -204,7 +206,7 @@ export class QqBodyStreaming {
     try {
       const result = await reservation.runPart(signal, () => this.client.sendStream({
         recipient: stream.recipient, messageId: anchor.messageId, sourceTimestampMs: anchor.sourceTimestampMs,
-        content, index: stream.index, ...(stream.id ? { streamId: stream.id } : {}), finished,
+        content, contentType: "markdown", index: stream.index, ...(stream.id ? { streamId: stream.id } : {}), finished,
       }, { signal, beforeSend: guard }));
       stream.attempted = true; stream.id = result.messageId; stream.sent = content; stream.index++;
       return result;

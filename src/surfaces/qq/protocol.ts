@@ -46,6 +46,7 @@ export interface QqStreamFrame {
   index: number;
   streamId?: string;
   finished: boolean;
+  contentType: "text" | "markdown";
 }
 export const QQ_STREAM_BYTES = 16_000;
 /** Local complete-result file budget, below QQ's documented direct-upload limit. */
@@ -226,7 +227,7 @@ export class QqProtocolClient {
     return this.sendPlan(() => textRequest(input), context);
   }
 
-  /** A single complete trusted menu, using the same recipient, deadline and response contract as text. */
+  /** A single complete Markdown body or trusted menu, with the text recipient/deadline/receipt contract. */
   async sendMarkdown(input: QqTextMessage, context: QqTextSendContext, keyboard?: QqCommandKeyboard): Promise<{ messageId: string }> {
     return this.sendPlan(() => {
       const plan = textRequest(input);
@@ -243,8 +244,9 @@ export class QqProtocolClient {
         || input.content.length > QQ_STREAM_BYTES || Buffer.byteLength(input.content) > QQ_STREAM_BYTES
         || !Number.isSafeInteger(input.index) || input.index < 0 || input.index > 120
         || typeof input.finished !== "boolean"
+        || (input.contentType !== "text" && input.contentType !== "markdown")
         || (input.index === 0 ? input.streamId !== undefined : !identifier(input.streamId))
-        || Object.keys(input).some(key => !["recipient", "messageId", "sourceTimestampMs", "content", "index", "streamId", "finished"].includes(key))) {
+        || Object.keys(input).some(key => !["recipient", "messageId", "sourceTimestampMs", "content", "index", "streamId", "finished", "contentType"].includes(key))) {
         throw new QqProtocolError("message", "invalid-input");
       }
       const age = Date.now() - input.sourceTimestampMs;
@@ -253,7 +255,7 @@ export class QqProtocolClient {
       }
       if (age >= QQ_PASSIVE_WINDOW_MS) throw new QqProtocolError("message", "expired");
       return { path: `/v2/users/${encodeURIComponent(input.recipient)}/stream_messages`,
-        body: { input_mode: "replace", content_type: "text", content_raw: input.content,
+        body: { input_mode: "replace", content_type: input.contentType, content_raw: input.content,
           input_state: input.finished ? 10 : 1, index: input.index, msg_id: input.messageId, msg_seq: 2,
           ...(input.streamId ? { stream_msg_id: input.streamId } : {}) },
         deadline: performance.now() + QQ_PASSIVE_WINDOW_MS - age };

@@ -13,11 +13,12 @@ import { parseQqTextEvent, type QqInboundTextMessage } from "./inbound.js";
 import { QqTaskSources, type QqTaskScope, type QqTaskSourceReference } from "./task-sources.js";
 import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
-import { QqProtocolError, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard } from "./protocol.js";
+import { QQ_TEXT_PART_BYTES, QqProtocolError, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard } from "./protocol.js";
 import { renderQqTurnCompleted } from "./lifecycle.js";
 import { QqBodyStreaming } from "./streaming.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { QqCommandMenuController } from "./command-menu-controller.js";
+import { qqBodyMarkdownPrefix } from "./body-markdown.js";
 
 export interface QqMessageOptions {
   appId: string;
@@ -96,6 +97,7 @@ export class QqMessages implements SurfaceOutputPort {
     if (!this.supported(event) || !authorized) throw new Error("QQ 输出未获授权");
     if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
     let text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.autoCompactPercent);
+    let continuation = false;
     let checkpointFailed = false;
     const record = async (value: DeliveryCheckpoint) => {
       try { await checkpoint(value); }
@@ -105,11 +107,16 @@ export class QqMessages implements SurfaceOutputPort {
       if (event.type === "text.completed") {
         const result = await this.streaming.finish(event, signal, record, authorized);
         if (result.kind === "complete") return;
-        if (result.kind === "continue") text = result.text;
+        if (result.kind === "continue") { text = result.text; continuation = true; }
       }
+      // Preselect the representation before sending. Continuations have no full
+      // Markdown context and must stay text; never retry a failed Markdown as text.
+      const markdown = event.type === "text.completed" && !continuation
+        && Buffer.byteLength(text) <= QQ_TEXT_PART_BYTES && qqBodyMarkdownPrefix(text, true) === text;
       await this.outbox.deliver({ mode: "active", recipient: event.target.conversationId.slice(4), content: text }, {
         signal: AbortSignal.any([signal, this.lifetime.signal]),
-        allowResultFile: event.type === "text.completed",
+        ...(markdown ? { representation: "markdown" as const } : {}),
+        allowResultFile: event.type === "text.completed" && !markdown,
         beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
         reserve: parts => this.budget.reserve(event.target.conversationId.slice(4), parts,
           { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: event.type === "turn.completed" }),
