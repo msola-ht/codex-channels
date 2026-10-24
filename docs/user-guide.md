@@ -959,6 +959,8 @@ WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接�
 `metrics report/export` 支持 `--request-purpose autoApprovalReview|unmarked`；不指定时包含全部用途。`unmarked` 表示未标记用途（含历史未知），不能证明是普通请求，可与 Thread/Turn 归属筛选组合。会话、轮次和 `run` 的任务统计固定排除明确审查，不接受此选项。聚合保留已知 Token 累计与 `usageCoverage` 缺失计数，CSV/JSON 同步输出；Markdown 直接显示已有累计，不附加字段缺失标注，零值与未提供的数值留空或省略。全局和提供商总量含审查，以“其中自动审查”列出，不能再次加到总数。模型组只按记录模型归组，涉及轮次不可跨组相加。
 请求明细 `metrics export` 通过只读 Worker 从同一快照逐块输出，JSON、CSV、Markdown 均保留原有字段与筛选语义；单次最多 64 MiB，读取和输出共用 120 秒预算，初始化和关闭另有限时。超过容量或时间限制会明确失败，请缩小时间范围或增加筛选条件后重试。Windows 辅助进程退出未确认时会报告关闭失败并保留进程引用，不把超时视为清理完成。
 
+请求明细、会话列表与轮次明细的 Markdown 输出中，思考等级缺失时显示“未观测”，不推断为模型默认；已有等级（包括 `none`）保留原值。JSON 保留空值，CSV 保留空单元格。
+
 ### OpenAI 重置券 CLI
 
 Gateway 和主 App Server 可用、已登录 ChatGPT 时，可在本机使用：
