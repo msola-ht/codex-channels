@@ -25,8 +25,12 @@ export const qqHelp = [
   ...qqCommandGroups.flatMap(group => [group.title,
     ...group.commands.map(name => `/${name}：${conversationCommandDescriptions[name]}`), ""]),
   "快捷命令：/h → /help，/work → /workspace，/r → /resume。",
-  "会话参数：/archived [页码] [filter all|pinned] [provider 名称] [search 搜索词]；/unarchive <序号|名称|Session ID>；/rename <名称>。",
-  "指标参数：/metrics session；/metrics <global|providers|models|errors> [24h|7d|30d|90d|all]。",
+  "命令参数：",
+  "/archived：可选页码，以及 filter all 或 filter pinned、provider 名称、search 搜索词。",
+  "/unarchive：填写序号、名称或 Session ID；/rename：填写名称。",
+  "/metrics：填写 session、global、providers、models 或 errors。",
+  "聚合指标时间范围：global、providers、models、errors 后可选填 24h、7d、30d、90d 或 all。",
+  "功能说明：",
   "QQ 的 /limits 仅查询，额度操作请在原生客户端处理。",
   "直接发送文字开始对话；回复按 QQ 格式呈现，代码和不支持的结构保留为完整文本。",
   "审批按当前请求显示一次、会话或持久规则选项；临时权限仅本次 Turn，终端输入只批准一次或中止。普通问题按提示回应。",
@@ -115,6 +119,13 @@ export function renderQqPanel(text: string): QqRenderedMessage {
   return { text: blocks.map(block => block.text).join("\n"), blocks };
 }
 
+/** Dynamic multiline fields cannot safely be reparsed as the shared panel's structure. */
+function hasMultilineField(value: unknown): boolean {
+  if (typeof value === "string") return /[\r\n]/u.test(value);
+  if (Array.isArray(value)) return value.some(hasMultilineField);
+  return value !== null && typeof value === "object" && Object.values(value).some(hasMultilineField);
+}
+
 /** Diff is source data: leading +, -, # and indentation must not become panel syntax. */
 export function renderQqCommandResult(result: ConversationCommandResult): QqRenderedMessage | null {
   if (result.kind === "outcome" && result.outcome.type === "thread.renamed") {
@@ -169,6 +180,10 @@ export function renderQqCommandResult(result: ConversationCommandResult): QqRend
     validateText(restoredText);
     return { text: restoredText, blocks, compact: true };
   }
+  if (hasMultilineField(result)) {
+    validateText(text);
+    return { text, blocks: [{ text }] };
+  }
   return renderQqPanel(text);
 }
 
@@ -222,17 +237,26 @@ export function renderQqOutput(event: OutputEvent): QqRenderedMessage {
     return { text: blocks.map(block => block.text).join("\n"), blocks };
   }
   if (event.type === "operation.updated") {
-    return renderQqPanel([
+    const panel = renderQqPanel([
       `${operationTitle(event.operation)} · ${operationStatus(event.operation.status)}`,
       ...operationMetadata(event.operation),
-      ...(event.operation.detail ? [redactOperationDetail(event.operation.detail)] : []),
     ].join("\n"));
+    if (!event.operation.detail) return panel;
+    const detail = redactOperationDetail(event.operation.detail);
+    const text = `${panel.text}\n${detail}`;
+    validateText(text);
+    return { text, blocks: [...panel.blocks, { text: detail }] };
   }
   if (event.type === "turn.completed") {
     const presentation = createTurnCompletedPresentation(event);
     const suffix = event.missingFinalResponse ? "\n\nQQ 当前未开放 /compact，请在原生客户端执行。" : "";
+    const text = renderPlainLifecyclePresentation(presentation) + suffix;
+    if (hasMultilineField(presentation)) {
+      validateText(text);
+      return { text, blocks: [{ text }] };
+    }
     return {
-      text: renderPlainLifecyclePresentation(presentation) + suffix,
+      text,
       blocks: renderQqContent(renderStructuredLifecyclePresentation(presentation, false) + suffix, true),
     };
   }

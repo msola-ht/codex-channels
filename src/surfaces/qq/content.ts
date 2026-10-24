@@ -40,6 +40,24 @@ function readLink(source: string): { raw: string; image: boolean; label: string;
   return undefined;
 }
 
+function readEmphasis(source: string): { raw: string; marker: string; value: string } | undefined {
+  const marker = /^(\*\*\*|\*\*|__|~~|\*|_)/u.exec(source)?.[0];
+  if (!marker || !source[marker.length] || /\s/u.test(source[marker.length]!)) return undefined;
+  for (let index = marker.length; index < source.length;) {
+    if (source[index] === "\\") { index += 2; continue; }
+    const rest = source.slice(index);
+    const code = /^(`+)([^\n]*?)\1(?!`)/u.exec(rest);
+    const link = readLink(rest);
+    if (code || link) { index += (code?.[0] ?? link!.raw).length; continue; }
+    if (source.startsWith(marker, index) && source[index - 1] !== marker[0]
+      && source[index + marker.length] !== marker[0] && !/\s/u.test(source[index - 1]!)) {
+      return { raw: source.slice(0, index + marker.length), marker, value: source.slice(marker.length, index) };
+    }
+    index++;
+  }
+  return undefined;
+}
+
 /** Bounded inline conversion. Code and unknown syntax never become executable QQ tags. */
 function inline(source: string, depth = 0): QqContentBlock {
   if (depth > 4) return { text: source };
@@ -84,19 +102,25 @@ function inline(source: string, depth = 0): QqContentBlock {
       index += (link?.raw ?? autolink![0]).length;
       continue;
     }
-    // URLs and file paths often contain Markdown delimiters; their spelling is data.
+    const emphasis = readEmphasis(rest);
+    if (emphasis && !(emphasis.marker.includes("_")
+      && (/[\p{L}\p{N}]/u.test(source[index - 1] ?? "") || /[\p{L}\p{N}]/u.test(rest[emphasis.raw.length] ?? "")))) {
+      const part = inline(emphasis.value, depth + 1);
+      append({ text: part.text, ...(part.markdown === undefined ? {} : { markdown: `${emphasis.marker}${part.markdown}${emphasis.marker}` }) });
+      index += emphasis.raw.length;
+      continue;
+    }
+    const unmatchedMarker = /^(?:\*+|_+|~+)/u.exec(rest);
+    if (unmatchedMarker && !(rest[0] === "_" && /[\p{L}\p{N}]/u.test(source[index - 1] ?? ""))) {
+      append(literal(unmatchedMarker[0]));
+      index += unmatchedMarker[0].length;
+      continue;
+    }
+    // Parse explicit emphasis first: __a/b__ and ~~a/b~~ are documented styles, not paths.
     const path = /^(?:[A-Za-z]:\\[^\s`[\]<>]*|[^\s*`[\]<>]*\/[^\s*`[\]<>]*)/u.exec(rest);
     if (path) {
       append(literal(path[0]));
       index += path[0].length;
-      continue;
-    }
-    const emphasis = /^(\*\*\*|\*\*|__|~~|\*|_)(\S(?:.*?\S)?)\1/u.exec(rest);
-    if (emphasis && !(emphasis[1]!.includes("_")
-      && (/[\p{L}\p{N}]/u.test(source[index - 1] ?? "") || /[\p{L}\p{N}]/u.test(rest[emphasis[0].length] ?? "")))) {
-      const part = inline(emphasis[2]!, depth + 1);
-      append({ text: part.text, ...(part.markdown === undefined ? {} : { markdown: `${emphasis[1]}${part.markdown}${emphasis[1]}` }) });
-      index += emphasis[0].length;
       continue;
     }
     // Consume ordinary text together so identifiers such as Los_Angeles retain their context.
@@ -112,7 +136,7 @@ function inline(source: string, depth = 0): QqContentBlock {
 /** Convert body syntax or shared panel structure; panel values are always literal. */
 export function renderQqContent(source: string, panel = false): QqContentBlock[] {
   const lines = source.replaceAll("\r\n", "\n").split("\n");
-  const blocks: QqContentBlock[] = [];
+  const blocks: Array<QqContentBlock & { listIndent?: number }> = [];
   const indents = lines.flatMap(line => {
     const match = /^( +)(?:[-+*]|\d+[.)]) /u.exec(line);
     return match ? [match[1]!.length] : [];
@@ -137,7 +161,11 @@ export function renderQqContent(source: string, panel = false): QqContentBlock[]
       blocks.push({ text: lines.slice(index).join("\n") });
       break;
     }
-    if (!line.trim()) { blocks.push({ text: line, markdown: line }); continue; }
+    if (!line.trim()) {
+      // QQ documents zero-width-space lines for keeping multiple blank lines visible.
+      blocks.push({ text: line, markdown: index > 0 && !lines[index - 1]!.trim() ? "\u200b" : "" });
+      continue;
+    }
     const heading = /^ {0,3}(#{1,6})\s+(.+)$/u.exec(line);
     const list = /^( *)([-+*]|\d+[.)])\s+(.+)$/u.exec(line);
     if (!panel && (!list || !listContext) && /^(?: {4}|\t)/u.test(line)) {
@@ -169,19 +197,25 @@ export function renderQqContent(source: string, panel = false): QqContentBlock[]
       && !/^(?:>|#{1,2} )/u.test(previous.markdown ?? previous.text)) {
       blocks.push({ text: "", markdown: "" });
     }
-    blocks.push({ text: plainPrefix + part.text,
+    blocks.push({ text: plainPrefix + part.text, ...(list ? { listIndent: indent } : {}),
       ...(part.markdown === undefined ? {} : { markdown: prefix + part.markdown }) });
   }
-  const grouped: QqContentBlock[] = [];
+  const grouped: Array<QqContentBlock & { listIndent?: number }> = [];
+  let blanks: QqContentBlock[] = [];
   for (const block of blocks) {
     const previous = grouped.at(-1);
-    const quote = /^> /u;
-    if (previous && ((listStart.test(previous.text) && listStart.test(block.text))
-      || (quote.test(previous.text) && quote.test(block.text)))) {
-      previous.text += `\n${block.text}`;
-      if (previous.markdown !== undefined && block.markdown !== undefined) previous.markdown += `\n${block.markdown}`;
-      else delete previous.markdown;
-    } else grouped.push({ ...block });
+    if (!block.text.trim()) { blanks.push(block); continue; }
+    // Keep a top-level list item with its children; independent items and quote lines can
+    // be packed separately without turning one unsupported/long item into a whole-list fallback.
+    if (previous?.listIndent !== undefined && block.listIndent !== undefined && block.listIndent > 0) {
+      for (const child of [...blanks, block]) {
+        previous.text += `\n${child.text}`;
+        if (previous.markdown !== undefined && child.markdown !== undefined) previous.markdown += `\n${child.markdown}`;
+        else delete previous.markdown;
+      }
+    } else grouped.push(...blanks, { ...block });
+    blanks = [];
   }
-  return grouped;
+  grouped.push(...blanks);
+  return grouped.map(({ text, markdown }) => ({ text, ...(markdown === undefined ? {} : { markdown }) }));
 }
