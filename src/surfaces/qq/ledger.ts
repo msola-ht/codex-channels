@@ -76,14 +76,22 @@ export class QqLedger {
       if (grant?.state === "claimed") grant.state = "handled";
     });
   }
+  remaining(id: string, actor: string): number {
+    const { used } = this.budget(id, actor);
+    return 4 - used;
+  }
+  private budget(id: string, actor: string): { grant: Grant; related: Grant[]; used: number } {
+    if (this.failed) throw new Error("QQ 传输登记写入状态未知，请重启后核对");
+    const grant = this.state.grants.find(value => value.id === id && value.actor === actor);
+    if (!grant || grant.generation !== this.generation || Date.now() - grant.createdAt >= windowMs
+      || grant.createdAt > Date.now()) throw new Error("QQ 回复窗口或额度不可用");
+    const related = this.state.grants.filter(value => value.msgId === grant.msgId && value.actor === actor);
+    return { grant, related, used: Math.max(...related.map(value => value.sequence)) };
+  }
   reserve(id: string, actor: string, count = 1): Promise<{ msgId: string; msgSeq: number; expiresAt: number }> {
     return this.change(() => {
       if (!Number.isSafeInteger(count) || count < 1 || count > 4) throw new Error("QQ 回复分片数量无效");
-      const grant = this.state.grants.find(value => value.id === id && value.actor === actor);
-      if (!grant || grant.generation !== this.generation || Date.now() - grant.createdAt >= windowMs
-        || grant.createdAt > Date.now()) throw new Error("QQ 回复窗口或额度不可用");
-      const related = this.state.grants.filter(value => value.msgId === grant.msgId && value.actor === actor);
-      const used = Math.max(...related.map(value => value.sequence));
+      const { grant, related, used } = this.budget(id, actor);
       if (used + count > 4) throw new Error("QQ 回复额度不足以发送完整结果");
       for (const value of related) value.sequence = used + count;
       return { msgId: grant.msgId, msgSeq: used + 1, expiresAt: Math.min(...related.map(value => value.createdAt)) + windowMs };

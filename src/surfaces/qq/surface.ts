@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { Logger } from "pino";
 import { safeInteractionDecision, type InteractionPort } from "../../approval/index.js";
 import { isConversationCommandName, type ConversationCommandExecutor, type ConversationTurnUseCases } from "../../application/index.js";
-import { UserFacingError, type ConversationTarget, type OutputEvent } from "../../conversation-core/index.js";
+import { UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import type { ConversationActorRegistry, SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
@@ -11,7 +11,8 @@ import { captureDelivery, checkpointDelivery } from "../delivery-receipt.js";
 import { parseSlashCommand } from "../slash-command.js";
 import type { SurfaceAdapter, SurfaceOutputPort } from "../types.js";
 import { createQqLedger } from "./ledger.js";
-import { QqProtocolClient, QqProtocolError } from "./protocol.js";
+import { QqProtocolClient, QqProtocolError, isQqMarkdownFormatRejection, type QqMessageBody } from "./protocol.js";
+import { planQqMessage, qqHelp, renderQqOutput, renderQqPanel, type QqRenderedMessage } from "./rendering.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 
 export interface QqNetwork {
@@ -35,7 +36,6 @@ export interface CreateQqSurfaceOptions {
 }
 // Commands which can start a Turn need their own verified submission association.
 const supportedCommands = new Set(["status", "stop", "workspace", "sessions", "resume", "new", "model", "effort", "fast", "usage", "limits"]);
-const help = "QQ 单聊文本模式\n/status /stop /workspace /sessions /resume /new /model /effort /fast /usage /limits\n审批、问题、流式、附件、计划任务暂不支持；审批请求安全拒绝，请在原生客户端处理。";
 
 export class QqSurface implements SurfaceAdapter {
   readonly surface = "qq";
@@ -121,8 +121,8 @@ class QqGeneration implements SurfaceAdapter {
             grant = this.ledger.forTurn(actor, event.threadId, event.turnId);
           }
           if (!grant) throw new Error("QQ 输出回复来源未确认");
-          const text = outputText(event);
-          await this.send(event.target, actor, grant, text, combined, authorized);
+          const result = renderQqOutput(event);
+          await this.send(event.target, actor, grant, result, combined, authorized);
         }, true);
       }, signal, checkpoint, { requireConfirmation: true }),
     };
@@ -196,7 +196,7 @@ class QqGeneration implements SurfaceAdapter {
     }
     const command = parseSlashCommand(message.text);
     if (command) {
-      if (command.name === "help") { await this.notify(target, message.actor, message.id, help); return; }
+      if (command.name === "help") { await this.notify(target, message.actor, message.id, qqHelp); return; }
       if (!supportedCommands.has(command.name) || !isConversationCommandName(command.name)) {
         await this.notify(target, message.actor, message.id, "当前 QQ 切片不支持该命令，请发送 /help。");
         return;
@@ -228,22 +228,36 @@ class QqGeneration implements SurfaceAdapter {
     }
   }
   private notify(target: ConversationTarget, actor: string, grant: string, text: string, authorized?: () => boolean): Promise<void> {
-    return this.queue.runOrdered(target.conversationId, signal => this.send(target, actor, grant, text, signal, authorized), this.controller.signal);
+    const result = renderQqPanel(text);
+    return this.queue.runOrdered(target.conversationId, signal => this.send(target, actor, grant,
+      result, signal, authorized), this.controller.signal);
   }
-  private async send(target: ConversationTarget, actor: string, grant: string, text: string, signal: AbortSignal, authorized?: () => boolean): Promise<void> {
+  private async send(target: ConversationTarget, actor: string, grant: string, result: QqRenderedMessage, signal: AbortSignal,
+    authorized?: () => boolean): Promise<void> {
     signal.throwIfAborted();
     if (!this.allowed(target, actor)) throw new Error("QQ 发送授权已失效");
-    if (!text || Buffer.byteLength(text, "utf8") > 12_000) throw new Error("QQ 完整结果超过文本预算，保留待核对");
-    // Sequential full Unicode chunks. A partial success never confirms the whole receipt.
-    const chunks: string[] = [];
-    let chunk = "";
-    for (const character of text) {
-      if (Buffer.byteLength(chunk + character, "utf8") > 3_000) { chunks.push(chunk); chunk = ""; }
-      chunk += character;
+    const remaining = this.ledger.remaining(grant, actor);
+    const messages = planQqMessage(result, remaining);
+    this.options.logger.info({ reason: "qq-output-plan", remaining, messageCount: messages.length,
+      formats: messages.map(message => message.kind) }, "QQ 完整输出计划已生成");
+    try {
+      await this.sendMessages(target, actor, grant, messages, signal, authorized,
+        messages.length === 1 && messages[0]?.kind === "markdown");
+    } catch (error) {
+      // Only a single, explicitly rejected Markdown operation may fall back. Reserve a new sequence
+      // without reclaiming the rejected attempt; unknown or partly delivered output never retries.
+      if (messages.length !== 1 || messages[0]?.kind !== "markdown" || !isQqMarkdownFormatRejection(error)) throw error;
+      this.options.logger.warn({ reason: "markdown-rejected", ...(error instanceof QqProtocolError
+        ? { httpStatus: error.httpStatus, bizCode: error.bizCode } : {}) }, "QQ Markdown 被明确拒绝，将使用完整纯文本");
+      await this.sendMessages(target, actor, grant, planQqMessage(result, this.ledger.remaining(grant, actor), true), signal, authorized, false);
     }
-    if (chunk) chunks.push(chunk);
+  }
+  private async sendMessages(target: ConversationTarget, actor: string, grant: string, messages: QqMessageBody[],
+    signal: AbortSignal, authorized: (() => boolean) | undefined, allowFormatRejection: boolean): Promise<void> {
+    signal.throwIfAborted();
+    if (!this.allowed(target, actor) || authorized?.() === false) throw new Error("QQ 发送授权已失效");
     // Reserve the complete result before the first side effect, including Unicode boundary overhead.
-    const reservation = await this.ledger.reserve(grant, actor, chunks.length);
+    const reservation = await this.ledger.reserve(grant, actor, messages.length);
     const remaining = reservation.expiresAt - Date.now();
     if (remaining <= 0) throw new Error("QQ 回复窗口已过期");
     const sendSignal = AbortSignal.any([signal, AbortSignal.timeout(remaining)]);
@@ -253,10 +267,11 @@ class QqGeneration implements SurfaceAdapter {
         throw new Error("QQ 发送依据已失效");
       }
     };
-    for (const [index, content] of chunks.entries()) {
+    for (const [index, message] of messages.entries()) {
       beforeSend();
-      await checkpointDelivery("qq.c2c.text", () => this.client.sendC2CText({ userOpenid: actor,
-        msgId: reservation.msgId, msgSeq: reservation.msgSeq + index, content, signal: sendSignal, beforeSend }));
+      await checkpointDelivery(`qq.c2c.${message.kind}`, () => this.client.sendC2CMessage({ userOpenid: actor,
+        msgId: reservation.msgId, msgSeq: reservation.msgSeq + index, message, signal: sendSignal, beforeSend }),
+      allowFormatRejection ? isQqMarkdownFormatRejection : undefined);
     }
   }
   private allowed(target: ConversationTarget, actor: string): boolean {
@@ -303,12 +318,6 @@ function record(value: unknown): value is Record<string, unknown> { return typeo
 function identifier(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 256 && !/\s/u.test(value)
     && ![...value].some(character => { const code = character.codePointAt(0)!; return code < 32 || code >= 127 && code <= 159; });
-}
-function outputText(event: OutputEvent): string {
-  if (event.type === "text.completed") return event.text;
-  if (event.type === "operation.updated") return ["操作未完成", event.operation.kind, event.operation.detail ?? ""].filter(Boolean).join("\n");
-  if (event.type === "turn.completed") return event.status === "completed" ? "本轮已完成。" : "本轮已结束，请通过 /status 核对状态。";
-  throw new Error("QQ 尚不支持此类结果");
 }
 async function waitBounded<T>(promise: Promise<T>, signal: AbortSignal | undefined, milliseconds: number): Promise<T> {
   const timeout = AbortSignal.timeout(milliseconds);

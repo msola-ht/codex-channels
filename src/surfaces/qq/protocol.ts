@@ -21,13 +21,26 @@ export class QqProtocolError extends Error {
   }
 }
 
-export interface QqSendTextInput {
+/** Only one content representation is permitted by the C2C message endpoint. */
+export type QqMessageBody =
+  | { kind: "text"; content: string }
+  | { kind: "markdown"; content: string };
+
+export interface QqSendMessageInput {
   userOpenid: string;
   msgId: string;
   msgSeq: number;
-  content: string;
+  message: QqMessageBody;
   signal?: AbortSignal;
   beforeSend?: () => void;
+}
+
+/** Explicit format refusals only; an unknown send outcome must never cause fallback. */
+export function isQqMarkdownFormatRejection(error: unknown): boolean {
+  return error instanceof QqProtocolError && error.operation === "send"
+    && ((error.reason === "http" && error.httpStatus === 400)
+      || (error.reason === "business" && error.httpStatus === 200))
+    && (error.bizCode === 40034011 || error.bizCode === 40034124);
 }
 
 export interface QqProtocolClientOptions {
@@ -127,22 +140,29 @@ export class QqProtocolClient {
     });
   }
 
-  async sendC2CText(input: QqSendTextInput): Promise<{ messageId: string }> {
+  async sendC2CMessage(input: QqSendMessageInput): Promise<{ messageId: string }> {
     if (!validId(input.userOpenid) || !validId(input.msgId)
       || !Number.isSafeInteger(input.msgSeq) || input.msgSeq < 1 || input.msgSeq > 65535
-      || typeof input.content !== "string" || input.content.trim().length === 0
-      || Buffer.byteLength(input.content, "utf8") > 4000) {
+      || !record(input.message)
+      || (input.message.kind !== "text" && input.message.kind !== "markdown")
+      || Object.keys(input.message).some((key) => key !== "kind" && key !== "content")
+      || typeof input.message.content !== "string" || input.message.content.trim().length === 0
+      || Buffer.byteLength(input.message.content, "utf8") > 4000) {
       throw new QqProtocolError("send", "invalid-input");
     }
+    // Snapshot the validated payload before token refresh or any other asynchronous work.
+    const path = `/v2/users/${encodeURIComponent(input.userOpenid)}/messages`;
+    const body = {
+      ...(input.message.kind === "text"
+        ? { msg_type: 0, content: input.message.content }
+        : { msg_type: 2, markdown: { content: input.message.content, force_verify_image_resource: true } }),
+      msg_id: input.msgId,
+      msg_seq: input.msgSeq,
+    };
     return await this.withRequest("send", input.signal, async (signal) => {
       const token = await this.getAccessToken(signal);
       input.beforeSend?.();
-      const data = await this.requestJson("send", `/v2/users/${encodeURIComponent(input.userOpenid)}/messages`, {
-        content: input.content,
-        msg_type: 0,
-        msg_id: input.msgId,
-        msg_seq: input.msgSeq,
-      }, signal, token);
+      const data = await this.requestJson("send", path, body, signal, token);
       if (!validId(data.id)) throw new QqProtocolError("send", "invalid-response");
       return { messageId: data.id };
     });
@@ -198,16 +218,20 @@ export class QqProtocolClient {
       if (response.status !== 200 || response.redirected) {
         let code: number | undefined;
         let responseTrace: string | undefined;
+        let conflictingSendResult = false;
         if (!response.redirected && response.body) {
           try {
             const failure: unknown = JSON.parse(await readBody(response, requestSignal, operation));
             if (record(failure)) {
+              conflictingSendResult = operation === "send" && ("id" in failure
+                || "code" in failure && "err_code" in failure && failure.code !== failure.err_code);
               const candidate = failure.code ?? failure.err_code;
               if (typeof candidate === "number" && Number.isSafeInteger(candidate)) code = candidate;
               responseTrace = safeTraceId(failure.trace_id);
             }
           } catch { /* Malformed error bodies never replace the known HTTP failure. */ }
         } else void response.body?.cancel().catch(() => undefined);
+        if (conflictingSendResult) throw new QqProtocolError(operation, "invalid-response", response.status, undefined, traceId ?? responseTrace);
         throw new QqProtocolError(operation, "http", response.status, code, traceId ?? responseTrace);
       }
       const raw = await readBody(response, requestSignal, operation);
@@ -216,6 +240,9 @@ export class QqProtocolClient {
         throw new QqProtocolError(operation, "invalid-response", response.status, undefined, traceId);
       }
       if (!record(data)) throw new QqProtocolError(operation, "invalid-response", response.status);
+      if (operation === "send" && "code" in data && "err_code" in data && data.code !== data.err_code) {
+        throw new QqProtocolError(operation, "invalid-response", response.status, undefined, traceId);
+      }
       for (const key of ["code", "err_code"]) {
         if (!(key in data)) continue;
         const code = data[key];
@@ -223,6 +250,9 @@ export class QqProtocolClient {
           throw new QqProtocolError(operation, "invalid-response", response.status, undefined, traceId);
         }
         if (code !== 0) {
+          if (operation === "send" && "id" in data) {
+            throw new QqProtocolError(operation, "invalid-response", response.status, undefined, traceId);
+          }
           throw new QqProtocolError(operation, "business", response.status, code,
             traceId ?? safeTraceId(data.trace_id));
         }
