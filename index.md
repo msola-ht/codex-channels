@@ -24,6 +24,8 @@
 
 ## 协议与现行设计
 
+- [`docs/qq-message-contract.md`](docs/qq-message-contract.md)：QQ 消息层待实施合同，区分官方限制、本地策略与实机验收缺口。
+
 - [`docs/unified-model-management-design.md`](docs/unified-model-management-design.md)：第三方模型统一管理的现行合同、设计取舍、关联审查结论与证据边界，明确默认保护、调用影响与暂不支持范围。
 - [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。

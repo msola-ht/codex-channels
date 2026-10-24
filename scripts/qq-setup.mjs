@@ -94,7 +94,9 @@ export async function runQqSetup({
       return undefined;
     }
     // 即使无变化，也先拒绝已过期确认；不把旧快照当成当前状态。
-    const current = readGatewayConfig(configPath);
+    // 与初始快照使用相同表示；TOML 解析器的空原型对象不是配置内容变化。
+    // 实际写入仍使用 document 保留的源修订，由原子写入器检查文件变化。
+    const current = structuredClone(readGatewayConfig(configPath));
     validateGatewayConfigStructureDocument(current);
     if (!isDeepStrictEqual(current, initialDocument)) {
       throw new Error("配置已变化，请重新开始 QQ 接入并确认。");
