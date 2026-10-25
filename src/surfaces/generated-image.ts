@@ -1,6 +1,4 @@
-import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { LocalFileError, readBoundedLocalFile } from "./bounded-local-file.js";
 
 export const maximumGeneratedImageBytes = 10 * 1024 * 1024;
 
@@ -48,40 +46,8 @@ async function readImage<Format extends string>(
   detectFormat: (value: Buffer) => Format | undefined,
   maximumBytes = maximumGeneratedImageBytes,
 ): Promise<{ bytes: Buffer; format: Format }> {
-  if (
-    !isAbsolute(path)
-    || path.length === 0
-    || path.length > 4_096
-  ) {
-    throw new GeneratedImageError("invalid-path");
-  }
-  let file;
   try {
-    const before = await lstat(path);
-    if (!before.isFile() || before.isSymbolicLink()) throw new GeneratedImageError("invalid-file");
-    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const stat = await file.stat();
-    const current = await lstat(path);
-    if (!stat.isFile() || stat.size <= 0 || !current.isFile() || current.isSymbolicLink()
-      || before.dev !== stat.dev || before.ino !== stat.ino
-      || current.dev !== stat.dev || current.ino !== stat.ino) {
-      throw new GeneratedImageError("invalid-file");
-    }
-    if (stat.size > maximumBytes) {
-      throw new GeneratedImageError("too-large");
-    }
-    // A concurrent writer must not turn a checked file into an unbounded read.
-    const buffer = Buffer.alloc(Math.min(stat.size + 1, maximumBytes + 1));
-    let length = 0;
-    while (length < buffer.length) {
-      const { bytesRead } = await file.read(buffer, length, buffer.length - length, null);
-      if (bytesRead === 0) break;
-      length += bytesRead;
-    }
-    if (length > stat.size || length > maximumBytes) {
-      throw new GeneratedImageError("too-large");
-    }
-    const bytes = buffer.subarray(0, length);
+    const bytes = await readBoundedLocalFile(path, maximumBytes);
     const format = detectFormat(bytes);
     if (format === undefined) {
       throw new GeneratedImageError("unsupported-image");
@@ -91,9 +57,8 @@ async function readImage<Format extends string>(
     if (error instanceof GeneratedImageError) {
       throw error;
     }
+    if (error instanceof LocalFileError && error.code !== "invalid-name") throw new GeneratedImageError(error.code);
     throw new GeneratedImageError("invalid-file");
-  } finally {
-    await file?.close();
   }
 }
 

@@ -92,7 +92,7 @@ export async function submitChannelImage({
   };
 }
 
-function resolveRuntimePaths({ environment, stateDatabasePath, spoolDirectory }) {
+export function resolveRuntimePaths({ environment, stateDatabasePath, spoolDirectory, spoolDirectoryName = "channel-outbox" }) {
   const userConfig = locateUserConfig(environment);
   const document = readGatewayConfig(userConfig.configPath);
   validateGatewayConfigStructureDocument(document);
@@ -105,11 +105,11 @@ function resolveRuntimePaths({ environment, stateDatabasePath, spoolDirectory })
   return {
     stateDatabasePath: resolvedStatePath,
     spoolDirectory: spoolDirectory
-      ?? join(dirname(resolvedStatePath), "channel-outbox"),
+      ?? join(dirname(resolvedStatePath), spoolDirectoryName),
   };
 }
 
-function readBindings(stateDatabasePath) {
+export function readBindings(stateDatabasePath) {
   if (!existsSync(stateDatabasePath)) {
     throw new Error(`状态数据库不存在，请先启动 Gateway：${stateDatabasePath}`);
   }
@@ -130,7 +130,7 @@ function readBindings(stateDatabasePath) {
   }
 }
 
-function resolveThreadId(bindings, requestedThreadId) {
+export function resolveThreadId(bindings, requestedThreadId) {
   if (typeof requestedThreadId === "string" && requestedThreadId.length > 0) {
     if (!bindings.some((binding) => binding.threadId === requestedThreadId)) {
       throw new Error(`Thread 未绑定会话：${requestedThreadId}`);

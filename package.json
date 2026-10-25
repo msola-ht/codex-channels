@@ -38,6 +38,8 @@
     "scripts/README.md",
     "scripts/channel-send-image-options.mjs",
     "scripts/channel-send-image.mjs",
+    "scripts/channel-send-file-options.mjs",
+    "scripts/channel-send-file.mjs",
     "scripts/video-analysis-mcp.mjs",
     "scripts/video-analysis-client.mjs",
     "scripts/mcp-setup.mjs",

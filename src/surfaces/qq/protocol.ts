@@ -1,3 +1,5 @@
+import { assertChannelFileName, maximumChannelFileBytes } from "../bounded-local-file.js";
+
 const API_ORIGIN = "https://api.bot.qq.com";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
@@ -345,6 +347,22 @@ export class QqProtocolClient {
       return { path: `/v2/users/${encodeURIComponent(input.recipient)}/files`, body: {
         file_type: 1, srv_send_msg: true,
         file_name: input.contentType === "image/png" ? "codex-image.png" : "codex-image.jpg",
+        file_data: Buffer.from(input.bytes).toString("base64"),
+      } };
+    }, context);
+  }
+
+  /** Explicit local-file delivery; independent from the bounded complete-text fallback. */
+  async sendFile(input: { recipient: string; bytes: Uint8Array; fileName: string }, context: QqTextSendContext): Promise<{ messageId: string }> {
+    return this.sendPlan(() => {
+      if (!record(input) || !identifier(input.recipient) || !(input.bytes instanceof Uint8Array)
+        || input.bytes.byteLength === 0 || input.bytes.byteLength > maximumChannelFileBytes
+        || Object.keys(input).some(key => !["recipient", "bytes", "fileName"].includes(key))) {
+        throw new QqProtocolError("message", "invalid-input");
+      }
+      assertChannelFileName(input.fileName);
+      return { path: `/v2/users/${encodeURIComponent(input.recipient)}/files`, body: {
+        file_type: 4, srv_send_msg: true, file_name: input.fileName,
         file_data: Buffer.from(input.bytes).toString("base64"),
       } };
     }, context);

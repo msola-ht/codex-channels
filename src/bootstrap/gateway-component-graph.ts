@@ -145,6 +145,7 @@ import {
   SurfaceOutputCoalescer,
 } from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
+import { ChannelFileSpool } from "./channel-file-spool.js";
 import { AsyncQuestionCoordinator } from "./async-question-coordinator.js";
 import { ConversationIdleReleaser } from "./conversation-idle-releaser.js";
 import {
@@ -196,6 +197,7 @@ export abstract class GatewayComponentGraph {
   private readonly surfaces: SurfaceAdapter[];
   private readonly surfaceManager: SurfaceManager;
   private readonly channelImageSpool: ChannelImageSpool;
+  private readonly channelFileSpool: ChannelFileSpool;
   private readonly interactions: InteractionRouter;
   private readonly asyncQuestions: AsyncQuestionCoordinator;
   private readonly approval: ApprovalCoordinator;
@@ -1224,8 +1226,14 @@ export abstract class GatewayComponentGraph {
     this.channelImageSpool = new ChannelImageSpool({
       directory: join(dirname(config.stateDatabasePath), "channel-outbox"),
       resolveTarget: (threadId) => this.router.targetForThread(threadId),
-      sendImage: (target, imagePath) =>
-        this.surfaceManager.sendChannelImage(target, imagePath),
+      sendImage: (target, imagePath, isCurrent) =>
+        this.surfaceManager.sendChannelImage(target, imagePath, isCurrent),
+      logger,
+    });
+    this.channelFileSpool = new ChannelFileSpool({
+      directory: join(dirname(config.stateDatabasePath), "channel-file-outbox"),
+      resolveTarget: (threadId) => this.router.targetForThread(threadId),
+      sendFile: (target, filePath, fileName, isCurrent) => this.surfaceManager.sendChannelFile(target, filePath, fileName, isCurrent),
       logger,
     });
     for (const surface of this.surfaces) {
@@ -1880,6 +1888,8 @@ export abstract class GatewayComponentGraph {
       });
       await this.channelImageSpool.start();
       this.requireRunning();
+      await this.channelFileSpool.start();
+      this.requireRunning();
       this.scheduledTasks?.start();
       this.conversationIdleReleaser?.start();
       this.providerIdleReleaser?.start();
@@ -2089,6 +2099,7 @@ export abstract class GatewayComponentGraph {
       ["Reasoning Repeat Guard", () => this.reasoningRepeatGuard.close()],
       ["Queue Lifecycle", () => this.closeQueueLifecycleTasks()],
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
+      ["Channel File Spool", () => this.channelFileSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
       ["Conversation Idle Releaser", () => this.conversationIdleReleaser?.stop()],
       ["Luna Reserve", () => this.conversations?.closeLunaReserve()],

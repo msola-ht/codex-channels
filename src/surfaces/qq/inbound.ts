@@ -7,7 +7,7 @@ const MAX_IMAGES = 4;
 const MAX_IMAGE_METADATA_BYTES = 8 * 1024;
 const MAX_IMAGE_URL_BYTES = 2048;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const MAX_TEXT_FILE_BYTES = 1_000_000;
+const MAX_FILE_BYTES = 5_000_000;
 const MAX_REFERENCE_BYTES = 32 * 1024;
 const CONTROL_CHARACTER = /\p{Cc}/u;
 // With the Unicode flag, a valid surrogate pair is one non-surrogate code point.
@@ -181,7 +181,7 @@ function parseFile(value: unknown): QqInboundFile | Rejection | undefined {
   if (!Array.isArray(validated)) return validated;
   if (typeof file.filename !== "string") return reject("malformed", "attachments", "invalid-type");
   if (Buffer.byteLength(file.filename) > 255) return reject("too-large", "attachments", "limit-exceeded");
-  if (typeof file.size === "number" && file.size > MAX_TEXT_FILE_BYTES) return reject("too-large", "attachments", "limit-exceeded");
+  if (typeof file.size === "number" && file.size > MAX_FILE_BYTES) return reject("too-large", "attachments", "limit-exceeded");
   return { url: validated[0]!.url, filename: file.filename, ...(typeof file.size === "number" ? { size: file.size } : {}) };
 }
 

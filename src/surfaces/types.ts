@@ -95,7 +95,8 @@ export interface SurfaceAdapter {
   readonly interactions: InteractionPort;
   readonly output: SurfaceOutputPort;
   takeAsyncAnswerSubmission?(target: ConversationTarget, requestId: string): SurfaceAsyncAnswerSubmission | undefined;
-  sendChannelImage?(conversationId: string, imagePath: string): Promise<void>;
+  sendChannelImage?(conversationId: string, imagePath: string, isCurrent: () => boolean): Promise<void>;
+  sendChannelFile?(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean): Promise<void>;
   presentScheduledTaskConfirmation?(
     target: ConversationTarget,
     actorId: string,

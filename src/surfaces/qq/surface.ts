@@ -98,8 +98,13 @@ export class QqSurface implements SurfaceAdapter {
     ]).then(() => {});
   }
 
-  sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
-    return this.current?.messages.sendChannelImage(conversationId, imagePath)
+  sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean): Promise<void> {
+    return this.current?.messages.sendChannelImage(conversationId, imagePath, isCurrent)
+      ?? Promise.reject(new Error("QQ 消息连接不可用"));
+  }
+
+  sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean): Promise<void> {
+    return this.current?.messages.sendChannelFile(conversationId, filePath, fileName, isCurrent)
       ?? Promise.reject(new Error("QQ 消息连接不可用"));
   }
 
@@ -128,7 +133,8 @@ class QqConnection {
     this.images = new QqImageStore(join(options.uploadsDirectory, `qq-images-${options.appId}`),
       (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger);
     this.files = new QqFileInput(join(options.uploadsDirectory, `qq-text-${options.appId}`),
-      (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger);
+      (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger,
+      join(options.uploadsDirectory, `qq-files-${options.appId}`));
     this.messages = new QqMessages({ ...options, images: this.images, files: this.files }, this.client);
     this.transport = new QqWebSocketTransport({
       client: this.client,

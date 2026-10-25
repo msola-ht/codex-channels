@@ -218,15 +218,28 @@ export class QqMessages implements SurfaceOutputPort {
     this.tasks.add(task);
   }
 
-  async sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
+  async sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean): Promise<void> {
     if (!conversationId.startsWith("c2c:")) throw new Error("QQ 图片目标不受支持");
     const recipient = conversationId.slice(4);
     const scope = this.scope(recipient);
-    if (!scope || !this.current(scope)) throw new Error("QQ 图片目标未获授权");
+    if (!scope || !this.current(scope) || isCurrent() !== true) throw new Error("QQ 图片目标未获授权");
     const target = this.target(recipient);
     const context = this.extensionQueryScope(target);
     await this.outbox.deliverImage(recipient, imagePath, { signal: this.lifetime.signal,
-      beforeSend: () => { if (!this.current(scope) || this.extensionQueryScope(target) !== context) throw new Error("QQ 图片目标已变化"); },
+      beforeSend: () => { if (isCurrent() !== true || !this.current(scope) || this.extensionQueryScope(target) !== context) throw new Error("QQ 图片目标已变化"); },
+      reserve: () => this.budget.reserve(recipient, 1, "interaction"),
+    }, async () => {});
+  }
+
+  async sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean): Promise<void> {
+    if (!conversationId.startsWith("c2c:")) throw new Error("QQ 文件目标不受支持");
+    const recipient = conversationId.slice(4);
+    const scope = this.scope(recipient);
+    if (!scope || !this.current(scope) || isCurrent() !== true) throw new Error("QQ 文件目标未获授权");
+    const target = this.target(recipient);
+    const context = this.extensionQueryScope(target);
+    await this.outbox.deliverFile(recipient, filePath, fileName, { signal: this.lifetime.signal,
+      beforeSend: () => { if (isCurrent() !== true || !this.current(scope) || this.extensionQueryScope(target) !== context) throw new Error("QQ 文件目标已变化"); },
       reserve: () => this.budget.reserve(recipient, 1, "interaction"),
     }, async () => {});
   }

@@ -48,6 +48,7 @@ import {
   parseCodexRemoteOptions,
 } from "../scripts/codex-remote-options.mjs";
 import { parseChannelSendImageArgs } from "../scripts/channel-send-image-options.mjs";
+import { parseChannelSendFileArgs } from "../scripts/channel-send-file-options.mjs";
 import {
   parseTrafficCleanupArgs,
   parseTrafficCommandArgs,
@@ -121,7 +122,7 @@ const helpText = {
   traffic                      查看模型请求与响应转储（列表、详情或持续跟随）
   delivery                     离线核对并处理未确认的渠道投递
   relay                        查询模型转发状态、调用方，管理监听与访问密钥
-  channel                      发送渠道图片（需指定本地文件）
+  channel                      发送渠道图片或 QQ 文件（需指定本地文件）
   cleanup                      统一交互清理会话、转储和指标
 
 程序维护：
@@ -222,15 +223,21 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
   维护入口：codexc cleanup metrics [参数]、codexc cleanup metrics prune <provider>、codexc cleanup metrics reset。`,
   traffic: TRAFFIC_USAGE,
   "traffic.cleanup": TRAFFIC_CLEANUP_USAGE,
-  channel: `用法：codexc channel <send-image>
+  channel: `用法：codexc channel <send-image|send-file>
 
-渠道图片能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地 PNG/JPEG 图片。`,
+渠道文件能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地图片或普通文件。`,
   "channel.send_image": `用法：codexc channel send-image <图片路径> [--thread <Thread ID>]
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，发送回该 Thread 绑定的
 飞书/微信/Telegram 会话。不指定 --thread 且存在多个绑定时会拒绝并提示指定。
 图片会被复制到状态数据库所在目录的 channel-outbox/pending/，由网关轮询发送；
 成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
+  "channel.send_file": `用法：codexc channel send-file <绝对文件路径> [--thread <Thread ID>]
+
+把本地普通文件（1 到 5,000,000 字节）交给 Gateway，发送回现有绑定的 QQ 会话。
+拒绝符号链接；文件名限 255 UTF-8 字节，不可含控制符或路径分隔符。
+不指定 --thread 时须仅有一个前台或后台绑定。文件私有复制至 channel-file-outbox/pending/；
+确认发送后归档到 done/，失败或结果未知归档到 failed/，不会自动重试。`,
   webui: `用法：codexc webui [--host 地址] [--port 端口]
 
 启动本地管理 WebUI（默认 http://127.0.0.1:8787/），提供指标、转储、配置与服务管理。
@@ -907,17 +914,24 @@ async function channel(args) {
   if (
     showRequestedHelp(args, "channel")
     || showSubcommandHelp(args, "send-image", "channel.send_image")
+    || showSubcommandHelp(args, "send-file", "channel.send_file")
   ) {
     return;
   }
   if (args.some(isHelpArgument)) {
     throw new Error(
-      args[0] === "send-image" ? helpText["channel.send_image"] : helpText.channel,
+      args[0] === "send-image" ? helpText["channel.send_image"]
+        : args[0] === "send-file" ? helpText["channel.send_file"] : helpText.channel,
     );
   }
   const [subcommand, ...rest] = args;
+  if (subcommand === "send-file") {
+    parseChannelSendFileArgs(rest);
+    runScript("scripts/channel-send-file.mjs", rest, { failureReportedByChild: true });
+    return;
+  }
   if (subcommand !== "send-image") {
-    throw new Error("用法：codexc channel <send-image>");
+    throw new Error("用法：codexc channel <send-image|send-file>");
   }
   parseChannelSendImageArgs(rest);
   runScript("scripts/channel-send-image.mjs", rest, { failureReportedByChild: true });

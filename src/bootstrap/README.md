@@ -246,7 +246,9 @@
   `errorChain`（每层只有类型与白名单错误码，不含错误正文），便于定位底层失败原因。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。
   关闭时通过 `beginShutdown` 先拒绝新执行和交互，保留持久接收入口供组合根排空入站通知，随后 `stop` 等待入箱并关闭渠道。
-- `channel-image-spool.ts`：扫描 `data/channel-outbox/pending/` 的图片发送请求，按
+- `channel-file-spool.ts`：普通文件独立 manifest 和 `channel-file-outbox` 根目录，沿 Thread 绑定调用活动 QQ 的 `sendChannelFile`；不改变图片数据格式，未知发送不重试。
+- `channel-media-spool.ts`：图片和普通文件共用的私有领取、发送及归档处理，按明确 kind 读取各自 manifest，文件只允许同编号 `.bin` 副本；两个公开包装器各自持有生命周期和根目录。
+- `channel-image-spool.ts`：图片 manifest 包装器，复用共享处理器扫描 `data/channel-outbox/pending/` 的图片发送请求，按
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据
   发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；Unix 使用 `0700/0600`，Windows
   使用当前 SID 私有 ACL；创建或使用目录时检查类型、链接与所有者，启动时先拒绝既有文件链接或异主文件，再收紧权限；只接受

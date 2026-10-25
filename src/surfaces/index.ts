@@ -75,3 +75,4 @@ export type { DeliveryCheckpoint } from "./delivery-receipt.js";
 export { withPersistentDeliveryDiagnostics } from "./diagnostics.js";
 export { readGeneratedImage, GeneratedImageError } from "./generated-image.js";
 export type { QqNetwork } from "./qq/index.js";
+export { readBoundedLocalFile, assertChannelFileName, maximumChannelFileBytes, LocalFileError } from "./bounded-local-file.js";

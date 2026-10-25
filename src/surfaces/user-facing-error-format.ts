@@ -55,6 +55,7 @@ export function formatSurfaceUserFacingError(
     case "attachment.too-many":
       return "一次最多处理 4 个文本附件";
     case "attachment.too-large":
+      if (error.details.kind === "binary") return "普通文件必须为 1 至 5,000,000 字节";
       return "文本附件总大小超过 1,000,000 字节限制";
     case "attachment.unsupported":
       if (surfaceLabel === "QQ") {
@@ -67,6 +68,7 @@ export function formatSurfaceUserFacingError(
     case "attachment.download-failed":
       return formatTextFileDownloadFailed(surfaceLabel);
     case "attachment.capacity":
+      if (error.details.kind === "binary") return "普通文件暂存空间已满，请等待文件过期后重试";
       return "文本附件暂存空间已满，请稍后重试或发送较小片段";
     case "message.empty":
       return "消息不能为空";

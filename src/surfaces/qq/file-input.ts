@@ -1,11 +1,17 @@
 import type { Logger } from "pino";
 import { finished } from "node:stream/promises";
+import { extname } from "node:path";
 import { UserFacingError } from "../../conversation-core/index.js";
 import { TextAttachmentStore, prepareTextFile, type PreparedTextAttachment } from "../text-attachment-store.js";
 import { formatTextFileDownloadFailed, formatTextFileTooLarge, formatUnsupportedTextFile } from "../text-file-copy.js";
 import { maximumTextFileBytes, normalizeTextFileName, readBoundedTextFile, TextFileValidationError } from "../text-file-input.js";
 import type { QqInboundFile } from "./inbound.js";
 import type { QqNetwork } from "./network.js";
+import { QqBinaryFileStore, maximumQqBinaryFileBytes, qqBinaryFileBody } from "./binary-file-store.js";
+
+// Explicit text classification; other names remain opaque rather than guessing
+// that a binary file happens to contain valid UTF-8.
+const textExtensions = new Set([".txt", ".md", ".markdown", ".csv", ".tsv", ".log", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini", ".xml", ".html", ".css", ".js", ".ts", ".jsx", ".tsx", ".py", ".rs", ".go", ".java", ".c", ".h", ".cpp", ".hpp", ".sh", ".sql"]);
 
 export interface QqTextFile extends PreparedTextAttachment {
   readonly fileName: string;
@@ -15,14 +21,17 @@ export interface QqTextFile extends PreparedTextAttachment {
 /** Owns bounded UTF-8 downloads and private text staging for one QQ generation. */
 export class QqFileInput {
   private readonly attachments: TextAttachmentStore;
+  private readonly binaries: QqBinaryFileStore;
   private readonly lifetime = new AbortController();
   private readonly tasks = new Set<Promise<QqTextFile>>();
   private starting: Promise<void> | undefined;
   private closing: Promise<void> | undefined;
 
-  constructor(directory: string, private readonly download: QqNetwork["downloadAttachment"], logger: Logger) {
+  constructor(directory: string, private readonly download: QqNetwork["downloadAttachment"], logger: Logger, binaryDirectory = `${directory}-binary`) {
     this.attachments = new TextAttachmentStore(directory,
       () => logger.warn({ reason: "text-cleanup-failed" }, "QQ 文本附件暂存清理未确认"));
+    this.binaries = new QqBinaryFileStore(binaryDirectory,
+      () => logger.warn({ reason: "file-cleanup-failed" }, "QQ 文件暂存清理未确认"));
   }
 
   prepare(file: QqInboundFile, signal: AbortSignal, assertAllowed: () => void): Promise<QqTextFile> {
@@ -38,11 +47,16 @@ export class QqFileInput {
       current.throwIfAborted();
       assertAllowed();
       const fileName = normalizeTextFileName(file.filename, { maximumUtf8Bytes: 255 });
-      if (file.size !== undefined && (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > maximumTextFileBytes)) {
-        throw new TextFileValidationError("too-large");
+      const textFile = textExtensions.has(extname(fileName).toLowerCase());
+      const maximumBytes = textFile ? maximumTextFileBytes : maximumQqBinaryFileBytes;
+      const tooLarge = () => new UserFacingError("attachment.too-large", "文件超过大小限制", { kind: textFile ? "text" : "binary" });
+      if (file.size !== undefined && (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > maximumBytes)) {
+        throw tooLarge();
       }
-      this.starting ??= this.attachments.start();
-      await waitForWork(this.starting, current);
+      if (textFile) {
+        this.starting ??= this.attachments.start();
+        await waitForWork(this.starting, current);
+      }
       current.throwIfAborted();
       assertAllowed();
       const resource = await this.download(new URL(file.url), current, assertAllowed);
@@ -53,14 +67,18 @@ export class QqFileInput {
         if (current.aborted) { abort(); current.throwIfAborted(); }
         const length = resource.contentLength;
         if (length !== undefined && (!Number.isSafeInteger(length) || length < 0)) throw new Error("invalid-length");
-        if (length !== undefined && length > maximumTextFileBytes) throw new TextFileValidationError("too-large");
-        const bytes = await readBoundedTextFile(resource.stream);
+        if (length !== undefined && length > maximumBytes) throw tooLarge();
+        const bytes = await readBoundedTextFile(resource.stream, maximumBytes).catch((error: unknown) => {
+          if (error instanceof TextFileValidationError && error.code === "too-large") throw tooLarge();
+          throw error;
+        });
         current.throwIfAborted();
         if (length !== undefined && length !== bytes.length || file.size !== undefined && file.size !== bytes.length) {
           throw new Error("length-mismatch");
         }
         assertAllowed();
-        const prepared = await waitForWork(prepareTextFile(bytes, fileName, this.attachments), current);
+        const prepared = textFile ? await waitForWork(prepareTextFile(bytes, fileName, this.attachments), current)
+          : await this.binaries.prepare(bytes, current, assertAllowed).then(value => ({ fileName, bytes: value.bytes, text: qqBinaryFileBody(value, fileName) }));
         current.throwIfAborted();
         assertAllowed();
         // Keep complete staging for the shared 24-hour retention, including an
@@ -89,9 +107,10 @@ export class QqFileInput {
   }
 
   private async closeResources(): Promise<void> {
+    const binariesClosing = this.binaries.close();
     await Promise.allSettled([...this.tasks]);
     await this.starting?.catch(() => {});
-    await this.attachments.close();
+    await Promise.all([this.attachments.close(), binariesClosing]);
   }
 }
 

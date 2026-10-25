@@ -317,6 +317,7 @@ export class SurfaceManager {
   async sendChannelImage(
     target: ConversationTarget,
     imagePath: string,
+    isCurrent: () => boolean,
   ): Promise<void> {
     if (this.stopping) {
       throw new Error("Gateway 正在停止，无法发送渠道图片");
@@ -335,7 +336,21 @@ export class SurfaceManager {
     if (surface.sendChannelImage === undefined) {
       throw new Error(`${target.surface} 渠道不支持发送图片`);
     }
-    return surface.sendChannelImage(target.conversationId, imagePath);
+    if (isCurrent() !== true) throw new Error("原 Thread 图片接收绑定已失效");
+    return surface.sendChannelImage(target.conversationId, imagePath,
+      () => !this.stopping && this.active.has(surface) && isCurrent() === true);
+  }
+
+  async sendChannelFile(target: ConversationTarget, filePath: string, fileName: string, isCurrent: () => boolean): Promise<void> {
+    if (this.stopping) throw new Error("Gateway 正在停止，无法发送渠道文件");
+    if (isCurrent() !== true) throw new Error("原 Thread 文件接收绑定已失效");
+    if (target.surface !== "qq") throw new Error(`${target.surface} 渠道不支持显式发送普通文件`);
+    const surface = this.surfacesByAccount.get(surfaceAccountKey(target.surface, target.accountId));
+    if (surface === undefined) throw new Error("未找到渠道文件接收账号");
+    if (!this.active.has(surface)) throw new Error("渠道账号尚未就绪，无法发送渠道文件");
+    if (surface.sendChannelFile === undefined) throw new Error("当前渠道不支持显式发送普通文件");
+    return surface.sendChannelFile(target.conversationId, filePath, fileName,
+      () => !this.stopping && this.active.has(surface) && isCurrent() === true);
   }
 
   presentScheduledTaskConfirmation(
