@@ -140,7 +140,7 @@ export class QqSurface implements SurfaceAdapter {
     // Start synchronously so restart recipients are captured before bootstrap
     // restores its temporary intersection. The connection owns cancellation.
     const task = this.configurationReady && !this.closed && this.current
-      ? this.current.messages.deliverConfigurationChange(change)
+      ? this.current.messages.deliverConfigurationChange(change, true)
       : Promise.reject(new Error("QQ 配置通知连接不可用"));
     void task.catch(() => this.options.logger.warn({ reason: "configuration-notification-failed" },
       "QQ 配置通知未确认，不自动重试"));

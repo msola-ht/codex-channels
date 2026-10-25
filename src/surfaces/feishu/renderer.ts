@@ -22,6 +22,7 @@ import {
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
+  shouldShowStartupNotification,
   createAutoApprovalReviewPresentation,
   createHookCompletedPresentation,
   createSubagentContactedPresentation,
@@ -108,6 +109,7 @@ export function renderFeishuStartupNotification(
   >,
   runtime: FeishuStartupRuntimeInfo,
 ): string {
+  if (!shouldShowStartupNotification(runtime)) return "";
   return renderFeishuLifecyclePresentation(
     createStartupPresentation(workspaces, status, runtime),
   );

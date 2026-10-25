@@ -13,7 +13,7 @@ import type {
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { ContextCompactionNotices } from "../operation-presentation.js";
-import { resolveSurfaceDelivery, surfaceDeliveryCoalesceKey } from "../delivery-policy.js";
+import { resolveSurfaceDelivery, shouldHideRoutineNotification, surfaceDeliveryCoalesceKey } from "../delivery-policy.js";
 import { exponentialRetryDelay, withDeliveryRetry } from "../delivery-retry.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import type { SurfaceOutputPort, SurfaceMessageDisplaySettings, SurfaceDeliverySource } from "../types.js";
@@ -169,6 +169,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   }
 
   retains(event: OutputEvent): boolean {
+    if (shouldHideRoutineNotification(event, this.options.displaySettings?.(event.target).routineNotificationsEnabled ?? true)) return false;
     if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
     return isPersistentOutput(event);
   }
@@ -206,6 +207,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
   }
 
   private handleEvent(event: OutputEvent, completion?: "brief" | "detailed"): void {
+    if (DeliveryReceipt.current()?.transient !== false
+      && shouldHideRoutineNotification(event, this.options.displaySettings?.(event.target).routineNotificationsEnabled ?? true)) return;
     // 渠道投递策略只在这里判定一次：微信的单次回复窗口只保留生命周期、终态与全局空闲
     // 通知和上下文压缩，推理、计划、其他操作、连接等事件不占用该预算（详见 delivery-policy.ts）。
     const decision = resolveSurfaceDelivery("weixin", event);

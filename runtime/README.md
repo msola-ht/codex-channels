@@ -1,5 +1,7 @@
 # 共享运行时基础设施
 
+`message-display-policy.mjs` 的可选 `routine_notifications` 缺省投影为必填 `routineNotificationsEnabled = true`，支持四渠道含微信及 QQ 群的五层逐字段继承；Schema 不物化默认值，范围 supportedFields 由管理模块提供。Gateway、管理读取和激活分类共用该契约，不修改 StateStore 或 Journal 格式。
+
 `gateway-config.mjs` / `gateway-config.d.mts` 同时定义 QQ 配置与变更分类，供 Setup、Doctor、WebUI 摘要及 Gateway 复用；
 QQ 单聊名单与可选群成员授权分别校验，群配置必须明确同意公开输出；配置成功不代表消息收发可用。省略群配置不填默认值，同应用凭据重配保留群授权，更换应用在明确预览后清除旧应用群授权。
 
@@ -59,7 +61,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 
 - `model-name-comparison.mjs` / `model-name-comparison.d.mts`：CLI 与 WebUI 共用的请求/响应模型名称对照；区分一致、不一致和信息不足，不推断模型身份或别名。
 - `model-display-name.mjs` / `model-display-name.d.mts`：配置、CLI、WebUI 与统计查询共用的模型统计分组校验；缺省为空，原始 ID 精确匹配仅用于查询归组，不修改模型展示、上游请求、路由、目录或存储的指标键。
-- `message-display-policy.mjs` / `message-display-policy.d.mts`：操作（含仅失败或拒绝）、子代理、流式、计划、思考、完成通知与消息详情的严格可选覆盖 Schema、五层逐字段继承与来源投影；微信只接受完成通知与消息详情，QQ 群类型和精确群拒绝 streaming 布尔值。完成缺省纯投影为详细，消息详情为基础，子代理和流式为开启；streaming 只控制 Telegram、飞书与 QQ 单聊正文增量预览。目标身份独立于 Conversation，管理与 Gateway 共用同一纯解析，不读取绑定或保存数据。
+- `message-display-policy.mjs` / `message-display-policy.d.mts`：操作（含仅失败或拒绝）、子代理、流式、过程说明、常规通知、计划、思考、完成通知与消息详情的严格可选覆盖 Schema、五层逐字段继承与来源投影；微信接受常规通知、完成通知与消息详情，QQ 群类型和精确群拒绝 streaming 布尔值。完成缺省纯投影为详细，消息详情为基础，子代理、流式与常规通知为开启；streaming 只控制 Telegram、飞书与 QQ 单聊正文增量预览。目标身份独立于 Conversation，管理与 Gateway 共用同一纯解析，不读取绑定或保存数据。
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。私有目录锁绑定进程与唯一 owner 标记，活进程不按年龄抢锁，未知锁保留并拒绝操作；操作完成但解锁失败以 `ConfigEventQueueLockReleaseError` 携带结果，调用方不得将其当成未入队或未确认。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。

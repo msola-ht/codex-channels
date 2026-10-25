@@ -330,6 +330,7 @@ export class QqTaskProgress {
       presentationDetail: "basic" as const,
       streamingEnabled: true,
       commentaryEnabled: true,
+      routineNotificationsEnabled: true,
       subagentsEnabled: true,
     };
   }

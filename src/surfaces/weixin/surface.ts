@@ -17,6 +17,7 @@ import type {
   SurfaceConfigurationChange,
 } from "../types.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
+import { shouldHideRoutineConfiguration } from "../delivery-policy.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { SurfaceShutdown } from "../surface-shutdown.js";
 
@@ -105,6 +106,7 @@ export class WeixinSurface implements SurfaceAdapter {
   private readonly startupNotification: WeixinSurfaceOptions["startupNotification"];
   private readonly access: SurfaceAccessPolicy;
   private readonly logger: Logger;
+  private readonly displaySettings: WeixinSurfaceOptions["displaySettings"];
   private readonly files: WeixinFilePort | undefined;
   private readonly images: WeixinImagePort | undefined;
   private readonly audios: WeixinAudioPort | undefined;
@@ -121,6 +123,7 @@ export class WeixinSurface implements SurfaceAdapter {
     this.startupNotification = options.startupNotification;
     this.access = options.access;
     this.logger = options.logger;
+    this.displaySettings = options.displaySettings ?? options.outbox?.displaySettings;
     this.files = options.files;
     this.images = options.images;
     this.audios = options.audios;
@@ -291,6 +294,7 @@ export class WeixinSurface implements SurfaceAdapter {
       { structuredFields: true },
     );
     for (const target of this.safeConfigurationTargets()) {
+      if (shouldHideRoutineConfiguration(change, this.displaySettings?.(target).routineNotificationsEnabled ?? true)) continue;
       if (!this.output.notifyText(target, text)) {
         this.logger.warn(
           {
@@ -379,12 +383,11 @@ export class WeixinSurface implements SurfaceAdapter {
       try {
         const text = await this.startupNotification?.text(target, this.startupAbort.signal);
         if (this.startupAbort.signal.aborted) return;
-        if (text) {
-          await this.output.deliverText(
-            target,
-            formatWeixinCommandText(text, { structuredFields: true }),
-          );
-        }
+        if (!text) continue;
+        await this.output.deliverText(
+          target,
+          formatWeixinCommandText(text, { structuredFields: true }),
+        );
       } catch (error) {
         this.logger.warn(
           {

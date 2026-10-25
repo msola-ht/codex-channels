@@ -343,6 +343,7 @@ const gatewayConfigStructureSchema = z.strictObject({
     subagents: z.boolean().optional(),
     streaming: z.boolean().optional(),
     commentary: z.boolean().optional(),
+    routine_notifications: z.boolean().optional(),
     plan_updates: z.boolean().default(true),
     reasoning: z.boolean().default(false),
     completion: z.enum(["off", "brief", "detailed"]).optional(),

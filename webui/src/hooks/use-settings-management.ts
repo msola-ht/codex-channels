@@ -54,6 +54,7 @@ function currentValue(settings: ManagementSettingsResponse, setting: ManagementS
   if (setting.kind === "display.subagents") return { subagentsEnabled: settings.display.subagentsEnabled, subagentsOverride: settings.display.subagentsOverride }
   if (setting.kind === "display.streaming") return { streamingEnabled: settings.display.streamingEnabled, streamingOverride: settings.display.streamingOverride }
   if (setting.kind === "display.commentary") return { commentaryEnabled: settings.display.commentaryEnabled, commentaryOverride: settings.display.commentaryOverride }
+  if (setting.kind === "display.routine-notifications") return { routineNotificationsEnabled: settings.display.routineNotificationsEnabled, routineNotificationsOverride: settings.display.routineNotificationsOverride }
   if (setting.kind === "system.approval-timeout") return settings.system.approvalTimeoutSeconds
   if (setting.kind === "system.idle-release-minutes") return settings.system.idleReleaseMinutes
   if (setting.kind === "system.model-traffic-mode") return {

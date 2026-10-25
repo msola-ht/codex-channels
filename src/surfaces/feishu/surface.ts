@@ -3,6 +3,7 @@ import type { ChannelFileMediaType } from "../bounded-local-file.js";
 import { TextAttachmentStore } from "../text-attachment-store.js";
 import { FeishuVideoStore, type FeishuVideoPort } from "./video.js";
 import type { Logger } from "pino";
+import { shouldHideRoutineConfiguration } from "../delivery-policy.js";
 
 import type {
   ConversationCommandExecutor,
@@ -170,6 +171,7 @@ export class FeishuSurface implements SurfaceAdapter {
     | FeishuStartupNotification
     | undefined;
   private readonly logger: Logger;
+  private readonly displaySettings: FeishuSurfaceOptions["displaySettings"];
   private readonly overloadNotifiedChats = new Set<string>();
   private connectionReady = false;
   private cardActionObserved = false;
@@ -191,6 +193,7 @@ export class FeishuSurface implements SurfaceAdapter {
     };
     this.startupNotification = options.startupNotification;
     this.logger = options.logger;
+    this.displaySettings = options.displaySettings;
     const client = dependencies.messagePort
         && dependencies.imagePort
         && dependencies.audioPort
@@ -616,6 +619,9 @@ export class FeishuSurface implements SurfaceAdapter {
     }
     const text = renderFeishuConfigurationChange(change);
     for (const chatId of this.safeConfigurationRecipients()) {
+      if (shouldHideRoutineConfiguration(change, this.displaySettings?.({
+        surface: this.surface, accountId: this.accountId, conversationId: chatId,
+      }).routineNotificationsEnabled ?? true)) continue;
       const card = this.deliverWorkspaceAddedCard(chatId, change);
       if (card) {
         void card.catch((error: unknown) => {
@@ -691,6 +697,7 @@ export class FeishuSurface implements SurfaceAdapter {
     const delivered = new Set<string>();
     for (const { chatId, text } of messages) {
       if (signal.aborted) return;
+      if (!text) continue;
       if (!/^oc_.+$/u.test(chatId)) {
         this.logger.warn(
           this.lifecycleContext(),

@@ -145,6 +145,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "display.presentation-detail": "消息详情",
     "display.streaming": "流式显示",
     "display.commentary": "过程说明",
+    "display.routine-notifications": "常规通知",
     "display.overrides": "渠道与聊天显示覆盖",
     "scheduled-tasks.enabled": "Gateway 计划任务",
     "metrics.storage": "指标保留策略",

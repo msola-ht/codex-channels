@@ -8,6 +8,7 @@ import {
 } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
+  shouldShowStartupNotification,
   createSubagentCompletedPresentation,
   renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
@@ -72,6 +73,7 @@ export function formatStartupNotification(
   status: Pick<ConversationStatus, "threadId" | "threadName" | "workspaceId" | "model" | "modelProvider" | "effort" | "serviceTier" | "serviceTierKnown" | "effectiveServiceTier" | "modelPending" | "effortPending" | "fastModePending" | "collaborationMode" | "collaborationModePending" | "weeklyLimit" | "gitBranch">,
   runtime: StartupRuntimeInfo,
 ): string {
+  if (!shouldShowStartupNotification(runtime)) return "";
   return renderTelegramLifecyclePresentation(
     createStartupPresentation(workspaces, status, runtime),
   );

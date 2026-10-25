@@ -1,5 +1,7 @@
 # Codex WebUI 前端
 
+常规通知复用既有 ManagedSelect、范围 supportedFields、中英文键与预览摘要，四渠道含微信和 QQ 群均支持。全局 kind `display.routine-notifications` 显式 set boolean/inherit，读取 `routineNotificationsEnabled` 与 `routineNotificationsOverride`（布尔值或 null），缺省开启且不物化；确认令牌、revision、私有备份、取消、未变化与读回沿共享事务。任一渠道启用时有效值改变要求重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组整体判定。关闭范围与异常、持久 Workspace 回执和 pending 保留边界以 docs/display.md 为准。回退旧版前清除全局及覆盖 routine_notifications，不自动迁移。
+
 请求列表及详情从指标 API 读取 `activity`，与调用列表共用 `formatRequestActivity`，不额外请求调用转储。历史未采集显示“未记录”，有界采集不完整显示“部分可见”。
 
 调用列表“请求行为”列消费 Reader 的 `activity` 摘要，展示本次回复、工具调用及工具结果续传，并保留明确用途分类；不在浏览器解析完整报文或扫描历史消息。未知与部分可见状态独立呈现，工具名只表示响应中的调用声明。
@@ -11,7 +13,7 @@
 `codexc webui` 的本地指标与低风险设置前端。Vite + React 19 + TypeScript，UI 组件全部来自
 shadcn（`npx shadcn@latest add` 安装），业务层只做组件组合与数据编排。
 
-“消息渠道 → 消息展示”管理全局与五层范围显示。操作详情新增仅失败或拒绝；子代理显示支持显式开启、关闭与恢复缺省（开启），关闭同时隐藏生命周期与子代理工具操作；完成通知支持关闭成功通知、精简、详细及恢复缺省。消息详情支持基础、详细及恢复缺省（基础），只控制启动运行环境与完成/子代理统计子项，独立于日志、调用采集、任务、审批及完成通知开关。界面分别展示存储覆盖、有效值及来源，微信范围支持完成通知和消息详情。全局 `display.completion`、`display.subagents`、`display.streaming`、`display.presentation-detail` 与范围修改复用确认令牌、配置修订、私有备份及读回事务；取消不写，缺省不物化。消息详情读取区分有效 `presentationDetail` 与本层 `presentationDetailOverride`，中英文摘要覆盖基础、详细、失败档位和布尔值。消息详情全局有效值改变且任一渠道启用时要求重启 Gateway，缺省基础和显式基础互换只 reload，范围数组整体保守判定。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/presentation_detail，将全局及覆盖 failures 改为旧版支持值，并核对后续修改。源码尚未部署，真实平台显示仍待验收。
+“消息渠道 → 消息展示”管理全局与五层范围显示。操作详情新增仅失败或拒绝；子代理显示支持显式开启、关闭与恢复缺省（开启），关闭同时隐藏生命周期与子代理工具操作；完成通知支持关闭成功通知、精简、详细及恢复缺省。消息详情支持基础、详细及恢复缺省（基础），只控制启动运行环境与完成/子代理统计子项，独立于日志、调用采集、任务、审批及完成通知开关。界面分别展示存储覆盖、有效值及来源，微信范围支持常规通知、完成通知和消息详情。全局 `display.completion`、`display.subagents`、`display.streaming`、`display.presentation-detail` 与范围修改复用确认令牌、配置修订、私有备份及读回事务；取消不写，缺省不物化。消息详情读取区分有效 `presentationDetail` 与本层 `presentationDetailOverride`，中英文摘要覆盖基础、详细、失败档位和布尔值。消息详情全局有效值改变且任一渠道启用时要求重启 Gateway，缺省基础和显式基础互换只 reload，范围数组整体保守判定。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，将全局及覆盖 failures 改为旧版支持值，并核对后续修改。源码尚未部署，真实平台显示仍待验收。
 
 流式显示缺省开启，只控制 Telegram、飞书及 QQ 单聊正文增量预览。全局读取返回 `streamingEnabled` 与 `streamingOverride`（布尔值或 null），`display.streaming` 接受显式 set boolean/inherit；微信和 QQ 群范围不显示该选项，QQ 群预览摘要也不宣称继承流式能力。共享 Schema 严拒微信和 QQ 群覆盖中的 true/false，QQ 渠道、账号级配置仅作用其单聊。全局有效值变化且任一 Telegram、飞书或 QQ 启用时要求重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload。不改变上游模型流式、思考、完整正文、附件、授权及原窗口和交付义务。
 

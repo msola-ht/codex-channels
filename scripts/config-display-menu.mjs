@@ -25,6 +25,7 @@ export async function runDisplaySettings({
         { value: "subagents", label: "子代理显示", hint: "开启 / 关闭，缺省开启" },
         { value: "streaming", label: "流式显示", hint: "正文增量预览，缺省开启；仅 Telegram、飞书和 QQ 单聊" },
         { value: "commentary", label: "过程说明", hint: "commentary 过程说明，缺省开启；Telegram、飞书和 QQ" },
+        { value: "routine_notifications", label: "常规通知", hint: "常规生命周期与成功提示，四渠道缺省开启" },
         { value: "operation_updates", label: "操作详情显示", hint: "full / compact / failures / hidden" },
         { value: "plan_updates", label: "计划更新显示", hint: "是否显示 Codex 计划" },
         { value: "reasoning", label: "思考状态显示", hint: "默认关闭；是否显示“思考中”状态卡" },
@@ -48,6 +49,8 @@ export async function runDisplaySettings({
       result = await runStreamingSettings(options);
     } else if (section === "commentary") {
       result = await runCommentarySettings(options);
+    } else if (section === "routine_notifications") {
+      result = await runRoutineNotificationsSettings(options);
     } else if (section === "message_format" && telegramConfigured) {
       result = await runTelegramMessageFormat(options);
     } else if (section === "operation_updates") {
@@ -68,7 +71,7 @@ export async function runDisplaySettings({
 
 async function runDisplayScopeSettings({ environment, output, prompts, writeConfig }) {
   const settings = loadGatewaySettings(environment);
-  output.write("范围显示按全局 → 渠道 → 账号 → 聊天类型 → 指定聊天逐字段继承；微信支持完成通知和消息详情，QQ 群不支持流式显示。\n");
+  output.write("范围显示按全局 → 渠道 → 账号 → 聊天类型 → 指定聊天逐字段继承；微信支持常规通知、完成通知和消息详情，QQ 群不支持流式显示。\n");
   if (settings.display.targetsStatus === "unavailable") output.write("已确认聊天目标不可读，请检查状态库版本、结构或访问权限；渠道与账号默认仍可编辑。\n");
   const label = scope => [scope.selector.surface, scope.selector.account_id, scope.selector.chat_kind === "direct" ? "私聊" : scope.selector.chat_kind === "group" ? "群聊" : undefined, scope.selector.chat_id].filter(Boolean).join(" / ");
   const selected = await prompts.select({ message: "选择显示目标范围", showInstructions: false, options: [
@@ -80,7 +83,7 @@ async function runDisplayScopeSettings({ environment, output, prompts, writeConf
   if (!scope) throw new Error("未知显示目标范围");
   output.write(`当前目标：${label(scope)}\n${displayScopeSummary(scope)}\n`);
   const field = await prompts.select({ message: "选择显示字段", showInstructions: false, options: [
-    ...[{ value: "operation_updates", label: "操作详情" }, { value: "subagents", label: "子代理显示" }, { value: "streaming", label: "流式显示" }, { value: "commentary", label: "过程说明" }, { value: "plan_updates", label: "计划更新" }, { value: "reasoning", label: "思考状态" }, { value: "completion", label: "完成通知" }, { value: "presentation_detail", label: "消息详情" }].filter(option => scope.supportedFields.includes(option.value)), { value: "back", label: "返回上一级" },
+    ...[{ value: "operation_updates", label: "操作详情" }, { value: "subagents", label: "子代理显示" }, { value: "streaming", label: "流式显示" }, { value: "commentary", label: "过程说明" }, { value: "routine_notifications", label: "常规通知" }, { value: "plan_updates", label: "计划更新" }, { value: "reasoning", label: "思考状态" }, { value: "completion", label: "完成通知" }, { value: "presentation_detail", label: "消息详情" }].filter(option => scope.supportedFields.includes(option.value)), { value: "back", label: "返回上一级" },
   ] });
   if (prompts.isCancel(field) || field === "back") return { action: "back" };
   if (!scope.supportedFields.includes(field)) throw new Error("该目标不支持所选显示字段");
@@ -92,10 +95,11 @@ async function runDisplayScopeSettings({ environment, output, prompts, writeConf
   if (prompts.isCancel(value) || value === "back") return { action: "back" };
   if (field === "streaming" && !["true", "false", "inherit"].includes(value)) throw new Error("未知流式显示选项");
   if (field === "commentary" && !["true", "false", "inherit"].includes(value)) throw new Error("未知过程说明选项");
+  if (field === "routine_notifications" && !["true", "false", "inherit"].includes(value)) throw new Error("未知常规通知选项");
   const edit = { kind: "display.scope", value: value === "inherit" ? { selector: scope.selector, field, action: "inherit" } : { selector: scope.selector, field, action: "set", value: field === "operation_updates" || field === "completion" || field === "presentation_detail" ? value : value === "true" } };
   const preview = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig: () => undefined, skipBackup: true });
-  output.write(`预览目标：${label(scope)}\n${displayScopeSummary(preview.value)}\n保存前创建私有配置备份；新增覆盖要求新版 Gateway。保存后按提示激活，已有 pending 仍可能投递；重启恢复不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/presentation_detail，并将全局及覆盖 failures 改为旧版支持值；核对后续修改，勿直接恢复备份覆盖配置。\n`);
-  const fieldName = { operation_updates: "操作详情", subagents: "子代理显示", streaming: "流式显示", commentary: "过程说明", plan_updates: "计划更新", reasoning: "思考状态", completion: "完成通知", presentation_detail: "消息详情" }[field];
+  output.write(`预览目标：${label(scope)}\n${displayScopeSummary(preview.value)}\n保存前创建私有配置备份；新增覆盖要求新版 Gateway。保存后按提示激活，已有 pending 仍可能投递；重启恢复不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，并将全局及覆盖 failures 改为旧版支持值；核对后续修改，勿直接恢复备份覆盖配置。\n`);
+  const fieldName = { operation_updates: "操作详情", subagents: "子代理显示", streaming: "流式显示", commentary: "过程说明", routine_notifications: "常规通知", plan_updates: "计划更新", reasoning: "思考状态", completion: "完成通知", presentation_detail: "消息详情" }[field];
   const confirmed = await prompts.confirm({ message: `确认修改 ${label(scope)} 的${fieldName}？`, initialValue: false });
   if (prompts.isCancel(confirmed) || !confirmed) return { action: "back" };
   const result = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig });
@@ -123,6 +127,7 @@ function displayScopeSummary(scope) {
     ["subagents", "subagentsEnabled", "子代理显示"],
     ["streaming", "streamingEnabled", "流式显示"],
     ["commentary", "commentaryEnabled", "过程说明"],
+    ["routine_notifications", "routineNotificationsEnabled", "常规通知"],
     ["presentation_detail", "presentationDetail", "消息详情"],
   ].filter(([field]) => scope.supportedFields.includes(field)).map(([field, effective, label]) => `${label}：本层${scope.override[field] === undefined ? "继承上级" : values[String(scope.override[field])]}；有效${values[String(scope.effective[effective])]}；来源${sources[scope.sources[effective]]}`)].join("\n");
 }
@@ -173,6 +178,32 @@ async function runCompletionSettings({ environment, output, prompts, writeConfig
     return { ...result, consistency: "unknown" };
   }
   output.write(`${result.activation === "none" ? "设置未变化" : "完成通知已保存并读回确认"}：${result.configPath}\n${result.backupPath ? `私有备份：${result.backupPath}\n` : ""}`);
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { ...result, consistency: "confirmed" };
+}
+
+async function runRoutineNotificationsSettings({ environment, output, prompts, writeConfig }) {
+  const settings = loadGatewaySettings(environment);
+  const label = value => value ? "开启" : "关闭";
+  output.write(`常规通知：本层${settings.display.routineNotificationsOverride === null ? "缺省" : label(settings.display.routineNotificationsOverride)}；有效${label(settings.display.routineNotificationsEnabled)}；来源全局。\n四渠道按五层范围继承；关闭常规启动、成功配置提示、空闲释放、成功或运行中的压缩、成功 Hook、自动审批通过、MCP starting/ready、线程名称与可用状态、连接恢复通知。失败、拒绝、停止、重试、账号与额度、OAuth、需用户操作、正文、附件、审批和命令回执保留。启动摘要含结构化鉴权或健康异常时仍显示；持久 Workspace 新增回执和已有 pending 按原义务保留。\n`);
+  const value = await prompts.select({ message: "选择全局常规通知", showInstructions: false, initialValue: settings.display.routineNotificationsOverride === null ? "inherit" : String(settings.display.routineNotificationsOverride), options: [
+    { value: "inherit", label: "恢复缺省（开启，不保存覆盖）" }, { value: "true", label: "开启" }, { value: "false", label: "关闭" }, { value: "back", label: "返回上一级" },
+  ] });
+  if (prompts.isCancel(value) || value === "back") return { action: "back" };
+  if (!["true", "false", "inherit"].includes(value)) throw new Error("未知常规通知选项");
+  const edit = { kind: "display.routine-notifications", value: value === "inherit" ? { action: "inherit" } : { action: "set", value: value === "true" } };
+  const preview = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig: () => undefined, skipBackup: true });
+  output.write(`预览：全局常规通知${label(preview.value.routineNotificationsEnabled)}；${value === "inherit" ? "删除覆盖字段" : "保存显式覆盖"}。保存前创建私有备份，保存后按提示激活；此字段要求新版 Gateway。回退前显式清除全局及覆盖 routine_notifications，核对后续修改，勿直接覆盖配置。\n`);
+  const confirmed = await prompts.confirm({ message: "确认修改全局常规通知？", initialValue: false });
+  if (prompts.isCancel(confirmed) || !confirmed) return { action: "back" };
+  const result = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig });
+  let current;
+  try { current = loadGatewaySettings(environment); } catch { /* Preserve saved state when readback is unavailable. */ }
+  if (!current || current.display.routineNotificationsOverride !== preview.value.routineNotificationsOverride) {
+    output.write(`保存操作已返回，但配置读回未确认，请重新读取配置，勿重复保存：${result.configPath}\n`);
+    return { ...result, consistency: "unknown" };
+  }
+  output.write(`${result.activation === "none" ? "设置未变化" : "常规通知已保存并读回确认"}：${result.configPath}\n${result.backupPath ? `私有备份：${result.backupPath}\n` : ""}`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { ...result, consistency: "confirmed" };
 }

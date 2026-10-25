@@ -40,6 +40,7 @@ import {
 import { formatConversationScheduledConfirmation } from "../conversation-scheduled-task-command-format.js";
 import { formatConversationAutoReview } from "../conversation-workspace-status-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
+import { shouldHideRoutineConfiguration } from "../delivery-policy.js";
 import {
   formatOperationFailure,
   gatewayRequestFailedText,
@@ -135,6 +136,7 @@ export interface TelegramSurfaceOptions {
   officialOpenAiAuthenticated?: () => boolean | undefined;
   openAiConnectivity?: () => NonNullable<StartupRuntimeInfo["openAiConnectivity"]>;
   startupPresentationDetail?: (chatId: number) => "basic" | "detailed";
+  startupRoutineNotificationsEnabled?: (chatId: number) => boolean;
   inputQuietWindowMs?: number;
   now?: () => number;
   autoCompactPercent?: (
@@ -215,6 +217,7 @@ export class TelegramSurface {
   } & AutoReviewSelectionScope>();
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
+  private readonly notificationRoutineEnabled: TelegramSurfaceOptions["startupRoutineNotificationsEnabled"];
   private stopping = false;
   private stopPromise: Promise<void> | undefined;
 
@@ -268,6 +271,7 @@ export class TelegramSurface {
     this.actorRegistry = options.actorRegistry;
     this.now = options.now ?? Date.now;
     this.notificationRecipients = new Set(startupRecipients);
+    this.notificationRoutineEnabled = options.startupRoutineNotificationsEnabled;
     this.commands = options.commands;
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
     const apiExecutor = new TelegramApiExecutor(logger, (chatId, recipientNotification) => {
@@ -357,6 +361,7 @@ export class TelegramSurface {
                   ? { openAiConnectivity: options.openAiConnectivity() }
                   : {}),
                 presentationDetail: options.startupPresentationDetail?.(chatId) ?? "basic",
+                routineNotificationsEnabled: options.startupRoutineNotificationsEnabled?.(chatId) ?? true,
               }),
             });
           }
@@ -511,6 +516,7 @@ export class TelegramSurface {
     const replyMarkup = workspaceSwitchKeyboard(change.addedWorkspaces);
     const text = formatConfigurationChange(change);
     for (const chatId of this.notificationRecipients) {
+      if (shouldHideRoutineConfiguration(change, this.notificationRoutineEnabled?.(chatId) ?? true)) continue;
       this.outbox.notifyPanel(
         String(chatId),
         text,

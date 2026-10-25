@@ -88,6 +88,7 @@ export interface GatewayConfigDocument {
     subagents?: boolean;
     streaming?: boolean;
     commentary?: boolean;
+    routine_notifications?: boolean;
     plan_updates: boolean;
     reasoning: boolean;
     completion?: "off" | "brief" | "detailed";

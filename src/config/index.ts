@@ -326,6 +326,7 @@ function loadValidatedConfigDocument(
       ...(raw.display.subagents === undefined ? {} : { subagents: raw.display.subagents }),
       ...(raw.display.streaming === undefined ? {} : { streaming: raw.display.streaming }),
       ...(raw.display.commentary === undefined ? {} : { commentary: raw.display.commentary }),
+      ...(raw.display.routine_notifications === undefined ? {} : { routine_notifications: raw.display.routine_notifications }),
       plan_updates: raw.display.plan_updates,
       reasoning: raw.display.reasoning,
       ...(raw.display.completion === undefined ? {} : { completion: raw.display.completion }),

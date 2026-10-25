@@ -1,5 +1,7 @@
 # Config
 
+可选 `display.routine_notifications` 不由默认补齐物化，缺省投影为必填 `MessageDisplaySettings.routineNotificationsEnabled = true`。四渠道含微信与 QQ 群均支持同名五层覆盖；全局管理 kind `display.routine-notifications` 使用显式 set boolean/inherit，读回有效值与 `routineNotificationsOverride`。全局有效值改变且任一渠道启用时重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组沿整体判定。不改持久 Schema；异常、需用户动作、持久 Workspace 回执和已入 Journal 义务由消费者保留。回退旧版前显式清除全局及覆盖 routine_notifications，不自动迁移。
+
 QQ 的 `[qq]` 配置复用共享严格 TOML Schema，仅在显式启用且 AppID、Secret、允许名单齐全时投影运行配置。
 单聊名单新增热加载，删除、账号、凭据或启停变化要求重启 Gateway。可选 `groups` 独立配置群与成员名单，必须显式同意公开输出；不从单聊扫码身份推导群授权，任何群授权变化均要求重启，缺省不启用群。
 
@@ -9,7 +11,7 @@ Workspace 仅定义 `id`、`name` 和 `cwd`；执行权限由 App Server 原生�
 `follow_cli_version = true` 时通过共享 `codex-request-identity` 解析当前锁定版本；无标记或 false 时保留显式版本，读取不改写身份配置。
 `display.model_aliases` 保留于共享配置，供控制台统计查询按原始模型 ID 归组，不投影为 Gateway
 运行字段或注入 Surface。分组变化无需重启 Gateway，不改模型展示、目录、选择标识或请求模型 ID。
-`messageDisplay` 从严格校验后的 `display` 投影三个全局过程字段、可选 `subagents`、`streaming`、`completion`、`presentation_detail` 与 `overrides`；原有三个扁平运行字段保留并同源。完成通知只从 `messageDisplay` 读取，缺省有效为 `detailed`；消息详情缺省有效为 `basic`；子代理与流式缺省有效为 `true`，解析后的 `MessageDisplaySettings.subagentsEnabled`、`streamingEnabled` 与 `presentationDetail` 必有；普通读取和默认补齐不生成这些可选字段。公开导出共享显示目标、设置类型与解析函数；完成、消息详情有效值或覆盖变化要求重启已启用的四渠道，原过程字段、全局子代理与流式仍只影响 Telegram、飞书与 QQ，不改 StateStore 或投递记录。覆盖字段缺失保持继承，普通读取与默认补齐不生成 `overrides`。
+`messageDisplay` 从严格校验后的 `display` 投影三个全局过程字段、可选 `subagents`、`streaming`、`commentary`、`routine_notifications`、`completion`、`presentation_detail` 与 `overrides`；原有三个扁平运行字段保留并同源。完成通知只从 `messageDisplay` 读取，缺省有效为 `detailed`；消息详情缺省有效为 `basic`；子代理与流式缺省有效为 `true`，解析后的 `MessageDisplaySettings.subagentsEnabled`、`streamingEnabled` 与 `presentationDetail` 必有；普通读取和默认补齐不生成这些可选字段。公开导出共享显示目标、设置类型与解析函数；完成、消息详情有效值或覆盖变化要求重启已启用的四渠道，原过程字段、全局子代理与流式仍只影响 Telegram、飞书与 QQ，不改 StateStore 或投递记录。覆盖字段缺失保持继承，普通读取与默认补齐不生成 `overrides`。
 其中 `codexTimezone` 保留已有 `codex.timezone` 配置，供渠道启动卡展示，不修改 Gateway 进程时区。
 `gatewayTimezone` 是解析后的网关时区：缺省使用 `codex.timezone`，`gateway.timezone = "system"`
 保留进程继承的系统时区，其他值为自定义 IANA 名称；有效网关时区或 `codexTimezone` 变化要求重启
@@ -93,7 +95,7 @@ Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺�
 思考状态，微信继续不主动发送，其余输出保持不变。启用 Telegram、飞书或 QQ 时变化需要重启 Gateway，
 不需要重启 App Server；只启用微信或未配置渠道时不要求重启。
 
-可选 `display.presentation_detail` 为 `basic` 或 `detailed`，缺省基础且不物化；所有四渠道及五层覆盖均支持，微信只支持它与 `completion`。解析后的 `MessageDisplaySettings.presentationDetail` 必有。它仅控制聊天可见的启动运行环境与完成、子代理统计子项，不改变日志、调用采集、任务、审批或完成通知开关。全局 `display.presentation-detail` 管理操作显式 `set` / `inherit`，读回区分有效 `presentationDetail` 与存储 `presentationDetailOverride`（缺省 `null`），保存前创建私有备份。有效值变化且任一渠道启用时重启 Gateway，否则 reload；缺省基础和显式基础互换只 reload。范围覆盖继续按数组整体保守判定。回退旧版前显式清除全局及覆盖 `presentation_detail` 并核对后续修改。
+可选 `display.presentation_detail` 为 `basic` 或 `detailed`，缺省基础且不物化；所有四渠道及五层覆盖均支持，微信支持它、`routine_notifications` 与 `completion`。解析后的 `MessageDisplaySettings.presentationDetail` 必有。它仅控制聊天可见的启动运行环境与完成、子代理统计子项，不改变日志、调用采集、任务、审批或完成通知开关。全局 `display.presentation-detail` 管理操作显式 `set` / `inherit`，读回区分有效 `presentationDetail` 与存储 `presentationDetailOverride`（缺省 `null`），保存前创建私有备份。有效值变化且任一渠道启用时重启 Gateway，否则 reload；缺省基础和显式基础互换只 reload。范围覆盖继续按数组整体保守判定。回退旧版前显式清除全局及覆盖 `presentation_detail` 并核对后续修改。
 
 `logging.level` 是全局日志级别；`debug` 与 `trace` 允许各模块记录受约束的类型、阶段、耗时和结果；
 消息正文、请求参数、上游响应、凭据和审批内容

@@ -11,8 +11,8 @@ export type GatewaySettingActivation =
 
 import type { ConfigActivationResult } from "./config-activation-result.mjs";
 import type { MessageDisplaySelector, MessageDisplayOverride, MessageDisplaySettings, MessageDisplaySource } from "../runtime/message-display-policy.mjs";
-export interface DisplayScopeState { id: string; selector: MessageDisplaySelector; writable: boolean; supportedFields: Array<"operation_updates" | "subagents" | "streaming" | "commentary" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; override: Pick<MessageDisplayOverride, "operation_updates" | "subagents" | "streaming" | "commentary" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; effective: MessageDisplaySettings; sources: Record<keyof MessageDisplaySettings, MessageDisplaySource> }
-export type DisplayScopeEdit = { selector: MessageDisplaySelector; field: "operation_updates"; action: "set"; value: "full" | "compact" | "failures" | "hidden" } | { selector: MessageDisplaySelector; field: "completion"; action: "set"; value: "off" | "brief" | "detailed" } | { selector: MessageDisplaySelector; field: "presentation_detail"; action: "set"; value: "basic" | "detailed" } | { selector: MessageDisplaySelector; field: "subagents" | "streaming" | "commentary" | "plan_updates" | "reasoning"; action: "set"; value: boolean } | { selector: MessageDisplaySelector; field: "operation_updates" | "subagents" | "streaming" | "commentary" | "plan_updates" | "reasoning" | "completion" | "presentation_detail"; action: "inherit" };
+export interface DisplayScopeState { id: string; selector: MessageDisplaySelector; writable: boolean; supportedFields: Array<"operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; override: Pick<MessageDisplayOverride, "operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; effective: MessageDisplaySettings; sources: Record<keyof MessageDisplaySettings, MessageDisplaySource> }
+export type DisplayScopeEdit = { selector: MessageDisplaySelector; field: "operation_updates"; action: "set"; value: "full" | "compact" | "failures" | "hidden" } | { selector: MessageDisplaySelector; field: "completion"; action: "set"; value: "off" | "brief" | "detailed" } | { selector: MessageDisplaySelector; field: "presentation_detail"; action: "set"; value: "basic" | "detailed" } | { selector: MessageDisplaySelector; field: "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning"; action: "set"; value: boolean } | { selector: MessageDisplaySelector; field: "operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail"; action: "inherit" };
 
 export class ConfigManagementError extends Error {
   readonly code: string;
@@ -30,6 +30,8 @@ export interface GatewaySettings {
     streamingOverride: boolean | null;
     commentaryEnabled: boolean;
     commentaryOverride: boolean | null;
+    routineNotificationsEnabled: boolean;
+    routineNotificationsOverride: boolean | null;
     planUpdatesEnabled: boolean;
     reasoningEnabled: boolean;
     completion: "off" | "brief" | "detailed";
@@ -101,6 +103,7 @@ export type GatewaySettingInput =
   | { kind: "display.operation-updates"; value: "full" | "compact" | "failures" | "hidden" }
   | { kind: "display.subagents"; value: { action: "set"; value: boolean } | { action: "inherit" } }
   | { kind: "display.streaming"; value: { action: "set"; value: boolean } | { action: "inherit" } }
+  | { kind: "display.routine-notifications"; value: { action: "set"; value: boolean } | { action: "inherit" } }
   | { kind: "display.commentary"; value: { action: "set"; value: boolean } | { action: "inherit" } }
   | { kind: "display.plan-updates"; value: boolean }
   | { kind: "display.reasoning"; value: boolean }

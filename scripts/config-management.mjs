@@ -76,6 +76,8 @@ export function loadGatewaySettings(environment = process.env) {
       streamingOverride: display.streaming ?? null,
       commentaryEnabled: display.commentary ?? true,
       commentaryOverride: display.commentary ?? null,
+      routineNotificationsEnabled: display.routine_notifications ?? true,
+      routineNotificationsOverride: display.routine_notifications ?? null,
       modelAliases: display.model_aliases ?? {},
       scopes: projectDisplayScopes(document, display, displayTargets.selectors),
       targetsStatus: displayTargets.status,
@@ -362,6 +364,21 @@ function applySetting(document, input, configPath) {
       } else if (document.display !== undefined) delete document.display.completion;
       const override = document.display?.completion ?? null;
       return { value: { completion: override ?? "detailed", completionOverride: override }, activation: completionSettingActivation(document), backupRequired: true };
+    }
+    case "display.routine-notifications": {
+      const edit = input.value;
+      const previous = document.display?.routine_notifications ?? true;
+      if (Object.keys(input).some(key => !["kind", "value"].includes(key))) throw invalid("input", "invalid-input", "常规通知输入包含不支持的字段");
+      if (!edit || typeof edit !== "object" || Array.isArray(edit)
+        || Object.keys(edit).some(key => !["action", "value"].includes(key))
+        || !["set", "inherit"].includes(edit.action)
+        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择常规通知设置或恢复缺省");
+      if (edit.action === "set") {
+        const value = booleanValue(edit.value, "value", "常规通知");
+        document.display = { ...table(document.display), routine_notifications: value };
+      } else if (document.display !== undefined) delete document.display.routine_notifications;
+      const override = document.display?.routine_notifications ?? null;
+      return { value: { routineNotificationsEnabled: override ?? true, routineNotificationsOverride: override }, activation: previous === (override ?? true) ? "reload" : completionSettingActivation(document), backupRequired: true };
     }
     case "display.commentary": {
       const edit = input.value;

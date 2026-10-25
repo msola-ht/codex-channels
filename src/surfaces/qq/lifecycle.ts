@@ -1,7 +1,7 @@
 import type { ConversationStatus } from "../../application/index.js";
 import type { OutputEvent } from "../../conversation-core/index.js";
 import {
-  createStartupPresentation, createTurnCompletedPresentation,
+  createStartupPresentation, createTurnCompletedPresentation, shouldShowStartupNotification,
   createHookCompletedPresentation, createAutoApprovalReviewPresentation,
   renderStructuredLifecyclePresentation, renderPlainLifecyclePresentation, type StartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
@@ -53,6 +53,7 @@ export function renderQqStartupNotification(
   status: ConversationStatus,
   runtime: StartupRuntimeInfo,
 ): string {
+  if (!shouldShowStartupNotification(runtime)) return "";
   return renderStructuredLifecyclePresentation(createStartupPresentation(workspaces, status, runtime));
 }
 

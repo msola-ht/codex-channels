@@ -17,6 +17,7 @@ export type GlobalConfigChangeCode =
   | "display.subagents"
   | "display.streaming"
   | "display.commentary"
+  | "display.routine-notifications"
   | "display.overrides"
   | "scheduled-tasks.enabled"
   | "metrics.storage"

@@ -17,6 +17,7 @@ export function DisplayScopeSettings({ management, disabled }: { management: Gat
     ["subagents", "subagentsEnabled", "settingsFields.subagents"],
     ["streaming", "streamingEnabled", "settingsFields.streaming"],
     ["commentary", "commentaryEnabled", "settingsFields.commentary"],
+    ["routine_notifications", "routineNotificationsEnabled", "settingsFields.routineNotifications"],
     ["plan_updates", "planUpdatesEnabled", "settingsFields.planUpdates"],
     ["reasoning", "reasoningEnabled", "settingsFields.reasoningStatus"],
     ["completion", "completion", "settingsFields.completion"],

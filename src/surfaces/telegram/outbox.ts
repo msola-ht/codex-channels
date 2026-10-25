@@ -1,7 +1,7 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
 import type { SurfaceMessageDisplaySettings } from "../types.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
-import { shouldHideCommentary, shouldPreviewTextDelta, surfaceOutputSnapshotKey } from "../delivery-policy.js";
+import { shouldHideCommentary, shouldHideRoutineNotification, shouldPreviewTextDelta, surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
 import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { TelegramTextStreams, type TelegramFinalMessageFormat } from "./text-streams.js";
@@ -282,6 +282,7 @@ export class TelegramOutbox {
   }
 
   retains(event: OutputEvent): boolean {
+    if (shouldHideRoutineNotification(event, this.displaySettings(event.target.conversationId).routineNotificationsEnabled)) return false;
     if (this.hidesCommentary(event)) return false;
     if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled) return false;
     if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
@@ -336,6 +337,7 @@ export class TelegramOutbox {
       streamingEnabled: true,
       commentaryEnabled: true,
       subagentsEnabled: true,
+      routineNotificationsEnabled: true,
     };
   }
 
@@ -360,6 +362,8 @@ export class TelegramOutbox {
   }
 
   private handleEvent(event: OutputEvent, completion?: "brief" | "detailed"): void {
+    if (DeliveryReceipt.current()?.transient !== false
+      && shouldHideRoutineNotification(event, this.displaySettings(event.target.conversationId).routineNotificationsEnabled)) return;
     if (DeliveryReceipt.current()?.transient !== false && this.hidesCommentary(event)) return;
     if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled
       && DeliveryReceipt.current()?.transient !== false) return;

@@ -11,7 +11,7 @@ import { formatSurfaceConfigurationChange } from "../configuration-change-format
 import { parseSlashCommand, isEmergencyStopCommand } from "../slash-command.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
-import { resolveSurfaceDelivery, shouldHideCommentary, shouldPreviewTextDelta } from "../delivery-policy.js";
+import { resolveSurfaceDelivery, shouldHideCommentary, shouldPreviewTextDelta, shouldHideRoutineNotification, shouldHideRoutineConfiguration } from "../delivery-policy.js";
 import { isSupportedPersistentOutput } from "../persistent-output.js";
 import { shouldHideTurnCompleted } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
@@ -459,10 +459,11 @@ export class QqMessages implements SurfaceOutputPort {
     this.tasks.add(task);
   }
 
-  deliverConfigurationChange(change: SurfaceConfigurationChange): Promise<void> {
+  deliverConfigurationChange(change: SurfaceConfigurationChange, live = false): Promise<void> {
     // Capture before returning: bootstrap restores the restart intersection as
     // soon as configurationChanged returns, before any asynchronous send runs.
-    const recipients = [...new Set(this.options.configurationNotification?.recipients() ?? [])];
+    const recipients = [...new Set(this.options.configurationNotification?.recipients() ?? [])]
+      .filter(actorId => !live || !shouldHideRoutineConfiguration(change, this.displaySettings(this.target(actorId)).routineNotificationsEnabled));
     if (this.lifetime.signal.aborted) return Promise.reject(new Error("QQ 配置通知代次已关闭"));
     if (!recipients.length) return Promise.resolve();
     if (this.configurationNotifications >= 8) return Promise.reject(new Error("QQ 配置通知容量已满"));
@@ -535,6 +536,7 @@ export class QqMessages implements SurfaceOutputPort {
       try {
         const content = await notification.text(this.target(actorId), signal);
         signal.throwIfAborted();
+        if (!content) continue;
         await this.outbox.deliver({ mode: "active", recipient: actorId, content }, {
           signal,
           preferMarkdown: true,
@@ -1134,6 +1136,7 @@ export class QqMessages implements SurfaceOutputPort {
   private supported(event: OutputEvent): boolean {
     if (!this.supportsDelivery(event)) return false;
     const settings = this.displaySettings(event.target);
+    if (shouldHideRoutineNotification(event, settings.routineNotificationsEnabled)) return false;
     if (shouldHideCommentary(event, settings.commentaryEnabled,
       event.type === "text.completed" && this.streaming.hasAdmittedPreview(event))) return false;
     if (isSubagentOutput(event) && !settings.subagentsEnabled) return false;
@@ -1152,6 +1155,7 @@ export class QqMessages implements SurfaceOutputPort {
       presentationDetail: "basic" as const,
       streamingEnabled: true,
       commentaryEnabled: true,
+      routineNotificationsEnabled: true,
       subagentsEnabled: true,
     };
   }

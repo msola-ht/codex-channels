@@ -1,5 +1,7 @@
 # 项目脚本
 
+常规通知管理由 `config-display-menu.mjs`、`config-management.mjs` 和 `config-display-management.mjs` 共同提供，全局 `display.routine-notifications` 显式 set boolean/inherit，范围字段 `routine_notifications` 支持四渠道及 QQ 群。共享读取区分有效值与覆盖，缺省开启不物化；保存沿 revision、私有备份和读回，取消和未变化不写。WebUI 高风险确认、API allowlist 及读回核对共用相同契约。启用任一渠道时全局有效值变化要求重启 Gateway，隐式 true/显式 true 互换只 reload，范围数组整体判定；回退前清除全局及覆盖 routine_notifications，不自动迁移。
+
 本目录保存 npm CLI 和开发流程调用的 Node.js、Shell 脚本。脚本处理本机配置、构建、协议生成和服务管理，不承载 Gateway 的会话业务逻辑。
 
 涉及 Provider、进程控制或服务安装时遵循[跨平台变更规则](../docs/development-rules.md#cross-platform-changes)。CLI、Setup、WebUI 的等价配置操作遵循[多入口配置管理规则](../docs/development-rules.md#multi-entry-configuration-management)，复用所属业务模块的管理计划与执行契约；平台控制脚本只处理服务管理器差异。预览通过不能代替执行前状态校验，写入成功不能代替运行时可消费或服务就绪。模板变化须同步核对全新安装、既有定义重装、失败恢复及 WebUI/Relay 状态，不能只验证当前主机平台。

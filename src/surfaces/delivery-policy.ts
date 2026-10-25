@@ -4,6 +4,33 @@ import {
   type SurfaceId,
 } from "../conversation-core/index.js";
 import { isGeneratedImageUnavailable } from "./operation-presentation.js";
+import type { SurfaceConfigurationChange } from "./types.js";
+
+/** Optional routine notices only; failures and requests for action remain visible. */
+export function shouldHideRoutineNotification(event: OutputEvent, enabled: boolean): boolean {
+  if (enabled) return false;
+  switch (event.type) {
+    case "turn.started":
+    case "conversation.idle.released":
+    case "connection.restored":
+    case "thread.name": return true;
+    case "warning": return event.globalIdle === true;
+    case "thread.availability": return event.availability === "available";
+    case "hook.completed": return event.hook.status === "completed";
+    case "autoApprovalReview.updated": return event.phase === "completed" && event.status === "approved";
+    case "operation.updated": return event.operation.kind === "contextCompaction"
+      && (event.operation.status === "running" || event.operation.status === "completed");
+    case "mcp.status.updated": return (event.status === "starting" || event.status === "ready")
+      && event.error === null && event.failureReason === null;
+    default: return false;
+  }
+}
+
+/** Durable workspace receipts bypass this live-only choice. */
+export function shouldHideRoutineConfiguration(change: SurfaceConfigurationChange, enabled: boolean): boolean {
+  return !enabled && (change.action === "reloaded" || change.action === "provider-settings-scheduled"
+    || change.action === "provider-settings-restarting" || change.action === "provider-settings-applied");
+}
 
 /** Unknown phases may be buffered, but cannot reveal a later commentary Item. */
 export function shouldPreviewTextDelta(

@@ -142,6 +142,7 @@ export interface StartupRuntimeInfo {
   transport: string;
   codexUpstreamUserAgent: string | null;
   presentationDetail?: "basic" | "detailed";
+  routineNotificationsEnabled?: boolean;
   /** 官方主路由是否已有 Codex 鉴权；`undefined` 表示当前未使用官方主路由。 */
   officialOpenAiAuthenticated?: boolean;
   openAiConnectivity?:
@@ -153,6 +154,13 @@ export interface StartupRuntimeInfo {
     | "indeterminate"
     | "unreachable"
     | "not-applicable";
+}
+
+/** Preserve the original startup summary when it contains an actionable warning. */
+export function shouldShowStartupNotification(runtime: StartupRuntimeInfo): boolean {
+  return runtime.routineNotificationsEnabled !== false || runtime.officialOpenAiAuthenticated === false
+    || (runtime.openAiConnectivity !== undefined && runtime.openAiConnectivity !== "reachable"
+      && runtime.openAiConnectivity !== "not-applicable");
 }
 
 type StartupStatus = Pick<

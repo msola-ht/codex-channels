@@ -1,7 +1,7 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
 import type { SurfaceMessageDisplaySettings } from "../types.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
-import { shouldHideCommentary, shouldPreviewTextDelta, surfaceOutputSnapshotKey } from "../delivery-policy.js";
+import { shouldHideCommentary, shouldHideRoutineNotification, shouldPreviewTextDelta, surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
 import { isHiddenAutoApprovalReview, shouldHideTurnCompleted } from "../lifecycle-presentation.js";
 import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
@@ -245,6 +245,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   retains(event: OutputEvent): boolean {
+    if (shouldHideRoutineNotification(event, this.displaySettings(event.target.conversationId).routineNotificationsEnabled)) return false;
     if (this.hidesCommentary(event)) return false;
     if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled) return false;
     if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
@@ -296,6 +297,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       streamingEnabled: true,
       commentaryEnabled: true,
       subagentsEnabled: true,
+      routineNotificationsEnabled: true,
     };
   }
 
@@ -324,6 +326,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   private handleEvent(event: OutputEvent, completionMode?: "brief" | "detailed"): void {
+    if (DeliveryReceipt.current()?.transient !== false
+      && shouldHideRoutineNotification(event, this.displaySettings(event.target.conversationId).routineNotificationsEnabled)) return;
     if (DeliveryReceipt.current()?.transient !== false && this.hidesCommentary(event)) return;
     if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled
       && DeliveryReceipt.current()?.transient !== false) return;

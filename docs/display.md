@@ -10,9 +10,19 @@
 
 ## 过程显示范围与继承
 
+可选 `routine_notifications` 布尔值缺省有效为 `true`，读取和安全默认补齐不物化，支持四渠道（含微信和 QQ 群）的全局 → 渠道 → 账号 → 聊天类型 → 指定聊天五层继承。关闭常规启动、普通成功配置提示、空闲及全局空闲释放、成功或运行中的压缩、成功 Hook、自动审批通过、MCP starting/ready、Thread 名称与可用状态、连接恢复通知。配置提示仅隐藏 `reloaded`、`provider-settings-scheduled`、`provider-settings-restarting`、`provider-settings-applied`；Gateway 即将退出的 restarting 提示保留。失败、拒绝、停止、全部重试、账号与额度、OAuth、需用户动作、正文附件、审批及命令回执保留；启动摘要含结构化鉴权或健康异常时仍显示原摘要，持久 Workspace 新增回执始终保留。该设置不取消已入 Journal 的投递义务，也不把未发送伪报为已送达。
+
+CLI“常规通知”、WebUI 和 API 使用共享 `display.routine-notifications` 显式 `{ action: "set", value: boolean }` / `{ action: "inherit" }`，拒绝 null、别名和多余字段；读回区分有效 `routineNotificationsEnabled` 与本层 `routineNotificationsOverride`（布尔值或 null）。恢复缺省删除字段；任一渠道启用时全局有效值变化要求重启 Gateway，否则 reload，隐式 true 与显式 true 互换只 reload。范围数组沿整体保守判定。保存前创建私有备份，预览、取消和未变化不写，旧 revision 拒绝；保存后读回不确定不自动重试或回滚。回退不支持此字段的版本前，显式清除全局及所有覆盖中的 `routine_notifications`，核对后续修改，不自动迁移或用旧备份覆盖新修改。此批源码尚未部署，真实平台效果待验收。
+
+| 显示字段 | Telegram / 飞书 | 微信 | QQ 单聊 | QQ 群 |
+| --- | --- | --- | --- | --- |
+| `routine_notifications`、`completion`、`presentation_detail` | 支持 | 支持 | 支持 | 支持 |
+| `streaming` | 支持 | 不支持 | 支持 | 不支持 |
+| 操作、子代理、过程说明、计划、思考状态 | 支持 | 不支持 | 支持 | 支持 |
+
 `[display]` 的 `operation_updates = "full" | "compact" | "failures" | "hidden"` 控制工具操作，`failures` 仅展示 `failed` / `declined`；原默认值仍为 `compact`。`plan_updates`、`reasoning` 保留全局含义与原默认值。可选 `subagents` 布尔值缺省有效为 `true`，可选 `completion = "off" | "brief" | "detailed"` 控制完成通知，缺省有效为 `detailed`；二者读取和安全默认补齐均不写入。可选 `[[display.overrides]]` 按全局 → 渠道 → 账号 → 账号的聊天类型 → 指定聊天逐字段覆盖。缺少字段表示继承，`false`、`hidden` 与 `off` 是有效覆盖；恢复继承必须显式删除所选字段，最后一个字段删除后移除该覆盖项。全局子代理和完成通知恢复缺省也删除对应字段，不保存默认值。`display.model_aliases` 独立管理，不参与消息继承。
 
-每项必填 `surface`；可选 `account_id`，`chat_kind` 需要账号，`chat_id` 需要账号及聊天类型。聊天类型仅 `direct`、`group`，其中群仅支持 QQ；微信接受 `completion` 与 `presentation_detail`，继续拒绝操作、子代理、流式、过程说明、计划与思考字段。除八个显示字段和上述目标字段外不接受其他键；空覆盖、重复目标、超长身份与超过 512 项均拒绝，读取不修复。Telegram 账号为 `default`，飞书与 QQ 为当前 AppID，微信为配置中的 `account_id`；QQ 单聊 `chat_id` 是收件人的用户 OpenID，群是物理 `group_openid`，不包含成员 Thread 身份。微信精确私聊 ID 与允许名单中的 `allowed_user_ids` 相同，管理仅提供当前启用账号及名单可证明的目标。
+每项必填 `surface`；可选 `account_id`，`chat_kind` 需要账号，`chat_id` 需要账号及聊天类型。聊天类型仅 `direct`、`group`，其中群仅支持 QQ；微信接受 `routine_notifications`、`completion` 与 `presentation_detail`，继续拒绝操作、子代理、流式、过程说明、计划与思考字段。除九个显示字段和上述目标字段外不接受其他键；空覆盖、重复目标、超长身份与超过 512 项均拒绝，读取不修复。Telegram 账号为 `default`，飞书与 QQ 为当前 AppID，微信为配置中的 `account_id`；QQ 单聊 `chat_id` 是收件人的用户 OpenID，群是物理 `group_openid`，不包含成员 Thread 身份。微信精确私聊 ID 与允许名单中的 `allowed_user_ids` 相同，管理仅提供当前启用账号及名单可证明的目标。
 
 可选 `commentary` 布尔值缺省有效为 `true`，普通读取与安全默认补齐不物化。Telegram、飞书及 QQ（含已支持群）按相同五层继承；微信本来不展示 commentary，覆盖严格拒绝此字段的 true/false，管理字段列表不提供该选项。关闭只隐藏明确 `phase = commentary` 的新过程说明，不控制 `reasoning` 状态或原始推理。未知或空阶段的完整正文保留；关闭时未知阶段增量先缓冲且暂不预览，待明确 `final_answer` 或完整 Item 再展示，避免晚到 commentary 泄漏。已经按可显示正文准入的流仍按原义务收尾；已入 Journal 内容继续投递。正文、附件、审批、失败、任务与模型不受此开关改变。
 

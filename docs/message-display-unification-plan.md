@@ -43,8 +43,8 @@
 | P0 | 计划、现状证据、目标合同、反例和索引；独立复审后提交 | 完成，提交 `88f0016b` |
 | P1 | 澄清日志/调用记录/展示边界；修复调用记录自定义裁剪被误标生产预设，统一相关入口文案与有效值 | 完成，提交 `c0c4bbfe` |
 | P2 | 共享显示策略、能力/聊天目标模型、继承算法与同源管理内部准备；保留已有配置及消费者；冻结身份、激活和存量恢复合同，明确旧设置备份/转换/回滚；不开放尚无消费者的新字段或预设 | P2a 完成，提交 `1830c57b`；P2b 与 P3a 合并提交 `628c9cbf` |
-| P3 | 全渠道接入共享任务显示：正文/commentary/流式、工具/计划/思考/子代理、成功完成与异常；状态结算、持久确认和旧记录处理一起修复；同批开放已完整接线字段的严格 Schema、CLI/WebUI、预设及生效结果 | P3a 提交 `628c9cbf`；P3b 提交 `fdcc0a7c`；P3c 提交 `eaf2b82e`；P3d 提交 `4898bfdd`；P3e commentary 独立复审修复完成，随本批提交；预设随 P4 后续批次 |
-| P4 | 启动/配置/空闲/压缩/Hook/自动审批/账户/MCP/重试等通知旁路；引用与提醒能力；命令/交互/附件保护；日志与可见详情彻底解耦；对应新增管理字段及预设在本批消费者完成后一起开放 | P4a 提交 `7f6cf4b7`；其余待开始 |
+| P3 | 全渠道接入共享任务显示：正文/commentary/流式、工具/计划/思考/子代理、成功完成与异常；状态结算、持久确认和旧记录处理一起修复；同批开放已完整接线字段的严格 Schema、CLI/WebUI、预设及生效结果 | P3a 提交 `628c9cbf`；P3b 提交 `fdcc0a7c`；P3c 提交 `eaf2b82e`；P3d 提交 `4898bfdd`；P3e 提交 `028035aa`；预设随 P4 后续批次 |
+| P4 | 启动/配置/空闲/压缩/Hook/自动审批/账户/MCP/重试等通知旁路；引用与提醒能力；命令/交互/附件保护；日志与可见详情彻底解耦；对应新增管理字段及预设在本批消费者完成后一起开放 | P4a 提交 `7f6cf4b7`；P4b 常规通知独立复审修复完成，随本批提交；引用/提醒审查中，预设待开始 |
 | P5 | 全入口整合复审：CLI、Setup、WebUI、配置加载重启、单群聊隔离、文档和支持矩阵；独立全链路复审修复提交 | 待开始 |
 
 P2–P4 的源码可拆分准备，但提交不得宣称未接线的设置可用；未开放指严格配置拒绝对应输入，CLI/WebUI 不提供可保存入口，而非保存后静默无效。每批已开放字段必须覆盖加载、默认补齐、局部编辑/恢复继承、修订保护、重启分类、运行注入及实际消费者，不能把这些必要路径留到 P5。预设只能写入本批已开放字段，不能预写下一批设置。必要时将 P2–P4 合并为一个完整可用的提交批次，保留内部子步骤，并在提交前完成独立全链路复审。P5 是跨批整合复审，不承担此前批次缺失的必需接线。不能让两个批次同时写同一文件。
@@ -164,3 +164,17 @@ P3e 保留原 TG 空白 commentary 省略特例，不用旧增量替代权威空
 P3e TG/飞书修复观察：unknown 增量观察→commentary 完成观察→迟到增量处理后等 1.1 秒，两端均零调用、零流、不准入；final 增量观察→commentary 完成观察→迟到处理，完成前零调用但保留完整 Item，可靠交付只将权威完整正文交给明确拒绝端口，只有 started，失败传播且清流。未知与 null 完整正文保留，partial→final 首发含全部前缀；平台创建在途且没有消息 ID 时，迟到 commentary 不撤销收尾，拒绝后不自动重播。飞书已有 retained 完整消息在途时，隐藏观察不删除终态所有权或提前释放回复目标。unknown-only Turn 保持原正文收尾，已隐藏 commentary 的旧 delta 与 Turn 结算不外发。观察实例全部关闭；所有平台端口只拒绝，没有伪 confirmed，真实客户端仍未观察。
 
 P3e A 独立复审覆盖管理五层/事务/激活、Bootstrap 能力与地址、三渠道同步观察和异步队列、完整交付/旧记录、关闭/取消/跨 Turn 收尾，修复竞态后无剩余阻断项。独立反例确认隐藏旧 delta 不复活，final 准入仍保留权威完整正文；终结一个 Thread 后另一个 Thread 缓冲仍保留，交互及普通输出前 flush 不泄露未准入未知正文。未知正文的 Turn 收尾遇拒绝如实失败。类型/边界、相关 Lint、前端构建及 Lint、2218 翻译键和文档检查通过，提交门禁继续构建。真实平台成功、浏览器控件、TTY、运行激活及跨重启平台确认未观察。
+
+P3e 已提交 `028035aa`，提交门禁全部通过。P4b 以一个可选 `display.routine_notifications` 布尔字段统一常规通知，缺省 true 不物化，四渠道及已支持单群聊均可覆盖，避免每个提示新增独立模式。正常启动、live 普通配置、空闲释放/显式全局空闲、压缩 running/completed、成功 Hook、自动审批通过、会话名称/恢复可用、连接恢复、无 error/failureReason 的 MCP starting/ready 可隐藏。失败、取消、拒绝、需要动作、全部 retry、账户/额度、OAuth、命令/审批/正文附件保持。Gateway 即将重启也保留；普通配置仅 `reloaded`、`provider-settings-scheduled`、`provider-settings-restarting`、`provider-settings-applied` 可关闭。既有 Journal 与持久 Workspace 配置义务不按新开关空确认，投递 v1 不变。
+
+启动仍使用同一次 runtime 的原摘要；关闭常规通知但明确未登录，或连接为 recovering/unreachable/invalid-base-url/route-warning/temporarily-unavailable/indeterminate 时保留完整摘要，不把未知鉴权当未登录。微信平台 start/stop 对账独立于聊天启动消息。管理事务、五层继承、备份与旧版回退同步接入；旧版回退前核对后续编辑并清除全局及覆盖 routine_notifications，不自动恢复旧备份。
+
+P4b QQ 初步本地观察：150 个常规事件进入生产 admit/observe/handle 后，临时通知来源为 0、发送尝试 0；失败压缩、blocked Hook、MCP ready 携错误、普通 warning 和 retry 均不被分类隐藏。关闭后既有压缩完成走可靠入口，实际到明确拒绝端口，仅 started 并返回 LOCAL_SEND_REFUSED。普通配置关闭零尝试，可靠配置仍尝试并报未全部确认。启动纯呈现检查：正常/未配置连接返回空摘要，六种健康异常及明确未登录保留原摘要。均为本地生产函数，不代表平台送达；实例已关闭。
+
+P4b 管理观察：CLI 生产菜单函数确认取消零写、恢复继承由真实 writer 保存并读回 confirmed；完整 createWebuiServer HTTP GET/预览/确认 PATCH 返回 200，CLI 同源读取 false，竞争写后的旧确认返回 409 stale-revision。非法 null 为 400 invalid-boolean，别名为 400 setting_not_allowed。仅微信启用时有效 true→false 要求 restart，隐式/显式 true 互换 reload，重复值 none；备份 0600，正常读取和默认补齐不物化。QQ 精确群 false 与同账号单聊 true 隔离。直接加载源码 Runtime 及 reload-classifier 确认上述分类，微信覆盖变化为 restart/display.overrides。隔离 HTTP、配置和审计资源已关闭清理；菜单调用不是真实 TTY。
+
+P4b 复审处理：TG 普通配置通知改用已配置私聊通知目标的独立回调，避免实时聊天类型尚未证明时把默认 true 误判为 false。A 复审确认新加的 idle→断线清理会在 Journal 尚未派发正文时删掉原引用和预览，并可能清除 TG 同聊其他 Thread 的 typing；已撤回该新增清理及其支持性代码，保持原有状态所有权。原 idle 提示的发送分支本不承担这些清理，因此关闭提示不会跳过原收尾。没有新增临时正文历史或改动引用恢复格式。
+
+P4b A 独立反例：飞书观察增量和完整 Item 后再观察隐藏 idle，零平台调用且两条 Thread 的原流与回复引用保持；后续可靠交付准确到 replyMarkdownCard(original-reply) 拒绝端口，只有 started 并传播 LOCAL_SEND_REFUSED。TG 另一个 Thread 的 typing 在目标 Thread idle 后仍保留。管理继承/能力、共享通知及异常分类、启动告警保留均独立核对，当前无剩余代码阻断项。真实平台送达、Journal 重启恢复、浏览器控件、TTY、运行激活及其他操作系统未观察。
+
+P4b 实施方补充：TG/飞书/微信 12 类常规新事件零发送且不保留；旧持久启动仍实际尝试，仅 started 并 ECONNREFUSED，失败压缩/Hook/拒绝审批继续尝试。三个实际 Surface 配置方法接真实 Outbox，普通 reloaded 零调用、reload-failed 继续尝试，可靠 reloaded 仍拒绝而不空确认；微信原 context 保持。TG/飞书待派发完整正文及既有预览跨隐藏 idle 保留原引用，正文拒绝如实传播。配置写后读回故意不可用时返回 consistency unknown，已保存 false 及备份保留，无回滚或重试。类型/边界、源码相关 Lint、前端类型/Lint 和文档检查通过，提交门禁继续执行构建。

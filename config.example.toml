@@ -94,6 +94,12 @@ operation_updates = "compact"
 # 未知阶段增量暂不预览，待明确 final_answer 或完整消息再展示；未知阶段完整正文保留。
 # 已准入正文流与已有 pending 按原义务收尾；微信本来不展示 commentary，拒绝该覆盖。
 # commentary = true
+
+# 四渠道（含微信和 QQ 群）常规生命周期与成功提示，缺省开启且不自动写入。
+# 关闭不影响失败、拒绝、停止、重试、账号与额度、OAuth、需用户动作、正文附件、审批和命令回执。
+# 启动鉴权/健康异常、持久 Workspace 新增回执与已有待投递义务保留；支持同名五层覆盖。
+# 任一启用渠道的有效值变化需重启 Gateway；回退旧版前显式清除全局及覆盖字段，不自动迁移。
+# routine_notifications = true
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
 # 是否在渠道显示“思考中”状态卡；默认 false，不显示。

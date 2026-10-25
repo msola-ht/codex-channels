@@ -162,6 +162,7 @@ function createQqModule(
         return renderQqStartupNotification(options.config.workspaces, status, {
           platform: process.platform, architecture: process.arch,
           presentationDetail: displaySettings(target).presentationDetail,
+          routineNotificationsEnabled: displaySettings(target).routineNotificationsEnabled,
           gatewayVersion: options.gatewayVersion, nodeVersion: process.version,
           transport: "Unix WebSocket", codexUpstreamUserAgent: options.codexUpstreamUserAgent() ?? null,
           ...(options.config.codexTimezone === undefined ? {} : { appServerTimezone: options.config.codexTimezone }),
@@ -271,6 +272,9 @@ function createWeixinModule(
             presentationDetail: resolveMessageDisplaySettings(options.config.messageDisplay, {
               surface: "weixin", accountId: config.accountId, chatKind: "direct", chatId: target.conversationId,
             }).presentationDetail,
+            routineNotificationsEnabled: resolveMessageDisplaySettings(options.config.messageDisplay, {
+              surface: "weixin", accountId: config.accountId, chatKind: "direct", chatId: target.conversationId,
+            }).routineNotificationsEnabled,
           },
         );
       },
@@ -392,6 +396,9 @@ function createFeishuModule(
                 presentationDetail: resolveMessageDisplaySettings(options.config.messageDisplay, {
                   surface: "feishu", accountId: config.appId, chatKind: "direct", chatId,
                 }).presentationDetail,
+                routineNotificationsEnabled: resolveMessageDisplaySettings(options.config.messageDisplay, {
+                  surface: "feishu", accountId: config.appId, chatKind: "direct", chatId,
+                }).routineNotificationsEnabled,
               },
             ),
           });
@@ -467,11 +474,14 @@ function createTelegramModule(
         reason: "private-chat-unconfirmed" }, "Telegram 可选过程展示等待私聊地址确认");
       // Unknown historical targets cannot bypass a direct/chat override. Retained
       // terminal output still renders through the independent durable contract.
-      return { operationUpdates: "hidden", planUpdatesEnabled: false, reasoningEnabled: false, completion: "off", subagentsEnabled: false, presentationDetail: "basic", streamingEnabled: false, commentaryEnabled: false };
+      return { operationUpdates: "hidden", planUpdatesEnabled: false, reasoningEnabled: false, completion: "off", subagentsEnabled: false, presentationDetail: "basic", streamingEnabled: false, commentaryEnabled: false, routineNotificationsEnabled: false };
     },
     startupPresentationDetail: chatId => resolveMessageDisplaySettings(config.messageDisplay, {
       surface: "telegram", accountId: telegramDefaultAccountId, chatKind: "direct", chatId: String(chatId),
     }).presentationDetail,
+    startupRoutineNotificationsEnabled: chatId => resolveMessageDisplaySettings(config.messageDisplay, {
+      surface: "telegram", accountId: telegramDefaultAccountId, chatKind: "direct", chatId: String(chatId),
+    }).routineNotificationsEnabled,
     autoCompactPercent: options.autoCompactPercent,
     gatewayVersion: options.gatewayVersion,
     ...(config.codexTimezone === undefined ? {} : { appServerTimezone: config.codexTimezone }),
