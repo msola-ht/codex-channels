@@ -28,7 +28,8 @@
 - `command-menu-controller.ts`：工作区、模型/思考等级/速度、会话恢复和统计选择菜单；列表读取及选项执行复用共享命令服务，模型选择复用共享快照和选择守卫。
   本代次持有有界、十分钟、单次消费的选项令牌，仅保存具体 ID/选择请求与授权上下文，不保存会话历史或模型正文；关闭清理，跨用户、工作区、会话或过期选择拒绝。
   动态名称只用于经过转义及限长的显示，不拼入可执行指令；回调沿用共享命令执行和既有一次性菜单令牌，不直接操作 App Server。模型翻页保留提供商筛选和共享快照；客户端反馈与未观察边界见消息合同。
-- `extension-queries.ts`：扩展查询准入与展示，复用共享 Plugin/MCP 参数解析器和结果格式；Skills/Agents/MCP 列表分页、Plugin/MCP 精确条目核对与 Hook 只读详情。任务调用和管理写操作不从本入口执行。
+- `extension-commands.ts`：扩展命令准入与展示，复用共享 Plugin/MCP 参数解析器和结果格式；Skills/Agents/MCP 列表分页、Plugin/MCP 精确条目核对及 MCP 登录、重载和资源读取。OAuth 地址使用经过协议校验的 URL 按钮，保留原查询参数；链接送达不代表登录完成。任务调用仍不从本入口执行。
+- `hook-review.ts`：QQ Hook 信任的字面审查策略；与共享完整性检查共同拒绝截断或展示时会改变字符的审查内容。Hook 菜单复用共享预览/确认，全部详情确认送达后才开放按钮或文字确认；生命周期守卫贯穿最终写入。
 - `interactions.ts`：共享 `InteractionPort` 的 QQ 呈现与回应适配；复用 `PendingInteractionRegistry` 和 `resolveApprovalChoice`，处理 command/stdin/file/permissions、逐题用户输入与异步问题、MCP 工具审批及 form/url elicitation。
   随机一次性令牌绑定原请求、用户及上下文，翻页或逐题推进递增 revision；按钮回调与普通文字 `/respond` 共用回应映射，输入按钮填入前缀后由用户追加正文发送。请求剩余期限包含展示发送，关闭、停止、切换及跨端解决撤销旧入口，不恢复旧令牌。
   问题保留原正文 Markdown、选项与必要输入提示，去除重复题号；提供完整字面预览作为发送前备选。审批不改为 Markdown，转义说明仅在内容确实发生转义时展示。
@@ -60,7 +61,7 @@
   主动交互共用账号和接收人额度，不占正文或终态的每 Turn 预算。
   完整协议调用串行并间隔至少 250ms，覆盖 Token 等待后的并发突发；限速不另建恢复投递箱，等待受完整计划期限和取消约束。
 - `protocol.ts`：AppID/AppSecret 校验、Token 合并刷新、Gateway 地址发现、有界 HTTP 响应、取消和结构化错误。
-  `acknowledgeInteraction` 单次 PUT 回调接收确认，复用 Token、取消和同步授权守卫；确认接收不代表动作成功。键盘严格区分 type=1 回调与 type=2 填入指令的字段。
+  `acknowledgeInteraction` 单次 PUT 回调接收确认，复用 Token、取消和同步授权守卫；确认接收不代表动作成功。键盘严格区分 type=0 URL 跳转、type=1 回调与 type=2 填入指令的字段；URL 仅接受 HTTPS 或本机 HTTP，拒绝用户信息及控制字符。
   `sendMarkdown` 仅发送完整单片，复用文字收件人/来源/期限校验与消息 ID 回执；使用 msg_type=2 与 markdown.content，不同时保留 content。
   `getBotMenu`/`putBotMenu` 为 Setup 独立管理入口提供有界 GET/PUT；不参与 Gateway 启动、事件连接或消息投递。
   `sendStream` 显式指定 text/markdown 格式，生产正文使用被动 markdown/replace 帧，固定原来信、序号、索引和流 ID，复用有界请求、同步授权守卫及保守结果分类；不使用 event_id 或 is_wakeup。

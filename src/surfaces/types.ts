@@ -29,7 +29,8 @@ export interface SurfaceConfigurationChange {
 }
 
 /** Disposable input participation identity; a stored reference alone grants no authority. */
-export interface SurfaceDeliverySource {
+export interface SurfaceTaskDeliverySource {
+  readonly kind?: never;
   readonly generation: string;
   readonly sourceToken: string;
   readonly accountId: string;
@@ -37,6 +38,20 @@ export interface SurfaceDeliverySource {
   readonly threadId: string;
   readonly turnId: string;
 }
+
+/** Application has already correlated this live notification with its original request. */
+export interface SurfaceNotificationDeliverySource {
+  readonly kind: "notification";
+  readonly generation: string;
+  readonly sourceToken: string;
+  readonly accountId: string;
+  readonly conversationId: string;
+  readonly threadId: string;
+  readonly eventType: "mcp.oauth.completed";
+  readonly serverName: string;
+}
+
+export type SurfaceDeliverySource = SurfaceTaskDeliverySource | SurfaceNotificationDeliverySource;
 
 /** One-time answer submission participation; retain confirmed sources until their normal release. */
 export interface SurfaceAsyncAnswerSubmission {

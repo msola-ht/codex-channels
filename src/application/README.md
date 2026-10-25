@@ -233,7 +233,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 
 Surface 只依赖直接输入、状态或菜单所需的能力切片，并使用 Bootstrap 注入的
 `ConversationCommandExecutor` 执行共享命令；不依赖完整 `ConversationUseCases`、具体服务类或底层 JSON-RPC。
-`execute` 可接收同步交互有效性守卫，与既有 Actor/Workspace 授权一起传至业务和最终提交前；QQ 回退用它取消在途查询及写入准备。未传守卫的调用保持原语义，已发送的写入不会因随后取消而自动撤回。共享回退解析器通过 Application 公共出口供菜单复用，不重复解析确认语法。
+`execute` 可接收同步交互有效性守卫，与既有 Actor/Workspace 授权一起传至业务和最终提交前；QQ 回退和 Hook 管理用它取消在途查询及写入准备。Hook 快照与确认使用五分钟单调时钟期限。`selectMcpLogin` 在共享目录解析后、认证写入前核对菜单原 Server 名称，拒绝重排的数字选择。未传守卫的调用保持原语义，已发送的写入不会因随后取消而自动撤回。共享回退解析器通过 Application 公共出口供菜单复用，不重复解析确认语法。
 Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。
 Queue 由 App Server 持久化并按 Thread 限制为 100 条；Application 默认以 25 条一页维护五分钟、
 不含正文的 Conversation 选择快照，数字选择器只使用该快照，完整 ID 则重新复核权威列表。

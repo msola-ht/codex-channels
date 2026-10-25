@@ -55,6 +55,7 @@ export function resolveSurfaceDelivery(
   event: OutputEvent,
 ): SurfaceDeliveryDecision {
   if (surface === "qq") {
+    if (event.type === "mcp.oauth.completed") return { disposition: "deliver", critical: true };
     if (event.type === "text.delta" && event.phase !== "commentary") return { disposition: "deliver", critical: false };
     return (event.type === "text.completed" && event.phase !== "commentary") || event.type === "turn.completed"
       ? { disposition: "deliver", critical: true }

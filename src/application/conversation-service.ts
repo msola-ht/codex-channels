@@ -254,7 +254,7 @@ export interface ConversationTurnUseCases {
 
 /** Stable model and installed-extension boundary. */
 export interface ConversationExtensionUseCases {
-  hooks(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView>;
+  hooks(target: ConversationTarget, input: string, actorId?: string, assertAuthorized?: () => void): Promise<HookCommandView>;
   invokeSkill(
     target: ConversationTarget,
     selector: string,
@@ -287,7 +287,7 @@ export interface ConversationExtensionUseCases {
   mcpServerDetail(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<McpServerDetail>;
   mcpHealth(target: ConversationTarget, assertAuthorized?: () => void): Promise<McpHealthReport>;
   reloadMcpServers(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
-  loginMcpServer(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<McpLoginResult>;
+  loginMcpServer(target: ConversationTarget, selector: string, assertAuthorized?: () => void, expectedName?: string): Promise<McpLoginResult>;
   readMcpResource(
     target: ConversationTarget,
     selector: string,
@@ -1541,8 +1541,8 @@ export class ConversationService implements
     return this.extensionQueries.modelState(target, assertAuthorized);
   }
 
-  hooks(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView> {
-    return this.hookUseCases.execute(target, input, actorId);
+  hooks(target: ConversationTarget, input: string, actorId?: string, assertAuthorized?: () => void): Promise<HookCommandView> {
+    return this.hookUseCases.execute(target, input, actorId, assertAuthorized);
   }
 
   clearModelBrowse(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState> {
@@ -1619,8 +1619,9 @@ export class ConversationService implements
     target: ConversationTarget,
     selector: string,
     assertAuthorized?: () => void,
+    expectedName?: string,
   ): Promise<McpLoginResult> {
-    return this.extensionQueries.loginMcpServer(target, selector, assertAuthorized);
+    return this.extensionQueries.loginMcpServer(target, selector, assertAuthorized, expectedName);
   }
 
   handleMcpOAuthCompleted(event: Extract<ConversationInputEvent, { type: "mcp.oauth.completed" }>): void {

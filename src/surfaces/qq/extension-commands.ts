@@ -1,7 +1,8 @@
-import { parseMcpOperation, parsePluginOperation, type ConversationCommandResult } from "../../application/index.js";
+import { parseMcpOperation, parsePluginOperation, supportsMcpOAuthLogin, type ConversationCommandResult } from "../../application/index.js";
 import { formatConversationAgents, formatConversationSkills, formatConversationMcp,
   formatConversationMcpDetail, formatConversationMcpHealth, formatConversationPlugins,
-  formatConversationPluginDetail, formatConversationPluginHealth, mcpDetailPageCount } from "../conversation-extension-command-format.js";
+  formatConversationPluginDetail, formatConversationPluginHealth, mcpDetailPageCount,
+  formatConversationMcpLogin, formatConversationMcpReload, formatConversationMcpResource } from "../conversation-extension-command-format.js";
 import { formatConversationHooks } from "../conversation-hook-command-format.js";
 import { formatConversationOccupancy } from "../conversation-session-command-format.js";
 import { UserFacingError } from "../../conversation-core/index.js";
@@ -14,16 +15,16 @@ export interface QqExtensionChoice {
   page?: number;
   expectedName?: string;
 }
-export interface QqExtensionView { detail: string; choices: QqExtensionChoice[] }
+export interface QqExtensionView { detail: string; choices: QqExtensionChoice[]; authorizationUrl?: string }
 
-/** Reuse business parsers; these entries cannot invoke tasks or configuration writes. */
-export function isQqExtensionQuery(command: string, input: string): boolean {
+/** Reuse business parsers; task invocation remains separate from MCP management. */
+export function isQqExtensionOperation(command: string, input: string): boolean {
   const value = input.trim();
   try {
     switch (command) {
       case "skill": case "agents": case "release": return !value;
       case "plugin": return parsePluginOperation(value).type !== "invoke";
-      case "mcp": return !value || ["detail", "health"].includes(parseMcpOperation(value).type);
+      case "mcp": if (value) parseMcpOperation(value); return true;
       case "hooks": return !value || /^page\s+[1-9]\d*$/u.test(value) || /^[a-f0-9]{16}\.[1-8]$/u.test(value);
       default: return false;
     }
@@ -33,7 +34,7 @@ export function isQqExtensionQuery(command: string, input: string): boolean {
   }
 }
 
-export function renderQqExtensionQuery(result: ConversationCommandResult, page = 1): QqExtensionView | undefined {
+export function renderQqExtensionCommand(result: ConversationCommandResult, page = 1): QqExtensionView | undefined {
   const choices: QqExtensionChoice[] = [];
   const paginate = (count: number, command: QqExtensionCommand, input: string) => {
     const pages = Math.max(1, Math.ceil(count / 8));
@@ -69,8 +70,15 @@ export function renderQqExtensionQuery(result: ConversationCommandResult, page =
       const detail = `MCP 第 ${page} 页 · 共 ${result.servers.length} 项\n${formatConversationMcp({ kind: "mcp", servers }, (page - 1) * 8)}`;
       return { detail, choices };
     }
-    case "mcp-health": return { detail: formatConversationMcpHealth(result, true), choices };
+    case "mcp-health": return { detail: formatConversationMcpHealth(result), choices };
+    case "mcp-login": return result.login.type === "oauth"
+      ? { detail: `MCP OAuth 登录已启动\nServer：${result.login.server}\n请点击“浏览器授权”完成登录；本机地址需在运行 App Server 的电脑打开。未收到完成通知时，可查询 MCP 实际状态。`,
+        choices, authorizationUrl: result.login.authorizationUrl }
+      : { detail: formatConversationMcpLogin(result), choices };
+    case "mcp-reload": return { detail: formatConversationMcpReload(result), choices };
+    case "mcp-resource": return { detail: formatConversationMcpResource(result), choices };
     case "mcp-detail": {
+      if (supportsMcpOAuthLogin(result.server.authStatus)) choices.push({ label: "登录认证", command: "mcp", input: `login ${result.selector}`, expectedName: result.server.name });
       for (const [section, label] of [["tools", "工具"], ["resources", "资源目录"], ["templates", "资源模板"]] as const) {
         choices.push({ label, command: "mcp", input: `${result.selector} ${section}`, expectedName: result.server.name });
       }
@@ -83,7 +91,7 @@ export function renderQqExtensionQuery(result: ConversationCommandResult, page =
             input: `${result.selector} ${view.section} ${next}${suffix}`, expectedName: result.server.name });
         }
       }
-      return { detail: formatConversationMcpDetail(result, true), choices };
+      return { detail: formatConversationMcpDetail(result), choices };
     }
     case "hooks": {
       const view = result.view;

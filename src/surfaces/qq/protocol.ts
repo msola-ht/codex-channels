@@ -28,9 +28,10 @@ export type QqInteractionAckCode = 0 | 1 | 2 | 3 | 4;
 export interface QqCommandKeyboard {
   content: { rows: Array<{ buttons: Array<{
     id: string;
-    render_data: { label: string; style: 0 | 1 };
+    render_data: { label: string; style: 0 | 1; visited_label?: string };
     action:
       | { type: 2; permission: { type: 2 }; data: string; enter: boolean; reply: false }
+      | { type: 0; permission: { type: 2 }; data: string }
       | { type: 1; permission: { type: 2 }; data: string; unsupport_tips: string };
   }> }> };
 }
@@ -497,14 +498,26 @@ function commandKeyboard(value: unknown): QqCommandKeyboard {
     return { buttons: row.buttons.map((button: unknown): QqCommandKeyboard["content"]["rows"][number]["buttons"][number] => {
       if (!exact(button, ["id", "render_data", "action"]) || typeof button.id !== "string"
         || !/^[a-z0-9_-]{1,32}$/u.test(button.id) || ids.has(button.id)
-        || !exact(button.render_data, ["label", "style"]) || typeof button.render_data.label !== "string"
+        || !exact(button.render_data, record(button.action) && button.action.type === 0 ? ["label", "style", "visited_label"] : ["label", "style"]) || typeof button.render_data.label !== "string"
         || !button.render_data.label.trim() || [...button.render_data.label].length > 10
         || !wellFormed(button.render_data.label) || /\p{Cc}/u.test(button.render_data.label)
         || (button.render_data.style !== 0 && button.render_data.style !== 1)
         || !record(button.action) || !exact(button.action.permission, ["type"]) || button.action.permission.type !== 2
-        || typeof button.action.data !== "string" || !button.action.data.trim() || [...button.action.data].length > 100
+        || typeof button.action.data !== "string" || !button.action.data.trim() || [...button.action.data].length > (button.action.type === 0 ? 4096 : 100)
         || !wellFormed(button.action.data) || /\p{Cc}/u.test(button.action.data)) return fail();
       ids.add(button.id);
+      if (button.action.type === 0) {
+        if (!exact(button.action, ["type", "permission", "data"]) || typeof button.render_data.visited_label !== "string"
+          || !button.render_data.visited_label.trim() || [...button.render_data.visited_label].length > 10
+          || !wellFormed(button.render_data.visited_label) || /[\p{Cc}\p{Cf}]/u.test(button.render_data.visited_label)
+          || /[\p{Cc}\p{Cf}]/u.test(button.action.data)) return fail();
+        let url: URL;
+        try { url = new URL(button.action.data); } catch { return fail(); }
+        if (url.username || url.password || (url.protocol !== "https:"
+          && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) return fail();
+        return { id: button.id, render_data: { label: button.render_data.label, style: button.render_data.style, visited_label: button.render_data.visited_label },
+          action: { type: 0, permission: { type: 2 }, data: button.action.data } };
+      }
       if (button.action.type === 1) {
         if (!exact(button.action, ["type", "permission", "data", "unsupport_tips"])
           || typeof button.action.unsupport_tips !== "string" || !button.action.unsupport_tips.trim()

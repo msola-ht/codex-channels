@@ -20,7 +20,7 @@
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。
 - `persistent-surface-output.ts`：在总线发布时取得原目标归属，按有界窗口异步生成快照并提交独立 Delivery；恢复时复核当前授权，通过 Surface 可等待端口记录实际平台确认；对未知或授权失效的持久结果注入仅解除顺序屏障的策略，保留记录和额度；同时拥有投递管理私有 IPC 的启动与关闭，将在线修订操作交给 Coordinator；进程内登记实时到达序号供输入镜像排序，序号不进入持久载荷，提交拒绝或开始投递时释放对应登记。
   可选 authorizeAtDispatch 接收 Coordinator 的取消信号，允许来源结算等待；通过后仍用同步 authorized 在富化、排队、started 检查点及最终发送前复核。载荷解码失败仍按存储故障处理，来源拒绝或超时不冒充存储故障。
-  组件图为 QQ 捕获 owner v3（共享身份字符串与一次来源引用），非 QQ 保持 v2；QQ 旧 owner、无来源、跨代次或 Thread/Turn 不匹配均禁发。QQ 运行时已装配引用端口，发送前同步复核精确来源。
+  组件图为 QQ 捕获 owner v3（共享身份字符串与一次来源引用），非 QQ 保持 v2；任务来源核对 Thread/Turn，MCP OAuth 完成通知的显式 notification 来源核对 Thread/Server，不伪造 Turn。QQ 旧 owner、无来源、跨代次或身份不匹配均禁发，发送前同步复核精确来源。通知来源仅驻当前代次内存，不从 Journal 恢复授权。
 - `persistent-interaction-port.ts`：审批和问题先等待同 Conversation 的前序持久结果；等待纳入原交互期限，等待前后及接受答复前复核交互归属，取消立即释放所有权并拒绝迟到结果，不保存交互正文。
 - `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前检查组合根的投递容量，统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止、查询与 Queue 删除能力，不修改协议字段。所有端口参数包含本地提交守卫原样转发，使准入等待后仍能拒绝过期命令。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，拒绝断线前连接代次迟到的问题通知，仍消费取消事件，避免入站或输出积压导致旧问题重新登记；等待前捕获唯一授权 Actor 与工作区 ID/目录，交互限定原用户，分批回答及最终 Turn 发送均复核原授权和 Thread。拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。

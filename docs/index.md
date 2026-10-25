@@ -2,6 +2,7 @@
 QQ 剩余适配按[分批计划](qq-message-contract.md#剩余适配分批计划2026-10-24)推进；会话管理批次复用共享 rename、archive/unarchive、setPinned 与官方归档列表，未新增协议。源码已接线菜单及文字命令，尚未部署客户端验收。
 模式与状态批次复用既有 effort/fast、无参 Plan、permissions、approvalsReviewer 与 Goal get/clear，不新增协议。QQ Goal 入口固定已就绪 Thread，拒绝 set 与带需求 Plan；审批方式按钮固定原 Thread 并传递有效性守卫。源码尚未部署，观察边界见同一分批合同。
 扩展查询批次复用 Skills/角色目录、Plugin installed、MCP status、Hook list 和占用诊断；QQ 仅开放查询并提供详情/分页回调，不扩大任务、OAuth、Hook 写入或强制释放能力。源码尚未部署，查询上下文、完整展示和反例记录见同一合同。
+后续管理批次接线 MCP OAuth、重载、资源读取及 Hook 信任/启停确认，沿既有受控协议和共享服务；OAuth 完成复用原登录关联，以独立通知来源进入 QQ 持久投递，不授予任务结果权限。Hook 的完整字面预览与确认门槛覆盖按钮和文字入口。OAuth 授权地址使用锁定 QQ 消息按钮合同的 type=0 URL 跳转，平台与客户端尚未验收；本地 HTTPS/本机 HTTP 和 4096 字符限制不代表平台上限。
 上下文批次复用 compact、fork 与 Revert 分页/预览/确认，QQ 提供分屏选择和完整预览后确认门槛，不新增协议。共享 Revert 确认守卫增加最终提交前的期限复核，影响所有已有渠道的同一确认路径；真实 QQ 操作尚未验收。
 普通 Turn 提交的本地关联入口见 [`SubmissionObserver`](../src/application/submission-observer.ts)：
 准备精确 Thread、标记可能提交、确认响应 Turn 并结算失败。它经 Client/Provider 透传而不添加 RPC 字段，

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { SubmissionObserver, SubmissionOutcome, SubmissionPreparation } from "../../application/index.js";
 import type { QqSourceInput } from "./message-input.js";
-import type { SurfaceDeliverySource } from "../types.js";
+import type { SurfaceTaskDeliverySource } from "../types.js";
 
 const MAX_ENTRIES = 4096;
 const MAX_SOURCES = 128;
@@ -20,7 +20,7 @@ export interface QqTaskScope {
 }
 
 /** A reference, never persisted authorization. No message body or credentials. */
-export type QqTaskSourceReference = SurfaceDeliverySource;
+export type QqTaskSourceReference = SurfaceTaskDeliverySource;
 
 export interface QqTaskTicket {
   readonly sourceToken: string;

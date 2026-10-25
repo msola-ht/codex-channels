@@ -208,6 +208,7 @@ export class ConversationExtensionQueryService {
     target: ConversationTarget,
     selector: string,
     assertAuthorized?: () => void,
+    expectedName?: string,
   ): Promise<McpLoginResult> {
     assertAuthorized?.();
     const threadId = this.router.current(target)?.threadId;
@@ -221,6 +222,7 @@ export class ConversationExtensionQueryService {
       await this.queries.listMcpServers(threadId, undefined, beforeSubmit),
     );
     beforeSubmit();
+    if (expectedName !== undefined && server.name !== expectedName) throw new UserFacingError("command.selection.expired", "MCP 目录已变化，请重新打开菜单");
     if (server.authStatus === "bearerToken") {
       return { type: "bearerToken", server: server.name };
     }

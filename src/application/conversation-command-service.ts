@@ -323,6 +323,7 @@ function modelSelectionResult(state: ModelSelectionState): ConversationCommandRe
 }
 
 export interface ConversationCommandExecutor {
+  selectMcpLogin(target: ConversationTarget, selector: string, expectedName: string, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
   selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string): Promise<ConversationCommandResult>;
   selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
   selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult>;
@@ -338,6 +339,15 @@ export interface ConversationCommandExecutor {
 
 export class ConversationCommandService implements ConversationCommandExecutor {
   private readonly scheduledTasks: ScheduledTaskUseCases | undefined;
+  async selectMcpLogin(target: ConversationTarget, selector: string, expectedName: string, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult> {
+    const authorize = this.commandGuard(target, actorId, false);
+    const guard = () => { authorize(); assertInteractionActive?.(); };
+    guard();
+    this.conversations.touchActivity?.(target);
+    const login = await this.conversations.loginMcpServer(target, selector, guard, expectedName);
+    guard();
+    return { kind: "mcp-login", login };
+  }
   constructor(
     private readonly conversations: ConversationCommandUseCases,
     scheduledTasks?: ScheduledTaskUseCases,
@@ -445,7 +455,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     const argumentsText = input.trim();
     switch (command) {
       case "hooks":
-        return { kind: "hooks", view: await this.conversations.hooks(target, argumentsText, actorId) };
+        return { kind: "hooks", view: await this.conversations.hooks(target, argumentsText, actorId, assertAuthorized) };
       case "autoreview": {
         if (!argumentsText) return { kind: "auto-review", state: this.conversations.autoReview(target) };
         if (argumentsText !== "on" && argumentsText !== "off") {

@@ -1,10 +1,12 @@
+import { randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 import type { InteractionRequest } from "../../approval/index.js";
 import type { ConversationCommandExecutor, ConversationSessionUseCases, ConversationTurnUseCases } from "../../application/index.js";
 import { UserFacingError, type ConversationTarget, type OutputEvent } from "../../conversation-core/index.js";
 import type { ConversationActorRegistry, SurfaceAccessPolicy } from "../../policy/index.js";
 import type { DeliveryCheckpoint } from "../delivery-receipt.js";
-import type { SurfaceOutputPort } from "../types.js";
+import type { SurfaceOutputPort, SurfaceDeliverySource, SurfaceNotificationDeliverySource } from "../types.js";
+import { formatRuntimeMcpOAuthCompleted } from "../runtime-status-format.js";
 import { parseSlashCommand, isEmergencyStopCommand } from "../slash-command.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
@@ -13,7 +15,7 @@ import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import { parseQqTextEvent } from "./inbound.js";
 import { parseQqButtonEvent } from "./button-inbound.js";
 import type { QqMessageInput } from "./message-input.js";
-import { QqTaskSources, type QqTaskScope, type QqTaskSourceReference, type QqTaskTicket } from "./task-sources.js";
+import { QqTaskSources, type QqTaskScope, type QqTaskTicket } from "./task-sources.js";
 import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
 import { QQ_TEXT_PART_BYTES, QqProtocolError, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard } from "./protocol.js";
@@ -23,7 +25,7 @@ import { surfaceErrorMetadata } from "../error-metadata.js";
 import { QqCommandMenuController } from "./command-menu-controller.js";
 import { qqBodyMarkdownPrefix } from "./body-markdown.js";
 import { QqInteractions } from "./interactions.js";
-import { isQqExtensionQuery } from "./extension-queries.js";
+import { isQqExtensionOperation } from "./extension-commands.js";
 
 export interface QqMessageOptions {
   appId: string;
@@ -57,7 +59,8 @@ export class QqMessages implements SurfaceOutputPort {
   private readonly streaming: QqBodyStreaming;
   private readonly budget = new QqSendBudget();
   private readonly menus: QqCommandMenuController;
-  private readonly admitted = new WeakMap<OutputEvent, QqTaskSourceReference>();
+  private readonly admitted = new WeakMap<OutputEvent, SurfaceDeliverySource>();
+  private readonly notificationSources = new Map<string, { source: SurfaceNotificationDeliverySource; scope: QqTaskScope; queryScope: string; until: number }>();
   private readonly replied = new WeakSet<QqMessageInput>();
   private callbackTimes: number[] = [];
   private callbackStopTimes: number[] = [];
@@ -74,7 +77,7 @@ export class QqMessages implements SurfaceOutputPort {
       readyThread: target => this.readyThread(target),
       queryScope: target => this.extensionQueryScope(target),
       allowed: (target, actorId) => this.allowed(target, actorId),
-      beforeMutation: (target, preserveRevert) => { this.cancelCallbacks(target); if (!preserveRevert) this.menus.cancelRevert(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); },
+      beforeMutation: (target, preserveRevert) => { this.cancelCallbacks(target); this.menus.cancelManagement(target); if (!preserveRevert) this.menus.cancelRevert(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); },
       signal: this.lifetime.signal,
     });
     this.outbox = new QqTextOutbox(client, options.logger);
@@ -96,18 +99,33 @@ export class QqMessages implements SurfaceOutputPort {
 
   readonly deliverySource = {
     capture: (event: OutputEvent) => this.admitted.get(event),
-    await: (reference: QqTaskSourceReference, signal: AbortSignal) => this.sources.awaitSource(reference, signal),
-    current: (reference: QqTaskSourceReference) => this.sources.isCurrent(reference),
+    await: (reference: SurfaceDeliverySource, signal: AbortSignal) => reference.kind === "notification"
+      ? Promise.resolve(!signal.aborted && this.notificationCurrent(reference)) : this.sources.awaitSource(reference, signal),
+    current: (reference: SurfaceDeliverySource) => reference.kind === "notification" ? this.notificationCurrent(reference) : this.sources.isCurrent(reference),
   };
 
   admitLive(event: OutputEvent): void {
     if (event.target.surface !== "qq" || event.target.accountId !== this.options.appId) return;
+    if (event.type === "mcp.oauth.completed") {
+      if (!event.threadId || !event.target.conversationId.startsWith("c2c:") || this.admitted.has(event)) return;
+      const scope = this.scope(event.target.conversationId.slice(4));
+      if (!scope || !this.current(scope, event.threadId)) return;
+      for (const [token, entry] of this.notificationSources) if (entry.until <= performance.now()) this.notificationSources.delete(token);
+      if (this.notificationSources.size >= 128) throw new Error("QQ 通知来源容量已满");
+      const source: SurfaceNotificationDeliverySource = Object.freeze({ kind: "notification", eventType: event.type, serverName: event.name,
+        generation: this.sources.generation, sourceToken: randomUUID(), accountId: event.target.accountId,
+        conversationId: event.target.conversationId, threadId: event.threadId });
+      this.notificationSources.set(source.sourceToken, { source, scope, queryScope: this.extensionQueryScope(event.target), until: performance.now() + 600_000 });
+      this.admitted.set(event, source);
+      return;
+    }
     if ((!this.supported(event) && event.type !== "turn.started") || !("threadId" in event) || !("turnId" in event)) return;
     const source = this.sources.capture(event.target, event.threadId, event.turnId);
     if (source) this.admitted.set(event, source);
   }
   observe(event: OutputEvent): void {
     const source = this.admitted.get(event);
+    if (source?.kind === "notification") return;
     if (source && event.type === "turn.started") this.streaming.started(source);
     if (event.type === "text.delta" || event.type === "text.completed") this.streaming.observe(event, source);
     if (source && event.type === "turn.completed") this.sources.terminal(source);
@@ -119,6 +137,14 @@ export class QqMessages implements SurfaceOutputPort {
   }
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void> {
     if (!this.supported(event) || !authorized) throw new Error("QQ 输出未获授权");
+    if (event.type === "mcp.oauth.completed") {
+      await this.outbox.deliver({ mode: "active", recipient: event.target.conversationId.slice(4), content: formatRuntimeMcpOAuthCompleted(event) }, {
+        signal: AbortSignal.any([signal, this.lifetime.signal]), preferMarkdown: true,
+        beforeSend: () => { if (!authorized()) throw new Error("QQ 通知授权失效"); },
+        reserve: parts => this.budget.reserve(event.target.conversationId.slice(4), parts, "interaction"),
+      }, checkpoint);
+      return;
+    }
     if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
     let text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.autoCompactPercent);
     let continuation = false;
@@ -293,7 +319,7 @@ export class QqMessages implements SurfaceOutputPort {
     try { command = parseSlashCommand(message.content); }
     catch { await this.reply(message, "命令格式不受支持。使用 /help 查看 QQ 命令。", () => this.allowed(target, message.actorId)); return; }
     const stop = command?.name === "stop" && !command.argumentsText;
-    if (stop) { this.cancelCallbacks(target); this.menus.cancelRevert(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); }
+    if (stop) { this.cancelCallbacks(target); this.menus.cancelRevert(target); this.menus.cancelManagement(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); }
     if (this.busy.has(target.conversationId) && !stop && !ownsBusy) {
       await this.reply(message, "上一条输入仍在处理中，请稍后重试；/stop 可取消当前准备和任务。", () => this.allowed(target, message.actorId)); return;
     }
@@ -304,7 +330,7 @@ export class QqMessages implements SurfaceOutputPort {
         if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", "compact", "fork", "revert", "effort", "fast", "plan", "goal", "permissions", "autoreview", "whoami", ...QUERY_COMMANDS, ...EXTENSION_COMMANDS].includes(command.name)
           || (["status", "stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin", "compact", "fork", "plan", "permissions", "whoami"].includes(command.name) && command.argumentsText.trim())
           || (command.name === "goal" && !["", "clear"].includes(command.argumentsText.trim()))
-          || (EXTENSION_COMMANDS.has(command.name) && !isQqExtensionQuery(command.name, command.argumentsText))) {
+          || (EXTENSION_COMMANDS.has(command.name) && command.name !== "hooks" && !isQqExtensionOperation(command.name, command.argumentsText))) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;
         }
         if (command.name === "whoami") {
@@ -312,8 +338,9 @@ export class QqMessages implements SurfaceOutputPort {
           await this.reply(message, `# QQ 身份\n- App ID：${this.options.appId}\n- OpenID（脱敏）：${identity}\n\nOpenID 是当前应用下的身份标识，不是 QQ 号码。`, () => this.allowed(target, message.actorId));
           return;
         }
-        if (command.name === "help" || command.name === "revert") {
+        if (command.name === "help" || command.name === "revert" || command.name === "hooks") {
           const menu = await (command.name === "help" ? this.menus.open(target, message.actorId, command.argumentsText)
+            : command.name === "hooks" ? this.menus.hooks(target, message.actorId, command.argumentsText)
             : this.menus.revert(target, message.actorId, command.argumentsText));
           stage = "reply";
           await this.reply(message, menu.content, () => this.allowed(target, message.actorId) && menu.isCurrent(), undefined, menu.keyboard, menu.detail, menu.markdownDetail);
@@ -321,7 +348,7 @@ export class QqMessages implements SurfaceOutputPort {
           return;
         }
         if (((command.name === "workspace" || command.name === "model" || command.name === "resume" || command.name === "unarchive") && command.argumentsText.trim()) || command.name === "new" || command.name === "archive" || command.name === "fork") {
-          this.cancelCallbacks(target); this.menus.cancelRevert(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target);
+          this.cancelCallbacks(target); this.menus.cancelRevert(target); this.menus.cancelManagement(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target);
         }
         const commandScope = this.scope(message.actorId);
         const extensionScope = EXTENSION_COMMANDS.has(command.name) ? this.extensionQueryScope(target) : undefined;
@@ -498,6 +525,12 @@ export class QqMessages implements SurfaceOutputPort {
     const status = this.options.service.status(target);
     return status.sessionRestoring === false ? status.threadId : undefined;
   }
+  private notificationCurrent(reference: SurfaceNotificationDeliverySource): boolean {
+    const entry = this.notificationSources.get(reference.sourceToken);
+    return !!entry && entry.until > performance.now() && JSON.stringify(entry.source) === JSON.stringify(reference)
+      && this.current(entry.scope, reference.threadId)
+      && this.extensionQueryScope(this.target(entry.scope.actorId)) === entry.queryScope;
+  }
   private extensionQueryScope(target: ConversationTarget): string {
     const status = this.options.service.status(target);
     return JSON.stringify([this.menuScope(target), status.modelProvider, status.selectionScope, status.sessionRestoring]);
@@ -524,7 +557,7 @@ export class QqMessages implements SurfaceOutputPort {
       && event.target.conversationId.startsWith("c2c:") && resolveSurfaceDelivery("qq", event).disposition === "deliver";
   }
   async close(): Promise<void> {
-    this.lifetime.abort(); this.sources.close(); this.menus.clear();
+    this.lifetime.abort(); this.sources.close(); this.menus.clear(); this.notificationSources.clear();
     await Promise.all([this.interactions.close(), this.streaming.close(), this.outbox.close()]);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {

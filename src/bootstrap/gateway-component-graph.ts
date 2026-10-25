@@ -138,6 +138,7 @@ import {
 import {
   canReviewConversationHook,
   canPreserveWeixinHookReviewText,
+  canPreserveQqHookReviewText,
   formatProviderIdleReleaseNotice,
   type SurfaceAdapter,
   type SurfaceDeliverySource,
@@ -845,6 +846,7 @@ export abstract class GatewayComponentGraph {
       },
       (surface, hook) => {
         if (surface === "weixin") return canReviewConversationHook(hook, canPreserveWeixinHookReviewText);
+        if (surface === "qq") return canReviewConversationHook(hook, canPreserveQqHookReviewText);
         if (surface === "feishu" || surface === "telegram") return canReviewConversationHook(hook, () => true);
         return false;
       },
@@ -1965,11 +1967,15 @@ export abstract class GatewayComponentGraph {
     const value = JSON.parse(owner) as { version?: unknown; kind?: unknown; identity?: unknown; source?: SurfaceDeliverySource | null };
     const source = value?.source;
     if (value?.version !== 3 || value.kind !== "qq-live" || typeof value.identity !== "string" || !source
-      || ![source.generation, source.sourceToken, source.accountId, source.conversationId, source.threadId, source.turnId]
+      || ![source.generation, source.sourceToken, source.accountId, source.conversationId, source.threadId]
         .every(field => typeof field === "string" && field.length > 0 && Buffer.byteLength(field) <= 512)
       || source.accountId !== event.target.accountId || source.conversationId !== event.target.conversationId
-      || !("threadId" in event) || event.threadId !== source.threadId
-      || !("turnId" in event) || event.turnId !== source.turnId) return undefined;
+      || !("threadId" in event) || event.threadId !== source.threadId) return undefined;
+    if (source.kind === "notification") {
+      if (source.eventType !== "mcp.oauth.completed" || event.type !== source.eventType
+        || source.serverName !== event.name) return undefined;
+    } else if (source.kind !== undefined || typeof source.turnId !== "string" || !source.turnId
+      || Buffer.byteLength(source.turnId) > 512 || !("turnId" in event) || event.turnId !== source.turnId) return undefined;
     return { identity: value.identity, source: Object.freeze({ ...source }) };
   }
 

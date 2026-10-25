@@ -3,6 +3,7 @@ import {
   fastServiceTierId,
   modelSelectionSnapshot,
   parseThreadRevertOperation,
+  parseMcpOperation,
   ultrafastServiceTierId,
   type ConversationCommandExecutor,
   type ConversationCommandResult,
@@ -13,12 +14,13 @@ import { conversationTargetKey, UserFacingError, type ConversationTarget } from 
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatServiceTierSetting } from "../provider-format.js";
+import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import { formatQqLiteralDetails } from "./interactions.js";
 import { qqMenuButton, renderQqCommandMenu, type QqMenuButton } from "./command-menu.js";
 import type { QqCommandKeyboard } from "./protocol.js";
 import { QqProtocolError } from "./protocol.js";
 import { planText } from "./outbox.js";
-import { isQqExtensionQuery, renderQqExtensionQuery, type QqExtensionChoice, type QqExtensionView } from "./extension-queries.js";
+import { isQqExtensionOperation, renderQqExtensionCommand, type QqExtensionChoice, type QqExtensionView } from "./extension-commands.js";
 
 export interface QqMenuPanel {
   content: string;
@@ -49,6 +51,8 @@ type MenuAction =
   | { kind: "auto-review"; threadId: string; enabled: boolean }
   | { kind: "goal-clear"; threadId: string }
   | { kind: "extension-query"; choice: QqExtensionChoice }
+  | { kind: "hook"; input: string }
+  | { kind: "hook-confirm"; token: string }
   | { kind: "workspace-page"; page: number }
   | { kind: "model-page"; page: number; view: ModelView; snapshot: ModelSelectionSnapshot }
   | { kind: "sessions-page"; page: number; filters: string; archived: boolean };
@@ -67,6 +71,7 @@ interface MenuContext {
   selectionScope?: string;
   queryScope?: string;
   revertSignal?: AbortSignal;
+  hookSignal?: AbortSignal;
 }
 
 interface Selection extends MenuContext { action: MenuAction | RevertAction; ready: boolean }
@@ -80,6 +85,7 @@ const MENU_LIFETIME_MS = 600_000;
 export class QqCommandMenuController {
   private readonly selections = new Map<string, Selection>();
   private readonly revertScopes = new Map<string, AbortController>();
+  private readonly hookScopes = new Map<string, AbortController>();
   private generation = 0;
 
   constructor(private readonly options: Options) {}
@@ -88,6 +94,8 @@ export class QqCommandMenuController {
     this.selections.clear();
     for (const controller of this.revertScopes.values()) controller.abort();
     this.revertScopes.clear();
+    for (const controller of this.hookScopes.values()) controller.abort();
+    this.hookScopes.clear();
     this.generation += 1;
   }
 
@@ -96,11 +104,12 @@ export class QqCommandMenuController {
     const context = this.context(target, actorId);
     if (!input) return this.panel(context, renderQqCommandMenu());
     if (input === "extensions") return this.panel(context, {
-      content: "# 扩展查询\n查看当前可用能力与诊断。任务调用、MCP 登录/重载及 Hook 写操作尚未开放。",
+      content: "# 扩展管理\n查看能力与诊断，管理 MCP 连接及 Hook。Hook 写入须完整预览后确认；扩展任务调用尚未开放。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("skill", "技能列表", "/skill"), qqMenuButton("agents", "代理角色", "/agents"), qqMenuButton("plugin", "插件列表", "/plugin")] },
         { buttons: [qqMenuButton("mcp", "MCP 列表", "/mcp"), qqMenuButton("mcphealth", "MCP 健康", "/mcp health"), qqMenuButton("pluginhealth", "插件健康", "/plugin health")] },
         { buttons: [qqMenuButton("hooks", "Hook 列表", "/hooks"), qqMenuButton("release", "占用诊断", "/release"), homeButton()] },
+        { buttons: [qqMenuButton("mcpreload", "重载 MCP", "/mcp reload")] },
       ] } },
     });
     if (input === "settings") return this.panel(context, {
@@ -133,7 +142,7 @@ export class QqCommandMenuController {
   }
 
   fromResult(target: ConversationTarget, actorId: string, result: ConversationCommandResult): QqMenuPanel | undefined {
-    const extension = renderQqExtensionQuery(result);
+    const extension = renderQqExtensionCommand(result);
     if (extension) return this.extensionPanel({ ...this.context(target, actorId), queryScope: this.options.queryScope(target) }, extension);
     if (result.kind !== "workspaces" && result.kind !== "models" && result.kind !== "sessions" && result.kind !== "auto-review" && result.kind !== "goal") return undefined;
     const context = this.context(target, actorId);
@@ -163,7 +172,7 @@ export class QqCommandMenuController {
   }
 
   private current(context: MenuContext, workspaceOnly = false): boolean {
-    return !this.options.signal.aborted && !context.revertSignal?.aborted && context.generation === this.generation
+    return !this.options.signal.aborted && !context.revertSignal?.aborted && !context.hookSignal?.aborted && context.generation === this.generation
       && performance.now() < context.expiresAt && this.options.allowed(context.target, context.actorId)
       && (context.queryScope === undefined || this.options.queryScope(context.target) === context.queryScope)
       && (workspaceOnly ? this.options.workspaceScope(context.target) === context.workspaceScope
@@ -184,7 +193,7 @@ export class QqCommandMenuController {
     this.assertCurrent(context);
     while (this.selections.size >= MAX_SELECTIONS) this.selections.delete(this.selections.keys().next().value!);
     const token = randomBytes(12).toString("hex");
-    this.selections.set(token, { ...context, action, ready: !["revert-confirm", "auto-review", "goal-clear"].includes(action.kind) });
+    this.selections.set(token, { ...context, action, ready: !["revert-confirm", "hook-confirm", "auto-review", "goal-clear"].includes(action.kind) });
     return qqMenuButton(token, bounded(label, 10), `/help pick ${token}`);
   }
 
@@ -197,14 +206,22 @@ export class QqCommandMenuController {
     this.selections.delete(token);
     const { action } = selection;
     switch (action.kind) {
+      case "hook": return this.hookResult(selection, await this.options.commands.execute(selection.target, "hooks", action.input, selection.actorId, () => this.assertCurrent(selection)));
+      case "hook-confirm": {
+        const result = await this.options.commands.execute(selection.target, "hooks", `confirm ${action.token}`, selection.actorId, () => this.assertCurrent(selection));
+        return this.hookResult(selection, result);
+      }
       case "extension-query": {
         const choice = action.choice;
-        if (!isQqExtensionQuery(choice.command, choice.input)) throw unsupported();
-        const result = await this.options.commands.execute(selection.target, choice.command, choice.input, selection.actorId, () => this.assertCurrent(selection));
+        if (!isQqExtensionOperation(choice.command, choice.input)) throw unsupported();
+        const operation = choice.command === "mcp" && choice.input ? parseMcpOperation(choice.input) : undefined;
+        const result = operation?.type === "login" && choice.expectedName !== undefined
+          ? await this.options.commands.selectMcpLogin(selection.target, operation.selector, choice.expectedName, selection.actorId, () => this.assertCurrent(selection))
+          : await this.options.commands.execute(selection.target, choice.command, choice.input, selection.actorId, () => this.assertCurrent(selection));
         this.assertCurrent(selection);
         if (choice.expectedName !== undefined && (result.kind === "mcp-detail" ? result.server.name
-          : result.kind === "plugin-detail" ? result.plugin.id : undefined) !== choice.expectedName) throw expired();
-        const view = renderQqExtensionQuery(result, choice.page);
+          : result.kind === "plugin-detail" ? result.plugin.id : result.kind === "mcp-login" ? result.login.server : undefined) !== choice.expectedName) throw expired();
+        const view = renderQqExtensionCommand(result, choice.page);
         if (!view) throw unsupported();
         return this.extensionPanel(selection, view);
       }
@@ -289,9 +306,12 @@ export class QqCommandMenuController {
 
   private extensionPanel(context: MenuContext, view: QqExtensionView): QqMenuPanel {
     const rows = buttonRows(view.choices.map(choice => this.button(context, choice.label, { kind: "extension-query", choice })));
-    rows.push({ buttons: [qqMenuButton("extensions", "扩展查询", "/help extensions"), homeButton()] });
+    const navigation: QqMenuButton[] = [qqMenuButton("extensions", "扩展管理", "/help extensions"), homeButton()];
+    if (view.authorizationUrl) navigation.unshift({ id: "oauth-url", render_data: { label: "浏览器授权", visited_label: "已打开", style: 0 },
+      action: { type: 0, permission: { type: 2 }, data: view.authorizationUrl } });
+    rows.push({ buttons: navigation });
     if (rows.length > 5) throw unsupported();
-    const panel = this.panel(context, { content: "以上为查询结果；本面板不启动任务或修改扩展配置。", keyboard: { content: { rows } } });
+    const panel = this.panel(context, { content: "可继续选择操作；登录需要在浏览器完成授权，重载结果请用 MCP 健康核对。", keyboard: { content: { rows } } });
     const detail = formatQqLiteralDetails(view.detail);
     try {
       if (planText({ mode: "active", recipient: context.actorId, content: detail }).length > 7) throw new QqProtocolError("message", "invalid-input");
@@ -307,6 +327,58 @@ export class QqCommandMenuController {
     this.revertScopes.get(key)?.abort();
     this.revertScopes.delete(key);
     this.clearRevertSelections(target);
+  }
+
+  cancelManagement(target: ConversationTarget): void {
+    const key = conversationTargetKey(target);
+    this.hookScopes.get(key)?.abort();
+    this.hookScopes.delete(key);
+    for (const [token, value] of this.selections) if ((value.action.kind === "hook" || value.action.kind === "hook-confirm")
+      && conversationTargetKey(value.target) === key) this.selections.delete(token);
+  }
+
+  async hooks(target: ConversationTarget, actorId: string, input: string): Promise<QqMenuPanel> {
+    const value = input.trim();
+    if (!value || /^page\s+[1-9]\d*$/u.test(value)) this.cancelManagement(target);
+    const key = conversationTargetKey(target);
+    let controller = this.hookScopes.get(key);
+    if (!controller) {
+      while (this.hookScopes.size >= MAX_SELECTIONS) {
+        const oldest = this.hookScopes.keys().next().value!;
+        this.hookScopes.get(oldest)!.abort(); this.hookScopes.delete(oldest);
+      }
+      controller = new AbortController(); this.hookScopes.set(key, controller);
+    }
+    const context = { ...this.context(target, actorId), hookSignal: controller.signal, queryScope: this.options.queryScope(target) };
+    const confirm = /^confirm\s+([a-f0-9]{32})$/u.exec(value);
+    if (confirm) {
+      const entry = [...this.selections.entries()].find(([, selection]) => selection.action.kind === "hook-confirm"
+        && selection.action.token === confirm[1] && selection.actorId === actorId && conversationTargetKey(selection.target) === key);
+      if (!entry) throw expired();
+      return this.pick(context, entry[0]);
+    }
+    if (/^confirm(?:\s|$)/u.test(value)) throw expired();
+    return this.hookResult(context, await this.options.commands.execute(target, "hooks", value, actorId, () => this.assertCurrent(context)));
+  }
+
+  private hookResult(context: MenuContext, result: ConversationCommandResult): QqMenuPanel {
+    this.assertCurrent(context);
+    if (result.kind !== "hooks") throw unsupported();
+    const buttons = hookCommandChoices(result.view).map(choice => this.button(context, choice.label,
+      choice.input.startsWith("confirm ") ? { kind: "hook-confirm", token: choice.input.slice(8) } : { kind: "hook", input: choice.input }));
+    const rows = buttonRows(buttons);
+    rows.push({ buttons: [qqMenuButton("extensions", "扩展管理", "/help extensions"), homeButton()] });
+    if (rows.length > 5) throw unsupported();
+    // Hook review fields must never acquire Markdown semantics, even inside a fence.
+    const detail = formatQqLiteralDetails(formatConversationHooks(result.view, true));
+    try {
+      if (planText({ mode: "active", recipient: context.actorId, content: detail }).length > 7) throw new QqProtocolError("message", "invalid-input");
+    } catch (error) {
+      if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
+      throw new UserFacingError("hooks.local-review-required", "Hook 详情超出完整展示预算");
+    }
+    return { ...this.panel(context, { content: "核对上方完整 Hook 信息后操作。确认仅对本次预览有效；停止、切换或重启后失效。", keyboard: { content: { rows } } }),
+      detail, delivered: () => this.activate(context, buttons) };
   }
 
   private clearRevertSelections(target: ConversationTarget): void {
