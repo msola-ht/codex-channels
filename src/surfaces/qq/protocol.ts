@@ -68,6 +68,10 @@ export interface QqStreamFrame {
   contentType: "text" | "markdown";
 }
 export const QQ_STREAM_BYTES = 16_000;
+export interface QqStreamResult {
+  messageId: string;
+  remainingCharacters?: number;
+}
 /** Local complete-result file budget, below QQ's documented direct-upload limit. */
 export const QQ_RESULT_FILE_BYTES = 256 * 1024;
 /** Conservative local binary-upload budget; QQ documents direct uploads within 5M. */
@@ -318,7 +322,7 @@ export class QqProtocolClient {
     }, context);
   }
 
-  async sendStream(input: QqStreamFrame, context: QqTextSendContext): Promise<{ messageId: string }> {
+  async sendStream(input: QqStreamFrame, context: QqTextSendContext): Promise<QqStreamResult> {
     return this.sendPlan(() => {
       if (!record(input) || !identifier(input.recipient) || !identifier(input.messageId)
         || typeof input.content !== "string" || !input.content.trim() || !wellFormed(input.content)
@@ -340,7 +344,7 @@ export class QqProtocolClient {
           input_state: input.finished ? 10 : 1, index: input.index, msg_id: input.messageId, msg_seq: 2,
           ...(input.streamId ? { stream_msg_id: input.streamId } : {}) },
         deadline: performance.now() + QQ_PASSIVE_WINDOW_MS - age };
-    }, context);
+    }, context, undefined, true);
   }
 
   async sendResultFile(input: { recipient: QqRecipient; content: string }, context: QqTextSendContext): Promise<{ messageId: string }> {
@@ -577,7 +581,7 @@ export class QqProtocolClient {
     }
   }
 
-  private async sendPlan(makePlan: () => { path: string; body: Record<string, unknown>; deadline?: number }, context: QqTextSendContext, onDispatch?: () => void): Promise<{ messageId: string }> {
+  private async sendPlan(makePlan: () => { path: string; body: Record<string, unknown>; deadline?: number }, context: QqTextSendContext, onDispatch?: () => void, stream = false): Promise<QqStreamResult> {
     let attempted = false;
     try {
       const plan = makePlan();
@@ -616,7 +620,13 @@ export class QqProtocolClient {
           attempted = true;
           onDispatch?.();
         });
-        return { messageId: data.id as string }; // readTextResponse validates the ID before returning.
+        // An invalid resource hint cannot be interpreted as unlimited capacity.
+        const remaining = stream ? data.remain_msg_len : undefined;
+        if (remaining !== undefined && (typeof remaining !== "number" || !Number.isSafeInteger(remaining) || remaining < 0)) {
+          throw new QqProtocolError("message", "invalid-response");
+        }
+        return { messageId: data.id as string,
+          ...(remaining === undefined ? {} : { remainingCharacters: remaining }) }; // readTextResponse validates the ID before returning.
       });
     } catch (error) {
       const failure = error instanceof QqProtocolError ? error : new QqProtocolError("message", "invalid-input");
@@ -899,7 +909,7 @@ async function readTextResponse(response: Response, signal: AbortSignal): Promis
     throw new QqProtocolError("message", "invalid-response", response.status, code, trace);
   }
   signal.throwIfAborted();
-  return { id: data.id };
+  return { id: data.id, ...(Object.hasOwn(data, "remain_msg_len") ? { remain_msg_len: data.remain_msg_len } : {}) };
 }
 
 function record(value: unknown): value is Record<string, unknown> {

@@ -11,7 +11,7 @@ export class QqSendBudget {
   private readonly turns = new Map<string, { text: number; status: number; progress: number; until: number }>();
 
   reserve(destination: QqRecipient, parts: number, scope?: { key: string; status: boolean; progress?: boolean } | "startup" | "interaction", planTimeoutMs = 45_000): {
-    runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
+    runPart<T extends { messageId: string }>(signal: AbortSignal, send: () => Promise<T>): Promise<T>;
   } {
     const recipient = qqRecipientKey(destination);
     if (planTimeoutMs !== 45_000 && planTimeoutMs !== 120_000) throw new QqProtocolError("message", "invalid-input");

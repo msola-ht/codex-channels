@@ -3,6 +3,7 @@ import { parseScheduledTaskOperation, type ConversationCommandExecutor, type Con
   type ScheduledTaskConfirmation } from "../../application/index.js";
 import { conversationTargetKey, UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
+import { escapeLifecycleLiteral as markdownLiteral } from "../lifecycle-presentation.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { formatConversationScheduledConfirmation, formatConversationScheduledTasks,
   formatConversationScheduledRuns, formatScheduledTaskStatusLabel, formatSchedule, formatScheduledAt } from "../conversation-scheduled-task-command-format.js";
@@ -210,10 +211,6 @@ export class QqScheduleMenu {
     if (!text) throw new UserFacingError("scheduled-task.state.invalid", "计划任务没有可交付结果。");
     return this.panel(context, "计划任务操作回执", [], text);
   }
-}
-
-function markdownLiteral(value: string): string {
-  return value.replace(/[\\`*_{}[\]()#+.!|>~<-]/gu, "\\$&");
 }
 
 function shortLabel(value: string): string {

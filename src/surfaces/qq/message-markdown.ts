@@ -1,4 +1,5 @@
 import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
+import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
 import { qqBodyMarkdownPrefix } from "./body-markdown.js";
 import { QQ_BODY_MARKDOWN_PART_BYTES, QQ_BODY_MARKDOWN_PART_CHARACTERS, QQ_TEXT_PART_BYTES, QqProtocolError, type QqTextMessage } from "./protocol.js";
 
@@ -57,23 +58,30 @@ export function planQqBodyMarkdown(input: QqTextMessage, markdownStart = 0):
   if (input.mode !== "active" || !Number.isSafeInteger(markdownStart)
     || markdownStart < 0 || markdownStart > input.content.length) return undefined;
   if (markdownStart === 0 && Array.from(input.content).length <= QQ_BODY_MARKDOWN_PART_CHARACTERS) {
-    const complete = planQqMessageMarkdown(input, QQ_BODY_MARKDOWN_PART_BYTES);
+    const content = qqBodyMarkdownText(input.content);
+    const complete = Array.from(content).length <= QQ_BODY_MARKDOWN_PART_CHARACTERS
+      ? planQqMessageMarkdown({ ...input, content }, QQ_BODY_MARKDOWN_PART_BYTES) : undefined;
     if (complete) return complete.map(message => ({ message, markdown: true }));
   }
   const markdownBudget = QQ_BODY_MARKDOWN_PART_CHARACTERS - Array.from("**1/8**\n").length;
   const textBudget = QQ_TEXT_PART_BYTES - Buffer.byteLength("[1/8]\n");
-  const blocks = [{ text: input.content.slice(0, markdownStart), closed: false }, ...markdownBlocks(input.content.slice(markdownStart))];
+  const body = input.content.slice(markdownStart);
+  const originalBlocks = markdownBlocks(body);
+  const displayBlocks = markdownBlocks(qqBodyMarkdownText(body));
+  const blocks = [{ text: input.content.slice(0, markdownStart), closed: false, candidate: input.content.slice(0, markdownStart) },
+    ...originalBlocks.map((block, index) => ({ ...block,
+      candidate: displayBlocks.length === originalBlocks.length ? displayBlocks[index]!.text : block.text }))];
   // Markdown counts code points; literal text retains its UTF-8 byte budget.
   const chunks: { content: string; size: number; markdown: boolean }[] = [];
-  for (const { text: block, closed } of blocks) {
+  for (const { text: block, closed, candidate } of blocks) {
     if (!block) continue;
-    const markdown = closed && !/[\p{Cf}\p{Cc}]/u.test(block.replace(/\n/gu, ""))
-      && qqBodyMarkdownPrefix(block, true) === block && Array.from(block).length <= markdownBudget;
+    const markdown = closed && !/[\p{Cf}\p{Cc}]/u.test(candidate.replace(/\n/gu, ""))
+      && qqBodyMarkdownPrefix(candidate, true) === candidate && Array.from(candidate).length <= markdownBudget;
     if (markdown) {
       const last = chunks.at(-1);
-      const size = Array.from(block).length;
-      if (last?.markdown && last.size + size <= markdownBudget) { last.content += block; last.size += size; }
-      else chunks.push({ content: block, size, markdown: true });
+      const size = Array.from(candidate).length;
+      if (last?.markdown && last.size + size <= markdownBudget) { last.content += candidate; last.size += size; }
+      else chunks.push({ content: candidate, size, markdown: true });
       if (chunks.length > 8) return undefined;
       continue;
     }
@@ -93,6 +101,29 @@ export function planQqBodyMarkdown(input: QqTextMessage, markdownStart = 0):
     ...input,
     content: chunks.length === 1 ? chunk.content : `${chunk.markdown ? `**${index + 1}/${chunks.length}**` : `[${index + 1}/${chunks.length}]`}\n${chunk.content}`,
   } }));
+}
+
+/** Completed standalone local references are display text, never upload requests.
+ * Keep the authoritative body and stream offsets unchanged; code examples and
+ * ambiguous syntax retain the existing literal fallback. */
+export function qqBodyMarkdownText(text: string): string {
+  let fence: MarkdownFence | undefined;
+  let inlineTicks = 0;
+  return text.split("\n").map(line => {
+    const previous = fence;
+    fence = advanceMarkdownFence(fence, line);
+    if (previous || fence) { inlineTicks = 0; return line; }
+    const insideCode = inlineTicks > 0;
+    for (const run of line.matchAll(/`+/gu)) {
+      if (inlineTicks === 0) inlineTicks = run[0].length;
+      else if (inlineTicks === run[0].length) inlineTicks = 0;
+    }
+    if (insideCode || inlineTicks > 0 || /^(?: {4}|\t)/u.test(line)) return line;
+    const match = /^([^`[\]\\<>!]*?)(!?)\[([^`[\]\\<>\p{Cc}\p{Cf}]+)\]\((\/(?!\/)[^`[\]()\\<>\p{Cc}\p{Cf}]+)\)[ \t]*$/u.exec(line);
+    if (!match) return line;
+    const [, prefix, image, label, path] = match;
+    return `${prefix}${image ? "本地图片：" : ""}${escapeLifecycleLiteral(label!)} — \`${path}\``;
+  }).join("\n");
 }
 
 function markdownBlocks(text: string): { text: string; closed: boolean }[] {

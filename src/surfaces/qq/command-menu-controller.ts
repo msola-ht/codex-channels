@@ -909,7 +909,7 @@ function bounded(value: string, maximum: number): string {
 function markdown(value: string, maximumBytes: number): string {
   let output = "";
   for (const character of clean(value)) {
-    const escaped = /[\\`*_{}[\]()#+.!|>~<]/u.test(character) ? `\\${character}` : character;
+    const escaped = escapeLifecycleLiteral(character);
     if (Buffer.byteLength(output + escaped, "utf8") > maximumBytes - 3) return `${output}…`;
     output += escaped;
   }

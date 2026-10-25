@@ -12,6 +12,7 @@ import {
 import { createPlanPresentation, PlanProgressTracker } from "../plan-presentation.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
+import { qqLiteralMarkdown } from "./message-markdown.js";
 
 export type QqTaskProgressEvent = Extract<OutputEvent, {
   type: "turn.retry" | "turn.reasoning" | "plan.updated" | "subagent.spawned"
@@ -303,7 +304,7 @@ export class QqTaskProgress {
       case "subagent.spawned": return [presentLifecycle(createSubagentStartedPresentation(event))];
       case "subagent.contacted": return [presentLifecycle(createSubagentContactedPresentation(event))];
       case "subagent.completed": return [presentLifecycle(createSubagentCompletedPresentation(event, this.options.debugEnabled))];
-      case "operation.updated": return [present(formatOperation(event.operation, this.options.operationUpdates))];
+      case "operation.updated": return [presentOperation(event.operation, this.options.operationUpdates)];
       case "turn.retry":
       case "plan.updated":
       case "turn.reasoning": return [];
@@ -376,18 +377,23 @@ function escapeLifecycleField(field: LifecyclePresentationField): LifecyclePrese
   };
 }
 
-function present(text: string): Presentation {
-  const [title = "", ...lines] = text.split("\n");
-  return { text, markdown: [`**${escapeLifecycleLiteral(title)}**`, ...lines.map(escapeLifecycleLiteral)].join("\n") };
-}
-
-function formatOperation(operation: OperationUpdate, display: OperationUpdateDisplay): string {
+function presentOperation(operation: OperationUpdate, display: OperationUpdateDisplay): Presentation {
   const metadata = operationMetadata(operation);
   const detail = operation.detail === undefined ? "" : display === "compact"
     ? compactOperationDetail(operation.detail) : redactOperationDetail(operation.detail);
-  return [
-    `${operationTitle(operation)} · ${operationStatus(operation.status)}`,
+  const title = `${operationTitle(operation)} · ${operationStatus(operation.status)}`;
+  const text = [
+    title,
     ...(metadata.length ? [metadata.join(" · ")] : []),
     ...(detail ? ["", detail] : []),
   ].join("\n");
+  // Match Feishu's emphasis/code hierarchy, while QQ keeps its own safe
+  // literal candidate and the original plain fallback for unsupported syntax.
+  const code = display === "compact" && !detail.includes("`")
+    ? `\`${detail}\`` : qqLiteralMarkdown(detail);
+  const markdown = [
+    `**${escapeLifecycleLiteral(title)}**${metadata.length ? ` · ${metadata.map(escapeLifecycleLiteral).join(" · ")}` : ""}`,
+    ...(detail ? ["", code ?? escapeLifecycleLiteral(detail)] : []),
+  ].join("\n");
+  return { text, markdown };
 }

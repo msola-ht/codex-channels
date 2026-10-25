@@ -5,7 +5,7 @@ import { QQ_PASSIVE_WINDOW_MS, QQ_STREAM_BYTES, QqProtocolError, QqTextSendError
 import type { QqTaskSources, QqTaskSourceReference } from "./task-sources.js";
 import type { QqSendBudget } from "./send-budget.js";
 import { qqBodyMarkdownPrefix } from "./body-markdown.js";
-import { qqBodyMarkdownRestart } from "./message-markdown.js";
+import { qqBodyMarkdownRestart, qqBodyMarkdownText } from "./message-markdown.js";
 
 type Body = Extract<OutputEvent, { type: "text.delta" | "text.completed" }>;
 interface Stream {
@@ -28,6 +28,7 @@ interface Stream {
   anchor?: { messageId: string; sourceTimestampMs: number; signal: AbortSignal };
   deadline?: number;
   nextUpdateAt?: number;
+  remainingCharacters?: number | undefined;
 }
 
 /** Disposable previews. Authoritative full Items still enter the shared delivery journal. */
@@ -98,33 +99,38 @@ export class QqBodyStreaming {
     try {
       await stream.tail;
       if (!stream.attempted) return { kind: "ordinary" };
+      const candidate = qqBodyMarkdownText(event.text);
+      // Only the final unsent suffix may change representation. Never rewrite
+      // a prefix already confirmed by replace-stream delivery.
+      const text = candidate.startsWith(stream.sent) ? candidate : event.text;
       // A prior preview is already externally visible or uncertain, even if the final send is never attempted.
-      const continuation = stream.sealed || stream.limited || Buffer.byteLength(event.text) > QQ_STREAM_BYTES
+      const continuation = stream.sealed || stream.limited || Buffer.byteLength(text) > QQ_STREAM_BYTES
+        || !this.fitsRemaining(stream, text)
         || performance.now() >= (stream.deadline ?? 0) - 45_000
-        || qqBodyMarkdownPrefix(event.text, true).length !== event.text.length;
+        || qqBodyMarkdownPrefix(text, true).length !== text.length;
       const operation = continuation ? "qq-stream:prefix" : "qq-stream:complete";
       await checkpoint({ operation, state: "started" });
-      if (stream.failed || !stream.id || !event.text.startsWith(stream.sent)) {
+      if (stream.failed || !stream.id || !text.startsWith(stream.sent)) {
         throw new QqProtocolError("message", "invalid-response");
       }
       if (!stream.sealed) {
-        await this.send(stream, continuation ? stream.sent : event.text, true, bounded, authorized);
+        await this.send(stream, continuation ? stream.sent : text, true, bounded, authorized);
         stream.sealed = true;
       }
       await checkpoint({ operation, state: "confirmed",
         ...(stream.id.length <= 256 ? { messageId: stream.id } : {}) });
-      const suffix = event.text.slice(stream.sent.length);
+      const suffix = text.slice(stream.sent.length);
       if (!suffix) { this.confirmed(stream.index); return { kind: "complete" }; }
       // Never split a completed grapheme across the old bubble and the continuation.
       let boundary = false;
-      for (const segment of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(event.text)) {
+      for (const segment of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)) {
         if (segment.index < stream.sent.length) continue;
         boundary = segment.index === stream.sent.length;
         break;
       }
       if (!boundary) throw new QqProtocolError("message", "invalid-input");
       const marker = "正文续接：\n";
-      const restart = qqBodyMarkdownRestart(event.text, stream.sent.length);
+      const restart = qqBodyMarkdownRestart(text, stream.sent.length);
       return { kind: "continue", text: `${marker}${suffix}`,
         markdownStart: restart === stream.sent.length ? 0 : marker.length + restart - stream.sent.length };
     } finally {
@@ -181,11 +187,17 @@ export class QqBodyStreaming {
     if (stream.completed || stream.failed || performance.now() >= stream.deadline - 15_000) return;
     const text = qqBodyMarkdownPrefix(stream.text);
     if (!text.trim() || text === stream.sent) return;
+    if (!this.fitsRemaining(stream, text)) {
+      stream.limited = true;
+      await this.seal(stream, signal);
+      return;
+    }
     // A delta may split a UTF-16 surrogate pair; wait for the next delta instead of emitting invalid Unicode.
     if (/[\uD800-\uDFFF]/u.test(text)) return;
     await this.send(stream, text, false, signal, () => this.sources.isCurrent(stream.source));
     stream.nextUpdateAt = performance.now() + 1000;
-    this.scheduleSeal(stream, stream.limited || stream.index >= 120 ? 0 : Math.max(0, stream.deadline - performance.now() - 45_000));
+    this.scheduleSeal(stream, stream.limited || stream.remainingCharacters === 0 || stream.index >= 120
+      ? 0 : Math.max(0, stream.deadline - performance.now() - 45_000));
   }
 
   /** One owned boundary timer, only closes the already confirmed prefix; never emits newly buffered body. */
@@ -221,6 +233,7 @@ export class QqBodyStreaming {
       if (!this.sources.isCurrent(stream.source) || authorized() !== true) throw new QqProtocolError("message", "authorization");
       if (performance.now() >= stream.deadline!) throw new QqProtocolError("message", "expired");
       if (!content.startsWith(stream.sent)) throw new QqProtocolError("message", "invalid-input");
+      if (!this.fitsRemaining(stream, content)) throw new QqProtocolError("message", "invalid-input");
     };
     guard();
     const reservation = this.budget.reserve(stream.recipient, 1);
@@ -229,12 +242,23 @@ export class QqBodyStreaming {
         recipient: stream.recipient, messageId: anchor.messageId, sourceTimestampMs: anchor.sourceTimestampMs,
         content, contentType: "markdown", index: stream.index, ...(stream.id ? { streamId: stream.id } : {}), finished,
       }, { signal, beforeSend: guard }));
+      const remaining = stream.remainingCharacters === undefined ? undefined
+        : stream.remainingCharacters - Buffer.byteLength(content.slice(stream.sent.length));
+      stream.remainingCharacters = result.remainingCharacters === undefined ? remaining
+        : remaining === undefined ? result.remainingCharacters : Math.min(remaining, result.remainingCharacters);
       stream.attempted = true; stream.id = result.messageId; stream.sent = content; stream.index++;
       return result;
     } catch (error) {
       if (error instanceof QqTextSendError && error.outcome === "unknown") stream.attempted = true;
       throw error;
     }
+  }
+
+  private fitsRemaining(stream: Stream, content: string): boolean {
+    // Upstream does not define which character unit it counts. UTF-8 bytes
+    // conservatively bound the added text; the reported limit can only tighten.
+    return stream.remainingCharacters === undefined
+      || Buffer.byteLength(content.slice(stream.sent.length)) <= stream.remainingCharacters;
   }
 
   private key(event: Body): string {
