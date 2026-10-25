@@ -91,7 +91,6 @@ export interface WeixinInputAdapterOptions {
   onStopTimeout?(): void;
   closeTimeoutMs?: number;
   now?: () => number;
-  debugEnabled?: boolean;
   logger?: Pick<Logger, "debug" | "info" | "warn">;
 }
 
@@ -132,7 +131,6 @@ export class WeixinInputAdapter {
         ...(options.logger ? { logger: options.logger } : {}),
         pollingHealth: this.health,
         now: this.now,
-        debugEnabled: options.debugEnabled ?? false,
         ...(options.doctor === undefined
           ? {}
           : {

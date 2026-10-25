@@ -141,7 +141,7 @@ export interface StartupRuntimeInfo {
   nodeVersion: string;
   transport: string;
   codexUpstreamUserAgent: string | null;
-  debugEnabled?: boolean;
+  presentationDetail?: "basic" | "detailed";
   /** 官方主路由是否已有 Codex 鉴权；`undefined` 表示当前未使用官方主路由。 */
   officialOpenAiAuthenticated?: boolean;
   openAiConnectivity?:
@@ -217,7 +217,7 @@ export function createStartupPresentation(
         : []),
     ],
     sections: [
-      ...(runtime.debugEnabled === true
+      ...(runtime.presentationDetail === "detailed"
         ? [{
             title: "运行环境",
             fields: [
@@ -391,7 +391,7 @@ export function createSubagentContactedPresentation(
 
 export function createSubagentCompletedPresentation(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  debug = false,
+  detailed = false,
 ): LifecyclePresentation {
   const fields: LifecyclePresentationField[] = [];
   if (event.model) {
@@ -411,7 +411,7 @@ export function createSubagentCompletedPresentation(
   fields.push({
     title: "Token",
     value: formatObservedTotal(event),
-    fields: debug ? [
+    fields: detailed ? [
       ...(cachedInputTokens === null
         ? [{ label: "输入", value: formatTokenCount(event.inputTokens) }]
         : [
@@ -519,7 +519,7 @@ export function shouldHideTurnCompleted(
 
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  debug = false,
+  detailed = false,
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -715,7 +715,7 @@ export function createTurnCompletedPresentation(
     runFields.push({
       title: "Token",
       value: formatObservedTotal({ inputTokens, outputTokens }),
-      fields: debug ? [
+      fields: detailed ? [
         ...(cachedInputTokens === undefined
           ? [{ label: "输入", value: formatTokenCount(inputTokens) }]
           : [
@@ -758,7 +758,7 @@ export function createTurnCompletedPresentation(
       label: "上下文压缩",
       value: formatCompactMetricsValue(
         event.timing.compact,
-        { concise: !debug, currentModel: event.model },
+        { concise: !detailed, currentModel: event.model },
       ),
     });
   }
@@ -789,7 +789,7 @@ export function createTurnCompletedPresentation(
       {
         title: "Token",
         value: formatObservedTotal(task),
-        fields: debug ? [
+        fields: detailed ? [
           ...(task.cachedInputTokens === null
             ? [{ label: "输入", value: formatTokenCount(task.inputTokens) }]
             : [
@@ -857,7 +857,7 @@ export function createTurnCompletedPresentation(
   if (event.sessionAggregate?.compact) {
     sessionStatistics.push({
       label: "压缩请求",
-      value: formatCompactMetricsValue(event.sessionAggregate.compact, { concise: !debug, currentModel: event.model }),
+      value: formatCompactMetricsValue(event.sessionAggregate.compact, { concise: !detailed, currentModel: event.model }),
     });
   }
   sessionStatistics.push({

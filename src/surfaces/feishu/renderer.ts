@@ -151,7 +151,7 @@ export function renderFeishuUserFacingError(
 
 export function renderFeishuOutput(
   event: OutputEvent,
-  debug = false,
+  detailed = false,
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -204,11 +204,11 @@ export function renderFeishuOutput(
         createSubagentContactedPresentation(event),
       );
     case "subagent.completed":
-      return renderFeishuSubagentCompleted(event, debug);
+      return renderFeishuSubagentCompleted(event, detailed);
     case "turn.completed":
       return renderFeishuTurnCompleted(
         event,
-        debug,
+        detailed,
         autoCompactPercent,
         completion,
       );
@@ -243,16 +243,16 @@ export function renderFeishuOutput(
 
 function renderFeishuSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  debug = false,
+  detailed = false,
 ): string {
   return renderFeishuLifecyclePresentation(
-    createSubagentCompletedPresentation(event, debug),
+    createSubagentCompletedPresentation(event, detailed),
   );
 }
 
 function renderFeishuTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  debug = false,
+  detailed = false,
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -262,7 +262,7 @@ function renderFeishuTurnCompleted(
   return renderFeishuLifecyclePresentation(
     createTurnCompletedPresentation(
       event,
-      debug,
+      detailed,
       autoCompactPercent,
       mode,
     ),

@@ -76,7 +76,6 @@ export interface WeixinSurfaceOptions {
   audios?: WeixinAudioPort;
   videos?: WeixinVideoStore;
   startupNotification?: WeixinStartupNotification;
-  debugEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -146,7 +145,6 @@ export class WeixinSurface implements SurfaceAdapter {
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),
-        debugEnabled: options.debugEnabled ?? false,
         ...(options.replyContextPersistence === undefined
           ? {}
           : {
@@ -206,7 +204,6 @@ export class WeixinSurface implements SurfaceAdapter {
         ? {}
         : { actorRegistry: options.actorRegistry }),
       onFatal: options.onFatal,
-      debugEnabled: options.debugEnabled ?? false,
       ...(options.autoCompactPercent === undefined
         ? {}
         : { autoCompactPercent: options.autoCompactPercent }),

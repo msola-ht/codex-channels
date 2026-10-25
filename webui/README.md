@@ -11,7 +11,7 @@
 `codexc webui` 的本地指标与低风险设置前端。Vite + React 19 + TypeScript，UI 组件全部来自
 shadcn（`npx shadcn@latest add` 安装），业务层只做组件组合与数据编排。
 
-“消息渠道 → 消息展示”管理全局与五层范围显示。操作详情新增仅失败或拒绝；子代理显示支持显式开启、关闭与恢复缺省（开启），关闭同时隐藏生命周期与子代理工具操作；完成通知支持关闭成功通知、精简、详细及恢复缺省。界面分别展示存储覆盖、有效值及来源，微信范围仅提供完成通知。全局 `display.completion`、`display.subagents` 与范围修改复用确认令牌、配置修订、私有备份及读回事务；取消不写，缺省不物化。子代理读取区分有效 `subagentsEnabled` 与本层 `subagentsOverride`，中英文摘要覆盖失败档位和布尔值。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents，将全局及覆盖 failures 改为旧版支持值，并核对后续修改。源码尚未部署，真实平台显示仍待验收。
+“消息渠道 → 消息展示”管理全局与五层范围显示。操作详情新增仅失败或拒绝；子代理显示支持显式开启、关闭与恢复缺省（开启），关闭同时隐藏生命周期与子代理工具操作；完成通知支持关闭成功通知、精简、详细及恢复缺省。消息详情支持基础、详细及恢复缺省（基础），只控制启动运行环境与完成/子代理统计子项，独立于日志、调用采集、任务、审批及完成通知开关。界面分别展示存储覆盖、有效值及来源，微信范围支持完成通知和消息详情。全局 `display.completion`、`display.subagents`、`display.presentation-detail` 与范围修改复用确认令牌、配置修订、私有备份及读回事务；取消不写，缺省不物化。消息详情读取区分有效 `presentationDetail` 与本层 `presentationDetailOverride`，中英文摘要覆盖基础、详细、失败档位和布尔值。全局有效值改变且任一渠道启用时要求重启 Gateway，缺省基础和显式基础互换只 reload，范围数组整体保守判定。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/presentation_detail，将全局及覆盖 failures 改为旧版支持值，并核对后续修改。源码尚未部署，真实平台显示仍待验收。
 
 ## 开发
 

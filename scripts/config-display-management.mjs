@@ -6,9 +6,9 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { assertStateDatabaseSchema } from "../dist/storage/index.js";
 
-const fields = ["operation_updates", "subagents", "plan_updates", "reasoning", "completion"];
+const fields = ["operation_updates", "subagents", "plan_updates", "reasoning", "completion", "presentation_detail"];
 const selectorFields = ["surface", "account_id", "chat_kind", "chat_id"];
-function supportedFields(selector) { return selector.surface === "weixin" ? ["completion"] : fields; }
+function supportedFields(selector) { return selector.surface === "weixin" ? ["completion", "presentation_detail"] : fields; }
 
 function selectors(document, targets = []) {
   const result = [];
@@ -82,7 +82,7 @@ export function applyDisplayScopeSetting(document, input, configPath) {
   if (value.action === "inherit" && Object.hasOwn(value, "value")) throw invalidSetting("value", "invalid-input", "恢复继承不能包含值");
   const selector = value.selector;
   if (!selector || typeof selector !== "object" || Array.isArray(selector) || Object.keys(selector).some(field => !selectorFields.includes(field))) throw invalidSetting("selector", "invalid-input", "显示目标无效");
-  const parsed = messageDisplayOverrideSchema.safeParse({ ...selector, [value.field]: value.action === "set" ? value.value : value.field === "operation_updates" ? "compact" : value.field === "completion" ? "detailed" : false });
+  const parsed = messageDisplayOverrideSchema.safeParse({ ...selector, [value.field]: value.action === "set" ? value.value : value.field === "operation_updates" ? "compact" : value.field === "completion" ? "detailed" : value.field === "presentation_detail" ? "basic" : false });
   if (!parsed.success) throw invalidSetting("value", "invalid-input", "显示目标或字段值无效");
   const key = messageDisplaySelectorKey(selector);
   const display = document.display ?? {};

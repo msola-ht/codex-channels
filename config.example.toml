@@ -92,9 +92,12 @@ reasoning = false
 # 可选完成通知：off 仅隐藏新成功通知；brief 精简；detailed 详细（缺省，不自动写入）。
 # 失败、停止、缺少最终回答和已有 pending 保留；精简不代表正文已送达。
 # completion = "detailed"
+# 可选消息详情：basic 基础（缺省，不自动写入）；detailed 展开启动运行环境及完成/子代理统计子项。
+# 独立于日志等级和调用采集，不改变任务、审批或完成通知开关。
+# presentation_detail = "basic"
 # 可选范围覆盖，普通读取不会生成。通过 codexc config 的“范围显示覆盖”或 WebUI 管理。
 # 全局 → 渠道 → 账号 → 账号聊天类型 → 指定聊天，字段缺失继承，false/hidden 保留。
-# surface 支持 telegram、feishu、qq、weixin；微信仅允许 completion，chat_kind=group 仅 QQ。
+# surface 支持 telegram、feishu、qq、weixin；微信允许 completion/presentation_detail，chat_kind=group 仅 QQ。
 # account_id 使用 Gateway 账号标识：Telegram 为 default，飞书/QQ 为 AppID，微信为配置的 account_id。
 # [[display.overrides]]
 # surface = "qq"

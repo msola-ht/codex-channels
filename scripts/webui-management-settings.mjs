@@ -4,6 +4,7 @@ export const managedSettingKinds = new Set([
   "display.reasoning",
   "display.scope",
   "display.completion",
+  "display.presentation-detail",
   "display.subagents",
   "display.model-aliases",
   "system.approval-timeout",
@@ -28,6 +29,7 @@ export const managedSettingKinds = new Set([
 export const highRiskManagedSettingKinds = new Set([
   "display.scope",
   "display.completion",
+  "display.presentation-detail",
   "display.subagents",
   "system.official-tui-identity",
   "automation.scheduled-tasks",

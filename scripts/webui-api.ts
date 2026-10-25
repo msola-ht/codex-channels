@@ -564,7 +564,7 @@ export interface ManagementProvidersResponse {
 
 export interface ManagementSettingsResponse {
   revision: string
-  display: SettingsSummaryResponse["gateway"]["display"] & Pick<import("./config-management.mjs").GatewaySettings["display"], "scopes" | "targetsStatus" | "completion" | "completionOverride" | "subagentsOverride">
+  display: SettingsSummaryResponse["gateway"]["display"] & Pick<import("./config-management.mjs").GatewaySettings["display"], "scopes" | "targetsStatus" | "completion" | "completionOverride" | "subagentsOverride" | "presentationDetail" | "presentationDetailOverride">
   system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficInputItems" | "modelTrafficItemMaxBytes" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {

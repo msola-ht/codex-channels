@@ -37,7 +37,6 @@ export interface CreateWeixinSurfaceOptions {
   uploadsDirectory: string;
   videoDirectory?: string;
   startupNotification: WeixinStartupNotification;
-  debugEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -87,9 +86,6 @@ export function createWeixinSurface(
     ),
     startupNotification: options.startupNotification,
     ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
-    ...(options.debugEnabled === undefined
-      ? {}
-      : { debugEnabled: options.debugEnabled }),
     logger: options.logger,
     onFatal: (error) => options.onFatal(error),
   });

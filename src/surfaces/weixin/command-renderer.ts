@@ -96,7 +96,7 @@ export function renderWeixinIdentity(message: {
 
 export function renderWeixinTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  debug = false,
+  detailed = false,
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -106,7 +106,7 @@ export function renderWeixinTurnCompleted(
   return renderWeixinLifecyclePresentation(
     createTurnCompletedPresentation(
       event,
-      debug,
+      detailed,
       autoCompactPercent,
       mode,
     ),
@@ -115,10 +115,10 @@ export function renderWeixinTurnCompleted(
 
 export function renderWeixinSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  debug = false,
+  detailed = false,
 ): string {
   return renderWeixinLifecyclePresentation(
-    createSubagentCompletedPresentation(event, debug),
+    createSubagentCompletedPresentation(event, detailed),
   );
 }
 

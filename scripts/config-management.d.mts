@@ -11,8 +11,8 @@ export type GatewaySettingActivation =
 
 import type { ConfigActivationResult } from "./config-activation-result.mjs";
 import type { MessageDisplaySelector, MessageDisplayOverride, MessageDisplaySettings, MessageDisplaySource } from "../runtime/message-display-policy.mjs";
-export interface DisplayScopeState { id: string; selector: MessageDisplaySelector; writable: boolean; supportedFields: Array<"operation_updates" | "subagents" | "plan_updates" | "reasoning" | "completion">; override: Pick<MessageDisplayOverride, "operation_updates" | "subagents" | "plan_updates" | "reasoning" | "completion">; effective: MessageDisplaySettings; sources: Record<keyof MessageDisplaySettings, MessageDisplaySource> }
-export type DisplayScopeEdit = { selector: MessageDisplaySelector; field: "operation_updates"; action: "set"; value: "full" | "compact" | "failures" | "hidden" } | { selector: MessageDisplaySelector; field: "completion"; action: "set"; value: "off" | "brief" | "detailed" } | { selector: MessageDisplaySelector; field: "subagents" | "plan_updates" | "reasoning"; action: "set"; value: boolean } | { selector: MessageDisplaySelector; field: "operation_updates" | "subagents" | "plan_updates" | "reasoning" | "completion"; action: "inherit" };
+export interface DisplayScopeState { id: string; selector: MessageDisplaySelector; writable: boolean; supportedFields: Array<"operation_updates" | "subagents" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; override: Pick<MessageDisplayOverride, "operation_updates" | "subagents" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; effective: MessageDisplaySettings; sources: Record<keyof MessageDisplaySettings, MessageDisplaySource> }
+export type DisplayScopeEdit = { selector: MessageDisplaySelector; field: "operation_updates"; action: "set"; value: "full" | "compact" | "failures" | "hidden" } | { selector: MessageDisplaySelector; field: "completion"; action: "set"; value: "off" | "brief" | "detailed" } | { selector: MessageDisplaySelector; field: "presentation_detail"; action: "set"; value: "basic" | "detailed" } | { selector: MessageDisplaySelector; field: "subagents" | "plan_updates" | "reasoning"; action: "set"; value: boolean } | { selector: MessageDisplaySelector; field: "operation_updates" | "subagents" | "plan_updates" | "reasoning" | "completion" | "presentation_detail"; action: "inherit" };
 
 export class ConfigManagementError extends Error {
   readonly code: string;
@@ -30,6 +30,8 @@ export interface GatewaySettings {
     reasoningEnabled: boolean;
     completion: "off" | "brief" | "detailed";
     completionOverride: "off" | "brief" | "detailed" | null;
+    presentationDetail: "basic" | "detailed";
+    presentationDetailOverride: "basic" | "detailed" | null;
     modelAliases: Record<string, string>;
     scopes: DisplayScopeState[];
     targetsStatus: "not-needed" | "missing" | "available" | "unavailable";
@@ -97,6 +99,7 @@ export type GatewaySettingInput =
   | { kind: "display.plan-updates"; value: boolean }
   | { kind: "display.reasoning"; value: boolean }
   | { kind: "display.completion"; value: { action: "set"; value: "off" | "brief" | "detailed" } | { action: "inherit" } }
+  | { kind: "display.presentation-detail"; value: { action: "set"; value: "basic" | "detailed" } | { action: "inherit" } }
   | { kind: "display.model-aliases"; value: Record<string, string> }
   | { kind: "telegram.message-format"; value: "html" | "rich" }
   | { kind: "system.approval-timeout"; value: number }

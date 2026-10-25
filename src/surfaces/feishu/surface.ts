@@ -127,7 +127,6 @@ export interface FeishuSurfaceOptions {
   displaySettings?: import("../types.js").SurfaceMessageDisplaySettings;
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
-  debugEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -244,7 +243,6 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),
-        debugEnabled: options.debugEnabled ?? false,
         deliverIdleReleased: async (event, sendCard) => {
           const actorId = this.notificationActor(event.target);
           if (actorId === undefined) {
@@ -317,7 +315,6 @@ export class FeishuSurface implements SurfaceAdapter {
       this.interactions,
       {
         quietWindowMs: 0,
-        debugEnabled: options.debugEnabled ?? false,
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),

@@ -51,7 +51,6 @@ export interface QqMessageOptions {
   actors: ConversationActorRegistry;
   ownsThread(target: ConversationTarget, threadId: string): boolean;
   logger: Logger;
-  debugEnabled?: boolean;
   operationUpdateDisplay?: OperationUpdateDisplay;
   displaySettings?: import("../types.js").SurfaceMessageDisplaySettings;
   reasoningEnabled?: boolean;
@@ -105,8 +104,7 @@ export class QqMessages implements SurfaceOutputPort {
   constructor(private readonly options: QqMessageOptions, private readonly client: QqProtocolClient) {
     this.progress = new QqTaskProgress({ reasoningEnabled: options.reasoningEnabled ?? false,
       ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
-      planUpdatesEnabled: options.planUpdatesEnabled ?? true, operationUpdates: options.operationUpdateDisplay ?? "compact",
-      debugEnabled: options.debugEnabled ?? false });
+      planUpdatesEnabled: options.planUpdatesEnabled ?? true, operationUpdates: options.operationUpdateDisplay ?? "compact" });
     this.sources = new QqTaskSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.current(scope, threadId) });
     this.queueSources = new QqQueueSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.current(scope, threadId) });
     this.scheduledSources = new QqTaskSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.scheduledCurrent(scope, threadId) });
@@ -392,7 +390,7 @@ export class QqMessages implements SurfaceOutputPort {
     }
     const referenceMessageId = source ? this.sourceRegistry(source).replyReference(source) : undefined;
     const completion = event.type === "turn.completed"
-      ? renderQqTurnCompleted(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent, context?.completion ?? "detailed") : undefined;
+      ? renderQqTurnCompleted(event, this.displaySettings(event.target).presentationDetail === "detailed", this.options.autoCompactPercent, context?.completion ?? "detailed") : undefined;
     let text = event.type === "text.completed" ? event.text : completion!.text;
     let markdownStart: number | undefined;
     let checkpointFailed = false;
@@ -1135,6 +1133,7 @@ export class QqMessages implements SurfaceOutputPort {
       planUpdatesEnabled: this.options.planUpdatesEnabled ?? true,
       reasoningEnabled: this.options.reasoningEnabled ?? false,
       completion: "detailed" as const,
+      presentationDetail: "basic" as const,
       subagentsEnabled: true,
     };
   }

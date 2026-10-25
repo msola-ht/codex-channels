@@ -127,7 +127,6 @@ export class FeishuConversationAdapter {
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
       now?: () => number;
-      debugEnabled?: boolean;
     } = { quietWindowMs: 0 },
   ) {}
 

@@ -106,7 +106,6 @@ export interface FeishuOutboxOptions {
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
-  debugEnabled?: boolean;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -278,6 +277,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       planUpdatesEnabled: this.options.planUpdatesEnabled ?? false,
       reasoningEnabled: this.options.reasoningEnabled ?? true,
       completion: "detailed" as const,
+      presentationDetail: "basic" as const,
       subagentsEnabled: true,
     };
   }
@@ -532,7 +532,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     const rendered = renderFeishuOutput(
       event,
-      this.options.debugEnabled ?? false,
+      this.displaySettings(event.target.conversationId).presentationDetail === "detailed",
       this.options.autoCompactPercent,
     );
     if (rendered === null) {
@@ -608,7 +608,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ): void {
     const rendered = renderFeishuOutput(
       event,
-      this.options.debugEnabled ?? false,
+      this.displaySettings(event.target.conversationId).presentationDetail === "detailed",
       this.options.autoCompactPercent,
     );
     if (rendered === null) {
@@ -972,7 +972,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const prefix = `${key}\u0000`;
     for (const value of this.computerUseCards.keys()) if (value.startsWith(prefix)) this.computerUseCards.delete(value);
     this.flushOperationUpdates(chatId, event);
-    const completion = visible ? renderFeishuOutput(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent, mode) : null;
+    const completion = visible ? renderFeishuOutput(event, this.displaySettings(chatId).presentationDetail === "detailed", this.options.autoCompactPercent, mode) : null;
     let resolveStreams!: (failed: boolean) => void;
     const streamsDone = new Promise<boolean>(resolve => { resolveStreams = resolve; });
     let streamsSettled = false;

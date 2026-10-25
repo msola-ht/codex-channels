@@ -68,6 +68,8 @@ export function loadGatewaySettings(environment = process.env) {
       reasoningEnabled: display.reasoning,
       completion: display.completion ?? "detailed",
       completionOverride: display.completion ?? null,
+      presentationDetail: display.presentation_detail ?? "basic",
+      presentationDetailOverride: display.presentation_detail ?? null,
       subagentsEnabled: display.subagents ?? true,
       subagentsOverride: display.subagents ?? null,
       modelAliases: display.model_aliases ?? {},
@@ -329,6 +331,20 @@ function applySetting(document, input, configPath) {
       // Overrides are one shared runtime configuration unit, including retained
       // inactive targets. Match reload-classifier's conservative array boundary.
       return { ...result, activation: result.activation === "none" ? "none" : completionSettingActivation(document) };
+    }
+    case "display.presentation-detail": {
+      const edit = input.value;
+      const previous = document.display?.presentation_detail ?? "basic";
+      if (!edit || typeof edit !== "object" || Array.isArray(edit)
+        || Object.keys(edit).some(key => !["action", "value"].includes(key))
+        || !["set", "inherit"].includes(edit.action)
+        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择消息详情设置或恢复缺省");
+      if (edit.action === "set") {
+        const value = enumValue(edit.value, ["basic", "detailed"], "value", "消息详情");
+        document.display = { ...table(document.display), presentation_detail: value };
+      } else if (document.display !== undefined) delete document.display.presentation_detail;
+      const override = document.display?.presentation_detail ?? null;
+      return { value: { presentationDetail: override ?? "basic", presentationDetailOverride: override }, activation: previous === (override ?? "basic") ? "reload" : completionSettingActivation(document), backupRequired: true };
     }
     case "display.completion": {
       const edit = input.value;

@@ -117,12 +117,6 @@ export interface ConfiguredWorkspace {
 
 export type OperationUpdateDisplay = "full" | "compact" | "failures" | "hidden";
 
-export function isDebugLogLevel(
-  level: GatewayConfig["logLevel"],
-): boolean {
-  return level === "debug" || level === "trace";
-}
-
 export class ConfigurationError extends Error {}
 
 export interface RuntimeGatewayConfig {
@@ -333,6 +327,7 @@ function loadValidatedConfigDocument(
       plan_updates: raw.display.plan_updates,
       reasoning: raw.display.reasoning,
       ...(raw.display.completion === undefined ? {} : { completion: raw.display.completion }),
+      ...(raw.display.presentation_detail === undefined ? {} : { presentation_detail: raw.display.presentation_detail }),
       ...(raw.display.overrides === undefined ? {} : { overrides: raw.display.overrides }),
     },
     operationUpdateDisplay: raw.display.operation_updates,

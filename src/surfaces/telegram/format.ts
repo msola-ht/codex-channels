@@ -90,10 +90,10 @@ export function renderTelegramLifecyclePresentation(
 
 export function renderTelegramSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  debug = false,
+  detailed = false,
 ): string {
   return renderTelegramLifecyclePresentation(
-    createSubagentCompletedPresentation(event, debug),
+    createSubagentCompletedPresentation(event, detailed),
   );
 }
 

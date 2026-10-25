@@ -134,9 +134,9 @@ export interface TelegramSurfaceOptions {
   codexUpstreamUserAgent?: () => string | undefined;
   officialOpenAiAuthenticated?: () => boolean | undefined;
   openAiConnectivity?: () => NonNullable<StartupRuntimeInfo["openAiConnectivity"]>;
+  startupPresentationDetail?: (chatId: number) => "basic" | "detailed";
   inputQuietWindowMs?: number;
   now?: () => number;
-  debugEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -213,7 +213,6 @@ export class TelegramSurface {
     actorId: string;
     expiresAt: number;
   } & AutoReviewSelectionScope>();
-  private readonly debugEnabled: boolean;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
   private stopping = false;
@@ -268,7 +267,6 @@ export class TelegramSurface {
     });
     this.actorRegistry = options.actorRegistry;
     this.now = options.now ?? Date.now;
-    this.debugEnabled = options.debugEnabled ?? false;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = options.commands;
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
@@ -302,7 +300,6 @@ export class TelegramSurface {
       ...(options.autoCompactPercent === undefined
         ? {}
         : { autoCompactPercent: options.autoCompactPercent }),
-      debugEnabled: this.debugEnabled,
       deliverIdleReleased: (event, send) => this.deliverIdleReleased(event, send),
     });
     this.output = this.outbox;
@@ -359,7 +356,7 @@ export class TelegramSurface {
                 ...(options.openAiConnectivity
                   ? { openAiConnectivity: options.openAiConnectivity() }
                   : {}),
-                debugEnabled: this.debugEnabled,
+                presentationDetail: options.startupPresentationDetail?.(chatId) ?? "basic",
               }),
             });
           }

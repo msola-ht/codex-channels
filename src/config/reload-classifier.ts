@@ -105,9 +105,10 @@ function restartRequiredReasons(
     ...(displaySettingsAffectEnabledSurface(current) || displaySettingsAffectEnabledSurface(next)
       || current.weixin !== undefined || next.weixin !== undefined ? [
         [configChange("display.completion"), current.messageDisplay.completion ?? "detailed", next.messageDisplay.completion ?? "detailed"],
+        [configChange("display.presentation-detail"), current.messageDisplay.presentation_detail ?? "basic", next.messageDisplay.presentation_detail ?? "basic"],
         [configChange("display.overrides"), JSON.stringify(current.messageDisplay.overrides ?? []), JSON.stringify(next.messageDisplay.overrides ?? [])],
       ] as Array<[ConfigChange, unknown, unknown]> : []),
-    // 微信不消费过程显示字段；完成显示单独比较。
+    // 微信不消费过程显示字段；完成通知与消息详情在上方单独比较。
     ...(displaySettingsAffectEnabledSurface(current)
       || displaySettingsAffectEnabledSurface(next)
       ? [

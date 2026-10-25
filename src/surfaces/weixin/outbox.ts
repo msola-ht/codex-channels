@@ -87,7 +87,6 @@ export interface WeixinOutboxOptions {
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
-  debugEnabled?: boolean;
   onReplyContextInvalidated?: (
     target: ConversationTarget,
     expectedContextToken?: string,
@@ -369,7 +368,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return formatWeixinCommandText(
           renderWeixinTurnCompleted(
             event,
-            this.options.debugEnabled ?? false,
+            this.options.displaySettings?.(event.target).presentationDetail === "detailed",
             this.options.autoCompactPercent,
             completion ?? (this.liveCompletionDisplay(event) === "brief" ? "brief" : "detailed"),
           ),

@@ -124,7 +124,6 @@ export class WeixinConversationAdapter {
       pollingHealth?: { snapshot(): WeixinPollingHealthSnapshot };
       doctor?: WeixinDoctor;
       now?: () => number;
-      debugEnabled?: boolean;
       logger?: Pick<Logger, "warn">;
       isAllowed?: (target: ConversationTarget, actorId: string) => boolean;
     } = { quietWindowMs: 0 },

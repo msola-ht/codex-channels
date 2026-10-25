@@ -123,7 +123,6 @@ export interface TelegramOutboxOptions {
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
-  debugEnabled?: boolean;
 }
 
 export class TelegramOutbox {
@@ -326,6 +325,7 @@ export class TelegramOutbox {
       planUpdatesEnabled: this.options.planUpdatesEnabled ?? false,
       reasoningEnabled: this.options.reasoningEnabled ?? true,
       completion: "detailed" as const,
+      presentationDetail: "basic" as const,
       subagentsEnabled: true,
     };
   }
@@ -621,7 +621,7 @@ export class TelegramOutbox {
             chatId,
             renderTelegramSubagentCompleted(
               event,
-              this.options.debugEnabled ?? false,
+              this.displaySettings(chatId).presentationDetail === "detailed",
             ),
             undefined,
             true,
@@ -788,7 +788,7 @@ export class TelegramOutbox {
           }
         }
         if (visible) await this.sendPanel(chatId, renderTelegramLifecyclePresentation(
-          createTurnCompletedPresentation(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent, mode),
+          createTurnCompletedPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed", this.options.autoCompactPercent, mode),
         ), this.replyTargets.get(chatId, turnKey), true, signal);
       } finally { cleanup(); }
     }, true, { purpose: "turn-completion", settled: cleanup });

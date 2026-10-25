@@ -58,10 +58,10 @@ export function renderQqStartupNotification(
 
 export function renderQqTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  debug = false,
+  detailed = false,
   autoCompactPercent?: (provider: string | null | undefined, model: string | null | undefined) => number | null,
   mode: "brief" | "detailed" = "detailed",
 ): { text: string; markdown: string } {
-  const presentation = createTurnCompletedPresentation(event, debug, autoCompactPercent, mode);
+  const presentation = createTurnCompletedPresentation(event, detailed, autoCompactPercent, mode);
   return { text: renderPlainLifecyclePresentation(presentation), markdown: renderStructuredLifecyclePresentation(presentation) };
 }
