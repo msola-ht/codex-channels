@@ -18,7 +18,7 @@ const zh = {
     fieldSummary: "{field}：本层 {override}；有效 {effective}；来源 {source}",
     direct: "私聊", group: "群聊", readonly: "目标已停用或移除；仅可恢复继承。", empty: "没有可编辑的显示目标。", effective: "有效值：{value}；来源：{source}",
     hint: "按全局、渠道、账号、聊天类型、指定聊天逐字段继承。微信支持常规通知、完成通知和消息详情，QQ 群不支持流式显示；Telegram 与飞书仅支持私聊默认，精确聊天需有已确认目标。",
-    notice: "保存前创建私有配置备份；新增覆盖、subagents、streaming、commentary、routine_notifications、presentation_detail 与 failures 需新版 Gateway。保存后按提示激活；已入箱 pending 仍可能投递，重启恢复后不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，并将全局及覆盖 failures 改为旧版支持值；核对后续修改，勿直接覆盖配置。",
+    notice: "保存前创建私有配置备份；新增覆盖、subagents、streaming、commentary、routine_notifications、presentation_detail 与 detailed/failures 需新版 Gateway。保存后按提示激活；已入箱 pending 仍可能投递，重启恢复后不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，并将全局及覆盖 detailed/failures 改为旧版支持值；核对后续修改，勿直接覆盖配置。",
   },
   modelAddition: {
     title: "添加模型",
@@ -520,6 +520,7 @@ const zh = {
     "telegramFormat": "Telegram 消息格式",
     "richText": "富文本",
     "operationUpdates": "操作详情",
+    "operationUpdatesHint": "日常明细显示工具、目标、状态与耗时；正常详情折叠为最多 600 字符的单行摘要，超出时标明省略，失败或拒绝保留完整脱敏原因。完整档保留完整脱敏详情。微信不展示工具过程。",
     "full": "完整",
     "compact": "紧凑",
     "failures": "仅失败或拒绝",
@@ -1978,7 +1979,7 @@ const en: Messages = {
     fieldSummary: "{field}: stored {override}; effective {effective}; source {source}",
     direct: "Direct", group: "Group", readonly: "Target disabled or removed; only inheritance can be restored.", empty: "No editable display targets.", effective: "Effective: {value}; source: {source}",
     hint: "Each field inherits from global, channel, account, chat kind, then exact chat. WeChat supports routine notifications, completion notices, and presentation details; QQ groups do not support streaming display. Telegram and Feishu offer direct-chat defaults; exact chats require a confirmed target.",
-    notice: "Saving creates a private configuration backup; overrides, subagents, streaming, commentary, routine_notifications, presentation_detail, and failures require a newer Gateway. Activate as instructed after saving. Existing pending deliveries may still be sent; restored deliveries may use a different detailed or compact layout. Before downgrading, explicitly remove new overrides and global or scoped completion/subagents/streaming/commentary/routine_notifications/presentation_detail as required by the older version, and replace global or scoped failures with a supported value. Check subsequent edits; do not overwrite the configuration directly.",
+    notice: "Saving creates a private configuration backup; overrides, subagents, streaming, commentary, routine_notifications, presentation_detail, and detailed/failures require a newer Gateway. Activate as instructed after saving. Existing pending deliveries may still be sent; restored deliveries may use a different detailed or compact layout. Before downgrading, explicitly remove new overrides and global or scoped completion/subagents/streaming/commentary/routine_notifications/presentation_detail as required by the older version, and replace global or scoped detailed/failures with a supported value. Check subsequent edits; do not overwrite the configuration directly.",
   },
   modelAddition: {
     title: "Add model",
@@ -2480,6 +2481,7 @@ const en: Messages = {
     "telegramFormat": "Telegram message format",
     "richText": "Rich text",
     "operationUpdates": "Operation details",
+    "operationUpdatesHint": "Detailed shows the tool, target, status, and duration. Normal details become a single line of up to 600 characters with an omission marker; failures and declines retain the full sanitized reason. Full keeps complete sanitized details. WeChat does not show tool progress.",
     "full": "Full",
     "compact": "Compact",
     "failures": "Failures or declines only",

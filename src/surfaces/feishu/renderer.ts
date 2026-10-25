@@ -152,10 +152,6 @@ export function renderFeishuUserFacingError(
 export function renderFeishuOutput(
   event: OutputEvent,
   detailed = false,
-  autoCompactPercent?: (
-    provider: string | null | undefined,
-    model: string | null | undefined,
-  ) => number | null,
   completion: "brief" | "detailed" = "detailed",
 ): string | null {
   switch (event.type) {
@@ -209,7 +205,6 @@ export function renderFeishuOutput(
       return renderFeishuTurnCompleted(
         event,
         detailed,
-        autoCompactPercent,
         completion,
       );
     case "thread.status":
@@ -253,17 +248,12 @@ function renderFeishuSubagentCompleted(
 function renderFeishuTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
   detailed = false,
-  autoCompactPercent?: (
-    provider: string | null | undefined,
-    model: string | null | undefined,
-  ) => number | null,
   mode: "brief" | "detailed" = "detailed",
 ): string {
   return renderFeishuLifecyclePresentation(
     createTurnCompletedPresentation(
       event,
       detailed,
-      autoCompactPercent,
       mode,
     ),
   );

@@ -339,7 +339,7 @@ const gatewayConfigStructureSchema = z.strictObject({
     idle_release_minutes: z.number().int().min(0).max(1440).default(15),
   }).default({ idle_release_minutes: 15 }),
   display: z.strictObject({
-    operation_updates: z.enum(["full", "compact", "failures", "hidden"]).default("compact"),
+    operation_updates: z.enum(["full", "detailed", "compact", "failures", "hidden"]).default("compact"),
     subagents: z.boolean().optional(),
     streaming: z.boolean().optional(),
     commentary: z.boolean().optional(),

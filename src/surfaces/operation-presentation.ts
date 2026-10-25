@@ -30,11 +30,14 @@ export function shouldDisplayOperation(
   if (display === "hidden") {
     return false;
   }
+  if (record.kind === "subagent" && record.action === "wait") {
+    return record.status === "failed" || record.status === "declined";
+  }
   if (display === "failures") return record.status === "failed" || record.status === "declined";
   if (display === "compact" && record.kind === "sleep") {
     return record.status === "failed" || record.status === "declined";
   }
-  if (display === "full" || record.kind !== "subagent") {
+  if (display === "full" || display === "detailed" || record.kind !== "subagent") {
     return true;
   }
   return record.status === "failed"
@@ -81,6 +84,23 @@ export function compactOperationDetail(value: string): string {
 
 export function redactOperationDetail(value: string): string {
   return visibleUpstreamMessage(value);
+}
+
+/** Daily detail stays bounded; failures retain the complete sanitized reason. */
+export function detailedOperationDetail(record: OperationUpdate): string {
+  const detail = redactOperationDetail(record.detail ?? "");
+  if (record.status === "failed" || record.status === "declined") return detail;
+  const normalized = detail.replace(/\s+/gu, " ").trim();
+  const characters = Array.from(normalized);
+  const omission = "…（详情已省略）";
+  return characters.length <= 600
+    ? normalized
+    : characters.slice(0, 600 - Array.from(omission).length).join("") + omission;
+}
+
+/** Already-admitted durable output remains visible after switching to hidden. */
+export function operationDetailDisplay(display: OperationUpdateDisplay): Exclude<OperationUpdateDisplay, "hidden"> {
+  return display === "hidden" ? "full" : display;
 }
 
 export function operationStatus(status: OperationUpdate["status"]): string {

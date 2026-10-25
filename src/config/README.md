@@ -48,9 +48,10 @@ Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺�
 安装、配置或重启 sing-box；仅 SOCKS `ALL_PROXY` 仍不受 HTTP(S) 客户端支持。
 
 `display.operation_updates` 是 Telegram、飞书与 QQ 的操作过程显示模式：`full` 显示完整详情、
-状态、耗时和退出码，`compact` 显示单行状态、耗时、退出码和最多 160 个字符的详情摘要，
+状态、耗时和退出码；`detailed` 与 full 准入相同，正常详情脱敏后折叠为最多 600 字符的单行摘要，
+超出时标明省略，失败或拒绝保留完整脱敏详情；`compact` 显示单行状态、耗时、退出码和最多 160 个字符的详情摘要，
 `failures` 仅显示 `failed` / `declined`，`hidden` 抑制 `operation.updated` 的平台输出。默认值为 `compact`，旧布尔字段由严格 Schema 拒绝。
-四种模式都不影响审批、最终回复和 Turn 完成或失败事件；启用 Telegram、飞书或 QQ 时变化需要重启 Gateway，
+五种模式都不影响审批、最终回复和 Turn 完成或失败事件；启用 Telegram、飞书或 QQ 时变化需要重启 Gateway，
 不需要重装或重启 App Server，只启用微信或未配置渠道时变化不要求重启。微信为保留单次回复窗口预算
 不发送任何操作过程事件（包括终态），该设置对微信没有效果。
 
@@ -60,7 +61,7 @@ Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺�
 全局管理通过 `display.subagents` 的显式 `set` / `inherit` 操作，返回有效 `subagentsEnabled` 和
 本层 `subagentsOverride`（缺省为 `null`）；恢复缺省删除字段。启用 Telegram、飞书或 QQ 时有效值变化
 要求重启，只有微信时无需重启；覆盖数组仍按整体配置单元判定。管理保存提供私有备份；回退旧版前
-显式清除全局及覆盖中的 `subagents`，将 `failures` 改为旧版支持值，并核对备份后的修改。
+显式清除全局及覆盖中的 `subagents`，将 `detailed` / `failures` 改为旧版支持值，并核对备份后的修改。
 
 `display.plan_updates` 是自动计划展示开关，默认开启；显式设为 `false` 可关闭。开启后只影响官方
 `turn/plan/updated` 在 Telegram、飞书与 QQ 的展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式；

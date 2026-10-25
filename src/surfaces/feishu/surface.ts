@@ -243,9 +243,6 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.reasoningEnabled !== undefined
           ? { reasoningEnabled: options.reasoningEnabled }
           : {}),
-        ...(options.autoCompactPercent === undefined
-          ? {}
-          : { autoCompactPercent: options.autoCompactPercent }),
         deliverIdleReleased: async (event, sendCard) => {
           const actorId = this.notificationActor(event.target);
           if (actorId === undefined) {

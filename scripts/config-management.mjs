@@ -33,7 +33,7 @@ import { detectTerminalIdentity } from "../runtime/terminal-identity.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import { createSharedCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
 
-const operationUpdateValues = ["full", "compact", "failures", "hidden"];
+const operationUpdateValues = ["full", "detailed", "compact", "failures", "hidden"];
 const messageFormatValues = ["html", "rich"];
 const loggingLevelValues = ["fatal", "error", "warn", "info", "debug", "trace"];
 const proxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_proxy"];
@@ -447,7 +447,7 @@ function applySetting(document, input, configPath) {
     case "display.operation-updates": {
       const value = enumValue(input.value, operationUpdateValues, "value", "操作详情显示");
       document.display = { ...table(document.display), operation_updates: value };
-      return { ...changed(value, displaySettingActivation(document)), backupRequired: value === "failures" };
+      return { ...changed(value, displaySettingActivation(document)), backupRequired: value === "failures" || value === "detailed" };
     }
     case "display.plan-updates": {
       const value = booleanValue(input.value, "value", "计划更新显示");

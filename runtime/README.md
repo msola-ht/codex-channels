@@ -2,6 +2,9 @@
 
 `message-display-policy.mjs` 统一定义九个显示字段、渠道支持矩阵及 `concise` / `standard` / `detailed` 三项预设。预设只供管理入口一次应用现有字段，不是持久化键或运行模式；`identifyMessageDisplayPreset` 按有效值及目标支持字段识别，无法匹配时为只读 `custom`。默认配置识别为 `standard`，缺省与继承仍逐字段处理。
 
+详细预设采用 `operation_updates = "detailed"`：与 full 相同准入，正常工具详情单行最多 600 字符，
+超出时明确省略，失败与拒绝保留完整脱敏原因。已有 full 仍保持完整详情；普通读取不重写旧配置。
+
 `message-display-policy.mjs` 的可选 `routine_notifications` 缺省投影为必填 `routineNotificationsEnabled = true`，支持四渠道含微信及 QQ 群的五层逐字段继承；Schema 不物化默认值，管理入口复用共享支持矩阵提供 supportedFields。Gateway、管理读取和激活分类共用该契约，不修改 StateStore 或 Journal 格式。
 
 `gateway-config.mjs` / `gateway-config.d.mts` 同时定义 QQ 配置与变更分类，供 Setup、Doctor、WebUI 摘要及 Gateway 复用；

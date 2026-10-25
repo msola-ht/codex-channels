@@ -126,7 +126,7 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
     >
       {pending !== null ? <>
           <p>{regeneratingToken ? t("settingsFields.regenerateTokenConfirmation") : t("settingsUi.change", { label: typeof pending.label === "string" ? pending.label : t(pending.label.key, pending.label.params), before: formatPreviewValue(pending.before, pending.kind, t), after: formatPreviewValue(pending.value, pending.kind, t) })}</p>
-          {(pending.kind === "display.preset" || pending.kind === "display.scope" || pending.kind === "display.completion" || pending.kind === "display.presentation-detail" || pending.kind === "display.subagents" || pending.kind === "display.streaming" || pending.kind === "display.commentary" || pending.kind === "display.routine-notifications" || (pending.kind === "display.operation-updates" && pending.value === "failures")) && <><p>{t("displayScope.projection")}</p><p>{t("displayScope.notice")}</p></>}
+          {(pending.kind === "display.preset" || pending.kind === "display.scope" || pending.kind === "display.completion" || pending.kind === "display.presentation-detail" || pending.kind === "display.subagents" || pending.kind === "display.streaming" || pending.kind === "display.commentary" || pending.kind === "display.routine-notifications" || (pending.kind === "display.operation-updates" && (pending.value === "failures" || pending.value === "detailed"))) && <><p>{t("displayScope.projection")}</p><p>{t("displayScope.notice")}</p></>}
           {pending.kind === "webui.token" && pending.intent === "set" ? <p>{t("settingsFields.setTokenConfirmation")}</p> : null}
           {pending.kind === "webui.token" && pending.intent === "clear" ? <p>{t("settingsFields.clearTokenConfirmation")}</p> : null}
           {pending.kind === "network.proxy" && pending.intent !== undefined ? <p>{t(pending.intent === "clear" ? "settingsFields.clearProxyConfirmation" : "settingsFields.setProxyConfirmation")}</p> : null}
@@ -288,7 +288,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
     }
   }
   if (kind === "system.default-model" && value === null) return t("modelManagement.followDefault")
-  const choices: Record<string, MessageKey> = kind === "display.operation-updates" ? { full: "settingsFields.full", compact: "settingsFields.compact", failures: "settingsFields.failures", hidden: "settingsFields.hidden" }
+  const choices: Record<string, MessageKey> = kind === "display.operation-updates" ? { full: "settingsFields.full", detailed: "settingsFields.detailed", compact: "settingsFields.compact", failures: "settingsFields.failures", hidden: "settingsFields.hidden" }
     : kind === "telegram.message-format" ? { rich: "settingsFields.richText" } : {}
   if (typeof value === "string" && Object.hasOwn(choices, value)) return t(choices[value])
   return scalar(value)

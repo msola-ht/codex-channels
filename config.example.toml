@@ -80,7 +80,8 @@ idle_release_minutes = 15
 # 可通过 codexc config → Gateway 显示设置 → 模型统计分组维护；仅合并控制台按模型统计。
 # 模型选择和明细保留原模型；重新读取即生效，无需重启服务。
 # model_aliases = { "cline-pass/deepseek-v4.1-flash" = "deepseek-flash", "deepseek-v4.1-flash" = "deepseek-flash" }
-# full：完整详情；compact：单行摘要；failures：仅 failed/declined；hidden：隐藏操作过程。
+# full：完整详情；detailed：日常明细（正常详情单行最多 600 字符，失败/拒绝保留完整脱敏详情）；
+# compact：单行摘要；failures：仅 failed/declined；hidden：隐藏操作过程。
 operation_updates = "compact"
 # 可选子代理显示，缺省 true，不自动写入；关闭同时隐藏生命周期和子代理工具操作。
 # 其他工具仍按 operation_updates；正文、图片、审批与父轮完成或失败保留。

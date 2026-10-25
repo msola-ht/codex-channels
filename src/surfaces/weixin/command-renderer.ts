@@ -97,17 +97,12 @@ export function renderWeixinIdentity(message: {
 export function renderWeixinTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
   detailed = false,
-  autoCompactPercent?: (
-    provider: string | null | undefined,
-    model: string | null | undefined,
-  ) => number | null,
   mode: "brief" | "detailed" = "detailed",
 ): string {
   return renderWeixinLifecyclePresentation(
     createTurnCompletedPresentation(
       event,
       detailed,
-      autoCompactPercent,
       mode,
     ),
   );

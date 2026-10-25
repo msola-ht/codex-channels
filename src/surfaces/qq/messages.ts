@@ -58,7 +58,6 @@ export interface QqMessageOptions {
   images?: Pick<QqImageStore, "prepare">;
   files?: Pick<QqFileInput, "prepare">;
   media?: Pick<QqMediaInput, "prepare" | "retain" | "discard">;
-  autoCompactPercent?: (provider: string | null | undefined, model: string | null | undefined) => number | null;
   startupNotification?: {
     recipients(): readonly string[];
     text(target: ConversationTarget, signal: AbortSignal): Promise<string>;
@@ -407,7 +406,7 @@ export class QqMessages implements SurfaceOutputPort {
     }
     const referenceMessageId = source ? this.sourceRegistry(source).replyReference(source) : undefined;
     const completion = event.type === "turn.completed"
-      ? renderQqTurnCompleted(event, this.displaySettings(event.target).presentationDetail === "detailed", this.options.autoCompactPercent, context?.completion ?? "detailed") : undefined;
+      ? renderQqTurnCompleted(event, this.displaySettings(event.target).presentationDetail === "detailed", context?.completion ?? "detailed") : undefined;
     let text = event.type === "text.completed" ? event.text : completion!.text;
     let markdownStart: number | undefined;
     let checkpointFailed = false;

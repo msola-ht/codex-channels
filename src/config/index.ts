@@ -115,7 +115,7 @@ export interface ConfiguredWorkspace {
   cwd: string;
 }
 
-export type OperationUpdateDisplay = "full" | "compact" | "failures" | "hidden";
+export type OperationUpdateDisplay = "full" | "detailed" | "compact" | "failures" | "hidden";
 
 export class ConfigurationError extends Error {}
 

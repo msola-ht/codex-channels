@@ -5,7 +5,7 @@ export const messageDisplayFields = [["operation_updates", "operationUpdates"], 
 export const messageDisplayPresets = Object.freeze({
   concise: Object.freeze({ operation_updates: "hidden", subagents: false, streaming: true, commentary: false, routine_notifications: false, plan_updates: false, reasoning: false, completion: "brief", presentation_detail: "basic" }),
   standard: Object.freeze({ operation_updates: "compact", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: false, completion: "detailed", presentation_detail: "basic" }),
-  detailed: Object.freeze({ operation_updates: "full", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: true, completion: "detailed", presentation_detail: "detailed" }),
+  detailed: Object.freeze({ operation_updates: "detailed", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: true, completion: "detailed", presentation_detail: "detailed" }),
 });
 
 export function supportedMessageDisplayFields(selector) {
@@ -22,7 +22,7 @@ export const messageDisplayOverrideSchema = z.strictObject({
   account_id: identity.optional(),
   chat_kind: z.enum(["direct", "group"]).optional(),
   chat_id: identity.optional(),
-  operation_updates: z.enum(["full", "compact", "failures", "hidden"]).optional(),
+  operation_updates: z.enum(["full", "detailed", "compact", "failures", "hidden"]).optional(),
   subagents: z.boolean().optional(),
   streaming: z.boolean().optional(),
   commentary: z.boolean().optional(),

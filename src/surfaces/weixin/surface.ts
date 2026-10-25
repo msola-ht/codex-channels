@@ -145,9 +145,6 @@ export class WeixinSurface implements SurfaceAdapter {
         ...(options.fileSendClient === undefined
           ? {}
           : { fileClient: options.fileSendClient }),
-        ...(options.autoCompactPercent === undefined
-          ? {}
-          : { autoCompactPercent: options.autoCompactPercent }),
         ...(options.replyContextPersistence === undefined
           ? {}
           : {

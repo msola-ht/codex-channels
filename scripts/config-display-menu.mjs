@@ -28,7 +28,7 @@ export async function runDisplaySettings({
         { value: "streaming", label: "流式显示", hint: "正文增量预览，缺省开启；仅 Telegram、飞书和 QQ 单聊" },
         { value: "commentary", label: "过程说明", hint: "commentary 过程说明，缺省开启；Telegram、飞书和 QQ" },
         { value: "routine_notifications", label: "常规通知", hint: "常规生命周期与成功提示，四渠道缺省开启" },
-        { value: "operation_updates", label: "操作详情显示", hint: "full / compact / failures / hidden" },
+        { value: "operation_updates", label: "操作详情显示", hint: "full / detailed / compact / failures / hidden" },
         { value: "plan_updates", label: "计划更新显示", hint: "是否显示 Codex 计划" },
         { value: "reasoning", label: "思考状态显示", hint: "默认关闭；是否显示“思考中”状态卡" },
         { value: "model_aliases", label: "模型统计分组", hint: "仅合并控制台按模型统计，保留原始模型明细" },
@@ -95,7 +95,7 @@ async function runDisplayScopeSettings({ environment, output, prompts, writeConf
   if (!scope.supportedFields.includes(field)) throw new Error("该目标不支持所选显示字段");
   const value = await prompts.select({ message: "选择本层覆盖或恢复继承", showInstructions: false, initialValue: scope.override[field] === undefined ? "inherit" : String(scope.override[field]), options: [
     { value: "inherit", label: "恢复继承上级" },
-    ...(scope.writable ? field === "operation_updates" ? [{ value: "full", label: "完整详情" }, { value: "compact", label: "单行摘要" }, { value: "failures", label: "仅失败或拒绝" }, { value: "hidden", label: "隐藏" }] : field === "completion" ? [{ value: "off", label: "关闭成功通知" }, { value: "brief", label: "精简" }, { value: "detailed", label: "详细" }] : field === "presentation_detail" ? [{ value: "basic", label: "基础" }, { value: "detailed", label: "详细" }] : [{ value: "true", label: "开启" }, { value: "false", label: "关闭" }] : []),
+    ...(scope.writable ? field === "operation_updates" ? [{ value: "full", label: "完整详情" }, { value: "detailed", label: "日常明细" }, { value: "compact", label: "单行摘要" }, { value: "failures", label: "仅失败或拒绝" }, { value: "hidden", label: "隐藏" }] : field === "completion" ? [{ value: "off", label: "关闭成功通知" }, { value: "brief", label: "精简" }, { value: "detailed", label: "详细" }] : field === "presentation_detail" ? [{ value: "basic", label: "基础" }, { value: "detailed", label: "详细" }] : [{ value: "true", label: "开启" }, { value: "false", label: "关闭" }] : []),
     { value: "back", label: "返回上一级" },
   ] });
   if (prompts.isCancel(value) || value === "back") return { action: "back" };
@@ -104,7 +104,7 @@ async function runDisplayScopeSettings({ environment, output, prompts, writeConf
   if (field === "routine_notifications" && !["true", "false", "inherit"].includes(value)) throw new Error("未知常规通知选项");
   const edit = { kind: "display.scope", value: value === "inherit" ? { selector: scope.selector, field, action: "inherit" } : { selector: scope.selector, field, action: "set", value: field === "operation_updates" || field === "completion" || field === "presentation_detail" ? value : value === "true" } };
   const preview = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig: () => undefined, skipBackup: true });
-  output.write(`预览目标：${label(scope)}\n${displayScopeSummary(preview.value)}\n保存前创建私有配置备份；新增覆盖要求新版 Gateway。保存后按提示激活，已有 pending 仍可能投递；重启恢复不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，并将全局及覆盖 failures 改为旧版支持值；核对后续修改，勿直接恢复备份覆盖配置。\n`);
+  output.write(`预览目标：${label(scope)}\n${displayScopeSummary(preview.value)}\n保存前创建私有配置备份；新增覆盖要求新版 Gateway。保存后按提示激活，已有 pending 仍可能投递；重启恢复不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，并将全局及覆盖 detailed/failures 改为旧版支持值；核对后续修改，勿直接恢复备份覆盖配置。\n`);
   const fieldName = { operation_updates: "操作详情", subagents: "子代理显示", streaming: "流式显示", commentary: "过程说明", routine_notifications: "常规通知", plan_updates: "计划更新", reasoning: "思考状态", completion: "完成通知", presentation_detail: "消息详情" }[field];
   const confirmed = await prompts.confirm({ message: `确认修改 ${label(scope)} 的${fieldName}？`, initialValue: false });
   if (prompts.isCancel(confirmed) || !confirmed) return { action: "back" };
@@ -150,7 +150,7 @@ async function runDisplayPresetSettings({ environment, output, prompts, writeCon
   if (prompts.isCancel(preset) || preset === "back") return { action: "back" };
   const edit = { kind: "display.preset", value: { preset, ...(scope ? { selector: scope.selector } : {}) } };
   const preview = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig: () => undefined, skipBackup: true });
-  output.write(`预览目标：${target}\n${displayScopeSummary(preview.value)}\n${preview.activation === "none" ? "配置未变化，不写入或创建备份。" : "一次保存本层全部支持字段，保存前创建私有配置备份。"}保存后按提示激活；已有 pending 仍可能投递，重启恢复不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，并将全局及覆盖 failures 改为旧版支持值；核对后续修改，勿直接恢复备份覆盖配置。\n`);
+  output.write(`预览目标：${target}\n${displayScopeSummary(preview.value)}\n${preview.activation === "none" ? "配置未变化，不写入或创建备份。" : "一次保存本层全部支持字段，保存前创建私有配置备份。"}保存后按提示激活；已有 pending 仍可能投递，重启恢复不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，并将全局及覆盖 detailed/failures 改为旧版支持值；核对后续修改，勿直接恢复备份覆盖配置。\n`);
   const confirmed = await prompts.confirm({ message: `确认向 ${target} 应用${presetLabels[preset]}显示预设及以上全部字段？`, initialValue: false });
   if (prompts.isCancel(confirmed) || !confirmed) return { action: "back" };
   const result = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig });
@@ -306,7 +306,7 @@ async function runSubagentsSettings({ environment, output, prompts, writeConfig 
   if (prompts.isCancel(value) || value === "back") return { action: "back" };
   const edit = { kind: "display.subagents", value: value === "inherit" ? { action: "inherit" } : { action: "set", value: value === "true" } };
   const preview = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig: () => undefined, skipBackup: true });
-  output.write(`预览：全局子代理显示${label(preview.value.subagentsEnabled)}；${value === "inherit" ? "删除覆盖字段" : "保存显式覆盖"}。保存前创建私有备份；保存后按提示激活。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/presentation_detail，并将全局及覆盖 failures 改为旧版支持值；核对后续修改，勿直接覆盖配置。\n`);
+  output.write(`预览：全局子代理显示${label(preview.value.subagentsEnabled)}；${value === "inherit" ? "删除覆盖字段" : "保存显式覆盖"}。保存前创建私有备份；保存后按提示激活。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/presentation_detail，并将全局及覆盖 detailed/failures 改为旧版支持值；核对后续修改，勿直接覆盖配置。\n`);
   const confirmed = await prompts.confirm({ message: "确认修改全局子代理显示？", initialValue: false });
   if (prompts.isCancel(confirmed) || !confirmed) return { action: "back" };
   const result = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig });
@@ -564,6 +564,7 @@ async function runOperationUpdatesToggle({ environment, output, prompts, writeCo
     initialValue: settings.display.operationUpdates,
     options: [
       { value: "full", label: "完整详情", hint: "显示完整操作过程" },
+      { value: "detailed", label: "日常明细", hint: "正常详情最多 600 字符，失败或拒绝保留完整脱敏原因" },
       { value: "compact", label: "单行摘要", hint: "压缩为摘要行" },
       { value: "failures", label: "仅失败或拒绝", hint: "仅显示 failed / declined 操作" },
       { value: "hidden", label: "隐藏", hint: "不显示操作过程" },
@@ -571,17 +572,17 @@ async function runOperationUpdatesToggle({ environment, output, prompts, writeCo
     ],
   });
   if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
-  if (selected !== "full" && selected !== "compact" && selected !== "failures" && selected !== "hidden") {
+  if (selected !== "full" && selected !== "detailed" && selected !== "compact" && selected !== "failures" && selected !== "hidden") {
     throw new Error(`未知操作详情显示设置：${String(selected)}`);
   }
   const edit = {
     kind: "display.operation-updates",
     value: selected,
   };
-  if (selected === "failures") {
+  if (selected === "failures" || selected === "detailed") {
     const preview = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig: () => undefined, skipBackup: true });
-    output.write(`预览：操作详情从 ${settings.display.operationUpdates} 改为 ${preview.value}，仅展示 failed/declined。该档位要求新版 Gateway；保存前创建私有备份，保存后按提示激活。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/presentation_detail，并将全局及覆盖 failures 改为旧版支持值；核对后续修改，勿直接覆盖配置。\n`);
-    const confirmed = await prompts.confirm({ message: "确认修改全局操作详情为仅失败或拒绝？", initialValue: false });
+    output.write(`预览：操作详情从 ${settings.display.operationUpdates} 改为 ${preview.value}。${selected === "failures" ? "仅展示 failed/declined。" : "显示完整过程，正常详情最多 600 字符；失败或拒绝保留完整脱敏详情。"}该档位要求新版 Gateway；保存前创建私有备份，保存后按提示激活。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/presentation_detail，并将全局及覆盖 detailed/failures 改为旧版支持值；核对后续修改，勿直接覆盖配置。\n`);
+    const confirmed = await prompts.confirm({ message: `确认修改全局操作详情为${selected === "failures" ? "仅失败或拒绝" : "日常明细"}？`, initialValue: false });
     if (prompts.isCancel(confirmed) || !confirmed) return { action: "back" };
   }
   const result = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig });

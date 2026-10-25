@@ -153,7 +153,6 @@ function createQqModule(
     createGroupPairing: () => new QqGroupPairingServer(dirname(options.config.credentialsDirectory), config.appId),
     uploadsDirectory: join(dirname(options.config.stateDatabasePath), "uploads"),
     service: options.service, commands: options.commands, actors: options.bindings,
-    autoCompactPercent: options.autoCompactPercent,
     displaySettings,
     configurationNotification: { recipients: () => [...notificationRecipients] },
     startupNotification: {

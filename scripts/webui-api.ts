@@ -463,7 +463,7 @@ export interface SettingsSummaryResponse {
   revision: string
   gateway: {
     display: {
-      operationUpdates: "full" | "compact" | "failures" | "hidden"
+      operationUpdates: "full" | "detailed" | "compact" | "failures" | "hidden"
       subagentsEnabled: boolean
       planUpdatesEnabled: boolean
       reasoningEnabled: boolean

@@ -6,7 +6,7 @@ import {
   type LifecyclePresentation, type LifecyclePresentationField,
 } from "../lifecycle-presentation.js";
 import {
-  compactOperationDetail, operationMetadata, operationStatus, operationTitle,
+  compactOperationDetail, detailedOperationDetail, operationMetadata, operationStatus, operationTitle,
   redactOperationDetail, isSubagentOutput, shouldDisplayOperation,
 } from "../operation-presentation.js";
 import { createPlanPresentation, PlanProgressTracker } from "../plan-presentation.js";
@@ -405,7 +405,8 @@ function escapeLifecycleField(field: LifecyclePresentationField): LifecyclePrese
 function presentOperation(operation: OperationUpdate, display: OperationUpdateDisplay): Presentation {
   const metadata = operationMetadata(operation);
   const detail = operation.detail === undefined ? "" : display === "compact"
-    ? compactOperationDetail(operation.detail) : redactOperationDetail(operation.detail);
+    ? compactOperationDetail(operation.detail) : display === "detailed"
+      ? detailedOperationDetail(operation) : redactOperationDetail(operation.detail);
   const title = `${operationTitle(operation)} · ${operationStatus(operation.status)}`;
   const text = [
     title,

@@ -84,10 +84,6 @@ export interface WeixinOutboxOptions {
   displaySettings?: SurfaceMessageDisplaySettings;
   capacity?: number;
   closeTimeoutMs?: number;
-  autoCompactPercent?: (
-    provider: string | null | undefined,
-    model: string | null | undefined,
-  ) => number | null;
   onReplyContextInvalidated?: (
     target: ConversationTarget,
     expectedContextToken?: string,
@@ -375,7 +371,6 @@ export class WeixinOutbox implements SurfaceOutputPort {
           renderWeixinTurnCompleted(
             event,
             this.options.displaySettings?.(event.target).presentationDetail === "detailed",
-            this.options.autoCompactPercent,
             completion ?? (this.liveCompletionDisplay(event) === "brief" ? "brief" : "detailed"),
           ),
           { structuredFields: true },

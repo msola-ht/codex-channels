@@ -28,7 +28,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { ContextCompactionNotices, generatedImageUnavailableText, isExecutionOperation, isGeneratedImageUnavailable, isSubagentOutput, shouldDisplayOperation } from "../operation-presentation.js";
+import { ContextCompactionNotices, generatedImageUnavailableText, isExecutionOperation, isGeneratedImageUnavailable, isSubagentOutput, operationDetailDisplay, shouldDisplayOperation } from "../operation-presentation.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createSubagentContactedPresentation,
@@ -119,10 +119,6 @@ export interface TelegramOutboxOptions {
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
-  autoCompactPercent?: (
-    provider: string | null | undefined,
-    model: string | null | undefined,
-  ) => number | null;
 }
 
 export class TelegramOutbox {
@@ -809,7 +805,7 @@ export class TelegramOutbox {
           }
         }
         if (visible) await this.sendPanel(chatId, renderTelegramLifecyclePresentation(
-          createTurnCompletedPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed", this.options.autoCompactPercent, mode),
+          createTurnCompletedPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed", mode),
         ), this.replyTargets.get(chatId, turnKey), shouldHideTurnCompleted(event, "off"), signal);
       } finally { cleanup(); }
     }, true, { purpose: "turn-completion", settled: cleanup });
@@ -1173,7 +1169,7 @@ export class TelegramOutbox {
   ): void {
     const text = formatTelegramOperationSummary(
       summary,
-      this.displaySettings(chatId).operationUpdates === "compact" ? "compact" : "full",
+      operationDetailDisplay(this.displaySettings(chatId).operationUpdates),
     );
     this.enqueue(
       chatId,
@@ -1199,9 +1195,7 @@ export class TelegramOutbox {
       return;
     }
     const { chatId, turnKey } = state;
-    const display = this.displaySettings(chatId).operationUpdates === "compact"
-      ? "compact"
-      : "full";
+    const display = operationDetailDisplay(this.displaySettings(chatId).operationUpdates);
     const records = state.order
       .map((itemId) => state.records.get(itemId))
       .filter((record): record is OperationUpdate => record !== undefined);

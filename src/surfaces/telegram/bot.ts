@@ -302,9 +302,6 @@ export class TelegramSurface {
       ...(options.reasoningEnabled !== undefined
         ? { reasoningEnabled: options.reasoningEnabled }
         : {}),
-      ...(options.autoCompactPercent === undefined
-        ? {}
-        : { autoCompactPercent: options.autoCompactPercent }),
       deliverIdleReleased: (event, send) => this.deliverIdleReleased(event, send),
     });
     this.output = this.outbox;

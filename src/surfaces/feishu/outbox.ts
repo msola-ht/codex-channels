@@ -25,7 +25,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { ContextCompactionNotices, generatedImageUnavailableText, isComputerUseOperation, isExecutionOperation, isGeneratedImageUnavailable, isSubagentOutput, shouldDisplayOperation } from "../operation-presentation.js";
+import { ContextCompactionNotices, generatedImageUnavailableText, isComputerUseOperation, isExecutionOperation, isGeneratedImageUnavailable, isSubagentOutput, operationDetailDisplay, shouldDisplayOperation } from "../operation-presentation.js";
 import {
   createPlanPresentation,
   type PlanPresentation,
@@ -102,10 +102,6 @@ export interface FeishuOutboxOptions {
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
-  autoCompactPercent?: (
-    provider: string | null | undefined,
-    model: string | null | undefined,
-  ) => number | null;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -434,7 +430,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         flushStreamBeforeOutput();
         const markdown = formatFeishuOperation(
           event.operation,
-          this.displaySettings(event.target.conversationId).operationUpdates === "compact" ? "compact" : "full",
+          operationDetailDisplay(this.displaySettings(event.target.conversationId).operationUpdates),
         );
         this.delivery.enqueue(
           event.target.conversationId,
@@ -462,7 +458,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         if (!isComputerUseOperation(event.operation) && event.operation.kind !== "imageGeneration") return;
       }
       flushStreamBeforeOutput();
-      const markdown = formatFeishuOperation(event.operation, this.displaySettings(event.target.conversationId).operationUpdates === "compact" ? "compact" : "full");
+      const markdown = formatFeishuOperation(event.operation, operationDetailDisplay(this.displaySettings(event.target.conversationId).operationUpdates));
       if (isComputerUseOperation(event.operation)) {
         const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
         const previous = this.computerUseCards.get(key);
@@ -559,7 +555,6 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const rendered = renderFeishuOutput(
       event,
       this.displaySettings(event.target.conversationId).presentationDetail === "detailed",
-      this.options.autoCompactPercent,
     );
     if (rendered === null) {
       return;
@@ -597,7 +592,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ): Promise<void> {
     const card = renderFeishuComputerUseCard(
       event.operation,
-      this.displaySettings(event.target.conversationId).operationUpdates === "compact" ? "compact" : "full",
+      operationDetailDisplay(this.displaySettings(event.target.conversationId).operationUpdates),
     );
     if (state.messageId === undefined) {
       state.messageId = await this.messagePort.sendCard(event.target.conversationId, card, signal);
@@ -640,7 +635,6 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const rendered = renderFeishuOutput(
       event,
       this.displaySettings(event.target.conversationId).presentationDetail === "detailed",
-      this.options.autoCompactPercent,
     );
     if (rendered === null) {
       return;
@@ -1003,7 +997,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const prefix = `${key}\u0000`;
     for (const value of this.computerUseCards.keys()) if (value.startsWith(prefix)) this.computerUseCards.delete(value);
     this.flushOperationUpdates(chatId, event);
-    const completion = visible ? renderFeishuOutput(event, this.displaySettings(chatId).presentationDetail === "detailed", this.options.autoCompactPercent, mode) : null;
+    const completion = visible ? renderFeishuOutput(event, this.displaySettings(chatId).presentationDetail === "detailed", mode) : null;
     let resolveStreams!: (failed: boolean) => void;
     const streamsDone = new Promise<boolean>(resolve => { resolveStreams = resolve; });
     let streamsSettled = false;
@@ -1045,7 +1039,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ): void {
     const markdown = formatFeishuOperationSummary(
       summary,
-      this.displaySettings(chatId).operationUpdates === "compact" ? "compact" : "full",
+      operationDetailDisplay(this.displaySettings(chatId).operationUpdates),
     );
     this.delivery.enqueue(
       chatId,
