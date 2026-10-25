@@ -4,9 +4,9 @@
 折叠为最多 600 字符的单行摘要，超出时标明省略，失败与拒绝保留完整脱敏原因。中英文选项、
 说明和确认摘要共用现有管理链路；旧 full 保持独立完整档，微信继续不支持工具过程。
 
-“消息渠道 → 消息展示”的全局及每个范围提供显示预设：静默、紧凑、详细、完整，以及不可保存的“自定义”识别值。复用 ManagedSelect、应用按钮和双语文案，描述显示管理读取的 computed `display.preset` / `scope.preset`；选择后按“预览并应用预设”进入确认，因此继承值已经匹配也可明确固定本层。确认摘要展示目标、本层支持的全部字段、继承来源及备份、pending 和回退提示。`display.preset` 经单次高风险预览确认与共享配置原子事务，保存后同源读回；取消和 no-op 不写，过期修订拒绝，不循环调用字段 writer。预设不新增 TOML 字段、不改变默认值，也不改日志或调用采集；单独修改字段后重新识别，仍保留逐字段继承。范围仅固定支持字段，微信三项、QQ 群不含 streaming；停用范围不可应用预设。源码尚未部署，浏览器交互与真实平台效果以实际验收记录为准。
+“消息渠道 → 消息展示”的全局及每个范围提供显示预设：静默、紧凑、详细、完整，以及不可保存的“自定义”识别值。复用 ManagedSelect、应用按钮和双语文案，描述显示管理读取的 computed `display.preset` / `scope.preset`；选择后按“预览并应用预设”进入确认，因此继承值已经匹配也可明确固定本层。确认摘要展示目标、本层支持的全部字段、继承来源及备份、pending 和回退提示。`display.preset` 经单次高风险预览确认与共享配置原子事务，保存后同源读回；取消和 no-op 不写，过期修订拒绝，不循环调用字段 writer。预设不新增 TOML 字段、不改变默认值，也不改日志或调用采集；单独修改字段后重新识别，仍保留逐字段继承。可写范围仅固定支持字段，微信三项；QQ 群已停用，与其他停用范围一样不可应用预设。源码尚未部署，浏览器交互与真实平台效果以实际验收记录为准。
 
-常规通知复用既有 ManagedSelect、范围 supportedFields、中英文键与预览摘要，四渠道含微信和 QQ 群均支持。全局 kind `display.routine-notifications` 显式 set boolean/inherit，读取 `routineNotificationsEnabled` 与 `routineNotificationsOverride`（布尔值或 null），缺省开启且不物化；确认令牌、revision、私有备份、取消、未变化与读回沿共享事务。任一渠道启用时有效值改变要求重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组整体判定。关闭范围与异常、持久 Workspace 回执和 pending 保留边界以 docs/display.md 为准。回退旧版前清除全局及覆盖 routine_notifications，不自动迁移。
+常规通知复用既有 ManagedSelect、范围 supportedFields、中英文键与预览摘要，四渠道支持；QQ 群已停用，已有群覆盖仅可查看与恢复继承。全局 kind `display.routine-notifications` 显式 set boolean/inherit，读取 `routineNotificationsEnabled` 与 `routineNotificationsOverride`（布尔值或 null），缺省开启且不物化；确认令牌、revision、私有备份、取消、未变化与读回沿共享事务。任一渠道启用时有效值改变要求重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组整体判定。关闭范围与异常、持久 Workspace 回执和 pending 保留边界以 docs/display.md 为准。回退旧版前清除全局及覆盖 routine_notifications，不自动迁移。
 
 请求列表及详情从指标 API 读取 `activity`，与调用列表共用 `formatRequestActivity`，不额外请求调用转储。历史未采集显示“未记录”，有界采集不完整显示“部分可见”。
 
@@ -23,7 +23,7 @@ shadcn（`npx shadcn@latest add` 安装），业务层只做组件组合与数�
 
 流式显示缺省开启，只控制 Telegram、飞书及 QQ 单聊正文增量预览。全局读取返回 `streamingEnabled` 与 `streamingOverride`（布尔值或 null），`display.streaming` 接受显式 set boolean/inherit；微信和 QQ 群范围不显示该选项，QQ 群预览摘要也不宣称继承流式能力。共享 Schema 严拒微信和 QQ 群覆盖中的 true/false，QQ 渠道、账号级配置仅作用其单聊。全局有效值变化且任一 Telegram、飞书或 QQ 启用时要求重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload。不改变上游模型流式、思考、完整正文、附件、授权及原窗口和交付义务。
 
-过程说明使用可选 `display.commentary`，缺省开启且不物化；Telegram、飞书与 QQ（含已支持群）支持五层继承，微信范围严格拒绝并隐藏此字段。它只隐藏明确 phase=commentary 的新过程说明，独立于思考状态及原始推理；未知阶段完整正文保留，关闭时未知阶段增量先缓冲而不预览，待明确 final_answer 或完整 Item 再展示。已准入正文流与已有 Journal 内容继续按原义务收尾，正文、附件、审批、失败、任务和模型保留。全局管理使用 `display.commentary` 显式 set boolean/inherit，读取区分 `commentaryEnabled` 与 `commentaryOverride`（布尔值或 null），中英文预览分开显示存储覆盖、有效值和来源；复用确认令牌、修订保护、私有备份与读回，不确定不重试。有效值改变且任一 Telegram、飞书或 QQ 启用时重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组仍整体判定。回退前显式清除全局及覆盖 commentary 并核对后续修改。源码尚未部署，平台效果待验收。
+过程说明使用可选 `display.commentary`，缺省开启且不物化；Telegram、飞书与 QQ 单聊支持五层继承；已有 QQ 群覆盖仅可查看与恢复继承，微信范围严格拒绝并隐藏此字段。它只隐藏明确 phase=commentary 的新过程说明，独立于思考状态及原始推理；未知阶段完整正文保留，关闭时未知阶段增量先缓冲而不预览，待明确 final_answer 或完整 Item 再展示。已准入正文流与已有 Journal 内容继续按原义务收尾，正文、附件、审批、失败、任务和模型保留。全局管理使用 `display.commentary` 显式 set boolean/inherit，读取区分 `commentaryEnabled` 与 `commentaryOverride`（布尔值或 null），中英文预览分开显示存储覆盖、有效值和来源；复用确认令牌、修订保护、私有备份与读回，不确定不重试。有效值改变且任一 Telegram、飞书或 QQ 启用时重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组仍整体判定。回退前显式清除全局及覆盖 commentary 并核对后续修改。源码尚未部署，平台效果待验收。
 
 ## 开发
 

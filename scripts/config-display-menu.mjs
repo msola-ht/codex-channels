@@ -75,7 +75,7 @@ export async function runDisplaySettings({
 
 async function runDisplayScopeSettings({ environment, output, prompts, writeConfig }) {
   const settings = loadGatewaySettings(environment);
-  output.write("范围显示按全局 → 渠道 → 账号 → 聊天类型 → 指定聊天逐字段继承；微信支持常规通知、完成通知和消息详情，QQ 群不支持流式显示。\n");
+  output.write("范围显示按全局 → 渠道 → 账号 → 聊天类型 → 指定聊天逐字段继承；微信支持常规通知、完成通知和消息详情，QQ 群已停用，已有群覆盖仅可恢复继承。\n");
   if (settings.display.targetsStatus === "unavailable") output.write("已确认聊天目标不可读，请检查状态库版本、结构或访问权限；渠道与账号默认仍可编辑。\n");
   const label = scope => [scope.selector.surface, scope.selector.account_id, scope.selector.chat_kind === "direct" ? "私聊" : scope.selector.chat_kind === "group" ? "群聊" : undefined, scope.selector.chat_id].filter(Boolean).join(" / ");
   const selected = await prompts.select({ message: "选择显示目标范围", showInstructions: false, options: [
@@ -247,7 +247,7 @@ async function runRoutineNotificationsSettings({ environment, output, prompts, w
 async function runCommentarySettings({ environment, output, prompts, writeConfig }) {
   const settings = loadGatewaySettings(environment);
   const label = value => value ? "开启" : "关闭";
-  output.write(`过程说明：本层${settings.display.commentaryOverride === null ? "缺省" : label(settings.display.commentaryOverride)}；有效${label(settings.display.commentaryEnabled)}；来源全局。\n只控制 Telegram、飞书与 QQ（含已支持群）的 commentary 过程说明，不是思考状态或原始推理。关闭时未知阶段增量暂不预览，明确为最终回答或完整消息后再展示；未知阶段完整正文、附件、审批、失败、任务和模型保留。已准入正文流与已有 pending 按原义务收尾。微信本来不显示 commentary，不支持此覆盖。\n`);
+  output.write(`过程说明：本层${settings.display.commentaryOverride === null ? "缺省" : label(settings.display.commentaryOverride)}；有效${label(settings.display.commentaryEnabled)}；来源全局。\n只控制 Telegram、飞书与 QQ 单聊的 commentary 过程说明，不是思考状态或原始推理。关闭时未知阶段增量暂不预览，明确为最终回答或完整消息后再展示；未知阶段完整正文、附件、审批、失败、任务和模型保留。已准入正文流与已有 pending 按原义务收尾。微信本来不显示 commentary，不支持此覆盖。\n`);
   const value = await prompts.select({ message: "选择全局过程说明", showInstructions: false, initialValue: settings.display.commentaryOverride === null ? "inherit" : String(settings.display.commentaryOverride), options: [
     { value: "inherit", label: "恢复缺省（开启，不保存覆盖）" }, { value: "true", label: "开启" }, { value: "false", label: "关闭" }, { value: "back", label: "返回上一级" },
   ] });

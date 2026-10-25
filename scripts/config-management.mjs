@@ -326,9 +326,32 @@ function completionSettingActivation(document) {
   return table(document.weixin).enabled === true ? "restart-gateway" : displaySettingActivation(document);
 }
 
+function applyGlobalDisplayEdit(document, input, { field, effective, override, fallback, label, values, activation }) {
+  const edit = input.value;
+  const previous = document.display?.[field] ?? fallback;
+  if (!edit || typeof edit !== "object" || Array.isArray(edit)
+    || Object.keys(edit).some(key => !["action", "value"].includes(key))
+    || !["set", "inherit"].includes(edit.action)
+    || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", `请选择${label}设置或恢复缺省`);
+  if (edit.action === "set") {
+    const value = values ? enumValue(edit.value, values, "value", label) : booleanValue(edit.value, "value", label);
+    document.display = { ...table(document.display), [field]: value };
+  } else if (document.display !== undefined) delete document.display[field];
+  const stored = document.display?.[field] ?? null;
+  return {
+    value: { [effective]: stored ?? fallback, [override]: stored },
+    activation: previous === (stored ?? fallback) ? "reload" : activation(document),
+    backupRequired: true,
+  };
+}
+
 function applySetting(document, input, configPath) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "设置输入必须是对象");
+  }
+  if (typeof input.kind === "string" && input.kind.startsWith("display.")
+    && Object.keys(input).some(key => !["kind", "value"].includes(key))) {
+    throw invalid("input", "invalid-input", "显示设置输入包含不支持的字段");
   }
   const delegated = applyWebuiSetting(document, input)
     ?? applyMetricsSetting(document, input);
@@ -346,91 +369,18 @@ function applySetting(document, input, configPath) {
       // inactive targets. Match reload-classifier's conservative array boundary.
       return { ...result, activation: result.activation === "none" ? "none" : completionSettingActivation(document) };
     }
-    case "display.presentation-detail": {
-      const edit = input.value;
-      const previous = document.display?.presentation_detail ?? "basic";
-      if (!edit || typeof edit !== "object" || Array.isArray(edit)
-        || Object.keys(edit).some(key => !["action", "value"].includes(key))
-        || !["set", "inherit"].includes(edit.action)
-        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择消息详情设置或恢复缺省");
-      if (edit.action === "set") {
-        const value = enumValue(edit.value, ["basic", "detailed", "full"], "value", "消息详情");
-        document.display = { ...table(document.display), presentation_detail: value };
-      } else if (document.display !== undefined) delete document.display.presentation_detail;
-      const override = document.display?.presentation_detail ?? null;
-      return { value: { presentationDetail: override ?? "basic", presentationDetailOverride: override }, activation: previous === (override ?? "basic") ? "reload" : completionSettingActivation(document), backupRequired: true };
-    }
-    case "display.completion": {
-      const previous = table(document.display).completion ?? "detailed";
-      const edit = input.value;
-      if (!edit || typeof edit !== "object" || Array.isArray(edit)
-        || Object.keys(edit).some(key => !["action", "value"].includes(key))
-        || !["set", "inherit"].includes(edit.action)
-        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择完成通知设置或恢复缺省");
-      if (edit.action === "set") {
-        const value = enumValue(edit.value, ["off", "brief", "detailed"], "value", "完成通知");
-        document.display = { ...table(document.display), completion: value };
-      } else if (document.display !== undefined) delete document.display.completion;
-      const override = document.display?.completion ?? null;
-      return { value: { completion: override ?? "detailed", completionOverride: override }, activation: previous === (override ?? "detailed") ? "reload" : completionSettingActivation(document), backupRequired: true };
-    }
-    case "display.routine-notifications": {
-      const edit = input.value;
-      const previous = document.display?.routine_notifications ?? true;
-      if (Object.keys(input).some(key => !["kind", "value"].includes(key))) throw invalid("input", "invalid-input", "常规通知输入包含不支持的字段");
-      if (!edit || typeof edit !== "object" || Array.isArray(edit)
-        || Object.keys(edit).some(key => !["action", "value"].includes(key))
-        || !["set", "inherit"].includes(edit.action)
-        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择常规通知设置或恢复缺省");
-      if (edit.action === "set") {
-        const value = booleanValue(edit.value, "value", "常规通知");
-        document.display = { ...table(document.display), routine_notifications: value };
-      } else if (document.display !== undefined) delete document.display.routine_notifications;
-      const override = document.display?.routine_notifications ?? null;
-      return { value: { routineNotificationsEnabled: override ?? true, routineNotificationsOverride: override }, activation: previous === (override ?? true) ? "reload" : completionSettingActivation(document), backupRequired: true };
-    }
-    case "display.commentary": {
-      const edit = input.value;
-      const previous = document.display?.commentary ?? true;
-      if (!edit || typeof edit !== "object" || Array.isArray(edit)
-        || Object.keys(edit).some(key => !["action", "value"].includes(key))
-        || !["set", "inherit"].includes(edit.action)
-        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择过程说明设置或恢复缺省");
-      if (edit.action === "set") {
-        const value = booleanValue(edit.value, "value", "过程说明");
-        document.display = { ...table(document.display), commentary: value };
-      } else if (document.display !== undefined) delete document.display.commentary;
-      const override = document.display?.commentary ?? null;
-      return { value: { commentaryEnabled: override ?? true, commentaryOverride: override }, activation: previous === (override ?? true) ? "reload" : displaySettingActivation(document), backupRequired: true };
-    }
-    case "display.streaming": {
-      const edit = input.value;
-      const previous = document.display?.streaming ?? true;
-      if (!edit || typeof edit !== "object" || Array.isArray(edit)
-        || Object.keys(edit).some(key => !["action", "value"].includes(key))
-        || !["set", "inherit"].includes(edit.action)
-        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择流式显示设置或恢复缺省");
-      if (edit.action === "set") {
-        const value = booleanValue(edit.value, "value", "流式显示");
-        document.display = { ...table(document.display), streaming: value };
-      } else if (document.display !== undefined) delete document.display.streaming;
-      const override = document.display?.streaming ?? null;
-      return { value: { streamingEnabled: override ?? true, streamingOverride: override }, activation: previous === (override ?? true) ? "reload" : displaySettingActivation(document), backupRequired: true };
-    }
-    case "display.subagents": {
-      const edit = input.value;
-      const previous = document.display?.subagents ?? true;
-      if (!edit || typeof edit !== "object" || Array.isArray(edit)
-        || Object.keys(edit).some(key => !["action", "value"].includes(key))
-        || !["set", "inherit"].includes(edit.action)
-        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择子代理显示设置或恢复缺省");
-      if (edit.action === "set") {
-        const value = booleanValue(edit.value, "value", "子代理显示");
-        document.display = { ...table(document.display), subagents: value };
-      } else if (document.display !== undefined) delete document.display.subagents;
-      const override = document.display?.subagents ?? null;
-      return { value: { subagentsEnabled: override ?? true, subagentsOverride: override }, activation: previous === (override ?? true) ? "reload" : displaySettingActivation(document), backupRequired: true };
-    }
+    case "display.presentation-detail":
+      return applyGlobalDisplayEdit(document, input, { field: "presentation_detail", effective: "presentationDetail", override: "presentationDetailOverride", fallback: "basic", label: "消息详情", values: ["basic", "detailed", "full"], activation: completionSettingActivation });
+    case "display.completion":
+      return applyGlobalDisplayEdit(document, input, { field: "completion", effective: "completion", override: "completionOverride", fallback: "detailed", label: "完成通知", values: ["off", "brief", "detailed"], activation: completionSettingActivation });
+    case "display.routine-notifications":
+      return applyGlobalDisplayEdit(document, input, { field: "routine_notifications", effective: "routineNotificationsEnabled", override: "routineNotificationsOverride", fallback: true, label: "常规通知", values: undefined, activation: completionSettingActivation });
+    case "display.commentary":
+      return applyGlobalDisplayEdit(document, input, { field: "commentary", effective: "commentaryEnabled", override: "commentaryOverride", fallback: true, label: "过程说明", values: undefined, activation: displaySettingActivation });
+    case "display.streaming":
+      return applyGlobalDisplayEdit(document, input, { field: "streaming", effective: "streamingEnabled", override: "streamingOverride", fallback: true, label: "流式显示", values: undefined, activation: displaySettingActivation });
+    case "display.subagents":
+      return applyGlobalDisplayEdit(document, input, { field: "subagents", effective: "subagentsEnabled", override: "subagentsOverride", fallback: true, label: "子代理显示", values: undefined, activation: displaySettingActivation });
     case "channel.enabled": {
       const channel = enumValue(input.channel, ["telegram", "feishu", "weixin", "qq"], "channel", "通讯渠道");
       const value = booleanValue(input.value, "value", "渠道启用状态");

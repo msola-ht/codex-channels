@@ -1,11 +1,11 @@
 # Config
 
-显示预设是管理层一次应用现有九字段的操作，不属于 TOML Schema 或运行模式；全局默认值保持不变，默认识别为 `standard`，不匹配则为只读 `custom`。共享定义、识别与支持矩阵在 `runtime/message-display-policy.mjs`，读取返回 computed `display.preset` / `scope.preset`。微信仅应用完成通知、消息详情与常规通知，QQ 群排除流式字段；不增加不支持配置，不影响日志、调用采集、模型分组或 Telegram 格式。全局有效值已匹配时不物化默认值；范围一次显式固定全部支持字段，之后仍可逐字段修改或恢复继承。原子事务、激活、备份与回退沿现有配置合同。
+显示预设是管理层一次应用现有九字段的操作，不属于 TOML Schema 或运行模式；全局默认值保持不变，默认识别为 `standard`，不匹配则为只读 `custom`。共享定义、识别与支持矩阵在 `runtime/message-display-policy.mjs`，读取返回 computed `display.preset` / `scope.preset`。微信仅应用完成通知、消息详情与常规通知，已停用的 QQ 群不能应用预设；不增加不支持配置，不影响日志、调用采集、模型分组或 Telegram 格式。全局有效值已匹配时不物化默认值；范围一次显式固定全部支持字段，之后仍可逐字段修改或恢复继承。原子事务、激活、备份与回退沿现有配置合同。
 
-可选 `display.routine_notifications` 不由默认补齐物化，缺省投影为必填 `MessageDisplaySettings.routineNotificationsEnabled = true`。四渠道含微信与 QQ 群均支持同名五层覆盖；全局管理 kind `display.routine-notifications` 使用显式 set boolean/inherit，读回有效值与 `routineNotificationsOverride`。全局有效值改变且任一渠道启用时重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组沿整体判定。不改持久 Schema；异常、需用户动作、持久 Workspace 回执和已入 Journal 义务由消费者保留。回退旧版前显式清除全局及覆盖 routine_notifications，不自动迁移。
+可选 `display.routine_notifications` 不由默认补齐物化，缺省投影为必填 `MessageDisplaySettings.routineNotificationsEnabled = true`。四渠道支持同名五层覆盖；QQ 群已停用，已有群覆盖仅保留结构校验、查看与恢复继承；全局管理 kind `display.routine-notifications` 使用显式 set boolean/inherit，读回有效值与 `routineNotificationsOverride`。全局有效值改变且任一渠道启用时重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组沿整体判定。不改持久 Schema；异常、需用户动作、持久 Workspace 回执和已入 Journal 义务由消费者保留。回退旧版前显式清除全局及覆盖 routine_notifications，不自动迁移。
 
 QQ 的 `[qq]` 配置复用共享严格 TOML Schema，仅在显式启用且 AppID、Secret、允许名单齐全时投影运行配置。
-单聊名单新增热加载，删除、账号、凭据或启停变化要求重启 Gateway。群功能暂停开发并关闭；已有可选 `groups` 仍按原结构校验并保留，但不投影为有效群授权，不从单聊扫码身份推导群权限。Setup 不再提供群编辑或配对。
+单聊名单新增热加载，删除、账号、凭据或启停变化要求重启 Gateway。群功能暂停开发并关闭；已有可选 `groups` 仍按原结构校验并保留，但不投影为有效群授权或可写显示目标，不从单聊扫码身份推导群权限。已有群显示覆盖仅可查看及显式恢复继承。Setup 不再提供群编辑或配对。
 
 Workspace 仅定义 `id`、`name` 和 `cwd`；执行权限由 App Server 原生配置及 Thread 继承规则决定，Gateway 不提供工作区权限覆盖字段。
 
@@ -78,7 +78,7 @@ Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺�
 保存前创建私有备份，回退旧版前显式清除全局及覆盖 streaming 并核对后续修改。
 
 可选 `display.commentary` 缺省有效为 `true`，读取与安全默认补齐不物化，解析后的
-`MessageDisplaySettings.commentaryEnabled` 必填。Telegram、飞书与 QQ（含已支持群）支持相同
+`MessageDisplaySettings.commentaryEnabled` 必填。Telegram、飞书与 QQ 单聊支持相同
 五层继承；微信本来不显示 commentary，严格拒绝该覆盖，管理字段不提供。它只隐藏明确
 `phase=commentary` 的新过程说明，独立于 reasoning 和原始推理。未知阶段完整正文保留；关闭时
 未知阶段增量由消费者缓冲，等待明确 final_answer 或完整 Item，不改写 streamingEnabled。

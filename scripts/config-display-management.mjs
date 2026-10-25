@@ -27,8 +27,7 @@ function selectors(document, targets = []) {
     }
     if (surface === "qq") {
       for (const chat_id of document.qq.allowed_user_openids ?? []) add({ surface, account_id, chat_kind: "direct", chat_id });
-      if (document.qq.groups?.length) add({ surface, account_id, chat_kind: "group" });
-      for (const group of document.qq.groups ?? []) add({ surface, account_id, chat_kind: "group", chat_id: group.group_openid });
+      // Retained group configuration is not an active channel capability.
     }
   }
   for (const selector of targets) add(selector);
@@ -76,7 +75,8 @@ export function projectDisplayScopes(document, configuration, targets = []) {
 
 export function applyDisplayScopeSetting(document, input, configPath) {
   const value = input.value;
-  if (!value || typeof value !== "object" || Array.isArray(value)
+  if (Object.keys(input).some(key => !["kind", "value"].includes(key))
+    || !value || typeof value !== "object" || Array.isArray(value)
     || Object.keys(value).some(field => !["selector", "field", "action", "value"].includes(field))) throw invalidSetting("value", "invalid-input", "显示覆盖输入无效");
   if (!fields.includes(value.field) || !["set", "inherit"].includes(value.action)) throw invalidSetting("value", "invalid-input", "请选择显示字段与明确的设置或继承操作");
   if (value.action === "inherit" && Object.hasOwn(value, "value")) throw invalidSetting("value", "invalid-input", "恢复继承不能包含值");
