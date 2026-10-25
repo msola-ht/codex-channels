@@ -77,6 +77,7 @@ timeout_seconds = 900
 idle_release_minutes = 15
 
 [display]
+# 显示预设可在 CLI/WebUI 一次应用：静默、紧凑、详细、完整；完整使用 operation_updates/presentation_detail = "full"。
 # 可通过 codexc config → Gateway 显示设置 → 模型统计分组维护；仅合并控制台按模型统计。
 # 模型选择和明细保留原模型；重新读取即生效，无需重启服务。
 # model_aliases = { "cline-pass/deepseek-v4.1-flash" = "deepseek-flash", "deepseek-v4.1-flash" = "deepseek-flash" }
@@ -108,7 +109,8 @@ reasoning = false
 # 可选完成通知：off 仅隐藏新成功通知；brief 精简；detailed 详细（缺省，不自动写入）。
 # 失败、停止、缺少最终回答和已有 pending 保留；精简不代表正文已送达。
 # completion = "detailed"
-# 可选消息详情：basic 基础（缺省，不自动写入）；detailed 展开启动运行环境及完成/子代理统计子项。
+# 可选消息详情：basic 基础（缺省，不自动写入）；detailed 保留会话摘要与本轮关键统计；
+# full 完整，展开环境、本轮统计分项及审批详情，过滤重复过程通知。
 # 独立于日志等级和调用采集，不改变任务、审批或完成通知开关。
 # presentation_detail = "basic"
 # 可选范围覆盖，普通读取不会生成。通过 codexc config 的“范围显示覆盖”或 WebUI 管理。

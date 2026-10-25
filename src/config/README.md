@@ -98,7 +98,7 @@ Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺�
 思考状态，微信继续不主动发送，其余输出保持不变。启用 Telegram、飞书或 QQ 时变化需要重启 Gateway，
 不需要重启 App Server；只启用微信或未配置渠道时不要求重启。
 
-可选 `display.presentation_detail` 为 `basic` 或 `detailed`，缺省基础且不物化；所有四渠道及五层覆盖均支持，微信支持它、`routine_notifications` 与 `completion`。解析后的 `MessageDisplaySettings.presentationDetail` 必有。它仅控制聊天可见的启动运行环境与完成、子代理统计子项，不改变日志、调用采集、任务、审批或完成通知开关。全局 `display.presentation-detail` 管理操作显式 `set` / `inherit`，读回区分有效 `presentationDetail` 与存储 `presentationDetailOverride`（缺省 `null`），保存前创建私有备份。有效值变化且任一渠道启用时重启 Gateway，否则 reload；缺省基础和显式基础互换只 reload。范围覆盖继续按数组整体保守判定。回退旧版前显式清除全局及覆盖 `presentation_detail` 并核对后续修改。
+可选 `display.presentation_detail` 为 `basic`、`detailed` 或 `full`，缺省基础且不物化；所有四渠道及五层覆盖均支持，微信支持它、`routine_notifications` 与 `completion`。解析后的 `MessageDisplaySettings.presentationDetail` 必有。其中 `full` 展开环境、本轮统计分项及审批详情，过滤重复过程通知；这些档位只控制聊天展示，不改变日志、调用采集、任务、审批或完成通知开关。全局 `display.presentation-detail` 管理操作显式 `set` / `inherit`，读回区分有效 `presentationDetail` 与存储 `presentationDetailOverride`（缺省 `null`），保存前创建私有备份。有效值变化且任一渠道启用时重启 Gateway，否则 reload；缺省基础和显式基础互换只 reload。范围覆盖继续按数组整体保守判定。回退旧版前显式清除全局及覆盖 `presentation_detail` 并核对后续修改。
 
 `logging.level` 是全局日志级别；`debug` 与 `trace` 允许各模块记录受约束的类型、阶段、耗时和结果；
 消息正文、请求参数、上游响应、凭据和审批内容

@@ -441,6 +441,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       if (
         event.operation.status !== "running"
+        && this.displaySettings(event.target.conversationId).operationUpdates !== "full"
         && this.operationUpdates.accept(event, event.target.conversationId)
       ) {
         return;
@@ -554,7 +555,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     const rendered = renderFeishuOutput(
       event,
-      this.displaySettings(event.target.conversationId).presentationDetail === "detailed",
+      this.displaySettings(event.target.conversationId).presentationDetail,
     );
     if (rendered === null) {
       return;
@@ -634,7 +635,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ): void {
     const rendered = renderFeishuOutput(
       event,
-      this.displaySettings(event.target.conversationId).presentationDetail === "detailed",
+      this.displaySettings(event.target.conversationId).presentationDetail,
     );
     if (rendered === null) {
       return;
@@ -997,7 +998,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const prefix = `${key}\u0000`;
     for (const value of this.computerUseCards.keys()) if (value.startsWith(prefix)) this.computerUseCards.delete(value);
     this.flushOperationUpdates(chatId, event);
-    const completion = visible ? renderFeishuOutput(event, this.displaySettings(chatId).presentationDetail === "detailed", mode) : null;
+    const completion = visible ? renderFeishuOutput(event, this.displaySettings(chatId).presentationDetail, mode) : null;
     let resolveStreams!: (failed: boolean) => void;
     const streamsDone = new Promise<boolean>(resolve => { resolveStreams = resolve; });
     let streamsSettled = false;

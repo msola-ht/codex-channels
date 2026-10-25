@@ -18,6 +18,7 @@ import {
   renderStructuredLifecyclePresentation,
   escapeLifecycleLiteral,
   type LifecyclePresentation,
+  type PresentationDetail,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
@@ -96,7 +97,7 @@ export function renderWeixinIdentity(message: {
 
 export function renderWeixinTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  detailed = false,
+  detailed: PresentationDetail = "basic",
   mode: "brief" | "detailed" = "detailed",
 ): string {
   return renderWeixinLifecyclePresentation(
@@ -110,7 +111,7 @@ export function renderWeixinTurnCompleted(
 
 export function renderWeixinSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  detailed = false,
+  detailed: PresentationDetail = "basic",
 ): string {
   return renderWeixinLifecyclePresentation(
     createSubagentCompletedPresentation(event, detailed),

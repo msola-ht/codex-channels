@@ -135,7 +135,7 @@ export interface TelegramSurfaceOptions {
   codexUpstreamUserAgent?: () => string | undefined;
   officialOpenAiAuthenticated?: () => boolean | undefined;
   openAiConnectivity?: () => NonNullable<StartupRuntimeInfo["openAiConnectivity"]>;
-  startupPresentationDetail?: (chatId: number) => "basic" | "detailed";
+  startupPresentationDetail?: (chatId: number) => "basic" | "detailed" | "full";
   startupDisplayPreset?: (chatId: number) => NonNullable<StartupRuntimeInfo["displayPreset"]>;
   startupRoutineNotificationsEnabled?: (chatId: number) => boolean;
   inputQuietWindowMs?: number;

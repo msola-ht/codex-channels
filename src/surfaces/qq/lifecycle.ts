@@ -1,9 +1,9 @@
 import type { ConversationStatus } from "../../application/index.js";
 import type { OutputEvent } from "../../conversation-core/index.js";
 import {
-  createStartupPresentation, createTurnCompletedPresentation,
+  createStartupPresentation, createTurnStartedPresentation, createTurnCompletedPresentation,
   createHookCompletedPresentation, createAutoApprovalReviewPresentation,
-  renderStructuredLifecyclePresentation, renderPlainLifecyclePresentation, type StartupRuntimeInfo,
+  renderStructuredLifecyclePresentation, renderPlainLifecyclePresentation, type StartupRuntimeInfo, type PresentationDetail,
 } from "../lifecycle-presentation.js";
 import { ContextCompactionNotices } from "../operation-presentation.js";
 import { formatCodexWarning, formatConnectionLost, formatConnectionRestored,
@@ -26,7 +26,7 @@ export function isQqLifecycleNotification(event: OutputEvent): event is QqLifecy
 export class QqLifecycleNotifications {
   private readonly compaction = new ContextCompactionNotices();
 
-  render(event: QqLifecycleNotification, retained = false, detailed = true): string | null {
+  render(event: QqLifecycleNotification, retained = false, detailed: PresentationDetail = "detailed"): string | null {
     switch (event.type) {
       case "conversation.idle.released": return formatConversationIdleReleased(event.minutes, event.threadId);
       case "warning": return formatCodexWarning(visibleUpstreamMessage(event.message));
@@ -58,9 +58,18 @@ export function renderQqStartupNotification(
 
 export function renderQqTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  detailed = false,
+  detailed: PresentationDetail = "basic",
   mode: "brief" | "detailed" = "detailed",
 ): { text: string; markdown: string } {
   const presentation = createTurnCompletedPresentation(event, detailed, mode);
+  return { text: renderPlainLifecyclePresentation(presentation), markdown: renderStructuredLifecyclePresentation(presentation) };
+}
+
+export function renderQqTurnStarted(
+  event: Extract<OutputEvent, { type: "turn.started" }>,
+): { text: string; markdown: string } {
+  const presentation = { ...createTurnStartedPresentation(
+    event.background ? event.threadId : undefined, event.identity, event.approvalsReviewer,
+  ), titleStyle: "emphasis" as const };
   return { text: renderPlainLifecyclePresentation(presentation), markdown: renderStructuredLifecyclePresentation(presentation) };
 }

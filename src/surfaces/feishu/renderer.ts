@@ -32,6 +32,7 @@ import {
   createTurnStartedPresentation,
   renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
+  type PresentationDetail,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
@@ -151,7 +152,7 @@ export function renderFeishuUserFacingError(
 
 export function renderFeishuOutput(
   event: OutputEvent,
-  detailed = false,
+  detailed: PresentationDetail = "basic",
   completion: "brief" | "detailed" = "detailed",
 ): string | null {
   switch (event.type) {
@@ -238,7 +239,7 @@ export function renderFeishuOutput(
 
 function renderFeishuSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  detailed = false,
+  detailed: PresentationDetail = "basic",
 ): string {
   return renderFeishuLifecyclePresentation(
     createSubagentCompletedPresentation(event, detailed),
@@ -247,7 +248,7 @@ function renderFeishuSubagentCompleted(
 
 function renderFeishuTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  detailed = false,
+  detailed: PresentationDetail = "basic",
   mode: "brief" | "detailed" = "detailed",
 ): string {
   return renderFeishuLifecyclePresentation(

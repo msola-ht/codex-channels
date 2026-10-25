@@ -6,7 +6,7 @@ import type { DisplayLanguage } from "../format"
  */
 const zh = {
   displayPreset: {
-    title: "显示预设", concise: "静默", standard: "紧凑", detailed: "详细", custom: "自定义（只读识别）",
+    title: "显示预设", concise: "静默", standard: "紧凑", detailed: "详细", full: "完整", custom: "自定义（只读识别）",
     detected: "已保存配置识别：{value}。", apply: "预览并应用预设",
     hint: "根据当前有效字段识别。应用时一次设置本层支持的全部显示字段；之后仍可逐字段修改或恢复继承。不改变日志、调用采集和模型统计分组。",
   },
@@ -542,7 +542,7 @@ const zh = {
     "completion": "完成通知",
     "presentationDetail": "消息详情",
     "presentationDetailDefault": "缺省（基础）",
-    "presentationDetailHint": "基础使用紧凑的上线、完成、子代理和自动审批通过摘要；详细保留运行环境与统计明细。独立于日志等级和调用采集，不改变任务、审批或是否发送完成通知。",
+    "presentationDetailHint": "基础使用紧凑的上线、完成、子代理和自动审批通过摘要；详细保留会话摘要与本轮关键统计；完整展开环境、本轮统计分项及审批详情，过滤重复过程通知。独立于日志等级和调用采集，不改变任务、审批或是否发送完成通知。",
     "basic": "基础",
     "completionDefault": "缺省（详细）",
     "completionHint": "关闭仅隐藏新的成功通知；失败、停止和缺少最终回答仍保留。精简不代表正文已送达；已有待投递通知仍可能发送。",
@@ -1967,7 +1967,7 @@ export type Messages = typeof zh
 
 const en: Messages = {
   displayPreset: {
-    title: "Display preset", concise: "Quiet", standard: "Compact", detailed: "Detailed", custom: "Custom (detected only)",
+    title: "Display preset", concise: "Quiet", standard: "Compact", detailed: "Detailed", full: "Full", custom: "Custom (detected only)",
     detected: "Detected from saved configuration: {value}.", apply: "Preview and apply preset",
     hint: "Detected from current effective fields. Applying sets every supported display field at this scope in one change. Fields can then be edited or inherit individually. Logging, traffic capture, and model statistics groups are unchanged.",
   },
@@ -2503,7 +2503,7 @@ const en: Messages = {
     "completion": "Completion notices",
     "presentationDetail": "Presentation details",
     "presentationDetailDefault": "Default (basic)",
-    "presentationDetailHint": "Basic uses compact startup, completion, subagent, and automatic approval summaries; detailed retains runtime and statistics breakdowns. It is independent of log levels and traffic capture, and does not change tasks, approvals, or whether completion notices are sent.",
+    "presentationDetailHint": "Basic uses compact startup, completion, subagent, and automatic approval summaries; detailed retains the session summary and key statistics for the current turn; full expands environment, current-turn statistics breakdowns, and approval details while filtering repeated progress notices. It is independent of log levels and traffic capture, and does not change tasks, approvals, or whether completion notices are sent.",
     "basic": "Basic",
     "completionDefault": "Default (detailed)",
     "completionHint": "Off hides only new successful notices. Failures, stops, and missing final answers remain visible. Brief does not confirm answer delivery; existing pending notices may still be sent.",

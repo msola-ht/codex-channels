@@ -347,7 +347,7 @@ const gatewayConfigStructureSchema = z.strictObject({
     plan_updates: z.boolean().default(true),
     reasoning: z.boolean().default(false),
     completion: z.enum(["off", "brief", "detailed"]).optional(),
-    presentation_detail: z.enum(["basic", "detailed"]).optional(),
+    presentation_detail: z.enum(["basic", "detailed", "full"]).optional(),
     overrides: messageDisplayOverridesSchema.optional(),
     model_aliases: modelDisplayAliasesSchema.optional(),
   }).default({

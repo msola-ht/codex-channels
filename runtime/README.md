@@ -1,6 +1,8 @@
 # 共享运行时基础设施
 
-`message-display-policy.mjs` 统一定义九个显示字段、渠道支持矩阵及 `concise` / `standard` / `detailed` 三项预设。预设只供管理入口一次应用现有字段，不是持久化键或运行模式；`identifyMessageDisplayPreset` 按有效值及目标支持字段识别，无法匹配时为只读 `custom`。默认配置识别为 `standard`，缺省与继承仍逐字段处理。
+`message-display-policy.mjs` 统一定义九个显示字段、渠道支持矩阵及 `concise` / `standard` / `detailed` / `full` 四项预设。预设只供管理入口一次应用现有字段，不是持久化键或运行模式；`identifyMessageDisplayPreset` 按有效值及目标支持字段识别，无法匹配时为只读 `custom`。默认配置识别为 `standard`，缺省与继承仍逐字段处理。
+
+完整预设采用 `operation_updates = "full"`、`presentation_detail = "full"` 并开启 `reasoning`，展开环境、本轮统计分项及审批详情，过滤重复过程通知。静默、紧凑和详细预设关闭思考状态，详细及完整完成卡仍显示已有推理次数。默认值不变，不自动改写已有配置；旧详细组合需重新应用预设才关闭已保存的思考开关。
 
 详细预设采用 `operation_updates = "detailed"`：与 full 相同准入，正常工具详情单行最多 600 字符，
 超出时明确省略，失败与拒绝保留完整脱敏原因。已有 full 仍保持完整详情；普通读取不重写旧配置。

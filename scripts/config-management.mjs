@@ -354,7 +354,7 @@ function applySetting(document, input, configPath) {
         || !["set", "inherit"].includes(edit.action)
         || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择消息详情设置或恢复缺省");
       if (edit.action === "set") {
-        const value = enumValue(edit.value, ["basic", "detailed"], "value", "消息详情");
+        const value = enumValue(edit.value, ["basic", "detailed", "full"], "value", "消息详情");
         document.display = { ...table(document.display), presentation_detail: value };
       } else if (document.display !== undefined) delete document.display.presentation_detail;
       const override = document.display?.presentation_detail ?? null;

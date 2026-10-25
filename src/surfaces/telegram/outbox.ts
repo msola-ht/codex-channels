@@ -506,7 +506,7 @@ export class TelegramOutbox {
           return;
         }
         flushStreamBeforeOutput();
-        if (this.operationUpdates.accept(event, chatId)) {
+        if (this.displaySettings(chatId).operationUpdates !== "full" && this.operationUpdates.accept(event, chatId)) {
           return;
         }
         const state = this.operationLogFor(chatId, turnKey) ?? this.createOperationLog(chatId, turnKey);
@@ -580,7 +580,7 @@ export class TelegramOutbox {
           (signal) => this.sendPanel(
             chatId,
             renderTelegramLifecyclePresentation(
-              createSubagentStartedPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed"),
+              createSubagentStartedPresentation(event, this.displaySettings(chatId).presentationDetail),
             ),
             undefined,
             true,
@@ -599,7 +599,7 @@ export class TelegramOutbox {
           (signal) => this.sendPanel(
             chatId,
             renderTelegramLifecyclePresentation(
-              createSubagentContactedPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed"),
+              createSubagentContactedPresentation(event, this.displaySettings(chatId).presentationDetail),
             ),
             undefined,
             true,
@@ -615,7 +615,7 @@ export class TelegramOutbox {
         ).then(() => undefined), true);
         return;
       case "autoApprovalReview.updated": {
-        const presentation = createAutoApprovalReviewPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed");
+        const presentation = createAutoApprovalReviewPresentation(event, this.displaySettings(chatId).presentationDetail);
         if (!presentation) return;
         this.enqueue(chatId, (signal) => this.sendPanel(
           chatId,
@@ -633,7 +633,7 @@ export class TelegramOutbox {
             chatId,
             renderTelegramSubagentCompleted(
               event,
-              this.displaySettings(chatId).presentationDetail === "detailed",
+              this.displaySettings(chatId).presentationDetail,
             ),
             undefined,
             true,
@@ -805,7 +805,7 @@ export class TelegramOutbox {
           }
         }
         if (visible) await this.sendPanel(chatId, renderTelegramLifecyclePresentation(
-          createTurnCompletedPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed", mode),
+          createTurnCompletedPresentation(event, this.displaySettings(chatId).presentationDetail, mode),
         ), this.replyTargets.get(chatId, turnKey), shouldHideTurnCompleted(event, "off"), signal);
       } finally { cleanup(); }
     }, true, { purpose: "turn-completion", settled: cleanup });

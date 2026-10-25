@@ -19,7 +19,7 @@ export function writeGatewayConfigSummary(output, document, configPath, environm
     `- 计划显示：${enabledLabel(summary.planUpdates)}`,
     `- 思考状态：${enabledLabel(summary.reasoning)}`,
     `- 完成通知：${({ off: "关闭成功通知", brief: "精简", detailed: "详细" })[summary.completion]}`,
-    `- 消息详情：${summary.presentationDetail === "detailed" ? "详细" : "基础"}`,
+    `- 消息详情：${({ basic: "基础", detailed: "详细", full: "完整" })[summary.presentationDetail]}`,
     "- 消息显示口径：以上显示项为已保存配置的全局缺省，不代表每个聊天的有效值或当前运行状态；渠道、账号与聊天覆盖请在 Gateway 显示设置中核对。",
     `- 计划任务：${enabledLabel(summary.scheduledTasks)}`,
     `- 会话空闲自动解除：${summary.idleReleaseMinutes === 0 ? "关闭" : `${summary.idleReleaseMinutes} 分钟`}`,

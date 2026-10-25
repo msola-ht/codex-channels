@@ -1203,6 +1203,7 @@ export abstract class GatewayComponentGraph {
           const summary = await this.metricsDatabase.withSignal(signal).threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
           return {
+            compact: summary.compact,
             responseUsage: summary.responseUsage ?? null,
             requestOutcomes: summary.requestOutcomes,
             interruptionSummary: summary.interruptionSummary,

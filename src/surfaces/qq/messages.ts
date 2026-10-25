@@ -23,7 +23,7 @@ import { QqQueueSources, type QqQueueTicket } from "./queue-sources.js";
 import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
 import { QQ_TEXT_PART_BYTES, QqProtocolError, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard, type QqReplyAnchor } from "./protocol.js";
-import { isQqLifecycleNotification, QqLifecycleNotifications, renderQqTurnCompleted } from "./lifecycle.js";
+import { isQqLifecycleNotification, QqLifecycleNotifications, renderQqTurnCompleted, renderQqTurnStarted } from "./lifecycle.js";
 import { QqBodyStreaming } from "./streaming.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { QqCommandMenuController } from "./command-menu-controller.js";
@@ -360,7 +360,7 @@ export class QqMessages implements SurfaceOutputPort {
   }
   private async deliverNotification(event: Parameters<QqLifecycleNotifications["render"]>[0], signal: AbortSignal,
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, retained = false): Promise<void> {
-    const content = this.notifications.render(event, retained, this.displaySettings(event.target).presentationDetail === "detailed");
+    const content = this.notifications.render(event, retained, this.displaySettings(event.target).presentationDetail);
     if (content === null) return;
     const recipient = qqConversationRecipient(event.target.conversationId);
     await this.outbox.deliver({ mode: "active", recipient, content }, {
@@ -396,7 +396,7 @@ export class QqMessages implements SurfaceOutputPort {
       } else throw new Error("QQ 图片结果缺少内容");
       return;
     }
-    if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
+    if (event.type !== "text.completed" && event.type !== "turn.completed" && event.type !== "turn.started") throw new Error("QQ 输出类型不受支持");
     // Durable events are decoded/enriched copies. Resolve the original owner
     // passed by dispatch, never WeakMap identity or the latest input in a Turn.
     if (source && (source.kind === "notification" || source.accountId !== event.target.accountId
@@ -405,9 +405,10 @@ export class QqMessages implements SurfaceOutputPort {
       throw new Error("QQ 引用来源与输出不匹配");
     }
     const referenceMessageId = source ? this.sourceRegistry(source).replyReference(source) : undefined;
-    const completion = event.type === "turn.completed"
-      ? renderQqTurnCompleted(event, this.displaySettings(event.target).presentationDetail === "detailed", context?.completion ?? "detailed") : undefined;
-    let text = event.type === "text.completed" ? event.text : completion!.text;
+    const lifecycle = event.type === "turn.completed"
+      ? renderQqTurnCompleted(event, this.displaySettings(event.target).presentationDetail, context?.completion ?? "detailed")
+      : event.type === "turn.started" ? renderQqTurnStarted(event) : undefined;
+    let text = event.type === "text.completed" ? event.text : lifecycle!.text;
     let markdownStart: number | undefined;
     let checkpointFailed = false;
     const record = async (value: DeliveryCheckpoint) => {
@@ -427,13 +428,13 @@ export class QqMessages implements SurfaceOutputPort {
         signal: AbortSignal.any([signal, this.lifetime.signal]),
         groupReply: this.groupReply(source),
         preferMarkdown: true,
-        ...(completion ? { markdownContent: completion.markdown } : {}),
+        ...(lifecycle ? { markdownContent: lifecycle.markdown } : {}),
         ...(markdownStart !== undefined ? { markdownStart } : {}),
         allowResultFile: event.type === "text.completed" && (event.phase !== "commentary" || markdownStart !== undefined),
         beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
         reserve: parts => this.budget.reserve(qqConversationRecipient(event.target.conversationId), parts,
           { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: event.type === "turn.completed",
-            progress: event.type === "text.completed" && event.phase === "commentary" }),
+            progress: event.type === "turn.started" || (event.type === "text.completed" && event.phase === "commentary") }),
       }, record);
     } catch (error) {
       if (event.type === "text.completed" && event.phase !== "commentary" && !checkpointFailed && !signal.aborted && authorized()) {

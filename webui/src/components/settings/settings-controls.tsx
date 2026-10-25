@@ -197,7 +197,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
   const completionLabel = (value: unknown) => value === "off" ? t("settingsFields.completionOff") : value === "brief" || value === "detailed" ? t(`settingsFields.${value}`) : t("settingsFields.completionDefault")
   if (kind === "display.completion" && record !== null) return t("displayScope.fieldSummary", { field: t("settingsFields.completion"), override: completionLabel(record.completionOverride), effective: completionLabel(record.completion), source: t("displayScope.global") })
   if (kind === "display.presentation-detail" && record !== null) {
-    const label = (value: unknown) => value === null ? t("settingsFields.presentationDetailDefault") : value === "basic" || value === "detailed" ? t(`settingsFields.${value}`) : t("common.unknown")
+    const label = (value: unknown) => value === null ? t("settingsFields.presentationDetailDefault") : value === "basic" || value === "detailed" || value === "full" ? t(`settingsFields.${value}`) : t("common.unknown")
     return t("displayScope.fieldSummary", { field: t("settingsFields.presentationDetail"), override: label(record.presentationDetailOverride), effective: label(record.presentationDetail), source: t("displayScope.global") })
   }
   if (kind === "display.subagents" && record !== null) return t("displayScope.fieldSummary", { field: t("settingsFields.subagents"), override: record.subagentsOverride === null ? t("settingsFields.subagentsDefault") : t(record.subagentsOverride ? "settingsFields.enabled" : "settingsFields.disabled"), effective: t(record.subagentsEnabled ? "settingsFields.enabled" : "settingsFields.disabled"), source: t("displayScope.global") })
@@ -217,7 +217,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
       return t("displayScope.fieldSummary", { field: t(field === "operation_updates" ? "settingsFields.operationUpdates" : field === "subagents" ? "settingsFields.subagents" : field === "streaming" ? "settingsFields.streaming" : field === "commentary" ? "settingsFields.commentary" : field === "routine_notifications" ? "settingsFields.routineNotifications" : field === "plan_updates" ? "settingsFields.planUpdates" : field === "completion" ? "settingsFields.completion" : field === "presentation_detail" ? "settingsFields.presentationDetail" : "settingsFields.reasoningStatus"), override: scalar(override?.[field]), effective: scalar(effective?.[key]), source: source === "global" || source === "surface" || source === "account" || source === "chat-kind" || source === "chat" ? translateDisplayScopeSource(t, source) : t("common.unknown") })
     }).join(" · ")
     const preset = record.preset
-    const presetLabel = kind === "display.preset" && (preset === "concise" || preset === "standard" || preset === "detailed" || preset === "custom") ? `${t(`displayPreset.${preset}`)} · ` : ""
+    const presetLabel = kind === "display.preset" && (preset === "concise" || preset === "standard" || preset === "detailed" || preset === "full" || preset === "custom") ? `${t(`displayPreset.${preset}`)} · ` : ""
     return `${target} · ${presetLabel}${detail}`
   }
   if (kind === "system.model-traffic-mode") {

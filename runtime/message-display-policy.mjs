@@ -5,7 +5,8 @@ export const messageDisplayFields = [["operation_updates", "operationUpdates"], 
 export const messageDisplayPresets = Object.freeze({
   concise: Object.freeze({ operation_updates: "hidden", subagents: false, streaming: true, commentary: false, routine_notifications: false, plan_updates: false, reasoning: false, completion: "brief", presentation_detail: "basic" }),
   standard: Object.freeze({ operation_updates: "compact", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: false, completion: "detailed", presentation_detail: "basic" }),
-  detailed: Object.freeze({ operation_updates: "detailed", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: true, completion: "detailed", presentation_detail: "detailed" }),
+  detailed: Object.freeze({ operation_updates: "detailed", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: false, completion: "detailed", presentation_detail: "detailed" }),
+  full: Object.freeze({ operation_updates: "full", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: true, completion: "detailed", presentation_detail: "full" }),
 });
 
 export function supportedMessageDisplayFields(selector) {
@@ -30,7 +31,7 @@ export const messageDisplayOverrideSchema = z.strictObject({
   plan_updates: z.boolean().optional(),
   reasoning: z.boolean().optional(),
   completion: z.enum(["off", "brief", "detailed"]).optional(),
-  presentation_detail: z.enum(["basic", "detailed"]).optional(),
+  presentation_detail: z.enum(["basic", "detailed", "full"]).optional(),
 }).superRefine((value, context) => {
   if (messageDisplayFields.some(([field]) => value[field] !== undefined && !supportedMessageDisplayFields(value).includes(field))
     || (value.chat_kind === "group" && value.surface !== "qq"))

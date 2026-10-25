@@ -351,7 +351,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
           { structuredFields: true },
         );
       case "autoApprovalReview.updated": {
-        const presentation = createAutoApprovalReviewPresentation(event, this.options.displaySettings?.(event.target).presentationDetail === "detailed");
+        const presentation = createAutoApprovalReviewPresentation(event, this.options.displaySettings?.(event.target).presentationDetail ?? "basic");
         return presentation ? formatWeixinCommandText(
           renderPlainLifecyclePresentation(presentation),
           { structuredFields: true },
@@ -370,7 +370,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return formatWeixinCommandText(
           renderWeixinTurnCompleted(
             event,
-            this.options.displaySettings?.(event.target).presentationDetail === "detailed",
+            this.options.displaySettings?.(event.target).presentationDetail ?? "basic",
             completion ?? (this.liveCompletionDisplay(event) === "brief" ? "brief" : "detailed"),
           ),
           { structuredFields: true },

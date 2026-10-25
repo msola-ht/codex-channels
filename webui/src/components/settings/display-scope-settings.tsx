@@ -9,17 +9,17 @@ import { Button } from "@/components/ui/button"
 
 export function DisplayPresetSelect({ management, disabled, scope }: { management: GatewaySettingsController; disabled: boolean; scope?: NonNullable<GatewaySettingsController["managedSettings"]>["display"]["scopes"][number] }) {
   const { t } = useTranslation()
-  const [choice, setChoice] = useState<{ scope: string; preset: "concise" | "standard" | "detailed" } | null>(null)
+  const [choice, setChoice] = useState<{ scope: string; preset: "concise" | "standard" | "detailed" | "full" } | null>(null)
   const preset = scope?.preset ?? management.managedSettings?.display.preset ?? "custom"
   const target = scope?.id ?? "global"
   const selected = choice?.scope === target ? choice.preset : preset
   return <FieldGroup>
     <ManagedSelect label={t("displayPreset.title")} description={`${t("displayPreset.detected", { value: t(`displayPreset.${preset}`) })} ${t("displayPreset.hint")}`} value={selected}
-    options={[["concise", t("displayPreset.concise")], ["standard", t("displayPreset.standard")], ["detailed", t("displayPreset.detailed")], ["custom", t("displayPreset.custom")]]}
+    options={[["concise", t("displayPreset.concise")], ["standard", t("displayPreset.standard")], ["detailed", t("displayPreset.detailed")], ["full", t("displayPreset.full")], ["custom", t("displayPreset.custom")]]}
     disabledValues={["custom"]} disabled={disabled || scope?.writable === false}
-    onChange={value => { if (value === "concise" || value === "standard" || value === "detailed") setChoice({ scope: target, preset: value }) }} />
+    onChange={value => { if (value === "concise" || value === "standard" || value === "detailed" || value === "full") setChoice({ scope: target, preset: value }) }} />
     <Button variant="outline" className="self-start" disabled={disabled || scope?.writable === false || selected === "custom"} onClick={() => {
-      if (selected === "concise" || selected === "standard" || selected === "detailed") void management.previewSetting("display.preset", { preset: selected, ...(scope ? { selector: scope.selector } : {}) }, { key: "displayPreset.title" })
+      if (selected === "concise" || selected === "standard" || selected === "detailed" || selected === "full") void management.previewSetting("display.preset", { preset: selected, ...(scope ? { selector: scope.selector } : {}) }, { key: "displayPreset.title" })
     }}>{t("displayPreset.apply")}</Button>
   </FieldGroup>
 }
@@ -55,7 +55,7 @@ export function DisplayScopeSettings({ management, disabled }: { management: Gat
       {fields.filter(([field]) => scope.supportedFields.includes(field)).map(([field, effective, title]) => <ManagedSelect key={field} label={t(title)}
         description={`${t("displayScope.effective", { value: display(scope.effective[effective]), source: translateDisplayScopeSource(t, scope.sources[effective]) })}${field === "operation_updates" ? ` ${t("settingsFields.operationUpdatesHint")}` : ""}`}
         value={scope.override[field] === undefined ? "inherit" : String(scope.override[field])}
-        options={[["inherit", t("displayScope.inherit")], ...(field === "operation_updates" ? [["full", t("settingsFields.full")], ["detailed", t("settingsFields.detailed")], ["compact", t("settingsFields.compact")], ["failures", t("settingsFields.failures")], ["hidden", t("settingsFields.hidden")]] : field === "completion" ? [["off", t("settingsFields.completionOff")], ["brief", t("settingsFields.brief")], ["detailed", t("settingsFields.detailed")]] : field === "presentation_detail" ? [["basic", t("settingsFields.basic")], ["detailed", t("settingsFields.detailed")]] : [["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]])]}
+        options={[["inherit", t("displayScope.inherit")], ...(field === "operation_updates" ? [["full", t("settingsFields.full")], ["detailed", t("settingsFields.detailed")], ["compact", t("settingsFields.compact")], ["failures", t("settingsFields.failures")], ["hidden", t("settingsFields.hidden")]] : field === "completion" ? [["off", t("settingsFields.completionOff")], ["brief", t("settingsFields.brief")], ["detailed", t("settingsFields.detailed")]] : field === "presentation_detail" ? [["basic", t("settingsFields.basic")], ["detailed", t("settingsFields.detailed")], ["full", t("settingsFields.full")]] : [["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]])]}
         disabledValues={scope.writable ? [] : ["true", "false", "full", "compact", "failures", "hidden", "off", "brief", "detailed", "basic"]}
         disabled={disabled} onChange={value => void management.previewSetting("display.scope", value === "inherit"
           ? { selector: scope.selector, field, action: "inherit" }

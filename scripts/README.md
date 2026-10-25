@@ -1,6 +1,6 @@
 # 项目脚本
 
-显示预设使用 `display.preset`，输入 `{ preset: "concise" | "standard" | "detailed", selector?: MessageDisplaySelector }`。省略目标应用全局，范围复用现有严格目标及启用、授权和可写检查；未知键、`null`、`custom` 和非法目标拒绝。共享定义和支持矩阵来自 `runtime/message-display-policy.mjs`，一次原子事务设置本层全部支持字段，保留其他目标、日志、调用采集、模型分组及 Telegram 格式；微信只写三项，QQ 群不写 streaming。全局有效值已匹配时 none，不补齐缺省；范围则固定显式字段，即使原有效值已匹配也仍属于变更。读取返回 computed `display.preset`、`display.globalScope` 和各 `scope.preset`，不保存标签。CLI 全局及范围字段菜单、WebUI 高风险单次确认、revision、备份、审计、读回、取消与 no-op 共用既有事务；全局激活按真正改变字段和已启用消费者计算，范围按覆盖数组判定。字段仍可单独编辑或恢复继承，无独立预设继承动作。
+显示预设使用 `display.preset`，输入 `{ preset: "concise" | "standard" | "detailed" | "full", selector?: MessageDisplaySelector }`。省略目标应用全局，范围复用现有严格目标及启用、授权和可写检查；未知键、`null`、`custom` 和非法目标拒绝。共享定义和支持矩阵来自 `runtime/message-display-policy.mjs`，一次原子事务设置本层全部支持字段，保留其他目标、日志、调用采集、模型分组及 Telegram 格式；微信只写三项，QQ 群不写 streaming。全局有效值已匹配时 none，不补齐缺省；范围则固定显式字段，即使原有效值已匹配也仍属于变更。读取返回 computed `display.preset`、`display.globalScope` 和各 `scope.preset`，不保存标签。CLI 全局及范围字段菜单、WebUI 高风险单次确认、revision、备份、审计、读回、取消与 no-op 共用既有事务；全局激活按真正改变字段和已启用消费者计算，范围按覆盖数组判定。字段仍可单独编辑或恢复继承，无独立预设继承动作。
 
 常规通知管理由 `config-display-menu.mjs`、`config-management.mjs` 和 `config-display-management.mjs` 共同提供，全局 `display.routine-notifications` 显式 set boolean/inherit，范围字段 `routine_notifications` 支持四渠道及 QQ 群。共享读取区分有效值与覆盖，缺省开启不物化；保存沿 revision、私有备份和读回，取消和未变化不写。WebUI 高风险确认、API allowlist 及读回核对共用相同契约。启用任一渠道时全局有效值变化要求重启 Gateway，隐式 true/显式 true 互换只 reload，范围数组整体判定；回退前清除全局及覆盖 routine_notifications，不自动迁移。
 

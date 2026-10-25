@@ -11,6 +11,7 @@ import {
   createSubagentCompletedPresentation,
   renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
+  type PresentationDetail,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
@@ -90,7 +91,7 @@ export function renderTelegramLifecyclePresentation(
 
 export function renderTelegramSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  detailed = false,
+  detailed: PresentationDetail = "basic",
 ): string {
   return renderTelegramLifecyclePresentation(
     createSubagentCompletedPresentation(event, detailed),

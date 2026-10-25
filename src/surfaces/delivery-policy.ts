@@ -94,6 +94,7 @@ export function resolveSurfaceDelivery(
   event: OutputEvent,
 ): SurfaceDeliveryDecision {
   if (surface === "qq") {
+    if (event.type === "turn.started") return { disposition: "deliver", critical: true };
     if (event.type === "turn.retry" || event.type === "turn.reasoning" || event.type === "plan.updated"
       || event.type === "subagent.spawned" || event.type === "subagent.contacted" || event.type === "subagent.completed") {
       return { disposition: "deliver", critical: isCriticalOutputEvent(event) };
