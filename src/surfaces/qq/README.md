@@ -33,7 +33,7 @@
 - `image-store.ts`：仅消费已准入事件的图片元数据，复用 ManagedImageStore 私有暂存及共享 Data URL 转换；每批最多四张、输入总量 20 MiB、单图 10 MiB、整批三十秒，声明类型必须与内容签名一致。暂存初始化等待可取消，关闭取消下载；成功落盘后沿共享 24 小时清理，不在提交未知时立即删除。下载由注入的 Network 窄端口处理，不接受消息正文 URL。
 - `file-input.ts`：只接事件中单个 `file` 附件，按明确扩展名区分文本与不透明文件；文本复用严格 UTF-8 校验和 TextAttachmentStore（1,000,000 字节，32 KiB 以上暂存），其他文件最大 5,000,000 字节。安全下载与声明/响应/实际字节核对共用；原名只作显示。关闭取消等待并回收在途任务，完整文件按 24 小时清理。
 - `binary-file-store.ts`：不透明文件的独立私有暂存，随机 `.bin` 名称、最多 16 项、每项 5,000,000 字节、保留 24 小时；不解压、执行或改变权限。只向任务传原名、路径、字节和期限，完整落盘后取消或提交未知仍保留至到期。
-- `body-markdown.ts`：任务正文的原生 Markdown 安全前缀选择；保留原文，不补围栏或改写已发送前缀。普通任务清单方括号及确定的 `&&` 不阻断正文；标签、潜在实体、图片及未确认链接仍留给普通文字，只允许完整简单 HTTP(S) 链接，不生成按钮。
+- `body-markdown.ts`：任务正文的原生 Markdown 安全前缀选择；保留原文，不补围栏或改写已发送前缀。完整简单 HTTP(S) 链接、公开 URL 图片及严格 qqbot-media 图片引用可透传，未闭合图片保持原子性；代码图片样例、带凭据 URL、私网字面地址、标签、潜在实体和未知语法留给普通文字。图片 URL 不做 DNS 解析，由 QQ 获取资源；不读取本地路径或生成按钮。
 - `message-markdown.ts`：通知、命令和完整正文的发送前表示规划，另为审批、预览及 Diff 提供完整字面围栏候选。正文安全 Markdown 块整体装箱，每片最多 5000 个 Unicode 码点（含包装，20000 UTF-8 字节兜底）；特殊构造、未闭合或超长块使用 2000 字节字素分片，后续完整安全块恢复 Markdown。流式续接按完整原文计算可恢复 Markdown 的边界，不从半个围栏重新解释。整篇最多八片；通知、命令、审批仍保留原预算，不做发送失败后的格式回退。
 - `command-menu.ts`：固定 `/help` 分类首页、统一 style=0 的按钮构造器及消息键盘宽度规划；Outbox 发送前在五行预算内展开长标签，保留功能分组和全部动作。点击执行使用 type=1 回调，需填写文字使用 type=2、enter=false。首页直达常用功能、子分类不重复收录同一操作；具体操作复用现有控制器和命令路径；协议层统一补齐回调与填入按钮的 visited_label。
 - `command-menu-controller.ts`：工作区、模型/思考等级/速度、会话恢复和统计选择菜单；列表读取及选项执行复用共享命令服务，模型选择复用共享快照和选择守卫。
@@ -77,6 +77,7 @@
 - `protocol.ts`：AppID/AppSecret 校验、Token 合并刷新、Gateway 地址发现、有界 HTTP 响应、取消和结构化错误。
   `acknowledgeInteraction` 单次 PUT 回调接收确认，复用 Token、取消和同步授权守卫；确认接收不代表动作成功。键盘严格区分 type=0 URL 跳转、type=1 回调与 type=2 填入指令的字段；URL 仅接受 HTTPS 或本机 HTTP，拒绝用户信息及控制字符。
   `sendMarkdown` 仅发送完整单片，复用文字收件人/来源/期限校验与消息 ID 回执；使用 msg_type=2 与 markdown.content，不同时保留 content。
+  `sendMarkdownImage` 仅用于显式图片 Markdown 模式，使用素材 prepare、无凭据预签名 PUT、ETag/MD5、complete 后发送严格 qqbot-media 引用；仍以最终消息 ID 确认。120 秒预算、各阶段原来源守卫及取消；客户端内最多缓存 100 个成功素材，保守 TTL，不延长、不持久化、不自动清理平台素材。Network 的 uploadImageMaterial 沿固定公网 IP 上传，使用原 MIME 并返回受限 ETag；普通 uploadPart 保持原协议。
   `getBotMenu`/`putBotMenu` 为 Setup 独立管理入口提供有界 GET/PUT；不参与 Gateway 启动、事件连接或消息投递。
   `sendStream` 显式指定 text/markdown 格式，生产正文使用被动 markdown/replace 帧，固定原来信、序号、索引和流 ID，复用有界请求、同步授权守卫及保守结果分类；不使用 event_id 或 is_wakeup。
   `sendResultFile` 固定文件名、UTF-8/Base64、file_type=4，正文最多 256 KiB；`sendImage` 只接共享校验后的 PNG/JPEG，file_type=1、固定文件名、本地最多 5,000,000 字节。两者先以 srv_send_msg=false 上传，再用 msg_type=7 发送，仅最终合法消息 ID 确认。

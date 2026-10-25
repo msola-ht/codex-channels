@@ -380,7 +380,9 @@ export class SurfaceManager {
     imagePath: string,
     isCurrent: () => boolean,
     signal?: AbortSignal,
+    format?: "markdown",
   ): Promise<void> {
+    if (format !== undefined && (format !== "markdown" || target.surface !== "qq")) throw new Error("图片发送格式不受支持");
     if (this.stopping) {
       throw new Error("Gateway 正在停止，无法发送渠道图片");
     }
@@ -400,7 +402,7 @@ export class SurfaceManager {
     }
     if (isCurrent() !== true) throw new Error("原 Thread 图片接收绑定已失效");
     return surface.sendChannelImage(target.conversationId, imagePath,
-      () => !this.stopping && this.active.has(surface) && isCurrent() === true, signal);
+      () => !this.stopping && this.active.has(surface) && isCurrent() === true, signal, format);
   }
 
   async sendChannelFile(target: ConversationTarget, filePath: string, fileName: string, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void> {

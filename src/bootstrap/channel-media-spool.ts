@@ -23,7 +23,8 @@ const defaultPollIntervalMs = 3_000;
 const maximumFailedArchives = 128;
 
 interface ChannelMediaManifest {
-  version: 1;
+  version: 1 | 2;
+  format?: "markdown";
   threadId: string;
   imagePath: string;
   fileName?: string;
@@ -34,7 +35,7 @@ interface ChannelMediaManifest {
 export interface ChannelMediaSpoolOptions {
   directory: string;
   resolveTarget(threadId: string): ConversationTarget | undefined;
-  send(target: ConversationTarget, path: string, fileName: string | undefined, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void>;
+  send(target: ConversationTarget, path: string, fileName: string | undefined, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal, format?: "markdown"): Promise<void>;
   kind: "image" | "file";
   logger: Logger;
   pollIntervalMs?: number;
@@ -203,6 +204,7 @@ export class ChannelMediaSpool {
       throw new Error(`Thread 未绑定会话：${manifest.threadId}`);
     }
     if (this.options.kind === "file" && target.surface !== "qq" && target.surface !== "feishu") throw new Error("当前渠道不支持文件发送");
+    if (manifest.format === "markdown" && target.surface !== "qq") throw new Error("Markdown 图片发送目前仅支持 QQ");
     const original = { ...target };
     const isCurrent = () => {
       if (this.stopped) return false;
@@ -219,7 +221,7 @@ export class ChannelMediaSpool {
       signal.throwIfAborted();
       if (!isCurrent()) throw new Error("原 Thread 文件接收绑定已失效");
     }
-    await this.options.send(original, manifest.imagePath, manifest.fileName, isCurrent, manifest.mediaType, signal);
+    await this.options.send(original, manifest.imagePath, manifest.fileName, isCurrent, manifest.mediaType, signal, manifest.format);
     this.assertOwnedFile(manifest.imagePath);
     this.assertOwnedFile(manifestPath);
     const imageName = basename(manifest.imagePath);
@@ -263,7 +265,13 @@ export class ChannelMediaSpool {
     } else if ("mediaType" in original) {
       throw new Error("渠道图片 manifest 不支持 mediaType");
     }
-    if (manifest.version !== 1) {
+    if (this.options.kind === "image" && "format" in original
+      && (original.version !== 2 || original.format !== "markdown")) throw new Error("渠道图片 manifest 的 format 不支持");
+    if (this.options.kind === "image" && original.version === 2
+      && Object.keys(original).some(key => !["version", "threadId", "imagePath", "format", "createdAtMs"].includes(key))) {
+      throw new Error("渠道图片 manifest 含不支持的字段");
+    }
+    if (manifest.version !== 1 && !(this.options.kind === "image" && manifest.version === 2 && manifest.format === "markdown")) {
       throw new Error(`${this.label} manifest 版本不支持`);
     }
     if (
@@ -292,7 +300,8 @@ export class ChannelMediaSpool {
       throw new Error(`${this.label}文件不存在：${manifest.imagePath}`);
     }
     return {
-      version: 1,
+      version: manifest.version,
+      ...(manifest.format === "markdown" ? { format: manifest.format } : {}),
       threadId: manifest.threadId,
       imagePath: manifest.imagePath,
       createdAtMs: manifest.createdAtMs,

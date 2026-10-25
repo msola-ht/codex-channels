@@ -123,7 +123,7 @@ export interface SurfaceAdapter {
   readonly output: SurfaceOutputPort;
   takeAsyncAnswerSubmission?(target: ConversationTarget, requestId: string): SurfaceAsyncAnswerSubmission | undefined;
   prepareScheduledTaskSubmission?(context: SurfaceScheduledTaskSubmissionContext): SurfaceAsyncAnswerSubmission;
-  sendChannelImage?(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void>;
+  sendChannelImage?(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal, format?: "markdown"): Promise<void>;
   sendChannelFile?(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void>;
   presentScheduledTaskConfirmation?(
     target: ConversationTarget,

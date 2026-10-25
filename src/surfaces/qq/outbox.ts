@@ -18,7 +18,7 @@ export class QqTextOutbox {
   private readonly lifetime = new AbortController();
   private readonly queue: ConversationDeliveryQueue;
 
-  constructor(private readonly client: Pick<QqProtocolClient, "sendText" | "sendResultFile" | "sendMarkdown" | "sendImage" | "sendFile">, logger: Logger) {
+  constructor(private readonly client: Pick<QqProtocolClient, "sendText" | "sendResultFile" | "sendMarkdown" | "sendImage" | "sendMarkdownImage" | "sendFile">, logger: Logger) {
     this.queue = new ConversationDeliveryQueue(logger, {
       component: "QqTextOutbox", capacity: 128, maximumPendingOperations: 128,
       drainOnClose: false,
@@ -179,8 +179,8 @@ export class QqTextOutbox {
   /** Images share the same conversation ordering and durable receipt contract as text. */
   async deliverImage(recipient: QqRecipient, path: string, context: QqTextSendContext & {
     reserve(): { runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }> };
-  }, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
-    const signal = AbortSignal.any([context.signal, this.lifetime.signal, AbortSignal.timeout(PLAN_TIMEOUT_MS)]);
+  }, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, format?: "markdown"): Promise<void> {
+    const signal = AbortSignal.any([context.signal, this.lifetime.signal, AbortSignal.timeout(format === "markdown" ? 120_000 : PLAN_TIMEOUT_MS)]);
     const guard = (): undefined => {
       signal.throwIfAborted();
       const result: unknown = context.beforeSend();
@@ -197,7 +197,8 @@ export class QqTextOutbox {
         const image = await readGeneratedImage(path, QQ_IMAGE_BYTES);
         guard();
         const reservation = context.reserve();
-        await checkpointDelivery("qq-image", () => reservation.runPart(active, () => this.client.sendImage({ recipient,
+        const send = format === "markdown" ? this.client.sendMarkdownImage.bind(this.client) : this.client.sendImage.bind(this.client);
+        await checkpointDelivery("qq-image", () => reservation.runPart(active, () => send({ recipient,
           bytes: image.bytes, contentType: image.format === "jpeg" ? "image/jpeg" : "image/png",
         }, { signal: active, beforeSend: guard })), error => error instanceof QqTextSendError && error.outcome !== "unknown");
         DeliveryReceipt.current()!.confirmCompleteContent();

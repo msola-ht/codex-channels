@@ -92,7 +92,7 @@
   时间范围、组合筛选、分组、格式及维护命令参数，通过 Observability 的 `query/index` 无状态入口复用规范范围、日期解析与聚合维度，并向顶层帮助
   导出规范用法行；不访问配置、数据库或服务，
   `metrics-database.mjs` 保留原有公开入口与 `metricsRange` 导出。
-- `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。
+- `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入；显式 --format image|markdown 默认 image，markdown 在绑定解析后限定 QQ 并写 version 2 图片请求。
 - `channel-send-file-options.mjs`：显式文件发送参数解析，支持 file/video/voice 类型，拒绝相对路径、重复选择和未知参数。
 - `channel-send-file.mjs`：复用现有配置与前后台绑定读取，QQ/飞书目标的文件经公开安全读取与目标渠道类型校验后复制到独立 `channel-file-outbox`，原子发布携带 mediaType 的 version 1 manifest；入口、预算及回滚见 [`渠道文件`](../docs/channel-file.md)。
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，校验配置与状态库 Schema，解析前台或后台 Thread 绑定；通过 Surface 公开入口校验并有界读取本地图片，私有原子写入

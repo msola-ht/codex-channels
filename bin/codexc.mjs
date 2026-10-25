@@ -226,10 +226,11 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
   channel: `用法：codexc channel <send-image|send-file>
 
 渠道文件能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地图片、文件、视频或语音。`,
-  "channel.send_image": `用法：codexc channel send-image <图片路径> [--thread <Thread ID>]
+  "channel.send_image": `用法：codexc channel send-image <图片路径> [--thread <Thread ID>] [--format image|markdown]
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，发送回该 Thread 绑定的
 飞书/微信/Telegram/QQ 会话；QQ 本地上限 5,000,000 字节。不指定 --thread 且存在多个绑定时会拒绝并提示指定。
+默认 image；markdown 仅 QQ，上传为有额度及有效期的 Markdown 图片素材。
 图片会被复制到状态数据库所在目录的 channel-outbox/pending/，由网关轮询发送；
 成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
   "channel.send_file": `用法：codexc channel send-file <绝对文件路径> [--type file|video|voice] [--thread <Thread ID>]

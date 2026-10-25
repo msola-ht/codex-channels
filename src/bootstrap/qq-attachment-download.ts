@@ -29,13 +29,15 @@ function publicAddress(address: string): boolean {
 export function createQqAttachmentDownloader(network: Pick<QqNetwork, "agentForUrl" | "releaseAgent">): {
   download: QqNetwork["downloadAttachment"];
   uploadPart: QqNetwork["uploadPart"];
+  uploadImageMaterial: QqNetwork["uploadImageMaterial"];
   close(): Promise<void>;
 } {
   const lifetime = new AbortController();
   const requests = new Set<ClientRequest>();
   const closing = new Set<Promise<void>>();
   let cleanupFailed = false;
-  async function transfer(url: URL, caller: AbortSignal, beforeDownload: () => void, bytes?: Uint8Array): Promise<Awaited<ReturnType<QqNetwork["downloadAttachment"]>> | undefined> {
+  async function transfer(url: URL, caller: AbortSignal, beforeDownload: () => void,
+    upload?: { bytes: Uint8Array; contentType: string; requireEtag: boolean }): Promise<Awaited<ReturnType<QqNetwork["downloadAttachment"]>> | { etag: string } | undefined> {
       url = new URL(url.href);
       const signal = AbortSignal.any([caller, lifetime.signal, AbortSignal.timeout(30_000)]);
       signal.throwIfAborted();
@@ -57,20 +59,26 @@ export function createQqAttachmentDownloader(network: Pick<QqNetwork, "agentForU
       };
       let constructed = false;
       try {
-        return await new Promise<Awaited<ReturnType<QqNetwork["downloadAttachment"]>> | undefined>((resolve, reject) => {
+        return await new Promise<Awaited<ReturnType<QqNetwork["downloadAttachment"]>> | { etag: string } | undefined>((resolve, reject) => {
           // CONNECT and direct TCP both use the pinned IP. Host/SNI/certificate
           // identity remain the original hostname; the proxy cannot resolve it again.
           const req = request({ protocol: "https:", hostname: address, port: 443,
-            path: `${url.pathname}${url.search}`, method: bytes ? "PUT" : "GET", agent: agent ?? false, signal,
+            path: `${url.pathname}${url.search}`, method: upload ? "PUT" : "GET", agent: agent ?? false, signal,
             ...(isIP(host) ? {} : { servername: host }), rejectUnauthorized: true,
             checkServerIdentity: (_hostname, certificate) => checkServerIdentity(host, certificate),
             headers: { Host: url.host, "Accept-Encoding": "identity",
-              ...(bytes ? { "Content-Type": "application/octet-stream", "Content-Length": String(bytes.byteLength) } : {}) },
+              ...(upload ? { "Content-Type": upload.contentType, "Content-Length": String(upload.bytes.byteLength) } : {}) },
           }, response => {
-            if (bytes) {
+            if (upload) {
               if (![200, 201, 204].includes(response.statusCode ?? 0)) {
                 response.destroy(); reject(new Error("QQ 分片上传未确认")); return;
               }
+              const header = response.headers.etag;
+              const match = typeof header === "string" ? /^(?:"([a-fA-F0-9]{32})"|([a-fA-F0-9]{32}))$/u.exec(header) : null;
+              if (upload.requireEtag && !match) {
+                response.destroy(); reject(new Error("QQ 图片上传 ETag 无效")); return;
+              }
+              const etag = (match?.[1] ?? match?.[2])?.toLowerCase();
               // A success status is confirmed only after its bounded response completes.
               let received = 0;
               response.on("data", (chunk: Buffer) => {
@@ -81,7 +89,7 @@ export function createQqAttachmentDownloader(network: Pick<QqNetwork, "agentForU
               });
               response.once("error", reject);
               response.once("aborted", () => reject(new Error("QQ 分片上传未确认")));
-              response.once("end", () => resolve(undefined));
+              response.once("end", () => resolve(etag && upload.requireEtag ? { etag } : undefined));
               return;
             }
             if (response.statusCode !== 200) { response.destroy(); reject(new Error("QQ 附件下载未确认")); return; }
@@ -95,7 +103,7 @@ export function createQqAttachmentDownloader(network: Pick<QqNetwork, "agentForU
           requests.add(req);
           req.once("error", reject);
           req.once("close", () => { requests.delete(req); release(); });
-          try { signal.throwIfAborted(); beforeDownload(); req.end(bytes); }
+          try { signal.throwIfAborted(); beforeDownload(); req.end(upload?.bytes); }
           catch (error) { req.destroy(); reject(error instanceof Error ? error : new Error("QQ 附件发送已取消")); }
         });
       } catch (error) {
@@ -106,14 +114,23 @@ export function createQqAttachmentDownloader(network: Pick<QqNetwork, "agentForU
   return {
     async download(url, signal, beforeDownload) {
       const result = await transfer(url, signal, beforeDownload);
-      if (!result) throw new Error("QQ 附件下载未确认");
+      if (!result || !("stream" in result)) throw new Error("QQ 附件下载未确认");
       return result;
     },
     async uploadPart(url, bytes, signal, beforeSend) {
       if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0 || bytes.byteLength > 64 * 1024 * 1024) {
         throw new Error("QQ 分片数据无效");
       }
-      await transfer(url, signal, beforeSend, bytes);
+      await transfer(url, signal, beforeSend, { bytes, contentType: "application/octet-stream", requireEtag: false });
+    },
+    async uploadImageMaterial(url, bytes, contentType, signal, beforeSend) {
+      if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0 || bytes.byteLength > 5_000_000
+        || (contentType !== "image/png" && contentType !== "image/jpeg")) {
+        throw new Error("QQ 图片素材数据无效");
+      }
+      const result = await transfer(url, signal, beforeSend, { bytes, contentType, requireEtag: true });
+      if (!result || !("etag" in result)) throw new Error("QQ 图片素材上传未确认");
+      return result;
     },
     async close() {
       lifetime.abort();

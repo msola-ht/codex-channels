@@ -9,6 +9,7 @@
 ```bash
 codexc channel send-image /absolute/path/to/project/output/playwright/screenshot.png                 # 只有一个会话绑定时自动选择目标
 codexc channel send-image /absolute/path/to/project/output/playwright/screenshot.png --thread <Thread ID>  # 明确指定目标会话
+codexc channel send-image /absolute/path/to/image.png --thread <Thread ID> --format markdown  # QQ Markdown 图片
 ```
 
 - 图片必须是绝对路径、非符号链接的普通文件、PNG/JPEG，大小 1 字节到 10 MiB。
@@ -18,15 +19,18 @@ codexc channel send-image /absolute/path/to/project/output/playwright/screenshot
 - 目标包含前台及仍保留的后台 Thread 绑定。`--thread` 只能指定一次；不指定时只有唯一绑定才会自动选择，存在多个绑定或没有绑定时拒绝。
 - 提交前校验 Gateway 配置及当前状态库 Schema 和必需表结构；不兼容时拒绝入队，不修改数据库。
 - 提交后命令立即返回，图片由网关轮询发送，不代表已送达客户端。
+- `--format image|markdown` 默认 image；markdown 仅支持 QQ，沿相同图片校验、绑定、队列和归档发送。普通图片及生成图片默认不改成素材。
+- QQ Markdown 模式使用素材 prepare、签名 PUT、complete，取得 `qqbot-media://image/v1/...` 后发单图 Markdown。平台最多保存 100 张，连续 90 天未引用会过期；本地只保留同一客户端生命周期内至多 100 个已完成且未过期的引用，不持久化、不跨重启去重、不延长平台返回 TTL，不自动删除平台素材。上传成功不代表消息已发送，只有最终消息 ID 才确认。
+- Markdown 素材路径沿 120 秒发送预算和原 Thread 守卫；签名 PUT 使用匹配的 MIME 并核对 ETag/MD5。额度耗尽、过期、取消或未知结果明确失败，不自动改普通图片或重发。本地仍仅 PNG/JPEG、最多 5,000,000 字节，未扩大到平台全部格式。本轮尚未部署或真实 QQ 验收。
 
 ## 工作原理
 
 1. 命令先通过共享校验读取有界图片字节，再私有原子写入状态数据库所在目录的 `channel-outbox/pending/`（默认 `~/.codex-connect/data/channel-outbox/pending/`），
-   最后发布同名 manifest（`version`、`threadId`、`imagePath`、`createdAtMs`）；入队失败清除本次暂存文件。
+   最后发布同名 manifest（`version`、`threadId`、`imagePath`、`createdAtMs`）；普通图片 version 1，Markdown 图片 version 2 且 `format: "markdown"`。入队失败清除本次暂存文件。
 2. Gateway 默认每 3 秒扫描一次 `pending/`，通过 `threadId` 在会话路由中解析出
    `surface + accountId + conversationId`，再调用对应 Surface Outbox 的
    `sendChannelImage`，使用渠道机器人凭据发送。发送前先在同一目录将 `<编号>.json` 原子改名为
-   `<编号>.sending` 领取请求，manifest 内容仍为 version 1；领取失败不会发送。
+   `<编号>.sending` 领取请求，不改 manifest 内容；领取失败不会发送。
 3. 成功：manifest 和图片一起归档到 `done/`。
 4. 失败：manifest、图片和 `*.error.txt`（原因）一起归档到 `failed/`，并在网关日志
    记录；失败项不会反复重试发送。归档失败时保留 `.sending`，后续轮询只重试归档。
@@ -51,7 +55,7 @@ codexc channel send-image /absolute/path/to/project/output/playwright/screenshot
 ## 恢复与回退
 
 恢复操作前先停止 Gateway，完整备份 `channel-outbox/` 并保留原目录、文件权限。
-本机制不修改 StateStore 或 version 1 manifest 字段，不迁移或删除现有图片。
+本机制不修改 StateStore 或 version 1 manifest 字段，不迁移或删除现有图片。新增 Markdown 请求使用 version 2；不识别该版本的旧网关拒绝发送。回退前备份并将未处理的 version 2 manifest 及同编号图片移至 spool 外的私有隔离目录，升级后再人工核对处理；不把 version 2 改成 version 1。
 无法归档时保留原文件和领取记录并记录日志；修复目录权限或磁盘问题后，网关只重试归档。
 `.sending` 表示可能已经发送，不能改回 `.json` 自动重试；先在原渠道核对，再按需要重新提交。
 

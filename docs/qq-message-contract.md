@@ -1,5 +1,15 @@
 # QQ 消息开发流程与合同
 
+## Markdown 图片（源码接入，尚未部署）
+
+正文支持完整简单的 `![说明 #208px #320px](https://...)` 和 `![说明](qqbot-media://image/v1/...)`，原文交 QQ 渲染，不自动读取本地路径。公网图片由 QQ 下载转存；Gateway 只检查 URL 语法、凭据、字面 IP 与本机域名，不为正文 URL 做 DNS 校验，不能据此保证平台实际抓取目的地。未闭合语法、私网字面地址、带凭据 URL、未知 scheme、代码中的图片样例及不支持的复杂语法保留字面路径；流式不发送半个图片构造，完整分片按原文块装箱。
+
+本地 `codexc channel send-image --format markdown` 沿共享入口和图片 spool，使用独立素材管理 prepare → 匹配 MIME 的无凭据 PUT → ETag/MD5 核验 → complete → Markdown 消息。普通图片与生成图片默认仍走 `/files` 富媒体；素材引用不等于 file_info。PNG/JPEG 本地上限 5,000,000 字节；素材协议与上限依据锁定 `material-management` 文档，不把平台支持 GIF/WebP 等同于本地已开放。素材最多 100 张、90 天未引用过期；仅客户端生命周期内有界复用已完成的引用，TTL 保守计时，不跨重启缓存或自动清理用户素材。
+
+完整发送预算 120 秒，PUT 30 秒；授权、取消与期限检查贯穿 Token 等待、上传、完成和最终消息。仅最终消息 ID 确认送达；上传后失败不自动删除素材、重发或切换富媒体。公网图语法与素材路径均未完成真实 QQ 客户端验收，且本轮未部署。入口、spool 版本与回退说明见 [渠道图片](channel-image.md)。本节取代下文早期“一律阻断图片”的呈现策略。
+
+隔离观察：实际 CLI 在独立配置和 SQLite 绑定下提交 Markdown 图片，version 2 与 68 字节 PNG 经生产 spool 消费归档；未知或重复格式参数拒绝。生产 Outbox → Protocol → 替代 HTTP 得到 `started,confirmed`；PUT 后撤权只有 `started,rejected` 且没有 complete/messages，最终响应缺消息 ID 只有 `started`。素材摘要错误、非法引用、过期、取消、弱/缺失 ETag 与重定向拒绝，同客户端复用不再上传，原普通分片 PUT 不要求 ETag。流式 16000 字节边界完整图片正常形成帧，16001 时只结束已确认前缀，未拆开图片 URL。观察未接触真实账号、用户数据库或 App Server；真实 DNS/TLS/代理、素材配额、QQ 客户端显示及 Windows/macOS 运行行为未观察。
+
 ## 富媒体出站接入（当前未部署）
 
 本轮在 `abcc2904` 后接入两阶段上传发送与大文件分片，沿现有 CLI、文件 spool、SurfaceManager、QQ Outbox 和额度，不建立另一套任务或文件投递语义。入口和本地上限见 [渠道文件](channel-file.md)。新增 `--type file|video|voice`：默认普通文件，不按后缀猜类型；MP4/SILK 仅做受控文件头校验，不转码。图片和长结果文件同时改为先上传、后发送，既有内容预算不扩大。
@@ -10,7 +20,7 @@
 
 隔离生产路径观察：真实 CLI 在独立配置及 SQLite 绑定下提交 file/video/voice，原字节和类型进入私有 manifest，spool 消费并归档；旧缺省类型 manifest 保持原字节。错类型、链接、未知字段及超限拒绝；停止 spool 的取消信号实际传到发送回调并收敛。生产 Outbox→Protocol→替代 HTTP 的完整路径得到 `started,confirmed`；上传失败、上传后撤权与取消得到 `started,rejected` 且零消息请求，消息请求失败只有 `started`，不误确认。群分片大小与 MD5、TTL 到期、非法尾片布局、私网及重定向拒绝由隔离生产函数观察。以上不连接真实 QQ、用户数据库或 App Server。
 
-当前未部署，真实公网预签名 PUT、QQ 两阶段 API 接收、视频/语音客户端表现仍未观察；Windows/macOS 私有文件权限路径未实机观察。ARK 尚未开放：模板权限及具体卡片用途未确认，本轮不把平台模板文档等同于账号可用能力。Markdown 内嵌图片尚未接入：公网 URL 的图片语法仍走字面路径，`qqbot-media://` 所需素材管理 prepare/PUT/complete 是另一组接口，不等同于独立富媒体 `/files` 返回的 file_info；官方素材文档已核对并与本地快照一致。下文早期 `srv_send_msg=true` 和 5 MB 普通文件记录仅描述当时基线，由本节当前合同取代。
+当前未部署，真实公网预签名 PUT、QQ 两阶段 API 接收、视频/语音客户端表现仍未观察；Windows/macOS 私有文件权限路径未实机观察。ARK 尚未开放：模板权限及具体卡片用途未确认，本轮不把平台模板文档等同于账号可用能力。Markdown 图片后续源码接入见上节；官方素材文档已核对并与本地快照一致。下文早期 `srv_send_msg=true` 和 5 MB 普通文件记录仅描述当时基线，由本节当前合同取代。
 
 本合同确定 QQ 消息层重做的边界与交付语义。基于 `16074aa2` 的后续源码现已装配普通文字输入、必要命令、来源注册、共享持久投递与有界 Outbox。
 QQ Adapter 已移除 connectionOnly，启用共享自动绑定恢复与交互，Queue、计划任务和当次配置通知已接线；持久配置事件重放仍关闭，仅在配置启用时连接。交互 `ec20fbc0` 及后续问题 Markdown 与紧凑展示优化已部署，用户截图确认异步问题排版、选项回应确认与对应后续回复开头；完整后续结果及其他交互分支仍待验收。本次点击按钮回调改造已部署、客户端往返待验收，当前合同及证据见下文对应章节。

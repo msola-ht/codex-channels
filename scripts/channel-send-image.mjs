@@ -28,6 +28,7 @@ import { assertStateDatabaseSchema } from "./state-database.mjs";
 export async function submitChannelImage({
   environment = process.env,
   imagePath,
+  format = "image",
   threadId,
   stateDatabasePath,
   spoolDirectory,
@@ -37,6 +38,7 @@ export async function submitChannelImage({
     throw new Error("请提供要发送的图片路径：codexc channel send-image <图片路径>");
   }
   assertAbsoluteChannelImagePath(imagePath);
+  if (format !== "image" && format !== "markdown") throw new Error("图片 format 不受支持");
   const { readGeneratedImage, GeneratedImageError } = await import("../dist/surfaces/index.js");
   let image;
   try {
@@ -60,6 +62,7 @@ export async function submitChannelImage({
   if (target === undefined) {
     throw new Error(`Thread 未绑定会话：${resolvedThreadId}`);
   }
+  if (format === "markdown" && target.surface !== "qq") throw new Error("Markdown 图片发送目前仅支持 QQ");
 
   const pendingDirectory = join(runtime.spoolDirectory, "pending");
   ensurePrivateDirectorySync(runtime.spoolDirectory);
@@ -72,7 +75,8 @@ export async function submitChannelImage({
     writePrivateFileAtomicSync(pendingImage, image.bytes);
     // Publish only after the validated bytes are complete and private.
     writePrivateFileAtomicSync(stagedManifestPath, `${JSON.stringify({
-        version: 1,
+        version: format === "markdown" ? 2 : 1,
+        ...(format === "markdown" ? { format } : {}),
         threadId: resolvedThreadId,
         imagePath: pendingImage,
         createdAtMs: now(),
@@ -164,6 +168,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       console.log(`${CHANNEL_SEND_IMAGE_USAGE}
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，由 Thread 绑定渠道的机器人凭据发送回对应会话。
+默认普通 image；--format markdown 仅 QQ，使用有额度与有效期的图片素材，本地最多 5,000,000 字节。
 不指定 --thread 时，只有当前仅存在一个会话绑定才会自动选择目标。`);
       process.exit(0);
     }

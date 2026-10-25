@@ -8,6 +8,8 @@
 纯共享能力与凭据检查不静态加载飞书或 Telegram SDK。
 该入口也向本机图片提交命令公开 `readGeneratedImage` 与 `GeneratedImageError`，复用普通文件、符号链接、大小与格式校验；读取后的字节才允许进入渠道待发送目录。
 
+`sendChannelImage` 的可选 `format: "markdown"` 当前仅 QQ 支持，由 SurfaceManager 拒绝其他渠道使用；缺省继续普通图片。QQ 使用相同队列、原绑定守卫和收据，素材上传不单独认定图片送达。
+
 `delivery-diagnostics/index.ts` 是离线投递诊断的窄公开入口，仅复用载荷解码和屏障分类，不加载平台 SDK 或数据库实现。
 `persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，持久结果发送未知或授权失效后解除顺序屏障并保留记录、检查点与容量计费，并将必要图片纳入同一有界快照；
 生成图片的上游 `fileId` 只在实时事件中传递，写入快照前一律剥离；只有引用、没有 `savedPath` 的完成结果仅保留内容不可获取标记，恢复后沿用相同提示，不把引用写入投递 Journal。

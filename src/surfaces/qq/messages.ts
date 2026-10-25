@@ -417,7 +417,7 @@ export class QqMessages implements SurfaceOutputPort {
     return task;
   }
 
-  async sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
+  async sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal, format?: "markdown"): Promise<void> {
     const actorId = qqConversationActor(conversationId);
     if (!actorId) throw new Error("QQ 图片目标不受支持");
     const recipient = qqConversationRecipient(conversationId);
@@ -427,8 +427,8 @@ export class QqMessages implements SurfaceOutputPort {
     const context = this.extensionQueryScope(target);
     await this.outbox.deliverImage(recipient, imagePath, { signal: signal ? AbortSignal.any([signal, this.lifetime.signal]) : this.lifetime.signal,
       beforeSend: () => { if (isCurrent() !== true || !this.current(scope) || this.extensionQueryScope(target) !== context) throw new Error("QQ 图片目标已变化"); },
-      reserve: () => this.budget.reserve(recipient, 1, "interaction"),
-    }, async () => {});
+      reserve: () => this.budget.reserve(recipient, 1, "interaction", format === "markdown" ? 120_000 : 45_000),
+    }, async () => {}, format);
   }
 
   async sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void> {

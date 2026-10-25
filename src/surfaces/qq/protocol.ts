@@ -114,6 +114,7 @@ export interface QqProtocolClientOptions {
   appSecret: string;
   fetchImpl: typeof fetch;
   uploadPart?: (url: URL, bytes: Uint8Array, signal: AbortSignal, beforeSend: () => undefined) => Promise<void>;
+  uploadImageMaterial?: (url: URL, bytes: Uint8Array, contentType: "image/png" | "image/jpeg", signal: AbortSignal, beforeSend: () => undefined) => Promise<{ etag: string }>;
 }
 
 /** One immutable account/credential generation. Replace the client on configuration changes. */
@@ -126,6 +127,8 @@ export class QqProtocolClient {
   private readonly appSecret: string;
   private readonly fetchImpl: typeof fetch;
   private readonly uploadPart: QqProtocolClientOptions["uploadPart"];
+  private readonly uploadImageMaterial: QqProtocolClientOptions["uploadImageMaterial"];
+  private readonly imageMaterials = new Map<string, { reference: string; deadline: number }>();
 
   constructor(options: QqProtocolClientOptions) {
     if (!/^[0-9]+$/u.test(options.appId)
@@ -140,11 +143,13 @@ export class QqProtocolClient {
     this.appSecret = options.appSecret;
     this.fetchImpl = options.fetchImpl;
     this.uploadPart = options.uploadPart;
+    this.uploadImageMaterial = options.uploadImageMaterial;
   }
 
   close(): void {
     this.generation++;
     this.cachedToken = undefined;
+    this.imageMaterials.clear();
     this.lifetime.abort();
   }
 
@@ -362,6 +367,115 @@ export class QqProtocolClient {
       return { recipient: input.recipient, fileType: 1,
         fileName: input.contentType === "image/png" ? "codex-image.png" : "codex-image.jpg", bytes: Buffer.from(input.bytes) };
     }, context);
+  }
+
+  /** Upload one image material and send its Markdown reference; only a final message ID confirms delivery. */
+  async sendMarkdownImage(input: QqImageMessage, context: QqTextSendContext): Promise<{ messageId: string }> {
+    let messageAttempted = false;
+    const mediaDeadline = performance.now() + MEDIA_TIMEOUT_MS;
+    try {
+      if (!record(input) || !recipient(input.recipient) || !(input.bytes instanceof Uint8Array)
+        || input.bytes.byteLength === 0 || input.bytes.byteLength > QQ_IMAGE_BYTES
+        || (input.contentType !== "image/png" && input.contentType !== "image/jpeg")
+        || Object.keys(input).some(key => !["recipient", "bytes", "contentType"].includes(key))
+        || !context || !(context.signal instanceof AbortSignal) || typeof context.beforeSend !== "function") {
+        throw new QqProtocolError("upload", "invalid-input");
+      }
+      // Freeze both routing and content before the first credential or network wait.
+      const target: QqRecipient = typeof input.recipient === "string" ? input.recipient : { groupOpenId: input.recipient.groupOpenId };
+      const bytes = Buffer.from(input.bytes);
+      const contentType = input.contentType;
+      const md5 = digest("md5", bytes);
+      const sha1 = digest("sha1", bytes);
+      const key = `${contentType}:${md5}:${sha1}`;
+      return await this.withRequest("upload", context.signal, async signal => {
+        const check = (): undefined => {
+          this.ensureOpen("upload", signal);
+          if (performance.now() >= mediaDeadline) throw new QqProtocolError("upload", "timeout");
+          try {
+            const result: unknown = context.beforeSend();
+            if (result !== undefined) {
+              void Promise.resolve(result).catch(() => undefined);
+              throw new Error();
+            }
+          } catch { throw new QqProtocolError("upload", "authorization"); }
+          this.ensureOpen("upload", signal);
+          if (performance.now() >= mediaDeadline) throw new QqProtocolError("upload", "timeout");
+          return undefined;
+        };
+        const api = async (resource: "prepare" | "complete", body: Record<string, unknown>, guard = check) => {
+          guard();
+          const token = await this.getAccessToken(signal);
+          return await this.requestJson("upload", `/v2/media-images/${resource}`, body, signal, token, guard);
+        };
+        check();
+        // Account-generation-local and success-only. Reuse never extends the confirmed TTL.
+        for (const [cachedKey, material] of this.imageMaterials) {
+          if (performance.now() >= material.deadline) this.imageMaterials.delete(cachedKey);
+        }
+        let material = this.imageMaterials.get(key);
+        if (!material) {
+          if (!this.uploadImageMaterial) throw new QqProtocolError("upload", "invalid-input");
+          const preparedAt = performance.now();
+          const prepared = await api("prepare", {
+            file_name: contentType === "image/png" ? "codex-image.png" : "codex-image.jpg",
+            file_size: bytes.byteLength, content_type: contentType, md5, sha1,
+          });
+          if (!identifier(prepared.upload_id) || typeof prepared.presigned_url !== "string"
+            || prepared.presigned_url.length > 8192 || typeof prepared.expires_in !== "number"
+            || !Number.isInteger(prepared.expires_in) || prepared.expires_in <= 0 || prepared.expires_in > 0xffff_ffff) {
+            throw new QqProtocolError("upload", "invalid-response");
+          }
+          let uploadUrl: URL;
+          try { uploadUrl = new URL(prepared.presigned_url); }
+          catch { throw new QqProtocolError("upload", "invalid-response"); }
+          if (uploadUrl.protocol !== "https:" || uploadUrl.username || uploadUrl.password || uploadUrl.hash
+            || (uploadUrl.port && uploadUrl.port !== "443")) throw new QqProtocolError("upload", "invalid-response");
+          const taskDeadline = preparedAt + 4 * 60 * 60 * 1000;
+          const presignedDeadline = preparedAt + prepared.expires_in * 1000;
+          const checkTask = (): undefined => {
+            check();
+            if (performance.now() >= taskDeadline) throw new QqProtocolError("upload", "expired");
+            return undefined;
+          };
+          const checkUpload = (): undefined => {
+            checkTask();
+            if (performance.now() >= presignedDeadline) throw new QqProtocolError("upload", "expired");
+            return undefined;
+          };
+          checkUpload();
+          const uploaded = await this.withRequest("upload", signal,
+            uploadSignal => this.uploadImageMaterial!(uploadUrl, bytes, contentType, uploadSignal, () => {
+              this.ensureOpen("upload", uploadSignal);
+              return checkUpload();
+            }), UPLOAD_PART_TIMEOUT_MS);
+          checkUpload();
+          if (!record(uploaded) || typeof uploaded.etag !== "string" || !/^[a-fA-F0-9]{32}$/u.test(uploaded.etag)
+            || uploaded.etag.toLowerCase() !== md5) throw new QqProtocolError("upload", "invalid-response");
+          const completedAt = performance.now();
+          const completed = await api("complete", { upload_id: prepared.upload_id, md5 }, checkTask);
+          checkTask();
+          if (!identifier(completed.image_id) || typeof completed.url !== "string"
+            || !/^qqbot-media:\/\/image\/v1\/[A-Za-z0-9_-]{1,4096}$/u.test(completed.url)
+            || typeof completed.ttl !== "number" || !Number.isInteger(completed.ttl)
+            || completed.ttl <= 0 || completed.ttl > 7_776_000) {
+            throw new QqProtocolError("upload", "invalid-response");
+          }
+          material = { reference: completed.url, deadline: completedAt + completed.ttl * 1000 };
+          if (performance.now() >= material.deadline) throw new QqProtocolError("upload", "expired");
+          if (this.imageMaterials.size >= 100) this.imageMaterials.delete(this.imageMaterials.keys().next().value!);
+          this.imageMaterials.set(key, material);
+        }
+        check();
+        return await this.sendPlan(() => ({ path: recipientPath(target, "messages"),
+          body: { msg_type: 2, markdown: { content: `![图片](${material.reference})` } }, deadline: material.deadline }),
+        { signal, beforeSend: check }, () => { messageAttempted = true; });
+      }, MEDIA_TIMEOUT_MS);
+    } catch (error) {
+      if (error instanceof QqTextSendError) throw error;
+      throw new QqTextSendError(messageAttempted ? "unknown" : "not-sent",
+        error instanceof QqProtocolError ? error : new QqProtocolError("upload", "invalid-input"));
+    }
   }
 
   /** Explicit local-file delivery; independent from the bounded complete-text fallback. */

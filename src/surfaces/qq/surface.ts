@@ -120,8 +120,8 @@ export class QqSurface implements SurfaceAdapter {
     ]).then(() => {});
   }
 
-  sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
-    return this.current?.messages.sendChannelImage(conversationId, imagePath, isCurrent, signal)
+  sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal, format?: "markdown"): Promise<void> {
+    return this.current?.messages.sendChannelImage(conversationId, imagePath, isCurrent, signal, format)
       ?? Promise.reject(new Error("QQ 消息连接不可用"));
   }
 
@@ -165,7 +165,8 @@ class QqConnection {
     // Validate credentials before acquiring network resources.
     this.client = new QqProtocolClient({ appId: options.appId, appSecret: options.appSecret,
       fetchImpl: (input, init) => this.network.fetchImpl(input, init),
-      uploadPart: (url, bytes, signal, guard) => this.network.uploadPart(url, bytes, signal, guard) });
+      uploadPart: (url, bytes, signal, guard) => this.network.uploadPart(url, bytes, signal, guard),
+      uploadImageMaterial: (url, bytes, contentType, signal, guard) => this.network.uploadImageMaterial(url, bytes, contentType, signal, guard) });
     this.network = options.createNetwork();
     this.images = new QqImageStore(join(options.uploadsDirectory, `qq-images-${options.appId}`),
       (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger);
