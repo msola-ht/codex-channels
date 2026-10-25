@@ -1,7 +1,7 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
 import type { SurfaceMessageDisplaySettings } from "../types.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
-import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
+import { shouldHideCommentary, shouldPreviewTextDelta, surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
 import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { TelegramTextStreams, type TelegramFinalMessageFormat } from "./text-streams.js";
@@ -201,9 +201,16 @@ export class TelegramOutbox {
       || this.admittedLive.has(event)) return;
     this.admittedLive.add(event);
     if (event.type === "turn.started") this.textStreams.startTurn(event.target.conversationId, event.threadId, event.turnId);
-    else if (event.type === "text.delta") this.textStreams.observeDelta(event);
-    else if (event.type === "turn.completed") this.textStreams.completeTurn(event.target.conversationId, event.threadId, event.turnId);
-    else if (event.type === "connection.lost") this.textStreams.invalidateThread(event.threadId);
+    else if (event.type === "text.delta") {
+      const display = this.displaySettings(event.target.conversationId);
+      if (display.streamingEnabled) this.textStreams.observeDelta(event, shouldPreviewTextDelta(event, display.commentaryEnabled));
+    } else if (event.type === "text.completed") {
+      this.textStreams.observeComplete(event);
+      if (isEmptyCommentary(event) || this.hidesCommentary(event)) this.textStreams.discard(event);
+    } else if (event.type === "turn.completed") {
+      this.textStreams.discardUnadmittedCommentaryForTurn(event.target.conversationId, event.threadId, event.turnId);
+      this.textStreams.completeTurn(event.target.conversationId, event.threadId, event.turnId);
+    } else if (event.type === "connection.lost") this.textStreams.invalidateThread(event.threadId);
   }
 
   observe(event: OutputEvent): void {
@@ -225,7 +232,6 @@ export class TelegramOutbox {
         this.activeOperations.add(key);
       } else this.activeOperations.delete(key);
     }
-    if (event.type === "text.completed" && isEmptyCommentary(event)) this.textStreams.discard(event);
     if (event.type === "turn.started") {
       if (!this.executor.isAuthorized(event.target.conversationId)) return;
       this.expireRunningOperations(event.threadId, (key) => key !== this.turnKey(event.threadId, event.turnId));
@@ -276,6 +282,7 @@ export class TelegramOutbox {
   }
 
   retains(event: OutputEvent): boolean {
+    if (this.hidesCommentary(event)) return false;
     if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled) return false;
     if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
     if (isEmptyCommentary(event)) return false;
@@ -327,6 +334,7 @@ export class TelegramOutbox {
       completion: "detailed" as const,
       presentationDetail: "basic" as const,
       streamingEnabled: true,
+      commentaryEnabled: true,
       subagentsEnabled: true,
     };
   }
@@ -352,6 +360,7 @@ export class TelegramOutbox {
   }
 
   private handleEvent(event: OutputEvent, completion?: "brief" | "detailed"): void {
+    if (DeliveryReceipt.current()?.transient !== false && this.hidesCommentary(event)) return;
     if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled
       && DeliveryReceipt.current()?.transient !== false) return;
     const chatId = event.target.conversationId;
@@ -413,7 +422,9 @@ export class TelegramOutbox {
         return;
       }
       case "text.delta":
-        if (this.displaySettings(chatId).streamingEnabled) this.textStreams.delta(event);
+        if (this.displaySettings(chatId).streamingEnabled) {
+          this.textStreams.delta(event);
+        }
         return;
       case "text.completed":
         if (isEmptyCommentary(event)) return;
@@ -750,6 +761,11 @@ export class TelegramOutbox {
         );
         return;
     }
+  }
+
+  private hidesCommentary(event: OutputEvent): boolean {
+    return shouldHideCommentary(event, this.displaySettings(event.target.conversationId).commentaryEnabled,
+      event.type === "text.completed" && this.textStreams.hasAdmittedPreview(event));
   }
 
   private completeTurn(event: Extract<OutputEvent, { type: "turn.completed" }>, visible: boolean, mode: "brief" | "detailed" = "detailed"): void {

@@ -1,6 +1,6 @@
 import { DeliveryReceipt } from "../delivery-receipt.js";
 import type { Logger } from "pino";
-import type { OutputEvent } from "../../conversation-core/index.js";
+import type { MessagePhase, OutputEvent } from "../../conversation-core/index.js";
 import type { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { surfaceDiagnosticContext } from "../diagnostics.js";
 import type { TurnReplyTargets } from "../turn-reply-targets.js";
@@ -23,6 +23,9 @@ interface FeishuStreamState {
   turnId: string;
   itemId: string;
   text: string;
+  phase: MessagePhase | null | undefined;
+  previewAdmitted: boolean;
+  previewClosed: boolean;
   cardText: string;
   flushGeneration: number;
   truncated: boolean;
@@ -41,6 +44,7 @@ interface FeishuStreamState {
 /** 正文流状态由此组件独占；共享 Outbox 的投递队列、关闭边界与降级发送。 */
 export class FeishuTextStreams {
   private readonly streams = new Map<string, FeishuStreamState>();
+  private readonly observedDeltas = new WeakMap<Extract<OutputEvent, { type: "text.delta" }>, FeishuStreamState | undefined>();
   private streamCapacityWarningIssued = false;
 
   constructor(
@@ -63,6 +67,10 @@ export class FeishuTextStreams {
       if (state.timer) {
         clearTimeout(state.timer);
         delete state.timer;
+      }
+      if (!state.previewAdmitted) {
+        if (state.phase === "commentary") this.discardState(key, state);
+        continue;
       }
       this.delivery.enqueue(
         state.chatId,
@@ -97,9 +105,13 @@ export class FeishuTextStreams {
     }
   }
 
-  acceptStreamDelta(
+  observeDelta(
     event: Extract<OutputEvent, { type: "text.delta" }>,
+    previewAllowed = true,
   ): void {
+    if (this.observedDeltas.has(event)) return;
+    // Remember rejected observations as well; delayed handlers cannot re-admit them.
+    this.observedDeltas.set(event, undefined);
     const key = streamKey(event.target.conversationId, event.threadId, event.turnId, event.itemId);
     const existing = this.streams.get(key);
     if (!existing && this.streams.size >= maximumFeishuActiveStreams) {
@@ -126,6 +138,9 @@ export class FeishuTextStreams {
       turnId: event.turnId,
       itemId: event.itemId,
       text: "",
+      phase: undefined,
+      previewAdmitted: false,
+      previewClosed: false,
       cardText: "",
       flushGeneration: 0,
       truncated: false,
@@ -133,6 +148,9 @@ export class FeishuTextStreams {
       cardCount: 0,
       failed: false,
     };
+    if (state.previewClosed) return;
+    state.previewAdmitted ||= previewAllowed;
+    if (event.phase !== undefined) state.phase = event.phase;
     const previousText = state.text;
     const appended = appendBoundedStreamText(state.text, event.text);
     state.text = appended.text;
@@ -142,6 +160,14 @@ export class FeishuTextStreams {
       state.text.slice(previousText.length),
     ).text;
     this.streams.set(key, state);
+    this.observedDeltas.set(event, state);
+  }
+
+  acceptStreamDelta(event: Extract<OutputEvent, { type: "text.delta" }>): void {
+    const key = streamKey(event.target.conversationId, event.threadId, event.turnId, event.itemId);
+    const state = this.observedDeltas.get(event);
+    if (!state || this.streams.get(key) !== state || state.previewClosed) return;
+    if (!state.previewAdmitted) return;
     if (!state.timer) {
       state.timer = setTimeout(() => {
         delete state.timer;
@@ -160,6 +186,39 @@ export class FeishuTextStreams {
     }
   }
 
+  hasAdmittedPreview(event: Extract<OutputEvent, { type: "text.completed" }>): boolean {
+    return this.streams.get(streamKey(event.target.conversationId, event.threadId, event.turnId, event.itemId))?.previewAdmitted === true;
+  }
+
+  observeComplete(event: Extract<OutputEvent, { type: "text.completed" }>): void {
+    const state = this.streams.get(streamKey(event.target.conversationId, event.threadId, event.turnId, event.itemId));
+    if (state) state.previewClosed = true;
+  }
+
+  discard(event: Extract<OutputEvent, { type: "text.completed" }>): void {
+    const key = streamKey(event.target.conversationId, event.threadId, event.turnId, event.itemId);
+    const state = this.streams.get(key);
+    if (state) this.discardState(key, state);
+  }
+
+  discardUnadmittedCommentaryForTurn(chatId: string, threadId: string, turnId: string): void {
+    for (const [key, state] of this.streams) {
+      if (state.chatId !== chatId || state.threadId !== threadId || state.turnId !== turnId) continue;
+      state.previewClosed = true;
+      if (!state.previewAdmitted && state.phase === "commentary") this.discardState(key, state);
+    }
+  }
+
+  private discardState(key: string, state: FeishuStreamState): void {
+    // A complete Item already owns its terminal send and reply-target lifetime.
+    // Later live hiding may only discard disposable preview buffers.
+    if (state.terminalSettled !== undefined) return;
+    if (state.timer) clearTimeout(state.timer);
+    state.previewAbort.abort();
+    state.flushGeneration += 1;
+    if (this.streams.get(key) === state) this.streams.delete(key);
+  }
+
   completeStream(
     event: Extract<OutputEvent, { type: "text.completed" }>,
     completeFilePlanned = false,
@@ -169,6 +228,8 @@ export class FeishuTextStreams {
     if (!state) {
       return false;
     }
+    state.previewClosed = true;
+    state.phase = event.phase;
     state.truncationNotice = completeFilePlanned ? feishuPreviewNotice : feishuTruncationNotice;
     const bounded = boundedStreamText(event.text);
     const completedText = bounded.text;
@@ -237,6 +298,7 @@ export class FeishuTextStreams {
     turnId: string,
     onSettled: (failed: boolean) => void,
   ): void {
+    this.discardUnadmittedCommentaryForTurn(chatId, threadId, turnId);
     const matching = [...this.streams].filter(([, state]) =>
       state.chatId === chatId && state.threadId === threadId && state.turnId === turnId
     );
@@ -300,6 +362,7 @@ export class FeishuTextStreams {
   ): Promise<void> {
     const state = retainedState ?? this.streams.get(key);
     if (!state) return;
+    if (!terminal && (!state.previewAdmitted || state.previewClosed)) return;
     if (state.terminalSettled === undefined) {
       signal = signal ? AbortSignal.any([signal, state.previewAbort.signal]) : state.previewAbort.signal;
       signal.throwIfAborted();

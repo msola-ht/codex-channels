@@ -467,7 +467,7 @@ function createTelegramModule(
         reason: "private-chat-unconfirmed" }, "Telegram 可选过程展示等待私聊地址确认");
       // Unknown historical targets cannot bypass a direct/chat override. Retained
       // terminal output still renders through the independent durable contract.
-      return { operationUpdates: "hidden", planUpdatesEnabled: false, reasoningEnabled: false, completion: "off", subagentsEnabled: false, presentationDetail: "basic", streamingEnabled: false };
+      return { operationUpdates: "hidden", planUpdatesEnabled: false, reasoningEnabled: false, completion: "off", subagentsEnabled: false, presentationDetail: "basic", streamingEnabled: false, commentaryEnabled: false };
     },
     startupPresentationDetail: chatId => resolveMessageDisplaySettings(config.messageDisplay, {
       surface: "telegram", accountId: telegramDefaultAccountId, chatKind: "direct", chatId: String(chatId),

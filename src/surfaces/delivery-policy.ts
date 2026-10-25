@@ -5,6 +5,19 @@ import {
 } from "../conversation-core/index.js";
 import { isGeneratedImageUnavailable } from "./operation-presentation.js";
 
+/** Unknown phases may be buffered, but cannot reveal a later commentary Item. */
+export function shouldPreviewTextDelta(
+  event: Extract<OutputEvent, { type: "text.delta" }>,
+  commentaryEnabled: boolean,
+): boolean {
+  return commentaryEnabled || event.phase === "final_answer";
+}
+
+/** An already-admitted preview still owns its original terminal settlement. */
+export function shouldHideCommentary(event: OutputEvent, commentaryEnabled: boolean, previewAdmitted = false): boolean {
+  return event.type === "text.completed" && event.phase === "commentary" && !commentaryEnabled && !previewAdmitted;
+}
+
 /**
  * 渠道投递策略的唯一判定点。
  *

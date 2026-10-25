@@ -18,6 +18,7 @@ interface Stream {
   index: number;
   id?: string;
   attempted: boolean;
+  previewAdmitted: boolean;
   completed: boolean;
   failed: boolean;
   selected?: boolean;
@@ -47,7 +48,7 @@ export class QqBodyStreaming {
   }
 
   /** Runs before the shared router may shed a delta. No networking in the observer. */
-  observe(event: Body, source?: QqTaskSourceReference): void {
+  observe(event: Body, source?: QqTaskSourceReference, previewAllowed = true): void {
     if (!event.target.conversationId.startsWith("c2c:")) return;
     const key = this.key(event);
     let stream = this.streams.get(key);
@@ -55,14 +56,16 @@ export class QqBodyStreaming {
       if (stream) stream.completed = true;
       return;
     }
-    if (!source || !this.startedSources.has(this.sourceKey(source)) || this.lifetime.signal.aborted || event.phase === "commentary") return;
+    if (!source || !this.startedSources.has(this.sourceKey(source)) || this.lifetime.signal.aborted
+      || (event.phase === "commentary" && previewAllowed)) return;
     if (!stream) {
       if (this.streams.size >= 128 || this.usedSources.size >= 4096 || this.usedSources.has(source.sourceToken)) return;
       stream = { key, controller: new AbortController(), source, recipient: event.target.conversationId.slice(4), text: "", sent: "",
-        index: 0, attempted: false, completed: false, failed: false };
+        index: 0, attempted: false, previewAdmitted: false, completed: false, failed: false };
       this.streams.set(key, stream);
     }
     if (stream.failed || stream.completed || stream.sealed || stream.limited) return;
+    stream.previewAdmitted ||= previewAllowed;
     if (stream.text.length + event.text.length > QQ_STREAM_BYTES
       || Buffer.byteLength(stream.text) + Buffer.byteLength(event.text) > QQ_STREAM_BYTES) {
       stream.limited = true; stream.text = "";
@@ -75,12 +78,27 @@ export class QqBodyStreaming {
   /** Router permission to start best-effort work; one bounded owner per Item. */
   async update(event: Body, signal?: AbortSignal): Promise<void> {
     const stream = this.streams.get(this.key(event));
-    if (!stream || stream.failed || stream.completed || stream.sealed || this.lifetime.signal.aborted) return;
+    if (!stream || !stream.previewAdmitted || stream.failed || stream.completed || stream.sealed || this.lifetime.signal.aborted) return;
     if (stream.tail) return stream.tail;
     const task = this.flush(stream, signal).catch(() => { stream.failed = true; this.failed(); })
       .finally(() => { if (stream.tail === task) delete stream.tail; });
     stream.tail = task;
     await task;
+  }
+
+  hasAdmittedPreview(event: Body): boolean {
+    return this.streams.get(this.key(event))?.previewAdmitted === true;
+  }
+
+  /** Only removes a local buffer which has never been admitted for display. */
+  discardUnadmitted(event: Body): void {
+    const key = this.key(event);
+    const stream = this.streams.get(key);
+    if (!stream || stream.previewAdmitted) return;
+    stream.controller.abort();
+    clearTimeout(stream.sealTimer);
+    this.streams.delete(key);
+    stream.text = "";
   }
 
   /** Only a confirmed closed prefix permits active continuation; uncertain streams never switch modes. */

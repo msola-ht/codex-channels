@@ -11,7 +11,7 @@ import { formatSurfaceConfigurationChange } from "../configuration-change-format
 import { parseSlashCommand, isEmergencyStopCommand } from "../slash-command.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
-import { resolveSurfaceDelivery } from "../delivery-policy.js";
+import { resolveSurfaceDelivery, shouldHideCommentary, shouldPreviewTextDelta } from "../delivery-policy.js";
 import { isSupportedPersistentOutput } from "../persistent-output.js";
 import { shouldHideTurnCompleted } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
@@ -249,7 +249,11 @@ export class QqMessages implements SurfaceOutputPort {
       this.admitted.set(event, source);
       return;
     }
-    if ((!this.supported(event) && event.type !== "turn.started") || !("threadId" in event) || !("turnId" in event)) return;
+    // A withheld delta still belongs to the original source and bounded Item
+    // buffer: a later final phase must not start with only its suffix.
+    const withheldDelta = event.type === "text.delta" && event.target.conversationId.startsWith("c2c:")
+      && this.displaySettings(event.target).streamingEnabled && !this.displaySettings(event.target).commentaryEnabled;
+    if ((!this.supported(event) && event.type !== "turn.started" && !withheldDelta) || !("threadId" in event) || !("turnId" in event)) return;
     const source = this.scheduledSources.capture(event.target, event.threadId, event.turnId)
       ?? this.queueSources.capture(event.target, event.threadId, event.turnId)
       ?? this.sources.capture(event.target, event.threadId, event.turnId);
@@ -258,15 +262,21 @@ export class QqMessages implements SurfaceOutputPort {
   observe(event: OutputEvent): void {
     if (this.observed.has(event)) return;
     this.observed.add(event);
+    if (event.target.surface === "qq" && event.target.accountId === this.options.appId
+      && shouldHideCommentary(event, this.displaySettings(event.target).commentaryEnabled)
+      && event.type === "text.completed") this.streaming.discardUnadmitted(event);
     const source = this.admitted.get(event);
     if (source || event.type === "connection.lost" || event.type === "conversation.idle.released") this.progress.observe(event);
     if (source?.kind === "notification") return;
     if (source?.generation === this.sources.generation && event.target.conversationId.startsWith("c2c:")) {
-      const streaming = this.displaySettings(event.target).streamingEnabled;
-      if (event.type === "turn.started" && streaming) this.streaming.started(source);
+      const settings = this.displaySettings(event.target);
+      if (event.type === "turn.started" && settings.streamingEnabled) this.streaming.started(source);
       // Completion may supply a phase that was absent on the original deltas.
       // Always reconcile the existing Item stream, including late commentary.
-      if (event.type === "text.completed" || (streaming && event.type === "text.delta" && event.phase !== "commentary")) this.streaming.observe(event, source);
+      if (event.type === "text.completed") this.streaming.observe(event, source);
+      else if (settings.streamingEnabled && event.type === "text.delta") {
+        this.streaming.observe(event, source, shouldPreviewTextDelta(event, settings.commentaryEnabled));
+      }
     }
     if (source && event.type === "turn.completed") this.sourceRegistry(source).terminal(source);
   }
@@ -1124,6 +1134,8 @@ export class QqMessages implements SurfaceOutputPort {
   private supported(event: OutputEvent): boolean {
     if (!this.supportsDelivery(event)) return false;
     const settings = this.displaySettings(event.target);
+    if (shouldHideCommentary(event, settings.commentaryEnabled,
+      event.type === "text.completed" && this.streaming.hasAdmittedPreview(event))) return false;
     if (isSubagentOutput(event) && !settings.subagentsEnabled) return false;
     if (event.type === "turn.reasoning" && !settings.reasoningEnabled) return false;
     if (event.type === "plan.updated" && !settings.planUpdatesEnabled) return false;
@@ -1139,6 +1151,7 @@ export class QqMessages implements SurfaceOutputPort {
       completion: "detailed" as const,
       presentationDetail: "basic" as const,
       streamingEnabled: true,
+      commentaryEnabled: true,
       subagentsEnabled: true,
     };
   }

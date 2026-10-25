@@ -137,6 +137,11 @@ function restartRequiredReasons(
             current.messageDisplay.streaming ?? true,
             next.messageDisplay.streaming ?? true,
           ],
+          [
+            configChange("display.commentary"),
+            current.messageDisplay.commentary ?? true,
+            next.messageDisplay.commentary ?? true,
+          ],
         ] as Array<[ConfigChange, unknown, unknown]>
       : []),
     [

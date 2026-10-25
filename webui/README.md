@@ -15,6 +15,8 @@ shadcn（`npx shadcn@latest add` 安装），业务层只做组件组合与数�
 
 流式显示缺省开启，只控制 Telegram、飞书及 QQ 单聊正文增量预览。全局读取返回 `streamingEnabled` 与 `streamingOverride`（布尔值或 null），`display.streaming` 接受显式 set boolean/inherit；微信和 QQ 群范围不显示该选项，QQ 群预览摘要也不宣称继承流式能力。共享 Schema 严拒微信和 QQ 群覆盖中的 true/false，QQ 渠道、账号级配置仅作用其单聊。全局有效值变化且任一 Telegram、飞书或 QQ 启用时要求重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload。不改变上游模型流式、思考、完整正文、附件、授权及原窗口和交付义务。
 
+过程说明使用可选 `display.commentary`，缺省开启且不物化；Telegram、飞书与 QQ（含已支持群）支持五层继承，微信范围严格拒绝并隐藏此字段。它只隐藏明确 phase=commentary 的新过程说明，独立于思考状态及原始推理；未知阶段完整正文保留，关闭时未知阶段增量先缓冲而不预览，待明确 final_answer 或完整 Item 再展示。已准入正文流与已有 Journal 内容继续按原义务收尾，正文、附件、审批、失败、任务和模型保留。全局管理使用 `display.commentary` 显式 set boolean/inherit，读取区分 `commentaryEnabled` 与 `commentaryOverride`（布尔值或 null），中英文预览分开显示存储覆盖、有效值和来源；复用确认令牌、修订保护、私有备份与读回，不确定不重试。有效值改变且任一 Telegram、飞书或 QQ 启用时重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组仍整体判定。回退前显式清除全局及覆盖 commentary 并核对后续修改。源码尚未部署，平台效果待验收。
+
 ## 开发
 
 `components/settings/management-task-feedback.tsx` 将任务的受控提交状态、失败阶段及恢复类别映射到双语提示；设置、Relay 最近任务和转储清理复用，原始 CLI 输出不进入界面。

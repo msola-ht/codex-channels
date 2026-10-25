@@ -74,6 +74,8 @@ export function loadGatewaySettings(environment = process.env) {
       subagentsOverride: display.subagents ?? null,
       streamingEnabled: display.streaming ?? true,
       streamingOverride: display.streaming ?? null,
+      commentaryEnabled: display.commentary ?? true,
+      commentaryOverride: display.commentary ?? null,
       modelAliases: display.model_aliases ?? {},
       scopes: projectDisplayScopes(document, display, displayTargets.selectors),
       targetsStatus: displayTargets.status,
@@ -360,6 +362,20 @@ function applySetting(document, input, configPath) {
       } else if (document.display !== undefined) delete document.display.completion;
       const override = document.display?.completion ?? null;
       return { value: { completion: override ?? "detailed", completionOverride: override }, activation: completionSettingActivation(document), backupRequired: true };
+    }
+    case "display.commentary": {
+      const edit = input.value;
+      const previous = document.display?.commentary ?? true;
+      if (!edit || typeof edit !== "object" || Array.isArray(edit)
+        || Object.keys(edit).some(key => !["action", "value"].includes(key))
+        || !["set", "inherit"].includes(edit.action)
+        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择过程说明设置或恢复缺省");
+      if (edit.action === "set") {
+        const value = booleanValue(edit.value, "value", "过程说明");
+        document.display = { ...table(document.display), commentary: value };
+      } else if (document.display !== undefined) delete document.display.commentary;
+      const override = document.display?.commentary ?? null;
+      return { value: { commentaryEnabled: override ?? true, commentaryOverride: override }, activation: previous === (override ?? true) ? "reload" : displaySettingActivation(document), backupRequired: true };
     }
     case "display.streaming": {
       const edit = input.value;

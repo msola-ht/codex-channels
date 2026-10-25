@@ -1,7 +1,7 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
 import type { SurfaceMessageDisplaySettings } from "../types.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
-import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
+import { shouldHideCommentary, shouldPreviewTextDelta, surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
 import { isHiddenAutoApprovalReview, shouldHideTurnCompleted } from "../lifecycle-presentation.js";
 import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
@@ -164,8 +164,22 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
   }
 
+  admitLive(event: OutputEvent): void {
+    if (this.closed || event.target.surface !== "feishu" || event.target.accountId !== this.accountId) return;
+    if (event.type === "text.delta") {
+      const display = this.displaySettings(event.target.conversationId);
+      if (display.streamingEnabled) this.textStreams.observeDelta(event, shouldPreviewTextDelta(event, display.commentaryEnabled));
+    } else if (event.type === "text.completed") {
+      this.textStreams.observeComplete(event);
+      if (this.hidesCommentary(event)) this.textStreams.discard(event);
+    } else if (event.type === "turn.completed") {
+      this.textStreams.discardUnadmittedCommentaryForTurn(event.target.conversationId, event.threadId, event.turnId);
+    }
+  }
+
   observe(event: OutputEvent): void {
     if (this.closed || event.target.surface !== "feishu" || event.target.accountId !== this.accountId) return;
+    this.admitLive(event);
     this.snapshots.observe(event);
     this.retryMessages.observe(event);
     if (event.type === "operation.updated" && isExecutionOperation(event.operation)
@@ -231,6 +245,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   retains(event: OutputEvent): boolean {
+    if (this.hidesCommentary(event)) return false;
     if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled) return false;
     if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
     return isPersistentOutput(event, this.displaySettings(event.target.conversationId).operationUpdates);
@@ -279,6 +294,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       completion: "detailed" as const,
       presentationDetail: "basic" as const,
       streamingEnabled: true,
+      commentaryEnabled: true,
       subagentsEnabled: true,
     };
   }
@@ -308,6 +324,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   private handleEvent(event: OutputEvent, completionMode?: "brief" | "detailed"): void {
+    if (DeliveryReceipt.current()?.transient !== false && this.hidesCommentary(event)) return;
     if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled
       && DeliveryReceipt.current()?.transient !== false) return;
     if (event.type === "turn.retry") {
@@ -557,6 +574,11 @@ export class FeishuOutbox implements SurfaceOutputPort {
         : this.sendText(event.target.conversationId, rendered, signal),
       event.type === "turn.started" || isCriticalOutputEvent(event),
     );
+  }
+
+  private hidesCommentary(event: OutputEvent): boolean {
+    return shouldHideCommentary(event, this.displaySettings(event.target.conversationId).commentaryEnabled,
+      event.type === "text.completed" && this.textStreams.hasAdmittedPreview(event));
   }
 
   private async deliverComputerUseCard(

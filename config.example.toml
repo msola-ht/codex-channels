@@ -89,6 +89,11 @@ operation_updates = "compact"
 # 不改变上游模型流式、思考状态、完整正文、附件、授权或原窗口和交付义务。
 # 微信和 QQ 群覆盖严格拒绝 streaming（true/false）；QQ 渠道、账号层只作用其单聊。
 # streaming = true
+# 可选过程说明，缺省 true，不自动写入；Telegram、飞书和 QQ（含已支持群）支持。
+# 关闭只隐藏明确 phase=commentary 的新过程说明，不控制 reasoning 或原始推理。
+# 未知阶段增量暂不预览，待明确 final_answer 或完整消息再展示；未知阶段完整正文保留。
+# 已准入正文流与已有 pending 按原义务收尾；微信本来不展示 commentary，拒绝该覆盖。
+# commentary = true
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
 # 是否在渠道显示“思考中”状态卡；默认 false，不显示。

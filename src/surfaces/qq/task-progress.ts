@@ -329,6 +329,7 @@ export class QqTaskProgress {
       completion: "detailed" as const,
       presentationDetail: "basic" as const,
       streamingEnabled: true,
+      commentaryEnabled: true,
       subagentsEnabled: true,
     };
   }

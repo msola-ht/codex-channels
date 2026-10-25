@@ -72,6 +72,18 @@ Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺�
 启用时重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload，覆盖数组仍整体保守判定。
 保存前创建私有备份，回退旧版前显式清除全局及覆盖 streaming 并核对后续修改。
 
+可选 `display.commentary` 缺省有效为 `true`，读取与安全默认补齐不物化，解析后的
+`MessageDisplaySettings.commentaryEnabled` 必填。Telegram、飞书与 QQ（含已支持群）支持相同
+五层继承；微信本来不显示 commentary，严格拒绝该覆盖，管理字段不提供。它只隐藏明确
+`phase=commentary` 的新过程说明，独立于 reasoning 和原始推理。未知阶段完整正文保留；关闭时
+未知阶段增量由消费者缓冲，等待明确 final_answer 或完整 Item，不改写 streamingEnabled。
+已准入正文流和已入 Journal 内容按原义务收尾，正文、附件、审批、失败、任务和模型保留。
+全局 `display.commentary` 使用显式 set boolean/inherit，读回 `commentaryEnabled` 与
+`commentaryOverride`（布尔值或 null）。有效值变化且 Telegram、飞书或 QQ 任一启用时要求
+重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组仍整体保守判定。
+保存前创建私有备份；取消、未变化不写，旧 revision 拒绝。回退前清除全局及覆盖 commentary，
+核对后续修改，勿直接覆盖备份。
+
 上游模型是否能够产生计划通知由 Codex 用户配置的 `tools.update_plan.enabled` 控制，默认关闭；通过
 `codexc config → Codex 新会话与用户偏好 → 计划清单工具` 修改。该设置写入 `~/.codex/config.toml`，与 Gateway
 的 `display.plan_updates` 分开管理；`codexc update` 会在合同预检时提示当前状态，`codexc doctor` 只读诊断该项。

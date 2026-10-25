@@ -24,6 +24,7 @@ export async function runDisplaySettings({
         { value: "presentation_detail", label: "消息详情", hint: "基础 / 详细，独立于日志等级，缺省基础" },
         { value: "subagents", label: "子代理显示", hint: "开启 / 关闭，缺省开启" },
         { value: "streaming", label: "流式显示", hint: "正文增量预览，缺省开启；仅 Telegram、飞书和 QQ 单聊" },
+        { value: "commentary", label: "过程说明", hint: "commentary 过程说明，缺省开启；Telegram、飞书和 QQ" },
         { value: "operation_updates", label: "操作详情显示", hint: "full / compact / failures / hidden" },
         { value: "plan_updates", label: "计划更新显示", hint: "是否显示 Codex 计划" },
         { value: "reasoning", label: "思考状态显示", hint: "默认关闭；是否显示“思考中”状态卡" },
@@ -45,6 +46,8 @@ export async function runDisplaySettings({
       result = await runSubagentsSettings(options);
     } else if (section === "streaming") {
       result = await runStreamingSettings(options);
+    } else if (section === "commentary") {
+      result = await runCommentarySettings(options);
     } else if (section === "message_format" && telegramConfigured) {
       result = await runTelegramMessageFormat(options);
     } else if (section === "operation_updates") {
@@ -77,7 +80,7 @@ async function runDisplayScopeSettings({ environment, output, prompts, writeConf
   if (!scope) throw new Error("未知显示目标范围");
   output.write(`当前目标：${label(scope)}\n${displayScopeSummary(scope)}\n`);
   const field = await prompts.select({ message: "选择显示字段", showInstructions: false, options: [
-    ...[{ value: "operation_updates", label: "操作详情" }, { value: "subagents", label: "子代理显示" }, { value: "streaming", label: "流式显示" }, { value: "plan_updates", label: "计划更新" }, { value: "reasoning", label: "思考状态" }, { value: "completion", label: "完成通知" }, { value: "presentation_detail", label: "消息详情" }].filter(option => scope.supportedFields.includes(option.value)), { value: "back", label: "返回上一级" },
+    ...[{ value: "operation_updates", label: "操作详情" }, { value: "subagents", label: "子代理显示" }, { value: "streaming", label: "流式显示" }, { value: "commentary", label: "过程说明" }, { value: "plan_updates", label: "计划更新" }, { value: "reasoning", label: "思考状态" }, { value: "completion", label: "完成通知" }, { value: "presentation_detail", label: "消息详情" }].filter(option => scope.supportedFields.includes(option.value)), { value: "back", label: "返回上一级" },
   ] });
   if (prompts.isCancel(field) || field === "back") return { action: "back" };
   if (!scope.supportedFields.includes(field)) throw new Error("该目标不支持所选显示字段");
@@ -88,10 +91,11 @@ async function runDisplayScopeSettings({ environment, output, prompts, writeConf
   ] });
   if (prompts.isCancel(value) || value === "back") return { action: "back" };
   if (field === "streaming" && !["true", "false", "inherit"].includes(value)) throw new Error("未知流式显示选项");
+  if (field === "commentary" && !["true", "false", "inherit"].includes(value)) throw new Error("未知过程说明选项");
   const edit = { kind: "display.scope", value: value === "inherit" ? { selector: scope.selector, field, action: "inherit" } : { selector: scope.selector, field, action: "set", value: field === "operation_updates" || field === "completion" || field === "presentation_detail" ? value : value === "true" } };
   const preview = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig: () => undefined, skipBackup: true });
-  output.write(`预览目标：${label(scope)}\n${displayScopeSummary(preview.value)}\n保存前创建私有配置备份；新增覆盖要求新版 Gateway。保存后按提示激活，已有 pending 仍可能投递；重启恢复不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/presentation_detail，并将全局及覆盖 failures 改为旧版支持值；核对后续修改，勿直接恢复备份覆盖配置。\n`);
-  const fieldName = { operation_updates: "操作详情", subagents: "子代理显示", streaming: "流式显示", plan_updates: "计划更新", reasoning: "思考状态", completion: "完成通知", presentation_detail: "消息详情" }[field];
+  output.write(`预览目标：${label(scope)}\n${displayScopeSummary(preview.value)}\n保存前创建私有配置备份；新增覆盖要求新版 Gateway。保存后按提示激活，已有 pending 仍可能投递；重启恢复不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/presentation_detail，并将全局及覆盖 failures 改为旧版支持值；核对后续修改，勿直接恢复备份覆盖配置。\n`);
+  const fieldName = { operation_updates: "操作详情", subagents: "子代理显示", streaming: "流式显示", commentary: "过程说明", plan_updates: "计划更新", reasoning: "思考状态", completion: "完成通知", presentation_detail: "消息详情" }[field];
   const confirmed = await prompts.confirm({ message: `确认修改 ${label(scope)} 的${fieldName}？`, initialValue: false });
   if (prompts.isCancel(confirmed) || !confirmed) return { action: "back" };
   const result = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig });
@@ -118,6 +122,7 @@ function displayScopeSummary(scope) {
     ["operation_updates", "operationUpdates", "操作详情"], ["plan_updates", "planUpdatesEnabled", "计划更新"], ["reasoning", "reasoningEnabled", "思考状态"], ["completion", "completion", "完成通知"],
     ["subagents", "subagentsEnabled", "子代理显示"],
     ["streaming", "streamingEnabled", "流式显示"],
+    ["commentary", "commentaryEnabled", "过程说明"],
     ["presentation_detail", "presentationDetail", "消息详情"],
   ].filter(([field]) => scope.supportedFields.includes(field)).map(([field, effective, label]) => `${label}：本层${scope.override[field] === undefined ? "继承上级" : values[String(scope.override[field])]}；有效${values[String(scope.effective[effective])]}；来源${sources[scope.sources[effective]]}`)].join("\n");
 }
@@ -168,6 +173,32 @@ async function runCompletionSettings({ environment, output, prompts, writeConfig
     return { ...result, consistency: "unknown" };
   }
   output.write(`${result.activation === "none" ? "设置未变化" : "完成通知已保存并读回确认"}：${result.configPath}\n${result.backupPath ? `私有备份：${result.backupPath}\n` : ""}`);
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { ...result, consistency: "confirmed" };
+}
+
+async function runCommentarySettings({ environment, output, prompts, writeConfig }) {
+  const settings = loadGatewaySettings(environment);
+  const label = value => value ? "开启" : "关闭";
+  output.write(`过程说明：本层${settings.display.commentaryOverride === null ? "缺省" : label(settings.display.commentaryOverride)}；有效${label(settings.display.commentaryEnabled)}；来源全局。\n只控制 Telegram、飞书与 QQ（含已支持群）的 commentary 过程说明，不是思考状态或原始推理。关闭时未知阶段增量暂不预览，明确为最终回答或完整消息后再展示；未知阶段完整正文、附件、审批、失败、任务和模型保留。已准入正文流与已有 pending 按原义务收尾。微信本来不显示 commentary，不支持此覆盖。\n`);
+  const value = await prompts.select({ message: "选择全局过程说明", showInstructions: false, initialValue: settings.display.commentaryOverride === null ? "inherit" : String(settings.display.commentaryOverride), options: [
+    { value: "inherit", label: "恢复缺省（开启，不保存覆盖）" }, { value: "true", label: "开启" }, { value: "false", label: "关闭" }, { value: "back", label: "返回上一级" },
+  ] });
+  if (prompts.isCancel(value) || value === "back") return { action: "back" };
+  if (!["true", "false", "inherit"].includes(value)) throw new Error("未知过程说明选项");
+  const edit = { kind: "display.commentary", value: value === "inherit" ? { action: "inherit" } : { action: "set", value: value === "true" } };
+  const preview = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig: () => undefined, skipBackup: true });
+  output.write(`预览：全局过程说明${label(preview.value.commentaryEnabled)}；${value === "inherit" ? "删除覆盖字段" : "保存显式覆盖"}。保存前创建私有备份，保存后按提示激活；此字段要求新版 Gateway。回退前显式清除全局及覆盖 commentary，核对后续修改，勿直接覆盖配置。\n`);
+  const confirmed = await prompts.confirm({ message: "确认修改全局过程说明？", initialValue: false });
+  if (prompts.isCancel(confirmed) || !confirmed) return { action: "back" };
+  const result = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig });
+  let current;
+  try { current = loadGatewaySettings(environment); } catch { /* Preserve saved state when readback is unavailable. */ }
+  if (!current || current.display.commentaryOverride !== preview.value.commentaryOverride) {
+    output.write(`保存操作已返回，但配置读回未确认，请重新读取配置，勿重复保存：${result.configPath}\n`);
+    return { ...result, consistency: "unknown" };
+  }
+  output.write(`${result.activation === "none" ? "设置未变化" : "过程说明已保存并读回确认"}：${result.configPath}\n${result.backupPath ? `私有备份：${result.backupPath}\n` : ""}`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { ...result, consistency: "confirmed" };
 }

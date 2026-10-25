@@ -24,6 +24,9 @@ interface StreamState {
   messageId: number | undefined;
   creationUncertain: boolean;
   phase: MessagePhase | null | undefined;
+  previewAdmitted: boolean;
+  previewStarted: boolean;
+  previewClosed: boolean;
   completed: boolean;
   truncated: boolean;
   timer: NodeJS.Timeout | undefined;
@@ -47,6 +50,7 @@ export class TelegramTextStreams {
   private readonly streams = new Map<string, StreamState>();
   private readonly activities = new Map<string, StreamActivity>();
   private readonly observedDeltas = new WeakMap<Extract<OutputEvent, { type: "text.delta" }>, StreamActivity | undefined>();
+  private readonly observedDeltaStates = new WeakMap<Extract<OutputEvent, { type: "text.delta" }>, StreamState | undefined>();
   private readonly notifiedTurns = new Set<string>();
   private streamCapacityWarningIssued = false;
   private activityCapacityWarningIssued = false;
@@ -88,17 +92,13 @@ export class TelegramTextStreams {
     this.activities.set(key, { chatId, turnKey, authorization, controller: new AbortController() });
   }
 
-  observeDelta(event: Extract<OutputEvent, { type: "text.delta" }>): void {
+  observeDelta(event: Extract<OutputEvent, { type: "text.delta" }>, previewAllowed = true): void {
     // Reader observation precedes routing waits. Re-observing the same live event
     // must not attach it to a later authorization or restored Turn identity.
-    if (!this.observedDeltas.has(event)) {
-      this.observedDeltas.set(event, this.activities.get(this.activityKey(
-        event.target.conversationId, this.turnKey(event.threadId, event.turnId),
-      )));
-    }
-  }
-
-  delta(event: Extract<OutputEvent, { type: "text.delta" }>): void {
+    if (this.observedDeltas.has(event)) return;
+    this.observedDeltas.set(event, this.activities.get(this.activityKey(
+      event.target.conversationId, this.turnKey(event.threadId, event.turnId),
+    )));
     const chatId = event.target.conversationId;
     const turnKey = this.turnKey(event.threadId, event.turnId);
     const key = this.streamKey(chatId, turnKey, event.itemId);
@@ -124,10 +124,9 @@ export class TelegramTextStreams {
     if (this.streams.size < maximumTelegramActiveStreams) {
       this.streamCapacityWarningIssued = false;
     }
-    if (!existing) {
-      this.beforeNewStream(chatId, turnKey);
-    }
     const state = existing ?? this.createStream(chatId, turnKey, activity);
+    if (state.previewClosed) return;
+    state.previewAdmitted ||= previewAllowed;
     const bounded = boundedTelegramStreamText(`${state.text}${event.text}`);
     state.text = bounded.text;
     state.truncated ||= bounded.truncated;
@@ -135,6 +134,20 @@ export class TelegramTextStreams {
       state.phase = event.phase;
     }
     this.streams.set(key, state);
+    this.observedDeltaStates.set(event, state);
+  }
+
+  delta(event: Extract<OutputEvent, { type: "text.delta" }>): void {
+    const chatId = event.target.conversationId;
+    const turnKey = this.turnKey(event.threadId, event.turnId);
+    const key = this.streamKey(chatId, turnKey, event.itemId);
+    const state = this.observedDeltaStates.get(event);
+    if (!state || this.streams.get(key) !== state || state.previewClosed || state.authorization.aborted) return;
+    if (!state.previewAdmitted) return;
+    if (!state.previewStarted) {
+      state.previewStarted = true;
+      this.beforeNewStream(chatId, turnKey);
+    }
     if (!state.timer) {
       state.timer = setTimeout(() => {
         state.timer = undefined;
@@ -150,6 +163,27 @@ export class TelegramTextStreams {
     const state = this.streams.get(key);
     if (state?.timer) clearTimeout(state.timer);
     this.streams.delete(key);
+  }
+
+  hasAdmittedPreview(event: Extract<OutputEvent, { type: "text.completed" }>): boolean {
+    return this.streams.get(this.streamKey(event.target.conversationId,
+      this.turnKey(event.threadId, event.turnId), event.itemId))?.previewAdmitted === true;
+  }
+
+  observeComplete(event: Extract<OutputEvent, { type: "text.completed" }>): void {
+    const state = this.streams.get(this.streamKey(event.target.conversationId,
+      this.turnKey(event.threadId, event.turnId), event.itemId));
+    if (state) state.previewClosed = true;
+  }
+
+  discardUnadmittedCommentaryForTurn(chatId: string, threadId: string, turnId: string): void {
+    for (const key of this.streamKeysForTurn(chatId, threadId, turnId)) {
+      const state = this.streams.get(key)!;
+      state.previewClosed = true;
+      if (state.previewAdmitted || state.phase !== "commentary") continue;
+      if (state.timer) clearTimeout(state.timer);
+      this.streams.delete(key);
+    }
   }
 
   complete(event: Extract<OutputEvent, { type: "text.completed" }>): void {
@@ -171,9 +205,8 @@ export class TelegramTextStreams {
     state.text = bounded.text;
     state.truncated = bounded.truncated;
     state.completed = true;
-    if (event.phase !== undefined) {
-      state.phase = event.phase;
-    }
+    state.previewClosed = true;
+    state.phase = event.phase;
     if (existing?.timer) clearTimeout(existing.timer);
     state.timer = undefined;
     this.streams.delete(key);
@@ -188,6 +221,7 @@ export class TelegramTextStreams {
   }
 
   prepareTurnCompletion(chatId: string, threadId: string, turnId: string): (chatId: string, signal?: AbortSignal) => Promise<void> {
+    this.discardUnadmittedCommentaryForTurn(chatId, threadId, turnId);
     const streams = this.streamKeysForTurn(chatId, threadId, turnId).map((key) => [key, this.streams.get(key)!] as const);
     for (const [, stream] of streams) {
       if (stream.timer) {
@@ -220,11 +254,12 @@ export class TelegramTextStreams {
   }
 
   prepareClose(): void {
-    for (const state of this.streams.values()) {
+    for (const [key, state] of this.streams) {
       if (state.timer) {
         clearTimeout(state.timer);
         state.timer = undefined;
       }
+      if (!state.previewAdmitted && state.phase === "commentary") this.streams.delete(key);
     }
   }
 
@@ -313,6 +348,7 @@ export class TelegramTextStreams {
     detached = false,
   ): Promise<void> {
     if (!detached && this.streams.get(key) !== state) return;
+    if (!final && (!state.previewAdmitted || state.previewClosed)) return;
     signal = signal ? AbortSignal.any([signal, state.authorization]) : state.authorization;
     signal.throwIfAborted();
     // 终态尝试从活动流脱离，Turn 完成不能从头重播一次已部分发送或结果不确定的回复。
@@ -403,6 +439,9 @@ export class TelegramTextStreams {
       messageId: undefined,
       creationUncertain: false,
       phase: undefined,
+      previewAdmitted: false,
+      previewStarted: false,
+      previewClosed: false,
       completed: false,
       truncated: false,
       timer: undefined,

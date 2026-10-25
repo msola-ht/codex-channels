@@ -123,6 +123,8 @@ export async function routeGatewaySettingsManagement({
       && current.display.subagentsOverride !== result.value.subagentsOverride) current = null;
     if (input.kind === "display.streaming" && current !== null
       && current.display.streamingOverride !== result.value.streamingOverride) current = null;
+    if (input.kind === "display.commentary" && current !== null
+      && current.display.commentaryOverride !== result.value.commentaryOverride) current = null;
     try {
       state.audit.record({
         sessionId: principalId,

@@ -377,6 +377,7 @@
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理与日志等级；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
 - `config-display-menu.mjs`：独立管理模型统计分组、操作详情（含仅失败或拒绝）、子代理显示、流式显示、计划更新、默认关闭的渠道思考状态、完成通知、消息详情和 Telegram 消息格式；完成、子代理、流式和消息详情支持显式设置与删除字段恢复缺省，消息详情缺省基础、子代理和流式缺省开启但均不物化，微信目标支持完成通知和消息详情。流式仅控制 Telegram、飞书与 QQ 单聊正文增量预览，QQ 群范围隐藏并拒绝该字段；不改变完整正文、附件、授权或原窗口和交付义务。消息详情独立于日志和调用采集，只控制启动运行环境及完成/子代理统计子项。提供范围覆盖的目标、存储值、有效值和来源确认，复用预览、修订保护、私有备份及保存后读回；旧版回退前显式清除全局及覆盖 `presentation_detail`、`streaming` 并核对后续修改；模型分组仅用于控制台汇总，保留原模型明细，重新读取即生效；
 - `config-display-management.mjs`：CLI 与 WebUI 共用的显示范围投影和显式 set/inherit 编辑，复用配置事务并提供每个目标实际支持的字段；只读当前 Schema 绑定并按当前飞书账号与 Actor 名单取得私聊物理 Chat，QQ 从配置取得单聊与物理群，微信从当前启用账号与允许名单取得精确私聊，Telegram 不猜历史绑定的聊天类型。目标不可读与缺失分别表示，停用或移除后的已有覆盖可显式清除。
+  “过程说明”通过 `display.commentary` 的显式 set boolean/inherit 管理，缺省开启不物化，读取区分有效 `commentaryEnabled` 与本层 `commentaryOverride`。Telegram、飞书与 QQ（含已支持群）支持，微信覆盖拒绝且不显示字段。CLI 和 WebUI 共用修订、私有备份、预览与读回；有效值变化且上述渠道任一启用时重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组整体保守判定。取消、未变化不写；回退前清除全局及覆盖 commentary，核对后续修改。语义与交付边界见[渠道展示](../docs/display.md#过程显示范围与继承)。
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs` / `config-system-menu.d.mts`：以受控分组分别提供 Gateway 会话、身份与时区、调用记录入口，分组越界选择明确拒绝；向 Workspace 菜单公开默认项设置，复用配置修订与生效通知。管理模型请求转储及其保留天数、审批超时、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与服务时区；模型请求转储独立写入

@@ -5,6 +5,12 @@ QQ 单聊名单与可选群成员授权分别校验，群配置必须明确同�
 
 本目录保存 npm CLI 与已编译 Gateway 必须直接共享的稳定 JavaScript 模块，不承载会话业务。
 
+`message-display-policy` 的可选 `commentary` 全局值及范围覆盖缺省开启，不写入默认字段；有效
+`MessageDisplaySettings.commentaryEnabled` 必填，且不改写独立的 `streamingEnabled`。
+Telegram、飞书与 QQ（含已支持群）支持五层继承，微信严格拒绝该覆盖。消费者只隐藏明确
+commentary 的新过程说明；未知阶段完整正文、已准入正文流与已有 Journal 交付义务保留。
+配置管理、备份及回退见[渠道展示](../docs/display.md#过程显示范围与继承)。
+
 ## 跨平台边界
 
 修改本目录的共享接口前，按[跨平台变更规则](../docs/development-rules.md#cross-platform-changes)追踪三平台调用方；文件位于 `runtime/` 或调用方最先在 Windows 报错，都不能据此缩小影响范围。
