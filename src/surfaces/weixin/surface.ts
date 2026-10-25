@@ -56,6 +56,7 @@ export interface WeixinStartupNotification {
 }
 
 export interface WeixinSurfaceOptions {
+  displaySettings?: import("../types.js").SurfaceMessageDisplaySettings;
   accountId: string;
   client: WeixinProtocolClient;
   fileSendClient?: WeixinFileSendProtocolClient;
@@ -135,6 +136,7 @@ export class WeixinSurface implements SurfaceAdapter {
       options.logger,
       {
         ...options.outbox,
+        ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
         ...(options.imageSendClient === undefined
           ? {}
           : { imageClient: options.imageSendClient }),

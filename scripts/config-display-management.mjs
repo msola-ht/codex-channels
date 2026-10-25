@@ -6,8 +6,9 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { assertStateDatabaseSchema } from "../dist/storage/index.js";
 
-const fields = ["operation_updates", "plan_updates", "reasoning"];
+const fields = ["operation_updates", "plan_updates", "reasoning", "completion"];
 const selectorFields = ["surface", "account_id", "chat_kind", "chat_id"];
+function supportedFields(selector) { return selector.surface === "weixin" ? ["completion"] : fields; }
 
 function selectors(document, targets = []) {
   const result = [];
@@ -16,10 +17,14 @@ function selectors(document, targets = []) {
     ["telegram", "default", isTelegramEnabled(document.telegram)],
     ["feishu", document.feishu?.app_id, document.feishu?.enabled === true],
     ["qq", document.qq?.app_id, document.qq?.enabled === true],
+    ["weixin", document.weixin?.account_id, document.weixin?.enabled === true],
   ];
   for (const [surface, account_id, enabled] of accounts) {
     if (!enabled || !account_id) continue;
     add({ surface }); add({ surface, account_id }); add({ surface, account_id, chat_kind: "direct" });
+    if (surface === "weixin") {
+      for (const chat_id of document.weixin.allowed_user_ids ?? []) add({ surface, account_id, chat_kind: "direct", chat_id });
+    }
     if (surface === "qq") {
       for (const chat_id of document.qq.allowed_user_openids ?? []) add({ surface, account_id, chat_kind: "direct", chat_id });
       if (document.qq.groups?.length) add({ surface, account_id, chat_kind: "group" });
@@ -65,7 +70,7 @@ export function projectDisplayScopes(document, configuration, targets = []) {
     const stored = (configuration.overrides ?? []).find(value => messageDisplaySelectorKey(value) === id);
     const override = Object.fromEntries(fields.filter(field => stored?.[field] !== undefined).map(field => [field, stored[field]]));
     const inspected = inspectMessageDisplayScope(configuration, selector);
-    return { id, selector, writable: writable.has(id), override, effective: inspected.settings, sources: inspected.sources };
+    return { id, selector, writable: writable.has(id), supportedFields: supportedFields(selector), override, effective: inspected.settings, sources: inspected.sources };
   });
 }
 
@@ -77,14 +82,14 @@ export function applyDisplayScopeSetting(document, input, configPath) {
   if (value.action === "inherit" && Object.hasOwn(value, "value")) throw invalidSetting("value", "invalid-input", "恢复继承不能包含值");
   const selector = value.selector;
   if (!selector || typeof selector !== "object" || Array.isArray(selector) || Object.keys(selector).some(field => !selectorFields.includes(field))) throw invalidSetting("selector", "invalid-input", "显示目标无效");
-  const parsed = messageDisplayOverrideSchema.safeParse({ ...selector, [value.field]: value.action === "set" ? value.value : value.field === "operation_updates" ? "compact" : false });
+  const parsed = messageDisplayOverrideSchema.safeParse({ ...selector, [value.field]: value.action === "set" ? value.value : value.field === "operation_updates" ? "compact" : value.field === "completion" ? "detailed" : false });
   if (!parsed.success) throw invalidSetting("value", "invalid-input", "显示目标或字段值无效");
   const key = messageDisplaySelectorKey(selector);
   const display = document.display ?? {};
   const overrides = [...(display.overrides ?? [])];
   const index = overrides.findIndex(entry => messageDisplaySelectorKey(entry) === key);
   const targets = readDisplayTargets(document, configPath);
-  if (value.action === "set" && !selectors(document, targets.selectors).some(entry => messageDisplaySelectorKey(entry) === key)) throw invalidSetting("selector", "invalid-input", "目标未启用、未授权、不可读或不支持过程显示；请重新读取范围");
+  if (value.action === "set" && !selectors(document, targets.selectors).some(entry => messageDisplaySelectorKey(entry) === key)) throw invalidSetting("selector", "invalid-input", "目标未启用、未授权、不可读或不支持显示；请重新读取范围");
   if (value.action === "inherit" && index < 0) return { value: projectDisplayScope(document, selector, targets.selectors), activation: "none", backupRequired: true };
   const next = { ...(index < 0 ? selector : overrides[index]) };
   if (value.action === "set") next[value.field] = value.value;
@@ -102,5 +107,5 @@ function projectDisplayScope(document, selector, targets = []) {
   const state = projectDisplayScopes(document, configuration, targets).find(entry => entry.id === messageDisplaySelectorKey(selector));
   if (state) return state;
   const inspected = inspectMessageDisplayScope(configuration, selector);
-  return { id: messageDisplaySelectorKey(selector), selector, writable: false, override: {}, effective: inspected.settings, sources: inspected.sources };
+  return { id: messageDisplaySelectorKey(selector), selector, writable: false, supportedFields: supportedFields(selector), override: {}, effective: inspected.settings, sources: inspected.sources };
 }

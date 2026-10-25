@@ -204,6 +204,21 @@ export class TelegramTextStreams {
     this.notifiedTurns.delete(turnKey);
   }
 
+  /** Revoke only this Turn's disposable previews; no final send or content retry. */
+  cancelTurn(chatId: string, threadId: string, turnId: string): void {
+    const turnKey = this.turnKey(threadId, turnId);
+    const activityKey = this.activityKey(chatId, turnKey);
+    const activity = this.activities.get(activityKey);
+    if (activity) this.removeActivity(activityKey, activity);
+    for (const [key, state] of this.streams) {
+      if (state.chatId !== chatId || state.turnKey !== turnKey) continue;
+      if (state.timer) clearTimeout(state.timer);
+      state.activity?.controller.abort();
+      this.streams.delete(key);
+    }
+    this.notifiedTurns.delete(turnKey);
+  }
+
   prepareClose(): void {
     for (const state of this.streams.values()) {
       if (state.timer) {

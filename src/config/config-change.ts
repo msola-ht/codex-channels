@@ -12,6 +12,7 @@ export type GlobalConfigChangeCode =
   | "display.operation-updates"
   | "display.plan-updates"
   | "display.reasoning"
+  | "display.completion"
   | "display.overrides"
   | "scheduled-tasks.enabled"
   | "metrics.storage"

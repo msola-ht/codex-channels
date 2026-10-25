@@ -66,7 +66,7 @@ export async function runConfig({
         },
         { value: "mcp", label: "工具与 MCP", hint: "添加、编辑、删除 MCP，以及电脑、浏览器与工具访问管理" },
         { value: "provider_web_search", label: "提供商联网搜索", hint: "按账户修改搜索模式，预览确认后保存" },
-        { value: "display", label: "Gateway 显示设置", hint: "渠道操作详情、计划更新、思考状态" },
+        { value: "display", label: "Gateway 显示设置", hint: "渠道操作详情、计划更新、思考状态与完成通知" },
         {
           value: "system",
           label: "Gateway 会话设置",

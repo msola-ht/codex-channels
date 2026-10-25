@@ -37,6 +37,7 @@ import {
   isHiddenAutoApprovalReview,
   createSubagentStartedPresentation,
   createTurnCompletedPresentation,
+  shouldHideTurnCompleted,
   createTurnReasoningPresentation,
   createTurnStartedPresentation,
 } from "../lifecycle-presentation.js";
@@ -230,7 +231,7 @@ export class TelegramOutbox {
     }
   }
 
-  handle(event: OutputEvent, context?: { liveAdmitted: true }): void | Promise<void> {
+  handle(event: OutputEvent, context?: { liveAdmitted: true; completion?: "brief" | "detailed" }, signal?: AbortSignal): void | Promise<void> {
     if (
       this.closed
       || event.target.surface !== "telegram"
@@ -243,13 +244,16 @@ export class TelegramOutbox {
       if (!context?.liveAdmitted) this.admitLive(event);
       this.observeLifecycle(event);
     }
+    if (!DeliveryReceipt.current() && event.type === "turn.completed" && !context?.completion && this.shouldSettleLiveCompletion(event)) {
+      return this.settleLiveCompletion(event, signal ?? new AbortController().signal, () => this.executor.isAuthorized(event.target.conversationId));
+    }
     if (!DeliveryReceipt.current() && surfaceOutputSnapshotKey(event) !== undefined) {
       const delivery = this.deliverSnapshot(event, new AbortController().signal, () => true);
       // Direct callers may intentionally ignore the asynchronous result; the owner still sees rejection.
       void delivery.catch(() => {});
       return delivery;
     }
-    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event, context?.completion));
   }
 
   deliverSnapshot(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void> {
@@ -262,6 +266,7 @@ export class TelegramOutbox {
   }
 
   retains(event: OutputEvent): boolean {
+    if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
     if (isEmptyCommentary(event)) return false;
     if (event.type === "operation.updated" && this.approvalOperations.isSuppressed(
       this.operationKey(this.turnKey(event.threadId, event.turnId), event.operation.itemId),
@@ -269,15 +274,50 @@ export class TelegramOutbox {
     return isPersistentOutput(event, this.displaySettings(event.target.conversationId).operationUpdates);
   }
 
+  liveCompletionDisplay(event: Extract<OutputEvent, { type: "turn.completed" }>): "off" | "brief" | "detailed" {
+    const mode = this.displaySettings(event.target.conversationId).completion;
+    return mode === "off" && !shouldHideTurnCompleted(event, mode) ? "detailed" : mode;
+  }
+
+  shouldSettleLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>): boolean {
+    return this.liveCompletionDisplay(event) === "off";
+  }
+
+  async settleLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>, signal: AbortSignal, authorized: () => boolean): Promise<void> {
+    try {
+      await this.snapshots.run(event, signal, () => authorized() && !this.closed
+        && event.target.surface === "telegram" && event.target.accountId === (this.options.accountId ?? telegramDefaultAccountId)
+        && this.executor.isAuthorized(event.target.conversationId), () => this.completeTurn(event, false), false);
+    } finally { this.discardLiveCompletion(event); }
+  }
+
+  discardLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>): void {
+    if (event.target.surface !== "telegram" || event.target.accountId !== (this.options.accountId ?? telegramDefaultAccountId)) return;
+    const key = this.turnKey(event.threadId, event.turnId);
+    this.planProgress.complete(event);
+    this.operationUpdates.flush(event);
+    const log = this.operationLogFor(event.target.conversationId, key);
+    if (log) { this.cancelOperationTimer(log); this.operationLogs.delete(key); }
+    this.textStreams.cancelTurn(event.target.conversationId, event.threadId, event.turnId);
+    for (const operation of this.activeOperations) if (operation.startsWith(`${key}:`)) this.activeOperations.delete(operation);
+    this.reasoningGenerations.delete(key);
+    const reasoning = this.reasoningMessages.get(event.threadId);
+    if (reasoning?.chatId === event.target.conversationId && reasoning.turnId === event.turnId) this.reasoningMessages.delete(event.threadId);
+    this.typing.stop(event.target.conversationId, this.turnActivityKey(event.threadId, event.turnId));
+    this.replyTargets.delete(event.target.conversationId, key);
+    this.clearApprovalOperationsForTurn(key);
+  }
+
   private displaySettings(chatId: string) {
     return this.options.displaySettings?.({ surface: "telegram", accountId: this.options.accountId ?? telegramDefaultAccountId, conversationId: chatId }) ?? {
       operationUpdates: this.options.operationUpdateDisplay ?? "full",
       planUpdatesEnabled: this.options.planUpdatesEnabled ?? false,
       reasoningEnabled: this.options.reasoningEnabled ?? true,
+      completion: "detailed" as const,
     };
   }
 
-  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, _authorized?: () => boolean, _source?: import("../types.js").SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
     if (this.closed || event.target.surface !== "telegram"
       || event.target.accountId !== (this.options.accountId ?? telegramDefaultAccountId)) throw new Error("可靠输出目标无效或已关闭");
     signal.throwIfAborted();
@@ -289,7 +329,7 @@ export class TelegramOutbox {
       this.operationKey(this.turnKey(event.threadId, event.turnId), event.operation.itemId),
     )) throw new Error("持久操作结果已被审批展示规则抑制，尚未发送");
     await captureDelivery(() => {
-      void this.handle(event);
+      void this.handle(event, { liveAdmitted: true, completion: context?.completion ?? "detailed" });
       if (event.type === "operation.updated" && event.operation.status !== "running") {
         const buffered = this.operationUpdates.flushTurn(event);
         if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
@@ -297,7 +337,7 @@ export class TelegramOutbox {
     }, signal, checkpoint, { requireConfirmation: true });
   }
 
-  private handleEvent(event: OutputEvent): void {
+  private handleEvent(event: OutputEvent, completion?: "brief" | "detailed"): void {
     const chatId = event.target.conversationId;
     switch (event.type) {
       case "turn.retry": {
@@ -584,35 +624,7 @@ export class TelegramOutbox {
         );
         return;
       case "turn.completed": {
-        const turnKey = this.turnKey(event.threadId, event.turnId);
-        this.planProgress.complete(event);
-        this.flushOperationUpdates(chatId, event);
-        this.sealOperationLog(chatId, turnKey);
-        const flushText = this.textStreams.prepareTurnCompletion(chatId, event.threadId, event.turnId);
-        this.typing.stop(chatId, this.turnActivityKey(event.threadId, event.turnId));
-        this.enqueue(chatId, async (signal) => {
-          await flushText(chatId, signal);
-          const replyTo = this.replyTargets.get(chatId, turnKey);
-          try {
-            await this.sendPanel(
-              chatId,
-              renderTelegramLifecyclePresentation(
-                createTurnCompletedPresentation(
-                  event,
-                  this.options.debugEnabled ?? false,
-                  this.options.autoCompactPercent,
-                ),
-              ),
-              replyTo,
-              true,
-              signal,
-            );
-          } finally {
-            this.replyTargets.delete(chatId, turnKey);
-            this.textStreams.clearTurnNotification(turnKey);
-            this.clearApprovalOperationsForTurn(turnKey);
-          }
-        }, true, { purpose: "turn-completion" });
+        this.completeTurn(event, true, completion ?? (this.liveCompletionDisplay(event) === "brief" ? "brief" : "detailed"));
         return;
       }
       case "warning":
@@ -730,6 +742,49 @@ export class TelegramOutbox {
         );
         return;
     }
+  }
+
+  private completeTurn(event: Extract<OutputEvent, { type: "turn.completed" }>, visible: boolean, mode: "brief" | "detailed" = "detailed"): void {
+    const chatId = event.target.conversationId;
+    const turnKey = this.turnKey(event.threadId, event.turnId);
+    this.planProgress.complete(event);
+    this.flushOperationUpdates(chatId, event);
+    this.sealOperationLog(chatId, turnKey);
+    const flushText = this.textStreams.prepareTurnCompletion(chatId, event.threadId, event.turnId);
+    this.typing.stop(chatId, this.turnActivityKey(event.threadId, event.turnId));
+    const cleanup = (): void => {
+      this.replyTargets.delete(chatId, turnKey);
+      this.textStreams.clearTurnNotification(turnKey);
+      this.clearApprovalOperationsForTurn(turnKey);
+    };
+    this.enqueue(chatId, async (signal) => {
+      try {
+        if (visible) await flushText(chatId, signal);
+        else {
+          // A body failure must leave the independent original authorization
+          // available for a bounded failure notice, without inventing an ACK.
+          const parent = DeliveryReceipt.current();
+          const body = new DeliveryReceipt(async checkpoint => {
+            try { await parent?.checkpoint(checkpoint); }
+            catch (error) { parent?.fail(error); throw error; }
+          }, signal, true);
+          try {
+            try { await body.run(() => flushText(chatId, signal)); }
+            catch (error) { body.fail(error); }
+            finally { body.release(); }
+            await body.done;
+          } catch (error) {
+            if (!signal.aborted && !parent?.controller.signal.aborted) {
+              await this.sendPanel(chatId, "本轮部分输出未确认，请核对正文。", undefined, true, signal);
+            }
+            throw error;
+          }
+        }
+        if (visible) await this.sendPanel(chatId, renderTelegramLifecyclePresentation(
+          createTurnCompletedPresentation(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent, mode),
+        ), this.replyTargets.get(chatId, turnKey), true, signal);
+      } finally { cleanup(); }
+    }, true, { purpose: "turn-completion", settled: cleanup });
   }
 
   private async sendImage(

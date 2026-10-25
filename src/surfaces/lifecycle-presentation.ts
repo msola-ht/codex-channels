@@ -508,6 +508,15 @@ function formatCompletedServiceTier(event: Extract<OutputEvent, { type: "turn.co
   return "未知（请求档位未完整观测）";
 }
 
+/** Only an ordinary successful completion may suppress its separate notification. */
+export function shouldHideTurnCompleted(
+  event: Extract<OutputEvent, { type: "turn.completed" }>,
+  display: "off" | "brief" | "detailed",
+): boolean {
+  return display === "off" && event.status === "completed" && !event.error
+    && !event.errorCode && !event.missingFinalResponse;
+}
+
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
   debug = false,
@@ -515,8 +524,21 @@ export function createTurnCompletedPresentation(
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null,
+  mode: "brief" | "detailed" = "detailed",
 ): LifecyclePresentation {
   const literal = (value: string): string => value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ");
+  if (mode === "brief") {
+    return {
+      title: `${event.background ? "后台任务" : "本次运行"} · ${turnStatusLabel(event.status)}`,
+      fields: [
+        ...(event.background ? [{ label: "任务", value: literal(event.threadId), literal: true }] : []),
+        ...(event.error ? [{ label: "错误", value: literal(formatTurnErrorMessage(event.error, event.errorCode, event.modelProvider, event.model)), literal: true }] : []),
+        ...(!event.error && event.errorCode ? [{ label: "错误码", value: event.errorCode, literal: true }] : []),
+        ...(event.missingFinalResponse ? [{ label: "结果", value: missingFinalResponseText }] : []),
+        ...((event.runningSubagentCount ?? 0) > 0 ? [{ label: "后台子代理", value: `${event.runningSubagentCount} 个尚未结束` }] : []),
+      ],
+    };
+  }
   const sessionFields: LifecyclePresentationField[] = [
     ...(event.workspaceId
       ? [{
@@ -548,6 +570,9 @@ export function createTurnCompletedPresentation(
       )),
       literal: true,
     });
+  }
+  if (!event.error && event.errorCode) {
+    runFields.push({ label: "错误码", value: event.errorCode, literal: true });
   }
   if (event.missingFinalResponse) {
     runFields.push({

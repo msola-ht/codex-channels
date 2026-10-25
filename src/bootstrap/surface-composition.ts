@@ -275,6 +275,9 @@ function createWeixinModule(
       },
     },
     debugEnabled: isDebugLogLevel(options.config.logLevel),
+    displaySettings: target => resolveMessageDisplaySettings(options.config.messageDisplay, {
+      surface: "weixin", accountId: config.accountId, chatKind: "direct", chatId: target.conversationId,
+    }),
     autoCompactPercent: options.autoCompactPercent,
     fetchImpl: createProxyFetch(options.config.networkProxy),
     logger: options.logger,
@@ -463,7 +466,7 @@ function createTelegramModule(
         reason: "private-chat-unconfirmed" }, "Telegram 可选过程展示等待私聊地址确认");
       // Unknown historical targets cannot bypass a direct/chat override. Retained
       // terminal output still renders through the independent durable contract.
-      return { operationUpdates: "hidden", planUpdatesEnabled: false, reasoningEnabled: false };
+      return { operationUpdates: "hidden", planUpdatesEnabled: false, reasoningEnabled: false, completion: "off" };
     },
     debugEnabled: isDebugLogLevel(config.logLevel),
     autoCompactPercent: options.autoCompactPercent,

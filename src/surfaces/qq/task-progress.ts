@@ -325,6 +325,7 @@ export class QqTaskProgress {
       operationUpdates: this.options.operationUpdates,
       planUpdatesEnabled: this.options.planUpdatesEnabled,
       reasoningEnabled: this.options.reasoningEnabled,
+      completion: "detailed" as const,
     };
   }
 }

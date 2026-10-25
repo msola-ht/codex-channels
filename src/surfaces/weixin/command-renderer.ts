@@ -101,12 +101,14 @@ export function renderWeixinTurnCompleted(
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null,
+  mode: "brief" | "detailed" = "detailed",
 ): string {
   return renderWeixinLifecyclePresentation(
     createTurnCompletedPresentation(
       event,
       debug,
       autoCompactPercent,
+      mode,
     ),
   );
 }

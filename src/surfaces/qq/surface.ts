@@ -57,10 +57,15 @@ export class QqSurface implements SurfaceAdapter {
     admitLive: event => this.current?.messages.admitLive(event),
     observe: event => this.current?.messages.observe(event),
     retains: event => this.current?.messages.retains(event) === true,
+    liveCompletionDisplay: event => this.current?.messages.liveCompletionDisplay(event) ?? "detailed",
+    shouldSettleLiveCompletion: event => this.current?.messages.shouldSettleLiveCompletion(event) === true,
+    settleLiveCompletion: (event, signal, authorized, source) => this.current?.messages.settleLiveCompletion(event, signal, authorized, source)
+      ?? Promise.reject(new Error("QQ 消息连接不可用")),
+    discardLiveCompletion: event => this.current?.messages.discardLiveCompletion(event),
     handle: (event, context, signal) => this.current?.messages.handle(event, context, signal),
     deliverSnapshot: (event, signal, authorized) => this.current?.messages.deliverSnapshot(event, signal, authorized)
       ?? Promise.reject(new Error("QQ 消息连接不可用")),
-    deliver: (event, signal, checkpoint, authorized, source) => this.current?.messages.deliver(event, signal, checkpoint, authorized, source)
+    deliver: (event, signal, checkpoint, authorized, source, context) => this.current?.messages.deliver(event, signal, checkpoint, authorized, source, context)
       ?? Promise.reject(new Error("QQ 消息连接不可用")),
   };
   private current: QqConnection | undefined;

@@ -1,5 +1,7 @@
 # QQ 文字接入
 
+完成通知消费目标 `completion` 设置；成功隐藏不跳过原来源捕获、过程退役或 `terminal` 观察。独立结算与丢弃只取消精确 Turn 的剩余预览，不发送未知流片、不伪造 `delivered` 或提前释放来源，保留原六十秒结束窗口。已入箱完成记录始终渲染；实时 brief 只缩短执行回执，不确认正文送达。
+
 `index.ts` 公开 `qqConversationRecipient` 给组合根解析展示目标：同一物理群的不同成员业务会话共享群显示覆盖，不改变原成员授权、来源、Thread 或发送预算。`messages.ts` 的实时准入与 `task-progress.ts` 的观察、准备和最终渲染都消费同一个目标显示回调；已入箱操作终态仍可渲染，不被新设置重新过滤。
 
 接入骨架迁自 `feat/qq-adaptation`（`7a867db7`），消息层沿共享 Application、来源授权和持久投递实现。

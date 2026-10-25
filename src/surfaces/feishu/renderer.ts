@@ -156,6 +156,7 @@ export function renderFeishuOutput(
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null,
+  completion: "brief" | "detailed" = "detailed",
 ): string | null {
   switch (event.type) {
     case "turn.retry":
@@ -209,6 +210,7 @@ export function renderFeishuOutput(
         event,
         debug,
         autoCompactPercent,
+        completion,
       );
     case "thread.status":
       return `Session 状态：${threadStatusLabel(event.status)}`;
@@ -255,12 +257,14 @@ function renderFeishuTurnCompleted(
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null,
+  mode: "brief" | "detailed" = "detailed",
 ): string {
   return renderFeishuLifecyclePresentation(
     createTurnCompletedPresentation(
       event,
       debug,
       autoCompactPercent,
+      mode,
     ),
   );
 }

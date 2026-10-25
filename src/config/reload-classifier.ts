@@ -102,15 +102,15 @@ function restartRequiredReasons(
       current.idleReleaseMinutes,
       next.idleReleaseMinutes,
     ],
-    // 微信不消费这些显示设置，只启用微信时改它们不需要重启 Gateway。
+    ...(displaySettingsAffectEnabledSurface(current) || displaySettingsAffectEnabledSurface(next)
+      || current.weixin !== undefined || next.weixin !== undefined ? [
+        [configChange("display.completion"), current.messageDisplay.completion ?? "detailed", next.messageDisplay.completion ?? "detailed"],
+        [configChange("display.overrides"), JSON.stringify(current.messageDisplay.overrides ?? []), JSON.stringify(next.messageDisplay.overrides ?? [])],
+      ] as Array<[ConfigChange, unknown, unknown]> : []),
+    // 微信不消费过程显示字段；完成显示单独比较。
     ...(displaySettingsAffectEnabledSurface(current)
       || displaySettingsAffectEnabledSurface(next)
       ? [
-          [
-            configChange("display.overrides"),
-            JSON.stringify(current.messageDisplay.overrides ?? []),
-            JSON.stringify(next.messageDisplay.overrides ?? []),
-          ],
           [
             configChange("display.operation-updates"),
             current.operationUpdateDisplay,

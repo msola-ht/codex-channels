@@ -25,6 +25,7 @@ import {
 import { FileWeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 
 export interface CreateWeixinSurfaceOptions {
+  displaySettings?: import("../types.js").SurfaceMessageDisplaySettings;
   accountId: string;
   service: Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">;
   commands: ConversationCommandExecutor;
@@ -85,6 +86,7 @@ export function createWeixinSurface(
       options.fetchImpl,
     ),
     startupNotification: options.startupNotification,
+    ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
     ...(options.debugEnabled === undefined
       ? {}
       : { debugEnabled: options.debugEnabled }),

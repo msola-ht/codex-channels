@@ -331,6 +331,7 @@ function loadValidatedConfigDocument(
       operation_updates: raw.display.operation_updates,
       plan_updates: raw.display.plan_updates,
       reasoning: raw.display.reasoning,
+      ...(raw.display.completion === undefined ? {} : { completion: raw.display.completion }),
       ...(raw.display.overrides === undefined ? {} : { overrides: raw.display.overrides }),
     },
     operationUpdateDisplay: raw.display.operation_updates,

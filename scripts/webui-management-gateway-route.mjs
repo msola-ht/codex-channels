@@ -115,6 +115,8 @@ export async function routeGatewaySettingsManagement({
       const saved = current.display.scopes.find(scope => scope.id === result.value.id);
       if (JSON.stringify(saved?.override ?? {}) !== JSON.stringify(result.value.override)) current = null;
     }
+    if (input.kind === "display.completion" && current !== null
+      && current.display.completionOverride !== result.value.completionOverride) current = null;
     try {
       state.audit.record({
         sessionId: principalId,

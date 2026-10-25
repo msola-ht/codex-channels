@@ -16,11 +16,11 @@ export class SnapshotDelivery {
     }
   }
 
-  async run(event: OutputEvent, signal: AbortSignal, authorized: () => boolean, call: () => void): Promise<void> {
+  async run(event: OutputEvent, signal: AbortSignal, authorized: () => boolean, call: () => void, supersedable = true): Promise<void> {
     signal.throwIfAborted();
     const controller = new AbortController();
     const entry = { event, controller };
-    this.active.add(entry);
+    if (supersedable) this.active.add(entry);
     const receipt = new DeliveryReceipt((checkpoint) => {
       if (checkpoint.state === "started" && !authorized()) throw new Error("状态展示授权已变化");
       return Promise.resolve();

@@ -17,6 +17,7 @@ const feishuStreamFlushDelayMs = 300;
 const maximumFeishuActiveStreams = 100;
 
 interface FeishuStreamState {
+  previewAbort: AbortController;
   chatId: string;
   threadId: string;
   turnId: string;
@@ -80,7 +81,19 @@ export class FeishuTextStreams {
     for (const [key, state] of this.streams) {
       if (state.threadId !== threadId) continue;
       if (state.timer) clearTimeout(state.timer);
+      if (state.terminalSettled === undefined) state.previewAbort.abort();
       if (this.streams.get(key) === state) this.streams.delete(key);
+    }
+  }
+
+  /** Stop only this Turn locally; never finish a platform card during discard. */
+  cancelTurn(chatId: string, threadId: string, turnId: string): void {
+    for (const [key, state] of this.streams) {
+      if (state.chatId !== chatId || state.threadId !== threadId || state.turnId !== turnId) continue;
+      if (state.timer) clearTimeout(state.timer);
+      if (state.terminalSettled === undefined) state.previewAbort.abort();
+      state.flushGeneration += 1;
+      this.streams.delete(key);
     }
   }
 
@@ -107,6 +120,7 @@ export class FeishuTextStreams {
       this.streamCapacityWarningIssued = false;
     }
     const state = existing ?? {
+      previewAbort: new AbortController(),
       chatId: event.target.conversationId,
       threadId: event.threadId,
       turnId: event.turnId,
@@ -233,6 +247,7 @@ export class FeishuTextStreams {
     }
     let failed = false;
     const completionReceipt = DeliveryReceipt.current();
+    const releaseCompletion = completionReceipt?.retain();
     // 正文平台失败只取消自身；授权、持久检查点和关闭仍沿完成事件的边界处理。
     DeliveryReceipt.without(() => {
       for (const [key, state] of matching) {
@@ -243,7 +258,9 @@ export class FeishuTextStreams {
           if (state.terminalOutcome === undefined) state.terminalOutcome = "failed";
           failed ||= state.terminalOutcome === "failed";
           if (this.streams.get(key) === state) this.streams.delete(key);
-          if (--pending === 0) onSettled(failed);
+          if (--pending === 0) {
+            try { onSettled(failed); } finally { releaseCompletion?.(); }
+          }
         };
         if (state.terminalSettled !== undefined) {
           // 已入队的完整正文由原回执拥有；等待其实际结束，不能因完成卡取消提前释放回复目标。
@@ -283,6 +300,10 @@ export class FeishuTextStreams {
   ): Promise<void> {
     const state = retainedState ?? this.streams.get(key);
     if (!state) return;
+    if (state.terminalSettled === undefined) {
+      signal = signal ? AbortSignal.any([signal, state.previewAbort.signal]) : state.previewAbort.signal;
+      signal.throwIfAborted();
+    }
     if (terminal && state.terminalOutcome === "confirmed") return;
     if (terminal && state.terminalOutcome === "failed") throw new Error("飞书正文终态未确认，禁止自动重发");
     try {

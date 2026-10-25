@@ -143,6 +143,24 @@ export class QqBodyStreaming {
     }
   }
 
+  /** Revoke leftover previews without closing or resending any uncertain platform frame. */
+  discardTurn(conversationId: string, threadId: string, turnId: string): void {
+    for (const [key, stream] of this.streams) {
+      if (stream.source.conversationId !== conversationId || stream.source.threadId !== threadId || stream.source.turnId !== turnId) continue;
+      stream.controller.abort();
+      clearTimeout(stream.sealTimer);
+      this.streams.delete(key);
+      stream.text = ""; stream.sent = "";
+    }
+  }
+
+  async cancelTurn(conversationId: string, threadId: string, turnId: string): Promise<void> {
+    const pending = [...this.streams.values()].filter(stream => stream.source.conversationId === conversationId
+      && stream.source.threadId === threadId && stream.source.turnId === turnId).flatMap(stream => stream.tail ? [stream.tail] : []);
+    this.discardTurn(conversationId, threadId, turnId);
+    await Promise.allSettled(pending);
+  }
+
   async close(): Promise<void> {
     this.lifetime.abort();
     for (const stream of this.streams.values()) clearTimeout(stream.sealTimer);

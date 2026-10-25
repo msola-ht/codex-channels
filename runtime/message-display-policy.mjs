@@ -9,14 +9,16 @@ export const messageDisplayOverrideSchema = z.strictObject({
   operation_updates: z.enum(["full", "compact", "hidden"]).optional(),
   plan_updates: z.boolean().optional(),
   reasoning: z.boolean().optional(),
+  completion: z.enum(["off", "brief", "detailed"]).optional(),
 }).superRefine((value, context) => {
-  if (value.surface === "weixin" || (value.chat_kind === "group" && value.surface !== "qq"))
-    context.addIssue({ code: "custom", path: ["surface"], message: "该渠道不支持此类过程显示目标" });
+  if ((value.surface === "weixin" && ["operation_updates", "plan_updates", "reasoning"].some(field => value[field] !== undefined))
+    || (value.chat_kind === "group" && value.surface !== "qq"))
+    context.addIssue({ code: "custom", path: ["surface"], message: "该渠道不支持此类显示目标或字段" });
   if (value.chat_kind !== undefined && value.account_id === undefined)
     context.addIssue({ code: "custom", path: ["account_id"], message: "chat_kind 必须指定 account_id" });
   if (value.chat_id !== undefined && (value.account_id === undefined || value.chat_kind === undefined))
     context.addIssue({ code: "custom", path: ["chat_id"], message: "chat_id 必须指定 account_id 和 chat_kind" });
-  if (!["operation_updates", "plan_updates", "reasoning"].some(field => value[field] !== undefined))
+  if (!["operation_updates", "plan_updates", "reasoning", "completion"].some(field => value[field] !== undefined))
     context.addIssue({ code: "custom", message: "显示覆盖必须至少包含一个字段" });
 });
 
@@ -33,7 +35,7 @@ export const messageDisplayOverridesSchema = z.array(messageDisplayOverrideSchem
   });
 });
 
-const fields = [["operation_updates", "operationUpdates"], ["plan_updates", "planUpdatesEnabled"], ["reasoning", "reasoningEnabled"]];
+const fields = [["operation_updates", "operationUpdates"], ["plan_updates", "planUpdatesEnabled"], ["reasoning", "reasoningEnabled"], ["completion", "completion"]];
 
 /** Resolve only validated configuration. Missing fields inherit; false and hidden are explicit. */
 export function inspectMessageDisplaySettings(configuration, target) {
@@ -43,7 +45,7 @@ export function inspectMessageDisplaySettings(configuration, target) {
 export function inspectMessageDisplayScope(configuration, selector) {
   const settings = {};
   const sources = {};
-  for (const [stored, field] of fields) { settings[field] = configuration[stored]; sources[field] = "global"; }
+  for (const [stored, field] of fields) { settings[field] = stored === "completion" ? configuration[stored] ?? "detailed" : configuration[stored]; sources[field] = "global"; }
   const matches = (configuration.overrides ?? []).filter(value => selector !== undefined && value.surface === selector.surface
     && (value.account_id === undefined || value.account_id === selector.account_id)
     && (value.chat_kind === undefined || value.chat_kind === selector.chat_kind)

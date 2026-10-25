@@ -3,7 +3,7 @@ import type { SurfaceMessageDisplaySettings } from "../types.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
-import { isHiddenAutoApprovalReview } from "../lifecycle-presentation.js";
+import { isHiddenAutoApprovalReview, shouldHideTurnCompleted } from "../lifecycle-presentation.js";
 import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { FeishuTextStreams } from "./text-streams.js";
 import type { Logger } from "pino";
@@ -93,6 +93,7 @@ interface FeishuReasoningCard {
 
 export interface FeishuOutboxOptions {
   displaySettings?: SurfaceMessageDisplaySettings;
+  isCompletionAuthorized?: (event: Extract<OutputEvent, { type: "turn.completed" }>) => boolean;
   deliverIdleReleased?: (
     event: Extract<OutputEvent, { type: "conversation.idle.released" }>,
     sendCard: (card: FeishuCardDocument) => Promise<string>,
@@ -189,7 +190,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
   }
 
-  handle(event: OutputEvent): void | Promise<void> {
+  handle(event: OutputEvent, context?: { liveAdmitted: true; completion?: "brief" | "detailed" }, signal?: AbortSignal): void | Promise<void> {
     if (
       this.closed
       || event.target.surface !== "feishu"
@@ -198,13 +199,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (!DeliveryReceipt.current()) this.observe(event);
+    if (!DeliveryReceipt.current() && event.type === "turn.completed" && !context?.completion && this.shouldSettleLiveCompletion(event)) {
+      return this.settleLiveCompletion(event, signal ?? new AbortController().signal, () => true);
+    }
     if (!DeliveryReceipt.current() && surfaceOutputSnapshotKey(event) !== undefined) {
       const delivery = this.deliverSnapshot(event, new AbortController().signal, () => true);
       // Direct callers may intentionally ignore the asynchronous result; the owner still sees rejection.
       void delivery.catch(() => {});
       return delivery;
     }
-    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event, context?.completion));
   }
 
   deliverSnapshot(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void> {
@@ -217,7 +221,43 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   retains(event: OutputEvent): boolean {
+    if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
     return isPersistentOutput(event, this.displaySettings(event.target.conversationId).operationUpdates);
+  }
+
+  liveCompletionDisplay(event: Extract<OutputEvent, { type: "turn.completed" }>): "off" | "brief" | "detailed" {
+    const mode = this.displaySettings(event.target.conversationId).completion;
+    return mode === "off" && !shouldHideTurnCompleted(event, mode) ? "detailed" : mode;
+  }
+
+  shouldSettleLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>): boolean {
+    return this.liveCompletionDisplay(event) === "off";
+  }
+
+  async settleLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>, signal: AbortSignal, authorized: () => boolean): Promise<void> {
+    try {
+      await this.snapshots.run(event, signal, () => authorized() && !this.closed
+        && event.target.surface === "feishu" && event.target.accountId === this.accountId
+        && this.options.isCompletionAuthorized?.(event) === true, () => this.completeTurn(event, false), false);
+    } finally { this.discardLiveCompletion(event); }
+  }
+
+  discardLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>): void {
+    if (event.target.surface !== "feishu" || event.target.accountId !== this.accountId) return;
+    const key = turnKey(event.threadId, event.turnId);
+    this.planMessages.delete(key);
+    this.operationUpdates.flush(event);
+    const prefix = `${key}\u0000`;
+    for (const value of this.computerUseCards.keys()) if (value.startsWith(prefix)) this.computerUseCards.delete(value);
+    for (const value of this.activeOperations) if (value.startsWith(prefix)) this.activeOperations.delete(value);
+    this.reasoningGenerations.delete(key);
+    for (const value of this.operationDisplays.keys()) if (value.startsWith(prefix)) this.operationDisplays.delete(value);
+    for (const value of this.pendingApprovalOperations) if (value.startsWith(prefix)) this.pendingApprovalOperations.delete(value);
+    for (const value of this.heldApprovalOperations.keys()) if (value.startsWith(prefix)) this.heldApprovalOperations.delete(value);
+    const reasoning = this.reasoningCards.get(event.threadId);
+    if (reasoning?.chatId === event.target.conversationId && reasoning.turnId === event.turnId) this.reasoningCards.delete(event.threadId);
+    this.textStreams.cancelTurn(event.target.conversationId, event.threadId, event.turnId);
+    this.replyTargets.delete(event.target.conversationId, key);
   }
 
   private displaySettings(chatId: string) {
@@ -225,17 +265,18 @@ export class FeishuOutbox implements SurfaceOutputPort {
       operationUpdates: this.options.operationUpdateDisplay ?? "full",
       planUpdatesEnabled: this.options.planUpdatesEnabled ?? false,
       reasoningEnabled: this.options.reasoningEnabled ?? true,
+      completion: "detailed" as const,
     };
   }
 
-  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, _authorized?: () => boolean, _source?: import("../types.js").SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
     if (this.closed || event.target.surface !== "feishu"
       || event.target.accountId !== this.accountId) throw new Error("可靠输出目标无效或已关闭");
     signal.throwIfAborted();
     if (isHiddenAutoApprovalReview(event)) return;
     if (!isSupportedPersistentOutput(event)) throw new Error("持久输出类型不受支持");
     await captureDelivery(() => {
-      void this.handle(event);
+      void this.handle(event, { liveAdmitted: true, completion: context?.completion ?? "detailed" });
       if (event.type === "text.completed") {
         // Runs after the rendered output. Preview success alone cannot ACK a
         // truncated result; an already-confirmed full file avoids a duplicate.
@@ -252,7 +293,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }, signal, checkpoint, { requireConfirmation: true });
   }
 
-  private handleEvent(event: OutputEvent): void {
+  private handleEvent(event: OutputEvent, completionMode?: "brief" | "detailed"): void {
     if (event.type === "turn.retry") {
       const run = this.retryMessages.prepare(event);
       if (run) this.delivery.enqueue(event.target.conversationId,
@@ -434,47 +475,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "turn.completed") {
-      this.planMessages.delete(turnKey(event.threadId, event.turnId));
-      const prefix = `${turnKey(event.threadId, event.turnId)}\u0000`;
-      for (const key of this.computerUseCards.keys()) {
-        if (key.startsWith(prefix)) this.computerUseCards.delete(key);
-      }
-      this.flushOperationUpdates(event.target.conversationId, event);
-      const completion = renderFeishuOutput(
-        event,
-        this.options.debugEnabled ?? false,
-        this.options.autoCompactPercent,
-      );
-      let streamsSettled = false;
-      let streamFinalizationFailed = false;
-      let completionSettled = completion === null;
-      const releaseReplyTarget = (): void => {
-        if (streamsSettled && completionSettled) {
-          this.replyTargets.delete(event.target.conversationId, turnKey(event.threadId, event.turnId));
-        }
-      };
-      this.textStreams.finishStreamsForTurn(
-        event.target.conversationId, event.threadId, event.turnId,
-        (failed) => {
-          streamFinalizationFailed = failed;
-          streamsSettled = true;
-          releaseReplyTarget();
-        },
-      );
-      if (completion !== null) {
-        const settled = (): void => { completionSettled = true; releaseReplyTarget(); };
-        const accepted = this.delivery.enqueue(
-          event.target.conversationId,
-          (signal) => this.sendMarkdown(
-            event.target.conversationId,
-            streamFinalizationFailed ? `${completion}\n\n**投递状态：本轮部分输出未确认，请核对正文。**` : completion,
-            maximumFeishuMessageChunks, undefined, undefined, signal,
-          ),
-          true,
-          { purpose: "turn-completion", settled },
-        );
-        if (!accepted) settled();
-      }
+      this.completeTurn(event, true, completionMode ?? (this.liveCompletionDisplay(event) === "brief" ? "brief" : "detailed"));
       return;
     }
     if (event.type === "thread.status") {
@@ -954,6 +955,38 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.heldApprovalOperations.clear();
     this.operationUpdates.clear();
     this.replyTargets.clear();
+  }
+
+  private completeTurn(event: Extract<OutputEvent, { type: "turn.completed" }>, visible: boolean, mode: "brief" | "detailed" = "detailed"): void {
+    const chatId = event.target.conversationId;
+    const key = turnKey(event.threadId, event.turnId);
+    this.planMessages.delete(key);
+    const prefix = `${key}\u0000`;
+    for (const value of this.computerUseCards.keys()) if (value.startsWith(prefix)) this.computerUseCards.delete(value);
+    this.flushOperationUpdates(chatId, event);
+    const completion = visible ? renderFeishuOutput(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent, mode) : null;
+    let resolveStreams!: (failed: boolean) => void;
+    const streamsDone = new Promise<boolean>(resolve => { resolveStreams = resolve; });
+    let streamsSettled = false;
+    let completionSettled = false;
+    const releaseReplyTarget = (): void => {
+      if (streamsSettled && completionSettled) this.replyTargets.delete(chatId, key);
+    };
+    this.textStreams.finishStreamsForTurn(chatId, event.threadId, event.turnId, failed => {
+      streamsSettled = true;
+      resolveStreams(failed);
+      releaseReplyTarget();
+    });
+    const settled = (): void => { completionSettled = true; releaseReplyTarget(); };
+    const accepted = this.delivery.enqueue(chatId, async signal => {
+      const failed = await streamsDone;
+      const warning = "**投递状态：本轮部分输出未确认，请核对正文。**";
+      if (completion !== null || failed) await this.sendMarkdown(chatId,
+        completion === null ? warning : failed ? `${completion}\n\n${warning}` : completion,
+        maximumFeishuMessageChunks, undefined, undefined, signal);
+      if (!visible && failed) throw new Error("飞书正文流收尾未确认，已尝试独立投递提示");
+    }, true, { purpose: "turn-completion", settled });
+    if (!accepted) settled();
   }
 
   private flushOperationUpdates(

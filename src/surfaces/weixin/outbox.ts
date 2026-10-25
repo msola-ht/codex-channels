@@ -16,13 +16,14 @@ import { ContextCompactionNotices } from "../operation-presentation.js";
 import { resolveSurfaceDelivery, surfaceDeliveryCoalesceKey } from "../delivery-policy.js";
 import { exponentialRetryDelay, withDeliveryRetry } from "../delivery-retry.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
-import type { SurfaceOutputPort } from "../types.js";
+import type { SurfaceOutputPort, SurfaceMessageDisplaySettings, SurfaceDeliverySource } from "../types.js";
 import { assertChannelFileName, assertWeixinChannelMediaBytes, maximumWeixinChannelFileBytes, readBoundedLocalFile, type ChannelFileMediaType } from "../bounded-local-file.js";
 import {
   createTurnStartedPresentation,
   createAutoApprovalReviewPresentation,
   createHookCompletedPresentation,
   isHiddenAutoApprovalReview,
+  shouldHideTurnCompleted,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
@@ -79,6 +80,7 @@ export class WeixinOutboxError extends Error {
 }
 
 export interface WeixinOutboxOptions {
+  displaySettings?: SurfaceMessageDisplaySettings;
   capacity?: number;
   closeTimeoutMs?: number;
   autoCompactPercent?: (
@@ -137,7 +139,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     });
   }
 
-  handle(event: OutputEvent): void {
+  handle(event: OutputEvent, context?: { liveAdmitted: true; completion?: "brief" | "detailed" }, signal?: AbortSignal): void | Promise<void> {
     if (
       this.closed
       || event.target.surface !== "weixin"
@@ -146,7 +148,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     if (!DeliveryReceipt.current()) this.observe(event);
-    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+    if (!DeliveryReceipt.current() && event.type === "turn.completed" && !context?.completion && this.shouldSettleLiveCompletion(event)) {
+      return this.settleLiveCompletion(event, signal ?? new AbortController().signal, () => true);
+    }
+    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event, context?.completion));
   }
 
   observe(event: OutputEvent): void {
@@ -165,10 +170,31 @@ export class WeixinOutbox implements SurfaceOutputPort {
   }
 
   retains(event: OutputEvent): boolean {
+    if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
     return isPersistentOutput(event);
   }
 
-  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
+  liveCompletionDisplay(event: Extract<OutputEvent, { type: "turn.completed" }>): "off" | "brief" | "detailed" {
+    const mode = this.options.displaySettings?.(event.target).completion ?? "detailed";
+    return mode === "off" && !shouldHideTurnCompleted(event, mode) ? "detailed" : mode;
+  }
+
+  shouldSettleLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>): boolean {
+    return this.liveCompletionDisplay(event) === "off";
+  }
+
+  async settleLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>, signal: AbortSignal, authorized: () => boolean): Promise<void> {
+    const actorId = this.contexts.get(event.target)?.actorId ?? event.target.conversationId;
+    await this.snapshots.run(event, signal, () => authorized() && !this.closed && this.matches(event.target)
+      && this.access.isAllowed({ target: event.target, actorId }), () => this.discardLiveCompletion(), false);
+  }
+
+  discardLiveCompletion(): void {
+    // Weixin owns no Turn stream. Its incoming reply context belongs to the
+    // Conversation; hiding a notification must not invalidate or consume it.
+  }
+
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, _authorized?: () => boolean, _source?: SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
     if (this.closed || !this.matches(event.target)) throw new Error("可靠输出目标无效或已关闭");
     signal.throwIfAborted();
     if (isHiddenAutoApprovalReview(event)) return;
@@ -176,11 +202,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
       throw new Error("微信持久输出类型不受支持");
     }
     await captureDelivery(() => {
-      this.handle(event);
+      void this.handle(event, { liveAdmitted: true, completion: context?.completion ?? "detailed" });
     }, signal, checkpoint, { requireConfirmation: true });
   }
 
-  private handleEvent(event: OutputEvent): void {
+  private handleEvent(event: OutputEvent, completion?: "brief" | "detailed"): void {
     // 渠道投递策略只在这里判定一次：微信的单次回复窗口只保留生命周期、终态与全局空闲
     // 通知和上下文压缩，推理、计划、其他操作、连接等事件不占用该预算（详见 delivery-policy.ts）。
     const decision = resolveSurfaceDelivery("weixin", event);
@@ -208,7 +234,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       );
       return;
     }
-    const rendered = this.render(event);
+    const rendered = this.render(event, completion);
     if (rendered === null) {
       return;
     }
@@ -316,7 +342,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     if (this.closed) throw new Error("微信输出队列已关闭");
   }
 
-  private render(event: OutputEvent): string | null {
+  private render(event: OutputEvent, completion?: "brief" | "detailed"): string | null {
     switch (event.type) {
       case "hook.completed":
         return formatWeixinCommandText(
@@ -345,6 +371,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
             event,
             this.options.debugEnabled ?? false,
             this.options.autoCompactPercent,
+            completion ?? (this.liveCompletionDisplay(event) === "brief" ? "brief" : "detailed"),
           ),
           { structuredFields: true },
         );

@@ -1,5 +1,7 @@
 # 微信 Surface
 
+组合根经 `factory.ts`、`surface.ts` 向 Outbox 注入目标显示回调，微信仅消费其中的完成通知 `completion`。成功隐藏只完成本地收尾，不调用发送接口、不消费或删除原 Conversation 回复上下文；失败、停止和权威缺正文回执保留。已入箱完成记录始终可见，其他过程显示设置继续不适用于微信。
+
 当前实现单账号私聊文本、图片、视频附件、语音转写与 UTF-8 文本文件 Surface：独立安全凭据边界、运行时窄协议 Client、私有游标检查点、
 私聊输入 Adapter、完整命令 Adapter、加密重启上线通知、受回复窗口约束的 Turn 生命周期与文本 Outbox、
 一次性精确文本审批、用户输入与 MCP 交互端口和目录内部完整 `SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，

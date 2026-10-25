@@ -230,6 +230,8 @@ export class FeishuSurface implements SurfaceAdapter {
       options.logger,
       {
         ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
+        isCompletionAuthorized: event => (options.actorRegistry?.actors(event.target) ?? [])
+          .some(actorId => options.access.isAllowed({ target: event.target, actorId })),
         ...(options.operationUpdateDisplay !== undefined
           ? { operationUpdateDisplay: options.operationUpdateDisplay }
           : {}),

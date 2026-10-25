@@ -14,7 +14,7 @@ export interface PersistentSurfaceOutputOptions {
   authorizeAtDispatch?(event: OutputEvent, owner: string, signal: AbortSignal): Promise<boolean>;
   source?(event: OutputEvent, owner: string): SurfaceDeliverySource | undefined;
   accounts(): string[];
-  deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number, source?: SurfaceDeliverySource): Promise<void>;
+  deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number, source?: SurfaceDeliverySource, presentation?: { completion: "brief" | "detailed" }): Promise<void>;
   acknowledged?(event: OutputEvent, owner: string): void;
   fault(code: string, account?: string, persistentDeliveryId?: string, failure?: DeliveryFailure): void;
   changed?(): void;
@@ -29,7 +29,7 @@ export class PersistentSurfaceOutput {
   private readonly preparingConversations = new Map<string, number>();
   private readonly tails = new Map<string, Promise<void>>();
   private pendingBytes = 0;
-  private readonly liveOrders = new Map<string, number>();
+  private readonly liveOrders = new Map<string, { order: number; presentation?: { completion: "brief" | "detailed" } }>();
   private closed = false;
   private readonly idleWaiters = new Set<() => void>();
 
@@ -64,7 +64,7 @@ export class PersistentSurfaceOutput {
             signal.throwIfAborted();
             if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
           }
-        }, () => options.authorized(payload.event, payload.owner), liveOrder, options.source?.(payload.event, payload.owner))));
+        }, () => options.authorized(payload.event, payload.owner), liveOrder?.order, options.source?.(payload.event, payload.owner), liveOrder?.presentation)));
       },
       fault: (code, account, id) => options.fault(code, account, id, code === "storage" ? this.journal.failure : undefined),
       acknowledged: (record) => {
@@ -115,7 +115,7 @@ export class PersistentSurfaceOutput {
     return this.preparingConversations.has(key) || this.coordinator.hasOutstanding(key);
   }
 
-  accept(event: OutputEvent, liveOrder?: number): void {
+  accept(event: OutputEvent, liveOrder?: number, presentation?: { completion: "brief" | "detailed" }): void {
     const account = surfaceAccountKey(event.target.surface, event.target.accountId);
     if (this.closed) return;
     let encoded: string;
@@ -140,7 +140,7 @@ export class PersistentSurfaceOutput {
     const previous = this.tails.get(conversation) ?? Promise.resolve();
     const id = randomUUID();
     let submitted = false;
-    if (liveOrder !== undefined) this.liveOrders.set(id, liveOrder);
+    if (liveOrder !== undefined) this.liveOrders.set(id, { order: liveOrder, ...(presentation ? { presentation } : {}) });
     const task = previous.then(async () => {
       const payload = await snapshotPersistentOutput(snapshot, owner);
       if (this.closed && this.closeExpired) throw new Error("投递箱快照关闭期限已结束");

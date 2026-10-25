@@ -87,6 +87,7 @@ export interface GatewayConfigDocument {
     operation_updates: "full" | "compact" | "hidden";
     plan_updates: boolean;
     reasoning: boolean;
+    completion?: "off" | "brief" | "detailed";
     overrides?: readonly import("./message-display-policy.mjs").MessageDisplayOverride[];
     model_aliases?: Record<string, string>;
   };

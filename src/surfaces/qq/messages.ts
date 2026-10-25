@@ -13,6 +13,7 @@ import { renderConversationCommandResult } from "../conversation-command-rendere
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { resolveSurfaceDelivery } from "../delivery-policy.js";
 import { isSupportedPersistentOutput } from "../persistent-output.js";
+import { shouldHideTurnCompleted } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import { parseQqTextEvent } from "./inbound.js";
 import { parseQqButtonEvent } from "./button-inbound.js";
@@ -270,7 +271,34 @@ export class QqMessages implements SurfaceOutputPort {
     }
     if (source && event.type === "turn.completed") this.sourceRegistry(source).terminal(source);
   }
-  retains(event: OutputEvent): boolean { return event.type !== "text.delta" && this.supported(event) && this.admitted.has(event); }
+  retains(event: OutputEvent): boolean {
+    return !(event.type === "turn.completed" && this.shouldSettleLiveCompletion(event))
+      && event.type !== "text.delta" && this.supported(event) && this.admitted.has(event);
+  }
+  liveCompletionDisplay(event: Extract<OutputEvent, { type: "turn.completed" }>): "off" | "brief" | "detailed" {
+    const mode = this.displaySettings(event.target).completion;
+    return mode === "off" && !shouldHideTurnCompleted(event, mode) ? "detailed" : mode;
+  }
+  shouldSettleLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>): boolean {
+    return this.liveCompletionDisplay(event) === "off";
+  }
+  async settleLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>, signal: AbortSignal,
+    authorized: () => boolean, source?: SurfaceDeliverySource): Promise<void> {
+    try {
+      signal.throwIfAborted();
+      const owner = source ?? this.admitted.get(event);
+      if (this.lifetime.signal.aborted || !authorized() || !this.supportsDelivery(event) || !owner || owner.kind === "notification"
+        || owner.accountId !== event.target.accountId || owner.conversationId !== event.target.conversationId
+        || owner.threadId !== event.threadId || owner.turnId !== event.turnId || !this.sourceRegistry(owner).isCurrent(owner)) {
+        throw new Error("QQ 完成收尾来源已失效");
+      }
+      await this.streaming.cancelTurn(event.target.conversationId, event.threadId, event.turnId);
+    } finally { this.discardLiveCompletion(event); }
+  }
+  discardLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>): void {
+    if (event.target.surface !== "qq" || event.target.accountId !== this.options.appId) return;
+    this.streaming.discardTurn(event.target.conversationId, event.threadId, event.turnId);
+  }
   async handle(event: OutputEvent, _context?: { liveAdmitted: true }, signal?: AbortSignal): Promise<void> {
     this.observe(event);
     if (event.type === "text.delta") { if (this.admitted.has(event)) await this.streaming.update(event, signal); return; }
@@ -327,7 +355,7 @@ export class QqMessages implements SurfaceOutputPort {
       reserve: parts => this.budget.reserve(recipient, parts, "interaction"),
     }, checkpoint);
   }
-  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, source?: SurfaceDeliverySource): Promise<void> {
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, source?: SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
     if (!isSupportedPersistentOutput(event) || !this.supportsDelivery(event) || !authorized) throw new Error("QQ 输出未获授权或类型不受支持");
     // The classifier selects only some operation updates; its false branch does
     // not exclude image delivery or compaction from the OutputEvent union.
@@ -364,7 +392,7 @@ export class QqMessages implements SurfaceOutputPort {
     }
     const referenceMessageId = source ? this.sourceRegistry(source).replyReference(source) : undefined;
     const completion = event.type === "turn.completed"
-      ? renderQqTurnCompleted(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent) : undefined;
+      ? renderQqTurnCompleted(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent, context?.completion ?? "detailed") : undefined;
     let text = event.type === "text.completed" ? event.text : completion!.text;
     let markdownStart: number | undefined;
     let checkpointFailed = false;
@@ -1105,6 +1133,7 @@ export class QqMessages implements SurfaceOutputPort {
       operationUpdates: this.options.operationUpdateDisplay ?? "compact",
       planUpdatesEnabled: this.options.planUpdatesEnabled ?? true,
       reasoningEnabled: this.options.reasoningEnabled ?? false,
+      completion: "detailed" as const,
     };
   }
   private supportsDelivery(event: OutputEvent): boolean {

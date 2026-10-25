@@ -66,6 +66,8 @@ export function loadGatewaySettings(environment = process.env) {
       operationUpdates: display.operation_updates,
       planUpdatesEnabled: display.plan_updates,
       reasoningEnabled: display.reasoning,
+      completion: display.completion ?? "detailed",
+      completionOverride: display.completion ?? null,
       modelAliases: display.model_aliases ?? {},
       scopes: projectDisplayScopes(document, display, displayTargets.selectors),
       targetsStatus: displayTargets.status,
@@ -308,6 +310,10 @@ function displaySettingActivation(document) {
     : "reload";
 }
 
+function completionSettingActivation(document) {
+  return table(document.weixin).enabled === true ? "restart-gateway" : displaySettingActivation(document);
+}
+
 function applySetting(document, input, configPath) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "设置输入必须是对象");
@@ -318,7 +324,22 @@ function applySetting(document, input, configPath) {
   switch (input.kind) {
     case "display.scope": {
       const result = applyDisplayScopeSetting(document, input, configPath);
-      return { ...result, activation: result.activation === "none" ? "none" : displaySettingActivation(document) };
+      // Overrides are one shared runtime configuration unit, including retained
+      // inactive targets. Match reload-classifier's conservative array boundary.
+      return { ...result, activation: result.activation === "none" ? "none" : completionSettingActivation(document) };
+    }
+    case "display.completion": {
+      const edit = input.value;
+      if (!edit || typeof edit !== "object" || Array.isArray(edit)
+        || Object.keys(edit).some(key => !["action", "value"].includes(key))
+        || !["set", "inherit"].includes(edit.action)
+        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择完成通知设置或恢复缺省");
+      if (edit.action === "set") {
+        const value = enumValue(edit.value, ["off", "brief", "detailed"], "value", "完成通知");
+        document.display = { ...table(document.display), completion: value };
+      } else if (document.display !== undefined) delete document.display.completion;
+      const override = document.display?.completion ?? null;
+      return { value: { completion: override ?? "detailed", completionOverride: override }, activation: completionSettingActivation(document), backupRequired: true };
     }
     case "channel.enabled": {
       const channel = enumValue(input.channel, ["telegram", "feishu", "weixin", "qq"], "channel", "通讯渠道");

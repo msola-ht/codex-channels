@@ -100,12 +100,19 @@ export interface SurfaceOutputPort {
   /** Apply live local lifecycle state synchronously; never await platform delivery. Not called on replay. */
   observe?(event: OutputEvent): void;
   retains?(event: OutputEvent): boolean;
+  /** Freeze the live presentation choice at admission; replay always defaults to detailed. */
+  liveCompletionDisplay?(event: Extract<OutputEvent, { type: "turn.completed" }>): "off" | "brief" | "detailed";
+  shouldSettleLiveCompletion?(event: Extract<OutputEvent, { type: "turn.completed" }>): boolean;
+  /** Finish the original Turn's live resources without creating a durable delivery or ACK. */
+  settleLiveCompletion?(event: Extract<OutputEvent, { type: "turn.completed" }>, signal: AbortSignal, authorized: () => boolean, source?: SurfaceDeliverySource): Promise<void>;
+  /** Local, exact-Turn cleanup only; never sends or grants delivery authority. */
+  discardLiveCompletion?(event: Extract<OutputEvent, { type: "turn.completed" }>): void;
   /** Successful live admission also applies to enriched copies; handle still owns ordinary lifecycle observation. */
-  handle(event: OutputEvent, context?: { liveAdmitted: true }, signal?: AbortSignal): Promise<void> | void;
+  handle(event: OutputEvent, context?: { liveAdmitted: true; completion?: "brief" | "detailed" }, signal?: AbortSignal): Promise<void> | void;
   /** Settle actual transient operations (including intentional no-op); validate ownership before sending. */
   deliverSnapshot?(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void>;
   /** Source is the original durable owner identity, never recaptured from an enriched event. */
-  deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, source?: SurfaceDeliverySource): Promise<void>;
+  deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, source?: SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void>;
 }
 
 export type { OperationUpdateDisplay };

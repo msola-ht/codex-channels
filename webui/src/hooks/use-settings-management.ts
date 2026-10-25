@@ -49,6 +49,7 @@ function currentValue(settings: ManagementSettingsResponse, setting: ManagementS
   if (setting.kind === "display.operation-updates") return settings.display.operationUpdates
   if (setting.kind === "display.plan-updates") return settings.display.planUpdatesEnabled
   if (setting.kind === "display.reasoning") return settings.display.reasoningEnabled
+  if (setting.kind === "display.completion") return { completion: settings.display.completion, completionOverride: settings.display.completionOverride }
   if (setting.kind === "system.approval-timeout") return settings.system.approvalTimeoutSeconds
   if (setting.kind === "system.idle-release-minutes") return settings.system.idleReleaseMinutes
   if (setting.kind === "system.model-traffic-mode") return {
