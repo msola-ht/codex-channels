@@ -31,7 +31,7 @@ export class QqTextOutbox {
   /** One complete text, one shared queue operation and receipt. Never retries or changes mode. */
   async deliver(
     input: QqTextMessage,
-    context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; markdownStart?: number; keyboard?: QqCommandKeyboard; allowResultFile?: boolean;
+    context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; markdownContent?: string; markdownStart?: number; keyboard?: QqCommandKeyboard; allowResultFile?: boolean;
       interactionControls?: { content: string; keyboard: QqCommandKeyboard; markdownContent?: string };
       reserve?(parts: number): {
       runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
@@ -54,6 +54,9 @@ export class QqTextOutbox {
         throw new QqProtocolError("message", "invalid-input");
       }
       if (context.preferMarkdown && (context.representation || context.keyboard)) {
+        throw new QqProtocolError("message", "invalid-input");
+      }
+      if (context.markdownContent !== undefined && (!context.preferMarkdown || context.allowResultFile || context.interactionControls)) {
         throw new QqProtocolError("message", "invalid-input");
       }
       if (context.markdownStart !== undefined && (!context.preferMarkdown || !context.allowResultFile
@@ -99,7 +102,8 @@ export class QqTextOutbox {
       const bodyMarkdown = context.allowResultFile && input.mode === "active";
       if (context.preferMarkdown) {
         const formatted = bodyMarkdown ? planQqBodyMarkdown(input, context.markdownStart)
-          : planQqMessageMarkdown(input)?.map(message => ({ message, markdown: true }));
+          : planQqMessageMarkdown(context.markdownContent === undefined ? input : { ...input, content: context.markdownContent })
+            ?.map(message => ({ message, markdown: true }));
         // Notifications keep their existing text-plan quota. Body Markdown
         // selects up to eight larger parts before any text/file attempt.
         if (formatted && (bodyMarkdown || formatted.length <= parts.length)) {

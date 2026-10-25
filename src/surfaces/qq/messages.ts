@@ -275,7 +275,9 @@ export class QqMessages implements SurfaceOutputPort {
       return;
     }
     if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
-    let text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent);
+    const completion = event.type === "turn.completed"
+      ? renderQqTurnCompleted(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent) : undefined;
+    let text = event.type === "text.completed" ? event.text : completion!.text;
     let markdownStart: number | undefined;
     let checkpointFailed = false;
     const record = async (value: DeliveryCheckpoint) => {
@@ -293,6 +295,7 @@ export class QqMessages implements SurfaceOutputPort {
       await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId), content: text }, {
         signal: AbortSignal.any([signal, this.lifetime.signal]),
         preferMarkdown: true,
+        ...(completion ? { markdownContent: completion.markdown } : {}),
         ...(markdownStart !== undefined ? { markdownStart } : {}),
         allowResultFile: event.type === "text.completed",
         beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },

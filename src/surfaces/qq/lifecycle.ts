@@ -3,7 +3,7 @@ import type { OutputEvent } from "../../conversation-core/index.js";
 import {
   createStartupPresentation, createTurnCompletedPresentation,
   createHookCompletedPresentation, createAutoApprovalReviewPresentation,
-  renderStructuredLifecyclePresentation, type StartupRuntimeInfo,
+  renderStructuredLifecyclePresentation, renderPlainLifecyclePresentation, type StartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { ContextCompactionNotices } from "../operation-presentation.js";
 import { formatCodexWarning, formatConnectionLost, formatConnectionRestored,
@@ -60,6 +60,7 @@ export function renderQqTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
   debug = false,
   autoCompactPercent?: (provider: string | null | undefined, model: string | null | undefined) => number | null,
-): string {
-  return renderStructuredLifecyclePresentation(createTurnCompletedPresentation(event, debug, autoCompactPercent));
+): { text: string; markdown: string } {
+  const presentation = createTurnCompletedPresentation(event, debug, autoCompactPercent);
+  return { text: renderPlainLifecyclePresentation(presentation), markdown: renderStructuredLifecyclePresentation(presentation) };
 }

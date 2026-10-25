@@ -14,6 +14,8 @@ import {
 import { conversationTargetKey, UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
+import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
+import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
 import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, formatServiceTierSetting, modelListEntry } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
@@ -202,13 +204,14 @@ export class QqCommandMenuController {
       const context = { ...this.context(target, actorId), queryScope: this.options.queryScope(target) };
       const buttons = result.kind === "status"
         ? [qqMenuButton("model", "模型设置", "/model"), qqMenuButton("workspace", "工作区", "/workspace"),
-          qqMenuButton("permissions", "权限查询", "/permissions"), qqMenuButton("autoreview", "会话审批方式", "/autoreview")]
+          qqMenuButton("permissions", "权限查询", "/permissions"), qqMenuButton("autoreview", "审批设置", "/autoreview")]
         : [qqMenuButton("credits", "查看重置券", "/limits reset")];
       const rows = buttonRows(buttons);
       rows.push({ buttons: [homeButton()] });
       const detail = renderConversationCommandResult(result)!;
       return { ...this.panel(context, { content: "选择下方操作继续。", keyboard: { content: { rows } } }),
-        detail: formatQqLiteralDetails(detail), markdownDetail: detail };
+        detail: formatQqLiteralDetails(detail), markdownDetail: result.kind === "status"
+          ? formatConversationStatus(result.status, escapeLifecycleLiteral) : detail };
     }
     const extension = renderQqExtensionCommand(result);
     if (extension) return this.extensionPanel({ ...this.context(target, actorId), queryScope: this.options.queryScope(target) }, extension);

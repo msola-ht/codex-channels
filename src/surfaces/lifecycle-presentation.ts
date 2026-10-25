@@ -516,33 +516,37 @@ export function createTurnCompletedPresentation(
     model: string | null | undefined,
   ) => number | null,
 ): LifecyclePresentation {
+  const literal = (value: string): string => value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ");
   const sessionFields: LifecyclePresentationField[] = [
     ...(event.workspaceId
       ? [{
           label: "当前工作区",
-          value: event.workspaceName
+          value: literal(event.workspaceName && event.workspaceName !== event.workspaceId
             ? `${event.workspaceName} (${event.workspaceId})`
-            : event.workspaceId,
+            : event.workspaceId),
+          literal: true,
         }]
       : []),
-    { label: "Session", value: event.sessionName ?? "未命名" },
-    { label: "Session ID", value: event.threadId },
+    { label: "会话", value: literal(event.sessionName ?? "未命名"), literal: true },
+    { label: "Session ID", value: literal(event.threadId), literal: true },
     ...(isAutoApprovalReviewer(event.approvalsReviewer)
       ? [{ label: "审批方式", value: "自动审批" }]
       : []),
   ];
   const runFields: LifecyclePresentationField[] = [];
+  const sessionStatistics: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
   let fallbackCacheField: LifecyclePresentationField | undefined;
   if (event.error) {
     runFields.push({
       label: "错误",
-      value: formatTurnErrorMessage(
+      value: literal(formatTurnErrorMessage(
         event.error,
         event.errorCode,
         event.modelProvider,
         event.model,
-      ),
+      )),
+      literal: true,
     });
   }
   if (event.missingFinalResponse) {
@@ -580,12 +584,18 @@ export function createTurnCompletedPresentation(
   if (event.model) {
     runFields.push({
       label: "模型",
-      value: `${event.model} · ${formatReasoningEffort(event.effort)} · ${formatCompletedServiceTier(event)}`,
+      value: literal(event.model),
+      literal: true,
     });
     runFields.push({
       label: "提供商",
-      value: formatCodexProviderLabel(event.modelProvider),
+      value: literal(formatCodexProviderLabel(event.modelProvider)),
+      literal: true,
     });
+    runFields.push(
+      { label: reasoningEffortSettingName(event.effort), value: formatReasoningEffort(event.effort) },
+      { label: "速度档位", value: formatCompletedServiceTier(event) },
+    );
     const autoCompact = autoCompactPercent?.(event.modelProvider, event.model);
     if (autoCompact !== null && autoCompact !== undefined) {
       sessionFields.push({
@@ -741,7 +751,7 @@ export function createTurnCompletedPresentation(
   }
   if (hasRunReviews && event.sessionAutoApprovalReview
     && event.sessionAutoApprovalReview.total > 0) {
-    sessionFields.push(autoApprovalReviewField(event.sessionAutoApprovalReview));
+    sessionStatistics.push(autoApprovalReviewField(event.sessionAutoApprovalReview));
   }
   if (event.taskAggregate) {
     const task = event.taskAggregate;
@@ -794,17 +804,18 @@ export function createTurnCompletedPresentation(
   if (Object.hasOwn(event, "gitBranch")) {
     sessionFields.push({
       label: "Git 分支",
-      value: event.gitBranch ?? "未检测到",
+      value: literal(event.gitBranch ?? "未检测到"),
+      literal: true,
     });
   }
   if (event.sessionAggregate) {
     const session = event.sessionAggregate;
-    sessionFields.push({
+    sessionStatistics.push({
       label: "模型请求",
       value: `${formatRequestCount(session.requestCount)} 次`,
     });
-    sessionFields.push(...requestOutcomeFields(session));
-    sessionFields.push({
+    sessionStatistics.push(...requestOutcomeFields(session));
+    sessionStatistics.push({
       title: "Token",
       value: formatObservedTotal(session),
       fields: [
@@ -816,15 +827,15 @@ export function createTurnCompletedPresentation(
     });
   }
   if (event.sessionAggregate?.responseUsage?.amount != null) {
-    sessionFields.push({ label: "OpenAI Credits", value: formatResponseUsage(event.sessionAggregate?.responseUsage) });
+    sessionStatistics.push({ label: "OpenAI Credits", value: formatResponseUsage(event.sessionAggregate?.responseUsage) });
   }
   if (event.sessionAggregate?.compact) {
-    sessionFields.push({
+    sessionStatistics.push({
       label: "压缩请求",
       value: formatCompactMetricsValue(event.sessionAggregate.compact, { concise: !debug, currentModel: event.model }),
     });
   }
-  sessionFields.push({
+  sessionStatistics.push({
     title: "总耗时",
     value: formatSessionExecutionTiming(event),
     fields: event.sessionAggregate ? performanceFields(event.sessionAggregate.performance) : [],
@@ -833,6 +844,7 @@ export function createTurnCompletedPresentation(
     ...(sessionFields.length > 0
       ? [{ title: "当前会话", fields: sessionFields }]
       : []),
+    { title: "会话累计", fields: sessionStatistics },
     ...(accountFields.length > 0
       ? [{ title: "账户状态", fields: accountFields }]
       : []),

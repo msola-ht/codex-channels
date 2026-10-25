@@ -128,87 +128,108 @@ export function formatThreadApprovalsReviewer(reviewer: ThreadApprovalsReviewer 
 
 export function formatConversationStatus(
   status: ConversationStatus,
-  formatExecutionPath: (path: string) => string = path => path,
+  formatLiteral: (value: string) => string = value => value,
 ): string {
+  // Values are metadata, never Markdown structure. Channel escaping happens once here.
+  const literal = (value: string): string => formatLiteral(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
+  const field = (label: string, value: string): string => `- ${label}：${literal(value)}`;
   const lines = [
-    "Codex 状态",
+    "## Codex 状态",
+    "",
     formatTimezoneLine(),
-    `Workspace：${status.workspaceName} (${status.workspaceId})`,
-    `Session：${status.threadId ? status.threadName ?? "未命名" : "尚未绑定"}`,
-    `Session ID：${status.threadId ?? "尚未绑定"}`,
-    `Turn：${status.sessionRestoring ? "尚未恢复" : status.turnId ?? "空闲"}`,
-    `工作目录：${status.cwd}`,
-    `Git 分支：${status.gitBranch ?? "未检测到"}`,
-    `模型：${status.sessionRestoring ? "尚未恢复" : `${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`}`,
-    `提供商：${status.sessionRestoring ? "尚未恢复" : formatCodexProviderLabel(status.modelProvider)}`,
-    `${reasoningEffortSettingName(status.effort)}：${status.sessionRestoring ? "尚未恢复" : `${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""}`}`,
-    `速度：${status.sessionRestoring ? "尚未恢复" : status.threadId || status.fastModePending ? formatServiceTierSetting(status) : "未知"}`,
-    `协作模式：${status.sessionRestoring ? "尚未恢复" : `${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`}`,
+    "",
+    "### 当前会话",
+    "",
+    field("工作区", status.workspaceName === status.workspaceId ? status.workspaceName : `${status.workspaceName} (${status.workspaceId})`),
+    field("会话", status.threadId ? status.threadName ?? "未命名" : "尚未绑定"),
+    ...(status.threadId ? [field("Session ID", status.threadId)] : []),
+    field("任务状态", !status.threadId ? "尚未绑定会话" : status.sessionRestoring ? "会话尚未恢复" : status.turnId ? "运行中" : "空闲"),
+    ...(status.threadId && !status.sessionRestoring && status.turnId ? [field("Turn ID", status.turnId)] : []),
+    "",
+    "### 模型与执行设置",
+    "",
+    field("模型", status.sessionRestoring ? "尚未恢复" : `${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`),
+    field("提供商", status.sessionRestoring ? "尚未恢复" : formatCodexProviderLabel(status.modelProvider)),
+    field(reasoningEffortSettingName(status.effort), status.sessionRestoring ? "尚未恢复" : `${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""}`),
+    field("速度", status.sessionRestoring ? "尚未恢复" : status.threadId || status.fastModePending ? formatServiceTierSetting(status) : "未知"),
+    field("协作模式", status.sessionRestoring ? "尚未恢复" : `${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`),
     ...(isAutoApprovalReviewer(status.approvalsReviewer)
-      ? [`审批方式：${formatThreadApprovalsReviewer(status.approvalsReviewer)}`]
+      ? [field("审批方式", formatThreadApprovalsReviewer(status.approvalsReviewer))]
       : []),
+    "",
+    "### 执行目录",
+    "",
+    field("工作区目录", status.cwd),
+    field("Git 分支", status.gitBranch ?? "未检测到"),
   ];
-  if (status.contextCompactionCount !== undefined) {
-    lines.push(`上下文压缩：${status.contextCompactionCount} 次`);
-  }
   if (status.threadId) {
-    const cleanPath = (path: string): string => formatExecutionPath(path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
     const context = status.executionContext;
-    lines.push("", "会话执行目录：");
     if (!context) {
-      lines.push("尚未取得有效的 App Server 执行上下文（可能正在恢复），不使用 Workspace 目录代替");
+      lines.push("", "尚未取得有效的 App Server 执行上下文（可能正在恢复），不使用工作区目录代替。");
     } else {
-      lines.push(`最近确认目录：${cleanPath(context.cwd)}`,
-        `运行目录列表（最近一次新建、恢复或派生的加载快照；不是实时权限清单）：`,
-        `快照对应目录：${cleanPath(context.workspaceRootsSnapshot.cwd)}`);
-      if (context.workspaceRootsSnapshot.roots.length === 0) {
-        lines.push("App Server 返回的运行目录列表为空");
+      lines.push(field("最近确认目录", context.cwd === status.cwd ? "与工作区目录一致（App Server 已确认）" : context.cwd));
+      if (context.workspaceRootsSnapshot.cwd === context.cwd
+        && context.workspaceRootsSnapshot.roots.length === 1
+        && context.workspaceRootsSnapshot.roots[0] === context.cwd) {
+        lines.push("- 运行目录：仅上述最近确认目录");
       } else {
-        lines.push(...context.workspaceRootsSnapshot.roots.map((path, index) => `- 目录 ${index + 1}：${cleanPath(path)}`));
+        if (context.workspaceRootsSnapshot.cwd !== context.cwd) {
+          lines.push(field("快照对应目录", context.workspaceRootsSnapshot.cwd));
+        }
+        if (context.workspaceRootsSnapshot.roots.length === 0) {
+          lines.push("- 运行目录：App Server 返回的列表为空");
+        } else {
+          lines.push("- 运行目录：", ...context.workspaceRootsSnapshot.roots.map((path, index) => `  ${field(`目录 ${index + 1}`, path)}`));
+        }
       }
+      lines.push("", "运行目录取最近一次新建、恢复或派生的加载快照，不是实时权限清单。");
     }
-    lines.push("", "指令文件来源（最近一次新建、恢复或派生的加载快照）：");
+    lines.push("", "### 规则来源", "", "最近一次新建、恢复或派生的加载快照，不代表文件当前的实时加载情况。", "");
     if (status.instructionSources === undefined) {
       lines.push("尚未取得 App Server 加载清单");
     } else if (status.instructionSources.length === 0) {
-      lines.push("App Server 返回的文件清单为空（不代表没有其他指令）");
+      lines.push("App Server 返回的规则文件清单为空（不代表没有其他规则）");
     } else {
-      lines.push(...status.instructionSources.map((path, index) => `- 文件 ${index + 1}：${cleanPath(path)}`));
+      lines.push(...status.instructionSources.map((path, index) => field(`文件 ${index + 1}`, path)));
     }
   }
   if (status.goal) {
     lines.push(
-      `Goal 状态：${formatGoalStatus(status.goal.status)}`,
-      `Goal 目标：${status.goal.objective}`,
-      `Goal 用量：${formatGoalUsage(status.goal)}`,
+      "", "### 当前目标", "",
+      field("目标", status.goal.objective),
+      field("状态", formatGoalStatus(status.goal.status)),
+      field("用量", formatGoalUsage(status.goal)),
     );
   }
+  lines.push("", "### 会话用量", "");
   if (status.tokenUsage) {
     const { total, last, modelContextWindow } = status.tokenUsage;
     lines.push(
-      "",
-      "当前 Session 用量：",
-      `- **Token**：${formatTokenCount(total.totalTokens)}`,
-      `  - 最近模型请求：${formatTokenCount(last.totalTokens)}`,
-      `  - 缓存：${formatTokenCount(total.cachedInputTokens)}`,
-      `  - 无缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
-      `  - 缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
+      `- 累计 Token：${formatTokenCount(total.totalTokens)}`,
+      `- 累计输入：${formatTokenCount(total.inputTokens)}`,
+      `  - 缓存输入：${formatTokenCount(total.cachedInputTokens)}`,
+      `  - 非缓存输入：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
       ...(total.cacheWriteInputTokens > 0
-        ? [`  - 缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
+        ? [`- 缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
         : []),
-      `  - 输出：${formatTokenCount(total.outputTokens)}`,
+      `- 累计输出：${formatTokenCount(total.outputTokens)}`,
       ...(total.reasoningOutputTokens > 0
         ? [`  - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`]
         : []),
-      `  - Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
+      `- 缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
+      `- 最近一次模型请求 Token：${formatTokenCount(last.totalTokens)}`,
+      `- Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
-  } else if (status.threadId) {
-    lines.push("", "当前 Session 用量：等待 App Server 推送统计");
+  } else {
+    lines.push(status.threadId ? "等待 App Server 推送统计。" : "尚未绑定会话，暂无会话用量。", "");
+  }
+  if (status.contextCompactionCount !== undefined) {
+    lines.push(`- 上下文压缩：${status.contextCompactionCount} 次`);
   }
   if (usesOpenAiAccount(status.modelProvider) && status.weeklyLimit) {
-    lines.push(`周限：${formatRemainingRateLimitWindow(status.weeklyLimit)}`);
+    lines.push("", "### 账户额度", "", `- 周限：${formatRemainingRateLimitWindow(status.weeklyLimit)}`);
   }
-  return toStructuredMarkdownList(lines.join("\n"));
+  return lines.join("\n").trimEnd();
 }
 
 export { formatConversationMetrics } from "./metrics-format.js";

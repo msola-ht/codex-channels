@@ -613,7 +613,7 @@ export function renderCommandCenterChoices(
         { label: "模型设置", action: "model", input: "" },
         { label: "工作区", action: "workspace", input: "" },
         { label: "权限查询", action: "permissions", input: "" },
-        { label: "当前会话审批方式", action: "autoreview", input: "" },
+        { label: "审批设置", action: "autoreview", input: "" },
       ],
     };
   }
