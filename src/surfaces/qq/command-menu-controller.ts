@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   fastServiceTierId,
+  listProviders,
   modelSelectionSnapshot,
   parseThreadRevertOperation,
   parseMcpOperation,
@@ -13,14 +14,14 @@ import {
 import { conversationTargetKey, UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
-import { formatServiceTierSetting } from "../provider-format.js";
+import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTierSetting } from "../provider-format.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import { formatThreadQueueInputTypeLabel } from "../conversation-session-command-format.js";
 import { formatQqLiteralDetails } from "./interactions.js";
 import { qqLiteralMarkdown } from "./message-markdown.js";
 import { qqMenuButton, renderQqCommandMenu, type QqMenuButton } from "./command-menu.js";
 import type { QqCommandKeyboard } from "./protocol.js";
-import { QqProtocolError } from "./protocol.js";
+import { QqProtocolError, QQ_MENU_PART_BYTES } from "./protocol.js";
 import { planText } from "./outbox.js";
 import { isQqExtensionOperation, renderQqExtensionCommand, type QqExtensionChoice, type QqExtensionView } from "./extension-commands.js";
 
@@ -120,9 +121,10 @@ export class QqCommandMenuController {
     const context = this.context(target, actorId);
     if (!input) return this.panel(context, renderQqCommandMenu());
     if (input === "account") return this.panel(context, {
-      content: "# 账户工具\n查看重置券或当前渠道身份。机器人接入与群授权请在本机 Setup 管理。",
+      content: "# 账户工具\n查看额度、重置券或当前渠道身份。机器人接入与群授权请在本机 Setup 管理。",
       keyboard: { content: { rows: [
-        { buttons: [qqMenuButton("credits", "查看重置券", "/limits reset"), qqMenuButton("whoami", "我的身份", "/whoami")] },
+        { buttons: [qqMenuButton("limits", "账户额度", "/limits"), qqMenuButton("credits", "查看重置券", "/limits reset")] },
+        { buttons: [qqMenuButton("whoami", "我的身份", "/whoami")] },
         { buttons: [homeButton()] },
       ] } },
     });
@@ -155,7 +157,6 @@ export class QqCommandMenuController {
     if (input === "settings") return this.panel(context, {
       content: "# 偏好设置\n调整后续任务的模式与当前会话审批方式；权限入口仅查询。",
       keyboard: { content: { rows: [
-        { buttons: [qqMenuButton("effort", "思考等级", "/effort"), qqMenuButton("fast", "速度设置", "/fast status")] },
         { buttons: [qqMenuButton("goal", "Goal", "/goal"), qqMenuButton("plan", "Plan 模式", "/plan")] },
         { buttons: [qqMenuButton("autoreview", "会话审批方式", "/autoreview"), qqMenuButton("permissions", "权限查询", "/permissions")] },
         { buttons: [homeButton()] },
@@ -671,7 +672,8 @@ export class QqCommandMenuController {
     const buttons = entries.map((workspace, index) => this.button(context,
       `${(page - 1) * 9 + index + 1} ${workspace.name}`, { kind: "workspace", id: workspace.id }));
     const lines = entries.map((workspace, index) =>
-      `${(page - 1) * 9 + index + 1}. ${markdown(workspace.name, 100)}${workspace.id === result.currentWorkspaceId ? "（当前）" : ""}\n${markdown(workspace.id, 70)}`);
+      `**${(page - 1) * 9 + index + 1}. ${markdown(workspace.name, 100)}${workspace.id === result.currentWorkspaceId ? "（当前）" : ""}**\nID：${markdown(workspace.id, 100)}\n工作目录：${markdown(workspace.cwd, 260)}\n`);
+    lines.unshift(`当前工作区：${markdown(result.currentWorkspaceId, 100)}${result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId) ? "" : "（已失效，请重新选择）"}\n切换后请重新发起操作，不会自动重试之前的请求。\n`);
     return this.listPanel(context, "选择工作区", lines, buttons, page, Math.ceil(result.workspaces.length / 9),
       next => ({ kind: "workspace-page", page: next }));
   }
@@ -719,13 +721,25 @@ export class QqCommandMenuController {
         [`当前模型：${markdown(selected?.displayName ?? state.model ?? "未知", 100)}`, ...(view === "fast" ? [`速度：${markdown(formatServiceTierSetting(state, selected), 200)}`, "速度影响下一轮；主 Provider 同时更新 Codex 用户级默认速度。"] : []), ...entries.map(choice => markdown(choice.label, 100))],
         buttons, page, Math.ceil(choices.length / 9), next => ({ kind: "model-page", page: next, view, snapshot }), extra);
     }
-    const catalog = state.models.filter(model => model.available !== false);
+    const current = `当前模型：${markdown(selected?.displayName ?? state.model, 100)}\n提供商：${markdown(formatCodexProviderLabel(state.modelProvider), 100)}\n思考等级：${markdown(state.effort ?? selected?.defaultReasoningEffort ?? "模型默认", 40)}\n速度：${markdown(formatServiceTierSetting(state, selected), 200)}\n`;
+    if (state.providerFilter === undefined) {
+      const providers = listProviders(state.models);
+      const entries = slicePage(providers, page, 9);
+      const buttons = entries.map(provider => this.button(context, formatCodexProviderLabel(provider), {
+        kind: "model", selection: { kind: "browse-provider", provider, snapshot },
+      }));
+      const lines = [current, "请先选择提供商，再选择该提供商下的模型。", ...entries.map(provider =>
+        `**${markdown(formatCodexProviderLabel(provider), 100)}${provider === (state.modelProvider ?? "openai") ? "（当前）" : ""}**\n${markdown(formatProviderModelSummary(state.models, provider), 180)}\n`)];
+      return this.listPanel(context, "选择提供商", lines, buttons, page, Math.ceil(providers.length / 9),
+        next => ({ kind: "model-page", page: next, view, snapshot }));
+    }
+    const catalog = state.models.filter(model => (model.provider ?? "openai") === state.providerFilter);
     const entries = slicePage(catalog, page, 9);
-    const buttons = entries.map((model, index) => this.button(context, `${(page - 1) * 9 + index + 1} ${model.displayName}`, {
+    const buttons = entries.flatMap((model, index) => model.available === false ? [] : [this.button(context, `${(page - 1) * 9 + index + 1} ${model.displayName}`, {
       kind: "model", selection: { kind: "model", provider: model.provider ?? "openai", model: model.model, snapshot },
-    }));
-    const lines = entries.map((model, index) => `${(page - 1) * 9 + index + 1}. ${markdown(model.displayName, 80)}\n${markdown(`${model.provider ?? "openai"} / ${model.model}`, 90)}`);
-    const extra: QqMenuButton[] = [];
+    })]);
+    const lines = [current, `提供商：${markdown(formatCodexProviderLabel(state.providerFilter), 100)}\n请选择模型；支持多个思考等级时继续选择思考等级。`, ...entries.map((model, index) => `${(page - 1) * 9 + index + 1}. ${markdown(model.displayName, 80)}${model.available === false ? "（暂不可用）" : ""}${model === selected ? "（当前）" : ""}\n${markdown(model.model, 90)}\n`)];
+    const extra: QqMenuButton[] = [qqMenuButton("providers", "返回提供商", "/model")];
     if (selected && selected.supportedReasoningEfforts.length > 1) extra.push(this.button(context, "思考等级", { kind: "model-page", page: 1, view: "effort", snapshot }));
     if (selected && (fastServiceTierId(selected) || ultrafastServiceTierId(selected))) extra.push(this.button(context, "选择速度", { kind: "model-page", page: 1, view: "fast", snapshot }));
     return this.listPanel(context, "选择模型", lines, buttons, page, Math.ceil(catalog.length / 9),
@@ -741,21 +755,58 @@ export class QqCommandMenuController {
   }
 
   private sessions(context: MenuContext, result: Sessions, page: number): QqMenuPanel {
-    const offset = page % 2 === 0 ? 10 : 0;
-    const entries = result.sessions.slice(offset, offset + 10);
     const pages = Math.max(1, Math.ceil(result.matchedSessionCount / 10));
     if (page > pages) throw unsupported();
-    const buttons = entries.map((session, index) => this.button(context, `${(page - 1) * 10 + index + 1} ${session.name || session.preview || session.id}`, { kind: result.archived ? "unarchive" : "resume", id: session.id }));
-    buttons.push(qqMenuButton("search", "搜索标题", result.archived ? "/archived search " : "/sessions search ", false),
-      qqMenuButton("resume", "手动恢复ID", result.archived ? "/unarchive " : "/resume ", false));
-    const lines = entries.map((session, index) => `${(page - 1) * 10 + index + 1}. ${markdown(session.name || session.preview || session.id, 140)}${session.id === result.currentThreadId ? "（当前）" : ""}`);
+    const offset = page % 2 === 0 ? 10 : 0;
+    const background = new Set(result.backgroundThreadIds ?? []);
+    const title = result.archived ? "已归档会话" : "历史会话";
+    const heading = `# ${title}（匹配 ${result.matchedSessionCount}）`;
+    const hint = "点击下方对应会话恢复；省略号表示标题或字段已截断。";
+    const entries = result.sessions.slice(offset, offset + 10).map((session, index) => ({
+      session,
+      number: (page - 1) * 10 + index + 1,
+      text: [
+        `**${(page - 1) * 10 + index + 1}. ${markdown(bounded(session.name || session.preview || "未命名", 32), 160)}**${session.id === result.currentThreadId ? " · 当前" : background.has(session.id) ? " · 后台运行" : ""}${session.isPinned ? " · 固定" : ""}`,
+        [
+          ...(session.model ? [`模型：${markdown(session.model, 60)}`] : []),
+          ...(session.reasoningEffort ? [`思考：${markdown(session.reasoningEffort, 24)}`] : []),
+          ...(session.modelProvider ? [`Provider：${markdown(session.modelProvider, 45)}`] : []),
+        ].join(" · "),
+        [
+          ...(session.turnCount === undefined ? [] : [`轮数：${session.turnCount}`]),
+          `状态：${session.status.type}`, `ID：${markdown(session.id.slice(0, 12), 24)}`,
+        ].join(" · "),
+      ].filter(Boolean).join("\n"),
+    }));
     const filters = [
       `filter ${result.view.filter}`,
       ...(result.view.provider ? [`provider ${result.view.provider}`] : []),
       ...(result.view.searchTerm ? [`search ${result.view.searchTerm}`] : []),
     ].join(" ");
-    return this.listPanel(context, result.archived ? "已归档会话 · 选择恢复" : "历史会话", lines, buttons, page, pages,
-      next => ({ kind: "sessions-page", page: next, filters, archived: result.archived }));
+    const navigate = (next: number): MenuAction => ({
+      kind: "sessions-page", page: next, filters, archived: result.archived,
+    });
+    const navigation = [
+      ...(page > 1 ? [this.button(context, "上一页", navigate(page - 1))] : []),
+      ...(page < pages ? [this.button(context, "下一页", navigate(page + 1))] : []),
+      homeButton(),
+    ];
+    const buttons = entries.map(entry => this.button(context, `${entry.number} ${entry.session.name || entry.session.preview || "未命名"}`, {
+      kind: result.archived ? "unarchive" : "resume", id: entry.session.id,
+    }));
+    const rows = buttonRows(buttons);
+    const tools = [
+      qqMenuButton("search", "搜索标题", result.archived ? "/archived search " : "/sessions search ", false),
+      qqMenuButton("resume", "填写恢复ID", result.archived ? "/unarchive " : "/resume ", false),
+    ];
+    const last = rows.at(-1);
+    if (last && last.buttons.length === 1) last.buttons.push(...tools);
+    else rows.push({ buttons: tools });
+    rows.push({ buttons: navigation });
+    const content = [heading, `第 ${page}/${pages} 页`, hint,
+      ...entries.length ? entries.map(entry => entry.text) : ["当前工作区没有匹配会话。"]].join("\n\n");
+    if (Buffer.byteLength(content) > QQ_MENU_PART_BYTES || rows.length > 5) throw unsupported();
+    return this.panel(context, { content, keyboard: { content: { rows } } });
   }
 
   private metrics(context: MenuContext, scope?: string): QqMenuPanel {
@@ -780,7 +831,7 @@ export class QqCommandMenuController {
     footer.push(homeButton());
     rows.push({ buttons: footer });
     const content = [`# ${title}`, `${page} / ${Math.max(1, pageCount)}`, ...lines.length ? lines : ["暂无可选项"]].join("\n");
-    if (Buffer.byteLength(content, "utf8") > 2000 || rows.length > 5) throw unsupported();
+    if (Buffer.byteLength(content, "utf8") > QQ_MENU_PART_BYTES || rows.length > 5) throw unsupported();
     return this.panel(context, { content, keyboard: { content: { rows } } });
   }
 }

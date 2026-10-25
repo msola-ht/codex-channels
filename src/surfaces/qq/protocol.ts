@@ -13,6 +13,8 @@ export type QqProtocolFailure =
 
 /** Local policy, not a discovered QQ platform maximum. One already planned part. */
 export const QQ_TEXT_PART_BYTES = 2000;
+/** Active Markdown plus keyboard: 6000-byte sample confirmed on platform and client. */
+export const QQ_MENU_PART_BYTES = 6000;
 export const QQ_PASSIVE_WINDOW_MS = 300_000;
 
 export type QqTextMessage = {
@@ -287,7 +289,7 @@ export class QqProtocolClient {
   /** A single complete Markdown body or trusted menu, with the text recipient/deadline/receipt contract. */
   async sendMarkdown(input: QqTextMessage, context: QqTextSendContext, keyboard?: QqCommandKeyboard): Promise<{ messageId: string }> {
     return this.sendPlan(() => {
-      const plan = textRequest(input);
+      const plan = textRequest(input, keyboard && input.mode === "active" ? QQ_MENU_PART_BYTES : QQ_TEXT_PART_BYTES);
       const { content, ...body } = plan.body;
       return { ...plan, body: { ...body, msg_type: 2, markdown: { content },
         ...(keyboard === undefined ? {} : { keyboard: commandKeyboard(keyboard) }) } };
@@ -508,10 +510,10 @@ export class QqProtocolClient {
   }
 }
 
-function textRequest(input: QqTextMessage): { path: string; body: Record<string, unknown>; deadline?: number } {
+function textRequest(input: QqTextMessage, maximumBytes = QQ_TEXT_PART_BYTES): { path: string; body: Record<string, unknown>; deadline?: number } {
   if (!record(input) || !recipient(input.recipient) || typeof input.content !== "string"
-    || !input.content.trim() || input.content.length > QQ_TEXT_PART_BYTES
-    || !wellFormed(input.content) || Buffer.byteLength(input.content) > QQ_TEXT_PART_BYTES) {
+    || !input.content.trim() || input.content.length > maximumBytes
+    || !wellFormed(input.content) || Buffer.byteLength(input.content) > maximumBytes) {
     throw new QqProtocolError("message", "invalid-input");
   }
   const base = ["mode", "recipient", "content"];
@@ -541,7 +543,7 @@ function commandKeyboard(value: unknown): QqCommandKeyboard {
     || value.content.rows.length < 1 || value.content.rows.length > 5) return fail();
   const ids = new Set<string>();
   const rows = value.content.rows.map((row: unknown) => {
-    if (!exact(row, ["buttons"]) || !Array.isArray(row.buttons) || row.buttons.length < 1 || row.buttons.length > 3) return fail();
+    if (!exact(row, ["buttons"]) || !Array.isArray(row.buttons) || row.buttons.length < 1 || row.buttons.length > 5) return fail();
     return { buttons: row.buttons.map((button: unknown): QqCommandKeyboard["content"]["rows"][number]["buttons"][number] => {
       if (!exact(button, ["id", "render_data", "action"]) || typeof button.id !== "string"
         || !/^[a-z0-9_-]{1,32}$/u.test(button.id) || ids.has(button.id)

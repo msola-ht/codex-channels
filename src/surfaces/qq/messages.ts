@@ -773,7 +773,8 @@ export class QqMessages implements SurfaceOutputPort {
     // A send failure must not recursively send another reply with the same msg_seq.
     if (this.replied.has(message)) throw new Error("QQ 来信回复已尝试，不重复发送");
     const recipient = qqConversationRecipient(message.conversationId);
-    const input: QqTextMessage = "kind" in message || detail !== undefined
+    const activeMenu = keyboard !== undefined && detail === undefined && Buffer.byteLength(content) > QQ_TEXT_PART_BYTES;
+    const input: QqTextMessage = "kind" in message || detail !== undefined || activeMenu
       ? { mode: "active", recipient, content: detail ?? content }
       : { mode: "passive", recipient, content,
         messageId: message.id, sequence: 1, sourceTimestampMs: message.sentAtMs };
@@ -800,7 +801,7 @@ export class QqMessages implements SurfaceOutputPort {
         : keyboard ? { representation: "markdown", keyboard } : { preferMarkdown: !preserveLiteral }),
       signal: cancellation ? AbortSignal.any([this.lifetime.signal, cancellation]) : this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
-      reserve: parts => this.budget.reserve(recipient, parts, "kind" in message || detail !== undefined ? "interaction" : undefined),
+      reserve: parts => this.budget.reserve(recipient, parts, "kind" in message || detail !== undefined || activeMenu ? "interaction" : undefined),
     }, async () => {});
   }
   private target(actorId: string, conversationId = `c2c:${actorId}`): ConversationTarget { return { surface: "qq", accountId: this.options.appId, conversationId }; }

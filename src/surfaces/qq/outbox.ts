@@ -3,7 +3,7 @@ import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { readGeneratedImage } from "../generated-image.js";
 import { assertChannelFileName, maximumChannelFileBytes, readBoundedLocalFile } from "../bounded-local-file.js";
-import { QQ_TEXT_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT_FILE_BYTES, QQ_IMAGE_BYTES, QqProtocolError, QqTextSendError,
+import { QQ_TEXT_PART_BYTES, QQ_MENU_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT_FILE_BYTES, QQ_IMAGE_BYTES, QqProtocolError, QqTextSendError,
   type QqProtocolClient, type QqTextMessage, type QqTextSendContext, type QqCommandKeyboard } from "./protocol.js";
 import { planQqMessageMarkdown } from "./message-markdown.js";
 import { qqRecipientKey, type QqRecipient } from "./addressing.js";
@@ -72,14 +72,16 @@ export class QqTextOutbox {
       signal.throwIfAborted();
       // A Markdown body or menu must never enter text splitting or file fallback.
       if (context.keyboard && context.representation !== "markdown") throw new QqProtocolError("message", "invalid-input");
+      const partBytes = context.representation === "markdown" && context.keyboard && input.mode === "active"
+        ? QQ_MENU_PART_BYTES : QQ_TEXT_PART_BYTES;
       if (context.representation === "markdown" && (context.allowResultFile
-        || typeof input.content !== "string" || Buffer.byteLength(input.content) > QQ_TEXT_PART_BYTES)) {
+        || typeof input.content !== "string" || Buffer.byteLength(input.content) > partBytes)) {
         throw new QqProtocolError("message", "invalid-input");
       }
       let file = false;
       let markdown = context.representation === "markdown";
       let parts: readonly QqTextMessage[];
-      try { parts = planText(input); }
+      try { parts = planText(input, partBytes); }
       catch (error) {
         if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input"
           || !context.allowResultFile || input.mode !== "active" || typeof input.content !== "string"
@@ -225,19 +227,19 @@ export class QqTextOutbox {
   }
 }
 
-export function planText(input: QqTextMessage): readonly QqTextMessage[] {
+export function planText(input: QqTextMessage, partBytes = QQ_TEXT_PART_BYTES): readonly QqTextMessage[] {
   const snapshot = { ...input };
   const text = snapshot.content;
   if (typeof text !== "string" || !text.trim() || /[\uD800-\uDFFF]/u.test(text)
-    || text.length > QQ_TEXT_PART_BYTES * MAX_PARTS || Buffer.byteLength(text) > QQ_TEXT_PART_BYTES * MAX_PARTS
+    || text.length > partBytes * MAX_PARTS || Buffer.byteLength(text) > partBytes * MAX_PARTS
     || (snapshot.mode !== "active" && snapshot.mode !== "passive")) {
     throw new QqProtocolError("message", "invalid-input");
   }
   const chunks: string[] = [];
-  if (Buffer.byteLength(text) <= QQ_TEXT_PART_BYTES) chunks.push(text);
+  if (Buffer.byteLength(text) <= partBytes) chunks.push(text);
   else {
     // At most eight parts: every [n/N] wrapper occupies exactly six ASCII bytes.
-    const budget = QQ_TEXT_PART_BYTES - Buffer.byteLength("[1/8]\n");
+    const budget = partBytes - Buffer.byteLength("[1/8]\n");
     let chunk = "";
     let bytes = 0;
     for (const { segment } of segmenter.segment(text)) {
