@@ -1,5 +1,6 @@
 # Codex 官方文档与源码索引
 QQ 剩余适配按[分批计划](qq-message-contract.md#剩余适配分批计划2026-10-24)推进；会话管理批次复用共享 rename、archive/unarchive、setPinned 与官方归档列表，未新增协议。源码已接线菜单及文字命令，尚未部署客户端验收。
+模式与状态批次复用既有 effort/fast、无参 Plan、permissions、approvalsReviewer 与 Goal get/clear，不新增协议。QQ Goal 入口固定已就绪 Thread，拒绝 set 与带需求 Plan；审批方式按钮固定原 Thread 并传递有效性守卫。源码尚未部署，观察边界见同一分批合同。
 上下文批次复用 compact、fork 与 Revert 分页/预览/确认，QQ 提供分屏选择和完整预览后确认门槛，不新增协议。共享 Revert 确认守卫增加最终提交前的期限复核，影响所有已有渠道的同一确认路径；真实 QQ 操作尚未验收。
 普通 Turn 提交的本地关联入口见 [`SubmissionObserver`](../src/application/submission-observer.ts)：
 准备精确 Thread、标记可能提交、确认响应 Turn 并结算失败。它经 Client/Provider 透传而不添加 RPC 字段，

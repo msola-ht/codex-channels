@@ -324,7 +324,7 @@ function modelSelectionResult(state: ModelSelectionState): ConversationCommandRe
 
 export interface ConversationCommandExecutor {
   selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string): Promise<ConversationCommandResult>;
-  selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult>;
+  selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
   selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult>;
   selectModelSetting(target: ConversationTarget, selection: ModelSelectionRequest, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
   execute(
@@ -386,8 +386,10 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       : { kind: "models", view: selection.kind === "browse-provider" ? "model" : selection.kind, state };
   }
 
-  async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult> {
-    const assertAuthorized = this.commandGuard(target, actorId, false);
+  async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult> {
+    const authorize = this.commandGuard(target, actorId, false);
+    const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
+    assertAuthorized();
     this.conversations.touchActivity?.(target);
     const state = await this.conversations.updateAutoReview(target, selection.enabled, selection.threadId, assertAuthorized);
     assertAuthorized();

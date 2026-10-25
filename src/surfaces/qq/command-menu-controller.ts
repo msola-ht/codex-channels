@@ -12,6 +12,7 @@ import {
 import { conversationTargetKey, UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
+import { formatServiceTierSetting } from "../provider-format.js";
 import { formatQqLiteralDetails } from "./interactions.js";
 import { qqMenuButton, renderQqCommandMenu, type QqMenuButton } from "./command-menu.js";
 import type { QqCommandKeyboard } from "./protocol.js";
@@ -21,6 +22,7 @@ export interface QqMenuPanel {
   keyboard: QqCommandKeyboard;
   isCurrent(): boolean;
   detail?: string;
+  markdownDetail?: string;
   delivered?(): void;
 }
 
@@ -29,6 +31,7 @@ interface Options {
   scope(target: ConversationTarget): string;
   workspaceScope(target: ConversationTarget): string;
   selectionScope(target: ConversationTarget): string | undefined;
+  readyThread(target: ConversationTarget): string | undefined;
   allowed(target: ConversationTarget, actorId: string): boolean;
   beforeMutation(target: ConversationTarget, preserveRevert?: boolean): void;
   signal: AbortSignal;
@@ -39,6 +42,8 @@ type MenuAction =
   | { kind: "workspace"; id: string }
   | { kind: "model"; selection: ModelSelectionRequest }
   | { kind: "resume" | "unarchive"; id: string }
+  | { kind: "auto-review"; threadId: string; enabled: boolean }
+  | { kind: "goal-clear"; threadId: string }
   | { kind: "workspace-page"; page: number }
   | { kind: "model-page"; page: number; view: ModelView; snapshot: ModelSelectionSnapshot }
   | { kind: "sessions-page"; page: number; filters: string; archived: boolean };
@@ -84,6 +89,14 @@ export class QqCommandMenuController {
     const input = argumentsText.trim();
     const context = this.context(target, actorId);
     if (!input) return this.panel(context, renderQqCommandMenu());
+    if (input === "settings") return this.panel(context, {
+      content: "# 模式与状态\n思考等级、速度和 Plan 模式影响后续任务。权限入口只查询，不修改权限。",
+      keyboard: { content: { rows: [
+        { buttons: [qqMenuButton("effort", "思考等级", "/effort"), qqMenuButton("fast", "速度设置", "/fast status"), qqMenuButton("plan", "切换计划模式", "/plan")] },
+        { buttons: [qqMenuButton("autoreview", "审批方式", "/autoreview"), qqMenuButton("permissions", "权限查询", "/permissions"), qqMenuButton("goal", "当前目标", "/goal")] },
+        { buttons: [qqMenuButton("whoami", "我的身份", "/whoami"), homeButton()] },
+      ] } },
+    });
     if (input === "manage") return this.panel(context, {
       content: "# 会话管理\n重命名、置顶与归档作用于当前会话；归档会退出当前会话。恢复归档会切换会话，不补发旧结果。",
       keyboard: { content: { rows: [
@@ -106,12 +119,14 @@ export class QqCommandMenuController {
   }
 
   fromResult(target: ConversationTarget, actorId: string, result: ConversationCommandResult): QqMenuPanel | undefined {
-    if (result.kind !== "workspaces" && result.kind !== "models" && result.kind !== "sessions") return undefined;
+    if (result.kind !== "workspaces" && result.kind !== "models" && result.kind !== "sessions" && result.kind !== "auto-review" && result.kind !== "goal") return undefined;
     const context = this.context(target, actorId);
     switch (result.kind) {
       case "workspaces": return this.workspaces(context, result, 1);
       case "models": return this.models(context, result, 1, result.view);
       case "sessions": return this.sessions(context, result, (result.page - 1) * 2 + 1);
+      case "auto-review": return this.autoReview(context, result);
+      case "goal": return this.goal(context, result);
     }
   }
 
@@ -152,7 +167,7 @@ export class QqCommandMenuController {
     this.assertCurrent(context);
     while (this.selections.size >= MAX_SELECTIONS) this.selections.delete(this.selections.keys().next().value!);
     const token = randomBytes(12).toString("hex");
-    this.selections.set(token, { ...context, action, ready: action.kind !== "revert-confirm" });
+    this.selections.set(token, { ...context, action, ready: !["revert-confirm", "auto-review", "goal-clear"].includes(action.kind) });
     return qqMenuButton(token, bounded(label, 10), `/help pick ${token}`);
   }
 
@@ -170,8 +185,25 @@ export class QqCommandMenuController {
       case "sessions-page": return this.sessionsPage(selection, action.page, action.filters, action.archived);
       case "revert-page": return this.revertPage(selection, action.page);
       case "revert-preview": return this.revertResult(selection, await this.options.commands.execute(selection.target, "revert", action.id, selection.actorId, () => this.assertCurrent(selection)));
+      case "auto-review": {
+        const result = await this.options.commands.selectAutoReview(selection.target,
+          { threadId: action.threadId, enabled: action.enabled }, selection.actorId, () => this.assertCurrent(selection));
+        this.assertCurrent(selection);
+        if (result.kind !== "auto-review") throw unsupported();
+        return this.autoReview(selection, result);
+      }
+      case "goal-clear": {
+        const guard = () => { this.assertCurrent(selection); if (this.options.readyThread(selection.target) !== action.threadId) throw expired(); };
+        const result = await this.options.commands.execute(selection.target, "goal", "clear", selection.actorId, guard);
+        guard();
+        if (result.kind !== "outcome" || result.outcome.type !== "goal.cleared") throw unsupported();
+        return this.panel(selection, { content: "# 已清除当前会话目标\n清除目标不等于中断正在运行的任务；如需停止，请使用 /stop。",
+          keyboard: { content: { rows: [{ buttons: [qqMenuButton("goal", "查询目标", "/goal"), homeButton()] }] } } });
+      }
     }
-    this.options.beforeMutation(selection.target, action.kind === "revert-confirm");
+    if (action.kind !== "model" || action.selection.kind === "model") {
+      this.options.beforeMutation(selection.target, action.kind === "revert-confirm");
+    }
     this.assertCurrent(selection);
     let result: ConversationCommandResult;
     if (action.kind === "revert-confirm") {
@@ -196,6 +228,35 @@ export class QqCommandMenuController {
     if (result.kind === "models") return this.models(next, result, 1, result.view);
     if (result.kind !== "outcome") throw unsupported();
     return this.panel(next, { ...renderQqCommandMenu(), content: markdown(formatConversationCommandOutcome(result.outcome), 1600) });
+  }
+
+  private autoReview(context: MenuContext, result: Extract<ConversationCommandResult, { kind: "auto-review" }>): QqMenuPanel {
+    const { threadId, reviewer } = result.state;
+    const buttons = threadId && (reviewer === "user" || reviewer === "auto_review")
+      ? [this.button(context, "自动审查", { kind: "auto-review", threadId, enabled: true }),
+        this.button(context, "手动审批", { kind: "auto-review", threadId, enabled: false }), homeButton()]
+      : [homeButton()];
+    const detail = renderConversationCommandResult(result)!;
+    return { ...this.panel(context, { content: "选择审批方式；仅作用于上述会话。", keyboard: { content: { rows: [{ buttons }] } } }),
+      detail: formatQqLiteralDetails(detail), markdownDetail: detail, delivered: () => this.activate(context, buttons) };
+  }
+
+  private goal(context: MenuContext, result: Extract<ConversationCommandResult, { kind: "goal" }>): QqMenuPanel {
+    const threadId = this.options.readyThread(context.target);
+    if (!threadId || result.goal && result.goal.threadId !== threadId) throw expired();
+    const buttons = result.goal ? [this.button(context, "清除当前目标", { kind: "goal-clear", threadId }), homeButton()] : [homeButton()];
+    const detail = result.goal ? renderConversationCommandResult(result)! : "当前会话没有 Goal。";
+    const panel = this.panel(context, { content: "QQ 当前支持查询和清除目标；清除不等于停止当前任务。", keyboard: { content: { rows: [{ buttons }] } } });
+    return { ...panel, isCurrent: () => panel.isCurrent() && this.options.readyThread(context.target) === threadId,
+      detail: formatQqLiteralDetails(detail), markdownDetail: detail, delivered: () => this.activate(context, buttons) };
+  }
+
+  private activate(context: MenuContext, buttons: QqMenuButton[]): void {
+    if (!this.current(context)) return;
+    for (const button of buttons) {
+      const selection = this.selections.get(button.id);
+      if (selection) selection.ready = true;
+    }
   }
 
   cancelRevert(target: ConversationTarget): void {
@@ -312,25 +373,25 @@ export class QqCommandMenuController {
     const selected = state.models.find(model => model.model === state.model
       && (model.provider ?? "openai") === (state.modelProvider ?? "openai") && model.available !== false);
     if (view !== "model") {
-      if (!selected) throw expired();
+      if (!selected && view === "effort") throw expired();
       const choices: Array<{ label: string; selection: ModelSelectionRequest }> = view === "effort"
-        ? selected.supportedReasoningEfforts.map(option => ({
+        ? selected!.supportedReasoningEfforts.map(option => ({
           label: `${option.effort === state.effort ? "当前 " : ""}${option.effort}`,
           selection: { kind: "effort", effort: option.effort, snapshot },
         }))
         : [
           { label: "Standard", selection: { kind: "fast", mode: "off", snapshot } },
-          ...(fastServiceTierId(selected) ? [{ label: "Fast", selection: { kind: "fast" as const, mode: "on" as const, snapshot } }] : []),
-          ...(ultrafastServiceTierId(selected) ? [{ label: "Ultrafast", selection: { kind: "fast" as const, mode: "ultrafast" as const, snapshot } }] : []),
+          ...(selected && fastServiceTierId(selected) ? [{ label: "Fast", selection: { kind: "fast" as const, mode: "on" as const, snapshot } }] : []),
+          ...(selected && ultrafastServiceTierId(selected) ? [{ label: "Ultrafast", selection: { kind: "fast" as const, mode: "ultrafast" as const, snapshot } }] : []),
         ];
       const entries = slicePage(choices, page, 9);
       const buttons = entries.map(choice => this.button(context, choice.label, { kind: "model", selection: choice.selection }));
       const extra = [this.button(context, "选择模型", { kind: "model-page", page: 1, view: "model", snapshot })];
-      if (view === "effort" && (fastServiceTierId(selected) || ultrafastServiceTierId(selected))) {
+      if (view === "effort" && selected && (fastServiceTierId(selected) || ultrafastServiceTierId(selected))) {
         extra.push(this.button(context, "选择速度", { kind: "model-page", page: 1, view: "fast", snapshot }));
       }
       return this.listPanel(context, view === "effort" ? "选择思考等级" : "选择速度",
-        [`当前模型：${markdown(selected.displayName, 100)}`, ...entries.map(choice => markdown(choice.label, 100))],
+        [`当前模型：${markdown(selected?.displayName ?? state.model ?? "未知", 100)}`, ...(view === "fast" ? [`速度：${markdown(formatServiceTierSetting(state, selected), 200)}`, "速度影响下一轮；主 Provider 同时更新 Codex 用户级默认速度。"] : []), ...entries.map(choice => markdown(choice.label, 100))],
         buttons, page, Math.ceil(choices.length / 9), next => ({ kind: "model-page", page: next, view, snapshot }), extra);
     }
     const catalog = state.models.filter(model => model.available !== false);

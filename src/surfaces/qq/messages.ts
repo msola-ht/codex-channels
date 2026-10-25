@@ -69,6 +69,7 @@ export class QqMessages implements SurfaceOutputPort {
       scope: target => this.menuScope(target),
       workspaceScope: target => this.menuWorkspaceScope(target),
       selectionScope: target => this.options.service.status(target).selectionScope,
+      readyThread: target => this.readyThread(target),
       allowed: (target, actorId) => this.allowed(target, actorId),
       beforeMutation: (target, preserveRevert) => { this.cancelCallbacks(target); if (!preserveRevert) this.menus.cancelRevert(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); },
       signal: this.lifetime.signal,
@@ -297,15 +298,21 @@ export class QqMessages implements SurfaceOutputPort {
     let stage: "command" | "render" | "reply" | "submit" = "command";
     try {
       if (command) {
-        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", "compact", "fork", "revert", ...QUERY_COMMANDS].includes(command.name)
-          || (["status", "stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin", "compact", "fork"].includes(command.name) && command.argumentsText.trim())) {
+        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", "compact", "fork", "revert", "effort", "fast", "plan", "goal", "permissions", "autoreview", "whoami", ...QUERY_COMMANDS].includes(command.name)
+          || (["status", "stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin", "compact", "fork", "plan", "permissions", "whoami"].includes(command.name) && command.argumentsText.trim())
+          || (command.name === "goal" && !["", "clear"].includes(command.argumentsText.trim()))) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;
+        }
+        if (command.name === "whoami") {
+          const identity = message.actorId.length > 8 ? `${message.actorId.slice(0, 4)}…${message.actorId.slice(-4)}` : "已隐藏";
+          await this.reply(message, `# QQ 身份\n- App ID：${this.options.appId}\n- OpenID（脱敏）：${identity}\n\nOpenID 是当前应用下的身份标识，不是 QQ 号码。`, () => this.allowed(target, message.actorId));
+          return;
         }
         if (command.name === "help" || command.name === "revert") {
           const menu = await (command.name === "help" ? this.menus.open(target, message.actorId, command.argumentsText)
             : this.menus.revert(target, message.actorId, command.argumentsText));
           stage = "reply";
-          await this.reply(message, menu.content, () => this.allowed(target, message.actorId) && menu.isCurrent(), undefined, menu.keyboard, menu.detail);
+          await this.reply(message, menu.content, () => this.allowed(target, message.actorId) && menu.isCurrent(), undefined, menu.keyboard, menu.detail, menu.markdownDetail);
           menu.delivered?.();
           return;
         }
@@ -313,11 +320,21 @@ export class QqMessages implements SurfaceOutputPort {
           this.cancelCallbacks(target); this.menus.cancelRevert(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target);
         }
         const commandScope = this.scope(message.actorId);
-        const hasSelectionMenu = ["workspace", "model", "sessions", "resume", "archived"].includes(command.name);
+        const hasSelectionMenu = ["workspace", "model", "sessions", "resume", "archived", "effort", "fast", "autoreview", "goal"].includes(command.name);
         const menuScope = hasSelectionMenu ? this.menuScope(target) : undefined;
         const menuWorkspaceScope = hasSelectionMenu ? this.menuWorkspaceScope(target) : undefined;
         const queryStatus = QUERY_COMMANDS.has(command.name) ? this.options.service.status(target) : undefined;
-        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "rename" | "archived" | "archive" | "unarchive" | "pin" | "unpin" | "compact" | "fork" | "usage" | "limits" | "metrics" | "diff", command.argumentsText, message.actorId);
+        const fixedScope = ["effort", "fast", "plan", "goal", "permissions", "autoreview"].includes(command.name) ? this.menuScope(target) : undefined;
+        const goalThread = command.name === "goal" ? this.readyThread(target) : undefined;
+        if (command.name === "goal" && !goalThread) {
+          await this.reply(message, "请先选择并等待当前会话恢复完成，再查询或清除目标。QQ 暂不支持创建目标。", () => this.allowed(target, message.actorId));
+          return;
+        }
+        const assertCurrent = () => {
+          if (fixedScope !== undefined && this.menuScope(target) !== fixedScope
+            || goalThread !== undefined && this.readyThread(target) !== goalThread) throw new UserFacingError("command.selection.expired", "菜单已失效，请重新发送 /help 打开菜单。");
+        };
+        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "rename" | "archived" | "archive" | "unarchive" | "pin" | "unpin" | "compact" | "fork" | "usage" | "limits" | "metrics" | "diff" | "effort" | "fast" | "plan" | "goal" | "permissions" | "autoreview", command.argumentsText, message.actorId, assertCurrent);
         const sessionReplyScope = ["rename", "archive", "unarchive", "pin", "unpin", "compact", "fork"].includes(command.name)
           ? this.menuScope(target) : undefined;
         stage = "render";
@@ -331,17 +348,22 @@ export class QqMessages implements SurfaceOutputPort {
                 && result.state.selectionScope === this.options.service.status(target).selectionScope
               : this.menuScope(target) === menuScope;
             return sameContext && menu.isCurrent() && this.allowed(target, message.actorId);
-          }, undefined, menu.keyboard);
+          }, undefined, menu.keyboard, menu.detail, menu.markdownDetail);
+          menu.delivered?.();
           return;
         }
         const text = result.kind === "outcome" && result.outcome.type === "thread.compaction-requested"
           ? "已请求压缩当前会话。QQ 暂不单独推送压缩进度；此回执不表示压缩已完成。"
+          : result.kind === "collaboration-mode" ? `# 协作模式：${result.state.mode === "plan" ? "Plan" : "Default"}${result.state.pending ? "（下一次 Turn 生效）" : ""}\n下一条普通消息按此模式处理；再次发送 /plan 可切换模式。`
+          : result.kind === "outcome" && result.outcome.type === "goal.cleared" ? "已清除当前会话目标。清除不等于停止正在运行的任务；如需停止，请使用 /stop。"
           : result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
           : renderConversationCommandResult(result);
         if (!text) throw new Error("QQ 命令没有可交付结果");
         stage = "reply";
         await this.reply(message, text, () => {
           if (!scope || !this.current(scope)) return false;
+          if (fixedScope !== undefined && this.menuScope(target) !== fixedScope
+            || goalThread !== undefined && this.readyThread(target) !== goalThread) return false;
           if (sessionReplyScope !== undefined && this.menuScope(target) !== sessionReplyScope) return false;
           if (result.kind === "outcome" && result.outcome.type === "thread.forked"
             && this.options.service.status(target).threadId !== result.outcome.threadId) return false;
@@ -387,7 +409,7 @@ export class QqMessages implements SurfaceOutputPort {
   }
 
   private async reply(message: QqMessageInput, content: string, allowed: () => boolean,
-    oversizedNotice?: string, keyboard?: QqCommandKeyboard, detail?: string): Promise<void> {
+    oversizedNotice?: string, keyboard?: QqCommandKeyboard, detail?: string, markdownDetail?: string): Promise<void> {
     // A send failure must not recursively send another reply with the same msg_seq.
     if (this.replied.has(message)) throw new Error("QQ 来信回复已尝试，不重复发送");
     const input: QqTextMessage = "kind" in message || detail !== undefined
@@ -403,7 +425,7 @@ export class QqMessages implements SurfaceOutputPort {
     }
     this.replied.add(message);
     await this.outbox.deliver(input, {
-      ...(detail !== undefined && keyboard ? { interactionControls: { content, keyboard } }
+      ...(detail !== undefined && keyboard ? { interactionControls: { content, keyboard, ...(markdownDetail !== undefined ? { markdownContent: markdownDetail } : {}) } }
         : keyboard ? { representation: "markdown", keyboard } : { preferMarkdown: true }),
       signal: this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
@@ -464,6 +486,10 @@ export class QqMessages implements SurfaceOutputPort {
     // The workspace picker must remain reachable when the previous workspace was removed.
     return JSON.stringify([this.menuWorkspaceScope(target), exists
       ? this.options.service.status(target).threadId : "workspace-missing"]);
+  }
+  private readyThread(target: ConversationTarget): string | undefined {
+    const status = this.options.service.status(target);
+    return status.sessionRestoring === false ? status.threadId : undefined;
   }
   private menuWorkspaceScope(target: ConversationTarget): string {
     const workspaceId = this.options.service.selectedWorkspaceId(target);
