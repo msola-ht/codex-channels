@@ -31,17 +31,20 @@ import { generatedImageUnavailableText, isGeneratedImageUnavailable } from "../o
 import { formatQuotedInput } from "../quoted-input.js";
 import { textAttachmentBody } from "../text-attachment-store.js";
 import type { QqFileInput } from "./file-input.js";
+import type { QqMediaInput } from "./media-input.js";
+import { videoAttachmentBody, type PreparedVideoAttachment } from "../video-attachment-store.js";
 
 export interface QqMessageOptions {
   appId: string;
   access: SurfaceAccessPolicy;
-  service: Pick<ConversationTurnUseCases, "submit" | "touchActivity"> & Pick<ConversationSessionUseCases, "selectedWorkspaceId" | "listWorkspaces" | "status">;
+  service: Pick<ConversationTurnUseCases, "submit" | "touchActivity" | "prepareAttachmentSubmission"> & Pick<ConversationSessionUseCases, "selectedWorkspaceId" | "listWorkspaces" | "status">;
   commands: ConversationCommandExecutor;
   actors: ConversationActorRegistry;
   ownsThread(target: ConversationTarget, threadId: string): boolean;
   logger: Logger;
   images?: Pick<QqImageStore, "prepare">;
   files?: Pick<QqFileInput, "prepare">;
+  media?: Pick<QqMediaInput, "prepare" | "retain" | "discard">;
   autoCompactPercent?: (provider: string | null | undefined, model: string | null | undefined) => number | null;
   startupNotification?: {
     recipients(): readonly string[];
@@ -357,19 +360,20 @@ export class QqMessages implements SurfaceOutputPort {
   private async process(message: QqMessageInput, target: ConversationTarget, ownsBusy = false): Promise<void> {
     const images = "images" in message ? message.images : undefined;
     const file = "file" in message ? message.file : undefined;
-    if ((images?.length || file) && message.content.trimStart().startsWith("/")) {
+    const media = "media" in message ? message.media : undefined;
+    if ((images?.length || file || media) && message.content.trimStart().startsWith("/")) {
       await this.reply(message, "附件消息不执行斜杠命令或交互回答，请单独发送命令；附件可附上普通文字需求。", () => this.allowed(target, message.actorId));
       return;
     }
     // Response tokens remain usable while ordinary submit is preparing. They
     // never enter task submission, including unknown tokens after restart.
-    const response = this.interactions.respond(target, message);
+    const response = media ? undefined : this.interactions.respond(target, message);
     if (response !== undefined) {
       await this.reply(message, response, () => this.allowed(target, message.actorId));
       return;
     }
     let command: ReturnType<typeof parseSlashCommand>;
-    try { command = parseSlashCommand(message.content); }
+    try { command = media ? null : parseSlashCommand(message.content); }
     catch { await this.reply(message, "命令格式不受支持。使用 /help 查看 QQ 命令。", () => this.allowed(target, message.actorId)); return; }
     const stop = command?.name === "stop" && !command.argumentsText;
     if (stop) { this.cancelCallbacks(target); this.menus.cancelRevert(target); this.menus.cancelManagement(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); }
@@ -480,12 +484,51 @@ export class QqMessages implements SurfaceOutputPort {
       }
       const scope = this.scope(message.actorId);
       if (!scope) { await this.reply(message, "请先用 /workspace 选择已配置的工作区。", () => this.allowed(target, message.actorId)); return; }
-      const reservation = this.sources.reserve(scope, message);
+      const reservation = this.sources.reserve(scope, message, media ? 120_000 : 30_000);
       if (reservation.kind !== "accepted") { await this.reply(message, "当前输入无法接纳，请稍后核对任务状态再重试。", () => this.current(scope)); return; }
       const { ticket } = reservation;
       stage = "submit";
       try {
         this.options.service.touchActivity?.(target);
+        if (media) {
+          const prepare = this.options.service.prepareAttachmentSubmission;
+          if (!prepare) throw new UserFacingError("input.authorization-changed", "音视频提交准备不可用");
+          const prepared = prepare.call(this.options.service, target, () => ticket.isCurrent(), media.kind === "voice" ? "audio" : "video", ticket.observer);
+          let video: PreparedVideoAttachment | undefined;
+          try {
+            // QQ ordinary input has no outer batching wait. Capture synchronously
+            // before initialization, download or any other asynchronous boundary.
+            prepared.captureTarget();
+            const signal = AbortSignal.any([ticket.signal, prepared.signal, this.lifetime.signal]);
+            const assertCurrent = () => {
+              signal.throwIfAborted();
+              if (!ticket.isCurrent()) throw new UserFacingError("input.authorization-changed", "音视频准备已取消或失权");
+            };
+            assertCurrent();
+            if (media.kind === "voice" && media.referenceText) {
+              await prepared.submit(formatQuotedInput([message.content, media.referenceText].filter(Boolean).join("\n\n"), message.quotedText));
+            } else {
+              if (!this.options.media) throw new UserFacingError("input.authorization-changed", "音视频准备不可用");
+              const file = await this.options.media.prepare(media, { target, actorId: message.actorId }, signal, assertCurrent);
+              if ("attachment" in file) {
+                video = file;
+                assertCurrent();
+                await prepared.submit(formatQuotedInput([message.content, videoAttachmentBody(file)].filter(Boolean).join("\n\n"), message.quotedText));
+              } else {
+                assertCurrent();
+                await prepared.submit({ text: formatQuotedInput(message.content, message.quotedText), localAudios: [{ path: file.path }] });
+              }
+            }
+          } finally {
+            try {
+              if (video) {
+                if (prepared.mayHaveSubmitted) this.options.media!.retain(video);
+                else await this.options.media!.discard(video);
+              }
+            } finally { prepared.dispose(); }
+          }
+          return;
+        }
         const attachmentScope = images?.length || file ? this.extensionQueryScope(target) : undefined;
         const assertAttachmentsCurrent = () => {
           if (!ticket.isCurrent() || attachmentScope !== undefined && this.extensionQueryScope(target) !== attachmentScope) {
@@ -508,7 +551,12 @@ export class QqMessages implements SurfaceOutputPort {
         const { errorType, errorCode, errorReason } = surfaceErrorMetadata(error);
         this.options.logger.warn({ reason: error instanceof UserFacingError ? error.code : "submission-unconfirmed",
           errorType, errorCode, errorReason }, "QQ 任务提交未确认");
-        await this.reply(message, error instanceof UserFacingError ? formatSurfaceUserFacingError(error, "QQ")
+        await this.reply(message, error instanceof UserFacingError ? media?.kind === "voice" && error.code === "audio.unsupported"
+          ? "QQ 语音仅接收平台转换后的 WAV 文件，请重新发送语音或文字"
+          : media?.kind === "voice" && error.code === "audio.unavailable"
+            ? error.details.reason === "length-mismatch" ? "QQ 语音文件实际大小与 HTTP 声明不一致，请重新发送"
+              : "QQ 语音文件准备失败、已取消或授权变化，请核对后重新发送"
+            : formatSurfaceUserFacingError(error, "QQ")
           : "任务提交未确认；请用 /status 或在本机核对，勿直接重复提交。", () => this.current(scope));
       }
     } catch (error) {

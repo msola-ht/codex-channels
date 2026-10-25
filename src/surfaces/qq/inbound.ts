@@ -21,8 +21,13 @@ export interface QqInboundTextMessage {
   readonly sentAtMs: number;
   readonly images?: readonly QqInboundImage[];
   readonly file?: QqInboundFile;
+  readonly media?: QqInboundMedia;
   readonly quotedText?: string;
 }
+
+export type QqInboundMedia =
+  | { readonly kind: "voice"; readonly referenceText?: string; readonly wavUrl?: string }
+  | { readonly kind: "video"; readonly url: string; readonly size?: number };
 
 export interface QqInboundFile {
   readonly url: string;
@@ -63,7 +68,7 @@ type Rejection = Extract<QqTextEventResult, { kind: "rejected" }>;
  * Parses an already decoded Dispatch envelope against the locked QQ event contract:
  * qq-api-v2-2026-10-23-message-reference/autogen/event/c2c_message_create.txt.
  * It grants no authorization, performs no deduplication or freshness check, and
- * returns only copied text, source fields and validated image metadata. It never
+ * returns only copied text, source fields and validated attachment metadata. It never
  * downloads attachments or forwards an event credential to an attachment URL.
  */
 export function parseQqTextEvent(value: unknown): QqTextEventResult {
@@ -87,9 +92,11 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
   if (scene.source !== "default") return reject("unsupported", "scene", "non-default-scene");
 
   const attachments = "attachments" in message ? message.attachments : [];
-  const file = parseFile(attachments);
+  const media = parseMedia(attachments);
+  if (media && "category" in media) return media;
+  const file = parseFile(media ? [] : attachments);
   if (file && "kind" in file) return file;
-  const images = parseImages(file ? [] : attachments);
+  const images = parseImages(file || media ? [] : attachments);
   if (!Array.isArray(images)) return images;
   if (message.message_type === 0 && "msg_elements" in message) {
     if (!Array.isArray(message.msg_elements)) return reject("malformed", "message-elements", "invalid-type");
@@ -112,7 +119,7 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
     return reject("too-large", "content", "limit-exceeded");
   }
   if (INVALID_UNICODE.test(message.content)) return reject("malformed", "content", "invalid-unicode");
-  if (message.content.trim().length === 0 && images.length === 0 && !file) return reject("malformed", "content", "empty");
+  if (message.content.trim().length === 0 && images.length === 0 && !file && !media) return reject("malformed", "content", "empty");
 
   if (!Array.isArray(scene.ext)) return reject("malformed", "ext", "invalid-type");
   if (scene.ext.length > MAX_EXT_ITEMS) return reject("too-large", "ext", "limit-exceeded");
@@ -161,9 +168,40 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
       sentAtMs: timestamp,
       ...(images.length > 0 ? { images } : {}),
       ...(file ? { file } : {}),
+      ...(media ? { media } : {}),
       ...(quotedText !== undefined ? { quotedText } : {}),
     },
   };
+}
+
+function parseMedia(value: unknown): QqInboundMedia | Rejection | undefined {
+  if (!Array.isArray(value)) return reject("malformed", "attachments", "invalid-type");
+  if (value.length > MAX_IMAGES) return reject("too-large", "attachments", "limit-exceeded");
+  if (!value.some((item: unknown) => record(item) && (item.content_type === "voice" || item.content_type === "video/mp4"))) return;
+  if (value.length !== 1) return reject("unsupported", "attachments", "non-text");
+  const item: unknown = value[0];
+  if (!record(item)) return reject("malformed", "attachments", "invalid-type");
+  const voice = item.content_type === "voice";
+  const keys = ["url", "filename", "size", "content_type", ...(voice ? ["voice_wav_url", "asr_refer_text"] : [])];
+  if (Object.keys(item).some(key => !keys.includes(key))) return reject("unsupported", "attachments", "non-text");
+  const metadata = parseAttachmentMetadata(item, voice ? undefined : 64 * 1024 * 1024);
+  if ("kind" in metadata) return metadata;
+  if (!voice) return { kind: "video", url: metadata.url, ...(metadata.size !== undefined ? { size: metadata.size } : {}) };
+  let referenceText: string | undefined;
+  if ("asr_refer_text" in item) {
+    if (typeof item.asr_refer_text !== "string") return reject("malformed", "attachments", "invalid-type");
+    if (Buffer.byteLength(item.asr_refer_text) > MAX_CONTENT_BYTES) return reject("too-large", "attachments", "limit-exceeded");
+    if (INVALID_UNICODE.test(item.asr_refer_text)) return reject("malformed", "attachments", "invalid-unicode");
+    if (item.asr_refer_text.trim()) referenceText = item.asr_refer_text;
+  }
+  let wavUrl: string | undefined;
+  if ("voice_wav_url" in item) {
+    const parsed = parseAttachmentUrl(item.voice_wav_url);
+    if (typeof parsed !== "string") return parsed;
+    wavUrl = parsed;
+  }
+  if (!referenceText && !wavUrl) return reject("unsupported", "attachments", "non-text");
+  return { kind: "voice", ...(referenceText ? { referenceText } : {}), ...(wavUrl ? { wavUrl } : {}) };
 }
 
 function parseFile(value: unknown): QqInboundFile | Rejection | undefined {
@@ -176,13 +214,12 @@ function parseFile(value: unknown): QqInboundFile | Rejection | undefined {
   if (!record(file) || Object.keys(file).some(key => !["url", "filename", "size", "content_type"].includes(key))) {
     return reject("unsupported", "attachments", "non-text");
   }
-  // Reuse the image metadata URL/name checks without treating file bytes as images.
-  const validated = parseImages([{ ...file, content_type: "image/png" }]);
-  if (!Array.isArray(validated)) return validated;
+  const validated = parseAttachmentMetadata(file, MAX_FILE_BYTES);
+  if ("kind" in validated) return validated;
   if (typeof file.filename !== "string") return reject("malformed", "attachments", "invalid-type");
   if (Buffer.byteLength(file.filename) > 255) return reject("too-large", "attachments", "limit-exceeded");
   if (typeof file.size === "number" && file.size > MAX_FILE_BYTES) return reject("too-large", "attachments", "limit-exceeded");
-  return { url: validated[0]!.url, filename: file.filename, ...(typeof file.size === "number" ? { size: file.size } : {}) };
+  return { ...validated, filename: file.filename };
 }
 
 function parseReference(value: unknown, refMsgIdx: string | undefined): string | Rejection {
@@ -247,50 +284,57 @@ function parseImages(value: unknown): QqInboundImage[] | Rejection {
     if (contentType !== "image/jpeg" && contentType !== "image/png" && contentType !== "image/gif") {
       return reject("unsupported", "attachments", "non-text");
     }
-    const url = attachment.url;
-    if (typeof url !== "string") return reject("malformed", "attachments", "invalid-type");
-    if (Buffer.byteLength(url) > MAX_IMAGE_URL_BYTES) return reject("too-large", "attachments", "limit-exceeded");
-    if (INVALID_UNICODE.test(url)) return reject("malformed", "attachments", "invalid-unicode");
-    if (!/^https:\/\/[^/?#]/u.test(url) || /[\s\p{Cc}\p{Cf}\\]/u.test(url)) {
-      return reject("malformed", "attachments", "invalid-value");
-    }
-    let parsed: URL;
-    try { parsed = new URL(url); } catch { return reject("malformed", "attachments", "invalid-value"); }
-    if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password || parsed.hash
-      || url.includes("#") || url.slice("https://".length).split(/[/?#]/u, 1)[0]?.includes("@")
-      || (parsed.port && parsed.port !== "443")) {
-      return reject("malformed", "attachments", "invalid-value");
-    }
-    const filename = attachment.filename;
-    if ("filename" in attachment) {
-      if (typeof filename !== "string") return reject("malformed", "attachments", "invalid-type");
-      if (Buffer.byteLength(filename) > MAX_IDENTIFIER_BYTES) return reject("too-large", "attachments", "limit-exceeded");
-      if (INVALID_UNICODE.test(filename)) return reject("malformed", "attachments", "invalid-unicode");
-      if (!filename.trim() || /[\p{Cc}\p{Cf}\\/]/u.test(filename) || filename === "." || filename === "..") {
-        return reject("malformed", "attachments", "invalid-value");
-      }
-    }
-    const size = attachment.size;
-    if ("size" in attachment) {
-      if (typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0) {
-        return reject("malformed", "attachments", "invalid-value");
-      }
-      if (size > MAX_IMAGE_BYTES) return reject("too-large", "attachments", "limit-exceeded");
-    }
-    for (const dimension of ["width", "height"] as const) {
-      if (dimension in attachment && (typeof attachment[dimension] !== "number"
-        || !Number.isSafeInteger(attachment[dimension]) || attachment[dimension] <= 0)) {
-        return reject("malformed", "attachments", "invalid-value");
-      }
-    }
+    const metadata = parseAttachmentMetadata(attachment, MAX_IMAGE_BYTES);
+    if ("kind" in metadata) return metadata;
     metadataBytes += Buffer.byteLength(JSON.stringify(attachment));
     if (metadataBytes > MAX_IMAGE_METADATA_BYTES) return reject("too-large", "attachments", "limit-exceeded");
-    images.push({ url, contentType,
-      ...(typeof filename === "string" ? { filename } : {}),
-      ...(typeof size === "number" ? { size } : {}),
-    });
+    images.push({ ...metadata, contentType });
   }
   return images;
+}
+
+function parseAttachmentUrl(url: unknown): string | Rejection {
+  if (typeof url !== "string") return reject("malformed", "attachments", "invalid-type");
+  if (Buffer.byteLength(url) > MAX_IMAGE_URL_BYTES) return reject("too-large", "attachments", "limit-exceeded");
+  if (INVALID_UNICODE.test(url)) return reject("malformed", "attachments", "invalid-unicode");
+  if (!/^https:\/\/[^/?#]/u.test(url) || /[\s\p{Cc}\p{Cf}\\]/u.test(url)) return reject("malformed", "attachments", "invalid-value");
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return reject("malformed", "attachments", "invalid-value"); }
+  if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password || parsed.hash
+    || url.includes("#") || url.slice("https://".length).split(/[/?#]/u, 1)[0]?.includes("@")
+    || (parsed.port && parsed.port !== "443")) return reject("malformed", "attachments", "invalid-value");
+  return url;
+}
+
+function parseAttachmentMetadata(attachment: Record<string, unknown>, maximumBytes: number | undefined): Omit<QqInboundFile, "filename"> & { filename?: string } | Rejection {
+  const url = parseAttachmentUrl(attachment.url);
+  if (typeof url !== "string") return url;
+  const filename = attachment.filename;
+  if ("filename" in attachment) {
+    if (typeof filename !== "string") return reject("malformed", "attachments", "invalid-type");
+    if (Buffer.byteLength(filename) > MAX_IDENTIFIER_BYTES) return reject("too-large", "attachments", "limit-exceeded");
+    if (INVALID_UNICODE.test(filename)) return reject("malformed", "attachments", "invalid-unicode");
+    if (!filename.trim() || /[\p{Cc}\p{Cf}\\/]/u.test(filename) || filename === "." || filename === "..") {
+      return reject("malformed", "attachments", "invalid-value");
+    }
+  }
+  const size = attachment.size;
+  if ("size" in attachment) {
+    if (typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0) {
+      return reject("malformed", "attachments", "invalid-value");
+    }
+    if (maximumBytes !== undefined && size > maximumBytes) return reject("too-large", "attachments", "limit-exceeded");
+  }
+  for (const dimension of ["width", "height"] as const) {
+    if (dimension in attachment && (typeof attachment[dimension] !== "number"
+      || !Number.isSafeInteger(attachment[dimension]) || attachment[dimension] <= 0)) {
+      return reject("malformed", "attachments", "invalid-value");
+    }
+  }
+  return { url,
+    ...(typeof filename === "string" ? { filename } : {}),
+    ...(typeof size === "number" ? { size } : {}),
+  };
 }
 
 function parseIdentifier(value: unknown, field: "id" | "actor-id" | "msg-idx"): string | Rejection {

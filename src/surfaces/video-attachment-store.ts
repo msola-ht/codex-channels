@@ -48,7 +48,7 @@ export class VideoAttachmentStore {
 
   constructor(
     private readonly root: string,
-    private readonly namespace: "telegram" | "feishu" | "weixin",
+    private readonly namespace: "telegram" | "feishu" | "weixin" | "qq",
     private readonly onCleanupFailure: (error: unknown) => void,
   ) {
     this.directory = join(root, namespace);
@@ -239,12 +239,12 @@ async function detectVideoType(path: string): Promise<{ extension: string; mimeT
     const prefix = Buffer.alloc(4096);
     const { bytesRead } = await handle.read(prefix, 0, prefix.length, 0);
     const bytes = prefix.subarray(0, bytesRead);
-    if (bytes.length >= 16 && bytes.toString("ascii", 4, 8) === "ftyp") {
+    if (bytes.length >= 16 && bytes.toString("latin1", 4, 8) === "ftyp") {
       const boxSize = bytes.readUInt32BE(0);
       if (boxSize < 16 || boxSize > bytes.length || boxSize % 4 !== 0) return undefined;
       const videoBrands = new Set(["isom", "iso2", "iso3", "iso4", "iso5", "iso6", "mp41", "mp42", "avc1", "dash", "M4V "]);
-      const brands = [bytes.toString("ascii", 8, 12)];
-      for (let offset = 16; offset < boxSize; offset += 4) brands.push(bytes.toString("ascii", offset, offset + 4));
+      const brands = [bytes.toString("latin1", 8, 12)];
+      for (let offset = 16; offset < boxSize; offset += 4) brands.push(bytes.toString("latin1", offset, offset + 4));
       if (brands.some(brand => videoBrands.has(brand))) return { extension: "mp4", mimeType: "video/mp4" };
     }
     if (bytes.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))

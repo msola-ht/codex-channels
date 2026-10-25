@@ -78,8 +78,9 @@ export class QqTaskSources {
     this.options = Object.freeze({ accountId: options.accountId, isCurrent: options.isCurrent });
   }
 
-  reserve(scope: QqTaskScope, message: QqSourceInput): QqTaskReservation {
+  reserve(scope: QqTaskScope, message: QqSourceInput, preparationMs: 30_000 | 120_000 = PREPARATION_MS): QqTaskReservation {
     if (this.closed) return { kind: "rejected", reason: "closed" };
+    if (preparationMs !== PREPARATION_MS && preparationMs !== 120_000) return { kind: "rejected", reason: "invalid-input" };
     const receivedAt = performance.now();
     const original = Object.freeze("kind" in message
       ? { kind: "interaction" as const, id: message.id, actorId: message.actorId, sentAtMs: message.sentAtMs }
@@ -105,7 +106,7 @@ export class QqTaskSources {
     if (this.closed) return { kind: "rejected", reason: "closed" };
     if (!allowed) return { kind: "rejected", reason: "scope" };
     if (this.clockUnsafe) return { kind: "rejected", reason: "clock" };
-    if (performance.now() >= receivedAt + PREPARATION_MS) return { kind: "rejected", reason: "expired" };
+    if (performance.now() >= receivedAt + preparationMs) return { kind: "rejected", reason: "expired" };
     const dedupKey = JSON.stringify([snapshot.accountId, snapshot.actorId, original.kind, original.id,
       original.kind === "text" ? original.msgIdx : undefined]);
     if (this.dedup.has(dedupKey)) return { kind: "rejected", reason: "duplicate" };
@@ -117,7 +118,7 @@ export class QqTaskSources {
     }
     const entry: Entry = { token: randomUUID(), dedupKey, targetKey, scope: snapshot,
       message: original,
-      receivedAt, deadline: receivedAt + PREPARATION_MS, expiresAt: receivedAt + SOURCE_MS, retainUntil: receivedAt + DEDUP_MS,
+      receivedAt, deadline: receivedAt + preparationMs, expiresAt: receivedAt + SOURCE_MS, retainUntil: receivedAt + DEDUP_MS,
       controller: new AbortController(), waiters: new Set(), terminals: new Map(), attempted: false };
     this.entries.set(entry.token, entry);
     this.dedup.set(dedupKey, entry);

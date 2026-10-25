@@ -22,7 +22,7 @@ QQ Adapter 已移除 connectionOnly，启用共享自动绑定恢复与交互，
 | 6 | 图片输入与图片交付 | 上游媒体合同、允许名单、下载与内容校验、共享私有暂存、提交不确定后的保留、停止/切换取消 | 源码完成，待部署验收 |
 | 7A | UTF-8 文本附件和引用输入 | 复用文本校验与私有暂存；只消费原生引用匹配内容，不下载引用附件，不将引用当命令 | 源码完成，待部署验收 |
 | 7B | 普通二进制文件输入及显式文件交付 | 独立文件合同，限制字节、路径、保留期限；不解压、不执行、不猜测模型产物 | 源码完成，待部署验收 |
-| 8 | 音频与视频输入 | 复用现有音视频解析能力、处理期限与取消、失败不提交残缺内容；按平台实际能力开放 | 待实施 |
+| 8 | 音频与视频输入 | 复用现有音视频解析能力、处理期限与取消、失败不提交残缺内容；按平台实际能力开放 | 源码完成，待部署验收 |
 | 9 | 原生 Queue、计划任务、配置广播 | 官方持久队列与自动消费、启动来源、后台路由、通知收件人；不得另建 Gateway 正文队列 | 待实施 |
 | 10 | 群聊与剩余管理写操作（含重置券、强制释放） | 单独确定群/成员身份、工作区绑定、审批收件人和额度；高影响操作沿共享确认机制，不沿用单聊假设 | 待设计 |
 
@@ -45,6 +45,24 @@ QQ Adapter 已移除 connectionOnly，启用共享自动绑定恢复与交互，
 主代理随后将同一修复覆盖到本轮第六批新增的 QQ 显式图片入口，避免遗留本次适配的相同问题；原图片 manifest 保持不变。实际 ImageSpool → Manager → Messages → 图片 HTTP 观察正常 sends=1、done 为 png/json，后台绑定失效时 sends=0、failed 保留 png/json/原因。独立代理已结束，该后续图片对应调整由主代理审查并观察，不描述为独立代理重复审查。其他三渠道图片实现没有消费新增的最终归属守卫，本轮未改变它们的渠道内部队列语义。
 
 7B 没有真实 QQ/App Server 请求，Windows/macOS 运行、客户端文件下载和实际文件解析仍待验收。临时 SQLite/目录及内联资源均已清理；源码提取后的静态检查通过。一次直接 tsc 发射遇到既有 dist 输入覆盖 TS5055，未作成功证据，后续 7A 正常提交的清理构建已通过；本批仍按正常门禁提交，不绕过检查。
+
+第八批依据锁定 C2C `voice`、`voice_wav_url`、`asr_refer_text` 与 `video/mp4` 附件合同。语音优先取有界平台 ASR 作为普通用户文字；没有 ASR 时只用平台转换后的 WAV 地址，拒绝直接 SILK，不自行转码。WAV 下载复用安全网络及 ManagedAudioStore，实际模型能力仍由共享 Application 校验。视频沿 VideoAttachmentStore 随机 QQ 引用、64 MiB 和 24 小时合同，Surface 不调用视频模型，由任务按已有 MCP 能力使用。每消息只处理单一媒体，不静默丢弃混合附件。
+
+音视频需在首个异步准备前登记共享附件作用域和来源，扩展 `prepareAttachmentSubmission` 可选观察器，保持其他渠道默认调用方式。来源准备使用独立有界媒体期限，不延长被动回复窗口；精确 Thread/Turn 确认后才回传。取消、未知提交、无模型能力、错 MIME/长度、原 Thread 改变和首次合法建会话都须观察。重复调用一次性 submit 不得再次结算同一观察器或撤销先前已确认来源。现阶段未部署，不以共享端口接线代替 QQ 音视频实机验收。
+
+第八批共享前置由实现代理实际调用 ConversationService 与 CodexAppServerClient，RPC 端口隔离：start、steer 和首次无 Thread 均 prepared → attempt → 一次 RPC → confirmed → settled confirmed；未知响应和错 Turn 为一次 RPC/unknown/保留标记，撤权、旧 Thread 改变和锁等待取消均零 RPC/not-submitted。音频能力允许时实际输入含 localAudio，拒绝时零 RPC。主代理复核后修正“重复 submit 再次 settled”问题，实际一次性作用域观察只有第一次的四个回调，第二次返回 video.unavailable，未再次结算；不复用修改前重复结算观察作为最终证据。
+
+实际 VideoAttachmentStore 的 QQ namespace 与生产 serveVideoMcp 的 analyze_video 消费已使用任务专用目录及隔离本机服务贯通：随机 QQ 引用、0600、24 小时、retain 后不删除，读取字节一致；路径穿越/未知 namespace 拒 invalid_arguments，直接本机路径绕过拒 unsafe_file，跨 Surface scope 拒 video.unavailable，声明 64 MiB+1 拒 video.too-large。输入仅为 24 字节容器标识材料，没有证明视频可解码；隔离服务不是实际 Strata，也未调用真实 App Server。资源均清理，QQ Adapter 的端到端输入仍另行观察。
+
+第八批容器反例发现共享 MP4 检测的 ASCII 解码会清除高位，改用保留完整字节的 latin1 比较；实际 VideoAttachmentStore 入口接纳 24 字节合法容器头，两种高位伪造的类型/品牌均返回 video.unsupported。该观察只证明签名校验，不能证明视频可解码。
+
+第八批实际 QQ 消息入口经媒体准备及 ConversationService，使用隔离下载/最终 RPC 端口：平台 ASR 中的 `/stop` 无下载、无命令调用，提交 text；原 SILK size=2 而 WAV 为 28 字节时提交 localAudio；音频模型拒绝零 RPC。MP4 引用提交和首次 Thread 创建成功，丢失确认保留视频而来源不可发送；下载期间停止后迟到流零 RPC、零文件。实际流音频 20 MiB+1、视频 64 MiB+1 均拒绝并无文件；声明大小不符、混合、斜杠 caption、不安全 URL、循环对象 ASR 和高位伪签名均拒绝。初始化取消零下载，close 等待初始化结束且任务/目录为空；受控错误不回显注入 secret。真实 QQ 转换服务、真实模型音频能力、视频解码及客户端结果未观察。
+
+独立复审追踪解析、安全下载、暂存、Application 首次建会话/start/steer、来源确认与最终视频 MCP 消费，未发现新增确证缺陷。复审者另以生产 QqMessages.receive 和隔离端口观察 ASR `/stop`：零命令/下载、只确认精确 Turn；MP4 lost-ack 早到候选不可发送，unknown 后 await/current 均 false，视频保留。该复审未重新观察真实平台或实际解码，其他操作系统现场仍未观察。
+
+第九批 Queue 设计依据锁定官方队列扩展：add 在持久入队后可先于响应自动派发，start 启动后删除失败仍可能报错，client ID 在官方存储中不保证唯一。因此不能复用普通提交“响应直接给 Turn”的观察器，不能猜下一 Turn。计划单独投影无正文 userMessage 身份（Thread/Turn/Item/client ID），保留 Core 对 gateway 正文镜像的过滤；写前登记随机 client ID，add 成功确认及精确身份共同建立来源。显式 start 先解析精确 Queue ID，再同时核对该项 client ID 与权威响应 Turn。非文字 TUI 队列项也必须可投影身份。
+
+Queue 等待项只存本代次有界身份，不存正文，不另建队列；入队确认后释放普通准备槽，等待不沿 30 秒准备或 300 秒被动窗口，结果主动投递。删项只按官方 deleted=true 精确撤销；停止、切换、撤权、关闭不删除官方队列，也不使迟到事件复活。重启不重建旧来源。上游没有 Queue ID→Turn 的原子事件，无法抵御同权限本机客户端故意复制随机 client ID；本地已知重复或多 Turn 冲突失败关闭，不把 ID 声称为协议层不可伪造凭证。预计反例包括通知早于响应、非队头/纯媒体启动、重复 ID、启动后删除报错、长期排队及旧代次迟到。
 
 7A 生产入口隔离观察由实现代理执行并由主代理核对源码及输出：实际 receive → QqFileInput → 记录 submit 端口，小文本 BOM/ANSI 清理后为 `hello world`；36,000 字节文本落私有文件（0600）且提交路径。type103 合法引用中的 `/stop` 仅作上下文，引用附件 URL 未下载。附文件命令的下载增量为零；坏 UTF-8、二进制控制字节、声明/HTTP 长度不符、超限及准备期间切换均拒绝提交。停止读取时 `submitCount=0`、`stopCommands=1`、流确认销毁；提交未知的 40000 字节完整暂存文件在关闭后仍保留，内部 SECRET 异常没有回显。重复/错引用、嵌套历史、混合附件拒绝。
 

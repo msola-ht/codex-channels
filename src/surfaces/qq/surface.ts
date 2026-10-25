@@ -9,6 +9,7 @@ import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 import { QqMessages, type QqMessageOptions } from "./messages.js";
 import { QqImageStore } from "./image-store.js";
 import { QqFileInput } from "./file-input.js";
+import { QqMediaInput } from "./media-input.js";
 
 export interface CreateQqSurfaceOptions extends QqMessageOptions {
   appId: string;
@@ -122,6 +123,7 @@ class QqConnection {
   private readonly transport: QqWebSocketTransport;
   private readonly images: QqImageStore;
   private readonly files: QqFileInput;
+  private readonly media: QqMediaInput;
   private closed = false;
   private stopping: Promise<void> | undefined;
 
@@ -135,7 +137,9 @@ class QqConnection {
     this.files = new QqFileInput(join(options.uploadsDirectory, `qq-text-${options.appId}`),
       (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger,
       join(options.uploadsDirectory, `qq-files-${options.appId}`));
-    this.messages = new QqMessages({ ...options, images: this.images, files: this.files }, this.client);
+    this.media = new QqMediaInput(options.uploadsDirectory, options.appId,
+      (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger);
+    this.messages = new QqMessages({ ...options, images: this.images, files: this.files, media: this.media }, this.client);
     this.transport = new QqWebSocketTransport({
       client: this.client,
       agentForUrl: (url, signal) => this.network.agentForUrl(url, signal),
@@ -166,7 +170,7 @@ class QqConnection {
   }
 
   private async closeResources(): Promise<void> {
-    const work = Promise.allSettled([this.messages.close(), this.files.close(), this.transport.stop(), this.network.close()]).then(results => {
+    const work = Promise.allSettled([this.messages.close(), this.files.close(), this.media.close(), this.transport.stop(), this.network.close()]).then(results => {
       if (results.some(result => result.status === "rejected")) throw new Error("QQ 连接资源关闭未确认");
     });
     let timer: ReturnType<typeof setTimeout> | undefined;

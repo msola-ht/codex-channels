@@ -237,7 +237,7 @@ export interface PreparedAttachmentSubmission {
 
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
-  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio"): PreparedAttachmentSubmission;
+  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio", observer?: SubmissionObserver): PreparedAttachmentSubmission;
   submit(target: ConversationTarget, value: string | ConversationInput, isAllowed?: () => boolean, observer?: SubmissionObserver): Promise<Submission>;
   stop(target: ConversationTarget, assertAuthorized?: () => void): Promise<boolean>;
   rename(target: ConversationTarget, name: string, assertAuthorized?: () => void): Promise<void>;
@@ -677,7 +677,7 @@ export class ConversationService implements
     this.extensionQueries.closeMcpLogins();
   }
 
-  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" = "video"): PreparedAttachmentSubmission {
+  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" = "video", observer?: SubmissionObserver): PreparedAttachmentSubmission {
     const key = conversationTargetKey(target);
     const pending = this.attachmentInputs.get(key) ?? new Set<AbortController>();
     if (!isAllowed() || pending.size >= 4 || (!this.attachmentInputs.has(key) && this.attachmentInputs.size >= 1000)) {
@@ -719,35 +719,44 @@ export class ConversationService implements
         captured = { workspaceId: workspace.id, workspaceCwd: workspace.cwd,
           threadId: this.router.current(target)?.threadId };
       },
-      submit: (value) => this.locked(target, () => {
-        const snapshot = captured;
-        if (!snapshot) throw new UserFacingError(`${kind}.unavailable`, "附件尚未捕获提交目标");
-        const assertCurrent = () => {
-          assertAllowed();
-          const currentWorkspace = this.router.workspace(target);
-          if (currentWorkspace.id !== snapshot.workspaceId || currentWorkspace.cwd !== snapshot.workspaceCwd
-            || (snapshot.threadId !== undefined && this.router.current(target)?.threadId !== snapshot.threadId)) {
-            throw new UserFacingError(`${kind}.unavailable`, "附件输入的工作区或会话已变化，请重新发送");
-          }
-        };
-        assertCurrent();
+      submit: async (value) => {
+        // One prepared scope owns one observer lifecycle. A repeated call must
+        // not settle the same external observer again and revoke prior output.
         if (used) throw new UserFacingError(`${kind}.unavailable`, "附件提交入口已使用");
         used = true;
-        if (this.router.current(target)?.threadId !== snapshot.threadId) {
-          throw new UserFacingError(`${kind}.unavailable`, "附件下载期间会话发生变化，请重新发送");
+        const observation = observer ? new SubmissionObservation(observer) : undefined;
+        try {
+          return await this.locked(target, () => {
+            const snapshot = captured;
+            if (!snapshot) throw new UserFacingError(`${kind}.unavailable`, "附件尚未捕获提交目标");
+            const assertCurrent = () => {
+              assertAllowed();
+              const currentWorkspace = this.router.workspace(target);
+              if (currentWorkspace.id !== snapshot.workspaceId || currentWorkspace.cwd !== snapshot.workspaceCwd
+                || (snapshot.threadId !== undefined && this.router.current(target)?.threadId !== snapshot.threadId)) {
+                throw new UserFacingError(`${kind}.unavailable`, "附件输入的工作区或会话已变化，请重新发送");
+              }
+            };
+            assertCurrent();
+            if (this.router.current(target)?.threadId !== snapshot.threadId) {
+              throw new UserFacingError(`${kind}.unavailable`, "附件下载期间会话发生变化，请重新发送");
+            }
+            const input = normalizeInput(value);
+            if (!input.length) throw new UserFacingError("message.empty", "消息不能为空");
+            // ensureSession may create the first Thread under this same conversation lock.
+            return this.submitInputLocked(target, input, undefined, (submissionThreadId) => {
+              assertCurrent();
+              if (this.router.current(target)?.threadId !== submissionThreadId) {
+                throw new UserFacingError(`${kind}.unavailable`, "附件的实际提交会话已失效，请重新发送");
+              }
+              // Once the RPC may start, a lost acknowledgment must not delete its file.
+              mayHaveSubmitted = true;
+            }, assertAllowed, observation);
+          });
+        } finally {
+          observation?.settle();
         }
-        const input = normalizeInput(value);
-        if (!input.length) throw new UserFacingError("message.empty", "消息不能为空");
-        // ensureSession may create the first Thread under this same conversation lock.
-        return this.submitInputLocked(target, input, undefined, (submissionThreadId) => {
-          assertCurrent();
-          if (this.router.current(target)?.threadId !== submissionThreadId) {
-            throw new UserFacingError(`${kind}.unavailable`, "附件的实际提交会话已失效，请重新发送");
-          }
-          // Once the RPC may start, a lost acknowledgment must not delete its file.
-          mayHaveSubmitted = true;
-        }, assertAllowed);
-      }),
+      },
     };
   }
 
