@@ -118,38 +118,56 @@ export class QqCommandMenuController {
     const input = argumentsText.trim();
     const context = this.context(target, actorId);
     if (!input) return this.panel(context, renderQqCommandMenu());
-    if (input === "extensions") return this.panel(context, {
-      content: "# 扩展管理\n选择技能、代理角色或插件后填写任务；任务结果回到当前 QQ。MCP 管理及 Hook 确认沿各自入口处理。",
+    if (input === "account") return this.panel(context, {
+      content: "# 账户工具\n查看重置券或当前渠道身份。机器人接入与群授权请在本机 Setup 管理。",
       keyboard: { content: { rows: [
-        { buttons: [qqMenuButton("skill", "技能列表", "/skill"), qqMenuButton("agents", "代理角色", "/agents"), qqMenuButton("plugin", "插件列表", "/plugin")] },
-        { buttons: [qqMenuButton("mcp", "MCP 列表", "/mcp"), qqMenuButton("mcphealth", "MCP 健康", "/mcp health"), qqMenuButton("pluginhealth", "插件健康", "/plugin health")] },
-        { buttons: [qqMenuButton("hooks", "Hook 列表", "/hooks"), qqMenuButton("release", "占用诊断", "/release"), homeButton()] },
-        { buttons: [qqMenuButton("mcpreload", "重载 MCP", "/mcp reload")] },
-      ] } },
-    });
-    if (input === "tasks") return this.panel(context, {
-      content: "# 任务\n审查当前改动可直接执行；指定分支、提交或审查要求时填写相应内容。计划需求会启动新的 Plan Turn。",
-      keyboard: { content: { rows: [
-        { buttons: [qqMenuButton("review", "审查当前改动", "/review"), qqMenuButton("reviewbranch", "审查分支差异", "/review branch ", false)] },
-        { buttons: [qqMenuButton("reviewcommit", "审查指定提交", "/review commit ", false), qqMenuButton("reviewcustom", "填写审查要求", "/review custom ", false)] },
-        { buttons: [qqMenuButton("planrequest", "填写计划需求", "/plan ", false), qqMenuButton("extensions", "选择扩展任务", "/help extensions"), qqMenuButton("schedule", "计划任务", "/schedule")] },
+        { buttons: [qqMenuButton("credits", "查看重置券", "/limits reset"), qqMenuButton("whoami", "我的身份", "/whoami")] },
         { buttons: [homeButton()] },
       ] } },
     });
-    if (input === "settings") return this.panel(context, {
-      content: "# 模式与状态\n思考等级、速度和 Plan 模式影响后续任务。权限入口只查询，不修改权限。",
+    if (input === "extensions") return this.panel(context, {
+      content: "# 能力与集成\n选择技能、子代理或插件后填写任务；MCP 管理及 Hook 确认沿各自入口处理。",
       keyboard: { content: { rows: [
-        { buttons: [qqMenuButton("effort", "思考等级", "/effort"), qqMenuButton("fast", "速度设置", "/fast status"), qqMenuButton("plan", "切换计划模式", "/plan")] },
-        { buttons: [qqMenuButton("autoreview", "审批方式", "/autoreview"), qqMenuButton("permissions", "权限查询", "/permissions"), qqMenuButton("goal", "当前目标", "/goal")] },
-        { buttons: [qqMenuButton("whoami", "我的身份", "/whoami"), qqMenuButton("credits", "查看重置券", "/limits reset"), homeButton()] },
+        { buttons: [qqMenuButton("agents", "子代理", "/agents"), qqMenuButton("skill", "Skills", "/skill"), qqMenuButton("plugin", "Plugin", "/plugin")] },
+        { buttons: [qqMenuButton("mcp", "MCP 列表", "/mcp"), qqMenuButton("mcphealth", "MCP 健康", "/mcp health"), qqMenuButton("pluginhealth", "插件健康", "/plugin health")] },
+        { buttons: [qqMenuButton("hooks", "Hooks", "/hooks"), qqMenuButton("mcpreload", "重载 MCP", "/mcp reload")] },
+        { buttons: [homeButton()] },
+      ] } },
+    });
+    if (input === "tasks") return this.panel(context, {
+      content: "# 任务工具\n查看改动、发起审查或管理排队与计划任务。",
+      keyboard: { content: { rows: [
+        { buttons: [qqMenuButton("diff", "Diff", "/diff"), qqMenuButton("review", "Review", "/help review")] },
+        { buttons: [qqMenuButton("queue", "原生队列", "/help queue"), qqMenuButton("schedule", "计划任务", "/schedule")] },
+        { buttons: [qqMenuButton("planrequest", "填写计划需求", "/plan ", false)] },
+        { buttons: [homeButton()] },
+      ] } },
+    });
+    if (input === "review") return this.panel(context, {
+      content: "# Review\n审查当前改动可直接执行；指定分支、提交或审查要求时填写相应内容。",
+      keyboard: { content: { rows: [
+        { buttons: [qqMenuButton("review", "审查当前改动", "/review"), qqMenuButton("reviewbranch", "审查分支差异", "/review branch ", false)] },
+        { buttons: [qqMenuButton("reviewcommit", "审查指定提交", "/review commit ", false), qqMenuButton("reviewcustom", "填写审查要求", "/review custom ", false)] },
+        { buttons: [qqMenuButton("contents", "返回任务工具", "/help tasks"), homeButton()] },
+      ] } },
+    });
+    if (input === "settings") return this.panel(context, {
+      content: "# 偏好设置\n调整后续任务的模式与当前会话审批方式；权限入口仅查询。",
+      keyboard: { content: { rows: [
+        { buttons: [qqMenuButton("effort", "思考等级", "/effort"), qqMenuButton("fast", "速度设置", "/fast status")] },
+        { buttons: [qqMenuButton("goal", "Goal", "/goal"), qqMenuButton("plan", "Plan 模式", "/plan")] },
+        { buttons: [qqMenuButton("autoreview", "会话审批方式", "/autoreview"), qqMenuButton("permissions", "权限查询", "/permissions")] },
+        { buttons: [homeButton()] },
       ] } },
     });
     if (input === "manage") return this.panel(context, {
-      content: "# 会话管理\n重命名、置顶与归档作用于当前会话；归档会退出当前会话。恢复归档会切换会话，不补发旧结果。",
+      content: "# 会话操作\n操作当前会话；归档会退出当前会话。",
       keyboard: { content: { rows: [
-        { buttons: [qqMenuButton("rename", "重命名", "/rename ", false), qqMenuButton("pin", "置顶会话", "/pin"), qqMenuButton("unpin", "取消置顶", "/unpin")] },
-        { buttons: [qqMenuButton("archive", "归档当前", "/archive"), qqMenuButton("archived", "归档列表", "/help archived 1"), homeButton()] },
-        { buttons: [qqMenuButton("compact", "压缩上下文", "/compact"), qqMenuButton("fork", "派生会话", "/fork"), qqMenuButton("revert", "历史回退", "/revert")] },
+        { buttons: [qqMenuButton("archive", "归档当前", "/archive"), qqMenuButton("archived", "已归档会话", "/help archived 1")] },
+        { buttons: [qqMenuButton("fork", "分叉会话", "/fork"), qqMenuButton("rename", "重命名", "/rename ", false)] },
+        { buttons: [qqMenuButton("release", "释放占用", "/release"), qqMenuButton("pin", "固定会话", "/pin"), qqMenuButton("unpin", "取消固定", "/unpin")] },
+        { buttons: [qqMenuButton("revert", "历史回退", "/revert"), qqMenuButton("compact", "压缩上下文", "/compact")] },
+        { buttons: [homeButton()] },
       ] } },
     });
     const pick = /^pick ([a-f0-9]{24})$/u.exec(input);

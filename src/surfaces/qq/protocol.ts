@@ -570,12 +570,13 @@ function commandKeyboard(value: unknown): QqCommandKeyboard {
           || typeof button.action.unsupport_tips !== "string" || !button.action.unsupport_tips.trim()
           || [...button.action.unsupport_tips].length > 100 || !wellFormed(button.action.unsupport_tips)
           || /\p{Cc}/u.test(button.action.unsupport_tips)) return fail();
-        return { id: button.id, render_data: { label: button.render_data.label, style: button.render_data.style },
+        // Callback buttons keep their label after a click; omission can render blank.
+        return { id: button.id, render_data: { label: button.render_data.label, visited_label: button.render_data.label, style: button.render_data.style },
           action: { type: 1, permission: { type: 2 }, data: button.action.data, unsupport_tips: button.action.unsupport_tips } };
       }
       if (!exact(button.action, ["type", "permission", "data", "enter", "reply"])
         || button.action.type !== 2 || typeof button.action.enter !== "boolean" || button.action.reply !== false) return fail();
-      return { id: button.id, render_data: { label: button.render_data.label, style: button.render_data.style },
+      return { id: button.id, render_data: { label: button.render_data.label, visited_label: button.render_data.label, style: button.render_data.style },
         action: { type: 2 as const, permission: { type: 2 as const }, data: button.action.data,
           enter: button.action.enter, reply: false as const } };
     }) };

@@ -135,7 +135,7 @@ export class QqPrivilegedManagementMenu {
     return qqMenuButton(token, label, `/${command} pick ${token}`);
   }
 
-  private panel(context: Context, content: string, buttons: QqMenuButton[], detail?: string): QqMenuPanel {
+  private panel(context: Context, content: string, buttons: QqMenuButton[], detail?: string, markdownDetail?: string): QqMenuPanel {
     this.assertCurrent(context);
     const literal = detail === undefined ? undefined : formatQqLiteralDetails(detail);
     if (literal !== undefined && planText({ mode: "active", recipient: context.actorId, content: literal }).length > 7) {
@@ -146,7 +146,8 @@ export class QqPrivilegedManagementMenu {
     rows.push({ buttons: [qqMenuButton("limits", "账户额度", "/limits"), qqMenuButton("home", "返回首页", "/help")] });
     if (rows.length > 5) throw new UserFacingError("command.authorization-changed", "管理菜单超出容量，未开放确认。");
     const entries = buttons.map(button => this.selections.get(button.id)).filter((entry): entry is Selection => entry !== undefined);
-    return { content, keyboard: { content: { rows } }, ...(literal === undefined ? {} : { detail: literal }), signal: context.signal,
+    return { content, keyboard: { content: { rows } }, ...(literal === undefined ? {} : { detail: literal }),
+      ...(markdownDetail === undefined ? {} : { markdownDetail }), signal: context.signal,
       isCurrent: () => this.current(context) && entries.every(entry => [...this.selections.values()].includes(entry)),
       delivered: () => {
         if (this.current(context)) for (const entry of entries) if ([...this.selections.values()].includes(entry)) entry.ready = true;
@@ -172,8 +173,9 @@ export class QqPrivilegedManagementMenu {
         buttons.push(this.button(context, "确认使用重置券", { kind: "command", command: "limits", input: `reset confirm ${value.token}` }, "limits"),
           this.button(context, "取消本次确认", { kind: "cancel", creditToken: value.token }, "limits"));
       }
+      const detail = formatConversationResetCredits(result, "buttons");
       return this.panel(context, value.type === "preview" ? "核对完整账户与券预览后确认。使用将消费所选券，结果未知时请先核对账户，不要重复提交。" : "OpenAI 重置券",
-        buttons, formatConversationResetCredits(result, "buttons"));
+        buttons, detail, detail);
     }
     if (result.kind !== "occupancy") throw new UserFacingError("command.authorization-changed", "管理操作未返回可识别回执。");
     const value = result.result;
