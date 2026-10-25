@@ -26,17 +26,18 @@ export const QQ_BODY_MARKDOWN_PART_CHARACTERS = 5_000;
 export const QQ_BODY_MARKDOWN_PART_BYTES = QQ_BODY_MARKDOWN_PART_CHARACTERS * 4;
 export const QQ_PASSIVE_WINDOW_MS = 300_000;
 
+export type QqReplyAnchor = { sourceTimestampMs: number } &
+  ({ messageId: string; eventId?: never } | { eventId: string; messageId?: never });
+
 export type QqTextMessage = {
   recipient: QqRecipient;
   content: string;
   /** User-message msg_idx, not the passive reply message ID. */
   referenceMessageId?: string;
-} & ({ mode: "active" } | {
+} & ({ mode: "active" } | ({
   mode: "passive";
-  messageId: string;
   sequence: number;
-  sourceTimestampMs: number;
-});
+} & QqReplyAnchor));
 
 export type QqInteractionAckCode = 0 | 1 | 2 | 3 | 4;
 
@@ -56,6 +57,8 @@ export interface QqTextSendContext {
   signal: AbortSignal;
   /** Synchronous current actor/source/recipient check, before token wait and final HTTP dispatch. */
   beforeSend: () => undefined;
+  /** Original passive anchor for a final media message; uploads do not renew it. */
+  reply?: QqReplyAnchor & { sequence: number };
 }
 
 /** One passive replace stream; sequence and source stay fixed across frames. */
@@ -312,9 +315,9 @@ export class QqProtocolClient {
   /** A single complete Markdown body or trusted menu, with the text recipient/deadline/receipt contract. */
   async sendMarkdown(input: QqTextMessage, context: QqTextSendContext & { body?: true }, keyboard?: QqCommandKeyboard): Promise<{ messageId: string }> {
     return this.sendPlan(() => {
-      if (context.body && (input.mode !== "active" || keyboard)) throw new QqProtocolError("message", "invalid-input");
+      if (context.body && ((input.mode !== "active" && typeof input.recipient === "string") || keyboard)) throw new QqProtocolError("message", "invalid-input");
       const plan = textRequest(input, context.body ? QQ_BODY_MARKDOWN_PART_BYTES
-        : keyboard && input.mode === "active" ? QQ_MENU_PART_BYTES : QQ_TEXT_PART_BYTES);
+        : keyboard && (input.mode === "active" || typeof input.recipient !== "string") ? QQ_MENU_PART_BYTES : QQ_TEXT_PART_BYTES);
       if (context.body && Array.from(input.content).length > QQ_BODY_MARKDOWN_PART_CHARACTERS) {
         throw new QqProtocolError("message", "invalid-input");
       }
@@ -397,6 +400,7 @@ export class QqProtocolClient {
       return await this.withRequest("upload", context.signal, async signal => {
         const check = (): undefined => {
           this.ensureOpen("upload", signal);
+          mediaReplyFields(target, context);
           if (performance.now() >= mediaDeadline) throw new QqProtocolError("upload", "timeout");
           try {
             const result: unknown = context.beforeSend();
@@ -474,7 +478,7 @@ export class QqProtocolClient {
         }
         check();
         return await this.sendPlan(() => ({ path: recipientPath(target, "messages"),
-          body: { msg_type: 2, markdown: { content: `![图片](${material.reference})` } }, deadline: material.deadline }),
+          body: { ...mediaReplyFields(target, context), msg_type: 2, markdown: { content: `![图片](${material.reference})` } }, deadline: material.deadline }),
         { signal, beforeSend: check }, () => { messageAttempted = true; });
       }, MEDIA_TIMEOUT_MS);
     } catch (error) {
@@ -514,6 +518,7 @@ export class QqProtocolClient {
       return await this.withRequest("upload", context.signal, async signal => {
         const check = (): undefined => {
           this.ensureOpen("upload", signal);
+          mediaReplyFields(target, context);
           if (performance.now() >= mediaDeadline) throw new QqProtocolError("upload", "timeout");
           try {
             const result: unknown = context.beforeSend();
@@ -574,7 +579,7 @@ export class QqProtocolClient {
         const deadline = uploaded.ttl === 0 ? undefined : uploadedAt + uploaded.ttl * 1000;
         // Only this final messages dispatch can yield an unknown delivery outcome.
         return await this.sendPlan(() => ({ path: recipientPath(target, "messages"),
-          body: { msg_type: 7, media: { file_info: fileInfo } }, ...(deadline === undefined ? {} : { deadline }) }),
+          body: { ...mediaReplyFields(target, context), msg_type: 7, media: { file_info: fileInfo } }, ...(deadline === undefined ? {} : { deadline }) }),
         { signal, beforeSend: check }, () => { messageAttempted = true; });
       }, MEDIA_TIMEOUT_MS);
     } catch (error) {
@@ -740,7 +745,7 @@ function textRequest(input: QqTextMessage, maximumBytes = QQ_TEXT_PART_BYTES): {
     throw new QqProtocolError("message", "invalid-input");
   }
   const base = ["mode", "recipient", "content", "referenceMessageId"];
-  const passive = ["messageId", "sequence", "sourceTimestampMs"];
+  const passive = ["messageId", "eventId", "sequence", "sourceTimestampMs"];
   const keys = input.mode === "passive" ? [...base, ...passive] : base;
   if (Object.keys(input).some(key => !keys.includes(key)) || !["active", "passive"].includes(input.mode)) {
     throw new QqProtocolError("message", "invalid-input");
@@ -750,13 +755,25 @@ function textRequest(input: QqTextMessage, maximumBytes = QQ_TEXT_PART_BYTES): {
     ...(input.referenceMessageId === undefined ? {} : { message_reference: { message_id: input.referenceMessageId } }) };
   if (input.mode === "active") return { path, body };
   const age = Date.now() - input.sourceTimestampMs;
-  if (!identifier(input.messageId) || !Number.isSafeInteger(input.sequence) || input.sequence < 1 || input.sequence > 4
+  const eventReply = input.eventId !== undefined;
+  if (!identifier(eventReply ? input.eventId : input.messageId) || (eventReply && (input.messageId !== undefined || typeof input.recipient === "string"))
+    || !Number.isSafeInteger(input.sequence) || input.sequence < 1 || input.sequence > (typeof input.recipient === "string" ? 4 : 5)
     || !Number.isSafeInteger(input.sourceTimestampMs) || input.sourceTimestampMs < 0 || age < 0) {
     throw new QqProtocolError("message", "invalid-input");
   }
   if (age >= QQ_PASSIVE_WINDOW_MS) throw new QqProtocolError("message", "expired");
-  return { path, body: { ...body, msg_id: input.messageId, msg_seq: input.sequence },
+  return { path, body: { ...body, ...(eventReply ? { event_id: input.eventId } : { msg_id: input.messageId }), msg_seq: input.sequence },
     deadline: performance.now() + QQ_PASSIVE_WINDOW_MS - age };
+}
+
+function mediaReplyFields(recipient: QqRecipient, context: QqTextSendContext): Record<string, unknown> {
+  if (!context.reply) return {};
+  if (typeof recipient === "string") throw new QqProtocolError("message", "invalid-input");
+  const reply = context.reply;
+  const plan = textRequest({ ...reply, recipient, content: "media", mode: "passive" });
+  return reply.eventId === undefined
+    ? { msg_id: plan.body.msg_id, msg_seq: plan.body.msg_seq }
+    : { event_id: plan.body.event_id, msg_seq: plan.body.msg_seq };
 }
 
 function commandKeyboard(value: unknown): QqCommandKeyboard {

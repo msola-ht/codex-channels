@@ -3,6 +3,7 @@ import { createQqGroupConversationId } from "../../policy/index.js";
 
 export interface QqInboundButtonInteraction {
   readonly id: string;
+  readonly eventId?: string;
   readonly actorId: string;
   readonly conversationId: string;
   readonly content: string;
@@ -26,6 +27,7 @@ export function parseQqButtonEvent(value: unknown, appId: string): QqButtonEvent
   if (!Number.isInteger(interaction.type)) return reject("invalid-type");
   if (interaction.type !== 11) return { kind: "ignored" };
   const group = interaction.scene === "group" && interaction.chat_type === 1;
+  if (group && !identifier(value.id)) return reject("invalid-event-id");
   if (!group && (interaction.scene !== "c2c" || interaction.chat_type !== 2)) return reject("unsupported-scene");
   if (!/^[0-9]+$/u.test(appId) || interaction.application_id !== appId) return reject("wrong-application");
   if (interaction.version !== 1) return reject("unsupported-version");
@@ -52,6 +54,7 @@ export function parseQqButtonEvent(value: unknown, appId: string): QqButtonEvent
   if (typeof timestamp !== "number") return reject(`timestamp-${timestamp.reason}`);
   return { kind: "supported", interaction: {
     id: interaction.id,
+    ...(group ? { eventId: value.id as string } : {}),
     actorId,
     conversationId: group ? createQqGroupConversationId(interaction.group_openid as string, actorId) : `c2c:${actorId}`,
     content: resolved.button_data,

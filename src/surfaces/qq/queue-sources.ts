@@ -33,6 +33,7 @@ interface Entry {
   readonly targetKey: string;
   readonly scope: Readonly<QqTaskScope>;
   readonly replyReference?: string;
+  readonly replyAnchor: import("./protocol.js").QqReplyAnchor | undefined;
   readonly deadline: number;
   readonly controller: AbortController;
   readonly candidates: Map<string, string>;
@@ -104,6 +105,9 @@ export class QqQueueSources {
     }
     const entry: Entry = { token: randomUUID(), dedupKey, targetKey, scope: snapshot,
       ...("msgIdx" in message ? { replyReference: message.msgIdx } : {}),
+      replyAnchor: "kind" in message
+        ? message.eventId ? { eventId: message.eventId, sourceTimestampMs: message.sentAtMs } : undefined
+        : { messageId: message.id, sourceTimestampMs: message.sentAtMs },
       deadline: now + PREPARATION_MS, controller: new AbortController(), candidates: new Map(),
       terminals: new Map(), waiters: new Set(), attempted: false, retainUntil: now + DEDUP_MS };
     this.entries.set(entry.token, entry);
@@ -200,6 +204,10 @@ export class QqQueueSources {
 
   replyReference(reference: SurfaceTaskDeliverySource): string | undefined {
     return this.isCurrent(reference) ? this.resolve(reference)!.replyReference : undefined;
+  }
+
+  replyAnchor(reference: SurfaceTaskDeliverySource): import("./protocol.js").QqReplyAnchor | undefined {
+    return this.isCurrent(reference) ? this.resolve(reference)!.replyAnchor : undefined;
   }
 
   async awaitSource(reference: SurfaceTaskDeliverySource, signal: AbortSignal): Promise<boolean> {
