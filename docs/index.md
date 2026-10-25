@@ -4,6 +4,7 @@ QQ 剩余适配按[分批计划](qq-message-contract.md#剩余适配分批计划
 扩展查询批次复用 Skills/角色目录、Plugin installed、MCP status、Hook list 和占用诊断；QQ 仅开放查询并提供详情/分页回调，不扩大任务、OAuth、Hook 写入或强制释放能力。源码尚未部署，查询上下文、完整展示和反例记录见同一合同。
 后续管理批次接线 MCP OAuth、重载、资源读取及 Hook 信任/启停确认，沿既有受控协议和共享服务；OAuth 完成复用原登录关联，以独立通知来源进入 QQ 持久投递，不授予任务结果权限。Hook 的完整字面预览与确认门槛覆盖按钮和文字入口。OAuth 授权地址使用锁定 QQ 消息按钮合同的 type=0 URL 跳转，平台与客户端尚未验收；本地 HTTPS/本机 HTTP 和 4096 字符限制不代表平台上限。
 上下文批次复用 compact、fork 与 Revert 分页/预览/确认，QQ 提供分屏选择和完整预览后确认门槛，不新增协议。共享 Revert 确认守卫增加最终提交前的期限复核，影响所有已有渠道的同一确认路径；真实 QQ 操作尚未验收。
+显式任务批次复用 `review/start` inline、普通 start/steer 与扩展调用：共享命令入口贯穿 SubmissionObserver，Review 用独立准备身份及最终同步请求观察，响应必须返回原 Thread 与有效 Turn。QQ 候选输出在响应结算前不得获得发送资格；流式唯一 Item 在精确 Turn 确认后占用，避免无关 TUI 早到事件抢占。源码尚未部署，隔离反例证据见分批合同；Goal set 继续暂缓。
 普通 Turn 提交的本地关联入口见 [`SubmissionObserver`](../src/application/submission-observer.ts)：
 准备精确 Thread、标记可能提交、确认响应 Turn 并结算失败。它经 Client/Provider 透传而不添加 RPC 字段，
 `turn/start` 仍可能实际追加；显式 `turn/steer` 响应必须匹配 expectedTurnId，空白 ID 不作成功。

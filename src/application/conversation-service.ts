@@ -245,8 +245,8 @@ export interface ConversationTurnUseCases {
   compact(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
   fork(target: ConversationTarget, assertAuthorized?: () => void): Promise<string>;
   togglePlanMode(target: ConversationTarget, assertAuthorized?: () => void): Promise<CollaborationModeState>;
-  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void): Promise<Submission>;
-  review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void): Promise<Submission>;
+  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission>;
+  review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission>;
   getGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<ThreadGoal | null>;
   setGoal(target: ConversationTarget, objective: string, assertAuthorized?: () => void): Promise<ThreadGoal>;
   clearGoal(target: ConversationTarget, assertAuthorized?: () => void): Promise<void>;
@@ -260,12 +260,14 @@ export interface ConversationExtensionUseCases {
     selector: string,
     task: string,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<Submission & { skillName: string }>;
   invokePlugin(
     target: ConversationTarget,
     selector: string,
     task: string,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<Submission & { pluginName: string }>;
   listAgentRoles(): AgentRoleEntry[];
   invokeAgent(
@@ -273,6 +275,7 @@ export interface ConversationExtensionUseCases {
     selector: string,
     task: string,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<Submission & { roleName: string }>;
   modelState(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
   clearModelBrowse(target: ConversationTarget, assertAuthorized?: () => void): Promise<ModelSelectionState>;
@@ -780,6 +783,7 @@ export class ConversationService implements
     selector: string,
     task: string,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<Submission & { skillName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -817,7 +821,7 @@ export class ConversationService implements
           path: skill.path,
         },
       ], { kind: "skill", name: skill.name },
-      threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized);
+      threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized, observation);
       return { ...submission, skillName: skill.name };
     });
   }
@@ -827,6 +831,7 @@ export class ConversationService implements
     selector: string,
     task: string,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<Submission & { pluginName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -874,7 +879,7 @@ export class ConversationService implements
       threadId => {
         this.commandThreadGuard(target, threadId, assertAuthorized)();
         requirePluginProvider();
-      }, assertAuthorized);
+      }, assertAuthorized, observation);
       return { ...submission, pluginName: resolved.displayName };
     });
   }
@@ -910,6 +915,7 @@ export class ConversationService implements
     selector: string,
     task: string,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<Submission & { roleName: string }> {
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
@@ -932,7 +938,7 @@ export class ConversationService implements
         type: "text",
         text: `请使用 agent_type="${role.name}"、fork_turns="1" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
       },
-    ], { kind: "agent", name: role.name }, assertAuthorized);
+    ], { kind: "agent", name: role.name }, assertAuthorized, observation);
     return { ...submission, roleName: role.name };
   }
 
@@ -941,13 +947,14 @@ export class ConversationService implements
     input: TurnInput[],
     identity?: TurnStartIdentity,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<Submission> {
     this.touchActivity(target);
     return this.authorizedLocked(
       target,
       assertAuthorized,
       () => this.submitInputLocked(target, input, identity,
-        threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized),
+        threadId => this.commandThreadGuard(target, threadId, assertAuthorized)(), assertAuthorized, observation),
     );
   }
 
@@ -1496,7 +1503,7 @@ export class ConversationService implements
     return this.withGuardedSelection(target, (guard) => this.requireCollaborationModes().toggle(target, guard), assertAuthorized);
   }
 
-  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void): Promise<Submission> {
+  startPlan(target: ConversationTarget, prompt: string, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission> {
     const normalized = prompt.trim();
     if (!normalized) {
       return Promise.reject(new UserFacingError("plan.prompt.empty", "Plan 需求不能为空"));
@@ -1519,18 +1526,24 @@ export class ConversationService implements
         undefined,
         undefined,
         assertAuthorized,
+        observation,
       );
     });
   }
 
-  review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void): Promise<Submission> {
+  review(target: ConversationTarget, reviewTarget: ReviewTarget, assertAuthorized?: () => void, observation?: SubmissionObservation): Promise<Submission> {
     return this.authorizedLocked(target, assertAuthorized, async () => {
       const { binding, beforeSubmit } = await this.prepareCommandThread(target, assertAuthorized, true);
       const activity = this.core.trackThreadActivity(binding.threadId);
       try {
-        const result = await this.codex.startReview(binding.threadId, reviewTarget, beforeSubmit);
-        activity.restore(target, result.turnId);
-        return { threadId: result.threadId, turnId: result.turnId, steered: false };
+        observation?.prepare({ kind: "review", threadId: binding.threadId });
+        const result = await this.codex.startReview(binding.threadId, reviewTarget, beforeSubmit,
+          observation ? () => observation.attempt() : undefined);
+        if (result.threadId !== binding.threadId || !result.turnId.trim()) throw new Error("Inline Review 响应与请求会话不一致或缺少有效 Turn");
+        const submission = { threadId: result.threadId, turnId: result.turnId, steered: false };
+        try { observation?.confirm(submission); }
+        finally { activity.restore(target, result.turnId); }
+        return submission;
       } finally {
         activity.stop();
       }

@@ -21,7 +21,7 @@ export function renderQqCommandMenu(): { content: string; keyboard: QqCommandKey
       { buttons: [button("workspace", "选择工作区", "/help workspace 1"), button("model", "选择模型", "/help model 1"), button("stop", "停止任务", "/stop")] },
       { buttons: [button("usage", "用量", "/usage"), button("limits", "额度", "/limits"), button("metrics", "请求统计", "/help metrics")] },
       { buttons: [button("diff", "查看改动", "/diff"), button("manage", "会话管理", "/help manage"), button("settings", "模式与状态", "/help settings")] },
-      { buttons: [button("extensions", "扩展查询", "/help extensions")] },
+      { buttons: [button("tasks", "任务与审查", "/help tasks"), button("extensions", "扩展与管理", "/help extensions")] },
     ] } },
   };
 }

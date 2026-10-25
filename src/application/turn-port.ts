@@ -81,7 +81,7 @@ export interface TurnExecutionPort {
   setThreadName(threadId: string, name: string, beforeSubmit?: () => void): Promise<void>;
   setThreadPinned(threadId: string, pinned: boolean, beforeSubmit?: () => void): Promise<boolean>;
   compactThread(threadId: string, beforeSubmit?: () => void): Promise<void>;
-  startReview(threadId: string, target: ReviewTarget, beforeSubmit?: () => void): Promise<ReviewStarted>;
+  startReview(threadId: string, target: ReviewTarget, beforeSubmit?: () => void, requestAttempted?: () => undefined): Promise<ReviewStarted>;
   getGoal(threadId: string, beforeSubmit?: () => void): Promise<ThreadGoal | null>;
   setGoal(threadId: string, objective: string, beforeSubmit?: () => void): Promise<ThreadGoal>;
   clearGoal(threadId: string, beforeSubmit?: () => void): Promise<void>;

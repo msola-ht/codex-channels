@@ -108,6 +108,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   `client.ts` 的手动与后台额度查询直接调用 `account/rateLimits/read`，携带取消信号且不主动刷新登录凭据；
   后台查询省略重置券详情，启动认证路由使用 `account/read.refreshToken: false`。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
+  列表的 `invocable` 与执行共用名称及路径校验，并拒绝重复名称；该标志仅供呈现，执行仍重新读取并验证，不以旧目录标志授权。
   使用稳定 `SkillMetadata.pluginId` 排除系统与 Plugin 所有项，不从安装路径猜测来源；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
   绝对路径均通过校验的引用。
 - `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，严格映射当前 Thread
@@ -169,6 +170,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
 - `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill。
+  inline Review 的可选 requestAttempted 与普通 Turn 提交一样要求同步返回，观察后再次核对最终守卫；响应必须关联请求 Thread 和非空 Turn，未知结果不重试。
   新建 Thread 隐式使用 Gateway 默认模型前核对当前实例 `model/list`，失效时不发送 `thread/start`；显式模型和历史恢复保持各自调用合同。
   仅在 `thread/resume` 拒绝处，将 `-32600` 且完整消息精确等于 `no rollout found for thread id <请求的 Thread ID>` 的错误映射为稳定 `thread.resume.history-unavailable`；其他方法、错误码或 Thread 身份不复用该分类。此错误不证明 Thread 已删除，Client 不自动命名、创建替代 Thread 或重试写请求，保留绑定与恢复调度由 Router 和组合根负责。
   Workspace 的可选 `approvalsReviewer` 通过稳定 `thread/start`、`thread/resume`、`thread/fork` 参数传递；省略时保留 Codex 默认或历史持久设置，恢复响应核对明确请求的 reviewer。

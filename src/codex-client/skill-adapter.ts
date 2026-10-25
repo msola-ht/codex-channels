@@ -10,10 +10,11 @@ export function toInstalledSkills(
   response: SkillsListResponse,
   cwd: string,
 ): InstalledSkill[] {
-  return toDirectlyInstalledSkills(response, cwd).map(({ name, description }) => ({
-    name,
-    description,
-  }));
+  const skills = toDirectlyInstalledSkills(response, cwd);
+  const counts = new Map<string, number>();
+  for (const skill of skills) counts.set(skill.name, (counts.get(skill.name) ?? 0) + 1);
+  return skills.map(skill => ({ name: skill.name, description: skill.description,
+    invocable: counts.get(skill.name) === 1 && isInvocable(skill) }));
 }
 
 export function resolveInvocableSkill(
@@ -28,15 +29,7 @@ export function resolveInvocableSkill(
     throw new Error("Codex 返回了重复的已启用 Skill 名称");
   }
   const skill = matches[0];
-  if (
-    skill
-    && (
-      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(skill.name)
-      || skill.name.length > 64
-      || !isAbsolute(skill.path)
-      || !skill.path.replaceAll("\\", "/").endsWith("/SKILL.md")
-    )
-  ) {
+  if (skill && !isInvocable(skill)) {
     throw new Error("Codex 返回了无法安全调用的 Skill");
   }
   return skill
@@ -44,8 +37,13 @@ export function resolveInvocableSkill(
     : undefined;
 }
 
-interface DirectlyInstalledSkill extends InstalledSkill {
+interface DirectlyInstalledSkill extends Omit<InstalledSkill, "invocable"> {
   path: string;
+}
+
+function isInvocable(skill: DirectlyInstalledSkill): boolean {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(skill.name) && skill.name.length <= 64
+    && isAbsolute(skill.path) && skill.path.replaceAll("\\", "/").endsWith("/SKILL.md");
 }
 
 function toDirectlyInstalledSkills(

@@ -76,7 +76,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 - `turn-errors.ts`：把单次 Turn 失败归约为稳定的错误类型、错误码与安全文案；只读取已归约的错误对象，不执行 RPC、不生成平台输出。
 - `pagination.ts`：提供 Application 层共用的分页总数、页码校验、偏移/切片与一基序号；错误类型与文案仍由各调用点提供，不持有列表状态。
 - `bounded-map.ts`：只提供按插入顺序裁剪 Map 容量的内部操作；过期、键刷新、确认消费及计时器清理由服务保留。
-- `submission-observer.ts`：普通 `submit` 的可选同步提交观察合同及单次调用状态；准备时固定 Thread、请求种类和 clientUserMessageId，
+- `submission-observer.ts`：普通 `submit` 与显式任务命令的可选同步提交观察合同及单次调用状态；普通输入准备时固定 Thread、请求种类和 clientUserMessageId，Review 使用不含用户消息 ID 的独立分支，
   最终写 RPC 前记录可能提交，权威响应后确认精确 Turn，所有退出路径结算 not-submitted/confirmed/unknown。
   回调必须返回 undefined；拒绝异步回调，观察结果不证明 Turn 最初由哪个客户端创建，不存输入正文、不授予平台发送权限。
 - `conversation-service.ts`：按 Turn、Session/Workspace、Queue/Revert、扩展与账户指标五类稳定能力接口公开用例，
@@ -203,7 +203,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
   指标累计，以及自然日/周/月、24 小时至 365 天滚动窗口或全部保留历史的全局/提供商/模型聚合和异常请求
   只读摘要；错误组保留来源、HTTP 状态、错误类型与错误码；聚合中的上下文压缩摘要单列实际请求模型、请求数与 Token；
   历史无 Turn 指标只参与通用明细和时间范围聚合；不向 Application 暴露 SQLite 或请求正文。
-- `skill-port.ts`：定义已直接安装 Skill 的稳定名称与说明查询，以及只供 Application 启动
+- `skill-port.ts`：定义已直接安装 Skill 的稳定名称、说明和目录可调用标志，以及只供 Application 启动
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
 - `mcp-port.ts`：定义 MCP Server 概览、当前 Thread 的未启动/连接中/已连接/需认证/失败/取消/禁用或未知运行状态、可空 Plugin 来源、只表示工具发现是否失败的布尔状态、带只读/可能写入/未知属性的工具摘要、资源/模板详情、共享 OAuth
   能力判断、登录结果和有界只读资源内容；Plugin 来源只供 `/mcp` 详情展示，不用于授权或 OAuth；不向 Surface 暴露工具 Schema、二进制正文或完整官方响应。
@@ -234,6 +234,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 Surface 只依赖直接输入、状态或菜单所需的能力切片，并使用 Bootstrap 注入的
 `ConversationCommandExecutor` 执行共享命令；不依赖完整 `ConversationUseCases`、具体服务类或底层 JSON-RPC。
 `execute` 可接收同步交互有效性守卫，与既有 Actor/Workspace 授权一起传至业务和最终提交前；QQ 回退和 Hook 管理用它取消在途查询及写入准备。Hook 快照与确认使用五分钟单调时钟期限。`selectMcpLogin` 在共享目录解析后、认证写入前核对菜单原 Server 名称，拒绝重排的数字选择。未传守卫的调用保持原语义，已发送的写入不会因随后取消而自动撤回。共享回退解析器通过 Application 公共出口供菜单复用，不重复解析确认语法。
+`execute` 的可选第六参数为 SubmissionObserver，在命令授权和解析之前创建一次 SubmissionObservation，finally 结算；Skill、角色、Plugin、带需求 Plan 和 Review 共用该观察，不改动未传观察器的其他渠道语义。Review 准备分支只有 Thread 身份，不伪造用户消息 ID；最终请求尝试同步观察，inline 响应固定原 Thread/Turn，观察失败仍释放活动追踪并保守结算。
 Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。
 Queue 由 App Server 持久化并按 Thread 限制为 100 条；Application 默认以 25 条一页维护五分钟、
 不含正文的 Conversation 选择快照，数字选择器只使用该快照，完整 ID 则重新复核权威列表。

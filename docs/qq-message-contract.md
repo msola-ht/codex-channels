@@ -18,14 +18,20 @@ QQ Adapter 已移除 connectionOnly，启用共享自动绑定恢复与交互，
 | 3 | 模式与状态：effort、fast、无参 plan、goal 查询/清除、permissions、autoreview、whoami | 复用模型菜单与共享模式/权限合同；Goal 限已就绪原 Thread；审批方式绑定原 Thread；身份输出脱敏 | 源码完成，待部署验收 |
 | 4A | 扩展查询：skill/agents 列表、plugin 查询、mcp 列表/健康/详情目录、hooks 列表/详情、release 诊断 | 查询期间 Provider/Thread 变化、目录序号重排、分页、完整预算与只读命令门控 | 源码完成，待部署验收 |
 | 4B | MCP 认证/重载/资源读取、Hook 管理确认 | OAuth 完成归属与主动通知、Hook 信任审查和已投递确认门槛、生命周期守卫贯穿最终写入；强制释放留第十批 | 源码完成，待部署验收 |
-| 5 | 显式任务入口：review、skill/agents/plugin 调用、plan 带需求 | SubmissionObserver 贯穿实际执行，不得遗漏早到输出或复用无关 Turn；goal set 按用户决定暂不开放，等待上游提供可靠 Turn 关联 | 待实施 |
+| 5 | 显式任务入口：review、skill/agents/plugin 调用、plan 带需求 | SubmissionObserver 贯穿实际执行，不得遗漏早到输出或复用无关 Turn；goal set 按用户决定暂不开放，等待上游提供可靠 Turn 关联 | 源码完成，待部署验收 |
 | 6 | 图片输入与图片交付 | 上游媒体合同、允许名单、下载与内容校验、共享私有暂存、提交不确定后的保留、停止/切换取消 | 待实施 |
 | 7 | 文本及普通文件输入/交付、引用输入 | 大小/类型/路径权限、期限与清理、来源完整性；引用不能扩大历史读取或授权范围 | 待实施 |
 | 8 | 音频与视频输入 | 复用现有音视频解析能力、处理期限与取消、失败不提交残缺内容；按平台实际能力开放 | 待实施 |
 | 9 | 原生 Queue、计划任务、配置广播 | 官方持久队列与自动消费、启动来源、后台路由、通知收件人；不得另建 Gateway 正文队列 | 待实施 |
 | 10 | 群聊与剩余管理写操作（含重置券、强制释放） | 单独确定群/成员身份、工作区绑定、审批收件人和额度；高影响操作沿共享确认机制，不沿用单聊假设 | 待设计 |
 
+第六批实现依据：锁定 QQ `c2c_message_create.txt` 的附件元数据只开放 JPEG/PNG/GIF，纯图片可无正文；`v2_users_user_openid_files.post.txt` 与 `rich-media.txt` 允许 `file_type=1`、Base64 `file_data`、`srv_send_msg=true` 直接发送，并以合法消息 ID 确认。出站先限具体端点列出的 PNG/JPEG，单次本地预算 5,000,000 字节；生成图片仍受共享 Journal 单条 4 MiB（包含 Base64 与元数据）的更小有效预算，不宣称所有 5 MB 图片都可持久投递。入口计划复用 ManagedImageStore、共享图片转 Data URL 与模型能力校验；图片和正文共用来源、投递顺序、额度及回执。附件下载不携带 QQ 凭据、不跟随重定向，目的地须在实际连接时绑定经校验的公网地址，避免只做 DNS 预检查。真实平台上传、下载及模型收图仍待观察。
+
 每批先读取受影响共享合同与既有渠道实现，再修改 QQ 入口、菜单、输出和文档；异常观察使用有限的既有生产入口，不新增测试或探测脚本。需要真实账户、费用或其他外部副作用时按既有授权边界处理；不可观察的路径明确保留待验收，不以静态检查替代。批次 3/4 中会实际启动任务的分支在批次 5 完成前保持明确拒绝。
+
+第五批接入 review、Skill/角色/Plugin 显式调用和带需求 Plan，沿共享 CommandService 第六参数创建一次 SubmissionObservation，在授权、解析和锁等待之前建立，finally 结算。Review 使用独立准备身份，不伪造 clientUserMessageId；最终 RPC 观察必须同步返回并再次核对守卫，inline 响应必须匹配原 Thread 和有效 Turn。QQ 在调用前预留本次输入来源，只有权威响应明确关联的 Turn 可交付；正文流候选在确认前不占用唯一 Item，修复无关 TUI Turn 早到抢占资格的问题。填写任务按钮使用完整稳定名称/ID，超过键盘预算或不能准确表示则不生成，不截断；发送时按当前上下文重新解析授权，不将填入动作视为原菜单的授权快照。
+第五批隔离生产入口观察由实现代理执行，主代理复核相关源码与完整报告：真实 `QqMessages.receive → CommandService → ConversationService`，执行及平台端口替换为内存记录，五入口各提交一次并 confirmed；响应前 TUI-A 与 QQ-B 候选只准响应指向的 QQ-B，经真实 deliver 交到隔离发送端口。解析失败、Provider 改变、停止准备与等锁取消均零提交/not-submitted；请求未知、错 Thread 和空 Turn 各尝试一次/unknown/零交付，不重试。实际 Client 的异步 attempt 或 attempt 内撤权均零 RPC；Review 观察器抛错仍 stop 活动观察，confirmed 抛错后仍 restore 再保守 unknown。
+实际 Sources/Streaming 观察只有 B 首个 Item 发送正文及结束两帧并确认完整检查点；同 Turn steer 保持原锚点和 token，不延长被动窗口。初次按钮观察只覆盖 100 码点、控制字符和坏 Unicode，不能证明 Skill 实际可调用。独立复审发现目录名称还受共享调用约束，已由 Client 统一产生 `invocable` 标志，QQ 只为 true 生成按钮。修复后实际 Client 目录适配到 QQ 渲染只生成 good-skill 按钮；bad_name、UPPER、65 字符、重复名称及相对路径均 false，仍保留列表详情。主代理同时修复最终 attempt 同步合同及过长任务按钮边界。未调用真实 QQ/App Server、未观察 Journal 落盘与重启，本批尚未部署；隔离 deliver 不能替代完整线上持久投递验收。
 
 持续验收清单：新消息按钮回调往返、MCP 工具审批、JSON/URL 回应、逐题/翻页、自定义回答、长任务跨窗口、取消/撤权与重启旧结果禁发。底部 Codex 菜单维持平台 send_message 合同，不作为回调缺陷处理。以上为排期，不代表未实施能力已经开放。
 
@@ -45,7 +51,7 @@ Hook 共享确认在异步回读中撤销守卫的隔离反例实际返回 `canc
 Plugin 搜索翻页实际回传“匹配 9 · 第 2/2 页”和原第九项，选择调用 selector=9，重复选择详情调用仍为一次；修正查询提示后第二页正文与按钮合为一片。MCP 工具搜索九个匹配项时下一页保留 `1 tools 2 search needle`；非法 `/plugin list 0`、`/mcp login` 返回 QQ 支持范围提示，不再带出写操作用法。Hook 空列表和无绑定占用诊断通过同一生产输出入口展示；真实 Hook 详情、MCP/Plugin 上游目录、客户端显示和查询中断仍待验收，不以这些隔离记录替代。
 
 第三批通过“模式与状态”回调面板进入思考等级、速度、无参 Plan 切换、审批方式、权限查询、当前目标和脱敏身份。模型设置复用共享快照；速度菜单进入 `/fast status`，裸 `/fast` 仍按共享合同切换，主 Provider 同时更新 Codex 用户级默认速度。思考/速度设置保留已有任务来源。`/permissions` 只查询可选配置，不表示实际权限；拒绝额外参数。Plan 回复不展示尚未接入的带需求启动入口。
-Goal 查询/清除仅允许当前 Thread 已完成订阅恢复，执行和交付固定原 Thread，避免共享 `ensureSession` 隐式建立或恢复会话。清除当前目标不停止正在运行的任务。按用户决定，`/goal set` 暂不开放，也不列入第五批的待接线入口：锁定上游返回值没有 Turn ID，active Goal 可立即启动空闲 Turn 或影响 TUI 任务，不能用时间顺序或下一条 Turn 猜测归属。待上游提供可靠关联后再评估。带参数 `/plan` 当前仍拒绝，其显式任务来源闭环留第五批。
+Goal 查询/清除仅允许当前 Thread 已完成订阅恢复，执行和交付固定原 Thread，避免共享 `ensureSession` 隐式建立或恢复会话。清除当前目标不停止正在运行的任务。按用户决定，`/goal set` 暂不开放，也不列入第五批的待接线入口：锁定上游返回值没有 Turn ID，active Goal 可立即启动空闲 Turn 或影响 TUI 任务，不能用时间顺序或下一条 Turn 猜测归属。待上游提供可靠关联后再评估。第三批当时拒绝带参数 `/plan`，其显式任务来源已由上述第五批接线。
 审批方式按钮沿共享 `selectAutoReview`，绑定原 Actor/Workspace/Thread、限时一次性选择，并将菜单有效性守卫透传至最终请求；不提前取消待处理审批来绕过共享空闲/交互判断。审批方式和 Goal 详情优先使用完整安全 Markdown，特殊构造退回完整字面详情与可信按钮，全部片确认后才开放选择；失败不重发。此批尚未部署，真实 QQ 显示与官方设置写入仍待验收。
 第三批关联审查覆盖 QQ 准入、共享命令授权、模型快照及默认速度写入、审批方式锁与最终守卫、Goal 就绪约束、菜单和 Outbox。独立只读复审发现并复核修复两项：速度面板必须保留实际/未知/待生效状态；当前模型已离开目录时，仍应展示状态和 Standard 入口，不将已成功关闭加速误报为失效。Goal 详情在等待发送时也核对原 Thread 订阅就绪。
 隔离生产入口观察使用实际 `QqMessages.receive → ConversationCommandService → 菜单/Outbox`，业务和平台执行端口替换为内存记录，不连接真实 QQ/App Server。模式菜单输出八个入口，速度入口为 `/fast status`；审批方式详情确认后两项选择 ready，重复选择只记录一次且 Thread 为原 `thread-a`。未恢复 Goal 查询 reads=0；切换 Thread 后旧清除按钮 writes=0；带需求 Plan、Goal set、permissions/whoami 附加参数业务调用增量为零。Plan 回执不提示未开放任务语法，身份仅显示 `allo…mple`。

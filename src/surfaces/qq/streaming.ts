@@ -8,6 +8,7 @@ import { qqBodyMarkdownPrefix } from "./body-markdown.js";
 
 type Body = Extract<OutputEvent, { type: "text.delta" | "text.completed" }>;
 interface Stream {
+  key: string;
   controller: AbortController;
   source: QqTaskSourceReference;
   recipient: string;
@@ -18,6 +19,7 @@ interface Stream {
   attempted: boolean;
   completed: boolean;
   failed: boolean;
+  selected?: boolean;
   limited?: boolean;
   sealed?: boolean;
   sealTimer?: ReturnType<typeof setTimeout>;
@@ -39,7 +41,7 @@ export class QqBodyStreaming {
     private readonly failed: () => void, private readonly confirmed: (frames: number) => void) {}
 
   started(source: QqTaskSourceReference): void {
-    if (this.startedSources.size < 4096) this.startedSources.add(source.sourceToken);
+    if (this.startedSources.size < 4096) this.startedSources.add(this.sourceKey(source));
   }
 
   /** Runs before the shared router may shed a delta. No networking in the observer. */
@@ -50,11 +52,10 @@ export class QqBodyStreaming {
       if (stream) stream.completed = true;
       return;
     }
-    if (!source || !this.startedSources.has(source.sourceToken) || this.lifetime.signal.aborted || event.phase === "commentary") return;
+    if (!source || !this.startedSources.has(this.sourceKey(source)) || this.lifetime.signal.aborted || event.phase === "commentary") return;
     if (!stream) {
       if (this.streams.size >= 128 || this.usedSources.size >= 4096 || this.usedSources.has(source.sourceToken)) return;
-      this.usedSources.add(source.sourceToken);
-      stream = { controller: new AbortController(), source, recipient: event.target.conversationId.slice(4), text: "", sent: "",
+      stream = { key, controller: new AbortController(), source, recipient: event.target.conversationId.slice(4), text: "", sent: "",
         index: 0, attempted: false, completed: false, failed: false };
       this.streams.set(key, stream);
     }
@@ -140,7 +141,12 @@ export class QqBodyStreaming {
 
   private async flush(stream: Stream, caller?: AbortSignal): Promise<void> {
     const local = AbortSignal.any([this.lifetime.signal, stream.controller.signal, ...(caller ? [caller] : [])]);
-    if (!(await this.sources.awaitSource(stream.source, local))) return;
+    if (!(await this.sources.awaitSource(stream.source, local))) {
+      stream.controller.abort();
+      this.streams.delete(stream.key);
+      stream.text = "";
+      return;
+    }
     const anchor = this.sources.streamSource(stream.source);
     if (!anchor) return;
     const remaining = QQ_PASSIVE_WINDOW_MS - (Date.now() - anchor.sourceTimestampMs);
@@ -152,6 +158,16 @@ export class QqBodyStreaming {
     if (timeLeft <= 0) return;
     const signal = AbortSignal.any([local, anchor.signal, AbortSignal.timeout(timeLeft)]);
     if (stream.completed || stream.failed || stream.sealed) return;
+    if (!stream.selected) {
+      // Candidate events are not source proof. Claim one Item only after the
+      // exact response Turn is confirmed, synchronously across concurrent Items.
+      if (this.usedSources.has(stream.source.sourceToken) || this.usedSources.size >= 4096) {
+        stream.failed = true;
+        return;
+      }
+      this.usedSources.add(stream.source.sourceToken);
+      stream.selected = true;
+    }
     if (stream.limited || stream.index >= 120) { await this.seal(stream, signal); return; }
     if (stream.text === stream.sent) return;
     stream.nextUpdateAt ??= performance.now() + 1000;
@@ -218,5 +234,9 @@ export class QqBodyStreaming {
 
   private key(event: Body): string {
     return JSON.stringify([event.target.conversationId, event.threadId, event.turnId, event.itemId]);
+  }
+
+  private sourceKey(source: QqTaskSourceReference): string {
+    return JSON.stringify([source.sourceToken, source.threadId, source.turnId]);
   }
 }

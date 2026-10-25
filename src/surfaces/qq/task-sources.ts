@@ -126,7 +126,7 @@ export class QqTaskSources {
     const observer: SubmissionObserver = {
       prepared: value => {
         this.requirePending(entry);
-        if (entry.preparation || !bounded(value.threadId) || !bounded(value.clientUserMessageId)
+        if (entry.preparation || !bounded(value.threadId) || (value.kind !== "review" && !bounded(value.clientUserMessageId))
           || (value.kind === "steer" && !bounded(value.expectedTurnId))) throw new Error("QQ 提交来源准备身份无效");
         entry.preparation = Object.freeze({ ...value });
         this.requirePending(entry);

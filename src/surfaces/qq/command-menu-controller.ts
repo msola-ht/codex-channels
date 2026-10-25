@@ -104,12 +104,20 @@ export class QqCommandMenuController {
     const context = this.context(target, actorId);
     if (!input) return this.panel(context, renderQqCommandMenu());
     if (input === "extensions") return this.panel(context, {
-      content: "# 扩展管理\n查看能力与诊断，管理 MCP 连接及 Hook。Hook 写入须完整预览后确认；扩展任务调用尚未开放。",
+      content: "# 扩展管理\n选择技能、代理角色或插件后填写任务；任务结果回到当前 QQ。MCP 管理及 Hook 确认沿各自入口处理。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("skill", "技能列表", "/skill"), qqMenuButton("agents", "代理角色", "/agents"), qqMenuButton("plugin", "插件列表", "/plugin")] },
         { buttons: [qqMenuButton("mcp", "MCP 列表", "/mcp"), qqMenuButton("mcphealth", "MCP 健康", "/mcp health"), qqMenuButton("pluginhealth", "插件健康", "/plugin health")] },
         { buttons: [qqMenuButton("hooks", "Hook 列表", "/hooks"), qqMenuButton("release", "占用诊断", "/release"), homeButton()] },
         { buttons: [qqMenuButton("mcpreload", "重载 MCP", "/mcp reload")] },
+      ] } },
+    });
+    if (input === "tasks") return this.panel(context, {
+      content: "# 任务\n审查当前改动可直接执行；指定分支、提交或审查要求时填写相应内容。计划需求会启动新的 Plan Turn。",
+      keyboard: { content: { rows: [
+        { buttons: [qqMenuButton("review", "审查当前改动", "/review"), qqMenuButton("reviewbranch", "审查分支差异", "/review branch ", false)] },
+        { buttons: [qqMenuButton("reviewcommit", "审查指定提交", "/review commit ", false), qqMenuButton("reviewcustom", "填写审查要求", "/review custom ", false)] },
+        { buttons: [qqMenuButton("planrequest", "填写计划需求", "/plan ", false), qqMenuButton("extensions", "选择扩展任务", "/help extensions"), homeButton()] },
       ] } },
     });
     if (input === "settings") return this.panel(context, {
@@ -305,13 +313,15 @@ export class QqCommandMenuController {
   }
 
   private extensionPanel(context: MenuContext, view: QqExtensionView): QqMenuPanel {
-    const rows = buttonRows(view.choices.map(choice => this.button(context, choice.label, { kind: "extension-query", choice })));
+    const rows = buttonRows(view.choices.map((choice, index) => choice.taskInput
+      ? qqMenuButton(`task${index}`, bounded(choice.label, 10), `/${choice.command} ${choice.input} `, false)
+      : this.button(context, choice.label, { kind: "extension-query", choice })));
     const navigation: QqMenuButton[] = [qqMenuButton("extensions", "扩展管理", "/help extensions"), homeButton()];
     if (view.authorizationUrl) navigation.unshift({ id: "oauth-url", render_data: { label: "浏览器授权", visited_label: "已打开", style: 0 },
       action: { type: 0, permission: { type: 2 }, data: view.authorizationUrl } });
     rows.push({ buttons: navigation });
     if (rows.length > 5) throw unsupported();
-    const panel = this.panel(context, { content: "可继续选择操作；登录需要在浏览器完成授权，重载结果请用 MCP 健康核对。", keyboard: { content: { rows } } });
+    const panel = this.panel(context, { content: "选择任务入口后补充需求并发送；查询操作可直接选择。登录需浏览器授权，重载结果请用 MCP 健康核对。", keyboard: { content: { rows } } });
     const detail = formatQqLiteralDetails(view.detail);
     try {
       if (planText({ mode: "active", recipient: context.actorId, content: detail }).length > 7) throw new QqProtocolError("message", "invalid-input");

@@ -14,8 +14,27 @@ export interface QqExtensionChoice {
   input: string;
   page?: number;
   expectedName?: string;
+  /** Selected stable identity; only the task text remains to be entered. */
+  taskInput?: boolean;
 }
 export interface QqExtensionView { detail: string; choices: QqExtensionChoice[]; authorizationUrl?: string }
+
+export function isQqTaskCommand(command: string, input: string): boolean {
+  if (command === "review") return true;
+  if (["skill", "agents", "plan"].includes(command)) return !!input.trim();
+  if (command !== "plugin") return false;
+  try { return parsePluginOperation(input).type === "invoke"; }
+  catch (error) { if (error instanceof UserFacingError) return false; throw error; }
+}
+
+function taskChoice(command: QqExtensionCommand, label: string, selector: string): QqExtensionChoice[] {
+  // The shared invocation grammar accepts exactly one selector token. Never
+  // turn a changing list index or an unrepresentable name into another task.
+  const data = `/${command} ${selector} `;
+  return /^\S+$/u.test(selector) && !/^\d+$/u.test(selector)
+    && [...data].length <= 100 && !/[\p{Cc}\uD800-\uDFFF]/u.test(data)
+    ? [{ label, command, input: selector, taskInput: true }] : [];
+}
 
 /** Reuse business parsers; task invocation remains separate from MCP management. */
 export function isQqExtensionOperation(command: string, input: string): boolean {
@@ -46,11 +65,13 @@ export function renderQqExtensionCommand(result: ConversationCommandResult, page
   switch (result.kind) {
     case "skills": {
       if (!paginate(result.entries.length, "skill", "")) return;
-      return { detail: `第 ${page} 页 · 共 ${result.entries.length} 项\n${formatConversationSkills({ ...result, entries: result.entries.slice((page - 1) * 8, page * 8) }, true)}`, choices };
+      choices.unshift(...result.entries.slice((page - 1) * 8, page * 8).flatMap(skill => skill.invocable === true ? taskChoice("skill", skill.name, skill.name) : []));
+      return { detail: `第 ${page} 页 · 共 ${result.entries.length} 项\n${formatConversationSkills({ ...result, entries: result.entries.slice((page - 1) * 8, page * 8) }, true)}\n使用：/skill <完整名称> <任务>；本页序号仅用于展示。`, choices };
     }
     case "agents": {
       if (!paginate(result.roles.length, "agents", "")) return;
-      return { detail: `第 ${page} 页 · 共 ${result.roles.length} 项\n${formatConversationAgents({ ...result, roles: result.roles.slice((page - 1) * 8, page * 8) }, true)}`, choices };
+      choices.unshift(...result.roles.slice((page - 1) * 8, page * 8).flatMap(role => taskChoice("agents", role.name, role.name)));
+      return { detail: `第 ${page} 页 · 共 ${result.roles.length} 项\n${formatConversationAgents({ ...result, roles: result.roles.slice((page - 1) * 8, page * 8) }, true)}\n使用：/agents <完整角色名称> <任务>；本页序号仅用于展示。`, choices };
     }
     case "plugins": {
       result.plugins.forEach((plugin, index) => choices.push({ label: plugin.displayName, command: "plugin", input: result.selectors[index]!, expectedName: plugin.id }));
@@ -59,7 +80,12 @@ export function renderQqExtensionCommand(result: ConversationCommandResult, page
       if (result.page < result.pageCount) choices.push({ label: "下一页", command: "plugin", input: `list ${result.page + 1}${suffix}` });
       return { detail: formatConversationPlugins(result, true), choices };
     }
-    case "plugin-detail": return { detail: formatConversationPluginDetail(result, true), choices };
+    case "plugin-detail": {
+      if (result.plugin.enabled && result.plugin.available && !["list", "health"].includes(result.plugin.id)) {
+        choices.push(...taskChoice("plugin", "填写插件任务", result.plugin.id));
+      }
+      return { detail: `${formatConversationPluginDetail(result, true)}\n使用：/plugin <完整 ID> <任务>。`, choices };
+    }
     case "plugin-health": return { detail: formatConversationPluginHealth(result), choices };
     case "mcp": {
       if (!paginate(result.servers.length, "mcp", "")) return;

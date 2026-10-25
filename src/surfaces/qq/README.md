@@ -20,6 +20,7 @@
 ## 文件与边界
 
 第三批模式与状态菜单复用共享 effort/fast、无参 plan、permissions 和 autoreview；Goal 仅开放已有就绪 Thread 的查询/清除，whoami 只呈现本用户脱敏身份。审批方式按钮绑定精确 Thread，生命周期守卫透传共享服务；设置和查询保留结果来源。详情沿 Outbox 完整 Markdown 预选及字面回退，全部确认后激活按钮。源码未部署，范围与观察记录见消息合同。
+第五批接入 review、Skill/角色/Plugin 任务与带需求 Plan；菜单复用回调，用户需求通过填入稳定名称后追加文字提交。命令在授权和解析前建立提交观察，结果只接受权威响应的精确 Thread/Turn；Review 不伪造用户消息 ID，Goal set 保持拒绝。早到流式候选不先占用唯一 Item，确认后同步选择，最终全文仍沿共享持久投递。填写任务按钮不是上下文授权快照，实际发送时重新解析和授权；源码未部署。
 
 - `index.ts`：QQ 模块公开出口。
 - `body-markdown.ts`：任务正文的原生 Markdown 安全前缀选择；保留原文，不补围栏或改写已发送前缀。标签、实体、图片及未确认链接留给普通文字；只允许完整的简单 HTTP(S) 链接，不生成按钮。
@@ -28,7 +29,7 @@
 - `command-menu-controller.ts`：工作区、模型/思考等级/速度、会话恢复和统计选择菜单；列表读取及选项执行复用共享命令服务，模型选择复用共享快照和选择守卫。
   本代次持有有界、十分钟、单次消费的选项令牌，仅保存具体 ID/选择请求与授权上下文，不保存会话历史或模型正文；关闭清理，跨用户、工作区、会话或过期选择拒绝。
   动态名称只用于经过转义及限长的显示，不拼入可执行指令；回调沿用共享命令执行和既有一次性菜单令牌，不直接操作 App Server。模型翻页保留提供商筛选和共享快照；客户端反馈与未观察边界见消息合同。
-- `extension-commands.ts`：扩展命令准入与展示，复用共享 Plugin/MCP 参数解析器和结果格式；Skills/Agents/MCP 列表分页、Plugin/MCP 精确条目核对及 MCP 登录、重载和资源读取。OAuth 地址使用经过协议校验的 URL 按钮，保留原查询参数；链接送达不代表登录完成。任务调用仍不从本入口执行。
+- `extension-commands.ts`：扩展命令准入、任务入口判定与展示，复用共享 Plugin/MCP 参数解析器和结果格式；Skills/Agents/MCP 列表分页、Plugin/MCP 精确条目核对及 MCP 登录、重载和资源读取。Skill 只有共享目录明确可调用时才生成填写任务按钮，执行仍重新解析。OAuth 地址使用经过协议校验的 URL 按钮，保留原查询参数；链接送达不代表登录完成。
 - `hook-review.ts`：QQ Hook 信任的字面审查策略；与共享完整性检查共同拒绝截断或展示时会改变字符的审查内容。Hook 菜单复用共享预览/确认，全部详情确认送达后才开放按钮或文字确认；生命周期守卫贯穿最终写入。
 - `interactions.ts`：共享 `InteractionPort` 的 QQ 呈现与回应适配；复用 `PendingInteractionRegistry` 和 `resolveApprovalChoice`，处理 command/stdin/file/permissions、逐题用户输入与异步问题、MCP 工具审批及 form/url elicitation。
   随机一次性令牌绑定原请求、用户及上下文，翻页或逐题推进递增 revision；按钮回调与普通文字 `/respond` 共用回应映射，输入按钮填入前缀后由用户追加正文发送。请求剩余期限包含展示发送，关闭、停止、切换及跨端解决撤销旧入口，不恢复旧令牌。

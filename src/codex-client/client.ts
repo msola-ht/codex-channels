@@ -1273,15 +1273,19 @@ export class CodexAppServerClient implements
     return toThreadSession(response);
   }
 
-  async startReview(threadId: string, target: ReviewTarget, beforeSubmit?: () => void): Promise<ReviewStarted> {
+  async startReview(threadId: string, target: ReviewTarget, beforeSubmit?: () => void, requestAttempted?: () => undefined): Promise<ReviewStarted> {
     const response = await this.rpc.request<ReviewStartResponse>({
       method: "review/start",
       params: { threadId, target: toProtocolReviewTarget(target), delivery: "inline" },
     }, { retryOverload: false, beforeSubmit: () => {
       beforeSubmit?.();
+      requireSynchronousAttempt(requestAttempted);
+      if (requestAttempted) beforeSubmit?.();
       this.observedTurns.delete(threadId);
     } });
-    return toReviewStarted(response);
+    const result = toReviewStarted(response);
+    if (result.threadId !== threadId || !result.turnId.trim()) throw new Error("Inline Review 响应与请求会话不一致或缺少有效 Turn");
+    return result;
   }
 
   async listSkills(cwd: string, beforeSubmit?: () => void): Promise<InstalledSkill[]> {

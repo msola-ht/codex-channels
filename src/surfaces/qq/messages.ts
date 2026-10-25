@@ -25,7 +25,7 @@ import { surfaceErrorMetadata } from "../error-metadata.js";
 import { QqCommandMenuController } from "./command-menu-controller.js";
 import { qqBodyMarkdownPrefix } from "./body-markdown.js";
 import { QqInteractions } from "./interactions.js";
-import { isQqExtensionOperation } from "./extension-commands.js";
+import { isQqExtensionOperation, isQqTaskCommand } from "./extension-commands.js";
 
 export interface QqMessageOptions {
   appId: string;
@@ -325,12 +325,14 @@ export class QqMessages implements SurfaceOutputPort {
     }
     if (!stop && !ownsBusy) this.busy.add(target.conversationId);
     let stage: "command" | "render" | "reply" | "submit" = "command";
+    let commandTicket: QqTaskTicket | undefined;
     try {
       if (command) {
-        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", "compact", "fork", "revert", "effort", "fast", "plan", "goal", "permissions", "autoreview", "whoami", ...QUERY_COMMANDS, ...EXTENSION_COMMANDS].includes(command.name)
-          || (["status", "stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin", "compact", "fork", "plan", "permissions", "whoami"].includes(command.name) && command.argumentsText.trim())
+        const taskCommand = isQqTaskCommand(command.name, command.argumentsText);
+        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", "compact", "fork", "revert", "review", "effort", "fast", "plan", "goal", "permissions", "autoreview", "whoami", ...QUERY_COMMANDS, ...EXTENSION_COMMANDS].includes(command.name)
+          || (["status", "stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin", "compact", "fork", "permissions", "whoami"].includes(command.name) && command.argumentsText.trim())
           || (command.name === "goal" && !["", "clear"].includes(command.argumentsText.trim()))
-          || (EXTENSION_COMMANDS.has(command.name) && command.name !== "hooks" && !isQqExtensionOperation(command.name, command.argumentsText))) {
+          || (EXTENSION_COMMANDS.has(command.name) && command.name !== "hooks" && !taskCommand && !isQqExtensionOperation(command.name, command.argumentsText))) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;
         }
         if (command.name === "whoami") {
@@ -351,28 +353,35 @@ export class QqMessages implements SurfaceOutputPort {
           this.cancelCallbacks(target); this.menus.cancelRevert(target); this.menus.cancelManagement(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target);
         }
         const commandScope = this.scope(message.actorId);
-        const extensionScope = EXTENSION_COMMANDS.has(command.name) ? this.extensionQueryScope(target) : undefined;
+        if (taskCommand) {
+          if (!commandScope) { await this.reply(message, "请先用 /workspace 选择已配置的工作区。", () => this.allowed(target, message.actorId)); return; }
+          const reservation = this.sources.reserve(commandScope, message);
+          if (reservation.kind !== "accepted") { await this.reply(message, "当前输入无法接纳，请稍后核对任务状态再重试。", () => this.current(commandScope)); return; }
+          commandTicket = reservation.ticket;
+        }
+        const extensionScope = !taskCommand && EXTENSION_COMMANDS.has(command.name) ? this.extensionQueryScope(target) : undefined;
         const hasSelectionMenu = extensionScope !== undefined || ["workspace", "model", "sessions", "resume", "archived", "effort", "fast", "autoreview", "goal"].includes(command.name);
         const menuScope = hasSelectionMenu ? this.menuScope(target) : undefined;
         const menuWorkspaceScope = hasSelectionMenu ? this.menuWorkspaceScope(target) : undefined;
         const queryStatus = QUERY_COMMANDS.has(command.name) ? this.options.service.status(target) : undefined;
-        const fixedScope = ["effort", "fast", "plan", "goal", "permissions", "autoreview"].includes(command.name) ? this.menuScope(target) : undefined;
+        const fixedScope = !taskCommand && ["effort", "fast", "plan", "goal", "permissions", "autoreview"].includes(command.name) ? this.menuScope(target) : undefined;
         const goalThread = command.name === "goal" ? this.readyThread(target) : undefined;
         if (command.name === "goal" && !goalThread) {
           await this.reply(message, "请先选择并等待当前会话恢复完成，再查询或清除目标。QQ 暂不支持创建目标。", () => this.allowed(target, message.actorId));
           return;
         }
         const assertCurrent = () => {
+          if (commandTicket && !commandTicket.isCurrent()) throw new UserFacingError("command.selection.expired", "任务准备已取消、过期或失权，请核对任务状态。");
           if (extensionScope !== undefined && this.extensionQueryScope(target) !== extensionScope) throw new UserFacingError("command.selection.expired", "查询上下文已变化，请重新打开扩展查询。");
           if (fixedScope !== undefined && this.menuScope(target) !== fixedScope
             || goalThread !== undefined && this.readyThread(target) !== goalThread) throw new UserFacingError("command.selection.expired", "菜单已失效，请重新发送 /help 打开菜单。");
         };
-        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "rename" | "archived" | "archive" | "unarchive" | "pin" | "unpin" | "compact" | "fork" | "usage" | "limits" | "metrics" | "diff" | "effort" | "fast" | "plan" | "goal" | "permissions" | "autoreview" | "skill" | "agents" | "plugin" | "mcp" | "hooks" | "release", command.argumentsText, message.actorId, assertCurrent);
+        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "rename" | "archived" | "archive" | "unarchive" | "pin" | "unpin" | "compact" | "fork" | "review" | "usage" | "limits" | "metrics" | "diff" | "effort" | "fast" | "plan" | "goal" | "permissions" | "autoreview" | "skill" | "agents" | "plugin" | "mcp" | "hooks" | "release", command.argumentsText, message.actorId, assertCurrent, commandTicket?.observer);
         const sessionReplyScope = ["rename", "archive", "unarchive", "pin", "unpin", "compact", "fork"].includes(command.name)
           ? this.menuScope(target) : undefined;
         stage = "render";
         const scope = command.name === "workspace" && command.argumentsText.trim() ? this.scope(message.actorId) : commandScope;
-        const menu = this.menus.fromResult(target, message.actorId, result);
+        const menu = taskCommand ? undefined : this.menus.fromResult(target, message.actorId, result);
         if (menu) {
           stage = "reply";
           await this.reply(message, menu.content, () => {
@@ -434,10 +443,12 @@ export class QqMessages implements SurfaceOutputPort {
           : "任务提交未确认；请用 /status 或在本机核对，勿直接重复提交。", () => this.current(scope));
       }
     } catch (error) {
+      if (stage === "command") commandTicket?.cancel();
       const { errorType, errorCode, errorReason } = surfaceErrorMetadata(error);
       this.options.logger.warn({ reason: error instanceof UserFacingError ? error.code : "operation-unconfirmed",
         stage, emergencyStop: stop, errorType, errorCode, errorReason }, "QQ 操作未确认");
       await this.reply(message, error instanceof UserFacingError ? formatSurfaceUserFacingError(error, "QQ")
+        : commandTicket ? "任务提交未确认；请用 /status 或在本机核对，勿直接重复提交。"
         : "操作未确认。请检查 /status、工作区和模型选择；本机日志可核对受控错误。", () => this.allowed(target, message.actorId));
     } finally { if (!stop && !ownsBusy) this.busy.delete(target.conversationId); }
   }

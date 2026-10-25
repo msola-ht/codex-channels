@@ -1,9 +1,10 @@
 import type { Submission } from "./conversation-service.js";
 
-export type SubmissionPreparation = Readonly<{
-  threadId: string;
-  clientUserMessageId: string;
-} & ({ kind: "start-or-steer" } | { kind: "steer"; expectedTurnId: string })>;
+export type SubmissionPreparation = Readonly<{ threadId: string } & (
+  | { kind: "review" }
+  | { kind: "start-or-steer"; clientUserMessageId: string }
+  | { kind: "steer"; clientUserMessageId: string; expectedTurnId: string }
+)>;
 
 export type SubmissionOutcome = "not-submitted" | "confirmed" | "unknown";
 

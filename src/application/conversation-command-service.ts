@@ -1,5 +1,6 @@
 import type { ConversationResetCreditService, ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
 import type { HookCommandView } from "./hook-port.js";
+import { SubmissionObservation, type SubmissionObserver } from "./submission-observer.js";
 import {
   UserFacingError,
   type ConversationTarget,
@@ -334,6 +335,7 @@ export interface ConversationCommandExecutor {
     input: string,
     actorId: string,
     assertInteractionActive?: () => void,
+    observer?: SubmissionObserver,
   ): Promise<ConversationCommandResult>;
 }
 
@@ -412,19 +414,25 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     input: string,
     actorId: string,
     assertInteractionActive?: () => void,
+    observer?: SubmissionObserver,
   ): Promise<ConversationCommandResult> {
-    const authorize = this.commandGuard(target, actorId, command === "workspace");
-    const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
-    assertAuthorized();
-    const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
+    const observation = observer ? new SubmissionObservation(observer) : undefined;
     try {
-      if (command === "workspace" && input.trim()) { this.authorize(target, actorId); assertInteractionActive?.(); }
-      else assertAuthorized();
-    } catch (error) {
-      if (result.kind === "scheduled-confirmation") this.scheduledTasks?.cancelConfirmation(result.preview.token);
-      throw error;
+      const authorize = this.commandGuard(target, actorId, command === "workspace");
+      const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
+      assertAuthorized();
+      const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, observation);
+      try {
+        if (command === "workspace" && input.trim()) { this.authorize(target, actorId); assertInteractionActive?.(); }
+        else assertAuthorized();
+      } catch (error) {
+        if (result.kind === "scheduled-confirmation") this.scheduledTasks?.cancelConfirmation(result.preview.token);
+        throw error;
+      }
+      return result;
+    } finally {
+      observation?.settle();
     }
-    return result;
   }
 
   private commandGuard(target: ConversationTarget, actorId: string, allowMissingWorkspace: boolean): () => void {
@@ -450,6 +458,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     input: string,
     actorId: string,
     assertAuthorized: () => void,
+    observation?: SubmissionObservation,
   ): Promise<ConversationCommandResult> {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
@@ -618,6 +627,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           target,
           parseReviewTarget(argumentsText),
           assertAuthorized,
+          observation,
         );
         return {
           kind: "outcome",
@@ -695,6 +705,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           invocation.selector,
           invocation.task,
           assertAuthorized,
+          observation,
         );
         return {
           kind: "outcome",
@@ -719,6 +730,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           invocation.selector,
           invocation.task,
           assertAuthorized,
+          observation,
         );
         return {
           kind: "outcome",
@@ -733,7 +745,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "mcp":
         return this.executeMcpCommand(target, argumentsText, assertAuthorized);
       case "plugin":
-        return this.executePluginCommand(target, argumentsText, assertAuthorized);
+        return this.executePluginCommand(target, argumentsText, assertAuthorized, observation);
       case "usage":
         return {
           kind: "usage",
@@ -777,7 +789,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "plan":
         if (argumentsText) {
-          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized);
+          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized, observation);
           return {
             kind: "outcome",
             outcome: { type: "plan.started", turnId: submission.turnId },
@@ -969,6 +981,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     target: ConversationTarget,
     input: string,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<ConversationCommandResult> {
     const operation = parsePluginOperation(input);
     if (operation.type === "list") {
@@ -992,6 +1005,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       operation.selector,
       operation.task,
       assertAuthorized,
+      observation,
     );
     return {
       kind: "outcome",
