@@ -48,7 +48,7 @@ export function qqMenuButton(id: string, label: string, data: string, enter = tr
 export function renderQqCommandMenu(): { content: string; keyboard: QqCommandKeyboard } {
   const button = qqMenuButton;
   return {
-    content: "**Codex 命令中心**\n常用操作直接点击；设置与管理功能按分类展开。",
+    content: "## Codex 命令中心\n\n常用操作直接点击；设置与管理功能按分类展开。",
     keyboard: { content: { rows: [
       { buttons: [button("new", "新会话", "/new"), button("status", "当前状态", "/status"), button("stop", "停止任务", "/stop")] },
       { buttons: [button("model", "选择模型", "/help model 1"), button("effort", "思考等级", "/effort"), button("fast", "速度", "/fast status")] },

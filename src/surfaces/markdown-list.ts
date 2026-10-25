@@ -21,14 +21,14 @@ export function toStructuredMarkdownList(text: string): string {
     if (firstContent) {
       firstContent = false;
       if (/^#{1,6}\s+/u.test(trimmed)) {
-        output.push(`**${trimmed.replace(/^#{1,6}\s+/u, "")}**`);
+        output.push(trimmed);
         continue;
       }
-      output.push(singleLine || /^\*\*.+\*\*$/u.test(trimmed) ? trimmed : `**${stripTrailingColon(trimmed)}**`);
+      output.push(singleLine || /^\*\*.+\*\*$/u.test(trimmed) ? trimmed : `## ${stripTrailingColon(trimmed)}`);
       continue;
     }
     if (/^#{1,6}\s+/u.test(trimmed)) {
-      output.push(`**${trimmed.replace(/^#{1,6}\s+/u, "")}**`);
+      output.push(trimmed);
       continue;
     }
     if (/^\*\*.+\*\*$/u.test(trimmed)) {
@@ -44,10 +44,11 @@ export function toStructuredMarkdownList(text: string): string {
       continue;
     }
     if (trimmed.endsWith("：")) {
-      output.push(`**${stripTrailingColon(trimmed)}**`);
+      output.push(`### ${stripTrailingColon(trimmed)}`);
       continue;
     }
-    output.push(`- ${trimmed}`);
+    // Field/value rows are lists; explanatory prose is not another field.
+    output.push(/^[^：\n]{1,64}：\s*\S/u.test(trimmed) ? `- ${trimmed}` : trimmed);
   }
   return output.join("\n");
 }

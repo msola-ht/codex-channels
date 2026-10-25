@@ -122,7 +122,7 @@ export class QqCommandMenuController {
     const context = this.context(target, actorId);
     if (!input) return this.panel(context, renderQqCommandMenu());
     if (input === "schedule-create") return this.panel(context, {
-      content: "**新增计划任务**\n\n**周期与填写参数**\n\n1. 每隔：间隔、时区、任务\n2. 一次性：日期、时间、时区、任务\n3. 每月：日、时间、时区、任务\n4. 每天：时间、时区、任务\n5. 工作日：时间、时区、任务\n6. 每周：星期、时间、时区、任务\n\n**格式说明**\n\n- 时间：HH:mm；日期：YYYY-MM-DD\n- 间隔：如 30m；星期：如 MO,FR\n- 时区：明确填写，如 Asia/Shanghai\n\n点击类型后补齐参数并发送。创建前会展示工作区、提供商、模型等执行上下文预览，确认后才创建。",
+      content: "## 新增计划任务\n\n### 周期与填写参数\n\n1. 每隔：间隔、时区、任务\n2. 一次性：日期、时间、时区、任务\n3. 每月：日、时间、时区、任务\n4. 每天：时间、时区、任务\n5. 工作日：时间、时区、任务\n6. 每周：星期、时间、时区、任务\n\n### 格式说明\n\n- 时间：HH:mm；日期：YYYY-MM-DD\n- 间隔：如 30m；星期：如 MO,FR\n- 时区：明确填写，如 Asia/Shanghai\n\n点击类型后补齐参数并发送。创建前会展示工作区、提供商、模型等执行上下文预览，确认后才创建。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("interval", "每隔一段时间", "/schedule add interval ", false), qqMenuButton("once", "一次性", "/schedule add once ", false)] },
         { buttons: [qqMenuButton("monthly", "每月指定日", "/schedule add monthly ", false), qqMenuButton("daily", "每天", "/schedule add daily ", false)] },
@@ -132,7 +132,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "account") return this.panel(context, {
-      content: "**账户工具**\n\n**查询与管理**\n\n- 账户额度与重置券\n- 当前渠道身份\n\n点击下方操作；机器人接入与群授权请在本机 Setup 管理。",
+      content: "## 账户工具\n\n### 查询与管理\n\n- 账户额度与重置券\n- 当前渠道身份\n\n点击下方操作；机器人接入与群授权请在本机 Setup 管理。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("limits", "账户额度", "/limits"), qqMenuButton("credits", "查看重置券", "/limits reset")] },
         { buttons: [qqMenuButton("whoami", "我的身份", "/whoami")] },
@@ -140,7 +140,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "extensions") return this.panel(context, {
-      content: "**能力与集成**\n\n**任务能力**\n\n- 子代理、Skills、Plugin：选择后填写任务\n\n**集成管理**\n\n- MCP：目录、健康、认证与重载\n- Hooks：查看配置并按预览确认\n\n点击下方入口继续。",
+      content: "## 能力与集成\n\n### 任务能力\n\n- 子代理、Skills、Plugin：选择后填写任务\n\n### 集成管理\n\n- MCP：目录、健康、认证与重载\n- Hooks：查看配置并按预览确认\n\n点击下方入口继续。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("agents", "子代理", "/agents"), qqMenuButton("skill", "Skills", "/skill"), qqMenuButton("plugin", "Plugin", "/plugin")] },
         { buttons: [qqMenuButton("mcp", "MCP 列表", "/mcp"), qqMenuButton("mcphealth", "MCP 健康", "/mcp health"), qqMenuButton("pluginhealth", "插件健康", "/plugin health")] },
@@ -149,7 +149,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "tasks") return this.panel(context, {
-      content: "**任务工具**\n\n**任务操作**\n\n- Diff：查看当前改动\n- Review：选择审查目标\n- 原生队列：管理排队输入\n- 计划任务：查看与管理定时任务\n\n点击下方操作；计划需求需填写后发送。",
+      content: "## 任务工具\n\n### 任务操作\n\n- Diff：查看当前改动\n- Review：选择审查目标\n- 原生队列：管理排队输入\n- 计划任务：查看与管理定时任务\n\n点击下方操作；计划需求需填写后发送。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("diff", "Diff", "/diff"), qqMenuButton("review", "Review", "/help review")] },
         { buttons: [qqMenuButton("queue", "原生队列", "/help queue"), qqMenuButton("schedule", "计划任务", "/schedule")] },
@@ -158,7 +158,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "review") return this.panel(context, {
-      content: "**Review**\n\n**审查目标**\n\n1. 当前未提交改动\n2. 指定分支差异\n3. 指定提交\n4. 自定义审查要求\n\n当前改动可直接执行；其他目标需填写后发送。",
+      content: "## Review\n\n### 审查目标\n\n1. 当前未提交改动\n2. 指定分支差异\n3. 指定提交\n4. 自定义审查要求\n\n当前改动可直接执行；其他目标需填写后发送。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("review", "审查当前改动", "/review"), qqMenuButton("reviewbranch", "审查分支差异", "/review branch ", false)] },
         { buttons: [qqMenuButton("reviewcommit", "审查指定提交", "/review commit ", false), qqMenuButton("reviewcustom", "填写审查要求", "/review custom ", false)] },
@@ -166,7 +166,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "settings") return this.panel(context, {
-      content: "**偏好设置**\n\n**当前会话设置**\n\n- Goal：查询或清除目标\n- Plan：调整协作模式\n- 会话审批方式：调整当前会话审批\n- 权限：只读查询\n\n点击下方选项继续。",
+      content: "## 偏好设置\n\n### 当前会话设置\n\n- Goal：查询或清除目标\n- Plan：调整协作模式\n- 会话审批方式：调整当前会话审批\n- 权限：只读查询\n\n点击下方选项继续。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("goal", "Goal", "/goal"), qqMenuButton("plan", "Plan 模式", "/plan")] },
         { buttons: [qqMenuButton("autoreview", "会话审批方式", "/autoreview"), qqMenuButton("permissions", "权限查询", "/permissions")] },
@@ -174,7 +174,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "manage") return this.panel(context, {
-      content: "**会话操作**\n\n**当前会话**\n\n- 归档、分叉、重命名\n- 固定、取消固定、释放占用\n- 历史回退、压缩上下文\n\n归档会退出当前会话；恢复入口位于“已归档会话”。",
+      content: "## 会话操作\n\n### 当前会话\n\n- 归档、分叉、重命名\n- 固定、取消固定、释放占用\n- 历史回退、压缩上下文\n\n归档会退出当前会话；恢复入口位于“已归档会话”。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("archive", "归档当前", "/archive"), qqMenuButton("archived", "已归档会话", "/help archived 1")] },
         { buttons: [qqMenuButton("fork", "分叉会话", "/fork"), qqMenuButton("rename", "重命名", "/rename ", false)] },
@@ -330,7 +330,7 @@ export class QqCommandMenuController {
         const result = await this.options.commands.execute(selection.target, "goal", "clear", selection.actorId, guard);
         guard();
         if (result.kind !== "outcome" || result.outcome.type !== "goal.cleared") throw unsupported();
-        return this.panel(selection, { content: "**已清除当前会话目标**\n清除目标不等于中断正在运行的任务；如需停止，请使用 /stop。",
+        return this.panel(selection, { content: "已清除当前会话目标。\n清除目标不等于中断正在运行的任务；如需停止，请使用 /stop。",
           keyboard: { content: { rows: [{ buttons: [qqMenuButton("goal", "查询目标", "/goal"), homeButton()] }] } } });
       }
     }
@@ -461,7 +461,7 @@ export class QqCommandMenuController {
     ];
     const rows = buttonRows(buttons);
     rows.push({ buttons: navigation }, { buttons: [qqMenuButton("queueadd", "新增排队文本", "/queue add ", false), homeButton()] });
-    const content = ["**App Server Queue**\n", `第 ${page} 屏 · 共 ${shared.totalItemCount} 条 · 每屏最多九项\n`, "**排队条目**\n",
+    const content = ["## App Server Queue\n", `第 ${page} 屏 · 共 ${shared.totalItemCount} 条 · 每屏最多九项\n`, "### 排队条目\n",
       ...entries.map((item, index) => `${(shared.page - 1) * 25 + local * 9 + index + 1}. ${markdown(item.textPreview ?? formatThreadQueueInputTypeLabel(item.inputType), 130)}`),
       ...entries.length ? [] : ["队列为空。"],
       "\n点击条目查看完整安全摘要，再选择操作。",
@@ -673,7 +673,7 @@ export class QqCommandMenuController {
     const current = { ...context, expiresAt: Math.min(context.expiresAt, performance.now() + 300_000) };
     const confirm = this.button(current, "确认回退历史", { kind: "revert-confirm", token: result.preview.token });
     const selection = this.selections.get(confirm.id)!;
-    const panel = this.panel(current, { content: "**确认历史回退**\n请核对上方完整预览。仅回退历史，不恢复文件或外部副作用。",
+    const panel = this.panel(current, { content: "## 确认历史回退\n请核对上方完整预览。仅回退历史，不恢复文件或外部副作用。",
       keyboard: { content: { rows: [{ buttons: [confirm, qqMenuButton("refresh", "重新查看历史", "/revert list"), homeButton()] }] } } });
     const detail = renderConversationCommandResult(result)!;
     const markdownDetail = qqLiteralMarkdown(detail);
@@ -699,7 +699,7 @@ export class QqCommandMenuController {
     const lines = entries.map((workspace, index) =>
       `${(page - 1) * 9 + index + 1}. **${markdown(workspace.name, 100)}**${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}\n   - ID：${markdown(workspace.id, 100)}\n   - 工作目录：${markdown(workspace.cwd, 260)}`);
     const currentWorkspace = result.workspaces.find(workspace => workspace.id === result.currentWorkspaceId);
-    lines.unshift(`**当前工作区：${markdown(currentWorkspace?.name ?? result.currentWorkspaceId, 100)}**\n\n- ID：${markdown(result.currentWorkspaceId, 100)}\n${currentWorkspace ? `- 工作目录：${markdown(currentWorkspace.cwd, 260)}` : "- 原选择已失效，请重新选择。"}\n\n**工作区列表**\n`);
+    lines.unshift(`**当前工作区：${markdown(currentWorkspace?.name ?? result.currentWorkspaceId, 100)}**\n\n- ID：${markdown(result.currentWorkspaceId, 100)}\n${currentWorkspace ? `- 工作目录：${markdown(currentWorkspace.cwd, 260)}` : "- 原选择已失效，请重新选择。"}\n\n### 工作区列表\n`);
     lines.push("\n点击下方工作区切换；切换后请重新发起操作，不会自动重试之前的请求。");
     return this.listPanel(context, "选择工作区", lines, buttons, page, Math.ceil(result.workspaces.length / 9),
       next => ({ kind: "workspace-page", page: next }));
@@ -751,7 +751,7 @@ export class QqCommandMenuController {
         extra.push(this.button(context, "选择速度", { kind: "model-page", page: 1, view: "fast", snapshot }));
       }
       return this.listPanel(context, view === "effort" ? `选择${reasoningEffortSettingName(state.effort, selected)}` : "选择速度",
-        [current, `**${view === "effort" ? reasoningEffortSettingName(state.effort, selected) : "速度"}选项**\n`, ...entries.map((choice, index) => `${(page - 1) * layout.pageSize + index + 1}. ${markdown(choice.label, 100)}`),
+        [current, `### ${view === "effort" ? reasoningEffortSettingName(state.effort, selected) : "速度"}选项\n`, ...entries.map((choice, index) => `${(page - 1) * layout.pageSize + index + 1}. ${markdown(choice.label, 100)}`),
           view === "fast" ? `\n- 当前模型：${formatModelSpeedSupport(selected)}\n\n点击下方速度选项，影响下一轮；主 Provider 同时更新 Codex 用户级默认速度。` : "\n点击下方选项调整思考设置。"],
         buttons, page, Math.ceil(choices.length / layout.pageSize), next => ({ kind: "model-page", page: next, view, snapshot }), extra, layout.columns);
     }
@@ -762,7 +762,7 @@ export class QqCommandMenuController {
       const buttons = entries.map(provider => this.button(context, formatCodexProviderLabel(provider), {
         kind: "model", selection: { kind: "browse-provider", provider, snapshot },
       }, QQ_BUTTON_LABEL_CHARACTERS));
-      const lines = [current, "**提供商列表**\n", ...entries.map((provider, index) =>
+      const lines = [current, "### 提供商列表\n", ...entries.map((provider, index) =>
         `${(page - 1) * layout.pageSize + index + 1}. ${markdown(formatCodexProviderLabel(provider), 100)}${provider === (state.modelProvider ?? "openai") ? " ← 当前" : ""} · ${markdown(formatProviderModelSummary(state.models, provider), 180)}`), "\n点击下方提供商，继续选择模型。"];
       return this.listPanel(context, "选择提供商", lines, buttons, page, Math.ceil(providers.length / layout.pageSize),
         next => ({ kind: "model-page", page: next, view, snapshot }), [], layout.columns);
@@ -795,7 +795,7 @@ export class QqCommandMenuController {
     if (page > pages) throw unsupported();
     const background = new Set(result.backgroundThreadIds ?? []);
     const title = result.archived ? "已归档会话" : "历史会话";
-    const heading = `**${title}**\n\n共 ${result.matchedSessionCount} 条 · 第 ${page} / ${pages} 页`;
+    const heading = `## ${title}\n\n共 ${result.matchedSessionCount} 条 · 第 ${page} / ${pages} 页`;
     const hint = "点击下方对应会话恢复；省略号表示标题或字段已截断。";
     const entries = result.sessions.map((session, index) => ({
       session,
@@ -856,8 +856,8 @@ export class QqCommandMenuController {
     const scopeLabels: Record<string, string> = { global: "全局", providers: "提供商", models: "模型", errors: "错误" };
     const scopeLabel = scopeLabels[scope ?? ""];
     const content = scope === undefined
-      ? "**请求统计**\n\n**统计范围**\n\n1. 当前会话\n2. 全局\n3. 提供商\n4. 模型\n5. 错误\n\n点击下方范围；聚合统计继续选择时段。"
-      : `**请求统计**\n\n**当前范围：${scopeLabel}**\n\n**统计时段**\n\n1. 24 小时\n2. 7 天\n3. 30 天\n4. 90 天\n5. 全部\n\n点击下方时段查看统计。`;
+      ? "## 请求统计\n\n### 统计范围\n\n1. 当前会话\n2. 全局\n3. 提供商\n4. 模型\n5. 错误\n\n点击下方范围；聚合统计继续选择时段。"
+      : `## 请求统计\n\n**当前范围：${scopeLabel}**\n\n### 统计时段\n\n1. 24 小时\n2. 7 天\n3. 30 天\n4. 90 天\n5. 全部\n\n点击下方时段查看统计。`;
     return this.panel(context, { content, keyboard: { content: { rows } } });
   }
 
@@ -870,7 +870,7 @@ export class QqCommandMenuController {
     if (page < pageCount) footer.push(this.button(context, "下一页", navigate(page + 1)));
     footer.push(homeButton());
     rows.push({ buttons: footer });
-    const content = [`**${title}**\n`, ...(pageCount > 1 ? [`第 ${page} / ${pageCount} 页\n`] : []), ...lines.length ? lines : ["暂无可选项"]].join("\n");
+    const content = [`## ${title}\n`, ...(pageCount > 1 ? [`第 ${page} / ${pageCount} 页\n`] : []), ...lines.length ? lines : ["暂无可选项"]].join("\n");
     if (Buffer.byteLength(content, "utf8") > QQ_MENU_PART_BYTES || rows.length > 5) throw unsupported();
     return this.panel(context, { content, keyboard: { content: { rows } } });
   }

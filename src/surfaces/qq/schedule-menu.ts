@@ -197,7 +197,7 @@ export class QqScheduleMenu {
       for (const run of visibleRetries) buttons.push(this.command(context, `重试 ${run.selector}`, `retry ${run.runId}`));
       buttons.push(...navigation);
       // The remaining uncertain Run IDs remain available in the full literal details.
-      const detail = ["**当前计划任务**", "", `- 名称：${task.name}`, `- ID：${task.taskId}`,
+      const detail = ["## 当前计划任务", "", `- 名称：${task.name}`, `- ID：${task.taskId}`,
         `- 状态：${formatScheduledTaskStatusLabel(task.status)}`, `- 计划：${formatSchedule(task.schedule, task.timezone)}`,
         `- 下次运行：${formatScheduledAt(task.nextRunAt)}`, `- 任务预览：${task.promptPreview}`, "",
         formatConversationScheduledRuns(result, "snapshot", "buttons")].join("\n");

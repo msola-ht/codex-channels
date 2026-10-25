@@ -121,9 +121,15 @@ export function formatTelegramPanelHtml(
       firstContentLine = false;
       continue;
     }
+    const emphasis = /^\*\*([^\n]+)\*\*$/u.exec(line);
+    if (emphasis) {
+      output.push(`<b>${escapeTelegramHtml(emphasis[1]!)}</b>`);
+      firstContentLine = false;
+      continue;
+    }
     if (firstContentLine) {
       firstContentLine = false;
-      if (emphasizeFirstLine) {
+      if (emphasizeFirstLine && lines.filter(value => value.trim()).length > 1) {
         output.push(`<b>${escaped}</b>`);
         continue;
       }

@@ -787,5 +787,5 @@ function sessionNavigationChoices(
 }
 
 function stripMarkdownHeading(value: string): string {
-  return value.replace(/^\*\*[^\n]+\*\*\n?/u, "");
+  return value.replace(/^## [^\n]+\n?/u, "");
 }
