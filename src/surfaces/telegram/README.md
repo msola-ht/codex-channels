@@ -41,7 +41,7 @@ Outbox 的完成通知消费目标 `completion` 设置；成功隐藏时沿原�
   同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
   版本字符串和当前 Workspace Git 分支，不读取生成协议。仅对 `startupRecipients` 调用
-  `startupPresentationDetail(chatId)` 选择启动环境明细，缺省 `basic`；组合根按已确认的启动私聊目标解析，不复用实时未知聊天的保守展示回调。
+  `startupPresentationDetail(chatId)` 选择启动环境明细，缺省 `basic`；`startupDisplayPreset(chatId)` 提供按有效设置识别的预设，紧凑预设增加当前会话摘要。组合根按已确认的启动私聊目标解析，不复用实时未知聊天的保守展示回调。
   空闲解除通知在能确定唯一授权 Actor 时附带“恢复此会话”按钮，仍保留 `/r` 命令；随机一次性
   令牌绑定接收者、聊天、通知消息和 Thread，10 分钟有效，最多保留 100 项，关闭时清空。
   点击复用 Application 的恢复命令与工作区检查；过期或重启后的按钮提示使用原通知中的命令。

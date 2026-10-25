@@ -136,6 +136,7 @@ export interface TelegramSurfaceOptions {
   officialOpenAiAuthenticated?: () => boolean | undefined;
   openAiConnectivity?: () => NonNullable<StartupRuntimeInfo["openAiConnectivity"]>;
   startupPresentationDetail?: (chatId: number) => "basic" | "detailed";
+  startupDisplayPreset?: (chatId: number) => NonNullable<StartupRuntimeInfo["displayPreset"]>;
   startupRoutineNotificationsEnabled?: (chatId: number) => boolean;
   inputQuietWindowMs?: number;
   now?: () => number;
@@ -361,6 +362,7 @@ export class TelegramSurface {
                   ? { openAiConnectivity: options.openAiConnectivity() }
                   : {}),
                 presentationDetail: options.startupPresentationDetail?.(chatId) ?? "basic",
+                ...(options.startupDisplayPreset ? { displayPreset: options.startupDisplayPreset(chatId) } : {}),
               }),
             });
           }

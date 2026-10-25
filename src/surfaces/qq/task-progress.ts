@@ -380,6 +380,7 @@ function escapePlan(event: Extract<OutputEvent, { type: "plan.updated" }>): Extr
 function presentLifecycle(presentation: LifecyclePresentation): Presentation {
   const safe: LifecyclePresentation = {
     ...presentation, title: escapeLifecycleLiteral(presentation.title),
+    ...(presentation.titleDetail === undefined ? {} : { titleDetail: escapeLifecycleLiteral(presentation.titleDetail) }),
     fields: [...presentation.fields, ...(presentation.footer ? [presentation.footer] : [])].map(escapeLifecycleField),
     ...(presentation.sections ? { sections: presentation.sections.map(section => ({
       title: escapeLifecycleLiteral(section.title), fields: section.fields.map(escapeLifecycleField),

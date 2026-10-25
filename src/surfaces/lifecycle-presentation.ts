@@ -19,7 +19,7 @@ import {
   formatRemainingRateLimitWindow,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
-import { isAutoApprovalReviewer } from "./conversation-workspace-status-command-format.js";
+import { isAutoApprovalReviewer, formatThreadApprovalsReviewer } from "./conversation-workspace-status-command-format.js";
 import {
   formatElapsedDuration,
 } from "./elapsed-duration.js";
@@ -43,6 +43,8 @@ import gatewayMetadata from "../version.json" with { type: "json" };
 
 export interface LifecyclePresentation {
   title: string;
+  titleStyle?: "emphasis";
+  titleDetail?: string;
   fields: readonly LifecyclePresentationField[];
   sections?: readonly LifecyclePresentationSection[];
   footer?: { label: string; value: string };
@@ -153,6 +155,7 @@ export interface StartupRuntimeInfo {
   transport: string;
   codexUpstreamUserAgent: string | null;
   presentationDetail?: "basic" | "detailed";
+  displayPreset?: "concise" | "standard" | "detailed" | "custom";
   /** 官方主路由是否已有 Codex 鉴权；`undefined` 表示当前未使用官方主路由。 */
   officialOpenAiAuthenticated?: boolean;
   openAiConnectivity?:
@@ -200,9 +203,20 @@ export function createStartupPresentation(
   if (runtime.presentationDetail !== "detailed") {
     return {
       title: "Codex Connect 已上线",
+      titleStyle: "emphasis",
       fields: [
         { label: "App Server", value: "已连接" },
         { label: "版本", value: `Codex Connect ${gatewayMetadata.version} · Codex ${runtime.gatewayVersion}` },
+        ...(runtime.displayPreset === "standard" ? [
+          { label: "工作区", value: workspace.name, literal: true },
+          { label: "会话", value: status.threadId ? status.threadName ?? "未命名" : "当前未绑定会话", literal: true },
+          ...(status.threadId && !status.sessionRestoring ? [
+            { label: "模型", value: `${status.model}${pendingSuffix(status.modelPending)} · ${formatCodexProviderLabel(status.modelProvider)}`, literal: true },
+            { label: "思考", value: `${formatReasoningEffort(status.effort)}${pendingSuffix(status.effortPending)} · 速度：${formatServiceTierSetting(status)}`, literal: true },
+            { label: "审批", value: formatThreadApprovalsReviewer(status.approvalsReviewer) },
+          ] : status.sessionRestoring ? [{ label: "会话状态", value: "尚未恢复" }] : []),
+          { label: "显示", value: "紧凑模式" },
+        ].map(field => ({ ...field, value: field.value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ") })) : []),
         ...openAiConnectivityFields(runtime.openAiConnectivity),
         ...(runtime.officialOpenAiAuthenticated === false
           ? [{ label: "OpenAI 官方", value: "未登录；请运行 codex login，或发送 /model 选择第三方提供商" }]
@@ -392,7 +406,8 @@ export function createSubagentStartedPresentation(
   detailed = true,
 ): LifecyclePresentation {
   return {
-    title: `子代理开始 · ${subagentTaskName(event.agentPath)}`,
+    title: detailed ? `子代理开始 · ${subagentTaskName(event.agentPath)}` : "子代理开始",
+    ...(!detailed ? { titleDetail: subagentTaskName(event.agentPath) } : {}),
     fields: detailed ? [
       { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
       { label: "模型设置", value: event.model || "未提供" },
@@ -406,7 +421,8 @@ export function createSubagentContactedPresentation(
   detailed = true,
 ): LifecyclePresentation {
   return {
-    title: `子代理继续 · ${subagentTaskName(event.agentPath)}`,
+    title: detailed ? `子代理继续 · ${subagentTaskName(event.agentPath)}` : "子代理继续",
+    ...(!detailed ? { titleDetail: subagentTaskName(event.agentPath) } : {}),
     fields: detailed ? [
       { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
       { label: "模型设置", value: event.model || "未提供" },
@@ -420,7 +436,7 @@ export function createSubagentCompletedPresentation(
   detailed = false,
 ): LifecyclePresentation {
   if (!detailed) {
-    return { title: `${subagentStatusLabel(event.status)} · ${subagentTaskName(event.agentPath)}`, fields: [] };
+    return { title: subagentStatusLabel(event.status), titleDetail: subagentTaskName(event.agentPath), fields: [] };
   }
   const fields: LifecyclePresentationField[] = [];
   if (event.model) {
@@ -566,6 +582,7 @@ export function createTurnCompletedPresentation(
   if (mode === "brief" || !detailed) {
     return {
       title: `${event.background ? "后台任务" : "本次运行"} · ${turnStatusLabel(event.status)}`,
+      titleStyle: "emphasis",
       fields: [
         { label: "上下文", value: usage && (capacity == null || capacity <= 0)
           ? `${contextUsage}（窗口上限未知）` : contextUsage },
@@ -944,7 +961,7 @@ export function renderPlainLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
   return [
-    presentation.title,
+    presentation.titleDetail === undefined ? presentation.title : `${presentation.title} · ${presentation.titleDetail}`,
     ...(presentation.fields.length > 0
       ? ["", ...presentation.fields.map(formatField)]
       : []),
@@ -984,7 +1001,8 @@ export function renderStructuredLifecyclePresentation(
   escapeLiterals = true,
 ): string {
   return toStructuredMarkdownList([
-    presentation.title,
+    presentation.titleDetail === undefined ? (presentation.titleStyle === "emphasis" ? `**${presentation.title}**` : presentation.title)
+      : `**${presentation.title}** · ${escapeLiterals ? escapeLifecycleLiteral(presentation.titleDetail) : presentation.titleDetail}`,
     ...(presentation.fields.length > 0
       ? ["", ...presentation.fields.map((field) => formatStructuredField(field, escapeLiterals))]
       : []),

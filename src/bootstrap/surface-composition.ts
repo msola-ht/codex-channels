@@ -6,6 +6,8 @@ import type { Logger } from "pino";
 
 import {
   resolveMessageDisplaySettings,
+  identifyMessageDisplayPreset,
+  supportedMessageDisplayFields,
   type GatewayConfig,
 } from "../config/index.js";
 import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
@@ -162,6 +164,7 @@ function createQqModule(
         return renderQqStartupNotification(options.config.workspaces, status, {
           platform: process.platform, architecture: process.arch,
           presentationDetail: displaySettings(target).presentationDetail,
+          displayPreset: identifyMessageDisplayPreset(displaySettings(target), supportedMessageDisplayFields({ surface: "qq", chat_kind: typeof qqConversationRecipient(target.conversationId) === "string" ? "direct" : "group" })),
           gatewayVersion: options.gatewayVersion, nodeVersion: process.version,
           transport: "Unix WebSocket", codexUpstreamUserAgent: options.codexUpstreamUserAgent() ?? null,
           ...(options.config.codexTimezone === undefined ? {} : { appServerTimezone: options.config.codexTimezone }),
@@ -271,6 +274,9 @@ function createWeixinModule(
             presentationDetail: resolveMessageDisplaySettings(options.config.messageDisplay, {
               surface: "weixin", accountId: config.accountId, chatKind: "direct", chatId: target.conversationId,
             }).presentationDetail,
+            displayPreset: identifyMessageDisplayPreset(resolveMessageDisplaySettings(options.config.messageDisplay, {
+              surface: "weixin", accountId: config.accountId, chatKind: "direct", chatId: target.conversationId,
+            }), supportedMessageDisplayFields({ surface: "weixin" })),
           },
         );
       },
@@ -392,6 +398,9 @@ function createFeishuModule(
                 presentationDetail: resolveMessageDisplaySettings(options.config.messageDisplay, {
                   surface: "feishu", accountId: config.appId, chatKind: "direct", chatId,
                 }).presentationDetail,
+                displayPreset: identifyMessageDisplayPreset(resolveMessageDisplaySettings(options.config.messageDisplay, {
+                  surface: "feishu", accountId: config.appId, chatKind: "direct", chatId,
+                })),
               },
             ),
           });
@@ -472,6 +481,9 @@ function createTelegramModule(
     startupPresentationDetail: chatId => resolveMessageDisplaySettings(config.messageDisplay, {
       surface: "telegram", accountId: telegramDefaultAccountId, chatKind: "direct", chatId: String(chatId),
     }).presentationDetail,
+    startupDisplayPreset: chatId => identifyMessageDisplayPreset(resolveMessageDisplaySettings(config.messageDisplay, {
+      surface: "telegram", accountId: telegramDefaultAccountId, chatKind: "direct", chatId: String(chatId),
+    })),
     startupRoutineNotificationsEnabled: chatId => resolveMessageDisplaySettings(config.messageDisplay, {
       surface: "telegram", accountId: telegramDefaultAccountId, chatKind: "direct", chatId: String(chatId),
     }).routineNotificationsEnabled,
