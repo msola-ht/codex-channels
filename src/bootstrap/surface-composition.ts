@@ -162,7 +162,6 @@ function createQqModule(
         return renderQqStartupNotification(options.config.workspaces, status, {
           platform: process.platform, architecture: process.arch,
           presentationDetail: displaySettings(target).presentationDetail,
-          routineNotificationsEnabled: displaySettings(target).routineNotificationsEnabled,
           gatewayVersion: options.gatewayVersion, nodeVersion: process.version,
           transport: "Unix WebSocket", codexUpstreamUserAgent: options.codexUpstreamUserAgent() ?? null,
           ...(options.config.codexTimezone === undefined ? {} : { appServerTimezone: options.config.codexTimezone }),
@@ -272,9 +271,6 @@ function createWeixinModule(
             presentationDetail: resolveMessageDisplaySettings(options.config.messageDisplay, {
               surface: "weixin", accountId: config.accountId, chatKind: "direct", chatId: target.conversationId,
             }).presentationDetail,
-            routineNotificationsEnabled: resolveMessageDisplaySettings(options.config.messageDisplay, {
-              surface: "weixin", accountId: config.accountId, chatKind: "direct", chatId: target.conversationId,
-            }).routineNotificationsEnabled,
           },
         );
       },
@@ -396,9 +392,6 @@ function createFeishuModule(
                 presentationDetail: resolveMessageDisplaySettings(options.config.messageDisplay, {
                   surface: "feishu", accountId: config.appId, chatKind: "direct", chatId,
                 }).presentationDetail,
-                routineNotificationsEnabled: resolveMessageDisplaySettings(options.config.messageDisplay, {
-                  surface: "feishu", accountId: config.appId, chatKind: "direct", chatId,
-                }).routineNotificationsEnabled,
               },
             ),
           });

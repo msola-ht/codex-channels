@@ -532,6 +532,13 @@ export abstract class GatewayComponentGraph {
         { event: "auto_review.notification_unroutable", threadId, turnId, reason },
         "自动审查通知未向渠道发送"),
     });
+    // Core also confirms starts from RPC responses and authoritative resume
+    // snapshots. Reconnect does not replay turn.started for an existing Turn.
+    this.output.observe((event) => {
+      if (event.type === "turn.started") {
+        this.autoApprovalReviewNotifications.observeParentRun(event.threadId, event.turnId);
+      }
+    });
     const metricsWriter = new BufferedModelRequestMetricsWriter(
       { recordBatch: samples => metricsStore.recordBatch(samples), close: async () => {
         try { await this.metricsDatabase.drain(); }
@@ -1249,7 +1256,12 @@ export abstract class GatewayComponentGraph {
     for (const surface of this.surfaces) {
       this.interactions.register(surface.surface, surface.accountId, surface.capabilities?.interactions === false
         ? surface.interactions : new PersistentInteractionPort(surface.interactions,
-          (target, signal) => this.surfaceManager.waitForPersistentOutput(target, signal)));
+          (target, signal) => this.surfaceManager.waitForPersistentOutput(target, signal),
+          (request, reason) => logger.warn({
+            event: "interaction.delivery_incomplete", surface: surface.surface,
+            accountId: surface.accountId, requestId: request.requestId,
+            threadId: request.threadId, turnId: request.turnId, reason,
+          }, "交互请求投递未完成")));
       this.interactions.setAvailable(surface.surface, surface.accountId, false);
     }
     this.approval = new ApprovalCoordinator(

@@ -66,6 +66,9 @@ Workspace 与上游 Project 的职责、共享范围及重新评估条件见
   或权限申请 reason，不展示 stdin 正文或完整 network target URL；不采集 riskLevel 与 userAuthorization。
   未知或畸形摘要字段在 Client 边界省略。
   子代理通知仅沿已确认的精确父子 Turn 关系路由，不从工作区、最近会话或联系消息推断归属。
+  直接会话归属同时接收实时 Turn 开始及 Core 经启动响应、权威恢复快照确认的活动 Turn；
+  后到的确认可以补齐未知归属并重试未过期通知，不能替换已记录的所有者。
+  审查事件本身、普通消息和单纯绑定变化均不建立归属；断线仍清除对应 Provider 的归属，恢复后不重复发布同一审查结果；平台送达由下游投递链确认。
   方法没有实验标记，但其 payload 在锁定版标记 UNSTABLE，两个通知类型必须受控导出。
   不传播未经处理的上游文本；摘要仅含经凭据脱敏、控制字符清理及限长的纯文本，Surface 在平台呈现边界处理 Markdown 等富文本转义，
   不展示 stdin 正文或完整 network target URL。指标与 StateStore 不增加审查正文，现有加密投递箱只暂存安全摘要，

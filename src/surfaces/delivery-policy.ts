@@ -11,10 +11,7 @@ export function shouldHideRoutineNotification(event: OutputEvent, enabled: boole
   if (enabled) return false;
   switch (event.type) {
     case "turn.started":
-    case "conversation.idle.released":
-    case "connection.restored":
     case "thread.name": return true;
-    case "warning": return event.globalIdle === true;
     case "thread.availability": return event.availability === "available";
     case "hook.completed": return event.hook.status === "completed";
     case "autoApprovalReview.updated": return event.phase === "completed" && event.status === "approved";
@@ -68,13 +65,14 @@ const weixinWindowEventTypes: ReadonlySet<OutputEvent["type"]> = new Set<OutputE
   "autoApprovalReview.updated",
   "hook.completed",
   "conversation.idle.released",
+  "connection.restored",
   "warning",
   "text.completed",
 ]);
 
 /**
  * 微信单次回复窗口预算：只让生命周期、终态和全局空闲通知占用主动发送配额。
- * 压缩、Hook 完成与自动审批完成属于生命周期；推理、计划、其他操作、子代理、连接、账户、额度、MCP 状态和 CLI/TUI 输入镜像都不占用。
+ * 压缩、Hook 完成、自动审批完成与连接恢复属于生命周期；推理、计划、其他操作、子代理、连接中断、账户、额度、MCP 状态和 CLI/TUI 输入镜像都不占用。
  */
 export function isWeixinWindowEvent(event: OutputEvent): boolean {
   if (event.type === "operation.updated" && event.operation.kind === "contextCompaction") return true;

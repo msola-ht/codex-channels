@@ -584,7 +584,7 @@ export class TelegramOutbox {
           (signal) => this.sendPanel(
             chatId,
             renderTelegramLifecyclePresentation(
-              createSubagentStartedPresentation(event),
+              createSubagentStartedPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed"),
             ),
             undefined,
             true,
@@ -603,7 +603,7 @@ export class TelegramOutbox {
           (signal) => this.sendPanel(
             chatId,
             renderTelegramLifecyclePresentation(
-              createSubagentContactedPresentation(event),
+              createSubagentContactedPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed"),
             ),
             undefined,
             true,
@@ -619,7 +619,7 @@ export class TelegramOutbox {
         ).then(() => undefined), true);
         return;
       case "autoApprovalReview.updated": {
-        const presentation = createAutoApprovalReviewPresentation(event);
+        const presentation = createAutoApprovalReviewPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed");
         if (!presentation) return;
         this.enqueue(chatId, (signal) => this.sendPanel(
           chatId,

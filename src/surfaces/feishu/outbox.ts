@@ -450,6 +450,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       if (event.operation.status === "running") {
+        // Image progress is sent as a new message, not edited in place. Compact
+        // keeps only its terminal receipt; media delivery remains independent.
+        if (event.operation.kind === "imageGeneration"
+          && this.displaySettings(event.target.conversationId).operationUpdates === "compact") return;
         const operationKey = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
         if (this.pendingApprovalOperations.has(operationKey)) {
           this.heldApprovalOperations.set(operationKey, event.operation);

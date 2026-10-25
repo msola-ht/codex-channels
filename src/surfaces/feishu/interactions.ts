@@ -96,6 +96,7 @@ export class FeishuInteractionPort implements InteractionPort {
         ? !supportsFeishuApprovalRequest(request)
         : !supportsFeishuInputRequest(request)
     ) {
+      this.logger?.warn({ ...interactionLogMetadata(target, request), reason: "unsupported-preview" }, "飞书交互请求未发送");
       return safeInteractionDecision(request);
     }
     return this.requestInteraction(target, request);
@@ -223,6 +224,7 @@ export class FeishuInteractionPort implements InteractionPort {
       || !this.actorRegistry
       || !this.access
     ) {
+      this.logger?.warn({ ...interactionLogMetadata(target, request), reason: "interaction-unavailable" }, "飞书交互请求未发送");
       return safeInteractionDecision(request);
     }
     const authorizedActors = this.actorRegistry.actors(target).filter(
@@ -230,11 +232,13 @@ export class FeishuInteractionPort implements InteractionPort {
     );
     if (authorizedActors.length !== 1 || (request.type === "user-input"
       && request.expectedActorId !== undefined && request.expectedActorId !== authorizedActors[0])) {
+      this.logger?.warn({ ...interactionLogMetadata(target, request), reason: "actor-unattributed" }, "飞书交互请求未发送");
       return safeInteractionDecision(request);
     }
 
     const token = randomBytes(18).toString("base64url");
     if (!this.pending.reserve(request.requestId, token, () => this.delivery?.finishInteraction?.(request, safeInteractionDecision(request)))) {
+      this.logger?.warn({ ...interactionLogMetadata(target, request), reason: "pending-unavailable" }, "飞书交互请求未发送");
       return safeInteractionDecision(request);
     }
     const signal = this.pending.signal(token);

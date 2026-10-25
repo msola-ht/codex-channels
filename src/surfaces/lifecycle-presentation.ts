@@ -68,6 +68,7 @@ export function createHookCompletedPresentation(
 
 export function createAutoApprovalReviewPresentation(
   event: Extract<OutputEvent, { type: "autoApprovalReview.updated" }>,
+  detailed = true,
 ): LifecyclePresentation | null {
   if (isHiddenAutoApprovalReview(event)) return null;
   const status = {
@@ -88,6 +89,16 @@ export function createAutoApprovalReviewPresentation(
     mcpToolCall: "调用 MCP 工具",
     requestPermissions: "申请额外权限",
   } as const;
+  if (!detailed && event.status === "approved") {
+    return {
+      title: `自动审批 · ${status}`,
+      fields: [
+        ...(action ? [{ label: "审查内容", value: actionLabels[action.kind] }] : []),
+        ...(event.sourceThreadId !== event.threadId ? [{ label: "来源", value: "子代理" }] : []),
+        ...(event.background ? [{ label: "任务", value: `后台任务 · ${event.threadId.slice(0, 12)}` }] : []),
+      ],
+    };
+  }
   return {
     title: "自动审批完成",
     fields: [
@@ -142,7 +153,6 @@ export interface StartupRuntimeInfo {
   transport: string;
   codexUpstreamUserAgent: string | null;
   presentationDetail?: "basic" | "detailed";
-  routineNotificationsEnabled?: boolean;
   /** 官方主路由是否已有 Codex 鉴权；`undefined` 表示当前未使用官方主路由。 */
   officialOpenAiAuthenticated?: boolean;
   openAiConnectivity?:
@@ -154,13 +164,6 @@ export interface StartupRuntimeInfo {
     | "indeterminate"
     | "unreachable"
     | "not-applicable";
-}
-
-/** Preserve the original startup summary when it contains an actionable warning. */
-export function shouldShowStartupNotification(runtime: StartupRuntimeInfo): boolean {
-  return runtime.routineNotificationsEnabled !== false || runtime.officialOpenAiAuthenticated === false
-    || (runtime.openAiConnectivity !== undefined && runtime.openAiConnectivity !== "reachable"
-      && runtime.openAiConnectivity !== "not-applicable");
 }
 
 type StartupStatus = Pick<
@@ -193,6 +196,19 @@ export function createStartupPresentation(
   const workspace = workspaces.find(({ id }) => id === status.workspaceId);
   if (!workspace) {
     throw new Error(`当前 Workspace 不存在：${status.workspaceId}`);
+  }
+  if (runtime.presentationDetail !== "detailed") {
+    return {
+      title: "Codex Connect 已上线",
+      fields: [
+        { label: "App Server", value: "已连接" },
+        { label: "版本", value: `Codex Connect ${gatewayMetadata.version} · Codex ${runtime.gatewayVersion}` },
+        ...openAiConnectivityFields(runtime.openAiConnectivity),
+        ...(runtime.officialOpenAiAuthenticated === false
+          ? [{ label: "OpenAI 官方", value: "未登录；请运行 codex login，或发送 /model 选择第三方提供商" }]
+          : []),
+      ],
+    };
   }
   return {
     title: "Codex Connect 已上线",
@@ -373,27 +389,29 @@ export function formatTurnStartIdentityLabel(
 
 export function createSubagentStartedPresentation(
   event: Extract<OutputEvent, { type: "subagent.spawned" }>,
+  detailed = true,
 ): LifecyclePresentation {
   return {
     title: `子代理开始 · ${subagentTaskName(event.agentPath)}`,
-    fields: [
+    fields: detailed ? [
       { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
       { label: "模型设置", value: event.model || "未提供" },
       { label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort, "未提供") },
-    ],
+    ] : [],
   };
 }
 
 export function createSubagentContactedPresentation(
   event: Extract<OutputEvent, { type: "subagent.contacted" }>,
+  detailed = true,
 ): LifecyclePresentation {
   return {
     title: `子代理继续 · ${subagentTaskName(event.agentPath)}`,
-    fields: [
+    fields: detailed ? [
       { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
       { label: "模型设置", value: event.model || "未提供" },
       { label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort, "未提供") },
-    ],
+    ] : [],
   };
 }
 
@@ -401,6 +419,9 @@ export function createSubagentCompletedPresentation(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
   detailed = false,
 ): LifecyclePresentation {
+  if (!detailed) {
+    return { title: `${subagentStatusLabel(event.status)} · ${subagentTaskName(event.agentPath)}`, fields: [] };
+  }
   const fields: LifecyclePresentationField[] = [];
   if (event.model) {
     fields.push({ label: "模型", value: event.model });
@@ -535,10 +556,21 @@ export function createTurnCompletedPresentation(
   mode: "brief" | "detailed" = "detailed",
 ): LifecyclePresentation {
   const literal = (value: string): string => value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ");
-  if (mode === "brief") {
+  const usage = event.tokenUsage;
+  const capacity = usage?.modelContextWindow;
+  const contextUsage = usage
+    ? capacity == null || capacity <= 0
+      ? formatTokenCount(usage.last.totalTokens)
+      : `${formatTokenCount(usage.last.totalTokens)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, usage.last.totalTokens / capacity * 100))}）`
+    : "暂不可用";
+  if (mode === "brief" || !detailed) {
     return {
       title: `${event.background ? "后台任务" : "本次运行"} · ${turnStatusLabel(event.status)}`,
       fields: [
+        { label: "上下文", value: usage && (capacity == null || capacity <= 0)
+          ? `${contextUsage}（窗口上限未知）` : contextUsage },
+        ...(mode !== "brief" && event.durationMs !== undefined
+          ? [{ label: "耗时", value: formatElapsedDuration(event.durationMs) }] : []),
         ...(event.background ? [{ label: "任务", value: literal(event.threadId), literal: true }] : []),
         ...(event.error ? [{ label: "错误", value: literal(formatTurnErrorMessage(event.error, event.errorCode, event.modelProvider, event.model)), literal: true }] : []),
         ...(!event.error && event.errorCode ? [{ label: "错误码", value: event.errorCode, literal: true }] : []),
@@ -589,14 +621,10 @@ export function createTurnCompletedPresentation(
     });
   }
   if (event.tokenUsage) {
-    const current = event.tokenUsage.last.totalTokens;
-    const capacity = event.tokenUsage.modelContextWindow;
     sessionFields.push(
       {
         label: "上下文",
-        value: capacity === null || capacity <= 0
-          ? formatTokenCount(current)
-          : `${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
+        value: contextUsage,
         ...((event.contextCompactionCount ?? 0) > 0
           ? { subfields: [{ label: "压缩", value: `${event.contextCompactionCount} 次` }] }
           : {}),

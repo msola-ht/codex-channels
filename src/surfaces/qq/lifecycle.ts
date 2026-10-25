@@ -1,7 +1,7 @@
 import type { ConversationStatus } from "../../application/index.js";
 import type { OutputEvent } from "../../conversation-core/index.js";
 import {
-  createStartupPresentation, createTurnCompletedPresentation, shouldShowStartupNotification,
+  createStartupPresentation, createTurnCompletedPresentation,
   createHookCompletedPresentation, createAutoApprovalReviewPresentation,
   renderStructuredLifecyclePresentation, renderPlainLifecyclePresentation, type StartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
@@ -26,7 +26,7 @@ export function isQqLifecycleNotification(event: OutputEvent): event is QqLifecy
 export class QqLifecycleNotifications {
   private readonly compaction = new ContextCompactionNotices();
 
-  render(event: QqLifecycleNotification, retained = false): string | null {
+  render(event: QqLifecycleNotification, retained = false, detailed = true): string | null {
     switch (event.type) {
       case "conversation.idle.released": return formatConversationIdleReleased(event.minutes, event.threadId);
       case "warning": return formatCodexWarning(visibleUpstreamMessage(event.message));
@@ -40,7 +40,7 @@ export class QqLifecycleNotifications {
       case "mcp.oauth.completed": return formatRuntimeMcpOAuthCompleted(event);
       case "hook.completed": return renderStructuredLifecyclePresentation(createHookCompletedPresentation(event));
       case "autoApprovalReview.updated": {
-        const presentation = createAutoApprovalReviewPresentation(event);
+        const presentation = createAutoApprovalReviewPresentation(event, detailed);
         return presentation ? renderStructuredLifecyclePresentation(presentation) : null;
       }
       case "operation.updated": return this.compaction.accept(event, retained);
@@ -53,7 +53,6 @@ export function renderQqStartupNotification(
   status: ConversationStatus,
   runtime: StartupRuntimeInfo,
 ): string {
-  if (!shouldShowStartupNotification(runtime)) return "";
   return renderStructuredLifecyclePresentation(createStartupPresentation(workspaces, status, runtime));
 }
 

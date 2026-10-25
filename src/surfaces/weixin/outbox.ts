@@ -30,6 +30,7 @@ import {
   contentTruncatedText,
   emptyCodexResponseText,
   formatCodexWarning,
+  formatConnectionRestored,
   formatConversationIdleReleased,
   visibleUpstreamMessage,
 } from "../output-copy.js";
@@ -210,7 +211,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     if (DeliveryReceipt.current()?.transient !== false
       && shouldHideRoutineNotification(event, this.options.displaySettings?.(event.target).routineNotificationsEnabled ?? true)) return;
     // 渠道投递策略只在这里判定一次：微信的单次回复窗口只保留生命周期、终态与全局空闲
-    // 通知和上下文压缩，推理、计划、其他操作、连接等事件不占用该预算（详见 delivery-policy.ts）。
+    // 通知、连接恢复和上下文压缩，推理、计划、其他操作不占用该预算（详见 delivery-policy.ts）。
     const decision = resolveSurfaceDelivery("weixin", event);
     if (decision.disposition === "ignore") {
       return;
@@ -346,13 +347,15 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private render(event: OutputEvent, completion?: "brief" | "detailed"): string | null {
     switch (event.type) {
+      case "connection.restored":
+        return formatWeixinCommandText(formatConnectionRestored(visibleUpstreamMessage(event.message)));
       case "hook.completed":
         return formatWeixinCommandText(
           renderPlainLifecyclePresentation(createHookCompletedPresentation(event)),
           { structuredFields: true },
         );
       case "autoApprovalReview.updated": {
-        const presentation = createAutoApprovalReviewPresentation(event);
+        const presentation = createAutoApprovalReviewPresentation(event, this.options.displaySettings?.(event.target).presentationDetail === "detailed");
         return presentation ? formatWeixinCommandText(
           renderPlainLifecyclePresentation(presentation),
           { structuredFields: true },

@@ -54,14 +54,18 @@ export class AutoApprovalReviewNotifications {
     }
   }
 
-  /** Only turn.started may establish ownership; activity within an existing Turn cannot. */
+  /** A live start or Core's authoritative start/resume confirmation may establish ownership. */
   observeParentRun(threadId: string, turnId: string): void {
     this.observeRun(threadId, turnId, true);
+    this.retryPending();
   }
 
   private observeRun(threadId: string, turnId: string, captureCurrentBinding: boolean): void {
     const key = runKey(threadId, turnId);
-    if (this.origins.has(key)) return;
+    const previous = this.origins.get(key);
+    // Reviews may arrive before start/resume confirmation. They must not prevent
+    // that confirmation from filling an unknown owner, or replace a known owner.
+    if (previous?.owner || (previous && !captureCurrentBinding)) return;
     const owner = this.route({ threadId, turnId }, captureCurrentBinding);
     this.origins.set(key, { threadId, turnId, ...(owner ? { owner } : {}) });
     while (this.origins.size > maximumRelations) {
@@ -95,9 +99,7 @@ export class AutoApprovalReviewNotifications {
       this.parents.delete(oldest);
       if (dropped) this.options.unroutable(dropped.agentThreadId, dropped.agentTurnId, "capacity");
     }
-    for (const [pendingKey, entry] of this.pending) {
-      if (this.deliver(entry.review, pendingKey)) this.pending.delete(pendingKey);
-    }
+    this.retryPending();
   }
 
   reset(provider?: string): void {
@@ -138,8 +140,9 @@ export class AutoApprovalReviewNotifications {
           || this.options.providerForThread(owner.threadId) !== owner.provider) return undefined;
         return owner;
       }
-      // Only turn.started may capture a binding, never mid-Turn activity, a review or late attribution.
-      const target = captureCurrentBinding && !origin ? this.options.targetForThread(threadId) : undefined;
+      // Only an authoritative start/resume confirmation may fill an unknown owner.
+      // Reviews and late child attribution never capture the current binding.
+      const target = captureCurrentBinding ? this.options.targetForThread(threadId) : undefined;
       if (target) return { threadId, turnId, target: { ...target }, provider };
       if (!parent) return undefined;
       threadId = parent.parentThreadId;
@@ -173,6 +176,13 @@ export class AutoApprovalReviewNotifications {
       if (expiresAt > Date.now()) continue;
       this.pending.delete(key);
       this.options.unroutable(review.threadId, review.turnId, "expired");
+    }
+  }
+
+  private retryPending(): void {
+    this.prune();
+    for (const [key, entry] of this.pending) {
+      if (this.deliver(entry.review, key)) this.pending.delete(key);
     }
   }
 }

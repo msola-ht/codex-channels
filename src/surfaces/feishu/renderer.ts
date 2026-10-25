@@ -22,7 +22,6 @@ import {
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
-  shouldShowStartupNotification,
   createAutoApprovalReviewPresentation,
   createHookCompletedPresentation,
   createSubagentContactedPresentation,
@@ -109,7 +108,6 @@ export function renderFeishuStartupNotification(
   >,
   runtime: FeishuStartupRuntimeInfo,
 ): string {
-  if (!shouldShowStartupNotification(runtime)) return "";
   return renderFeishuLifecyclePresentation(
     createStartupPresentation(workspaces, status, runtime),
   );
@@ -167,7 +165,7 @@ export function renderFeishuOutput(
     case "hook.completed":
       return renderFeishuLifecyclePresentation(createHookCompletedPresentation(event));
     case "autoApprovalReview.updated": {
-      const presentation = createAutoApprovalReviewPresentation(event);
+      const presentation = createAutoApprovalReviewPresentation(event, detailed);
       return presentation ? renderFeishuLifecyclePresentation(presentation) : null;
     }
     case "turn.started":
@@ -199,11 +197,11 @@ export function renderFeishuOutput(
       return null;
     case "subagent.spawned":
       return renderFeishuLifecyclePresentation(
-        createSubagentStartedPresentation(event),
+        createSubagentStartedPresentation(event, detailed),
       );
     case "subagent.contacted":
       return renderFeishuLifecyclePresentation(
-        createSubagentContactedPresentation(event),
+        createSubagentContactedPresentation(event, detailed),
       );
     case "subagent.completed":
       return renderFeishuSubagentCompleted(event, detailed);

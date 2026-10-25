@@ -361,7 +361,7 @@ export class QqMessages implements SurfaceOutputPort {
   }
   private async deliverNotification(event: Parameters<QqLifecycleNotifications["render"]>[0], signal: AbortSignal,
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, retained = false): Promise<void> {
-    const content = this.notifications.render(event, retained);
+    const content = this.notifications.render(event, retained, this.displaySettings(event.target).presentationDetail === "detailed");
     if (content === null) return;
     const recipient = qqConversationRecipient(event.target.conversationId);
     await this.outbox.deliver({ mode: "active", recipient, content }, {

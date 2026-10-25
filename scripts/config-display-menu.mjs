@@ -20,7 +20,7 @@ export async function runDisplaySettings({
       message: "选择显示设置",
       showInstructions: false,
       options: [
-        { value: "preset", label: "应用显示预设", hint: "简洁 / 标准 / 详细，一次设置全局九项显示字段" },
+        { value: "preset", label: "应用显示预设", hint: "静默 / 紧凑 / 详细，一次设置全局九项显示字段" },
         { value: "scope", label: "范围显示覆盖", hint: "渠道、账号、聊天类型与已确认聊天；逐字段继承" },
         { value: "completion", label: "完成通知", hint: "关闭成功通知 / 精简 / 详细，缺省详细" },
         { value: "presentation_detail", label: "消息详情", hint: "基础 / 详细，独立于日志等级，缺省基础" },
@@ -138,7 +138,7 @@ function displayScopeSummary(scope) {
   ].filter(([field]) => scope.supportedFields.includes(field)).map(([field, effective, label]) => `${label}：本层${scope.override[field] === undefined ? scope.selector === null ? "使用缺省" : "继承上级" : values[String(scope.override[field])]}；有效${values[String(scope.effective[effective])]}；来源${sources[scope.sources[effective]]}`)].join("\n");
 }
 
-const presetLabels = { concise: "简洁", standard: "标准", detailed: "详细", custom: "自定义" };
+const presetLabels = { concise: "静默", standard: "紧凑", detailed: "详细", custom: "自定义" };
 
 async function runDisplayPresetSettings({ environment, output, prompts, writeConfig, settings = loadGatewaySettings(environment), scope }) {
   const target = scope ? [scope.selector.surface, scope.selector.account_id, scope.selector.chat_kind, scope.selector.chat_id].filter(Boolean).join(" / ") : "全局";
@@ -171,7 +171,7 @@ async function runDisplayPresetSettings({ environment, output, prompts, writeCon
 async function runPresentationDetailSettings({ environment, output, prompts, writeConfig }) {
   const settings = loadGatewaySettings(environment);
   const labels = { basic: "基础", detailed: "详细" };
-  output.write(`消息详情：本层${settings.display.presentationDetailOverride === null ? "缺省" : labels[settings.display.presentationDetailOverride]}；有效${labels[settings.display.presentationDetail]}；来源全局。\n详细展示启动运行环境与完成、子代理统计子项；不改变日志等级、调用采集、任务、审批或完成通知开关。\n`);
+  output.write(`消息详情：本层${settings.display.presentationDetailOverride === null ? "缺省" : labels[settings.display.presentationDetailOverride]}；有效${labels[settings.display.presentationDetail]}；来源全局。\n基础使用紧凑的上线、完成、子代理和自动审批通过摘要；详细保留运行环境与统计明细；不改变日志等级、调用采集、任务、审批或完成通知开关。\n`);
   const value = await prompts.select({ message: "选择全局消息详情", showInstructions: false, initialValue: settings.display.presentationDetailOverride ?? "inherit", options: [
     { value: "inherit", label: "恢复缺省（基础，不保存覆盖）" }, ...Object.entries(labels).map(([value, label]) => ({ value, label })), { value: "back", label: "返回上一级" },
   ] });

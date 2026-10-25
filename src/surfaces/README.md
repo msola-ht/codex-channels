@@ -8,15 +8,15 @@
 
 Telegram 既有空白 commentary 的明确省略特例保持不变；该设置不把旧增量替换为空白完成 Item 的权威正文，也不为它新增成功确认。
 
-常规通知由目标 `routineNotificationsEnabled` 控制，四渠道均支持，缺省开启。`delivery-policy.ts` 按结构化事件区分普通成功提示与需要关注的结果；状态观察、授权和原持久义务独立。启动仅隐藏正常摘要，鉴权/连接健康异常保留原摘要；配置只有 live 普通提示可隐藏，持久工作区回执仍需原交付确认。失败、重试、账户/额度、OAuth、审批及主动命令不由该开关屏蔽。
+常规通知由目标 `routineNotificationsEnabled` 控制，四渠道均支持，缺省开启。`delivery-policy.ts` 按结构化事件区分普通成功提示与需要关注的结果；状态观察、授权和原持久义务独立。Gateway 上线摘要、App Server 连接恢复、会话空闲释放和全局空闲释放不受常规通知开关控制；微信恢复提示沿原回复上下文和配额发送；配置只有 live 普通提示可隐藏，持久工作区回执仍需原交付确认。失败、重试、账户/额度、OAuth、审批及主动命令不由该开关屏蔽。
 
 [QQ](qq/README.md) 已接入文字任务、命令菜单、共享持久投递及审批/问题回应；图片、文本/普通文件、原生引用、音视频输入、原生 Queue、计划任务和当次配置通知已随 `9c0d3488` 部署，具体客户端证据与待验收范围见模块文档。部署就绪不代表所有分支验收完成，旧来源仍不恢复。
 
 本目录保存外部交互平台适配器。Surface 负责把平台输入转换为 Application 命令，并把 Core 输出和审批交互渲染为平台消息。
 
-`SurfaceMessageDisplaySettings` 是组合根注入的窄展示解析回调，以原始 `ConversationTarget` 选择工具、计划、思考、完成通知及呈现详情；Telegram、飞书 Outbox 和 QQ 消息准入、任务进度及异步渲染使用同一目标设置。微信消费完成通知和呈现详情，继续不开放这些过程输出。`presentationDetail` 只选择启动环境和完成、子代理统计明细，不决定消息准入或投递确认，也不读取日志等级；`basic` 保留统计总计，`detailed` 展开子项。独立装配未注入回调时保留各渠道原来的过程选项默认值，完成通知默认 `detailed`，呈现详情默认 `basic`。新实时事件按有效设置准入，已保留的终态只选择版式，不重新以 `hidden`/`compact` 过滤。
+`SurfaceMessageDisplaySettings` 是组合根注入的窄展示解析回调，以原始 `ConversationTarget` 选择工具、计划、思考、完成通知及呈现详情；Telegram、飞书 Outbox 和 QQ 消息准入、任务进度及异步渲染使用同一目标设置。微信消费完成通知和呈现详情，继续不开放这些过程输出。`presentationDetail` 只选择启动环境和完成、子代理统计明细，不决定消息准入或投递确认，也不读取日志等级；`basic` 使用紧凑摘要，`detailed` 保留既有统计与子项。独立装配未注入回调时保留各渠道原来的过程选项默认值，完成通知默认 `detailed`，呈现详情默认 `basic`。新实时事件按有效设置准入，已保留的终态只选择版式，不重新以 `hidden`/`compact` 过滤。
 
-完成通知 `brief` 仅呈现实际执行状态、后台身份和必要异常，不因呈现详情 `detailed` 展开统计；它不确认正文送达。`off` 只省略成功且无错误、错误码及权威缺正文标记的新完成通知。`liveCompletionDisplay` 在实时准入时固定模式；`shouldSettleLiveCompletion`、`settleLiveCompletion` 与 `discardLiveCompletion` 分离新事件的隐藏收尾、受原授权的瞬态操作和精确 Turn 的无发送清理。收尾复用原 Conversation 队列及瞬态回执，等待嵌套操作结算，不生成 Journal 记录或持久确认，也不受普通状态快照替换。持久 `deliver` 的可选完成上下文只由本次实时准入传递；恢复或未提供上下文时完成通知固定使用 `detailed`，统计明细按当前目标的呈现详情选择，不查询当前完成偏好而空确认，也不增加持久字段。流式正文失败的独立提示仍复核原授权。
+完成通知 `brief` 呈现实际执行状态、上下文占用、后台身份和必要异常，不因呈现详情 `detailed` 展开统计；它不确认正文送达。`off` 只省略成功且无错误、错误码及权威缺正文标记的新完成通知。`liveCompletionDisplay` 在实时准入时固定模式；`shouldSettleLiveCompletion`、`settleLiveCompletion` 与 `discardLiveCompletion` 分离新事件的隐藏收尾、受原授权的瞬态操作和精确 Turn 的无发送清理。收尾复用原 Conversation 队列及瞬态回执，等待嵌套操作结算，不生成 Journal 记录或持久确认，也不受普通状态快照替换。持久 `deliver` 的可选完成上下文只由本次实时准入传递；恢复或未提供上下文时完成通知固定使用 `detailed`，统计明细按当前目标的呈现详情选择，不查询当前完成偏好而空确认，也不增加持久字段。流式正文失败的独立提示仍复核原授权。
 
 `index.ts` 是 Gateway 装配各 Surface 的主公开入口；通过显式异步加载函数提供飞书、微信、Telegram 和 QQ 四个消息渠道，
 纯共享能力与凭据检查不静态加载飞书或 Telegram SDK。

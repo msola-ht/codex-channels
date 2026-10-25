@@ -13,7 +13,6 @@ import { toStructuredMarkdownList } from "../markdown-list.js";
 import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 import {
   createStartupPresentation,
-  shouldShowStartupNotification,
   createSubagentCompletedPresentation,
   createTurnCompletedPresentation,
   renderStructuredLifecyclePresentation,
@@ -64,7 +63,6 @@ export function renderWeixinStartupNotification(
   >,
   runtime: WeixinStartupRuntimeInfo,
 ): string {
-  if (!shouldShowStartupNotification(runtime)) return "";
   return renderWeixinLifecyclePresentation(
     createStartupPresentation(workspaces, status, runtime),
   );

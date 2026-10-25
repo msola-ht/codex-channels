@@ -361,7 +361,6 @@ export class TelegramSurface {
                   ? { openAiConnectivity: options.openAiConnectivity() }
                   : {}),
                 presentationDetail: options.startupPresentationDetail?.(chatId) ?? "basic",
-                routineNotificationsEnabled: options.startupRoutineNotificationsEnabled?.(chatId) ?? true,
               }),
             });
           }

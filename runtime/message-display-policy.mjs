@@ -3,7 +3,7 @@ import { z } from "zod";
 const identity = z.string().min(1).max(1024).refine(value => !/[\s\p{Cc}\uD800-\uDFFF]/u.test(value));
 export const messageDisplayFields = [["operation_updates", "operationUpdates"], ["subagents", "subagentsEnabled"], ["streaming", "streamingEnabled"], ["commentary", "commentaryEnabled"], ["routine_notifications", "routineNotificationsEnabled"], ["plan_updates", "planUpdatesEnabled"], ["reasoning", "reasoningEnabled"], ["completion", "completion"], ["presentation_detail", "presentationDetail"]];
 export const messageDisplayPresets = Object.freeze({
-  concise: Object.freeze({ operation_updates: "hidden", subagents: false, streaming: true, commentary: false, routine_notifications: false, plan_updates: false, reasoning: false, completion: "off", presentation_detail: "basic" }),
+  concise: Object.freeze({ operation_updates: "hidden", subagents: false, streaming: true, commentary: false, routine_notifications: false, plan_updates: false, reasoning: false, completion: "brief", presentation_detail: "basic" }),
   standard: Object.freeze({ operation_updates: "compact", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: false, completion: "detailed", presentation_detail: "basic" }),
   detailed: Object.freeze({ operation_updates: "full", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: true, completion: "detailed", presentation_detail: "detailed" }),
 });

@@ -311,8 +311,8 @@ export class QqTaskProgress {
 
   private render(event: QqTaskProgressEvent): Presentation[] {
     switch (event.type) {
-      case "subagent.spawned": return [presentLifecycle(createSubagentStartedPresentation(event))];
-      case "subagent.contacted": return [presentLifecycle(createSubagentContactedPresentation(event))];
+      case "subagent.spawned": return [presentLifecycle(createSubagentStartedPresentation(event, this.displaySettings(event.target).presentationDetail === "detailed"))];
+      case "subagent.contacted": return [presentLifecycle(createSubagentContactedPresentation(event, this.displaySettings(event.target).presentationDetail === "detailed"))];
       case "subagent.completed": return [presentLifecycle(createSubagentCompletedPresentation(event, this.displaySettings(event.target).presentationDetail === "detailed"))];
       case "operation.updated": return [presentOperation(event.operation, this.displaySettings(event.target).operationUpdates)];
       case "turn.retry":
