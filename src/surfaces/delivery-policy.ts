@@ -56,6 +56,10 @@ export function resolveSurfaceDelivery(
   event: OutputEvent,
 ): SurfaceDeliveryDecision {
   if (surface === "qq") {
+    if (event.type === "turn.retry" || event.type === "turn.reasoning" || event.type === "plan.updated"
+      || event.type === "subagent.spawned" || event.type === "subagent.contacted" || event.type === "subagent.completed") {
+      return { disposition: "deliver", critical: isCriticalOutputEvent(event) };
+    }
     if (event.type === "mcp.oauth.completed") return { disposition: "deliver", critical: true };
     if (event.type === "conversation.idle.released" || event.type === "warning" || event.type === "hook.completed"
       || event.type === "connection.lost" || event.type === "connection.restored" || event.type === "thread.availability"
@@ -70,8 +74,8 @@ export function resolveSurfaceDelivery(
       return { disposition: "deliver", critical: true };
     }
     if (event.type === "text.delta" && event.phase !== "commentary") return { disposition: "deliver", critical: false };
-    return (event.type === "text.completed" && event.phase !== "commentary") || event.type === "turn.completed"
-      ? { disposition: "deliver", critical: true }
+    return event.type === "text.completed" || event.type === "turn.completed" || event.type === "operation.updated"
+      ? { disposition: "deliver", critical: isCriticalOutputEvent(event) }
       : { disposition: "ignore", critical: false };
   }
   if (surface === "weixin") {

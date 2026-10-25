@@ -8,9 +8,9 @@ export class QqSendBudget {
   private tail: Promise<void> = Promise.resolve();
   private readonly recipients = new Map<string, number[]>();
   private account: number[] = [];
-  private readonly turns = new Map<string, { text: number; status: number; until: number }>();
+  private readonly turns = new Map<string, { text: number; status: number; progress: number; until: number }>();
 
-  reserve(destination: QqRecipient, parts: number, scope?: { key: string; status: boolean } | "startup" | "interaction"): {
+  reserve(destination: QqRecipient, parts: number, scope?: { key: string; status: boolean; progress?: boolean } | "startup" | "interaction"): {
     runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
   } {
     const recipient = qqRecipientKey(destination);
@@ -24,18 +24,19 @@ export class QqSendBudget {
     for (const [key, value] of this.turns) if (value.until <= now) this.turns.delete(key);
     this.account = this.account.filter(value => value > now - 60_000);
     const recipientTimes = this.recipients.get(recipient) ?? [];
-    const usage = turn ? this.turns.get(turn.key) ?? { text: 0, status: 0, until: now + day } : undefined;
+    const usage = turn ? this.turns.get(turn.key) ?? { text: 0, status: 0, progress: 0, until: now + day } : undefined;
     if (!Number.isSafeInteger(parts) || parts < 1 || parts > 8) throw new QqProtocolError("message", "invalid-input");
     if ((!this.recipients.has(recipient) && this.recipients.size >= 4096)
       || (turn && !this.turns.has(turn.key) && this.turns.size >= 4096)
       || (scope !== undefined && (this.account.length + parts > 24
         || recipientTimes.filter(value => value > now - 60_000).length + parts > 16
         || recipientTimes.length + parts > 800))
-      || (usage && turn && (turn.status ? usage.status + parts > 2 : usage.text + parts > 16))) {
+      || (usage && turn && (turn.progress ? usage.progress + parts > 8 : turn.status ? usage.status + parts > 2 : usage.text + parts > 16))) {
       throw new QqProtocolError("message", "budget");
     }
     if (usage && turn) {
-      if (turn.status) usage.status += parts; else usage.text += parts;
+      if (turn.progress) usage.progress += parts;
+      else if (turn.status) usage.status += parts; else usage.text += parts;
       this.turns.set(turn.key, usage);
     }
     if (scope !== undefined) {

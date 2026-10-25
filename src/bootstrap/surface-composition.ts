@@ -139,6 +139,9 @@ function createQqModule(
     service: options.service, commands: options.commands, actors: options.bindings,
     autoCompactPercent: options.autoCompactPercent,
     debugEnabled: isDebugLogLevel(options.config.logLevel),
+    operationUpdateDisplay: options.config.operationUpdateDisplay,
+    planUpdatesEnabled: options.config.planUpdatesEnabled,
+    reasoningEnabled: options.config.reasoningEnabled,
     configurationNotification: { recipients: () => [...notificationRecipients] },
     startupNotification: {
       recipients: () => [...notificationRecipients],

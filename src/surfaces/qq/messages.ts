@@ -5,7 +5,7 @@ import { parseThreadQueueOperation, type ConversationCommandExecutor, type Conve
 import { UserFacingError, type ConversationTarget, type OutputEvent, type UserMessageIdentity } from "../../conversation-core/index.js";
 import type { ConversationActorRegistry, SurfaceAccessPolicy } from "../../policy/index.js";
 import type { DeliveryCheckpoint } from "../delivery-receipt.js";
-import type { SurfaceOutputPort, SurfaceDeliverySource, SurfaceNotificationDeliverySource, SurfaceScheduledTaskSubmissionContext, SurfaceAsyncAnswerSubmission, SurfaceConfigurationChange } from "../types.js";
+import type { SurfaceOutputPort, SurfaceDeliverySource, SurfaceNotificationDeliverySource, SurfaceScheduledTaskSubmissionContext, SurfaceAsyncAnswerSubmission, SurfaceConfigurationChange, OperationUpdateDisplay } from "../types.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import { parseSlashCommand, isEmergencyStopCommand } from "../slash-command.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
@@ -30,13 +30,14 @@ import { planQqMessageMarkdown, qqLiteralMarkdown } from "./message-markdown.js"
 import { QqInteractions } from "./interactions.js";
 import { isQqExtensionOperation, isQqTaskCommand } from "./extension-commands.js";
 import type { QqImageStore } from "./image-store.js";
-import { generatedImageUnavailableText, isGeneratedImageUnavailable } from "../operation-presentation.js";
+import { generatedImageUnavailableText, isGeneratedImageUnavailable, shouldDisplayOperation } from "../operation-presentation.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { textAttachmentBody } from "../text-attachment-store.js";
 import type { QqFileInput } from "./file-input.js";
 import type { QqMediaInput } from "./media-input.js";
 import { videoAttachmentBody, type PreparedVideoAttachment } from "../video-attachment-store.js";
 import { qqConversationActor, qqConversationRecipient } from "./addressing.js";
+import { QqTaskProgress, isQqTaskProgressEvent, type QqTaskProgressEvent } from "./task-progress.js";
 
 export interface QqMessageOptions {
   appId: string;
@@ -47,6 +48,9 @@ export interface QqMessageOptions {
   ownsThread(target: ConversationTarget, threadId: string): boolean;
   logger: Logger;
   debugEnabled?: boolean;
+  operationUpdateDisplay?: OperationUpdateDisplay;
+  reasoningEnabled?: boolean;
+  planUpdatesEnabled?: boolean;
   images?: Pick<QqImageStore, "prepare">;
   files?: Pick<QqFileInput, "prepare">;
   media?: Pick<QqMediaInput, "prepare" | "retain" | "discard">;
@@ -80,6 +84,8 @@ export class QqMessages implements SurfaceOutputPort {
   private readonly streaming: QqBodyStreaming;
   private readonly budget = new QqSendBudget();
   private readonly notifications = new QqLifecycleNotifications();
+  private readonly progress: QqTaskProgress;
+  private readonly observed = new WeakSet<OutputEvent>();
   private readonly menus: QqCommandMenuController;
   private readonly schedules: QqScheduleMenu;
   private readonly management: QqPrivilegedManagementMenu;
@@ -92,6 +98,9 @@ export class QqMessages implements SurfaceOutputPort {
   private readonly asyncAnswers = new Map<string, { target: ConversationTarget; ticket: QqTaskTicket; remove: () => void; failed: () => Promise<void> }>();
 
   constructor(private readonly options: QqMessageOptions, private readonly client: QqProtocolClient) {
+    this.progress = new QqTaskProgress({ reasoningEnabled: options.reasoningEnabled ?? false,
+      planUpdatesEnabled: options.planUpdatesEnabled ?? true, operationUpdates: options.operationUpdateDisplay ?? "compact",
+      debugEnabled: options.debugEnabled ?? false });
     this.sources = new QqTaskSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.current(scope, threadId) });
     this.queueSources = new QqQueueSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.current(scope, threadId) });
     this.scheduledSources = new QqTaskSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.scheduledCurrent(scope, threadId) });
@@ -181,6 +190,7 @@ export class QqMessages implements SurfaceOutputPort {
   }
 
   private cancelSources(target: ConversationTarget): void {
+    this.progress.cancelTarget(target);
     this.sources.cancelTarget(target);
     this.queueSources.cancelTarget(target);
     this.menus.cancelQueue(target);
@@ -189,6 +199,14 @@ export class QqMessages implements SurfaceOutputPort {
 
   admitLive(event: OutputEvent): void {
     if (event.target.surface !== "qq" || event.target.accountId !== this.options.appId) return;
+    if (event.type === "subagent.completed") {
+      if (!event.parentTurnId) return;
+      const source = this.scheduledSources.capture(event.target, event.parentThreadId, event.parentTurnId)
+        ?? this.queueSources.capture(event.target, event.parentThreadId, event.parentTurnId)
+        ?? this.sources.capture(event.target, event.parentThreadId, event.parentTurnId);
+      if (source) this.admitted.set(event, source);
+      return;
+    }
     if (this.supported(event) && isQqLifecycleNotification(event)
       && !(event.type === "operation.updated" && event.operation.kind !== "contextCompaction")) {
       const actorId = qqConversationActor(event.target.conversationId);
@@ -216,16 +234,20 @@ export class QqMessages implements SurfaceOutputPort {
     if (source) this.admitted.set(event, source);
   }
   observe(event: OutputEvent): void {
+    if (this.observed.has(event)) return;
+    this.observed.add(event);
     const source = this.admitted.get(event);
+    if (source || event.type === "connection.lost" || event.type === "conversation.idle.released") this.progress.observe(event);
     if (source?.kind === "notification") return;
     if (source?.generation === this.sources.generation && event.target.conversationId.startsWith("c2c:")) {
       if (event.type === "turn.started") this.streaming.started(source);
-      if (event.type === "text.delta" || event.type === "text.completed") this.streaming.observe(event, source);
+      if ((event.type === "text.delta" || event.type === "text.completed") && event.phase !== "commentary") this.streaming.observe(event, source);
     }
     if (source && event.type === "turn.completed") this.sourceRegistry(source).terminal(source);
   }
   retains(event: OutputEvent): boolean { return event.type !== "text.delta" && this.supported(event) && this.admitted.has(event); }
   async handle(event: OutputEvent, _context?: { liveAdmitted: true }, signal?: AbortSignal): Promise<void> {
+    this.observe(event);
     if (event.type === "text.delta") { if (this.admitted.has(event)) await this.streaming.update(event, signal); return; }
     if (isQqLifecycleNotification(event) && this.supported(event) && this.admitted.get(event)?.kind === "notification") {
       const source = this.admitted.get(event)!;
@@ -238,10 +260,32 @@ export class QqMessages implements SurfaceOutputPort {
     if (this.supported(event)) throw new Error("QQ 任务结果必须通过共享持久投递");
   }
   async deliverSnapshot(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void> {
+    if (isQqTaskProgressEvent(event) && this.supported(event)) {
+      await this.deliverProgress(event, signal, async () => {}, authorized);
+      return;
+    }
     if (!this.supported(event) || !isQqLifecycleNotification(event)) throw new Error("QQ 状态类型不受支持");
     const source = this.admitted.get(event);
     try { await this.deliverNotification(event, signal, async () => {}, authorized); }
     finally { if (source) this.deliverySource.release(source); }
+  }
+  private async deliverProgress(event: QqTaskProgressEvent, signal: AbortSignal,
+    checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean): Promise<void> {
+    if (signal.aborted || !authorized()) throw new Error("QQ 过程通知来源已失效");
+    const run = this.progress.prepare(event);
+    if (!run) return;
+    const threadId = event.type === "subagent.completed" ? event.parentThreadId : event.threadId;
+    const turnId = event.type === "subagent.completed" ? event.parentTurnId : event.turnId;
+    if (!threadId || !turnId) throw new Error("QQ 过程通知缺少原任务来源");
+    const recipient = qqConversationRecipient(event.target.conversationId);
+    await run(async presentation => {
+      await this.outbox.deliver({ mode: "active", recipient, content: presentation.text }, {
+        signal: AbortSignal.any([signal, this.lifetime.signal]), preferMarkdown: true, markdownContent: presentation.markdown,
+        beforeSend: () => { if (!authorized()) throw new Error("QQ 过程通知来源已失效"); },
+        reserve: parts => this.budget.reserve(recipient, parts,
+          { key: JSON.stringify([event.target.conversationId, threadId, turnId]), status: false, progress: true }),
+      }, checkpoint);
+    });
   }
   private async deliverNotification(event: Parameters<QqLifecycleNotifications["render"]>[0], signal: AbortSignal,
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, retained = false): Promise<void> {
@@ -256,6 +300,13 @@ export class QqMessages implements SurfaceOutputPort {
   }
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void> {
     if (!this.supported(event) || !authorized) throw new Error("QQ 输出未获授权");
+    // The classifier selects only some operation updates; its false branch does
+    // not exclude image delivery or compaction from the OutputEvent union.
+    const progressEvent = isQqTaskProgressEvent(event) ? event : undefined;
+    if (progressEvent) {
+      await this.deliverProgress(progressEvent, signal, checkpoint, authorized);
+      return;
+    }
     if (isQqLifecycleNotification(event) && !(event.type === "operation.updated" && event.operation.kind !== "contextCompaction")) {
       await this.deliverNotification(event, signal, checkpoint, authorized, true);
       return;
@@ -285,7 +336,7 @@ export class QqMessages implements SurfaceOutputPort {
       catch (error) { checkpointFailed = true; throw error; }
     };
     try {
-      if (event.type === "text.completed") {
+      if (event.type === "text.completed" && event.phase !== "commentary") {
         const result = await this.streaming.finish(event, signal, record, authorized);
         if (result.kind === "complete") return;
         if (result.kind === "continue") { text = result.text; markdownStart = result.markdownStart; }
@@ -297,13 +348,14 @@ export class QqMessages implements SurfaceOutputPort {
         preferMarkdown: true,
         ...(completion ? { markdownContent: completion.markdown } : {}),
         ...(markdownStart !== undefined ? { markdownStart } : {}),
-        allowResultFile: event.type === "text.completed",
+        allowResultFile: event.type === "text.completed" && event.phase !== "commentary",
         beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
         reserve: parts => this.budget.reserve(qqConversationRecipient(event.target.conversationId), parts,
-          { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: event.type === "turn.completed" }),
+          { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: event.type === "turn.completed",
+            progress: event.type === "text.completed" && event.phase === "commentary" }),
       }, record);
     } catch (error) {
-      if (event.type === "text.completed" && !checkpointFailed && !signal.aborted && authorized()) {
+      if (event.type === "text.completed" && event.phase !== "commentary" && !checkpointFailed && !signal.aborted && authorized()) {
         try {
           await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId),
             content: "正文未完整送达或发送结果未确认；这不等于任务执行失败。请在本机 WebUI 投递箱核对，完整内容可在原生 Codex 会话查看。人工重试可能重复已收到的内容。" }, {
@@ -778,23 +830,35 @@ export class QqMessages implements SurfaceOutputPort {
           }
           return;
         }
-        const attachmentScope = images?.length || file ? this.extensionQueryScope(target) : undefined;
-        const assertAttachmentsCurrent = () => {
-          if (!ticket.isCurrent() || attachmentScope !== undefined && this.extensionQueryScope(target) !== attachmentScope) {
-            throw new UserFacingError(file ? "input.authorization-changed" : "image.download-failed", "附件准备已取消或上下文变化");
-          }
-        };
-        if (images?.length && !this.options.images) throw new UserFacingError("image.download-failed", "图片准备不可用");
-        if (file && !this.options.files) throw new UserFacingError("attachment.download-failed", "文本附件准备不可用");
-        const preparedFile = file ? await this.options.files!.prepare(file, ticket.signal, assertAttachmentsCurrent) : undefined;
-        const currentText = preparedFile
-          ? [message.content, `附件文件名：${JSON.stringify(preparedFile.fileName)}`, textAttachmentBody(preparedFile)].filter(Boolean).join("\n\n")
-          : message.content;
-        const text = formatQuotedInput(currentText, message.quotedText);
-        const input = images?.length
-          ? await this.options.images!.prepare(images, text, ticket.signal, assertAttachmentsCurrent) : text;
-        if (images?.length || file) assertAttachmentsCurrent();
-        await this.options.service.submit(target, input, () => ticket.isCurrent(), ticket.observer);
+        if (!images?.length && !file) {
+          await this.options.service.submit(target, formatQuotedInput(message.content, message.quotedText), () => ticket.isCurrent(), ticket.observer);
+          return;
+        }
+        const prepare = this.options.service.prepareAttachmentSubmission;
+        if (!prepare) throw new UserFacingError("input.authorization-changed", "附件提交准备不可用");
+        const prepared = prepare.call(this.options.service, target, () => ticket.isCurrent(), images?.length ? "image" : "file", ticket.observer);
+        try {
+          prepared.captureTarget();
+          const signal = AbortSignal.any([ticket.signal, prepared.signal, this.lifetime.signal]);
+          const attachmentScope = this.extensionQueryScope(target);
+          const assertAttachmentsCurrent = () => {
+            signal.throwIfAborted();
+            if (!ticket.isCurrent() || this.extensionQueryScope(target) !== attachmentScope) {
+              throw new UserFacingError(file ? "input.authorization-changed" : "image.download-failed", "附件准备已取消或上下文变化");
+            }
+          };
+          if (images?.length && !this.options.images) throw new UserFacingError("image.download-failed", "图片准备不可用");
+          if (file && !this.options.files) throw new UserFacingError("attachment.download-failed", "文本附件准备不可用");
+          const preparedFile = file ? await this.options.files!.prepare(file, signal, assertAttachmentsCurrent) : undefined;
+          const currentText = preparedFile
+            ? [message.content, `附件文件名：${JSON.stringify(preparedFile.fileName)}`, textAttachmentBody(preparedFile)].filter(Boolean).join("\n\n")
+            : message.content;
+          const text = formatQuotedInput(currentText, message.quotedText);
+          const input = images?.length
+            ? await this.options.images!.prepare(images, text, signal, assertAttachmentsCurrent) : text;
+          assertAttachmentsCurrent();
+          await prepared.submit(input);
+        } finally { prepared.dispose(); }
       } catch (error) {
         ticket.cancel();
         const { errorType, errorCode, errorReason } = surfaceErrorMetadata(error);
@@ -963,10 +1027,15 @@ export class QqMessages implements SurfaceOutputPort {
       status.modelPending, status.effortPending, status.fastModePending, status.executionContext]);
   }
   private supported(event: OutputEvent): boolean {
+    if (event.type === "turn.reasoning" && this.options.reasoningEnabled !== true) return false;
+    if (event.type === "plan.updated" && this.options.planUpdatesEnabled === false) return false;
+    if (event.type === "operation.updated" && isQqTaskProgressEvent(event)
+      && !shouldDisplayOperation(event.operation, this.options.operationUpdateDisplay ?? "compact")) return false;
     return event.target.surface === "qq" && event.target.accountId === this.options.appId
       && !!qqConversationActor(event.target.conversationId) && resolveSurfaceDelivery("qq", event).disposition === "deliver";
   }
   async close(): Promise<void> {
+    this.progress.close();
     this.lifetime.abort(); this.sources.close(); this.queueSources.close(); this.scheduledSources.close(); this.schedules.close(); this.management.close(); this.menus.clear(); this.notificationSources.clear();
     await Promise.all([this.interactions.close(), this.streaming.close(), this.outbox.close()]);
     let timer: ReturnType<typeof setTimeout> | undefined;

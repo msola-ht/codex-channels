@@ -2028,9 +2028,14 @@ export abstract class GatewayComponentGraph {
       }
     } else if ((source.kind !== undefined && source.kind !== "scheduled")
       || typeof source.threadId !== "string" || !source.threadId || Buffer.byteLength(source.threadId) > 512
-      || !("threadId" in event) || event.threadId !== source.threadId
+      || (event.type === "subagent.completed"
+        ? event.parentThreadId !== source.threadId
+        : !("threadId" in event) || event.threadId !== source.threadId)
       || typeof source.turnId !== "string" || !source.turnId
-      || Buffer.byteLength(source.turnId) > 512 || !("turnId" in event) || event.turnId !== source.turnId) return undefined;
+      || Buffer.byteLength(source.turnId) > 512
+      || (event.type === "subagent.completed"
+        ? event.parentTurnId !== source.turnId
+        : !("turnId" in event) || event.turnId !== source.turnId)) return undefined;
     if (source.kind === "scheduled" && (typeof source.workspaceId !== "string" || !source.workspaceId
       || Buffer.byteLength(source.workspaceId) > 512 || typeof source.workspaceCwd !== "string" || !source.workspaceCwd
       || Buffer.byteLength(source.workspaceCwd) > 32 * 1024)) return undefined;

@@ -874,16 +874,23 @@ export class SurfaceManager {
         if (this.snapshots.get(key) !== snapshot || !this.active.has(surface)) return;
         const { event, owner, bytes, revision } = snapshot;
         const authorized = (): boolean => this.options.persistence!.authorized(event, owner);
-        if (!authorized()) {
+        active = { event, owner, bytes, revision, controller: snapshot.controller };
+        snapshot.active = active;
+        const bounded = AbortSignal.any([signal, active.controller.signal]);
+        // Live snapshots may arrive while the originating submit response is still
+        // pending. Use the same bounded source confirmation as reliable output.
+        const admitted = this.options.persistence!.authorizeAtDispatch
+          ? await this.options.persistence!.authorizeAtDispatch(event, owner, bounded) : authorized();
+        bounded.throwIfAborted();
+        if (this.snapshots.get(key) !== snapshot || snapshot.revision !== revision || !this.active.has(surface)) return;
+        if (!admitted || !authorized()) {
           this.logger.warn({ surface: surface.surface, accountId: surface.accountId,
             conversationId: event.target.conversationId, eventType: event.type }, "Surface 最新状态归属已变化，取消展示");
           this.removeSnapshot(key, snapshot);
           return;
         }
-        active = { event, owner, bytes, revision, controller: snapshot.controller };
-        snapshot.active = active;
         if (!surface.output.deliverSnapshot) throw new Error("Surface 缺少状态投递结算端口");
-        await surface.output.deliverSnapshot(event, AbortSignal.any([signal, active.controller.signal]), authorized);
+        await surface.output.deliverSnapshot(event, bounded, authorized);
       } catch {
         if (!active?.controller.signal.aborted) {
           this.logger.warn({ surface: surface.surface, accountId: surface.accountId,
