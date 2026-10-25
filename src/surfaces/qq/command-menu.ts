@@ -5,7 +5,9 @@ export type QqMenuButton = QqCommandKeyboard["content"]["rows"][number]["buttons
 export function qqMenuButton(id: string, label: string, data: string, enter = true): QqMenuButton {
   return {
     id, render_data: { label, style: 0 },
-    action: { type: 2, permission: { type: 2 }, data, enter, reply: false },
+    action: enter
+      ? { type: 1, permission: { type: 2 }, data, unsupport_tips: "当前客户端不支持此按钮，请使用命令入口。" }
+      : { type: 2, permission: { type: 2 }, data, enter: false, reply: false },
   };
 }
 

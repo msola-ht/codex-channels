@@ -246,7 +246,7 @@ export class QqWebSocketTransport {
               resuming = this.sessionId !== undefined && this.lastSeq !== null;
               send(resuming
                 ? { op: 6, d: { token: `QQBot ${token}`, session_id: this.sessionId, seq: this.lastSeq } }
-                : { op: 2, d: { token: `QQBot ${token}`, intents: 1 << 25, shard: [0, 1] } });
+                : { op: 2, d: { token: `QQBot ${token}`, intents: (1 << 25) | (1 << 26), shard: [0, 1] } });
               heartbeat = setInterval(() => {
                 if (awaitingHeartbeat) { ws.terminate(); return; }
                 awaitingHeartbeat = true;

@@ -2,7 +2,7 @@ const API_ORIGIN = "https://api.bot.qq.com";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
-export type QqProtocolOperation = "token" | "gateway" | "message" | "menu";
+export type QqProtocolOperation = "token" | "gateway" | "message" | "menu" | "interaction";
 export type QqProtocolFailure =
   | "invalid-input" | "closed" | "cancelled" | "timeout" | "network"
   | "http" | "business" | "invalid-response" | "response-too-large"
@@ -22,12 +22,16 @@ export type QqTextMessage = {
   sourceTimestampMs: number;
 });
 
-/** Only command buttons; callback actions require a separate event/acknowledgment contract. */
+export type QqInteractionAckCode = 0 | 1 | 2 | 3 | 4;
+
+/** Callback execution and input-prefill commands have separate action contracts. */
 export interface QqCommandKeyboard {
   content: { rows: Array<{ buttons: Array<{
     id: string;
     render_data: { label: string; style: 0 | 1 };
-    action: { type: 2; permission: { type: 2 }; data: string; enter: boolean; reply: false };
+    action:
+      | { type: 2; permission: { type: 2 }; data: string; enter: boolean; reply: false }
+      | { type: 1; permission: { type: 2 }; data: string; unsupport_tips: string };
   }> }> };
 }
 
@@ -220,6 +224,46 @@ export class QqProtocolClient {
       }
       return { version: data.version };
     });
+  }
+
+  /** A single receipt acknowledgment, independent of whether the selected business action completes. */
+  async acknowledgeInteraction(id: string, code: QqInteractionAckCode, context: QqTextSendContext): Promise<void> {
+    if (!identifier(id) || id.startsWith("INTERACTION_CREATE:")
+      || !Number.isInteger(code) || code < 0 || code > 4
+      || !context || !(context.signal instanceof AbortSignal) || typeof context.beforeSend !== "function") {
+      throw new QqProtocolError("interaction", "invalid-input");
+    }
+    const { signal: callerSignal, beforeSend } = context;
+    try {
+      await this.withRequest("interaction", callerSignal, async signal => {
+        const check = () => {
+          this.ensureOpen("interaction", signal);
+          try {
+            const result: unknown = beforeSend();
+            if (result !== undefined) {
+              void Promise.resolve(result).catch(() => undefined);
+              throw new Error();
+            }
+          } catch { throw new QqProtocolError("interaction", "authorization"); }
+          this.ensureOpen("interaction", signal);
+        };
+        check();
+        const token = await this.getAccessToken(signal);
+        const data = await this.requestJson("interaction", `/interactions/${encodeURIComponent(id)}`, { code }, signal, token, check, "PUT");
+        // The official success example is {}; explicit zero result codes are also conclusive.
+        // Do not infer acknowledgment from arbitrary successful HTTP JSON.
+        const keys = Object.keys(data);
+        if (keys.some(key => !["code", "err_code", "trace_id"].includes(key))
+          || (keys.length > 0 && !("code" in data) && !("err_code" in data))) {
+          throw new QqProtocolError("interaction", "invalid-response");
+        }
+      });
+    } catch (error) {
+      if (error instanceof QqProtocolError && error.operation !== "interaction") {
+        throw new QqProtocolError("interaction", error.reason, error.httpStatus, error.bizCode, error.traceId);
+      }
+      throw error;
+    }
   }
 
   /** No retries, mode fallback, splitting, task submission or delivery checkpoint side effects. */
@@ -457,12 +501,20 @@ function commandKeyboard(value: unknown): QqCommandKeyboard {
         || !button.render_data.label.trim() || [...button.render_data.label].length > 10
         || !wellFormed(button.render_data.label) || /\p{Cc}/u.test(button.render_data.label)
         || (button.render_data.style !== 0 && button.render_data.style !== 1)
-        || !exact(button.action, ["type", "permission", "data", "enter", "reply"])
-        || button.action.type !== 2 || !exact(button.action.permission, ["type"]) || button.action.permission.type !== 2
+        || !record(button.action) || !exact(button.action.permission, ["type"]) || button.action.permission.type !== 2
         || typeof button.action.data !== "string" || !button.action.data.trim() || [...button.action.data].length > 100
-        || !wellFormed(button.action.data) || /\p{Cc}/u.test(button.action.data)
-        || typeof button.action.enter !== "boolean" || button.action.reply !== false) return fail();
+        || !wellFormed(button.action.data) || /\p{Cc}/u.test(button.action.data)) return fail();
       ids.add(button.id);
+      if (button.action.type === 1) {
+        if (!exact(button.action, ["type", "permission", "data", "unsupport_tips"])
+          || typeof button.action.unsupport_tips !== "string" || !button.action.unsupport_tips.trim()
+          || [...button.action.unsupport_tips].length > 100 || !wellFormed(button.action.unsupport_tips)
+          || /\p{Cc}/u.test(button.action.unsupport_tips)) return fail();
+        return { id: button.id, render_data: { label: button.render_data.label, style: button.render_data.style },
+          action: { type: 1, permission: { type: 2 }, data: button.action.data, unsupport_tips: button.action.unsupport_tips } };
+      }
+      if (!exact(button.action, ["type", "permission", "data", "enter", "reply"])
+        || button.action.type !== 2 || typeof button.action.enter !== "boolean" || button.action.reply !== false) return fail();
       return { id: button.id, render_data: { label: button.render_data.label, style: button.render_data.style },
         action: { type: 2 as const, permission: { type: 2 as const }, data: button.action.data,
           enter: button.action.enter, reply: false as const } };

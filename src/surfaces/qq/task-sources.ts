@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SubmissionObserver, SubmissionOutcome, SubmissionPreparation } from "../../application/index.js";
-import type { QqInboundTextMessage } from "./inbound.js";
+import type { QqSourceInput } from "./message-input.js";
 import type { SurfaceDeliverySource } from "../types.js";
 
 const MAX_ENTRIES = 4096;
@@ -40,7 +40,8 @@ interface Entry {
   readonly dedupKey: string;
   readonly targetKey: string;
   readonly scope: Readonly<QqTaskScope>;
-  readonly message: Readonly<{ id: string; msgIdx: string; sentAtMs: number }>;
+  readonly message: Readonly<{ kind: "text"; id: string; msgIdx: string; sentAtMs: number }
+    | { kind: "interaction"; id: string; sentAtMs: number }>;
   readonly receivedAt: number;
   readonly deadline: number;
   readonly controller: AbortController;
@@ -77,16 +78,18 @@ export class QqTaskSources {
     this.options = Object.freeze({ accountId: options.accountId, isCurrent: options.isCurrent });
   }
 
-  reserve(scope: QqTaskScope, message: Pick<QqInboundTextMessage, "id" | "actorId" | "msgIdx" | "sentAtMs">): QqTaskReservation {
+  reserve(scope: QqTaskScope, message: QqSourceInput): QqTaskReservation {
     if (this.closed) return { kind: "rejected", reason: "closed" };
     const receivedAt = performance.now();
-    const original = Object.freeze({ id: message.id, actorId: message.actorId, msgIdx: message.msgIdx, sentAtMs: message.sentAtMs });
+    const original = Object.freeze("kind" in message
+      ? { kind: "interaction" as const, id: message.id, actorId: message.actorId, sentAtMs: message.sentAtMs }
+      : { kind: "text" as const, id: message.id, actorId: message.actorId, msgIdx: message.msgIdx, sentAtMs: message.sentAtMs });
     const wall = Date.now();
     if (wall < this.lastWall) this.clockUnsafe = true;
     this.lastWall = Math.max(wall, this.lastWall);
     if (this.clockUnsafe) return { kind: "rejected", reason: "clock" };
     // Local metadata budgets, independent of upstream validity or authorization.
-    if (![original.id, original.actorId, original.msgIdx].every(value => bounded(value))) {
+    if (![original.id, original.actorId, ...(original.kind === "text" ? [original.msgIdx] : [])].every(value => bounded(value))) {
       return { kind: "rejected", reason: "invalid-input" };
     }
     if (!Number.isSafeInteger(original.sentAtMs) || original.sentAtMs < this.startedAt
@@ -103,7 +106,8 @@ export class QqTaskSources {
     if (!allowed) return { kind: "rejected", reason: "scope" };
     if (this.clockUnsafe) return { kind: "rejected", reason: "clock" };
     if (performance.now() >= receivedAt + PREPARATION_MS) return { kind: "rejected", reason: "expired" };
-    const dedupKey = JSON.stringify([snapshot.accountId, snapshot.actorId, original.id, original.msgIdx]);
+    const dedupKey = JSON.stringify([snapshot.accountId, snapshot.actorId, original.kind, original.id,
+      original.kind === "text" ? original.msgIdx : undefined]);
     if (this.dedup.has(dedupKey)) return { kind: "rejected", reason: "duplicate" };
     const targetKey = this.targetKey(snapshot);
     if (this.pending.has(targetKey)) return { kind: "rejected", reason: "busy" };
@@ -112,7 +116,7 @@ export class QqTaskSources {
       return { kind: "rejected", reason: "capacity" };
     }
     const entry: Entry = { token: randomUUID(), dedupKey, targetKey, scope: snapshot,
-      message: Object.freeze({ id: original.id, msgIdx: original.msgIdx, sentAtMs: original.sentAtMs }),
+      message: original,
       receivedAt, deadline: receivedAt + PREPARATION_MS, expiresAt: receivedAt + SOURCE_MS, retainUntil: receivedAt + DEDUP_MS,
       controller: new AbortController(), waiters: new Set(), terminals: new Map(), attempted: false };
     this.entries.set(entry.token, entry);
@@ -179,6 +183,7 @@ export class QqTaskSources {
   streamSource(reference: QqTaskSourceReference): { messageId: string; sourceTimestampMs: number; signal: AbortSignal } | undefined {
     if (!this.isCurrent(reference)) return undefined;
     const entry = this.resolve(reference)!;
+    if (entry.message.kind !== "text") return undefined;
     return { messageId: entry.message.id, sourceTimestampMs: entry.message.sentAtMs,
       signal: AbortSignal.any([entry.controller.signal, entry.source!.controller.signal]) };
   }

@@ -10,7 +10,9 @@ import { renderConversationCommandResult } from "../conversation-command-rendere
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { resolveSurfaceDelivery } from "../delivery-policy.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
-import { parseQqTextEvent, type QqInboundTextMessage } from "./inbound.js";
+import { parseQqTextEvent } from "./inbound.js";
+import { parseQqButtonEvent } from "./button-inbound.js";
+import type { QqMessageInput } from "./message-input.js";
 import { QqTaskSources, type QqTaskScope, type QqTaskSourceReference, type QqTaskTicket } from "./task-sources.js";
 import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
@@ -54,10 +56,13 @@ export class QqMessages implements SurfaceOutputPort {
   private readonly budget = new QqSendBudget();
   private readonly menus: QqCommandMenuController;
   private readonly admitted = new WeakMap<OutputEvent, QqTaskSourceReference>();
-  private readonly replied = new WeakSet<QqInboundTextMessage>();
+  private readonly replied = new WeakSet<QqMessageInput>();
+  private callbackTimes: number[] = [];
+  private callbackStopTimes: number[] = [];
+  private readonly pendingCallbacks = new Map<string, Set<AbortController>>();
   private readonly asyncAnswers = new Map<string, { target: ConversationTarget; ticket: QqTaskTicket; remove: () => void; failed: () => Promise<void> }>();
 
-  constructor(private readonly options: QqMessageOptions, client: QqProtocolClient) {
+  constructor(private readonly options: QqMessageOptions, private readonly client: QqProtocolClient) {
     this.sources = new QqTaskSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.current(scope, threadId) });
     this.menus = new QqCommandMenuController({
       commands: options.commands,
@@ -65,7 +70,7 @@ export class QqMessages implements SurfaceOutputPort {
       workspaceScope: target => this.menuWorkspaceScope(target),
       selectionScope: target => this.options.service.status(target).selectionScope,
       allowed: (target, actorId) => this.allowed(target, actorId),
-      beforeMutation: target => { this.sources.cancelTarget(target); this.interactions.cancelTarget(target); },
+      beforeMutation: target => { this.cancelCallbacks(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); },
       signal: this.lifetime.signal,
     });
     this.outbox = new QqTextOutbox(client, options.logger);
@@ -189,12 +194,20 @@ export class QqMessages implements SurfaceOutputPort {
   /** Synchronous bounded admission: Transport must remain free to receive /stop. */
   receive(envelope: unknown): void {
     if (this.lifetime.signal.aborted) return;
+    const button = parseQqButtonEvent(envelope, this.options.appId);
+    if (button.kind === "supported") { this.admit({ ...button.interaction, kind: "interaction" }); return; }
+    if (button.kind === "rejected") {
+      this.options.logger.warn({ reason: button.reason }, "QQ 按钮回调未接纳"); return;
+    }
     const parsed = parseQqTextEvent(envelope);
     if (parsed.kind !== "supported") {
       if (parsed.kind === "rejected") this.options.logger.warn({ reason: parsed.reason, field: parsed.field }, "QQ 非普通文字事件未处理");
       return;
     }
-    const message = parsed.message;
+    this.admit(parsed.message);
+  }
+
+  private admit(message: QqMessageInput): void {
     const target = this.target(message.actorId);
     if (!this.options.access.isAllowed({ target, actorId: message.actorId })) return;
     const now = Date.now();
@@ -202,20 +215,69 @@ export class QqMessages implements SurfaceOutputPort {
     this.lastWall = now;
     if (message.sentAtMs < this.startedAt || message.sentAtMs > now || now - message.sentAtMs > 60_000) return;
     for (const [key, until] of this.dedup) if (until <= performance.now()) this.dedup.delete(key);
-    const key = JSON.stringify([message.actorId, message.id, message.msgIdx]);
+    const callback = "kind" in message;
+    const key = JSON.stringify([callback ? "interaction" : "text", message.actorId, message.id,
+      callback ? undefined : message.msgIdx]);
     if (this.dedup.has(key)) return;
     if (this.dedup.size >= 4096 || this.tasks.size >= (isEmergencyStopCommand(message.content) ? 40 : 32)) {
       this.options.logger.warn({ reason: "input-capacity" }, "QQ 输入容量已满，未提交或排队"); return;
     }
+    if (callback) {
+      const monotonic = performance.now();
+      this.callbackTimes = this.callbackTimes.filter(value => value > monotonic - 1000);
+      this.callbackStopTimes = this.callbackStopTimes.filter(value => value > monotonic - 1000);
+      const emergency = isEmergencyStopCommand(message.content);
+      const times = emergency ? this.callbackStopTimes : this.callbackTimes;
+      if (times.length >= (emergency ? 8 : 24)) {
+        this.options.logger.warn({ reason: "callback-capacity" }, "QQ 按钮回调过于频繁，未执行"); return;
+      }
+      times.push(monotonic);
+    }
     this.dedup.set(key, performance.now() + 600_000);
     this.options.actors.rememberActor(target, message.actorId);
-    const task = this.process(message, target).catch(() => {
-      this.options.logger.warn({ reason: "input-or-reply-failed" }, "QQ 输入处理或回复未确认；不自动重试");
+    const task = (callback ? this.processCallback(message, target) : this.process(message, target)).catch((error: unknown) => {
+      this.options.logger.warn({ reason: callback ? "callback-or-reply-failed" : "input-or-reply-failed",
+        ...(error instanceof QqProtocolError ? { operation: error.operation, protocolReason: error.reason, httpStatus: error.httpStatus } : {}),
+      }, "QQ 输入处理或回复未确认；不自动重试");
     }).finally(() => this.tasks.delete(task));
     this.tasks.add(task);
   }
 
-  private async process(message: QqInboundTextMessage, target: ConversationTarget): Promise<void> {
+  private async processCallback(message: QqMessageInput, target: ConversationTarget): Promise<void> {
+    const stop = isEmergencyStopCommand(message.content);
+    const response = /^\s*\/respond(?:\s|$)/iu.test(message.content);
+    if (stop) this.cancelCallbacks(target);
+    const blocked = !stop && !response && this.busy.has(target.conversationId);
+    const ownsBusy = !stop && !response && !blocked;
+    const controller = new AbortController();
+    const waiting = this.pendingCallbacks.get(target.conversationId) ?? new Set<AbortController>();
+    waiting.add(controller);
+    this.pendingCallbacks.set(target.conversationId, waiting);
+    if (ownsBusy) this.busy.add(target.conversationId);
+    try {
+      const scope = this.menuScope(target);
+      const allowed = () => !controller.signal.aborted && this.allowed(target, message.actorId) && this.menuScope(target) === scope;
+      // ACK means receipt, not business success. Do not execute when receipt is
+      // unknown; never retry an interaction ID or invent a passive message ID.
+      await this.client.acknowledgeInteraction(message.id, blocked ? 2 : 0, {
+        signal: AbortSignal.any([controller.signal, this.lifetime.signal, AbortSignal.timeout(3000)]),
+        beforeSend: () => { if (!allowed()) throw new Error("QQ 按钮回调授权失效"); },
+      });
+      if (!allowed() || blocked) return;
+      waiting.delete(controller);
+      await this.process(message, target, ownsBusy);
+    } finally {
+      waiting.delete(controller);
+      if (waiting.size === 0 && this.pendingCallbacks.get(target.conversationId) === waiting) this.pendingCallbacks.delete(target.conversationId);
+      if (ownsBusy) this.busy.delete(target.conversationId);
+    }
+  }
+
+  private cancelCallbacks(target: ConversationTarget): void {
+    for (const controller of this.pendingCallbacks.get(target.conversationId) ?? []) controller.abort();
+  }
+
+  private async process(message: QqMessageInput, target: ConversationTarget, ownsBusy = false): Promise<void> {
     // Response tokens remain usable while ordinary submit is preparing. They
     // never enter task submission, including unknown tokens after restart.
     const response = this.interactions.respond(target, message);
@@ -227,11 +289,11 @@ export class QqMessages implements SurfaceOutputPort {
     try { command = parseSlashCommand(message.content); }
     catch { await this.reply(message, "命令格式不受支持。使用 /help 查看 QQ 命令。", () => this.allowed(target, message.actorId)); return; }
     const stop = command?.name === "stop" && !command.argumentsText;
-    if (stop) { this.sources.cancelTarget(target); this.interactions.cancelTarget(target); }
-    if (this.busy.has(target.conversationId) && !stop) {
+    if (stop) { this.cancelCallbacks(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); }
+    if (this.busy.has(target.conversationId) && !stop && !ownsBusy) {
       await this.reply(message, "上一条输入仍在处理中，请稍后重试；/stop 可取消当前准备和任务。", () => this.allowed(target, message.actorId)); return;
     }
-    if (!stop) this.busy.add(target.conversationId);
+    if (!stop && !ownsBusy) this.busy.add(target.conversationId);
     let stage: "command" | "render" | "reply" | "submit" = "command";
     try {
       if (command) {
@@ -246,7 +308,7 @@ export class QqMessages implements SurfaceOutputPort {
           return;
         }
         if (((command.name === "workspace" || command.name === "model" || command.name === "resume") && command.argumentsText.trim()) || command.name === "new") {
-          this.sources.cancelTarget(target); this.interactions.cancelTarget(target);
+          this.cancelCallbacks(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target);
         }
         const commandScope = this.scope(message.actorId);
         const hasSelectionMenu = ["workspace", "model", "sessions", "resume"].includes(command.name);
@@ -285,6 +347,10 @@ export class QqMessages implements SurfaceOutputPort {
           : undefined);
         return;
       }
+      if ("kind" in message) {
+        await this.reply(message, "此按钮操作不受支持，请重新打开 /help。", () => this.allowed(target, message.actorId));
+        return;
+      }
       const scope = this.scope(message.actorId);
       if (!scope) { await this.reply(message, "请先用 /workspace 选择已配置的工作区。", () => this.allowed(target, message.actorId)); return; }
       const reservation = this.sources.reserve(scope, message);
@@ -308,15 +374,17 @@ export class QqMessages implements SurfaceOutputPort {
         stage, emergencyStop: stop, errorType, errorCode, errorReason }, "QQ 操作未确认");
       await this.reply(message, error instanceof UserFacingError ? formatSurfaceUserFacingError(error, "QQ")
         : "操作未确认。请检查 /status、工作区和模型选择；本机日志可核对受控错误。", () => this.allowed(target, message.actorId));
-    } finally { if (!stop) this.busy.delete(target.conversationId); }
+    } finally { if (!stop && !ownsBusy) this.busy.delete(target.conversationId); }
   }
 
-  private async reply(message: QqInboundTextMessage, content: string, allowed: () => boolean,
+  private async reply(message: QqMessageInput, content: string, allowed: () => boolean,
     oversizedNotice?: string, keyboard?: QqCommandKeyboard): Promise<void> {
     // A send failure must not recursively send another reply with the same msg_seq.
     if (this.replied.has(message)) throw new Error("QQ 来信回复已尝试，不重复发送");
-    const input: QqTextMessage = { mode: "passive", recipient: message.actorId, content,
-      messageId: message.id, sequence: 1, sourceTimestampMs: message.sentAtMs };
+    const input: QqTextMessage = "kind" in message
+      ? { mode: "active", recipient: message.actorId, content }
+      : { mode: "passive", recipient: message.actorId, content,
+        messageId: message.id, sequence: 1, sourceTimestampMs: message.sentAtMs };
     if (oversizedNotice) {
       try { planText(input); }
       catch (error) {
@@ -329,7 +397,7 @@ export class QqMessages implements SurfaceOutputPort {
       ...(keyboard ? { representation: "markdown", keyboard } : { preferMarkdown: true }),
       signal: this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
-      reserve: parts => this.budget.reserve(message.actorId, parts),
+      reserve: parts => this.budget.reserve(message.actorId, parts, "kind" in message ? "interaction" : undefined),
     }, async () => {});
   }
   private target(actorId: string): ConversationTarget { return { surface: "qq", accountId: this.options.appId, conversationId: `c2c:${actorId}` }; }
@@ -345,7 +413,7 @@ export class QqMessages implements SurfaceOutputPort {
     return () => this.current(scope) && request.isCurrent!() === true
       && threads.some(threadId => this.options.ownsThread(target, threadId));
   }
-  private prepareAsyncAnswer(target: ConversationTarget, request: Extract<InteractionRequest, { type: "user-input" }>, message: QqInboundTextMessage): boolean {
+  private prepareAsyncAnswer(target: ConversationTarget, request: Extract<InteractionRequest, { type: "user-input" }>, message: QqMessageInput): boolean {
     const authorized = this.interactionAuthorization(target, request);
     if (!authorized?.() || this.asyncAnswers.has(request.requestId) || this.asyncAnswers.size >= 128) return false;
     const scope = this.scope(message.actorId);

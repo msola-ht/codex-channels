@@ -140,7 +140,7 @@ function parseIdentifier(value: unknown, field: "id" | "actor-id" | "msg-idx"): 
   return value;
 }
 
-function parseTimestamp(value: unknown): number | Rejection {
+export function parseTimestamp(value: unknown): number | Rejection {
   if (typeof value !== "string") return reject("malformed", "timestamp", "invalid-type");
   if (value.length > MAX_TIMESTAMP_BYTES || Buffer.byteLength(value, "utf8") > MAX_TIMESTAMP_BYTES) {
     return reject("too-large", "timestamp", "limit-exceeded");

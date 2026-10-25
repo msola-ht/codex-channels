@@ -6,7 +6,7 @@ import type { ConversationTarget } from "../../conversation-core/index.js";
 import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
 import { qqMenuButton } from "./command-menu.js";
 import type { QqCommandKeyboard } from "./protocol.js";
-import type { QqInboundTextMessage } from "./inbound.js";
+import type { QqMessageInput } from "./message-input.js";
 
 interface Pending {
   requestId: string;
@@ -27,8 +27,8 @@ export interface QqInteractionOptions {
   logger: Logger;
   /** Capture original actor/workspace/ownership before any asynchronous work. */
   authorize(target: ConversationTarget, request: InteractionRequest): (() => boolean) | undefined;
-  prepareAsyncAnswer(target: ConversationTarget, request: Extract<InteractionRequest, { type: "user-input" }>, message: QqInboundTextMessage): boolean;
-  send(target: ConversationTarget, content: string, controls: { content: string; keyboard: QqCommandKeyboard },
+  prepareAsyncAnswer(target: ConversationTarget, request: Extract<InteractionRequest, { type: "user-input" }>, message: QqMessageInput): boolean;
+  send(target: ConversationTarget, content: string, controls: { content: string; keyboard: QqCommandKeyboard; markdownContent?: string },
     signal: AbortSignal, current: () => boolean): Promise<void>;
 }
 
@@ -62,7 +62,7 @@ export class QqInteractions implements InteractionPort {
   }
 
   /** Reserved syntax is consumed even after expiry/restart, never submitted as a task. */
-  respond(target: ConversationTarget, message: QqInboundTextMessage): string | undefined {
+  respond(target: ConversationTarget, message: QqMessageInput): string | undefined {
     const { actorId, content: text } = message;
     if (!/^\s*\/respond(?:\s|$)/iu.test(text)) return undefined;
     const match = /^\s*\/respond ([A-Za-z0-9_-]{24}) (\d+) ([a-z]+\d*)(?: ([\s\S]*))?$/u.exec(text.trim());
@@ -197,12 +197,14 @@ export class QqInteractions implements InteractionPort {
   private check(current: () => boolean): boolean { try { return current() === true; } catch { return false; } }
 }
 
-function render(pending: Pending, token: string): { content: string; controls: { content: string; keyboard: QqCommandKeyboard } } {
+function render(pending: Pending, token: string): { content: string; controls: { content: string; keyboard: QqCommandKeyboard; markdownContent?: string } } {
   const request = pending.request;
   const prefix = `/respond ${token} ${pending.revision} `;
   const buttons: ReturnType<typeof qqMenuButton>[] = [];
   const add = (action: string, label: string, enter = true) => buttons.push(qqMenuButton(action, label, prefix + action + (enter ? "" : " "), enter));
   let content: string;
+  let markdownContent: string | undefined;
+  let instruction = "请核对完整详情，再选择授权范围。";
   if (request.type === "approval") {
     content = `${request.title}\n\n${request.detail}`;
     add("once", "允许一次");
@@ -214,9 +216,18 @@ function render(pending: Pending, token: string): { content: string; controls: {
     });
   } else if (request.type === "user-input") {
     const question = request.questions[pending.question]!;
-    content = `${request.title}\n\n问题 ${pending.question + 1}/${request.questions.length}：${question.header}\n${question.question}`;
-    content += question.options.map((option, index) => `\n选项 ${index + 1}：${option}`).join("");
+    const number = `问题 ${pending.question + 1}/${request.questions.length}`;
+    const heading = question.header.trim() && question.header.trim() !== number
+      ? `${number} · ${question.header.trim()}` : number;
+    content = `${request.title}\n\n${heading}\n\n${question.question}`;
+    content += question.options.map((option, index) => `\n\n${index + 1}. ${option}`).join("");
     if (question.secret) content += "\n请勿在 QQ 聊天记录中发送密钥、Token 或其他敏感凭据。";
+    markdownContent = `## ${request.title}\n\n### ${heading}\n\n${question.question}`
+      + question.options.map((option, index) => `\n\n${index + 1}. ${option}`).join("")
+      + (question.secret ? "\n\n请勿在 QQ 聊天记录中发送密钥、Token 或其他敏感凭据。" : "");
+    instruction = question.options.length === 0
+      ? "点击“输入回答”，在填入的前缀后追加回答并发送。"
+      : question.allowOther ? "请选择选项，或点击“输入回答”，在填入的前缀后追加回答并发送。" : "请选择下方选项。";
     for (let index = pending.page * 10; index < Math.min(question.options.length, (pending.page + 1) * 10); index++) add(`option${index}`, `选项 ${index + 1}`);
     if (pending.page > 0) add("prev", "上一页");
     if ((pending.page + 1) * 10 < question.options.length) add("next", "下一页");
@@ -228,16 +239,21 @@ function render(pending: Pending, token: string): { content: string; controls: {
       add("once", "允许一次");
       if (request.toolApproval?.allowSession) add("session", "本会话允许");
       if (request.toolApproval?.allowAlways) add("always", "始终允许");
-    } else if (request.mode === "form") add("text", "输入 JSON", false);
-    else { content += `\n${request.url ?? ""}`; add("done", "已完成"); }
+    } else if (request.mode === "form") {
+      add("text", "输入 JSON", false);
+      instruction = "点击“输入 JSON”，在填入的前缀后追加 JSON 对象并发送。";
+    } else { content += `\n${request.url ?? ""}`; add("done", "已完成"); instruction = "完成上方操作后，点击“已完成”。"; }
   }
-  add("cancel", request.type === "approval" ? "拒绝" : "取消交互");
+  add("cancel", request.type === "approval" ? "拒绝" : request.type === "user-input" ? "取消回答" : "取消交互");
   if (buttons.length > 15) throw new Error("QQ 交互按钮容量不足");
   const rows: QqCommandKeyboard["content"]["rows"] = [];
   for (let index = 0; index < buttons.length; index += 3) rows.push({ buttons: buttons.slice(index, index + 3) });
-  return { content: `特殊字符使用转义表示：双反斜杠表示一个反斜杠，\\u{码点} 表示对应字符。\n\n${literal(content)}`, controls: {
-    content: "## 请核对上方完整请求\n选择下方按钮回应。输入回答会填入专属前缀，请保留前缀后追加内容并发送。\n超时、取消、已处理或重启后的按钮无效。",
+  const escaped = literal(content);
+  return { content: escaped === content ? content
+    : `特殊字符使用转义表示：双反斜杠表示一个反斜杠，\\u{码点} 表示对应字符。\n\n${escaped}`, controls: {
+    content: instruction,
     keyboard: { content: { rows } },
+    ...(markdownContent === undefined ? {} : { markdownContent }),
   } };
 }
 

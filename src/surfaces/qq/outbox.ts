@@ -28,7 +28,7 @@ export class QqTextOutbox {
   async deliver(
     input: QqTextMessage,
     context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; keyboard?: QqCommandKeyboard; allowResultFile?: boolean;
-      interactionControls?: { content: string; keyboard: QqCommandKeyboard };
+      interactionControls?: { content: string; keyboard: QqCommandKeyboard; markdownContent?: string };
       reserve?(parts: number): {
       runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
     } },
@@ -93,10 +93,26 @@ export class QqTextOutbox {
       }
       if (context.interactionControls) {
         const controls = planText({ ...input, content: context.interactionControls.content });
-        if (controls.length !== 1 || parts.length >= MAX_PARTS) throw new QqProtocolError("message", "invalid-input");
-        // Reserve the entire preview and final controls before the first send.
-        // Only the trusted final panel is Markdown; privileged details stay literal.
-        parts = [...parts, controls[0]!];
+        if (controls.length !== 1) throw new QqProtocolError("message", "invalid-input");
+        const candidate = context.interactionControls.markdownContent;
+        let formatted: readonly QqTextMessage[] | undefined;
+        if (candidate !== undefined) {
+          const combined = { ...input, content: `${candidate}\n\n${context.interactionControls.content}` };
+          // Validate the full candidate before optional Markdown planning. No
+          // clipping or partial Markdown: unsafe/oversized candidates use the
+          // already validated literal preview and separate controls instead.
+          try { planText(combined); formatted = planQqMessageMarkdown(combined); }
+          catch (error) {
+            if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
+          }
+        }
+        if (formatted && formatted.length <= parts.length + 1 && formatted.length <= MAX_PARTS) {
+          parts = formatted;
+          markdown = true;
+        } else {
+          if (parts.length >= MAX_PARTS) throw new QqProtocolError("message", "invalid-input");
+          parts = [...parts, controls[0]!];
+        }
       }
       const first = parts[0]!;
       if (first.mode === "passive") {
