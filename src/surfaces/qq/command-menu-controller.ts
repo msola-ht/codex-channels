@@ -17,6 +17,7 @@ import { formatServiceTierSetting } from "../provider-format.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import { formatThreadQueueInputTypeLabel } from "../conversation-session-command-format.js";
 import { formatQqLiteralDetails } from "./interactions.js";
+import { qqLiteralMarkdown } from "./message-markdown.js";
 import { qqMenuButton, renderQqCommandMenu, type QqMenuButton } from "./command-menu.js";
 import type { QqCommandKeyboard } from "./protocol.js";
 import { QqProtocolError } from "./protocol.js";
@@ -504,7 +505,8 @@ export class QqCommandMenuController {
       this.clearQueueSelections(context.target);
       throw new UserFacingError("queue.failed", "Queue 条目详情超出完整展示预算，请在本机核对。");
     }
-    return { ...panel, detail: literal, delivered: () => this.activate(context, buttons) };
+    const markdownDetail = qqLiteralMarkdown(detail);
+    return { ...panel, detail: literal, ...(markdownDetail === undefined ? {} : { markdownDetail }), delivered: () => this.activate(context, buttons) };
   }
 
   private extensionPanel(context: MenuContext, view: QqExtensionView): QqMenuPanel {
@@ -647,8 +649,11 @@ export class QqCommandMenuController {
     const selection = this.selections.get(confirm.id)!;
     const panel = this.panel(current, { content: "## 确认历史回退\n请核对上方完整预览。仅回退历史，不恢复文件或外部副作用。",
       keyboard: { content: { rows: [{ buttons: [confirm, qqMenuButton("refresh", "重新查看历史", "/revert list"), homeButton()] }] } } });
+    const detail = renderConversationCommandResult(result)!;
+    const markdownDetail = qqLiteralMarkdown(detail);
     return { ...panel, isCurrent: () => panel.isCurrent() && this.selections.get(confirm.id) === selection,
-      detail: formatQqLiteralDetails(renderConversationCommandResult(result)!), delivered: () => {
+      detail: formatQqLiteralDetails(detail),
+      ...(markdownDetail === undefined ? {} : { markdownDetail }), delivered: () => {
       if (this.selections.get(confirm.id) === selection && this.current(selection)) selection.ready = true;
     } };
   }

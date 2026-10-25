@@ -9,6 +9,7 @@ import { formatConversationScheduledConfirmation, formatConversationScheduledTas
 import { qqMenuButton, type QqMenuButton } from "./command-menu.js";
 import type { QqMenuPanel } from "./command-menu-controller.js";
 import { formatQqLiteralDetails } from "./interactions.js";
+import { qqLiteralMarkdown } from "./message-markdown.js";
 import { planText } from "./outbox.js";
 import { QqProtocolError } from "./protocol.js";
 
@@ -150,7 +151,9 @@ export class QqScheduleMenu {
     if (literal !== undefined && planText({ mode: "active", recipient: context.actorId, content: literal }).length > 7) {
       throw new UserFacingError("scheduled-task.state.invalid", "计划任务详情超出 QQ 完整展示预算，请在本机核对。");
     }
+    const markdownDetail = detail === undefined ? undefined : qqLiteralMarkdown(detail);
     return { content, keyboard: { content: { rows } }, ...(literal === undefined ? {} : { detail: literal }),
+      ...(markdownDetail === undefined ? {} : { markdownDetail }),
       isCurrent: () => this.current(context), signal: context.signal };
   }
 
@@ -176,7 +179,7 @@ export class QqScheduleMenu {
       if (list.page > 1) buttons.push(this.command(context, "上一页", `list ${list.page - 1}`));
       if (list.page < list.pageCount) buttons.push(this.command(context, "下一页", `list ${list.page + 1}`));
       buttons.push(qqMenuButton("scheduleadd", "填写计划需求", "/schedule ", false));
-      return this.panel(context, "选择任务查看运行记录与管理选项。新增需求须写明时区。", buttons, formatConversationScheduledTasks(result));
+      return this.panel(context, "选择任务查看运行记录与管理选项。新增需求须写明时区。", buttons, formatConversationScheduledTasks(result, "snapshot", "buttons"));
     }
     if (result.kind === "scheduled-runs") {
       const { task, runs, page, pageCount } = result.result;
@@ -194,7 +197,7 @@ export class QqScheduleMenu {
       buttons.push(...navigation);
       // The remaining uncertain Run IDs remain available in the full literal details.
       return this.panel(context, "暂停、删除不会停止已运行任务；/stop 操作当前前台任务。结果未知时先核对 Run，再显式重试。",
-        buttons, formatConversationScheduledRuns(result));
+        buttons, formatConversationScheduledRuns(result, "snapshot", "buttons"));
     }
     const text = result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome) : renderConversationCommandResult(result);
     if (!text) throw new UserFacingError("scheduled-task.state.invalid", "计划任务没有可交付结果。");

@@ -28,6 +28,7 @@ import { QqCommandMenuController } from "./command-menu-controller.js";
 import { QqScheduleMenu } from "./schedule-menu.js";
 import { QqPrivilegedManagementMenu } from "./privileged-management-menu.js";
 import { qqBodyMarkdownPrefix } from "./body-markdown.js";
+import { planQqMessageMarkdown, qqLiteralMarkdown } from "./message-markdown.js";
 import { QqInteractions } from "./interactions.js";
 import { isQqExtensionOperation, isQqTaskCommand } from "./extension-commands.js";
 import type { QqImageStore } from "./image-store.js";
@@ -157,7 +158,8 @@ export class QqMessages implements SurfaceOutputPort {
     const panel = this.schedules.present(target, actorId, preview);
     const recipient = qqConversationRecipient(target.conversationId);
     const task = this.outbox.deliver({ mode: "active", recipient, content: panel.detail ?? panel.content }, {
-      interactionControls: { content: panel.content, keyboard: panel.keyboard },
+      interactionControls: { content: panel.content, keyboard: panel.keyboard,
+        ...(panel.markdownDetail === undefined ? {} : { markdownContent: panel.markdownDetail }) },
       signal: AbortSignal.any([this.lifetime.signal, panel.signal ?? this.lifetime.signal]),
       beforeSend: () => { if (!panel.isCurrent()) throw new Error("QQ 计划任务预览授权失效"); },
       reserve: parts => this.budget.reserve(recipient, parts, "interaction"),
@@ -670,7 +672,7 @@ export class QqMessages implements SurfaceOutputPort {
         }, QUERY_COMMANDS.has(command.name)
           ? command.name === "diff" ? "Diff 无法在本次 QQ 回复中完整展示，本次仅发送此提示。请在原生 Codex 会话查看。"
             : "查询结果无法在本次 QQ 回复中完整展示，本次仅发送此提示。统计可缩小 /metrics 查询范围，或在本机 WebUI 查看；账户信息也可从其他已接入渠道查询。"
-          : undefined);
+          : undefined, undefined, undefined, undefined, undefined, result.kind === "artifacts");
         return;
       }
       if ("kind" in message) {
@@ -767,7 +769,7 @@ export class QqMessages implements SurfaceOutputPort {
   }
 
   private async reply(message: QqMessageInput, content: string, allowed: () => boolean,
-    oversizedNotice?: string, keyboard?: QqCommandKeyboard, detail?: string, markdownDetail?: string, cancellation?: AbortSignal): Promise<void> {
+    oversizedNotice?: string, keyboard?: QqCommandKeyboard, detail?: string, markdownDetail?: string, cancellation?: AbortSignal, preserveLiteral = false): Promise<void> {
     // A send failure must not recursively send another reply with the same msg_seq.
     if (this.replied.has(message)) throw new Error("QQ 来信回复已尝试，不重复发送");
     const recipient = qqConversationRecipient(message.conversationId);
@@ -783,9 +785,19 @@ export class QqMessages implements SurfaceOutputPort {
       }
     }
     this.replied.add(message);
+    // Diff is source text, not authored Markdown. Only render a complete fenced
+    // candidate; otherwise retain the original text without interpreting it.
+    if (preserveLiteral) {
+      const candidate = qqLiteralMarkdown(input.content);
+      const plan = candidate === undefined ? undefined : planQqMessageMarkdown({ ...input, content: candidate });
+      if (plan && plan.length <= planText(input).length) {
+        input.content = candidate!;
+        preserveLiteral = false;
+      }
+    }
     await this.outbox.deliver(input, {
       ...(detail !== undefined && keyboard ? { interactionControls: { content, keyboard, ...(markdownDetail !== undefined ? { markdownContent: markdownDetail } : {}) } }
-        : keyboard ? { representation: "markdown", keyboard } : { preferMarkdown: true }),
+        : keyboard ? { representation: "markdown", keyboard } : { preferMarkdown: !preserveLiteral }),
       signal: cancellation ? AbortSignal.any([this.lifetime.signal, cancellation]) : this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
       reserve: parts => this.budget.reserve(recipient, parts, "kind" in message || detail !== undefined ? "interaction" : undefined),

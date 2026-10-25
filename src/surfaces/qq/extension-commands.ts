@@ -66,12 +66,12 @@ export function renderQqExtensionCommand(result: ConversationCommandResult, page
     case "skills": {
       if (!paginate(result.entries.length, "skill", "")) return;
       choices.unshift(...result.entries.slice((page - 1) * 8, page * 8).flatMap(skill => skill.invocable === true ? taskChoice("skill", skill.name, skill.name) : []));
-      return { detail: `第 ${page} 页 · 共 ${result.entries.length} 项\n${formatConversationSkills({ ...result, entries: result.entries.slice((page - 1) * 8, page * 8) }, true)}\n使用：/skill <完整名称> <任务>；本页序号仅用于展示。`, choices };
+      return { detail: `第 ${page} 页 · 共 ${result.entries.length} 项\n${formatConversationSkills({ ...result, entries: result.entries.slice((page - 1) * 8, page * 8) }, true)}\n使用 /skill，依次填写完整名称和任务；本页序号仅用于展示。`, choices };
     }
     case "agents": {
       if (!paginate(result.roles.length, "agents", "")) return;
       choices.unshift(...result.roles.slice((page - 1) * 8, page * 8).flatMap(role => taskChoice("agents", role.name, role.name)));
-      return { detail: `第 ${page} 页 · 共 ${result.roles.length} 项\n${formatConversationAgents({ ...result, roles: result.roles.slice((page - 1) * 8, page * 8) }, true)}\n使用：/agents <完整角色名称> <任务>；本页序号仅用于展示。`, choices };
+      return { detail: `第 ${page} 页 · 共 ${result.roles.length} 项\n${formatConversationAgents({ ...result, roles: result.roles.slice((page - 1) * 8, page * 8) }, true)}\n使用 /agents，依次填写完整角色名称和任务；本页序号仅用于展示。`, choices };
     }
     case "plugins": {
       result.plugins.forEach((plugin, index) => choices.push({ label: plugin.displayName, command: "plugin", input: result.selectors[index]!, expectedName: plugin.id }));
@@ -84,7 +84,7 @@ export function renderQqExtensionCommand(result: ConversationCommandResult, page
       if (result.plugin.enabled && result.plugin.available && !["list", "health"].includes(result.plugin.id)) {
         choices.push(...taskChoice("plugin", "填写插件任务", result.plugin.id));
       }
-      return { detail: `${formatConversationPluginDetail(result, true)}\n使用：/plugin <完整 ID> <任务>。`, choices };
+      return { detail: `${formatConversationPluginDetail(result, true)}\n使用 /plugin，依次填写完整 ID 和任务。`, choices };
     }
     case "plugin-health": return { detail: formatConversationPluginHealth(result), choices };
     case "mcp": {

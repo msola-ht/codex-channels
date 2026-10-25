@@ -2,11 +2,20 @@ import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 import { qqBodyMarkdownPrefix } from "./body-markdown.js";
 import { QQ_TEXT_PART_BYTES, type QqTextMessage } from "./protocol.js";
 
+/** Preserve exact review/code text inside a fixed fence. Unsupported platform
+ * syntax, invisible characters and fence collisions retain the literal path. */
+export function qqLiteralMarkdown(content: string): string | undefined {
+  if (content.includes("```") || /[\p{Cf}\p{Cc}]/u.test(content.replace(/\n/gu, ""))) return undefined;
+  const candidate = `\`\`\`text\n${content}\n\`\`\``;
+  return qqBodyMarkdownPrefix(candidate, true) === candidate ? candidate : undefined;
+}
+
 /** Optional representation for already validated notifications and command text.
  * Choose the whole plan before sending; never downgrade after a network attempt.
  */
 export function planQqMessageMarkdown(input: QqTextMessage): readonly QqTextMessage[] | undefined {
   const text = input.content;
+  if (/[\p{Cf}\p{Cc}]/u.test(text.replace(/\n/gu, ""))) return undefined;
   if (qqBodyMarkdownPrefix(text, true) !== text) return undefined;
   if (Buffer.byteLength(text) <= QQ_TEXT_PART_BYTES) return [{ ...input }];
   const budget = QQ_TEXT_PART_BYTES - Buffer.byteLength("**1/8**\n");
