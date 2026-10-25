@@ -178,7 +178,7 @@ export class QqScheduleMenu {
       const buttons = list.tasks.map((task, index) => this.command(context, `任务 ${list.selectors[index] ?? index + 1}`, `runs ${task.taskId}`));
       if (list.page > 1) buttons.push(this.command(context, "上一页", `list ${list.page - 1}`));
       if (list.page < list.pageCount) buttons.push(this.command(context, "下一页", `list ${list.page + 1}`));
-      buttons.push(qqMenuButton("scheduleadd", "填写计划需求", "/schedule ", false));
+      buttons.push(qqMenuButton("scheduleadd", "新增计划任务", "/help schedule-create"));
       return this.panel(context, "选择任务查看运行记录与管理选项。新增需求须写明时区。", buttons, formatConversationScheduledTasks(result, "snapshot", "buttons"));
     }
     if (result.kind === "scheduled-runs") {

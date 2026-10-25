@@ -15,6 +15,7 @@ import { conversationTargetKey, UserFacingError, type ConversationTarget } from 
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTierSetting } from "../provider-format.js";
+import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import { formatThreadQueueInputTypeLabel } from "../conversation-session-command-format.js";
 import { formatQqLiteralDetails } from "./interactions.js";
@@ -120,6 +121,16 @@ export class QqCommandMenuController {
     const input = argumentsText.trim();
     const context = this.context(target, actorId);
     if (!input) return this.panel(context, renderQqCommandMenu());
+    if (input === "schedule-create") return this.panel(context, {
+      content: "# 新增计划任务\n选择周期类型后，在填入的命令后补齐参数并发送。\n每隔：间隔 时区 任务\n一次性：日期 时间 时区 任务\n每月：日 时间 时区 任务\n每天、工作日：时间 时区 任务\n每周：星期 时间 时区 任务\n时间使用 HH:mm，日期使用 YYYY-MM-DD；间隔如 30m，星期如 MO,FR。时区请明确填写，例如 Asia/Shanghai。\n创建前会展示工作区、提供商、模型等执行上下文预览，确认后才创建。",
+      keyboard: { content: { rows: [
+        { buttons: [qqMenuButton("interval", "每隔一段时间", "/schedule add interval ", false), qqMenuButton("once", "一次性", "/schedule add once ", false)] },
+        { buttons: [qqMenuButton("monthly", "每月指定日", "/schedule add monthly ", false), qqMenuButton("daily", "每天", "/schedule add daily ", false)] },
+        { buttons: [qqMenuButton("weekdays", "工作日", "/schedule add weekdays ", false), qqMenuButton("weekly", "每周指定日", "/schedule add weekly ", false)] },
+        { buttons: [qqMenuButton("natural", "填写自然语言需求", "/schedule ", false), qqMenuButton("schedule", "计划任务列表", "/schedule list")] },
+        { buttons: [homeButton()] },
+      ] } },
+    });
     if (input === "account") return this.panel(context, {
       content: "# 账户工具\n查看额度、重置券或当前渠道身份。机器人接入与群授权请在本机 Setup 管理。",
       keyboard: { content: { rows: [
@@ -699,11 +710,12 @@ export class QqCommandMenuController {
     context = { ...context, selectionScope: snapshot.selectionScope };
     const selected = state.models.find(model => model.model === state.model
       && (model.provider ?? "openai") === (state.modelProvider ?? "openai") && model.available !== false);
+    const current = `当前模型：${markdown(selected?.displayName ?? state.model, 100)}\n提供商：${markdown(formatCodexProviderLabel(state.modelProvider), 100)}\n${reasoningEffortSettingName(state.effort, selected)}：${markdown(formatReasoningEffort(state.effort ?? selected?.defaultReasoningEffort), 40)}\n速度：${markdown(formatServiceTierSetting(state, selected), 200)}\n`;
     if (view !== "model") {
       if (!selected && view === "effort") throw expired();
       const choices: Array<{ label: string; selection: ModelSelectionRequest }> = view === "effort"
         ? selected!.supportedReasoningEfforts.map(option => ({
-          label: `${option.effort === state.effort ? "当前 " : ""}${option.effort}`,
+          label: `${option.effort === (state.effort ?? selected?.defaultReasoningEffort) ? "当前 " : ""}${formatReasoningEffort(option.effort)}`,
           selection: { kind: "effort", effort: option.effort, snapshot },
         }))
         : [
@@ -717,11 +729,10 @@ export class QqCommandMenuController {
       if (view === "effort" && selected && (fastServiceTierId(selected) || ultrafastServiceTierId(selected))) {
         extra.push(this.button(context, "选择速度", { kind: "model-page", page: 1, view: "fast", snapshot }));
       }
-      return this.listPanel(context, view === "effort" ? "选择思考等级" : "选择速度",
-        [`当前模型：${markdown(selected?.displayName ?? state.model ?? "未知", 100)}`, ...(view === "fast" ? [`速度：${markdown(formatServiceTierSetting(state, selected), 200)}`, "速度影响下一轮；主 Provider 同时更新 Codex 用户级默认速度。"] : []), ...entries.map(choice => markdown(choice.label, 100))],
+      return this.listPanel(context, view === "effort" ? `选择${reasoningEffortSettingName(state.effort, selected)}` : "选择速度",
+        [current, ...(view === "fast" ? ["速度影响下一轮；主 Provider 同时更新 Codex 用户级默认速度。"] : []), ...entries.map(choice => markdown(choice.label, 100))],
         buttons, page, Math.ceil(choices.length / 9), next => ({ kind: "model-page", page: next, view, snapshot }), extra);
     }
-    const current = `当前模型：${markdown(selected?.displayName ?? state.model, 100)}\n提供商：${markdown(formatCodexProviderLabel(state.modelProvider), 100)}\n思考等级：${markdown(state.effort ?? selected?.defaultReasoningEffort ?? "模型默认", 40)}\n速度：${markdown(formatServiceTierSetting(state, selected), 200)}\n`;
     if (state.providerFilter === undefined) {
       const providers = listProviders(state.models);
       const entries = slicePage(providers, page, 9);
