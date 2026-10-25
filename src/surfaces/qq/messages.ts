@@ -48,6 +48,7 @@ export interface QqMessageOptions {
   actors: ConversationActorRegistry;
   ownsThread(target: ConversationTarget, threadId: string): boolean;
   logger: Logger;
+  debugEnabled?: boolean;
   images?: Pick<QqImageStore, "prepare">;
   files?: Pick<QqFileInput, "prepare">;
   media?: Pick<QqMediaInput, "prepare" | "retain" | "discard">;
@@ -243,7 +244,7 @@ export class QqMessages implements SurfaceOutputPort {
       return;
     }
     if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
-    let text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.autoCompactPercent);
+    let text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent);
     let continuation = false;
     let checkpointFailed = false;
     const record = async (value: DeliveryCheckpoint) => {
@@ -618,6 +619,13 @@ export class QqMessages implements SurfaceOutputPort {
         const menuScope = hasSelectionMenu ? this.menuScope(target) : undefined;
         const menuWorkspaceScope = hasSelectionMenu ? this.menuWorkspaceScope(target) : undefined;
         const queryStatus = QUERY_COMMANDS.has(command.name) ? this.options.service.status(target) : undefined;
+        const queryCurrent = () => {
+          if (!queryStatus) return true;
+          const current = this.options.service.status(target);
+          return current.threadId === queryStatus.threadId
+            && (command.name !== "usage" && command.name !== "limits"
+              || current.modelProvider === queryStatus.modelProvider && !current.sessionRestoring);
+        };
         const fixedScope = !taskCommand && ["effort", "fast", "plan", "goal", "permissions", "autoreview"].includes(command.name) ? this.menuScope(target) : undefined;
         const goalThread = command.name === "goal" ? this.readyThread(target) : undefined;
         if (command.name === "goal" && !goalThread) {
@@ -631,22 +639,39 @@ export class QqMessages implements SurfaceOutputPort {
             || goalThread !== undefined && this.readyThread(target) !== goalThread) throw new UserFacingError("command.selection.expired", "菜单已失效，请重新发送 /help 打开菜单。");
         };
         const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "rename" | "archived" | "archive" | "unarchive" | "pin" | "unpin" | "compact" | "fork" | "review" | "usage" | "limits" | "metrics" | "diff" | "effort" | "fast" | "plan" | "goal" | "permissions" | "autoreview" | "skill" | "agents" | "plugin" | "mcp" | "hooks" | "release", command.argumentsText, message.actorId, assertCurrent, commandTicket?.observer);
-        const sessionReplyScope = ["rename", "archive", "unarchive", "pin", "unpin", "compact", "fork"].includes(command.name)
+        const sessionReplyScope = taskCommand || ["rename", "archive", "unarchive", "pin", "unpin", "compact", "fork"].includes(command.name)
           ? this.menuScope(target) : undefined;
         stage = "render";
         const scope = command.name === "workspace" && command.argumentsText.trim() ? this.scope(message.actorId, target.conversationId) : commandScope;
-        const menu = taskCommand ? undefined : this.menus.fromResult(target, message.actorId, result);
+        let menu = taskCommand ? undefined : this.menus.fromResult(target, message.actorId, result);
+        if (menu && QUERY_COMMANDS.has(command.name)) {
+          // Adding buttons must preserve the original query's complete-result
+          // budget and oversized notice, including passive reply limits.
+          try {
+            const query = renderConversationCommandResult(result)!;
+            planText("kind" in message
+              ? { mode: "active", recipient: qqConversationRecipient(message.conversationId), content: query }
+              : { mode: "passive", recipient: qqConversationRecipient(message.conversationId), content: query,
+                messageId: message.id, sequence: 1, sourceTimestampMs: message.sentAtMs });
+            if (planText({ mode: "active", recipient: qqConversationRecipient(message.conversationId),
+              content: menu.detail ?? menu.content }).length > 7) menu = undefined;
+          } catch (error) {
+            if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
+            menu = undefined;
+          }
+        }
         if (menu) {
+          const panel = menu;
           stage = "reply";
-          await this.reply(message, menu.content, () => {
+          await this.reply(message, panel.content, () => {
             const sameContext = result.kind === "models" && command.argumentsText.trim()
               ? this.menuWorkspaceScope(target) === menuWorkspaceScope && !!result.state.selectionScope
                 && result.state.selectionScope === this.options.service.status(target).selectionScope
               : this.menuScope(target) === menuScope;
-            return sameContext && menu.isCurrent() && this.allowed(target, message.actorId)
+            return sameContext && panel.isCurrent() && queryCurrent() && this.allowed(target, message.actorId)
               && (extensionScope === undefined || this.extensionQueryScope(target) === extensionScope);
-          }, undefined, menu.keyboard, menu.detail, menu.markdownDetail);
-          menu.delivered?.();
+          }, undefined, panel.keyboard, panel.detail, panel.markdownDetail);
+          panel.delivered?.();
           return;
         }
         const text = result.kind === "outcome" && result.outcome.type === "thread.compaction-requested"
@@ -659,16 +684,13 @@ export class QqMessages implements SurfaceOutputPort {
         stage = "reply";
         await this.reply(message, text, () => {
           if (!scope || !this.current(scope)) return false;
+          if (commandTicket?.signal.aborted) return false;
           if (fixedScope !== undefined && this.menuScope(target) !== fixedScope
             || goalThread !== undefined && this.readyThread(target) !== goalThread) return false;
           if (sessionReplyScope !== undefined && this.menuScope(target) !== sessionReplyScope) return false;
           if (result.kind === "outcome" && result.outcome.type === "thread.forked"
             && this.options.service.status(target).threadId !== result.outcome.threadId) return false;
-          if (!queryStatus) return true;
-          const current = this.options.service.status(target);
-          if (current.threadId !== queryStatus.threadId) return false;
-          return command.name !== "usage" && command.name !== "limits"
-            || (current.modelProvider === queryStatus.modelProvider && !current.sessionRestoring);
+          return queryCurrent();
         }, QUERY_COMMANDS.has(command.name)
           ? command.name === "diff" ? "Diff 无法在本次 QQ 回复中完整展示，本次仅发送此提示。请在原生 Codex 会话查看。"
             : "查询结果无法在本次 QQ 回复中完整展示，本次仅发送此提示。统计可缩小 /metrics 查询范围，或在本机 WebUI 查看；账户信息也可从其他已接入渠道查询。"

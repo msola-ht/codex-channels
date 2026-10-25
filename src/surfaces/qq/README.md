@@ -45,7 +45,7 @@
   问题保留原正文 Markdown、选项与必要输入提示，去除重复题号；提供完整字面预览作为发送前备选。审批不改为 Markdown，转义说明仅在内容确实发生转义时展示。
 - `bot-menu.ts`：应用级常驻菜单的严格结构校验与 Codex 入口追加计划；保留现有菜单，拒绝同名冲突、未知结构与容量不足。
   接受并保留实测由 QQ 补充的 send_message HTTPS icon；新项回读允许补图标，既有项及确认快照仍精确比较。
-- `lifecycle.ts`：复用共享上线信息与 Turn 完成统计，输出结构化 Markdown 标题和列表，由 Outbox 预选表示；完成通知不承诺正文已全部送达。不新增任务开始通知。
+- `lifecycle.ts`：直接将共享上线信息与 Turn 完成统计交给共享结构化渲染器，保留分组/嵌套字段；不经纯文本再转 Markdown，不附加每次上线/完成的 QQ 固定尾注。Bootstrap 将统一日志等级的 debug 开关传入启动和完成通知；Outbox 仍负责表示预选及原发送预算。正文失败提示保留在实际失败路径，任务完成不等于正文送达。不新增任务开始通知。
 - `surface.ts`：文字 Adapter，接入共享启停与故障重试；每代次拥有独立网络、Token、WebSocket 和 messages。
   capabilities 启用共享绑定、订阅恢复、交互和计划任务；`configurationNotifications: false` 只排除持久 Workspace 配置事件重放，当次 `configurationChanged` 仍主动通知。交互仍经过共享持久投递屏障，持久结果使用共享投递账号。
   关闭取消来源、交互及未发文字，不终止共享 App Server。无法路由、归属失效或展示失败的交互使用共享安全决定。

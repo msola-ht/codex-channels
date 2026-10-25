@@ -38,6 +38,7 @@ import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
 import type { ScheduledTaskOperationContext } from "../scheduled-tasks/index.js";
 import { resolveProvider, type ModelSelectionIdentity, type ModelSelectionRequest, type ModelSelectionState } from "./model-selection-service.js";
 import { pageCountFor, pageSlice } from "./pagination.js";
+import { sessionListPageSize } from "./conversation-session-query-service.js";
 
 export {
   parseThreadRevertOperation,
@@ -93,7 +94,6 @@ export const conversationCommandNames = [
 
 export type ConversationCommandName = typeof conversationCommandNames[number];
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
-const maximumSessionListEntries = 10;
 const maximumPluginListEntries = 8;
 
 export type ConversationCommandUseCases =
@@ -1206,10 +1206,10 @@ function sessionListResult(
     backgroundThreadIds?: string[];
   },
 ): Extract<ConversationCommandResult, { kind: "sessions" }> {
-  const pageCount = pageCountFor(sessions.length, maximumSessionListEntries);
+  const pageCount = pageCountFor(sessions.length, sessionListPageSize);
   return {
     kind: "sessions",
-    sessions: pageSlice(sessions, view.page, maximumSessionListEntries, pageCount),
+    sessions: pageSlice(sessions, view.page, sessionListPageSize, pageCount),
     archived: metadata.archived,
     page: view.page,
     pageCount,

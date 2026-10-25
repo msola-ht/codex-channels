@@ -138,6 +138,7 @@ function createQqModule(
     uploadsDirectory: join(dirname(options.config.stateDatabasePath), "uploads"),
     service: options.service, commands: options.commands, actors: options.bindings,
     autoCompactPercent: options.autoCompactPercent,
+    debugEnabled: isDebugLogLevel(options.config.logLevel),
     configurationNotification: { recipients: () => [...notificationRecipients] },
     startupNotification: {
       recipients: () => [...notificationRecipients],
@@ -146,6 +147,7 @@ function createQqModule(
         const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
         return renderQqStartupNotification(options.config.workspaces, status, {
           platform: process.platform, architecture: process.arch,
+          debugEnabled: isDebugLogLevel(options.config.logLevel),
           gatewayVersion: options.gatewayVersion, nodeVersion: process.version,
           transport: "Unix WebSocket", codexUpstreamUserAgent: options.codexUpstreamUserAgent() ?? null,
           ...(options.config.codexTimezone === undefined ? {} : { appServerTimezone: options.config.codexTimezone }),

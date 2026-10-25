@@ -199,7 +199,7 @@ export class QqCommandMenuController {
 
   fromResult(target: ConversationTarget, actorId: string, result: ConversationCommandResult): QqMenuPanel | undefined {
     if (result.kind === "status" || result.kind === "limits" && result.result.kind === "rate-limits") {
-      const context = this.context(target, actorId);
+      const context = { ...this.context(target, actorId), queryScope: this.options.queryScope(target) };
       const buttons = result.kind === "status"
         ? [qqMenuButton("model", "模型设置", "/model"), qqMenuButton("workspace", "工作区", "/workspace"),
           qqMenuButton("permissions", "权限查询", "/permissions"), qqMenuButton("autoreview", "会话审批方式", "/autoreview")]
