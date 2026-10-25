@@ -5,7 +5,7 @@ import { conversationTargetKey, UserFacingError, type ConversationTarget } from 
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { formatConversationScheduledConfirmation, formatConversationScheduledTasks,
-  formatConversationScheduledRuns } from "../conversation-scheduled-task-command-format.js";
+  formatConversationScheduledRuns, formatScheduledTaskStatusLabel, formatSchedule, formatScheduledAt } from "../conversation-scheduled-task-command-format.js";
 import { qqMenuButton, type QqMenuButton } from "./command-menu.js";
 import type { QqMenuPanel } from "./command-menu-controller.js";
 import { formatQqLiteralDetails } from "./interactions.js";
@@ -141,7 +141,7 @@ export class QqScheduleMenu {
     return this.button(context, label, { kind: "command", input });
   }
 
-  private panel(context: Context, content: string, buttons: QqMenuButton[], detail?: string): QqMenuPanel {
+  private panel(context: Context, content: string, buttons: QqMenuButton[], detail?: string, structured = false): QqMenuPanel {
     context.assertCurrent();
     const rows: { buttons: QqMenuButton[] }[] = [];
     for (let index = 0; index < buttons.length; index += 3) rows.push({ buttons: buttons.slice(index, index + 3) });
@@ -151,7 +151,7 @@ export class QqScheduleMenu {
     if (literal !== undefined && planText({ mode: "active", recipient: context.actorId, content: literal }).length > 7) {
       throw new UserFacingError("scheduled-task.state.invalid", "计划任务详情超出 QQ 完整展示预算，请在本机核对。");
     }
-    const markdownDetail = detail === undefined ? undefined : qqLiteralMarkdown(detail);
+    const markdownDetail = detail === undefined ? undefined : structured ? detail : qqLiteralMarkdown(detail);
     return { content, keyboard: { content: { rows } }, ...(literal === undefined ? {} : { detail: literal }),
       ...(markdownDetail === undefined ? {} : { markdownDetail }),
       isCurrent: () => this.current(context), signal: context.signal };
@@ -175,11 +175,12 @@ export class QqScheduleMenu {
     if (result.kind === "scheduled-confirmation") return this.confirmation(context, result.preview);
     if (result.kind === "scheduled-tasks") {
       const list = result.result;
-      const buttons = list.tasks.map((task, index) => this.command(context, `任务 ${list.selectors[index] ?? index + 1}`, `runs ${task.taskId}`));
+      const buttons = list.tasks.map((task, index) => this.command(context,
+        shortLabel(`${list.selectors[index] ?? index + 1} ${task.name}`), `runs ${task.taskId}`));
       if (list.page > 1) buttons.push(this.command(context, "上一页", `list ${list.page - 1}`));
       if (list.page < list.pageCount) buttons.push(this.command(context, "下一页", `list ${list.page + 1}`));
       buttons.push(qqMenuButton("scheduleadd", "新增计划任务", "/help schedule-create"));
-      return this.panel(context, "选择任务查看运行记录与管理选项。新增需求须写明时区。", buttons, formatConversationScheduledTasks(result, "snapshot", "buttons"));
+      return this.panel(context, "选择任务查看运行记录与管理选项。新增需求须写明时区。", buttons, formatConversationScheduledTasks(result, "snapshot", "buttons"), true);
     }
     if (result.kind === "scheduled-runs") {
       const { task, runs, page, pageCount } = result.result;
@@ -196,13 +197,22 @@ export class QqScheduleMenu {
       for (const run of visibleRetries) buttons.push(this.command(context, `重试 ${run.selector}`, `retry ${run.runId}`));
       buttons.push(...navigation);
       // The remaining uncertain Run IDs remain available in the full literal details.
+      const detail = ["## 当前计划任务", "", `- 名称：${task.name}`, `- ID：${task.taskId}`,
+        `- 状态：${formatScheduledTaskStatusLabel(task.status)}`, `- 计划：${formatSchedule(task.schedule, task.timezone)}`,
+        `- 下次运行：${formatScheduledAt(task.nextRunAt)}`, `- 任务预览：${task.promptPreview}`, "",
+        formatConversationScheduledRuns(result, "snapshot", "buttons")].join("\n");
       return this.panel(context, "暂停、删除不会停止已运行任务；/stop 操作当前前台任务。结果未知时先核对 Run，再显式重试。",
-        buttons, formatConversationScheduledRuns(result, "snapshot", "buttons"));
+        buttons, detail, true);
     }
     const text = result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome) : renderConversationCommandResult(result);
     if (!text) throw new UserFacingError("scheduled-task.state.invalid", "计划任务没有可交付结果。");
     return this.panel(context, "计划任务操作回执", [], text);
   }
+}
+
+function shortLabel(value: string): string {
+  const characters = [...value.replace(/[\p{Cc}\p{Cf}]/gu, " ")];
+  return characters.length > 10 ? `${characters.slice(0, 9).join("")}…` : characters.join("");
 }
 
 function expired(): UserFacingError {

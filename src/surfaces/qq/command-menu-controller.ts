@@ -198,6 +198,18 @@ export class QqCommandMenuController {
   }
 
   fromResult(target: ConversationTarget, actorId: string, result: ConversationCommandResult): QqMenuPanel | undefined {
+    if (result.kind === "status" || result.kind === "limits" && result.result.kind === "rate-limits") {
+      const context = this.context(target, actorId);
+      const buttons = result.kind === "status"
+        ? [qqMenuButton("model", "模型设置", "/model"), qqMenuButton("workspace", "工作区", "/workspace"),
+          qqMenuButton("permissions", "权限查询", "/permissions"), qqMenuButton("autoreview", "会话审批方式", "/autoreview")]
+        : [qqMenuButton("credits", "查看重置券", "/limits reset")];
+      const rows = buttonRows(buttons);
+      rows.push({ buttons: [homeButton()] });
+      const detail = renderConversationCommandResult(result)!;
+      return { ...this.panel(context, { content: "选择下方操作继续。", keyboard: { content: { rows } } }),
+        detail: formatQqLiteralDetails(detail), markdownDetail: detail };
+    }
     const extension = renderQqExtensionCommand(result);
     if (extension) return this.extensionPanel({ ...this.context(target, actorId), queryScope: this.options.queryScope(target) }, extension);
     if (result.kind === "thread-queue") return this.queueList(this.queueContext(this.context(target, actorId)), result, (result.result.page - 1) * 3 + 1);
@@ -348,7 +360,9 @@ export class QqCommandMenuController {
     const next = this.context(selection.target, selection.actorId);
     if (result.kind === "models") return this.models(next, result, 1, result.view);
     if (result.kind !== "outcome") throw unsupported();
-    return this.panel(next, { ...renderQqCommandMenu(), content: markdown(formatConversationCommandOutcome(result.outcome), 1600) });
+    const detail = formatConversationCommandOutcome(result.outcome);
+    return { ...this.panel(next, { ...renderQqCommandMenu(), content: "选择下方操作继续。" }),
+      detail: formatQqLiteralDetails(detail), markdownDetail: detail };
   }
 
   private autoReview(context: MenuContext, result: Extract<ConversationCommandResult, { kind: "auto-review" }>): QqMenuPanel {

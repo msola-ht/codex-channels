@@ -614,7 +614,7 @@ export class QqMessages implements SurfaceOutputPort {
           commandTicket = reservation.ticket;
         }
         const extensionScope = !taskCommand && EXTENSION_COMMANDS.has(command.name) ? this.extensionQueryScope(target) : undefined;
-        const hasSelectionMenu = extensionScope !== undefined || ["workspace", "model", "sessions", "resume", "archived", "effort", "fast", "autoreview", "goal"].includes(command.name);
+        const hasSelectionMenu = extensionScope !== undefined || ["status", "limits", "workspace", "model", "sessions", "resume", "archived", "effort", "fast", "autoreview", "goal"].includes(command.name);
         const menuScope = hasSelectionMenu ? this.menuScope(target) : undefined;
         const menuWorkspaceScope = hasSelectionMenu ? this.menuWorkspaceScope(target) : undefined;
         const queryStatus = QUERY_COMMANDS.has(command.name) ? this.options.service.status(target) : undefined;
