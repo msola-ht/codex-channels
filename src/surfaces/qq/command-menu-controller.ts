@@ -16,6 +16,9 @@ import { formatServiceTierSetting } from "../provider-format.js";
 import { formatQqLiteralDetails } from "./interactions.js";
 import { qqMenuButton, renderQqCommandMenu, type QqMenuButton } from "./command-menu.js";
 import type { QqCommandKeyboard } from "./protocol.js";
+import { QqProtocolError } from "./protocol.js";
+import { planText } from "./outbox.js";
+import { isQqExtensionQuery, renderQqExtensionQuery, type QqExtensionChoice, type QqExtensionView } from "./extension-queries.js";
 
 export interface QqMenuPanel {
   content: string;
@@ -32,6 +35,7 @@ interface Options {
   workspaceScope(target: ConversationTarget): string;
   selectionScope(target: ConversationTarget): string | undefined;
   readyThread(target: ConversationTarget): string | undefined;
+  queryScope(target: ConversationTarget): string;
   allowed(target: ConversationTarget, actorId: string): boolean;
   beforeMutation(target: ConversationTarget, preserveRevert?: boolean): void;
   signal: AbortSignal;
@@ -44,6 +48,7 @@ type MenuAction =
   | { kind: "resume" | "unarchive"; id: string }
   | { kind: "auto-review"; threadId: string; enabled: boolean }
   | { kind: "goal-clear"; threadId: string }
+  | { kind: "extension-query"; choice: QqExtensionChoice }
   | { kind: "workspace-page"; page: number }
   | { kind: "model-page"; page: number; view: ModelView; snapshot: ModelSelectionSnapshot }
   | { kind: "sessions-page"; page: number; filters: string; archived: boolean };
@@ -60,6 +65,7 @@ interface MenuContext {
   expiresAt: number;
   generation: number;
   selectionScope?: string;
+  queryScope?: string;
   revertSignal?: AbortSignal;
 }
 
@@ -89,6 +95,14 @@ export class QqCommandMenuController {
     const input = argumentsText.trim();
     const context = this.context(target, actorId);
     if (!input) return this.panel(context, renderQqCommandMenu());
+    if (input === "extensions") return this.panel(context, {
+      content: "# 扩展查询\n查看当前可用能力与诊断。任务调用、MCP 登录/重载及 Hook 写操作尚未开放。",
+      keyboard: { content: { rows: [
+        { buttons: [qqMenuButton("skill", "技能列表", "/skill"), qqMenuButton("agents", "代理角色", "/agents"), qqMenuButton("plugin", "插件列表", "/plugin")] },
+        { buttons: [qqMenuButton("mcp", "MCP 列表", "/mcp"), qqMenuButton("mcphealth", "MCP 健康", "/mcp health"), qqMenuButton("pluginhealth", "插件健康", "/plugin health")] },
+        { buttons: [qqMenuButton("hooks", "Hook 列表", "/hooks"), qqMenuButton("release", "占用诊断", "/release"), homeButton()] },
+      ] } },
+    });
     if (input === "settings") return this.panel(context, {
       content: "# 模式与状态\n思考等级、速度和 Plan 模式影响后续任务。权限入口只查询，不修改权限。",
       keyboard: { content: { rows: [
@@ -119,6 +133,8 @@ export class QqCommandMenuController {
   }
 
   fromResult(target: ConversationTarget, actorId: string, result: ConversationCommandResult): QqMenuPanel | undefined {
+    const extension = renderQqExtensionQuery(result);
+    if (extension) return this.extensionPanel({ ...this.context(target, actorId), queryScope: this.options.queryScope(target) }, extension);
     if (result.kind !== "workspaces" && result.kind !== "models" && result.kind !== "sessions" && result.kind !== "auto-review" && result.kind !== "goal") return undefined;
     const context = this.context(target, actorId);
     switch (result.kind) {
@@ -149,6 +165,7 @@ export class QqCommandMenuController {
   private current(context: MenuContext, workspaceOnly = false): boolean {
     return !this.options.signal.aborted && !context.revertSignal?.aborted && context.generation === this.generation
       && performance.now() < context.expiresAt && this.options.allowed(context.target, context.actorId)
+      && (context.queryScope === undefined || this.options.queryScope(context.target) === context.queryScope)
       && (workspaceOnly ? this.options.workspaceScope(context.target) === context.workspaceScope
         : this.options.scope(context.target) === context.scope
           && (context.selectionScope === undefined || this.options.selectionScope(context.target) === context.selectionScope));
@@ -180,6 +197,17 @@ export class QqCommandMenuController {
     this.selections.delete(token);
     const { action } = selection;
     switch (action.kind) {
+      case "extension-query": {
+        const choice = action.choice;
+        if (!isQqExtensionQuery(choice.command, choice.input)) throw unsupported();
+        const result = await this.options.commands.execute(selection.target, choice.command, choice.input, selection.actorId, () => this.assertCurrent(selection));
+        this.assertCurrent(selection);
+        if (choice.expectedName !== undefined && (result.kind === "mcp-detail" ? result.server.name
+          : result.kind === "plugin-detail" ? result.plugin.id : undefined) !== choice.expectedName) throw expired();
+        const view = renderQqExtensionQuery(result, choice.page);
+        if (!view) throw unsupported();
+        return this.extensionPanel(selection, view);
+      }
       case "workspace-page": return this.workspacePage(selection, action.page);
       case "model-page": return this.modelPage(selection, action.page, action.view, action.snapshot);
       case "sessions-page": return this.sessionsPage(selection, action.page, action.filters, action.archived);
@@ -257,6 +285,21 @@ export class QqCommandMenuController {
       const selection = this.selections.get(button.id);
       if (selection) selection.ready = true;
     }
+  }
+
+  private extensionPanel(context: MenuContext, view: QqExtensionView): QqMenuPanel {
+    const rows = buttonRows(view.choices.map(choice => this.button(context, choice.label, { kind: "extension-query", choice })));
+    rows.push({ buttons: [qqMenuButton("extensions", "扩展查询", "/help extensions"), homeButton()] });
+    if (rows.length > 5) throw unsupported();
+    const panel = this.panel(context, { content: "以上为查询结果；本面板不启动任务或修改扩展配置。", keyboard: { content: { rows } } });
+    const detail = formatQqLiteralDetails(view.detail);
+    try {
+      if (planText({ mode: "active", recipient: context.actorId, content: detail }).length > 7) throw new QqProtocolError("message", "invalid-input");
+    } catch (error) {
+      if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
+      return { ...panel, content: "查询详情超过 QQ 完整展示预算，本次未发送详情。请缩小查询范围、翻页或在本机查看。" };
+    }
+    return { ...panel, detail, markdownDetail: view.detail };
   }
 
   cancelRevert(target: ConversationTarget): void {

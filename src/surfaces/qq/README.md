@@ -28,6 +28,7 @@
 - `command-menu-controller.ts`：工作区、模型/思考等级/速度、会话恢复和统计选择菜单；列表读取及选项执行复用共享命令服务，模型选择复用共享快照和选择守卫。
   本代次持有有界、十分钟、单次消费的选项令牌，仅保存具体 ID/选择请求与授权上下文，不保存会话历史或模型正文；关闭清理，跨用户、工作区、会话或过期选择拒绝。
   动态名称只用于经过转义及限长的显示，不拼入可执行指令；回调沿用共享命令执行和既有一次性菜单令牌，不直接操作 App Server。模型翻页保留提供商筛选和共享快照；客户端反馈与未观察边界见消息合同。
+- `extension-queries.ts`：扩展查询准入与展示，复用共享 Plugin/MCP 参数解析器和结果格式；Skills/Agents/MCP 列表分页、Plugin/MCP 精确条目核对与 Hook 只读详情。任务调用和管理写操作不从本入口执行。
 - `interactions.ts`：共享 `InteractionPort` 的 QQ 呈现与回应适配；复用 `PendingInteractionRegistry` 和 `resolveApprovalChoice`，处理 command/stdin/file/permissions、逐题用户输入与异步问题、MCP 工具审批及 form/url elicitation。
   随机一次性令牌绑定原请求、用户及上下文，翻页或逐题推进递增 revision；按钮回调与普通文字 `/respond` 共用回应映射，输入按钮填入前缀后由用户追加正文发送。请求剩余期限包含展示发送，关闭、停止、切换及跨端解决撤销旧入口，不恢复旧令牌。
   问题保留原正文 Markdown、选项与必要输入提示，去除重复题号；提供完整字面预览作为发送前备选。审批不改为 Markdown，转义说明仅在内容确实发生转义时展示。

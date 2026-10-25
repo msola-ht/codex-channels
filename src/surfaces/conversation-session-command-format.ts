@@ -170,6 +170,7 @@ function formatSessionLabel(value: string): string {
 export function formatConversationOccupancy(
   result: Extract<ConversationCommandResult, { kind: "occupancy" }>,
   formatCommand: (command: string) => string = (command) => command,
+  queryOnly = false,
 ): string {
   const { result: release } = result;
   switch (release.status) {
@@ -193,7 +194,8 @@ export function formatConversationOccupancy(
       return toStructuredMarkdownList([
         `Codex Session 被 PID ${release.holder.pid} 占用。`,
         `进程：${formatProcessCommand(release.holder.command)}`,
-        release.releasable
+        queryOnly ? "本入口只诊断，不结束进程；共享 App Server 正常持锁不代表故障。"
+        : release.releasable
           ? release.stuck
             ? `当前会话恢复失败，可确认释放：${formatCommand("/release force")}（会向该进程发送结束信号；若是 App Server 子进程，服务会自动重启并重连所有会话）。`
             : "当前会话运行正常，通常无需释放；如确认需要，/release force 会结束该进程（App Server 子进程会重启并重连所有会话）。"

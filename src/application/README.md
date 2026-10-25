@@ -62,7 +62,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
   会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；
   存在原 Thread 时，新会话结果同时携带原 Thread ID，供三个 Surface 像自动解除占用提示一样
   展示可复制的 `恢复会话：/r <Thread ID>`。
-- `conversation-command-parser.ts`：集中定义会话命令的参数语法、用法提示和查询视图；只做纯解析，不调用 Application 用例。
+- `conversation-command-parser.ts`：集中定义会话命令的参数语法、用法提示和查询视图；只做纯解析，不调用 Application 用例。公开 MCP/Plugin 解析器供渠道按已解析操作限定支持范围，避免复制语法或误开放任务、写操作。
 - `scheduled-task-command.ts`：定义计划任务命令的解析结果与创建请求类型，解析固定句式和模型标记，不依赖具体用例服务。
 - `scheduled-task-service.ts`：通过异步存储端口执行计划任务用例，持有列表选择器和一次性确认状态；消费命令解析结果，并通过注入端口检查授权、取得创建上下文及触发运行。渠道命令复用 operation 守卫，数据库读取、领取与派发前复核原 Actor/工作区；创建上下文在容量等待前捕获。确认最终写入前复核有效期，失权而未展示的预览令牌取消；已提交结果继续结算。创建数量上限同时由存储原子约束。
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
