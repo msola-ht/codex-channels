@@ -326,6 +326,7 @@ export class TelegramOutbox {
       reasoningEnabled: this.options.reasoningEnabled ?? true,
       completion: "detailed" as const,
       presentationDetail: "basic" as const,
+      streamingEnabled: true,
       subagentsEnabled: true,
     };
   }
@@ -412,7 +413,7 @@ export class TelegramOutbox {
         return;
       }
       case "text.delta":
-        this.textStreams.delta(event);
+        if (this.displaySettings(chatId).streamingEnabled) this.textStreams.delta(event);
         return;
       case "text.completed":
         if (isEmptyCommentary(event)) return;

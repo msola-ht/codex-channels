@@ -6,9 +6,12 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { assertStateDatabaseSchema } from "../dist/storage/index.js";
 
-const fields = ["operation_updates", "subagents", "plan_updates", "reasoning", "completion", "presentation_detail"];
+const fields = ["operation_updates", "subagents", "streaming", "plan_updates", "reasoning", "completion", "presentation_detail"];
 const selectorFields = ["surface", "account_id", "chat_kind", "chat_id"];
-function supportedFields(selector) { return selector.surface === "weixin" ? ["completion", "presentation_detail"] : fields; }
+function supportedFields(selector) {
+  return selector.surface === "weixin" ? ["completion", "presentation_detail"]
+    : selector.surface === "qq" && selector.chat_kind === "group" ? fields.filter(field => field !== "streaming") : fields;
+}
 
 function selectors(document, targets = []) {
   const result = [];

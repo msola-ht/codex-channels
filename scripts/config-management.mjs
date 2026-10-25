@@ -72,6 +72,8 @@ export function loadGatewaySettings(environment = process.env) {
       presentationDetailOverride: display.presentation_detail ?? null,
       subagentsEnabled: display.subagents ?? true,
       subagentsOverride: display.subagents ?? null,
+      streamingEnabled: display.streaming ?? true,
+      streamingOverride: display.streaming ?? null,
       modelAliases: display.model_aliases ?? {},
       scopes: projectDisplayScopes(document, display, displayTargets.selectors),
       targetsStatus: displayTargets.status,
@@ -358,6 +360,20 @@ function applySetting(document, input, configPath) {
       } else if (document.display !== undefined) delete document.display.completion;
       const override = document.display?.completion ?? null;
       return { value: { completion: override ?? "detailed", completionOverride: override }, activation: completionSettingActivation(document), backupRequired: true };
+    }
+    case "display.streaming": {
+      const edit = input.value;
+      const previous = document.display?.streaming ?? true;
+      if (!edit || typeof edit !== "object" || Array.isArray(edit)
+        || Object.keys(edit).some(key => !["action", "value"].includes(key))
+        || !["set", "inherit"].includes(edit.action)
+        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择流式显示设置或恢复缺省");
+      if (edit.action === "set") {
+        const value = booleanValue(edit.value, "value", "流式显示");
+        document.display = { ...table(document.display), streaming: value };
+      } else if (document.display !== undefined) delete document.display.streaming;
+      const override = document.display?.streaming ?? null;
+      return { value: { streamingEnabled: override ?? true, streamingOverride: override }, activation: previous === (override ?? true) ? "reload" : displaySettingActivation(document), backupRequired: true };
     }
     case "display.subagents": {
       const edit = input.value;

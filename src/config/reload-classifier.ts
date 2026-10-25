@@ -132,6 +132,11 @@ function restartRequiredReasons(
             current.messageDisplay.subagents ?? true,
             next.messageDisplay.subagents ?? true,
           ],
+          [
+            configChange("display.streaming"),
+            current.messageDisplay.streaming ?? true,
+            next.messageDisplay.streaming ?? true,
+          ],
         ] as Array<[ConfigChange, unknown, unknown]>
       : []),
     [

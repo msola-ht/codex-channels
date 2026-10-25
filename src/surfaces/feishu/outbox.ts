@@ -278,6 +278,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       reasoningEnabled: this.options.reasoningEnabled ?? true,
       completion: "detailed" as const,
       presentationDetail: "basic" as const,
+      streamingEnabled: true,
       subagentsEnabled: true,
     };
   }
@@ -317,7 +318,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "text.delta") {
-      this.textStreams.acceptStreamDelta(event);
+      if (this.displaySettings(event.target.conversationId).streamingEnabled) this.textStreams.acceptStreamDelta(event);
       return;
     }
     if (event.type === "turn.reasoning") {

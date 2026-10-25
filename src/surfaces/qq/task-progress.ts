@@ -328,6 +328,7 @@ export class QqTaskProgress {
       reasoningEnabled: this.options.reasoningEnabled,
       completion: "detailed" as const,
       presentationDetail: "basic" as const,
+      streamingEnabled: true,
       subagentsEnabled: true,
     };
   }

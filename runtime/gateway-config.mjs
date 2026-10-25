@@ -341,6 +341,7 @@ const gatewayConfigStructureSchema = z.strictObject({
   display: z.strictObject({
     operation_updates: z.enum(["full", "compact", "failures", "hidden"]).default("compact"),
     subagents: z.boolean().optional(),
+    streaming: z.boolean().optional(),
     plan_updates: z.boolean().default(true),
     reasoning: z.boolean().default(false),
     completion: z.enum(["off", "brief", "detailed"]).optional(),

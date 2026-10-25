@@ -9,7 +9,7 @@ Workspace 仅定义 `id`、`name` 和 `cwd`；执行权限由 App Server 原生�
 `follow_cli_version = true` 时通过共享 `codex-request-identity` 解析当前锁定版本；无标记或 false 时保留显式版本，读取不改写身份配置。
 `display.model_aliases` 保留于共享配置，供控制台统计查询按原始模型 ID 归组，不投影为 Gateway
 运行字段或注入 Surface。分组变化无需重启 Gateway，不改模型展示、目录、选择标识或请求模型 ID。
-`messageDisplay` 从严格校验后的 `display` 投影三个全局过程字段、可选 `subagents`、`completion`、`presentation_detail` 与 `overrides`；原有三个扁平运行字段保留并同源。完成通知只从 `messageDisplay` 读取，缺省有效为 `detailed`；消息详情缺省有效为 `basic`；子代理缺省有效为 `true`，解析后的 `MessageDisplaySettings.subagentsEnabled` 与 `presentationDetail` 必有；普通读取和默认补齐不生成这些可选字段。公开导出共享显示目标、设置类型与解析函数；完成、消息详情有效值或覆盖变化要求重启已启用的四渠道，原过程字段与全局子代理仍只影响 Telegram、飞书与 QQ，不改 StateStore 或投递记录。覆盖字段缺失保持继承，普通读取与默认补齐不生成 `overrides`。
+`messageDisplay` 从严格校验后的 `display` 投影三个全局过程字段、可选 `subagents`、`streaming`、`completion`、`presentation_detail` 与 `overrides`；原有三个扁平运行字段保留并同源。完成通知只从 `messageDisplay` 读取，缺省有效为 `detailed`；消息详情缺省有效为 `basic`；子代理与流式缺省有效为 `true`，解析后的 `MessageDisplaySettings.subagentsEnabled`、`streamingEnabled` 与 `presentationDetail` 必有；普通读取和默认补齐不生成这些可选字段。公开导出共享显示目标、设置类型与解析函数；完成、消息详情有效值或覆盖变化要求重启已启用的四渠道，原过程字段、全局子代理与流式仍只影响 Telegram、飞书与 QQ，不改 StateStore 或投递记录。覆盖字段缺失保持继承，普通读取与默认补齐不生成 `overrides`。
 其中 `codexTimezone` 保留已有 `codex.timezone` 配置，供渠道启动卡展示，不修改 Gateway 进程时区。
 `gatewayTimezone` 是解析后的网关时区：缺省使用 `codex.timezone`，`gateway.timezone = "system"`
 保留进程继承的系统时区，其他值为自定义 IANA 名称；有效网关时区或 `codexTimezone` 变化要求重启
@@ -63,7 +63,16 @@ Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺�
 微信不展示结构化计划。与 `display.operation_updates` 相同，只有启用 Telegram、飞书或 QQ 时变化才要求
 重启 Gateway。
 
-上游模型是否能够产生这些通知由 Codex 用户配置的 `tools.update_plan.enabled` 控制，默认关闭；通过
+可选 `display.streaming` 缺省有效为 `true`，普通读取与安全默认补齐不物化，投影为必填
+`MessageDisplaySettings.streamingEnabled`。只控制 Telegram、飞书和 QQ 单聊的 `text.delta` 正文预览，
+不改变上游模型流式、思考状态、完整正文、附件、授权及原窗口和交付义务。支持相同五层继承；
+微信覆盖和 QQ 群类型、精确群覆盖严格拒绝 true/false；QQ 渠道、账号层只作用其单聊。
+全局 `display.streaming` 管理使用显式 set/inherit，区分有效 `streamingEnabled` 与
+`streamingOverride`（布尔值或 null），恢复缺省删除字段。有效值改变且 Telegram、飞书或 QQ 任一
+启用时重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload，覆盖数组仍整体保守判定。
+保存前创建私有备份，回退旧版前显式清除全局及覆盖 streaming 并核对后续修改。
+
+上游模型是否能够产生计划通知由 Codex 用户配置的 `tools.update_plan.enabled` 控制，默认关闭；通过
 `codexc config → Codex 新会话与用户偏好 → 计划清单工具` 修改。该设置写入 `~/.codex/config.toml`，与 Gateway
 的 `display.plan_updates` 分开管理；`codexc update` 会在合同预检时提示当前状态，`codexc doctor` 只读诊断该项。
 变化由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变，不需要重启 Gateway 或 App Server。

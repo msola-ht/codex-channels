@@ -15,6 +15,7 @@ export function DisplayScopeSettings({ management, disabled }: { management: Gat
   const fields = [
     ["operation_updates", "operationUpdates", "settingsFields.operationUpdates"],
     ["subagents", "subagentsEnabled", "settingsFields.subagents"],
+    ["streaming", "streamingEnabled", "settingsFields.streaming"],
     ["plan_updates", "planUpdatesEnabled", "settingsFields.planUpdates"],
     ["reasoning", "reasoningEnabled", "settingsFields.reasoningStatus"],
     ["completion", "completion", "settingsFields.completion"],

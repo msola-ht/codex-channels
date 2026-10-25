@@ -86,6 +86,7 @@ export interface GatewayConfigDocument {
   display: {
     operation_updates: "full" | "compact" | "failures" | "hidden";
     subagents?: boolean;
+    streaming?: boolean;
     plan_updates: boolean;
     reasoning: boolean;
     completion?: "off" | "brief" | "detailed";

@@ -85,6 +85,10 @@ operation_updates = "compact"
 # 可选子代理显示，缺省 true，不自动写入；关闭同时隐藏生命周期和子代理工具操作。
 # 其他工具仍按 operation_updates；正文、图片、审批与父轮完成或失败保留。
 # subagents = true
+# 可选流式显示，缺省 true，不自动写入；仅控制 Telegram、飞书与 QQ 单聊的正文增量预览。
+# 不改变上游模型流式、思考状态、完整正文、附件、授权或原窗口和交付义务。
+# 微信和 QQ 群覆盖严格拒绝 streaming（true/false）；QQ 渠道、账号层只作用其单聊。
+# streaming = true
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
 # 是否在渠道显示“思考中”状态卡；默认 false，不显示。

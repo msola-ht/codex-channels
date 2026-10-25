@@ -262,10 +262,11 @@ export class QqMessages implements SurfaceOutputPort {
     if (source || event.type === "connection.lost" || event.type === "conversation.idle.released") this.progress.observe(event);
     if (source?.kind === "notification") return;
     if (source?.generation === this.sources.generation && event.target.conversationId.startsWith("c2c:")) {
-      if (event.type === "turn.started") this.streaming.started(source);
+      const streaming = this.displaySettings(event.target).streamingEnabled;
+      if (event.type === "turn.started" && streaming) this.streaming.started(source);
       // Completion may supply a phase that was absent on the original deltas.
       // Always reconcile the existing Item stream, including late commentary.
-      if (event.type === "text.completed" || (event.type === "text.delta" && event.phase !== "commentary")) this.streaming.observe(event, source);
+      if (event.type === "text.completed" || (streaming && event.type === "text.delta" && event.phase !== "commentary")) this.streaming.observe(event, source);
     }
     if (source && event.type === "turn.completed") this.sourceRegistry(source).terminal(source);
   }
@@ -299,7 +300,10 @@ export class QqMessages implements SurfaceOutputPort {
   }
   async handle(event: OutputEvent, _context?: { liveAdmitted: true }, signal?: AbortSignal): Promise<void> {
     this.observe(event);
-    if (event.type === "text.delta") { if (this.admitted.has(event)) await this.streaming.update(event, signal); return; }
+    if (event.type === "text.delta") {
+      if (this.admitted.has(event) && this.displaySettings(event.target).streamingEnabled) await this.streaming.update(event, signal);
+      return;
+    }
     if (isQqLifecycleNotification(event) && this.supported(event) && this.admitted.get(event)?.kind === "notification") {
       const source = this.admitted.get(event)!;
       try {
@@ -1134,6 +1138,7 @@ export class QqMessages implements SurfaceOutputPort {
       reasoningEnabled: this.options.reasoningEnabled ?? false,
       completion: "detailed" as const,
       presentationDetail: "basic" as const,
+      streamingEnabled: true,
       subagentsEnabled: true,
     };
   }

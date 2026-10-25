@@ -324,6 +324,7 @@ function loadValidatedConfigDocument(
     messageDisplay: {
       operation_updates: raw.display.operation_updates,
       ...(raw.display.subagents === undefined ? {} : { subagents: raw.display.subagents }),
+      ...(raw.display.streaming === undefined ? {} : { streaming: raw.display.streaming }),
       plan_updates: raw.display.plan_updates,
       reasoning: raw.display.reasoning,
       ...(raw.display.completion === undefined ? {} : { completion: raw.display.completion }),
