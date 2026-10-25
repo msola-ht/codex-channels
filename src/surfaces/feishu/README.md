@@ -29,6 +29,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
   收起的核对面板中，不截断展开内容。标题与详情超过渠道 12,000 UTF-8 字节预算时安全拒绝，
   共同层对命令等预览另有更严格预算；不能为超限内容生成批准按钮。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
+- `card-action-expiry.ts`：为已过期、已消费或容量淘汰的命令及 Doctor 按钮保留有界短期归属；仅向原 Actor、Chat、消息且仍授权的点击回执一次失效提示，不恢复动作。重启或归属记录淘汰后不推测按钮归属。
 - `card-kit.ts`：只构造 CardKit 2.0 外壳（`schema`、`update_multi`、`wide_screen_mode`）、Markdown/纯文本/备注块、按钮与 column_set 行；不承载审批动作、交互令牌或业务语义。
 - `command-center-presentation.ts`：将命令结果转换为命令中心选项、输入表单和展示文案；仅接收动作与结果数据，
   不执行命令或管理交互令牌；速度选择复用共享档位展示，Standard 始终可选，Fast、Ultrafast 按当前模型目录提供。

@@ -70,7 +70,7 @@ function formatFeishuDiffMarkdown(text: string): string {
     return text;
   }
   const title = text.slice(0, separator);
-  const diff = text.slice(separator + 2).trimEnd();
+  const diff = text.slice(separator + 2);
   const fence = safeFeishuFence(diff);
   return [`**${title}**`, "", fence, diff, fence].join("\n");
 }

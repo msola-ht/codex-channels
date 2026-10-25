@@ -45,6 +45,7 @@ export function formatConversationModels(
       );
   if (result.view === "fast") {
     return toStructuredMarkdownList([
+      "## 速度设置",
       formatModelStateLine(state),
       speed,
       `模型支持：${formatModelSpeedSupport(current)}`,
@@ -54,6 +55,7 @@ export function formatConversationModels(
   }
   if (result.view === "effort") {
     return toStructuredMarkdownList([
+      `## ${effortName}设置`,
       formatModelStateLine(state),
       `当前${effortName}：${formatReasoningEffort(state.effort ?? current?.defaultReasoningEffort)}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
       speed,
@@ -76,6 +78,7 @@ export function formatConversationModels(
   const providers = listProviders(state.models);
   if (providers.length === 0) {
     return toStructuredMarkdownList([
+      "## 选择模型",
       formatModelStateLine(state),
       speed,
       "当前没有可选模型。请检查账户配置与订阅状态；续订后可在 WebUI 或当前账户的 /usage 刷新。",
@@ -84,6 +87,7 @@ export function formatConversationModels(
   if (state.providerFilter === undefined && providers.length > 1) {
     const currentProvider = state.modelProvider;
     return toStructuredMarkdownList([
+      "## 选择提供商",
       formatModelStateLine(state),
       `${effortName}：${formatReasoningEffort(state.effort)}`,
       speed,
@@ -98,6 +102,7 @@ export function formatConversationModels(
     ].join("\n"));
   }
   return toStructuredMarkdownList([
+    "## 选择模型",
     formatModelStateLine(state),
     `${effortName}：${formatReasoningEffort(state.effort)}`,
     speed,
@@ -480,9 +485,13 @@ function formatUsageTokens(value: bigint | number | null): string {
   return value === null ? "未知" : formatTokenCount(Number(value));
 }
 
-export function formatConversationResetCredits(result: Extract<ConversationCommandResult, { kind: "reset-credit" }>, interaction: "text" | "buttons" = "text"): string {
+export function formatConversationResetCredits(
+  result: Extract<ConversationCommandResult, { kind: "reset-credit" }>,
+  interaction: "text" | "buttons" = "text",
+  formatText: (value: string) => string = value => value.replace(/[\\`*_[\]<>]/gu, "\\$&"),
+): string {
   const value = result.result;
-  const text = (input: string) => input.replace(/\s+/gu, " ").replace(/[\\`*_[\]<>]/gu, "\\$&");
+  const text = (input: string) => formatText(input.replace(/\s+/gu, " "));
   const details = (credit: { id: string; title: string | null; description: string | null; expiresAt: number | null }) => [
     `券 ID：${text(credit.id)}`, `名称：${text(credit.title ?? "用量重置券")}`,
     `说明：${text(credit.description ?? "使用范围以官方执行结果为准")}`,

@@ -53,6 +53,7 @@ import {
   renderWeixinTurnCompleted,
 } from "./command-renderer.js";
 import { formatWeixinFinalText } from "./final-text-format.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
@@ -64,6 +65,7 @@ const fileFailureNotice = "[文件发送失败，已改为分段文本]\n\n";
 const finalAnswerFileName = "codex-final-answer.txt";
 
 export type WeixinOutboxErrorCode =
+  | "markdown-layout-too-long"
   | "image-sender-unavailable"
   | "missing-reply-context"
   | "unauthorized-recipient";
@@ -365,7 +367,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     this.assertSendActive(signal);
     if (
       event.type === "text.completed"
-      && text.length > weixinTextCapacity(text, maximumChunks)
+      && planWeixinText(text, maximumChunks).truncated
       && await this.sendLongFinalAnswer(event.target, text, event.text, signal, context)
     ) {
       return;
@@ -393,12 +395,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
     ) {
       return false;
     }
-    const previewLength = safePrefixLength(
+    const [previewContent, remainingContent] = splitWeixinMarkdownChunk(
       text,
       maximumChunkCharacters - previewNotice.length,
     );
     DeliveryReceipt.current()?.markContentIncomplete();
-    const preview = text.slice(0, previewLength) + previewNotice;
+    const preview = previewContent + previewNotice;
     await this.send(target, preview, maximumChunks, signal, context);
     if (!this.access.isAllowed({
       target,
@@ -439,7 +441,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       }
       await this.send(
         target,
-        fileFailureNotice + text.slice(previewLength),
+        fileFailureNotice + remainingContent,
         maximumChunks - 1,
         signal,
         context,
@@ -465,7 +467,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
       actorId: target.conversationId,
       contextToken: undefined,
     };
-    for (const chunk of splitWeixinText(text, maximumChunkCount)) {
+    const plan = planWeixinText(text, maximumChunkCount);
+    if (plan.truncated) DeliveryReceipt.current()?.markContentIncomplete();
+    for (const chunk of plan.chunks) {
       this.assertSendActive(signal);
       if (!this.access.isAllowed({
         target,
@@ -617,41 +621,63 @@ export class WeixinOutbox implements SurfaceOutputPort {
   }
 }
 
-function splitWeixinText(
+function planWeixinText(
   value: string,
   maximumChunkCount = maximumChunks,
-): string[] {
-  const maximumCharacters = weixinTextCapacity(value, maximumChunkCount);
+): { chunks: string[]; truncated: boolean } {
   let text = value;
-  if (text.length > maximumCharacters) {
-    DeliveryReceipt.current()?.markContentIncomplete();
-    text = safePrefix(
-      text,
-      maximumCharacters - truncationNotice.length,
-    ) + truncationNotice;
-  }
   const chunks: string[] = [];
-  while (text.length > 0) {
-    const end = safePrefixLength(text, maximumChunkCharacters);
-    chunks.push(text.slice(0, end));
-    text = text.slice(end);
+  while (text.length > maximumChunkCharacters && chunks.length < maximumChunkCount - 1) {
+    const [head, tail] = splitWeixinMarkdownChunk(text, maximumChunkCharacters);
+    chunks.push(head);
+    text = tail;
   }
-  return chunks.length === 0 ? [emptyCodexResponseText] : chunks;
+  const truncated = text.length > maximumChunkCharacters;
+  if (truncated) {
+    const [head] = splitWeixinMarkdownChunk(text, maximumChunkCharacters - truncationNotice.length);
+    chunks.push(head + truncationNotice);
+  } else if (text.length > 0) chunks.push(text);
+  return { chunks: chunks.length === 0 ? [emptyCodexResponseText] : chunks, truncated };
 }
 
-/** Count the actual prefix fitting in the bubble budget, including surrogate boundaries. */
-function weixinTextCapacity(value: string, maximumChunkCount: number): number {
-  let offset = 0;
-  for (let chunk = 0; chunk < maximumChunkCount && offset < value.length; chunk += 1) {
-    let end = Math.min(value.length, offset + maximumChunkCharacters);
-    if (end < value.length && isHighSurrogate(value.charCodeAt(end - 1))) end -= 1;
-    offset = end;
+/** Keep each bubble's code region complete; added delimiters consume the same UTF-16 budget. */
+function splitWeixinMarkdownChunk(text: string, limit: number): [string, string] {
+  let end = safePrefixLength(text, limit);
+  const newline = text.lastIndexOf("\n", end - 1);
+  if (newline >= Math.floor(end * 0.75)) end = newline + 1;
+  while (end > 0) {
+    let offset = 0;
+    let fence: MarkdownFence | undefined;
+    let delimiterStart: number | undefined;
+    for (const line of text.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
+      const next = advanceMarkdownFence(fence, line);
+      if (offset < end && offset + line.length > end && next !== fence) {
+        delimiterStart = offset;
+        break;
+      }
+      if (offset + line.length > end) break;
+      fence = next;
+      offset += line.length;
+      if (offset >= end) break;
+    }
+    if (delimiterStart !== undefined) {
+      end = delimiterStart;
+      continue;
+    }
+    const head = text.slice(0, end);
+    const closing = fence === undefined ? "" : `${head.endsWith("\n") ? "" : "\n"}${fence.marker}`;
+    if (end + closing.length > limit) {
+      end = safePrefixLength(text, limit - closing.length);
+      const previousNewline = text.lastIndexOf("\n", end - 1);
+      if (previousNewline >= Math.floor(end * 0.75)) end = previousNewline + 1;
+      continue;
+    }
+    const tail = fence === undefined ? text.slice(end) : `${fence.opening}\n${text.slice(end)}`;
+    if (tail.length >= text.length) break;
+    return [head + closing, tail];
   }
-  return offset;
-}
-
-function safePrefix(value: string, maximumLength: number): string {
-  return value.slice(0, safePrefixLength(value, maximumLength));
+  // A delimiter that cannot fit must not be sliced into executable-looking prose.
+  throw new WeixinOutboxError("markdown-layout-too-long");
 }
 
 function safePrefixLength(value: string, maximumLength: number): number {

@@ -519,7 +519,7 @@ export class TelegramSurface {
       replyTelegramPanel(
         context,
         [
-          "Codex Connect Gateway",
+          "## Codex Connect Gateway",
           "",
           "普通文本会发送到当前 Codex Session。",
           "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",

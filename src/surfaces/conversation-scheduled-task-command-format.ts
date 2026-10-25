@@ -11,6 +11,7 @@ export function formatConversationScheduledTasks(
   result: Extract<ConversationCommandResult, { kind: "scheduled-tasks" }>,
   selectionMode: "snapshot" | "id" = "snapshot",
   interaction: "text" | "buttons" = "text",
+  formatLiteral: (value: string) => string = value => value,
 ): string {
   const { tasks, selectors, page, pageCount, totalTaskCount } = result.result;
   if (tasks.length === 0) {
@@ -24,7 +25,7 @@ export function formatConversationScheduledTasks(
   return toStructuredMarkdownList([
     `Gateway 计划任务（第 ${page}/${pageCount} 页 · 共 ${totalTaskCount} 项）：`,
     ...tasks.map((task, index) => [
-      `${selectionMode === "snapshot" ? `【${selectors[index] ?? "?"}】` : ""}${task.name} · ${formatScheduledTaskStatusLabel(task.status)}`,
+      `${selectionMode === "snapshot" ? `【${selectors[index] ?? "?"}】` : ""}${formatLiteral(task.name)} · ${formatScheduledTaskStatusLabel(task.status)}`,
       `   ID：${task.taskId}`,
       `   计划：${formatSchedule(task.schedule, task.timezone)}`,
       `   下次运行：${formatScheduledAt(task.nextRunAt)}`,
@@ -44,11 +45,12 @@ export function formatConversationScheduledRuns(
   result: Extract<ConversationCommandResult, { kind: "scheduled-runs" }>,
   selectionMode: "snapshot" | "id" = "snapshot",
   interaction: "text" | "buttons" = "text",
+  formatLiteral: (value: string) => string = value => value,
 ): string {
   const { task, runs, page, pageCount, totalRunCount } = result.result;
   return toStructuredMarkdownList([
     "计划任务运行记录",
-    `任务：${task.name} · ${task.taskId}`,
+    `任务：${formatLiteral(task.name)} · ${task.taskId}`,
     `第 ${page}/${pageCount} 页 · 共 ${totalRunCount} 条`,
     "运行记录：",
     ...(runs.length === 0
@@ -80,13 +82,14 @@ export function formatConversationScheduledRuns(
 
 export function formatConversationScheduledConfirmation(
   result: Extract<ConversationCommandResult, { kind: "scheduled-confirmation" }>,
+  formatLiteral: (value: string) => string = value => value,
 ): string {
   const { preview } = result;
   return toStructuredMarkdownList([
     preview.action === "create"
       ? "计划任务创建预览（尚未保存）"
       : "计划任务删除预览（尚未删除）",
-    `名称：${preview.task.name}`,
+    `名称：${formatLiteral(preview.task.name)}`,
     ...(preview.action === "delete" ? [`任务：${preview.task.taskId}`] : []),
     `计划：${formatSchedule(preview.task.schedule, preview.task.timezone)}`,
     `Workspace：${preview.task.workspaceId}`,
@@ -98,7 +101,7 @@ export function formatConversationScheduledConfirmation(
     "网络：沿用目标 App Server 的项目配置；无人值守审批一律拒绝",
     "Approval Policy：never（无人值守请求将安全拒绝）",
     "该任务将在用户不在线时由 Gateway 无人值守执行。",
-    `任务预览：${preview.task.promptPreview}`,
+    `任务预览：${formatLiteral(preview.task.promptPreview)}`,
     `确认：/schedule confirm ${preview.token}`,
     "令牌五分钟内有效且只能使用一次。",
   ].join("\n"));

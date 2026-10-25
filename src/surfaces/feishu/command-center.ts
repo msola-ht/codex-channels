@@ -22,6 +22,7 @@ import {
   feishuCardShell,
 } from "./card-kit.js";
 import type { FeishuCardAction } from "./card-action.js";
+import { FeishuExpiredCardActions } from "./card-action-expiry.js";
 import { formatFeishuCommandMarkdown } from "./command-format.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import type { SurfaceConfigurationChange } from "../types.js";
@@ -146,6 +147,7 @@ interface FeishuCommandCenterOptions {
 
 export class FeishuCommandCenter {
   private readonly pending = new Map<string, PendingCommandCenter>();
+  private readonly expiredActions = new FeishuExpiredCardActions();
   private readonly seenMenuEvents = new Map<string, number>();
   private readonly tokenTtlMs: number;
   private readonly capacity: number;
@@ -240,7 +242,7 @@ export class FeishuCommandCenter {
       }
       await this.openResponse(target, actorId, {
         title: "新增工作区",
-        description: formatSurfaceConfigurationChange(change, "feishu", true),
+        description: formatSurfaceConfigurationChange(change, "feishu", true).replace(/^## [^\n]+\n?/u, ""),
         descriptionFormat: "markdown",
         choices: change.addedWorkspaces.map(workspace => ({
           label: `切换到 ${workspace.name}`,
@@ -312,7 +314,12 @@ export class FeishuCommandCenter {
       ...(form ? { form } : {}),
       consumeOnUse,
     });
-    this.trimOldest(this.pending, this.capacity);
+    while (this.pending.size > this.capacity) {
+      const first = this.pending.entries().next();
+      if (first.done) break;
+      this.expiredActions.remember(first.value[0], first.value[1], this.now());
+      this.pending.delete(first.value[0]);
+    }
   }
 
   openFromMenu(
@@ -359,6 +366,17 @@ export class FeishuCommandCenter {
       return "ignored";
     }
     this.prune();
+    if (!this.closed && token !== undefined
+      && (action.tag === "button" || action.tag === "form_submit")) {
+      const expired = this.expiredActions.take(token, action, this.access, this.now());
+      if (expired) {
+        void this.track(this.outbox.deliverCard(expired.conversationId,
+          feishuCardShell("grey", "操作已失效", [
+            feishuCardPlainText("按钮已过期或已处理，请发送 /help 重新打开命令中心。"),
+          ])).catch(error => this.logger.warn(surfaceErrorMetadata(error), "飞书失效操作提示发送失败")));
+        return "accepted";
+      }
+    }
     const pending = token === undefined
       ? undefined
       : this.pending.get(token);
@@ -414,6 +432,7 @@ export class FeishuCommandCenter {
       pending.consumeOnUse
       || commandCenterActionConsumesToken(resolvedCommand, submittedInput!)
     ) {
+      this.expiredActions.remember(token, pending, this.now());
       this.pending.delete(token);
     }
     const acceptedState = submittedSelection === undefined
@@ -500,6 +519,7 @@ export class FeishuCommandCenter {
   private async closeOnce(): Promise<void> {
     this.closed = true;
     this.pending.clear();
+    this.expiredActions.clear();
     this.seenMenuEvents.clear();
     if (this.tasks.size === 0) {
       return;
@@ -519,6 +539,7 @@ export class FeishuCommandCenter {
     const now = this.now();
     for (const [token, pending] of this.pending) {
       if (pending.expiresAt <= now) {
+        this.expiredActions.remember(token, pending, now);
         this.pending.delete(token);
       }
     }
@@ -756,7 +777,7 @@ export function renderFeishuCommandCenterCard(
 }
 
 function sectionTitle(title: string): Record<string, unknown> {
-  return feishuCardMarkdown(`**${title}**`);
+  return feishuCardMarkdown(`### ${title}`);
 }
 
 function actionRow(

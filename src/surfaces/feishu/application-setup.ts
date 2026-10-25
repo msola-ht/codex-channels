@@ -16,6 +16,7 @@ import {
   type FeishuApplicationTenantScope,
 } from "./application-api.js";
 import type { FeishuCardAction } from "./card-action.js";
+import { FeishuExpiredCardActions } from "./card-action-expiry.js";
 import { feishuCommandMenuEventKey } from "./command-center.js";
 import { toFeishuInAppUrl } from "./oauth-card.js";
 import type { FeishuOutbox } from "./outbox.js";
@@ -53,6 +54,7 @@ interface FeishuApplicationSetupOptions {
 
 export class FeishuApplicationSetupController {
   private readonly pending = new Map<string, PendingSetup>();
+  private readonly expiredActions = new FeishuExpiredCardActions();
   private readonly tasks = new Set<Promise<void>>();
   private readonly scopes = new Set<SetupScope>();
   private readonly tokenTtlMs: number;
@@ -151,6 +153,7 @@ export class FeishuApplicationSetupController {
       if (first.done) {
         break;
       }
+      this.expiredActions.remember(first.value, this.pending.get(first.value)!, this.now());
       this.pending.delete(first.value);
     }
   }
@@ -172,6 +175,14 @@ export class FeishuApplicationSetupController {
       return "invalid";
     }
     this.prune();
+    const expired = this.expiredActions.take(token, action, this.access, this.now());
+    if (expired) {
+      const task = this.outbox.deliverText(expired.conversationId,
+        "Doctor 按钮已过期或已处理，请发送 /fs doctor 重新检测。",
+      ).catch(error => this.logFailure(expired, "expired-action", error)).finally(() => this.tasks.delete(task));
+      this.tasks.add(task);
+      return "accepted";
+    }
     const pending = this.pending.get(token);
     if (
       !pending
@@ -185,6 +196,7 @@ export class FeishuApplicationSetupController {
     ) {
       return "invalid";
     }
+    this.expiredActions.remember(token, pending, this.now());
     this.pending.delete(token);
     if (this.active) {
       void this.outbox.deliverText(
@@ -205,6 +217,7 @@ export class FeishuApplicationSetupController {
   async close(): Promise<void> {
     this.closed = true;
     this.pending.clear();
+    this.expiredActions.clear();
     for (const scope of this.scopes) scope.controller.abort();
     if (this.tasks.size === 0) {
       return;
@@ -386,6 +399,7 @@ export class FeishuApplicationSetupController {
     const now = this.now();
     for (const [token, pending] of this.pending) {
       if (pending.expiresAt <= now) {
+        this.expiredActions.remember(token, pending, now);
         this.pending.delete(token);
       }
     }

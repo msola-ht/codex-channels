@@ -703,9 +703,7 @@ export class QqMessages implements SurfaceOutputPort {
           panel.delivered?.();
           return;
         }
-        const text = result.kind === "outcome" && result.outcome.type === "thread.compaction-requested"
-          ? "已请求压缩当前会话。QQ 暂不单独推送压缩进度；此回执不表示压缩已完成。"
-          : result.kind === "collaboration-mode" ? `协作模式：${result.state.mode === "plan" ? "Plan" : "Default"}${result.state.pending ? "（下一次 Turn 生效）" : ""}\n下一条普通消息按此模式处理；再次发送 /plan 可切换模式。`
+        const text = result.kind === "collaboration-mode" ? `协作模式：${result.state.mode === "plan" ? "Plan" : "Default"}${result.state.pending ? "（下一次 Turn 生效）" : ""}\n下一条普通消息按此模式处理；再次发送 /plan 可切换模式。`
           : result.kind === "outcome" && result.outcome.type === "goal.cleared" ? "已清除当前会话目标。清除不等于停止正在运行的任务；如需停止，请使用 /stop。"
           : result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
           : renderConversationCommandResult(result);

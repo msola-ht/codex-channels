@@ -223,11 +223,15 @@ function render(pending: Pending, token: string): { content: string; controls: {
     const number = `问题 ${pending.question + 1}/${request.questions.length}`;
     const heading = question.header.trim() && question.header.trim() !== number
       ? `${number} · ${question.header.trim()}` : number;
+    const pageCount = Math.max(1, Math.ceil(question.options.length / 10));
+    const page = pageCount > 1 ? `\n\n选项第 ${pending.page + 1}/${pageCount} 页` : "";
+    const options = question.options.slice(pending.page * 10, (pending.page + 1) * 10)
+      .map((option, index) => `\n\n${pending.page * 10 + index + 1}. ${option}`).join("");
     content = `${request.title}\n\n${heading}\n\n${question.question}`;
-    content += question.options.map((option, index) => `\n\n${index + 1}. ${option}`).join("");
+    content += page + options;
     if (question.secret) content += "\n请勿在 QQ 聊天记录中发送密钥、Token 或其他敏感凭据。";
     markdownContent = `## ${request.title}\n\n### ${heading}\n\n${question.question}`
-      + question.options.map((option, index) => `\n\n${index + 1}. ${option}`).join("")
+      + page + options
       + (question.secret ? "\n\n请勿在 QQ 聊天记录中发送密钥、Token 或其他敏感凭据。" : "");
     instruction = question.options.length === 0
       ? "点击“输入回答”，在填入的前缀后追加回答并发送。"

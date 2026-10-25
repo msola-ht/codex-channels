@@ -141,7 +141,7 @@ export class QqScheduleMenu {
     return this.button(context, label, { kind: "command", input });
   }
 
-  private panel(context: Context, content: string, buttons: QqMenuButton[], detail?: string, structured = false): QqMenuPanel {
+  private panel(context: Context, content: string, buttons: QqMenuButton[], detail?: string, structuredMarkdown?: string): QqMenuPanel {
     context.assertCurrent();
     const rows: { buttons: QqMenuButton[] }[] = [];
     for (let index = 0; index < buttons.length; index += 3) rows.push({ buttons: buttons.slice(index, index + 3) });
@@ -151,7 +151,7 @@ export class QqScheduleMenu {
     if (literal !== undefined && planText({ mode: "active", recipient: context.actorId, content: literal }).length > 7) {
       throw new UserFacingError("scheduled-task.state.invalid", "计划任务详情超出 QQ 完整展示预算，请在本机核对。");
     }
-    const markdownDetail = detail === undefined ? undefined : structured ? detail : qqLiteralMarkdown(detail);
+    const markdownDetail = detail === undefined ? undefined : structuredMarkdown ?? qqLiteralMarkdown(detail);
     return { content, keyboard: { content: { rows } }, ...(literal === undefined ? {} : { detail: literal }),
       ...(markdownDetail === undefined ? {} : { markdownDetail }),
       isCurrent: () => this.current(context), signal: context.signal };
@@ -180,7 +180,9 @@ export class QqScheduleMenu {
       if (list.page > 1) buttons.push(this.command(context, "上一页", `list ${list.page - 1}`));
       if (list.page < list.pageCount) buttons.push(this.command(context, "下一页", `list ${list.page + 1}`));
       buttons.push(qqMenuButton("scheduleadd", "新增计划任务", "/help schedule-create"));
-      return this.panel(context, "选择任务查看运行记录与管理选项。新增需求须写明时区。", buttons, formatConversationScheduledTasks(result, "snapshot", "buttons"), true);
+      return this.panel(context, "选择任务查看运行记录与管理选项。新增需求须写明时区。", buttons,
+        formatConversationScheduledTasks(result, "snapshot", "buttons"),
+        formatConversationScheduledTasks(result, "snapshot", "buttons", markdownLiteral));
     }
     if (result.kind === "scheduled-runs") {
       const { task, runs, page, pageCount } = result.result;
@@ -197,17 +199,21 @@ export class QqScheduleMenu {
       for (const run of visibleRetries) buttons.push(this.command(context, `重试 ${run.selector}`, `retry ${run.runId}`));
       buttons.push(...navigation);
       // The remaining uncertain Run IDs remain available in the full literal details.
-      const detail = ["## 当前计划任务", "", `- 名称：${task.name}`, `- ID：${task.taskId}`,
+      const detail = (literal: (value: string) => string) => ["## 当前计划任务", "", `- 名称：${literal(task.name)}`, `- ID：${task.taskId}`,
         `- 状态：${formatScheduledTaskStatusLabel(task.status)}`, `- 计划：${formatSchedule(task.schedule, task.timezone)}`,
-        `- 下次运行：${formatScheduledAt(task.nextRunAt)}`, `- 任务预览：${task.promptPreview}`, "",
-        formatConversationScheduledRuns(result, "snapshot", "buttons")].join("\n");
+        `- 下次运行：${formatScheduledAt(task.nextRunAt)}`, `- 任务预览：${literal(task.promptPreview)}`, "",
+        formatConversationScheduledRuns(result, "snapshot", "buttons", literal).replace(/^## 计划任务运行记录\n/u, "### 计划任务运行记录\n")].join("\n");
       return this.panel(context, "暂停、删除不会停止已运行任务；/stop 操作当前前台任务。结果未知时先核对 Run，再显式重试。",
-        buttons, detail, true);
+        buttons, detail(value => value), detail(markdownLiteral));
     }
     const text = result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome) : renderConversationCommandResult(result);
     if (!text) throw new UserFacingError("scheduled-task.state.invalid", "计划任务没有可交付结果。");
     return this.panel(context, "计划任务操作回执", [], text);
   }
+}
+
+function markdownLiteral(value: string): string {
+  return value.replace(/[\\`*_{}[\]()#+.!|>~<-]/gu, "\\$&");
 }
 
 function shortLabel(value: string): string {

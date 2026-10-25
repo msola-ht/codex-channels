@@ -90,6 +90,7 @@ export function formatConversationCollaborationMode(
 ): string {
   const label = result.state.mode === "plan" ? "Plan" : "Default";
   return toStructuredMarkdownList([
+    "## 协作模式",
     `协作模式：${label}${result.state.pending ? "（下一次 Turn 生效）" : ""}`,
     "",
     result.state.mode === "plan"
@@ -104,6 +105,7 @@ export function formatConversationGoal(
 ): string {
   return result.goal
     ? toStructuredMarkdownList([
+        "## 当前目标",
         `当前 Goal：${result.goal.objective}`,
         `状态：${formatGoalStatus(result.goal.status)}`,
         `Tokens：${formatGoalTokens(result.goal)}`,

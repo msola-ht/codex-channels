@@ -6,16 +6,17 @@ export function toStructuredMarkdownList(text: string): string {
   let firstContent = true;
   let fence: MarkdownFence | undefined;
   for (const rawLine of text.split("\n")) {
+    const previous = fence;
+    fence = advanceMarkdownFence(fence, rawLine);
+    if (previous || fence) {
+      output.push(rawLine);
+      firstContent = false;
+      continue;
+    }
     const line = rawLine.trimEnd();
     const trimmed = line.trim();
     if (!trimmed) {
       output.push("");
-      continue;
-    }
-    const previous = fence;
-    fence = advanceMarkdownFence(fence, line);
-    if (previous || fence) {
-      output.push(line);
       continue;
     }
     if (firstContent) {

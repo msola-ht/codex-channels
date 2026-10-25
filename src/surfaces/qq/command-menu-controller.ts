@@ -291,7 +291,7 @@ export class QqCommandMenuController {
         guard();
         if (result.kind !== "outcome" || result.outcome.type !== `thread-queue.${action.operation === "delete" ? "deleted" : action.operation === "start" ? "started" : "reordered"}`) throw unsupported();
         this.clearQueueSelections(selection.target);
-        return this.panel(selection, { content: markdown(formatConversationCommandOutcome(result.outcome), 1600),
+        return this.panel(selection, { content: formatConversationCommandOutcome(result.outcome),
           keyboard: { content: { rows: [{ buttons: [this.button(selection, "查看队列", { kind: "queue-page", page: 1 }), homeButton()] }] } } });
       }
       case "hook": return this.hookResult(selection, await this.options.commands.execute(selection.target, "hooks", action.input, selection.actorId, () => this.assertCurrent(selection)));

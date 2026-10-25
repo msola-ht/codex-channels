@@ -177,7 +177,7 @@ export class QqPrivilegedManagementMenu {
           this.button(context, "取消本次确认", { kind: "cancel", creditToken: value.token }, "limits"));
       }
       const detail = formatConversationResetCredits(result, "buttons");
-      return this.panel(context, value.type === "preview" ? "核对完整账户与券预览后确认。使用将消费所选券，结果未知时请先核对账户，不要重复提交。" : "OpenAI 重置券",
+      return this.panel(context, value.type === "preview" ? "核对完整账户与券预览后确认。使用将消费所选券，结果未知时请先核对账户，不要重复提交。" : "选择下方操作继续。",
         buttons, detail, detail);
     }
     if (result.kind !== "occupancy") throw new UserFacingError("command.authorization-changed", "管理操作未返回可识别回执。");

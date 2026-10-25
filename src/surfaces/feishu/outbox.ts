@@ -1186,14 +1186,24 @@ export class FeishuOutbox implements SurfaceOutputPort {
         event.target.conversationId, turnKey(event.threadId, event.turnId),
       );
       if (replyTo !== undefined) {
+        let statusMessageId: string | undefined;
         await this.sendMarkdown(
           event.target.conversationId,
           markdown,
           maximumFeishuMessageChunks,
           replyTo,
-          undefined,
+          (messageId) => { statusMessageId = messageId; },
           signal,
         );
+        if (event.background !== true && statusMessageId !== undefined && !this.closeFinished) {
+          this.threadStatusMessages.set(event.threadId, {
+            chatId: event.target.conversationId,
+            messageId: statusMessageId,
+            status: "active",
+            ...(event.identity ? { identity: event.identity } : {}),
+          });
+        }
+        return;
       }
       if (event.background === true) {
         return;

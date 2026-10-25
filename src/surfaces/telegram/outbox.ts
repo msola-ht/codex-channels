@@ -55,6 +55,7 @@ import {
   formatRuntimeRateLimitUpdate,
 } from "../runtime-status-format.js";
 import { TurnPlanProgressState } from "../plan-presentation.js";
+import { toStructuredMarkdownList } from "../markdown-list.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
@@ -482,7 +483,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async (signal) => {
           try {
             for (const presentation of this.planProgress.accept(event)) {
-              await this.send(chatId, presentation.text, undefined, true, signal);
+              await this.sendPanel(chatId, toStructuredMarkdownList(presentation.text), undefined, true, signal);
             }
           } catch (error) {
             // A failed presentation must not suppress the next live plan update.
