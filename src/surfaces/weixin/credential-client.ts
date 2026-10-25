@@ -61,13 +61,13 @@ export function createCredentialBackedWeixinClient(
       });
     return clientTask;
   };
-  const mediaClient = async (signal?: AbortSignal): Promise<WeixinRuntimeProtocolClient> => {
+  const outboundClient = async (signal?: AbortSignal): Promise<WeixinRuntimeProtocolClient> => {
     signal?.throwIfAborted();
     if (!signal) return client();
     let abort: () => void = () => {};
     try {
       return await Promise.race([client(), new Promise<never>((_resolve, reject) => {
-        abort = () => reject(new Error("微信媒体凭据等待已取消"));
+        abort = () => reject(new Error("微信发送凭据等待已取消"));
         signal.addEventListener("abort", abort, { once: true });
         if (signal.aborted) abort();
       })]);
@@ -83,14 +83,14 @@ export function createCredentialBackedWeixinClient(
     async getUpdates(cursor, signal) {
       return (await client()).getUpdates(cursor, signal);
     },
-    async sendText(input, signal) {
-      return (await client()).sendText(input, signal);
+    async sendText(input, signal, beforeSend) {
+      return (await outboundClient(signal)).sendText(input, signal, beforeSend);
     },
     async sendImage(input, signal, beforeSend) {
-      return (await mediaClient(signal)).sendImage(input, signal, beforeSend);
+      return (await outboundClient(signal)).sendImage(input, signal, beforeSend);
     },
     async sendFile(input, signal, beforeSend) {
-      return (await mediaClient(signal)).sendFile(input, signal, beforeSend);
+      return (await outboundClient(signal)).sendFile(input, signal, beforeSend);
     },
   };
 }

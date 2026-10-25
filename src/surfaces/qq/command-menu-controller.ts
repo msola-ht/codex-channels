@@ -247,9 +247,13 @@ export class QqCommandMenuController {
     return context;
   }
 
-  private current(context: MenuContext, workspaceOnly = false): boolean {
+  private active(context: MenuContext): boolean {
     return !this.options.signal.aborted && !context.revertSignal?.aborted && !context.hookSignal?.aborted && !context.queueSignal?.aborted && context.generation === this.generation
-      && performance.now() < context.expiresAt && this.options.allowed(context.target, context.actorId)
+      && performance.now() < context.expiresAt && this.options.allowed(context.target, context.actorId);
+  }
+
+  private current(context: MenuContext, workspaceOnly = false): boolean {
+    return this.active(context)
       && (context.queueThreadId === undefined || this.options.readyThread(context.target) === context.queueThreadId)
       && (context.queryScope === undefined || this.options.queryScope(context.target) === context.queryScope)
       && (workspaceOnly ? this.options.workspaceScope(context.target) === context.workspaceScope
@@ -351,7 +355,11 @@ export class QqCommandMenuController {
       result = await this.options.commands.execute(selection.target, "revert", `confirm ${action.token}`, selection.actorId, () => this.assertCurrent(selection));
       this.assertCurrent(selection);
     } else if (action.kind === "workspace") {
-      result = await this.options.commands.selectWorkspace(selection.target, action.id, selection.actorId);
+      // The shared mutation guards the original Workspace and Thread. Keep
+      // this menu's lifetime at its final write boundary while allowing the
+      // successful operation itself to change the selected Workspace.
+      result = await this.options.commands.selectWorkspace(selection.target, action.id, selection.actorId,
+        () => { if (!this.active(selection)) throw expired(); });
     } else if (action.kind === "model") {
       // Shared model selection owns and validates its own Thread/snapshot progression,
       // including the synchronous unbinding performed by a Provider switch.
@@ -359,7 +367,10 @@ export class QqCommandMenuController {
         () => this.assertCurrent(selection, true));
       this.assertCurrent(selection, true);
     } else {
-      result = await this.options.commands.execute(selection.target, action.kind, action.id, selection.actorId);
+      // Resume/unarchive intentionally change Thread; the shared lifecycle
+      // owns that transition, while the menu still fixes its Workspace.
+      result = await this.options.commands.execute(selection.target, action.kind, action.id, selection.actorId,
+        () => this.assertCurrent(selection, true));
     }
     // Only a completed mutation may adopt its resulting workspace or Thread scope.
     if (this.options.signal.aborted || selection.generation !== this.generation

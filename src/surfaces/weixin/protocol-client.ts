@@ -41,6 +41,7 @@ export interface WeixinProtocolClient {
       text: string;
     },
     signal?: AbortSignal,
+    beforeSend?: () => undefined,
   ): Promise<void>;
 }
 
@@ -151,7 +152,7 @@ export function createWeixinProtocolClient(
     const ciphertext = encryptMedia(value, aesKey);
     const uploadResponse = parseMediaUploadResponse(
       await request({
-        fetchImpl: guardedMediaFetch(fetchImpl, beforeSend),
+        fetchImpl: guardedSendFetch(fetchImpl, beforeSend),
         randomBytesImpl,
         baseUrl,
         botToken,
@@ -180,7 +181,7 @@ export function createWeixinProtocolClient(
       label,
     );
     const downloadParameter = await uploadMediaCiphertext({
-      fetchImpl: guardedMediaFetch(fetchImpl, beforeSend),
+      fetchImpl: guardedSendFetch(fetchImpl, beforeSend),
       maximumAttempts: beforeSend ? 1 : maximumImageUploadAttempts,
       url: uploadUrl,
       ciphertext,
@@ -252,7 +253,7 @@ export function createWeixinProtocolClient(
       return batch;
     },
 
-    async sendText(input, signal) {
+    async sendText(input, signal, beforeSend) {
       const actorId = validateActorInput(input.actorId);
       const contextToken = optionalContextToken(
         input.contextToken,
@@ -265,7 +266,7 @@ export function createWeixinProtocolClient(
         maximumTextLength,
       );
       const raw = await request({
-        fetchImpl,
+        fetchImpl: guardedSendFetch(fetchImpl, beforeSend),
         randomBytesImpl,
         baseUrl,
         botToken,
@@ -310,7 +311,7 @@ export function createWeixinProtocolClient(
         beforeSend,
       );
       const raw = await request({
-        fetchImpl: guardedMediaFetch(fetchImpl, beforeSend),
+        fetchImpl: guardedSendFetch(fetchImpl, beforeSend),
         randomBytesImpl,
         baseUrl,
         botToken,
@@ -371,7 +372,7 @@ export function createWeixinProtocolClient(
         beforeSend,
       );
       const raw = await request({
-        fetchImpl: guardedMediaFetch(fetchImpl, beforeSend),
+        fetchImpl: guardedSendFetch(fetchImpl, beforeSend),
         randomBytesImpl,
         baseUrl,
         botToken,
@@ -426,13 +427,13 @@ interface WeixinMediaUploadResponse {
   uploadParameter?: string;
 }
 
-function guardedMediaFetch(fetchImpl: typeof fetch, beforeSend?: () => undefined): typeof fetch {
+function guardedSendFetch(fetchImpl: typeof fetch, beforeSend?: () => undefined): typeof fetch {
   return (input, init) => {
     if (beforeSend) {
       const result: unknown = beforeSend();
       if (result !== undefined) {
         void Promise.resolve(result).catch(() => undefined);
-        throw new WeixinProtocolError("invalid-input", "微信媒体发送授权无效");
+        throw new WeixinProtocolError("invalid-input", "微信发送授权无效");
       }
     }
     return fetchImpl(input, init);

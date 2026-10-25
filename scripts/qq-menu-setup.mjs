@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
-import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
+import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { readGatewayConfig, validateGatewayConfigStructureDocument } from "../runtime/gateway-config.mjs";
+import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
 import { ChannelSetupCancelled } from "./channel-setup-presentation.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
@@ -32,8 +32,7 @@ export async function runQqMenuSetup({ environment = process.env, output = proce
     try {
       const { configPath } = requireUserConfig(environment, { readOnly: true });
       operation = "load-modules";
-      const [{ loadConfigDocument }, { createQqNetwork }, { loadQqSurface }] = await Promise.all([
-        import("../dist/config/index.js"),
+      const [{ createQqNetwork }, { loadQqSurface }] = await Promise.all([
         import("../dist/bootstrap/qq-network.js"),
         import("../dist/surfaces/index.js"),
       ]);
@@ -44,10 +43,15 @@ export async function runQqMenuSetup({ environment = process.env, output = proce
         }
         const raw = validateGatewayConfigStructureDocument(readGatewayConfig(configPath));
         if (!raw.qq?.app_id || !raw.qq?.app_secret) throw new QqMenuSetupError("credentials-missing");
-        const config = loadConfigDocument(readFileSync(configPath, "utf8"), dirname(configPath), {
-          environment, detectSystemProxy: true,
-        });
-        return { appId: raw.qq.app_id, appSecret: raw.qq.app_secret, networkProxy: config.networkProxy };
+        // Menu management also works before any channel is enabled. Resolve the
+        // shared proxy without requiring a startable Gateway or usable Workspace.
+        const proxy = resolveProxyEnvironment(readCodexProxySettings(environment), environment);
+        return { appId: raw.qq.app_id, appSecret: raw.qq.app_secret, networkProxy: {
+          ...(proxy.HTTP_PROXY ? { http: proxy.HTTP_PROXY } : {}),
+          ...(proxy.HTTPS_PROXY ? { https: proxy.HTTPS_PROXY } : {}),
+          ...(proxy.ALL_PROXY ? { all: proxy.ALL_PROXY } : {}),
+          ...(proxy.NO_PROXY ? { no: proxy.NO_PROXY } : {}),
+        } };
       };
       operation = "configuration";
       const local = readLocal();

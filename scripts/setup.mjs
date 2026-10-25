@@ -380,7 +380,7 @@ async function runChannelSetup({
       {
         value: "qq",
         label: "QQ",
-        hint: "扫码接入、单聊与群聊授权",
+        hint: "扫码接入、单聊授权与机器人菜单",
       },
       {
         value: "back",

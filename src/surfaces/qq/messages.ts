@@ -813,6 +813,7 @@ export class QqMessages implements SurfaceOutputPort {
           return;
         }
         const assertCurrent = () => {
+          if (!this.allowed(target, message.actorId)) throw new UserFacingError("command.authorization-changed", "QQ 命令所属连接已关闭或操作者授权已变化。");
           if (commandTicket && !commandTicket.isCurrent()) throw new UserFacingError("command.selection.expired", "任务准备已取消、过期或失权，请核对任务状态。");
           if (extensionScope !== undefined && this.extensionQueryScope(target) !== extensionScope) throw new UserFacingError("command.selection.expired", "查询上下文已变化，请重新打开扩展查询。");
           if (fixedScope !== undefined && this.menuScope(target) !== fixedScope

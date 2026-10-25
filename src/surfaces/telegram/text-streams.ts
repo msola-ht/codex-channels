@@ -176,11 +176,13 @@ export class TelegramTextStreams {
     if (state) state.previewClosed = true;
   }
 
-  discardUnadmittedCommentaryForTurn(chatId: string, threadId: string, turnId: string): void {
+  discardUnadmittedPreviewsForTurn(chatId: string, threadId: string, turnId: string): void {
     for (const key of this.streamKeysForTurn(chatId, threadId, turnId)) {
       const state = this.streams.get(key)!;
       state.previewClosed = true;
-      if (state.previewAdmitted || state.phase !== "commentary") continue;
+      // An unknown phase is still withheld until an authoritative complete Item
+      // or final_answer delta arrives. Turn completion cannot grant admission.
+      if (state.previewAdmitted) continue;
       if (state.timer) clearTimeout(state.timer);
       this.streams.delete(key);
     }
@@ -221,7 +223,7 @@ export class TelegramTextStreams {
   }
 
   prepareTurnCompletion(chatId: string, threadId: string, turnId: string): (chatId: string, signal?: AbortSignal) => Promise<void> {
-    this.discardUnadmittedCommentaryForTurn(chatId, threadId, turnId);
+    this.discardUnadmittedPreviewsForTurn(chatId, threadId, turnId);
     const streams = this.streamKeysForTurn(chatId, threadId, turnId).map((key) => [key, this.streams.get(key)!] as const);
     for (const [, stream] of streams) {
       if (stream.timer) {
@@ -259,7 +261,7 @@ export class TelegramTextStreams {
         clearTimeout(state.timer);
         state.timer = undefined;
       }
-      if (!state.previewAdmitted && state.phase === "commentary") this.streams.delete(key);
+      if (!state.previewAdmitted) this.streams.delete(key);
     }
   }
 

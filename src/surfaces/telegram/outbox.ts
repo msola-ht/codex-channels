@@ -204,7 +204,7 @@ export class TelegramOutbox {
       this.textStreams.observeComplete(event);
       if (isEmptyCommentary(event) || this.hidesCommentary(event)) this.textStreams.discard(event);
     } else if (event.type === "turn.completed") {
-      this.textStreams.discardUnadmittedCommentaryForTurn(event.target.conversationId, event.threadId, event.turnId);
+      this.textStreams.discardUnadmittedPreviewsForTurn(event.target.conversationId, event.threadId, event.turnId);
       this.textStreams.completeTurn(event.target.conversationId, event.threadId, event.turnId);
     } else if (event.type === "connection.lost") this.textStreams.invalidateThread(event.threadId);
   }

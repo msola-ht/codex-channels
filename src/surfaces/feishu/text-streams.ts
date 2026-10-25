@@ -69,7 +69,7 @@ export class FeishuTextStreams {
         delete state.timer;
       }
       if (!state.previewAdmitted) {
-        if (state.phase === "commentary") this.discardState(key, state);
+        this.discardState(key, state);
         continue;
       }
       this.delivery.enqueue(
@@ -201,11 +201,13 @@ export class FeishuTextStreams {
     if (state) this.discardState(key, state);
   }
 
-  discardUnadmittedCommentaryForTurn(chatId: string, threadId: string, turnId: string): void {
+  discardUnadmittedPreviewsForTurn(chatId: string, threadId: string, turnId: string): void {
     for (const [key, state] of this.streams) {
       if (state.chatId !== chatId || state.threadId !== threadId || state.turnId !== turnId) continue;
       state.previewClosed = true;
-      if (!state.previewAdmitted && state.phase === "commentary") this.discardState(key, state);
+      // Preserve complete Items owned by their terminal receipt; only discard
+      // withheld live buffers, including Items whose phase is still unknown.
+      if (!state.previewAdmitted) this.discardState(key, state);
     }
   }
 
@@ -298,7 +300,7 @@ export class FeishuTextStreams {
     turnId: string,
     onSettled: (failed: boolean) => void,
   ): void {
-    this.discardUnadmittedCommentaryForTurn(chatId, threadId, turnId);
+    this.discardUnadmittedPreviewsForTurn(chatId, threadId, turnId);
     const matching = [...this.streams].filter(([, state]) =>
       state.chatId === chatId && state.threadId === threadId && state.turnId === turnId
     );

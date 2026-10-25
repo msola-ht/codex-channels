@@ -8,7 +8,7 @@ Surface 在接收音视频、首次进入队列前登记有界接收取消范围
 
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 
-工作区文字命令保留序号、ID、名称选择；`ConversationCommandExecutor.selectWorkspace` 为渠道按钮提供精确 ID 入口，复用同一授权、会话锁、空闲检查及绑定切换。旧工作区选择已失效时仍允许显式重选，不自动选择默认目录或重试失败请求。
+工作区文字命令保留序号、ID、名称选择；`ConversationCommandExecutor.selectWorkspace` 为渠道按钮提供精确 ID 入口，复用同一授权、会话锁、空闲检查及绑定切换。可选交互有效性守卫贯穿等待和提交边界，成功切换后只复核操作者及交互有效性，不再要求旧工作区。旧工作区选择已失效时仍允许显式重选，不自动选择默认目录或重试失败请求。
 
 普通消息的 `submit` 接收 Surface 提供的实时授权闭包，在等待会话锁、Thread 准备及最终 Turn 写入前复核；
 输入同时固定接收时的 Workspace ID 与目录，变化时拒绝。图片准备后的 start/steer 也保留最终守卫。

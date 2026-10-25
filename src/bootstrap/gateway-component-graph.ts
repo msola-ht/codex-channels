@@ -1120,7 +1120,9 @@ export abstract class GatewayComponentGraph {
         throw new UserFacingError("command.authorization-changed", "当前渠道不支持状态展示");
       }
       const group = target.surface === "qq" ? parseQqGroupConversationId(target.conversationId) : undefined;
-      const selector = { surface: target.surface, account_id: target.accountId, chat_kind: group ? "group" : "direct", chat_id: group?.groupOpenId ?? target.conversationId } as const;
+      const chatId = group?.groupOpenId ?? (target.surface === "qq" && target.conversationId.startsWith("c2c:")
+        ? target.conversationId.slice(4) : target.conversationId);
+      const selector = { surface: target.surface, account_id: target.accountId, chat_kind: group ? "group" : "direct", chat_id: chatId } as const;
       const inspected = inspectMessageDisplayScope(this.config.messageDisplay, selector);
       const fields = supportedMessageDisplayFields(selector);
       return { preset: identifyMessageDisplayPreset(inspected.settings, fields), sources: [...new Set(messageDisplayFields.filter(([field]) => fields.includes(field)).map(([, key]) => inspected.sources[key]))] };

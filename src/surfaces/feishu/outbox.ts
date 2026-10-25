@@ -169,7 +169,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       this.textStreams.observeComplete(event);
       if (this.hidesCommentary(event)) this.textStreams.discard(event);
     } else if (event.type === "turn.completed") {
-      this.textStreams.discardUnadmittedCommentaryForTurn(event.target.conversationId, event.threadId, event.turnId);
+      this.textStreams.discardUnadmittedPreviewsForTurn(event.target.conversationId, event.threadId, event.turnId);
     }
   }
 

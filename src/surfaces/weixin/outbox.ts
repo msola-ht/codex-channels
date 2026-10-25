@@ -114,11 +114,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
     this.accountId = validateWeixinAccountId(accountId);
     this.logger = logger;
     this.client = {
-      sendText: (input, signal) => this.withSendRetry(
+      sendText: (input, signal, beforeSend) => this.withSendRetry(
         "sendText",
-        () => (signal === undefined
-          ? client.sendText(input)
-          : client.sendText(input, signal)),
+        () => {
+          beforeSend?.();
+          return client.sendText(input, signal, beforeSend);
+        },
         signal,
       ),
     };
@@ -503,6 +504,14 @@ export class WeixinOutbox implements SurfaceOutputPort {
     };
     const plan = planWeixinText(text, maximumChunkCount);
     if (plan.truncated) DeliveryReceipt.current()?.markContentIncomplete();
+    const actorId = context.actorId;
+    // Keep both the result owner and current recipient authorization across
+    // retry waits and asynchronous credential acquisition, through to HTTP.
+    const beforeSend = (): undefined => {
+      this.assertSendActive(signal);
+      if (!this.access.isAllowed({ target, actorId })) throw new WeixinOutboxError("unauthorized-recipient");
+      return undefined;
+    };
     for (const chunk of plan.chunks) {
       this.assertSendActive(signal);
       if (!this.access.isAllowed({
@@ -520,11 +529,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
             : { contextToken: context.contextToken }),
           text: chunk,
         };
-        if (signal) {
-          await checkpointDelivery("sendText", () => this.client.sendText(input, signal), isDefinitelyRejectedWeixinSend);
-        } else {
-          await checkpointDelivery("sendText", () => this.client.sendText(input), isDefinitelyRejectedWeixinSend);
-        }
+        await checkpointDelivery("sendText", () => this.client.sendText(input, signal, beforeSend), isDefinitelyRejectedWeixinSend);
       } catch (error) {
         if (isRejectedReplyContext(error)) {
           await this.invalidateContext(target, context.contextToken);

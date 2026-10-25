@@ -5,7 +5,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20Preview-555555)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-在 Telegram、飞书或微信中使用本机 Codex。Gateway 与 `codexc remote` 共享同一个 Codex App Server，聊天渠道和原生 TUI 可在工作区与 Provider 匹配时接续同一 Thread，并共享运行状态。工作区选择与终端入口见[使用指南](docs/user-guide.md#4-workspaceprovider-与终端)。
+在 Telegram、飞书或微信中使用本机 Codex；QQ 单聊接入处于预览阶段，群功能暂停，支持范围和验收限制见[QQ 消息合同](docs/qq-message-contract.md)。Gateway 与 `codexc remote` 共享同一个 Codex App Server，聊天渠道和原生 TUI 可在工作区与 Provider 匹配时接续同一 Thread，并共享运行状态。工作区选择与终端入口见[使用指南](docs/user-guide.md#4-workspaceprovider-与终端)。
 
 当前源码开发基线：`0.164.0`。项目通过 Git 源码安装和更新，不再发布新的 npm 版本。
 

@@ -330,7 +330,7 @@ function modelSelectionResult(state: ModelSelectionState): ConversationCommandRe
 
 export interface ConversationCommandExecutor {
   selectMcpLogin(target: ConversationTarget, selector: string, expectedName: string, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
-  selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string): Promise<ConversationCommandResult>;
+  selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
   selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
   selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult>;
   selectModelSetting(target: ConversationTarget, selection: ModelSelectionRequest, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
@@ -370,11 +370,14 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     this.scheduledTasks = scheduledTasks;
   }
 
-  async selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string): Promise<ConversationCommandResult> {
-    const assertAuthorized = this.commandGuard(target, actorId, true);
+  async selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult> {
+    const authorize = this.commandGuard(target, actorId, true);
+    const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
+    assertAuthorized();
     this.conversations.touchActivity?.(target);
     const result = await this.selectWorkspaceResult(target, { id: workspaceId }, assertAuthorized);
     this.authorize(target, actorId);
+    assertInteractionActive?.();
     return result;
   }
 
