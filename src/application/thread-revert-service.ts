@@ -178,8 +178,8 @@ export class ThreadRevertService {
   ): Promise<{ threadId: string; beforeTurnId: string }> {
     assertAuthorized?.();
     const binding = this.requireCurrentBinding(target);
-    return this.withSnapshotOperation(target, binding, assertAuthorized, async (beforeSubmit) => {
-      beforeSubmit();
+    return this.withSnapshotOperation(target, binding, assertAuthorized, async (beforeOperation) => {
+      beforeOperation();
       const confirmation = this.confirmations.get(token);
       if (!confirmation) {
         throw confirmationInvalidError();
@@ -187,13 +187,22 @@ export class ThreadRevertService {
       // Consume before all checks: a token is single-use even when a
       // concurrent change makes the destructive request fail closed.
       this.confirmations.delete(token);
+      const age = Date.now() - confirmation.capturedAtMs;
       if (
         confirmation.targetKey !== conversationTargetKey(target)
         || confirmation.actorId !== (actorId ?? target.accountId)
-        || Date.now() - confirmation.capturedAtMs > snapshotLifetimeMs
+        || age < 0 || age > snapshotLifetimeMs
       ) {
         throw confirmationInvalidError();
       }
+      const deadline = performance.now() + snapshotLifetimeMs - age;
+      const beforeSubmit = () => {
+        beforeOperation();
+        const currentAge = Date.now() - confirmation.capturedAtMs;
+        if (performance.now() > deadline || currentAge < 0 || currentAge > snapshotLifetimeMs) {
+          throw confirmationInvalidError();
+        }
+      };
       if (
         binding.threadId !== confirmation.threadId
         || binding.workspaceId !== confirmation.workspaceId

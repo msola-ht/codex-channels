@@ -14,7 +14,7 @@ QQ Adapter 已移除 connectionOnly，启用共享自动绑定恢复与交互，
 | 批次 | 范围 | 必须覆盖的边界 | 状态 |
 | --- | --- | --- | --- |
 | 1 | 会话管理：rename、archived、archive、unarchive、pin、unpin；会话管理按钮及归档列表选择 | 归档/恢复前撤销旧来源；归档列表不能执行 resume；精确 ID 与一次性选择；重命名和置顶不撤销任务来源 | 源码完成，待部署验收 |
-| 2 | 上下文操作：compact、fork、revert | 异步压缩终态、派生后的绑定/模型、回退预览与确认、失效快照及旧结果禁发 | 待实施 |
+| 2 | 上下文操作：compact、fork、revert | 压缩请求不冒充完成、派生后的绑定/模型、回退完整预览与确认、失效快照及旧结果禁发 | 源码完成，待部署验收 |
 | 3 | 模式与状态：effort、fast、plan、goal、permissions、autoreview、whoami | 复用模型菜单与共享模式/权限合同；启动任务的参数路径必须取得精确来源；身份输出脱敏 | 待实施 |
 | 4 | 扩展只读与管理入口：skills/agents 列表、plugin 查询、mcp 查询/认证、hooks、release 诊断 | 查询期间 Provider/Thread 变化、OAuth 完成归属、Hook 信任范围；强制释放单独门控 | 待实施 |
 | 5 | 显式任务入口：review、skill/agents/plugin 调用，以及批次 3 的任务型参数 | SubmissionObserver 贯穿实际执行；不得遗漏早到输出或复用无关 Turn，保持共享提交语义 | 待实施 |
@@ -30,6 +30,11 @@ QQ Adapter 已移除 connectionOnly，启用共享自动绑定恢复与交互，
 
 当前基础命令为 /help（含 /h）、/status、/stop、/workspace（含 /work）、/model、/new、/sessions、/resume（含 /r）；此外开放下述查询命令，其他斜杠命令拒绝。
 第一批源码另开放 rename、archived、archive、unarchive、pin、unpin；当前尚未部署。会话管理菜单使用既有回调，归档列表沿共享查询/筛选，分页携带 archived 标记；每个条目以精确 ID 和一次性令牌执行 unarchive，不误调用 resume。文字 unarchive 沿共享序号/名称/ID 解析，不增加会话缓存索引。
+第二批开放无参数 compact/fork 及共享 revert 语法，尚未部署。压缩仅发送请求回执，明确不单独推送进度、不表示完成；fork 成功回执固定返回的新 Thread，执行前撤销旧来源。Revert 使用共享列表/预览/确认合同，列表每 25 条在 QQ 分为最多九项的子页，只保留菜单 ID 和有界令牌、不另存历史；选中生成完整字面预览，最后附可信 Markdown 确认按钮。
+回退预览主动发送并计额度，所有片确认后才激活确认入口；文字 confirm 与按钮共用本代次就绪资格，部分发送、超限、跨用户、过期、停止/切换及刷新列表均不能绕过。确认执行前撤销来源；共享服务复核原 Actor/Thread/Workspace、最新历史、活动 Turn 和 Queue 指纹，一次性令牌失败也不恢复。最终写入前复核五分钟期限，查询等待跨过期限则不发送回退请求；已经发送的请求仍按实际响应结算。上游没有条件版本写入，仍保留预览中“确认完成前不要从其他客户端追加 Turn”的提示。
+第二批关联复审加入具体反例，修复了确认查询跨过期限仍提交、共享页数字序号不一致、上一屏跳页和停止无法取消在途准备四项问题。QQ 为每目标持有有界回退取消信号，覆盖查询返回后生成面板的窗口；`ConversationCommandExecutor.execute` 的可选有效性守卫与原授权一起透传到最终请求，其他渠道不传时保留原语义。已有写入无法撤回，不将停止或过期解释成回滚。
+本地生产入口观察使用真实 QQ 准入/菜单、共享 CommandService 与 ThreadRevertService，替换 HTTP 和历史/Queue 执行端口：25 条长中文摘要分为 9/9/7 项，页面最大 1152 字节；选择后先发送完整字面预览和末片控制按钮（两片），写入次数为零，确认后才执行一次；重复确认仍为一次。压缩回执明确只请求，派生回执包含返回的新 Thread。修复后的跨共享页观察为“预览 26 → 上一屏预览 19”；前一共享页仅五条时回到其唯一屏。
+反例实际结果：预览控制面板 HTTP 500、预览查询时停止、确认复核时停止均 writes=0、readyConfirmations=0；令牌 4:59.999 入确认后 Queue 等待跨期限返回 confirmation-invalid，错 Actor/Thread、Queue 变化均未写入，失败后重复令牌拒绝。模拟写入响应未知时写入尝试为一次且返回 result-unknown，未重试；已提交后才过期仍结算真实成功响应。独立复审先指出上述问题，主代理完成修复与这些观察；真实 QQ 回调、App Server 历史变更及其他客户端并发仍待验收，不以隔离观察替代。
 archive/unarchive 在尝试前撤销本目标旧来源和交互，失败不恢复；rename/pin/unpin 保留来源。共享服务负责空闲判断、名称校验、路由权限及官方写入。无参数操作拒绝额外参数；变更完成后的回执绑定当时工作区和 Thread，输出等待期间切换后禁发。archive/unarchive 操作不授予旧任务结果回传资格。
 第一批关联审查追踪 QQ 准入/按钮、共享命令授权、Application 会话锁、Router 归档与恢复、Client 最终写入守卫、菜单结果和 Outbox 消费。独立只读分析核对共享归档/绑定合同；主代理完成接线与最终关联复查。取消来源不等于撤销已经提交的官方写入；unarchive 后续恢复失败也不承诺回滚归档状态，不自动重试。
 本地生产入口隔离观察（未接真实 QQ/App Server）：`receive → archived → 菜单 → callback → unarchive → Outbox` 返回“已取消归档并切换会话”，调用使用精确 `thread-0`；归档翻页继续调用 archived 并保留 `filter pinned search 工作`，搜索填入 `/archived search`。重复令牌没有再次执行业务；rename/pin/unpin/archive 均到达对应共享命令端口，三个无参数操作附加参数时业务调用增量为零。

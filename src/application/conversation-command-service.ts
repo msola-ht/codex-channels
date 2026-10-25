@@ -38,6 +38,7 @@ import { resolveProvider, type ModelSelectionIdentity, type ModelSelectionReques
 import { pageCountFor, pageSlice } from "./pagination.js";
 
 export {
+  parseThreadRevertOperation,
   archivedSessionCommandUsageText,
   mcpCommandUsageText,
   pluginCommandUsageText,
@@ -331,6 +332,7 @@ export interface ConversationCommandExecutor {
     command: ConversationCommandName,
     input: string,
     actorId: string,
+    assertInteractionActive?: () => void,
   ): Promise<ConversationCommandResult>;
 }
 
@@ -397,11 +399,14 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     command: ConversationCommandName,
     input: string,
     actorId: string,
+    assertInteractionActive?: () => void,
   ): Promise<ConversationCommandResult> {
-    const assertAuthorized = this.commandGuard(target, actorId, command === "workspace");
+    const authorize = this.commandGuard(target, actorId, command === "workspace");
+    const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
+    assertAuthorized();
     const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
     try {
-      if (command === "workspace" && input.trim()) this.authorize(target, actorId);
+      if (command === "workspace" && input.trim()) { this.authorize(target, actorId); assertInteractionActive?.(); }
       else assertAuthorized();
     } catch (error) {
       if (result.kind === "scheduled-confirmation") this.scheduledTasks?.cancelConfirmation(result.preview.token);

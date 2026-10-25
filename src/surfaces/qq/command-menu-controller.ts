@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import {
   fastServiceTierId,
   modelSelectionSnapshot,
+  parseThreadRevertOperation,
   ultrafastServiceTierId,
   type ConversationCommandExecutor,
   type ConversationCommandResult,
@@ -10,6 +11,8 @@ import {
 } from "../../application/index.js";
 import { conversationTargetKey, UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
+import { renderConversationCommandResult } from "../conversation-command-renderer.js";
+import { formatQqLiteralDetails } from "./interactions.js";
 import { qqMenuButton, renderQqCommandMenu, type QqMenuButton } from "./command-menu.js";
 import type { QqCommandKeyboard } from "./protocol.js";
 
@@ -17,6 +20,8 @@ export interface QqMenuPanel {
   content: string;
   keyboard: QqCommandKeyboard;
   isCurrent(): boolean;
+  detail?: string;
+  delivered?(): void;
 }
 
 interface Options {
@@ -25,7 +30,7 @@ interface Options {
   workspaceScope(target: ConversationTarget): string;
   selectionScope(target: ConversationTarget): string | undefined;
   allowed(target: ConversationTarget, actorId: string): boolean;
-  beforeMutation(target: ConversationTarget): void;
+  beforeMutation(target: ConversationTarget, preserveRevert?: boolean): void;
   signal: AbortSignal;
 }
 
@@ -37,6 +42,10 @@ type MenuAction =
   | { kind: "workspace-page"; page: number }
   | { kind: "model-page"; page: number; view: ModelView; snapshot: ModelSelectionSnapshot }
   | { kind: "sessions-page"; page: number; filters: string; archived: boolean };
+// Revert selections retain only IDs/tokens. Authoritative history remains in Application.
+type RevertAction = { kind: "revert-page"; page: number }
+  | { kind: "revert-preview"; id: string }
+  | { kind: "revert-confirm"; token: string };
 
 interface MenuContext {
   target: ConversationTarget;
@@ -46,9 +55,10 @@ interface MenuContext {
   expiresAt: number;
   generation: number;
   selectionScope?: string;
+  revertSignal?: AbortSignal;
 }
 
-interface Selection extends MenuContext { action: MenuAction }
+interface Selection extends MenuContext { action: MenuAction | RevertAction; ready: boolean }
 type Workspaces = Extract<ConversationCommandResult, { kind: "workspaces" }>;
 type Models = Extract<ConversationCommandResult, { kind: "models" }>;
 type Sessions = Extract<ConversationCommandResult, { kind: "sessions" }>;
@@ -58,12 +68,15 @@ const MENU_LIFETIME_MS = 600_000;
 /** One account generation owns these bounded, one-use command selections; no history is retained. */
 export class QqCommandMenuController {
   private readonly selections = new Map<string, Selection>();
+  private readonly revertScopes = new Map<string, AbortController>();
   private generation = 0;
 
   constructor(private readonly options: Options) {}
 
   clear(): void {
     this.selections.clear();
+    for (const controller of this.revertScopes.values()) controller.abort();
+    this.revertScopes.clear();
     this.generation += 1;
   }
 
@@ -76,6 +89,7 @@ export class QqCommandMenuController {
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("rename", "重命名", "/rename ", false), qqMenuButton("pin", "置顶会话", "/pin"), qqMenuButton("unpin", "取消置顶", "/unpin")] },
         { buttons: [qqMenuButton("archive", "归档当前", "/archive"), qqMenuButton("archived", "归档列表", "/help archived 1"), homeButton()] },
+        { buttons: [qqMenuButton("compact", "压缩上下文", "/compact"), qqMenuButton("fork", "派生会话", "/fork"), qqMenuButton("revert", "历史回退", "/revert")] },
       ] } },
     });
     const pick = /^pick ([a-f0-9]{24})$/u.exec(input);
@@ -118,7 +132,7 @@ export class QqCommandMenuController {
   }
 
   private current(context: MenuContext, workspaceOnly = false): boolean {
-    return !this.options.signal.aborted && context.generation === this.generation
+    return !this.options.signal.aborted && !context.revertSignal?.aborted && context.generation === this.generation
       && performance.now() < context.expiresAt && this.options.allowed(context.target, context.actorId)
       && (workspaceOnly ? this.options.workspaceScope(context.target) === context.workspaceScope
         : this.options.scope(context.target) === context.scope
@@ -134,11 +148,11 @@ export class QqCommandMenuController {
     return { ...value, isCurrent: () => this.current(context) };
   }
 
-  private button(context: MenuContext, label: string, action: MenuAction): QqMenuButton {
+  private button(context: MenuContext, label: string, action: MenuAction | RevertAction): QqMenuButton {
     this.assertCurrent(context);
     while (this.selections.size >= MAX_SELECTIONS) this.selections.delete(this.selections.keys().next().value!);
     const token = randomBytes(12).toString("hex");
-    this.selections.set(token, { ...context, action });
+    this.selections.set(token, { ...context, action, ready: action.kind !== "revert-confirm" });
     return qqMenuButton(token, bounded(label, 10), `/help pick ${token}`);
   }
 
@@ -147,17 +161,24 @@ export class QqCommandMenuController {
     if (!selection || selection.actorId !== request.actorId
       || conversationTargetKey(selection.target) !== conversationTargetKey(request.target)) throw expired();
     this.assertCurrent(selection);
+    if (!selection.ready) throw expired();
     this.selections.delete(token);
     const { action } = selection;
     switch (action.kind) {
       case "workspace-page": return this.workspacePage(selection, action.page);
       case "model-page": return this.modelPage(selection, action.page, action.view, action.snapshot);
       case "sessions-page": return this.sessionsPage(selection, action.page, action.filters, action.archived);
+      case "revert-page": return this.revertPage(selection, action.page);
+      case "revert-preview": return this.revertResult(selection, await this.options.commands.execute(selection.target, "revert", action.id, selection.actorId, () => this.assertCurrent(selection)));
     }
-    this.options.beforeMutation(selection.target);
+    this.options.beforeMutation(selection.target, action.kind === "revert-confirm");
     this.assertCurrent(selection);
     let result: ConversationCommandResult;
-    if (action.kind === "workspace") {
+    if (action.kind === "revert-confirm") {
+      this.clearRevertSelections(selection.target);
+      result = await this.options.commands.execute(selection.target, "revert", `confirm ${action.token}`, selection.actorId, () => this.assertCurrent(selection));
+      this.assertCurrent(selection);
+    } else if (action.kind === "workspace") {
       result = await this.options.commands.selectWorkspace(selection.target, action.id, selection.actorId);
     } else if (action.kind === "model") {
       // Shared model selection owns and validates its own Thread/snapshot progression,
@@ -175,6 +196,80 @@ export class QqCommandMenuController {
     if (result.kind === "models") return this.models(next, result, 1, result.view);
     if (result.kind !== "outcome") throw unsupported();
     return this.panel(next, { ...renderQqCommandMenu(), content: markdown(formatConversationCommandOutcome(result.outcome), 1600) });
+  }
+
+  cancelRevert(target: ConversationTarget): void {
+    const key = conversationTargetKey(target);
+    this.revertScopes.get(key)?.abort();
+    this.revertScopes.delete(key);
+    this.clearRevertSelections(target);
+  }
+
+  private clearRevertSelections(target: ConversationTarget): void {
+    for (const [key, value] of this.selections) if (value.action.kind.startsWith("revert-")
+      && conversationTargetKey(value.target) === conversationTargetKey(target)) this.selections.delete(key);
+  }
+
+  async revert(target: ConversationTarget, actorId: string, input: string): Promise<QqMenuPanel> {
+    const context = this.revertContext(this.context(target, actorId));
+    const operation = parseThreadRevertOperation(input);
+    if (operation.type === "confirm") {
+      const entry = [...this.selections.entries()].find(([, value]) => value.action.kind === "revert-confirm"
+        && value.action.token === operation.token && value.actorId === actorId
+        && conversationTargetKey(value.target) === conversationTargetKey(target));
+      if (!entry) throw expired();
+      return this.pick(context, entry[0]);
+    }
+    if (operation.type === "list") return this.revertPage(context, (operation.page - 1) * 3 + 1);
+    return this.revertResult(context, await this.options.commands.execute(target, "revert", input, actorId, () => this.assertCurrent(context)));
+  }
+
+  private revertContext(context: MenuContext): MenuContext {
+    if (context.revertSignal) return context;
+    const key = conversationTargetKey(context.target);
+    let controller = this.revertScopes.get(key);
+    if (!controller) {
+      while (this.revertScopes.size >= MAX_SELECTIONS) {
+        const oldest = this.revertScopes.keys().next().value!;
+        this.revertScopes.get(oldest)!.abort();
+        this.revertScopes.delete(oldest);
+      }
+      controller = new AbortController();
+      this.revertScopes.set(key, controller);
+    }
+    return { ...context, revertSignal: controller.signal };
+  }
+
+  private async revertPage(context: MenuContext, page: number): Promise<QqMenuPanel> {
+    this.assertCurrent(context);
+    this.clearRevertSelections(context.target);
+    const sharedPage = Math.floor((page - 1) / 3) + 1;
+    const result = await this.options.commands.execute(context.target, "revert", `list ${sharedPage}`, context.actorId, () => this.assertCurrent(context));
+    this.assertCurrent(context);
+    if (result.kind !== "thread-revert") throw unsupported();
+    const offset = Math.min(((page - 1) % 3) * 9, Math.max(0, (Math.ceil(result.result.turns.length / 9) - 1) * 9));
+    page = (sharedPage - 1) * 3 + offset / 9 + 1;
+    const turns = result.result.turns.slice(offset, offset + 9);
+    const buttons = turns.map((turn, index) => this.button(context, `预览 ${result.result.selectors[offset + index] ?? turn.id}`, { kind: "revert-preview", id: turn.id }));
+    const lines = turns.map((turn, index) => `${result.result.selectors[offset + index] ?? ""}. ${markdown(turn.id, 100)} · ${markdown(turn.status, 30)}\n${markdown(turn.textPreview ?? "无文字预览", 70)}`);
+    const lastPage = (sharedPage - 1) * 3 + Math.max(1, Math.ceil(result.result.turns.length / 9));
+    return this.listPanel(context, "历史回退 · 选择预览", lines, buttons, page,
+      result.result.hasNextPage ? sharedPage * 3 + 1 : lastPage, next => ({ kind: "revert-page",
+        page: next > page && page === lastPage ? sharedPage * 3 + 1 : next }));
+  }
+
+  private revertResult(context: MenuContext, result: ConversationCommandResult): QqMenuPanel {
+    this.assertCurrent(context);
+    if (result.kind !== "thread-revert-preview") throw unsupported();
+    const current = { ...context, expiresAt: Math.min(context.expiresAt, performance.now() + 300_000) };
+    const confirm = this.button(current, "确认回退历史", { kind: "revert-confirm", token: result.preview.token });
+    const selection = this.selections.get(confirm.id)!;
+    const panel = this.panel(current, { content: "## 确认历史回退\n请核对上方完整预览。仅回退历史，不恢复文件或外部副作用。",
+      keyboard: { content: { rows: [{ buttons: [confirm, qqMenuButton("refresh", "重新查看历史", "/revert list"), homeButton()] }] } } });
+    return { ...panel, isCurrent: () => panel.isCurrent() && this.selections.get(confirm.id) === selection,
+      detail: formatQqLiteralDetails(renderConversationCommandResult(result)!), delivered: () => {
+      if (this.selections.get(confirm.id) === selection && this.current(selection)) selection.ready = true;
+    } };
   }
 
   private async workspacePage(context: MenuContext, page: number): Promise<QqMenuPanel> {
@@ -290,7 +385,7 @@ export class QqCommandMenuController {
   }
 
   private listPanel(context: MenuContext, title: string, lines: string[], buttons: QqMenuButton[], page: number, pageCount: number,
-    navigate: (page: number) => MenuAction, extra: QqMenuButton[] = []): QqMenuPanel {
+    navigate: (page: number) => MenuAction | RevertAction, extra: QqMenuButton[] = []): QqMenuPanel {
     const rows = buttonRows(buttons);
     if (extra.length) rows.push({ buttons: extra });
     const footer: QqMenuButton[] = [];

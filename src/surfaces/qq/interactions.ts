@@ -248,9 +248,7 @@ function render(pending: Pending, token: string): { content: string; controls: {
   if (buttons.length > 15) throw new Error("QQ 交互按钮容量不足");
   const rows: QqCommandKeyboard["content"]["rows"] = [];
   for (let index = 0; index < buttons.length; index += 3) rows.push({ buttons: buttons.slice(index, index + 3) });
-  const escaped = literal(content);
-  return { content: escaped === content ? content
-    : `特殊字符使用转义表示：双反斜杠表示一个反斜杠，\\u{码点} 表示对应字符。\n\n${escaped}`, controls: {
+  return { content: formatQqLiteralDetails(content), controls: {
     content: instruction,
     keyboard: { content: { rows } },
     ...(markdownContent === undefined ? {} : { markdownContent }),
@@ -258,6 +256,12 @@ function render(pending: Pending, token: string): { content: string; controls: {
 }
 
 /** Lossless visible escapes prevent platform tags and invisible characters hiding approval scope. */
+export function formatQqLiteralDetails(value: string): string {
+  const escaped = literal(value);
+  return escaped === value ? value
+    : `特殊字符使用转义表示：双反斜杠表示一个反斜杠，\\u{码点} 表示对应字符。\n\n${escaped}`;
+}
+
 function literal(value: string): string {
   return value.replace(/[\\<>&\p{Cf}\p{Cc}]/gu, character => character === "\n" ? character : character === "\\" ? "\\\\"
     : [...character].map(point => `\\u{${point.codePointAt(0)!.toString(16)}}`).join(""));

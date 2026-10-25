@@ -70,7 +70,7 @@ export class QqMessages implements SurfaceOutputPort {
       workspaceScope: target => this.menuWorkspaceScope(target),
       selectionScope: target => this.options.service.status(target).selectionScope,
       allowed: (target, actorId) => this.allowed(target, actorId),
-      beforeMutation: target => { this.cancelCallbacks(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); },
+      beforeMutation: (target, preserveRevert) => { this.cancelCallbacks(target); if (!preserveRevert) this.menus.cancelRevert(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); },
       signal: this.lifetime.signal,
     });
     this.outbox = new QqTextOutbox(client, options.logger);
@@ -289,7 +289,7 @@ export class QqMessages implements SurfaceOutputPort {
     try { command = parseSlashCommand(message.content); }
     catch { await this.reply(message, "命令格式不受支持。使用 /help 查看 QQ 命令。", () => this.allowed(target, message.actorId)); return; }
     const stop = command?.name === "stop" && !command.argumentsText;
-    if (stop) { this.cancelCallbacks(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); }
+    if (stop) { this.cancelCallbacks(target); this.menus.cancelRevert(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target); }
     if (this.busy.has(target.conversationId) && !stop && !ownsBusy) {
       await this.reply(message, "上一条输入仍在处理中，请稍后重试；/stop 可取消当前准备和任务。", () => this.allowed(target, message.actorId)); return;
     }
@@ -297,26 +297,28 @@ export class QqMessages implements SurfaceOutputPort {
     let stage: "command" | "render" | "reply" | "submit" = "command";
     try {
       if (command) {
-        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", ...QUERY_COMMANDS].includes(command.name)
-          || (["status", "stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin"].includes(command.name) && command.argumentsText.trim())) {
+        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", "compact", "fork", "revert", ...QUERY_COMMANDS].includes(command.name)
+          || (["status", "stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin", "compact", "fork"].includes(command.name) && command.argumentsText.trim())) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;
         }
-        if (command.name === "help") {
-          const menu = await this.menus.open(target, message.actorId, command.argumentsText);
+        if (command.name === "help" || command.name === "revert") {
+          const menu = await (command.name === "help" ? this.menus.open(target, message.actorId, command.argumentsText)
+            : this.menus.revert(target, message.actorId, command.argumentsText));
           stage = "reply";
-          await this.reply(message, menu.content, () => this.allowed(target, message.actorId) && menu.isCurrent(), undefined, menu.keyboard);
+          await this.reply(message, menu.content, () => this.allowed(target, message.actorId) && menu.isCurrent(), undefined, menu.keyboard, menu.detail);
+          menu.delivered?.();
           return;
         }
-        if (((command.name === "workspace" || command.name === "model" || command.name === "resume" || command.name === "unarchive") && command.argumentsText.trim()) || command.name === "new" || command.name === "archive") {
-          this.cancelCallbacks(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target);
+        if (((command.name === "workspace" || command.name === "model" || command.name === "resume" || command.name === "unarchive") && command.argumentsText.trim()) || command.name === "new" || command.name === "archive" || command.name === "fork") {
+          this.cancelCallbacks(target); this.menus.cancelRevert(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target);
         }
         const commandScope = this.scope(message.actorId);
         const hasSelectionMenu = ["workspace", "model", "sessions", "resume", "archived"].includes(command.name);
         const menuScope = hasSelectionMenu ? this.menuScope(target) : undefined;
         const menuWorkspaceScope = hasSelectionMenu ? this.menuWorkspaceScope(target) : undefined;
         const queryStatus = QUERY_COMMANDS.has(command.name) ? this.options.service.status(target) : undefined;
-        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "rename" | "archived" | "archive" | "unarchive" | "pin" | "unpin" | "usage" | "limits" | "metrics" | "diff", command.argumentsText, message.actorId);
-        const sessionReplyScope = ["rename", "archive", "unarchive", "pin", "unpin"].includes(command.name)
+        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "rename" | "archived" | "archive" | "unarchive" | "pin" | "unpin" | "compact" | "fork" | "usage" | "limits" | "metrics" | "diff", command.argumentsText, message.actorId);
+        const sessionReplyScope = ["rename", "archive", "unarchive", "pin", "unpin", "compact", "fork"].includes(command.name)
           ? this.menuScope(target) : undefined;
         stage = "render";
         const scope = command.name === "workspace" && command.argumentsText.trim() ? this.scope(message.actorId) : commandScope;
@@ -332,13 +334,17 @@ export class QqMessages implements SurfaceOutputPort {
           }, undefined, menu.keyboard);
           return;
         }
-        const text = result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
+        const text = result.kind === "outcome" && result.outcome.type === "thread.compaction-requested"
+          ? "已请求压缩当前会话。QQ 暂不单独推送压缩进度；此回执不表示压缩已完成。"
+          : result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
           : renderConversationCommandResult(result);
         if (!text) throw new Error("QQ 命令没有可交付结果");
         stage = "reply";
         await this.reply(message, text, () => {
           if (!scope || !this.current(scope)) return false;
           if (sessionReplyScope !== undefined && this.menuScope(target) !== sessionReplyScope) return false;
+          if (result.kind === "outcome" && result.outcome.type === "thread.forked"
+            && this.options.service.status(target).threadId !== result.outcome.threadId) return false;
           if (!queryStatus) return true;
           const current = this.options.service.status(target);
           if (current.threadId !== queryStatus.threadId) return false;
@@ -381,11 +387,11 @@ export class QqMessages implements SurfaceOutputPort {
   }
 
   private async reply(message: QqMessageInput, content: string, allowed: () => boolean,
-    oversizedNotice?: string, keyboard?: QqCommandKeyboard): Promise<void> {
+    oversizedNotice?: string, keyboard?: QqCommandKeyboard, detail?: string): Promise<void> {
     // A send failure must not recursively send another reply with the same msg_seq.
     if (this.replied.has(message)) throw new Error("QQ 来信回复已尝试，不重复发送");
-    const input: QqTextMessage = "kind" in message
-      ? { mode: "active", recipient: message.actorId, content }
+    const input: QqTextMessage = "kind" in message || detail !== undefined
+      ? { mode: "active", recipient: message.actorId, content: detail ?? content }
       : { mode: "passive", recipient: message.actorId, content,
         messageId: message.id, sequence: 1, sourceTimestampMs: message.sentAtMs };
     if (oversizedNotice) {
@@ -397,10 +403,11 @@ export class QqMessages implements SurfaceOutputPort {
     }
     this.replied.add(message);
     await this.outbox.deliver(input, {
-      ...(keyboard ? { representation: "markdown", keyboard } : { preferMarkdown: true }),
+      ...(detail !== undefined && keyboard ? { interactionControls: { content, keyboard } }
+        : keyboard ? { representation: "markdown", keyboard } : { preferMarkdown: true }),
       signal: this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
-      reserve: parts => this.budget.reserve(message.actorId, parts, "kind" in message ? "interaction" : undefined),
+      reserve: parts => this.budget.reserve(message.actorId, parts, "kind" in message || detail !== undefined ? "interaction" : undefined),
     }, async () => {});
   }
   private target(actorId: string): ConversationTarget { return { surface: "qq", accountId: this.options.appId, conversationId: `c2c:${actorId}` }; }

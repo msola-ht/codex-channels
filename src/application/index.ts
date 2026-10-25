@@ -37,6 +37,7 @@ export {
 } from "./collaboration-mode-port.js";
 export {
   ConversationCommandService,
+  parseThreadRevertOperation,
   archivedSessionCommandUsageText,
   conversationCommandNames,
   isConversationCommandName,
