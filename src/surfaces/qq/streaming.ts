@@ -5,6 +5,7 @@ import { QQ_PASSIVE_WINDOW_MS, QQ_STREAM_BYTES, QqProtocolError, QqTextSendError
 import type { QqTaskSources, QqTaskSourceReference } from "./task-sources.js";
 import type { QqSendBudget } from "./send-budget.js";
 import { qqBodyMarkdownPrefix } from "./body-markdown.js";
+import { qqBodyMarkdownRestart } from "./message-markdown.js";
 
 type Body = Extract<OutputEvent, { type: "text.delta" | "text.completed" }>;
 interface Stream {
@@ -84,7 +85,7 @@ export class QqBodyStreaming {
   /** Only a confirmed closed prefix permits active continuation; uncertain streams never switch modes. */
   async finish(event: Extract<Body, { type: "text.completed" }>, signal: AbortSignal,
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean): Promise<
-      { kind: "ordinary" } | { kind: "complete" } | { kind: "continue"; text: string }> {
+      { kind: "ordinary" } | { kind: "complete" } | { kind: "continue"; text: string; markdownStart: number }> {
     const key = this.key(event);
     const stream = this.streams.get(key);
     if (!stream) return { kind: "ordinary" };
@@ -122,7 +123,10 @@ export class QqBodyStreaming {
         break;
       }
       if (!boundary) throw new QqProtocolError("message", "invalid-input");
-      return { kind: "continue", text: `[正文续接]\n${suffix}` };
+      const marker = "正文续接：\n";
+      const restart = qqBodyMarkdownRestart(event.text, stream.sent.length);
+      return { kind: "continue", text: `${marker}${suffix}`,
+        markdownStart: restart === stream.sent.length ? 0 : marker.length + restart - stream.sent.length };
     } finally {
       bounded.removeEventListener("abort", abort);
       stream.controller.abort();

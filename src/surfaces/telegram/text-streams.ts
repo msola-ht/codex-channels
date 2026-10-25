@@ -12,7 +12,6 @@ import { telegramAbortSignal } from "./sdk-signal.js";
 import { isTelegramBadRequest, isTelegramDeliveryUncertain, isTelegramFormatRejection, isTelegramMissingMessage, telegramErrorMetadata } from "./error-metadata.js";
 import { splitTelegramText } from "./format.js";
 import { formatMarkdownAsTelegramHtml, formatMarkdownAsTelegramHtmlChunks, telegramHtmlToPlainText } from "./markdown-format.js";
-import { hasTelegramReplyHeading } from "./html-format.js";
 import { planLongFinalMessage, type LongFinalMessagePlan } from "./long-message-format.js";
 import { replyOptions, htmlSendOptions, operationEditOptions } from "./message-options.js";
 
@@ -37,7 +36,6 @@ interface StreamActivity {
   controller: AbortController;
 }
 
-const maximumRichMarkdownCharacters = 32_000;
 const maximumTelegramActiveStreams = 100;
 const maximumTelegramBufferedStreamCharacters = 1_000_000;
 const telegramStreamTruncationMarker = `\n\n（${contentTruncatedText}）`;
@@ -323,23 +321,17 @@ export class TelegramTextStreams {
     }
     const text = state.text.trimEnd();
     if (final && state.phase !== "commentary") {
-      const longMessage = planLongFinalMessage(text);
+      const longMessage = planLongFinalMessage(text, this.options.finalMessageFormat ?? "html");
       if (longMessage) {
         state.messageId = await this.sendLongFinal(chatId, state, text, longMessage, signal);
         return;
       }
       {
-        // Native Rich Markdown must not recreate the reserved interaction heading.
-        const reservedHeading = hasTelegramReplyHeading(formatMarkdownAsTelegramHtml(text.split("\n", 1)[0]!) ?? "");
-        const format = reservedHeading ? "html" : this.options.finalMessageFormat ?? "html";
-        const formatted = format === "rich"
-          ? canSendRichMarkdown(text) ? text : undefined
-          : formatMarkdownAsTelegramHtml(text);
-        if (formatted !== undefined && (format === "rich" || state.phase === "final_answer" || formatted !== text)) {
+        const format = "html";
+        const formatted = formatMarkdownAsTelegramHtml(text);
+        if (formatted !== undefined && (state.phase === "final_answer" || formatted !== text)) {
           try {
-            state.messageId = format === "rich"
-              ? await this.sendRichFinal(chatId, state, formatted, signal)
-              : await this.sendHtmlFinal(chatId, state, formatted, signal);
+            state.messageId = await this.sendHtmlFinal(chatId, state, formatted, signal);
             this.logger.info({ ...surfaceDiagnosticContext(), chatId, format, messageId: state.messageId },
               "Telegram 完成正文已格式化");
             return;
@@ -535,6 +527,24 @@ export class TelegramTextStreams {
     plan: LongFinalMessagePlan,
     signal?: AbortSignal,
   ): Promise<number> {
+    if (plan.kind === "rich") {
+      let firstId: number | undefined;
+      for (const markdown of plan.chunks) {
+        signal?.throwIfAborted();
+        const part = firstId === undefined ? state : { ...state, messageId: undefined };
+        try {
+          part.messageId = await this.sendRichFinal(chatId, part, markdown, signal);
+        } catch (error) {
+          if (signal?.aborted || !isTelegramFormatRejection(error)) throw error;
+          this.logger.warn({ ...surfaceDiagnosticContext(), chatId, ...telegramErrorMetadata(error) },
+            "Telegram 当前富文本分段格式被拒绝，回退该段 HTML");
+          part.messageId = await this.sendHtmlChunksFinal(chatId, part, formatMarkdownAsTelegramHtmlChunks(markdown), signal);
+        }
+        firstId ??= part.messageId;
+      }
+      if (firstId === undefined) throw new Error("Telegram 分段回复没有可发送内容");
+      return firstId;
+    }
     if (plan.kind === "html") {
       return this.sendHtmlChunksFinal(chatId, state, plan.chunks, signal);
     }
@@ -638,8 +648,4 @@ function boundedTelegramStreamText(text: string): {
       .join(""),
     truncated: true,
   };
-}
-
-function canSendRichMarkdown(text: string): boolean {
-  return Array.from(text).length <= maximumRichMarkdownCharacters;
 }

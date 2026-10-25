@@ -5,7 +5,7 @@ import { readGeneratedImage } from "../generated-image.js";
 import { assertChannelFileName, maximumChannelFileBytes, readBoundedLocalFile } from "../bounded-local-file.js";
 import { QQ_TEXT_PART_BYTES, QQ_MENU_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT_FILE_BYTES, QQ_IMAGE_BYTES, QqProtocolError, QqTextSendError,
   type QqProtocolClient, type QqTextMessage, type QqTextSendContext, type QqCommandKeyboard } from "./protocol.js";
-import { planQqMessageMarkdown } from "./message-markdown.js";
+import { planQqBodyMarkdown, planQqMessageMarkdown } from "./message-markdown.js";
 import { qqRecipientKey, type QqRecipient } from "./addressing.js";
 
 const MAX_PARTS = 8;
@@ -30,7 +30,7 @@ export class QqTextOutbox {
   /** One complete text, one shared queue operation and receipt. Never retries or changes mode. */
   async deliver(
     input: QqTextMessage,
-    context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; keyboard?: QqCommandKeyboard; allowResultFile?: boolean;
+    context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; markdownStart?: number; keyboard?: QqCommandKeyboard; allowResultFile?: boolean;
       interactionControls?: { content: string; keyboard: QqCommandKeyboard; markdownContent?: string };
       reserve?(parts: number): {
       runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
@@ -52,7 +52,11 @@ export class QqTextOutbox {
         || context.preferMarkdown || context.keyboard || context.allowResultFile)) {
         throw new QqProtocolError("message", "invalid-input");
       }
-      if (context.preferMarkdown && (context.representation || context.keyboard || context.allowResultFile)) {
+      if (context.preferMarkdown && (context.representation || context.keyboard)) {
+        throw new QqProtocolError("message", "invalid-input");
+      }
+      if (context.markdownStart !== undefined && (!context.preferMarkdown || !context.allowResultFile
+        || !Number.isSafeInteger(context.markdownStart) || context.markdownStart < 0 || context.markdownStart > input.content.length)) {
         throw new QqProtocolError("message", "invalid-input");
       }
       checkTime();
@@ -80,6 +84,7 @@ export class QqTextOutbox {
       }
       let file = false;
       let markdown = context.representation === "markdown";
+      let markdownParts: readonly boolean[] | undefined;
       let parts: readonly QqTextMessage[];
       try { parts = planText(input, partBytes); }
       catch (error) {
@@ -90,11 +95,17 @@ export class QqTextOutbox {
         file = true;
         parts = [{ ...input }];
       }
+      const bodyMarkdown = context.allowResultFile && input.mode === "active";
       if (context.preferMarkdown) {
-        const formatted = planQqMessageMarkdown(input);
-        // Rendering must not require more quota than the existing text plan,
-        // particularly the two-part completion-notification allowance.
-        if (formatted && formatted.length <= parts.length) { parts = formatted; markdown = true; }
+        const formatted = bodyMarkdown ? planQqBodyMarkdown(input, context.markdownStart)
+          : planQqMessageMarkdown(input)?.map(message => ({ message, markdown: true }));
+        // Notifications keep their existing text-plan quota. Body Markdown
+        // selects up to eight larger parts before any text/file attempt.
+        if (formatted && (bodyMarkdown || formatted.length <= parts.length)) {
+          parts = formatted.map(part => part.message);
+          markdownParts = formatted.map(part => part.markdown);
+          file = false;
+        }
       }
       if (context.interactionControls) {
         const controls = planText({ ...input, content: context.interactionControls.content });
@@ -136,12 +147,13 @@ export class QqTextOutbox {
             active.throwIfAborted();
             guard();
             const controls = index === parts.length - 1 ? context.interactionControls : undefined;
+            const partMarkdown = markdownParts?.[index] ?? markdown;
             const send = () => file
               ? this.client.sendResultFile({ recipient: part.recipient, content: part.content }, { signal: active, beforeSend: guard })
-              : markdown || controls
-                ? this.client.sendMarkdown(part, { signal: active, beforeSend: guard }, controls?.keyboard ?? context.keyboard)
+              : partMarkdown || controls
+                ? this.client.sendMarkdown(part, { signal: active, beforeSend: guard, ...(bodyMarkdown ? { body: true as const } : {}) }, controls?.keyboard ?? context.keyboard)
               : this.client.sendText(part, { signal: active, beforeSend: guard });
-            await checkpointDelivery(file ? "qq-result-file" : controls ? "qq-interaction-controls" : markdown
+            await checkpointDelivery(file ? "qq-result-file" : controls ? "qq-interaction-controls" : partMarkdown
               ? parts.length === 1 ? "qq-markdown" : `qq-markdown:${index + 1}/${parts.length}`
               : `qq-text:${index + 1}/${parts.length}`,
               () => reservation ? reservation.runPart(active, send) : send(),

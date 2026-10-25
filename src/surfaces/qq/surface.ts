@@ -50,11 +50,14 @@ export class QqSurface implements SurfaceAdapter {
       capture: event => this.current?.messages.deliverySource.capture(event),
       await: (reference, signal) => this.current?.messages.deliverySource.await(reference, signal) ?? Promise.resolve(false),
       current: reference => this.current?.messages.deliverySource.current(reference) === true,
+      release: reference => this.current?.messages.deliverySource.release(reference),
     },
     admitLive: event => this.current?.messages.admitLive(event),
     observe: event => this.current?.messages.observe(event),
     retains: event => this.current?.messages.retains(event) === true,
     handle: (event, context, signal) => this.current?.messages.handle(event, context, signal),
+    deliverSnapshot: (event, signal, authorized) => this.current?.messages.deliverSnapshot(event, signal, authorized)
+      ?? Promise.reject(new Error("QQ 消息连接不可用")),
     deliver: (event, signal, checkpoint, authorized) => this.current?.messages.deliver(event, signal, checkpoint, authorized)
       ?? Promise.reject(new Error("QQ 消息连接不可用")),
   };

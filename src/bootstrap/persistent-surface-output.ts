@@ -13,6 +13,7 @@ export interface PersistentSurfaceOutputOptions {
   authorizeAtDispatch?(event: OutputEvent, owner: string, signal: AbortSignal): Promise<boolean>;
   accounts(): string[];
   deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number): Promise<void>;
+  acknowledged?(event: OutputEvent, owner: string): void;
   fault(code: string, account?: string, persistentDeliveryId?: string, failure?: DeliveryFailure): void;
   changed?(): void;
   workerUrl?: URL;
@@ -64,6 +65,10 @@ export class PersistentSurfaceOutput {
         }, () => options.authorized(payload.event, payload.owner), liveOrder)));
       },
       fault: (code, account, id) => options.fault(code, account, id, code === "storage" ? this.journal.failure : undefined),
+      acknowledged: (record) => {
+        const payload = decodePersistentOutput(record.payload);
+        options.acknowledged?.(payload.event, payload.owner);
+      },
       changed: () => this.notifyIdleWaiters(),
     });
     this.control = new DeliveryControlServer(options.directory, async (entries, action) => {

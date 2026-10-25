@@ -15,6 +15,10 @@ export type QqProtocolFailure =
 export const QQ_TEXT_PART_BYTES = 2000;
 /** Active Markdown plus keyboard: 6000-byte sample confirmed on platform and client. */
 export const QQ_MENU_PART_BYTES = 6000;
+/** Local layout budget aligned with Feishu cards; not a QQ platform limit. */
+export const QQ_BODY_MARKDOWN_PART_CHARACTERS = 5_000;
+/** A Unicode scalar occupies at most four UTF-8 bytes. */
+export const QQ_BODY_MARKDOWN_PART_BYTES = QQ_BODY_MARKDOWN_PART_CHARACTERS * 4;
 export const QQ_PASSIVE_WINDOW_MS = 300_000;
 
 export type QqTextMessage = {
@@ -287,9 +291,14 @@ export class QqProtocolClient {
   }
 
   /** A single complete Markdown body or trusted menu, with the text recipient/deadline/receipt contract. */
-  async sendMarkdown(input: QqTextMessage, context: QqTextSendContext, keyboard?: QqCommandKeyboard): Promise<{ messageId: string }> {
+  async sendMarkdown(input: QqTextMessage, context: QqTextSendContext & { body?: true }, keyboard?: QqCommandKeyboard): Promise<{ messageId: string }> {
     return this.sendPlan(() => {
-      const plan = textRequest(input, keyboard && input.mode === "active" ? QQ_MENU_PART_BYTES : QQ_TEXT_PART_BYTES);
+      if (context.body && (input.mode !== "active" || keyboard)) throw new QqProtocolError("message", "invalid-input");
+      const plan = textRequest(input, context.body ? QQ_BODY_MARKDOWN_PART_BYTES
+        : keyboard && input.mode === "active" ? QQ_MENU_PART_BYTES : QQ_TEXT_PART_BYTES);
+      if (context.body && Array.from(input.content).length > QQ_BODY_MARKDOWN_PART_CHARACTERS) {
+        throw new QqProtocolError("message", "invalid-input");
+      }
       const { content, ...body } = plan.body;
       return { ...plan, body: { ...body, msg_type: 2, markdown: { content },
         ...(keyboard === undefined ? {} : { keyboard: commandKeyboard(keyboard) }) } };

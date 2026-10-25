@@ -7,7 +7,6 @@ import type { ConversationActorRegistry, SurfaceAccessPolicy } from "../../polic
 import type { DeliveryCheckpoint } from "../delivery-receipt.js";
 import type { SurfaceOutputPort, SurfaceDeliverySource, SurfaceNotificationDeliverySource, SurfaceScheduledTaskSubmissionContext, SurfaceAsyncAnswerSubmission, SurfaceConfigurationChange } from "../types.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
-import { formatRuntimeMcpOAuthCompleted } from "../runtime-status-format.js";
 import { parseSlashCommand, isEmergencyStopCommand } from "../slash-command.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
@@ -21,13 +20,12 @@ import { QqQueueSources, type QqQueueTicket } from "./queue-sources.js";
 import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
 import { QQ_TEXT_PART_BYTES, QqProtocolError, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard } from "./protocol.js";
-import { renderQqTurnCompleted } from "./lifecycle.js";
+import { isQqLifecycleNotification, QqLifecycleNotifications, renderQqTurnCompleted } from "./lifecycle.js";
 import { QqBodyStreaming } from "./streaming.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { QqCommandMenuController } from "./command-menu-controller.js";
 import { QqScheduleMenu } from "./schedule-menu.js";
 import { QqPrivilegedManagementMenu } from "./privileged-management-menu.js";
-import { qqBodyMarkdownPrefix } from "./body-markdown.js";
 import { planQqMessageMarkdown, qqLiteralMarkdown } from "./message-markdown.js";
 import { QqInteractions } from "./interactions.js";
 import { isQqExtensionOperation, isQqTaskCommand } from "./extension-commands.js";
@@ -81,6 +79,7 @@ export class QqMessages implements SurfaceOutputPort {
   private readonly outbox: QqTextOutbox;
   private readonly streaming: QqBodyStreaming;
   private readonly budget = new QqSendBudget();
+  private readonly notifications = new QqLifecycleNotifications();
   private readonly menus: QqCommandMenuController;
   private readonly schedules: QqScheduleMenu;
   private readonly management: QqPrivilegedManagementMenu;
@@ -133,6 +132,11 @@ export class QqMessages implements SurfaceOutputPort {
     await: (reference: SurfaceDeliverySource, signal: AbortSignal) => reference.kind === "notification"
       ? Promise.resolve(!signal.aborted && this.notificationCurrent(reference)) : this.sourceRegistry(reference).awaitSource(reference, signal),
     current: (reference: SurfaceDeliverySource) => reference.kind === "notification" ? this.notificationCurrent(reference) : this.sourceRegistry(reference).isCurrent(reference),
+    release: (reference: SurfaceDeliverySource): void => {
+      if (reference.kind !== "notification") return;
+      const entry = this.notificationSources.get(reference.sourceToken);
+      if (entry && JSON.stringify(entry.source) === JSON.stringify(reference)) this.notificationSources.delete(reference.sourceToken);
+    },
   };
 
   observeUserMessageIdentity(identity: Readonly<UserMessageIdentity>): void { this.queueSources.observeIdentity(identity); }
@@ -185,17 +189,23 @@ export class QqMessages implements SurfaceOutputPort {
 
   admitLive(event: OutputEvent): void {
     if (event.target.surface !== "qq" || event.target.accountId !== this.options.appId) return;
-    if (event.type === "mcp.oauth.completed") {
+    if (this.supported(event) && isQqLifecycleNotification(event)
+      && !(event.type === "operation.updated" && event.operation.kind !== "contextCompaction")) {
       const actorId = qqConversationActor(event.target.conversationId);
-      if (!event.threadId || !actorId || this.admitted.has(event)) return;
+      const threadId = "threadId" in event ? event.threadId ?? null : null;
+      if (!actorId || this.admitted.has(event) || (event.type === "mcp.oauth.completed" && !threadId)) return;
       const scope = this.scope(actorId, event.target.conversationId);
-      if (!scope || !this.current(scope, event.threadId)) return;
+      if (!scope || !this.current(scope, event.type === "conversation.idle.released" ? undefined : threadId ?? undefined)) return;
+      if (event.type === "conversation.idle.released" && this.options.service.status(event.target).threadId !== undefined) return;
       for (const [token, entry] of this.notificationSources) if (entry.until <= performance.now()) this.notificationSources.delete(token);
       if (this.notificationSources.size >= 128) throw new Error("QQ 通知来源容量已满");
-      const source: SurfaceNotificationDeliverySource = Object.freeze({ kind: "notification", eventType: event.type, serverName: event.name,
-        generation: this.sources.generation, sourceToken: randomUUID(), accountId: event.target.accountId,
-        conversationId: event.target.conversationId, threadId: event.threadId });
-      this.notificationSources.set(source.sourceToken, { source, scope, queryScope: this.extensionQueryScope(event.target), until: performance.now() + 600_000 });
+      const identity = { kind: "notification" as const, generation: this.sources.generation, sourceToken: randomUUID(),
+        accountId: event.target.accountId, conversationId: event.target.conversationId };
+      const source: SurfaceNotificationDeliverySource = Object.freeze(event.type === "mcp.oauth.completed"
+        ? { ...identity, eventType: event.type, serverName: event.name, threadId: threadId! }
+        : { ...identity, eventType: event.type, threadId });
+      this.notificationSources.set(source.sourceToken, { source, scope,
+        queryScope: this.notificationScope(source, event.target), until: performance.now() + 600_000 });
       this.admitted.set(event, source);
       return;
     }
@@ -217,16 +227,37 @@ export class QqMessages implements SurfaceOutputPort {
   retains(event: OutputEvent): boolean { return event.type !== "text.delta" && this.supported(event) && this.admitted.has(event); }
   async handle(event: OutputEvent, _context?: { liveAdmitted: true }, signal?: AbortSignal): Promise<void> {
     if (event.type === "text.delta") { if (this.admitted.has(event)) await this.streaming.update(event, signal); return; }
+    if (isQqLifecycleNotification(event) && this.supported(event) && this.admitted.get(event)?.kind === "notification") {
+      const source = this.admitted.get(event)!;
+      try {
+        await this.deliverNotification(event, signal ?? this.lifetime.signal, async () => {},
+          () => this.deliverySource.current(source));
+      } finally { this.deliverySource.release(source); }
+      return;
+    }
     if (this.supported(event)) throw new Error("QQ 任务结果必须通过共享持久投递");
+  }
+  async deliverSnapshot(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void> {
+    if (!this.supported(event) || !isQqLifecycleNotification(event)) throw new Error("QQ 状态类型不受支持");
+    const source = this.admitted.get(event);
+    try { await this.deliverNotification(event, signal, async () => {}, authorized); }
+    finally { if (source) this.deliverySource.release(source); }
+  }
+  private async deliverNotification(event: Parameters<QqLifecycleNotifications["render"]>[0], signal: AbortSignal,
+    checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, retained = false): Promise<void> {
+    const content = this.notifications.render(event, retained);
+    if (content === null) return;
+    const recipient = qqConversationRecipient(event.target.conversationId);
+    await this.outbox.deliver({ mode: "active", recipient, content }, {
+      signal: AbortSignal.any([signal, this.lifetime.signal]), preferMarkdown: true,
+      beforeSend: () => { if (!authorized()) throw new Error("QQ 通知授权失效"); },
+      reserve: parts => this.budget.reserve(recipient, parts, "interaction"),
+    }, checkpoint);
   }
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void> {
     if (!this.supported(event) || !authorized) throw new Error("QQ 输出未获授权");
-    if (event.type === "mcp.oauth.completed") {
-      await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId), content: formatRuntimeMcpOAuthCompleted(event) }, {
-        signal: AbortSignal.any([signal, this.lifetime.signal]), preferMarkdown: true,
-        beforeSend: () => { if (!authorized()) throw new Error("QQ 通知授权失效"); },
-        reserve: parts => this.budget.reserve(qqConversationRecipient(event.target.conversationId), parts, "interaction"),
-      }, checkpoint);
+    if (isQqLifecycleNotification(event) && !(event.type === "operation.updated" && event.operation.kind !== "contextCompaction")) {
+      await this.deliverNotification(event, signal, checkpoint, authorized, true);
       return;
     }
     if (event.type === "operation.updated" && event.operation.kind === "imageGeneration") {
@@ -245,7 +276,7 @@ export class QqMessages implements SurfaceOutputPort {
     }
     if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
     let text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent);
-    let continuation = false;
+    let markdownStart: number | undefined;
     let checkpointFailed = false;
     const record = async (value: DeliveryCheckpoint) => {
       try { await checkpoint(value); }
@@ -255,17 +286,15 @@ export class QqMessages implements SurfaceOutputPort {
       if (event.type === "text.completed") {
         const result = await this.streaming.finish(event, signal, record, authorized);
         if (result.kind === "complete") return;
-        if (result.kind === "continue") { text = result.text; continuation = true; }
+        if (result.kind === "continue") { text = result.text; markdownStart = result.markdownStart; }
       }
-      // Preselect the representation before sending. Continuations have no full
-      // Markdown context and must stay text; never retry a failed Markdown as text.
-      const markdown = event.type === "text.completed" && !continuation
-        && Buffer.byteLength(text) <= QQ_TEXT_PART_BYTES && qqBodyMarkdownPrefix(text, true) === text;
+      // Preselect the complete plan. A continuation's partial first block stays
+      // literal; later full blocks may resume Markdown without changing old text.
       await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId), content: text }, {
         signal: AbortSignal.any([signal, this.lifetime.signal]),
-        ...(markdown ? { representation: "markdown" as const } : {}),
-        ...(event.type === "turn.completed" ? { preferMarkdown: true } : {}),
-        allowResultFile: event.type === "text.completed" && !markdown,
+        preferMarkdown: true,
+        ...(markdownStart !== undefined ? { markdownStart } : {}),
+        allowResultFile: event.type === "text.completed",
         beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
         reserve: parts => this.budget.reserve(qqConversationRecipient(event.target.conversationId), parts,
           { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: event.type === "turn.completed" }),
@@ -889,9 +918,15 @@ export class QqMessages implements SurfaceOutputPort {
   }
   private notificationCurrent(reference: SurfaceNotificationDeliverySource): boolean {
     const entry = this.notificationSources.get(reference.sourceToken);
-    return !!entry && entry.until > performance.now() && JSON.stringify(entry.source) === JSON.stringify(reference)
-      && this.current(entry.scope, reference.threadId)
-      && this.extensionQueryScope(this.target(entry.scope.actorId, entry.scope.conversationId)) === entry.queryScope;
+    if (!entry) return false;
+    const target = this.target(entry.scope.actorId, entry.scope.conversationId);
+    return entry.until > performance.now() && JSON.stringify(entry.source) === JSON.stringify(reference)
+      && this.current(entry.scope, reference.eventType === "mcp.oauth.completed" ? reference.threadId : undefined)
+      && (reference.eventType !== "conversation.idle.released" || this.options.service.status(target).threadId === undefined)
+      && this.notificationScope(reference, target) === entry.queryScope;
+  }
+  private notificationScope(reference: SurfaceNotificationDeliverySource, target: ConversationTarget): string {
+    return reference.eventType === "mcp.oauth.completed" ? this.extensionQueryScope(target) : this.menuScope(target);
   }
   private extensionQueryScope(target: ConversationTarget): string {
     const status = this.options.service.status(target);

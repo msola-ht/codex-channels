@@ -1,5 +1,5 @@
-import { formatMarkdownAsTelegramHtmlChunks } from "./markdown-format.js";
-import { escapeTelegramHtml } from "./html-format.js";
+import { formatMarkdownAsTelegramHtml, formatMarkdownAsTelegramHtmlChunks } from "./markdown-format.js";
+import { escapeTelegramHtml, hasTelegramReplyHeading } from "./html-format.js";
 import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 const maximumInlineCharacters = 3_500;
@@ -8,9 +8,11 @@ const largeCodeBlockLines = 80;
 const previewLines = 24;
 const maximumEscapedPreviewCodeUnits = 2_600;
 const maximumDocumentBytes = 45 * 1024 * 1024;
+const maximumRichPartCharacters = 5_000;
 
 export type LongFinalMessagePlan =
   | { kind: "html"; chunks: string[] }
+  | { kind: "rich"; chunks: string[] }
   | {
       kind: "document";
       previewHtml: string;
@@ -19,8 +21,8 @@ export type LongFinalMessagePlan =
       lineCount: number;
     };
 
-export function planLongFinalMessage(text: string): LongFinalMessagePlan | undefined {
-  if (Array.from(text).length <= maximumInlineCharacters) {
+export function planLongFinalMessage(text: string, format: "html" | "rich" = "html"): LongFinalMessagePlan | undefined {
+  if (format === "html" && Array.from(text).length <= maximumInlineCharacters) {
     return undefined;
   }
 
@@ -28,6 +30,7 @@ export function planLongFinalMessage(text: string): LongFinalMessagePlan | undef
   const content = Buffer.from(text, "utf8");
   if (
     content.byteLength <= maximumDocumentBytes &&
+    Array.from(text).length > maximumInlineCharacters &&
     (Array.from(text).length > documentThresholdCharacters ||
       maximumFencedCodeLines(lines) >= largeCodeBlockLines)
   ) {
@@ -50,10 +53,40 @@ export function planLongFinalMessage(text: string): LongFinalMessagePlan | undef
     };
   }
 
+  const rich = format === "rich" ? richMarkdownChunks(text) : undefined;
+  if (rich) return { kind: "rich", chunks: rich };
   return {
     kind: "html",
     chunks: formatMarkdownAsTelegramHtmlChunks(text),
   };
+}
+
+/** Split only complete blocks; oversized/unfinished blocks retain HTML fallback. */
+function richMarkdownChunks(text: string): string[] | undefined {
+  const blocks: string[] = [];
+  let block = "";
+  let fence: MarkdownFence | undefined;
+  for (const line of text.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
+    block += line;
+    fence = advanceMarkdownFence(fence, line);
+    if (!fence && !line.trim()) { blocks.push(block); block = ""; }
+  }
+  if (fence) return undefined;
+  if (block) blocks.push(block);
+  const chunks: string[] = [];
+  let chunk = "";
+  for (const value of blocks) {
+    if (Array.from(value).length > maximumRichPartCharacters) return undefined;
+    if (Array.from(chunk).length + Array.from(value).length > maximumRichPartCharacters) {
+      chunks.push(chunk); chunk = "";
+    }
+    chunk += value;
+  }
+  if (chunk) chunks.push(chunk);
+  if (!chunks.length || chunks.some(value => !value.trim() || hasTelegramReplyHeading(
+    formatMarkdownAsTelegramHtml(value.split("\n", 1)[0]!) ?? "",
+  ))) return undefined;
+  return chunks;
 }
 
 function maximumFencedCodeLines(lines: readonly string[]): number {

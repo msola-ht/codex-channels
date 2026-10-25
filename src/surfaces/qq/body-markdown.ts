@@ -9,13 +9,26 @@ export function qqBodyMarkdownPrefix(text: string, finished = false): string {
     const character = text[index];
     // QQ command/mention tags, HTML and entity-encoded syntax are not body capabilities.
     // Apply even inside code: QQ does not document that code fences disable its tags.
-    if (character === "<" || character === "&") return text.slice(0, index);
+    if (character === "<") return text.slice(0, index);
+    if (character === "&" && (/[#a-z]/iu.test(text[index + 1] ?? "")
+      || (!finished && index + 1 === text.length))) return text.slice(0, index);
     if (character === "!") {
       if (text[index + 1] === "[" || (!finished && index + 1 === text.length)) return text.slice(0, index);
     }
     if (character !== "[") continue;
-    // Hold an incomplete link from its opening bracket. Only an explicit HTTP(S)
-    // destination can become a link; images, references and client schemes cannot.
+    // Plain brackets (including task markers and code) do not grant link
+    // capabilities. Keep an unresolved closing bracket until its next
+    // non-whitespace character proves it cannot become a link or reference.
+    const close = text.indexOf("]", index + 1);
+    if (close === -1) {
+      if (!finished) return text.slice(0, index);
+      continue;
+    }
+    const following = text.slice(close + 1).match(/^\s*(.)/su)?.[1];
+    if (following === undefined && !finished) return text.slice(0, index);
+    if (following === "[" || following === ":") return text.slice(0, index);
+    if (following !== "(") continue;
+    // Only a complete, simple HTTP(S) destination can become a link.
     const link = /^\[[^[\]\r\n\\!<&\p{Cc}]*\]\((https?:\/\/[^\s()\\<&\p{Cc}\p{Cf}]+)\)/iu.exec(text.slice(index));
     if (!link) return text.slice(0, index);
     try {

@@ -57,6 +57,14 @@ export function resolveSurfaceDelivery(
 ): SurfaceDeliveryDecision {
   if (surface === "qq") {
     if (event.type === "mcp.oauth.completed") return { disposition: "deliver", critical: true };
+    if (event.type === "conversation.idle.released" || event.type === "warning" || event.type === "hook.completed"
+      || event.type === "connection.lost" || event.type === "connection.restored" || event.type === "thread.availability"
+      || event.type === "thread.name" || event.type === "account.updated" || event.type === "account.rateLimits.updated"
+      || event.type === "mcp.status.updated"
+      || (event.type === "autoApprovalReview.updated" && event.phase === "completed" && event.status !== "inProgress")
+      || (event.type === "operation.updated" && event.operation.kind === "contextCompaction")) {
+      return { disposition: "deliver", critical: true };
+    }
     if (event.type === "operation.updated" && event.operation.kind === "imageGeneration"
       && event.operation.status === "completed" && (event.operation.imagePath !== undefined || isGeneratedImageUnavailable(event.operation))) {
       return { disposition: "deliver", critical: true };

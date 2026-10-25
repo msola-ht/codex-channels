@@ -44,17 +44,22 @@ export type SurfaceTaskDeliverySource = SurfaceTaskDeliveryIdentity & (
   | { readonly kind: "scheduled"; readonly workspaceId: string; readonly workspaceCwd: string }
 );
 
-/** Application has already correlated this live notification with its original request. */
-export interface SurfaceNotificationDeliverySource {
+/** Disposable authority for a live lifecycle notice; it never grants Turn output. */
+interface SurfaceNotificationDeliveryIdentity {
   readonly kind: "notification";
   readonly generation: string;
   readonly sourceToken: string;
   readonly accountId: string;
   readonly conversationId: string;
-  readonly threadId: string;
-  readonly eventType: "mcp.oauth.completed";
-  readonly serverName: string;
 }
+
+export type SurfaceNotificationDeliverySource = SurfaceNotificationDeliveryIdentity & (
+  | { readonly eventType: "mcp.oauth.completed"; readonly threadId: string; readonly serverName: string }
+  | { readonly eventType: "conversation.idle.released" | "warning" | "hook.completed" | "autoApprovalReview.updated"
+      | "operation.updated" | "connection.lost" | "connection.restored" | "thread.availability" | "thread.name"
+      | "account.updated" | "account.rateLimits.updated" | "mcp.status.updated";
+      readonly threadId: string | null; readonly serverName?: never }
+);
 
 export type SurfaceDeliverySource = SurfaceTaskDeliverySource | SurfaceNotificationDeliverySource;
 
@@ -85,6 +90,8 @@ export interface SurfaceOutputPort {
     capture(event: OutputEvent): SurfaceDeliverySource | undefined;
     await(reference: SurfaceDeliverySource, signal: AbortSignal): Promise<boolean>;
     current(reference: SurfaceDeliverySource): boolean;
+    /** Idempotently discard disposable source identity; never release retained task sources. */
+    release?(reference: SurfaceDeliverySource): void;
   };
   /** Fix disposable live admission identities before routing waits; never change presentation lifecycle. */
   admitLive?(event: OutputEvent): void;

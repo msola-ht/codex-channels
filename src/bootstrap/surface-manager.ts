@@ -77,11 +77,14 @@ interface PendingSnapshot {
   revision: number;
   order: number;
   controller: AbortController;
-  active?: { event: OutputEvent; bytes: number; revision: number; controller: AbortController };
+  active?: { event: OutputEvent; owner: string; bytes: number; revision: number; controller: AbortController };
 }
 
 export interface SurfaceManagerOptions extends CompletionOutputEnricherOptions {
-  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "authorizeAtDispatch" | "fault" | "workerUrl">;
+  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "authorizeAtDispatch" | "fault" | "workerUrl"> & {
+    /** Discard only disposable identities; retained records call this after their journal ACK. */
+    releaseSource?(event: OutputEvent, owner: string): void;
+  };
   retryDelaysMs?: readonly number[];
   maximumPendingCriticalOutput?: number;
   setInteractionAvailable?(
@@ -157,6 +160,7 @@ export class SurfaceManager {
     }
     this.persistent = options.persistence ? new PersistentSurfaceOutput({
       ...options.persistence,
+      acknowledged: (event, owner) => options.persistence?.releaseSource?.(event, owner),
       changed: () => {
         if (this.stopping) return;
         for (const [key, snapshot] of this.snapshots) {
@@ -825,10 +829,13 @@ export class SurfaceManager {
     snapshot.bytes = 0;
   }
 
-  private removeSnapshot(key: string, snapshot: PendingSnapshot): void {
+  private removeSnapshot(key: string, snapshot: PendingSnapshot, sourceSettled = false): void {
     if (this.snapshots.get(key) !== snapshot) return;
     this.snapshots.delete(key);
     snapshot.controller.abort();
+    if (!sourceSettled && snapshot.revision !== snapshot.active?.revision) {
+      this.options.persistence?.releaseSource?.(snapshot.event, snapshot.owner);
+    }
     // Queued closures and in-flight sends still own their memory until settlement.
     if (!snapshot.queued) this.releaseSnapshot(snapshot);
   }
@@ -842,8 +849,12 @@ export class SurfaceManager {
     const bytes = Buffer.byteLength(JSON.stringify(event)) + Buffer.byteLength(owner);
     const replaceableBytes = previous && previous.revision !== previous.active?.revision ? previous.bytes : 0;
     if ((!previous && this.snapshotOwners.size >= 512) || this.snapshotBytes - replaceableBytes + bytes > 8 * 1024 * 1024) {
+      this.options.persistence?.releaseSource?.(event, owner);
       this.options.persistence?.fault("mailbox-full", account);
       return;
+    }
+    if (previous && previous.revision !== previous.active?.revision) {
+      this.options.persistence?.releaseSource?.(previous.event, previous.owner);
     }
     const snapshot = previous ?? { event, owner, bytes: 0, queued: false, revision: 0, order, controller: new AbortController() };
     this.snapshotBytes += bytes - replaceableBytes;
@@ -869,7 +880,7 @@ export class SurfaceManager {
           this.removeSnapshot(key, snapshot);
           return;
         }
-        active = { event, bytes, revision, controller: snapshot.controller };
+        active = { event, owner, bytes, revision, controller: snapshot.controller };
         snapshot.active = active;
         if (!surface.output.deliverSnapshot) throw new Error("Surface 缺少状态投递结算端口");
         await surface.output.deliverSnapshot(event, AbortSignal.any([signal, active.controller.signal]), authorized);
@@ -881,11 +892,12 @@ export class SurfaceManager {
         }
       }
     }, true, { signal: snapshot.controller.signal, settled: () => {
+        if (active) this.options.persistence?.releaseSource?.(active.event, active.owner);
         if (active && active.revision !== snapshot.revision) this.snapshotBytes -= active.bytes;
         delete snapshot.active;
         snapshot.queued = false;
         if (this.snapshots.get(key) !== snapshot) this.releaseSnapshot(snapshot);
-        else if (active?.revision === snapshot.revision) this.removeSnapshot(key, snapshot);
+        else if (active?.revision === snapshot.revision) this.removeSnapshot(key, snapshot, true);
         else if (active) this.scheduleSnapshot(surface, key, snapshot);
       },
     });

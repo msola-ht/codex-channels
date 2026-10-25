@@ -166,6 +166,9 @@ function createQqModule(
   });
   return {
     adapter,
+    notificationTargets: () => [...notificationRecipients].map(actorId => ({
+      surface: "qq", accountId: config.appId, conversationId: `c2c:${actorId}`,
+    })),
     applyHotReload(next, changes) {
       if (changes.some(change => change.code === "surface.qq.allowed-users") && next.qq) {
         access.replace(next.qq.allowedUserOpenIds, config.groups);

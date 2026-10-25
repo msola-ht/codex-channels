@@ -1139,9 +1139,10 @@ export abstract class GatewayComponentGraph {
           owner: (event) => this.outputOwner(event),
           authorized: (event, owner) => this.outputAuthorized(event, owner),
           authorizeAtDispatch: (event, owner, signal) => this.authorizeOutputAtDispatch(event, owner, signal),
+          releaseSource: (event, owner) => this.releaseOutputSource(event, owner),
           fault: (code, account, persistentDeliveryId, failure) => {
             logger.error({ code, account, persistentDeliveryId, ...(failure ? { deliveryFailure: failure } : {}) }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
-            if (code === "delivery-uncertain" || code === "authorization-changed") return;
+            if (code === "delivery-uncertain" || code === "authorization-changed" || code === "acknowledged-cleanup-failed") return;
             if (account && code !== "storage" && code !== "capacity" && code !== "mailbox-full") this.surfaceManager.suspendPersistentAccount(account);
             else void this.requestStop().catch(() => logger.error("可靠投递故障后的 Gateway 清理失败"));
           },
@@ -2005,16 +2006,30 @@ export abstract class GatewayComponentGraph {
     const value = JSON.parse(owner) as { version?: unknown; kind?: unknown; identity?: unknown; source?: SurfaceDeliverySource | null };
     const source = value?.source;
     if (value?.version !== 3 || value.kind !== "qq-live" || typeof value.identity !== "string" || !source
-      || ![source.generation, source.sourceToken, source.accountId, source.threadId]
+      || ![source.generation, source.sourceToken, source.accountId]
         .every(field => typeof field === "string" && field.length > 0 && Buffer.byteLength(field) <= 512)
       || typeof source.conversationId !== "string" || !source.conversationId
       || (Buffer.byteLength(source.conversationId) > 512 && !parseQqGroupConversationId(source.conversationId))
-      || source.accountId !== event.target.accountId || source.conversationId !== event.target.conversationId
-      || !("threadId" in event) || event.threadId !== source.threadId) return undefined;
+      || source.accountId !== event.target.accountId || source.conversationId !== event.target.conversationId) return undefined;
     if (source.kind === "notification") {
-      if (source.eventType !== "mcp.oauth.completed" || event.type !== source.eventType
-        || source.serverName !== event.name) return undefined;
-    } else if ((source.kind !== undefined && source.kind !== "scheduled") || typeof source.turnId !== "string" || !source.turnId
+      if (source.threadId !== ("threadId" in event ? event.threadId ?? null : null)
+        || (source.threadId !== null && (typeof source.threadId !== "string" || !source.threadId || Buffer.byteLength(source.threadId) > 512))
+        || source.eventType !== event.type) return undefined;
+      switch (event.type) {
+        case "mcp.oauth.completed":
+          if (source.eventType !== event.type || source.serverName !== event.name || !source.threadId) return undefined;
+          break;
+        case "operation.updated": if (event.operation.kind !== "contextCompaction") return undefined; break;
+        case "autoApprovalReview.updated": if (event.phase !== "completed" || event.status === "inProgress") return undefined; break;
+        case "conversation.idle.released": case "warning": case "hook.completed":
+        case "connection.lost": case "connection.restored": case "thread.availability": case "thread.name":
+        case "account.updated": case "account.rateLimits.updated": case "mcp.status.updated": break;
+        default: return undefined;
+      }
+    } else if ((source.kind !== undefined && source.kind !== "scheduled")
+      || typeof source.threadId !== "string" || !source.threadId || Buffer.byteLength(source.threadId) > 512
+      || !("threadId" in event) || event.threadId !== source.threadId
+      || typeof source.turnId !== "string" || !source.turnId
       || Buffer.byteLength(source.turnId) > 512 || !("turnId" in event) || event.turnId !== source.turnId) return undefined;
     if (source.kind === "scheduled" && (typeof source.workspaceId !== "string" || !source.workspaceId
       || Buffer.byteLength(source.workspaceId) > 512 || typeof source.workspaceCwd !== "string" || !source.workspaceCwd
@@ -2030,6 +2045,12 @@ export abstract class GatewayComponentGraph {
     if (!original || !port || !this.outputIdentityAuthorized(event, original.identity, original.source)) return false;
     if (!(await port.await(original.source, signal))) return false;
     return !signal.aborted && this.outputAuthorized(event, owner);
+  }
+
+  private releaseOutputSource(event: OutputEvent, owner: string): void {
+    if (event.target.surface !== "qq") return;
+    const source = this.outputSourceOwner(event, owner)?.source;
+    if (source?.kind === "notification") this.outputSourcePort(event)?.release?.(source);
   }
 
   private outputIdentity(event: OutputEvent, source?: SurfaceDeliverySource) {
@@ -2061,6 +2082,8 @@ export abstract class GatewayComponentGraph {
     // Older owners cannot prove the directory that was authorized at admission.
     // Preserve their records, but never infer or upgrade their identity here.
     if (original?.version !== 2) return false;
+    if (source?.kind === "notification" && source.eventType === "conversation.idle.released"
+      && original.binding !== null) return false;
     if (source?.kind === "scheduled" && (original.workspace !== source.workspaceId
       || original.workspaceCwd !== source.workspaceCwd || original.binding?.[3] !== source.workspaceId
       || original.bindingWorkspaceCwd !== source.workspaceCwd)) return false;

@@ -8,6 +8,7 @@ import { qqMenuButton } from "./command-menu.js";
 import type { QqCommandKeyboard } from "./protocol.js";
 import type { QqMessageInput } from "./message-input.js";
 import { qqConversationActor } from "./addressing.js";
+import { qqLiteralMarkdown } from "./message-markdown.js";
 
 interface Pending {
   requestId: string;
@@ -210,11 +211,13 @@ function render(pending: Pending, token: string): { content: string; controls: {
     content = `${request.title}\n\n${request.detail}`;
     add("once", "允许一次");
     if (request.allowSession) add("session", "本会话允许");
-    if (request.execPolicyAmendment) add("policy", "保存命令规则");
+    if (request.execPolicyAmendment) add("policy", "始终允许此前缀");
     request.networkPolicyAmendments?.forEach((rule, index) => {
       content += `\n网络规则 ${index + 1}：${rule.action} ${rule.host}`;
       add(`network${index}`, `网络规则 ${index + 1}`);
     });
+    const literalMarkdown = qqLiteralMarkdown(content);
+    if (literalMarkdown) markdownContent = `## 审批请求\n\n${literalMarkdown}`;
   } else if (request.type === "user-input") {
     const question = request.questions[pending.question]!;
     const number = `问题 ${pending.question + 1}/${request.questions.length}`;
@@ -237,6 +240,8 @@ function render(pending: Pending, token: string): { content: string; controls: {
     content = `${request.title}\n\n${request.message}`;
     if (request.mode === "tool-approval") {
       content += `\n工具：${request.toolApproval?.toolTitle ?? "未命名工具"}\n${request.toolApproval?.detail ?? ""}`;
+      const literalMarkdown = qqLiteralMarkdown(content);
+      if (literalMarkdown) markdownContent = `## 工具审批\n\n${literalMarkdown}`;
       add("once", "允许一次");
       if (request.toolApproval?.allowSession) add("session", "本会话允许");
       if (request.toolApproval?.allowAlways) add("always", "始终允许");
@@ -248,7 +253,11 @@ function render(pending: Pending, token: string): { content: string; controls: {
   add("cancel", request.type === "approval" ? "拒绝" : request.type === "user-input" ? "取消回答" : "取消交互");
   if (buttons.length > 15) throw new Error("QQ 交互按钮容量不足");
   const rows: QqCommandKeyboard["content"]["rows"] = [];
-  for (let index = 0; index < buttons.length; index += 3) rows.push({ buttons: buttons.slice(index, index + 3) });
+  // Approval scope labels must remain readable. Use full-width actions when
+  // possible, while keeping every offered decision within the five-row limit.
+  const columns = request.type === "approval" || request.type === "elicitation" && request.mode === "tool-approval"
+    ? Math.ceil(buttons.length / 5) : 3;
+  for (let index = 0; index < buttons.length; index += columns) rows.push({ buttons: buttons.slice(index, index + columns) });
   return { content: formatQqLiteralDetails(content), controls: {
     content: instruction,
     keyboard: { content: { rows } },

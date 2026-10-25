@@ -5,6 +5,8 @@ export interface DeliveryCoordinatorOptions {
   accounts(): string[];
   authorized(record: DeliveryRecord, signal: AbortSignal): boolean | Promise<boolean>;
   deliver(record: DeliveryRecord, signal: AbortSignal): Promise<void>;
+  /** Called only after the platform delivery and durable journal acknowledgement both succeed. */
+  acknowledged?(record: DeliveryRecord): void;
   fault(code: string, account?: string, persistentDeliveryId?: string): void;
   concurrency?: number;
   timeoutMs?: number;
@@ -210,6 +212,8 @@ export class DeliveryCoordinator {
       if (!(await this.journal.acknowledge(record.id))) throw new DeliveryError("conflict");
       this.release(record.conversation);
       this.updateUsage(record.account, -record.bytes, -1);
+      try { this.options.acknowledged?.(record); }
+      catch { this.options.fault("acknowledged-cleanup-failed", record.account, record.id); }
     } catch { this.storageFailed(record.account, record.id); }
     finally {
       clearTimeout(timer);
