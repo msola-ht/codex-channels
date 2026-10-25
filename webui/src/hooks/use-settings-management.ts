@@ -41,6 +41,10 @@ function confirmationIntent(setting: ManagementSettingInput): PendingSetting["in
 }
 
 function currentValue(settings: ManagementSettingsResponse, setting: ManagementSettingInput): unknown {
+  if (setting.kind === "display.preset") {
+    const selector = setting.value !== null && typeof setting.value === "object" && "selector" in setting.value ? setting.value.selector : undefined
+    return selector === undefined ? settings.display.globalScope : settings.display.scopes.find(scope => JSON.stringify(scope.selector) === JSON.stringify(selector)) ?? null
+  }
   if (setting.kind === "display.scope" && setting.value !== null && typeof setting.value === "object" && "selector" in setting.value) {
     const selector = setting.value.selector
     return settings.display.scopes.find(scope => JSON.stringify(scope.selector) === JSON.stringify(selector)) ?? null

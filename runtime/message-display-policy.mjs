@@ -1,6 +1,22 @@
 import { z } from "zod";
 
 const identity = z.string().min(1).max(1024).refine(value => !/[\s\p{Cc}\uD800-\uDFFF]/u.test(value));
+export const messageDisplayFields = [["operation_updates", "operationUpdates"], ["subagents", "subagentsEnabled"], ["streaming", "streamingEnabled"], ["commentary", "commentaryEnabled"], ["routine_notifications", "routineNotificationsEnabled"], ["plan_updates", "planUpdatesEnabled"], ["reasoning", "reasoningEnabled"], ["completion", "completion"], ["presentation_detail", "presentationDetail"]];
+export const messageDisplayPresets = Object.freeze({
+  concise: Object.freeze({ operation_updates: "hidden", subagents: false, streaming: true, commentary: false, routine_notifications: false, plan_updates: false, reasoning: false, completion: "off", presentation_detail: "basic" }),
+  standard: Object.freeze({ operation_updates: "compact", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: false, completion: "detailed", presentation_detail: "basic" }),
+  detailed: Object.freeze({ operation_updates: "full", subagents: true, streaming: true, commentary: true, routine_notifications: true, plan_updates: true, reasoning: true, completion: "detailed", presentation_detail: "detailed" }),
+});
+
+export function supportedMessageDisplayFields(selector) {
+  return messageDisplayFields.map(([field]) => field).filter(field => selector?.surface === "weixin"
+    ? ["completion", "presentation_detail", "routine_notifications"].includes(field)
+    : !(selector?.surface === "qq" && selector.chat_kind === "group" && field === "streaming"));
+}
+
+export function identifyMessageDisplayPreset(settings, supportedFields = supportedMessageDisplayFields()) {
+  return Object.entries(messageDisplayPresets).find(([, preset]) => messageDisplayFields.every(([stored, effective]) => !supportedFields.includes(stored) || settings[effective] === preset[stored]))?.[0] ?? "custom";
+}
 export const messageDisplayOverrideSchema = z.strictObject({
   surface: z.enum(["telegram", "feishu", "weixin", "qq"]),
   account_id: identity.optional(),
@@ -16,8 +32,7 @@ export const messageDisplayOverrideSchema = z.strictObject({
   completion: z.enum(["off", "brief", "detailed"]).optional(),
   presentation_detail: z.enum(["basic", "detailed"]).optional(),
 }).superRefine((value, context) => {
-  if ((value.surface === "weixin" && ["operation_updates", "subagents", "streaming", "commentary", "plan_updates", "reasoning"].some(field => value[field] !== undefined))
-    || (value.surface === "qq" && value.chat_kind === "group" && value.streaming !== undefined)
+  if (messageDisplayFields.some(([field]) => value[field] !== undefined && !supportedMessageDisplayFields(value).includes(field))
     || (value.chat_kind === "group" && value.surface !== "qq"))
     context.addIssue({ code: "custom", path: ["surface"], message: "该渠道不支持此类显示目标或字段" });
   if (value.chat_kind !== undefined && value.account_id === undefined)
@@ -41,7 +56,7 @@ export const messageDisplayOverridesSchema = z.array(messageDisplayOverrideSchem
   });
 });
 
-const fields = [["operation_updates", "operationUpdates"], ["subagents", "subagentsEnabled"], ["streaming", "streamingEnabled"], ["commentary", "commentaryEnabled"], ["routine_notifications", "routineNotificationsEnabled"], ["plan_updates", "planUpdatesEnabled"], ["reasoning", "reasoningEnabled"], ["completion", "completion"], ["presentation_detail", "presentationDetail"]];
+const fields = messageDisplayFields;
 
 /** Resolve only validated configuration. Missing fields inherit; false and hidden are explicit. */
 export function inspectMessageDisplaySettings(configuration, target) {

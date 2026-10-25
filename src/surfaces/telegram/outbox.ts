@@ -803,14 +803,14 @@ export class TelegramOutbox {
             await body.done;
           } catch (error) {
             if (!signal.aborted && !parent?.controller.signal.aborted) {
-              await this.sendPanel(chatId, "本轮部分输出未确认，请核对正文。", undefined, true, signal);
+              await this.sendPanel(chatId, "本轮部分输出未确认，请核对正文。", undefined, false, signal);
             }
             throw error;
           }
         }
         if (visible) await this.sendPanel(chatId, renderTelegramLifecyclePresentation(
           createTurnCompletedPresentation(event, this.displaySettings(chatId).presentationDetail === "detailed", this.options.autoCompactPercent, mode),
-        ), this.replyTargets.get(chatId, turnKey), true, signal);
+        ), this.replyTargets.get(chatId, turnKey), shouldHideTurnCompleted(event, "off"), signal);
       } finally { cleanup(); }
     }, true, { purpose: "turn-completion", settled: cleanup });
   }
@@ -1319,7 +1319,7 @@ export class TelegramOutbox {
           (signal) => (this.reasoningGenerations.get(this.turnKey(event.threadId, event.turnId)) ?? 0) !== generation
             || this.hasActiveOperation(event.threadId, event.turnId)
             ? Promise.resolve()
-            : this.sendPanel(chatId, text, undefined, false, signal).then(() => undefined),
+            : this.sendPanel(chatId, text, undefined, true, signal).then(() => undefined),
           true,
         );
         return;
@@ -1343,7 +1343,7 @@ export class TelegramOutbox {
             }
             return;
           }
-          state.messageId = await this.sendPanel(chatId, text, undefined, false, signal);
+          state.messageId = await this.sendPanel(chatId, text, undefined, true, signal);
           signal.throwIfAborted();
           if (state.sealed) {
             this.enqueueReasoningSeal(state);
@@ -1366,7 +1366,7 @@ export class TelegramOutbox {
           return;
         }
         if (existing.messageId === undefined) {
-          existing.messageId = await this.sendPanel(chatId, text, undefined, false, signal);
+          existing.messageId = await this.sendPanel(chatId, text, undefined, true, signal);
           return;
         }
         try {
@@ -1383,7 +1383,7 @@ export class TelegramOutbox {
           );
         } catch (error) {
           if (event.final === true && !signal?.aborted && isTelegramBadRequest(error)) {
-            existing.messageId = await this.sendPanel(chatId, text, undefined, false, signal);
+            existing.messageId = await this.sendPanel(chatId, text, undefined, true, signal);
           } else {
             throw error;
           }

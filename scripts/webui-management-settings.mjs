@@ -1,4 +1,5 @@
 export const managedSettingKinds = new Set([
+  "display.preset",
   "display.operation-updates",
   "display.plan-updates",
   "display.reasoning",
@@ -30,6 +31,7 @@ export const managedSettingKinds = new Set([
 ])
 
 export const highRiskManagedSettingKinds = new Set([
+  "display.preset",
   "display.scope",
   "display.completion",
   "display.presentation-detail",

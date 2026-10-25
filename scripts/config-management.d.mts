@@ -10,8 +10,9 @@ export type GatewaySettingActivation =
   | "reinstall-services";
 
 import type { ConfigActivationResult } from "./config-activation-result.mjs";
-import type { MessageDisplaySelector, MessageDisplayOverride, MessageDisplaySettings, MessageDisplaySource } from "../runtime/message-display-policy.mjs";
-export interface DisplayScopeState { id: string; selector: MessageDisplaySelector; writable: boolean; supportedFields: Array<"operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; override: Pick<MessageDisplayOverride, "operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; effective: MessageDisplaySettings; sources: Record<keyof MessageDisplaySettings, MessageDisplaySource> }
+import type { MessageDisplaySelector, MessageDisplayOverride, MessageDisplaySettings, MessageDisplaySource, MessageDisplayPreset } from "../runtime/message-display-policy.mjs";
+export interface DisplayScopeState { id: string; selector: MessageDisplaySelector; writable: boolean; preset: MessageDisplayPreset | "custom"; supportedFields: Array<"operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; override: Pick<MessageDisplayOverride, "operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; effective: MessageDisplaySettings; sources: Record<keyof MessageDisplaySettings, MessageDisplaySource> }
+export type GlobalDisplayState = Omit<DisplayScopeState, "id" | "selector" | "writable"> & { selector: null };
 export type DisplayScopeEdit = { selector: MessageDisplaySelector; field: "operation_updates"; action: "set"; value: "full" | "compact" | "failures" | "hidden" } | { selector: MessageDisplaySelector; field: "completion"; action: "set"; value: "off" | "brief" | "detailed" } | { selector: MessageDisplaySelector; field: "presentation_detail"; action: "set"; value: "basic" | "detailed" } | { selector: MessageDisplaySelector; field: "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning"; action: "set"; value: boolean } | { selector: MessageDisplaySelector; field: "operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail"; action: "inherit" };
 
 export class ConfigManagementError extends Error {
@@ -23,6 +24,8 @@ export interface GatewaySettings {
   configPath: string;
   revision: string;
   display: {
+    preset: MessageDisplayPreset | "custom";
+    globalScope: GlobalDisplayState;
     operationUpdates: "full" | "compact" | "failures" | "hidden";
     subagentsEnabled: boolean;
     subagentsOverride: boolean | null;
@@ -98,6 +101,7 @@ export interface GatewaySettings {
 }
 
 export type GatewaySettingInput =
+  | { kind: "display.preset"; value: { preset: MessageDisplayPreset; selector?: MessageDisplaySelector } }
   | { kind: "display.scope"; value: DisplayScopeEdit }
   | { kind: "channel.enabled"; channel: "telegram" | "feishu" | "weixin" | "qq"; value: boolean }
   | { kind: "display.operation-updates"; value: "full" | "compact" | "failures" | "hidden" }

@@ -17,7 +17,7 @@ import {
 import { readCodexProxySnapshot, renderCodexProxySettings, validateCodexProxyValue, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { validateModelDisplayAliases } from "../runtime/model-display-name.mjs";
-import { applyDisplayScopeSetting, projectDisplayScopes, readDisplayTargets } from "./config-display-management.mjs";
+import { applyDisplayPresetSetting, applyDisplayScopeSetting, projectDisplayScopes, projectGlobalDisplayState, readDisplayTargets } from "./config-display-management.mjs";
 import { ConfigManagementError, invalidSetting } from "./config-management-error.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import {
@@ -63,6 +63,8 @@ export function loadGatewaySettings(environment = process.env) {
     configPath,
     revision: snapshot.revision,
     display: {
+      preset: projectGlobalDisplayState(display, document.display).preset,
+      globalScope: projectGlobalDisplayState(display, document.display),
       operationUpdates: display.operation_updates,
       planUpdatesEnabled: display.plan_updates,
       reasoningEnabled: display.reasoning,
@@ -332,6 +334,12 @@ function applySetting(document, input, configPath) {
     ?? applyMetricsSetting(document, input);
   if (delegated !== undefined) return delegated;
   switch (input.kind) {
+    case "display.preset": {
+      const result = applyDisplayPresetSetting(document, input, configPath);
+      const activation = result.scope || result.changedFields?.some(field => ["completion", "presentation_detail", "routine_notifications"].includes(field))
+        ? completionSettingActivation(document) : displaySettingActivation(document);
+      return { ...result, activation };
+    }
     case "display.scope": {
       const result = applyDisplayScopeSetting(document, input, configPath);
       // Overrides are one shared runtime configuration unit, including retained

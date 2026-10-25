@@ -1,5 +1,7 @@
 # Codex WebUI 前端
 
+“消息渠道 → 消息展示”的全局及每个范围提供显示预设：简洁、标准、详细，以及不可保存的“自定义”识别值。复用 ManagedSelect、应用按钮和双语文案，描述显示管理读取的 computed `display.preset` / `scope.preset`；选择后按“预览并应用预设”进入确认，因此继承值已经匹配也可明确固定本层。确认摘要展示目标、本层支持的全部字段、继承来源及备份、pending 和回退提示。`display.preset` 经单次高风险预览确认与共享配置原子事务，保存后同源读回；取消和 no-op 不写，过期修订拒绝，不循环调用字段 writer。预设不新增 TOML 字段、不改变默认值，也不改日志或调用采集；单独修改字段后重新识别，仍保留逐字段继承。范围仅固定支持字段，微信三项、QQ 群不含 streaming；停用范围不可应用预设。源码尚未部署，浏览器交互与真实平台效果以实际验收记录为准。
+
 常规通知复用既有 ManagedSelect、范围 supportedFields、中英文键与预览摘要，四渠道含微信和 QQ 群均支持。全局 kind `display.routine-notifications` 显式 set boolean/inherit，读取 `routineNotificationsEnabled` 与 `routineNotificationsOverride`（布尔值或 null），缺省开启且不物化；确认令牌、revision、私有备份、取消、未变化与读回沿共享事务。任一渠道启用时有效值改变要求重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组整体判定。关闭范围与异常、持久 Workspace 回执和 pending 保留边界以 docs/display.md 为准。回退旧版前清除全局及覆盖 routine_notifications，不自动迁移。
 
 请求列表及详情从指标 API 读取 `activity`，与调用列表共用 `formatRequestActivity`，不额外请求调用转储。历史未采集显示“未记录”，有界采集不完整显示“部分可见”。

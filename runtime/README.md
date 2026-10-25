@@ -1,6 +1,8 @@
 # 共享运行时基础设施
 
-`message-display-policy.mjs` 的可选 `routine_notifications` 缺省投影为必填 `routineNotificationsEnabled = true`，支持四渠道含微信及 QQ 群的五层逐字段继承；Schema 不物化默认值，范围 supportedFields 由管理模块提供。Gateway、管理读取和激活分类共用该契约，不修改 StateStore 或 Journal 格式。
+`message-display-policy.mjs` 统一定义九个显示字段、渠道支持矩阵及 `concise` / `standard` / `detailed` 三项预设。预设只供管理入口一次应用现有字段，不是持久化键或运行模式；`identifyMessageDisplayPreset` 按有效值及目标支持字段识别，无法匹配时为只读 `custom`。默认配置识别为 `standard`，缺省与继承仍逐字段处理。
+
+`message-display-policy.mjs` 的可选 `routine_notifications` 缺省投影为必填 `routineNotificationsEnabled = true`，支持四渠道含微信及 QQ 群的五层逐字段继承；Schema 不物化默认值，管理入口复用共享支持矩阵提供 supportedFields。Gateway、管理读取和激活分类共用该契约，不修改 StateStore 或 Journal 格式。
 
 `gateway-config.mjs` / `gateway-config.d.mts` 同时定义 QQ 配置与变更分类，供 Setup、Doctor、WebUI 摘要及 Gateway 复用；
 QQ 单聊名单与可选群成员授权分别校验，群配置必须明确同意公开输出；配置成功不代表消息收发可用。省略群配置不填默认值，同应用凭据重配保留群授权，更换应用在明确预览后清除旧应用群授权。

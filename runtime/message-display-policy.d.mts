@@ -6,6 +6,12 @@ export interface MessageDisplaySelector { surface: MessageDisplaySurface; accoun
 export interface MessageDisplayOverride extends MessageDisplaySelector { operation_updates?: "full" | "compact" | "failures" | "hidden"; subagents?: boolean; streaming?: boolean; commentary?: boolean; routine_notifications?: boolean; plan_updates?: boolean; reasoning?: boolean; completion?: "off" | "brief" | "detailed"; presentation_detail?: "basic" | "detailed" }
 export interface MessageDisplayConfiguration { operation_updates: "full" | "compact" | "failures" | "hidden"; subagents?: boolean; streaming?: boolean; commentary?: boolean; routine_notifications?: boolean; plan_updates: boolean; reasoning: boolean; completion?: "off" | "brief" | "detailed"; presentation_detail?: "basic" | "detailed"; overrides?: readonly MessageDisplayOverride[] }
 export type MessageDisplaySource = "global" | "surface" | "account" | "chat-kind" | "chat";
+export type MessageDisplayField = Exclude<keyof MessageDisplayOverride, keyof MessageDisplaySelector>;
+export type MessageDisplayPreset = "concise" | "standard" | "detailed";
+export const messageDisplayFields: readonly (readonly [MessageDisplayField, keyof MessageDisplaySettings])[];
+export const messageDisplayPresets: Readonly<Record<MessageDisplayPreset, Readonly<Required<Pick<MessageDisplayOverride, MessageDisplayField>>>>>;
+export function supportedMessageDisplayFields(selector?: MessageDisplaySelector): MessageDisplayField[];
+export function identifyMessageDisplayPreset(settings: MessageDisplaySettings, supportedFields?: readonly MessageDisplayField[]): MessageDisplayPreset | "custom";
 export const messageDisplayOverrideSchema: ZodType<MessageDisplayOverride>;
 export const messageDisplayOverridesSchema: ZodType<MessageDisplayOverride[]>;
 export function messageDisplaySelectorKey(value: MessageDisplaySelector): string;

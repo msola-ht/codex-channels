@@ -5,7 +5,13 @@ import type { DisplayLanguage } from "../format"
  * 由 `Messages` 类型检查在构建期保证两种语言键一致。
  */
 const zh = {
+  displayPreset: {
+    title: "显示预设", concise: "简洁", standard: "标准", detailed: "详细", custom: "自定义（只读识别）",
+    detected: "已保存配置识别：{value}。", apply: "预览并应用预设",
+    hint: "根据当前有效字段识别。应用时一次设置本层支持的全部显示字段；之后仍可逐字段修改或恢复继承。不改变日志、调用采集和模型统计分组。",
+  },
   displayScope: {
+    defaultValue: "使用缺省",
     title: "范围显示覆盖", scope: "目标范围", inherit: "继承上级", global: "全局", surface: "渠道", account: "账号", chatKind: "聊天类型", chat: "指定聊天",
     unavailable: "已确认聊天目标不可读，请检查状态库版本、结构或访问权限。渠道与账号默认仍可编辑。",
     projection: "有效值按已保存配置计算，非当前运行状态；保存后按提示激活。",
@@ -1959,7 +1965,13 @@ const zh = {
 export type Messages = typeof zh
 
 const en: Messages = {
+  displayPreset: {
+    title: "Display preset", concise: "Concise", standard: "Standard", detailed: "Detailed", custom: "Custom (detected only)",
+    detected: "Detected from saved configuration: {value}.", apply: "Preview and apply preset",
+    hint: "Detected from current effective fields. Applying sets every supported display field at this scope in one change. Fields can then be edited or inherit individually. Logging, traffic capture, and model statistics groups are unchanged.",
+  },
   displayScope: {
+    defaultValue: "Use default",
     title: "Scoped display overrides", scope: "Target scope", inherit: "Inherit parent", global: "Global", surface: "Channel", account: "Account", chatKind: "Chat kind", chat: "Exact chat",
     unavailable: "Confirmed chat targets could not be read. Check the state database version, structure, and permissions. Channel and account defaults remain editable.",
     projection: "Effective values are calculated from saved configuration, not current runtime state. Activate changes after saving as instructed.",

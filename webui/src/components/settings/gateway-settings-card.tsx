@@ -12,7 +12,7 @@ import type { UseApiState } from "@/hooks/use-api"
 import type { GatewaySettingsController } from "@/lib/settings-management"
 import type { UpstreamUserAgentResponse } from "@/lib/types"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
-import { DisplayScopeSettings } from "@/components/settings/display-scope-settings"
+import { DisplayPresetSelect, DisplayScopeSettings } from "@/components/settings/display-scope-settings"
 
 export function GatewaySettingsCard({ management, upstreamAgent, section = "general" }: {
   management: GatewaySettingsController
@@ -74,6 +74,7 @@ export function GatewaySettingsCard({ management, upstreamAgent, section = "gene
     <CardHeader><CardTitle>{t(section === "display" ? "navigation.channelDisplay" : section === "permissions" ? "navigation.gatewayPermissions" : section === "network" ? "navigation.gatewayNetwork" : section === "data" ? "navigation.gatewayData" : "navigation.gatewayGeneral")}</CardTitle><CardDescription>{t("navigation.configurationHint")}</CardDescription></CardHeader>
     <CardContent className="flex flex-col gap-5 text-sm">
       {section !== "network" && <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
+        {section === "display" && <DisplayPresetSelect management={management} disabled={disabled} />}
         {section === "permissions" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.approval-timeout" ? management.lastAppliedSetting : null} label={t("settingsFields.approvalTimeoutSeconds")} type="number" defaultValue={String(managedSettings.system.approvalTimeoutSeconds)} placeholder="30–3600" disabled={disabled} onBlur={(value) => void management.previewSetting("system.approval-timeout", Number(value), { key: "settingsFields.approvalTimeout" })} />}
         {section === "general" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.idle-release-minutes" ? management.lastAppliedSetting : null} label={t("settingsFields.idleReleaseMinutes")} type="number" defaultValue={String(managedSettings.system.idleReleaseMinutes)} placeholder={t("settingsFields.idleReleasePlaceholder")} disabled={disabled} onBlur={(value) => void management.previewSetting("system.idle-release-minutes", Number(value), { key: "settingsFields.idleRelease" })} />}
         {section === "data" && <ManagedSelect label={t("settingsFields.trafficDump")} value={String(managedSettings.system.modelTrafficDumpEnabled)} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-dump", value === "true", { key: "settingsFields.trafficDump" })} />}

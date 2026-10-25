@@ -5,6 +5,24 @@ import type { GatewaySettingsController } from "@/lib/settings-management"
 import { translateDisplayScopeSource } from "@/lib/i18n/translate"
 import { FieldGroup } from "@/components/ui/field"
 import { SettingsEmpty } from "@/components/settings/settings-feedback"
+import { Button } from "@/components/ui/button"
+
+export function DisplayPresetSelect({ management, disabled, scope }: { management: GatewaySettingsController; disabled: boolean; scope?: NonNullable<GatewaySettingsController["managedSettings"]>["display"]["scopes"][number] }) {
+  const { t } = useTranslation()
+  const [choice, setChoice] = useState<{ scope: string; preset: "concise" | "standard" | "detailed" } | null>(null)
+  const preset = scope?.preset ?? management.managedSettings?.display.preset ?? "custom"
+  const target = scope?.id ?? "global"
+  const selected = choice?.scope === target ? choice.preset : preset
+  return <FieldGroup>
+    <ManagedSelect label={t("displayPreset.title")} description={`${t("displayPreset.detected", { value: t(`displayPreset.${preset}`) })} ${t("displayPreset.hint")}`} value={selected}
+    options={[["concise", t("displayPreset.concise")], ["standard", t("displayPreset.standard")], ["detailed", t("displayPreset.detailed")], ["custom", t("displayPreset.custom")]]}
+    disabledValues={["custom"]} disabled={disabled || scope?.writable === false}
+    onChange={value => { if (value === "concise" || value === "standard" || value === "detailed") setChoice({ scope: target, preset: value }) }} />
+    <Button variant="outline" className="self-start" disabled={disabled || scope?.writable === false || selected === "custom"} onClick={() => {
+      if (selected === "concise" || selected === "standard" || selected === "detailed") void management.previewSetting("display.preset", { preset: selected, ...(scope ? { selector: scope.selector } : {}) }, { key: "displayPreset.title" })
+    }}>{t("displayPreset.apply")}</Button>
+  </FieldGroup>
+}
 
 export function DisplayScopeSettings({ management, disabled }: { management: GatewaySettingsController; disabled: boolean }) {
   const { t } = useTranslation()
@@ -32,6 +50,7 @@ export function DisplayScopeSettings({ management, disabled }: { management: Gat
     <p className="text-xs text-muted-foreground">{t("displayScope.notice")}</p>
     {!scope ? <SettingsEmpty>{t("displayScope.empty")}</SettingsEmpty> : <FieldGroup>
       <ManagedSelect fullWidth label={t("displayScope.scope")} value={scope.id} options={scopes.map(value => [value.id, label(value)])} disabled={disabled} onChange={setSelected} />
+      <DisplayPresetSelect management={management} disabled={disabled} scope={scope} />
       {!scope.writable && <p className="text-xs text-muted-foreground">{t("displayScope.readonly")}</p>}
       {fields.filter(([field]) => scope.supportedFields.includes(field)).map(([field, effective, title]) => <ManagedSelect key={field} label={t(title)}
         description={t("displayScope.effective", { value: display(scope.effective[effective]), source: translateDisplayScopeSource(t, scope.sources[effective]) })}

@@ -1,6 +1,7 @@
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { validateModelDisplayAliases } from "../runtime/model-display-name.mjs";
 import { loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
+import { messageDisplayPresets } from "../runtime/message-display-policy.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import {
   loadGatewaySettings,
@@ -19,6 +20,7 @@ export async function runDisplaySettings({
       message: "选择显示设置",
       showInstructions: false,
       options: [
+        { value: "preset", label: "应用显示预设", hint: "简洁 / 标准 / 详细，一次设置全局九项显示字段" },
         { value: "scope", label: "范围显示覆盖", hint: "渠道、账号、聊天类型与已确认聊天；逐字段继承" },
         { value: "completion", label: "完成通知", hint: "关闭成功通知 / 精简 / 详细，缺省详细" },
         { value: "presentation_detail", label: "消息详情", hint: "基础 / 详细，独立于日志等级，缺省基础" },
@@ -37,7 +39,9 @@ export async function runDisplaySettings({
     if (prompts.isCancel(section) || section === "back") return { action: "back" };
     let result;
     const options = { environment, output, prompts, writeConfig };
-    if (section === "scope") {
+    if (section === "preset") {
+      result = await runDisplayPresetSettings(options);
+    } else if (section === "scope") {
       result = await runDisplayScopeSettings(options);
     } else if (section === "completion") {
       result = await runCompletionSettings(options);
@@ -83,9 +87,11 @@ async function runDisplayScopeSettings({ environment, output, prompts, writeConf
   if (!scope) throw new Error("未知显示目标范围");
   output.write(`当前目标：${label(scope)}\n${displayScopeSummary(scope)}\n`);
   const field = await prompts.select({ message: "选择显示字段", showInstructions: false, options: [
+    ...(scope.writable ? [{ value: "preset", label: "应用显示预设", hint: "一次设置本层全部支持字段" }] : []),
     ...[{ value: "operation_updates", label: "操作详情" }, { value: "subagents", label: "子代理显示" }, { value: "streaming", label: "流式显示" }, { value: "commentary", label: "过程说明" }, { value: "routine_notifications", label: "常规通知" }, { value: "plan_updates", label: "计划更新" }, { value: "reasoning", label: "思考状态" }, { value: "completion", label: "完成通知" }, { value: "presentation_detail", label: "消息详情" }].filter(option => scope.supportedFields.includes(option.value)), { value: "back", label: "返回上一级" },
   ] });
   if (prompts.isCancel(field) || field === "back") return { action: "back" };
+  if (field === "preset" && scope.writable) return runDisplayPresetSettings({ environment, output, prompts, writeConfig, settings, scope });
   if (!scope.supportedFields.includes(field)) throw new Error("该目标不支持所选显示字段");
   const value = await prompts.select({ message: "选择本层覆盖或恢复继承", showInstructions: false, initialValue: scope.override[field] === undefined ? "inherit" : String(scope.override[field]), options: [
     { value: "inherit", label: "恢复继承上级" },
@@ -122,14 +128,44 @@ async function runDisplayScopeSettings({ environment, output, prompts, writeConf
 function displayScopeSummary(scope) {
   const values = { full: "完整", compact: "紧凑", failures: "仅失败或拒绝", hidden: "隐藏", true: "开启", false: "关闭", off: "关闭成功通知", brief: "精简", detailed: "详细", basic: "基础" };
   const sources = { global: "全局", surface: "渠道", account: "账号", "chat-kind": "聊天类型", chat: "指定聊天" };
-  return ["按已保存配置计算，非当前运行状态；保存后按提示激活。", ...[
+  return [`显示预设：${presetLabels[scope.preset] ?? "自定义"}（根据有效字段识别，不保存预设标签）。`, "按已保存配置计算，非当前运行状态；保存后按提示激活。", ...[
     ["operation_updates", "operationUpdates", "操作详情"], ["plan_updates", "planUpdatesEnabled", "计划更新"], ["reasoning", "reasoningEnabled", "思考状态"], ["completion", "completion", "完成通知"],
     ["subagents", "subagentsEnabled", "子代理显示"],
     ["streaming", "streamingEnabled", "流式显示"],
     ["commentary", "commentaryEnabled", "过程说明"],
     ["routine_notifications", "routineNotificationsEnabled", "常规通知"],
     ["presentation_detail", "presentationDetail", "消息详情"],
-  ].filter(([field]) => scope.supportedFields.includes(field)).map(([field, effective, label]) => `${label}：本层${scope.override[field] === undefined ? "继承上级" : values[String(scope.override[field])]}；有效${values[String(scope.effective[effective])]}；来源${sources[scope.sources[effective]]}`)].join("\n");
+  ].filter(([field]) => scope.supportedFields.includes(field)).map(([field, effective, label]) => `${label}：本层${scope.override[field] === undefined ? scope.selector === null ? "使用缺省" : "继承上级" : values[String(scope.override[field])]}；有效${values[String(scope.effective[effective])]}；来源${sources[scope.sources[effective]]}`)].join("\n");
+}
+
+const presetLabels = { concise: "简洁", standard: "标准", detailed: "详细", custom: "自定义" };
+
+async function runDisplayPresetSettings({ environment, output, prompts, writeConfig, settings = loadGatewaySettings(environment), scope }) {
+  const target = scope ? [scope.selector.surface, scope.selector.account_id, scope.selector.chat_kind, scope.selector.chat_id].filter(Boolean).join(" / ") : "全局";
+  const currentState = scope ?? settings.display.globalScope;
+  output.write(`当前目标：${target}\n${displayScopeSummary(currentState)}\n预设只一次应用现有显示字段，之后仍按字段继承；不改变日志、调用采集、模型统计分组或 Telegram 消息格式。\n`);
+  const preset = await prompts.select({ message: "选择显示预设", showInstructions: false, initialValue: currentState.preset === "custom" ? undefined : currentState.preset,
+    options: [...Object.keys(messageDisplayPresets).map(value => ({ value, label: presetLabels[value] })), { value: "back", label: "返回上一级" }],
+  });
+  if (prompts.isCancel(preset) || preset === "back") return { action: "back" };
+  const edit = { kind: "display.preset", value: { preset, ...(scope ? { selector: scope.selector } : {}) } };
+  const preview = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig: () => undefined, skipBackup: true });
+  output.write(`预览目标：${target}\n${displayScopeSummary(preview.value)}\n${preview.activation === "none" ? "配置未变化，不写入或创建备份。" : "一次保存本层全部支持字段，保存前创建私有配置备份。"}保存后按提示激活；已有 pending 仍可能投递，重启恢复不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，并将全局及覆盖 failures 改为旧版支持值；核对后续修改，勿直接恢复备份覆盖配置。\n`);
+  const confirmed = await prompts.confirm({ message: `确认向 ${target} 应用${presetLabels[preset]}显示预设及以上全部字段？`, initialValue: false });
+  if (prompts.isCancel(confirmed) || !confirmed) return { action: "back" };
+  const result = updateGatewaySetting(edit, { environment, expectedRevision: settings.revision, writeConfig });
+  let saved;
+  try {
+    const current = loadGatewaySettings(environment);
+    saved = scope ? current.display.scopes.find(entry => entry.id === scope.id) : current.display.globalScope;
+  } catch { /* Keep a completed write when readback is unavailable. */ }
+  if (JSON.stringify(saved) !== JSON.stringify(preview.value)) {
+    output.write(`保存操作已返回，但配置读回未确认，请重新读取并核对，勿重复保存：${result.configPath}\n`);
+    return { ...result, consistency: "unknown" };
+  }
+  output.write(`${result.activation === "none" ? "设置未变化" : "显示预设已保存并读回确认"}：${target}；${result.configPath}\n${displayScopeSummary(saved)}\n${result.backupPath ? `私有备份：${result.backupPath}\n` : ""}`);
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { ...result, consistency: "confirmed" };
 }
 
 async function runPresentationDetailSettings({ environment, output, prompts, writeConfig }) {

@@ -1,4 +1,4 @@
-import { inspectMessageDisplayScope, messageDisplayOverrideSchema, messageDisplaySelectorKey } from "../runtime/message-display-policy.mjs";
+import { identifyMessageDisplayPreset, inspectMessageDisplayScope, messageDisplayFields, messageDisplayPresets, messageDisplayOverrideSchema, messageDisplaySelectorKey, supportedMessageDisplayFields } from "../runtime/message-display-policy.mjs";
 import { isTelegramEnabled, validateGatewayConfigStructureDocument } from "../runtime/gateway-config.mjs";
 import { invalidSetting } from "./config-management-error.mjs";
 import { existsSync } from "node:fs";
@@ -6,12 +6,9 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { assertStateDatabaseSchema } from "../dist/storage/index.js";
 
-const fields = ["operation_updates", "subagents", "streaming", "commentary", "routine_notifications", "plan_updates", "reasoning", "completion", "presentation_detail"];
+const fields = messageDisplayFields.map(([field]) => field);
 const selectorFields = ["surface", "account_id", "chat_kind", "chat_id"];
-function supportedFields(selector) {
-  return selector.surface === "weixin" ? ["completion", "presentation_detail", "routine_notifications"]
-    : selector.surface === "qq" && selector.chat_kind === "group" ? fields.filter(field => field !== "streaming") : fields;
-}
+const supportedFields = supportedMessageDisplayFields;
 
 function selectors(document, targets = []) {
   const result = [];
@@ -73,7 +70,7 @@ export function projectDisplayScopes(document, configuration, targets = []) {
     const stored = (configuration.overrides ?? []).find(value => messageDisplaySelectorKey(value) === id);
     const override = Object.fromEntries(fields.filter(field => stored?.[field] !== undefined).map(field => [field, stored[field]]));
     const inspected = inspectMessageDisplayScope(configuration, selector);
-    return { id, selector, writable: writable.has(id), supportedFields: supportedFields(selector), override, effective: inspected.settings, sources: inspected.sources };
+    return { id, selector, writable: writable.has(id), supportedFields: supportedFields(selector), preset: identifyMessageDisplayPreset(inspected.settings, supportedFields(selector)), override, effective: inspected.settings, sources: inspected.sources };
   });
 }
 
@@ -105,10 +102,40 @@ export function applyDisplayScopeSetting(document, input, configPath) {
   return { value: projectDisplayScope(document, selector, targets.selectors), activation: "restart-gateway", backupRequired: true };
 }
 
-function projectDisplayScope(document, selector, targets = []) {
+export function projectDisplayScope(document, selector, targets = []) {
   const configuration = validateGatewayConfigStructureDocument(document).display;
   const state = projectDisplayScopes(document, configuration, targets).find(entry => entry.id === messageDisplaySelectorKey(selector));
   if (state) return state;
   const inspected = inspectMessageDisplayScope(configuration, selector);
-  return { id: messageDisplaySelectorKey(selector), selector, writable: false, supportedFields: supportedFields(selector), override: {}, effective: inspected.settings, sources: inspected.sources };
+  return { id: messageDisplaySelectorKey(selector), selector, writable: false, supportedFields: supportedFields(selector), preset: identifyMessageDisplayPreset(inspected.settings, supportedFields(selector)), override: {}, effective: inspected.settings, sources: inspected.sources };
+}
+
+export function projectGlobalDisplayState(configuration, stored) {
+  const inspected = inspectMessageDisplayScope(configuration);
+  return { selector: null, preset: identifyMessageDisplayPreset(inspected.settings), supportedFields: fields, override: Object.fromEntries(fields.filter(field => stored?.[field] !== undefined).map(field => [field, stored[field]])), effective: inspected.settings, sources: inspected.sources };
+}
+
+export function applyDisplayPresetSetting(document, input, configPath) {
+  const value = input.value;
+  if (Object.keys(input).some(key => !["kind", "value"].includes(key)) || !value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).some(key => !["preset", "selector"].includes(key)) || typeof value.preset !== "string" || !Object.hasOwn(messageDisplayPresets, value.preset)) throw invalidSetting("value", "invalid-input", "请选择有效的显示预设");
+  const preset = messageDisplayPresets[value.preset];
+  if (Object.hasOwn(value, "selector")) {
+    const selector = value.selector;
+    if (!selector || typeof selector !== "object" || Array.isArray(selector) || Object.keys(selector).some(key => !selectorFields.includes(key))
+      || !messageDisplayOverrideSchema.safeParse({ ...selector, completion: preset.completion }).success) throw invalidSetting("selector", "invalid-input", "显示目标无效");
+    const targets = readDisplayTargets(document, configPath);
+    const key = messageDisplaySelectorKey(selector);
+    if (!selectors(document, targets.selectors).some(entry => messageDisplaySelectorKey(entry) === key)) throw invalidSetting("selector", "invalid-input", "目标未启用、未授权、不可读或不支持显示；请重新读取范围");
+    const overrides = [...(document.display?.overrides ?? [])];
+    const index = overrides.findIndex(entry => messageDisplaySelectorKey(entry) === key);
+    const next = { ...(index < 0 ? selector : overrides[index]), ...Object.fromEntries(supportedFields(selector).map(field => [field, preset[field]])) };
+    if (index < 0) overrides.push(next); else overrides[index] = next;
+    document.display = { ...document.display, overrides };
+    return { value: projectDisplayScope(document, selector, targets.selectors), activation: "restart-gateway", backupRequired: true, scope: true };
+  }
+  const current = projectGlobalDisplayState(validateGatewayConfigStructureDocument(document).display, document.display);
+  const changedFields = messageDisplayFields.filter(([stored, effective]) => current.effective[effective] !== preset[stored]).map(([field]) => field);
+  if (changedFields.length) document.display = { ...document.display, ...preset };
+  return { value: projectGlobalDisplayState(validateGatewayConfigStructureDocument(document).display, document.display), activation: "reload", backupRequired: true, changedFields };
 }
