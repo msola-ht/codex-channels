@@ -284,6 +284,9 @@ export class QqMessages implements SurfaceOutputPort {
     return !(event.type === "turn.completed" && this.shouldSettleLiveCompletion(event))
       && event.type !== "text.delta" && this.supported(event) && this.admitted.has(event);
   }
+  acceptsSnapshot(event: OutputEvent): boolean {
+    return this.supported(event);
+  }
   liveCompletionDisplay(event: Extract<OutputEvent, { type: "turn.completed" }>): "off" | "brief" | "detailed" {
     const mode = this.displaySettings(event.target).completion;
     return mode === "off" && !shouldHideTurnCompleted(event, mode) ? "detailed" : mode;

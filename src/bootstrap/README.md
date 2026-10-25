@@ -1,5 +1,7 @@
 # Bootstrap
 
+实时快照先执行状态观察和取代，再按 Surface 的可选 `acceptsSnapshot` 判定是否捕获 owner 并入队。此入口只用于新快照，隐藏完成的独立收尾和已有 Journal 重放不经过它；显示隐藏不伪装成授权失败或平台确认。
+
 持久输出将原 owner 中已校验的 Surface 来源经 `PersistentSurfaceOutput → SurfaceManager` 传入发送端，跨过反序列化与富化仍保留原任务关联；不修改 Journal/owner 格式，不凭索引建立新授权。QQ 据此从有效连接代次取原生引用索引，其他渠道仍使用原投递合同。
 
 子代理开始通知使用 0.162.0 官方活动中的启动模型与思考等级；元数据补充只读取并核验 Provider 归属，不用稍后 Thread 设置覆盖启动快照。继续通知仍展示读取时的 Thread 设置。

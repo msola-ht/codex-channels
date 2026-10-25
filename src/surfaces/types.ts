@@ -100,6 +100,8 @@ export interface SurfaceOutputPort {
   /** Apply live local lifecycle state synchronously; never await platform delivery. Not called on replay. */
   observe?(event: OutputEvent): void;
   retains?(event: OutputEvent): boolean;
+  /** Pure live snapshot visibility; does not replace source authorization or terminal settlement. */
+  acceptsSnapshot?(event: OutputEvent): boolean;
   /** Freeze the live presentation choice at admission; replay always defaults to detailed. */
   liveCompletionDisplay?(event: Extract<OutputEvent, { type: "turn.completed" }>): "off" | "brief" | "detailed";
   shouldSettleLiveCompletion?(event: Extract<OutputEvent, { type: "turn.completed" }>): boolean;

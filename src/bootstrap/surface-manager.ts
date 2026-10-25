@@ -237,7 +237,9 @@ export class SurfaceManager {
         if (surface.output.retains?.(event) ?? true) this.persistent.accept(event, order, presentation);
       } else if (resolveSurfaceDelivery(event.target.surface, event).disposition !== "ignore") {
         const snapshotKey = surfaceOutputSnapshotKey(event);
-        if (snapshotKey !== undefined) this.retainSnapshot(surface, snapshotKey, event, order);
+        if (snapshotKey !== undefined && (surface.output.acceptsSnapshot?.(event) ?? true)) {
+          this.retainSnapshot(surface, snapshotKey, event, order);
+        }
       }
     });
     this.removeOutputSubscription = output.subscribe(

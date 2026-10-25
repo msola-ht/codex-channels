@@ -57,6 +57,7 @@ export class QqSurface implements SurfaceAdapter {
     admitLive: event => this.current?.messages.admitLive(event),
     observe: event => this.current?.messages.observe(event),
     retains: event => this.current?.messages.retains(event) === true,
+    acceptsSnapshot: event => this.current?.messages.acceptsSnapshot(event) === true,
     liveCompletionDisplay: event => this.current?.messages.liveCompletionDisplay(event) ?? "detailed",
     shouldSettleLiveCompletion: event => this.current?.messages.shouldSettleLiveCompletion(event) === true,
     settleLiveCompletion: (event, signal, authorized, source) => this.current?.messages.settleLiveCompletion(event, signal, authorized, source)

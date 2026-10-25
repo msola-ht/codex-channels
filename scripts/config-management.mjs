@@ -361,6 +361,7 @@ function applySetting(document, input, configPath) {
       return { value: { presentationDetail: override ?? "basic", presentationDetailOverride: override }, activation: previous === (override ?? "basic") ? "reload" : completionSettingActivation(document), backupRequired: true };
     }
     case "display.completion": {
+      const previous = table(document.display).completion ?? "detailed";
       const edit = input.value;
       if (!edit || typeof edit !== "object" || Array.isArray(edit)
         || Object.keys(edit).some(key => !["action", "value"].includes(key))
@@ -371,7 +372,7 @@ function applySetting(document, input, configPath) {
         document.display = { ...table(document.display), completion: value };
       } else if (document.display !== undefined) delete document.display.completion;
       const override = document.display?.completion ?? null;
-      return { value: { completion: override ?? "detailed", completionOverride: override }, activation: completionSettingActivation(document), backupRequired: true };
+      return { value: { completion: override ?? "detailed", completionOverride: override }, activation: previous === (override ?? "detailed") ? "reload" : completionSettingActivation(document), backupRequired: true };
     }
     case "display.routine-notifications": {
       const edit = input.value;
