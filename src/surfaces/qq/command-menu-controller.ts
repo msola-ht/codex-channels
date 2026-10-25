@@ -33,10 +33,10 @@ type ModelView = "model" | "effort" | "fast";
 type MenuAction =
   | { kind: "workspace"; id: string }
   | { kind: "model"; selection: ModelSelectionRequest }
-  | { kind: "resume"; id: string }
+  | { kind: "resume" | "unarchive"; id: string }
   | { kind: "workspace-page"; page: number }
   | { kind: "model-page"; page: number; view: ModelView; snapshot: ModelSelectionSnapshot }
-  | { kind: "sessions-page"; page: number; filters: string };
+  | { kind: "sessions-page"; page: number; filters: string; archived: boolean };
 
 interface MenuContext {
   target: ConversationTarget;
@@ -71,14 +71,21 @@ export class QqCommandMenuController {
     const input = argumentsText.trim();
     const context = this.context(target, actorId);
     if (!input) return this.panel(context, renderQqCommandMenu());
+    if (input === "manage") return this.panel(context, {
+      content: "# 会话管理\n重命名、置顶与归档作用于当前会话；归档会退出当前会话。恢复归档会切换会话，不补发旧结果。",
+      keyboard: { content: { rows: [
+        { buttons: [qqMenuButton("rename", "重命名", "/rename ", false), qqMenuButton("pin", "置顶会话", "/pin"), qqMenuButton("unpin", "取消置顶", "/unpin")] },
+        { buttons: [qqMenuButton("archive", "归档当前", "/archive"), qqMenuButton("archived", "归档列表", "/help archived 1"), homeButton()] },
+      ] } },
+    });
     const pick = /^pick ([a-f0-9]{24})$/u.exec(input);
     if (pick) return this.pick(context, pick[1]!);
     const workspace = /^workspace(?: ([1-9][0-9]{0,4}))?$/u.exec(input);
     if (workspace) return this.workspacePage(context, pageNumber(workspace[1]));
     const model = /^model(?: ([1-9][0-9]{0,4}))?$/u.exec(input);
     if (model) return this.modelPage(context, pageNumber(model[1]), "model");
-    const sessions = /^sessions(?: ([1-9][0-9]{0,4})(?: (.+))?)?$/u.exec(input);
-    if (sessions) return this.sessionsPage(context, pageNumber(sessions[1]), sessions[2] ?? "");
+    const sessions = /^(sessions|archived)(?: ([1-9][0-9]{0,4})(?: (.+))?)?$/u.exec(input);
+    if (sessions) return this.sessionsPage(context, pageNumber(sessions[2]), sessions[3] ?? "", sessions[1] === "archived");
     const metrics = /^metrics(?: (global|providers|models|errors))?$/u.exec(input);
     if (metrics) return this.metrics(context, metrics[1]);
     throw unsupported();
@@ -145,7 +152,7 @@ export class QqCommandMenuController {
     switch (action.kind) {
       case "workspace-page": return this.workspacePage(selection, action.page);
       case "model-page": return this.modelPage(selection, action.page, action.view, action.snapshot);
-      case "sessions-page": return this.sessionsPage(selection, action.page, action.filters);
+      case "sessions-page": return this.sessionsPage(selection, action.page, action.filters, action.archived);
     }
     this.options.beforeMutation(selection.target);
     this.assertCurrent(selection);
@@ -159,7 +166,7 @@ export class QqCommandMenuController {
         () => this.assertCurrent(selection, true));
       this.assertCurrent(selection, true);
     } else {
-      result = await this.options.commands.execute(selection.target, "resume", action.id, selection.actorId);
+      result = await this.options.commands.execute(selection.target, action.kind, action.id, selection.actorId);
     }
     // Only a completed mutation may adopt its resulting workspace or Thread scope.
     if (this.options.signal.aborted || selection.generation !== this.generation
@@ -244,30 +251,30 @@ export class QqCommandMenuController {
       next => ({ kind: "model-page", page: next, view: "model", snapshot }), extra);
   }
 
-  private async sessionsPage(context: MenuContext, page: number, filters: string): Promise<QqMenuPanel> {
+  private async sessionsPage(context: MenuContext, page: number, filters: string, archived: boolean): Promise<QqMenuPanel> {
     this.assertCurrent(context);
-    const result = await this.options.commands.execute(context.target, "sessions", `${Math.ceil(page / 2)} ${filters}`.trim(), context.actorId);
+    const result = await this.options.commands.execute(context.target, archived ? "archived" : "sessions", `${Math.ceil(page / 2)} ${filters}`.trim(), context.actorId);
     this.assertCurrent(context);
-    if (result.kind !== "sessions" || result.archived) throw unsupported();
+    if (result.kind !== "sessions" || result.archived !== archived) throw unsupported();
     return this.sessions(context, result, page);
   }
 
   private sessions(context: MenuContext, result: Sessions, page: number): QqMenuPanel {
-    if (result.archived) throw unsupported();
     const offset = page % 2 === 0 ? 10 : 0;
     const entries = result.sessions.slice(offset, offset + 10);
     const pages = Math.max(1, Math.ceil(result.matchedSessionCount / 10));
     if (page > pages) throw unsupported();
-    const buttons = entries.map((session, index) => this.button(context, `${(page - 1) * 10 + index + 1} ${session.name || session.preview || session.id}`, { kind: "resume", id: session.id }));
-    buttons.push(qqMenuButton("search", "搜索标题", "/sessions search ", false), qqMenuButton("resume", "手动恢复ID", "/resume ", false));
+    const buttons = entries.map((session, index) => this.button(context, `${(page - 1) * 10 + index + 1} ${session.name || session.preview || session.id}`, { kind: result.archived ? "unarchive" : "resume", id: session.id }));
+    buttons.push(qqMenuButton("search", "搜索标题", result.archived ? "/archived search " : "/sessions search ", false),
+      qqMenuButton("resume", "手动恢复ID", result.archived ? "/unarchive " : "/resume ", false));
     const lines = entries.map((session, index) => `${(page - 1) * 10 + index + 1}. ${markdown(session.name || session.preview || session.id, 140)}${session.id === result.currentThreadId ? "（当前）" : ""}`);
     const filters = [
       `filter ${result.view.filter}`,
       ...(result.view.provider ? [`provider ${result.view.provider}`] : []),
       ...(result.view.searchTerm ? [`search ${result.view.searchTerm}`] : []),
     ].join(" ");
-    return this.listPanel(context, "历史会话", lines, buttons, page, pages,
-      next => ({ kind: "sessions-page", page: next, filters }));
+    return this.listPanel(context, result.archived ? "已归档会话 · 选择恢复" : "历史会话", lines, buttons, page, pages,
+      next => ({ kind: "sessions-page", page: next, filters, archived: result.archived }));
   }
 
   private metrics(context: MenuContext, scope?: string): QqMenuPanel {
@@ -326,5 +333,5 @@ function markdown(value: string, maximumBytes: number): string {
   }
   return output || "未命名";
 }
-function expired(): UserFacingError { return new UserFacingError("model.selection.expired", "菜单已失效，请重新发送 /help 打开菜单。"); }
+function expired(): UserFacingError { return new UserFacingError("command.selection.expired", "菜单已失效，请重新发送 /help 打开菜单。"); }
 function unsupported(): UserFacingError { return new UserFacingError("command.unsupported", "QQ 菜单不支持此参数，请重新发送 /help。"); }

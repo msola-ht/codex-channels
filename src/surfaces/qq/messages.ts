@@ -297,8 +297,8 @@ export class QqMessages implements SurfaceOutputPort {
     let stage: "command" | "render" | "reply" | "submit" = "command";
     try {
       if (command) {
-        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", ...QUERY_COMMANDS].includes(command.name)
-          || (["status", "stop", "new", "usage", "limits", "diff"].includes(command.name) && command.argumentsText.trim())) {
+        if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", ...QUERY_COMMANDS].includes(command.name)
+          || (["status", "stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin"].includes(command.name) && command.argumentsText.trim())) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;
         }
         if (command.name === "help") {
@@ -307,15 +307,17 @@ export class QqMessages implements SurfaceOutputPort {
           await this.reply(message, menu.content, () => this.allowed(target, message.actorId) && menu.isCurrent(), undefined, menu.keyboard);
           return;
         }
-        if (((command.name === "workspace" || command.name === "model" || command.name === "resume") && command.argumentsText.trim()) || command.name === "new") {
+        if (((command.name === "workspace" || command.name === "model" || command.name === "resume" || command.name === "unarchive") && command.argumentsText.trim()) || command.name === "new" || command.name === "archive") {
           this.cancelCallbacks(target); this.sources.cancelTarget(target); this.interactions.cancelTarget(target);
         }
         const commandScope = this.scope(message.actorId);
-        const hasSelectionMenu = ["workspace", "model", "sessions", "resume"].includes(command.name);
+        const hasSelectionMenu = ["workspace", "model", "sessions", "resume", "archived"].includes(command.name);
         const menuScope = hasSelectionMenu ? this.menuScope(target) : undefined;
         const menuWorkspaceScope = hasSelectionMenu ? this.menuWorkspaceScope(target) : undefined;
         const queryStatus = QUERY_COMMANDS.has(command.name) ? this.options.service.status(target) : undefined;
-        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "usage" | "limits" | "metrics" | "diff", command.argumentsText, message.actorId);
+        const result = await this.options.commands.execute(target, command.name as "status" | "stop" | "workspace" | "model" | "new" | "sessions" | "resume" | "rename" | "archived" | "archive" | "unarchive" | "pin" | "unpin" | "usage" | "limits" | "metrics" | "diff", command.argumentsText, message.actorId);
+        const sessionReplyScope = ["rename", "archive", "unarchive", "pin", "unpin"].includes(command.name)
+          ? this.menuScope(target) : undefined;
         stage = "render";
         const scope = command.name === "workspace" && command.argumentsText.trim() ? this.scope(message.actorId) : commandScope;
         const menu = this.menus.fromResult(target, message.actorId, result);
@@ -336,6 +338,7 @@ export class QqMessages implements SurfaceOutputPort {
         stage = "reply";
         await this.reply(message, text, () => {
           if (!scope || !this.current(scope)) return false;
+          if (sessionReplyScope !== undefined && this.menuScope(target) !== sessionReplyScope) return false;
           if (!queryStatus) return true;
           const current = this.options.service.status(target);
           if (current.threadId !== queryStatus.threadId) return false;

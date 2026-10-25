@@ -136,6 +136,7 @@ export type UserFacingErrorCode =
   | "agents.config-unreadable"
   | "reset-credit.failed"
   | "command.unsupported"
+  | "command.selection.expired"
   | "review.usage";
 
 export type UserFacingErrorDetails = Readonly<

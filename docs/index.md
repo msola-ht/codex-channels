@@ -1,4 +1,5 @@
 # Codex 官方文档与源码索引
+QQ 剩余适配按[分批计划](qq-message-contract.md#剩余适配分批计划2026-10-24)推进；会话管理批次复用共享 rename、archive/unarchive、setPinned 与官方归档列表，未新增协议。源码已接线菜单及文字命令，尚未部署客户端验收。
 普通 Turn 提交的本地关联入口见 [`SubmissionObserver`](../src/application/submission-observer.ts)：
 准备精确 Thread、标记可能提交、确认响应 Turn 并结算失败。它经 Client/Provider 透传而不添加 RPC 字段，
 `turn/start` 仍可能实际追加；显式 `turn/steer` 响应必须匹配 expectedTurnId，空白 ID 不作成功。
