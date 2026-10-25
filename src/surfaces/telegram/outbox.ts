@@ -337,7 +337,7 @@ export class TelegramOutbox {
     };
   }
 
-  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, _authorized?: () => boolean, _source?: import("../types.js").SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, _source?: import("../types.js").SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
     if (this.closed || event.target.surface !== "telegram"
       || event.target.accountId !== (this.options.accountId ?? telegramDefaultAccountId)) throw new Error("可靠输出目标无效或已关闭");
     signal.throwIfAborted();
@@ -354,7 +354,10 @@ export class TelegramOutbox {
         const buffered = this.operationUpdates.flushTurn(event);
         if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
       }
-    }, signal, checkpoint, { requireConfirmation: true });
+    }, signal, checkpoint, { requireConfirmation: true, beforeSend: () => {
+      signal.throwIfAborted();
+      if (this.closed || authorized?.() !== true) throw new Error("Telegram 可靠输出授权已变化");
+    } });
   }
 
   private handleEvent(event: OutputEvent, completion?: "brief" | "detailed"): void {
@@ -791,7 +794,7 @@ export class TelegramOutbox {
           const body = new DeliveryReceipt(async checkpoint => {
             try { await parent?.checkpoint(checkpoint); }
             catch (error) { parent?.fail(error); throw error; }
-          }, signal, true);
+          }, signal, true, parent?.beforeSend);
           try {
             try { await body.run(() => flushText(chatId, signal)); }
             catch (error) { body.fail(error); }

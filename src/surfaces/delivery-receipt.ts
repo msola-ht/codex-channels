@@ -32,7 +32,7 @@ export class DeliveryReceipt {
   readonly controller = new AbortController();
 
   constructor(readonly checkpoint: (value: DeliveryCheckpoint) => Promise<void>, signal: AbortSignal,
-    readonly transient = false) {
+    readonly transient = false, readonly beforeSend?: () => void) {
     void this.done.catch(() => {});
     const abort = (): void => {
       this.fail(new Error("输出投递已取消"));
@@ -82,10 +82,10 @@ export async function captureDelivery(
   call: () => void,
   signal: AbortSignal,
   checkpoint: (value: DeliveryCheckpoint) => Promise<void>,
-  options?: { requireConfirmation?: boolean },
+  options?: { requireConfirmation?: boolean; beforeSend?: () => void },
 ): Promise<void> {
   signal.throwIfAborted();
-  const receipt = new DeliveryReceipt(checkpoint, signal);
+  const receipt = new DeliveryReceipt(checkpoint, signal, false, options?.beforeSend);
   if (options?.requireConfirmation) receipt.requireConfirmation();
   try { receipt.run(call); } catch (error) { receipt.fail(error); }
   finally { receipt.release(); }
@@ -96,8 +96,10 @@ export async function checkpointDelivery<T>(operation: string, call: () => Promi
   const receipt = DeliveryReceipt.current();
   if (!receipt) return call();
   receipt.controller.signal.throwIfAborted();
+  receipt.beforeSend?.();
   await receipt.record({ operation, state: "started" });
   receipt.controller.signal.throwIfAborted();
+  receipt.beforeSend?.();
   let result: T;
   try { result = await call(); }
   catch (error) {

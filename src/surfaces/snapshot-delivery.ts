@@ -24,7 +24,9 @@ export class SnapshotDelivery {
     const receipt = new DeliveryReceipt((checkpoint) => {
       if (checkpoint.state === "started" && !authorized()) throw new Error("状态展示授权已变化");
       return Promise.resolve();
-    }, AbortSignal.any([signal, controller.signal]), true);
+    }, AbortSignal.any([signal, controller.signal]), true, () => {
+      if (!authorized()) throw new Error("状态展示授权已变化");
+    });
     try {
       try {
         if (!authorized()) throw new Error("状态展示授权已变化");

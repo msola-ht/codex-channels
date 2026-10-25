@@ -1,4 +1,5 @@
-import { checkpointDelivery } from "../delivery-receipt.js";
+import { DeliveryReceipt, checkpointDelivery } from "../delivery-receipt.js";
+import { withFeishuSendGuard } from "./sdk-request-context.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import { FeishuMessageError } from "./message-error.js";
 import type { ChannelFileMediaType } from "../bounded-local-file.js";
@@ -46,7 +47,14 @@ export function bindOutboxMessagePort(port: FeishuMessagePort, closed: AbortSign
   async function send<T>(request: (signal: AbortSignal) => Promise<T>, external?: AbortSignal): Promise<T> {
     const signal = external === undefined ? closed : AbortSignal.any([closed, external]);
     signal.throwIfAborted();
-    const result = await checkpointDelivery("feishu-message", () => request(signal),
+    const receipt = DeliveryReceipt.current();
+    const beforeSend = (): void => {
+      signal.throwIfAborted();
+      receipt?.controller.signal.throwIfAborted();
+      receipt?.beforeSend?.();
+    };
+    beforeSend();
+    const result = await checkpointDelivery("feishu-message", () => withFeishuSendGuard(signal, beforeSend, () => request(signal)),
       (error) => error instanceof FeishuMessageError && error.code === "card-create-failed");
     signal.throwIfAborted();
     return result;

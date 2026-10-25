@@ -9,6 +9,8 @@
 一次性精确文本审批、用户输入与 MCP 交互端口和目录内部完整 `SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，
 未新增 SQLite Schema。
 
+可靠输出把原归属授权保存在回执中，每次实际请求和有限重试前重新复核。长正文的完整答案附件将同一守卫传至上传地址申请、CDN 上传和最终消息发送，撤权后不再发送文件或降级正文；预览确认不代表全文确认。带守卫附件沿用既有协议策略：CDN 内部上传最多一次，外层对明确 API/429 拒绝的有限重试仍保留。此路径不开放微信持久生成图片输出。
+
 显式 `channel send-file` 已接共享 CLI/spool/绑定链路：file/video 最多 25 MiB，video 仅 MP4，原生 voice 明确拒绝（锁定上游无发送实现），音频可由调用方显式选 file。原长正文文件上限 1,000,000 字节不变。协议共用 AES/CDN 上传，视频使用 media_type=2、type=5 与密文 video_size，文件仍为 media_type=3/type=4。显式图片/文件固定原 Thread 和入队时回复上下文，透传停止信号并在每次 HTTP 前复核，120 秒总预算内执行，不自动重传 CDN 或消息。这些新增路径尚未部署或真实客户端验收。
 
 - `credential-store.ts`：严格校验版本 1 微信 Bot 凭据；macOS 使用独立 Keychain Service，

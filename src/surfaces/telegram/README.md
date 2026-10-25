@@ -127,6 +127,7 @@ Outbox 的完成通知消费目标 `completion` 设置；成功隐藏时沿原�
   有界重试耗尽后向 Bootstrap 报告渠道故障，由该
   Telegram 实例独立退避重连，不停止 Gateway 或其他 Surface。
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试；新建消息仅重试明确的限流拒绝，编辑与删除可重试网络异常及服务端错误。每次实际请求前复核目标已登记 Actor 的当前授权，队列与正文计时器捕获可取消的授权范围；热撤权取消无剩余授权 Actor 的目标，重新授权不恢复已取消操作。显式配置通知允许名单内用户自身私聊没有既有绑定，普通输出不把 Chat ID 当作 Actor。`editMessageText` 入口在检查点结算前将该方法明确返回的 `400 message is not modified` 归一为确认，正文、操作与交互共用该入口；取消不能归一为成功。启动通知和直接命令回复仍走各自 SDK 调用路径。
+  可靠输出及状态快照还保存各自的原归属守卫，API Executor 在每次 attempt 前复核，不能因目标仍有其他授权 Actor 而继续发送已失效的原任务；正文收尾子回执继承该守卫。
 - `sdk-signal.ts`：在 SDK 边界保留原生取消信号身份，并适配 grammY 的信号类型声明。
 - `error-metadata.ts`：只保留异常类型、受约束的机器错误码及消息未变化分类，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。

@@ -337,7 +337,7 @@ export class FeishuTextStreams {
         const receipt = completionReceipt === undefined ? undefined : new DeliveryReceipt(async (checkpoint) => {
           try { await completionReceipt.checkpoint(checkpoint); }
           catch (error) { completionReceipt.fail(error); throw error; }
-        }, completionReceipt.controller.signal, true);
+        }, completionReceipt.controller.signal, true, completionReceipt.beforeSend);
         const enqueue = (): boolean => this.delivery.enqueue(
           state.chatId,
           async (signal) => {

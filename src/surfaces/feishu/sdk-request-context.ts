@@ -4,6 +4,13 @@ import { AsyncLocalStorage } from "node:async_hooks";
 // Scope the shared HTTP adapter to one invocation, including its authentication.
 const requestContext = new AsyncLocalStorage<{ signal: AbortSignal; beforeSend: (() => void) | undefined }>();
 
+/** Keep one output's owner guard across compound upload/create/send operations. */
+export function withFeishuSendGuard<T>(signal: AbortSignal, beforeSend: () => void, request: () => T): T {
+  signal.throwIfAborted();
+  checkFeishuSendGuard(beforeSend);
+  return requestContext.run({ signal, beforeSend }, request);
+}
+
 export function checkFeishuSendGuard(beforeSend?: () => void): void {
   const result: unknown = beforeSend?.();
   if (result !== undefined) {
@@ -28,6 +35,13 @@ export async function runFeishuSdkRequest<T>(
   external?: AbortSignal,
   beforeSend?: () => void,
 ): Promise<T> {
+  const parent = requestContext.getStore();
+  const guard = (): void => {
+    checkFeishuSendGuard(parent?.beforeSend);
+    checkFeishuSendGuard(beforeSend);
+  };
+  external = parent?.signal && external && parent.signal !== external
+    ? AbortSignal.any([parent.signal, external]) : parent?.signal ?? external;
   const controller = new AbortController();
   let rejectCancellation!: (error: Error) => void;
   const cancellation = new Promise<never>((_resolve, reject) => { rejectCancellation = reject; });
@@ -46,9 +60,9 @@ export async function runFeishuSdkRequest<T>(
   external?.addEventListener("abort", onAbort, { once: true });
   if (external?.aborted) onAbort();
   try {
-    const operation = requestContext.run({ signal: controller.signal, beforeSend }, async () => {
+    const operation = requestContext.run({ signal: controller.signal, beforeSend: guard }, async () => {
       controller.signal.throwIfAborted();
-      checkFeishuSendGuard(beforeSend);
+      guard();
       return request();
     });
     return await Promise.race([operation, cancellation]);

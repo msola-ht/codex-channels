@@ -191,7 +191,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     // Conversation; hiding a notification must not invalidate or consume it.
   }
 
-  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, _authorized?: () => boolean, _source?: SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, _source?: SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
     if (this.closed || !this.matches(event.target)) throw new Error("可靠输出目标无效或已关闭");
     signal.throwIfAborted();
     if (isHiddenAutoApprovalReview(event)) return;
@@ -200,7 +200,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     await captureDelivery(() => {
       void this.handle(event, { liveAdmitted: true, completion: context?.completion ?? "detailed" });
-    }, signal, checkpoint, { requireConfirmation: true });
+    }, signal, checkpoint, { requireConfirmation: true, beforeSend: () => {
+      signal.throwIfAborted();
+      if (this.closed || authorized?.() !== true) throw new Error("微信可靠输出授权已变化");
+    } });
   }
 
   private handleEvent(event: OutputEvent, completion?: "brief" | "detailed"): void {
@@ -339,6 +342,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private assertSendActive(signal?: AbortSignal): void {
     signal?.throwIfAborted();
     if (this.closed) throw new Error("微信输出队列已关闭");
+    DeliveryReceipt.current()?.beforeSend?.();
   }
 
   private render(event: OutputEvent, completion?: "brief" | "detailed"): string | null {
@@ -449,11 +453,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
         file,
       };
       try {
+        const ownerGuard = DeliveryReceipt.current()?.beforeSend;
+        const beforeSend = ownerGuard === undefined ? undefined : (): undefined => { ownerGuard(); };
         await checkpointDelivery("sendFile", () => this.withSendRetry(
           "sendFile",
-          () => (signal
-            ? fileClient.sendFile(input, signal)
-            : fileClient.sendFile(input)),
+          () => fileClient.sendFile(input, signal, beforeSend),
           signal,
         ), isDefinitelyRejectedWeixinSend);
         DeliveryReceipt.current()?.confirmCompleteContent();

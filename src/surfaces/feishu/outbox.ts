@@ -297,12 +297,14 @@ export class FeishuOutbox implements SurfaceOutputPort {
     };
   }
 
-  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, _authorized?: () => boolean, _source?: import("../types.js").SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, _source?: import("../types.js").SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
     if (this.closed || event.target.surface !== "feishu"
       || event.target.accountId !== this.accountId) throw new Error("可靠输出目标无效或已关闭");
     signal.throwIfAborted();
     if (isHiddenAutoApprovalReview(event)) return;
     if (!isSupportedPersistentOutput(event)) throw new Error("持久输出类型不受支持");
+    const beforeSend = this.channelSendGuard(() => authorized?.() === true, signal);
+    beforeSend();
     await captureDelivery(() => {
       void this.handle(event, { liveAdmitted: true, completion: context?.completion ?? "detailed" });
       if (event.type === "text.completed") {
@@ -318,7 +320,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         const buffered = this.operationUpdates.flushTurn(event);
         if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
       }
-    }, signal, checkpoint, { requireConfirmation: true });
+    }, signal, checkpoint, { requireConfirmation: true, beforeSend });
   }
 
   private handleEvent(event: OutputEvent, completionMode?: "brief" | "detailed"): void {
