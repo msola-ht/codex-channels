@@ -577,6 +577,11 @@ export class TelegramSurface {
     this.bot.callbackQuery(/^(?:wp|ar):/, async (context) => {
       await context.answerCallbackQuery({ text: "工作区权限设置入口已停用，请使用原生 Codex 权限配置。" });
     });
+    this.bot.callbackQuery(/^status:(overview|detail)$/, async context => {
+      await context.answerCallbackQuery({ text: "正在查询当前会话状态" });
+      const result = await this.commands.execute(target(context), "status", context.match[1] === "detail" ? "detail" : "", String(context.from.id));
+      await renderTelegramCommandResult(context, result);
+    });
     this.bot.callbackQuery(/^idle:resume:([A-Za-z0-9_-]{24})$/, async (context) => {
       const token = context.match[1]!;
       const pending = this.idleResumeSelections.get(token);
