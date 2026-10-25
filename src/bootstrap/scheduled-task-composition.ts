@@ -24,7 +24,7 @@ import {
   scheduledTaskDatabasePath,
   AsyncSqliteScheduledTaskStore,
 } from "../scheduled-tasks/index.js";
-import { ScheduledTaskExecutor } from "./scheduled-task-executor.js";
+import { ScheduledTaskExecutor, type ScheduledTaskExecutorOptions } from "./scheduled-task-executor.js";
 import { ScheduledTaskRunCoordinator } from "./scheduled-task-run-coordinator.js";
 import {
   createScheduledTaskToolRequestHandler,
@@ -39,6 +39,7 @@ export interface ScheduledTaskCompositionOptions {
   codex: ProviderRoutingClient;
   turns?: TurnExecutionPort;
   acceptsExecution: (target: ConversationTarget) => boolean;
+  prepareSubmission?: ScheduledTaskExecutorOptions["prepareSubmission"];
   releaseRecoveredThread: (threadId: string, isCurrent: () => boolean) => Promise<boolean>;
   bindings: SqliteBindingStore;
   workspaces: WorkspaceRegistry;
@@ -92,6 +93,7 @@ export class ScheduledTaskComposition {
         isSurfaceEnabled: (target) => options.isSurfaceEnabled(target),
         isActorAuthorized: (target, actorId) => options.isActorAuthorized(target, actorId),
         acceptsExecution: options.acceptsExecution,
+        ...(options.prepareSubmission ? { prepareSubmission: options.prepareSubmission } : {}),
         onThreadStarted: (run, target, threadId) =>
           requireCoordinator().onThreadStarted(run, target, threadId),
         onTurnStarted: (run, target, threadId, turnId) =>

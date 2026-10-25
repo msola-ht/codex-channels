@@ -71,3 +71,4 @@ export {
   type WindowsProxyTransportOptions,
 } from "./windows-proxy-transport.js";
 export { toReasoningGuardInput } from "./notification-reasoning-guard.js";
+export { toUserMessageIdentity } from "./user-message-identity.js";

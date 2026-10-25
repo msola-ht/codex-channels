@@ -196,7 +196,9 @@ export function formatSurfaceUserFacingError(
     case "queue.reorder-conflict":
       return "Queue 已发生变化，请刷新 /queue list 后重试排序";
     case "queue.failed":
-      return "Queue 操作失败，请稍后重试";
+      return error.details.reason === "submission-unconfirmed"
+        ? "Queue 提交结果未确认，任务可能已开始；请用 /queue list、/status 或在本机核对，勿直接重复提交"
+        : "Queue 操作失败，请稍后重试";
     case "revert.usage":
       return threadRevertCommandUsageText;
     case "revert.unavailable":

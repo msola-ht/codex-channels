@@ -7,6 +7,7 @@ import {
   surfaceAccountKey,
   type ConversationTarget,
   type OutputEvent,
+  type UserMessageIdentity,
 } from "../conversation-core/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import {
@@ -20,6 +21,8 @@ import {
   surfaceErrorMetadata,
   type SurfaceAdapter,
   type SurfaceConfigurationChange,
+  type SurfaceAsyncAnswerSubmission,
+  type SurfaceScheduledTaskSubmissionContext,
 } from "../surfaces/index.js";
 
 const defaultRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000] as const;
@@ -276,6 +279,50 @@ export class SurfaceManager {
     return this.executionBlockReason(target) === undefined;
   }
 
+  prepareScheduledTaskSubmission(context: SurfaceScheduledTaskSubmissionContext): SurfaceAsyncAnswerSubmission | undefined {
+    const account = surfaceAccountKey(context.target.surface, context.target.accountId);
+    const surface = this.surfacesByAccount.get(account);
+    const isCurrent = (): boolean => !this.stopping && this.acceptingOutput
+      && surface !== undefined && !surface.connectionOnly && !this.suspended.has(account)
+      && this.surfacesByAccount.get(account) === surface && this.active.has(surface)
+      && this.requireRuntime(surface).state === "running";
+    if (!isCurrent() || !surface?.prepareScheduledTaskSubmission) {
+      if (context.target.surface === "qq") throw new Error("QQ 计划任务结果来源尚未就绪");
+      return undefined;
+    }
+    const submission = surface.prepareScheduledTaskSubmission(context);
+    return {
+      observer: submission.observer,
+      isCurrent: () => isCurrent() && submission.isCurrent(),
+      cancel: () => submission.cancel(),
+    };
+  }
+
+  /** Live synchronous port; never enters output queues or durable delivery. */
+  forwardUserMessageIdentity(target: ConversationTarget, identity: Readonly<UserMessageIdentity>): void {
+    if (this.stopping || !this.acceptingOutput) return;
+    const account = surfaceAccountKey(target.surface, target.accountId);
+    const surface = this.surfacesByAccount.get(account);
+    if (!surface || surface.connectionOnly || this.suspended.has(account)
+      || !this.active.has(surface) || this.requireRuntime(surface).state !== "running") return;
+    try {
+      surface.output.observeUserMessageIdentity?.(identity);
+    } catch {
+      // Observer errors must neither block the App Server reader nor expose content.
+      this.logger.error({ surface: target.surface, accountId: target.accountId }, "Surface 用户消息身份观察失败");
+    }
+  }
+
+  forwardQueueChanged(target: ConversationTarget, threadId: string): void {
+    if (this.stopping || !this.acceptingOutput) return;
+    const account = surfaceAccountKey(target.surface, target.accountId);
+    const surface = this.surfacesByAccount.get(account);
+    if (!surface || surface.connectionOnly || this.suspended.has(account)
+      || !this.active.has(surface) || this.requireRuntime(surface).state !== "running") return;
+    try { surface.output.observeQueueChanged?.(target, threadId); }
+    catch { this.logger.error({ surface: target.surface, accountId: target.accountId }, "Surface Queue 选择失效通知失败"); }
+  }
+
   executionBlockReason(target: ConversationTarget): "unavailable" | "global-capacity" | "account-capacity" | undefined {
     const account = surfaceAccountKey(target.surface, target.accountId);
     if (this.stopping || this.suspended.has(account)
@@ -285,6 +332,15 @@ export class SurfaceManager {
 
   waitForPersistentOutput(target: ConversationTarget, signal: AbortSignal): Promise<void> {
     return this.persistent?.waitForIdle(target, signal) ?? Promise.resolve();
+  }
+
+  /** Before a live binding is released, settle its output without waiting on pre-start replay. */
+  waitForActivePersistentOutput(target: ConversationTarget, signal: AbortSignal): Promise<void> {
+    const account = surfaceAccountKey(target.surface, target.accountId);
+    const surface = this.surfacesByAccount.get(account);
+    if (this.stopping || !surface || this.suspended.has(account) || !this.active.has(surface)
+      || this.requireRuntime(surface).state !== "running") return Promise.resolve();
+    return this.waitForPersistentOutput(target, signal);
   }
 
   suspendPersistentAccount(account: string): void {

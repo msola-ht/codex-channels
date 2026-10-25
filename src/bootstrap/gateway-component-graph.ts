@@ -82,6 +82,7 @@ import {
   toReasoningGuardInput,
   toThreadQueueChangedEvent,
   toThreadStateEvent,
+  toUserMessageIdentity,
   type CodexTransport,
   type RpcNotification,
 } from "../codex-client/index.js";
@@ -860,6 +861,11 @@ export abstract class GatewayComponentGraph {
         restoreRequired: (threadId) => {
           if (!this.stopping && !this.isBindingRestoring(threadId)) void this.restoreIdleBinding(threadId);
         },
+        beforeBackgroundRelease: async (target) => {
+          if (target.surface === "qq") {
+            await this.surfaceManager.waitForActivePersistentOutput(target, AbortSignal.timeout(10_000));
+          }
+        },
       },
       (operation) => logger.warn(
         { module: "sessions", event: "display_cache.disabled", operation, reason: "cache-operation-failed" },
@@ -1038,6 +1044,7 @@ export abstract class GatewayComponentGraph {
           codex: this.codex,
           turns: execution,
           acceptsExecution: (target) => this.surfaceManager.acceptsExecution(target),
+          prepareSubmission: (context) => this.surfaceManager.prepareScheduledTaskSubmission(context),
           bindings: this.bindings,
           workspaces: this.workspaces,
           core: this.core,
@@ -1762,6 +1769,8 @@ export abstract class GatewayComponentGraph {
         this.notificationGenerations.set(notification, {
           provider, generation: this.providerNotificationGenerations.get(provider) ?? 0,
         });
+        this.observeUserMessageIdentity(notification);
+        this.observeQueueChanged(notification);
         const threadStateEvent = toThreadStateEvent(notification);
         if (threadStateEvent) {
           const isCurrent = this.threadState.observeExecutionContext(threadStateEvent);
@@ -1960,10 +1969,28 @@ export abstract class GatewayComponentGraph {
     }
   }
 
+  private observeUserMessageIdentity(notification: RpcNotification): void {
+    if (this.stopping || notification.isCurrentConnection?.() !== true) return;
+    const identity = toUserMessageIdentity(notification);
+    if (!identity || notification.provider === undefined
+      || notification.provider !== this.codex.knownProvider(identity.threadId)) return;
+    const target = this.router.targetForThread(identity.threadId);
+    if (target) this.surfaceManager.forwardUserMessageIdentity(target, identity);
+  }
+
+  private observeQueueChanged(notification: RpcNotification): void {
+    if (this.stopping || notification.isCurrentConnection?.() !== true) return;
+    const changed = toThreadQueueChangedEvent(notification);
+    if (!changed || notification.provider === undefined
+      || notification.provider !== this.codex.knownProvider(changed.threadId)) return;
+    const target = this.router.targetForThread(changed.threadId);
+    if (target) this.surfaceManager.forwardQueueChanged(target, changed.threadId);
+  }
+
   private outputOwner(event: OutputEvent): string {
-    const identity = JSON.stringify(this.outputIdentity(event));
-    if (event.target.surface !== "qq") return identity;
+    if (event.target.surface !== "qq") return JSON.stringify(this.outputIdentity(event));
     const source = this.outputSourcePort(event)?.capture(event) ?? null;
+    const identity = JSON.stringify(this.outputIdentity(event, source ?? undefined));
     return JSON.stringify({ version: 3, kind: "qq-live", identity, source });
   }
 
@@ -1984,8 +2011,11 @@ export abstract class GatewayComponentGraph {
     if (source.kind === "notification") {
       if (source.eventType !== "mcp.oauth.completed" || event.type !== source.eventType
         || source.serverName !== event.name) return undefined;
-    } else if (source.kind !== undefined || typeof source.turnId !== "string" || !source.turnId
+    } else if ((source.kind !== undefined && source.kind !== "scheduled") || typeof source.turnId !== "string" || !source.turnId
       || Buffer.byteLength(source.turnId) > 512 || !("turnId" in event) || event.turnId !== source.turnId) return undefined;
+    if (source.kind === "scheduled" && (typeof source.workspaceId !== "string" || !source.workspaceId
+      || Buffer.byteLength(source.workspaceId) > 512 || typeof source.workspaceCwd !== "string" || !source.workspaceCwd
+      || Buffer.byteLength(source.workspaceCwd) > 32 * 1024)) return undefined;
     return { identity: value.identity, source: Object.freeze({ ...source }) };
   }
 
@@ -1994,16 +2024,16 @@ export abstract class GatewayComponentGraph {
     if (event.target.surface !== "qq") return this.outputAuthorized(event, owner);
     const original = this.outputSourceOwner(event, owner);
     const port = this.outputSourcePort(event);
-    if (!original || !port || !this.outputIdentityAuthorized(event, original.identity)) return false;
+    if (!original || !port || !this.outputIdentityAuthorized(event, original.identity, original.source)) return false;
     if (!(await port.await(original.source, signal))) return false;
     return !signal.aborted && this.outputAuthorized(event, owner);
   }
 
-  private outputIdentity(event: OutputEvent) {
+  private outputIdentity(event: OutputEvent, source?: SurfaceDeliverySource) {
     const target = event.target;
     const threadId = "threadId" in event ? event.threadId : "parentThreadId" in event ? event.parentThreadId : undefined;
     const binding = threadId ? this.bindings.getByThread(threadId) : this.bindings.get(target);
-    const workspace = this.bindings.getWorkspace(target) ?? null;
+    const workspace = source?.kind === "scheduled" ? source.workspaceId : this.bindings.getWorkspace(target) ?? null;
     return {
       version: 2,
       workspaceCwd: workspace ? this.workspaces.get(workspace)?.cwd ?? null : null,
@@ -2019,15 +2049,18 @@ export abstract class GatewayComponentGraph {
   private outputAuthorized(event: OutputEvent, owner: string): boolean {
     if (event.target.surface !== "qq") return this.outputIdentityAuthorized(event, owner);
     const original = this.outputSourceOwner(event, owner);
-    return !!original && this.outputIdentityAuthorized(event, original.identity)
+    return !!original && this.outputIdentityAuthorized(event, original.identity, original.source)
       && this.outputSourcePort(event)?.current(original.source) === true;
   }
 
-  private outputIdentityAuthorized(event: OutputEvent, owner: string): boolean {
+  private outputIdentityAuthorized(event: OutputEvent, owner: string, source?: SurfaceDeliverySource): boolean {
     const original = JSON.parse(owner) as ReturnType<typeof this.outputIdentity>;
     // Older owners cannot prove the directory that was authorized at admission.
     // Preserve their records, but never infer or upgrade their identity here.
     if (original?.version !== 2) return false;
+    if (source?.kind === "scheduled" && (original.workspace !== source.workspaceId
+      || original.workspaceCwd !== source.workspaceCwd || original.binding?.[3] !== source.workspaceId
+      || original.bindingWorkspaceCwd !== source.workspaceCwd)) return false;
     if (original.provider && !this.codex.isProviderConfigured(original.provider)) return false;
     // Stored selections survive unbinding and configuration changes; they do
     // not establish current Workspace authorization.
@@ -2036,7 +2069,7 @@ export abstract class GatewayComponentGraph {
       || this.workspaces.get(original.workspace)?.cwd !== original.workspaceCwd)) return false;
     if (original.binding && (!original.bindingWorkspaceCwd
       || this.workspaces.get(original.binding[3]!)?.cwd !== original.bindingWorkspaceCwd)) return false;
-    const current = this.outputIdentity(event);
+    const current = this.outputIdentity(event, source);
     // Foreground/background is presentation state, not recipient authorization.
     // Normal unsubscription may precede slow delivery, including after demotion.
     // A Thread currently owned by another target must still fail the comparison.

@@ -1,6 +1,7 @@
 import type { ConversationResetCreditService, ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
 import type { HookCommandView } from "./hook-port.js";
 import { SubmissionObservation, type SubmissionObserver } from "./submission-observer.js";
+import { QueueSubmissionObservation, type ThreadQueueExecutionContext } from "./thread-queue-observer.js";
 import {
   UserFacingError,
   type ConversationTarget,
@@ -336,6 +337,8 @@ export interface ConversationCommandExecutor {
     actorId: string,
     assertInteractionActive?: () => void,
     observer?: SubmissionObserver,
+    queueContext?: ThreadQueueExecutionContext,
+    scheduledOperation?: ScheduledTaskOperationContext,
   ): Promise<ConversationCommandResult>;
 }
 
@@ -415,13 +418,16 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     actorId: string,
     assertInteractionActive?: () => void,
     observer?: SubmissionObserver,
+    queueContext?: ThreadQueueExecutionContext,
+    scheduledOperation?: ScheduledTaskOperationContext,
   ): Promise<ConversationCommandResult> {
     const observation = observer ? new SubmissionObservation(observer) : undefined;
+    const queueObservation = queueContext?.submission ? new QueueSubmissionObservation(queueContext.submission) : undefined;
     try {
       const authorize = this.commandGuard(target, actorId, command === "workspace");
       const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
       assertAuthorized();
-      const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, observation);
+      const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, observation, queueObservation, queueContext?.deleted, scheduledOperation);
       try {
         if (command === "workspace" && input.trim()) { this.authorize(target, actorId); assertInteractionActive?.(); }
         else assertAuthorized();
@@ -429,9 +435,23 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         if (result.kind === "scheduled-confirmation") this.scheduledTasks?.cancelConfirmation(result.preview.token);
         throw error;
       }
+      if (result.kind === "scheduled-confirmation" && scheduledOperation) {
+        const { token, expiresAt } = result.preview;
+        const signal = scheduledOperation.signal;
+        const cleanup = () => { clearTimeout(timer); signal.removeEventListener("abort", cancel); };
+        const cancel = () => { this.scheduledTasks?.cancelConfirmation(token); cleanup(); };
+        const timer = setTimeout(cleanup, Math.max(0, expiresAt - Date.now() + 1));
+        timer.unref();
+        signal.addEventListener("abort", cancel, { once: true });
+        if (signal.aborted) {
+          cancel();
+          signal.throwIfAborted();
+        }
+      }
       return result;
     } finally {
-      observation?.settle();
+      try { observation?.settle(); }
+      finally { queueObservation?.settle(); }
     }
   }
 
@@ -459,6 +479,9 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     actorId: string,
     assertAuthorized: () => void,
     observation?: SubmissionObservation,
+    queueObservation?: QueueSubmissionObservation,
+    onQueueDeleted?: ThreadQueueExecutionContext["deleted"],
+    scheduledOperation?: ScheduledTaskOperationContext,
   ): Promise<ConversationCommandResult> {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
@@ -600,7 +623,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "queue":
-        return this.executeQueueCommand(target, argumentsText, assertAuthorized);
+        return this.executeQueueCommand(target, argumentsText, assertAuthorized, queueObservation, onQueueDeleted);
       case "revert":
         return this.executeRevertCommand(target, argumentsText, actorId, assertAuthorized);
       case "rename":
@@ -815,7 +838,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "schedule":
-        return this.executeScheduledTaskCommand(target, argumentsText, actorId, assertAuthorized);
+        return this.executeScheduledTaskCommand(target, argumentsText, actorId, assertAuthorized, scheduledOperation);
     }
     throw new UserFacingError(
       "command.unsupported",
@@ -828,6 +851,8 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     target: ConversationTarget,
     input: string,
     assertAuthorized: () => void,
+    observation?: QueueSubmissionObservation,
+    onDeleted?: ThreadQueueExecutionContext["deleted"],
   ): Promise<ConversationCommandResult> {
     const operation = parseThreadQueueOperation(input);
     if (operation.type === "list") {
@@ -841,7 +866,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         kind: "outcome",
         outcome: {
           type: "thread-queue.added",
-          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized),
+          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized, observation),
         },
       };
     }
@@ -860,7 +885,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       };
     }
     if (operation.type === "delete") {
-      const result = await this.conversations.queueDelete(target, operation.selector, assertAuthorized);
+      const result = await this.conversations.queueDelete(target, operation.selector, assertAuthorized, onDeleted);
       return {
         kind: "outcome",
         outcome: { type: "thread-queue.deleted", deleted: result.deleted },
@@ -883,7 +908,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         },
       };
     }
-    const result = await this.conversations.queueStart(target, operation.selector, assertAuthorized);
+    const result = await this.conversations.queueStart(target, operation.selector, assertAuthorized, observation);
     return {
       kind: "outcome",
       outcome: { type: "thread-queue.started", turnId: result.turnId },
@@ -1023,6 +1048,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     input: string,
     actorId: string,
     assertAuthorized: () => void,
+    operationContext?: ScheduledTaskOperationContext,
   ): Promise<ConversationCommandResult> {
     const scheduled = this.scheduledTasks;
     if (!scheduled) {
@@ -1038,12 +1064,14 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       );
     }
     const controller = new AbortController();
+    const signal = operationContext ? AbortSignal.any([controller.signal, operationContext.signal]) : controller.signal;
     const context: ScheduledTaskOperationContext = {
-      signal: controller.signal,
+      signal,
       assertCurrent() {
-        controller.signal.throwIfAborted();
+        signal.throwIfAborted();
         try {
           assertAuthorized();
+          operationContext?.assertCurrent();
         } catch (error) {
           controller.abort(error);
           throw error;

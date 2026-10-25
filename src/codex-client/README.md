@@ -142,6 +142,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
 - `notification-reasoning-guard.ts`：将锁定协议的 `item/reasoning/textDelta` 与 `summaryTextDelta` 投影为 Application 重复保护的瞬时输入，保留 Thread／Turn／Item／段索引及原始思考／摘要来源隔离；Item 起止只标记边界，不把完成快照重放为增量。内容不转为渠道事件或指标。
 - `notification-account-events.ts`：映射账户、额度、MCP OAuth 完成、MCP 启动状态与 warning 事件，统一脱敏并限长，残缺字段省略而不推断。
 - `notification-thread-state.ts`：映射 Routing 侧线程设置、线程名、生命周期与 Queue 变更事件；Queue 变化只让本地选择快照失效，不触发读取。
+- `user-message-identity.ts`：仅从官方 item/started.userMessage 投影 Thread、Turn、Item 和 client ID，包含纯媒体输入但不读取正文；供本代次 Queue 来源关联使用。JsonRpc 本地 isCurrentConnection 闭包证明原连接仍完成握手且当前有效，不编码到协议或持久记录。
 - `notification-review.ts`：把受控 `item/autoApprovalReview/started|completed` 裁剪为 Thread、Turn、review ID、阶段、状态和 agent 来源的批准标志，供 Bootstrap 继续采集开始与完成指标。仅 agent 完成事件附加 `AutoApprovalReviewDetails`：七种官方动作类别、最多 1,024 个字符串条目的文件数量、白名单网络协议与 u16 端口；按动作提取操作与工作目录、审查理由，经共享凭据脱敏、控制字符清理及 320 字符限长后传递，execve 参数按原始边界脱敏后才格式化；保留文本标点，由 Surface 处理富文本呈现。合法起止时间投影为耗时，不采集风险与授权等级。未知或畸形摘要字段省略，超大文件列表只保留动作类别，不传递 stdin 正文或完整网络 target URL，非法来源和终态明确排除。
 - `notification-parse-helpers.ts`：上述映射共用的纯解析与基础断言（记录/字符串断言、Turn 与 Thread 状态、MessagePhase、PlanType、额度快照、Token 用量与 Turn 错误分类）；不持有状态、不执行 IO。
 - `value-primitives.ts`：本模块适配器共用的最小取值断言（有限数值、原样字符串、去空白后非空的字符串）；不含协议语义、不持有状态，供通知映射、操作摘要与服务器请求解码复用同一实现。

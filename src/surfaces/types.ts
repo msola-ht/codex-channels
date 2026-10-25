@@ -8,6 +8,7 @@ import type {
   ConversationTarget,
   OutputEvent,
   SurfaceId,
+  UserMessageIdentity,
 } from "../conversation-core/index.js";
 import type { Workspace } from "../policy/index.js";
 import type { DeliveryCheckpoint } from "./delivery-receipt.js";
@@ -29,8 +30,7 @@ export interface SurfaceConfigurationChange {
 }
 
 /** Disposable input participation identity; a stored reference alone grants no authority. */
-export interface SurfaceTaskDeliverySource {
-  readonly kind?: never;
+interface SurfaceTaskDeliveryIdentity {
   readonly generation: string;
   readonly sourceToken: string;
   readonly accountId: string;
@@ -38,6 +38,11 @@ export interface SurfaceTaskDeliverySource {
   readonly threadId: string;
   readonly turnId: string;
 }
+
+export type SurfaceTaskDeliverySource = SurfaceTaskDeliveryIdentity & (
+  | { readonly kind?: never; readonly workspaceId?: never; readonly workspaceCwd?: never }
+  | { readonly kind: "scheduled"; readonly workspaceId: string; readonly workspaceCwd: string }
+);
 
 /** Application has already correlated this live notification with its original request. */
 export interface SurfaceNotificationDeliverySource {
@@ -61,7 +66,21 @@ export interface SurfaceAsyncAnswerSubmission {
   failed?(): Promise<void>;
 }
 
+/** A fresh unattended submission in its fixed Workspace; contains no task content. */
+export interface SurfaceScheduledTaskSubmissionContext {
+  readonly runId: string;
+  readonly target: ConversationTarget;
+  readonly actorId: string;
+  readonly workspaceId: string;
+  readonly workspaceCwd: string;
+  readonly threadId: string;
+}
+
 export interface SurfaceOutputPort {
+  /** Observe current official identity synchronously; no network, content, persistence or replay. */
+  observeUserMessageIdentity?(identity: Readonly<UserMessageIdentity>): void;
+  /** Invalidate unused selections only; this does not prove deletion or revoke task output. */
+  observeQueueChanged?(target: ConversationTarget, threadId: string): void;
   deliverySource?: {
     capture(event: OutputEvent): SurfaceDeliverySource | undefined;
     await(reference: SurfaceDeliverySource, signal: AbortSignal): Promise<boolean>;
@@ -95,6 +114,7 @@ export interface SurfaceAdapter {
   readonly interactions: InteractionPort;
   readonly output: SurfaceOutputPort;
   takeAsyncAnswerSubmission?(target: ConversationTarget, requestId: string): SurfaceAsyncAnswerSubmission | undefined;
+  prepareScheduledTaskSubmission?(context: SurfaceScheduledTaskSubmissionContext): SurfaceAsyncAnswerSubmission;
   sendChannelImage?(conversationId: string, imagePath: string, isCurrent: () => boolean): Promise<void>;
   sendChannelFile?(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean): Promise<void>;
   presentScheduledTaskConfirmation?(

@@ -114,6 +114,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
   Revert/Queue 快照。普通输入、平台本地命令和审批交互刷新活动时间，输出事件也由组合根统一刷新。
 - `conversation-lock-coordinator.ts`：为同一 Conversation、多个 Conversation 的有序加锁；Queue、Revert
   与主会话生命周期共用同一实例。
+- `thread-queue-observer.ts`：Queue 专用同步身份观察；add 确认持久条目及 client ID，start 确认精确 Turn，命令入口统一结算。准备、请求尝试和响应确认分开，不把入队成功当作 Turn 已开始。
 - `thread-queue-service.ts`：维护原生 Thread Queue 的增删改查、启动、分页选择快照、错误映射和待生效设置冲突检查；
   只有列表发布更新数字选择，内部复核不重排或续期旧页；读取期间的失效不允许重新发布旧快照。
   不负责 Thread 绑定切换或后台释放。
@@ -235,6 +236,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 
 Surface 只依赖直接输入、状态或菜单所需的能力切片，并使用 Bootstrap 注入的
 `ConversationCommandExecutor` 执行共享命令；不依赖完整 `ConversationUseCases`、具体服务类或底层 JSON-RPC。
+`execute` 第七个可选 Queue context 透传 add/start 的观察器，以及仅在官方 deleted=true 后调用的精确删除通知。受观察的 start 先解析完整快照中的精确 Queue ID，未传观察的调用保留原生队首启动语义；Queue parser 通过公共出口供渠道判断操作种类。第八个可选 ScheduledTaskOperationContext 贯穿计划操作的取消信号和授权守卫；返回的预览在该信号取消时撤销共享确认，监听到期释放。
 `execute` 可接收同步交互有效性守卫，与既有 Actor/Workspace 授权一起传至业务和最终提交前；QQ 回退和 Hook 管理用它取消在途查询及写入准备。Hook 快照与确认使用五分钟单调时钟期限。`selectMcpLogin` 在共享目录解析后、认证写入前核对菜单原 Server 名称，拒绝重排的数字选择。未传守卫的调用保持原语义，已发送的写入不会因随后取消而自动撤回。共享回退解析器通过 Application 公共出口供菜单复用，不重复解析确认语法。
 `execute` 的可选第六参数为 SubmissionObserver，在命令授权和解析之前创建一次 SubmissionObservation，finally 结算；Skill、角色、Plugin、带需求 Plan 和 Review 共用该观察，不改动未传观察器的其他渠道语义。Review 准备分支只有 Thread 身份，不伪造用户消息 ID；最终请求尝试同步观察，inline 响应固定原 Thread/Turn，观察失败仍释放活动追踪并保守结算。
 Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。

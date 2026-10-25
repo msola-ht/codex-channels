@@ -66,6 +66,7 @@ export type {
   OperationUpdateDisplay,
   SurfaceAdapter,
   SurfaceAsyncAnswerSubmission,
+  SurfaceScheduledTaskSubmissionContext,
   SurfaceConfigurationChange,
   SurfaceOutputPort,
   SurfaceDeliverySource,

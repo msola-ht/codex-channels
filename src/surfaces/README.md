@@ -1,6 +1,6 @@
 # Surface Adapters
 
-[QQ](qq/README.md) 已接入普通单聊文字任务、必要命令、共享持久投递及共享审批/问题回应；交互与消息按钮回调已部署，客户端证据与待验收范围见模块文档。图片输入和生成图片/显式图片交付、文本/普通文件、原生引用、显式文件交付及音视频输入已接线，尚未部署；计划任务与旧来源恢复不开放。
+[QQ](qq/README.md) 已接入普通单聊文字任务、必要命令、共享持久投递及共享审批/问题回应；交互与消息按钮回调已部署，客户端证据与待验收范围见模块文档。图片输入和生成图片/显式图片交付、文本/普通文件、原生引用、显式文件交付及音视频输入已接线，尚未部署；第九批原生 Queue、计划任务和当次配置通知也已接线、待部署验收，旧来源仍不恢复。
 
 本目录保存外部交互平台适配器。Surface 负责把平台输入转换为 Application 命令，并把 Core 输出和审批交互渲染为平台消息。
 
@@ -64,7 +64,8 @@ Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录�
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。可选 `output.deliverySource` 提供来源引用的捕获、可取消等待和同步复核；引用不能单独授予发送资格。持久 `deliver` 的第四参数可接收共享同步授权守卫，用于最终网络发送前复核。
 普通输出 `handle` 的可选第三参数传递共享会话队列取消信号；QQ 正文流在该队列内等待单帧完成，并将取消传递到来源等待、节流及 HTTP。
-可选 capabilities 分别约束自动绑定恢复、交互、计划任务及配置广播；QQ 启用绑定恢复与交互，关闭计划任务和配置广播，同时允许普通文字输入和共享持久输出，其他渠道缺省行为不变。QQ 交互仍经过 `PersistentInteractionPort` 的前序持久投递屏障，按原用户、工作区和当前请求归属授权，不恢复旧来源或令牌。
+可选 capabilities 分别约束自动绑定恢复、交互、计划任务及持久配置事件订阅；QQ 启用绑定恢复、交互和计划任务，`configurationNotifications: false` 排除持久 Workspace 配置事件重放，当次 `configurationChanged` 仍发送受控通知。QQ 交互仍经过 `PersistentInteractionPort` 的前序持久投递屏障，按原用户、工作区和当前请求归属授权，不恢复旧来源或令牌。
+可选 `output.observeUserMessageIdentity` 接收当前已握手连接投影的官方用户消息四项身份，QQ 结合 Queue 提交响应关联精确 Turn；`output.observeQueueChanged` 只清理未用选择。可选 `prepareScheduledTaskSubmission` 为 Executor 提供独立提交观察票据；QQ 将计划运行固定于原任务 Workspace 和后台绑定，经权威响应确认 Turn，前台切换不改变该归属。
 可选 `takeAsyncAnswerSubmission(target, requestId)` 按原目标与请求单次领取异步回答的 `observer/isCurrent/cancel` 及可选 `failed` 通知端口；Bootstrap 将其接入 `ConversationService.submitAsyncAnswer`，提交前及等待后复核，失败取消来源并尝试受控提示。QQ 必须取得该次回答来信的新来源才可提交；确认后保留来源至正常释放，不恢复旧来源，其他渠道未实现此可选端口时沿用原路径。
 每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
@@ -93,7 +94,7 @@ Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不
 等待重启、重启中、已生效和失败；Surface 只渲染结果，不得接收原始配置值或异常详情。普通
 生命周期通知可通过可选的 `configurationChanged` 异步入队；`deliverConfigurationChange` 必须等待
 所有目标的平台 API 实际发送成功，失败时抛出错误，以便 Bootstrap 保留尚未确认的持久化配置事件。
-没有配置通知订阅对象时按空集合完成；QQ 当前属于此情形，不产生配置广播消息。
+没有配置通知订阅对象时按空集合完成。QQ 不订阅持久事件，但当次通知使用显式单聊允许名单，热加载更新名单，重启前同应用只取新旧交集，换应用或禁用时不发送；逐人完整回执、六十秒期限与共享主动预算由 QQ Adapter 负责，未知不自动重试。
 全局变更投递给所有 Surface；平台作用域变更只投递给匹配 Surface。进程重启和重装会影响所有
 Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台私有原因的生命周期通知。
 
@@ -127,11 +128,11 @@ Thread Queue 属于 App Server，由 Application 负责授权、25 条分页和�
 分页历史 Revert 同样由 Application 统一编排；三个 Surface 只渲染 `/revert list`、预览和一次性确认结果，
 统一提示仅支持新建分页历史 Thread、执行前会复核并且不会恢复工作区文件。Surface 不保存 Turn 历史、
 确认令牌或 Queue/历史快照；按钮和菜单只能提交当前绑定 Actor 的规范选择器。
-Gateway 计划任务同样由 Application 统一编排；三个 Surface 只渲染 `/schedule` 的类型化列表、Run、
+Gateway 计划任务同样由 Application 统一编排；四个 Surface 只渲染 `/schedule` 的类型化列表、Run、
 预览与操作结果。飞书管理按钮携带完整任务或 Run ID 并继续走共享命令；显式命令和 `schedule_task`
 工具预览都按精确 Surface 复用同一呈现入口，飞书与 Telegram 的创建/删除确认按钮提交同一五分钟令牌，
 飞书按钮被接受后会把原卡片更新为无按钮终态，微信保留同一文本语法；
-Surface 不保存任务定义、Prompt、选择快照或确认令牌。
+QQ 完整字面预览全部取得平台确认后才开放确认按钮与文字 confirm，停止、切换、取消和过期撤销尚未执行的确认；临时呈现身份不作为共享确认权威。Surface 不保存任务定义、Prompt 或共享选择快照，任务与确认状态由 Application 持有。
 审批卡片和其他需要等待结果的 `runOrdered` 操作排在所有既有关键消息之后，但会越过尚未执行的
 非关键过程输出；关键消息与非关键消息各自保持原顺序。交互取消会移除尚未执行的发送，
 并向在途平台请求传递取消信号；在有界清理窗口内取得已验证的迟到消息 ID 时，尝试清理交互入口。

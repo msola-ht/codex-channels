@@ -2,7 +2,7 @@ import type { Logger } from "pino";
 import { join } from "node:path";
 import { safeInteractionDecision, type InteractionPort } from "../../approval/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
-import type { SurfaceAdapter, SurfaceOutputPort } from "../types.js";
+import type { SurfaceAdapter, SurfaceOutputPort, SurfaceConfigurationChange } from "../types.js";
 import type { QqNetwork } from "./network.js";
 import { QqProtocolClient, QqProtocolError } from "./protocol.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
@@ -24,7 +24,9 @@ export interface CreateQqSurfaceOptions extends QqMessageOptions {
 /** Shares Application and persistent delivery with other Surfaces. */
 export class QqSurface implements SurfaceAdapter {
   readonly surface = "qq";
-  readonly capabilities = { recoverBindings: true, interactions: true, scheduledTasks: false, configurationNotifications: false } as const;
+  // This flag controls replay of durable workspace events. Live configuration
+  // notifications use configurationChanged and are attempted only once.
+  readonly capabilities = { recoverBindings: true, interactions: true, scheduledTasks: true, configurationNotifications: false } as const;
   readonly accountId: string;
   readonly interactions: InteractionPort = {
     request: (target, request) => this.current?.messages.interactions.request(target, request) ?? Promise.resolve(safeInteractionDecision(request)),
@@ -33,7 +35,17 @@ export class QqSurface implements SurfaceAdapter {
   };
   readonly takeAsyncAnswerSubmission = (target: Parameters<QqMessages["takeAsyncAnswerSubmission"]>[0], requestId: string) =>
     this.current?.messages.takeAsyncAnswerSubmission(target, requestId);
+  readonly prepareScheduledTaskSubmission: QqMessages["prepareScheduledTaskSubmission"] = context => {
+    if (!this.current) throw new Error("QQ 消息连接不可用");
+    return this.current.messages.prepareScheduledTaskSubmission(context);
+  };
+  readonly presentScheduledTaskConfirmation: QqMessages["presentScheduledTaskConfirmation"] = (target, actorId, preview) => {
+    if (!this.current) return Promise.reject(new Error("QQ 消息连接不可用"));
+    return this.current.messages.presentScheduledTaskConfirmation(target, actorId, preview);
+  };
   readonly output: SurfaceOutputPort = {
+    observeUserMessageIdentity: identity => this.current?.messages.observeUserMessageIdentity(identity),
+    observeQueueChanged: (target, threadId) => this.current?.messages.observeQueueChanged(target, threadId),
     deliverySource: {
       capture: event => this.current?.messages.deliverySource.capture(event),
       await: (reference, signal) => this.current?.messages.deliverySource.await(reference, signal) ?? Promise.resolve(false),
@@ -52,6 +64,7 @@ export class QqSurface implements SurfaceAdapter {
   private closed = false;
   private terminalFailure: QqTransportError | undefined;
   private startupAttempted = false;
+  private configurationReady = false;
 
   constructor(private readonly options: CreateQqSurfaceOptions) {
     this.accountId = options.appId;
@@ -64,10 +77,12 @@ export class QqSurface implements SurfaceAdapter {
   }
 
   private async begin(): Promise<void> {
+    this.configurationReady = false;
     await this.current?.stop();
     if (this.closed) throw new Error("QQ 已关闭");
     if (this.terminalFailure) throw this.terminalFailure;
     const connection = new QqConnection({ ...this.options, onFatal: error => {
+      this.configurationReady = false;
       this.rememberTerminalFailure(error);
       this.options.onFatal(error);
     } });
@@ -80,6 +95,7 @@ export class QqSurface implements SurfaceAdapter {
       throw error;
     }
     if (this.closed) { await connection.stop(); throw new Error("QQ 已关闭"); }
+    this.configurationReady = true;
     if (!this.startupAttempted) {
       this.startupAttempted = true;
       connection.messages.startNotifications();
@@ -94,6 +110,7 @@ export class QqSurface implements SurfaceAdapter {
 
   stop(): Promise<void> {
     this.closed = true;
+    this.configurationReady = false;
     return this.stopping ??= Promise.all([
       this.current?.stop(), this.starting?.catch(() => {}),
     ]).then(() => {});
@@ -109,10 +126,23 @@ export class QqSurface implements SurfaceAdapter {
       ?? Promise.reject(new Error("QQ 消息连接不可用"));
   }
 
-  deliverConfigurationChange(): Promise<void> {
-    // Startup notifications are independent of configuration broadcasts.
-    // This disabled broadcast must not block other channels' durable events.
-    return Promise.resolve();
+  configurationChanged(change: SurfaceConfigurationChange): void {
+    // Start synchronously so restart recipients are captured before bootstrap
+    // restores its temporary intersection. The connection owns cancellation.
+    const task = this.configurationReady && !this.closed && this.current
+      ? this.current.messages.deliverConfigurationChange(change)
+      : Promise.reject(new Error("QQ 配置通知连接不可用"));
+    void task.catch(() => this.options.logger.warn({ reason: "configuration-notification-failed" },
+      "QQ 配置通知未确认，不自动重试"));
+  }
+
+  deliverConfigurationChange(change: SurfaceConfigurationChange): Promise<void> {
+    if (!(this.options.configurationNotification?.recipients().length)) return Promise.resolve();
+    // The shared durable event has no event identity or recipient checkpoints.
+    // Replaying it could resend confirmed or unknown QQ deliveries.
+    if (change.addedWorkspaces.length) return Promise.reject(new Error("QQ 不支持重放持久配置事件"));
+    if (!this.configurationReady || this.closed || !this.current) return Promise.reject(new Error("QQ 配置通知连接不可用"));
+    return this.current.messages.deliverConfigurationChange(change);
   }
 }
 

@@ -41,7 +41,9 @@ interface Entry {
   readonly targetKey: string;
   readonly scope: Readonly<QqTaskScope>;
   readonly message: Readonly<{ kind: "text"; id: string; msgIdx: string; sentAtMs: number }
-    | { kind: "interaction"; id: string; sentAtMs: number }>;
+    | { kind: "interaction"; id: string; sentAtMs: number }
+    | { kind: "scheduled"; id: string; actorId: string }>;
+  readonly expectedThreadId?: string;
   readonly receivedAt: number;
   readonly deadline: number;
   readonly controller: AbortController;
@@ -95,6 +97,19 @@ export class QqTaskSources {
     }
     if (!Number.isSafeInteger(original.sentAtMs) || original.sentAtMs < this.startedAt
       || original.sentAtMs > wall || wall - original.sentAtMs > 60_000) return { kind: "rejected", reason: "stale" };
+    return this.reserveEntry(scope, original, receivedAt, preparationMs);
+  }
+
+  /** Only the live scheduler factory may call this; never reconstructed from run history. */
+  reserveScheduled(scope: QqTaskScope, runId: string, threadId: string): QqTaskReservation {
+    if (this.closed) return { kind: "rejected", reason: "closed" };
+    if (!bounded(runId) || !bounded(threadId)) return { kind: "rejected", reason: "invalid-input" };
+    return this.reserveEntry(scope, Object.freeze({ kind: "scheduled", id: runId, actorId: scope.actorId }),
+      performance.now(), PREPARATION_MS, threadId);
+  }
+
+  private reserveEntry(scope: QqTaskScope, original: Entry["message"] & { actorId: string }, receivedAt: number,
+    preparationMs: number, expectedThreadId?: string): QqTaskReservation {
     const snapshot = Object.freeze({ accountId: scope.accountId, actorId: scope.actorId,
       conversationId: scope.conversationId, workspaceId: scope.workspaceId, workspaceCwd: scope.workspaceCwd });
     if (![snapshot.accountId, snapshot.actorId, snapshot.conversationId, snapshot.workspaceId].every(value => bounded(value))
@@ -102,7 +117,7 @@ export class QqTaskSources {
       || snapshot.accountId !== this.options.accountId || snapshot.actorId !== original.actorId) return { kind: "rejected", reason: "scope" };
     this.prune();
     if (this.closed) return { kind: "rejected", reason: "closed" };
-    const allowed = this.guard(snapshot);
+    const allowed = this.guard(snapshot, expectedThreadId);
     if (this.closed) return { kind: "rejected", reason: "closed" };
     if (!allowed) return { kind: "rejected", reason: "scope" };
     if (this.clockUnsafe) return { kind: "rejected", reason: "clock" };
@@ -117,7 +132,7 @@ export class QqTaskSources {
       return { kind: "rejected", reason: "capacity" };
     }
     const entry: Entry = { token: randomUUID(), dedupKey, targetKey, scope: snapshot,
-      message: original,
+      message: original, ...(expectedThreadId === undefined ? {} : { expectedThreadId }),
       receivedAt, deadline: receivedAt + preparationMs, expiresAt: receivedAt + SOURCE_MS, retainUntil: receivedAt + DEDUP_MS,
       controller: new AbortController(), waiters: new Set(), terminals: new Map(), attempted: false };
     this.entries.set(entry.token, entry);
@@ -128,7 +143,8 @@ export class QqTaskSources {
       prepared: value => {
         this.requirePending(entry);
         if (entry.preparation || !bounded(value.threadId) || (value.kind !== "review" && !bounded(value.clientUserMessageId))
-          || (value.kind === "steer" && !bounded(value.expectedTurnId))) throw new Error("QQ 提交来源准备身份无效");
+          || (value.kind === "steer" && !bounded(value.expectedTurnId))
+          || (expectedThreadId !== undefined && (value.threadId !== expectedThreadId || value.kind !== "start-or-steer"))) throw new Error("QQ 提交来源准备身份无效");
         entry.preparation = Object.freeze({ ...value });
         this.requirePending(entry);
       },
@@ -168,7 +184,9 @@ export class QqTaskSources {
       entry = pending;
     }
     return Object.freeze({ generation: this.generation, sourceToken: entry.token,
-      accountId: entry.scope.accountId, conversationId: entry.scope.conversationId, threadId, turnId });
+      accountId: entry.scope.accountId, conversationId: entry.scope.conversationId, threadId, turnId,
+      ...(entry.message.kind === "scheduled" ? { kind: "scheduled" as const,
+        workspaceId: entry.scope.workspaceId, workspaceCwd: entry.scope.workspaceCwd } : {}) });
   }
 
   isCurrent(reference: QqTaskSourceReference): boolean {
@@ -289,12 +307,15 @@ export class QqTaskSources {
     const entry = this.entries.get(reference.sourceToken);
     return entry && entry.scope.accountId === reference.accountId
       && entry.scope.conversationId === reference.conversationId
+      && (entry.message.kind === "scheduled"
+        ? reference.kind === "scheduled" && reference.workspaceId === entry.scope.workspaceId && reference.workspaceCwd === entry.scope.workspaceCwd
+        : reference.kind === undefined)
       && entry.preparation?.threadId === reference.threadId ? entry : undefined;
   }
 
   private pendingCurrent(entry: Entry): boolean {
     if (this.closed || entry.controller.signal.aborted || entry.outcome !== undefined) return false;
-    if (performance.now() >= entry.deadline || !this.guard(entry.scope, entry.preparation?.threadId)
+    if (performance.now() >= entry.deadline || !this.guard(entry.scope, entry.preparation?.threadId ?? entry.expectedThreadId)
       || this.closed || entry.controller.signal.aborted || entry.outcome !== undefined || performance.now() >= entry.deadline) {
       this.revoke(entry); return false;
     }
@@ -360,6 +381,7 @@ export class QqTaskSources {
     const now = performance.now();
     for (const entry of this.entries.values()) {
       if (entry.source === entry) this.sourceCurrent(entry);
+      // A Run ID is never a renewable incoming-message anchor in this generation.
       if (entry.outcome === undefined || entry.outcome === "unknown") continue;
       if (entry.source && this.sourceCurrent(entry.source)) continue;
       this.revoke(entry);

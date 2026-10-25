@@ -116,6 +116,7 @@ import {
 } from "./conversation-session-query-service.js";
 import { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 import { SubmissionObservation, type SubmissionObserver } from "./submission-observer.js";
+import type { QueueSubmissionObservation, ThreadQueueExecutionContext } from "./thread-queue-observer.js";
 
 export type { ConversationSession, ConversationSessionQuery } from "./conversation-session-query-service.js";
 export type {
@@ -305,7 +306,7 @@ export interface ConversationExtensionUseCases {
 
 /** Stable native Queue and paginated Revert boundary. */
 export interface ConversationQueueRevertUseCases {
-  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem>;
+  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<ThreadQueueItem>;
   queueList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadQueueListResult>;
   queueUpdate(
     target: ConversationTarget,
@@ -313,14 +314,14 @@ export interface ConversationQueueRevertUseCases {
     value: string,
     assertAuthorized?: () => void,
   ): Promise<ThreadQueueItem>;
-  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<{ deleted: boolean }>;
+  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void, onDeleted?: ThreadQueueExecutionContext["deleted"]): Promise<{ deleted: boolean }>;
   queueReorder(
     target: ConversationTarget,
     selector: string,
     position: number,
     assertAuthorized?: () => void,
   ): Promise<ThreadQueueReorderResult>;
-  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void): Promise<{ turnId: string }>;
+  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<{ turnId: string }>;
   revertList(target: ConversationTarget, page?: number, assertAuthorized?: () => void): Promise<ThreadRevertListResult>;
   revertPreview(
     target: ConversationTarget,
@@ -438,6 +439,7 @@ export class ConversationService implements
     private readonly bindingLifecycle?: {
       backgrounded(threadId: string): void;
       restoreRequired(threadId: string): void;
+      beforeBackgroundRelease?(target: ConversationTarget, threadId: string): Promise<void>;
     },
     onSessionDisplayCacheError?: (operation: SessionDisplayCacheOperation) => void,
   ) {
@@ -1005,8 +1007,8 @@ export class ConversationService implements
     return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, assertAuthorized, observation);
   }
 
-  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void): Promise<ThreadQueueItem> {
-    return this.queueUseCases.add(target, value, assertAuthorized);
+  queueAdd(target: ConversationTarget, value: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<ThreadQueueItem> {
+    return this.queueUseCases.add(target, value, assertAuthorized, observation);
   }
 
   queueList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadQueueListResult> {
@@ -1022,8 +1024,8 @@ export class ConversationService implements
     return this.queueUseCases.update(target, selector, value, assertAuthorized);
   }
 
-  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void): Promise<{ deleted: boolean }> {
-    return this.queueUseCases.delete(target, selector, assertAuthorized);
+  queueDelete(target: ConversationTarget, selector: string, assertAuthorized?: () => void, onDeleted?: ThreadQueueExecutionContext["deleted"]): Promise<{ deleted: boolean }> {
+    return this.queueUseCases.delete(target, selector, assertAuthorized, onDeleted);
   }
 
   queueReorder(
@@ -1035,8 +1037,8 @@ export class ConversationService implements
     return this.queueUseCases.reorder(target, selector, position, assertAuthorized);
   }
 
-  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void): Promise<{ turnId: string }> {
-    return this.queueUseCases.start(target, selector, assertAuthorized);
+  queueStart(target: ConversationTarget, selector?: string, assertAuthorized?: () => void, observation?: QueueSubmissionObservation): Promise<{ turnId: string }> {
+    return this.queueUseCases.start(target, selector, assertAuthorized, observation);
   }
 
   revertList(target: ConversationTarget, page = 1, assertAuthorized?: () => void): Promise<ThreadRevertListResult> {
@@ -2050,6 +2052,11 @@ export class ConversationService implements
     }
     const target = this.router.targetForThread(threadId);
     if (!target || !canRelease() || this.hasLocalThreadWork(threadId)) return false;
+    await this.bindingLifecycle?.beforeBackgroundRelease?.(target, threadId);
+    if (!canRelease() || this.router.targetForThread(threadId)?.surface !== target.surface
+      || this.router.targetForThread(threadId)?.accountId !== target.accountId
+      || this.router.targetForThread(threadId)?.conversationId !== target.conversationId
+      || this.hasLocalThreadWork(threadId)) return false;
     const released = await this.router.releaseBackground(threadId, {
       isCurrent: () => canRelease() && !this.hasLocalThreadWork(threadId),
       verifyIdle: () => this.isThreadIdle(threadId),

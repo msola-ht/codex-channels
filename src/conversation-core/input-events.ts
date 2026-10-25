@@ -13,6 +13,14 @@ import type {
   TurnStatus,
 } from "./events.js";
 
+/** Transient official identity only; no message content or presentation lifecycle. */
+export interface UserMessageIdentity {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly itemId: string;
+  readonly clientUserMessageId: string;
+}
+
 export type ConversationInputEvent =
   | { type: "hook.completed"; threadId: string; hook: HookCompletion }
   | { type: "turn.started"; threadId: string; turnId: string }

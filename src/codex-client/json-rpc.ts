@@ -45,6 +45,8 @@ export interface RpcNotification {
   method: string;
   params: unknown;
   provider?: string;
+  /** Local connection provenance only; never encoded as a protocol field. */
+  isCurrentConnection?(): boolean;
 }
 
 export interface RpcServerRequest {
@@ -300,7 +302,7 @@ export class JsonRpcClient {
     return (await response) as T;
   }
 
-  private handleMessage(raw: string): void {
+  private handleMessage(raw: string, isCurrentConnection: () => boolean): void {
     let decoded: unknown;
     try {
       decoded = JSON.parse(raw);
@@ -355,6 +357,7 @@ export class JsonRpcClient {
       const notification = {
         method: message.method,
         params: message.params ?? {},
+        isCurrentConnection,
       };
       for (const handler of this.notificationHandlers) {
         handler(notification);
@@ -440,7 +443,11 @@ export class JsonRpcClient {
 
   private installTransportHandlers(): void {
     if (!this.removeMessageHandler) {
-      this.removeMessageHandler = this.transport.onMessage((message) => this.handleMessage(message));
+      const generation = this.connectionGeneration;
+      // Execution identities require a completed initialize/initialized handshake.
+      // Keep ordinary dispatch unchanged; individual live consumers opt into this fence.
+      const isCurrentConnection = (): boolean => generation === this.connectionGeneration && this.state === "connected";
+      this.removeMessageHandler = this.transport.onMessage((message) => this.handleMessage(message, isCurrentConnection));
     }
     if (!this.removeCloseHandler) {
       this.removeCloseHandler = this.transport.onClose((error) => {

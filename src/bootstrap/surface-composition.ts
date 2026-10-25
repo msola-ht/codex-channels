@@ -132,13 +132,15 @@ function createQqModule(
   const config = options.config.qq;
   if (!config) throw new Error("QQ 运行配置不存在");
   const access = new QqAccessPolicy(config.allowedUserOpenIds, config.appId);
+  let notificationRecipients = new Set(config.allowedUserOpenIds);
   const adapter = new QqSurface({
     appId: config.appId, appSecret: config.appSecret, access,
     uploadsDirectory: join(dirname(options.config.stateDatabasePath), "uploads"),
     service: options.service, commands: options.commands, actors: options.bindings,
     autoCompactPercent: options.autoCompactPercent,
+    configurationNotification: { recipients: () => [...notificationRecipients] },
     startupNotification: {
-      recipients: () => [...config.allowedUserOpenIds],
+      recipients: () => [...notificationRecipients],
       text: async (target, signal) => {
         const status = await options.service.statusForDisplay(target, signal);
         const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
@@ -163,9 +165,17 @@ function createQqModule(
   return {
     adapter,
     applyHotReload(next, changes) {
-      if (changes.some(change => change.code === "surface.qq.allowed-users") && next.qq) access.replace(next.qq.allowedUserOpenIds);
+      if (changes.some(change => change.code === "surface.qq.allowed-users") && next.qq) {
+        access.replace(next.qq.allowedUserOpenIds);
+        notificationRecipients = new Set(next.qq.allowedUserOpenIds);
+      }
     },
-    prepareRestartNotification() { return () => {}; },
+    prepareRestartNotification(next) {
+      const previous = notificationRecipients;
+      notificationRecipients = next.qq?.appId === config.appId
+        ? new Set([...previous].filter(id => next.qq!.allowedUserOpenIds.has(id))) : new Set();
+      return () => { notificationRecipients = previous; };
+    },
   };
 }
 

@@ -104,6 +104,17 @@ export {
 } from "./conversation-service.js";
 export { resolveThread } from "./conversation-session-query-service.js";
 export type { SubmissionObserver, SubmissionPreparation, SubmissionOutcome } from "./submission-observer.js";
+export { SubmissionObservation } from "./submission-observer.js";
+export { parseThreadQueueOperation } from "./conversation-command-parser.js";
+export { parseScheduledTaskOperation } from "./scheduled-task-command.js";
+export {
+  QueueSubmissionObservation,
+  type QueuePreparation,
+  type QueueSubmissionConfirmation,
+  type QueueSubmissionOutcome,
+  type ThreadQueueSubmissionObserver,
+  type ThreadQueueExecutionContext,
+} from "./thread-queue-observer.js";
 export { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 export {
   ModelSelectionService,

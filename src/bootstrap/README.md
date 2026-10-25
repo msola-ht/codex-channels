@@ -13,7 +13,7 @@
 
 ## 文件
 
-- `qq-network.ts`：QQ 每代次独立的代理、HTTP 池与关闭资源管理，由渠道组合注入。QQ 普通文字复用共享 Application 和持久投递；绑定和订阅沿共享恢复，审批与问答进入共享交互路由，计划任务与配置广播仍关闭。
+- `qq-network.ts`：QQ 每代次独立的代理、HTTP 池与关闭资源管理，由渠道组合注入。QQ 普通文字复用共享 Application 和持久投递；绑定和订阅沿共享恢复，审批与问答进入共享交互路由。计划任务接入共享执行器及精确 Turn 来源；当次配置通知使用受控单聊名单，不订阅持久 Workspace 配置事件。
   独立的 QQ 菜单 Setup 通过精确文件级边界许可复用此网络所有者，操作结束关闭自有资源，不启动组合根或 WebSocket。
 - `qq-attachment-download.ts`：QQ 附件独立的无凭据 HTTPS 下载。DNS 全部结果经保守公网策略校验后固定一个 IP，直连与代理 CONNECT 均使用该地址，HTTP Host、SNI 和证书验证保留原域名；不自动重定向，代理选择仍按原 URL。私网、特殊 IPv4 和 IPv6 映射/转译范围拒绝，此安全策略不是完整可达性分类，可能保守拒绝特殊公网地址。取消覆盖 DNS 等待及实际请求，响应结束释放专用代理资源，网络关闭汇总关闭结果。
   `surface-composition.ts` 为 QQ 上线通知注入启动允许名单、共享只读状态和运行环境；渠道在发送前复核授权，通知不恢复 Thread 或旧投递来源。完成通知复用现有精确 Turn 统计补全。
@@ -30,10 +30,12 @@
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限；异步预检返回后及 Thread 创建后再次复核当前授权、取消、Workspace 与投递准入，撤权时释放新建后台绑定而不启动 Turn。临时容量拒绝及创建提交绑定前的订阅失效不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
   启动请求期间使用 Core 临时活动观察合并响应，迟到响应不覆盖期间归约的终态或更新轮次；无论 Core 当前是否仍活动，成功响应中的准确 Turn ID 都继续交给 Run 协调器关联，观察器在请求结束时释放。
   同一提交守卫穿过后台排队、投递准入和 Provider 准备到 Client 最终写入前；提交前取消或授权失效明确收敛，已发写入仍按真实响应处理，已知新 Thread 的取消保留身份并释放绑定。
+  可选 Surface 提交票据在最终 Turn 请求前准备，并由同一 SubmissionObserver 确认响应的精确 Thread/Turn；QQ 缺少票据时拒绝启动。组件图贯穿任务原 Actor、Workspace 和后台绑定授权，切换前台不改投结果，重启恢复 Run 不恢复旧 QQ 结果来源。
   权限预检按实际 Provider 与授权 cwd 查询原生明确受限沙箱，未知缺省或命名 Profile 拒绝。
   创建不覆盖沙箱，仅设置无人值守 `never`；实际响应符合目录、审批策略和预检沙箱后才启动 Turn。
 - `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态；确认离线终态后通过组合层向原 Conversation 发布恢复通知，再释放后台绑定。恢复包含已知 Thread 的 `uncertain` Run，结果未知不清除无人值守拒绝归属；精确 Turn 的终态只释放该未知 Run 的运行期归属，不改写历史结果。启动响应前每 Run 只保留一个带 Turn ID 的完成候选，其他轮次不覆盖它；启动响应不匹配时在五秒和分页上限内读取权威历史的精确 Turn，缺失或读取失败保留为 `uncertain`，不能将同 Thread 的其他轮次用于结算。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
   恢复终态写入后复核同一后台绑定对象；通过组合根注入 Application 的完成释放能力，保留当前 Turn、子代理与 Queue 保护，恢复本身不派发 Queue。
+  QQ 自动释放后台绑定前，还会有界等待该 Conversation 已接收的持久投递结算，再复核归属和任务状态；失败记录仍保留在投递箱，等待超时保留绑定交恢复流程处理，不把顺序屏障结束称为全部送达。
 - `scheduled-task-server-request.ts`：按启动恢复及实时登记的 Thread/Run 归属，在首次异步操作前记录无人值守拒绝，避免并发 Turn 完成误报成功；持久化失败保留进程内拒绝事实并记录告警。为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状；普通命令和文件审批返回 `decline`，已有终端输入 `writeStdin` 返回 `cancel` 中止本轮，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
 - `scheduled-task-tool-request.ts`：校验前台 `item/tool/call` 的 Thread 绑定、唯一授权 Actor 和
   `schedule_task` 工具名，把结果复用现有计划任务渲染格式返回给 Agent，并把确认预览交给当前
