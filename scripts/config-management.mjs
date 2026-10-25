@@ -33,7 +33,7 @@ import { detectTerminalIdentity } from "../runtime/terminal-identity.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import { createSharedCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
 
-const operationUpdateValues = ["full", "compact", "hidden"];
+const operationUpdateValues = ["full", "compact", "failures", "hidden"];
 const messageFormatValues = ["html", "rich"];
 const loggingLevelValues = ["fatal", "error", "warn", "info", "debug", "trace"];
 const proxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_proxy"];
@@ -68,6 +68,8 @@ export function loadGatewaySettings(environment = process.env) {
       reasoningEnabled: display.reasoning,
       completion: display.completion ?? "detailed",
       completionOverride: display.completion ?? null,
+      subagentsEnabled: display.subagents ?? true,
+      subagentsOverride: display.subagents ?? null,
       modelAliases: display.model_aliases ?? {},
       scopes: projectDisplayScopes(document, display, displayTargets.selectors),
       targetsStatus: displayTargets.status,
@@ -341,6 +343,20 @@ function applySetting(document, input, configPath) {
       const override = document.display?.completion ?? null;
       return { value: { completion: override ?? "detailed", completionOverride: override }, activation: completionSettingActivation(document), backupRequired: true };
     }
+    case "display.subagents": {
+      const edit = input.value;
+      const previous = document.display?.subagents ?? true;
+      if (!edit || typeof edit !== "object" || Array.isArray(edit)
+        || Object.keys(edit).some(key => !["action", "value"].includes(key))
+        || !["set", "inherit"].includes(edit.action)
+        || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", "请选择子代理显示设置或恢复缺省");
+      if (edit.action === "set") {
+        const value = booleanValue(edit.value, "value", "子代理显示");
+        document.display = { ...table(document.display), subagents: value };
+      } else if (document.display !== undefined) delete document.display.subagents;
+      const override = document.display?.subagents ?? null;
+      return { value: { subagentsEnabled: override ?? true, subagentsOverride: override }, activation: previous === (override ?? true) ? "reload" : displaySettingActivation(document), backupRequired: true };
+    }
     case "channel.enabled": {
       const channel = enumValue(input.channel, ["telegram", "feishu", "weixin", "qq"], "channel", "通讯渠道");
       const value = booleanValue(input.value, "value", "渠道启用状态");
@@ -357,7 +373,7 @@ function applySetting(document, input, configPath) {
     case "display.operation-updates": {
       const value = enumValue(input.value, operationUpdateValues, "value", "操作详情显示");
       document.display = { ...table(document.display), operation_updates: value };
-      return changed(value, displaySettingActivation(document));
+      return { ...changed(value, displaySettingActivation(document)), backupRequired: value === "failures" };
     }
     case "display.plan-updates": {
       const value = booleanValue(input.value, "value", "计划更新显示");

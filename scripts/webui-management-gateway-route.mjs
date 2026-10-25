@@ -117,6 +117,8 @@ export async function routeGatewaySettingsManagement({
     }
     if (input.kind === "display.completion" && current !== null
       && current.display.completionOverride !== result.value.completionOverride) current = null;
+    if (input.kind === "display.subagents" && current !== null
+      && current.display.subagentsOverride !== result.value.subagentsOverride) current = null;
     try {
       state.audit.record({
         sessionId: principalId,

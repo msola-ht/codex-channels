@@ -339,9 +339,10 @@ Surface 只能渲染明确标记的结构化用户错误，不能直接复用其
 warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳定字段。未知异常、凭据和未经约束
 的响应正文不得带入聊天消息或日志。
 
-Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 Surface Outbox。`full`
+Bootstrap 把共享的 `display.operation_updates` 四档模式显式注入各 Surface Outbox。`full`
 显示完整操作，`compact` 显示单行摘要，其中子代理只保留启动和失败、抑制成功的等待与交互操作，
-`hidden` 忽略新到达的普通 `operation.updated`；已入箱终态保留上述可见表示与送达义务。Core 始终正常归约操作，审批与其他关键输出不受影响。
+`failures` 只显示失败或拒绝的操作，`hidden` 忽略新到达的普通 `operation.updated`；已入箱终态保留上述可见表示与送达义务。Core 始终正常归约操作，审批与其他关键输出不受影响。
+可选 `display.subagents` 缺省开启，关闭时统一隐藏新的子代理启动、联系、结束通知及子代理工具操作；其既有可靠结果仍发送，其他工具不受该开关影响。正文、生成图片和父轮完成/异常保持独立。三个支持过程展示的渠道复用同一子代理类别判定，微信不扩展过程能力。
 上下文压缩开始和完成由共享展示状态去重，三个渠道均独立、有序发送，不受操作显示设置影响。
 Telegram 把同一 Turn 的成功查询类操作延迟聚合；
 飞书只聚合 MCP 与动态工具，网页搜索完成后立即发送。MCP 目录与实际工具调用统一显示 App Server

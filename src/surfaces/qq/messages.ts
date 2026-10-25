@@ -33,7 +33,7 @@ import { planQqMessageMarkdown, qqLiteralMarkdown } from "./message-markdown.js"
 import { QqInteractions } from "./interactions.js";
 import { isQqExtensionOperation, isQqTaskCommand } from "./extension-commands.js";
 import type { QqImageStore } from "./image-store.js";
-import { generatedImageUnavailableText, isGeneratedImageUnavailable, shouldDisplayOperation } from "../operation-presentation.js";
+import { generatedImageUnavailableText, isGeneratedImageUnavailable, isSubagentOutput, shouldDisplayOperation } from "../operation-presentation.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { textAttachmentBody } from "../text-attachment-store.js";
 import type { QqFileInput } from "./file-input.js";
@@ -1122,6 +1122,7 @@ export class QqMessages implements SurfaceOutputPort {
   private supported(event: OutputEvent): boolean {
     if (!this.supportsDelivery(event)) return false;
     const settings = this.displaySettings(event.target);
+    if (isSubagentOutput(event) && !settings.subagentsEnabled) return false;
     if (event.type === "turn.reasoning" && !settings.reasoningEnabled) return false;
     if (event.type === "plan.updated" && !settings.planUpdatesEnabled) return false;
     if (event.type === "operation.updated" && isQqTaskProgressEvent(event)
@@ -1134,6 +1135,7 @@ export class QqMessages implements SurfaceOutputPort {
       planUpdatesEnabled: this.options.planUpdatesEnabled ?? true,
       reasoningEnabled: this.options.reasoningEnabled ?? false,
       completion: "detailed" as const,
+      subagentsEnabled: true,
     };
   }
   private supportsDelivery(event: OutputEvent): boolean {

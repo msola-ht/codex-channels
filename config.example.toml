@@ -80,8 +80,11 @@ idle_release_minutes = 15
 # 可通过 codexc config → Gateway 显示设置 → 模型统计分组维护；仅合并控制台按模型统计。
 # 模型选择和明细保留原模型；重新读取即生效，无需重启服务。
 # model_aliases = { "cline-pass/deepseek-v4.1-flash" = "deepseek-flash", "deepseek-v4.1-flash" = "deepseek-flash" }
-# full：完整详情；compact：单行摘要；hidden：隐藏操作过程。
+# full：完整详情；compact：单行摘要；failures：仅 failed/declined；hidden：隐藏操作过程。
 operation_updates = "compact"
+# 可选子代理显示，缺省 true，不自动写入；关闭同时隐藏生命周期和子代理工具操作。
+# 其他工具仍按 operation_updates；正文、图片、审批与父轮完成或失败保留。
+# subagents = true
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
 # 是否在渠道显示“思考中”状态卡；默认 false，不显示。
@@ -99,6 +102,7 @@ reasoning = false
 # chat_kind = "group"
 # chat_id = "物理群OpenID"
 # operation_updates = "hidden"
+# subagents = false
 # plan_updates = false
 
 [debug]

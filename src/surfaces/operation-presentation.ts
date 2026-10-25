@@ -17,6 +17,12 @@ export function isComputerUseOperation(record: OperationUpdate): boolean {
   return record.kind === "mcpTool" && record.action === "computerUse";
 }
 
+/** One presentation category covers both child lifecycle notices and child tool logs. */
+export function isSubagentOutput(event: OutputEvent): boolean {
+  return event.type === "subagent.spawned" || event.type === "subagent.contacted" || event.type === "subagent.completed"
+    || (event.type === "operation.updated" && event.operation.kind === "subagent");
+}
+
 export function shouldDisplayOperation(
   record: OperationUpdate,
   display: OperationUpdateDisplay,
@@ -24,6 +30,7 @@ export function shouldDisplayOperation(
   if (display === "hidden") {
     return false;
   }
+  if (display === "failures") return record.status === "failed" || record.status === "declined";
   if (display === "compact" && record.kind === "sleep") {
     return record.status === "failed" || record.status === "declined";
   }

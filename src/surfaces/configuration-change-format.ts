@@ -141,6 +141,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "display.plan-updates": "自动计划显示",
     "display.reasoning": "思考状态显示",
     "display.completion": "完成通知显示",
+    "display.subagents": "子代理过程显示",
     "display.overrides": "渠道与聊天显示覆盖",
     "scheduled-tasks.enabled": "Gateway 计划任务",
     "metrics.storage": "指标保留策略",

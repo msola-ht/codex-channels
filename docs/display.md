@@ -10,9 +10,11 @@
 
 ## 过程显示范围与继承
 
-现有 `[display]` 的 `operation_updates = "full" | "compact" | "hidden"`、`plan_updates`、`reasoning` 保留全局含义与原默认值。可选 `completion = "off" | "brief" | "detailed"` 控制完成通知，缺省有效为 `detailed`，读取和安全默认补齐不写入。可选 `[[display.overrides]]` 按全局 → 渠道 → 账号 → 账号的聊天类型 → 指定聊天逐字段覆盖。缺少字段表示继承，`false`、`hidden` 与 `off` 是有效覆盖；恢复继承必须显式删除所选字段，最后一个字段删除后移除该覆盖项。全局完成通知恢复缺省也删除 `completion`，不保存 `detailed`。`display.model_aliases` 独立管理，不参与消息继承。
+`[display]` 的 `operation_updates = "full" | "compact" | "failures" | "hidden"` 控制工具操作，`failures` 仅展示 `failed` / `declined`；原默认值仍为 `compact`。`plan_updates`、`reasoning` 保留全局含义与原默认值。可选 `subagents` 布尔值缺省有效为 `true`，可选 `completion = "off" | "brief" | "detailed"` 控制完成通知，缺省有效为 `detailed`；二者读取和安全默认补齐均不写入。可选 `[[display.overrides]]` 按全局 → 渠道 → 账号 → 账号的聊天类型 → 指定聊天逐字段覆盖。缺少字段表示继承，`false`、`hidden` 与 `off` 是有效覆盖；恢复继承必须显式删除所选字段，最后一个字段删除后移除该覆盖项。全局子代理和完成通知恢复缺省也删除对应字段，不保存默认值。`display.model_aliases` 独立管理，不参与消息继承。
 
-每项必填 `surface`；可选 `account_id`，`chat_kind` 需要账号，`chat_id` 需要账号及聊天类型。聊天类型仅 `direct`、`group`，其中群仅支持 QQ；微信只接受 `completion`，继续拒绝操作、计划与思考字段。除四个显示字段和上述目标字段外不接受其他键；空覆盖、重复目标、超长身份与超过 512 项均拒绝，读取不修复。Telegram 账号为 `default`，飞书与 QQ 为当前 AppID，微信为配置中的 `account_id`；QQ 单聊 `chat_id` 是收件人的用户 OpenID，群是物理 `group_openid`，不包含成员 Thread 身份。微信精确私聊 ID 与允许名单中的 `allowed_user_ids` 相同，管理仅提供当前启用账号及名单可证明的目标。
+每项必填 `surface`；可选 `account_id`，`chat_kind` 需要账号，`chat_id` 需要账号及聊天类型。聊天类型仅 `direct`、`group`，其中群仅支持 QQ；微信只接受 `completion`，继续拒绝操作、子代理、计划与思考字段。除五个显示字段和上述目标字段外不接受其他键；空覆盖、重复目标、超长身份与超过 512 项均拒绝，读取不修复。Telegram 账号为 `default`，飞书与 QQ 为当前 AppID，微信为配置中的 `account_id`；QQ 单聊 `chat_id` 是收件人的用户 OpenID，群是物理 `group_openid`，不包含成员 Thread 身份。微信精确私聊 ID 与允许名单中的 `allowed_user_ids` 相同，管理仅提供当前启用账号及名单可证明的目标。
+
+`subagents = false` 同时隐藏 `subagent.spawned`、`subagent.contacted`、`subagent.completed` 和 `operation.kind = subagent`，其他工具仍由操作档位控制。它只控制新事件的渠道展示，不限制 Core 子代理执行，不影响正文、图片、审批与父轮完成或失败；既有 Journal pending 子代理结果仍按原义务投递。全局管理读取区分 `subagentsEnabled` 有效值与 `subagentsOverride`（布尔值或缺省 `null`），写入使用显式 `set` / `inherit`。全局有效值只在已启用 Telegram、飞书或 QQ 时变化要求重启 Gateway；仅微信时重新读取即可。范围覆盖数组仍作为整体配置单元判定重启。
 
 完成通知 `off` 只隐藏新的成功且没有错误、没有权威 `missingFinalResponse` 的事件；失败、停止、缺少最终回答仍保留准确回执。`brief` 使用精简结果，不意味着最终正文已送达；`detailed` 保留详细统计。既有 Journal pending 完成记录继续按原投递义务发送。此次源码尚未部署，四渠道真实显示与重启后的平台效果仍待验收。
 
@@ -22,7 +24,7 @@ Telegram 运行时只从当前进程收到且仍获授权的 `private` 输入确
 
 预览与取消不写，未变化不写、不要求重启；保存拒绝过期修订，并在新增、编辑或清除覆盖前创建私有配置备份。新增覆盖要求新版二进制，普通读取或安全默认补齐不会物化覆盖。保存后重启 Gateway，新事件按新设置准入；已经入箱的 pending 保留原投递义务，仍可能发送，重启恢复不保证与原先详细或紧凑版式完全相同。保存后读回失败保留已保存配置并报告未确认，不自动重复或回滚。
 
-回退时先停止配置写入，核对保存返回的备份与后续修改，再选择匹配旧二进制的配置。发生后续修改时逐字段处理，禁止直接恢复旧备份覆盖它们；可以先显式清除全部新增覆盖并恢复全局完成通知缺省，确认配置已没有 `completion`，再使用仍兼容的旧三个全局键。此变更不修改 StateStore、投递 Journal 或其恢复格式。
+回退时先停止配置写入，核对保存返回的私有备份与后续修改，再选择匹配旧二进制的配置。`subagents` 与 `failures` 要求新版；保存子代理设置与范围覆盖、或选择全局 `failures` 时均先创建备份。发生后续修改时逐字段处理，禁止直接恢复旧备份覆盖它们。回退 P3c 之前版本时显式清除全局及所有覆盖中的 `subagents`，并把全局及覆盖中的 `failures` 改为旧版支持值；若回退到不支持完成与范围覆盖的版本，再显式清除全部新增覆盖并恢复全局完成通知缺省，确认没有 `completion`。不自动迁移、清理或写入默认值。此变更不修改 StateStore、投递 Journal 或其恢复格式。
 
 ## QQ 上线与任务结束通知
 

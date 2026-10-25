@@ -9,7 +9,7 @@ Workspace 仅定义 `id`、`name` 和 `cwd`；执行权限由 App Server 原生�
 `follow_cli_version = true` 时通过共享 `codex-request-identity` 解析当前锁定版本；无标记或 false 时保留显式版本，读取不改写身份配置。
 `display.model_aliases` 保留于共享配置，供控制台统计查询按原始模型 ID 归组，不投影为 Gateway
 运行字段或注入 Surface。分组变化无需重启 Gateway，不改模型展示、目录、选择标识或请求模型 ID。
-`messageDisplay` 从严格校验后的 `display` 投影三个全局过程字段、可选 `completion` 与 `overrides`；原有三个扁平运行字段保留并同源。完成通知只从 `messageDisplay` 读取，缺省有效为 `detailed`，普通读取和默认补齐不生成该字段。公开导出共享显示目标、设置类型与解析函数；完成或覆盖变化要求重启已启用的四渠道，原过程字段仍只影响 Telegram、飞书与 QQ，不改 StateStore 或投递记录。覆盖字段缺失保持继承，普通读取与默认补齐不生成 `overrides`。
+`messageDisplay` 从严格校验后的 `display` 投影三个全局过程字段、可选 `subagents`、`completion` 与 `overrides`；原有三个扁平运行字段保留并同源。完成通知只从 `messageDisplay` 读取，缺省有效为 `detailed`；子代理缺省有效为 `true`，解析后的 `MessageDisplaySettings.subagentsEnabled` 必有；普通读取和默认补齐不生成这两个可选字段。公开导出共享显示目标、设置类型与解析函数；完成或覆盖变化要求重启已启用的四渠道，原过程字段与全局子代理仍只影响 Telegram、飞书与 QQ，不改 StateStore 或投递记录。覆盖字段缺失保持继承，普通读取与默认补齐不生成 `overrides`。
 其中 `codexTimezone` 保留已有 `codex.timezone` 配置，供渠道启动卡展示，不修改 Gateway 进程时区。
 `gatewayTimezone` 是解析后的网关时区：缺省使用 `codex.timezone`，`gateway.timezone = "system"`
 保留进程继承的系统时区，其他值为自定义 IANA 名称；有效网关时区或 `codexTimezone` 变化要求重启
@@ -45,10 +45,18 @@ Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺�
 
 `display.operation_updates` 是 Telegram、飞书与 QQ 的操作过程显示模式：`full` 显示完整详情、
 状态、耗时和退出码，`compact` 显示单行状态、耗时、退出码和最多 160 个字符的详情摘要，
-`hidden` 抑制 `operation.updated` 的平台输出。默认值为 `compact`，旧布尔字段由严格 Schema 拒绝。
-三种模式都不影响审批、错误、最终回复和 Turn 完成事件；启用 Telegram、飞书或 QQ 时变化需要重启 Gateway，
+`failures` 仅显示 `failed` / `declined`，`hidden` 抑制 `operation.updated` 的平台输出。默认值为 `compact`，旧布尔字段由严格 Schema 拒绝。
+四种模式都不影响审批、最终回复和 Turn 完成或失败事件；启用 Telegram、飞书或 QQ 时变化需要重启 Gateway，
 不需要重装或重启 App Server，只启用微信或未配置渠道时变化不要求重启。微信为保留单次回复窗口预算
 不发送任何操作过程事件（包括终态），该设置对微信没有效果。
+
+可选 `display.subagents` 缺省有效为 `true`，只读投影，不由安全默认补齐物化。关闭同时隐藏
+`subagent.spawned/contacted/completed` 与 `operation.kind = subagent` 的展示，其他工具仍由操作档位控制；
+正文、图片、审批、父轮完成或失败和 Core 执行不受影响。可按五层范围覆盖；微信覆盖拒绝该字段。
+全局管理通过 `display.subagents` 的显式 `set` / `inherit` 操作，返回有效 `subagentsEnabled` 和
+本层 `subagentsOverride`（缺省为 `null`）；恢复缺省删除字段。启用 Telegram、飞书或 QQ 时有效值变化
+要求重启，只有微信时无需重启；覆盖数组仍按整体配置单元判定。管理保存提供私有备份；回退旧版前
+显式清除全局及覆盖中的 `subagents`，将 `failures` 改为旧版支持值，并核对备份后的修改。
 
 `display.plan_updates` 是自动计划展示开关，默认开启；显式设为 `false` 可关闭。开启后只影响官方
 `turn/plan/updated` 在 Telegram、飞书与 QQ 的展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式；

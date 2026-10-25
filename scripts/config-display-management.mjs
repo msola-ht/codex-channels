@@ -6,7 +6,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { assertStateDatabaseSchema } from "../dist/storage/index.js";
 
-const fields = ["operation_updates", "plan_updates", "reasoning", "completion"];
+const fields = ["operation_updates", "subagents", "plan_updates", "reasoning", "completion"];
 const selectorFields = ["surface", "account_id", "chat_kind", "chat_id"];
 function supportedFields(selector) { return selector.surface === "weixin" ? ["completion"] : fields; }
 

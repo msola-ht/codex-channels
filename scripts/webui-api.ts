@@ -463,7 +463,8 @@ export interface SettingsSummaryResponse {
   revision: string
   gateway: {
     display: {
-      operationUpdates: "full" | "compact" | "hidden"
+      operationUpdates: "full" | "compact" | "failures" | "hidden"
+      subagentsEnabled: boolean
       planUpdatesEnabled: boolean
       reasoningEnabled: boolean
       modelAliases: Record<string, string>
@@ -563,7 +564,7 @@ export interface ManagementProvidersResponse {
 
 export interface ManagementSettingsResponse {
   revision: string
-  display: SettingsSummaryResponse["gateway"]["display"] & Pick<import("./config-management.mjs").GatewaySettings["display"], "scopes" | "targetsStatus" | "completion" | "completionOverride">
+  display: SettingsSummaryResponse["gateway"]["display"] & Pick<import("./config-management.mjs").GatewaySettings["display"], "scopes" | "targetsStatus" | "completion" | "completionOverride" | "subagentsOverride">
   system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficInputItems" | "modelTrafficItemMaxBytes" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {

@@ -7,7 +7,7 @@ import {
 } from "../lifecycle-presentation.js";
 import {
   compactOperationDetail, operationMetadata, operationStatus, operationTitle,
-  redactOperationDetail, shouldDisplayOperation,
+  redactOperationDetail, isSubagentOutput, shouldDisplayOperation,
 } from "../operation-presentation.js";
 import { createPlanPresentation, PlanProgressTracker } from "../plan-presentation.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
@@ -124,6 +124,7 @@ export class QqTaskProgress {
     if (event.type !== "subagent.completed" && !turn) return;
     if (turn) turn.retry.observe(event, false);
     const settings = this.displaySettings(event.target);
+    if (isSubagentOutput(event) && !settings.subagentsEnabled) return;
     if ((event.type === "turn.reasoning" && !settings.reasoningEnabled)
       || (event.type === "plan.updated" && !settings.planUpdatesEnabled)
       || (event.type === "operation.updated" && !shouldDisplayOperation(event.operation, settings.operationUpdates))) return;
@@ -143,6 +144,7 @@ export class QqTaskProgress {
 
   prepare(event: QqTaskProgressEvent, retained = false): PreparedProgress | undefined {
     if (this.closed) return isReliableProgress(event) ? failedProgress : undefined;
+    if (!retained && isSubagentOutput(event) && !this.displaySettings(event.target).subagentsEnabled) return undefined;
     if (event.type === "subagent.completed" && event.parentTurnId === undefined) return failedProgress;
     // Live snapshots still use current preferences. A stored terminal result must
     // render even when compact would hide this sleep/subagent operation.
@@ -326,6 +328,7 @@ export class QqTaskProgress {
       planUpdatesEnabled: this.options.planUpdatesEnabled,
       reasoningEnabled: this.options.reasoningEnabled,
       completion: "detailed" as const,
+      subagentsEnabled: true,
     };
   }
 }

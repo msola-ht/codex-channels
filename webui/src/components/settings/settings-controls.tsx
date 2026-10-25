@@ -126,7 +126,7 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
     >
       {pending !== null ? <>
           <p>{regeneratingToken ? t("settingsFields.regenerateTokenConfirmation") : t("settingsUi.change", { label: typeof pending.label === "string" ? pending.label : t(pending.label.key, pending.label.params), before: formatPreviewValue(pending.before, pending.kind, t), after: formatPreviewValue(pending.value, pending.kind, t) })}</p>
-          {(pending.kind === "display.scope" || pending.kind === "display.completion") && <><p>{t("displayScope.projection")}</p><p>{t("displayScope.notice")}</p></>}
+          {(pending.kind === "display.scope" || pending.kind === "display.completion" || pending.kind === "display.subagents" || (pending.kind === "display.operation-updates" && pending.value === "failures")) && <><p>{t("displayScope.projection")}</p><p>{t("displayScope.notice")}</p></>}
           {pending.kind === "webui.token" && pending.intent === "set" ? <p>{t("settingsFields.setTokenConfirmation")}</p> : null}
           {pending.kind === "webui.token" && pending.intent === "clear" ? <p>{t("settingsFields.clearTokenConfirmation")}</p> : null}
           {pending.kind === "network.proxy" && pending.intent !== undefined ? <p>{t(pending.intent === "clear" ? "settingsFields.clearProxyConfirmation" : "settingsFields.setProxyConfirmation")}</p> : null}
@@ -196,17 +196,18 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
   const record = previewRecord(value)
   const completionLabel = (value: unknown) => value === "off" ? t("settingsFields.completionOff") : value === "brief" || value === "detailed" ? t(`settingsFields.${value}`) : t("settingsFields.completionDefault")
   if (kind === "display.completion" && record !== null) return t("displayScope.fieldSummary", { field: t("settingsFields.completion"), override: completionLabel(record.completionOverride), effective: completionLabel(record.completion), source: t("displayScope.global") })
+  if (kind === "display.subagents" && record !== null) return t("displayScope.fieldSummary", { field: t("settingsFields.subagents"), override: record.subagentsOverride === null ? t("settingsFields.subagentsDefault") : t(record.subagentsOverride ? "settingsFields.enabled" : "settingsFields.disabled"), effective: t(record.subagentsEnabled ? "settingsFields.enabled" : "settingsFields.disabled"), source: t("displayScope.global") })
   if (kind === "display.scope" && record !== null) {
     const selector = previewRecord(record.selector)
     const override = previewRecord(record.override)
     const effective = previewRecord(record.effective)
     const sources = previewRecord(record.sources)
-    const scalar = (current: unknown) => current === undefined ? t("displayScope.inherit") : typeof current === "boolean" ? t(current ? "settingsFields.enabled" : "settingsFields.disabled") : current === "off" ? t("settingsFields.completionOff") : current === "full" || current === "compact" || current === "hidden" || current === "brief" || current === "detailed" ? t(`settingsFields.${current}`) : t("common.unknown")
+    const scalar = (current: unknown) => current === undefined ? t("displayScope.inherit") : typeof current === "boolean" ? t(current ? "settingsFields.enabled" : "settingsFields.disabled") : current === "off" ? t("settingsFields.completionOff") : current === "full" || current === "compact" || current === "failures" || current === "hidden" || current === "brief" || current === "detailed" ? t(`settingsFields.${current}`) : t("common.unknown")
     const target = [selector?.surface, selector?.account_id, selector?.chat_kind === "direct" ? t("displayScope.direct") : selector?.chat_kind === "group" ? t("displayScope.group") : undefined, selector?.chat_id].filter(value => typeof value === "string").join(" / ")
-    const detail = (["operation_updates", "plan_updates", "reasoning", "completion"] as const).filter(field => selector?.surface !== "weixin" || field === "completion").map(field => {
-      const key = field === "operation_updates" ? "operationUpdates" : field === "plan_updates" ? "planUpdatesEnabled" : field === "completion" ? "completion" : "reasoningEnabled"
+    const detail = (["operation_updates", "subagents", "plan_updates", "reasoning", "completion"] as const).filter(field => selector?.surface !== "weixin" || field === "completion").map(field => {
+      const key = field === "operation_updates" ? "operationUpdates" : field === "subagents" ? "subagentsEnabled" : field === "plan_updates" ? "planUpdatesEnabled" : field === "completion" ? "completion" : "reasoningEnabled"
       const source = sources?.[key]
-      return t("displayScope.fieldSummary", { field: t(field === "operation_updates" ? "settingsFields.operationUpdates" : field === "plan_updates" ? "settingsFields.planUpdates" : field === "completion" ? "settingsFields.completion" : "settingsFields.reasoningStatus"), override: scalar(override?.[field]), effective: scalar(effective?.[key]), source: source === "global" || source === "surface" || source === "account" || source === "chat-kind" || source === "chat" ? translateDisplayScopeSource(t, source) : t("common.unknown") })
+      return t("displayScope.fieldSummary", { field: t(field === "operation_updates" ? "settingsFields.operationUpdates" : field === "subagents" ? "settingsFields.subagents" : field === "plan_updates" ? "settingsFields.planUpdates" : field === "completion" ? "settingsFields.completion" : "settingsFields.reasoningStatus"), override: scalar(override?.[field]), effective: scalar(effective?.[key]), source: source === "global" || source === "surface" || source === "account" || source === "chat-kind" || source === "chat" ? translateDisplayScopeSource(t, source) : t("common.unknown") })
     }).join(" · ")
     return `${target} · ${detail}`
   }
@@ -278,7 +279,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
     }
   }
   if (kind === "system.default-model" && value === null) return t("modelManagement.followDefault")
-  const choices: Record<string, MessageKey> = kind === "display.operation-updates" ? { full: "settingsFields.full", compact: "settingsFields.compact", hidden: "settingsFields.hidden" }
+  const choices: Record<string, MessageKey> = kind === "display.operation-updates" ? { full: "settingsFields.full", compact: "settingsFields.compact", failures: "settingsFields.failures", hidden: "settingsFields.hidden" }
     : kind === "telegram.message-format" ? { rich: "settingsFields.richText" } : {}
   if (typeof value === "string" && Object.hasOwn(choices, value)) return t(choices[value])
   return scalar(value)

@@ -126,6 +126,11 @@ function restartRequiredReasons(
             current.reasoningEnabled,
             next.reasoningEnabled,
           ],
+          [
+            configChange("display.subagents"),
+            current.messageDisplay.subagents ?? true,
+            next.messageDisplay.subagents ?? true,
+          ],
         ] as Array<[ConfigChange, unknown, unknown]>
       : []),
     [

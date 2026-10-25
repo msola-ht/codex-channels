@@ -28,7 +28,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { ContextCompactionNotices, generatedImageUnavailableText, isExecutionOperation, isGeneratedImageUnavailable, shouldDisplayOperation } from "../operation-presentation.js";
+import { ContextCompactionNotices, generatedImageUnavailableText, isExecutionOperation, isGeneratedImageUnavailable, isSubagentOutput, shouldDisplayOperation } from "../operation-presentation.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createSubagentContactedPresentation,
@@ -136,6 +136,7 @@ export class TelegramOutbox {
   private nextReasoningSegment = 0;
   private nextOperationLogSegment = 0;
   private readonly activeOperations = new Set<string>();
+  private readonly observedOperations = new WeakSet<OutputEvent>();
   private readonly snapshots = new SnapshotDelivery();
   private readonly retryMessages = new TurnRetryMessages<number>();
   private readonly reasoningGenerations = new Map<string, number>();
@@ -215,6 +216,16 @@ export class TelegramOutbox {
     if (this.closed || event.target.surface !== "telegram" || event.target.accountId !== (this.options.accountId ?? telegramDefaultAccountId)) return;
     this.snapshots.observe(event);
     this.retryMessages.observe(event);
+    if (event.type === "operation.updated" && isExecutionOperation(event.operation)
+      && !this.observedOperations.has(event) && this.executor.isAuthorized(event.target.conversationId)) {
+      this.observedOperations.add(event);
+      const turn = this.turnKey(event.threadId, event.turnId);
+      const key = this.operationKey(turn, event.operation.itemId);
+      if (event.operation.status === "running") {
+        if (!this.activeOperations.has(key)) this.reasoningGenerations.set(turn, (this.reasoningGenerations.get(turn) ?? 0) + 1);
+        this.activeOperations.add(key);
+      } else this.activeOperations.delete(key);
+    }
     if (event.type === "text.completed" && isEmptyCommentary(event)) this.textStreams.discard(event);
     if (event.type === "turn.started") {
       if (!this.executor.isAuthorized(event.target.conversationId)) return;
@@ -266,6 +277,7 @@ export class TelegramOutbox {
   }
 
   retains(event: OutputEvent): boolean {
+    if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled) return false;
     if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
     if (isEmptyCommentary(event)) return false;
     if (event.type === "operation.updated" && this.approvalOperations.isSuppressed(
@@ -314,6 +326,7 @@ export class TelegramOutbox {
       planUpdatesEnabled: this.options.planUpdatesEnabled ?? false,
       reasoningEnabled: this.options.reasoningEnabled ?? true,
       completion: "detailed" as const,
+      subagentsEnabled: true,
     };
   }
 
@@ -338,6 +351,8 @@ export class TelegramOutbox {
   }
 
   private handleEvent(event: OutputEvent, completion?: "brief" | "detailed"): void {
+    if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled
+      && DeliveryReceipt.current()?.transient !== false) return;
     const chatId = event.target.conversationId;
     switch (event.type) {
       case "turn.retry": {
@@ -417,17 +432,9 @@ export class TelegramOutbox {
           return;
         }
         const turnKey = this.turnKey(event.threadId, event.turnId);
-        if (isExecutionOperation(event.operation)) {
-          const operationKey = this.operationKey(turnKey, event.operation.itemId);
-          if (event.operation.status === "running") {
-            this.activeOperations.add(operationKey);
-            this.reasoningGenerations.set(turnKey, (this.reasoningGenerations.get(turnKey) ?? 0) + 1);
-          } else {
-            this.activeOperations.delete(operationKey);
-          }
-          if (event.operation.status === "running") {
-            this.sealReasoningMessage(chatId, event.threadId, event.turnId);
-          }
+        if (isExecutionOperation(event.operation) && event.operation.status === "running"
+          && this.activeOperations.has(this.operationKey(turnKey, event.operation.itemId))) {
+          this.sealReasoningMessage(chatId, event.threadId, event.turnId);
         }
         let streamFlushed = false;
         const flushStreamBeforeOutput = (): void => {

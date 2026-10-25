@@ -25,7 +25,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { ContextCompactionNotices, generatedImageUnavailableText, isComputerUseOperation, isExecutionOperation, isGeneratedImageUnavailable, shouldDisplayOperation } from "../operation-presentation.js";
+import { ContextCompactionNotices, generatedImageUnavailableText, isComputerUseOperation, isExecutionOperation, isGeneratedImageUnavailable, isSubagentOutput, shouldDisplayOperation } from "../operation-presentation.js";
 import {
   createPlanPresentation,
   type PlanPresentation,
@@ -131,6 +131,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly reasoningCards = new Map<string, FeishuReasoningCard>();
   private nextReasoningSegment = 0;
   private readonly activeOperations = new Set<string>();
+  private readonly observedOperations = new WeakSet<OutputEvent>();
   private readonly snapshots = new SnapshotDelivery();
   private readonly retryMessages = new TurnRetryMessages<string>();
   private readonly reasoningGenerations = new Map<string, number>();
@@ -168,6 +169,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (this.closed || event.target.surface !== "feishu" || event.target.accountId !== this.accountId) return;
     this.snapshots.observe(event);
     this.retryMessages.observe(event);
+    if (event.type === "operation.updated" && isExecutionOperation(event.operation)
+      && !this.observedOperations.has(event)) {
+      this.observedOperations.add(event);
+      const turn = turnKey(event.threadId, event.turnId);
+      const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
+      if (event.operation.status === "running") {
+        if (!this.activeOperations.has(key)) this.reasoningGenerations.set(turn, (this.reasoningGenerations.get(turn) ?? 0) + 1);
+        this.activeOperations.add(key);
+      } else this.activeOperations.delete(key);
+    }
     if (event.type === "turn.started") {
       this.clearExecutionTurns(event.threadId);
       this.reasoningCards.delete(event.threadId);
@@ -221,6 +232,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   retains(event: OutputEvent): boolean {
+    if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled) return false;
     if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
     return isPersistentOutput(event, this.displaySettings(event.target.conversationId).operationUpdates);
   }
@@ -266,6 +278,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       planUpdatesEnabled: this.options.planUpdatesEnabled ?? false,
       reasoningEnabled: this.options.reasoningEnabled ?? true,
       completion: "detailed" as const,
+      subagentsEnabled: true,
     };
   }
 
@@ -294,6 +307,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   private handleEvent(event: OutputEvent, completionMode?: "brief" | "detailed"): void {
+    if (isSubagentOutput(event) && !this.displaySettings(event.target.conversationId).subagentsEnabled
+      && DeliveryReceipt.current()?.transient !== false) return;
     if (event.type === "turn.retry") {
       const run = this.retryMessages.prepare(event);
       if (run) this.delivery.enqueue(event.target.conversationId,
@@ -347,16 +362,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
         }
         return;
       }
-      if (isExecutionOperation(event.operation)) {
-        const turn = turnKey(event.threadId, event.turnId);
-        const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
-        if (event.operation.status === "running") {
-          this.activeOperations.add(key);
-          this.reasoningGenerations.set(turn, (this.reasoningGenerations.get(turn) ?? 0) + 1);
-          this.sealReasoningCard(event.target.conversationId, event.threadId, event.turnId);
-        } else {
-          this.activeOperations.delete(key);
-        }
+      if (isExecutionOperation(event.operation) && event.operation.status === "running"
+        && this.activeOperations.has(this.operationKey(event.threadId, event.turnId, event.operation.itemId))) {
+        this.sealReasoningCard(event.target.conversationId, event.threadId, event.turnId);
       }
       let streamFlushed = false;
       const flushStreamBeforeOutput = (): void => {

@@ -115,7 +115,7 @@ export interface ConfiguredWorkspace {
   cwd: string;
 }
 
-export type OperationUpdateDisplay = "full" | "compact" | "hidden";
+export type OperationUpdateDisplay = "full" | "compact" | "failures" | "hidden";
 
 export function isDebugLogLevel(
   level: GatewayConfig["logLevel"],
@@ -329,6 +329,7 @@ function loadValidatedConfigDocument(
       : {}),
     messageDisplay: {
       operation_updates: raw.display.operation_updates,
+      ...(raw.display.subagents === undefined ? {} : { subagents: raw.display.subagents }),
       plan_updates: raw.display.plan_updates,
       reasoning: raw.display.reasoning,
       ...(raw.display.completion === undefined ? {} : { completion: raw.display.completion }),
