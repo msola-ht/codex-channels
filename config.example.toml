@@ -21,12 +21,19 @@ enabled = false
 # allowed_user_ids = ["不透明用户@im.wechat"]
 
 [qq]
-# QQ 可通过 codexc setup 扫码或手工配置；当前仅基础连接，不处理消息、不提交任务、不回复。
-# 空允许名单不会授权任何用户；用户 OpenID 必须来自同一 QQ 应用。
+# QQ 可通过 codexc setup 扫码或手工配置；群授权由独立的手工配置入口管理。
+# 空单聊允许名单不会授权单聊用户；用户 OpenID 必须来自同一 QQ 应用。
 enabled = false
 # app_id = "1234567890"
 # app_secret = "你的_QQ_AppSecret"
 # allowed_user_openids = ["当前应用下的用户_OpenID"]
+# 群默认关闭。仅接收明确配置群内允许成员的 @机器人消息；单聊名单不授予群权限。
+# 每位允许成员拥有独立会话，只能控制自己的会话；任务、审批与结果向全群公开。
+# 必须显式同意公开输出；群或成员名单变化要求重启 Gateway。OpenID 不能用 QQ 号码替代。
+# [[qq.groups]]
+# group_openid = "当前应用下的群_OpenID"
+# allowed_member_openids = ["当前群内成员_OpenID"]
+# allow_public_output = true
 
 # 共享网络代理通过 codexc config 写入 ~/.codex/.env，不在 Gateway TOML 中保存。
 

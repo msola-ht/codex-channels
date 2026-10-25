@@ -188,7 +188,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
   Luna Reserve 后端授权摘要、第三方余额、Credits/配额窗口和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
-- `conversation-reset-credit-service.ts`：`/limits reset` 的分页查询、预览和确认归属，绑定 Actor、Conversation、Workspace 与当前 Thread；查询、预览和消费的实时授权贯穿 Provider 等待及最终 RPC，已发送消费按真实结果结算。
+- `conversation-reset-credit-service.ts`：`/limits reset` 的分页查询、预览和确认归属，绑定 Actor、Conversation、Workspace 与当前 Thread；查询、预览和消费的实时授权及可选 Surface 生命周期守卫贯穿 Provider 等待及最终 RPC，已发送消费按真实结果结算。
 - `openai-reset-credit-service.ts`：OpenAI 重置券查询、短期选券确认与单次消费；复核账户/券修订、过期及并发，预览与券期限贯穿最终消费提交守卫；本地明确拒绝保留 stale/授权分类，消费结果与额度刷新分离，不保存凭据或自动重试写操作。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未注册的聚合或自定义 Provider 返回不支持，不创建占位账户快照，不回退到 OpenAI。
@@ -217,7 +217,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
 - `thread-occupancy-port.ts`：定义渠道 `/release` 使用的 Thread 占用查询与释放窄端口；只返回
-  稳定占用状态、持锁进程摘要和释放结果，不暴露进程级实现。释放命令传递实时授权守卫，异步诊断后及终止前复核原绑定与 Workspace；已经发出的强制释放不因后续取消被视为撤销。
+  稳定占用状态、持锁进程摘要和释放结果，不暴露进程级实现。释放命令传递实时授权守卫，异步诊断后及终止前复核原绑定与 Workspace；可选 `ThreadOccupancyIdentity` 固定完整预览中的 Thread、PID 与启动身份，初次诊断或最终复核变化时拒绝终止，未提供该参数的既有渠道保留原调用合同。已经发出的强制释放不因后续取消被视为撤销。
 - `thread-queue-port.ts`：定义原生 Thread Queue 的六个稳定用例及已知拒绝分类；Application 按分类映射反馈与释放策略，不识别官方英文异常。Application 只接收纯文本写入，
   通过 Client 返回条目种类、可编辑标记和有界安全预览，不传播官方 `UserInput` 或本地路径。
   切换到已有 Queue 的 Thread 时沿用该 Thread 自身设置并清除当前会话待生效偏好；后台完成释放前

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { SubmissionObserver, SubmissionOutcome, SubmissionPreparation } from "../../application/index.js";
 import type { QqSourceInput } from "./message-input.js";
 import type { SurfaceTaskDeliverySource } from "../types.js";
+import { boundedQqConversationId, qqConversationActor } from "./addressing.js";
 
 const MAX_ENTRIES = 4096;
 const MAX_SOURCES = 128;
@@ -82,6 +83,7 @@ export class QqTaskSources {
 
   reserve(scope: QqTaskScope, message: QqSourceInput, preparationMs: 30_000 | 120_000 = PREPARATION_MS): QqTaskReservation {
     if (this.closed) return { kind: "rejected", reason: "closed" };
+    if (message.conversationId !== scope.conversationId) return { kind: "rejected", reason: "scope" };
     if (preparationMs !== PREPARATION_MS && preparationMs !== 120_000) return { kind: "rejected", reason: "invalid-input" };
     const receivedAt = performance.now();
     const original = Object.freeze("kind" in message
@@ -112,7 +114,8 @@ export class QqTaskSources {
     preparationMs: number, expectedThreadId?: string): QqTaskReservation {
     const snapshot = Object.freeze({ accountId: scope.accountId, actorId: scope.actorId,
       conversationId: scope.conversationId, workspaceId: scope.workspaceId, workspaceCwd: scope.workspaceCwd });
-    if (![snapshot.accountId, snapshot.actorId, snapshot.conversationId, snapshot.workspaceId].every(value => bounded(value))
+    if (![snapshot.accountId, snapshot.actorId, snapshot.workspaceId].every(value => bounded(value))
+      || !boundedQqConversationId(snapshot.conversationId) || qqConversationActor(snapshot.conversationId) !== snapshot.actorId
       || !bounded(snapshot.workspaceCwd, 32 * 1024)
       || snapshot.accountId !== this.options.accountId || snapshot.actorId !== original.actorId) return { kind: "rejected", reason: "scope" };
     this.prune();
@@ -122,7 +125,7 @@ export class QqTaskSources {
     if (!allowed) return { kind: "rejected", reason: "scope" };
     if (this.clockUnsafe) return { kind: "rejected", reason: "clock" };
     if (performance.now() >= receivedAt + preparationMs) return { kind: "rejected", reason: "expired" };
-    const dedupKey = JSON.stringify([snapshot.accountId, snapshot.actorId, original.kind, original.id,
+    const dedupKey = JSON.stringify([snapshot.accountId, snapshot.conversationId, snapshot.actorId, original.kind, original.id,
       original.kind === "text" ? original.msgIdx : undefined]);
     if (this.dedup.has(dedupKey)) return { kind: "rejected", reason: "duplicate" };
     const targetKey = this.targetKey(snapshot);
@@ -171,7 +174,7 @@ export class QqTaskSources {
 
   /** Called synchronously for each live event, before any enrichment or mailbox wait. */
   capture(target: Pick<QqTaskScope, "accountId" | "conversationId">, threadId: string, turnId: string): QqTaskSourceReference | undefined {
-    if (this.closed || target.accountId !== this.options.accountId || !bounded(target.conversationId)
+    if (this.closed || target.accountId !== this.options.accountId || !boundedQqConversationId(target.conversationId)
       || !bounded(threadId) || !bounded(turnId)) return undefined;
     const key = this.turnKey(target, threadId, turnId);
     let entry = this.sources.get(key);
@@ -202,7 +205,7 @@ export class QqTaskSources {
   streamSource(reference: QqTaskSourceReference): { messageId: string; sourceTimestampMs: number; signal: AbortSignal } | undefined {
     if (!this.isCurrent(reference)) return undefined;
     const entry = this.resolve(reference)!;
-    if (entry.message.kind !== "text") return undefined;
+    if (entry.message.kind !== "text" || !entry.scope.conversationId.startsWith("c2c:")) return undefined;
     return { messageId: entry.message.id, sourceTimestampMs: entry.message.sentAtMs,
       signal: AbortSignal.any([entry.controller.signal, entry.source!.controller.signal]) };
   }

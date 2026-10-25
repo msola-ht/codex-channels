@@ -42,6 +42,7 @@ import {
 } from "../session-routing/index.js";
 import type {
   ThreadOccupancyPort,
+  ThreadOccupancyIdentity,
   ThreadOccupancyReleaseResult,
 } from "./thread-occupancy-port.js";
 import type { Workspace } from "../policy/index.js";
@@ -364,6 +365,7 @@ export interface ConversationSessionUseCases {
     target: ConversationTarget,
     force?: boolean,
     assertAuthorized?: () => void,
+    expectedIdentity?: ThreadOccupancyIdentity,
   ): Promise<ThreadOccupancyReleaseResult>;
   releaseIdle?(
     target: ConversationTarget,
@@ -517,6 +519,7 @@ export class ConversationService implements
     target: ConversationTarget,
     force?: boolean,
     assertAuthorized?: () => void,
+    expectedIdentity?: ThreadOccupancyIdentity,
   ): Promise<ThreadOccupancyReleaseResult> {
     if (!this.threadOccupancy) {
       return Promise.reject(new UserFacingError(
@@ -525,7 +528,7 @@ export class ConversationService implements
       ));
     }
     assertAuthorized?.();
-    return this.threadOccupancy.releaseThread(target, force, assertAuthorized);
+    return this.threadOccupancy.releaseThread(target, force, assertAuthorized, expectedIdentity);
   }
 
   touchActivity(target: ConversationTarget): void {

@@ -46,6 +46,7 @@ export class QqBodyStreaming {
 
   /** Runs before the shared router may shed a delta. No networking in the observer. */
   observe(event: Body, source?: QqTaskSourceReference): void {
+    if (!event.target.conversationId.startsWith("c2c:")) return;
     const key = this.key(event);
     let stream = this.streams.get(key);
     if (event.type === "text.completed") {

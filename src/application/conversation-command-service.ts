@@ -30,7 +30,7 @@ import type {
   ConversationTurnUseCases,
 } from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
-import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
+import type { ThreadOccupancyIdentity, ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
 import {
   parseScheduledTaskOperation,
 } from "./scheduled-task-command.js";
@@ -339,6 +339,7 @@ export interface ConversationCommandExecutor {
     observer?: SubmissionObserver,
     queueContext?: ThreadQueueExecutionContext,
     scheduledOperation?: ScheduledTaskOperationContext,
+    expectedRelease?: ThreadOccupancyIdentity,
   ): Promise<ConversationCommandResult>;
 }
 
@@ -420,6 +421,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     observer?: SubmissionObserver,
     queueContext?: ThreadQueueExecutionContext,
     scheduledOperation?: ScheduledTaskOperationContext,
+    expectedRelease?: ThreadOccupancyIdentity,
   ): Promise<ConversationCommandResult> {
     const observation = observer ? new SubmissionObservation(observer) : undefined;
     const queueObservation = queueContext?.submission ? new QueueSubmissionObservation(queueContext.submission) : undefined;
@@ -427,7 +429,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       const authorize = this.commandGuard(target, actorId, command === "workspace");
       const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
       assertAuthorized();
-      const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, observation, queueObservation, queueContext?.deleted, scheduledOperation);
+      const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, observation, queueObservation, queueContext?.deleted, scheduledOperation, expectedRelease);
       try {
         if (command === "workspace" && input.trim()) { this.authorize(target, actorId); assertInteractionActive?.(); }
         else assertAuthorized();
@@ -482,6 +484,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     queueObservation?: QueueSubmissionObservation,
     onQueueDeleted?: ThreadQueueExecutionContext["deleted"],
     scheduledOperation?: ScheduledTaskOperationContext,
+    expectedRelease?: ThreadOccupancyIdentity,
   ): Promise<ConversationCommandResult> {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
@@ -786,7 +789,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "limits":
         if (argumentsText) {
           if (!this.resetCredits) throw new UserFacingError("reset-credit.failed", "重置券功能不可用", { reason: "reset_unavailable" });
-          return { kind: "reset-credit", result: await this.resetCredits.execute(target, actorId, argumentsText) };
+          return { kind: "reset-credit", result: await this.resetCredits.execute(target, actorId, argumentsText, assertAuthorized) };
         }
         return {
           kind: "limits",
@@ -834,7 +837,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
         return {
           kind: "occupancy",
-          result: await this.conversations.releaseThread(target, force, assertAuthorized),
+          result: await this.conversations.releaseThread(target, force, assertAuthorized, expectedRelease),
         };
       }
       case "schedule":

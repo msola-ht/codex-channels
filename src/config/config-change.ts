@@ -42,7 +42,8 @@ export type QQConfigChangeCode =
   | "surface.qq.enabled"
   | "surface.qq.account"
   | "surface.qq.credentials"
-  | "surface.qq.allowed-users";
+  | "surface.qq.allowed-users"
+  | "surface.qq.groups";
 
 export type ConfigChangeCode =
   | GlobalConfigChangeCode

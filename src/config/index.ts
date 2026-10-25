@@ -59,6 +59,11 @@ export interface GatewayConfig {
     appId: string;
     appSecret: string;
     allowedUserOpenIds: ReadonlySet<string>;
+    groups?: readonly {
+      groupOpenId: string;
+      allowedMemberOpenIds: ReadonlySet<string>;
+      allowPublicOutput: true;
+    }[];
   };
   codexBinary: string;
   networkProxy: {
@@ -291,6 +296,13 @@ function loadValidatedConfigDocument(
             appId: raw.qq.app_id,
             appSecret: raw.qq.app_secret,
             allowedUserOpenIds: new Set(raw.qq.allowed_user_openids),
+            ...(raw.qq.groups === undefined ? {} : {
+              groups: raw.qq.groups.map(group => ({
+                groupOpenId: group.group_openid,
+                allowedMemberOpenIds: new Set(group.allowed_member_openids),
+                allowPublicOutput: group.allow_public_output,
+              })),
+            }),
           },
         }
       : {}),

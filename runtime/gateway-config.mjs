@@ -34,6 +34,10 @@ export function classifyQqConfigChanges(current, next) {
     const after = new Set(next.allowedUserOpenIds);
     const removed = [...before].some(id => !after.has(id));
     if (removed || [...after].some(id => !before.has(id))) changes.push({ kind: "allowed-users", restart: removed });
+    const groups = value => JSON.stringify((value.groups ?? []).map(group => [
+      group.groupOpenId, [...group.allowedMemberOpenIds].sort(), group.allowPublicOutput,
+    ]).sort((left, right) => left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0));
+    if (groups(current) !== groups(next)) changes.push({ kind: "groups", restart: true });
   }
   return changes;
 }
@@ -120,6 +124,19 @@ const weixinSetupSchema = z.strictObject({
   ),
 });
 
+const qqGroupOpenIdSchema = z.string().min(1).refine(
+  value => Buffer.byteLength(value, "utf8") <= 512 && !/[\s\p{Cc}\uD800-\uDFFF]/u.test(value),
+  "群及成员 OpenID 须为不含空白及控制字符的有效 Unicode，最多 512 UTF-8 字节",
+);
+const qqGroupSchema = z.strictObject({
+  group_openid: qqGroupOpenIdSchema,
+  allowed_member_openids: z.array(qqGroupOpenIdSchema).min(1).refine(
+    values => new Set(values).size === values.length,
+    "allowed_member_openids 不能包含重复项",
+  ),
+  allow_public_output: z.literal(true),
+});
+
 const qqSchema = z.strictObject({
   enabled: z.boolean(),
   app_id: z.string().regex(/^[0-9]+$/u, "app_id 必须是 QQ 应用的数字标识").optional(),
@@ -135,6 +152,10 @@ const qqSchema = z.strictObject({
   ).refine(
     (values) => new Set(values).size === values.length,
     "allowed_user_openids 不能包含重复项",
+  ).optional(),
+  groups: z.array(qqGroupSchema).refine(
+    values => new Set(values.map(value => value.group_openid)).size === values.length,
+    "groups 不能包含重复群 OpenID",
   ).optional(),
 }).superRefine((value, context) => {
   if (!value.enabled) return;

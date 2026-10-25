@@ -6,6 +6,7 @@ import { assertChannelFileName, maximumChannelFileBytes, readBoundedLocalFile } 
 import { QQ_TEXT_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT_FILE_BYTES, QQ_IMAGE_BYTES, QqProtocolError, QqTextSendError,
   type QqProtocolClient, type QqTextMessage, type QqTextSendContext, type QqCommandKeyboard } from "./protocol.js";
 import { planQqMessageMarkdown } from "./message-markdown.js";
+import { qqRecipientKey, type QqRecipient } from "./addressing.js";
 
 const MAX_PARTS = 8;
 const PLAN_TIMEOUT_MS = 45_000;
@@ -127,7 +128,7 @@ export class QqTextOutbox {
       guard();
       const reservation = context.reserve?.(parts.length);
       await captureDelivery(() => {
-        const accepted = this.queue.enqueue(parts[0]!.recipient, async active => {
+        const accepted = this.queue.enqueue(qqRecipientKey(parts[0]!.recipient), async active => {
           const receipt = DeliveryReceipt.current()!;
           for (const [index, part] of parts.entries()) {
             active.throwIfAborted();
@@ -155,7 +156,7 @@ export class QqTextOutbox {
   }
 
   /** Images share the same conversation ordering and durable receipt contract as text. */
-  async deliverImage(recipient: string, path: string, context: QqTextSendContext & {
+  async deliverImage(recipient: QqRecipient, path: string, context: QqTextSendContext & {
     reserve(): { runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }> };
   }, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
     const signal = AbortSignal.any([context.signal, this.lifetime.signal, AbortSignal.timeout(PLAN_TIMEOUT_MS)]);
@@ -170,7 +171,7 @@ export class QqTextOutbox {
     };
     guard();
     await captureDelivery(() => {
-      const accepted = this.queue.enqueue(recipient, async active => {
+      const accepted = this.queue.enqueue(qqRecipientKey(recipient), async active => {
         guard();
         const image = await readGeneratedImage(path, QQ_IMAGE_BYTES);
         guard();
@@ -185,7 +186,7 @@ export class QqTextOutbox {
   }
 
   /** Same queue, one active-message reservation and one confirmed receipt as an image. */
-  async deliverFile(recipient: string, path: string, fileName: string, context: QqTextSendContext & {
+  async deliverFile(recipient: QqRecipient, path: string, fileName: string, context: QqTextSendContext & {
     reserve(): { runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }> };
   }, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
     assertChannelFileName(fileName);
@@ -203,7 +204,7 @@ export class QqTextOutbox {
     };
     guard();
     await captureDelivery(() => {
-      const accepted = this.queue.enqueue(recipient, async active => {
+      const accepted = this.queue.enqueue(qqRecipientKey(recipient), async active => {
         guard();
         const bytes = await readBoundedLocalFile(path, maximumChannelFileBytes);
         guard();

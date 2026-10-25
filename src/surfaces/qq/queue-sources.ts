@@ -6,6 +6,7 @@ import type { UserMessageIdentity } from "../../conversation-core/index.js";
 import type { SurfaceTaskDeliverySource } from "../types.js";
 import type { QqSourceInput } from "./message-input.js";
 import type { QqTaskScope } from "./task-sources.js";
+import { boundedQqConversationId, qqConversationActor } from "./addressing.js";
 
 const MAX_ENTRIES = 4096;
 const MAX_SOURCES = 128;
@@ -67,6 +68,7 @@ export class QqQueueSources {
 
   reserve(scope: QqTaskScope, message: QqSourceInput): QqQueueReservation {
     if (this.closed) return { kind: "rejected", reason: "closed" };
+    if (message.conversationId !== scope.conversationId) return { kind: "rejected", reason: "scope" };
     const now = performance.now();
     const wall = Date.now();
     if (wall < this.lastWall) this.clockUnsafe = true;
@@ -80,7 +82,8 @@ export class QqQueueSources {
       || message.sentAtMs > wall || wall - message.sentAtMs > 60_000) return { kind: "rejected", reason: "stale" };
     const snapshot = Object.freeze({ accountId: scope.accountId, actorId: scope.actorId,
       conversationId: scope.conversationId, workspaceId: scope.workspaceId, workspaceCwd: scope.workspaceCwd });
-    if (![snapshot.accountId, snapshot.actorId, snapshot.conversationId, snapshot.workspaceId].every(value => bounded(value))
+    if (![snapshot.accountId, snapshot.actorId, snapshot.workspaceId].every(value => bounded(value))
+      || !boundedQqConversationId(snapshot.conversationId) || qqConversationActor(snapshot.conversationId) !== snapshot.actorId
       || !bounded(snapshot.workspaceCwd, 32 * 1024) || snapshot.accountId !== this.options.accountId
       || snapshot.actorId !== message.actorId) return { kind: "rejected", reason: "scope" };
     this.prune();
@@ -89,7 +92,7 @@ export class QqQueueSources {
     if (!allowed) return { kind: "rejected", reason: "scope" };
     if (this.clockUnsafe) return { kind: "rejected", reason: "clock" };
     if (performance.now() >= now + PREPARATION_MS) return { kind: "rejected", reason: "expired" };
-    const dedupKey = JSON.stringify([snapshot.accountId, snapshot.actorId, kind, message.id,
+    const dedupKey = JSON.stringify([snapshot.accountId, snapshot.conversationId, snapshot.actorId, kind, message.id,
       "msgIdx" in message ? message.msgIdx : undefined]);
     if (this.dedup.has(dedupKey)) return { kind: "rejected", reason: "duplicate" };
     const targetKey = this.targetKey(snapshot);
@@ -176,7 +179,7 @@ export class QqQueueSources {
   }
 
   capture(target: Pick<QqTaskScope, "accountId" | "conversationId">, threadId: string, turnId: string): SurfaceTaskDeliverySource | undefined {
-    if (this.closed || target.accountId !== this.options.accountId || !bounded(target.conversationId)
+    if (this.closed || target.accountId !== this.options.accountId || !boundedQqConversationId(target.conversationId)
       || !bounded(threadId) || !bounded(turnId)) return undefined;
     for (const entry of this.entries.values()) {
       if (entry.targetKey !== this.targetKey(target) || entry.preparation?.threadId !== threadId

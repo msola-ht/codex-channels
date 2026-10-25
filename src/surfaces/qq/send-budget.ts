@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { QqProtocolError } from "./protocol.js";
+import { qqRecipientKey, type QqRecipient } from "./addressing.js";
 
 /** One account generation, metadata only. Reservations are never refunded after unknown outcomes. */
 export class QqSendBudget {
@@ -9,9 +10,10 @@ export class QqSendBudget {
   private account: number[] = [];
   private readonly turns = new Map<string, { text: number; status: number; until: number }>();
 
-  reserve(recipient: string, parts: number, scope?: { key: string; status: boolean } | "startup" | "interaction"): {
+  reserve(destination: QqRecipient, parts: number, scope?: { key: string; status: boolean } | "startup" | "interaction"): {
     runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
   } {
+    const recipient = qqRecipientKey(destination);
     const now = performance.now();
     const turn = typeof scope === "object" ? scope : undefined;
     const day = 86_400_000;

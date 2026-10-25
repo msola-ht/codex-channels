@@ -108,6 +108,7 @@ import {
   ConversationResetCreditService,
   type ThreadLockHolder,
   type ThreadOccupancyReleaseResult,
+  type ThreadOccupancyIdentity,
   type ModelOption,
 } from "../application/index.js";
 import {
@@ -127,7 +128,7 @@ import {
   metricsWorkerFailureMetadata,
   modelRequestMetricsDatabasePath,
 } from "../observability/index.js";
-import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy, QqAccessPolicy } from "../policy/index.js";
+import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy, QqAccessPolicy, parseQqGroupConversationId } from "../policy/index.js";
 import {
   SessionRouter,
   ThreadStateSynchronizer,
@@ -811,7 +812,7 @@ export abstract class GatewayComponentGraph {
         listAgentRoles: () => listConfiguredAgentRoles(process.env),
       },
       {
-        releaseThread: (target, force, assertAuthorized) => this.releaseThread(target, force, assertAuthorized),
+        releaseThread: (target, force, assertAuthorized, expectedIdentity) => this.releaseThread(target, force, assertAuthorized, expectedIdentity),
       },
       execution,
       this.codex,
@@ -2004,8 +2005,10 @@ export abstract class GatewayComponentGraph {
     const value = JSON.parse(owner) as { version?: unknown; kind?: unknown; identity?: unknown; source?: SurfaceDeliverySource | null };
     const source = value?.source;
     if (value?.version !== 3 || value.kind !== "qq-live" || typeof value.identity !== "string" || !source
-      || ![source.generation, source.sourceToken, source.accountId, source.conversationId, source.threadId]
+      || ![source.generation, source.sourceToken, source.accountId, source.threadId]
         .every(field => typeof field === "string" && field.length > 0 && Buffer.byteLength(field) <= 512)
+      || typeof source.conversationId !== "string" || !source.conversationId
+      || (Buffer.byteLength(source.conversationId) > 512 && !parseQqGroupConversationId(source.conversationId))
       || source.accountId !== event.target.accountId || source.conversationId !== event.target.conversationId
       || !("threadId" in event) || event.threadId !== source.threadId) return undefined;
     if (source.kind === "notification") {
@@ -2098,7 +2101,7 @@ export abstract class GatewayComponentGraph {
       : target.surface === "weixin" && this.config.weixin
       ? new WeixinAccessPolicy(this.config.weixin.allowedUserIds, this.config.weixin.accountId)
       : target.surface === "qq" && this.config.qq
-      ? new QqAccessPolicy(this.config.qq.allowedUserOpenIds, this.config.qq.appId)
+      ? new QqAccessPolicy(this.config.qq.allowedUserOpenIds, this.config.qq.appId, this.config.qq.groups)
       : undefined;
   }
 
@@ -2403,6 +2406,7 @@ export abstract class GatewayComponentGraph {
     target: ConversationTarget,
     force?: boolean,
     assertAuthorized?: () => void,
+    expectedIdentity?: ThreadOccupancyIdentity,
   ): Promise<ThreadOccupancyReleaseResult> {
     this.requireRunning();
     assertAuthorized?.();
@@ -2419,6 +2423,12 @@ export abstract class GatewayComponentGraph {
       }
     };
     const threadId = current.threadId;
+    const assertIdentity = (holder: ThreadLockHolder) => {
+      if (expectedIdentity && (expectedIdentity.threadId !== threadId
+        || expectedIdentity.pid !== holder.pid || expectedIdentity.startedAt !== holder.startedAt)) {
+        throw new UserFacingError("thread.takeover.changed", "占用进程已变化，未执行释放，请重新预览");
+      }
+    };
     const options = {
       runner: this.auxiliaryCommands,
       ...(this.startupAbort ? { signal: this.startupAbort.signal } : {}),
@@ -2433,6 +2443,7 @@ export abstract class GatewayComponentGraph {
       return { status: "unidentifiable", threadId, reason: inspection.reason };
     }
     const holder = inspection.holder;
+    assertIdentity(holder);
     const releasable = isReleaseableThreadWriterHolder(holder);
     const stuck = this.bindingRestoreCoordinator().hasPending(threadId);
     if (!force || !releasable) {
@@ -2454,6 +2465,7 @@ export abstract class GatewayComponentGraph {
       return { status: "unidentifiable", threadId, reason: recheck.reason };
     }
     const recheckedReleasable = isReleaseableThreadWriterHolder(recheck.holder);
+    assertIdentity(recheck.holder);
     if (
       recheck.holder.pid !== holder.pid
       || recheck.holder.startedAt !== holder.startedAt
@@ -2471,6 +2483,7 @@ export abstract class GatewayComponentGraph {
     const exited = await terminateThreadWriterHolder(holder.pid, {
       ...(holder.startedAt === undefined ? {} : { startedAt: holder.startedAt }),
       ...options,
+      beforeTerminate: assertCurrent,
     });
     // Termination may already have happened. A stale result never restores a
     // replacement binding, and cancellation does not imply rollback of force.

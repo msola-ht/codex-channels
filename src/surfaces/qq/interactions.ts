@@ -7,6 +7,7 @@ import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
 import { qqMenuButton } from "./command-menu.js";
 import type { QqCommandKeyboard } from "./protocol.js";
 import type { QqMessageInput } from "./message-input.js";
+import { qqConversationActor } from "./addressing.js";
 
 interface Pending {
   requestId: string;
@@ -70,7 +71,7 @@ export class QqInteractions implements InteractionPort {
     const [, token, revision, action, value] = match;
     const pending = this.pending.get(token!);
     if (!pending || pending.target.surface !== target.surface || pending.target.accountId !== target.accountId
-      || pending.target.conversationId !== target.conversationId || target.conversationId !== `c2c:${actorId}`
+      || pending.target.conversationId !== target.conversationId || qqConversationActor(target.conversationId) !== actorId
       || (pending.request.type === "user-input" && pending.request.expectedActorId !== undefined
         && pending.request.expectedActorId !== actorId)) return "该请求已失效或不属于当前用户。";
     if (!this.valid(pending)) {

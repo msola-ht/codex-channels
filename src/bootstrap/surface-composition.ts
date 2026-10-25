@@ -131,7 +131,7 @@ function createQqModule(
 ): SurfaceRuntimeModule {
   const config = options.config.qq;
   if (!config) throw new Error("QQ 运行配置不存在");
-  const access = new QqAccessPolicy(config.allowedUserOpenIds, config.appId);
+  const access = new QqAccessPolicy(config.allowedUserOpenIds, config.appId, config.groups);
   let notificationRecipients = new Set(config.allowedUserOpenIds);
   const adapter = new QqSurface({
     appId: config.appId, appSecret: config.appSecret, access,
@@ -166,7 +166,7 @@ function createQqModule(
     adapter,
     applyHotReload(next, changes) {
       if (changes.some(change => change.code === "surface.qq.allowed-users") && next.qq) {
-        access.replace(next.qq.allowedUserOpenIds);
+        access.replace(next.qq.allowedUserOpenIds, config.groups);
         notificationRecipients = new Set(next.qq.allowedUserOpenIds);
       }
     },

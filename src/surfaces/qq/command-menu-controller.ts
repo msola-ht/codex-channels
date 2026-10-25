@@ -141,7 +141,7 @@ export class QqCommandMenuController {
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("effort", "思考等级", "/effort"), qqMenuButton("fast", "速度设置", "/fast status"), qqMenuButton("plan", "切换计划模式", "/plan")] },
         { buttons: [qqMenuButton("autoreview", "审批方式", "/autoreview"), qqMenuButton("permissions", "权限查询", "/permissions"), qqMenuButton("goal", "当前目标", "/goal")] },
-        { buttons: [qqMenuButton("whoami", "我的身份", "/whoami"), homeButton()] },
+        { buttons: [qqMenuButton("whoami", "我的身份", "/whoami"), qqMenuButton("credits", "查看重置券", "/limits reset"), homeButton()] },
       ] } },
     });
     if (input === "manage") return this.panel(context, {

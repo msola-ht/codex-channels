@@ -5,11 +5,12 @@ export interface QqButtonInput {
   readonly kind: "interaction";
   readonly id: string;
   readonly actorId: string;
+  readonly conversationId: string;
   readonly content: string;
   readonly buttonId: string;
   readonly sentAtMs: number;
 }
 
 export type QqMessageInput = QqInboundTextMessage | QqButtonInput;
-export type QqSourceInput = Pick<QqInboundTextMessage, "id" | "actorId" | "msgIdx" | "sentAtMs">
-  | Pick<QqButtonInput, "kind" | "id" | "actorId" | "sentAtMs">;
+export type QqSourceInput = Pick<QqInboundTextMessage, "id" | "actorId" | "conversationId" | "msgIdx" | "sentAtMs">
+  | Pick<QqButtonInput, "kind" | "id" | "actorId" | "conversationId" | "sentAtMs">;

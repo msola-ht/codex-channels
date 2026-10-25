@@ -1,8 +1,10 @@
 import { parseTimestamp } from "./inbound.js";
+import { createQqGroupConversationId } from "../../policy/index.js";
 
 export interface QqInboundButtonInteraction {
   readonly id: string;
   readonly actorId: string;
+  readonly conversationId: string;
   readonly content: string;
   readonly buttonId: string;
   readonly sentAtMs: number;
@@ -23,13 +25,15 @@ export function parseQqButtonEvent(value: unknown, appId: string): QqButtonEvent
   if (!record(interaction)) return reject("invalid-interaction");
   if (!Number.isInteger(interaction.type)) return reject("invalid-type");
   if (interaction.type !== 11) return { kind: "ignored" };
-  if (interaction.scene !== "c2c" || interaction.chat_type !== 2) return reject("unsupported-scene");
+  const group = interaction.scene === "group" && interaction.chat_type === 1;
+  if (!group && (interaction.scene !== "c2c" || interaction.chat_type !== 2)) return reject("unsupported-scene");
   if (!/^[0-9]+$/u.test(appId) || interaction.application_id !== appId) return reject("wrong-application");
   if (interaction.version !== 1) return reject("unsupported-version");
   if (!identifier(interaction.id) || interaction.id.startsWith("INTERACTION_CREATE:")) return reject("invalid-id");
-  if (!identifier(interaction.user_openid)) return reject("invalid-actor-id");
+  const actorId = group ? interaction.group_member_openid : interaction.user_openid;
+  if (!identifier(actorId) || group && !identifier(interaction.group_openid)) return reject("invalid-actor-id");
   // Empty optional fields are harmless; a second scene identity contradicts c2c attribution.
-  if (["guild_id", "channel_id", "group_openid", "group_member_openid"]
+  if (["guild_id", "channel_id", ...(group ? ["user_openid"] : ["group_openid", "group_member_openid"])]
     .some(key => key in interaction && interaction[key] !== "")) return reject("conflicting-scene");
   if (!record(interaction.data) || interaction.data.type !== 11 || !record(interaction.data.resolved)) {
     return reject("invalid-button-data");
@@ -48,7 +52,8 @@ export function parseQqButtonEvent(value: unknown, appId: string): QqButtonEvent
   if (typeof timestamp !== "number") return reject(`timestamp-${timestamp.reason}`);
   return { kind: "supported", interaction: {
     id: interaction.id,
-    actorId: interaction.user_openid,
+    actorId,
+    conversationId: group ? createQqGroupConversationId(interaction.group_openid as string, actorId) : `c2c:${actorId}`,
     content: resolved.button_data,
     buttonId: resolved.button_id,
     sentAtMs: timestamp,

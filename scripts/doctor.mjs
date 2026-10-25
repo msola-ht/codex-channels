@@ -184,15 +184,18 @@ if (document) {
     : "尚未配置通讯渠道，Gateway 暂不能启动；继续检查工作区及其他独立项目",
   channelEnabled ? undefined : "运行 codexc setup 配置 Telegram、飞书、微信或 QQ，然后重新运行 codexc doctor");
   if (Object.keys(qq).length > 0) {
-    note("QQ", `${qq.enabled === true ? "已启用" : "未启用"}；WebSocket 单聊`);
+    note("QQ", `${qq.enabled === true ? "已启用" : "未启用"}；WebSocket 单聊及显式授权群聊`);
     note("QQ 应用凭据", stringValue(qq.app_id) && stringValue(qq.app_secret)
       ? "已配置（内容已隐藏）；未联网验证"
       : "未完整配置；未联网验证");
     note("QQ 用户授权", Array.isArray(qq.allowed_user_openids) && qq.allowed_user_openids.length > 0
       ? `已配置 ${qq.allowed_user_openids.length} 个允许用户（内容已隐藏）`
-      : "无允许用户，拒绝所有用户输入");
+      : "无单聊允许用户，拒绝所有单聊输入");
+    note("QQ 群授权", Array.isArray(qq.groups) && qq.groups.length > 0
+      ? `已配置 ${qq.groups.length} 个群；按独立成员名单授权，回复在群内公开（身份内容已隐藏）`
+      : "未配置群授权，拒绝所有群输入");
     note("QQ 账号能力", "未知；Doctor 不获取 Access Token、不连接 QQ、不发送消息");
-    note("QQ 运行核对", "单聊文字渠道；用 codexc logs gateway -n 100 核对连接状态。支持必要文字命令与普通任务；只读检查不证明收发可用");
+    note("QQ 运行核对", "用 codexc logs gateway -n 100 核对连接状态；群聊还须具备平台群能力并显式配置授权。只读检查不证明收发可用");
   } else {
     note("QQ", "未配置");
   }

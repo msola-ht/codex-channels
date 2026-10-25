@@ -1,9 +1,24 @@
 import type { TomlTable } from "smol-toml";
 
+export interface QqGroupConfig {
+  group_openid: string;
+  allowed_member_openids: string[];
+  allow_public_output: true;
+}
+interface QqRuntimeAccount {
+  appId: string;
+  appSecret: string;
+  allowedUserOpenIds: Iterable<string>;
+  groups?: readonly {
+    groupOpenId: string;
+    allowedMemberOpenIds: Iterable<string>;
+    allowPublicOutput: true;
+  }[];
+}
 export function classifyQqConfigChanges(
-  current: { appId: string; appSecret: string; allowedUserOpenIds: Iterable<string> } | undefined,
-  next: { appId: string; appSecret: string; allowedUserOpenIds: Iterable<string> } | undefined,
-): Array<{ kind: "enabled" | "account" | "credentials" | "allowed-users"; restart: boolean }>;
+  current: QqRuntimeAccount | undefined,
+  next: QqRuntimeAccount | undefined,
+): Array<{ kind: "enabled" | "account" | "credentials" | "allowed-users" | "groups"; restart: boolean }>;
 
 export interface GatewayConfigDocument {
   version: 1;
@@ -35,11 +50,13 @@ export interface GatewayConfigDocument {
     app_id?: string;
     app_secret?: string;
     allowed_user_openids?: string[];
+    groups?: QqGroupConfig[];
   } | {
     enabled: true;
     app_id: string;
     app_secret: string;
     allowed_user_openids: string[];
+    groups?: QqGroupConfig[];
   };
   codex: {
     binary: string;

@@ -1,4 +1,5 @@
 import { assertChannelFileName, maximumChannelFileBytes } from "../bounded-local-file.js";
+import type { QqRecipient } from "./addressing.js";
 
 const API_ORIGIN = "https://api.bot.qq.com";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -15,7 +16,7 @@ export const QQ_TEXT_PART_BYTES = 2000;
 export const QQ_PASSIVE_WINDOW_MS = 300_000;
 
 export type QqTextMessage = {
-  recipient: string;
+  recipient: QqRecipient;
   content: string;
 } & ({ mode: "active" } | {
   mode: "passive";
@@ -62,7 +63,7 @@ export const QQ_RESULT_FILE_BYTES = 256 * 1024;
 export const QQ_IMAGE_BYTES = 5_000_000;
 
 export interface QqImageMessage {
-  readonly recipient: string;
+  readonly recipient: QqRecipient;
   /** Already validated PNG/JPEG bytes from the shared image reader. No paths or URLs. */
   readonly bytes: Uint8Array;
   readonly contentType: "image/png" | "image/jpeg";
@@ -318,15 +319,15 @@ export class QqProtocolClient {
     }, context);
   }
 
-  async sendResultFile(input: { recipient: string; content: string }, context: QqTextSendContext): Promise<{ messageId: string }> {
+  async sendResultFile(input: { recipient: QqRecipient; content: string }, context: QqTextSendContext): Promise<{ messageId: string }> {
     return this.sendPlan(() => {
-      if (!record(input) || !identifier(input.recipient) || typeof input.content !== "string"
+      if (!record(input) || !recipient(input.recipient) || typeof input.content !== "string"
         || !input.content.trim() || !wellFormed(input.content) || input.content.length > QQ_RESULT_FILE_BYTES
         || Buffer.byteLength(input.content) > QQ_RESULT_FILE_BYTES
         || Object.keys(input).some(key => key !== "recipient" && key !== "content")) {
         throw new QqProtocolError("message", "invalid-input");
       }
-      return { path: `/v2/users/${encodeURIComponent(input.recipient)}/files`, body: {
+      return { path: recipientPath(input.recipient, "files"), body: {
         file_type: 4, srv_send_msg: true, file_name: "codex-result.txt",
         file_data: Buffer.from(input.content, "utf8").toString("base64"),
       } };
@@ -336,7 +337,7 @@ export class QqProtocolClient {
   /** One active image delivery. srv_send_msg=true must return a valid message ID. */
   async sendImage(input: QqImageMessage, context: QqTextSendContext): Promise<{ messageId: string }> {
     return this.sendPlan(() => {
-      if (!record(input) || !identifier(input.recipient) || !(input.bytes instanceof Uint8Array)
+      if (!record(input) || !recipient(input.recipient) || !(input.bytes instanceof Uint8Array)
         || input.bytes.byteLength === 0 || input.bytes.byteLength > QQ_IMAGE_BYTES
         || (input.contentType !== "image/png" && input.contentType !== "image/jpeg")
         || Object.keys(input).some(key => !["recipient", "bytes", "contentType"].includes(key))) {
@@ -344,7 +345,7 @@ export class QqProtocolClient {
       }
       // Copy into immutable Base64 before credential or authorization waits, just
       // like result-file uploads. The endpoint explicitly supports PNG/JPEG.
-      return { path: `/v2/users/${encodeURIComponent(input.recipient)}/files`, body: {
+      return { path: recipientPath(input.recipient, "files"), body: {
         file_type: 1, srv_send_msg: true,
         file_name: input.contentType === "image/png" ? "codex-image.png" : "codex-image.jpg",
         file_data: Buffer.from(input.bytes).toString("base64"),
@@ -353,15 +354,15 @@ export class QqProtocolClient {
   }
 
   /** Explicit local-file delivery; independent from the bounded complete-text fallback. */
-  async sendFile(input: { recipient: string; bytes: Uint8Array; fileName: string }, context: QqTextSendContext): Promise<{ messageId: string }> {
+  async sendFile(input: { recipient: QqRecipient; bytes: Uint8Array; fileName: string }, context: QqTextSendContext): Promise<{ messageId: string }> {
     return this.sendPlan(() => {
-      if (!record(input) || !identifier(input.recipient) || !(input.bytes instanceof Uint8Array)
+      if (!record(input) || !recipient(input.recipient) || !(input.bytes instanceof Uint8Array)
         || input.bytes.byteLength === 0 || input.bytes.byteLength > maximumChannelFileBytes
         || Object.keys(input).some(key => !["recipient", "bytes", "fileName"].includes(key))) {
         throw new QqProtocolError("message", "invalid-input");
       }
       assertChannelFileName(input.fileName);
-      return { path: `/v2/users/${encodeURIComponent(input.recipient)}/files`, body: {
+      return { path: recipientPath(input.recipient, "files"), body: {
         file_type: 4, srv_send_msg: true, file_name: input.fileName,
         file_data: Buffer.from(input.bytes).toString("base64"),
       } };
@@ -508,7 +509,7 @@ export class QqProtocolClient {
 }
 
 function textRequest(input: QqTextMessage): { path: string; body: Record<string, unknown>; deadline?: number } {
-  if (!record(input) || !identifier(input.recipient) || typeof input.content !== "string"
+  if (!record(input) || !recipient(input.recipient) || typeof input.content !== "string"
     || !input.content.trim() || input.content.length > QQ_TEXT_PART_BYTES
     || !wellFormed(input.content) || Buffer.byteLength(input.content) > QQ_TEXT_PART_BYTES) {
     throw new QqProtocolError("message", "invalid-input");
@@ -519,7 +520,7 @@ function textRequest(input: QqTextMessage): { path: string; body: Record<string,
   if (Object.keys(input).some(key => !keys.includes(key)) || !["active", "passive"].includes(input.mode)) {
     throw new QqProtocolError("message", "invalid-input");
   }
-  const path = `/v2/users/${encodeURIComponent(input.recipient)}/messages`;
+  const path = recipientPath(input.recipient, "messages");
   const body: Record<string, unknown> = { msg_type: 0, content: input.content };
   if (input.mode === "active") return { path, body };
   const age = Date.now() - input.sourceTimestampMs;
@@ -593,6 +594,15 @@ function wellFormed(value: string): boolean {
 function identifier(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 512
     && Buffer.byteLength(value) <= 512 && !/[\s\p{Cc}]/u.test(value) && wellFormed(value);
+}
+
+function recipient(value: unknown): value is QqRecipient {
+  return identifier(value) || record(value) && Object.keys(value).length === 1 && identifier(value.groupOpenId);
+}
+
+function recipientPath(value: QqRecipient, resource: "messages" | "files"): string {
+  return typeof value === "string" ? `/v2/users/${encodeURIComponent(value)}/${resource}`
+    : `/v2/groups/${encodeURIComponent(value.groupOpenId)}/${resource}`;
 }
 
 // Only documented, unambiguous message rejections are classified as definitely rejected.

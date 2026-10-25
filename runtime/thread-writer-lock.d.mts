@@ -42,5 +42,6 @@ export function terminateThreadWriterHolder(
     environment?: NodeJS.ProcessEnv;
     runner?: OwnedCommandRunner;
     signal?: AbortSignal;
+    beforeTerminate?: () => void;
   },
 ): Promise<boolean>;

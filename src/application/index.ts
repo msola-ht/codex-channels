@@ -236,6 +236,7 @@ export {
 } from "./thread-history-port.js";
 export {
   type ThreadLockHolder,
+  type ThreadOccupancyIdentity,
   type ThreadOccupancyPort,
   type ThreadOccupancyReleaseResult,
 } from "./thread-occupancy-port.js";
