@@ -25,7 +25,7 @@ import {
   AsyncSqliteScheduledTaskStore,
 } from "../scheduled-tasks/index.js";
 import { ScheduledTaskExecutor, type ScheduledTaskExecutorOptions } from "./scheduled-task-executor.js";
-import { ScheduledTaskRunCoordinator } from "./scheduled-task-run-coordinator.js";
+import { ScheduledTaskRunCoordinator, type ScheduledTaskRunCoordinatorOptions } from "./scheduled-task-run-coordinator.js";
 import {
   createScheduledTaskToolRequestHandler,
   type ScheduledTaskToolLookup,
@@ -41,6 +41,7 @@ export interface ScheduledTaskCompositionOptions {
   acceptsExecution: (target: ConversationTarget) => boolean;
   prepareSubmission?: ScheduledTaskExecutorOptions["prepareSubmission"];
   releaseRecoveredThread: (threadId: string, isCurrent: () => boolean) => Promise<boolean>;
+  canReleaseBinding?: ScheduledTaskRunCoordinatorOptions["canReleaseBinding"];
   bindings: SqliteBindingStore;
   workspaces: WorkspaceRegistry;
   core: ConversationCore;
@@ -109,6 +110,7 @@ export class ScheduledTaskComposition {
       {
         validateRun: (task, signal) => executor.validateRun(task, signal),
         releaseRecoveredThread: options.releaseRecoveredThread,
+        ...(options.canReleaseBinding ? { canReleaseBinding: options.canReleaseBinding } : {}),
         logger: options.logger,
         onRecovered: (run, target) => {
           const status = run.state === "completed" ? "已完成"

@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
-import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
+import { DeliveryReceipt, SurfaceDeliveryNotSentError, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { readGeneratedImage } from "../generated-image.js";
 import { assertChannelFileName, assertChannelMediaBytes, maximumQqChannelFileBytes, readBoundedLocalFile, type ChannelFileMediaType } from "../bounded-local-file.js";
 import { QQ_TEXT_PART_BYTES, QQ_MENU_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT_FILE_BYTES, QQ_IMAGE_BYTES, QqProtocolError, QqTextSendError,
@@ -12,6 +12,25 @@ import { layoutQqKeyboard } from "./command-menu.js";
 const MAX_PARTS = 8;
 const PLAN_TIMEOUT_MS = 45_000;
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Proof applies to this Outbox call, not to an earlier streaming preview. */
+class QqDeliveryAttempt {
+  private definitelyNotSent = true;
+
+  async send<T>(call: () => Promise<T>): Promise<T> {
+    const previousNotSent = this.definitelyNotSent;
+    this.definitelyNotSent = false;
+    try { return await call(); }
+    catch (error) {
+      if (previousNotSent && error instanceof QqTextSendError && error.outcome !== "unknown") this.definitelyNotSent = true;
+      throw error;
+    }
+  }
+
+  failure(error: unknown): unknown {
+    return this.definitelyNotSent ? new SurfaceDeliveryNotSentError({ cause: error }) : error;
+  }
+}
 
 /** Text execution only. Adapter owns event selection, source authorization and quota reservation. */
 export class QqTextOutbox {
@@ -40,6 +59,7 @@ export class QqTextOutbox {
     } },
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>,
   ): Promise<void> {
+    const attempt = new QqDeliveryAttempt();
     const deadline = performance.now() + PLAN_TIMEOUT_MS;
     const controller = new AbortController();
     const signal = AbortSignal.any([context.signal, controller.signal, this.lifetime.signal]);
@@ -167,7 +187,20 @@ export class QqTextOutbox {
         passiveDeadline = performance.now() + QQ_PASSIVE_WINDOW_MS - age;
       }
       guard();
-      const reservation = context.reserve?.(parts.length);
+      let reservation: ReturnType<NonNullable<typeof context.reserve>> | undefined;
+      try { reservation = context.reserve?.(parts.length); }
+      catch (error) {
+        if (!(error instanceof QqProtocolError) || error.reason !== "budget" || !context.allowResultFile
+          || input.mode !== "active" || typeof input.recipient !== "string" || parts.length <= 1
+          || Buffer.byteLength(input.content) > QQ_RESULT_FILE_BYTES) throw error;
+        // No request has started. Preserve the complete original content in a
+        // single file when the remaining rolling budget cannot fit all parts.
+        file = true;
+        parts = [{ ...input }];
+        markdownParts = undefined;
+        markdown = false;
+        reservation = context.reserve?.(1);
+      }
       await captureDelivery(() => {
         const accepted = this.queue.enqueue(qqRecipientKey(parts[0]!.recipient), async active => {
           const receipt = DeliveryReceipt.current()!;
@@ -182,13 +215,13 @@ export class QqTextOutbox {
             // format. C2C replies never combine native references with content.
             const outgoing = { ...part };
             if (typeof outgoing.recipient === "string" || index > 0) delete outgoing.referenceMessageId;
-            const send = () => file
+            const send = () => attempt.send(() => file
               ? this.client.sendResultFile({ recipient: part.recipient, content: part.content }, { signal: active, beforeSend: guard,
                 ...(part.mode === "passive" ? { reply: part } : {}) })
               : partMarkdown || controls
                 ? this.client.sendMarkdown(outgoing, { signal: active, beforeSend: guard, ...(bodyMarkdown ? { body: true as const } : {}) },
                   keyboard ? layoutQqKeyboard(keyboard) : undefined)
-              : this.client.sendText(outgoing, { signal: active, beforeSend: guard });
+              : this.client.sendText(outgoing, { signal: active, beforeSend: guard }));
             await checkpointDelivery(file ? "qq-result-file" : controls ? "qq-interaction-controls" : partMarkdown
               ? parts.length === 1 ? "qq-markdown" : `qq-markdown:${index + 1}/${parts.length}`
               : `qq-text:${index + 1}/${parts.length}`,
@@ -199,7 +232,8 @@ export class QqTextOutbox {
         }, true, { signal });
         if (!accepted) throw new Error("QQ 输出未进入共享投递队列");
       }, signal, checkpoint, { requireConfirmation: true });
-    } finally {
+    } catch (error) { throw attempt.failure(error); }
+    finally {
       clearTimeout(timer);
       controller.abort();
     }
@@ -210,33 +244,36 @@ export class QqTextOutbox {
     groupReply?: QqReplyAnchor | undefined;
     reserve(): { runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }> };
   }, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, format?: "markdown"): Promise<void> {
-    const signal = AbortSignal.any([context.signal, this.lifetime.signal, AbortSignal.timeout(format === "markdown" ? 120_000 : PLAN_TIMEOUT_MS)]);
-    const guard = (): undefined => {
-      signal.throwIfAborted();
-      const result: unknown = context.beforeSend();
-      if (result !== undefined) {
-        void Promise.resolve(result).catch(() => {});
-        throw new QqProtocolError("message", "authorization");
-      }
-      signal.throwIfAborted();
-    };
-    guard();
-    const reply = typeof recipient !== "string" && context.groupReply
-      ? { ...context.groupReply, sequence: this.reserveGroupReply(recipient, context.groupReply, 1) } : undefined;
-    await captureDelivery(() => {
-      const accepted = this.queue.enqueue(qqRecipientKey(recipient), async active => {
-        guard();
-        const image = await readGeneratedImage(path, QQ_IMAGE_BYTES);
-        guard();
-        const reservation = context.reserve();
-        const send = format === "markdown" ? this.client.sendMarkdownImage.bind(this.client) : this.client.sendImage.bind(this.client);
-        await checkpointDelivery("qq-image", () => reservation.runPart(active, () => send({ recipient,
-          bytes: image.bytes, contentType: image.format === "jpeg" ? "image/jpeg" : "image/png",
-        }, { signal: active, beforeSend: guard, ...(reply ? { reply } : {}) })), error => error instanceof QqTextSendError && error.outcome !== "unknown");
-        DeliveryReceipt.current()!.confirmCompleteContent();
-      }, true, { signal });
-      if (!accepted) throw new Error("QQ 图片未进入共享投递队列");
-    }, signal, checkpoint, { requireConfirmation: true });
+    const attempt = new QqDeliveryAttempt();
+    try {
+      const signal = AbortSignal.any([context.signal, this.lifetime.signal, AbortSignal.timeout(format === "markdown" ? 120_000 : PLAN_TIMEOUT_MS)]);
+      const guard = (): undefined => {
+        signal.throwIfAborted();
+        const result: unknown = context.beforeSend();
+        if (result !== undefined) {
+          void Promise.resolve(result).catch(() => {});
+          throw new QqProtocolError("message", "authorization");
+        }
+        signal.throwIfAborted();
+      };
+      guard();
+      const reply = typeof recipient !== "string" && context.groupReply
+        ? { ...context.groupReply, sequence: this.reserveGroupReply(recipient, context.groupReply, 1) } : undefined;
+      await captureDelivery(() => {
+        const accepted = this.queue.enqueue(qqRecipientKey(recipient), async active => {
+          guard();
+          const image = await readGeneratedImage(path, QQ_IMAGE_BYTES);
+          guard();
+          const reservation = context.reserve();
+          const send = format === "markdown" ? this.client.sendMarkdownImage.bind(this.client) : this.client.sendImage.bind(this.client);
+          await checkpointDelivery("qq-image", () => reservation.runPart(active, () => attempt.send(() => send({ recipient,
+            bytes: image.bytes, contentType: image.format === "jpeg" ? "image/jpeg" : "image/png",
+          }, { signal: active, beforeSend: guard, ...(reply ? { reply } : {}) }))), error => error instanceof QqTextSendError && error.outcome !== "unknown");
+          DeliveryReceipt.current()!.confirmCompleteContent();
+        }, true, { signal });
+        if (!accepted) throw new Error("QQ 图片未进入共享投递队列");
+      }, signal, checkpoint, { requireConfirmation: true });
+    } catch (error) { throw attempt.failure(error); }
   }
 
   /** Same queue, one active-message reservation and one confirmed receipt as an image. */
@@ -244,36 +281,39 @@ export class QqTextOutbox {
     groupReply?: QqReplyAnchor | undefined;
     reserve(): { runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }> };
   }, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, mediaType: ChannelFileMediaType = "file"): Promise<void> {
-    assertChannelFileName(fileName);
-    const signal = AbortSignal.any([context.signal, this.lifetime.signal, AbortSignal.timeout(120_000)]);
-    const guard = (): undefined => {
-      signal.throwIfAborted();
-      try {
-        const result: unknown = context.beforeSend();
-        if (result !== undefined) {
-          void Promise.resolve(result).catch(() => {});
-          throw new Error();
-        }
-      } catch { throw new QqProtocolError("message", "authorization"); }
-      signal.throwIfAborted();
-    };
-    guard();
-    const reply = typeof recipient !== "string" && context.groupReply
-      ? { ...context.groupReply, sequence: this.reserveGroupReply(recipient, context.groupReply, 1) } : undefined;
-    await captureDelivery(() => {
-      const accepted = this.queue.enqueue(qqRecipientKey(recipient), async active => {
-        guard();
-        const bytes = await readBoundedLocalFile(path, maximumQqChannelFileBytes);
-        assertChannelMediaBytes(bytes, mediaType);
-        guard();
-        const reservation = context.reserve();
-        await checkpointDelivery("qq-file", () => reservation.runPart(active, () => this.client.sendFile({ recipient,
-          bytes, fileName, mediaType,
-        }, { signal: active, beforeSend: guard, ...(reply ? { reply } : {}) })), error => error instanceof QqTextSendError && error.outcome !== "unknown");
-        DeliveryReceipt.current()!.confirmCompleteContent();
-      }, true, { signal });
-      if (!accepted) throw new Error("QQ 文件未进入共享投递队列");
-    }, signal, checkpoint, { requireConfirmation: true });
+    const attempt = new QqDeliveryAttempt();
+    try {
+      assertChannelFileName(fileName);
+      const signal = AbortSignal.any([context.signal, this.lifetime.signal, AbortSignal.timeout(120_000)]);
+      const guard = (): undefined => {
+        signal.throwIfAborted();
+        try {
+          const result: unknown = context.beforeSend();
+          if (result !== undefined) {
+            void Promise.resolve(result).catch(() => {});
+            throw new Error();
+          }
+        } catch { throw new QqProtocolError("message", "authorization"); }
+        signal.throwIfAborted();
+      };
+      guard();
+      const reply = typeof recipient !== "string" && context.groupReply
+        ? { ...context.groupReply, sequence: this.reserveGroupReply(recipient, context.groupReply, 1) } : undefined;
+      await captureDelivery(() => {
+        const accepted = this.queue.enqueue(qqRecipientKey(recipient), async active => {
+          guard();
+          const bytes = await readBoundedLocalFile(path, maximumQqChannelFileBytes);
+          assertChannelMediaBytes(bytes, mediaType);
+          guard();
+          const reservation = context.reserve();
+          await checkpointDelivery("qq-file", () => reservation.runPart(active, () => attempt.send(() => this.client.sendFile({ recipient,
+            bytes, fileName, mediaType,
+          }, { signal: active, beforeSend: guard, ...(reply ? { reply } : {}) }))), error => error instanceof QqTextSendError && error.outcome !== "unknown");
+          DeliveryReceipt.current()!.confirmCompleteContent();
+        }, true, { signal });
+        if (!accepted) throw new Error("QQ 文件未进入共享投递队列");
+      }, signal, checkpoint, { requireConfirmation: true });
+    } catch (error) { throw attempt.failure(error); }
   }
 
   private groupReplyKey(recipient: QqRecipient, anchor: QqReplyAnchor): string {

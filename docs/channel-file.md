@@ -1,6 +1,6 @@
 # 渠道文件与富媒体发送
 
-`codexc channel send-file` 将显式选择的本地文件交给 Gateway，通过已有 Thread 绑定发送。支持 QQ、飞书、Telegram 和微信。本轮富媒体扩展尚未部署或客户端验收。
+`codexc channel send-file` 将显式选择的本地文件交给 Gateway，通过已有 Thread 绑定发送。支持 QQ、飞书、Telegram 和微信。富媒体代码已部署，全部媒体类型与异常分支尚未完成客户端验收。
 
 ```bash
 codexc channel send-file /absolute/path/report.pdf --thread <Thread ID>

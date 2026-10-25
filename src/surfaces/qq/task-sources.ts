@@ -201,6 +201,14 @@ export class QqTaskSources {
     return current && !this.closed && !entry.controller.signal.aborted && entry.source === source;
   }
 
+  /** Local cancellation only; pending candidates still need awaitSource before sending. */
+  cancellationSignal(reference: QqTaskSourceReference): AbortSignal | undefined {
+    const entry = this.resolve(reference);
+    if (!entry) return undefined;
+    return entry.source && entry.source !== entry
+      ? AbortSignal.any([entry.controller.signal, entry.source.controller.signal]) : entry.controller.signal;
+  }
+
   /** Original inbound anchor only, never a newer message or renewed reply window. */
   replyReference(reference: QqTaskSourceReference): string | undefined {
     if (!this.isCurrent(reference)) return undefined;

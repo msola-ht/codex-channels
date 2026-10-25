@@ -91,6 +91,8 @@ codexc logs gateway -n 100
 
 新投递日志的 `persistentDeliveryId` 与 `codexc delivery list` 的记录 `id` 一致，可从入箱后的故障定位到渲染、排队和平台调用；分片仍有各自的 `deliveryId` 和 `diagnosticId`。历史日志缺少该字段时不能追补。关联 ID 不包含正文或凭据，也不新增持久字段。
 
+QQ 本地预算或规划在发送前明确拒绝，且没有先前预览或发送检查点时，记录保留为 `blocked`，日志为 `delivery-not-sent`，不再称为平台结果未知。已有预览、部分交付、检查点或网络未知结果仍为 `uncertain`。额度恢复不会自动重发；人工重试仍复核原来源及当前授权。数据格式不变，不删除旧记录；回退代码也不会使这些记录自动发送。
+
 投递 Worker 的 `storage` 故障可附带 `deliveryFailure`：`phase` 区分 `startup`、`request`、`worker`，
 `reason` 区分超时（`timeout`）、Windows ACL（`acl`）、SQLite（`sqlite`）、写锁冲突（`conflict`）等安全类别；
 请求故障还可带 `operation`。未识别的原因仍为 `storage`，不能据此推断数据库损坏。

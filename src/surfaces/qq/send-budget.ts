@@ -2,6 +2,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { QqProtocolError } from "./protocol.js";
 import { qqRecipientKey, type QqRecipient } from "./addressing.js";
 
+const RESULT_HEADROOM = 8;
+const STATUS_HEADROOM = 2;
+
 /** One account generation, metadata only. Reservations are never refunded after unknown outcomes. */
 export class QqSendBudget {
   private nextRequest = 0;
@@ -10,7 +13,7 @@ export class QqSendBudget {
   private account: number[] = [];
   private readonly turns = new Map<string, { text: number; status: number; progress: number; until: number }>();
 
-  reserve(destination: QqRecipient, parts: number, scope?: { key: string; status: boolean; progress?: boolean } | "startup" | "interaction", planTimeoutMs = 45_000): {
+  reserve(destination: QqRecipient, parts: number, scope?: { key: string; status: boolean; progress?: boolean } | "startup" | "interaction" | "critical-interaction", planTimeoutMs = 45_000): {
     runPart<T extends { messageId: string }>(signal: AbortSignal, send: () => Promise<T>): Promise<T>;
   } {
     const recipient = qqRecipientKey(destination);
@@ -26,12 +29,18 @@ export class QqSendBudget {
     this.account = this.account.filter(value => value > now - 60_000);
     const recipientTimes = this.recipients.get(recipient) ?? [];
     const usage = turn ? this.turns.get(turn.key) ?? { text: 0, status: 0, progress: 0, until: now + day } : undefined;
+    // Optional output must leave room for one complete result and its terminal
+    // status. Result output itself leaves this Turn's remaining status slots.
+    // The headroom is admission policy, never additional platform quota.
+    const headroom = turn && !turn.progress
+      ? turn.status ? 0 : Math.max(0, STATUS_HEADROOM - usage!.status)
+      : scope === undefined || scope === "critical-interaction" ? 0 : RESULT_HEADROOM + STATUS_HEADROOM;
     if (!Number.isSafeInteger(parts) || parts < 1 || parts > 8) throw new QqProtocolError("message", "invalid-input");
     if ((!this.recipients.has(recipient) && this.recipients.size >= 4096)
       || (turn && !this.turns.has(turn.key) && this.turns.size >= 4096)
-      || (scope !== undefined && (this.account.length + parts > 24
-        || recipientTimes.filter(value => value > now - 60_000).length + parts > 16
-        || recipientTimes.length + parts > 800))
+      || (scope !== undefined && (this.account.length + parts + headroom > 24
+        || recipientTimes.filter(value => value > now - 60_000).length + parts + headroom > 16
+        || recipientTimes.length + parts + headroom > 800))
       || (usage && turn && (turn.progress ? usage.progress + parts > 8 : turn.status ? usage.status + parts > 2 : usage.text + parts > 16))) {
       throw new QqProtocolError("message", "budget");
     }

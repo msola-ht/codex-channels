@@ -37,14 +37,26 @@ export class QqBodyStreaming {
   private readonly lifetime = new AbortController();
   private readonly streams = new Map<string, Stream>();
   private readonly usedSources = new Set<string>();
-  private readonly startedSources = new Set<string>();
+  private readonly startedSources = new Map<string, { signal: AbortSignal; retire: () => void }>();
 
   constructor(private readonly client: Pick<QqProtocolClient, "sendStream">,
     private readonly sources: QqTaskSources, private readonly budget: QqSendBudget,
     private readonly failed: () => void, private readonly confirmed: (frames: number) => void) {}
 
   started(source: QqTaskSourceReference): void {
-    if (this.startedSources.size < 4096) this.startedSources.add(this.sourceKey(source));
+    const key = this.sourceKey(source);
+    if (this.lifetime.signal.aborted || this.startedSources.has(key) || this.startedSources.size >= 4096) return;
+    const signal = this.sources.cancellationSignal(source);
+    if (!signal || signal.aborted) return;
+    const retire = () => {
+      this.startedSources.delete(key);
+      this.usedSources.delete(source.sourceToken);
+      for (const stream of this.streams.values()) {
+        if (this.sourceKey(stream.source) === key) this.discard(stream);
+      }
+    };
+    this.startedSources.set(key, { signal, retire });
+    signal.addEventListener("abort", retire, { once: true });
   }
 
   /** Runs before the shared router may shed a delta. No networking in the observer. */
@@ -95,10 +107,7 @@ export class QqBodyStreaming {
     const key = this.key(event);
     const stream = this.streams.get(key);
     if (!stream || stream.previewAdmitted) return;
-    stream.controller.abort();
-    clearTimeout(stream.sealTimer);
-    this.streams.delete(key);
-    stream.text = "";
+    this.discard(stream);
   }
 
   /** Only a confirmed closed prefix permits active continuation; uncertain streams never switch modes. */
@@ -110,12 +119,13 @@ export class QqBodyStreaming {
     if (!stream) return { kind: "ordinary" };
     stream.completed = true;
     clearTimeout(stream.sealTimer);
-    const bounded = AbortSignal.any([signal, this.lifetime.signal, AbortSignal.timeout(45_000)]);
+    const bounded = AbortSignal.any([signal, this.lifetime.signal, stream.controller.signal, AbortSignal.timeout(45_000)]);
     const abort = () => stream.controller.abort();
     bounded.addEventListener("abort", abort, { once: true });
     if (bounded.aborted) abort();
     try {
       await stream.tail;
+      bounded.throwIfAborted();
       if (!stream.attempted) return { kind: "ordinary" };
       const candidate = qqBodyMarkdownText(event.text);
       // Only the final unsent suffix may change representation. Never rewrite
@@ -128,6 +138,7 @@ export class QqBodyStreaming {
         || qqBodyMarkdownPrefix(text, true).length !== text.length;
       const operation = continuation ? "qq-stream:prefix" : "qq-stream:complete";
       await checkpoint({ operation, state: "started" });
+      bounded.throwIfAborted();
       if (stream.failed || !stream.id || !text.startsWith(stream.sent)) {
         throw new QqProtocolError("message", "invalid-response");
       }
@@ -153,22 +164,16 @@ export class QqBodyStreaming {
         markdownStart: restart === stream.sent.length ? 0 : marker.length + restart - stream.sent.length };
     } finally {
       bounded.removeEventListener("abort", abort);
-      stream.controller.abort();
-      clearTimeout(stream.sealTimer);
       // A later explicit journal retry selects a full-result representation and may duplicate previews.
-      this.streams.delete(key);
-      stream.text = ""; stream.sent = "";
+      this.discard(stream);
     }
   }
 
   /** Revoke leftover previews without closing or resending any uncertain platform frame. */
   discardTurn(conversationId: string, threadId: string, turnId: string): void {
-    for (const [key, stream] of this.streams) {
+    for (const stream of this.streams.values()) {
       if (stream.source.conversationId !== conversationId || stream.source.threadId !== threadId || stream.source.turnId !== turnId) continue;
-      stream.controller.abort();
-      clearTimeout(stream.sealTimer);
-      this.streams.delete(key);
-      stream.text = ""; stream.sent = "";
+      this.discard(stream);
     }
   }
 
@@ -183,15 +188,14 @@ export class QqBodyStreaming {
     this.lifetime.abort();
     for (const stream of this.streams.values()) clearTimeout(stream.sealTimer);
     await Promise.allSettled([...this.streams.values()].flatMap(value => value.tail ? [value.tail] : []));
+    for (const { signal, retire } of this.startedSources.values()) signal.removeEventListener("abort", retire);
     this.streams.clear(); this.usedSources.clear(); this.startedSources.clear();
   }
 
   private async flush(stream: Stream, caller?: AbortSignal): Promise<void> {
     const local = AbortSignal.any([this.lifetime.signal, stream.controller.signal, ...(caller ? [caller] : [])]);
     if (!(await this.sources.awaitSource(stream.source, local))) {
-      stream.controller.abort();
-      this.streams.delete(stream.key);
-      stream.text = "";
+      this.discard(stream);
       return;
     }
     const anchor = this.sources.streamSource(stream.source);
@@ -295,6 +299,13 @@ export class QqBodyStreaming {
     // conservatively bound the added text; the reported limit can only tighten.
     return stream.remainingCharacters === undefined
       || Buffer.byteLength(content.slice(stream.sent.length)) <= stream.remainingCharacters;
+  }
+
+  private discard(stream: Stream): void {
+    stream.controller.abort();
+    clearTimeout(stream.sealTimer);
+    if (this.streams.get(stream.key) === stream) this.streams.delete(stream.key);
+    stream.text = ""; stream.sent = "";
   }
 
   private key(event: Body): string {

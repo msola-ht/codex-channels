@@ -10,7 +10,7 @@
 - `feishu-access.ts`：校验飞书 Surface、App 账号和 `open_id` 精确允许名单，并支持原子替换。
 - `telegram-access.ts`：实现统一授权接口，同时校验 Telegram Surface、Bot 账号和 Actor 允许名单，并支持原子替换热加载后的名单。
 - `weixin-access.ts`：校验微信 Surface、机器人账号和微信用户 ID 精确允许名单，并支持原子替换。
-- `qq-access.ts`：校验 QQ App、单聊用户以及独立群/成员允许名单；群目标按规范编码保存群与成员身份，每位成员独立 Conversation，回复对群公开。群权限不继承单聊名单；未知、非规范编码、跨成员和未同意公开输出均拒绝。
+- `qq-access.ts`：仅校验 QQ App 与单聊用户允许名单。群功能暂停，所有群目标拒绝；群地址编码、解析及配置类型仅保留供旧数据读取，不授予群权限。
 - `workspace-registry.ts`：保存服务端预配置 Workspace，支持安全热加载新增项，并解析默认项和显式选择。
 
 Surface 输入不能提交任意绝对工作目录；所有 Thread、Turn、Shell 和文件相关操作都必须使用 Registry 中已经授权的 Workspace。

@@ -1,10 +1,10 @@
 import { DeliveryControlServer } from "../../runtime/delivery-control.mjs";
 import { randomUUID } from "node:crypto";
-import { DeliveryCoordinator, DeliveryJournal, DeliveryError, type DeliveryFailure } from "../delivery/index.js";
+import { DeliveryCoordinator, DeliveryJournal, DeliveryError, DeliveryNotSentError, type DeliveryFailure } from "../delivery/index.js";
 import type { ConversationTarget, OutputEvent } from "../conversation-core/index.js";
 import { conversationTargetKey, surfaceAccountKey } from "../conversation-core/index.js";
 import type { SurfaceDeliverySource } from "../surfaces/index.js";
-import { mayReleaseUncertainOutputBarrier, decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, withPersistentDeliveryDiagnostics, type DeliveryCheckpoint } from "../surfaces/index.js";
+import { SurfaceDeliveryNotSentError, mayReleaseUncertainOutputBarrier, decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, withPersistentDeliveryDiagnostics, type DeliveryCheckpoint } from "../surfaces/index.js";
 
 export interface PersistentSurfaceOutputOptions {
   directory: string;
@@ -57,14 +57,21 @@ export class PersistentSurfaceOutput {
         this.liveOrders.delete(record.id);
         const payload = decodePersistentOutput(record.payload);
         if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
-        await withPersistentDeliveryDiagnostics(record.id, () => withPersistentOutputImage(payload, options.directory, (event) => options.deliver(event, signal, async (checkpoint) => {
-          if (!(await this.journal.checkpoint(record.id, checkpoint))) throw new DeliveryError("storage");
-          this.control.changed();
-          if (checkpoint.state === "started") {
-            signal.throwIfAborted();
-            if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
-          }
-        }, () => options.authorized(payload.event, payload.owner), liveOrder?.order, options.source?.(payload.event, payload.owner), liveOrder?.presentation)));
+        let checkpointObserved = record.progress.length > 0;
+        try {
+          await withPersistentDeliveryDiagnostics(record.id, () => withPersistentOutputImage(payload, options.directory, (event) => options.deliver(event, signal, async (checkpoint) => {
+            checkpointObserved = true;
+            if (!(await this.journal.checkpoint(record.id, checkpoint))) throw new DeliveryError("storage");
+            this.control.changed();
+            if (checkpoint.state === "started") {
+              signal.throwIfAborted();
+              if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
+            }
+          }, () => options.authorized(payload.event, payload.owner), liveOrder?.order, options.source?.(payload.event, payload.owner), liveOrder?.presentation)));
+        } catch (error) {
+          if (error instanceof SurfaceDeliveryNotSentError && !checkpointObserved) throw new DeliveryNotSentError();
+          throw error;
+        }
       },
       fault: (code, account, id) => options.fault(code, account, id, code === "storage" ? this.journal.failure : undefined),
       acknowledged: (record) => {

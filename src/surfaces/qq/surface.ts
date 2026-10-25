@@ -12,8 +12,7 @@ import { QqImageStore } from "./image-store.js";
 import { QqFileInput } from "./file-input.js";
 import { QqMediaInput } from "./media-input.js";
 
-export interface CreateQqSurfaceOptions extends Omit<QqMessageOptions, "groupPairing"> {
-  createGroupPairing?(): NonNullable<QqMessageOptions["groupPairing"]> & { start(): Promise<void>; close(): Promise<void> };
+export interface CreateQqSurfaceOptions extends QqMessageOptions {
   appId: string;
   appSecret: string;
   uploadsDirectory: string;
@@ -159,7 +158,6 @@ export class QqSurface implements SurfaceAdapter {
 
 class QqConnection {
   readonly messages: QqMessages;
-  private readonly groupPairing: ReturnType<NonNullable<CreateQqSurfaceOptions["createGroupPairing"]>> | undefined;
   private readonly network: QqNetwork;
   private readonly client: QqProtocolClient;
   private readonly transport: QqWebSocketTransport;
@@ -170,7 +168,6 @@ class QqConnection {
   private stopping: Promise<void> | undefined;
 
   constructor(private readonly options: CreateQqSurfaceOptions) {
-    this.groupPairing = options.createGroupPairing?.();
     // Validate credentials before acquiring network resources.
     this.client = new QqProtocolClient({ appId: options.appId, appSecret: options.appSecret,
       fetchImpl: (input, init) => this.network.fetchImpl(input, init),
@@ -184,7 +181,7 @@ class QqConnection {
       join(options.uploadsDirectory, `qq-files-${options.appId}`));
     this.media = new QqMediaInput(options.uploadsDirectory, options.appId,
       (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger);
-    this.messages = new QqMessages({ ...options, ...(this.groupPairing ? { groupPairing: this.groupPairing } : {}),
+    this.messages = new QqMessages({ ...options,
       images: this.images, files: this.files, media: this.media }, this.client);
     this.transport = new QqWebSocketTransport({
       client: this.client,
@@ -207,7 +204,6 @@ class QqConnection {
   }
 
   async start(): Promise<void> {
-    await this.groupPairing?.start();
     if (this.closed) throw new Error("QQ 已关闭");
     await this.transport.start();
   }
@@ -221,7 +217,7 @@ class QqConnection {
 
   private async closeResources(): Promise<void> {
     const work = Promise.allSettled([this.messages.close(), this.files.close(), this.media.close(), this.transport.stop(),
-      this.network.close(), this.groupPairing?.close()]).then(results => {
+      this.network.close()]).then(results => {
       if (results.some(result => result.status === "rejected")) throw new Error("QQ 连接资源关闭未确认");
     });
     let timer: ReturnType<typeof setTimeout> | undefined;

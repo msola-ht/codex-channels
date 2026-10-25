@@ -12,7 +12,6 @@ import {
 } from "../config/index.js";
 import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
 import { securePrivateDirectorySync } from "../../runtime/private-file.mjs";
-import { QqGroupPairingServer } from "../../runtime/qq-group-pairing.mjs";
 import {
   type ConversationTarget,
 } from "../conversation-core/index.js";
@@ -134,7 +133,7 @@ function createQqModule(
 ): SurfaceRuntimeModule {
   const config = options.config.qq;
   if (!config) throw new Error("QQ 运行配置不存在");
-  const access = new QqAccessPolicy(config.allowedUserOpenIds, config.appId, config.groups);
+  const access = new QqAccessPolicy(config.allowedUserOpenIds, config.appId);
   const removedBindings = removeUnauthorizedQqBindings(options.bindings, access, config.appId);
   if (removedBindings > 0) {
     options.logger.warn({ removedBindings }, "已清理不再授权的 QQ 会话绑定");
@@ -150,7 +149,6 @@ function createQqModule(
   };
   const adapter = new QqSurface({
     appId: config.appId, appSecret: config.appSecret, access,
-    createGroupPairing: () => new QqGroupPairingServer(dirname(options.config.credentialsDirectory), config.appId),
     uploadsDirectory: join(dirname(options.config.stateDatabasePath), "uploads"),
     service: options.service, commands: options.commands, actors: options.bindings,
     displaySettings,
@@ -187,7 +185,7 @@ function createQqModule(
     })),
     applyHotReload(next, changes) {
       if (changes.some(change => change.code === "surface.qq.allowed-users") && next.qq) {
-        access.replace(next.qq.allowedUserOpenIds, config.groups);
+        access.replace(next.qq.allowedUserOpenIds);
         notificationRecipients = new Set(next.qq.allowedUserOpenIds);
       }
     },
@@ -616,6 +614,8 @@ export function removeUnauthorizedQqBindings(
   let removed = 0;
   for (const target of bindings.conversations()) {
     if (target.surface !== "qq" || target.accountId !== accountId) continue;
+    // 停用群功能不删除用户绑定；恢复与投递另由访问策略失败关闭。
+    if (target.conversationId.startsWith("group:")) continue;
     const allowedActors = new Set(bindings.actors(target).filter(actorId =>
       access.isAllowed({ target, actorId })));
     if (bindings.retainActors(target, allowedActors)) removed += 1;

@@ -6,6 +6,14 @@ export interface DeliveryCheckpoint {
   messageId?: string;
 }
 
+/** The Surface proved that this delivery attempt emitted no platform message. */
+export class SurfaceDeliveryNotSentError extends Error {
+  constructor(options?: ErrorOptions) {
+    super("渠道投递在发送前被阻止", options);
+    this.name = "SurfaceDeliveryNotSentError";
+  }
+}
+
 const context = new AsyncLocalStorage<DeliveryReceipt | undefined>();
 
 /** Tracks actual queued operations for one output, including nested enqueues and live snapshots. */

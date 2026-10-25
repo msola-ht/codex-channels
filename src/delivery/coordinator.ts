@@ -1,5 +1,5 @@
 import { DeliveryJournal } from "./journal.js";
-import { defaultDeliveryLimits, DeliveryError, type DeliveryRecord, type DeliverySubmission } from "./types.js";
+import { defaultDeliveryLimits, DeliveryError, DeliveryNotSentError, type DeliveryRecord, type DeliverySubmission } from "./types.js";
 
 export interface DeliveryCoordinatorOptions {
   accounts(): string[];
@@ -200,11 +200,12 @@ export class DeliveryCoordinator {
           cancelled,
         ]);
         controller.signal.throwIfAborted();
-      } catch {
-        if (!(await this.journal.transition(record.id, "sending", "uncertain"))) throw new DeliveryError("conflict");
+      } catch (error) {
+        const state = error instanceof DeliveryNotSentError ? "blocked" : "uncertain";
+        if (!(await this.journal.transition(record.id, "sending", state))) throw new DeliveryError("conflict");
         this.options.changed?.();
-        await this.releaseRetainedBarrier({ ...record, state: "uncertain" });
-        this.options.fault("delivery-uncertain", record.account, record.id);
+        await this.releaseRetainedBarrier({ ...record, state });
+        this.options.fault(state === "blocked" ? "delivery-not-sent" : "delivery-uncertain", record.account, record.id);
         return;
       }
       // Platform confirmation and local acknowledgement are different failure domains.

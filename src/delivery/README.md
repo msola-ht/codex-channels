@@ -6,6 +6,7 @@
 
 - `index.ts`：公开 Journal、Coordinator、异步只读查询、读取与写入者关闭/退出确认，以及容量、状态与安全故障类型。
 - `types.ts`：schema、状态、容量、Worker 命令及安全错误码。
+  `DeliveryNotSentError` 是组合边界提供的明确未发送证据，Coordinator 保留为 `blocked` 并报告 `delivery-not-sent`；普通异常仍为 `uncertain`。两类均不自动重试或确认送达，不新增持久状态或修改 Schema。
 - `sqlite-journal.ts`：独立 SQLite、私有密钥、AES-256-GCM、事务额度、检查点、会话顺序与操作系统释放的单写者锁；生产环境由 Worker 独占。
   已有库先只读校验版本、必需结构与完整性，通过后才调整目录权限、取得写入锁或改变日志模式；不兼容库不初始化或修补。
 - `payload-codec.ts`：写入端与只读查看端共用的 AES-256-GCM 编解码和记录身份认证数据；不持有密钥、文件、连接或恢复状态。

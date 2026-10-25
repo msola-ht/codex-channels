@@ -1,5 +1,7 @@
 # 渠道展示与消息详情
 
+QQ 群功能暂停开发并关闭；下文群类型和群覆盖说明仅保留已有配置的结构合同，不代表能发送群消息。已有覆盖无需删除，单聊显示与权限保持独立。关闭群功能及本轮单聊修复尚未部署，状态见 [QQ 消息合同](qq-message-contract.md#当前实现与待完善范围)。
+
 本页说明 Gateway 完成卡片、`/metrics` 命令和信息类聊天指令的展示口径，以及消息详情
 设置控制的技术字段。根目录 README 只保留常用操作，细节以本页为准。
 
@@ -12,7 +14,7 @@
 
 可选 `routine_notifications` 布尔值缺省有效为 `true`，读取和安全默认补齐不物化，支持四渠道（含微信和 QQ 群）的全局 → 渠道 → 账号 → 聊天类型 → 指定聊天五层继承。关闭任务开始、普通成功配置提示、成功或运行中的压缩、成功 Hook、自动审批通过、MCP starting/ready、Thread 名称与可用状态。配置提示仅隐藏 `reloaded`、`provider-settings-scheduled`、`provider-settings-restarting`、`provider-settings-applied`；Gateway 即将退出的 restarting 提示保留。失败、拒绝、停止、全部重试、账号与额度、OAuth、需用户动作、正文附件、审批及命令回执保留；Gateway 上线摘要、App Server 连接恢复、会话空闲释放和全局空闲释放始终保留，持久 Workspace 新增回执始终保留。该设置不取消已入 Journal 的投递义务，也不把未发送伪报为已送达。
 
-CLI“常规通知”、WebUI 和 API 使用共享 `display.routine-notifications` 显式 `{ action: "set", value: boolean }` / `{ action: "inherit" }`，拒绝 null、别名和多余字段；读回区分有效 `routineNotificationsEnabled` 与本层 `routineNotificationsOverride`（布尔值或 null）。恢复缺省删除字段；任一渠道启用时全局有效值变化要求重启 Gateway，否则 reload，隐式 true 与显式 true 互换只 reload。范围数组沿整体保守判定。保存前创建私有备份，预览、取消和未变化不写，旧 revision 拒绝；保存后读回不确定不自动重试或回滚。回退不支持此字段的版本前，显式清除全局及所有覆盖中的 `routine_notifications`，核对后续修改，不自动迁移或用旧备份覆盖新修改。此批源码尚未部署，真实平台效果待验收。
+CLI“常规通知”、WebUI 和 API 使用共享 `display.routine-notifications` 显式 `{ action: "set", value: boolean }` / `{ action: "inherit" }`，拒绝 null、别名和多余字段；读回区分有效 `routineNotificationsEnabled` 与本层 `routineNotificationsOverride`（布尔值或 null）。恢复缺省删除字段；任一渠道启用时全局有效值变化要求重启 Gateway，否则 reload，隐式 true 与显式 true 互换只 reload。范围数组沿整体保守判定。保存前创建私有备份，预览、取消和未变化不写，旧 revision 拒绝；保存后读回不确定不自动重试或回滚。回退不支持此字段的版本前，显式清除全局及所有覆盖中的 `routine_notifications`，核对后续修改，不自动迁移或用旧备份覆盖新修改。当前代码已部署，真实平台完整效果仍待验收。
 
 | 显示字段 | Telegram / 飞书 | 微信 | QQ 单聊 | QQ 群 |
 | --- | --- | --- | --- | --- |
@@ -26,15 +28,15 @@ CLI“常规通知”、WebUI 和 API 使用共享 `display.routine-notification
 
 可选 `commentary` 布尔值缺省有效为 `true`，普通读取与安全默认补齐不物化。Telegram、飞书及 QQ（含已支持群）按相同五层继承；微信本来不展示 commentary，覆盖严格拒绝此字段的 true/false，管理字段列表不提供该选项。关闭只隐藏明确 `phase = commentary` 的新过程说明，不控制 `reasoning` 状态或原始推理。未知或空阶段的完整正文保留；关闭时未知阶段增量先缓冲且暂不预览，待明确 `final_answer` 或完整 Item 再展示，避免晚到 commentary 泄漏。已经按可显示正文准入的流仍按原义务收尾；已入 Journal 内容继续投递。正文、附件、审批、失败、任务与模型不受此开关改变。
 
-CLI“过程说明”和 WebUI 使用共享 `display.commentary` 管理：显式 `{ action: "set", value: boolean }` / `{ action: "inherit" }`，读取区分有效 `commentaryEnabled` 与本层 `commentaryOverride`（布尔值或 `null`）。恢复缺省删除字段。有效值变化且 Telegram、飞书或 QQ 任一启用时要求重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload，范围数组继续整体保守判定。预览、取消与未变化不写，旧 revision 拒绝；保存前创建私有备份，读回不确定不自动重试。回退不支持该字段的版本前，显式清除全局及所有覆盖中的 `commentary`，核对备份后的修改，勿直接恢复备份覆盖新修改。此批源码尚未部署，真实平台效果待验收。
+CLI“过程说明”和 WebUI 使用共享 `display.commentary` 管理：显式 `{ action: "set", value: boolean }` / `{ action: "inherit" }`，读取区分有效 `commentaryEnabled` 与本层 `commentaryOverride`（布尔值或 `null`）。恢复缺省删除字段。有效值变化且 Telegram、飞书或 QQ 任一启用时要求重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload，范围数组继续整体保守判定。预览、取消与未变化不写，旧 revision 拒绝；保存前创建私有备份，读回不确定不自动重试。回退不支持该字段的版本前，显式清除全局及所有覆盖中的 `commentary`，核对备份后的修改，勿直接恢复备份覆盖新修改。当前代码已部署，真实平台完整效果仍待验收。
 
-可选 `streaming` 布尔值缺省有效为 `true`，读取与安全默认补齐不物化；支持全局及相同五层继承，只控制 Telegram、飞书与 QQ 单聊中用户可见的 `text.delta` 正文预览。不改变上游模型流式、思考状态、完整 `text.completed` 正文、附件、授权、原回复窗口或可靠交付义务。微信覆盖和 QQ 群类型、精确群覆盖严格拒绝 `streaming = true` 与 `false`；QQ 渠道或账号层可设置，但只作用其单聊。管理字段列表和群摘要不展示流式选项。全局 `display.streaming` 写入接受 `{ action: "set", value: boolean }` 或 `{ action: "inherit" }`，读取区分有效 `streamingEnabled` 与本层 `streamingOverride`（布尔值或 `null`）。Telegram、飞书或 QQ 任一启用时有效值变化要求重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload。范围覆盖数组仍整体保守判定；保存前创建私有备份，预览、取消和未变化不写，过期 revision 拒绝。回退不支持该字段的版本前显式清除全局及所有覆盖中的 `streaming`，核对备份后的修改，不直接覆盖配置。此批源码尚未部署，平台效果待验收。
+可选 `streaming` 布尔值缺省有效为 `true`，读取与安全默认补齐不物化；支持全局及相同五层继承，只控制 Telegram、飞书与 QQ 单聊中用户可见的 `text.delta` 正文预览。不改变上游模型流式、思考状态、完整 `text.completed` 正文、附件、授权、原回复窗口或可靠交付义务。微信覆盖和 QQ 群类型、精确群覆盖严格拒绝 `streaming = true` 与 `false`；QQ 渠道或账号层可设置，但只作用其单聊。管理字段列表和群摘要不展示流式选项。全局 `display.streaming` 写入接受 `{ action: "set", value: boolean }` 或 `{ action: "inherit" }`，读取区分有效 `streamingEnabled` 与本层 `streamingOverride`（布尔值或 `null`）。Telegram、飞书或 QQ 任一启用时有效值变化要求重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload。范围覆盖数组仍整体保守判定；保存前创建私有备份，预览、取消和未变化不写，过期 revision 拒绝。回退不支持该字段的版本前显式清除全局及所有覆盖中的 `streaming`，核对备份后的修改，不直接覆盖配置。当前代码已部署，平台完整效果仍待验收。
 
 可选 `presentation_detail = "basic" | "detailed" | "full"` 按相同五层逐字段继承，缺省有效为 `basic`，读取与安全默认补齐不物化。它独立控制聊天可见的上线、完成、子代理和自动审批通过通知；基础使用紧凑摘要，详细保留日常明细，完整展开可用统计分项和环境信息。日志等级、调用采集、开发运行方式、任务执行、审批和完成通知开关各自独立。管理读取返回有效 `presentationDetail` 与本层 `presentationDetailOverride`（缺省 `null`），全局写入使用 `display.presentation-detail` 的显式 `set` / `inherit`。四渠道中任一启用时全局有效值变化要求重启 Gateway，否则 reload；缺省基础与显式基础互换只要求 reload，范围覆盖数组仍整体保守判定。保存前创建私有备份；回退到不支持该字段的版本前显式清除全局和所有覆盖中的 `presentation_detail`，核对后续修改，勿用旧备份覆盖新修改。
 
 `subagents = false` 同时隐藏 `subagent.spawned`、`subagent.contacted`、`subagent.completed` 和 `operation.kind = subagent`，其他工具仍由操作档位控制。它只控制新事件的渠道展示，不限制 Core 子代理执行，不影响正文、图片、审批与父轮完成或失败；既有 Journal pending 子代理结果仍按原义务投递。全局管理读取区分 `subagentsEnabled` 有效值与 `subagentsOverride`（布尔值或缺省 `null`），写入使用显式 `set` / `inherit`。全局有效值只在已启用 Telegram、飞书或 QQ 时变化要求重启 Gateway；仅微信时重新读取即可。范围覆盖数组仍作为整体配置单元判定重启。
 
-完成通知 `off` 只隐藏新的成功且没有错误、没有权威 `missingFinalResponse` 的事件；失败、停止、缺少最终回答仍保留准确回执。`brief` 使用精简结果，不意味着最终正文已送达；`detailed` 保留详细统计。既有 Journal pending 完成记录继续按原投递义务发送。此次源码尚未部署，四渠道真实显示与重启后的平台效果仍待验收。
+完成通知 `off` 只隐藏新的成功且没有错误、没有权威 `missingFinalResponse` 的事件；失败、停止、缺少最终回答仍保留准确回执。`brief` 使用精简结果，不意味着最终正文已送达；`detailed` 保留详细统计。既有 Journal pending 完成记录继续按原投递义务发送。当前代码已部署，四渠道全部显示组合与重启后的平台效果尚未完整验收。
 
 全局完成通知只有有效值改变且存在启用渠道时才要求重启；缺省 `detailed` 与显式 `detailed` 互换只 reload，重复完全相同配置为 none。QQ 隐藏的实时计划、思考及常规状态在共享快照入队前过滤，仍先观察状态变化；不会把主动隐藏误报成原任务来源失效，也不会取消隐藏完成的独立收尾。
 
@@ -111,7 +113,7 @@ QQ 使用共享 `createStartupPresentation` 和 `createTurnCompletedPresentation
 两类通知沿 QQ 完整文字计划及账号/接收人预算；完成通知还受每 Turn 状态片预算约束。超限明确失败，不截断冒充成功。
 关闭或撤权会阻止尚未发送的步骤；平台已接收的消息无法撤回。QQ 可在同一气泡内更新被动正文流，最终全文通过共享投递确认；审批与问题交互使用完整预览及来源绑定的按钮。流式窗口、失败及验收范围见 [QQ 消息合同](qq-message-contract.md#正文流式生产任务与同气泡显示已观察)。
 
-QQ 任务过程沿共享事件与展示配置接入：计划、工具与思考状态分别遵循目标的有效范围设置，思考不显示原始推理内容；完整 commentary 单独交付，不进入正文流或文件回退。每 Turn 过程最多八片，正文十六片与完成状态两片单独计数，但仍共同受账号和收件人限额约束。过程失败不改写任务执行结果，可靠事件的未确认发送留在共享投递箱；任务开始通知复用共享“已开始处理”及权威审批方式，遵守常规通知开关。本轮源码尚未部署，实际观察范围见 [任务过程反馈](qq-message-contract.md#任务过程反馈本轮源码调整尚未部署)。
+QQ 任务过程沿共享事件与展示配置接入：计划、工具与思考状态分别遵循目标的有效范围设置，思考不显示原始推理内容；完整 commentary 单独交付，不进入正文流或文件回退。每 Turn 过程最多八片，正文十六片与完成状态两片单独计数，但仍共同受账号和收件人限额约束。过程失败不改写任务执行结果，可靠事件的未确认发送留在共享投递箱；任务开始通知复用共享“已开始处理”及权威审批方式，遵守常规通知开关。当前代码已部署，实际观察范围见 [任务过程反馈](qq-message-contract.md#任务过程反馈)。
 
 ## 完成卡速度档位
 

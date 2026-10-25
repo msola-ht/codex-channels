@@ -35,32 +35,15 @@ export function parseQqGroupConversationId(conversationId: string): {
 
 export class QqAccessPolicy implements SurfaceAccessPolicy {
   private users: ReadonlySet<string>;
-  private groups: ReadonlyMap<string, ReadonlySet<string>>;
-  constructor(users: ReadonlySet<string>, private readonly appId: string, groups: readonly QqGroupAccess[] = []) {
+  constructor(users: ReadonlySet<string>, private readonly appId: string) {
     this.users = new Set(users);
-    this.groups = groupMembers(groups);
   }
-  replace(users: ReadonlySet<string>, groups: readonly QqGroupAccess[] = []): void {
-    const members = groupMembers(groups);
+  replace(users: ReadonlySet<string>): void {
     this.users = new Set(users);
-    this.groups = members;
   }
   isAllowed({ target, actorId }: SurfaceAccessContext): boolean {
     if (target.surface !== "qq" || target.accountId !== this.appId) return false;
-    if (target.conversationId === `c2c:${actorId}`) return this.users.has(actorId);
-    const group = parseQqGroupConversationId(target.conversationId);
-    return group?.memberOpenId === actorId && this.groups.get(group.groupOpenId)?.has(actorId) === true;
+    // 群权限体系尚未确定。旧群配置只保留，不授予输入、恢复或出站能力。
+    return target.conversationId === `c2c:${actorId}` && this.users.has(actorId);
   }
-}
-
-function groupMembers(groups: readonly QqGroupAccess[]): ReadonlyMap<string, ReadonlySet<string>> {
-  const members = new Map<string, ReadonlySet<string>>();
-  for (const group of groups) {
-    if (group.allowPublicOutput !== true || !validGroupIdentity(group.groupOpenId) || members.has(group.groupOpenId)
-      || group.allowedMemberOpenIds.size === 0 || [...group.allowedMemberOpenIds].some(id => !validGroupIdentity(id))) {
-      throw new Error("QQ 群授权无效，须明确同意群内公开输出并提供独立成员名单");
-    }
-    members.set(group.groupOpenId, new Set(group.allowedMemberOpenIds));
-  }
-  return members;
 }

@@ -897,7 +897,7 @@ export abstract class GatewayComponentGraph {
         isBindingRestoring: (threadId) => this.isBindingRestoring(threadId),
         listForegroundBindings: () =>
           this.router.allBindings().filter(
-            (binding) => !this.router.isBackgroundThread(binding.threadId),
+            (binding) => !this.router.isBackgroundThread(binding.threadId) && !this.isSuspendedQqGroup(binding.target),
           ),
         idleState: (target) => this.router.idleState(target),
         ensureIdleState: (target, atMs) =>
@@ -927,6 +927,7 @@ export abstract class GatewayComponentGraph {
       });
     }
     this.output.subscribe("conversation-background-release", async (event) => {
+      if (this.isSuspendedQqGroup(event.target)) return;
       const threadId = event.type === "turn.completed"
         ? event.threadId
         : event.type === "subagent.completed"
@@ -1052,6 +1053,7 @@ export abstract class GatewayComponentGraph {
     this.scheduledTasks = config.scheduledTasksEnabled
       ? new ScheduledTaskComposition({
           stateDatabasePath: config.stateDatabasePath,
+          canReleaseBinding: task => !this.isSuspendedQqGroup(task),
           registerConstructionCleanup,
           releaseRecoveredThread: (threadId, isCurrent) => service.releaseBackgroundIfComplete(threadId, {
             dispatchQueued: false, isCurrent,
@@ -1167,7 +1169,8 @@ export abstract class GatewayComponentGraph {
           releaseSource: (event, owner) => this.releaseOutputSource(event, owner),
           fault: (code, account, persistentDeliveryId, failure) => {
             logger.error({ code, account, persistentDeliveryId, ...(failure ? { deliveryFailure: failure } : {}) }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
-            if (code === "delivery-uncertain" || code === "authorization-changed" || code === "acknowledged-cleanup-failed") return;
+            if (code === "delivery-uncertain" || code === "delivery-not-sent"
+              || code === "authorization-changed" || code === "acknowledged-cleanup-failed") return;
             if (account && code !== "storage" && code !== "capacity" && code !== "mailbox-full") this.surfaceManager.suspendPersistentAccount(account);
             else void this.requestStop().catch(() => logger.error("可靠投递故障后的 Gateway 清理失败"));
           },
@@ -1360,6 +1363,8 @@ export abstract class GatewayComponentGraph {
       reduce: (event) => this.core.handle(event, { threadClosureObserved: event.type === "thread.closed" }),
       isBackgroundThread: (threadId) => this.router.isBackgroundThread(threadId),
       retryBackgroundRelease: (threadId, trigger) => {
+        const target = this.bindings.getByThread(threadId)?.target;
+        if (target && this.isSuspendedQqGroup(target)) return;
         void this.trackQueueLifecycleTask(() => service.retryPendingBackgroundRelease(threadId,
           () => !this.stopping && !this.isBindingRestoring(threadId)))
           .catch(async (error) => {
@@ -1499,6 +1504,7 @@ export abstract class GatewayComponentGraph {
       router: this.router,
       output: this.output,
       enabledSurfaces: () => this.surfaces.filter(surface => !surface.connectionOnly && surface.capabilities?.recoverBindings !== false),
+      canRestoreBinding: binding => !this.isSuspendedQqGroup(binding.target),
       scheduledRecovery: () => this.scheduledTasks?.coordinator,
       releaseBackground: async (threadId, isCurrent) =>
         await this.trackQueueLifecycleTask(() =>
@@ -2160,8 +2166,12 @@ export abstract class GatewayComponentGraph {
       : target.surface === "weixin" && this.config.weixin
       ? new WeixinAccessPolicy(this.config.weixin.allowedUserIds, this.config.weixin.accountId)
       : target.surface === "qq" && this.config.qq
-      ? new QqAccessPolicy(this.config.qq.allowedUserOpenIds, this.config.qq.appId, this.config.qq.groups)
+      ? new QqAccessPolicy(this.config.qq.allowedUserOpenIds, this.config.qq.appId)
       : undefined;
+  }
+
+  private isSuspendedQqGroup(target: Pick<ConversationTarget, "surface" | "conversationId">): boolean {
+    return target.surface === "qq" && target.conversationId.startsWith("group:");
   }
 
   private shutdownComponents(): Promise<void> {

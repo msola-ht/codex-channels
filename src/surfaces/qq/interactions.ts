@@ -203,7 +203,11 @@ function render(pending: Pending, token: string): { content: string; controls: {
   const request = pending.request;
   const prefix = `/respond ${token} ${pending.revision} `;
   const buttons: ReturnType<typeof qqMenuButton>[] = [];
-  const add = (action: string, label: string, enter = true) => buttons.push(qqMenuButton(action, label, prefix + action + (enter ? "" : " "), enter));
+  const textActions: string[] = [];
+  const add = (action: string, label: string, enter = true) => {
+    buttons.push(qqMenuButton(action, label, prefix + action + (enter ? "" : " "), enter));
+    textActions.push(`${label}${enter ? "" : "（命令末尾加空格，再追加回答）"}：\n${prefix}${action}`);
+  };
   let content: string;
   let markdownContent: string | undefined;
   let instruction = "请核对完整详情，再选择授权范围。";
@@ -256,6 +260,13 @@ function render(pending: Pending, token: string): { content: string; controls: {
   }
   add("cancel", request.type === "approval" ? "拒绝" : request.type === "user-input" ? "取消回答" : "取消交互");
   if (buttons.length > 15) throw new Error("QQ 交互按钮容量不足");
+  // The same one-use token/revision must remain reachable without keyboard
+  // support. Keep these commands inside the complete presentation barrier.
+  const textResponse = `按钮不可用时，复制对应文字命令发送：\n\n${textActions.join("\n\n")}`;
+  content += `\n\n${textResponse}`;
+  if (markdownContent !== undefined) {
+    markdownContent += `\n\n${qqLiteralMarkdown(textResponse)!}`;
+  }
   const rows: QqCommandKeyboard["content"]["rows"] = [];
   // Approval scope labels must remain readable. Use full-width actions when
   // possible, while keeping every offered decision within the five-row limit.

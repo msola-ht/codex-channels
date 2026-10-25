@@ -1,6 +1,11 @@
 # Codex 官方文档与源码索引
+
+QQ 当前实现、部署状态及未完善项统一见[消息合同当前范围](qq-message-contract.md#当前实现与待完善范围)。`7898264e` 已安装并重启 Gateway；下方批次部署措辞保留其原观察语境，不作为当前安装或全量验收结论。
+
+后续源码已暂停并关闭 QQ 群输入、输出、配对及绑定恢复，保留旧配置和绑定，待群权限重新设计。单聊共同额度保护、明确未发分类、流式来源回收及文字回应入口已完成源码修复；这些变更尚未部署，不改变 App Server 协议。下方群适配描述只保留暂停前记录。
+
 QQ 前十批适配已随 `9c0d3488` 部署，四个渠道已进入 ready；ready 只证明当次启动就绪，不代表所有能力通过真实客户端验收。范围、隔离观察和未验收边界见[分批记录](qq-message-contract.md#剩余适配分批计划2026-10-24)。后续源码修改的部署状态另行记录。
-本轮 QQ 过程反馈沿既有 `turn.retry`、`turn.reasoning`、`plan.updated`、操作和子代理事件呈现，不增加 RPC；瞬态快照与持久终态继续使用共享任务来源，完整 commentary 不流式、不转文件，未新增任务开始通知。子代理完成使用共享跟踪器的父 Thread/Turn 与当代精确来源关联，旧来源不恢复。本轮源码尚未部署，范围及观察边界见[过程反馈合同](qq-message-contract.md#任务过程反馈本轮源码调整尚未部署)。
+本轮 QQ 过程反馈沿既有 `turn.retry`、`turn.reasoning`、`plan.updated`、操作和子代理事件呈现，不增加 RPC；瞬态快照与持久终态继续使用共享任务来源，完整 commentary 不流式、不转文件；任务开始通知沿原任务来源和常规通知开关呈现。子代理完成使用共享跟踪器的父 Thread/Turn 与当代精确来源关联，旧来源不恢复。当前代码已部署，范围及观察边界见[过程反馈合同](qq-message-contract.md#任务过程反馈)。
 会话管理复用共享 rename、archive/unarchive、setPinned 与官方归档列表；模式与状态复用 effort/fast、Plan、permissions、approvalsReviewer 与 Goal get/clear，不新增协议。QQ Goal 入口固定已就绪 Thread，`/goal set` 按用户决定关闭；无参 Plan 切换模式，带需求 Plan 沿显式任务提交。审批方式按钮固定原 Thread 并传递有效性守卫。
 扩展目录与任务复用 Skills/角色目录、Plugin installed、MCP status、Hook list 和占用诊断；查询提供详情及分页回调，Skill/角色/Plugin 调用、MCP 管理、Hook 写入和强制释放分别沿下述任务或确认路径执行。
 后续管理批次接线 MCP OAuth、重载、资源读取及 Hook 信任/启停确认，沿既有受控协议和共享服务；OAuth 完成复用原登录关联，以独立通知来源进入 QQ 持久投递，不授予任务结果权限。Hook 的完整字面预览与确认门槛覆盖按钮和文字入口。OAuth 授权地址使用锁定 QQ 消息按钮合同的 type=0 URL 跳转，平台与客户端尚未验收；本地 HTTPS/本机 HTTP 和 4096 字符限制不代表平台上限。
@@ -10,14 +15,14 @@ QQ 前十批适配已随 `9c0d3488` 部署，四个渠道已进入 ready；ready
 准备精确 Thread、标记可能提交、确认响应 Turn 并结算失败。它经 Client/Provider 透传而不添加 RPC 字段，
 `turn/start` 仍可能实际追加；显式 `turn/steer` 响应必须匹配 expectedTurnId，空白 ID 不作成功。
 QQ 普通单聊文字沿共享 submit、来源注册、持久投递与 Outbox 接线；支持必要工作区/模型/状态命令及共享会话列表、显式恢复命令。图片批次复用既有图片输入和 `imageGeneration.savedPath` 输出，包含安全下载、共享私有暂存/模型能力校验、持久图片快照和显式图片发送；旧投递来源仍不恢复。共享审批、用户输入及 MCP 交互除已记录的问题回应外，其余分支仍待实机验收，见 [交互合同](qq-message-contract.md#审批与问题回应已部署部分分支待验收)。用户已确认普通文字任务闭环、会话列表分片、显式恢复及恢复后继续对话；两次按当前序号恢复不同会话符合用户预期。图片隔离入口、反例及未观察边界见 [QQ 消息合同](qq-message-contract.md)。
-QQ 文件与原生引用输入复用普通文本提交，不增加 App Server 方法或二进制协议字段。明确文本扩展名沿严格 UTF-8 校验，其余文件沿独立私有不透明暂存，只传路径及期限；引用仅使用平台事件的唯一匹配元素，不额外查询历史或下载引用附件。本机显式 `send-file` 沿共享 spool 及原 Thread 实时归属守卫发送，QQ 支持普通文件、MP4 与 SILK，飞书支持普通文件、MP4 与 Ogg/Opus；两阶段上传发送及 QQ 大文件分片属于渠道能力，不增加 App Server 方法。QQ/飞书显式图片同步复核该守卫。飞书图片和文本文件输入也复用共享附件提交范围，未增添 RPC。新增富媒体尚未部署或平台验收，入口边界见 [渠道文件](channel-file.md)。
+QQ 文件与原生引用输入复用普通文本提交，不增加 App Server 方法或二进制协议字段。明确文本扩展名沿严格 UTF-8 校验，其余文件沿独立私有不透明暂存，只传路径及期限；引用仅使用平台事件的唯一匹配元素，不额外查询历史或下载引用附件。本机显式 `send-file` 沿共享 spool 及原 Thread 实时归属守卫发送，QQ 支持普通文件、MP4 与 SILK，飞书支持普通文件、MP4 与 Ogg/Opus；两阶段上传发送及 QQ 大文件分片属于渠道能力，不增加 App Server 方法。QQ/飞书显式图片同步复核该守卫。飞书图片和文本文件输入也复用共享附件提交范围，未增添 RPC。富媒体代码已部署，完整平台验收仍未完成，入口边界见 [渠道文件](channel-file.md)。
 QQ 音视频输入：平台 ASR 沿普通文字，转换 WAV 沿既有 `localAudio` 与模型能力校验，MP4 沿共享视频引用与已有 MCP 消费；不新增 App Server 字段。共享附件提交可选来源观察器覆盖首次建会话、start/steer、最终确认和未知结果。隔离观察不等于真实平台或视频解码验收。
 QQ 第九批复用原生 Queue 六请求与 Gateway 计划任务，不新增 App Server 能力。Queue 由 [`thread-queue-observer.ts`](../src/application/thread-queue-observer.ts) 区分入队/启动确认，Client 仅投影官方 `item/started.userMessage` 的 Thread/Turn/Item/client ID，并以当前已握手连接证明拒绝旧连接身份；QQ 的 [`queue-sources.ts`](../src/surfaces/qq/queue-sources.ts) 在提交成功与精确身份同时满足后授权主动完整结果。计划任务通过可选 Surface 提交工厂和既有 SubmissionObserver 确认精确 Turn，结果固定原任务 Workspace/后台绑定；完整预览送达后才开放创建/删除确认。配置通知只沿当次 `configurationChanged` 向显式单聊名单发送，不订阅持久 Workspace 配置事件。隔离链路及反例观察范围见分批合同，真实 QQ 平台仍待验收；旧来源不恢复。
 第十批群聊是 Surface 身份与投递适配，不增加 App Server RPC：明确授权的群成员各自使用既有 Conversation/Thread 合同，群物理收件人共享额度，正文采用完整投递。重置券和强制释放复用已有账户/Runtime 能力，经 QQ 完整预览及单次确认接入；来源、权限和生命周期守卫贯穿最终操作。实现入口见 [`addressing.ts`](../src/surfaces/qq/addressing.ts) 与 [`privileged-management-menu.ts`](../src/surfaces/qq/privileged-management-menu.ts)，隔离证据与真实平台待验收范围见 [分批合同](qq-message-contract.md)。`/goal set` 继续不开放。
 QQ 正文增量使用既有 `text.delta` 输出，此前已接入被动 text/replace 流与最终全文检查点衔接；同气泡及完成通知已有用户确认，调度审查修复与异常边界的证据范围记录在同一合同中，不新增 App Server 协议能力。
 正文 Markdown 在既有流中显式使用 markdown/replace；增量只发送安全原文前缀，完成时的显示候选也必须保留已确认前缀。未启流的安全短正文复用 `sendMarkdown`；图片支持范围以 [QQ 消息合同](qq-message-contract.md) 的当前图片章节为准，不执行模型生成的交互标签或本地路径上传。流式回执的可选剩余长度只收紧本地预算，具体规则与尚未验收边界见该合同的呈现与流式收尾复审章节。`ad8e129b` 部署后记录四帧及完整结果确认，用户确认普通正文、表格和代码块显示正常；不代表所有客户端、代码语言高亮和异常场景全部验收，详见 [既有正文观察](qq-message-contract.md#正文-markdown-接入已部署普通正文显示已确认)。
 QQ `/help` 使用 Markdown 与按钮面板，工作区、模型设置及会话恢复的动态选择复用共享命令和模型快照；Setup 独立配置应用级 `Codex → /help` 常驻菜单。点击即执行按钮已改为 type=1 的 `INTERACTION_CREATE` 回调，需填入文字的入口保留 type=2；回调接收确认、主动回复与来源身份由 QQ 边界处理，不新增 App Server 协议。本次回调改造已部署，客户端回调仍待验收；既有手机菜单、文字按钮及问题截图不证明回调往返可用，见 [QQ 消息合同](qq-message-contract.md#点击按钮回调已部署客户端待验收)。
-现有启动、完成通知与命令回复新增 Markdown 预选规划，复用共享内容、字节与片数预算，保留发送前纯文本选择；不新增任务开始消息，不变更 App Server 能力。`5ceef1af` 已部署且 QQ 进入 ready，客户端显示仍待用户反馈。
+现有启动、完成通知与命令回复新增 Markdown 预选规划，复用共享内容、字节与片数预算，保留发送前纯文本选择，不变更 App Server 能力；任务开始通知另沿共享生命周期呈现。`5ceef1af` 已部署且 QQ 进入 ready，客户端显示仍待用户反馈。
 QQ 只读查询支持 `/usage`、无参数 `/limits`、共享参数 `/metrics` 和当前 `/diff`，复用现有账户、指标与 Diff 能力，不新增协议方法；`/limits reset` 另沿完整预览与单次确认消费重置券。结果超出被动回复预算时显示查看提示，真实平台各分支仍待验收。
 QQ 交互的本地入口为 [`interactions.ts`](../src/surfaces/qq/interactions.ts) 与 [`messages.ts`](../src/surfaces/qq/messages.ts)，复用下方审批/用户输入及异步用户问题协议合同。纯文字详情与末尾可信 Markdown 按钮经同一 [`Outbox`](../src/surfaces/qq/outbox.ts) 完整规划、预算预留及平台确认后才开放回应；失效、超限或展示失败安全取消，详见[当前交互合同](qq-message-contract.md#审批与问题回应已部署部分分支待验收)。
 `ec20fbc0` 与后续问题 Markdown 优化均已部署；用户截图确认短问题与按钮同气泡、点击选项后收到回应确认及对应的后续回复开头。后续全文被截图遮挡，其他交互分支未验收。长问题仅末片附按钮，审批详情继续字面展示，不改变协议和回应授权。

@@ -5,7 +5,7 @@
 可选 `display.routine_notifications` 不由默认补齐物化，缺省投影为必填 `MessageDisplaySettings.routineNotificationsEnabled = true`。四渠道含微信与 QQ 群均支持同名五层覆盖；全局管理 kind `display.routine-notifications` 使用显式 set boolean/inherit，读回有效值与 `routineNotificationsOverride`。全局有效值改变且任一渠道启用时重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组沿整体判定。不改持久 Schema；异常、需用户动作、持久 Workspace 回执和已入 Journal 义务由消费者保留。回退旧版前显式清除全局及覆盖 routine_notifications，不自动迁移。
 
 QQ 的 `[qq]` 配置复用共享严格 TOML Schema，仅在显式启用且 AppID、Secret、允许名单齐全时投影运行配置。
-单聊名单新增热加载，删除、账号、凭据或启停变化要求重启 Gateway。可选 `groups` 独立配置群与成员名单，必须显式同意公开输出；不从单聊扫码身份推导群授权，任何群授权变化均要求重启，缺省不启用群。
+单聊名单新增热加载，删除、账号、凭据或启停变化要求重启 Gateway。群功能暂停开发并关闭；已有可选 `groups` 仍按原结构校验并保留，但不投影为有效群授权，不从单聊扫码身份推导群权限。Setup 不再提供群编辑或配对。
 
 Workspace 仅定义 `id`、`name` 和 `cwd`；执行权限由 App Server 原生配置及 Thread 继承规则决定，Gateway 不提供工作区权限覆盖字段。
 
