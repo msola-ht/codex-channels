@@ -1178,7 +1178,7 @@ const zh = {
       "disable": "停用 Key"
     }
   },
-  capture: { mode: "调用记录模式", production: "生产", debug: "调试", scope: "Codex 与 Relay 共用。Relay 刷新配置后用于新请求；Codex 需重启 App Server。调试仍会脱敏并限制容量。" },
+  capture: { mode: "调用记录预设", production: "生产预设（3/65536）", debug: "调试预设（0/0）", custom: "自定义", values: "裁剪值：输入项 {inputItems} / 单项字节 {itemMaxBytes}。", scope: "仅控制调用采集，不改变日志或开发运行模式。选择预设会覆盖两项裁剪值；自定义值请在 TOML 中管理。裁剪值用于 Codex；Relay 仅在 0/0 时增加入站与交付采集阶段。调试仍会脱敏并限制容量。", activation: "Codex 需重启 App Server；Relay 刷新配置后用于新请求，在途采集沿用开始时的设置。" },
   requestMethod: {
     label: "方式",
     imageGeneration: "图片生成",
@@ -3101,7 +3101,7 @@ const en: Messages = {
       "disable": "Disable key"
     }
   },
-  capture: { mode: "Capture mode", production: "Production", debug: "Debug", scope: "Shared by Codex and Relay. Relay applies refreshed settings to new requests; Codex requires an App Server restart. Debug capture still redacts data and enforces size limits." },
+  capture: { mode: "Call capture preset", production: "Production preset (3/65536)", debug: "Debug preset (0/0)", custom: "Custom", values: "Clipping values: input items {inputItems} / bytes per item {itemMaxBytes}.", scope: "Controls call capture only, independently of logging and development mode. Selecting a preset replaces both clipping values; manage custom values in TOML. Clipping applies to Codex; Relay adds inbound and delivery capture stages only for 0/0. Debug capture still redacts data and enforces size limits.", activation: "Codex requires an App Server restart. Relay applies refreshed settings to new requests; captures already in progress retain their initial settings." },
   requestMethod: {
     label: "Method",
     imageGeneration: "Image generation",

@@ -23,7 +23,7 @@ import {
   applyMetricsSetting,
   projectMetricsSettings,
 } from "./config-metrics-management.mjs";
-import { gatewayChannelStates } from "./config-summary.mjs";
+import { gatewayChannelStates, projectModelTrafficSettings } from "./config-summary.mjs";
 import {
   applyWebuiSetting,
   projectWebuiSettings,
@@ -71,7 +71,7 @@ export function loadGatewaySettings(environment = process.env) {
       idleReleaseMinutes: conversation.idle_release_minutes,
       defaultWorkspace: stringValue(document.default_workspace) || null,
       defaultModel: stringValue(codex.default_model) || null,
-      modelTrafficMode: debug.model_traffic_input_items === 0 && debug.model_traffic_item_max_bytes === 0 ? "debug" : "production",
+      ...projectModelTrafficSettings(debug),
       modelTrafficDumpEnabled: debug.model_traffic_dump,
       modelTrafficRetentionDays: debug.model_traffic_retention_days,
       officialTuiIdentity: {
@@ -386,17 +386,21 @@ function applySetting(document, input) {
     }
     case "system.model-traffic-dump": {
       const value = booleanValue(input.value, "value", "调用详情记录");
+      if (validateDebugConfigDocument(table(document.debug)).model_traffic_dump === value) return changed(value, "none");
       document.debug = { ...table(document.debug), model_traffic_dump: value };
       return changed(value, "restart-app-server");
     }
     case "system.model-traffic-mode": {
-      const value = enumValue(input.value, ["production", "debug"], "value", "调用记录模式");
+      const value = enumValue(input.value, ["production", "debug"], "value", "调用记录预设");
+      const current = projectModelTrafficSettings(validateDebugConfigDocument(table(document.debug)));
+      if (current.modelTrafficMode === value) return changed(value, "none");
       document.debug = { ...table(document.debug), model_traffic_input_items: value === "debug" ? 0 : 3,
         model_traffic_item_max_bytes: value === "debug" ? 0 : 65536 };
       return changed(value, "restart-app-server");
     }
     case "system.model-traffic-retention-days": {
       const value = integerValue(input.value, 0, 36_500, "value", "调用记录保留天数");
+      if (validateDebugConfigDocument(table(document.debug)).model_traffic_retention_days === value) return changed(value, "none");
       document.debug = { ...table(document.debug), model_traffic_retention_days: value };
       return changed(value, "restart-app-server");
     }

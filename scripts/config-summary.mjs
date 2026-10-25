@@ -17,6 +17,7 @@ export function writeGatewayConfigSummary(output, document, configPath, environm
     `- 计划任务：${enabledLabel(summary.scheduledTasks)}`,
     `- 会话空闲自动解除：${summary.idleReleaseMinutes === 0 ? "关闭" : `${summary.idleReleaseMinutes} 分钟`}`,
     `- 调用详情记录：${enabledLabel(summary.modelTrafficDump)}`,
+    `- 调用记录预设：${({ production: "生产", debug: "调试", custom: "自定义" })[summary.modelTrafficMode]}（输入项 ${summary.modelTrafficInputItems} / 单项字节 ${summary.modelTrafficItemMaxBytes}）`,
     `- 调用记录按时间自动清理：${summary.modelTrafficRetentionDays === 0 ? "关闭" : `保留 ${summary.modelTrafficRetentionDays} 天`}`,
     `- 日志等级：${summary.logLevel}`,
     `- Codex .env 代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,
@@ -59,6 +60,7 @@ export function gatewayConfigSummary(document, configPath, environment = process
     idleReleaseMinutes: conversation.idle_release_minutes,
     scheduledTasks: scheduledTasks.enabled,
     modelTrafficDump: debug.model_traffic_dump,
+    ...projectModelTrafficSettings(debug),
     modelTrafficRetentionDays: debug.model_traffic_retention_days,
     logLevel: logging.level,
     networkFields: ["http_proxy", "https_proxy", "all_proxy", "no_proxy"]
@@ -73,6 +75,19 @@ export function gatewayConfigSummary(document, configPath, environment = process
           ),
     metricsRetentionDays: metrics.storage.retentionDays,
     metricsMaxRows: metrics.storage.maxRows,
+  };
+}
+
+/** Project effective capture values without changing custom clipping settings. */
+export function projectModelTrafficSettings(debug) {
+  const modelTrafficInputItems = debug.model_traffic_input_items;
+  const modelTrafficItemMaxBytes = debug.model_traffic_item_max_bytes;
+  return {
+    modelTrafficMode: modelTrafficInputItems === 0 && modelTrafficItemMaxBytes === 0
+      ? "debug"
+      : modelTrafficInputItems === 3 && modelTrafficItemMaxBytes === 65536 ? "production" : "custom",
+    modelTrafficInputItems,
+    modelTrafficItemMaxBytes,
   };
 }
 

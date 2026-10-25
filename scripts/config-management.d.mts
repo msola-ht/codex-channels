@@ -30,7 +30,9 @@ export interface GatewaySettings {
     idleReleaseMinutes: number;
     defaultWorkspace: string | null;
     defaultModel: string | null;
-    modelTrafficMode: "production" | "debug";
+    modelTrafficMode: "production" | "debug" | "custom";
+    modelTrafficInputItems: number;
+    modelTrafficItemMaxBytes: number;
     modelTrafficDumpEnabled: boolean;
     modelTrafficRetentionDays: number;
     officialTuiIdentity: {

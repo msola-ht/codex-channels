@@ -57,6 +57,8 @@ export function redactManagedSettings(settings) {
       defaultWorkspace: settings.system.defaultWorkspace,
       defaultModel: settings.system.defaultModel,
       modelTrafficMode: settings.system.modelTrafficMode,
+      modelTrafficInputItems: settings.system.modelTrafficInputItems,
+      modelTrafficItemMaxBytes: settings.system.modelTrafficItemMaxBytes,
       modelTrafficDumpEnabled: settings.system.modelTrafficDumpEnabled,
       modelTrafficRetentionDays: settings.system.modelTrafficRetentionDays,
       officialTuiIdentity: settings.system.officialTuiIdentity,

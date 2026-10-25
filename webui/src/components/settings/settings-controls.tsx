@@ -130,6 +130,8 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
           {pending.kind === "network.proxy" && pending.intent !== undefined ? <p>{t(pending.intent === "clear" ? "settingsFields.clearProxyConfirmation" : "settingsFields.setProxyConfirmation")}</p> : null}
           {pending.kind === "webui.host" && previewRecord(pending.before)?.tokenConfigured === false && previewRecord(pending.value)?.tokenConfigured === true ? <p>{t("settingsFields.publicHostTokenConfirmation")}</p> : null}
           <p className="text-muted-foreground">{t("settingsUi.activation", { value: formatActivation(pending.activation, t) })}</p>
+          {pending.kind === "system.model-traffic-mode" ? <p className="text-muted-foreground">{t("capture.scope")}</p> : null}
+          {["system.model-traffic-mode", "system.model-traffic-dump", "system.model-traffic-retention-days"].includes(pending.kind) && pending.activation.status !== "none" ? <p className="text-muted-foreground">{t("capture.activation")}</p> : null}
           {pending.activation.commands.length > 0
             ? <p className="text-muted-foreground">{t(pending.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: pending.activation.commands.join("; ") })}</p>
             : null}
@@ -190,6 +192,13 @@ function previewRecord(value: unknown): Record<string, unknown> | null {
 
 function formatPreviewValue(value: unknown, kind: string, t: Translate): string {
   const record = previewRecord(value)
+  if (kind === "system.model-traffic-mode") {
+    const mode = record?.modelTrafficMode ?? value
+    const label = mode === "production" ? t("capture.production") : mode === "debug" ? t("capture.debug") : mode === "custom" ? t("capture.custom") : t("common.unknown")
+    const inputItems = record?.modelTrafficInputItems ?? (mode === "production" ? 3 : mode === "debug" ? 0 : undefined)
+    const itemMaxBytes = record?.modelTrafficItemMaxBytes ?? (mode === "production" ? 65536 : mode === "debug" ? 0 : undefined)
+    return typeof inputItems === "number" && typeof itemMaxBytes === "number" ? `${label} · ${t("capture.values", { inputItems, itemMaxBytes })}` : label
+  }
   const scalar = (current: unknown): string => current === null || current === undefined ? t("settingsFields.notSet")
     : current === "unsupported" ? t("globalSettings.unsupportedValue")
     : typeof current === "boolean" ? t(current ? "settingsFields.enabled" : "settingsFields.disabled")

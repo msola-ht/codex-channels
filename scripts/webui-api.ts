@@ -472,7 +472,9 @@ export interface SettingsSummaryResponse {
       approvalTimeoutSeconds: number
       defaultWorkspace: string | null
       defaultModel: string | null
-      modelTrafficMode: "production" | "debug"
+      modelTrafficMode: "production" | "debug" | "custom"
+      modelTrafficInputItems: number
+      modelTrafficItemMaxBytes: number
       modelTrafficDumpEnabled: boolean
       modelTrafficRetentionDays: number
     }
@@ -562,7 +564,7 @@ export interface ManagementProvidersResponse {
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
-  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficInputItems" | "modelTrafficItemMaxBytes" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {
       followCliVersion: boolean

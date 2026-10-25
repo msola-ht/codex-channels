@@ -47,7 +47,11 @@ function currentValue(settings: ManagementSettingsResponse, setting: ManagementS
   if (setting.kind === "display.reasoning") return settings.display.reasoningEnabled
   if (setting.kind === "system.approval-timeout") return settings.system.approvalTimeoutSeconds
   if (setting.kind === "system.idle-release-minutes") return settings.system.idleReleaseMinutes
-  if (setting.kind === "system.model-traffic-mode") return settings.system.modelTrafficMode
+  if (setting.kind === "system.model-traffic-mode") return {
+    modelTrafficMode: settings.system.modelTrafficMode,
+    modelTrafficInputItems: settings.system.modelTrafficInputItems,
+    modelTrafficItemMaxBytes: settings.system.modelTrafficItemMaxBytes,
+  }
   if (setting.kind === "system.model-traffic-dump") return settings.system.modelTrafficDumpEnabled
   if (setting.kind === "system.model-traffic-retention-days") return settings.system.modelTrafficRetentionDays
   if (setting.kind === "automation.scheduled-tasks") return settings.automation.scheduledTasksEnabled

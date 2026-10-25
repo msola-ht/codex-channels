@@ -90,7 +90,8 @@ reasoning = false
 [debug]
 # Codex 与 Relay 共用的调用详情开关，写入 Gateway 数据目录下的 traffic，默认关闭；
 # Codex 重启 App Server 后生效；Relay 配置刷新后用于新请求。
-# 下方两项裁剪值同时为 0 表示全局调试模式，否则为生产模式；菜单预设分别是 0/0 和 3/65536。
+# 调用记录预设：仅 0/0 显示调试，3/65536 显示生产，其他合法组合显示自定义及实际值；
+# 不改变日志等级或开发运行方式。裁剪值用于 Codex；Relay 仅在 0/0 时增加入站与交付采集阶段。
 # V2 转储按逻辑模型调用保存一条请求和一个终态响应，完整 SSE/WS 传输轨迹另存为 trace；
 # 包含 prompt、工具输出和代码，但不包含 Authorization、Cookie 等凭据。写入失败不影响模型请求。
 model_traffic_dump = false
