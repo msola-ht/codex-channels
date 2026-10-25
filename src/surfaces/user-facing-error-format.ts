@@ -175,6 +175,8 @@ export function formatSurfaceUserFacingError(
       return threadQueueCommandUsageText;
     case "metrics.usage":
       return "用法：/metrics [session|global|providers|models|errors] [24h|7d|30d|90d|all]";
+    case "status.usage":
+      return "用法：/status [detail]";
     case "queue.full":
       return "App Server Queue 已满，最多 100 条";
     case "queue.unavailable":

@@ -54,8 +54,11 @@ export function formatIdleReleaseNotification(minutes: number, threadId: string)
   ].join("\n");
 }
 
-export function formatStatus(status: ConversationStatus): string {
-  return formatConversationStatus(status);
+export function formatStatus(
+  status: ConversationStatus,
+  options?: Parameters<typeof formatConversationStatus>[2],
+): string {
+  return formatConversationStatus(status, undefined, options);
 }
 
 export function formatWorkspacesAdded(workspaces: SurfaceConfigurationChange["addedWorkspaces"]): string {

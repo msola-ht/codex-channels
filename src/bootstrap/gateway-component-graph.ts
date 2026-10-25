@@ -90,6 +90,10 @@ import {
   classifyConfigReload,
   configChange,
   includesConfigChange,
+  inspectMessageDisplayScope,
+  identifyMessageDisplayPreset,
+  supportedMessageDisplayFields,
+  messageDisplayFields,
   type ConfigChange,
   type ConfigReloadResult,
   type GatewayConfig,
@@ -879,6 +883,10 @@ export abstract class GatewayComponentGraph {
         { module: "sessions", event: "display_cache.disabled", operation, reason: "cache-operation-failed" },
         "会话派生缓存操作失败，当前会话查询实例已禁用缓存",
       ),
+      async (provider, signal, beforeSubmit) => {
+        if (provider === "openai" || !this.providerAccounts || !accountAdapters.some(adapter => adapter.provider === provider)) return undefined;
+        return completionAccountStatus(provider, await this.providerAccounts.accountUsage(provider, undefined, signal, beforeSubmit));
+      },
     );
     this.conversations = service;
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
@@ -1105,6 +1113,15 @@ export abstract class GatewayComponentGraph {
       if (!actorId || !this.accessPolicy(target)?.isAllowed({ target, actorId })) {
         throw new UserFacingError("command.authorization-changed", "当前命令操作者未获授权");
       }
+    }, target => {
+      if (target.surface !== "qq" && target.surface !== "feishu" && target.surface !== "telegram" && target.surface !== "weixin") {
+        throw new UserFacingError("command.authorization-changed", "当前渠道不支持状态展示");
+      }
+      const group = target.surface === "qq" ? parseQqGroupConversationId(target.conversationId) : undefined;
+      const selector = { surface: target.surface, account_id: target.accountId, chat_kind: group ? "group" : "direct", chat_id: group?.groupOpenId ?? target.conversationId } as const;
+      const inspected = inspectMessageDisplayScope(this.config.messageDisplay, selector);
+      const fields = supportedMessageDisplayFields(selector);
+      return { preset: identifyMessageDisplayPreset(inspected.settings, fields), sources: [...new Set(messageDisplayFields.filter(([field]) => fields.includes(field)).map(([, key]) => inspected.sources[key]))] };
     });
     const constructedSurfaces = new Set<SurfaceAdapter>();
     this.surfaceModules = createSurfaceModules({

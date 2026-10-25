@@ -57,6 +57,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
+  `/status` 和 `/status detail` 分别返回概览与详情视图，拒绝其他参数；显示预设和来源由组合根通过窄回调注入，不在 Application 解析渠道配置。
+  只有主动状态命令显式请求账户富化；上线通知复用的 `statusForDisplay` 缺省不增加供应商账户请求。
   命令和模型/审批按钮必须传原 Actor，由组合根注入当前 Surface 账号策略；缺少授权实现失败关闭。
   Queue 命令把当前 Workspace 作用域的授权闭包传到锁、选择器和最终请求边界，拒绝后不自动撤销已提交写入。
   按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。
@@ -99,6 +101,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
   Git 查询结束后重新读取当前绑定及诊断，同工作区内切换 Thread 也不会返回旧会话来源；工作区变化时丢弃原 Git 结果。
   status 另投影 Router 的 Thread 执行上下文：最近确认 cwd 与带对应 cwd 的生命周期 roots 快照；
   未知时省略该字段，不从 Workspace 推断。异步 Git 查询后同样重新读取此投影。
+  第三方账户摘要通过组合根注入的既有账户查询获取，与 Git 读取并发，沿用十秒账户预算及调用方取消；失败仅标记账户暂不可用。订阅恢复中不猜账户身份，异步完成后重新核对 Workspace、目录、Thread 和 Provider，避免旧账户结果进入新会话。
   `/stop` 同时取消当前目标的视频准备及当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
   当前 Thread Auto-review 写入则在同一锁内要求已有绑定、空闲且无待处理交互，未知或 Guardian 实际值只读；已确认的相同值不写。等待 Client 的权威通知确认后再核对绑定，返回 Router 的实际值，不创建 Thread、启动 Turn 或乐观修改缓存。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；

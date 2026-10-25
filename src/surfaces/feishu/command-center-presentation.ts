@@ -606,10 +606,11 @@ export function renderCommandCenterChoices(
   }
   if (action === "status" && result.kind === "status") {
     return {
-      title: "Codex 状态",
-      description: stripMarkdownHeading(formatConversationStatus(result.status, escapeFeishuCardMarkdown)),
+      title: result.view === "detail" ? "Codex 状态详情" : "Codex 状态",
+      description: stripMarkdownHeading(formatConversationStatus(result.status, escapeFeishuCardMarkdown, result)),
       descriptionFormat: "markdown",
       choices: [
+        { label: result.view === "detail" ? "返回总览" : "查看详情", action: "status", input: result.view === "detail" ? "" : "detail" },
         { label: "模型设置", action: "model", input: "" },
         { label: "工作区", action: "workspace", input: "" },
         { label: "权限查询", action: "permissions", input: "" },

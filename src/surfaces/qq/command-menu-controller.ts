@@ -207,11 +207,15 @@ export class QqCommandMenuController {
           qqMenuButton("permissions", "权限查询", "/permissions"), qqMenuButton("autoreview", "审批设置", "/autoreview")]
         : [qqMenuButton("credits", "查看重置券", "/limits reset")];
       const rows = buttonRows(buttons);
+      if (result.kind === "status") {
+        rows.push({ buttons: [qqMenuButton("status-view", result.view === "detail" ? "返回总览" : "查看详情",
+          result.view === "detail" ? "/status" : "/status detail")] });
+      }
       rows.push({ buttons: [homeButton()] });
       const detail = renderConversationCommandResult(result)!;
       return { ...this.panel(context, { content: "选择下方操作继续。", keyboard: { content: { rows } } }),
         detail: formatQqLiteralDetails(detail), markdownDetail: result.kind === "status"
-          ? formatConversationStatus(result.status, escapeLifecycleLiteral) : detail };
+          ? formatConversationStatus(result.status, escapeLifecycleLiteral, result) : detail };
     }
     const extension = renderQqExtensionCommand(result);
     if (extension) return this.extensionPanel({ ...this.context(target, actorId), queryScope: this.options.queryScope(target) }, extension);

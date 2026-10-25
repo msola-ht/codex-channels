@@ -76,7 +76,7 @@ export async function renderTelegramCommandResult(
       );
       return;
     case "status":
-      await replyTelegramPanel(context, formatStatus(result.status));
+      await replyTelegramPanel(context, formatStatus(result.status, result));
       return;
     case "workspaces":
       await replyTelegramPanel(

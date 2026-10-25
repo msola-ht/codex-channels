@@ -15,7 +15,7 @@ import { usesOpenAiAccount } from "../conversation-core/index.js";
 import {
   formatOpenAiErrorMessage,
   formatPercent,
-  formatRemainingRateLimitWindow,
+  accountQuotaFields,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { isAutoApprovalReviewer, formatThreadApprovalsReviewer } from "./conversation-workspace-status-command-format.js";
@@ -635,7 +635,7 @@ export function createTurnCompletedPresentation(
     fields: full ? [
       { title: "主轮", fields: visibleCompletionStatistics(runFields) },
       ...completionAccountFields(event),
-    ] : visibleCompletionStatistics(runFields),
+    ] : [...visibleCompletionStatistics(runFields), ...completionAccountFields(event)],
   };
 }
 
@@ -692,24 +692,7 @@ function expandedMetricsFields(summary: {
 }
 
 function completionAccountFields(event: Extract<OutputEvent, { type: "turn.completed" }>): LifecyclePresentationField[] {
-  const fields: LifecyclePresentationField[] = [];
-  let hasResetTime = false;
-  if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
-    fields.push({ label: "周限", value: formatRemainingRateLimitWindow(event.weeklyLimit, { includeDuration: false }) });
-    hasResetTime = event.weeklyLimit.resetsAt !== null;
-  }
-  const account = event.accountStatus;
-  if (!usesOpenAiAccount(event.modelProvider) && account && account.provider === event.modelProvider) {
-    for (const balance of account.balances) {
-      fields.push({ label: "余额", value: `${balance.currency === "CNY" ? "¥" : "$"}${balance.remaining}` });
-    }
-    if (account.credits !== undefined) fields.push({ label: "剩余额度", value: `$${account.credits}` });
-    for (const window of account.windows) {
-      fields.push({ label: window.label, value: formatRemainingRateLimitWindow({ ...window, windowDurationMins: null }) });
-      hasResetTime ||= window.resetsAt !== null;
-    }
-  }
-  if (hasResetTime) fields.unshift({ label: "时区", value: Intl.DateTimeFormat().resolvedOptions().timeZone });
+  const fields = accountQuotaFields(event);
   return fields.length === 0 ? [] : [{ title: "当前账户额度", fields }];
 }
 

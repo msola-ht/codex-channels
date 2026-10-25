@@ -1,4 +1,26 @@
 import { visibleUpstreamMessage } from "./output-copy.js";
+import { usesOpenAiAccount, type OutputEvent } from "../conversation-core/index.js";
+
+/** Account snapshots belong to the selected provider; missing data stays absent. */
+export function accountQuotaFields(event: Pick<Extract<OutputEvent, { type: "turn.completed" }>, "modelProvider" | "weeklyLimit" | "accountStatus">): { label: string; value: string }[] {
+  const fields: { label: string; value: string }[] = [];
+  let hasResetTime = false;
+  if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
+    fields.push({ label: "周限", value: formatRemainingRateLimitWindow(event.weeklyLimit, { includeDuration: false }) });
+    hasResetTime = event.weeklyLimit.resetsAt !== null;
+  }
+  const account = event.accountStatus;
+  if (!usesOpenAiAccount(event.modelProvider) && account && account.provider === event.modelProvider) {
+    for (const balance of account.balances) fields.push({ label: "余额", value: `${balance.currency === "CNY" ? "¥" : "$"}${balance.remaining}` });
+    if (account.credits !== undefined) fields.push({ label: "剩余额度", value: `$${account.credits}` });
+    for (const window of account.windows) {
+      fields.push({ label: window.label, value: formatRemainingRateLimitWindow({ ...window, windowDurationMins: null }) });
+      hasResetTime ||= window.resetsAt !== null;
+    }
+  }
+  if (hasResetTime) fields.unshift({ label: "时区", value: Intl.DateTimeFormat().resolvedOptions().timeZone });
+  return fields;
+}
 
 export function formatTimezoneLine(): string {
   return `时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`;

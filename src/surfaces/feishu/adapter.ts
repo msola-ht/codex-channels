@@ -239,8 +239,8 @@ export class FeishuConversationAdapter {
           }
           return;
         }
-        if (result.kind === "auto-review" && this.commandCenter) {
-          const response = renderCommandCenterChoices("autoreview", result);
+        if ((result.kind === "auto-review" || result.kind === "status") && this.commandCenter) {
+          const response = renderCommandCenterChoices(result.kind === "status" ? "status" : "autoreview", result);
           if (response) {
             await this.commandCenter.openResponse(message.target, message.actorId, response);
             return;
@@ -503,6 +503,7 @@ export class FeishuConversationAdapter {
           || (action === "plugin" && result.kind === "plugins")
           || action === "schedule"
           || action === "hooks"
+          || action === "status"
           || (action === "limits" && result.kind === "reset-credit")
         )
           ? renderCommandCenterChoices(action, result)

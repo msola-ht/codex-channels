@@ -52,6 +52,7 @@ export {
   type ConversationCommandExecutor,
   type ConversationCommandOutcome,
   type ConversationCommandResult,
+  type ConversationStatusDisplay,
   type ConversationCommandUseCases,
   type McpDetailView,
   type PluginListView,

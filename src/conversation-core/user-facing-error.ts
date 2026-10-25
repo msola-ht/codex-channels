@@ -139,6 +139,7 @@ export type UserFacingErrorCode =
   | "agents.config-unreadable"
   | "reset-credit.failed"
   | "command.unsupported"
+  | "status.usage"
   | "command.selection.expired"
   | "review.usage";
 

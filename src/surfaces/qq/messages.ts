@@ -764,7 +764,7 @@ export class QqMessages implements SurfaceOutputPort {
         }
         const taskCommand = isQqTaskCommand(command.name, command.argumentsText);
         if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", "compact", "fork", "revert", "review", "effort", "fast", "plan", "goal", "permissions", "autoreview", "whoami", ...QUERY_COMMANDS, ...EXTENSION_COMMANDS].includes(command.name)
-          || (["status", "stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin", "compact", "fork", "permissions", "whoami"].includes(command.name) && command.argumentsText.trim())
+          || (["stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin", "compact", "fork", "permissions", "whoami"].includes(command.name) && command.argumentsText.trim())
           || (command.name === "goal" && !["", "clear"].includes(command.argumentsText.trim()))
           || (EXTENSION_COMMANDS.has(command.name) && command.name !== "hooks" && !taskCommand && !isQqExtensionOperation(command.name, command.argumentsText))) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;

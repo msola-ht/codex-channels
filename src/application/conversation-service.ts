@@ -53,6 +53,7 @@ import {
   gatewayUserMessageClientIdPrefix,
   usesOpenAiAccount,
   type ConversationTarget,
+  type CompletionAccountStatus,
   type ConversationInputEvent,
   type RateLimitSnapshot,
   type SurfaceId,
@@ -220,6 +221,8 @@ export interface ConversationStatus {
   contextCompactionCount?: number;
   tokenUsage?: ThreadTokenUsage;
   weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
+  accountStatus?: CompletionAccountStatus;
+  accountStatusUnavailable?: boolean;
 }
 
 export interface ConversationAutoReviewState {
@@ -372,7 +375,7 @@ export interface ConversationSessionUseCases {
     condition?: ConversationIdleReleaseCondition,
   ): Promise<ConversationIdleReleaseResult>;
   status(target: ConversationTarget): ConversationStatus;
-  statusForDisplay(target: ConversationTarget, signal?: AbortSignal): Promise<ConversationStatus>;
+  statusForDisplay(target: ConversationTarget, signal?: AbortSignal, options?: { assertAuthorized?: () => void; includeAccount?: boolean }): Promise<ConversationStatus>;
 }
 
 /** Stable account and local request-metrics boundary. */
@@ -444,6 +447,7 @@ export class ConversationService implements
       beforeBackgroundRelease?(target: ConversationTarget, threadId: string): Promise<void>;
     },
     onSessionDisplayCacheError?: (operation: SessionDisplayCacheOperation) => void,
+    private readonly statusAccount?: (provider: string, signal: AbortSignal, beforeSubmit: () => void) => Promise<CompletionAccountStatus | undefined>,
   ) {
     this.hookUseCases = new ConversationHookService(this.locks, router, models, queries, hookAuthorization ?? (() => {
       throw new UserFacingError("hooks.forbidden", "Hook 管理授权不可用");
@@ -1814,15 +1818,44 @@ export class ConversationService implements
     return this.workspaceStatus?.currentGitBranch(workspace.cwd, signal);
   }
 
-  async statusForDisplay(target: ConversationTarget, signal?: AbortSignal): Promise<ConversationStatus> {
-    const status = this.status(target);
-    const gitBranch = await this.workspaceGitBranch(target, signal);
+  async statusForDisplay(target: ConversationTarget, signal?: AbortSignal, options: { assertAuthorized?: () => void; includeAccount?: boolean } = {}): Promise<ConversationStatus> {
+    const assertAuthorized = options.assertAuthorized;
+    assertAuthorized?.();
     signal?.throwIfAborted();
+    const status = this.status(target);
+    const provider = status.modelProvider ?? "openai";
+    const accountSignal = AbortSignal.any([AbortSignal.timeout(10_000), ...(signal ? [signal] : [])]);
+    const sameAccountTarget = (current: ConversationStatus): boolean => current.workspaceId === status.workspaceId
+      && current.cwd === status.cwd && current.threadId === status.threadId
+      && (current.modelProvider ?? "openai") === provider && current.sessionRestoring !== true;
+    const beforeAccountSubmit = (): void => {
+      assertAuthorized?.();
+      accountSignal.throwIfAborted();
+      if (!sameAccountTarget(this.status(target))) {
+        throw new UserFacingError("command.authorization-changed", "状态查询目标已变化，请重新查询");
+      }
+    };
+    const queryStatusAccount = this.statusAccount;
+    const accountQuery = options.includeAccount === true && queryStatusAccount && provider !== "openai" && status.sessionRestoring !== true
+      ? Promise.resolve().then(async () => {
+        beforeAccountSubmit();
+        const accountStatus = await queryStatusAccount(provider, accountSignal, beforeAccountSubmit);
+        beforeAccountSubmit();
+        return accountStatus?.provider === provider ? { accountStatus } : {};
+      }).catch(() => ({ accountStatusUnavailable: true as const }))
+      : Promise.resolve({});
+    const [gitBranch, account] = await Promise.all([this.workspaceGitBranch(target, signal), accountQuery]);
+    signal?.throwIfAborted();
+    assertAuthorized?.();
     // Refresh the bound Thread and its diagnostics after asynchronous IO;
     // outer callers own authorization. Only reuse Git data for the same cwd.
     const current = this.status(target);
     if (current.workspaceId !== status.workspaceId || current.cwd !== status.cwd) return current;
-    return gitBranch ? { ...current, gitBranch } : current;
+    return {
+      ...current,
+      ...(gitBranch ? { gitBranch } : {}),
+      ...(sameAccountTarget(current) ? account : {}),
+    };
   }
 
   private readonly observeThreadRestore: ThreadRestoreObserver = (threadId) => {

@@ -70,7 +70,7 @@ export function renderConversationCommandResult(
     case "scheduled-confirmation":
       return formatConversationScheduledConfirmation(result);
     case "status":
-      return formatConversationStatus(result.status);
+      return formatConversationStatus(result.status, undefined, result);
     case "workspaces":
       return formatConversationWorkspaces(result);
     case "auto-review":

@@ -93,6 +93,10 @@ export const conversationCommandNames = [
 ] as const;
 
 export type ConversationCommandName = typeof conversationCommandNames[number];
+export interface ConversationStatusDisplay {
+  preset: "concise" | "standard" | "detailed" | "full" | "custom";
+  sources: string[];
+}
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
 const maximumPluginListEntries = 8;
 
@@ -141,7 +145,7 @@ export type ConversationCommandResult =
       kind: "thread-revert-preview";
       preview: Awaited<ReturnType<ConversationCommandUseCases["revertPreview"]>>;
     }
-  | { kind: "status"; status: ReturnType<ConversationCommandUseCases["status"]> }
+  | { kind: "status"; view: "overview" | "detail"; status: ReturnType<ConversationCommandUseCases["status"]>; display?: ConversationStatusDisplay }
   | {
       kind: "workspaces";
       workspaces: ReturnType<ConversationCommandUseCases["listWorkspaces"]>;
@@ -361,6 +365,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     private readonly authorize: (target: ConversationTarget, actorId: string) => void = () => {
       throw new UserFacingError("command.authorization-changed", "命令授权不可用");
     },
+    private readonly statusDisplay?: (target: ConversationTarget) => ConversationStatusDisplay,
   ) {
     this.scheduledTasks = scheduledTasks;
   }
@@ -603,11 +608,20 @@ export class ConversationCommandService implements ConversationCommandExecutor {
             outcome: { type: "thread.pin-updated", pinned: false, changed },
           };
         }
-      case "status":
+      case "status": {
+        if (argumentsText && argumentsText !== "detail") {
+          throw new UserFacingError("status.usage", "用法：/status [detail]");
+        }
+        const status = await this.conversations.statusForDisplay(target, undefined, { assertAuthorized, includeAccount: true });
+        assertAuthorized();
+        const display = this.statusDisplay?.(target);
         return {
           kind: "status",
-          status: await this.conversations.statusForDisplay(target),
+          view: argumentsText === "detail" ? "detail" : "overview",
+          status,
+          ...(display ? { display } : {}),
         };
+      }
       case "workspace": {
         if (argumentsText) {
           return this.selectWorkspaceResult(target, argumentsText, assertAuthorized);

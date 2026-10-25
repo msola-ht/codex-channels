@@ -57,7 +57,7 @@ import { formatFeishuCommandMarkdown } from "./command-format.js";
 export function renderFeishuCommandResult(
   result: ConversationCommandResult,
 ): string | null {
-  if (result.kind === "status") return formatConversationStatus(result.status, escapeFeishuMarkdown);
+  if (result.kind === "status") return formatConversationStatus(result.status, escapeFeishuMarkdown, result);
   const rendered = renderConversationCommandResult(result, formatFeishuCommandMarkdown);
   if (rendered === null || result.kind !== "artifacts") {
     return rendered;

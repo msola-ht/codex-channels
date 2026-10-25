@@ -35,7 +35,7 @@ export function renderWeixinCommandResult(result: ConversationCommandResult): st
     return `## Turn Diff · ${result.artifacts.turnId}\n\n${fence}diff\n${diff}${diff.endsWith("\n") ? "" : "\n"}${fence}`;
   }
   return result.kind === "status"
-    ? formatConversationStatus(result.status, escapeLifecycleLiteral)
+    ? formatConversationStatus(result.status, escapeLifecycleLiteral, result)
     : renderConversationCommandResult(result);
 }
 

@@ -24,7 +24,7 @@ import { assertPrivateConfigAccessSync } from "../../runtime/private-file.mjs";
 import { inspectWorkspaceDirectory } from "../../runtime/workspace-directory.mjs";
 
 export type { MessageDisplayTarget, MessageDisplaySettings, MessageDisplayConfiguration } from "../../runtime/message-display-policy.mjs";
-export { resolveMessageDisplaySettings, inspectMessageDisplayScope, identifyMessageDisplayPreset, supportedMessageDisplayFields } from "../../runtime/message-display-policy.mjs";
+export { resolveMessageDisplaySettings, inspectMessageDisplayScope, identifyMessageDisplayPreset, supportedMessageDisplayFields, messageDisplayFields } from "../../runtime/message-display-policy.mjs";
 
 export {
   configChange,
