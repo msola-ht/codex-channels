@@ -21,6 +21,7 @@ import {
   surfaceErrorMetadata,
   type SurfaceAdapter,
   type ChannelFileMediaType,
+  channelFilePolicy,
   type SurfaceConfigurationChange,
   type SurfaceAsyncAnswerSubmission,
   type SurfaceScheduledTaskSubmissionContext,
@@ -408,7 +409,7 @@ export class SurfaceManager {
   async sendChannelFile(target: ConversationTarget, filePath: string, fileName: string, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void> {
     if (this.stopping) throw new Error("Gateway 正在停止，无法发送渠道文件");
     if (isCurrent() !== true) throw new Error("原 Thread 文件接收绑定已失效");
-    if (target.surface !== "qq" && target.surface !== "feishu") throw new Error(`${target.surface} 渠道不支持显式发送文件`);
+    if (!channelFilePolicy(target.surface)) throw new Error(`${target.surface} 渠道不支持显式发送文件`);
     const surface = this.surfacesByAccount.get(surfaceAccountKey(target.surface, target.accountId));
     if (surface === undefined) throw new Error("未找到渠道文件接收账号");
     if (!this.active.has(surface)) throw new Error("渠道账号尚未就绪，无法发送渠道文件");

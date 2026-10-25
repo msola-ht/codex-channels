@@ -16,7 +16,7 @@ import {
 } from "../../runtime/private-file.mjs";
 
 import type { ConversationTarget } from "../conversation-core/index.js";
-import { assertChannelFileName, assertChannelMediaBytes, assertFeishuChannelMediaBytes, maximumQqChannelFileBytes, maximumFeishuChannelFileBytes, readBoundedLocalFile } from "../surfaces/index.js";
+import { assertChannelFileName, channelFilePolicy, readBoundedLocalFile } from "../surfaces/index.js";
 import type { ChannelFileMediaType } from "../surfaces/index.js";
 
 const defaultPollIntervalMs = 3_000;
@@ -203,7 +203,6 @@ export class ChannelMediaSpool {
     if (target === undefined) {
       throw new Error(`Thread 未绑定会话：${manifest.threadId}`);
     }
-    if (this.options.kind === "file" && target.surface !== "qq" && target.surface !== "feishu") throw new Error("当前渠道不支持文件发送");
     if (manifest.format === "markdown" && target.surface !== "qq") throw new Error("Markdown 图片发送目前仅支持 QQ");
     const original = { ...target };
     const isCurrent = () => {
@@ -215,9 +214,10 @@ export class ChannelMediaSpool {
     const signal = this.abortController.signal;
     signal.throwIfAborted();
     if (this.options.kind === "file") {
-      const feishu = original.surface === "feishu";
-      const bytes = await readBoundedLocalFile(manifest.imagePath, feishu ? maximumFeishuChannelFileBytes : maximumQqChannelFileBytes);
-      (feishu ? assertFeishuChannelMediaBytes : assertChannelMediaBytes)(bytes, manifest.mediaType ?? "file");
+      const policy = channelFilePolicy(original.surface);
+      if (!policy) throw new Error("当前渠道不支持文件发送");
+      const bytes = await readBoundedLocalFile(manifest.imagePath, policy.maximumBytes);
+      policy.validate(bytes, manifest.mediaType ?? "file");
       signal.throwIfAborted();
       if (!isCurrent()) throw new Error("原 Thread 文件接收绑定已失效");
     }

@@ -22,6 +22,7 @@ import {
 } from "../conversation-delivery-queue.js";
 import { surfaceDeliveryCoalesceKey } from "../delivery-policy.js";
 import { readGeneratedImage } from "../generated-image.js";
+import { assertChannelFileName, assertTelegramChannelMediaBytes, maximumTelegramChannelFileBytes, readBoundedLocalFile, type ChannelFileMediaType } from "../bounded-local-file.js";
 import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
@@ -718,7 +719,10 @@ export class TelegramOutbox {
     chatId: string,
     imagePath: string,
     signal?: AbortSignal,
+    isCurrent?: () => boolean,
   ): Promise<void> {
+    signal?.throwIfAborted();
+    if (isCurrent && !isCurrent()) throw new Error("原 Thread 图片绑定已失效");
     const image = await (
       this.options.readGeneratedImage ?? readGeneratedImage
     )(imagePath);
@@ -728,7 +732,10 @@ export class TelegramOutbox {
         operation: "sendPhoto",
         critical: false,
       },
-      (requestSignal) => this.api.sendPhoto(
+      (requestSignal) => {
+        requestSignal.throwIfAborted();
+        if (isCurrent && !isCurrent()) throw new Error("原 Thread 图片绑定已失效");
+        return this.api.sendPhoto(
         chatId,
         new InputFile(
           image.bytes,
@@ -736,16 +743,36 @@ export class TelegramOutbox {
         ),
         { disable_notification: true },
         telegramAbortSignal(requestSignal),
-      ),
+        );
+      },
       signal,
     );
   }
 
-  sendChannelImage(chatId: string, imagePath: string): Promise<void> {
+  sendChannelImage(chatId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
     return this.runOrdered(
       chatId,
-      (signal) => this.sendImage(chatId, imagePath, signal),
+      (active) => this.sendImage(chatId, imagePath, active, isCurrent),
+      signal,
     );
+  }
+
+  sendChannelFile(chatId: string, path: string, fileName: string, isCurrent: () => boolean, mediaType: ChannelFileMediaType = "file", signal?: AbortSignal): Promise<void> {
+    const lifetime = AbortSignal.any([AbortSignal.timeout(120_000), ...(signal ? [signal] : [])]);
+    return this.runOrdered(chatId, async active => {
+      const guard = () => { active.throwIfAborted(); if (!isCurrent()) throw new Error("原 Thread 文件绑定已失效"); };
+      guard();
+      assertChannelFileName(fileName);
+      const bytes = await readBoundedLocalFile(path, maximumTelegramChannelFileBytes);
+      assertTelegramChannelMediaBytes(bytes, mediaType);
+      guard();
+      const method = mediaType === "video" ? "sendVideo" : mediaType === "voice" ? "sendVoice" : "sendDocument";
+      await this.executor.call({ chatId, operation: method, critical: false }, async requestSignal => {
+        guard();
+        const message = await this.api[method](chatId, new InputFile(bytes, fileName), { disable_notification: true }, telegramAbortSignal(requestSignal));
+        if (!Number.isSafeInteger(message.message_id) || message.message_id <= 0) throw new Error("Telegram 文件发送结果未确认");
+      }, active);
+    }, lifetime);
   }
 
   revalidateAccess(): void {

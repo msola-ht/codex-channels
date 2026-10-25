@@ -372,8 +372,12 @@ export class TelegramSurface {
     this.registerHandlers();
   }
 
-  sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
-    return this.output.sendChannelImage(conversationId, imagePath);
+  sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
+    return this.output.sendChannelImage(conversationId, imagePath, isCurrent, signal);
+  }
+
+  sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean, mediaType?: import("../bounded-local-file.js").ChannelFileMediaType, signal?: AbortSignal): Promise<void> {
+    return this.output.sendChannelFile(conversationId, filePath, fileName, isCurrent, mediaType, signal);
   }
 
   private queryGuard(target: ConversationTarget, actorId: string): () => void {

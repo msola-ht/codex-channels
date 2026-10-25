@@ -5,6 +5,7 @@ import {
 } from "node:crypto";
 
 import gatewayMetadata from "../../version.json" with { type: "json" };
+import { assertChannelFileName, assertWeixinChannelMediaBytes, type ChannelFileMediaType } from "../bounded-local-file.js";
 import {
   validateWeixinAccountId,
   validateWeixinActorId,
@@ -51,6 +52,7 @@ export interface WeixinImageSendProtocolClient {
       image: Buffer;
     },
     signal?: AbortSignal,
+    beforeSend?: () => undefined,
   ): Promise<void>;
 }
 
@@ -61,8 +63,10 @@ export interface WeixinFileSendProtocolClient {
       contextToken?: string;
       fileName: string;
       file: Buffer;
+      mediaType?: ChannelFileMediaType;
     },
     signal?: AbortSignal,
+    beforeSend?: () => undefined,
   ): Promise<void>;
 }
 
@@ -129,9 +133,10 @@ export function createWeixinProtocolClient(
   const uploadMedia = async (
     value: Buffer,
     actorId: string,
-    mediaType: 1 | 3,
+    mediaType: 1 | 2 | 3,
     label: "图片" | "文件",
     signal?: AbortSignal,
+    beforeSend?: () => undefined,
   ): Promise<UploadedWeixinMedia> => {
     const aesKey = exactRandomBytes(
       randomBytesImpl,
@@ -146,7 +151,7 @@ export function createWeixinProtocolClient(
     const ciphertext = encryptMedia(value, aesKey);
     const uploadResponse = parseMediaUploadResponse(
       await request({
-        fetchImpl,
+        fetchImpl: guardedMediaFetch(fetchImpl, beforeSend),
         randomBytesImpl,
         baseUrl,
         botToken,
@@ -175,7 +180,8 @@ export function createWeixinProtocolClient(
       label,
     );
     const downloadParameter = await uploadMediaCiphertext({
-      fetchImpl,
+      fetchImpl: guardedMediaFetch(fetchImpl, beforeSend),
+      maximumAttempts: beforeSend ? 1 : maximumImageUploadAttempts,
       url: uploadUrl,
       ciphertext,
       timeoutMs: imageUploadTimeoutMs,
@@ -287,7 +293,7 @@ export function createWeixinProtocolClient(
       parseSendResponse(raw);
     },
 
-    async sendImage(input, signal) {
+    async sendImage(input, signal, beforeSend) {
       const actorId = validateActorInput(input.actorId);
       const contextToken = optionalContextToken(
         input.contextToken,
@@ -301,9 +307,10 @@ export function createWeixinProtocolClient(
         1,
         "图片",
         signal,
+        beforeSend,
       );
       const raw = await request({
-        fetchImpl,
+        fetchImpl: guardedMediaFetch(fetchImpl, beforeSend),
         randomBytesImpl,
         baseUrl,
         botToken,
@@ -339,7 +346,8 @@ export function createWeixinProtocolClient(
       parseSendResponse(raw);
     },
 
-    async sendFile(input, signal) {
+    async sendFile(input, signal, beforeSend) {
+      const mediaType = input.mediaType;
       const actorId = validateActorInput(input.actorId);
       const contextToken = optionalContextToken(
         input.contextToken,
@@ -347,16 +355,23 @@ export function createWeixinProtocolClient(
         maximumImageParameterLength,
       );
       const fileName = validateOutboundFileName(input.fileName);
-      const file = validateOutboundFile(input.file);
+      let file: Buffer;
+      if (mediaType === undefined) file = validateOutboundFile(input.file);
+      else {
+        assertChannelFileName(fileName);
+        assertWeixinChannelMediaBytes(input.file, mediaType);
+        file = Buffer.from(input.file);
+      }
       const uploaded = await uploadMedia(
         file,
         actorId,
-        3,
+        mediaType === "video" ? 2 : 3,
         "文件",
         signal,
+        beforeSend,
       );
       const raw = await request({
-        fetchImpl,
+        fetchImpl: guardedMediaFetch(fetchImpl, beforeSend),
         randomBytesImpl,
         baseUrl,
         botToken,
@@ -368,7 +383,17 @@ export function createWeixinProtocolClient(
             client_id: createClientId(randomBytesImpl, nowImpl),
             message_type: 2,
             message_state: 2,
-            item_list: [{
+            item_list: mediaType === "video" ? [{
+              type: 5,
+              video_item: {
+                media: {
+                  encrypt_query_param: uploaded.downloadParameter,
+                  aes_key: Buffer.from(uploaded.aesKey.toString("hex")).toString("base64"),
+                  encrypt_type: 1,
+                },
+                video_size: uploaded.ciphertext.length,
+              },
+            }] : [{
               type: 4,
               file_item: {
                 media: {
@@ -399,6 +424,19 @@ export function createWeixinProtocolClient(
 interface WeixinMediaUploadResponse {
   uploadFullUrl?: string;
   uploadParameter?: string;
+}
+
+function guardedMediaFetch(fetchImpl: typeof fetch, beforeSend?: () => undefined): typeof fetch {
+  return (input, init) => {
+    if (beforeSend) {
+      const result: unknown = beforeSend();
+      if (result !== undefined) {
+        void Promise.resolve(result).catch(() => undefined);
+        throw new WeixinProtocolError("invalid-input", "微信媒体发送授权无效");
+      }
+    }
+    return fetchImpl(input, init);
+  };
 }
 
 interface UploadedWeixinMedia {
@@ -617,11 +655,12 @@ async function uploadMediaCiphertext(options: {
   timeoutMs: number;
   label: "图片" | "文件";
   signal?: AbortSignal;
+  maximumAttempts?: number;
 }): Promise<string> {
   let lastError: WeixinProtocolError | undefined;
   for (
     let attempt = 0;
-    attempt < maximumImageUploadAttempts;
+    attempt < (options.maximumAttempts ?? maximumImageUploadAttempts);
     attempt += 1
   ) {
     try {

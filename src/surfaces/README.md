@@ -10,6 +10,8 @@
 
 `sendChannelImage` 的可选 `format: "markdown"` 当前仅 QQ 支持，由 SurfaceManager 拒绝其他渠道使用；缺省继续普通图片。QQ 使用相同队列、原绑定守卫和收据，素材上传不单独认定图片送达。
 
+显式文件发送现覆盖 QQ/飞书/TG/微信，CLI、spool 和路由通过 `channelFilePolicy` 共享渠道准入与预算，Adapter 负责平台协议。MP4 和 Ogg/Opus 的受控文件头检查共用；微信原生 voice 不开放。TG/微信显式图片和文件现消费原 Thread 守卫及领取器取消信号，不因后台 Thread 解绑而改投前台；微信固定入队时回复上下文。新增支持不改变文件 version 1 manifest，不迁移用户数据，未部署或实机验收。
+
 `delivery-diagnostics/index.ts` 是离线投递诊断的窄公开入口，仅复用载荷解码和屏障分类，不加载平台 SDK 或数据库实现。
 `persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，持久结果发送未知或授权失效后解除顺序屏障并保留记录、检查点与容量计费，并将必要图片纳入同一有界快照；
 生成图片的上游 `fileId` 只在实时事件中传递，写入快照前一律剥离；只有引用、没有 `savedPath` 的完成结果仅保留内容不可获取标记，恢复后沿用相同提示，不把引用写入投递 Journal。
@@ -295,7 +297,7 @@ Adapter 负责。
 不进入缓冲。
 Computer Use 的 MCP 操作也不进入查询缓冲；飞书在同一卡片展示调用开始和终态，复用已有去重、
 顺序队列及 `hidden` 模式。具体操作说明已在 Client 边界提取并清洗，过程展示不使用 MCP 读写声明标签。
-`bounded-local-file.ts` 为图片和显式文件提供有界普通文件读取，拒绝链接、身份/长度或修改时间变化；QQ 显式普通文件上限 64 MiB，视频/语音分别为 MP4 30,000,000 字节与 SILK 20,000,000 字节，由 `assertChannelMediaBytes` 校验；飞书三类均限 30,000,000 字节，视频 MP4、语音 Ogg/Opus，由 `assertFeishuChannelMediaBytes` 校验，两者共享受控 MP4 文件头判断。文件名拒绝控制字符和路径分隔符，其他既有 5,000,000 字节边界不扩大。`SurfaceAdapter.sendChannelFile` 当前由 QQ/飞书实现，携带原 Thread 绑定实时守卫、媒体类型和取消信号，进入队列、读取及各上传/发送请求时复核，不因后台解绑改投前台。显式图片同样携带守卫和取消信号，QQ/飞书在最终请求边界消费；微信/TG 内部图片队列语义保持原实现。
+`bounded-local-file.ts` 为图片和显式文件提供有界普通文件读取，拒绝链接、身份/长度或修改时间变化；channelFilePolicy 统一声明四渠道文件准入与预算，保留各渠道内容合同，共享 MP4/Ogg-Opus 文件头校验。文件名拒绝控制字符和路径分隔符；具体限制见 `docs/channel-file.md`。`SurfaceAdapter.sendChannelFile` 由四渠道实现，携带原 Thread 实时守卫、媒体类型和取消信号；显式图片同样在排队、读取和请求边界消费这些信息，不因后台解绑改投前台。未修改普通生成图与原长正文文件的内容预算。
 
 `generated-image.ts` 对 App Server `imageGeneration.savedPath` 指向的生成图片和
 `codexc channel send-image` 提交的渠道 spool 图片执行同一读取校验：绝对路径、拒绝符号链接、

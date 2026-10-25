@@ -78,3 +78,4 @@ export { readGeneratedImage, GeneratedImageError } from "./generated-image.js";
 export type { QqNetwork } from "./qq/index.js";
 export { readBoundedLocalFile, assertChannelFileName, assertChannelMediaBytes, assertFeishuChannelMediaBytes, maximumChannelFileBytes, maximumQqChannelFileBytes, maximumFeishuChannelFileBytes, LocalFileError } from "./bounded-local-file.js";
 export type { ChannelFileMediaType } from "./bounded-local-file.js";
+export { channelFilePolicy, assertTelegramChannelMediaBytes, assertWeixinChannelMediaBytes, maximumTelegramChannelFileBytes, maximumWeixinChannelFileBytes } from "./bounded-local-file.js";

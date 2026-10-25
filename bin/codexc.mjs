@@ -235,9 +235,11 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
 成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
   "channel.send_file": `用法：codexc channel send-file <绝对文件路径> [--type file|video|voice] [--thread <Thread ID>]
 
-把本地文件交给 Gateway，发送回现有绑定的 QQ 或飞书会话。默认 file。
+把本地文件交给 Gateway，发送回现有绑定的 QQ、飞书、Telegram 或微信会话。默认 file。
 QQ：file 上限 64 MiB；video 为 MP4、上限 30,000,000 字节；voice 为 SILK、上限 20,000,000 字节。
 飞书：三种类型均上限 30,000,000 字节；video 为 MP4，voice 为 Ogg/Opus。
+Telegram：三种类型均上限 50,000,000 字节；video 为 MP4，voice 为 Ogg/Opus。
+微信：file/video 上限 25 MiB，video 为 MP4；不支持原生 voice，可显式选 file 发送音频文件。
 媒体类型须显式选择，按内容校验，不按后缀推断。拒绝空文件和符号链接；
 文件名限 255 UTF-8 字节，不可含控制符或路径分隔符。
 不指定 --thread 时须仅有一个前台或后台绑定。文件私有复制至 channel-file-outbox/pending/；

@@ -231,7 +231,7 @@ export class WeixinSurface implements SurfaceAdapter {
     });
   }
 
-  sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
+  sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
     return this.output.sendChannelImage(
       {
         surface: "weixin",
@@ -239,7 +239,13 @@ export class WeixinSurface implements SurfaceAdapter {
         conversationId,
       },
       imagePath,
+      isCurrent,
+      signal,
     );
+  }
+
+  sendChannelFile(conversationId: string, path: string, fileName: string, isCurrent: () => boolean, mediaType?: import("../bounded-local-file.js").ChannelFileMediaType, signal?: AbortSignal): Promise<void> {
+    return this.output.sendChannelFile({ surface: "weixin", accountId: this.accountId, conversationId }, path, fileName, isCurrent, mediaType, signal);
   }
 
   async presentScheduledTaskConfirmation(

@@ -17,6 +17,7 @@ import { resolveSurfaceDelivery, surfaceDeliveryCoalesceKey } from "../delivery-
 import { exponentialRetryDelay, withDeliveryRetry } from "../delivery-retry.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import type { SurfaceOutputPort } from "../types.js";
+import { assertChannelFileName, assertWeixinChannelMediaBytes, maximumWeixinChannelFileBytes, readBoundedLocalFile, type ChannelFileMediaType } from "../bounded-local-file.js";
 import {
   createTurnStartedPresentation,
   createAutoApprovalReviewPresentation,
@@ -505,7 +506,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
     path: string,
     signal?: AbortSignal,
     context = this.contexts.get(target),
+    beforeSend?: () => undefined,
   ): Promise<void> {
+    beforeSend?.();
     this.assertSendActive(signal);
     context ??= {
       actorId: target.conversationId,
@@ -540,6 +543,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
       image,
     };
     try {
+      if (beforeSend) {
+        await checkpointDelivery("sendImage", () => client.sendImage(input, signal, beforeSend), isDefinitelyRejectedWeixinSend);
+        return;
+      }
       await checkpointDelivery("sendImage", () => this.withSendRetry(
         "sendImage",
         () => (signal
@@ -558,16 +565,53 @@ export class WeixinOutbox implements SurfaceOutputPort {
   sendChannelImage(
     target: ConversationTarget,
     imagePath: string,
+    isCurrent: () => boolean,
+    signal?: AbortSignal,
   ): Promise<void> {
+    const context = this.contexts.get(target);
     return this.delivery.runOrdered(
       target.conversationId,
-      (signal) => this.sendImage(
+      (active) => this.sendImage(
         target,
         imagePath,
-        signal,
-        this.contexts.get(target),
+        active,
+        context,
+        () => this.assertExplicitMediaCurrent(target, context, isCurrent, active),
       ),
+      signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
     );
+  }
+
+  sendChannelFile(target: ConversationTarget, path: string, fileName: string, isCurrent: () => boolean, mediaType: ChannelFileMediaType = "file", signal?: AbortSignal): Promise<void> {
+    const context = this.contexts.get(target);
+    const lifetime = AbortSignal.any([AbortSignal.timeout(120_000), ...(signal ? [signal] : [])]);
+    return this.delivery.runOrdered(target.conversationId, async active => {
+      const guard = () => this.assertExplicitMediaCurrent(target, context, isCurrent, active);
+      guard();
+      assertChannelFileName(fileName);
+      const bytes = await readBoundedLocalFile(path, maximumWeixinChannelFileBytes);
+      assertWeixinChannelMediaBytes(bytes, mediaType);
+      guard();
+      const client = this.options.fileClient;
+      if (!client) throw new Error("微信文件发送不可用");
+      try {
+        await checkpointDelivery("sendFile", () => client.sendFile({ actorId: context!.actorId,
+          contextToken: context!.contextToken!, fileName, file: bytes, mediaType }, active, guard), isDefinitelyRejectedWeixinSend);
+      } catch (error) {
+        if (isRejectedReplyContext(error)) await this.invalidateContext(target, context?.contextToken);
+        throw error;
+      }
+    }, lifetime);
+  }
+
+  private assertExplicitMediaCurrent(target: ConversationTarget, context: ReturnType<WeixinReplyContextStore["get"]>, isCurrent: () => boolean, signal: AbortSignal): undefined {
+    this.assertSendActive(signal);
+    const latest = this.contexts.get(target);
+    if (!isCurrent() || !context?.contextToken || latest?.contextToken !== context.contextToken
+      || latest.actorId !== context.actorId || !this.access.isAllowed({ target, actorId: context.actorId })) {
+      throw new Error("微信原 Thread、授权或回复上下文已失效");
+    }
+    return undefined;
   }
 
   private async invalidateContext(

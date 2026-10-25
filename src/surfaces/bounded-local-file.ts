@@ -5,7 +5,29 @@ import { isAbsolute } from "node:path";
 export const maximumChannelFileBytes = 5_000_000;
 export const maximumQqChannelFileBytes = 64 * 1024 * 1024;
 export const maximumFeishuChannelFileBytes = 30_000_000;
+export const maximumTelegramChannelFileBytes = 50_000_000;
+export const maximumWeixinChannelFileBytes = 25 * 1024 * 1024;
 export type ChannelFileMediaType = "file" | "video" | "voice";
+
+/** Shared admission used by CLI, spool and adapters; platform encoders remain separate. */
+export function channelFilePolicy(surface: string): { maximumBytes: number; validate(bytes: Uint8Array, type: ChannelFileMediaType): void } | undefined {
+  switch (surface) {
+    case "qq": return { maximumBytes: maximumQqChannelFileBytes, validate: assertChannelMediaBytes };
+    case "feishu": return { maximumBytes: maximumFeishuChannelFileBytes, validate: assertFeishuChannelMediaBytes };
+    case "telegram": return { maximumBytes: maximumTelegramChannelFileBytes, validate: assertTelegramChannelMediaBytes };
+    case "weixin": return { maximumBytes: maximumWeixinChannelFileBytes, validate: assertWeixinChannelMediaBytes };
+    default: return undefined;
+  }
+}
+
+export function assertTelegramChannelMediaBytes(bytes: Uint8Array, type: ChannelFileMediaType): void {
+  assertNativeMediaBytes(bytes, type, maximumTelegramChannelFileBytes);
+}
+
+export function assertWeixinChannelMediaBytes(bytes: Uint8Array, type: ChannelFileMediaType): void {
+  if (type === "voice") throw new LocalFileError("invalid-file");
+  assertNativeMediaBytes(bytes, type, maximumWeixinChannelFileBytes);
+}
 
 export class LocalFileError extends Error {
   constructor(readonly code: "invalid-path" | "invalid-file" | "too-large" | "invalid-name") {
@@ -34,9 +56,13 @@ export function assertChannelMediaBytes(bytes: Uint8Array, type: ChannelFileMedi
 
 /** Feishu native voice is Ogg/Opus, distinct from QQ SILK. No transcoding. */
 export function assertFeishuChannelMediaBytes(bytes: Uint8Array, type: ChannelFileMediaType): void {
+  assertNativeMediaBytes(bytes, type, maximumFeishuChannelFileBytes);
+}
+
+function assertNativeMediaBytes(bytes: Uint8Array, type: ChannelFileMediaType, maximumBytes: number): void {
   if (type !== "file" && type !== "video" && type !== "voice") throw new LocalFileError("invalid-file");
   if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) throw new LocalFileError("invalid-file");
-  if (bytes.byteLength > maximumFeishuChannelFileBytes) throw new LocalFileError("too-large");
+  if (bytes.byteLength > maximumBytes) throw new LocalFileError("too-large");
   if (type === "file") return;
   const prefix = Buffer.from(bytes.buffer, bytes.byteOffset, Math.min(bytes.byteLength, 4096));
   if (type === "video") return assertMp4Prefix(prefix);

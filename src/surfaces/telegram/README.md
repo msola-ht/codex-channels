@@ -3,6 +3,8 @@
 本目录实现 Telegram Bot 适配器，把聊天、命令、图片、一次性音频、视频附件、UTF-8 文本文件和按钮交互连接到平台无关
 的应用与核心模块。
 
+显式 `channel send-file` 复用共享文件 spool 和绑定路由；file/video/voice 分别使用原生 sendDocument/sendVideo/sendVoice，最多 50,000,000 字节，视频 MP4、语音 Ogg/Opus。类型校验与飞书共享受控内容规则，不按扩展名推断，不转码。Outbox 沿原有队列及 API Executor，一次请求不自动重试，以有效 message_id 确认；总预算 120 秒、SDK 单次请求 30 秒。显式图片和文件携带原 Thread 守卫及取消信号，读取前后与 API 调用前复核，支持 spool 停止取消。这些新增路径尚未部署或真实客户端验收。
+
 ## 文件
 
 - `index.ts`：Telegram Surface 的公开导出入口。

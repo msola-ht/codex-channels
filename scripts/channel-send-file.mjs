@@ -10,7 +10,7 @@ import { CHANNEL_SEND_FILE_USAGE, parseChannelSendFileArgs } from "./channel-sen
 export async function submitChannelFile({
   environment = process.env, filePath, threadId, mediaType = "file", stateDatabasePath, spoolDirectory, now = () => Date.now(),
 } = {}) {
-  const { readBoundedLocalFile, assertChannelFileName, assertChannelMediaBytes, assertFeishuChannelMediaBytes, maximumQqChannelFileBytes } = await import("../dist/surfaces/index.js");
+  const { readBoundedLocalFile, assertChannelFileName, channelFilePolicy, maximumQqChannelFileBytes } = await import("../dist/surfaces/index.js");
   const fileName = typeof filePath === "string" ? basename(filePath) : undefined;
   let bytes;
   try {
@@ -31,11 +31,13 @@ export async function submitChannelFile({
   const targets = bindings.filter(binding => binding.threadId === resolvedThreadId);
   if (targets.length !== 1) throw new Error("Thread 的渠道绑定不唯一，拒绝发送文件");
   const target = targets[0];
-  if (target.surface !== "qq" && target.surface !== "feishu") throw new Error(`${target.surface} 渠道不支持显式发送渠道文件，当前支持 QQ、飞书`);
+  const policy = channelFilePolicy(target.surface);
+  if (!policy) throw new Error(`${target.surface} 渠道不支持显式发送渠道文件`);
   try {
-    if (target.surface === "feishu") assertFeishuChannelMediaBytes(bytes, mediaType);
-    else assertChannelMediaBytes(bytes, mediaType);
+    policy.validate(bytes, mediaType);
   } catch {
+    if (target.surface === "telegram") throw new Error("Telegram 文件上限 50,000,000 字节；video 仅 MP4，voice 仅 Ogg/Opus，不自动转码");
+    if (target.surface === "weixin") throw new Error("微信文件上限 25 MiB；video 仅 MP4；暂不支持原生 voice，可显式选择 file 发送音频文件");
     throw new Error(target.surface === "feishu"
       ? "飞书文件上限 30,000,000 字节；video 仅支持 MP4，voice 仅支持 Ogg/Opus，不自动转码"
       : "QQ 普通文件上限 64 MiB；video 仅支持 MP4、上限 30,000,000 字节，voice 仅支持 SILK、上限 20,000,000 字节");
@@ -69,7 +71,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   try {
     const args = process.argv.slice(2);
     if (args.length === 1 && (args[0] === "-h" || args[0] === "--help")) {
-      console.log(`${CHANNEL_SEND_FILE_USAGE}\n\n通过现有前台或后台 Thread 绑定，把本机文件交给 Gateway 发送。支持 QQ、飞书。\nQQ：默认 file 上限 64 MiB；video 为 MP4、上限 30,000,000 字节；voice 为 SILK、上限 20,000,000 字节。\n飞书：file/video/voice 均上限 30,000,000 字节；video 为 MP4，voice 为 Ogg/Opus。\n媒体类型须显式选择，按内容校验，不按后缀推断、不自动转码；拒绝空文件和符号链接；不指定 --thread 时须仅有一个绑定。`);
+      console.log(`${CHANNEL_SEND_FILE_USAGE}\n\n通过现有前台或后台 Thread 绑定，把本机文件交给 Gateway 发送。支持 QQ、飞书、Telegram、微信。\nQQ：默认 file 上限 64 MiB；video 为 MP4、上限 30,000,000 字节；voice 为 SILK、上限 20,000,000 字节。\n飞书：file/video/voice 均上限 30,000,000 字节；video 为 MP4，voice 为 Ogg/Opus。\nTelegram：三类上限 50,000,000 字节，video 为 MP4，voice 为 Ogg/Opus。\n微信：file/video 上限 25 MiB，video 为 MP4；原生 voice 不支持，可显式选 file 发送音频文件。\n媒体类型须显式选择，按内容校验，不按后缀推断、不自动转码；拒绝空文件和符号链接；不指定 --thread 时须仅有一个绑定。`);
     } else {
       const result = await submitChannelFile(parseChannelSendFileArgs(args));
       writeCliMessage("success", "已提交渠道文件发送，网关确认发送后自动归档。");
