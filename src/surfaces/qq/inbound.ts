@@ -3,6 +3,10 @@ const MAX_CONTENT_BYTES = 16 * 1024;
 const MAX_EXT_ITEMS = 32;
 const MAX_EXT_BYTES = 8 * 1024;
 const MAX_TIMESTAMP_BYTES = 128;
+const MAX_IMAGES = 4;
+const MAX_IMAGE_METADATA_BYTES = 8 * 1024;
+const MAX_IMAGE_URL_BYTES = 2048;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const CONTROL_CHARACTER = /\p{Cc}/u;
 // With the Unicode flag, a valid surrogate pair is one non-surrogate code point.
 const INVALID_UNICODE = /[\uD800-\uDFFF]/u;
@@ -13,6 +17,14 @@ export interface QqInboundTextMessage {
   readonly content: string;
   readonly msgIdx: string;
   readonly sentAtMs: number;
+  readonly images?: readonly QqInboundImage[];
+}
+
+export interface QqInboundImage {
+  readonly url: string;
+  readonly filename?: string;
+  readonly size?: number;
+  readonly contentType: "image/jpeg" | "image/png" | "image/gif";
 }
 
 export type QqInboundFailureCategory = "malformed" | "unsupported" | "too-large";
@@ -41,7 +53,8 @@ type Rejection = Extract<QqTextEventResult, { kind: "rejected" }>;
  * Parses an already decoded Dispatch envelope against the locked QQ event contract:
  * qq-api-v2-2026-10-23-message-reference/autogen/event/c2c_message_create.txt.
  * It grants no authorization, performs no deduplication or freshness check, and
- * returns no original event, extension list, credential or attachment data.
+ * returns only copied text, source fields and validated image metadata. It never
+ * downloads attachments or forwards an event credential to an attachment URL.
  */
 export function parseQqTextEvent(value: unknown): QqTextEventResult {
   if (!record(value) || value.op !== 0 || typeof value.t !== "string"
@@ -63,13 +76,11 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
   }
   if (scene.source !== "default") return reject("unsupported", "scene", "non-default-scene");
 
-  for (const [key, field] of [
-    ["attachments", "attachments"], ["msg_elements", "message-elements"],
-  ] as const) {
-    if (!(key in message)) continue;
-    const elements: unknown = message[key];
-    if (!Array.isArray(elements)) return reject("malformed", field, "invalid-type");
-    if (elements.length > 0) return reject("unsupported", field, "non-text");
+  const images = parseImages("attachments" in message ? message.attachments : []);
+  if (!Array.isArray(images)) return images;
+  if ("msg_elements" in message) {
+    if (!Array.isArray(message.msg_elements)) return reject("malformed", "message-elements", "invalid-type");
+    if (message.msg_elements.length > 0) return reject("unsupported", "message-elements", "non-text");
   }
   if ("ark_data" in message) {
     if (!record(message.ark_data)) return reject("malformed", "ark-data", "invalid-type");
@@ -88,7 +99,7 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
     return reject("too-large", "content", "limit-exceeded");
   }
   if (INVALID_UNICODE.test(message.content)) return reject("malformed", "content", "invalid-unicode");
-  if (message.content.trim().length === 0) return reject("malformed", "content", "empty");
+  if (message.content.trim().length === 0 && images.length === 0) return reject("malformed", "content", "empty");
 
   if (!Array.isArray(scene.ext)) return reject("malformed", "ext", "invalid-type");
   if (scene.ext.length > MAX_EXT_ITEMS) return reject("too-large", "ext", "limit-exceeded");
@@ -125,8 +136,70 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
       content: message.content,
       msgIdx,
       sentAtMs: timestamp,
+      ...(images.length > 0 ? { images } : {}),
     },
   };
+}
+
+function parseImages(value: unknown): QqInboundImage[] | Rejection {
+  if (!Array.isArray(value)) return reject("malformed", "attachments", "invalid-type");
+  if (value.length > MAX_IMAGES) return reject("too-large", "attachments", "limit-exceeded");
+  const images: QqInboundImage[] = [];
+  let metadataBytes = 0;
+  for (const attachment of value as unknown[]) {
+    if (!record(attachment)) return reject("malformed", "attachments", "invalid-type");
+    if (Object.keys(attachment).some(key => !["url", "filename", "size", "content_type", "width", "height"].includes(key))) {
+      return reject("unsupported", "attachments", "non-text");
+    }
+    const contentType = attachment.content_type;
+    if (typeof contentType !== "string") return reject("malformed", "attachments", "invalid-type");
+    if (contentType !== "image/jpeg" && contentType !== "image/png" && contentType !== "image/gif") {
+      return reject("unsupported", "attachments", "non-text");
+    }
+    const url = attachment.url;
+    if (typeof url !== "string") return reject("malformed", "attachments", "invalid-type");
+    if (Buffer.byteLength(url) > MAX_IMAGE_URL_BYTES) return reject("too-large", "attachments", "limit-exceeded");
+    if (INVALID_UNICODE.test(url)) return reject("malformed", "attachments", "invalid-unicode");
+    if (!/^https:\/\/[^/?#]/u.test(url) || /[\s\p{Cc}\p{Cf}\\]/u.test(url)) {
+      return reject("malformed", "attachments", "invalid-value");
+    }
+    let parsed: URL;
+    try { parsed = new URL(url); } catch { return reject("malformed", "attachments", "invalid-value"); }
+    if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password || parsed.hash
+      || url.includes("#") || url.slice("https://".length).split(/[/?#]/u, 1)[0]?.includes("@")
+      || (parsed.port && parsed.port !== "443")) {
+      return reject("malformed", "attachments", "invalid-value");
+    }
+    const filename = attachment.filename;
+    if ("filename" in attachment) {
+      if (typeof filename !== "string") return reject("malformed", "attachments", "invalid-type");
+      if (Buffer.byteLength(filename) > MAX_IDENTIFIER_BYTES) return reject("too-large", "attachments", "limit-exceeded");
+      if (INVALID_UNICODE.test(filename)) return reject("malformed", "attachments", "invalid-unicode");
+      if (!filename.trim() || /[\p{Cc}\p{Cf}\\/]/u.test(filename) || filename === "." || filename === "..") {
+        return reject("malformed", "attachments", "invalid-value");
+      }
+    }
+    const size = attachment.size;
+    if ("size" in attachment) {
+      if (typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0) {
+        return reject("malformed", "attachments", "invalid-value");
+      }
+      if (size > MAX_IMAGE_BYTES) return reject("too-large", "attachments", "limit-exceeded");
+    }
+    for (const dimension of ["width", "height"] as const) {
+      if (dimension in attachment && (typeof attachment[dimension] !== "number"
+        || !Number.isSafeInteger(attachment[dimension]) || attachment[dimension] <= 0)) {
+        return reject("malformed", "attachments", "invalid-value");
+      }
+    }
+    metadataBytes += Buffer.byteLength(JSON.stringify(attachment));
+    if (metadataBytes > MAX_IMAGE_METADATA_BYTES) return reject("too-large", "attachments", "limit-exceeded");
+    images.push({ url, contentType,
+      ...(typeof filename === "string" ? { filename } : {}),
+      ...(typeof size === "number" ? { size } : {}),
+    });
+  }
+  return images;
 }
 
 function parseIdentifier(value: unknown, field: "id" | "actor-id" | "msg-idx"): string | Rejection {

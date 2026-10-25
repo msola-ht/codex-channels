@@ -2,7 +2,7 @@
 
 接入骨架迁自 `feat/qq-adaptation`（`7a867db7`），消息层沿共享 Application、来源授权和持久投递实现。
 通过 `codexc setup → 通讯渠道 → QQ` 扫码或手工保存凭据与允许名单，启用后支持普通单聊文字任务。
-支持 /help、/status、/stop、/workspace、/model、/new、/sessions、/resume（/r），并已接入共享审批、用户问题与 MCP 交互；不开放附件输入、计划任务或旧结果补发；超长文字结果可交付为文本文件。
+支持 /help、/status、/stop、/workspace、/model、/new、/sessions、/resume（/r），并已接入共享审批、用户问题与 MCP 交互；图片输入及 PNG/JPEG 图片交付已接线、待部署验收，其他附件输入、计划任务或旧结果补发暂不开放；超长文字结果可交付为文本文件。
 会话管理新增 /rename、/archived、/archive、/unarchive、/pin、/unpin 及菜单，源码已接入、尚未部署验收。归档列表、分页与搜索保留 archived 语义，精确选择执行 unarchive；不增加平行会话索引。归档/恢复前取消旧来源，重命名/置顶保留来源；操作回执固定结果上下文，队列等待期间切换后不发送旧回执。
 第二批 /compact、/fork、/revert 源码已接入、尚未部署。回退复用共享解析、历史与确认，用有界 ID/令牌菜单呈现最多九项，完整字面预览沿 Outbox 的详情与末片按钮发送；`delivered` 仅在全部确认后开放一次性菜单选择。文字 confirm 同样复核本代次展示门槛；停止、切换及新列表撤销本目标的回退菜单。压缩不建立结果来源，回执不承诺完成；派生/回退执行前撤销旧来源，不补发历史。
 交互及问题 Markdown 优化已部署，用户截图确认同气泡排版、选项回应确认与对应后续回复开头；完整后续结果和其他交互分支仍待验收。审批详情以纯文字展示，末尾附可信 Markdown 回应按钮；全部分片获得平台确认后才开放回应，超限或展示失败安全取消，不转文件或自动重发。后续按钮回调改造已部署，客户端回调仍待验收。范围及待验收边界见 [当前交互合同](../../../docs/qq-message-contract.md#审批与问题回应源码实现待部署验收)。
@@ -23,6 +23,7 @@
 第五批接入 review、Skill/角色/Plugin 任务与带需求 Plan；菜单复用回调，用户需求通过填入稳定名称后追加文字提交。命令在授权和解析前建立提交观察，结果只接受权威响应的精确 Thread/Turn；Review 不伪造用户消息 ID，Goal set 保持拒绝。早到流式候选不先占用唯一 Item，确认后同步选择，最终全文仍沿共享持久投递。填写任务按钮不是上下文授权快照，实际发送时重新解析和授权；源码未部署。
 
 - `index.ts`：QQ 模块公开出口。
+- `image-store.ts`：仅消费已准入事件的图片元数据，复用 ManagedImageStore 私有暂存及共享 Data URL 转换；每批最多四张、输入总量 20 MiB、单图 10 MiB、整批三十秒，声明类型必须与内容签名一致。暂存初始化等待可取消，关闭取消下载；成功落盘后沿共享 24 小时清理，不在提交未知时立即删除。下载由注入的 Network 窄端口处理，不接受消息正文 URL。
 - `body-markdown.ts`：任务正文的原生 Markdown 安全前缀选择；保留原文，不补围栏或改写已发送前缀。标签、实体、图片及未确认链接留给普通文字；只允许完整的简单 HTTP(S) 链接，不生成按钮。
 - `message-markdown.ts`：启动、完成和普通命令回复的 Markdown 预选规划；复用安全检查，按完整段落合并分片、围栏内不截断，仍受原主动/被动片数与字节预算限制。不能完整规划时发送前选择原文字方案，不做失败后回退。
 - `command-menu.ts`：固定 `/help` 首页与统一 style=0 的按钮构造器；点击执行使用 type=1 回调，需填写文字使用 type=2、enter=false。首页仅显示 Codex 标题，不重复长说明。
@@ -66,15 +67,15 @@
   `sendMarkdown` 仅发送完整单片，复用文字收件人/来源/期限校验与消息 ID 回执；使用 msg_type=2 与 markdown.content，不同时保留 content。
   `getBotMenu`/`putBotMenu` 为 Setup 独立管理入口提供有界 GET/PUT；不参与 Gateway 启动、事件连接或消息投递。
   `sendStream` 显式指定 text/markdown 格式，生产正文使用被动 markdown/replace 帧，固定原来信、序号、索引和流 ID，复用有界请求、同步授权守卫及保守结果分类；不使用 event_id 或 is_wakeup。
-  `sendResultFile` 使用固定文件名的 UTF-8/Base64 直传、file_type=4 和 srv_send_msg=true，单次主动发送，正文最多 256 KiB；
-  不开放任意本地文件路径、下载 URL 或附件输入，收到合法消息 ID 后才认定平台接受。
+  `sendResultFile` 使用固定文件名的 UTF-8/Base64 直传、file_type=4 和 srv_send_msg=true，单次主动发送，正文最多 256 KiB；`sendImage` 只接共享校验后的 PNG/JPEG 字节，file_type=1、固定文件名、主动直传，本地最多 5,000,000 字节，均以合法消息 ID 确认。
+  协议不接任意本地文件路径或下载 URL。Outbox 图片沿共享顺序、主动额度和持久检查点；生成图还受共享 Journal 更小的有效图片容量约束，无路径仅 fileId 时提示内容不可取得，不伪称已发送。
   `sendText` 显式主动/被动模式，单片最多 2000 UTF-8 字节；被动序号取本地保守 1–4，
   原消息 300 秒窗口在调用时转换为单调期限，Token 等待后再次核验，不因等待重置。
   必传取消信号和同步 `beforeSend` 守卫，Token 前和最终 HTTP 发送前复核；一次操作的 15 秒期限覆盖 Token 与响应读取。
   成功只返回合法 `messageId`；`QqTextSendError.outcome` 区分 not-sent、rejected、unknown。仅一致的已知业务拒绝码认定 rejected，
   5xx、畸形/矛盾响应、缺少 ID、网络中断或发出后取消均不当作可重发失败。不分片、不重试、不切换模式，不写检查点。
-- `inbound.ts`：纯普通单聊 Dispatch 解析，输出最小文字与来源字段，区分非目标事件、格式错误、不支持和超出本地预算；
-  RFC3339 日历校验、Unicode 校验、唯一不透明 msg_idx 和引用/附件排除均在该边界完成。
+- `inbound.ts`：普通单聊 Dispatch 解析，输出最小文字、来源及 JPEG/PNG/GIF 图片元数据；纯图片可无正文，其他附件与引用仍拒绝，区分非目标事件、格式错误、不支持和超出本地预算；
+  RFC3339 日历校验、Unicode 校验、唯一不透明 msg_idx 及附件 URL/数量/元数据预算在该边界完成。
   不保留 ext 中的鉴权字段，不执行允许名单、Workspace、去重或任务授权；这些仍属下一层，不以解析成功代表准入。
 - `button-inbound.ts`：仅解析当前应用的 type=11/c2c/version=1 按钮事件，复用 RFC3339 日历校验；拒绝矛盾身份、畸形或超限回调数据，不解释命令或授予权限。
 - `message-input.ts`：区分普通来信与按钮回调身份；回调没有普通消息的 msg_idx 或被动回复锚点。

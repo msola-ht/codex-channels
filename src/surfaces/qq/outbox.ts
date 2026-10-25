@@ -1,7 +1,8 @@
 import type { Logger } from "pino";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
-import { QQ_TEXT_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT_FILE_BYTES, QqProtocolError, QqTextSendError,
+import { readGeneratedImage } from "../generated-image.js";
+import { QQ_TEXT_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT_FILE_BYTES, QQ_IMAGE_BYTES, QqProtocolError, QqTextSendError,
   type QqProtocolClient, type QqTextMessage, type QqTextSendContext, type QqCommandKeyboard } from "./protocol.js";
 import { planQqMessageMarkdown } from "./message-markdown.js";
 
@@ -14,7 +15,7 @@ export class QqTextOutbox {
   private readonly lifetime = new AbortController();
   private readonly queue: ConversationDeliveryQueue;
 
-  constructor(private readonly client: Pick<QqProtocolClient, "sendText" | "sendResultFile" | "sendMarkdown">, logger: Logger) {
+  constructor(private readonly client: Pick<QqProtocolClient, "sendText" | "sendResultFile" | "sendMarkdown" | "sendImage">, logger: Logger) {
     this.queue = new ConversationDeliveryQueue(logger, {
       component: "QqTextOutbox", capacity: 128, maximumPendingOperations: 128,
       drainOnClose: false,
@@ -150,6 +151,36 @@ export class QqTextOutbox {
       clearTimeout(timer);
       controller.abort();
     }
+  }
+
+  /** Images share the same conversation ordering and durable receipt contract as text. */
+  async deliverImage(recipient: string, path: string, context: QqTextSendContext & {
+    reserve(): { runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }> };
+  }, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
+    const signal = AbortSignal.any([context.signal, this.lifetime.signal, AbortSignal.timeout(PLAN_TIMEOUT_MS)]);
+    const guard = (): undefined => {
+      signal.throwIfAborted();
+      const result: unknown = context.beforeSend();
+      if (result !== undefined) {
+        void Promise.resolve(result).catch(() => {});
+        throw new QqProtocolError("message", "authorization");
+      }
+      signal.throwIfAborted();
+    };
+    guard();
+    await captureDelivery(() => {
+      const accepted = this.queue.enqueue(recipient, async active => {
+        guard();
+        const image = await readGeneratedImage(path, QQ_IMAGE_BYTES);
+        guard();
+        const reservation = context.reserve();
+        await checkpointDelivery("qq-image", () => reservation.runPart(active, () => this.client.sendImage({ recipient,
+          bytes: image.bytes, contentType: image.format === "jpeg" ? "image/jpeg" : "image/png",
+        }, { signal: active, beforeSend: guard })), error => error instanceof QqTextSendError && error.outcome === "rejected");
+        DeliveryReceipt.current()!.confirmCompleteContent();
+      }, true, { signal });
+      if (!accepted) throw new Error("QQ 图片未进入共享投递队列");
+    }, signal, checkpoint, { requireConfirmation: true });
   }
 
   /** Does not close the account protocol client, which belongs to the Adapter. */

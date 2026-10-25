@@ -3,6 +3,7 @@ import {
   type OutputEvent,
   type SurfaceId,
 } from "../conversation-core/index.js";
+import { isGeneratedImageUnavailable } from "./operation-presentation.js";
 
 /**
  * 渠道投递策略的唯一判定点。
@@ -56,6 +57,10 @@ export function resolveSurfaceDelivery(
 ): SurfaceDeliveryDecision {
   if (surface === "qq") {
     if (event.type === "mcp.oauth.completed") return { disposition: "deliver", critical: true };
+    if (event.type === "operation.updated" && event.operation.kind === "imageGeneration"
+      && event.operation.status === "completed" && (event.operation.imagePath !== undefined || isGeneratedImageUnavailable(event.operation))) {
+      return { disposition: "deliver", critical: true };
+    }
     if (event.type === "text.delta" && event.phase !== "commentary") return { disposition: "deliver", critical: false };
     return (event.type === "text.completed" && event.phase !== "commentary") || event.type === "turn.completed"
       ? { disposition: "deliver", critical: true }

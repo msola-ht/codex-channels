@@ -134,6 +134,7 @@ function createQqModule(
   const access = new QqAccessPolicy(config.allowedUserOpenIds, config.appId);
   const adapter = new QqSurface({
     appId: config.appId, appSecret: config.appSecret, access,
+    uploadsDirectory: join(dirname(options.config.stateDatabasePath), "uploads"),
     service: options.service, commands: options.commands, actors: options.bindings,
     autoCompactPercent: options.autoCompactPercent,
     startupNotification: {

@@ -56,6 +56,15 @@ export interface QqStreamFrame {
 export const QQ_STREAM_BYTES = 16_000;
 /** Local complete-result file budget, below QQ's documented direct-upload limit. */
 export const QQ_RESULT_FILE_BYTES = 256 * 1024;
+/** Conservative local binary-upload budget; QQ documents direct uploads within 5M. */
+export const QQ_IMAGE_BYTES = 5_000_000;
+
+export interface QqImageMessage {
+  readonly recipient: string;
+  /** Already validated PNG/JPEG bytes from the shared image reader. No paths or URLs. */
+  readonly bytes: Uint8Array;
+  readonly contentType: "image/png" | "image/jpeg";
+}
 
 export type QqTextRejection = "permission" | "refused" | "expired" | "reply-window-or-limit"
   | "rate-limit" | "duplicate" | "length" | "format" | "content" | "unavailable";
@@ -318,6 +327,25 @@ export class QqProtocolClient {
       return { path: `/v2/users/${encodeURIComponent(input.recipient)}/files`, body: {
         file_type: 4, srv_send_msg: true, file_name: "codex-result.txt",
         file_data: Buffer.from(input.content, "utf8").toString("base64"),
+      } };
+    }, context);
+  }
+
+  /** One active image delivery. srv_send_msg=true must return a valid message ID. */
+  async sendImage(input: QqImageMessage, context: QqTextSendContext): Promise<{ messageId: string }> {
+    return this.sendPlan(() => {
+      if (!record(input) || !identifier(input.recipient) || !(input.bytes instanceof Uint8Array)
+        || input.bytes.byteLength === 0 || input.bytes.byteLength > QQ_IMAGE_BYTES
+        || (input.contentType !== "image/png" && input.contentType !== "image/jpeg")
+        || Object.keys(input).some(key => !["recipient", "bytes", "contentType"].includes(key))) {
+        throw new QqProtocolError("message", "invalid-input");
+      }
+      // Copy into immutable Base64 before credential or authorization waits, just
+      // like result-file uploads. The endpoint explicitly supports PNG/JPEG.
+      return { path: `/v2/users/${encodeURIComponent(input.recipient)}/files`, body: {
+        file_type: 1, srv_send_msg: true,
+        file_name: input.contentType === "image/png" ? "codex-image.png" : "codex-image.jpg",
+        file_data: Buffer.from(input.bytes).toString("base64"),
       } };
     }, context);
   }

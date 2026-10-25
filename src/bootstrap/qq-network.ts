@@ -6,6 +6,7 @@ import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
 import type { GatewayConfig } from "../config/index.js";
 import type { QqNetwork } from "../surfaces/index.js";
 import { createProxyFetch } from "./proxy-fetch.js";
+import { createQqAttachmentDownloader } from "./qq-attachment-download.js";
 
 // The public constructor also accepts a URL; only common TCP options are supplied.
 type ProxyProtocol = `http:${string}`;
@@ -56,7 +57,8 @@ export function createQqNetwork(proxy: GatewayConfig["networkProxy"]): QqNetwork
     dispatchers.add(dispatcher);
     return dispatcher;
   } });
-  return {
+  const network: QqNetwork = {
+    downloadAttachment: (url, signal, beforeDownload) => downloads.download(url, signal, beforeDownload),
     fetchImpl(input, init) {
       const original = init?.signal ?? (input instanceof Request ? input.signal : undefined);
       const signal = AbortSignal.any([lifetime.signal, ...(original ? [original] : [])]);
@@ -82,6 +84,7 @@ export function createQqNetwork(proxy: GatewayConfig["networkProxy"]): QqNetwork
       lifetime.abort();
       return closing ??= (async () => {
         const results = await Promise.allSettled([
+          downloads.close(),
           ...[...agents].map(agent => agent.close()),
           ...[...dispatchers].map(dispatcher => dispatcher.destroy()),
         ]);
@@ -91,4 +94,6 @@ export function createQqNetwork(proxy: GatewayConfig["networkProxy"]): QqNetwork
       })();
     },
   };
+  const downloads = createQqAttachmentDownloader(network);
+  return network;
 }

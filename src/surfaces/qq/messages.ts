@@ -26,6 +26,8 @@ import { QqCommandMenuController } from "./command-menu-controller.js";
 import { qqBodyMarkdownPrefix } from "./body-markdown.js";
 import { QqInteractions } from "./interactions.js";
 import { isQqExtensionOperation, isQqTaskCommand } from "./extension-commands.js";
+import type { QqImageStore } from "./image-store.js";
+import { generatedImageUnavailableText, isGeneratedImageUnavailable } from "../operation-presentation.js";
 
 export interface QqMessageOptions {
   appId: string;
@@ -35,6 +37,7 @@ export interface QqMessageOptions {
   actors: ConversationActorRegistry;
   ownsThread(target: ConversationTarget, threadId: string): boolean;
   logger: Logger;
+  images?: Pick<QqImageStore, "prepare">;
   autoCompactPercent?: (provider: string | null | undefined, model: string | null | undefined) => number | null;
   startupNotification?: {
     recipients(): readonly string[];
@@ -145,6 +148,20 @@ export class QqMessages implements SurfaceOutputPort {
       }, checkpoint);
       return;
     }
+    if (event.type === "operation.updated" && event.operation.kind === "imageGeneration") {
+      const recipient = event.target.conversationId.slice(4);
+      const beforeSend = (): undefined => { if (authorized() !== true) throw new Error("QQ 图片授权失效"); };
+      const bounded = AbortSignal.any([signal, this.lifetime.signal]);
+      const reserve = () => this.budget.reserve(recipient, 1,
+        { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: false });
+      if (isGeneratedImageUnavailable(event.operation)) {
+        await this.outbox.deliver({ mode: "active", recipient, content: generatedImageUnavailableText },
+          { signal: bounded, beforeSend, reserve }, checkpoint);
+      } else if (event.operation.imagePath) {
+        await this.outbox.deliverImage(recipient, event.operation.imagePath, { signal: bounded, beforeSend, reserve }, checkpoint);
+      } else throw new Error("QQ 图片结果缺少内容");
+      return;
+    }
     if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
     let text = event.type === "text.completed" ? event.text : renderQqTurnCompleted(event, this.options.autoCompactPercent);
     let continuation = false;
@@ -195,6 +212,19 @@ export class QqMessages implements SurfaceOutputPort {
       if (!this.lifetime.signal.aborted) this.options.logger.warn({ reason: "startup-notification-failed" }, "QQ 上线通知未确认，不自动重试");
     }).finally(() => this.tasks.delete(task));
     this.tasks.add(task);
+  }
+
+  async sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
+    if (!conversationId.startsWith("c2c:")) throw new Error("QQ 图片目标不受支持");
+    const recipient = conversationId.slice(4);
+    const scope = this.scope(recipient);
+    if (!scope || !this.current(scope)) throw new Error("QQ 图片目标未获授权");
+    const target = this.target(recipient);
+    const context = this.extensionQueryScope(target);
+    await this.outbox.deliverImage(recipient, imagePath, { signal: this.lifetime.signal,
+      beforeSend: () => { if (!this.current(scope) || this.extensionQueryScope(target) !== context) throw new Error("QQ 图片目标已变化"); },
+      reserve: () => this.budget.reserve(recipient, 1, "interaction"),
+    }, async () => {});
   }
 
   private async sendStartupNotifications(): Promise<void> {
@@ -308,6 +338,11 @@ export class QqMessages implements SurfaceOutputPort {
   }
 
   private async process(message: QqMessageInput, target: ConversationTarget, ownsBusy = false): Promise<void> {
+    const images = "images" in message ? message.images : undefined;
+    if (images?.length && message.content.trimStart().startsWith("/")) {
+      await this.reply(message, "图片消息不执行斜杠命令或交互回答，请单独发送命令；图片可附上普通文字需求。", () => this.allowed(target, message.actorId));
+      return;
+    }
     // Response tokens remain usable while ordinary submit is preparing. They
     // never enter task submission, including unknown tokens after restart.
     const response = this.interactions.respond(target, message);
@@ -433,7 +468,17 @@ export class QqMessages implements SurfaceOutputPort {
       stage = "submit";
       try {
         this.options.service.touchActivity?.(target);
-        await this.options.service.submit(target, message.content, () => ticket.isCurrent(), ticket.observer);
+        const imageScope = images?.length ? this.extensionQueryScope(target) : undefined;
+        const assertImagesCurrent = () => {
+          if (!ticket.isCurrent() || imageScope !== undefined && this.extensionQueryScope(target) !== imageScope) {
+            throw new UserFacingError("image.download-failed", "图片准备已取消或上下文变化");
+          }
+        };
+        if (images?.length && !this.options.images) throw new UserFacingError("image.download-failed", "图片准备不可用");
+        const input = images?.length
+          ? await this.options.images!.prepare(images, message.content, ticket.signal, assertImagesCurrent) : message.content;
+        if (images?.length) assertImagesCurrent();
+        await this.options.service.submit(target, input, () => ticket.isCurrent(), ticket.observer);
       } catch (error) {
         ticket.cancel();
         const { errorType, errorCode, errorReason } = surfaceErrorMetadata(error);

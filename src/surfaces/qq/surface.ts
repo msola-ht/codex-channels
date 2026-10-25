@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import { join } from "node:path";
 import { safeInteractionDecision, type InteractionPort } from "../../approval/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import type { SurfaceAdapter, SurfaceOutputPort } from "../types.js";
@@ -6,17 +7,19 @@ import type { QqNetwork } from "./network.js";
 import { QqProtocolClient, QqProtocolError } from "./protocol.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 import { QqMessages, type QqMessageOptions } from "./messages.js";
+import { QqImageStore } from "./image-store.js";
 
 export interface CreateQqSurfaceOptions extends QqMessageOptions {
   appId: string;
   appSecret: string;
+  uploadsDirectory: string;
   createNetwork(): QqNetwork;
   access: SurfaceAccessPolicy;
   logger: Logger;
   onFatal(error: Error): void;
 }
 
-/** Text-only adapter; shares Application and persistent delivery with other Surfaces. */
+/** Shares Application and persistent delivery with other Surfaces. */
 export class QqSurface implements SurfaceAdapter {
   readonly surface = "qq";
   readonly capabilities = { recoverBindings: true, interactions: true, scheduledTasks: false, configurationNotifications: false } as const;
@@ -94,6 +97,11 @@ export class QqSurface implements SurfaceAdapter {
     ]).then(() => {});
   }
 
+  sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
+    return this.current?.messages.sendChannelImage(conversationId, imagePath)
+      ?? Promise.reject(new Error("QQ 消息连接不可用"));
+  }
+
   deliverConfigurationChange(): Promise<void> {
     // Startup notifications are independent of configuration broadcasts.
     // This disabled broadcast must not block other channels' durable events.
@@ -106,6 +114,7 @@ class QqConnection {
   private readonly network: QqNetwork;
   private readonly client: QqProtocolClient;
   private readonly transport: QqWebSocketTransport;
+  private readonly images: QqImageStore;
   private closed = false;
   private stopping: Promise<void> | undefined;
 
@@ -114,7 +123,9 @@ class QqConnection {
     this.client = new QqProtocolClient({ appId: options.appId, appSecret: options.appSecret,
       fetchImpl: (input, init) => this.network.fetchImpl(input, init) });
     this.network = options.createNetwork();
-    this.messages = new QqMessages(options, this.client);
+    this.images = new QqImageStore(join(options.uploadsDirectory, `qq-images-${options.appId}`),
+      (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger);
+    this.messages = new QqMessages({ ...options, images: this.images }, this.client);
     this.transport = new QqWebSocketTransport({
       client: this.client,
       agentForUrl: (url, signal) => this.network.agentForUrl(url, signal),
@@ -139,6 +150,7 @@ class QqConnection {
 
   stop(): Promise<void> {
     this.closed = true;
+    this.images.close();
     this.client.close();
     return this.stopping ??= this.closeResources();
   }

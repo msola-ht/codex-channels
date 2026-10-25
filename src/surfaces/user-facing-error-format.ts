@@ -104,6 +104,10 @@ export function formatSurfaceUserFacingError(
       return "一次最多处理 4 张图片";
     case "image.unsupported":
       return "仅支持 PNG、JPEG、WebP 和非动画 GIF 图片";
+    case "image.type-mismatch":
+      return "图片内容与声明类型不一致，请重新发送图片";
+    case "image.download-failed":
+      return "图片读取已取消、超时或未确认，请核对权限后重新发送图片";
     case "audio.path.invalid":
       return "本地音频路径必须是绝对路径";
     case "audio.duration-missing":
