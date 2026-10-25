@@ -354,7 +354,7 @@ Plugin 或子代理的具体类型与名称，
 渲染，不使用其内部 fallback message；未知异常只发送通用提示，然后把原异常交回 Inbox，由
 Inbox 现有诊断路径仅记录受约束的错误类型。命令结果、追加确认和错误提示被输出队列拒绝时，
 Adapter 不会重试已经执行的状态修改，而是把稳定的队列错误交回同一诊断路径。会话列表最多展示
-20 条，名称或预览会规范空白并限制为 48 个字符，剩余项通过搜索提示收敛。
+每页 10 条，与 Telegram、微信和 QQ 共用 Application 分页；名称或预览会规范空白并限制为 48 个字符，剩余项通过翻页或搜索查看。
 
 `/fs doctor` 在 Surface 内调用 `application-setup.ts`，不经过 Conversation Core，也不把
 应用 SDK 类型带入 Application。Doctor 先读取租户已开通权限、已发布版本、事件和回调形成快照，

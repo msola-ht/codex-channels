@@ -177,7 +177,7 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 `/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`
 标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。三个渠道分别用飞书卡片
 Markdown、Telegram HTML、微信结构化字段渲染列表。
-`/sessions` 和 `/archived` 共用可复制的分页/筛选命令，仅支持运行状态、固定状态、Provider 和关键词。
+`/sessions` 和 `/archived` 在飞书、Telegram、微信和 QQ 统一每页十条，由 Application 完成分页；Surface 直接呈现当前页，不二次切片。共用可复制的分页/筛选命令，仅支持运行状态、固定状态、Provider 和关键词。
 自定义会话分区入口及其管理员权限已移除。内置 Pinned 在三渠道统一复用 `/pin` 与 `/unpin`，
 渠道只提交选择，不保存分区状态。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际

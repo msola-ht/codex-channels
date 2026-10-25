@@ -8,7 +8,6 @@ import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatDisplayedProvider } from "./provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
-const maximumSessionEntries = 20;
 const maximumSessionLabelCharacters = 48;
 const maximumProcessCommandCharacters = 160;
 
@@ -21,22 +20,13 @@ export function formatConversationSessions(
       ? `页码超出范围：第 ${result.page} 页，共 ${result.pageCount} 页。`
       : `当前 Workspace 没有匹配的${scope}。`;
   }
-  const visibleSessions = result.sessions.slice(0, maximumSessionEntries);
-  const hiddenCount = result.sessions.length - visibleSessions.length;
-  const searchCommand = result.archived ? "archived" : "sessions";
   const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
   return toStructuredMarkdownList([
     `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${result.view.searchTerm}` : ""}：`,
-    ...visibleSessions.map(
+    ...result.sessions.map(
       (session, index) =>
         `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${formatReasoningEffort(session.reasoningEffort)}` : ""}${session.modelProvider ? ` · Provider：${formatDisplayedProvider(session.modelProvider)}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
-    ...(hiddenCount > 0
-      ? [
-          "",
-          `另有 ${hiddenCount} 条未显示，请使用 /${searchCommand} search <搜索词> 缩小范围。`,
-        ]
-      : []),
     ...(result.pageCount > 1
       ? [
           "",

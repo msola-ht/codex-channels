@@ -93,7 +93,7 @@ export const conversationCommandNames = [
 
 export type ConversationCommandName = typeof conversationCommandNames[number];
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
-const maximumSessionListEntries = 20;
+const maximumSessionListEntries = 10;
 const maximumPluginListEntries = 8;
 
 export type ConversationCommandUseCases =

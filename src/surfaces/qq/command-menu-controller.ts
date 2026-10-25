@@ -14,7 +14,7 @@ import {
 import { conversationTargetKey, UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
-import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTierSetting } from "../provider-format.js";
+import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, formatServiceTierSetting, modelListEntry } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import { formatThreadQueueInputTypeLabel } from "../conversation-session-command-format.js";
@@ -122,7 +122,7 @@ export class QqCommandMenuController {
     const context = this.context(target, actorId);
     if (!input) return this.panel(context, renderQqCommandMenu());
     if (input === "schedule-create") return this.panel(context, {
-      content: "# 新增计划任务\n选择周期类型后，在填入的命令后补齐参数并发送。\n每隔：间隔 时区 任务\n一次性：日期 时间 时区 任务\n每月：日 时间 时区 任务\n每天、工作日：时间 时区 任务\n每周：星期 时间 时区 任务\n时间使用 HH:mm，日期使用 YYYY-MM-DD；间隔如 30m，星期如 MO,FR。时区请明确填写，例如 Asia/Shanghai。\n创建前会展示工作区、提供商、模型等执行上下文预览，确认后才创建。",
+      content: "# 新增计划任务\n\n**周期与填写参数**\n\n1. 每隔：间隔、时区、任务\n2. 一次性：日期、时间、时区、任务\n3. 每月：日、时间、时区、任务\n4. 每天：时间、时区、任务\n5. 工作日：时间、时区、任务\n6. 每周：星期、时间、时区、任务\n\n**格式说明**\n\n- 时间：HH:mm；日期：YYYY-MM-DD\n- 间隔：如 30m；星期：如 MO,FR\n- 时区：明确填写，如 Asia/Shanghai\n\n点击类型后补齐参数并发送。创建前会展示工作区、提供商、模型等执行上下文预览，确认后才创建。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("interval", "每隔一段时间", "/schedule add interval ", false), qqMenuButton("once", "一次性", "/schedule add once ", false)] },
         { buttons: [qqMenuButton("monthly", "每月指定日", "/schedule add monthly ", false), qqMenuButton("daily", "每天", "/schedule add daily ", false)] },
@@ -132,7 +132,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "account") return this.panel(context, {
-      content: "# 账户工具\n查看额度、重置券或当前渠道身份。机器人接入与群授权请在本机 Setup 管理。",
+      content: "# 账户工具\n\n**查询与管理**\n\n- 账户额度与重置券\n- 当前渠道身份\n\n点击下方操作；机器人接入与群授权请在本机 Setup 管理。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("limits", "账户额度", "/limits"), qqMenuButton("credits", "查看重置券", "/limits reset")] },
         { buttons: [qqMenuButton("whoami", "我的身份", "/whoami")] },
@@ -140,7 +140,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "extensions") return this.panel(context, {
-      content: "# 能力与集成\n选择技能、子代理或插件后填写任务；MCP 管理及 Hook 确认沿各自入口处理。",
+      content: "# 能力与集成\n\n**任务能力**\n\n- 子代理、Skills、Plugin：选择后填写任务\n\n**集成管理**\n\n- MCP：目录、健康、认证与重载\n- Hooks：查看配置并按预览确认\n\n点击下方入口继续。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("agents", "子代理", "/agents"), qqMenuButton("skill", "Skills", "/skill"), qqMenuButton("plugin", "Plugin", "/plugin")] },
         { buttons: [qqMenuButton("mcp", "MCP 列表", "/mcp"), qqMenuButton("mcphealth", "MCP 健康", "/mcp health"), qqMenuButton("pluginhealth", "插件健康", "/plugin health")] },
@@ -149,7 +149,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "tasks") return this.panel(context, {
-      content: "# 任务工具\n查看改动、发起审查或管理排队与计划任务。",
+      content: "# 任务工具\n\n**任务操作**\n\n- Diff：查看当前改动\n- Review：选择审查目标\n- 原生队列：管理排队输入\n- 计划任务：查看与管理定时任务\n\n点击下方操作；计划需求需填写后发送。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("diff", "Diff", "/diff"), qqMenuButton("review", "Review", "/help review")] },
         { buttons: [qqMenuButton("queue", "原生队列", "/help queue"), qqMenuButton("schedule", "计划任务", "/schedule")] },
@@ -158,7 +158,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "review") return this.panel(context, {
-      content: "# Review\n审查当前改动可直接执行；指定分支、提交或审查要求时填写相应内容。",
+      content: "# Review\n\n**审查目标**\n\n1. 当前未提交改动\n2. 指定分支差异\n3. 指定提交\n4. 自定义审查要求\n\n当前改动可直接执行；其他目标需填写后发送。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("review", "审查当前改动", "/review"), qqMenuButton("reviewbranch", "审查分支差异", "/review branch ", false)] },
         { buttons: [qqMenuButton("reviewcommit", "审查指定提交", "/review commit ", false), qqMenuButton("reviewcustom", "填写审查要求", "/review custom ", false)] },
@@ -166,7 +166,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "settings") return this.panel(context, {
-      content: "# 偏好设置\n调整后续任务的模式与当前会话审批方式；权限入口仅查询。",
+      content: "# 偏好设置\n\n**当前会话设置**\n\n- Goal：查询或清除目标\n- Plan：调整协作模式\n- 会话审批方式：调整当前会话审批\n- 权限：只读查询\n\n点击下方选项继续。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("goal", "Goal", "/goal"), qqMenuButton("plan", "Plan 模式", "/plan")] },
         { buttons: [qqMenuButton("autoreview", "会话审批方式", "/autoreview"), qqMenuButton("permissions", "权限查询", "/permissions")] },
@@ -174,7 +174,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "manage") return this.panel(context, {
-      content: "# 会话操作\n操作当前会话；归档会退出当前会话。",
+      content: "# 会话操作\n\n**当前会话**\n\n- 归档、分叉、重命名\n- 固定、取消固定、释放占用\n- 历史回退、压缩上下文\n\n归档会退出当前会话；恢复入口位于“已归档会话”。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("archive", "归档当前", "/archive"), qqMenuButton("archived", "已归档会话", "/help archived 1")] },
         { buttons: [qqMenuButton("fork", "分叉会话", "/fork"), qqMenuButton("rename", "重命名", "/rename ", false)] },
@@ -206,7 +206,7 @@ export class QqCommandMenuController {
     switch (result.kind) {
       case "workspaces": return this.workspaces(context, result, 1);
       case "models": return this.models(context, result, 1, result.view);
-      case "sessions": return this.sessions(context, result, (result.page - 1) * 2 + 1);
+      case "sessions": return this.sessions(context, result, result.page);
       case "auto-review": return this.autoReview(context, result);
       case "goal": return this.goal(context, result);
     }
@@ -447,10 +447,10 @@ export class QqCommandMenuController {
     ];
     const rows = buttonRows(buttons);
     rows.push({ buttons: navigation }, { buttons: [qqMenuButton("queueadd", "新增排队文本", "/queue add ", false), homeButton()] });
-    const content = ["# App Server Queue", `第 ${page} 屏 · 共 ${shared.totalItemCount} 条 · 每屏最多九项`,
-      "选择条目查看完整安全摘要；条目正文由 App Server 持久保存，Gateway 不保存第二份。",
+    const content = ["# App Server Queue\n", `第 ${page} 屏 · 共 ${shared.totalItemCount} 条 · 每屏最多九项\n`, "**排队条目**\n",
       ...entries.map((item, index) => `${(shared.page - 1) * 25 + local * 9 + index + 1}. ${markdown(item.textPreview ?? formatThreadQueueInputTypeLabel(item.inputType), 130)}`),
       ...entries.length ? [] : ["队列为空。"],
+      "\n点击条目查看完整安全摘要，再选择操作。",
     ].join("\n");
     return this.panel(context, { content, keyboard: { content: { rows } } });
   }
@@ -683,8 +683,10 @@ export class QqCommandMenuController {
     const buttons = entries.map((workspace, index) => this.button(context,
       `${(page - 1) * 9 + index + 1} ${workspace.name}`, { kind: "workspace", id: workspace.id }));
     const lines = entries.map((workspace, index) =>
-      `**${(page - 1) * 9 + index + 1}. ${markdown(workspace.name, 100)}${workspace.id === result.currentWorkspaceId ? "（当前）" : ""}**\nID：${markdown(workspace.id, 100)}\n工作目录：${markdown(workspace.cwd, 260)}\n`);
-    lines.unshift(`当前工作区：${markdown(result.currentWorkspaceId, 100)}${result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId) ? "" : "（已失效，请重新选择）"}\n切换后请重新发起操作，不会自动重试之前的请求。\n`);
+      `${(page - 1) * 9 + index + 1}. **${markdown(workspace.name, 100)}**${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}\n   - ID：${markdown(workspace.id, 100)}\n   - 工作目录：${markdown(workspace.cwd, 260)}`);
+    const currentWorkspace = result.workspaces.find(workspace => workspace.id === result.currentWorkspaceId);
+    lines.unshift(`**当前工作区：${markdown(currentWorkspace?.name ?? result.currentWorkspaceId, 100)}**\n\n- ID：${markdown(result.currentWorkspaceId, 100)}\n${currentWorkspace ? `- 工作目录：${markdown(currentWorkspace.cwd, 260)}` : "- 原选择已失效，请重新选择。"}\n\n**工作区列表**\n`);
+    lines.push("\n点击下方工作区切换；切换后请重新发起操作，不会自动重试之前的请求。");
     return this.listPanel(context, "选择工作区", lines, buttons, page, Math.ceil(result.workspaces.length / 9),
       next => ({ kind: "workspace-page", page: next }));
   }
@@ -710,7 +712,8 @@ export class QqCommandMenuController {
     context = { ...context, selectionScope: snapshot.selectionScope };
     const selected = state.models.find(model => model.model === state.model
       && (model.provider ?? "openai") === (state.modelProvider ?? "openai") && model.available !== false);
-    const current = `当前模型：${markdown(selected?.displayName ?? state.model, 100)}\n提供商：${markdown(formatCodexProviderLabel(state.modelProvider), 100)}\n${reasoningEffortSettingName(state.effort, selected)}：${markdown(formatReasoningEffort(state.effort ?? selected?.defaultReasoningEffort), 40)}\n速度：${markdown(formatServiceTierSetting(state, selected), 200)}\n`;
+    const currentName = selected ? modelListEntry(selected.displayName, selected.provider, selected.model).modelName : state.model;
+    const current = `**当前模型：${markdown(currentName, 100)}**\n\n- ${reasoningEffortSettingName(state.effort, selected)}：${markdown(formatReasoningEffort(state.effort ?? selected?.defaultReasoningEffort), 40)}\n- 速度：${markdown(formatServiceTierSetting(state, selected), 200)}\n- 当前提供商：${markdown(formatCodexProviderLabel(state.modelProvider), 100)}\n`;
     if (view !== "model") {
       if (!selected && view === "effort") throw expired();
       const choices: Array<{ label: string; selection: ModelSelectionRequest }> = view === "effort"
@@ -723,14 +726,18 @@ export class QqCommandMenuController {
           ...(selected && fastServiceTierId(selected) ? [{ label: "Fast", selection: { kind: "fast" as const, mode: "on" as const, snapshot } }] : []),
           ...(selected && ultrafastServiceTierId(selected) ? [{ label: "Ultrafast", selection: { kind: "fast" as const, mode: "ultrafast" as const, snapshot } }] : []),
         ];
-      const entries = slicePage(choices, page, 9);
+      const speed = state.serviceTierKnown ? formatServiceTier(state.serviceTier, selected) : undefined;
+      const entries = slicePage(choices, page, 9).map(choice => ({ ...choice,
+        label: view === "fast" && choice.label === speed ? `${choice.label} ← 当前` : choice.label,
+      }));
       const buttons = entries.map(choice => this.button(context, choice.label, { kind: "model", selection: choice.selection }));
       const extra = [this.button(context, "选择模型", { kind: "model-page", page: 1, view: "model", snapshot })];
       if (view === "effort" && selected && (fastServiceTierId(selected) || ultrafastServiceTierId(selected))) {
         extra.push(this.button(context, "选择速度", { kind: "model-page", page: 1, view: "fast", snapshot }));
       }
       return this.listPanel(context, view === "effort" ? `选择${reasoningEffortSettingName(state.effort, selected)}` : "选择速度",
-        [current, ...(view === "fast" ? ["速度影响下一轮；主 Provider 同时更新 Codex 用户级默认速度。"] : []), ...entries.map(choice => markdown(choice.label, 100))],
+        [current, `**${view === "effort" ? reasoningEffortSettingName(state.effort, selected) : "速度"}选项**\n`, ...entries.map((choice, index) => `${(page - 1) * 9 + index + 1}. ${markdown(choice.label, 100)}`),
+          view === "fast" ? `\n- 当前模型：${formatModelSpeedSupport(selected)}\n\n点击下方速度选项，影响下一轮；主 Provider 同时更新 Codex 用户级默认速度。` : "\n点击下方选项调整思考设置。"],
         buttons, page, Math.ceil(choices.length / 9), next => ({ kind: "model-page", page: next, view, snapshot }), extra);
     }
     if (state.providerFilter === undefined) {
@@ -739,8 +746,8 @@ export class QqCommandMenuController {
       const buttons = entries.map(provider => this.button(context, formatCodexProviderLabel(provider), {
         kind: "model", selection: { kind: "browse-provider", provider, snapshot },
       }));
-      const lines = [current, "请先选择提供商，再选择该提供商下的模型。", ...entries.map(provider =>
-        `**${markdown(formatCodexProviderLabel(provider), 100)}${provider === (state.modelProvider ?? "openai") ? "（当前）" : ""}**\n${markdown(formatProviderModelSummary(state.models, provider), 180)}\n`)];
+      const lines = [current, "**提供商列表**\n", ...entries.map((provider, index) =>
+        `${(page - 1) * 9 + index + 1}. ${markdown(formatCodexProviderLabel(provider), 100)}${provider === (state.modelProvider ?? "openai") ? " ← 当前" : ""} · ${markdown(formatProviderModelSummary(state.models, provider), 180)}`), "\n点击下方提供商，继续选择模型。"];
       return this.listPanel(context, "选择提供商", lines, buttons, page, Math.ceil(providers.length / 9),
         next => ({ kind: "model-page", page: next, view, snapshot }));
     }
@@ -749,7 +756,7 @@ export class QqCommandMenuController {
     const buttons = entries.flatMap((model, index) => model.available === false ? [] : [this.button(context, `${(page - 1) * 9 + index + 1} ${model.displayName}`, {
       kind: "model", selection: { kind: "model", provider: model.provider ?? "openai", model: model.model, snapshot },
     })]);
-    const lines = [current, `提供商：${markdown(formatCodexProviderLabel(state.providerFilter), 100)}\n请选择模型；支持多个思考等级时继续选择思考等级。`, ...entries.map((model, index) => `${(page - 1) * 9 + index + 1}. ${markdown(model.displayName, 80)}${model.available === false ? "（暂不可用）" : ""}${model === selected ? "（当前）" : ""}\n${markdown(model.model, 90)}\n`)];
+    const lines = [current, `**浏览提供商：${markdown(formatCodexProviderLabel(state.providerFilter), 100)}**\n`, ...entries.map((model, index) => `${(page - 1) * 9 + index + 1}. ${markdown(modelListEntry(model.displayName, model.provider, model.model).name, 130)}${model.available === false ? "（暂不可用）" : ""}${model === selected ? " ← 当前" : ""} · ${formatModelSpeedSupport(model)}`), "\n点击下方模型完成选择，再调整该模型的思考等级和速度；上方当前设置不会因浏览而切换。"];
     const extra: QqMenuButton[] = [qqMenuButton("providers", "返回提供商", "/model")];
     if (selected && selected.supportedReasoningEfforts.length > 1) extra.push(this.button(context, "思考等级", { kind: "model-page", page: 1, view: "effort", snapshot }));
     if (selected && (fastServiceTierId(selected) || ultrafastServiceTierId(selected))) extra.push(this.button(context, "选择速度", { kind: "model-page", page: 1, view: "fast", snapshot }));
@@ -759,34 +766,33 @@ export class QqCommandMenuController {
 
   private async sessionsPage(context: MenuContext, page: number, filters: string, archived: boolean): Promise<QqMenuPanel> {
     this.assertCurrent(context);
-    const result = await this.options.commands.execute(context.target, archived ? "archived" : "sessions", `${Math.ceil(page / 2)} ${filters}`.trim(), context.actorId);
+    const result = await this.options.commands.execute(context.target, archived ? "archived" : "sessions", `${page} ${filters}`.trim(), context.actorId);
     this.assertCurrent(context);
     if (result.kind !== "sessions" || result.archived !== archived) throw unsupported();
     return this.sessions(context, result, page);
   }
 
   private sessions(context: MenuContext, result: Sessions, page: number): QqMenuPanel {
-    const pages = Math.max(1, Math.ceil(result.matchedSessionCount / 10));
+    const pages = result.pageCount;
     if (page > pages) throw unsupported();
-    const offset = page % 2 === 0 ? 10 : 0;
     const background = new Set(result.backgroundThreadIds ?? []);
     const title = result.archived ? "已归档会话" : "历史会话";
-    const heading = `# ${title}（匹配 ${result.matchedSessionCount}）`;
+    const heading = `# ${title}\n\n共 ${result.matchedSessionCount} 条 · 第 ${page} / ${pages} 页`;
     const hint = "点击下方对应会话恢复；省略号表示标题或字段已截断。";
-    const entries = result.sessions.slice(offset, offset + 10).map((session, index) => ({
+    const entries = result.sessions.map((session, index) => ({
       session,
-      number: (page - 1) * 10 + index + 1,
+      number: session.selector ?? index + 1,
       text: [
-        `**${(page - 1) * 10 + index + 1}. ${markdown(bounded(session.name || session.preview || "未命名", 32), 160)}**${session.id === result.currentThreadId ? " · 当前" : background.has(session.id) ? " · 后台运行" : ""}${session.isPinned ? " · 固定" : ""}`,
+        `**${session.selector ?? index + 1}. ${markdown(bounded(session.name || session.preview || "未命名", 32), 160)}${session.id === result.currentThreadId ? "（当前）" : background.has(session.id) ? "（后台）" : ""}${session.isPinned ? "（固定）" : ""}**\n`,
         [
           ...(session.model ? [`模型：${markdown(session.model, 60)}`] : []),
           ...(session.reasoningEffort ? [`思考：${markdown(session.reasoningEffort, 24)}`] : []),
           ...(session.modelProvider ? [`Provider：${markdown(session.modelProvider, 45)}`] : []),
-        ].join(" · "),
+        ].join(" · ").replace(/^(.+)$/u, "- $1"),
         [
           ...(session.turnCount === undefined ? [] : [`轮数：${session.turnCount}`]),
           `状态：${session.status.type}`, `ID：${markdown(session.id.slice(0, 12), 24)}`,
-        ].join(" · "),
+        ].join(" · ").replace(/^/u, "- "),
       ].filter(Boolean).join("\n"),
     }));
     const filters = [
@@ -814,8 +820,8 @@ export class QqCommandMenuController {
     if (last && last.buttons.length === 1) last.buttons.push(...tools);
     else rows.push({ buttons: tools });
     rows.push({ buttons: navigation });
-    const content = [heading, `第 ${page}/${pages} 页`, hint,
-      ...entries.length ? entries.map(entry => entry.text) : ["当前工作区没有匹配会话。"]].join("\n\n");
+    const content = [heading,
+      ...entries.length ? entries.map(entry => entry.text) : ["当前工作区没有匹配会话。"], hint].join("\n\n");
     if (Buffer.byteLength(content) > QQ_MENU_PART_BYTES || rows.length > 5) throw unsupported();
     return this.panel(context, { content, keyboard: { content: { rows } } });
   }
@@ -829,7 +835,12 @@ export class QqCommandMenuController {
         qqMenuButton(value!, label!, `/metrics ${scope} ${value}`));
     const rows = buttonRows(buttons);
     rows.push({ buttons: [qqMenuButton("metrics", "统计范围", "/help metrics"), homeButton()] });
-    return this.panel(context, { content: scope === undefined ? "# 请求统计" : "# 选择统计时段", keyboard: { content: { rows } } });
+    const scopeLabels: Record<string, string> = { global: "全局", providers: "提供商", models: "模型", errors: "错误" };
+    const scopeLabel = scopeLabels[scope ?? ""];
+    const content = scope === undefined
+      ? "# 请求统计\n\n**统计范围**\n\n1. 当前会话\n2. 全局\n3. 提供商\n4. 模型\n5. 错误\n\n点击下方范围；聚合统计继续选择时段。"
+      : `# 请求统计\n\n**当前范围：${scopeLabel}**\n\n**统计时段**\n\n1. 24 小时\n2. 7 天\n3. 30 天\n4. 90 天\n5. 全部\n\n点击下方时段查看统计。`;
+    return this.panel(context, { content, keyboard: { content: { rows } } });
   }
 
   private listPanel(context: MenuContext, title: string, lines: string[], buttons: QqMenuButton[], page: number, pageCount: number,
@@ -841,7 +852,7 @@ export class QqCommandMenuController {
     if (page < pageCount) footer.push(this.button(context, "下一页", navigate(page + 1)));
     footer.push(homeButton());
     rows.push({ buttons: footer });
-    const content = [`# ${title}`, `${page} / ${Math.max(1, pageCount)}`, ...lines.length ? lines : ["暂无可选项"]].join("\n");
+    const content = [`# ${title}\n`, ...(pageCount > 1 ? [`第 ${page} / ${pageCount} 页\n`] : []), ...lines.length ? lines : ["暂无可选项"]].join("\n");
     if (Buffer.byteLength(content, "utf8") > QQ_MENU_PART_BYTES || rows.length > 5) throw unsupported();
     return this.panel(context, { content, keyboard: { content: { rows } } });
   }
