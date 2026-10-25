@@ -15,9 +15,10 @@
 `delivery-diagnostics/index.ts` 是离线投递诊断的窄公开入口，仅复用载荷解码和屏障分类，不加载平台 SDK 或数据库实现。
 `SurfaceOutputPort.deliver` 的可选来源参数由持久 owner 解析后传入，富化不重选来源；QQ 用它校验并取得原生引用索引。来源本身不授予发送权限，各渠道继续执行原授权守卫，不消费该参数的渠道保持原行为。
 `persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，持久结果发送未知或授权失效后解除顺序屏障并保留记录、检查点与容量计费，并将必要图片纳入同一有界快照；
+载荷 v1 支持分类独立于当前显示偏好和渠道实时准入。`retains` 只决定新事件是否入箱；已入箱操作即使后来改为 `hidden`，或在 `compact` 下属于省略的 sleep/子代理操作，也保留可见的完整或精简终态表示。恢复不保证与原来版式相同，不新增持久字段。发送仍复核原授权、来源、回复窗口和渠道支持；微信不因此开放普通操作或子代理输出。
 生成图片的上游 `fileId` 只在实时事件中传递，写入快照前一律剥离；只有引用、没有 `savedPath` 的完成结果仅保留内容不可获取标记，恢复后沿用相同提示，不把引用写入投递 Journal。
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
-等待实际操作结算，Bootstrap 才能确认持久记录；TG/飞书可靠正文还要求存在平台成功检查点，排队终态持有正文引用，独立于断线清理的临时流缓存；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。`snapshot-delivery.ts` 将状态展示的失效信号与排队操作关联；`SurfaceOutputPort.deliverSnapshot`
+等待实际操作结算，Bootstrap 才能确认持久记录；TG/飞书/微信可靠输出要求存在平台成功检查点，排队终态持有正文引用，独立于断线清理的临时流缓存；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。既有空白 commentary 和隐藏自动审批展示特例保持原有明确结算规则，不据此推导其他空发送成功。`snapshot-delivery.ts` 将状态展示的失效信号与排队操作关联；`SurfaceOutputPort.deliverSnapshot`
 允许按展示规则不产生消息，等待实际状态操作结束，并在平台调用前复核归属。普通 `handle` 继续用于中间输出。
 
 Surface 只运输和呈现项目已经接入的 Codex CLI/App Server 能力。当前能力范围以
@@ -336,7 +337,7 @@ warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳�
 
 Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 Surface Outbox。`full`
 显示完整操作，`compact` 显示单行摘要，其中子代理只保留启动和失败、抑制成功的等待与交互操作，
-`hidden` 忽略普通 `operation.updated`；Core 始终正常归约操作，审批与其他关键输出不受影响。
+`hidden` 忽略新到达的普通 `operation.updated`；已入箱终态保留上述可见表示与送达义务。Core 始终正常归约操作，审批与其他关键输出不受影响。
 上下文压缩开始和完成由共享展示状态去重，三个渠道均独立、有序发送，不受操作显示设置影响。
 Telegram 把同一 Turn 的成功查询类操作延迟聚合；
 飞书只聚合 MCP 与动态工具，网页搜索完成后立即发送。MCP 目录与实际工具调用统一显示 App Server

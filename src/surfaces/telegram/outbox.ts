@@ -1,7 +1,7 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
-import { isPersistentOutput } from "../persistent-output.js";
+import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
 import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { TelegramTextStreams, type TelegramFinalMessageFormat } from "./text-streams.js";
 import { replyOptions, htmlSendOptions, operationEditOptions } from "./message-options.js";
@@ -274,14 +274,17 @@ export class TelegramOutbox {
     // Existing journal records may contain deliberately hidden, empty commentary.
     // This explicit presentation decision is not evidence that a platform send occurred.
     if (isEmptyCommentary(event) || isHiddenAutoApprovalReview(event)) return;
-    if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
+    if (!isSupportedPersistentOutput(event)) throw new Error("持久输出类型不受支持");
+    if (event.type === "operation.updated" && this.approvalOperations.isSuppressed(
+      this.operationKey(this.turnKey(event.threadId, event.turnId), event.operation.itemId),
+    )) throw new Error("持久操作结果已被审批展示规则抑制，尚未发送");
     await captureDelivery(() => {
       void this.handle(event);
       if (event.type === "operation.updated" && event.operation.status !== "running") {
         const buffered = this.operationUpdates.flushTurn(event);
         if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
       }
-    }, signal, checkpoint, { requireConfirmation: event.type === "text.completed" });
+    }, signal, checkpoint, { requireConfirmation: true });
   }
 
   private handleEvent(event: OutputEvent): void {
@@ -391,7 +394,8 @@ export class TelegramOutbox {
             state.records.set(event.operation.itemId, event.operation);
             this.cancelOperationTimer(state);
             flushStreamBeforeOutput();
-            this.enqueue(chatId, (signal) => this.flushOperationLog(state, false, signal), true, { purpose: "operation-log" });
+            const confirmItemId = DeliveryReceipt.current()?.transient === false ? event.operation.itemId : undefined;
+            this.enqueue(chatId, (signal) => this.flushOperationLog(state, false, signal, confirmItemId), true, { purpose: "operation-log" });
             return;
           }
           flushStreamBeforeOutput();
@@ -412,10 +416,12 @@ export class TelegramOutbox {
             true,
           );
         }
+        // Durable admission survives later hidden/compact preferences. Images already
+        // have their own delivery above; keep their optional operation log policy.
         if (!shouldDisplayOperation(
           event.operation,
           this.options.operationUpdateDisplay ?? "full",
-        )) {
+        ) && (DeliveryReceipt.current()?.transient !== false || imagePath !== undefined)) {
           return;
         }
         const operationKey = this.operationKey(turnKey, event.operation.itemId);
@@ -449,7 +455,8 @@ export class TelegramOutbox {
         state.records.set(event.operation.itemId, event.operation);
         if (event.operation.status !== "running") {
           this.cancelOperationTimer(state);
-          this.enqueue(chatId, (signal) => this.flushOperationLog(state, false, signal), true, { purpose: "operation-log" });
+          const confirmItemId = DeliveryReceipt.current()?.transient === false ? event.operation.itemId : undefined;
+          this.enqueue(chatId, (signal) => this.flushOperationLog(state, false, signal, confirmItemId), true, { purpose: "operation-log" });
         } else if (!state.timer) {
           const receipt = DeliveryReceipt.current();
           const release = receipt?.retain();
@@ -1093,6 +1100,7 @@ export class TelegramOutbox {
     state: OperationLogState,
     final: boolean,
     signal?: AbortSignal,
+    confirmItemId?: string,
   ): Promise<void> {
     if (state.records.size === 0) {
       return;
@@ -1110,7 +1118,8 @@ export class TelegramOutbox {
         records: new Map([[record.itemId, record]]),
       }, display);
       const messageId = state.messageIds.get(record.itemId);
-      if (messageId !== undefined && state.sentText.get(record.itemId) === text) {
+      if (messageId !== undefined && state.sentText.get(record.itemId) === text
+        && record.itemId !== confirmItemId) {
         continue;
       }
       if (messageId === undefined) {

@@ -1,4 +1,4 @@
-import { isPersistentOutput } from "../persistent-output.js";
+import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
 import { SnapshotDelivery } from "../snapshot-delivery.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
@@ -172,10 +172,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
     if (this.closed || !this.matches(event.target)) throw new Error("可靠输出目标无效或已关闭");
     signal.throwIfAborted();
     if (isHiddenAutoApprovalReview(event)) return;
-    if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
+    if (!isSupportedPersistentOutput(event) || resolveSurfaceDelivery("weixin", event).disposition === "ignore") {
+      throw new Error("微信持久输出类型不受支持");
+    }
     await captureDelivery(() => {
       this.handle(event);
-    }, signal, checkpoint);
+    }, signal, checkpoint, { requireConfirmation: true });
   }
 
   private handleEvent(event: OutputEvent): void {

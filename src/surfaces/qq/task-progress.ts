@@ -139,13 +139,16 @@ export class QqTaskProgress {
     });
   }
 
-  prepare(event: QqTaskProgressEvent): PreparedProgress | undefined {
+  prepare(event: QqTaskProgressEvent, retained = false): PreparedProgress | undefined {
     if (this.closed) return isReliableProgress(event) ? failedProgress : undefined;
     if (event.type === "subagent.completed" && event.parentTurnId === undefined) return failedProgress;
+    // Live snapshots still use current preferences. A stored terminal result must
+    // render even when compact would hide this sleep/subagent operation.
     if (event.type === "operation.updated" && (event.operation.status === "running"
-      || !shouldDisplayOperation(event.operation, this.options.operationUpdates))) return undefined;
+      || (!retained && !shouldDisplayOperation(event.operation, this.options.operationUpdates)))) return undefined;
     if (isReliableProgress(event)) {
       const values = this.render(event);
+      if (values.length === 0) return failedProgress;
       // Reliable delivery owns occurrence identity, ordering, confirmation and retries.
       // Always render the supplied enriched event and propagate the actual send result.
       return async send => {

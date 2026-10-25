@@ -1,7 +1,7 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
-import { isPersistentOutput } from "../persistent-output.js";
+import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
 import { isHiddenAutoApprovalReview } from "../lifecycle-presentation.js";
 import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { FeishuTextStreams } from "./text-streams.js";
@@ -223,7 +223,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       || event.target.accountId !== this.accountId) throw new Error("可靠输出目标无效或已关闭");
     signal.throwIfAborted();
     if (isHiddenAutoApprovalReview(event)) return;
-    if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
+    if (!isSupportedPersistentOutput(event)) throw new Error("持久输出类型不受支持");
     await captureDelivery(() => {
       void this.handle(event);
       if (event.type === "text.completed") {
@@ -239,7 +239,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         const buffered = this.operationUpdates.flushTurn(event);
         if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
       }
-    }, signal, checkpoint, { requireConfirmation: event.type === "text.completed" || event.type === "turn.completed" });
+    }, signal, checkpoint, { requireConfirmation: true });
   }
 
   private handleEvent(event: OutputEvent): void {
@@ -338,10 +338,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
           true,
         );
       }
+      // Stored terminal results retain a visible representation after display changes.
+      // Generated images already have their independent delivery above.
       if (!shouldDisplayOperation(
         event.operation,
         this.options.operationUpdateDisplay ?? "full",
-      )) {
+      ) && (DeliveryReceipt.current()?.transient !== false || imagePath !== undefined)) {
         return;
       }
       if (

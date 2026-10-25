@@ -12,6 +12,7 @@ import { parseSlashCommand, isEmergencyStopCommand } from "../slash-command.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
 import { resolveSurfaceDelivery } from "../delivery-policy.js";
+import { isSupportedPersistentOutput } from "../persistent-output.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import { parseQqTextEvent } from "./inbound.js";
 import { parseQqButtonEvent } from "./button-inbound.js";
@@ -292,10 +293,13 @@ export class QqMessages implements SurfaceOutputPort {
     finally { if (source) this.deliverySource.release(source); }
   }
   private async deliverProgress(event: QqTaskProgressEvent, signal: AbortSignal,
-    checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, source?: SurfaceDeliverySource): Promise<void> {
+    checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, source?: SurfaceDeliverySource, retained = false): Promise<void> {
     if (signal.aborted || !authorized()) throw new Error("QQ 过程通知来源已失效");
-    const run = this.progress.prepare(event);
-    if (!run) return;
+    const run = this.progress.prepare(event, retained);
+    if (!run) {
+      if (retained) throw new Error("QQ 持久过程结果没有可发送表示");
+      return;
+    }
     const threadId = event.type === "subagent.completed" ? event.parentThreadId : event.threadId;
     const turnId = event.type === "subagent.completed" ? event.parentTurnId : event.turnId;
     if (!threadId || !turnId) throw new Error("QQ 过程通知缺少原任务来源");
@@ -322,12 +326,12 @@ export class QqMessages implements SurfaceOutputPort {
     }, checkpoint);
   }
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, source?: SurfaceDeliverySource): Promise<void> {
-    if (!this.supported(event) || !authorized) throw new Error("QQ 输出未获授权");
+    if (!isSupportedPersistentOutput(event) || !this.supportsDelivery(event) || !authorized) throw new Error("QQ 输出未获授权或类型不受支持");
     // The classifier selects only some operation updates; its false branch does
     // not exclude image delivery or compaction from the OutputEvent union.
     const progressEvent = isQqTaskProgressEvent(event) ? event : undefined;
     if (progressEvent) {
-      await this.deliverProgress(progressEvent, signal, checkpoint, authorized, source);
+      await this.deliverProgress(progressEvent, signal, checkpoint, authorized, source, true);
       return;
     }
     if (isQqLifecycleNotification(event) && !(event.type === "operation.updated" && event.operation.kind !== "contextCompaction")) {
@@ -1090,6 +1094,9 @@ export class QqMessages implements SurfaceOutputPort {
     if (event.type === "plan.updated" && this.options.planUpdatesEnabled === false) return false;
     if (event.type === "operation.updated" && isQqTaskProgressEvent(event)
       && !shouldDisplayOperation(event.operation, this.options.operationUpdateDisplay ?? "compact")) return false;
+    return this.supportsDelivery(event);
+  }
+  private supportsDelivery(event: OutputEvent): boolean {
     return event.target.surface === "qq" && event.target.accountId === this.options.appId
       && !!qqConversationActor(event.target.conversationId) && resolveSurfaceDelivery("qq", event).disposition === "deliver";
   }

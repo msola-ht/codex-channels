@@ -10,21 +10,21 @@ import { securePrivateDirectorySync, securePrivateFileSync } from "../../runtime
 /** Result and compaction lifecycle retention is separate from other live intermediate output. */
 export function isPersistentOutput(event: OutputEvent, display: OperationUpdateDisplay = "full"): boolean {
   if (resolveSurfaceDelivery(event.target.surface, event).disposition === "ignore") return false;
-  return isSupportedPersistentOutput(event, display);
+  if (!isSupportedPersistentOutput(event)) return false;
+  return event.type !== "operation.updated" || event.operation.kind === "contextCompaction"
+    || (event.operation.kind === "imageGeneration" && event.operation.status === "completed" && event.operation.imagePath !== undefined)
+    || isGeneratedImageUnavailable(event.operation)
+    || shouldDisplayOperation(event.operation, display);
 }
 
-/** Payload v1 event classification, independent of current per-Surface admission policy. */
-function isSupportedPersistentOutput(event: OutputEvent, display: OperationUpdateDisplay = "full"): boolean {
+/** Payload v1 support only; current live display and platform policies cannot invalidate a stored event. */
+export function isSupportedPersistentOutput(event: OutputEvent): boolean {
   switch (event.type) {
     case "text.completed": case "turn.completed": case "subagent.completed": case "autoApprovalReview.updated":
     case "turn.started": case "subagent.spawned": case "subagent.contacted":
     case "connection.lost": case "connection.restored": case "thread.availability": case "thread.name":
     case "mcp.oauth.completed": case "warning": case "conversation.idle.released": return true;
-    case "operation.updated": return event.operation.kind === "contextCompaction" || (event.operation.status !== "running" && (
-      (event.operation.kind === "imageGeneration" && event.operation.status === "completed" && event.operation.imagePath !== undefined)
-      || isGeneratedImageUnavailable(event.operation)
-      || shouldDisplayOperation(event.operation, display)
-    ));
+    case "operation.updated": return event.operation.kind === "contextCompaction" || event.operation.status !== "running";
     case "hook.completed":
     case "text.delta": case "user.message": case "plan.updated": case "thread.status":
     case "turn.reasoning": case "turn.retry": case "account.updated":
@@ -35,7 +35,7 @@ function isSupportedPersistentOutput(event: OutputEvent, display: OperationUpdat
 
 /** Retain every failed result for inspection without fencing later delivery or interactions. */
 export function mayReleaseUncertainOutputBarrier(event: OutputEvent): boolean {
-  return event.target.surface === "qq" ? isSupportedPersistentOutput(event) : isPersistentOutput(event);
+  return isSupportedPersistentOutput(event);
 }
 
 export interface PersistentOutputPayload {
@@ -68,7 +68,7 @@ export async function snapshotPersistentOutput(event: OutputEvent, owner: string
 export function decodePersistentOutput(payload: string): PersistentOutputPayload {
   const value = JSON.parse(payload) as PersistentOutputPayload;
   if (value.version !== 1 || typeof value.owner !== "string"
-    || !(value.event.target.surface === "qq" ? isSupportedPersistentOutput(value.event) : isPersistentOutput(value.event))) throw new Error("持久输出格式不受支持");
+    || !isSupportedPersistentOutput(value.event)) throw new Error("持久输出格式不受支持");
   return value;
 }
 
