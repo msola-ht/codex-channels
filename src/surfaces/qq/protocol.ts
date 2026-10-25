@@ -1,11 +1,14 @@
-import { assertChannelFileName, maximumChannelFileBytes } from "../bounded-local-file.js";
+import { createHash } from "node:crypto";
+import { assertChannelFileName, assertChannelMediaBytes, maximumQqChannelFileBytes, type ChannelFileMediaType } from "../bounded-local-file.js";
 import type { QqRecipient } from "./addressing.js";
 
 const API_ORIGIN = "https://api.bot.qq.com";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
+const MEDIA_TIMEOUT_MS = 120_000;
+const UPLOAD_PART_TIMEOUT_MS = 30_000;
 
-export type QqProtocolOperation = "token" | "gateway" | "message" | "menu" | "interaction";
+export type QqProtocolOperation = "token" | "gateway" | "message" | "menu" | "interaction" | "upload";
 export type QqProtocolFailure =
   | "invalid-input" | "closed" | "cancelled" | "timeout" | "network"
   | "http" | "business" | "invalid-response" | "response-too-large"
@@ -110,6 +113,7 @@ export interface QqProtocolClientOptions {
   appId: string;
   appSecret: string;
   fetchImpl: typeof fetch;
+  uploadPart?: (url: URL, bytes: Uint8Array, signal: AbortSignal, beforeSend: () => undefined) => Promise<void>;
 }
 
 /** One immutable account/credential generation. Replace the client on configuration changes. */
@@ -121,6 +125,7 @@ export class QqProtocolClient {
   private readonly appId: string;
   private readonly appSecret: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly uploadPart: QqProtocolClientOptions["uploadPart"];
 
   constructor(options: QqProtocolClientOptions) {
     if (!/^[0-9]+$/u.test(options.appId)
@@ -134,6 +139,7 @@ export class QqProtocolClient {
     this.appId = options.appId;
     this.appSecret = options.appSecret;
     this.fetchImpl = options.fetchImpl;
+    this.uploadPart = options.uploadPart;
   }
 
   close(): void {
@@ -333,56 +339,131 @@ export class QqProtocolClient {
   }
 
   async sendResultFile(input: { recipient: QqRecipient; content: string }, context: QqTextSendContext): Promise<{ messageId: string }> {
-    return this.sendPlan(() => {
+    return this.sendMedia(() => {
       if (!record(input) || !recipient(input.recipient) || typeof input.content !== "string"
         || !input.content.trim() || !wellFormed(input.content) || input.content.length > QQ_RESULT_FILE_BYTES
         || Buffer.byteLength(input.content) > QQ_RESULT_FILE_BYTES
         || Object.keys(input).some(key => key !== "recipient" && key !== "content")) {
         throw new QqProtocolError("message", "invalid-input");
       }
-      return { path: recipientPath(input.recipient, "files"), body: {
-        file_type: 4, srv_send_msg: true, file_name: "codex-result.txt",
-        file_data: Buffer.from(input.content, "utf8").toString("base64"),
-      } };
+      return { recipient: input.recipient, fileType: 4, fileName: "codex-result.txt", bytes: Buffer.from(input.content, "utf8") };
     }, context);
   }
 
-  /** One active image delivery. srv_send_msg=true must return a valid message ID. */
+  /** Upload without sending, then require a confirmed media-message ID. */
   async sendImage(input: QqImageMessage, context: QqTextSendContext): Promise<{ messageId: string }> {
-    return this.sendPlan(() => {
+    return this.sendMedia(() => {
       if (!record(input) || !recipient(input.recipient) || !(input.bytes instanceof Uint8Array)
         || input.bytes.byteLength === 0 || input.bytes.byteLength > QQ_IMAGE_BYTES
         || (input.contentType !== "image/png" && input.contentType !== "image/jpeg")
         || Object.keys(input).some(key => !["recipient", "bytes", "contentType"].includes(key))) {
         throw new QqProtocolError("message", "invalid-input");
       }
-      // Copy into immutable Base64 before credential or authorization waits, just
-      // like result-file uploads. The endpoint explicitly supports PNG/JPEG.
-      return { path: recipientPath(input.recipient, "files"), body: {
-        file_type: 1, srv_send_msg: true,
-        file_name: input.contentType === "image/png" ? "codex-image.png" : "codex-image.jpg",
-        file_data: Buffer.from(input.bytes).toString("base64"),
-      } };
+      return { recipient: input.recipient, fileType: 1,
+        fileName: input.contentType === "image/png" ? "codex-image.png" : "codex-image.jpg", bytes: Buffer.from(input.bytes) };
     }, context);
   }
 
   /** Explicit local-file delivery; independent from the bounded complete-text fallback. */
-  async sendFile(input: { recipient: QqRecipient; bytes: Uint8Array; fileName: string }, context: QqTextSendContext): Promise<{ messageId: string }> {
-    return this.sendPlan(() => {
+  async sendFile(input: { recipient: QqRecipient; bytes: Uint8Array; fileName: string; mediaType?: ChannelFileMediaType }, context: QqTextSendContext): Promise<{ messageId: string }> {
+    return this.sendMedia(() => {
       if (!record(input) || !recipient(input.recipient) || !(input.bytes instanceof Uint8Array)
-        || input.bytes.byteLength === 0 || input.bytes.byteLength > maximumChannelFileBytes
-        || Object.keys(input).some(key => !["recipient", "bytes", "fileName"].includes(key))) {
+        || input.bytes.byteLength === 0 || input.bytes.byteLength > maximumQqChannelFileBytes
+        || Object.keys(input).some(key => !["recipient", "bytes", "fileName", "mediaType"].includes(key))) {
         throw new QqProtocolError("message", "invalid-input");
       }
       assertChannelFileName(input.fileName);
-      return { path: recipientPath(input.recipient, "files"), body: {
-        file_type: 4, srv_send_msg: true, file_name: input.fileName,
-        file_data: Buffer.from(input.bytes).toString("base64"),
-      } };
+      // Omission explicitly means an ordinary downloadable file; never infer from a name.
+      const mediaType = input.mediaType === undefined ? "file" : input.mediaType;
+      assertChannelMediaBytes(input.bytes, mediaType);
+      return { recipient: input.recipient, fileType: mediaType === "video" ? 2 : mediaType === "voice" ? 3 : 4,
+        fileName: input.fileName, bytes: Buffer.from(input.bytes) };
     }, context);
   }
 
-  private async sendPlan(makePlan: () => { path: string; body: Record<string, unknown>; deadline?: number }, context: QqTextSendContext): Promise<{ messageId: string }> {
+  private async sendMedia(makePlan: () => { recipient: QqRecipient; fileType: 1 | 2 | 3 | 4; fileName: string; bytes: Buffer }, context: QqTextSendContext): Promise<{ messageId: string }> {
+    let messageAttempted = false;
+    const mediaDeadline = performance.now() + MEDIA_TIMEOUT_MS;
+    try {
+      const plan = makePlan();
+      // Snapshot routing before any wait as well as the bytes: callers retain their objects.
+      const target: QqRecipient = typeof plan.recipient === "string" ? plan.recipient : { groupOpenId: plan.recipient.groupOpenId };
+      if (!context || !(context.signal instanceof AbortSignal) || typeof context.beforeSend !== "function") {
+        throw new QqProtocolError("upload", "invalid-input");
+      }
+      return await this.withRequest("upload", context.signal, async signal => {
+        const check = (): undefined => {
+          this.ensureOpen("upload", signal);
+          if (performance.now() >= mediaDeadline) throw new QqProtocolError("upload", "timeout");
+          try {
+            const result: unknown = context.beforeSend();
+            if (result !== undefined) {
+              void Promise.resolve(result).catch(() => undefined);
+              throw new Error();
+            }
+          } catch { throw new QqProtocolError("upload", "authorization"); }
+          this.ensureOpen("upload", signal);
+          if (performance.now() >= mediaDeadline) throw new QqProtocolError("upload", "timeout");
+          return undefined;
+        };
+        const api = async (resource: "files" | "upload_prepare" | "upload_part_finish", body: Record<string, unknown>) => {
+          check();
+          const token = await this.getAccessToken(signal);
+          return await this.requestJson("upload", recipientPath(target, resource), body, signal, token, check);
+        };
+        check();
+        const common = { file_type: plan.fileType, file_name: plan.fileName, srv_send_msg: false };
+        let uploadBody: Record<string, unknown>;
+        if (plan.bytes.byteLength <= QQ_IMAGE_BYTES) {
+          uploadBody = { ...common, file_data: plan.bytes.toString("base64") };
+        } else {
+          if (!this.uploadPart) throw new QqProtocolError("upload", "invalid-input");
+          const data = await api("upload_prepare", {
+            file_type: plan.fileType, file_name: plan.fileName, file_size: String(plan.bytes.byteLength),
+            md5: digest("md5", plan.bytes), sha1: digest("sha1", plan.bytes),
+            md5_10m: digest("md5", plan.bytes.subarray(0, 10_002_432)),
+          });
+          const prepared = uploadParts(data, plan.bytes.byteLength);
+          let offset = 0;
+          for (const part of prepared.parts) {
+            const bytes = plan.bytes.subarray(offset, offset + part.size);
+            const partDeadline = performance.now() + UPLOAD_PART_TIMEOUT_MS;
+            await this.withRequest("upload", signal, partSignal => this.uploadPart!(part.url, bytes, partSignal, () => {
+              this.ensureOpen("upload", partSignal);
+              check();
+              if (performance.now() >= partDeadline) throw new QqProtocolError("upload", "timeout");
+              return undefined;
+            }), UPLOAD_PART_TIMEOUT_MS);
+            await api("upload_part_finish", { upload_id: prepared.id, part_index: part.index,
+              block_size: String(part.size), md5: digest("md5", bytes) });
+            offset += part.size;
+          }
+          uploadBody = { ...common, upload_id: prepared.id };
+        }
+        // Conservatively include the entire /files request in the upstream TTL.
+        const uploadedAt = performance.now();
+        const uploaded = await api("files", uploadBody);
+        if (!identifier(uploaded.file_uuid) || typeof uploaded.file_info !== "string"
+          || !/^[\x21-\x7e]{1,49152}$/u.test(uploaded.file_info)
+          || typeof uploaded.ttl !== "number" || !Number.isSafeInteger(uploaded.ttl)
+          || uploaded.ttl < 0 || uploaded.ttl > Math.floor(Number.MAX_SAFE_INTEGER / 1000)
+          || Object.hasOwn(uploaded, "id")) {
+          throw new QqProtocolError("upload", "invalid-response");
+        }
+        const fileInfo = uploaded.file_info;
+        const deadline = uploaded.ttl === 0 ? undefined : uploadedAt + uploaded.ttl * 1000;
+        // Only this final messages dispatch can yield an unknown delivery outcome.
+        return await this.sendPlan(() => ({ path: recipientPath(target, "messages"),
+          body: { msg_type: 7, media: { file_info: fileInfo } }, ...(deadline === undefined ? {} : { deadline }) }),
+        { signal, beforeSend: check }, () => { messageAttempted = true; });
+      }, MEDIA_TIMEOUT_MS);
+    } catch (error) {
+      if (error instanceof QqTextSendError) throw error;
+      throw new QqTextSendError(messageAttempted ? "unknown" : "not-sent", error instanceof QqProtocolError ? error : new QqProtocolError("upload", "invalid-input"));
+    }
+  }
+
+  private async sendPlan(makePlan: () => { path: string; body: Record<string, unknown>; deadline?: number }, context: QqTextSendContext, onDispatch?: () => void): Promise<{ messageId: string }> {
     let attempted = false;
     try {
       const plan = makePlan();
@@ -419,6 +500,7 @@ export class QqProtocolClient {
           check();
           // From here onward even a synchronous transport failure is conservatively unknown.
           attempted = true;
+          onDispatch?.();
         });
         return { messageId: data.id as string }; // readTextResponse validates the ID before returning.
       });
@@ -440,10 +522,11 @@ export class QqProtocolClient {
     operation: QqProtocolOperation,
     signal: AbortSignal | undefined,
     work: (signal: AbortSignal) => Promise<T>,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<T> {
     this.ensureOpen(operation, signal);
     const deadline = new AbortController();
-    const timeout = setTimeout(() => deadline.abort(), REQUEST_TIMEOUT_MS);
+    const timeout = setTimeout(() => deadline.abort(), timeoutMs);
     timeout.unref();
     const combined = AbortSignal.any([this.lifetime.signal, deadline.signal, ...(signal ? [signal] : [])]);
     try {
@@ -614,9 +697,45 @@ function recipient(value: unknown): value is QqRecipient {
   return identifier(value) || record(value) && Object.keys(value).length === 1 && identifier(value.groupOpenId);
 }
 
-function recipientPath(value: QqRecipient, resource: "messages" | "files"): string {
+function recipientPath(value: QqRecipient, resource: "messages" | "files" | "upload_prepare" | "upload_part_finish"): string {
   return typeof value === "string" ? `/v2/users/${encodeURIComponent(value)}/${resource}`
     : `/v2/groups/${encodeURIComponent(value.groupOpenId)}/${resource}`;
+}
+
+function digest(algorithm: "md5" | "sha1", bytes: Uint8Array): string {
+  return createHash(algorithm).update(bytes).digest("hex");
+}
+
+/** Validate the complete layout before uploading any bytes; no partial best-effort interpretation. */
+function uploadParts(data: Record<string, unknown>, size: number): { id: string; parts: Array<{ index: number; size: number; url: URL }> } {
+  const fail = (): never => { throw new QqProtocolError("upload", "invalid-response"); };
+  const positiveBytes = (value: unknown): number => {
+    if (typeof value !== "string" || !/^[1-9][0-9]{0,8}$/u.test(value)) return fail();
+    const bytes = Number(value);
+    if (!Number.isSafeInteger(bytes) || bytes > maximumQqChannelFileBytes) return fail();
+    return bytes;
+  };
+  if (!identifier(data.upload_id) || !Array.isArray(data.parts) || !record(data.upload_config)) return fail();
+  const blockSize = positiveBytes(data.block_size);
+  const count = Math.ceil(size / blockSize);
+  // Local response/iteration resource budget, independent from upstream's suggested concurrency.
+  if (count > 1024 || data.parts.length !== count) return fail();
+  const config = data.upload_config;
+  for (const key of ["concurrency", "retry_timeout", "retry_delay"]) {
+    const value = config[key];
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < (key === "concurrency" ? 1 : 0)) return fail();
+  }
+  const parts = data.parts.map((part: unknown, index: number) => {
+    if (!record(part) || part.index !== index || typeof part.presigned_url !== "string"
+      || part.presigned_url.length > 8192) return fail();
+    const partSize = positiveBytes(part.block_size);
+    if (partSize !== Math.min(blockSize, size - index * blockSize)) return fail();
+    let url: URL;
+    try { url = new URL(part.presigned_url); } catch { return fail(); }
+    if (url.protocol !== "https:" || url.username || url.password || url.hash || (url.port && url.port !== "443")) return fail();
+    return { index, size: partSize, url };
+  });
+  return { id: data.upload_id, parts };
 }
 
 // Only documented, unambiguous message rejections are classified as definitely rejected.

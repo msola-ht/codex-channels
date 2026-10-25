@@ -1235,14 +1235,14 @@ export abstract class GatewayComponentGraph {
     this.channelImageSpool = new ChannelImageSpool({
       directory: join(dirname(config.stateDatabasePath), "channel-outbox"),
       resolveTarget: (threadId) => this.router.targetForThread(threadId),
-      sendImage: (target, imagePath, isCurrent) =>
-        this.surfaceManager.sendChannelImage(target, imagePath, isCurrent),
+      sendImage: (target, imagePath, isCurrent, signal) =>
+        this.surfaceManager.sendChannelImage(target, imagePath, isCurrent, signal),
       logger,
     });
     this.channelFileSpool = new ChannelFileSpool({
       directory: join(dirname(config.stateDatabasePath), "channel-file-outbox"),
       resolveTarget: (threadId) => this.router.targetForThread(threadId),
-      sendFile: (target, filePath, fileName, isCurrent) => this.surfaceManager.sendChannelFile(target, filePath, fileName, isCurrent),
+      sendFile: (target, filePath, fileName, isCurrent, mediaType, signal) => this.surfaceManager.sendChannelFile(target, filePath, fileName, isCurrent, mediaType, signal),
       logger,
     });
     for (const surface of this.surfaces) {

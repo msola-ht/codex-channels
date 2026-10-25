@@ -293,7 +293,7 @@ Adapter 负责。
 不进入缓冲。
 Computer Use 的 MCP 操作也不进入查询缓冲；飞书在同一卡片展示调用开始和终态，复用已有去重、
 顺序队列及 `hidden` 模式。具体操作说明已在 Client 边界提取并清洗，过程展示不使用 MCP 读写声明标签。
-`bounded-local-file.ts` 为图片和显式普通文件提供有界普通文件读取，拒绝链接、身份/长度或修改时间变化；普通文件上限 5,000,000 字节，文件名拒绝控制字符和路径分隔符。`SurfaceAdapter.sendChannelFile` 当前由 QQ 实现，携带原 Thread 绑定实时守卫，进入队列、读取及最终请求时复核，不因后台解绑改投前台。显式图片同样携带该守卫，QQ 在最终请求边界消费；其他渠道内部图片队列语义保持原实现。
+`bounded-local-file.ts` 为图片和显式文件提供有界普通文件读取，拒绝链接、身份/长度或修改时间变化；QQ 显式普通文件上限 64 MiB，视频/语音分别为 MP4 30,000,000 字节与 SILK 20,000,000 字节，由 `assertChannelMediaBytes` 校验；飞书三类均限 30,000,000 字节，视频 MP4、语音 Ogg/Opus，由 `assertFeishuChannelMediaBytes` 校验，两者共享受控 MP4 文件头判断。文件名拒绝控制字符和路径分隔符，其他既有 5,000,000 字节边界不扩大。`SurfaceAdapter.sendChannelFile` 当前由 QQ/飞书实现，携带原 Thread 绑定实时守卫、媒体类型和取消信号，进入队列、读取及各上传/发送请求时复核，不因后台解绑改投前台。显式图片同样携带守卫和取消信号，QQ/飞书在最终请求边界消费；微信/TG 内部图片队列语义保持原实现。
 
 `generated-image.ts` 对 App Server `imageGeneration.savedPath` 指向的生成图片和
 `codexc channel send-image` 提交的渠道 spool 图片执行同一读取校验：绝对路径、拒绝符号链接、

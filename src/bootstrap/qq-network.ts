@@ -59,6 +59,7 @@ export function createQqNetwork(proxy: GatewayConfig["networkProxy"]): QqNetwork
   } });
   const network: QqNetwork = {
     downloadAttachment: (url, signal, beforeDownload) => downloads.download(url, signal, beforeDownload),
+    uploadPart: (url, bytes, signal, beforeSend) => downloads.uploadPart(url, bytes, signal, beforeSend),
     fetchImpl(input, init) {
       const original = init?.signal ?? (input instanceof Request ? input.signal : undefined);
       const signal = AbortSignal.any([lifetime.signal, ...(original ? [original] : [])]);

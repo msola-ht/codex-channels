@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import type { ChannelFileMediaType } from "../bounded-local-file.js";
 import { join } from "node:path";
 import { safeInteractionDecision, type InteractionPort } from "../../approval/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
@@ -119,13 +120,13 @@ export class QqSurface implements SurfaceAdapter {
     ]).then(() => {});
   }
 
-  sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean): Promise<void> {
-    return this.current?.messages.sendChannelImage(conversationId, imagePath, isCurrent)
+  sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
+    return this.current?.messages.sendChannelImage(conversationId, imagePath, isCurrent, signal)
       ?? Promise.reject(new Error("QQ 消息连接不可用"));
   }
 
-  sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean): Promise<void> {
-    return this.current?.messages.sendChannelFile(conversationId, filePath, fileName, isCurrent)
+  sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void> {
+    return this.current?.messages.sendChannelFile(conversationId, filePath, fileName, isCurrent, mediaType, signal)
       ?? Promise.reject(new Error("QQ 消息连接不可用"));
   }
 
@@ -163,7 +164,8 @@ class QqConnection {
   constructor(private readonly options: CreateQqSurfaceOptions) {
     // Validate credentials before acquiring network resources.
     this.client = new QqProtocolClient({ appId: options.appId, appSecret: options.appSecret,
-      fetchImpl: (input, init) => this.network.fetchImpl(input, init) });
+      fetchImpl: (input, init) => this.network.fetchImpl(input, init),
+      uploadPart: (url, bytes, signal, guard) => this.network.uploadPart(url, bytes, signal, guard) });
     this.network = options.createNetwork();
     this.images = new QqImageStore(join(options.uploadsDirectory, `qq-images-${options.appId}`),
       (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger);

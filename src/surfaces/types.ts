@@ -12,6 +12,7 @@ import type {
 } from "../conversation-core/index.js";
 import type { Workspace } from "../policy/index.js";
 import type { DeliveryCheckpoint } from "./delivery-receipt.js";
+import type { ChannelFileMediaType } from "./bounded-local-file.js";
 
 export interface SurfaceConfigurationChange {
   action:
@@ -122,8 +123,8 @@ export interface SurfaceAdapter {
   readonly output: SurfaceOutputPort;
   takeAsyncAnswerSubmission?(target: ConversationTarget, requestId: string): SurfaceAsyncAnswerSubmission | undefined;
   prepareScheduledTaskSubmission?(context: SurfaceScheduledTaskSubmissionContext): SurfaceAsyncAnswerSubmission;
-  sendChannelImage?(conversationId: string, imagePath: string, isCurrent: () => boolean): Promise<void>;
-  sendChannelFile?(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean): Promise<void>;
+  sendChannelImage?(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void>;
+  sendChannelFile?(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void>;
   presentScheduledTaskConfirmation?(
     target: ConversationTarget,
     actorId: string,

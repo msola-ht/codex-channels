@@ -15,7 +15,7 @@
 
 - `qq-network.ts`：QQ 每代次独立的代理、HTTP 池与关闭资源管理，由渠道组合注入。QQ 普通文字复用共享 Application 和持久投递；绑定和订阅沿共享恢复，审批与问答进入共享交互路由。计划任务接入共享执行器及精确 Turn 来源；当次配置通知使用受控单聊名单，不订阅持久 Workspace 配置事件。
   独立的 QQ 菜单 Setup 通过精确文件级边界许可复用此网络所有者，操作结束关闭自有资源，不启动组合根或 WebSocket。
-- `qq-attachment-download.ts`：QQ 附件独立的无凭据 HTTPS 下载。DNS 全部结果经保守公网策略校验后固定一个 IP，直连与代理 CONNECT 均使用该地址，HTTP Host、SNI 和证书验证保留原域名；不自动重定向，代理选择仍按原 URL。私网、特殊 IPv4 和 IPv6 映射/转译范围拒绝，此安全策略不是完整可达性分类，可能保守拒绝特殊公网地址。取消覆盖 DNS 等待及实际请求，响应结束释放专用代理资源，网络关闭汇总关闭结果。
+- `qq-attachment-download.ts`：QQ 附件无凭据 HTTPS 下载与富媒体预签名分片 PUT。DNS 全部结果经保守公网策略校验后固定一个 IP，直连与代理 CONNECT 均使用该地址，HTTP Host、SNI 和证书验证保留原域名；不自动重定向，代理选择仍按原 URL。私网、特殊 IPv4 和 IPv6 映射/转译范围拒绝，此安全策略不是完整可达性分类，可能保守拒绝特殊公网地址。取消覆盖 DNS 等待及实际请求，PUT 仅在有界成功响应完整结束后确认，响应结束释放专用代理资源，网络关闭汇总关闭结果。
   `surface-composition.ts` 为 QQ 上线通知注入启动允许名单、共享只读状态和运行环境；渠道在发送前复核授权，通知不恢复 Thread 或旧投递来源。完成通知复用现有精确 Turn 统计补全。
 
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。
@@ -248,8 +248,8 @@
   `errorChain`（每层只有类型与白名单错误码，不含错误正文），便于定位底层失败原因。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。
   关闭时通过 `beginShutdown` 先拒绝新执行和交互，保留持久接收入口供组合根排空入站通知，随后 `stop` 等待入箱并关闭渠道。
-- `channel-file-spool.ts`：普通文件独立 manifest 和 `channel-file-outbox` 根目录，沿 Thread 绑定调用活动 QQ 的 `sendChannelFile`；不改变图片数据格式，未知发送不重试。
-- `channel-media-spool.ts`：图片和普通文件共用的私有领取、发送及归档处理，按明确 kind 读取各自 manifest，文件只允许同编号 `.bin` 副本；两个公开包装器各自持有生命周期和根目录。
+- `channel-file-spool.ts`：文件独立 manifest 和 `channel-file-outbox` 根目录，沿 Thread 绑定调用活动 QQ/飞书的 `sendChannelFile`，透传显式 file/video/voice 与停止信号；不改变图片数据格式，未知发送不重试。
+- `channel-media-spool.ts`：图片和文件共用的私有领取、发送及归档处理，按明确 kind 读取各自 manifest，文件只允许同编号 `.bin` 副本；文件 version 1 可选 mediaType，缺省 file，原记录不改写，图片拒绝该字段。两个公开包装器各自持有生命周期和根目录，停止信号传到支持取消的渠道上传边界；文件在固定原目标后按渠道复核类型与预算。
 - `channel-image-spool.ts`：图片 manifest 包装器，复用共享处理器扫描 `data/channel-outbox/pending/` 的图片发送请求，按
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据
   发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；Unix 使用 `0700/0600`，Windows

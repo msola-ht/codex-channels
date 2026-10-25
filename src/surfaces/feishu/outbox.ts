@@ -19,6 +19,7 @@ import { surfaceErrorMetadata } from "../error-metadata.js";
 import type {
 } from "../../application/index.js";
 import { readGeneratedImage } from "../generated-image.js";
+import { assertChannelFileName, assertFeishuChannelMediaBytes, maximumFeishuChannelFileBytes, readBoundedLocalFile, type ChannelFileMediaType } from "../bounded-local-file.js";
 import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
@@ -744,7 +745,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
     chatId: string,
     imagePath: string,
     signal?: AbortSignal,
+    beforeSend?: () => void,
   ): Promise<void> {
+    signal?.throwIfAborted();
+    beforeSend?.();
     if (this.messagePort.sendImage === undefined) {
       throw new FeishuMessageError(
         "invalid-response",
@@ -754,14 +758,45 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const image = await (
       this.options.readGeneratedImage ?? readGeneratedImage
     )(imagePath);
-    await this.messagePort.sendImage(chatId, image.bytes, signal);
+    signal?.throwIfAborted();
+    beforeSend?.();
+    await this.messagePort.sendImage(chatId, image.bytes, signal, beforeSend);
   }
 
-  sendChannelImage(chatId: string, imagePath: string): Promise<void> {
+  sendChannelImage(chatId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
+    const guard = this.channelSendGuard(isCurrent, signal);
+    guard();
     return this.delivery.runOrdered(
       chatId,
-      (signal) => this.sendImage(chatId, imagePath, signal),
+      (active) => this.sendImage(chatId, imagePath, active, guard),
+      signal,
     );
+  }
+
+  sendChannelFile(chatId: string, filePath: string, fileName: string, isCurrent: () => boolean,
+    mediaType: ChannelFileMediaType = "file", signal?: AbortSignal): Promise<void> {
+    const guard = this.channelSendGuard(isCurrent, signal);
+    guard();
+    assertChannelFileName(fileName);
+    return this.delivery.runOrdered(chatId, async (active) => {
+      guard();
+      active.throwIfAborted();
+      if (!this.messagePort.sendFile) throw new FeishuMessageError("invalid-response", "飞书文件发送能力不可用");
+      const file = await readBoundedLocalFile(filePath, maximumFeishuChannelFileBytes);
+      guard();
+      active.throwIfAborted();
+      assertFeishuChannelMediaBytes(file, mediaType);
+      await this.messagePort.sendFile(chatId, fileName, file, active, mediaType, guard);
+    }, signal);
+  }
+
+  private channelSendGuard(isCurrent: () => boolean, signal?: AbortSignal): () => void {
+    return () => {
+      signal?.throwIfAborted();
+      if (this.closed || isCurrent() !== true) {
+        throw new FeishuMessageError("send-failed", "飞书渠道发送已失效或原会话绑定已变化");
+      }
+    };
   }
 
   prepareTurnReplyTarget(chatId: string, messageId: string): void {

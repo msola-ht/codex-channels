@@ -37,6 +37,8 @@ interface FeishuInboxMessageBase {
   parentId?: string;
 }
 
+type ReceivedFeishuInput = (() => void) & { isCancelled?(): boolean };
+
 export type FeishuInboxMessage = FeishuInboxMessageBase & (
   | { kind: "text"; text: string }
   | { kind: "image"; imageKeys: readonly string[]; text?: string }
@@ -74,7 +76,7 @@ export interface FeishuInboxOptions {
   access: SurfaceAccessPolicy;
   actorRegistry?: ConversationActorRegistry;
   handle(message: FeishuInboxMessage): Promise<void>;
-  receiveInput?(message: FeishuInboxMessage): (() => void) | undefined;
+  receiveInput?(message: FeishuInboxMessage): ReceivedFeishuInput | undefined;
   handleUrgent?(message: Extract<FeishuInboxMessage, { kind: "text" }>): Promise<void>;
   handleImageBatch?(messages: readonly Extract<
     FeishuInboxMessage,
@@ -108,7 +110,7 @@ export class FeishuInbox {
   private readonly seen = new Map<string, number>();
   private readonly workers = new Map<string, ConversationWorker>();
   private readonly urgentTasks = new Set<Promise<void>>();
-  private readonly receivedInputs = new WeakMap<FeishuInboxMessage, () => void>();
+  private readonly receivedInputs = new WeakMap<FeishuInboxMessage, ReceivedFeishuInput>();
   private pendingCount = 0;
   private closed = false;
   private closePromise: Promise<void> | undefined;
@@ -326,7 +328,7 @@ export class FeishuInbox {
       }
       const imageBatch = first?.kind === "image"
         && this.options.handleImageBatch !== undefined
-        ? takeLeadingImages(worker.queue)
+        ? takeLeadingImages(worker.queue, message => this.receivedInputs.get(message)?.isCancelled?.() ?? false)
         : undefined;
       if (imageBatch !== undefined && handleImageBatch !== undefined) {
         try {
@@ -466,9 +468,13 @@ function nonNegativeInteger(value: number, name: string): number {
 
 function takeLeadingImages(
   queue: FeishuInboxMessage[],
+  isCancelled: (message: FeishuInboxMessage) => boolean,
 ): Array<Extract<FeishuInboxMessage, { kind: "image" }>> {
   const images: Array<Extract<FeishuInboxMessage, { kind: "image" }>> = [];
-  while (queue[0]?.kind === "image") {
+  const actorId = queue[0]?.actorId;
+  const cancelled = queue[0] === undefined ? false : isCancelled(queue[0]);
+  while (queue[0]?.kind === "image" && queue[0].actorId === actorId
+    && isCancelled(queue[0]) === cancelled) {
     const message = queue.shift();
     if (message?.kind === "image") {
       images.push(message);

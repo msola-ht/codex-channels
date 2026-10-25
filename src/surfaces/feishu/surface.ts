@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { ChannelFileMediaType } from "../bounded-local-file.js";
 import { TextAttachmentStore } from "../text-attachment-store.js";
 import { FeishuVideoStore, type FeishuVideoPort } from "./video.js";
 import type { Logger } from "pino";
@@ -528,8 +529,13 @@ export class FeishuSurface implements SurfaceAdapter {
     });
   }
 
-  sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
-    return this.output.sendChannelImage(conversationId, imagePath);
+  sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
+    return this.output.sendChannelImage(conversationId, imagePath, isCurrent, signal);
+  }
+
+  sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean,
+    mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void> {
+    return this.output.sendChannelFile(conversationId, filePath, fileName, isCurrent, mediaType, signal);
   }
 
   presentScheduledTaskConfirmation(

@@ -1,6 +1,7 @@
 import { checkpointDelivery } from "../delivery-receipt.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import { FeishuMessageError } from "./message-error.js";
+import type { ChannelFileMediaType } from "../bounded-local-file.js";
 
 /** Observe verified creation independently of the cancellable delivery receipt. */
 export type ObserveFeishuCardCreation = (creation: Promise<string>) => void;
@@ -9,8 +10,8 @@ export interface FeishuMessagePort {
   sendText(chatId: string, text: string, signal?: AbortSignal): Promise<void>;
   sendPost(chatId: string, markdown: string, signal?: AbortSignal): Promise<void>;
   sendMarkdownCard(chatId: string, markdown: string, signal?: AbortSignal): Promise<string | void>;
-  sendFile?(chatId: string, fileName: string, file: Buffer, signal?: AbortSignal): Promise<void>;
-  sendImage?(chatId: string, image: Buffer, signal?: AbortSignal): Promise<void>;
+  sendFile?(chatId: string, fileName: string, file: Buffer, signal?: AbortSignal, mediaType?: ChannelFileMediaType, beforeSend?: () => void): Promise<void>;
+  sendImage?(chatId: string, image: Buffer, signal?: AbortSignal, beforeSend?: () => void): Promise<void>;
   replyPost?(messageId: string, markdown: string, signal?: AbortSignal): Promise<void>;
   replyMarkdownCard?(messageId: string, markdown: string, signal?: AbortSignal): Promise<string | void>;
   sendCard(chatId: string, card: FeishuCardDocument, signal?: AbortSignal, observeCreation?: ObserveFeishuCardCreation): Promise<string>;
@@ -61,10 +62,10 @@ export function bindOutboxMessagePort(port: FeishuMessagePort, closed: AbortSign
     updateStreamingCard: (id, text, sequence, signal) => send((active) => port.updateStreamingCard(id, text, sequence, active), signal),
     finishStreamingCard: (id, sequence, text, signal) => send((active) => port.finishStreamingCard(id, sequence, text, active), signal),
     ...(port.sendImage === undefined ? {} : {
-      sendImage: (chatId: string, bytes: Buffer, signal?: AbortSignal) => send((active) => port.sendImage!(chatId, bytes, active), signal),
+      sendImage: (chatId: string, bytes: Buffer, signal?: AbortSignal, beforeSend?: () => void) => send((active) => port.sendImage!(chatId, bytes, active, beforeSend), signal),
     }),
     ...(port.sendFile === undefined ? {} : {
-      sendFile: (chatId: string, name: string, bytes: Buffer, signal?: AbortSignal) => send((active) => port.sendFile!(chatId, name, bytes, active), signal),
+      sendFile: (chatId: string, name: string, bytes: Buffer, signal?: AbortSignal, mediaType?: ChannelFileMediaType, beforeSend?: () => void) => send((active) => port.sendFile!(chatId, name, bytes, active, mediaType, beforeSend), signal),
     }),
     ...(port.replyPost === undefined ? {} : {
       replyPost: (id: string, text: string, signal?: AbortSignal) => send((active) => port.replyPost!(id, text, active), signal),

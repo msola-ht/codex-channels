@@ -225,17 +225,20 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
   "traffic.cleanup": TRAFFIC_CLEANUP_USAGE,
   channel: `用法：codexc channel <send-image|send-file>
 
-渠道文件能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地图片或普通文件。`,
+渠道文件能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地图片、文件、视频或语音。`,
   "channel.send_image": `用法：codexc channel send-image <图片路径> [--thread <Thread ID>]
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，发送回该 Thread 绑定的
-飞书/微信/Telegram 会话。不指定 --thread 且存在多个绑定时会拒绝并提示指定。
+飞书/微信/Telegram/QQ 会话；QQ 本地上限 5,000,000 字节。不指定 --thread 且存在多个绑定时会拒绝并提示指定。
 图片会被复制到状态数据库所在目录的 channel-outbox/pending/，由网关轮询发送；
 成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
-  "channel.send_file": `用法：codexc channel send-file <绝对文件路径> [--thread <Thread ID>]
+  "channel.send_file": `用法：codexc channel send-file <绝对文件路径> [--type file|video|voice] [--thread <Thread ID>]
 
-把本地普通文件（1 到 5,000,000 字节）交给 Gateway，发送回现有绑定的 QQ 会话。
-拒绝符号链接；文件名限 255 UTF-8 字节，不可含控制符或路径分隔符。
+把本地文件交给 Gateway，发送回现有绑定的 QQ 或飞书会话。默认 file。
+QQ：file 上限 64 MiB；video 为 MP4、上限 30,000,000 字节；voice 为 SILK、上限 20,000,000 字节。
+飞书：三种类型均上限 30,000,000 字节；video 为 MP4，voice 为 Ogg/Opus。
+媒体类型须显式选择，按内容校验，不按后缀推断。拒绝空文件和符号链接；
+文件名限 255 UTF-8 字节，不可含控制符或路径分隔符。
 不指定 --thread 时须仅有一个前台或后台绑定。文件私有复制至 channel-file-outbox/pending/；
 确认发送后归档到 done/，失败或结果未知归档到 failed/，不会自动重试。`,
   webui: `用法：codexc webui [--host 地址] [--port 端口]

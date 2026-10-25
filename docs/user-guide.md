@@ -1107,7 +1107,7 @@ codexc channel send-image /tmp/screenshot.png --thread <Thread ID>
 
 只接受经过安全校验的 PNG/JPEG，具体限制见 [`渠道图片`](channel-image.md)。
 
-显式普通文件可用 `codexc channel send-file /absolute/path/report.pdf --thread <Thread ID>`，当前仅 QQ，最多 5,000,000 字节；沿独立私有暂存、原 Thread 绑定和未知结果不重试规则。已随当前基线部署，真实文件交付仍待验收；完整参数及归档方式见 [`渠道文件`](channel-file.md)。
+显式文件可用 `codexc channel send-file /absolute/path/report.pdf --thread <Thread ID>`，支持 QQ 和飞书；默认普通文件，`--type video` 为 MP4，`--type voice` 在 QQ 为 SILK、飞书为 Ogg/Opus，不自动转码。QQ 普通文件最多 64 MiB，视频 30,000,000 字节，语音 20,000,000 字节；飞书三种类型均最多 30,000,000 字节。沿独立私有暂存、原 Thread 绑定和未知结果不重试规则，上传后另行发送消息；本轮扩展尚未部署或真实验收。完整参数及归档方式见 [`渠道文件`](channel-file.md)。
 
 ## 8. 排障
 

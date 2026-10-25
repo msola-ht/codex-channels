@@ -79,9 +79,9 @@
   `sendMarkdown` 仅发送完整单片，复用文字收件人/来源/期限校验与消息 ID 回执；使用 msg_type=2 与 markdown.content，不同时保留 content。
   `getBotMenu`/`putBotMenu` 为 Setup 独立管理入口提供有界 GET/PUT；不参与 Gateway 启动、事件连接或消息投递。
   `sendStream` 显式指定 text/markdown 格式，生产正文使用被动 markdown/replace 帧，固定原来信、序号、索引和流 ID，复用有界请求、同步授权守卫及保守结果分类；不使用 event_id 或 is_wakeup。
-  `sendResultFile` 使用固定文件名的 UTF-8/Base64 直传、file_type=4 和 srv_send_msg=true，单次主动发送，正文最多 256 KiB；`sendImage` 只接共享校验后的 PNG/JPEG 字节，file_type=1、固定文件名、主动直传，本地最多 5,000,000 字节，均以合法消息 ID 确认。
+  `sendResultFile` 固定文件名、UTF-8/Base64、file_type=4，正文最多 256 KiB；`sendImage` 只接共享校验后的 PNG/JPEG，file_type=1、固定文件名、本地最多 5,000,000 字节。两者先以 srv_send_msg=false 上传，再用 msg_type=7 发送，仅最终合法消息 ID 确认。
   协议不接任意本地文件路径或下载 URL。Outbox 图片沿共享顺序、主动额度和持久检查点；生成图还受共享 Journal 更小的有效图片容量约束，无路径仅 fileId 时提示内容不可取得，不伪称已发送。
-  `sendFile` 仅接受安全读取后的普通文件字节和受限文件名，最大 5,000,000 字节，file_type=4 主动发送；显式文件沿独立 spool，原 Thread 绑定守卫贯穿最终请求。没有消息 ID 或发送未知时不确认、不重发；旧长正文接口预算不扩大。
+  `sendFile` 接受安全读取后的字节、受限文件名和显式 file/video/voice 类型，复用两阶段上传发送；普通文件最多 64 MiB，MP4 30,000,000 字节，SILK 20,000,000 字节。超过 5,000,000 字节使用 upload_prepare、预签名 PUT、upload_part_finish 与合并，布局严格验证且不自动重试。显式文件沿独立 spool，原 Thread 守卫和取消贯穿每个网络阶段，完整预算 120 秒；旧长正文预算不扩大。file_info 按 TTL 保守计时，不跨目标或请求缓存；上传失败是 not-sent，最终消息派发后不确定才是 unknown。
   `sendText` 显式主动/被动模式，单片最多 2000 UTF-8 字节；被动序号取本地保守 1–4，
   原消息 300 秒窗口在调用时转换为单调期限，Token 等待后再次核验，不因等待重置。
   必传取消信号和同步 `beforeSend` 守卫，Token 前和最终 HTTP 发送前复核；一次操作的 15 秒期限覆盖 Token 与响应读取。

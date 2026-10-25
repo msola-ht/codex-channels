@@ -16,7 +16,8 @@ import {
 } from "../../runtime/private-file.mjs";
 
 import type { ConversationTarget } from "../conversation-core/index.js";
-import { assertChannelFileName } from "../surfaces/index.js";
+import { assertChannelFileName, assertChannelMediaBytes, assertFeishuChannelMediaBytes, maximumQqChannelFileBytes, maximumFeishuChannelFileBytes, readBoundedLocalFile } from "../surfaces/index.js";
+import type { ChannelFileMediaType } from "../surfaces/index.js";
 
 const defaultPollIntervalMs = 3_000;
 const maximumFailedArchives = 128;
@@ -26,13 +27,14 @@ interface ChannelMediaManifest {
   threadId: string;
   imagePath: string;
   fileName?: string;
+  mediaType?: ChannelFileMediaType;
   createdAtMs: number;
 }
 
 export interface ChannelMediaSpoolOptions {
   directory: string;
   resolveTarget(threadId: string): ConversationTarget | undefined;
-  send(target: ConversationTarget, path: string, fileName: string | undefined, isCurrent: () => boolean): Promise<void>;
+  send(target: ConversationTarget, path: string, fileName: string | undefined, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void>;
   kind: "image" | "file";
   logger: Logger;
   pollIntervalMs?: number;
@@ -52,6 +54,7 @@ export class ChannelMediaSpool {
   private timer: NodeJS.Timeout | undefined;
   private running: Promise<void> | undefined;
   private stopped = false;
+  private readonly abortController = new AbortController();
   // Details are bounded in memory; the .sending claim owns retry safety on disk.
   private readonly failedArchives = new Map<string, string>();
   private get label(): string { return this.options.kind === "image" ? "渠道图片" : "渠道文件"; }
@@ -83,6 +86,7 @@ export class ChannelMediaSpool {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.abortController.abort();
     if (this.timer !== undefined) {
       clearInterval(this.timer);
       this.timer = undefined;
@@ -198,7 +202,7 @@ export class ChannelMediaSpool {
     if (target === undefined) {
       throw new Error(`Thread 未绑定会话：${manifest.threadId}`);
     }
-    if (this.options.kind === "file" && target.surface !== "qq") throw new Error("当前渠道不支持普通文件");
+    if (this.options.kind === "file" && target.surface !== "qq" && target.surface !== "feishu") throw new Error("当前渠道不支持文件发送");
     const original = { ...target };
     const isCurrent = () => {
       if (this.stopped) return false;
@@ -206,7 +210,16 @@ export class ChannelMediaSpool {
       return current !== undefined && current.surface === original.surface
         && current.accountId === original.accountId && current.conversationId === original.conversationId;
     };
-    await this.options.send(original, manifest.imagePath, manifest.fileName, isCurrent);
+    const signal = this.abortController.signal;
+    signal.throwIfAborted();
+    if (this.options.kind === "file") {
+      const feishu = original.surface === "feishu";
+      const bytes = await readBoundedLocalFile(manifest.imagePath, feishu ? maximumFeishuChannelFileBytes : maximumQqChannelFileBytes);
+      (feishu ? assertFeishuChannelMediaBytes : assertChannelMediaBytes)(bytes, manifest.mediaType ?? "file");
+      signal.throwIfAborted();
+      if (!isCurrent()) throw new Error("原 Thread 文件接收绑定已失效");
+    }
+    await this.options.send(original, manifest.imagePath, manifest.fileName, isCurrent, manifest.mediaType, signal);
     this.assertOwnedFile(manifest.imagePath);
     this.assertOwnedFile(manifestPath);
     const imageName = basename(manifest.imagePath);
@@ -239,10 +252,16 @@ export class ChannelMediaSpool {
     const original = parsed as Partial<ChannelMediaManifest> & { filePath?: unknown };
     const manifest = this.options.kind === "image" ? original : { ...original, imagePath: original.filePath };
     if (this.options.kind === "file") {
-      if (Object.keys(original).some(key => !["version", "threadId", "filePath", "fileName", "createdAtMs"].includes(key))) {
+      if (Object.keys(original).some(key => !["version", "threadId", "filePath", "fileName", "mediaType", "createdAtMs"].includes(key))) {
         throw new Error("渠道文件 manifest 含不支持的字段");
       }
       assertChannelFileName(manifest.fileName);
+      if ("mediaType" in original && original.mediaType !== "file"
+        && original.mediaType !== "video" && original.mediaType !== "voice") {
+        throw new Error("渠道文件 manifest 的 mediaType 不支持");
+      }
+    } else if ("mediaType" in original) {
+      throw new Error("渠道图片 manifest 不支持 mediaType");
     }
     if (manifest.version !== 1) {
       throw new Error(`${this.label} manifest 版本不支持`);
@@ -277,7 +296,7 @@ export class ChannelMediaSpool {
       threadId: manifest.threadId,
       imagePath: manifest.imagePath,
       createdAtMs: manifest.createdAtMs,
-      ...(this.options.kind === "file" ? { fileName: manifest.fileName } : {}),
+      ...(this.options.kind === "file" ? { fileName: manifest.fileName, mediaType: manifest.mediaType ?? "file" } : {}),
     };
   }
 

@@ -3,6 +3,7 @@ import { conversationTargetKey, UserFacingError, type ConversationTarget } from 
 
 export interface ReceivedAttachmentInput {
   prepare(): Promise<PreparedAttachmentSubmission>;
+  isCancelled(): boolean;
   dispose(): void;
 }
 
@@ -20,14 +21,15 @@ export class AttachmentInputLifecycle {
   receive(
     target: ConversationTarget,
     allowed: () => boolean,
-    kind: "audio" | "video",
+    kind: "audio" | "video" | "image" | "file",
     create: () => PreparedAttachmentSubmission | undefined,
   ): ReceivedAttachmentInput {
     const key = conversationTargetKey(target);
     const pending = this.pending.get(key) ?? new Set<AbortController>();
-    const unavailable = () => new UserFacingError(`${kind}.unavailable`, "附件输入已取消、超时、未获授权或正在处理过多附件，请重新发送");
+    const unavailable = () => new UserFacingError(kind === "image" ? "image.download-failed"
+      : kind === "file" ? "attachment.download-failed" : `${kind}.unavailable`, "附件输入已取消、超时、未获授权或正在处理过多附件，请重新发送");
     if (this.closed || !allowed() || pending.size >= 4 || (!this.pending.has(key) && this.pending.size >= 1000)) {
-      return { dispose: () => undefined, prepare: () => Promise.reject(unavailable()) };
+      return { dispose: () => undefined, isCancelled: () => true, prepare: () => Promise.reject(unavailable()) };
     }
     const controller = new AbortController();
     const stops = [...this.stops.get(key) ?? []];
@@ -49,6 +51,7 @@ export class AttachmentInputLifecycle {
     controller.signal.addEventListener("abort", dispose, { once: true });
     return {
       dispose,
+      isCancelled: () => controller.signal.aborted || !allowed(),
       prepare: async () => {
         if (stops.some(stop => !stop.completed) && !controller.signal.aborted) {
           await new Promise<void>((resolve) => {

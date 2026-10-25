@@ -10,10 +10,11 @@ export class QqSendBudget {
   private account: number[] = [];
   private readonly turns = new Map<string, { text: number; status: number; progress: number; until: number }>();
 
-  reserve(destination: QqRecipient, parts: number, scope?: { key: string; status: boolean; progress?: boolean } | "startup" | "interaction"): {
+  reserve(destination: QqRecipient, parts: number, scope?: { key: string; status: boolean; progress?: boolean } | "startup" | "interaction", planTimeoutMs = 45_000): {
     runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
   } {
     const recipient = qqRecipientKey(destination);
+    if (planTimeoutMs !== 45_000 && planTimeoutMs !== 120_000) throw new QqProtocolError("message", "invalid-input");
     const now = performance.now();
     const turn = typeof scope === "object" ? scope : undefined;
     const day = 86_400_000;
@@ -40,9 +41,9 @@ export class QqSendBudget {
       this.turns.set(turn.key, usage);
     }
     if (scope !== undefined) {
-      // Hold the full reservation through the entire possible 45-second plan.
+      // Hold the full reservation through the entire bounded send plan.
       // This conservatively counts queued requests in all rolling windows.
-      const reserved = Array<number>(parts).fill(now + 45_000);
+      const reserved = Array<number>(parts).fill(now + planTimeoutMs);
       recipientTimes.push(...reserved);
       this.recipients.set(recipient, recipientTimes);
       this.account.push(...reserved);

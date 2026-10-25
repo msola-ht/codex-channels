@@ -13,6 +13,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 持续模型增量使用 CardKit 2.0 原生流式卡片；Codex 原生 `imageGeneration` 完成以及
 `codexc channel send-image` 提交的图片都只读取经共享安全边界校验的 PNG/JPEG，
 通过官方图片上传和私聊图片消息接口顺序发送；
+显式 `codexc channel send-file` 沿共享文件领取器接入普通文件、MP4 视频与 Ogg/Opus 语音，三者本地上限 30,000,000 字节，不转码、不伪造时长或封面。图片/文件的原 Thread 守卫贯穿排队、读取前后、上传与 SDK 鉴权后的最终业务请求；停止信号取消在途网络发送。
 这些路径均有对应实现。真实平台验收状态统一见
 [`通讯渠道验收矩阵`](../../../docs/channel-acceptance-matrix.md)。
 
@@ -43,7 +44,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `application-setup.ts`：生成 CardKit 2.0 精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和
   一次性令牌，管理有限任务、取消和安全结果。
 - `client.ts`：隔离官方 HTTP SDK，提供消息读取/发送、生成图片上传、CardKit 与 OAuth 窄客户端；按调用隔离取消信号，覆盖 SDK 鉴权和业务 HTTP，交互创建仅额外观察已验证消息 ID 以清理失效卡片。
-- `sdk-request-context.ts`：私有 SDK 调用取消上下文，在请求开始前绑定调用方取消与期限，区分取消原因，并向共用 HTTP 策略提供该调用的信号；正常返回不取消下载流。
+- `sdk-request-context.ts`：私有 SDK 调用上下文，在请求开始前绑定调用方取消、期限与可选同步发送守卫；共用 HTTP 策略在 SDK 鉴权等待后仍复核守卫并取得该调用的信号，拒绝异步守卫。正常返回不取消下载流。
 - `audio.ts`：通过既有消息资源权限下载独立音频，限制为 5 分钟、20 MiB 和 Codex CLI
   支持的 WAV/MP3/M4A/WebM/OGG，写入一小时私有临时文件后构造 `localAudio`；Application
   仅在当前模型目录包含 `audio` 时提交，否则在创建或追加 Turn 前明确拒绝。
@@ -58,7 +59,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `event-connection.ts`：隔离官方 WebSocket SDK，管理事件注册、握手、SDK 重连、失败后重新启动
   和最终停止生命周期。
 - `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证
-  文件名与 UTF-8，文件流读取总时限为 30 秒，清理常见终端转义序列并拒绝残留的不支持控制字符，较大文本通过共享私有暂存交给执行端按需读取。
+  文件名与 UTF-8，文件流读取总时限为 30 秒，调用方与关闭信号覆盖 SDK、流读取及迟到暂存清理；清理常见终端转义序列并拒绝残留的不支持控制字符，较大文本通过共享私有暂存交给执行端按需读取。
 - `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本、图片、文件、音频和视频元素；
   富文本优先非空 `content_v2`，`media` 按视频解析，同一 Key 去重，多个不同视频或视频混合独立 `img` 失败关闭。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容，并集中提供飞书 Markdown 转义（输入卡与卡片展示共用同一核心实现，各自保留换行归一与花括号处理的开关）。
@@ -70,7 +71,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；不等待独立文字或图片，
   已在队列中明确相邻的图片可成批处理，普通文本与命令仍沿用既有顺序路径。
-  音视频在授权、去重与容量准入后同步登记接收取消范围，覆盖等待中的附件；授权stop取消此前范围，后续附件等待旧stop结束后再建立提交作用域。处理完成及关闭丢弃队列项时释放接收范围。
+  图片、文本文件及音视频在授权、去重与容量准入后同步登记接收取消范围，覆盖等待中的附件；授权stop取消此前范围，后续附件等待旧stop结束后再建立提交作用域。图片仅将同 Actor、相同取消状态的相邻消息合批，旧失效图片不带走 stop 后的新图片；文字及卡片 stop 共用同一生命周期。处理完成及关闭丢弃队列项时释放接收范围。图片/文件在 Worker 开始下载前固定 Thread 与模型，下载和后续提交等待后复核；尚未开始处理的附件按届时选择捕获。文件确定未提交时清理，提交未知保留至期，受管图片沿既有 TTL 保留。
 - `command-format.ts`：把 Gateway Markdown 文案中独立成行的命令和“标签：命令”的值渲染为行内代码，
   供 Markdown 文案出口（`notifyMarkdown`、`deliverMarkdown`）与命令中心 Markdown 卡片共用；
   只识别共享命令、别名与飞书专有命令，跳过目录/路径/文件字段、缩进代码块、代码围栏、表格行、

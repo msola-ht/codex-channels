@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ChannelFileMediaType } from "../bounded-local-file.js";
 import type { Logger } from "pino";
 import type { InteractionRequest } from "../../approval/index.js";
 import { parseThreadQueueOperation, type ConversationCommandExecutor, type ConversationCommandResult, type ConversationSessionUseCases, type ConversationTurnUseCases, type ScheduledTaskConfirmation } from "../../application/index.js";
@@ -416,7 +417,7 @@ export class QqMessages implements SurfaceOutputPort {
     return task;
   }
 
-  async sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean): Promise<void> {
+  async sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
     const actorId = qqConversationActor(conversationId);
     if (!actorId) throw new Error("QQ 图片目标不受支持");
     const recipient = qqConversationRecipient(conversationId);
@@ -424,13 +425,13 @@ export class QqMessages implements SurfaceOutputPort {
     if (!scope || !this.current(scope) || isCurrent() !== true) throw new Error("QQ 图片目标未获授权");
     const target = this.target(actorId, conversationId);
     const context = this.extensionQueryScope(target);
-    await this.outbox.deliverImage(recipient, imagePath, { signal: this.lifetime.signal,
+    await this.outbox.deliverImage(recipient, imagePath, { signal: signal ? AbortSignal.any([signal, this.lifetime.signal]) : this.lifetime.signal,
       beforeSend: () => { if (isCurrent() !== true || !this.current(scope) || this.extensionQueryScope(target) !== context) throw new Error("QQ 图片目标已变化"); },
       reserve: () => this.budget.reserve(recipient, 1, "interaction"),
     }, async () => {});
   }
 
-  async sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean): Promise<void> {
+  async sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void> {
     const actorId = qqConversationActor(conversationId);
     if (!actorId) throw new Error("QQ 文件目标不受支持");
     const recipient = qqConversationRecipient(conversationId);
@@ -438,10 +439,10 @@ export class QqMessages implements SurfaceOutputPort {
     if (!scope || !this.current(scope) || isCurrent() !== true) throw new Error("QQ 文件目标未获授权");
     const target = this.target(actorId, conversationId);
     const context = this.extensionQueryScope(target);
-    await this.outbox.deliverFile(recipient, filePath, fileName, { signal: this.lifetime.signal,
+    await this.outbox.deliverFile(recipient, filePath, fileName, { signal: signal ? AbortSignal.any([signal, this.lifetime.signal]) : this.lifetime.signal,
       beforeSend: () => { if (isCurrent() !== true || !this.current(scope) || this.extensionQueryScope(target) !== context) throw new Error("QQ 文件目标已变化"); },
-      reserve: () => this.budget.reserve(recipient, 1, "interaction"),
-    }, async () => {});
+      reserve: () => this.budget.reserve(recipient, 1, "interaction", 120_000),
+    }, async () => {}, mediaType);
   }
 
   private async sendStartupNotifications(): Promise<void> {

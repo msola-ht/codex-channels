@@ -72,7 +72,7 @@
 | 长连接规则 | [使用长连接接收事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode) | 处理时限、集群投递和订阅类型 |
 | 文本消息发送 | [发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create) | 核对 `chat_id` 接收目标、文本消息体和机器人可用性 |
 | 富文本视频元素 | [发送消息内容结构](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/im-v1/message/create_json) | `media` 是视频标签，`file_key` 是视频文件 Key，可选 `image_key` 是封面；消息资源下载的 `type=file` 不表示 UTF-8 文本文件 |
-| IM 文件上传 | [上传文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/file/create) | 核对 `stream` 文件类型、文件名、Buffer/流、30 MiB 平台上限和返回 `file_key`；项目只用于不超过 1,000,000 字节的完整最终回复 |
+| IM 文件上传 | [上传文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/file/create) | 锁定 SDK `code-gen/projects/im.ts` 核对 `stream/mp4/opus`、文件名、Buffer/流、30 MB 及返回 `file_key`；显式文件本地上限 30,000,000 字节，长正文文件仍限 1,000,000 字节；原生音视频消息体对照锁定官方插件 sender 的 `audio/media`，不填虚构时长或封面 |
 | IM 图片上传 | [上传图片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/image/create) | 核对 `image_type=message`、Buffer、10 MiB 平台上限和返回 `image_key`；项目只用于 App Server 明确返回且经本地安全校验的 PNG/JPEG 生成图片 |
 | 更新消息卡片 | [更新应用发送的消息卡片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/patch) | 核对应用发送的交互卡片原地更新、14 天窗口、单消息 5 QPS 和请求大小限制 |
 | 卡片更新错误 | [错误码 230001：消息不是卡片](https://open.feishu.cn/document/faq/trouble-shooting/how-to-resolve-error-230001?lang=zh-CN) | 明确 `im.v1.message.patch` 只更新卡片；普通文本或富文本必须使用对应的编辑消息能力 |

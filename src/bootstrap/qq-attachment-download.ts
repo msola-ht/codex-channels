@@ -25,17 +25,18 @@ function publicAddress(address: string): boolean {
     : family === 6 && nativeGlobal.check(address, "ipv6") && !excluded.check(address, "ipv6");
 }
 
-/** Owns download sockets separately from token/API fetch; no credentials or redirects. */
+/** Owns attachment GET and presigned PUT sockets apart from token/API fetch. No credentials or redirects. */
 export function createQqAttachmentDownloader(network: Pick<QqNetwork, "agentForUrl" | "releaseAgent">): {
   download: QqNetwork["downloadAttachment"];
+  uploadPart: QqNetwork["uploadPart"];
   close(): Promise<void>;
 } {
   const lifetime = new AbortController();
   const requests = new Set<ClientRequest>();
   const closing = new Set<Promise<void>>();
   let cleanupFailed = false;
-  return {
-    async download(url, caller, beforeDownload) {
+  async function transfer(url: URL, caller: AbortSignal, beforeDownload: () => void, bytes?: Uint8Array): Promise<Awaited<ReturnType<QqNetwork["downloadAttachment"]>> | undefined> {
+      url = new URL(url.href);
       const signal = AbortSignal.any([caller, lifetime.signal, AbortSignal.timeout(30_000)]);
       signal.throwIfAborted();
       beforeDownload();
@@ -54,16 +55,35 @@ export function createQqAttachmentDownloader(network: Pick<QqNetwork, "agentForU
         const work = network.releaseAgent(agent).catch(() => { cleanupFailed = true; }).finally(() => closing.delete(work));
         closing.add(work);
       };
+      let constructed = false;
       try {
-        return await new Promise<Awaited<ReturnType<QqNetwork["downloadAttachment"]>>>((resolve, reject) => {
+        return await new Promise<Awaited<ReturnType<QqNetwork["downloadAttachment"]>> | undefined>((resolve, reject) => {
           // CONNECT and direct TCP both use the pinned IP. Host/SNI/certificate
           // identity remain the original hostname; the proxy cannot resolve it again.
           const req = request({ protocol: "https:", hostname: address, port: 443,
-            path: `${url.pathname}${url.search}`, method: "GET", agent: agent ?? false, signal,
+            path: `${url.pathname}${url.search}`, method: bytes ? "PUT" : "GET", agent: agent ?? false, signal,
             ...(isIP(host) ? {} : { servername: host }), rejectUnauthorized: true,
             checkServerIdentity: (_hostname, certificate) => checkServerIdentity(host, certificate),
-            headers: { Host: url.host, "Accept-Encoding": "identity" },
+            headers: { Host: url.host, "Accept-Encoding": "identity",
+              ...(bytes ? { "Content-Type": "application/octet-stream", "Content-Length": String(bytes.byteLength) } : {}) },
           }, response => {
+            if (bytes) {
+              if (![200, 201, 204].includes(response.statusCode ?? 0)) {
+                response.destroy(); reject(new Error("QQ 分片上传未确认")); return;
+              }
+              // A success status is confirmed only after its bounded response completes.
+              let received = 0;
+              response.on("data", (chunk: Buffer) => {
+                received += chunk.byteLength;
+                if (received > 64 * 1024) {
+                  response.destroy(); reject(new Error("QQ 分片上传响应过大"));
+                }
+              });
+              response.once("error", reject);
+              response.once("aborted", () => reject(new Error("QQ 分片上传未确认")));
+              response.once("end", () => resolve(undefined));
+              return;
+            }
             if (response.statusCode !== 200) { response.destroy(); reject(new Error("QQ 附件下载未确认")); return; }
             const length = response.headers["content-length"];
             if (length !== undefined && (!/^\d+$/u.test(length) || !Number.isSafeInteger(Number(length)))) {
@@ -71,16 +91,29 @@ export function createQqAttachmentDownloader(network: Pick<QqNetwork, "agentForU
             }
             resolve({ stream: response, ...(length === undefined ? {} : { contentLength: Number(length) }) });
           });
+          constructed = true;
           requests.add(req);
           req.once("error", reject);
           req.once("close", () => { requests.delete(req); release(); });
-          req.end();
+          try { signal.throwIfAborted(); beforeDownload(); req.end(bytes); }
+          catch (error) { req.destroy(); reject(error instanceof Error ? error : new Error("QQ 附件发送已取消")); }
         });
       } catch (error) {
-        // Request close owns release once construction succeeded. An agent that
-        // never acquired a request is still released on network shutdown.
+        if (!constructed) release();
         throw new Error("QQ 附件连接未确认", { cause: error });
       }
+  }
+  return {
+    async download(url, signal, beforeDownload) {
+      const result = await transfer(url, signal, beforeDownload);
+      if (!result) throw new Error("QQ 附件下载未确认");
+      return result;
+    },
+    async uploadPart(url, bytes, signal, beforeSend) {
+      if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0 || bytes.byteLength > 64 * 1024 * 1024) {
+        throw new Error("QQ 分片数据无效");
+      }
+      await transfer(url, signal, beforeSend, bytes);
     },
     async close() {
       lifetime.abort();
