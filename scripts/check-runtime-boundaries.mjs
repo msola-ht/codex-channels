@@ -229,7 +229,7 @@ function checkRelativeImport(sourceDirectory, file, specifier) {
   }
   if (targetDirectory !== "dist") return;
   if (!allowedDistEntries.get(sourceDirectory)?.has(targetPath)
-    && !allowedFileDistEntries.get(display(file))?.has(targetPath)) {
+    && !allowedFileDistEntries.get(display(file).replaceAll("\\", "/"))?.has(targetPath)) {
     failures.push(`${display(file)} -> ${specifier} 未列入 ${sourceDirectory} 的已编译入口允许表`);
     return;
   }
