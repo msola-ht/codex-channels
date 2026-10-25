@@ -28,6 +28,9 @@ import { QqInteractions } from "./interactions.js";
 import { isQqExtensionOperation, isQqTaskCommand } from "./extension-commands.js";
 import type { QqImageStore } from "./image-store.js";
 import { generatedImageUnavailableText, isGeneratedImageUnavailable } from "../operation-presentation.js";
+import { formatQuotedInput } from "../quoted-input.js";
+import { textAttachmentBody } from "../text-attachment-store.js";
+import type { QqFileInput } from "./file-input.js";
 
 export interface QqMessageOptions {
   appId: string;
@@ -38,6 +41,7 @@ export interface QqMessageOptions {
   ownsThread(target: ConversationTarget, threadId: string): boolean;
   logger: Logger;
   images?: Pick<QqImageStore, "prepare">;
+  files?: Pick<QqFileInput, "prepare">;
   autoCompactPercent?: (provider: string | null | undefined, model: string | null | undefined) => number | null;
   startupNotification?: {
     recipients(): readonly string[];
@@ -339,8 +343,9 @@ export class QqMessages implements SurfaceOutputPort {
 
   private async process(message: QqMessageInput, target: ConversationTarget, ownsBusy = false): Promise<void> {
     const images = "images" in message ? message.images : undefined;
-    if (images?.length && message.content.trimStart().startsWith("/")) {
-      await this.reply(message, "图片消息不执行斜杠命令或交互回答，请单独发送命令；图片可附上普通文字需求。", () => this.allowed(target, message.actorId));
+    const file = "file" in message ? message.file : undefined;
+    if ((images?.length || file) && message.content.trimStart().startsWith("/")) {
+      await this.reply(message, "附件消息不执行斜杠命令或交互回答，请单独发送命令；附件可附上普通文字需求。", () => this.allowed(target, message.actorId));
       return;
     }
     // Response tokens remain usable while ordinary submit is preparing. They
@@ -468,16 +473,22 @@ export class QqMessages implements SurfaceOutputPort {
       stage = "submit";
       try {
         this.options.service.touchActivity?.(target);
-        const imageScope = images?.length ? this.extensionQueryScope(target) : undefined;
-        const assertImagesCurrent = () => {
-          if (!ticket.isCurrent() || imageScope !== undefined && this.extensionQueryScope(target) !== imageScope) {
-            throw new UserFacingError("image.download-failed", "图片准备已取消或上下文变化");
+        const attachmentScope = images?.length || file ? this.extensionQueryScope(target) : undefined;
+        const assertAttachmentsCurrent = () => {
+          if (!ticket.isCurrent() || attachmentScope !== undefined && this.extensionQueryScope(target) !== attachmentScope) {
+            throw new UserFacingError(file ? "input.authorization-changed" : "image.download-failed", "附件准备已取消或上下文变化");
           }
         };
         if (images?.length && !this.options.images) throw new UserFacingError("image.download-failed", "图片准备不可用");
+        if (file && !this.options.files) throw new UserFacingError("attachment.download-failed", "文本附件准备不可用");
+        const preparedFile = file ? await this.options.files!.prepare(file, ticket.signal, assertAttachmentsCurrent) : undefined;
+        const currentText = preparedFile
+          ? [message.content, `附件文件名：${JSON.stringify(preparedFile.fileName)}`, textAttachmentBody(preparedFile)].filter(Boolean).join("\n\n")
+          : message.content;
+        const text = formatQuotedInput(currentText, message.quotedText);
         const input = images?.length
-          ? await this.options.images!.prepare(images, message.content, ticket.signal, assertImagesCurrent) : message.content;
-        if (images?.length) assertImagesCurrent();
+          ? await this.options.images!.prepare(images, text, ticket.signal, assertAttachmentsCurrent) : text;
+        if (images?.length || file) assertAttachmentsCurrent();
         await this.options.service.submit(target, input, () => ticket.isCurrent(), ticket.observer);
       } catch (error) {
         ticket.cancel();

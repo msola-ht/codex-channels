@@ -7,6 +7,8 @@ const MAX_IMAGES = 4;
 const MAX_IMAGE_METADATA_BYTES = 8 * 1024;
 const MAX_IMAGE_URL_BYTES = 2048;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_TEXT_FILE_BYTES = 1_000_000;
+const MAX_REFERENCE_BYTES = 32 * 1024;
 const CONTROL_CHARACTER = /\p{Cc}/u;
 // With the Unicode flag, a valid surrogate pair is one non-surrogate code point.
 const INVALID_UNICODE = /[\uD800-\uDFFF]/u;
@@ -18,6 +20,14 @@ export interface QqInboundTextMessage {
   readonly msgIdx: string;
   readonly sentAtMs: number;
   readonly images?: readonly QqInboundImage[];
+  readonly file?: QqInboundFile;
+  readonly quotedText?: string;
+}
+
+export interface QqInboundFile {
+  readonly url: string;
+  readonly filename: string;
+  readonly size?: number;
 }
 
 export interface QqInboundImage {
@@ -69,16 +79,19 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
   if (typeof message.message_type !== "number" || !Number.isInteger(message.message_type)) {
     return reject("malformed", "message-type", "invalid-type");
   }
-  if (message.message_type !== 0) return reject("unsupported", "message-type", "non-text");
+  if (message.message_type !== 0 && message.message_type !== 103) return reject("unsupported", "message-type", "non-text");
   const scene = message.message_scene;
   if (!record(scene) || typeof scene.source !== "string") {
     return reject("malformed", "scene", "invalid-type");
   }
   if (scene.source !== "default") return reject("unsupported", "scene", "non-default-scene");
 
-  const images = parseImages("attachments" in message ? message.attachments : []);
+  const attachments = "attachments" in message ? message.attachments : [];
+  const file = parseFile(attachments);
+  if (file && "kind" in file) return file;
+  const images = parseImages(file ? [] : attachments);
   if (!Array.isArray(images)) return images;
-  if ("msg_elements" in message) {
+  if (message.message_type === 0 && "msg_elements" in message) {
     if (!Array.isArray(message.msg_elements)) return reject("malformed", "message-elements", "invalid-type");
     if (message.msg_elements.length > 0) return reject("unsupported", "message-elements", "non-text");
   }
@@ -99,13 +112,14 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
     return reject("too-large", "content", "limit-exceeded");
   }
   if (INVALID_UNICODE.test(message.content)) return reject("malformed", "content", "invalid-unicode");
-  if (message.content.trim().length === 0 && images.length === 0) return reject("malformed", "content", "empty");
+  if (message.content.trim().length === 0 && images.length === 0 && !file) return reject("malformed", "content", "empty");
 
   if (!Array.isArray(scene.ext)) return reject("malformed", "ext", "invalid-type");
   if (scene.ext.length > MAX_EXT_ITEMS) return reject("too-large", "ext", "limit-exceeded");
   const extensions: readonly unknown[] = scene.ext;
   let extBytes = 0;
   let msgIdx: string | undefined;
+  let refMsgIdx: string | undefined;
   for (const entry of extensions) {
     if (typeof entry !== "string") return reject("malformed", "ext", "invalid-type");
     extBytes += Buffer.byteLength(entry, "utf8");
@@ -116,7 +130,14 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
       return reject("malformed", "ext", "invalid-value");
     }
     const key = entry.slice(0, separator);
-    if (key === "ref_msg_idx") return reject("unsupported", "ext", "reference");
+    if (key === "ref_msg_idx") {
+      if (message.message_type !== 103) return reject("unsupported", "ext", "reference");
+      if (refMsgIdx !== undefined) return reject("malformed", "ext", "reference");
+      const candidate = parseIdentifier(entry.slice(separator + 1), "msg-idx");
+      if (typeof candidate !== "string") return candidate;
+      refMsgIdx = candidate;
+      continue;
+    }
     if (key !== "msg_idx") continue;
     if (msgIdx !== undefined) return reject("malformed", "msg-idx", "duplicate-msg-idx");
     const candidate = parseIdentifier(entry.slice(separator + 1), "msg-idx");
@@ -124,6 +145,8 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
     msgIdx = candidate;
   }
   if (msgIdx === undefined) return reject("malformed", "msg-idx", "missing-msg-idx");
+  const quotedText = message.message_type === 103 ? parseReference(message.msg_elements, refMsgIdx) : undefined;
+  if (quotedText !== undefined && typeof quotedText !== "string") return quotedText;
 
   const timestamp = parseTimestamp(message.timestamp);
   if (typeof timestamp !== "number") return timestamp;
@@ -137,8 +160,76 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
       msgIdx,
       sentAtMs: timestamp,
       ...(images.length > 0 ? { images } : {}),
+      ...(file ? { file } : {}),
+      ...(quotedText !== undefined ? { quotedText } : {}),
     },
   };
+}
+
+function parseFile(value: unknown): QqInboundFile | Rejection | undefined {
+  if (!Array.isArray(value)) return reject("malformed", "attachments", "invalid-type");
+  if (value.length > MAX_IMAGES) return reject("too-large", "attachments", "limit-exceeded");
+  const files = value.filter((item: unknown) => record(item) && item.content_type === "file");
+  if (!files.length) return;
+  if (value.length !== 1) return reject("unsupported", "attachments", "non-text");
+  const file: unknown = files[0];
+  if (!record(file) || Object.keys(file).some(key => !["url", "filename", "size", "content_type"].includes(key))) {
+    return reject("unsupported", "attachments", "non-text");
+  }
+  // Reuse the image metadata URL/name checks without treating file bytes as images.
+  const validated = parseImages([{ ...file, content_type: "image/png" }]);
+  if (!Array.isArray(validated)) return validated;
+  if (typeof file.filename !== "string") return reject("malformed", "attachments", "invalid-type");
+  if (Buffer.byteLength(file.filename) > 255) return reject("too-large", "attachments", "limit-exceeded");
+  if (typeof file.size === "number" && file.size > MAX_TEXT_FILE_BYTES) return reject("too-large", "attachments", "limit-exceeded");
+  return { url: validated[0]!.url, filename: file.filename, ...(typeof file.size === "number" ? { size: file.size } : {}) };
+}
+
+function parseReference(value: unknown, refMsgIdx: string | undefined): string | Rejection {
+  if (!refMsgIdx || !Array.isArray(value)) return reject("malformed", "message-elements", "reference");
+  // Bound the entire untrusted tree before serializing or considering a match.
+  let nodes = 0;
+  let bytes = 0;
+  const bounded = (node: unknown, depth: number): boolean => {
+    if (++nodes > 256 || depth > 8) return false;
+    if (typeof node === "string") { bytes += Buffer.byteLength(node); return bytes <= MAX_REFERENCE_BYTES && !INVALID_UNICODE.test(node); }
+    if (Array.isArray(node)) return node.length <= 32 && node.every(child => bounded(child, depth + 1));
+    if (record(node)) return Object.keys(node).length <= 32 && Object.entries(node).every(([key, child]) => bounded(key, depth + 1) && bounded(child, depth + 1));
+    return node === null || typeof node === "number" || typeof node === "boolean";
+  };
+  if (!bounded(value, 0) || Buffer.byteLength(JSON.stringify(value)) > MAX_REFERENCE_BYTES) {
+    return reject("too-large", "message-elements", "limit-exceeded");
+  }
+  const seen = new Set<string>();
+  let selected: Record<string, unknown> | undefined;
+  for (const element of value as unknown[]) {
+    if (!record(element)) return reject("malformed", "message-elements", "invalid-type");
+    const index = parseIdentifier(element.msg_idx, "msg-idx");
+    if (typeof index !== "string") return index;
+    if (seen.has(index)) return reject("malformed", "message-elements", "reference");
+    seen.add(index);
+    // Nested histories are not an input source in this batch.
+    if ("msg_elements" in element && (!Array.isArray(element.msg_elements) || element.msg_elements.length > 0)) {
+      return reject("unsupported", "message-elements", "reference");
+    }
+    if (index === refMsgIdx) selected = element;
+  }
+  if (!selected) return reject("malformed", "message-elements", "reference");
+  if (selected.message_type !== 0 && selected.message_type !== 103) return reject("unsupported", "message-elements", "non-text");
+  if (typeof selected.content !== "string") return reject("malformed", "message-elements", "invalid-type");
+  if ("ark_data" in selected && (!record(selected.ark_data) || Object.keys(selected.ark_data).length > 0)) {
+    return reject("unsupported", "message-elements", "non-text");
+  }
+  if ("attachments" in selected && !Array.isArray(selected.attachments)) return reject("malformed", "attachments", "invalid-type");
+  const annotations: string[] = [];
+  for (const attachment of (selected.attachments ?? []) as unknown[]) {
+    if (!record(attachment) || typeof attachment.content_type !== "string") return reject("malformed", "attachments", "invalid-type");
+    // Only a fixed annotation escapes; URLs, filenames and credentials never do.
+    annotations.push(attachment.content_type.startsWith("image/") ? "[引用消息包含图片，未读取]" : "[引用消息包含附件，未读取]");
+  }
+  const text = [selected.content, ...annotations].filter(Boolean).join("\n");
+  if (!text.trim()) return reject("malformed", "message-elements", "empty");
+  return text;
 }
 
 function parseImages(value: unknown): QqInboundImage[] | Rejection {

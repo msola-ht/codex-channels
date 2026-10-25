@@ -11,6 +11,7 @@ import {
 import type { UserFacingError } from "../conversation-core/index.js";
 import { gatewayRequestFailedText } from "./output-copy.js";
 import { formatReasoningEffort } from "./reasoning-effort-format.js";
+import { formatTextFileDownloadFailed, formatUnsupportedTextFile } from "./text-file-copy.js";
 
 export function formatSurfaceUserFacingError(
   error: UserFacingError,
@@ -56,7 +57,15 @@ export function formatSurfaceUserFacingError(
     case "attachment.too-large":
       return "文本附件总大小超过 1,000,000 字节限制";
     case "attachment.unsupported":
+      if (surfaceLabel === "QQ") {
+        switch (error.details.reason) {
+          case "invalid-name": case "invalid-utf8": case "empty": case "control-characters": case "unsupported":
+            return formatUnsupportedTextFile(surfaceLabel, error.details.reason);
+        }
+      }
       return "文本附件格式不支持";
+    case "attachment.download-failed":
+      return formatTextFileDownloadFailed(surfaceLabel);
     case "attachment.capacity":
       return "文本附件暂存空间已满，请稍后重试或发送较小片段";
     case "message.empty":

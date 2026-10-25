@@ -19,6 +19,7 @@ export type UserFacingErrorCode =
   | "attachment.too-many"
   | "attachment.too-large"
   | "attachment.unsupported"
+  | "attachment.download-failed"
   | "attachment.capacity"
   | "video.too-large"
   | "video.unsupported"

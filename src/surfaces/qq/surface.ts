@@ -8,6 +8,7 @@ import { QqProtocolClient, QqProtocolError } from "./protocol.js";
 import { QqWebSocketTransport, QqTransportError } from "./transport.js";
 import { QqMessages, type QqMessageOptions } from "./messages.js";
 import { QqImageStore } from "./image-store.js";
+import { QqFileInput } from "./file-input.js";
 
 export interface CreateQqSurfaceOptions extends QqMessageOptions {
   appId: string;
@@ -115,6 +116,7 @@ class QqConnection {
   private readonly client: QqProtocolClient;
   private readonly transport: QqWebSocketTransport;
   private readonly images: QqImageStore;
+  private readonly files: QqFileInput;
   private closed = false;
   private stopping: Promise<void> | undefined;
 
@@ -125,7 +127,9 @@ class QqConnection {
     this.network = options.createNetwork();
     this.images = new QqImageStore(join(options.uploadsDirectory, `qq-images-${options.appId}`),
       (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger);
-    this.messages = new QqMessages({ ...options, images: this.images }, this.client);
+    this.files = new QqFileInput(join(options.uploadsDirectory, `qq-text-${options.appId}`),
+      (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger);
+    this.messages = new QqMessages({ ...options, images: this.images, files: this.files }, this.client);
     this.transport = new QqWebSocketTransport({
       client: this.client,
       agentForUrl: (url, signal) => this.network.agentForUrl(url, signal),
@@ -156,7 +160,7 @@ class QqConnection {
   }
 
   private async closeResources(): Promise<void> {
-    const work = Promise.allSettled([this.messages.close(), this.transport.stop(), this.network.close()]).then(results => {
+    const work = Promise.allSettled([this.messages.close(), this.files.close(), this.transport.stop(), this.network.close()]).then(results => {
       if (results.some(result => result.status === "rejected")) throw new Error("QQ 连接资源关闭未确认");
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
