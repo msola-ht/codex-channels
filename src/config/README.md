@@ -32,7 +32,7 @@ Gateway，以刷新进程时区或渠道启动卡配置。
 允许名单，也不处理未知字段或不受支持的版本。运行语义校验失败、文件发生并发修改或原子写回失败时
 不得修改原配置，并以配置错误失败关闭。
 
-Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bot_token` 缺失或空白时运行配置
+Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺失；`bot_token` 缺失或空白时运行配置
 将其视为未启用，不创建 Telegram Surface，也不要求允许用户列表。Token 非空时
 `allowed_user_ids` 必须至少包含一个正整数。飞书和微信继续以各自的 `enabled` 字段决定是否启用。
 
@@ -42,16 +42,16 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 私有 `proxy_url` 只覆盖 Telegram，并优先于共享代理和 `NO_PROXY`。项目不修改系统代理，也不
 安装、配置或重启 sing-box；仅 SOCKS `ALL_PROXY` 仍不受 HTTP(S) 客户端支持。
 
-`display.operation_updates` 是 Telegram 与飞书的操作过程显示模式：`full` 显示完整详情、
+`display.operation_updates` 是 Telegram、飞书与 QQ 的操作过程显示模式：`full` 显示完整详情、
 状态、耗时和退出码，`compact` 显示单行状态、耗时、退出码和最多 160 个字符的详情摘要，
 `hidden` 抑制 `operation.updated` 的平台输出。默认值为 `compact`，旧布尔字段由严格 Schema 拒绝。
-三种模式都不影响审批、错误、最终回复和 Turn 完成事件；启用 Telegram 或飞书时变化需要重启 Gateway，
+三种模式都不影响审批、错误、最终回复和 Turn 完成事件；启用 Telegram、飞书或 QQ 时变化需要重启 Gateway，
 不需要重装或重启 App Server，只启用微信或未配置渠道时变化不要求重启。微信为保留单次回复窗口预算
 不发送任何操作过程事件（包括终态），该设置对微信没有效果。
 
 `display.plan_updates` 是自动计划展示开关，默认开启；显式设为 `false` 可关闭。开启后只影响官方
-`turn/plan/updated` 在 Telegram 与飞书的展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式；
-微信不展示结构化计划。与 `display.operation_updates` 相同，只有启用 Telegram 或飞书时变化才要求
+`turn/plan/updated` 在 Telegram、飞书与 QQ 的展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式；
+微信不展示结构化计划。与 `display.operation_updates` 相同，只有启用 Telegram、飞书或 QQ 时变化才要求
 重启 Gateway。
 
 上游模型是否能够产生这些通知由 Codex 用户配置的 `tools.update_plan.enabled` 控制，默认关闭；通过
@@ -59,8 +59,8 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 的 `display.plan_updates` 分开管理；`codexc update` 会在合同预检时提示当前状态，`codexc doctor` 只读诊断该项。
 变化由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变，不需要重启 Gateway 或 App Server。
 
-`display.reasoning` 是“思考中”状态展示开关，默认关闭；显式设为 `true` 时 Telegram 和飞书发送
-思考状态卡，微信继续不主动发送，其余输出保持不变。启用 Telegram 或飞书时变化需要重启 Gateway，
+`display.reasoning` 是“思考中”状态展示开关，默认关闭；显式设为 `true` 时 Telegram、飞书和 QQ 发送
+思考状态，微信继续不主动发送，其余输出保持不变。启用 Telegram、飞书或 QQ 时变化需要重启 Gateway，
 不需要重启 App Server；只启用微信或未配置渠道时不要求重启。
 
 `logging.level` 是全局日志级别；`debug` 与 `trace` 同时启用全局调试模式，`info`、`warn`、

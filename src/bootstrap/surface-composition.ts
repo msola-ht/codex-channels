@@ -132,6 +132,10 @@ function createQqModule(
   const config = options.config.qq;
   if (!config) throw new Error("QQ 运行配置不存在");
   const access = new QqAccessPolicy(config.allowedUserOpenIds, config.appId, config.groups);
+  const removedBindings = removeUnauthorizedQqBindings(options.bindings, access, config.appId);
+  if (removedBindings > 0) {
+    options.logger.warn({ removedBindings }, "已清理不再授权的 QQ 会话绑定");
+  }
   let notificationRecipients = new Set(config.allowedUserOpenIds);
   const adapter = new QqSurface({
     appId: config.appId, appSecret: config.appSecret, access,
@@ -566,6 +570,21 @@ function intersectNumberSets(
   right: ReadonlySet<number>,
 ): ReadonlySet<number> {
   return new Set([...left].filter((value) => right.has(value)));
+}
+
+export function removeUnauthorizedQqBindings(
+  bindings: BindingStore,
+  access: QqAccessPolicy,
+  accountId: string,
+): number {
+  let removed = 0;
+  for (const target of bindings.conversations()) {
+    if (target.surface !== "qq" || target.accountId !== accountId) continue;
+    const allowedActors = new Set(bindings.actors(target).filter(actorId =>
+      access.isAllowed({ target, actorId })));
+    if (bindings.retainActors(target, allowedActors)) removed += 1;
+  }
+  return removed;
 }
 
 export function removeUnauthorizedTelegramBindings(

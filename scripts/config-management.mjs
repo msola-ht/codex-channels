@@ -293,12 +293,12 @@ function telegramSurfaceEnabled(document) {
 }
 
 /**
- * 只有 Telegram（已配置 bot_token）与已启用的飞书消费 `display.*` 设置，与运行时重载判定
+ * Telegram（已配置 bot_token）、已启用的飞书与 QQ 消费过程显示设置，与运行时重载判定
  * （`classifyConfigReload`）保持一致：只启用微信或未配置渠道时改这些设置没有渠道受影响，
  * 无需重建 Gateway 连接，只需重新读取配置。
  */
 function displaySettingActivation(document) {
-  return telegramSurfaceEnabled(document) || table(document.feishu).enabled === true
+  return telegramSurfaceEnabled(document) || table(document.feishu).enabled === true || table(document.qq).enabled === true
     ? "restart-gateway"
     : "reload";
 }

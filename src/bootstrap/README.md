@@ -143,6 +143,9 @@
   决定是否启用，飞书和微信使用显式开关；飞书和微信启动通知从仍有授权 Actor 的已知 Conversation
   解析收件人，不要求当时已有 Thread 绑定。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
   读取凭据，不把 Token 放入运行配置。
+  QQ 在创建渠道、恢复订阅前按当前 App 的精确单聊及群/成员策略复核已知 Actor；撤权或无法确认 Actor 的
+  Conversation 复用共享 `retainActors` 原子解除前台/后台绑定，保留 Workspace 选择及 App Server Thread。
+  已授权单聊与群成员、其他 App 和其他渠道的绑定不受影响；重新授权后普通输入按既有强制新建标记处理。
   组合根同时向 Surface 上下文提供官方主路由的鉴权文件可用性，非官方主路由返回未知；该值只用于
   上线通知和失效降级提示，不替代 App Server 的认证判断，也不改变 Thread 的 Provider 绑定。
 - `proxy-fetch.ts`：向 Bootstrap 组合代码转发 Runtime 共享的代理 Fetch 接口；代理选择与

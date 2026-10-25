@@ -105,6 +105,9 @@ export class QqTaskProgress {
       return;
     }
     if (!isQqTaskProgressEvent(event)) return;
+    // QQ operation notices are append-only; publish the terminal result once
+    // instead of creating separate running and completed bubbles.
+    if (event.type === "operation.updated" && event.operation.status === "running") return;
     if (isReliableProgress(event)) {
       if (event.type === "operation.updated") {
         const key = presentationKey(event);
@@ -139,7 +142,8 @@ export class QqTaskProgress {
   prepare(event: QqTaskProgressEvent): PreparedProgress | undefined {
     if (this.closed) return isReliableProgress(event) ? failedProgress : undefined;
     if (event.type === "subagent.completed" && event.parentTurnId === undefined) return failedProgress;
-    if (event.type === "operation.updated" && !shouldDisplayOperation(event.operation, this.options.operationUpdates)) return undefined;
+    if (event.type === "operation.updated" && (event.operation.status === "running"
+      || !shouldDisplayOperation(event.operation, this.options.operationUpdates))) return undefined;
     if (isReliableProgress(event)) {
       const values = this.render(event);
       // Reliable delivery owns occurrence identity, ordering, confirmation and retries.

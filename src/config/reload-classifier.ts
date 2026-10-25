@@ -36,9 +36,9 @@ export function classifyConfigReload(
   return { action: "reload", changes: reloadReasons };
 }
 
-/** 操作、计划与推理过程显示设置只由 Telegram 与飞书消费。 */
+/** 操作、计划与推理过程显示设置由 Telegram、飞书及 QQ 消费。 */
 function displaySettingsAffectEnabledSurface(config: GatewayConfig): boolean {
-  return config.telegramEnabled || config.feishu !== undefined;
+  return config.telegramEnabled || config.feishu !== undefined || config.qq !== undefined;
 }
 
 function serviceReinstallReasons(
