@@ -180,7 +180,9 @@ export class SurfaceManager {
         if (!surface || !this.active.has(surface) || !surface.output.deliver) throw new Error("可靠投递端口不可用");
         const enriched = await this.enrichSafely(event, signal);
         signal.throwIfAborted();
-        if (!this.acceptingOutput) throw new Error("可靠投递已停止");
+        // Already-dispatched durable output owns the shutdown grace period.
+        // Live admission closes earlier; cancellation and owner authorization
+        // still govern enrichment and admission to the Surface delivery port.
         if (!authorized()) throw new Error("可靠投递授权已变化");
         if (liveOrder !== undefined) {
           // Coordinator has settled every preceding durable record in this Conversation.
@@ -195,7 +197,6 @@ export class SurfaceManager {
           }
         }
         await this.requireRuntime(surface).delivery.runOrdered(event.target.conversationId, async (active) => {
-          if (!this.acceptingOutput) throw new Error("可靠投递已停止");
           if (!authorized()) throw new Error("可靠投递授权已变化");
           await surface.output.deliver!(enriched, active, checkpoint, authorized, source, presentation);
         }, signal);

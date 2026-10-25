@@ -31,12 +31,13 @@ export class PersistentSurfaceOutput {
   private pendingBytes = 0;
   private readonly liveOrders = new Map<string, { order: number; presentation?: { completion: "brief" | "detailed" } }>();
   private closed = false;
+  private closePromise: Promise<void> | undefined;
   private readonly idleWaiters = new Set<() => void>();
 
   constructor(private readonly options: PersistentSurfaceOutputOptions) {
     this.journal = new DeliveryJournal(options.directory, {
       ...(options.workerUrl ? { workerUrl: options.workerUrl } : {}),
-      onFailure: (failure) => options.fault("storage", undefined, undefined, failure),
+      onFailure: () => this.coordinator.storageFailed(),
     });
     this.coordinator = new DeliveryCoordinator(this.journal, {
       accounts: () => options.accounts(),
@@ -166,8 +167,11 @@ export class PersistentSurfaceOutput {
     this.tails.set(conversation, task);
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> { return this.closePromise ??= this.closeInternal(); }
+
+  private async closeInternal(): Promise<void> {
     this.closed = true;
+    this.coordinator.beginShutdown();
     await this.control.close().catch(() => this.options.fault("control-close"));
     this.notifyIdleWaiters();
     let timer: NodeJS.Timeout | undefined;
@@ -180,7 +184,7 @@ export class PersistentSurfaceOutput {
           resolve();
         }, 5_000); }),
       ]);
-    } finally { clearTimeout(timer); await this.coordinator.close(); this.liveOrders.clear(); }
+    } finally { clearTimeout(timer); await this.coordinator.close(true); this.liveOrders.clear(); }
   }
 
   private closeExpired = false;
