@@ -202,6 +202,13 @@ export class QqTaskSources {
   }
 
   /** Original inbound anchor only, never a newer message or renewed reply window. */
+  replyReference(reference: QqTaskSourceReference): string | undefined {
+    if (!this.isCurrent(reference)) return undefined;
+    const message = this.resolve(reference)!.message;
+    return message.kind === "text" ? message.msgIdx : undefined;
+  }
+
+  /** Passive streaming keeps its own incoming-message ID and expiry. */
   streamSource(reference: QqTaskSourceReference): { messageId: string; sourceTimestampMs: number; signal: AbortSignal } | undefined {
     if (!this.isCurrent(reference)) return undefined;
     const entry = this.resolve(reference)!;

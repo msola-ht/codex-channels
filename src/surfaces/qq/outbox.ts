@@ -154,12 +154,16 @@ export class QqTextOutbox {
             const controls = index === parts.length - 1 ? context.interactionControls : undefined;
             const keyboard = controls?.keyboard ?? context.keyboard;
             const partMarkdown = markdownParts?.[index] ?? markdown;
+            // Planning may clone metadata into every part. Only the first
+            // actual bubble carries the native reference, regardless of format.
+            const outgoing = { ...part };
+            if (index > 0) delete outgoing.referenceMessageId;
             const send = () => file
               ? this.client.sendResultFile({ recipient: part.recipient, content: part.content }, { signal: active, beforeSend: guard })
               : partMarkdown || controls
-                ? this.client.sendMarkdown(part, { signal: active, beforeSend: guard, ...(bodyMarkdown ? { body: true as const } : {}) },
+                ? this.client.sendMarkdown(outgoing, { signal: active, beforeSend: guard, ...(bodyMarkdown ? { body: true as const } : {}) },
                   keyboard ? layoutQqKeyboard(keyboard) : undefined)
-              : this.client.sendText(part, { signal: active, beforeSend: guard });
+              : this.client.sendText(outgoing, { signal: active, beforeSend: guard });
             await checkpointDelivery(file ? "qq-result-file" : controls ? "qq-interaction-controls" : partMarkdown
               ? parts.length === 1 ? "qq-markdown" : `qq-markdown:${index + 1}/${parts.length}`
               : `qq-text:${index + 1}/${parts.length}`,

@@ -302,7 +302,7 @@ export class QqMessages implements SurfaceOutputPort {
       reserve: parts => this.budget.reserve(recipient, parts, "interaction"),
     }, checkpoint);
   }
-  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void> {
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, source?: SurfaceDeliverySource): Promise<void> {
     if (!this.supported(event) || !authorized) throw new Error("QQ 输出未获授权");
     // The classifier selects only some operation updates; its false branch does
     // not exclude image delivery or compaction from the OutputEvent union.
@@ -330,6 +330,14 @@ export class QqMessages implements SurfaceOutputPort {
       return;
     }
     if (event.type !== "text.completed" && event.type !== "turn.completed") throw new Error("QQ 输出类型不受支持");
+    // Durable events are decoded/enriched copies. Resolve the original owner
+    // passed by dispatch, never WeakMap identity or the latest input in a Turn.
+    if (source && (source.kind === "notification" || source.accountId !== event.target.accountId
+      || source.conversationId !== event.target.conversationId || source.threadId !== event.threadId
+      || source.turnId !== event.turnId || !this.sourceRegistry(source).isCurrent(source))) {
+      throw new Error("QQ 引用来源与输出不匹配");
+    }
+    const referenceMessageId = source ? this.sourceRegistry(source).replyReference(source) : undefined;
     const completion = event.type === "turn.completed"
       ? renderQqTurnCompleted(event, this.options.debugEnabled ?? false, this.options.autoCompactPercent) : undefined;
     let text = event.type === "text.completed" ? event.text : completion!.text;
@@ -347,7 +355,8 @@ export class QqMessages implements SurfaceOutputPort {
       }
       // Preselect the complete plan. A continuation's partial first block stays
       // literal; later full blocks may resume Markdown without changing old text.
-      await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId), content: text }, {
+      await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId), content: text,
+        ...(referenceMessageId === undefined ? {} : { referenceMessageId }) }, {
         signal: AbortSignal.any([signal, this.lifetime.signal]),
         preferMarkdown: true,
         ...(completion ? { markdownContent: completion.markdown } : {}),
@@ -909,6 +918,7 @@ export class QqMessages implements SurfaceOutputPort {
       ? { mode: "active", recipient, content: detail ?? content }
       : { mode: "passive", recipient, content,
         messageId: message.id, sequence: 1, sourceTimestampMs: message.sentAtMs };
+    if (!("kind" in message)) input.referenceMessageId = message.msgIdx;
     if (oversizedNotice) {
       try { planText(input); }
       catch (error) {

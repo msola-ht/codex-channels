@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { DeliveryCoordinator, DeliveryJournal, DeliveryError, type DeliveryFailure } from "../delivery/index.js";
 import type { ConversationTarget, OutputEvent } from "../conversation-core/index.js";
 import { conversationTargetKey, surfaceAccountKey } from "../conversation-core/index.js";
+import type { SurfaceDeliverySource } from "../surfaces/index.js";
 import { mayReleaseUncertainOutputBarrier, decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, withPersistentDeliveryDiagnostics, type DeliveryCheckpoint } from "../surfaces/index.js";
 
 export interface PersistentSurfaceOutputOptions {
@@ -11,8 +12,9 @@ export interface PersistentSurfaceOutputOptions {
   authorized(event: OutputEvent, owner: string): boolean;
   /** Optional source settlement wait; synchronous checks below remain mandatory. */
   authorizeAtDispatch?(event: OutputEvent, owner: string, signal: AbortSignal): Promise<boolean>;
+  source?(event: OutputEvent, owner: string): SurfaceDeliverySource | undefined;
   accounts(): string[];
-  deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number): Promise<void>;
+  deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number, source?: SurfaceDeliverySource): Promise<void>;
   acknowledged?(event: OutputEvent, owner: string): void;
   fault(code: string, account?: string, persistentDeliveryId?: string, failure?: DeliveryFailure): void;
   changed?(): void;
@@ -62,7 +64,7 @@ export class PersistentSurfaceOutput {
             signal.throwIfAborted();
             if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
           }
-        }, () => options.authorized(payload.event, payload.owner), liveOrder)));
+        }, () => options.authorized(payload.event, payload.owner), liveOrder, options.source?.(payload.event, payload.owner))));
       },
       fault: (code, account, id) => options.fault(code, account, id, code === "storage" ? this.journal.failure : undefined),
       acknowledged: (record) => {

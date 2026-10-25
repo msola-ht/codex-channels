@@ -1139,6 +1139,7 @@ export abstract class GatewayComponentGraph {
           owner: (event) => this.outputOwner(event),
           authorized: (event, owner) => this.outputAuthorized(event, owner),
           authorizeAtDispatch: (event, owner, signal) => this.authorizeOutputAtDispatch(event, owner, signal),
+          source: (event, owner) => event.target.surface === "qq" ? this.outputSourceOwner(event, owner)?.source : undefined,
           releaseSource: (event, owner) => this.releaseOutputSource(event, owner),
           fault: (code, account, persistentDeliveryId, failure) => {
             logger.error({ code, account, persistentDeliveryId, ...(failure ? { deliveryFailure: failure } : {}) }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");

@@ -83,7 +83,7 @@ interface PendingSnapshot {
 }
 
 export interface SurfaceManagerOptions extends CompletionOutputEnricherOptions {
-  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "authorizeAtDispatch" | "fault" | "workerUrl"> & {
+  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "authorizeAtDispatch" | "source" | "fault" | "workerUrl"> & {
     /** Discard only disposable identities; retained records call this after their journal ACK. */
     releaseSource?(event: OutputEvent, owner: string): void;
   };
@@ -172,7 +172,7 @@ export class SurfaceManager {
       },
       accounts: () => [...this.active].filter(surface => !surface.connectionOnly)
         .map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
-      deliver: async (event, signal, checkpoint, authorized, liveOrder) => {
+      deliver: async (event, signal, checkpoint, authorized, liveOrder, source) => {
         const surface = this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId));
         if (!surface || !this.active.has(surface) || !surface.output.deliver) throw new Error("可靠投递端口不可用");
         const enriched = await this.enrichSafely(event, signal);
@@ -194,7 +194,7 @@ export class SurfaceManager {
         await this.requireRuntime(surface).delivery.runOrdered(event.target.conversationId, async (active) => {
           if (!this.acceptingOutput) throw new Error("可靠投递已停止");
           if (!authorized()) throw new Error("可靠投递授权已变化");
-          await surface.output.deliver!(enriched, active, checkpoint, authorized);
+          await surface.output.deliver!(enriched, active, checkpoint, authorized, source);
         }, signal);
       },
     }) : undefined;

@@ -13,6 +13,7 @@
 显式文件发送现覆盖 QQ/飞书/TG/微信，CLI、spool 和路由通过 `channelFilePolicy` 共享渠道准入与预算，Adapter 负责平台协议。MP4 和 Ogg/Opus 的受控文件头检查共用；微信原生 voice 不开放。TG/微信显式图片和文件现消费原 Thread 守卫及领取器取消信号，不因后台 Thread 解绑而改投前台；微信固定入队时回复上下文。新增支持不改变文件 version 1 manifest，不迁移用户数据，未部署或实机验收。
 
 `delivery-diagnostics/index.ts` 是离线投递诊断的窄公开入口，仅复用载荷解码和屏障分类，不加载平台 SDK 或数据库实现。
+`SurfaceOutputPort.deliver` 的可选来源参数由持久 owner 解析后传入，富化不重选来源；QQ 用它校验并取得原生引用索引。来源本身不授予发送权限，各渠道继续执行原授权守卫，不消费该参数的渠道保持原行为。
 `persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，持久结果发送未知或授权失效后解除顺序屏障并保留记录、检查点与容量计费，并将必要图片纳入同一有界快照；
 生成图片的上游 `fileId` 只在实时事件中传递，写入快照前一律剥离；只有引用、没有 `savedPath` 的完成结果仅保留内容不可获取标记，恢复后沿用相同提示，不把引用写入投递 Journal。
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`

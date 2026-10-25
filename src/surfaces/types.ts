@@ -103,7 +103,8 @@ export interface SurfaceOutputPort {
   handle(event: OutputEvent, context?: { liveAdmitted: true }, signal?: AbortSignal): Promise<void> | void;
   /** Settle actual transient operations (including intentional no-op); validate ownership before sending. */
   deliverSnapshot?(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void>;
-  deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean): Promise<void>;
+  /** Source is the original durable owner identity, never recaptured from an enriched event. */
+  deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, source?: SurfaceDeliverySource): Promise<void>;
 }
 
 export type { OperationUpdateDisplay };

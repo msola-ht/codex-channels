@@ -29,6 +29,8 @@ export const QQ_PASSIVE_WINDOW_MS = 300_000;
 export type QqTextMessage = {
   recipient: QqRecipient;
   content: string;
+  /** User-message msg_idx, not the passive reply message ID. */
+  referenceMessageId?: string;
 } & ({ mode: "active" } | {
   mode: "passive";
   messageId: string;
@@ -734,14 +736,18 @@ function textRequest(input: QqTextMessage, maximumBytes = QQ_TEXT_PART_BYTES): {
     || !wellFormed(input.content) || Buffer.byteLength(input.content) > maximumBytes) {
     throw new QqProtocolError("message", "invalid-input");
   }
-  const base = ["mode", "recipient", "content"];
+  if (input.referenceMessageId !== undefined && !identifier(input.referenceMessageId)) {
+    throw new QqProtocolError("message", "invalid-input");
+  }
+  const base = ["mode", "recipient", "content", "referenceMessageId"];
   const passive = ["messageId", "sequence", "sourceTimestampMs"];
   const keys = input.mode === "passive" ? [...base, ...passive] : base;
   if (Object.keys(input).some(key => !keys.includes(key)) || !["active", "passive"].includes(input.mode)) {
     throw new QqProtocolError("message", "invalid-input");
   }
   const path = recipientPath(input.recipient, "messages");
-  const body: Record<string, unknown> = { msg_type: 0, content: input.content };
+  const body: Record<string, unknown> = { msg_type: 0, content: input.content,
+    ...(input.referenceMessageId === undefined ? {} : { message_reference: { message_id: input.referenceMessageId } }) };
   if (input.mode === "active") return { path, body };
   const age = Date.now() - input.sourceTimestampMs;
   if (!identifier(input.messageId) || !Number.isSafeInteger(input.sequence) || input.sequence < 1 || input.sequence > 4
