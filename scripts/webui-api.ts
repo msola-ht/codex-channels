@@ -563,7 +563,7 @@ export interface ManagementProvidersResponse {
 
 export interface ManagementSettingsResponse {
   revision: string
-  display: SettingsSummaryResponse["gateway"]["display"]
+  display: SettingsSummaryResponse["gateway"]["display"] & Pick<import("./config-management.mjs").GatewaySettings["display"], "scopes" | "targetsStatus">
   system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficInputItems" | "modelTrafficItemMaxBytes" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {

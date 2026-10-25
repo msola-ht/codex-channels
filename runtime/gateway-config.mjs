@@ -9,6 +9,7 @@ import { parse, stringify } from "smol-toml";
 import { z } from "zod";
 import { modelRelayConfigSchema } from "./model-relay-config.mjs";
 import { validateModelDisplayAliases } from "./model-display-name.mjs";
+import { messageDisplayOverridesSchema } from "./message-display-policy.mjs";
 
 import {
   PrivateFileWriteCommittedError,
@@ -341,6 +342,7 @@ const gatewayConfigStructureSchema = z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
     reasoning: z.boolean().default(false),
+    overrides: messageDisplayOverridesSchema.optional(),
     model_aliases: modelDisplayAliasesSchema.optional(),
   }).default({
     operation_updates: "compact",

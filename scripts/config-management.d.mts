@@ -10,6 +10,9 @@ export type GatewaySettingActivation =
   | "reinstall-services";
 
 import type { ConfigActivationResult } from "./config-activation-result.mjs";
+import type { MessageDisplaySelector, MessageDisplayOverride, MessageDisplaySettings, MessageDisplaySource } from "../runtime/message-display-policy.mjs";
+export interface DisplayScopeState { id: string; selector: MessageDisplaySelector; writable: boolean; override: Pick<MessageDisplayOverride, "operation_updates" | "plan_updates" | "reasoning">; effective: MessageDisplaySettings; sources: Record<keyof MessageDisplaySettings, MessageDisplaySource> }
+export type DisplayScopeEdit = { selector: MessageDisplaySelector; field: "operation_updates"; action: "set"; value: "full" | "compact" | "hidden" } | { selector: MessageDisplaySelector; field: "plan_updates" | "reasoning"; action: "set"; value: boolean } | { selector: MessageDisplaySelector; field: "operation_updates" | "plan_updates" | "reasoning"; action: "inherit" };
 
 export class ConfigManagementError extends Error {
   readonly code: string;
@@ -24,6 +27,8 @@ export interface GatewaySettings {
     planUpdatesEnabled: boolean;
     reasoningEnabled: boolean;
     modelAliases: Record<string, string>;
+    scopes: DisplayScopeState[];
+    targetsStatus: "not-needed" | "missing" | "available" | "unavailable";
   };
   system: {
     approvalTimeoutSeconds: number;
@@ -81,6 +86,7 @@ export interface GatewaySettings {
 }
 
 export type GatewaySettingInput =
+  | { kind: "display.scope"; value: DisplayScopeEdit }
   | { kind: "channel.enabled"; channel: "telegram" | "feishu" | "weixin" | "qq"; value: boolean }
   | { kind: "display.operation-updates"; value: "full" | "compact" | "hidden" }
   | { kind: "display.plan-updates"; value: boolean }

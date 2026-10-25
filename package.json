@@ -70,6 +70,7 @@
     "scripts/config-activation-result.mjs",
     "scripts/config-advanced-menu.mjs",
     "scripts/config-display-menu.mjs",
+    "scripts/config-display-management.mjs",
     "scripts/config-management-error.mjs",
     "scripts/config-management.mjs",
     "scripts/config-metrics-management.mjs",

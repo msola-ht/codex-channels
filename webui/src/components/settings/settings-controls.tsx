@@ -24,6 +24,7 @@ import type { PendingSetting } from "@/lib/settings-management"
 import type { ManagementSettingMutationResponse } from "@/lib/types"
 import type { MessageKey, Translate } from "@/lib/i18n/messages"
 import { cn } from "cn"
+import { translateDisplayScopeSource } from "@/lib/i18n/translate"
 
 export const modelOperationDialogClassName = "w-[calc(100%-2rem)] max-w-2xl max-h-[85dvh] overflow-y-auto sm:max-w-2xl"
 export const modelOperationFormDialogClassName = "flex flex-col overflow-hidden"
@@ -125,6 +126,7 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
     >
       {pending !== null ? <>
           <p>{regeneratingToken ? t("settingsFields.regenerateTokenConfirmation") : t("settingsUi.change", { label: typeof pending.label === "string" ? pending.label : t(pending.label.key, pending.label.params), before: formatPreviewValue(pending.before, pending.kind, t), after: formatPreviewValue(pending.value, pending.kind, t) })}</p>
+          {pending.kind === "display.scope" && <><p>{t("displayScope.projection")}</p><p>{t("displayScope.notice")}</p></>}
           {pending.kind === "webui.token" && pending.intent === "set" ? <p>{t("settingsFields.setTokenConfirmation")}</p> : null}
           {pending.kind === "webui.token" && pending.intent === "clear" ? <p>{t("settingsFields.clearTokenConfirmation")}</p> : null}
           {pending.kind === "network.proxy" && pending.intent !== undefined ? <p>{t(pending.intent === "clear" ? "settingsFields.clearProxyConfirmation" : "settingsFields.setProxyConfirmation")}</p> : null}
@@ -192,6 +194,20 @@ function previewRecord(value: unknown): Record<string, unknown> | null {
 
 function formatPreviewValue(value: unknown, kind: string, t: Translate): string {
   const record = previewRecord(value)
+  if (kind === "display.scope" && record !== null) {
+    const selector = previewRecord(record.selector)
+    const override = previewRecord(record.override)
+    const effective = previewRecord(record.effective)
+    const sources = previewRecord(record.sources)
+    const scalar = (current: unknown) => current === undefined ? t("displayScope.inherit") : typeof current === "boolean" ? t(current ? "settingsFields.enabled" : "settingsFields.disabled") : current === "full" || current === "compact" || current === "hidden" ? t(`settingsFields.${current}`) : t("common.unknown")
+    const target = [selector?.surface, selector?.account_id, selector?.chat_kind === "direct" ? t("displayScope.direct") : selector?.chat_kind === "group" ? t("displayScope.group") : undefined, selector?.chat_id].filter(value => typeof value === "string").join(" / ")
+    const detail = (["operation_updates", "plan_updates", "reasoning"] as const).map(field => {
+      const key = field === "operation_updates" ? "operationUpdates" : field === "plan_updates" ? "planUpdatesEnabled" : "reasoningEnabled"
+      const source = sources?.[key]
+      return t("displayScope.fieldSummary", { field: t(field === "operation_updates" ? "settingsFields.operationUpdates" : field === "plan_updates" ? "settingsFields.planUpdates" : "settingsFields.reasoningStatus"), override: scalar(override?.[field]), effective: scalar(effective?.[key]), source: source === "global" || source === "surface" || source === "account" || source === "chat-kind" || source === "chat" ? translateDisplayScopeSource(t, source) : t("common.unknown") })
+    }).join(" · ")
+    return `${target} · ${detail}`
+  }
   if (kind === "system.model-traffic-mode") {
     const mode = record?.modelTrafficMode ?? value
     const label = mode === "production" ? t("capture.production") : mode === "debug" ? t("capture.debug") : mode === "custom" ? t("capture.custom") : t("common.unknown")

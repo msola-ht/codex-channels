@@ -12,6 +12,7 @@ import type { UseApiState } from "@/hooks/use-api"
 import type { GatewaySettingsController } from "@/lib/settings-management"
 import type { UpstreamUserAgentResponse } from "@/lib/types"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
+import { DisplayScopeSettings } from "@/components/settings/display-scope-settings"
 
 export function GatewaySettingsCard({ management, upstreamAgent, section = "general" }: {
   management: GatewaySettingsController
@@ -89,6 +90,7 @@ export function GatewaySettingsCard({ management, upstreamAgent, section = "gene
         {section === "general" && <ManagedSelect label={t("settingsFields.scheduledTasks")} value={String(managedSettings.automation.scheduledTasksEnabled)} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]]} disabled={disabled} onChange={(value) => void management.previewSetting("automation.scheduled-tasks", value === "true", { key: "settingsFields.scheduledTasks" })} />}
         {section === "data" && <ManagedSelect label={t("settingsFields.loggingLevel")} value={managedSettings.advanced.loggingLevel} options={[["fatal", "fatal"], ["error", "error"], ["warn", "warn"], ["info", "info"], ["debug", "debug"], ["trace", "trace"]]} disabled={disabled} onChange={(value) => void management.previewSetting("advanced.logging-level", value, { key: "settingsFields.loggingLevel" })} />}
       </FieldGroup>}
+      {section === "display" && <DisplayScopeSettings management={management} disabled={disabled} />}
 
       {section === "network" && <>
       <section className="flex flex-col gap-3">

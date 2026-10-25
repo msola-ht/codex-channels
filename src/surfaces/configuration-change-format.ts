@@ -140,6 +140,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "display.operation-updates": "操作过程显示",
     "display.plan-updates": "自动计划显示",
     "display.reasoning": "思考状态显示",
+    "display.overrides": "渠道与聊天显示覆盖",
     "scheduled-tasks.enabled": "Gateway 计划任务",
     "metrics.storage": "指标保留策略",
     "model-relay.policy": "模型 API 转发策略",

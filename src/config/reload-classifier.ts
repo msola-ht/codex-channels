@@ -107,6 +107,11 @@ function restartRequiredReasons(
       || displaySettingsAffectEnabledSurface(next)
       ? [
           [
+            configChange("display.overrides"),
+            JSON.stringify(current.messageDisplay.overrides ?? []),
+            JSON.stringify(next.messageDisplay.overrides ?? []),
+          ],
+          [
             configChange("display.operation-updates"),
             current.operationUpdateDisplay,
             next.operationUpdateDisplay,

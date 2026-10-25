@@ -23,6 +23,9 @@ import {
 import { assertPrivateConfigAccessSync } from "../../runtime/private-file.mjs";
 import { inspectWorkspaceDirectory } from "../../runtime/workspace-directory.mjs";
 
+export type { MessageDisplayTarget, MessageDisplaySettings, MessageDisplayConfiguration } from "../../runtime/message-display-policy.mjs";
+export { resolveMessageDisplaySettings, inspectMessageDisplayScope } from "../../runtime/message-display-policy.mjs";
+
 export {
   configChange,
   includesConfigChange,
@@ -41,6 +44,7 @@ export {
 } from "./reload-classifier.js";
 
 export interface GatewayConfig {
+  readonly messageDisplay: import("../../runtime/message-display-policy.mjs").MessageDisplayConfiguration;
   modelRelay?: import("../../runtime/model-relay-config.mjs").ModelRelayConfig;
   telegramEnabled: boolean;
   telegramBotToken: string;
@@ -323,6 +327,12 @@ function loadValidatedConfigDocument(
     ...(clientIdentity
       ? { codexClientIdentity: clientIdentity }
       : {}),
+    messageDisplay: {
+      operation_updates: raw.display.operation_updates,
+      plan_updates: raw.display.plan_updates,
+      reasoning: raw.display.reasoning,
+      ...(raw.display.overrides === undefined ? {} : { overrides: raw.display.overrides }),
+    },
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
     reasoningEnabled: raw.display.reasoning,

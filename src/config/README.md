@@ -9,6 +9,7 @@ Workspace 仅定义 `id`、`name` 和 `cwd`；执行权限由 App Server 原生�
 `follow_cli_version = true` 时通过共享 `codex-request-identity` 解析当前锁定版本；无标记或 false 时保留显式版本，读取不改写身份配置。
 `display.model_aliases` 保留于共享配置，供控制台统计查询按原始模型 ID 归组，不投影为 Gateway
 运行字段或注入 Surface。分组变化无需重启 Gateway，不改模型展示、目录、选择标识或请求模型 ID。
+`messageDisplay` 从严格校验后的 `display` 投影三个全局字段和可选 `overrides`；原有三个扁平运行字段保留并同源。公开导出共享显示目标、设置类型与解析函数；覆盖变化要求重启已启用的 Telegram、飞书或 QQ，不改 StateStore 或投递记录。覆盖字段缺失保持继承，普通读取与默认补齐不生成 `overrides`。
 其中 `codexTimezone` 保留已有 `codex.timezone` 配置，供渠道启动卡展示，不修改 Gateway 进程时区。
 `gatewayTimezone` 是解析后的网关时区：缺省使用 `codex.timezone`，`gateway.timezone = "system"`
 保留进程继承的系统时区，其他值为自定义 IANA 名称；有效网关时区或 `codexTimezone` 变化要求重启

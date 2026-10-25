@@ -75,6 +75,7 @@ export class QqTaskProgress {
   private closed = false;
 
   constructor(private readonly options: {
+    displaySettings?: import("../types.js").SurfaceMessageDisplaySettings;
     reasoningEnabled: boolean;
     planUpdatesEnabled: boolean;
     operationUpdates: OperationUpdateDisplay;
@@ -122,9 +123,10 @@ export class QqTaskProgress {
     const turn = event.type === "subagent.completed" ? undefined : this.ensureTurn(event);
     if (event.type !== "subagent.completed" && !turn) return;
     if (turn) turn.retry.observe(event, false);
-    if ((event.type === "turn.reasoning" && !this.options.reasoningEnabled)
-      || (event.type === "plan.updated" && !this.options.planUpdatesEnabled)
-      || (event.type === "operation.updated" && !shouldDisplayOperation(event.operation, this.options.operationUpdates))) return;
+    const settings = this.displaySettings(event.target);
+    if ((event.type === "turn.reasoning" && !settings.reasoningEnabled)
+      || (event.type === "plan.updated" && !settings.planUpdatesEnabled)
+      || (event.type === "operation.updated" && !shouldDisplayOperation(event.operation, settings.operationUpdates))) return;
     const key = presentationKey(event);
     if (event.type === "operation.updated" && this.completedOperations.has(key)) return;
     const existing = this.presentations.get(key);
@@ -145,7 +147,7 @@ export class QqTaskProgress {
     // Live snapshots still use current preferences. A stored terminal result must
     // render even when compact would hide this sleep/subagent operation.
     if (event.type === "operation.updated" && (event.operation.status === "running"
-      || (!retained && !shouldDisplayOperation(event.operation, this.options.operationUpdates)))) return undefined;
+      || (!retained && !shouldDisplayOperation(event.operation, this.displaySettings(event.target).operationUpdates)))) return undefined;
     if (isReliableProgress(event)) {
       const values = this.render(event);
       if (values.length === 0) return failedProgress;
@@ -311,11 +313,19 @@ export class QqTaskProgress {
       case "subagent.spawned": return [presentLifecycle(createSubagentStartedPresentation(event))];
       case "subagent.contacted": return [presentLifecycle(createSubagentContactedPresentation(event))];
       case "subagent.completed": return [presentLifecycle(createSubagentCompletedPresentation(event, this.options.debugEnabled))];
-      case "operation.updated": return [presentOperation(event.operation, this.options.operationUpdates)];
+      case "operation.updated": return [presentOperation(event.operation, this.displaySettings(event.target).operationUpdates)];
       case "turn.retry":
       case "plan.updated":
       case "turn.reasoning": return [];
     }
+  }
+
+  private displaySettings(target: ConversationTarget) {
+    return this.options.displaySettings?.(target) ?? {
+      operationUpdates: this.options.operationUpdates,
+      planUpdatesEnabled: this.options.planUpdatesEnabled,
+      reasoningEnabled: this.options.reasoningEnabled,
+    };
   }
 }
 

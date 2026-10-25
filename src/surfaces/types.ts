@@ -3,6 +3,7 @@ import type { ScheduledTaskConfirmation, SubmissionObserver } from "../applicati
 import type {
   ConfigChange,
   OperationUpdateDisplay,
+  MessageDisplaySettings,
 } from "../config/index.js";
 import type {
   ConversationTarget,
@@ -108,6 +109,9 @@ export interface SurfaceOutputPort {
 }
 
 export type { OperationUpdateDisplay };
+
+/** Resolve presentation only; the original business target and authorization remain unchanged. */
+export type SurfaceMessageDisplaySettings = (target: ConversationTarget) => MessageDisplaySettings;
 
 export interface SurfaceAdapter {
   readonly surface: SurfaceId;

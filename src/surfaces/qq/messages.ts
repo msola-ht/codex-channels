@@ -52,6 +52,7 @@ export interface QqMessageOptions {
   logger: Logger;
   debugEnabled?: boolean;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  displaySettings?: import("../types.js").SurfaceMessageDisplaySettings;
   reasoningEnabled?: boolean;
   planUpdatesEnabled?: boolean;
   images?: Pick<QqImageStore, "prepare">;
@@ -102,6 +103,7 @@ export class QqMessages implements SurfaceOutputPort {
 
   constructor(private readonly options: QqMessageOptions, private readonly client: QqProtocolClient) {
     this.progress = new QqTaskProgress({ reasoningEnabled: options.reasoningEnabled ?? false,
+      ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
       planUpdatesEnabled: options.planUpdatesEnabled ?? true, operationUpdates: options.operationUpdateDisplay ?? "compact",
       debugEnabled: options.debugEnabled ?? false });
     this.sources = new QqTaskSources({ accountId: options.appId, isCurrent: (scope, threadId) => this.current(scope, threadId) });
@@ -1090,11 +1092,20 @@ export class QqMessages implements SurfaceOutputPort {
       status.modelPending, status.effortPending, status.fastModePending, status.executionContext]);
   }
   private supported(event: OutputEvent): boolean {
-    if (event.type === "turn.reasoning" && this.options.reasoningEnabled !== true) return false;
-    if (event.type === "plan.updated" && this.options.planUpdatesEnabled === false) return false;
+    if (!this.supportsDelivery(event)) return false;
+    const settings = this.displaySettings(event.target);
+    if (event.type === "turn.reasoning" && !settings.reasoningEnabled) return false;
+    if (event.type === "plan.updated" && !settings.planUpdatesEnabled) return false;
     if (event.type === "operation.updated" && isQqTaskProgressEvent(event)
-      && !shouldDisplayOperation(event.operation, this.options.operationUpdateDisplay ?? "compact")) return false;
-    return this.supportsDelivery(event);
+      && !shouldDisplayOperation(event.operation, settings.operationUpdates)) return false;
+    return true;
+  }
+  private displaySettings(target: ConversationTarget) {
+    return this.options.displaySettings?.(target) ?? {
+      operationUpdates: this.options.operationUpdateDisplay ?? "compact",
+      planUpdatesEnabled: this.options.planUpdatesEnabled ?? true,
+      reasoningEnabled: this.options.reasoningEnabled ?? false,
+    };
   }
   private supportsDelivery(event: OutputEvent): boolean {
     return event.target.surface === "qq" && event.target.accountId === this.options.appId

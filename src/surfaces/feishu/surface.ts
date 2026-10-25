@@ -124,6 +124,7 @@ export interface FeishuSurfaceOptions {
   webSocketAgent?: unknown;
   disableEnvironmentProxy?: boolean;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  displaySettings?: import("../types.js").SurfaceMessageDisplaySettings;
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
   debugEnabled?: boolean;
@@ -228,6 +229,7 @@ export class FeishuSurface implements SurfaceAdapter {
       messagePort,
       options.logger,
       {
+        ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
         ...(options.operationUpdateDisplay !== undefined
           ? { operationUpdateDisplay: options.operationUpdateDisplay }
           : {}),

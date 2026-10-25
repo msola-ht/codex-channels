@@ -111,6 +111,10 @@ export async function routeGatewaySettingsManagement({
       webuiLogger.warn({ module: "settings", event: "settings.readback_failed", err: error }, "Gateway 设置已写入，但新修订读取失败");
     }
     let auditStatus = "recorded";
+    if (input.kind === "display.scope" && current !== null) {
+      const saved = current.display.scopes.find(scope => scope.id === result.value.id);
+      if (JSON.stringify(saved?.override ?? {}) !== JSON.stringify(result.value.override)) current = null;
+    }
     try {
       state.audit.record({
         sessionId: principalId,

@@ -6,6 +6,7 @@ import type { Logger } from "pino";
 
 import {
   isDebugLogLevel,
+  resolveMessageDisplaySettings,
   type GatewayConfig,
 } from "../config/index.js";
 import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
@@ -128,7 +129,7 @@ export async function loadBuiltInSurfacePlugins(
 
 function createQqModule(
   options: SurfacePluginContext,
-  { QqSurface, renderQqStartupNotification }: Awaited<ReturnType<typeof loadQqSurface>>,
+  { QqSurface, renderQqStartupNotification, qqConversationRecipient }: Awaited<ReturnType<typeof loadQqSurface>>,
 ): SurfaceRuntimeModule {
   const config = options.config.qq;
   if (!config) throw new Error("QQ 运行配置不存在");
@@ -145,9 +146,14 @@ function createQqModule(
     service: options.service, commands: options.commands, actors: options.bindings,
     autoCompactPercent: options.autoCompactPercent,
     debugEnabled: isDebugLogLevel(options.config.logLevel),
-    operationUpdateDisplay: options.config.operationUpdateDisplay,
-    planUpdatesEnabled: options.config.planUpdatesEnabled,
-    reasoningEnabled: options.config.reasoningEnabled,
+    displaySettings: target => {
+      const recipient = qqConversationRecipient(target.conversationId);
+      return resolveMessageDisplaySettings(options.config.messageDisplay, {
+        surface: "qq", accountId: config.appId,
+        chatKind: typeof recipient === "string" ? "direct" : "group",
+        chatId: typeof recipient === "string" ? recipient : recipient.groupOpenId,
+      });
+    },
     configurationNotification: { recipients: () => [...notificationRecipients] },
     startupNotification: {
       recipients: () => [...notificationRecipients],
@@ -325,9 +331,9 @@ function createFeishuModule(
       "feishu",
     ),
     disableEnvironmentProxy: true,
-    operationUpdateDisplay: options.config.operationUpdateDisplay,
-    planUpdatesEnabled: options.config.planUpdatesEnabled,
-    reasoningEnabled: options.config.reasoningEnabled,
+    displaySettings: target => resolveMessageDisplaySettings(options.config.messageDisplay, {
+      surface: "feishu", accountId: config.appId, chatKind: "direct", chatId: target.conversationId,
+    }),
     debugEnabled: isDebugLogLevel(options.config.logLevel),
     autoCompactPercent: options.autoCompactPercent,
     ...(openApiAgent
@@ -434,7 +440,7 @@ function createTelegramModule(
     config.telegramAllowedUserIds,
     telegramDefaultAccountId,
   );
-  const adapter = createTelegramSurface({
+  const adapter: ReturnType<typeof createTelegramSurface> = createTelegramSurface({
     token: config.telegramBotToken,
     ...(proxyUrl === undefined ? {} : { proxyUrl }),
     service: options.service,
@@ -448,9 +454,17 @@ function createTelegramModule(
     actorRegistry: bindings,
     onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),
     finalMessageFormat: config.telegramMessageFormat,
-    operationUpdateDisplay: config.operationUpdateDisplay,
-    planUpdatesEnabled: config.planUpdatesEnabled,
-    reasoningEnabled: config.reasoningEnabled,
+    displaySettings: target => {
+      if (adapter.isPrivateConversation(target)) return resolveMessageDisplaySettings(config.messageDisplay, {
+          surface: "telegram", accountId: telegramDefaultAccountId,
+          chatKind: "direct", chatId: target.conversationId,
+        });
+      logger.debug({ surface: "telegram", accountId: target.accountId, conversationId: target.conversationId,
+        reason: "private-chat-unconfirmed" }, "Telegram 可选过程展示等待私聊地址确认");
+      // Unknown historical targets cannot bypass a direct/chat override. Retained
+      // terminal output still renders through the independent durable contract.
+      return { operationUpdates: "hidden", planUpdatesEnabled: false, reasoningEnabled: false };
+    },
     debugEnabled: isDebugLogLevel(config.logLevel),
     autoCompactPercent: options.autoCompactPercent,
     gatewayVersion: options.gatewayVersion,

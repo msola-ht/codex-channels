@@ -86,6 +86,17 @@ operation_updates = "compact"
 plan_updates = true
 # 是否在渠道显示“思考中”状态卡；默认 false，不显示。
 reasoning = false
+# 可选范围覆盖，普通读取不会生成。通过 codexc config 的“范围显示覆盖”或 WebUI 管理。
+# 全局 → 渠道 → 账号 → 账号聊天类型 → 指定聊天，字段缺失继承，false/hidden 保留。
+# surface 当前仅支持 telegram、feishu、qq；chat_kind=group 仅 QQ。
+# account_id 使用 Gateway 账号标识：Telegram 为 default，飞书/QQ 为 AppID。
+# [[display.overrides]]
+# surface = "qq"
+# account_id = "123456"
+# chat_kind = "group"
+# chat_id = "物理群OpenID"
+# operation_updates = "hidden"
+# plan_updates = false
 
 [debug]
 # Codex 与 Relay 共用的调用详情开关，写入 Gateway 数据目录下的 traffic，默认关闭；

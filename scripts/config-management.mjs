@@ -17,6 +17,7 @@ import {
 import { readCodexProxySnapshot, renderCodexProxySettings, validateCodexProxyValue, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { validateModelDisplayAliases } from "../runtime/model-display-name.mjs";
+import { applyDisplayScopeSetting, projectDisplayScopes, readDisplayTargets } from "./config-display-management.mjs";
 import { ConfigManagementError, invalidSetting } from "./config-management-error.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import {
@@ -57,6 +58,7 @@ export function loadGatewaySettings(environment = process.env) {
   const network = snapshot.proxy.settings;
   const telegram = table(document.telegram);
   const workspaces = workspaceOptions(document);
+  const displayTargets = readDisplayTargets(document, configPath);
   return {
     configPath,
     revision: snapshot.revision,
@@ -65,6 +67,8 @@ export function loadGatewaySettings(environment = process.env) {
       planUpdatesEnabled: display.plan_updates,
       reasoningEnabled: display.reasoning,
       modelAliases: display.model_aliases ?? {},
+      scopes: projectDisplayScopes(document, display, displayTargets.selectors),
+      targetsStatus: displayTargets.status,
     },
     system: {
       approvalTimeoutSeconds: approval.timeout_seconds,
@@ -207,7 +211,7 @@ function updateGatewaySettingValidated(
     };
   }
   const originalDocument = structuredClone(document);
-  const result = applySetting(document, input);
+  const result = applySetting(document, input, configPath);
   validateGatewayConfigStructureDocument(document);
   if (JSON.stringify(document) === JSON.stringify(originalDocument)) {
     return {
@@ -304,7 +308,7 @@ function displaySettingActivation(document) {
     : "reload";
 }
 
-function applySetting(document, input) {
+function applySetting(document, input, configPath) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "设置输入必须是对象");
   }
@@ -312,6 +316,10 @@ function applySetting(document, input) {
     ?? applyMetricsSetting(document, input);
   if (delegated !== undefined) return delegated;
   switch (input.kind) {
+    case "display.scope": {
+      const result = applyDisplayScopeSetting(document, input, configPath);
+      return { ...result, activation: result.activation === "none" ? "none" : displaySettingActivation(document) };
+    }
     case "channel.enabled": {
       const channel = enumValue(input.channel, ["telegram", "feishu", "weixin", "qq"], "channel", "通讯渠道");
       const value = booleanValue(input.value, "value", "渠道启用状态");

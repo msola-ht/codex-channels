@@ -1,4 +1,5 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
+import type { SurfaceMessageDisplaySettings } from "../types.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
@@ -91,6 +92,7 @@ interface FeishuReasoningCard {
 
 
 export interface FeishuOutboxOptions {
+  displaySettings?: SurfaceMessageDisplaySettings;
   deliverIdleReleased?: (
     event: Extract<OutputEvent, { type: "conversation.idle.released" }>,
     sendCard: (card: FeishuCardDocument) => Promise<string>,
@@ -215,7 +217,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   retains(event: OutputEvent): boolean {
-    return isPersistentOutput(event, this.options.operationUpdateDisplay ?? "full");
+    return isPersistentOutput(event, this.displaySettings(event.target.conversationId).operationUpdates);
+  }
+
+  private displaySettings(chatId: string) {
+    return this.options.displaySettings?.({ surface: "feishu", accountId: this.accountId, conversationId: chatId }) ?? {
+      operationUpdates: this.options.operationUpdateDisplay ?? "full",
+      planUpdatesEnabled: this.options.planUpdatesEnabled ?? false,
+      reasoningEnabled: this.options.reasoningEnabled ?? true,
+    };
   }
 
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
@@ -255,7 +265,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "turn.reasoning") {
-      if (this.options.reasoningEnabled === false) {
+      if (!this.displaySettings(event.target.conversationId).reasoningEnabled) {
         return;
       }
       if (this.hasActiveOperation(event.threadId, event.turnId)) {
@@ -342,7 +352,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       // Generated images already have their independent delivery above.
       if (!shouldDisplayOperation(
         event.operation,
-        this.options.operationUpdateDisplay ?? "full",
+        this.displaySettings(event.target.conversationId).operationUpdates,
       ) && (DeliveryReceipt.current()?.transient !== false || imagePath !== undefined)) {
         return;
       }
@@ -353,7 +363,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         flushStreamBeforeOutput();
         const markdown = formatFeishuOperation(
           event.operation,
-          this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+          this.displaySettings(event.target.conversationId).operationUpdates === "compact" ? "compact" : "full",
         );
         this.delivery.enqueue(
           event.target.conversationId,
@@ -377,7 +387,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         if (!isComputerUseOperation(event.operation) && event.operation.kind !== "imageGeneration") return;
       }
       flushStreamBeforeOutput();
-      const markdown = formatFeishuOperation(event.operation, this.options.operationUpdateDisplay === "compact" ? "compact" : "full");
+      const markdown = formatFeishuOperation(event.operation, this.displaySettings(event.target.conversationId).operationUpdates === "compact" ? "compact" : "full");
       if (isComputerUseOperation(event.operation)) {
         const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
         const previous = this.computerUseCards.get(key);
@@ -403,7 +413,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "plan.updated") {
-      if (!this.options.planUpdatesEnabled) {
+      if (!this.displaySettings(event.target.conversationId).planUpdatesEnabled) {
         return;
       }
       const key = turnKey(event.threadId, event.turnId);
@@ -547,7 +557,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ): Promise<void> {
     const card = renderFeishuComputerUseCard(
       event.operation,
-      this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+      this.displaySettings(event.target.conversationId).operationUpdates === "compact" ? "compact" : "full",
     );
     if (state.messageId === undefined) {
       state.messageId = await this.messagePort.sendCard(event.target.conversationId, card, signal);
@@ -963,7 +973,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ): void {
     const markdown = formatFeishuOperationSummary(
       summary,
-      this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+      this.displaySettings(chatId).operationUpdates === "compact" ? "compact" : "full",
     );
     this.delivery.enqueue(
       chatId,

@@ -5,6 +5,15 @@ import type { DisplayLanguage } from "../format"
  * 由 `Messages` 类型检查在构建期保证两种语言键一致。
  */
 const zh = {
+  displayScope: {
+    title: "范围显示覆盖", scope: "目标范围", inherit: "继承上级", global: "全局", surface: "渠道", account: "账号", chatKind: "聊天类型", chat: "指定聊天",
+    unavailable: "已确认聊天目标不可读，请检查状态库版本、结构或访问权限。渠道与账号默认仍可编辑。",
+    projection: "有效值按已保存配置计算，非当前运行状态；保存后按提示激活。",
+    fieldSummary: "{field}：本层 {override}；有效 {effective}；来源 {source}",
+    direct: "私聊", group: "群聊", readonly: "目标已停用或移除；仅可恢复继承。", empty: "没有可编辑的过程显示目标。", effective: "有效值：{value}；来源：{source}",
+    hint: "按全局、渠道、账号、聊天类型、指定聊天逐字段继承。微信不支持这三种过程显示；Telegram 与飞书仅支持私聊默认，精确聊天需有已确认目标。",
+    notice: "保存前创建私有配置备份；新增覆盖需新版 Gateway。保存后重启 Gateway；已入箱 pending 仍可能投递，重启恢复后不保证原有详细或紧凑版式。回退前核对后续修改，勿直接覆盖配置。",
+  },
   modelAddition: {
     title: "添加模型",
     duplicateId: "此模型 ID 已存在，请填写新的 ID。",
@@ -1928,6 +1937,15 @@ const zh = {
 export type Messages = typeof zh
 
 const en: Messages = {
+  displayScope: {
+    title: "Scoped display overrides", scope: "Target scope", inherit: "Inherit parent", global: "Global", surface: "Channel", account: "Account", chatKind: "Chat kind", chat: "Exact chat",
+    unavailable: "Confirmed chat targets could not be read. Check the state database version, structure, and permissions. Channel and account defaults remain editable.",
+    projection: "Effective values are calculated from saved configuration, not current runtime state. Activate changes after saving as instructed.",
+    fieldSummary: "{field}: stored {override}; effective {effective}; source {source}",
+    direct: "Direct", group: "Group", readonly: "Target disabled or removed; only inheritance can be restored.", empty: "No editable progress display targets.", effective: "Effective: {value}; source: {source}",
+    hint: "Each field inherits from global, channel, account, chat kind, then exact chat. WeChat does not support these progress events. Telegram and Feishu offer direct-chat defaults; exact chats require a confirmed target.",
+    notice: "Saving creates a private configuration backup; overrides require a newer Gateway. Restart Gateway after saving. Existing pending deliveries may still be sent; restored deliveries may use a different detailed or compact layout. Check subsequent edits before rolling back; do not overwrite the configuration directly.",
+  },
   modelAddition: {
     title: "Add model",
     duplicateId: "This model ID already exists. Enter a new ID.",

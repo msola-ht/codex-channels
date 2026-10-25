@@ -17,6 +17,7 @@ export {
 } from "./task-sources.js";
 export { QqSurface, type CreateQqSurfaceOptions } from "./surface.js";
 export { renderQqStartupNotification } from "./lifecycle.js";
+export { qqConversationRecipient } from "./addressing.js";
 export {
   QqBotMenuError, parseQqBotMenuSnapshot, planQqCodexBotMenu,
   sameQqBotMenuSnapshot, sameQqBotMenuContent, matchesQqBotMenuPlan,

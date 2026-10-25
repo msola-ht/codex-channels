@@ -64,6 +64,7 @@ export { canPreserveWeixinHookReviewText } from "./weixin/markdown-sanitize.js";
 export { canPreserveQqHookReviewText } from "./qq/hook-review.js";
 export type {
   OperationUpdateDisplay,
+  SurfaceMessageDisplaySettings,
   SurfaceAdapter,
   SurfaceAsyncAnswerSubmission,
   SurfaceScheduledTaskSubmissionContext,

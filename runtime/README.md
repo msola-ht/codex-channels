@@ -53,6 +53,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 
 - `model-name-comparison.mjs` / `model-name-comparison.d.mts`：CLI 与 WebUI 共用的请求/响应模型名称对照；区分一致、不一致和信息不足，不推断模型身份或别名。
 - `model-display-name.mjs` / `model-display-name.d.mts`：配置、CLI、WebUI 与统计查询共用的模型统计分组校验；缺省为空，原始 ID 精确匹配仅用于查询归组，不修改模型展示、上游请求、路由、目录或存储的指标键。
+- `message-display-policy.mjs` / `message-display-policy.d.mts`：三个现有过程显示字段的严格可选覆盖 Schema、五层逐字段继承与来源投影；目标身份独立于 Conversation，管理与 Gateway 共用同一纯解析，不读取绑定或保存数据。
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。私有目录锁绑定进程与唯一 owner 标记，活进程不按年龄抢锁，未知锁保留并拒绝操作；操作完成但解锁失败以 `ConfigEventQueueLockReleaseError` 携带结果，调用方不得将其当成未入队或未确认。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。

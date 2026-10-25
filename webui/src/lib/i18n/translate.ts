@@ -2,6 +2,11 @@ import type { DisplayLanguage } from "@/lib/format"
 import { messages } from "@/lib/i18n/messages"
 import type { MessageKey, Translate, TranslateParams } from "@/lib/i18n/messages"
 
+const displayScopeSourceKeys = { global: "displayScope.global", surface: "displayScope.surface", account: "displayScope.account", "chat-kind": "displayScope.chatKind", chat: "displayScope.chat" } as const
+export function translateDisplayScopeSource(t: Translate, source: keyof typeof displayScopeSourceKeys): string {
+  return t(displayScopeSourceKeys[source])
+}
+
 function lookup(language: DisplayLanguage, key: MessageKey): string | null {
   let node: unknown = messages[language]
   for (const segment of key.split(".")) {

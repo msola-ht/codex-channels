@@ -1,4 +1,5 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
+import type { SurfaceMessageDisplaySettings } from "../types.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
@@ -106,6 +107,7 @@ interface TelegramReasoningMessage {
 }
 
 export interface TelegramOutboxOptions {
+  displaySettings?: SurfaceMessageDisplaySettings;
   deliverIdleReleased?: (
     event: Extract<OutputEvent, { type: "conversation.idle.released" }>,
     send: (keyboard?: InlineKeyboardMarkup) => Promise<number | undefined>,
@@ -264,7 +266,15 @@ export class TelegramOutbox {
     if (event.type === "operation.updated" && this.approvalOperations.isSuppressed(
       this.operationKey(this.turnKey(event.threadId, event.turnId), event.operation.itemId),
     )) return false;
-    return isPersistentOutput(event, this.options.operationUpdateDisplay ?? "full");
+    return isPersistentOutput(event, this.displaySettings(event.target.conversationId).operationUpdates);
+  }
+
+  private displaySettings(chatId: string) {
+    return this.options.displaySettings?.({ surface: "telegram", accountId: this.options.accountId ?? telegramDefaultAccountId, conversationId: chatId }) ?? {
+      operationUpdates: this.options.operationUpdateDisplay ?? "full",
+      planUpdatesEnabled: this.options.planUpdatesEnabled ?? false,
+      reasoningEnabled: this.options.reasoningEnabled ?? true,
+    };
   }
 
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
@@ -319,7 +329,7 @@ export class TelegramOutbox {
         );
         return;
       case "turn.reasoning":
-        if (this.options.reasoningEnabled === false) {
+        if (!this.displaySettings(chatId).reasoningEnabled) {
           return;
         }
         if (this.hasActiveOperation(event.threadId, event.turnId)) {
@@ -420,7 +430,7 @@ export class TelegramOutbox {
         // have their own delivery above; keep their optional operation log policy.
         if (!shouldDisplayOperation(
           event.operation,
-          this.options.operationUpdateDisplay ?? "full",
+          this.displaySettings(chatId).operationUpdates,
         ) && (DeliveryReceipt.current()?.transient !== false || imagePath !== undefined)) {
           return;
         }
@@ -485,7 +495,7 @@ export class TelegramOutbox {
         return;
       }
       case "plan.updated": {
-        if (!this.options.planUpdatesEnabled) {
+        if (!this.displaySettings(chatId).planUpdatesEnabled) {
           return;
         }
         this.enqueue(chatId, async (signal) => {
@@ -1080,7 +1090,7 @@ export class TelegramOutbox {
   ): void {
     const text = formatTelegramOperationSummary(
       summary,
-      this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+      this.displaySettings(chatId).operationUpdates === "compact" ? "compact" : "full",
     );
     this.enqueue(
       chatId,
@@ -1106,7 +1116,7 @@ export class TelegramOutbox {
       return;
     }
     const { chatId, turnKey } = state;
-    const display = this.options.operationUpdateDisplay === "compact"
+    const display = this.displaySettings(chatId).operationUpdates === "compact"
       ? "compact"
       : "full";
     const records = state.order
