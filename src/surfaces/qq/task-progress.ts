@@ -378,7 +378,7 @@ function escapeLifecycleField(field: LifecyclePresentationField): LifecyclePrese
 
 function present(text: string): Presentation {
   const [title = "", ...lines] = text.split("\n");
-  return { text, markdown: [`## ${escapeLifecycleLiteral(title)}`, ...lines.map(escapeLifecycleLiteral)].join("\n") };
+  return { text, markdown: [`**${escapeLifecycleLiteral(title)}**`, ...lines.map(escapeLifecycleLiteral)].join("\n") };
 }
 
 function formatOperation(operation: OperationUpdate, display: OperationUpdateDisplay): string {

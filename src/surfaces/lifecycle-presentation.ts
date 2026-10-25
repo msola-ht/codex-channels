@@ -951,7 +951,9 @@ function formatStructuredField(field: LifecyclePresentationField, escapeLiterals
 }
 
 export function escapeLifecycleLiteral(value: string): string {
-  return value.replace(/[\\`*_~[\]()<>#+\-.!|{}]/gu, "\\$&");
+  // Parentheses are literal without an unescaped link label. Escaping them
+  // creates \(…\) math delimiters in Markdown clients such as QQ.
+  return value.replace(/[\\`*_~[\]<>#+\-.!|{}]/gu, "\\$&");
 }
 
 function formatField(field: LifecyclePresentationField): string {

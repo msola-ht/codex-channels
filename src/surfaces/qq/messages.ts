@@ -242,7 +242,9 @@ export class QqMessages implements SurfaceOutputPort {
     if (source?.kind === "notification") return;
     if (source?.generation === this.sources.generation && event.target.conversationId.startsWith("c2c:")) {
       if (event.type === "turn.started") this.streaming.started(source);
-      if ((event.type === "text.delta" || event.type === "text.completed") && event.phase !== "commentary") this.streaming.observe(event, source);
+      // Completion may supply a phase that was absent on the original deltas.
+      // Always reconcile the existing Item stream, including late commentary.
+      if (event.type === "text.completed" || (event.type === "text.delta" && event.phase !== "commentary")) this.streaming.observe(event, source);
     }
     if (source && event.type === "turn.completed") this.sourceRegistry(source).terminal(source);
   }
@@ -337,7 +339,7 @@ export class QqMessages implements SurfaceOutputPort {
       catch (error) { checkpointFailed = true; throw error; }
     };
     try {
-      if (event.type === "text.completed" && event.phase !== "commentary") {
+      if (event.type === "text.completed") {
         const result = await this.streaming.finish(event, signal, record, authorized);
         if (result.kind === "complete") return;
         if (result.kind === "continue") { text = result.text; markdownStart = result.markdownStart; }
@@ -349,7 +351,7 @@ export class QqMessages implements SurfaceOutputPort {
         preferMarkdown: true,
         ...(completion ? { markdownContent: completion.markdown } : {}),
         ...(markdownStart !== undefined ? { markdownStart } : {}),
-        allowResultFile: event.type === "text.completed" && event.phase !== "commentary",
+        allowResultFile: event.type === "text.completed" && (event.phase !== "commentary" || markdownStart !== undefined),
         beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
         reserve: parts => this.budget.reserve(qqConversationRecipient(event.target.conversationId), parts,
           { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: event.type === "turn.completed",
