@@ -620,7 +620,7 @@ export class QqMessages implements SurfaceOutputPort {
         }
         if (command.name === "whoami") {
           const identity = message.actorId.length > 8 ? `${message.actorId.slice(0, 4)}…${message.actorId.slice(-4)}` : "已隐藏";
-          await this.reply(message, `# QQ 身份\n- App ID：${this.options.appId}\n- OpenID（脱敏）：${identity}\n\nOpenID 是当前应用下的身份标识，不是 QQ 号码。`, () => this.allowed(target, message.actorId));
+          await this.reply(message, `**QQ 身份**\n- App ID：${this.options.appId}\n- OpenID（脱敏）：${identity}\n\nOpenID 是当前应用下的身份标识，不是 QQ 号码。`, () => this.allowed(target, message.actorId));
           return;
         }
         if (command.name === "help" || command.name === "revert" || command.name === "hooks") {
@@ -705,7 +705,7 @@ export class QqMessages implements SurfaceOutputPort {
         }
         const text = result.kind === "outcome" && result.outcome.type === "thread.compaction-requested"
           ? "已请求压缩当前会话。QQ 暂不单独推送压缩进度；此回执不表示压缩已完成。"
-          : result.kind === "collaboration-mode" ? `# 协作模式：${result.state.mode === "plan" ? "Plan" : "Default"}${result.state.pending ? "（下一次 Turn 生效）" : ""}\n下一条普通消息按此模式处理；再次发送 /plan 可切换模式。`
+          : result.kind === "collaboration-mode" ? `**协作模式：${result.state.mode === "plan" ? "Plan" : "Default"}${result.state.pending ? "（下一次 Turn 生效）" : ""}**\n下一条普通消息按此模式处理；再次发送 /plan 可切换模式。`
           : result.kind === "outcome" && result.outcome.type === "goal.cleared" ? "已清除当前会话目标。清除不等于停止正在运行的任务；如需停止，请使用 /stop。"
           : result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
           : renderConversationCommandResult(result);
@@ -809,9 +809,9 @@ export class QqMessages implements SurfaceOutputPort {
       }
     } catch (error) {
       if (stage === "command") commandTicket?.cancel();
-      const { errorType, errorCode, errorReason } = surfaceErrorMetadata(error);
+      const { errorType, errorCode, errorReason, selectionFields } = surfaceErrorMetadata(error);
       this.options.logger.warn({ reason: error instanceof UserFacingError ? error.code : "operation-unconfirmed",
-        stage, emergencyStop: stop, errorType, errorCode, errorReason }, "QQ 操作未确认");
+        stage, emergencyStop: stop, errorType, errorCode, errorReason, selectionFields }, "QQ 操作未确认");
       await this.reply(message, error instanceof UserFacingError ? formatSurfaceUserFacingError(error, "QQ")
         : commandTicket ? "任务提交未确认；请用 /status 或在本机核对，勿直接重复提交。"
         : command?.name === "schedule" ? "计划任务操作未确认；请用 /schedule 或 /schedule runs <任务 ID> 核对，勿直接重复提交。"

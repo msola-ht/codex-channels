@@ -7,6 +7,7 @@ import { QQ_TEXT_PART_BYTES, QQ_MENU_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT
   type QqProtocolClient, type QqTextMessage, type QqTextSendContext, type QqCommandKeyboard } from "./protocol.js";
 import { planQqBodyMarkdown, planQqMessageMarkdown } from "./message-markdown.js";
 import { qqRecipientKey, type QqRecipient } from "./addressing.js";
+import { layoutQqKeyboard } from "./command-menu.js";
 
 const MAX_PARTS = 8;
 const PLAN_TIMEOUT_MS = 45_000;
@@ -147,11 +148,13 @@ export class QqTextOutbox {
             active.throwIfAborted();
             guard();
             const controls = index === parts.length - 1 ? context.interactionControls : undefined;
+            const keyboard = controls?.keyboard ?? context.keyboard;
             const partMarkdown = markdownParts?.[index] ?? markdown;
             const send = () => file
               ? this.client.sendResultFile({ recipient: part.recipient, content: part.content }, { signal: active, beforeSend: guard })
               : partMarkdown || controls
-                ? this.client.sendMarkdown(part, { signal: active, beforeSend: guard, ...(bodyMarkdown ? { body: true as const } : {}) }, controls?.keyboard ?? context.keyboard)
+                ? this.client.sendMarkdown(part, { signal: active, beforeSend: guard, ...(bodyMarkdown ? { body: true as const } : {}) },
+                  keyboard ? layoutQqKeyboard(keyboard) : undefined)
               : this.client.sendText(part, { signal: active, beforeSend: guard });
             await checkpointDelivery(file ? "qq-result-file" : controls ? "qq-interaction-controls" : partMarkdown
               ? parts.length === 1 ? "qq-markdown" : `qq-markdown:${index + 1}/${parts.length}`

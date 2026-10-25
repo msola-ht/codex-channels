@@ -176,7 +176,7 @@ export function renderFeishuOutput(
         ),
       );
     case "turn.reasoning":
-      return renderFeishuReasoningPresentation(
+      return renderFeishuLifecyclePresentation(
         createTurnReasoningPresentation(
           event.background ? event.threadId : undefined,
           event.elapsedMs,
@@ -273,15 +273,6 @@ function renderFeishuLifecyclePresentation(
   return footer === undefined
     ? rendered
     : `${rendered}\n\n---\n**${footer.label}：** ${footer.value}`;
-}
-
-function renderFeishuReasoningPresentation(
-  presentation: LifecyclePresentation,
-): string {
-  const rendered = renderFeishuLifecyclePresentation(presentation);
-  // Match operation cards: reasoning is an inline status, not a section
-  // heading, so use the same bold title scale as "运行命令".
-  return rendered.replace(/^## (.+)$/mu, "**$1**");
 }
 
 function threadStatusLabel(status: string): string {

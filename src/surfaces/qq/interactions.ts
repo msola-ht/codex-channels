@@ -217,7 +217,7 @@ function render(pending: Pending, token: string): { content: string; controls: {
       add(`network${index}`, `网络规则 ${index + 1}`);
     });
     const literalMarkdown = qqLiteralMarkdown(content);
-    if (literalMarkdown) markdownContent = `## 审批请求\n\n${literalMarkdown}`;
+    if (literalMarkdown) markdownContent = `**审批请求**\n\n${literalMarkdown}`;
   } else if (request.type === "user-input") {
     const question = request.questions[pending.question]!;
     const number = `问题 ${pending.question + 1}/${request.questions.length}`;
@@ -226,7 +226,7 @@ function render(pending: Pending, token: string): { content: string; controls: {
     content = `${request.title}\n\n${heading}\n\n${question.question}`;
     content += question.options.map((option, index) => `\n\n${index + 1}. ${option}`).join("");
     if (question.secret) content += "\n请勿在 QQ 聊天记录中发送密钥、Token 或其他敏感凭据。";
-    markdownContent = `## ${request.title}\n\n### ${heading}\n\n${question.question}`
+    markdownContent = `**${request.title}**\n\n**${heading}**\n\n${question.question}`
       + question.options.map((option, index) => `\n\n${index + 1}. ${option}`).join("")
       + (question.secret ? "\n\n请勿在 QQ 聊天记录中发送密钥、Token 或其他敏感凭据。" : "");
     instruction = question.options.length === 0
@@ -241,7 +241,7 @@ function render(pending: Pending, token: string): { content: string; controls: {
     if (request.mode === "tool-approval") {
       content += `\n工具：${request.toolApproval?.toolTitle ?? "未命名工具"}\n${request.toolApproval?.detail ?? ""}`;
       const literalMarkdown = qqLiteralMarkdown(content);
-      if (literalMarkdown) markdownContent = `## 工具审批\n\n${literalMarkdown}`;
+      if (literalMarkdown) markdownContent = `**工具审批**\n\n${literalMarkdown}`;
       add("once", "允许一次");
       if (request.toolApproval?.allowSession) add("session", "本会话允许");
       if (request.toolApproval?.allowAlways) add("always", "始终允许");

@@ -7,6 +7,7 @@ import { formatQqLiteralDetails } from "./interactions.js";
 import { qqMenuButton, type QqMenuButton } from "./command-menu.js";
 import type { QqMenuPanel } from "./command-menu-controller.js";
 import { planText } from "./outbox.js";
+import { QQ_BUTTON_LABEL_CHARACTERS } from "./protocol.js";
 
 type Command = "limits" | "release";
 interface Context {
@@ -163,7 +164,7 @@ export class QqPrivilegedManagementMenu {
         for (const [index, credit] of value.credits.entries()) {
           if (!/^\S{1,256}$/u.test(credit.id)) throw new UserFacingError("reset-credit.failed", "券 ID 无法通过支持的命令格式选择，请使用本机入口。", { reason: "reset_unavailable" });
           const label = [...`${index + 1} ${credit.title ?? "用量重置券"}`.replace(/[\p{Cc}\p{Cf}]/gu, " ")];
-          buttons.push(this.button(context, label.length > 10 ? `${label.slice(0, 9).join("")}…` : label.join(""),
+          buttons.push(this.button(context, label.length > QQ_BUTTON_LABEL_CHARACTERS ? `${label.slice(0, QQ_BUTTON_LABEL_CHARACTERS - 1).join("")}…` : label.join(""),
             { kind: "command", command: "limits", input: `reset use ${credit.id}` }, "limits"));
         }
         if (value.page > 1) buttons.push(this.button(context, "上一页", { kind: "command", command: "limits", input: `reset ${value.page - 1}` }, "limits"));

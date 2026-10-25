@@ -15,6 +15,8 @@ export type QqProtocolFailure =
 export const QQ_TEXT_PART_BYTES = 2000;
 /** Active Markdown plus keyboard: 6000-byte sample confirmed on platform and client. */
 export const QQ_MENU_PART_BYTES = 6000;
+/** Local display/resource budget, not a documented platform maximum. */
+export const QQ_BUTTON_LABEL_CHARACTERS = 32;
 /** Local layout budget aligned with Feishu cards; not a QQ platform limit. */
 export const QQ_BODY_MARKDOWN_PART_CHARACTERS = 5_000;
 /** A Unicode scalar occupies at most four UTF-8 bytes. */
@@ -557,7 +559,7 @@ function commandKeyboard(value: unknown): QqCommandKeyboard {
       if (!exact(button, ["id", "render_data", "action"]) || typeof button.id !== "string"
         || !/^[a-z0-9_-]{1,32}$/u.test(button.id) || ids.has(button.id)
         || !exact(button.render_data, record(button.action) && button.action.type === 0 ? ["label", "style", "visited_label"] : ["label", "style"]) || typeof button.render_data.label !== "string"
-        || !button.render_data.label.trim() || [...button.render_data.label].length > 10
+        || !button.render_data.label.trim() || [...button.render_data.label].length > QQ_BUTTON_LABEL_CHARACTERS
         || !wellFormed(button.render_data.label) || /\p{Cc}/u.test(button.render_data.label)
         || (button.render_data.style !== 0 && button.render_data.style !== 1)
         || !record(button.action) || !exact(button.action.permission, ["type"]) || button.action.permission.type !== 2
@@ -566,7 +568,7 @@ function commandKeyboard(value: unknown): QqCommandKeyboard {
       ids.add(button.id);
       if (button.action.type === 0) {
         if (!exact(button.action, ["type", "permission", "data"]) || typeof button.render_data.visited_label !== "string"
-          || !button.render_data.visited_label.trim() || [...button.render_data.visited_label].length > 10
+          || !button.render_data.visited_label.trim() || [...button.render_data.visited_label].length > QQ_BUTTON_LABEL_CHARACTERS
           || !wellFormed(button.render_data.visited_label) || /[\p{Cc}\p{Cf}]/u.test(button.render_data.visited_label)
           || /[\p{Cc}\p{Cf}]/u.test(button.action.data)) return fail();
         let url: URL;

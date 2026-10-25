@@ -9,7 +9,9 @@ export function qqBodyMarkdownPrefix(text: string, finished = false): string {
     const character = text[index];
     // QQ command/mention tags, HTML and entity-encoded syntax are not body capabilities.
     // Apply even inside code: QQ does not document that code fences disable its tags.
-    if (character === "<") return text.slice(0, index);
+    // A literal left arrow cannot open an HTML/QQ tag. Hold a lone '<'
+    // across deltas until the following '-' establishes that distinction.
+    if (character === "<" && text[index + 1] !== "-") return text.slice(0, index);
     if (character === "&" && (/[#a-z]/iu.test(text[index + 1] ?? "")
       || (!finished && index + 1 === text.length))) return text.slice(0, index);
     if (character === "!") {

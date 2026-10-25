@@ -11,7 +11,7 @@ import type { QqMenuPanel } from "./command-menu-controller.js";
 import { formatQqLiteralDetails } from "./interactions.js";
 import { qqLiteralMarkdown } from "./message-markdown.js";
 import { planText } from "./outbox.js";
-import { QqProtocolError } from "./protocol.js";
+import { QQ_BUTTON_LABEL_CHARACTERS, QqProtocolError } from "./protocol.js";
 
 type ScheduledTaskOperationContext = NonNullable<Parameters<ConversationCommandExecutor["execute"]>[7]>;
 
@@ -197,7 +197,7 @@ export class QqScheduleMenu {
       for (const run of visibleRetries) buttons.push(this.command(context, `重试 ${run.selector}`, `retry ${run.runId}`));
       buttons.push(...navigation);
       // The remaining uncertain Run IDs remain available in the full literal details.
-      const detail = ["## 当前计划任务", "", `- 名称：${task.name}`, `- ID：${task.taskId}`,
+      const detail = ["**当前计划任务**", "", `- 名称：${task.name}`, `- ID：${task.taskId}`,
         `- 状态：${formatScheduledTaskStatusLabel(task.status)}`, `- 计划：${formatSchedule(task.schedule, task.timezone)}`,
         `- 下次运行：${formatScheduledAt(task.nextRunAt)}`, `- 任务预览：${task.promptPreview}`, "",
         formatConversationScheduledRuns(result, "snapshot", "buttons")].join("\n");
@@ -212,7 +212,7 @@ export class QqScheduleMenu {
 
 function shortLabel(value: string): string {
   const characters = [...value.replace(/[\p{Cc}\p{Cf}]/gu, " ")];
-  return characters.length > 10 ? `${characters.slice(0, 9).join("")}…` : characters.join("");
+  return characters.length > QQ_BUTTON_LABEL_CHARACTERS ? `${characters.slice(0, QQ_BUTTON_LABEL_CHARACTERS - 1).join("")}…` : characters.join("");
 }
 
 function expired(): UserFacingError {

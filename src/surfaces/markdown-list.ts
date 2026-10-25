@@ -2,6 +2,7 @@ import { advanceMarkdownFence, type MarkdownFence } from "./markdown-fence.js";
 
 export function toStructuredMarkdownList(text: string): string {
   const output: string[] = [];
+  const singleLine = text.split("\n").filter(line => line.trim()).length === 1;
   let firstContent = true;
   let fence: MarkdownFence | undefined;
   for (const rawLine of text.split("\n")) {
@@ -20,13 +21,17 @@ export function toStructuredMarkdownList(text: string): string {
     if (firstContent) {
       firstContent = false;
       if (/^#{1,6}\s+/u.test(trimmed)) {
-        output.push(trimmed);
+        output.push(`**${trimmed.replace(/^#{1,6}\s+/u, "")}**`);
         continue;
       }
-      output.push(`## ${stripTrailingColon(trimmed)}`);
+      output.push(singleLine || /^\*\*.+\*\*$/u.test(trimmed) ? trimmed : `**${stripTrailingColon(trimmed)}**`);
       continue;
     }
     if (/^#{1,6}\s+/u.test(trimmed)) {
+      output.push(`**${trimmed.replace(/^#{1,6}\s+/u, "")}**`);
+      continue;
+    }
+    if (/^\*\*.+\*\*$/u.test(trimmed)) {
       output.push(trimmed);
       continue;
     }
@@ -39,7 +44,7 @@ export function toStructuredMarkdownList(text: string): string {
       continue;
     }
     if (trimmed.endsWith("：")) {
-      output.push(`### ${stripTrailingColon(trimmed)}`);
+      output.push(`**${stripTrailingColon(trimmed)}**`);
       continue;
     }
     output.push(`- ${trimmed}`);
