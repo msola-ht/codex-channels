@@ -155,9 +155,10 @@ export class QqTextOutbox {
             const keyboard = controls?.keyboard ?? context.keyboard;
             const partMarkdown = markdownParts?.[index] ?? markdown;
             // Planning may clone metadata into every part. Only the first
-            // actual bubble carries the native reference, regardless of format.
+            // actual group bubble carries the native reference, regardless of
+            // format. C2C replies never combine native references with content.
             const outgoing = { ...part };
-            if (index > 0) delete outgoing.referenceMessageId;
+            if (typeof outgoing.recipient === "string" || index > 0) delete outgoing.referenceMessageId;
             const send = () => file
               ? this.client.sendResultFile({ recipient: part.recipient, content: part.content }, { signal: active, beforeSend: guard })
               : partMarkdown || controls
