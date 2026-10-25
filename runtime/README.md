@@ -300,6 +300,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `queue-events.mjs` / `queue-events.d.mts`：投递箱、Relay、账户快照与请求指标共用的有界私有变化通知流；独立订阅连接、首次失效通知、100 毫秒合并、心跳、取消与背压清理，只传变化类型。异步端点／ACL 准备和连接共用 20 秒期限，连接后改用独立 35 秒空闲期限；关闭等待准备任务结束，取消后不建立迟到连接。
 - `metrics-events.mjs` / `metrics-events.d.mts`：按配置文件路径派生相互独立的请求指标与账户快照通知端点，供 Gateway 写入器与 WebUI 订阅共用；不携带指标或账户数据。
 - `delivery-control.mjs` / `delivery-control.d.mts`：投递箱私有在线管理与变化通知 IPC（`watchDeliveryChanges`）；Unix 使用系统 `/tmp` 规范目录下的当前用户私有短目录，以投递目录规范路径的 SHA-256 确定端点，连接前校验父目录及 Socket 所有者和权限；Windows 继续使用私有描述文件及认证管道。最多 50 条修订绑定的重试/忽略请求，限制连接数、报文大小和等待时间；只输出受控结果，已发送请求的响应丢失不允许离线回退或自动重试。
+- `qq-group-pairing.mjs` / `qq-group-pairing.d.mts`：Setup 与运行中 QQ Surface 共享的受控群配对私有 IPC。配置目录规范路径与 AppID 隔离端点，Unix 使用当前用户私有短 Socket，Windows 复用私有描述文件与认证管道；每连接限 8 KiB、3 秒，最多八连接。独立随机所有者令牌与一次性码只留内存，同一时刻一个五分钟单调期限会话；仅捕获发起所在秒之后、六十秒内且不在未来的已验证群 @ 指令，所有 `/qq-pair` 保留指令均消费，匹配后第二人不能覆写。结果可重复读取至取消或到期；客户端取消使用独立清理期限，清理未确认明确失败，失联不重发 begin、不抢占旧会话，不建立 QQ 连接或发送平台消息，不持久化或记录身份、正文及令牌。
 - `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供 v2 私有账户 IPC，支持 Provider 刷新及 OpenAI 重置券列表、预览、取消和消费；
   WebUI 提交精确 Provider ID、券 ID 或短期操作 ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
   公开错误文案按受控原因生成，不透传内部 message；调用方取消或连接结束时取消该等待，

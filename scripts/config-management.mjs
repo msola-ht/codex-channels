@@ -6,6 +6,7 @@ import {
   GatewayConfigConflictError,
   GatewayConfigValidationError,
   GatewayConfigWriteCommittedError,
+  isTelegramEnabled,
   parseGatewayConfig,
   validateCodexConfigDocument,
   validateDebugConfigDocument,
@@ -287,13 +288,13 @@ export function validateNetworkProxyValue(field, value) {
   return field === "no_proxy" ? validateNoProxy(normalized) : validateCodexProxyValue(field, normalized);
 }
 
-/** 已配置 bot_token 的 Telegram 才会创建 Surface；只留空表时没有消费者。 */
+/** 与运行时共用启用判定；停用时保留凭据但没有 Surface 消费者。 */
 function telegramSurfaceEnabled(document) {
-  return stringValue(table(document.telegram).bot_token) !== "";
+  return isTelegramEnabled(document.telegram);
 }
 
 /**
- * Telegram（已配置 bot_token）、已启用的飞书与 QQ 消费过程显示设置，与运行时重载判定
+ * 已启用的 Telegram、飞书与 QQ 消费过程显示设置，与运行时重载判定
  * （`classifyConfigReload`）保持一致：只启用微信或未配置渠道时改这些设置没有渠道受影响，
  * 无需重建 Gateway 连接，只需重新读取配置。
  */
@@ -311,6 +312,19 @@ function applySetting(document, input) {
     ?? applyMetricsSetting(document, input);
   if (delegated !== undefined) return delegated;
   switch (input.kind) {
+    case "channel.enabled": {
+      const channel = enumValue(input.channel, ["telegram", "feishu", "weixin", "qq"], "channel", "通讯渠道");
+      const value = booleanValue(input.value, "value", "渠道启用状态");
+      const state = gatewayChannelStates(document).find(entry => entry.id === channel);
+      if (!state) throw invalid("channel", "channel-not-configured", "请先通过 Setup 完成该渠道接入配置");
+      if (state.enabled === value) return changed(value, "none");
+      if (!value && !gatewayChannelStates(document).some(entry => entry.id !== channel && entry.enabled)) {
+        throw invalid("value", "last-enabled-channel", "Gateway 至少需要启用一个通讯渠道；暂停全部渠道请执行 codexc stop gateway");
+      }
+      document[channel] = { ...table(document[channel]), enabled: value };
+      // 调用方统一校验变更后的凭据和授权名单，绝不补充授权。
+      return changed(value, "restart-gateway");
+    }
     case "display.operation-updates": {
       const value = enumValue(input.value, operationUpdateValues, "value", "操作详情显示");
       document.display = { ...table(document.display), operation_updates: value };

@@ -191,6 +191,7 @@ class TelegramSetupSession {
     const allowedUserIds = [...this.#preview.allowedUserIds];
     currentDocument.telegram = {
       ...this.#existing,
+      enabled: true,
       bot_token: this.#token,
       allowed_user_ids: allowedUserIds.map(Number),
     };

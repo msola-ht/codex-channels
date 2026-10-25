@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 
 import {
+  isTelegramEnabled,
   materializeGatewayConfigDefaults,
   parseGatewayConfig,
   validateCodexConfigDocument,
@@ -268,7 +269,7 @@ function loadValidatedConfigDocument(
     throw new ConfigurationError(error instanceof Error ? error.message : String(error));
   }
   return {
-    telegramEnabled: Boolean(raw.telegram?.bot_token?.trim()),
+    telegramEnabled: isTelegramEnabled(raw.telegram),
     telegramBotToken: raw.telegram?.bot_token ?? "",
     telegramAllowedUserIds: new Set(raw.telegram?.allowed_user_ids ?? []),
     ...(proxyUrl ? { telegramProxyUrl: proxyUrl } : {}),

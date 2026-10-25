@@ -32,9 +32,9 @@ Gateway，以刷新进程时区或渠道启动卡配置。
 允许名单，也不处理未知字段或不受支持的版本。运行语义校验失败、文件发生并发修改或原子写回失败时
 不得修改原配置，并以配置错误失败关闭。
 
-Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺失；`bot_token` 缺失或空白时运行配置
-将其视为未启用，不创建 Telegram Surface，也不要求允许用户列表。Token 非空时
-`allowed_user_ids` 必须至少包含一个正整数。飞书和微信继续以各自的 `enabled` 字段决定是否启用。
+Telegram、飞书、微信和 QQ 至少需要启用一个。Telegram 表可缺失；可选 `enabled = false` 停用并保留凭据，
+不创建 Telegram Surface；未设置 `enabled` 时按非空 Token 判断启用。显式启用必须有非空 Token，
+启用时 `allowed_user_ids` 必须至少包含一个正整数。各渠道开关改变均要求重建 Gateway 连接。
 
 共享代理由 Codex Home 的 `.env` 统一保存，供 Telegram、飞书、微信和模型统计代理共用，按 `.env`、标准代理环境变量、受支持系统代理的
 顺序合并；系统自动发现当前只支持 macOS 和 GNOME，Windows 不读取 WinINET/WinHTTP，需使用 `.env`

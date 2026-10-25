@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
+import { dirname } from "node:path";
+import { pairQqGroup } from "../runtime/qq-group-pairing.mjs";
 
 import {
   GatewayConfigWriteCommittedError,
@@ -20,6 +22,7 @@ export async function runQqSetup({
   prompter,
   registerApplication = registerQqApplication,
   renderQRCode = renderTerminalQRCode,
+  pairGroup = pairQqGroup,
 } = {}) {
   const prompt = prompter ?? createChannelPrompter(input, output);
   try {
@@ -28,7 +31,7 @@ export async function runQqSetup({
     const mode = await prompt.select("选择 QQ 操作", [
       { value: "scan", label: "手机 QQ 扫码连接（推荐）", hint: "获取应用凭据和本次扫码用户 OpenID" },
       { value: "manual", label: "手工填写应用凭据和 OpenID" },
-      { value: "groups", label: "配置群及允许成员的公开输出授权", hint: "手工填写当前应用群与成员 OpenID；不调用 QQ API" },
+      { value: "groups", label: "配置群及允许成员的公开输出授权", hint: "群内配对识别身份，或手工填写 OpenID" },
       { value: "bot-menu", label: "配置机器人常驻 Codex 菜单", hint: "复用已有凭据；全应用单聊生效，不改本机配置" },
       { value: "back", label: "返回" },
     ]);
@@ -56,7 +59,7 @@ export async function runQqSetup({
       appSecret = document.qq.app_secret;
       allowedUserOpenids = document.qq.allowed_user_openids;
       enabled = document.qq.enabled;
-      const edited = await editGroup(prompt, output, document);
+      const edited = await editGroup(prompt, output, document, { input, configPath, pairGroup });
       if (!edited) return undefined;
       groups = edited.groups;
     } else if (mode === "scan") {
@@ -204,22 +207,63 @@ function writeGroupPreview(output, groups) {
   }
 }
 
-async function editGroup(prompt, output, document) {
-  output.write("群与成员 OpenID 必须来自当前应用；OpenID 不是 QQ 号码。扫码身份不能证明群或群成员身份，此操作不联网、不发送消息。\n");
+async function editGroup(prompt, output, document, { input, configPath, pairGroup }) {
+  output.write("群与成员 OpenID 必须来自当前应用，不能用 QQ 号码或单聊扫码身份代替。配对复用已运行的 Gateway 收取群 @消息，不另建机器人连接；识别身份不会自动授权或向群回复。\n");
   const groups = structuredClone(document.qq.groups ?? []);
   writeGroupPreview(output, groups);
   const action = await prompt.select("选择群授权操作", [
+    { value: "pair", label: "在群里 @机器人配对（推荐）" },
     { value: "save", label: "添加或替换一个群的完整成员名单" },
     ...(groups.length ? [{ value: "remove", label: "移除一个群的全部授权" }] : []),
     { value: "back", label: "返回" },
   ]);
   if (action === "back") return undefined;
+  if (action === "pair") {
+    if (document.qq.enabled !== true) throw new Error("请先启用 QQ 并启动 Gateway，再进行群配对。");
+    output.write("请先将当前应用的机器人加入目标群。配对有效期五分钟，按 Esc/Ctrl+C 取消；只识别发送配对码的这一位成员。\n");
+    let found;
+    try {
+      found = await withQqSetupCancellation(input, signal => pairGroup({
+        configDirectory: dirname(configPath), appId: document.qq.app_id, signal,
+        onCode: code => output.write(`\n请由要授权的成员在目标群 @机器人，并发送：\n/qq-pair ${code}\n\n等待群消息；无需手工查找 OpenID。\n`),
+      }));
+    } catch (error) {
+      if (error instanceof ChannelSetupCancelled) throw error;
+      const reasons = {
+        busy: "已有群配对正在进行，请在原终端完成或取消；遗留配对最多五分钟后过期。",
+        expired: "群配对已过期，请重新开始并使用新配对码。",
+        cancelled: "群配对等待已取消或超时，请重新开始。",
+        closed: "Gateway 群配对入口已关闭，请确认 QQ 已启用并重新启动 Gateway。",
+        unavailable: "无法连接群配对入口，请确认同一配置的 QQ 已启用，并更新、启动 Gateway 后重试。",
+        cleanup_unconfirmed: "群配对清理结果未确认，未保存授权；请等待最多五分钟使旧码过期后重试。",
+        unauthorized: "群配对已失效，请重新开始。",
+        invalid_request: "群配对请求不兼容，请更新 CLI 与 Gateway 后重试。",
+        invalid_response: "群配对响应无法确认，请更新 CLI 与 Gateway 后重试。",
+      };
+      throw new Error(Object.hasOwn(reasons, error?.code) ? reasons[error.code] : "群配对未完成，未保存授权；请检查 Gateway 连接状态后重试。", { cause: error });
+    }
+    const previous = groups.find(group => group.group_openid === found.groupOpenId);
+    const members = [...(previous?.allowed_member_openids ?? [])];
+    if (!members.includes(found.memberOpenId)) members.push(found.memberOpenId);
+    const group = { group_openid: found.groupOpenId, allowed_member_openids: members, allow_public_output: true };
+    validateGatewayConfigStructureDocument({ ...document, qq: { ...document.qq, groups: [group] } });
+    output.write(`已识别群 ${JSON.stringify(found.groupOpenId)}，发起成员 ${JSON.stringify(found.memberOpenId)}。\n`);
+    output.write("配对只证明该成员在此群发送了本次口令，不证明群主或管理员身份；已有群成员授权保留。\n");
+    writeGroupPreview(output, [group]);
+    if (!await prompt.confirm("确认这是目标群及成员，并同意任务、审批、问题、文件和结果向全群公开？", false)) {
+      output.write("未确认群授权，未保存任何配置。\n");
+      return undefined;
+    }
+    const index = groups.findIndex(entry => entry.group_openid === group.group_openid);
+    if (index < 0) groups.push(group); else groups[index] = group;
+    return { groups };
+  }
   if (action === "remove") {
     const groupOpenId = await prompt.select("选择要移除授权的群", groups.map(group => ({
       value: group.group_openid, label: JSON.stringify(group.group_openid),
     })));
     if (!groups.some(group => group.group_openid === groupOpenId)) throw new Error("所选 QQ 群不存在");
-    output.write(`将移除群 ${JSON.stringify(groupOpenId)} 的全部授权，保留历史绑定及用户数据。\n`);
+    output.write(`将移除群 ${JSON.stringify(groupOpenId)} 的全部授权；重启时解除撤权成员的 Gateway 绑定，保留工作区选择及 App Server 会话。\n`);
     return { groups: groups.filter(group => group.group_openid !== groupOpenId) };
   }
   if (action !== "save") throw new Error("不支持的 QQ 群操作");
@@ -262,8 +306,29 @@ async function editGroup(prompt, output, document) {
 }
 
 async function scanQq({ input, output, registerApplication, renderQRCode }) {
-  const controller = new AbortController();
   let renderError;
+  try { return await withQqSetupCancellation(input, async (signal, cancel) => {
+    const result = await registerApplication({
+      signal,
+      onQRCodeReady: url => {
+        signal.throwIfAborted();
+        output.write("\n请使用手机 QQ 扫描二维码，并在手机上完成连接：\n\n");
+        try { renderQRCode(url, output); }
+        catch (error) { renderError = error; cancel(); }
+      },
+      onQrExpired: () => output.write("二维码已过期，正在获取新的二维码。\n"),
+    });
+    signal.throwIfAborted();
+    return result;
+  }); } catch (error) {
+    if (error?.code === "shutdown-failed") throw error;
+    if (renderError) throw renderError;
+    throw error;
+  }
+}
+
+async function withQqSetupCancellation(input, run) {
+  const controller = new AbortController();
   const cancel = () => controller.abort();
   const wasRaw = input.isRaw === true;
   const wasPaused = input.isPaused?.() === true;
@@ -278,21 +343,11 @@ async function scanQq({ input, output, registerApplication, renderQRCode }) {
       input.on("data", onData);
       input.resume();
     }
-    const result = await registerApplication({
-      signal: controller.signal,
-      onQRCodeReady: url => {
-        controller.signal.throwIfAborted();
-        output.write("\n请使用手机 QQ 扫描二维码，并在手机上完成连接：\n\n");
-        try { renderQRCode(url, output); }
-        catch (error) { renderError = error; controller.abort(); }
-      },
-      onQrExpired: () => output.write("二维码已过期，正在获取新的二维码。\n"),
-    });
+    const result = await run(controller.signal, cancel);
     controller.signal.throwIfAborted();
     return result;
   } catch (error) {
-    if (error?.code === "shutdown-failed") throw error;
-    if (renderError) throw renderError;
+    if (error?.code === "shutdown-failed" || error?.code === "cleanup_unconfirmed") throw error;
     if (controller.signal.aborted) throw new ChannelSetupCancelled();
     throw error;
   } finally {

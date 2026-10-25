@@ -236,13 +236,22 @@ function containsControlCharacter(value) {
   return false;
 }
 
+export function isTelegramEnabled(telegram) {
+  return telegram?.enabled !== false && typeof telegram?.bot_token === "string" && telegram.bot_token.trim().length > 0;
+}
+
 const telegramSchema = z.strictObject({
+  enabled: z.boolean().optional(),
   bot_token: z.string().optional(),
   allowed_user_ids: z.array(z.number().int().positive()).optional(),
   proxy_url: z.string().optional(),
   message_format: z.enum(["html", "rich"]).default("html"),
 }).superRefine((value, context) => {
+  if (value.enabled === false) return;
   if (!value.bot_token?.trim()) {
+    if (value.enabled === true) context.addIssue({
+      code: "custom", path: ["bot_token"], message: "Telegram 启用时必须配置 bot_token",
+    });
     return;
   }
   if (!value.allowed_user_ids?.length) {
@@ -362,7 +371,7 @@ const gatewayConfigStructureSchema = z.strictObject({
 
 const gatewayDocumentSchema = gatewayConfigStructureSchema.superRefine((value, context) => {
   if (
-    !value.telegram?.bot_token?.trim()
+    !isTelegramEnabled(value.telegram)
     && value.feishu?.enabled !== true
     && value.weixin?.enabled !== true
     && value.qq?.enabled !== true

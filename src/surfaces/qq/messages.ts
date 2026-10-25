@@ -41,6 +41,7 @@ import { qqConversationActor, qqConversationRecipient } from "./addressing.js";
 import { QqTaskProgress, isQqTaskProgressEvent, type QqTaskProgressEvent } from "./task-progress.js";
 
 export interface QqMessageOptions {
+  groupPairing?: { accept(input: { groupOpenId: string; memberOpenId: string; content: string; sentAtMs: number }): boolean };
   appId: string;
   access: SurfaceAccessPolicy;
   service: Pick<ConversationTurnUseCases, "submit" | "touchActivity" | "prepareAttachmentSubmission"> & Pick<ConversationSessionUseCases, "selectedWorkspaceId" | "listWorkspaces" | "status">;
@@ -484,7 +485,18 @@ export class QqMessages implements SurfaceOutputPort {
       if (parsed.kind === "rejected") this.options.logger.warn({ reason: parsed.reason, field: parsed.field }, "QQ 非普通文字事件未处理");
       return;
     }
-    this.admit(parsed.message);
+    // Pairing is local operator discovery only, never conversation permission.
+    // Reserve the command even outside an active pairing to prevent replay as a task.
+    const message = parsed.message;
+    if (!message.conversationId.startsWith("c2c:") && /^\/qq-pair(?:\s|$)/u.test(message.content.trim())) {
+      const recipient = qqConversationRecipient(message.conversationId);
+      if (typeof recipient !== "string" && !message.images?.length && !message.file && !message.media && message.quotedText === undefined) {
+        this.options.groupPairing?.accept({ groupOpenId: recipient.groupOpenId, memberOpenId: message.actorId,
+          content: message.content.trim(), sentAtMs: message.sentAtMs });
+      }
+      return;
+    }
+    this.admit(message);
   }
 
   private admit(message: QqMessageInput): void {

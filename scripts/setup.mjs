@@ -17,6 +17,7 @@ export async function runSetup({
   telegramSetup = async (options) => (await import("./telegram-setup.mjs")).runTelegramSetup(options),
   weixinSetup = async (options) => (await import("./weixin-setup.mjs")).runWeixinSetup(options),
   qqSetup = async (options) => (await import("./qq-setup.mjs")).runQqSetup(options),
+  channelSettingsSetup = async (options) => (await import("./channel-settings-setup.mjs")).runChannelSettingsSetup(options),
   skillSetup = async (options) => (await import("./skill-setup.mjs")).runSkillSetup(options),
   openCodeGoSetup = async (options) => (await import("./opencode-go-setup.mjs")).runOpenCodeGoSetup(options),
   customPrimarySetup = async (options) => (await import("./primary-provider-cli.mjs")).runCustomPrimaryProviderMenu(options),
@@ -104,6 +105,7 @@ export async function runSetup({
             telegramSetup,
             weixinSetup,
             qqSetup,
+            channelSettingsSetup,
           });
           if (isBackResult(result)) continue;
           const enriched = enrichSetupResult(result);
@@ -348,12 +350,18 @@ async function runChannelSetup({
   telegramSetup,
   weixinSetup,
   qqSetup,
+  channelSettingsSetup,
 }) {
   const channel = await prompts.select({
     message: "通讯渠道",
     showInstructions: false,
     initialValue: selection.channel,
     options: [
+      {
+        value: "channel-settings",
+        label: "启用／停用渠道",
+        hint: "保留接入配置，单独切换渠道开关",
+      },
       {
         value: "telegram",
         label: "Telegram",
@@ -372,7 +380,7 @@ async function runChannelSetup({
       {
         value: "qq",
         label: "QQ",
-        hint: "基础连接与用户授权（消息层尚未接入）",
+        hint: "扫码接入、单聊与群聊授权",
       },
       {
         value: "back",
@@ -385,6 +393,9 @@ async function runChannelSetup({
     return { action: "back" };
   }
   switch (channel) {
+    case "channel-settings":
+      selection.channel = channel;
+      return channelSettingsSetup({ input, output });
     case "telegram":
       selection.channel = channel;
       return telegramSetup({ input, output });

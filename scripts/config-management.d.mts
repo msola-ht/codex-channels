@@ -79,6 +79,7 @@ export interface GatewaySettings {
 }
 
 export type GatewaySettingInput =
+  | { kind: "channel.enabled"; channel: "telegram" | "feishu" | "weixin" | "qq"; value: boolean }
   | { kind: "display.operation-updates"; value: "full" | "compact" | "hidden" }
   | { kind: "display.plan-updates"; value: boolean }
   | { kind: "display.reasoning"; value: boolean }

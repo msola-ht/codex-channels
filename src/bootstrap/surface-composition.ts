@@ -10,6 +10,7 @@ import {
 } from "../config/index.js";
 import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
 import { securePrivateDirectorySync } from "../../runtime/private-file.mjs";
+import { QqGroupPairingServer } from "../../runtime/qq-group-pairing.mjs";
 import {
   type ConversationTarget,
 } from "../conversation-core/index.js";
@@ -139,6 +140,7 @@ function createQqModule(
   let notificationRecipients = new Set(config.allowedUserOpenIds);
   const adapter = new QqSurface({
     appId: config.appId, appSecret: config.appSecret, access,
+    createGroupPairing: () => new QqGroupPairingServer(dirname(options.config.credentialsDirectory), config.appId),
     uploadsDirectory: join(dirname(options.config.stateDatabasePath), "uploads"),
     service: options.service, commands: options.commands, actors: options.bindings,
     autoCompactPercent: options.autoCompactPercent,

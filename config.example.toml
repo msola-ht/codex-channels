@@ -2,7 +2,8 @@ version = 1
 default_workspace = "main"
 
 [telegram]
-# 不使用 Telegram 时可删除本表，或将 bot_token 留空并把 allowed_user_ids 设为空数组。
+# 可在 Setup 中独立停用并保留凭据；未设置 enabled 时按非空 Token 判断启用。
+enabled = true
 bot_token = "你的_Bot_Token"
 allowed_user_ids = [123456789]
 message_format = "html"
@@ -21,7 +22,7 @@ enabled = false
 # allowed_user_ids = ["不透明用户@im.wechat"]
 
 [qq]
-# QQ 可通过 codexc setup 扫码或手工配置；群授权由独立的手工配置入口管理。
+# QQ 可通过 codexc setup 扫码或手工配置；群授权可配对识别身份或手工填写。
 # 空单聊允许名单不会授权单聊用户；用户 OpenID 必须来自同一 QQ 应用。
 enabled = false
 # app_id = "1234567890"

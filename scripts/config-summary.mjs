@@ -1,5 +1,5 @@
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
-import { validateDebugConfigDocument, validateGatewayConfigStructureDocument } from "../runtime/gateway-config.mjs";
+import { isTelegramEnabled, validateDebugConfigDocument, validateGatewayConfigStructureDocument } from "../runtime/gateway-config.mjs";
 import { projectWebuiSettings } from "./config-webui-management.mjs";
 import { projectMetricsSettings } from "./config-metrics-management.mjs";
 
@@ -80,7 +80,7 @@ export function gatewayChannelStates(document) {
   const channels = [];
   const telegram = table(document.telegram);
   if (stringValue(telegram.bot_token)) {
-    channels.push({ id: "telegram", displayName: "Telegram", configured: true, enabled: true });
+    channels.push({ id: "telegram", displayName: "Telegram", configured: true, enabled: isTelegramEnabled(telegram) });
   }
   const feishu = table(document.feishu);
   if (feishu.enabled === true || configuredFeishu(feishu)) {

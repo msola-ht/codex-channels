@@ -146,6 +146,7 @@
   QQ 在创建渠道、恢复订阅前按当前 App 的精确单聊及群/成员策略复核已知 Actor；撤权或无法确认 Actor 的
   Conversation 复用共享 `retainActors` 原子解除前台/后台绑定，保留 Workspace 选择及 App Server Thread。
   已授权单聊与群成员、其他 App 和其他渠道的绑定不受影响；重新授权后普通输入按既有强制新建标记处理。
+  QQ 群配对服务使用配置目录与 App 隔离的私有 IPC，经窄端口注入 Surface；Surface 持有启停，Runtime 仅接收已解析的群身份与配对指令，不操作 Application 或保存配置。Setup 完整确认后复用原子配置写入，配对本身不授予任务权限。
   组合根同时向 Surface 上下文提供官方主路由的鉴权文件可用性，非官方主路由返回未知；该值只用于
   上线通知和失效降级提示，不替代 App Server 的认证判断，也不改变 Thread 的 Provider 绑定。
 - `proxy-fetch.ts`：向 Bootstrap 组合代码转发 Runtime 共享的代理 Fetch 接口；代理选择与

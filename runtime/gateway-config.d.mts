@@ -1,5 +1,7 @@
 import type { TomlTable } from "smol-toml";
 
+export function isTelegramEnabled(telegram: { enabled?: boolean; bot_token?: string } | undefined): boolean;
+
 export interface QqGroupConfig {
   group_openid: string;
   allowed_member_openids: string[];
@@ -24,6 +26,7 @@ export interface GatewayConfigDocument {
   version: 1;
   default_workspace: string;
   telegram?: {
+    enabled?: boolean;
     bot_token?: string;
     allowed_user_ids?: number[];
     proxy_url?: string;

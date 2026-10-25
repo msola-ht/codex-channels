@@ -30,6 +30,7 @@ import {
 } from "../runtime/app-server-runtime.mjs";
 import {
   readGatewayConfig,
+  isTelegramEnabled,
   validateGatewayConfigStructureDocument,
 } from "../runtime/gateway-config.mjs";
 import {
@@ -178,7 +179,8 @@ if (document) {
 
   setSection("通讯渠道");
   const tokenConfigured = Boolean(stringValue(telegram.bot_token));
-  const channelEnabled = tokenConfigured || feishu.enabled === true || weixin.enabled === true || qq.enabled === true;
+  const telegramEnabled = isTelegramEnabled(telegram);
+  const channelEnabled = telegramEnabled || feishu.enabled === true || weixin.enabled === true || qq.enabled === true;
   record("渠道启用", channelEnabled, channelEnabled
     ? "至少一个通讯渠道已配置启用"
     : "尚未配置通讯渠道，Gateway 暂不能启动；继续检查工作区及其他独立项目",
@@ -200,7 +202,7 @@ if (document) {
     note("QQ", "未配置");
   }
   const allowedUsers = validAllowedUsers(telegram.allowed_user_ids);
-  if (tokenConfigured) {
+  if (telegramEnabled) {
     record("Telegram Token", true, "已配置（内容已隐藏）");
     record(
       "Telegram 用户",
@@ -208,7 +210,7 @@ if (document) {
       allowedUsers ? "允许列表有效" : "telegram.allowed_user_ids 未配置或格式无效",
     );
   } else {
-    note("Telegram", "未配置");
+    note("Telegram", tokenConfigured ? "已配置，未启用；保留凭据和允许名单" : "未配置");
   }
   if (feishu.enabled === true) {
     const appId = stringValue(feishu.app_id);
