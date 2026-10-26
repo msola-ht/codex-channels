@@ -71,11 +71,11 @@ export async function discoverOllamaCloudModels({ fetchImpl = globalThis.fetch, 
         const id = ids[index];
         operation.throwIfAborted();
         if (!isManagedProviderModelValid(ollamaCloudProviderDefinition, id)) {
-          results[index] = { id, status: "excluded", reason: "模型 ID 不符合长度、空白或字符约束" };
+          results[index] = { id, status: "excluded", reasonCode: "invalidId", reason: "模型 ID 不符合长度、空白或字符约束" };
           continue;
         }
         if (!tags.has(id)) {
-          results[index] = { id, status: "unconfirmed", reason: "公开模型列表与 tags 集合不一致" };
+          results[index] = { id, status: "unconfirmed", reasonCode: "missingTag", reason: "公开模型列表与 tags 集合不一致" };
           continue;
         }
         try {
@@ -84,7 +84,7 @@ export async function discoverOllamaCloudModels({ fetchImpl = globalThis.fetch, 
           results[index] = { ...mapped, fingerprint: tags.get(id), showSha256: digest(show) };
         } catch {
           operation.throwIfAborted();
-          results[index] = { id, status: "unconfirmed", reason: "模型详情读取或解析失败；不能判为已下架" };
+          results[index] = { id, status: "unconfirmed", reasonCode: "details", reason: "模型详情读取或解析失败；不能判为已下架" };
         }
       }
     }));
@@ -96,6 +96,7 @@ export async function discoverOllamaCloudModels({ fetchImpl = globalThis.fetch, 
     if (!stable) {
       for (const result of results) {
         result.status = "unconfirmed";
+        result.reasonCode = "sourceChanged";
         result.reason = "发现期间来源发生变化，请重新发现；未修改已保存目录";
       }
     }
@@ -126,11 +127,11 @@ function tagIndex(value) {
   const tags = new Map();
   for (const item of value.models) {
     if (!record(item) || typeof item.name !== "string" || !item.name.length || item.name.length > 1024
-      || typeof item.digest !== "string" || !item.digest.length || item.digest.length > 256
+      || typeof item.digest !== "string" || !item.digest.length || item.digest.length > 256 || /\p{Cc}/u.test(item.digest)
       || !Number.isSafeInteger(item.size) || item.size < 0
-      || typeof item.modified_at !== "string" || item.modified_at.length > 128
+      || typeof item.modified_at !== "string" || item.modified_at.length > 40 || !Number.isFinite(Date.parse(item.modified_at))
       || !Array.isArray(item.capabilities) || item.capabilities.length > 32
-      || item.capabilities.some(value => typeof value !== "string" || value.length > 64)
+      || item.capabilities.some(value => typeof value !== "string" || value.length > 64 || /\p{Cc}/u.test(value))
       || tags.has(item.name)) throw new Error("Ollama tags 字段无效或模型名称重复");
     tags.set(item.name, { digest: item.digest, size: item.size, modifiedAt: item.modified_at, capabilities: [...item.capabilities].sort() });
   }
@@ -138,25 +139,25 @@ function tagIndex(value) {
 }
 
 function candidate(id, show, tagCapabilities) {
-  const unconfirmed = reason => ({ id, status: "unconfirmed", reason });
-  if (!record(show) || !Array.isArray(show.capabilities) || show.capabilities.some(value => typeof value !== "string")) return unconfirmed("能力字段缺失或无效");
-  if (digest([...show.capabilities].sort()) !== digest(tagCapabilities)) return unconfirmed("tags 与 show 的能力声明不一致，请重新发现");
+  const unconfirmed = (reason, reasonCode) => ({ id, status: "unconfirmed", reason, reasonCode });
+  if (!record(show) || !Array.isArray(show.capabilities) || show.capabilities.some(value => typeof value !== "string")) return unconfirmed("能力字段缺失或无效", "capabilities");
+  if (digest([...show.capabilities].sort()) !== digest(tagCapabilities)) return unconfirmed("tags 与 show 的能力声明不一致，请重新发现", "capabilityConflict");
   if (!show.capabilities.includes("completion") || !show.capabilities.includes("tools")) {
-    return { id, status: "excluded", reason: "缺少 completion 或 tools 能力" };
+    return { id, status: "excluded", reasonCode: "unsupported", reason: "缺少 completion 或 tools 能力" };
   }
   const architecture = show.model_info?.["general.architecture"];
   const contextFields = record(show.model_info) ? Object.entries(show.model_info).filter(([key]) => key.endsWith(".context_length")) : [];
   const context = typeof architecture === "string" ? show.model_info[`${architecture}.context_length`]
     : contextFields.length === 1 ? contextFields[0][1] : undefined;
-  if (!Number.isSafeInteger(context) || context <= 0) return unconfirmed("上下文窗口缺失、歧义或无效");
+  if (!Number.isSafeInteger(context) || context < 1024) return unconfirmed("上下文窗口缺失、歧义或无效", "context");
   const thinking = show.thinking;
   if (!record(thinking) || !Array.isArray(thinking.values) || !thinking.values.length || thinking.values.length > 16
     || thinking.values.some(value => value !== false && (typeof value !== "string" || !efforts.has(value)))) {
-    return unconfirmed("思考元数据缺失或含未确认的布尔/等级映射");
+    return unconfirmed("思考元数据缺失或含未确认的布尔/等级映射", "thinking");
   }
   const levels = thinking.values.map(value => value === false ? "none" : value);
   const defaultLevel = thinking.default === false ? "none" : thinking.default;
-  if (new Set(levels).size !== levels.length || !levels.includes(defaultLevel)) return unconfirmed("默认思考等级或等级集合无效");
+  if (new Set(levels).size !== levels.length || !levels.includes(defaultLevel)) return unconfirmed("默认思考等级或等级集合无效", "defaultThinking");
   return { id, status: "candidate", requiresResponsesVerification: true,
     upstreamContextWindow: context, contextWindowPolicyCap: 393_216,
     proposedContextWindow: Math.min(context, 393_216),

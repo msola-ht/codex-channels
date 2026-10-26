@@ -422,6 +422,10 @@ async function buildRemovalPlan(input, environment) {
       nextManifest.templateUpdates = { ...manifest.templateUpdates };
       delete nextManifest.templateUpdates[input.model];
     }
+    if (family.proxyKey === "olc" && Object.hasOwn(manifest, "modelDiscovery")) {
+      nextManifest.modelDiscovery = { ...manifest.modelDiscovery };
+      delete nextManifest.modelDiscovery[input.model];
+    }
   } else {
     const provider = [...state.customProviders.fixedCandidates.filter(candidate => candidate.active), ...state.customProviders.switchingProviders]
       .find(candidate => candidate.id === input.provider);

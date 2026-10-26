@@ -18,7 +18,7 @@ import type { ManagedManualModelDefinition, ProviderModelAdditionPreview } from 
 import { defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
 import { cn } from "cn"
 
-export interface ProviderModelAdditionTarget { provider: string; revision: string; models: Array<{ id: string; displayName: string }> }
+export interface ProviderModelAdditionTarget { provider: string; providers: string[]; revision: string; models: Array<{ id: string; displayName: string }> }
 
 export function ProviderModelAdditionDialog({ target, open, stale, management, previewRef, finalFocus, onClose }: {
   target: ProviderModelAdditionTarget
@@ -34,6 +34,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const custom = target.provider.startsWith("cp-")
   const ollamaCloud = target.provider.startsWith("olc-")
   const [mode, setMode] = useState("manual")
+  const [additionProvider, setAdditionProvider] = useState(target.provider)
   const [id, setId] = useState("")
   const [name, setName] = useState("")
   const [manualSource, setManualSource] = useState("independent")
@@ -44,10 +45,14 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const [images, setImages] = useState("unknown")
   const [patch, setPatch] = useState(ollamaCloud ? "no" : "unknown")
   const [search, setSearch] = useState(ollamaCloud ? "no" : "unknown")
+  const [discoveryModel, setDiscoveryModel] = useState("")
+  const [verificationEfforts, setVerificationEfforts] = useState<string[]>([])
+  const [paidConfirmed, setPaidConfirmed] = useState(false)
   const busy = management.busy || management.loading || management.error !== null || management.readbackRequired
-  const candidates = useProviderModelAdditionOptions(target, open, stale, busy)
+  const candidates = useProviderModelAdditionOptions({ provider: additionProvider, revision: target.revision }, open, stale, busy)
   const { options, selected, loading, errorCode, setSelected, clearError } = candidates
   const locked = busy || loading || stale
+  const discovered = options?.discovery?.find(candidate => candidate.id === discoveryModel && candidate.status === "candidate" && !candidate.alreadySaved)
   const inheriting = manualSource === "inherit"
   const capabilitiesValid = validContextWindow(window, 1024, 100_000_000)
     && efforts.length > 0 && efforts.includes(effort) && [images, patch, search].every(value => value !== "unknown")
@@ -57,6 +62,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const load = async () => {
     if (locked || !open || mode === "manual" && !manualValid) return
     management.clearError()
+    if (mode !== "manual") { setDiscoveryModel(""); setVerificationEfforts([]); setPaidConfirmed(false) }
     const manualModel: ManagedManualModelDefinition | undefined = mode !== "manual" ? undefined : inheriting ? {
       id: id.trim(), name: name.trim(), inheritFrom,
     } : {
@@ -71,19 +77,20 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
     <DialogContent initialFocus={options && selected.length > 0 && !locked ? previewRef : undefined} finalFocus={open ? finalFocus : false} closeLabel={t("common.close")} showCloseButton={!management.busy} className={cn(modelOperationDialogClassName, modelOperationFormDialogClassName)}>
       <DialogHeader className="shrink-0"><DialogTitle>{t("modelAddition.title")}</DialogTitle><DialogDescription>{t("modelAddition.hint")}</DialogDescription></DialogHeader>
       <div className="flex min-h-0 min-w-0 flex-col gap-6 overflow-y-auto">
-      <code className="break-all">{target.provider}</code>
+      <code className="break-all">{additionProvider}</code>
       {ollamaCloud ? <Alert><AlertDescription>{t("modelAddition.ollamaHint")}</AlertDescription></Alert> : null}
       {!options ? <FieldGroup>
         <FieldGroup className={cn("grid min-w-0 gap-6", !custom && mode === "manual" && !inheriting && "sm:grid-cols-2")}>
-          {!custom && !ollamaCloud ? <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.method")}</FieldLegend><ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={[mode]} disabled={locked} aria-label={t("modelAddition.method")} onValueChange={values => { if (values[0]) { setMode(values[0]); clearError() } }}>
+          {!custom ? <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.method")}</FieldLegend><ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={[mode]} disabled={locked} aria-label={t("modelAddition.method")} onValueChange={values => { if (values[0]) { setMode(values[0]); clearError() } }}>
             <ToggleGroupItem value="manual">{t("modelAddition.manual")}</ToggleGroupItem>
-            <ToggleGroupItem value="discover">{t("modelAddition.discover")}</ToggleGroupItem>
+            <ToggleGroupItem value="discover">{t(ollamaCloud ? "modelAddition.ollamaDiscover" : "modelAddition.discover")}</ToggleGroupItem>
           </ToggleGroup></FieldSet> : null}
           {mode === "manual" ? <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.manualSource")}</FieldLegend><ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={[manualSource]} disabled={locked} aria-label={t("modelAddition.manualSource")} onValueChange={values => { if (values[0]) { setManualSource(values[0]); clearError() } }}>
             <ToggleGroupItem value="independent">{t("modelAddition.independent")}</ToggleGroupItem>
             <ToggleGroupItem value="inherit">{t("modelAddition.inherit")}</ToggleGroupItem>
           </ToggleGroup></FieldSet> : null}
         </FieldGroup>
+        {ollamaCloud && mode === "discover" ? <ManagedSelect fullWidth label={t("modelAddition.verificationAccount")} value={additionProvider} disabled={locked} options={target.providers.map(value => [value, value])} onChange={value => { setAdditionProvider(value); setDiscoveryModel(""); setVerificationEfforts([]); setPaidConfirmed(false) }} /> : null}
         {mode === "manual" ? <>
           <p className="text-sm text-muted-foreground">{t(inheriting ? "modelAddition.clineInheritHint" : clinePass ? "modelAddition.clineManualHint" : "modelAddition.manualHint")}</p>
           <ModelIdentityFields id={id} name={name} disabled={locked} singleColumn={inheriting} idError={duplicateId ? t("modelAddition.duplicateId") : undefined} onIdChange={next => { if (name === "" || name === defaultModelDisplayName(id)) setName(defaultModelDisplayName(next)); setId(next) }} onNameChange={setName} />
@@ -100,19 +107,32 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
               if (Object.hasOwn(changes, "supportsSearch")) setSearch(changes.supportsSearch === undefined ? "unknown" : changes.supportsSearch ? "yes" : "no")
             }} />}
         </> : null}
-        <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{loading && <Spinner aria-label={t("common.loading")} data-icon="inline-start" />}{t(loading ? "common.loading" : mode === "manual" ? "modelAddition.load" : "modelAddition.discoverLoad")}</Button>
+        <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{loading && <Spinner aria-label={t("common.loading")} data-icon="inline-start" />}{t(loading ? "common.loading" : mode === "manual" ? "modelAddition.load" : ollamaCloud ? "modelAddition.ollamaDiscoverLoad" : "modelAddition.discoverLoad")}</Button>
       </FieldGroup> : <FieldGroup>
         <p>{t("modelCatalog.scope", { providers: options.providers.join(t("managementUi.listSeparator")) })}</p>
-        {options.candidates.length === 0 ? <SettingsEmpty>{t("modelAddition.empty")}</SettingsEmpty> : <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.select")}</FieldLegend><FieldGroup>{options.candidates.map((entry, index) => <Field key={entry.model} orientation="horizontal"><Checkbox id={`addition-candidate-${index}`} checked={selected.includes(entry.model)} disabled={locked} onCheckedChange={checked => setSelected(previous => checked ? [...previous, entry.model] : previous.filter(model => model !== entry.model))} /><FieldLabel htmlFor={`addition-candidate-${index}`} className="break-all">{entry.displayName} ({entry.model})</FieldLabel></Field>)}</FieldGroup></FieldSet>}
-        <Button variant="outline" disabled={locked} onClick={() => { candidates.reset(); management.clearError() }}>{t("modelAddition.reset")}</Button>
+        {options.discovery ? <>
+          <p>{t("modelAddition.discoveryReadonly")}</p>
+          {options.discovery.map(entry => <p key={entry.id} className="break-all"><code>{entry.id}</code> — {t(entry.alreadySaved ? "modelAddition.discoverySaved" : entry.status === "candidate" ? "modelAddition.discoveryCandidate" : entry.status === "excluded" ? "modelAddition.discoveryExcluded" : "modelAddition.discoveryUnconfirmed")}{entry.reasonCode ? ` · ${t(`modelAddition.discoveryReasons.${entry.reasonCode}`)}` : ""}</p>)}
+          <ManagedSelect fullWidth label={t("modelAddition.discoveryModel")} placeholder={t("modelAddition.discoveryModel")} value={discoveryModel} disabled={locked} options={options.discovery.filter(entry => entry.status === "candidate" && !entry.alreadySaved).map(entry => [entry.id, entry.id])} onChange={value => { setDiscoveryModel(value); setVerificationEfforts([options.discovery?.find(entry => entry.id === value)?.defaultReasoningEffort ?? ""].filter(Boolean)); setPaidConfirmed(false) }} />
+          {discovered ? <>
+            <p>{t("modelAddition.discoveryWindow", { window: discovered.proposedContextWindow ?? 0, effort: discovered.defaultReasoningEffort ?? "" })}</p>
+            <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.reasoning")}</FieldLegend><FieldGroup>{discovered.reasoningEfforts?.map((level, index) => <Field key={level} orientation="horizontal"><Checkbox id={`verification-effort-${index}`} checked={verificationEfforts.includes(level)} disabled={locked || level === discovered.defaultReasoningEffort} onCheckedChange={checked => { setVerificationEfforts(previous => checked ? [...previous, level] : previous.filter(value => value !== level)); setPaidConfirmed(false) }} /><FieldLabel htmlFor={`verification-effort-${index}`}>{level}</FieldLabel></Field>)}</FieldGroup></FieldSet>
+            <Alert><AlertDescription>{t("modelAddition.paidVerificationHint", { provider: additionProvider, model: discoveryModel, levels: verificationEfforts.join("/"), defaultEffort: discovered.defaultReasoningEffort ?? "", requests: verificationEfforts.length * 2 + 2 })}</AlertDescription></Alert>
+            <Field orientation="horizontal"><Checkbox id="olc-paid-verification-confirm" checked={paidConfirmed} disabled={locked} onCheckedChange={value => setPaidConfirmed(value === true)} /><FieldLabel htmlFor="olc-paid-verification-confirm">{t("modelAddition.paidVerificationConfirm")}</FieldLabel></Field>
+            <Button disabled={locked || !paidConfirmed || !verificationEfforts.includes(discovered.defaultReasoningEffort ?? "")} onClick={() => { setPaidConfirmed(false); void candidates.verify(discoveryModel, verificationEfforts) }}>{loading ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : null}{t("modelAddition.verify")}</Button>
+          </> : null}
+        </> : options.candidates.length === 0 ? <SettingsEmpty>{t("modelAddition.empty")}</SettingsEmpty> : <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.select")}</FieldLegend><FieldGroup>{options.candidates.map((entry, index) => <Field key={entry.model} orientation="horizontal"><Checkbox id={`addition-candidate-${index}`} checked={selected.includes(entry.model)} disabled={locked} onCheckedChange={checked => setSelected(previous => checked ? [...previous, entry.model] : previous.filter(model => model !== entry.model))} /><FieldLabel htmlFor={`addition-candidate-${index}`} className="break-all">{entry.displayName} ({entry.model})</FieldLabel></Field>)}</FieldGroup></FieldSet>}
+        {options.candidates.some(entry => entry.ollamaVerification) ? <Alert><AlertDescription>{t("modelAddition.verifiedHint")}</AlertDescription></Alert> : null}
+        <Button variant="outline" disabled={locked} onClick={() => { candidates.reset(); management.clearError(); setDiscoveryModel(""); setVerificationEfforts([]); setPaidConfirmed(false) }}>{t("modelAddition.reset")}</Button>
       </FieldGroup>}
       {errorCode ? <Alert variant="destructive"><AlertDescription>{translateApiErrorCode(t, errorCode)}</AlertDescription></Alert> : null}
+      {candidates.auditDegraded ? <Alert><AlertDescription>{t("modelAddition.verificationAuditDegraded")}</AlertDescription></Alert> : null}
       {stale ? <Alert variant="destructive"><AlertDescription>{t("modelCatalog.stale")}</AlertDescription></Alert> : null}
       {management.actionError ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
       {management.readbackRequired ? <Alert><AlertDescription>{t("settingsUi.readbackUnknown")}</AlertDescription></Alert> : null}
       </div>
       <DialogFooter className="shrink-0"><Button variant="outline" disabled={management.busy} onClick={onClose}>{t("modelManagement.cancel")}</Button><Button ref={previewRef} disabled={locked || !options || selected.length === 0} onClick={() => {
-        if (options && !locked) void management.mutate({ operation: "model.add", provider: target.provider, revision: options.revision, sourceToken: options.sourceToken, models: selected })
+        if (options && !locked) void management.mutate({ operation: "model.add", provider: additionProvider, revision: options.revision, sourceToken: options.sourceToken, models: selected })
       }}>{t("modelManagement.preview")}</Button></DialogFooter>
     </DialogContent>
   </Dialog>
@@ -134,6 +154,7 @@ export function ProviderModelAdditionConfirmation({ preview, saving, loading, fi
       {entry.clineRequestProfile ? <p>{t("modelAddition.requestProfileSummary", { profile: t(entry.clineRequestProfile === "deepseek-flash" ? "modelAddition.deepseekFlashProfile" : "modelAddition.standardProfile") })}</p> : null}
       {entry.clineProviderOptions ? <p className="break-all font-mono text-xs">{t("clineRequestOptions.jsonLabel")}: {JSON.stringify(entry.clineProviderOptions)}</p> : null}
       {entry.template ? <p>{t("modelTemplate.sourceSummary", { source: t(`modelTemplate.${entry.template.source}`), model: entry.template.model })}</p> : null}
+      {entry.ollamaVerification ? <p>{t("modelAddition.verifiedSummary", { levels: entry.ollamaVerification.reasoningEfforts.join("/"), jsonEffort: entry.ollamaVerification.jsonReasoningEffort, at: entry.ollamaVerification.verifiedAt, requests: entry.ollamaVerification.requests })}</p> : null}
       <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">{JSON.stringify(entry.fields, null, 2)}</pre>
     </section>)}
     <p>{t("settingsUi.command", { value: "codexc restart all" })}</p>

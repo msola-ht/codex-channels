@@ -41,7 +41,7 @@ import { routeOfficialModelManagement } from "./webui-management-official-model-
 import { routeModelBaseManagement } from "./webui-management-model-base-route.mjs";
 import { loadProviderModelCatalogPresentations, loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadProviderModelTemplateOptions } from "./provider-model-template-management.mjs";
-import { loadProviderModelAdditionOptions } from "./provider-model-additions.mjs";
+import { loadProviderModelAdditionOptions, verifyProviderModelAddition } from "./provider-model-additions.mjs";
 import { loadManagedProviderModelRequestOptions } from "./managed-provider-model-edit.mjs";
 
 const activeTemplateOptionsReads = new WeakSet();
@@ -70,11 +70,62 @@ export async function routeProviderManagement({
   }
   if (await routeOfficialModelManagement({ environment, maximumBodyBytes, path, principalId, request, response, state })) return true;
   if (await routeModelBaseManagement({ environment, maximumBodyBytes, path, principalId, request, response, state })) return true;
+  if (path === "/provider-model-additions/verify" && request.method === "POST") {
+    if (new URL(request.url, "http://localhost").search || state.snapshotReadsClosed) throw new ApiError(400, "provider_models_invalid_input", "模型验证请求不可用");
+    const input = await readJsonBody(request, Math.min(maximumBodyBytes, 16_384));
+    if (state.snapshotReadsClosed) throw new ApiError(503, "provider_models_unavailable", "管理服务正在关闭，未开始模型验证");
+    if (!input || typeof input !== "object" || Array.isArray(input) || input.confirmPaid !== true
+      || typeof input.provider !== "string" || !/^olc-[A-Za-z0-9_-]{1,61}$/u.test(input.provider)
+      || typeof input.sourceToken !== "string" || !/^[a-f0-9]{64}$/u.test(input.sourceToken)
+      || typeof input.revision !== "string" || !/^[a-f0-9]{64}$/u.test(input.revision)) throw new ApiError(400, "provider_models_invalid_input", "请明确确认准确账户与候选修订");
+    if (activeTemplateOptionsReads.has(state)) throw new ApiError(503, "provider_templates_busy", "已有模型候选操作正在进行");
+    const controller = new AbortController();
+    const disconnect = () => { if (!response.writableEnded) controller.abort(); };
+    activeTemplateOptionsReads.add(state);
+    request.once("aborted", disconnect);
+    response.once("close", disconnect);
+    let entry;
+    try {
+      if (request.aborted || response.destroyed) controller.abort();
+      controller.signal.throwIfAborted();
+      assertManagementAuditWritable(state.audit);
+      const auditStatus = recordProviderAudit(state, { sessionId: principalId, operation: "provider-model.verify",
+        target: input.provider, inputFingerprint: fingerprintManagementValue(input), resourceRevision: input.revision,
+        safePreview: { model: input.model, reasoningEfforts: input.reasoningEfforts }, confirmationToken: input.sourceToken,
+        phase: "requested", resultCode: "started" }, "模型验证尚未开始，审计记录失败");
+      if (auditStatus !== "recorded") throw new ApiError(503, "management_audit_unavailable", "审计记录不可用，未开始模型验证");
+      const task = verifyProviderModelAddition(input, { environment, signal: controller.signal });
+      entry = { controller, settled: task.then(() => undefined, () => undefined) };
+      state.snapshotReads.add(entry);
+      const result = await task;
+      const completedAuditStatus = recordProviderAudit(state, { sessionId: principalId, operation: "provider-model.verify",
+        target: input.provider, inputFingerprint: fingerprintManagementValue(input), resourceRevision: input.revision,
+        safePreview: { model: input.model, reasoningEfforts: input.reasoningEfforts }, confirmationToken: input.sourceToken,
+        resultCode: result.status }, "模型验证已完成，但审计记录失败");
+      if (!response.destroyed && !controller.signal.aborted) sendManagementJson(response, 200, { ...result, auditStatus: completedAuditStatus });
+    } catch (error) {
+      recordProviderAudit(state, { sessionId: principalId, operation: "provider-model.verify", target: input.provider,
+        inputFingerprint: fingerprintManagementValue(input), resourceRevision: input.revision,
+        safePreview: { model: input.model, reasoningEfforts: input.reasoningEfforts }, confirmationToken: input.sourceToken,
+        phase: "failed", resultCode: controller.signal.aborted ? "cancelled" : "verification-failed" }, "模型验证失败，审计记录失败");
+      if (controller.signal.aborted && response.destroyed) return true;
+      if (error instanceof ApiError) throw error;
+      throw managementOperationError(error, [ProviderModelManagementError], "provider_models_unavailable");
+    } finally {
+      controller.abort();
+      request.removeListener("aborted", disconnect);
+      response.removeListener("close", disconnect);
+      if (entry) state.snapshotReads.delete(entry);
+      activeTemplateOptionsReads.delete(state);
+    }
+    return true;
+  }
   if (path === "/provider-model-additions" && request.method === "POST") {
-    if (new URL(request.url, "http://localhost").searchParams.size !== 0) {
+    if (new URL(request.url, "http://localhost").searchParams.size !== 0 || state.snapshotReadsClosed) {
       throw new ApiError(400, "provider_models_invalid_input", "新增模型候选请求不接受查询参数");
     }
     const input = await readJsonBody(request, maximumBodyBytes);
+    if (state.snapshotReadsClosed) throw new ApiError(503, "provider_models_unavailable", "管理服务正在关闭，未读取模型候选");
     if (!input || typeof input !== "object" || Array.isArray(input)
       || Object.keys(input).some(key => !["provider", "manualModel"].includes(key))
       || typeof input.provider !== "string") {
@@ -86,20 +137,28 @@ export async function routeProviderManagement({
     const controller = new AbortController();
     const disconnect = () => { if (!response.writableEnded) controller.abort(); };
     activeTemplateOptionsReads.add(state);
+    request.once("aborted", disconnect);
     response.once("close", disconnect);
-    if (response.destroyed) controller.abort();
+    if (request.aborted || response.destroyed) controller.abort();
+    let entry;
     try {
-      const options = await loadProviderModelAdditionOptions(input.provider, {
+      const task = loadProviderModelAdditionOptions(input.provider, {
         environment, signal: controller.signal,
         ...(Object.hasOwn(input, "manualModel") ? { manualModel: input.manualModel } : {}),
       });
+      entry = { controller, settled: task.then(() => undefined, () => undefined) };
+      state.snapshotReads.add(entry);
+      const options = await task;
       controller.signal.throwIfAborted();
       sendManagementJson(response, 200, options);
     } catch (error) {
       if (controller.signal.aborted && response.destroyed) return true;
       throw managementOperationError(error, [ProviderModelManagementError], "provider_models_unavailable");
     } finally {
+      controller.abort();
+      request.removeListener("aborted", disconnect);
       response.removeListener("close", disconnect);
+      if (entry) state.snapshotReads.delete(entry);
       activeTemplateOptionsReads.delete(state);
     }
     return true;
@@ -539,7 +598,7 @@ function recordProviderAudit(state, details, failureMessage) {
       revision: details.resourceRevision,
       previewId: fingerprintManagementValue(details.safePreview),
       confirmationId: fingerprintManagementValue(details.confirmationToken),
-      phase: "completed",
+      phase: details.phase ?? "completed",
       resultCode: details.resultCode,
       recovery: "none",
     });

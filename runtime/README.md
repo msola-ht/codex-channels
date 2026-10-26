@@ -4,6 +4,8 @@
 
 `model-base-snapshot.mjs` / `model-base-snapshot.d.mts` 读取 Gateway 数据目录中的公共底座快照，缺失时使用项目初始快照，损坏或不支持版本拒绝。快照含原始单模型目录和来源，DS 模板从保留的原始 DS 目录按有效底座补全；显式创建及模板更新消费该底座，已有账户目录读取不注入新提示词。保存与预览由 `scripts/model-base-management.mjs` 负责，恢复流程见[公共底座更新](../docs/deepseek.md#公共底座更新)。
 
+`model-template-bindings.mjs` 的 OLC manifest 校验允许独立于模板关联的可选 `modelDiscovery`，每个精确模型保存有界公开来源、摘要、窗口策略及 Responses 验证范围；旧来源无须补写或迁移。目录新增、读取、模板管理、移除与 runtime writer 共用校验，移除仅裁剪目标记录；运行时不重新发现或发送诊断推理。
+
 `message-display-policy.mjs` 统一定义九个显示字段、渠道支持矩阵及 `concise` / `standard` / `detailed` / `full` 四项预设。预设只供管理入口一次应用现有字段，不是持久化键或运行模式；`identifyMessageDisplayPreset` 按有效值及目标支持字段识别，无法匹配时为只读 `custom`。静默关闭成功完成卡，紧凑隐藏工具操作；独立字段缺省不变，全局默认组合因仍为 compact 工具档而识别为 `custom`，缺省与继承仍逐字段处理。旧组合不自动迁移，重新应用才写入新值；微信仅比较三项支持字段，原紧凑组合仍可匹配。
 
 完整预设采用 `operation_updates = "full"`、`presentation_detail = "full"` 并开启 `reasoning`，展开环境、本轮统计分项及审批详情，过滤重复过程通知。静默、紧凑和详细预设关闭思考状态，详细及完整完成卡仍显示已有推理次数。默认值不变，不自动改写已有配置；旧详细组合需重新应用预设才关闭已保存的思考开关。

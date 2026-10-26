@@ -537,6 +537,12 @@ export function fetchProviderModelAdditionOptions(provider: string, manualModel:
   }, signal, 100_000)
 }
 
+export function verifyProviderModelAddition(input: import("../../../scripts/provider-model-additions.mjs").ProviderModelAdditionVerificationInput, signal: AbortSignal): Promise<import("../../../scripts/provider-model-additions.mjs").ProviderModelAdditionVerificationResult> {
+  return requestJson(`${API_PREFIX}/management/provider-model-additions/verify`, {
+    method: "POST", body: JSON.stringify(input),
+  }, signal, 100_000)
+}
+
 export function fetchManagedProviderModelRequestOptions(provider: string, model: string, signal: AbortSignal): Promise<ManagedProviderModelRequestOptions> {
   return getJson(`${API_PREFIX}/management/provider-model-request-options?${new URLSearchParams({ provider, model })}`, signal)
 }

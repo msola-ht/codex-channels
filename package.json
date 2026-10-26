@@ -45,6 +45,7 @@
     "scripts/mcp-setup.mjs",
     "scripts/ccg-setup.mjs",
     "scripts/ollama-cloud-catalog.mjs",
+    "scripts/ollama-cloud-model-verification.mjs",
     "scripts/ollama-cloud-command.mjs",
     "scripts/ollama-cloud-account-management.mjs",
     "scripts/ollama-cloud-setup.mjs",

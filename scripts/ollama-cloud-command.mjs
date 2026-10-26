@@ -1,5 +1,6 @@
 import { isCommandHelp } from "./cli-help.mjs";
 import { discoverOllamaCloudModels } from "./ollama-cloud-catalog.mjs";
+import { withOllamaCloudFetch } from "./ollama-cloud-model-verification.mjs";
 import { loadOllamaCloudAccounts, ollamaCloudProviderId } from "../runtime/ollama-cloud-accounts.mjs";
 import { runOllamaCloudSetup } from "./ollama-cloud-setup.mjs";
 
@@ -19,7 +20,9 @@ export async function runOllamaCloudCommand(args, options = {}) {
   }
   if (["add", "reconfigure", "remove", "default"].includes(args[0]) && args.length === 2) return runOllamaCloudSetup({ ...options, action: args[0], accountId: args[1] });
   if (args[0] !== "discover" || args.length > 2 || args.length === 2 && args[1] !== "--json") throw new Error(ollamaCloudUsage);
-  const result = await discoverOllamaCloudModels({ signal });
+  const operationSignal = globalThis.AbortSignal.any([globalThis.AbortSignal.timeout(90_000), ...(signal ? [signal] : [])]);
+  const result = await withOllamaCloudFetch(environment, operationSignal,
+    fetch => discoverOllamaCloudModels({ signal: operationSignal, fetchImpl: fetch }), options.fetchImpl);
   if (args[1] === "--json") output.write(`${JSON.stringify(result)}\n`);
   else {
     output.write("Ollama Cloud 公开模型候选（尚未验证 Responses 能力；未写入配置）\n");

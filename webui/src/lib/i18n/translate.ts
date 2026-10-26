@@ -50,6 +50,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   provider_models_invalid_input: "modelCatalog.promptsInvalid",
   provider_models_stale_revision: "modelCatalog.detailsStale",
   provider_models_unavailable: "modelCatalog.promptsUnavailable",
+  provider_models_verification_inconclusive: "modelAddition.verificationInconclusive",
   provider_templates_busy: "modelTemplate.busy",
   "template-source-expired": "modelTemplate.expired",
   "template-source-unavailable": "modelTemplate.sourceUnavailable",

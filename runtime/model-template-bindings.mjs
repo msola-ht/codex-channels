@@ -47,6 +47,38 @@ export function validateOllamaCloudCatalogManifest(manifest, modelIds) {
       throw new Error("Ollama Cloud 模板更新记录无效");
     }
   }
+  if (manifest.modelDiscovery !== undefined) {
+    const hex = value => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+    const date = value => typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value));
+    const levels = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+    if (!record(manifest.modelDiscovery) || Object.keys(manifest.modelDiscovery).length > 64
+      || Buffer.byteLength(JSON.stringify(manifest.modelDiscovery)) > 128 * 1024
+      || Object.entries(manifest.modelDiscovery).some(([id, source]) => {
+        if (!modelIds.includes(id) || !record(source) || Object.keys(source).length !== 11
+          || Object.keys(source).some(key => !["generatorVersion", "sources", "fetchedAt", "modelsSha256", "tagsSha256", "showSha256", "fingerprint", "upstreamContextWindow", "contextWindowPolicyCap", "verification", "model"].includes(key))
+          || source.model !== id || source.generatorVersion !== 1 || !date(source.fetchedAt)
+          || !hex(source.modelsSha256) || !hex(source.tagsSha256) || !hex(source.showSha256)
+          || !Array.isArray(source.sources) || source.sources.length !== 3
+          || source.sources.some((url, index) => url !== ["https://ollama.com/v1/models", "https://ollama.com/api/tags", "https://ollama.com/api/show"][index])
+          || !Number.isSafeInteger(source.upstreamContextWindow) || source.upstreamContextWindow <= 0
+          || source.contextWindowPolicyCap !== 393_216 || !record(source.fingerprint)) return true;
+        const fingerprint = source.fingerprint;
+        if (Object.keys(fingerprint).length !== 4 || Object.keys(fingerprint).some(key => !["digest", "size", "modifiedAt", "capabilities"].includes(key))
+          || typeof fingerprint.digest !== "string" || !fingerprint.digest || fingerprint.digest.length > 256 || /\p{Cc}/u.test(fingerprint.digest)
+          || !Number.isSafeInteger(fingerprint.size) || fingerprint.size < 0 || !date(fingerprint.modifiedAt)
+          || !Array.isArray(fingerprint.capabilities) || fingerprint.capabilities.length > 32
+          || fingerprint.capabilities.some(value => typeof value !== "string" || value.length > 64 || /\p{Cc}/u.test(value))) return true;
+        const verification = source.verification;
+        return !record(verification) || Object.keys(verification).length !== 5
+          || Object.keys(verification).some(key => !["verifiedAt", "reasoningEfforts", "jsonReasoningEffort", "requests", "scope"].includes(key))
+          || !date(verification.verifiedAt) || verification.scope !== "responses-sse-and-json-default-roundtrip"
+          || !Array.isArray(verification.reasoningEfforts) || !verification.reasoningEfforts.length || verification.reasoningEfforts.length > 7
+          || new Set(verification.reasoningEfforts).size !== verification.reasoningEfforts.length
+          || verification.reasoningEfforts.some(value => !levels.has(value))
+          || !verification.reasoningEfforts.includes(verification.jsonReasoningEffort)
+          || verification.requests !== verification.reasoningEfforts.length * 2 + 2;
+      })) throw new Error("Ollama Cloud 模型发现与验证来源记录无效");
+  }
   return bindings;
 }
 
