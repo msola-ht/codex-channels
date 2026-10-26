@@ -488,6 +488,8 @@ WebUI `#/models/providers` 的行内“操作 → 提供商联网搜索”为选
 OpenAI 官方账户和使用主配置的固定提供商读取 `config.toml` 的全局 `web_search`，在全局设置中修改，
 不在提供商卡片中提供另一份覆盖。
 
+OLC 的托管网页搜索适配仅支持 `live`，使用请求所选账户的 Ollama 搜索额度。`cached`、`indexed` 或跟随全局后得到的未支持模式不会自动降级为实时；请求中的不支持控制在模型出站前拒绝。`disabled` 不声明搜索工具。此策略按精确账户 Profile 保存，与同族共享模型目录的客户端 `tool_search` 能力无关；独立 Relay 按其 API 请求中的工具声明处理，不读取 App Server 的全局搜索偏好。配置保存不执行搜索，也不证明账户搜索权限或真实云端往返已验收。
+
 搜索值直接保存在对应提供商 config 的顶层，例如 `$CODEX_HOME/sf-clp-main.config.toml`：
 
 ```toml
@@ -603,9 +605,9 @@ CLI／WebUI 设置入口；它们不同于用户的 `web_search` 偏好，也不
 
 内置网页搜索使用 Codex 的 `web_search` 模式，不提供模型级搜索支持声明。模型目录中的 `supports_search_tool` 仍表示客户端工具检索，`web_search_tool_type` 仍只选择 hosted 工具形态。
 
-App Server 的固定、切换入口保留已有的顶层 `web_search`、`tool_choice` 和 Responses 历史 `web_search_call`，由上游判断执行支持。源目录不变，临时运行投影使用普通 Responses 工具编码（`use_responses_lite=false`），实例关闭 `features.standalone_web_search`，防止切换到独立 `/alpha/search` 执行器。App Server 从对应配置生成受控启动参数并隔离子进程凭据；`codexc remote` 通过原生 Profile 选择连接同一实例。聚合入口当前关闭。
+App Server 的固定、切换入口按对应配置生成顶层 `web_search`、`tool_choice` 和 Responses 历史 `web_search_call`，由具体 Provider 的原生或托管适配路径消费。源目录不变，临时运行投影使用普通 Responses 工具编码（`use_responses_lite=false`），实例关闭 `features.standalone_web_search`，防止切换到独立 `/alpha/search` 执行器。App Server 从对应配置生成受控启动参数并隔离子进程凭据；`codexc remote` 通过原生 Profile 选择连接同一实例。聚合入口当前关闭。
 
-HTTP 与 Responses WebSocket 保持工具透传，官方 OpenAI 与独立 Model Relay 保留自己的合同。受管 CLP Chat 桥将 live `web_search` 适配至同账户独立搜索接口，映射搜索事件并处理 search 查询历史，详见 [CLP 网页搜索适配](cline-pass.md#网页搜索适配)。其他 Chat 对 hosted 声明仍仅透传，不承诺执行或历史转换。
+普通原生 HTTP 与 Responses WebSocket 保持工具透传，官方 OpenAI 保留自己的合同。受管 CLP Chat 桥将 live `web_search` 适配至同账户独立搜索接口，映射搜索事件并处理 search 查询历史，详见 [CLP 网页搜索适配](cline-pass.md#网页搜索适配)。OLC 的 Provider Proxy 与独立 Relay 在 Responses HTTP 中执行同账户 Ollama live 搜索并续答，保持一个外部响应，WebSocket 关闭；搜索历史只保留可读查询，不补造上次结果。其他 Chat 对 hosted 声明仍仅透传，不承诺执行或历史转换。
 
 已保存的 CP v5 `supportsWebSearch` 作为历史布尔元数据保留，并按原字段顺序编译为 `supports_web_search`，既有定义与编译快照仍可一致性校验和读取。普通读取不迁移、删字段或改写目录，编辑后保存仍保留该元数据；它不参与搜索门控，也不再从新模板导入。非法类型、未知字段、定义与编译快照不一致及未完成事务仍明确拒绝，不能删除 pending 绕过检查。受管或官方完整目录同样保留原文件内容，搜索策略不解释该扩展字段。
 
@@ -649,7 +651,7 @@ Responses 使用对应工具协议，Chat 使用当前网关桥的请求转换�
 CLI 单模型工具能力入口保留目录默认模型、Profile／主配置默认选择及固定模式的独立思考等级；连接配置不重新保存。整份模型编辑中的默认模型选择仍由用户明确确认。
 
 CLI 另提供默认跳过的原生网页搜索诊断，WebUI 通过“检测网页搜索”显式发起。它使用一次最长 45 秒的流式请求，声明 `web_search` 与 `external_web_access: true`；上游可能实际搜索并产生模型及搜索费用。只有完整 Responses 响应中的已完成 `web_search_call` 搜索才算取得执行证据；HTTP 200、文字自称搜索或回答带链接都不算。完成但没有搜索证据时显示“无法确认”；明确拒绝仅针对本次原生工具声明，不推断其他搜索接口。Chat 请求经过现有桥转换，普通 Chat 文本不算原生搜索证据。
-原生网页搜索结果仅诊断，不回填工具能力或改写搜索配置。它与发现外部工具的 `tool_search` 是不同路径，不生成用于保存回填的关联标识。
+原生网页搜索结果仅诊断，不回填工具能力或改写搜索配置。它不经过 CLP 或 OLC 的托管搜索执行链，结果不能作为这些适配路径的验收。它与发现外部工具的 `tool_search` 是不同路径，不生成用于保存回填的关联标识。
 
 已保存模型也可从 WebUI 模型目录行操作中的“检测网页搜索”进入，覆盖官方 OpenAI、DS／CLP／CCG／OCG、Codex 兼容及自定义提供商。CLI 在 `codexc setup → 模型与提供商 → 检测原生网页搜索` 提供统一入口，官方子菜单与第三方模型管理也可进入。同一目录有多个账户时须明确选择一个账户，不广播检测。后端按目录修订读取所选账户的实际协议、凭据及模型映射；CLP 复用专用路由和思考转换。未配置、凭据不可用或目录已变化时明确拒绝，不启动服务或刷新登录。
 官方独立诊断支持文件存储的 API Key 和 ChatGPT 登录；系统钥匙串、临时认证、OpenAI Provider 覆写及无法安全执行的登录约束会明确拒绝，不回退使用旧凭据。模型缓存仅提供待检测 ID，不能证明其所属上游或实际可用性，因此官方诊断不继承缓存中的思考默认值。其他已配置模型使用对应目录的默认值；诊断不验证思考控制本身。请求发出后若配置或凭据改变，旧结果被拒绝，但已经发出的请求可能计费。

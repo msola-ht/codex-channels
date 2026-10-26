@@ -75,19 +75,20 @@ async function runOllamaCloudSetupOperation(options) {
     const preview = await previewOllamaCloudConfiguration(input, options);
     if (preview.initialModel) {
       const model = preview.initialModel;
-      output.write(`将创建所有 OLC 账户共用的模型目录（手动能力声明）\n准确 ID：${model.id}\n显示名称：${model.name}\n上下文：${model.contextWindow} Token\n支持思考等级：${model.reasoningEfforts.join(" / ")}\n默认思考等级：${model.defaultReasoningEffort}\n图片输入：${model.supportsImages ? "支持" : "不支持"}\nfreeform：${model.applyPatchToolType === "freeform" ? "声明支持" : "关闭"}；tool_search 与原生搜索关闭。\n`);
+      output.write(`将创建所有 OLC 账户共用的模型目录（手动能力声明）\n准确 ID：${model.id}\n显示名称：${model.name}\n上下文：${model.contextWindow} Token\n支持思考等级：${model.reasoningEfforts.join(" / ")}\n默认思考等级：${model.defaultReasoningEffort}\n图片输入：${model.supportsImages ? "支持" : "不支持"}\nfreeform：${model.applyPatchToolType === "freeform" ? "声明支持" : "关闭"}；目录不声明客户端 tool_search 或上游原生搜索能力。\n`);
     }
     if (!await confirmManagedAccountEdit(preview, { prompts, output })) return { action: "back" };
     result = await applyOllamaCloudConfiguration({ ...input, confirmExclusiveConfigChange: preview.effects.writesMainConfig, expectedRevision: preview.revision }, options);
     if (result.action === "back") return result;
     output.write(result.action === "unchanged" ? "账户配置未变化，无需保存或重启。\n" : `Ollama Cloud 账户 ${accountId} 配置已保存。\n`);
+    output.write("首次使用前，请在 codexc config → 提供商联网搜索中明确选择实时（live）或关闭（disabled）；固定模式按该入口提示修改全局设置。目录能力不决定搜索模式，跟随全局得到 cached/indexed 时会拒绝模型请求。\n");
   }
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
 async function promptInitialModel(prompts, output) {
-  output.write("首次创建共享目录：填写准确模型和能力；freeform 需明确声明，tool_search 与原生搜索保持关闭。\n");
+  output.write("首次创建共享目录：填写准确模型和能力；freeform 需明确声明。目录不声明客户端 tool_search 或上游原生搜索能力，托管搜索模式在现有联网搜索设置中单独选择。\n");
   const id = await prompts.text({ message: "准确模型 ID（保留版本与冒号）", validate: value => typeof value === "string" && value.trim() === value && value.length > 0 ? undefined : "请输入准确 ID" });
   if (prompts.isCancel(id)) return undefined;
   const name = await prompts.text({ message: "显示名称", initialValue: defaultModelDisplayName(id) });

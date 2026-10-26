@@ -14,6 +14,7 @@
 - `codex-private-items.ts`：Codex 私有输入项与参数标记的共享语义；`agentMessageText` 按可读正文拼接信封与载荷，`stripEncryptedMarker` 只删除 schema 节点的布尔 `encrypted` 标记并报告是否发生改写。
 - `responses-normalize.ts`：面向第三方 Responses 上游的正文归一化；把 `agent_message` 降级为普通 `user` 消息并删除工具参数 schema 中的 `encrypted` 标记，未改写时报告 `changed: false`。
 - `ollama-freeform.ts`：显式 OLC 的独立纯适配；保留当前 custom 声明及工具选择，按精确名称和命名空间还原 JSON/SSE 调用，按本请求 call_id 包装配对历史。单调用参数 1 MiB、同时工具调用 64 个、保留输入 2 MiB、事件 65536 个及总事件 32 MiB；包装参数必须是仅含字符串 input 的 JSON 对象，重复键、孤立代理码、身份冲突和不一致完成失败关闭。标准 custom 与包装 custom 均有界累积，确认完整后才发出一次原始输入；显式未完成工具状态及不支持的客户端工具输出拒绝，非流式可执行工具要求 completed，终态输出不能遗漏已观察项。所有下游事件重新生成单调序号；HTTP、原始采集和取消清理由 provider-proxy 持有。此入口不处理 Codex 私有 agent_message/encrypted 标记，不开放工具搜索或执行托管搜索。
+- `ollama-web-search.ts`：可信 OLC hosted live 搜索的纯声明、选择、历史与单响应状态。只接受可兑现的 live 控制，内部函数名和命名空间冲突失败关闭；历史搜索仅降为可读查询，不补结果或自动执行。整轮工具经 freeform 归约校验后，重写所有调用和输出身份；混合同批客户端工具只生成明确 not_executed 的内部配对结果，后续纯客户端轮才发布完成项。保持唯一 response ID、单调序号、连续输出索引及单终态，搜索状态反映实际执行。显式输出预算逐轮扣除已知消耗，用量缺失保持未知，外部终态仅在三个必需计数均已知时附 usage；内部指标仍可保留独立已知计数。不缓存跨请求正文。初始/逐轮请求 4 MiB、累计模型输入 4 MiB、单轮输出 64 项/768 KiB、最终快照 900 KiB；HTTP、授权、取消和搜索结果读取由 Provider Proxy 持有。
 - `chat-to-responses.ts`：单选择 Chat 流转换为 Responses 文本、推理摘要与正文、函数调用、自由格式调用、客户端检索调用和用量事件。
 - `validation.ts`：模型 API 信任边界的结构验证和不含报文的错误；转换错误可选携带有界的诊断事实（如工具参数的长度与 `empty`/`invalid_json`/`not_object` 形态分类），只描述形态，不含参数正文或用户内容。
 - `direct-request.ts`：原生请求共用的模型、流式字段校验、思考控制字段冲突定位及显式关闭字段覆盖；协议专属等级映射留在各请求模块。

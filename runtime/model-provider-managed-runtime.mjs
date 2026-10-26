@@ -734,7 +734,7 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
   const protocols = definition.upstreamWireApi === "chat_completions" ? ["chat"]
     : definition.storageId === "deepseek" ? ["chat", "responses"] : ["responses"];
   return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs, protocols,
-    ...(definition.storageId === "ollama-cloud" ? { ollamaFreeform: true } : {}),
+    ...(definition.storageId === "ollama-cloud" ? { ollamaFreeform: true, ollamaWebSearch: true } : {}),
     ...(definition.storageId === "clp" ? { modelCapabilities: settings.map(model => ({ id: model.model,
       reasoning_efforts: model.reasoningEfforts.map(level => level.effort).filter(effort => effort !== "enabled"),
       cline_request_profile: model.clineRequestProfile,

@@ -2,7 +2,9 @@ import { modelRequestDiagnostics, chatDiagnosticsHeader, type ChatDiagnosticsCha
 import { autoReviewMetadata } from "../../runtime/auto-review-metadata.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
-import { ModelConversionError, normalizeResponsesRequest, prepareOllamaFreeform, type OllamaFreeformResponse, type DirectResponsesRequest, type SamplingParameters } from "../model-api/index.js";
+import { OllamaWebSearch, ModelConversionError, normalizeResponsesRequest, prepareOllamaFreeform, type OllamaFreeformResponse, type DirectResponsesRequest, type SamplingParameters } from "../model-api/index.js";
+import { randomUUID } from "node:crypto";
+import { sendOllamaSearchResponses } from "./ollama-web-search.js";
 import { consumeDirectResponses, DirectResponsesObserver } from "./direct-responses.js";
 import {
   createServer,
@@ -72,7 +74,7 @@ import {
   waitForChatOperation,
 } from "./chat-io.js";
 import { finishProxyResponse, sendProxyWebSocket, waitForProxyOperation, writeResponseChunk } from "./proxy-delivery.js";
-import { ModelRequestTimeoutError, type ModelRequestStage } from "./chat-errors.js";
+import { ChatUpstreamError, ModelRequestTimeoutError, type ModelRequestStage } from "./chat-errors.js";
 import {
   maximumBufferedModelRequests,
   maximumModelRequestBytes,
@@ -157,6 +159,9 @@ export interface ProviderProxyOptions {
   normalizeResponsesInput?: boolean;
   /** Trusted OLC family only; never inferred from URLs, model names, or client input. */
   ollamaFreeform?: boolean;
+  ollamaWebSearch?: boolean;
+  /** Synchronous current account, credential and catalogue material check. */
+  authorizeOllamaSearch?(authorization: string): () => void;
   quotaWindowsProvider?: (
     accountId?: string,
     signal?: AbortSignal,
@@ -178,6 +183,7 @@ interface TurnMetadata {
 }
 
 interface BufferedResponsesBody {
+  search?: OllamaWebSearch;
   adapter?: OllamaFreeformResponse;
   body: Buffer;
   parsed: unknown;
@@ -194,6 +200,8 @@ export class ProviderProxy {
   private readonly readModelCapabilities: ProviderProxyOptions["readModelCapabilities"];
   private readonly normalizeResponsesInput: boolean;
   private readonly ollamaFreeform: boolean;
+  private readonly ollamaWebSearch: boolean;
+  private readonly authorizeOllamaSearch: ProviderProxyOptions["authorizeOllamaSearch"];
   private readonly modelAuthorizations = new Set<AbortController>();
   private readonly pendingUpgrades = new Set<Duplex>();
   private readonly pendingRequests = new Set<AbortController>();
@@ -251,6 +259,8 @@ export class ProviderProxy {
     this.readModelCapabilities = options.readModelCapabilities;
     this.normalizeResponsesInput = options.normalizeResponsesInput ?? false;
     this.ollamaFreeform = options.ollamaFreeform ?? false;
+    this.ollamaWebSearch = options.ollamaWebSearch ?? false;
+    this.authorizeOllamaSearch = options.authorizeOllamaSearch?.bind(options);
     this.accountIds = options.accountIds;
     this.defaultAccountId = options.defaultAccountId;
     this.upstreamUserAgent = options.upstreamUserAgent;
@@ -572,7 +582,7 @@ export class ProviderProxy {
     // cannot retain an authorization for a model disabled while it was waiting.
     // 第三方 Responses 上游必须缓冲正文才能归一化私有输入项；有目录守卫时缓冲同时用于模型复核。
     const buffersResponsesBody = route.kind === "response"
-      && (this.isModelEnabled !== undefined || this.readModelCapabilities !== undefined || this.normalizeResponsesInput || this.ollamaFreeform);
+      && (this.isModelEnabled !== undefined || this.readModelCapabilities !== undefined || this.normalizeResponsesInput || this.ollamaFreeform || this.ollamaWebSearch);
     const bufferedRequest = buffersResponsesBody
       ? await this.bufferResponsesBody(request, response)
       : undefined;
@@ -593,7 +603,7 @@ export class ProviderProxy {
       imageOperation ?? turnMetadata.operation,
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
     );
-    const exchange = this.trafficDump?.beginHttpExchange({
+    const exchange = bufferedRequest?.search ? undefined : this.trafficDump?.beginHttpExchange({
       ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
       headers: request.headers,
       method: request.method ?? "GET",
@@ -634,6 +644,130 @@ export class ProviderProxy {
     });
     response.once("close", () => diagnosticObserver?.close());
     const upstreamHeaders = forwardedRequestHeaders(request.headers, upstreamTarget.host, upstreamTarget.port, this.upstreamUserAgent);
+    if (bufferedRequest?.search && upstreamBody) {
+      if (this.normalizationOperations.size >= maximumBufferedModelRequests) {
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { type: "olc_search_capacity", message: "Ollama Cloud 搜索请求并发已满。" } }));
+        diagnosticObserver?.close(); return;
+      }
+      const search = bufferedRequest.search;
+      const body = JSON.parse(upstreamBody.toString("utf8")) as DirectResponsesRequest;
+      metrics.requestModel = boundedString(body.model);
+      metrics.requestServiceTier = requestServiceTier(body);
+      metrics.reasoningEffort = boundedString(asRecord(body.reasoning)?.effort);
+      metrics.responseFormat = body.stream ? "sse" : "json";
+      const observer = new DirectResponsesObserver();
+      const searchController = new AbortController();
+      const searchSignal = AbortSignal.any([signal, searchController.signal]);
+      let submitted = false;
+      let roundExchange: ReturnType<ModelTrafficDump["beginHttpExchange"]> | undefined;
+      let roundMetrics: MetricsState | undefined;
+      let delivering = false;
+      let terminalAttempted = false;
+      const searchAgent = upstreamTarget.agent ?? this.upstreamAgent;
+      const authorization = String(request.headers.authorization ?? "");
+      let materialCheck: (() => void) | undefined;
+      const syncMetrics = (): void => {
+        Object.assign(metrics, observer.timing);
+        if (observer.firstTokenMs !== undefined) metrics.firstTokenMs = observer.firstTokenMs;
+        for (const key of ["inputTokens", "outputTokens", "totalTokens", "cachedInputTokens", "reasoningOutputTokens"] as const) metrics[key] = observer.usage[key] ?? null;
+        invalidateGenerationTiming(metrics);
+      };
+      const recheck = (): void => {
+        searchSignal.throwIfAborted();
+        if (this.stopped || !this.authorizeOllamaSearch) throw new ModelConversionError("Ollama Cloud 搜索材料复核不可用。");
+        materialCheck ??= this.authorizeOllamaSearch(authorization);
+        materialCheck();
+      };
+      const operation = sendOllamaSearchResponses({ search, request: body, target: { ...upstreamTarget,
+        ...(searchAgent ? { agent: searchAgent } : {}),
+        authorization }, signal: searchSignal, deadlineAt: startedAtMonotonicMs + 10 * 60_000,
+        cancel: reason => searchController.abort(reason), clientHeaders: request.headers, observer, recheck,
+        refresh: async operationSignal => {
+          recheck();
+          const capability = this.readModelCapabilities ? await this.readModelCapabilities(body.model, operationSignal) : undefined;
+          operationSignal.throwIfAborted();
+          if (this.readModelCapabilities && (!capability || JSON.stringify(capability.sampling) !== JSON.stringify(bufferedRequest.sampling))
+            || !this.readModelCapabilities && this.isModelEnabled && !await this.isModelEnabled(body.model, operationSignal)) throw new ModelConversionError("Ollama Cloud 模型目录已变化。");
+          operationSignal.throwIfAborted();
+          const current = await this.upstreamFor(request.headers, operationSignal);
+          operationSignal.throwIfAborted();
+          if (current.host !== upstreamTarget.host || current.port !== upstreamTarget.port || current.protocol !== upstreamTarget.protocol
+            || current.basePath !== upstreamTarget.basePath || current.agent !== upstreamTarget.agent) throw new ModelConversionError("Ollama Cloud 出站材料已变化。");
+          recheck();
+        },
+        capture: {
+          submitted: (outbound, headers, path) => {
+            roundExchange = this.trafficDump?.beginHttpExchange({ headers: headers as IncomingHttpHeaders, method: "POST", path, startedAtMs: Date.now(), startedAtMonotonicMs: performance.now(),
+              ...(route.accountId === undefined ? {} : { accountId: route.accountId }) });
+            roundExchange?.requestChunk(Buffer.from(JSON.stringify(outbound))); roundExchange?.requestEnd();
+            roundMetrics = createMetricsState(turnMetadata, Date.now(), "http", "response", metrics.userAgent);
+            observeRequestSubmitted(roundMetrics, performance.now());
+            roundExchange?.callTiming?.submitted(performance.now());
+            roundExchange?.observeRequestMetrics(roundMetrics);
+            if (roundMetrics.traffic) metrics.traffic = roundMetrics.traffic;
+          },
+          head: (status, headers) => roundExchange?.responseHead(status, headers as IncomingHttpHeaders),
+          value: () => {},
+          invalid: () => {}, done: () => { roundExchange?.responseEnd(); roundExchange = undefined; }, finish: () => undefined,
+        },
+        observeChunk: chunk => roundExchange?.responseChunk(chunk),
+        observeValue: (value, stream, receivedAt) => {
+          if (roundMetrics) {
+            if (stream) observeResponseEvent(roundMetrics, String(value.type), value, Date.now(), receivedAt);
+            else observeJsonResponse(roundMetrics, value, Date.now(), receivedAt);
+          }
+          syncMetrics();
+        },
+        diagnostics: summary => Object.assign(metrics, summary),
+        submitted: (ua, bytes, url) => {
+          if (!submitted) { submitted = true; observeRequestSubmitted(metrics, performance.now()); }
+          metrics.requestBytes = (metrics.requestBytes ?? 0) + bytes; metrics.upstreamUrl = url; metrics.userAgent = ua;
+        },
+        headers: status => { metrics.httpStatus = status; }, content: () => {},
+        emit: async (value, terminal) => {
+          if (terminal) terminalAttempted = true;
+          if (terminal) { const final = body.stream ? asRecord(value.response)! : value; observeJsonResponse(metrics, final, Date.now(), performance.now()); syncMetrics(); await emitMetrics(); }
+          delivering = true;
+          if (!response.headersSent) response.writeHead(200, { "content-type": body.stream ? "text/event-stream" : "application/json", "cache-control": "no-store" });
+          await writeResponseChunk(response, Buffer.from(body.stream ? `event: ${String(value.type)}\ndata: ${JSON.stringify(value)}\n\n` : JSON.stringify(value)), searchSignal,
+            terminal ? modelRequestPolicy.terminalDeliveryTimeoutMs : modelRequestPolicy.deliveryTimeoutMs, () => invalidateGenerationTiming(metrics), terminal ? "terminal" : "delivery");
+          delivering = false;
+        },
+      }).then(async () => { await finishProxyResponse(response, searchSignal, modelRequestPolicy.terminalDeliveryTimeoutMs); exchange?.responseEnd(); await emitMetrics(); })
+        .catch(async (error: unknown) => {
+          const failureType = signal.aborted && response.destroyed && !this.stopped ? "client_disconnected"
+            : error instanceof ModelRequestTimeoutError ? error.code : delivering ? "client_delivery_error" : "olc_search_failed";
+          if (metrics.status === "unknown") markMetricsFailed(metrics, failureType, Date.now(), error);
+          if (error instanceof ChatUpstreamError) metrics.errorCode = error.code;
+          roundExchange?.failure(delivering ? "client_delivery" : "olc_search_failed", error); roundExchange = undefined;
+          syncMetrics(); exchange?.failure(delivering ? "client_delivery" : "olc_search_failed", error); await emitMetrics();
+          if (!response.destroyed && !signal.aborted && response.headersSent && body.stream && !delivering && !terminalAttempted) {
+            // Upstream work is already stopped. Local deadlines/material revocation
+            // still get the existing bounded failure-delivery budget; a disconnected
+            // client or a partially delivered terminal must not receive a second one.
+            const failureController = new AbortController();
+            const failureTimer = setTimeout(() => failureController.abort(), modelRequestPolicy.terminalDeliveryTimeoutMs);
+            const failureSignal = AbortSignal.any([signal, failureController.signal]);
+            const failure = search.forDelivery(search.failure(error instanceof ChatUpstreamError ? error.code : "olc_search_failed",
+              error instanceof ChatUpstreamError ? error.message : "Ollama Cloud 网页搜索请求失败。"));
+            try {
+              await writeResponseChunk(response, Buffer.from(`event: response.failed\ndata: ${JSON.stringify(failure)}\n\n`), failureSignal,
+                modelRequestPolicy.terminalDeliveryTimeoutMs, () => invalidateGenerationTiming(metrics), "terminal");
+              await finishProxyResponse(response, failureSignal, modelRequestPolicy.terminalDeliveryTimeoutMs);
+            } catch { response.destroy(); }
+            finally { clearTimeout(failureTimer); }
+          } else if (!response.destroyed && !signal.aborted && !response.headersSent) {
+            const controlled = error instanceof ChatUpstreamError ? error : undefined;
+            const status = controlled?.upstreamStatus;
+            response.writeHead(status !== undefined && [429, 503, 504].includes(status) ? status
+              : controlled && ["olc_search_timeout", "olc_search_deadline", "upstream_timeout"].includes(controlled.code) ? 504 : 502, { "content-type": "application/json" });
+            response.end(JSON.stringify({ error: { type: controlled?.code ?? "olc_search_failed", message: controlled?.message ?? "Ollama Cloud 网页搜索请求失败。" } }));
+          } else response.destroy();
+        }).finally(() => diagnosticObserver?.close());
+      this.normalizationOperations.add(operation); void operation.finally(() => this.normalizationOperations.delete(operation)).catch(() => undefined);
+      return;
+    }
     delete upstreamHeaders[chatDiagnosticsHeader];
     if (diagnosticObserver) upstreamHeaders[chatDiagnosticsHeader] = diagnosticObserver.id;
     if (this.localChatBridgeToken !== undefined) upstreamHeaders[chatBridgeAuthorizationHeader] = this.localChatBridgeToken;
@@ -990,11 +1124,18 @@ export class ProviderProxy {
       const normalized = this.normalizeResponsesInput
         ? normalizeResponsesRequest(parsed) : { body: parsed, changed: false };
       const sampled = applySamplingDefaults(normalized.body, sampling);
-      const adapted = this.ollamaFreeform ? prepareOllamaFreeform(sampled.body as Record<string, unknown>) : undefined;
+      const search = this.ollamaWebSearch ? new OllamaWebSearch(sampled.body as Record<string, unknown>, randomUUID().replaceAll("-", "")) : undefined;
+      if (search?.active) {
+        // Validate all choices and histories before either network service is invoked.
+        prepareOllamaFreeform(search.body).adapter.close();
+        buffered.search = search; return Buffer.from(JSON.stringify(search.body));
+      }
+      const prepared = search?.body ?? sampled.body;
+      const adapted = this.ollamaFreeform ? prepareOllamaFreeform(prepared as Record<string, unknown>) : undefined;
       if (adapted?.adapter.active) buffered.adapter = adapted.adapter;
       else adapted?.adapter.close();
-      return normalized.changed || sampled.changed || adapted !== undefined && adapted.body !== sampled.body
-        ? Buffer.from(JSON.stringify(adapted?.body ?? sampled.body)) : body;
+      return normalized.changed || sampled.changed || search !== undefined && search.body !== sampled.body || adapted !== undefined && adapted.body !== prepared
+        ? Buffer.from(JSON.stringify(adapted?.body ?? prepared)) : body;
     } catch (error) {
       const message = error instanceof ModelConversionError
         ? error.message

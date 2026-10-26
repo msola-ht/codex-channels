@@ -97,6 +97,8 @@ OLC 只使用 `https://ollama.com/v1` 的无状态 Responses，明确关闭 WS�
 
 第七批再次读取上述 OpenAI compatibility 官方页：云端示例仍使用无状态 Responses，普通 function 工具、`max_output_tokens` 及模型定义的 `reasoning.effort` 属于公开合同；不能从字段被接受推断实际思考质量。产品采用完整显式历史的函数及模拟结果续答，不使用 `previous_response_id` 或 `conversation`，每个精确候选仍须独立验证；本地合成响应不能代替真实云端验收。
 
+第八批于 2026-10-26 再次读取 [Web search](https://docs.ollama.com/capabilities/web-search)：独立固定 `POST https://ollama.com/api/web_search` 接受 query/max_results（默认五条、最多十条），顶层 results 每条包含 title/url/content 摘要；使用账户 Bearer。网页读取是另一个接口，本批未实现，也未调用真实搜索 API。Responses 工具及搜索生命周期同时核对锁定 Codex `tools/src/tool_spec.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs`；Search action 只保留 query/queries，外部用量缺必需计数时省略 usage，不虚构零。
+
 ## Cline 模型目录来源
 
 CLP 不再使用 Cline 官方生成目录作为模型名单或能力来源。固定 DS 模型由仓库 `runtime/model-catalog-deepseek.json` 和 `provider-model-catalog.json` 的明确映射生成，入口为 `scripts/provider-model-catalog.mjs`；其他模型通过统一的按 ID 添加入口独立声明或继承本地快照。渠道和 Relay 共用受管目录；旧独立 Relay 文件及 Cline 来源记录保留，不自动迁移或删除，见[CLP 配置与恢复](cline-pass.md)。

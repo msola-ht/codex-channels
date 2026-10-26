@@ -11,6 +11,7 @@ import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 import { ProviderModelGuard } from "./provider-model-guard.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 import { DeepseekImageMaterialReader } from "./deepseek-image-material-reader.mjs";
+import { loadConfiguredProviderProfile } from "./model-provider-managed-runtime.mjs";
 import { closeSingleWorkerReaders, waitForSingleWorkerReadersExit } from "./single-worker-reader.mjs";
 import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "./windows-acl-bridge.mjs";
 import { writeThirdPartyRuntimeModelCatalog } from "./third-party-model-catalog.mjs";
@@ -436,7 +437,26 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       // 除官方 OpenAI 端点外的 Responses 上游都不理解 Codex 私有输入项与参数标记，
       // 必须在上游收到正文前归一化；Chat 上游由桥转换，不在此处改写。
       ...(!bridge && !officialOpenAiRoute ? { normalizeResponsesInput: true } : {}),
-      ...(!bridge && definition?.storageId === "ollama-cloud" ? { ollamaFreeform: true } : {}),
+      ...(!bridge && definition?.storageId === "ollama-cloud" ? { ollamaFreeform: true, ollamaWebSearch: true,
+        authorizeOllamaSearch: authorization => {
+          assertRunning();
+          const active = settingsSnapshots.get(upstreamProvider);
+          const fingerprint = readAppServerProviderSettingsFingerprint(upstreamProvider, runtime.environment);
+          const profile = loadConfiguredProviderProfile(runtime.environment, definition);
+          const expected = `Bearer ${profile?.apiKey ?? ""}`;
+          if (!active || active.fingerprint !== fingerprint || !profile?.apiKey || authorization.length !== expected.length
+            || !timingSafeEqual(Buffer.from(authorization), Buffer.from(expected))
+            || readAppServerProviderSettingsFingerprint(upstreamProvider, runtime.environment) !== fingerprint) {
+            throw new Error("Ollama Cloud 账户或目录材料已变化，请应用设置后重试");
+          }
+          return () => {
+            assertRunning();
+            if (settingsSnapshots.get(upstreamProvider) !== active
+              || readAppServerProviderSettingsFingerprint(upstreamProvider, runtime.environment) !== fingerprint) {
+              throw new Error("Ollama Cloud 账户或目录材料已变化，请应用设置后重试");
+            }
+          };
+        } } : {}),
       ...(opencodeGo
         ? {
             accountIds: [accountId],

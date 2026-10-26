@@ -1,5 +1,6 @@
 export { responsesToChat } from "./responses-to-chat.js";
 export { prepareOllamaFreeform, OllamaFreeformResponse } from "./ollama-freeform.js";
+export { OllamaWebSearch, type OllamaSearchCall, type OllamaSearchResult } from "./ollama-web-search.js";
 export type { ChatRequest, ChatMessage, ChatUserContentPart, ChatToolIdentity } from "./responses-to-chat.js";
 export { ChatToResponses } from "./chat-to-responses.js";
 export type { HostedSearchCall, HostedSearchResult } from "./chat-to-responses.js";

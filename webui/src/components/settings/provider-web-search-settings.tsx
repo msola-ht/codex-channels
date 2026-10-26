@@ -25,7 +25,7 @@ export function ProviderWebSearchSettings({ settings, management, provider }: { 
         const error = providerSearchSettingLabel(t, setting)
         return <ManagedSelect fullWidth key={setting.provider} label={t("providerWebSearch.providerLabel", { name: label, provider: setting.provider })}
           value={knownMode && setting.status === "ready" ? setting.mode ?? "global" : ""} placeholder={error}
-          description={!knownMode ? error : undefined} disabled={locked || !knownMode}
+          description={!knownMode ? error : setting.provider.startsWith("olc-") ? t("providerWebSearch.ollamaHint") : undefined} disabled={locked || !knownMode}
           options={[["global", t("providerWebSearch.followGlobal")], ["disabled", t("settingsFields.off")], ["cached", t("settingsFields.cached")], ["indexed", t("settingsFields.indexed")], ["live", t("settingsFields.live")]]}
           onChange={value => {
             if (locked || setting.status !== "ready" || !knownMode) return

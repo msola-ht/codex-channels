@@ -4,7 +4,7 @@ import { ModelConversionError, prepareOllamaFreeform, type OllamaFreeformRespons
 import { parseDirectModelJson, readDirectModelBody, validateDirectModelResponse, withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
 import { readModelFrames } from "./chat-io.js";
 import { ChatUpstreamError, chatStreamError, chatUpstreamError } from "./chat-errors.js";
-import { createMetricsState, hasResponseOutputContent, observeJsonResponse, observeResponseEvent, observeRequestSubmitted, observeResponseReceived } from "./response-metrics-observer.js";
+import { createMetricsState, hasResponseOutputContent, invalidateGenerationTiming, observeJsonResponse, observeResponseEvent, observeRequestSubmitted, observeResponseReceived } from "./response-metrics-observer.js";
 import type { GenerationTiming } from "../../runtime/request-timing.mjs";
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
 
@@ -13,6 +13,25 @@ export class DirectResponsesObserver {
   private readonly metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, Date.now(), "http", "response", null);
   submitted(at: number): void { observeRequestSubmitted(this.metrics, at); }
   receivedError(at: number): void { observeResponseReceived(this.metrics, at); }
+  get firstTokenMs(): number | undefined { return this.metrics.firstTokenMs; }
+  /** Internal rounds contribute receipt/content timing, never an external terminal. */
+  progress(value: Record<string, unknown>, stream: boolean, at: number): void {
+    invalidateGenerationTiming(this.metrics);
+    if (stream) {
+      if (!["response.completed", "response.failed", "response.incomplete", "error"].includes(String(value.type))) observeResponseEvent(this.metrics, String(value.type), value, Date.now(), at);
+    } else {
+      observeResponseReceived(this.metrics, at);
+      if (hasResponseOutputContent(value)) observeResponseEvent(this.metrics, "response.output_text.delta", { type: "response.output_text.delta", delta: "content" }, Date.now(), at);
+    }
+  }
+  aggregateUsage(value: Record<string, unknown>): void {
+    const input = record(value.input_tokens_details) ? value.input_tokens_details : {};
+    const output = record(value.output_tokens_details) ? value.output_tokens_details : {};
+    for (const [key, count] of Object.entries({ inputTokens: value.input_tokens, outputTokens: value.output_tokens, totalTokens: value.total_tokens,
+      cachedInputTokens: input.cached_tokens, reasoningOutputTokens: output.reasoning_tokens })) {
+      (this.metrics as unknown as Record<string, unknown>)[key] = typeof count === "number" ? count : null;
+    }
+  }
   get timing(): { responseTimeMs?: number; generationTiming?: GenerationTiming } {
     return { ...(this.metrics.responseTimeMs === undefined ? {} : { responseTimeMs: this.metrics.responseTimeMs }),
       ...(this.metrics.generationTiming === undefined ? {} : { generationTiming: this.metrics.generationTiming }) };
@@ -52,12 +71,14 @@ export class DirectResponsesObserver {
   }
 }
 
-interface DirectResponsesCall {
+export interface DirectResponsesCall {
   adapter?: OllamaFreeformResponse;
   ollamaFreeform?: boolean;
   request: DirectResponsesRequest;
   /** Optional tighter success-body budget; error bodies remain capped at 64 KiB. */
   maximumResponseBytes?: number;
+  observeChunk?: (chunk: Buffer) => void;
+  observeValue?: (value: Record<string, unknown>, stream: boolean, receivedAt: number) => void;
   target: DirectModelTarget;
   signal: AbortSignal;
   clientHeaders?: IncomingHttpHeaders;
@@ -84,7 +105,7 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
       call.observer.submitted(performance.now()); call.submitted(ua, requestBytes, upstreamUrl);
       call.capture?.submitted(call.request, headers, path);
     },
-  }, incoming => { consuming = true; return consumeDirectResponses(incoming, { ...call, ...(adapted?.adapter.active ? { adapter: adapted.adapter } : {}) }); }); }
+  }, incoming => { consuming = true; return consumeDirectResponses(incoming, { ...call, ...(suppliedAdapter || adapted?.adapter.active ? { adapter: adapted!.adapter } : {}) }); }); }
   catch (error) {
     if (!consuming && !call.signal.aborted) {
       const diagnostics = new ChatDiagnostics();

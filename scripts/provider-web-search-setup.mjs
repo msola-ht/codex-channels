@@ -28,6 +28,7 @@ export async function runProviderWebSearchSettingsSetup({
       output.write("所选提供商的搜索配置不可安全读取，请检查配置后重试；未执行写入。\n");
       return { action: "back" };
     }
+    if (provider.startsWith("olc-")) output.write("Ollama Cloud 搜索仅支持实时（live），使用所选账户的搜索额度；缓存和索引不受支持，跟随全局不会自动改为实时。\n");
     if (selected.source === "global") {
       output.write(`${provider} 共用主 config.toml 的全局搜索设置。\n请进入 codexc config → Codex 新会话与用户偏好 → 联网搜索模式；修改会影响所有跟随全局的提供商。\n`);
       return { action: "back" };

@@ -11,6 +11,8 @@
 
 `clp_search_tool_choice` 表示上游搜索调用违反本轮工具选择限制，联网前已阻止。CLP 永久流内失败对 Codex 返回非重试码 `invalid_prompt`，细分原因保留在 `error.type` 与诊断码中；错误记录同时读取 code/type。可重试流内失败保留分类，并透传经校验的 `Retry-After`，避免永久搜索失败引发整轮自动重试。
 
+OLC 托管搜索的 `olc_search_authentication_error`、`olc_search_permission_denied`、`olc_search_rate_limit`、`olc_search_timeout`、`olc_search_invalid_response` 和 `olc_search_upstream_error` 分别表示搜索接口的认证、权限、限流、超时、格式和连接／服务故障；`olc_search_deadline` 表示整次请求期限已到，`olc_search_failed` 表示工具、预算或材料复核失败。错误列表和详情优先显示这些安全分类，不把最后一次模型 HTTP 200 当作搜索成功。搜索已开始后的失败以同一响应的 `response.failed` 收尾，wire code 为 `invalid_prompt`，具体原因保留在 type 和指标中，防止原生 Codex 把整个搜索请求自动重放。失败搜索不发布完成项；本地期限或撤销停止上游后仅保留既有的 5 秒失败交付预算，客户端已经断开或终态交付本身失败时无法保证送达。
+
 渠道输入、输出和生命周期失败统一使用以下字段（能拿到时才出现）：
 
 | 字段 | 含义 | 示例 |
