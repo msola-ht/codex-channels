@@ -9,6 +9,8 @@ import type { QqCommandKeyboard } from "./protocol.js";
 import type { QqMessageInput } from "./message-input.js";
 import { qqConversationActor } from "./addressing.js";
 import { qqLiteralMarkdown } from "./message-markdown.js";
+import { formatInteractionQuestionHeading } from "../interaction-copy.js";
+import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
 
 interface Pending {
   requestId: string;
@@ -224,9 +226,7 @@ function render(pending: Pending, token: string): { content: string; controls: {
     if (literalMarkdown) markdownContent = `## 审批请求\n\n${literalMarkdown}`;
   } else if (request.type === "user-input") {
     const question = request.questions[pending.question]!;
-    const number = `问题 ${pending.question + 1}/${request.questions.length}`;
-    const heading = question.header.trim() && question.header.trim() !== number
-      ? `${number} · ${question.header.trim()}` : number;
+    const heading = formatInteractionQuestionHeading(request, pending.question);
     const pageCount = Math.max(1, Math.ceil(question.options.length / 10));
     const page = pageCount > 1 ? `\n\n选项第 ${pending.page + 1}/${pageCount} 页` : "";
     const options = question.options.slice(pending.page * 10, (pending.page + 1) * 10)
@@ -234,8 +234,10 @@ function render(pending: Pending, token: string): { content: string; controls: {
     content = `${request.title}\n\n${heading}\n\n${question.question}`;
     content += page + options;
     if (question.secret) content += "\n请勿在 QQ 聊天记录中发送密钥、Token 或其他敏感凭据。";
-    markdownContent = `## ${request.title}\n\n### ${heading}\n\n${question.question}`
-      + page + options
+    const markdownOptions = question.options.slice(pending.page * 10, (pending.page + 1) * 10)
+      .map((option, index) => `\n\n${pending.page * 10 + index + 1}. ${escapeLifecycleLiteral(option).replaceAll("=", "\\=")}`).join("");
+    markdownContent = `## ${escapeLifecycleLiteral(request.title.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " "))}\n\n### ${escapeLifecycleLiteral(heading)}\n\n${question.question}`
+      + page + markdownOptions
       + (question.secret ? "\n\n请勿在 QQ 聊天记录中发送密钥、Token 或其他敏感凭据。" : "");
     instruction = question.options.length === 0
       ? "点击“输入回答”，在填入的前缀后追加回答并发送。"

@@ -586,7 +586,7 @@ function mapUserInputDecision(
       const choiceField = `q${index}_choice`;
       const otherField = `q${index}_other`;
       allowedFields.add(choiceField);
-      const choice = formValues[choiceField]?.trim();
+      const choice = formValues[choiceField];
       const other = question.allowOther
         ? formValues[otherField]?.trim()
         : undefined;

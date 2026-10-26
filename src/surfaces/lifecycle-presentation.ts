@@ -17,7 +17,6 @@ import {
   formatPercent,
   accountQuotaFields,
 } from "./account-format.js";
-import { toStructuredMarkdownList } from "./markdown-list.js";
 import { isAutoApprovalReviewer, formatThreadApprovalsReviewer } from "./conversation-workspace-status-command-format.js";
 import {
   formatElapsedDuration,
@@ -215,7 +214,7 @@ export function createStartupPresentation(
       { label: "版本", value: `Codex Connect ${gatewayMetadata.version} · Codex ${runtime.gatewayVersion}` },
       { label: "工作区", value: workspace.name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true },
       ...(status.gitBranch ? [{ label: "Git 分支", value: status.gitBranch.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true }] : []),
-      ...(detailed || runtime.displayPreset === "standard" ? [
+      ...(detailed || runtime.displayPreset === "standard" || runtime.displayPreset === "custom" ? [
         ...(detailed ? [{ label: "工作目录", value: workspace.cwd, literal: true }] : []),
         { label: "会话", value: status.threadId ? status.threadName ?? "未命名" : "当前未绑定会话", literal: true },
         ...(detailed && status.threadId ? [{ label: "Session ID", value: status.threadId, literal: true }] : []),
@@ -279,7 +278,8 @@ export function createTurnStartedPresentation(
       ? turnStartIdentityTitle(identity)
       : backgroundThreadId
         ? "后台任务继续处理中。"
-        : "已开始处理。",
+        : "已开始处理",
+    titleStyle: "emphasis",
     fields: [
       { label: "工作区", value: (workspace?.workspaceName ?? workspace?.workspaceId ?? "未知").replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true },
       ...(workspace?.gitBranch ? [{ label: "Git 分支", value: workspace.gitBranch.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true }] : []),
@@ -330,11 +330,11 @@ export function createSubagentStartedPresentation(
 ): LifecyclePresentation {
   const detailed = detail !== "basic";
   return {
-    title: detailed ? `子代理开始 · ${subagentTaskName(event.agentPath)}` : "子代理开始",
-    ...(!detailed ? { titleDetail: subagentTaskName(event.agentPath) } : {}),
+    title: "子代理开始",
+    titleDetail: subagentTaskName(event.agentPath),
     fields: detailed ? [
-      { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
-      { label: "模型设置", value: event.model || "未提供" },
+      { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供", literal: true },
+      { label: "模型设置", value: event.model || "未提供", literal: true },
       { label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort, "未提供") },
     ] : [],
   };
@@ -346,11 +346,11 @@ export function createSubagentContactedPresentation(
 ): LifecyclePresentation {
   const detailed = detail !== "basic";
   return {
-    title: detailed ? `子代理继续 · ${subagentTaskName(event.agentPath)}` : "子代理继续",
-    ...(!detailed ? { titleDetail: subagentTaskName(event.agentPath) } : {}),
+    title: "子代理继续",
+    titleDetail: subagentTaskName(event.agentPath),
     fields: detailed ? [
-      { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
-      { label: "模型设置", value: event.model || "未提供" },
+      { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供", literal: true },
+      { label: "模型设置", value: event.model || "未提供", literal: true },
       { label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort, "未提供") },
     ] : [],
   };
@@ -365,12 +365,13 @@ export function createSubagentCompletedPresentation(
   }
   const fields: LifecyclePresentationField[] = [];
   if (event.model) {
-    fields.push({ label: "模型", value: event.model });
+    fields.push({ label: "模型", value: event.model, literal: true });
   }
   if (event.modelProvider) {
     fields.push({
       label: "提供商",
       value: formatCodexProviderLabel(event.modelProvider),
+      literal: true,
     });
   }
   if (event.reasoningEffort) {
@@ -390,7 +391,8 @@ export function createSubagentCompletedPresentation(
     }],
   });
   return {
-    title: `${subagentStatusLabel(event.status)} · ${subagentTaskName(event.agentPath)}`,
+    title: subagentStatusLabel(event.status),
+    titleDetail: subagentTaskName(event.agentPath),
     fields: visibleCompletionStatistics(fields),
   };
 }
@@ -771,18 +773,20 @@ export function renderStructuredLifecyclePresentation(
   presentation: LifecyclePresentation,
   escapeLiterals = true,
 ): string {
-  return toStructuredMarkdownList([
-    presentation.titleDetail === undefined ? (presentation.titleStyle === "emphasis" ? `**${presentation.title}**` : presentation.title)
-      : `**${presentation.title}** · ${escapeLiterals ? escapeLifecycleLiteral(presentation.titleDetail) : presentation.titleDetail}`,
+  const title = escapeLiterals ? escapeLifecycleLiteral(presentation.title) : presentation.title;
+  const hasBody = presentation.fields.length > 0 || (presentation.sections?.length ?? 0) > 0;
+  return [
+    presentation.titleDetail === undefined ? (presentation.titleStyle === "emphasis" ? `**${title}**` : hasBody ? `## ${title}` : title)
+      : `**${title}** · ${escapeLiterals ? escapeLifecycleLiteral(presentation.titleDetail) : presentation.titleDetail}`,
     ...(presentation.fields.length > 0
       ? ["", ...presentation.fields.map((field) => formatStructuredField(field, escapeLiterals))]
       : []),
     ...(presentation.sections ?? []).flatMap((section) => [
       "",
-      `${section.title}：`,
+      `### ${section.title}`,
       ...section.fields.map((field) => formatStructuredField(field, escapeLiterals)),
     ]),
-  ].join("\n"));
+  ].join("\n");
 }
 
 function formatStructuredField(field: LifecyclePresentationField, escapeLiterals: boolean): string {
@@ -793,10 +797,11 @@ function formatStructuredField(field: LifecyclePresentationField, escapeLiterals
         formatStructuredField(subfield, escapeLiterals).split("\n").map((line) => `  ${line}`)),
     ].join("\n");
   }
+  const value = field.literal && escapeLiterals ? escapeLifecycleLiteral(field.value) : field.value;
   return [
-    `- ${field.label}：${field.literal && escapeLiterals ? escapeLifecycleLiteral(field.value) : field.value}`,
+    `- ${field.label}：${value.replace(/\r\n?|\n/gu, "  \n  ")}`,
     ...(field.subfields ?? []).map((subfield) =>
-      `  - ${subfield.label}：${subfield.value}`),
+      formatStructuredField(subfield, escapeLiterals).split("\n").map(line => `  ${line}`).join("\n")),
   ].join("\n");
 }
 
@@ -817,7 +822,7 @@ function formatField(field: LifecyclePresentationField): string {
   return [
     `${field.label}：${field.value}`,
     ...(field.subfields ?? []).map((subfield) =>
-      `  ${subfield.label}：${subfield.value}`),
+      formatField(subfield).split("\n").map(line => `  ${line}`).join("\n")),
   ].join("\n");
 }
 

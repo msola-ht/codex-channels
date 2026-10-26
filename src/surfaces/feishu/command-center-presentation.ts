@@ -6,7 +6,7 @@ import {
   type ConversationCommandResult,
 } from "../../application/index.js";
 import { UserFacingError } from "../../conversation-core/index.js";
-import { formatConversationResetCredits } from "../conversation-model-account-command-format.js";
+import { formatConversationModelState, formatConversationResetCredits, formatModelSettingLiteral } from "../conversation-model-account-command-format.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import {
   formatDelayMinutes,
@@ -22,7 +22,7 @@ import {
   formatConversationAutoReview,
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
-import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, formatServiceTierSetting, modelListDisplayName, modelListEntry } from "../provider-format.js";
+import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListDisplayName } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import type {
   FeishuCommandCenterAction,
@@ -606,11 +606,13 @@ export function renderCommandCenterChoices(
   }
   if (action === "status" && result.kind === "status") {
     return {
-      title: result.view === "detail" ? "Codex 状态详情" : "Codex 状态",
+      title: "Codex 状态",
       description: stripMarkdownHeading(formatConversationStatus(result.status, escapeFeishuCardMarkdown, result)),
       descriptionFormat: "markdown",
       choices: [
-        { label: result.view === "detail" ? "返回总览" : "查看详情", action: "status", input: result.view === "detail" ? "" : "detail" },
+        { label: "请求统计", action: "metrics", input: "" },
+        { label: "账户用量", action: "usage", input: "" },
+        { label: "账户额度", action: "limits", input: "" },
         { label: "模型设置", action: "model", input: "" },
         { label: "工作区", action: "workspace", input: "" },
         { label: "权限查询", action: "permissions", input: "" },
@@ -642,10 +644,7 @@ export function renderCommandCenterChoices(
       model.available !== false && model.model === result.state.model
       && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai"),
   );
-  // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
-  const currentModelName = currentModel === undefined
-    ? result.state.model
-    : modelListEntry(currentModel.displayName, currentModel.provider, currentModel.model).modelName;
+  const settingLines = formatConversationModelState(result, escapeFeishuCardMarkdown).map(line => `- ${line}`);
   if (action === "model") {
     if (result.state.models.length === 0) {
       return undefined;
@@ -657,16 +656,13 @@ export function renderCommandCenterChoices(
         title: "选择提供商",
         description: [
           "### 当前模型",
-          `- 模型：${currentModelName}`,
-          `- Provider：${formatCodexProviderLabel(result.state.modelProvider)}`,
-          `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
-          `- 速度：${formatServiceTierSetting(result.state, currentModel)}`,
+          ...settingLines,
           "",
           "请先选择提供商，再选择该提供商下的模型。",
         ].join("\n"),
         descriptionFormat: "markdown",
         choices: providers.map((provider) => ({
-          label: `${provider === current ? "✓ " : ""}${formatCodexProviderLabel(provider)} · ${formatProviderModelSummary(result.state.models, provider)}`,
+          label: `${provider === current ? "✓ " : ""}${formatModelSettingLiteral(formatCodexProviderLabel(provider))} · ${formatProviderModelSummary(result.state.models, provider)}`,
           action: "model",
           input: provider,
           modelSelection: { kind: "browse-provider", provider, snapshot },
@@ -677,16 +673,16 @@ export function renderCommandCenterChoices(
       title: "选择模型",
       description: [
         "### 当前设置",
-        `- Provider：${formatCodexProviderLabel(result.state.providerFilter)}`,
-        `- 速度：${formatServiceTierSetting(result.state, currentModel)}`,
+        ...settingLines,
+        `- 浏览 Provider：${formatModelSettingLiteral(formatCodexProviderLabel(result.state.providerFilter), escapeFeishuCardMarkdown)}`,
         "",
-        "已选择该 Provider，请继续选择模型。选择模型后将继续选择思考等级。",
+        "正在浏览该 Provider；浏览不会切换当前设置。请继续选择模型，选择后将继续选择思考等级。",
       ].join("\n"),
       descriptionFormat: "markdown",
       choices: result.state.models
         .filter((model) => (model.provider ?? "openai") === result.state.providerFilter)
         .map((model, index) => ({
-        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${modelListDisplayName(model.displayName, model.provider, model.model, index + 1)}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
+        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, index + 1))}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
         action: "model",
         input: String(index + 1),
         modelSelection: { kind: "model", provider: model.provider ?? "openai", model: model.model, snapshot },
@@ -702,14 +698,12 @@ export function renderCommandCenterChoices(
       title: `选择${reasoningEffortSettingName(result.state.effort, currentModel)}`,
       description: [
         "### 当前设置",
-        `- 模型：${currentModelName}`,
-        `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
-        `- 速度：${formatServiceTierSetting(result.state, currentModel)}`,
+        ...settingLines,
       ].join("\n"),
       descriptionFormat: "markdown",
       choices: efforts.map(
         (option) => ({
-          label: `${option.effort === result.state.effort ? "✓ " : ""}${formatReasoningEffort(option.effort)}`,
+          label: `${option.effort === result.state.effort ? "✓ " : ""}${formatModelSettingLiteral(formatReasoningEffort(option.effort))}`,
           action: "effort",
           input: option.effort,
           modelSelection: { kind: "effort", effort: option.effort, snapshot },
@@ -722,7 +716,8 @@ export function renderCommandCenterChoices(
       ? "未知" : formatServiceTier(result.state.serviceTier, currentModel);
     return {
       title: "切换速度",
-      description: `当前：${formatServiceTierSetting(result.state, currentModel)} · 当前模型${formatModelSpeedSupport(currentModel)}`,
+      description: [...settingLines, `- 当前模型：${formatModelSpeedSupport(currentModel)}`].join("\n"),
+      descriptionFormat: "markdown",
       choices: [
         {
           label: `${speed === "Standard" ? "✓ " : ""}Standard`,

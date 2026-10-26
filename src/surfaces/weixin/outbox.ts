@@ -1,5 +1,6 @@
 import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
 import { SnapshotDelivery } from "../snapshot-delivery.js";
+import { waitForCompletionNotice } from "../completion-notice-delay.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import type { Logger } from "pino";
@@ -24,7 +25,7 @@ import {
   createHookCompletedPresentation,
   isHiddenAutoApprovalReview,
   shouldHideTurnCompleted,
-  renderPlainLifecyclePresentation,
+  renderStructuredLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
   contentTruncatedText,
@@ -226,7 +227,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     if (event.type === "turn.started") {
       this.enqueueText(
         event.target,
-        renderPlainLifecyclePresentation(
+        renderStructuredLifecyclePresentation(
           createTurnStartedPresentation(
             event.background ? event.threadId : undefined,
             event.identity,
@@ -244,12 +245,15 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     this.delivery.enqueue(
       event.target.conversationId,
-      (signal) => this.sendEvent(
-        event,
-        rendered,
-        signal,
-        this.contexts.get(event.target),
-      ),
+      async (signal) => {
+        if (event.type === "turn.completed") await waitForCompletionNotice(signal);
+        await this.sendEvent(
+          event,
+          rendered,
+          signal,
+          this.contexts.get(event.target),
+        );
+      },
       decision.critical,
     );
   }
@@ -352,16 +356,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
       case "connection.restored":
         return formatWeixinCommandText(formatConnectionRestored(visibleUpstreamMessage(event.message)));
       case "hook.completed":
-        return formatWeixinCommandText(
-          renderPlainLifecyclePresentation(createHookCompletedPresentation(event)),
-          { structuredFields: true },
-        );
+        return renderStructuredLifecyclePresentation(createHookCompletedPresentation(event));
       case "autoApprovalReview.updated": {
         const presentation = createAutoApprovalReviewPresentation(event, this.options.displaySettings?.(event.target).presentationDetail ?? "basic");
-        return presentation ? formatWeixinCommandText(
-          renderPlainLifecyclePresentation(presentation),
-          { structuredFields: true },
-        ) : null;
+        return presentation ? renderStructuredLifecyclePresentation(presentation) : null;
       }
       case "operation.updated":
         return this.compactionNotices.accept(event, DeliveryReceipt.current() !== undefined);

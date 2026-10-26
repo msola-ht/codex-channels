@@ -58,7 +58,7 @@ export function renderFeishuCommandResult(
   result: ConversationCommandResult,
 ): string | null {
   if (result.kind === "status") return formatConversationStatus(result.status, escapeFeishuMarkdown, result);
-  const rendered = renderConversationCommandResult(result, formatFeishuCommandMarkdown);
+  const rendered = renderConversationCommandResult(result, formatFeishuCommandMarkdown, escapeFeishuMarkdown);
   if (rendered === null || result.kind !== "artifacts") {
     return rendered;
   }

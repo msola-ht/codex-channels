@@ -1,4 +1,5 @@
 import { advanceMarkdownFence } from "../markdown-fence.js";
+import { markdownInlineCodeAt } from "../markdown-inline-code.js";
 
 export function formatWeixinFinalText(text: string): string {
   const lines = text.split(/\r?\n/u);
@@ -42,30 +43,50 @@ function formatWeixinMarkdownLine(line: string): string {
   return formatWeixinMarkdownInline(value);
 }
 
-function formatWeixinMarkdownInline(value: string): string {
+interface InlineFormatBudget { remaining: number }
+
+function formatWeixinMarkdownInline(
+  value: string,
+  depth = 0,
+  budget: InlineFormatBudget = { remaining: Math.max(1_024, value.length * 8) },
+): string {
+  // Link labels are untrusted model output. Preserve deeply nested text rather
+  // than exhausting the stack before the Outbox can send its preview or file.
+  if (depth >= 32) return value;
   let output = "";
   let index = 0;
   while (index < value.length) {
+    if (budget.remaining-- <= 0) return output + value.slice(index);
+    if (value[index] === "\\" && isMarkdownPunctuation(value[index + 1])) {
+      output += value.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
     if (value[index] === "`") {
-      const closing = value.indexOf("`", index + 1);
-      if (closing < 0) {
-        output += value.slice(index + 1);
-        break;
-      }
-      output += value.slice(index, closing + 1);
-      index = closing + 1;
+      const code = boundedInlineCodeAt(value, index, budget);
+      output += value.slice(index, code.end);
+      index = code.end;
       continue;
     }
 
     if (value.startsWith("![", index)) {
-      const imageEnd = markdownDestinationEnd(value, index + 2);
-      if (imageEnd !== null) {
-        index = imageEnd;
+      const image = markdownLinkAt(value, index + 2, budget);
+      if (image !== null) {
+        index = image.end;
         continue;
       }
     }
 
-    const emphasis = cjkEmphasisAt(value, index);
+    if (value[index] === "[") {
+      const link = markdownLinkAt(value, index + 1, budget);
+      if (link !== null) {
+        output += `[${formatWeixinMarkdownInline(value.slice(index + 1, link.labelEnd), depth + 1, budget)}${value.slice(link.labelEnd, link.end)}`;
+        index = link.end;
+        continue;
+      }
+    }
+
+    const emphasis = cjkEmphasisAt(value, index, depth, budget);
     if (emphasis !== null) {
       output += emphasis.text;
       index = emphasis.end;
@@ -78,18 +99,96 @@ function formatWeixinMarkdownInline(value: string): string {
   return output;
 }
 
-function markdownDestinationEnd(value: string, labelStart: number): number | null {
-  const labelEnd = value.indexOf("]", labelStart);
-  if (labelEnd < 0 || value[labelEnd + 1] !== "(") {
-    return null;
+function boundedInlineCodeAt(value: string, start: number, budget: InlineFormatBudget): { end: number } {
+  if (value.length - start > budget.remaining) {
+    budget.remaining = 0;
+    return { end: value.length };
   }
-  const destinationEnd = value.indexOf(")", labelEnd + 2);
-  return destinationEnd < 0 ? null : destinationEnd + 1;
+  const code = markdownInlineCodeAt(value, start);
+  budget.remaining -= (code.content === undefined ? value.length : code.end) - start;
+  return code;
+}
+
+function markdownLinkAt(
+  value: string,
+  labelStart: number,
+  budget: InlineFormatBudget,
+): { labelEnd: number; end: number } | null {
+  let cursor = labelStart;
+  let brackets = 1;
+  while (cursor < value.length) {
+    if (budget.remaining-- <= 0) return null;
+    if (value[cursor] === "\\" && isMarkdownPunctuation(value[cursor + 1])) {
+      cursor += 2;
+      continue;
+    }
+    if (value[cursor] === "`") {
+      cursor = boundedInlineCodeAt(value, cursor, budget).end;
+      continue;
+    }
+    if (value[cursor] === "[") brackets += 1;
+    if (value[cursor] === "]" && --brackets === 0) break;
+    cursor += 1;
+  }
+  if (brackets !== 0 || value[cursor + 1] !== "(") return null;
+  const labelEnd = cursor;
+  cursor += 2;
+  while (/[ \t]/u.test(value[cursor] ?? "")) {
+    if (budget.remaining-- <= 0) return null;
+    cursor += 1;
+  }
+  const wrapped = value[cursor] === "<";
+  if (wrapped) cursor += 1;
+  let parentheses = 0;
+  while (cursor < value.length) {
+    if (budget.remaining-- <= 0) return null;
+    if (value[cursor] === "\\" && isMarkdownPunctuation(value[cursor + 1])) {
+      cursor += 2;
+      continue;
+    }
+    if (wrapped) {
+      if (value[cursor] === ">") break;
+      if (value[cursor] === "<") return null;
+    } else {
+      if (/\s/u.test(value[cursor]!)) break;
+      if (value[cursor] === "<") return null;
+      if (value[cursor] === "(") parentheses += 1;
+      if (value[cursor] === ")") {
+        if (parentheses === 0) break;
+        parentheses -= 1;
+      }
+    }
+    cursor += 1;
+  }
+  if (parentheses !== 0 || (wrapped && value[cursor++] !== ">")) return null;
+  const destinationEnd = cursor;
+  while (/[ \t]/u.test(value[cursor] ?? "")) {
+    if (budget.remaining-- <= 0) return null;
+    cursor += 1;
+  }
+  if (cursor > destinationEnd && (value[cursor] === '"' || value[cursor] === "'" || value[cursor] === "(")) {
+    const closing = value[cursor] === "(" ? ")" : value[cursor];
+    cursor += 1;
+    while (cursor < value.length && value[cursor] !== closing) {
+      if (budget.remaining-- <= 0) return null;
+      if (value[cursor] === "\\" && isMarkdownPunctuation(value[cursor + 1])) cursor += 2;
+      else if (closing === ")" && value[cursor] === "(") return null;
+      else cursor += 1;
+    }
+    if (value[cursor++] !== closing) return null;
+    while (/[ \t]/u.test(value[cursor] ?? "")) {
+      if (budget.remaining-- <= 0) return null;
+      cursor += 1;
+    }
+  }
+  return value[cursor] === ")" ? { labelEnd, end: cursor + 1 } : null;
 }
 
 function cjkEmphasisAt(
   value: string,
   start: number,
+  depth: number,
+  budget: InlineFormatBudget,
 ): { text: string; end: number } | null {
   const markers = ["***", "___", "*", "_"] as const;
   for (const marker of markers) {
@@ -106,7 +205,7 @@ function cjkEmphasisAt(
       continue;
     }
     const contentStart = start + marker.length;
-    const closing = value.indexOf(marker, contentStart);
+    const closing = emphasisClosingAt(value, contentStart, marker, budget);
     if (closing <= contentStart) {
       continue;
     }
@@ -124,11 +223,38 @@ function cjkEmphasisAt(
       return null;
     }
     return {
-      text: formatWeixinMarkdownInline(content),
+      text: formatWeixinMarkdownInline(content, depth + 1, budget),
       end: closing + marker.length,
     };
   }
   return null;
+}
+
+function emphasisClosingAt(value: string, start: number, marker: string, budget: InlineFormatBudget): number {
+  for (let index = start; index < value.length; index += 1) {
+    if (budget.remaining-- <= 0) return -1;
+    if (value[index] === "\\" && isMarkdownPunctuation(value[index + 1])) {
+      index += 1;
+    } else if (value[index] === "`") {
+      index = boundedInlineCodeAt(value, index, budget).end - 1;
+    } else if (value[index] === "[") {
+      const link = markdownLinkAt(value, index + 1, budget);
+      if (link !== null) index = link.end - 1;
+    } else if (value[index] === marker[0]) {
+      let end = index + 1;
+      while (value[end] === marker[0]) {
+        if (budget.remaining-- <= 0) return -1;
+        end += 1;
+      }
+      if (end - index === marker.length) return index;
+      index = end - 1;
+    }
+  }
+  return -1;
+}
+
+function isMarkdownPunctuation(value: string | undefined): boolean {
+  return value !== undefined && /[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E]/u.test(value);
 }
 
 function containsCjk(value: string): boolean {

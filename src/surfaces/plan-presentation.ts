@@ -15,6 +15,10 @@ export interface PlanPresentation {
   fingerprint: string;
 }
 
+export type PlanProgressUpdate =
+  | { type: "plan" }
+  | { type: "step.completed"; index: number };
+
 export class TurnPlanProgressState {
   private readonly trackers = new Map<string, PlanProgressTracker>();
 
@@ -49,12 +53,18 @@ export class PlanProgressTracker {
   accept(
     event: Extract<OutputEvent, { type: "plan.updated" }>,
   ): readonly PlanPresentation[] {
+    return this.acceptUpdates(event).map(update => createPlanProgressPresentation(event, update));
+  }
+
+  acceptUpdates(
+    event: Extract<OutputEvent, { type: "plan.updated" }>,
+  ): readonly PlanProgressUpdate[] {
     if (!this.initialized) {
       this.initialized = true;
       this.rememberCompleted(event.steps);
-      return [createPlanPresentation(event)];
+      return [{ type: "plan" }];
     }
-    const presentations: PlanPresentation[] = [];
+    const updates: PlanProgressUpdate[] = [];
     event.steps.forEach((step, index) => {
       if (step.status !== "completed") {
         return;
@@ -64,9 +74,9 @@ export class PlanProgressTracker {
         return;
       }
       this.completedSteps.add(key);
-      presentations.push(createCompletedStepPresentation(event, step, index));
+      updates.push({ type: "step.completed", index });
     });
-    return presentations;
+    return updates;
   }
 
   private rememberCompleted(steps: readonly TurnPlanStep[]): void {
@@ -78,11 +88,19 @@ export class PlanProgressTracker {
   }
 }
 
+export function createPlanProgressPresentation(
+  event: Extract<OutputEvent, { type: "plan.updated" }>,
+  update: PlanProgressUpdate,
+): PlanPresentation {
+  return update.type === "plan" ? createPlanPresentation(event)
+    : createCompletedStepPresentation(event, event.steps[update.index]!, update.index);
+}
+
 export function createPlanPresentation(
   event: Extract<OutputEvent, { type: "plan.updated" }>,
 ): PlanPresentation {
   const steps = event.steps.slice(0, maximumPlanSteps);
-  const completed = steps.filter((step) => step.status === "completed").length;
+  const completed = event.steps.filter((step) => step.status === "completed").length;
   const title = `任务计划 · ${completed}/${event.steps.length}`;
   const explanation = boundedText(
     event.explanation?.trim() ?? "",

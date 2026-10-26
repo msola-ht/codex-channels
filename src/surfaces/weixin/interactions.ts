@@ -18,6 +18,7 @@ import type {
 import {
   formatCancelledInteraction,
   formatProcessedInteractionOutcome,
+  formatInteractionQuestionHeading,
   interactionOutcome,
 } from "../interaction-copy.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
@@ -25,6 +26,7 @@ import { formatWeixinCommandText } from "./command-renderer.js";
 import { PendingInteractionRegistry, waitForInteractionPreparation } from "../pending-interaction-registry.js";
 import { sanitizeWeixinMarkdownText } from "./markdown-sanitize.js";
 import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
+import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
 
 type ApprovalRequest = Extract<InteractionRequest, { type: "approval" }>;
 type UserInputRequest = Extract<InteractionRequest, { type: "user-input" }>;
@@ -85,6 +87,11 @@ export class WeixinInteractionPort implements InteractionPort {
           target,
           "微信聊天无法安全填写敏感信息，本次输入请求已取消。",
         );
+      } else if (
+        !this.closed && request.type === "user-input"
+        && request.questions.some((question) => question.options.some((option) => option.length > maximumInputCharacters))
+      ) {
+        void this.notify(target, "选项超过微信端 1000 字符的回答上限，本次输入请求已取消。请让 Codex 提供更短的选项。");
       }
       return Promise.resolve(safeInteractionDecision(request));
     }
@@ -692,6 +699,7 @@ function supportsInteraction(request: InteractionRequest): boolean {
     return request.questions.length > 0
       && request.questions.length <= maximumQuestionCount
       && !request.questions.some((question) => question.secret)
+      && !request.questions.some((question) => question.options.some((option) => option.length > maximumInputCharacters))
       && new Set(request.questions.map((question) => question.id)).size
         === request.questions.length;
   }
@@ -783,68 +791,23 @@ function renderUserInputPrompt(
   questionIndex: number,
   includeIntroduction: boolean,
 ): readonly string[] {
-  if (request.asynchronous) {
-    return renderAsyncUserInputPrompt(request, token, questionIndex, includeIntroduction);
-  }
-  const introduction = [
-    sanitizeWeixinMarkdownText(request.title),
-    "Codex 正在等待你的回答。每个问题只接受一项答案。",
-    `有效期：${Math.max(1, Math.ceil(request.expiresInMs / 1_000))} 秒`,
-  ].join("\n\n");
-  const question = request.questions[questionIndex]!;
-  const number = questionIndex + 1;
-  const description = [
-    `问题 ${number}/${request.questions.length}：${
-      sanitizeWeixinMarkdownText(question.header)
-    }`,
-    sanitizeWeixinMarkdownText(question.question),
-  ].join("\n");
-  const choices = question.options.map((option, optionIndex) => [
-    `${optionIndex + 1}. ${sanitizeWeixinMarkdownText(option)}`,
-    `\`\`\`text\n/选择 ${token} ${number} ${optionIndex + 1}\n\`\`\``,
-  ].join("\n"));
-  const other = question.allowOther || question.options.length === 0
-    ? [[
-        "填写其他内容（复制后替换最后的文字）：",
-        `\`\`\`text\n/填写 ${token} ${number} 在这里输入答案\n\`\`\``,
-      ].join("\n")]
-    : [];
-  return [
-    ...(includeIntroduction ? [introduction] : []),
-    ...packPromptBlocks([
-      description,
-      ...choices,
-      ...other,
-      [
-        "取消本次输入：",
-        `\`\`\`text\n/取消 ${token}\n\`\`\``,
-      ].join("\n"),
-    ]),
-  ];
-}
-
-function renderAsyncUserInputPrompt(
-  request: UserInputRequest,
-  token: string,
-  questionIndex: number,
-  includeIntroduction: boolean,
-): readonly string[] {
   const question = request.questions[questionIndex]!;
   const number = questionIndex + 1;
   const blocks = [
     ...(includeIntroduction ? [
-      ...splitAsyncPromptMarkdown(request.title),
+      ...splitPromptLiteral(request.title),
       [
-        "任务继续执行，你可以在问题有效期内回答。每个问题只接受一项答案。",
+        request.asynchronous
+          ? "任务继续执行，你可以在问题有效期内回答。每个问题只接受一项答案。"
+          : "Codex 正在等待你的回答。每个问题只接受一项答案。",
         `有效期：${Math.max(1, Math.ceil(request.expiresInMs / 1_000))} 秒`,
       ].join("\n\n"),
     ] : []),
-    `问题 ${number}/${request.questions.length}：`,
-    ...splitAsyncPromptMarkdown(question.header),
-    ...splitAsyncPromptMarkdown(question.question),
+    ...splitPromptLiteral(formatInteractionQuestionHeading(request, questionIndex)),
+    ...splitPromptMarkdown(question.question),
     ...question.options.flatMap((option, optionIndex) => [
       `选项 ${optionIndex + 1}：`,
-      ...splitAsyncPromptMarkdown(option),
+      ...splitPromptLiteral(option),
       `回答命令：\n\`\`\`text\n/选择 ${token} ${number} ${optionIndex + 1}\n\`\`\``,
     ]),
     ...(question.allowOther || question.options.length === 0 ? [[
@@ -858,8 +821,26 @@ function renderAsyncUserInputPrompt(
 
 class WeixinPromptTooLongError extends Error {}
 
+function splitPromptLiteral(value: string): string[] {
+  if (value.length > maximumPromptCharacters) throw new WeixinPromptTooLongError();
+  const chunks: string[] = [];
+  let current = "";
+  // Escape each complete character before packing so a fragment cannot separate
+  // an escape from its punctuation or turn a continuation into a Markdown list.
+  for (const character of value) {
+    const literal = escapeLifecycleLiteral(character).replaceAll("=", "\\=");
+    if (current.length + literal.length > maximumPromptMessageCharacters) {
+      chunks.push(current);
+      current = "";
+    }
+    current += literal;
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 /** 保留原文；每片独立闭合围栏，防止 Outbox 再次切开代码或题干吞入回答命令。 */
-function splitAsyncPromptMarkdown(value: string): string[] {
+function splitPromptMarkdown(value: string): string[] {
   if (value.length > maximumPromptCharacters) throw new WeixinPromptTooLongError();
   const messages: string[] = [];
   let fence: MarkdownFence | undefined;

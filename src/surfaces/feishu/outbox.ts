@@ -1,4 +1,5 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
+import { waitForCompletionNotice } from "../completion-notice-delay.js";
 import type { SurfaceMessageDisplaySettings } from "../types.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { shouldHideCommentary, shouldHideRoutineNotification, shouldPreviewTextDelta, surfaceOutputSnapshotKey } from "../delivery-policy.js";
@@ -114,7 +115,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     string,
     {
       chatId: string;
-      messageId: string;
+      messageId?: string;
       status: string;
       identity?: TurnStartIdentity;
     }
@@ -1017,6 +1018,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const accepted = this.delivery.enqueue(chatId, async signal => {
       const failed = await streamsDone;
       const warning = "**投递状态：本轮部分输出未确认，请核对正文。**";
+      if (completion !== null) await waitForCompletionNotice(signal);
       if (completion !== null || failed) await this.sendMarkdown(chatId,
         completion === null ? warning : failed ? `${completion}\n\n${warning}` : completion,
         maximumFeishuMessageChunks, undefined, undefined, signal);
@@ -1232,21 +1234,34 @@ export class FeishuOutbox implements SurfaceOutputPort {
     signal?: AbortSignal,
   ): Promise<void> {
     if (event.type === "turn.started") {
+      const replyTo = this.replyTargets.get(
+        event.target.conversationId, turnKey(event.threadId, event.turnId),
+      );
+      // 先发送本轮共享回执，避免已有状态卡更新失败阻止开始通知。
+      // 回执与 Session 状态卡分别持有消息，不互相覆盖。
+      await this.sendMarkdown(
+        event.target.conversationId,
+        markdown,
+        maximumFeishuMessageChunks,
+        replyTo,
+        undefined,
+        signal,
+      );
       const current = this.threadStatusMessages.get(event.threadId);
       this.logger.info(
         {
           component: "Feishu",
           threadId: event.threadId,
           turnId: event.turnId,
-          hasCurrent: current !== undefined,
+          hasCurrent: current?.chatId === event.target.conversationId && current.messageId !== undefined,
         },
         "飞书 Turn 开始状态卡检查",
       );
-      if (current?.chatId === event.target.conversationId) {
+      if (current?.chatId === event.target.conversationId && current.messageId !== undefined) {
         try {
           const activeCard = renderFeishuThreadStatusCard(
             "active",
-            event.identity ?? current.identity,
+            event.identity,
           );
           if (signal) {
             await this.messagePort.updateCard(current.messageId, activeCard, signal);
@@ -1279,69 +1294,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
           throw error;
         }
         this.threadStatusMessages.set(event.threadId, {
-          ...current,
+          chatId: current.chatId,
+          messageId: current.messageId,
           status: "active",
           ...(event.identity ? { identity: event.identity } : {}),
         });
-        const replyTo = this.replyTargets.get(
-          event.target.conversationId, turnKey(event.threadId, event.turnId),
-        );
-        if (replyTo !== undefined) {
-          await this.sendMarkdown(
-            event.target.conversationId,
-            markdown,
-            maximumFeishuMessageChunks,
-            replyTo,
-            undefined,
-            signal,
-          );
-        }
-        return;
       }
-      const replyTo = this.replyTargets.get(
-        event.target.conversationId, turnKey(event.threadId, event.turnId),
-      );
-      if (replyTo !== undefined) {
-        let statusMessageId: string | undefined;
-        await this.sendMarkdown(
-          event.target.conversationId,
-          markdown,
-          maximumFeishuMessageChunks,
-          replyTo,
-          (messageId) => { statusMessageId = messageId; },
-          signal,
-        );
-        if (event.background !== true && statusMessageId !== undefined && !this.closeFinished) {
-          this.threadStatusMessages.set(event.threadId, {
-            chatId: event.target.conversationId,
-            messageId: statusMessageId,
-            status: "active",
-            ...(event.identity ? { identity: event.identity } : {}),
-          });
-        }
-        return;
-      }
-      if (event.background === true) {
-        return;
-      }
-      const messageId = await this.messagePort.sendCard(
-        event.target.conversationId,
-        renderFeishuThreadStatusCard("active", event.identity),
-        signal,
-      );
-      this.logger.info(
-        {
-          component: "Feishu",
-          threadId: event.threadId,
-          turnId: event.turnId,
-          messageId,
-        },
-        "飞书状态卡已创建",
-      );
-      if (!this.closeFinished) {
+      if (event.background !== true && !this.closeFinished
+        && (current?.chatId !== event.target.conversationId || current.messageId === undefined)) {
         this.threadStatusMessages.set(event.threadId, {
           chatId: event.target.conversationId,
-          messageId,
           status: "active",
           ...(event.identity ? { identity: event.identity } : {}),
         });
@@ -1409,10 +1371,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
     signal?: AbortSignal,
   ): Promise<void> {
     const current = this.threadStatusMessages.get(event.threadId);
-    const card = renderFeishuThreadStatusCard(event.status, current?.identity);
+    const identity = current?.chatId === event.target.conversationId ? current.identity : undefined;
+    const card = renderFeishuThreadStatusCard(event.status, identity);
     if (
       current
       && current.chatId === event.target.conversationId
+      && current.messageId !== undefined
     ) {
       if (current.status === event.status) {
         this.logger.info(
@@ -1465,6 +1429,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
               chatId: event.target.conversationId,
               messageId,
               status: event.status,
+              ...(identity ? { identity } : {}),
             });
           } else {
             this.threadStatusMessages.delete(event.threadId);
@@ -1488,6 +1453,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.status !== "active") {
+      if (current?.chatId === event.target.conversationId) this.threadStatusMessages.delete(event.threadId);
       return;
     }
     const messageId = await this.messagePort.sendCard(
@@ -1509,6 +1475,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         chatId: event.target.conversationId,
         messageId,
         status: event.status,
+        ...(identity ? { identity } : {}),
       });
     }
   }

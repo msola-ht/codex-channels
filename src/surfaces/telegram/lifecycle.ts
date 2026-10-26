@@ -43,7 +43,8 @@ class TelegramLifecycleError extends Error {
 }
 
 export interface TelegramStartupNotification {
-  messages: (signal: AbortSignal) => ReadonlyArray<{ chatId: number; text: string }> | Promise<ReadonlyArray<{ chatId: number; text: string }>>;
+  messages: (signal: AbortSignal) => ReadonlyArray<{ chatId: number; text: Parameters<typeof formatTelegramPanelChunks>[0]; signal: AbortSignal }> | Promise<ReadonlyArray<{ chatId: number; text: Parameters<typeof formatTelegramPanelChunks>[0]; signal: AbortSignal }>>;
+  send: (chatId: number, html: string, signal: AbortSignal) => Promise<unknown>;
 }
 
 export interface TelegramLifecycleOptions {
@@ -135,7 +136,7 @@ export class TelegramLifecycle {
     if (!this.startupNotification) {
       return;
     }
-    let messages: ReadonlyArray<{ chatId: number; text: string }>;
+    let messages: Awaited<ReturnType<TelegramStartupNotification["messages"]>>;
     try {
       messages = await this.startupNotification.messages(signal);
     } catch (error) {
@@ -147,17 +148,14 @@ export class TelegramLifecycle {
       }
       return;
     }
-    for (const { chatId, text } of messages) {
+    for (const { chatId, text, signal: authorizationSignal } of messages) {
       if (this.stopping || signal.aborted) return;
-      if (!text) continue;
+      if (!text || authorizationSignal.aborted) continue;
+      const active = AbortSignal.any([signal, authorizationSignal]);
       try {
         for (const chunk of formatTelegramPanelChunks(text)) {
-          await this.bot.api.sendMessage(
-            chatId,
-            chunk,
-            { parse_mode: "HTML", disable_notification: true },
-            telegramAbortSignal(signal),
-          );
+          active.throwIfAborted();
+          await this.startupNotification.send(chatId, chunk, active);
         }
       } catch (error) {
         if (this.stopping || signal.aborted) {

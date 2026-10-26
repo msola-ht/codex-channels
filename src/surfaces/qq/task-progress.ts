@@ -3,13 +3,15 @@ import {
   createSubagentCompletedPresentation, createSubagentContactedPresentation,
   createSubagentStartedPresentation, createTurnReasoningPresentation,
   escapeLifecycleLiteral, renderPlainLifecyclePresentation, renderStructuredLifecyclePresentation,
-  type LifecyclePresentation, type LifecyclePresentationField,
+  type LifecyclePresentation, type LifecyclePresentationField, type LifecyclePresentationLeafField,
 } from "../lifecycle-presentation.js";
 import {
   compactOperationDetail, detailedOperationDetail, operationMetadata, operationStatus, operationTitle,
   redactOperationDetail, isSubagentOutput, shouldDisplayOperation,
 } from "../operation-presentation.js";
-import { createPlanPresentation, PlanProgressTracker } from "../plan-presentation.js";
+import {
+  createPlanProgressPresentation, PlanProgressTracker, type PlanProgressUpdate,
+} from "../plan-presentation.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import { qqLiteralMarkdown } from "./message-markdown.js";
@@ -19,7 +21,7 @@ export type QqTaskProgressEvent = Extract<OutputEvent, {
     | "subagent.contacted" | "subagent.completed" | "operation.updated";
 }>;
 
-type Presentation = { text: string; markdown: string };
+type Presentation = { text: string; markdown?: string };
 type Send = (presentation: Presentation) => Promise<void>;
 type PreparedProgress = (send: Send) => Promise<void>;
 
@@ -32,7 +34,6 @@ interface TurnPresentationState {
   planObservations: number;
   planDisplayed: boolean;
   plan: PlanProgressTracker;
-  markdownPlan: PlanProgressTracker;
   retry: TurnRetryMessages<void>;
 }
 
@@ -192,18 +193,18 @@ export class QqTaskProgress {
         const bounded = { ...event, steps: event.steps.slice(0, 128).map(step => ({
           ...step, step: boundStepIdentity(step.step),
         })) };
-        const plans = !turn.planDisplayed ? [createPlanPresentation(event)]
-          : event.steps.length > 128 ? [] : turn.plan.accept(bounded);
-        const markdownInput = escapePlan(event);
-        const markdownBounded = escapePlan(bounded);
-        const markdownPlans = !turn.planDisplayed ? [createPlanPresentation(markdownInput)]
-          : event.steps.length > 128 ? [] : turn.markdownPlan.accept(markdownBounded);
-        for (const [index, plan] of plans.entries()) {
+        const updates: readonly PlanProgressUpdate[] = !turn.planDisplayed ? [{ type: "plan" }]
+          : event.steps.length > 128 ? [] : turn.plan.acceptUpdates(bounded);
+        const presentationEvent = turn.planDisplayed ? bounded : event;
+        const markdownEvent = escapePlan(presentationEvent);
+        for (const update of updates) {
           if (!this.isCurrent(state)) return;
-          await send({ text: plan.text, markdown: markdownPlans[index]!.text });
+          await send({
+            text: createPlanProgressPresentation(presentationEvent, update).text,
+            markdown: createPlanProgressPresentation(markdownEvent, update).text,
+          });
           if (!turn.planDisplayed) {
-            turn.plan.accept(bounded);
-            turn.markdownPlan.accept(markdownBounded);
+            turn.plan.acceptUpdates(bounded);
             turn.planDisplayed = true;
           }
         }
@@ -257,7 +258,7 @@ export class QqTaskProgress {
     const turn: TurnPresentationState = {
       targetKey: targetKey(event.target), threadId: event.threadId, turnId: event.turnId,
       active: true, reasoningAttempted: false, planObservations: 0, planDisplayed: false,
-      plan: new PlanProgressTracker(), markdownPlan: new PlanProgressTracker(), retry: new TurnRetryMessages<void>(),
+      plan: new PlanProgressTracker(), retry: new TurnRetryMessages<void>(),
     };
     this.turns.set(key, turn);
     return turn;
@@ -395,10 +396,12 @@ function escapeLifecycleField(field: LifecyclePresentationField): LifecyclePrese
     ...(field.value === undefined ? {} : { value: escapeLifecycleLiteral(field.value) }),
     fields: field.fields.map(escapeLifecycleField),
   };
+  return escapeLifecycleLeaf(field);
+}
+
+function escapeLifecycleLeaf(field: LifecyclePresentationLeafField): LifecyclePresentationLeafField {
   return { ...field, label: escapeLifecycleLiteral(field.label), value: escapeLifecycleLiteral(field.value),
-    ...(field.subfields ? { subfields: field.subfields.map(subfield => ({
-      ...subfield, label: escapeLifecycleLiteral(subfield.label), value: escapeLifecycleLiteral(subfield.value),
-    })) } : {}),
+    ...(field.subfields ? { subfields: field.subfields.map(escapeLifecycleLeaf) } : {}),
   };
 }
 
@@ -413,13 +416,15 @@ function presentOperation(operation: OperationUpdate, display: OperationUpdateDi
     ...(metadata.length ? [metadata.join(" · ")] : []),
     ...(detail ? ["", detail] : []),
   ].join("\n");
-  // Match Feishu's emphasis/code hierarchy, while QQ keeps its own safe
-  // literal candidate and the original plain fallback for unsupported syntax.
+  // Failure to wrap literal details must select plain delivery explicitly;
+  // escaping the rejected source into prose would reinterpret its contents.
+  const literal = qqLiteralMarkdown(detail);
+  if (detail && literal === undefined) return { text };
   const code = display === "compact" && !detail.includes("`")
-    ? `\`${detail}\`` : qqLiteralMarkdown(detail);
+    ? `\`${detail}\`` : literal;
   const markdown = [
     `**${escapeLifecycleLiteral(title)}**${metadata.length ? ` · ${metadata.map(escapeLifecycleLiteral).join(" · ")}` : ""}`,
-    ...(detail ? ["", code ?? escapeLifecycleLiteral(detail)] : []),
+    ...(detail ? ["", code!] : []),
   ].join("\n");
   return { text, markdown };
 }

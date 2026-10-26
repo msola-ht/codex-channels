@@ -3,6 +3,8 @@ import type {
   RequestMetricsTimeRange,
   RequestOutcomeCounts,
   RequestInterruptionSummary,
+  TurnRequestMetricsSummary,
+  ThreadRequestMetricsSummary,
 } from "../application/index.js";
 
 import {
@@ -10,6 +12,7 @@ import {
   formatTimezoneLine,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { formatElapsedDuration } from "./elapsed-duration.js";
 import { formatCodexProviderLabel } from "./provider-format.js";
 import {
   formatCacheHitRate,
@@ -33,7 +36,7 @@ export function formatConversationMetrics(
   const lines = [
     "## 请求指标",
     "任务执行统计排除明确标记的自动审查；Token 为保留记录中的已知累计。",
-    `Session ID：${formatThreadId(summary.threadId)}`,
+    `Session ID：${summary.threadId}`,
   ];
   if (summary.latestTurn) {
     const turn = summary.latestTurn;
@@ -42,21 +45,29 @@ export function formatConversationMetrics(
       ...nonemptyLine(formatRequestOutcomes(turn.requestOutcomes)),
       ...formatInterruptionSummary(turn.interruptionSummary),
       ...formatMetricsUsage(turn),
+      ...(turn.durationMs != null && Number.isFinite(turn.durationMs) && turn.durationMs > 0
+        ? [`本轮耗时：${formatElapsedDuration(turn.durationMs)}`] : []),
+      ...formatMetricsPerformance(turn.performance),
       ...(turn.compact
         ? nonemptyLine(formatCompactMetrics(turn.compact))
         : []),
     ];
     if (details.length > 0) lines.push("", "### 最近运行聚合", ...details);
   }
-  if (summary.threadAggregate) {
+  const sessionDuration = formatSessionDuration(summary);
+  if (summary.threadAggregate || sessionDuration.length > 0) {
     const aggregate = summary.threadAggregate;
     const details = [
-      ...(aggregate.turnCount > 0 ? [`Turn：${aggregate.turnCount} 次`] : []),
-      ...(aggregate.requestCount > 0 ? [`模型请求：${formatRequestCount(aggregate.requestCount)} 次`] : []),
-      ...nonemptyLine(formatRequestOutcomes(aggregate.requestOutcomes)),
-      ...formatInterruptionSummary(aggregate.interruptionSummary),
-      ...formatMetricsUsage(aggregate),
-      ...(aggregate.compact
+      ...(aggregate ? [
+        ...(aggregate.turnCount > 0 ? [`Turn：${aggregate.turnCount} 次`] : []),
+        ...(aggregate.requestCount > 0 ? [`模型请求：${formatRequestCount(aggregate.requestCount)} 次`] : []),
+        ...nonemptyLine(formatRequestOutcomes(aggregate.requestOutcomes)),
+        ...formatInterruptionSummary(aggregate.interruptionSummary),
+        ...formatMetricsUsage(aggregate),
+      ] : []),
+      ...sessionDuration,
+      ...formatMetricsPerformance(aggregate?.performance),
+      ...(aggregate?.compact
         ? nonemptyLine(formatCompactMetrics(aggregate.compact))
         : []),
     ];
@@ -110,10 +121,24 @@ function formatErrorMetricsReport(
   return toStructuredMarkdownList(lines.join("\n"));
 }
 
-function formatThreadId(threadId: string): string {
-  return threadId.length > 12
-    ? `${threadId.slice(0, 12)}…`
-    : threadId;
+function formatMetricsPerformance(performance: TurnRequestMetricsSummary["performance"]): string[] {
+  if (!performance) return [];
+  const first = performance.averageFirstTokenMs;
+  const speed = performance.generationTokensPerSecond;
+  return [
+    ...(performance.firstTokenSampleCount > 0 && first != null && Number.isFinite(first) && first > 0
+      ? [`首 Token：${formatElapsedDuration(first)}`] : []),
+    ...(performance.requestCount > 0 && speed != null && Number.isFinite(speed) && speed > 0
+      ? [`速度：${speed.toFixed(1)} Token/s`] : []),
+  ];
+}
+
+function formatSessionDuration(summary: ThreadRequestMetricsSummary): string[] {
+  const timing = summary.sessionTiming;
+  const duration = timing ? timing.knownDurationMs : summary.sessionDurationMs;
+  if (duration == null || !Number.isFinite(duration) || duration <= 0) return [];
+  const partial = timing && (!timing.historyComplete || timing.missingTurnCount > 0);
+  return [`${partial ? "已知总耗时" : "总耗时"}：${formatElapsedDuration(duration)}${partial ? "（历史耗时未完整）" : ""}`];
 }
 
 function formatMetricsErrorType(value: string | null): string {

@@ -2,7 +2,7 @@ import type {
   InteractionDecision,
   InteractionRequest,
 } from "../../approval/index.js";
-import { interactionProcessedTitle } from "../interaction-copy.js";
+import { formatInteractionQuestionHeading, interactionProcessedTitle } from "../interaction-copy.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import {
   feishuCardButton,
@@ -38,7 +38,9 @@ export function supportsFeishuInputRequest(
 ): boolean {
   if (request.type === "user-input") {
     return request.questions.length > 0
-      && request.questions.length <= maximumQuestionCount;
+      && request.questions.length <= maximumQuestionCount
+      && request.questions.every((question) => question.options.every((option) => option.length <= maximumInputLength)
+        && hasUnambiguousOptionLabels(question.options));
   }
   if (request.mode === "tool-approval") {
     return request.toolApproval !== undefined && Buffer.byteLength([
@@ -82,8 +84,8 @@ export function renderFeishuInputOutcomeCard(
   ];
   if (request.type === "user-input" && request.asynchronous) {
     request.questions.forEach((question, index) => {
-      elements.push(feishuCardMarkdown(formatAsyncQuestion(
-        question.header || `问题 ${index + 1}`, question.question,
+      elements.push(feishuCardMarkdown(formatQuestion(
+        formatInteractionQuestionHeading(request, index), question.question,
       )));
     });
   }
@@ -114,18 +116,16 @@ function renderUserInputCard(
   request: Extract<InteractionRequest, { type: "user-input" }>,
   interactionToken: string,
 ): FeishuCardDocument {
+  if (!supportsFeishuInputRequest(request)) {
+    throw new Error("飞书用户问题超出支持范围或选项截断后无法区分");
+  }
   const formElements: Array<Record<string, unknown>> = [];
   request.questions.forEach((question, index) => {
     if (index > 0) {
       formElements.push({ tag: "hr" });
     }
     formElements.push(feishuCardMarkdown(
-      request.asynchronous
-        ? formatAsyncQuestion(question.header || `问题 ${index + 1}`, question.question)
-        : `**${escapeFeishuMarkdown(truncate(
-          question.header || `问题 ${index + 1}`,
-          maximumLabelLength,
-        ))}**\n${escapeFeishuMarkdown(truncate(question.question, maximumDisplayLength))}`,
+      formatQuestion(formatInteractionQuestionHeading(request, index), question.question),
     ));
     if (question.options.length > 0) {
       formElements.push({
@@ -184,7 +184,7 @@ function renderFormElicitationCard(
   interactionToken: string,
 ): FeishuCardDocument {
   return cardKit(
-    "MCP 请求输入",
+    request.title,
     [
       feishuCardMarkdown(escapeFeishuMarkdown(truncate(request.message, maximumDisplayLength))),
       feishuCardMarkdown("请填写有效 JSON。提交内容不会写入 Gateway 数据库或日志。"),
@@ -363,7 +363,18 @@ function input(
   };
 }
 
-function formatAsyncQuestion(header: string, question: string): string {
+function hasUnambiguousOptionLabels(options: readonly string[]): boolean {
+  const labels = new Map<string, string>();
+  for (const option of options) {
+    const label = truncate(option, maximumLabelLength);
+    const previous = labels.get(label);
+    if (previous !== undefined && previous !== option) return false;
+    labels.set(label, option);
+  }
+  return true;
+}
+
+function formatQuestion(header: string, question: string): string {
   const safeQuestion = sanitizeFeishuMarkdown(question);
   const notice = "\n\n（问题内容已截断，请让 Codex 分段提供完整内容后再复制代码。）";
   const body = [...safeQuestion].length <= maximumDisplayLength ? safeQuestion

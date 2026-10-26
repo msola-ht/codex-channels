@@ -1,4 +1,4 @@
-import type { QqInboundTextMessage } from "./inbound.js";
+import type { QqInboundTextMessage, QqRejectedInput } from "./inbound.js";
 
 /** Callback IDs identify interactions, never ordinary messages or passive reply anchors. */
 export interface QqButtonInput {
@@ -11,6 +11,6 @@ export interface QqButtonInput {
   readonly sentAtMs: number;
 }
 
-export type QqMessageInput = QqInboundTextMessage | QqButtonInput;
+export type QqMessageInput = QqInboundTextMessage | QqButtonInput | QqRejectedInput;
 export type QqSourceInput = Pick<QqInboundTextMessage, "id" | "actorId" | "conversationId" | "msgIdx" | "sentAtMs">
   | Pick<QqButtonInput, "kind" | "id" | "actorId" | "conversationId" | "sentAtMs">;

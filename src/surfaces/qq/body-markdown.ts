@@ -30,18 +30,113 @@ function imageDestinationSupported(destination: string): boolean {
   } catch { return false; }
 }
 
-/**
- * Return an unchanged, safe prefix for QQ's native Markdown renderer.
- * Never repair incomplete syntax or append closing fences: replace streams
- * cannot rewrite content already accepted by the platform.
- * Unknown constructs remain in the authoritative body for plain-text delivery.
- */
-export function qqBodyMarkdownPrefix(text: string, finished = false): string {
+/** Notifications contain literal fields: preserve dollars and ampersands in
+ * visible prose, without changing code or link/image destinations. This is an
+ * outbound representation only; model bodies and source values stay raw. */
+export function escapeQqNotificationLiterals(text: string): string {
+  let fence: MarkdownFence | undefined;
+  let prose = "";
+  let result = "";
+  const flush = (): void => {
+    result += escapeNotificationProse(prose);
+    prose = "";
+  };
+  for (const originalLine of text.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
+    const line = originalLine.replace(/^(?: {0,3}>[ \t]?| {0,3}(?:[-+*]|\d{1,9}[.)])[ \t])+/u, "");
+    const previous = fence;
+    fence = advanceMarkdownFence(fence, line);
+    // Indentation cannot interrupt an existing prose paragraph or code span.
+    if (previous || fence || (!prose && /^(?: {4}|\t)/u.test(line)) || !line.trim()) {
+      flush();
+      result += originalLine;
+    } else prose += originalLine;
+  }
+  flush();
+  return result;
+}
+
+function escapeNotificationProse(text: string): string {
+  // A code span closes only at a run of exactly the same length. Index the
+  // runs once so malformed prose cannot cause repeated scans of its suffix.
+  const runs = new Map<number, { positions: number[]; next: number }>();
+  for (const match of text.matchAll(/`+/gu)) {
+    const length = match[0].length;
+    const entry = runs.get(length) ?? { positions: [], next: 0 };
+    entry.positions.push(match.index);
+    runs.set(length, entry);
+  }
+  let result = "";
+  for (let index = 0; index < text.length;) {
+    const character = text[index];
+    if (character === "\\") {
+      let end = index + 1;
+      while (text[end] === "\\") end++;
+      result += text.slice(index, end);
+      if ((end - index) % 2 === 1 && (text[end] === "$" || text[end] === "&" || text[end] === "`")) result += text[end++];
+      index = end;
+      continue;
+    }
+    if (character === "`") {
+      let end = index + 1;
+      while (text[end] === "`") end++;
+      const length = end - index;
+      const entry = runs.get(length);
+      if (entry) while (entry.next < entry.positions.length && entry.positions[entry.next]! < end) entry.next++;
+      const close = entry?.positions[entry.next];
+      if (close !== undefined) {
+        result += text.slice(index, close + length);
+        index = close + length;
+      } else {
+        // An unmatched backtick run is literal Markdown, not an open code span.
+        result += text.slice(index, end);
+        index = end;
+      }
+      continue;
+    }
+    if (character === "]" && text[index + 1] === "(") {
+      // Preserve resource identifiers byte for byte. The existing safety scan
+      // still decides whether each complete link/image is supported at all.
+      const destination = /^\]\((?:https?:\/\/|qqbot-media:\/\/|\/(?!\/))[^\s()\\<&\p{Cc}\p{Cf}]*\)/iu.exec(text.slice(index));
+      if (destination) {
+        result += destination[0];
+        index += destination[0].length;
+        continue;
+      }
+    }
+    if ((character === "h" || character === "H") && !/[\p{L}\p{N}_]/u.test(text[index - 1] ?? "")) {
+      // QQ may auto-link bare URLs too. Escaping a dollar in that token can
+      // change its resource identity, even without an explicit destination.
+      const url = /^https?:\/\/[^\s<>`\\\p{Cc}\p{Cf}]+/iu.exec(text.slice(index));
+      if (url) {
+        try {
+          if (new URL(url[0]).hostname) {
+            result += url[0];
+            index += url[0].length;
+            continue;
+          }
+        } catch { /* A malformed URL remains ordinary visible text. */ }
+      }
+    }
+    result += character === "$" || character === "&" ? `\\${character}` : character;
+    index++;
+  }
+  return result;
+}
+
+/** All Markdown presentations share the same capability boundary. Code/review
+ * producers own literal wrapping; this scanner does not validate Markdown. */
+export function qqNativeMarkdownPrefix(text: string): string {
   let fence: MarkdownFence | undefined;
   let fenceLine = false;
   let inlineTicks = 0;
+  let inlineEnd = -1;
   let indented = false;
-  let ambiguousCode = false;
+  const ticks = new Map<number, { positions: number[]; next: number }>();
+  for (const match of text.matchAll(/`+/gu)) {
+    const entry = ticks.get(match[0].length) ?? { positions: [], next: 0 };
+    entry.positions.push(match.index);
+    ticks.set(match[0].length, entry);
+  }
   for (let index = 0; index < text.length; index++) {
     if (index === 0 || text[index - 1] === "\n") {
       const end = text.indexOf("\n", index);
@@ -51,23 +146,19 @@ export function qqBodyMarkdownPrefix(text: string, finished = false): string {
       const previousFence = fence;
       fence = advanceMarkdownFence(fence, line);
       fenceLine = Boolean(previousFence || fence);
-      if (fenceLine) inlineTicks = 0;
+      if (fenceLine) { inlineTicks = 0; inlineEnd = -1; }
       indented = /^(?: {4}|\t)/u.test(line);
     }
     const character = text[index];
-    // QQ command/mention tags, HTML and entity-encoded syntax are not body capabilities.
-    // Apply even inside code: QQ does not document that code fences disable its tags.
-    // A literal left arrow cannot open an HTML/QQ tag. Hold a lone '<'
-    // across deltas until the following '-' establishes that distinction.
-    if (character === "<" && text[index + 1] !== "-") return text.slice(0, index);
-    if (character === "&" && (/[#a-z]/iu.test(text[index + 1] ?? "")
-      || (!finished && index + 1 === text.length))) return text.slice(0, index);
+    // QQ interaction tags remain capabilities even in code. Ordinary source
+    // text such as <redacted>, generics, heredocs and entities is literal inside
+    // a code span/fence; it must not make the whole command lose its code box.
+    if (character === "<" && /^<(?:qqbot-|@|#|emoji:)/iu.test(text.slice(index))) return text.slice(0, index);
     if (character === "!") {
-      if (!finished && index + 1 === text.length) return text.slice(0, index);
       if (text[index + 1] === "[") {
         // QQ does not document that code/escapes suppress images. Keep examples
         // literal instead of granting image-fetch capabilities to code text.
-        if (fenceLine || inlineTicks || indented || ambiguousCode || text[index - 1] === "\\") return text.slice(0, index);
+        if (fenceLine || inlineTicks || indented || text[index - 1] === "\\") return text.slice(0, index);
         // A bounded, complete inline image is atomic across stream deltas and
         // final Markdown blocks. Titles, nesting and reference images stay literal.
         // A media reference needs 23 scheme/path characters plus its 4096-byte token.
@@ -81,37 +172,24 @@ export function qqBodyMarkdownPrefix(text: string, finished = false): string {
       let end = index + 1;
       while (text[end] === "`") end++;
       const count = end - index;
-      if (!inlineTicks) inlineTicks = count;
-      else if (inlineTicks === count) inlineTicks = 0;
+      if (index === inlineEnd) { inlineTicks = 0; inlineEnd = -1; }
+      else if (!inlineTicks) {
+        let slash = index;
+        while (slash > 0 && text[slash - 1] === "\\") slash--;
+        const entry = ticks.get(count)!;
+        while (entry.next < entry.positions.length && entry.positions[entry.next]! < end) entry.next++;
+        const close = entry.positions[entry.next];
+        // Escaped or unmatched backticks are prose, not proof that a later
+        // link is literal. Blank lines also end an inline-code paragraph.
+        if ((index - slash) % 2 === 0 && close !== undefined
+          && !/\n[ \t]*\n/u.test(text.slice(end, close))) {
+          inlineTicks = count;
+          inlineEnd = close;
+        }
+      }
       index = end - 1;
       continue;
     }
-    if (character !== "[") continue;
-    // Plain brackets (including task markers and code) do not grant link
-    // capabilities. Keep an unresolved closing bracket until its next
-    // non-whitespace character proves it cannot become a link or reference.
-    const close = text.indexOf("]", index + 1);
-    if (close === -1) {
-      if (!finished) return text.slice(0, index);
-      continue;
-    }
-    const following = text.slice(close + 1).match(/^\s*(.)/su)?.[1];
-    if (following === undefined && !finished) return text.slice(0, index);
-    if (following === "[" || following === ":") return text.slice(0, index);
-    if (following !== "(") continue;
-    // Only a complete, simple HTTP(S) destination can become a link.
-    const link = /^\[[^[\]\r\n\\!<&\p{Cc}]*\]\((https?:\/\/[^\s()\\<&\p{Cc}\p{Cf}]+)\)/iu.exec(text.slice(index));
-    if (!link) return text.slice(0, index);
-    try {
-      const url = new URL(link[1]!);
-      if (!url.hostname || url.username || url.password || (url.protocol !== "http:" && url.protocol !== "https:")) {
-        return text.slice(0, index);
-      }
-    } catch { return text.slice(0, index); }
-    // The simple-link recognizer does not parse inline-code precedence inside
-    // labels/destinations. Do not allow a later image under that uncertainty.
-    if (link[0].includes("`")) ambiguousCode = true;
-    index += link[0].length - 1;
   }
   return text;
 }

@@ -2,6 +2,7 @@ import type {
   AccountRateLimit,
   AccountWeeklyLimitEstimate,
 } from "./account-port.js";
+import type { TurnOutputTiming } from "../conversation-core/index.js";
 
 export interface RequestOutcomeCounts {
   completed: number;
@@ -29,6 +30,8 @@ export interface CompactRequestMetricsSummary {
 }
 
 export interface TurnRequestMetricsSummary {
+  durationMs?: number | null;
+  performance?: TurnOutputTiming["performance"];
   usageCoverage: TokenUsageCoverage;
   requestOutcomes: RequestOutcomeCounts;
   interruptionSummary: RequestInterruptionSummary;
@@ -45,6 +48,7 @@ export interface TurnRequestMetricsSummary {
 }
 
 export interface ThreadRequestMetricsAggregate {
+  performance?: TurnOutputTiming["performance"];
   usageCoverage: TokenUsageCoverage;
   requestOutcomes: RequestOutcomeCounts;
   interruptionSummary: RequestInterruptionSummary;
@@ -59,6 +63,8 @@ export interface ThreadRequestMetricsAggregate {
 }
 
 export interface ThreadRequestMetricsSummary {
+  sessionTiming?: { knownDurationMs: number | null; missingTurnCount: number; historyComplete: boolean };
+  sessionDurationMs?: number | null;
   threadId: string;
   modelProvider: string;
   latestTurn: TurnRequestMetricsSummary | null;

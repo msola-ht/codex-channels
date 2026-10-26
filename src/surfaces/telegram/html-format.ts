@@ -1,5 +1,6 @@
 import { splitTelegramText } from "./format.js";
 import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
+import type { LifecyclePresentation, LifecyclePresentationField } from "../lifecycle-presentation.js";
 
 export const telegramInteractionReplyHeading = "Codex 交互回复";
 
@@ -17,8 +18,9 @@ export function protectTelegramReplyHeading(html: string): string {
     : html;
 }
 
-export function formatTelegramPanelChunks(text: string, limit = 3_600): string[] {
+export function formatTelegramPanelChunks(text: string | LifecyclePresentation, limit = 3_600): string[] {
   const contentLimit = Math.max(1, limit - 128);
+  if (typeof text !== "string") return formatLifecycleChunks(text, contentLimit);
   let fence: MarkdownFence | undefined;
   return splitTelegramText(text, contentLimit).map((chunk) => {
     const opening = fence?.opening;
@@ -32,6 +34,80 @@ export function formatTelegramPanelChunks(text: string, limit = 3_600): string[]
     ].join("\n");
     return formatTelegramPanelHtml(balanced);
   });
+}
+
+interface LifecycleHtmlFragment {
+  text: string;
+  bold?: boolean;
+}
+
+/** Only typed lifecycle panels use this path; generic panels retain their parser. */
+function formatLifecycleChunks(presentation: LifecyclePresentation, limit: number): string[] {
+  const fragments: LifecycleHtmlFragment[] = [];
+  const append = (text: string, bold = false): void => { fragments.push({ text, bold }); };
+  const field = (value: LifecyclePresentationField, depth = 0): void => {
+    append(`\n${"  ".repeat(depth)}• `);
+    if ("title" in value) {
+      append(value.title, true);
+      if (value.value !== undefined) append(`：${value.value}`);
+      for (const child of value.fields) field(child, depth + 1);
+    } else {
+      append(`${value.label}：`, true);
+      append(value.value);
+      for (const child of value.subfields ?? []) field(child, depth + 1);
+    }
+  };
+  append(presentation.title, presentation.titleStyle === "emphasis" || presentation.titleDetail !== undefined
+    || presentation.fields.length > 0 || (presentation.sections?.length ?? 0) > 0);
+  if (presentation.titleDetail !== undefined) append(` · ${presentation.titleDetail}`);
+  if (presentation.fields.length > 0) append("\n");
+  for (const value of presentation.fields) field(value);
+  for (const section of presentation.sections ?? []) {
+    append("\n\n");
+    append(section.title, true);
+    for (const value of section.fields) field(value);
+  }
+  if (presentation.footer) {
+    append("\n\n");
+    append(`${presentation.footer.label}：`, true);
+    append(presentation.footer.value);
+  }
+
+  // Escape before accounting for the existing panel budget, but split only
+  // between source code points. Every chunk closes its own formatting tags.
+  const chunks: string[] = [];
+  let chunk = "";
+  let length = 0;
+  let bold = false;
+  const flush = (): void => {
+    if (chunk) chunks.push(protectTelegramReplyHeading(chunk + (bold ? "</b>" : "")));
+    chunk = "";
+    length = 0;
+    bold = false;
+  };
+  for (const fragment of fragments) {
+    for (const character of fragment.text) {
+      const escaped = escapeTelegramHtml(character);
+      const encodedLength = Array.from(escaped).length;
+      const desiredBold = fragment.bold === true;
+      if (encodedLength + (desiredBold ? 7 : 0) > limit) {
+        throw new Error("Telegram 生命周期分片预算不足，无法完整表示内容");
+      }
+      const transition = bold === desiredBold ? 0 : desiredBold ? 3 : 4;
+      const closing = desiredBold ? 4 : 0;
+      if (length + transition + encodedLength + closing > limit && chunk) flush();
+      if (bold !== desiredBold) {
+        const tag = desiredBold ? "<b>" : "</b>";
+        chunk += tag;
+        length += tag.length;
+        bold = desiredBold;
+      }
+      chunk += escaped;
+      length += encodedLength;
+    }
+  }
+  flush();
+  return chunks;
 }
 
 /** System title and field labels are formatted while all supplied values remain literal. */
@@ -156,6 +232,13 @@ export function formatTelegramPanelHtml(text: string): string {
 
     if (/^\s{2,}(?:\/|[A-Za-z]:\\)/.test(line)) {
       output.push(`<code>${escaped.trimStart()}</code>`);
+      continue;
+    }
+
+    // Ordered catalogue rows contain literal names and inline metadata, not a
+    // field label ending at the first colon inside a user-provided name.
+    if (/^\s*\d+[.)]\s+/u.test(line)) {
+      output.push(escaped);
       continue;
     }
 

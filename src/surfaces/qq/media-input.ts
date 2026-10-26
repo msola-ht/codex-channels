@@ -58,7 +58,7 @@ export class QqMediaInput {
       if (declaredSize !== undefined && (!Number.isSafeInteger(declaredSize) || declaredSize < 1 || declaredSize > maximum)) {
         throw new UserFacingError("video.too-large", "QQ 视频必须为 1 字节至 64 MiB");
       }
-      const resource = await this.download(new URL(url), signal, assertAllowed);
+      const resource = await this.download(new URL(url), signal, assertAllowed, kind === "video" ? 60_000 : 30_000);
       source = resource.stream;
       streamClosed = finished(source, { cleanup: true }).catch(() => {});
       signal.throwIfAborted();

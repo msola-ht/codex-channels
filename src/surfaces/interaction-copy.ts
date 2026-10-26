@@ -1,4 +1,16 @@
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import type { InteractionRequest } from "../approval/index.js";
+
+export function formatInteractionQuestionHeading(
+  request: Extract<InteractionRequest, { type: "user-input" }>,
+  questionIndex: number,
+): string {
+  const header = request.questions[questionIndex]!.header
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ").trim();
+  const number = `问题 ${questionIndex + 1}/${request.questions.length}`;
+  if (request.asynchronous && header) return header;
+  return header && header !== number ? `${number} · ${header}` : number;
+}
 
 export const interactionProcessedTitle = "Codex 交互已处理";
 export const interactionCancelledTitle = "Codex 交互已取消";

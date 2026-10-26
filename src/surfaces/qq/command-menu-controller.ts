@@ -13,10 +13,11 @@ import {
 } from "../../application/index.js";
 import { conversationTargetKey, UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
+import { formatConversationModelState } from "../conversation-model-account-command-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
 import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
-import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, formatServiceTierSetting, modelListEntry } from "../provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListEntry } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import { formatThreadQueueInputTypeLabel } from "../conversation-session-command-format.js";
@@ -108,6 +109,16 @@ export class QqCommandMenuController {
 
   constructor(private readonly options: Options) {}
 
+  idleReleased(target: ConversationTarget, actorId: string, threadId: string): QqMenuPanel {
+    const context = this.context(target, actorId);
+    return this.panel(context, {
+      content: "点击下方按钮恢复此会话。",
+      keyboard: { content: { rows: [{ buttons: [
+        this.button(context, "恢复会话", { kind: "resume", id: threadId }),
+      ] }] } },
+    });
+  }
+
   clear(): void {
     this.selections.clear();
     for (const controller of this.revertScopes.values()) controller.abort();
@@ -134,7 +145,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "account") return this.panel(context, {
-      content: "## 账户工具\n\n### 查询与管理\n\n- 账户额度与重置券\n- 当前渠道身份\n\n点击下方操作；机器人接入与群授权请在本机 Setup 管理。",
+      content: "## 账户工具\n\n### 查询与管理\n\n- 账户额度与重置券\n- 当前渠道身份\n\n点击下方操作；机器人接入与单聊允许名单请在本机 Setup 管理。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("limits", "账户额度", "/limits"), qqMenuButton("credits", "查看重置券", "/limits reset")] },
         { buttons: [qqMenuButton("whoami", "我的身份", "/whoami")] },
@@ -203,17 +214,15 @@ export class QqCommandMenuController {
     if (result.kind === "status" || result.kind === "limits" && result.result.kind === "rate-limits") {
       const context = { ...this.context(target, actorId), queryScope: this.options.queryScope(target) };
       const buttons = result.kind === "status"
-        ? [qqMenuButton("model", "模型设置", "/model"), qqMenuButton("workspace", "工作区", "/workspace"),
+        ? [qqMenuButton("metrics", "请求统计", "/metrics"), qqMenuButton("usage", "账户用量", "/usage"),
+          qqMenuButton("limits", "账户额度", "/limits"),
+          qqMenuButton("model", "模型设置", "/model"), qqMenuButton("workspace", "工作区", "/workspace"),
           qqMenuButton("permissions", "权限查询", "/permissions"), qqMenuButton("autoreview", "审批设置", "/autoreview")]
         : [qqMenuButton("credits", "查看重置券", "/limits reset")];
       const rows = buttonRows(buttons);
-      if (result.kind === "status") {
-        rows.push({ buttons: [qqMenuButton("status-view", result.view === "detail" ? "返回总览" : "查看详情",
-          result.view === "detail" ? "/status" : "/status detail")] });
-      }
       rows.push({ buttons: [homeButton()] });
       const detail = renderConversationCommandResult(result)!;
-      return { ...this.panel(context, { content: "选择下方操作继续。", keyboard: { content: { rows } } }),
+      return { ...this.panel(context, { content: result.kind === "status" ? "" : "选择下方操作继续。", keyboard: { content: { rows } } }),
         detail: formatQqLiteralDetails(detail), markdownDetail: result.kind === "status"
           ? formatConversationStatus(result.status, escapeLifecycleLiteral, result) : detail };
     }
@@ -378,9 +387,9 @@ export class QqCommandMenuController {
     const next = this.context(selection.target, selection.actorId);
     if (result.kind === "models") return this.models(next, result, 1, result.view);
     if (result.kind !== "outcome") throw unsupported();
-    const detail = formatConversationCommandOutcome(result.outcome);
+    const detail = formatConversationCommandOutcome(result.outcome, undefined, false);
     return { ...this.panel(next, { ...renderQqCommandMenu(), content: "选择下方操作继续。" }),
-      detail: formatQqLiteralDetails(detail), markdownDetail: detail };
+      detail, markdownDetail: formatConversationCommandOutcome(result.outcome, escapeLifecycleLiteral) };
   }
 
   private autoReview(context: MenuContext, result: Extract<ConversationCommandResult, { kind: "auto-review" }>): QqMenuPanel {
@@ -621,6 +630,7 @@ export class QqCommandMenuController {
     rows.push({ buttons: [qqMenuButton("extensions", "扩展管理", "/help extensions"), homeButton()] });
     if (rows.length > 5) throw unsupported();
     // Hook review fields must never acquire Markdown semantics, even inside a fence.
+    const confirmation = hookCommandChoices(result.view).find(choice => choice.input.startsWith("confirm "));
     const detail = formatQqLiteralDetails(formatConversationHooks(result.view, true));
     try {
       if (planText({ mode: "active", recipient: context.actorId, content: detail }).length > 7) throw new QqProtocolError("message", "invalid-input");
@@ -628,7 +638,10 @@ export class QqCommandMenuController {
       if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
       throw new UserFacingError("hooks.local-review-required", "Hook 详情超出完整展示预算");
     }
-    return { ...this.panel(context, { content: "核对上方完整 Hook 信息后操作。确认仅对本次预览有效；停止、切换或重启后失效。", keyboard: { content: { rows } } }),
+    const content = ["核对上方完整 Hook 信息后操作。确认仅对本次预览有效；停止、切换或重启后失效。",
+      ...(confirmation ? [`也可发送：/hooks ${confirmation.input}`] : []),
+    ].join("\n\n");
+    return { ...this.panel(context, { content, keyboard: { content: { rows } } }),
       detail, delivered: () => this.activate(context, buttons) };
   }
 
@@ -744,8 +757,8 @@ export class QqCommandMenuController {
     context = { ...context, selectionScope: snapshot.selectionScope };
     const selected = state.models.find(model => model.model === state.model
       && (model.provider ?? "openai") === (state.modelProvider ?? "openai") && model.available !== false);
-    const currentName = selected ? modelListEntry(selected.displayName, selected.provider, selected.model).modelName : state.model;
-    const current = `**当前模型：${markdown(currentName, 100)}**\n\n- ${reasoningEffortSettingName(state.effort, selected)}：${markdown(formatReasoningEffort(state.effort ?? selected?.defaultReasoningEffort), 40)}\n- 速度：${markdown(formatServiceTierSetting(state, selected), 200)}\n- 当前提供商：${markdown(formatCodexProviderLabel(state.modelProvider), 100)}\n`;
+    const [modelLine, ...settingLines] = formatConversationModelState(result, value => markdown(value, 140));
+    const current = `**${modelLine}**\n\n${settingLines.map(line => `- ${line}`).join("\n")}\n`;
     if (view !== "model") {
       if (!selected && view === "effort") throw expired();
       const choices: Array<{ label: string; selection: ModelSelectionRequest }> = view === "effort"
@@ -822,8 +835,8 @@ export class QqCommandMenuController {
         `**${session.selector ?? index + 1}. ${markdown(bounded(session.name || session.preview || "未命名", 32), 160)}${session.id === result.currentThreadId ? "（当前）" : background.has(session.id) ? "（后台）" : ""}${session.isPinned ? "（固定）" : ""}**\n`,
         [
           ...(session.model ? [`模型：${markdown(session.model, 60)}`] : []),
-          ...(session.reasoningEffort ? [`思考：${markdown(session.reasoningEffort, 24)}`] : []),
-          ...(session.modelProvider ? [`Provider：${markdown(session.modelProvider, 45)}`] : []),
+          ...(session.reasoningEffort ? [`${reasoningEffortSettingName(session.reasoningEffort)}：${markdown(formatReasoningEffort(session.reasoningEffort), 40)}`] : []),
+          ...(session.modelProvider ? [`Provider：${markdown(formatDisplayedProvider(session.modelProvider), 80)}`] : []),
         ].join(" · ").replace(/^(.+)$/u, "- $1"),
         [
           ...(session.turnCount === undefined ? [] : [`轮数：${session.turnCount}`]),

@@ -1,5 +1,6 @@
 import { protectTelegramReplyHeading } from "./html-format.js";
 import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
+import { markdownInlineCodeAt } from "../markdown-inline-code.js";
 
 const maximumFormattedMarkdownCharacters = 3_500;
 const markdownBackslashEscapePattern = /\\([\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])/gu;
@@ -53,14 +54,14 @@ function renderMarkdownAsTelegramHtml(markdown: string): string {
       && tableSeparator
       && tableHeader.length === tableSeparator.length
     ) {
-      output.push(`<b>${tableHeader.map(formatInlineMarkdown).join(" · ")}</b>`);
+      output.push(`<b>${tableHeader.map(cell => formatInlineMarkdown(cell)).join(" · ")}</b>`);
       index += 1;
       while (index + 1 < lines.length) {
         const row = parseMarkdownTableRow(lines[index + 1]!);
         if (!row || row.length !== tableHeader.length) {
           break;
         }
-        output.push(`• ${row.map(formatInlineMarkdown).join(" · ")}`);
+        output.push(`• ${row.map(cell => formatInlineMarkdown(cell)).join(" · ")}`);
         index += 1;
       }
       continue;
@@ -83,7 +84,7 @@ function renderMarkdownAsTelegramHtml(markdown: string): string {
         quoted.push(next[1]!);
         index += 1;
       }
-      output.push(`<blockquote>${quoted.map(formatInlineMarkdown).join("\n")}</blockquote>`);
+      output.push(`<blockquote>${quoted.map(line => formatInlineMarkdown(line)).join("\n")}</blockquote>`);
       continue;
     }
 
@@ -109,7 +110,9 @@ function renderMarkdownAsTelegramHtml(markdown: string): string {
   return protectTelegramReplyHeading(output.join("\n"));
 }
 
-function formatInlineMarkdown(text: string): string {
+interface InlineFormatBudget { remaining: number }
+
+function formatInlineMarkdown(text: string, budget: InlineFormatBudget = { remaining: Math.max(1_024, text.length * 8) }): string {
   const protectedHtml: string[] = [];
   let placeholderPrefix = "\uE000HTML";
   while (text.includes(placeholderPrefix)) placeholderPrefix += "\uE002";
@@ -117,36 +120,56 @@ function formatInlineMarkdown(text: string): string {
     const index = protectedHtml.push(html) - 1;
     return `${placeholderPrefix}${index}\uE001`;
   };
-  const withCodePlaceholders = text.replace(/`([^`\n]+)`/g, (_match, content: string) => {
-    const rendered = isBotCommand(content.trim())
-      ? escapeHtml(content.trim())
-      : `<code>${escapeHtml(content)}</code>`;
-    return protect(rendered);
-  });
-  const withFilePlaceholders = withCodePlaceholders.replace(
-    /(?<![!\\])\[([^\]\n]+)\]\((?:<(\/(?!\/)[^>\n]+)>|(\/(?!\/)[^\s)]+))\)/g,
-    (match, _label: string, wrapped: string | undefined, plain: string | undefined) => {
-      const destination = wrapped ?? plain;
-      const reference = destination?.slice(destination.lastIndexOf("/") + 1);
-      return reference ? protect(`<code>${escapeHtml(reference)}</code>`) : match;
-    },
-  );
-  const withLinkPlaceholders = withFilePlaceholders.replace(
-    /(?<![!\\])\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/gi,
-    (match, label: string, destination: string) => {
-      if (!isSafeHttpUrl(destination)) {
-        return match;
+  let withPlaceholders = "";
+  for (let index = 0; index < text.length;) {
+    // Unclosed link/code candidates must not repeatedly scan an unbounded body.
+    // Retain the remaining source literally when the shared scan budget is spent.
+    if (budget.remaining-- <= 0) {
+      withPlaceholders += protect(escapeHtml(text.slice(index)));
+      break;
+    }
+    const escaped = text[index] === "\\"
+      ? /^\\([\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])/u.exec(text.slice(index))
+      : null;
+    if (escaped) {
+      withPlaceholders += protect(escapeHtml(escaped[1]!));
+      index += escaped[0].length;
+      continue;
+    }
+    if (text[index] === "`") {
+      const code = boundedInlineCodeAt(text, index, budget);
+      withPlaceholders += protect(code.content === undefined
+        ? escapeHtml(text.slice(index, code.end))
+        : isBotCommand(code.content.trim())
+          ? escapeHtml(code.content.trim())
+          : `<code>${escapeHtml(code.content)}</code>`);
+      index = code.end;
+      continue;
+    }
+    if (text[index] === "[" && text[index - 1] !== "!") {
+      const link = markdownLinkAt(text, index, budget);
+      if (link) {
+        const destination = link.destination.replace(markdownBackslashEscapePattern, "$1");
+        if (destination.startsWith("/") && !destination.startsWith("//")) {
+          const reference = destination.slice(destination.lastIndexOf("/") + 1);
+          if (reference) {
+            withPlaceholders += protect(`<code>${escapeHtml(reference)}</code>`);
+            index = link.end;
+            continue;
+          }
+        } else if (/^https?:\/\//iu.test(destination) && isSafeHttpUrl(destination)) {
+          withPlaceholders += protect(
+            `<a href="${escapeHtml(destination)}">${formatInlineMarkdown(link.label, budget)}</a>`,
+          );
+          index = link.end;
+          continue;
+        }
       }
-      return protect(
-        `<a href="${escapeHtml(destination)}">${formatInlineMarkdown(label)}</a>`,
-      );
-    },
-  );
-  const withEscapePlaceholders = withLinkPlaceholders.replace(
-    markdownBackslashEscapePattern,
-    (_match, punctuation: string) => protect(escapeHtml(punctuation)),
-  );
-  const formatted = escapeHtml(withEscapePlaceholders)
+    }
+    withPlaceholders += text[index];
+    index += 1;
+  }
+  const formatted = escapeHtml(withPlaceholders)
     .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
     .replace(/__([^_\n]+)__/g, "<b>$1</b>")
     .replace(/~~([^~\n]+)~~/g, "<s>$1</s>")
@@ -156,6 +179,69 @@ function formatInlineMarkdown(text: string): string {
     new RegExp(`${placeholderPrefix}(\\d+)\uE001`, "g"),
     (_match, index: string) => protectedHtml[Number(index)] ?? "",
   );
+}
+
+function boundedInlineCodeAt(text: string, start: number, budget: InlineFormatBudget): ReturnType<typeof markdownInlineCodeAt> {
+  if (text.length - start > budget.remaining) {
+    budget.remaining = 0;
+    return { end: text.length, content: undefined };
+  }
+  const code = markdownInlineCodeAt(text, start);
+  budget.remaining -= (code.content === undefined ? text.length : code.end) - start;
+  return code;
+}
+
+function markdownLinkAt(text: string, start: number, budget: InlineFormatBudget): {
+  label: string;
+  destination: string;
+  end: number;
+} | undefined {
+  let cursor = start + 1;
+  while (cursor < text.length && text[cursor] !== "\n") {
+    if (budget.remaining-- <= 0) return undefined;
+    if (text[cursor] === "\\") {
+      cursor += 2;
+    } else if (text[cursor] === "`") {
+      cursor = boundedInlineCodeAt(text, cursor, budget).end;
+    } else if (text[cursor] === "]") {
+      break;
+    } else {
+      cursor += 1;
+    }
+  }
+  if (cursor === start + 1 || text[cursor] !== "]" || text[cursor + 1] !== "(") return undefined;
+  const label = text.slice(start + 1, cursor);
+  const destinationStart = cursor + 2;
+  const wrapped = text[destinationStart] === "<";
+  cursor = destinationStart + (wrapped ? 1 : 0);
+  const contentStart = cursor;
+  let parentheses = 0;
+  while (cursor < text.length && text[cursor] !== "\n") {
+    if (budget.remaining-- <= 0) return undefined;
+    if (text[cursor] === "\\") {
+      cursor += 2;
+      continue;
+    }
+    if (wrapped) {
+      if (text[cursor] === ">") break;
+    } else {
+      if (/\s/u.test(text[cursor]!)) break;
+      if (text[cursor] === "(") parentheses += 1;
+      if (text[cursor] === ")") {
+        if (parentheses === 0) break;
+        parentheses -= 1;
+      }
+    }
+    cursor += 1;
+  }
+  if (cursor === contentStart || (wrapped ? text[cursor] !== ">" || text[cursor + 1] !== ")" : text[cursor] !== ")")) {
+    return undefined;
+  }
+  return {
+    label,
+    destination: text.slice(contentStart, cursor),
+    end: cursor + (wrapped ? 2 : 1),
+  };
 }
 
 export function decodeMarkdownBackslashEscapes(markdown: string): string {
@@ -170,14 +256,27 @@ export function decodeMarkdownBackslashEscapes(markdown: string): string {
 
 function decodeInlineMarkdownBackslashEscapes(text: string): string {
   let output = "";
-  let cursor = 0;
-  for (const match of text.matchAll(/`([^`\n]+)`/gu)) {
-    const index = match.index;
-    output += text.slice(cursor, index).replace(markdownBackslashEscapePattern, "$1");
-    output += match[0];
-    cursor = index + match[0].length;
+  const budget: InlineFormatBudget = { remaining: Math.max(1_024, text.length * 8) };
+  for (let index = 0; index < text.length;) {
+    if (budget.remaining-- <= 0) return output + text.slice(index);
+    if (text[index] === "\\") {
+      const escaped = /^\\([\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])/u.exec(text.slice(index));
+      if (escaped) {
+        output += escaped[1];
+        index += 2;
+        continue;
+      }
+    }
+    if (text[index] === "`") {
+      const code = boundedInlineCodeAt(text, index, budget);
+      output += text.slice(index, code.end);
+      index = code.end;
+      continue;
+    }
+    output += text[index];
+    index += 1;
   }
-  return `${output}${text.slice(cursor).replace(markdownBackslashEscapePattern, "$1")}`;
+  return output;
 }
 
 function parseMarkdownTableRow(line: string): string[] | undefined {
@@ -255,8 +354,12 @@ export function formatMarkdownAsTelegramHtmlChunks(markdown: string): string[] {
 }
 
 /** 仅用于本模块生成的 HTML 分片降级，先去标签再解码，避免误删正文里的尖括号。 */
-export function telegramHtmlToPlainText(html: string): string {
-  return html.replace(/<[^>]*>/gu, "").replace(/&(amp|lt|gt|quot|#39);/gu, (_match, entity: string) => {
+export function telegramHtmlToPlainText(html: string, options?: { preserveUrls?: boolean }): string {
+  const withUrls = options?.preserveUrls
+    ? html.replace(/<a href="([^"]*)">([\s\S]*?)<\/a>/gu, (_match, destination: string, label: string) =>
+      `${label} (${destination})`)
+    : html;
+  return withUrls.replace(/<[^>]*>/gu, "").replace(/&(amp|lt|gt|quot|#39);/gu, (_match, entity: string) => {
     const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" };
     return entities[entity]!;
   });

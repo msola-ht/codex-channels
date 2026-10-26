@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { waitForCompletionNotice } from "../completion-notice-delay.js";
 import type { ChannelFileMediaType } from "../bounded-local-file.js";
 import type { Logger } from "pino";
 import type { InteractionRequest } from "../../approval/index.js";
@@ -11,9 +12,10 @@ import { formatSurfaceConfigurationChange } from "../configuration-change-format
 import { parseSlashCommand, isEmergencyStopCommand } from "../slash-command.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
+import { formatConversationCollaborationMode } from "../conversation-workspace-status-command-format.js";
 import { resolveSurfaceDelivery, shouldHideCommentary, shouldPreviewTextDelta, shouldHideRoutineNotification, shouldHideRoutineConfiguration } from "../delivery-policy.js";
 import { isSupportedPersistentOutput } from "../persistent-output.js";
-import { shouldHideTurnCompleted } from "../lifecycle-presentation.js";
+import { escapeLifecycleLiteral, shouldHideTurnCompleted } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import { parseQqTextEvent } from "./inbound.js";
 import { parseQqButtonEvent } from "./button-inbound.js";
@@ -23,9 +25,10 @@ import { QqQueueSources, type QqQueueTicket } from "./queue-sources.js";
 import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
 import { QQ_TEXT_PART_BYTES, QqProtocolError, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard } from "./protocol.js";
-import { isQqLifecycleNotification, QqLifecycleNotifications, renderQqTurnCompleted, renderQqTurnStarted } from "./lifecycle.js";
+import { isQqLifecycleNotification, QqLifecycleNotifications, renderQqTurnCompleted, renderQqTurnStarted, type QqLifecyclePresentation } from "./lifecycle.js";
 import { QqBodyStreaming } from "./streaming.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
+import { surfaceDiagnosticContext } from "../diagnostics.js";
 import { QqCommandMenuController } from "./command-menu-controller.js";
 import { QqScheduleMenu } from "./schedule-menu.js";
 import { QqPrivilegedManagementMenu } from "./privileged-management-menu.js";
@@ -35,6 +38,7 @@ import { isQqExtensionOperation, isQqTaskCommand } from "./extension-commands.js
 import type { QqImageStore } from "./image-store.js";
 import { generatedImageUnavailableText, isGeneratedImageUnavailable, isSubagentOutput, shouldDisplayOperation } from "../operation-presentation.js";
 import { formatQuotedInput } from "../quoted-input.js";
+import { formatTurnInputAppended, type AppendedInputKind } from "../input-copy.js";
 import { textAttachmentBody } from "../text-attachment-store.js";
 import type { QqFileInput } from "./file-input.js";
 import type { QqMediaInput } from "./media-input.js";
@@ -59,7 +63,7 @@ export interface QqMessageOptions {
   media?: Pick<QqMediaInput, "prepare" | "retain" | "discard">;
   startupNotification?: {
     recipients(): readonly string[];
-    text(target: ConversationTarget, signal: AbortSignal): Promise<string>;
+    presentation(target: ConversationTarget, signal: AbortSignal): Promise<QqLifecyclePresentation>;
   };
   configurationNotification?: {
     recipients(): readonly string[];
@@ -128,7 +132,7 @@ export class QqMessages implements SurfaceOutputPort {
       prepareAsyncAnswer: (target, request, message) => this.prepareAsyncAnswer(target, request, message),
       send: async (target, content, interactionControls, signal, current) => {
         await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(target.conversationId), content }, {
-          signal: AbortSignal.any([signal, this.lifetime.signal]), interactionControls,
+          signal: AbortSignal.any([signal, this.lifetime.signal]), presentation: { kind: "interaction", controls: interactionControls },
           beforeSend: () => { if (!current()) throw new Error("QQ 交互授权失效"); },
           reserve: parts => this.budget.reserve(qqConversationRecipient(target.conversationId), parts, "critical-interaction"),
         }, async () => {});
@@ -176,8 +180,8 @@ export class QqMessages implements SurfaceOutputPort {
     const panel = this.schedules.present(target, actorId, preview);
     const recipient = qqConversationRecipient(target.conversationId);
     const task = this.outbox.deliver({ mode: "active", recipient, content: panel.detail ?? panel.content }, {
-      interactionControls: { content: panel.content, keyboard: panel.keyboard,
-        ...(panel.markdownDetail === undefined ? {} : { markdownContent: panel.markdownDetail }) },
+      presentation: { kind: "interaction", controls: { content: panel.content, keyboard: panel.keyboard,
+        ...(panel.markdownDetail === undefined ? {} : { markdownContent: panel.markdownDetail }) } },
       signal: AbortSignal.any([this.lifetime.signal, panel.signal ?? this.lifetime.signal]),
       beforeSend: () => { if (!panel.isCurrent()) throw new Error("QQ 计划任务预览授权失效"); },
       reserve: parts => this.budget.reserve(recipient, parts, "critical-interaction"),
@@ -335,10 +339,12 @@ export class QqMessages implements SurfaceOutputPort {
     const recipient = qqConversationRecipient(event.target.conversationId);
     await run(async presentation => {
       await this.outbox.deliver({ mode: "active", recipient, content: presentation.text }, {
-        signal: AbortSignal.any([signal, this.lifetime.signal]), preferMarkdown: true, markdownContent: presentation.markdown,
+        signal: AbortSignal.any([signal, this.lifetime.signal]), presentation: presentation.markdown === undefined
+          ? { kind: "literal" } : { kind: "formatted", markdownContent: presentation.markdown },
         beforeSend: () => { if (!authorized()) throw new Error("QQ 过程通知来源已失效"); },
-        reserve: parts => this.budget.reserve(recipient, parts,
-          { key: JSON.stringify([event.target.conversationId, threadId, turnId]), status: false, progress: true }),
+        reserve: parts => this.budget.reserve(recipient, parts, retained ? "delivery-progress"
+          : { key: JSON.stringify([event.target.conversationId, threadId, turnId]), status: false, progress: true }),
+        ...(retained ? { reserveAfterWait: (parts: number, active: AbortSignal) => this.budget.reserveAfterWait(recipient, parts, "delivery-progress", active) } : {}),
       }, checkpoint);
     });
   }
@@ -346,11 +352,21 @@ export class QqMessages implements SurfaceOutputPort {
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, retained = false): Promise<void> {
     const content = this.notifications.render(event, retained, this.displaySettings(event.target).presentationDetail);
     if (content === null) return;
+    const presentation = typeof content === "string" ? { text: content, markdown: content } : content;
     const recipient = qqConversationRecipient(event.target.conversationId);
-    await this.outbox.deliver({ mode: "active", recipient, content }, {
-      signal: AbortSignal.any([signal, this.lifetime.signal]), preferMarkdown: true,
-      beforeSend: () => { if (!authorized()) throw new Error("QQ 通知授权失效"); },
-      reserve: parts => this.budget.reserve(recipient, parts, "interaction"),
+    // Capture the released conversation's menu scope before entering the send queue.
+    // The normal one-use selection path owns authorization and explicit resume.
+    if (!authorized()) throw new Error("QQ 通知授权失效");
+    const actorId = qqConversationActor(event.target.conversationId);
+    const menu = event.type === "conversation.idle.released" && actorId
+      ? this.menus.idleReleased(event.target, actorId, event.threadId) : undefined;
+    await this.outbox.deliver({ mode: "active", recipient, content: presentation.text }, {
+      signal: AbortSignal.any([signal, this.lifetime.signal]),
+      presentation: menu ? { kind: "interaction", controls: { content: menu.content, keyboard: menu.keyboard, markdownContent: presentation.markdown } }
+        : { kind: "formatted", markdownContent: presentation.markdown },
+      beforeSend: () => { if (!authorized() || (menu && !menu.isCurrent())) throw new Error("QQ 通知授权失效"); },
+      reserve: parts => this.budget.reserve(recipient, parts, retained ? "delivery-progress" : "interaction"),
+      ...(retained ? { reserveAfterWait: (parts: number, active: AbortSignal) => this.budget.reserveAfterWait(recipient, parts, "delivery-progress", active) } : {}),
     }, checkpoint);
   }
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, source?: SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
@@ -370,13 +386,13 @@ export class QqMessages implements SurfaceOutputPort {
       const recipient = qqConversationRecipient(event.target.conversationId);
       const beforeSend = (): undefined => { if (authorized() !== true) throw new Error("QQ 图片授权失效"); };
       const bounded = AbortSignal.any([signal, this.lifetime.signal]);
-      const reserve = () => this.budget.reserve(recipient, 1,
-        { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: false });
+      const reserve = () => this.budget.reserve(recipient, 1, "delivery");
+      const reserveAfterWait = (parts: number, active: AbortSignal) => this.budget.reserveAfterWait(recipient, parts, "delivery", active);
       if (isGeneratedImageUnavailable(event.operation)) {
         await this.outbox.deliver({ mode: "active", recipient, content: generatedImageUnavailableText },
-          { signal: bounded, beforeSend, reserve }, checkpoint);
+          { presentation: { kind: "literal" }, signal: bounded, beforeSend, reserve, reserveAfterWait }, checkpoint);
       } else if (event.operation.imagePath) {
-        await this.outbox.deliverImage(recipient, event.operation.imagePath, { signal: bounded, beforeSend, reserve }, checkpoint);
+        await this.outbox.deliverImage(recipient, event.operation.imagePath, { signal: bounded, beforeSend, reserve, reserveAfterWait }, checkpoint);
       } else throw new Error("QQ 图片结果缺少内容");
       return;
     }
@@ -392,41 +408,61 @@ export class QqMessages implements SurfaceOutputPort {
       ? renderQqTurnCompleted(event, this.displaySettings(event.target).presentationDetail, context?.completion ?? "detailed")
       : event.type === "turn.started" ? renderQqTurnStarted(event) : undefined;
     let text = event.type === "text.completed" ? event.text : lifecycle!.text;
-    let markdownStart: number | undefined;
-    // A blocked continuation does not prove that an earlier live preview was
-    // never sent. Capture this before finish removes the preview state.
-    const hadPreview = event.type === "text.completed" && this.streaming.hasAdmittedPreview(event);
+    // Stream checkpoints are emitted after in-flight work settles and only
+    // when a preview was confirmed or its send result is unknown. Admission
+    // alone is not evidence that anything reached the platform.
+    let hadPreview = false;
     let checkpointFailed = false;
+    const diagnostics = { ...surfaceDiagnosticContext(), surface: "qq", eventType: event.type,
+      threadId: event.threadId, turnId: event.turnId,
+      ...(event.type === "text.completed" ? { itemId: event.itemId, phase: event.phase } : {}) };
+    let representation: "stream" | "continuation" | "ordinary" = "ordinary";
     const record = async (value: DeliveryCheckpoint) => {
+      if (value.operation.startsWith("qq-stream:")) hadPreview = true;
       try { await checkpoint(value); }
       catch (error) { checkpointFailed = true; throw error; }
     };
     try {
+      this.options.logger.info(diagnostics, "QQ 可靠正文或轮次通知开始投递");
       if (event.type === "text.completed") {
         const result = await this.streaming.finish(event, signal, record, authorized);
-        if (result.kind === "complete") return;
-        if (result.kind === "continue") { text = result.text; markdownStart = result.markdownStart; }
+        if (result.kind === "complete") {
+          this.options.logger.info({ ...diagnostics, representation: "stream" }, "QQ 可靠正文或轮次通知平台确认");
+          return;
+        }
+        if (result.kind === "continue") { text = result.text; representation = "continuation"; }
       }
-      // Preselect the complete plan. A continuation's partial first block stays
-      // literal; later full blocks may resume Markdown without changing old text.
+      if (event.type === "turn.completed") {
+        // Ordered delivery has settled preceding bodies, but QQ's HTTP ACK is
+        // not a client-render acknowledgement. Give the final bubble time to
+        // display without adding another per-Turn state or delaying the body.
+        const waiting = AbortSignal.any([signal, this.lifetime.signal]);
+        try {
+          waiting.throwIfAborted();
+          if (authorized() !== true) throw new Error("QQ 完成通知来源已失效");
+          await waitForCompletionNotice(waiting);
+        }
+        catch (error) { throw new SurfaceDeliveryNotSentError({ cause: error }); }
+      }
+      // Preselect one complete representation; streams stop at raw block boundaries.
       await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId), content: text }, {
         signal: AbortSignal.any([signal, this.lifetime.signal]),
-        preferMarkdown: true,
-        ...(lifecycle ? { markdownContent: lifecycle.markdown } : {}),
-        ...(markdownStart !== undefined ? { markdownStart } : {}),
-        allowResultFile: event.type === "text.completed" && (event.phase !== "commentary" || markdownStart !== undefined),
+        presentation: event.type === "text.completed"
+          ? { kind: "body", allowResultFile: event.phase !== "commentary" || representation === "continuation" }
+          : { kind: "formatted", markdownContent: lifecycle!.markdown },
         beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
-        reserve: parts => this.budget.reserve(qqConversationRecipient(event.target.conversationId), parts,
-          { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: event.type === "turn.completed",
-            progress: event.type === "turn.started" || (event.type === "text.completed" && event.phase === "commentary") }),
+        reserve: parts => this.budget.reserve(qqConversationRecipient(event.target.conversationId), parts, "delivery"),
+        reserveAfterWait: (parts, active) => this.budget.reserveAfterWait(qqConversationRecipient(event.target.conversationId), parts, "delivery", active),
       }, record);
+      this.options.logger.info({ ...diagnostics, representation }, "QQ 可靠正文或轮次通知平台确认");
     } catch (error) {
+      this.options.logger.warn({ ...diagnostics, hadPreview, checkpointFailed }, "QQ 可靠正文或轮次通知投递未确认");
       if (event.type === "text.completed" && event.phase !== "commentary" && !checkpointFailed && !signal.aborted && authorized()) {
         try {
           await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId),
             content: "正文未完整送达或发送结果未确认；这不等于任务执行失败。请在本机 WebUI 投递箱核对，完整内容可在原生 Codex 会话查看。人工重试可能重复已收到的内容。" }, {
             signal: AbortSignal.any([signal, this.lifetime.signal, AbortSignal.timeout(10_000)]),
-            preferMarkdown: true,
+            presentation: { kind: "formatted" },
             beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
             reserve: parts => this.budget.reserve(qqConversationRecipient(event.target.conversationId), parts,
               { key: JSON.stringify([event.target.conversationId, event.threadId, event.turnId]), status: true }),
@@ -465,7 +501,7 @@ export class QqMessages implements SurfaceOutputPort {
         signal.throwIfAborted();
         try {
           await this.outbox.deliver({ mode: "active", recipient: actorId, content }, {
-            signal, preferMarkdown: true,
+            signal, presentation: { kind: "formatted" },
             beforeSend: () => {
               if (!this.allowed(this.target(actorId), actorId)) throw new Error("QQ 配置通知授权失效");
             },
@@ -496,7 +532,7 @@ export class QqMessages implements SurfaceOutputPort {
     const context = this.extensionQueryScope(target);
     await this.outbox.deliverImage(recipient, imagePath, { signal: signal ? AbortSignal.any([signal, this.lifetime.signal]) : this.lifetime.signal,
       beforeSend: () => { if (isCurrent() !== true || !this.current(scope) || this.extensionQueryScope(target) !== context) throw new Error("QQ 图片目标已变化"); },
-      reserve: () => this.budget.reserve(recipient, 1, "critical-interaction", format === "markdown" ? 120_000 : 45_000),
+      reserve: () => this.budget.reserve(recipient, 1, "critical-interaction"),
     }, async () => {}, format);
   }
 
@@ -510,7 +546,7 @@ export class QqMessages implements SurfaceOutputPort {
     const context = this.extensionQueryScope(target);
     await this.outbox.deliverFile(recipient, filePath, fileName, { signal: signal ? AbortSignal.any([signal, this.lifetime.signal]) : this.lifetime.signal,
       beforeSend: () => { if (isCurrent() !== true || !this.current(scope) || this.extensionQueryScope(target) !== context) throw new Error("QQ 文件目标已变化"); },
-      reserve: () => this.budget.reserve(recipient, 1, "critical-interaction", 120_000),
+      reserve: () => this.budget.reserve(recipient, 1, "critical-interaction"),
     }, async () => {}, mediaType);
   }
 
@@ -523,12 +559,12 @@ export class QqMessages implements SurfaceOutputPort {
       const scope = this.scope(actorId);
       if (!scope || !this.current(scope)) continue;
       try {
-        const content = await notification.text(this.target(actorId), signal);
+        const content = await notification.presentation(this.target(actorId), signal);
         signal.throwIfAborted();
-        if (!content) continue;
-        await this.outbox.deliver({ mode: "active", recipient: actorId, content }, {
+        if (!content.text) continue;
+        await this.outbox.deliver({ mode: "active", recipient: actorId, content: content.text }, {
           signal,
-          preferMarkdown: true,
+          presentation: { kind: "formatted", markdownContent: content.markdown },
           beforeSend: () => { if (!this.current(scope)) throw new Error("QQ 上线通知授权失效"); },
           reserve: parts => this.budget.reserve(actorId, parts, "startup"),
         }, async () => {});
@@ -549,7 +585,10 @@ export class QqMessages implements SurfaceOutputPort {
     }
     const parsed = parseQqTextEvent(envelope);
     if (parsed.kind !== "supported") {
-      if (parsed.kind === "rejected") this.options.logger.warn({ reason: parsed.reason, field: parsed.field }, "QQ 非普通文字事件未处理");
+      if (parsed.kind === "rejected") {
+        this.options.logger.warn({ category: parsed.category, reason: parsed.reason, field: parsed.field }, "QQ 消息未接纳");
+        if (parsed.reply) this.admit(parsed.reply);
+      }
       return;
     }
     this.admit(parsed.message);
@@ -667,6 +706,18 @@ export class QqMessages implements SurfaceOutputPort {
   }
 
   private async process(message: QqMessageInput, target: ConversationTarget, ownsBusy = false): Promise<void> {
+    if ("rejection" in message) {
+      const reason = message.rejection;
+      const detail = reason === "empty" ? "引用内容仅作上下文，请补充本次需求后发送。"
+        : reason === "mixed-attachments" ? "图片、文件或音视频混合附件暂不支持，请分开发送。"
+        : reason === "unsupported-attachment-type" ? "图片目前支持 PNG、JPEG 和非动画 GIF，请转换格式后重发。"
+        : reason === "unsupported-attachment-fields" ? "附件结构暂不支持，请尝试单独发送图片，再补充文字需求。"
+        : reason === "limit-exceeded" ? "附件数量或大小超出限制，请减少附件或压缩后重发。"
+        : reason === "missing-voice-content" ? "未取得语音转写或可读取的音频，请改发文字。"
+        : "附件信息校验未通过，请重新发送。";
+      await this.reply(message, `这条消息未提交给 Codex。${detail}`, () => this.allowed(target, message.actorId));
+      return;
+    }
     const images = "images" in message ? message.images : undefined;
     const file = "file" in message ? message.file : undefined;
     const media = "media" in message ? message.media : undefined;
@@ -831,9 +882,9 @@ export class QqMessages implements SurfaceOutputPort {
           panel.delivered?.();
           return;
         }
-        const text = result.kind === "collaboration-mode" ? `协作模式：${result.state.mode === "plan" ? "Plan" : "Default"}${result.state.pending ? "（下一次 Turn 生效）" : ""}\n下一条普通消息按此模式处理；再次发送 /plan 可切换模式。`
+        const text = result.kind === "collaboration-mode" ? formatConversationCollaborationMode(result, false)
           : result.kind === "outcome" && result.outcome.type === "goal.cleared" ? "已清除当前会话目标。清除不等于停止正在运行的任务；如需停止，请使用 /stop。"
-          : result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
+          : result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome, undefined, false)
           : renderConversationCommandResult(result);
         if (!text) throw new Error("QQ 命令没有可交付结果");
         stage = "reply";
@@ -849,11 +900,24 @@ export class QqMessages implements SurfaceOutputPort {
         }, QUERY_COMMANDS.has(command.name)
           ? command.name === "diff" ? "Diff 无法在本次 QQ 回复中完整展示，本次仅发送此提示。请在原生 Codex 会话查看。"
             : "查询结果无法在本次 QQ 回复中完整展示，本次仅发送此提示。统计可缩小 /metrics 查询范围，或在本机 WebUI 查看；账户信息也可从其他已接入渠道查询。"
-          : undefined, undefined, undefined, undefined, undefined, result.kind === "artifacts");
+          : undefined, undefined, undefined,
+          result.kind === "outcome" && result.outcome.type !== "goal.cleared"
+            ? formatConversationCommandOutcome(result.outcome, escapeLifecycleLiteral) : undefined,
+          undefined, result.kind === "artifacts");
         return;
       }
       if ("kind" in message) {
         await this.reply(message, "此按钮操作不受支持，请重新打开 /help。", () => this.allowed(target, message.actorId));
+        return;
+      }
+      const quotedImages = "quotedImages" in message ? message.quotedImages ?? [] : [];
+      const taskImages = [...(images ?? []), ...quotedImages];
+      if (quotedImages.length && (file || media)) {
+        await this.reply(message, "引用图片不能与当前文件或音视频一起提交，请单独发送图片需求。", () => this.allowed(target, message.actorId));
+        return;
+      }
+      if (taskImages.length > 4) {
+        await this.reply(message, "当前消息与引用消息的图片合计最多四张，请减少图片后重发。", () => this.allowed(target, message.actorId));
         return;
       }
       const scope = this.scope(message.actorId, target.conversationId);
@@ -861,6 +925,19 @@ export class QqMessages implements SurfaceOutputPort {
       const reservation = this.sources.reserve(scope, message, media ? 120_000 : 30_000);
       if (reservation.kind !== "accepted") { await this.reply(message, "当前输入无法接纳，请稍后核对任务状态再重试。", () => this.current(scope)); return; }
       const { ticket } = reservation;
+      const acknowledge = async (submission: Awaited<ReturnType<ConversationTurnUseCases["submit"]>>, kind: AppendedInputKind) => {
+        if (!submission.steered) return;
+        // Submission has already succeeded. A receipt failure must never cancel
+        // its source or turn into a misleading submission-failed response.
+        try {
+          await this.reply(message, formatTurnInputAppended(kind, !!message.content.trim()),
+            () => this.current(scope, submission.threadId)
+              && this.options.service.status(target).threadId === submission.threadId);
+        } catch (error) {
+          const { errorType, errorCode, errorReason } = surfaceErrorMetadata(error);
+          this.options.logger.warn({ reason: "input-ack-unconfirmed", errorType, errorCode, errorReason }, "QQ 追加输入已提交，回执未确认");
+        }
+      };
       stage = "submit";
       try {
         this.options.service.touchActivity?.(target);
@@ -880,17 +957,17 @@ export class QqMessages implements SurfaceOutputPort {
             };
             assertCurrent();
             if (media.kind === "voice" && media.referenceText) {
-              await prepared.submit(formatQuotedInput([message.content, media.referenceText].filter(Boolean).join("\n\n"), message.quotedText));
+              await acknowledge(await prepared.submit(formatQuotedInput([message.content, media.referenceText].filter(Boolean).join("\n\n"), message.quotedText)), "audio");
             } else {
               if (!this.options.media) throw new UserFacingError("input.authorization-changed", "音视频准备不可用");
               const file = await this.options.media.prepare(media, { target, actorId: message.actorId }, signal, assertCurrent);
               if ("attachment" in file) {
                 video = file;
                 assertCurrent();
-                await prepared.submit(formatQuotedInput([message.content, videoAttachmentBody(file)].filter(Boolean).join("\n\n"), message.quotedText));
+                await acknowledge(await prepared.submit(formatQuotedInput([message.content, videoAttachmentBody(file)].filter(Boolean).join("\n\n"), message.quotedText)), "file");
               } else {
                 assertCurrent();
-                await prepared.submit({ text: formatQuotedInput(message.content, message.quotedText), localAudios: [{ path: file.path }] });
+                await acknowledge(await prepared.submit({ text: formatQuotedInput(message.content, message.quotedText), localAudios: [{ path: file.path }] }), "audio");
               }
             }
           } finally {
@@ -903,13 +980,13 @@ export class QqMessages implements SurfaceOutputPort {
           }
           return;
         }
-        if (!images?.length && !file) {
-          await this.options.service.submit(target, formatQuotedInput(message.content, message.quotedText), () => ticket.isCurrent(), ticket.observer);
+        if (!taskImages.length && !file) {
+          await acknowledge(await this.options.service.submit(target, formatQuotedInput(message.content, message.quotedText), () => ticket.isCurrent(), ticket.observer), "text");
           return;
         }
         const prepare = this.options.service.prepareAttachmentSubmission;
         if (!prepare) throw new UserFacingError("input.authorization-changed", "附件提交准备不可用");
-        const prepared = prepare.call(this.options.service, target, () => ticket.isCurrent(), images?.length ? "image" : "file", ticket.observer);
+        const prepared = prepare.call(this.options.service, target, () => ticket.isCurrent(), taskImages.length ? "image" : "file", ticket.observer);
         try {
           prepared.captureTarget();
           const signal = AbortSignal.any([ticket.signal, prepared.signal, this.lifetime.signal]);
@@ -920,17 +997,19 @@ export class QqMessages implements SurfaceOutputPort {
               throw new UserFacingError(file ? "input.authorization-changed" : "image.download-failed", "附件准备已取消或上下文变化");
             }
           };
-          if (images?.length && !this.options.images) throw new UserFacingError("image.download-failed", "图片准备不可用");
+          if (taskImages.length && !this.options.images) throw new UserFacingError("image.download-failed", "图片准备不可用");
           if (file && !this.options.files) throw new UserFacingError("attachment.download-failed", "文本附件准备不可用");
           const preparedFile = file ? await this.options.files!.prepare(file, signal, assertAttachmentsCurrent) : undefined;
           const currentText = preparedFile
             ? [message.content, `附件文件名：${JSON.stringify(preparedFile.fileName)}`, textAttachmentBody(preparedFile)].filter(Boolean).join("\n\n")
             : message.content;
-          const text = formatQuotedInput(currentText, message.quotedText);
-          const input = images?.length
-            ? await this.options.images!.prepare(images, text, signal, assertAttachmentsCurrent) : text;
+          const text = [formatQuotedInput(currentText, message.quotedText),
+            ...(quotedImages.length ? [`图片顺序：当前消息 ${images?.length ?? 0} 张在前，引用消息 ${quotedImages.length} 张在后；引用图片仅作上下文。`] : []),
+          ].join("\n\n");
+          const input = taskImages.length
+            ? await this.options.images!.prepare(taskImages, text, signal, assertAttachmentsCurrent) : text;
           assertAttachmentsCurrent();
-          await prepared.submit(input);
+          await acknowledge(await prepared.submit(input), taskImages.length ? "image" : "file");
         } finally { prepared.dispose(); }
       } catch (error) {
         ticket.cancel();
@@ -947,9 +1026,13 @@ export class QqMessages implements SurfaceOutputPort {
       }
     } catch (error) {
       if (stage === "command") commandTicket?.cancel();
-      const { errorType, errorCode, errorReason, selectionFields } = surfaceErrorMetadata(error);
+      const failure = error instanceof SurfaceDeliveryNotSentError ? error.cause : error;
+      const { errorType, errorCode, errorReason, selectionFields } = surfaceErrorMetadata(failure);
       this.options.logger.warn({ reason: error instanceof UserFacingError ? error.code : "operation-unconfirmed",
-        stage, emergencyStop: stop, errorType, errorCode, errorReason, selectionFields }, "QQ 操作未确认");
+        stage, emergencyStop: stop, errorType, errorCode, errorReason, selectionFields,
+        ...(failure instanceof QqProtocolError ? { operation: failure.operation, protocolReason: failure.reason, httpStatus: failure.httpStatus } : {}),
+      }, "QQ 操作未确认");
+      if (this.replied.has(message)) throw error;
       await this.reply(message, error instanceof UserFacingError ? formatSurfaceUserFacingError(error, "QQ")
         : commandTicket ? "任务提交未确认；请用 /status 或在本机核对，勿直接重复提交。"
         : command?.name === "schedule" ? "计划任务操作未确认；请用 /schedule 或 /schedule runs <任务 ID> 核对，勿直接重复提交。"
@@ -974,6 +1057,7 @@ export class QqMessages implements SurfaceOutputPort {
       catch (error) {
         if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
         input.content = oversizedNotice;
+        markdownDetail = undefined;
       }
     }
     this.replied.add(message);
@@ -988,12 +1072,17 @@ export class QqMessages implements SurfaceOutputPort {
       }
     }
     await this.outbox.deliver(input, {
-      ...(detail !== undefined && keyboard ? { interactionControls: { content, keyboard, ...(markdownDetail !== undefined ? { markdownContent: markdownDetail } : {}) } }
-        : keyboard ? { representation: "markdown", keyboard } : { preferMarkdown: !preserveLiteral }),
+      presentation: detail !== undefined && keyboard
+        ? { kind: "interaction", controls: { content, keyboard, ...(markdownDetail !== undefined ? { markdownContent: markdownDetail } : {}) } }
+        : keyboard ? { kind: "panel", keyboard }
+          : preserveLiteral ? { kind: "literal" }
+            : { kind: "formatted", ...(markdownDetail === undefined ? {} : { markdownContent: markdownDetail }) },
       signal: cancellation ? AbortSignal.any([this.lifetime.signal, cancellation]) : this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
-      reserve: parts => this.budget.reserve(recipient, parts, detail !== undefined ? "critical-interaction"
-        : "kind" in message || activeMenu ? "interaction" : undefined),
+      // Explicit command replies, including callback queries, consume the same
+      // bounded user-response budget as detailed menus, without optional-output headroom.
+      reserve: parts => this.budget.reserve(recipient, parts,
+        detail !== undefined || "kind" in message || activeMenu ? "critical-interaction" : undefined),
     }, async () => {});
   }
   private target(actorId: string, conversationId = `c2c:${actorId}`): ConversationTarget { return { surface: "qq", accountId: this.options.appId, conversationId }; }
@@ -1026,6 +1115,7 @@ export class QqMessages implements SurfaceOutputPort {
       const recipient = qqConversationRecipient(target.conversationId);
       await this.outbox.deliver({ mode: "active", recipient,
         content: "问题回答提交未确认；请用 /status 或在本机核对，勿直接重复提交。" }, {
+        presentation: { kind: "literal" },
         signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(10_000)]),
         beforeSend: () => { if (!authorized()) throw new Error("QQ 问题回复授权失效"); },
         reserve: parts => this.budget.reserve(recipient, parts, "interaction"),

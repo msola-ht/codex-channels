@@ -16,32 +16,37 @@ import {
   formatNextMessageModel,
 } from "./conversation-model-account-command-format.js";
 import { formatDisplayedProvider } from "./provider-format.js";
-import { toStructuredMarkdownList } from "./markdown-list.js";
+import { toStructuredMarkdownList as structuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
 export function formatConversationCommandOutcome(
   outcome: ConversationCommandOutcome,
+  formatLiteral: (value: string) => string = value => value,
+  structured = true,
 ): string {
+  const literal = (value: string): string => formatLiteral(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
+  const field = (value: string): string => structured ? `- ${value}` : value;
+  const toStructuredMarkdownList = structured ? structuredMarkdownList : (value: string): string => value;
   switch (outcome.type) {
     case "thread.resumed":
       return outcome.transferredFrom
         ? toStructuredMarkdownList([
             formatTakeoverSource(outcome.transferredFrom),
-            `Session ID：${outcome.threadId}`,
-            formatConversationModel("会话模型", outcome.model),
+            field(`Session ID：${literal(outcome.threadId)}`),
+            field(literal(formatConversationModel("会话模型", outcome.model))),
             ...(outcome.queuePending
               ? ["Queue 中有待派发条目，已沿用该 Session 自身设置，未应用当前会话的待生效偏好。"]
               : []),
           ].join("\n"))
         : toStructuredMarkdownList([
             "已恢复 Codex Session",
-            `Session ID：${outcome.threadId}`,
-            formatConversationModel("会话模型", outcome.model),
+            field(`Session ID：${literal(outcome.threadId)}`),
+            field(literal(formatConversationModel("会话模型", outcome.model))),
             ...(outcome.queuePending
               ? ["Queue 中有待派发条目，已沿用该 Session 自身设置，未应用当前会话的待生效偏好。"]
               : []),
             ...(outcome.backgroundedThreadId
-              ? [`原会话已保留为后台会话：${outcome.backgroundedThreadId}`]
+              ? [field(`原会话已保留为后台会话：${literal(outcome.backgroundedThreadId)}`)]
               : []),
           ].join("\n"));
     case "session.new":
@@ -52,17 +57,17 @@ export function formatConversationCommandOutcome(
           ...(outcome.backgroundedThreadId
             ? [
                 "新会话已准备，原会话尚不满足释放条件，已保留在后台。",
-                `后台 Session ID：${outcome.backgroundedThreadId}`,
+                field(`后台 Session ID：${literal(outcome.backgroundedThreadId)}`),
               ]
             : ["已退出当前会话。"]),
           ...(recoverableThreadId
             ? [
-                ...(outcome.backgroundedThreadId ? [] : [`Session ID：${recoverableThreadId}`]),
-                `恢复会话：/r ${recoverableThreadId}`,
+                ...(outcome.backgroundedThreadId ? [] : [field(`Session ID：${literal(recoverableThreadId)}`)]),
+                field(`恢复会话：/r ${literal(recoverableThreadId)}`),
               ]
             : []),
           "发送下一条普通消息时才会创建新的 Codex Session。",
-          formatNextMessageModel(outcome.nextModel),
+          field(literal(formatNextMessageModel(outcome.nextModel))),
         ].join("\n"));
       }
     case "thread.archived":
@@ -94,9 +99,9 @@ export function formatConversationCommandOutcome(
     case "workspace.selected":
       return toStructuredMarkdownList([
         "已切换 Workspace",
-        `Workspace：${outcome.workspace.name}`,
-        `工作目录：${outcome.workspace.cwd}`,
-        formatNextMessageModel(outcome.nextModel),
+        field(`Workspace：${literal(outcome.workspace.name)}`),
+        field(`工作目录：${literal(outcome.workspace.cwd)}`),
+        field(literal(formatNextMessageModel(outcome.nextModel))),
       ].join("\n"));
     case "turn.stop-requested":
       return outcome.stopped
@@ -138,7 +143,7 @@ export function formatConversationCommandOutcome(
     case "thread.renamed":
       return toStructuredMarkdownList([
         "会话已重命名",
-        `名称：${outcome.name}`,
+        field(`名称：${literal(outcome.name)}`),
       ].join("\n"));
     case "thread.compaction-requested":
       return toStructuredMarkdownList([

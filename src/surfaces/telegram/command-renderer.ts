@@ -10,9 +10,9 @@ import type {
 import {
   listProviders,
 } from "../../application/index.js";
-import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTierSetting, modelListDisplayName, modelListEntry } from "../provider-format.js";
+import { formatCodexProviderLabel, formatProviderModelSummary, modelListDisplayName } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
-import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
+import { formatReasoningEffort } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import {
@@ -22,6 +22,8 @@ import {
   formatConversationLimits,
   formatConversationResetCredits,
   formatConversationModels,
+  formatConversationModelState,
+  formatModelSettingLiteral,
 } from "../conversation-model-account-command-format.js";
 import {
   formatConversationThreadQueue,
@@ -43,7 +45,10 @@ import { formatTelegramDiffChunks, formatTelegramLiteralPanelChunks, formatTeleg
 export async function renderTelegramCommandResult(
   context: Context,
   result: ConversationCommandResult,
+  reply: Context["reply"] = context.reply.bind(context),
 ): Promise<void> {
+  const panel = (text: string, markup?: InlineKeyboardMarkup): Promise<void> =>
+    replyTelegramPanel(context, text, markup, reply);
   switch (result.kind) {
     case "outcome": {
       if (isTurnLifecycleAcknowledgedOutcome(result.outcome)) {
@@ -51,15 +56,14 @@ export async function renderTelegramCommandResult(
       }
       const rendered = renderOutcome(result.outcome);
       if (rendered.expanded) {
-        await replyTelegramPanel(context, rendered.text);
+        await panel(rendered.text);
       } else {
-        await context.reply(rendered.text);
+        await reply(rendered.text);
       }
       return;
     }
     case "thread-queue":
-      await replyTelegramPanel(
-        context,
+      await panel(
         [
           formatConversationThreadQueue(result),
           "",
@@ -69,21 +73,31 @@ export async function renderTelegramCommandResult(
       );
       return;
     case "scheduled-confirmation":
-      await replyTelegramPanel(
-        context,
+      await panel(
         formatConversationScheduledConfirmation(result),
         scheduledTaskConfirmationKeyboard(result),
       );
       return;
-    case "status":
-      await replyTelegramPanel(context, formatStatus(result.status, result), {
-        inline_keyboard: [[{ text: result.view === "detail" ? "返回总览" : "查看详情",
-          callback_data: result.view === "detail" ? "status:overview" : "status:detail" }]],
-      });
+    case "status": {
+      const [title, ...fields] = formatStatus(result.status, result).split("\n");
+      const markup = {
+        inline_keyboard: [[
+          { text: "请求统计", callback_data: "status-query:metrics" },
+          { text: "账户用量", callback_data: "status-query:usage" },
+          { text: "账户额度", callback_data: "status-query:limits" },
+        ]],
+      };
+      // Metadata labels and values are literal; only the shared panel structure
+      // becomes HTML. Do not interpret account window names as Markdown.
+      const chunks = formatTelegramLiteralPanelChunks(title!.replace(/^## /u, ""), fields.map(line => line.replace(/^- /u, "• ")).join("\n"));
+      for (const [index, chunk] of chunks.entries()) {
+        await reply(chunk, { parse_mode: "HTML", ...(index === 0
+          ? { reply_markup: markup } : { disable_notification: true }) });
+      }
       return;
+    }
     case "workspaces":
-      await replyTelegramPanel(
-        context,
+      await panel(
         formatConversationWorkspaces(result),
         workspaceSelectionKeyboard(result),
       );
@@ -91,8 +105,7 @@ export async function renderTelegramCommandResult(
     case "models":
       if (result.view === "model") {
         const providerOnly = result.state.providerFilter === undefined;
-        await replyTelegramPanel(
-          context,
+        await panel(
           providerOnly
             ? modelProviderSelectionText(result)
             : formatConversationModels(result),
@@ -101,16 +114,14 @@ export async function renderTelegramCommandResult(
             : modelSelectionKeyboard(result, String(context.from?.id ?? "")),
         );
       } else {
-        await replyTelegramPanel(
-          context,
+        await panel(
           formatConversationModels(result),
           modelEffortKeyboard(result, String(context.from?.id ?? "")),
         );
       }
       return;
     case "plugins":
-      await replyTelegramPanel(
-        context,
+      await panel(
         formatConversationPlugins(result),
         pluginKeyboard(result),
       );
@@ -119,7 +130,7 @@ export async function renderTelegramCommandResult(
       const [title, ...body] = formatConversationHooks(result.view).split("\n");
       const chunks = formatTelegramLiteralPanelChunks(title!, body.join("\n"));
       for (const [index, chunk] of chunks.entries()) {
-        await context.reply(chunk, {
+        await reply(chunk, {
           parse_mode: "HTML",
           ...(index === chunks.length - 1 ? { reply_markup: hookKeyboard(result) } : {}),
           ...(index > 0 ? { disable_notification: true } : {}),
@@ -128,16 +139,15 @@ export async function renderTelegramCommandResult(
       return;
     }
     case "reset-credit":
-      await replyTelegramPanel(context, formatConversationResetCredits(result, "buttons", value => value),
+      await panel(formatConversationResetCredits(result, "buttons", value => value),
         resetCreditKeyboard(result, String(context.chat?.id ?? ""), String(context.from?.id ?? "")));
       return;
     case "limits":
-      await replyTelegramPanel(context, formatConversationLimits(result), result.result.kind === "rate-limits"
+      await panel(formatConversationLimits(result), result.result.kind === "rate-limits"
         ? { inline_keyboard: [[{ text: "查看重置券", callback_data: "rc:page:1" }]] } : undefined);
       return;
     case "permissions":
-      await replyTelegramPanel(
-        context,
+      await panel(
         formatConversationPermissions(result),
       );
       return;
@@ -145,7 +155,7 @@ export async function renderTelegramCommandResult(
       for (const [index, chunk] of formatTelegramDiffChunks(
         formatConversationArtifacts(result),
       ).entries()) {
-        await context.reply(chunk, {
+        await reply(chunk, {
           parse_mode: "HTML",
           ...(index === 0 ? {} : { disable_notification: true }),
         });
@@ -153,7 +163,7 @@ export async function renderTelegramCommandResult(
       return;
   }
   const text = renderConversationCommandResult(result);
-  if (text !== null) await replyTelegramPanel(context, text);
+  if (text !== null) await panel(text);
 }
 
 export function hookKeyboard(
@@ -180,7 +190,7 @@ export function workspaceSelectionKeyboard(
   if (result.workspaces.length === 0) return undefined;
   return {
     inline_keyboard: result.workspaces.map((workspace) => [{
-      text: `${workspace.id === result.currentWorkspaceId ? "✓ " : ""}切换到 ${workspace.name}`,
+      text: boundedButtonLabel(`${workspace.id === result.currentWorkspaceId ? "✓ " : ""}切换到 ${formatModelSettingLiteral(workspace.name)}`),
       callback_data: `ws:${telegramWorkspaceSwitchToken(workspace.id)}`,
     }]),
   };
@@ -206,7 +216,7 @@ export function modelEffortKeyboard(
   const token = telegramModelSelectionToken(result.state, actorId);
   return {
     inline_keyboard: model.supportedReasoningEfforts.map((option, index) => [{
-      text: `${option.effort === result.state.effort ? "✓ " : ""}${formatReasoningEffort(option.effort)}`,
+      text: `${option.effort === result.state.effort ? "✓ " : ""}${formatModelSettingLiteral(formatReasoningEffort(option.effort))}`,
       callback_data: `me:${index + 1}:${token}`,
     }]),
   };
@@ -217,25 +227,15 @@ function modelProviderSelectionText(
 ): string {
   const providers = listProviders(result.state.models);
   const current = result.state.modelProvider ?? "openai";
-  const currentModel = result.state.models.find((model) =>
-    model.available !== false && model.model === result.state.model
-    && (model.provider ?? "openai") === current);
-  // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
-  const currentModelName = currentModel === undefined
-    ? result.state.model
-    : modelListEntry(currentModel.displayName, currentModel.provider, currentModel.model).modelName;
   return toStructuredMarkdownList([
     "## 选择提供商",
-    `当前模型：${currentModelName}（Provider：${formatCodexProviderLabel(current)}）`,
-    `${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort)}`,
-    `速度：${formatServiceTierSetting(result.state, currentModel)}`,
+    ...formatConversationModelState(result).map(line => `- ${line}`),
     "",
-    `当前 Provider：${formatCodexProviderLabel(current)}`,
     ...(providers.length > 0 ? ["提供商列表："] : [
       "当前没有可选模型。请检查账户配置与订阅状态；续订后可在 WebUI 或当前账户的 /usage 刷新。",
     ]),
     ...providers.map((provider, index) =>
-      `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === current ? " ← 当前" : ""} · ${formatProviderModelSummary(result.state.models, provider)}`),
+      `${index + 1}. ${formatModelSettingLiteral(formatCodexProviderLabel(provider))}${provider === current ? " ← 当前" : ""} · ${formatProviderModelSummary(result.state.models, provider)}`),
     "",
     ...(providers.length > 0
       ? ["请先选择提供商，再选择该提供商下的模型；也可输入 /model <提供商序号>。"]
@@ -260,7 +260,7 @@ export function modelProviderSelectionKeyboard(
   return {
     inline_keyboard: providers.map((provider, index) => [{
       text: boundedButtonLabel(
-        `${provider === current ? "✓ " : ""}${formatCodexProviderLabel(provider)}`,
+        `${provider === current ? "✓ " : ""}${formatModelSettingLiteral(formatCodexProviderLabel(provider))}`,
       ),
       callback_data: `mp:${index + 1}:${token}`,
     }]),
@@ -283,7 +283,7 @@ export function modelSelectionKeyboard(
   return {
     inline_keyboard: models.map((model, index) => [{
       text: boundedButtonLabel(
-        `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${modelListDisplayName(model.displayName, model.provider, model.model, index + 1)}${model.available === false ? "（暂不可用）" : ""}`,
+        `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${formatModelSettingLiteral(modelListDisplayName(model.displayName, model.provider, model.model, index + 1))}${model.available === false ? "（暂不可用）" : ""}`,
       ),
       callback_data: `ms:${index + 1}:${token}`,
     }]),
@@ -511,9 +511,10 @@ export async function replyTelegramPanel(
   context: Context,
   text: string,
   replyMarkup?: InlineKeyboardMarkup,
+  reply: Context["reply"] = context.reply.bind(context),
 ): Promise<void> {
   for (const [index, chunk] of formatTelegramPanelChunks(text).entries()) {
-    await context.reply(chunk, {
+    await reply(chunk, {
       parse_mode: "HTML",
       ...(index === 0 && replyMarkup
         ? { reply_markup: replyMarkup }

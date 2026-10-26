@@ -1,6 +1,6 @@
 # Config
 
-显示预设是管理层一次应用现有九字段的操作，不属于 TOML Schema 或运行模式；全局默认值保持不变，默认识别为 `standard`，不匹配则为只读 `custom`。共享定义、识别与支持矩阵在 `runtime/message-display-policy.mjs`，读取返回 computed `display.preset` / `scope.preset`。微信仅应用完成通知、消息详情与常规通知；不增加不支持配置，不影响日志、调用采集、模型分组或 Telegram 格式。全局有效值已匹配时不物化默认值；范围一次显式固定全部支持字段，之后仍可逐字段修改或恢复继承。原子事务、激活、备份与回退沿现有配置合同。
+显示预设是管理层一次应用现有九字段的操作，不属于 TOML Schema 或运行模式；全局默认值保持不变，不匹配现行预设则为只读 `custom`。静默的 completion 为 off，紧凑的 operation_updates 为 hidden，旧显式值不自动迁移；全局默认 compact 工具档因此识别为 custom。共享定义、识别与支持矩阵在 `runtime/message-display-policy.mjs`，读取返回 computed `display.preset` / `scope.preset`。微信仅应用完成通知、消息详情与常规通知；不增加不支持配置，不影响日志、调用采集、模型分组或 Telegram 格式。全局有效值已匹配时不物化默认值；范围一次显式固定全部支持字段，之后仍可逐字段修改或恢复继承。原子事务、激活、备份与回退沿现有配置合同。
 
 可选 `display.routine_notifications` 不由默认补齐物化，缺省投影为必填 `MessageDisplaySettings.routineNotificationsEnabled = true`。四渠道单聊支持同名五层覆盖；全局管理 kind `display.routine-notifications` 使用显式 set boolean/inherit，读回有效值与 `routineNotificationsOverride`。全局有效值改变且任一渠道启用时重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组沿整体判定。不改持久 Schema；异常、需用户动作、持久 Workspace 回执和已入 Journal 义务由消费者保留。回退旧版前显式清除全局及覆盖 routine_notifications，不自动迁移。
 

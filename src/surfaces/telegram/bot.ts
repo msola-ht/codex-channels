@@ -87,6 +87,7 @@ import {
   TelegramAudioStore,
 } from "./audio-store.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
+import { telegramAbortSignal } from "./sdk-signal.js";
 import {
   maximumTelegramTextFileBytes,
   TelegramTextFileInput,
@@ -179,6 +180,7 @@ export function createTelegramSurface(
 }
 
 type AutoReviewSelectionScope = { threadId: string };
+type CommandReplyScope = { workspaceId: string; cwd: string | undefined; selectionScope: string | undefined; threadId: string | undefined };
 
 export class TelegramSurface {
   readonly surface = "telegram" as const;
@@ -195,6 +197,8 @@ export class TelegramSurface {
   private readonly videoInput: TelegramVideoInput | undefined;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandExecutor;
+  private readonly apiExecutor: TelegramApiExecutor;
+  private readonly commandReplies = new WeakMap<Context, { signal: AbortSignal; scope: CommandReplyScope }>();
   private readonly inputs: SurfaceInputBatcher;
   private readonly attachmentInputs = new AttachmentInputLifecycle();
   private readonly receivedAttachments = new WeakMap<object, ReceivedAttachmentInput>();
@@ -285,9 +289,11 @@ export class TelegramSurface {
           && this.notificationRecipients.has(userId)
           && this.access.isAllowed({ target: outputTarget, actorId: chatId });
       }
-      return (this.actorRegistry?.actors(outputTarget) ?? [])
+      const privateActor = this.privateConversations.get(chatId);
+      return (this.actorRegistry?.actors(outputTarget) ?? (privateActor === undefined ? [] : [privateActor]))
         .some(actorId => this.access.isAllowed({ target: outputTarget, actorId }));
     });
+    this.apiExecutor = apiExecutor;
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
       ...(options.finalMessageFormat
@@ -329,20 +335,30 @@ export class TelegramSurface {
       logger,
       {
         messages: async (signal) => {
-          const messages: Array<{ chatId: number; text: string }> = [];
+          const messages: Array<{ chatId: number; text: ReturnType<typeof formatStartupNotification>; signal: AbortSignal }> = [];
           for (const chatId of startupRecipients) {
             signal.throwIfAborted();
+            // Keep the original grant across status waits and every startup chunk.
+            // Revoking then granting access again must not revive an old notice.
+            const active = AbortSignal.any([signal, apiExecutor.authorizationSignal(String(chatId), true)]);
+            if (active.aborted) continue;
             const status = await this.service.statusForDisplay(
               {
                 surface: "telegram",
                 accountId: telegramDefaultAccountId,
                 conversationId: String(chatId),
               },
-              signal,
-            );
+              active,
+            ).catch(error => {
+              if (active.aborted && !signal.aborted) return undefined;
+              throw error;
+            });
+            signal.throwIfAborted();
+            if (active.aborted || status === undefined) continue;
             const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated?.();
             messages.push({
               chatId,
+              signal: active,
               text: formatStartupNotification(workspaces, status, {
                 platform: process.platform,
                 architecture: process.arch,
@@ -365,6 +381,12 @@ export class TelegramSurface {
           }
           return messages;
         },
+        send: (chatId, html, signal) => apiExecutor.call(
+          { chatId: String(chatId), operation: "sendMessage", critical: false, recipientNotification: true },
+          requestSignal => this.bot.api.sendMessage(chatId, html,
+            { parse_mode: "HTML", disable_notification: true }, telegramAbortSignal(requestSignal)),
+          signal,
+        ),
       },
       options.onFatal,
       {
@@ -577,10 +599,12 @@ export class TelegramSurface {
     this.bot.callbackQuery(/^(?:wp|ar):/, async (context) => {
       await context.answerCallbackQuery({ text: "工作区权限设置入口已停用，请使用原生 Codex 权限配置。" });
     });
-    this.bot.callbackQuery(/^status:(overview|detail)$/, async context => {
-      await context.answerCallbackQuery({ text: "正在查询当前会话状态" });
-      const result = await this.commands.execute(target(context), "status", context.match[1] === "detail" ? "detail" : "", String(context.from.id));
-      await renderTelegramCommandResult(context, result);
+    this.bot.callbackQuery(/^status-query:(metrics|usage|limits)$/, async context => {
+      await context.answerCallbackQuery({ text: "正在查询" });
+      const command = context.match[1];
+      if (command !== "metrics" && command !== "usage" && command !== "limits") return;
+      const result = await this.commands.execute(target(context), command, "", String(context.from.id));
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(/^idle:resume:([A-Za-z0-9_-]{24})$/, async (context) => {
       const token = context.match[1]!;
@@ -602,7 +626,7 @@ export class TelegramSurface {
       const result = await this.commands.execute(callbackTarget, "resume", pending.threadId, pending.actorId);
       try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
       catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "空闲恢复按钮清理失败"); }
-      await renderTelegramCommandResult(context, result);
+      await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(/^tar:(on|off):([A-Za-z0-9_-]{24})$/, async (context) => {
       const token = context.match[2]!;
@@ -639,7 +663,7 @@ export class TelegramSurface {
         String(context.from.id),
       );
       await context.answerCallbackQuery({ text: `已切换到 ${workspace.id}` });
-      await renderTelegramCommandResult(
+      await this.renderCommandResult(
         context,
         result,
       );
@@ -667,7 +691,7 @@ export class TelegramSurface {
             "提供商列表已变化，请重新发送 /model 选择",
           );
         }
-        await context.answerCallbackQuery({ text: "已选择提供商" });
+        await context.answerCallbackQuery({ text: "正在浏览提供商" });
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
@@ -681,7 +705,7 @@ export class TelegramSurface {
           provider,
           String(context.from.id),
         );
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
@@ -721,7 +745,7 @@ export class TelegramSurface {
           provider: selected.provider ?? "openai",
           model: selected.model,
         }, String(context.from.id));
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
@@ -766,7 +790,7 @@ export class TelegramSurface {
           effort,
           String(context.from.id),
         );
-        await renderTelegramCommandResult(
+        await this.renderCommandResult(
           context,
           result,
         );
@@ -1498,10 +1522,89 @@ export class TelegramSurface {
       await this.renderAutoReviewResult(context, result);
       return;
     }
-    await renderTelegramCommandResult(
+    await this.renderCommandResult(
       context,
       result,
     );
+  }
+
+  private commandReplyScope(inputTarget: ConversationTarget): CommandReplyScope {
+    const workspaceId = this.service.selectedWorkspaceId(inputTarget);
+    const workspace = this.service.listWorkspaces().find(workspace => workspace.id === workspaceId);
+    // /workspace must remain available to recover a removed selection.
+    const status = workspace === undefined ? undefined : this.service.status(inputTarget);
+    return {
+      workspaceId,
+      cwd: workspace?.cwd,
+      selectionScope: status?.selectionScope,
+      threadId: status?.threadId,
+    };
+  }
+
+  private async renderCommandResult(context: Context, result: ConversationCommandResult): Promise<void> {
+    const relevant = result.kind === "status" || result.kind === "workspaces" || result.kind === "models"
+      || result.kind === "metrics" || result.kind === "usage" || result.kind === "limits"
+      || result.kind === "sessions" || result.kind === "collaboration-mode"
+      || result.kind === "outcome" && ["workspace.selected", "thread.resumed", "thread.unarchived", "thread.forked",
+        "session.new", "thread.archived", "thread.renamed", "thread.pin-updated", "sessions.cleaned"].includes(result.outcome.type);
+    if (!relevant) return renderTelegramCommandResult(context, result);
+    const original = this.commandReplies.get(context);
+    const inputTarget = target(context);
+    const actorId = String(context.from?.id ?? "");
+    if (!original) throw new UserFacingError("command.authorization-changed", "命令回复已失效，请重新发起操作");
+    const assertActor = (): void => {
+      original.signal.throwIfAborted();
+      if (this.stopping || !this.access.isAllowed({ target: inputTarget, actorId })) {
+        throw new UserFacingError("command.authorization-changed", "命令授权已变化，请重新发起操作");
+      }
+    };
+    assertActor();
+    let scope = original.scope;
+    // Model queries and selections return their exact authoritative selection
+    // scope, including browse-only changes. Status refreshes also carry it.
+    if (result.kind === "models") scope = { ...scope, selectionScope: result.state.selectionScope,
+      threadId: this.service.status(inputTarget).threadId };
+    if (result.kind === "status") {
+      if (result.status.workspaceId !== scope.workspaceId || result.status.cwd !== scope.cwd || result.status.threadId !== scope.threadId) {
+        throw new UserFacingError("command.authorization-changed", "命令结果所属会话已变化，请重新查询");
+      }
+      scope = { ...scope, selectionScope: result.status.selectionScope };
+    }
+    if (result.kind === "outcome") {
+      const outcome = result.outcome;
+      // These completed mutations intentionally replace the query's original
+      // binding. Capture the resulting scope once, before queueing any reply.
+      if (["workspace.selected", "thread.resumed", "thread.unarchived", "thread.forked", "session.new", "thread.archived"].includes(outcome.type)) {
+        scope = outcome.type === "workspace.selected" && outcome.workspace.id === original.scope.workspaceId
+          ? original.scope : this.commandReplyScope(inputTarget);
+        const status = this.service.status(inputTarget);
+        if (outcome.type === "workspace.selected" && (scope.workspaceId !== outcome.workspace.id || scope.cwd !== outcome.workspace.cwd)
+          || outcome.type === "workspace.selected" && outcome.workspace.id !== original.scope.workspaceId && status.threadId !== undefined
+          || outcome.type !== "workspace.selected" && (scope.workspaceId !== original.scope.workspaceId || scope.cwd !== original.scope.cwd)
+          || (outcome.type === "thread.resumed" || outcome.type === "thread.forked" || outcome.type === "thread.unarchived") && status.threadId !== outcome.threadId
+          || (outcome.type === "session.new" || outcome.type === "thread.archived") && status.threadId !== undefined) {
+          throw new UserFacingError("command.authorization-changed", "命令结果所属会话已变化，请重新查询");
+        }
+      }
+    }
+    const guard = (): void => {
+      assertActor();
+      const current = this.commandReplyScope(inputTarget);
+      if (current.workspaceId !== scope.workspaceId || current.cwd !== scope.cwd
+        || current.selectionScope !== scope.selectionScope || current.threadId !== scope.threadId) {
+        throw new UserFacingError("command.authorization-changed", "命令结果所属会话已变化，请重新查询");
+      }
+    };
+    guard();
+    await this.outbox.runOrdered(inputTarget.conversationId, async signal => {
+      guard();
+      await renderTelegramCommandResult(context, result, (text, options) => this.apiExecutor.call({
+        chatId: inputTarget.conversationId, operation: "sendMessage", critical: false,
+      }, requestSignal => {
+        guard();
+        return context.reply(text, options, telegramAbortSignal(requestSignal));
+      }, signal));
+    }, original.signal);
   }
 
   private registerAutoReviewSelection(
@@ -1604,6 +1707,10 @@ export class TelegramSurface {
     try {
       this.rememberPrivateConversation(accessContext.target, accessContext.actorId);
       this.actorRegistry?.rememberActor(accessContext.target, accessContext.actorId);
+      this.commandReplies.set(context, {
+        signal: this.apiExecutor.authorizationSignal(accessContext.target.conversationId),
+        scope: this.commandReplyScope(accessContext.target),
+      });
       await next();
     } catch (error) {
       this.logger.error(
@@ -1613,7 +1720,8 @@ export class TelegramSurface {
         },
         "Telegram 命令执行失败",
       );
-      if (context.chat) {
+      if (context.chat && !this.stopping && this.access.isAllowed(accessContext)
+        && !this.commandReplies.get(context)?.signal.aborted) {
         await context.reply(
           error instanceof UserFacingError
             ? formatOperationFailure(formatTelegramUserFacingError(error))
@@ -1621,6 +1729,7 @@ export class TelegramSurface {
         );
       }
     } finally {
+      this.commandReplies.delete(context);
       stopTyping?.();
     }
   }

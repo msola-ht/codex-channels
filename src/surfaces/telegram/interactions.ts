@@ -12,7 +12,7 @@ import {
   type InteractionRequest,
 } from "../../approval/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
-import { interactionOutcome } from "../interaction-copy.js";
+import { formatInteractionQuestionHeading, interactionOutcome } from "../interaction-copy.js";
 import { PendingInteractionRegistry, waitForInteractionPreparation } from "../pending-interaction-registry.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import {
@@ -469,9 +469,9 @@ export class TelegramInteractionPort implements InteractionPort {
       const question = request.questions[questionIndex];
       if (question && question.options.length > 0) {
         const keyboard = new InlineKeyboard();
-        for (const [optionIndex, option] of question.options.entries()) {
+        for (const optionIndex of question.options.keys()) {
           keyboard.text(
-            option,
+            `选项 ${optionIndex + 1}`,
             `ix:q${questionIndex}.${optionIndex}:${token}`,
           ).row();
         }
@@ -864,7 +864,6 @@ function formatUserInputChunks(
   awaitingOther: boolean,
 ): string[] {
   const question = request.questions[questionIndex]!;
-  const title = question.header.trim() || `问题 ${questionIndex + 1}`;
   const instruction = awaitingOther
     ? "请在底部回复栏输入回答并发送，保持回复本消息。"
     : question.options.length > 0
@@ -877,8 +876,10 @@ function formatUserInputChunks(
   // Render metadata literally; only the question body carries Markdown semantics.
   const sections = [
     ...splitTelegramText(request.title, 1_750).map((chunk) => `<b>${escapeTelegramHtml(chunk)}</b>`),
-    ...splitTelegramText(`问题 ${questionIndex + 1}/${request.questions.length}：${title}`, 1_750).map(escapeTelegramHtml),
+    ...splitTelegramText(formatInteractionQuestionHeading(request, questionIndex), 1_750).map(escapeTelegramHtml),
     ...formatMarkdownAsTelegramHtmlChunks(question.question),
+    ...question.options.flatMap((option, index) =>
+      splitTelegramText(`选项 ${index + 1}：\n${option}`, 1_750).map(escapeTelegramHtml)),
     escapeTelegramHtml(footer),
   ];
   const chunks: string[] = [];
