@@ -91,7 +91,6 @@ const foregroundThreadSources = new Set(["cli", "vscode", "appServer"]);
 class SupersededRestoreError extends Error {}
 
 export class SessionRouter {
-  private readonly forceNew = new Set<string>();
   private readonly backgroundStartQueues = new Map<string, Promise<void>>();
   private readonly backgroundReservations = new Map<string, number>();
   private readonly threadLifecycleQueues = new Map<string, Promise<void>>();
@@ -688,55 +687,8 @@ export class SessionRouter {
     }
     const workspace = this.workspace(target);
     this.bindings.selectWorkspace(target, workspace.id);
-    if (!this.shouldForceNew(target)) {
-      const sessions = await this.list(target, { ...(startOptions.beforeSubmit ? { beforeSubmit: startOptions.beforeSubmit } : {}) });
-      startOptions.beforeSubmit?.();
-      const candidate = sessions.find(
-        (thread) =>
-          thread.status.type !== "active"
-          && foregroundThreadSources.has(thread.source)
-          && !this.bindings.getByThread(thread.id)
-          && (
-            startOptions.modelProvider === undefined
-            || thread.modelProvider === startOptions.modelProvider
-          )
-          && this.isProviderSelectable(thread.modelProvider),
-      );
-      if (candidate) {
-        return this.withThreadLifecycle([candidate.id], async () => {
-          if (this.bindings.getByThread(candidate.id)) {
-            throw new UserFacingError("thread.bound", "该 Codex Thread 已绑定到其他会话");
-          }
-          const historical = await this.codex.readThread(candidate.id, undefined, startOptions.beforeSubmit);
-          const observation = observeRestore?.(candidate.id);
-          try {
-            const resumed = await this.resumeInWorkspace(historical, workspace, startOptions);
-            if (resumed.thread.status.type === "active") {
-              await this.cleanupFailedResume(candidate.id, new UserFacingError(
-                "conversation.busy", "历史会话已有运行中的任务，请显式恢复会话",
-              ));
-            }
-            const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
-            try {
-              this.requireCurrentSubscription(resumed);
-              this.bindings.bind(binding);
-            } catch (error) {
-              await this.cleanupFailedResume(resumed.thread.id, error);
-            }
-            this.captureModelSettings(resumed, resumed.collaborationMode);
-            this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-            this.captureSessionDiagnostics(resumed);
-            this.clearForceNew(target, Date.now());
-            observation?.restored(binding, resumed.thread);
-            this.notifyBindingsChanged();
-            return binding;
-          } finally {
-            observation?.stop();
-          }
-        });
-      }
-    }
-
+    // An unbound Conversation has no authority to select historical content.
+    // History is resumed only by an explicit selection or an existing binding.
     const started = await this.observeSessionContext(() => this.codex.startThread(workspace.cwd, {
       ...startOptions,
       ...(this.dynamicTools.length > 0
@@ -774,8 +726,8 @@ export class SessionRouter {
   /**
    * Start a fresh App Server Thread as a background binding.
    *
-   * This is intentionally separate from ensure(): scheduled execution must
-   * never inspect or resume an idle historical Thread.  The optional
+   * Unlike ensure(), this never reuses the Conversation's foreground binding.
+   * The optional
    * workspaceId is used by unattended runs so a removed or changed Workspace
    * cannot silently fall back to the Conversation default.
    */
@@ -1312,9 +1264,7 @@ export class SessionRouter {
         throw new UserFacingError("thread.takeover.changed", "Workspace 已变化，请重新选择");
       }
       this.bindings.selectWorkspace(target, workspace.id);
-      // Workspace changes start a fresh conversation.  Keep the marker until
-      // ensure() creates the first Thread so it cannot auto-resume history from
-      // the newly selected workspace.
+      // Preserve the stored lifecycle marker until the next Thread is bound.
       this.markForceNew(target, Date.now());
       return workspace;
     });
@@ -1524,17 +1474,7 @@ export class SessionRouter {
     }
   }
 
-  private shouldForceNew(target: ConversationTarget): boolean {
-    return this.forceNew.has(this.key(target))
-      || this.bindings.idleState(target).forceNew;
-  }
-
-  /**
-   * 自动接续的候选必须落在当前仍然可用的模型 Provider 上。
-   * 操作员移除某个 Provider 后，其历史 Thread 属于永久不可用（与
-   * `isUnavailableRestoreError` 的分类一致），不能被空闲候选选中，
-   * 否则会话会一直卡在恢复失败上而无法新建 Thread。
-   */
+  /** Approval routing must remain within a currently configured Provider. */
   private isProviderSelectable(provider: string): boolean {
     return this.codex.isProviderConfigured?.(provider) ?? true;
   }
@@ -1649,12 +1589,10 @@ export class SessionRouter {
   }
 
   private markForceNew(target: ConversationTarget, atMs: number): void {
-    this.forceNew.add(this.key(target));
     this.bindings.setForceNew(target, atMs, true);
   }
 
   private clearForceNew(target: ConversationTarget, atMs: number): void {
-    this.forceNew.delete(this.key(target));
     this.bindings.setForceNew(target, atMs, false);
   }
 

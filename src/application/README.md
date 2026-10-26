@@ -8,6 +8,9 @@ Surface 在接收音视频、首次进入队列前登记有界接收取消范围
 
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 
+共享 `ensureSession` 在已有绑定时校验并恢复该 Thread；没有前台绑定时在当前工作区新建 Thread，
+不搜索或自动接续历史。单聊与群聊使用同一规则，历史会话由用户显式恢复。
+
 工作区文字命令保留序号、ID、名称选择；`ConversationCommandExecutor.selectWorkspace` 为渠道按钮提供精确 ID 入口，复用同一授权、会话锁、空闲检查及绑定切换。可选交互有效性守卫贯穿等待和提交边界，成功切换后只复核操作者及交互有效性，不再要求旧工作区。旧工作区选择已失效时仍允许显式重选，不自动选择默认目录或重试失败请求。
 
 普通消息的 `submit` 接收 Surface 提供的实时授权闭包，在等待会话锁、Thread 准备及最终 Turn 写入前复核；
@@ -274,7 +277,7 @@ Plugin 列表与详情只查询当前 Provider 实例在当前 Workspace 的已�
 详情只使用同一次 `plugin/installed` 返回的安全摘要，能力与适用套餐有界展示，不读取本机路径或远端 URL；
 Application 对同一已安装目录提供每页 8 项的本地分页过滤和只含需处理项的健康归约，保留原目录全局
 数字选择器，不调用 `plugin/search`；同时保留 Marketplace 加载失败计数，在互斥区内解析并发送官方 mention，
-支持官方与第三方；自动恢复确定实际 Thread 后与最终 start/steer 提交前再次复核 Provider 与解析时一致，
+支持官方与第三方；会话准备确定实际 Thread 后与最终 start/steer 提交前再次复核 Provider 与解析时一致，
 变化时拒绝并要求重发，不借用主实例的账户可用状态放行其他 Provider；
 三个 Surface 共用同一 Application 边界。
 成功启动 Turn 后，模型、思考等级、服务层级和协作模式以 App Server 的 Thread 设置为准；
