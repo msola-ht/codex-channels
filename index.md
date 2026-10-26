@@ -11,7 +11,7 @@
 - [`provider-model-catalog.json`](provider-model-catalog.json)：OCG/CCG 基于 DS 目录扩展 V4.1 的模型 ID 与显示名映射。
 - [`startup-network-policy.json`](startup-network-policy.json)：首次网络探测与启动恢复的时限、退避参数。
 - [`docs/display.md`](docs/display.md)：渠道展示口径、`/metrics` 命令与调试模式说明。
-- [`docs/message-display-unification-plan.md`](docs/message-display-unification-plan.md)：四渠道共享呈现与平台渲染的 R1–R6 逐批计划、首批改动、读码发现及开放验收记录。
+- [`docs/message-display-unification-plan.md`](docs/message-display-unification-plan.md)：四渠道共享呈现与平台渲染的 R1–R6 分批修复、关联复审、交付提交及开放验收记录。
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换、网页搜索能力与运行统计。
 - [`docs/archive/deepseek-upload-remediation.md`](docs/archive/deepseek-upload-remediation.md)：历史记录，DeepSeek 图片上传调用身份、运行实例一致性、材料 Worker 的关联修复、独立复查与隔离观察。
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
