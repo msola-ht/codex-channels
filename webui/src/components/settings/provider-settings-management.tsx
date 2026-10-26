@@ -352,7 +352,7 @@ function ProviderSettingsCard({
       reasoning: "reasoningEffort" in custom ? custom.reasoningEffort : settings.defaults.reasoningEffort,
     }] : accounts.map(account => ({ id: account.id, model: account.model, reasoning: account.reasoningEffort }))
     const locked = busy || pending !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || requestOptionsTarget !== null || webSearchTarget !== null || editorOpen || managedEditorRevision !== null
-    const canAdd = catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) || catalog.source === "custom"
+    const canAdd = catalog.source === "managed" && /^(ccg|ocg|clp|olc)-/u.test(catalog.provider) || catalog.source === "custom"
     return {
       id: `provider:${catalog.provider}`,
       header: <div className="flex flex-wrap items-center justify-between gap-3">

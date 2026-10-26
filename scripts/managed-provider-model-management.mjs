@@ -12,8 +12,8 @@ import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-ups
 function definitionFor(provider, environment) {
   if (/^cp-[A-Za-z0-9_-]{1,61}$/u.test(provider)) return { id: provider, storageId: "custom", displayName: "自定义提供商", upstreamWireApi: readCustomProviderUpstreamWireApi(environment, provider) };
   const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === provider);
-  if (definition && ["ccg", "opencode-go", "clp"].includes(definition.storageId)) return definition;
-  throw new Error("此模型新增入口必须明确选择 CCG、OCG 或 CLP 账户");
+  if (definition && ["ccg", "opencode-go", "clp", "ollama-cloud"].includes(definition.storageId)) return definition;
+  throw new Error("此模型新增入口必须明确选择 CCG、OCG、CLP 或 OLC 账户");
 }
 
 /** All interaction and source acquisition precede the short write transaction. */
@@ -34,6 +34,7 @@ async function runManagedProviderModelOperation(provider, { environment, prompts
     provider = accounts[0].id;
   }
   const definition = definitionFor(provider, environment);
+  const ollamaCloud = definition.storageId === "ollama-cloud";
   const displayName = definition.storageId === "custom" ? definition.displayName : managedProviderAccountFamilyForDefinition(definition).definition.displayName;
   const { catalogs } = await loadProviderModelCatalogs({ environment });
   const current = catalogs.find(catalog => catalog.providers.includes(provider));
@@ -41,7 +42,7 @@ async function runManagedProviderModelOperation(provider, { environment, prompts
   const action = await prompts.select({ message: `${displayName} 模型目录`, options: [
     { value: "select", label: "查看启用模型", hint: "移除请使用统一模型管理入口" },
     { value: "add", label: "按 ID 添加模型", hint: "独立填写能力或继承当前目录中的已有模型" },
-    ...(definition.storageId === "custom" ? [] : [{ value: "templates", label: "添加内置 DS 模型", hint: "只添加明确选择的固定 DS 模型，已有模型保持不变" }]),
+    ...(definition.storageId === "custom" || ollamaCloud ? [] : [{ value: "templates", label: "添加内置 DS 模型", hint: "只添加明确选择的固定 DS 模型，已有模型保持不变" }]),
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "menu-back", activation: "none" };
@@ -97,8 +98,10 @@ export async function runProviderModelAdditionSetup(provider, {
 }
 
 async function promptAdditionalModel(prompts, definition, existing) {
-  if (!["ccg", "opencode-go", "clp", "custom"].includes(definition.storageId)) throw new Error("此提供商不支持手动新增模型");
+  if (!["ccg", "opencode-go", "clp", "ollama-cloud", "custom"].includes(definition.storageId)) throw new Error("此提供商不支持手动新增模型");
   const clinePass = definition.storageId === "clp";
+  const ollamaCloud = definition.storageId === "ollama-cloud";
+  if (ollamaCloud) prompts.log?.info("OLC 公开发现候选尚未验证，不能自动启用。请按精确 ID 声明能力；freeform 文件编辑、客户端 tool_search 和原生 web_search 尚未开放。");
   const confirmed = await prompts.confirm({ message: clinePass || definition.upstreamWireApi === "chat_completions" ? "已确认此提供商以 Chat Completions 接口支持该模型的文本及工具调用？" : "已确认此提供商以 Responses 接口支持该模型及工具调用？", initialValue: false });
   if (confirmed !== true) return undefined;
   const id = await prompts.text({ message: "上游模型 ID（准确名称）", validate: value => (definition.storageId === "custom" ? isValidCustomModelId(value) : isManagedProviderModelValid(definition, value)) && !existing.some(model => model.id === value) ? undefined : "请输入有效且未加入目录的模型 ID" });
@@ -128,9 +131,9 @@ async function promptAdditionalModel(prompts, definition, existing) {
   if (prompts.isCancel(effort)) return undefined;
   const images = await prompts.confirm({ message: "支持图片输入？", initialValue: false });
   if (prompts.isCancel(images)) return undefined;
-  const patch = await prompts.confirm({ message: "支持 Codex 自由格式 apply_patch 工具？", initialValue: false });
+  const patch = ollamaCloud ? false : await prompts.confirm({ message: "支持 Codex 自由格式 apply_patch 工具？", initialValue: false });
   if (prompts.isCancel(patch)) return undefined;
-  const search = await prompts.confirm({ message: "支持 Codex 客户端 tool_search 工具？", initialValue: false });
+  const search = ollamaCloud ? false : await prompts.confirm({ message: "支持 Codex 客户端 tool_search 工具？", initialValue: false });
   if (prompts.isCancel(search)) return undefined;
   return { id, name, contextWindow: Number(window), reasoningEfforts: efforts, defaultReasoningEffort: effort,
     supportsImages: images, applyPatchToolType: patch ? "freeform" : null, supportsSearchTool: search };

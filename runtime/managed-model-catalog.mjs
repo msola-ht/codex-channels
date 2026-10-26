@@ -1,6 +1,26 @@
 import { isManagedProviderModelValid } from "./model-provider-definitions.mjs";
 
 export function catalogSlugSet(catalog, definition) {
+  if (definition.storageId === "ollama-cloud") {
+    const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+    if (!Array.isArray(catalog?.models) || !catalog.models.length || catalog.models.length > 64
+      || new Set(catalog.models.map(model => model?.slug)).size !== catalog.models.length
+      || catalog.models.some(model => !model || !Number.isSafeInteger(model.context_window) || model.context_window <= 0
+        || model.max_context_window != null && (!Number.isSafeInteger(model.max_context_window) || model.max_context_window < model.context_window)
+        || !Array.isArray(model.supported_reasoning_levels) || !model.supported_reasoning_levels.length
+        || new Set(model.supported_reasoning_levels.map(level => level?.effort)).size !== model.supported_reasoning_levels.length
+        || model.supported_reasoning_levels.some(level => !efforts.has(level?.effort) || typeof level.description !== "string")
+        || !model.supported_reasoning_levels.some(level => level.effort === model.default_reasoning_level)
+        || !Array.isArray(model.input_modalities) || !model.input_modalities.includes("text")
+        || model.input_modalities.some(modality => !["text", "image"].includes(modality))
+        || model.apply_patch_tool_type !== null || model.supports_search_tool !== false
+        || model.supports_web_search !== undefined && model.supports_web_search !== false
+        || model.web_search_tool_type != null
+        || model.experimental_supported_tools !== undefined && (!Array.isArray(model.experimental_supported_tools)
+          || model.experimental_supported_tools.some(tool => typeof tool !== "string" || !tool.trim() || ["apply_patch", "tool_search", "web_search"].includes(tool))))) {
+      throw new Error("Ollama Cloud 模型须明确声明有效窗口、文本和思考等级；文件编辑、工具搜索及原生网页搜索尚未开放");
+    }
+  }
   if (Array.isArray(catalog?.models)
     && catalog.models.some((entry) =>
       !isManagedProviderModelValid(definition, record(entry).slug))) {
@@ -23,6 +43,7 @@ export function modelCatalogSetting(content, definition, model) {
   } catch {
     throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
   }
+  if (definition.storageId === "ollama-cloud") catalogSlugSet(catalog, definition);
   const candidate = Array.isArray(catalog?.models)
     ? catalog.models.find((entry) => record(entry).slug === model)
     : undefined;

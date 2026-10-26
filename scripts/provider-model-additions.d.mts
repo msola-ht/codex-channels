@@ -1,6 +1,8 @@
 import type { ModelDefinition } from "../runtime/model-catalog.mjs";
 /** Managed catalogs do not persist custom sampling defaults or inferred bindings.
- * CLP accepts enabled reasoning but rejects original image detail and reasoning-summary controls. */
+ * CLP accepts enabled reasoning but rejects original image detail and reasoning-summary controls.
+ * OLC requires applyPatchToolType=null and supportsSearchTool=false; native web search is unavailable.
+ * OLC discovery is read-only and cannot be used as an automatic addition source. */
 export type ManagedManualModelDefinition = Omit<ModelDefinition, "sampling" | "template">
   | { id: string; name: string; inheritFrom: string };
 export interface ProviderModelAdditionCandidate {

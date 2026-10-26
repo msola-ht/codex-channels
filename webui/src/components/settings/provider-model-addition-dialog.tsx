@@ -32,6 +32,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const { t } = useTranslation()
   const clinePass = target.provider.startsWith("clp-")
   const custom = target.provider.startsWith("cp-")
+  const ollamaCloud = target.provider.startsWith("olc-")
   const [mode, setMode] = useState("manual")
   const [id, setId] = useState("")
   const [name, setName] = useState("")
@@ -41,8 +42,8 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const [efforts, setEfforts] = useState<string[]>([])
   const [effort, setEffort] = useState("")
   const [images, setImages] = useState("unknown")
-  const [patch, setPatch] = useState("unknown")
-  const [search, setSearch] = useState("unknown")
+  const [patch, setPatch] = useState(ollamaCloud ? "no" : "unknown")
+  const [search, setSearch] = useState(ollamaCloud ? "no" : "unknown")
   const busy = management.busy || management.loading || management.error !== null || management.readbackRequired
   const candidates = useProviderModelAdditionOptions(target, open, stale, busy)
   const { options, selected, loading, errorCode, setSelected, clearError } = candidates
@@ -71,9 +72,10 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
       <DialogHeader className="shrink-0"><DialogTitle>{t("modelAddition.title")}</DialogTitle><DialogDescription>{t("modelAddition.hint")}</DialogDescription></DialogHeader>
       <div className="flex min-h-0 min-w-0 flex-col gap-6 overflow-y-auto">
       <code className="break-all">{target.provider}</code>
+      {ollamaCloud ? <Alert><AlertDescription>{t("modelAddition.ollamaHint")}</AlertDescription></Alert> : null}
       {!options ? <FieldGroup>
         <FieldGroup className={cn("grid min-w-0 gap-6", !custom && mode === "manual" && !inheriting && "sm:grid-cols-2")}>
-          {!custom ? <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.method")}</FieldLegend><ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={[mode]} disabled={locked} aria-label={t("modelAddition.method")} onValueChange={values => { if (values[0]) { setMode(values[0]); clearError() } }}>
+          {!custom && !ollamaCloud ? <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.method")}</FieldLegend><ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={[mode]} disabled={locked} aria-label={t("modelAddition.method")} onValueChange={values => { if (values[0]) { setMode(values[0]); clearError() } }}>
             <ToggleGroupItem value="manual">{t("modelAddition.manual")}</ToggleGroupItem>
             <ToggleGroupItem value="discover">{t("modelAddition.discover")}</ToggleGroupItem>
           </ToggleGroup></FieldSet> : null}
@@ -88,7 +90,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
           {inheriting ? <>
             <ManagedSelect fullWidth label={t("modelAddition.inheritFrom")} placeholder={t("modelAddition.selectInheritSource")} value={inheritFrom} disabled={locked} options={target.models.map(entry => [entry.id, `${entry.displayName} (${entry.id})`])} onChange={setInheritFrom} />
             {target.models.length === 0 ? <p>{t("modelAddition.noInheritSource")}</p> : null}
-          </> : <ModelCapabilityFields disabled={locked} allowReasoningToggle={clinePass} value={{ contextWindow: window, reasoningEfforts: efforts, defaultReasoningEffort: effort || null,
+          </> : <ModelCapabilityFields disabled={locked} unavailableTools={ollamaCloud} allowReasoningToggle={clinePass} value={{ contextWindow: window, reasoningEfforts: efforts, defaultReasoningEffort: effort || null,
             supportsImages: images === "unknown" ? undefined : images === "yes", supportsPatch: patch === "unknown" ? undefined : patch === "yes", supportsSearch: search === "unknown" ? undefined : search === "yes" }} onChange={changes => {
               if (changes.contextWindow !== undefined) setWindow(changes.contextWindow)
               if (changes.reasoningEfforts !== undefined) setEfforts(changes.reasoningEfforts)

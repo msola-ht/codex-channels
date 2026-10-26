@@ -448,8 +448,8 @@ Ollama 元数据来源与提示词模板关联必须分别保存。新家族 man
 
 | 衔接位置 | 当前限制与 OLC 必须补齐的内容 |
 | --- | --- |
-| [统一新增计划](../scripts/provider-model-additions.mjs) | 受管读取和独立填写目前只允许 CCG/OCG/CLP；发现的非 CCG 默认分支调用 OCG 生成器。OLC 须显式增加读取、ID 校验、独立填写/继承及 Ollama 候选分支，禁止仅放宽白名单后落入 OCG 路径。 |
-| [统一模板计划](../scripts/provider-model-template-management.mjs)、[目录投影](../scripts/provider-model-catalog.mjs) | `allowedTemplate`、`loadSourceTemplates`、字段分组与预览/执行必须共同支持 OLC；现有 DS 投影只接受 DS/CCG/OCG。读取 `official` 提示词不代表允许复制其能力，来源候选和确认须绑定同一摘要。 |
+| [统一新增计划](../scripts/provider-model-additions.mjs) | 第四批已接入已注册 OLC 的读取、精确 ID、独立填写及同目录继承；OLC 自动新增明确拒绝，不会落入 OCG 生成器。公开发现仍只读，按精确 ID 的 Responses 验证与自动目录投影待后续。 |
+| [统一模板计划](../scripts/provider-model-template-management.mjs)、[目录投影](../scripts/provider-model-catalog.mjs) | 第四批 OLC 仅提供 `official` 固定底座及 prompts/settings 分组，拒绝 capabilities；来源候选和确认绑定同一底座修订和摘要，不借用 DS 能力投影。 |
 | [目录事务](../runtime/model-provider-managed-runtime.mjs)、[模型管理读取](../scripts/provider-model-management.mjs) | 核对新 manifest 被列表、详情、默认设置、移除及恢复共同接受；保持共享目录和账户默认模型边界，不新增平行 writer 或改写其他家族来源。 |
 | [WebUI 管理路由](../scripts/webui-management-provider-route.mjs)及其类型/界面 | 账户来源、操作可用性、来源选项和确认投影与共用计划一致；不显示后端尚未支持的能力更新或高级编辑入口。 |
 
@@ -582,6 +582,11 @@ Ollama 元数据来源与提示词模板关联必须分别保存。新家族 man
 - 第三批：余额适配和用户展示已完成关联及独立复审，等待提交。采用官方 Balance 数字原文、10^-9 USD 整数单位精确求和，非负且最多 9 位小数，单项和合计均小于 10^12 USD；不支持的精度、负余额和旧百分比计划明确失败。查询使用精确账户凭据及 AccountQuery 期限/权限/错误合同，`/limits` 不开放。渠道短标签为 `OLC <账户>`，两类金额标为包含和已购额度剩余；不引入本地计费。
 - 第三批隔离观察（Node 24.22.1）：主审确认 `0.1 + 0.2` 和纳美元求和保留十进制精度，负值、缺字段、字符串和超精度拒绝。独立复审以两个虚拟账户贯穿实际适配器、ProviderAccountService、快照写入端口及渠道格式化，分别使用各自 Key，`999999999999.123456788 + 0.000000001` 精确显示为 `999999999999.123456789`，OLC 无时区或周期行。移除一个注册账户后快照 API 不再返回其历史数据，该账户再查询为 configuration；响应后撤权保留原始拒绝，预先及途中取消均拒绝成功结果。超精度、合计溢出和 65537 字节响应为 invalid-response，403 为 authentication，429 为 rate-limited，均只有一次请求且公开错误不含上游正文。真实回环 HTTP 停滞正文在约 10009ms 以 timeout/response 结束，自有服务已关闭。
 - 第三批浏览器观察由主审完成：已构建 WebUI 配合隔离账户响应，中英文卡片均保留 `USD 0.000000003` 及两类额度精度；手动刷新返回隔离 503 时显示更新失败和最后一次成功数据提示，旧余额保持不变。中文截图保留于 `output/playwright/ollama-balance/card-zh.png`，已检查字形和布局。其他 API 未提供真实服务；没有使用真实 Ollama Key 或运行中的 Gateway，Windows/macOS 与 CI 固定 Node 22.23.4 尚未实机观察。静态类型、定向 lint、i18n 与 WebUI 构建在主审阶段通过，仅表示对应工作流状态。
+- 第四批：已注册 OLC 的统一模型管理已实现，完成主审关联检查及独立全链路复审，等待提交。CLI/WebUI 共用按 ID 独立填写、同目录继承、默认模型／共享思考／窗口、本地移除和模板更新事务；来源只接受顶层 `ollama-cloud` 与逐模型 `official`。模板只开放 prompts/settings，保留能力、本地工具与未选字段；未知来源拒绝。新增不自动关联模板，公开发现候选尚未验证，自动启用明确不支持；freeform、客户端 `tool_search` 与原生 `web_search` 声明分别限制，不能互相当作验证证据。未提供账户创建或真实 Responses 能力验证。
+- 第四批隔离观察（Node 24.22.1）：两个虚拟账户的 CLI 新增保存后，WebUI 目录路由读取返回 200，精确保留 `deepseek-v4.1-flash:1017`，未绑定模板；WebUI 共用 mutation 继承保存成功。另一账户 Profile 保持不变，共享窗口调整使旧新增预览返回 stale-preview；CLI 默认设置只修改目标账户，另一账户默认模型移除为 default-model-protected。模板候选只有 official 和 prompts/settings，能力分组／DS 来源拒绝；提示词保存保留其他字段及来源元数据，无差异不写入，取消新增不写入。移除成功并保留其他来源数据；未知顶层来源在运行读取、新增、模板及移除均拒绝。最初隔离手构目录含 `web_search_tool_type:null`，被真实 Codex 目录校验拒绝；移除此无效字段后实际新增路径通过，生产新增编译本来省略该字段。类型、定向 lint、i18n、WebUI 构建和文档检查已通过；Windows/macOS 尚未观察，未调用真实模型或账户接口。
+- 第四批补充反例：只选择 settings 时保留提示词及工具，来源没有压缩阈值时明确删除本地该字段并预览差异；移除已绑定模型同时裁剪其 modelTemplates/templateUpdates，保留另一模型关联和其他来源数据。空新增为 unchanged/none 且目录修改时间不变，预先取消以 AbortError 结束；非 official 关联、空思考等级、缺少 text、默认等级越界及原生搜索声明均被运行读取拒绝。隔离配置与任务目录交给主审继续浏览器观察，不启动共享 App Server。
+- 第四批主审浏览器观察：隔离 WebUI 与任务自有 App Server 中，从 `deepseek-v4.1-flash:1017` 继承新增 `browser-model:1`，完成检查配置、预览及确认保存，页面快照显示 300000 文本窗口；runtime 另一入口读取两账户均为三个模型，两个账户原默认模型保持不变。界面禁用 freeform／客户端 tool_search，未展示自动发现新增选项。未启动 Gateway、未外发渠道消息、未请求模型；自有浏览器、WebUI 和 App Server 已关闭。截图保留于 `output/playwright/ollama-models/saved.png`，主审确认中文字形正常，但该图仅包含顶部视口；新增成功证据为页面快照和 runtime 回读。
+- 第四批独立复审及故障观察：基于 `0aa454b1` 加本批修改，追踪 CLI/WebUI 的共享计划、默认值与目录范围、catalog/manifest/Profile 事务、显式恢复和 runtime material 消费，未发现本批运行实现需修复的问题；根据主审定位补齐 WebUI 用户文档遗漏的 OLC 可用性与限制。在独立复制的私有 fixture 中，catalog 替换后向 manifest 写入注入 EIO，返回 operation-failed，目录、来源、备份及两个 Profile 恢复原字节且 pending 清除；同阶段模拟后续 manifest 编辑则保留该编辑与 pending，runtime material 拒绝读取，rollback 拒绝覆盖。明确消除隔离后续编辑后，经另一账户 rollback 成功；写入及回滚均失败的另一场景保留 pending，解除故障后 keep 成功，两账户默认值不变。正常重命名保存后，另一账户 material 读取三个精确 ID 及 Responses-only；自动新增无手动定义返回 addition-unavailable，DS/OCG 下载器调用次数为零。上述故障仅注入任务自有 Node 进程及临时文件，不代表断电或各操作系统文件系统故障均已观察；没有新增测试或检查脚本。
 - 实施阶段补充官方证据：[Balance](https://docs.ollama.com/api/balance.md) 明确 `included.balance_usd` 表示剩余包含额度、`purchased.balance_usd` 表示尚未过期的剩余已购额度，单位均为 USD；旧计划也可能仅返回 `included.session` / `included.weekly`，不能把缺失的金额当作零。精度、范围和负值策略已有上述隔离观察，真实账户响应仍待验收；上文原始快照的待确认状态保留其时点。
 - 数据处理沿用上文备份与回滚方案：新家族新增文件、现有事务预览/备份/回读，不迁移、导入或覆盖 `cp-ollama`；结果不确定时保留现场，不自动重试。
 

@@ -51,7 +51,7 @@ export function ProviderModelTemplateDialog({ target, open, stale, management, p
   }
   return <Dialog open={open} disablePointerDismissal onOpenChange={(nextOpen, details) => { if (management.busy) { details.cancel(); return }; if (!nextOpen && open) onClose() }}>
     <DialogContent finalFocus={open ? finalFocus : false} closeLabel={t("common.close")} showCloseButton={!management.busy} className={modelOperationDialogClassName}>
-      <DialogHeader><DialogTitle>{t("modelTemplate.title")}</DialogTitle><DialogDescription>{t(custom ? "modelTemplate.customHint" : "modelTemplate.hint")}</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>{t("modelTemplate.title")}</DialogTitle><DialogDescription>{t(target.provider.startsWith("olc-") ? "modelTemplate.ollamaHint" : custom ? "modelTemplate.customHint" : "modelTemplate.hint")}</DialogDescription></DialogHeader>
       <code className="break-all text-xs text-muted-foreground">{target.provider} · {target.model}</code>
       {request.loading ? <p aria-busy="true">{t("common.loading")}</p> : null}
       {request.error ? <Alert variant="destructive"><AlertDescription>{translateApiError(t, request.error, request.errorCode)}</AlertDescription></Alert> : null}

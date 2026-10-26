@@ -39,6 +39,7 @@ const zh = {
     notice: "保存前创建私有配置备份；新增覆盖、subagents、streaming、commentary、routine_notifications、presentation_detail 与 detailed/failures 需新版 Gateway。保存后按提示激活；已入箱 pending 仍可能投递，重启恢复后不保证原有详细或紧凑版式。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，并将全局及覆盖 detailed/failures 改为旧版支持值；核对后续修改，勿直接覆盖配置。",
   },
   modelAddition: {
+    ollamaHint: "OLC 公开发现候选尚未验证，不能自动启用。请按准确 ID 独立填写或继承当前目录模型；freeform 文件编辑、客户端 tool_search 及原生 web_search 尚未开放。",
     title: "添加模型",
     duplicateId: "此模型 ID 已存在，请填写新的 ID。",
     windowInvalid: "请输入 1024 至 {maximum} 之间的整数。",
@@ -98,6 +99,7 @@ const zh = {
     unchanged: "请求改写未变化。",
   },
   modelTemplate: {
+    ollamaHint: "OLC 仅从固定 OpenAI 底座更新所选提示词或压缩设置；保留模型能力、本地工具及未选字段。",
     title: "更新模板", hint: "选择模板和更新内容，预览后保存。",
     sourceUnavailable: "模板来源读取或校验失败，请检查本地模板后重新读取。",
     customHint: "选择模板和更新内容，模型能力与采样保持手动值。",
@@ -2020,6 +2022,7 @@ const en: Messages = {
     notice: "Saving creates a private configuration backup; overrides, subagents, streaming, commentary, routine_notifications, presentation_detail, and detailed/failures require a newer Gateway. Activate as instructed after saving. Existing pending deliveries may still be sent; restored deliveries may use a different detailed or compact layout. Before downgrading, explicitly remove new overrides and global or scoped completion/subagents/streaming/commentary/routine_notifications/presentation_detail as required by the older version, and replace global or scoped detailed/failures with a supported value. Check subsequent edits; do not overwrite the configuration directly.",
   },
   modelAddition: {
+    ollamaHint: "OLC discovery candidates are unverified and cannot be enabled automatically. Enter an exact ID independently or inherit a model from this catalogue. Freeform file editing, client tool_search, and native web_search are not available yet.",
     title: "Add model",
     duplicateId: "This model ID already exists. Enter a new ID.",
     windowInvalid: "Enter an integer between 1024 and {maximum}.",
@@ -2079,6 +2082,7 @@ const en: Messages = {
     unchanged: "Request overrides are unchanged.",
   },
   modelTemplate: {
+    ollamaHint: "For OLC, update selected prompts or compaction settings from the fixed OpenAI base only. Model capabilities, local tools, and unselected fields are preserved.",
     title: "Update template", hint: "Choose a template and sections, then preview and save.",
     sourceUnavailable: "The template source could not be read or validated. Check the local templates and reload.",
     customHint: "Choose a template and sections. Model capabilities and sampling keep their manual values.",

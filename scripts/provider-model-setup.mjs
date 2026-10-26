@@ -135,7 +135,8 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   output.write(`模板对比：${JSON.stringify(preview.provider)} / ${JSON.stringify(preview.model)}\n来源：${JSON.stringify(preview.source)} / ${JSON.stringify(preview.sourceModel)}\n修订：${JSON.stringify(preview.revision)}\n`);
   output.write(provider.startsWith("cp-")
     ? "自定义模型按勾选范围更新提示词、本地工具或上下文与压缩设置，并记录来源关联；模型自身能力、其他工具声明及采样保留本地值。\n"
-    : "保留本地模型 ID、显示名称、当前上下文、默认思考等级和采样；能力更新可改变最大上下文，并补入基座异步提问与时钟声明，保留其他已有工具声明。\n");
+    : provider.startsWith("olc-") ? "OLC 仅从 official 更新勾选的提示词或运行设置；模型能力、本地工具及未选字段保持原值。\n"
+      : "保留本地模型 ID、显示名称、当前上下文、默认思考等级和采样；能力更新可改变最大上下文，并补入基座异步提问与时钟声明，保留其他已有工具声明。\n");
   output.write("有效上下文比例、自动压缩阈值和截断策略默认保留本地值；仅主动选择「上下文与压缩设置」并确认差异后覆盖。\n");
   for (const change of preview.changes) {
     output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before)}\n  更新后：${templateDifferenceValue(change.after)}\n`);
@@ -196,7 +197,7 @@ async function runProviderModelOperation({ environment, prompts, output, provide
     ? "DeepSeek 暂不支持单模型移除。\n"
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
   const action = await prompts.select({ message: "模型操作", options: [
-    ...(["ccg", "ocg", "clp"].includes(family) || custom && catalog.canRemove ? [{ value: "manage", label: "查看／添加新模型", hint: "按 ID 独立填写或继承已有模型；已有模型保持不变" }] : []),
+    ...(["ccg", "ocg", "clp", "olc"].includes(family) || custom && catalog.canRemove ? [{ value: "manage", label: "查看／添加新模型", hint: "按 ID 独立填写或继承已有模型；已有模型保持不变" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "编辑模型与默认值" }] : []),
     ...(custom || family ? [{ value: "rename", label: "编辑模型显示名称", hint: "模型 ID 保持不变" }] : []),
     ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求格式" }] : []),

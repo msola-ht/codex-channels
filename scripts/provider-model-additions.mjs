@@ -12,7 +12,7 @@ import { readDeepseekModelTemplateCatalog, readModelBaseSnapshot, withModelBaseS
 import { resolveClinePassRequestProfile } from "../runtime/chat-reasoning.mjs";
 import { validateClinePassProviderOptions } from "../runtime/cline-provider-options.mjs";
 import { createIndependentModelDraft, isValidCustomModelId } from "../runtime/model-catalog.mjs";
-import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
+import { readModelTemplateBindings, validateOllamaCloudCatalogManifest } from "../runtime/model-template-bindings.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import { createCcgCatalogWithTemplateBindings, createOpencodeGoCatalogWithTemplateBindings, createClinePassCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
@@ -66,7 +66,7 @@ export async function loadProviderModelAdditionOptions(provider, {
       if (manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "sampling")) {
         throw invalid("invalid-input", "manualModel", "受管模型手动新增不支持默认采样参数；sampling 不会保存，请移除此字段");
       }
-      if (!["ccg", "opencode-go", "clp", "custom"].includes(state.family.storageId)
+      if (!["ccg", "opencode-go", "clp", "ollama-cloud", "custom"].includes(state.family.storageId)
         || !manualModel || typeof manualModel !== "object" || Array.isArray(manualModel)
         || !validModelId(state, manualModel.id)
         || manualModel.experimentalSupportedTools !== undefined && !Array.isArray(manualModel.experimentalSupportedTools)
@@ -77,6 +77,10 @@ export async function loadProviderModelAdditionOptions(provider, {
         throw invalid("invalid-input", "manualModel", "须明确声明思考等级、图片、apply_patch 和 tool_search 能力，不自动关联模板");
       }
       const clinePass = state.family.storageId === "clp";
+      if (state.family.storageId === "ollama-cloud" && (manualModel.applyPatchToolType !== null
+        || manualModel.supportsSearchTool !== false || manualModel.supportsWebSearch !== undefined && manualModel.supportsWebSearch !== false)) {
+        throw invalid("invalid-input", "manualModel", "OLC 尚未开放 freeform 文件编辑、客户端 tool_search 或原生 web_search 能力声明");
+      }
       const chat = clinePass || state.upstreamWireApi === "chat_completions";
       if (chat && manualModel.supportsImageDetailOriginal !== undefined && manualModel.supportsImageDetailOriginal !== false) {
         throw invalid("invalid-input", "manualModel", "Chat 桥不支持 original 图片细节");
@@ -101,6 +105,8 @@ export async function loadProviderModelAdditionOptions(provider, {
       models = generated.catalog.models;
       bindings = generated.templateBindings;
       source = { kind: "deepseek" };
+    } else if (state.family.storageId === "ollama-cloud") {
+      throw invalid("addition-unavailable", "manualModel", "OLC 公开发现仅提供尚未验证的候选，不能自动启用；请按 ID 独立填写或继承当前目录模型");
     } else if (state.custom) {
       throw invalid("invalid-input", "manualModel", "自定义提供商新增模型必须填写准确 ID 及能力，或选择已有模型继承");
     } else {
@@ -266,7 +272,7 @@ async function readState(provider, environment) {
   const definitions = loadManagedModelProviderDefinitions(environment);
   const definition = definitions.find(entry => entry.id === provider);
   const family = managedProviderAccountFamilies.find(entry => entry.storageId === definition?.storageId);
-  if (!definition || !family || !["ccg", "opencode-go", "clp"].includes(family.storageId)) throw invalid("addition-unavailable", "provider", "新增仅支持已配置的 CCG、OCG 或 CLP 账户");
+  if (!definition || !family || !["ccg", "opencode-go", "clp", "ollama-cloud"].includes(family.storageId)) throw invalid("addition-unavailable", "provider", "新增仅支持已配置的 CCG、OCG、CLP 或 OLC 账户");
   const { catalogs } = await loadProviderModelCatalogs({ environment });
   const visible = catalogs.find(catalog => catalog.providers.includes(provider));
   if (!visible) throw invalid("provider-not-configured", "provider", "提供商账户不存在或目录不可用");
@@ -288,6 +294,7 @@ async function readState(provider, environment) {
   }
   if (!isDeepStrictEqual(catalog.models.map(model => model.slug).sort(), visible.models.map(model => model.id).sort())) throw stale();
   const bindings = readModelTemplateBindings(manifest, catalog.models.map(model => model.slug));
+  if (family.storageId === "ollama-cloud") validateOllamaCloudCatalogManifest(manifest, catalog.models.map(model => model.slug));
   const scope = JSON.stringify([codexHomePath(environment), connectHomePath(environment), resolve(environment.CODEX_CONNECT_CONFIG_FILE?.trim() || join(connectHomePath(environment), "config.toml"))]);
   return { definition, family, providers: visible.providers, catalogPath, manifestPath, catalog, manifest, bindings, snapshots: files, scope,
     revision: revisionOf([provider, scope, visible, files.map(file => [file.path, file.content?.toString("base64") ?? null])]) };
