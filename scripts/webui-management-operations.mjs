@@ -89,6 +89,8 @@ export function isHighRiskManagementPath(path) {
   return path.startsWith("/accounts/openai/reset-credits/")
     || path === "/models/official/context"
     || path === "/models/official/refresh"
+    || path === "/models/base"
+    || path === "/models/base/preview"
     || path.startsWith("/relay/")
     || path.startsWith("/delivery/")
     || path.startsWith("/provider-settings")

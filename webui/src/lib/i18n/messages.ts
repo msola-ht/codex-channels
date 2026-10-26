@@ -5,6 +5,23 @@ import type { DisplayLanguage } from "../format"
  * 由 `Messages` 类型检查在构建期保证两种语言键一致。
  */
 const zh = {
+  baseModel: {
+    title: "公共模型底座", hint: "供添加模型与更新模型模板使用的公共基础模板。",
+    version: "Codex {version}", cliVersion: "Codex 版本", bundled: "来源：随安装附带", savedSource: "来源：本地已保存",
+    fetch: "获取候选并对比", fetching: "正在获取候选…",
+    fetchHint: "使用服务端当前 Codex 环境运行 codex debug models，取返回的第一个模型。结果可能来自缓存或回退目录，不保证是远程最新；获取候选可能更新 Codex 缓存，即使随后取消。",
+    confirmTitle: "确认更新公共模型底座？", confirmHint: "请核对模型、版本和全部字段差异，再保存公共模板。取消不保存底座。",
+    before: "更新前", after: "更新后", save: "确认保存底座", confirmUnchanged: "确认无需更改",
+    activation: "只保存公共模板，供后续添加模型和模板更新使用；已有账户模型与运行中服务不会自动改变。",
+    absent: "未提供", empty: "空字符串", expand: "展开完整内容", collapse: "收起完整内容",
+    updated: "公共模型底座已保存并读回确认。", unchanged: "公共模型底座内容未变化，未写入文件。",
+    backup: "备份：{path}", writeUnknown: "保存结果未知，请重新读取并核对底座，不要直接重试保存。",
+    readbackUnknown: "保存已返回，但写后读回未确认，请重新读取并核对底座。",
+    invalidInput: "底座更新参数无效，请重新读取后获取候选。", invalidCatalog: "模型底座或候选目录无效，无法预览或保存。",
+    unavailable: "无法读取公共模型底座，请检查文件与访问权限后重试。", stale: "底座修订或候选已失效，正在重新读取；请重新获取候选并核对差异。",
+    exportFailed: "Codex 模型导出失败，未保存底座，请检查服务端 Codex 环境后重试。",
+    writeFailed: "底座保存或确认失败，请重新读取并核对实际内容。", busy: "已有底座更新正在进行，请稍后重新读取。",
+  },
   displayPreset: {
     title: "显示预设", concise: "静默", standard: "紧凑", detailed: "详细", full: "完整", custom: "自定义（只读识别）",
     detected: "已保存配置识别：{value}。", apply: "预览并应用预设",
@@ -1966,6 +1983,23 @@ const zh = {
 export type Messages = typeof zh
 
 const en: Messages = {
+  baseModel: {
+    title: "Shared model base", hint: "The shared base template used when adding models or updating model templates.",
+    version: "Codex {version}", cliVersion: "Codex version", bundled: "Source: bundled with installation", savedSource: "Source: saved locally",
+    fetch: "Fetch candidate and compare", fetching: "Fetching candidate…",
+    fetchHint: "Runs codex debug models in the server's current Codex environment and takes the first returned model. Results may come from cache or a fallback catalog and are not guaranteed to be the latest remote data. Fetching may update the Codex cache even if you cancel afterward.",
+    confirmTitle: "Update the shared model base?", confirmHint: "Review the model, version, and all field differences before saving the shared template. Cancelling does not save the base.",
+    before: "Before", after: "After", save: "Confirm and save base", confirmUnchanged: "Confirm no changes needed",
+    activation: "Saves only the shared template for future model additions and template updates. Existing account models and running services do not change automatically.",
+    absent: "Not provided", empty: "Empty string", expand: "Expand full content", collapse: "Collapse full content",
+    updated: "The shared model base was saved and confirmed by readback.", unchanged: "The shared model base content is unchanged. No file was written.",
+    backup: "Backup: {path}", writeUnknown: "The save result is unknown. Reload and check the base before attempting another save.",
+    readbackUnknown: "The save returned, but readback was not confirmed. Reload and check the base.",
+    invalidInput: "Invalid base update input. Reload before fetching another candidate.", invalidCatalog: "The model base or candidate catalog is invalid and cannot be previewed or saved.",
+    unavailable: "The shared model base could not be read. Check the file and access permissions, then retry.", stale: "The base revision or candidate is stale. Reloading now; fetch another candidate and review its differences.",
+    exportFailed: "Codex model export failed. The base was not saved. Check the server's Codex environment before retrying.",
+    writeFailed: "The base could not be saved or confirmed. Reload and check the actual content.", busy: "A base update is already running. Reload shortly.",
+  },
   displayPreset: {
     title: "Display preset", concise: "Quiet", standard: "Compact", detailed: "Detailed", full: "Full", custom: "Custom (detected only)",
     detected: "Detected from saved configuration: {value}.", apply: "Preview and apply preset",

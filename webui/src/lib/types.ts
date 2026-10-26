@@ -1,4 +1,5 @@
 export type {
+  BaseModelSnapshot, BaseModelPreviewInput, BaseModelPreview, BaseModelUpdateResult,
   ManagementProviderWebSearchProbeInput, ManagementProviderWebSearchProbeResult,
   ManagementCustomModelProbeInput, ManagementCustomModelProbeResult,
   ServiceLogTarget, ServiceLogsResponse,

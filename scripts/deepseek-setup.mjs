@@ -142,6 +142,7 @@ export function createManagedDeepseekCatalog(
   catalog,
   previousModels = [],
   windowPercent = null,
+  environment = process.env,
 ) {
   if (windowPercent !== null && (
     !Number.isInteger(windowPercent)
@@ -151,7 +152,7 @@ export function createManagedDeepseekCatalog(
     throw new Error("DeepSeek 上下文窗口百分比无效");
   }
   return createManagedProviderCatalog(
-    createDeepseekTemplateCatalog(catalog, "deepseek"),
+    createDeepseekTemplateCatalog(catalog, "deepseek", environment),
     deepseekProviderDefinition,
     {
       previousModels,

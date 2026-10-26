@@ -607,6 +607,37 @@ export interface ManagementSettingMutationResponse {
 
 export type OpenAiModelCatalogEntry = import("./webui-official-model-catalog.mjs").OpenAiModelCatalogEntry
 
+export interface BaseModelSnapshot {
+  revision: string
+  model: string
+  cliVersion: string
+  source: "bundled" | "saved"
+  command: string
+}
+
+export interface BaseModelPreviewInput {
+  revision: string
+}
+
+export interface BaseModelPreview {
+  revision: string
+  candidateToken: string
+  expiresAt: number
+  changed: boolean
+  before: { model: string; cliVersion: string; command: string }
+  after: { model: string; cliVersion: string; command: string }
+  changes: Array<{ field: string; before: { present: boolean; value?: unknown }; after: { present: boolean; value?: unknown } }>
+}
+
+export interface BaseModelUpdateResult {
+  status: "updated" | "unchanged"
+  model: string
+  revision: string
+  backupPath?: string
+  consistency: "confirmed" | "unconfirmed"
+  auditStatus: "recorded" | "degraded"
+}
+
 export interface OpenAiModelCatalogResponse {
   source: "codex-cache"
   revision: string

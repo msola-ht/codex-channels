@@ -3,7 +3,7 @@ export type ResponsesModelDefinition = ModelDefinition;
 export function isCustomCatalogProvider(id: unknown): boolean;
 export function responsesProviderCatalogPath(environment: NodeJS.ProcessEnv | undefined, id: string): string;
 export function validateResponsesModels(values: unknown, defaultModel: string, options?: { allowReasoningToggle?: boolean }): ResponsesModelDefinition[];
-export function createResponsesModelCatalog(definitions: ResponsesModelDefinition[], defaultModel: string, options?: { allowReasoningToggle?: boolean }): {
+export function createResponsesModelCatalog(definitions: ResponsesModelDefinition[], defaultModel: string, options?: { allowReasoningToggle?: boolean }, environment?: NodeJS.ProcessEnv): {
   schemaVersion: number; defaultModel: string; definitions: ResponsesModelDefinition[]; models: Record<string, unknown>[];
 };
 export function compileResponsesModelCatalog(definitions: ResponsesModelDefinition[], defaultModel: string, options?: { allowReasoningToggle?: boolean }): ReturnType<typeof createResponsesModelCatalog>;

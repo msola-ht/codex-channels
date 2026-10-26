@@ -652,7 +652,7 @@ async function buildSavePlan(input, options, { requireConfirmation, connectionOn
       throw invalid("invalid-catalog", "catalog", "模型定义无效，请检查上下文、思考等级、默认值及能力设置", error);
     }
     models = models.map(entry => existingIds.has(entry.id)
-      ? entry : createResponsesModelCatalog([entry.template ? withCustomBaseTemplate(entry) : createIndependentModelDraft(entry)], entry.id).definitions[0]);
+      ? entry : createResponsesModelCatalog([entry.template ? withCustomBaseTemplate(entry, environment) : createIndependentModelDraft(entry)], entry.id, undefined, environment).definitions[0]);
   }
   const reasoningEffort = models?.find((entry) => entry.id === model)?.defaultReasoningEffort ?? "none";
   const officialModelIds = new Set(

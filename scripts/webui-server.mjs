@@ -94,6 +94,7 @@ import { routeTaskManagement } from "./webui-management-task-route.mjs";
 import { routeLogsApi } from "./webui-logs-route.mjs";
 import { webuiLogger } from "./webui-logger.mjs";
 import { closeOfficialModelOperations } from "./webui-management-official-model-route.mjs";
+import { closeModelBaseOperations } from "./webui-management-model-base-route.mjs";
 
 const logger = webuiLogger.child({ module: "http" });
 
@@ -207,6 +208,7 @@ export function createWebuiServer({
       waitForTrafficReads(management.shutdownController.signal),
       metricsExports.close(), metricsReads.close(), closeDeliveryReaders(), closeDeliveryJournals(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
       closeOfficialModelOperations(management),
+      closeModelBaseOperations(management),
       closeAppServerUserAgentReads(management.appServerUserAgentCache),
       closeManagementSnapshotReads(management).then(() => closeCodexUserConfigClients()),
     ]);
@@ -214,6 +216,7 @@ export function createWebuiServer({
   }, waitForNotificationsExit: async () => {
     await waitForTrafficReads(management.shutdownController.signal);
     await Promise.all([management.tasks.waitForExit(), closeQueueStreams(management), closeAppServerUserAgentReads(management.appServerUserAgentCache), metricsExports.waitForExit(), metricsReads.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit(), closeOfficialModelOperations(management, { waitForExit: true }),
+      closeModelBaseOperations(management, { waitForExit: true }),
       closeManagementSnapshotReads(management).then(() => closeCodexUserConfigClients())]);
   } };
 }

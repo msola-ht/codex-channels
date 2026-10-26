@@ -342,7 +342,7 @@ async function runCcgSetupOperation({
       catalog = JSON.parse(readPrivateFileSync(paths.catalog, maximumCatalogBytes));
     } else {
       const downloaded = await downloadCatalog(fetchImpl);
-      ({ catalog, templateBindings } = createCcgCatalogWithTemplateBindings(downloaded.catalog));
+      ({ catalog, templateBindings } = createCcgCatalogWithTemplateBindings(downloaded.catalog, environment));
     }
     const model = current?.model ?? await prompts.select({
       message: "选择 CCG 默认模型（来自目录文件）",

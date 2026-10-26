@@ -187,10 +187,16 @@ async function runModelSetup({
         },
         { value: "web-search", label: "检测原生网页搜索", hint: "官方或第三方；选择单一账户和模型；可能计费" },
         { value: "web-search-settings", label: "提供商联网搜索", hint: "按账户修改搜索模式；不发送探测请求" },
+        { value: "model-base", label: "公共底座更新", hint: "获取候选，查看字段前后差异，确认后保存" },
         { value: "back", label: "返回", hint: "返回设置类别" },
       ],
     });
     if (prompts.isCancel(category) || category === "back") return { action: "back" };
+    if (category === "model-base") {
+      selection.modelCategory = category;
+      await (await import("./model-base-command.mjs")).runModelBaseCommand(["update"], { input, output, prompts });
+      continue;
+    }
     if (category === "web-search-settings") {
       selection.modelCategory = category;
       const result = await (await import("./provider-web-search-setup.mjs")).runProviderWebSearchSettingsSetup({ output, prompts });

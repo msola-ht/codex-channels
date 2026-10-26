@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, renameSync, unlinkSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { completeModelMessages } from "../runtime/model-template-prompts.mjs";
+import { validateModelBaseCatalog } from "../runtime/model-base-snapshot.mjs";
 import { packageDir } from "./package-path.mjs";
 import { downloadDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
@@ -58,7 +58,7 @@ function differences(before, after, path = "", result = []) {
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 1 && args[0] === "--help") {
-    console.log("用法：node scripts/update-model-templates.mjs [--update-base] [--write]\n默认下载 DS 官方目录，用已保存公共底座补全并显示差异，不刷新底座。\n--update-base 从锁定 CLI 内置目录按原始顺序提取第一个模型作为底座，并用已保存 DS 原始目录重新补全，不下载 DS。\n两种操作默认只对比；--write 在校验后保存所选更新。不会更新账户目录。");
+    console.log("用法：node scripts/update-model-templates.mjs [--update-base] [--write]\n默认下载 DS 官方目录，用已保存公共底座补全并显示差异，不刷新底座。\n--update-base 使用当前 Codex 环境运行锁定 CLI 的 debug models，按输出顺序提取第一个模型作为底座，并用已保存 DS 原始目录重新补全，不下载 DS。该命令可能联网或更新 CLI 缓存。\n两种操作默认只对比仓库快照；--write 在校验后保存所选更新。不会更新账户目录。");
     return;
   }
   if (args.some(arg => arg !== "--update-base" && arg !== "--write") || new Set(args).size !== args.length) {
@@ -82,36 +82,34 @@ async function main() {
   } else {
     base = saved(names[0]);
     validateCatalog(base);
+    validateModelBaseCatalog(base);
     if (base.models.length !== 1) throw new Error("公共底座必须仅包含一个模型");
     if (sources.official.model !== base.models[0].slug || sources.official.sha256 !== hash(previous.get(names[0]))) throw new Error("公共底座与来源记录不一致，请先检查仓库快照");
   }
   const codexBinary = effectiveCodexBinary("codex", process.env);
-  const temporary = mkdtempSync(join(tmpdir(), "codexc-template-export-"));
-  let cliVersion;
-  try {
-    const environment = { ...process.env, CODEX_HOME: temporary };
-    const run = args => {
-      const invocation = resolveExecutableInvocation(codexBinary, args, environment);
-      const result = spawnSync(invocation.file, invocation.args, { cwd: temporary, env: environment,
-        windowsVerbatimArguments: invocation.windowsVerbatimArguments, encoding: "utf8", timeout: 30_000,
-        maxBuffer: 16 * maximumBytes, stdio: ["ignore", "pipe", "pipe"] });
-      if (result.error || result.status !== 0) throw new Error("Codex 模板导出失败，请确认锁定 CLI 可运行");
-      return result.stdout;
-    };
-    cliVersion = run(["--version"]).trim();
-    const expected = JSON.parse(readFileSync(join(packageDir, "src/codex-protocol/version.json"), "utf8")).codexCli;
-    if (cliVersion !== expected) throw new Error(`CLI 版本与项目基线不一致：需要 ${expected}，实际 ${cliVersion}`);
-    if (updateBase) {
-      const bundled = JSON.parse(run(["debug", "models", "--bundled"]));
-      if (!Array.isArray(bundled.models) || bundled.models.length === 0) throw new Error("内置目录缺少第一个模型");
-      base = { models: [bundled.models[0]] };
-      validateCatalog(base);
-    }
-  } finally { rmSync(temporary, { recursive: true, force: true }); }
+  const environment = { ...process.env };
+  const run = args => {
+    const invocation = resolveExecutableInvocation(codexBinary, args, environment);
+    const result = spawnSync(invocation.file, invocation.args, { cwd: process.cwd(), env: environment,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments, encoding: "utf8", timeout: 30_000,
+      maxBuffer: 16 * maximumBytes, stdio: ["ignore", "pipe", "pipe"] });
+    if (result.error || result.status !== 0) throw new Error("Codex 模板导出失败，请确认锁定 CLI 可运行");
+    return result.stdout;
+  };
+  const cliVersion = run(["--version"]).trim();
+  const expected = JSON.parse(readFileSync(join(packageDir, "src/codex-protocol/version.json"), "utf8")).codexCli;
+  if (cliVersion !== expected) throw new Error(`CLI 版本与项目基线不一致：需要 ${expected}，实际 ${cliVersion}`);
+  if (updateBase) {
+    const catalog = JSON.parse(run(["debug", "models"]));
+    if (!Array.isArray(catalog.models) || catalog.models.length === 0) throw new Error("Codex 导出目录缺少第一个模型");
+    base = { models: [catalog.models[0]] };
+    validateCatalog(base);
+    validateModelBaseCatalog(base);
+  }
   const contents = new Map(previous);
   if (updateBase) {
     contents.set(names[0], encode(base));
-    sources.official = { cliVersion, model: base.models[0].slug, command: "codex debug models --bundled", sha256: hash(contents.get(names[0])) };
+    sources.official = { cliVersion, model: base.models[0].slug, command: "codex debug models", sha256: hash(contents.get(names[0])) };
   } else {
     const downloaded = await downloadDeepseekCatalog(globalThis.fetch);
     source = downloaded.catalog;

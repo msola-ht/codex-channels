@@ -25,8 +25,8 @@ export function responsesProviderCatalogPath(environment, id) {
   return join(providerStorageRoot(environment), id, "models.json");
 }
 
-export function createResponsesModelCatalog(definitions, defaultModel, options) {
-  return compileResponsesModelCatalog(completeDefinitionPrompts(validateResponsesModels(definitions, defaultModel, options)), defaultModel, options);
+export function createResponsesModelCatalog(definitions, defaultModel, options, environment = process.env) {
+  return compileResponsesModelCatalog(completeDefinitionPrompts(validateResponsesModels(definitions, defaultModel, options), environment), defaultModel, options);
 }
 
 export function compileResponsesModelCatalog(definitions, defaultModel, options) {

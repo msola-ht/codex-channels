@@ -566,7 +566,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           : officialCatalogPath;
     if (!sourcePath) throw new Error("第三方 App Server 缺少模型目录");
     const path = writeThirdPartyRuntimeModelCatalog(sourcePath, runtime.dataDir, customPrimaryProvider && provider === primaryProvider
-      ? customPrimaryProvider.id : provider);
+      ? customPrimaryProvider.id : provider, runtime.environment);
     // Third-party model APIs use hosted search, not OpenAI's separate /alpha/search executor.
     return withOfficialModelCatalog([...argumentsList, "-c", "features.standalone_web_search=false"], path);
   };

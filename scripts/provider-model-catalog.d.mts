@@ -1,16 +1,16 @@
 export interface ProviderModelCatalog {
   models: Array<Record<string, unknown>>;
 }
-export function createDeepseekTemplateCatalog(source: ProviderModelCatalog, family: "deepseek" | "ccg" | "opencode-go"): ProviderModelCatalog;
-export function createOpencodeGoCatalogWithTemplateBindings(source: ProviderModelCatalog): {
+export function createDeepseekTemplateCatalog(source: ProviderModelCatalog, family: "deepseek" | "ccg" | "opencode-go", environment?: NodeJS.ProcessEnv): ProviderModelCatalog;
+export function createOpencodeGoCatalogWithTemplateBindings(source: ProviderModelCatalog, environment?: NodeJS.ProcessEnv): {
   catalog: ProviderModelCatalog;
   templateBindings: Record<string, import("../runtime/model-template-bindings.mjs").ModelTemplateBinding>;
 };
-export function createCcgCatalogWithTemplateBindings(source: ProviderModelCatalog): {
+export function createCcgCatalogWithTemplateBindings(source: ProviderModelCatalog, environment?: NodeJS.ProcessEnv): {
   catalog: ProviderModelCatalog;
   templateBindings: Record<string, import("../runtime/model-template-bindings.mjs").ModelTemplateBinding>;
 };
-export function createClinePassCatalogWithTemplateBindings(source: ProviderModelCatalog): {
+export function createClinePassCatalogWithTemplateBindings(source: ProviderModelCatalog, environment?: NodeJS.ProcessEnv): {
   catalog: ProviderModelCatalog;
   templateBindings: Record<string, import("../runtime/model-template-bindings.mjs").ModelTemplateBinding>;
 };

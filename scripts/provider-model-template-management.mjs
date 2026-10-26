@@ -1,10 +1,10 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { connectHomePath } from "../runtime/connect-home.mjs";
 import { completeDefinitionPrompts } from "../runtime/model-template-catalog.mjs";
+import { readModelBaseSnapshot, readDeepseekModelTemplateCatalog, withModelBaseSnapshotLock } from "../runtime/model-base-snapshot.mjs";
 import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
 import { loadManagedModelProviderDefinitions, managedProviderAccountFamilies } from "../runtime/model-provider-definitions.mjs";
 import { managedProviderDirectory, managedProviderMarkerPath, writeManagedModelProviderCatalogUpdates,
@@ -44,12 +44,14 @@ const authenticatedRevision = value => createHmac("sha256", revisionSecret).upda
 export async function loadProviderModelTemplateOptions(provider, { environment = process.env, signal } = {}) {
   signal?.throwIfAborted();
   const state = await readTargetState(provider, environment);
+  const baseRevision = readModelBaseSnapshot(environment).revision;
   const templates = await loadSourceTemplates(state, environment, signal);
   const current = await readTargetState(provider, environment);
   signal?.throwIfAborted();
   if (current.revision !== state.revision) throw staleTarget();
+  if (readModelBaseSnapshot(environment).revision !== baseRevision) throw staleSource();
   const snapshot = { provider, scope: state.scope, revision: state.revision, templates,
-    expiresAt: Date.now() + sourceLifetimeMs, sourceRevision: digest(templates) };
+    expiresAt: Date.now() + sourceLifetimeMs, sourceRevision: digest(templates), baseRevision };
   const bytes = Buffer.byteLength(JSON.stringify(snapshot));
   if (bytes > maximumSnapshotBytes) throw invalid("template-source-too-large", "template", "候选模板超过 8 MiB，请缩小源目录后重试");
   pruneSourceSnapshots();
@@ -75,30 +77,33 @@ export async function applyProviderModelTemplateUpdate(input, { environment = pr
     const plan = await buildPlan(input, environment);
     if (!preview || preview.revision !== plan.preview.revision) throw invalid("stale-preview", "revision", "账户目录、候选模板或更新范围已变化，请重新对比");
     if (!plan.preview.willChange) return { action: "unchanged", activation: "none" };
-    await assertProviderFileSnapshots(plan.snapshots);
-    if (plan.customCatalog) {
-      // Template updates cannot change connection selections. The catalog's
-      // default may differ from the fixed config or switching profile default.
-      try {
-        const transaction = writeResponsesModelCatalog(environment, input.provider,
-          plan.customCatalog.definitions, plan.customCatalog.defaultModel, plan.catalogRevision);
-        await withResponsesModelCatalogWrite(transaction, async () => {
-          if (readResponsesModelCatalog(environment, input.provider).content !== transaction.content) {
-            throw new Error("模板目录回读不一致");
-          }
-          const written = new Set([transaction.path, `${transaction.path}.backup`, `${transaction.path}.pending`]);
-          await assertProviderFileSnapshots(plan.snapshots.filter(snapshot => !written.has(snapshot.path)));
-          finishResponsesModelCatalogWrite(transaction);
-        });
-      } catch (error) {
-        throw invalid("readback-failed", "template", "模板目录保存未完成或结果无法确认；请核对目录、pending 与备份，勿自动重试", error);
+    return withModelBaseSnapshotLock(environment, async () => {
+      await assertProviderFileSnapshots(plan.snapshots);
+      if (plan.baseRevision !== readModelBaseSnapshot(environment).revision) throw staleSource();
+      if (plan.customCatalog) {
+        // Template updates cannot change connection selections. The catalog's
+        // default may differ from the fixed config or switching profile default.
+        try {
+          const transaction = writeResponsesModelCatalog(environment, input.provider,
+            plan.customCatalog.definitions, plan.customCatalog.defaultModel, plan.catalogRevision);
+          await withResponsesModelCatalogWrite(transaction, async () => {
+            if (readResponsesModelCatalog(environment, input.provider).content !== transaction.content) {
+              throw new Error("模板目录回读不一致");
+            }
+            const written = new Set([transaction.path, `${transaction.path}.backup`, `${transaction.path}.pending`]);
+            await assertProviderFileSnapshots(plan.snapshots.filter(snapshot => !written.has(snapshot.path)));
+            finishResponsesModelCatalogWrite(transaction);
+          });
+        } catch (error) {
+          throw invalid("readback-failed", "template", "模板目录保存未完成或结果无法确认；请核对目录、pending 与备份，勿自动重试", error);
+        }
+      } else {
+        writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
+          new Map(plan.snapshots.filter(snapshot => !snapshot.path.endsWith(".settings-pending"))
+            .map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
       }
-    } else {
-      writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
-        new Map(plan.snapshots.filter(snapshot => !snapshot.path.endsWith(".settings-pending"))
-          .map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
-    }
-    return { action: "updated", activation: plan.preview.activation };
+      return { action: "updated", activation: plan.preview.activation };
+    });
   });
 }
 
@@ -110,6 +115,7 @@ async function buildPlan(input, environment) {
     throw invalid("template-source-expired", "sourceToken", "候选模板已过期或不属于当前账户，请重新加载模板");
   }
   if (source.revision !== input.revision) throw staleTarget();
+  if (source.baseRevision !== readModelBaseSnapshot(environment).revision) throw staleSource();
   const state = await readTargetState(input.provider, environment);
   if (state.revision !== input.revision) throw staleTarget();
   if (!state.targets.some(target => target.model === input.model)) throw invalid("template-unavailable", "model", "模型不在当前账户目录中");
@@ -129,13 +135,14 @@ async function buildPlan(input, environment) {
     sections, changes, willChange: changes.length > 0,
     activation: changes.length === 0 ? "none" : state.custom ? "restart-all" : "restart-app-server" };
   await assertProviderFileSnapshots(state.snapshots);
+  if (source.baseRevision !== readModelBaseSnapshot(environment).revision) throw staleSource();
   // Codex validation may await; do not finish with an expired or evicted candidate.
   if (source.expiresAt <= Date.now() || sourceSnapshots.get(input.sourceToken) !== source) {
     throw invalid("template-source-expired", "sourceToken", "候选模板已过期，请重新加载模板");
   }
   const revision = authenticatedRevision({ preview, sourceToken: input.sourceToken, sourceRevision: source.sourceRevision,
     targetRevision: state.revision, scope: state.scope });
-  return { ...plan, snapshots: state.snapshots, preview: { ...preview, revision } };
+  return { ...plan, baseRevision: source.baseRevision, snapshots: state.snapshots, preview: { ...preview, revision } };
 }
 
 function validateInput(input) {
@@ -239,14 +246,14 @@ async function loadSourceTemplates(state, environment, signal) {
   let result;
   if (state.custom) {
     const sources = await Promise.all(["official", "deepseek"].map(async source =>
-      completeDefinitionPrompts(await loadResponsesModelTemplates(source)).map(template => ({ source,
+      completeDefinitionPrompts(await loadResponsesModelTemplates(source, environment), environment).map(template => ({ source,
         model: template.id, displayName: template.name,
         template: { ...template, maxContextWindow: template.maxContextWindow ?? template.contextWindow } }))));
     result = sources.flat();
   } else if (state.family === "clp") {
     signal?.throwIfAborted();
     const { catalog, templateBindings } = createClinePassCatalogWithTemplateBindings(
-      JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8")));
+      readDeepseekModelTemplateCatalog(environment), environment);
     const seen = new Set();
     result = catalog.models.flatMap(template => {
       const binding = templateBindings[template.slug];
@@ -257,7 +264,7 @@ async function loadSourceTemplates(state, environment, signal) {
     });
   } else {
     const catalog = createDeepseekTemplateCatalog(
-      JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8")), state.family);
+      readDeepseekModelTemplateCatalog(environment), state.family, environment);
     result = catalog.models.map(template => ({ source: "deepseek", model: template.slug, displayName: template.display_name,
       template: { ...template, max_context_window: template.max_context_window ?? template.context_window } }));
   }
@@ -271,6 +278,8 @@ function pruneSourceSnapshots() {
   const now = Date.now();
   for (const [token, snapshot] of sourceSnapshots) if (snapshot.expiresAt <= now) sourceSnapshots.delete(token);
 }
+
+function staleSource() { return invalid("template-source-expired", "sourceToken", "公共底座或源模板已变化，请重新加载模板并对比"); }
 
 function selectedFields(before, template, kind, sections) {
   const after = structuredClone(before);

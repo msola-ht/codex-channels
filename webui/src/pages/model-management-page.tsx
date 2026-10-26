@@ -8,12 +8,14 @@ import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-managemen
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { useOpenAiModelCatalog } from "@/hooks/use-openai-model-catalog"
+import { useBaseModelManagement } from "@/hooks/use-base-model-management"
 import { useProviderModelCatalogs } from "@/hooks/use-provider-model-catalogs"
 import { ModelDisplayGroups } from "@/components/settings/model-display-groups"
 import { useTranslation } from "@/hooks/use-translation"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { fetchManagementProviders, fetchSettingsSummary } from "@/lib/api"
 import { OpenAiModelCatalogCard } from "@/components/settings/openai-model-catalog-card"
+import { BaseModelCard } from "@/components/settings/base-model-card"
 import { ModelCatalogTable } from "@/components/settings/model-catalog-columns"
 import { ProviderSettingsManagement } from "@/components/settings/provider-settings-management"
 import { ProviderModelCatalogs } from "@/components/settings/provider-model-catalogs"
@@ -30,6 +32,7 @@ import { SettingsPageFrame } from "@/components/settings/settings-page-frame"
 import { SettingsNavigationGuard } from "@/components/settings/settings-navigation-guard"
 import { SettingsCliCommands } from "@/components/settings/settings-cli-commands"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog"
 
 
 export function ProvidersPage() {
@@ -74,6 +77,9 @@ export function ModelConfigurationPage() {
   const [providerEditing, setProviderEditing] = useState(false)
   const [groupsEditing, setGroupsEditing] = useState(false)
   const catalog = useOpenAiModelCatalog()
+  const base = useBaseModelManagement()
+  const [baseOpen, setBaseOpen] = useState(false)
+  const reloadBase = base.refetch
   const reloadCatalog = catalog.refresh
   const codex = useCodexSettingsManagement()
   const providers = useProviderSettingsManagement()
@@ -86,15 +92,23 @@ export function ModelConfigurationPage() {
   useEffect(() => { if (channelSaved) resetChannelDraft() }, [channelSaved, resetChannelDraft])
   const reloadCodex = codex.refetch, reloadProviders = providers.refetch, reloadGateway = gateway.refetch
   const reloadLocalCatalogs = localCatalogs.refetch
-  const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog(); reloadLocalCatalogs() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog, reloadLocalCatalogs])
-  const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
+  const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog(); reloadLocalCatalogs(); reloadBase() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog, reloadLocalCatalogs, reloadBase])
+  const otherBusy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
+  const busy = otherBusy || base.busy || base.pendingPreview !== null
   const codexSettings = !codex.loading && codex.error === null && !codex.readbackRequired ? codex.codexSettings : null
   const defaultModel = codexSettings?.models.find(model => model.model === codexSettings.defaults.configuredModel)
   const localOnly = providers.settings === null || providers.error !== null || !localCatalogs.matchesManagement
   const providerCatalogs = localOnly ? localCatalogs.data?.catalogs ?? [] : providers.settings?.modelCatalogs ?? []
   const selectedCatalogIds = new Set(providerCatalogs.filter(item => item.providers.includes(selectedProvider ?? "")).map(item => `provider:${item.provider}`))
-  return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy || localCatalogs.loading || providerEditing || groupsEditing || channelEditing} refresh={refresh}>
-    <SettingsNavigationGuard editing={providerEditing || groupsEditing || catalog.draft !== null || channelEditing} locked={providers.busy || providers.pendingPreview !== null || catalog.busy || catalog.pendingPreview !== null || gateway.saving || gateway.pendingSetting !== null} />
+  return <SettingsPageFrame title="modelManagement.models" busy={baseOpen || busy || base.loading || catalog.pageBusy || localCatalogs.loading || providerEditing || groupsEditing || channelEditing} refresh={refresh} actions={
+    <Dialog open={baseOpen} onOpenChange={open => { if (!base.busy && base.pendingPreview === null) setBaseOpen(open) }}>
+      <DialogTrigger render={<Button variant="outline" disabled={otherBusy || catalog.pageBusy || providerEditing || groupsEditing || channelEditing} />}>{t("baseModel.title")}</DialogTrigger>
+      <DialogContent closeLabel={t("common.close")} showCloseButton={!base.busy && base.pendingPreview === null} className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+        <BaseModelCard management={base} disabled={otherBusy || catalog.pageBusy || providerEditing || groupsEditing || channelEditing} />
+      </DialogContent>
+    </Dialog>
+  }>
+    <SettingsNavigationGuard editing={providerEditing || groupsEditing || catalog.draft !== null || channelEditing} locked={providers.busy || providers.pendingPreview !== null || catalog.busy || catalog.pendingPreview !== null || gateway.saving || gateway.pendingSetting !== null || base.busy || base.pendingPreview !== null} />
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="text-sm font-medium">{t("settingsFields.primaryDefaults")}</span>
