@@ -293,9 +293,8 @@ function parseImages(value: unknown): QqInboundImage[] | Rejection {
   let metadataBytes = 0;
   for (const attachment of value as unknown[]) {
     if (!record(attachment)) return reject("malformed", "attachments", "invalid-type");
-    if (Object.keys(attachment).some(key => !["url", "filename", "size", "content_type", "width", "height"].includes(key))) {
-      return reject("unsupported", "attachments", "unsupported-attachment-fields");
-    }
+    // QQ may add attachment metadata. Only the validated image projection is
+    // consumed; unrelated fields neither reject the message nor cross this boundary.
     const contentType = attachment.content_type;
     if (typeof contentType !== "string") return reject("malformed", "attachments", "invalid-type");
     if (contentType !== "image/jpeg" && contentType !== "image/png" && contentType !== "image/gif") {
@@ -303,7 +302,7 @@ function parseImages(value: unknown): QqInboundImage[] | Rejection {
     }
     const metadata = parseAttachmentMetadata(attachment, MAX_IMAGE_BYTES);
     if ("kind" in metadata) return metadata;
-    metadataBytes += Buffer.byteLength(JSON.stringify(attachment));
+    metadataBytes += Buffer.byteLength(JSON.stringify({ ...metadata, contentType }));
     if (metadataBytes > MAX_IMAGE_METADATA_BYTES) return reject("too-large", "attachments", "limit-exceeded");
     images.push({ ...metadata, contentType });
   }
