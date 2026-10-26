@@ -1,5 +1,6 @@
 import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
 import { SnapshotDelivery } from "../snapshot-delivery.js";
+import { waitForCompletionNotice } from "../completion-notice-delay.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import type { Logger } from "pino";
@@ -244,12 +245,15 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     this.delivery.enqueue(
       event.target.conversationId,
-      (signal) => this.sendEvent(
-        event,
-        rendered,
-        signal,
-        this.contexts.get(event.target),
-      ),
+      async (signal) => {
+        if (event.type === "turn.completed") await waitForCompletionNotice(signal);
+        await this.sendEvent(
+          event,
+          rendered,
+          signal,
+          this.contexts.get(event.target),
+        );
+      },
       decision.critical,
     );
   }

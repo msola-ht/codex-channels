@@ -1,4 +1,5 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
+import { waitForCompletionNotice } from "../completion-notice-delay.js";
 import type { SurfaceMessageDisplaySettings } from "../types.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { shouldHideCommentary, shouldHideRoutineNotification, shouldPreviewTextDelta, surfaceOutputSnapshotKey } from "../delivery-policy.js";
@@ -808,6 +809,7 @@ export class TelegramOutbox {
             throw error;
           }
         }
+        if (visible) await waitForCompletionNotice(signal);
         if (visible) await this.sendPanel(chatId, renderTelegramLifecyclePresentation(
           createTurnCompletedPresentation(event, this.displaySettings(chatId).presentationDetail, mode),
         ), this.replyTargets.get(chatId, turnKey), shouldHideTurnCompleted(event, "off"), signal);

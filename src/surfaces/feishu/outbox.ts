@@ -1,4 +1,5 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
+import { waitForCompletionNotice } from "../completion-notice-delay.js";
 import type { SurfaceMessageDisplaySettings } from "../types.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { shouldHideCommentary, shouldHideRoutineNotification, shouldPreviewTextDelta, surfaceOutputSnapshotKey } from "../delivery-policy.js";
@@ -1017,6 +1018,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const accepted = this.delivery.enqueue(chatId, async signal => {
       const failed = await streamsDone;
       const warning = "**投递状态：本轮部分输出未确认，请核对正文。**";
+      if (completion !== null) await waitForCompletionNotice(signal);
       if (completion !== null || failed) await this.sendMarkdown(chatId,
         completion === null ? warning : failed ? `${completion}\n\n${warning}` : completion,
         maximumFeishuMessageChunks, undefined, undefined, signal);

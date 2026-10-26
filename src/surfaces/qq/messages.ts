@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { waitForCompletionNotice } from "../completion-notice-delay.js";
 import type { ChannelFileMediaType } from "../bounded-local-file.js";
 import type { Logger } from "pino";
 import type { InteractionRequest } from "../../approval/index.js";
@@ -430,6 +431,18 @@ export class QqMessages implements SurfaceOutputPort {
           return;
         }
         if (result.kind === "continue") { text = result.text; representation = "continuation"; }
+      }
+      if (event.type === "turn.completed") {
+        // Ordered delivery has settled preceding bodies, but QQ's HTTP ACK is
+        // not a client-render acknowledgement. Give the final bubble time to
+        // display without adding another per-Turn state or delaying the body.
+        const waiting = AbortSignal.any([signal, this.lifetime.signal]);
+        try {
+          waiting.throwIfAborted();
+          if (authorized() !== true) throw new Error("QQ 完成通知来源已失效");
+          await waitForCompletionNotice(waiting);
+        }
+        catch (error) { throw new SurfaceDeliveryNotSentError({ cause: error }); }
       }
       // Preselect one complete representation; streams stop at raw block boundaries.
       await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId), content: text }, {
