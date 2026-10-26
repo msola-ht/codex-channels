@@ -349,7 +349,7 @@ export interface HookCompletion {
 export type OutputEvent =
   | { type: "hook.completed"; target: ConversationTarget; threadId: string; hook: HookCompletion; background?: boolean }
   | { type: "autoApprovalReview.updated"; target: ConversationTarget; threadId: string; turnId: string; sourceThreadId: string; sourceTurnId: string; reviewId: string; phase: "started" | "completed"; status: "inProgress" | "approved" | "denied" | "timedOut" | "aborted"; details?: AutoApprovalReviewDetails; background?: boolean }
-  | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; approvalsReviewer?: ThreadApprovalsReviewer | null; identity?: TurnStartIdentity; background?: boolean }
+  | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; approvalsReviewer?: ThreadApprovalsReviewer | null; identity?: TurnStartIdentity; workspaceId?: string; workspaceName?: string; gitBranch?: string; background?: boolean }
   | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; background?: boolean }
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }

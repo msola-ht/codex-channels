@@ -136,7 +136,7 @@ Outbox 的完成通知消费目标 `completion` 设置；成功隐藏时沿原�
 - `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、Git 分支、权限、用量、缓存命中率、
   上下文压缩总次数和状态文本；可复用语义委托给 Surface 共享格式器，账户、额度与 MCP 运行状态
   由 `runtime-status-format.ts` 提供；上线通知复用 Surface 共享生命周期字段并把结构化字段渲染为
-  紧凑项目符号列表，`/status` 与 Turn 结束统计均显示当前 Workspace Git 分支。
+  紧凑项目符号列表，上线与 Turn 结束统计在所有呈现档位显示工作区和 Git 分支；状态命令在 `/status detail` 显示分支。
 - `file-download.ts`：统一通过 Bot API 定位文件，并执行支持 HTTPS 代理、超时和状态校验的下载；
   图片与文本文件复用该传输边界，各自保留大小、内容和错误语义校验。
 - `image-store.ts`：安全获取 Telegram 下载地址和下载流；大小、内容签名、私有暂存与过期清理

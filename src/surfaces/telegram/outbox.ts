@@ -386,6 +386,7 @@ export class TelegramOutbox {
                   event.background ? event.threadId : undefined,
                   event.identity,
                   event.approvalsReviewer,
+                  event,
                 ),
               ),
               this.replyTargets.get(chatId, this.turnKey(event.threadId, event.turnId)),

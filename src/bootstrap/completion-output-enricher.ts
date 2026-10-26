@@ -59,7 +59,7 @@ export class CompletionOutputEnricher {
 
   constructor(
     private readonly logger: Logger,
-    private readonly currentGitBranch: ((target: OutputEvent["target"], signal: AbortSignal) => Promise<string | undefined>) | undefined,
+    private readonly currentGitBranch: ((target: OutputEvent["target"], signal: AbortSignal, workspaceId?: string) => Promise<string | undefined>) | undefined,
     private readonly options: CompletionOutputEnricherOptions,
   ) {}
 
@@ -83,6 +83,10 @@ export class CompletionOutputEnricher {
     const signal = callerSignal ? AbortSignal.any([callerSignal, this.queriesAbort.signal]) : this.queriesAbort.signal;
     if (event.type === "subagent.spawned" || event.type === "subagent.contacted") {
       return this.readSubagentMetadata(event, signal);
+    }
+    if (event.type === "turn.started") {
+      const gitBranch = await this.readGitBranch(event, Date.now() + completionEnrichmentTimeoutMs, signal);
+      return { ...event, ...(gitBranch ? { gitBranch } : {}) };
     }
     if (event.type !== "turn.completed") {
       return event;
@@ -173,7 +177,7 @@ export class CompletionOutputEnricher {
   }
 
   private async readGitBranch(
-    event: Extract<OutputEvent, { type: "turn.completed" }>,
+    event: Extract<OutputEvent, { type: "turn.started" | "turn.completed" }>,
     deadlineAtMs: number,
     callerSignal: AbortSignal,
   ): Promise<string | undefined> {
@@ -187,13 +191,13 @@ export class CompletionOutputEnricher {
     });
     try {
       const branch = await withDeadline(
-        Promise.race([this.currentGitBranch(event.target, signal), cancelled]),
+        Promise.race([this.currentGitBranch(event.target, signal, event.workspaceId), cancelled]),
         Math.max(0, deadlineAtMs - Date.now()),
         () => { deadline.abort(); return undefined; },
       );
       return signal.aborted ? undefined : branch;
     } catch {
-      this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡 Git 分支读取失败");
+      this.logger.warn({ threadId: event.threadId, turnId: event.turnId, eventType: event.type }, "任务通知 Git 分支读取失败");
       return undefined;
     } finally {
       signal.removeEventListener("abort", cancel);

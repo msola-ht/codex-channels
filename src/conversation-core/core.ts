@@ -133,6 +133,7 @@ export class ConversationCore {
       this.artifactsByThread.set(threadId, { threadId, turnId });
     }
     this.activeByThread.set(threadId, { target, threadId, turnId });
+    const workspace = this.router.workspaceForThread?.(threadId);
     this.publish({
       type: "turn.started",
       target,
@@ -140,6 +141,7 @@ export class ConversationCore {
       turnId,
       approvalsReviewer: this.router.modelSettingsForThread(threadId)?.approvalsReviewer ?? null,
       ...(identity ? { identity } : {}),
+      ...(workspace ? { workspaceId: workspace.id, workspaceName: workspace.name } : {}),
       ...(this.isBackgroundThread(threadId) ? { background: true } : {}),
     });
   }

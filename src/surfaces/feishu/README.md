@@ -107,8 +107,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `oauth.ts`：按 App 与 Actor 协调单一进行中授权、身份匹配、凭据写入、撤销和停止取消。
   关闭最多等待 5 秒，仍保留未结算凭据作业的归属；同 App 重建期间凭据入口以 `oauth.closing` 拒绝，旧刷新成功轮换仍保存，直到旧作业实际结束。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
-  映射为稳定文本内容；CLI/TUI 输入使用共享“CLI 输入”语义，启动通知、`/status` 与
-  `turn.completed` 结束统计均包含当前 Workspace Git 分支；Turn Diff 用围栏展示，内容自带
+  映射为稳定文本内容；CLI/TUI 输入使用共享“CLI 输入”语义，启动通知与
+  `turn.completed` 结束统计在所有呈现档位显示工作区和 Git 分支，状态命令在 `/status detail` 显示分支；Turn Diff 用围栏展示，内容自带
   围栏时自动加长标记，因此不进入命令装饰层。
 - `message-error.ts`：Client 与 Outbox 共用的结构化消息错误合同，不依赖 SDK；Client 保留原错误类及类型导出。
 - `text-streams.ts`：独占按 Conversation、Thread、Turn 隔离的正文活动流、刷新计时器、卡片序号、分卡与正文终态；共用 Outbox 已绑定关闭信号的消息端口、投递队列和降级发送方法。正文终态失败或取消后释放活动流，不重播正文；Turn 收尾只结算剩余正文流，不缓存已完成正文或追加完成页脚。
