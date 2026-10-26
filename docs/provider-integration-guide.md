@@ -19,7 +19,7 @@ CLI 模型操作按添加、编辑、默认设置、模板更新、诊断和移�
 - CCG、OCG、CLP、已注册的 OLC 和自定义目录提供商共用按 ID 新增入口：选择独立填写或继承同一目录中的模型，预览后保存。独立填写使用通用编程提示词，逐项声明上下文、思考、图片及工具能力；继承复制保存快照，不复制凭据或模板关联。其他模型不从官方列表自动发现。
 - CCG/OCG 保留 DS 模板导入，CLP 使用仓库 DS 模板生成固定映射，均只追加明确选择的条目。DeepSeek 原生目录仍按其既有流程管理，暂不开放单模型移除；官方共享目录继续使用原有合同。
 - OLC 的公开发现只提供尚未验证的候选，不自动启用。已配置账户可在 CLI/Setup 或 WebUI 选择具体账户、一个准确候选及包含来源默认值的思考等级，另行确认可能收费的验证；每级两个 SSE Responses 请求验证普通函数与配对模拟结果续答，来源默认等级另加两轮 JSON，共最多 16 次、每次 768 输出 Token/128 KiB、总期限 90 秒含前后来源复核，无重试。SSE 必须实际交付与终态一致的 `output_item.done` 和文本增量，不以 JSON 快照替代原生流式证据。通过后仍需统一新增预览及确认保存；图片、freeform、搜索关闭，窗口为元数据与本地 393216 上限，不宣称思考质量或长上下文已经验证。发现与验证令牌均绑定精确账户、来源和本地修订；每次提交及保存前复核凭据与目录。首次账户仍手动创建，后续才有可供验证的已配置材料。
-- OLC 按 ID 新增须明确声明有效思考等级与默认值、文本及窗口，模型 ID 原样保留 `:tag`；独立填写和继承均不代表上游能力已验证。freeform 文件编辑可明确声明 `freeform` 或 `null`，CLI、Setup、WebUI 首次目录和独立新增共用此合同；继承只复制当前值，不自动启用旧目录。客户端 `tool_search` 和原生 `web_search` 声明仍不开放；本地时钟和异步提问工具保留。已有 OLC 目录支持账户默认模型、共享思考等级和窗口调整及预览后本地移除。自动新增的有界 `modelDiscovery` 来源记录与 `modelTemplates` 分开，保留逐模型 ID、元数据摘要/指纹、时间、本地窗口策略及验证范围；移除仅裁剪目标来源记录。旧 manifest 仍可读，不迁移或补写旧模型。两条 HTTP 出口共用请求级 custom 表示适配，真实 Ollama 推理仍需独立验收，详见[接入记录](ollama-cloud-probe.md#freeform-工具适配要求)。
+- OLC 按 ID 新增须明确声明有效思考等级与默认值、文本及窗口，模型 ID 原样保留 `:tag`；独立填写和继承均不代表上游能力已验证。freeform 文件编辑可明确声明 `freeform` 或 `null`，CLI、Setup、WebUI 首次目录和独立新增共用此合同；继承只复制当前值，不自动启用旧目录。客户端 `tool_search` 和原生 `web_search` 声明仍不开放；本地时钟和异步提问工具保留。已有 OLC 目录支持账户默认模型、共享思考等级和窗口调整及预览后本地移除。自动新增的有界 `modelDiscovery` 来源记录与 `modelTemplates` 分开，保留逐模型 ID、元数据摘要/指纹、时间、本地窗口策略及验证范围；移除仅裁剪目标来源记录。旧 manifest 仍可读，不迁移或补写旧模型。两条 HTTP 出口共用请求级 custom 表示适配，真实 Ollama 推理仍需独立验收，详见[OLC freeform 合同](ollama-cloud.md#freeform-工具适配)。
 
 移除先预览再确认，保护所有共用该目录账户的默认模型、最后一个模型和当前主提供商的 Gateway 显式默认值。
 配置或目录变化后必须重新预览。旧接入编辑、启用选择和联网刷新不能通过取消旧项绕过移除流程；新增或曾移除模型需显式选择才加入。
@@ -119,7 +119,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 CLP 的 CLI 模型管理提供“本地编辑已有模型”：直接读取已保存配置，按设置组选项修改并预览差异，不下载模板。适用于固定映射之外按 ID 添加的模型。精确 ID、请求格式、来源关联、其他模型及未选字段保持不变；修改共享目录会影响同族账户，默认等级按已有规则同步切换 Profile。无变化或取消不写入，过期确认被拒绝；保存沿用受管目录备份与恢复。另有“编辑请求改写”入口（CLI 与 WebUI 模型操作均提供），只编辑模型级 `providerOptions` JSON；字段不设白名单，格式校验、合并规则、拒绝项和上游限制见 [CLP 请求改写](cline-pass.md#请求改写)。完整本地编辑目前由 CLI 提供，WebUI 继续使用已有名称、上下文、默认值和模板更新入口；模板更新仍须明确选择可用来源，不把本地编辑伪装成下载成功。
 
-- DS、CLP、OCG、CCG 分别在 `~/.codex-connect/providers/deepseek|clp|opencode-go|ccg/` 保存一份共用 `models.json`，不按账户拆分模型文件，schema 与现有目录一致：每个模型必须有
+- DS、CLP、OCG、CCG、OLC 分别在 `~/.codex-connect/providers/deepseek|clp|opencode-go|ccg|ollama-cloud/` 保存一份共用 `models.json`，不按账户拆分模型文件，schema 与现有目录一致：每个模型必须有
   `context_window`、非空 `supported_reasoning_levels`、合法 `default_reasoning_level`、
   `display_name` 与输入能力；`max_context_window` 存在时作为可设置窗口的上限，上下文窗口
   由模型管理按提供商和模型写入，同一提供商账户共用该值；`auto_compact_token_limit`
@@ -172,8 +172,8 @@ CP v5 使用可选定义字段 `experimentalSupportedTools` 保存本地工具�
 
 当前仅支持以下目录布局：
 
-- DS、CLP、CCG、OCG 各自在 `providers/deepseek|clp|ccg|opencode-go/models.json` 保存一份共用模型目录，manifest 和模型设置备份位于同目录。
-- 账户管理标记、安装备份及私有凭据位于家族下的完整账户 ID 目录，例如 `providers/clp/clp-main/`、`providers/deepseek/ds-main/`、`providers/ccg/ccg-main/` 和 `providers/opencode-go/ocg-main/`。
+- DS、CLP、CCG、OCG、OLC 各自在 `providers/deepseek|clp|ccg|opencode-go|ollama-cloud/models.json` 保存一份共用模型目录，manifest 和模型设置备份位于同目录。
+- 账户管理标记、安装备份及私有凭据位于家族下的完整账户 ID 目录，例如 `providers/clp/clp-main/`、`providers/deepseek/ds-main/`、`providers/ccg/ccg-main/`、`providers/opencode-go/ocg-main/` 和 `providers/ollama-cloud/olc-main/`。
 - 自定义 `cp-*` 各自表示不同提供商，使用 `providers/<cp-ID>/models.json`，不并入受管家族共用目录。
 
 旧 `providers/<家族>/accounts/<账户>/`、平级 `providers/<完整账户 Provider ID>/` 布局及旧目录引用不受支持。新版保留检测并拒绝加载，不迁移、合并或删除用户文件；即使模型已经共用，也不能沿用旧账户身份材料路径。当前版本不提供旧布局迁移入口，程序安装与更新不处理此类历史数据。
@@ -247,12 +247,12 @@ OCG/CCG 与自定义 `cp-*` 的普通代理及聚合下游均在发送前复核�
 
 ## 4. 安全边界
 
-DS、OCG、CCG 与 CLP 固定模式的主 `~/.codex/config.toml` 只保存带随机版本的 `env_key`，Key 位于
+DS、OCG、CCG、CLP 与 OLC 固定模式的主 `~/.codex/config.toml` 只保存带随机版本的 `env_key`，Key 位于
 `~/.codex-connect/providers/<家族>/<provider-id>/primary-credentials/<版本>.json`。
 JSON 使用版本 1，字段限于 `schemaVersion`、`providerId`、`origin`、`apiKey`，私有读取严格核对版本、Provider 和固定上游 Origin；
 Unix 文件/目录分别为 `0600`/`0700`，Windows 使用私有 ACL，主配置可供 Codex 沙盒读取且不包含 Key。
 每次明确重配先写新私有版本，再通过官方用户层 `config/read` 和带 `expectedVersion` 的 `config/batchWrite` 发布主配置引用。
-DS、CLP、CCG 与 OCG 的新增、重配、模式转换和删除共用该字段写入边界；只编辑本次计划中实际变化的字段，保留未选字段及其他账户，不用旧快照全文件替换主配置。
+DS、CLP、CCG、OCG 与 OLC 的新增、重配、模式转换和删除共用该字段写入边界；只编辑本次计划中实际变化的字段，保留未选字段及其他账户，不用旧快照全文件替换主配置。
 官方用户层读取会将路径字段规范化；事务在读取前后复核磁盘原始字节，以取得对应版本，不把规范化后的对象与原始 TOML 全量比较。写后回读同样复核字节稳定性，并按实际磁盘字段确认本次变更。未选路径保持原文；本次变更涉及 `model_catalog_json` 时按配置目录或其用户主目录语义解析为绝对路径后提交，以满足官方写入校验，恢复时仍指向原目录文件。
 旧版本与现有初始备份、归档保留，避免旧引用失效；这不是跨主配置与私有文件的原子事务。
 写入响应丢失先回读；已确认字段保存则继续，无法确认或结果不一致时保留私有文件、凭据及备份，不自动重放或恢复备份。
@@ -371,7 +371,7 @@ Provider 分别提示重新登录、改选第三方或更新对应凭据。
 普通消息及 Goal 查询/设置/清除、Review、Compact、Fork 的自动建会话入口均遵循该规则，
 先执行这些命令不会把后续消息绑定回未登录的官方 Provider。
 多个第三方 Provider 可选时不按目录顺序决定默认值；仅当全部已配置切换实例都属于同一家 DS、OCG、
-CCG 或 CLP 时使用该家注册表标记的默认账户，混合其他 Provider 时先通过 `/model` 选择提供商和模型，再发送消息；
+CCG、CLP 或 OLC 时使用该家注册表标记的默认账户，混合其他 Provider 时先通过 `/model` 选择提供商和模型，再发送消息；
 选择在当前 Conversation 中沿用。官方不可用时，Gateway 的官方 `codex.default_model` 不阻断第三方选择。
 已有 Thread 保留自身 Provider，不因官方退出登录而自动迁移。
 同一 Provider 内选模型只标记模型待生效；只有实际离开旧 Provider 的 Thread 才提示创建新 Session，
@@ -488,7 +488,7 @@ WebUI `#/models/providers` 的行内“操作 → 提供商联网搜索”为选
 OpenAI 官方账户和使用主配置的固定提供商读取 `config.toml` 的全局 `web_search`，在全局设置中修改，
 不在提供商卡片中提供另一份覆盖。
 
-OLC 的托管网页搜索适配仅支持 `live`，使用请求所选账户的 Ollama 搜索额度。`cached`、`indexed` 或跟随全局后得到的未支持模式不会自动降级为实时；请求中的不支持控制在模型出站前拒绝。`disabled` 不声明搜索工具。此策略按精确账户 Profile 保存，与同族共享模型目录的客户端 `tool_search` 能力无关；独立 Relay 按其 API 请求中的工具声明处理，不读取 App Server 的全局搜索偏好。配置保存不执行搜索，也不证明账户搜索权限或真实云端往返已验收。
+OLC 的托管网页搜索适配仅支持 `live`，使用请求所选账户的 Ollama 搜索额度。`cached`、`indexed` 或跟随全局后得到的未支持模式不会自动降级为实时；请求中的不支持控制在模型出站前拒绝。`disabled` 不声明搜索工具。切换模式的覆盖按精确账户 Profile 保存，固定模式读取主配置的全局值；两者均与同族共享模型目录的客户端 `tool_search` 能力无关。独立 Relay 按其 API 请求中的工具声明处理，不读取 App Server 的全局搜索偏好。配置保存不执行搜索，也不证明账户搜索权限或真实云端往返已验收。
 
 搜索值直接保存在对应提供商 config 的顶层，例如 `$CODEX_HOME/sf-clp-main.config.toml`：
 

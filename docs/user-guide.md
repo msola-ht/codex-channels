@@ -237,11 +237,11 @@ Windows 显式配置不接受依赖当前盘符或盘内工作目录的路径（
 
 权限设置的保存范围跟随入口：`codexc config → Codex 新会话与用户偏好 → 沙盒、审批与网络` 会逐项询问并确认完整组合；WebUI 的三个独立控件只保存各自修改项，其他未配置权限继续继承默认值。两端共用修订检查与写入规则，启用 Permission Profile 时不能从这些控件改写传统 Sandbox 设置。
 
-命令只接受当前入口：Provider 管理集中为 `codexc provider`，受管账户使用 `provider deepseek`、`provider opencode-go`、`provider ccg`；各家的可用操作以子命令帮助为准。OpenCode Go 的 `release` 只释放实例，后续请求可重新拉起，不禁用账户。会话归档、转储删除与指标维护集中为 `cleanup sessions`、`cleanup traffic`、`cleanup metrics`（含 `prune`、`reset`）。旧独立 Provider 命令、`sessions`、原领域下的清理命令、`setup --json` 和 `config --json` 均被移除，没有兼容别名。脚本读取配置路径使用 `config paths --json`；诊断使用 `doctor --json`。
+命令只接受当前入口：Provider 管理集中为 `codexc provider`，受管账户使用 `provider deepseek`、`provider opencode-go`、`provider ccg`、`provider ollama-cloud`；各家的可用操作以子命令帮助为准。OpenCode Go 的 `release` 只释放实例，后续请求可重新拉起，不禁用账户。会话归档、转储删除与指标维护集中为 `cleanup sessions`、`cleanup traffic`、`cleanup metrics`（含 `prune`、`reset`）。旧独立 Provider 命令、`sessions`、原领域下的清理命令、`setup --json` 和 `config --json` 均被移除，没有兼容别名。脚本读取配置路径使用 `config paths --json`；诊断使用 `doctor --json`。
 
 Setup 仅按具体操作返回的激活范围提示重启。列出账户、停止账户等操作不会因经过模型菜单而附加“重启全部服务”；需要重启的配置修改会返回对应服务目标，Setup 不自动执行重启。
 
-Ollama Cloud 正在分批接入。`codexc provider ollama-cloud setup` 或 Setup 第三方提供商菜单可添加、重配、设置默认和移除本地账户；也支持 `add <id>`、`reconfigure <id>`、`default <id>`、`remove <id>` 与 `list [--json]`，各入口支持 `-h` / `--help`。WebUI 提供同一账户事务。账户使用 `olc-<id>`、独立 Key、独立默认模型，所有 OLC 账户共用目录。新增账户必须明确选择准确模型；首次目录须手动填写模型 ID、窗口、思考等级、默认等级、图片与 freeform 能力，不从官方模型复制能力。首次写入会在确认中展示共享目录及模型定义；已有目录须通过统一模型管理编辑。freeform 默认关闭，可明确声明支持；客户端 tool_search 和原生 web_search 声明暂不开放。
+Ollama Cloud 已接入受管多账户，使用范围见 [Ollama Cloud](ollama-cloud.md)。`codexc provider ollama-cloud setup` 或 Setup 第三方提供商菜单可添加、重配、设置默认和移除本地账户；也支持 `add <id>`、`reconfigure <id>`、`default <id>`、`remove <id>` 与 `list [--json]`，各入口支持 `-h` / `--help`。WebUI 提供同一账户事务。账户使用 `olc-<id>`、独立 Key、独立默认模型，所有 OLC 账户共用目录。新增账户必须明确选择准确模型；首次目录须手动填写模型 ID、窗口、思考等级、默认等级、图片与 freeform 能力，不从官方模型复制能力。首次写入会在确认中展示共享目录及模型定义；已有目录须通过统一模型管理编辑。freeform 默认关闭，可明确声明支持；目录不声明客户端 tool_search 或上游原生 web_search 能力；托管 live 搜索须在联网搜索设置中单独启用。
 
 新增或更换 Key 的预览及保存会固定读取 `https://ollama.com/api/balance` 验证认证，不发送推理请求；旧计划缺少 USD 金额不等同于认证失败。无变化操作不请求网络、不写入、不要求重启。保存绑定预览修订，固定模式明确确认主配置字段修改，并复用版本化写入、私有凭据和备份；结果不确定时保留现场，不自动重试。仍有其他账户时，移除默认账户前须先选择其他默认账户；最后一个账户允许直接确认移除。移除只停止对应实例并提示该账户历史会话不可用，保留共享目录、私有备份和凭据历史，不迁移或修改已有 `cp-ollama`。
 
@@ -576,13 +576,13 @@ Codex 主配置的 `model_provider` / `model`；`switch` 与 `recover` 可用 `-
 
 Provider 新增、需要确认的受管账户删除与重配要求标准输入、标准输出均为终端；非交互调用会明确报错。`list`、默认账户设置和实例释放保留各自的脚本调用方式。
 受管账户进入固定模式会修改 Codex 主配置，从固定模式改为切换模式会恢复主配置；这两种操作都需要明确确认，保存时也会在管理锁内重新检查实际影响。
-模型管理按提供商展示一组模型。DS、CLP、CCG、OCG 分别共用 `providers/deepseek|clp|ccg|opencode-go/models.json`，账户标记、安装备份和固定凭据放在对应家族下的完整账户 ID 子目录，例如 `providers/clp/clp-main/` 和 `providers/deepseek/ds-main/`；自定义提供商各自使用 `providers/<cp-ID>/models.json`。同族账户共用模型窗口、思考等级、提示词和启用名单，修改单模型不影响其他模型或提供商；账户凭据、默认模型选择和会话仍独立。共享模型等级改变时相关 Profile 在同一事务中同步，移除保护所有账户的默认模型，删除账户不删除共用模型。当前版本拒绝旧账户布局及未完成的历史目录迁移；保留数据和标记，按[当前目录布局与旧版本恢复](provider-integration-guide.md#当前目录布局与旧版本恢复)使用对应旧版本处理，不提供当前版本迁移命令。
+模型管理按提供商展示一组模型。DS、CLP、CCG、OCG、OLC 分别共用 `providers/deepseek|clp|ccg|opencode-go|ollama-cloud/models.json`，账户标记、安装备份和固定凭据放在对应家族下的完整账户 ID 子目录，例如 `providers/clp/clp-main/` 和 `providers/deepseek/ds-main/`；自定义提供商各自使用 `providers/<cp-ID>/models.json`。同族账户共用模型窗口、思考等级、提示词和启用名单，修改单模型不影响其他模型或提供商；账户凭据、默认模型选择和会话仍独立。共享模型等级改变时相关 Profile 在同一事务中同步，移除保护所有账户的默认模型，删除账户不删除共用模型。当前版本拒绝旧账户布局及未完成的历史目录迁移；保留数据和标记，按[当前目录布局与旧版本恢复](provider-integration-guide.md#当前目录布局与旧版本恢复)使用对应旧版本处理，不提供当前版本迁移命令。
 
 添加账户时，Setup 与 WebUI 已有的多账户配置入口均提供 `main`（主账户）、`work`（工作账户）、`other`（其他账户）和“自定义”；已占用的预设不再显示。名称仅作账户 ID，不决定默认账户或自动切换行为。
 
-DS、OCG、CCG、CLP 的账户菜单统一提供“添加账户”“编辑账户”“模型管理”“设置默认账户”“移除本地账户配置”和“返回”；未配置账户时只显示添加与返回。模式在添加或编辑中选择，编辑目标不依赖默认账户。模型默认值、思考等级、窗口、添加和移除均从模型管理进入；DS 暂不支持单模型添加或移除，其他三家保留各自的添加来源。
+DS、OCG、CCG、CLP、OLC 的账户菜单统一提供“添加账户”“编辑账户”“模型管理”“设置默认账户”“移除本地账户配置”和“返回”；未配置账户时只显示添加与返回。模式在添加或编辑中选择，编辑目标不依赖默认账户。模型默认值、思考等级、窗口、添加和移除均从模型管理进入；DS 暂不支持单模型添加或移除，其他家族保留各自的添加来源。
 
-编辑时 Key 留空保留当前凭据，当前模式预选；保存前展示目标账户、前后模式及 Key 的保留或替换，确认后保存，无变化不写入、不备份、不提示重启。账户默认模型已不在目录中时先到模型管理修复，不自动换模型。Setup 与已有的 DS、OCG、CLP WebUI 账户入口共用这些语义；CCG 账户仍在 Setup 管理。OCG 新增无需邮箱或手机号，已有联系方式保留。直接编辑使用 `codexc provider opencode-go reconfigure <id>` 或 `codexc provider deepseek reconfigure <id>`，原有列表和实例释放命令继续保留。
+编辑时 Key 留空保留当前凭据，当前模式预选；保存前展示目标账户、前后模式及 Key 的保留或替换，确认后保存，无变化不写入、不备份、不提示重启。账户默认模型已不在目录中时先到模型管理修复，不自动换模型。Setup 与已有的 DS、OCG、CLP、OLC WebUI 账户入口共用这些语义；CCG 账户仍在 Setup 管理。OCG 新增无需邮箱或手机号，已有联系方式保留。直接编辑使用 `codexc provider opencode-go reconfigure <id>` 或 `codexc provider deepseek reconfigure <id>`，原有列表和实例释放命令继续保留。
 
 DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSeek 使用说明`](deepseek.md)、[`OpenCode Go 使用说明`](opencode-go.md)、[`Provider 接入指南`](provider-integration-guide.md) 和 [`OpenCode Go 多账户`](opencode-go-multi-account.md)。
 
@@ -611,7 +611,7 @@ codexc remote --profile personal
 直接使用原生 `codex --remote` 不会读取 Gateway Workspace 注册表。
 
 `codexc remote` 与 `codexc app` 的 `-p` / `--provider` 使用同一选择规则：接受已配置的完整
-Provider ID（如 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`cp-llm`、`my-provider`），或注册表中精确登记的
+Provider ID（如 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`olc-main`、`cp-llm`、`my-provider`），或注册表中精确登记的
 规范 `sf-*` Profile 名称（如 `sf-ds-main`、`sf-cp-llm`、`sf-custom-my-provider`）。自定义提供商使用 `cp-` 前缀，支持独立选择 Responses 或 Chat Completions；对应配置文件为 `sf-cp-<名称>.config.toml`。推荐使用完整 Provider ID；
 只匹配已登记的名称，不通过任意剥除 `sf-` 前缀推测目标。未配置、歧义或重复选择均明确拒绝。
 两个入口默认都连接主实例，不根据 OpenAI 登录状态自动选择第三方，也不沿用上次选择；
@@ -1351,6 +1351,7 @@ Responses 只提供同步无状态创建；`store` 可省略或传布尔值，�
 `background` 可省略或传布尔值，传入时统一设为 `false`，继续在当前请求内交付结果，不因 `true` 报错；省略时不补字段。
 官方 DS 的 `previous_response_id`、`conversation` 原样转发，由上游按其无状态合同忽略；客户端仍需在 `input` 中携带所需完整历史，引用不会恢复上下文。其他 Responses 提供商仍拒绝服务端会话引用：多个 Relay Key 可共享上游账户，当前没有响应/会话归属校验，不能通过引用读取共享账户历史。Relay 不提供响应管理端点。
 普通参数、工具声明和远程图片交由上游处理；Chat 保留原始响应字段与工具增量，客户端须等待有效终态后才执行工具。
+OLC 仅提供 Responses，按可信账户材料适配 freeform 和托管 live 网页搜索；搜索可在一次外部请求内执行有界模型续答，仍须独立 Relay Key 及精确模型授权。Relay 按请求声明决定搜索，不读取 App Server 的搜索偏好；不支持的 cached/indexed 或过滤控制会拒绝，不自动降级。详见 [Relay 请求与交付链路](provider-api-relay-development.md#请求与交付链路)及 [Ollama Cloud](ollama-cloud.md)。
 完整双协议、提供商接入与升级回滚合同见[转发设计与边界](provider-api-relay-development.md)。
 局域网交互设置：运行 `codexc relay listen`，或进入 `codexc config` → 服务访问 → 模型转发监听，选择关闭、仅本机、局域网（0.0.0.0）或指定内网 IP。确认后自动备份、原子保存并向运行中的 Relay 确认生效，保留 Key 和现有端口。若服务未运行，会提示启动命令，不自动安装或启动。配置被其他操作修改时拒绝覆盖，请重新进入菜单。
 

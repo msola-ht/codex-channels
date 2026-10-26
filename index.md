@@ -17,7 +17,7 @@
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
 - [`docs/cline-pass.md`](docs/cline-pass.md)：CLP 配置、Chat 转换边界与用量。
 - [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、账户模型目录、额度查询与固定/切换模式。
-- [`docs/ollama-cloud-probe.md`](docs/ollama-cloud-probe.md)：Ollama Cloud 原始探测快照、受管多账户完整接入步骤、统一管理对接及 freeform/网页搜索设计；分批实施中，尚未完整验收。
+- [`docs/ollama-cloud.md`](docs/ollama-cloud.md)：OLC 多账户、共享模型、逐模型验证、freeform、托管实时搜索及数据恢复合同。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
@@ -64,6 +64,8 @@
 
 ## 验收与开放补证
 
+- [`docs/ollama-cloud-probe.md`](docs/ollama-cloud-probe.md)：OLC 分批提交、隔离路径与反例摘要，以及真实云端、平台和部署的开放验收。
+
 - [`docs/thread-execution-context-acceptance.md`](docs/thread-execution-context-acceptance.md)：Debian 修复审查、冷恢复与监管器补验、`19519cb6` 会话控制及真实 TG 投递证据，以及 macOS 完整 Gateway 恢复证据；记录阶段收尾并区分人工挑战、真实组件链路与开放边界。
 - [`docs/project-closeout-review.md`](docs/project-closeout-review.md)：五轮收尾审查与45项历史问题状态，以及 Thread 执行上下文后续关联收尾；保留各批次关闭条件及运行验证边界。
 - [`docs/project-closeout-remediation-plan.md`](docs/project-closeout-remediation-plan.md)：Astra 分批复审、26批历史修复、169文件分支审查及 M01–M04、L01–L07 记录；另登记 Thread 执行上下文已推送批次与 Debian/macOS 验收，历史交付限制和开放补证按批次区分。
@@ -80,6 +82,8 @@
 - [`docs/relay-codex-auth-development.md`](docs/relay-codex-auth-development.md)：Model Relay 复用本机 Codex 登录态的候选设计，尚未实施；保留 WSS、头部与授权等待决边界。
 
 ## 历史审查与研究记录
+
+- [`docs/archive/ollama-cloud-integration-2026-10-26.md`](docs/archive/ollama-cloud-integration-2026-10-26.md)：OLC 原始探测、方案 B 及八批实施/独立复审历史，代码交付截至 d6af229e。
 
 以下记录保留原基线、结论及未观察限制；其中的旧执行顺序不是当前开发流程，重新使用证据前须确认适用范围。
 

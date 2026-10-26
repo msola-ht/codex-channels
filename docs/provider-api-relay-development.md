@@ -16,6 +16,7 @@ Relay 是独立可选服务，提供原生 Chat Completions、Responses 的 HTTP
 | CLP | Chat | 共享受管账户的 API Key、模型目录与请求快照；模型授权由 Key 保存 |
 | DeepSeek | Chat / Responses | 受管账户的独立 API Key 与模型目录 |
 | OpenCode Go、CCG | Responses | 受管账户的独立 API Key 与模型目录 |
+| Ollama Cloud（OLC） | Responses | 精确 `olc-<账户>` 的独立 API Key 与家族共享模型目录；可信材料开启 freeform 和托管 live 搜索适配 |
 | 自定义主/切换提供商 | Responses | 已注册配置、可独立读取的 API Key 与有效模型目录 |
 
 官方 Codex OAuth 登录态尚未接入 Relay。[只读 Codex 登录转发](relay-codex-auth-development.md)
@@ -59,7 +60,7 @@ Relay 重启取消自身在途请求，不停止共享 App Server。
 3. 有界读取并验证正文，加入等待队列。
 4. 按同 Key FIFO、跨 Key 轮转取得全局执行许可及可选速率令牌；上传未结束的 Key 不阻塞其他 Key。
 5. 通过 Runtime 读取受信上游材料与网络目标；在异步准备后复核授权、revision、模型及取消状态，再按 Key 与模型覆盖策略处理思考字段。
-6. 最后一次复核与创建上游连接之间没有异步间隔；只发送一次，不跟随重定向或自动重试。
+6. 每次上游提交的最后一次复核与创建连接之间没有异步间隔，不跟随重定向或自动重试。普通转发发送一次；OLC 托管搜索可在同一外部请求内发起有界的搜索及模型续答，每次重新复核授权与材料。
 7. 按原生协议交付 JSON/SSE，分别记录上游模型终态与客户端交付结果。
 8. 释放许可并单次生成指标，放入有界发送器；客户端响应不等待指标 IPC 确认。
 
@@ -72,6 +73,9 @@ Relay 重启取消自身在途请求，不停止共享 App Server。
 模型列表返回 Key 授权列表与对应提供商当前目录的交集；不提供响应读取、取消或服务端会话管理端点。
 
 请求保留解析后的普通 JSON 字段和值，由上游判断模型参数、工具、图片与扩展内容。CLP 鉴权与精确模型匹配后读取共用目录的请求快照与可选 `cline_provider_options`：只有模型显式保存该对象时才递归合并到出站 `providerOptions`，数组、标量和 null 覆盖客户端值。未保存改写时保持原请求，不添加或覆盖 `gateway.only`。字段不设白名单，保存值原样发出；非对象容器由覆盖替换或保留，不在本地按字段拒绝。Flash 与标准快照都不再自动限定路由，JSON/SSE 一致，不取消限定重试；其他 Provider 不注入。历史云端探测及限制见[CLP 路由记录](cline-pass.md#上游路由限定探测)。
+
+OLC Responses 依据可信账户材料适配 custom/freeform 声明、选择及配对历史，JSON/SSE 响应按本次工具身份还原；不执行客户端工具，不开启 Chat、客户端 `tool_search` 或 Codex 私有输入归一化。请求显式声明受支持的 `web_search` 时，使用该账户 Key 调用固定 Ollama live 搜索接口并携带摘要续答，形成一个外部响应；不读取 App Server 的搜索偏好。cached/indexed、过滤等不支持控制在模型出站前拒绝，不自动降级。混合客户端调用只在内部配对 `not_executed`，历史搜索仅保留查询。搜索最多八模型轮、四次搜索、单搜索 45 秒、整次请求十分钟，每次搜索和续答都复核 Relay 租约、准确模型授权及材料。完整资源、失败及未验收边界见 [OLC 托管实时网页搜索](ollama-cloud.md#托管实时网页搜索)。
+
 Relay 不下载远程图片，不读取请求里的本机路径。具体本地边界如下：
 
 | 字段或条件 | 当前处理 |
@@ -84,7 +88,7 @@ Relay 不下载远程图片，不读取请求里的本机路径。具体本地�
 | Responses `store` | 省略或布尔值，出站统一为 `false`，不因 `true` 拒绝 |
 | Responses `background` | 省略或布尔值；传入时改为 `false`，省略时不补 |
 | Responses 历史引用 | 官方 DS 原样透传；其他提供商拒绝非 null 的 `previous_response_id`、`conversation` |
-| 正文预算 | 入站及处理后的请求受 1 MiB 上限约束；输入项不另设 256 条上限 |
+| 正文预算 | 入站及初次处理后的请求受 1 MiB 准入上限约束；OLC 搜索的逐轮实际包装正文和累计模型输入另受 4 MiB 限制；输入项不另设 256 条上限 |
 
 DS 历史引用由上游按其无状态合同忽略，客户端仍须携带完整上下文；其他提供商的引用可能
 读取共享账户历史，而 Relay 尚无响应/会话归属校验。提供商分支只来自鉴权绑定。
@@ -125,13 +129,13 @@ WebUI 的 `POST /api/v1/management/relay/reasoning-probe` 接受配置 revision�
 
 两协议共享 HTTP 状态、Content-Type 和 JSON 解码检查，非法 JSON 返回
 `invalid_upstream_json`。上游错误仅暴露受控分类，不返回未经约束的错误正文。
-Chat 保留原始扩展字段与工具增量；流式结束后允许附带用量、重复相同结束原因且 delta 仅含空 content / assistant role 的统计尾帧，仍须收到 `[DONE]`。结束后追加内容、工具或不同结束原因仍拒绝；Responses 保留原生事件和 completed/failed/incomplete 终态。
+Chat 保留原始扩展字段与工具增量；流式结束后允许附带用量、重复相同结束原因且 delta 仅含空 content / assistant role 的统计尾帧，仍须收到 `[DONE]`。结束后追加内容、工具或不同结束原因仍拒绝；普通 Responses 保留原生事件和 completed/failed/incomplete 终态，OLC freeform/搜索按上述适配合同还原工具及外部响应生命周期。
 终态前断流不得伪造成功；SSE 开始后用对应协议的失败事件结束，可写性丢失时只关闭并记录。
 客户端应在有效终态后执行工具，上游完成不等于客户端已收到全部输出。
 
 ## CLP 转发模型目录与设置
 
-CLP 与 CCG、OCG、DS 一样从受管提供商的共用模型目录提供 Relay 材料，不再下载独立 Cline 模型文件。模型管理中的“按 ID 添加”提供独立填写及继承已有模型，固定 DS 模型走内置映射。CLI、WebUI、渠道和 Relay 读取同一份保存结果；提供商行的“模型列表”只读展示调用 ID、输入格式和协议。
+CLP 与 CCG、OCG、DS、OLC 一样从受管提供商的共用模型目录提供 Relay 材料，不再下载独立 Cline 模型文件。模型管理中的“按 ID 添加”提供独立填写及继承已有模型，固定 DS 模型走内置映射。CLI、WebUI、渠道和 Relay 读取同一份保存结果；提供商行的“模型列表”只读展示调用 ID、输入格式和协议。
 
 `GET /v1/models` 只返回当前目录与该 Key 授权的交集。每把 Key 的 `models` 保存 1–256 个唯一的 `提供商ID/模型ID`，可跨提供商；新增目录模型不会自动授权。CLP 对外只去掉 `cline-pass/`，出站必须通过当前目录精确匹配还原 ID；其他提供商保留完整上游模型部分。映射重名拒绝调用，无别名、自动回退或协议转换。
 
@@ -165,7 +169,7 @@ CLI/WebUI 共用预览、确认、配置锁、revision、私有备份与原子�
 
 ## 指标、转储与管理诊断
 
-每次实际出站只生成一个模型请求样本，保留真实提供商、调用方、Key、凭据代次与请求 UUID；
+每个实际出站的外部请求只生成一个模型请求样本；OLC 托管搜索在该样本中累计实际模型轮的用量，缺失计数保持未知，多轮不提供生成速率，不把末轮金额当作总费用。保留真实提供商、调用方、Key、凭据代次与请求 UUID；
 Thread/Turn 为空，不伪造成 Codex 会话。指标发送有界且不重试；`accepted` 仅表示接收确认，
 不等于落盘，`unconfirmed` 也不能直接当作丢失。指标不能充当可靠账本。
 
@@ -176,6 +180,7 @@ Thread/Turn 为空，不伪造成 Codex 会话。指标发送有界且不重试�
 Relay 与 Codex 共用全局 debug 转储开关与 production/debug 模式。V2 转储使用
 `relay.chat` / `relay.responses` 标签，共用容量与待写预算；生产与调试模式均脱敏必要凭据，
 保留普通头及关联信息。调试模式可对照入站、出站和实际交付；历史版本自动补入或覆盖 CLP 路由时可能记录 `provider_routing_pinned`，读取器和中英文 WebUI 继续识别已有记录；当前版本仅应用模型显式保存的请求改写，不再生成该标记。非法、截断、未采集与未交付分别显示。
+OLC 搜索的每个实际模型轮独立采集，内部续答的查询、URL 和摘要可能随模型请求落盘；不建立 Gateway 会话缓存。模型 completed 与外部交付结果分开判断，搜索失败或随后交付失败不能据末轮 HTTP 200 视为成功，细分错误见[错误字典](errors.md#日志字段约定)。
 普通头可能包含业务数据，不承诺识别任意自定义编码秘密。详细采集口径见
 [WebUI 调用详情](webui.md)和[代理模块](../src/provider-proxy/README.md)。
 
