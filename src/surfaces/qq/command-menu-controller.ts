@@ -109,6 +109,16 @@ export class QqCommandMenuController {
 
   constructor(private readonly options: Options) {}
 
+  idleReleased(target: ConversationTarget, actorId: string, threadId: string): QqMenuPanel {
+    const context = this.context(target, actorId);
+    return this.panel(context, {
+      content: "点击下方按钮恢复此会话。",
+      keyboard: { content: { rows: [{ buttons: [
+        this.button(context, "恢复会话", { kind: "resume", id: threadId }),
+      ] }] } },
+    });
+  }
+
   clear(): void {
     this.selections.clear();
     for (const controller of this.revertScopes.values()) controller.abort();

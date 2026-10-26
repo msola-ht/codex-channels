@@ -349,9 +349,17 @@ export class QqMessages implements SurfaceOutputPort {
     if (content === null) return;
     const presentation = typeof content === "string" ? { text: content, markdown: content } : content;
     const recipient = qqConversationRecipient(event.target.conversationId);
+    // Capture the released conversation's menu scope before entering the send queue.
+    // The normal one-use selection path owns authorization and explicit resume.
+    if (!authorized()) throw new Error("QQ 通知授权失效");
+    const actorId = qqConversationActor(event.target.conversationId);
+    const menu = event.type === "conversation.idle.released" && actorId
+      ? this.menus.idleReleased(event.target, actorId, event.threadId) : undefined;
     await this.outbox.deliver({ mode: "active", recipient, content: presentation.text }, {
-      signal: AbortSignal.any([signal, this.lifetime.signal]), preferMarkdown: true, markdownContent: presentation.markdown,
-      beforeSend: () => { if (!authorized()) throw new Error("QQ 通知授权失效"); },
+      signal: AbortSignal.any([signal, this.lifetime.signal]),
+      ...(menu ? { interactionControls: { content: menu.content, keyboard: menu.keyboard, markdownContent: presentation.markdown } }
+        : { preferMarkdown: true, markdownContent: presentation.markdown }),
+      beforeSend: () => { if (!authorized() || (menu && !menu.isCurrent())) throw new Error("QQ 通知授权失效"); },
       reserve: parts => this.budget.reserve(recipient, parts, "interaction"),
     }, checkpoint);
   }
