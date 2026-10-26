@@ -36,6 +36,8 @@ export interface ScheduledTaskRunCoordinatorOptions {
   logger?: Logger;
   onRecovered?: (run: ScheduledRun, target: ConversationTarget) => void;
   releaseRecoveredThread: (threadId: string, isCurrent: () => boolean) => Promise<boolean>;
+  /** Suspended capabilities may settle Runs while retaining their stored bindings. */
+  canReleaseBinding?: (task: ScheduledTask) => boolean;
 }
 
 export interface ScheduledTaskRunValidation {
@@ -59,6 +61,7 @@ export class ScheduledTaskRunCoordinator {
   private readonly logger: Logger | undefined;
   private readonly onRecovered: ScheduledTaskRunCoordinatorOptions["onRecovered"];
   private readonly releaseRecoveredThread: ScheduledTaskRunCoordinatorOptions["releaseRecoveredThread"];
+  private readonly canReleaseBinding: ScheduledTaskRunCoordinatorOptions["canReleaseBinding"];
 
   constructor(
     private readonly store: ScheduledTaskStorePort,
@@ -73,6 +76,7 @@ export class ScheduledTaskRunCoordinator {
     this.logger = options.logger;
     this.onRecovered = options.onRecovered;
     this.releaseRecoveredThread = options.releaseRecoveredThread;
+    this.canReleaseBinding = options.canReleaseBinding;
   }
 
   async initialize(signal?: AbortSignal): Promise<void> {
@@ -332,10 +336,12 @@ export class ScheduledTaskRunCoordinator {
         if (signal?.aborted) return;
         if (!stillOwned()) continue;
         if (recovered && !liveCompletionObserved) this.onRecovered?.(recovered, binding);
-        await this.releaseRecoveredThread(reference.threadId, stillOwned).catch((error) => {
-          if (signal?.aborted) return;
-          this.logger?.warn({ err: error, threadId: reference.threadId }, "恢复计划任务后台绑定清理失败");
-        });
+        if (this.canReleaseBinding?.(task) !== false) {
+          await this.releaseRecoveredThread(reference.threadId, stillOwned).catch((error) => {
+            if (signal?.aborted) return;
+            this.logger?.warn({ err: error, threadId: reference.threadId }, "恢复计划任务后台绑定清理失败");
+          });
+        }
       } catch (error) {
         if (signal?.aborted) return;
         this.logger?.warn(
@@ -397,6 +403,7 @@ export class ScheduledTaskRunCoordinator {
     if (signal?.aborted) return true;
     await this.markFailedIfRunning(run.runId, validation.category, signal);
     if (signal?.aborted) return true;
+    if (this.canReleaseBinding?.(task) === false) return true;
     try {
       await this.router.releaseBackground(reference.threadId);
     } catch (error) {

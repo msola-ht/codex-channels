@@ -111,9 +111,11 @@ function renderMarkdownAsTelegramHtml(markdown: string): string {
 
 function formatInlineMarkdown(text: string): string {
   const protectedHtml: string[] = [];
+  let placeholderPrefix = "\uE000HTML";
+  while (text.includes(placeholderPrefix)) placeholderPrefix += "\uE002";
   const protect = (html: string): string => {
     const index = protectedHtml.push(html) - 1;
-    return `\uE000HTML${index}\uE001`;
+    return `${placeholderPrefix}${index}\uE001`;
   };
   const withCodePlaceholders = text.replace(/`([^`\n]+)`/g, (_match, content: string) => {
     const rendered = isBotCommand(content.trim())
@@ -151,7 +153,7 @@ function formatInlineMarkdown(text: string): string {
     .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<i>$1</i>")
     .replace(/(?<![_A-Za-z0-9])_([^_\n]+)_(?![_A-Za-z0-9])/g, "<i>$1</i>");
   return formatted.replace(
-    /\uE000HTML(\d+)\uE001/g,
+    new RegExp(`${placeholderPrefix}(\\d+)\uE001`, "g"),
     (_match, index: string) => protectedHtml[Number(index)] ?? "",
   );
 }

@@ -2,6 +2,9 @@
 
 本目录维护外部 Conversation、Workspace 与 Codex Thread 的前台绑定、后台绑定和订阅状态。
 
+订阅恢复开始先标记不可用，失败后保留该标记，生命周期响应成功才重新开放提交。
+`isSubscriptionReady` 供状态呈现区分已恢复设置与仅保留的绑定，不能用默认模型代替恢复失败或尚未取得的设置。
+
 模型设置中的 `serviceTier` 保留用户选择，`serviceTierKnown` 必须明确说明是否有选择证据；
 `effectiveServiceTier` 只保存生命周期响应确认的有效档位，缺省表示未知。0.164 的
 `get_service_tier`（`core/src/session/mod.rs`）只原样保留或丢弃选择，因此非空生命周期结果

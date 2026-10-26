@@ -1,5 +1,6 @@
 export { ConversationEventCoordinator } from "./conversation-event-coordinator.js";
 export type { HookAction, HookEntry, HookCatalog, HookConfigPort, HookCommandView, HookReviewPolicy } from "./hook-port.js";
+export { parseMcpOperation, parsePluginOperation } from "./conversation-command-parser.js";
 export {
   type AccountMetric,
   type AccountPlanType,
@@ -37,6 +38,7 @@ export {
 } from "./collaboration-mode-port.js";
 export {
   ConversationCommandService,
+  parseThreadRevertOperation,
   archivedSessionCommandUsageText,
   conversationCommandNames,
   isConversationCommandName,
@@ -50,6 +52,7 @@ export {
   type ConversationCommandExecutor,
   type ConversationCommandOutcome,
   type ConversationCommandResult,
+  type ConversationStatusDisplay,
   type ConversationCommandUseCases,
   type McpDetailView,
   type PluginListView,
@@ -101,6 +104,18 @@ export {
   type WorkspaceStatusPort,
 } from "./conversation-service.js";
 export { resolveThread } from "./conversation-session-query-service.js";
+export type { SubmissionObserver, SubmissionPreparation, SubmissionOutcome } from "./submission-observer.js";
+export { SubmissionObservation } from "./submission-observer.js";
+export { parseThreadQueueOperation } from "./conversation-command-parser.js";
+export { parseScheduledTaskOperation } from "./scheduled-task-command.js";
+export {
+  QueueSubmissionObservation,
+  type QueuePreparation,
+  type QueueSubmissionConfirmation,
+  type QueueSubmissionOutcome,
+  type ThreadQueueSubmissionObserver,
+  type ThreadQueueExecutionContext,
+} from "./thread-queue-observer.js";
 export { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 export {
   ModelSelectionService,
@@ -222,6 +237,7 @@ export {
 } from "./thread-history-port.js";
 export {
   type ThreadLockHolder,
+  type ThreadOccupancyIdentity,
   type ThreadOccupancyPort,
   type ThreadOccupancyReleaseResult,
 } from "./thread-occupancy-port.js";

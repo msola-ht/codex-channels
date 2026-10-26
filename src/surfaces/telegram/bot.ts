@@ -40,6 +40,7 @@ import {
 import { formatConversationScheduledConfirmation } from "../conversation-scheduled-task-command-format.js";
 import { formatConversationAutoReview } from "../conversation-workspace-status-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
+import { shouldHideRoutineConfiguration } from "../delivery-policy.js";
 import {
   formatOperationFailure,
   gatewayRequestFailedText,
@@ -128,14 +129,17 @@ export interface TelegramSurfaceOptions {
   videoDirectory?: string;
   finalMessageFormat?: TelegramFinalMessageFormat;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  displaySettings?: import("../types.js").SurfaceMessageDisplaySettings;
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
   codexUpstreamUserAgent?: () => string | undefined;
   officialOpenAiAuthenticated?: () => boolean | undefined;
   openAiConnectivity?: () => NonNullable<StartupRuntimeInfo["openAiConnectivity"]>;
+  startupPresentationDetail?: (chatId: number) => "basic" | "detailed" | "full";
+  startupDisplayPreset?: (chatId: number) => NonNullable<StartupRuntimeInfo["displayPreset"]>;
+  startupRoutineNotificationsEnabled?: (chatId: number) => boolean;
   inputQuietWindowMs?: number;
   now?: () => number;
-  debugEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -195,6 +199,7 @@ export class TelegramSurface {
   private readonly attachmentInputs = new AttachmentInputLifecycle();
   private readonly receivedAttachments = new WeakMap<object, ReceivedAttachmentInput>();
   private readonly receivedUpdates = new WeakSet<object>();
+  private readonly privateConversations = new Map<string, string>();
   private readonly attachmentStops = new WeakSet<object>();
   private readonly rejectedAttachmentStops = new WeakSet<object>();
   private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
@@ -211,9 +216,9 @@ export class TelegramSurface {
     actorId: string;
     expiresAt: number;
   } & AutoReviewSelectionScope>();
-  private readonly debugEnabled: boolean;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
+  private readonly notificationRoutineEnabled: TelegramSurfaceOptions["startupRoutineNotificationsEnabled"];
   private stopping = false;
   private stopPromise: Promise<void> | undefined;
 
@@ -266,8 +271,8 @@ export class TelegramSurface {
     });
     this.actorRegistry = options.actorRegistry;
     this.now = options.now ?? Date.now;
-    this.debugEnabled = options.debugEnabled ?? false;
     this.notificationRecipients = new Set(startupRecipients);
+    this.notificationRoutineEnabled = options.startupRoutineNotificationsEnabled;
     this.commands = options.commands;
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
     const apiExecutor = new TelegramApiExecutor(logger, (chatId, recipientNotification) => {
@@ -284,6 +289,7 @@ export class TelegramSurface {
         .some(actorId => this.access.isAllowed({ target: outputTarget, actorId }));
     });
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
+      ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
       ...(options.finalMessageFormat
         ? { finalMessageFormat: options.finalMessageFormat }
         : {}),
@@ -296,10 +302,6 @@ export class TelegramSurface {
       ...(options.reasoningEnabled !== undefined
         ? { reasoningEnabled: options.reasoningEnabled }
         : {}),
-      ...(options.autoCompactPercent === undefined
-        ? {}
-        : { autoCompactPercent: options.autoCompactPercent }),
-      debugEnabled: this.debugEnabled,
       deliverIdleReleased: (event, send) => this.deliverIdleReleased(event, send),
     });
     this.output = this.outbox;
@@ -356,7 +358,8 @@ export class TelegramSurface {
                 ...(options.openAiConnectivity
                   ? { openAiConnectivity: options.openAiConnectivity() }
                   : {}),
-                debugEnabled: this.debugEnabled,
+                presentationDetail: options.startupPresentationDetail?.(chatId) ?? "basic",
+                ...(options.startupDisplayPreset ? { displayPreset: options.startupDisplayPreset(chatId) } : {}),
               }),
             });
           }
@@ -372,8 +375,24 @@ export class TelegramSurface {
     this.registerHandlers();
   }
 
-  sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
-    return this.output.sendChannelImage(conversationId, imagePath);
+  sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
+    return this.output.sendChannelImage(conversationId, imagePath, isCurrent, signal);
+  }
+
+  isPrivateConversation(target: ConversationTarget): boolean {
+    return target.surface === this.surface && target.accountId === this.accountId
+      && this.privateConversations.has(target.conversationId);
+  }
+
+  private rememberPrivateConversation(target: ConversationTarget, actorId: string): void {
+    this.privateConversations.set(target.conversationId, actorId);
+    if (this.privateConversations.size > 4_096) {
+      this.privateConversations.delete(this.privateConversations.keys().next().value!);
+    }
+  }
+
+  sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean, mediaType?: import("../bounded-local-file.js").ChannelFileMediaType, signal?: AbortSignal): Promise<void> {
+    return this.output.sendChannelFile(conversationId, filePath, fileName, isCurrent, mediaType, signal);
   }
 
   private queryGuard(target: ConversationTarget, actorId: string): () => void {
@@ -460,6 +479,7 @@ export class TelegramSurface {
   private async stopOnce(): Promise<void> {
     const shutdown = new SurfaceShutdown();
     this.stopping = true;
+    this.privateConversations.clear();
     this.attachmentInputs.close();
     const videoClose = shutdown.run("videos", () => this.videoInput?.close());
     const lifecycleStop = shutdown.run("lifecycle", () => this.lifecycle.stop());
@@ -483,6 +503,10 @@ export class TelegramSurface {
   }
 
   revalidateAccess(): void {
+    for (const [conversationId, actorId] of this.privateConversations) {
+      const target = { surface: this.surface, accountId: this.accountId, conversationId };
+      if (!this.access.isAllowed({ target, actorId })) this.privateConversations.delete(conversationId);
+    }
     this.outbox.revalidateAccess();
   }
 
@@ -490,6 +514,7 @@ export class TelegramSurface {
     const replyMarkup = workspaceSwitchKeyboard(change.addedWorkspaces);
     const text = formatConfigurationChange(change);
     for (const chatId of this.notificationRecipients) {
+      if (shouldHideRoutineConfiguration(change, this.notificationRoutineEnabled?.(chatId) ?? true)) continue;
       this.outbox.notifyPanel(
         String(chatId),
         text,
@@ -519,7 +544,7 @@ export class TelegramSurface {
       replyTelegramPanel(
         context,
         [
-          "Codex Connect Gateway",
+          "## Codex Connect Gateway",
           "",
           "普通文本会发送到当前 Codex Session。",
           "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",
@@ -551,6 +576,11 @@ export class TelegramSurface {
     });
     this.bot.callbackQuery(/^(?:wp|ar):/, async (context) => {
       await context.answerCallbackQuery({ text: "工作区权限设置入口已停用，请使用原生 Codex 权限配置。" });
+    });
+    this.bot.callbackQuery(/^status:(overview|detail)$/, async context => {
+      await context.answerCallbackQuery({ text: "正在查询当前会话状态" });
+      const result = await this.commands.execute(target(context), "status", context.match[1] === "detail" ? "detail" : "", String(context.from.id));
+      await renderTelegramCommandResult(context, result);
     });
     this.bot.callbackQuery(/^idle:resume:([A-Za-z0-9_-]{24})$/, async (context) => {
       const token = context.match[1]!;
@@ -1517,12 +1547,13 @@ export class TelegramSurface {
   private receiveAttachmentUpdate(update: Context["update"]): (() => void) | undefined {
     this.receivedUpdates.add(update);
     const message = update.message;
-    if (!message?.from || this.stopping) return;
+    if (!message?.from || message.chat.type !== "private" || this.stopping) return;
     const inputTarget: ConversationTarget = {
       surface: "telegram", accountId: this.accountId, conversationId: String(message.chat.id),
     };
     const actorId = String(message.from.id);
     const allowed = () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId });
+    if (allowed()) this.rememberPrivateConversation(inputTarget, actorId);
     if (isTelegramEmergencyStopUpdate(update, this.bot)) {
       if (!allowed()) {
         this.rejectedAttachmentStops.add(update);
@@ -1544,6 +1575,11 @@ export class TelegramSurface {
 
   private async authorize(context: Context, next: () => Promise<void>): Promise<void> {
     if (this.stopping) return;
+    if (context.chat?.type !== "private") {
+      if (context.message) await context.reply("此 Gateway 仅支持 Telegram 私聊，请在与机器人的私聊中使用。");
+      else if (context.callbackQuery) await context.answerCallbackQuery({ text: "此 Gateway 仅支持 Telegram 私聊" });
+      return;
+    }
     if (isWhoAmICommand(context, this.bot.botInfo.username)) {
       await next();
       return;
@@ -1566,6 +1602,7 @@ export class TelegramSurface {
       ? this.outbox.beginTyping(String(context.chat.id))
       : undefined;
     try {
+      this.rememberPrivateConversation(accessContext.target, accessContext.actorId);
       this.actorRegistry?.rememberActor(accessContext.target, accessContext.actorId);
       await next();
     } catch (error) {

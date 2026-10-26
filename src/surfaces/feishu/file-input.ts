@@ -56,23 +56,35 @@ export interface FeishuFilePort {
     messageId: string,
     fileKey: string,
     fileName: string,
+    signal?: AbortSignal,
   ): Promise<FeishuTextFile>;
 }
 
 export class FeishuFileInput implements FeishuFilePort {
+  private readonly cancellation = new AbortController();
   constructor(private readonly resources: FeishuFileResourcePort, private readonly attachments?: TextAttachmentStore) {}
 
   async discard(file: FeishuTextFile): Promise<void> { await this.attachments?.discard(file); }
 
   async start(): Promise<void> { await this.attachments?.start(); }
-  async close(): Promise<void> { await this.attachments?.close(); }
+  async close(): Promise<void> {
+    this.cancellation.abort();
+    await this.attachments?.close();
+  }
 
   async download(
     messageId: string,
     fileKey: string,
     fileName: string,
+    inputSignal?: AbortSignal,
   ): Promise<FeishuTextFile> {
+    const signal = inputSignal === undefined ? this.cancellation.signal
+      : AbortSignal.any([inputSignal, this.cancellation.signal]);
+    let file: FeishuTextFile | undefined;
+    let stream: Readable | undefined;
+    const abort = () => stream?.destroy(new Error("飞书文本文件输入已取消"));
     try {
+      signal.throwIfAborted();
       if (
         !isSafeFeishuResourceIdentifier(messageId)
         || !isSafeFeishuResourceIdentifier(fileKey)
@@ -80,7 +92,11 @@ export class FeishuFileInput implements FeishuFilePort {
         throw new Error("invalid Feishu file resource identifier");
       }
       const normalizedName = validateFeishuFileName(fileName);
-      const resource = await this.resources.downloadFile(messageId, fileKey);
+      const resource = await this.resources.downloadFile(messageId, fileKey, signal);
+      stream = resource.stream;
+      stream.on("error", () => {});
+      signal.addEventListener("abort", abort, { once: true });
+      signal.throwIfAborted();
       if (
         resource.contentLength !== undefined
         && (
@@ -96,8 +112,12 @@ export class FeishuFileInput implements FeishuFilePort {
         throw tooLarge();
       }
       const content = await readBoundedTextFile(resource.stream);
-      return await prepareTextFile(content, normalizedName, this.attachments);
+      signal.throwIfAborted();
+      file = await prepareTextFile(content, normalizedName, this.attachments);
+      signal.throwIfAborted();
+      return file;
     } catch (error) {
+      if (file !== undefined) await this.discard(file);
       if (error instanceof UserFacingError) throw error;
       if (error instanceof FeishuFileInputError) {
         throw error;
@@ -110,6 +130,9 @@ export class FeishuFileInput implements FeishuFilePort {
         "download-failed",
         formatTextFileDownloadFailed("飞书"),
       );
+    } finally {
+      signal.removeEventListener("abort", abort);
+      stream?.destroy();
     }
   }
 }

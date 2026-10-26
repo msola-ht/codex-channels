@@ -10,26 +10,29 @@ import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-e
 export function formatConversationScheduledTasks(
   result: Extract<ConversationCommandResult, { kind: "scheduled-tasks" }>,
   selectionMode: "snapshot" | "id" = "snapshot",
+  interaction: "text" | "buttons" = "text",
+  formatLiteral: (value: string) => string = value => value,
 ): string {
   const { tasks, selectors, page, pageCount, totalTaskCount } = result.result;
   if (tasks.length === 0) {
     return toStructuredMarkdownList([
       "Gateway 计划任务为空",
       `第 ${page}/${pageCount} 页 · 共 ${totalTaskCount} 项`,
-      "新增：/schedule add interval <N>m|h <时区> <文本> · /schedule add once <YYYY-MM-DD> <HH:mm> <时区> <文本>",
+      interaction === "buttons" ? "点击填写计划需求，说明运行时间、时区与任务内容。"
+        : "新增：/schedule add interval <N>m|h <时区> <文本> · /schedule add once <YYYY-MM-DD> <HH:mm> <时区> <文本>",
     ].join("\n"));
   }
   return toStructuredMarkdownList([
     `Gateway 计划任务（第 ${page}/${pageCount} 页 · 共 ${totalTaskCount} 项）：`,
     ...tasks.map((task, index) => [
-      `${selectionMode === "snapshot" ? `【${selectors[index] ?? "?"}】` : ""}${task.name} · ${formatScheduledTaskStatusLabel(task.status)}`,
+      `${selectionMode === "snapshot" ? `【${selectors[index] ?? "?"}】` : ""}${formatLiteral(task.name)} · ${formatScheduledTaskStatusLabel(task.status)}`,
       `   ID：${task.taskId}`,
       `   计划：${formatSchedule(task.schedule, task.timezone)}`,
       `   下次运行：${formatScheduledAt(task.nextRunAt)}`,
       `   Workspace：${task.workspaceId} · 模型：${formatDisplayedProvider(task.modelProvider)}/${task.model || "默认"} · ${task.sandbox}`,
     ].join("\n")),
     "",
-    "此处列出循环任务定义；每次执行结果与终态：/schedule runs <任务>",
+    interaction === "buttons" ? "选择任务查看每次执行结果与终态。" : "此处列出循环任务定义；每次执行结果与终态：/schedule runs <任务>",
     selectionMode === "snapshot"
       ? "数字序号只对最近五分钟的本会话列表有效。"
       : "schedule_task 的 selector 必须使用完整任务 ID；本次查询不更新 /schedule 的数字选择快照。",
@@ -41,11 +44,13 @@ export function formatConversationScheduledTasks(
 export function formatConversationScheduledRuns(
   result: Extract<ConversationCommandResult, { kind: "scheduled-runs" }>,
   selectionMode: "snapshot" | "id" = "snapshot",
+  interaction: "text" | "buttons" = "text",
+  formatLiteral: (value: string) => string = value => value,
 ): string {
   const { task, runs, page, pageCount, totalRunCount } = result.result;
   return toStructuredMarkdownList([
     "计划任务运行记录",
-    `任务：${task.name} · ${task.taskId}`,
+    `任务：${formatLiteral(task.name)} · ${task.taskId}`,
     `第 ${page}/${pageCount} 页 · 共 ${totalRunCount} 条`,
     "运行记录：",
     ...(runs.length === 0
@@ -67,7 +72,7 @@ export function formatConversationScheduledRuns(
         ].join("\n"))),
     "",
     "可用操作：",
-    selectionMode === "snapshot"
+    interaction === "buttons" ? "结果未知的运行可点击重试；未列出的项使用 /schedule retry 后填写完整 Run ID。" : selectionMode === "snapshot"
       ? "uncertain Run 可使用 /schedule retry <Run ID 或列表序号>"
       : "uncertain Run 可使用 schedule_task action=retry，selector 必须为完整 Run ID；本次查询不更新 /schedule 的数字选择快照。",
     ...(page > 1 ? [`上一页：/schedule runs ${task.taskId} ${page - 1}`] : []),
@@ -77,13 +82,14 @@ export function formatConversationScheduledRuns(
 
 export function formatConversationScheduledConfirmation(
   result: Extract<ConversationCommandResult, { kind: "scheduled-confirmation" }>,
+  formatLiteral: (value: string) => string = value => value,
 ): string {
   const { preview } = result;
   return toStructuredMarkdownList([
     preview.action === "create"
       ? "计划任务创建预览（尚未保存）"
       : "计划任务删除预览（尚未删除）",
-    `名称：${preview.task.name}`,
+    `名称：${formatLiteral(preview.task.name)}`,
     ...(preview.action === "delete" ? [`任务：${preview.task.taskId}`] : []),
     `计划：${formatSchedule(preview.task.schedule, preview.task.timezone)}`,
     `Workspace：${preview.task.workspaceId}`,
@@ -95,7 +101,7 @@ export function formatConversationScheduledConfirmation(
     "网络：沿用目标 App Server 的项目配置；无人值守审批一律拒绝",
     "Approval Policy：never（无人值守请求将安全拒绝）",
     "该任务将在用户不在线时由 Gateway 无人值守执行。",
-    `任务预览：${preview.task.promptPreview}`,
+    `任务预览：${formatLiteral(preview.task.promptPreview)}`,
     `确认：/schedule confirm ${preview.token}`,
     "令牌五分钟内有效且只能使用一次。",
   ].join("\n"));

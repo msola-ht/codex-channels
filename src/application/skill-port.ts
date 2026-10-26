@@ -1,6 +1,8 @@
 export interface InstalledSkill {
   name: string;
   description: string;
+  /** Current catalog has one safe, directly invocable definition; resolve again before execution. */
+  invocable: boolean;
 }
 
 export interface InvocableSkill {

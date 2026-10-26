@@ -104,6 +104,26 @@ Cline 官方 SDK 仍是 Chat 参数语义的参考，而非模型能力验收结
 不导入运行时代码、不安装或运行上游依赖、不自动更新。指标公式及回归用例见
 `apps/web/src/features/monitoring/model/eventRows.ts` 和相邻 `eventRows.test.ts`；首 Token 采集需同时核对实际 CPA 后端版本。
 
+## QQ 接入骨架基线
+
+本次从本仓库 `feat/qq-adaptation` 的 `7a867db7` 迁入鉴权、连接、网络、配置与扫码基础代码，
+不迁入旧消息渲染、分片、发送、附件或投递链路。范围见 [QQ 基础接入](../src/surfaces/qq/README.md)。
+
+消息层后续规范见[QQ 消息开发流程与合同](qq-message-contract.md)。2026-10-24 已核对线上单聊发送、
+流式、入站事件及消息概述 HTML 与本地快照哈希一致；被动窗口的 60/5 分钟矛盾仍在，普通正文长度上限仍未明确。
+这次核对不更新上游基线，不代表已实现收发或完成账号验收。
+
+- 协议参考为 [QQ API V2](https://bot.q.qq.com/wiki/develop/api-v2/) 的
+  `upstream/qq-api-v2-2026-10-23` 与 `upstream/qq-api-v2-2026-10-23-message-reference` 本地只读快照；
+  本次不下载、更新或切换上游资料。
+- 扫码使用 [npm Connector](https://www.npmjs.com/package/@tencent-connect/qqbot-connector) 的
+  `@tencent-connect/qqbot-connector@1.2.0` 公开 `startQrConnect`；
+  锁文件继承旧分支的精确版本和 integrity。该依赖只由扫码 Worker 使用，不负责配置写入或收发。
+  本次未启动真实扫码或重新核验账号权限；移除扫码骨架时一并移除此依赖。
+- WebSocket 生命周期沿用旧分支的 V2 详细关闭码解释：4009 保留会话并 Resume，
+  4006/4007 清除无效会话，4001/4002/4010–4014/4914/4915 终止自动重连。
+  基础连接不代表消息层已实现或经过验收。
+
 ## 查阅顺序
 
 

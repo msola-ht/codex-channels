@@ -11,6 +11,7 @@ import {
   createSubagentCompletedPresentation,
   renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
+  type PresentationDetail,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
@@ -53,8 +54,11 @@ export function formatIdleReleaseNotification(minutes: number, threadId: string)
   ].join("\n");
 }
 
-export function formatStatus(status: ConversationStatus): string {
-  return formatConversationStatus(status);
+export function formatStatus(
+  status: ConversationStatus,
+  options?: Parameters<typeof formatConversationStatus>[2],
+): string {
+  return formatConversationStatus(status, undefined, options);
 }
 
 export function formatWorkspacesAdded(workspaces: SurfaceConfigurationChange["addedWorkspaces"]): string {
@@ -90,10 +94,10 @@ export function renderTelegramLifecyclePresentation(
 
 export function renderTelegramSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  debug = false,
+  detailed: PresentationDetail = "basic",
 ): string {
   return renderTelegramLifecyclePresentation(
-    createSubagentCompletedPresentation(event, debug),
+    createSubagentCompletedPresentation(event, detailed),
   );
 }
 

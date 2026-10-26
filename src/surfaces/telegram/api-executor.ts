@@ -1,4 +1,4 @@
-import { checkpointDelivery } from "../delivery-receipt.js";
+import { DeliveryReceipt, checkpointDelivery } from "../delivery-receipt.js";
 import { GrammyError, HttpError } from "grammy";
 import type { Logger } from "pino";
 
@@ -91,6 +91,7 @@ export class TelegramApiExecutor {
     const maximumAttempts = context.critical ? 3 : 1;
     for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
       signal.throwIfAborted();
+      DeliveryReceipt.current()?.beforeSend?.();
       if (!this.authorized(context.chatId, context.recipientNotification ?? false)) {
         this.revalidateAccess();
         throw new Error("Telegram 输出授权已变化");

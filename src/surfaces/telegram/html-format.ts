@@ -20,7 +20,7 @@ export function protectTelegramReplyHeading(html: string): string {
 export function formatTelegramPanelChunks(text: string, limit = 3_600): string[] {
   const contentLimit = Math.max(1, limit - 128);
   let fence: MarkdownFence | undefined;
-  return splitTelegramText(text, contentLimit).map((chunk, index) => {
+  return splitTelegramText(text, contentLimit).map((chunk) => {
     const opening = fence?.opening;
     for (const line of chunk.split("\n")) {
       fence = advanceMarkdownFence(fence, line);
@@ -30,8 +30,21 @@ export function formatTelegramPanelChunks(text: string, limit = 3_600): string[]
       chunk,
       ...(fence ? [fence.marker] : []),
     ].join("\n");
-    return formatTelegramPanelHtml(balanced, { emphasizeFirstLine: index === 0 });
+    return formatTelegramPanelHtml(balanced);
   });
+}
+
+/** System title and field labels are formatted while all supplied values remain literal. */
+export function formatTelegramLiteralPanelChunks(title: string, body: string, limit = 3_600): string[] {
+  return splitTelegramText(`${title}\n${body}`, Math.max(1, limit - 128)).map((chunk, chunkIndex) =>
+    protectTelegramReplyHeading(chunk.split("\n").map((line, lineIndex) => {
+      if (chunkIndex === 0 && lineIndex === 0) return `<b>${escapeTelegramHtml(line)}</b>`;
+      const field = line.match(/^([^：\n]{1,32}：)(.*)$/);
+      return field
+        ? `<b>${escapeTelegramHtml(field[1]!)}</b>${escapeTelegramHtml(field[2]!)}`
+        : escapeTelegramHtml(line);
+    }).join("\n")),
+  );
 }
 
 export function formatTelegramExpandableQuotePanelChunks(
@@ -74,14 +87,9 @@ export function formatTelegramDiffChunks(text: string, limit = 3_600): string[] 
   ].join("\n"));
 }
 
-export function formatTelegramPanelHtml(
-  text: string,
-  options: { emphasizeFirstLine?: boolean } = {},
-): string {
-  const emphasizeFirstLine = options.emphasizeFirstLine ?? true;
+export function formatTelegramPanelHtml(text: string): string {
   const lines = text.split("\n");
   const output: string[] = [];
-  let firstContentLine = true;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
@@ -95,7 +103,6 @@ export function formatTelegramPanelHtml(
         index += 1;
       }
       output.push(`<pre>${escapeTelegramHtml(code.join("\n"))}</pre>`);
-      firstContentLine = false;
       continue;
     }
     if (!line) {
@@ -110,7 +117,6 @@ export function formatTelegramPanelHtml(
         index += 1;
       }
       output.push(`<blockquote>${escapeTelegramHtml(quoted.join("\n"))}</blockquote>`);
-      firstContentLine = false;
       continue;
     }
 
@@ -118,15 +124,13 @@ export function formatTelegramPanelHtml(
     const heading = line.match(/^#{1,6}\s+(.+)$/);
     if (heading) {
       output.push(`<b>${escapeTelegramHtml(heading[1]!)}</b>`);
-      firstContentLine = false;
       continue;
     }
-    if (firstContentLine) {
-      firstContentLine = false;
-      if (emphasizeFirstLine) {
-        output.push(`<b>${escaped}</b>`);
-        continue;
-      }
+    const emphasis = /^\*\*([^*\n]+)\*\*( · [^\n]*)$/u.exec(line)
+      ?? /^\*\*([^\n]+)\*\*$/u.exec(line);
+    if (emphasis) {
+      output.push(`<b>${escapeTelegramHtml(emphasis[1]!)}</b>${escapeTelegramHtml(emphasis[2] ?? "")}`);
+      continue;
     }
 
     const bullet = line.match(/^(\s*)-\s+(.+)$/);

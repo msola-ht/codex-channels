@@ -15,7 +15,7 @@ export interface SetupConfigurationSummary {
     reasoningEffort?: string;
   }>;
   channels: Array<{
-    id: "telegram" | "feishu" | "weixin";
+    id: "telegram" | "feishu" | "weixin" | "qq";
     displayName: string;
     configured: true;
     enabled: boolean;

@@ -1,6 +1,6 @@
 import { DeliveryReceipt } from "../delivery-receipt.js";
 import type { Logger } from "pino";
-import type { OutputEvent } from "../../conversation-core/index.js";
+import type { MessagePhase, OutputEvent } from "../../conversation-core/index.js";
 import type { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { surfaceDiagnosticContext } from "../diagnostics.js";
 import type { TurnReplyTargets } from "../turn-reply-targets.js";
@@ -17,11 +17,15 @@ const feishuStreamFlushDelayMs = 300;
 const maximumFeishuActiveStreams = 100;
 
 interface FeishuStreamState {
+  previewAbort: AbortController;
   chatId: string;
   threadId: string;
   turnId: string;
   itemId: string;
   text: string;
+  phase: MessagePhase | null | undefined;
+  previewAdmitted: boolean;
+  previewClosed: boolean;
   cardText: string;
   flushGeneration: number;
   truncated: boolean;
@@ -40,6 +44,7 @@ interface FeishuStreamState {
 /** 正文流状态由此组件独占；共享 Outbox 的投递队列、关闭边界与降级发送。 */
 export class FeishuTextStreams {
   private readonly streams = new Map<string, FeishuStreamState>();
+  private readonly observedDeltas = new WeakMap<Extract<OutputEvent, { type: "text.delta" }>, FeishuStreamState | undefined>();
   private streamCapacityWarningIssued = false;
 
   constructor(
@@ -63,6 +68,10 @@ export class FeishuTextStreams {
         clearTimeout(state.timer);
         delete state.timer;
       }
+      if (!state.previewAdmitted) {
+        this.discardState(key, state);
+        continue;
+      }
       this.delivery.enqueue(
         state.chatId,
         (signal) => this.flushStream(key, true, false, signal),
@@ -80,13 +89,29 @@ export class FeishuTextStreams {
     for (const [key, state] of this.streams) {
       if (state.threadId !== threadId) continue;
       if (state.timer) clearTimeout(state.timer);
+      if (state.terminalSettled === undefined) state.previewAbort.abort();
       if (this.streams.get(key) === state) this.streams.delete(key);
     }
   }
 
-  acceptStreamDelta(
+  /** Stop only this Turn locally; never finish a platform card during discard. */
+  cancelTurn(chatId: string, threadId: string, turnId: string): void {
+    for (const [key, state] of this.streams) {
+      if (state.chatId !== chatId || state.threadId !== threadId || state.turnId !== turnId) continue;
+      if (state.timer) clearTimeout(state.timer);
+      if (state.terminalSettled === undefined) state.previewAbort.abort();
+      state.flushGeneration += 1;
+      this.streams.delete(key);
+    }
+  }
+
+  observeDelta(
     event: Extract<OutputEvent, { type: "text.delta" }>,
+    previewAllowed = true,
   ): void {
+    if (this.observedDeltas.has(event)) return;
+    // Remember rejected observations as well; delayed handlers cannot re-admit them.
+    this.observedDeltas.set(event, undefined);
     const key = streamKey(event.target.conversationId, event.threadId, event.turnId, event.itemId);
     const existing = this.streams.get(key);
     if (!existing && this.streams.size >= maximumFeishuActiveStreams) {
@@ -107,11 +132,15 @@ export class FeishuTextStreams {
       this.streamCapacityWarningIssued = false;
     }
     const state = existing ?? {
+      previewAbort: new AbortController(),
       chatId: event.target.conversationId,
       threadId: event.threadId,
       turnId: event.turnId,
       itemId: event.itemId,
       text: "",
+      phase: undefined,
+      previewAdmitted: false,
+      previewClosed: false,
       cardText: "",
       flushGeneration: 0,
       truncated: false,
@@ -119,6 +148,9 @@ export class FeishuTextStreams {
       cardCount: 0,
       failed: false,
     };
+    if (state.previewClosed) return;
+    state.previewAdmitted ||= previewAllowed;
+    if (event.phase !== undefined) state.phase = event.phase;
     const previousText = state.text;
     const appended = appendBoundedStreamText(state.text, event.text);
     state.text = appended.text;
@@ -128,6 +160,14 @@ export class FeishuTextStreams {
       state.text.slice(previousText.length),
     ).text;
     this.streams.set(key, state);
+    this.observedDeltas.set(event, state);
+  }
+
+  acceptStreamDelta(event: Extract<OutputEvent, { type: "text.delta" }>): void {
+    const key = streamKey(event.target.conversationId, event.threadId, event.turnId, event.itemId);
+    const state = this.observedDeltas.get(event);
+    if (!state || this.streams.get(key) !== state || state.previewClosed) return;
+    if (!state.previewAdmitted) return;
     if (!state.timer) {
       state.timer = setTimeout(() => {
         delete state.timer;
@@ -146,6 +186,41 @@ export class FeishuTextStreams {
     }
   }
 
+  hasAdmittedPreview(event: Extract<OutputEvent, { type: "text.completed" }>): boolean {
+    return this.streams.get(streamKey(event.target.conversationId, event.threadId, event.turnId, event.itemId))?.previewAdmitted === true;
+  }
+
+  observeComplete(event: Extract<OutputEvent, { type: "text.completed" }>): void {
+    const state = this.streams.get(streamKey(event.target.conversationId, event.threadId, event.turnId, event.itemId));
+    if (state) state.previewClosed = true;
+  }
+
+  discard(event: Extract<OutputEvent, { type: "text.completed" }>): void {
+    const key = streamKey(event.target.conversationId, event.threadId, event.turnId, event.itemId);
+    const state = this.streams.get(key);
+    if (state) this.discardState(key, state);
+  }
+
+  discardUnadmittedPreviewsForTurn(chatId: string, threadId: string, turnId: string): void {
+    for (const [key, state] of this.streams) {
+      if (state.chatId !== chatId || state.threadId !== threadId || state.turnId !== turnId) continue;
+      state.previewClosed = true;
+      // Preserve complete Items owned by their terminal receipt; only discard
+      // withheld live buffers, including Items whose phase is still unknown.
+      if (!state.previewAdmitted) this.discardState(key, state);
+    }
+  }
+
+  private discardState(key: string, state: FeishuStreamState): void {
+    // A complete Item already owns its terminal send and reply-target lifetime.
+    // Later live hiding may only discard disposable preview buffers.
+    if (state.terminalSettled !== undefined) return;
+    if (state.timer) clearTimeout(state.timer);
+    state.previewAbort.abort();
+    state.flushGeneration += 1;
+    if (this.streams.get(key) === state) this.streams.delete(key);
+  }
+
   completeStream(
     event: Extract<OutputEvent, { type: "text.completed" }>,
     completeFilePlanned = false,
@@ -155,6 +230,8 @@ export class FeishuTextStreams {
     if (!state) {
       return false;
     }
+    state.previewClosed = true;
+    state.phase = event.phase;
     state.truncationNotice = completeFilePlanned ? feishuPreviewNotice : feishuTruncationNotice;
     const bounded = boundedStreamText(event.text);
     const completedText = bounded.text;
@@ -223,6 +300,7 @@ export class FeishuTextStreams {
     turnId: string,
     onSettled: (failed: boolean) => void,
   ): void {
+    this.discardUnadmittedPreviewsForTurn(chatId, threadId, turnId);
     const matching = [...this.streams].filter(([, state]) =>
       state.chatId === chatId && state.threadId === threadId && state.turnId === turnId
     );
@@ -233,6 +311,7 @@ export class FeishuTextStreams {
     }
     let failed = false;
     const completionReceipt = DeliveryReceipt.current();
+    const releaseCompletion = completionReceipt?.retain();
     // 正文平台失败只取消自身；授权、持久检查点和关闭仍沿完成事件的边界处理。
     DeliveryReceipt.without(() => {
       for (const [key, state] of matching) {
@@ -243,7 +322,9 @@ export class FeishuTextStreams {
           if (state.terminalOutcome === undefined) state.terminalOutcome = "failed";
           failed ||= state.terminalOutcome === "failed";
           if (this.streams.get(key) === state) this.streams.delete(key);
-          if (--pending === 0) onSettled(failed);
+          if (--pending === 0) {
+            try { onSettled(failed); } finally { releaseCompletion?.(); }
+          }
         };
         if (state.terminalSettled !== undefined) {
           // 已入队的完整正文由原回执拥有；等待其实际结束，不能因完成卡取消提前释放回复目标。
@@ -258,7 +339,7 @@ export class FeishuTextStreams {
         const receipt = completionReceipt === undefined ? undefined : new DeliveryReceipt(async (checkpoint) => {
           try { await completionReceipt.checkpoint(checkpoint); }
           catch (error) { completionReceipt.fail(error); throw error; }
-        }, completionReceipt.controller.signal, true);
+        }, completionReceipt.controller.signal, true, completionReceipt.beforeSend);
         const enqueue = (): boolean => this.delivery.enqueue(
           state.chatId,
           async (signal) => {
@@ -283,6 +364,11 @@ export class FeishuTextStreams {
   ): Promise<void> {
     const state = retainedState ?? this.streams.get(key);
     if (!state) return;
+    if (!terminal && (!state.previewAdmitted || state.previewClosed)) return;
+    if (state.terminalSettled === undefined) {
+      signal = signal ? AbortSignal.any([signal, state.previewAbort.signal]) : state.previewAbort.signal;
+      signal.throwIfAborted();
+    }
     if (terminal && state.terminalOutcome === "confirmed") return;
     if (terminal && state.terminalOutcome === "failed") throw new Error("飞书正文终态未确认，禁止自动重发");
     try {

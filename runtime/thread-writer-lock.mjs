@@ -34,12 +34,19 @@ export async function inspectThreadWriterLock(threadId, environment = process.en
   if (holders.length === 0) {
     return { held: false };
   }
+  if (holders.length !== 1) return { held: true, holder: null, reason: "inspection-unavailable" };
   const pid = holders[0];
+  const startedAt = processStartedAt(pid, procRoot);
+  const command = processCommandLine(pid, procRoot);
+  if (startedAt === undefined || processStartedAt(pid, procRoot) !== startedAt) {
+    return { held: true, holder: null, reason: "inspection-unavailable" };
+  }
   return {
     held: true,
     holder: {
       pid,
-      command: processCommandLine(pid, procRoot),
+      command,
+      startedAt,
     },
   };
 }
@@ -94,6 +101,7 @@ export async function terminateThreadWriterHolder(pid, {
   environment = process.env,
   runner,
   signal,
+  beforeTerminate,
 } = {}) {
   if (signal?.aborted) return false;
   if (process.platform === "win32") {
@@ -103,12 +111,18 @@ export async function terminateThreadWriterHolder(pid, {
       pid,
       startedAt,
       timeoutMs,
-    }, environment, { runner, signal, timeoutMs });
+    }, environment, { runner, signal, timeoutMs, beforeSubmit: beforeTerminate });
     return response?.ok === true && response.exited === true;
   }
+  if (process.platform !== "linux") return false;
   if (!isRunningProcess(pid)) {
     return true;
   }
+  // Reject an already changed or unreadable identity immediately before the
+  // numeric signal. /proc and kill still have a non-atomic PID-reuse window.
+  beforeTerminate?.();
+  if (typeof startedAt !== "string" || !/^\d+$/u.test(startedAt)
+    || processStartedAt(pid) !== startedAt) return false;
   try {
     process.kill(pid, "SIGTERM");
   } catch (error) {
@@ -125,12 +139,28 @@ export async function terminateThreadWriterHolder(pid, {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (signal?.aborted) return false;
-    if (!isRunningProcess(pid)) {
+    if (processIdentityExited(pid, startedAt)) {
       return true;
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
-  return !isRunningProcess(pid);
+  return processIdentityExited(pid, startedAt);
+}
+
+function processIdentityExited(pid, startedAt) {
+  if (!isRunningProcess(pid)) return true;
+  const actual = processStartedAt(pid);
+  return actual !== undefined && actual !== startedAt;
+}
+
+function processStartedAt(pid, procRoot = "/proc") {
+  try {
+    const stat = readFileSync(join(procRoot, String(pid), "stat"), "utf8");
+    // comm is parenthesized and may contain spaces or closing parentheses.
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/u);
+    const startedAt = fields[19]; // field 22; fields starts at state (field 3).
+    return typeof startedAt === "string" && /^\d+$/u.test(startedAt) ? startedAt : undefined;
+  } catch { return undefined; }
 }
 
 async function inspectWindowsThreadWriterLock(lockPath, environment, options) {
@@ -164,7 +194,7 @@ async function inspectWindowsThreadWriterLock(lockPath, environment, options) {
   };
 }
 
-async function invokeWindowsThreadWriterLock(request, environment, { runner, signal, timeoutMs = 8_000 } = {}) {
+async function invokeWindowsThreadWriterLock(request, environment, { runner, signal, timeoutMs = 8_000, beforeSubmit } = {}) {
   if (!runner || signal?.aborted) return undefined;
   const deadline = Date.now() + timeoutMs;
   const script = join(
@@ -189,6 +219,7 @@ async function invokeWindowsThreadWriterLock(request, environment, { runner, sig
   } catch {
     return undefined;
   }
+  beforeSubmit?.();
   try {
     const result = await runner.run(invocation, {
       input: JSON.stringify({ ...request, deadline }),

@@ -1,9 +1,32 @@
 import type { TomlTable } from "smol-toml";
 
+export function isTelegramEnabled(telegram: { enabled?: boolean; bot_token?: string } | undefined): boolean;
+
+export interface QqGroupConfig {
+  group_openid: string;
+  allowed_member_openids: string[];
+  allow_public_output: true;
+}
+interface QqRuntimeAccount {
+  appId: string;
+  appSecret: string;
+  allowedUserOpenIds: Iterable<string>;
+  groups?: readonly {
+    groupOpenId: string;
+    allowedMemberOpenIds: Iterable<string>;
+    allowPublicOutput: true;
+  }[];
+}
+export function classifyQqConfigChanges(
+  current: QqRuntimeAccount | undefined,
+  next: QqRuntimeAccount | undefined,
+): Array<{ kind: "enabled" | "account" | "credentials" | "allowed-users" | "groups"; restart: boolean }>;
+
 export interface GatewayConfigDocument {
   version: 1;
   default_workspace: string;
   telegram?: {
+    enabled?: boolean;
     bot_token?: string;
     allowed_user_ids?: number[];
     proxy_url?: string;
@@ -24,6 +47,19 @@ export interface GatewayConfigDocument {
     enabled: boolean;
     account_id: string;
     allowed_user_ids: string[];
+  };
+  qq?: {
+    enabled: false;
+    app_id?: string;
+    app_secret?: string;
+    allowed_user_openids?: string[];
+    groups?: QqGroupConfig[];
+  } | {
+    enabled: true;
+    app_id: string;
+    app_secret: string;
+    allowed_user_openids: string[];
+    groups?: QqGroupConfig[];
   };
   codex: {
     binary: string;
@@ -48,9 +84,16 @@ export interface GatewayConfigDocument {
   model_relay?: import("./model-relay-config.mjs").ModelRelayConfig;
   conversation: { idle_release_minutes: number };
   display: {
-    operation_updates: "full" | "compact" | "hidden";
+    operation_updates: "full" | "detailed" | "compact" | "failures" | "hidden";
+    subagents?: boolean;
+    streaming?: boolean;
+    commentary?: boolean;
+    routine_notifications?: boolean;
     plan_updates: boolean;
     reasoning: boolean;
+    completion?: "off" | "brief" | "detailed";
+    presentation_detail?: "basic" | "detailed" | "full";
+    overrides?: readonly import("./message-display-policy.mjs").MessageDisplayOverride[];
     model_aliases?: Record<string, string>;
   };
   debug?: {

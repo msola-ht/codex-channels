@@ -36,6 +36,13 @@ const allowedDistEntries = new Map([
   ["bin", new Set()],
 ]);
 const failures = [];
+// The explicitly retained manual QQ observation reuses the production proxy owner
+// without importing the Gateway composition root or duplicating its network pools.
+const allowedFileDistEntries = new Map([
+  ["scripts/qq-passive-observation.mjs", new Set(["dist/bootstrap/qq-network.js"])],
+  // Explicit menu setup owns a short-lived QQ network, reusing Gateway proxy/cleanup policy.
+  ["scripts/qq-menu-setup.mjs", new Set(["dist/bootstrap/qq-network.js"])],
+]);
 const sourceRoot = resolve(root, "src");
 const allowedModuleDependencies = new Map(Object.entries({
   application: ["conversation-core", "policy", "scheduled-tasks", "session-routing"],
@@ -161,7 +168,7 @@ function checkSourceBoundaries() {
           failures.push(`${sourcePath} -> ${specifier} 业务模块依赖具体 Codex Client`);
         }
       }
-      const channels = ["feishu", "telegram", "weixin"];
+      const channels = ["feishu", "telegram", "weixin", "qq"];
       const sourceChannel = channels.find(channel => isInside(resolve(sourceRoot, "surfaces", channel), file));
       if (sourceChannel && channels.some(channel => channel !== sourceChannel
         && isInside(resolve(sourceRoot, "surfaces", channel), target))) {
@@ -221,7 +228,8 @@ function checkRelativeImport(sourceDirectory, file, specifier) {
     return;
   }
   if (targetDirectory !== "dist") return;
-  if (!allowedDistEntries.get(sourceDirectory)?.has(targetPath)) {
+  if (!allowedDistEntries.get(sourceDirectory)?.has(targetPath)
+    && !allowedFileDistEntries.get(display(file).replaceAll("\\", "/"))?.has(targetPath)) {
     failures.push(`${display(file)} -> ${specifier} 未列入 ${sourceDirectory} 的已编译入口允许表`);
     return;
   }

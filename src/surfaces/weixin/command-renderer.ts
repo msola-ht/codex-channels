@@ -18,6 +18,7 @@ import {
   renderStructuredLifecyclePresentation,
   escapeLifecycleLiteral,
   type LifecyclePresentation,
+  type PresentationDetail,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
@@ -26,8 +27,15 @@ import { renderConversationCommandResult } from "../conversation-command-rendere
 import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
 
 export function renderWeixinCommandResult(result: ConversationCommandResult): string | null {
+  if (result.kind === "artifacts" && result.artifacts?.diff?.trim()) {
+    const diff = result.artifacts.diff;
+    let fenceLength = 3;
+    for (const match of diff.matchAll(/`+/gu)) fenceLength = Math.max(fenceLength, match[0].length + 1);
+    const fence = "`".repeat(fenceLength);
+    return `## Turn Diff · ${result.artifacts.turnId}\n\n${fence}diff\n${diff}${diff.endsWith("\n") ? "" : "\n"}${fence}`;
+  }
   return result.kind === "status"
-    ? formatConversationStatus(result.status, escapeLifecycleLiteral)
+    ? formatConversationStatus(result.status, escapeLifecycleLiteral, result)
     : renderConversationCommandResult(result);
 }
 
@@ -89,27 +97,24 @@ export function renderWeixinIdentity(message: {
 
 export function renderWeixinTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  debug = false,
-  autoCompactPercent?: (
-    provider: string | null | undefined,
-    model: string | null | undefined,
-  ) => number | null,
+  detailed: PresentationDetail = "basic",
+  mode: "brief" | "detailed" = "detailed",
 ): string {
   return renderWeixinLifecyclePresentation(
     createTurnCompletedPresentation(
       event,
-      debug,
-      autoCompactPercent,
+      detailed,
+      mode,
     ),
   );
 }
 
 export function renderWeixinSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  debug = false,
+  detailed: PresentationDetail = "basic",
 ): string {
   return renderWeixinLifecyclePresentation(
-    createSubagentCompletedPresentation(event, debug),
+    createSubagentCompletedPresentation(event, detailed),
   );
 }
 
@@ -123,17 +128,15 @@ export function formatWeixinCommandText(
   text: string,
   options: { structuredFields?: boolean } = {},
 ): string {
-  const lines = text
-    .replace(/\r\n/gu, "\n")
-    .replace(/\n{3,}/gu, "\n\n")
-    .split("\n");
+  const lines = text.split("\n");
   let fence: MarkdownFence | undefined;
-  return lines.map((line, index) => {
+  return lines.map((rawLine, index) => {
     const previous = fence;
-    fence = advanceMarkdownFence(fence, line);
+    fence = advanceMarkdownFence(fence, rawLine);
     if (previous || fence) {
-      return line;
+      return rawLine;
     }
+    const line = rawLine.replace(/\r$/u, "");
     if (options.structuredFields === true) {
       const heading = /^#{1,6}\s+(.+)$/u.exec(line);
       if (heading) {
@@ -146,6 +149,7 @@ export function formatWeixinCommandText(
       if (
         index === 0
         && line.length > 0
+        && !isMarkdownBlockLine(line)
         && isWeixinStructuredField(lines[index + 1])
       ) {
         return `**${line}**`;
@@ -155,7 +159,7 @@ export function formatWeixinCommandText(
         return `- ${field.label}：${field.value}`;
       }
     }
-    const next = lines[index + 1];
+    const next = lines[index + 1]?.replace(/\r$/u, "");
     if (
       line.length === 0
       || isMarkdownBlockLine(line)
@@ -170,7 +174,7 @@ export function formatWeixinCommandText(
 }
 
 function isMarkdownBlockLine(line: string): boolean {
-  return /^\s*(?:[-+*]\s+|\d+\.\s+|>|#{1,6}\s+|\||-{3,}\s*$)/u
+  return /^\s*(?:[-+*]\s+|\d+\.\s+|>|#{1,6}\s+|\*\*.+\*\*\s*$|\||-{3,}\s*$)/u
     .test(line);
 }
 

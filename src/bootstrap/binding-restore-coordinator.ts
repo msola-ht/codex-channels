@@ -35,6 +35,7 @@ export interface BindingRestoreCoordinatorOptions {
   router: SessionRouter;
   output: EventBus<OutputEvent>;
   enabledSurfaces(): readonly Pick<SurfaceAdapter, "surface" | "accountId">[];
+  canRestoreBinding?(binding: ConversationBinding): boolean;
   scheduledRecovery(): ScheduledBindingRecoveryPort | undefined;
   releaseBackground(threadId: string, isCurrent: () => boolean): Promise<boolean>;
   restored?(threadId: string): void;
@@ -138,6 +139,7 @@ export class BindingRestoreCoordinator {
         .filter((binding) => {
           const bindingProvider = this.options.codex.knownProvider(binding.threadId);
           return !this.stopped
+            && this.options.canRestoreBinding?.(binding) !== false
             && (
               enabledSurfaces.has(surfaceAccountKey(
                 binding.target.surface,
@@ -180,7 +182,8 @@ export class BindingRestoreCoordinator {
         && (provider === currentProvider || !disconnectedProviders.has(currentProvider));
     };
     const canRestore = (binding: ConversationBinding): boolean =>
-      isConnectionCurrent(binding) && this.isCurrentBinding(binding);
+      isConnectionCurrent(binding) && this.isCurrentBinding(binding)
+      && this.options.canRestoreBinding?.(binding) !== false;
     let failures: SubscriptionRestoreFailure[];
     try {
       const scheduledProviders = new Map<string, string>();

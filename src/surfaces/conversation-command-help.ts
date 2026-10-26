@@ -9,7 +9,7 @@ export const conversationCommandDescriptions = {
   unarchive: "恢复已归档会话",
   pin: "固定当前会话",
   unpin: "取消固定当前会话",
-  status: "查看当前状态",
+  status: "查看状态总览，detail 展开详情",
   workspace: "列出或切换 Workspace",
   autoreview: "查看或切换当前会话审批方式",
   stop: "停止当前任务",
@@ -53,7 +53,7 @@ export const conversationCommandHelpSections = [
   {
     title: "运行与项目：",
     lines: [
-      "/status · /workspace [序号|ID|名称]",
+      "/status [detail] · /workspace [序号|ID|名称]",
       { command: "/autoreview [on|off]", description: "（当前会话后续轮次）" },
       "/stop · /queue add <文本> · /queue list [页码]",
       "/queue update <完整 ID 或列表序号> <文本> · /queue delete <完整 ID 或列表序号>",

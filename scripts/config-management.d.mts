@@ -10,6 +10,10 @@ export type GatewaySettingActivation =
   | "reinstall-services";
 
 import type { ConfigActivationResult } from "./config-activation-result.mjs";
+import type { MessageDisplaySelector, MessageDisplayOverride, MessageDisplaySettings, MessageDisplaySource, MessageDisplayPreset } from "../runtime/message-display-policy.mjs";
+export interface DisplayScopeState { id: string; selector: MessageDisplaySelector; writable: boolean; preset: MessageDisplayPreset | "custom"; supportedFields: Array<"operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; override: Pick<MessageDisplayOverride, "operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail">; effective: MessageDisplaySettings; sources: Record<keyof MessageDisplaySettings, MessageDisplaySource> }
+export type GlobalDisplayState = Omit<DisplayScopeState, "id" | "selector" | "writable"> & { selector: null };
+export type DisplayScopeEdit = { selector: MessageDisplaySelector; field: "operation_updates"; action: "set"; value: "full" | "detailed" | "compact" | "failures" | "hidden" } | { selector: MessageDisplaySelector; field: "completion"; action: "set"; value: "off" | "brief" | "detailed" } | { selector: MessageDisplaySelector; field: "presentation_detail"; action: "set"; value: "basic" | "detailed" | "full" } | { selector: MessageDisplaySelector; field: "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning"; action: "set"; value: boolean } | { selector: MessageDisplaySelector; field: "operation_updates" | "subagents" | "streaming" | "commentary" | "routine_notifications" | "plan_updates" | "reasoning" | "completion" | "presentation_detail"; action: "inherit" };
 
 export class ConfigManagementError extends Error {
   readonly code: string;
@@ -20,17 +24,35 @@ export interface GatewaySettings {
   configPath: string;
   revision: string;
   display: {
-    operationUpdates: "full" | "compact" | "hidden";
+    preset: MessageDisplayPreset | "custom";
+    globalScope: GlobalDisplayState;
+    operationUpdates: "full" | "detailed" | "compact" | "failures" | "hidden";
+    subagentsEnabled: boolean;
+    subagentsOverride: boolean | null;
+    streamingEnabled: boolean;
+    streamingOverride: boolean | null;
+    commentaryEnabled: boolean;
+    commentaryOverride: boolean | null;
+    routineNotificationsEnabled: boolean;
+    routineNotificationsOverride: boolean | null;
     planUpdatesEnabled: boolean;
     reasoningEnabled: boolean;
+    completion: "off" | "brief" | "detailed";
+    completionOverride: "off" | "brief" | "detailed" | null;
+    presentationDetail: "basic" | "detailed" | "full";
+    presentationDetailOverride: "basic" | "detailed" | "full" | null;
     modelAliases: Record<string, string>;
+    scopes: DisplayScopeState[];
+    targetsStatus: "not-needed" | "missing" | "available" | "unavailable";
   };
   system: {
     approvalTimeoutSeconds: number;
     idleReleaseMinutes: number;
     defaultWorkspace: string | null;
     defaultModel: string | null;
-    modelTrafficMode: "production" | "debug";
+    modelTrafficMode: "production" | "debug" | "custom";
+    modelTrafficInputItems: number;
+    modelTrafficItemMaxBytes: number;
     modelTrafficDumpEnabled: boolean;
     modelTrafficRetentionDays: number;
     officialTuiIdentity: {
@@ -71,7 +93,7 @@ export interface GatewaySettings {
     storage: { retentionDays: number; maxRows: number };
   };
   channels: Array<{
-    id: "telegram" | "feishu" | "weixin";
+    id: "telegram" | "feishu" | "weixin" | "qq";
     displayName: string;
     configured: true;
     enabled: boolean;
@@ -79,9 +101,18 @@ export interface GatewaySettings {
 }
 
 export type GatewaySettingInput =
-  | { kind: "display.operation-updates"; value: "full" | "compact" | "hidden" }
+  | { kind: "display.preset"; value: { preset: MessageDisplayPreset; selector?: MessageDisplaySelector } }
+  | { kind: "display.scope"; value: DisplayScopeEdit }
+  | { kind: "channel.enabled"; channel: "telegram" | "feishu" | "weixin" | "qq"; value: boolean }
+  | { kind: "display.operation-updates"; value: "full" | "detailed" | "compact" | "failures" | "hidden" }
+  | { kind: "display.subagents"; value: { action: "set"; value: boolean } | { action: "inherit" } }
+  | { kind: "display.streaming"; value: { action: "set"; value: boolean } | { action: "inherit" } }
+  | { kind: "display.routine-notifications"; value: { action: "set"; value: boolean } | { action: "inherit" } }
+  | { kind: "display.commentary"; value: { action: "set"; value: boolean } | { action: "inherit" } }
   | { kind: "display.plan-updates"; value: boolean }
   | { kind: "display.reasoning"; value: boolean }
+  | { kind: "display.completion"; value: { action: "set"; value: "off" | "brief" | "detailed" } | { action: "inherit" } }
+  | { kind: "display.presentation-detail"; value: { action: "set"; value: "basic" | "detailed" | "full" } | { action: "inherit" } }
   | { kind: "display.model-aliases"; value: Record<string, string> }
   | { kind: "telegram.message-format"; value: "html" | "rich" }
   | { kind: "system.approval-timeout"; value: number }

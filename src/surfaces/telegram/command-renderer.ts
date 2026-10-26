@@ -37,8 +37,8 @@ import {
   formatConversationWorkspaces,
 } from "../conversation-workspace-status-command-format.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
-import { formatStatus, splitTelegramText } from "./format.js";
-import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-format.js";
+import { formatStatus } from "./format.js";
+import { formatTelegramDiffChunks, formatTelegramLiteralPanelChunks, formatTelegramPanelChunks } from "./html-format.js";
 
 export async function renderTelegramCommandResult(
   context: Context,
@@ -76,7 +76,10 @@ export async function renderTelegramCommandResult(
       );
       return;
     case "status":
-      await replyTelegramPanel(context, formatStatus(result.status));
+      await replyTelegramPanel(context, formatStatus(result.status, result), {
+        inline_keyboard: [[{ text: result.view === "detail" ? "返回总览" : "查看详情",
+          callback_data: result.view === "detail" ? "status:overview" : "status:detail" }]],
+      });
       return;
     case "workspaces":
       await replyTelegramPanel(
@@ -113,9 +116,11 @@ export async function renderTelegramCommandResult(
       );
       return;
     case "hooks": {
-      const chunks = splitTelegramText(formatConversationHooks(result.view), 3_600);
+      const [title, ...body] = formatConversationHooks(result.view).split("\n");
+      const chunks = formatTelegramLiteralPanelChunks(title!, body.join("\n"));
       for (const [index, chunk] of chunks.entries()) {
         await context.reply(chunk, {
+          parse_mode: "HTML",
           ...(index === chunks.length - 1 ? { reply_markup: hookKeyboard(result) } : {}),
           ...(index > 0 ? { disable_notification: true } : {}),
         });
@@ -123,7 +128,7 @@ export async function renderTelegramCommandResult(
       return;
     }
     case "reset-credit":
-      await replyTelegramPanel(context, formatConversationResetCredits(result, "buttons"),
+      await replyTelegramPanel(context, formatConversationResetCredits(result, "buttons", value => value),
         resetCreditKeyboard(result, String(context.chat?.id ?? ""), String(context.from?.id ?? "")));
       return;
     case "limits":
@@ -220,16 +225,21 @@ function modelProviderSelectionText(
     ? result.state.model
     : modelListEntry(currentModel.displayName, currentModel.provider, currentModel.model).modelName;
   return toStructuredMarkdownList([
+    "## 选择提供商",
     `当前模型：${currentModelName}（Provider：${formatCodexProviderLabel(current)}）`,
     `${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort)}`,
     `速度：${formatServiceTierSetting(result.state, currentModel)}`,
     "",
     `当前 Provider：${formatCodexProviderLabel(current)}`,
-    "提供商列表：",
+    ...(providers.length > 0 ? ["提供商列表："] : [
+      "当前没有可选模型。请检查账户配置与订阅状态；续订后可在 WebUI 或当前账户的 /usage 刷新。",
+    ]),
     ...providers.map((provider, index) =>
       `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === current ? " ← 当前" : ""} · ${formatProviderModelSummary(result.state.models, provider)}`),
     "",
-    "请先选择提供商，再选择该提供商下的模型；也可输入 /model <提供商序号>。",
+    ...(providers.length > 0
+      ? ["请先选择提供商，再选择该提供商下的模型；也可输入 /model <提供商序号>。"]
+      : []),
   ].join("\n"));
 }
 
@@ -445,7 +455,7 @@ export function formatTelegramThreadQueueItemAction(
   item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
 ): string {
   return [
-    "Queue 条目",
+    "## Queue 条目",
     `ID：${item.id}`,
     `类型：${formatThreadQueueInputTypeLabel(item.inputType)}${item.editable ? " · 可更新" : " · 只读摘要"}`,
     `安全预览：${item.textPreview || "（无文本预览）"}`,
@@ -458,7 +468,7 @@ export function formatTelegramThreadQueueDeleteConfirmation(
   item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
 ): string {
   return [
-    "确认删除 Queue 条目？",
+    "## 确认删除 Queue 条目？",
     `ID：${item.id}`,
     `安全预览：${item.textPreview || "（无文本预览）"}`,
     "删除后无法通过 Gateway 恢复。",
@@ -485,26 +495,8 @@ function renderOutcome(
     };
   }
 
-  return {
-    text: formatConversationCommandOutcome(outcome),
-    expanded: [
-      "thread.resumed",
-      "thread.archived",
-      "thread.unarchived",
-      "workspace.selected",
-      "thread.renamed",
-      "thread.forked",
-      "review.started",
-      "goal.updated",
-      "scheduled-task.created",
-      "scheduled-task.deleted",
-      "scheduled-task.renamed",
-      "scheduled-task.paused",
-      "scheduled-task.resumed",
-      "scheduled-task.run-requested",
-      "scheduled-task.retry-requested",
-    ].includes(outcome.type),
-  };
+  const text = formatConversationCommandOutcome(outcome);
+  return { text, expanded: text.includes("\n") };
 }
 
 function queueItemButtonLabel(

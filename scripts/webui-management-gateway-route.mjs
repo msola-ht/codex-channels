@@ -111,6 +111,26 @@ export async function routeGatewaySettingsManagement({
       webuiLogger.warn({ module: "settings", event: "settings.readback_failed", err: error }, "Gateway 设置已写入，但新修订读取失败");
     }
     let auditStatus = "recorded";
+    if (input.kind === "display.preset" && current !== null) {
+      const saved = result.value.selector === null ? current.display.globalScope : current.display.scopes.find(scope => scope.id === result.value.id);
+      if (JSON.stringify(saved) !== JSON.stringify(result.value)) current = null;
+    }
+    if (input.kind === "display.scope" && current !== null) {
+      const saved = current.display.scopes.find(scope => scope.id === result.value.id);
+      if (JSON.stringify(saved?.override ?? {}) !== JSON.stringify(result.value.override)) current = null;
+    }
+    if (input.kind === "display.completion" && current !== null
+      && current.display.completionOverride !== result.value.completionOverride) current = null;
+    if (input.kind === "display.presentation-detail" && current !== null
+      && current.display.presentationDetailOverride !== result.value.presentationDetailOverride) current = null;
+    if (input.kind === "display.subagents" && current !== null
+      && current.display.subagentsOverride !== result.value.subagentsOverride) current = null;
+    if (input.kind === "display.streaming" && current !== null
+      && current.display.streamingOverride !== result.value.streamingOverride) current = null;
+    if (input.kind === "display.routine-notifications" && current !== null
+      && current.display.routineNotificationsOverride !== result.value.routineNotificationsOverride) current = null;
+    if (input.kind === "display.commentary" && current !== null
+      && current.display.commentaryOverride !== result.value.commentaryOverride) current = null;
     try {
       state.audit.record({
         sessionId: principalId,

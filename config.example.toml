@@ -2,7 +2,8 @@ version = 1
 default_workspace = "main"
 
 [telegram]
-# 不使用 Telegram 时可删除本表，或将 bot_token 留空并把 allowed_user_ids 设为空数组。
+# 可在 Setup 中独立停用并保留凭据；未设置 enabled 时按非空 Token 判断启用。
+enabled = true
 bot_token = "你的_Bot_Token"
 allowed_user_ids = [123456789]
 message_format = "html"
@@ -19,6 +20,15 @@ enabled = false
 # enabled = false
 # account_id = "不透明账号@im.bot"
 # allowed_user_ids = ["不透明用户@im.wechat"]
+
+[qq]
+# QQ 单聊可通过 codexc setup 扫码或手工配置；群功能暂停开发并关闭。
+# 空单聊允许名单不会授权单聊用户；用户 OpenID 必须来自同一 QQ 应用。
+enabled = false
+# app_id = "1234567890"
+# app_secret = "你的_QQ_AppSecret"
+# allowed_user_openids = ["当前应用下的用户_OpenID"]
+# 已有 qq.groups 配置仅保留，不授予群输入、输出、审批或任务权限；无需删除配置。
 
 # 共享网络代理通过 codexc config 写入 ~/.codex/.env，不在 Gateway TOML 中保存。
 
@@ -61,20 +71,60 @@ timeout_seconds = 900
 idle_release_minutes = 15
 
 [display]
+# 显示预设可在 CLI/WebUI 一次应用：静默、紧凑、详细、完整；完整使用 operation_updates/presentation_detail = "full"。
 # 可通过 codexc config → Gateway 显示设置 → 模型统计分组维护；仅合并控制台按模型统计。
 # 模型选择和明细保留原模型；重新读取即生效，无需重启服务。
 # model_aliases = { "cline-pass/deepseek-v4.1-flash" = "deepseek-flash", "deepseek-v4.1-flash" = "deepseek-flash" }
-# full：完整详情；compact：单行摘要；hidden：隐藏操作过程。
+# full：完整详情；detailed：日常明细（正常详情单行最多 600 字符，失败/拒绝保留完整脱敏详情）；
+# compact：单行摘要；failures：仅 failed/declined；hidden：隐藏操作过程。
 operation_updates = "compact"
+# 可选子代理显示，缺省 true，不自动写入；关闭同时隐藏生命周期和子代理工具操作。
+# 其他工具仍按 operation_updates；正文、图片、审批与父轮完成或失败保留。
+# subagents = true
+# 可选流式显示，缺省 true，不自动写入；仅控制 Telegram、飞书与 QQ 单聊的正文增量预览。
+# 不改变上游模型流式、思考状态、完整正文、附件、授权或原窗口和交付义务。
+# 微信和 QQ 群覆盖严格拒绝 streaming（true/false）；QQ 渠道、账号层只作用其单聊。
+# streaming = true
+# 可选过程说明，缺省 true，不自动写入；Telegram、飞书和 QQ（含已支持群）支持。
+# 关闭只隐藏明确 phase=commentary 的新过程说明，不控制 reasoning 或原始推理。
+# 未知阶段增量暂不预览，待明确 final_answer 或完整消息再展示；未知阶段完整正文保留。
+# 已准入正文流与已有 pending 按原义务收尾；微信本来不展示 commentary，拒绝该覆盖。
+# commentary = true
+
+# 四渠道（含微信和 QQ 群）常规生命周期与成功提示，缺省开启且不自动写入。
+# 关闭不影响失败、拒绝、停止、重试、账号与额度、OAuth、需用户动作、正文附件、审批和命令回执。
+# 启动鉴权/健康异常、持久 Workspace 新增回执与已有待投递义务保留；支持同名五层覆盖。
+# 任一启用渠道的有效值变化需重启 Gateway；回退旧版前显式清除全局及覆盖字段，不自动迁移。
+# routine_notifications = true
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
 # 是否在渠道显示“思考中”状态卡；默认 false，不显示。
 reasoning = false
+# 可选完成通知：off 仅隐藏新成功通知；brief 精简；detailed 详细（缺省，不自动写入）。
+# 失败、停止、缺少最终回答和已有 pending 保留；精简不代表正文已送达。
+# completion = "detailed"
+# 可选消息详情：basic 基础（缺省，不自动写入）；detailed 保留会话摘要与本轮关键统计；
+# full 完整，展开环境、本轮统计分项及审批详情，过滤重复过程通知。
+# 独立于日志等级和调用采集，不改变任务、审批或完成通知开关。
+# presentation_detail = "basic"
+# 可选范围覆盖，普通读取不会生成。通过 codexc config 的“范围显示覆盖”或 WebUI 管理。
+# 全局 → 渠道 → 账号 → 账号聊天类型 → 指定聊天，字段缺失继承，false/hidden 保留。
+# surface 支持 telegram、feishu、qq、weixin；微信允许 completion/presentation_detail，chat_kind=group 仅 QQ。
+# account_id 使用 Gateway 账号标识：Telegram 为 default，飞书/QQ 为 AppID，微信为配置的 account_id。
+# [[display.overrides]]
+# surface = "qq"
+# account_id = "123456"
+# chat_kind = "group"
+# chat_id = "物理群OpenID"
+# operation_updates = "hidden"
+# subagents = false
+# plan_updates = false
 
 [debug]
 # Codex 与 Relay 共用的调用详情开关，写入 Gateway 数据目录下的 traffic，默认关闭；
 # Codex 重启 App Server 后生效；Relay 配置刷新后用于新请求。
-# 下方两项裁剪值同时为 0 表示全局调试模式，否则为生产模式；菜单预设分别是 0/0 和 3/65536。
+# 调用记录预设：仅 0/0 显示调试，3/65536 显示生产，其他合法组合显示自定义及实际值；
+# 不改变日志等级或开发运行方式。裁剪值用于 Codex；Relay 仅在 0/0 时增加入站与交付采集阶段。
 # V2 转储按逻辑模型调用保存一条请求和一个终态响应，完整 SSE/WS 传输轨迹另存为 trace；
 # 包含 prompt、工具输出和代码，但不包含 Authorization、Cookie 等凭据。写入失败不影响模型请求。
 model_traffic_dump = false

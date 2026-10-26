@@ -18,6 +18,7 @@ import type {
   ThreadQueuePort,
 } from "./thread-queue-port.js";
 import { pageCountFor, pageSelector, pageSlice, requirePage } from "./pagination.js";
+import type { QueueSubmissionObservation, ThreadQueueExecutionContext } from "./thread-queue-observer.js";
 
 export const maximumNativeQueueItems = 100;
 const nativeQueuePageSize = 25;
@@ -59,6 +60,7 @@ export class ThreadQueueService {
     target: ConversationTarget,
     value: string,
     assertAuthorized?: () => void,
+    observation?: QueueSubmissionObservation,
   ): Promise<ThreadQueueItem> {
     assertAuthorized?.();
     const threadId = this.requireCurrentThread(target);
@@ -69,14 +71,17 @@ export class ThreadQueueService {
       this.rejectPendingOverrides(target);
       const text = normalizeQueueText(value);
       beforeSubmit();
+      const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
+      observation?.prepare({ kind: "add", threadId, clientUserMessageId });
       try {
         const item = await queue.addQueueItem(
           threadId,
           text,
-          `${gatewayUserMessageClientIdPrefix}${randomUUID()}`,
-          beforeSubmit,
+          clientUserMessageId,
+          () => { beforeSubmit(); observation?.attempt(); },
         );
         this.invalidateSnapshot(threadId);
+        observation?.confirm({ kind: "add", threadId, queuedSubmissionId: item.id, clientUserMessageId: item.clientUserMessageId });
         return item;
       } catch (error) {
         throw queueUserFacingError(error, "add");
@@ -156,6 +161,7 @@ export class ThreadQueueService {
     target: ConversationTarget,
     selector: string,
     assertAuthorized?: () => void,
+    onDeleted?: ThreadQueueExecutionContext["deleted"],
   ): Promise<{ deleted: boolean }> {
     assertAuthorized?.();
     const threadId = this.requireCurrentThread(target);
@@ -168,6 +174,13 @@ export class ThreadQueueService {
       try {
         const result = await queue.deleteQueueItem(threadId, item.id, beforeSubmit);
         this.invalidateSnapshot(threadId);
+        if (result.deleted === true && onDeleted) {
+          const observed: unknown = onDeleted(Object.freeze({ threadId, queuedSubmissionId: item.id }));
+          if (observed !== undefined) {
+            void Promise.resolve(observed).catch(() => undefined);
+            throw new Error("Queue 删除观察必须同步返回 undefined");
+          }
+        }
         return result;
       } catch (error) {
         throw queueUserFacingError(error, "delete");
@@ -210,6 +223,7 @@ export class ThreadQueueService {
     target: ConversationTarget,
     selector?: string,
     assertAuthorized?: () => void,
+    observation?: QueueSubmissionObservation,
   ): Promise<{ turnId: string }> {
     assertAuthorized?.();
     const threadId = this.requireCurrentThread(target);
@@ -220,14 +234,24 @@ export class ThreadQueueService {
       this.rejectPendingOverrides(target);
       let queuedSubmissionId: string | undefined;
       if (selector?.trim()) {
-        queuedSubmissionId = (
-          await this.resolveSelectorSnapshot(target, threadId, selector, beforeSubmit)
-        ).item.id;
+        const { item } = await this.resolveSelectorSnapshot(target, threadId, selector, beforeSubmit);
+        queuedSubmissionId = item.id;
+        observation?.prepare({ kind: "start", threadId, queuedSubmissionId, clientUserMessageId: item.clientUserMessageId });
+      } else if (observation) {
+        const { items } = await this.readSnapshot(threadId, beforeSubmit);
+        const item = items[0];
+        if (!item) throw new UserFacingError("queue.empty", "App Server Queue 为空");
+        queuedSubmissionId = item.id;
+        observation.prepare({ kind: "start", threadId, queuedSubmissionId, clientUserMessageId: item.clientUserMessageId });
       }
       beforeSubmit();
       try {
-        const result = await queue.startQueueItem(threadId, queuedSubmissionId, beforeSubmit);
+        const result = await queue.startQueueItem(threadId, queuedSubmissionId, () => {
+          beforeSubmit();
+          observation?.attempt();
+        });
         this.invalidateSnapshot(threadId);
+        observation?.confirm({ kind: "start", threadId, turnId: result.turnId });
         return result;
       } catch (error) {
         throw queueUserFacingError(error, "start");

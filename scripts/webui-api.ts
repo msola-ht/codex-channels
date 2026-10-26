@@ -463,7 +463,8 @@ export interface SettingsSummaryResponse {
   revision: string
   gateway: {
     display: {
-      operationUpdates: "full" | "compact" | "hidden"
+      operationUpdates: "full" | "detailed" | "compact" | "failures" | "hidden"
+      subagentsEnabled: boolean
       planUpdatesEnabled: boolean
       reasoningEnabled: boolean
       modelAliases: Record<string, string>
@@ -472,7 +473,9 @@ export interface SettingsSummaryResponse {
       approvalTimeoutSeconds: number
       defaultWorkspace: string | null
       defaultModel: string | null
-      modelTrafficMode: "production" | "debug"
+      modelTrafficMode: "production" | "debug" | "custom"
+      modelTrafficInputItems: number
+      modelTrafficItemMaxBytes: number
       modelTrafficDumpEnabled: boolean
       modelTrafficRetentionDays: number
     }
@@ -485,7 +488,7 @@ export interface SettingsSummaryResponse {
     metrics: {
       storage: { retentionDays: number; maxRows: number }
     }
-    channels: Array<{ id: "telegram" | "feishu" | "weixin"; displayName: string; configured: true; enabled: boolean }>
+    channels: Array<{ id: "telegram" | "feishu" | "weixin" | "qq"; displayName: string; configured: true; enabled: boolean }>
   }
   services: {
     available: boolean
@@ -561,8 +564,8 @@ export interface ManagementProvidersResponse {
 
 export interface ManagementSettingsResponse {
   revision: string
-  display: SettingsSummaryResponse["gateway"]["display"]
-  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
+  display: SettingsSummaryResponse["gateway"]["display"] & Pick<import("./config-management.mjs").GatewaySettings["display"], "preset" | "globalScope" | "scopes" | "targetsStatus" | "completion" | "completionOverride" | "subagentsOverride" | "streamingEnabled" | "streamingOverride" | "commentaryEnabled" | "commentaryOverride" | "routineNotificationsEnabled" | "routineNotificationsOverride" | "presentationDetail" | "presentationDetailOverride">
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficInputItems" | "modelTrafficItemMaxBytes" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {
       followCliVersion: boolean

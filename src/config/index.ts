@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 
 import {
+  isTelegramEnabled,
   materializeGatewayConfigDefaults,
   parseGatewayConfig,
   validateCodexConfigDocument,
@@ -22,6 +23,9 @@ import {
 import { assertPrivateConfigAccessSync } from "../../runtime/private-file.mjs";
 import { inspectWorkspaceDirectory } from "../../runtime/workspace-directory.mjs";
 
+export type { MessageDisplayTarget, MessageDisplaySettings, MessageDisplayConfiguration } from "../../runtime/message-display-policy.mjs";
+export { resolveMessageDisplaySettings, inspectMessageDisplayScope, identifyMessageDisplayPreset, supportedMessageDisplayFields, messageDisplayFields } from "../../runtime/message-display-policy.mjs";
+
 export {
   configChange,
   includesConfigChange,
@@ -30,6 +34,7 @@ export {
   type ConfigChangeScope,
   type FeishuConfigChangeCode,
   type GlobalConfigChangeCode,
+  type QQConfigChangeCode,
   type TelegramConfigChangeCode,
   type WeixinConfigChangeCode,
 } from "./config-change.js";
@@ -39,6 +44,7 @@ export {
 } from "./reload-classifier.js";
 
 export interface GatewayConfig {
+  readonly messageDisplay: import("../../runtime/message-display-policy.mjs").MessageDisplayConfiguration;
   modelRelay?: import("../../runtime/model-relay-config.mjs").ModelRelayConfig;
   telegramEnabled: boolean;
   telegramBotToken: string;
@@ -53,6 +59,16 @@ export interface GatewayConfig {
   weixin?: {
     accountId: string;
     allowedUserIds: ReadonlySet<string>;
+  };
+  qq?: {
+    appId: string;
+    appSecret: string;
+    allowedUserOpenIds: ReadonlySet<string>;
+    groups?: readonly {
+      groupOpenId: string;
+      allowedMemberOpenIds: ReadonlySet<string>;
+      allowPublicOutput: true;
+    }[];
   };
   codexBinary: string;
   networkProxy: {
@@ -99,13 +115,7 @@ export interface ConfiguredWorkspace {
   cwd: string;
 }
 
-export type OperationUpdateDisplay = "full" | "compact" | "hidden";
-
-export function isDebugLogLevel(
-  level: GatewayConfig["logLevel"],
-): boolean {
-  return level === "debug" || level === "trace";
-}
+export type OperationUpdateDisplay = "full" | "detailed" | "compact" | "failures" | "hidden";
 
 export class ConfigurationError extends Error {}
 
@@ -257,7 +267,7 @@ function loadValidatedConfigDocument(
     throw new ConfigurationError(error instanceof Error ? error.message : String(error));
   }
   return {
-    telegramEnabled: Boolean(raw.telegram?.bot_token?.trim()),
+    telegramEnabled: isTelegramEnabled(raw.telegram),
     telegramBotToken: raw.telegram?.bot_token ?? "",
     telegramAllowedUserIds: new Set(raw.telegram?.allowed_user_ids ?? []),
     ...(proxyUrl ? { telegramProxyUrl: proxyUrl } : {}),
@@ -279,6 +289,22 @@ function loadValidatedConfigDocument(
           },
         }
       : {}),
+    ...(raw.qq?.enabled
+      ? {
+          qq: {
+            appId: raw.qq.app_id,
+            appSecret: raw.qq.app_secret,
+            allowedUserOpenIds: new Set(raw.qq.allowed_user_openids),
+            ...(raw.qq.groups === undefined ? {} : {
+              groups: raw.qq.groups.map(group => ({
+                groupOpenId: group.group_openid,
+                allowedMemberOpenIds: new Set(group.allowed_member_openids),
+                allowPublicOutput: group.allow_public_output,
+              })),
+            }),
+          },
+        }
+      : {}),
     codexBinary,
     networkProxy: {
       ...(proxyEnvironment.HTTP_PROXY ? { http: proxyEnvironment.HTTP_PROXY } : {}),
@@ -295,6 +321,18 @@ function loadValidatedConfigDocument(
     ...(clientIdentity
       ? { codexClientIdentity: clientIdentity }
       : {}),
+    messageDisplay: {
+      operation_updates: raw.display.operation_updates,
+      ...(raw.display.subagents === undefined ? {} : { subagents: raw.display.subagents }),
+      ...(raw.display.streaming === undefined ? {} : { streaming: raw.display.streaming }),
+      ...(raw.display.commentary === undefined ? {} : { commentary: raw.display.commentary }),
+      ...(raw.display.routine_notifications === undefined ? {} : { routine_notifications: raw.display.routine_notifications }),
+      plan_updates: raw.display.plan_updates,
+      reasoning: raw.display.reasoning,
+      ...(raw.display.completion === undefined ? {} : { completion: raw.display.completion }),
+      ...(raw.display.presentation_detail === undefined ? {} : { presentation_detail: raw.display.presentation_detail }),
+      ...(raw.display.overrides === undefined ? {} : { overrides: raw.display.overrides }),
+    },
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
     reasoningEnabled: raw.display.reasoning,

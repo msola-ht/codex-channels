@@ -1,4 +1,4 @@
-import { isPersistentOutput } from "../persistent-output.js";
+import { isPersistentOutput, isSupportedPersistentOutput } from "../persistent-output.js";
 import { SnapshotDelivery } from "../snapshot-delivery.js";
 import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
@@ -13,21 +13,24 @@ import type {
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { ContextCompactionNotices } from "../operation-presentation.js";
-import { resolveSurfaceDelivery, surfaceDeliveryCoalesceKey } from "../delivery-policy.js";
+import { resolveSurfaceDelivery, shouldHideRoutineNotification, surfaceDeliveryCoalesceKey } from "../delivery-policy.js";
 import { exponentialRetryDelay, withDeliveryRetry } from "../delivery-retry.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
-import type { SurfaceOutputPort } from "../types.js";
+import type { SurfaceOutputPort, SurfaceMessageDisplaySettings, SurfaceDeliverySource } from "../types.js";
+import { assertChannelFileName, assertWeixinChannelMediaBytes, maximumWeixinChannelFileBytes, readBoundedLocalFile, type ChannelFileMediaType } from "../bounded-local-file.js";
 import {
   createTurnStartedPresentation,
   createAutoApprovalReviewPresentation,
   createHookCompletedPresentation,
   isHiddenAutoApprovalReview,
+  shouldHideTurnCompleted,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
   contentTruncatedText,
   emptyCodexResponseText,
   formatCodexWarning,
+  formatConnectionRestored,
   formatConversationIdleReleased,
   visibleUpstreamMessage,
 } from "../output-copy.js";
@@ -53,6 +56,7 @@ import {
   renderWeixinTurnCompleted,
 } from "./command-renderer.js";
 import { formatWeixinFinalText } from "./final-text-format.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
@@ -64,6 +68,7 @@ const fileFailureNotice = "[文件发送失败，已改为分段文本]\n\n";
 const finalAnswerFileName = "codex-final-answer.txt";
 
 export type WeixinOutboxErrorCode =
+  | "markdown-layout-too-long"
   | "image-sender-unavailable"
   | "missing-reply-context"
   | "unauthorized-recipient";
@@ -76,13 +81,9 @@ export class WeixinOutboxError extends Error {
 }
 
 export interface WeixinOutboxOptions {
+  displaySettings?: SurfaceMessageDisplaySettings;
   capacity?: number;
   closeTimeoutMs?: number;
-  autoCompactPercent?: (
-    provider: string | null | undefined,
-    model: string | null | undefined,
-  ) => number | null;
-  debugEnabled?: boolean;
   onReplyContextInvalidated?: (
     target: ConversationTarget,
     expectedContextToken?: string,
@@ -113,11 +114,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
     this.accountId = validateWeixinAccountId(accountId);
     this.logger = logger;
     this.client = {
-      sendText: (input, signal) => this.withSendRetry(
+      sendText: (input, signal, beforeSend) => this.withSendRetry(
         "sendText",
-        () => (signal === undefined
-          ? client.sendText(input)
-          : client.sendText(input, signal)),
+        () => {
+          beforeSend?.();
+          return client.sendText(input, signal, beforeSend);
+        },
         signal,
       ),
     };
@@ -134,7 +136,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     });
   }
 
-  handle(event: OutputEvent): void {
+  handle(event: OutputEvent, context?: { liveAdmitted: true; completion?: "brief" | "detailed" }, signal?: AbortSignal): void | Promise<void> {
     if (
       this.closed
       || event.target.surface !== "weixin"
@@ -143,7 +145,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     if (!DeliveryReceipt.current()) this.observe(event);
-    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+    if (!DeliveryReceipt.current() && event.type === "turn.completed" && !context?.completion && this.shouldSettleLiveCompletion(event)) {
+      return this.settleLiveCompletion(event, signal ?? new AbortController().signal, () => true);
+    }
+    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event, context?.completion));
   }
 
   observe(event: OutputEvent): void {
@@ -162,22 +167,51 @@ export class WeixinOutbox implements SurfaceOutputPort {
   }
 
   retains(event: OutputEvent): boolean {
+    if (shouldHideRoutineNotification(event, this.options.displaySettings?.(event.target).routineNotificationsEnabled ?? true)) return false;
+    if (event.type === "turn.completed" && this.shouldSettleLiveCompletion(event)) return false;
     return isPersistentOutput(event);
   }
 
-  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
+  liveCompletionDisplay(event: Extract<OutputEvent, { type: "turn.completed" }>): "off" | "brief" | "detailed" {
+    const mode = this.options.displaySettings?.(event.target).completion ?? "detailed";
+    return mode === "off" && !shouldHideTurnCompleted(event, mode) ? "detailed" : mode;
+  }
+
+  shouldSettleLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>): boolean {
+    return this.liveCompletionDisplay(event) === "off";
+  }
+
+  async settleLiveCompletion(event: Extract<OutputEvent, { type: "turn.completed" }>, signal: AbortSignal, authorized: () => boolean): Promise<void> {
+    const actorId = this.contexts.get(event.target)?.actorId ?? event.target.conversationId;
+    await this.snapshots.run(event, signal, () => authorized() && !this.closed && this.matches(event.target)
+      && this.access.isAllowed({ target: event.target, actorId }), () => this.discardLiveCompletion(), false);
+  }
+
+  discardLiveCompletion(): void {
+    // Weixin owns no Turn stream. Its incoming reply context belongs to the
+    // Conversation; hiding a notification must not invalidate or consume it.
+  }
+
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized?: () => boolean, _source?: SurfaceDeliverySource, context?: { completion: "brief" | "detailed" }): Promise<void> {
     if (this.closed || !this.matches(event.target)) throw new Error("可靠输出目标无效或已关闭");
     signal.throwIfAborted();
     if (isHiddenAutoApprovalReview(event)) return;
-    if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
+    if (!isSupportedPersistentOutput(event) || resolveSurfaceDelivery("weixin", event).disposition === "ignore") {
+      throw new Error("微信持久输出类型不受支持");
+    }
     await captureDelivery(() => {
-      this.handle(event);
-    }, signal, checkpoint);
+      void this.handle(event, { liveAdmitted: true, completion: context?.completion ?? "detailed" });
+    }, signal, checkpoint, { requireConfirmation: true, beforeSend: () => {
+      signal.throwIfAborted();
+      if (this.closed || authorized?.() !== true) throw new Error("微信可靠输出授权已变化");
+    } });
   }
 
-  private handleEvent(event: OutputEvent): void {
+  private handleEvent(event: OutputEvent, completion?: "brief" | "detailed"): void {
+    if (DeliveryReceipt.current()?.transient !== false
+      && shouldHideRoutineNotification(event, this.options.displaySettings?.(event.target).routineNotificationsEnabled ?? true)) return;
     // 渠道投递策略只在这里判定一次：微信的单次回复窗口只保留生命周期、终态与全局空闲
-    // 通知和上下文压缩，推理、计划、其他操作、连接等事件不占用该预算（详见 delivery-policy.ts）。
+    // 通知、连接恢复和上下文压缩，推理、计划、其他操作不占用该预算（详见 delivery-policy.ts）。
     const decision = resolveSurfaceDelivery("weixin", event);
     if (decision.disposition === "ignore") {
       return;
@@ -203,7 +237,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       );
       return;
     }
-    const rendered = this.render(event);
+    const rendered = this.render(event, completion);
     if (rendered === null) {
       return;
     }
@@ -309,17 +343,20 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private assertSendActive(signal?: AbortSignal): void {
     signal?.throwIfAborted();
     if (this.closed) throw new Error("微信输出队列已关闭");
+    DeliveryReceipt.current()?.beforeSend?.();
   }
 
-  private render(event: OutputEvent): string | null {
+  private render(event: OutputEvent, completion?: "brief" | "detailed"): string | null {
     switch (event.type) {
+      case "connection.restored":
+        return formatWeixinCommandText(formatConnectionRestored(visibleUpstreamMessage(event.message)));
       case "hook.completed":
         return formatWeixinCommandText(
           renderPlainLifecyclePresentation(createHookCompletedPresentation(event)),
           { structuredFields: true },
         );
       case "autoApprovalReview.updated": {
-        const presentation = createAutoApprovalReviewPresentation(event);
+        const presentation = createAutoApprovalReviewPresentation(event, this.options.displaySettings?.(event.target).presentationDetail ?? "basic");
         return presentation ? formatWeixinCommandText(
           renderPlainLifecyclePresentation(presentation),
           { structuredFields: true },
@@ -338,8 +375,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return formatWeixinCommandText(
           renderWeixinTurnCompleted(
             event,
-            this.options.debugEnabled ?? false,
-            this.options.autoCompactPercent,
+            this.options.displaySettings?.(event.target).presentationDetail ?? "basic",
+            completion ?? (this.liveCompletionDisplay(event) === "brief" ? "brief" : "detailed"),
           ),
           { structuredFields: true },
         );
@@ -365,7 +402,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     this.assertSendActive(signal);
     if (
       event.type === "text.completed"
-      && text.length > weixinTextCapacity(text, maximumChunks)
+      && planWeixinText(text, maximumChunks).truncated
       && await this.sendLongFinalAnswer(event.target, text, event.text, signal, context)
     ) {
       return;
@@ -393,12 +430,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
     ) {
       return false;
     }
-    const previewLength = safePrefixLength(
+    const [previewContent, remainingContent] = splitWeixinMarkdownChunk(
       text,
       maximumChunkCharacters - previewNotice.length,
     );
     DeliveryReceipt.current()?.markContentIncomplete();
-    const preview = text.slice(0, previewLength) + previewNotice;
+    const preview = previewContent + previewNotice;
     await this.send(target, preview, maximumChunks, signal, context);
     if (!this.access.isAllowed({
       target,
@@ -417,11 +454,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
         file,
       };
       try {
+        const ownerGuard = DeliveryReceipt.current()?.beforeSend;
+        const beforeSend = ownerGuard === undefined ? undefined : (): undefined => { ownerGuard(); };
         await checkpointDelivery("sendFile", () => this.withSendRetry(
           "sendFile",
-          () => (signal
-            ? fileClient.sendFile(input, signal)
-            : fileClient.sendFile(input)),
+          () => fileClient.sendFile(input, signal, beforeSend),
           signal,
         ), isDefinitelyRejectedWeixinSend);
         DeliveryReceipt.current()?.confirmCompleteContent();
@@ -439,7 +476,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       }
       await this.send(
         target,
-        fileFailureNotice + text.slice(previewLength),
+        fileFailureNotice + remainingContent,
         maximumChunks - 1,
         signal,
         context,
@@ -465,7 +502,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
       actorId: target.conversationId,
       contextToken: undefined,
     };
-    for (const chunk of splitWeixinText(text, maximumChunkCount)) {
+    const plan = planWeixinText(text, maximumChunkCount);
+    if (plan.truncated) DeliveryReceipt.current()?.markContentIncomplete();
+    const actorId = context.actorId;
+    // Keep both the result owner and current recipient authorization across
+    // retry waits and asynchronous credential acquisition, through to HTTP.
+    const beforeSend = (): undefined => {
+      this.assertSendActive(signal);
+      if (!this.access.isAllowed({ target, actorId })) throw new WeixinOutboxError("unauthorized-recipient");
+      return undefined;
+    };
+    for (const chunk of plan.chunks) {
       this.assertSendActive(signal);
       if (!this.access.isAllowed({
         target,
@@ -482,11 +529,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
             : { contextToken: context.contextToken }),
           text: chunk,
         };
-        if (signal) {
-          await checkpointDelivery("sendText", () => this.client.sendText(input, signal), isDefinitelyRejectedWeixinSend);
-        } else {
-          await checkpointDelivery("sendText", () => this.client.sendText(input), isDefinitelyRejectedWeixinSend);
-        }
+        await checkpointDelivery("sendText", () => this.client.sendText(input, signal, beforeSend), isDefinitelyRejectedWeixinSend);
       } catch (error) {
         if (isRejectedReplyContext(error)) {
           await this.invalidateContext(target, context.contextToken);
@@ -501,7 +544,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
     path: string,
     signal?: AbortSignal,
     context = this.contexts.get(target),
+    beforeSend?: () => undefined,
   ): Promise<void> {
+    beforeSend?.();
     this.assertSendActive(signal);
     context ??= {
       actorId: target.conversationId,
@@ -536,6 +581,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
       image,
     };
     try {
+      if (beforeSend) {
+        await checkpointDelivery("sendImage", () => client.sendImage(input, signal, beforeSend), isDefinitelyRejectedWeixinSend);
+        return;
+      }
       await checkpointDelivery("sendImage", () => this.withSendRetry(
         "sendImage",
         () => (signal
@@ -554,16 +603,53 @@ export class WeixinOutbox implements SurfaceOutputPort {
   sendChannelImage(
     target: ConversationTarget,
     imagePath: string,
+    isCurrent: () => boolean,
+    signal?: AbortSignal,
   ): Promise<void> {
+    const context = this.contexts.get(target);
     return this.delivery.runOrdered(
       target.conversationId,
-      (signal) => this.sendImage(
+      (active) => this.sendImage(
         target,
         imagePath,
-        signal,
-        this.contexts.get(target),
+        active,
+        context,
+        () => this.assertExplicitMediaCurrent(target, context, isCurrent, active),
       ),
+      signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
     );
+  }
+
+  sendChannelFile(target: ConversationTarget, path: string, fileName: string, isCurrent: () => boolean, mediaType: ChannelFileMediaType = "file", signal?: AbortSignal): Promise<void> {
+    const context = this.contexts.get(target);
+    const lifetime = AbortSignal.any([AbortSignal.timeout(120_000), ...(signal ? [signal] : [])]);
+    return this.delivery.runOrdered(target.conversationId, async active => {
+      const guard = () => this.assertExplicitMediaCurrent(target, context, isCurrent, active);
+      guard();
+      assertChannelFileName(fileName);
+      const bytes = await readBoundedLocalFile(path, maximumWeixinChannelFileBytes);
+      assertWeixinChannelMediaBytes(bytes, mediaType);
+      guard();
+      const client = this.options.fileClient;
+      if (!client) throw new Error("微信文件发送不可用");
+      try {
+        await checkpointDelivery("sendFile", () => client.sendFile({ actorId: context!.actorId,
+          contextToken: context!.contextToken!, fileName, file: bytes, mediaType }, active, guard), isDefinitelyRejectedWeixinSend);
+      } catch (error) {
+        if (isRejectedReplyContext(error)) await this.invalidateContext(target, context?.contextToken);
+        throw error;
+      }
+    }, lifetime);
+  }
+
+  private assertExplicitMediaCurrent(target: ConversationTarget, context: ReturnType<WeixinReplyContextStore["get"]>, isCurrent: () => boolean, signal: AbortSignal): undefined {
+    this.assertSendActive(signal);
+    const latest = this.contexts.get(target);
+    if (!isCurrent() || !context?.contextToken || latest?.contextToken !== context.contextToken
+      || latest.actorId !== context.actorId || !this.access.isAllowed({ target, actorId: context.actorId })) {
+      throw new Error("微信原 Thread、授权或回复上下文已失效");
+    }
+    return undefined;
   }
 
   private async invalidateContext(
@@ -617,41 +703,63 @@ export class WeixinOutbox implements SurfaceOutputPort {
   }
 }
 
-function splitWeixinText(
+function planWeixinText(
   value: string,
   maximumChunkCount = maximumChunks,
-): string[] {
-  const maximumCharacters = weixinTextCapacity(value, maximumChunkCount);
+): { chunks: string[]; truncated: boolean } {
   let text = value;
-  if (text.length > maximumCharacters) {
-    DeliveryReceipt.current()?.markContentIncomplete();
-    text = safePrefix(
-      text,
-      maximumCharacters - truncationNotice.length,
-    ) + truncationNotice;
-  }
   const chunks: string[] = [];
-  while (text.length > 0) {
-    const end = safePrefixLength(text, maximumChunkCharacters);
-    chunks.push(text.slice(0, end));
-    text = text.slice(end);
+  while (text.length > maximumChunkCharacters && chunks.length < maximumChunkCount - 1) {
+    const [head, tail] = splitWeixinMarkdownChunk(text, maximumChunkCharacters);
+    chunks.push(head);
+    text = tail;
   }
-  return chunks.length === 0 ? [emptyCodexResponseText] : chunks;
+  const truncated = text.length > maximumChunkCharacters;
+  if (truncated) {
+    const [head] = splitWeixinMarkdownChunk(text, maximumChunkCharacters - truncationNotice.length);
+    chunks.push(head + truncationNotice);
+  } else if (text.length > 0) chunks.push(text);
+  return { chunks: chunks.length === 0 ? [emptyCodexResponseText] : chunks, truncated };
 }
 
-/** Count the actual prefix fitting in the bubble budget, including surrogate boundaries. */
-function weixinTextCapacity(value: string, maximumChunkCount: number): number {
-  let offset = 0;
-  for (let chunk = 0; chunk < maximumChunkCount && offset < value.length; chunk += 1) {
-    let end = Math.min(value.length, offset + maximumChunkCharacters);
-    if (end < value.length && isHighSurrogate(value.charCodeAt(end - 1))) end -= 1;
-    offset = end;
+/** Keep each bubble's code region complete; added delimiters consume the same UTF-16 budget. */
+function splitWeixinMarkdownChunk(text: string, limit: number): [string, string] {
+  let end = safePrefixLength(text, limit);
+  const newline = text.lastIndexOf("\n", end - 1);
+  if (newline >= Math.floor(end * 0.75)) end = newline + 1;
+  while (end > 0) {
+    let offset = 0;
+    let fence: MarkdownFence | undefined;
+    let delimiterStart: number | undefined;
+    for (const line of text.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
+      const next = advanceMarkdownFence(fence, line);
+      if (offset < end && offset + line.length > end && next !== fence) {
+        delimiterStart = offset;
+        break;
+      }
+      if (offset + line.length > end) break;
+      fence = next;
+      offset += line.length;
+      if (offset >= end) break;
+    }
+    if (delimiterStart !== undefined) {
+      end = delimiterStart;
+      continue;
+    }
+    const head = text.slice(0, end);
+    const closing = fence === undefined ? "" : `${head.endsWith("\n") ? "" : "\n"}${fence.marker}`;
+    if (end + closing.length > limit) {
+      end = safePrefixLength(text, limit - closing.length);
+      const previousNewline = text.lastIndexOf("\n", end - 1);
+      if (previousNewline >= Math.floor(end * 0.75)) end = previousNewline + 1;
+      continue;
+    }
+    const tail = fence === undefined ? text.slice(end) : `${fence.opening}\n${text.slice(end)}`;
+    if (tail.length >= text.length) break;
+    return [head + closing, tail];
   }
-  return offset;
-}
-
-function safePrefix(value: string, maximumLength: number): string {
-  return value.slice(0, safePrefixLength(value, maximumLength));
+  // A delimiter that cannot fit must not be sliced into executable-looking prose.
+  throw new WeixinOutboxError("markdown-layout-too-long");
 }
 
 function safePrefixLength(value: string, maximumLength: number): number {

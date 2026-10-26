@@ -1,16 +1,40 @@
 # Surface Adapters
 
+`SurfaceOutputPort.acceptsSnapshot` 是可选的实时快照显示准入；Bootstrap 在状态观察和旧快照取代之后、捕获 owner 和排队之前调用，缺省保留既有行为。它不替代来源授权，不用于持久记录重放，也不门控隐藏完成的独立收尾。QQ 复用现有显示判定，避免已隐藏的新状态因未捕获来源而误报归属变化；真实来源缺失仍由投递守卫处理。
+
+正文流式显示由目标 `streamingEnabled` 控制，缺省开启；关闭只停止新 `text.delta` 预览，完整 `text.completed`、附件和可靠投递保持独立。它不改变模型传输、思考状态或其他原地更新。Telegram、飞书与 QQ 单聊消费该设置；微信及 QQ 群不开放无效覆盖。已有流的完整终结仍走原收尾逻辑，存量完成正文不按新设置隐藏。
+
+过程说明由目标 `commentaryEnabled` 控制，缺省开启，Telegram、飞书、QQ 单群聊支持，微信不开放。共享 `delivery-policy.ts` 仅依据显式 phase 分类；关闭后未知阶段增量在各渠道既有有界流中缓冲，明确 final_answer 才放行完整前缀。未知完整 Item 始终保留，已准入预览继续原收尾，旧持久记录独立于当前开关。Telegram、飞书在 Turn 结束或关闭时丢弃尚未准入且没有完整 Item 终态所有者的缓冲，不能以收尾代替 phase 准入。观察阶段先清理明确隐藏的未显示缓冲，再决定新事件准入；不建立第二份正文历史。
+
+Telegram 既有空白 commentary 的明确省略特例保持不变；该设置不把旧增量替换为空白完成 Item 的权威正文，也不为它新增成功确认。
+
+常规通知由目标 `routineNotificationsEnabled` 控制，四渠道均支持，缺省开启。`delivery-policy.ts` 按结构化事件区分普通成功提示与需要关注的结果；状态观察、授权和原持久义务独立。Gateway 上线摘要、App Server 连接恢复、会话空闲释放和全局空闲释放不受常规通知开关控制；微信恢复提示沿原回复上下文和配额发送；配置只有 live 普通提示可隐藏，持久工作区回执仍需原交付确认。失败、重试、账户/额度、OAuth、审批及主动命令不由该开关屏蔽。
+
+[QQ](qq/README.md) 已接入文字任务、命令菜单、共享持久投递及审批/问题回应；图片、文本/普通文件、原生引用、音视频输入、原生 Queue、计划任务和当次配置通知已随 `9c0d3488` 部署，具体客户端证据与待验收范围见模块文档。部署就绪不代表所有分支验收完成，旧来源仍不恢复。
+
 本目录保存外部交互平台适配器。Surface 负责把平台输入转换为 Application 命令，并把 Core 输出和审批交互渲染为平台消息。
 
-`index.ts` 是 Gateway 装配各 Surface 的主公开入口；通过显式异步加载函数提供三个渠道实现，
+`SurfaceMessageDisplaySettings` 是组合根注入的窄展示解析回调，以原始 `ConversationTarget` 选择工具、计划、思考、完成通知及呈现详情；Telegram、飞书 Outbox 和 QQ 消息准入、任务进度及异步渲染使用同一目标设置。微信消费完成通知和呈现详情，继续不开放这些过程输出。`presentationDetail` 只选择上线会话和完成、子代理的关键明细，不决定消息准入或投递确认，也不读取日志等级；`basic` 使用紧凑摘要，`detailed` 增加本轮统计总计，不展开统计子项；`full` 展开现有环境、统计分项和审批详情，仍不复制正文或会话累计。独立装配未注入回调时保留各渠道原来的过程选项默认值，完成通知默认 `detailed`，呈现详情默认 `basic`。新实时事件按有效设置准入，已保留的终态只选择版式，不重新以 `hidden`/`compact` 过滤。
+
+完成通知 `brief` 呈现实际执行状态、上下文占用、后台身份和必要异常，不因呈现详情 `detailed` 展开统计；它不确认正文送达。`off` 只省略成功且无错误、错误码及权威缺正文标记的新完成通知。`liveCompletionDisplay` 在实时准入时固定模式；`shouldSettleLiveCompletion`、`settleLiveCompletion` 与 `discardLiveCompletion` 分离新事件的隐藏收尾、受原授权的瞬态操作和精确 Turn 的无发送清理。收尾复用原 Conversation 队列及瞬态回执，等待嵌套操作结算，不生成 Journal 记录或持久确认，也不受普通状态快照替换。持久 `deliver` 的可选完成上下文只由本次实时准入传递；恢复或未提供上下文时完成通知固定使用 `detailed`，统计明细按当前目标的呈现详情选择，不查询当前完成偏好而空确认，也不增加持久字段。流式正文失败的独立提示仍复核原授权。
+
+`index.ts` 是 Gateway 装配各 Surface 的主公开入口；通过显式异步加载函数提供飞书、微信、Telegram 和 QQ 四个消息渠道，
 纯共享能力与凭据检查不静态加载飞书或 Telegram SDK。
 该入口也向本机图片提交命令公开 `readGeneratedImage` 与 `GeneratedImageError`，复用普通文件、符号链接、大小与格式校验；读取后的字节才允许进入渠道待发送目录。
 
+`sendChannelImage` 的可选 `format: "markdown"` 当前仅 QQ 支持，由 SurfaceManager 拒绝其他渠道使用；缺省继续普通图片。QQ 使用相同队列、原绑定守卫和收据，素材上传不单独认定图片送达。
+
+显式文件发送现覆盖 QQ/飞书/TG/微信，CLI、spool 和路由通过 `channelFilePolicy` 共享渠道准入与预算，Adapter 负责平台协议。MP4 和 Ogg/Opus 的受控文件头检查共用；微信原生 voice 不开放。TG/微信显式图片和文件现消费原 Thread 守卫及领取器取消信号，不因后台 Thread 解绑而改投前台；微信固定入队时回复上下文。新增支持不改变文件 version 1 manifest，不迁移用户数据，未部署或实机验收。
+
 `delivery-diagnostics/index.ts` 是离线投递诊断的窄公开入口，仅复用载荷解码和屏障分类，不加载平台 SDK 或数据库实现。
+`SurfaceOutputPort.deliver` 的可选来源参数由持久 owner 解析后传入，富化不重选来源；QQ 用它校验并取得原生引用索引。来源本身不授予发送权限，各渠道继续执行原授权守卫，不消费该参数的渠道保持原行为。
 `persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，持久结果发送未知或授权失效后解除顺序屏障并保留记录、检查点与容量计费，并将必要图片纳入同一有界快照；
+载荷 v1 支持分类独立于当前显示偏好和渠道实时准入。`retains` 只决定新事件是否入箱；已入箱操作即使后来改为 `hidden`，或在 `compact` 下属于省略的 sleep/子代理操作，也保留可见的完整或精简终态表示。恢复不保证与原来版式相同，不新增持久字段。发送仍复核原授权、来源、回复窗口和渠道支持；微信不因此开放普通操作或子代理输出。
 生成图片的上游 `fileId` 只在实时事件中传递，写入快照前一律剥离；只有引用、没有 `savedPath` 的完成结果仅保留内容不可获取标记，恢复后沿用相同提示，不把引用写入投递 Journal。
+`SurfaceOutputPort.deliver` 的原归属授权回调由飞书、Telegram、微信显式保存为回执的同步 `beforeSend` 守卫，缺失回调时拒绝实际发送；既有无消息展示特例不伪造送达确认。守卫随队列及子回执保留，在检查点写入前后、SDK 的后续请求或重试前重新核对；状态快照同样携带自己的授权守卫。QQ 继续使用原有来源守卫，不因共享回执扩展而增加发送权限。
+
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
-等待实际操作结算，Bootstrap 才能确认持久记录；TG/飞书可靠正文还要求存在平台成功检查点，排队终态持有正文引用，独立于断线清理的临时流缓存；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。`snapshot-delivery.ts` 将状态展示的失效信号与排队操作关联；`SurfaceOutputPort.deliverSnapshot`
+等待实际操作结算，Bootstrap 才能确认持久记录；TG/飞书/微信可靠输出要求存在平台成功检查点，排队终态持有正文引用，独立于断线清理的临时流缓存；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。既有空白 commentary 和隐藏自动审批展示特例保持原有明确结算规则，不据此推导其他空发送成功。`snapshot-delivery.ts` 将状态展示的失效信号与排队操作关联；`SurfaceOutputPort.deliverSnapshot`
 允许按展示规则不产生消息，等待实际状态操作结束，并在平台调用前复核归属。普通 `handle` 继续用于中间输出。
 
 Surface 只运输和呈现项目已经接入的 Codex CLI/App Server 能力。当前能力范围以
@@ -22,7 +46,7 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 当前实现：
 
 工作区只选择登记目录；`/status` 和生命周期卡片的权限相关状态取 App Server 实际值。
-`/status` 经共享格式化入口另展示 Thread 最近确认目录和运行目录加载快照，明确区分登记
+`/status` 经共享格式化入口显示总览及有效消息模式；`/status detail` 展开 Thread 最近确认目录和运行目录加载快照，明确区分登记
 Workspace、未知执行上下文和历史快照；执行目录与指令文件路径统一清理控制字符，飞书与微信使用字面值转义，
 Telegram 使用已有 HTML 字段值转义，不把 roots 描述为实时权限。
 `/autoreview [on|off]` 查询或切换当前已绑定 Thread，统一结果由共享格式化器呈现；飞书命令中心与
@@ -60,7 +84,12 @@ Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录�
 `surface-shutdown.ts` 收集各渠道关闭步骤的同步和异步失败；渠道仍决定启动与等待各步骤的顺序，
 保留各资源原有预算，全部清理尝试完成后统一抛出失败。停止结果由实例缓存，失败不伪装为成功，也不隐式重新启动资源。
 
-`types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
+`types.ts` 定义最小 `SurfaceAdapter` 契约。可选 `output.deliverySource` 提供来源引用的捕获、可取消等待和同步复核；引用不能单独授予发送资格。持久 `deliver` 的第四参数可接收共享同步授权守卫，用于最终网络发送前复核。
+普通输出 `handle` 的可选第三参数传递共享会话队列取消信号；QQ 正文流在该队列内等待单帧完成，并将取消传递到来源等待、节流及 HTTP。
+可选 capabilities 分别约束自动绑定恢复、交互、计划任务及持久配置事件订阅；QQ 启用绑定恢复、交互和计划任务，`configurationNotifications: false` 排除持久 Workspace 配置事件重放，当次 `configurationChanged` 仍发送受控通知。QQ 交互仍经过 `PersistentInteractionPort` 的前序持久投递屏障，按原用户、工作区和当前请求归属授权，不恢复旧来源或令牌。
+可选 `output.observeUserMessageIdentity` 接收当前已握手连接投影的官方用户消息四项身份，QQ 结合 Queue 提交响应关联精确 Turn；`output.observeQueueChanged` 只清理未用选择。可选 `prepareScheduledTaskSubmission` 为 Executor 提供独立提交观察票据；QQ 将计划运行固定于原任务 Workspace 和后台绑定，经权威响应确认 Turn，前台切换不改变该归属。
+可选 `takeAsyncAnswerSubmission(target, requestId)` 按原目标与请求单次领取异步回答的 `observer/isCurrent/cancel` 及可选 `failed` 通知端口；Bootstrap 将其接入 `ConversationService.submitAsyncAnswer`，提交前及等待后复核，失败取消来源并尝试受控提示。QQ 必须取得该次回答来信的新来源才可提交；确认后保留来源至正常释放，不恢复旧来源，其他渠道未实现此可选端口时沿用原路径。
+每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
 只通过编译期内置插件注册表显式注册。
 Bootstrap 的内置插件注册表负责把一个渠道插件展开为零到多个账号实例并验证身份唯一性；
@@ -74,6 +103,8 @@ Telegram、飞书目录仍只实现平台 Adapter，不导入插件宿主或组�
 会取消对应旧状态的未发送操作。状态发送失败或结果未知会向调用方报告，不自动重试整个状态。
 Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不再各自订阅全局事件总线。
 平台投递只交给成功启动且仍处于运行状态的 Surface；本地生命周期观察不依赖渠道就绪。单个输出端口拒绝事件不得中断后续路由。
+`connectionOnly: true` 明确标记仅连接的 Adapter：不参与旧绑定恢复、消息准入、持久投递账号选择或审批可用性，
+没有配置通知订阅对象，其连接故障也不阻塞其他渠道配置事件确认。未声明时保持完整消息渠道的现有行为。
 运行连接失败后，同一 Adapter 的 `start()` 必须能重新建立输入连接；Bootstrap 对每个账号实例
 独立退避，不通过重启 Gateway 恢复单个渠道。`stop()` 用于 Gateway 关闭或账号永久隔离，必须可在部分启动后
 安全调用并保持幂等。生产装配中的关键终态由 Bootstrap 提交独立持久投递箱，不写入 StateStore；
@@ -84,7 +115,8 @@ Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不
 配置变更通知使用结构化动作区分热加载、自动重启、需要重装、加载失败，以及第三方模型设置的
 等待重启、重启中、已生效和失败；Surface 只渲染结果，不得接收原始配置值或异常详情。普通
 生命周期通知可通过可选的 `configurationChanged` 异步入队；`deliverConfigurationChange` 必须等待
-平台 API 实际发送成功，失败时抛出错误，以便 Bootstrap 保留尚未确认的持久化配置事件。
+所有目标的平台 API 实际发送成功，失败时抛出错误，以便 Bootstrap 保留尚未确认的持久化配置事件。
+没有配置通知订阅对象时按空集合完成。QQ 不订阅持久事件，但当次通知使用显式单聊允许名单，热加载更新名单，重启前同应用只取新旧交集，换应用或禁用时不发送；逐人完整回执、六十秒期限与共享主动预算由 QQ Adapter 负责，未知不自动重试。
 全局变更投递给所有 Surface；平台作用域变更只投递给匹配 Surface。进程重启和重装会影响所有
 Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台私有原因的生命周期通知。
 
@@ -118,11 +150,11 @@ Thread Queue 属于 App Server，由 Application 负责授权、25 条分页和�
 分页历史 Revert 同样由 Application 统一编排；三个 Surface 只渲染 `/revert list`、预览和一次性确认结果，
 统一提示仅支持新建分页历史 Thread、执行前会复核并且不会恢复工作区文件。Surface 不保存 Turn 历史、
 确认令牌或 Queue/历史快照；按钮和菜单只能提交当前绑定 Actor 的规范选择器。
-Gateway 计划任务同样由 Application 统一编排；三个 Surface 只渲染 `/schedule` 的类型化列表、Run、
+Gateway 计划任务同样由 Application 统一编排；四个 Surface 只渲染 `/schedule` 的类型化列表、Run、
 预览与操作结果。飞书管理按钮携带完整任务或 Run ID 并继续走共享命令；显式命令和 `schedule_task`
 工具预览都按精确 Surface 复用同一呈现入口，飞书与 Telegram 的创建/删除确认按钮提交同一五分钟令牌，
 飞书按钮被接受后会把原卡片更新为无按钮终态，微信保留同一文本语法；
-Surface 不保存任务定义、Prompt、选择快照或确认令牌。
+QQ 完整字面预览全部取得平台确认后才开放确认按钮与文字 confirm，停止、切换、取消和过期撤销尚未执行的确认；临时呈现身份不作为共享确认权威。Surface 不保存任务定义、Prompt 或共享选择快照，任务与确认状态由 Application 持有。
 审批卡片和其他需要等待结果的 `runOrdered` 操作排在所有既有关键消息之后，但会越过尚未执行的
 非关键过程输出；关键消息与非关键消息各自保持原顺序。交互取消会移除尚未执行的发送，
 并向在途平台请求传递取消信号；在有界清理窗口内取得已验证的迟到消息 ID 时，尝试清理交互入口。
@@ -141,7 +173,7 @@ Telegram 和飞书在交互消息创建成功或失败时
 Thread/Turn/Item、事件类型及输入/投递标识；输出队列、输入处理和平台调用复用该上下文，
 不保留事件正文。公开的 `withPersistentDeliveryDiagnostics` 供组合根注入持久记录 ID，各层通过 `persistentDeliveryId` 关联同一记录，单次操作的 `deliveryId` 独立保留。终态相关任务在 `info` 留痕，任务成功与正文投递成功分别记录，慢操作与失败在 `warn` 留痕；阶段明细、合并与取消
 使用 `debug`。诊断不修改平台调用、重试或排队顺序，日志口径与排障步骤见
-[`渠道展示与调试模式`](../../docs/display.md#调试模式)。
+[`消息详情与日志等级`](../../docs/display.md#消息详情与日志等级)。
 `attachment-input-lifecycle.ts` 只管理当前已接收、尚未完成的音视频取消身份，不保存正文或建立提交队列。
 三渠道在第一次队列等待前登记，每个Surface实例最多1000个活跃目标、每目标4项，120秒预算包含接收后的等待。
 授权停止命令同步取消此前任务；后续附件等待该目标此前全部停止处理结束后，才建立Application提交范围，
@@ -155,7 +187,7 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 有界 Base64 Data URL 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，
 不写入自身日志或独立存储，也不向 App Server 发送本地路径，不在 Surface 维护另一套识图会话或重试队列。
 
-`video-attachment-store.ts` 为三渠道提供独立视频附件暂存与单文件随机引用：复用私有媒体存储，按渠道分目录，最多保留八个文件并允许一个串行去重候选，每个文件最大 64 MiB、24 小时过期；只初步验证 MP4/WebM 容器签名，实际可解码性由 Strata 判断。流保存及哈希含排队最多 60 秒、最多四条在途流，关闭销毁流并等待收尾。`store` 接受已授权的 ConversationTarget 与 Actor，按作用域和 SHA-256 去重；Adapter 在提交成功或结果不确定时 `retain`，确定未提交时 `discard`，复用旧附件不会被失败清理删除。去重仅保留有界内存元数据，不续期，不跨会话或重启恢复映射。共享附件提示指导原引用追问及有界 context 传递。引用是持有者凭据，仅提交给完成授权的当前 Conversation；MCP 不提供列举入口，不依赖可伪造的 Actor 参数鉴权。引用不代表跨会话身份认证，泄露后可在有效期内转授读取权。暂存内容不写 StateStore；使用方式与部署边界见[视频分析 MCP](../../docs/video-analysis-mcp.md)。
+`video-attachment-store.ts` 为四渠道提供独立视频附件暂存与单文件随机引用：复用私有媒体存储，按渠道分目录，最多保留八个文件并允许一个串行去重候选，每个文件最大 64 MiB、24 小时过期；只初步验证 MP4/WebM 容器签名，实际可解码性由 Strata 判断。流保存及哈希含排队最多 60 秒、最多四条在途流，关闭销毁流并等待收尾。`store` 接受已授权的 ConversationTarget 与 Actor，按作用域和 SHA-256 去重；Adapter 在提交成功或结果不确定时 `retain`，确定未提交时 `discard`，复用旧附件不会被失败清理删除。去重仅保留有界内存元数据，不续期，不跨会话或重启恢复映射。共享附件提示指导原引用追问及有界 context 传递。引用是持有者凭据，仅提交给完成授权的当前 Conversation；MCP 不提供列举入口，不依赖可伪造的 Actor 参数鉴权。引用不代表跨会话身份认证，泄露后可在有效期内转授读取权。暂存内容不写 StateStore；使用方式与部署边界见[视频分析 MCP](../../docs/video-analysis-mcp.md)。
 三渠道共享的 `/metrics` 分开展示当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的会话累计，
 `global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
 按同一请求口径聚合指标库记录，模型维度最多展示请求量最高的 20 组并说明截断，提供商完整返回；`errors` 用同一
@@ -167,7 +199,7 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 `/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`
 标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。三个渠道分别用飞书卡片
 Markdown、Telegram HTML、微信结构化字段渲染列表。
-`/sessions` 和 `/archived` 共用可复制的分页/筛选命令，仅支持运行状态、固定状态、Provider 和关键词。
+`/sessions` 和 `/archived` 在飞书、Telegram、微信和 QQ 统一每页十条，由 Application 完成分页；Surface 直接呈现当前页，不二次切片。共用可复制的分页/筛选命令，仅支持运行状态、固定状态、Provider 和关键词。
 自定义会话分区入口及其管理员权限已移除。内置 Pinned 在三渠道统一复用 `/pin` 与 `/unpin`，
 渠道只提交选择，不保存分区状态。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际
@@ -183,17 +215,13 @@ Conversation，旧会话完成不能删除新会话已登记的回复目标。�
 开始/继续/完成通知、Hook 完成提示和 Turn 结束汇报；Hook 按上游完成通知展示安全状态摘要，经三渠道内存投递，微信将其纳入回复窗口预算，不写入持久输出日志。OpenAI 启动传输探测全部失败时，上线通知增加代理检查提醒，
 官方主路由缺少鉴权时增加未登录提示和 `codex login` 或 `/model` 的操作建议，不显示目标地址或
 底层错误；飞书和微信仍只通知已有安全会话。完成卡片对 `unauthorized` 按 OpenAI 官方与其他
-Provider 分别生成固定凭据提示，不展示上游原文。Turn 完成在正式与调试模式都显示当前
-工作区、Session 名称和 Session ID，并显示非零官方 `Turn.durationMs`，零值或缺失时省略；会话耗时存在已知累计时直接展示数值，把本次运行、
-当前会话累计和账户状态依次分区；按 Turn
-聚合统计代理捕获的非自动审查模型请求与“推理次数”次数，审查请求数和 Token 在“自动审批”项单独显示，并保留 Provider
-通用的 Thread Token/上下文与请求数累计指标；父 Turn 存在显式子代理时另展示递归任务合计，
-不把子代理用量混入父 Turn 自身统计；本轮存在非正常模型尝试时，请求总数会进一步拆分为
-完成、中断、未完整观测和失败数量；`429/5xx` 瞬时失败后存在成功请求时显示为“自动重试、最终
-成功”，底层异常记录仍完整保留。完成卡片正式模式保留 Token 总计，调试模式才展开 Token 子项；
-账户状态在正式和调试模式均显示剩余额度及可用的重置时间、剩余时长；含重置时间时标注时区。子代理完成卡片在值可靠时
-展示思考等级、请求次数和 Token：正式模式保留总计，调试模式才展开缓存与推理 Token 和缓存命中率；
-指标读取失败时省略无数值统计，保留子代理终态和任务身份。
+Provider 分别生成固定凭据提示，不展示上游原文。完成通知在 `basic` 下保留状态、上下文、可用耗时及必要异常；`brief` 不增加耗时。
+`detailed` 另显示模型设置、本轮请求结果、已观测 Token 总计、缓存命中率及已取得的当前账户额度，不展开环境、Token/性能分项或会话累计。
+缺失本轮输入/输出时不以零或最近请求补齐；上下文仍取最近权威上下文用量。父 Turn 存在明确子代理合计时另展示任务合计，
+不混入父 Turn 自身统计；失败后成功的可恢复请求保留“自动重试、最终成功”语义，错误、后台身份、Goal 及仍运行子代理保留。
+基础子代理完成仅名称和状态，详细子代理保留模型设置、请求数、Token 总计和缓存命中率，不展开 Token 分项。
+详细上线保留会话摘要及工作目录、Session ID、协作模式，不再自动展开系统/UA等环境字段。未绑定或尚未恢复时不展示默认模型冒充当前设置。
+自动审批通过的详细呈现保留来源、动作、操作和理由摘要；失败及人工审批必要详情不裁剪。正文、指标采集与主动状态/指标查询不变。
 原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示
 OpenAI 周限；速度区分用户选择与生命周期确认的有效设置，设置通知只显示“已选”并将有效档位标为未知，
 未知选择不会被标为 Standard；下一 Turn 的选择标为待提交，不承诺生效。完成输出格式化本轮普通请求的出站档位观测：
@@ -205,7 +233,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `elapsed-duration.ts` 把已确认的 Turn、操作、推理状态和请求耗时格式化为自适应 `ms` / `s` / `min` / `h`，
 三个 Surface、CLI 与 WebUI 共用该纯函数；账户用量秒数仍使用独立的中文周期格式。不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
-和生命周期汇报复用。
+和生命周期汇报复用；`accountQuotaFields` 统一状态查询与详细／完整完成卡的提供商归属、余额、周限及重置时间，不发起查询。
 `conversation-model-account-command-format.ts` 为三个渠道渲染 `/limits reset` 选券预览、确认命令和消费结果，并在 OpenAI `/limits` 中展示重置券可用数量，并按相同
 到期时间合并服务端返回的明细；`null` 到期时间明确显示为“无到期时间”，明细少于可用数量时标出
 未返回明细的剩余张数。
@@ -250,15 +278,13 @@ Telegram 使用当前页按钮和绑定 Actor 的十分钟一次性 ForceReply�
 `error-metadata.ts` 统一渠道日志中的受约束异常类型、机器错误码和锁定 App Server
 白名单拒绝分类，拒绝异常正文、堆栈、请求标识及上游自定义名称进入日志；Bootstrap
 继续通过注入的 Pino `err` 序列化器处理组合根异常。
-`input-copy.ts` 统一补充文字、文件、图片与音频追加到当前 Turn 的确认文案，以及
-开始识别图片与本条要求时的进度文案，并统一视觉完成通知正式模式只显示 Token 总计、调试模式
-展开 Token 子项与 API 耗时的展示策略；
+`input-copy.ts` 统一补充文字、文件、图片与音频追加到当前 Turn 的确认文案；
 `output-copy.ts` 统一 CLI 输入镜像、断线、警告、操作失败、停止交互、空回复与内容截断等输出
 语义，以及 Thread 被其他 Codex 客户端占用与自动恢复的提示；各渠道继续自行决定 HTML、CardKit
 Markdown、纯文本布局和发送方式。
 `interaction-copy.ts` 统一审批、用户输入和 MCP 交互的处理、取消、超时、跨客户端解决及提交结果
 语义；平台仍各自使用按钮、卡片或可复制命令完成交互。
-`pending-interaction-registry.ts` 统一三个渠道待处理交互的请求 ID 与一次性令牌索引、容量限制、
+`pending-interaction-registry.ts` 统一四个渠道待处理交互的请求 ID 与一次性令牌索引、容量限制、
 请求级取消信号、准备期失效与立即释放身份及容量、完成清理和超时计时器释放；
 旧请求的迟到清理不能释放同 ID 新请求的占用。平台仍各自负责授权复核、消息准备、输入解析、
 决定映射和结果更新。
@@ -272,8 +298,8 @@ Telegram、飞书与微信分别通过 HTML 面板、CardKit Markdown 或按会�
 `configuration-change-format.ts` 统一 Telegram、飞书与微信已有的配置热加载、重启、重装和失败通知；
 Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击。
 新增 Workspace 的数字切换命令使用 Bootstrap 从当前完整注册列表附带的序号，不按新增子集重新编号。
-`operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、上游敏感占位符和单行摘要，
-并为三个渠道提供有界的压缩通知去重与文案；
+`operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、上游敏感占位符和单行摘要；共享准入在所有工具档位隐藏子代理 `wait` 的正常过程，失败和拒绝沿用有效设置，独立生命周期通知与既有可靠投递义务不变。
+该模块也为三个渠道提供有界的压缩通知去重与文案；
 Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自
 Adapter 负责。
 `operation-update-buffer.ts` 在 Surface 边界按完整 Conversation 与 Turn 有界暂存成功的查询操作，并统一在非 Commentary
@@ -283,11 +309,13 @@ Adapter 负责。
 不进入缓冲。
 Computer Use 的 MCP 操作也不进入查询缓冲；飞书在同一卡片展示调用开始和终态，复用已有去重、
 顺序队列及 `hidden` 模式。具体操作说明已在 Client 边界提取并清洗，过程展示不使用 MCP 读写声明标签。
+`bounded-local-file.ts` 为图片和显式文件提供有界普通文件读取，拒绝链接、身份/长度或修改时间变化；channelFilePolicy 统一声明四渠道文件准入与预算，保留各渠道内容合同，共享 MP4/Ogg-Opus 文件头校验。文件名拒绝控制字符和路径分隔符；具体限制见 `docs/channel-file.md`。`SurfaceAdapter.sendChannelFile` 由四渠道实现，携带原 Thread 实时守卫、媒体类型和取消信号；显式图片同样在排队、读取和请求边界消费这些信息，不因后台解绑改投前台。未修改普通生成图与原长正文文件的内容预算。
+
 `generated-image.ts` 对 App Server `imageGeneration.savedPath` 指向的生成图片和
 `codexc channel send-image` 提交的渠道 spool 图片执行同一读取校验：绝对路径、拒绝符号链接、
-空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书与微信分别负责平台上传和发送，
+空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书、微信与 QQ 分别负责平台上传和发送，QQ 使用更小的 5,000,000 字节上限，
 不读取 `imageView` 或用户上传图片路径。
-Telegram 和飞书收到仅含 `fileId`、没有 `savedPath` 的原生图片生成完成结果时，
+Telegram、飞书和 QQ 收到仅含 `fileId`、没有 `savedPath` 的原生图片生成完成结果时，
 独立提示“图片已生成，但当前无法获取图片内容”，不受操作过程显示档位影响；不展示引用、
 不尝试下载或声称图片已发送。若同时有路径则沿用原有安全读取与平台发送链路。
 微信仍按回复窗口策略忽略这类操作事件，不新增引用结果通知。
@@ -317,11 +345,12 @@ Surface 只能渲染明确标记的结构化用户错误，不能直接复用其
 warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳定字段。未知异常、凭据和未经约束
 的响应正文不得带入聊天消息或日志。
 
-Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 Surface Outbox。`full`
-显示完整操作，`compact` 显示单行摘要，其中子代理只保留启动和失败、抑制成功的等待与交互操作，
-`hidden` 忽略普通 `operation.updated`；Core 始终正常归约操作，审批与其他关键输出不受影响。
+Bootstrap 把共享的 `display.operation_updates` 五档模式显式注入各 Surface Outbox。`full`
+显示完整操作，`detailed` 与其准入相同，正常详情脱敏后单行最多600字符并标记省略，失败/拒绝保留完整脱敏详情；`compact` 显示单行摘要，其中子代理只保留启动和失败、抑制成功的等待与交互操作，
+`failures` 只显示失败或拒绝的操作，`hidden` 忽略新到达的普通 `operation.updated`；已入箱终态保留上述可见表示与送达义务。Core 始终正常归约操作，审批与其他关键输出不受影响。
+可选 `display.subagents` 缺省开启，关闭时统一隐藏新的子代理启动、联系、结束通知及子代理工具操作；其既有可靠结果仍发送，其他工具不受该开关影响。正文、生成图片和父轮完成/异常保持独立。三个支持过程展示的渠道复用同一子代理类别判定，微信不扩展过程能力。
 上下文压缩开始和完成由共享展示状态去重，三个渠道均独立、有序发送，不受操作显示设置影响。
-Telegram 把同一 Turn 的成功查询类操作延迟聚合；
+完整工具档逐项发送现有操作详情；其余工具档下，Telegram 把同一 Turn 的成功查询类操作延迟聚合；
 飞书只聚合 MCP 与动态工具，网页搜索完成后立即发送。MCP 目录与实际工具调用统一显示 App Server
 提供的只读、可能写入或未知提示，该提示不替代审批或执行结果。微信
 除上下文压缩生命周期外，不主动发送操作事件；Surface 只实现平台格式，不各自定义

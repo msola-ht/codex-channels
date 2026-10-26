@@ -18,7 +18,7 @@ import { TelegramApiExecutor } from "./api-executor.js";
 import {
   escapeTelegramHtml,
   formatTelegramExpandableQuotePanelChunks,
-  formatTelegramPanelChunks,
+  formatTelegramLiteralPanelChunks,
   telegramInteractionReplyHeading,
 } from "./html-format.js";
 import { splitTelegramText } from "./format.js";
@@ -849,16 +849,16 @@ function formatInputChunks(
   questionIndex: number,
   awaitingOther = false,
 ): string[] {
-  const chunks = request.type === "user-input" && request.asynchronous
-    ? formatAsynchronousInputChunks(request, questionIndex, awaitingOther)
-    : formatTelegramPanelChunks(formatInteraction(request, questionIndex, awaitingOther), 3_600);
+  const chunks = request.type === "user-input"
+    ? formatUserInputChunks(request, questionIndex, awaitingOther)
+    : formatTelegramLiteralPanelChunks(request.title, formatElicitationBody(request), 3_600);
   // Mark every fragment so replies remain identifiable after restart or cache eviction.
   return acceptsTextReply(request)
     ? chunks.map((chunk) => `<b>${telegramInteractionReplyHeading}</b>\n\n${chunk}`)
     : chunks;
 }
 
-function formatAsynchronousInputChunks(
+function formatUserInputChunks(
   request: Extract<InteractionRequest, { type: "user-input" }>,
   questionIndex: number,
   awaitingOther: boolean,
@@ -942,40 +942,15 @@ function unsupportedApprovalChoiceMessage(
   }
 }
 
-function formatInteraction(
-  request: Exclude<InteractionRequest, { type: "approval" }>,
-  questionIndex = 0,
-  awaitingOther = false,
+function formatElicitationBody(
+  request: Extract<InteractionRequest, { type: "elicitation" }>,
 ): string {
-  if (request.type === "user-input") {
-    const question = request.questions[questionIndex]!;
-    const title = question.header.trim() || `问题 ${questionIndex + 1}`;
-    const instruction = awaitingOther
-      ? "请在底部回复栏输入回答并发送，保持回复本消息。"
-      : question.options.length > 0
-        ? question.allowOther ? "点击下方选项，或点「输入回答」填写文字。" : "请选择下方按钮。"
-        : "请在底部回复栏输入回答并发送，保持回复本消息。";
-    const secretWarning = request.questions.some((question) => question.secret)
-      ? "\n\n安全提示：Telegram 回复会保留在聊天记录中，请勿发送密钥、Token 或其他敏感凭据。"
-      : "";
-    return [
-      request.title,
-      "",
-      `问题 ${questionIndex + 1}/${request.questions.length}：${title}`,
-      question.question,
-      "",
-      instruction,
-      "发送 /stop 可停止当前请求。",
-    ].join("\n") + secretWarning;
-  }
   if (request.mode === "tool-approval") {
     const toolTitle = request.toolApproval?.toolTitle ?? "未命名工具";
     const detail = request.toolApproval?.detail
       ? `\n参数：${request.toolApproval.detail}`
       : "";
     return [
-      request.title,
-      "",
       request.message,
       "",
       `工具：${toolTitle}${detail}`,
@@ -984,7 +959,7 @@ function formatInteraction(
     ].join("\n");
   }
   const instruction = request.mode === "form" ? "请回复有效 JSON 对象，或发送 /stop 停止当前请求。" : "请打开链接完成操作，然后点击“完成”。";
-  return `${request.title}\n\n${request.message}\n\n${instruction}`;
+  return `${request.message}\n\n${instruction}`;
 }
 
 function mapMcpToolApprovalDecision(

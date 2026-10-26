@@ -3,6 +3,44 @@ import {
   type OutputEvent,
   type SurfaceId,
 } from "../conversation-core/index.js";
+import { isGeneratedImageUnavailable } from "./operation-presentation.js";
+import type { SurfaceConfigurationChange } from "./types.js";
+
+/** Optional routine notices only; failures and requests for action remain visible. */
+export function shouldHideRoutineNotification(event: OutputEvent, enabled: boolean): boolean {
+  if (enabled) return false;
+  switch (event.type) {
+    case "turn.started":
+    case "thread.name": return true;
+    case "thread.availability": return event.availability === "available";
+    case "hook.completed": return event.hook.status === "completed";
+    case "autoApprovalReview.updated": return event.phase === "completed" && event.status === "approved";
+    case "operation.updated": return event.operation.kind === "contextCompaction"
+      && (event.operation.status === "running" || event.operation.status === "completed");
+    case "mcp.status.updated": return (event.status === "starting" || event.status === "ready")
+      && event.error === null && event.failureReason === null;
+    default: return false;
+  }
+}
+
+/** Durable workspace receipts bypass this live-only choice. */
+export function shouldHideRoutineConfiguration(change: SurfaceConfigurationChange, enabled: boolean): boolean {
+  return !enabled && (change.action === "reloaded" || change.action === "provider-settings-scheduled"
+    || change.action === "provider-settings-restarting" || change.action === "provider-settings-applied");
+}
+
+/** Unknown phases may be buffered, but cannot reveal a later commentary Item. */
+export function shouldPreviewTextDelta(
+  event: Extract<OutputEvent, { type: "text.delta" }>,
+  commentaryEnabled: boolean,
+): boolean {
+  return commentaryEnabled || event.phase === "final_answer";
+}
+
+/** An already-admitted preview still owns its original terminal settlement. */
+export function shouldHideCommentary(event: OutputEvent, commentaryEnabled: boolean, previewAdmitted = false): boolean {
+  return event.type === "text.completed" && event.phase === "commentary" && !commentaryEnabled && !previewAdmitted;
+}
 
 /**
  * 渠道投递策略的唯一判定点。
@@ -27,13 +65,14 @@ const weixinWindowEventTypes: ReadonlySet<OutputEvent["type"]> = new Set<OutputE
   "autoApprovalReview.updated",
   "hook.completed",
   "conversation.idle.released",
+  "connection.restored",
   "warning",
   "text.completed",
 ]);
 
 /**
  * 微信单次回复窗口预算：只让生命周期、终态和全局空闲通知占用主动发送配额。
- * 压缩、Hook 完成与自动审批完成属于生命周期；推理、计划、其他操作、子代理、连接、账户、额度、MCP 状态和 CLI/TUI 输入镜像都不占用。
+ * 压缩、Hook 完成、自动审批完成与连接恢复属于生命周期；推理、计划、其他操作、子代理、连接中断、账户、额度、MCP 状态和 CLI/TUI 输入镜像都不占用。
  */
 export function isWeixinWindowEvent(event: OutputEvent): boolean {
   if (event.type === "operation.updated" && event.operation.kind === "contextCompaction") return true;
@@ -54,6 +93,30 @@ export function resolveSurfaceDelivery(
   surface: SurfaceId,
   event: OutputEvent,
 ): SurfaceDeliveryDecision {
+  if (surface === "qq") {
+    if (event.type === "turn.started") return { disposition: "deliver", critical: true };
+    if (event.type === "turn.retry" || event.type === "turn.reasoning" || event.type === "plan.updated"
+      || event.type === "subagent.spawned" || event.type === "subagent.contacted" || event.type === "subagent.completed") {
+      return { disposition: "deliver", critical: isCriticalOutputEvent(event) };
+    }
+    if (event.type === "mcp.oauth.completed") return { disposition: "deliver", critical: true };
+    if (event.type === "conversation.idle.released" || event.type === "warning" || event.type === "hook.completed"
+      || event.type === "connection.lost" || event.type === "connection.restored" || event.type === "thread.availability"
+      || event.type === "thread.name" || event.type === "account.updated" || event.type === "account.rateLimits.updated"
+      || event.type === "mcp.status.updated"
+      || (event.type === "autoApprovalReview.updated" && event.phase === "completed" && event.status !== "inProgress")
+      || (event.type === "operation.updated" && event.operation.kind === "contextCompaction")) {
+      return { disposition: "deliver", critical: true };
+    }
+    if (event.type === "operation.updated" && event.operation.kind === "imageGeneration"
+      && event.operation.status === "completed" && (event.operation.imagePath !== undefined || isGeneratedImageUnavailable(event.operation))) {
+      return { disposition: "deliver", critical: true };
+    }
+    if (event.type === "text.delta" && event.phase !== "commentary") return { disposition: "deliver", critical: false };
+    return event.type === "text.completed" || event.type === "turn.completed" || event.type === "operation.updated"
+      ? { disposition: "deliver", critical: isCriticalOutputEvent(event) }
+      : { disposition: "ignore", critical: false };
+  }
   if (surface === "weixin") {
     return isWeixinWindowEvent(event)
       ? { disposition: "deliver", critical: true }

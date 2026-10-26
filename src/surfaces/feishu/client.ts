@@ -23,9 +23,10 @@ import {
 } from "./message-content.js";
 import { extractFeishuQuotedText } from "./inbound-content.js";
 import type { FeishuMessagePort, ObserveFeishuCardCreation } from "./outbox-message-port.js";
-import { feishuSdkRequestSignal, runFeishuSdkRequest } from "./sdk-request-context.js";
+import { checkFeishuSendGuard, feishuSdkRequestSignal, runFeishuSdkRequest } from "./sdk-request-context.js";
 import { FeishuMessageError, feishuApiDiagnostics } from "./message-error.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
+import { assertChannelFileName, assertFeishuChannelMediaBytes, type ChannelFileMediaType } from "../bounded-local-file.js";
 export { FeishuMessageError, type FeishuMessageErrorCode } from "./message-error.js";
 import {
   abortableSleep,
@@ -94,7 +95,7 @@ interface FeishuSdkMessagePayload {
   };
   data: {
     receive_id: string;
-    msg_type: "text" | "post" | "interactive" | "file" | "image";
+    msg_type: "text" | "post" | "interactive" | "file" | "image" | "media" | "audio";
     content: string;
   };
 }
@@ -107,7 +108,7 @@ interface FeishuSdkMessageClient {
   }>;
   createFile?(payload: {
     data: {
-      file_type: "stream";
+      file_type: "stream" | "mp4" | "opus";
       file_name: string;
       file: Buffer;
     };
@@ -273,6 +274,7 @@ export class FeishuMessageClient implements
     timeoutMs: number,
     timeoutError: Error,
     signal?: AbortSignal,
+    beforeSend?: () => void,
   ): Promise<T> {
     return withSurfaceDiagnosticContext({ ...surfaceDiagnosticContext(), component: "Feishu" },
       () => observeSurfaceStage(this.diagnosticLogger, {
@@ -281,7 +283,7 @@ export class FeishuMessageClient implements
         ...(signal === undefined ? {} : { signal }),
       }, async () => {
         if (signal?.aborted) throw createAbortError();
-        const response = await runFeishuSdkRequest(request, timeoutMs, timeoutError, signal);
+        const response = await runFeishuSdkRequest(request, timeoutMs, timeoutError, signal, beforeSend);
         validateBusinessResponse(response);
         return response;
       }));
@@ -304,16 +306,13 @@ export class FeishuMessageClient implements
     fileName: string,
     file: Buffer,
     signal?: AbortSignal,
+    mediaType: ChannelFileMediaType = "file",
+    beforeSend?: () => void,
   ): Promise<void> {
-    if (
-      !this.sdkClient.createFile
-      || file.length === 0
-      || file.length > 30 * 1_024 * 1_024
-      || Buffer.byteLength(fileName, "utf8") > 255
-      || fileName.length === 0
-      || fileName.includes("/")
-      || fileName.includes("\\")
-    ) {
+    checkFeishuSendGuard(beforeSend);
+    assertChannelFileName(fileName);
+    assertFeishuChannelMediaBytes(file, mediaType);
+    if (!this.sdkClient.createFile) {
       throw new FeishuMessageError(
         "invalid-response",
         "飞书文件发送参数无效",
@@ -323,7 +322,7 @@ export class FeishuMessageClient implements
       const response = await this.observeRequest("uploadFile",
         () => this.sdkClient.createFile!({
           data: {
-            file_type: "stream",
+            file_type: mediaType === "video" ? "mp4" : mediaType === "voice" ? "opus" : "stream",
             file_name: fileName,
             file,
           },
@@ -332,7 +331,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           "飞书文件上传超时",
-        ), signal,
+        ), signal, beforeSend,
       );
       const fileKey = response?.file_key ?? response?.data?.file_key;
       if (
@@ -346,8 +345,8 @@ export class FeishuMessageClient implements
       }
       await this.sendMessage(
         chatId,
-        "file",
-        JSON.stringify({ file_key: fileKey }), signal,
+        mediaType === "video" ? "media" : mediaType === "voice" ? "audio" : "file",
+        JSON.stringify({ file_key: fileKey }), signal, undefined, beforeSend,
       );
     } catch (error) {
       if (isAbortError(error)) {
@@ -369,7 +368,8 @@ export class FeishuMessageClient implements
     }
   }
 
-  async sendImage(chatId: string, image: Buffer, signal?: AbortSignal): Promise<void> {
+  async sendImage(chatId: string, image: Buffer, signal?: AbortSignal, beforeSend?: () => void): Promise<void> {
+    checkFeishuSendGuard(beforeSend);
     if (
       !this.sdkClient.createImage
       || image.length === 0
@@ -392,7 +392,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           "飞书图片上传超时",
-        ), signal,
+        ), signal, beforeSend,
       );
       const imageKey = response?.image_key ?? response?.data?.image_key;
       if (
@@ -407,7 +407,7 @@ export class FeishuMessageClient implements
       await this.sendMessage(
         chatId,
         "image",
-        JSON.stringify({ image_key: imageKey }), signal,
+        JSON.stringify({ image_key: imageKey }), signal, undefined, beforeSend,
       );
     } catch (error) {
       if (isAbortError(error)) {
@@ -1064,10 +1064,11 @@ export class FeishuMessageClient implements
 
   private async sendMessage(
     chatId: string,
-    messageType: "text" | "post" | "interactive" | "file" | "image",
+    messageType: "text" | "post" | "interactive" | "file" | "image" | "media" | "audio",
     content: string,
     signal?: AbortSignal,
     observeCreation?: ObserveFeishuCardCreation,
+    beforeSend?: () => void,
   ): Promise<string> {
     try {
       return await this.observeRequest("createMessage", () => {
@@ -1094,7 +1095,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           "飞书消息发送超时",
-        ), signal,
+        ), signal, beforeSend,
       );
     } catch (error) {
       if (isAbortError(error)) {

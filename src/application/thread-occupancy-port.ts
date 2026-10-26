@@ -7,6 +7,13 @@ export interface ThreadLockHolder {
   startedAt?: string;
 }
 
+/** Identity captured by a fully delivered force-release preview. */
+export interface ThreadOccupancyIdentity {
+  threadId: string;
+  pid: number;
+  startedAt: string;
+}
+
 export type ThreadOccupancyReleaseResult =
   | { status: "unbound" }
   | { status: "free"; threadId: string }
@@ -29,5 +36,6 @@ export interface ThreadOccupancyPort {
     target: ConversationTarget,
     force?: boolean,
     assertAuthorized?: () => void,
+    expectedIdentity?: ThreadOccupancyIdentity,
   ): Promise<ThreadOccupancyReleaseResult>;
 }

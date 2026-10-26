@@ -25,6 +25,7 @@ import {
 import { FileWeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 
 export interface CreateWeixinSurfaceOptions {
+  displaySettings?: import("../types.js").SurfaceMessageDisplaySettings;
   accountId: string;
   service: Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">;
   commands: ConversationCommandExecutor;
@@ -36,7 +37,6 @@ export interface CreateWeixinSurfaceOptions {
   uploadsDirectory: string;
   videoDirectory?: string;
   startupNotification: WeixinStartupNotification;
-  debugEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -85,9 +85,7 @@ export function createWeixinSurface(
       options.fetchImpl,
     ),
     startupNotification: options.startupNotification,
-    ...(options.debugEnabled === undefined
-      ? {}
-      : { debugEnabled: options.debugEnabled }),
+    ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
     logger: options.logger,
     onFatal: (error) => options.onFatal(error),
   });

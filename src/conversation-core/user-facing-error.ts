@@ -19,6 +19,7 @@ export type UserFacingErrorCode =
   | "attachment.too-many"
   | "attachment.too-large"
   | "attachment.unsupported"
+  | "attachment.download-failed"
   | "attachment.capacity"
   | "video.too-large"
   | "video.unsupported"
@@ -40,6 +41,8 @@ export type UserFacingErrorCode =
   | "image.too-large"
   | "image.too-many"
   | "image.unsupported"
+  | "image.type-mismatch"
+  | "image.download-failed"
   | "audio.path.invalid"
   | "audio.duration-missing"
   | "audio.too-large"
@@ -136,6 +139,8 @@ export type UserFacingErrorCode =
   | "agents.config-unreadable"
   | "reset-credit.failed"
   | "command.unsupported"
+  | "status.usage"
+  | "command.selection.expired"
   | "review.usage";
 
 export type UserFacingErrorDetails = Readonly<

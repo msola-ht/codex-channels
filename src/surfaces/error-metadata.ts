@@ -4,6 +4,7 @@ export interface SurfaceErrorMetadata extends Record<string, unknown> {
   errorType: string;
   errorCode?: string | number;
   errorReason?: SurfaceErrorReason;
+  selectionFields?: string[];
   errorMessage?: string;
 }
 
@@ -12,7 +13,9 @@ export type SurfaceErrorReason =
   | "expected-turn-mismatch"
   | "non-steerable-review"
   | "non-steerable-compact"
-  | "empty-input";
+  | "empty-input"
+  | "selection-before-snapshot" | "selection-state-snapshot" | "selection-model-missing"
+  | "selection-scope" | "selection-defaults";
 
 // 只放行各 Surface 错误类声明的稳定小写 kebab 错误码；新增错误码时必须同步本白名单，
 // 否则该码会被当作不可信字符串从日志元数据中剥离（失败安全）。
@@ -73,6 +76,7 @@ export function surfaceErrorMetadata(error: unknown): SurfaceErrorMetadata {
       errorCode: error.code,
       errorMessage: error.message,
       ...(error.code === "image.reference.failed" ? imageFailureMetadata(error) : {}),
+      ...(error.code === "model.selection.expired" ? modelSelectionFailureMetadata(error) : {}),
     };
   }
   const constructorName = error instanceof Error
@@ -118,6 +122,16 @@ export function surfaceErrorMetadata(error: unknown): SurfaceErrorMetadata {
   return { errorType };
 }
 
+function modelSelectionFailureMetadata(error: UserFacingError): Partial<SurfaceErrorMetadata> {
+  const reason = error.details.reason;
+  if (reason !== "selection-before-snapshot" && reason !== "selection-state-snapshot"
+    && reason !== "selection-model-missing" && reason !== "selection-scope" && reason !== "selection-defaults") return {};
+  const fields = new Set(["selectionScope", "model", "modelProvider", "providerFilter", "effort", "serviceTier",
+    "serviceTierKnown", "effectiveServiceTier", "pending", "modelPending", "effortPending", "serviceTierPending", "providerPending"]);
+  return { errorReason: reason, ...(Array.isArray(error.details.fields)
+    ? { selectionFields: error.details.fields.filter((value): value is string => typeof value === "string" && fields.has(value)) } : {}) };
+}
+
 function rpcErrorReason(
   errorType: string,
   message: unknown,
@@ -125,7 +139,7 @@ function rpcErrorReason(
   if (errorType !== "JsonRpcError" || typeof message !== "string") {
     return {};
   }
-  if (message === "no active turn to steer") {
+  if (message === "no active turn to steer" || message === "no active turn to interrupt") {
     return { errorReason: "no-active-turn" };
   }
   if (/^expected active turn id `?[^`]+`? but found `?[^`]+`?$/u.test(message)) {

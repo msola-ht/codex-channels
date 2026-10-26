@@ -12,6 +12,13 @@ export type GlobalConfigChangeCode =
   | "display.operation-updates"
   | "display.plan-updates"
   | "display.reasoning"
+  | "display.completion"
+  | "display.presentation-detail"
+  | "display.subagents"
+  | "display.streaming"
+  | "display.commentary"
+  | "display.routine-notifications"
+  | "display.overrides"
   | "scheduled-tasks.enabled"
   | "metrics.storage"
   | "model-relay.policy"
@@ -38,19 +45,28 @@ export type WeixinConfigChangeCode =
   | "surface.weixin.credentials"
   | "surface.weixin.allowed-users";
 
+export type QQConfigChangeCode =
+  | "surface.qq.enabled"
+  | "surface.qq.account"
+  | "surface.qq.credentials"
+  | "surface.qq.allowed-users"
+  | "surface.qq.groups";
+
 export type ConfigChangeCode =
   | GlobalConfigChangeCode
   | TelegramConfigChangeCode
   | FeishuConfigChangeCode
-  | WeixinConfigChangeCode;
+  | WeixinConfigChangeCode
+  | QQConfigChangeCode;
 
-export type ConfigChangeScope = "global" | "telegram" | "feishu" | "weixin";
+export type ConfigChangeScope = "global" | "telegram" | "feishu" | "weixin" | "qq";
 
 export type ConfigChange =
   | { code: GlobalConfigChangeCode; scope: "global" }
   | { code: TelegramConfigChangeCode; scope: "telegram" }
   | { code: FeishuConfigChangeCode; scope: "feishu" }
-  | { code: WeixinConfigChangeCode; scope: "weixin" };
+  | { code: WeixinConfigChangeCode; scope: "weixin" }
+  | { code: QQConfigChangeCode; scope: "qq" };
 
 export function configChange(code: GlobalConfigChangeCode): ConfigChange;
 export function configChange(
@@ -66,6 +82,10 @@ export function configChange(
   scope: "weixin",
 ): ConfigChange;
 export function configChange(
+  code: QQConfigChangeCode,
+  scope: "qq",
+): ConfigChange;
+export function configChange(
   code: ConfigChangeCode,
   scope: ConfigChangeScope = "global",
 ): ConfigChange {
@@ -75,7 +95,9 @@ export function configChange(
       ? "feishu"
       : code.startsWith("surface.weixin.")
         ? "weixin"
-      : "global";
+        : code.startsWith("surface.qq.")
+          ? "qq"
+          : "global";
   if (scope !== expectedScope) {
     throw new Error(`配置变更 ${code} 的 scope 必须为 ${expectedScope}`);
   }

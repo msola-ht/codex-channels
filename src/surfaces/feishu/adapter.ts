@@ -81,8 +81,6 @@ const unsupportedMessageLinkText = [
 ].join("\n");
 
 export class FeishuConversationAdapter {
-  private readonly inputs: SurfaceInputBatcher;
-  private nextInputSequence = 0;
   private readonly videoCancellation = new AbortController();
   private readonly attachmentInputs = new AttachmentInputLifecycle();
   private readonly receivedAttachments = new WeakMap<object, ReceivedAttachmentInput>();
@@ -129,19 +127,8 @@ export class FeishuConversationAdapter {
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
       now?: () => number;
-      debugEnabled?: boolean;
     } = { quietWindowMs: 0 },
-  ) {
-    this.inputs = new SurfaceInputBatcher(
-      (target, input, actorId) => conversations.submit(
-        target,
-        input,
-        () => !this.videoCancellation.signal.aborted
-          && this.inputOptions.access?.isAllowed({ target, actorId }) === true,
-      ),
-      inputOptions,
-    );
-  }
+  ) {}
 
   async presentScheduledTaskConfirmation(
     target: ConversationTarget,
@@ -158,7 +145,7 @@ export class FeishuConversationAdapter {
     }
   }
 
-  receiveInput(message: FeishuInboxMessage): (() => void) | undefined {
+  receiveInput(message: FeishuInboxMessage): ((() => void) & { isCancelled?(): boolean }) | undefined {
     const allowed = () => !this.videoCancellation.signal.aborted
       && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true;
     if (!allowed()) return;
@@ -167,12 +154,15 @@ export class FeishuConversationAdapter {
       if (stop.cancelled) this.attachmentStops.add(message);
       return stop;
     }
-    const kind = message.kind === "audio" ? "audio" : message.kind === "video" ? "video" : undefined;
+    const kind = message.kind === "text" ? undefined : message.kind;
     if (!kind) return;
     const receipt = this.attachmentInputs.receive(message.target, allowed, kind,
       () => this.conversations.prepareAttachmentSubmission?.(message.target, allowed, kind));
     this.receivedAttachments.set(message, receipt);
-    return () => { receipt.dispose(); this.receivedAttachments.delete(message); };
+    return Object.assign(
+      () => { receipt.dispose(); this.receivedAttachments.delete(message); },
+      { isCancelled: () => receipt.isCancelled() },
+    );
   }
 
   async handle(message: FeishuInboxMessage): Promise<void> {
@@ -249,8 +239,8 @@ export class FeishuConversationAdapter {
           }
           return;
         }
-        if (result.kind === "auto-review" && this.commandCenter) {
-          const response = renderCommandCenterChoices("autoreview", result);
+        if ((result.kind === "auto-review" || result.kind === "status") && this.commandCenter) {
+          const response = renderCommandCenterChoices(result.kind === "status" ? "status" : "autoreview", result);
           if (response) {
             await this.commandCenter.openResponse(message.target, message.actorId, response);
             return;
@@ -369,7 +359,7 @@ export class FeishuConversationAdapter {
 
   close(): Promise<void> {
     this.stopVideoInputs();
-    return this.inputs.close();
+    return Promise.resolve();
   }
 
   stopVideoInputs(): void {
@@ -513,6 +503,7 @@ export class FeishuConversationAdapter {
           || (action === "plugin" && result.kind === "plugins")
           || action === "schedule"
           || action === "hooks"
+          || action === "status"
           || (action === "limits" && result.kind === "reset-credit")
         )
           ? renderCommandCenterChoices(action, result)
@@ -775,40 +766,50 @@ export class FeishuConversationAdapter {
         "飞书当前未启用文本文件输入",
       );
     }
-    const file = await this.inputOptions.files.download(message.messageId, message.fileKey, message.fileName);
-    const quotedText = await this.readQuotedText(message);
-    const text = formatQuotedInput([
-      "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
-      `文件名：${file.fileName}`, "", textAttachmentBody(file),
-    ].join("\n").trimEnd(), quotedText);
-    const sequence = this.nextInputSequence;
-    this.nextInputSequence += 1;
-    const result = await this.submitWithReplyTarget(
-      message.target.conversationId,
-      message.messageId,
-      () => this.inputs.enqueue({
-        target: message.target,
-        actorId: message.actorId,
-        sequence,
-        text,
-      }),
+    const scope = await this.receivedAttachments.get(message)?.prepare() ?? this.conversations.prepareAttachmentSubmission?.(
+      message.target,
+      () => !this.videoCancellation.signal.aborted
+        && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
+      "file",
     );
-    if (!result.tail) {
-      return;
-    }
-    this.settleTurnReplyTarget(
-      message.target.conversationId,
-      result.submission.threadId,
-      result.submission.turnId,
-      result.submission.steered,
-    );
-    if (result.submission.steered) {
-      this.replyTurnInput(
+    if (!scope) throw new UserFacingError("attachment.download-failed", "文本附件提交能力尚未就绪");
+    const signal = AbortSignal.any([scope.signal, this.videoCancellation.signal]);
+    let file: Awaited<ReturnType<FeishuFilePort["download"]>> | undefined;
+    let submitted = false;
+    try {
+      scope.captureTarget();
+      file = await this.inputOptions.files.download(message.messageId, message.fileKey, message.fileName, signal);
+      signal.throwIfAborted();
+      const quotedText = await this.readQuotedText(message);
+      const text = formatQuotedInput([
+        "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
+        `文件名：${file.fileName}`, "", textAttachmentBody(file),
+      ].join("\n").trimEnd(), quotedText);
+      const result = await this.submitWithReplyTarget(
         message.target.conversationId,
-        result.submission.threadId,
-        result.submission.turnId,
-        formatTurnInputAppended("file"),
+        message.messageId,
+        () => scope.submit(text),
       );
+      submitted = true;
+      this.settleTurnReplyTarget(
+        message.target.conversationId,
+        result.threadId,
+        result.turnId,
+        result.steered,
+      );
+      if (result.steered) {
+        this.replyTurnInput(
+          message.target.conversationId,
+          result.threadId,
+          result.turnId,
+          formatTurnInputAppended("file"),
+        );
+      }
+    } finally {
+      scope.dispose();
+      if (file !== undefined && !submitted && !scope.mayHaveSubmitted) {
+        await this.inputOptions.files.discard?.(file);
+      }
     }
   }
 
@@ -838,7 +839,6 @@ export class FeishuConversationAdapter {
         !signal.aborted && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
       );
       signal = AbortSignal.any([signal, submissionScope.signal]);
-      await this.inputs.flushPending(message.target, message.actorId);
       check();
       submissionScope.captureTarget();
       file = await videos.download(message.messageId, message.fileKey, { target: message.target, actorId: message.actorId }, signal);
@@ -894,7 +894,6 @@ export class FeishuConversationAdapter {
     if (!scope) throw new UserFacingError("audio.unavailable", "语音提交能力尚未就绪");
     const signal = AbortSignal.any([scope.signal, this.videoCancellation.signal]);
     try {
-      await this.inputs.flushPending(message.target, message.actorId);
       scope.captureTarget();
       const audio = await this.inputOptions.audios.download(
         message.messageId,
@@ -952,64 +951,95 @@ export class FeishuConversationAdapter {
       );
     }
     const replyMessage = messages[0]!;
-    const prepared = await Promise.all(messages.map(async (message) => {
-      const sequence = this.nextInputSequence;
-      this.nextInputSequence += 1;
-      const images = await Promise.all(message.imageKeys.map((imageKey) =>
-        this.images.download(message.messageId, imageKey)
-      ));
-      const quotedText = await this.readQuotedText(message);
-      const currentText = message.text?.trim();
-      return {
-        target: message.target,
-        actorId: message.actorId,
-        sequence,
-        aggregationKey: `feishu:${replyMessage.messageId}`,
-        ...(currentText
-          ? { text: formatQuotedInput(currentText, quotedText) }
-          : quotedText === undefined
-            ? {}
-            : {
-                text: formatQuotedInput(
-                  "请查看这张图片并根据图片内容协助我。",
-                  quotedText,
-                ),
-              }),
-        localImages: images.map((image) => ({
-          path: image.path,
-          mimeType: image.mimeType,
-          bytes: image.bytes,
-        })),
-      };
-    }));
-    const results = await this.submitWithReplyTarget(
-      replyMessage.target.conversationId,
-      replyMessage.messageId,
-      () => Promise.all(
-        prepared.map((input) => this.inputs.enqueue(input)),
-      ),
+    if (messages.some(message => message.actorId !== replyMessage.actorId
+      || message.target.surface !== replyMessage.target.surface
+      || message.target.accountId !== replyMessage.target.accountId
+      || message.target.conversationId !== replyMessage.target.conversationId)) {
+      throw new UserFacingError("image.download-failed", "图片批次必须属于同一会话和用户");
+    }
+    const scope = await this.receivedAttachments.get(replyMessage)?.prepare() ?? this.conversations.prepareAttachmentSubmission?.(
+      replyMessage.target,
+      () => !this.videoCancellation.signal.aborted
+        && this.inputOptions.access?.isAllowed({ target: replyMessage.target, actorId: replyMessage.actorId }) === true,
+      "image",
     );
-    const submitted = results;
-    const tail = submitted.find((result) => result.tail);
-    if (tail) {
-      this.settleTurnReplyTarget(
+    if (!scope) throw new UserFacingError("image.download-failed", "图片提交能力尚未就绪");
+    const downloadCancellation = new AbortController();
+    const signal = AbortSignal.any([scope.signal, this.videoCancellation.signal, downloadCancellation.signal]);
+    const inputs = new SurfaceInputBatcher((_target, input) => scope.submit(input), this.inputOptions);
+    try {
+      scope.captureTarget();
+      const imageDownloads = messages.map(message => message.imageKeys.map(imageKey =>
+        this.images.download(message.messageId, imageKey, signal)));
+      // Keep ownership of every download until cancellation has settled, even
+      // when one resource in the same post fails before its siblings finish.
+      const downloads = imageDownloads.flat();
+      try {
+        await Promise.all(downloads);
+      } catch (error) {
+        downloadCancellation.abort();
+        await Promise.allSettled(downloads);
+        throw error;
+      }
+      signal.throwIfAborted();
+      const prepared = await Promise.all(messages.map(async (message, sequence) => {
+        const images = await Promise.all(imageDownloads[sequence]!);
+        const quotedText = await this.readQuotedText(message);
+        signal.throwIfAborted();
+        const currentText = message.text?.trim();
+        return {
+          target: message.target,
+          actorId: message.actorId,
+          sequence,
+          aggregationKey: `feishu:${replyMessage.messageId}`,
+          aggregationSize: messages.length,
+          ...(currentText
+            ? { text: formatQuotedInput(currentText, quotedText) }
+            : quotedText === undefined
+              ? {}
+              : {
+                  text: formatQuotedInput(
+                    "请查看这张图片并根据图片内容协助我。",
+                    quotedText,
+                  ),
+                }),
+          localImages: images.map((image) => ({
+            path: image.path,
+            mimeType: image.mimeType,
+            bytes: image.bytes,
+          })),
+        };
+      }));
+      const results = await this.submitWithReplyTarget(
         replyMessage.target.conversationId,
-        tail.submission.threadId,
-        tail.submission.turnId,
-        tail.submission.steered,
+        replyMessage.messageId,
+        () => Promise.all(prepared.map((input) => inputs.enqueue(input))),
       );
-      if (tail.submission.steered) {
-        const appended = formatTurnInputAppended(
-          "image",
-          messages.some((message) => Boolean(message.text?.trim())),
-        );
-        this.replyTurnInput(
+      const tail = results.find((result) => result.tail);
+      if (tail) {
+        this.settleTurnReplyTarget(
           replyMessage.target.conversationId,
           tail.submission.threadId,
           tail.submission.turnId,
-          appended,
+          tail.submission.steered,
         );
+        if (tail.submission.steered) {
+          const appended = formatTurnInputAppended(
+            "image",
+            messages.some((message) => Boolean(message.text?.trim())),
+          );
+          this.replyTurnInput(
+            replyMessage.target.conversationId,
+            tail.submission.threadId,
+            tail.submission.turnId,
+            appended,
+          );
+        }
       }
+    } finally {
+      downloadCancellation.abort();
+      scope.dispose();
+      await inputs.close();
     }
   }
 

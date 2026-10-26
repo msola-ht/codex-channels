@@ -1,5 +1,7 @@
 import type { ConversationResetCreditService, ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
 import type { HookCommandView } from "./hook-port.js";
+import { SubmissionObservation, type SubmissionObserver } from "./submission-observer.js";
+import { QueueSubmissionObservation, type ThreadQueueExecutionContext } from "./thread-queue-observer.js";
 import {
   UserFacingError,
   type ConversationTarget,
@@ -28,7 +30,7 @@ import type {
   ConversationTurnUseCases,
 } from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
-import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
+import type { ThreadOccupancyIdentity, ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
 import {
   parseScheduledTaskOperation,
 } from "./scheduled-task-command.js";
@@ -36,8 +38,10 @@ import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
 import type { ScheduledTaskOperationContext } from "../scheduled-tasks/index.js";
 import { resolveProvider, type ModelSelectionIdentity, type ModelSelectionRequest, type ModelSelectionState } from "./model-selection-service.js";
 import { pageCountFor, pageSlice } from "./pagination.js";
+import { sessionListPageSize } from "./conversation-session-query-service.js";
 
 export {
+  parseThreadRevertOperation,
   archivedSessionCommandUsageText,
   mcpCommandUsageText,
   pluginCommandUsageText,
@@ -89,8 +93,11 @@ export const conversationCommandNames = [
 ] as const;
 
 export type ConversationCommandName = typeof conversationCommandNames[number];
+export interface ConversationStatusDisplay {
+  preset: "concise" | "standard" | "detailed" | "full" | "custom";
+  sources: string[];
+}
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
-const maximumSessionListEntries = 20;
 const maximumPluginListEntries = 8;
 
 export type ConversationCommandUseCases =
@@ -138,7 +145,7 @@ export type ConversationCommandResult =
       kind: "thread-revert-preview";
       preview: Awaited<ReturnType<ConversationCommandUseCases["revertPreview"]>>;
     }
-  | { kind: "status"; status: ReturnType<ConversationCommandUseCases["status"]> }
+  | { kind: "status"; view: "overview" | "detail"; status: ReturnType<ConversationCommandUseCases["status"]>; display?: ConversationStatusDisplay }
   | {
       kind: "workspaces";
       workspaces: ReturnType<ConversationCommandUseCases["listWorkspaces"]>;
@@ -322,8 +329,9 @@ function modelSelectionResult(state: ModelSelectionState): ConversationCommandRe
 }
 
 export interface ConversationCommandExecutor {
-  selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string): Promise<ConversationCommandResult>;
-  selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult>;
+  selectMcpLogin(target: ConversationTarget, selector: string, expectedName: string, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
+  selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
+  selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
   selectModel(target: ConversationTarget, selection: ModelSelectionIdentity, actorId: string): Promise<ConversationCommandResult>;
   selectModelSetting(target: ConversationTarget, selection: ModelSelectionRequest, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult>;
   execute(
@@ -331,11 +339,25 @@ export interface ConversationCommandExecutor {
     command: ConversationCommandName,
     input: string,
     actorId: string,
+    assertInteractionActive?: () => void,
+    observer?: SubmissionObserver,
+    queueContext?: ThreadQueueExecutionContext,
+    scheduledOperation?: ScheduledTaskOperationContext,
+    expectedRelease?: ThreadOccupancyIdentity,
   ): Promise<ConversationCommandResult>;
 }
 
 export class ConversationCommandService implements ConversationCommandExecutor {
   private readonly scheduledTasks: ScheduledTaskUseCases | undefined;
+  async selectMcpLogin(target: ConversationTarget, selector: string, expectedName: string, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult> {
+    const authorize = this.commandGuard(target, actorId, false);
+    const guard = () => { authorize(); assertInteractionActive?.(); };
+    guard();
+    this.conversations.touchActivity?.(target);
+    const login = await this.conversations.loginMcpServer(target, selector, guard, expectedName);
+    guard();
+    return { kind: "mcp-login", login };
+  }
   constructor(
     private readonly conversations: ConversationCommandUseCases,
     scheduledTasks?: ScheduledTaskUseCases,
@@ -343,15 +365,19 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     private readonly authorize: (target: ConversationTarget, actorId: string) => void = () => {
       throw new UserFacingError("command.authorization-changed", "命令授权不可用");
     },
+    private readonly statusDisplay?: (target: ConversationTarget) => ConversationStatusDisplay,
   ) {
     this.scheduledTasks = scheduledTasks;
   }
 
-  async selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string): Promise<ConversationCommandResult> {
-    const assertAuthorized = this.commandGuard(target, actorId, true);
+  async selectWorkspace(target: ConversationTarget, workspaceId: string, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult> {
+    const authorize = this.commandGuard(target, actorId, true);
+    const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
+    assertAuthorized();
     this.conversations.touchActivity?.(target);
     const result = await this.selectWorkspaceResult(target, { id: workspaceId }, assertAuthorized);
     this.authorize(target, actorId);
+    assertInteractionActive?.();
     return result;
   }
 
@@ -384,8 +410,10 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       : { kind: "models", view: selection.kind === "browse-provider" ? "model" : selection.kind, state };
   }
 
-  async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string): Promise<ConversationCommandResult> {
-    const assertAuthorized = this.commandGuard(target, actorId, false);
+  async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }, actorId: string, assertInteractionActive?: () => void): Promise<ConversationCommandResult> {
+    const authorize = this.commandGuard(target, actorId, false);
+    const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
+    assertAuthorized();
     this.conversations.touchActivity?.(target);
     const state = await this.conversations.updateAutoReview(target, selection.enabled, selection.threadId, assertAuthorized);
     assertAuthorized();
@@ -397,17 +425,44 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     command: ConversationCommandName,
     input: string,
     actorId: string,
+    assertInteractionActive?: () => void,
+    observer?: SubmissionObserver,
+    queueContext?: ThreadQueueExecutionContext,
+    scheduledOperation?: ScheduledTaskOperationContext,
+    expectedRelease?: ThreadOccupancyIdentity,
   ): Promise<ConversationCommandResult> {
-    const assertAuthorized = this.commandGuard(target, actorId, command === "workspace");
-    const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized);
+    const observation = observer ? new SubmissionObservation(observer) : undefined;
+    const queueObservation = queueContext?.submission ? new QueueSubmissionObservation(queueContext.submission) : undefined;
     try {
-      if (command === "workspace" && input.trim()) this.authorize(target, actorId);
-      else assertAuthorized();
-    } catch (error) {
-      if (result.kind === "scheduled-confirmation") this.scheduledTasks?.cancelConfirmation(result.preview.token);
-      throw error;
+      const authorize = this.commandGuard(target, actorId, command === "workspace");
+      const assertAuthorized = () => { authorize(); assertInteractionActive?.(); };
+      assertAuthorized();
+      const result = await this.executeAuthorized(target, command, input, actorId, assertAuthorized, observation, queueObservation, queueContext?.deleted, scheduledOperation, expectedRelease);
+      try {
+        if (command === "workspace" && input.trim()) { this.authorize(target, actorId); assertInteractionActive?.(); }
+        else assertAuthorized();
+      } catch (error) {
+        if (result.kind === "scheduled-confirmation") this.scheduledTasks?.cancelConfirmation(result.preview.token);
+        throw error;
+      }
+      if (result.kind === "scheduled-confirmation" && scheduledOperation) {
+        const { token, expiresAt } = result.preview;
+        const signal = scheduledOperation.signal;
+        const cleanup = () => { clearTimeout(timer); signal.removeEventListener("abort", cancel); };
+        const cancel = () => { this.scheduledTasks?.cancelConfirmation(token); cleanup(); };
+        const timer = setTimeout(cleanup, Math.max(0, expiresAt - Date.now() + 1));
+        timer.unref();
+        signal.addEventListener("abort", cancel, { once: true });
+        if (signal.aborted) {
+          cancel();
+          signal.throwIfAborted();
+        }
+      }
+      return result;
+    } finally {
+      try { observation?.settle(); }
+      finally { queueObservation?.settle(); }
     }
-    return result;
   }
 
   private commandGuard(target: ConversationTarget, actorId: string, allowMissingWorkspace: boolean): () => void {
@@ -433,12 +488,17 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     input: string,
     actorId: string,
     assertAuthorized: () => void,
+    observation?: SubmissionObservation,
+    queueObservation?: QueueSubmissionObservation,
+    onQueueDeleted?: ThreadQueueExecutionContext["deleted"],
+    scheduledOperation?: ScheduledTaskOperationContext,
+    expectedRelease?: ThreadOccupancyIdentity,
   ): Promise<ConversationCommandResult> {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
     switch (command) {
       case "hooks":
-        return { kind: "hooks", view: await this.conversations.hooks(target, argumentsText, actorId) };
+        return { kind: "hooks", view: await this.conversations.hooks(target, argumentsText, actorId, assertAuthorized) };
       case "autoreview": {
         if (!argumentsText) return { kind: "auto-review", state: this.conversations.autoReview(target) };
         if (argumentsText !== "on" && argumentsText !== "off") {
@@ -551,11 +611,20 @@ export class ConversationCommandService implements ConversationCommandExecutor {
             outcome: { type: "thread.pin-updated", pinned: false, changed },
           };
         }
-      case "status":
+      case "status": {
+        if (argumentsText && argumentsText !== "detail") {
+          throw new UserFacingError("status.usage", "用法：/status [detail]");
+        }
+        const status = await this.conversations.statusForDisplay(target, undefined, { assertAuthorized, includeAccount: true });
+        assertAuthorized();
+        const display = this.statusDisplay?.(target);
         return {
           kind: "status",
-          status: await this.conversations.statusForDisplay(target),
+          view: argumentsText === "detail" ? "detail" : "overview",
+          status,
+          ...(display ? { display } : {}),
         };
+      }
       case "workspace": {
         if (argumentsText) {
           return this.selectWorkspaceResult(target, argumentsText, assertAuthorized);
@@ -574,7 +643,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       }
       case "queue":
-        return this.executeQueueCommand(target, argumentsText, assertAuthorized);
+        return this.executeQueueCommand(target, argumentsText, assertAuthorized, queueObservation, onQueueDeleted);
       case "revert":
         return this.executeRevertCommand(target, argumentsText, actorId, assertAuthorized);
       case "rename":
@@ -601,6 +670,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           target,
           parseReviewTarget(argumentsText),
           assertAuthorized,
+          observation,
         );
         return {
           kind: "outcome",
@@ -678,6 +748,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           invocation.selector,
           invocation.task,
           assertAuthorized,
+          observation,
         );
         return {
           kind: "outcome",
@@ -702,6 +773,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           invocation.selector,
           invocation.task,
           assertAuthorized,
+          observation,
         );
         return {
           kind: "outcome",
@@ -716,7 +788,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "mcp":
         return this.executeMcpCommand(target, argumentsText, assertAuthorized);
       case "plugin":
-        return this.executePluginCommand(target, argumentsText, assertAuthorized);
+        return this.executePluginCommand(target, argumentsText, assertAuthorized, observation);
       case "usage":
         return {
           kind: "usage",
@@ -728,12 +800,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           summary: await this.conversations.requestMetrics(
             target,
             parseMetricsCommand(argumentsText),
+            assertAuthorized,
           ),
         };
       case "limits":
         if (argumentsText) {
           if (!this.resetCredits) throw new UserFacingError("reset-credit.failed", "重置券功能不可用", { reason: "reset_unavailable" });
-          return { kind: "reset-credit", result: await this.resetCredits.execute(target, actorId, argumentsText) };
+          return { kind: "reset-credit", result: await this.resetCredits.execute(target, actorId, argumentsText, assertAuthorized) };
         }
         return {
           kind: "limits",
@@ -759,7 +832,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         };
       case "plan":
         if (argumentsText) {
-          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized);
+          const submission = await this.conversations.startPlan(target, argumentsText, assertAuthorized, observation);
           return {
             kind: "outcome",
             outcome: { type: "plan.started", turnId: submission.turnId },
@@ -781,11 +854,11 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         }
         return {
           kind: "occupancy",
-          result: await this.conversations.releaseThread(target, force, assertAuthorized),
+          result: await this.conversations.releaseThread(target, force, assertAuthorized, expectedRelease),
         };
       }
       case "schedule":
-        return this.executeScheduledTaskCommand(target, argumentsText, actorId, assertAuthorized);
+        return this.executeScheduledTaskCommand(target, argumentsText, actorId, assertAuthorized, scheduledOperation);
     }
     throw new UserFacingError(
       "command.unsupported",
@@ -798,6 +871,8 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     target: ConversationTarget,
     input: string,
     assertAuthorized: () => void,
+    observation?: QueueSubmissionObservation,
+    onDeleted?: ThreadQueueExecutionContext["deleted"],
   ): Promise<ConversationCommandResult> {
     const operation = parseThreadQueueOperation(input);
     if (operation.type === "list") {
@@ -811,7 +886,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         kind: "outcome",
         outcome: {
           type: "thread-queue.added",
-          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized),
+          item: await this.conversations.queueAdd(target, operation.text, assertAuthorized, observation),
         },
       };
     }
@@ -830,7 +905,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       };
     }
     if (operation.type === "delete") {
-      const result = await this.conversations.queueDelete(target, operation.selector, assertAuthorized);
+      const result = await this.conversations.queueDelete(target, operation.selector, assertAuthorized, onDeleted);
       return {
         kind: "outcome",
         outcome: { type: "thread-queue.deleted", deleted: result.deleted },
@@ -853,7 +928,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         },
       };
     }
-    const result = await this.conversations.queueStart(target, operation.selector, assertAuthorized);
+    const result = await this.conversations.queueStart(target, operation.selector, assertAuthorized, observation);
     return {
       kind: "outcome",
       outcome: { type: "thread-queue.started", turnId: result.turnId },
@@ -951,6 +1026,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     target: ConversationTarget,
     input: string,
     assertAuthorized?: () => void,
+    observation?: SubmissionObservation,
   ): Promise<ConversationCommandResult> {
     const operation = parsePluginOperation(input);
     if (operation.type === "list") {
@@ -974,6 +1050,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       operation.selector,
       operation.task,
       assertAuthorized,
+      observation,
     );
     return {
       kind: "outcome",
@@ -991,6 +1068,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     input: string,
     actorId: string,
     assertAuthorized: () => void,
+    operationContext?: ScheduledTaskOperationContext,
   ): Promise<ConversationCommandResult> {
     const scheduled = this.scheduledTasks;
     if (!scheduled) {
@@ -1006,12 +1084,14 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       );
     }
     const controller = new AbortController();
+    const signal = operationContext ? AbortSignal.any([controller.signal, operationContext.signal]) : controller.signal;
     const context: ScheduledTaskOperationContext = {
-      signal: controller.signal,
+      signal,
       assertCurrent() {
-        controller.signal.throwIfAborted();
+        signal.throwIfAborted();
         try {
           assertAuthorized();
+          operationContext?.assertCurrent();
         } catch (error) {
           controller.abort(error);
           throw error;
@@ -1143,10 +1223,10 @@ function sessionListResult(
     backgroundThreadIds?: string[];
   },
 ): Extract<ConversationCommandResult, { kind: "sessions" }> {
-  const pageCount = pageCountFor(sessions.length, maximumSessionListEntries);
+  const pageCount = pageCountFor(sessions.length, sessionListPageSize);
   return {
     kind: "sessions",
-    sessions: pageSlice(sessions, view.page, maximumSessionListEntries, pageCount),
+    sessions: pageSlice(sessions, view.page, sessionListPageSize, pageCount),
     archived: metadata.archived,
     page: view.page,
     pageCount,

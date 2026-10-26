@@ -16,6 +16,7 @@ const mcpToolAccessNotice =
 
 export function formatConversationSkills(
   result: Extract<ConversationCommandResult, { kind: "skills" }>,
+  queryOnly = false,
 ): string {
   return result.entries.length === 0
     ? "当前没有已启用的 Skills。"
@@ -25,12 +26,13 @@ export function formatConversationSkills(
           (skill, index) => `${index + 1}. ${skill.name}：${skill.description}`,
         ),
         "",
-        "使用：/skill <名称或序号> <任务>",
+        ...(queryOnly ? [] : ["使用：/skill <名称或序号> <任务>"]),
       ].join("\n"));
 }
 
 export function formatConversationAgents(
   result: Extract<ConversationCommandResult, { kind: "agents" }>,
+  queryOnly = false,
 ): string {
   return result.roles.length === 0
     ? "当前没有可用的子代理角色。"
@@ -41,12 +43,13 @@ export function formatConversationAgents(
             `${index + 1}. ${role.name}${role.description ? `：${role.description}` : ""}`,
         ),
         "",
-        "使用：/agents <角色名称或序号> <任务>",
+        ...(queryOnly ? [] : ["使用：/agents <角色名称或序号> <任务>"]),
       ].join("\n"));
 }
 
 export function formatConversationMcp(
   result: Extract<ConversationCommandResult, { kind: "mcp" }>,
+  offset = 0,
 ): string {
   if (result.servers.length === 0) {
     return toStructuredMarkdownList("MCP Servers（0）：");
@@ -55,8 +58,8 @@ export function formatConversationMcp(
     `MCP Servers（${result.servers.length}）：`,
     ...result.servers.flatMap(
       (server, index) => [
-        `${index + 1}. ${server.name} · 运行：${formatMcpRuntimeStatus(server.runtimeStatus)} · 认证：${formatMcpAuthStatus(server.authStatus)} · 工具：${server.toolCount}`,
-        `  - 详情：/mcp ${index + 1}`,
+        `${offset + index + 1}. ${server.name} · 运行：${formatMcpRuntimeStatus(server.runtimeStatus)} · 认证：${formatMcpAuthStatus(server.authStatus)} · 工具：${server.toolCount}`,
+        `  - 详情：/mcp ${offset + index + 1}`,
       ],
     ),
   ].join("\n"));
@@ -64,6 +67,7 @@ export function formatConversationMcp(
 
 export function formatConversationMcpHealth(
   result: Extract<ConversationCommandResult, { kind: "mcp-health" }>,
+  queryOnly = false,
 ): string {
   const report = result.report;
   const visibleActions = report.actions.slice(0, maximumMcpHealthFindings);
@@ -90,14 +94,14 @@ export function formatConversationMcpHealth(
             if (action.type === "loginRequired") {
               return [
                 `- ${action.server}：尚未登录`,
-                `  - 处理：/mcp login ${action.selector}`,
+                ...(queryOnly ? [] : [`  - 处理：/mcp login ${action.selector}`]),
               ];
             }
             return [
               action.type === "toolDiscoveryFailed"
                 ? `- ${action.server}：工具目录读取失败`
                 : `- ${action.server}：连接失败或已取消`,
-              "  - 处理：/mcp reload",
+              ...(queryOnly ? [] : ["  - 处理：/mcp reload"]),
             ];
           }),
         ]
@@ -108,7 +112,7 @@ export function formatConversationMcpHealth(
           ...visibleNotices.map((notice) => {
             switch (notice.type) {
               case "authUnknown":
-                return `- ${notice.server}：认证状态未知，可检查配置或尝试 /mcp login ${notice.selector}`;
+                return `- ${notice.server}：认证状态未知${queryOnly ? "，请在本机核对" : `，可检查配置或尝试 /mcp login ${notice.selector}`}`;
               case "noCapabilities":
                 return `- ${notice.server}：未公开工具、资源或资源模板`;
               case "notStarted":
@@ -141,6 +145,7 @@ export function formatConversationMcpReload(
 
 export function formatConversationMcpDetail(
   result: Extract<ConversationCommandResult, { kind: "mcp-detail" }>,
+  queryOnly = false,
 ): string {
   const server = result.server;
   const selector = result.selector;
@@ -170,13 +175,13 @@ export function formatConversationMcpDetail(
       : []),
     ...detailSections,
     "",
-    ...(supportsMcpOAuthLogin(server.authStatus)
+    ...(!queryOnly && supportsMcpOAuthLogin(server.authStatus)
       ? [`OAuth：/mcp login ${selector}`]
       : []),
     `浏览工具：/mcp ${selector} tools`,
     `浏览资源：/mcp ${selector} resources`,
     `浏览资源模板：/mcp ${selector} templates`,
-    `读取资源：/mcp resource ${selector} <URI>`,
+    ...(queryOnly ? [] : [`读取资源：/mcp resource ${selector} <URI>`]),
   ].join("\n"));
 }
 
@@ -256,6 +261,19 @@ function formatSelectedMcpDetailSection(
     ],
     (template) => `- ${template.title ?? template.name} · ${template.uriTemplate}`,
   );
+}
+
+export function mcpDetailPageCount(result: Extract<ConversationCommandResult, { kind: "mcp-detail" }>): number {
+  if (!result.view) return 1;
+  const { server, view } = result;
+  const values = view.section === "tools"
+    ? server.tools.map(tool => [tool.name, tool.title, tool.description])
+    : view.section === "resources"
+      ? server.resources.map(resource => [resource.name, resource.title, resource.description, resource.uri, resource.mimeType])
+      : server.resourceTemplates.map(template => [template.name, template.title, template.description, template.uriTemplate, template.mimeType]);
+  const term = view.searchTerm?.toLowerCase();
+  const count = term ? values.filter(fields => fields.some(value => value?.toLowerCase().includes(term))).length : values.length;
+  return Math.max(1, Math.ceil(count / maximumMcpDetailEntries));
 }
 
 function formatMcpToolLine(
@@ -432,6 +450,7 @@ function escapeCodeFence(value: string): string {
 
 export function formatConversationPlugins(
   result: Extract<ConversationCommandResult, { kind: "plugins" }>,
+  queryOnly = false,
 ): string {
   const {
     plugins,
@@ -472,7 +491,7 @@ export function formatConversationPlugins(
       "已安装 Plugin（匹配 0 · 第 1/1 页）：",
       ...loadErrorNotice,
       `没有匹配“${searchTerm}”的 Plugin。`,
-      "重新搜索：/plugin list search <关键词>",
+      queryOnly ? "重新搜索：/plugin list search 关键词" : "重新搜索：/plugin list search <关键词>",
     ].join("\n"));
   }
   return toStructuredMarkdownList([
@@ -489,16 +508,16 @@ export function formatConversationPlugins(
     "",
     ...(page > 1 ? [`上一页：/plugin list ${page - 1}${commandSuffix}`] : []),
     ...(page < pageCount ? [`下一页：/plugin list ${page + 1}${commandSuffix}`] : []),
-    ...(callableCommands.length > 0
+    ...(!queryOnly && callableCommands.length > 0
       ? ["当前页快捷调用：", ...callableCommands]
       : []),
     "健康检查：/plugin health",
-    "搜索：/plugin list search <关键词>",
+    queryOnly ? "搜索：/plugin list search 关键词" : "搜索：/plugin list search <关键词>",
     ...(hasReservedPluginName
       ? ["提示：名称为 health 或 list 时，查看详情请使用完整 ID 或序号。"]
       : []),
-    "详情：/plugin <名称、完整 ID 或序号>",
-    "调用：/plugin <名称、完整 ID 或序号> <任务>",
+    ...(queryOnly ? [] : ["详情：/plugin <名称、完整 ID 或序号>"]),
+    ...(queryOnly ? [] : ["调用：/plugin <名称、完整 ID 或序号> <任务>"]),
   ].join("\n"));
 }
 
@@ -539,6 +558,7 @@ function pluginHealthIssueLabel(
 
 export function formatConversationPluginDetail(
   result: Extract<ConversationCommandResult, { kind: "plugin-detail" }>,
+  queryOnly = false,
 ): string {
   const plugin = result.plugin;
   return toStructuredMarkdownList([
@@ -564,9 +584,9 @@ export function formatConversationPluginDetail(
       : []),
     ...(plugin.description ? [`说明：${plugin.description}`] : []),
     "",
-    plugin.enabled && plugin.available
+    ...(queryOnly ? [] : [plugin.enabled && plugin.available
       ? `调用：/plugin ${plugin.id} <任务>`
-      : "当前 Plugin 不可调用。",
+      : "当前 Plugin 不可调用。"]),
   ].join("\n"));
 }
 

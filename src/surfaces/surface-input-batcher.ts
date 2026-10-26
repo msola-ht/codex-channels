@@ -287,7 +287,7 @@ interface InlineImage {
   bytes: number;
 }
 
-async function toInlineImage(image: {
+export async function toInlineImage(image: {
   path: string;
   mimeType: InputImageMimeType;
 }): Promise<InlineImage> {

@@ -24,8 +24,8 @@ import {
   scheduledTaskDatabasePath,
   AsyncSqliteScheduledTaskStore,
 } from "../scheduled-tasks/index.js";
-import { ScheduledTaskExecutor } from "./scheduled-task-executor.js";
-import { ScheduledTaskRunCoordinator } from "./scheduled-task-run-coordinator.js";
+import { ScheduledTaskExecutor, type ScheduledTaskExecutorOptions } from "./scheduled-task-executor.js";
+import { ScheduledTaskRunCoordinator, type ScheduledTaskRunCoordinatorOptions } from "./scheduled-task-run-coordinator.js";
 import {
   createScheduledTaskToolRequestHandler,
   type ScheduledTaskToolLookup,
@@ -39,7 +39,9 @@ export interface ScheduledTaskCompositionOptions {
   codex: ProviderRoutingClient;
   turns?: TurnExecutionPort;
   acceptsExecution: (target: ConversationTarget) => boolean;
+  prepareSubmission?: ScheduledTaskExecutorOptions["prepareSubmission"];
   releaseRecoveredThread: (threadId: string, isCurrent: () => boolean) => Promise<boolean>;
+  canReleaseBinding?: ScheduledTaskRunCoordinatorOptions["canReleaseBinding"];
   bindings: SqliteBindingStore;
   workspaces: WorkspaceRegistry;
   core: ConversationCore;
@@ -92,6 +94,7 @@ export class ScheduledTaskComposition {
         isSurfaceEnabled: (target) => options.isSurfaceEnabled(target),
         isActorAuthorized: (target, actorId) => options.isActorAuthorized(target, actorId),
         acceptsExecution: options.acceptsExecution,
+        ...(options.prepareSubmission ? { prepareSubmission: options.prepareSubmission } : {}),
         onThreadStarted: (run, target, threadId) =>
           requireCoordinator().onThreadStarted(run, target, threadId),
         onTurnStarted: (run, target, threadId, turnId) =>
@@ -107,6 +110,7 @@ export class ScheduledTaskComposition {
       {
         validateRun: (task, signal) => executor.validateRun(task, signal),
         releaseRecoveredThread: options.releaseRecoveredThread,
+        ...(options.canReleaseBinding ? { canReleaseBinding: options.canReleaseBinding } : {}),
         logger: options.logger,
         onRecovered: (run, target) => {
           const status = run.state === "completed" ? "已完成"

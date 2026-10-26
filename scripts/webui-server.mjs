@@ -950,6 +950,8 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
         defaultWorkspace: gateway.system.defaultWorkspace,
         defaultModel: gateway.system.defaultModel,
         modelTrafficMode: gateway.system.modelTrafficMode,
+        modelTrafficInputItems: gateway.system.modelTrafficInputItems,
+        modelTrafficItemMaxBytes: gateway.system.modelTrafficItemMaxBytes,
         modelTrafficDumpEnabled: gateway.system.modelTrafficDumpEnabled,
         modelTrafficRetentionDays: gateway.system.modelTrafficRetentionDays,
       },

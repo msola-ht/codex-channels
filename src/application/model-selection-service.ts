@@ -171,7 +171,11 @@ export class ModelSelectionService {
     const current = await this.state(target, false, guard, expected);
     guard();
     if (JSON.stringify(modelSelectionSnapshot(current)) !== JSON.stringify(modelSelectionSnapshot(selection.snapshot))) {
-      throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片");
+      throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片", {
+        reason: "selection-before-snapshot",
+        fields: Object.keys(modelSelectionSnapshot(current)).filter(key =>
+          JSON.stringify(current[key as keyof ModelSelectionState]) !== JSON.stringify(selection.snapshot[key as keyof ModelSelectionSnapshot])),
+      });
     }
     expected.snapshot = modelSelectionSnapshot(current);
     expected.defaults = this.selectionDefaults(target, expected.snapshot);
@@ -283,7 +287,7 @@ export class ModelSelectionService {
       ? resolveModel(selectableModels, selector)
       : findModel(eligible, selector.model, selector.provider);
     if (!selected) {
-      throw new UserFacingError("model.selection.expired", "模型选项已失效，请重新发送 /model 选择");
+      throw new UserFacingError("model.selection.expired", "模型选项已失效，请重新发送 /model 选择", { reason: "selection-model-missing" });
     }
     this.requireAvailableModel(selected);
     const current = await this.resolveState(target, catalog, undefined, assertAuthorized, !expected.snapshot, expected);
@@ -373,6 +377,9 @@ export class ModelSelectionService {
         // Advance at the synchronous commit, before callbacks or an await can
         // expose another actor's changes. Removal by anyone else still fails.
         expected.threadId = undefined;
+        // Router has committed the replacement preference. The old pending
+        // override must no longer shadow that authoritative selection.
+        this.pendingByConversation.delete(this.key(target));
         this.acceptSelectionChange(target, expected);
       });
     }
@@ -743,7 +750,11 @@ export class ModelSelectionService {
     };
     if (expected?.snapshot
       && JSON.stringify(modelSelectionSnapshot(state)) !== JSON.stringify(expected.snapshot)) {
-      throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片");
+      throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片", {
+        reason: "selection-state-snapshot",
+        fields: Object.keys(modelSelectionSnapshot(state)).filter(key =>
+          JSON.stringify(state[key as keyof ModelSelectionState]) !== JSON.stringify(expected.snapshot![key as keyof ModelSelectionSnapshot])),
+      });
     }
     if (expected) expected.catalog = catalog;
     return state;
@@ -768,8 +779,9 @@ export class ModelSelectionService {
     return createHash("sha256").update(JSON.stringify([
       conversationTargetKey(target), workspaceId, cwd ?? null,
       binding?.threadId ?? null, binding?.sessionId ?? null,
-      current ? [current.model, current.modelProvider, current.effort, current.serviceTier,
-        current.serviceTierKnown, current.effectiveServiceTier] : null,
+      // Subscription teardown invalidates observed tier availability before
+      // committing a Provider switch; it does not change the user's selection.
+      current ? [current.model, current.modelProvider, current.effort, current.serviceTier] : null,
       pending ? [pending.model, pending.modelProvider, pending.effort, pending.serviceTier,
         hasOverride(pending, "model"), hasOverride(pending, "effort"), hasServiceTierOverride(pending)] : null,
       this.pendingProviderSwitches.has(this.key(target)),
@@ -785,11 +797,17 @@ export class ModelSelectionService {
     const current = this.router.modelSettings(target);
     const status = this.status(target);
     const filter = this.providerFilterByConversation.get(this.key(target));
+    const model = pending?.model ?? current?.model ?? previous.model;
+    const sameModel = model === previous.model && status.modelProvider === previous.modelProvider;
+    const catalogModel = expected.catalog && findModel(expected.catalog.models, model, status.modelProvider);
     expected.snapshot = modelSelectionSnapshot({
       ...status,
       ...(filter === undefined ? {} : { providerFilter: filter }),
-      model: pending?.model ?? current?.model ?? previous.model,
-      effort: pending?.effort ?? current?.effort ?? previous.effort,
+      model,
+      // A committed Provider switch may intentionally have no reasoning setting.
+      // Only retain the prior model's inferred default while its identity is unchanged.
+      effort: pending?.effort ?? current?.effort
+        ?? (sameModel ? previous.effort : catalogModel?.defaultReasoningEffort ?? null),
       serviceTier: hasServiceTierOverride(pending) || current ? status.serviceTier : previous.serviceTier,
     });
     expected.defaults = this.selectionDefaults(target, expected.snapshot);
@@ -962,10 +980,10 @@ export class ModelSelectionService {
         throw new UserFacingError("command.authorization-changed", "模型选择期间会话已变化");
       }
       if (expected.scope !== undefined && this.selectionScope(target) !== expected.scope) {
-        throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片");
+        throw new UserFacingError("model.selection.expired", "模型设置已变化，请重新打开选择卡片", { reason: "selection-scope" });
       }
       if (expected.snapshot && expected.defaults !== this.selectionDefaults(target, expected.snapshot)) {
-        throw new UserFacingError("model.selection.expired", "模型默认设置已变化，请重新打开选择卡片");
+        throw new UserFacingError("model.selection.expired", "模型默认设置已变化，请重新打开选择卡片", { reason: "selection-defaults" });
       }
     };
   }

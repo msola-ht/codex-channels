@@ -841,6 +841,7 @@ export class SubagentCompletionTracker {
       type: "subagent.completed",
       target: entry.target,
       parentThreadId: entry.parentThreadId,
+      parentTurnId: entry.parentTurnId,
       agentThreadId,
       agentPath: entry.agentPath,
       metricsStatus,

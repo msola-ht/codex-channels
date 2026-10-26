@@ -18,7 +18,7 @@
   供空闲会话跨渠道接管在转移绑定前失败关闭，不迁移审批、输入或 MCP 交互。
   标记为异步的用户问题使用独立 Conversation 队列，等待可选回答不阻塞审批；这类问题由 Bootstrap
   协调普通输入回传，不经过 `ApprovalCoordinator` 或 Server Request 响应编码。
-  异步问题携带进程内 `expectedActorId`，三个 Surface 约束原用户作答；它与 `isCurrent` 授权守卫均不进入上游协议或持久化。
+  异步问题携带进程内 `expectedActorId`，四个 Surface 约束原用户作答；它与 `isCurrent` 授权守卫均不进入上游协议或持久化。
 
 批量取消先撤销整批请求，再通知 Surface 清理，最后推进未受影响的队列；不得在取消过程中发送同批待取消请求。
 组合根通过 `resolvedMany` 按请求 ID 批量撤销异步问题，覆盖渠道断线、Thread 失效、绑定切换及关闭。

@@ -1,8 +1,25 @@
 # Bootstrap
 
+QQ 群功能暂停：组合根不创建群配对端点；旧群绑定不进入启动订阅恢复、空闲释放或后台自动清理，配置与绑定原样保留。计划任务恢复仍记录授权失败并阻止运行，但不因此删除旧群后台绑定。单聊及其他渠道沿原生命周期执行。
+
+Surface 明确证明本次结果尚未发送，且原记录与本次均无发送检查点时，`PersistentSurfaceOutput` 将其映射为 Delivery 的未发送错误，保留为 `blocked`；已有预览、检查点或未知结果仍保守保留 `uncertain`。两者均不自动重发，不改变数据库格式。
+
+自动审查通知的 Turn 开始观察包含 Core 在启动响应和权威恢复快照确认后发布的 `turn.started`，不局限于原始 RPC 通知。
+先到审查所留下的未知归属可由该确认补齐，并重试尚未过期的通知；既有所有者不可替换，子代理仍要求精确父子 Turn 关系。
+持久输出前序等待与 Surface 交互失败记录阶段及请求身份，不记录审批内容；安全结束和超时不代表消息已送达。
+
+实时快照先执行状态观察和取代，再按 Surface 的可选 `acceptsSnapshot` 判定是否捕获 owner 并入队。此入口只用于新快照，隐藏完成的独立收尾和已有 Journal 重放不经过它；显示隐藏不伪装成授权失败或平台确认。
+
+持久输出将原 owner 中已校验的 Surface 来源经 `PersistentSurfaceOutput → SurfaceManager` 传入发送端，跨过反序列化与富化仍保留原任务关联；不修改 Journal/owner 格式，不凭索引建立新授权。QQ 据此从有效连接代次取原生引用索引，其他渠道仍使用原投递合同。
+
 子代理开始通知使用 0.162.0 官方活动中的启动模型与思考等级；元数据补充只读取并核验 Provider 归属，不用稍后 Thread 设置覆盖启动快照。继续通知仍展示读取时的 Thread 设置。
 
 本目录是模块化单体的组合根，负责创建具体依赖并管理 Gateway 进程生命周期。
+
+`surface-composition.ts` 将固定启动配置的显示解析器注入渠道。QQ 经渠道公开的地址解码器把成员会话映射到物理群或原始单聊接收者，仅用于展示继承，业务会话、Actor、Thread、审批及来源仍使用原身份。飞书使用已校验私聊的物理 Chat ID；Telegram 仅对当前进程已确认 `chat.type=private` 的地址应用覆盖，未知旧目标保守隐藏可选实时过程并记录原因，已保留终态仍独立履行投递，不猜测 ID 或删除绑定。显示覆盖修改需重启 Gateway 激活。
+共享 `/status` 的显示模式查询也使用 QQ 原始 OpenID 匹配单聊覆盖，不能把业务会话的 `c2c:` 前缀当作配置中的聊天 ID；群覆盖仍按物理群 ID 匹配。
+
+成功完成通知的实时模式在 observer 准入时固定：可见模式随进程内到达序号传入可靠消费者，恢复或重试时没有该上下文则使用稳定详细呈现；不增加 Journal 字段。隐藏模式复用有界快照的独立 `turn-settlement` 用途，不写 Journal、不参与普通状态合并，按精确目标和 Turn 收尾。它等待前序持久排序屏障，或在后继持久发送前按到达顺序先入同一 critical 队列；不占队列等待自身，不阻塞后继可靠记录落盘。固定 60 秒后仅做本地清理，撤权、停止、容量不足也不发送；这不改变旧 pending/uncertain 记录或声称正文送达。微信按现有私聊目标消费完成设置；TG 类型证明缺失时成功完成可选通知同样隐藏，错误与明确缺正文仍受保护。
 `gateway-component-graph.ts` 在有损展示队列之前接入第三方重复思考保护，仅为已绑定、当前活动且 Provider 已知并非 OpenAI 官方的 Thread 提供中断端口。原始思考与摘要增量由 Client 适配后交给 Application 的有界异步检测，不等待 RPC；中断任务纳入既有生命周期任务集合，对应 Provider 断线或绑定失效清空检测窗口，关闭先停检测再等待已发出的中断。提示走现有 warning 投递链，不传出思考内容。
 当前页 Thread 状态由组件图以最多 4 个并发只读查询已连接 Provider；配置生命周期在应用启动成功后发布独立私有 IPC，
 停止先撤销入口和查询再停止应用，不接管共享 App Server 的进程生命周期。
@@ -13,19 +30,30 @@
 
 ## 文件
 
+- `qq-network.ts`：QQ 每代次独立的代理、HTTP 池与关闭资源管理，由渠道组合注入。QQ 普通文字复用共享 Application 和持久投递；绑定和订阅沿共享恢复，审批与问答进入共享交互路由。计划任务接入共享执行器及精确 Turn 来源；当次配置通知使用受控单聊名单，不订阅持久 Workspace 配置事件。
+  独立的 QQ 菜单 Setup 通过精确文件级边界许可复用此网络所有者，操作结束关闭自有资源，不启动组合根或 WebSocket。
+  Markdown 图片素材的 uploadImageMaterial 复用下面的无凭据公网固定 IP 传输，与分片 PUT 分开声明 MIME/ETag 合同，不复用 QQ API 的鉴权头。
+- `qq-attachment-download.ts`：QQ 附件无凭据 HTTPS 下载与富媒体预签名分片 PUT。DNS 全部结果经保守公网策略校验后固定一个 IP，直连与代理 CONNECT 均使用该地址，HTTP Host、SNI 和证书验证保留原域名；不自动重定向，代理选择仍按原 URL。私网、特殊 IPv4 和 IPv6 映射/转译范围拒绝，此安全策略不是完整可达性分类，可能保守拒绝特殊公网地址。取消覆盖 DNS 等待及实际请求，PUT 仅在有界成功响应完整结束后确认，响应结束释放专用代理资源，网络关闭汇总关闭结果。
+  `surface-composition.ts` 为 QQ 上线通知注入启动允许名单、共享只读状态和运行环境；渠道在发送前复核授权，通知不恢复 Thread 或旧投递来源。完成通知复用现有精确 Turn 统计补全。
+
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。
-- `persistent-surface-output.ts`：在总线发布时取得原目标归属，按有界窗口异步生成快照并提交独立 Delivery；恢复时复核当前授权，通过 Surface 可等待端口记录实际平台确认；对未知或授权失效的持久结果注入仅解除顺序屏障的策略，保留记录和额度；同时拥有投递管理私有 IPC 的启动与关闭，将在线修订操作交给 Coordinator；进程内登记实时到达序号供输入镜像排序，序号不进入持久载荷，提交拒绝或开始投递时释放对应登记。
+- `persistent-surface-output.ts`：在总线发布时取得原目标归属，按有界窗口异步生成快照并提交独立 Delivery；恢复时复核当前授权，通过 Surface 可等待端口记录实际平台确认；对未知或授权失效的持久结果注入仅解除顺序屏障的策略，保留记录和额度；同时拥有投递管理私有 IPC 的启动与关闭，将在线修订操作交给 Coordinator；进程内登记实时到达序号供输入镜像排序，序号不进入持久载荷，提交拒绝或开始投递时释放对应登记。关闭入口先停止新派发并启动所有渠道共用的 3 秒收尾，再等待控制接口和此前接受的快照；重复关闭复用同一结果，Journal 故障直接取消在途投递。
+  可选 authorizeAtDispatch 接收 Coordinator 的取消信号，允许来源结算等待；通过后仍用同步 authorized 在富化、排队、started 检查点及最终发送前复核。载荷解码失败仍按存储故障处理，来源拒绝或超时不冒充存储故障。
+  组件图为 QQ 捕获 owner v3（共享身份字符串与一次来源引用），非 QQ 保持 v2；任务来源核对 Thread/Turn，MCP OAuth 完成通知的显式 notification 来源核对 Thread/Server，不伪造 Turn。QQ 旧 owner、无来源、跨代次或身份不匹配均禁发，发送前同步复核精确来源。通知来源仅驻当前代次内存，不从 Journal 恢复授权。
 - `persistent-interaction-port.ts`：审批和问题先等待同 Conversation 的前序持久结果；等待纳入原交互期限，等待前后及接受答复前复核交互归属，取消立即释放所有权并拒绝迟到结果，不保存交互正文。
 - `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前检查组合根的投递容量，统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止、查询与 Queue 删除能力，不修改协议字段。所有端口参数包含本地提交守卫原样转发，使准入等待后仍能拒绝过期命令。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，拒绝断线前连接代次迟到的问题通知，仍消费取消事件，避免入站或输出积压导致旧问题重新登记；等待前捕获唯一授权 Actor 与工作区 ID/目录，交互限定原用户，分批回答及最终 Turn 发送均复核原授权和 Thread。拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
   回答提交结束前持续保护原 Thread，整个问题流程结束后触发后台空闲复核；审批类交互则在官方 `serverRequest/resolved` 后解析绑定祖先并复核，避免只清理交互状态而遗留后台订阅。
+  QQ 回答按原交互 requestId 单次领取最终回应来信的提交票据，将原问题守卫与票据守卫合并，并透传既有 SubmissionObserver；新 Turn 结果由本次参与建立来源。失败取消票据，原授权仍有效时由 QQ 窄回调提示未确认，不借无 Turn 的 warning 扩大发送范围。
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限；异步预检返回后及 Thread 创建后再次复核当前授权、取消、Workspace 与投递准入，撤权时释放新建后台绑定而不启动 Turn。临时容量拒绝及创建提交绑定前的订阅失效不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
   启动请求期间使用 Core 临时活动观察合并响应，迟到响应不覆盖期间归约的终态或更新轮次；无论 Core 当前是否仍活动，成功响应中的准确 Turn ID 都继续交给 Run 协调器关联，观察器在请求结束时释放。
   同一提交守卫穿过后台排队、投递准入和 Provider 准备到 Client 最终写入前；提交前取消或授权失效明确收敛，已发写入仍按真实响应处理，已知新 Thread 的取消保留身份并释放绑定。
+  可选 Surface 提交票据在最终 Turn 请求前准备，并由同一 SubmissionObserver 确认响应的精确 Thread/Turn；QQ 缺少票据时拒绝启动。组件图贯穿任务原 Actor、Workspace 和后台绑定授权，切换前台不改投结果，重启恢复 Run 不恢复旧 QQ 结果来源。
   权限预检按实际 Provider 与授权 cwd 查询原生明确受限沙箱，未知缺省或命名 Profile 拒绝。
   创建不覆盖沙箱，仅设置无人值守 `never`；实际响应符合目录、审批策略和预检沙箱后才启动 Turn。
 - `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态；确认离线终态后通过组合层向原 Conversation 发布恢复通知，再释放后台绑定。恢复包含已知 Thread 的 `uncertain` Run，结果未知不清除无人值守拒绝归属；精确 Turn 的终态只释放该未知 Run 的运行期归属，不改写历史结果。启动响应前每 Run 只保留一个带 Turn ID 的完成候选，其他轮次不覆盖它；启动响应不匹配时在五秒和分页上限内读取权威历史的精确 Turn，缺失或读取失败保留为 `uncertain`，不能将同 Thread 的其他轮次用于结算。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
   恢复终态写入后复核同一后台绑定对象；通过组合根注入 Application 的完成释放能力，保留当前 Turn、子代理与 Queue 保护，恢复本身不派发 Queue。
+  QQ 自动释放后台绑定前，还会有界等待该 Conversation 已接收的持久投递结算，再复核归属和任务状态；失败记录仍保留在投递箱，等待超时保留绑定交恢复流程处理，不把顺序屏障结束称为全部送达。
 - `scheduled-task-server-request.ts`：按启动恢复及实时登记的 Thread/Run 归属，在首次异步操作前记录无人值守拒绝，避免并发 Turn 完成误报成功；持久化失败保留进程内拒绝事实并记录告警。为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状；普通命令和文件审批返回 `decline`，已有终端输入 `writeStdin` 返回 `cancel` 中止本轮，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
 - `scheduled-task-tool-request.ts`：校验前台 `item/tool/call` 的 Thread 绑定、唯一授权 Actor 和
   `schedule_task` 工具名，把结果复用现有计划任务渲染格式返回给 Agent，并把确认预览交给当前
@@ -132,6 +160,10 @@
   决定是否启用，飞书和微信使用显式开关；飞书和微信启动通知从仍有授权 Actor 的已知 Conversation
   解析收件人，不要求当时已有 Thread 绑定。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
   读取凭据，不把 Token 放入运行配置。
+  QQ 在创建渠道、恢复订阅前按当前 App 的精确单聊及群/成员策略复核已知 Actor；撤权或无法确认 Actor 的
+  Conversation 复用共享 `retainActors` 原子解除前台/后台绑定，保留 Workspace 选择及 App Server Thread。
+  已授权单聊与群成员、其他 App 和其他渠道的绑定不受影响；重新授权后普通输入按既有强制新建标记处理。
+  QQ 群配对服务使用配置目录与 App 隔离的私有 IPC，经窄端口注入 Surface；Surface 持有启停，Runtime 仅接收已解析的群身份与配对指令，不操作 Application 或保存配置。Setup 完整确认后复用原子配置写入，配对本身不授予任务权限。
   组合根同时向 Surface 上下文提供官方主路由的鉴权文件可用性，非官方主路由返回未知；该值只用于
   上线通知和失效降级提示，不替代 App Server 的认证判断，也不改变 Thread 的 Provider 绑定。
 - `proxy-fetch.ts`：向 Bootstrap 组合代码转发 Runtime 共享的代理 Fetch 接口；代理选择与
@@ -238,7 +270,9 @@
   `errorChain`（每层只有类型与白名单错误码，不含错误正文），便于定位底层失败原因。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。
   关闭时通过 `beginShutdown` 先拒绝新执行和交互，保留持久接收入口供组合根排空入站通知，随后 `stop` 等待入箱并关闭渠道。
-- `channel-image-spool.ts`：扫描 `data/channel-outbox/pending/` 的图片发送请求，按
+- `channel-file-spool.ts`：文件独立 manifest 和 `channel-file-outbox` 根目录，沿 Thread 绑定调用活动 QQ/飞书/TG/微信的 `sendChannelFile`，通过共享 channelFilePolicy 复核类型及预算，透传显式 file/video/voice 与停止信号（微信拒绝 voice）；不改变图片数据格式，未知发送不重试。
+- `channel-media-spool.ts`：图片和文件共用的私有领取、发送及归档处理，按明确 kind 读取各自 manifest，文件只允许同编号 `.bin` 副本；文件 version 1 可选 mediaType，缺省 file，原记录不改写，图片拒绝该字段。普通图片 version 1；QQ 显式 Markdown 图片 version 2 且 format=markdown，向 Surface 透传格式，不迁移旧记录。两个公开包装器各自持有生命周期和根目录，停止信号传到支持取消的渠道上传边界；文件在固定原目标后按渠道复核类型与预算。
+- `channel-image-spool.ts`：图片 manifest 包装器，复用共享处理器扫描 `data/channel-outbox/pending/` 的图片发送请求，按
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据
   发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；Unix 使用 `0700/0600`，Windows
   使用当前 SID 私有 ACL；创建或使用目录时检查类型、链接与所有者，启动时先拒绝既有文件链接或异主文件，再收紧权限；只接受

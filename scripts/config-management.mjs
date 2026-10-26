@@ -6,6 +6,7 @@ import {
   GatewayConfigConflictError,
   GatewayConfigValidationError,
   GatewayConfigWriteCommittedError,
+  isTelegramEnabled,
   parseGatewayConfig,
   validateCodexConfigDocument,
   validateDebugConfigDocument,
@@ -16,13 +17,14 @@ import {
 import { readCodexProxySnapshot, renderCodexProxySettings, validateCodexProxyValue, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { validateModelDisplayAliases } from "../runtime/model-display-name.mjs";
+import { applyDisplayPresetSetting, applyDisplayScopeSetting, projectDisplayScopes, projectGlobalDisplayState, readDisplayTargets } from "./config-display-management.mjs";
 import { ConfigManagementError, invalidSetting } from "./config-management-error.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import {
   applyMetricsSetting,
   projectMetricsSettings,
 } from "./config-metrics-management.mjs";
-import { gatewayChannelStates } from "./config-summary.mjs";
+import { gatewayChannelStates, projectModelTrafficSettings } from "./config-summary.mjs";
 import {
   applyWebuiSetting,
   projectWebuiSettings,
@@ -31,7 +33,7 @@ import { detectTerminalIdentity } from "../runtime/terminal-identity.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import { createSharedCodexUserConfigClient, withCodexUserConfigClient } from "./codex-user-config.mjs";
 
-const operationUpdateValues = ["full", "compact", "hidden"];
+const operationUpdateValues = ["full", "detailed", "compact", "failures", "hidden"];
 const messageFormatValues = ["html", "rich"];
 const loggingLevelValues = ["fatal", "error", "warn", "info", "debug", "trace"];
 const proxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_proxy"];
@@ -56,21 +58,38 @@ export function loadGatewaySettings(environment = process.env) {
   const network = snapshot.proxy.settings;
   const telegram = table(document.telegram);
   const workspaces = workspaceOptions(document);
+  const displayTargets = readDisplayTargets(document, configPath);
   return {
     configPath,
     revision: snapshot.revision,
     display: {
+      preset: projectGlobalDisplayState(display, document.display).preset,
+      globalScope: projectGlobalDisplayState(display, document.display),
       operationUpdates: display.operation_updates,
       planUpdatesEnabled: display.plan_updates,
       reasoningEnabled: display.reasoning,
+      completion: display.completion ?? "detailed",
+      completionOverride: display.completion ?? null,
+      presentationDetail: display.presentation_detail ?? "basic",
+      presentationDetailOverride: display.presentation_detail ?? null,
+      subagentsEnabled: display.subagents ?? true,
+      subagentsOverride: display.subagents ?? null,
+      streamingEnabled: display.streaming ?? true,
+      streamingOverride: display.streaming ?? null,
+      commentaryEnabled: display.commentary ?? true,
+      commentaryOverride: display.commentary ?? null,
+      routineNotificationsEnabled: display.routine_notifications ?? true,
+      routineNotificationsOverride: display.routine_notifications ?? null,
       modelAliases: display.model_aliases ?? {},
+      scopes: projectDisplayScopes(document, display, displayTargets.selectors),
+      targetsStatus: displayTargets.status,
     },
     system: {
       approvalTimeoutSeconds: approval.timeout_seconds,
       idleReleaseMinutes: conversation.idle_release_minutes,
       defaultWorkspace: stringValue(document.default_workspace) || null,
       defaultModel: stringValue(codex.default_model) || null,
-      modelTrafficMode: debug.model_traffic_input_items === 0 && debug.model_traffic_item_max_bytes === 0 ? "debug" : "production",
+      ...projectModelTrafficSettings(debug),
       modelTrafficDumpEnabled: debug.model_traffic_dump,
       modelTrafficRetentionDays: debug.model_traffic_retention_days,
       officialTuiIdentity: {
@@ -206,7 +225,7 @@ function updateGatewaySettingValidated(
     };
   }
   const originalDocument = structuredClone(document);
-  const result = applySetting(document, input);
+  const result = applySetting(document, input, configPath);
   validateGatewayConfigStructureDocument(document);
   if (JSON.stringify(document) === JSON.stringify(originalDocument)) {
     return {
@@ -287,34 +306,98 @@ export function validateNetworkProxyValue(field, value) {
   return field === "no_proxy" ? validateNoProxy(normalized) : validateCodexProxyValue(field, normalized);
 }
 
-/** 已配置 bot_token 的 Telegram 才会创建 Surface；只留空表时没有消费者。 */
+/** 与运行时共用启用判定；停用时保留凭据但没有 Surface 消费者。 */
 function telegramSurfaceEnabled(document) {
-  return stringValue(table(document.telegram).bot_token) !== "";
+  return isTelegramEnabled(document.telegram);
 }
 
 /**
- * 只有 Telegram（已配置 bot_token）与已启用的飞书消费 `display.*` 设置，与运行时重载判定
+ * 已启用的 Telegram、飞书与 QQ 消费过程显示设置，与运行时重载判定
  * （`classifyConfigReload`）保持一致：只启用微信或未配置渠道时改这些设置没有渠道受影响，
  * 无需重建 Gateway 连接，只需重新读取配置。
  */
 function displaySettingActivation(document) {
-  return telegramSurfaceEnabled(document) || table(document.feishu).enabled === true
+  return telegramSurfaceEnabled(document) || table(document.feishu).enabled === true || table(document.qq).enabled === true
     ? "restart-gateway"
     : "reload";
 }
 
-function applySetting(document, input) {
+function completionSettingActivation(document) {
+  return table(document.weixin).enabled === true ? "restart-gateway" : displaySettingActivation(document);
+}
+
+function applyGlobalDisplayEdit(document, input, { field, effective, override, fallback, label, values, activation }) {
+  const edit = input.value;
+  const previous = document.display?.[field] ?? fallback;
+  if (!edit || typeof edit !== "object" || Array.isArray(edit)
+    || Object.keys(edit).some(key => !["action", "value"].includes(key))
+    || !["set", "inherit"].includes(edit.action)
+    || (edit.action === "inherit" && Object.hasOwn(edit, "value"))) throw invalid("value", "invalid-input", `请选择${label}设置或恢复缺省`);
+  if (edit.action === "set") {
+    const value = values ? enumValue(edit.value, values, "value", label) : booleanValue(edit.value, "value", label);
+    document.display = { ...table(document.display), [field]: value };
+  } else if (document.display !== undefined) delete document.display[field];
+  const stored = document.display?.[field] ?? null;
+  return {
+    value: { [effective]: stored ?? fallback, [override]: stored },
+    activation: previous === (stored ?? fallback) ? "reload" : activation(document),
+    backupRequired: true,
+  };
+}
+
+function applySetting(document, input, configPath) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "设置输入必须是对象");
+  }
+  if (typeof input.kind === "string" && input.kind.startsWith("display.")
+    && Object.keys(input).some(key => !["kind", "value"].includes(key))) {
+    throw invalid("input", "invalid-input", "显示设置输入包含不支持的字段");
   }
   const delegated = applyWebuiSetting(document, input)
     ?? applyMetricsSetting(document, input);
   if (delegated !== undefined) return delegated;
   switch (input.kind) {
+    case "display.preset": {
+      const result = applyDisplayPresetSetting(document, input, configPath);
+      const activation = result.scope || result.changedFields?.some(field => ["completion", "presentation_detail", "routine_notifications"].includes(field))
+        ? completionSettingActivation(document) : displaySettingActivation(document);
+      return { ...result, activation };
+    }
+    case "display.scope": {
+      const result = applyDisplayScopeSetting(document, input, configPath);
+      // Overrides are one shared runtime configuration unit, including retained
+      // inactive targets. Match reload-classifier's conservative array boundary.
+      return { ...result, activation: result.activation === "none" ? "none" : completionSettingActivation(document) };
+    }
+    case "display.presentation-detail":
+      return applyGlobalDisplayEdit(document, input, { field: "presentation_detail", effective: "presentationDetail", override: "presentationDetailOverride", fallback: "basic", label: "消息详情", values: ["basic", "detailed", "full"], activation: completionSettingActivation });
+    case "display.completion":
+      return applyGlobalDisplayEdit(document, input, { field: "completion", effective: "completion", override: "completionOverride", fallback: "detailed", label: "完成通知", values: ["off", "brief", "detailed"], activation: completionSettingActivation });
+    case "display.routine-notifications":
+      return applyGlobalDisplayEdit(document, input, { field: "routine_notifications", effective: "routineNotificationsEnabled", override: "routineNotificationsOverride", fallback: true, label: "常规通知", values: undefined, activation: completionSettingActivation });
+    case "display.commentary":
+      return applyGlobalDisplayEdit(document, input, { field: "commentary", effective: "commentaryEnabled", override: "commentaryOverride", fallback: true, label: "过程说明", values: undefined, activation: displaySettingActivation });
+    case "display.streaming":
+      return applyGlobalDisplayEdit(document, input, { field: "streaming", effective: "streamingEnabled", override: "streamingOverride", fallback: true, label: "流式显示", values: undefined, activation: displaySettingActivation });
+    case "display.subagents":
+      return applyGlobalDisplayEdit(document, input, { field: "subagents", effective: "subagentsEnabled", override: "subagentsOverride", fallback: true, label: "子代理显示", values: undefined, activation: displaySettingActivation });
+    case "channel.enabled": {
+      const channel = enumValue(input.channel, ["telegram", "feishu", "weixin", "qq"], "channel", "通讯渠道");
+      const value = booleanValue(input.value, "value", "渠道启用状态");
+      const state = gatewayChannelStates(document).find(entry => entry.id === channel);
+      if (!state) throw invalid("channel", "channel-not-configured", "请先通过 Setup 完成该渠道接入配置");
+      if (state.enabled === value) return changed(value, "none");
+      if (!value && !gatewayChannelStates(document).some(entry => entry.id !== channel && entry.enabled)) {
+        throw invalid("value", "last-enabled-channel", "Gateway 至少需要启用一个通讯渠道；暂停全部渠道请执行 codexc stop gateway");
+      }
+      document[channel] = { ...table(document[channel]), enabled: value };
+      // 调用方统一校验变更后的凭据和授权名单，绝不补充授权。
+      return changed(value, "restart-gateway");
+    }
     case "display.operation-updates": {
       const value = enumValue(input.value, operationUpdateValues, "value", "操作详情显示");
       document.display = { ...table(document.display), operation_updates: value };
-      return changed(value, displaySettingActivation(document));
+      return { ...changed(value, displaySettingActivation(document)), backupRequired: value === "failures" || value === "detailed" };
     }
     case "display.plan-updates": {
       const value = booleanValue(input.value, "value", "计划更新显示");
@@ -372,17 +455,21 @@ function applySetting(document, input) {
     }
     case "system.model-traffic-dump": {
       const value = booleanValue(input.value, "value", "调用详情记录");
+      if (validateDebugConfigDocument(table(document.debug)).model_traffic_dump === value) return changed(value, "none");
       document.debug = { ...table(document.debug), model_traffic_dump: value };
       return changed(value, "restart-app-server");
     }
     case "system.model-traffic-mode": {
-      const value = enumValue(input.value, ["production", "debug"], "value", "调用记录模式");
+      const value = enumValue(input.value, ["production", "debug"], "value", "调用记录预设");
+      const current = projectModelTrafficSettings(validateDebugConfigDocument(table(document.debug)));
+      if (current.modelTrafficMode === value) return changed(value, "none");
       document.debug = { ...table(document.debug), model_traffic_input_items: value === "debug" ? 0 : 3,
         model_traffic_item_max_bytes: value === "debug" ? 0 : 65536 };
       return changed(value, "restart-app-server");
     }
     case "system.model-traffic-retention-days": {
       const value = integerValue(input.value, 0, 36_500, "value", "调用记录保留天数");
+      if (validateDebugConfigDocument(table(document.debug)).model_traffic_retention_days === value) return changed(value, "none");
       document.debug = { ...table(document.debug), model_traffic_retention_days: value };
       return changed(value, "restart-app-server");
     }

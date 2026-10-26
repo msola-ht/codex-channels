@@ -2,6 +2,7 @@ import type { OperationUpdate } from "../../conversation-core/index.js";
 import { formatElapsedDuration } from "../elapsed-duration.js";
 import {
   compactOperationDetail,
+  detailedOperationDetail,
   operationMetadata,
   operationStatus,
   operationTitle,
@@ -90,7 +91,8 @@ function renderOperationRecords(
     }
     lines.push("", heading);
     if (record.detail) {
-      const detail = escapeTelegramHtml(redactOperationDetail(record.detail));
+      const detail = escapeTelegramHtml(display === "detailed"
+        ? detailedOperationDetail(record) : redactOperationDetail(record.detail));
       lines.push(record.kind === "command" && record.commandExploration === undefined
         ? `<pre><code class="language-shell">${detail}</code></pre>`
         : record.commandExploration === undefined

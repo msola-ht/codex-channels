@@ -1,10 +1,12 @@
 import { DeliveryJournal } from "./journal.js";
-import { defaultDeliveryLimits, DeliveryError, type DeliveryRecord, type DeliverySubmission } from "./types.js";
+import { defaultDeliveryLimits, DeliveryError, DeliveryNotSentError, type DeliveryRecord, type DeliverySubmission } from "./types.js";
 
 export interface DeliveryCoordinatorOptions {
   accounts(): string[];
-  authorized(record: DeliveryRecord): boolean | Promise<boolean>;
+  authorized(record: DeliveryRecord, signal: AbortSignal): boolean | Promise<boolean>;
   deliver(record: DeliveryRecord, signal: AbortSignal): Promise<void>;
+  /** Called only after the platform delivery and durable journal acknowledgement both succeed. */
+  acknowledged?(record: DeliveryRecord): void;
   fault(code: string, account?: string, persistentDeliveryId?: string): void;
   concurrency?: number;
   timeoutMs?: number;
@@ -18,8 +20,12 @@ export class DeliveryCoordinator {
   private readonly active = new Map<string, { controller: AbortController; task: Promise<void> }>();
   private readonly outstanding = new Map<string, number>();
   private readonly submissions = new Set<Promise<boolean>>();
+  private readonly delivering = new Set<AbortController>();
   private started = false;
   private stopped = false;
+  private dispatchStopped = false;
+  private shutdownTimer: NodeJS.Timeout | undefined;
+  private storageFaulted = false;
   private pumping = false;
   private pumpTask: Promise<void> | undefined;
   private managementTask: Promise<boolean> | undefined;
@@ -69,7 +75,7 @@ export class DeliveryCoordinator {
   }
 
   executionBlockReason(account: string): "unavailable" | "global-capacity" | "account-capacity" | undefined {
-    if (!this.started || this.stopped || !this.journal.available) return "unavailable";
+    if (!this.started || this.stopped || this.dispatchStopped || !this.journal.available) return "unavailable";
     if (this.total.paused) return "global-capacity";
     if (this.usage.get(account)?.paused) return "account-capacity";
     return undefined;
@@ -99,11 +105,11 @@ export class DeliveryCoordinator {
 
   /** Runtime writer owns both the transaction and in-memory scheduling/accounting changes. */
   resolveBatch(entries: Array<{ id: string; revision: string }>, action: "retry" | "ignore"): Promise<boolean> {
-    if (!this.started || this.stopped || this.managementTask) return Promise.reject(new DeliveryError("conflict"));
+    if (!this.started || this.stopped || this.dispatchStopped || this.managementTask) return Promise.reject(new DeliveryError("conflict"));
     const task = Promise.resolve().then(async () => {
       await this.pumpTask;
       const rows = await this.journal.queueEntries(entries.map(entry => entry.id));
-      if (this.stopped) throw new DeliveryError("closed");
+      if (this.stopped || this.dispatchStopped) throw new DeliveryError("closed");
       if (rows.some(row => row && this.active.has(row.conversation))) throw new DeliveryError("conflict");
       if (rows.some((row, i) => !row || row.revision !== entries[i]!.revision || !["uncertain", "blocked"].includes(row.state))) return false;
       let applied: boolean;
@@ -135,24 +141,24 @@ export class DeliveryCoordinator {
 
   wake(): void {
     this.dirty = true;
-    if (!this.started || this.stopped || this.pumping || this.managementTask) return;
+    if (!this.started || this.stopped || this.dispatchStopped || this.pumping || this.managementTask) return;
     this.pumping = true;
     this.pumpTask = this.pump().catch(() => {
       this.storageFailed();
     }).finally(() => {
       this.pumping = false;
-      if (this.dirty && !this.stopped) this.wake();
+      if (this.dirty && !this.stopped && !this.dispatchStopped) this.wake();
     });
   }
 
   private async pump(): Promise<void> {
     do {
       this.dirty = false;
-      while (!this.stopped && !this.managementTask && this.active.size < (this.options.concurrency ?? 8)) {
+      while (!this.stopped && !this.dispatchStopped && !this.managementTask && this.active.size < (this.options.concurrency ?? 8)) {
         const accounts = this.options.accounts();
         if (accounts.length === 0) break;
         const record = await this.journal.next([...this.active.keys()], accounts);
-        if (!record || this.stopped || this.managementTask) break;
+        if (!record || this.stopped || this.dispatchStopped || this.managementTask) break;
         const controller = new AbortController();
         const task = this.run(record, controller).finally(() => {
           this.active.delete(record.conversation);
@@ -160,7 +166,7 @@ export class DeliveryCoordinator {
         });
         this.active.set(record.conversation, { controller, task });
       }
-    } while (this.dirty && !this.stopped && !this.managementTask);
+    } while (this.dirty && !this.stopped && !this.dispatchStopped && !this.managementTask);
   }
 
   private async run(record: DeliveryRecord, controller: AbortController): Promise<void> {
@@ -172,28 +178,46 @@ export class DeliveryCoordinator {
     });
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 60_000);
     try {
-      if (!(await Promise.race([this.options.authorized(record), cancelled]))) {
+      let authorized = false;
+      try {
+        authorized = (await Promise.race([this.options.authorized(record, controller.signal), cancelled])) === true;
+      } catch (error) {
+        if (error instanceof DeliveryError && error.code === "storage") throw error;
+        // Authorization failure is not evidence of a broken journal. Never send
+        // after a rejected, timed out or cancelled authorization wait.
+      }
+      if (this.stopped || this.dispatchStopped) return;
+      if (!authorized || controller.signal.aborted) {
         if (!(await this.journal.transition(record.id, "pending", "blocked"))) throw new DeliveryError("conflict");
         this.options.changed?.();
         await this.releaseRetainedBarrier({ ...record, state: "blocked" });
         this.options.fault("authorization-changed", record.account, record.id);
         return;
       }
-      if (this.stopped) return;
+      if (this.stopped || this.dispatchStopped) return;
       if (!(await this.journal.transition(record.id, "pending", "sending"))) throw new DeliveryError("conflict");
       this.options.changed?.();
+      if (this.stopped || this.dispatchStopped) {
+        // Shutdown may win while the state write is in flight. No delivery
+        // callback has run, so preserve this record for the next startup.
+        if (!(await this.journal.transition(record.id, "sending", "pending"))) throw new DeliveryError("conflict");
+        this.options.changed?.();
+        return;
+      }
       try {
         controller.signal.throwIfAborted();
+        this.delivering.add(controller);
         await Promise.race([
           this.options.deliver(record, controller.signal),
           cancelled,
         ]);
         controller.signal.throwIfAborted();
-      } catch {
-        if (!(await this.journal.transition(record.id, "sending", "uncertain"))) throw new DeliveryError("conflict");
+      } catch (error) {
+        const state = error instanceof DeliveryNotSentError ? "blocked" : "uncertain";
+        if (!(await this.journal.transition(record.id, "sending", state))) throw new DeliveryError("conflict");
         this.options.changed?.();
-        await this.releaseRetainedBarrier({ ...record, state: "uncertain" });
-        this.options.fault("delivery-uncertain", record.account, record.id);
+        await this.releaseRetainedBarrier({ ...record, state });
+        this.options.fault(state === "blocked" ? "delivery-not-sent" : "delivery-uncertain", record.account, record.id);
         return;
       }
       // Platform confirmation and local acknowledgement are different failure domains.
@@ -201,12 +225,21 @@ export class DeliveryCoordinator {
       if (!(await this.journal.acknowledge(record.id))) throw new DeliveryError("conflict");
       this.release(record.conversation);
       this.updateUsage(record.account, -record.bytes, -1);
+      try { this.options.acknowledged?.(record); }
+      catch { this.options.fault("acknowledged-cleanup-failed", record.account, record.id); }
     } catch { this.storageFailed(record.account, record.id); }
-    finally { clearTimeout(timer); controller.signal.removeEventListener("abort", cancel); }
+    finally {
+      this.delivering.delete(controller);
+      clearTimeout(timer);
+      controller.signal.removeEventListener("abort", cancel);
+      controller.abort();
+    }
   }
 
-  private storageFailed(account?: string, id?: string): void {
-    if (this.stopped) return;
+  /** Writer failure must cancel active sends even when no journal call is awaiting it. */
+  storageFailed(account?: string, id?: string): void {
+    if (this.storageFaulted) return;
+    this.storageFaulted = true;
     this.stopped = true;
     for (const { controller } of this.active.values()) controller.abort();
     this.options.changed?.();
@@ -245,12 +278,28 @@ export class DeliveryCoordinator {
     else this.usage.set(account, usage);
   }
 
-  close(): Promise<void> {
+  /** Fence dispatch immediately, but allow already-accepted snapshots to finish admission. */
+  beginShutdown(): void {
+    if (this.dispatchStopped || this.stopped) return;
+    this.dispatchStopped = true;
+    for (const { controller } of this.active.values()) {
+      if (!this.delivering.has(controller)) controller.abort();
+    }
+    // One deadline from the shutdown entry, including control/snapshot cleanup.
+    this.shutdownTimer = setTimeout(() => {
+      for (const { controller } of this.active.values()) controller.abort();
+    }, 3_000);
+  }
+
+  close(graceful = false): Promise<void> {
     if (this.closePromise) return this.closePromise;
+    if (graceful) this.beginShutdown();
     this.stopped = true;
-    for (const { controller } of this.active.values()) controller.abort();
+    if (!graceful) for (const { controller } of this.active.values()) controller.abort();
     this.closePromise = (async () => {
-      await Promise.allSettled([this.managementTask, this.pumpTask, ...this.submissions, ...[...this.active.values()].map((entry) => entry.task)]);
+      try {
+        await Promise.allSettled([this.managementTask, this.pumpTask, ...this.submissions, ...[...this.active.values()].map((entry) => entry.task)]);
+      } finally { clearTimeout(this.shutdownTimer); }
       await this.journal.close();
     })();
     return this.closePromise;

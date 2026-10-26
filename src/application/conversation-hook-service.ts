@@ -46,9 +46,11 @@ export class ConversationHookService {
     private readonly reviewPolicy: HookReviewPolicy = () => false,
   ) {}
 
-  async execute(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView> {
+  async execute(target: ConversationTarget, input: string, actorId?: string, assertAuthorized?: () => void): Promise<HookCommandView> {
+    assertAuthorized?.();
     const context = this.context(target, actorId);
     const beforeSubmit = () => {
+      assertAuthorized?.();
       if (!sameContext(this.context(target, actorId), context)) throw expired();
     };
     return this.locks.forConversation(target, async () => {
@@ -104,14 +106,14 @@ export class ConversationHookService {
       warningCount: catalog.warningCount, errorCount: catalog.errorCount, page, pageCount,
     };
     this.prune(this.snapshots, true);
-    this.snapshots.set(id, { ...context, capturedAt: Date.now(), view });
+    this.snapshots.set(id, { ...context, capturedAt: performance.now(), view });
     return view;
   }
 
   private selection(context: Context, selector: string): { view: HookCommandView; hook: HookEntry } {
     const id = selector.split(".")[0]!;
     const snapshot = this.snapshots.get(id);
-    if (!snapshot || !sameContext(snapshot, context) || Date.now() - snapshot.capturedAt > lifetimeMs) throw expired();
+    if (!snapshot || !sameContext(snapshot, context) || performance.now() - snapshot.capturedAt >= lifetimeMs) throw expired();
     const entry = snapshot.view.entries.find(entry => entry.selector === selector);
     if (!entry) throw expired();
     return { view: snapshot.view, hook: entry.hook };
@@ -131,7 +133,7 @@ export class ConversationHookService {
     const token = randomBytes(16).toString("hex");
     const view = { ...selection.view, detail: { selector, hook } };
     this.prune(this.confirmations, true);
-    this.confirmations.set(token, { ...context, capturedAt: Date.now(), hook, action, version, view });
+    this.confirmations.set(token, { ...context, capturedAt: performance.now(), hook, action, version, view });
     return { ...view, confirmation: { token, action } };
   }
 
@@ -139,18 +141,18 @@ export class ConversationHookService {
     const pending = this.confirmations.get(token);
     if (!pending || !sameContext(pending, context)) throw expired();
     this.confirmations.delete(token);
-    if (Date.now() - pending.capturedAt > lifetimeMs) throw expired();
+    if (performance.now() - pending.capturedAt >= lifetimeMs) throw expired();
     if (await this.version(context, beforeSubmit) !== pending.version) throw expired();
     const hook = await this.recheck(context, pending.hook, beforeSubmit);
     requireAction(hook, pending.action);
     beforeSubmit();
-    if (Date.now() - pending.capturedAt > lifetimeMs) throw expired();
+    if (performance.now() - pending.capturedAt >= lifetimeMs) throw expired();
     let refreshFailedProviders: string[];
     let submissionDenied = false;
     const beforeWrite = () => {
       try {
         beforeSubmit();
-        if (Date.now() - pending.capturedAt > lifetimeMs) throw expired();
+        if (performance.now() - pending.capturedAt >= lifetimeMs) throw expired();
         requireAction({ ...hook, reviewable: hook.reviewable && this.reviewPolicy(context.surface, hook) }, pending.action);
       } catch (error) {
         submissionDenied = true;
@@ -230,7 +232,7 @@ export class ConversationHookService {
   }
 
   private prune<T extends { capturedAt: number }>(map: Map<string, T>, reserve = false): void {
-    for (const [key, value] of map) if (Date.now() - value.capturedAt > lifetimeMs) map.delete(key);
+    for (const [key, value] of map) if (performance.now() - value.capturedAt >= lifetimeMs) map.delete(key);
     if (reserve) trimOldestEntries(map, maximumSnapshots - 1);
   }
 }

@@ -149,6 +149,7 @@ export class TelegramLifecycle {
     }
     for (const { chatId, text } of messages) {
       if (this.stopping || signal.aborted) return;
+      if (!text) continue;
       try {
         for (const chunk of formatTelegramPanelChunks(text)) {
           await this.bot.api.sendMessage(

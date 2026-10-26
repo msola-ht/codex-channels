@@ -1,16 +1,21 @@
 import { DeliveryControlServer } from "../../runtime/delivery-control.mjs";
 import { randomUUID } from "node:crypto";
-import { DeliveryCoordinator, DeliveryJournal, DeliveryError, type DeliveryFailure } from "../delivery/index.js";
+import { DeliveryCoordinator, DeliveryJournal, DeliveryError, DeliveryNotSentError, type DeliveryFailure } from "../delivery/index.js";
 import type { ConversationTarget, OutputEvent } from "../conversation-core/index.js";
 import { conversationTargetKey, surfaceAccountKey } from "../conversation-core/index.js";
-import { mayReleaseUncertainOutputBarrier, decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, withPersistentDeliveryDiagnostics, type DeliveryCheckpoint } from "../surfaces/index.js";
+import type { SurfaceDeliverySource } from "../surfaces/index.js";
+import { SurfaceDeliveryNotSentError, mayReleaseUncertainOutputBarrier, decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, withPersistentDeliveryDiagnostics, type DeliveryCheckpoint } from "../surfaces/index.js";
 
 export interface PersistentSurfaceOutputOptions {
   directory: string;
   owner(event: OutputEvent): string;
   authorized(event: OutputEvent, owner: string): boolean;
+  /** Optional source settlement wait; synchronous checks below remain mandatory. */
+  authorizeAtDispatch?(event: OutputEvent, owner: string, signal: AbortSignal): Promise<boolean>;
+  source?(event: OutputEvent, owner: string): SurfaceDeliverySource | undefined;
   accounts(): string[];
-  deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number): Promise<void>;
+  deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number, source?: SurfaceDeliverySource, presentation?: { completion: "brief" | "detailed" }): Promise<void>;
+  acknowledged?(event: OutputEvent, owner: string): void;
   fault(code: string, account?: string, persistentDeliveryId?: string, failure?: DeliveryFailure): void;
   changed?(): void;
   workerUrl?: URL;
@@ -24,14 +29,15 @@ export class PersistentSurfaceOutput {
   private readonly preparingConversations = new Map<string, number>();
   private readonly tails = new Map<string, Promise<void>>();
   private pendingBytes = 0;
-  private readonly liveOrders = new Map<string, number>();
+  private readonly liveOrders = new Map<string, { order: number; presentation?: { completion: "brief" | "detailed" } }>();
   private closed = false;
+  private closePromise: Promise<void> | undefined;
   private readonly idleWaiters = new Set<() => void>();
 
   constructor(private readonly options: PersistentSurfaceOutputOptions) {
     this.journal = new DeliveryJournal(options.directory, {
       ...(options.workerUrl ? { workerUrl: options.workerUrl } : {}),
-      onFailure: (failure) => options.fault("storage", undefined, undefined, failure),
+      onFailure: () => this.coordinator.storageFailed(),
     });
     this.coordinator = new DeliveryCoordinator(this.journal, {
       accounts: () => options.accounts(),
@@ -39,25 +45,40 @@ export class PersistentSurfaceOutput {
         const payload = decodePersistentOutput(record.payload);
         return mayReleaseUncertainOutputBarrier(payload.event);
       },
-      authorized: (record) => {
-        const payload = decodePersistentOutput(record.payload);
-        return options.authorized(payload.event, payload.owner);
+      authorized: async (record, signal) => {
+        let payload: ReturnType<typeof decodePersistentOutput>;
+        try { payload = decodePersistentOutput(record.payload); }
+        catch { throw new DeliveryError("storage"); }
+        if (signal.aborted) return false;
+        if (options.authorizeAtDispatch && !(await options.authorizeAtDispatch(payload.event, payload.owner, signal))) return false;
+        return !signal.aborted && options.authorized(payload.event, payload.owner);
       },
       deliver: async (record, signal) => {
         const liveOrder = this.liveOrders.get(record.id);
         this.liveOrders.delete(record.id);
         const payload = decodePersistentOutput(record.payload);
         if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
-        await withPersistentDeliveryDiagnostics(record.id, () => withPersistentOutputImage(payload, options.directory, (event) => options.deliver(event, signal, async (checkpoint) => {
-          if (!(await this.journal.checkpoint(record.id, checkpoint))) throw new DeliveryError("storage");
-          this.control.changed();
-          if (checkpoint.state === "started") {
-            signal.throwIfAborted();
-            if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
-          }
-        }, () => options.authorized(payload.event, payload.owner), liveOrder)));
+        let checkpointObserved = record.progress.length > 0;
+        try {
+          await withPersistentDeliveryDiagnostics(record.id, () => withPersistentOutputImage(payload, options.directory, (event) => options.deliver(event, signal, async (checkpoint) => {
+            checkpointObserved = true;
+            if (!(await this.journal.checkpoint(record.id, checkpoint))) throw new DeliveryError("storage");
+            this.control.changed();
+            if (checkpoint.state === "started") {
+              signal.throwIfAborted();
+              if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
+            }
+          }, () => options.authorized(payload.event, payload.owner), liveOrder?.order, options.source?.(payload.event, payload.owner), liveOrder?.presentation)));
+        } catch (error) {
+          if (error instanceof SurfaceDeliveryNotSentError && !checkpointObserved) throw new DeliveryNotSentError();
+          throw error;
+        }
       },
       fault: (code, account, id) => options.fault(code, account, id, code === "storage" ? this.journal.failure : undefined),
+      acknowledged: (record) => {
+        const payload = decodePersistentOutput(record.payload);
+        options.acknowledged?.(payload.event, payload.owner);
+      },
       changed: () => this.notifyIdleWaiters(),
     });
     this.control = new DeliveryControlServer(options.directory, async (entries, action) => {
@@ -102,7 +123,7 @@ export class PersistentSurfaceOutput {
     return this.preparingConversations.has(key) || this.coordinator.hasOutstanding(key);
   }
 
-  accept(event: OutputEvent, liveOrder?: number): void {
+  accept(event: OutputEvent, liveOrder?: number, presentation?: { completion: "brief" | "detailed" }): void {
     const account = surfaceAccountKey(event.target.surface, event.target.accountId);
     if (this.closed) return;
     let encoded: string;
@@ -127,7 +148,7 @@ export class PersistentSurfaceOutput {
     const previous = this.tails.get(conversation) ?? Promise.resolve();
     const id = randomUUID();
     let submitted = false;
-    if (liveOrder !== undefined) this.liveOrders.set(id, liveOrder);
+    if (liveOrder !== undefined) this.liveOrders.set(id, { order: liveOrder, ...(presentation ? { presentation } : {}) });
     const task = previous.then(async () => {
       const payload = await snapshotPersistentOutput(snapshot, owner);
       if (this.closed && this.closeExpired) throw new Error("投递箱快照关闭期限已结束");
@@ -146,8 +167,11 @@ export class PersistentSurfaceOutput {
     this.tails.set(conversation, task);
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> { return this.closePromise ??= this.closeInternal(); }
+
+  private async closeInternal(): Promise<void> {
     this.closed = true;
+    this.coordinator.beginShutdown();
     await this.control.close().catch(() => this.options.fault("control-close"));
     this.notifyIdleWaiters();
     let timer: NodeJS.Timeout | undefined;
@@ -160,7 +184,7 @@ export class PersistentSurfaceOutput {
           resolve();
         }, 5_000); }),
       ]);
-    } finally { clearTimeout(timer); await this.coordinator.close(); this.liveOrders.clear(); }
+    } finally { clearTimeout(timer); await this.coordinator.close(true); this.liveOrders.clear(); }
   }
 
   private closeExpired = false;

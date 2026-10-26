@@ -14,11 +14,14 @@ export class ConversationResetCreditService {
   constructor(private readonly credits: OpenAiResetCreditService,
     private readonly authorizedContext: (target: ConversationTarget, actorId: string) => string) {}
 
-  async execute(target: ConversationTarget, actorId: string | undefined, input: string): Promise<ConversationResetCreditResult> {
+  async execute(target: ConversationTarget, actorId: string | undefined, input: string,
+    assertInteractionActive?: () => void): Promise<ConversationResetCreditResult> {
     try {
       if (!actorId) throw failure("forbidden");
+      assertInteractionActive?.();
       const context = this.authorizedContext(target, actorId);
       const validateAuthorization = () => {
+        assertInteractionActive?.();
         if (this.authorizedContext(target, actorId) !== context) throw failure("reset_stale");
       };
       const owner = JSON.stringify([conversationTargetKey(target), actorId]);
@@ -30,7 +33,7 @@ export class ConversationResetCreditService {
       if (parts.length === 1 || (parts.length === 2 && /^[1-9]\d{0,3}$/u.test(parts[1]!))) {
         const page = Number(parts[1] ?? "1");
         const snapshot = await this.credits.list(undefined, validateAuthorization);
-        if (this.authorizedContext(target, actorId) !== context) throw failure("reset_stale");
+        validateAuthorization();
         const pageCount = Math.max(1, Math.ceil(snapshot.credits.length / 8));
         if (page > pageCount) throw failure("usage");
         return { type: "list", accountId: snapshot.accountId, availableCount: snapshot.availableCount,
@@ -43,7 +46,7 @@ export class ConversationResetCreditService {
         if (this.pending.size >= 128) throw failure("reset_busy");
         const preview = await this.credits.preview(value, undefined, validateAuthorization);
         try {
-          if (this.authorizedContext(target, actorId) !== context) throw failure("reset_stale");
+          validateAuthorization();
           if (this.pending.size >= 128) throw failure("reset_busy");
           this.pending.set(preview.attemptId, { owner, context, expiresAt: preview.expiresAt });
         } catch (error) { this.credits.cancel(preview.attemptId); throw error; }

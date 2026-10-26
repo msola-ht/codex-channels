@@ -1,7 +1,9 @@
 import { join } from "node:path";
+import type { ChannelFileMediaType } from "../bounded-local-file.js";
 import { TextAttachmentStore } from "../text-attachment-store.js";
 import { FeishuVideoStore, type FeishuVideoPort } from "./video.js";
 import type { Logger } from "pino";
+import { shouldHideRoutineConfiguration } from "../delivery-policy.js";
 
 import type {
   ConversationCommandExecutor,
@@ -123,9 +125,9 @@ export interface FeishuSurfaceOptions {
   webSocketAgent?: unknown;
   disableEnvironmentProxy?: boolean;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  displaySettings?: import("../types.js").SurfaceMessageDisplaySettings;
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
-  debugEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -169,6 +171,7 @@ export class FeishuSurface implements SurfaceAdapter {
     | FeishuStartupNotification
     | undefined;
   private readonly logger: Logger;
+  private readonly displaySettings: FeishuSurfaceOptions["displaySettings"];
   private readonly overloadNotifiedChats = new Set<string>();
   private connectionReady = false;
   private cardActionObserved = false;
@@ -190,6 +193,7 @@ export class FeishuSurface implements SurfaceAdapter {
     };
     this.startupNotification = options.startupNotification;
     this.logger = options.logger;
+    this.displaySettings = options.displaySettings;
     const client = dependencies.messagePort
         && dependencies.imagePort
         && dependencies.audioPort
@@ -227,6 +231,9 @@ export class FeishuSurface implements SurfaceAdapter {
       messagePort,
       options.logger,
       {
+        ...(options.displaySettings ? { displaySettings: options.displaySettings } : {}),
+        isCompletionAuthorized: event => (options.actorRegistry?.actors(event.target) ?? [])
+          .some(actorId => options.access.isAllowed({ target: event.target, actorId })),
         ...(options.operationUpdateDisplay !== undefined
           ? { operationUpdateDisplay: options.operationUpdateDisplay }
           : {}),
@@ -236,10 +243,6 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.reasoningEnabled !== undefined
           ? { reasoningEnabled: options.reasoningEnabled }
           : {}),
-        ...(options.autoCompactPercent === undefined
-          ? {}
-          : { autoCompactPercent: options.autoCompactPercent }),
-        debugEnabled: options.debugEnabled ?? false,
         deliverIdleReleased: async (event, sendCard) => {
           const actorId = this.notificationActor(event.target);
           if (actorId === undefined) {
@@ -312,7 +315,6 @@ export class FeishuSurface implements SurfaceAdapter {
       this.interactions,
       {
         quietWindowMs: 0,
-        debugEnabled: options.debugEnabled ?? false,
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),
@@ -528,8 +530,13 @@ export class FeishuSurface implements SurfaceAdapter {
     });
   }
 
-  sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
-    return this.output.sendChannelImage(conversationId, imagePath);
+  sendChannelImage(conversationId: string, imagePath: string, isCurrent: () => boolean, signal?: AbortSignal): Promise<void> {
+    return this.output.sendChannelImage(conversationId, imagePath, isCurrent, signal);
+  }
+
+  sendChannelFile(conversationId: string, filePath: string, fileName: string, isCurrent: () => boolean,
+    mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void> {
+    return this.output.sendChannelFile(conversationId, filePath, fileName, isCurrent, mediaType, signal);
   }
 
   presentScheduledTaskConfirmation(
@@ -609,6 +616,9 @@ export class FeishuSurface implements SurfaceAdapter {
     }
     const text = renderFeishuConfigurationChange(change);
     for (const chatId of this.safeConfigurationRecipients()) {
+      if (shouldHideRoutineConfiguration(change, this.displaySettings?.({
+        surface: this.surface, accountId: this.accountId, conversationId: chatId,
+      }).routineNotificationsEnabled ?? true)) continue;
       const card = this.deliverWorkspaceAddedCard(chatId, change);
       if (card) {
         void card.catch((error: unknown) => {
@@ -684,6 +694,7 @@ export class FeishuSurface implements SurfaceAdapter {
     const delivered = new Set<string>();
     for (const { chatId, text } of messages) {
       if (signal.aborted) return;
+      if (!text) continue;
       if (!/^oc_.+$/u.test(chatId)) {
         this.logger.warn(
           this.lifecycleContext(),

@@ -30,6 +30,7 @@ import {
 } from "../runtime/app-server-runtime.mjs";
 import {
   readGatewayConfig,
+  isTelegramEnabled,
   validateGatewayConfigStructureDocument,
 } from "../runtime/gateway-config.mjs";
 import {
@@ -135,6 +136,7 @@ if (document) {
   const telegram = table(document.telegram);
   const feishu = table(document.feishu);
   const weixin = table(document.weixin);
+  const qq = table(document.qq);
   const codex = table(document.codex);
   const storage = table(document.storage);
   const stateDatabasePath = resolveConfiguredPath(
@@ -177,13 +179,30 @@ if (document) {
 
   setSection("通讯渠道");
   const tokenConfigured = Boolean(stringValue(telegram.bot_token));
-  const channelEnabled = tokenConfigured || feishu.enabled === true || weixin.enabled === true;
+  const telegramEnabled = isTelegramEnabled(telegram);
+  const channelEnabled = telegramEnabled || feishu.enabled === true || weixin.enabled === true || qq.enabled === true;
   record("渠道启用", channelEnabled, channelEnabled
     ? "至少一个通讯渠道已配置启用"
     : "尚未配置通讯渠道，Gateway 暂不能启动；继续检查工作区及其他独立项目",
-  channelEnabled ? undefined : "运行 codexc setup 配置 Telegram、飞书或微信，然后重新运行 codexc doctor");
+  channelEnabled ? undefined : "运行 codexc setup 配置 Telegram、飞书、微信或 QQ，然后重新运行 codexc doctor");
+  if (Object.keys(qq).length > 0) {
+    note("QQ", `${qq.enabled === true ? "已启用" : "未启用"}；WebSocket 单聊；群功能暂停`);
+    note("QQ 应用凭据", stringValue(qq.app_id) && stringValue(qq.app_secret)
+      ? "已配置（内容已隐藏）；未联网验证"
+      : "未完整配置；未联网验证");
+    note("QQ 用户授权", Array.isArray(qq.allowed_user_openids) && qq.allowed_user_openids.length > 0
+      ? `已配置 ${qq.allowed_user_openids.length} 个允许用户（内容已隐藏）`
+      : "无单聊允许用户，拒绝所有单聊输入");
+    note("QQ 群授权", Array.isArray(qq.groups) && qq.groups.length > 0
+      ? `保留 ${qq.groups.length} 个群配置但不生效；群输入和输出均关闭（身份内容已隐藏）`
+      : "群功能暂停，群输入和输出均关闭");
+    note("QQ 账号能力", "未知；Doctor 不获取 Access Token、不连接 QQ、不发送消息");
+    note("QQ 运行核对", "用 codexc logs gateway -n 100 核对单聊连接状态。只读检查不证明收发可用；群配置不授予群能力");
+  } else {
+    note("QQ", "未配置");
+  }
   const allowedUsers = validAllowedUsers(telegram.allowed_user_ids);
-  if (tokenConfigured) {
+  if (telegramEnabled) {
     record("Telegram Token", true, "已配置（内容已隐藏）");
     record(
       "Telegram 用户",
@@ -191,7 +210,7 @@ if (document) {
       allowedUsers ? "允许列表有效" : "telegram.allowed_user_ids 未配置或格式无效",
     );
   } else {
-    note("Telegram", "未配置");
+    note("Telegram", tokenConfigured ? "已配置，未启用；保留凭据和允许名单" : "未配置");
   }
   if (feishu.enabled === true) {
     const appId = stringValue(feishu.app_id);

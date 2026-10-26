@@ -3,7 +3,7 @@ import type { SessionRouter } from "../session-routing/index.js";
 import type { ThreadHistoryPort } from "./thread-history-port.js";
 import type { RequestMetricsQueryPort } from "./request-metrics-port.js";
 
-const sessionListPageSize = 20;
+export const sessionListPageSize = 10;
 const sessionTurnCountCacheTtlMs = 5 * 60_000;
 const sessionScanConcurrency = 3;
 const sessionScanTimeoutMs = 10_000;

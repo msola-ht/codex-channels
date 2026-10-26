@@ -9,6 +9,7 @@ import { parse, stringify } from "smol-toml";
 import { z } from "zod";
 import { modelRelayConfigSchema } from "./model-relay-config.mjs";
 import { validateModelDisplayAliases } from "./model-display-name.mjs";
+import { messageDisplayOverridesSchema } from "./message-display-policy.mjs";
 
 import {
   PrivateFileWriteCommittedError,
@@ -22,6 +23,25 @@ import {
 } from "./private-directory-lock.mjs";
 
 const sourceByDocument = new WeakMap();
+
+/** Compare validated runtime QQ identities; disabled configurations project to undefined. */
+export function classifyQqConfigChanges(current, next) {
+  const changes = [];
+  if (Boolean(current) !== Boolean(next)) changes.push({ kind: "enabled", restart: true });
+  if (current && next) {
+    if (current.appId !== next.appId) changes.push({ kind: "account", restart: true });
+    if (current.appSecret !== next.appSecret) changes.push({ kind: "credentials", restart: true });
+    const before = new Set(current.allowedUserOpenIds);
+    const after = new Set(next.allowedUserOpenIds);
+    const removed = [...before].some(id => !after.has(id));
+    if (removed || [...after].some(id => !before.has(id))) changes.push({ kind: "allowed-users", restart: removed });
+    const groups = value => JSON.stringify((value.groups ?? []).map(group => [
+      group.groupOpenId, [...group.allowedMemberOpenIds].sort(), group.allowPublicOutput,
+    ]).sort((left, right) => left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0));
+    if (groups(current) !== groups(next)) changes.push({ kind: "groups", restart: true });
+  }
+  return changes;
+}
 const activeGatewayConfigLocks = new Set();
 
 export class GatewayConfigConflictError extends Error {
@@ -105,6 +125,52 @@ const weixinSetupSchema = z.strictObject({
   ),
 });
 
+const qqGroupOpenIdSchema = z.string().min(1).refine(
+  value => Buffer.byteLength(value, "utf8") <= 512 && !/[\s\p{Cc}\uD800-\uDFFF]/u.test(value),
+  "群及成员 OpenID 须为不含空白及控制字符的有效 Unicode，最多 512 UTF-8 字节",
+);
+const qqGroupSchema = z.strictObject({
+  group_openid: qqGroupOpenIdSchema,
+  allowed_member_openids: z.array(qqGroupOpenIdSchema).min(1).refine(
+    values => new Set(values).size === values.length,
+    "allowed_member_openids 不能包含重复项",
+  ),
+  allow_public_output: z.literal(true),
+});
+
+const qqSchema = z.strictObject({
+  enabled: z.boolean(),
+  app_id: z.string().regex(/^[0-9]+$/u, "app_id 必须是 QQ 应用的数字标识").optional(),
+  app_secret: z.string().min(1).refine(
+    (value) => !/\s/u.test(value) && !containsControlCharacter(value),
+    "app_secret 不能为空或包含空白及控制字符",
+  ).optional(),
+  allowed_user_openids: z.array(
+    z.string().min(1).refine(
+      (value) => !/[\s,，;；]/u.test(value) && !containsControlCharacter(value),
+      "每个 QQ 用户 OpenID 不能为空或包含空白、逗号、分号及控制字符",
+    ),
+  ).refine(
+    (values) => new Set(values).size === values.length,
+    "allowed_user_openids 不能包含重复项",
+  ).optional(),
+  groups: z.array(qqGroupSchema).refine(
+    values => new Set(values.map(value => value.group_openid)).size === values.length,
+    "groups 不能包含重复群 OpenID",
+  ).optional(),
+}).superRefine((value, context) => {
+  if (!value.enabled) return;
+  for (const field of ["app_id", "app_secret", "allowed_user_openids"]) {
+    if (value[field] === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `QQ 启用时必须配置 ${field}`,
+      });
+    }
+  }
+});
+
 const webuiSchema = z.strictObject({
   enabled: z.boolean().optional(),
   host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
@@ -171,13 +237,22 @@ function containsControlCharacter(value) {
   return false;
 }
 
+export function isTelegramEnabled(telegram) {
+  return telegram?.enabled !== false && typeof telegram?.bot_token === "string" && telegram.bot_token.trim().length > 0;
+}
+
 const telegramSchema = z.strictObject({
+  enabled: z.boolean().optional(),
   bot_token: z.string().optional(),
   allowed_user_ids: z.array(z.number().int().positive()).optional(),
   proxy_url: z.string().optional(),
   message_format: z.enum(["html", "rich"]).default("html"),
 }).superRefine((value, context) => {
+  if (value.enabled === false) return;
   if (!value.bot_token?.trim()) {
+    if (value.enabled === true) context.addIssue({
+      code: "custom", path: ["bot_token"], message: "Telegram 启用时必须配置 bot_token",
+    });
     return;
   }
   if (!value.allowed_user_ids?.length) {
@@ -253,6 +328,7 @@ const gatewayConfigStructureSchema = z.strictObject({
   telegram: telegramSchema.optional(),
   feishu: feishuSchema.optional(),
   weixin: weixinSetupSchema.optional(),
+  qq: qqSchema.optional(),
   codex: codexSchema,
   gateway: gatewaySchema.optional(),
   model_relay: modelRelayConfigSchema.optional(),
@@ -263,9 +339,16 @@ const gatewayConfigStructureSchema = z.strictObject({
     idle_release_minutes: z.number().int().min(0).max(1440).default(15),
   }).default({ idle_release_minutes: 15 }),
   display: z.strictObject({
-    operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
+    operation_updates: z.enum(["full", "detailed", "compact", "failures", "hidden"]).default("compact"),
+    subagents: z.boolean().optional(),
+    streaming: z.boolean().optional(),
+    commentary: z.boolean().optional(),
+    routine_notifications: z.boolean().optional(),
     plan_updates: z.boolean().default(true),
     reasoning: z.boolean().default(false),
+    completion: z.enum(["off", "brief", "detailed"]).optional(),
+    presentation_detail: z.enum(["basic", "detailed", "full"]).optional(),
+    overrides: messageDisplayOverridesSchema.optional(),
     model_aliases: modelDisplayAliasesSchema.optional(),
   }).default({
     operation_updates: "compact",
@@ -296,14 +379,15 @@ const gatewayConfigStructureSchema = z.strictObject({
 
 const gatewayDocumentSchema = gatewayConfigStructureSchema.superRefine((value, context) => {
   if (
-    !value.telegram?.bot_token?.trim()
+    !isTelegramEnabled(value.telegram)
     && value.feishu?.enabled !== true
     && value.weixin?.enabled !== true
+    && value.qq?.enabled !== true
   ) {
     context.addIssue({
       code: "custom",
       path: ["telegram", "bot_token"],
-      message: "至少需要配置一个通讯渠道：Telegram、飞书或微信",
+      message: "至少需要配置一个通讯渠道：Telegram、飞书、微信或 QQ",
     });
   }
 

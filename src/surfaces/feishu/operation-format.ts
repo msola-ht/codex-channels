@@ -2,6 +2,7 @@ import type { OperationUpdate } from "../../conversation-core/index.js";
 import { formatElapsedDuration } from "../elapsed-duration.js";
 import {
   compactOperationDetail,
+  detailedOperationDetail,
   mcpToolCapabilityLabel,
   operationStatus,
   operationTitle,
@@ -23,7 +24,7 @@ export function renderFeishuComputerUseCard(
   const detail = record.detail === undefined ? "" : inlineOperationDetail(
     display === "compact"
       ? compactOperationDetail(record.detail)
-      : safeOperationDetail(record.detail),
+      : safeOperationDetail(record, display),
   );
   const content = withOperationDurationFooter(detail ? `\`${detail}\`` : "", record.durationMs);
   return feishuCardShell(
@@ -51,7 +52,7 @@ export function formatFeishuOperation(
         record.durationMs,
       );
     }
-    const detail = safeOperationDetail(record.detail);
+    const detail = safeOperationDetail(record, display);
     if (record.kind === "command" && record.commandExploration === undefined) {
       lines.push("```shell", detail, "```");
     } else {
@@ -98,7 +99,8 @@ function inlineOperationDetail(value: string): string {
     .replaceAll("\n", " ");
 }
 
-function safeOperationDetail(value: string): string {
-  return redactOperationDetail(value)
-    .replaceAll("```", "``\u200B`");
+function safeOperationDetail(record: OperationUpdate, display: Exclude<OperationUpdateDisplay, "hidden">): string {
+  const detail = display === "detailed"
+    ? detailedOperationDetail(record) : redactOperationDetail(record.detail ?? "");
+  return detail.replaceAll("```", "``\u200B`");
 }

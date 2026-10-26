@@ -83,6 +83,14 @@ export class DeliveryError extends Error {
   }
 }
 
+/** Explicit boundary evidence of a delivery blocked before any message attempt. */
+export class DeliveryNotSentError extends Error {
+  constructor() {
+    super("可靠投递尚未发送");
+    this.name = "DeliveryNotSentError";
+  }
+}
+
 export type JournalCommand =
   | { type: "submit"; value: DeliverySubmission }
   | { type: "next"; excluded: string[]; accounts?: string[] }

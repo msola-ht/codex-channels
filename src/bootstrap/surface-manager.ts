@@ -7,6 +7,7 @@ import {
   surfaceAccountKey,
   type ConversationTarget,
   type OutputEvent,
+  type UserMessageIdentity,
 } from "../conversation-core/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import {
@@ -19,7 +20,11 @@ import {
   resolveSurfaceDelivery,
   surfaceErrorMetadata,
   type SurfaceAdapter,
+  type ChannelFileMediaType,
+  channelFilePolicy,
   type SurfaceConfigurationChange,
+  type SurfaceAsyncAnswerSubmission,
+  type SurfaceScheduledTaskSubmissionContext,
 } from "../surfaces/index.js";
 
 const defaultRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000] as const;
@@ -74,11 +79,16 @@ interface PendingSnapshot {
   revision: number;
   order: number;
   controller: AbortController;
-  active?: { event: OutputEvent; bytes: number; revision: number; controller: AbortController };
+  purpose?: "turn-settlement";
+  expiry?: NodeJS.Timeout;
+  active?: { event: OutputEvent; owner: string; bytes: number; revision: number; controller: AbortController };
 }
 
 export interface SurfaceManagerOptions extends CompletionOutputEnricherOptions {
-  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "fault" | "workerUrl">;
+  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "authorizeAtDispatch" | "source" | "fault" | "workerUrl"> & {
+    /** Discard only disposable identities; retained records call this after their journal ACK. */
+    releaseSource?(event: OutputEvent, owner: string): void;
+  };
   retryDelaysMs?: readonly number[];
   maximumPendingCriticalOutput?: number;
   setInteractionAvailable?(
@@ -105,7 +115,8 @@ export class SurfaceManager {
   private readonly persistent: PersistentSurfaceOutput | undefined;
   private persistenceStart: Promise<void> | undefined;
   private removeOutputObserver: (() => void) | undefined;
-  private readonly liveOutput = new WeakMap<OutputEvent, { liveAdmitted: true } | undefined>();
+  private readonly liveOutput = new WeakMap<OutputEvent, { liveAdmitted: true; completion?: "brief" | "detailed" } | undefined>();
+  private readonly hiddenCompletions = new WeakSet<OutputEvent>();
   private readonly suspended = new Set<string>();
   private readonly surfaceStops = new Map<SurfaceAdapter, Promise<void>>();
   private readonly snapshots = new Map<string, PendingSnapshot>();
@@ -154,6 +165,7 @@ export class SurfaceManager {
     }
     this.persistent = options.persistence ? new PersistentSurfaceOutput({
       ...options.persistence,
+      acknowledged: (event, owner) => options.persistence?.releaseSource?.(event, owner),
       changed: () => {
         if (this.stopping) return;
         for (const [key, snapshot] of this.snapshots) {
@@ -161,19 +173,22 @@ export class SurfaceManager {
           if (surface) this.scheduleSnapshot(surface, key, snapshot);
         }
       },
-      accounts: () => [...this.active].map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
-      deliver: async (event, signal, checkpoint, authorized, liveOrder) => {
+      accounts: () => [...this.active].filter(surface => !surface.connectionOnly)
+        .map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
+      deliver: async (event, signal, checkpoint, authorized, liveOrder, source, presentation) => {
         const surface = this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId));
         if (!surface || !this.active.has(surface) || !surface.output.deliver) throw new Error("可靠投递端口不可用");
         const enriched = await this.enrichSafely(event, signal);
         signal.throwIfAborted();
-        if (!this.acceptingOutput) throw new Error("可靠投递已停止");
+        // Already-dispatched durable output owns the shutdown grace period.
+        // Live admission closes earlier; cancellation and owner authorization
+        // still govern enrichment and admission to the Surface delivery port.
         if (!authorized()) throw new Error("可靠投递授权已变化");
         if (liveOrder !== undefined) {
           // Coordinator has settled every preceding durable record in this Conversation.
           // Admit earlier live input now, without letting it bypass recovered/uncertain results.
           for (const [key, snapshot] of this.snapshots) {
-            if (snapshot.event.type === "user.message" && snapshot.order < liveOrder
+            if ((snapshot.event.type === "user.message" || snapshot.purpose === "turn-settlement") && snapshot.order < liveOrder
               && snapshot.event.target.surface === event.target.surface
               && snapshot.event.target.accountId === event.target.accountId
               && snapshot.event.target.conversationId === event.target.conversationId) {
@@ -182,9 +197,8 @@ export class SurfaceManager {
           }
         }
         await this.requireRuntime(surface).delivery.runOrdered(event.target.conversationId, async (active) => {
-          if (!this.acceptingOutput) throw new Error("可靠投递已停止");
           if (!authorized()) throw new Error("可靠投递授权已变化");
-          await surface.output.deliver!(enriched, active, checkpoint);
+          await surface.output.deliver!(enriched, active, checkpoint, authorized, source, presentation);
         }, signal);
       },
     }) : undefined;
@@ -193,6 +207,11 @@ export class SurfaceManager {
       const key = surfaceAccountKey(event.target.surface, event.target.accountId);
       const surface = this.surfacesByAccount.get(key);
       if (!surface || this.suspended.has(key)) return;
+      if (surface.connectionOnly) {
+        this.logger.warn({ surface: surface.surface, accountId: surface.accountId, eventType: event.type },
+          "仅连接的 Surface 不接收消息输出，事件未投递");
+        return;
+      }
       try {
         surface.output.admitLive?.(event);
         if (this.persistent) surface.output.observe?.(event);
@@ -202,22 +221,34 @@ export class SurfaceManager {
         this.options.persistence?.fault("surface-state-failed", key);
         return;
       }
-      this.liveOutput.set(event, surface.output.admitLive ? { liveAdmitted: true } : undefined);
+      const completion = event.type === "turn.completed" ? surface.output.liveCompletionDisplay?.(event) : undefined;
+      if (completion === "off") this.hiddenCompletions.add(event);
+      const presentation = completion === "brief" || completion === "detailed" ? { completion } : undefined;
+      this.liveOutput.set(event, surface.output.admitLive || presentation
+        ? { liveAdmitted: true, ...presentation } : undefined);
       if (!this.persistent) return;
       const order = this.requireRuntime(surface).nextOutputOrder++;
       for (const [snapshotKey, snapshot] of this.snapshots) {
-        if (supersedesSurfaceSnapshot(event, snapshot.event)) this.removeSnapshot(snapshotKey, snapshot);
+        if (snapshot.purpose !== "turn-settlement" && supersedesSurfaceSnapshot(event, snapshot.event)) this.removeSnapshot(snapshotKey, snapshot);
       }
-      if (isPersistentOutput(event)) {
-        if (surface.output.retains?.(event) ?? true) this.persistent.accept(event, order);
+      if (event.type === "turn.completed" && this.hiddenCompletions.has(event)) {
+        this.retainSnapshot(surface, JSON.stringify(["turn-settlement", event.target.surface, event.target.accountId,
+          event.target.conversationId, event.threadId, event.turnId]), event, order, "turn-settlement");
+      } else if (isPersistentOutput(event)) {
+        if (surface.output.retains?.(event) ?? true) this.persistent.accept(event, order, presentation);
       } else if (resolveSurfaceDelivery(event.target.surface, event).disposition !== "ignore") {
         const snapshotKey = surfaceOutputSnapshotKey(event);
-        if (snapshotKey !== undefined) this.retainSnapshot(surface, snapshotKey, event, order);
+        if (snapshotKey !== undefined && (surface.output.acceptsSnapshot?.(event) ?? true)) {
+          this.retainSnapshot(surface, snapshotKey, event, order);
+        }
       }
     });
     this.removeOutputSubscription = output.subscribe(
       "surface-output-router",
       (event, _signal, eventBusWaitMs) => {
+        // The observer already records rejection; do not report ignored terminal
+        // events as successfully queued by the ordinary routing path.
+        if (this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId))?.connectionOnly) return;
         if (this.persistent) {
           if (isPersistentOutput(event) || surfaceOutputSnapshotKey(event) !== undefined) return;
           const surface = this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId));
@@ -267,14 +298,68 @@ export class SurfaceManager {
     return this.executionBlockReason(target) === undefined;
   }
 
+  prepareScheduledTaskSubmission(context: SurfaceScheduledTaskSubmissionContext): SurfaceAsyncAnswerSubmission | undefined {
+    const account = surfaceAccountKey(context.target.surface, context.target.accountId);
+    const surface = this.surfacesByAccount.get(account);
+    const isCurrent = (): boolean => !this.stopping && this.acceptingOutput
+      && surface !== undefined && !surface.connectionOnly && !this.suspended.has(account)
+      && this.surfacesByAccount.get(account) === surface && this.active.has(surface)
+      && this.requireRuntime(surface).state === "running";
+    if (!isCurrent() || !surface?.prepareScheduledTaskSubmission) {
+      if (context.target.surface === "qq") throw new Error("QQ 计划任务结果来源尚未就绪");
+      return undefined;
+    }
+    const submission = surface.prepareScheduledTaskSubmission(context);
+    return {
+      observer: submission.observer,
+      isCurrent: () => isCurrent() && submission.isCurrent(),
+      cancel: () => submission.cancel(),
+    };
+  }
+
+  /** Live synchronous port; never enters output queues or durable delivery. */
+  forwardUserMessageIdentity(target: ConversationTarget, identity: Readonly<UserMessageIdentity>): void {
+    if (this.stopping || !this.acceptingOutput) return;
+    const account = surfaceAccountKey(target.surface, target.accountId);
+    const surface = this.surfacesByAccount.get(account);
+    if (!surface || surface.connectionOnly || this.suspended.has(account)
+      || !this.active.has(surface) || this.requireRuntime(surface).state !== "running") return;
+    try {
+      surface.output.observeUserMessageIdentity?.(identity);
+    } catch {
+      // Observer errors must neither block the App Server reader nor expose content.
+      this.logger.error({ surface: target.surface, accountId: target.accountId }, "Surface 用户消息身份观察失败");
+    }
+  }
+
+  forwardQueueChanged(target: ConversationTarget, threadId: string): void {
+    if (this.stopping || !this.acceptingOutput) return;
+    const account = surfaceAccountKey(target.surface, target.accountId);
+    const surface = this.surfacesByAccount.get(account);
+    if (!surface || surface.connectionOnly || this.suspended.has(account)
+      || !this.active.has(surface) || this.requireRuntime(surface).state !== "running") return;
+    try { surface.output.observeQueueChanged?.(target, threadId); }
+    catch { this.logger.error({ surface: target.surface, accountId: target.accountId }, "Surface Queue 选择失效通知失败"); }
+  }
+
   executionBlockReason(target: ConversationTarget): "unavailable" | "global-capacity" | "account-capacity" | undefined {
     const account = surfaceAccountKey(target.surface, target.accountId);
-    if (this.stopping || this.suspended.has(account)) return "unavailable";
+    if (this.stopping || this.suspended.has(account)
+      || this.surfacesByAccount.get(account)?.connectionOnly) return "unavailable";
     return this.persistent?.executionBlockReason(target);
   }
 
   waitForPersistentOutput(target: ConversationTarget, signal: AbortSignal): Promise<void> {
     return this.persistent?.waitForIdle(target, signal) ?? Promise.resolve();
+  }
+
+  /** Before a live binding is released, settle its output without waiting on pre-start replay. */
+  waitForActivePersistentOutput(target: ConversationTarget, signal: AbortSignal): Promise<void> {
+    const account = surfaceAccountKey(target.surface, target.accountId);
+    const surface = this.surfacesByAccount.get(account);
+    if (this.stopping || !surface || this.suspended.has(account) || !this.active.has(surface)
+      || this.requireRuntime(surface).state !== "running") return Promise.resolve();
+    return this.waitForPersistentOutput(target, signal);
   }
 
   suspendPersistentAccount(account: string): void {
@@ -307,7 +392,11 @@ export class SurfaceManager {
   async sendChannelImage(
     target: ConversationTarget,
     imagePath: string,
+    isCurrent: () => boolean,
+    signal?: AbortSignal,
+    format?: "markdown",
   ): Promise<void> {
+    if (format !== undefined && (format !== "markdown" || target.surface !== "qq")) throw new Error("图片发送格式不受支持");
     if (this.stopping) {
       throw new Error("Gateway 正在停止，无法发送渠道图片");
     }
@@ -325,7 +414,21 @@ export class SurfaceManager {
     if (surface.sendChannelImage === undefined) {
       throw new Error(`${target.surface} 渠道不支持发送图片`);
     }
-    return surface.sendChannelImage(target.conversationId, imagePath);
+    if (isCurrent() !== true) throw new Error("原 Thread 图片接收绑定已失效");
+    return surface.sendChannelImage(target.conversationId, imagePath,
+      () => !this.stopping && this.active.has(surface) && isCurrent() === true, signal, format);
+  }
+
+  async sendChannelFile(target: ConversationTarget, filePath: string, fileName: string, isCurrent: () => boolean, mediaType?: ChannelFileMediaType, signal?: AbortSignal): Promise<void> {
+    if (this.stopping) throw new Error("Gateway 正在停止，无法发送渠道文件");
+    if (isCurrent() !== true) throw new Error("原 Thread 文件接收绑定已失效");
+    if (!channelFilePolicy(target.surface)) throw new Error(`${target.surface} 渠道不支持显式发送文件`);
+    const surface = this.surfacesByAccount.get(surfaceAccountKey(target.surface, target.accountId));
+    if (surface === undefined) throw new Error("未找到渠道文件接收账号");
+    if (!this.active.has(surface)) throw new Error("渠道账号尚未就绪，无法发送渠道文件");
+    if (surface.sendChannelFile === undefined) throw new Error("当前渠道不支持显式发送普通文件");
+    return surface.sendChannelFile(target.conversationId, filePath, fileName,
+      () => !this.stopping && this.active.has(surface) && isCurrent() === true, mediaType, signal);
   }
 
   presentScheduledTaskConfirmation(
@@ -485,10 +588,10 @@ export class SurfaceManager {
   }
 
   async deliverConfigurationChange(change: SurfaceConfigurationChange): Promise<void> {
-    if (this.active.size !== this.surfaces.length) {
+    const surfaces = this.surfaces.filter(surface => !surface.connectionOnly && surface.capabilities?.configurationNotifications !== false);
+    if (surfaces.some(surface => !this.active.has(surface))) {
       throw new Error("部分 Surface 当前不可用，不能确认持久化配置事件");
     }
-    const surfaces = [...this.surfaces];
     const results = await Promise.allSettled(
       surfaces.map(async (surface) => {
         const scopedChange = configurationChangeForSurface(surface, change);
@@ -713,7 +816,7 @@ export class SurfaceManager {
     }
     runtime.state = "running";
     runtime.retryAttempt = 0;
-    this.setInteractionAvailable(surface, true);
+    this.setInteractionAvailable(surface, !surface.connectionOnly && surface.capabilities?.interactions !== false);
     this.active.add(surface);
     this.persistent?.wake();
     for (const [key, snapshot] of this.snapshots) {
@@ -744,29 +847,68 @@ export class SurfaceManager {
     snapshot.bytes = 0;
   }
 
-  private removeSnapshot(key: string, snapshot: PendingSnapshot): void {
+  private removeSnapshot(key: string, snapshot: PendingSnapshot, sourceSettled = false): void {
     if (this.snapshots.get(key) !== snapshot) return;
     this.snapshots.delete(key);
     snapshot.controller.abort();
+    if (snapshot.expiry) clearTimeout(snapshot.expiry);
+    if (snapshot.purpose === "turn-settlement") this.discardTurnSettlement(snapshot.event);
+    if (!sourceSettled && snapshot.revision !== snapshot.active?.revision) {
+      this.options.persistence?.releaseSource?.(snapshot.event, snapshot.owner);
+    }
     // Queued closures and in-flight sends still own their memory until settlement.
     if (!snapshot.queued) this.releaseSnapshot(snapshot);
   }
 
-  private retainSnapshot(surface: SurfaceAdapter, key: string, event: OutputEvent, order: number): void {
+  private discardTurnSettlement(event: OutputEvent): void {
+    if (event.type !== "turn.completed") return;
+    const surface = this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId));
+    try { surface?.output.discardLiveCompletion?.(event); }
+    catch {
+      this.logger.warn({ surface: event.target.surface, accountId: event.target.accountId,
+        reason: "turn-settlement-cleanup-failed" }, "Surface 隐藏完成通知的本地收尾未完成");
+    }
+  }
+
+  private retainSnapshot(surface: SurfaceAdapter, key: string, event: OutputEvent, order: number,
+    purpose?: "turn-settlement"): void {
     const previous = this.snapshots.get(key);
+    // A completion is an exact-Turn cleanup obligation, not a replaceable status.
+    if (purpose === "turn-settlement" && previous) return;
     const account = surfaceAccountKey(surface.surface, surface.accountId);
     let owner: string;
     try { owner = this.options.persistence!.owner(event); }
-    catch { this.options.persistence?.fault("authorization-changed", account); return; }
+    catch {
+      if (purpose === "turn-settlement") this.discardTurnSettlement(event);
+      this.options.persistence?.fault("authorization-changed", account); return;
+    }
     const bytes = Buffer.byteLength(JSON.stringify(event)) + Buffer.byteLength(owner);
     const replaceableBytes = previous && previous.revision !== previous.active?.revision ? previous.bytes : 0;
     if ((!previous && this.snapshotOwners.size >= 512) || this.snapshotBytes - replaceableBytes + bytes > 8 * 1024 * 1024) {
-      this.options.persistence?.fault("mailbox-full", account);
+      this.options.persistence?.releaseSource?.(event, owner);
+      if (purpose === "turn-settlement") {
+        this.discardTurnSettlement(event);
+        this.logger.warn({ account, reason: "turn-settlement-capacity" }, "隐藏完成通知收尾容量已满，仅清理本地状态");
+      } else this.options.persistence?.fault("mailbox-full", account);
       return;
     }
-    const snapshot = previous ?? { event, owner, bytes: 0, queued: false, revision: 0, order, controller: new AbortController() };
+    if (previous && previous.revision !== previous.active?.revision) {
+      this.options.persistence?.releaseSource?.(previous.event, previous.owner);
+    }
+    const snapshot: PendingSnapshot = previous ?? { event, owner, bytes: 0, queued: false, revision: 0, order, controller: new AbortController() };
     this.snapshotBytes += bytes - replaceableBytes;
     Object.assign(snapshot, { event, owner, bytes, revision: snapshot.revision + 1 });
+    if (purpose === "turn-settlement") {
+      snapshot.purpose = purpose;
+      // Waiting must not retain optional UI state forever or block later journal writes.
+      snapshot.expiry = setTimeout(() => {
+        if (this.snapshots.get(key) !== snapshot) return;
+        this.logger.warn({ surface: event.target.surface, accountId: event.target.accountId,
+          reason: "turn-settlement-expired" }, "隐藏完成通知等待超时，仅清理本地状态；存量结果仍由投递箱处理");
+        this.removeSnapshot(key, snapshot);
+      }, 60_000);
+      snapshot.expiry.unref();
+    }
     this.snapshotOwners.add(snapshot);
     this.snapshots.set(key, snapshot);
     this.scheduleSnapshot(surface, key, snapshot);
@@ -782,16 +924,28 @@ export class SurfaceManager {
         if (this.snapshots.get(key) !== snapshot || !this.active.has(surface)) return;
         const { event, owner, bytes, revision } = snapshot;
         const authorized = (): boolean => this.options.persistence!.authorized(event, owner);
-        if (!authorized()) {
+        active = { event, owner, bytes, revision, controller: snapshot.controller };
+        snapshot.active = active;
+        const bounded = AbortSignal.any([signal, active.controller.signal]);
+        // Live snapshots may arrive while the originating submit response is still
+        // pending. Use the same bounded source confirmation as reliable output.
+        const admitted = this.options.persistence!.authorizeAtDispatch
+          ? await this.options.persistence!.authorizeAtDispatch(event, owner, bounded) : authorized();
+        bounded.throwIfAborted();
+        if (this.snapshots.get(key) !== snapshot || snapshot.revision !== revision || !this.active.has(surface)) return;
+        if (!admitted || !authorized()) {
           this.logger.warn({ surface: surface.surface, accountId: surface.accountId,
             conversationId: event.target.conversationId, eventType: event.type }, "Surface 最新状态归属已变化，取消展示");
           this.removeSnapshot(key, snapshot);
           return;
         }
-        active = { event, bytes, revision, controller: snapshot.controller };
-        snapshot.active = active;
-        if (!surface.output.deliverSnapshot) throw new Error("Surface 缺少状态投递结算端口");
-        await surface.output.deliverSnapshot(event, AbortSignal.any([signal, active.controller.signal]), authorized);
+        if (snapshot.purpose === "turn-settlement") {
+          if (event.type !== "turn.completed" || !surface.output.settleLiveCompletion) throw new Error("Surface 缺少完成状态收尾端口");
+          await surface.output.settleLiveCompletion(event, bounded, authorized, this.options.persistence?.source?.(event, owner));
+        } else {
+          if (!surface.output.deliverSnapshot) throw new Error("Surface 缺少状态投递结算端口");
+          await surface.output.deliverSnapshot(event, bounded, authorized);
+        }
       } catch {
         if (!active?.controller.signal.aborted) {
           this.logger.warn({ surface: surface.surface, accountId: surface.accountId,
@@ -800,11 +954,12 @@ export class SurfaceManager {
         }
       }
     }, true, { signal: snapshot.controller.signal, settled: () => {
+        if (active) this.options.persistence?.releaseSource?.(active.event, active.owner);
         if (active && active.revision !== snapshot.revision) this.snapshotBytes -= active.bytes;
         delete snapshot.active;
         snapshot.queued = false;
         if (this.snapshots.get(key) !== snapshot) this.releaseSnapshot(snapshot);
-        else if (active?.revision === snapshot.revision) this.removeSnapshot(key, snapshot);
+        else if (active?.revision === snapshot.revision) this.removeSnapshot(key, snapshot, true);
         else if (active) this.scheduleSnapshot(surface, key, snapshot);
       },
     });
@@ -843,7 +998,7 @@ export class SurfaceManager {
     const runtime = this.requireRuntime(surface);
     const enqueuedAt = performance.now();
     const coalesceKey = this.outputCoalescer.key(event);
-    runtime.delivery.enqueue(event.target.conversationId, async () => {
+    runtime.delivery.enqueue(event.target.conversationId, async (signal) => {
       const started = performance.now();
       if (!this.active.has(surface)) {
         if (!this.stopping && decision.critical) {
@@ -851,7 +1006,7 @@ export class SurfaceManager {
         }
         return;
       }
-      await this.deliverOne(surface, event, order);
+      await this.deliverOne(surface, event, order, signal);
       const fields = {
         surface: surface.surface, accountId: surface.accountId,
         conversationId: event.target.conversationId, eventType: event.type,
@@ -873,7 +1028,17 @@ export class SurfaceManager {
     surface: SurfaceAdapter,
     event: OutputEvent,
     order: number,
+    signal: AbortSignal,
   ): Promise<void> {
+    if (event.type === "turn.completed" && this.hiddenCompletions.has(event)) {
+      try {
+        if (!this.persistent) surface.output.observe?.(event);
+        if (!surface.output.settleLiveCompletion) throw new Error("Surface 缺少完成状态收尾端口");
+        await surface.output.settleLiveCompletion(event, AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+          () => this.acceptingOutput && this.active.has(surface), surface.output.deliverySource?.capture(event));
+      } finally { this.discardTurnSettlement(event); }
+      return;
+    }
     const routedEvent = await this.enrichSafely(event);
     if (!this.acceptingOutput) return;
     if (!this.active.has(surface)) {
@@ -884,7 +1049,7 @@ export class SurfaceManager {
       return;
     }
     try {
-      await surface.output.handle(routedEvent, this.liveOutput.get(event));
+      await surface.output.handle(routedEvent, this.liveOutput.get(event), signal);
       if (routedEvent.type !== "text.delta") {
         this.logger.debug(
           {

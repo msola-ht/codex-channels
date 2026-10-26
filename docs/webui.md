@@ -1,5 +1,7 @@
 # 本地指标 WebUI
 
+消息展示另提供“常规通知”，以既有 ManagedSelect 管理四渠道及五层范围。全局 `display.routine-notifications` 接受显式 set boolean/inherit，读回 `routineNotificationsEnabled` 与 `routineNotificationsOverride`（布尔值或 null）；缺省开启且不物化。预览摘要分开显示覆盖、有效值与来源，沿确认令牌、修订保护、私有备份及读回链路；取消和未变化不写。任一启用渠道有效值改变要求重启 Gateway，隐式 true 与显式 true 互换只 reload，范围数组整体判定。关闭只影响常规生命周期与成功提示；异常、需用户动作、命令与持久 Workspace 回执及已有 pending 保留，完整边界见[过程显示范围与继承](display.md#过程显示范围与继承)。回退旧版前清除全局及覆盖 routine_notifications，不自动迁移。
+
 请求与调用列表的 CLP 模型名省略匹配当前账户的 Relay 前缀（如 `clp-main/`）和 `cline-pass/`，悬停可查看完整模型 ID。仅缩短显示，不改写请求、指标或导出中的模型 ID；其他提供商及不匹配的账户前缀保持原样。
 
 调用详情在请求终态且诊断、原始事件页读取完整后暂停自动更新，保持当前阅读内容；同批次其他调用的通知不再反复刷新已完成详情。进行中的调用继续自动更新；后续补写的诊断可点击“刷新”读取，原始事件翻页仍按所选页加载。
@@ -651,7 +653,9 @@ DS、CLP、CCG、OCG 和自定义独立目录的模型行提供“更新模板�
 
 取消差异确认返回原模板草稿，保留来源、更新范围和候选快照，不重新下载；关闭编辑或保存成功才结束本次编辑。能力冲突明确提示先调整当前窗口或默认思考等级。保存完成并回读后，键盘焦点返回该模型的模板更新入口。
 
-侧栏「调用监控」归并请求、调用详情与错误，原有 `#/requests`、`#/traffic`、`#/errors` 地址和查询参数保留。「消息渠道」包含渠道配置（`#/channels`）、投递队列（`#/delivery`）和消息展示（`#/channels/display`）。渠道配置只显示 Gateway 配置快照，不代表实时连接状态；配置与授权继续使用对应 CLI 入口。消息展示集中管理 Telegram 格式、操作详情、计划更新和思考状态。
+侧栏「调用监控」归并请求、调用详情与错误，原有 `#/requests`、`#/traffic`、`#/errors` 地址和查询参数保留。「消息渠道」包含渠道配置（`#/channels`）、投递队列（`#/delivery`）和消息展示（`#/channels/display`）。渠道配置只显示 Gateway 配置快照，不代表实时连接状态；配置与授权继续使用对应 CLI 入口。消息展示集中管理 Telegram 格式、操作详情（含仅失败或拒绝）、子代理显示、流式显示、计划更新、思考状态、过程说明、常规通知、完成通知与消息详情；子代理缺省开启且不物化，恢复缺省删除字段。关闭子代理同时隐藏生命周期和子代理工具操作，其余工具按操作档位；正文、图片、审批及父轮完成或失败保留。消息详情缺省基础，显式详细可展开启动环境和完成、子代理统计子项，独立于日志等级，不改变主动查询结果。范围覆盖另提供目标选择、本层覆盖、有效值与逐字段来源，复用 CLI 的显式 set/inherit、私有备份与修订事务，确认绑定预览令牌。微信接受常规通知、完成通知与消息详情；旧目标只读并可恢复继承，绑定不可读明确提示。管理读取返回子代理有效 `subagentsEnabled` 与本层 `subagentsOverride`（布尔值或 `null`），`display.subagents` 写入接受 `{ action: "set", value: boolean }` 或 `{ action: "inherit" }`。消息详情有效值为 `presentationDetail`，本层为 `presentationDetailOverride`（`basic`、`detailed` 或 `null`），`display.presentation-detail` 接受同样的 set/inherit 结构。保存按实际渠道提示激活；旧版回退前按其支持范围清除新增全局及覆盖字段（含 routine_notifications、presentation_detail、commentary、subagents、streaming、completion）或覆盖结构，将 failures 改为旧版支持值并核对后续修改。保存、pending 投递与回退边界见[过程显示范围与继承](display.md#过程显示范围与继承)。
+
+流式显示全局入口使用 `display.streaming`，接受 `{ action: "set", value: boolean }` 或 `{ action: "inherit" }`；读取返回有效 `streamingEnabled` 和本层 `streamingOverride`（布尔值或 `null`）。缺省开启且不物化；关闭只抑制 Telegram、飞书和 QQ 单聊的正文增量预览，不改变上游模型流式、思考、完整正文、附件、授权及原窗口和交付义务。微信覆盖、QQ 群类型及精确群覆盖严格拒绝 true/false；QQ 渠道与账号层可设置，只作用其单聊，群选择器和预览摘要不展示流式项。有效值变化且任一 Telegram、飞书或 QQ 启用时须重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload，范围数组仍整体保守判定。预览、取消、未变化不写，保存先备份并拒绝过期 revision，读回失败保留保存结果并提示核对。此批源码尚未部署，平台效果待验收。
 
 「设置」包含全局设置（`#/settings/global`）、常规与偏好（`#/settings`）、工作区与权限（`#/settings/permissions`）、网络与访问（`#/settings/network`）、数据与日志（`#/settings/data`）、服务与维护（`#/settings/services`）。全局页集中 Codex 用户主配置，常规页保留 Gateway 会话/自动化选项；工作区与权限页保留 Gateway 审批超时和默认 Workspace 选择；网络页管理 WebUI 监听/令牌、共享代理与整组官方 TUI 请求身份；数据页管理调用采集、日志、指标保留与清理；服务页管理服务及后台任务结果；源码安装与更新只在本机终端执行。Relay 服务仍在模型转发页操作。
 
@@ -742,7 +746,7 @@ Relay 的 `relay.chat` / `relay.responses` 标签分别保存脱敏的原生请�
 
 Relay 全局调试沿用“调用详情”页面：原请求/响应展示出站与上游报文，调试区域补充客户端入站、客户端交付和实际处理记录。头与正文的省略分别标注，普通头及关联 ID 保留，仅凭据、URL 中的秘密与 CSP nonce 脱敏；统一开关、模式及回退操作见[用户指南](user-guide.md)。
 
-Codex 与 Relay 共用 Gateway 系统设置中的“记录调用详情”和“调用记录模式”。生产/调试分别写入已有裁剪参数 3/65536 与 0/0，不新增模式字段；关闭采集不删除历史记录。
+Codex 与 Relay 共用 Gateway 系统设置中的“记录调用详情”和“调用记录预设”。仅精确的 3/65536 显示生产预设，0/0 显示调试预设，其余合法组合显示自定义；页面与确认弹窗展示实际输入项数和单项字节数。自定义是只读状态，继续在 TOML 中管理；明确选择生产或调试预设才会覆盖这两个已有裁剪参数，不新增配置字段。重复保存无变化时不写入或要求重启，关闭采集不删除历史记录。调用记录预设与日志等级、开发运行方式、渠道消息显示分别管理。保存后 Codex 需重启 App Server，Relay 刷新配置后用于新请求，在途采集沿用开始时的设置。
 
 
 

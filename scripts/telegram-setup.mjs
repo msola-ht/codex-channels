@@ -203,7 +203,7 @@ export async function runTelegramSetup({
     session.useAllowedUserIds(ownerId, allowedUserIds.split(","));
     output.write(`\n准备保存 Telegram 配置：\n- Bot：@${bot.username}\n- 允许用户：${allowedUserIds}\n`);
     if (!await promptWithinSession((signal) =>
-      prompt.confirm("确认保存以上配置？", true, { signal }))) {
+      prompt.confirm("确认保存以上配置并启用 Telegram？", true, { signal }))) {
       output.write("未保存 Telegram 配置。\n");
       return undefined;
     }

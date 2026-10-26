@@ -82,6 +82,7 @@ import {
   toReasoningGuardInput,
   toThreadQueueChangedEvent,
   toThreadStateEvent,
+  toUserMessageIdentity,
   type CodexTransport,
   type RpcNotification,
 } from "../codex-client/index.js";
@@ -89,6 +90,10 @@ import {
   classifyConfigReload,
   configChange,
   includesConfigChange,
+  inspectMessageDisplayScope,
+  identifyMessageDisplayPreset,
+  supportedMessageDisplayFields,
+  messageDisplayFields,
   type ConfigChange,
   type ConfigReloadResult,
   type GatewayConfig,
@@ -107,6 +112,7 @@ import {
   ConversationResetCreditService,
   type ThreadLockHolder,
   type ThreadOccupancyReleaseResult,
+  type ThreadOccupancyIdentity,
   type ModelOption,
 } from "../application/index.js";
 import {
@@ -126,7 +132,7 @@ import {
   metricsWorkerFailureMetadata,
   modelRequestMetricsDatabasePath,
 } from "../observability/index.js";
-import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy } from "../policy/index.js";
+import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy, QqAccessPolicy, parseQqGroupConversationId } from "../policy/index.js";
 import {
   SessionRouter,
   ThreadStateSynchronizer,
@@ -138,11 +144,14 @@ import {
 import {
   canReviewConversationHook,
   canPreserveWeixinHookReviewText,
+  canPreserveQqHookReviewText,
   formatProviderIdleReleaseNotice,
   type SurfaceAdapter,
+  type SurfaceDeliverySource,
   SurfaceOutputCoalescer,
 } from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
+import { ChannelFileSpool } from "./channel-file-spool.js";
 import { AsyncQuestionCoordinator } from "./async-question-coordinator.js";
 import { ConversationIdleReleaser } from "./conversation-idle-releaser.js";
 import {
@@ -194,6 +203,7 @@ export abstract class GatewayComponentGraph {
   private readonly surfaces: SurfaceAdapter[];
   private readonly surfaceManager: SurfaceManager;
   private readonly channelImageSpool: ChannelImageSpool;
+  private readonly channelFileSpool: ChannelFileSpool;
   private readonly interactions: InteractionRouter;
   private readonly asyncQuestions: AsyncQuestionCoordinator;
   private readonly approval: ApprovalCoordinator;
@@ -526,6 +536,13 @@ export abstract class GatewayComponentGraph {
         { event: "auto_review.notification_unroutable", threadId, turnId, reason },
         "自动审查通知未向渠道发送"),
     });
+    // Core also confirms starts from RPC responses and authoritative resume
+    // snapshots. Reconnect does not replay turn.started for an existing Turn.
+    this.output.observe((event) => {
+      if (event.type === "turn.started") {
+        this.autoApprovalReviewNotifications.observeParentRun(event.threadId, event.turnId);
+      }
+    });
     const metricsWriter = new BufferedModelRequestMetricsWriter(
       { recordBatch: samples => metricsStore.recordBatch(samples), close: async () => {
         try { await this.metricsDatabase.drain(); }
@@ -806,7 +823,7 @@ export abstract class GatewayComponentGraph {
         listAgentRoles: () => listConfiguredAgentRoles(process.env),
       },
       {
-        releaseThread: (target, force, assertAuthorized) => this.releaseThread(target, force, assertAuthorized),
+        releaseThread: (target, force, assertAuthorized, expectedIdentity) => this.releaseThread(target, force, assertAuthorized, expectedIdentity),
       },
       execution,
       this.codex,
@@ -844,6 +861,7 @@ export abstract class GatewayComponentGraph {
       },
       (surface, hook) => {
         if (surface === "weixin") return canReviewConversationHook(hook, canPreserveWeixinHookReviewText);
+        if (surface === "qq") return canReviewConversationHook(hook, canPreserveQqHookReviewText);
         if (surface === "feishu" || surface === "telegram") return canReviewConversationHook(hook, () => true);
         return false;
       },
@@ -855,11 +873,20 @@ export abstract class GatewayComponentGraph {
         restoreRequired: (threadId) => {
           if (!this.stopping && !this.isBindingRestoring(threadId)) void this.restoreIdleBinding(threadId);
         },
+        beforeBackgroundRelease: async (target) => {
+          if (target.surface === "qq") {
+            await this.surfaceManager.waitForActivePersistentOutput(target, AbortSignal.timeout(10_000));
+          }
+        },
       },
       (operation) => logger.warn(
         { module: "sessions", event: "display_cache.disabled", operation, reason: "cache-operation-failed" },
         "会话派生缓存操作失败，当前会话查询实例已禁用缓存",
       ),
+      async (provider, signal, beforeSubmit) => {
+        if (provider === "openai" || !this.providerAccounts || !accountAdapters.some(adapter => adapter.provider === provider)) return undefined;
+        return completionAccountStatus(provider, await this.providerAccounts.accountUsage(provider, undefined, signal, beforeSubmit));
+      },
     );
     this.conversations = service;
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
@@ -870,7 +897,7 @@ export abstract class GatewayComponentGraph {
         isBindingRestoring: (threadId) => this.isBindingRestoring(threadId),
         listForegroundBindings: () =>
           this.router.allBindings().filter(
-            (binding) => !this.router.isBackgroundThread(binding.threadId),
+            (binding) => !this.router.isBackgroundThread(binding.threadId) && !this.isSuspendedQqGroup(binding.target),
           ),
         idleState: (target) => this.router.idleState(target),
         ensureIdleState: (target, atMs) =>
@@ -900,6 +927,7 @@ export abstract class GatewayComponentGraph {
       });
     }
     this.output.subscribe("conversation-background-release", async (event) => {
+      if (this.isSuspendedQqGroup(event.target)) return;
       const threadId = event.type === "turn.completed"
         ? event.threadId
         : event.type === "subagent.completed"
@@ -1025,6 +1053,7 @@ export abstract class GatewayComponentGraph {
     this.scheduledTasks = config.scheduledTasksEnabled
       ? new ScheduledTaskComposition({
           stateDatabasePath: config.stateDatabasePath,
+          canReleaseBinding: task => !this.isSuspendedQqGroup(task),
           registerConstructionCleanup,
           releaseRecoveredThread: (threadId, isCurrent) => service.releaseBackgroundIfComplete(threadId, {
             dispatchQueued: false, isCurrent,
@@ -1033,13 +1062,15 @@ export abstract class GatewayComponentGraph {
           codex: this.codex,
           turns: execution,
           acceptsExecution: (target) => this.surfaceManager.acceptsExecution(target),
+          prepareSubmission: (context) => this.surfaceManager.prepareScheduledTaskSubmission(context),
           bindings: this.bindings,
           workspaces: this.workspaces,
           core: this.core,
           output: this.output,
           logger,
           isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
-            surface.surface === target.surface && surface.accountId === target.accountId),
+            !surface.connectionOnly && surface.capabilities?.scheduledTasks !== false
+            && surface.surface === target.surface && surface.accountId === target.accountId),
           isActorAuthorized: (target, actorId) =>
             this.accessPolicy(target)?.isAllowed({ target, actorId }) === true,
           creationContext: (target) => {
@@ -1084,6 +1115,17 @@ export abstract class GatewayComponentGraph {
       if (!actorId || !this.accessPolicy(target)?.isAllowed({ target, actorId })) {
         throw new UserFacingError("command.authorization-changed", "当前命令操作者未获授权");
       }
+    }, target => {
+      if (target.surface !== "qq" && target.surface !== "feishu" && target.surface !== "telegram" && target.surface !== "weixin") {
+        throw new UserFacingError("command.authorization-changed", "当前渠道不支持状态展示");
+      }
+      const group = target.surface === "qq" ? parseQqGroupConversationId(target.conversationId) : undefined;
+      const chatId = group?.groupOpenId ?? (target.surface === "qq" && target.conversationId.startsWith("c2c:")
+        ? target.conversationId.slice(4) : target.conversationId);
+      const selector = { surface: target.surface, account_id: target.accountId, chat_kind: group ? "group" : "direct", chat_id: chatId } as const;
+      const inspected = inspectMessageDisplayScope(this.config.messageDisplay, selector);
+      const fields = supportedMessageDisplayFields(selector);
+      return { preset: identifyMessageDisplayPreset(inspected.settings, fields), sources: [...new Set(messageDisplayFields.filter(([field]) => fields.includes(field)).map(([, key]) => inspected.sources[key]))] };
     });
     const constructedSurfaces = new Set<SurfaceAdapter>();
     this.surfaceModules = createSurfaceModules({
@@ -1124,9 +1166,13 @@ export abstract class GatewayComponentGraph {
           workerUrl: new URL(import.meta.url.endsWith(".ts") ? "../../dist/delivery/worker.js" : "../delivery/worker.js", import.meta.url),
           owner: (event) => this.outputOwner(event),
           authorized: (event, owner) => this.outputAuthorized(event, owner),
+          authorizeAtDispatch: (event, owner, signal) => this.authorizeOutputAtDispatch(event, owner, signal),
+          source: (event, owner) => event.target.surface === "qq" ? this.outputSourceOwner(event, owner)?.source : undefined,
+          releaseSource: (event, owner) => this.releaseOutputSource(event, owner),
           fault: (code, account, persistentDeliveryId, failure) => {
             logger.error({ code, account, persistentDeliveryId, ...(failure ? { deliveryFailure: failure } : {}) }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
-            if (code === "delivery-uncertain" || code === "authorization-changed") return;
+            if (code === "delivery-uncertain" || code === "delivery-not-sent"
+              || code === "authorization-changed" || code === "acknowledged-cleanup-failed") return;
             if (account && code !== "storage" && code !== "capacity" && code !== "mailbox-full") this.surfaceManager.suspendPersistentAccount(account);
             else void this.requestStop().catch(() => logger.error("可靠投递故障后的 Gateway 清理失败"));
           },
@@ -1179,6 +1225,7 @@ export abstract class GatewayComponentGraph {
           const summary = await this.metricsDatabase.withSignal(signal).threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
           return {
+            compact: summary.compact,
             responseUsage: summary.responseUsage ?? null,
             requestOutcomes: summary.requestOutcomes,
             interruptionSummary: summary.interruptionSummary,
@@ -1219,13 +1266,25 @@ export abstract class GatewayComponentGraph {
     this.channelImageSpool = new ChannelImageSpool({
       directory: join(dirname(config.stateDatabasePath), "channel-outbox"),
       resolveTarget: (threadId) => this.router.targetForThread(threadId),
-      sendImage: (target, imagePath) =>
-        this.surfaceManager.sendChannelImage(target, imagePath),
+      sendImage: (target, imagePath, isCurrent, signal, format) =>
+        this.surfaceManager.sendChannelImage(target, imagePath, isCurrent, signal, format),
+      logger,
+    });
+    this.channelFileSpool = new ChannelFileSpool({
+      directory: join(dirname(config.stateDatabasePath), "channel-file-outbox"),
+      resolveTarget: (threadId) => this.router.targetForThread(threadId),
+      sendFile: (target, filePath, fileName, isCurrent, mediaType, signal) => this.surfaceManager.sendChannelFile(target, filePath, fileName, isCurrent, mediaType, signal),
       logger,
     });
     for (const surface of this.surfaces) {
-      this.interactions.register(surface.surface, surface.accountId, new PersistentInteractionPort(surface.interactions,
-        (target, signal) => this.surfaceManager.waitForPersistentOutput(target, signal)));
+      this.interactions.register(surface.surface, surface.accountId, surface.capabilities?.interactions === false
+        ? surface.interactions : new PersistentInteractionPort(surface.interactions,
+          (target, signal) => this.surfaceManager.waitForPersistentOutput(target, signal),
+          (request, reason) => logger.warn({
+            event: "interaction.delivery_incomplete", surface: surface.surface,
+            accountId: surface.accountId, requestId: request.requestId,
+            threadId: request.threadId, turnId: request.turnId, reason,
+          }, "交互请求投递未完成")));
       this.interactions.setAvailable(surface.surface, surface.accountId, false);
     }
     this.approval = new ApprovalCoordinator(
@@ -1256,7 +1315,24 @@ export abstract class GatewayComponentGraph {
           } catch { return false; }
         } };
       },
-      submit: (target, threadId, text, isCurrent) => service.submitAsyncAnswer(target, threadId, text, isCurrent),
+      submit: async (target, threadId, text, isCurrent, requestId) => {
+        const surface = this.surfaces.find(candidate => candidate.surface === target.surface
+          && candidate.accountId === target.accountId);
+        const submission = surface?.takeAsyncAnswerSubmission?.(target, requestId);
+        if (target.surface === "qq" && !submission) {
+          throw new UserFacingError("input.authorization-changed", "回答来源已失效，请重新发送。");
+        }
+        try {
+          return await service.submitAsyncAnswer(target, threadId, text,
+            () => isCurrent() && (submission?.isCurrent() ?? true), submission?.observer);
+        } catch (error) {
+          submission?.cancel();
+          try {
+            await submission?.failed?.();
+          } catch { /* Notification failure must preserve the submission error. */ }
+          throw error;
+        }
+      },
       warn: (event, message) => this.output.publish({
         type: "warning", target: event.target, threadId: event.threadId, message,
       }, true),
@@ -1289,6 +1365,8 @@ export abstract class GatewayComponentGraph {
       reduce: (event) => this.core.handle(event, { threadClosureObserved: event.type === "thread.closed" }),
       isBackgroundThread: (threadId) => this.router.isBackgroundThread(threadId),
       retryBackgroundRelease: (threadId, trigger) => {
+        const target = this.bindings.getByThread(threadId)?.target;
+        if (target && this.isSuspendedQqGroup(target)) return;
         void this.trackQueueLifecycleTask(() => service.retryPendingBackgroundRelease(threadId,
           () => !this.stopping && !this.isBindingRestoring(threadId)))
           .catch(async (error) => {
@@ -1427,7 +1505,8 @@ export abstract class GatewayComponentGraph {
       codex: this.codex,
       router: this.router,
       output: this.output,
-      enabledSurfaces: () => this.surfaces,
+      enabledSurfaces: () => this.surfaces.filter(surface => !surface.connectionOnly && surface.capabilities?.recoverBindings !== false),
+      canRestoreBinding: binding => !this.isSuspendedQqGroup(binding.target),
       scheduledRecovery: () => this.scheduledTasks?.coordinator,
       releaseBackground: async (threadId, isCurrent) =>
         await this.trackQueueLifecycleTask(() =>
@@ -1731,6 +1810,8 @@ export abstract class GatewayComponentGraph {
         this.notificationGenerations.set(notification, {
           provider, generation: this.providerNotificationGenerations.get(provider) ?? 0,
         });
+        this.observeUserMessageIdentity(notification);
+        this.observeQueueChanged(notification);
         const threadStateEvent = toThreadStateEvent(notification);
         if (threadStateEvent) {
           const isCurrent = this.threadState.observeExecutionContext(threadStateEvent);
@@ -1857,6 +1938,8 @@ export abstract class GatewayComponentGraph {
       });
       await this.channelImageSpool.start();
       this.requireRunning();
+      await this.channelFileSpool.start();
+      this.requireRunning();
       this.scheduledTasks?.start();
       this.conversationIdleReleaser?.start();
       this.providerIdleReleaser?.start();
@@ -1927,15 +2010,98 @@ export abstract class GatewayComponentGraph {
     }
   }
 
-  private outputOwner(event: OutputEvent): string {
-    return JSON.stringify(this.outputIdentity(event));
+  private observeUserMessageIdentity(notification: RpcNotification): void {
+    if (this.stopping || notification.isCurrentConnection?.() !== true) return;
+    const identity = toUserMessageIdentity(notification);
+    if (!identity || notification.provider === undefined
+      || notification.provider !== this.codex.knownProvider(identity.threadId)) return;
+    const target = this.router.targetForThread(identity.threadId);
+    if (target) this.surfaceManager.forwardUserMessageIdentity(target, identity);
   }
 
-  private outputIdentity(event: OutputEvent) {
+  private observeQueueChanged(notification: RpcNotification): void {
+    if (this.stopping || notification.isCurrentConnection?.() !== true) return;
+    const changed = toThreadQueueChangedEvent(notification);
+    if (!changed || notification.provider === undefined
+      || notification.provider !== this.codex.knownProvider(changed.threadId)) return;
+    const target = this.router.targetForThread(changed.threadId);
+    if (target) this.surfaceManager.forwardQueueChanged(target, changed.threadId);
+  }
+
+  private outputOwner(event: OutputEvent): string {
+    if (event.target.surface !== "qq") return JSON.stringify(this.outputIdentity(event));
+    const source = this.outputSourcePort(event)?.capture(event) ?? null;
+    const identity = JSON.stringify(this.outputIdentity(event, source ?? undefined));
+    return JSON.stringify({ version: 3, kind: "qq-live", identity, source });
+  }
+
+  private outputSourcePort(event: OutputEvent) {
+    const surface = this.surfaces.find(candidate => candidate.surface === event.target.surface
+      && candidate.accountId === event.target.accountId);
+    return surface && !surface.connectionOnly ? surface.output.deliverySource : undefined;
+  }
+
+  private outputSourceOwner(event: OutputEvent, owner: string): { identity: string; source: SurfaceDeliverySource } | undefined {
+    const value = JSON.parse(owner) as { version?: unknown; kind?: unknown; identity?: unknown; source?: SurfaceDeliverySource | null };
+    const source = value?.source;
+    if (value?.version !== 3 || value.kind !== "qq-live" || typeof value.identity !== "string" || !source
+      || ![source.generation, source.sourceToken, source.accountId]
+        .every(field => typeof field === "string" && field.length > 0 && Buffer.byteLength(field) <= 512)
+      || typeof source.conversationId !== "string" || !source.conversationId
+      || (Buffer.byteLength(source.conversationId) > 512 && !parseQqGroupConversationId(source.conversationId))
+      || source.accountId !== event.target.accountId || source.conversationId !== event.target.conversationId) return undefined;
+    if (source.kind === "notification") {
+      if (source.threadId !== ("threadId" in event ? event.threadId ?? null : null)
+        || (source.threadId !== null && (typeof source.threadId !== "string" || !source.threadId || Buffer.byteLength(source.threadId) > 512))
+        || source.eventType !== event.type) return undefined;
+      switch (event.type) {
+        case "mcp.oauth.completed":
+          if (source.eventType !== event.type || source.serverName !== event.name || !source.threadId) return undefined;
+          break;
+        case "operation.updated": if (event.operation.kind !== "contextCompaction") return undefined; break;
+        case "autoApprovalReview.updated": if (event.phase !== "completed" || event.status === "inProgress") return undefined; break;
+        case "conversation.idle.released": case "warning": case "hook.completed":
+        case "connection.lost": case "connection.restored": case "thread.availability": case "thread.name":
+        case "account.updated": case "account.rateLimits.updated": case "mcp.status.updated": break;
+        default: return undefined;
+      }
+    } else if ((source.kind !== undefined && source.kind !== "scheduled")
+      || typeof source.threadId !== "string" || !source.threadId || Buffer.byteLength(source.threadId) > 512
+      || (event.type === "subagent.completed"
+        ? event.parentThreadId !== source.threadId
+        : !("threadId" in event) || event.threadId !== source.threadId)
+      || typeof source.turnId !== "string" || !source.turnId
+      || Buffer.byteLength(source.turnId) > 512
+      || (event.type === "subagent.completed"
+        ? event.parentTurnId !== source.turnId
+        : !("turnId" in event) || event.turnId !== source.turnId)) return undefined;
+    if (source.kind === "scheduled" && (typeof source.workspaceId !== "string" || !source.workspaceId
+      || Buffer.byteLength(source.workspaceId) > 512 || typeof source.workspaceCwd !== "string" || !source.workspaceCwd
+      || Buffer.byteLength(source.workspaceCwd) > 32 * 1024)) return undefined;
+    return { identity: value.identity, source: Object.freeze({ ...source }) };
+  }
+
+  private async authorizeOutputAtDispatch(event: OutputEvent, owner: string, signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return false;
+    if (event.target.surface !== "qq") return this.outputAuthorized(event, owner);
+    const original = this.outputSourceOwner(event, owner);
+    const port = this.outputSourcePort(event);
+    if (!original || !port || !this.outputIdentityAuthorized(event, original.identity, original.source)) return false;
+    if (!(await port.await(original.source, signal))) return false;
+    return !signal.aborted && this.outputAuthorized(event, owner);
+  }
+
+  private releaseOutputSource(event: OutputEvent, owner: string): void {
+    if (event.target.surface !== "qq") return;
+    const source = this.outputSourceOwner(event, owner)?.source;
+    if (source?.kind === "notification") this.outputSourcePort(event)?.release?.(source);
+  }
+
+  private outputIdentity(event: OutputEvent, source?: SurfaceDeliverySource) {
     const target = event.target;
     const threadId = "threadId" in event ? event.threadId : "parentThreadId" in event ? event.parentThreadId : undefined;
     const binding = threadId ? this.bindings.getByThread(threadId) : this.bindings.get(target);
-    const workspace = this.bindings.getWorkspace(target) ?? null;
+    const workspace = source?.kind === "scheduled" ? source.workspaceId : this.bindings.getWorkspace(target) ?? null;
     return {
       version: 2,
       workspaceCwd: workspace ? this.workspaces.get(workspace)?.cwd ?? null : null,
@@ -1949,10 +2115,22 @@ export abstract class GatewayComponentGraph {
   }
 
   private outputAuthorized(event: OutputEvent, owner: string): boolean {
+    if (event.target.surface !== "qq") return this.outputIdentityAuthorized(event, owner);
+    const original = this.outputSourceOwner(event, owner);
+    return !!original && this.outputIdentityAuthorized(event, original.identity, original.source)
+      && this.outputSourcePort(event)?.current(original.source) === true;
+  }
+
+  private outputIdentityAuthorized(event: OutputEvent, owner: string, source?: SurfaceDeliverySource): boolean {
     const original = JSON.parse(owner) as ReturnType<typeof this.outputIdentity>;
     // Older owners cannot prove the directory that was authorized at admission.
     // Preserve their records, but never infer or upgrade their identity here.
     if (original?.version !== 2) return false;
+    if (source?.kind === "notification" && source.eventType === "conversation.idle.released"
+      && original.binding !== null) return false;
+    if (source?.kind === "scheduled" && (original.workspace !== source.workspaceId
+      || original.workspaceCwd !== source.workspaceCwd || original.binding?.[3] !== source.workspaceId
+      || original.bindingWorkspaceCwd !== source.workspaceCwd)) return false;
     if (original.provider && !this.codex.isProviderConfigured(original.provider)) return false;
     // Stored selections survive unbinding and configuration changes; they do
     // not establish current Workspace authorization.
@@ -1961,7 +2139,7 @@ export abstract class GatewayComponentGraph {
       || this.workspaces.get(original.workspace)?.cwd !== original.workspaceCwd)) return false;
     if (original.binding && (!original.bindingWorkspaceCwd
       || this.workspaces.get(original.binding[3]!)?.cwd !== original.bindingWorkspaceCwd)) return false;
-    const current = this.outputIdentity(event);
+    const current = this.outputIdentity(event, source);
     // Foreground/background is presentation state, not recipient authorization.
     // Normal unsubscription may precede slow delivery, including after demotion.
     // A Thread currently owned by another target must still fail the comparison.
@@ -1989,7 +2167,13 @@ export abstract class GatewayComponentGraph {
       ? new FeishuAccessPolicy(this.config.feishu.allowedOpenIds, this.config.feishu.appId)
       : target.surface === "weixin" && this.config.weixin
       ? new WeixinAccessPolicy(this.config.weixin.allowedUserIds, this.config.weixin.accountId)
+      : target.surface === "qq" && this.config.qq
+      ? new QqAccessPolicy(this.config.qq.allowedUserOpenIds, this.config.qq.appId)
       : undefined;
+  }
+
+  private isSuspendedQqGroup(target: Pick<ConversationTarget, "surface" | "conversationId">): boolean {
+    return target.surface === "qq" && target.conversationId.startsWith("group:");
   }
 
   private shutdownComponents(): Promise<void> {
@@ -2022,6 +2206,7 @@ export abstract class GatewayComponentGraph {
       ["Reasoning Repeat Guard", () => this.reasoningRepeatGuard.close()],
       ["Queue Lifecycle", () => this.closeQueueLifecycleTasks()],
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
+      ["Channel File Spool", () => this.channelFileSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
       ["Conversation Idle Releaser", () => this.conversationIdleReleaser?.stop()],
       ["Luna Reserve", () => this.conversations?.closeLunaReserve()],
@@ -2292,6 +2477,7 @@ export abstract class GatewayComponentGraph {
     target: ConversationTarget,
     force?: boolean,
     assertAuthorized?: () => void,
+    expectedIdentity?: ThreadOccupancyIdentity,
   ): Promise<ThreadOccupancyReleaseResult> {
     this.requireRunning();
     assertAuthorized?.();
@@ -2308,6 +2494,12 @@ export abstract class GatewayComponentGraph {
       }
     };
     const threadId = current.threadId;
+    const assertIdentity = (holder: ThreadLockHolder) => {
+      if (expectedIdentity && (expectedIdentity.threadId !== threadId
+        || expectedIdentity.pid !== holder.pid || expectedIdentity.startedAt !== holder.startedAt)) {
+        throw new UserFacingError("thread.takeover.changed", "占用进程已变化，未执行释放，请重新预览");
+      }
+    };
     const options = {
       runner: this.auxiliaryCommands,
       ...(this.startupAbort ? { signal: this.startupAbort.signal } : {}),
@@ -2322,6 +2514,7 @@ export abstract class GatewayComponentGraph {
       return { status: "unidentifiable", threadId, reason: inspection.reason };
     }
     const holder = inspection.holder;
+    assertIdentity(holder);
     const releasable = isReleaseableThreadWriterHolder(holder);
     const stuck = this.bindingRestoreCoordinator().hasPending(threadId);
     if (!force || !releasable) {
@@ -2343,6 +2536,7 @@ export abstract class GatewayComponentGraph {
       return { status: "unidentifiable", threadId, reason: recheck.reason };
     }
     const recheckedReleasable = isReleaseableThreadWriterHolder(recheck.holder);
+    assertIdentity(recheck.holder);
     if (
       recheck.holder.pid !== holder.pid
       || recheck.holder.startedAt !== holder.startedAt
@@ -2360,6 +2554,7 @@ export abstract class GatewayComponentGraph {
     const exited = await terminateThreadWriterHolder(holder.pid, {
       ...(holder.startedAt === undefined ? {} : { startedAt: holder.startedAt }),
       ...options,
+      beforeTerminate: assertCurrent,
     });
     // Termination may already have happened. A stale result never restores a
     // replacement binding, and cancellation does not imply rollback of force.

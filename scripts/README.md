@@ -1,10 +1,22 @@
 # 项目脚本
 
+显示预设使用 `display.preset`，输入 `{ preset: "concise" | "standard" | "detailed" | "full", selector?: MessageDisplaySelector }`。省略目标应用全局，范围复用现有严格目标及启用、授权和可写检查；未知键、`null`、`custom` 和非法目标拒绝。共享定义和支持矩阵来自 `runtime/message-display-policy.mjs`，一次原子事务设置本层全部支持字段，保留其他目标、日志、调用采集、模型分组及 Telegram 格式；微信只写三项，已停用的 QQ 群不能应用预设。全局有效值已匹配时 none，不补齐缺省；范围则固定显式字段，即使原有效值已匹配也仍属于变更。读取返回 computed `display.preset`、`display.globalScope` 和各 `scope.preset`，不保存标签。CLI 全局及范围字段菜单、WebUI 高风险单次确认、revision、备份、审计、读回、取消与 no-op 共用既有事务；全局激活按真正改变字段和已启用消费者计算，范围按覆盖数组判定。字段仍可单独编辑或恢复继承，无独立预设继承动作。
+
+常规通知管理由 `config-display-menu.mjs`、`config-management.mjs` 和 `config-display-management.mjs` 共同提供，全局 `display.routine-notifications` 显式 set boolean/inherit，范围字段 `routine_notifications` 支持四渠道；QQ 群已停用，已有群覆盖仅可查看与恢复继承。共享读取区分有效值与覆盖，缺省开启不物化；保存沿 revision、私有备份和读回，取消和未变化不写。WebUI 高风险确认、API allowlist 及读回核对共用相同契约。启用任一渠道时全局有效值变化要求重启 Gateway，隐式 true/显式 true 互换只 reload，范围数组整体判定；回退前清除全局及覆盖 routine_notifications，不自动迁移。
+
 本目录保存 npm CLI 和开发流程调用的 Node.js、Shell 脚本。脚本处理本机配置、构建、协议生成和服务管理，不承载 Gateway 的会话业务逻辑。
 
 涉及 Provider、进程控制或服务安装时遵循[跨平台变更规则](../docs/development-rules.md#cross-platform-changes)。CLI、Setup、WebUI 的等价配置操作遵循[多入口配置管理规则](../docs/development-rules.md#multi-entry-configuration-management)，复用所属业务模块的管理计划与执行契约；平台控制脚本只处理服务管理器差异。预览通过不能代替执行前状态校验，写入成功不能代替运行时可消费或服务就绪。模板变化须同步核对全新安装、既有定义重装、失败恢复及 WebUI/Relay 状态，不能只验证当前主机平台。
 
 ## 配置与 Workspace
+
+- `qq-passive-observation.mjs`：用户明确要求保留的源码工作区手动探测入口，不纳入 npm 包或正式 CLI。
+  正式 QQ 禁用且配置生效后，用 `--run` 启动；Gateway 的其他渠道可继续运行，独立 QQ 探测锁阻止同配置同账号的重复探测。
+  默认 `--run` 最多 180 秒等待唯一允许用户的随机口令，使用原消息 ID 被动回复一次；另有固定数量文字样例、重复序号/次数、
+  310 秒延迟回复及自有网络连接中断恢复模式，不自动重试业务请求；检测到 QQ 启用、凭据或名单变化取消。
+  QQ 协议通过 Surface 公共加载入口取得；此脚本与正式 `qq-menu-setup.mjs` 获准导入 Bootstrap 的 QQ 网络所有者，复用正式代理及清理语义，不加载 Gateway 组合根。
+  退出关闭自有资源并释放探测锁，不占用 Gateway 所有权，不启停服务或调用 App Server。
+  具体步骤与观察限制见 [QQ 消息开发流程](../docs/qq-message-contract.md#手动被动探测)。
 
 - `cli-operation-progress.mjs`：CLI 共用的分组标题与阶段展示；终端使用不读取 stdin 的行内动画，重定向、CI 和 dumb 终端使用纯文本。支持延迟显示、选择输出流或静默，以及沿用调用方取消信号。阶段完成必须等待实际操作结束，取消后由调用方收尾，进度层不直接退出进程。
 - `cli-lifecycle-command.mjs`：更新、程序卸载、Doctor 与指标/数据维护的 CLI 父子进程协作；就绪握手后通过私有 IPC 转发取消，子进程在安全边界检查取消，父进程等待事务收尾并退出，不用强制终止代替取消。指标导出可把子进程标准输出直接写入私有文件。
@@ -84,7 +96,9 @@
   时间范围、组合筛选、分组、格式及维护命令参数，通过 Observability 的 `query/index` 无状态入口复用规范范围、日期解析与聚合维度，并向顶层帮助
   导出规范用法行；不访问配置、数据库或服务，
   `metrics-database.mjs` 保留原有公开入口与 `metricsRange` 导出。
-- `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。
+- `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入；显式 --format image|markdown 默认 image，markdown 在绑定解析后限定 QQ 并写 version 2 图片请求。
+- `channel-send-file-options.mjs`：显式文件发送参数解析，支持 file/video/voice 类型，拒绝相对路径、重复选择和未知参数。
+- `channel-send-file.mjs`：复用现有配置与前后台绑定读取，四渠道目标的文件经公开安全读取与共享 channelFilePolicy 校验后复制到独立 `channel-file-outbox`，原子发布携带 mediaType 的 version 1 manifest；微信仅 file/video，其他类型差异与回滚见 [`渠道文件`](../docs/channel-file.md)。
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，校验配置与状态库 Schema，解析前台或后台 Thread 绑定；通过 Surface 公开入口校验并有界读取本地图片，私有原子写入
   状态库目录下的 `channel-outbox/pending/` 后发布 manifest，失败时清理本次暂存；由 Gateway 轮询后按 Thread 绑定
   会话发送并归档，详见 `docs/channel-image.md`。
@@ -192,6 +206,7 @@
   登录/恢复与第三方提供商两级，子模块返回时停留在所属层级；第三方设置分为统一模型管理和各提供商账户接入，默认模型、共享思考等级与目录窗口集中在模型管理，自定义接入合并为一个入口；配置写入后的激活结果由
   `config-activation-result.mjs` 提供统一状态和目标定义，只转换子模块显式返回的激活范围，不为查询或取消操作推断重启。公开 CLI 的 `codexc setup --jsonl` 将交互提示
   写入终端 stderr，并按每行一个事件把脱敏结果或错误写入 stdout；完成接入返回 `result` 事件的 `action: completed`。输入或提示输出不连接终端时明确拒绝，操作失败后可继续选择。默认 `codexc setup` 保持纯交互文本输出。
+- `channel-settings-setup.mjs`：Setup 的四渠道独立启停入口，复用 Config 管理的修订保护、严格校验和原子保存；停用保留凭据和授权配置，禁止停用最后一个渠道，取消不写入。只返回 Gateway 重启生效范围，不直接管理服务。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
   原生子代理、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
@@ -344,7 +359,7 @@
   卸载确认同样绑定目标、父身份与内容修订；执行时复核并将原树保留到 skills 根目录之外的私有隔离目录，不递归删除。移走后发现并发变化时报告未确认和保留位置，不覆盖重新出现的目标，不自动恢复或清理材料。
 - `config.mjs`：`codexc config` 的顶层交互编排，按作用范围提供 Codex 用户偏好、工具与 MCP、Gateway 显示与会话、身份时区、调用记录、计划任务、网络代理、服务访问、日志高级功能与指标存储，以及脱敏总览和路径查询。MCP 添加、编辑、删除与已有工具策略管理同组，Relay/WebUI 访问设置同组；保留损坏 Gateway 配置时的 Codex、MCP 和路径入口。循环记住上次选择；修改复用既有保存流程，非交互终端无参数时显示帮助。
   `paths [--json]` 不进入菜单或读取配置正文，只输出绝对路径与文件存在状态，不创建配置。子菜单与总览在选中后按需加载，路径查询和取消不加载这些实现。
-- `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，有效默认值来自共享 Schema，原始配置保留未配置与显式配置的区别；只显示配置来源、有效开关、作用范围
+- `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，有效默认值来自共享 Schema，原始配置保留未配置与显式配置的区别；与设置管理共用调用记录预设分类及实际裁剪值投影，只有 3/65536 与 0/0 分别标为生产与调试，其余显示自定义；只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
 - `config-management.mjs` / `config-management.d.mts`：渠道新会话模型通过异步 `updateGatewayDefaultModelSetting` 校验当前主实例目录与配置修订后预览或保存；同步入口拒绝该设置，清除覆盖可离线执行。目录读取与 Gateway 写入分属不同资源，不提供跨资源原子事务。提供不依赖 prompts、TTY 或终端文案的 Gateway
   设置接口；官方身份一键设置持久写入 `follow_cli_version`，WebUI 可开关，终端单项修改保留标记；无标记或 false 时显式版本固定。
@@ -364,7 +379,9 @@
   保存 Config 管理接口的共享稳定错误，以及 WebUI、指标的脱敏投影、输入校验与文档修改语义；
   切换 WebUI 为全网卡监听且尚无令牌时，共享逻辑生成随机令牌并与地址一起保存；也支持经确认显式重新生成。预览仅返回脱敏状态，写入响应只提供本次生成的令牌。CLI 菜单不直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理与日志等级；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
-- `config-display-menu.mjs`：独立管理模型统计分组、操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；模型分组仅用于控制台汇总，保留原模型明细，重新读取即生效；
+- `config-display-menu.mjs`：独立管理模型统计分组、操作详情（含仅失败或拒绝）、子代理显示、流式显示、计划更新、默认关闭的渠道思考状态、完成通知、消息详情和 Telegram 消息格式；完成、子代理、流式和消息详情支持显式设置与删除字段恢复缺省，消息详情缺省基础、子代理和流式缺省开启但均不物化，微信目标支持完成通知和消息详情。流式仅控制 Telegram、飞书与 QQ 单聊正文增量预览，QQ 群范围隐藏并拒绝该字段；不改变完整正文、附件、授权或原窗口和交付义务。消息详情独立于日志和调用采集，只控制启动运行环境及完成/子代理统计子项。提供范围覆盖的目标、存储值、有效值和来源确认，复用预览、修订保护、私有备份及保存后读回；旧版回退前显式清除全局及覆盖 `presentation_detail`、`streaming` 并核对后续修改；模型分组仅用于控制台汇总，保留原模型明细，重新读取即生效；
+- `config-display-management.mjs`：CLI 与 WebUI 共用的显示范围投影和显式 set/inherit 编辑，复用配置事务并提供每个目标实际支持的字段；只读当前 Schema 绑定并按当前飞书账号与 Actor 名单取得私聊物理 Chat，QQ 仅从配置取得单聊，保留的群配置不产生可写目标，微信从当前启用账号与允许名单取得精确私聊，Telegram 不猜历史绑定的聊天类型。目标不可读与缺失分别表示，停用或移除后的已有覆盖可显式清除。
+  “过程说明”通过 `display.commentary` 的显式 set boolean/inherit 管理，缺省开启不物化，读取区分有效 `commentaryEnabled` 与本层 `commentaryOverride`。Telegram、飞书与 QQ 单聊支持，已有群覆盖仅可查看与恢复继承，微信覆盖拒绝且不显示字段。CLI 和 WebUI 共用修订、私有备份、预览与读回；有效值变化且上述渠道任一启用时重启 Gateway，否则 reload；隐式 true 与显式 true 互换只 reload，范围数组整体保守判定。取消、未变化不写；回退前清除全局及覆盖 commentary，核对后续修改。语义与交付边界见[渠道展示](../docs/display.md#过程显示范围与继承)。
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs` / `config-system-menu.d.mts`：以受控分组分别提供 Gateway 会话、身份与时区、调用记录入口，分组越界选择明确拒绝；向 Workspace 菜单公开默认项设置，复用配置修订与生效通知。管理模型请求转储及其保留天数、审批超时、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与服务时区；模型请求转储独立写入
@@ -450,6 +467,9 @@
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
   稳定错误；每次凭据验证使用独立 Token 缓存，鉴权和 Bot 查询均受请求期限与会话取消约束。
 - `feishu-registration.mjs` / `feishu-registration-worker.mjs`：在独立 Worker 内复用锁定 SDK 的扫码注册，限定注册开始和轮询请求期限；父端取消、失败或完成后等待 Worker 终止，不在后台遗留注册请求，也不更改主进程的 SDK HTTP 默认值。
+- `qq-registration.mjs` / `qq-registration-worker.mjs`：迁入旧 QQ 分支的扫码基础模块，使用锁定 Connector 并等待自有 Worker 退出，不自行写配置。
+- `qq-setup.mjs`：QQ 单聊扫码或手工配置入口，复用私有 TOML、修订检查和激活提示。群功能暂停，不提供群配对或编辑；已有群配置在同 App 或更换 App 时均原样保留，但不生效。取消或配置并发变化不保存。另提供独立的单聊机器人常驻菜单配置操作，选中后才加载相关实现。
+- `qq-menu-setup.mjs`：复用已有 QQ 凭据、共享代理网络和协议客户端，通过全局 `/v2/menu` 为单聊新增只填入 `/help` 的 Codex 菜单。严格保留四种已知菜单和顺序，未知字段、同名冲突或满十项拒绝；同值不写。预览确认后重读本机凭据/代理及远程版本/完整内容，PUT 后回读核对版本与计划；允许平台为 send_message 补充 HTTPS icon，保留既有图标。平台未配置时实测返回 `{menu:{}}` 且无版本，保留该明确空态，不虚构版本。平台无 CAS，仍有复核与 PUT 之间的并发窗口，不自动重试或回滚不确定写入。独立关闭客户端与网络，不打开 WebSocket、不写 TOML、不重启 Gateway；当前账号菜单保存已只读确认，用户已确认手机显示，桌面端支持范围未确认。
 - `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单、目录创建与已有目录注册，不保存或写入执行权限；
   默认工作区选择复用 `config-system-menu.mjs` 的版本化配置写入，移除操作仅移除注册；本次菜单循环保留上次选择。
   `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。

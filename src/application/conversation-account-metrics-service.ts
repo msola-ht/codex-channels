@@ -42,6 +42,7 @@ export class ConversationAccountMetricsService {
     beforeSubmit?.();
     const binding = this.router.current(target);
     const guard = this.accountThreadGuard(target, binding?.threadId, beforeSubmit);
+    guard?.();
     const model = this.models.status(target);
     const provider = model.modelProvider ?? "openai";
     const threadProvider = binding
@@ -64,6 +65,7 @@ export class ConversationAccountMetricsService {
   ): Promise<ProviderAccountLimits> {
     beforeSubmit?.();
     const guard = this.accountThreadGuard(target, this.router.current(target)?.threadId, beforeSubmit);
+    guard?.();
     const provider = this.models.status(target).modelProvider ?? "openai";
     const resolved: ProviderAccountLimits = this.providerAccounts
       ? await this.providerAccounts.accountLimits(provider, undefined, guard)
@@ -102,24 +104,29 @@ export class ConversationAccountMetricsService {
       if (this.router.current(target)?.threadId !== threadId) {
         throw new UserFacingError("command.authorization-changed", "命令目标会话已变化，请重新查询账户");
       }
+      if (threadId && !this.router.isSubscriptionReady(threadId)) {
+        throw new UserFacingError("conversation.busy", "会话订阅尚未恢复，请稍后重新查询账户", { reason: "subscription-restoring" });
+      }
     };
   }
 
   async requestMetrics(
     target: ConversationTarget,
     query: RequestMetricsCommandQuery = { view: "session" },
+    assertAuthorized?: () => void,
   ): Promise<RequestMetricsResult | null> {
+    assertAuthorized?.();
     if (!this.requestMetricsQuery) return null;
-    if (query.view === "errors") {
-      return this.requestMetricsQuery.errors(query.range ?? "24h");
-    }
-    if (query.view !== "session") {
-      return this.requestMetricsQuery.aggregate(
-        query.view,
-        query.range ?? "24h",
-      );
-    }
     const threadId = this.router.current(target)?.threadId;
-    return threadId ? this.requestMetricsQuery.forThread(threadId) : null;
+    const result = query.view === "session"
+      ? threadId ? await this.requestMetricsQuery.forThread(threadId) : null
+      : query.view === "errors"
+        ? await this.requestMetricsQuery.errors(query.range ?? "24h")
+        : await this.requestMetricsQuery.aggregate(query.view, query.range ?? "24h");
+    assertAuthorized?.();
+    if (query.view === "session" && this.router.current(target)?.threadId !== threadId) {
+      throw new UserFacingError("command.authorization-changed", "命令目标会话已变化，请重新查询统计");
+    }
+    return result;
   }
 }

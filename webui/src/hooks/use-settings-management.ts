@@ -41,13 +41,31 @@ function confirmationIntent(setting: ManagementSettingInput): PendingSetting["in
 }
 
 function currentValue(settings: ManagementSettingsResponse, setting: ManagementSettingInput): unknown {
+  if (setting.kind === "display.preset") {
+    const selector = setting.value !== null && typeof setting.value === "object" && "selector" in setting.value ? setting.value.selector : undefined
+    return selector === undefined ? settings.display.globalScope : settings.display.scopes.find(scope => JSON.stringify(scope.selector) === JSON.stringify(selector)) ?? null
+  }
+  if (setting.kind === "display.scope" && setting.value !== null && typeof setting.value === "object" && "selector" in setting.value) {
+    const selector = setting.value.selector
+    return settings.display.scopes.find(scope => JSON.stringify(scope.selector) === JSON.stringify(selector)) ?? null
+  }
   if (setting.kind === "display.model-aliases") return settings.display.modelAliases
   if (setting.kind === "display.operation-updates") return settings.display.operationUpdates
   if (setting.kind === "display.plan-updates") return settings.display.planUpdatesEnabled
   if (setting.kind === "display.reasoning") return settings.display.reasoningEnabled
+  if (setting.kind === "display.completion") return { completion: settings.display.completion, completionOverride: settings.display.completionOverride }
+  if (setting.kind === "display.presentation-detail") return { presentationDetail: settings.display.presentationDetail, presentationDetailOverride: settings.display.presentationDetailOverride }
+  if (setting.kind === "display.subagents") return { subagentsEnabled: settings.display.subagentsEnabled, subagentsOverride: settings.display.subagentsOverride }
+  if (setting.kind === "display.streaming") return { streamingEnabled: settings.display.streamingEnabled, streamingOverride: settings.display.streamingOverride }
+  if (setting.kind === "display.commentary") return { commentaryEnabled: settings.display.commentaryEnabled, commentaryOverride: settings.display.commentaryOverride }
+  if (setting.kind === "display.routine-notifications") return { routineNotificationsEnabled: settings.display.routineNotificationsEnabled, routineNotificationsOverride: settings.display.routineNotificationsOverride }
   if (setting.kind === "system.approval-timeout") return settings.system.approvalTimeoutSeconds
   if (setting.kind === "system.idle-release-minutes") return settings.system.idleReleaseMinutes
-  if (setting.kind === "system.model-traffic-mode") return settings.system.modelTrafficMode
+  if (setting.kind === "system.model-traffic-mode") return {
+    modelTrafficMode: settings.system.modelTrafficMode,
+    modelTrafficInputItems: settings.system.modelTrafficInputItems,
+    modelTrafficItemMaxBytes: settings.system.modelTrafficItemMaxBytes,
+  }
   if (setting.kind === "system.model-traffic-dump") return settings.system.modelTrafficDumpEnabled
   if (setting.kind === "system.model-traffic-retention-days") return settings.system.modelTrafficRetentionDays
   if (setting.kind === "automation.scheduled-tasks") return settings.automation.scheduledTasksEnabled

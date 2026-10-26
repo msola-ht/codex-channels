@@ -13,7 +13,7 @@ const hookTrustLabels = {
   modified: "定义或插件内容已变化，需重新审查",
 } as const;
 
-export function formatConversationHooks(view: HookCommandView): string {
+export function formatConversationHooks(view: HookCommandView, queryOnly = false): string {
   const lines = [
     `Hooks · 第 ${view.page}/${view.pageCount} 页`,
     `Workspace：${hookDisplayText(view.workspaceId)}`,
@@ -65,7 +65,7 @@ export function formatConversationHooks(view: HookCommandView): string {
       "确认令牌五分钟内有效，仅可使用一次；配置或当前会话上下文变化后需重新预览。",
     );
   }
-  lines.push("", ...hookCommandChoices(view).map(choice => `${choice.label}：/hooks ${choice.input}`));
+  lines.push("", ...(queryOnly ? [] : hookCommandChoices(view).map(choice => `${choice.label}：/hooks ${choice.input}`)));
   return lines.join("\n");
 }
 

@@ -26,7 +26,7 @@ interface AsyncQuestionOptions {
   targetForThread(threadId: string): ConversationTarget | undefined;
   currentThread(target: ConversationTarget): string | undefined;
   captureAuthorization(target: ConversationTarget): { actorId: string; isCurrent(): boolean } | undefined;
-  submit(target: ConversationTarget, threadId: string, text: string, isCurrent: () => boolean): Promise<unknown>;
+  submit(target: ConversationTarget, threadId: string, text: string, isCurrent: () => boolean, requestId: string): Promise<unknown>;
   warn(event: QuestionEvent, message: string): void;
   settled?(threadId: string): void;
 }
@@ -158,7 +158,7 @@ export class AsyncQuestionCoordinator {
     const { event } = pending;
     const isCurrent = () => !pending.cancelled && !this.stopped && pending.isAuthorized()
       && this.options.currentThread(event.target) === event.threadId;
-    // All three existing channel forms support three questions per interaction.
+    // Keep shared question batches bounded across all channel presentations.
     for (let offset = 0; offset < event.questions.length; offset += 3) {
       if (!isCurrent()) return;
       const questions = event.questions.slice(offset, offset + 3);
@@ -199,6 +199,7 @@ export class AsyncQuestionCoordinator {
           event.threadId,
           `异步问题回答：\n\n${answers.join("\n\n")}`,
           isCurrent,
+          request.requestId,
         );
       } catch {
         this.options.warn(event, "异步回答未确认送达，请核对原会话后重新发送；Gateway 不会自动重发。");

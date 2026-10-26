@@ -32,6 +32,7 @@ import {
   createTurnStartedPresentation,
   renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
+  type PresentationDetail,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
@@ -56,7 +57,7 @@ import { formatFeishuCommandMarkdown } from "./command-format.js";
 export function renderFeishuCommandResult(
   result: ConversationCommandResult,
 ): string | null {
-  if (result.kind === "status") return formatConversationStatus(result.status, escapeFeishuMarkdown);
+  if (result.kind === "status") return formatConversationStatus(result.status, escapeFeishuMarkdown, result);
   const rendered = renderConversationCommandResult(result, formatFeishuCommandMarkdown);
   if (rendered === null || result.kind !== "artifacts") {
     return rendered;
@@ -70,7 +71,7 @@ function formatFeishuDiffMarkdown(text: string): string {
     return text;
   }
   const title = text.slice(0, separator);
-  const diff = text.slice(separator + 2).trimEnd();
+  const diff = text.slice(separator + 2);
   const fence = safeFeishuFence(diff);
   return [`**${title}**`, "", fence, diff, fence].join("\n");
 }
@@ -151,11 +152,8 @@ export function renderFeishuUserFacingError(
 
 export function renderFeishuOutput(
   event: OutputEvent,
-  debug = false,
-  autoCompactPercent?: (
-    provider: string | null | undefined,
-    model: string | null | undefined,
-  ) => number | null,
+  detailed: PresentationDetail = "basic",
+  completion: "brief" | "detailed" = "detailed",
 ): string | null {
   switch (event.type) {
     case "turn.retry":
@@ -164,7 +162,7 @@ export function renderFeishuOutput(
     case "hook.completed":
       return renderFeishuLifecyclePresentation(createHookCompletedPresentation(event));
     case "autoApprovalReview.updated": {
-      const presentation = createAutoApprovalReviewPresentation(event);
+      const presentation = createAutoApprovalReviewPresentation(event, detailed);
       return presentation ? renderFeishuLifecyclePresentation(presentation) : null;
     }
     case "turn.started":
@@ -176,7 +174,7 @@ export function renderFeishuOutput(
         ),
       );
     case "turn.reasoning":
-      return renderFeishuReasoningPresentation(
+      return renderFeishuLifecyclePresentation(
         createTurnReasoningPresentation(
           event.background ? event.threadId : undefined,
           event.elapsedMs,
@@ -196,19 +194,19 @@ export function renderFeishuOutput(
       return null;
     case "subagent.spawned":
       return renderFeishuLifecyclePresentation(
-        createSubagentStartedPresentation(event),
+        createSubagentStartedPresentation(event, detailed),
       );
     case "subagent.contacted":
       return renderFeishuLifecyclePresentation(
-        createSubagentContactedPresentation(event),
+        createSubagentContactedPresentation(event, detailed),
       );
     case "subagent.completed":
-      return renderFeishuSubagentCompleted(event, debug);
+      return renderFeishuSubagentCompleted(event, detailed);
     case "turn.completed":
       return renderFeishuTurnCompleted(
         event,
-        debug,
-        autoCompactPercent,
+        detailed,
+        completion,
       );
     case "thread.status":
       return `Session 状态：${threadStatusLabel(event.status)}`;
@@ -241,26 +239,23 @@ export function renderFeishuOutput(
 
 function renderFeishuSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  debug = false,
+  detailed: PresentationDetail = "basic",
 ): string {
   return renderFeishuLifecyclePresentation(
-    createSubagentCompletedPresentation(event, debug),
+    createSubagentCompletedPresentation(event, detailed),
   );
 }
 
 function renderFeishuTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  debug = false,
-  autoCompactPercent?: (
-    provider: string | null | undefined,
-    model: string | null | undefined,
-  ) => number | null,
+  detailed: PresentationDetail = "basic",
+  mode: "brief" | "detailed" = "detailed",
 ): string {
   return renderFeishuLifecyclePresentation(
     createTurnCompletedPresentation(
       event,
-      debug,
-      autoCompactPercent,
+      detailed,
+      mode,
     ),
   );
 }
@@ -273,15 +268,6 @@ function renderFeishuLifecyclePresentation(
   return footer === undefined
     ? rendered
     : `${rendered}\n\n---\n**${footer.label}：** ${footer.value}`;
-}
-
-function renderFeishuReasoningPresentation(
-  presentation: LifecyclePresentation,
-): string {
-  const rendered = renderFeishuLifecyclePresentation(presentation);
-  // Match operation cards: reasoning is an inline status, not a section
-  // heading, so use the same bold title scale as "运行命令".
-  return rendered.replace(/^## (.+)$/mu, "**$1**");
 }
 
 function threadStatusLabel(status: string): string {

@@ -11,10 +11,11 @@ import {
 import type { UserFacingError } from "../conversation-core/index.js";
 import { gatewayRequestFailedText } from "./output-copy.js";
 import { formatReasoningEffort } from "./reasoning-effort-format.js";
+import { formatTextFileDownloadFailed, formatUnsupportedTextFile } from "./text-file-copy.js";
 
 export function formatSurfaceUserFacingError(
   error: UserFacingError,
-  surfaceLabel: "Telegram" | "飞书" | "微信",
+  surfaceLabel: "Telegram" | "飞书" | "微信" | "QQ",
 ): string {
   switch (error.code) {
     case "mcp.oauth.unavailable":
@@ -54,10 +55,20 @@ export function formatSurfaceUserFacingError(
     case "attachment.too-many":
       return "一次最多处理 4 个文本附件";
     case "attachment.too-large":
+      if (error.details.kind === "binary") return "普通文件必须为 1 至 5,000,000 字节";
       return "文本附件总大小超过 1,000,000 字节限制";
     case "attachment.unsupported":
+      if (surfaceLabel === "QQ") {
+        switch (error.details.reason) {
+          case "invalid-name": case "invalid-utf8": case "empty": case "control-characters": case "unsupported":
+            return formatUnsupportedTextFile(surfaceLabel, error.details.reason);
+        }
+      }
       return "文本附件格式不支持";
+    case "attachment.download-failed":
+      return formatTextFileDownloadFailed(surfaceLabel);
     case "attachment.capacity":
+      if (error.details.kind === "binary") return "普通文件暂存空间已满，请等待文件过期后重试";
       return "文本附件暂存空间已满，请稍后重试或发送较小片段";
     case "message.empty":
       return "消息不能为空";
@@ -65,6 +76,8 @@ export function formatSurfaceUserFacingError(
       return "输入授权或工作区已变化，本次输入未继续提交；请核对权限和工作区后重新发送";
     case "command.authorization-changed":
       return "命令授权或工作区已变化，未继续后续操作；已提交的操作不会自动撤销，请重新查询实际状态";
+    case "command.selection.expired":
+      return "菜单已失效，请重新发送 /help 打开菜单。";
     case "oauth.closing":
       return "飞书用户授权正在关闭，请稍后重试";
     case "conversation.name.invalid":
@@ -102,6 +115,10 @@ export function formatSurfaceUserFacingError(
       return "一次最多处理 4 张图片";
     case "image.unsupported":
       return "仅支持 PNG、JPEG、WebP 和非动画 GIF 图片";
+    case "image.type-mismatch":
+      return "图片内容与声明类型不一致，请重新发送图片";
+    case "image.download-failed":
+      return "图片读取已取消、超时或未确认，请核对权限后重新发送图片";
     case "audio.path.invalid":
       return "本地音频路径必须是绝对路径";
     case "audio.duration-missing":
@@ -158,6 +175,8 @@ export function formatSurfaceUserFacingError(
       return threadQueueCommandUsageText;
     case "metrics.usage":
       return "用法：/metrics [session|global|providers|models|errors] [24h|7d|30d|90d|all]";
+    case "status.usage":
+      return "用法：/status [detail]";
     case "queue.full":
       return "App Server Queue 已满，最多 100 条";
     case "queue.unavailable":
@@ -179,7 +198,9 @@ export function formatSurfaceUserFacingError(
     case "queue.reorder-conflict":
       return "Queue 已发生变化，请刷新 /queue list 后重试排序";
     case "queue.failed":
-      return "Queue 操作失败，请稍后重试";
+      return error.details.reason === "submission-unconfirmed"
+        ? "Queue 提交结果未确认，任务可能已开始；请用 /queue list、/status 或在本机核对，勿直接重复提交"
+        : "Queue 操作失败，请稍后重试";
     case "revert.usage":
       return threadRevertCommandUsageText;
     case "revert.unavailable":

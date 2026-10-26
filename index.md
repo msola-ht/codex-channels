@@ -11,6 +11,7 @@
 - [`provider-model-catalog.json`](provider-model-catalog.json)：OCG/CCG 基于 DS 目录扩展 V4.1 的模型 ID 与显示名映射。
 - [`startup-network-policy.json`](startup-network-policy.json)：首次网络探测与启动恢复的时限、退避参数。
 - [`docs/display.md`](docs/display.md)：渠道展示口径、`/metrics` 命令与调试模式说明。
+- [`docs/message-display-unification-plan.md`](docs/message-display-unification-plan.md)：全渠道单群聊消息显示统一的分批计划、关联风险、反例与审查进度。
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换、网页搜索能力与运行统计。
 - [`docs/archive/deepseek-upload-remediation.md`](docs/archive/deepseek-upload-remediation.md)：历史记录，DeepSeek 图片上传调用身份、运行实例一致性、材料 Worker 的关联修复、独立复查与隔离观察。
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
@@ -19,10 +20,13 @@
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
+- [`docs/channel-file.md`](docs/channel-file.md)：显式普通文件发送、目标绑定、独立暂存与未知结果处理。
 - [`docs/video-analysis-mcp.md`](docs/video-analysis-mcp.md)：独立视频分析 MCP、授权目录、Strata 接口及 Codex 配置。
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
 
 ## 协议与现行设计
+
+- [`docs/qq-message-contract.md`](docs/qq-message-contract.md)：QQ 消息开发流程与合同，覆盖协议/解析、共享提交观察与内存来源注册的源码进度，以及后续接线、阶段门槛、恢复处置和证据缺口。
 
 - [`docs/unified-model-management-design.md`](docs/unified-model-management-design.md)：第三方模型统一管理的现行合同、设计取舍、关联审查结论与证据边界，明确默认保护、调用影响与暂不支持范围。
 - [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。
@@ -97,6 +101,7 @@
 - [`src/model-api/README.md`](src/model-api/README.md)：纯模型 API 消息与流式转换模块。
 - [`src/model-relay/README.md`](src/model-relay/README.md)：独立模型 API 的身份、准入与撤销模块。
 - [`src/surfaces/README.md`](src/surfaces/README.md)：通讯渠道公共边界。
+- [`src/surfaces/qq/README.md`](src/surfaces/qq/README.md)：QQ 文字接入、来源授权、共享投递、发送预算与验收边界。
 - [`bin/README.md`](bin/README.md)：npm CLI 入口。
 - [`runtime/README.md`](runtime/README.md)：CLI 与 Gateway 共享运行时。
 - [`scripts/README.md`](scripts/README.md)：配置、构建、验证和服务脚本。

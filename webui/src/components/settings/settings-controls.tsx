@@ -24,6 +24,7 @@ import type { PendingSetting } from "@/lib/settings-management"
 import type { ManagementSettingMutationResponse } from "@/lib/types"
 import type { MessageKey, Translate } from "@/lib/i18n/messages"
 import { cn } from "cn"
+import { translateDisplayScopeSource } from "@/lib/i18n/translate"
 
 export const modelOperationDialogClassName = "w-[calc(100%-2rem)] max-w-2xl max-h-[85dvh] overflow-y-auto sm:max-w-2xl"
 export const modelOperationFormDialogClassName = "flex flex-col overflow-hidden"
@@ -125,11 +126,14 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
     >
       {pending !== null ? <>
           <p>{regeneratingToken ? t("settingsFields.regenerateTokenConfirmation") : t("settingsUi.change", { label: typeof pending.label === "string" ? pending.label : t(pending.label.key, pending.label.params), before: formatPreviewValue(pending.before, pending.kind, t), after: formatPreviewValue(pending.value, pending.kind, t) })}</p>
+          {(pending.kind === "display.preset" || pending.kind === "display.scope" || pending.kind === "display.completion" || pending.kind === "display.presentation-detail" || pending.kind === "display.subagents" || pending.kind === "display.streaming" || pending.kind === "display.commentary" || pending.kind === "display.routine-notifications" || (pending.kind === "display.operation-updates" && (pending.value === "failures" || pending.value === "detailed"))) && <><p>{t("displayScope.projection")}</p><p>{t("displayScope.notice")}</p></>}
           {pending.kind === "webui.token" && pending.intent === "set" ? <p>{t("settingsFields.setTokenConfirmation")}</p> : null}
           {pending.kind === "webui.token" && pending.intent === "clear" ? <p>{t("settingsFields.clearTokenConfirmation")}</p> : null}
           {pending.kind === "network.proxy" && pending.intent !== undefined ? <p>{t(pending.intent === "clear" ? "settingsFields.clearProxyConfirmation" : "settingsFields.setProxyConfirmation")}</p> : null}
           {pending.kind === "webui.host" && previewRecord(pending.before)?.tokenConfigured === false && previewRecord(pending.value)?.tokenConfigured === true ? <p>{t("settingsFields.publicHostTokenConfirmation")}</p> : null}
           <p className="text-muted-foreground">{t("settingsUi.activation", { value: formatActivation(pending.activation, t) })}</p>
+          {pending.kind === "system.model-traffic-mode" ? <p className="text-muted-foreground">{t("capture.scope")}</p> : null}
+          {["system.model-traffic-mode", "system.model-traffic-dump", "system.model-traffic-retention-days"].includes(pending.kind) && pending.activation.status !== "none" ? <p className="text-muted-foreground">{t("capture.activation")}</p> : null}
           {pending.activation.commands.length > 0
             ? <p className="text-muted-foreground">{t(pending.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: pending.activation.commands.join("; ") })}</p>
             : null}
@@ -190,6 +194,39 @@ function previewRecord(value: unknown): Record<string, unknown> | null {
 
 function formatPreviewValue(value: unknown, kind: string, t: Translate): string {
   const record = previewRecord(value)
+  const completionLabel = (value: unknown) => value === "off" ? t("settingsFields.completionOff") : value === "brief" || value === "detailed" ? t(`settingsFields.${value}`) : t("settingsFields.completionDefault")
+  if (kind === "display.completion" && record !== null) return t("displayScope.fieldSummary", { field: t("settingsFields.completion"), override: completionLabel(record.completionOverride), effective: completionLabel(record.completion), source: t("displayScope.global") })
+  if (kind === "display.presentation-detail" && record !== null) {
+    const label = (value: unknown) => value === null ? t("settingsFields.presentationDetailDefault") : value === "basic" || value === "detailed" || value === "full" ? t(`settingsFields.${value}`) : t("common.unknown")
+    return t("displayScope.fieldSummary", { field: t("settingsFields.presentationDetail"), override: label(record.presentationDetailOverride), effective: label(record.presentationDetail), source: t("displayScope.global") })
+  }
+  if (kind === "display.subagents" && record !== null) return t("displayScope.fieldSummary", { field: t("settingsFields.subagents"), override: record.subagentsOverride === null ? t("settingsFields.subagentsDefault") : t(record.subagentsOverride ? "settingsFields.enabled" : "settingsFields.disabled"), effective: t(record.subagentsEnabled ? "settingsFields.enabled" : "settingsFields.disabled"), source: t("displayScope.global") })
+  if (kind === "display.streaming" && record !== null) return t("displayScope.fieldSummary", { field: t("settingsFields.streaming"), override: record.streamingOverride === null ? t("settingsFields.streamingDefault") : t(record.streamingOverride ? "settingsFields.enabled" : "settingsFields.disabled"), effective: t(record.streamingEnabled ? "settingsFields.enabled" : "settingsFields.disabled"), source: t("displayScope.global") })
+  if (kind === "display.commentary" && record !== null) return t("displayScope.fieldSummary", { field: t("settingsFields.commentary"), override: record.commentaryOverride === null ? t("settingsFields.commentaryDefault") : t(record.commentaryOverride ? "settingsFields.enabled" : "settingsFields.disabled"), effective: t(record.commentaryEnabled ? "settingsFields.enabled" : "settingsFields.disabled"), source: t("displayScope.global") })
+  if (kind === "display.routine-notifications" && record !== null) return t("displayScope.fieldSummary", { field: t("settingsFields.routineNotifications"), override: record.routineNotificationsOverride === null ? t("settingsFields.routineNotificationsDefault") : t(record.routineNotificationsOverride ? "settingsFields.enabled" : "settingsFields.disabled"), effective: t(record.routineNotificationsEnabled ? "settingsFields.enabled" : "settingsFields.disabled"), source: t("displayScope.global") })
+  if ((kind === "display.scope" || kind === "display.preset") && record !== null) {
+    const selector = previewRecord(record.selector)
+    const override = previewRecord(record.override)
+    const effective = previewRecord(record.effective)
+    const sources = previewRecord(record.sources)
+    const scalar = (current: unknown) => current === undefined ? t(selector === null ? "displayScope.defaultValue" : "displayScope.inherit") : typeof current === "boolean" ? t(current ? "settingsFields.enabled" : "settingsFields.disabled") : current === "off" ? t("settingsFields.completionOff") : current === "full" || current === "compact" || current === "failures" || current === "hidden" || current === "brief" || current === "detailed" || current === "basic" ? t(`settingsFields.${current}`) : t("common.unknown")
+    const target = selector === null ? t("displayScope.global") : [selector.surface, selector.account_id, selector.chat_kind === "direct" ? t("displayScope.direct") : selector.chat_kind === "group" ? t("displayScope.group") : undefined, selector.chat_id].filter(value => typeof value === "string").join(" / ")
+    const detail = (["operation_updates", "subagents", "streaming", "commentary", "routine_notifications", "plan_updates", "reasoning", "completion", "presentation_detail"] as const).filter(field => Array.isArray(record.supportedFields) && record.supportedFields.includes(field)).map(field => {
+      const key = field === "operation_updates" ? "operationUpdates" : field === "subagents" ? "subagentsEnabled" : field === "streaming" ? "streamingEnabled" : field === "commentary" ? "commentaryEnabled" : field === "routine_notifications" ? "routineNotificationsEnabled" : field === "plan_updates" ? "planUpdatesEnabled" : field === "completion" ? "completion" : field === "presentation_detail" ? "presentationDetail" : "reasoningEnabled"
+      const source = sources?.[key]
+      return t("displayScope.fieldSummary", { field: t(field === "operation_updates" ? "settingsFields.operationUpdates" : field === "subagents" ? "settingsFields.subagents" : field === "streaming" ? "settingsFields.streaming" : field === "commentary" ? "settingsFields.commentary" : field === "routine_notifications" ? "settingsFields.routineNotifications" : field === "plan_updates" ? "settingsFields.planUpdates" : field === "completion" ? "settingsFields.completion" : field === "presentation_detail" ? "settingsFields.presentationDetail" : "settingsFields.reasoningStatus"), override: scalar(override?.[field]), effective: scalar(effective?.[key]), source: source === "global" || source === "surface" || source === "account" || source === "chat-kind" || source === "chat" ? translateDisplayScopeSource(t, source) : t("common.unknown") })
+    }).join(" · ")
+    const preset = record.preset
+    const presetLabel = kind === "display.preset" && (preset === "concise" || preset === "standard" || preset === "detailed" || preset === "full" || preset === "custom") ? `${t(`displayPreset.${preset}`)} · ` : ""
+    return `${target} · ${presetLabel}${detail}`
+  }
+  if (kind === "system.model-traffic-mode") {
+    const mode = record?.modelTrafficMode ?? value
+    const label = mode === "production" ? t("capture.production") : mode === "debug" ? t("capture.debug") : mode === "custom" ? t("capture.custom") : t("common.unknown")
+    const inputItems = record?.modelTrafficInputItems ?? (mode === "production" ? 3 : mode === "debug" ? 0 : undefined)
+    const itemMaxBytes = record?.modelTrafficItemMaxBytes ?? (mode === "production" ? 65536 : mode === "debug" ? 0 : undefined)
+    return typeof inputItems === "number" && typeof itemMaxBytes === "number" ? `${label} · ${t("capture.values", { inputItems, itemMaxBytes })}` : label
+  }
   const scalar = (current: unknown): string => current === null || current === undefined ? t("settingsFields.notSet")
     : current === "unsupported" ? t("globalSettings.unsupportedValue")
     : typeof current === "boolean" ? t(current ? "settingsFields.enabled" : "settingsFields.disabled")
@@ -251,7 +288,7 @@ function formatPreviewValue(value: unknown, kind: string, t: Translate): string 
     }
   }
   if (kind === "system.default-model" && value === null) return t("modelManagement.followDefault")
-  const choices: Record<string, MessageKey> = kind === "display.operation-updates" ? { full: "settingsFields.full", compact: "settingsFields.compact", hidden: "settingsFields.hidden" }
+  const choices: Record<string, MessageKey> = kind === "display.operation-updates" ? { full: "settingsFields.full", detailed: "settingsFields.detailed", compact: "settingsFields.compact", failures: "settingsFields.failures", hidden: "settingsFields.hidden" }
     : kind === "telegram.message-format" ? { rich: "settingsFields.richText" } : {}
   if (typeof value === "string" && Object.hasOwn(choices, value)) return t(choices[value])
   return scalar(value)

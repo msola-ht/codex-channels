@@ -1,5 +1,5 @@
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
-import { validateDebugConfigDocument, validateGatewayConfigStructureDocument } from "../runtime/gateway-config.mjs";
+import { isTelegramEnabled, validateDebugConfigDocument, validateGatewayConfigStructureDocument } from "../runtime/gateway-config.mjs";
 import { projectWebuiSettings } from "./config-webui-management.mjs";
 import { projectMetricsSettings } from "./config-metrics-management.mjs";
 
@@ -12,11 +12,19 @@ export function writeGatewayConfigSummary(output, document, configPath, environm
     `- 渠道新会话模型：${summary.defaultModel}`,
     `- 通讯渠道：${summary.channels.join("、") || "未配置"}`,
     `- 操作详情：${summary.operationUpdates}`,
+    `- 子代理显示：${enabledLabel(summary.subagentsEnabled)}`,
+    `- 流式显示：${enabledLabel(summary.streamingEnabled)}（Telegram、飞书与 QQ 单聊）`,
+    `- 过程说明：${enabledLabel(summary.commentaryEnabled)}（Telegram、飞书与 QQ）`,
+    `- 常规通知：${enabledLabel(summary.routineNotificationsEnabled)}（四渠道）`,
     `- 计划显示：${enabledLabel(summary.planUpdates)}`,
     `- 思考状态：${enabledLabel(summary.reasoning)}`,
+    `- 完成通知：${({ off: "关闭成功通知", brief: "精简", detailed: "详细" })[summary.completion]}`,
+    `- 消息详情：${({ basic: "基础", detailed: "详细", full: "完整" })[summary.presentationDetail]}`,
+    "- 消息显示口径：以上显示项为已保存配置的全局缺省，不代表每个聊天的有效值或当前运行状态；渠道、账号与聊天覆盖请在 Gateway 显示设置中核对。",
     `- 计划任务：${enabledLabel(summary.scheduledTasks)}`,
     `- 会话空闲自动解除：${summary.idleReleaseMinutes === 0 ? "关闭" : `${summary.idleReleaseMinutes} 分钟`}`,
     `- 调用详情记录：${enabledLabel(summary.modelTrafficDump)}`,
+    `- 调用记录预设：${({ production: "生产", debug: "调试", custom: "自定义" })[summary.modelTrafficMode]}（输入项 ${summary.modelTrafficInputItems} / 单项字节 ${summary.modelTrafficItemMaxBytes}）`,
     `- 调用记录按时间自动清理：${summary.modelTrafficRetentionDays === 0 ? "关闭" : `保留 ${summary.modelTrafficRetentionDays} 天`}`,
     `- 日志等级：${summary.logLevel}`,
     `- Codex .env 代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,
@@ -54,11 +62,18 @@ export function gatewayConfigSummary(document, configPath, environment = process
     defaultModel: stringValue(codex.default_model) || "跟随当前 Provider 默认值",
     channels: channelLabels(document),
     operationUpdates: display.operation_updates,
+    subagentsEnabled: display.subagents ?? true,
+    streamingEnabled: display.streaming ?? true,
+    commentaryEnabled: display.commentary ?? true,
+    routineNotificationsEnabled: display.routine_notifications ?? true,
     planUpdates: display.plan_updates,
     reasoning: display.reasoning,
+    completion: display.completion ?? "detailed",
+    presentationDetail: display.presentation_detail ?? "basic",
     idleReleaseMinutes: conversation.idle_release_minutes,
     scheduledTasks: scheduledTasks.enabled,
     modelTrafficDump: debug.model_traffic_dump,
+    ...projectModelTrafficSettings(debug),
     modelTrafficRetentionDays: debug.model_traffic_retention_days,
     logLevel: logging.level,
     networkFields: ["http_proxy", "https_proxy", "all_proxy", "no_proxy"]
@@ -76,11 +91,24 @@ export function gatewayConfigSummary(document, configPath, environment = process
   };
 }
 
+/** Project effective capture values without changing custom clipping settings. */
+export function projectModelTrafficSettings(debug) {
+  const modelTrafficInputItems = debug.model_traffic_input_items;
+  const modelTrafficItemMaxBytes = debug.model_traffic_item_max_bytes;
+  return {
+    modelTrafficMode: modelTrafficInputItems === 0 && modelTrafficItemMaxBytes === 0
+      ? "debug"
+      : modelTrafficInputItems === 3 && modelTrafficItemMaxBytes === 65536 ? "production" : "custom",
+    modelTrafficInputItems,
+    modelTrafficItemMaxBytes,
+  };
+}
+
 export function gatewayChannelStates(document) {
   const channels = [];
   const telegram = table(document.telegram);
   if (stringValue(telegram.bot_token)) {
-    channels.push({ id: "telegram", displayName: "Telegram", configured: true, enabled: true });
+    channels.push({ id: "telegram", displayName: "Telegram", configured: true, enabled: isTelegramEnabled(telegram) });
   }
   const feishu = table(document.feishu);
   if (feishu.enabled === true || configuredFeishu(feishu)) {
@@ -97,6 +125,14 @@ export function gatewayChannelStates(document) {
       displayName: "微信",
       configured: true,
       enabled: table(document.weixin).enabled === true,
+    });
+  }
+  if (isTable(document.qq)) {
+    channels.push({
+      id: "qq",
+      displayName: "QQ",
+      configured: true,
+      enabled: table(document.qq).enabled === true,
     });
   }
   return channels;

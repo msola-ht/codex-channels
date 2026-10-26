@@ -9,6 +9,7 @@ import type {
   TurnExecutionPort,
   TurnOverrides,
 } from "../application/index.js";
+import { SubmissionObservation } from "../application/index.js";
 import {
   JsonRpcError,
 } from "../codex-client/index.js";
@@ -25,6 +26,7 @@ import type {
 import type { SessionRouter } from "../session-routing/index.js";
 import type { BindingStore } from "../storage/index.js";
 import type { WorkspaceRegistry } from "../policy/index.js";
+import type { SurfaceAsyncAnswerSubmission, SurfaceScheduledTaskSubmissionContext } from "../surfaces/index.js";
 
 /** Provider/model preflight is injected at the composition root and may start a Provider App Server. */
 export interface ScheduledTaskModelPort {
@@ -43,6 +45,8 @@ export interface ScheduledTaskExecutorOptions {
   isActorAuthorized: (target: ConversationTarget, actorId: string) => boolean;
   /** Temporary output pressure does not revoke task authorization. */
   acceptsExecution: (target: ConversationTarget) => boolean;
+  /** Prepare disposable result identity only after validating the fresh Thread. */
+  prepareSubmission?: (context: SurfaceScheduledTaskSubmissionContext) => SurfaceAsyncAnswerSubmission | undefined;
   /** Associate a fresh Thread before the Turn-start write begins. */
   onThreadStarted: (run: ScheduledRun, target: ConversationTarget, threadId: string) => void;
   /** Complete the Thread association once the Turn-start response is known. */
@@ -73,6 +77,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
   private readonly onTurnStarted: ScheduledTaskExecutorOptions["onTurnStarted"];
   private readonly onRunStateChangedHook: ScheduledTaskExecutorOptions["onRunStateChanged"];
   private readonly logger: Logger | undefined;
+  private readonly prepareSubmission: ScheduledTaskExecutorOptions["prepareSubmission"];
 
   constructor(
     private readonly router: SessionRouter,
@@ -104,6 +109,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     this.onTurnStarted = options.onTurnStarted;
     this.onRunStateChangedHook = options.onRunStateChanged;
     this.logger = options.logger;
+    this.prepareSubmission = options.prepareSubmission;
   }
 
   onRunStateChanged(run: ScheduledRun): void | Promise<void> {
@@ -168,6 +174,11 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     if (workspace.cwd !== prepared.cwd) return { kind: "failed", category: "workspace" };
     const rejectedBeforeSubmit = new Error("计划任务在提交前已失效");
     let submissionRejection: ScheduledTaskExecutionResult = { kind: "interrupted" };
+    let submission: SurfaceAsyncAnswerSubmission | undefined;
+    const cancelSubmission = (): void => {
+      try { submission?.cancel(); }
+      catch { this.logger?.error("计划任务结果来源取消失败"); }
+    };
     const beforeSubmit = (): void => {
       try {
         signal.throwIfAborted();
@@ -178,10 +189,11 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       const currentValidation = this.validateCurrent(task, target);
       const currentWorkspace = this.workspaces.get(task.workspaceId);
       const workspaceChanged = currentWorkspace?.cwd !== workspace.cwd;
-      if (currentValidation || workspaceChanged || !this.acceptsExecution(target)) {
+      const sourceRevoked = submission !== undefined && !submission.isCurrent();
+      if (currentValidation || workspaceChanged || sourceRevoked || !this.acceptsExecution(target)) {
         submissionRejection = {
           kind: "failed",
-          category: currentValidation?.category ?? (workspaceChanged ? "workspace" : "capacity"),
+          category: currentValidation?.category ?? (workspaceChanged ? "workspace" : sourceRevoked ? "authorization" : "capacity"),
           ...(currentValidation?.blockTask ? { blockTask: true } : {}),
         };
         throw rejectedBeforeSubmit;
@@ -222,6 +234,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     if (
       effective.cwd !== workspace.cwd
       || effective.approvalPolicy !== "never"
+      || (effective.sandbox !== "read-only" && effective.sandbox !== "workspace-write")
       || effective.sandbox !== prepared.permission.sandbox
       || effective.permissions !== prepared.permission.permissions
     ) {
@@ -248,41 +261,86 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       return { kind: "failed", category: "model", threadId };
     }
 
-    const overrides: TurnOverrides = {
-      beforeSubmit,
-      ...(task.model == null ? {} : { model: task.model }),
-      ...(task.reasoningEffort == null ? {} : { effort: task.reasoningEffort }),
-      ...(task.serviceTier == null ? {} : { serviceTier: task.serviceTier }),
-    };
-    const activity = this.core.trackThreadActivity(threadId);
+    let observation: SubmissionObservation | undefined;
+    const clientUserMessageId = `scheduled-run-${run.runId}`;
     try {
-      let turnId: string;
       try {
-        const turn = await this.turns.startTurn(
-          threadId,
-          [{ type: "text", text: task.prompt }],
-          `scheduled-run-${run.runId}`,
-          workspace.cwd,
-          overrides,
-        );
-        turnId = turn.turnId;
+        submission = this.prepareSubmission?.({
+          runId: run.runId, target, actorId: task.actorId,
+          workspaceId: task.workspaceId, workspaceCwd: workspace.cwd, threadId,
+        });
+        if (target.surface === "qq" && !submission) throw new Error("QQ 计划任务缺少结果来源");
+        if (submission) {
+          observation = new SubmissionObservation(submission.observer);
+          observation.prepare({ kind: "start-or-steer", threadId, clientUserMessageId });
+        }
+        beforeSubmit();
       } catch (error) {
-        if (error === rejectedBeforeSubmit) {
-          await this.releaseFreshBackground(threadId);
-          return withThreadId(submissionRejection, threadId);
-        }
-        const result = writeFailure(error);
-        if (result.kind === "failed") {
-          await this.releaseFreshBackground(threadId);
-        }
-        return withThreadId(result, threadId);
+        cancelSubmission();
+        await this.releaseFreshBackground(threadId);
+        return error === rejectedBeforeSubmit ? withThreadId(submissionRejection, threadId)
+          : { kind: "failed", category: "authorization", threadId };
       }
 
-      this.onTurnStarted?.(run, target, threadId, turnId);
-      activity.restore(target, turnId);
-      return { kind: "running", threadId, turnId };
+      let observerAttemptFailed = false;
+      const requestObservation = observation;
+      const overrides: TurnOverrides = {
+        beforeSubmit,
+        ...(requestObservation ? { requestAttempted: (): undefined => {
+          try { return requestObservation.attempt(); }
+          catch (error) { observerAttemptFailed = true; throw error; }
+        } } : {}),
+        ...(task.model == null ? {} : { model: task.model }),
+        ...(task.reasoningEffort == null ? {} : { effort: task.reasoningEffort }),
+        ...(task.serviceTier == null ? {} : { serviceTier: task.serviceTier }),
+      };
+      const activity = this.core.trackThreadActivity(threadId);
+      try {
+        let turnId: string;
+        try {
+          const turn = await this.turns.startTurn(
+            threadId,
+            [{ type: "text", text: task.prompt }],
+            clientUserMessageId,
+            workspace.cwd,
+            overrides,
+          );
+          if (typeof turn.turnId !== "string" || !turn.turnId.trim()) {
+            throw new Error("计划任务启动响应缺少有效 Turn 身份");
+          }
+          turnId = turn.turnId;
+        } catch (error) {
+          if (error === rejectedBeforeSubmit && !observerAttemptFailed) {
+            await this.releaseFreshBackground(threadId);
+            return withThreadId(submissionRejection, threadId);
+          }
+          const result = observerAttemptFailed ? { kind: "uncertain" as const } : writeFailure(error);
+          if (result.kind === "failed") {
+            await this.releaseFreshBackground(threadId);
+          }
+          return withThreadId(result, threadId);
+        }
+
+        try {
+          observation?.confirm({ threadId, turnId, steered: false });
+        } catch {
+          cancelSubmission();
+          this.logger?.error({ threadId }, "计划任务提交已确认，但结果来源确认失败");
+        } finally {
+          // A local observer cannot undo an accepted Turn or suppress coordinator state.
+          this.onTurnStarted?.(run, target, threadId, turnId);
+          activity.restore(target, turnId);
+        }
+        return { kind: "running", threadId, turnId };
+      } finally {
+        activity.stop();
+      }
     } finally {
-      activity.stop();
+      try { observation?.settle(); }
+      catch {
+        cancelSubmission();
+        this.logger?.error({ threadId }, "计划任务结果来源结算失败");
+      }
     }
   }
 
@@ -408,7 +466,7 @@ function toTarget(task: ScheduledTask): ConversationTarget {
 }
 
 function isSupportedSurface(surface: string): surface is ConversationTarget["surface"] {
-  return surface === "telegram" || surface === "feishu" || surface === "weixin";
+  return surface === "telegram" || surface === "feishu" || surface === "weixin" || surface === "qq";
 }
 
 function sameTarget(left: ConversationTarget, right: ConversationTarget): boolean {

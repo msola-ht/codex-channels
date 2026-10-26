@@ -140,6 +140,13 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "display.operation-updates": "操作过程显示",
     "display.plan-updates": "自动计划显示",
     "display.reasoning": "思考状态显示",
+    "display.completion": "完成通知显示",
+    "display.subagents": "子代理过程显示",
+    "display.presentation-detail": "消息详情",
+    "display.streaming": "流式显示",
+    "display.commentary": "过程说明",
+    "display.routine-notifications": "常规通知",
+    "display.overrides": "渠道与聊天显示覆盖",
     "scheduled-tasks.enabled": "Gateway 计划任务",
     "metrics.storage": "指标保留策略",
     "model-relay.policy": "模型 API 转发策略",
@@ -161,6 +168,11 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "surface.weixin.account": "微信账号",
     "surface.weixin.credentials": "微信连接凭据",
     "surface.weixin.allowed-users": "微信允许用户",
+    "surface.qq.enabled": "QQ 启用状态",
+    "surface.qq.account": "QQ 应用账号",
+    "surface.qq.credentials": "QQ 应用凭据",
+    "surface.qq.allowed-users": "QQ 允许用户",
+    "surface.qq.groups": "QQ 群及群成员公开输出授权",
   };
   return labels[code];
 }

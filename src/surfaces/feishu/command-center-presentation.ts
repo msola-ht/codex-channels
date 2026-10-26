@@ -360,20 +360,20 @@ export function renderCommandCenterChoices(
     };
   }
   if (action === "limits" && result.kind === "limits" && result.result.kind === "rate-limits") {
-    return { title: "OpenAI 额度", description: renderFeishuCommandResult(result) ?? "", descriptionFormat: "markdown",
+    return { title: "OpenAI 额度", description: stripMarkdownHeading(renderFeishuCommandResult(result) ?? ""), descriptionFormat: "markdown",
       choices: [{ label: "查看重置券", action: "limits", input: "reset" }] };
   }
   if (action === "limits" && result.kind === "reset-credit") {
     const value = result.result;
     if (value.type === "preview") return {
-      title: "确认使用重置券", description: formatConversationResetCredits(result, "buttons"), descriptionFormat: "markdown",
+      title: "确认使用重置券", description: stripMarkdownHeading(formatConversationResetCredits(result, "buttons")), descriptionFormat: "markdown",
       choices: (["confirm", "cancel"] as const).map(operation => ({
         label: operation === "confirm" ? "确认使用" : "取消", action: "limits", input: `reset ${operation} ${value.token}`,
         acceptedState: { title: "重置券请求已提交", description: "原按钮已失效，执行结果见后续消息。", template: "grey" },
       })),
     };
     if (value.type === "list") return {
-      title: "选择重置券", description: formatConversationResetCredits(result, "buttons"), descriptionFormat: "markdown",
+      title: "选择重置券", description: stripMarkdownHeading(formatConversationResetCredits(result, "buttons")), descriptionFormat: "markdown",
       choices: [
         ...value.credits.map((credit, index) => ({ label: `${index + 1}. ${credit.title ?? "用量重置券"}`.slice(0, 80), action: "limits" as const, input: `reset use ${credit.id}` })),
         ...(value.page > 1 ? [{ label: "上一页", action: "limits" as const, input: `reset ${value.page - 1}` }] : []),
@@ -445,12 +445,12 @@ export function renderCommandCenterChoices(
     return {
       title: `确认${actionLabel}计划任务`,
       description: [
-        "**任务**",
+        "### 任务",
         `- 名称：${escapeFeishuCardMarkdown(task.name)}`,
         `- 计划：${escapeFeishuCardMarkdown(scheduleChoiceSummary(task.schedule))} · ${escapeFeishuCardMarkdown(task.timezone)}`,
         `- 下次运行：${escapeFeishuCardMarkdown(formatScheduledAt(task.nextRunAt))}`,
         "",
-        "**执行配置**",
+        "### 执行配置",
         `- Workspace：${escapeFeishuCardMarkdown(task.workspaceId)}`,
         `- Provider：${escapeFeishuCardMarkdown(formatCodexProviderLabel(task.modelProvider))}`,
         `- 模型：${escapeFeishuCardMarkdown(task.model || "默认")}`,
@@ -460,7 +460,7 @@ export function renderCommandCenterChoices(
         "- 网络：沿用目标 App Server 的项目配置",
         "- 审批：无人值守时一律拒绝",
         "",
-        "**任务内容**",
+        "### 任务内容",
         `- ${escapeFeishuCardMarkdown(task.promptPreview)}`,
         "",
         "该任务由 Gateway 无人值守执行；确认令牌 5 分钟内有效且仅可使用一次。",
@@ -583,7 +583,7 @@ export function renderCommandCenterChoices(
     return {
       title: "选择工作区",
       description: [
-        "当前工作区",
+        "### 当前工作区",
         `- ${result.currentWorkspaceId}${result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId) ? "" : "（已失效）"}`,
         "",
         "请选择下方工作区；切换后请重新发起操作，不会自动重试之前的请求。",
@@ -599,29 +599,30 @@ export function renderCommandCenterChoices(
   if (action === "permissions" && result.kind === "permissions") {
     return {
       title: "权限只读查询",
-      description: formatConversationPermissions(result),
+      description: stripMarkdownHeading(formatConversationPermissions(result)),
       descriptionFormat: "markdown",
       choices: [],
     };
   }
   if (action === "status" && result.kind === "status") {
     return {
-      title: "Codex 状态",
-      description: stripMarkdownHeading(formatConversationStatus(result.status, escapeFeishuCardMarkdown)),
+      title: result.view === "detail" ? "Codex 状态详情" : "Codex 状态",
+      description: stripMarkdownHeading(formatConversationStatus(result.status, escapeFeishuCardMarkdown, result)),
       descriptionFormat: "markdown",
       choices: [
+        { label: result.view === "detail" ? "返回总览" : "查看详情", action: "status", input: result.view === "detail" ? "" : "detail" },
         { label: "模型设置", action: "model", input: "" },
         { label: "工作区", action: "workspace", input: "" },
         { label: "权限查询", action: "permissions", input: "" },
-        { label: "当前会话审批方式", action: "autoreview", input: "" },
+        { label: "审批设置", action: "autoreview", input: "" },
       ],
     };
   }
   if (action === "autoreview" && result.kind === "auto-review") {
     const { threadId, reviewer } = result.state;
     return {
-      title: "当前会话审批方式",
-      description: formatConversationAutoReview(result, formatFeishuCommandMarkdown),
+      title: result.state.updated ? "已切换当前会话审批方式" : "当前会话审批方式",
+      description: stripMarkdownHeading(formatConversationAutoReview(result, formatFeishuCommandMarkdown)),
       descriptionFormat: "markdown",
       choices: threadId !== null && (reviewer === "user" || reviewer === "auto_review")
         ? (["on", "off"] as const).map(value => ({
@@ -655,7 +656,7 @@ export function renderCommandCenterChoices(
       return {
         title: "选择提供商",
         description: [
-          "当前模型",
+          "### 当前模型",
           `- 模型：${currentModelName}`,
           `- Provider：${formatCodexProviderLabel(result.state.modelProvider)}`,
           `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
@@ -675,7 +676,7 @@ export function renderCommandCenterChoices(
     return {
       title: "选择模型",
       description: [
-        "当前设置",
+        "### 当前设置",
         `- Provider：${formatCodexProviderLabel(result.state.providerFilter)}`,
         `- 速度：${formatServiceTierSetting(result.state, currentModel)}`,
         "",
@@ -700,7 +701,7 @@ export function renderCommandCenterChoices(
     return {
       title: `选择${reasoningEffortSettingName(result.state.effort, currentModel)}`,
       description: [
-        "当前设置",
+        "### 当前设置",
         `- 模型：${currentModelName}`,
         `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
         `- 速度：${formatServiceTierSetting(result.state, currentModel)}`,

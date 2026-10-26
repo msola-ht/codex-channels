@@ -4,6 +4,9 @@
 
 Thread 启动/恢复、Turn 启动/追加及中断的本地 `beforeSubmit` 守卫透过 Provider 准备保留到 RPC 发送前同步执行，不编码为
 协议字段；守卫拒绝时不发请求，已经发出的写请求仍等待实际响应，不以取消丢弃写入结果。
+Turn start/steer 另支持可选本地 `requestAttempted` 同步观察，在输入准备和最终守卫后、RPC 前调用，
+观察后再次复核守卫；该回调不编码进协议，不重试写请求。Promise 返回被拒绝，错误只表示本地观察失败。
+非空 Turn ID 才能确认提交，显式 steer 的响应 ID 还必须等于 expectedTurnId；普通 start 响应不能区分新建与追加。
 图片引用准备同样在创建文件、每次字节上传及完成确认前复核该守卫；受管 DS 还在私有上传路由
 IPC 前后及上传后复核。撤权后不再新出站，
 守卫错误保留原分类，既有上传失败处理不会将其吞掉或重试。
@@ -105,6 +108,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
   `client.ts` 的手动与后台额度查询直接调用 `account/rateLimits/read`，携带取消信号且不主动刷新登录凭据；
   后台查询省略重置券详情，启动认证路由使用 `account/read.refreshToken: false`。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
+  列表的 `invocable` 与执行共用名称及路径校验，并拒绝重复名称；该标志仅供呈现，执行仍重新读取并验证，不以旧目录标志授权。
   使用稳定 `SkillMetadata.pluginId` 排除系统与 Plugin 所有项，不从安装路径猜测来源；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
   绝对路径均通过校验的引用。
 - `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，严格映射当前 Thread
@@ -138,6 +142,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
 - `notification-reasoning-guard.ts`：将锁定协议的 `item/reasoning/textDelta` 与 `summaryTextDelta` 投影为 Application 重复保护的瞬时输入，保留 Thread／Turn／Item／段索引及原始思考／摘要来源隔离；Item 起止只标记边界，不把完成快照重放为增量。内容不转为渠道事件或指标。
 - `notification-account-events.ts`：映射账户、额度、MCP OAuth 完成、MCP 启动状态与 warning 事件，统一脱敏并限长，残缺字段省略而不推断。
 - `notification-thread-state.ts`：映射 Routing 侧线程设置、线程名、生命周期与 Queue 变更事件；Queue 变化只让本地选择快照失效，不触发读取。
+- `user-message-identity.ts`：仅从官方 item/started.userMessage 投影 Thread、Turn、Item 和 client ID，包含纯媒体输入但不读取正文；供本代次 Queue 来源关联使用。JsonRpc 本地 isCurrentConnection 闭包证明原连接仍完成握手且当前有效，不编码到协议或持久记录。
 - `notification-review.ts`：把受控 `item/autoApprovalReview/started|completed` 裁剪为 Thread、Turn、review ID、阶段、状态和 agent 来源的批准标志，供 Bootstrap 继续采集开始与完成指标。仅 agent 完成事件附加 `AutoApprovalReviewDetails`：七种官方动作类别、最多 1,024 个字符串条目的文件数量、白名单网络协议与 u16 端口；按动作提取操作与工作目录、审查理由，经共享凭据脱敏、控制字符清理及 320 字符限长后传递，execve 参数按原始边界脱敏后才格式化；保留文本标点，由 Surface 处理富文本呈现。合法起止时间投影为耗时，不采集风险与授权等级。未知或畸形摘要字段省略，超大文件列表只保留动作类别，不传递 stdin 正文或完整网络 target URL，非法来源和终态明确排除。
 - `notification-parse-helpers.ts`：上述映射共用的纯解析与基础断言（记录/字符串断言、Turn 与 Thread 状态、MessagePhase、PlanType、额度快照、Token 用量与 Turn 错误分类）；不持有状态、不执行 IO。
 - `value-primitives.ts`：本模块适配器共用的最小取值断言（有限数值、原样字符串、去空白后非空的字符串）；不含协议语义、不持有状态，供通知映射、操作摘要与服务器请求解码复用同一实现。
@@ -166,6 +171,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
 - `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill。
+  inline Review 的可选 requestAttempted 与普通 Turn 提交一样要求同步返回，观察后再次核对最终守卫；响应必须关联请求 Thread 和非空 Turn，未知结果不重试。
   新建 Thread 隐式使用 Gateway 默认模型前核对当前实例 `model/list`，失效时不发送 `thread/start`；显式模型和历史恢复保持各自调用合同。
   仅在 `thread/resume` 拒绝处，将 `-32600` 且完整消息精确等于 `no rollout found for thread id <请求的 Thread ID>` 的错误映射为稳定 `thread.resume.history-unavailable`；其他方法、错误码或 Thread 身份不复用该分类。此错误不证明 Thread 已删除，Client 不自动命名、创建替代 Thread 或重试写请求，保留绑定与恢复调度由 Router 和组合根负责。
   Workspace 的可选 `approvalsReviewer` 通过稳定 `thread/start`、`thread/resume`、`thread/fork` 参数传递；省略时保留 Codex 默认或历史持久设置，恢复响应核对明确请求的 reviewer。

@@ -79,7 +79,7 @@ export async function runSystemSettings({
         label: "调用详情记录",
         hint: "Codex 与 Relay 共用；记录完整报文，仅排查时临时开启",
       },
-      { value: "model_traffic_mode", label: "调用记录模式", hint: "Codex 与 Relay 共用；生产精简，调试增加报文信息" },
+      { value: "model_traffic_mode", label: "调用记录预设", hint: "Codex 与 Relay 共用；仅调整调用采集，不改变日志或开发运行模式" },
       {
         value: "model_traffic_retention",
         label: "调用记录保留天数",
@@ -146,8 +146,10 @@ async function runModelTrafficDump({ environment, output, prompts, writeConfig }
     kind: "system.model-traffic-dump",
     value: enabled,
   }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`调用详情记录已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  output.write(result.activation === "none"
+    ? `调用详情记录未变化：${result.configPath}\n`
+    : `调用详情记录已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
+  writeModelTrafficActivationNotice(output, environment, result);
   return {
     modelTrafficDumpEnabled: enabled,
     configPath: result.configPath,
@@ -177,10 +179,12 @@ async function runModelTrafficRetention({ environment, output, prompts, writeCon
     kind: "system.model-traffic-retention-days",
     value: parsed,
   }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(parsed === 0
+  output.write(result.activation === "none"
+    ? `调用记录保留天数未变化：${result.configPath}\n`
+    : parsed === 0
     ? `调用详情记录按时间自动清理已关闭：${result.configPath}\n`
     : `调用详情记录已设为保留 ${parsed} 天：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  writeModelTrafficActivationNotice(output, environment, result);
   return {
     modelTrafficRetentionDays: parsed,
     configPath: result.configPath,
@@ -420,16 +424,27 @@ async function runAppServerTimezone({ environment, input, output, prompts, write
 
 async function runModelTrafficMode({ environment, output, prompts, writeConfig }) {
   const settings = loadGatewaySettings(environment);
-  const value = await prompts.select({ message: "调用记录模式（Codex 与 Relay 共用）", showInstructions: false,
-    initialValue: settings.system.modelTrafficMode, options: [
-      { value: "production", label: "生产", hint: "精简报文；Codex 使用 3/65536 裁剪参数" },
-      { value: "debug", label: "调试", hint: "Codex 使用 0/0；Relay 增加入站与交付阶段，仍脱敏并限制容量" },
+  const current = settings.system;
+  output.write(`当前调用记录预设：${({ production: "生产", debug: "调试", custom: "自定义" })[current.modelTrafficMode]}（输入项 ${current.modelTrafficInputItems} / 单项字节 ${current.modelTrafficItemMaxBytes}）。\n`);
+  const value = await prompts.select({ message: "选择调用记录预设（覆盖两项裁剪值，不改变日志或开发运行模式）", showInstructions: false,
+    initialValue: current.modelTrafficMode === "custom" ? "back" : current.modelTrafficMode, options: [
+      { value: "production", label: "生产预设", hint: "写入输入项 3 / 单项 65536 字节；Relay 记录出站与上游阶段" },
+      { value: "debug", label: "调试预设", hint: "写入 0/0；Relay 增加入站与交付阶段，仍脱敏并限制容量" },
       { value: "back", label: "返回上一级" },
     ] });
   if (prompts.isCancel(value) || value === "back") return { action: "back" };
   const result = updateGatewaySetting({ kind: "system.model-traffic-mode", value },
     { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`调用记录模式已保存：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  output.write(result.activation === "none"
+    ? `调用记录预设未变化：${result.configPath}\n`
+    : `调用记录预设已保存：${result.configPath}\n`);
+  writeModelTrafficActivationNotice(output, environment, result);
   return { modelTrafficMode: value, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
+}
+
+function writeModelTrafficActivationNotice(output, environment, result) {
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  if (result.activation !== "none") {
+    output.write("调用采集设置：Codex 需重启 App Server；运行中的 Relay 刷新配置后用于新请求，已开始采集的请求沿用开始时的设置。\n");
+  }
 }

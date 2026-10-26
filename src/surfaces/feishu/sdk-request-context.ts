@@ -2,10 +2,27 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 // The SDK drops generated-method options and obtains tokens before business HTTP.
 // Scope the shared HTTP adapter to one invocation, including its authentication.
-const requestSignal = new AsyncLocalStorage<AbortSignal>();
+const requestContext = new AsyncLocalStorage<{ signal: AbortSignal; beforeSend: (() => void) | undefined }>();
+
+/** Keep one output's owner guard across compound upload/create/send operations. */
+export function withFeishuSendGuard<T>(signal: AbortSignal, beforeSend: () => void, request: () => T): T {
+  signal.throwIfAborted();
+  checkFeishuSendGuard(beforeSend);
+  return requestContext.run({ signal, beforeSend }, request);
+}
+
+export function checkFeishuSendGuard(beforeSend?: () => void): void {
+  const result: unknown = beforeSend?.();
+  if (result !== undefined) {
+    void Promise.resolve(result).catch(() => undefined);
+    throw new Error("飞书发送守卫必须同步完成");
+  }
+}
 
 export function feishuSdkRequestSignal(explicit?: AbortSignal | null): AbortSignal | undefined {
-  const scoped = requestSignal.getStore();
+  const context = requestContext.getStore();
+  checkFeishuSendGuard(context?.beforeSend);
+  const scoped = context?.signal;
   return scoped && explicit && scoped !== explicit
     ? AbortSignal.any([scoped, explicit])
     : scoped ?? explicit ?? undefined;
@@ -16,7 +33,15 @@ export async function runFeishuSdkRequest<T>(
   timeoutMs: number,
   timeoutError: Error,
   external?: AbortSignal,
+  beforeSend?: () => void,
 ): Promise<T> {
+  const parent = requestContext.getStore();
+  const guard = (): void => {
+    checkFeishuSendGuard(parent?.beforeSend);
+    checkFeishuSendGuard(beforeSend);
+  };
+  external = parent?.signal && external && parent.signal !== external
+    ? AbortSignal.any([parent.signal, external]) : parent?.signal ?? external;
   const controller = new AbortController();
   let rejectCancellation!: (error: Error) => void;
   const cancellation = new Promise<never>((_resolve, reject) => { rejectCancellation = reject; });
@@ -35,8 +60,9 @@ export async function runFeishuSdkRequest<T>(
   external?.addEventListener("abort", onAbort, { once: true });
   if (external?.aborted) onAbort();
   try {
-    const operation = requestSignal.run(controller.signal, async () => {
+    const operation = requestContext.run({ signal: controller.signal, beforeSend: guard }, async () => {
       controller.signal.throwIfAborted();
+      guard();
       return request();
     });
     return await Promise.race([operation, cancellation]);

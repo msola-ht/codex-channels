@@ -5,7 +5,9 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
 import {
-  isDebugLogLevel,
+  resolveMessageDisplaySettings,
+  identifyMessageDisplayPreset,
+  supportedMessageDisplayFields,
   type GatewayConfig,
 } from "../config/index.js";
 import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
@@ -17,12 +19,14 @@ import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
   WeixinAccessPolicy,
+  QqAccessPolicy,
 } from "../policy/index.js";
 import type { BindingStore } from "../storage/index.js";
 import {
   loadFeishuSurface,
   loadTelegramSurface,
   loadWeixinSurface,
+  loadQqSurface,
   telegramDefaultAccountId,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
@@ -33,6 +37,7 @@ import {
   type SurfaceRuntimeModule,
 } from "./surface-plugin.js";
 import { createProxyFetch } from "./proxy-fetch.js";
+import { createQqNetwork } from "./qq-network.js";
 
 export interface TelegramRuntimeAdapter extends SurfaceAdapter {
   readonly surface: "telegram";
@@ -91,6 +96,10 @@ export async function loadBuiltInSurfacePlugins(
   config: GatewayConfig,
 ): Promise<readonly BuiltInSurfacePlugin[]> {
   const plugins: BuiltInSurfacePlugin[] = [];
+  if (config.qq) {
+    const channel = await loadQqSurface();
+    plugins.push({ id: "qq", create: options => options.config.qq ? [createQqModule(options, channel)] : [] });
+  }
   if (config.telegramEnabled) {
     const channel = await loadTelegramSurface();
     plugins.push({
@@ -116,6 +125,77 @@ export async function loadBuiltInSurfacePlugins(
     });
   }
   return plugins;
+}
+
+function createQqModule(
+  options: SurfacePluginContext,
+  { QqSurface, renderQqStartupNotification, qqConversationRecipient }: Awaited<ReturnType<typeof loadQqSurface>>,
+): SurfaceRuntimeModule {
+  const config = options.config.qq;
+  if (!config) throw new Error("QQ 运行配置不存在");
+  const access = new QqAccessPolicy(config.allowedUserOpenIds, config.appId);
+  const removedBindings = removeUnauthorizedQqBindings(options.bindings, access, config.appId);
+  if (removedBindings > 0) {
+    options.logger.warn({ removedBindings }, "已清理不再授权的 QQ 会话绑定");
+  }
+  let notificationRecipients = new Set(config.allowedUserOpenIds);
+  const displaySettings = (target: ConversationTarget) => {
+    const recipient = qqConversationRecipient(target.conversationId);
+    return resolveMessageDisplaySettings(options.config.messageDisplay, {
+      surface: "qq", accountId: config.appId,
+      chatKind: typeof recipient === "string" ? "direct" : "group",
+      chatId: typeof recipient === "string" ? recipient : recipient.groupOpenId,
+    });
+  };
+  const adapter = new QqSurface({
+    appId: config.appId, appSecret: config.appSecret, access,
+    uploadsDirectory: join(dirname(options.config.stateDatabasePath), "uploads"),
+    service: options.service, commands: options.commands, actors: options.bindings,
+    displaySettings,
+    configurationNotification: { recipients: () => [...notificationRecipients] },
+    startupNotification: {
+      recipients: () => [...notificationRecipients],
+      text: async (target, signal) => {
+        const status = await options.service.statusForDisplay(target, signal);
+        const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
+        return renderQqStartupNotification(options.config.workspaces, status, {
+          platform: process.platform, architecture: process.arch,
+          presentationDetail: displaySettings(target).presentationDetail,
+          displayPreset: identifyMessageDisplayPreset(displaySettings(target), supportedMessageDisplayFields({ surface: "qq", chat_kind: typeof qqConversationRecipient(target.conversationId) === "string" ? "direct" : "group" })),
+          gatewayVersion: options.gatewayVersion, nodeVersion: process.version,
+          transport: "Unix WebSocket", codexUpstreamUserAgent: options.codexUpstreamUserAgent() ?? null,
+          ...(options.config.codexTimezone === undefined ? {} : { appServerTimezone: options.config.codexTimezone }),
+          ...(officialOpenAiAuthenticated === undefined ? {} : { officialOpenAiAuthenticated }),
+          openAiConnectivity: options.openAiConnectivity(),
+        });
+      },
+    },
+    ownsThread: (target, threadId) => {
+      const binding = options.bindings.getByThread(threadId);
+      return binding?.target.surface === target.surface && binding.target.accountId === target.accountId
+        && binding.target.conversationId === target.conversationId;
+    },
+    createNetwork: () => createQqNetwork(options.config.networkProxy),
+    logger: options.logger, onFatal: error => options.onFatal("qq", config.appId, error),
+  });
+  return {
+    adapter,
+    notificationTargets: () => [...notificationRecipients].map(actorId => ({
+      surface: "qq", accountId: config.appId, conversationId: `c2c:${actorId}`,
+    })),
+    applyHotReload(next, changes) {
+      if (changes.some(change => change.code === "surface.qq.allowed-users") && next.qq) {
+        access.replace(next.qq.allowedUserOpenIds);
+        notificationRecipients = new Set(next.qq.allowedUserOpenIds);
+      }
+    },
+    prepareRestartNotification(next) {
+      const previous = notificationRecipients;
+      notificationRecipients = next.qq?.appId === config.appId
+        ? new Set([...previous].filter(id => next.qq!.allowedUserOpenIds.has(id))) : new Set();
+      return () => { notificationRecipients = previous; };
+    },
+  };
 }
 
 function createWeixinModule(
@@ -188,12 +268,19 @@ function createWeixinModule(
               ? {}
               : { officialOpenAiAuthenticated }),
             openAiConnectivity: options.openAiConnectivity(),
-            debugEnabled: isDebugLogLevel(options.config.logLevel),
+            presentationDetail: resolveMessageDisplaySettings(options.config.messageDisplay, {
+              surface: "weixin", accountId: config.accountId, chatKind: "direct", chatId: target.conversationId,
+            }).presentationDetail,
+            displayPreset: identifyMessageDisplayPreset(resolveMessageDisplaySettings(options.config.messageDisplay, {
+              surface: "weixin", accountId: config.accountId, chatKind: "direct", chatId: target.conversationId,
+            }), supportedMessageDisplayFields({ surface: "weixin" })),
           },
         );
       },
     },
-    debugEnabled: isDebugLogLevel(options.config.logLevel),
+    displaySettings: target => resolveMessageDisplaySettings(options.config.messageDisplay, {
+      surface: "weixin", accountId: config.accountId, chatKind: "direct", chatId: target.conversationId,
+    }),
     autoCompactPercent: options.autoCompactPercent,
     fetchImpl: createProxyFetch(options.config.networkProxy),
     logger: options.logger,
@@ -250,10 +337,9 @@ function createFeishuModule(
       "feishu",
     ),
     disableEnvironmentProxy: true,
-    operationUpdateDisplay: options.config.operationUpdateDisplay,
-    planUpdatesEnabled: options.config.planUpdatesEnabled,
-    reasoningEnabled: options.config.reasoningEnabled,
-    debugEnabled: isDebugLogLevel(options.config.logLevel),
+    displaySettings: target => resolveMessageDisplaySettings(options.config.messageDisplay, {
+      surface: "feishu", accountId: config.appId, chatKind: "direct", chatId: target.conversationId,
+    }),
     autoCompactPercent: options.autoCompactPercent,
     ...(openApiAgent
       ? {
@@ -306,7 +392,12 @@ function createFeishuModule(
                   ? {}
                   : { officialOpenAiAuthenticated }),
                 openAiConnectivity: options.openAiConnectivity(),
-                debugEnabled: isDebugLogLevel(options.config.logLevel),
+                presentationDetail: resolveMessageDisplaySettings(options.config.messageDisplay, {
+                  surface: "feishu", accountId: config.appId, chatKind: "direct", chatId,
+                }).presentationDetail,
+                displayPreset: identifyMessageDisplayPreset(resolveMessageDisplaySettings(options.config.messageDisplay, {
+                  surface: "feishu", accountId: config.appId, chatKind: "direct", chatId,
+                })),
               },
             ),
           });
@@ -359,7 +450,7 @@ function createTelegramModule(
     config.telegramAllowedUserIds,
     telegramDefaultAccountId,
   );
-  const adapter = createTelegramSurface({
+  const adapter: ReturnType<typeof createTelegramSurface> = createTelegramSurface({
     token: config.telegramBotToken,
     ...(proxyUrl === undefined ? {} : { proxyUrl }),
     service: options.service,
@@ -373,10 +464,26 @@ function createTelegramModule(
     actorRegistry: bindings,
     onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),
     finalMessageFormat: config.telegramMessageFormat,
-    operationUpdateDisplay: config.operationUpdateDisplay,
-    planUpdatesEnabled: config.planUpdatesEnabled,
-    reasoningEnabled: config.reasoningEnabled,
-    debugEnabled: isDebugLogLevel(config.logLevel),
+    displaySettings: target => {
+      if (adapter.isPrivateConversation(target)) return resolveMessageDisplaySettings(config.messageDisplay, {
+          surface: "telegram", accountId: telegramDefaultAccountId,
+          chatKind: "direct", chatId: target.conversationId,
+        });
+      logger.debug({ surface: "telegram", accountId: target.accountId, conversationId: target.conversationId,
+        reason: "private-chat-unconfirmed" }, "Telegram 可选过程展示等待私聊地址确认");
+      // Unknown historical targets cannot bypass a direct/chat override. Retained
+      // terminal output still renders through the independent durable contract.
+      return { operationUpdates: "hidden", planUpdatesEnabled: false, reasoningEnabled: false, completion: "off", subagentsEnabled: false, presentationDetail: "basic", streamingEnabled: false, commentaryEnabled: false, routineNotificationsEnabled: false };
+    },
+    startupPresentationDetail: chatId => resolveMessageDisplaySettings(config.messageDisplay, {
+      surface: "telegram", accountId: telegramDefaultAccountId, chatKind: "direct", chatId: String(chatId),
+    }).presentationDetail,
+    startupDisplayPreset: chatId => identifyMessageDisplayPreset(resolveMessageDisplaySettings(config.messageDisplay, {
+      surface: "telegram", accountId: telegramDefaultAccountId, chatKind: "direct", chatId: String(chatId),
+    })),
+    startupRoutineNotificationsEnabled: chatId => resolveMessageDisplaySettings(config.messageDisplay, {
+      surface: "telegram", accountId: telegramDefaultAccountId, chatKind: "direct", chatId: String(chatId),
+    }).routineNotificationsEnabled,
     autoCompactPercent: options.autoCompactPercent,
     gatewayVersion: options.gatewayVersion,
     ...(config.codexTimezone === undefined ? {} : { appServerTimezone: config.codexTimezone }),
@@ -497,6 +604,23 @@ function intersectNumberSets(
   right: ReadonlySet<number>,
 ): ReadonlySet<number> {
   return new Set([...left].filter((value) => right.has(value)));
+}
+
+export function removeUnauthorizedQqBindings(
+  bindings: BindingStore,
+  access: QqAccessPolicy,
+  accountId: string,
+): number {
+  let removed = 0;
+  for (const target of bindings.conversations()) {
+    if (target.surface !== "qq" || target.accountId !== accountId) continue;
+    // 停用群功能不删除用户绑定；恢复与投递另由访问策略失败关闭。
+    if (target.conversationId.startsWith("group:")) continue;
+    const allowedActors = new Set(bindings.actors(target).filter(actorId =>
+      access.isAllowed({ target, actorId })));
+    if (bindings.retainActors(target, allowedActors)) removed += 1;
+  }
+  return removed;
 }
 
 export function removeUnauthorizedTelegramBindings(

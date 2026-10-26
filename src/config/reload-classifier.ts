@@ -3,6 +3,7 @@ import {
   type ConfigChange,
 } from "./config-change.js";
 import type { GatewayConfig } from "./index.js";
+import { classifyQqConfigChanges } from "../../runtime/gateway-config.mjs";
 
 export type ConfigReloadResult =
   | { action: "reload"; changes: ConfigChange[] }
@@ -35,9 +36,9 @@ export function classifyConfigReload(
   return { action: "reload", changes: reloadReasons };
 }
 
-/** 操作、计划与推理过程显示设置只由 Telegram 与飞书消费。 */
+/** 操作、计划与推理过程显示设置由 Telegram、飞书及 QQ 消费。 */
 function displaySettingsAffectEnabledSurface(config: GatewayConfig): boolean {
-  return config.telegramEnabled || config.feishu !== undefined;
+  return config.telegramEnabled || config.feishu !== undefined || config.qq !== undefined;
 }
 
 function serviceReinstallReasons(
@@ -101,7 +102,14 @@ function restartRequiredReasons(
       current.idleReleaseMinutes,
       next.idleReleaseMinutes,
     ],
-    // 微信不消费这些显示设置，只启用微信时改它们不需要重启 Gateway。
+    ...(displaySettingsAffectEnabledSurface(current) || displaySettingsAffectEnabledSurface(next)
+      || current.weixin !== undefined || next.weixin !== undefined ? [
+        [configChange("display.completion"), current.messageDisplay.completion ?? "detailed", next.messageDisplay.completion ?? "detailed"],
+        [configChange("display.routine-notifications"), current.messageDisplay.routine_notifications ?? true, next.messageDisplay.routine_notifications ?? true],
+        [configChange("display.presentation-detail"), current.messageDisplay.presentation_detail ?? "basic", next.messageDisplay.presentation_detail ?? "basic"],
+        [configChange("display.overrides"), JSON.stringify(current.messageDisplay.overrides ?? []), JSON.stringify(next.messageDisplay.overrides ?? [])],
+      ] as Array<[ConfigChange, unknown, unknown]> : []),
+    // 微信不消费过程显示字段；完成通知、常规通知与消息详情在上方单独比较。
     ...(displaySettingsAffectEnabledSurface(current)
       || displaySettingsAffectEnabledSurface(next)
       ? [
@@ -119,6 +127,21 @@ function restartRequiredReasons(
             configChange("display.reasoning"),
             current.reasoningEnabled,
             next.reasoningEnabled,
+          ],
+          [
+            configChange("display.subagents"),
+            current.messageDisplay.subagents ?? true,
+            next.messageDisplay.subagents ?? true,
+          ],
+          [
+            configChange("display.streaming"),
+            current.messageDisplay.streaming ?? true,
+            next.messageDisplay.streaming ?? true,
+          ],
+          [
+            configChange("display.commentary"),
+            current.messageDisplay.commentary ?? true,
+            next.messageDisplay.commentary ?? true,
           ],
         ] as Array<[ConfigChange, unknown, unknown]>
       : []),
@@ -165,6 +188,9 @@ function restartRequiredReasons(
     )
   ) {
     reasons.push(configChange("surface.weixin.allowed-users", "weixin"));
+  }
+  for (const change of classifyQqConfigChanges(current.qq, next.qq)) {
+    if (change.restart) reasons.push(configChange(`surface.qq.${change.kind}`, "qq"));
   }
   if (!preservesExistingWorkspaces(current.workspaces, next.workspaces)) {
     reasons.push(configChange("workspace.registry"));
@@ -225,6 +251,9 @@ function hotReloadReasons(
     )
   ) {
     reasons.push(configChange("surface.weixin.allowed-users", "weixin"));
+  }
+  for (const change of classifyQqConfigChanges(current.qq, next.qq)) {
+    if (!change.restart) reasons.push(configChange(`surface.qq.${change.kind}`, "qq"));
   }
   return reasons;
 }
