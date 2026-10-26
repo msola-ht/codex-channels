@@ -31,7 +31,7 @@ export interface QqInteractionOptions {
   authorize(target: ConversationTarget, request: InteractionRequest): (() => boolean) | undefined;
   prepareAsyncAnswer(target: ConversationTarget, request: Extract<InteractionRequest, { type: "user-input" }>, message: QqMessageInput): boolean;
   send(target: ConversationTarget, content: string, controls: { content: string; keyboard: QqCommandKeyboard; markdownContent?: string },
-    signal: AbortSignal, current: () => boolean, request: InteractionRequest): Promise<void>;
+    signal: AbortSignal, current: () => boolean): Promise<void>;
 }
 
 /** Disposable presentation and response tokens; shared Approval owns decisions and routing. */
@@ -173,7 +173,7 @@ export class QqInteractions implements InteractionPort {
       if (!this.valid(pending)) throw new Error("QQ 交互失效");
       const panel = render(pending, token);
       await this.options.send(pending.target, panel.content, panel.controls, this.pending.signal(token),
-        () => this.pending.get(token) === pending && this.valid(pending), pending.request);
+        () => this.pending.get(token) === pending && this.valid(pending));
       if (this.pending.get(token) !== pending || !this.valid(pending)) throw new Error("QQ 交互失效");
       pending.ready = true;
       this.options.logger.info({ requestId: pending.requestId, requestType: pending.request.type }, "QQ 交互完整展示已确认，回应入口就绪");

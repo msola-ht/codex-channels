@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { QqProtocolError } from "./protocol.js";
-import { qqRecipientKey, type QqRecipient } from "./addressing.js";
+import { qqRecipientKey } from "./addressing.js";
 
 const RESULT_HEADROOM = 8;
 const STATUS_HEADROOM = 2;
@@ -13,7 +13,7 @@ export class QqSendBudget {
   private account: number[] = [];
   private readonly turns = new Map<string, { text: number; status: number; progress: number; until: number }>();
 
-  reserve(destination: QqRecipient, parts: number, scope?: { key: string; status: boolean; progress?: boolean } | "startup" | "interaction" | "critical-interaction", planTimeoutMs = 45_000): {
+  reserve(destination: string, parts: number, scope?: { key: string; status: boolean; progress?: boolean } | "startup" | "interaction" | "critical-interaction", planTimeoutMs = 45_000): {
     runPart<T extends { messageId: string }>(signal: AbortSignal, send: () => Promise<T>): Promise<T>;
   } {
     const recipient = qqRecipientKey(destination);

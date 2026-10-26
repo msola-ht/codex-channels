@@ -132,7 +132,7 @@ import {
   metricsWorkerFailureMetadata,
   modelRequestMetricsDatabasePath,
 } from "../observability/index.js";
-import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy, QqAccessPolicy, parseQqGroupConversationId } from "../policy/index.js";
+import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy, QqAccessPolicy } from "../policy/index.js";
 import {
   SessionRouter,
   ThreadStateSynchronizer,
@@ -897,7 +897,7 @@ export abstract class GatewayComponentGraph {
         isBindingRestoring: (threadId) => this.isBindingRestoring(threadId),
         listForegroundBindings: () =>
           this.router.allBindings().filter(
-            (binding) => !this.router.isBackgroundThread(binding.threadId) && !this.isSuspendedQqGroup(binding.target),
+            (binding) => !this.router.isBackgroundThread(binding.threadId) && !this.isUnsupportedQqTarget(binding.target),
           ),
         idleState: (target) => this.router.idleState(target),
         ensureIdleState: (target, atMs) =>
@@ -923,11 +923,12 @@ export abstract class GatewayComponentGraph {
         },
       });
       this.output.subscribe("conversation-idle-activity", (event) => {
+        if (this.isUnsupportedQqTarget(event.target)) return;
         this.router.touchActivity(event.target, Date.now());
       });
     }
     this.output.subscribe("conversation-background-release", async (event) => {
-      if (this.isSuspendedQqGroup(event.target)) return;
+      if (this.isUnsupportedQqTarget(event.target)) return;
       const threadId = event.type === "turn.completed"
         ? event.threadId
         : event.type === "subagent.completed"
@@ -1053,7 +1054,7 @@ export abstract class GatewayComponentGraph {
     this.scheduledTasks = config.scheduledTasksEnabled
       ? new ScheduledTaskComposition({
           stateDatabasePath: config.stateDatabasePath,
-          canReleaseBinding: task => !this.isSuspendedQqGroup(task),
+          canReleaseBinding: task => !this.isUnsupportedQqTarget(task),
           registerConstructionCleanup,
           releaseRecoveredThread: (threadId, isCurrent) => service.releaseBackgroundIfComplete(threadId, {
             dispatchQueued: false, isCurrent,
@@ -1119,10 +1120,12 @@ export abstract class GatewayComponentGraph {
       if (target.surface !== "qq" && target.surface !== "feishu" && target.surface !== "telegram" && target.surface !== "weixin") {
         throw new UserFacingError("command.authorization-changed", "当前渠道不支持状态展示");
       }
-      const group = target.surface === "qq" ? parseQqGroupConversationId(target.conversationId) : undefined;
-      const chatId = group?.groupOpenId ?? (target.surface === "qq" && target.conversationId.startsWith("c2c:")
-        ? target.conversationId.slice(4) : target.conversationId);
-      const selector = { surface: target.surface, account_id: target.accountId, chat_kind: group ? "group" : "direct", chat_id: chatId } as const;
+      if (this.isUnsupportedQqTarget(target)) {
+        throw new UserFacingError("command.authorization-changed", "当前 QQ 会话类型不受支持");
+      }
+      const chatId = target.surface === "qq" && target.conversationId.startsWith("c2c:")
+        ? target.conversationId.slice(4) : target.conversationId;
+      const selector = { surface: target.surface, account_id: target.accountId, chat_kind: "direct", chat_id: chatId } as const;
       const inspected = inspectMessageDisplayScope(this.config.messageDisplay, selector);
       const fields = supportedMessageDisplayFields(selector);
       return { preset: identifyMessageDisplayPreset(inspected.settings, fields), sources: [...new Set(messageDisplayFields.filter(([field]) => fields.includes(field)).map(([, key]) => inspected.sources[key]))] };
@@ -1366,7 +1369,7 @@ export abstract class GatewayComponentGraph {
       isBackgroundThread: (threadId) => this.router.isBackgroundThread(threadId),
       retryBackgroundRelease: (threadId, trigger) => {
         const target = this.bindings.getByThread(threadId)?.target;
-        if (target && this.isSuspendedQqGroup(target)) return;
+        if (target && this.isUnsupportedQqTarget(target)) return;
         void this.trackQueueLifecycleTask(() => service.retryPendingBackgroundRelease(threadId,
           () => !this.stopping && !this.isBindingRestoring(threadId)))
           .catch(async (error) => {
@@ -1506,7 +1509,7 @@ export abstract class GatewayComponentGraph {
       router: this.router,
       output: this.output,
       enabledSurfaces: () => this.surfaces.filter(surface => !surface.connectionOnly && surface.capabilities?.recoverBindings !== false),
-      canRestoreBinding: binding => !this.isSuspendedQqGroup(binding.target),
+      canRestoreBinding: binding => !this.isUnsupportedQqTarget(binding.target),
       scheduledRecovery: () => this.scheduledTasks?.coordinator,
       releaseBackground: async (threadId, isCurrent) =>
         await this.trackQueueLifecycleTask(() =>
@@ -2048,7 +2051,7 @@ export abstract class GatewayComponentGraph {
       || ![source.generation, source.sourceToken, source.accountId]
         .every(field => typeof field === "string" && field.length > 0 && Buffer.byteLength(field) <= 512)
       || typeof source.conversationId !== "string" || !source.conversationId
-      || (Buffer.byteLength(source.conversationId) > 512 && !parseQqGroupConversationId(source.conversationId))
+      || Buffer.byteLength(source.conversationId) > 512 || this.isUnsupportedQqTarget(event.target)
       || source.accountId !== event.target.accountId || source.conversationId !== event.target.conversationId) return undefined;
     if (source.kind === "notification") {
       if (source.threadId !== ("threadId" in event ? event.threadId ?? null : null)
@@ -2172,8 +2175,8 @@ export abstract class GatewayComponentGraph {
       : undefined;
   }
 
-  private isSuspendedQqGroup(target: Pick<ConversationTarget, "surface" | "conversationId">): boolean {
-    return target.surface === "qq" && target.conversationId.startsWith("group:");
+  private isUnsupportedQqTarget(target: Pick<ConversationTarget, "surface" | "conversationId">): boolean {
+    return target.surface === "qq" && (!target.conversationId.startsWith("c2c:") || target.conversationId.length <= 4);
   }
 
   private shutdownComponents(): Promise<void> {

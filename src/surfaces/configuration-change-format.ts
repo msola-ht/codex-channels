@@ -172,7 +172,6 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "surface.qq.account": "QQ 应用账号",
     "surface.qq.credentials": "QQ 应用凭据",
     "surface.qq.allowed-users": "QQ 允许用户",
-    "surface.qq.groups": "QQ 群及群成员公开输出授权",
   };
   return labels[code];
 }

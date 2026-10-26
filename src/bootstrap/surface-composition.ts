@@ -143,8 +143,8 @@ function createQqModule(
     const recipient = qqConversationRecipient(target.conversationId);
     return resolveMessageDisplaySettings(options.config.messageDisplay, {
       surface: "qq", accountId: config.appId,
-      chatKind: typeof recipient === "string" ? "direct" : "group",
-      chatId: typeof recipient === "string" ? recipient : recipient.groupOpenId,
+      chatKind: "direct",
+      chatId: recipient,
     });
   };
   const adapter = new QqSurface({
@@ -161,7 +161,7 @@ function createQqModule(
         return renderQqStartupNotification(options.config.workspaces, status, {
           platform: process.platform, architecture: process.arch,
           presentationDetail: displaySettings(target).presentationDetail,
-          displayPreset: identifyMessageDisplayPreset(displaySettings(target), supportedMessageDisplayFields({ surface: "qq", chat_kind: typeof qqConversationRecipient(target.conversationId) === "string" ? "direct" : "group" })),
+          displayPreset: identifyMessageDisplayPreset(displaySettings(target), supportedMessageDisplayFields({ surface: "qq", chat_kind: "direct" })),
           gatewayVersion: options.gatewayVersion, nodeVersion: process.version,
           transport: "Unix WebSocket", codexUpstreamUserAgent: options.codexUpstreamUserAgent() ?? null,
           ...(options.config.codexTimezone === undefined ? {} : { appServerTimezone: options.config.codexTimezone }),
@@ -614,8 +614,8 @@ export function removeUnauthorizedQqBindings(
   let removed = 0;
   for (const target of bindings.conversations()) {
     if (target.surface !== "qq" || target.accountId !== accountId) continue;
-    // 停用群功能不删除用户绑定；恢复与投递另由访问策略失败关闭。
-    if (target.conversationId.startsWith("group:")) continue;
+    // Unsupported targets are neither migrated nor deleted by single-chat authorization cleanup.
+    if (!target.conversationId.startsWith("c2c:") || target.conversationId.length <= 4) continue;
     const allowedActors = new Set(bindings.actors(target).filter(actorId =>
       access.isAllowed({ target, actorId })));
     if (bindings.retainActors(target, allowedActors)) removed += 1;

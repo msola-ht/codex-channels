@@ -22,13 +22,13 @@ enabled = false
 # allowed_user_ids = ["不透明用户@im.wechat"]
 
 [qq]
-# QQ 单聊可通过 codexc setup 扫码或手工配置；群功能暂停开发并关闭。
+# QQ 仅支持单聊，可通过 codexc setup 扫码或手工配置。
 # 空单聊允许名单不会授权单聊用户；用户 OpenID 必须来自同一 QQ 应用。
 enabled = false
 # app_id = "1234567890"
 # app_secret = "你的_QQ_AppSecret"
 # allowed_user_openids = ["当前应用下的用户_OpenID"]
-# 已有 qq.groups 配置仅保留，不授予群输入、输出、审批或任务权限；无需删除配置。
+# 不支持 qq.groups；含该字段的配置会明确报错，不自动改写。
 
 # 共享网络代理通过 codexc config 写入 ~/.codex/.env，不在 Gateway TOML 中保存。
 
@@ -83,15 +83,15 @@ operation_updates = "compact"
 # subagents = true
 # 可选流式显示，缺省 true，不自动写入；仅控制 Telegram、飞书与 QQ 单聊的正文增量预览。
 # 不改变上游模型流式、思考状态、完整正文、附件、授权或原窗口和交付义务。
-# 微信和 QQ 群覆盖严格拒绝 streaming（true/false）；QQ 渠道、账号层只作用其单聊。
+# 微信覆盖严格拒绝 streaming（true/false）；QQ 渠道、账号层只作用其单聊。
 # streaming = true
-# 可选过程说明，缺省 true，不自动写入；Telegram、飞书和 QQ（含已支持群）支持。
+# 可选过程说明，缺省 true，不自动写入；Telegram、飞书和 QQ 单聊支持。
 # 关闭只隐藏明确 phase=commentary 的新过程说明，不控制 reasoning 或原始推理。
 # 未知阶段增量暂不预览，待明确 final_answer 或完整消息再展示；未知阶段完整正文保留。
 # 已准入正文流与已有 pending 按原义务收尾；微信本来不展示 commentary，拒绝该覆盖。
 # commentary = true
 
-# 四渠道（含微信和 QQ 群）常规生命周期与成功提示，缺省开启且不自动写入。
+# 四渠道单聊常规生命周期与成功提示，缺省开启且不自动写入。
 # 关闭不影响失败、拒绝、停止、重试、账号与额度、OAuth、需用户动作、正文附件、审批和命令回执。
 # 启动鉴权/健康异常、持久 Workspace 新增回执与已有待投递义务保留；支持同名五层覆盖。
 # 任一启用渠道的有效值变化需重启 Gateway；回退旧版前显式清除全局及覆盖字段，不自动迁移。
@@ -109,13 +109,13 @@ reasoning = false
 # presentation_detail = "basic"
 # 可选范围覆盖，普通读取不会生成。通过 codexc config 的“范围显示覆盖”或 WebUI 管理。
 # 全局 → 渠道 → 账号 → 账号聊天类型 → 指定聊天，字段缺失继承，false/hidden 保留。
-# surface 支持 telegram、feishu、qq、weixin；微信允许 completion/presentation_detail，chat_kind=group 仅 QQ。
+# surface 支持 telegram、feishu、qq、weixin；微信允许 completion/presentation_detail/routine_notifications；chat_kind 仅支持 direct。
 # account_id 使用 Gateway 账号标识：Telegram 为 default，飞书/QQ 为 AppID，微信为配置的 account_id。
 # [[display.overrides]]
 # surface = "qq"
 # account_id = "123456"
-# chat_kind = "group"
-# chat_id = "物理群OpenID"
+# chat_kind = "direct"
+# chat_id = "当前应用下的用户_OpenID"
 # operation_updates = "hidden"
 # subagents = false
 # plan_updates = false

@@ -4,7 +4,6 @@ import type { QqInboundTextMessage } from "./inbound.js";
 export interface QqButtonInput {
   readonly kind: "interaction";
   readonly id: string;
-  readonly eventId?: string;
   readonly actorId: string;
   readonly conversationId: string;
   readonly content: string;
@@ -14,4 +13,4 @@ export interface QqButtonInput {
 
 export type QqMessageInput = QqInboundTextMessage | QqButtonInput;
 export type QqSourceInput = Pick<QqInboundTextMessage, "id" | "actorId" | "conversationId" | "msgIdx" | "sentAtMs">
-  | Pick<QqButtonInput, "kind" | "id" | "eventId" | "actorId" | "conversationId" | "sentAtMs">;
+  | Pick<QqButtonInput, "kind" | "id" | "actorId" | "conversationId" | "sentAtMs">;

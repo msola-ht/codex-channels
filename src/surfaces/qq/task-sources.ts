@@ -42,7 +42,7 @@ interface Entry {
   readonly targetKey: string;
   readonly scope: Readonly<QqTaskScope>;
   readonly message: Readonly<{ kind: "text"; id: string; msgIdx: string; sentAtMs: number }
-    | { kind: "interaction"; id: string; eventId?: string; sentAtMs: number }
+    | { kind: "interaction"; id: string; sentAtMs: number }
     | { kind: "scheduled"; id: string; actorId: string }>;
   readonly expectedThreadId?: string;
   readonly receivedAt: number;
@@ -87,7 +87,7 @@ export class QqTaskSources {
     if (preparationMs !== PREPARATION_MS && preparationMs !== 120_000) return { kind: "rejected", reason: "invalid-input" };
     const receivedAt = performance.now();
     const original = Object.freeze("kind" in message
-      ? { kind: "interaction" as const, id: message.id, ...(message.eventId === undefined ? {} : { eventId: message.eventId }), actorId: message.actorId, sentAtMs: message.sentAtMs }
+      ? { kind: "interaction" as const, id: message.id, actorId: message.actorId, sentAtMs: message.sentAtMs }
       : { kind: "text" as const, id: message.id, actorId: message.actorId, msgIdx: message.msgIdx, sentAtMs: message.sentAtMs });
     const wall = Date.now();
     if (wall < this.lastWall) this.clockUnsafe = true;
@@ -207,22 +207,6 @@ export class QqTaskSources {
     if (!entry) return undefined;
     return entry.source && entry.source !== entry
       ? AbortSignal.any([entry.controller.signal, entry.source.controller.signal]) : entry.controller.signal;
-  }
-
-  /** Original inbound anchor only, never a newer message or renewed reply window. */
-  replyReference(reference: QqTaskSourceReference): string | undefined {
-    if (!this.isCurrent(reference)) return undefined;
-    const message = this.resolve(reference)!.message;
-    return message.kind === "text" ? message.msgIdx : undefined;
-  }
-
-  /** Passive streaming keeps its own incoming-message ID and expiry. */
-  replyAnchor(reference: QqTaskSourceReference): import("./protocol.js").QqReplyAnchor | undefined {
-    if (!this.isCurrent(reference)) return undefined;
-    const message = this.resolve(reference)!.message;
-    if (message.kind === "scheduled") return undefined;
-    if (message.kind === "text") return { messageId: message.id, sourceTimestampMs: message.sentAtMs };
-    return message.eventId ? { eventId: message.eventId, sourceTimestampMs: message.sentAtMs } : undefined;
   }
 
   streamSource(reference: QqTaskSourceReference): { messageId: string; sourceTimestampMs: number; signal: AbortSignal } | undefined {

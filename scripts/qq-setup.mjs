@@ -24,7 +24,7 @@ export async function runQqSetup({
   const prompt = prompter ?? createChannelPrompter(input, output);
   try {
     output.write("\n通讯渠道 · QQ 接入\n\n");
-    output.write("单聊仅允许独立名单；启用后允许用户的普通单聊文字会提交 Codex。群功能暂停，已有群配置保留但不生效，不提供群配对或编辑入口。\n");
+    output.write("单聊仅允许独立名单；启用后允许用户的普通单聊文字会提交 Codex。QQ 仅支持单聊。\n");
     const mode = await prompt.select("选择 QQ 操作", [
       { value: "scan", label: "手机 QQ 扫码连接（推荐）", hint: "获取应用凭据和本次扫码用户 OpenID" },
       { value: "manual", label: "手工填写应用凭据和 OpenID" },
@@ -36,7 +36,7 @@ export async function runQqSetup({
       const { runQqMenuSetup } = await import("./qq-menu-setup.mjs");
       return await runQqMenuSetup({ environment, output, prompter: prompt });
     }
-    if (mode !== "scan" && mode !== "manual") throw new Error("不支持的 QQ 接入方式；群功能已暂停");
+    if (mode !== "scan" && mode !== "manual") throw new Error("不支持的 QQ 接入方式");
     const { configPath } = requireUserConfig(environment);
     // 保留读取时的源修订，由现有原子写入器拒绝确认期间的任何并发修改。
     const document = readGatewayConfig(configPath);
@@ -45,12 +45,11 @@ export async function runQqSetup({
     let appId;
     let appSecret;
     let allowedUserOpenids;
-    const groups = initialDocument.qq?.groups;
     let enabled;
     if (mode === "scan") {
       output.write("扫码将通过腾讯官方 Connector 连接机器人；请在手机 QQ 页面确认机器人与授权。\n");
       output.write("此步骤直连 q.qq.com，不使用共享代理；最多等待五分钟，按 Esc/Ctrl+C 取消。\n");
-      output.write("最终确认后替换应用凭据和单聊名单，仅授权本次扫码用户单聊；已有群配置原样保留且不生效。扫码不能证明群或群成员身份。\n");
+      output.write("最终确认后替换应用凭据和单聊名单，仅授权本次扫码用户单聊。\n");
       output.write("取消本地保存不会撤销手机端已完成的授权。扫码完成不代表消息收发已验证。\n");
       if (!await prompt.confirm("开始 QQ 扫码连接？", true)) return undefined;
       const result = await scanQq({ input, output, registerApplication, renderQRCode });
@@ -89,7 +88,6 @@ export async function runQqSetup({
       app_id: appId,
       app_secret: appSecret,
       allowed_user_openids: allowedUserOpenids,
-      ...(groups === undefined ? {} : { groups }),
     };
     validateGatewayConfigStructureDocument(document);
     output.write("\n准备保存 QQ 配置（替换凭据和单聊允许名单）：\n");
@@ -97,7 +95,6 @@ export async function runQqSetup({
     output.write(`- 传输：WebSocket 单聊\n- 应用凭据：${mode === "scan" ? "扫码取得" : "已填写"}（内容已隐藏，收发尚未验证）\n`);
     output.write(`- 允许用户：${allowedUserOpenids.length} 个（内容已隐藏）\n`);
     if (allowedUserOpenids.length === 0) output.write("- 单聊空名单：拒绝所有单聊用户输入。\n");
-    output.write(`- 群功能：暂停；保留已有 ${groups?.length ?? 0} 个群配置，不授予群权限。\n`);
     if (!await prompt.confirm("确认保存以上配置？", false)) {
       output.write("未保存 QQ 配置。\n");
       return undefined;
@@ -133,10 +130,6 @@ export async function runQqSetup({
     output.write("QQ 账号能力尚未验证；运行 codexc doctor 查看只读配置状态。\n");
     const runtimeAccount = value => value?.enabled === true ? {
       appId: value.app_id, appSecret: value.app_secret, allowedUserOpenIds: value.allowed_user_openids,
-      ...(value.groups === undefined ? {} : { groups: value.groups.map(group => ({
-        groupOpenId: group.group_openid, allowedMemberOpenIds: group.allowed_member_openids,
-        allowPublicOutput: group.allow_public_output,
-      })) }),
     } : undefined;
     const changes = classifyQqConfigChanges(runtimeAccount(initialDocument.qq), runtimeAccount(document.qq));
     const activation = changes.some(change => change.restart) ? "restart-gateway"
@@ -169,7 +162,6 @@ function writeVerificationSteps(output, enabled, allowedUserCount) {
   if (allowedUserCount === 0) {
     output.write("QQ 单聊当前没有允许用户；所有单聊输入均拒绝。\n");
   }
-  output.write("QQ 群功能已暂停；已有群配置及会话数据保留，不会授权群输入或输出。\n");
   output.write("下一步：按激活要求启动或重启 Gateway，用 codexc logs gateway -n 100 核对 QQ 连接状态。\n");
   output.write("先发送 /help、/workspace 和 /model 核对，再提交普通文字任务。连接就绪不代表任务送达；重启不恢复旧结果发送资格。\n");
 }
