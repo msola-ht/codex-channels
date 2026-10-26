@@ -11,6 +11,7 @@ export const modelBaseCommandUsage = `用法：codexc model-base [status [--json
   update             获取候选，显示字段前后差异，长内容可展开，终端确认后保存
   update --preview   只获取并对比，不保存底座；--json 输出完整差异
 
+更新须先通过 codex login 登录 ChatGPT；未登录时继续使用现有底座（默认随项目附带）。
 使用当前 Codex 环境的 codex debug models，取输出的第一个模型；可能联网或更新 CLI 缓存，
 不保证获取远端最新目录。保存到 Gateway 数据目录，保留旧快照备份，不修改安装包文件。
 已有账户模型须另行使用“对比并更新模型模板”；不会自动重启服务。`;

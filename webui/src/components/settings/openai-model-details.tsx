@@ -39,7 +39,7 @@ export function OpenAiModelDetails({ model, revision, open, loading, onClose, on
         {model && <code className="break-all text-xs text-muted-foreground">{provider ?? "openai"} · {model.model}</code>}
       </SheetHeader>
       <div className="flex flex-col gap-6 px-4 pb-6">
-        {loading ? <Skeleton className="h-40 w-full" /> : !stale && model && revision && open ? <Tabs key={JSON.stringify([provider, model.model, revision])} defaultValue="capabilities">
+        {loading && model === null ? <Skeleton className="h-40 w-full" /> : !stale && model && revision && open ? <Tabs key={JSON.stringify([provider, model.model, revision])} defaultValue="capabilities">
           <TabsList><TabsTrigger value="capabilities">{t("openAiModelPrompts.capabilities")}</TabsTrigger><TabsTrigger value="prompts">{t("openAiModelPrompts.title")}</TabsTrigger></TabsList>
           <TabsContent value="capabilities" className="flex flex-col gap-6">{model.declaredCapabilities === undefined ? null : <DeclaredModelCapabilities capabilities={model.declaredCapabilities} />}<ModelDetailFields details={model.details} sidebar /></TabsContent>
           <TabsContent value="prompts"><OpenAiModelPrompts model={model.model} revision={revision} provider={provider} onReload={onReload} /></TabsContent>

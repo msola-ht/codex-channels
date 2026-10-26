@@ -1,4 +1,5 @@
-export type ModelBaseErrorCode = "invalid_input" | "invalid_catalog" | "unavailable" | "stale_revision" | "export_failed" | "write_failed" | "busy";
+export type ModelBaseErrorCode = "invalid_input" | "invalid_catalog" | "unavailable" | "stale_revision" | "export_failed" | "write_failed" | "busy" | "login_required";
+export function assertModelBaseLogin(binary: string, environment?: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<void>;
 export class ModelBaseError extends Error { readonly code: ModelBaseErrorCode; readonly reason?: string; constructor(code: ModelBaseErrorCode, reason?: string, options?: ErrorOptions) }
 export interface ModelBaseSummary { model: string; cliVersion: string; command: string }
 export interface ModelBaseState extends ModelBaseSummary { revision: string; source: "bundled" | "saved" }

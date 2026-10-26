@@ -104,7 +104,7 @@ function ProviderSettingsCard({
   const [selectedModel, setSelectedModel] = useState<{ provider: string; model: string; revision: string } | null>(null)
   const selectedCatalog = settings.modelCatalogs.find(catalog => catalog.provider === selectedModel?.provider)
   const detailsStale = selectedModel !== null && selectedCatalog?.revision !== selectedModel.revision
-  const detailModel = !catalogReadOnly && !management.loading && management.error === null && !detailsStale
+  const detailModel = management.error === null && !detailsStale
     ? selectedCatalog?.models.find(entry => entry.id === selectedModel?.model)?.presentation ?? null : null
   const [editorRevision, setEditorRevision] = useState<string | null>(null)
   const [originalModelCount, setOriginalModelCount] = useState(0)
@@ -357,7 +357,7 @@ function ProviderSettingsCard({
       id: `provider:${catalog.provider}`,
       header: <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1"><div className="flex flex-wrap items-center gap-2"><h3 tabIndex={-1} ref={node => { const key = JSON.stringify([catalog.provider]); if (node) actionTargets.current.set(key, node); else actionTargets.current.delete(key) }} className="font-medium">{catalog.displayName}</h3><Badge variant="outline">{t(catalog.source === "managed" ? "modelCatalog.sourceManaged" : catalog.source === "custom" ? "modelCatalog.sourceCustom" : "modelCatalog.sourceOfficial")}</Badge>
-          {!catalogReadOnly && !management.loading && management.error === null && !management.readbackRequired && defaults.map(value => <span key={value.id} className="flex flex-wrap items-center gap-2">
+          {management.error === null && defaults.map(value => <span key={value.id} className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">{defaults.length > 1 ? `${value.id} · ` : ""}{t("managementUi.defaultModel")}: {catalog.models.find(model => model.id === value.model)?.displayName ?? value.model ?? t("customModel.unset")}</Badge>
             <Badge variant="secondary">{defaults.length > 1 ? `${value.id} · ` : ""}{t("managementUi.reasoning")}: {value.reasoning || t("customModel.unset")}</Badge>
           </span>)}
@@ -375,7 +375,7 @@ function ProviderSettingsCard({
       </div>,
       models: catalog.models.map(entry => ({ ...entry.presentation, isDefault: entry.isDefault })),
       webSearchSettings: settings.webSearchSettings.filter(entry => catalog.providers.includes(entry.provider)),
-      webSearchState: management.loading ? "loading" : management.error !== null ? "error" : undefined,
+      webSearchState: management.error !== null ? "error" : undefined,
       onSelect: model => setSelectedModel({ provider: catalog.provider, model: model.model, revision: catalog.revision }),
       renderAction: model => {
         const blockedReason = catalog.models.find(entry => entry.id === model.model)?.removalBlockedReason

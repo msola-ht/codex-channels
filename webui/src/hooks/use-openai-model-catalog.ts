@@ -49,7 +49,7 @@ export function useOpenAiModelCatalog() {
   const value = draft !== null && /^[1-9]\d*$/u.test(draft.value) ? Number(draft.value) : NaN
   const valid = draft !== null && validContextWindow(draft.value, 1, draft.maxContextWindow)
   const stale = draft !== null && management.data !== null && (draft.revision !== management.data.revision || draft.scope !== management.data.scope)
-  const changedModels = management.data === null || management.loading || management.error !== null ? [] : tracking.edits
+  const changedModels = management.data === null || management.error !== null ? [] : tracking.edits
     .filter(edit => edit.scope === management.data?.scope && management.data.models.find(model => model.model === edit.model)?.contextWindow !== edit.contextWindow)
     .map(edit => edit.model)
   const startEdit = (model: OpenAiModelCatalogResponse["models"][number]) => {

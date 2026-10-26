@@ -16,6 +16,7 @@ const errors = {
   export_failed: [503, "Codex 目录导出或校验失败，请检查 CLI、配置与认证"],
   write_failed: [500, "底座保存结果未确认，请重新读取并核对备份，勿直接重试"],
   busy: [409, "公共底座更新正在进行，请稍后重试"],
+  login_required: [403, "更新公共底座需要先通过 codex login 登录 ChatGPT；未登录时继续使用现有底座"],
 };
 
 export async function routeModelBaseManagement({ environment, maximumBodyBytes, path, principalId, request, response, state }) {

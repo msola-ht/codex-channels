@@ -37,6 +37,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   base_models_export_failed: "baseModel.exportFailed",
   base_models_write_failed: "baseModel.writeFailed",
   base_models_busy: "baseModel.busy",
+  base_models_login_required: "baseModel.loginRequired",
   "rename-not-supported": "modelCatalog.renameReadOnly",
   "invalid-display-name": "modelCatalog.renameInvalid",
   "addition-source-expired": "modelAddition.expired",

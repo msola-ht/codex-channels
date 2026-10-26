@@ -6,6 +6,7 @@ import type { DisplayLanguage } from "../format"
  */
 const zh = {
   baseModel: {
+    loginRequired: "更新公共底座需要先在服务端通过 codex login 登录 ChatGPT。未登录时不导出或保存底座，继续使用现有底座（默认随项目附带）。",
     title: "公共模型底座", hint: "供添加模型与更新模型模板使用的公共基础模板。",
     version: "Codex {version}", cliVersion: "Codex 版本", bundled: "来源：随安装附带", savedSource: "来源：本地已保存",
     fetch: "获取候选并对比", fetching: "正在获取候选…",
@@ -1984,6 +1985,7 @@ export type Messages = typeof zh
 
 const en: Messages = {
   baseModel: {
+    loginRequired: "Updating the base requires signing in to ChatGPT with codex login on the server. Without a confirmed login, the base is neither exported nor saved; the existing base remains in use (bundled with the project by default).",
     title: "Shared model base", hint: "The shared base template used when adding models or updating model templates.",
     version: "Codex {version}", cliVersion: "Codex version", bundled: "Source: bundled with installation", savedSource: "Source: saved locally",
     fetch: "Fetch candidate and compare", fetching: "Fetching candidate…",
