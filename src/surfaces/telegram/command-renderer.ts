@@ -79,10 +79,7 @@ export async function renderTelegramCommandResult(
       );
       return;
     case "status":
-      await panel(formatStatus(result.status, result), {
-        inline_keyboard: [[{ text: result.view === "detail" ? "返回总览" : "查看详情",
-          callback_data: result.view === "detail" ? "status:overview" : "status:detail" }]],
-      });
+      await panel(formatStatus(result.status, result));
       return;
     case "workspaces":
       await panel(

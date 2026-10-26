@@ -6,11 +6,12 @@ import {
 import {
   type ThreadGoal,
   type ThreadApprovalsReviewer,
+  usesOpenAiAccount,
 } from "../conversation-core/index.js";
 
-import { accountQuotaFields, formatPercent } from "./account-format.js";
+import { formatPercent } from "./account-format.js";
 import { formatCodexProviderLabel, formatServiceTierSetting } from "./provider-format.js";
-import { formatCacheHitRate, formatTokenCount } from "./token-format.js";
+import { formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
@@ -133,112 +134,52 @@ export function formatThreadApprovalsReviewer(reviewer: ThreadApprovalsReviewer 
 export function formatConversationStatus(
   status: ConversationStatus,
   formatLiteral: (value: string) => string = value => value,
-  options: { view?: "overview" | "detail"; display?: ConversationStatusDisplay } = {},
+  options: { display?: ConversationStatusDisplay } = {},
 ): string {
-  const detailed = options.view === "detail";
   // Values are metadata, never Markdown structure. Channel escaping happens once here.
   const literal = (value: string): string => formatLiteral(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
   const field = (label: string, value: string): string => `- ${label}：${literal(value)}`;
+  const taskState = !status.threadId ? "尚未绑定" : status.sessionRestoring ? "尚未恢复" : status.turnId ? "运行中" : "空闲";
+  const setting = (value: string): string => status.sessionRestoring ? "尚未恢复" : value;
   const lines = [
-    detailed ? "## Codex 状态详情" : "## Codex 状态",
-    "",
-    "### 当前会话",
+    "## Codex 状态",
     "",
     field("工作区", status.workspaceName === status.workspaceId ? status.workspaceName : `${status.workspaceName} (${status.workspaceId})`),
-    field("会话", status.threadId ? status.threadName ?? "未命名" : "尚未绑定"),
-    ...(detailed && status.threadId ? [field("Session ID", status.threadId)] : []),
-    field("任务状态", !status.threadId ? "尚未绑定会话" : status.sessionRestoring ? "会话尚未恢复" : status.turnId ? "运行中" : "空闲"),
-    ...(detailed && status.threadId && !status.sessionRestoring && status.turnId ? [field("Turn ID", status.turnId)] : []),
-    "",
-    "### 模型与执行设置",
-    "",
-    field("模型", status.sessionRestoring ? "尚未恢复" : `${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`),
-    field("提供商", status.sessionRestoring ? "尚未恢复" : status.modelProvider === undefined ? "待选择" : formatCodexProviderLabel(status.modelProvider)),
-    field(reasoningEffortSettingName(status.effort), status.sessionRestoring ? "尚未恢复" : `${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""}`),
-    field("速度", status.sessionRestoring ? "尚未恢复" : status.threadId || status.fastModePending ? formatServiceTierSetting(status) : "未知"),
-    field("协作模式", status.sessionRestoring ? "尚未恢复" : `${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`),
-    field("审批方式", status.sessionRestoring ? "尚未恢复" : status.threadId ? formatThreadApprovalsReviewer(status.approvalsReviewer) : "尚未绑定会话"),
+    field("会话", status.threadId ? `${status.threadName ?? "未命名"} · ${taskState}` : taskState),
+    field("模型", setting(`${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""} · ${status.modelProvider === undefined ? "提供商待选择" : formatCodexProviderLabel(status.modelProvider)}`)),
+    field("执行设置", setting(`${reasoningEffortSettingName(status.effort)}：${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""} · 速度：${status.threadId || status.fastModePending ? formatServiceTierSetting(status) : "未知"}`)),
+    field("协作与审批", setting(`${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""} · ${status.threadId ? formatThreadApprovalsReviewer(status.approvalsReviewer) : "尚未绑定会话"}`)),
   ];
   if (options.display) {
     const presets = { concise: "静默", standard: "紧凑", detailed: "详细", full: "完整", custom: "自定义" };
-    const sources: Record<string, string> = { global: "全局", surface: "渠道", account: "账号", "chat-kind": "聊天类型", chat: "当前聊天" };
-    lines.push("", "### 消息展示", "", field("有效模式", presets[options.display.preset]),
-      field("设置来源", [...new Set(options.display.sources)].map(source => sources[source] ?? "未知").join("、") || "未知"));
+    lines.push(field("消息模式", presets[options.display.preset]));
   }
-  if (detailed) lines.push("", "### 执行目录", "", field("工作区目录", status.cwd), field("Git 分支", status.gitBranch ?? "未检测到"));
-  if (!detailed && status.threadId) {
-    if (!status.executionContext) lines.push("", "执行目录尚未由 App Server 确认，可查看状态详情。");
-    else if (status.executionContext.cwd !== status.cwd) lines.push("", field("执行目录与工作区不同", status.executionContext.cwd));
-  }
-  if (detailed && status.threadId) {
-    const context = status.executionContext;
-    if (!context) {
-      lines.push("", "尚未取得有效的 App Server 执行上下文（可能正在恢复），不使用工作区目录代替。");
-    } else {
-      lines.push(field("最近确认目录", context.cwd === status.cwd ? "与工作区目录一致（App Server 已确认）" : context.cwd));
-      if (context.workspaceRootsSnapshot.cwd === context.cwd
-        && context.workspaceRootsSnapshot.roots.length === 1
-        && context.workspaceRootsSnapshot.roots[0] === context.cwd) {
-        lines.push("- 运行目录：仅上述最近确认目录");
-      } else {
-        if (context.workspaceRootsSnapshot.cwd !== context.cwd) {
-          lines.push(field("快照对应目录", context.workspaceRootsSnapshot.cwd));
-        }
-        if (context.workspaceRootsSnapshot.roots.length === 0) {
-          lines.push("- 运行目录：App Server 返回的列表为空");
-        } else {
-          lines.push("- 运行目录：", ...context.workspaceRootsSnapshot.roots.map((path, index) => `  ${field(`目录 ${index + 1}`, path)}`));
-        }
-      }
-      lines.push("", "运行目录取最近一次新建、恢复或派生的加载快照，不是实时权限清单。");
-    }
-    lines.push("", "### 规则来源", "", "最近一次新建、恢复或派生的加载快照，不代表文件当前的实时加载情况。", "");
-    if (status.instructionSources === undefined) {
-      lines.push("尚未取得 App Server 加载清单");
-    } else if (status.instructionSources.length === 0) {
-      lines.push("App Server 返回的规则文件清单为空（不代表没有其他规则）");
-    } else {
-      lines.push(...status.instructionSources.map((path, index) => field(`文件 ${index + 1}`, path)));
-    }
-  }
-  if (status.goal) {
-    lines.push(
-      "", "### 当前目标", "",
-      field("目标", status.goal.objective),
-      field("状态", formatGoalStatus(status.goal.status)),
-      field("用量", formatGoalUsage(status.goal)),
-    );
-  }
-  lines.push("", "### 上下文与用量", "");
   if (status.tokenUsage) {
     const { total, last, modelContextWindow } = status.tokenUsage;
     lines.push(
       `- 上下文：${formatTokenCount(last.totalTokens)}${modelContextWindow !== null && modelContextWindow > 0 ? ` / ${formatTokenCount(modelContextWindow)}（${formatPercent(Math.max(0, last.totalTokens / modelContextWindow * 100))}）` : "（窗口上限未知）"}`,
       `- 累计 Token：${formatTokenCount(total.totalTokens)}`,
-      ...(detailed ? [
-      `- 累计输入：${formatTokenCount(total.inputTokens)}`,
-      `  - 缓存输入：${formatTokenCount(total.cachedInputTokens)}`,
-      `  - 非缓存输入：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
-      ...(total.cacheWriteInputTokens > 0
-        ? [`- 缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
-        : []),
-      `- 累计输出：${formatTokenCount(total.outputTokens)}`,
-      ...(total.reasoningOutputTokens > 0
-        ? [`  - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`]
-        : []),
-      ] : []),
-      `- 缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
     );
   } else {
-    lines.push(status.threadId ? "等待 App Server 推送统计。" : "尚未绑定会话，暂无会话用量。", "");
+    lines.push(field("上下文", status.threadId ? "等待 App Server 推送统计" : "尚未绑定会话，暂无用量"));
   }
-  if (status.contextCompactionCount !== undefined) {
-    lines.push(`- 上下文压缩：${status.contextCompactionCount} 次`);
+  if (status.goal) lines.push(field("目标状态", `${formatGoalStatus(status.goal.status)} · /goal`));
+  if (status.threadId) {
+    if (!status.executionContext) lines.push(field("执行目录", "尚未由 App Server 确认"));
+    else if (status.executionContext.cwd !== status.cwd) lines.push(field("执行目录与工作区不同", status.executionContext.cwd));
   }
-  const quota = accountQuotaFields(status);
-  if (quota.length) lines.push("", "### 当前账户额度", "", ...quota.map(entry => `- ${literal(entry.label)}：${entry.value.split("\n").map((line, index) => index === 0 ? literal(line) : `  - ${literal(line.replace(/^\s*-\s*/u, ""))}`).join("\n")}`));
-  else if (status.accountStatusUnavailable) lines.push("", "### 当前账户额度", "", "本次未能取得账户额度，请稍后重新查询。");
-  lines.push("", detailed ? "返回总览：/status" : "查看详情：/status detail", "统计明细：/metrics");
+  const account = status.accountStatus?.provider === status.modelProvider ? status.accountStatus : undefined;
+  const exhausted = usesOpenAiAccount(status.modelProvider)
+    ? (status.weeklyLimit?.usedPercent ?? 0) >= 100
+    : account?.windows.some(window => window.usedPercent >= 100);
+  if (exhausted) lines.push(field("额度提示", "有额度窗口已用尽，请用 /limits 查看"));
+  if (!usesOpenAiAccount(status.modelProvider) && account) {
+    const nonpositive = (value: string): boolean => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) <= 0;
+    if (account.balances.some(balance => nonpositive(balance.remaining))) lines.push(field("余额提示", "存在余额不足的币种，请用 /usage 查看"));
+    if (account.credits !== undefined && nonpositive(account.credits)) lines.push(field("额度提示", "账户剩余额度不足，请用 /limits 查看"));
+  }
+  if (status.accountStatusUnavailable) lines.push(field("额度提示", "本次未能取得账户额度，请用 /usage 或 /limits 重查"));
+  lines.push("", "请求统计：/metrics · 账户额度：/usage /limits");
   return lines.join("\n").trimEnd();
 }
 
@@ -261,29 +202,8 @@ function formatGoalStatus(status: ThreadGoal["status"]): string {
   }
 }
 
-function formatGoalUsage(goal: ThreadGoal): string {
-  const tokens = goal.tokenBudget === null
-    ? formatTokenCount(goal.tokensUsed)
-    : `${formatTokenCount(goal.tokensUsed)} / ${formatTokenCount(goal.tokenBudget)}`;
-  return `${tokens} · ${formatDuration(goal.timeUsedSeconds)}`;
-}
-
 function formatGoalTokens(goal: ThreadGoal): string {
   return goal.tokenBudget === null
     ? formatTokenCount(goal.tokensUsed)
     : `${formatTokenCount(goal.tokensUsed)} / ${formatTokenCount(goal.tokenBudget)}`;
-}
-
-function formatDuration(seconds: number): string {
-  const wholeSeconds = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(wholeSeconds / 3_600);
-  const minutes = Math.floor(wholeSeconds % 3_600 / 60);
-  const remainder = wholeSeconds % 60;
-  return [
-    ...(hours > 0 ? [`${hours}小时`] : []),
-    ...(minutes > 0 ? [`${minutes}分`] : []),
-    ...(remainder > 0 || (hours === 0 && minutes === 0)
-      ? [`${remainder}秒`]
-      : []),
-  ].join("");
 }

@@ -60,7 +60,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
-  `/status` 和 `/status detail` 分别返回概览与详情视图，拒绝其他参数；显示预设和来源由组合根通过窄回调注入，不在 Application 解析渠道配置。
+  `/status` 只返回一份当前会话状态，拒绝所有参数；有效显示预设由组合根通过窄回调注入，不在 Application 解析渠道配置，也不再携带详情视图或显示来源字段。
   只有主动状态命令显式请求账户富化；上线通知复用的 `statusForDisplay` 缺省不增加供应商账户请求。
   命令和模型/审批按钮必须传原 Actor，由组合根注入当前 Surface 账号策略；缺少授权实现失败关闭。
   Queue 命令把当前 Workspace 作用域的授权闭包传到锁、选择器和最终请求边界，拒绝后不自动撤销已提交写入。

@@ -93,7 +93,6 @@ import {
   inspectMessageDisplayScope,
   identifyMessageDisplayPreset,
   supportedMessageDisplayFields,
-  messageDisplayFields,
   type ConfigChange,
   type ConfigReloadResult,
   type GatewayConfig,
@@ -1128,7 +1127,7 @@ export abstract class GatewayComponentGraph {
       const selector = { surface: target.surface, account_id: target.accountId, chat_kind: "direct", chat_id: chatId } as const;
       const inspected = inspectMessageDisplayScope(this.config.messageDisplay, selector);
       const fields = supportedMessageDisplayFields(selector);
-      return { preset: identifyMessageDisplayPreset(inspected.settings, fields), sources: [...new Set(messageDisplayFields.filter(([field]) => fields.includes(field)).map(([, key]) => inspected.sources[key]))] };
+      return { preset: identifyMessageDisplayPreset(inspected.settings, fields) };
     });
     const constructedSurfaces = new Set<SurfaceAdapter>();
     this.surfaceModules = createSurfaceModules({
