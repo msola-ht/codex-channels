@@ -25,6 +25,7 @@ import {
   isHiddenAutoApprovalReview,
   shouldHideTurnCompleted,
   renderPlainLifecyclePresentation,
+  renderStructuredLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
   contentTruncatedText,
@@ -226,7 +227,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     if (event.type === "turn.started") {
       this.enqueueText(
         event.target,
-        renderPlainLifecyclePresentation(
+        renderStructuredLifecyclePresentation(
           createTurnStartedPresentation(
             event.background ? event.threadId : undefined,
             event.identity,

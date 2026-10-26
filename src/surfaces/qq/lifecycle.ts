@@ -68,8 +68,8 @@ export function renderQqTurnCompleted(
 export function renderQqTurnStarted(
   event: Extract<OutputEvent, { type: "turn.started" }>,
 ): { text: string; markdown: string } {
-  const presentation = { ...createTurnStartedPresentation(
+  const presentation = createTurnStartedPresentation(
     event.background ? event.threadId : undefined, event.identity, event.approvalsReviewer, event,
-  ), titleStyle: "emphasis" as const };
+  );
   return { text: renderPlainLifecyclePresentation(presentation), markdown: renderStructuredLifecyclePresentation(presentation) };
 }

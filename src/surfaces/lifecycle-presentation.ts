@@ -279,7 +279,8 @@ export function createTurnStartedPresentation(
       ? turnStartIdentityTitle(identity)
       : backgroundThreadId
         ? "后台任务继续处理中。"
-        : "已开始处理。",
+        : "已开始处理",
+    titleStyle: "emphasis",
     fields: [
       { label: "工作区", value: (workspace?.workspaceName ?? workspace?.workspaceId ?? "未知").replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true },
       ...(workspace?.gitBranch ? [{ label: "Git 分支", value: workspace.gitBranch.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true }] : []),
@@ -771,9 +772,10 @@ export function renderStructuredLifecyclePresentation(
   presentation: LifecyclePresentation,
   escapeLiterals = true,
 ): string {
+  const title = escapeLiterals ? escapeLifecycleLiteral(presentation.title) : presentation.title;
   return toStructuredMarkdownList([
-    presentation.titleDetail === undefined ? (presentation.titleStyle === "emphasis" ? `**${presentation.title}**` : presentation.title)
-      : `**${presentation.title}** · ${escapeLiterals ? escapeLifecycleLiteral(presentation.titleDetail) : presentation.titleDetail}`,
+    presentation.titleDetail === undefined ? (presentation.titleStyle === "emphasis" ? `**${title}**` : title)
+      : `**${title}** · ${escapeLiterals ? escapeLifecycleLiteral(presentation.titleDetail) : presentation.titleDetail}`,
     ...(presentation.fields.length > 0
       ? ["", ...presentation.fields.map((field) => formatStructuredField(field, escapeLiterals))]
       : []),

@@ -84,9 +84,15 @@ export function formatStartupNotification(
 export function renderTelegramLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
-  const { footer, ...rest } = presentation;
+  const { footer, titleStyle, ...rest } = presentation;
   // sendPanel performs HTML escaping; Markdown escapes would become visible text.
-  const body = renderStructuredLifecyclePresentation(rest, false);
+  // Use an unambiguous whole-line heading for typed emphasis. A literal name
+  // containing "** · " must not be parsed as a title/detail delimiter.
+  const body = renderStructuredLifecyclePresentation({
+    ...rest,
+    title: titleStyle === "emphasis" && rest.titleDetail === undefined
+      ? `## ${rest.title}` : rest.title,
+  }, false);
   return footer === undefined
     ? body
     : `${body}\n\n${footer.label}：${footer.value}`;

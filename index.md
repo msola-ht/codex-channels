@@ -11,7 +11,7 @@
 - [`provider-model-catalog.json`](provider-model-catalog.json)：OCG/CCG 基于 DS 目录扩展 V4.1 的模型 ID 与显示名映射。
 - [`startup-network-policy.json`](startup-network-policy.json)：首次网络探测与启动恢复的时限、退避参数。
 - [`docs/display.md`](docs/display.md)：渠道展示口径、`/metrics` 命令与调试模式说明。
-- [`docs/message-display-unification-plan.md`](docs/message-display-unification-plan.md)：全渠道单群聊消息显示统一的分批计划、关联风险、反例与审查进度。
+- [`docs/message-display-unification-plan.md`](docs/message-display-unification-plan.md)：四渠道共享呈现与平台渲染的 R1–R6 逐批计划、首批改动、读码发现及开放验收记录。
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换、网页搜索能力与运行统计。
 - [`docs/archive/deepseek-upload-remediation.md`](docs/archive/deepseek-upload-remediation.md)：历史记录，DeepSeek 图片上传调用身份、运行实例一致性、材料 Worker 的关联修复、独立复查与隔离观察。
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
@@ -80,6 +80,8 @@
 ## 历史审查与研究记录
 
 以下记录保留原基线、结论及未观察限制；其中的旧执行顺序不是当前开发流程，重新使用证据前须确认适用范围。
+
+- [`docs/archive/message-display-policy-unification.md`](docs/archive/message-display-policy-unification.md)：显示策略统一 P0–P5 的历史方案、交付提交及复审/观察证据；旧群范围和阶段用语仅对应原基线，当前开放项与验收边界由活动计划维护。
 
 - [`docs/archive/thread-execution-context-plan.md`](docs/archive/thread-execution-context-plan.md)：Thread 执行上下文投影与渠道诊断的早期分批开发、独立审查和历史观察；后续证据见当前验收记录。
 

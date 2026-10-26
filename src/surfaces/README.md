@@ -52,7 +52,7 @@ Telegram 使用已有 HTML 字段值转义，不把 roots 描述为实时权限�
 `/autoreview [on|off]` 查询或切换当前已绑定 Thread，统一结果由共享格式化器呈现；飞书命令中心与
 Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌。
 平台只提交结构化选择，Application 在锁内复核 Thread 与空闲状态，确认权威设置后才返回更新成功。
-三个渠道共用 `lifecycle-presentation.ts` 仅在自动审批完成后呈现结果与结构化内容摘要；Client 提供经脱敏和限长的纯文本，Telegram HTML 面板与飞书 Markdown 呈现边界转义字面字段，微信纯文本保留字符原样；通知经共享关键投递路径发送，不生成审批交互。
+四渠道共用 `lifecycle-presentation.ts` 仅在自动审批完成后呈现结果与结构化内容摘要；Client 提供经脱敏和限长的文本，Telegram HTML 面板与飞书/QQ Markdown 呈现边界处理字面字段。微信当前自动审批仍经普通字符串及字段转换，客户端会解析 Markdown，不保证字面格式保真；该差异登记在[呈现对齐计划](../../docs/message-display-unification-plan.md#已核对的开放项) F3。通知经共享关键投递路径发送，不生成审批交互。
 普通状态与生命周期卡只在 Thread 权威设置启用自动审批时显示审批方式，完成卡的自动审批统计也受此条件约束；专用查询与设置入口保留完整状态和操作回执。
 
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片、一次性音频、UTF-8 文本文件和生命周期。
@@ -211,8 +211,8 @@ Conversation，旧会话完成不能删除新会话已登记的回复目标。�
 同一个按完整 Conversation 与 Turn 隔离并在完成时释放的进度状态，飞书保留原地更新卡片所需的平台消息状态并核对接收会话；微信不展示
 结构化计划，其回复窗口只保留生命周期、终态与全局空闲通知。各渠道只决定完整计划是原地更新还是
 追加紧凑进度。
-`lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认、子代理
-开始/继续/完成通知、Hook 完成提示和 Turn 结束汇报；Hook 按上游完成通知展示安全状态摘要，经三渠道内存投递，微信将其纳入回复窗口预算，不写入持久输出日志。OpenAI 启动传输探测全部失败时，上线通知增加代理检查提醒，
+`lifecycle-presentation.ts` 向 Telegram、飞书、微信和 QQ 提供 Gateway 上线、Turn 开始确认、子代理
+开始/继续/完成通知、Hook 完成提示和 Turn 结束汇报的共享结构；具体事件仍按渠道能力准入，微信不开放子代理过程通知。Hook 按上游完成通知展示安全状态摘要，经四渠道内存投递，微信将其纳入回复窗口预算，不写入持久输出日志。OpenAI 启动传输探测全部失败时，上线通知增加代理检查提醒，
 官方主路由缺少鉴权时增加未登录提示和 `codex login` 或 `/model` 的操作建议，不显示目标地址或
 底层错误；飞书和微信仍只通知已有安全会话。完成卡片对 `unauthorized` 按 OpenAI 官方与其他
 Provider 分别生成固定凭据提示，不展示上游原文。完成通知在 `basic` 下保留状态、上下文、可用耗时及必要异常；`brief` 不增加耗时。
@@ -221,7 +221,8 @@ Provider 分别生成固定凭据提示，不展示上游原文。完成通知�
 不混入父 Turn 自身统计；失败后成功的可恢复请求保留“自动重试、最终成功”语义，错误、后台身份、Goal 及仍运行子代理保留。
 基础子代理完成仅名称和状态，详细子代理保留模型设置、请求数、Token 总计和缓存命中率，不展开 Token 分项。
 四渠道上线和完成通知在所有呈现档位（含 `brief`）保留工作区与已取得的 Git 分支；缺少分支隐藏整行，完成工作区优先名称、其次 ID，均缺失时显示“未知”。详细上线保留会话摘要及工作目录、Session ID、协作模式，不再自动展开系统/UA等环境字段。未绑定或尚未恢复时不展示默认模型冒充当前设置。
-“已开始处理”和后台继续处理通知也从 `turn.started` 接收任务工作区与 Git 分支，四渠道沿共享格式显示；缺少工作区采用相同占位，缺少分支隐藏整行，原常规通知准入保持独立。
+“已开始处理”和后台继续处理的共享内容从 `turn.started` 接收任务工作区与 Git 分支；缺少工作区采用相同占位，缺少分支隐藏整行，原常规通知准入保持独立。飞书已准入的开始回执统一经 Markdown 发送路径处理可选回复目标，独立于可变 Session 状态卡，后续状态更新不覆盖开始字段。
+开始通知的 `titleStyle` 由共享层设置为加粗正文；飞书、QQ、微信消费共享结构化 Markdown，Telegram 在发送时转为 HTML。动态标题在 Markdown 边界转义，Telegram 保留原字面值后做 HTML 转义。QQ 不另设标题样式，微信不再把开始字段拼成仅靠软换行分隔的普通段落。
 自动审批通过的详细呈现保留来源、动作、操作和理由摘要；失败及人工审批必要详情不裁剪。正文、指标采集与主动状态/指标查询不变。
 原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示
 OpenAI 周限；速度区分用户选择与生命周期确认的有效设置，设置通知只显示“已选”并将有效档位标为未知，
@@ -322,7 +323,7 @@ Telegram、飞书和 QQ 收到仅含 `fileId`、没有 `savedPath` 的原生图�
 微信仍按回复窗口策略忽略这类操作事件，不新增引用结果通知。
 `SurfaceAdapter.sendChannelImage` 是可选的渠道图片发送入口，由 Gateway 的
 `channel-image-spool` 驱动，复用 `generated-image.ts` 的读取校验和各自平台上传发送；
-三个 Surface 都实现该入口，微信按目标 Conversation 复用其回复上下文与授权检查。
+四个 Surface 都实现该入口，微信按目标 Conversation 复用其回复上下文与授权检查。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Bootstrap 注入的 Application `ConversationCommandExecutor`；Surface 只保留普通输入、状态或菜单实际需要的能力切片，并负责提取命令名、参数和渲染类型化结果。
