@@ -8,10 +8,21 @@ import { QQ_TEXT_PART_BYTES, QQ_MENU_PART_BYTES, QQ_PASSIVE_WINDOW_MS, QQ_RESULT
 import { planQqBodyMarkdown, planQqMessageMarkdown } from "./message-markdown.js";
 import { qqRecipientKey } from "./addressing.js";
 import { layoutQqKeyboard } from "./command-menu.js";
+import { qqLiteralSegments } from "./literal-segments.js";
+import { surfaceDiagnosticContext } from "../diagnostics.js";
+import { QqBudgetError, qqBudgetDiagnostics, type QqSendReservation } from "./send-budget.js";
 
 const MAX_PARTS = 8;
 const PLAN_TIMEOUT_MS = 45_000;
-const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Runs after account scheduling but before any checkpoint or protocol call. */
+function guardBeforeDispatch(guard: () => undefined): void {
+  try { guard(); }
+  catch (error) {
+    throw new QqTextSendError("not-sent", error instanceof QqProtocolError
+      ? error : new QqProtocolError("message", "authorization"));
+  }
+}
 
 /** Proof applies to this Outbox call, not to an earlier streaming preview. */
 class QqDeliveryAttempt {
@@ -37,13 +48,18 @@ export class QqTextOutbox {
   private readonly lifetime = new AbortController();
   private readonly queue: ConversationDeliveryQueue;
 
-  constructor(private readonly client: Pick<QqProtocolClient, "sendText" | "sendResultFile" | "sendMarkdown" | "sendImage" | "sendMarkdownImage" | "sendFile">, logger: Logger) {
+  constructor(private readonly client: Pick<QqProtocolClient, "sendText" | "sendResultFile" | "sendMarkdown" | "sendImage" | "sendMarkdownImage" | "sendFile">, private readonly logger: Logger) {
     this.queue = new ConversationDeliveryQueue(logger, {
       component: "QqTextOutbox", capacity: 128, maximumPendingOperations: 128,
       drainOnClose: false,
-      errorMetadata: error => error instanceof QqProtocolError
-        ? { reason: error.reason, operation: error.operation, httpStatus: error.httpStatus, businessCode: error.bizCode }
-        : { reason: "output-failed" },
+      errorMetadata: error => {
+        const failure = error instanceof SurfaceDeliveryNotSentError ? error.cause : error;
+        return failure instanceof QqProtocolError
+          ? { reason: failure.reason, operation: failure.operation, httpStatus: failure.httpStatus, ...qqBudgetDiagnostics(failure),
+            businessCode: failure.bizCode,
+            ...(failure instanceof QqTextSendError ? { outcome: failure.outcome, rejection: failure.rejection } : {}) }
+          : { reason: "output-failed" };
+      },
     });
   }
 
@@ -52,9 +68,8 @@ export class QqTextOutbox {
     input: QqTextMessage,
     context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; markdownContent?: string; markdownStart?: number; keyboard?: QqCommandKeyboard; allowResultFile?: boolean;
       interactionControls?: { content: string; keyboard: QqCommandKeyboard; markdownContent?: string };
-      reserve?(parts: number): {
-      runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }>;
-    } },
+      reserve?(parts: number): QqSendReservation;
+      reserveAfterWait?(parts: number, signal: AbortSignal): Promise<QqSendReservation> },
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>,
   ): Promise<void> {
     const attempt = new QqDeliveryAttempt();
@@ -63,6 +78,20 @@ export class QqTextOutbox {
     const signal = AbortSignal.any([context.signal, controller.signal, this.lifetime.signal]);
     const beforeSend = context.beforeSend;
     let passiveDeadline: number | undefined;
+    let queued = false;
+    let reservation: QqSendReservation | undefined;
+    const reserve = async (parts: number): Promise<QqSendReservation | undefined> => {
+      try { return context.reserve?.(parts); }
+      catch (error) {
+        if (!(error instanceof QqBudgetError) || error.budgetScope !== "recipient-minute" || !context.reserveAfterWait) throw error;
+        try { return await context.reserveAfterWait(parts, signal); }
+        catch (waitingError) {
+          this.logger.warn({ ...surfaceDiagnosticContext(), component: "QqTextOutbox", stage: "budget-wait",
+            ...qqBudgetDiagnostics(error), reason: signal.aborted ? "cancelled" : "output-failed" }, "QQ 分钟额度等待结束，仍未取得发送预约");
+          throw waitingError;
+        }
+      }
+    };
     const checkTime = () => {
       if (performance.now() >= deadline) throw new QqProtocolError("message", "timeout");
       if (passiveDeadline !== undefined && performance.now() >= passiveDeadline) throw new QqProtocolError("message", "expired");
@@ -125,9 +154,9 @@ export class QqTextOutbox {
         const formatted = bodyMarkdown ? planQqBodyMarkdown(input, context.markdownStart)
           : planQqMessageMarkdown(context.markdownContent === undefined ? input : { ...input, content: context.markdownContent })
             ?.map(message => ({ message, markdown: true }));
-        // Notifications keep their existing text-plan quota. Body Markdown
-        // selects up to eight larger parts before any text/file attempt.
-        if (formatted && (bodyMarkdown || formatted.length <= parts.length)) {
+        // Prefer whole-message Markdown only when it does not add bubbles to
+        // a valid text plan; a file fallback may become up to eight body parts.
+        if (formatted && (file || formatted.length <= parts.length)) {
           parts = formatted.map(part => part.message);
           markdownParts = formatted.map(part => part.markdown);
           file = false;
@@ -170,20 +199,21 @@ export class QqTextOutbox {
         passiveDeadline = performance.now() + QQ_PASSIVE_WINDOW_MS - age;
       }
       guard();
-      let reservation: ReturnType<NonNullable<typeof context.reserve>> | undefined;
       try { reservation = context.reserve?.(parts.length); }
       catch (error) {
-        if (!(error instanceof QqProtocolError) || error.reason !== "budget" || !context.allowResultFile
-          || input.mode !== "active" || parts.length <= 1
-          || Buffer.byteLength(input.content) > QQ_RESULT_FILE_BYTES) throw error;
-        // No request has started. Preserve the complete original content in a
-        // single file when the remaining rolling budget cannot fit all parts.
-        file = true;
-        parts = [{ ...input }];
-        markdownParts = undefined;
-        markdown = false;
-        reservation = context.reserve?.(1);
+        if (!(error instanceof QqProtocolError) || error.reason !== "budget") throw error;
+        if (context.allowResultFile
+          && input.mode === "active" && parts.length > 1 && Buffer.byteLength(input.content) <= QQ_RESULT_FILE_BYTES) {
+          // No request has started. Prefer one complete file before waiting
+          // for capacity; never change representation after a request begins.
+          file = true;
+          parts = [{ ...input }];
+          markdownParts = undefined;
+          markdown = false;
+        }
+        reservation = await reserve(parts.length);
       }
+      guard();
       await captureDelivery(() => {
         const accepted = this.queue.enqueue(qqRecipientKey(parts[0]!.recipient), async active => {
           const receipt = DeliveryReceipt.current()!;
@@ -203,26 +233,37 @@ export class QqTextOutbox {
                 ? this.client.sendMarkdown(outgoing, { signal: active, beforeSend: guard, ...(bodyMarkdown ? { body: true as const } : {}) },
                   keyboard ? layoutQqKeyboard(keyboard) : undefined)
               : this.client.sendText(outgoing, { signal: active, beforeSend: guard }));
-            await checkpointDelivery(file ? "qq-result-file" : controls ? "qq-interaction-controls" : partMarkdown
+            const checkpointed = () => checkpointDelivery(file ? "qq-result-file" : controls ? "qq-interaction-controls" : partMarkdown
               ? parts.length === 1 ? "qq-markdown" : `qq-markdown:${index + 1}/${parts.length}`
               : `qq-text:${index + 1}/${parts.length}`,
-              () => reservation ? reservation.runPart(active, send) : send(),
+              () => send(),
               error => error instanceof QqTextSendError && (error.outcome === "rejected" || (file && error.outcome === "not-sent")));
+            await (reservation ? reservation.runPart(active, () => { guardBeforeDispatch(guard); return checkpointed(); }) : checkpointed());
           }
           receipt.confirmCompleteContent();
         }, true, { signal });
+        queued = accepted;
         if (!accepted) throw new Error("QQ 输出未进入共享投递队列");
       }, signal, checkpoint, { requireConfirmation: true });
-    } catch (error) { throw attempt.failure(error); }
+    } catch (error) {
+      // Queue diagnostics cannot observe planning, guards or reservations
+      // which fail before enqueue. Preserve their controlled cause here.
+      if (!queued) this.logger.warn({ ...surfaceDiagnosticContext(), component: "QqTextOutbox", stage: "preparation",
+        ...(error instanceof QqProtocolError ? { reason: error.reason, operation: error.operation, ...qqBudgetDiagnostics(error) } : { reason: "output-failed" }),
+      }, "QQ 消息发送前准备失败，未进入发送队列");
+      throw attempt.failure(error);
+    }
     finally {
       clearTimeout(timer);
       controller.abort();
+      reservation?.release();
     }
   }
 
   /** Images share the same conversation ordering and durable receipt contract as text. */
   async deliverImage(recipient: string, path: string, context: QqTextSendContext & {
-    reserve(): { runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }> };
+    reserve(): QqSendReservation;
+    reserveAfterWait?(parts: number, signal: AbortSignal): Promise<QqSendReservation>;
   }, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, format?: "markdown"): Promise<void> {
     const attempt = new QqDeliveryAttempt();
     try {
@@ -243,12 +284,24 @@ export class QqTextOutbox {
           guard();
           const image = await readGeneratedImage(path, QQ_IMAGE_BYTES);
           guard();
-          const reservation = context.reserve();
+          let reservation: QqSendReservation;
+          try { reservation = context.reserve(); }
+          catch (error) {
+            if (!(error instanceof QqBudgetError) || error.budgetScope !== "recipient-minute" || !context.reserveAfterWait) throw error;
+            try { reservation = await context.reserveAfterWait(1, active); }
+            catch (waitingError) {
+              this.logger.warn({ ...surfaceDiagnosticContext(), component: "QqTextOutbox", stage: "budget-wait",
+                ...qqBudgetDiagnostics(error), reason: active.aborted ? "cancelled" : "output-failed" }, "QQ 分钟额度等待结束，仍未取得发送预约");
+              throw waitingError;
+            }
+          }
           const send = format === "markdown" ? this.client.sendMarkdownImage.bind(this.client) : this.client.sendImage.bind(this.client);
-          await checkpointDelivery("qq-image", () => reservation.runPart(active, () => attempt.send(() => send({ recipient,
-            bytes: image.bytes, contentType: image.format === "jpeg" ? "image/jpeg" : "image/png",
-          }, { signal: active, beforeSend: guard }))), error => error instanceof QqTextSendError && error.outcome !== "unknown");
-          DeliveryReceipt.current()!.confirmCompleteContent();
+          try {
+            await reservation.runPart(active, () => { guardBeforeDispatch(guard); return checkpointDelivery("qq-image", () => attempt.send(() => send({ recipient,
+              bytes: image.bytes, contentType: image.format === "jpeg" ? "image/jpeg" : "image/png",
+            }, { signal: active, beforeSend: guard })), error => error instanceof QqTextSendError && error.outcome !== "unknown"); });
+            DeliveryReceipt.current()!.confirmCompleteContent();
+          } finally { reservation.release(); }
         }, true, { signal });
         if (!accepted) throw new Error("QQ 图片未进入共享投递队列");
       }, signal, checkpoint, { requireConfirmation: true });
@@ -257,7 +310,7 @@ export class QqTextOutbox {
 
   /** Same queue, one active-message reservation and one confirmed receipt as an image. */
   async deliverFile(recipient: string, path: string, fileName: string, context: QqTextSendContext & {
-    reserve(): { runPart(signal: AbortSignal, send: () => Promise<{ messageId: string }>): Promise<{ messageId: string }> };
+    reserve(): QqSendReservation;
   }, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, mediaType: ChannelFileMediaType = "file"): Promise<void> {
     const attempt = new QqDeliveryAttempt();
     try {
@@ -283,10 +336,12 @@ export class QqTextOutbox {
           assertChannelMediaBytes(bytes, mediaType);
           guard();
           const reservation = context.reserve();
-          await checkpointDelivery("qq-file", () => reservation.runPart(active, () => attempt.send(() => this.client.sendFile({ recipient,
-            bytes, fileName, mediaType,
-          }, { signal: active, beforeSend: guard }))), error => error instanceof QqTextSendError && error.outcome !== "unknown");
-          DeliveryReceipt.current()!.confirmCompleteContent();
+          try {
+            await reservation.runPart(active, () => { guardBeforeDispatch(guard); return checkpointDelivery("qq-file", () => attempt.send(() => this.client.sendFile({ recipient,
+              bytes, fileName, mediaType,
+            }, { signal: active, beforeSend: guard })), error => error instanceof QqTextSendError && error.outcome !== "unknown"); });
+            DeliveryReceipt.current()!.confirmCompleteContent();
+          } finally { reservation.release(); }
         }, true, { signal });
         if (!accepted) throw new Error("QQ 文件未进入共享投递队列");
       }, signal, checkpoint, { requireConfirmation: true });
@@ -315,7 +370,7 @@ export function planText(input: QqTextMessage, partBytes = QQ_TEXT_PART_BYTES): 
     const budget = partBytes - Buffer.byteLength("[1/8]\n");
     let chunk = "";
     let bytes = 0;
-    for (const { segment } of segmenter.segment(text)) {
+    for (const segment of qqLiteralSegments(text)) {
       const size = Buffer.byteLength(segment);
       if (size > budget) throw new QqProtocolError("message", "invalid-input");
       if (bytes + size > budget) {

@@ -4,8 +4,9 @@ import type { DeliveryCheckpoint } from "../delivery-receipt.js";
 import { QQ_PASSIVE_WINDOW_MS, QQ_STREAM_BYTES, QqProtocolError, QqTextSendError, type QqProtocolClient } from "./protocol.js";
 import type { QqTaskSources, QqTaskSourceReference } from "./task-sources.js";
 import type { QqSendBudget } from "./send-budget.js";
-import { qqBodyMarkdownPrefix } from "./body-markdown.js";
+import { escapeQqMarkdownDollars, qqBodyMarkdownPrefix, qqMarkdownDollarStablePrefix } from "./body-markdown.js";
 import { qqBodyMarkdownRestart, qqBodyMarkdownText } from "./message-markdown.js";
+import { qqLiteralStablePrefix } from "./literal-segments.js";
 
 type Body = Extract<OutputEvent, { type: "text.delta" | "text.completed" }>;
 interface Stream {
@@ -21,6 +22,7 @@ interface Stream {
   previewAdmitted: boolean;
   completed: boolean;
   failed: boolean;
+  finishAfterUnsentFailure?: boolean;
   selected?: boolean;
   limited?: boolean;
   sealed?: boolean;
@@ -92,7 +94,7 @@ export class QqBodyStreaming {
     const stream = this.streams.get(this.key(event));
     if (!stream || !stream.previewAdmitted || stream.failed || stream.completed || stream.sealed || this.lifetime.signal.aborted) return;
     if (stream.tail) return stream.tail;
-    const task = this.flush(stream, signal).catch(() => { stream.failed = true; this.failed(); })
+    const task = this.flush(stream, signal).catch(error => { this.previewFailed(stream, error); })
       .finally(() => { if (stream.tail === task) delete stream.tail; });
     stream.tail = task;
     await task;
@@ -132,14 +134,14 @@ export class QqBodyStreaming {
       // a prefix already confirmed by replace-stream delivery.
       const text = candidate.startsWith(stream.sent) ? candidate : event.text;
       // A prior preview is already externally visible or uncertain, even if the final send is never attempted.
-      const continuation = stream.sealed || stream.limited || Buffer.byteLength(text) > QQ_STREAM_BYTES
+      const continuation = stream.sealed || stream.limited || stream.finishAfterUnsentFailure || Buffer.byteLength(escapeQqMarkdownDollars(text)) > QQ_STREAM_BYTES
         || !this.fitsRemaining(stream, text)
         || performance.now() >= (stream.deadline ?? 0) - 45_000
         || qqBodyMarkdownPrefix(text, true).length !== text.length;
       const operation = continuation ? "qq-stream:prefix" : "qq-stream:complete";
       await checkpoint({ operation, state: "started" });
       bounded.throwIfAborted();
-      if (stream.failed || !stream.id || !text.startsWith(stream.sent)) {
+      if (stream.failed && !stream.finishAfterUnsentFailure || !stream.id || !text.startsWith(stream.sent)) {
         throw new QqProtocolError("message", "invalid-response");
       }
       if (!stream.sealed) {
@@ -232,7 +234,8 @@ export class QqBodyStreaming {
     const segments = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(stream.text);
     let stableEnd = 0;
     for (const segment of segments) stableEnd = segment.index;
-    const safeEnd = qqBodyMarkdownPrefix(stream.text.slice(0, stableEnd)).length;
+    const safeEnd = Math.min(qqLiteralStablePrefix(stream.text).length,
+      qqMarkdownDollarStablePrefix(qqBodyMarkdownPrefix(stream.text.slice(0, stableEnd))).length);
     // The safety scanner may stop inside a grapheme (e.g. Prepend + '<').
     // Align its cut to the original text as well, not to the truncated prefix.
     let previewEnd = 0;
@@ -242,7 +245,7 @@ export class QqBodyStreaming {
     }
     const text = stream.text.slice(0, previewEnd);
     if (!text.trim() || text === stream.sent || !text.startsWith(stream.sent)) return;
-    if (!this.fitsRemaining(stream, text)) {
+    if (Buffer.byteLength(escapeQqMarkdownDollars(text)) > QQ_STREAM_BYTES || !this.fitsRemaining(stream, text)) {
       stream.limited = true;
       await this.seal(stream, signal);
       return;
@@ -263,7 +266,7 @@ export class QqBodyStreaming {
       const preceding = stream.tail;
       const task = Promise.resolve(preceding).then(async () => {
         if (!stream.completed && !stream.failed && !stream.sealed) await this.seal(stream, this.lifetime.signal);
-      }).catch(() => { stream.failed = true; this.failed(); })
+      }).catch(error => { this.previewFailed(stream, error); })
         .finally(() => { if (stream.tail === task) delete stream.tail; });
       stream.tail = task;
     }, wait);
@@ -278,16 +281,27 @@ export class QqBodyStreaming {
     stream.text = "";
   }
 
+  private previewFailed(stream: Stream, error: unknown): void {
+    stream.failed = true;
+    // Only a request proven not dispatched leaves the confirmed index intact.
+    // Stop previews; final delivery may close that prefix once, under all of
+    // the original guards. Rejected/unknown operations never authorize this.
+    stream.finishAfterUnsentFailure = !!stream.id && error instanceof QqTextSendError && error.outcome === "not-sent";
+    this.failed();
+  }
+
   private async send(stream: Stream, content: string, finished: boolean, caller: AbortSignal,
     authorized: () => boolean): Promise<{ messageId: string }> {
     const anchor = stream.anchor;
     if (!anchor || stream.deadline === undefined) throw new QqProtocolError("message", "authorization");
+    const rendered = escapeQqMarkdownDollars(content);
     const signal = AbortSignal.any([caller, this.lifetime.signal, stream.controller.signal, anchor.signal]);
     const guard = (): undefined => {
       signal.throwIfAborted();
       if (!this.sources.isCurrent(stream.source) || authorized() !== true) throw new QqProtocolError("message", "authorization");
       if (performance.now() >= stream.deadline!) throw new QqProtocolError("message", "expired");
       if (!content.startsWith(stream.sent)) throw new QqProtocolError("message", "invalid-input");
+      if (Buffer.byteLength(rendered) > QQ_STREAM_BYTES) throw new QqProtocolError("message", "invalid-input");
       if (!this.fitsRemaining(stream, content)) throw new QqProtocolError("message", "invalid-input");
     };
     guard();
@@ -295,10 +309,10 @@ export class QqBodyStreaming {
     try {
       const result = await reservation.runPart(signal, () => this.client.sendStream({
         recipient: stream.recipient, messageId: anchor.messageId, sourceTimestampMs: anchor.sourceTimestampMs,
-        content, contentType: "markdown", index: stream.index, ...(stream.id ? { streamId: stream.id } : {}), finished,
+        content: rendered, contentType: "markdown", index: stream.index, ...(stream.id ? { streamId: stream.id } : {}), finished,
       }, { signal, beforeSend: guard }));
       const remaining = stream.remainingCharacters === undefined ? undefined
-        : stream.remainingCharacters - Buffer.byteLength(content.slice(stream.sent.length));
+        : stream.remainingCharacters - Buffer.byteLength(rendered.slice(escapeQqMarkdownDollars(stream.sent).length));
       // Real QQ continuation responses can report zero on every accepted frame.
       // Zero is not evidence of exhaustion; only a positive hint tightens capacity.
       const reported = result.remainingCharacters === 0 ? undefined : result.remainingCharacters;
@@ -309,14 +323,16 @@ export class QqBodyStreaming {
     } catch (error) {
       if (error instanceof QqTextSendError && error.outcome === "unknown") stream.attempted = true;
       throw error;
-    }
+    } finally { reservation.release(); }
   }
 
   private fitsRemaining(stream: Stream, content: string): boolean {
     // Upstream does not define which character unit it counts. UTF-8 bytes
     // conservatively bound the added text; the reported limit can only tighten.
-    return stream.remainingCharacters === undefined
-      || Buffer.byteLength(content.slice(stream.sent.length)) <= stream.remainingCharacters;
+    const rendered = escapeQqMarkdownDollars(content);
+    const previous = escapeQqMarkdownDollars(stream.sent);
+    return rendered.startsWith(previous) && (stream.remainingCharacters === undefined
+      || Buffer.byteLength(rendered.slice(previous.length)) <= stream.remainingCharacters);
   }
 
   private discard(stream: Stream): void {
