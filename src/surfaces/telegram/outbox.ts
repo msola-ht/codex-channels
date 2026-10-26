@@ -102,7 +102,7 @@ interface TelegramReasoningMessage {
   turnId: string;
   /** 同一 Turn 内每段“思考中”消息的分段编号，用于隔离可合并的中间状态。 */
   segment: number;
-  text: string;
+  text: ReturnType<typeof renderTelegramLifecyclePresentation>;
   sealed: boolean;
   messageId?: number | undefined;
 }
@@ -1267,7 +1267,7 @@ export class TelegramOutbox {
 
   private async sendPanel(
     chatId: string,
-    text: string,
+    text: string | ReturnType<typeof renderTelegramLifecyclePresentation>,
     replyTo?: number,
     silent = false,
     signal?: AbortSignal,
@@ -1303,7 +1303,7 @@ export class TelegramOutbox {
         event.final === true,
       ),
     );
-    const editText = formatTelegramPanelChunks(text)[0] ?? text;
+    const editText = formatTelegramPanelChunks(text)[0] ?? "";
     const existing = this.reasoningMessages.get(event.threadId);
     if (existing !== undefined && (existing.turnId !== event.turnId || existing.chatId !== event.target.conversationId)) {
       this.reasoningMessages.delete(event.threadId);
@@ -1409,9 +1409,9 @@ export class TelegramOutbox {
     if (state.messageId === undefined) {
       return;
     }
-    const completedText = state.text.replace("思考中…", "思考完成");
+    const completedText = { ...state.text, title: state.text.title.replace("思考中…", "思考完成") };
     const formattedCompletedText = formatTelegramPanelChunks(completedText)[0]
-      ?? completedText;
+      ?? "";
     this.enqueue(
       state.chatId,
       (signal) => this.executor.editMessageText(

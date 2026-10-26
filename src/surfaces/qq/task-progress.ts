@@ -3,7 +3,7 @@ import {
   createSubagentCompletedPresentation, createSubagentContactedPresentation,
   createSubagentStartedPresentation, createTurnReasoningPresentation,
   escapeLifecycleLiteral, renderPlainLifecyclePresentation, renderStructuredLifecyclePresentation,
-  type LifecyclePresentation, type LifecyclePresentationField,
+  type LifecyclePresentation, type LifecyclePresentationField, type LifecyclePresentationLeafField,
 } from "../lifecycle-presentation.js";
 import {
   compactOperationDetail, detailedOperationDetail, operationMetadata, operationStatus, operationTitle,
@@ -395,10 +395,12 @@ function escapeLifecycleField(field: LifecyclePresentationField): LifecyclePrese
     ...(field.value === undefined ? {} : { value: escapeLifecycleLiteral(field.value) }),
     fields: field.fields.map(escapeLifecycleField),
   };
+  return escapeLifecycleLeaf(field);
+}
+
+function escapeLifecycleLeaf(field: LifecyclePresentationLeafField): LifecyclePresentationLeafField {
   return { ...field, label: escapeLifecycleLiteral(field.label), value: escapeLifecycleLiteral(field.value),
-    ...(field.subfields ? { subfields: field.subfields.map(subfield => ({
-      ...subfield, label: escapeLifecycleLiteral(subfield.label), value: escapeLifecycleLiteral(subfield.value),
-    })) } : {}),
+    ...(field.subfields ? { subfields: field.subfields.map(escapeLifecycleLeaf) } : {}),
   };
 }
 

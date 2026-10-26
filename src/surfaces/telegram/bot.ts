@@ -87,6 +87,7 @@ import {
   TelegramAudioStore,
 } from "./audio-store.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
+import { telegramAbortSignal } from "./sdk-signal.js";
 import {
   maximumTelegramTextFileBytes,
   TelegramTextFileInput,
@@ -329,20 +330,30 @@ export class TelegramSurface {
       logger,
       {
         messages: async (signal) => {
-          const messages: Array<{ chatId: number; text: string }> = [];
+          const messages: Array<{ chatId: number; text: ReturnType<typeof formatStartupNotification>; signal: AbortSignal }> = [];
           for (const chatId of startupRecipients) {
             signal.throwIfAborted();
+            // Keep the original grant across status waits and every startup chunk.
+            // Revoking then granting access again must not revive an old notice.
+            const active = AbortSignal.any([signal, apiExecutor.authorizationSignal(String(chatId), true)]);
+            if (active.aborted) continue;
             const status = await this.service.statusForDisplay(
               {
                 surface: "telegram",
                 accountId: telegramDefaultAccountId,
                 conversationId: String(chatId),
               },
-              signal,
-            );
+              active,
+            ).catch(error => {
+              if (active.aborted && !signal.aborted) return undefined;
+              throw error;
+            });
+            signal.throwIfAborted();
+            if (active.aborted || status === undefined) continue;
             const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated?.();
             messages.push({
               chatId,
+              signal: active,
               text: formatStartupNotification(workspaces, status, {
                 platform: process.platform,
                 architecture: process.arch,
@@ -365,6 +376,12 @@ export class TelegramSurface {
           }
           return messages;
         },
+        send: (chatId, html, signal) => apiExecutor.call(
+          { chatId: String(chatId), operation: "sendMessage", critical: false, recipientNotification: true },
+          requestSignal => this.bot.api.sendMessage(chatId, html,
+            { parse_mode: "HTML", disable_notification: true }, telegramAbortSignal(requestSignal)),
+          signal,
+        ),
       },
       options.onFatal,
       {

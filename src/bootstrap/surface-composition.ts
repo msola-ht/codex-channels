@@ -155,7 +155,7 @@ function createQqModule(
     configurationNotification: { recipients: () => [...notificationRecipients] },
     startupNotification: {
       recipients: () => [...notificationRecipients],
-      text: async (target, signal) => {
+      presentation: async (target, signal) => {
         const status = await options.service.statusForDisplay(target, signal);
         const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
         return renderQqStartupNotification(options.config.workspaces, status, {

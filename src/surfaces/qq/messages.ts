@@ -23,7 +23,7 @@ import { QqQueueSources, type QqQueueTicket } from "./queue-sources.js";
 import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
 import { QQ_TEXT_PART_BYTES, QqProtocolError, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard } from "./protocol.js";
-import { isQqLifecycleNotification, QqLifecycleNotifications, renderQqTurnCompleted, renderQqTurnStarted } from "./lifecycle.js";
+import { isQqLifecycleNotification, QqLifecycleNotifications, renderQqTurnCompleted, renderQqTurnStarted, type QqLifecyclePresentation } from "./lifecycle.js";
 import { QqBodyStreaming } from "./streaming.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { QqCommandMenuController } from "./command-menu-controller.js";
@@ -59,7 +59,7 @@ export interface QqMessageOptions {
   media?: Pick<QqMediaInput, "prepare" | "retain" | "discard">;
   startupNotification?: {
     recipients(): readonly string[];
-    text(target: ConversationTarget, signal: AbortSignal): Promise<string>;
+    presentation(target: ConversationTarget, signal: AbortSignal): Promise<QqLifecyclePresentation>;
   };
   configurationNotification?: {
     recipients(): readonly string[];
@@ -346,9 +346,10 @@ export class QqMessages implements SurfaceOutputPort {
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, retained = false): Promise<void> {
     const content = this.notifications.render(event, retained, this.displaySettings(event.target).presentationDetail);
     if (content === null) return;
+    const presentation = typeof content === "string" ? { text: content, markdown: content } : content;
     const recipient = qqConversationRecipient(event.target.conversationId);
-    await this.outbox.deliver({ mode: "active", recipient, content }, {
-      signal: AbortSignal.any([signal, this.lifetime.signal]), preferMarkdown: true,
+    await this.outbox.deliver({ mode: "active", recipient, content: presentation.text }, {
+      signal: AbortSignal.any([signal, this.lifetime.signal]), preferMarkdown: true, markdownContent: presentation.markdown,
       beforeSend: () => { if (!authorized()) throw new Error("QQ 通知授权失效"); },
       reserve: parts => this.budget.reserve(recipient, parts, "interaction"),
     }, checkpoint);
@@ -523,12 +524,13 @@ export class QqMessages implements SurfaceOutputPort {
       const scope = this.scope(actorId);
       if (!scope || !this.current(scope)) continue;
       try {
-        const content = await notification.text(this.target(actorId), signal);
+        const content = await notification.presentation(this.target(actorId), signal);
         signal.throwIfAborted();
-        if (!content) continue;
-        await this.outbox.deliver({ mode: "active", recipient: actorId, content }, {
+        if (!content.text) continue;
+        await this.outbox.deliver({ mode: "active", recipient: actorId, content: content.text }, {
           signal,
           preferMarkdown: true,
+          markdownContent: content.markdown,
           beforeSend: () => { if (!this.current(scope)) throw new Error("QQ 上线通知授权失效"); },
           reserve: parts => this.budget.reserve(actorId, parts, "startup"),
         }, async () => {});

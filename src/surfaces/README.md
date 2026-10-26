@@ -52,7 +52,7 @@ Telegram 使用已有 HTML 字段值转义，不把 roots 描述为实时权限�
 `/autoreview [on|off]` 查询或切换当前已绑定 Thread，统一结果由共享格式化器呈现；飞书命令中心与
 Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌。
 平台只提交结构化选择，Application 在锁内复核 Thread 与空闲状态，确认权威设置后才返回更新成功。
-四渠道共用 `lifecycle-presentation.ts` 仅在自动审批完成后呈现结果与结构化内容摘要；Client 提供经脱敏和限长的文本，Telegram HTML 面板与飞书/QQ Markdown 呈现边界处理字面字段。微信当前自动审批仍经普通字符串及字段转换，客户端会解析 Markdown，不保证字面格式保真；该差异登记在[呈现对齐计划](../../docs/message-display-unification-plan.md#已核对的开放项) F3。通知经共享关键投递路径发送，不生成审批交互。
+四渠道共用 `lifecycle-presentation.ts` 仅在自动审批完成后呈现结果与结构化内容摘要；Client 提供经脱敏和限长的文本。飞书、QQ、微信在共享 Markdown 呈现边界处理字面字段；Telegram 保留结构直到 HTML 转义，不把字段续行再次解析成标题。QQ 上线、Hook 与自动审批保留独立原文字备选，Markdown 不适用时不展示转义源码。通知经共享关键投递路径发送，不生成审批交互。
 普通状态与生命周期卡只在 Thread 权威设置启用自动审批时显示审批方式，完成卡的自动审批统计也受此条件约束；专用查询与设置入口保留完整状态和操作回执。
 
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片、一次性音频、UTF-8 文本文件和生命周期。

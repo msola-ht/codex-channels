@@ -24,7 +24,6 @@ import {
   createHookCompletedPresentation,
   isHiddenAutoApprovalReview,
   shouldHideTurnCompleted,
-  renderPlainLifecyclePresentation,
   renderStructuredLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
@@ -353,16 +352,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
       case "connection.restored":
         return formatWeixinCommandText(formatConnectionRestored(visibleUpstreamMessage(event.message)));
       case "hook.completed":
-        return formatWeixinCommandText(
-          renderPlainLifecyclePresentation(createHookCompletedPresentation(event)),
-          { structuredFields: true },
-        );
+        return renderStructuredLifecyclePresentation(createHookCompletedPresentation(event));
       case "autoApprovalReview.updated": {
         const presentation = createAutoApprovalReviewPresentation(event, this.options.displaySettings?.(event.target).presentationDetail ?? "basic");
-        return presentation ? formatWeixinCommandText(
-          renderPlainLifecyclePresentation(presentation),
-          { structuredFields: true },
-        ) : null;
+        return presentation ? renderStructuredLifecyclePresentation(presentation) : null;
       }
       case "operation.updated":
         return this.compactionNotices.accept(event, DeliveryReceipt.current() !== undefined);

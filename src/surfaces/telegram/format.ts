@@ -9,7 +9,6 @@ import {
 import {
   createStartupPresentation,
   createSubagentCompletedPresentation,
-  renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
   type PresentationDetail,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
@@ -75,7 +74,7 @@ export function formatStartupNotification(
   workspaces: Workspace[],
   status: Pick<ConversationStatus, "threadId" | "threadName" | "workspaceId" | "model" | "modelProvider" | "effort" | "serviceTier" | "serviceTierKnown" | "effectiveServiceTier" | "modelPending" | "effortPending" | "fastModePending" | "collaborationMode" | "collaborationModePending" | "weeklyLimit" | "gitBranch">,
   runtime: StartupRuntimeInfo,
-): string {
+): LifecyclePresentation {
   return renderTelegramLifecyclePresentation(
     createStartupPresentation(workspaces, status, runtime),
   );
@@ -83,25 +82,16 @@ export function formatStartupNotification(
 
 export function renderTelegramLifecyclePresentation(
   presentation: LifecyclePresentation,
-): string {
-  const { footer, titleStyle, ...rest } = presentation;
-  // sendPanel performs HTML escaping; Markdown escapes would become visible text.
-  // Use an unambiguous whole-line heading for typed emphasis. A literal name
-  // containing "** · " must not be parsed as a title/detail delimiter.
-  const body = renderStructuredLifecyclePresentation({
-    ...rest,
-    title: titleStyle === "emphasis" && rest.titleDetail === undefined
-      ? `## ${rest.title}` : rest.title,
-  }, false);
-  return footer === undefined
-    ? body
-    : `${body}\n\n${footer.label}：${footer.value}`;
+): LifecyclePresentation {
+  // Keep field and title boundaries until the HTML boundary. Literal newlines
+  // must not return to the generic panel's Markdown/field-line parser.
+  return presentation;
 }
 
 export function renderTelegramSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
   detailed: PresentationDetail = "basic",
-): string {
+): LifecyclePresentation {
   return renderTelegramLifecyclePresentation(
     createSubagentCompletedPresentation(event, detailed),
   );
