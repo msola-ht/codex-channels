@@ -334,6 +334,40 @@ Codex 在后续请求中可能发送 `custom_tool_call` 和 `custom_tool_call_ou
 - 普通 function 工具、图片输入和文本流不受影响；
 - 不新增测试文件；使用真实用户路径和现有静态检查作为证据。
 
+## 网页搜索适配设计（待实现）
+
+2026-10-26 核对 [Ollama 网页搜索官方文档](https://docs.ollama.com/capabilities/web-search)：Ollama 提供独立的搜索与网页读取 API，使用账户 API Key；这不等于 `/v1/responses` 支持内置 `web_search`。本轮只核对文档，没有调用搜索服务或验证当前账户额度。
+
+| 能力 | 官方接口 | 输入与结果 |
+| --- | --- | --- |
+| 网页搜索 | `POST https://ollama.com/api/web_search` | `query`；可选 `max_results` 默认 5、最多 10；返回 `results[]` 的标题、URL 和内容摘要 |
+| 网页读取 | `POST https://ollama.com/api/web_fetch` | `url`；返回标题、正文和链接 |
+
+### 借鉴 CLP 的执行流程
+
+目标是在 OLC 的 Responses 路径中适配客户端声明的 hosted `web_search`。参考 [CLP 转换合同](cline-pass.md#chat-转换边界)和 [model-api 职责](../src/model-api/README.md)，执行流程为：
+
+`Responses 搜索声明 → 内部普通函数声明 → 模型产生搜索调用 → 代理调用 Ollama 搜索 API → 配对回传结果 → 继续 Responses 生成 → 交付搜索生命周期及回答`
+
+这需要请求、响应和工具执行共同适配，不是仅修改 JSON 参数。CLP 的 `cline_provider_options` 只覆盖其出站 `providerOptions`，不能替代搜索执行器；OLC 也不改走 Chat Completions，不直接套用 `ChatToResponses`。纯工具映射和响应状态放在 `model-api`，账户凭据、HTTP 执行与取消由 Provider Proxy 的生命周期所有者负责，通过模块公开出口组合。正式实现前核对锁定 Codex 的搜索事件合同，不直接伪造 App Server 事件。
+
+### 范围与约束
+
+- 首版拟支持 live 文本搜索。官方搜索接口未声明域名过滤、地域、缓存搜索或搜索上下文大小控制；遇到这些无法兑现的控制须在出站前明确拒绝，不沿用 CLP 的域名过滤承诺，也不静默删除参数。`tool_choice` 与工具身份同步映射，未知选择失败关闭。
+- 网页读取作为单独的后续能力保留，不自动把 `web_search` 的所有 open/find 动作映射为 `web_fetch`；启用前明确 URL 准入、动作语义和输出合同。官方 MCP 示例是另一种客户端接法，本方案不自动安装或注册 MCP。
+- 仅在可信 OLC 能力明确启用且请求声明搜索时执行，内部函数身份不得与用户工具冲突。搜索使用当前具体账户的凭据，续答沿用同一模型及授权，不回退其他账户；凭据只发送到固定官方搜索服务，不发送到结果网址。
+- 同批搜索与客户端工具调用借鉴 CLP 的处理：先搜索，同批客户端调用不派发，以明确的 `not_executed` 结果告知模型后重新决策；完整保留调用组与配对结果，后续纯客户端调用才交给 Codex。不得执行客户端文件/命令工具或伪造其成功，调用 ID 必须在多轮和并行调用间保持唯一关联。
+- 内部续答显式携带完整必要历史，不使用 `previous_response_id`，不建立跨请求会话缓存。搜索来源只作为当前请求的外部资料，不当作系统指令；来源链接不能直接伪造成正文的精确引用注解。后续请求缺失搜索正文时不得补造结果。
+- 整次请求共享取消信号和总期限，另设搜索次数、模型轮次、并发、结果字节及累计上下文上限。取消、断连、授权失效或预算耗尽后不继续搜索/续答；不无限重试，不把 HTTP 200、空响应体或畸形结果当成搜索成功。合法空结果与查询失败分别表示。
+- 对外只交付一个一致的 Responses 响应：内部轮次的终态不提前结束外部响应；SSE 与非流式路径同步处理调用身份、搜索生命周期、最终快照与错误。累计各轮已知模型用量，缺失计数保持未知；搜索费用不编造成模型 Token 或余额扣减，日志不泄露查询正文、原始网页或凭据。
+- 独立 Model Relay 不经过 Proxy 实例；若提供相同搜索能力，须独立接入共享转换与执行接口，并核对 Key 授权和材料失效。未接入时明确不支持，不因渠道路径可用就宣称 Relay 可用。
+
+### 验收与状态
+
+实施时观察真实用户路径：Codex 发起搜索、官方 API 返回结果、模型据此续答、客户端显示对应搜索状态；SSE 与非流式分别核对。反例覆盖不支持的控制、账户隔离、混合工具、空结果、畸形响应、认证失败、限流、超时、取消和轮数耗尽，确认不误执行客户端工具、不提前完成、不重复派发，且用量无漏计或重复累计。不新增测试或探针文件。
+
+当前仅完成设计记录。尚未验证账户搜索权限、费用/限额、真实 API 输出、搜索事件还原及完整往返；实现并验收前不得标记为已支持。网页读取仍是单独待设计能力。
+
 ## 方案 B：受管多账户接入设计（待实现）
 
 方案 B 复用现有受管 Provider 管道，新增一个独立家族。它不修改 `cp-ollama`，也不把 Ollama Cloud 注册成 Codex 内置的 `ollama`；内置 `ollama` 的 Provider ID 已被保留，继续面向本地 Ollama 语义。方案 B 不包含迁移：`cp-ollama` 与新受管账户互不导入、互不转换。
@@ -430,6 +464,7 @@ Codex 在后续请求中可能发送 `custom_tool_call` 和 `custom_tool_call_ou
 | WebUI | `scripts/webui-api.ts`、`scripts/webui-management-provider-route.mjs`、`scripts/webui-account-settings-management.mjs` | 来源/操作类型、账户加载、configure/default/remove |
 | 展示 | `src/surfaces/provider-format.ts` | 渠道短标签 `OLC <account>` 和目录展示名前缀 |
 | Freeform | `src/model-api/responses-normalize.ts`、`src/provider-proxy/proxy.ts` | 请求侧历史转换、响应侧 SSE/JSON 归一化 |
+| 网页搜索 | `src/model-api/`、`src/provider-proxy/` | Responses 工具映射、独立搜索执行、内部续答、外部响应生命周期及累计用量；参见网页搜索适配设计 |
 | Relay | `src/model-api/`、`src/model-relay/server.ts`、Relay 材料组合入口 | 通过公开接口接入共享转换；独立核对身份、材料版本、错误与交付，不能假定 Proxy 改动自动覆盖 |
 | 文档 | 见下方“文档影响矩阵” | 不能只更新根索引和 `docs/index.md` |
 
@@ -472,7 +507,8 @@ Codex 在后续请求中可能发送 `custom_tool_call` 和 `custom_tool_call_ou
 2. 新增 Provider 定义、`.d.mts` 类型、账户模块、`olc` 命名空间保留、Bootstrap 适配器和账户用量适配器。
 3. 新增目录生成器与 Setup，完成单账户的 switching/exclusive 路径，并接入 Codex 目录校验、模板来源和本地工具投影。
 4. 接通 CLI、WebUI 账户操作、模型新增/移除、模板更新、短标签、Relay 和恢复路径；逐项处理 `olc` 与 `ollama-cloud` 的键差异。
-5. 按“文档影响矩阵”更新中央文档、用户文档和模块 README，创建正式 Provider 专题文档，完成验收记录。
+5. 按网页搜索适配设计接入 Responses 搜索执行与续答，独立确认 Relay 支持范围；搜索能力单独验收，未完成时明确不支持。
+6. 按“文档影响矩阵”更新中央文档、用户文档和模块 README，创建正式 Provider 专题文档，完成验收记录。
 
 在 freeform 适配未完成前，可以先用 `apply_patch_tool_type: null` 完成方案 B 的其他部分，但不能把 freeform 能力标为已支持。
 
