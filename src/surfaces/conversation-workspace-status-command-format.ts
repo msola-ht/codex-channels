@@ -179,7 +179,6 @@ export function formatConversationStatus(
     if (account.credits !== undefined && nonpositive(account.credits)) lines.push(field("额度提示", "账户剩余额度不足，请用 /limits 查看"));
   }
   if (status.accountStatusUnavailable) lines.push(field("额度提示", "本次未能取得账户额度，请用 /usage 或 /limits 重查"));
-  lines.push("", "请求统计：/metrics · 账户额度：/usage /limits");
   return lines.join("\n").trimEnd();
 }
 

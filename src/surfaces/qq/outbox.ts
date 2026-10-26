@@ -134,12 +134,17 @@ export class QqTextOutbox {
         }
       }
       if (context.interactionControls) {
-        const controls = planText({ ...input, content: context.interactionControls.content });
+        // A complete Markdown status panel needs no filler above its keyboard.
+        // Literal fallback still carries a separate, nonempty control message.
+        if (!context.interactionControls.content && context.interactionControls.markdownContent === undefined) {
+          throw new QqProtocolError("message", "invalid-input");
+        }
+        const controls = planText({ ...input, content: context.interactionControls.content || "更多查询" });
         if (controls.length !== 1) throw new QqProtocolError("message", "invalid-input");
         const candidate = context.interactionControls.markdownContent;
         let formatted: readonly QqTextMessage[] | undefined;
         if (candidate !== undefined) {
-          const combined = { ...input, content: `${candidate}\n\n${context.interactionControls.content}` };
+          const combined = { ...input, content: candidate + (context.interactionControls.content ? `\n\n${context.interactionControls.content}` : "") };
           // Validate the full candidate before optional Markdown planning. No
           // clipping or partial Markdown: unsafe/oversized candidates use the
           // already validated literal preview and separate controls instead.

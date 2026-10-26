@@ -599,6 +599,13 @@ export class TelegramSurface {
     this.bot.callbackQuery(/^(?:wp|ar):/, async (context) => {
       await context.answerCallbackQuery({ text: "工作区权限设置入口已停用，请使用原生 Codex 权限配置。" });
     });
+    this.bot.callbackQuery(/^status-query:(metrics|usage|limits)$/, async context => {
+      await context.answerCallbackQuery({ text: "正在查询" });
+      const command = context.match[1];
+      if (command !== "metrics" && command !== "usage" && command !== "limits") return;
+      const result = await this.commands.execute(target(context), command, "", String(context.from.id));
+      await this.renderCommandResult(context, result);
+    });
     this.bot.callbackQuery(/^idle:resume:([A-Za-z0-9_-]{24})$/, async (context) => {
       const token = context.match[1]!;
       const pending = this.idleResumeSelections.get(token);
@@ -1536,6 +1543,7 @@ export class TelegramSurface {
 
   private async renderCommandResult(context: Context, result: ConversationCommandResult): Promise<void> {
     const relevant = result.kind === "status" || result.kind === "workspaces" || result.kind === "models"
+      || result.kind === "metrics" || result.kind === "usage" || result.kind === "limits"
       || result.kind === "sessions" || result.kind === "collaboration-mode"
       || result.kind === "outcome" && ["workspace.selected", "thread.resumed", "thread.unarchived", "thread.forked",
         "session.new", "thread.archived", "thread.renamed", "thread.pin-updated", "sessions.cleaned"].includes(result.outcome.type);

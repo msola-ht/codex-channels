@@ -5,6 +5,7 @@ import {
   createHookCompletedPresentation, createAutoApprovalReviewPresentation,
   renderStructuredLifecyclePresentation, renderPlainLifecyclePresentation, type StartupRuntimeInfo, type PresentationDetail,
   type LifecyclePresentation,
+  escapeLifecycleLiteral,
 } from "../lifecycle-presentation.js";
 import { ContextCompactionNotices } from "../operation-presentation.js";
 import { formatCodexWarning, formatConnectionLost, formatConnectionRestored,
@@ -12,6 +13,7 @@ import { formatCodexWarning, formatConnectionLost, formatConnectionRestored,
 import { formatRuntimeAccountUpdate, formatRuntimeRateLimitUpdate, formatRuntimeMcpStatusUpdate,
   formatRuntimeMcpOAuthCompleted } from "../runtime-status-format.js";
 import type { SurfaceNotificationDeliverySource } from "../types.js";
+import { toStructuredMarkdownList } from "../markdown-list.js";
 
 export type QqLifecycleNotification = Extract<OutputEvent, { type: SurfaceNotificationDeliverySource["eventType"] }>;
 export interface QqLifecyclePresentation { text: string; markdown: string }
@@ -30,7 +32,12 @@ export class QqLifecycleNotifications {
 
   render(event: QqLifecycleNotification, retained = false, detailed: PresentationDetail = "detailed"): string | QqLifecyclePresentation | null {
     switch (event.type) {
-      case "conversation.idle.released": return formatConversationIdleReleased(event.minutes, event.threadId);
+      case "conversation.idle.released": return {
+        text: formatConversationIdleReleased(event.minutes, event.threadId),
+        markdown: toStructuredMarkdownList(formatConversationIdleReleased(event.minutes, event.threadId, {
+          fencedCommand: true, formatLiteral: escapeLifecycleLiteral,
+        })),
+      };
       case "warning": return formatCodexWarning(visibleUpstreamMessage(event.message));
       case "connection.lost": return formatConnectionLost(visibleUpstreamMessage(event.message));
       case "connection.restored": return formatConnectionRestored(visibleUpstreamMessage(event.message));

@@ -214,13 +214,15 @@ export class QqCommandMenuController {
     if (result.kind === "status" || result.kind === "limits" && result.result.kind === "rate-limits") {
       const context = { ...this.context(target, actorId), queryScope: this.options.queryScope(target) };
       const buttons = result.kind === "status"
-        ? [qqMenuButton("model", "模型设置", "/model"), qqMenuButton("workspace", "工作区", "/workspace"),
+        ? [qqMenuButton("metrics", "请求统计", "/metrics"), qqMenuButton("usage", "账户用量", "/usage"),
+          qqMenuButton("limits", "账户额度", "/limits"),
+          qqMenuButton("model", "模型设置", "/model"), qqMenuButton("workspace", "工作区", "/workspace"),
           qqMenuButton("permissions", "权限查询", "/permissions"), qqMenuButton("autoreview", "审批设置", "/autoreview")]
         : [qqMenuButton("credits", "查看重置券", "/limits reset")];
       const rows = buttonRows(buttons);
       rows.push({ buttons: [homeButton()] });
       const detail = renderConversationCommandResult(result)!;
-      return { ...this.panel(context, { content: "选择下方操作继续。", keyboard: { content: { rows } } }),
+      return { ...this.panel(context, { content: result.kind === "status" ? "" : "选择下方操作继续。", keyboard: { content: { rows } } }),
         detail: formatQqLiteralDetails(detail), markdownDetail: result.kind === "status"
           ? formatConversationStatus(result.status, escapeLifecycleLiteral, result) : detail };
     }

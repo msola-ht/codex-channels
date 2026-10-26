@@ -34,6 +34,8 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
         ?.modelProvider ?? "openai",
       latestTurn: summary.latestTurn,
       threadAggregate: summary.threadAggregate,
+      ...(summary.sessionTiming === undefined ? {} : { sessionTiming: summary.sessionTiming }),
+      ...(summary.sessionDurationMs === undefined ? {} : { sessionDurationMs: summary.sessionDurationMs }),
     };
   }
 

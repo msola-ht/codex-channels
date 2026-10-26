@@ -79,7 +79,13 @@ export async function renderTelegramCommandResult(
       );
       return;
     case "status":
-      await panel(formatStatus(result.status, result));
+      await panel(formatStatus(result.status, result), {
+        inline_keyboard: [[
+          { text: "请求统计", callback_data: "status-query:metrics" },
+          { text: "账户用量", callback_data: "status-query:usage" },
+          { text: "账户额度", callback_data: "status-query:limits" },
+        ]],
+      });
       return;
     case "workspaces":
       await panel(

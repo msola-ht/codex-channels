@@ -610,6 +610,9 @@ export function renderCommandCenterChoices(
       description: stripMarkdownHeading(formatConversationStatus(result.status, escapeFeishuCardMarkdown, result)),
       descriptionFormat: "markdown",
       choices: [
+        { label: "请求统计", action: "metrics", input: "" },
+        { label: "账户用量", action: "usage", input: "" },
+        { label: "账户额度", action: "limits", input: "" },
         { label: "模型设置", action: "model", input: "" },
         { label: "工作区", action: "workspace", input: "" },
         { label: "权限查询", action: "permissions", input: "" },
