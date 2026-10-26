@@ -53,7 +53,7 @@ export function resolveApprovalChoice(
               approved: true,
               scope: "execpolicy",
             },
-            outcome: "已保存命令前缀规则",
+            outcome: "已选择保存命令前缀规则",
           }
         : undefined;
     case "networkpolicy": {
@@ -72,7 +72,7 @@ export function resolveApprovalChoice(
               scope: "networkpolicy",
               networkPolicyAmendment: amendment,
             },
-            outcome: `已保存网络${amendment.action === "allow" ? "允许" : "拒绝"}规则`,
+            outcome: `已选择保存网络${amendment.action === "allow" ? "允许" : "拒绝"}规则`,
           }
         : undefined;
     }
