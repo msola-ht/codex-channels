@@ -6,7 +6,7 @@ import type { BaseModelPreview } from "@/lib/types"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -21,9 +21,9 @@ export function BaseModelCard({ management, disabled }: { management: ReturnType
   const result = management.actionResult
   const locked = disabled || management.busy || management.loading || management.error !== null || management.readbackRequired || pending !== undefined
   const warning = management.writeUnconfirmed || management.readbackRequired || result?.consistency === "unconfirmed" || result?.auditStatus === "degraded"
-  return <Card>
-    <CardHeader><CardTitle>{t("baseModel.title")}</CardTitle><CardDescription>{t("baseModel.hint")}</CardDescription></CardHeader>
-    <CardContent className="flex min-w-0 flex-col gap-4">
+  return <>
+    <DialogHeader><DialogTitle>{t("baseModel.title")}</DialogTitle><DialogDescription>{t("baseModel.hint")}</DialogDescription></DialogHeader>
+    <div className="flex min-w-0 flex-col gap-4">
       {management.loading && <Skeleton className="h-16 w-full" />}
       {management.error && <SettingsError message={management.error} retry={management.refetch} />}
       {snapshot && <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -40,11 +40,11 @@ export function BaseModelCard({ management, disabled }: { management: ReturnType
         {management.readbackRequired && <p>{t("settingsUi.readbackUnknown")}</p>}
         <p>{t("baseModel.activation")}</p>
       </AlertDescription></Alert>}
-    </CardContent>
-    <CardFooter><Button ref={previewTrigger} variant="outline" disabled={locked || snapshot === null} onClick={() => { if (snapshot) void management.mutate({ revision: snapshot.revision }) }}>
+    </div>
+    <DialogFooter><Button ref={previewTrigger} variant="outline" disabled={locked || snapshot === null} onClick={() => { if (snapshot) void management.mutate({ revision: snapshot.revision }) }}>
       {management.busy && !pending ? <Spinner data-icon="inline-start" aria-label={t("common.loading")} /> : <RefreshCwIcon data-icon="inline-start" />}
       {t(management.busy && !pending ? "baseModel.fetching" : "baseModel.fetch")}
-    </Button></CardFooter>
+    </Button></DialogFooter>
     <ManagementConfirmationDialog open={pending !== undefined} title={t("baseModel.confirmTitle")} description={t("baseModel.confirmHint")} className={modelOperationDialogClassName} finalFocus={previewTrigger} saving={management.busy} loading={management.loading} confirmDisabled={disabled || management.error !== null || management.readbackRequired} confirmLabel={t(pending?.changed ? "baseModel.save" : "baseModel.confirmUnchanged")} onConfirm={() => void management.confirm()} onCancel={management.cancel}>
       {pending && <div className="flex min-w-0 flex-col gap-4">
         <div className="grid min-w-0 gap-4 sm:grid-cols-2">{(["before", "after"] as const).map(side => <div key={side} className="flex min-w-0 flex-col gap-2">
@@ -65,7 +65,7 @@ export function BaseModelCard({ management, disabled }: { management: ReturnType
         </section>)}
       </div>}
     </ManagementConfirmationDialog>
-  </Card>
+  </>
 }
 
 function BaseModelValue({ value }: { value: BaseModelPreview["changes"][number]["before"] }) {

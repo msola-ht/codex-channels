@@ -32,6 +32,7 @@ import { SettingsPageFrame } from "@/components/settings/settings-page-frame"
 import { SettingsNavigationGuard } from "@/components/settings/settings-navigation-guard"
 import { SettingsCliCommands } from "@/components/settings/settings-cli-commands"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog"
 
 
 export function ProvidersPage() {
@@ -77,6 +78,7 @@ export function ModelConfigurationPage() {
   const [groupsEditing, setGroupsEditing] = useState(false)
   const catalog = useOpenAiModelCatalog()
   const base = useBaseModelManagement()
+  const [baseOpen, setBaseOpen] = useState(false)
   const reloadBase = base.refetch
   const reloadCatalog = catalog.refresh
   const codex = useCodexSettingsManagement()
@@ -98,7 +100,14 @@ export function ModelConfigurationPage() {
   const localOnly = providers.settings === null || providers.error !== null || !localCatalogs.matchesManagement
   const providerCatalogs = localOnly ? localCatalogs.data?.catalogs ?? [] : providers.settings?.modelCatalogs ?? []
   const selectedCatalogIds = new Set(providerCatalogs.filter(item => item.providers.includes(selectedProvider ?? "")).map(item => `provider:${item.provider}`))
-  return <SettingsPageFrame title="modelManagement.models" busy={busy || base.loading || catalog.pageBusy || localCatalogs.loading || providerEditing || groupsEditing || channelEditing} refresh={refresh}>
+  return <SettingsPageFrame title="modelManagement.models" busy={baseOpen || busy || base.loading || catalog.pageBusy || localCatalogs.loading || providerEditing || groupsEditing || channelEditing} refresh={refresh} actions={
+    <Dialog open={baseOpen} onOpenChange={open => { if (!base.busy && base.pendingPreview === null) setBaseOpen(open) }}>
+      <DialogTrigger render={<Button variant="outline" disabled={otherBusy || catalog.pageBusy || providerEditing || groupsEditing || channelEditing} />}>{t("baseModel.title")}</DialogTrigger>
+      <DialogContent closeLabel={t("common.close")} showCloseButton={!base.busy && base.pendingPreview === null} className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+        <BaseModelCard management={base} disabled={otherBusy || catalog.pageBusy || providerEditing || groupsEditing || channelEditing} />
+      </DialogContent>
+    </Dialog>
+  }>
     <SettingsNavigationGuard editing={providerEditing || groupsEditing || catalog.draft !== null || channelEditing} locked={providers.busy || providers.pendingPreview !== null || catalog.busy || catalog.pendingPreview !== null || gateway.saving || gateway.pendingSetting !== null || base.busy || base.pendingPreview !== null} />
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -114,7 +123,6 @@ export function ModelConfigurationPage() {
       </div>
     </div>
     <p className="text-sm text-muted-foreground">{t("globalSettings.scopeHint")}</p>
-    <BaseModelCard management={base} disabled={otherBusy || catalog.pageBusy || providerEditing || groupsEditing || channelEditing} />
     {codex.error && <SettingsError message={codex.error} retry={reloadCodex} />}
     <OpenAiModelCatalogCard catalog={catalog} disabled={busy || providers.error !== null} configurationRevision={providers.settings?.resourceRevision ?? null}
       renderCatalog={official =>
