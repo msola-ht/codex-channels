@@ -48,15 +48,16 @@ import { formatConversationMetrics } from "./metrics-format.js";
 export function renderConversationCommandResult(
   result: ConversationCommandResult,
   formatCommand?: (command: string) => string,
+  formatLiteral?: (value: string) => string,
 ): string | null {
   switch (result.kind) {
     case "outcome":
       if (isTurnLifecycleAcknowledgedOutcome(result.outcome)) {
         return null;
       }
-      return formatConversationCommandOutcome(result.outcome);
+      return formatConversationCommandOutcome(result.outcome, formatLiteral);
     case "sessions":
-      return formatConversationSessions(result);
+      return formatConversationSessions(result, formatLiteral, formatCommand);
     case "thread-queue":
       return formatConversationThreadQueue(result);
     case "thread-revert":
@@ -72,11 +73,11 @@ export function renderConversationCommandResult(
     case "status":
       return formatConversationStatus(result.status, undefined, result);
     case "workspaces":
-      return formatConversationWorkspaces(result);
+      return formatConversationWorkspaces(result, formatLiteral);
     case "auto-review":
       return formatConversationAutoReview(result, formatCommand);
     case "models":
-      return formatConversationModels(result, formatCommand);
+      return formatConversationModels(result, formatCommand, formatLiteral);
     case "collaboration-mode":
       return formatConversationCollaborationMode(result);
     case "skills":

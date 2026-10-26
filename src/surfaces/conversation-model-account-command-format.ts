@@ -28,16 +28,16 @@ const maximumThreadUsageGroups = 8;
 export function formatConversationModels(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
   formatCommand: (command: string) => string = (command) => command,
+  formatLiteral: (value: string) => string = (value) => value,
 ): string {
   const { state } = result;
+  const literal = (value: string): string => formatModelSettingLiteral(value, formatLiteral);
   const current = state.models.find((model) =>
     model.available !== false && model.model === state.model
     && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
-  const speed = `速度：${formatServiceTierSetting(state, current)}`;
   const effortName = reasoningEffortSettingName(state.effort, current);
-  const providerSwitchNotice = state.providerPending
-    ? ["提供商切换将在下一条消息中创建新 Session；当前 Session 会保留，可通过 /resume 恢复。", ""]
-    : [];
+  // The field structure is known here; a trailing colon in metadata is data.
+  const setting = formatConversationModelState(result, formatLiteral).map(line => `- ${line}`);
   const scopedModels = state.providerFilter === undefined
     ? state.models
     : state.models.filter(
@@ -46,8 +46,7 @@ export function formatConversationModels(
   if (result.view === "fast") {
     return toStructuredMarkdownList([
       "## 速度设置",
-      formatModelStateLine(state),
-      speed,
+      ...setting,
       `模型支持：${formatModelSpeedSupport(current)}`,
       "",
       `切换：${formatCommand("/fast [on|ultrafast|off|status]")}（on：Fast；off：Standard）`,
@@ -56,20 +55,12 @@ export function formatConversationModels(
   if (result.view === "effort") {
     return toStructuredMarkdownList([
       `## ${effortName}设置`,
-      formatModelStateLine(state),
-      `当前${effortName}：${formatReasoningEffort(state.effort ?? current?.defaultReasoningEffort)}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
-      speed,
-      "",
-      ...providerSwitchNotice,
-      ...(result.nextSelection === "effort"
-        ? [`模型已选择，请继续选择${effortName}。`, ""]
-        : []),
-      ...formatCurrentModelNotices(current),
+      ...setting,
       "",
       `可用${effortName}：`,
       ...(current?.supportedReasoningEfforts ?? []).map(
         (option, index) =>
-          `${index + 1}. ${formatReasoningEffort(option.effort)}${option.effort === state.effort ? " ← 当前" : ""} · ${option.description}`,
+          `${index + 1}. ${literal(formatReasoningEffort(option.effort))}${option.effort === state.effort ? " ← 当前" : ""} · ${literal(option.description)}`,
       ),
       "",
       "切换：/effort <序号或档位>",
@@ -79,8 +70,7 @@ export function formatConversationModels(
   if (providers.length === 0) {
     return toStructuredMarkdownList([
       "## 选择模型",
-      formatModelStateLine(state),
-      speed,
+      ...setting,
       "当前没有可选模型。请检查账户配置与订阅状态；续订后可在 WebUI 或当前账户的 /usage 刷新。",
     ].join("\n"));
   }
@@ -88,14 +78,11 @@ export function formatConversationModels(
     const currentProvider = state.modelProvider;
     return toStructuredMarkdownList([
       "## 选择提供商",
-      formatModelStateLine(state),
-      `${effortName}：${formatReasoningEffort(state.effort)}`,
-      speed,
+      ...setting,
       "",
-      `当前 Provider：${currentProvider === undefined ? "待选择" : formatCodexProviderLabel(currentProvider)}`,
       "提供商列表：",
       ...providers.map((provider, index) =>
-        `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${formatProviderModelSummary(state.models, provider)}`,
+        `${index + 1}. ${literal(formatCodexProviderLabel(provider))}${provider === currentProvider ? " ← 当前" : ""} · ${formatProviderModelSummary(state.models, provider)}`,
       ),
       "",
       "下一步：/model <提供商序号>",
@@ -103,25 +90,53 @@ export function formatConversationModels(
   }
   return toStructuredMarkdownList([
     "## 选择模型",
-    formatModelStateLine(state),
-    `${effortName}：${formatReasoningEffort(state.effort)}`,
-    speed,
-    ...formatCurrentModelNotices(current),
+    ...setting,
     "",
-    ...providerSwitchNotice,
-    `当前 Provider：${formatCodexProviderLabel(state.providerFilter ?? state.modelProvider ?? providers[0])}`,
+    `- 浏览 Provider：${literal(formatCodexProviderLabel(state.providerFilter ?? state.modelProvider ?? providers[0]))}（浏览不会切换当前设置）`,
     `模型列表（${scopedModels.length}）：`,
     ...scopedModels.map((model, index) => {
       // 列表项使用提供商与原目录名称，统计分组不参与模型选择。
       const entry = modelListEntry(model.displayName, model.provider, model.model);
-      return `${index + 1}. ${entry.name}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`;
+      return `${index + 1}. ${literal(entry.name)}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${literal(model.unavailableReason)}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model, literal)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`;
     }),
     "",
     "切换：/model <模型序号>",
   ].join("\n"));
 }
 
-function formatCurrentModelNotices(model: ModelOption | undefined): string[] {
+/** Directory metadata is a single literal field before channel formatting. */
+export function formatModelSettingLiteral(
+  value: string,
+  formatLiteral: (value: string) => string = (value) => value,
+): string {
+  return formatLiteral(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ").replace(/\s+/gu, " ").trim());
+}
+
+/** All model menus consume the same selected state and activation consequences. */
+export function formatConversationModelState(
+  result: Extract<ConversationCommandResult, { kind: "models" }>,
+  formatLiteral: (value: string) => string = (value) => value,
+): string[] {
+  const { state } = result;
+  const current = state.models.find((model) =>
+    model.available !== false && model.model === state.model
+    && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
+  const literal = (value: string): string => formatModelSettingLiteral(value, formatLiteral);
+  const effortName = reasoningEffortSettingName(state.effort, current);
+  return [
+    formatModelStateLine(state, literal),
+    `${state.modelPending ? "已选" : "当前"} Provider：${state.modelProvider === undefined ? "待选择" : literal(formatCodexProviderLabel(state.modelProvider))}`,
+    `${effortName}：${literal(formatReasoningEffort(state.effort ?? current?.defaultReasoningEffort))}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
+    `速度：${literal(formatServiceTierSetting(state, current))}`,
+    ...(state.providerPending
+      ? ["提供商切换将在下一条消息中创建新 Session；当前 Session 会保留，可通过 /resume 恢复。"]
+      : []),
+    ...(result.nextSelection === "effort" ? [`模型已选择，请继续选择${effortName}。`] : []),
+    ...formatCurrentModelNotices(current, literal),
+  ];
+}
+
+function formatCurrentModelNotices(model: ModelOption | undefined, literal: (value: string) => string): string[] {
   if (!model) return [];
   const notices: string[] = [];
   if (model.multiAgentVersion) {
@@ -134,7 +149,7 @@ function formatCurrentModelNotices(model: ModelOption | undefined): string[] {
   }
   if (model.upgrade) {
     notices.push([
-      `官方模型提示：建议切换到 ${model.upgrade.model}`,
+      `官方模型提示：建议切换到 ${literal(model.upgrade.model)}`,
       ...(model.upgrade.retirementAtSeconds === null
         ? []
         : [`退役时间：${formatUtcDate(model.upgrade.retirementAtSeconds)}（UTC）`]),
@@ -143,12 +158,12 @@ function formatCurrentModelNotices(model: ModelOption | undefined): string[] {
   return notices;
 }
 
-function formatModelUpgradeBadge(model: ModelOption): string {
+function formatModelUpgradeBadge(model: ModelOption, literal: (value: string) => string): string {
   if (!model.upgrade) return "";
   const retirement = model.upgrade.retirementAtSeconds === null
     ? ""
     : ` · 退役 ${formatUtcDate(model.upgrade.retirementAtSeconds)} UTC`;
-  return ` · 官方建议替代 ${model.upgrade.model}${retirement}`;
+  return ` · 官方建议替代 ${literal(model.upgrade.model)}${retirement}`;
 }
 
 function formatUtcDate(timestampSeconds: number): string {
@@ -169,6 +184,7 @@ export function formatConversationModel(
 
 function formatModelStateLine(
   state: Extract<ConversationCommandResult, { kind: "models" }>["state"],
+  literal: (value: string) => string,
 ): string {
   const current = state.models.find((model) =>
     model.available !== false && model.model === state.model
@@ -177,9 +193,7 @@ function formatModelStateLine(
   const name = current === undefined
     ? state.model
     : modelListEntry(current.displayName, current.provider, current.model).modelName;
-  return state.modelPending
-    ? formatConversationModel("下一条消息模型", state, name)
-    : `当前模型：${name}`;
+  return `${state.modelPending ? "下一条消息模型" : "当前模型"}：${literal(name)}`;
 }
 
 export function formatConversationUsage(

@@ -36,7 +36,7 @@ export function renderWeixinCommandResult(result: ConversationCommandResult): st
   }
   return result.kind === "status"
     ? formatConversationStatus(result.status, escapeLifecycleLiteral, result)
-    : renderConversationCommandResult(result);
+    : renderConversationCommandResult(result, undefined, escapeLifecycleLiteral);
 }
 
 export type WeixinStartupRuntimeInfo = LifecycleStartupRuntimeInfo;

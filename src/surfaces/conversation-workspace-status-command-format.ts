@@ -16,15 +16,17 @@ import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-e
 
 export function formatConversationWorkspaces(
   result: Extract<ConversationCommandResult, { kind: "workspaces" }>,
+  formatLiteral: (value: string) => string = value => value,
 ): string {
+  const literal = (value: string): string => formatLiteral(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
   return toStructuredMarkdownList([
     `Workspace（${result.workspaces.length}）：`,
     ...(!result.workspaces.some(workspace => workspace.id === result.currentWorkspaceId)
-      ? [`原选择已失效：${result.currentWorkspaceId}。请选择下列工作区后重新发起操作。`]
+      ? [`原选择已失效：${literal(result.currentWorkspaceId)}。请选择下列工作区后重新发起操作。`]
       : []),
     ...result.workspaces.flatMap((workspace, index) => [
-      `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
-      `工作目录：${workspace.cwd}`,
+      `${index + 1}. ${literal(workspace.name)} · ${literal(workspace.id)}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
+      `- 工作目录：${literal(workspace.cwd)}`,
     ]),
     "",
     "切换：/workspace <序号、ID 或名称>",
@@ -87,17 +89,19 @@ export function formatConversationArtifacts(
 
 export function formatConversationCollaborationMode(
   result: Extract<ConversationCommandResult, { kind: "collaboration-mode" }>,
+  structured = true,
 ): string {
   const label = result.state.mode === "plan" ? "Plan" : "Default";
-  return toStructuredMarkdownList([
-    "## 协作模式",
+  const text = [
+    "协作模式",
     `协作模式：${label}${result.state.pending ? "（下一次 Turn 生效）" : ""}`,
     "",
     result.state.mode === "plan"
       ? "下一条普通消息将按 Plan 模式处理；再次发送 /plan 可切回 Default。"
       : "下一条普通消息将按 Default 模式处理；发送 /plan 可切换到 Plan。",
     "也可发送 /plan <规划需求>，直接进入 Plan 并开始规划。",
-  ].join("\n"));
+  ].join("\n");
+  return structured ? toStructuredMarkdownList(text) : text;
 }
 
 export function formatConversationGoal(
@@ -149,7 +153,7 @@ export function formatConversationStatus(
     "### 模型与执行设置",
     "",
     field("模型", status.sessionRestoring ? "尚未恢复" : `${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`),
-    field("提供商", status.sessionRestoring ? "尚未恢复" : formatCodexProviderLabel(status.modelProvider)),
+    field("提供商", status.sessionRestoring ? "尚未恢复" : status.modelProvider === undefined ? "待选择" : formatCodexProviderLabel(status.modelProvider)),
     field(reasoningEffortSettingName(status.effort), status.sessionRestoring ? "尚未恢复" : `${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""}`),
     field("速度", status.sessionRestoring ? "尚未恢复" : status.threadId || status.fastModePending ? formatServiceTierSetting(status) : "未知"),
     field("协作模式", status.sessionRestoring ? "尚未恢复" : `${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`),

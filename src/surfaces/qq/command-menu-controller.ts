@@ -13,10 +13,11 @@ import {
 } from "../../application/index.js";
 import { conversationTargetKey, UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
+import { formatConversationModelState } from "../conversation-model-account-command-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
 import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
-import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, formatServiceTierSetting, modelListEntry } from "../provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListEntry } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import { formatThreadQueueInputTypeLabel } from "../conversation-session-command-format.js";
@@ -378,9 +379,9 @@ export class QqCommandMenuController {
     const next = this.context(selection.target, selection.actorId);
     if (result.kind === "models") return this.models(next, result, 1, result.view);
     if (result.kind !== "outcome") throw unsupported();
-    const detail = formatConversationCommandOutcome(result.outcome);
+    const detail = formatConversationCommandOutcome(result.outcome, undefined, false);
     return { ...this.panel(next, { ...renderQqCommandMenu(), content: "选择下方操作继续。" }),
-      detail: formatQqLiteralDetails(detail), markdownDetail: detail };
+      detail, markdownDetail: formatConversationCommandOutcome(result.outcome, escapeLifecycleLiteral) };
   }
 
   private autoReview(context: MenuContext, result: Extract<ConversationCommandResult, { kind: "auto-review" }>): QqMenuPanel {
@@ -744,8 +745,8 @@ export class QqCommandMenuController {
     context = { ...context, selectionScope: snapshot.selectionScope };
     const selected = state.models.find(model => model.model === state.model
       && (model.provider ?? "openai") === (state.modelProvider ?? "openai") && model.available !== false);
-    const currentName = selected ? modelListEntry(selected.displayName, selected.provider, selected.model).modelName : state.model;
-    const current = `**当前模型：${markdown(currentName, 100)}**\n\n- ${reasoningEffortSettingName(state.effort, selected)}：${markdown(formatReasoningEffort(state.effort ?? selected?.defaultReasoningEffort), 40)}\n- 速度：${markdown(formatServiceTierSetting(state, selected), 200)}\n- 当前提供商：${markdown(formatCodexProviderLabel(state.modelProvider), 100)}\n`;
+    const [modelLine, ...settingLines] = formatConversationModelState(result, value => markdown(value, 140));
+    const current = `**${modelLine}**\n\n${settingLines.map(line => `- ${line}`).join("\n")}\n`;
     if (view !== "model") {
       if (!selected && view === "effort") throw expired();
       const choices: Array<{ label: string; selection: ModelSelectionRequest }> = view === "effort"
@@ -822,8 +823,8 @@ export class QqCommandMenuController {
         `**${session.selector ?? index + 1}. ${markdown(bounded(session.name || session.preview || "未命名", 32), 160)}${session.id === result.currentThreadId ? "（当前）" : background.has(session.id) ? "（后台）" : ""}${session.isPinned ? "（固定）" : ""}**\n`,
         [
           ...(session.model ? [`模型：${markdown(session.model, 60)}`] : []),
-          ...(session.reasoningEffort ? [`思考：${markdown(session.reasoningEffort, 24)}`] : []),
-          ...(session.modelProvider ? [`Provider：${markdown(session.modelProvider, 45)}`] : []),
+          ...(session.reasoningEffort ? [`${reasoningEffortSettingName(session.reasoningEffort)}：${markdown(formatReasoningEffort(session.reasoningEffort), 40)}`] : []),
+          ...(session.modelProvider ? [`Provider：${markdown(formatDisplayedProvider(session.modelProvider), 80)}`] : []),
         ].join(" · ").replace(/^(.+)$/u, "- $1"),
         [
           ...(session.turnCount === undefined ? [] : [`轮数：${session.turnCount}`]),

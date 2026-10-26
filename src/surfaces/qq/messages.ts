@@ -11,9 +11,10 @@ import { formatSurfaceConfigurationChange } from "../configuration-change-format
 import { parseSlashCommand, isEmergencyStopCommand } from "../slash-command.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
+import { formatConversationCollaborationMode } from "../conversation-workspace-status-command-format.js";
 import { resolveSurfaceDelivery, shouldHideCommentary, shouldPreviewTextDelta, shouldHideRoutineNotification, shouldHideRoutineConfiguration } from "../delivery-policy.js";
 import { isSupportedPersistentOutput } from "../persistent-output.js";
-import { shouldHideTurnCompleted } from "../lifecycle-presentation.js";
+import { escapeLifecycleLiteral, shouldHideTurnCompleted } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import { parseQqTextEvent } from "./inbound.js";
 import { parseQqButtonEvent } from "./button-inbound.js";
@@ -833,9 +834,9 @@ export class QqMessages implements SurfaceOutputPort {
           panel.delivered?.();
           return;
         }
-        const text = result.kind === "collaboration-mode" ? `协作模式：${result.state.mode === "plan" ? "Plan" : "Default"}${result.state.pending ? "（下一次 Turn 生效）" : ""}\n下一条普通消息按此模式处理；再次发送 /plan 可切换模式。`
+        const text = result.kind === "collaboration-mode" ? formatConversationCollaborationMode(result, false)
           : result.kind === "outcome" && result.outcome.type === "goal.cleared" ? "已清除当前会话目标。清除不等于停止正在运行的任务；如需停止，请使用 /stop。"
-          : result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome)
+          : result.kind === "outcome" ? formatConversationCommandOutcome(result.outcome, undefined, false)
           : renderConversationCommandResult(result);
         if (!text) throw new Error("QQ 命令没有可交付结果");
         stage = "reply";
@@ -851,7 +852,10 @@ export class QqMessages implements SurfaceOutputPort {
         }, QUERY_COMMANDS.has(command.name)
           ? command.name === "diff" ? "Diff 无法在本次 QQ 回复中完整展示，本次仅发送此提示。请在原生 Codex 会话查看。"
             : "查询结果无法在本次 QQ 回复中完整展示，本次仅发送此提示。统计可缩小 /metrics 查询范围，或在本机 WebUI 查看；账户信息也可从其他已接入渠道查询。"
-          : undefined, undefined, undefined, undefined, undefined, result.kind === "artifacts");
+          : undefined, undefined, undefined,
+          result.kind === "outcome" && result.outcome.type !== "goal.cleared"
+            ? formatConversationCommandOutcome(result.outcome, escapeLifecycleLiteral) : undefined,
+          undefined, result.kind === "artifacts");
         return;
       }
       if ("kind" in message) {
@@ -976,6 +980,7 @@ export class QqMessages implements SurfaceOutputPort {
       catch (error) {
         if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
         input.content = oversizedNotice;
+        markdownDetail = undefined;
       }
     }
     this.replied.add(message);
@@ -991,7 +996,8 @@ export class QqMessages implements SurfaceOutputPort {
     }
     await this.outbox.deliver(input, {
       ...(detail !== undefined && keyboard ? { interactionControls: { content, keyboard, ...(markdownDetail !== undefined ? { markdownContent: markdownDetail } : {}) } }
-        : keyboard ? { representation: "markdown", keyboard } : { preferMarkdown: !preserveLiteral }),
+        : keyboard ? { representation: "markdown", keyboard }
+          : { preferMarkdown: !preserveLiteral, ...(markdownDetail === undefined ? {} : { markdownContent: markdownDetail }) }),
       signal: cancellation ? AbortSignal.any([this.lifetime.signal, cancellation]) : this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
       reserve: parts => this.budget.reserve(recipient, parts, detail !== undefined ? "critical-interaction"

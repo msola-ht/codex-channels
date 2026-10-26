@@ -235,6 +235,13 @@ export function formatTelegramPanelHtml(text: string): string {
       continue;
     }
 
+    // Ordered catalogue rows contain literal names and inline metadata, not a
+    // field label ending at the first colon inside a user-provided name.
+    if (/^\s*\d+[.)]\s+/u.test(line)) {
+      output.push(escaped);
+      continue;
+    }
+
     const field = line.match(/^([^：\n]{1,32}：)(.*)$/);
     if (field) {
       const label = escapeTelegramHtml(field[1]!);

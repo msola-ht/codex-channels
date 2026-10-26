@@ -88,6 +88,8 @@ function wrapCommand(value: string): string | undefined {
   if (
     [...value].length > maximumCommandCharacters
     || value.includes("`")
+    // Pre-escaped literal fields must not expose their Markdown backslashes in code.
+    || value.includes("\\")
   ) {
     return undefined;
   }

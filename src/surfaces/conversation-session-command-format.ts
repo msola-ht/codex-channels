@@ -13,7 +13,15 @@ const maximumProcessCommandCharacters = 160;
 
 export function formatConversationSessions(
   result: Extract<ConversationCommandResult, { kind: "sessions" }>,
+  formatLiteral: (value: string) => string = value => value,
+  formatCommand?: (value: string) => string,
 ): string {
+  const literal = (value: string): string => formatLiteral(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
+  const command = (value: string): string => {
+    const singleLine = value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ");
+    const formatted = formatCommand?.(singleLine);
+    return formatted === undefined || formatted === singleLine ? formatLiteral(singleLine) : formatted;
+  };
   if (result.sessions.length === 0) {
     const scope = result.archived ? "已归档会话" : "可恢复会话";
     return result.page > result.pageCount
@@ -22,19 +30,19 @@ export function formatConversationSessions(
   }
   const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
   return toStructuredMarkdownList([
-    `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${result.view.searchTerm}` : ""}：`,
+    `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${literal(result.view.searchTerm)}` : ""}：`,
     ...result.sessions.map(
       (session, index) =>
-        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${formatReasoningEffort(session.reasoningEffort)}` : ""}${session.modelProvider ? ` · Provider：${formatDisplayedProvider(session.modelProvider)}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
+        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${literal(formatSessionLabel(session.name ?? session.preview))}${session.model ? ` · 模型：${literal(session.model)}` : ""}${session.reasoningEffort ? ` · ${reasoningEffortSettingName(session.reasoningEffort)}：${literal(formatReasoningEffort(session.reasoningEffort))}` : ""}${session.modelProvider ? ` · Provider：${literal(formatDisplayedProvider(session.modelProvider))}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${literal(session.id.slice(0, 12))} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
     ...(result.pageCount > 1
       ? [
           "",
           ...(result.page > 1
-            ? [`上一页：${formatSessionListCommand(result, result.page - 1)}`]
+            ? [`- 上一页：${command(formatSessionListCommand(result, result.page - 1))}`]
             : []),
           ...(result.page < result.pageCount
-            ? [`下一页：${formatSessionListCommand(result, result.page + 1)}`]
+            ? [`- 下一页：${command(formatSessionListCommand(result, result.page + 1))}`]
             : []),
         ]
       : []),
