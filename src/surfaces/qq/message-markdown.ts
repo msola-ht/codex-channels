@@ -51,24 +51,6 @@ export function qqBodyMarkdownRestart(text: string, offset: number): number {
   return text.length;
 }
 
-/** QQ may commit each pending suffix independently. Preview only complete
- * paragraphs/containers so later frames do not depend on their inline syntax. */
-export function qqBodyMarkdownPreview(text: string): string {
-  const safe = qqBodyMarkdownPrefix(text);
-  let fence: MarkdownFence | undefined;
-  let position = 0;
-  let boundary = 0;
-  for (const line of safe.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
-    // Match the safety scanner's container handling. A blank line inside a
-    // list/quote fence must not commit half of that code block to QQ.
-    const content = line.replace(/^(?: {0,3}>[ \t]?| {0,3}(?:[-+*]|\d{1,9}[.)])[ \t])+/u, "");
-    fence = advanceMarkdownFence(fence, content);
-    position += line.length;
-    if (!fence && !line.trim() && line.endsWith("\n")) boundary = position;
-  }
-  return safe.slice(0, boundary);
-}
-
 /** Keep unsafe or incomplete blocks literal while later full blocks retain
  * their Markdown. Active bodies retain the original eight-part quota. */
 export function planQqBodyMarkdown(input: QqTextMessage, markdownStart = 0):

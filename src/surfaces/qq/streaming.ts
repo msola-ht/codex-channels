@@ -5,7 +5,7 @@ import { QQ_PASSIVE_WINDOW_MS, QQ_STREAM_BYTES, QqProtocolError, QqTextSendError
 import type { QqTaskSources, QqTaskSourceReference } from "./task-sources.js";
 import type { QqSendBudget } from "./send-budget.js";
 import { qqBodyMarkdownPrefix } from "./body-markdown.js";
-import { qqBodyMarkdownPreview, qqBodyMarkdownRestart, qqBodyMarkdownText } from "./message-markdown.js";
+import { qqBodyMarkdownRestart, qqBodyMarkdownText } from "./message-markdown.js";
 
 type Body = Extract<OutputEvent, { type: "text.delta" | "text.completed" }>;
 interface Stream {
@@ -221,12 +221,27 @@ export class QqBodyStreaming {
     }
     if (stream.limited || stream.index >= 120) { await this.seal(stream, signal); return; }
     if (stream.text === stream.sent) return;
-    stream.nextUpdateAt ??= performance.now() + 1000;
+    // Start as soon as an eligible prefix exists; throttle subsequent updates.
+    stream.nextUpdateAt ??= performance.now();
     const wait = Math.ceil(stream.nextUpdateAt - performance.now());
     if (wait > 0) await delay(wait, undefined, { signal });
     if (stream.completed || stream.failed || performance.now() >= stream.deadline - 15_000) return;
-    const text = qqBodyMarkdownPreview(stream.text);
-    if (!text.trim() || text === stream.sent) return;
+    // Native Markdown streams take the current full prefix, not complete blocks.
+    // Retain the last grapheme: a later delta may extend it with a combining mark
+    // or emoji joiner, which would invalidate a continuation boundary.
+    const segments = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(stream.text);
+    let stableEnd = 0;
+    for (const segment of segments) stableEnd = segment.index;
+    const safeEnd = qqBodyMarkdownPrefix(stream.text.slice(0, stableEnd)).length;
+    // The safety scanner may stop inside a grapheme (e.g. Prepend + '<').
+    // Align its cut to the original text as well, not to the truncated prefix.
+    let previewEnd = 0;
+    for (const segment of segments) {
+      if (segment.index > safeEnd) break;
+      previewEnd = segment.index;
+    }
+    const text = stream.text.slice(0, previewEnd);
+    if (!text.trim() || text === stream.sent || !text.startsWith(stream.sent)) return;
     if (!this.fitsRemaining(stream, text)) {
       stream.limited = true;
       await this.seal(stream, signal);
