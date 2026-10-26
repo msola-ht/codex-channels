@@ -21,6 +21,7 @@ const messages = {
   export_failed: "公共底座导出或 CLI 校验失败、超时或已取消，请检查锁定 CLI 后重新对比",
   write_failed: "公共底座保存未确认，请重新读取并核对修订与保留备份，勿自动重试",
   busy: "公共底座正在处理另一操作或子进程退出尚未确认，请稍后重试",
+  login_required: "更新公共底座需要先通过 codex login 登录 ChatGPT；未确认登录，不导出或保存底座，继续使用现有底座（默认随项目附带）",
 };
 const candidates = new Map();
 const maximumCandidateBytes = 16 * 1024 * 1024;
@@ -74,6 +75,7 @@ export async function prepareModelBaseUpdate(input, environment = process.env, {
     phase = "read-cli-baseline";
     const expected = JSON.parse(readFileSync(new URL("../src/codex-protocol/version.json", import.meta.url), "utf8")).codexCli;
     if (cliVersion !== expected) fail("export_failed", "version-mismatch");
+    await assertModelBaseLogin(binary, environment, operationSignal);
     let catalog;
     try {
       const exported = JSON.parse(await run(binary, ["debug", "models"], environment, operationSignal, process.cwd(), 32 * modelBaseMaximumBytes));
@@ -89,6 +91,7 @@ export async function prepareModelBaseUpdate(input, environment = process.env, {
     await validateCatalog(binary, catalog, environment, operationSignal);
     phase = "validate-deepseek";
     await validateCatalog(binary, afterDeepseek, environment, operationSignal);
+    await assertModelBaseLogin(binary, environment, operationSignal);
     if (operationSignal.aborted) fail("export_failed", "cancelled");
     assertRevision(state.revision, read(environment));
     phase = "compare";
@@ -136,6 +139,8 @@ export async function applyModelBaseUpdate(input, environment = process.env, { s
   operating = true;
   let savedResult;
   try {
+    await assertModelBaseLogin(resolveCodexUserConfigBinary(environment), environment, signal);
+    candidateFor(input, environment);
     if (!initial.candidate.preview.changed) {
       candidates.delete(input.candidateToken);
       return { status: "unchanged", model: initial.state.provenance.model, revision: initial.state.revision, consistency: "confirmed" };
@@ -146,6 +151,7 @@ export async function applyModelBaseUpdate(input, environment = process.env, { s
     return await withModelBaseSnapshotLock(environment, async () => {
       if (signal?.aborted) fail("export_failed", "cancelled");
       inspectPrivateDirectoryAccessSync(directory);
+      await assertModelBaseLogin(resolveCodexUserConfigBinary(environment), environment, signal);
       const { state, candidate } = candidateFor(input, environment);
       if (candidate !== initial.candidate) fail("stale_revision");
       const backups = join(directory, "backups");
@@ -196,9 +202,17 @@ function differences(before, after, field = "", result = [], beforePresent = tru
     after: afterPresent ? { present: true, value: after } : { present: false } });
   return result;
 }
-async function run(binary, args, environment, signal, cwd, maxOutputBytes) {
+export async function assertModelBaseLogin(binary, environment = process.env, signal) {
+  await run(binary, ["login", "status"], environment, signal, process.cwd(), 65_536, true);
+}
+
+async function run(binary, args, environment, signal, cwd, maxOutputBytes, login = false) {
   try {
-    const result = await runner.run(resolveExecutableInvocation(binary, args, environment), { timeoutMs: 30_000, maxOutputBytes, environment, signal, cwd, strictUtf8: true });
+    const result = await runner.run(resolveExecutableInvocation(binary, args, environment), { timeoutMs: login ? 5_000 : 30_000, maxOutputBytes, environment, signal, cwd, strictUtf8: true });
+    if (login) {
+      if (result.status !== 0 || !result.stderr.split(/\r?\n/u).includes("Logged in using ChatGPT")) fail("login_required");
+      return "";
+    }
     if (result.status !== 0) fail("export_failed", "exit");
     return result.stdout;
   } catch (error) {

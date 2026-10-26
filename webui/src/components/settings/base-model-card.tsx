@@ -32,6 +32,7 @@ export function BaseModelCard({ management, disabled }: { management: ReturnType
         <span className="text-sm text-muted-foreground">{t(snapshot.source === "bundled" ? "baseModel.bundled" : "baseModel.savedSource")}</span>
       </div>}
       <p className="text-sm text-muted-foreground">{t("baseModel.fetchHint")}</p>
+      <p className="text-sm text-muted-foreground">{t("baseModel.loginRequired")}</p>
       {management.actionError && <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert>}
       {(result || management.writeUnconfirmed) && <Alert variant={warning ? "destructive" : "default"}><AlertDescription className="flex flex-col gap-2" aria-live="polite">
         <p>{t(management.writeUnconfirmed ? "baseModel.writeUnknown" : result?.consistency === "unconfirmed" ? "baseModel.readbackUnknown" : result?.status === "unchanged" ? "baseModel.unchanged" : "baseModel.updated")}</p>

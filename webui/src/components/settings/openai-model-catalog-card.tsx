@@ -45,7 +45,7 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
     || catalog.data?.scope !== webSearchTarget.scope
     || configurationRevision !== webSearchTarget.configurationRevision
     || !catalog.data?.models.some(model => model.model === webSearchTarget.model))
-  const detailModel = !catalog.loading && !catalog.error && catalog.data?.scope === selectedModel?.scope
+  const detailModel = !catalog.error && catalog.data?.scope === selectedModel?.scope
     ? catalog.data?.models.find(model => model.model === selectedModel?.id) ?? null : null
   const numbers = new Intl.NumberFormat(language === "zh" ? "zh-CN" : "en-US")
   const context = (value: number | null) => value === null ? t("common.unknown") : numbers.format(value)
@@ -57,7 +57,7 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
   const result = catalog.actionResult?.value
   const warning = catalog.writeUnconfirmed || result?.consistency === "unknown"
   const metadata = catalog.data
-  const showMetadata = metadata !== null && !catalog.loading && !catalog.error
+  const showMetadata = metadata !== null && !catalog.error
   const refreshResult = catalog.actionResult?.kind === "refresh" ? catalog.actionResult.value : null
   const unchanged = catalog.actionResult?.kind === "context" && catalog.actionResult.value.status === "unchanged"
 
@@ -81,7 +81,7 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
           <Button variant="outline" disabled={disabled || catalog.locked || catalog.draft !== null || catalog.data === null || webSearchTarget !== null} onClick={() => void catalog.previewRefresh()}>{catalog.busy && !catalog.draft && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("openAiModelCatalog.refreshConfigured")}</Button>
         </div>
       </div>,
-    models: !catalog.loading && !catalog.error ? catalog.data?.models ?? [] : [],
+    models: !catalog.error ? catalog.data?.models ?? [] : [],
     onSelect: model => { if (metadata) setSelectedModel({ id: model.model, scope: metadata.scope }) },
     renderAction: model => <DropdownMenu><DropdownMenuTrigger ref={node => { if (node) actionTriggers.current.set(model.model, node); else actionTriggers.current.delete(model.model) }} render={<Button variant="outline" size="sm" />} onFocus={event => { actionTriggerRef.current = event.currentTarget }} onPointerDown={event => { actionTriggerRef.current = event.currentTarget }} disabled={disabled || catalog.locked || catalog.draft !== null || webSearchTarget !== null}>{t("modelManagement.actions")}</DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-2rem)]" finalFocus={catalog.draft !== null || webSearchTarget !== null ? false : undefined}><DropdownMenuGroup>
@@ -91,7 +91,7 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, configuratio
           }}>{t("modelProbe.detectWebSearch")}</DropdownMenuItem>
           <DropdownMenuItem disabled={!model.editable || disabled || catalog.locked || catalog.draft !== null} onClick={() => catalog.startEdit(model)}>{t("openAiModelCatalog.adjustContext")}</DropdownMenuItem>
         </DropdownMenuGroup></DropdownMenuContent></DropdownMenu>,
-    content: catalog.loading ? <div aria-busy="true"><Skeleton className="h-28 w-full" /></div>
+    content: catalog.loading && catalog.data === null ? <div aria-busy="true"><Skeleton className="h-28 w-full" /></div>
         : catalog.error ? <SettingsError message={catalog.error} retry={catalog.refresh} />
           : catalog.data && catalog.data.models.length === 0
             ? <SettingsEmpty>{t("openAiModelCatalog.empty")}</SettingsEmpty>

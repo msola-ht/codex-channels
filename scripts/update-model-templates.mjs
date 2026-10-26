@@ -6,6 +6,8 @@ import { isDeepStrictEqual } from "node:util";
 import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { completeModelMessages } from "../runtime/model-template-prompts.mjs";
 import { validateModelBaseCatalog } from "../runtime/model-base-snapshot.mjs";
+import { assertModelBaseLogin } from "./model-base-management.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
 import { packageDir } from "./package-path.mjs";
 import { downloadDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
@@ -88,6 +90,8 @@ async function main() {
   }
   const codexBinary = effectiveCodexBinary("codex", process.env);
   const environment = { ...process.env };
+  const checkLogin = () => withCliProgress("检查公共底座更新登录状态",
+    ({ signal }) => assertModelBaseLogin(codexBinary, environment, signal), { output: null });
   const run = args => {
     const invocation = resolveExecutableInvocation(codexBinary, args, environment);
     const result = spawnSync(invocation.file, invocation.args, { cwd: process.cwd(), env: environment,
@@ -100,6 +104,7 @@ async function main() {
   const expected = JSON.parse(readFileSync(join(packageDir, "src/codex-protocol/version.json"), "utf8")).codexCli;
   if (cliVersion !== expected) throw new Error(`CLI 版本与项目基线不一致：需要 ${expected}，实际 ${cliVersion}`);
   if (updateBase) {
+    await checkLogin();
     const catalog = JSON.parse(run(["debug", "models"]));
     if (!Array.isArray(catalog.models) || catalog.models.length === 0) throw new Error("Codex 导出目录缺少第一个模型");
     base = { models: [catalog.models[0]] };
@@ -129,6 +134,7 @@ async function main() {
   for (const catalog of [base, source, completed]) await validateModelCatalogWithCodex(catalog, process.env, codexBinary);
   console.log("三份目录已通过 Codex 加载校验。");
   if (!args.includes("--write")) { console.log(`仅对比，未写入。确认差异后使用${updateBase ? " --update-base" : ""} --write 更新。`); return; }
+  if (updateBase) await checkLogin();
 
   const lock = join(directory, ".model-catalog-update.lock");
   writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });

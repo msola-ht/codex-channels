@@ -23,7 +23,7 @@ export function ProviderModelCatalogs({ local, management, onChanged, renderCata
   const [selected, setSelected] = useState<{ provider: string; model: string; revision: string } | null>(null)
   const selectedCatalog = local.data?.catalogs.find(catalog => catalog.provider === selected?.provider)
   const stale = selected !== null && selectedCatalog?.revision !== selected.revision
-  const detailModel = !local.loading && local.error === null && !stale
+  const detailModel = local.error === null && !stale
     ? selectedCatalog?.models.find(model => model.id === selected?.model)?.presentation ?? null : null
   const localOnly = management.settings === null || management.error !== null || !local.matchesManagement
   const readOnly = localOnly || local.loading || local.error !== null
@@ -44,7 +44,7 @@ export function ProviderModelCatalogs({ local, management, onChanged, renderCata
       : local.data === null ? <p>{t("modelCatalog.localUnavailable")}</p> : <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty>,
   })
   return <>
-    {readOnly && <Alert><AlertDescription className="flex flex-col items-start gap-3">
+    {(localOnly || local.error !== null) && <Alert><AlertDescription className="flex flex-col items-start gap-3">
       <p>{t("modelCatalog.localReadOnly")}</p>
       {!local.matchesManagement && management.settings !== null && management.error === null && !management.loading && !local.loading && local.error === null
         ? <><p>{t("modelCatalog.managementMismatch")}</p><Button variant="outline" size="sm" disabled={management.busy || management.pendingPreview !== null} onClick={() => { management.refetch(); local.refetch() }}>{t("common.retry")}</Button></> : null}

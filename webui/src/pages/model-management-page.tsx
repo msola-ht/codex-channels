@@ -95,7 +95,7 @@ export function ModelConfigurationPage() {
   const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog(); reloadLocalCatalogs(); reloadBase() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog, reloadLocalCatalogs, reloadBase])
   const otherBusy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
   const busy = otherBusy || base.busy || base.pendingPreview !== null
-  const codexSettings = !codex.loading && codex.error === null && !codex.readbackRequired ? codex.codexSettings : null
+  const codexSettings = codex.error === null ? codex.codexSettings : null
   const defaultModel = codexSettings?.models.find(model => model.model === codexSettings.defaults.configuredModel)
   const localOnly = providers.settings === null || providers.error !== null || !localCatalogs.matchesManagement
   const providerCatalogs = localOnly ? localCatalogs.data?.catalogs ?? [] : providers.settings?.modelCatalogs ?? []
@@ -132,7 +132,7 @@ export function ModelConfigurationPage() {
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2"><Button variant="outline" size="sm" nativeButton={false} render={<Link to={`/models/providers${providerReturnSearch}`} />}>{t("providerDirectory.backToProviders")}</Button>{selectedProvider && <div className="flex min-w-0 flex-wrap items-center gap-2"><Badge variant="outline">{selectedProvider}</Badge><Button variant="outline" size="sm" onClick={() => setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete("provider"); return next })}>{t("providerDirectory.allModels")}</Button></div>}</div>
             {selectedProvider && selectedProvider !== "openai" && selectedCatalogIds.size === 0 && <SettingsEmpty>{t(providers.loading || localCatalogs.loading ? "common.loading" : localOnly && (localCatalogs.error !== null || localCatalogs.data === null) ? "modelCatalog.localUnavailable" : "providerDirectory.noCatalog")}</SettingsEmpty>}
-            <ModelCatalogTable label={t("modelCatalog.title")} groups={[{ ...official, webSearchSettings: providers.settings?.webSearchSettings.filter(entry => entry.provider === "openai"), webSearchState: providers.loading ? "loading" as const : providers.error !== null ? "error" as const : undefined }, ...thirdParty].filter(group => !selectedProvider || group.id === "third-party-status" || (selectedProvider === "openai" ? group.id === "openai" : selectedCatalogIds.has(group.id)))} />
+            <ModelCatalogTable label={t("modelCatalog.title")} groups={[{ ...official, webSearchSettings: providers.settings?.webSearchSettings.filter(entry => entry.provider === "openai"), webSearchState: providers.error !== null ? "error" as const : providers.settings === null && providers.loading ? "loading" as const : undefined }, ...thirdParty].filter(group => !selectedProvider || group.id === "third-party-status" || (selectedProvider === "openai" ? group.id === "openai" : selectedCatalogIds.has(group.id)))} />
           </CardContent>
         </Card>
       } />
