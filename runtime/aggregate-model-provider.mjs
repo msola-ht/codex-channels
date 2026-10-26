@@ -179,7 +179,7 @@ export function loadAggregateModelMaterial(environment, expectedMembers) {
   }
   assertResponsesContextSyncComplete(environment);
   const first = profiles[0];
-  return { catalog: withThirdPartyRuntimeTools({ models }), routes, profiles, files, fingerprint,
+  return { catalog: withThirdPartyRuntimeTools({ models }, environment), routes, profiles, files, fingerprint,
     defaultModel: `${first.provider}/${first.model}`, reasoningEffort: first.reasoningEffort };
 }
 

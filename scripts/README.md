@@ -10,6 +10,10 @@
 
 ## 配置与 Workspace
 
+- `model-base-management.mjs` / `model-base-management.d.mts`：CLI 与 WebUI 共用的公共底座读取、候选导出、字段对比、确认保存与资源关闭。导出复用受管子进程并有总期限，候选有界且绑定底座修订，确认不重新获取；私有备份、进程间锁、原子替换和回读区分保存事实与结果不确定。见[公共底座更新](../docs/deepseek.md#公共底座更新)。
+- `model-base-command.mjs`：`codexc model-base status/update` 与 Setup 公共底座入口；完整显示字段前后值，支持只预览 JSON，写入须交互确认。
+- `webui-management-model-base-route.mjs`：公共底座 GET、预览与保存路由，复用管理认证、限速、单次确认及审计；绑定候选与预览，断连取消自有导出，服务关闭等待自有进程收尾。
+
 - `qq-passive-observation.mjs`：用户明确要求保留的源码工作区手动探测入口，不纳入 npm 包或正式 CLI。
   正式 QQ 禁用且配置生效后，用 `--run` 启动；Gateway 的其他渠道可继续运行，独立 QQ 探测锁阻止同配置同账号的重复探测。
   默认 `--run` 最多 180 秒等待唯一允许用户的随机口令，使用原消息 ID 被动回复一次；另有固定数量文字样例、重复序号/次数、
@@ -234,7 +238,7 @@
   保留原 Key，Origin 变化时强制重新输入且写入前不复用旧 Key；新增拒绝覆盖 config 或私有备份中的已有 Provider ID。
   无效旧 URL 按不可复用 Key 处理，允许输入新 URL 与新 Key 修复。保留其他候选块，只移除与自定义
   主 Provider 冲突的顶层 `openai_base_url`。
-- `responses-model-templates.mjs` / `responses-model-templates.d.mts`：为显式模板更新和受管固定模型生成读取单一 OpenAI 底座与仓库 DS 补全模板，不读取当前 CLI 官方名单或账户目录。独立新增使用 `model-catalog.mjs` 的通用草稿，不再维护另一套模板草稿接口。
+- `responses-model-templates.mjs` / `responses-model-templates.d.mts`：为显式模板更新和受管固定模型生成读取当前有效公共底座，并从仓库 DS 原始目录按该底座补全模板，不读取当前 CLI 官方名单或账户目录。独立新增使用 `model-catalog.mjs` 的通用草稿，不再维护另一套模板草稿接口。
 - `custom-model-capability-probe.mjs` / `custom-model-capability-probe.d.mts`：CLI 与 WebUI 共用的单项工具探测；按用户选择验证 apply_patch 或 tool_search 的调用及模拟结果接续，不执行返回的工具。另支持一次有界流式原生 web_search 诊断，上游可能实际搜索并计费，仅完整结构化搜索证据算通过；结构化工具拒绝复用 Provider Proxy 分类器及实际出站工具索引，覆盖 HTTP、顶层和选择项流错误；使用手填思考等级和安全结果，不写配置。
   工具探测的每步非流式成功响应必须声明与请求精确相同的模型 ID；缺失、无效或错模型返回无法确认，不以请求 ID 代替响应证据，也不自动解析模型别名。
 - `custom-model-capability-setup.mjs` / `custom-model-capability-setup.d.mts`：CLI 逐模型、逐项询问 apply_patch 和 tool_search，支持手动选择或显式探测本项；用户选择采用结果后才回填草稿，最终复用 Provider 预览和目录事务。原生网页搜索默认跳过，仅诊断，不回填工具能力或改变搜索策略。
@@ -410,7 +414,7 @@
 - `managed-provider-account-plan.mjs` / `managed-provider-account-plan.d.mts`：受管账户固定模式与自定义切换注册表的兼容性检查；DS、CCG、CLP 共用编辑的模式、凭据保留和变化计算，拒绝缺失默认模型，预览不暴露凭据。账户计划快照包含相关配置、注册表及当前固定凭据版本，以私有 HMAC 修订绑定预览，执行时拒绝过期确认，不公开凭据摘要。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。使用用户配置定位主 Socket，源码拆分入口直接运行时也遵守显式配置文件、用户数据目录与默认用户配置的优先级，不回退仓库配置。
 - `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，构建时复用 `runtime/model-catalog.mjs` 收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；调用方取消覆盖请求、正文读取及重试等待，取消后不重试。拒绝响应时释放正文；不导入账户菜单或管理事务。
-- `update-model-templates.mjs`：源码仓库维护入口；默认仅下载 DS 官方目录，用已保存公共底座补全提示词并报告字段差异，保持底座及其来源不变。`--update-base` 显式从锁定 CLI 内置目录按原始顺序提取第一个模型，记录实际模型 ID，用已保存 DS 原始目录重新补全，不下载 DS；两种操作均默认只对比，`--write` 在 Codex 加载校验后才保存所选更新。复用快照须与来源哈希一致；不更新已配置账户，不执行下载脚本，不进入安装包命令入口。操作与边界见[DS 模板维护](../docs/deepseek.md#仓库模板维护)。
+- `update-model-templates.mjs`：源码仓库维护入口；默认仅下载 DS 官方目录，用已保存公共底座补全提示词并报告字段差异，保持底座及其来源不变。`--update-base` 在当前 Codex 环境运行锁定 CLI 的 `debug models`（不带 `--bundled`），按输出顺序提取第一个模型，记录实际模型 ID，用已保存 DS 原始目录重新补全，不下载 DS；导出使用 CLI 配置、认证与缓存策略，可能联网或更新缓存。两种操作均默认只对比仓库快照，`--write` 在隔离的 Codex 加载校验后才保存所选更新。复用快照须与来源哈希一致；不更新已配置账户，不执行下载脚本，不进入安装包命令入口。操作与边界见[DS 模板维护](../docs/deepseek.md#仓库模板维护)。
 - `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 多账户配置、默认账户与删除事务；新建目录记录逐模型来源关联，重新配置保留已有目录，不隐式补全模板。首次下载及复用目录均在账户文件写入前通过当前 Codex 完整目录校验。
 - `deepseek-account-setup.mjs` / `deepseek-account-setup.d.mts`：DS Setup 菜单与 `codexc provider deepseek` 入口，复用管理事务和既有模型设置菜单。
 - `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、

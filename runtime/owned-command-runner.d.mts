@@ -10,6 +10,8 @@ export class OwnedCommandRunner {
     timeoutMs: number;
     signal?: AbortSignal;
     input?: string;
+    cwd?: string;
+    strictUtf8?: boolean;
     environment?: NodeJS.ProcessEnv;
     maxOutputBytes?: number;
   }): Promise<{ status: number | null; stdout: string; stderr: string }>;

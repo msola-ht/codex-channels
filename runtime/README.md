@@ -1,5 +1,9 @@
 # 共享运行时基础设施
 
+下文“固定底座”指已保存的有效快照；`model-template-catalog.mjs` 和本地工具投影均通过 `model-base-snapshot.mjs` 读取，CLI 与 WebUI 显式确认更新前不会自动刷新。`model-catalog-base.json` 则专指安装包内初始快照，由源码维护脚本更新。
+
+`model-base-snapshot.mjs` / `model-base-snapshot.d.mts` 读取 Gateway 数据目录中的公共底座快照，缺失时使用项目初始快照，损坏或不支持版本拒绝。快照含原始单模型目录和来源，DS 模板从保留的原始 DS 目录按有效底座补全；显式创建及模板更新消费该底座，已有账户目录读取不注入新提示词。保存与预览由 `scripts/model-base-management.mjs` 负责，恢复流程见[公共底座更新](../docs/deepseek.md#公共底座更新)。
+
 `message-display-policy.mjs` 统一定义九个显示字段、渠道支持矩阵及 `concise` / `standard` / `detailed` / `full` 四项预设。预设只供管理入口一次应用现有字段，不是持久化键或运行模式；`identifyMessageDisplayPreset` 按有效值及目标支持字段识别，无法匹配时为只读 `custom`。默认配置识别为 `standard`，缺省与继承仍逐字段处理。
 
 完整预设采用 `operation_updates = "full"`、`presentation_detail = "full"` 并开启 `reasoning`，展开环境、本轮统计分项及审批详情，过滤重复过程通知。静默、紧凑和详细预设关闭思考状态，详细及完整完成卡仍显示已有推理次数。默认值不变，不自动改写已有配置；旧详细组合需重新应用预设才关闭已保存的思考开关。
@@ -183,8 +187,8 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `model-catalog.mjs` / `model-catalog.d.mts`：模型定义、字段编译和来源适配的纯数据层；`createIndependentModelDraft` 为 CLI、WebUI 初始配置及统一新增提供通用编程提示词与本地工具声明，保留显式指令或模板提示词的优先级，不推断上游能力或自动绑定模板。保留已有模型验证、上下文设置及 DS 能力投影。
 - `model-template-prompts.mjs` / `model-template-prompts.d.mts`：纯 JSON 提示词补全，保留显式值，补缺失文本及必要 token-budget 配套字段；`approvals: null` 是继承基础审批提示词的例外。
 - `model-template-bindings.mjs` / `model-template-bindings.d.mts`：严格读取 manifest 的逐模型来源关联，拒绝孤立引用；`validateClinePassCatalogManifest` 共用于保存与移除，区分保留的旧 Cline 来源记录和新固定 DS 来源，未知字段或不一致失败关闭，不隐式迁移。
-- `model-template-catalog.mjs` / `model-template-catalog.d.mts`：读取固定仓库底座，在显式新增模型时补全并固化 `model_messages`／`modelMessages`。自定义入口共享 `withCustomBaseTemplate`，仅为新模型记录缺省底座来源，并合并固定底座的 `send_user_message_async`、`clock` 到 `experimentalSupportedTools`，保留已有其他声明；官方底座读取和目录模板投影将已知来源模型身份改为通用助手身份，并保留独立审批中文回复要求及两项受控本地工具声明。主提示词保留来源正文与显式空值，不追加中文时钟指导；缺失辅助提示词沿用 `completeModelMessages`，原始快照及用户显式指令保留。`tool_mode`、`node_repl_auto_review_required`、`web_search_tool_type` 分别涉及执行架构、Guardian 审核策略及托管搜索格式，不作为本地工具前提自动继承。显式模板更新重新读取已保存底座；读取、普通编辑、删除及调整已有模型窗口不执行模板补全。
-- `model-catalog-base.json`：按项目锁定 Codex CLI 内置目录的原始顺序抽取第一个模型，保存为单模型固定快照，并记录实际模型 ID；不依赖固定名称。只有维护脚本显式 `--update-base --write` 才更新，不随 CLI 升级或 DS 维护刷新。源模型的上下文、思考等级、加速和工具声明不能视为第三方实际能力。
+- `model-template-catalog.mjs` / `model-template-catalog.d.mts`：读取当前有效公共底座，在显式新增模型时补全并固化 `model_messages`／`modelMessages`。自定义入口共享 `withCustomBaseTemplate`，仅为新模型记录缺省底座来源，并合并固定底座的 `send_user_message_async`、`clock` 到 `experimentalSupportedTools`，保留已有其他声明；官方底座读取和目录模板投影将已知来源模型身份改为通用助手身份，并保留独立审批中文回复要求及两项受控本地工具声明。主提示词保留来源正文与显式空值，不追加中文时钟指导；缺失辅助提示词沿用 `completeModelMessages`，原始快照及用户显式指令保留。`tool_mode`、`node_repl_auto_review_required`、`web_search_tool_type` 分别涉及执行架构、Guardian 审核策略及托管搜索格式，不作为本地工具前提自动继承。显式模板更新重新读取已保存底座；读取、普通编辑、删除及调整已有模型窗口不执行模板补全。
+- `model-catalog-base.json`：从项目锁定 Codex CLI 的 `debug models` 输出按顺序抽取第一个模型，保存为单模型固定快照，并记录实际模型 ID；不依赖固定名称。导出使用当前 Codex 环境和 CLI 配置、认证与缓存策略，不带 `--bundled`。只有维护脚本显式 `--update-base --write` 才更新，不随 CLI 升级或 DS 维护刷新。源模型的上下文、思考等级、加速和工具声明不能视为第三方实际能力。
 - `model-catalog-deepseek-source.json` / `model-catalog-deepseek.json`：分别保存 DS 官方原始目录与提示词补全目录。保留 DS 已有字段，仅补缺失提示词及必要的 token-budget 配套结构；`approvals: null` 是明确允许继承基础审批提示词的例外。
 - `model-catalog-sources.json`：上述模板的 CLI 版本、来源和 SHA-256。四份快照由 `scripts/update-model-templates.mjs` 显式对比、校验、更新；基础快照供显式目录生成补全提示词，DS 补全目录供 CLP Flash 与 CP 导入，不采用某个 DS 账户设置。维护步骤见[DS 模板维护](../docs/deepseek.md#仓库模板维护)。
 - `model-catalog-presentation.mjs` / `model-catalog-presentation.d.mts`：OpenAI 缓存与第三方保存目录共用的纯展示投影；白名单能力、加速倍率、审批声明与按需提示词分组，不执行文件读写、不推断未声明能力。

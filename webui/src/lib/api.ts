@@ -1,5 +1,6 @@
 import type { ResetCreditSnapshot, ResetCreditPreview, ResetCreditResult } from "./types"
 import type {
+  BaseModelSnapshot, BaseModelPreviewInput, BaseModelPreview, BaseModelUpdateResult,
   ManagementProviderWebSearchProbeInput, ManagementProviderWebSearchProbeResult,
   ManagementCustomModelProbeInput, ManagementCustomModelProbeResult,
   ServiceLogTarget, ServiceLogsResponse,
@@ -402,6 +403,18 @@ export function fetchUpstreamUserAgent(signal?: AbortSignal): Promise<UpstreamUs
 
 export function fetchManagementProviders(signal?: AbortSignal): Promise<ManagementProvidersResponse> {
   return getJson<ManagementProvidersResponse>(`${API_PREFIX}/management/providers`, signal)
+}
+
+export function fetchBaseModel(signal?: AbortSignal): Promise<BaseModelSnapshot> {
+  return getJson(`${API_PREFIX}/management/models/base`, signal)
+}
+
+export function previewBaseModel(input: BaseModelPreviewInput, signal?: AbortSignal): Promise<{ preview: BaseModelPreview; confirmationToken: string; confirmationExpiresAt: number }> {
+  return requestJson(`${API_PREFIX}/management/models/base/preview`, { method: "POST", body: JSON.stringify(input) }, signal, 45_000)
+}
+
+export function updateBaseModel(input: BaseModelPreviewInput, candidateToken: string, confirmationToken: string, signal?: AbortSignal): Promise<BaseModelUpdateResult> {
+  return requestJson(`${API_PREFIX}/management/models/base`, { method: "POST", body: JSON.stringify({ ...input, candidateToken, confirmationToken }) }, signal)
 }
 
 export function fetchOpenAiModelCatalog(signal?: AbortSignal): Promise<OpenAiModelCatalogResponse> {

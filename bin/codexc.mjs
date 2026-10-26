@@ -104,6 +104,7 @@ const helpText = {
 接入与账户：
   setup [--jsonl]               交互配置 Provider、通讯渠道与项目技能
   provider                     管理 Provider 与各家账户
+  model-base                   查看公共底座、对比并确认更新
 
 状态与服务：
   status [目标]                查看后台服务状态
@@ -333,6 +334,9 @@ async function executeCommand(command, args) {
 
 async function dispatchCommand(command, args) {
   switch (command) {
+    case "model-base":
+      await (await import("../scripts/model-base-command.mjs")).runModelBaseCommand(args);
+      break;
     case "video-mcp":
       await (await import("../scripts/video-analysis-mcp.mjs")).runVideoMcp(args);
       break;

@@ -123,7 +123,7 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
       catalog = JSON.parse(createProviderFileReader(environment)(paths.catalog, 2_097_152));
     } else {
       const downloaded = await (options.downloadCatalog ?? downloadDeepseekCatalog)(options.fetchImpl ?? fetch);
-      catalog = createManagedDeepseekCatalog(downloaded.catalog);
+      catalog = createManagedDeepseekCatalog(downloaded.catalog, undefined, null, environment);
       updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
       const modelIds = catalog.models.map(model => model.slug);
       const modelTemplates = readModelTemplateBindings({ modelTemplates: Object.fromEntries(

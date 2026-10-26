@@ -9,6 +9,8 @@
 
 ## 命令范围
 
+`model-base status [--json]` 读取公共底座模型、来源与修订；`model-base update` 获取候选、显示完整字段前后值并交互确认保存。`update --preview [--json]` 只对比底座，不保存；Codex 命令自身可能联网或刷新缓存。Setup → 模型与提供商 → 公共底座更新复用同一入口，已有账户模型仍须显式更新模板。
+
 独立入口 `strata-video-mcp.mjs` 直接调用视频分析模块，由 npm 安装为跨平台的 `strata-video-mcp` 命令。不经过 Gateway CLI 分派，不启动服务或连接 App Server。
 
 `delivery` 委托 `scripts/delivery-command.mjs` 离线查看和处理未确认渠道投递；参数与备份恢复步骤见 [投递箱运维](../docs/delivery.md)。

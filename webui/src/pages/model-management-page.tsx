@@ -8,12 +8,14 @@ import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-managemen
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { useOpenAiModelCatalog } from "@/hooks/use-openai-model-catalog"
+import { useBaseModelManagement } from "@/hooks/use-base-model-management"
 import { useProviderModelCatalogs } from "@/hooks/use-provider-model-catalogs"
 import { ModelDisplayGroups } from "@/components/settings/model-display-groups"
 import { useTranslation } from "@/hooks/use-translation"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { fetchManagementProviders, fetchSettingsSummary } from "@/lib/api"
 import { OpenAiModelCatalogCard } from "@/components/settings/openai-model-catalog-card"
+import { BaseModelCard } from "@/components/settings/base-model-card"
 import { ModelCatalogTable } from "@/components/settings/model-catalog-columns"
 import { ProviderSettingsManagement } from "@/components/settings/provider-settings-management"
 import { ProviderModelCatalogs } from "@/components/settings/provider-model-catalogs"
@@ -74,6 +76,8 @@ export function ModelConfigurationPage() {
   const [providerEditing, setProviderEditing] = useState(false)
   const [groupsEditing, setGroupsEditing] = useState(false)
   const catalog = useOpenAiModelCatalog()
+  const base = useBaseModelManagement()
+  const reloadBase = base.refetch
   const reloadCatalog = catalog.refresh
   const codex = useCodexSettingsManagement()
   const providers = useProviderSettingsManagement()
@@ -86,15 +90,16 @@ export function ModelConfigurationPage() {
   useEffect(() => { if (channelSaved) resetChannelDraft() }, [channelSaved, resetChannelDraft])
   const reloadCodex = codex.refetch, reloadProviders = providers.refetch, reloadGateway = gateway.refetch
   const reloadLocalCatalogs = localCatalogs.refetch
-  const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog(); reloadLocalCatalogs() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog, reloadLocalCatalogs])
-  const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
+  const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway(); reloadCatalog(); reloadLocalCatalogs(); reloadBase() }, [reloadCodex, reloadProviders, reloadGateway, reloadCatalog, reloadLocalCatalogs, reloadBase])
+  const otherBusy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
+  const busy = otherBusy || base.busy || base.pendingPreview !== null
   const codexSettings = !codex.loading && codex.error === null && !codex.readbackRequired ? codex.codexSettings : null
   const defaultModel = codexSettings?.models.find(model => model.model === codexSettings.defaults.configuredModel)
   const localOnly = providers.settings === null || providers.error !== null || !localCatalogs.matchesManagement
   const providerCatalogs = localOnly ? localCatalogs.data?.catalogs ?? [] : providers.settings?.modelCatalogs ?? []
   const selectedCatalogIds = new Set(providerCatalogs.filter(item => item.providers.includes(selectedProvider ?? "")).map(item => `provider:${item.provider}`))
-  return <SettingsPageFrame title="modelManagement.models" busy={busy || catalog.pageBusy || localCatalogs.loading || providerEditing || groupsEditing || channelEditing} refresh={refresh}>
-    <SettingsNavigationGuard editing={providerEditing || groupsEditing || catalog.draft !== null || channelEditing} locked={providers.busy || providers.pendingPreview !== null || catalog.busy || catalog.pendingPreview !== null || gateway.saving || gateway.pendingSetting !== null} />
+  return <SettingsPageFrame title="modelManagement.models" busy={busy || base.loading || catalog.pageBusy || localCatalogs.loading || providerEditing || groupsEditing || channelEditing} refresh={refresh}>
+    <SettingsNavigationGuard editing={providerEditing || groupsEditing || catalog.draft !== null || channelEditing} locked={providers.busy || providers.pendingPreview !== null || catalog.busy || catalog.pendingPreview !== null || gateway.saving || gateway.pendingSetting !== null || base.busy || base.pendingPreview !== null} />
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="text-sm font-medium">{t("settingsFields.primaryDefaults")}</span>
@@ -109,6 +114,7 @@ export function ModelConfigurationPage() {
       </div>
     </div>
     <p className="text-sm text-muted-foreground">{t("globalSettings.scopeHint")}</p>
+    <BaseModelCard management={base} disabled={otherBusy || catalog.pageBusy || providerEditing || groupsEditing || channelEditing} />
     {codex.error && <SettingsError message={codex.error} retry={reloadCodex} />}
     <OpenAiModelCatalogCard catalog={catalog} disabled={busy || providers.error !== null} configurationRevision={providers.settings?.resourceRevision ?? null}
       renderCatalog={official =>

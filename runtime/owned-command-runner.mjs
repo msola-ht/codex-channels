@@ -30,7 +30,7 @@ export class OwnedCommandRunner {
   #entries = new Set();
   constructor() { runners.add(this); }
 
-  run(invocation, { timeoutMs, signal, input, environment = process.env, maxOutputBytes = 65_536 } = {}) {
+  run(invocation, { timeoutMs, signal, input, cwd, strictUtf8 = false, environment = process.env, maxOutputBytes = 65_536 } = {}) {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0
       || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0) {
       return Promise.reject(new OwnedCommandError("invalid-budget"));
@@ -41,7 +41,7 @@ export class OwnedCommandRunner {
     try {
       const owned = supervisedCliInvocation(ownedProcessInvocation(invocation, environment), { forwardInput: input !== undefined });
       child = spawn(owned.file, owned.args, {
-        env: environment, detached: process.platform !== "win32", windowsHide: true,
+        env: environment, cwd, detached: process.platform !== "win32", windowsHide: true,
         windowsVerbatimArguments: owned.windowsVerbatimArguments,
         stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       });
@@ -86,7 +86,12 @@ export class OwnedCommandRunner {
           ...(reason ? { cause: new OwnedCommandError(reason) } : {}),
         }));
         else if (reason) reject(new OwnedCommandError(reason));
-        else accept({ status: code, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") });
+        else {
+          const output = Buffer.concat(stdout);
+          const text = output.toString("utf8");
+          if (strictUtf8 && !Buffer.from(text, "utf8").equals(output)) reject(new OwnedCommandError("decode"));
+          else accept({ status: code, stdout: text, stderr: Buffer.concat(stderr).toString("utf8") });
+        }
         stdout = []; stderr = [];
       })();
     };

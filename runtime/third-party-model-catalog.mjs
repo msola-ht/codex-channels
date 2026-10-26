@@ -1,12 +1,12 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ensurePrivateDirectorySync, readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
+import { readModelBaseSnapshot } from "./model-base-snapshot.mjs";
 
 const maximumBytes = 8 * 1024 * 1024;
 const localToolNames = ["send_user_message_async", "clock"];
 
-function readLocalTools() {
-  const catalog = JSON.parse(readFileSync(new URL("./model-catalog-base.json", import.meta.url), "utf8"));
+function readLocalTools(environment) {
+  const catalog = readModelBaseSnapshot(environment).catalog;
   if (!catalog || !Array.isArray(catalog.models) || catalog.models.length !== 1
     || typeof catalog.models[0]?.slug !== "string" || !catalog.models[0].slug.trim()) {
     throw new Error("基础模型模板缺失、无效或不唯一");
@@ -20,11 +20,11 @@ function readLocalTools() {
 }
 
 /** Shared by explicit template projections and runtime snapshots; never mutate the source. */
-export function withThirdPartyLocalTools(catalog) {
+export function withThirdPartyLocalTools(catalog, environment = process.env) {
   if (!catalog || !Array.isArray(catalog.models) || catalog.models.length === 0) {
     throw new Error("第三方运行模型目录缺少模型");
   }
-  const localTools = readLocalTools();
+  const localTools = readLocalTools(environment);
   return {
     models: catalog.models.map(model => {
       if (!model || typeof model.slug !== "string" || !model.slug.trim()) {
@@ -39,7 +39,7 @@ export function withThirdPartyLocalTools(catalog) {
   };
 }
 
-export function writeThirdPartyRuntimeModelCatalog(sourcePath, dataDir, provider) {
+export function writeThirdPartyRuntimeModelCatalog(sourcePath, dataDir, provider, environment = process.env) {
   if (typeof provider !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(provider)) {
     throw new Error("第三方运行模型目录 Provider 无效");
   }
@@ -49,7 +49,7 @@ export function writeThirdPartyRuntimeModelCatalog(sourcePath, dataDir, provider
   } catch {
     throw new Error("无法安全读取第三方模型目录");
   }
-  const content = `${JSON.stringify(withThirdPartyRuntimeTools(catalog))}\n`;
+  const content = `${JSON.stringify(withThirdPartyRuntimeTools(catalog, environment))}\n`;
   if (Buffer.byteLength(content) > maximumBytes) throw new Error("第三方运行模型目录超过 8 MiB");
   const runtimeDirectory = join(dataDir, "runtime");
   ensurePrivateDirectorySync(runtimeDirectory);
@@ -61,7 +61,7 @@ export function writeThirdPartyRuntimeModelCatalog(sourcePath, dataDir, provider
 }
 
 /** Responses Lite suppresses hosted tools and selects OpenAI's standalone executor. */
-export function withThirdPartyRuntimeTools(catalog) {
-  const projected = withThirdPartyLocalTools(catalog);
+export function withThirdPartyRuntimeTools(catalog, environment = process.env) {
+  const projected = withThirdPartyLocalTools(catalog, environment);
   return { models: projected.models.map(model => ({ ...model, use_responses_lite: false })) };
 }

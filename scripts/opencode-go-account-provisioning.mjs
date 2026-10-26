@@ -128,7 +128,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
 
   let catalogState;
   try {
-    catalogState = await loadCatalog(plan, { fetchImpl, downloadCatalog });
+    catalogState = await loadCatalog(plan, { fetchImpl, downloadCatalog, environment });
   } catch (error) {
     throw normalize("catalog-unavailable", "catalog", error);
   }
@@ -433,7 +433,7 @@ async function buildPlan(
   };
 }
 
-async function loadCatalog(plan, { fetchImpl, downloadCatalog }) {
+async function loadCatalog(plan, { fetchImpl, downloadCatalog, environment }) {
   if (!plan.downloadsCatalog) {
     return {
       catalog: JSON.parse(readPrivateFileSync(
@@ -446,7 +446,7 @@ async function loadCatalog(plan, { fetchImpl, downloadCatalog }) {
     };
   }
   const downloaded = await downloadCatalog(fetchImpl);
-  const { catalog, templateBindings } = createOpencodeGoCatalogWithTemplateBindings(downloaded.catalog);
+  const { catalog, templateBindings } = createOpencodeGoCatalogWithTemplateBindings(downloaded.catalog, environment);
   return {
     catalog,
     manifest: {

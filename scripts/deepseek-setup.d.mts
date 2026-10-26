@@ -20,4 +20,5 @@ export function createManagedDeepseekCatalog(
     windowPercent?: number;
   }>,
   windowPercent?: number | null,
+  environment?: NodeJS.ProcessEnv,
 ): { models: Array<Record<string, unknown>> };

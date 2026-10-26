@@ -1,5 +1,4 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { codexHomePath } from "../runtime/codex-home.mjs";
@@ -9,6 +8,7 @@ import { managedProviderDirectory, managedProviderMarkerPath, withManagedModelCa
 import { createResponsesModelCatalog, readResponsesModelCatalog, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite, compileResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { withThirdPartyLocalTools } from "../runtime/third-party-model-catalog.mjs";
+import { readDeepseekModelTemplateCatalog, readModelBaseSnapshot, withModelBaseSnapshotLock } from "../runtime/model-base-snapshot.mjs";
 import { resolveClinePassRequestProfile } from "../runtime/chat-reasoning.mjs";
 import { validateClinePassProviderOptions } from "../runtime/cline-provider-options.mjs";
 import { createIndependentModelDraft, isValidCustomModelId } from "../runtime/model-catalog.mjs";
@@ -42,6 +42,8 @@ export async function loadProviderModelAdditionOptions(provider, {
     const operationSignal = signal ? globalThis.AbortSignal.any([signal, deadline]) : deadline;
     operationSignal.throwIfAborted();
     const state = await readState(provider, environment);
+    const baseRevision = manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "inheritFrom")
+      ? undefined : readModelBaseSnapshot(environment).revision;
     let models, bindings = {}, source;
     if (manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "inheritFrom")) {
       if (Array.isArray(manualModel)
@@ -86,8 +88,8 @@ export async function loadProviderModelAdditionOptions(provider, {
       try {
         const catalog = createResponsesModelCatalog([{ ...createIndependentModelDraft(manualModel),
           ...(chat ? { supportsImageDetailOriginal: false } : {}),
-        }], manualModel.id, { allowReasoningToggle: clinePass });
-        models = state.custom ? catalog.definitions : withThirdPartyLocalTools(catalog).models;
+        }], manualModel.id, { allowReasoningToggle: clinePass }, environment);
+        models = state.custom ? catalog.definitions : withThirdPartyLocalTools(catalog, environment).models;
         validateModel(models[0], state);
       } catch (error) {
         throw invalid("invalid-input", "manualModel", "手动模型 ID、上下文、默认思考等级或能力定义无效", error);
@@ -95,7 +97,7 @@ export async function loadProviderModelAdditionOptions(provider, {
       if (state.catalog.models.some(model => model.slug === manualModel.id)) throw invalid("model-exists", "manualModel", "模型 ID 已存在，新增不能覆盖已有模型");
       source = { kind: "manual" };
     } else if (state.family.storageId === "clp") {
-      const generated = createClinePassCatalogWithTemplateBindings(JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8")));
+      const generated = createClinePassCatalogWithTemplateBindings(readDeepseekModelTemplateCatalog(environment), environment);
       models = generated.catalog.models;
       bindings = generated.templateBindings;
       source = { kind: "deepseek" };
@@ -104,7 +106,7 @@ export async function loadProviderModelAdditionOptions(provider, {
     } else {
       const downloaded = await downloadCatalog(globalThis.fetch, { signal: operationSignal });
       operationSignal.throwIfAborted();
-      const generated = (state.family.storageId === "ccg" ? createCcgCatalogWithTemplateBindings : createOpencodeGoCatalogWithTemplateBindings)(downloaded.catalog);
+      const generated = (state.family.storageId === "ccg" ? createCcgCatalogWithTemplateBindings : createOpencodeGoCatalogWithTemplateBindings)(downloaded.catalog, environment);
       models = generated.catalog.models;
       bindings = generated.templateBindings;
       source = { kind: "deepseek", sha256: downloaded.sha256 };
@@ -127,7 +129,8 @@ export async function loadProviderModelAdditionOptions(provider, {
     const current = await readState(provider, environment);
     if (current.revision !== state.revision) throw stale();
     operationSignal.throwIfAborted();
-    const snapshot = { provider, providers: state.providers, scope: state.scope, revision: state.revision, source,
+    if (baseRevision !== undefined && readModelBaseSnapshot(environment).revision !== baseRevision) throw stale();
+    const snapshot = { provider, providers: state.providers, scope: state.scope, revision: state.revision, source, baseRevision,
       candidates, expiresAt: Date.now() + lifetimeMs };
     const bytes = Buffer.byteLength(JSON.stringify(snapshot));
     if (bytes > maximumSnapshotBytes) throw invalid("addition-source-too-large", "models", "新增候选超过 4 MiB，请缩小源目录后重试");
@@ -156,27 +159,33 @@ export async function applyProviderModelAddition(input, { environment = process.
     catch (error) { throw stateError(error); }
     if (!preview || !isDeepStrictEqual(preview, plan.preview)) throw stale();
     if (!plan.preview.willChange) return { action: "unchanged", activation: "none", models: plan.models };
-    await assertProviderFileSnapshots(plan.state.snapshots).catch(() => { throw stale(); });
-    const snapshot = snapshots.get(input.sourceToken);
-    if (!snapshot || snapshot.expiresAt <= Date.now()) throw invalid("addition-source-expired", "sourceToken", "新增候选已过期，请重新读取并预览");
-    try {
-      if (plan.state.custom) {
-        const transaction = writeResponsesModelCatalog(environment, input.provider, plan.customCatalog.definitions,
-          plan.state.previous.defaultModel, plan.state.previous.revision);
-        await withResponsesModelCatalogWrite(transaction, async () => {
-          if (readResponsesModelCatalog(environment, input.provider).content !== transaction.content) throw new Error("新增目录回读不一致");
-          const written = new Set([transaction.path, `${transaction.path}.backup`, `${transaction.path}.pending`]);
-          await assertProviderFileSnapshots(plan.state.snapshots.filter(file => !written.has(file.path)));
-          finishResponsesModelCatalogWrite(transaction);
-        });
-      } else writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
-        new Map(plan.state.snapshots.filter(snapshot => !snapshot.path.endsWith(".settings-pending"))
-          .map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
-    } catch (error) {
-      throw invalid("operation-failed", "models", "新增模型保存未完成；请核对原目录、备份与恢复记录，勿自动重试", error);
-    }
-    snapshots.delete(input.sourceToken);
-    return { action: "catalog-updated", activation: "restart-all", models: plan.models };
+    const selectedSource = snapshots.get(input.sourceToken);
+    const withSourceLock = selectedSource?.baseRevision === undefined
+      ? operation => operation() : operation => withModelBaseSnapshotLock(environment, operation);
+    return withSourceLock(async () => {
+      await assertProviderFileSnapshots(plan.state.snapshots).catch(() => { throw stale(); });
+      const snapshot = snapshots.get(input.sourceToken);
+      if (!snapshot || snapshot.expiresAt <= Date.now()) throw invalid("addition-source-expired", "sourceToken", "新增候选已过期，请重新读取并预览");
+      assertSourceBase(snapshot, environment);
+      try {
+        if (plan.state.custom) {
+          const transaction = writeResponsesModelCatalog(environment, input.provider, plan.customCatalog.definitions,
+            plan.state.previous.defaultModel, plan.state.previous.revision);
+          await withResponsesModelCatalogWrite(transaction, async () => {
+            if (readResponsesModelCatalog(environment, input.provider).content !== transaction.content) throw new Error("新增目录回读不一致");
+            const written = new Set([transaction.path, `${transaction.path}.backup`, `${transaction.path}.pending`]);
+            await assertProviderFileSnapshots(plan.state.snapshots.filter(file => !written.has(file.path)));
+            finishResponsesModelCatalogWrite(transaction);
+          });
+        } else writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
+          new Map(plan.state.snapshots.filter(snapshot => !snapshot.path.endsWith(".settings-pending"))
+            .map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
+      } catch (error) {
+        throw invalid("operation-failed", "models", "新增模型保存未完成；请核对原目录、备份与恢复记录，勿自动重试", error);
+      }
+      snapshots.delete(input.sourceToken);
+      return { action: "catalog-updated", activation: "restart-all", models: plan.models };
+    });
   });
 }
 
@@ -194,6 +203,7 @@ async function buildPlan(input, environment, validate) {
   const state = await readState(input.provider, environment);
   if (snapshot.provider !== input.provider || snapshot.scope !== state.scope || snapshot.revision !== state.revision
     || input.revision !== snapshot.revision) throw stale();
+  assertSourceBase(snapshot, environment);
   const additions = snapshot.candidates.filter(candidate => input.models.includes(candidate.model));
   if (additions.length !== input.models.length || additions.some(candidate => state.catalog.models.some(model => model.slug === candidate.model))) {
     throw invalid("addition-unavailable", "models", "所选模型不在当前新增候选中，或 ID 已存在");
@@ -203,6 +213,7 @@ async function buildPlan(input, environment, validate) {
     const customCatalog = compileResponsesModelCatalog([...state.previous.definitions, ...additions.map(candidate => candidate.fields)], state.previous.defaultModel);
     if (validate && additions.length) await validateModelCatalogWithCodex(customCatalog, environment);
     await assertProviderFileSnapshots(state.snapshots);
+    assertSourceBase(snapshot, environment);
     if (snapshot.expiresAt <= Date.now() || snapshots.get(input.sourceToken) !== snapshot) throw invalid("addition-source-expired", "sourceToken", "新增候选已过期，请重新读取并预览");
     const preview = { provider: input.provider, providers: state.providers, additions: structuredClone(additions),
       revision: revisionOf([state.revision, input.sourceToken, snapshot.source, additions]),
@@ -220,6 +231,7 @@ async function buildPlan(input, environment, validate) {
   if (validate && additions.length) await validateModelCatalogWithCodex(catalog, environment);
   await assertProviderFileSnapshots(state.snapshots);
   if (snapshot.expiresAt <= Date.now() || snapshots.get(input.sourceToken) !== snapshot) throw invalid("addition-source-expired", "sourceToken", "新增候选已过期，请重新读取并预览");
+  assertSourceBase(snapshot, environment);
   const preview = { provider: input.provider, providers: state.providers, additions: structuredClone(additions),
     revision: revisionOf([state.revision, input.sourceToken, snapshot.source, additions]),
     willChange: additions.length > 0, activation: additions.length ? "restart-all" : "none" };
@@ -228,6 +240,10 @@ async function buildPlan(input, environment, validate) {
     [`${state.manifestPath}.backup`, content(state.snapshots, state.manifestPath)],
     [state.catalogPath, `${JSON.stringify(catalog, null, 2)}\n`], [state.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`],
   ]) };
+}
+
+function assertSourceBase(snapshot, environment) {
+  if (snapshot.baseRevision !== undefined && snapshot.baseRevision !== readModelBaseSnapshot(environment).revision) throw stale();
 }
 
 async function readState(provider, environment) {

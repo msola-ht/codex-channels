@@ -33,8 +33,8 @@ export function clinePassSetupPaths(environment, accountId) {
   };
 }
 
-export function createClinePassCatalog(templates, enabledModels) {
-  const generated = createClinePassCatalogWithTemplateBindings(createResponsesModelCatalog(templates, templates[0]?.id));
+export function createClinePassCatalog(templates, enabledModels, environment = process.env) {
+  const generated = createClinePassCatalogWithTemplateBindings(createResponsesModelCatalog(templates, templates[0]?.id, undefined, environment), environment);
   if (enabledModels !== undefined) {
     generated.catalog.models = generated.catalog.models.filter(model => enabledModels.includes(model.slug));
     generated.templateBindings = Object.fromEntries(Object.entries(generated.templateBindings).filter(([id]) => enabledModels.includes(id)));
@@ -100,12 +100,12 @@ export async function applyClinePassConfiguration(input, { environment = process
       try { catalog = JSON.parse(content("catalog")); }
       catch { throw new Error("CLP 模型目录无法安全读取"); }
     } else {
-      const templates = await loadTemplates("deepseek");
-      const generated = createClinePassCatalog(templates);
+      const templates = await loadTemplates("deepseek", environment);
+      const generated = createClinePassCatalog(templates, undefined, environment);
       const models = generated.catalog.models.map(model => ({ id: model.slug, name: model.display_name, defaultReasoningEffort: model.default_reasoning_level }));
       const selected = await selectClinePassModels(models, [], selectModels);
       if (!selected) return { ...preview, activation: "none", action: "back", excludedModels: [] };
-      ({ catalog, templateBindings } = createClinePassCatalog(templates, selected));
+      ({ catalog, templateBindings } = createClinePassCatalog(templates, selected, environment));
     }
     await validateModelCatalogWithCodex(catalog, environment);
     if (!preview.willChange) {

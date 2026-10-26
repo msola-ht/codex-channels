@@ -244,6 +244,8 @@ CLI 按提供商修改搜索使用 `codexc config → 提供商联网搜索`，�
 `codexc provider remove <精确 cp-ID>` 在配置已删除但备份、凭据、目录或元数据清理失败时保留删除结果并逐项告警，直接命令返回非零；Setup 和 WebUI 也显示清理告警。修复文件权限或类型后，可用同一精确 ID 重试残留清理，不回滚已提交删除；仅残留 `provider.json` 或归属凭据时仍可处理。备份清理失败会保留依赖的凭据、目录和元数据。
 CLI 与 WebUI 模型管理均提供 DS、CLP、CCG、OCG 和自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确来源，受管模型选择提示词或能力范围，自定义模型可更新提示词及来源，并独立选择“本地工具”以合并异步提问和时钟声明；两类模型均可另行选择有效上下文比例、压缩阈值和截断策略，查看差异并确认后更新目标模型；旧模型缺少来源关联时须手动选择。
 
+公共底座可在 WebUI「模型配置 → 公共底座」获取候选、查看字段前后值并确认更新；长提示词可展开全文。终端使用 `codexc model-base status` 查看当前来源，`codexc model-base update` 对比并交互确认，`codexc model-base update --preview --json` 仅输出完整对比。Setup 的「模型与提供商 → 公共底座更新」提供同一流程。保存位于 Gateway 数据目录，不改安装包或已有账户模型；候选来自当前运行环境的 `codex debug models`，可能读取缓存或联网，不保证远端最新。备份、生效与恢复边界见 [公共底座更新](deepseek.md#公共底座更新)。
+
 `codexc timezone` 设置服务时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`服务时区`](model-timezone.md)。
 
 Telegram、飞书和微信至少启用一个。Telegram 需要 Bot Token 和允许用户；飞书需要应用凭据和允许的 `open_id`；微信需要扫码凭据、账号和允许用户，Setup 最终确认保存时会直接启用消息接收。

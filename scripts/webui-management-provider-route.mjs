@@ -37,6 +37,7 @@ import { invalidateServiceStatusSummary } from "./webui-service-status.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
 import { routeCustomModelCapabilityProbe } from "./webui-custom-model-probe.mjs";
 import { routeOfficialModelManagement } from "./webui-management-official-model-route.mjs";
+import { routeModelBaseManagement } from "./webui-management-model-base-route.mjs";
 import { loadProviderModelCatalogPresentations, loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadProviderModelTemplateOptions } from "./provider-model-template-management.mjs";
 import { loadProviderModelAdditionOptions } from "./provider-model-additions.mjs";
@@ -67,6 +68,7 @@ export async function routeProviderManagement({
     return true;
   }
   if (await routeOfficialModelManagement({ environment, maximumBodyBytes, path, principalId, request, response, state })) return true;
+  if (await routeModelBaseManagement({ environment, maximumBodyBytes, path, principalId, request, response, state })) return true;
   if (path === "/provider-model-additions" && request.method === "POST") {
     if (new URL(request.url, "http://localhost").searchParams.size !== 0) {
       throw new ApiError(400, "provider_models_invalid_input", "新增模型候选请求不接受查询参数");
