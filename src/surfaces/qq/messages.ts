@@ -961,9 +961,13 @@ export class QqMessages implements SurfaceOutputPort {
       }
     } catch (error) {
       if (stage === "command") commandTicket?.cancel();
-      const { errorType, errorCode, errorReason, selectionFields } = surfaceErrorMetadata(error);
+      const failure = error instanceof SurfaceDeliveryNotSentError ? error.cause : error;
+      const { errorType, errorCode, errorReason, selectionFields } = surfaceErrorMetadata(failure);
       this.options.logger.warn({ reason: error instanceof UserFacingError ? error.code : "operation-unconfirmed",
-        stage, emergencyStop: stop, errorType, errorCode, errorReason, selectionFields }, "QQ 操作未确认");
+        stage, emergencyStop: stop, errorType, errorCode, errorReason, selectionFields,
+        ...(failure instanceof QqProtocolError ? { operation: failure.operation, protocolReason: failure.reason, httpStatus: failure.httpStatus } : {}),
+      }, "QQ 操作未确认");
+      if (this.replied.has(message)) throw error;
       await this.reply(message, error instanceof UserFacingError ? formatSurfaceUserFacingError(error, "QQ")
         : commandTicket ? "任务提交未确认；请用 /status 或在本机核对，勿直接重复提交。"
         : command?.name === "schedule" ? "计划任务操作未确认；请用 /schedule 或 /schedule runs <任务 ID> 核对，勿直接重复提交。"
@@ -1008,8 +1012,10 @@ export class QqMessages implements SurfaceOutputPort {
           : { preferMarkdown: !preserveLiteral, ...(markdownDetail === undefined ? {} : { markdownContent: markdownDetail }) }),
       signal: cancellation ? AbortSignal.any([this.lifetime.signal, cancellation]) : this.lifetime.signal,
       beforeSend: () => { if (!allowed()) throw new Error("QQ 回复授权失效"); },
-      reserve: parts => this.budget.reserve(recipient, parts, detail !== undefined ? "critical-interaction"
-        : "kind" in message || activeMenu ? "interaction" : undefined),
+      // Explicit command replies, including callback queries, consume the same
+      // bounded user-response budget as detailed menus, without optional-output headroom.
+      reserve: parts => this.budget.reserve(recipient, parts,
+        detail !== undefined || "kind" in message || activeMenu ? "critical-interaction" : undefined),
     }, async () => {});
   }
   private target(actorId: string, conversationId = `c2c:${actorId}`): ConversationTarget { return { surface: "qq", accountId: this.options.appId, conversationId }; }

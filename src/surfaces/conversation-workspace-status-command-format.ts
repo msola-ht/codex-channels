@@ -138,17 +138,22 @@ export function formatConversationStatus(
 ): string {
   // Values are metadata, never Markdown structure. Channel escaping happens once here.
   const literal = (value: string): string => formatLiteral(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "));
-  const field = (label: string, value: string): string => `- ${label}：${literal(value)}`;
+  const field = (label: string, value: string): string => `- ${literal(label)}：${literal(value)}`;
   const taskState = !status.threadId ? "尚未绑定" : status.sessionRestoring ? "尚未恢复" : status.turnId ? "运行中" : "空闲";
   const setting = (value: string): string => status.sessionRestoring ? "尚未恢复" : value;
   const lines = [
     "## Codex 状态",
     "",
     field("工作区", status.workspaceName === status.workspaceId ? status.workspaceName : `${status.workspaceName} (${status.workspaceId})`),
+    field("工作目录", status.cwd),
+    ...(status.gitBranch ? [field("Git 分支", status.gitBranch)] : []),
     field("会话", status.threadId ? `${status.threadName ?? "未命名"} · ${taskState}` : taskState),
+    ...(status.threadId ? [field("Session ID", status.threadId)] : []),
     field("模型", setting(`${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""} · ${status.modelProvider === undefined ? "提供商待选择" : formatCodexProviderLabel(status.modelProvider)}`)),
-    field("执行设置", setting(`${reasoningEffortSettingName(status.effort)}：${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""} · 速度：${status.threadId || status.fastModePending ? formatServiceTierSetting(status) : "未知"}`)),
-    field("协作与审批", setting(`${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""} · ${status.threadId ? formatThreadApprovalsReviewer(status.approvalsReviewer) : "尚未绑定会话"}`)),
+    field(reasoningEffortSettingName(status.effort), setting(`${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""}`)),
+    field("速度", setting(status.threadId || status.fastModePending ? formatServiceTierSetting(status) : "未知")),
+    field("协作模式", setting(`${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`)),
+    field("审批方式", setting(status.threadId ? formatThreadApprovalsReviewer(status.approvalsReviewer) : "尚未绑定会话")),
   ];
   if (options.display) {
     const presets = { concise: "静默", standard: "紧凑", detailed: "详细", full: "完整", custom: "自定义" };
@@ -169,14 +174,16 @@ export function formatConversationStatus(
     else if (status.executionContext.cwd !== status.cwd) lines.push(field("执行目录与工作区不同", status.executionContext.cwd));
   }
   const account = status.accountStatus?.provider === status.modelProvider ? status.accountStatus : undefined;
-  const exhausted = usesOpenAiAccount(status.modelProvider)
-    ? (status.weeklyLimit?.usedPercent ?? 0) >= 100
-    : account?.windows.some(window => window.usedPercent >= 100);
-  if (exhausted) lines.push(field("额度提示", "有额度窗口已用尽，请用 /limits 查看"));
+  const quota = (usedPercent: number): string => `剩余 ${formatPercent(Math.min(100, Math.max(0, 100 - usedPercent)))}`;
+  if (usesOpenAiAccount(status.modelProvider) && status.weeklyLimit && Number.isFinite(status.weeklyLimit.usedPercent)) {
+    lines.push(field("账户周限", quota(status.weeklyLimit.usedPercent)));
+  }
   if (!usesOpenAiAccount(status.modelProvider) && account) {
-    const nonpositive = (value: string): boolean => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) <= 0;
-    if (account.balances.some(balance => nonpositive(balance.remaining))) lines.push(field("余额提示", "存在余额不足的币种，请用 /usage 查看"));
-    if (account.credits !== undefined && nonpositive(account.credits)) lines.push(field("额度提示", "账户剩余额度不足，请用 /limits 查看"));
+    for (const balance of account.balances) lines.push(field("账户余额", `${balance.currency === "CNY" ? "¥" : "$"}${balance.remaining}`));
+    if (account.credits !== undefined) lines.push(field("账户剩余额度", `$${account.credits}`));
+    for (const window of account.windows) {
+      if (Number.isFinite(window.usedPercent)) lines.push(field(window.label, quota(window.usedPercent)));
+    }
   }
   if (status.accountStatusUnavailable) lines.push(field("额度提示", "本次未能取得账户额度，请用 /usage 或 /limits 重查"));
   return lines.join("\n").trimEnd();

@@ -78,15 +78,24 @@ export async function renderTelegramCommandResult(
         scheduledTaskConfirmationKeyboard(result),
       );
       return;
-    case "status":
-      await panel(formatStatus(result.status, result), {
+    case "status": {
+      const [title, ...fields] = formatStatus(result.status, result).split("\n");
+      const markup = {
         inline_keyboard: [[
           { text: "请求统计", callback_data: "status-query:metrics" },
           { text: "账户用量", callback_data: "status-query:usage" },
           { text: "账户额度", callback_data: "status-query:limits" },
         ]],
-      });
+      };
+      // Metadata labels and values are literal; only the shared panel structure
+      // becomes HTML. Do not interpret account window names as Markdown.
+      const chunks = formatTelegramLiteralPanelChunks(title!.replace(/^## /u, ""), fields.map(line => line.replace(/^- /u, "• ")).join("\n"));
+      for (const [index, chunk] of chunks.entries()) {
+        await reply(chunk, { parse_mode: "HTML", ...(index === 0
+          ? { reply_markup: markup } : { disable_notification: true }) });
+      }
       return;
+    }
     case "workspaces":
       await panel(
         formatConversationWorkspaces(result),
