@@ -241,6 +241,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 未返回明细的剩余张数。
 `provider-format.ts` 统一已知 Provider 显示名（DS、CLP、CCG、OCG、CP 短标签及 AGG；OpenAI 保留原规则）、命令中的 Provider 文案，并把渠道模型项归一为“提供商 · 原目录模型名”，对后续 Provider 标识做有界展示。`modelListEntry` 返回列表文案与模型名，供列表与“当前模型”行共用；`formatDisplayedProvider` 在会话、模型行和定时任务中复用同一套短标签，官方标识保留原规则。受管账户目录自带的前缀按渠道标签归一；聚合模型按模型 ID 拆出成员 Provider，显示成员标签与原模型名；自定义目录已有的限定前缀与官方主 Provider 的展示名保持原样。统计分组不进入 Surface，模型列表、按钮、状态、会话、计划任务及请求统计明细均保留原模型身份，选择编号、Application 模型目录、文本选择输入、按钮载荷或出站 ID 不变。提供商摘要统一统计可用与暂不可用模型，不改变目录排序或选择编号。同时按实际服务档位格式化速度，并依据当前模型目录展示 Fast、Ultrafast 支持情况，供模型、状态与生命周期展示共用。
 `markdown-fence.ts` 只识别反引号或波浪号围栏、合法开头与匹配结束并推进纯状态；共享列表、渠道命令、问题预览及最终正文复用它，字符预算、分片、截断和转义仍由各渠道负责。
+`markdown-inline-code.ts` 识别完整等长反引号串包裹的行内代码，供微信正文、Telegram HTML 转换及反斜杠解码复用；未闭合标记保留字面内容，平台转义和分片预算仍由调用方负责。
 `reasoning-effort-format.ts` 统一模型菜单、状态与运行结果的思考设置文案；目录声明 `enabled` 时使用思考模式选择，`enabled` / `none` 分别显示开启/关闭思考，其余等级原样显示，提交给 Application 的控制值保持不变。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。

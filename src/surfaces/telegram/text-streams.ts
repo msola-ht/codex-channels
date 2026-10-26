@@ -646,8 +646,9 @@ export class TelegramTextStreams {
     for (const [index, html] of chunks.entries()) {
       const plain = telegramHtmlToPlainText(html);
       if (!plain.trim()) continue;
-      const first = !deliveredChunk;
       const deliver = async (text: string, formatted: boolean): Promise<void> => {
+        signal?.throwIfAborted();
+        const first = !deliveredChunk;
         if (first && state.messageId !== undefined) {
           await this.executor.editMessageText(
             { chatId, critical: true },
@@ -670,6 +671,7 @@ export class TelegramTextStreams {
           if (first) state.messageId = message.message_id;
           if (!silent) this.notifiedTurns.add(state.turnKey);
         }
+        deliveredChunk = true;
       };
       try {
         await deliver(html, true);
@@ -677,15 +679,28 @@ export class TelegramTextStreams {
         if (signal?.aborted || !isTelegramFormatRejection(error)) throw error;
         this.logger.warn({ ...surfaceDiagnosticContext(), chatId, chunkIndex: index,
           ...telegramErrorMetadata(error) }, "Telegram 当前分段格式被拒绝，回退该段纯文本");
-        await deliver(plain, false);
+        for (const part of splitTelegramPlainFallback(telegramHtmlToPlainText(html, { preserveUrls: true }))) {
+          await deliver(part, false);
+        }
       }
-      deliveredChunk = true;
     }
     if (state.messageId === undefined) throw new Error("Telegram 分段回复没有可发送内容");
     return state.messageId;
   }
 
 
+}
+
+/** URL restoration can expand a rejected HTML chunk beyond Telegram's UTF-16 budget. */
+function splitTelegramPlainFallback(text: string): string[] {
+  const chunks: string[] = [];
+  for (let start = 0; start < text.length;) {
+    let end = Math.min(start + 3_500, text.length);
+    if (end < text.length && /[\uD800-\uDBFF]/u.test(text[end - 1]!)) end -= 1;
+    chunks.push(text.slice(start, end));
+    start = end;
+  }
+  return chunks;
 }
 
 function boundedTelegramStreamText(text: string): {

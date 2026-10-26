@@ -1,4 +1,5 @@
 import { advanceMarkdownFence } from "../markdown-fence.js";
+import { markdownInlineCodeAt } from "../markdown-inline-code.js";
 
 export function formatWeixinFinalText(text: string): string {
   const lines = text.split(/\r?\n/u);
@@ -46,21 +47,31 @@ function formatWeixinMarkdownInline(value: string): string {
   let output = "";
   let index = 0;
   while (index < value.length) {
+    if (value[index] === "\\" && isMarkdownPunctuation(value[index + 1])) {
+      output += value.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
     if (value[index] === "`") {
-      const closing = value.indexOf("`", index + 1);
-      if (closing < 0) {
-        output += value.slice(index + 1);
-        break;
-      }
-      output += value.slice(index, closing + 1);
-      index = closing + 1;
+      const code = markdownInlineCodeAt(value, index);
+      output += value.slice(index, code.end);
+      index = code.end;
       continue;
     }
 
     if (value.startsWith("![", index)) {
-      const imageEnd = markdownDestinationEnd(value, index + 2);
-      if (imageEnd !== null) {
-        index = imageEnd;
+      const image = markdownLinkAt(value, index + 2);
+      if (image !== null) {
+        index = image.end;
+        continue;
+      }
+    }
+
+    if (value[index] === "[") {
+      const link = markdownLinkAt(value, index + 1);
+      if (link !== null) {
+        output += `[${formatWeixinMarkdownInline(value.slice(index + 1, link.labelEnd))}${value.slice(link.labelEnd, link.end)}`;
+        index = link.end;
         continue;
       }
     }
@@ -78,13 +89,66 @@ function formatWeixinMarkdownInline(value: string): string {
   return output;
 }
 
-function markdownDestinationEnd(value: string, labelStart: number): number | null {
-  const labelEnd = value.indexOf("]", labelStart);
-  if (labelEnd < 0 || value[labelEnd + 1] !== "(") {
-    return null;
+function markdownLinkAt(
+  value: string,
+  labelStart: number,
+): { labelEnd: number; end: number } | null {
+  let cursor = labelStart;
+  let brackets = 1;
+  while (cursor < value.length) {
+    if (value[cursor] === "\\" && isMarkdownPunctuation(value[cursor + 1])) {
+      cursor += 2;
+      continue;
+    }
+    if (value[cursor] === "`") {
+      cursor = markdownInlineCodeAt(value, cursor).end;
+      continue;
+    }
+    if (value[cursor] === "[") brackets += 1;
+    if (value[cursor] === "]" && --brackets === 0) break;
+    cursor += 1;
   }
-  const destinationEnd = value.indexOf(")", labelEnd + 2);
-  return destinationEnd < 0 ? null : destinationEnd + 1;
+  if (brackets !== 0 || value[cursor + 1] !== "(") return null;
+  const labelEnd = cursor;
+  cursor += 2;
+  while (/[ \t]/u.test(value[cursor] ?? "")) cursor += 1;
+  const wrapped = value[cursor] === "<";
+  if (wrapped) cursor += 1;
+  let parentheses = 0;
+  while (cursor < value.length) {
+    if (value[cursor] === "\\" && isMarkdownPunctuation(value[cursor + 1])) {
+      cursor += 2;
+      continue;
+    }
+    if (wrapped) {
+      if (value[cursor] === ">") break;
+      if (value[cursor] === "<") return null;
+    } else {
+      if (/\s/u.test(value[cursor]!)) break;
+      if (value[cursor] === "<") return null;
+      if (value[cursor] === "(") parentheses += 1;
+      if (value[cursor] === ")") {
+        if (parentheses === 0) break;
+        parentheses -= 1;
+      }
+    }
+    cursor += 1;
+  }
+  if (parentheses !== 0 || (wrapped && value[cursor++] !== ">")) return null;
+  const destinationEnd = cursor;
+  while (/[ \t]/u.test(value[cursor] ?? "")) cursor += 1;
+  if (cursor > destinationEnd && (value[cursor] === '"' || value[cursor] === "'" || value[cursor] === "(")) {
+    const closing = value[cursor] === "(" ? ")" : value[cursor];
+    cursor += 1;
+    while (cursor < value.length && value[cursor] !== closing) {
+      if (value[cursor] === "\\" && isMarkdownPunctuation(value[cursor + 1])) cursor += 2;
+      else if (closing === ")" && value[cursor] === "(") return null;
+      else cursor += 1;
+    }
+    if (value[cursor++] !== closing) return null;
+    while (/[ \t]/u.test(value[cursor] ?? "")) cursor += 1;
+  }
+  return value[cursor] === ")" ? { labelEnd, end: cursor + 1 } : null;
 }
 
 function cjkEmphasisAt(
@@ -106,7 +170,7 @@ function cjkEmphasisAt(
       continue;
     }
     const contentStart = start + marker.length;
-    const closing = value.indexOf(marker, contentStart);
+    const closing = emphasisClosingAt(value, contentStart, marker);
     if (closing <= contentStart) {
       continue;
     }
@@ -129,6 +193,29 @@ function cjkEmphasisAt(
     };
   }
   return null;
+}
+
+function emphasisClosingAt(value: string, start: number, marker: string): number {
+  for (let index = start; index < value.length; index += 1) {
+    if (value[index] === "\\" && isMarkdownPunctuation(value[index + 1])) {
+      index += 1;
+    } else if (value[index] === "`") {
+      index = markdownInlineCodeAt(value, index).end - 1;
+    } else if (value[index] === "[") {
+      const link = markdownLinkAt(value, index + 1);
+      if (link !== null) index = link.end - 1;
+    } else if (value[index] === marker[0]) {
+      let end = index + 1;
+      while (value[end] === marker[0]) end += 1;
+      if (end - index === marker.length) return index;
+      index = end - 1;
+    }
+  }
+  return -1;
+}
+
+function isMarkdownPunctuation(value: string | undefined): boolean {
+  return value !== undefined && /[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E]/u.test(value);
 }
 
 function containsCjk(value: string): boolean {
