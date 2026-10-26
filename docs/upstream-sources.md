@@ -89,6 +89,12 @@ Chat→Chat 转换保留请求字段；长度字段归一化由模型配置显�
 随后 `git -C upstream/CLIProxyAPI checkout a2976eb8a303f11b4ea5177bce9f9ff752634dfc`。
 TTFT 参考 `internal/runtime/executor/helps/responses_ttft_helpers.go`、`chat_ttft_helpers.go` 和 `usage_helpers.go`；本次版本更新的 Chat/Responses 内容事件判定未变。CPA 的终态及首包兜底不等于本项目的严格首内容口径，不能直接作为本地支持合同。
 
+## Ollama Cloud 官方来源
+
+2026-10-26 实施时核对 [OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)、[Cloud](https://docs.ollama.com/cloud)、[List models](https://docs.ollama.com/api/tags)、[Show model details](https://docs.ollama.com/api-reference/show-model-details.md) 与 [Balance](https://docs.ollama.com/api/balance.md)。这些动态官方文档补充上游 HTTP 合同，不替换本地锁定的 Codex 协议基线。
+
+OLC 只使用 `https://ollama.com/v1` 的无状态 Responses，明确关闭 WS。发现使用公开 `/v1/models`、`/api/tags`、`/api/show`，不以公开端点判断 Key 有效或把元数据当作工具往返验收。实现与未验收范围见 [Ollama 接入记录](ollama-cloud-probe.md)。
+
 ## Cline 模型目录来源
 
 CLP 不再使用 Cline 官方生成目录作为模型名单或能力来源。固定 DS 模型由仓库 `runtime/model-catalog-deepseek.json` 和 `provider-model-catalog.json` 的明确映射生成，入口为 `scripts/provider-model-catalog.mjs`；其他模型通过统一的按 ID 添加入口独立声明或继承本地快照。渠道和 Relay 共用受管目录；旧独立 Relay 文件及 Cline 来源记录保留，不自动迁移或删除，见[CLP 配置与恢复](cline-pass.md)。

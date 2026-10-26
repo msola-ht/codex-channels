@@ -407,6 +407,8 @@
   覆盖高风险确认、Origin、限速、请求上限、安全响应头和脱敏审计；WebUI 管理路由复用其中的请求约束、
   限速和审计原语，配置了 WebUI 令牌时直接使用 Bearer 令牌认证。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 日志与高级功能选择完整日志等级，不改写显示设置或凭据。
+- `ollama-cloud-catalog.mjs`：从固定官方公开接口有界发现精确模型 ID、能力和来源指纹，复核首尾集合与 tags；仅输出待 Responses 验证的候选，不携带 Key 或写入目录。
+- `ollama-cloud-command.mjs`：`codexc provider ollama-cloud discover [--json]` 只读发现入口，支持 `-h` / `--help`；不创建账户、不启用模型。
 - `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、默认账户及 `codexc provider ccg remove` 删除入口；账户隔离 Key/Profile/App Server 与统计代理，模型目录由 CCG 账户共用，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：原生 DS、CCG、OCG 的模板投影，以及 CLP 固定 DS ID 映射和模板绑定。CLP 从仓库 DS 元数据编译 Chat 能力，明确保存 Flash／标准请求快照，不继承 DS Responses 原图、摘要、服务档位或未支持的协议字段。
   DS、CCG、OCG 的初建及模板更新共用按目标家族区分的来源投影；仅 DS 官方账户关闭 verbosity 与摘要声明，CCG／OCG 保留源声明，不将 DS 官方端点限制套用到其他平台。
