@@ -126,7 +126,7 @@
   RFC3339 日历校验、Unicode 校验、唯一不透明 msg_idx 及附件 URL/数量/元数据预算在该边界完成。
   不保留 ext 中的鉴权字段，不执行允许名单、Workspace、去重或任务授权；这些仍属下一层，不以解析成功代表准入。
 - `button-inbound.ts`：仅解析当前应用的 type=11/version=1、c2c/chat_type=2 按钮事件，复用 RFC3339 日历校验；拒绝矛盾身份、畸形或超限回调数据，不解释命令或授予权限。
-- `message-input.ts`：区分普通来信与按钮回调身份；回调没有普通消息的 msg_idx，ACK 使用互动 ID。
+- `message-input.ts`：区分普通来信、只可回复的附件拒绝和按钮回调身份；附件拒绝仅含已校验路由元数据、空正文和受控原因，不进入命令、附件准备或任务提交。回调没有普通消息的 msg_idx，ACK 使用互动 ID。
 - `task-sources.ts`：本代次任务来源注册表，由 messages 持有。接收已解析的来信身份和已授权作用域，
   不保存正文；原 Actor、Workspace 和 Thread 的实时检查由调用者提供，异步或抛错的检查拒绝准入。
   调用者须在撤权/归属切换时调用取消接口，Adapter 重建时 close；本模块不监听配置变化。

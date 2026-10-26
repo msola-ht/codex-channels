@@ -560,7 +560,10 @@ export class QqMessages implements SurfaceOutputPort {
     }
     const parsed = parseQqTextEvent(envelope);
     if (parsed.kind !== "supported") {
-      if (parsed.kind === "rejected") this.options.logger.warn({ reason: parsed.reason, field: parsed.field }, "QQ 非普通文字事件未处理");
+      if (parsed.kind === "rejected") {
+        this.options.logger.warn({ category: parsed.category, reason: parsed.reason, field: parsed.field }, "QQ 消息未接纳");
+        if (parsed.reply) this.admit(parsed.reply);
+      }
       return;
     }
     this.admit(parsed.message);
@@ -678,6 +681,17 @@ export class QqMessages implements SurfaceOutputPort {
   }
 
   private async process(message: QqMessageInput, target: ConversationTarget, ownsBusy = false): Promise<void> {
+    if ("rejection" in message) {
+      const reason = message.rejection;
+      const detail = reason === "mixed-attachments" ? "图片、文件或音视频混合附件暂不支持，请分开发送。"
+        : reason === "unsupported-attachment-type" ? "图片目前支持 PNG、JPEG 和非动画 GIF，请转换格式后重发。"
+        : reason === "unsupported-attachment-fields" ? "附件结构暂不支持，请尝试单独发送图片，再补充文字需求。"
+        : reason === "limit-exceeded" ? "附件数量或大小超出限制，请减少附件或压缩后重发。"
+        : reason === "missing-voice-content" ? "未取得语音转写或可读取的音频，请改发文字。"
+        : "附件信息校验未通过，请重新发送。";
+      await this.reply(message, `这条消息未提交给 Codex。${detail}`, () => this.allowed(target, message.actorId));
+      return;
+    }
     const images = "images" in message ? message.images : undefined;
     const file = "file" in message ? message.file : undefined;
     const media = "media" in message ? message.media : undefined;

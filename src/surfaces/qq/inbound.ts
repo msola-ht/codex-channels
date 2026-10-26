@@ -51,7 +51,14 @@ export type QqInboundFailureField =
 export type QqInboundFailureReason =
   | "invalid-type" | "invalid-value" | "invalid-unicode" | "empty"
   | "limit-exceeded" | "non-text" | "non-default-scene" | "reference"
+  | "mixed-attachments" | "unsupported-attachment-fields" | "unsupported-attachment-type" | "missing-voice-content"
   | "missing-msg-idx" | "duplicate-msg-idx" | "unsupported-timestamp";
+
+/** Only routing metadata survives rejection; rejected text and attachments never become input. */
+export type QqRejectedInput = Pick<QqInboundTextMessage, "id" | "actorId" | "conversationId" | "msgIdx" | "sentAtMs"> & {
+  readonly content: "";
+  readonly rejection: QqInboundFailureReason;
+};
 
 export type QqTextEventResult =
   | { readonly kind: "supported"; readonly message: QqInboundTextMessage }
@@ -61,6 +68,7 @@ export type QqTextEventResult =
     readonly category: QqInboundFailureCategory;
     readonly field: QqInboundFailureField;
     readonly reason: QqInboundFailureReason;
+    readonly reply?: QqRejectedInput;
   };
 
 type Rejection = Extract<QqTextEventResult, { kind: "rejected" }>;
@@ -92,13 +100,6 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
   }
   if (scene.source !== "default") return reject("unsupported", "scene", "non-default-scene");
 
-  const attachments = "attachments" in message ? message.attachments : [];
-  const media = parseMedia(attachments);
-  if (media && "category" in media) return media;
-  const file = parseFile(media ? [] : attachments);
-  if (file && "kind" in file) return file;
-  const images = parseImages(file || media ? [] : attachments);
-  if (!Array.isArray(images)) return images;
   if (message.message_type === 0 && "msg_elements" in message) {
     if (!Array.isArray(message.msg_elements)) return reject("malformed", "message-elements", "invalid-type");
     if (message.msg_elements.length > 0) return reject("unsupported", "message-elements", "non-text");
@@ -123,7 +124,6 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
     return reject("too-large", "content", "limit-exceeded");
   }
   if (INVALID_UNICODE.test(message.content)) return reject("malformed", "content", "invalid-unicode");
-  if (message.content.trim().length === 0 && images.length === 0 && !file && !media) return reject("malformed", "content", "empty");
 
   if (!Array.isArray(scene.ext)) return reject("malformed", "ext", "invalid-type");
   if (scene.ext.length > MAX_EXT_ITEMS) return reject("too-large", "ext", "limit-exceeded");
@@ -158,10 +158,21 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
   if (msgIdx === undefined) return reject("malformed", "msg-idx", "missing-msg-idx");
   const quotedText = message.message_type === 103 ? parseReference(message.msg_elements, refMsgIdx) : undefined;
   if (quotedText !== undefined && typeof quotedText !== "string") return quotedText;
-  if (message.content.trim().length === 0 && images.length === 0 && !file && !media && !quotedText) return reject("malformed", "content", "empty");
-
   const timestamp = parseTimestamp(message.timestamp);
   if (typeof timestamp !== "number") return timestamp;
+  // Validate the whole message source before making an attachment rejection replyable.
+  // Admission still owns allowlists, freshness, deduplication and send authorization.
+  const attachmentFailure = (failure: Rejection): Rejection => ({ ...failure, reply: {
+    id, actorId, conversationId, msgIdx, sentAtMs: timestamp, content: "", rejection: failure.reason,
+  } });
+  const attachments = "attachments" in message ? message.attachments : [];
+  const media = parseMedia(attachments);
+  if (media && "category" in media) return attachmentFailure(media);
+  const file = parseFile(media ? [] : attachments);
+  if (file && "kind" in file) return attachmentFailure(file);
+  const images = parseImages(file || media ? [] : attachments);
+  if (!Array.isArray(images)) return attachmentFailure(images);
+  if (message.content.trim().length === 0 && images.length === 0 && !file && !media) return reject("malformed", "content", "empty");
   // The validated strings are copied individually; no upstream object escapes.
   return {
     kind: "supported",
@@ -184,12 +195,12 @@ function parseMedia(value: unknown): QqInboundMedia | Rejection | undefined {
   if (!Array.isArray(value)) return reject("malformed", "attachments", "invalid-type");
   if (value.length > MAX_IMAGES) return reject("too-large", "attachments", "limit-exceeded");
   if (!value.some((item: unknown) => record(item) && (item.content_type === "voice" || item.content_type === "video/mp4"))) return;
-  if (value.length !== 1) return reject("unsupported", "attachments", "non-text");
+  if (value.length !== 1) return reject("unsupported", "attachments", "mixed-attachments");
   const item: unknown = value[0];
   if (!record(item)) return reject("malformed", "attachments", "invalid-type");
   const voice = item.content_type === "voice";
   const keys = ["url", "filename", "size", "content_type", ...(voice ? ["voice_wav_url", "asr_refer_text"] : [])];
-  if (Object.keys(item).some(key => !keys.includes(key))) return reject("unsupported", "attachments", "non-text");
+  if (Object.keys(item).some(key => !keys.includes(key))) return reject("unsupported", "attachments", "unsupported-attachment-fields");
   const metadata = parseAttachmentMetadata(item, voice ? undefined : 64 * 1024 * 1024);
   if ("kind" in metadata) return metadata;
   if (!voice) return { kind: "video", url: metadata.url, ...(metadata.size !== undefined ? { size: metadata.size } : {}) };
@@ -206,7 +217,7 @@ function parseMedia(value: unknown): QqInboundMedia | Rejection | undefined {
     if (typeof parsed !== "string") return parsed;
     wavUrl = parsed;
   }
-  if (!referenceText && !wavUrl) return reject("unsupported", "attachments", "non-text");
+  if (!referenceText && !wavUrl) return reject("unsupported", "attachments", "missing-voice-content");
   return { kind: "voice", ...(referenceText ? { referenceText } : {}), ...(wavUrl ? { wavUrl } : {}) };
 }
 
@@ -215,10 +226,10 @@ function parseFile(value: unknown): QqInboundFile | Rejection | undefined {
   if (value.length > MAX_IMAGES) return reject("too-large", "attachments", "limit-exceeded");
   const files = value.filter((item: unknown) => record(item) && item.content_type === "file");
   if (!files.length) return;
-  if (value.length !== 1) return reject("unsupported", "attachments", "non-text");
+  if (value.length !== 1) return reject("unsupported", "attachments", "mixed-attachments");
   const file: unknown = files[0];
   if (!record(file) || Object.keys(file).some(key => !["url", "filename", "size", "content_type"].includes(key))) {
-    return reject("unsupported", "attachments", "non-text");
+    return reject("unsupported", "attachments", "unsupported-attachment-fields");
   }
   const validated = parseAttachmentMetadata(file, MAX_FILE_BYTES);
   if ("kind" in validated) return validated;
@@ -283,12 +294,12 @@ function parseImages(value: unknown): QqInboundImage[] | Rejection {
   for (const attachment of value as unknown[]) {
     if (!record(attachment)) return reject("malformed", "attachments", "invalid-type");
     if (Object.keys(attachment).some(key => !["url", "filename", "size", "content_type", "width", "height"].includes(key))) {
-      return reject("unsupported", "attachments", "non-text");
+      return reject("unsupported", "attachments", "unsupported-attachment-fields");
     }
     const contentType = attachment.content_type;
     if (typeof contentType !== "string") return reject("malformed", "attachments", "invalid-type");
     if (contentType !== "image/jpeg" && contentType !== "image/png" && contentType !== "image/gif") {
-      return reject("unsupported", "attachments", "non-text");
+      return reject("unsupported", "attachments", "unsupported-attachment-type");
     }
     const metadata = parseAttachmentMetadata(attachment, MAX_IMAGE_BYTES);
     if ("kind" in metadata) return metadata;
