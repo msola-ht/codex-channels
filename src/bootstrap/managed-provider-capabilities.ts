@@ -31,6 +31,9 @@ export function createManagedProviderAccountAdapters(
     switch (capabilities.accountAdapter) {
       case "none":
         break;
+      case "ollama-cloud":
+        // 余额适配及精度未验收，暂不登记 usage/limits 能力。
+        break;
       case "clp":
         adapters.push(createClinePassAccountAdapter({ environment, fetchImpl, provider: definition.id }));
         break;

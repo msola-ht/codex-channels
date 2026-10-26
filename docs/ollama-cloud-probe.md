@@ -10,7 +10,7 @@
 
 适配范围：只处理 Responses（`wire_api=responses`）路径。原始记录中的 `cp-ollama` 已经使用 Responses，不需要切换协议；Chat Completions 仅作为接口对照，不纳入适配、验收或回退方案。非目标包括音频、Embeddings、本地 Ollama、Chat Completions 适配和任何从 `cp-ollama` 到受管账户的迁移。
 
-接入方向已经确定为方案 B：新增独立的受管多账户 Provider 家族，而不是把 Ollama Cloud 注册成内置 `ollama`，也不把现有 `cp-ollama` 直接改造成受管账户。方案 B 不包含迁移，也不需要迁移；现有 `cp-ollama` 继续按现状使用。本文记录设计、接口利用方式和 freeform 适配要求；本轮不修改代码、配置或运行中的 Provider。相关合同见[第三方模型 Provider 接入指南](provider-integration-guide.md)、[CCG](ccg.md)、[OpenCode Go](opencode-go.md)和[开发规则](development-rules.md#development-workflow)。
+接入方向已经确定为方案 B：新增独立的受管多账户 Provider 家族，而不是把 Ollama Cloud 注册成内置 `ollama`，也不把现有 `cp-ollama` 直接改造成受管账户。方案 B 不包含迁移，也不需要迁移；现有 `cp-ollama` 继续按现状使用。本文记录设计、接口利用方式、freeform 适配要求及下文分批实施进度；原始文档复审阶段未修改代码，当前实施不修改现有账户配置或运行中的 Provider。相关合同见[第三方模型 Provider 接入指南](provider-integration-guide.md)、[CCG](ccg.md)、[OpenCode Go](opencode-go.md)和[开发规则](development-rules.md#development-workflow)。
 
 ## 原始记录中的接入状态
 
@@ -372,7 +372,7 @@ Codex 在后续请求中可能发送 `custom_tool_call` 和 `custom_tool_call_ou
 
 当前仅完成设计记录。尚未验证账户搜索权限、费用/限额、真实 API 输出、搜索事件还原及完整往返；实现并验收前不得标记为已支持。网页读取仍是单独待设计能力。
 
-## 方案 B：受管多账户接入设计（待实现）
+## 方案 B：受管多账户接入设计（分批实施中）
 
 方案 B 复用现有受管 Provider 管道，新增一个独立家族。它不修改 `cp-ollama`，也不把 Ollama Cloud 注册成 Codex 内置的 `ollama`；内置 `ollama` 的 Provider ID 已被保留，继续面向本地 Ollama 语义。方案 B 不包含迁移：`cp-ollama` 与新受管账户互不导入、互不转换。
 
@@ -567,7 +567,18 @@ Ollama 元数据来源与提示词模板关联必须分别保存。新家族 man
 - 不把 Responses 的 `reasoning_tokens` 用于计费或思考量判断，也不依赖 `tool_choice` 回显判断实际工具行为；
 - 不使用 Chat Completions 作为适配或回退路径。
 
-方案 B 当前状态为“设计已确定、实现待开始”；开始实施后应按实际进度更新状态，完成上述验收前不能把受管多账户 Ollama 标记为已验收。
+方案 B 当前进入分批实施；完成上述验收前不能把受管多账户 Ollama 标记为已验收。
+
+### 实施进度（2026-10-26）
+
+按用户授权逐批实现、关联审查、Astra 独立复审及反例核对后提交；不推送或部署，不改动现有 `cp-ollama`。每批复用现有事务与检查，不新增或维护测试。
+
+- 第一批：账户家族基础已完成关联复审与修复。新增 `olc` 定义、`ollama-cloud` 共享目录身份、账户注册表读取和 `olc-*` 命名空间保留；没有默认模型，WS 关闭。Bootstrap 已识别家族分支，余额适配及精度未验收前不登记账户查询适配器、不提供 usage/limits。此批不提供账户创建入口，不表示模型请求已验收。
+- 第一批隔离观察：临时私有目录中配置 `main` / `other` 两账户，`remote` 参数解析入口将 `sf-olc-other` 解析为 `olc-other`，默认路由选择 `olc-main`；启动材料生成各自 Key 环境变量和 `supports_websockets=false`，Relay 材料读取选择 `other` 的独立虚拟 Key、共享目录及 Responses-only。悬空注册表链接曾被误判为空账户，已修复为明确拒绝；公开权限注册表、跨账户凭据引用和未登记账户也明确拒绝。未启动 App Server、未调用模型或余额 API，Windows/macOS 私有文件适配与服务运行尚未实机观察。
+- 后续批次：目录发现及统一模型管理；Setup/CLI/WebUI 账户事务与运行请求；freeform 双向转换和独立 Relay；搜索、余额与完整用户路径。每批具体边界按实际调用链调整，不能遗漏上文实施顺序的适用项。
+- 官方资料已重新核对：直连地址、无状态 Responses、freeform 历史和内置搜索限制与本文一致。尚未使用账户凭据调用模型或余额接口。
+- 实施阶段补充官方证据：[Balance](https://docs.ollama.com/api/balance.md) 明确 `included.balance_usd` 表示剩余包含额度、`purchased.balance_usd` 表示尚未过期的剩余已购额度，单位均为 USD；旧计划也可能仅返回 `included.session` / `included.weekly`，不能把缺失的金额当作零。适配精度、范围、负值处理和真实账户响应仍待验收，上文原始快照的待确认状态保留其时点。
+- 数据处理沿用上文备份与回滚方案：新家族新增文件、现有事务预览/备份/回读，不迁移、导入或覆盖 `cp-ollama`；结果不确定时保留现场，不自动重试。
 
 ## 后续要求
 
