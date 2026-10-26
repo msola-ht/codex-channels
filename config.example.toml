@@ -72,6 +72,7 @@ idle_release_minutes = 15
 
 [display]
 # 显示预设可在 CLI/WebUI 一次应用：静默、紧凑、详细、完整；完整使用 operation_updates/presentation_detail = "full"。
+# 静默使用 completion = "off"；紧凑使用 operation_updates = "hidden"。下方保留独立字段缺省，不自动套用预设。
 # 可通过 codexc config → Gateway 显示设置 → 模型统计分组维护；仅合并控制台按模型统计。
 # 模型选择和明细保留原模型；重新读取即生效，无需重启服务。
 # model_aliases = { "cline-pass/deepseek-v4.1-flash" = "deepseek-flash", "deepseek-v4.1-flash" = "deepseek-flash" }

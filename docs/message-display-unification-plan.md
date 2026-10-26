@@ -227,3 +227,13 @@ Astra 已独立审查存储、适配器、共享接口及四渠道按钮/通知�
 Sol 从旧 dist 和修复源码的生产 `QqMessages.receive` 做同输入对照：3 次 status 后的 7063 字节、4 片模型统计，旧版 ACK=0/发送0片且出现与线上一致日志，修复版 ACK=0/发送完整4片、预算从3到7；旧版7次status后1片统计同样被拒。修复后16次status再查询仍拒绝且保留 budget 分类；账号24、接收人分钟16/日800硬限额仍拒绝超额。4片中第1或第2片未知结果分别只调用1/2次，不继续、不重发、不回错，完整预留不退。准入撤权0 ACK/0发送，查询中撤权已ACK但0发送，保留authorization分类。主代理已阅读报告并核对具体预算分类和错误传播修改。
 
 Astra 独立关联复审发现新增动态窗口 label 未按字面字段保护；主代理修复共享 label 的控制字符净化与渠道转义。四渠道反例为含换行、标题和粗体符号的窗口名；微信/飞书/QQ 为单行转义标签，TG 使用已有字面 HTML 面板渲染器保留可见原字符，不解释账户标签和路径中的 Markdown，也不输出额外反斜杠。TG 仍复用原发送器及首片按钮、后续静默分片规则。复审其他 QQ 授权、预算、未知发送和状态数据范围未发现阻断项；文档与最终修复由主代理核对。未对线上四次错误的预算值作无证据断言，真实 QQ 修复后收件仍待用户点击验收。
+
+## 静默与紧凑预设调整
+
+基于 `d7794fa6`，用户要求静默关闭完成卡、紧凑隐藏工具过程。共享预设改 concise.completion 为 off、standard.operation_updates 为 hidden，沿用既有九字段和四渠道支持矩阵；不改 Schema、缺省或用户已保存配置，重新应用才写入。旧组合可能显示自定义，微信仍只比较三项支持字段。任务失败、中断、带 error/errorCode 或无最终回复的完成提示保留；工具 hidden 隐藏普通工具失败条目，不声称所有工具错误仍可见。子代理生命周期、生成图片及压缩各自沿已有策略，已入箱记录继续原投递义务。
+
+Astra 独立复审追踪管理 CLI/WebUI 共用写入入口、范围继承、四渠道准入、正文收尾及持久化分支，发现上线摘要依赖 standard 标签：旧紧凑/默认值改识别 custom 后会丢会话信息。主代理让基础 custom 上线保留会话摘要并标自定义，核对最终源码及现行文档；没有保留旧预设别名或隐式迁移。
+
+隔离目录复制 config.example.toml，经生产 CLI runDisplaySettings 的选择、预览、确认、配置 writer、备份与 loadGatewaySettings 读回：concise 为 hidden/off，standard 为 hidden/detailed，两者均读回确认；重复同值 activation=none；过期 revision 返回 stale-revision；Telegram 范围可覆盖为静默且全局仍紧凑；QQ 群目标 invalid-input、拒绝后 revision 不变。此为内联调用 CLI 生产函数与合成提示器，不是实际 TTY 或 WebUI 浏览器观察，未读取或修改用户配置。
+
+生产四渠道 Outbox 实例的 liveCompletionDisplay 对普通成功均 off，对失败、中断和 missingFinalResponse 均 detailed。微信 deliver(text.completed) → handle(turn.completed) 接内存 Client 实际只发“最终正文保留”，成功卡零发送、原 context token 保留。紧凑工具 running/completed/failed 的准入均 false，subagents=true、completion=detailed；修正后的 custom 基础上线字段保留会话、模型、思考、审批和显示。其他三渠道真实发送、持久箱重启恢复及真实客户端效果只完成源码关联审查，未现场观察。不新增或运行测试，隔离配置观察产物随后清理。

@@ -214,7 +214,7 @@ export function createStartupPresentation(
       { label: "版本", value: `Codex Connect ${gatewayMetadata.version} · Codex ${runtime.gatewayVersion}` },
       { label: "工作区", value: workspace.name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true },
       ...(status.gitBranch ? [{ label: "Git 分支", value: status.gitBranch.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true }] : []),
-      ...(detailed || runtime.displayPreset === "standard" ? [
+      ...(detailed || runtime.displayPreset === "standard" || runtime.displayPreset === "custom" ? [
         ...(detailed ? [{ label: "工作目录", value: workspace.cwd, literal: true }] : []),
         { label: "会话", value: status.threadId ? status.threadName ?? "未命名" : "当前未绑定会话", literal: true },
         ...(detailed && status.threadId ? [{ label: "Session ID", value: status.threadId, literal: true }] : []),
