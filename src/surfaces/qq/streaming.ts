@@ -5,7 +5,7 @@ import { QQ_PASSIVE_WINDOW_MS, QQ_STREAM_BYTES, QqProtocolError, QqTextSendError
 import type { QqTaskSources, QqTaskSourceReference } from "./task-sources.js";
 import type { QqSendBudget } from "./send-budget.js";
 import { qqBodyMarkdownPrefix } from "./body-markdown.js";
-import { qqBodyMarkdownRestart, qqBodyMarkdownText } from "./message-markdown.js";
+import { qqBodyMarkdownPreview, qqBodyMarkdownRestart, qqBodyMarkdownText } from "./message-markdown.js";
 
 type Body = Extract<OutputEvent, { type: "text.delta" | "text.completed" }>;
 interface Stream {
@@ -225,7 +225,7 @@ export class QqBodyStreaming {
     const wait = Math.ceil(stream.nextUpdateAt - performance.now());
     if (wait > 0) await delay(wait, undefined, { signal });
     if (stream.completed || stream.failed || performance.now() >= stream.deadline - 15_000) return;
-    const text = qqBodyMarkdownPrefix(stream.text);
+    const text = qqBodyMarkdownPreview(stream.text);
     if (!text.trim() || text === stream.sent) return;
     if (!this.fitsRemaining(stream, text)) {
       stream.limited = true;
@@ -284,8 +284,11 @@ export class QqBodyStreaming {
       }, { signal, beforeSend: guard }));
       const remaining = stream.remainingCharacters === undefined ? undefined
         : stream.remainingCharacters - Buffer.byteLength(content.slice(stream.sent.length));
-      stream.remainingCharacters = result.remainingCharacters === undefined ? remaining
-        : remaining === undefined ? result.remainingCharacters : Math.min(remaining, result.remainingCharacters);
+      // Real QQ continuation responses can report zero on every accepted frame.
+      // Zero is not evidence of exhaustion; only a positive hint tightens capacity.
+      const reported = result.remainingCharacters === 0 ? undefined : result.remainingCharacters;
+      stream.remainingCharacters = reported === undefined ? remaining
+        : remaining === undefined ? reported : Math.min(remaining, reported);
       stream.attempted = true; stream.id = result.messageId; stream.sent = content; stream.index++;
       return result;
     } catch (error) {
