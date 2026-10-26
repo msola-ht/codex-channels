@@ -10,6 +10,7 @@ import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "./opencode-go-account-adapter.js";
 import { createCcgAccountAdapter } from "./ccg-account-adapter.js";
 import { createClinePassAccountAdapter } from "./cline-pass-account-adapter.js";
+import { createOllamaCloudAccountAdapter } from "./ollama-cloud-account-adapter.js";
 import type { AsyncGatewayMetricsStore } from "../observability/index.js";
 
 export interface ManagedProviderAccountFactoryOptions {
@@ -32,7 +33,7 @@ export function createManagedProviderAccountAdapters(
       case "none":
         break;
       case "ollama-cloud":
-        // 余额适配及精度未验收，暂不登记 usage/limits 能力。
+        adapters.push(createOllamaCloudAccountAdapter({ environment, fetchImpl, provider: definition.id }));
         break;
       case "clp":
         adapters.push(createClinePassAccountAdapter({ environment, fetchImpl, provider: definition.id }));

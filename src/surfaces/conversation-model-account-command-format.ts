@@ -21,6 +21,7 @@ import { formatElapsedSeconds } from "./elapsed-duration.js";
 import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTierSetting, modelListEntry } from "./provider-format.js";
 import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { isOllamaCloudAccountProvider } from "../../runtime/ollama-cloud-accounts.mjs";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
 const maximumThreadUsageGroups = 8;
@@ -208,7 +209,7 @@ export function formatConversationUsage(
   if (result.result.kind === "balance") {
     return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户余额：`,
-      formatTimezoneLine(),
+      ...(isOllamaCloudAccountProvider(result.result.provider) ? [] : [formatTimezoneLine()]),
       `API 可用：${result.result.available ? "是" : "否"}`,
       ...(result.result.balances.length === 0
         ? ["暂无余额信息"]
@@ -216,8 +217,8 @@ export function formatConversationUsage(
             "",
             `${balance.currency}：`,
             `总余额：${balance.totalBalance}`,
-            `赠金余额：${balance.grantedBalance}`,
-            `充值余额：${balance.toppedUpBalance}`,
+            `${isOllamaCloudAccountProvider(result.result.provider) ? "包含额度剩余" : "赠金余额"}：${balance.grantedBalance}`,
+            `${isOllamaCloudAccountProvider(result.result.provider) ? "已购额度剩余" : "充值余额"}：${balance.toppedUpBalance}`,
         ])),
     ].join("\n"));
   }

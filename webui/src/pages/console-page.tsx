@@ -13,6 +13,7 @@ import {
   CcgCreditUsageCards,
   ClinePassUsageCard,
   DeepseekBalanceCards,
+  OllamaCloudBalanceCards,
   ErrorsSummary,
   GlobalCards,
   OpencodeGoUsageCard,
@@ -87,6 +88,7 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
         accountDataLoaded={officialAccounts.data !== null}
         accountLoading={officialAccounts.loading}
         deepseek={officialAccounts.data?.deepseek ?? null}
+        ollamaCloud={officialAccounts.data?.ollamaCloud ?? []}
         opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
         ccgUsage={officialAccounts.data?.ccg ?? null}
         clinePass={officialAccounts.data?.clinePass ?? []}
@@ -179,6 +181,7 @@ function AccountStatusCards({
   accountDataLoaded,
   accountLoading,
   deepseek,
+  ollamaCloud,
   opencodeGoUsage,
   ccgUsage,
   clinePass,
@@ -196,6 +199,7 @@ function AccountStatusCards({
   accountDataLoaded: boolean
   accountLoading: boolean
   deepseek: DeepseekBalanceResponse | null
+  ollamaCloud: DeepseekBalanceResponse["accounts"]
   opencodeGoUsage: OpencodeGoUsageResponse | null
   ccgUsage: CcgCreditUsageResponse | null
   clinePass: QuotaAccountUsage[]
@@ -237,6 +241,7 @@ function AccountStatusCards({
           planType={weeklyQuota?.planType ?? null}
         />
         {accountDataLoaded ? <>
+          <OllamaCloudBalanceCards accounts={ollamaCloud} refreshControls={refreshControls} />
           {(deepseek?.accounts.length ?? 0) > 0 || !accountWarnings.some((warning) => warning.source === "deepseek") ? <DeepseekBalanceCards
             accounts={deepseek?.accounts ?? []}
             refreshControls={refreshControls}

@@ -108,7 +108,8 @@ Surface 明确证明本次结果尚未发送，且原记录与本次均无发送
 - `managed-provider-capabilities.ts`：按 `runtime/model-provider-definitions.mjs` 的编译期能力元数据
   有界装配 DeepSeek、OpenCode Go、CCG、CLP 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
   账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。
-  Ollama Cloud 的家族能力分支已识别，余额适配及精度未验收前不登记账户查询适配器、不提供 usage/limits 查询能力。
+  Ollama Cloud 通过精确账户适配器提供 USD 余额，不提供 limits。
+- `ollama-cloud-account-adapter.ts`：按 `olc-<账户>` 私有凭据读取固定官方 `/api/balance`。复用 AccountQuery 的期限、提交守卫与有界读取，通过 JSON 数字原文和 bigint 十进制单位精确求和；拒绝缺失、负值、过大或精度超限金额以及旧百分比计划，不泄露原始响应。
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   模型请求入口；IPC 只投影约定字段，Provider 归属由组合层确定，不接受入站扩展字段覆盖。
   模型请求统计端口。合法脱敏样本尝试入队；生图请求只保存请求指标，不回填文本模型思考等级，

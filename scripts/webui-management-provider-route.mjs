@@ -7,6 +7,7 @@ import { readCodexConfigFile } from "../runtime/model-provider-managed-runtime.m
 import { routeResetCredits } from "./webui-reset-credit-route.mjs";
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
 import { loadCcgAccounts, ccgProviderId } from "../runtime/ccg-accounts.mjs";
+import { loadOllamaCloudAccounts, ollamaCloudProviderId } from "../runtime/ollama-cloud-accounts.mjs";
 import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
 import {
   GatewayAccountRefreshError,
@@ -404,11 +405,12 @@ export async function sendAccountSnapshots(environment, response, readMetrics, p
   // A refresh owns one Provider; the separate GET remains the authoritative list.
   const storedSnapshots = await readMetrics({ operation: "accounts", nowMs: Date.now(), ...(provider === undefined ? {} : { provider }) }, response);
   if (response.destroyed) return;
-  const { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, accountMetadata } = loadAccountSources(environment);
+  const { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, ollamaAccounts, accountMetadata } = loadAccountSources(environment);
   const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
   const snapshots = storedSnapshots
     .filter((snapshot) => {
-      if (["deepseek", "ocg", "ccg", "clp"].includes(snapshot.provider)) return false;
+      if (["deepseek", "ocg", "ccg", "clp", "olc"].includes(snapshot.provider)) return false;
+      if (snapshot.provider.startsWith("olc-")) return ollamaAccounts === null || metadataByProvider.has(snapshot.provider);
       if (snapshot.provider.startsWith("clp-")) return clineAccounts === null || metadataByProvider.has(snapshot.provider);
       const registry = snapshot.provider.startsWith("ds-")
         ? dsAccounts
@@ -482,7 +484,11 @@ function loadAccountSources(environment) {
     "clp",
     "Cline Pass 配置暂不可用",
   );
+  const ollamaAccounts = loadAccountRegistry(
+    () => loadOllamaCloudAccounts(environment), warnings, "ollama-cloud", "Ollama Cloud 账户元数据暂不可用",
+  );
   const accountMetadata = [
+    ...(ollamaAccounts ?? []).map(account => ({ provider: ollamaCloudProviderId(account.id), accountId: account.id, displayName: `Ollama Cloud ${account.id}`, default: account.default })),
     ...(clineAccounts ?? []).map(account => ({ provider: clinePassProviderId(account.id), accountId: account.id, displayName: `Cline Pass ${account.id}`, default: account.default })),
     ...(dsAccounts ?? []).map((account) => ({
       provider: deepseekProviderId(account.id),
@@ -503,7 +509,7 @@ function loadAccountSources(environment) {
       default: account.default,
     })),
   ];
-  return { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, accountMetadata };
+  return { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, ollamaAccounts, accountMetadata };
 }
 
 function loadAccountRegistry(load, warnings, source, message) {

@@ -11,12 +11,15 @@ import {
 import { deepseekAccountIdFromProvider } from "../../runtime/deepseek-accounts.mjs";
 import { clinePassAccountIdFromProvider } from "../../runtime/cline-pass-accounts.mjs";
 import { ccgAccountIdFromProvider } from "../../runtime/ccg-accounts.mjs";
+import { ollamaCloudAccountIdFromProvider } from "../../runtime/ollama-cloud-accounts.mjs";
 import { ccgAccountDefinition, clinePassAccountDefinition, deepseekAccountDefinition } from "../../runtime/model-provider-definitions.mjs";
 
 export function formatProviderLabel(provider: string): string {
   if (provider === "openai") return "OpenAI";
   if (provider === "codexc-aggregate") return "AGG";
   if (provider === "deepseek") return "DeepSeek";
+  const ollamaCloudAccount = ollamaCloudAccountIdFromProvider(provider);
+  if (ollamaCloudAccount !== undefined) return `OLC ${ollamaCloudAccount}`;
   // 渠道统一使用短标签；模型目录定义的全名（*AccountDefinition）由模型列表按同一标签归一。
   const deepseekAccount = deepseekAccountIdFromProvider(provider);
   if (deepseekAccount !== undefined) return `DS ${deepseekAccount}`;
@@ -164,6 +167,8 @@ function stripProviderPrefix(name: string, labels: readonly (string | undefined)
 
 /** 受管账户模型目录使用的展示名前缀，来自 Runtime 的账户定义。 */
 function providerCatalogLabel(provider: string): string | undefined {
+  const ollamaCloudAccount = ollamaCloudAccountIdFromProvider(provider);
+  if (ollamaCloudAccount !== undefined) return `Ollama Cloud ${ollamaCloudAccount}`;
   const deepseekAccount = deepseekAccountIdFromProvider(provider);
   if (deepseekAccount !== undefined) return deepseekAccountDefinition(deepseekAccount).displayName;
   const clinePassAccount = clinePassAccountIdFromProvider(provider);

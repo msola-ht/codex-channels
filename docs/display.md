@@ -351,9 +351,9 @@ Core 和投递路径保留经处理的有界纯文本。Telegram 在 HTML 面板
 - 推理 Token 计数对所有 Provider 展示；指标库不保存推理正文；Chat 转换层会处理推理回传，显式开启的调用转储可能保存原始推理内容，见[调用详情](user-guide.md#模型请求转储)。
 - 原生 OpenAI 账户对应的 Codex Provider 明确显示为“OpenAI 官方”；配置的自定义主模型
   Provider 不追加“自定义”后缀；`cp-llm` 显示为 `CP llm`，Codex 兼容类型的 `OpenAI` 保留原 ID。
-- Provider 在渠道统一使用短标签 `DS <账户>`、`CLP <账户>`、`CCG <账户>`、`OCG <账户>`、`CP <名称>`，已关闭聚合的历史记录保留 `AGG` 标签：
+- Provider 在渠道统一使用短标签 `DS <账户>`、`CLP <账户>`、`CCG <账户>`、`OCG <账户>`、`OLC <账户>`、`CP <名称>`，已关闭聚合的历史记录保留 `AGG` 标签：
   提供商菜单、模型列表、模型行、状态、完成卡片、`/usage`、`/metrics`、会话列表与定时任务
-  提示都是同一写法；OCG 使用账户 ID，不使用邮箱或手机号作为渠道标签。`ds-<账户>`、`clp-<账户>`、`ccg-<账户>`、`ocg-<账户>`、`cp-<名称>` 仍是实际 Provider 标识，
+  提示都是同一写法；OCG 使用账户 ID，不使用邮箱或手机号作为渠道标签。`ds-<账户>`、`clp-<账户>`、`ccg-<账户>`、`ocg-<账户>`、`olc-<账户>`、`cp-<名称>` 仍是实际 Provider 标识，
   CLI 的 `-p` 参数、Relay／API Key 等按标识展示的位置仍使用原始 ID。Setup 品牌入口、WebUI 账户卡片与账户设置
   使用完整名称 Cline Pass。
 - WebUI 请求及错误列表按记录的请求服务层级展示 Fast 或 Ultrafast，调用详情区分请求与响应层级。
@@ -370,7 +370,7 @@ Core 和投递路径保留经处理的有界纯文本。Telegram 在 HTML 面板
   会话数值仅覆盖本机保留的指标记录，不承诺完整账户账单；不与余额或官方 Thread 估算相加。
 - Gateway 不在本地计算或估算模型价格与费用，完成卡片不展示总价、均价、单价或峰谷档位，也不
   保存价格快照或刷新价格目录。账户与额度仍展示官方来源的数据：OpenAI 周限、
-  DeepSeek 账户余额、OpenCode Go / Cline Pass 官方配额窗口和 CCG Credits；这些数据不是本地价格估算。
+  DeepSeek 账户余额、Ollama Cloud USD 余额、OpenCode Go / Cline Pass 官方配额窗口和 CCG Credits；这些数据不是本地价格估算。OLC 余额分为“包含额度剩余”和“已购额度剩余”，不称作赠金；不显示周期或重置时间，`/limits` 不支持。仅支持非负、最多 9 位小数且合计小于一万亿美元的金额，超出策略、缺失金额或旧百分比计划明确报查询失败，不补零或浮点舍入。官方余额接口每用户每分钟最多 10 次请求，跨 Key 和设备共享；查询不自动重试，429 保留限流分类。
 - 详细完成通知不展开“账户状态”；主动 `/usage` 或 WebUI 保留账户查询：OpenAI 优先显示
   OpenAI 官方周限；OpenCode Go、Cline Pass 显示各窗口“剩余百分比 · 重置时间”，CCG 显示剩余额度和可用窗口，DeepSeek 显示官方余额。重置时间缺失时省略，不推算；余额与 Credits 不转换为百分比。
   完成事件补全过程仍可按本次 Turn 的精确 Provider/账户读取额度，与本地统计并行、最多等待 2 秒；失败或超时不使用其他账户或旧快照，详细完成通知不消费这些账户字段。Gateway 关闭会取消查询，此读取不阻塞 App Server Reader。

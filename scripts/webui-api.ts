@@ -1142,7 +1142,7 @@ export interface OfficialAccountSnapshotsResponse {
   observedAtMs: number
   snapshots: OfficialAccountSnapshot[]
   warnings: Array<{
-    source: "openai" | "deepseek" | "opencode-go" | "ccg" | "clp"
+    source: "openai" | "deepseek" | "opencode-go" | "ccg" | "clp" | "ollama-cloud"
     code: "registry_unavailable"
     message: string
   }>

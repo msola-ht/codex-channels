@@ -68,7 +68,7 @@ export class AccountQuery {
   }
 
   async json(fetchImpl: typeof fetch, url: string, apiKey: string, operation: string,
-    options: { allowForbidden?: boolean; redirect?: RequestRedirect } = {},
+    options: { allowForbidden?: boolean; redirect?: RequestRedirect; parseJson?: (text: string) => unknown } = {},
   ): Promise<{ body: unknown; status: number }> {
     this.operation = operation;
     this.stage = "request";
@@ -90,7 +90,7 @@ export class AccountQuery {
     });
     this.signal.throwIfAborted();
     this.stage = "parse";
-    return { body: JSON.parse(body.toString("utf8")) as unknown, status: response.status };
+    return { body: (options.parseJson ?? JSON.parse)(body.toString("utf8")) as unknown, status: response.status };
   }
 
   rejectHttp(status: number): never { throw new HttpFailure(status); }
