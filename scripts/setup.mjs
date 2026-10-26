@@ -14,6 +14,7 @@ export async function runSetup({
   deepseekSetup = async (options) => (await import("./deepseek-account-setup.mjs")).runDeepseekSetup(options),
   ccgSetup = async (options) => (await import("./ccg-setup.mjs")).runCcgSetup(options),
   clinePassSetup = async (options) => (await import("./cline-pass-setup.mjs")).runClinePassSetup(options),
+  ollamaCloudSetup = async (options) => (await import("./ollama-cloud-setup.mjs")).runOllamaCloudSetup(options),
   telegramSetup = async (options) => (await import("./telegram-setup.mjs")).runTelegramSetup(options),
   weixinSetup = async (options) => (await import("./weixin-setup.mjs")).runWeixinSetup(options),
   qqSetup = async (options) => (await import("./qq-setup.mjs")).runQqSetup(options),
@@ -122,6 +123,7 @@ export async function runSetup({
             deepseekSetup,
             ccgSetup,
             clinePassSetup,
+            ollamaCloudSetup,
             openCodeGoSetup,
             customPrimarySetup,
             officialLoginSetup,
@@ -165,6 +167,7 @@ async function runModelSetup({
   deepseekSetup,
   ccgSetup,
   clinePassSetup,
+  ollamaCloudSetup,
   openCodeGoSetup,
   customPrimarySetup,
   officialLoginSetup,
@@ -230,6 +233,7 @@ async function runModelSetup({
         deepseekSetup,
         ccgSetup,
         clinePassSetup,
+        ollamaCloudSetup,
         openCodeGoSetup,
         customPrimarySetup,
       });
@@ -285,6 +289,7 @@ async function runThirdPartyModelSetup({
   deepseekSetup,
   ccgSetup,
   clinePassSetup,
+  ollamaCloudSetup,
   openCodeGoSetup,
   customPrimarySetup,
 }) {
@@ -315,6 +320,7 @@ async function runThirdPartyModelSetup({
           label: "Cline Pass 官方",
           hint: "账户、运行模式与共享模型目录",
         },
+        { value: "olc", label: "Ollama Cloud", hint: "账户、默认模型与共享模型目录" },
         {
           value: "custom_primary",
           label: "自定义提供商",
@@ -324,7 +330,7 @@ async function runThirdPartyModelSetup({
       ],
     });
     if (prompts.isCancel(module) || module === "back") return { action: "back" };
-    if (!["models", "deepseek", "opencode-go", "clp", "ccg", "custom_primary"].includes(module)) {
+    if (!["models", "deepseek", "opencode-go", "clp", "ccg", "olc", "custom_primary"].includes(module)) {
       throw new Error(`未知第三方设置：${String(module)}`);
     }
     selection.thirdPartyModule = module;
@@ -337,6 +343,8 @@ async function runThirdPartyModelSetup({
       result = await openCodeGoSetup({ input, output, prompts, allowBack: true });
     } else if (module === "clp") {
       result = await clinePassSetup({ input, output, prompts, allowBack: true });
+    } else if (module === "olc") {
+      result = await ollamaCloudSetup({ input, output, prompts, allowBack: true });
     } else if (module === "ccg") {
       result = await ccgSetup({ input, output, prompts, allowBack: true });
     } else if (module === "custom_primary") {

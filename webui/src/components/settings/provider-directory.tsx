@@ -15,7 +15,7 @@ import type { AccountDirectoryActions, AccountRow, Platform } from "@/components
 import type { ProviderDirectoryActions } from "@/components/settings/provider-settings-management"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 
-const platforms: Record<Platform, string> = { opencodeGo: "OpenCode Go", deepseek: "DeepSeek", clinePass: "Cline Pass" }
+const platforms: Record<Platform, string> = { opencodeGo: "OpenCode Go", deepseek: "DeepSeek", clinePass: "Cline Pass", ollamaCloud: "Ollama Cloud" }
 type ProviderRow = { id: string; name: string; type: string; mode: string | null; model: string; state: string; account?: AccountRow; custom?: boolean; address?: string; statusContent?: ReactNode; searchContent?: ReactNode; actions?: ReactNode }
 
 export function ProviderDirectory({ providers, accounts, management, locked, fresh, authenticated, terminalContent, onEditingChange }: {

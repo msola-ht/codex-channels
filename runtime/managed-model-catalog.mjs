@@ -15,7 +15,7 @@ export function catalogSlugSet(catalog, definition) {
         || model.input_modalities.some(modality => !["text", "image"].includes(modality))
         || model.apply_patch_tool_type !== null || model.supports_search_tool !== false
         || model.supports_web_search !== undefined && model.supports_web_search !== false
-        || model.web_search_tool_type != null
+        || model.web_search_tool_type !== undefined
         || model.experimental_supported_tools !== undefined && (!Array.isArray(model.experimental_supported_tools)
           || model.experimental_supported_tools.some(tool => typeof tool !== "string" || !tool.trim() || ["apply_patch", "tool_search", "web_search"].includes(tool))))) {
       throw new Error("Ollama Cloud 模型须明确声明有效窗口、文本和思考等级；文件编辑、工具搜索及原生网页搜索尚未开放");

@@ -975,6 +975,12 @@ export interface ManagementAccountSettingsResponse {
     configured: boolean
     accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
+  ollamaCloud: {
+    configured: boolean
+    catalogExists: boolean
+    models: Array<{ id: string; name: string }>
+    accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
+  }
   deepseek: {
     configured: boolean
     accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
@@ -982,6 +988,17 @@ export interface ManagementAccountSettingsResponse {
 }
 
 export type ManagementAccountSettingsMutationInput =
+  | {
+      operation: "olc.configure"
+      accountId: string
+      model?: string
+      initialModel?: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition
+      reconfigure?: boolean
+      mode?: "switching" | "exclusive"
+      apiKey?: string
+      confirmExclusiveConfigChange?: boolean
+    }
+  | { operation: "olc.default" | "olc.remove"; accountId: string }
   | {
       operation: "opencode.account.configure"
       accountId: string
@@ -1007,6 +1024,7 @@ export type ManagementAccountSettingsMutationInput =
   | { operation: "deepseek.default" | "deepseek.remove" | "clp.default" | "clp.remove"; accountId: string }
 
 export interface ManagementAccountSettingsPreview {
+  initialModel?: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition
   operation: string
   revision?: string
   activation?: string

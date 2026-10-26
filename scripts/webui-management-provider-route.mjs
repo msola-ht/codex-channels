@@ -249,25 +249,28 @@ export async function routeProviderManagement({
   if (path === "/account-settings/preview" && request.method === "POST") {
     const body = await readJsonBody(request, maximumBodyBytes);
     const input = normalizeAccountSettingsMutation(body);
-    const preview = await state.previewAccountSettings(input, environment);
-    const safePreview = redactAccountSettingsResult(preview);
-    const resource = await readAccountSettings(environment, state);
-    const inputFingerprint = fingerprintManagementValue(input);
-    const resourceRevision = fingerprintManagementValue(resource);
-    const issued = state.confirmations.issue({
-      sessionId: principalId,
-      operation: "account-settings.write",
-      inputFingerprint,
-      resourceRevision,
-      previewFingerprint: fingerprintManagementValue(safePreview),
+    return withAccountSettingsRequest(request, response, state, input.operation, async options => {
+      const preview = await state.previewAccountSettings(input, environment, options);
+      options.signal?.throwIfAborted();
+      const safePreview = redactAccountSettingsResult(preview);
+      const resource = await readAccountSettings(environment, state);
+      const inputFingerprint = fingerprintManagementValue(input);
+      const resourceRevision = fingerprintManagementValue(resource);
+      const issued = state.confirmations.issue({
+        sessionId: principalId,
+        operation: "account-settings.write",
+        inputFingerprint,
+        resourceRevision,
+        previewFingerprint: fingerprintManagementValue(safePreview),
+      });
+      sendManagementJson(response, 200, {
+        preview: safePreview,
+        resourceRevision,
+        confirmationToken: issued.token,
+        confirmationExpiresAt: issued.expiresAt,
+      });
+      return true;
     });
-    sendManagementJson(response, 200, {
-      preview: safePreview,
-      resourceRevision,
-      confirmationToken: issued.token,
-      confirmationExpiresAt: issued.expiresAt,
-    });
-    return true;
   }
   if (path === "/account-settings" && request.method === "POST") {
     const body = await readJsonBody(request, maximumBodyBytes);
@@ -275,39 +278,43 @@ export async function routeProviderManagement({
       throw new ApiError(400, "invalid_json", "账户设置写入请求必须包含 confirmationToken");
     }
     const input = normalizeAccountSettingsMutation(body);
-    const resource = await readAccountSettings(environment, state);
-    const preview = await state.previewAccountSettings(input, environment);
-    const safePreview = redactAccountSettingsResult(preview);
-    const inputFingerprint = fingerprintManagementValue(input);
-    const resourceRevision = fingerprintManagementValue(resource);
-    state.confirmations.consume(body.confirmationToken, {
-      sessionId: principalId,
-      operation: "account-settings.write",
-      inputFingerprint,
-      resourceRevision,
-      previewFingerprint: fingerprintManagementValue(safePreview),
+    return withAccountSettingsRequest(request, response, state, input.operation, async options => {
+      const resource = await readAccountSettings(environment, state);
+      const preview = await state.previewAccountSettings(input, environment, { ...options, authentication: "defer-to-apply" });
+      options.signal?.throwIfAborted();
+      const safePreview = redactAccountSettingsResult(preview);
+      const inputFingerprint = fingerprintManagementValue(input);
+      const resourceRevision = fingerprintManagementValue(resource);
+      state.confirmations.consume(body.confirmationToken, {
+        sessionId: principalId,
+        operation: "account-settings.write",
+        inputFingerprint,
+        resourceRevision,
+        previewFingerprint: fingerprintManagementValue(safePreview),
+      });
+      let result;
+      try {
+        options.signal?.throwIfAborted();
+        assertManagementAuditWritable(state.audit);
+        result = await state.applyAccountSettings(input, environment, safePreview, options);
+      } catch (error) {
+        throw managementOperationError(error, [], "account_settings_failed");
+      }
+      invalidateProviderManagementSummary(state.providerStateCache);
+      invalidateServiceStatusSummary(state.serviceStatusCache);
+      const auditStatus = recordProviderAudit(state, {
+        sessionId: principalId,
+        operation: "account-settings.write",
+        target: accountSettingsAuditTarget(input),
+        inputFingerprint,
+        resourceRevision,
+        safePreview,
+        confirmationToken: body.confirmationToken,
+        resultCode: result.action ?? "updated",
+      }, "账户设置已写入，但审计记录失败");
+      sendManagementJson(response, 200, { ...redactAccountSettingsResult(result), auditStatus });
+      return true;
     });
-    let result;
-    try {
-      assertManagementAuditWritable(state.audit);
-      result = await state.applyAccountSettings(input, environment, safePreview);
-    } catch (error) {
-      throw managementOperationError(error, [], "account_settings_failed");
-    }
-    invalidateProviderManagementSummary(state.providerStateCache);
-    invalidateServiceStatusSummary(state.serviceStatusCache);
-    const auditStatus = recordProviderAudit(state, {
-      sessionId: principalId,
-      operation: "account-settings.write",
-      target: accountSettingsAuditTarget(input),
-      inputFingerprint,
-      resourceRevision,
-      safePreview,
-      confirmationToken: body.confirmationToken,
-      resultCode: result.action ?? "updated",
-    }, "账户设置已写入，但审计记录失败");
-    sendManagementJson(response, 200, { ...redactAccountSettingsResult(result), auditStatus });
-    return true;
   }
   if (path === "/provider-settings/preview" && request.method === "POST") {
     const body = await readJsonBody(request, maximumBodyBytes);
@@ -552,6 +559,7 @@ function providerSettingsAuditTarget(input) {
 }
 
 function accountSettingsAuditTarget(input) {
+  if (input.operation.startsWith("olc.")) return `olc-${input.accountId}`;
   if (input.operation.startsWith("clp.")) return clinePassProviderId(input.accountId);
   if (input.operation.startsWith("opencode.account.")) return String(input.accountId ?? "unknown");
   return input.operation.startsWith("deepseek.") ? "deepseek" : "unknown";
@@ -572,4 +580,9 @@ async function readAccountSettings(environment, state) {
   } catch {
     throw new ApiError(503, "account_state_unavailable", "账户设置暂不可用，请检查 Provider 配置");
   }
+}
+
+async function withAccountSettingsRequest(request, response, state, operationId, operation) {
+  if (!operationId.startsWith("olc.")) return operation({});
+  return readManagementSnapshot(request, response, state, signal => operation({ signal }));
 }
