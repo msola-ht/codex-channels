@@ -17,6 +17,7 @@
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
 - [`docs/cline-pass.md`](docs/cline-pass.md)：CLP 配置、Chat 转换边界与用量。
 - [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、账户模型目录、额度查询与固定/切换模式。
+- [`docs/ollama-cloud-probe.md`](docs/ollama-cloud-probe.md)：Ollama Cloud 原始探测快照、官方合同核对、受管多账户方案 B 与 freeform 适配设计；尚未实现。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
