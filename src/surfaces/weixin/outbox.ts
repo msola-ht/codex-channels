@@ -231,6 +231,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
             event.background ? event.threadId : undefined,
             event.identity,
             event.approvalsReviewer,
+            event,
           ),
         ),
         true,

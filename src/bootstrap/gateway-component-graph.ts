@@ -1162,7 +1162,10 @@ export abstract class GatewayComponentGraph {
       this.surfaces,
       this.output,
       logger.child({ module: "delivery" }),
-      (target, signal) => service.workspaceGitBranch(target, signal),
+      (_target, signal, workspaceId) => {
+        const workspace = workspaceId === undefined ? undefined : this.workspaces.get(workspaceId);
+        return workspace ? currentGitBranch(workspace.cwd, signal) : Promise.resolve(undefined);
+      },
       {
         persistence: {
           directory: join(dirname(config.stateDatabasePath), "delivery-outbox"),

@@ -171,6 +171,7 @@ export function renderFeishuOutput(
           event.background ? event.threadId : undefined,
           event.identity,
           event.approvalsReviewer,
+          event,
         ),
       );
     case "turn.reasoning":

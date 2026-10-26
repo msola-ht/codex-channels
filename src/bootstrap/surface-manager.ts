@@ -130,6 +130,7 @@ export class SurfaceManager {
     currentGitBranch?: (
       target: OutputEvent["target"],
       signal: AbortSignal,
+      workspaceId?: string,
     ) => Promise<string | undefined>,
     private readonly options: SurfaceManagerOptions = {},
   ) {
@@ -1039,7 +1040,7 @@ export class SurfaceManager {
       } finally { this.discardTurnSettlement(event); }
       return;
     }
-    const routedEvent = await this.enrichSafely(event);
+    const routedEvent = await this.enrichSafely(event, signal);
     if (!this.acceptingOutput) return;
     if (!this.active.has(surface)) {
       if (!this.stopping) {

@@ -213,8 +213,9 @@ export function createStartupPresentation(
     fields: [
       { label: "App Server", value: "已连接" },
       { label: "版本", value: `Codex Connect ${gatewayMetadata.version} · Codex ${runtime.gatewayVersion}` },
+      { label: "工作区", value: workspace.name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true },
+      ...(status.gitBranch ? [{ label: "Git 分支", value: status.gitBranch.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true }] : []),
       ...(detailed || runtime.displayPreset === "standard" ? [
-        { label: "工作区", value: workspace.name, literal: true },
         ...(detailed ? [{ label: "工作目录", value: workspace.cwd, literal: true }] : []),
         { label: "会话", value: status.threadId ? status.threadName ?? "未命名" : "当前未绑定会话", literal: true },
         ...(detailed && status.threadId ? [{ label: "Session ID", value: status.threadId, literal: true }] : []),
@@ -271,6 +272,7 @@ export function createTurnStartedPresentation(
   backgroundThreadId?: string,
   identity?: TurnStartIdentity,
   approvalsReviewer?: ThreadApprovalsReviewer | null,
+  workspace?: Pick<Extract<OutputEvent, { type: "turn.started" }>, "workspaceId" | "workspaceName" | "gitBranch">,
 ): LifecyclePresentation {
   return {
     title: identity
@@ -279,6 +281,8 @@ export function createTurnStartedPresentation(
         ? "后台任务继续处理中。"
         : "已开始处理。",
     fields: [
+      { label: "工作区", value: (workspace?.workspaceName ?? workspace?.workspaceId ?? "未知").replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true },
+      ...(workspace?.gitBranch ? [{ label: "Git 分支", value: workspace.gitBranch.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " "), literal: true }] : []),
       ...(backgroundThreadId ? [{ label: "Session ID", value: backgroundThreadId }] : []),
       ...(isAutoApprovalReviewer(approvalsReviewer)
         ? [{ label: "审批方式", value: "自动审批" }]
@@ -474,11 +478,16 @@ export function createTurnCompletedPresentation(
       : `${formatTokenCount(usage.last.totalTokens)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, usage.last.totalTokens / capacity * 100))}）`
     : "暂不可用";
   const full = detail === "full";
+  const workspaceFields: LifecyclePresentationField[] = [
+    { label: "工作区", value: literal(event.workspaceName ?? event.workspaceId ?? "未知"), literal: true },
+    ...(event.gitBranch ? [{ label: "Git 分支", value: literal(event.gitBranch), literal: true }] : []),
+  ];
   if (mode === "brief" || detail === "basic") {
     return {
       title: `${event.background ? "后台任务" : "本次运行"} · ${turnStatusLabel(event.status)}`,
       titleStyle: "emphasis",
       fields: [
+        ...workspaceFields,
         { label: "上下文", value: usage && (capacity == null || capacity <= 0)
           ? `${contextUsage}（窗口上限未知）` : contextUsage },
         ...(mode !== "brief" && event.durationMs !== undefined
@@ -621,6 +630,7 @@ export function createTurnCompletedPresentation(
         title: `${event.background ? "后台任务" : "本次运行"} · ${event.missingFinalResponse ? "无最终回复" : turnStatusLabel(event.status)}`,
         titleStyle: "emphasis",
         fields: [
+          ...workspaceFields,
           { title: "主轮", fields: visibleCompletionStatistics(runFields) },
           { title: "任务合计（含子代理）", fields: visibleCompletionStatistics(taskFields) },
           ...completionAccountFields(event),
@@ -633,9 +643,10 @@ export function createTurnCompletedPresentation(
     title: `${event.background ? "后台任务" : "本次运行"} · ${event.missingFinalResponse ? "无最终回复" : turnStatusLabel(event.status)}`,
     titleStyle: "emphasis",
     fields: full ? [
+      ...workspaceFields,
       { title: "主轮", fields: visibleCompletionStatistics(runFields) },
       ...completionAccountFields(event),
-    ] : [...visibleCompletionStatistics(runFields), ...completionAccountFields(event)],
+    ] : [...workspaceFields, ...visibleCompletionStatistics(runFields), ...completionAccountFields(event)],
   };
 }
 
