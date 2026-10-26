@@ -1,14 +1,14 @@
 import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
-import { escapeQqMarkdownDollars, qqBodyMarkdownPrefix, qqNativeMarkdownPrefix } from "./body-markdown.js";
+import { escapeQqNotificationLiterals, qqNativeMarkdownPrefix } from "./body-markdown.js";
 import { QQ_BODY_MARKDOWN_PART_BYTES, QQ_BODY_MARKDOWN_PART_CHARACTERS, QQ_TEXT_PART_BYTES, type QqTextMessage } from "./protocol.js";
 
 /** Preserve exact review/code text inside a fixed fence. Unsupported platform
  * syntax, invisible characters and fence collisions retain the literal path. */
 export function qqLiteralMarkdown(content: string): string | undefined {
-  if (content.includes("```") || /[\p{Cf}\p{Cc}]/u.test(content.replace(/\n/gu, ""))) return undefined;
+  if (content.includes("```") || /[\p{Cf}\p{Cc}]/u.test(content.replace(/[\t\r\n]/gu, ""))) return undefined;
   const candidate = `\`\`\`text\n${content}\n\`\`\``;
-  return qqBodyMarkdownPrefix(candidate, true) === candidate ? candidate : undefined;
+  return qqNativeMarkdownPrefix(candidate) === candidate ? candidate : undefined;
 }
 
 /** Optional representation for already validated notifications and command text.
@@ -19,17 +19,17 @@ export function planQqMessageMarkdown(input: QqTextMessage, maximumBytes = QQ_TE
   // preprocessing below. Convert completed local references here as well so
   // they do not force the whole Markdown representation to plain text.
   const original = qqBodyMarkdownText(input.content);
-  if (/[\p{Cf}\p{Cc}]/u.test(original.replace(/\n/gu, ""))) return undefined;
-  if (qqBodyMarkdownPrefix(original, true) !== original) return undefined;
+  if (/[\p{Cf}\p{Cc}]/u.test(original.replace(/[\t\r\n]/gu, ""))) return undefined;
+  if (qqNativeMarkdownPrefix(original) !== original) return undefined;
   const blocks = markdownBlocks(original);
   if (blocks.some(block => !block.closed)) return undefined;
-  const text = escapeQqMarkdownDollars(original);
+  const text = escapeQqNotificationLiterals(original);
   if (Buffer.byteLength(text) <= maximumBytes) return [{ ...input, content: text }];
-  const budget = maximumBytes - Buffer.byteLength("[1/8]\n");
+  const budget = maximumBytes - Buffer.byteLength("[1/8]\n\n");
   const chunks: string[] = [];
   let chunk = "";
   for (const { text: block } of blocks) {
-    const value = escapeQqMarkdownDollars(block);
+    const value = escapeQqNotificationLiterals(block);
     if (Buffer.byteLength(value) > budget) return undefined;
     if (Buffer.byteLength(chunk) + Buffer.byteLength(value) > budget) {
       chunks.push(chunk); chunk = "";
@@ -40,7 +40,7 @@ export function planQqMessageMarkdown(input: QqTextMessage, maximumBytes = QQ_TE
   if (chunks.length > 8 || chunks.some(value => !value.trim())
     || (input.mode === "passive" && input.sequence + chunks.length - 1 > 4)) return undefined;
   return chunks.map((content, index) => ({
-    ...input, content: `[${index + 1}/${chunks.length}]\n${content}`,
+    ...input, content: `[${index + 1}/${chunks.length}]\n\n${content}`,
     ...(input.mode === "passive" ? { sequence: input.sequence + index } : {}),
   }));
 }

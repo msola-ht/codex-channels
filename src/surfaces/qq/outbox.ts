@@ -15,6 +15,14 @@ import { QqBudgetError, qqBudgetDiagnostics, type QqSendReservation } from "./se
 const MAX_PARTS = 8;
 const PLAN_TIMEOUT_MS = 45_000;
 
+/** Rendering intent is independent of transport authorization and scheduling. */
+type QqTextPresentation =
+  | { kind: "literal" }
+  | { kind: "formatted"; markdownContent?: string }
+  | { kind: "body"; allowResultFile: boolean }
+  | { kind: "panel"; keyboard: QqCommandKeyboard }
+  | { kind: "interaction"; controls: { content: string; keyboard: QqCommandKeyboard; markdownContent?: string } };
+
 /** Runs after account scheduling but before any checkpoint or protocol call. */
 function guardBeforeDispatch(guard: () => undefined): void {
   try { guard(); }
@@ -66,12 +74,16 @@ export class QqTextOutbox {
   /** One complete text, one shared queue operation and receipt. Never retries or changes mode. */
   async deliver(
     input: QqTextMessage,
-    context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; nativeBody?: boolean; markdownContent?: string; keyboard?: QqCommandKeyboard; allowResultFile?: boolean;
-      interactionControls?: { content: string; keyboard: QqCommandKeyboard; markdownContent?: string };
+    context: QqTextSendContext & { presentation: QqTextPresentation;
       reserve?(parts: number): QqSendReservation;
       reserveAfterWait?(parts: number, signal: AbortSignal): Promise<QqSendReservation> },
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>,
   ): Promise<void> {
+    const presentation = context.presentation;
+    const bodyMarkdown = presentation.kind === "body";
+    const allowResultFile = presentation.kind === "body" && presentation.allowResultFile;
+    const interactionControls = presentation.kind === "interaction" ? presentation.controls : undefined;
+    const panelKeyboard = presentation.kind === "panel" ? presentation.keyboard : undefined;
     const attempt = new QqDeliveryAttempt();
     const deadline = performance.now() + PLAN_TIMEOUT_MS;
     const controller = new AbortController();
@@ -99,17 +111,7 @@ export class QqTextOutbox {
     const guard = (): undefined => {
       signal.throwIfAborted();
       if (typeof input.recipient !== "string") throw new QqProtocolError("message", "invalid-input");
-      if (context.interactionControls && (input.mode !== "active" || context.representation
-        || context.preferMarkdown || context.keyboard || context.allowResultFile)) {
-        throw new QqProtocolError("message", "invalid-input");
-      }
-      if (context.preferMarkdown && (context.representation || context.keyboard)) {
-        throw new QqProtocolError("message", "invalid-input");
-      }
-      if (context.nativeBody && (!context.preferMarkdown || input.mode !== "active" || context.markdownContent !== undefined)) {
-        throw new QqProtocolError("message", "invalid-input");
-      }
-      if (context.markdownContent !== undefined && (!context.preferMarkdown || context.allowResultFile || context.interactionControls)) {
+      if ((bodyMarkdown || interactionControls) && input.mode !== "active") {
         throw new QqProtocolError("message", "invalid-input");
       }
       checkTime();
@@ -127,19 +129,16 @@ export class QqTextOutbox {
     timer.unref();
     try {
       signal.throwIfAborted();
-      // A Markdown body or menu must never enter text splitting or file fallback.
-      if (context.keyboard && context.representation !== "markdown") throw new QqProtocolError("message", "invalid-input");
-      const partBytes = context.representation === "markdown" && context.keyboard && input.mode === "active"
+      // A fixed menu must never enter text splitting or file fallback.
+      const partBytes = panelKeyboard && input.mode === "active"
         ? QQ_MENU_PART_BYTES : QQ_TEXT_PART_BYTES;
-      if (context.representation === "markdown" && (context.allowResultFile
-        || typeof input.content !== "string" || Buffer.byteLength(input.content) > partBytes)) {
+      if (panelKeyboard && (typeof input.content !== "string" || Buffer.byteLength(input.content) > partBytes)) {
         throw new QqProtocolError("message", "invalid-input");
       }
       let file = false;
-      let markdown = context.representation === "markdown";
+      let markdown = presentation.kind === "panel";
       let markdownParts: readonly boolean[] | undefined;
       let parts: readonly QqTextMessage[];
-      const bodyMarkdown = context.nativeBody === true;
       const nativePlan = bodyMarkdown ? planQqBodyMarkdown(input) : undefined;
       try {
         parts = nativePlan ? nativePlan.map(part => part.message) : planText(input, partBytes);
@@ -147,35 +146,33 @@ export class QqTextOutbox {
       }
       catch (error) {
         if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input"
-          || !context.allowResultFile || input.mode !== "active" || typeof input.content !== "string"
+          || !allowResultFile || input.mode !== "active" || typeof input.content !== "string"
           || !input.content.trim() || /[\uD800-\uDFFF]/u.test(input.content)
           || input.content.length > QQ_RESULT_FILE_BYTES || Buffer.byteLength(input.content) > QQ_RESULT_FILE_BYTES) throw error;
         file = true;
         parts = [{ ...input }];
       }
-      if (context.preferMarkdown && !bodyMarkdown) {
-        const formatted = planQqMessageMarkdown(context.markdownContent === undefined ? input : { ...input, content: context.markdownContent })
+      if (presentation.kind === "formatted") {
+        const formatted = planQqMessageMarkdown(presentation.markdownContent === undefined ? input : { ...input, content: presentation.markdownContent })
             ?.map(message => ({ message, markdown: true }));
-        // Prefer whole-message Markdown only when it does not add bubbles to
-        // a valid text plan; a file fallback may become up to eight body parts.
-        if (formatted && (file || formatted.length <= parts.length)) {
+        // A formatted notification must not add bubbles to its literal plan.
+        if (formatted && formatted.length <= parts.length) {
           parts = formatted.map(part => part.message);
           markdownParts = formatted.map(part => part.markdown);
-          file = false;
         }
       }
-      if (context.interactionControls) {
+      if (interactionControls) {
         // A complete Markdown status panel needs no filler above its keyboard.
         // Literal fallback still carries a separate, nonempty control message.
-        if (!context.interactionControls.content && context.interactionControls.markdownContent === undefined) {
+        if (!interactionControls.content && interactionControls.markdownContent === undefined) {
           throw new QqProtocolError("message", "invalid-input");
         }
-        const controls = planText({ ...input, content: context.interactionControls.content || "更多查询" });
+        const controls = planText({ ...input, content: interactionControls.content || "更多查询" });
         if (controls.length !== 1) throw new QqProtocolError("message", "invalid-input");
-        const candidate = context.interactionControls.markdownContent;
+        const candidate = interactionControls.markdownContent;
         let formatted: readonly QqTextMessage[] | undefined;
         if (candidate !== undefined) {
-          const combined = { ...input, content: candidate + (context.interactionControls.content ? `\n\n${context.interactionControls.content}` : "") };
+          const combined = { ...input, content: candidate + (interactionControls.content ? `\n\n${interactionControls.content}` : "") };
           // Validate the full candidate before optional Markdown planning. No
           // clipping or partial Markdown: unsafe/oversized candidates use the
           // already validated literal preview and separate controls instead.
@@ -204,7 +201,7 @@ export class QqTextOutbox {
       try { reservation = context.reserve?.(parts.length); }
       catch (error) {
         if (!(error instanceof QqProtocolError) || error.reason !== "budget") throw error;
-        if (context.allowResultFile
+        if (allowResultFile
           && input.mode === "active" && parts.length > 1 && Buffer.byteLength(input.content) <= QQ_RESULT_FILE_BYTES) {
           // No request has started. Prefer one complete file before waiting
           // for capacity; never change representation after a request begins.
@@ -222,8 +219,8 @@ export class QqTextOutbox {
           for (const [index, part] of parts.entries()) {
             active.throwIfAborted();
             guard();
-            const controls = index === parts.length - 1 ? context.interactionControls : undefined;
-            const keyboard = controls?.keyboard ?? context.keyboard;
+            const controls = index === parts.length - 1 ? interactionControls : undefined;
+            const keyboard = controls?.keyboard ?? panelKeyboard;
             const partMarkdown = markdownParts?.[index] ?? markdown;
             // C2C replies never combine native references with content.
             const outgoing = { ...part };

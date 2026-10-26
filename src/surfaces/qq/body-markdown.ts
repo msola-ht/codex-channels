@@ -30,15 +30,15 @@ function imageDestinationSupported(destination: string): boolean {
   } catch { return false; }
 }
 
-/** QQ interprets unescaped dollars as formula delimiters. Keep them literal in
- * visible Markdown text, without changing code or link/image destinations.
- * This is an outbound representation only; source text and offsets stay raw. */
-export function escapeQqMarkdownDollars(text: string): string {
+/** Notifications contain literal fields: preserve dollars and ampersands in
+ * visible prose, without changing code or link/image destinations. This is an
+ * outbound representation only; model bodies and source values stay raw. */
+export function escapeQqNotificationLiterals(text: string): string {
   let fence: MarkdownFence | undefined;
   let prose = "";
   let result = "";
   const flush = (): void => {
-    result += escapeProseDollars(prose);
+    result += escapeNotificationProse(prose);
     prose = "";
   };
   for (const originalLine of text.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
@@ -55,7 +55,7 @@ export function escapeQqMarkdownDollars(text: string): string {
   return result;
 }
 
-function escapeProseDollars(text: string): string {
+function escapeNotificationProse(text: string): string {
   // A code span closes only at a run of exactly the same length. Index the
   // runs once so malformed prose cannot cause repeated scans of its suffix.
   const runs = new Map<number, { positions: number[]; next: number }>();
@@ -72,7 +72,7 @@ function escapeProseDollars(text: string): string {
       let end = index + 1;
       while (text[end] === "\\") end++;
       result += text.slice(index, end);
-      if ((end - index) % 2 === 1 && (text[end] === "$" || text[end] === "`")) result += text[end++];
+      if ((end - index) % 2 === 1 && (text[end] === "$" || text[end] === "&" || text[end] === "`")) result += text[end++];
       index = end;
       continue;
     }
@@ -117,54 +117,20 @@ function escapeProseDollars(text: string): string {
         } catch { /* A malformed URL remains ordinary visible text. */ }
       }
     }
-    result += character === "$" ? "\\$" : character;
+    result += character === "$" || character === "&" ? `\\${character}` : character;
     index++;
   }
   return result;
 }
 
-/**
- * Return an unchanged, safe prefix for QQ's native Markdown renderer.
- * Never repair incomplete syntax or append closing fences: replace streams
- * cannot rewrite content already accepted by the platform.
- * Unknown constructs remain in the authoritative body for plain-text delivery.
- */
-export function qqBodyMarkdownPrefix(text: string, finished = false): string {
-  return markdownPrefix(text, finished, false);
-}
-
-/** Ordinary model prose is native Markdown, not a syntax allowlist. Only QQ
- * interaction tags and image-fetch capabilities need a Gateway boundary.
- * Literal review/command presentations keep the stricter policy above. */
+/** All Markdown presentations share the same capability boundary. Code/review
+ * producers own literal wrapping; this scanner does not validate Markdown. */
 export function qqNativeMarkdownPrefix(text: string): string {
-  return markdownPrefix(text, true, true);
-}
-
-function markdownPrefix(text: string, finished: boolean, nativeBody: boolean): string {
   let fence: MarkdownFence | undefined;
   let fenceLine = false;
   let inlineTicks = 0;
   let inlineEnd = -1;
   let indented = false;
-  let ambiguousCode = false;
-  // Find the actual label boundary even for unsupported nested brackets. Using
-  // the first ']' can overlook the destination after '[outer [inner]](...)'.
-  // Index once so deeply nested/unclosed labels remain linear to scan.
-  const bracketEnds = new Map<number, number>();
-  let nextClosingBracket: number | undefined;
-  for (let index = text.length - 1; index >= 0; index--) {
-    if (text[index] === "]") nextClosingBracket = index;
-    else if (text[index] === "[" && nextClosingBracket !== undefined) bracketEnds.set(index, nextClosingBracket);
-  }
-  const brackets: number[] = [];
-  for (let index = 0; index < text.length; index++) {
-    if (text[index] === "\\") { index++; continue; }
-    if (text[index] === "[") brackets.push(index);
-    else if (text[index] === "]") {
-      const start = brackets.pop();
-      if (start !== undefined) bracketEnds.set(start, index);
-    }
-  }
   const ticks = new Map<number, { positions: number[]; next: number }>();
   for (const match of text.matchAll(/`+/gu)) {
     const entry = ticks.get(match[0].length) ?? { positions: [], next: 0 };
@@ -184,20 +150,15 @@ function markdownPrefix(text: string, finished: boolean, nativeBody: boolean): s
       indented = /^(?: {4}|\t)/u.test(line);
     }
     const character = text[index];
-    // QQ command/mention tags, HTML and entity-encoded syntax are not body capabilities.
-    // Apply even inside code: QQ does not document that code fences disable its tags.
-    // A literal left arrow cannot open an HTML/QQ tag. Hold a lone '<'
-    // across deltas until the following '-' establishes that distinction.
-    if (character === "<" && (nativeBody
-      ? /^<(?:qqbot-|@|#|emoji:)/iu.test(text.slice(index)) : text[index + 1] !== "-")) return text.slice(0, index);
-    if (!nativeBody && character === "&" && (/[#a-z]/iu.test(text[index + 1] ?? "")
-      || (!finished && index + 1 === text.length))) return text.slice(0, index);
+    // QQ interaction tags remain capabilities even in code. Ordinary source
+    // text such as <redacted>, generics, heredocs and entities is literal inside
+    // a code span/fence; it must not make the whole command lose its code box.
+    if (character === "<" && /^<(?:qqbot-|@|#|emoji:)/iu.test(text.slice(index))) return text.slice(0, index);
     if (character === "!") {
-      if (!finished && index + 1 === text.length) return text.slice(0, index);
       if (text[index + 1] === "[") {
         // QQ does not document that code/escapes suppress images. Keep examples
         // literal instead of granting image-fetch capabilities to code text.
-        if (fenceLine || inlineTicks || indented || ambiguousCode || text[index - 1] === "\\") return text.slice(0, index);
+        if (fenceLine || inlineTicks || indented || text[index - 1] === "\\") return text.slice(0, index);
         // A bounded, complete inline image is atomic across stream deltas and
         // final Markdown blocks. Titles, nesting and reference images stay literal.
         // A media reference needs 23 scheme/path characters plus its 4096-byte token.
@@ -229,35 +190,6 @@ function markdownPrefix(text: string, finished: boolean, nativeBody: boolean): s
       index = end - 1;
       continue;
     }
-    if (character !== "[" || nativeBody) continue;
-    // Code spans and fenced or indented code keep link-like text literal.
-    // QQ tags/entities and images remain conservatively rejected above.
-    if (inlineTicks || fenceLine) continue;
-    // Plain brackets (including task markers and code) do not grant link
-    // capabilities. Keep an unresolved closing bracket until its next
-    // non-whitespace character proves it cannot become a link or reference.
-    const close = bracketEnds.get(index);
-    if (close === undefined) {
-      if (!finished) return text.slice(0, index);
-      continue;
-    }
-    const following = text.slice(close + 1).match(/^\s*(.)/su)?.[1];
-    if (following === undefined && !finished) return text.slice(0, index);
-    if (following === "[" || following === ":") return text.slice(0, index);
-    if (following !== "(") continue;
-    // Only a complete, simple HTTP(S) destination can become a link.
-    const link = /^\[[^[\]\r\n\\!<&\p{Cc}]*\]\((https?:\/\/[^\s()\\<&\p{Cc}\p{Cf}]+)\)/iu.exec(text.slice(index));
-    if (!link) return text.slice(0, index);
-    try {
-      const url = new URL(link[1]!);
-      if (!url.hostname || url.username || url.password || (url.protocol !== "http:" && url.protocol !== "https:")) {
-        return text.slice(0, index);
-      }
-    } catch { return text.slice(0, index); }
-    // The simple-link recognizer does not parse inline-code precedence inside
-    // labels/destinations. Do not allow a later image under that uncertainty.
-    if (link[0].includes("`")) ambiguousCode = true;
-    index += link[0].length - 1;
   }
   return text;
 }

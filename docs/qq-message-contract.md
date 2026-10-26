@@ -1,5 +1,31 @@
 # QQ 消息开发流程与合同
 
+## 本轮提交复核
+
+提交范围为共用 Markdown 能力边界、互斥发送类型和单份计划状态及相关文档；下文“尚未提交”为各阶段记录。提交前沿调用者、呈现、规划、预算、发送与确认重新核对，复用输入未变化的命令生产链、计划状态、正文流式及独立复审证据，未发现新的代码缺陷。补充实际 Outbox → Protocol 的隔离 fetch 观察：完整交互详情两片普通文字后才发送带按钮的第三片，三次 confirmed；第二片网络结果 unknown 时只有两次发送且无按钮；首片后撤权只有一次发送；预先取消零发送、零检查点。没有向外部会话发送观察消息。正常提交 Hook 执行工作流检查；客户端外观仍以用户验收为准，无关 Ollama 文档和索引不纳入提交。
+
+## 命令与通知共用能力边界
+
+本轮取消通知、命令、审批代码候选的独立 Markdown 语法白名单，统一复用正文的 `qqNativeMarkdownPrefix`。普通尖括号、实体和链接不再触发语法降级；QQ 专用标签及图片资源能力保持原限制。字面代码允许 Tab/CR/LF，三反引号冲突及其他不可见控制字符仍选原文字，不改写审批原值。通知的美元与实体字面显示通过 `escapeQqNotificationLiterals` 投影，代码与 URL 保持原值，模型正文不参与这项投影。
+
+关联修复：命令代码包装失败后不再将详情转义成 Markdown 重试解释，进度呈现显式省略 Markdown 候选，由消息入口选择 literal；通知分片标记后使用空行并同步预算，避免吞掉下一块的列表语义。审批、工具审批、Diff 使用完整围栏候选；Hook 的独立字面审查条件及完整送达后才允许确认的门槛保持不变。
+
+直接观察实际 `QqMessages.deliver → QqTaskProgress → QqTextOutbox → QqProtocolClient`，注入 fetch 不联网：普通尖括号、Tab/CRLF、实体及 heredoc 得到 msg_type 2 的完整代码围栏；QQ 专用标签、围栏冲突和内网图片样例得到 msg_type 0 原文字，四条均收到 started/confirmed。撤权反例在发送前拒绝，发送总数不增加。生产规划器观察到通知实体被转义，已有转义不叠加、URL 查询参数及代码原样，正文实体不变；字面代码逐字保留，不可见字符拒绝；通知分片为 1118/1107 字节且标记后为空行。独立复审覆盖上述消费者及正文流共用检查，旧/新原生能力判断的 13 类样例输出一致。没有向真实 QQ 会话发送消息，客户端外观未重新验收。
+
+本轮类型/依赖检查、受影响 ESLint、文档检查与构建通过。已安装并执行 `codexc restart gateway`；随后日志记录 `display.presentation-detail` 与 `display.operation-updates` 配置变化触发监管重启，最终 Gateway PID 为 1370291，QQ 于 1793031112188 报告 ready，App Server PID 1296176 保持不变。四项修改代码产物的本地/安装 SHA-256 一致，body-markdown.js 为 `12d1c5295ca647a45428144aed6f3bc16772deb179eed9ef88300d5466cefd53`。本轮代码及前一增量尚未另行提交，未改用户配置；真实客户端仍待观察。
+
+## 发送类型与单份计划状态
+
+按用户要求，先复核已验收渲染及引用图片、提交回执、下载预算和 Hook 确认链路，再将该基线提交为 `fdeb4bd1`；正常提交 Hook 的类型、依赖边界、Lint、文档及构建通过。无关 Ollama 文档及索引未纳入。随后完成下述两项内部简化，并处理用户新增的命令详情截图。
+
+- Outbox 的呈现请求改为互斥 `literal`、`formatted`、`body`、`panel`、`interaction` 五种已有用途，删除散落的 preferMarkdown/nativeBody/representation 组合开关。仅 body 可声明文件回退，面板键盘和交互控制归各自分支；授权、来源、队列、预算、检查点及未知结果不重发保持原链路。
+- QQ 计划进度删除 markdownPlan，唯一 PlanProgressTracker 生成结构化“完整计划/完成步骤”更新，再分别生成普通文字和 Markdown。共享 accept 保持原 title/text/fingerprint 返回合同；首次发送成功后才初始化显示状态，取消、过期快照、重复完成及观察次数/步骤上限保持原行为。
+- 新截图中 `<redacted>` 和 `<<'NODE'` 命令详情退成纯文字，已通过生产函数复现。字面代码内现在允许普通尖括号和实体字符，保留原文；QQ 专用指令标签、图片能力、围栏冲突仍拒绝。未改变命令执行、脱敏和原有详情长度策略。
+
+隔离观察：实际 `QqMessages.deliver → QqTextOutbox → QqProtocolClient → 注入 fetch` 为 redacted/heredoc 命令生成 `msg_type: 2` 的 text 围栏，QQ 指令反例仍为 `msg_type: 0`；过程说明和最终回答仍发送相同的原生正文与简洁文件引用，五条结果均取得 confirmed。未调用真实命令或访问截图中的配置/日志，fetch 没有联网。Outbox 五种呈现各走预期发送方法；18000 字节正文仅在声明允许时转文件，不允许文件和超长固定面板均零发送；三片正文第二片 unknown 后只有两次调用和一次 confirmed，没有继续第三片或改发文件。
+
+计划子任务直接观察生产 observe/prepare/send：首帧与两步完成合计三条，重复快照无新增；首帧发送失败后下一快照仍显示完整计划；并发调用同一准备结果只发送一次，替换快照、Turn 结束和发送中取消阻止后续发送；129 步及64次观察边界保持。共享 Telegram 状态入口及飞书完整计划呈现合同未变。此增量的类型/依赖检查、受影响 ESLint、文档检查及构建通过；已安装并只重启 Gateway，主 PID 1345409 → 1358616，独立 App Server PID 1296176 不变，日志 1793030306423 报告 QQ ready。五项代码产物本地/安装哈希一致，body-markdown.js 为 bb31634c8fa6cf0722abd95d9f231b7c2e914bed4fb6da2128c9f701833e4038。第一阶段已提交 fdeb4bd1，本增量未另行提交；命令详情代码框仍待真实 QQ 客户端验收。
+
 ## 原生正文薄适配
 
 当前实现改用 DSH 式正文直传；本节覆盖下方早期批次的正文白名单、标题改写、美元转义和半段纯文字续接策略。参考只读 `dsh-qqbot` 提交 `c8b9158b37817b0dbc1e514e62e16204ad47a6ce` 的 `outbound.ts`、`streaming-writer.ts`，以及 `qqbot-nodejs` 提交 `429a0f1b798f3b0fcef3679e207dbc0469a1df2d` 的 `QQBot.sendMarkdown`。没有引入这两个依赖或更换本地快照。普通 Markdown 不做支持性判定，QQ 不支持的扩展也不保证能显示；网关只保留专用交互标签和图片资源能力限制、授权、来源、发送预算及投递确认。
@@ -23,8 +49,8 @@ A 独立复审覆盖正文入口、流状态机、Outbox、协议、来源与授
 
 按用户要求，在部署后只读比较 QQ 的消息表示、流式交付、限额、来源关联及过程输出；没有扩展为整个 Gateway 或 DSH 的全面质量审计，也没有顺带改变配置或其他功能。
 
-- 可收敛的内部接口：本项目 `outbox.ts` 的 representation、preferMarkdown、nativeBody、markdownContent、interactionControls 等组合依靠运行时排斥无效组合，DSH 的发送层主要接收 content 和 keyboard。可把本项目现有的正文、字面通知、交互面板明确建模为互斥请求类型，保留文件资格、预算、守卫与检查点；这是减少错误组合的维护建议，尚未实施。
-- 可消除的重复状态：`task-progress.ts` 同时持有 plan 和 markdownPlan 两个 `PlanProgressTracker`，并按索引配对二者输出。业务上的完成步骤只需判定一次，再分别生成普通文字/Markdown。可以改为单个结构化进度结果驱动两种呈现，仍需保持既有首次发送确认和去重语义；本次未修改，也未声称已复现状态错配。
+- 可收敛的内部接口：本项目 `outbox.ts` 的 representation、preferMarkdown、nativeBody、markdownContent、interactionControls 等组合依靠运行时排斥无效组合，DSH 的发送层主要接收 content 和 keyboard。可把本项目现有的正文、字面通知、交互面板明确建模为互斥请求类型，保留文件资格、预算、守卫与检查点；该建议随后已落实为互斥呈现类型，见本页“发送类型与单份计划状态”。
+- 可消除的重复状态：`task-progress.ts` 同时持有 plan 和 markdownPlan 两个 `PlanProgressTracker`，并按索引配对二者输出。业务上的完成步骤只需判定一次，再分别生成普通文字/Markdown。可以改为单个结构化进度结果驱动两种呈现，仍需保持既有首次发送确认和去重语义；随后已落实为单份结构化更新，见本页“发送类型与单份计划状态”；未声称曾复现状态错配。
 - 可选的产品简化：DSH `config.ts` 默认 `showToolResults=false`，`outbound.ts` 不发送工具开始、只按开关发送成功结果。本项目 QQ 支持计划、重试、推理、子代理和操作终态等更多过程输出，因而有更多排队、预算和展示状态。若要减少消息噪声，优先利用已有显示设置；此项会改变可见信息，不在本轮擅自关闭。
 - 应保留的复杂度：DSH `outbound-buffer.ts` flush 失败只记日志并清空缓冲，`outbound.ts` 单片失败后继续循环；本项目投递箱、检查点与未知结果不重发提供不同的交付保证。DSH `session-manager.ts` 覆盖最近 replyTarget，`reply-target.ts` 会尝试同会话其他缓存来信再转主动；本项目精确绑定原 Thread/Turn、来信、用户及工作区，不能用最近来信替代。账号/接收人预算和完整计划预留也不能由简单被动次数计数替代。平台协议、SDK 内部重试和中间件还承担 DSH 仓库未直接展示的工作，不能只按插件行数判断谁更简单。
 
