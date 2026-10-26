@@ -82,7 +82,7 @@ export function createPlanPresentation(
   event: Extract<OutputEvent, { type: "plan.updated" }>,
 ): PlanPresentation {
   const steps = event.steps.slice(0, maximumPlanSteps);
-  const completed = steps.filter((step) => step.status === "completed").length;
+  const completed = event.steps.filter((step) => step.status === "completed").length;
   const title = `任务计划 · ${completed}/${event.steps.length}`;
   const explanation = boundedText(
     event.explanation?.trim() ?? "",

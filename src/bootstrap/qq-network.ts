@@ -58,7 +58,7 @@ export function createQqNetwork(proxy: GatewayConfig["networkProxy"]): QqNetwork
     return dispatcher;
   } });
   const network: QqNetwork = {
-    downloadAttachment: (url, signal, beforeDownload) => downloads.download(url, signal, beforeDownload),
+    downloadAttachment: (url, signal, beforeDownload, timeoutMs) => downloads.download(url, signal, beforeDownload, timeoutMs),
     uploadPart: (url, bytes, signal, beforeSend) => downloads.uploadPart(url, bytes, signal, beforeSend),
     uploadImageMaterial: (url, bytes, contentType, signal, beforeSend) => downloads.uploadImageMaterial(url, bytes, contentType, signal, beforeSend),
     fetchImpl(input, init) {

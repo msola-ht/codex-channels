@@ -34,24 +34,11 @@ function imageDestinationSupported(destination: string): boolean {
  * visible Markdown text, without changing code or link/image destinations.
  * This is an outbound representation only; source text and offsets stay raw. */
 export function escapeQqMarkdownDollars(text: string): string {
-  return renderQqMarkdownDollars(text).content;
-}
-
-/** Hold only an unfinished code-span interpretation that could change how a
- * dollar already present is rendered. Return raw text so stream offsets stay raw. */
-export function qqMarkdownDollarStablePrefix(text: string): string {
-  return text.slice(0, renderQqMarkdownDollars(text).stableEnd);
-}
-
-function renderQqMarkdownDollars(text: string): { content: string; stableEnd: number } {
   let fence: MarkdownFence | undefined;
   let prose = "";
   let result = "";
-  let stableEnd = text.length;
-  const flush = (final = false): void => {
-    result += escapeProseDollars(prose, final ? offset => {
-      stableEnd = Math.min(stableEnd, text.length - prose.length + offset);
-    } : undefined);
+  const flush = (): void => {
+    result += escapeProseDollars(prose);
     prose = "";
   };
   for (const originalLine of text.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
@@ -64,15 +51,14 @@ function renderQqMarkdownDollars(text: string): { content: string; stableEnd: nu
       result += originalLine;
     } else prose += originalLine;
   }
-  flush(true);
-  return { content: result, stableEnd };
+  flush();
+  return result;
 }
 
-function escapeProseDollars(text: string, unclosedCodeDollar?: (offset: number) => void): string {
+function escapeProseDollars(text: string): string {
   // A code span closes only at a run of exactly the same length. Index the
   // runs once so malformed prose cannot cause repeated scans of its suffix.
   const runs = new Map<number, { positions: number[]; next: number }>();
-  const lastDollar = text.lastIndexOf("$");
   for (const match of text.matchAll(/`+/gu)) {
     const length = match[0].length;
     const entry = runs.get(length) ?? { positions: [], next: 0 };
@@ -98,15 +84,10 @@ function escapeProseDollars(text: string, unclosedCodeDollar?: (offset: number) 
       if (entry) while (entry.next < entry.positions.length && entry.positions[entry.next]! < end) entry.next++;
       const close = entry?.positions[entry.next];
       if (close !== undefined) {
-        // A closing run at the current stream edge can still grow on the next
-        // delta and cease to match this opening run.
-        const dollar = text.indexOf("$", end);
-        if (close + length === text.length && dollar >= end && dollar < close) unclosedCodeDollar?.(index);
         result += text.slice(index, close + length);
         index = close + length;
       } else {
         // An unmatched backtick run is literal Markdown, not an open code span.
-        if (lastDollar >= end) unclosedCodeDollar?.(index);
         result += text.slice(index, end);
         index = end;
       }
@@ -149,12 +130,41 @@ function escapeProseDollars(text: string, unclosedCodeDollar?: (offset: number) 
  * Unknown constructs remain in the authoritative body for plain-text delivery.
  */
 export function qqBodyMarkdownPrefix(text: string, finished = false): string {
+  return markdownPrefix(text, finished, false);
+}
+
+/** Ordinary model prose is native Markdown, not a syntax allowlist. Only QQ
+ * interaction tags and image-fetch capabilities need a Gateway boundary.
+ * Literal review/command presentations keep the stricter policy above. */
+export function qqNativeMarkdownPrefix(text: string): string {
+  return markdownPrefix(text, true, true);
+}
+
+function markdownPrefix(text: string, finished: boolean, nativeBody: boolean): string {
   let fence: MarkdownFence | undefined;
   let fenceLine = false;
   let inlineTicks = 0;
   let inlineEnd = -1;
   let indented = false;
   let ambiguousCode = false;
+  // Find the actual label boundary even for unsupported nested brackets. Using
+  // the first ']' can overlook the destination after '[outer [inner]](...)'.
+  // Index once so deeply nested/unclosed labels remain linear to scan.
+  const bracketEnds = new Map<number, number>();
+  let nextClosingBracket: number | undefined;
+  for (let index = text.length - 1; index >= 0; index--) {
+    if (text[index] === "]") nextClosingBracket = index;
+    else if (text[index] === "[" && nextClosingBracket !== undefined) bracketEnds.set(index, nextClosingBracket);
+  }
+  const brackets: number[] = [];
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] === "\\") { index++; continue; }
+    if (text[index] === "[") brackets.push(index);
+    else if (text[index] === "]") {
+      const start = brackets.pop();
+      if (start !== undefined) bracketEnds.set(start, index);
+    }
+  }
   const ticks = new Map<number, { positions: number[]; next: number }>();
   for (const match of text.matchAll(/`+/gu)) {
     const entry = ticks.get(match[0].length) ?? { positions: [], next: 0 };
@@ -178,8 +188,9 @@ export function qqBodyMarkdownPrefix(text: string, finished = false): string {
     // Apply even inside code: QQ does not document that code fences disable its tags.
     // A literal left arrow cannot open an HTML/QQ tag. Hold a lone '<'
     // across deltas until the following '-' establishes that distinction.
-    if (character === "<" && text[index + 1] !== "-") return text.slice(0, index);
-    if (character === "&" && (/[#a-z]/iu.test(text[index + 1] ?? "")
+    if (character === "<" && (nativeBody
+      ? /^<(?:qqbot-|@|#|emoji:)/iu.test(text.slice(index)) : text[index + 1] !== "-")) return text.slice(0, index);
+    if (!nativeBody && character === "&" && (/[#a-z]/iu.test(text[index + 1] ?? "")
       || (!finished && index + 1 === text.length))) return text.slice(0, index);
     if (character === "!") {
       if (!finished && index + 1 === text.length) return text.slice(0, index);
@@ -218,15 +229,15 @@ export function qqBodyMarkdownPrefix(text: string, finished = false): string {
       index = end - 1;
       continue;
     }
-    if (character !== "[") continue;
+    if (character !== "[" || nativeBody) continue;
     // Code spans and fenced or indented code keep link-like text literal.
     // QQ tags/entities and images remain conservatively rejected above.
     if (inlineTicks || fenceLine) continue;
     // Plain brackets (including task markers and code) do not grant link
     // capabilities. Keep an unresolved closing bracket until its next
     // non-whitespace character proves it cannot become a link or reference.
-    const close = text.indexOf("]", index + 1);
-    if (close === -1) {
+    const close = bracketEnds.get(index);
+    if (close === undefined) {
       if (!finished) return text.slice(0, index);
       continue;
     }

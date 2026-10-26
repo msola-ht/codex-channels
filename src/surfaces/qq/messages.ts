@@ -37,6 +37,7 @@ import { isQqExtensionOperation, isQqTaskCommand } from "./extension-commands.js
 import type { QqImageStore } from "./image-store.js";
 import { generatedImageUnavailableText, isGeneratedImageUnavailable, isSubagentOutput, shouldDisplayOperation } from "../operation-presentation.js";
 import { formatQuotedInput } from "../quoted-input.js";
+import { formatTurnInputAppended, type AppendedInputKind } from "../input-copy.js";
 import { textAttachmentBody } from "../text-attachment-store.js";
 import type { QqFileInput } from "./file-input.js";
 import type { QqMediaInput } from "./media-input.js";
@@ -405,7 +406,6 @@ export class QqMessages implements SurfaceOutputPort {
       ? renderQqTurnCompleted(event, this.displaySettings(event.target).presentationDetail, context?.completion ?? "detailed")
       : event.type === "turn.started" ? renderQqTurnStarted(event) : undefined;
     let text = event.type === "text.completed" ? event.text : lifecycle!.text;
-    let markdownStart: number | undefined;
     // Stream checkpoints are emitted after in-flight work settles and only
     // when a preview was confirmed or its send result is unknown. Admission
     // alone is not evidence that anything reached the platform.
@@ -428,16 +428,15 @@ export class QqMessages implements SurfaceOutputPort {
           this.options.logger.info({ ...diagnostics, representation: "stream" }, "QQ 可靠正文或轮次通知平台确认");
           return;
         }
-        if (result.kind === "continue") { text = result.text; markdownStart = result.markdownStart; representation = "continuation"; }
+        if (result.kind === "continue") { text = result.text; representation = "continuation"; }
       }
-      // Preselect one complete representation. A partial first block keeps
-      // the whole continuation literal without changing the confirmed prefix.
+      // Preselect one complete representation; streams stop at raw block boundaries.
       await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId), content: text }, {
         signal: AbortSignal.any([signal, this.lifetime.signal]),
         preferMarkdown: true,
+        nativeBody: event.type === "text.completed",
         ...(lifecycle ? { markdownContent: lifecycle.markdown } : {}),
-        ...(markdownStart !== undefined ? { markdownStart } : {}),
-        allowResultFile: event.type === "text.completed" && (event.phase !== "commentary" || markdownStart !== undefined),
+        allowResultFile: event.type === "text.completed" && (event.phase !== "commentary" || representation === "continuation"),
         beforeSend: () => { if (authorized() !== true) throw new Error("QQ 输出授权失效"); },
         reserve: parts => this.budget.reserve(qqConversationRecipient(event.target.conversationId), parts, "delivery"),
         reserveAfterWait: (parts, active) => this.budget.reserveAfterWait(qqConversationRecipient(event.target.conversationId), parts, "delivery", active),
@@ -697,7 +696,8 @@ export class QqMessages implements SurfaceOutputPort {
   private async process(message: QqMessageInput, target: ConversationTarget, ownsBusy = false): Promise<void> {
     if ("rejection" in message) {
       const reason = message.rejection;
-      const detail = reason === "mixed-attachments" ? "图片、文件或音视频混合附件暂不支持，请分开发送。"
+      const detail = reason === "empty" ? "引用内容仅作上下文，请补充本次需求后发送。"
+        : reason === "mixed-attachments" ? "图片、文件或音视频混合附件暂不支持，请分开发送。"
         : reason === "unsupported-attachment-type" ? "图片目前支持 PNG、JPEG 和非动画 GIF，请转换格式后重发。"
         : reason === "unsupported-attachment-fields" ? "附件结构暂不支持，请尝试单独发送图片，再补充文字需求。"
         : reason === "limit-exceeded" ? "附件数量或大小超出限制，请减少附件或压缩后重发。"
@@ -898,11 +898,34 @@ export class QqMessages implements SurfaceOutputPort {
         await this.reply(message, "此按钮操作不受支持，请重新打开 /help。", () => this.allowed(target, message.actorId));
         return;
       }
+      const quotedImages = "quotedImages" in message ? message.quotedImages ?? [] : [];
+      const taskImages = [...(images ?? []), ...quotedImages];
+      if (quotedImages.length && (file || media)) {
+        await this.reply(message, "引用图片不能与当前文件或音视频一起提交，请单独发送图片需求。", () => this.allowed(target, message.actorId));
+        return;
+      }
+      if (taskImages.length > 4) {
+        await this.reply(message, "当前消息与引用消息的图片合计最多四张，请减少图片后重发。", () => this.allowed(target, message.actorId));
+        return;
+      }
       const scope = this.scope(message.actorId, target.conversationId);
       if (!scope) { await this.reply(message, "请先用 /workspace 选择已配置的工作区。", () => this.allowed(target, message.actorId)); return; }
       const reservation = this.sources.reserve(scope, message, media ? 120_000 : 30_000);
       if (reservation.kind !== "accepted") { await this.reply(message, "当前输入无法接纳，请稍后核对任务状态再重试。", () => this.current(scope)); return; }
       const { ticket } = reservation;
+      const acknowledge = async (submission: Awaited<ReturnType<ConversationTurnUseCases["submit"]>>, kind: AppendedInputKind) => {
+        if (!submission.steered) return;
+        // Submission has already succeeded. A receipt failure must never cancel
+        // its source or turn into a misleading submission-failed response.
+        try {
+          await this.reply(message, formatTurnInputAppended(kind, !!message.content.trim()),
+            () => this.current(scope, submission.threadId)
+              && this.options.service.status(target).threadId === submission.threadId);
+        } catch (error) {
+          const { errorType, errorCode, errorReason } = surfaceErrorMetadata(error);
+          this.options.logger.warn({ reason: "input-ack-unconfirmed", errorType, errorCode, errorReason }, "QQ 追加输入已提交，回执未确认");
+        }
+      };
       stage = "submit";
       try {
         this.options.service.touchActivity?.(target);
@@ -922,17 +945,17 @@ export class QqMessages implements SurfaceOutputPort {
             };
             assertCurrent();
             if (media.kind === "voice" && media.referenceText) {
-              await prepared.submit(formatQuotedInput([message.content, media.referenceText].filter(Boolean).join("\n\n"), message.quotedText));
+              await acknowledge(await prepared.submit(formatQuotedInput([message.content, media.referenceText].filter(Boolean).join("\n\n"), message.quotedText)), "audio");
             } else {
               if (!this.options.media) throw new UserFacingError("input.authorization-changed", "音视频准备不可用");
               const file = await this.options.media.prepare(media, { target, actorId: message.actorId }, signal, assertCurrent);
               if ("attachment" in file) {
                 video = file;
                 assertCurrent();
-                await prepared.submit(formatQuotedInput([message.content, videoAttachmentBody(file)].filter(Boolean).join("\n\n"), message.quotedText));
+                await acknowledge(await prepared.submit(formatQuotedInput([message.content, videoAttachmentBody(file)].filter(Boolean).join("\n\n"), message.quotedText)), "file");
               } else {
                 assertCurrent();
-                await prepared.submit({ text: formatQuotedInput(message.content, message.quotedText), localAudios: [{ path: file.path }] });
+                await acknowledge(await prepared.submit({ text: formatQuotedInput(message.content, message.quotedText), localAudios: [{ path: file.path }] }), "audio");
               }
             }
           } finally {
@@ -945,13 +968,13 @@ export class QqMessages implements SurfaceOutputPort {
           }
           return;
         }
-        if (!images?.length && !file) {
-          await this.options.service.submit(target, formatQuotedInput(message.content, message.quotedText), () => ticket.isCurrent(), ticket.observer);
+        if (!taskImages.length && !file) {
+          await acknowledge(await this.options.service.submit(target, formatQuotedInput(message.content, message.quotedText), () => ticket.isCurrent(), ticket.observer), "text");
           return;
         }
         const prepare = this.options.service.prepareAttachmentSubmission;
         if (!prepare) throw new UserFacingError("input.authorization-changed", "附件提交准备不可用");
-        const prepared = prepare.call(this.options.service, target, () => ticket.isCurrent(), images?.length ? "image" : "file", ticket.observer);
+        const prepared = prepare.call(this.options.service, target, () => ticket.isCurrent(), taskImages.length ? "image" : "file", ticket.observer);
         try {
           prepared.captureTarget();
           const signal = AbortSignal.any([ticket.signal, prepared.signal, this.lifetime.signal]);
@@ -962,17 +985,19 @@ export class QqMessages implements SurfaceOutputPort {
               throw new UserFacingError(file ? "input.authorization-changed" : "image.download-failed", "附件准备已取消或上下文变化");
             }
           };
-          if (images?.length && !this.options.images) throw new UserFacingError("image.download-failed", "图片准备不可用");
+          if (taskImages.length && !this.options.images) throw new UserFacingError("image.download-failed", "图片准备不可用");
           if (file && !this.options.files) throw new UserFacingError("attachment.download-failed", "文本附件准备不可用");
           const preparedFile = file ? await this.options.files!.prepare(file, signal, assertAttachmentsCurrent) : undefined;
           const currentText = preparedFile
             ? [message.content, `附件文件名：${JSON.stringify(preparedFile.fileName)}`, textAttachmentBody(preparedFile)].filter(Boolean).join("\n\n")
             : message.content;
-          const text = formatQuotedInput(currentText, message.quotedText);
-          const input = images?.length
-            ? await this.options.images!.prepare(images, text, signal, assertAttachmentsCurrent) : text;
+          const text = [formatQuotedInput(currentText, message.quotedText),
+            ...(quotedImages.length ? [`图片顺序：当前消息 ${images?.length ?? 0} 张在前，引用消息 ${quotedImages.length} 张在后；引用图片仅作上下文。`] : []),
+          ].join("\n\n");
+          const input = taskImages.length
+            ? await this.options.images!.prepare(taskImages, text, signal, assertAttachmentsCurrent) : text;
           assertAttachmentsCurrent();
-          await prepared.submit(input);
+          await acknowledge(await prepared.submit(input), taskImages.length ? "image" : "file");
         } finally { prepared.dispose(); }
       } catch (error) {
         ticket.cancel();

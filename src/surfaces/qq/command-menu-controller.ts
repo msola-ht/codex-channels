@@ -145,7 +145,7 @@ export class QqCommandMenuController {
       ] } },
     });
     if (input === "account") return this.panel(context, {
-      content: "## 账户工具\n\n### 查询与管理\n\n- 账户额度与重置券\n- 当前渠道身份\n\n点击下方操作；机器人接入与群授权请在本机 Setup 管理。",
+      content: "## 账户工具\n\n### 查询与管理\n\n- 账户额度与重置券\n- 当前渠道身份\n\n点击下方操作；机器人接入与单聊允许名单请在本机 Setup 管理。",
       keyboard: { content: { rows: [
         { buttons: [qqMenuButton("limits", "账户额度", "/limits"), qqMenuButton("credits", "查看重置券", "/limits reset")] },
         { buttons: [qqMenuButton("whoami", "我的身份", "/whoami")] },
@@ -630,6 +630,7 @@ export class QqCommandMenuController {
     rows.push({ buttons: [qqMenuButton("extensions", "扩展管理", "/help extensions"), homeButton()] });
     if (rows.length > 5) throw unsupported();
     // Hook review fields must never acquire Markdown semantics, even inside a fence.
+    const confirmation = hookCommandChoices(result.view).find(choice => choice.input.startsWith("confirm "));
     const detail = formatQqLiteralDetails(formatConversationHooks(result.view, true));
     try {
       if (planText({ mode: "active", recipient: context.actorId, content: detail }).length > 7) throw new QqProtocolError("message", "invalid-input");
@@ -637,7 +638,10 @@ export class QqCommandMenuController {
       if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input") throw error;
       throw new UserFacingError("hooks.local-review-required", "Hook 详情超出完整展示预算");
     }
-    return { ...this.panel(context, { content: "核对上方完整 Hook 信息后操作。确认仅对本次预览有效；停止、切换或重启后失效。", keyboard: { content: { rows } } }),
+    const content = ["核对上方完整 Hook 信息后操作。确认仅对本次预览有效；停止、切换或重启后失效。",
+      ...(confirmation ? [`也可发送：/hooks ${confirmation.input}`] : []),
+    ].join("\n\n");
+    return { ...this.panel(context, { content, keyboard: { content: { rows } } }),
       detail, delivered: () => this.activate(context, buttons) };
   }
 

@@ -4,9 +4,8 @@ import type { DeliveryCheckpoint } from "../delivery-receipt.js";
 import { QQ_PASSIVE_WINDOW_MS, QQ_STREAM_BYTES, QqProtocolError, QqTextSendError, type QqProtocolClient } from "./protocol.js";
 import type { QqTaskSources, QqTaskSourceReference } from "./task-sources.js";
 import type { QqSendBudget } from "./send-budget.js";
-import { escapeQqMarkdownDollars, qqBodyMarkdownPrefix, qqMarkdownDollarStablePrefix } from "./body-markdown.js";
-import { qqBodyMarkdownRestart, qqBodyMarkdownText } from "./message-markdown.js";
-import { qqLiteralStablePrefix } from "./literal-segments.js";
+import { qqNativeMarkdownPrefix } from "./body-markdown.js";
+import { qqBodyMarkdownCompletePrefix, qqBodyMarkdownText } from "./message-markdown.js";
 
 type Body = Extract<OutputEvent, { type: "text.delta" | "text.completed" }>;
 interface Stream {
@@ -115,7 +114,7 @@ export class QqBodyStreaming {
   /** Only a confirmed closed prefix permits active continuation; uncertain streams never switch modes. */
   async finish(event: Extract<Body, { type: "text.completed" }>, signal: AbortSignal,
     checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean): Promise<
-      { kind: "ordinary" } | { kind: "complete" } | { kind: "continue"; text: string; markdownStart: number }> {
+      { kind: "ordinary" } | { kind: "complete" } | { kind: "continue"; text: string }> {
     const key = this.key(event);
     const stream = this.streams.get(key);
     if (!stream) return { kind: "ordinary" };
@@ -129,15 +128,13 @@ export class QqBodyStreaming {
       await stream.tail;
       bounded.throwIfAborted();
       if (!stream.attempted) return { kind: "ordinary" };
-      const candidate = qqBodyMarkdownText(event.text);
-      // Only the final unsent suffix may change representation. Never rewrite
-      // a prefix already confirmed by replace-stream delivery.
-      const text = candidate.startsWith(stream.sent) ? candidate : event.text;
+      const text = event.text;
+      const rendered = qqBodyMarkdownText(text);
       // A prior preview is already externally visible or uncertain, even if the final send is never attempted.
-      const continuation = stream.sealed || stream.limited || stream.finishAfterUnsentFailure || Buffer.byteLength(escapeQqMarkdownDollars(text)) > QQ_STREAM_BYTES
+      const continuation = stream.sealed || stream.limited || stream.finishAfterUnsentFailure || Buffer.byteLength(rendered) > QQ_STREAM_BYTES
         || !this.fitsRemaining(stream, text)
         || performance.now() >= (stream.deadline ?? 0) - 45_000
-        || qqBodyMarkdownPrefix(text, true).length !== text.length;
+        || qqNativeMarkdownPrefix(rendered) !== rendered;
       const operation = continuation ? "qq-stream:prefix" : "qq-stream:complete";
       await checkpoint({ operation, state: "started" });
       bounded.throwIfAborted();
@@ -145,7 +142,17 @@ export class QqBodyStreaming {
         throw new QqProtocolError("message", "invalid-response");
       }
       if (!stream.sealed) {
-        await this.send(stream, continuation ? stream.sent : text, true, bounded, authorized);
+        let closingText = continuation ? stream.sent : text;
+        if (continuation && !stream.limited && !stream.finishAfterUnsentFailure
+          && performance.now() < (stream.deadline ?? 0) - 45_000) {
+          const maximumBytes = Math.min(QQ_STREAM_BYTES, stream.remainingCharacters === undefined ? QQ_STREAM_BYTES
+            : Buffer.byteLength(qqBodyMarkdownText(stream.sent)) + stream.remainingCharacters);
+          const completePrefix = qqBodyMarkdownCompletePrefix(text, text.length, maximumBytes);
+          if (completePrefix.startsWith(stream.sent)
+            && Buffer.byteLength(qqBodyMarkdownText(completePrefix)) <= QQ_STREAM_BYTES
+            && this.fitsRemaining(stream, completePrefix)) closingText = completePrefix;
+        }
+        await this.send(stream, closingText, true, bounded, authorized);
         stream.sealed = true;
       }
       await checkpoint({ operation, state: "confirmed",
@@ -160,10 +167,8 @@ export class QqBodyStreaming {
         break;
       }
       if (!boundary) throw new QqProtocolError("message", "invalid-input");
-      const marker = "正文续接：\n";
-      const restart = qqBodyMarkdownRestart(text, stream.sent.length);
-      return { kind: "continue", text: `${marker}${suffix}`,
-        markdownStart: restart === stream.sent.length ? 0 : marker.length + restart - stream.sent.length };
+      const marker = "正文续接：\n\n";
+      return { kind: "continue", text: `${marker}${suffix}` };
     } finally {
       bounded.removeEventListener("abort", abort);
       // A later explicit journal retry selects a full-result representation and may duplicate previews.
@@ -228,16 +233,14 @@ export class QqBodyStreaming {
     const wait = Math.ceil(stream.nextUpdateAt - performance.now());
     if (wait > 0) await delay(wait, undefined, { signal });
     if (stream.completed || stream.failed || performance.now() >= stream.deadline - 15_000) return;
-    // Native Markdown streams take the current full prefix, not complete blocks.
-    // Retain the last grapheme: a later delta may extend it with a combining mark
-    // or emoji joiner, which would invalidate a continuation boundary.
+    // A completed block cannot change the local-reference projection on a later
+    // delta. Stream cumulative stable blocks and flush the last block at finish.
+    // Retain the last grapheme so continuation offsets stay in the raw body.
     const segments = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(stream.text);
     let stableEnd = 0;
     for (const segment of segments) stableEnd = segment.index;
-    const safeEnd = Math.min(qqLiteralStablePrefix(stream.text).length,
-      qqMarkdownDollarStablePrefix(qqBodyMarkdownPrefix(stream.text.slice(0, stableEnd))).length);
-    // The safety scanner may stop inside a grapheme (e.g. Prepend + '<').
-    // Align its cut to the original text as well, not to the truncated prefix.
+    const safeEnd = qqBodyMarkdownCompletePrefix(stream.text, stableEnd, QQ_STREAM_BYTES).length;
+    // Align the raw cut to the original grapheme boundaries.
     let previewEnd = 0;
     for (const segment of segments) {
       if (segment.index > safeEnd) break;
@@ -245,7 +248,7 @@ export class QqBodyStreaming {
     }
     const text = stream.text.slice(0, previewEnd);
     if (!text.trim() || text === stream.sent || !text.startsWith(stream.sent)) return;
-    if (Buffer.byteLength(escapeQqMarkdownDollars(text)) > QQ_STREAM_BYTES || !this.fitsRemaining(stream, text)) {
+    if (Buffer.byteLength(qqBodyMarkdownText(text)) > QQ_STREAM_BYTES || !this.fitsRemaining(stream, text)) {
       stream.limited = true;
       await this.seal(stream, signal);
       return;
@@ -294,7 +297,7 @@ export class QqBodyStreaming {
     authorized: () => boolean): Promise<{ messageId: string }> {
     const anchor = stream.anchor;
     if (!anchor || stream.deadline === undefined) throw new QqProtocolError("message", "authorization");
-    const rendered = escapeQqMarkdownDollars(content);
+    const rendered = qqBodyMarkdownText(content);
     const signal = AbortSignal.any([caller, this.lifetime.signal, stream.controller.signal, anchor.signal]);
     const guard = (): undefined => {
       signal.throwIfAborted();
@@ -312,7 +315,7 @@ export class QqBodyStreaming {
         content: rendered, contentType: "markdown", index: stream.index, ...(stream.id ? { streamId: stream.id } : {}), finished,
       }, { signal, beforeSend: guard }));
       const remaining = stream.remainingCharacters === undefined ? undefined
-        : stream.remainingCharacters - Buffer.byteLength(rendered.slice(escapeQqMarkdownDollars(stream.sent).length));
+        : stream.remainingCharacters - Buffer.byteLength(rendered.slice(qqBodyMarkdownText(stream.sent).length));
       // Real QQ continuation responses can report zero on every accepted frame.
       // Zero is not evidence of exhaustion; only a positive hint tightens capacity.
       const reported = result.remainingCharacters === 0 ? undefined : result.remainingCharacters;
@@ -329,8 +332,8 @@ export class QqBodyStreaming {
   private fitsRemaining(stream: Stream, content: string): boolean {
     // Upstream does not define which character unit it counts. UTF-8 bytes
     // conservatively bound the added text; the reported limit can only tighten.
-    const rendered = escapeQqMarkdownDollars(content);
-    const previous = escapeQqMarkdownDollars(stream.sent);
+    const rendered = qqBodyMarkdownText(content);
+    const previous = qqBodyMarkdownText(stream.sent);
     return rendered.startsWith(previous) && (stream.remainingCharacters === undefined
       || Buffer.byteLength(rendered.slice(previous.length)) <= stream.remainingCharacters);
   }

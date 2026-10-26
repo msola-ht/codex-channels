@@ -37,9 +37,10 @@ export function createQqAttachmentDownloader(network: Pick<QqNetwork, "agentForU
   const closing = new Set<Promise<void>>();
   let cleanupFailed = false;
   async function transfer(url: URL, caller: AbortSignal, beforeDownload: () => void,
-    upload?: { bytes: Uint8Array; contentType: string; requireEtag: boolean }): Promise<Awaited<ReturnType<QqNetwork["downloadAttachment"]>> | { etag: string } | undefined> {
+    upload?: { bytes: Uint8Array; contentType: string; requireEtag: boolean }, timeoutMs = 30_000): Promise<Awaited<ReturnType<QqNetwork["downloadAttachment"]>> | { etag: string } | undefined> {
+      if (timeoutMs !== 30_000 && timeoutMs !== 60_000) throw new Error("QQ 附件下载期限无效");
       url = new URL(url.href);
-      const signal = AbortSignal.any([caller, lifetime.signal, AbortSignal.timeout(30_000)]);
+      const signal = AbortSignal.any([caller, lifetime.signal, AbortSignal.timeout(timeoutMs)]);
       signal.throwIfAborted();
       beforeDownload();
       if (url.protocol !== "https:" || url.username || url.password || url.hash || (url.port && url.port !== "443")) {
@@ -112,8 +113,8 @@ export function createQqAttachmentDownloader(network: Pick<QqNetwork, "agentForU
       }
   }
   return {
-    async download(url, signal, beforeDownload) {
-      const result = await transfer(url, signal, beforeDownload);
+    async download(url, signal, beforeDownload, timeoutMs) {
+      const result = await transfer(url, signal, beforeDownload, undefined, timeoutMs);
       if (!result || !("stream" in result)) throw new Error("QQ 附件下载未确认");
       return result;
     },

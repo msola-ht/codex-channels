@@ -24,6 +24,7 @@ export interface QqInboundTextMessage {
   readonly file?: QqInboundFile;
   readonly media?: QqInboundMedia;
   readonly quotedText?: string;
+  readonly quotedImages?: readonly QqInboundImage[];
 }
 
 export type QqInboundMedia =
@@ -156,8 +157,7 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
     msgIdx = candidate;
   }
   if (msgIdx === undefined) return reject("malformed", "msg-idx", "missing-msg-idx");
-  const quotedText = message.message_type === 103 ? parseReference(message.msg_elements, refMsgIdx) : undefined;
-  if (quotedText !== undefined && typeof quotedText !== "string") return quotedText;
+  const reference = message.message_type === 103 ? parseReference(message.msg_elements, refMsgIdx) : undefined;
   const timestamp = parseTimestamp(message.timestamp);
   if (typeof timestamp !== "number") return timestamp;
   // Validate the whole message source before making an attachment rejection replyable.
@@ -165,6 +165,7 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
   const attachmentFailure = (failure: Rejection): Rejection => ({ ...failure, reply: {
     id, actorId, conversationId, msgIdx, sentAtMs: timestamp, content: "", rejection: failure.reason,
   } });
+  if (reference && "kind" in reference) return reference.field === "attachments" ? attachmentFailure(reference) : reference;
   const attachments = "attachments" in message ? message.attachments : [];
   const media = parseMedia(attachments);
   if (media && "category" in media) return attachmentFailure(media);
@@ -172,7 +173,9 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
   if (file && "kind" in file) return attachmentFailure(file);
   const images = parseImages(file || media ? [] : attachments);
   if (!Array.isArray(images)) return attachmentFailure(images);
-  if (message.content.trim().length === 0 && images.length === 0 && !file && !media) return reject("malformed", "content", "empty");
+  if (message.content.trim().length === 0 && images.length === 0 && !file && !media) {
+    return reference ? attachmentFailure(reject("unsupported", "content", "empty")) : reject("malformed", "content", "empty");
+  }
   // The validated strings are copied individually; no upstream object escapes.
   return {
     kind: "supported",
@@ -186,7 +189,8 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
       ...(images.length > 0 ? { images } : {}),
       ...(file ? { file } : {}),
       ...(media ? { media } : {}),
-      ...(quotedText !== undefined ? { quotedText } : {}),
+      ...(reference ? { quotedText: reference.text,
+        ...(reference.images.length ? { quotedImages: reference.images } : {}) } : {}),
     },
   };
 }
@@ -239,7 +243,7 @@ function parseFile(value: unknown): QqInboundFile | Rejection | undefined {
   return { ...validated, filename: file.filename };
 }
 
-function parseReference(value: unknown, refMsgIdx: string | undefined): string | Rejection {
+function parseReference(value: unknown, refMsgIdx: string | undefined): { text: string; images: readonly QqInboundImage[] } | Rejection {
   if (!refMsgIdx || !Array.isArray(value)) return reject("malformed", "message-elements", "reference");
   // Bound the entire untrusted tree before serializing or considering a match.
   let nodes = 0;
@@ -276,14 +280,18 @@ function parseReference(value: unknown, refMsgIdx: string | undefined): string |
   }
   if ("attachments" in selected && !Array.isArray(selected.attachments)) return reject("malformed", "attachments", "invalid-type");
   const annotations: string[] = [];
+  const imageAttachments: unknown[] = [];
   for (const attachment of (selected.attachments ?? []) as unknown[]) {
     if (!record(attachment) || typeof attachment.content_type !== "string") return reject("malformed", "attachments", "invalid-type");
-    // Only a fixed annotation escapes; URLs, filenames and credentials never do.
-    annotations.push(attachment.content_type.startsWith("image/") ? "[引用消息包含图片，未读取]" : "[引用消息包含附件，未读取]");
+    if (attachment.content_type.startsWith("image/")) imageAttachments.push(attachment);
+    else annotations.push("[引用消息包含附件，未读取]");
   }
-  const text = [selected.content, ...annotations].filter(Boolean).join("\n");
-  if (!text.trim()) return reject("malformed", "message-elements", "empty");
-  return text;
+  const images = parseImages(imageAttachments);
+  if (!Array.isArray(images)) return images;
+  // Put unread attachment notices first so long quoted text cannot truncate them.
+  const text = [...annotations, selected.content].filter(Boolean).join("\n");
+  if (!text.trim() && images.length === 0) return reject("malformed", "message-elements", "empty");
+  return { text, images };
 }
 
 function parseImages(value: unknown): QqInboundImage[] | Rejection {

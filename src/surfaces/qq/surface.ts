@@ -180,7 +180,7 @@ class QqConnection {
       (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger,
       join(options.uploadsDirectory, `qq-files-${options.appId}`));
     this.media = new QqMediaInput(options.uploadsDirectory, options.appId,
-      (url, signal, guard) => this.network.downloadAttachment(url, signal, guard), options.logger);
+      (url, signal, guard, timeoutMs) => this.network.downloadAttachment(url, signal, guard, timeoutMs), options.logger);
     this.messages = new QqMessages({ ...options,
       images: this.images, files: this.files, media: this.media }, this.client);
     this.transport = new QqWebSocketTransport({

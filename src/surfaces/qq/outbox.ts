@@ -66,7 +66,7 @@ export class QqTextOutbox {
   /** One complete text, one shared queue operation and receipt. Never retries or changes mode. */
   async deliver(
     input: QqTextMessage,
-    context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; markdownContent?: string; markdownStart?: number; keyboard?: QqCommandKeyboard; allowResultFile?: boolean;
+    context: QqTextSendContext & { representation?: "markdown"; preferMarkdown?: boolean; nativeBody?: boolean; markdownContent?: string; keyboard?: QqCommandKeyboard; allowResultFile?: boolean;
       interactionControls?: { content: string; keyboard: QqCommandKeyboard; markdownContent?: string };
       reserve?(parts: number): QqSendReservation;
       reserveAfterWait?(parts: number, signal: AbortSignal): Promise<QqSendReservation> },
@@ -106,11 +106,10 @@ export class QqTextOutbox {
       if (context.preferMarkdown && (context.representation || context.keyboard)) {
         throw new QqProtocolError("message", "invalid-input");
       }
-      if (context.markdownContent !== undefined && (!context.preferMarkdown || context.allowResultFile || context.interactionControls)) {
+      if (context.nativeBody && (!context.preferMarkdown || input.mode !== "active" || context.markdownContent !== undefined)) {
         throw new QqProtocolError("message", "invalid-input");
       }
-      if (context.markdownStart !== undefined && (!context.preferMarkdown || !context.allowResultFile
-        || !Number.isSafeInteger(context.markdownStart) || context.markdownStart < 0 || context.markdownStart > input.content.length)) {
+      if (context.markdownContent !== undefined && (!context.preferMarkdown || context.allowResultFile || context.interactionControls)) {
         throw new QqProtocolError("message", "invalid-input");
       }
       checkTime();
@@ -140,7 +139,12 @@ export class QqTextOutbox {
       let markdown = context.representation === "markdown";
       let markdownParts: readonly boolean[] | undefined;
       let parts: readonly QqTextMessage[];
-      try { parts = planText(input, partBytes); }
+      const bodyMarkdown = context.nativeBody === true;
+      const nativePlan = bodyMarkdown ? planQqBodyMarkdown(input) : undefined;
+      try {
+        parts = nativePlan ? nativePlan.map(part => part.message) : planText(input, partBytes);
+        if (nativePlan) markdownParts = nativePlan.map(part => part.markdown);
+      }
       catch (error) {
         if (!(error instanceof QqProtocolError) || error.reason !== "invalid-input"
           || !context.allowResultFile || input.mode !== "active" || typeof input.content !== "string"
@@ -149,10 +153,8 @@ export class QqTextOutbox {
         file = true;
         parts = [{ ...input }];
       }
-      const bodyMarkdown = context.allowResultFile && input.mode === "active";
-      if (context.preferMarkdown) {
-        const formatted = bodyMarkdown ? planQqBodyMarkdown(input, context.markdownStart)
-          : planQqMessageMarkdown(context.markdownContent === undefined ? input : { ...input, content: context.markdownContent })
+      if (context.preferMarkdown && !bodyMarkdown) {
+        const formatted = planQqMessageMarkdown(context.markdownContent === undefined ? input : { ...input, content: context.markdownContent })
             ?.map(message => ({ message, markdown: true }));
         // Prefer whole-message Markdown only when it does not add bubbles to
         // a valid text plan; a file fallback may become up to eight body parts.
