@@ -11,6 +11,7 @@ import { applyClinePassProviderOptions, sendDirectResponses, DirectResponsesObse
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 import { ModelRequestTimeoutError } from "../provider-proxy/index.js";
 import type { SamplingParameters } from "../model-api/index.js";
+import { prepareOllamaFreeform, type OllamaFreeformResponse } from "../model-api/index.js";
 
 export interface RelayQueueEntry {
   requestId: string;
@@ -25,6 +26,7 @@ export interface RelayQueueEntry {
 }
 
 export interface PreparedRelayProvider {
+  readonly ollamaFreeform?: boolean;
   readonly modelSampling?: Readonly<Record<string, SamplingParameters>>;
   readonly modelCapabilities?: readonly RelayModelCapability[];
   readonly target: DirectChatTarget;
@@ -121,6 +123,7 @@ export class ModelRelayServer {
     response.once("close", disconnected);
     let lease: RelayLease | undefined;
     let capture: DirectChatCapture | undefined;
+    let freeformAdapter: OllamaFreeformResponse | undefined;
     let diagnostics: ModelRequestDiagnostics = {};
     let inbound: unknown;
     let started: number | undefined;
@@ -235,6 +238,10 @@ export class ModelRelayServer {
         const capability = prepared.modelCapabilities?.find(model => model.id === body!.model);
         body = applyClinePassProviderOptions(body, capability?.cline_provider_options);
       }
+      if (protocol === "responses" && prepared.ollamaFreeform) {
+        const adapted = prepareOllamaFreeform(body);
+        body = adapted.body as DirectResponsesRequest; freeformAdapter = adapted.adapter;
+      }
       if (Buffer.byteLength(JSON.stringify(body)) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
       // Preparation includes optional capture initialization and the material/proxy resolver.
       phase = "prepare";
@@ -291,7 +298,7 @@ export class ModelRelayServer {
           } finally { clearTimeout(terminalTimer); }
         },
       };
-      if (protocol === "responses") await sendDirectResponses({ ...call, request: body as DirectResponsesRequest, observer: observer as DirectResponsesObserver });
+      if (protocol === "responses") await sendDirectResponses({ ...call, ...(freeformAdapter ? { adapter: freeformAdapter } : {}), request: body as DirectResponsesRequest, observer: observer as DirectResponsesObserver });
       else await sendDirectChat({ ...call, request: body as DirectChatRequest, observer: observer as DirectChatResponse, unwrapClpEnvelope: provider!.startsWith("clp-") });
       deliveryStatus = "finished";
     } catch (error) {
@@ -342,6 +349,7 @@ export class ModelRelayServer {
         } catch { response.destroy(); }
       }
     } finally {
+      freeformAdapter?.close();
       if (this.requests.delete(relayRequestId)) this.options.queueChanged?.();
       clearTimeout(preparationTimer); response.off("close", disconnected); controller.abort(); this.active.delete(controller);
       lease?.release();

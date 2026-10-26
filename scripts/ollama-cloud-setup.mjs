@@ -75,7 +75,7 @@ async function runOllamaCloudSetupOperation(options) {
     const preview = await previewOllamaCloudConfiguration(input, options);
     if (preview.initialModel) {
       const model = preview.initialModel;
-      output.write(`将创建所有 OLC 账户共用的模型目录（手动能力声明）\n准确 ID：${model.id}\n显示名称：${model.name}\n上下文：${model.contextWindow} Token\n支持思考等级：${model.reasoningEfforts.join(" / ")}\n默认思考等级：${model.defaultReasoningEffort}\n图片输入：${model.supportsImages ? "支持" : "不支持"}\nfreeform、tool_search 与原生搜索关闭。\n`);
+      output.write(`将创建所有 OLC 账户共用的模型目录（手动能力声明）\n准确 ID：${model.id}\n显示名称：${model.name}\n上下文：${model.contextWindow} Token\n支持思考等级：${model.reasoningEfforts.join(" / ")}\n默认思考等级：${model.defaultReasoningEffort}\n图片输入：${model.supportsImages ? "支持" : "不支持"}\nfreeform：${model.applyPatchToolType === "freeform" ? "声明支持" : "关闭"}；tool_search 与原生搜索关闭。\n`);
     }
     if (!await confirmManagedAccountEdit(preview, { prompts, output })) return { action: "back" };
     result = await applyOllamaCloudConfiguration({ ...input, confirmExclusiveConfigChange: preview.effects.writesMainConfig, expectedRevision: preview.revision }, options);
@@ -87,7 +87,7 @@ async function runOllamaCloudSetupOperation(options) {
 }
 
 async function promptInitialModel(prompts, output) {
-  output.write("首次创建共享目录：填写准确模型和能力；本地 apply_patch、tool_search 与原生搜索保持关闭。\n");
+  output.write("首次创建共享目录：填写准确模型和能力；freeform 需明确声明，tool_search 与原生搜索保持关闭。\n");
   const id = await prompts.text({ message: "准确模型 ID（保留版本与冒号）", validate: value => typeof value === "string" && value.trim() === value && value.length > 0 ? undefined : "请输入准确 ID" });
   if (prompts.isCancel(id)) return undefined;
   const name = await prompts.text({ message: "显示名称", initialValue: defaultModelDisplayName(id) });
@@ -100,5 +100,7 @@ async function promptInitialModel(prompts, output) {
   if (prompts.isCancel(defaultReasoningEffort)) return undefined;
   const supportsImages = await prompts.confirm({ message: "明确支持图片输入？", initialValue: false });
   if (prompts.isCancel(supportsImages)) return undefined;
-  return { id, name, contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort, supportsImages, applyPatchToolType: null, supportsSearchTool: false };
+  const supportsPatch = await prompts.confirm({ message: "明确支持 Codex 自由格式 apply_patch？（声明不等于真实上游验收）", initialValue: false });
+  if (prompts.isCancel(supportsPatch)) return undefined;
+  return { id, name, contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort, supportsImages, applyPatchToolType: supportsPatch ? "freeform" : null, supportsSearchTool: false };
 }

@@ -436,6 +436,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       // 除官方 OpenAI 端点外的 Responses 上游都不理解 Codex 私有输入项与参数标记，
       // 必须在上游收到正文前归一化；Chat 上游由桥转换，不在此处改写。
       ...(!bridge && !officialOpenAiRoute ? { normalizeResponsesInput: true } : {}),
+      ...(!bridge && definition?.storageId === "ollama-cloud" ? { ollamaFreeform: true } : {}),
       ...(opencodeGo
         ? {
             accountIds: [accountId],

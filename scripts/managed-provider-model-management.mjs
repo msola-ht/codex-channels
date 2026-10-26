@@ -101,7 +101,7 @@ async function promptAdditionalModel(prompts, definition, existing) {
   if (!["ccg", "opencode-go", "clp", "ollama-cloud", "custom"].includes(definition.storageId)) throw new Error("此提供商不支持手动新增模型");
   const clinePass = definition.storageId === "clp";
   const ollamaCloud = definition.storageId === "ollama-cloud";
-  if (ollamaCloud) prompts.log?.info("OLC 公开发现候选尚未验证，不能自动启用。请按精确 ID 声明能力；freeform 文件编辑、客户端 tool_search 和原生 web_search 尚未开放。");
+  if (ollamaCloud) prompts.log?.info("OLC 公开发现候选尚未验证，不能自动启用。请按精确 ID 声明能力；freeform 需明确选择，不代表真实上游已验收；客户端 tool_search 和原生 web_search 尚未开放。");
   const confirmed = await prompts.confirm({ message: clinePass || definition.upstreamWireApi === "chat_completions" ? "已确认此提供商以 Chat Completions 接口支持该模型的文本及工具调用？" : "已确认此提供商以 Responses 接口支持该模型及工具调用？", initialValue: false });
   if (confirmed !== true) return undefined;
   const id = await prompts.text({ message: "上游模型 ID（准确名称）", validate: value => (definition.storageId === "custom" ? isValidCustomModelId(value) : isManagedProviderModelValid(definition, value)) && !existing.some(model => model.id === value) ? undefined : "请输入有效且未加入目录的模型 ID" });
@@ -131,7 +131,7 @@ async function promptAdditionalModel(prompts, definition, existing) {
   if (prompts.isCancel(effort)) return undefined;
   const images = await prompts.confirm({ message: "支持图片输入？", initialValue: false });
   if (prompts.isCancel(images)) return undefined;
-  const patch = ollamaCloud ? false : await prompts.confirm({ message: "支持 Codex 自由格式 apply_patch 工具？", initialValue: false });
+  const patch = await prompts.confirm({ message: "支持 Codex 自由格式 apply_patch 工具？", initialValue: false });
   if (prompts.isCancel(patch)) return undefined;
   const search = ollamaCloud ? false : await prompts.confirm({ message: "支持 Codex 客户端 tool_search 工具？", initialValue: false });
   if (prompts.isCancel(search)) return undefined;

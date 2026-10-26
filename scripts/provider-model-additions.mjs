@@ -77,9 +77,8 @@ export async function loadProviderModelAdditionOptions(provider, {
         throw invalid("invalid-input", "manualModel", "须明确声明思考等级、图片、apply_patch 和 tool_search 能力，不自动关联模板");
       }
       const clinePass = state.family.storageId === "clp";
-      if (state.family.storageId === "ollama-cloud" && (manualModel.applyPatchToolType !== null
-        || manualModel.supportsSearchTool !== false || manualModel.supportsWebSearch !== undefined && manualModel.supportsWebSearch !== false)) {
-        throw invalid("invalid-input", "manualModel", "OLC 尚未开放 freeform 文件编辑、客户端 tool_search 或原生 web_search 能力声明");
+      if (state.family.storageId === "ollama-cloud" && (manualModel.supportsSearchTool !== false || manualModel.supportsWebSearch !== undefined && manualModel.supportsWebSearch !== false)) {
+        throw invalid("invalid-input", "manualModel", "OLC 尚未开放客户端 tool_search 或原生 web_search 能力声明");
       }
       const chat = clinePass || state.upstreamWireApi === "chat_completions";
       if (chat && manualModel.supportsImageDetailOriginal !== undefined && manualModel.supportsImageDetailOriginal !== false) {

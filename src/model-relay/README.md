@@ -21,6 +21,7 @@ HTTP 上游状态与 Relay 对外状态分别解释：上游 429/503/504 保留�
 请求指标的可空 `upstreamUrl` 只在实际模型 HTTP 请求提交后从出站请求读取，保存最后一次已提交目标的 Origin 与路径；不保存用户信息、查询参数或片段，不从当前 Provider 配置回填历史。Chat 与 Responses 共用直接发送点，转储关闭时仍采集。
 Relay 只转发外部调用方自带的响应报文，不归一化 Codex 私有输入项（`agent_message`、`encrypted`
 参数标记）；Codex CLI 的子代理流量经 App Server 的 Provider Proxy，不经过 Relay。
+可信 OLC 材料显式开启 freeform 双向表示适配，复用 model-api 纯转换与 Provider Proxy 的 Responses reader；不按 URL 或模型名猜测，不开启 Chat、工具搜索或托管搜索。请求历史只包装本次明确 custom 声明及 call_id 配对，不执行工具、不保存历史。上游完成和转换／交付失败仍由原 observer 与独立 deliveryStatus 分别记录；材料复核、Key 撤销、取消、背压和原始采集保持原合同。
 
 模型请求与 App Server 代理共用 `runtime/model-request-policy.mjs` 的纯阶段预算：准备 30 秒、真实出站首响应头 300 秒、完整 SSE 数据事件空闲 300 秒、非流式 JSON 完整读取 300 秒、错误正文 5 秒；生成没有总期限。交付受阻最多 30 秒，终态或失败交付最多 5 秒，取消/断连/撤销会清理等待并释放准入租约。完整事件等待不因注释或零碎字节续期，也不把下游背压计为上游空闲。策略独立于凭据材料 revision；更新程序后重启 Relay 生效，不借材料热更新修改在途请求的计时。
 

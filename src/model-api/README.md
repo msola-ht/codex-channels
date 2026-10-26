@@ -13,6 +13,7 @@
 - `responses-to-chat.ts`：Responses 文本、用户内联图片、函数与自由格式工具定义、调用、文本结果、Codex multi-agent v2 的 `agent_message` 输入项，以及工具结果内联图片到紧随 user 消息的映射。
 - `codex-private-items.ts`：Codex 私有输入项与参数标记的共享语义；`agentMessageText` 按可读正文拼接信封与载荷，`stripEncryptedMarker` 只删除 schema 节点的布尔 `encrypted` 标记并报告是否发生改写。
 - `responses-normalize.ts`：面向第三方 Responses 上游的正文归一化；把 `agent_message` 降级为普通 `user` 消息并删除工具参数 schema 中的 `encrypted` 标记，未改写时报告 `changed: false`。
+- `ollama-freeform.ts`：显式 OLC 的独立纯适配；保留当前 custom 声明及工具选择，按精确名称和命名空间还原 JSON/SSE 调用，按本请求 call_id 包装配对历史。单调用参数 1 MiB、同时工具调用 64 个、保留输入 2 MiB、事件 65536 个及总事件 32 MiB；包装参数必须是仅含字符串 input 的 JSON 对象，重复键、孤立代理码、身份冲突和不一致完成失败关闭。标准 custom 与包装 custom 均有界累积，确认完整后才发出一次原始输入；显式未完成工具状态及不支持的客户端工具输出拒绝，非流式可执行工具要求 completed，终态输出不能遗漏已观察项。所有下游事件重新生成单调序号；HTTP、原始采集和取消清理由 provider-proxy 持有。此入口不处理 Codex 私有 agent_message/encrypted 标记，不开放工具搜索或执行托管搜索。
 - `chat-to-responses.ts`：单选择 Chat 流转换为 Responses 文本、推理摘要与正文、函数调用、自由格式调用、客户端检索调用和用量事件。
 - `validation.ts`：模型 API 信任边界的结构验证和不含报文的错误；转换错误可选携带有界的诊断事实（如工具参数的长度与 `empty`/`invalid_json`/`not_object` 形态分类），只描述形态，不含参数正文或用户内容。
 - `direct-request.ts`：原生请求共用的模型、流式字段校验、思考控制字段冲突定位及显式关闭字段覆盖；协议专属等级映射留在各请求模块。

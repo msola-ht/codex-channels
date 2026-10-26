@@ -90,7 +90,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
           {inheriting ? <>
             <ManagedSelect fullWidth label={t("modelAddition.inheritFrom")} placeholder={t("modelAddition.selectInheritSource")} value={inheritFrom} disabled={locked} options={target.models.map(entry => [entry.id, `${entry.displayName} (${entry.id})`])} onChange={setInheritFrom} />
             {target.models.length === 0 ? <p>{t("modelAddition.noInheritSource")}</p> : null}
-          </> : <ModelCapabilityFields disabled={locked} unavailableTools={ollamaCloud} allowReasoningToggle={clinePass} value={{ contextWindow: window, reasoningEfforts: efforts, defaultReasoningEffort: effort || null,
+          </> : <ModelCapabilityFields disabled={locked} unavailableSearch={ollamaCloud} allowReasoningToggle={clinePass} value={{ contextWindow: window, reasoningEfforts: efforts, defaultReasoningEffort: effort || null,
             supportsImages: images === "unknown" ? undefined : images === "yes", supportsPatch: patch === "unknown" ? undefined : patch === "yes", supportsSearch: search === "unknown" ? undefined : search === "yes" }} onChange={changes => {
               if (changes.contextWindow !== undefined) setWindow(changes.contextWindow)
               if (changes.reasoningEfforts !== undefined) setEfforts(changes.reasoningEfforts)

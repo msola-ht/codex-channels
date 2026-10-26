@@ -33,10 +33,10 @@ export function parseDirectModelJson(text: string, capture?: DirectChatCapture):
 }
 
 /** A successful non-streaming response must complete within its own body budget. */
-export async function readDirectModelBody(incoming: IncomingMessage, signal: AbortSignal, maximumBytes = 8 * 1024 * 1024): Promise<string> {
+export async function readDirectModelBody(incoming: IncomingMessage, signal: AbortSignal, maximumBytes = 8 * 1024 * 1024, observe?: (chunk: Buffer) => void): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new ModelRequestTimeoutError("body")), modelRequestPolicy.bodyReadTimeoutMs);
-  try { return await readChatBody(incoming, AbortSignal.any([signal, controller.signal]), Math.min(maximumBytes, 8 * 1024 * 1024)); }
+  try { return await readChatBody(incoming, AbortSignal.any([signal, controller.signal]), Math.min(maximumBytes, 8 * 1024 * 1024), observe); }
   catch (error) {
     if (error instanceof ChatBodyEncodingError) throw new ChatUpstreamError("invalid_upstream_encoding", "Upstream response contains invalid UTF-8.", false);
     throw error;

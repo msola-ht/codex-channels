@@ -38,13 +38,13 @@ export function ModelIdentityFields({ id, name, disabled, idReadOnly = false, si
   </FieldGroup>
 }
 
-export function ModelCapabilityFields({ value, disabled, maximum = 100000000, allowUnknown = false, allowReasoningToggle = false, unavailableTools = false, onChange }: {
+export function ModelCapabilityFields({ value, disabled, maximum = 100000000, allowUnknown = false, allowReasoningToggle = false, unavailableSearch = false, onChange }: {
   value: ModelCapabilityFieldsValue
   disabled: boolean
   maximum?: number
   allowUnknown?: boolean
   allowReasoningToggle?: boolean
-  unavailableTools?: boolean
+  unavailableSearch?: boolean
   onChange: (changes: Partial<ModelCapabilityFieldsValue>) => void
 }) {
   const { t } = useTranslation()
@@ -90,9 +90,9 @@ export function ModelCapabilityFields({ value, disabled, maximum = 100000000, al
         ["supportsImages", t("managementUi.imageInput")],
         ["supportsPatch", t("modelAddition.fileEditing")],
         ["supportsSearch", t("modelAddition.toolSearch")],
-      ] as const).map(([field, label]) => <FieldSet key={field} disabled={disabled || unavailableTools && field !== "supportsImages"}>
+      ] as const).map(([field, label]) => <FieldSet key={field} disabled={disabled || unavailableSearch && field === "supportsSearch"}>
         <FieldLegend className="flex items-center gap-2">{label}{allowUnknown && value[field] === undefined ? <Badge variant="outline">{t("common.unknown")}</Badge> : null}</FieldLegend>
-        <ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={value[field] === undefined ? [] : [value[field] ? "yes" : "no"]} disabled={disabled || unavailableTools && field !== "supportsImages"} aria-label={label} onValueChange={([selected]) => onChange({ [field]: selected === undefined ? undefined : selected === "yes" })}>
+        <ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={value[field] === undefined ? [] : [value[field] ? "yes" : "no"]} disabled={disabled || unavailableSearch && field === "supportsSearch"} aria-label={label} onValueChange={([selected]) => onChange({ [field]: selected === undefined ? undefined : selected === "yes" })}>
           <ToggleGroupItem value="yes">{t("managementUi.supported")}</ToggleGroupItem>
           <ToggleGroupItem value="no">{t("managementUi.unsupported")}</ToggleGroupItem>
         </ToggleGroup>

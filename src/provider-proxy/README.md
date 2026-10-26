@@ -11,6 +11,8 @@
 
 ## 文件
 
+- `direct-responses.ts`：Provider Proxy 和独立 Relay 共用的有界 Responses JSON/SSE 读取器。可信 OLC 开关选择 model-api 的 freeform 适配；JSON 上限 8 MiB，SSE 单事件 1 MiB、缓冲 2 MiB、总字节 32 MiB，复用完整事件空闲、取消和背压时钟，拒绝压缩、非法 UTF-8、半事件与断流。原始上游 chunk 进入转储、原始解析值先进入模型指标，随后转换并交付；JSON 和多行 SSE 共用既有指标归约，避免交付前状态尚未观察或重复累计。模型 completed 可与 response_normalization／client_delivery 错误同时存在，不能据模型终态声称下游成功；沿用终态交付前单次指标提交，提交后的交付错误可能仅在转储和诊断可见。改写正文删除 Content-Length，OLC WebSocket 拒绝。未设置开关的 Responses 路径保留现有报文与协议。
+
 - `cline-web-search.ts`：受管 CLP 桥的同源独立搜索 HTTP 执行器，复用账户认证和代理 Agent，45 秒总期限、256 KiB 正文及 50 条结果边界，返回校验后的标题和 URL；取消关闭连接，无自动重试，错误仅输出固定 `clp_search_*` 分类。
 
 受管 CLP 的 live 搜索由 `chat-bridge.ts` 在同一请求内执行普通函数→独立搜索→模型续答。搜索最多 4 次、显式输出预算逐轮扣减；每次续模型前复核目录，原始响应 ID、事件序号与输出索引连续，用量按已知各轮累计。多轮调用不发布将搜索等待计入解码时间的生成速率。混合搜索与客户端调用先整体校验，执行搜索并把尚未派发的客户端调用作为明确的 `not_executed` 结果内部续传，模型看过搜索结果后重新发起纯客户端调用；桥不执行客户端操作。诊断仅累计延期调用数量及固定 `serialized` 分类，不保存调用参数。cached/indexed/未知控制不降级为 live。通用 Chat、原生搜索诊断与 Relay 不启用此适配。

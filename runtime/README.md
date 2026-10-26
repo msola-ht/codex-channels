@@ -120,7 +120,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   基础定义只描述能力，不包含单账户 Profile；`loadManagedModelProviderWatcherDefinitions`
   为当前账户监听目录、Profile 和管理标记，按 Provider ID 合并并去重路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，账户目录独立。
-- `ollama-cloud-accounts.mjs` / `ollama-cloud-accounts.d.mts`：Ollama Cloud 家族账户身份、默认账户、私有注册表读取与凭据变量冲突校验。`olc-<账户>` 共享 `ollama-cloud` 模型目录，独立 Profile 和账户材料；定义使用 Responses 并关闭 WebSocket，不预设模型和思考等级。空注册表时也保留 `olc` / `olc-*` 命名空间；Setup 与模型能力接线仍在实施中。
+- `ollama-cloud-accounts.mjs` / `ollama-cloud-accounts.d.mts`：Ollama Cloud 家族账户身份、默认账户、私有注册表读取与凭据变量冲突校验。`olc-<账户>` 共享 `ollama-cloud` 模型目录，独立 Profile 和账户材料；定义使用 Responses 并关闭 WebSocket，不预设模型和思考等级。空注册表时也保留 `olc` / `olc-*` 命名空间；CLI／Setup／WebUI 共用账户事务，模型可明确声明 freeform。App Server 组合点按可信 storageId、Relay 按可信材料显式开启同一适配，不改变旧目录与其他提供商。
 - `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，模型目录按 CLP 家族共用，Chat 转换代理与凭据按账户独立。
 - `provider-model-guard.mjs` / `provider-model-guard.d.mts`：DS/OCG/CCG、自定义目录提供商代理与 CLP Chat 桥共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。逐条校验可选 `cline_request_profile`，并从同次目录读取向 CLP 桥返回 `clineRequestProfile`；未知值失败关闭。读取上限为 2 MiB；Codex 兼容 Provider 的共享官方只读目录不注入此复核。
   CP 从同次已校验目录的精确模型定义读取默认采样，和启用状态共同交给代理；采样不进入编译后的 Codex 模型字段。

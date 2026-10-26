@@ -41,10 +41,10 @@ export function createOllamaCloudCatalog(model, environment = process.env) {
   if (!model || typeof model !== "object" || Array.isArray(model)
     || !isManagedProviderModelValid(definition, model.id)
     || !Array.isArray(model.reasoningEfforts) || model.reasoningEfforts.length === 0
-    || typeof model.supportsImages !== "boolean" || model.applyPatchToolType !== null
+    || typeof model.supportsImages !== "boolean" || ![null, "freeform"].includes(model.applyPatchToolType)
     || model.supportsSearchTool !== false || model.supportsWebSearch !== undefined
     || model.template !== undefined || model.sampling !== undefined) {
-    throw new AccountManagementError("invalid-input", "initialModel", "首次模型必须明确声明准确 ID、窗口、思考等级与图片能力；不支持原生搜索、freeform、tool_search、采样或模板绑定");
+    throw new AccountManagementError("invalid-input", "initialModel", "首次模型必须明确声明准确 ID、窗口、思考等级、图片与 freeform 能力；不支持原生搜索、tool_search、采样或模板绑定");
   }
   try {
     const catalog = withThirdPartyLocalTools(createResponsesModelCatalog([createIndependentModelDraft(model)], model.id, undefined, environment), environment);

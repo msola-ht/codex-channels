@@ -9,6 +9,7 @@ export interface ManagedModelProviderRuntime {
   provider: ManagedModelProviderId;
 }
 export function loadConfiguredRelayProviderMaterial(provider: string, environment?: NodeJS.ProcessEnv): {
+  ollamaFreeform?: boolean;
   modelSampling?: Record<string, import("./model-catalog.mjs").SamplingParameters>;
   modelCapabilities?: import("./chat-reasoning.mjs").RelayModelCapability[];
   provider: string; baseUrl: string; apiKey: string; models: string[]; modelInputs: Record<string, unknown[]>; protocols: ("chat" | "responses")[]; paths: string[]; revision: string;

@@ -2,7 +2,8 @@ import { modelRequestDiagnostics, chatDiagnosticsHeader, type ChatDiagnosticsCha
 import { autoReviewMetadata } from "../../runtime/auto-review-metadata.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { sanitizeModelRequestUrl } from "../../runtime/model-request-address.mjs";
-import { ModelConversionError, normalizeResponsesRequest, type SamplingParameters } from "../model-api/index.js";
+import { ModelConversionError, normalizeResponsesRequest, prepareOllamaFreeform, type OllamaFreeformResponse, type DirectResponsesRequest, type SamplingParameters } from "../model-api/index.js";
+import { consumeDirectResponses, DirectResponsesObserver } from "./direct-responses.js";
 import {
   createServer,
   request as httpRequest,
@@ -45,6 +46,7 @@ import {
   httpResponseFormat,
   inspectResponseEvent,
   markMetricsFailed,
+  observeJsonResponse,
   observeResponseEvent,
   observeRequestSubmitted,
   observeRequestActivity,
@@ -153,6 +155,8 @@ export interface ProviderProxyOptions {
    * 只对第三方 Responses 上游开启；官方 OpenAI 路由保持原样。
    */
   normalizeResponsesInput?: boolean;
+  /** Trusted OLC family only; never inferred from URLs, model names, or client input. */
+  ollamaFreeform?: boolean;
   quotaWindowsProvider?: (
     accountId?: string,
     signal?: AbortSignal,
@@ -174,6 +178,7 @@ interface TurnMetadata {
 }
 
 interface BufferedResponsesBody {
+  adapter?: OllamaFreeformResponse;
   body: Buffer;
   parsed: unknown;
   sampling?: SamplingParameters;
@@ -188,11 +193,13 @@ export class ProviderProxy {
   private readonly isModelEnabled: ProviderProxyOptions["isModelEnabled"];
   private readonly readModelCapabilities: ProviderProxyOptions["readModelCapabilities"];
   private readonly normalizeResponsesInput: boolean;
+  private readonly ollamaFreeform: boolean;
   private readonly modelAuthorizations = new Set<AbortController>();
   private readonly pendingUpgrades = new Set<Duplex>();
   private readonly pendingRequests = new Set<AbortController>();
   private readonly activeImageUploads = new Set<AbortController>();
   private readonly imageUploadOperations = new Set<Promise<string>>();
+  private readonly normalizationOperations = new Set<Promise<void>>();
   private readonly shutdownController = new AbortController();
   private readonly accountIds: readonly string[] | undefined;
   private readonly defaultAccountId: string | undefined;
@@ -243,6 +250,7 @@ export class ProviderProxy {
     this.isModelEnabled = options.isModelEnabled;
     this.readModelCapabilities = options.readModelCapabilities;
     this.normalizeResponsesInput = options.normalizeResponsesInput ?? false;
+    this.ollamaFreeform = options.ollamaFreeform ?? false;
     this.accountIds = options.accountIds;
     this.defaultAccountId = options.defaultAccountId;
     this.upstreamUserAgent = options.upstreamUserAgent;
@@ -348,7 +356,7 @@ export class ProviderProxy {
       }),
       settleWithin(quotaRefreshes.map((refresh) => refresh.promise), quotaRefreshCloseTimeoutMs),
       Promise.allSettled([...this.imageUploadOperations]),
-      Promise.resolve().then(() => this.trafficDump?.close()),
+      Promise.resolve().then(async () => { await Promise.allSettled([...this.normalizationOperations]); await this.trafficDump?.close(); }),
     ]);
     const failures: unknown[] = [];
     for (const result of results) if (result.status === "rejected") failures.push(result.reason);
@@ -564,7 +572,7 @@ export class ProviderProxy {
     // cannot retain an authorization for a model disabled while it was waiting.
     // 第三方 Responses 上游必须缓冲正文才能归一化私有输入项；有目录守卫时缓冲同时用于模型复核。
     const buffersResponsesBody = route.kind === "response"
-      && (this.isModelEnabled !== undefined || this.readModelCapabilities !== undefined || this.normalizeResponsesInput);
+      && (this.isModelEnabled !== undefined || this.readModelCapabilities !== undefined || this.normalizeResponsesInput || this.ollamaFreeform);
     const bufferedRequest = buffersResponsesBody
       ? await this.bufferResponsesBody(request, response)
       : undefined;
@@ -703,8 +711,58 @@ export class ProviderProxy {
           request.destroy();
         });
       }
-      writeUpstreamHead(response, upstreamResponse);
       const metricsObserver = new HttpResponseMetricsObserver(metrics);
+      if (bufferedRequest?.adapter && upstreamBody && (upstreamResponse.statusCode ?? 502) === 200) {
+        clearTimeout(bodyTimer);
+        const observer = new DirectResponsesObserver();
+        let delivering = false;
+        const normalization = consumeDirectResponses(upstreamResponse, {
+          request: JSON.parse(upstreamBody.toString("utf8")) as DirectResponsesRequest,
+          signal, observer, adapter: bufferedRequest.adapter,
+          headers: () => {}, content: () => {},
+          observeChunk: chunk => exchange?.responseChunk(chunk),
+          observeValue: (value, stream, receivedAt) => {
+            if (stream) observeResponseEvent(metrics, String(value.type), value, Date.now(), receivedAt);
+            else observeJsonResponse(metrics, value, Date.now(), receivedAt);
+          },
+          emit: async (value, terminal) => {
+            delivering = true;
+            if (terminal) await emitMetrics();
+            if (!response.headersSent) {
+              const headers = endToEndHeaders(upstreamResponse.headers); delete headers["content-length"];
+              response.writeHead(upstreamResponse.statusCode ?? 200, headers);
+            }
+            const stream = bufferedRequest.parsed && typeof bufferedRequest.parsed === "object" && "stream" in bufferedRequest.parsed && bufferedRequest.parsed.stream === true;
+            const chunk = Buffer.from(stream ? `event: ${String(value.type)}\ndata: ${JSON.stringify(value)}\n\n` : JSON.stringify(value));
+            await writeResponseChunk(response, chunk, signal, terminal ? modelRequestPolicy.terminalDeliveryTimeoutMs : modelRequestPolicy.deliveryTimeoutMs,
+              () => invalidateGenerationTiming(metrics), terminal ? "terminal" : "delivery");
+            delivering = false;
+          },
+        }).then(async () => {
+          delivering = true;
+          await finishProxyResponse(response, signal, modelRequestPolicy.terminalDeliveryTimeoutMs);
+          delivering = false;
+          exchange?.responseEnd(); await emitMetrics();
+        }).catch((error: unknown) => {
+          if (deliveryFailed) return;
+          deliveryFailed = true;
+          if (signal.aborted) { upstreamResponse.destroy(); upstream.destroy(); return; }
+          const scope = delivering ? "client_delivery" : "response_normalization";
+          if (metrics.status === "unknown") markMetricsFailed(metrics, scope, Date.now(), error);
+          // A model terminal is preserved while the separate error classification records failed delivery.
+          metrics.errorType = scope; exchange?.failure(scope, error); void emitMetrics();
+          upstreamResponse.destroy(); upstream.destroy();
+          if (!response.headersSent && !response.destroyed && !signal.aborted) {
+            response.writeHead(502, { "content-type": "application/json" });
+            response.end(JSON.stringify({ error: { type: "provider_response_invalid", message: "Ollama Cloud 响应无法安全转换" } }));
+          } else response.destroy();
+          this.onError?.(asError(error));
+        });
+        this.normalizationOperations.add(normalization);
+        void normalization.finally(() => this.normalizationOperations.delete(normalization)).catch(() => undefined);
+        return;
+      }
+      writeUpstreamHead(response, upstreamResponse);
       let forwarding = Promise.resolve();
       upstreamResponse.on("data", (chunk: Buffer) => {
         const receivedAtMonotonicMs = performance.now();
@@ -926,12 +984,17 @@ export class ProviderProxy {
    * 归一化第三方 Responses 正文并补齐当前模型的默认采样。未发生改写时沿用原始字节，
    * 避免无意义的重新序列化；`agent_message` 内容非法时按请求错误失败关闭。
    */
-  private prepareResponsesBody({ body, parsed, sampling }: BufferedResponsesBody, response: ServerResponse): Buffer | null {
+  private prepareResponsesBody(buffered: BufferedResponsesBody, response: ServerResponse): Buffer | null {
+    const { body, parsed, sampling } = buffered;
     try {
       const normalized = this.normalizeResponsesInput
         ? normalizeResponsesRequest(parsed) : { body: parsed, changed: false };
       const sampled = applySamplingDefaults(normalized.body, sampling);
-      return normalized.changed || sampled.changed ? Buffer.from(JSON.stringify(sampled.body)) : body;
+      const adapted = this.ollamaFreeform ? prepareOllamaFreeform(sampled.body as Record<string, unknown>) : undefined;
+      if (adapted?.adapter.active) buffered.adapter = adapted.adapter;
+      else adapted?.adapter.close();
+      return normalized.changed || sampled.changed || adapted !== undefined && adapted.body !== sampled.body
+        ? Buffer.from(JSON.stringify(adapted?.body ?? sampled.body)) : body;
     } catch (error) {
       const message = error instanceof ModelConversionError
         ? error.message
@@ -1022,6 +1085,7 @@ export class ProviderProxy {
     head: Buffer,
   ): Promise<void> {
     const signal = this.requestSignal(socket);
+    if (this.ollamaFreeform) { socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"); return; }
     const startedAtMs = Date.now();
     const route = resolveProxyRoute(
       request.url,
