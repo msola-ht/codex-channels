@@ -27,7 +27,6 @@ function selectors(document, targets = []) {
     }
     if (surface === "qq") {
       for (const chat_id of document.qq.allowed_user_openids ?? []) add({ surface, account_id, chat_kind: "direct", chat_id });
-      // Retained group configuration is not an active channel capability.
     }
   }
   for (const selector of targets) add(selector);

@@ -74,6 +74,7 @@
 
 ## 待实施方案
 
+- [`docs/qq-group-design.md`](docs/qq-group-design.md)：QQ 群共享会话的待实施设计，包含独立群入口、成员与任务授权、近期上下文、原生 Queue、投递能力门槛及旧数据边界；旧群实现已删除，新群不继承旧实现或数据。
 - [`docs/relay-codex-auth-development.md`](docs/relay-codex-auth-development.md)：Model Relay 复用本机 Codex 登录态的候选设计，尚未实施；保留 WSS、头部与授权等待决边界。
 
 ## 历史审查与研究记录

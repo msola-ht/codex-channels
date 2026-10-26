@@ -550,7 +550,7 @@ export class TelegramSurface {
           "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",
           "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
           "发送 MP4/WebM 视频或视频消息时，会暂存最多 20 MiB 的视频附件供当前会话调用视频 MCP；可附说明文字。",
-          "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
+          "没有绑定会话时会新建会话；继续历史会话请使用 /resume 显式选择。",
           "",
           ...conversationCommandHelpLines,
           "Telegram：",

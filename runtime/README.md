@@ -7,16 +7,16 @@
 详细预设采用 `operation_updates = "detailed"`：与 full 相同准入，正常工具详情单行最多 600 字符，
 超出时明确省略，失败与拒绝保留完整脱敏原因。已有 full 仍保持完整详情；普通读取不重写旧配置。
 
-`message-display-policy.mjs` 的可选 `routine_notifications` 缺省投影为必填 `routineNotificationsEnabled = true`，支持四渠道含微信及 QQ 群的五层逐字段继承；Schema 不物化默认值，管理入口复用共享支持矩阵提供 supportedFields。Gateway、管理读取和激活分类共用该契约，不修改 StateStore 或 Journal 格式。
+`message-display-policy.mjs` 的可选 `routine_notifications` 缺省投影为必填 `routineNotificationsEnabled = true`，支持四渠道单聊的五层逐字段继承；Schema 不物化默认值，管理入口复用共享支持矩阵提供 supportedFields。Gateway、管理读取和激活分类共用该契约，不修改 StateStore 或 Journal 格式。
 
 `gateway-config.mjs` / `gateway-config.d.mts` 同时定义 QQ 配置与变更分类，供 Setup、Doctor、WebUI 摘要及 Gateway 复用；
-QQ 单聊名单与可选群成员授权分别校验，群配置必须明确同意公开输出；配置成功不代表消息收发可用。省略群配置不填默认值，同应用凭据重配保留群授权，更换应用在明确预览后清除旧应用群授权。
+QQ 仅校验单聊名单，不支持 `qq.groups` 或 QQ 群显示覆盖；含旧字段或旧群覆盖的配置明确拒绝，不迁移或改写。配置成功不代表消息收发可用。
 
 本目录保存 npm CLI 与已编译 Gateway 必须直接共享的稳定 JavaScript 模块，不承载会话业务。
 
 `message-display-policy` 的可选 `commentary` 全局值及范围覆盖缺省开启，不写入默认字段；有效
 `MessageDisplaySettings.commentaryEnabled` 必填，且不改写独立的 `streamingEnabled`。
-Telegram、飞书与 QQ（含已支持群）支持五层继承，微信严格拒绝该覆盖。消费者只隐藏明确
+Telegram、飞书与 QQ 单聊支持五层继承，微信严格拒绝该覆盖。消费者只隐藏明确
 commentary 的新过程说明；未知阶段完整正文、已准入正文流与已有 Journal 交付义务保留。
 配置管理、备份及回退见[渠道展示](../docs/display.md#过程显示范围与继承)。
 
@@ -68,7 +68,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 
 - `model-name-comparison.mjs` / `model-name-comparison.d.mts`：CLI 与 WebUI 共用的请求/响应模型名称对照；区分一致、不一致和信息不足，不推断模型身份或别名。
 - `model-display-name.mjs` / `model-display-name.d.mts`：配置、CLI、WebUI 与统计查询共用的模型统计分组校验；缺省为空，原始 ID 精确匹配仅用于查询归组，不修改模型展示、上游请求、路由、目录或存储的指标键。
-- `message-display-policy.mjs` / `message-display-policy.d.mts`：操作（含仅失败或拒绝）、子代理、流式、过程说明、常规通知、计划、思考、完成通知与消息详情的严格可选覆盖 Schema、五层逐字段继承与来源投影；微信接受常规通知、完成通知与消息详情，QQ 群类型和精确群拒绝 streaming 布尔值。完成缺省纯投影为详细，消息详情为基础，子代理、流式与常规通知为开启；streaming 只控制 Telegram、飞书与 QQ 单聊正文增量预览。目标身份独立于 Conversation，管理与 Gateway 共用同一纯解析，不读取绑定或保存数据。
+- `message-display-policy.mjs` / `message-display-policy.d.mts`：操作（含仅失败或拒绝）、子代理、流式、过程说明、常规通知、计划、思考、完成通知与消息详情的严格可选覆盖 Schema、五层逐字段继承与来源投影；微信接受常规通知、完成通知与消息详情，当前支持的覆盖聊天类型为单聊。完成缺省纯投影为详细，消息详情为基础，子代理、流式与常规通知为开启；streaming 只控制 Telegram、飞书与 QQ 单聊正文增量预览。目标身份独立于 Conversation，管理与 Gateway 共用同一纯解析，不读取绑定或保存数据。
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。私有目录锁绑定进程与唯一 owner 标记，活进程不按年龄抢锁，未知锁保留并拒绝操作；操作完成但解锁失败以 `ConfigEventQueueLockReleaseError` 携带结果，调用方不得将其当成未入队或未确认。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
@@ -316,7 +316,6 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `queue-events.mjs` / `queue-events.d.mts`：投递箱、Relay、账户快照与请求指标共用的有界私有变化通知流；独立订阅连接、首次失效通知、100 毫秒合并、心跳、取消与背压清理，只传变化类型。异步端点／ACL 准备和连接共用 20 秒期限，连接后改用独立 35 秒空闲期限；关闭等待准备任务结束，取消后不建立迟到连接。
 - `metrics-events.mjs` / `metrics-events.d.mts`：按配置文件路径派生相互独立的请求指标与账户快照通知端点，供 Gateway 写入器与 WebUI 订阅共用；不携带指标或账户数据。
 - `delivery-control.mjs` / `delivery-control.d.mts`：投递箱私有在线管理与变化通知 IPC（`watchDeliveryChanges`）；Unix 使用系统 `/tmp` 规范目录下的当前用户私有短目录，以投递目录规范路径的 SHA-256 确定端点，连接前校验父目录及 Socket 所有者和权限；Windows 继续使用私有描述文件及认证管道。最多 50 条修订绑定的重试/忽略请求，限制连接数、报文大小和等待时间；只输出受控结果，已发送请求的响应丢失不允许离线回退或自动重试。
-- `qq-group-pairing.mjs` / `qq-group-pairing.d.mts`：暂停开发的群配对私有 IPC 实现，仅保留源码。Setup 和 QQ Surface 已撤下入口，Gateway 不创建该端点。未来群权限方案确定前不重新启用，不以旧单聊授权代替群授权。
 - `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供 v2 私有账户 IPC，支持 Provider 刷新及 OpenAI 重置券列表、预览、取消和消费；
   WebUI 提交精确 Provider ID、券 ID 或短期操作 ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
   公开错误文案按受控原因生成，不透传内部 message；调用方取消或连接结束时取消该等待，

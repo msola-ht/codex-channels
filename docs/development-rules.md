@@ -82,7 +82,8 @@ For configuration changes exposed through CLI, Setup, WebUI or another managemen
 - Ordinary Thread list queries must explicitly pass server-allowed `cwd` and `sourceKinds`.
 - Local session archive previews must scope descendants by explicit `ancestorThreadId` and explicitly cover official source kinds, rather than truncating descendants by the parent's `cwd`.
   Before archiving, check the Workspace, Provider and protection state of queryable descendants. Do not claim this enumerates all official internal agents.
-- Before automatic continuation, check Thread source, Workspace, running state and existing bindings.
+- An unbound Conversation must start a new Thread; never automatically search for or select historical Threads.
+  Existing-binding recovery and explicit history selection must check Thread source, Workspace, running state and ownership.
 - A Thread cannot be bound to multiple external Conversations simultaneously. Do not unconditionally append a new Turn to an active Thread.
 - When a binding is released and no longer retained, cancel its subscription through the protocol; deleting local mappings alone is insufficient.
   Switching or creating a foreground Thread may preserve the previous running Thread as an authorized background binding.

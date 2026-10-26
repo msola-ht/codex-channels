@@ -2,6 +2,9 @@
 
 本目录维护外部 Conversation、Workspace 与 Codex Thread 的前台绑定、后台绑定和订阅状态。
 
+`ensure` 没有前台绑定时始终在当前 Workspace 新建 Thread，不查询或自动选择历史会话；
+该规则适用于所有渠道的单聊与群聊。已有绑定继续按原归属校验及恢复订阅，未绑定历史仅通过显式恢复重新关联。
+
 订阅恢复开始先标记不可用，失败后保留该标记，生命周期响应成功才重新开放提交。
 `isSubscriptionReady` 供状态呈现区分已恢复设置与仅保留的绑定，不能用默认模型代替恢复失败或尚未取得的设置。
 
@@ -44,7 +47,7 @@
 本地绑定提交之间再次核对。已提交归档按实际结果结算；切换失败时恢复旧订阅、清理新订阅不受
 过期用户守卫阻断。列表快速查询转完整扫描前及 Client 分页请求前均保留守卫。
 订阅恢复清理不可用 Thread 时保留已经保存的工作区选择；失效的工作区 ID 继续报错，不能静默切到默认目录。
-新建、自动接续和后台创建在绑定落盘失败时清理新订阅；已有合法归属的订阅仍保留。
+新建和后台创建在绑定落盘失败时清理新订阅；已有合法归属的订阅仍保留。
 清理也失败时同时报告原始写入和清理错误，不发布绑定成功或吞掉补偿失败。
 活动恢复观察由调用方提供，Router 在每次实际权威读取或恢复请求前建立窗口，在合法绑定建立后交回快照，并在成功、失败或取消时释放。解除订阅后的补偿恢复使用新窗口，不复用被 `thread.closed` 失效的旧窗口；生命周期锁等待结束后才开始观察，避免把旧关闭事件应用到新请求。Router 不依赖 Core，也不保存第二份 Turn 历史。
 
@@ -55,8 +58,8 @@
   稳定快照；快照保留 App Server 返回的 `historyMode`（`legacy` 或 `paginated`），新建 Thread 使用分页
   历史，既有 legacy Thread 不宣称支持 Revert；官方分区裁剪为稳定 `id/name/builtIn`，内置 Pinned 另投影为 `isPinned`，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
   模型 Provider、实际 Default/Plan 协作模式、实际审批审查方式、更新时间/最近活跃时间；可选 `parentThreadId` 保留官方派生父子关系供本机归档识别和子代理交互归属核验，
-  压缩 Item ID，不向业务层暴露完整官方 Turn。Thread 快照还保留官方当前模型与思考设置，供子代理开始和继续展示；只读查询支持取消，不把当前配置当作历史轮次遥测。端口可选声明已配置的模型 Provider 判定，用于把
-  Provider 已被移除的历史 Thread 排除在自动接续之外，未实现的部署视为不做限制。
+  压缩 Item ID，不向业务层暴露完整官方 Turn。Thread 快照还保留官方当前模型与思考设置，供子代理开始和继续展示；只读查询支持取消，不把当前配置当作历史轮次遥测。端口可选声明已配置的模型 Provider 判定，
+  审批归属解析据此拒绝已移除的 Provider，未实现的部署视为不做限制。
 - `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，前台不注入 Workspace 权限；
   由 App Server 解析原生配置及会话继承，不按 Provider 或模型限制审批方式。已加载会话保留实际审批方式、订阅和活动 Turn 恢复管理能力，未知或 Guardian 值仍按实际值投影。协调持久化映射、订阅恢复、Provider/模型设置、
   压缩 Item ID、新建前台 Thread 的动态工具注册及 `thread/unsubscribe`，并按 Thread 向 Core 提供已绑定
@@ -65,12 +68,10 @@
   当前 Thread 与目标 Conversation 原 Thread 都由 App Server 报告为空闲时执行；保留被接管
   Thread 的现有订阅，只取消目标 Conversation 被替换 Thread 的订阅。跨 Provider 模型切换通过
   `newSession` 解除当前绑定并保留原 Thread，下一 Turn 由对应 App Server 以精确 Provider 和模型新建 Thread；
-  不使用 `thread/fork` 复制 Provider 专属历史。自动接续收到渠道保留的 Provider 时只恢复相同
-  Provider 的候选 Thread；没有兼容候选时按该 Provider 新建，避免把模型交给错误的 App Server。
-  Provider 已由操作员移除的历史 Thread 属于永久不可用，不会被自动接续选中，此时改用其余
-  兼容候选或新建 Thread，避免 Conversation 永久卡在恢复失败上。
+  不使用 `thread/fork` 复制 Provider 专属历史。未绑定会话按渠道保留的 Provider 和模型设置新建，
+  不借用历史 Thread；Provider 已由操作员移除的历史 Thread 属于永久不可用，恢复时明确拒绝。
   `startBackground` 是计划任务专用的窄入口：始终发送稳定 `threadSource=automation`、强制
-  `thread/start`，不调用 `ensure` 的空闲候选选择，并在写入前限制每个 Conversation 三个后台绑定；
+  `thread/start`，不复用 `ensure` 的前台绑定，并在写入前限制每个 Conversation 三个后台绑定；
   后台 Thread 不携带前台 `dynamicTools`，防止计划任务递归创建任务。
   后台新建排队结束后复核本地提交守卫，并透传到 Client 的最终 RPC 发送边界；取消尚未提交的创建，
   不丢弃已提交创建的响应和 Thread 身份。
@@ -96,7 +97,7 @@
   不把仍存在的绑定直接视为可用。`ensure` 对已有前台绑定读取不含历史的权威快照，复核工作区和
   与显式恢复相同的来源；发现 `notLoaded` 时复用按 Thread 串行的订阅恢复，再通过调用方的同步
   回调恢复活动状态，同一次输入等待成功后继续。读取或恢复失败时不提交 Turn，不重发失败的 Turn。
-  自动历史候选同样排除不允许的前台来源。只有解绑提交成功才清理派生路由状态。
+  只有解绑提交成功才清理派生路由状态。
 
 切换到不同 Workspace 会解除当前前台 Thread，并在下一条消息中强制新建 Thread，不自动接续目标 Workspace
 中的历史空闲 Thread；当前模型、思考等级和服务层级偏好仍按 Conversation 保留。
@@ -113,10 +114,10 @@ Conversation 归属；新输入只路由到前台 Thread。后台 Turn 完成后
   App Server 内存卸载，保留可恢复的持久化绑定并登记订阅恢复；通知遗漏时由 `ensure` 的权威读取补足。
   官方通知的校验和转换由 `codex-client` 完成。
 
-自动接续前必须检查来源、Workspace、活动状态和是否被其他 Conversation 占用。App Server 响应是事实来源，Router 的缓存只用于路由和界面加速。
+已有绑定恢复与显式恢复必须检查来源、Workspace、活动状态和绑定归属。App Server 响应是事实来源，Router 的缓存只用于路由和界面加速。
 已保存的 Workspace ID 不在当前注册表时明确拒绝，不改写为默认目录；只有从未选择的会话使用默认项。
 Workspace 列表保留失效选择的身份，用户可以显式选择已注册项恢复，不自动迁移绑定或删除原数据。
-输入携带的提交守卫同时约束新建、自动接续和已有订阅恢复；响应迟到时复核后才发布新绑定，失效的新订阅按既有清理路径释放。
+输入携带的提交守卫同时约束新建和已有订阅恢复；响应迟到时复核后才发布新绑定，失效的新订阅按既有清理路径释放。
 显式恢复只接受当前工作区历史；`resume` 在写请求前读取 Thread 元数据，核对选择时的目录
 和允许来源。恢复与重连统一检查历史目录及响应中的实际目录、权限和活动状态，避免用旧绑定
 覆盖历史目录；普通切换失败时取消新订阅并保留原绑定。显式恢复、重连、接管或恢复旧订阅时，

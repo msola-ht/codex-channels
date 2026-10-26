@@ -75,7 +75,7 @@ export async function runDisplaySettings({
 
 async function runDisplayScopeSettings({ environment, output, prompts, writeConfig }) {
   const settings = loadGatewaySettings(environment);
-  output.write("范围显示按全局 → 渠道 → 账号 → 聊天类型 → 指定聊天逐字段继承；微信支持常规通知、完成通知和消息详情，QQ 群已停用，已有群覆盖仅可恢复继承。\n");
+  output.write("范围显示按全局 → 渠道 → 账号 → 聊天类型 → 指定聊天逐字段继承；微信支持常规通知、完成通知和消息详情，QQ 仅支持单聊。\n");
   if (settings.display.targetsStatus === "unavailable") output.write("已确认聊天目标不可读，请检查状态库版本、结构或访问权限；渠道与账号默认仍可编辑。\n");
   const label = scope => [scope.selector.surface, scope.selector.account_id, scope.selector.chat_kind === "direct" ? "私聊" : scope.selector.chat_kind === "group" ? "群聊" : undefined, scope.selector.chat_id].filter(Boolean).join(" / ");
   const selected = await prompts.select({ message: "选择显示目标范围", showInstructions: false, options: [
@@ -273,7 +273,7 @@ async function runCommentarySettings({ environment, output, prompts, writeConfig
 async function runStreamingSettings({ environment, output, prompts, writeConfig }) {
   const settings = loadGatewaySettings(environment);
   const label = value => value ? "开启" : "关闭";
-  output.write(`流式显示：本层${settings.display.streamingOverride === null ? "缺省" : label(settings.display.streamingOverride)}；有效${label(settings.display.streamingEnabled)}；来源全局。\n仅控制 Telegram、飞书与 QQ 单聊的正文增量预览；不改变上游模型流式、思考状态、完整正文、附件、授权及原窗口和交付义务。微信与 QQ 群不支持流式显示。\n`);
+  output.write(`流式显示：本层${settings.display.streamingOverride === null ? "缺省" : label(settings.display.streamingOverride)}；有效${label(settings.display.streamingEnabled)}；来源全局。\n仅控制 Telegram、飞书与 QQ 单聊的正文增量预览；不改变上游模型流式、思考状态、完整正文、附件、授权及原窗口和交付义务。微信不支持流式显示。\n`);
   const value = await prompts.select({ message: "选择全局流式显示", showInstructions: false, initialValue: settings.display.streamingOverride === null ? "inherit" : String(settings.display.streamingOverride), options: [
     { value: "inherit", label: "恢复缺省（开启，不保存覆盖）" }, { value: "true", label: "开启" }, { value: "false", label: "关闭" }, { value: "back", label: "返回上一级" },
   ] });

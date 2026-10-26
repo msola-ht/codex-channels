@@ -140,7 +140,7 @@ const helpText = {
 重复运行也可进入交互向导，后续设置按你的选择保存。
 交互终端下继续显示环境检测结果，并依次引导模型提供商与通讯渠道、Codex 新会话与用户偏好、
 官方 TUI 身份、服务时区、可选功能和后台服务；
-非交互调用只创建用户目录、默认工作区仓库与初始配置，不进入向导。`,
+非交互调用只创建用户目录、默认与群聊预备工作区仓库及初始配置，不进入向导；不启用群聊。`,
   setup: `用法：codexc setup [--jsonl]
 
 打开脱敏接入状态总览，以及模型与提供商、通讯渠道和项目技能设置菜单。
@@ -603,6 +603,7 @@ async function initialize(args) {
   console.log(`配置文件：${result.configPath}`);
   if (result.created) {
     console.log(`默认 Workspace：${result.workspace}`);
+    console.log(`群聊预备 Workspace：${result.groupWorkspace}（未启用群聊）`);
   }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     if (result.created) {

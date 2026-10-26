@@ -1,5 +1,3 @@
-import { createQqGroupConversationId } from "../../policy/index.js";
-
 const MAX_IDENTIFIER_BYTES = 512;
 const MAX_CONTENT_BYTES = 16 * 1024;
 const MAX_EXT_ITEMS = 32;
@@ -79,8 +77,7 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
     || !/^[A-Z][A-Z0-9_]{0,79}$/u.test(value.t)) {
     return reject("malformed", "envelope", "invalid-value");
   }
-  const group = value.t === "GROUP_AT_MESSAGE_CREATE";
-  if (value.t !== "C2C_MESSAGE_CREATE" && !group) {
+  if (value.t !== "C2C_MESSAGE_CREATE") {
     return { kind: "ignored", reason: "non-message-event" };
   }
   const message = value.d;
@@ -116,21 +113,17 @@ export function parseQqTextEvent(value: unknown): QqTextEventResult {
   const id = parseIdentifier(message.id, "id");
   if (typeof id !== "string") return id;
   if (!record(message.author)) return reject("malformed", "actor-id", "invalid-type");
-  const conflictingActorField = group ? "user_openid" : "member_openid";
-  if (conflictingActorField in message.author && message.author[conflictingActorField] !== ""
-    || !group && "group_openid" in message && message.group_openid !== "") return reject("malformed", "actor-id", "invalid-value");
-  const actorId = parseIdentifier(group ? message.author.member_openid : message.author.user_openid, "actor-id");
+  if ("member_openid" in message.author && message.author.member_openid !== ""
+    || "group_openid" in message && message.group_openid !== "") return reject("malformed", "actor-id", "invalid-value");
+  const actorId = parseIdentifier(message.author.user_openid, "actor-id");
   if (typeof actorId !== "string") return actorId;
-  const groupOpenId = group ? parseIdentifier(message.group_openid, "actor-id") : undefined;
-  if (groupOpenId !== undefined && typeof groupOpenId !== "string") return groupOpenId;
-  if (groupOpenId !== undefined && (/\s/u.test(groupOpenId) || /\s/u.test(actorId))) return reject("malformed", "actor-id", "invalid-value");
-  const conversationId = groupOpenId === undefined ? `c2c:${actorId}` : createQqGroupConversationId(groupOpenId, actorId);
+  const conversationId = `c2c:${actorId}`;
   if (typeof message.content !== "string") return reject("malformed", "content", "invalid-type");
   if (Buffer.byteLength(message.content, "utf8") > MAX_CONTENT_BYTES) {
     return reject("too-large", "content", "limit-exceeded");
   }
   if (INVALID_UNICODE.test(message.content)) return reject("malformed", "content", "invalid-unicode");
-  if (!group && message.content.trim().length === 0 && images.length === 0 && !file && !media) return reject("malformed", "content", "empty");
+  if (message.content.trim().length === 0 && images.length === 0 && !file && !media) return reject("malformed", "content", "empty");
 
   if (!Array.isArray(scene.ext)) return reject("malformed", "ext", "invalid-type");
   if (scene.ext.length > MAX_EXT_ITEMS) return reject("too-large", "ext", "limit-exceeded");

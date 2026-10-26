@@ -2,7 +2,7 @@ export type { ConversationActorRegistry } from "./conversation-actor.js";
 export { FeishuAccessPolicy } from "./feishu-access.js";
 export { TelegramAccessPolicy } from "./telegram-access.js";
 export { WeixinAccessPolicy } from "./weixin-access.js";
-export { QqAccessPolicy, createQqGroupConversationId, parseQqGroupConversationId, type QqGroupAccess } from "./qq-access.js";
+export { QqAccessPolicy } from "./qq-access.js";
 export {
   type SurfaceAccessContext,
   type SurfaceAccessPolicy,

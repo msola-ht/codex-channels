@@ -10,9 +10,8 @@ export const messageDisplayPresets = Object.freeze({
 });
 
 export function supportedMessageDisplayFields(selector) {
-  return messageDisplayFields.map(([field]) => field).filter(field => selector?.surface === "weixin"
-    ? ["completion", "presentation_detail", "routine_notifications"].includes(field)
-    : !(selector?.surface === "qq" && selector.chat_kind === "group" && field === "streaming"));
+  return messageDisplayFields.map(([field]) => field).filter(field => selector?.surface !== "weixin"
+    || ["completion", "presentation_detail", "routine_notifications"].includes(field));
 }
 
 export function identifyMessageDisplayPreset(settings, supportedFields = supportedMessageDisplayFields()) {
@@ -34,7 +33,7 @@ export const messageDisplayOverrideSchema = z.strictObject({
   presentation_detail: z.enum(["basic", "detailed", "full"]).optional(),
 }).superRefine((value, context) => {
   if (messageDisplayFields.some(([field]) => value[field] !== undefined && !supportedMessageDisplayFields(value).includes(field))
-    || (value.chat_kind === "group" && value.surface !== "qq"))
+    || value.chat_kind === "group")
     context.addIssue({ code: "custom", path: ["surface"], message: "该渠道不支持此类显示目标或字段" });
   if (value.chat_kind !== undefined && value.account_id === undefined)
     context.addIssue({ code: "custom", path: ["account_id"], message: "chat_kind 必须指定 account_id" });
