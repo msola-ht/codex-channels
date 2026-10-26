@@ -167,6 +167,8 @@ retention_days = 365
 max_rows = 1000000
 
 [[workspaces]]
+# 此示例使用已有项目；codexc init 首次初始化会注册 codex-connect（workspace/）
+# 和 group（group/），默认仍为 codex-connect。group 注册不启用群聊。
 id = "main"
 name = "Main Project"
 cwd = "/absolute/path/to/project"

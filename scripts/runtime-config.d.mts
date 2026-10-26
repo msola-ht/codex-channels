@@ -8,6 +8,7 @@ export interface RuntimeConfigLocation {
 export interface InitializedUserData extends RuntimeConfigLocation {
   created: boolean;
   workspace: string;
+  groupWorkspace?: string;
 }
 
 export function userDataDir(environment?: NodeJS.ProcessEnv): string;

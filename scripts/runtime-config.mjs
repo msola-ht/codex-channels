@@ -54,17 +54,29 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
   const runtimeDir = join(dataDir, "runtime");
   const stateDir = join(dataDir, "data");
   const workspaceDir = join(dataDir, "workspace");
+  const groupWorkspaceDir = join(dataDir, "group");
   mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   mkdirSync(workspaceDir, { recursive: true, mode: 0o700 });
+  mkdirSync(groupWorkspaceDir, { recursive: true, mode: 0o700 });
+  if (!lstatSync(groupWorkspaceDir).isDirectory()) {
+    throw new Error("群聊 Workspace 必须是普通目录，不能是符号链接");
+  }
   if (!explicitConfigFile) securePrivateDirectorySync(dataDir);
   securePrivateDirectorySync(runtimeDir);
   securePrivateDirectorySync(stateDir);
   securePrivateDirectorySync(workspaceDir);
+  securePrivateDirectorySync(groupWorkspaceDir);
 
   const defaultCwd = realpathSync(workspaceDir);
+  const groupCwd = realpathSync(groupWorkspaceDir);
+  if (defaultCwd === groupCwd) {
+    throw new Error("默认与群聊 Workspace 必须使用不同目录");
+  }
   initializeWorkspaceRepository(defaultCwd, environment);
+  initializeWorkspaceRepository(groupCwd, environment, "群聊 Workspace");
   const defaultWorkspace = { id: "codex-connect", name: ".codex-connect/workspace", cwd: defaultCwd };
+  const groupWorkspace = { id: "group", name: ".codex-connect/group", cwd: groupCwd };
   writeGatewayConfig(configPath, {
     version: 1,
     default_workspace: defaultWorkspace.id,
@@ -89,12 +101,12 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
     },
     storage: { database_path: "data/gateway.sqlite3" },
     logging: { level: "info" },
-    workspaces: [defaultWorkspace],
+    workspaces: [defaultWorkspace, groupWorkspace],
   });
-  return { created: true, configPath, dataDir, workspace: defaultCwd };
+  return { created: true, configPath, dataDir, workspace: defaultCwd, groupWorkspace: groupCwd };
 }
 
-function initializeWorkspaceRepository(workspaceDir, environment) {
+function initializeWorkspaceRepository(workspaceDir, environment, label = "默认 Workspace") {
   const gitDir = join(workspaceDir, ".git");
   if (existsSync(gitDir)) return;
 
@@ -123,13 +135,13 @@ function initializeWorkspaceRepository(workspaceDir, environment) {
     }
   }
   if (result.error?.code === "ENOENT") {
-    throw new Error("默认 Workspace 的 Git 仓库初始化失败：Git 不可用，请安装 Git 后重新运行 codexc init");
+    throw new Error(`${label} 的 Git 仓库初始化失败：Git 不可用，请安装 Git 后重新运行 codexc init`);
   }
   if (/unknown (option|switch)|unrecognized option/iu.test(result.stderr ?? "")) {
-    throw new Error("默认 Workspace 的 Git 仓库初始化失败：当前 Git 不支持 --initial-branch，创建 main 分支需要 Git 2.28 或更高版本，请升级 Git 后重新运行 codexc init");
+    throw new Error(`${label} 的 Git 仓库初始化失败：当前 Git 不支持 --initial-branch，创建 main 分支需要 Git 2.28 或更高版本，请升级 Git 后重新运行 codexc init`);
   }
   if (result.error || result.status !== 0) {
-    throw new Error("默认 Workspace 的 Git 仓库初始化失败：git init 失败，请检查目录权限和 Git 配置后重新运行 codexc init");
+    throw new Error(`${label} 的 Git 仓库初始化失败：git init 失败，请检查目录权限和 Git 配置后重新运行 codexc init`);
   }
 }
 
