@@ -11,6 +11,13 @@
     },
     "v41Model": "deepseek/deepseek-v4.1-flash"
   },
+  "olc": {
+    "models": [
+      { "id": "deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash", "template": "deepseek-flash", "supportsImages": true, "defaultReasoningEffort": "high" },
+      { "id": "deepseek-v4.1-flash:1017", "name": "DeepSeek V4.1 Flash 1017", "template": "deepseek-flash", "supportsImages": true, "defaultReasoningEffort": "high" },
+      { "id": "deepseek-v4-pro:0813", "name": "DeepSeek V4 Pro 0813", "template": "deepseek-v4-pro", "supportsImages": false, "defaultReasoningEffort": "low" }
+    ]
+  },
   "clp": {
     "modelIds": {
       "cline-pass/deepseek-v4.1-flash": "deepseek-flash",

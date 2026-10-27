@@ -33,7 +33,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
   const clinePass = target.provider.startsWith("clp-")
   const custom = target.provider.startsWith("cp-")
   const ollamaCloud = target.provider.startsWith("olc-")
-  const [mode, setMode] = useState("manual")
+  const [mode, setMode] = useState(ollamaCloud ? "managed" : "manual")
   const [additionProvider, setAdditionProvider] = useState(target.provider)
   const [id, setId] = useState("")
   const [name, setName] = useState("")
@@ -71,7 +71,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
       ...(patch === "unknown" ? {} : { applyPatchToolType: patch === "yes" ? "freeform" : null }),
       ...(search === "unknown" ? {} : { supportsSearchTool: search === "yes" }),
     }
-    await candidates.load(manualModel)
+    await candidates.load(manualModel, mode === "discover" && ollamaCloud)
   }
   return <Dialog open={open} disablePointerDismissal onOpenChange={(next, details) => { if (management.busy) { details.cancel(); return }; if (!next && open) onClose() }}>
     <DialogContent initialFocus={options && selected.length > 0 && !locked ? previewRef : undefined} finalFocus={open ? finalFocus : false} closeLabel={t("common.close")} showCloseButton={!management.busy} className={cn(modelOperationDialogClassName, modelOperationFormDialogClassName)}>
@@ -82,6 +82,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
       {!options ? <FieldGroup>
         <FieldGroup className={cn("grid min-w-0 gap-6", !custom && mode === "manual" && !inheriting && "sm:grid-cols-2")}>
           {!custom ? <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.method")}</FieldLegend><ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={[mode]} disabled={locked} aria-label={t("modelAddition.method")} onValueChange={values => { if (values[0]) { setMode(values[0]); clearError() } }}>
+            {ollamaCloud ? <ToggleGroupItem value="managed">{t("modelAddition.ollamaManaged")}</ToggleGroupItem> : null}
             <ToggleGroupItem value="manual">{t("modelAddition.manual")}</ToggleGroupItem>
             <ToggleGroupItem value="discover">{t(ollamaCloud ? "modelAddition.ollamaDiscover" : "modelAddition.discover")}</ToggleGroupItem>
           </ToggleGroup></FieldSet> : null}
@@ -97,7 +98,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
           {inheriting ? <>
             <ManagedSelect fullWidth label={t("modelAddition.inheritFrom")} placeholder={t("modelAddition.selectInheritSource")} value={inheritFrom} disabled={locked} options={target.models.map(entry => [entry.id, `${entry.displayName} (${entry.id})`])} onChange={setInheritFrom} />
             {target.models.length === 0 ? <p>{t("modelAddition.noInheritSource")}</p> : null}
-          </> : <ModelCapabilityFields disabled={locked} unavailableSearch={ollamaCloud} allowReasoningToggle={clinePass} value={{ contextWindow: window, reasoningEfforts: efforts, defaultReasoningEffort: effort || null,
+          </> : <ModelCapabilityFields disabled={locked} allowReasoningToggle={clinePass} value={{ contextWindow: window, reasoningEfforts: efforts, defaultReasoningEffort: effort || null,
             supportsImages: images === "unknown" ? undefined : images === "yes", supportsPatch: patch === "unknown" ? undefined : patch === "yes", supportsSearch: search === "unknown" ? undefined : search === "yes" }} onChange={changes => {
               if (changes.contextWindow !== undefined) setWindow(changes.contextWindow)
               if (changes.reasoningEfforts !== undefined) setEfforts(changes.reasoningEfforts)
@@ -107,7 +108,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
               if (Object.hasOwn(changes, "supportsSearch")) setSearch(changes.supportsSearch === undefined ? "unknown" : changes.supportsSearch ? "yes" : "no")
             }} />}
         </> : null}
-        <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{loading && <Spinner aria-label={t("common.loading")} data-icon="inline-start" />}{t(loading ? "common.loading" : mode === "manual" ? "modelAddition.load" : ollamaCloud ? "modelAddition.ollamaDiscoverLoad" : "modelAddition.discoverLoad")}</Button>
+        <Button disabled={locked || mode === "manual" && !manualValid} onClick={() => void load()}>{loading && <Spinner aria-label={t("common.loading")} data-icon="inline-start" />}{t(loading ? "common.loading" : mode === "manual" ? "modelAddition.load" : mode === "managed" ? "modelAddition.ollamaManagedLoad" : ollamaCloud ? "modelAddition.ollamaDiscoverLoad" : "modelAddition.discoverLoad")}</Button>
       </FieldGroup> : <FieldGroup>
         <p>{t("modelCatalog.scope", { providers: options.providers.join(t("managementUi.listSeparator")) })}</p>
         {options.discovery ? <>

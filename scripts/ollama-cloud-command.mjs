@@ -4,7 +4,7 @@ import { withOllamaCloudFetch } from "./ollama-cloud-model-verification.mjs";
 import { loadOllamaCloudAccounts, ollamaCloudProviderId } from "../runtime/ollama-cloud-accounts.mjs";
 import { runOllamaCloudSetup } from "./ollama-cloud-setup.mjs";
 
-export const ollamaCloudUsage = "用法：codexc provider ollama-cloud <setup|add|list|reconfigure|remove|default|discover> [id]\nlist/discover 支持 --json；setup 交互管理账户与模型；add/reconfigure/remove/default 接受账户 ID。\n新增账户必须明确选择共享目录模型；首次目录手动声明能力。新增或更换 Key 的预览及保存读取认证接口，不发送推理请求。discover 仅发现公开候选，不启用模型。";
+export const ollamaCloudUsage = "用法：codexc provider ollama-cloud <setup|add|list|reconfigure|remove|default|discover> [id]\nlist/discover 支持 --json；setup 交互管理账户与模型；add/reconfigure/remove/default 接受账户 ID。\n新增账户选择受管目录模型；首次自动创建共享目录，后续复用已有目录。新增或更换 Key 的预览及保存读取认证接口，不发送推理请求。discover 仅发现公开候选，不启用模型。";
 
 export async function runOllamaCloudCommand(args, options = {}) {
   const { output = process.stdout, signal, environment = process.env } = options;

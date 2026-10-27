@@ -70,3 +70,24 @@ export function createClinePassCatalogWithTemplateBindings(source, environment =
   for (const model of catalog.models) model.cline_request_profile = templateBindings[model.slug].model === settings.flashSourceModel ? "deepseek-flash" : "standard";
   return { catalog: { models: catalog.models }, templateBindings };
 }
+
+/** Exact cloud IDs and capabilities are maintained separately from the reusable DS template.
+ * This is configuration, not evidence of paid upstream inference verification. */
+export function createOllamaCloudCatalogWithTemplateBindings(source, environment = process.env) {
+  const templates = modelDefinitionsFromCatalog(completeCatalogPrompts(source, environment), "deepseek");
+  const templateBindings = {};
+  const definitions = settings.olc.models.map(({ template, ...entry }) => {
+    const matches = templates.filter(model => model.id === template);
+    if (matches.length !== 1) throw new Error(`OLC 缺少唯一的 DS 模板：${template}`);
+    const model = structuredClone(matches[0]);
+    delete model.template;
+    templateBindings[entry.id] = { source: "deepseek", model: template };
+    const contextWindow = Math.min(model.contextWindow, 393_216);
+    return { ...model, ...entry, contextWindow, maxContextWindow: contextWindow,
+      reasoningEfforts: ["low", "high", "max"],
+      supportsImageDetailOriginal: false, supportsReasoningSummary: false, defaultReasoningSummary: "none",
+      supportsVerbosity: false, defaultVerbosity: null, applyPatchToolType: "freeform", supportsSearchTool: true };
+  });
+  const catalog = withThirdPartyLocalTools(createResponsesModelCatalog(definitions, definitions[0].id, undefined, environment), environment);
+  return { catalog: { models: catalog.models }, templateBindings };
+}

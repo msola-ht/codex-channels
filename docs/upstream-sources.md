@@ -95,9 +95,15 @@ TTFT 参考 `internal/runtime/executor/helps/responses_ttft_helpers.go`、`chat_
 
 OLC 只使用 `https://ollama.com/v1` 的无状态 Responses，明确关闭 WS。发现使用公开 `/v1/models`、`/api/tags`、`/api/show`，不以公开端点判断 Key 有效或把元数据当作工具往返验收。现行合同见 [Ollama Cloud](ollama-cloud.md)，实际观察和未验收范围见 [接入验收记录](ollama-cloud-probe.md)。
 
-第七批再次读取上述 OpenAI compatibility 官方页：云端示例仍使用无状态 Responses，普通 function 工具、`max_output_tokens` 及模型定义的 `reasoning.effort` 属于公开合同；不能从字段被接受推断实际思考质量。产品采用完整显式历史的函数及模拟结果续答，不使用 `previous_response_id` 或 `conversation`，每个精确候选仍须独立验证；本地合成响应不能代替真实云端验收。
+上述 OpenAI compatibility 官方页的云端示例使用无状态 Responses，普通 function 工具、`max_output_tokens` 及模型定义的 `reasoning.effort` 属于公开合同；不能从字段被接受推断实际思考质量。产品采用完整显式历史的函数及模拟结果续答，不使用 `previous_response_id` 或 `conversation`。固定受管模型可以直接添加，其他公开发现候选须经独立验证后保存；两条路径均不能以本地合成响应代替真实云端验收。
 
-第八批于 2026-10-26 再次读取 [Web search](https://docs.ollama.com/capabilities/web-search)：独立固定 `POST https://ollama.com/api/web_search` 接受 query/max_results（默认五条、最多十条），顶层 results 每条包含 title/url/content 摘要；使用账户 Bearer。网页读取是另一个接口，本批未实现，也未调用真实搜索 API。Responses 工具及搜索生命周期同时核对锁定 Codex `tools/src/tool_spec.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs`；Search action 只保留 query/queries，外部用量缺必需计数时省略 usage，不虚构零。
+2026-10-26 客户端工具搜索适配复核了锁定 Codex 的 `tools/src/tool_spec.rs`、`protocol/src/models.rs` 及客户端搜索 handler／工具加载实现。`execution=client` 的声明、对象参数、配对搜索输出和检索后的 defer_loading 语义由该基线确定；OLC 使用普通 function 承载，不宣称上游原生支持 tool_search。DS 模板关联记录本地配置来源，后续能力更新使用 Ollama 投影而非 DS 原始端点能力；仍不作为云端验证记录。
+
+2026-10-26 对公开 [`/v1/models`](https://ollama.com/v1/models) 的只读查询返回 23 个 ID，包含 `deepseek-v4.1-flash`、`deepseek-v4.1-flash:1017`、`deepseek-v4-pro:0813`。逐个读取 `/api/show` 均返回 200：两项 Flash 声明 completion/thinking/tools/vision，Pro 声明 completion/tools/thinking；上下文均为 1048576，思考选项均含 `false/low/high/max`，Flash 默认 `high`，Pro 默认 `low`。本地受管映射只采用精确 ID、图片差异及 `low/high/max` 和默认值，窗口仍受 393216 策略上限约束，不把布尔 `false` 映射为 Responses `none`。生成器以仓库 DS 模板为起点再覆盖 OLC 能力，manifest 不伪造模板能力关联或云端验证记录。这些公开查询不使用 Key、不发送推理请求，不能证明认证、图片、freeform 或真实工具往返已通过。
+
+2026-10-26 核对 [Web search](https://docs.ollama.com/capabilities/web-search)：独立固定 `POST https://ollama.com/api/web_search` 接受 query/max_results（默认五条、最多十条），顶层 results 每条包含 title/url/content 摘要；使用账户 Bearer。网页读取是另一个接口，当前未实现，也未调用真实搜索 API。Responses 工具及搜索生命周期同时核对锁定 Codex `tools/src/tool_spec.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs`；Search action 只保留 query/queries，外部用量缺必需计数时省略 usage，不虚构零。
+
+同日后续故障诊断经用户单次授权调用真实搜索接口：HTTP 200，`Content-Type: text/html; charset=utf-8`、identity 编码，正文为 31810 字节有效 JSON，五条结果的字符串字段、URL 与现有长度限制均通过。先前共用模型 HTTP 校验器因此误拒绝。现行搜索读取器局部接受这一实测类型，但正文仍严格解析为官方 results 结构；不接受 HTML 页面，不改变模型 HTTP reader。该一次观察不能推断所有查询或云端推理均可用。
 
 ## Cline 模型目录来源
 

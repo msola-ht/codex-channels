@@ -74,7 +74,7 @@ Relay 重启取消自身在途请求，不停止共享 App Server。
 
 请求保留解析后的普通 JSON 字段和值，由上游判断模型参数、工具、图片与扩展内容。CLP 鉴权与精确模型匹配后读取共用目录的请求快照与可选 `cline_provider_options`：只有模型显式保存该对象时才递归合并到出站 `providerOptions`，数组、标量和 null 覆盖客户端值。未保存改写时保持原请求，不添加或覆盖 `gateway.only`。字段不设白名单，保存值原样发出；非对象容器由覆盖替换或保留，不在本地按字段拒绝。Flash 与标准快照都不再自动限定路由，JSON/SSE 一致，不取消限定重试；其他 Provider 不注入。历史云端探测及限制见[CLP 路由记录](cline-pass.md#上游路由限定探测)。
 
-OLC Responses 依据可信账户材料适配 custom/freeform 声明、选择及配对历史，JSON/SSE 响应按本次工具身份还原；不执行客户端工具，不开启 Chat、客户端 `tool_search` 或 Codex 私有输入归一化。请求显式声明受支持的 `web_search` 时，使用该账户 Key 调用固定 Ollama live 搜索接口并携带摘要续答，形成一个外部响应；不读取 App Server 的搜索偏好。cached/indexed、过滤等不支持控制在模型出站前拒绝，不自动降级。混合客户端调用只在内部配对 `not_executed`，历史搜索仅保留查询。搜索最多八模型轮、四次搜索、单搜索 45 秒、整次请求十分钟，每次搜索和续答都复核 Relay 租约、准确模型授权及材料。完整资源、失败及未验收边界见 [OLC 托管实时网页搜索](ollama-cloud.md#托管实时网页搜索)。
+OLC Responses 依据可信账户材料适配 custom/freeform 与 `execution=client` 的工具搜索声明、选择及配对历史，JSON/SSE 响应按本次工具身份还原；搜索结果中的工具声明显式加载，不执行客户端工具，不开启 Chat 或上游服务端工具搜索。新加载 schema 清理布尔 encrypted 标记，不支持加密历史或私有 agent_message。请求显式声明受支持的 `web_search` 时，使用该账户 Key 调用固定 Ollama live 搜索接口并携带摘要续答，形成一个外部响应；不读取 App Server 的搜索偏好。cached/indexed、过滤等不支持控制在模型出站前拒绝，不自动降级。混合客户端调用只在内部配对 `not_executed`，不伪造成功的工具搜索结果，历史网页搜索仅保留查询。搜索最多八模型轮、四次搜索、单搜索 45 秒、整次请求十分钟，每次搜索和续答都复核 Relay 租约、准确模型授权及材料。完整资源、失败及未验收边界见 [OLC 托管实时网页搜索](ollama-cloud.md#托管实时网页搜索)。
 
 Relay 不下载远程图片，不读取请求里的本机路径。具体本地边界如下：
 

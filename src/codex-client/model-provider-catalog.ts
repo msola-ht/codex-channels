@@ -13,8 +13,6 @@ interface ManagedCatalogDefinition {
   defaultReasoningEffort?: string;
 }
 
-// Provider 注册与受控模型范围由 Bootstrap/Runtime 校验；目录允许单层命名空间。
-const modelSlugPattern = /^(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u;
 // The member model ID is an opaque JSON field, not a URL path segment.
 const aggregateModelSlugPattern = /^[a-zA-Z0-9_-]{1,64}\/[^\p{Cc}]{1,200}$/u;
 
@@ -22,6 +20,7 @@ export function loadManagedModelOptions(
   providerDirectory: string,
   enabled: boolean,
   definition: ManagedCatalogDefinition,
+  isModelValid: (model: string) => boolean,
 ): ModelOption[] {
   if (!enabled) return [];
   const catalogPath = join(providerDirectory, definition.catalogFileName);
@@ -35,7 +34,7 @@ export function loadManagedModelOptions(
       { cause: error },
     );
   }
-  return parseModelOptions(parsed, definition, catalogPath, modelSlugPattern);
+  return parseModelOptions(parsed, definition, catalogPath, isModelValid);
 }
 
 /** Map confirmed aggregate material without starting an App Server to read its catalog. */
@@ -44,14 +43,14 @@ export function parseAggregateModelOptions(catalog: unknown): ModelOption[] {
     id: "codexc-aggregate",
     displayName: "聚合提供商",
     catalogFileName: "aggregate-models.json",
-  }, "聚合模型目录", aggregateModelSlugPattern, true);
+  }, "聚合模型目录", (model) => aggregateModelSlugPattern.test(model), true);
 }
 
 function parseModelOptions(
   parsed: unknown,
   definition: ManagedCatalogDefinition,
   catalogPath: string,
-  slugPattern: RegExp,
+  isModelValid: (model: string) => boolean,
   aggregate = false,
 ): ModelOption[] {
   const models = record(parsed).models;
@@ -63,7 +62,7 @@ function parseModelOptions(
     // Aggregate authentication is API-key based. Match upstream model/list's
     // API availability and picker visibility, including while the instance sleeps.
     if (aggregate && (model.visibility !== "list" || model.supported_in_api !== true)) return [];
-    if (typeof model.slug !== "string" || !slugPattern.test(model.slug)
+    if (typeof model.slug !== "string" || !isModelValid(model.slug)
       || aggregate && model.slug.slice(model.slug.indexOf("/") + 1).trim() !== model.slug.slice(model.slug.indexOf("/") + 1)) {
       throw new Error(`${definition.displayName} 模型目录包含无效模型名：${catalogPath}`);
     }

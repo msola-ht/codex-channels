@@ -10,9 +10,6 @@ import { Input } from "@/components/ui/input"
 import { ManagedSelect, ManagementConfirmationDialog, SettingsMutationFeedback, modelOperationDialogClassName } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { AccountSettingsController } from "@/lib/settings-management"
-import { ModelIdentityFields, ModelCapabilityFields, type ModelCapabilityFieldsValue } from "@/components/settings/model-definition-fields"
-import { defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
-import { validContextWindow } from "@/lib/model-context-window"
 
 export type Platform = "opencodeGo" | "deepseek" | "clinePass" | "ollamaCloud"
 const platforms: Record<Platform, string> = { opencodeGo: "OpenCode Go", deepseek: "DeepSeek", clinePass: "Cline Pass", ollamaCloud: "Ollama Cloud" }
@@ -37,12 +34,8 @@ function AccountSettingsCard({ management, settings, onChanged, onEditingChange,
   const [mode, setMode] = useState<AccountMode | null>("switching")
   const [key, setKey] = useState("")
   const [model, setModel] = useState("")
-  const [modelName, setModelName] = useState("")
-  const [capabilities, setCapabilities] = useState<ModelCapabilityFieldsValue>({ contextWindow: "", reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: undefined, supportsPatch: false, supportsSearch: false })
   const initialCatalog = editor === "ollamaCloud" && !settings.ollamaCloud.catalogExists
-  const modelValid = editor !== "ollamaCloud" || (initialCatalog
-    ? model.length > 0 && modelName.trim().length > 0 && validContextWindow(capabilities.contextWindow, 1024, 100000000) && (capabilities.reasoningEfforts?.length ?? 0) > 0 && capabilities.reasoningEfforts?.includes(capabilities.defaultReasoningEffort ?? "") && typeof capabilities.supportsImages === "boolean"
-    : settings.ollamaCloud.models.some(entry => entry.id === model))
+  const modelValid = editor !== "ollamaCloud" || editing || settings.ollamaCloud.models.some(entry => entry.id === model)
   const pending = management.pendingPreview
   const disabled = management.busy || management.loading || management.error !== null || management.readbackRequired || pending !== null
   const rows: AccountRow[] = [
@@ -59,7 +52,7 @@ function AccountSettingsCard({ management, settings, onChanged, onEditingChange,
   const open = (platform: Platform, row?: AccountRow) => {
     management.clearError()
     setEditor(platform); setEditing(Boolean(row)); setAccountId(row?.id ?? ""); setMode(row ? row.mode : "switching"); setKey("")
-    setModel(row?.model ?? ""); setModelName(""); setCapabilities({ contextWindow: "", reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: undefined, supportsPatch: false, supportsSearch: false })
+    setModel(row?.model ?? "")
   }
   const save = () => {
     if (editor === null || (mode !== "switching" && mode !== "exclusive")) return
@@ -67,9 +60,7 @@ function AccountSettingsCard({ management, settings, onChanged, onEditingChange,
     if (editor === "opencodeGo") void management.mutate({ ...common, operation: "opencode.account.configure" })
     if (editor === "deepseek") void management.mutate({ operation: "deepseek.configure", ...common })
     if (editor === "clinePass") void management.mutate({ operation: "clp.configure", ...common })
-    if (editor === "ollamaCloud" && modelValid) void management.mutate({ operation: "olc.configure", ...common, model,
-      ...(initialCatalog ? { initialModel: { id: model, name: modelName, contextWindow: Number(capabilities.contextWindow), reasoningEfforts: capabilities.reasoningEfforts, defaultReasoningEffort: capabilities.defaultReasoningEffort, supportsImages: capabilities.supportsImages, applyPatchToolType: capabilities.supportsPatch ? "freeform" : null, supportsSearchTool: false } } : {}),
-    })
+    if (editor === "ollamaCloud" && modelValid) void management.mutate({ operation: "olc.configure", ...common, ...(!editing ? { model } : {}) })
   }
   const confirm = async () => {
     const result = await management.confirm()
@@ -94,11 +85,8 @@ function AccountSettingsCard({ management, settings, onChanged, onEditingChange,
           <Field data-disabled={disabled}><FieldLabel htmlFor="model-account-key">API Key</FieldLabel><Input id="model-account-key" type="password" autoComplete="new-password" disabled={disabled} value={key} placeholder={editing ? t("managementUi.preserveCredentials") : undefined} onChange={event => setKey(event.target.value)} /></Field>
           {editor === "ollamaCloud" && <>
             <Alert><AlertDescription>{t("modelManagement.ollamaAuthenticationHint")}</AlertDescription></Alert>
-            {initialCatalog ? <>
-              <p>{t("modelManagement.ollamaInitialHint")}</p>
-              <ModelIdentityFields id={model} name={modelName} disabled={disabled} onIdChange={value => { if (!modelName || modelName === defaultModelDisplayName(model)) setModelName(defaultModelDisplayName(value)); setModel(value) }} onNameChange={setModelName} />
-              <ModelCapabilityFields value={capabilities} disabled={disabled} unavailableSearch onChange={changes => setCapabilities(previous => ({ ...previous, ...changes, supportsSearch: false }))} />
-            </> : <ManagedSelect fullWidth label={t("managementUi.defaultModel")} value={model} placeholder={t("modelManagement.selectModel")} options={settings.ollamaCloud.models.map(entry => [entry.id, `${entry.name} (${entry.id})`])} disabled={disabled} onChange={setModel} />}
+            {initialCatalog && <p>{t("modelManagement.ollamaInitialHint")}</p>}
+            {editing ? <Field><FieldLabel>{t("managementUi.defaultModel")}</FieldLabel><p className="break-all">{model || t("common.unknown")}</p></Field> : <ManagedSelect fullWidth label={t("managementUi.defaultModel")} value={model} placeholder={t("modelManagement.selectModel")} options={settings.ollamaCloud.models.map(entry => [entry.id, `${entry.name} (${entry.id})`])} disabled={disabled} onChange={setModel} />}
           </>}
         </FieldGroup>}
         {management.actionError && <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert>}
@@ -138,9 +126,8 @@ export function AccountSettingsConfirmationDialog({
   if (preview.mode !== undefined) lines.push(t("accountConfirmation.mode", { value: preview.previousMode === undefined ? modeLabel(preview.mode) : `${modeLabel(preview.previousMode)} → ${modeLabel(preview.mode)}` }))
   if (preview.credentialAction !== undefined) lines.push(t(preview.credentialAction === "preserve" ? "accountConfirmation.preserveKey" : "accountConfirmation.replaceKey"))
   if (preview.model !== undefined) lines.push(t("accountConfirmation.model", { value: preview.model }))
-  if (preview.initialModel !== undefined) {
-    const model = preview.initialModel
-    lines.push(t("modelManagement.ollamaInitialSummary", { id: model.id, name: model.name, window: String(model.contextWindow), efforts: (model.reasoningEfforts ?? []).join(" / "), defaultEffort: model.defaultReasoningEffort ?? "", images: t(model.supportsImages ? "openAiModelCatalog.supported" : "openAiModelCatalog.unsupported"), patch: t(model.applyPatchToolType === "freeform" ? "openAiModelCatalog.supported" : "openAiModelCatalog.unsupported") }))
+  if (preview.initialModels !== undefined) {
+    lines.push(t("modelManagement.ollamaInitialSummary", { models: preview.initialModels.map(model => `${model.name} (${model.id})`).join("\n") }))
   }
   if (preview.status !== undefined) lines.push(t("accountConfirmation.status", { value: preview.status }))
   if (preview.effects !== undefined) {

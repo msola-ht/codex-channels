@@ -4,7 +4,6 @@ import { loadOllamaCloudAccounts, ollamaCloudProviderId } from "../runtime/ollam
 import { loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
 import { ollamaCloudProviderDefinition as definition } from "../runtime/model-provider-definitions.mjs";
 import { promptManagedAccountId, promptManagedAccountEdit, confirmManagedAccountEdit } from "./managed-provider-account-prompt.mjs";
-import { defaultModelDisplayName } from "../runtime/model-catalog.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import {
@@ -60,22 +59,16 @@ async function runOllamaCloudSetupOperation(options) {
     const edit = await promptManagedAccountEdit({ prompts, current, definition, reconfigure: action === "reconfigure" });
     if (!edit) return { action: "back" };
     const choices = loadOllamaCloudModelChoices(environment);
-    let model;
-    let initialModel;
-    if (choices.catalogExists) {
-      model = await prompts.select({ message: "账户默认模型（选择共享目录中的准确 ID）", initialValue: current?.model, options: choices.models.map(entry => ({ value: entry.id, label: `${entry.name}（${entry.id}）` })) });
+    let model = current?.model;
+    if (action === "add") {
+      model = await prompts.select({ message: "账户默认模型", options: choices.models.map(entry => ({ value: entry.id, label: `${entry.name}（${entry.id}）` })) });
       if (prompts.isCancel(model)) return { action: "back" };
-    } else {
-      initialModel = await promptInitialModel(prompts, output);
-      if (!initialModel) return { action: "back" };
-      model = initialModel.id;
     }
-    const input = { accountId, ...edit, model, ...(initialModel ? { initialModel } : {}), reconfigure: action === "reconfigure" };
-    output.write("新增或更换 Key 时，预览及保存会读取 Ollama Cloud 认证接口；不发送推理请求。首次手动模型仅声明能力，不证明上游已通过 Responses 验证。\n");
+    const input = { accountId, ...edit, ...(action === "add" ? { model } : {}), reconfigure: action === "reconfigure" };
+    output.write("新增或更换 Key 时，预览及保存会读取 Ollama Cloud 认证接口；不发送推理请求。\n");
     const preview = await previewOllamaCloudConfiguration(input, options);
-    if (preview.initialModel) {
-      const model = preview.initialModel;
-      output.write(`将创建所有 OLC 账户共用的模型目录（手动能力声明）\n准确 ID：${model.id}\n显示名称：${model.name}\n上下文：${model.contextWindow} Token\n支持思考等级：${model.reasoningEfforts.join(" / ")}\n默认思考等级：${model.defaultReasoningEffort}\n图片输入：${model.supportsImages ? "支持" : "不支持"}\nfreeform：${model.applyPatchToolType === "freeform" ? "声明支持" : "关闭"}；目录不声明客户端 tool_search 或上游原生搜索能力。\n`);
+    if (preview.initialModels) {
+      output.write(`将创建所有 OLC 账户共用的受管模型目录：\n${preview.initialModels.map(entry => `  ${entry.name}（${entry.id}）`).join("\n")}\n受管配置不代表真实云端推理已验收。\n`);
     }
     if (!await confirmManagedAccountEdit(preview, { prompts, output })) return { action: "back" };
     result = await applyOllamaCloudConfiguration({ ...input, confirmExclusiveConfigChange: preview.effects.writesMainConfig, expectedRevision: preview.revision }, options);
@@ -85,23 +78,4 @@ async function runOllamaCloudSetupOperation(options) {
   }
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
-}
-
-async function promptInitialModel(prompts, output) {
-  output.write("首次创建共享目录：填写准确模型和能力；freeform 需明确声明。目录不声明客户端 tool_search 或上游原生搜索能力，托管搜索模式在现有联网搜索设置中单独选择。\n");
-  const id = await prompts.text({ message: "准确模型 ID（保留版本与冒号）", validate: value => typeof value === "string" && value.trim() === value && value.length > 0 ? undefined : "请输入准确 ID" });
-  if (prompts.isCancel(id)) return undefined;
-  const name = await prompts.text({ message: "显示名称", initialValue: defaultModelDisplayName(id) });
-  if (prompts.isCancel(name)) return undefined;
-  const context = await prompts.text({ message: "上下文 Token 数（1024–100000000）", validate: value => Number.isSafeInteger(Number(value)) && Number(value) >= 1024 && Number(value) <= 100000000 ? undefined : "请输入合法整数窗口" });
-  if (prompts.isCancel(context)) return undefined;
-  const reasoningEfforts = await prompts.multiselect({ message: "明确支持的思考等级（至少一个）", options: ["none", "minimal", "low", "medium", "high", "xhigh", "max"].map(value => ({ value, label: value })), required: true });
-  if (prompts.isCancel(reasoningEfforts)) return undefined;
-  const defaultReasoningEffort = await prompts.select({ message: "默认思考等级", options: reasoningEfforts.map(value => ({ value, label: value })) });
-  if (prompts.isCancel(defaultReasoningEffort)) return undefined;
-  const supportsImages = await prompts.confirm({ message: "明确支持图片输入？", initialValue: false });
-  if (prompts.isCancel(supportsImages)) return undefined;
-  const supportsPatch = await prompts.confirm({ message: "明确支持 Codex 自由格式 apply_patch？（声明不等于真实上游验收）", initialValue: false });
-  if (prompts.isCancel(supportsPatch)) return undefined;
-  return { id, name, contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort, supportsImages, applyPatchToolType: supportsPatch ? "freeform" : null, supportsSearchTool: false };
 }

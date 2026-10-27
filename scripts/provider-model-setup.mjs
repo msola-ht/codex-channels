@@ -128,14 +128,14 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
     { value: "prompts", label: "提示词" },
     { value: "capabilities", label: provider.startsWith("cp-") ? "本地工具" : "能力参数", hint: provider.startsWith("cp-") ? "同步异步提问与时钟声明，保留其他工具和模型能力" : "含基座异步提问与时钟声明；请确认平台支持模板中的参数" },
     { value: "settings", label: "上下文与压缩设置", hint: "仅有效上下文比例、自动压缩阈值、截断策略；主动勾选才覆盖本地值" },
-  ].filter(entry => options.availableSections.includes(entry.value)), initialValues: ["prompts"], required: true });
+  ].filter(entry => template.availableSections.includes(entry.value)), initialValues: ["prompts"], required: true });
   if (prompts.isCancel(sections)) return { action: "back" };
   const input = { provider, model, sections, revision: options.revision, sourceToken: options.sourceToken, template: { source: template.source, model: template.model } };
   const preview = await previewProviderModelTemplateUpdate(input, { environment });
   output.write(`模板对比：${JSON.stringify(preview.provider)} / ${JSON.stringify(preview.model)}\n来源：${JSON.stringify(preview.source)} / ${JSON.stringify(preview.sourceModel)}\n修订：${JSON.stringify(preview.revision)}\n`);
   output.write(provider.startsWith("cp-")
     ? "自定义模型按勾选范围更新提示词、本地工具或上下文与压缩设置，并记录来源关联；模型自身能力、其他工具声明及采样保留本地值。\n"
-    : provider.startsWith("olc-") ? "OLC 仅从 official 更新勾选的提示词或运行设置；模型能力、本地工具及未选字段保持原值。\n"
+    : provider.startsWith("olc-") ? "OLC 的 DS 模板使用 Ollama 专属能力，能力更新包含客户端工具搜索与 freeform；official 仅更新提示词或运行设置。未选字段保持原值。\n"
       : "保留本地模型 ID、显示名称、当前上下文、默认思考等级和采样；能力更新可改变最大上下文，并补入基座异步提问与时钟声明，保留其他已有工具声明。\n");
   output.write("有效上下文比例、自动压缩阈值和截断策略默认保留本地值；仅主动选择「上下文与压缩设置」并确认差异后覆盖。\n");
   for (const change of preview.changes) {

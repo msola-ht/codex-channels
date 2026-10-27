@@ -34,16 +34,18 @@ export function readModelTemplateBindings(manifest, modelIds) {
 /** OLC metadata provenance is separate from explicitly selected prompt templates. */
 export function validateOllamaCloudCatalogManifest(manifest, modelIds) {
   const bindings = readModelTemplateBindings(manifest, modelIds);
-  if (manifest.source !== "ollama-cloud" || Object.values(bindings).some(binding => binding.source !== "official")) {
-    throw new Error("Ollama Cloud 目录来源须为 ollama-cloud，提示词模板仅支持 official");
+  const supportedTemplate = reference => reference.source === "official"
+    || reference.source === "deepseek" && ["deepseek-flash", "deepseek-v4-pro"].includes(reference.model);
+  if (manifest.source !== "ollama-cloud" || Object.values(bindings).some(binding => !supportedTemplate(binding))) {
+    throw new Error("Ollama Cloud 目录来源须为 ollama-cloud，模板仅支持 official 或受管 DS 模板");
   }
   if (manifest.templateUpdates !== undefined) {
     if (!record(manifest.templateUpdates) || Object.entries(manifest.templateUpdates).some(([id, update]) =>
-      !modelIds.includes(id) || !record(update) || update.source !== "official" || !modelId(update.model)
+      !modelIds.includes(id) || !record(update) || !supportedTemplate(update) || !modelId(update.model)
       || typeof update.revision !== "string" || !/^[a-f0-9]{64}$/u.test(update.revision)
-      || !Array.isArray(update.sections) || update.sections.length === 0 || update.sections.length > 2
+      || !Array.isArray(update.sections) || update.sections.length === 0 || update.sections.length > 3
       || new Set(update.sections).size !== update.sections.length
-      || update.sections.some(section => !["prompts", "settings"].includes(section)))) {
+      || update.sections.some(section => !(update.source === "deepseek" ? ["prompts", "settings", "capabilities"] : ["prompts", "settings"]).includes(section)))) {
       throw new Error("Ollama Cloud 模板更新记录无效");
     }
   }

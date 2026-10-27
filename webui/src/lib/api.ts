@@ -531,9 +531,9 @@ export function fetchProviderModelTemplateOptions(provider: string, signal?: Abo
   return getJson(`${API_PREFIX}/management/provider-model-templates?${new URLSearchParams({ provider })}`, signal)
 }
 
-export function fetchProviderModelAdditionOptions(provider: string, manualModel: ManagedManualModelDefinition | undefined, signal: AbortSignal): Promise<ProviderModelAdditionOptions> {
+export function fetchProviderModelAdditionOptions(provider: string, manualModel: ManagedManualModelDefinition | undefined, signal: AbortSignal, discovery?: boolean): Promise<ProviderModelAdditionOptions> {
   return requestJson(`${API_PREFIX}/management/provider-model-additions`, {
-    method: "POST", body: JSON.stringify({ provider, ...(manualModel ? { manualModel } : {}) }),
+    method: "POST", body: JSON.stringify({ provider, ...(manualModel ? { manualModel } : {}), ...(discovery === true ? { discovery: true } : {}) }),
   }, signal, 100_000)
 }
 

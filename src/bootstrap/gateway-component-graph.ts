@@ -31,6 +31,7 @@ import {
 } from "../../runtime/executable.mjs";
 import { codexProcessInvocation } from "../../runtime/owned-process.mjs";
 import {
+  isManagedProviderModelValid,
   loadManagedModelProviderDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
 import {
@@ -293,7 +294,12 @@ export abstract class GatewayComponentGraph {
       const definition = providerDefinitions.find((entry) => entry.id === provider);
       if (!definition) throw new Error("Provider 模型目录定义不存在");
       const fingerprint = readAppServerProviderSettingsFingerprint(provider);
-      const models = loadManagedModelOptions(managedProviderDirectory(process.env, definition), true, definition);
+      const models = loadManagedModelOptions(
+        managedProviderDirectory(process.env, definition),
+        true,
+        definition,
+        (model) => isManagedProviderModelValid(definition, model),
+      );
       if (fingerprint !== readAppServerProviderSettingsFingerprint(provider)) throw new Error("Provider 模型目录在读取期间发生变化");
       return { fingerprint, models };
     };

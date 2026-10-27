@@ -15,7 +15,7 @@ import { createIndependentModelDraft, defaultModelDisplayName, isValidCustomMode
 import { readModelTemplateBindings, validateOllamaCloudCatalogManifest } from "../runtime/model-template-bindings.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import { createCcgCatalogWithTemplateBindings, createOpencodeGoCatalogWithTemplateBindings, createClinePassCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
+import { createCcgCatalogWithTemplateBindings, createOpencodeGoCatalogWithTemplateBindings, createClinePassCatalogWithTemplateBindings, createOllamaCloudCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
 import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
@@ -37,7 +37,7 @@ const stateError = error => error instanceof ProviderModelManagementError || err
 
 /** The downloaded source is retained privately; callers select exact candidate IDs only. */
 export async function loadProviderModelAdditionOptions(provider, {
-  environment = process.env, signal, manualModel, fetchImpl,
+  environment = process.env, signal, manualModel, fetchImpl, discovery,
   downloadCatalog = downloadDeepseekCatalog,
 } = {}) {
   try {
@@ -45,6 +45,9 @@ export async function loadProviderModelAdditionOptions(provider, {
     const operationSignal = signal ? globalThis.AbortSignal.any([signal, deadline]) : deadline;
     operationSignal.throwIfAborted();
     const state = await readState(provider, environment);
+    if (discovery !== undefined && (discovery !== true || manualModel !== undefined || state.family.storageId !== "ollama-cloud")) {
+      throw invalid("invalid-input", "provider", "公开发现仅用于 OLC，不能与手动模型混用");
+    }
     const baseRevision = manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "inheritFrom")
       ? undefined : readModelBaseSnapshot(environment).revision;
     let models, bindings = {}, source;
@@ -80,8 +83,8 @@ export async function loadProviderModelAdditionOptions(provider, {
         throw invalid("invalid-input", "manualModel", "须明确声明思考等级、图片、apply_patch 和 tool_search 能力，不自动关联模板");
       }
       const clinePass = state.family.storageId === "clp";
-      if (state.family.storageId === "ollama-cloud" && (manualModel.supportsSearchTool !== false || manualModel.supportsWebSearch !== undefined && manualModel.supportsWebSearch !== false)) {
-        throw invalid("invalid-input", "manualModel", "OLC 尚未开放客户端 tool_search 或原生 web_search 能力声明");
+      if (state.family.storageId === "ollama-cloud" && manualModel.supportsWebSearch !== undefined && manualModel.supportsWebSearch !== false) {
+        throw invalid("invalid-input", "manualModel", "OLC 尚未开放原生 web_search 能力声明");
       }
       const chat = clinePass || state.upstreamWireApi === "chat_completions";
       if (chat && manualModel.supportsImageDetailOriginal !== undefined && manualModel.supportsImageDetailOriginal !== false) {
@@ -107,6 +110,11 @@ export async function loadProviderModelAdditionOptions(provider, {
       models = generated.catalog.models;
       bindings = generated.templateBindings;
       source = { kind: "deepseek" };
+    } else if (state.family.storageId === "ollama-cloud" && discovery !== true) {
+      const generated = createOllamaCloudCatalogWithTemplateBindings(readDeepseekModelTemplateCatalog(environment), environment);
+      models = generated.catalog.models;
+      bindings = generated.templateBindings;
+      source = { kind: "ollama-managed" };
     } else if (state.family.storageId === "ollama-cloud") {
       const material = loadConfiguredManagedProviderMaterial(provider, environment);
       const discovery = await withOllamaCloudFetch(environment, operationSignal,

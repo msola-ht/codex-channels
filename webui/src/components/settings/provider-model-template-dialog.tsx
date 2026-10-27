@@ -35,12 +35,13 @@ export function ProviderModelTemplateDialog({ target, open, stale, management, p
   const [sections, setSections] = useState<ProviderModelTemplateSection[]>(["prompts"])
   const options = request.data
   const custom = target.provider.startsWith("cp-")
-  const selectedSections = sections.filter(section => options?.availableSections.includes(section))
   const currentTarget = options?.targets.find(entry => entry.model === target.model)
   const templates = options?.templates.filter(entry => !target.provider.startsWith("ds-") || entry.model === target.model) ?? []
   const initialIndex = currentTarget?.template ? templates.findIndex(entry => entry.source === currentTarget.template?.source && entry.model === currentTarget.template.model) : -1
   const selection = selected ?? (initialIndex < 0 ? "" : String(initialIndex))
   const template = selection === "" ? undefined : templates[Number(selection)]
+  const availableSections = template?.availableSections ?? []
+  const selectedSections = sections.filter(section => availableSections.includes(section))
   const catalogStale = stale
   const busy = management.busy || management.loading || management.error !== null || management.readbackRequired
   const unavailable = !request.loading && request.error === null && (!currentTarget || templates.length === 0)
@@ -59,7 +60,7 @@ export function ProviderModelTemplateDialog({ target, open, stale, management, p
       {options && !request.loading && !request.error && !unavailable ? <FieldGroup>
         <ManagedSelect fullWidth label={t("modelTemplate.source")} value={selection} placeholder={t("modelTemplate.selectSource")} disabled={busy || catalogStale} options={templates.map((entry, index) => [String(index), `${t(`modelTemplate.${entry.source}`)} · ${entry.displayName} (${entry.model})`])} onChange={setSelected} />
         <FieldSet disabled={busy || catalogStale}><FieldLegend>{t("modelTemplate.sections")}</FieldLegend><FieldGroup className="flex-row flex-wrap gap-x-5 gap-y-2">
-          {options.availableSections.map(section => <Field key={section} orientation="horizontal" className="w-auto"><Checkbox id={`template-${section}`} checked={selectedSections.includes(section)} disabled={busy || catalogStale} onCheckedChange={checked => setSections(previous => checked ? [...previous.filter(value => value !== section), section] : previous.filter(value => value !== section))} /><FieldLabel htmlFor={`template-${section}`}>{t(custom && section === "capabilities" ? "modelTemplate.localTools" : `modelTemplate.${section}`)}</FieldLabel></Field>)}
+          {availableSections.map(section => <Field key={section} orientation="horizontal" className="w-auto"><Checkbox id={`template-${section}`} checked={selectedSections.includes(section)} disabled={busy || catalogStale} onCheckedChange={checked => setSections(previous => checked ? [...previous.filter(value => value !== section), section] : previous.filter(value => value !== section))} /><FieldLabel htmlFor={`template-${section}`}>{t(custom && section === "capabilities" ? "modelTemplate.localTools" : `modelTemplate.${section}`)}</FieldLabel></Field>)}
         </FieldGroup></FieldSet>
         <p className="text-sm text-muted-foreground">{t("modelTemplate.settingsHint")}</p>
         {selectedSections.includes("capabilities") ? <p className="text-sm text-muted-foreground">{t(custom ? "modelTemplate.localToolsHint" : "modelTemplate.capabilityHint")}</p> : null}

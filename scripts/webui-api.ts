@@ -802,7 +802,7 @@ export interface ProviderModelTemplateOptionsResponse {
   expiresAt: number
   availableSections: ProviderModelTemplateSection[]
   targets: Array<{ model: string; displayName: string; template: { source: ProviderModelTemplateSource; model: string } | null }>
-  templates: Array<{ source: ProviderModelTemplateSource; model: string; displayName: string }>
+  templates: Array<{ source: ProviderModelTemplateSource; model: string; displayName: string; availableSections: ProviderModelTemplateSection[] }>
 }
 export interface ProviderModelTemplateUpdateInput {
   operation: "model.template.update"
@@ -992,7 +992,6 @@ export type ManagementAccountSettingsMutationInput =
       operation: "olc.configure"
       accountId: string
       model?: string
-      initialModel?: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition
       reconfigure?: boolean
       mode?: "switching" | "exclusive"
       apiKey?: string
@@ -1024,7 +1023,7 @@ export type ManagementAccountSettingsMutationInput =
   | { operation: "deepseek.default" | "deepseek.remove" | "clp.default" | "clp.remove"; accountId: string }
 
 export interface ManagementAccountSettingsPreview {
-  initialModel?: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition
+  initialModels?: Array<{ id: string; name: string }>
   operation: string
   revision?: string
   activation?: string

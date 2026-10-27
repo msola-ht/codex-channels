@@ -3,14 +3,14 @@ import { request as httpsRequest } from "node:https";
 import type { IncomingMessage } from "node:http";
 import { OllamaWebSearch, prepareOllamaFreeform, ModelConversionError, type DirectResponsesRequest, type OllamaSearchResult } from "../model-api/index.js";
 import { ChatUpstreamError } from "./chat-errors.js";
-import { readChatBody } from "./chat-io.js";
-import { validateDirectModelResponse } from "./direct-model-http.js";
+import { ChatBodyEncodingError, ChatBodyTooLargeError, readChatBody } from "./chat-io.js";
 import { DirectResponsesObserver, sendDirectResponses, type DirectResponsesCall } from "./direct-responses.js";
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
 import { waitForChatOperation } from "./chat-io.js";
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
-const invalid = (): ChatUpstreamError => new ChatUpstreamError("olc_search_invalid_response", "Ollama Cloud 网页搜索返回了无效响应。", false);
+const invalid = (reason: string): ChatUpstreamError => new ChatUpstreamError("olc_search_invalid_response", `Ollama Cloud 网页搜索返回了无效响应（${reason}）。`, false);
+const resultLimit = (reason: string): ChatUpstreamError => new ChatUpstreamError("olc_search_result_limit", `Ollama Cloud 网页搜索结果超过本地处理上限（${reason}）。`, false);
 
 /** Fixed official origin and path. No redirects, result URL fetches or automatic retry. */
 export async function executeOllamaWebSearch(authorization: string, query: string, signal: AbortSignal, recheck: () => void,
@@ -35,22 +35,40 @@ export async function executeOllamaWebSearch(authorization: string, query: strin
         : status === 408 || status === 504 ? "timeout" : "upstream_error";
       throw new ChatUpstreamError(`olc_search_${reason}`, `Ollama Cloud 网页搜索失败（${reason}）。`, false, undefined, status);
     }
-    await validateDirectModelResponse(incoming, false);
+    // The fixed search endpoint has returned valid JSON labeled text/html.
+    // Keep this observed exception local; model JSON/SSE readers remain strict.
+    const encoding = incoming.headers["content-encoding"];
+    if (encoding !== undefined && encoding.trim().toLowerCase() !== "identity") throw invalid("不支持的正文编码");
+    const contentType = incoming.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+    if (contentType !== "application/json" && contentType !== "text/html") throw invalid("不支持的响应类型");
     const text = await readChatBody(incoming, operationSignal, 256 * 1024);
-    let value: unknown; try { value = JSON.parse(text); } catch { throw invalid(); }
-    if (!record(value) || !Array.isArray(value.results) || value.results.length > 10) throw invalid();
-    return value.results.map((entry: unknown) => {
-      if (!record(entry) || typeof entry.title !== "string" || typeof entry.url !== "string" || typeof entry.content !== "string"
-        || Buffer.byteLength(entry.title) > 4096 || Buffer.byteLength(entry.url) > 8192 || Buffer.byteLength(entry.content) > 32 * 1024
-        || !/^https?:\/\//iu.test(entry.url) || /[\s\p{Cc}]/u.test(entry.url) || /[\uD800-\uDFFF]/u.test(entry.title + entry.url + entry.content)) throw invalid();
-      let url: URL; try { url = new URL(entry.url); } catch { throw invalid(); }
-      if (!url.hostname || url.username || url.password) throw invalid();
-      return { title: entry.title, url: entry.url, content: entry.content };
+    let value: unknown; try { value = JSON.parse(text); } catch { throw invalid("正文不是有效 JSON"); }
+    if (!record(value) || !Array.isArray(value.results)) throw invalid("缺少 results 数组");
+    if (value.results.length > 10) throw resultLimit("结果数量超过 10 条");
+    return value.results.map((entry: unknown, index: number) => {
+      const position = `第 ${index + 1} 条结果`;
+      if (!record(entry)) throw invalid(`${position}不是对象`);
+      for (const field of ["title", "url", "content"] as const) {
+        if (typeof entry[field] !== "string") throw invalid(`${position}的 ${field} 不是字符串`);
+        if (/[\uD800-\uDFFF]/u.test(entry[field])) throw invalid(`${position}的 ${field} 包含无效 Unicode`);
+      }
+      const { title, url: address, content } = entry as { title: string; url: string; content: string };
+      if (Buffer.byteLength(title) > 4096) throw resultLimit(`${position}标题超过 4 KiB`);
+      if (Buffer.byteLength(address) > 8192) throw resultLimit(`${position}地址超过 8 KiB`);
+      // content is bounded by the complete response and cumulative result budgets.
+      // Valid long snippets must not invalidate an otherwise bounded search.
+      if (!/^https?:\/\//iu.test(address)) throw invalid(`${position}地址不是 HTTP(S)`);
+      if (/[\s\p{Cc}]/u.test(address)) throw invalid(`${position}地址包含空白或控制字符`);
+      let url: URL; try { url = new URL(address); } catch { throw invalid(`${position}地址无法解析`); }
+      if (!url.hostname || url.username || url.password) throw invalid(`${position}地址缺少主机或包含凭据`);
+      return { title, url: address, content };
     });
   } catch (error) {
     if (operationSignal.aborted) throw signal.aborted ? signal.reason : timeout;
     if (error instanceof ChatUpstreamError && error.code.startsWith("olc_search_")) throw error;
-    if (incoming?.statusCode === 200) throw invalid();
+    if (error instanceof ChatBodyTooLargeError) throw resultLimit("单次响应超过 256 KiB");
+    if (error instanceof ChatBodyEncodingError) throw invalid("正文不是有效 UTF-8");
+    if (incoming?.statusCode === 200) throw new ChatUpstreamError("olc_search_upstream_error", "Ollama Cloud 网页搜索正文读取中断。", false);
     throw new ChatUpstreamError("olc_search_upstream_error", "Ollama Cloud 网页搜索连接失败。", false);
   } finally { clearTimeout(timer); incoming?.destroy(); request?.destroy(); }
 }
@@ -121,9 +139,9 @@ export async function sendOllamaSearchResponses(call: DirectResponsesCall & {
       signal.throwIfAborted();
       if (!terminal) throw new ModelConversionError("Ollama Cloud 模型轮缺少终态。");
       if (body.stream && Array.isArray(terminal.output)) for (const item of terminal.output) {
-        if (!record(item) || item.type !== "function_call" && item.type !== "custom_tool_call") continue;
+        if (!record(item) || item.type !== "function_call" && item.type !== "custom_tool_call" && item.type !== "tool_search_call") continue;
         const previous = done.get(String(item.id));
-        const signature = (value: Record<string, unknown>): string => JSON.stringify([value.type, value.call_id, value.name, value.namespace, value.arguments, value.input]);
+        const signature = (value: Record<string, unknown>): string => JSON.stringify([value.type, value.call_id, value.name, value.namespace, value.execution, value.arguments, value.input]);
         if (!previous || signature(previous) !== signature(item)) throw new ModelConversionError("Ollama Cloud 工具终态与完成项不一致。");
       }
       const accepted = call.search.accept(terminal);
@@ -150,7 +168,7 @@ export async function sendOllamaSearchResponses(call: DirectResponsesCall & {
         signal.throwIfAborted(); await waitForChatOperation(call.refresh(signal), signal); signal.throwIfAborted(); call.recheck();
         const result = await executeOllamaWebSearch(call.target.authorization, search.query, signal, () => call.recheck(), call.target.agent);
         resultBytes += Buffer.byteLength(JSON.stringify(result));
-        if (resultBytes > 512 * 1024) throw new ModelConversionError("Ollama Cloud 网页搜索累计结果超限。");
+        if (resultBytes > 512 * 1024) throw resultLimit("累计结果超过 512 KiB");
         results.push(result); searchCount++;
         const completedEvents = call.search.completeSearch(search.callId);
         if (body.stream) for (const event of completedEvents) await emit(event, false);

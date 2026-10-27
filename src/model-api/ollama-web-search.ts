@@ -126,7 +126,8 @@ export class OllamaWebSearch {
     this.output.push(item);
     const events = [this.event("response.output_item.added", { output_index: index,
       item: { ...item, status: "in_progress", ...(item.type === "message" ? { content: [] } : {}), ...(item.type === "reasoning" ? { summary: [], content: [] } : {}),
-        ...(item.type === "function_call" ? { arguments: "" } : {}), ...(item.type === "custom_tool_call" ? { input: "" } : {}) } })];
+        ...(item.type === "function_call" ? { arguments: "" } : {}), ...(item.type === "custom_tool_call" ? { input: "" } : {}),
+        ...(item.type === "tool_search_call" ? { arguments: {} } : {}) } })];
     if (item.type === "web_search_call") {
       for (const status of ["in_progress", "searching", "completed"]) events.push(this.event(`response.web_search_call.${status}`, { output_index: index, item_id: item.id }));
     }
@@ -186,13 +187,14 @@ export class OllamaWebSearch {
     const seen = new Set<string>();
     const calls: OllamaSearchCall[] = [];
     const history = response.output.map(raw => {
-      if (!record(raw) || !["message", "reasoning", "function_call", "custom_tool_call"].includes(String(raw.type))) fail();
+      if (!record(raw) || !["message", "reasoning", "function_call", "custom_tool_call", "tool_search_call"].includes(String(raw.type))) fail();
       passiveItem(raw);
       const item: Json = { ...raw, id: `item_olc_${this.responseId}_${this.ordinal++}` };
-      if (raw.type === "function_call" || raw.type === "custom_tool_call") {
+      if (raw.type === "function_call" || raw.type === "custom_tool_call" || raw.type === "tool_search_call") {
         if (response.status !== "completed" || typeof raw.call_id !== "string" || !raw.call_id || seen.has(raw.call_id)
           || raw.status !== undefined && raw.status !== "completed" || raw.type === "function_call" && typeof raw.arguments !== "string"
-          || raw.type === "custom_tool_call" && typeof raw.input !== "string") fail();
+          || raw.type === "custom_tool_call" && typeof raw.input !== "string"
+          || raw.type === "tool_search_call" && (raw.execution !== "client" || !record(raw.arguments))) fail();
         seen.add(raw.call_id);
         item.call_id = `call_olc_${this.responseId}_${this.ordinal++}`;
         if (raw.name === internalName) {
@@ -209,7 +211,7 @@ export class OllamaWebSearch {
     if (history.length > 64 || Buffer.byteLength(JSON.stringify(history)) > 768 * 1024) fail();
     const choice = this.body.tool_choice;
     const required = choice === "required" || record(choice) && (choice.type === "allowed_tools" ? choice.mode === "required" : true);
-    if (required && response.status === "completed" && !history.some(item => item.type === "function_call" || item.type === "custom_tool_call")) fail();
+    if (required && response.status === "completed" && !history.some(item => ["function_call", "custom_tool_call", "tool_search_call"].includes(String(item.type)))) fail();
     // The mapped declaration must still obey the exact user's allowed set; freeform
     // validates client calls and all choices, while search is checked above.
     return { calls, history };
@@ -245,14 +247,21 @@ export class OllamaWebSearch {
   continuation(history: Json[], calls: OllamaSearchCall[], results: OllamaSearchResult[][]): Json {
     this.beforeSearch(history);
     const byId = new Map(calls.map((call, index) => [call.callId, results[index]]));
-    const outputs = history.filter(item => item.type === "function_call" || item.type === "custom_tool_call").map(item => ({
+    // A delayed client search must not look like a successful empty search.
+    // Keep it as a model-side function exchange with explicit not_executed output.
+    const internalHistory = history.map(item => {
+      if (item.type !== "tool_search_call") return item;
+      const { execution: unused, arguments: args, ...rest } = item; void unused;
+      return { ...rest, type: "function_call", name: "tool_search", arguments: JSON.stringify(args) };
+    });
+    const outputs = internalHistory.filter(item => item.type === "function_call" || item.type === "custom_tool_call").map(item => ({
       type: item.type === "custom_tool_call" ? "custom_tool_call_output" : "function_call_output", call_id: item.call_id,
       output: JSON.stringify(byId.has(String(item.call_id))
         ? { source: "untrusted_web_search_snippets", results: byId.get(String(item.call_id)) }
         : { status: "not_executed", reason: "Search ran first. This client tool was not dispatched. Reconsider and issue it in a separate tool-only round if still needed." }),
     }));
     const previous: unknown[] = typeof this.body.input === "string" ? [{ role: "user", content: this.body.input }] : Array.isArray(this.body.input) ? this.body.input as unknown[] : [];
-    const input = [...previous, ...history, ...outputs];
+    const input = [...previous, ...internalHistory, ...outputs];
     if (this.contextBytes + Buffer.byteLength(JSON.stringify(input)) > limit) fail("Ollama Cloud 网页搜索累计模型输入超限。");
     // Only the first forced choice is satisfied by a successful search. Preserve
     // allowed_tools' set while permitting a final answer on the continuation.

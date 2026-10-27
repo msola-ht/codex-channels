@@ -41,6 +41,7 @@ async function runManagedProviderModelOperation(provider, { environment, prompts
   if (!current) throw new Error("请先完成账户配置");
   const action = await prompts.select({ message: `${displayName} 模型目录`, options: [
     { value: "select", label: "查看启用模型", hint: "移除请使用统一模型管理入口" },
+    ...(ollamaCloud ? [{ value: "templates", label: "添加受管模型", hint: "从内置目录选择，无需手填能力或推理验证；已有模型保持不变" }] : []),
     { value: "add", label: "按 ID 添加模型", hint: "独立填写能力或继承当前目录中的已有模型" },
     ...(ollamaCloud ? [{ value: "discover", label: "发现并验证新模型", hint: "公开候选只读；另行确认后逐模型验证，可能收费" }] : []),
     ...(definition.storageId === "custom" || ollamaCloud ? [] : [{ value: "templates", label: "添加内置 DS 模型", hint: "只添加明确选择的固定 DS 模型，已有模型保持不变" }]),
@@ -62,16 +63,16 @@ async function runManagedProviderModelOperation(provider, { environment, prompts
     if (!current.providers.includes(account)) throw new Error("验证账户选择无效");
     provider = account;
   }
-  return runProviderModelAdditionSetup(provider, { environment, prompts, output, downloadCatalog, signal, ...(manualModel ? { manualModel } : {}) });
+  return runProviderModelAdditionSetup(provider, { environment, prompts, output, downloadCatalog, signal, ...(manualModel ? { manualModel } : {}), ...(action === "discover" ? { discovery: true } : {}) });
 }
 
 /** Shared CLI discovery, OLC paid verification, full-field preview and explicit save confirmation. */
 export async function runProviderModelAdditionSetup(provider, {
-  environment = process.env, prompts = clackPrompts, output = process.stdout, manualModel, signal,
+  environment = process.env, prompts = clackPrompts, output = process.stdout, manualModel, signal, discovery,
   downloadCatalog = downloadDeepseekCatalog, fetchImpl,
 } = {}) {
   definitionFor(provider, environment);
-  let options = await loadProviderModelAdditionOptions(provider, { environment, manualModel, downloadCatalog, signal, fetchImpl });
+  let options = await loadProviderModelAdditionOptions(provider, { environment, manualModel, downloadCatalog, signal, fetchImpl, discovery });
   if (options.discovery) {
     output.write("公开元数据候选，尚未验证；已保存模型不会覆盖。\n");
     for (const candidate of options.discovery) output.write(`${JSON.stringify(candidate.id)}：${candidate.alreadySaved ? "已保存" : candidate.status === "candidate" ? "待单模型验证" : candidate.reason}\n`);
@@ -134,7 +135,7 @@ async function promptAdditionalModel(prompts, definition, existing) {
   if (!["ccg", "opencode-go", "clp", "ollama-cloud", "custom"].includes(definition.storageId)) throw new Error("此提供商不支持手动新增模型");
   const clinePass = definition.storageId === "clp";
   const ollamaCloud = definition.storageId === "ollama-cloud";
-  if (ollamaCloud) prompts.log?.info("按精确 ID 手动声明能力，不代表真实上游已验收；也可返回选择发现并验证。freeform 需明确选择；客户端 tool_search 和原生 web_search 尚未开放。");
+  if (ollamaCloud) prompts.log?.info("按精确 ID 手动声明能力，不代表真实上游已验收；也可返回选择发现并验证。freeform 和客户端 tool_search 需明确选择；原生 web_search 尚未开放。");
   const confirmed = await prompts.confirm({ message: clinePass || definition.upstreamWireApi === "chat_completions" ? "已确认此提供商以 Chat Completions 接口支持该模型的文本及工具调用？" : "已确认此提供商以 Responses 接口支持该模型及工具调用？", initialValue: false });
   if (confirmed !== true) return undefined;
   const id = await prompts.text({ message: "上游模型 ID（准确名称）", validate: value => (definition.storageId === "custom" ? isValidCustomModelId(value) : isManagedProviderModelValid(definition, value)) && !existing.some(model => model.id === value) ? undefined : "请输入有效且未加入目录的模型 ID" });
@@ -166,7 +167,7 @@ async function promptAdditionalModel(prompts, definition, existing) {
   if (prompts.isCancel(images)) return undefined;
   const patch = await prompts.confirm({ message: "支持 Codex 自由格式 apply_patch 工具？", initialValue: false });
   if (prompts.isCancel(patch)) return undefined;
-  const search = ollamaCloud ? false : await prompts.confirm({ message: "支持 Codex 客户端 tool_search 工具？", initialValue: false });
+  const search = await prompts.confirm({ message: "支持 Codex 客户端 tool_search 工具？", initialValue: false });
   if (prompts.isCancel(search)) return undefined;
   return { id, name, contextWindow: Number(window), reasoningEfforts: efforts, defaultReasoningEffort: effort,
     supportsImages: images, applyPatchToolType: patch ? "freeform" : null, supportsSearchTool: search };

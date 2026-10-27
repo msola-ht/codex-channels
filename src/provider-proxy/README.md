@@ -16,7 +16,9 @@
   公开 `consumeDirectResponses` 供 Scripts 的 OLC 产品验证复用同一读取边界；Fetch 正文仅适配为 Node Readable 与原始 status/headers，不改写上游内容。诊断使用更紧的 128 KiB 限制，并独立要求实际 `output_item.done`、文本增量及终态快照一致；网络、账户授权与保存事务仍由 Scripts 持有。
 
 - `cline-web-search.ts`：受管 CLP 桥的同源独立搜索 HTTP 执行器，复用账户认证和代理 Agent，45 秒总期限、256 KiB 正文及 50 条结果边界，返回校验后的标题和 URL；取消关闭连接，无自动重试，错误仅输出固定 `clp_search_*` 分类。
-- `ollama-web-search.ts`：由独立可信 `ollamaWebSearch` 材料启用的 OLC Responses 多轮编排及固定 `https://ollama.com/api/web_search` 执行器，通过公开出口供 Proxy 和 Relay 分别组合。搜索只携带同一账户 Bearer，默认五条、最多接受十条，每条保留 title/url/content 的关联；不访问结果 URL、不重定向、不重试。空 results 成功，认证、限流、超时和畸形响应使用固定 olc_search 分类。每次模型和搜索提交前复核账户、目录与材料；Proxy 首次将实际入站 Bearer 与已应用材料绑定并捕获不可变快照，Relay 保留独立 Key 租约及 prepared.recheck。整轮有界收齐后才选择搜索或交付客户端工具，强制选择不得由无工具答复绕过，内部完成不结束外部响应。整请求十分钟、每次搜索45秒、最多八模型轮/四搜索、每请求搜索并发一、累计结果512 KiB、单次响应256 KiB、单摘要32 KiB；Proxy 最多四个在途搜索请求，Relay 使用既有准入上限。显式输出预算为整请求共享预算，计数缺失或耗尽时在搜索前停止；多轮不发布生成速率。
+- `ollama-web-search.ts`：由独立可信 `ollamaWebSearch` 材料启用的 OLC Responses 多轮编排及固定 `https://ollama.com/api/web_search` 执行器，通过公开出口供 Proxy 和 Relay 分别组合。搜索只携带同一账户 Bearer，默认五条、最多接受十条，每条保留 title/url/content 的关联；不访问结果 URL、不重定向、不重试。空 results 成功，认证、限流、超时和畸形响应使用固定 olc_search 分类；本地资源超限单独归为 olc_search_result_limit。每次模型和搜索提交前复核账户、目录与材料；Proxy 首次将实际入站 Bearer 与已应用材料绑定并捕获不可变快照，Relay 保留独立 Key 租约及 prepared.recheck。整轮有界收齐后才选择搜索或交付客户端工具，强制选择不得由无工具答复绕过，内部完成不结束外部响应。整请求十分钟、每次搜索45秒、最多八模型轮/四搜索、每请求搜索并发一、累计结果512 KiB、单次响应256 KiB；预算内的摘要完整保留，不设单条32 KiB限制。标题4 KiB、URL 8 KiB及结构校验仍生效；固定搜索端点兼容实测 text/html 标记的 JSON，实际 HTML 拒绝。Proxy 最多四个在途搜索请求，Relay 使用既有准入上限。显式输出预算为整请求共享预算，计数缺失或耗尽时在搜索前停止；多轮不发布生成速率。
+
+OLC 的客户端工具搜索通过共用 Responses reader 映射和还原，Proxy 与 Relay 均适用；不调用云端原生工具搜索。托管网页搜索与客户端工具搜索混合时，尚未派发的客户端调用以内部函数及明确 not_executed 结果续传，不伪造空工具搜索结果；纯客户端轮再交付调用，SSE 终态必须匹配已完成项。
 
 OLC 搜索保留每个真实模型轮的独立转储记录，模型请求包含完整必要历史，因此启用报文转储时内部续答中的查询、来源链接和摘要也可能持久化；普通指标和例行日志不记录这些正文。Proxy 通过共享 reader 的原始 chunk 记录实际模型响应字节；Relay 沿现有脱敏解析值采集，每轮独立结束与释放，最终交付记录及指标定位归最后模型轮。每外部请求只提交一份累计指标，模型首响应/首内容计时始于首个实际模型提交，搜索 HTTP 不混入模型请求字节或 Token。内层完成可在后续搜索/续答失败后形成外层失败；终态指标提交后的交付失败仍受既有单次提交合同限制，不重复写入。
 

@@ -1,7 +1,8 @@
-import { ModelConversionError } from "./validation.js";
+import { ModelConversionError, toolSearchArguments } from "./validation.js";
+import { stripEncryptedMarker } from "./codex-private-items.js";
 
 type Json = Record<string, unknown>;
-type Identity = { name: string; namespace?: string; kind: "custom" | "function" };
+type Identity = { name: string; namespace?: string; kind: "custom" | "function" | "tool_search" };
 const argumentLimit = 1024 * 1024;
 const bufferLimit = 2 * 1024 * 1024;
 const callLimit = 64;
@@ -9,6 +10,8 @@ const eventLimit = 65536;
 const jsonString = '"(?:[^"\\\\\\x00-\\x1f]|\\\\(?:["\\\\/bfnrt]|u[0-9a-fA-F]{4}))*"';
 const jsonSpace = "[ \\t\\r\\n]*";
 const inputEnvelope = new RegExp(`^${jsonSpace}\\{${jsonSpace}(${jsonString})${jsonSpace}:${jsonSpace}(${jsonString})${jsonSpace}\\}${jsonSpace}$`, "u");
+const searchValue = `(?:${jsonString}|null|[0-9]+)`;
+const searchEnvelope = new RegExp(`^${jsonSpace}\\{${jsonSpace}(${jsonString})${jsonSpace}:${jsonSpace}${searchValue}(?:${jsonSpace},${jsonSpace}(${jsonString})${jsonSpace}:${jsonSpace}${searchValue})?${jsonSpace}\\}${jsonSpace}$`, "u");
 
 function fail(): never { throw new ModelConversionError("Invalid or unsupported Ollama Cloud freeform tool representation"); }
 function record(value: unknown): value is Json { return value !== null && typeof value === "object" && !Array.isArray(value); }
@@ -30,6 +33,24 @@ function unpack(argumentsValue: unknown): string {
   try { if (JSON.parse(match[1]!) !== "input") fail(); const input = JSON.parse(match[2]!) as string; if (!wellFormed(input)) fail(); return input; }
   catch { return fail(); }
 }
+function searchArguments(value: unknown): Json {
+  const args = toolSearchArguments(value);
+  if (typeof args.query !== "string" || !wellFormed(args.query) || bytes(JSON.stringify(args)) > argumentLimit) fail();
+  return args;
+}
+function unpackSearch(value: unknown): string {
+  const raw = rawInput(value);
+  // A search has only query and optional limit. Check the envelope before JSON.parse
+  // so duplicate members cannot silently select a different query or limit.
+  const match = searchEnvelope.exec(raw);
+  if (!match) fail();
+  let parsed: unknown;
+  try {
+    if (match[2] !== undefined && JSON.parse(match[1]!) === JSON.parse(match[2])) fail();
+    parsed = JSON.parse(raw);
+  } catch { fail(); }
+  return JSON.stringify(searchArguments(parsed));
+}
 function plain(item: Json): void {
   if (item.encrypted_content != null || item.encrypted_function_args != null) fail();
 }
@@ -41,21 +62,26 @@ function outputPart(part: unknown): boolean {
   return false;
 }
 
-/** Request-local identities only. Declarations and their selection remain native Responses. */
+/** Request-local identities; client search uses ordinary Responses functions. */
 export function prepareOllamaFreeform(source: Json): { body: Json; adapter: OllamaFreeformResponse } {
   if (!record(source)) fail();
   if (source.stream !== undefined && typeof source.stream !== "boolean") fail();
   if (source.previous_response_id != null || source.conversation != null) fail();
   const identities = new Map<string, Identity>();
   let hostedSearch = false;
-  const add = (raw: unknown, namespace?: string): void => {
+  const tools: Json[] = [];
+  let changed = false;
+  const add = (raw: unknown, namespace?: string, loaded = false): Json | undefined => {
     if (!record(raw) || !["custom", "function"].includes(String(raw.type)) || raw.defer_loading === true) fail();
     if (raw.namespace != null) fail();
     if (raw.type === "custom" && (!record(raw.format) || raw.format.type !== "text" && (raw.format.type !== "grammar"
       || raw.format.syntax !== "lark" || typeof raw.format.definition !== "string"))) fail();
     const name = text(raw.name), id = key(name, namespace);
-    if (identities.has(id) || identities.size >= 512) fail();
+    const previous = identities.get(id);
+    if (previous) { if (!loaded || previous.kind !== raw.type) fail(); return; }
+    if (identities.size >= 512) fail();
     identities.set(id, { name, ...(namespace === undefined ? {} : { namespace }), kind: raw.type as Identity["kind"] });
+    return raw;
   };
   if (source.tools != null) {
     if (!Array.isArray(source.tools)) fail();
@@ -65,9 +91,46 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
         const namespace = text(tool.name);
         if (tool.defer_loading === true || !Array.isArray(tool.tools)) fail();
         for (const child of tool.tools) add(child, namespace);
-      } else if (tool.type === "web_search") { if (tool.defer_loading === true) fail(); hostedSearch = true; }
-      else add(tool);
+        tools.push({ ...tool, tools: [...tool.tools as unknown[]] });
+      } else if (tool.type === "web_search") { if (tool.defer_loading === true) fail(); hostedSearch = true; tools.push(tool); }
+      else if (tool.type === "tool_search") {
+        if (tool.execution !== "client") throw new ModelConversionError("Ollama Cloud 仅支持客户端工具搜索（execution=client），不支持上游服务端工具搜索。");
+        if (tool.defer_loading === true || typeof tool.description !== "string" || !record(tool.parameters)
+          || Object.keys(tool).some(field => !["type", "execution", "description", "parameters"].includes(field))
+          || identities.has(key("tool_search")) || identities.size >= 512) fail();
+        identities.set(key("tool_search"), { name: "tool_search", kind: "tool_search" });
+        tools.push({ type: "function", name: "tool_search", description: tool.description, parameters: tool.parameters }); changed = true;
+      } else { add(tool); tools.push(tool); }
     }
+  }
+  // Codex returns retrieved declarations only in tool_search_output. Ollama's
+  // ordinary function API needs them explicitly loaded in this request.
+  if (Array.isArray(source.input)) for (const item of source.input) {
+    if (!record(item) || item.type !== "tool_search_output") continue;
+    if (item.execution !== "client" || item.status !== "completed" || !Array.isArray(item.tools)) fail();
+    for (const entry of item.tools) {
+      if (!record(entry)) fail();
+      const load = (raw: unknown, namespace?: string): Json | undefined => {
+        if (!record(raw)) fail();
+        const { defer_loading: deferred, ...eager } = raw;
+        if (deferred !== undefined && typeof deferred !== "boolean") fail();
+        // These declarations were inside history while the common request
+        // normalizer visited top-level tools. They now cross the same boundary.
+        if (Object.hasOwn(eager, "parameters")) eager.parameters = stripEncryptedMarker(eager.parameters).value;
+        return add(eager, namespace, true);
+      };
+      if (entry.type === "namespace") {
+        const namespace = text(entry.name);
+        if (!Array.isArray(entry.tools)) fail();
+        const children = entry.tools.flatMap(raw => { const loaded = load(raw, namespace); return loaded ? [loaded] : []; });
+        if (children.length) {
+          const existing = tools.find(tool => tool.type === "namespace" && tool.name === namespace);
+          if (existing) existing.tools = [...existing.tools as unknown[], ...children];
+          else { const { defer_loading: unused, ...eager } = entry; void unused; tools.push({ ...eager, tools: children }); }
+        }
+      } else { const loaded = load(entry); if (loaded) tools.push(loaded); }
+    }
+    changed = true;
   }
   const checkChoice = (raw: unknown): void => {
     // The locked CLI sends string choices; the public named-choice schema has no namespace field.
@@ -75,6 +138,7 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
     if (!record(raw) || raw.namespace !== undefined) fail();
     if (Object.keys(raw).some(field => !["type", "name"].includes(field))) fail();
     if (raw.type === "web_search" && hostedSearch && raw.name === undefined) return;
+    if (raw.type === "tool_search" && identities.get(key("tool_search"))?.kind === "tool_search" && raw.name === undefined) return;
     if (!record(raw) || !["custom", "function"].includes(String(raw.type))) fail();
     const id = identity(raw), found = identities.get(key(id.name, id.namespace));
     if (!found || found.kind !== raw.type) fail();
@@ -88,7 +152,7 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
       for (const tool of choice.tools) {
         checkChoice(tool);
         const selected = tool as Json;
-        const value = selected.type === "web_search" ? "web_search" : key(text(selected.name));
+        const value = selected.type === "web_search" ? "web_search" : key(selected.type === "tool_search" ? "tool_search" : text(selected.name));
         if (seen.has(value)) fail(); seen.add(value);
       }
     } else checkChoice(choice);
@@ -99,18 +163,34 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
   else if (record(source.tool_choice)) {
     const choice = source.tool_choice;
     const selected = choice.type === "allowed_tools" ? choice.tools as Json[] : [choice];
-    allowed = new Set(selected.filter(tool => tool.type !== "web_search").map(tool => { const id = identity(tool); return key(id.name, id.namespace); }));
+    allowed = new Set(selected.filter(tool => tool.type !== "web_search").map(tool => tool.type === "tool_search" ? key("tool_search") : key(identity(tool).name)));
   }
-  const calls = new Map<string, "custom" | "function">(), outputs = new Set<string>();
-  let changed = false;
+  const mapChoice = (choice: unknown): unknown => record(choice) && choice.type === "tool_search" ? { type: "function", name: "tool_search" }
+    : record(choice) && choice.type === "allowed_tools" ? { ...choice, tools: (choice.tools as unknown[]).map(mapChoice) } : choice;
+  const calls = new Map<string, Identity["kind"]>(), outputs = new Set<string>();
   const input = Array.isArray(source.input) ? source.input.map(raw => {
     if (!record(raw)) fail();
-    if (raw.type === "tool_search_call" || raw.type === "tool_search_output" || raw.type === "item_reference") fail();
+    if (raw.type === "item_reference") fail();
+    if (raw.type === "tool_search_call") {
+      const call = text(raw.call_id);
+      if (raw.execution !== "client" || raw.namespace != null || raw.name != null
+        || calls.has(call) || outputs.has(call) || raw.status != null && raw.status !== "completed") fail();
+      plain(raw); calls.set(call, "tool_search"); changed = true;
+      const { execution: unused, arguments: args, ...rest } = raw; void unused;
+      return { ...rest, type: "function_call", name: "tool_search", arguments: JSON.stringify(searchArguments(args)) };
+    }
+    if (raw.type === "tool_search_output") {
+      const call = text(raw.call_id);
+      if (calls.get(call) !== "tool_search" || outputs.has(call)) fail();
+      outputs.add(call); plain(raw); changed = true;
+      const { tools: found, execution: unused, ...rest } = raw; void unused;
+      return { ...rest, type: "function_call_output", output: JSON.stringify(found) };
+    }
     if (raw.type === "function_call" || raw.type === "function_call_output") {
       // Native function history remains upstream-owned, including tools no longer offered.
       // Reserve its explicit IDs only to prevent a custom call borrowing that identity.
       if (typeof raw.call_id === "string" && raw.call_id.length) {
-        if (calls.get(raw.call_id) === "custom") fail(); calls.set(raw.call_id, "function");
+        if (calls.has(raw.call_id) && calls.get(raw.call_id) !== "function") fail(); calls.set(raw.call_id, "function");
       }
       return raw;
     }
@@ -135,8 +215,9 @@ export function prepareOllamaFreeform(source: Json): { body: Json; adapter: Olla
     }
     return raw;
   }) : source.input;
-  for (const [call, kind] of calls) if (kind === "custom" && !outputs.has(call)) fail();
-  return { body: changed ? { ...source, input } : source, adapter: new OllamaFreeformResponse(identities, allowed, new Set(calls.keys())) };
+  for (const [call, kind] of calls) if (kind !== "function" && !outputs.has(call)) fail();
+  return { body: changed ? { ...source, tools, ...(source.tool_choice === undefined ? {} : { tool_choice: mapChoice(source.tool_choice) }), input } : source,
+    adapter: new OllamaFreeformResponse(identities, allowed, new Set(calls.keys())) };
 }
 
 interface Call {
@@ -161,7 +242,7 @@ export class OllamaFreeformResponse {
   private readonly itemIndexes = new Map<number, string>();
   private readonly toolCalls = new Map<string, string>();
   constructor(private readonly identities: ReadonlyMap<string, Identity>, private readonly allowed: ReadonlySet<string>, private readonly historyCalls: ReadonlySet<string>) {
-    this.active = [...identities.values()].some(tool => tool.kind === "custom");
+    this.active = [...identities.values()].some(tool => tool.kind !== "function");
   }
 
   close(): void {
@@ -207,7 +288,7 @@ export class OllamaFreeformResponse {
     return call;
   }
   private finish(call: Call, value: unknown): string {
-    const decode = call.representation === "function_call" ? unpack : rawInput;
+    const decode = call.identity.kind === "tool_search" ? unpackSearch : call.representation === "function_call" ? unpack : rawInput;
     const input = decode(value);
     if (call.input !== undefined && call.input !== input || call.initial !== undefined && call.initial !== input || call.arguments && decode(call.arguments) !== input) fail();
     if (call.input === undefined) {
@@ -227,9 +308,9 @@ export class OllamaFreeformResponse {
     if (item.status != null && item.status !== "completed" && (!added || item.status !== "in_progress")) fail();
     const found = this.resolve(item); plain(item);
     if (item.type === "custom_tool_call" && found.kind !== "custom") fail();
-    if (found.kind !== "custom") return item;
+    if (found.kind === "function") return item;
     const value = item.type === "function_call" ? item.arguments : item.input;
-    const decode = item.type === "function_call" ? unpack : rawInput;
+    const decode = found.kind === "tool_search" ? unpackSearch : item.type === "function_call" ? unpack : rawInput;
     let input: string;
     if (stream) {
       const call = this.call(item, index, added);
@@ -240,6 +321,10 @@ export class OllamaFreeformResponse {
       else input = this.finish(call, value);
     } else input = decode(value);
     const { arguments: unused, ...rest } = item; void unused;
+    if (found.kind === "tool_search") {
+      const { name: unusedName, namespace: unusedNamespace, ...search } = rest; void unusedName; void unusedNamespace;
+      return { ...search, type: "tool_search_call", execution: "client", arguments: added ? {} : JSON.parse(input) as Json };
+    }
     return { ...rest, type: "custom_tool_call", input };
   }
   json(value: Json): Json {
@@ -255,7 +340,9 @@ export class OllamaFreeformResponse {
         seenCalls.add(call);
       }
       const converted = this.item(item, index, false, false);
-      if (converted.type === "custom_tool_call") { this.buffered += bytes(String(converted.input)); if (this.buffered > bufferLimit) fail(); }
+      if (converted.type === "custom_tool_call" || converted.type === "tool_search_call") {
+        this.buffered += bytes(converted.type === "custom_tool_call" ? String(converted.input) : JSON.stringify(converted.arguments)); if (this.buffered > bufferLimit) fail();
+      }
       return converted;
     });
     return { ...value, output };
@@ -272,6 +359,7 @@ export class OllamaFreeformResponse {
     const inputEvents = (call: Call): void => {
       if (call.emitted) return;
       if (call.input === undefined) fail();
+      if (call.identity.kind === "tool_search") { call.emitted = true; return; }
       const base = { item_id: call.id, output_index: call.index };
       events.push({ ...base, type: "response.custom_tool_call_input.delta", delta: call.input },
         { ...base, type: "response.custom_tool_call_input.done", input: call.input }); call.emitted = true;
@@ -286,7 +374,7 @@ export class OllamaFreeformResponse {
       const added = value.type === "response.output_item.added";
       const duplicate = this.track(value.item, value.output_index, added ? "added" : "done");
       const converted = this.item(value.item, value.output_index, added, true);
-      if (converted.type === "custom_tool_call") {
+      if (converted.type === "custom_tool_call" || converted.type === "tool_search_call") {
         const call = this.call(value.item, value.output_index, false);
         if (added && call.done) fail();
         if (!added) { inputEvents(call); if (call.done) return []; call.done = true; }
@@ -322,7 +410,7 @@ export class OllamaFreeformResponse {
         const id = text(item.id);
         if (seen.has(id)) fail(); seen.add(id);
         const converted = this.item(item, index, false, true);
-        if (converted.type === "custom_tool_call") {
+        if (converted.type === "custom_tool_call" || converted.type === "tool_search_call") {
           const call = this.call(item, index, false);
           if (!call.done) fail();
         }

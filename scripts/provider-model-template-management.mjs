@@ -17,7 +17,7 @@ import { loadResponsesModelTemplates } from "./responses-model-templates.mjs";
 import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
-import { createDeepseekTemplateCatalog, createClinePassCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
+import { createDeepseekTemplateCatalog, createClinePassCatalogWithTemplateBindings, createOllamaCloudCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
 
 const revisionSecret = randomBytes(32);
 const sourceSnapshots = new Map();
@@ -65,7 +65,8 @@ export async function loadProviderModelTemplateOptions(provider, { environment =
   sourceSnapshots.set(sourceToken, { ...snapshot, bytes });
   return { provider, revision: state.revision, sourceToken, expiresAt: snapshot.expiresAt, targets: state.targets,
     availableSections: availableSections(state),
-    templates: templates.map(({ source, model, displayName }) => ({ source, model, displayName })) };
+    templates: templates.map(({ source, model, displayName }) => ({ source, model, displayName,
+      availableSections: availableSections(state, source) })) };
 }
 
 export async function previewProviderModelTemplateUpdate(input, { environment = process.env } = {}) {
@@ -124,7 +125,7 @@ async function buildPlan(input, environment) {
     throw invalid("template-unavailable", "template", "所选源模板不适用于当前账户模型，请明确选择可用模板");
   }
   const sections = ["prompts", "settings", "capabilities"].filter(section => input.sections.includes(section));
-  if (sections.some(section => !availableSections(state).includes(section))) {
+  if (sections.some(section => !availableSections(state, input.template.source).includes(section))) {
     throw invalid("invalid-input", "sections", "OLC 的 official 模板仅支持提示词与运行设置，不能覆盖模型能力");
   }
   const plan = state.custom
@@ -225,7 +226,8 @@ async function readTargetState(provider, environment) {
 }
 
 function allowedTemplate(state, model, template) {
-  if (state.family === "ollama-cloud") return template.source === "official";
+  if (state.family === "ollama-cloud") return template.source === "official"
+    || template.source === "deepseek" && ["deepseek-flash", "deepseek-v4-pro"].includes(template.model);
   if (state.custom) return ["official", "deepseek"].includes(template.source);
   if (state.family === "deepseek") return template.source === "deepseek" && template.model === model;
   if (state.family === "clp") return template.source === "cline" && template.model === model
@@ -233,8 +235,8 @@ function allowedTemplate(state, model, template) {
   return ["ccg", "opencode-go"].includes(state.family) && template.source === "deepseek";
 }
 
-function availableSections(state) {
-  return state.family === "ollama-cloud" ? ["prompts", "settings"] : Object.keys(fields[state.custom ? "custom" : "managed"]);
+function availableSections(state, source) {
+  return state.family === "ollama-cloud" && source === "official" ? ["prompts", "settings"] : Object.keys(fields[state.custom ? "custom" : "managed"]);
 }
 
 function assertVisibleModels(visible, ids) {
@@ -257,6 +259,14 @@ async function loadSourceTemplates(state, environment, signal) {
     signal?.throwIfAborted();
     result = readCustomBaseModelCatalog(environment).models.map(template => ({ source: "official", model: template.slug,
       displayName: template.display_name, template }));
+    const generated = createOllamaCloudCatalogWithTemplateBindings(readDeepseekModelTemplateCatalog(environment), environment);
+    const seen = new Set();
+    for (const template of generated.catalog.models) {
+      const binding = generated.templateBindings[template.slug];
+      if (seen.has(binding.model)) continue;
+      seen.add(binding.model);
+      result.push({ ...binding, displayName: template.display_name, template });
+    }
   } else if (state.custom) {
     const sources = await Promise.all(["official", "deepseek"].map(async source =>
       completeDefinitionPrompts(await loadResponsesModelTemplates(source, environment), environment).map(template => ({ source,
@@ -341,6 +351,11 @@ async function buildManagedPlan(input, source, sections, state, environment) {
   const { catalog, manifest, catalogPath, manifestPath } = state;
   const before = catalog.models.find(entry => entry.slug === input.model);
   const after = selectedFields(before, source.template, "managed", sections);
+  if (state.family === "ollama-cloud" && sections.includes("capabilities")) {
+    // The source is the OLC projection, never raw DS endpoint capabilities.
+    after.supports_search_tool = source.template.supports_search_tool;
+    after.apply_patch_tool_type = source.template.apply_patch_tool_type;
+  }
   if (sections.includes("capabilities")) {
     const existingTools = before.experimental_supported_tools === undefined ? [] : before.experimental_supported_tools;
     const sourceTools = source.template.experimental_supported_tools;
@@ -371,6 +386,7 @@ async function buildManagedPlan(input, source, sections, state, environment) {
   const nextManifest = { ...manifest, modelTemplates: { ...state.bindings, [input.model]: { ...input.template } },
     templateUpdates: { ...manifest.templateUpdates,
       [input.model]: { source: input.template.source, model: input.template.model, revision: digest(source.template), sections } } };
+  if (state.family === "ollama-cloud") validateOllamaCloudCatalogManifest(nextManifest, nextCatalog.models.map(model => model.slug));
   const updates = new Map([[`${catalogPath}.backup`, snapshotContent(state.snapshots, catalogPath)],
     [`${manifestPath}.backup`, snapshotContent(state.snapshots, manifestPath)],
     [catalogPath, `${JSON.stringify(nextCatalog, null, 2)}\n`], [manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`]]);

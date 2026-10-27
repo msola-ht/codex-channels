@@ -127,7 +127,8 @@ export async function routeProviderManagement({
     const input = await readJsonBody(request, maximumBodyBytes);
     if (state.snapshotReadsClosed) throw new ApiError(503, "provider_models_unavailable", "管理服务正在关闭，未读取模型候选");
     if (!input || typeof input !== "object" || Array.isArray(input)
-      || Object.keys(input).some(key => !["provider", "manualModel"].includes(key))
+      || Object.keys(input).some(key => !["provider", "manualModel", "discovery"].includes(key))
+      || input.discovery !== undefined && input.discovery !== true
       || typeof input.provider !== "string") {
       throw new ApiError(400, "provider_models_invalid_input", "新增模型候选参数无效");
     }
@@ -145,6 +146,7 @@ export async function routeProviderManagement({
       const task = loadProviderModelAdditionOptions(input.provider, {
         environment, signal: controller.signal,
         ...(Object.hasOwn(input, "manualModel") ? { manualModel: input.manualModel } : {}),
+        ...(Object.hasOwn(input, "discovery") ? { discovery: input.discovery } : {}),
       });
       entry = { controller, settled: task.then(() => undefined, () => undefined) };
       state.snapshotReads.add(entry);

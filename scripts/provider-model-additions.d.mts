@@ -1,7 +1,7 @@
 import type { ModelDefinition } from "../runtime/model-catalog.mjs";
 /** Managed catalogs do not persist custom sampling defaults or inferred bindings.
  * CLP accepts enabled reasoning but rejects original image detail and reasoning-summary controls.
- * OLC requires applyPatchToolType=null or freeform and supportsSearchTool=false; native web search is unavailable.
+ * OLC requires applyPatchToolType=null or freeform and an explicit supportsSearchTool boolean; native web search is unavailable.
  * OLC discovery requires a separate explicitly confirmed per-model Responses verification before saving. */
 export type ManagedManualModelDefinition = Omit<ModelDefinition, "sampling" | "template">
   | { id: string; name: string; inheritFrom: string };
@@ -68,6 +68,8 @@ export interface ProviderModelAdditionLoadOptions {
   environment?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   manualModel?: ManagedManualModelDefinition;
+  /** OLC public candidates and optional paid verification; omitted loads managed models. */
+  discovery?: true;
   downloadCatalog?: typeof import("./deepseek-setup.mjs").downloadDeepseekCatalog;
   fetchImpl?: typeof globalThis.fetch;
 }
