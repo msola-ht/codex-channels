@@ -1,6 +1,6 @@
 # Ollama Cloud
 
-OLC 是独立的受管多账户提供商，账户 ID 为 `olc-<id>`，固定使用 `https://ollama.com/v1` 的无状态 Responses，关闭 WebSocket。账户、模型管理、余额查询、freeform 适配及托管实时搜索已接入。本地 CLI、WebUI、HTTP 和原生 Codex 路径已有隔离观察；真实云端推理、搜索权限与费用仍未验收，见[开放验收记录](ollama-cloud-probe.md)。
+OLC 是独立的受管多账户提供商，账户 ID 为 `olc-<id>`，固定使用 `https://ollama.com/v1` 的无状态 Responses，关闭 WebSocket。账户、模型管理、余额查询、freeform 适配及托管实时搜索已接入。已有 Linux 隔离链路、Flash 真实搜索续答、真实账户额度与用量、WebUI 和 IPC 缓存同步观察；这不代表全部模型、工具、渠道和平台已验收，范围见[接入验收记录](ollama-cloud-probe.md)。
 
 本接入不导入、迁移或修改已有 `cp-ollama`，不支持本地 Ollama、Chat Completions、音频、Embeddings 或 OLC 聚合路由。
 
@@ -82,6 +82,8 @@ App Server Provider Proxy 的固定/切换实例与独立 Model Relay 均按可�
 目录的原生搜索能力声明与上述策略不同。请求含支持的 `web_search` 声明时，代理将其映射为内部函数，使用当前准确账户的 Key 调用固定 `POST https://ollama.com/api/web_search`，把查询对应的摘要携带给模型续答，输出一份 Responses 响应。没有搜索声明不会启用执行；历史搜索项只保留可读查询，不自动重搜或恢复旧摘要。
 
 只支持 live 文本摘要，不支持缓存、索引、域名过滤、地区、搜索上下文大小或其他不能兑现的控制，不自动降级。网页读取 `/api/web_fetch` 未接入，不主动抓取结果 URL。原生搜索诊断检查上游原生工具，不验证此托管线路。
+
+2026-10-27 收尾范围明确暂不实现网页抓取，记录为后续候选能力，不属于本轮缺陷修复或交付条件。后续若重新启动，需独立确认 URL 读取工具、Responses 动作与历史往返、Proxy／Relay 执行、账户权限、取消和内容预算的完整合同；不能将已有搜索摘要能力视为网页读取支持。
 
 固定搜索接口接受 `application/json`，以及实测返回 JSON 正文时使用的 `text/html` 响应类型；两者均必须通过 UTF-8、JSON、结果结构、URL 和大小校验，真实 HTML 错误页仍拒绝。该例外仅属于 `/api/web_search`，不放宽模型 Responses 的 JSON／SSE 校验。
 

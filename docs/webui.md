@@ -728,7 +728,7 @@ Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOM
 `codexc webui`，再 `cd webui && npm run dev`（手动启动时代理默认指向 `8787`）。
 开发代理会将设置管理请求的 Origin 还原为后端地址，因此预览和低风险修改与生产静态托管使用同一套回环 Origin 约束。
 
-控制台账户卡片使用完整提供商名称 CommandCode Go、Cline Pass、Ollama Cloud，并附账户 ID；`ccg-<账户>`、`clp-<账户>`、`olc-<账户>` 继续作为内部 Provider 标识。Ollama Cloud 展示官方 USD 总余额、包含额度剩余和已购额度剩余，保留适配器已校验的十进制精度，不转换为百分比或显示周期重置时间；手动查询失败时明确标记失败并保留最后一次成功数据。余额支持范围见[显示规范](display.md)。
+控制台账户卡片使用完整提供商名称 CommandCode Go、Cline Pass、Ollama Cloud，并附账户 ID；`ccg-<账户>`、`clp-<账户>`、`olc-<账户>` 继续作为内部 Provider 标识。Ollama Cloud 紧凑显示套餐等级、官方 USD 额度和总余额，底部显示 100M 折合单价、套餐估算及剩余估算，不展开余额明细或周期时间。经私有 IPC 共用 Gateway 缓存与费用计算，变化通知只同步缓存；概览总刷新和卡片刷新均可主动查询。传输失败保留旧值并明确提示，账户不存在、认证或权威查询失败清理旧展示。字段、精度与估算范围见 [Ollama Cloud](ollama-cloud.md#余额指标与-relay)。
 
 ### 刷新、草稿与关联状态
 
