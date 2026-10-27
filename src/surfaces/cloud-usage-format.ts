@@ -1,5 +1,5 @@
 import type { CloudUsageMetrics, CloudUsageQuery, CloudUsageReport } from "../application/index.js";
-import { formatResetTime, formatTimezoneLine } from "./account-format.js";
+import { formatResetTime } from "./account-format.js";
 import { formatCacheHitRate, formatObservedTotal, formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 
@@ -10,6 +10,7 @@ const units = (value: string): bigint => {
 };
 const tokens = (value: number | null): string => value === null ? "未提供" : formatTokenCount(value);
 const date = (value: number): string => formatResetTime(value / 1_000, true);
+const priceDenominator = `${formatTokenCount(100_000_000)} Token`;
 
 export function cloudUsageChoices(report: CloudUsageReport): Array<{ label: string; input: string }> {
   const input = (range: CloudUsageQuery["range"], refresh = false): string =>
@@ -27,19 +28,38 @@ export function cloudUsageChoices(report: CloudUsageReport): Array<{ label: stri
 export function formatCloudUsage(report: CloudUsageReport): string {
   const selected = report.totals;
   const candidates = report.groups.filter(group => !services.has(group.model));
-  const price = report.remainder !== null ? null : tokenPrice(candidates);
+  const basis = report.remainder !== null ? null : tokenBasis(candidates);
+  const price = basis === null ? null : decimalRatio(basis.usd * 10_000n, basis.tokens);
+  const allowance = report.allowanceUsd === null ? null : units(report.allowanceUsd);
+  const estimatedTokens = basis && basis.usd > 0n && allowance !== null
+    ? allowance * basis.tokens / basis.usd : null;
+  const remainingTokens = report.balanceUsd !== null && units(report.balanceUsd) === 0n ? 0n
+    : basis && basis.usd > 0n && report.balanceUsd !== null ? units(report.balanceUsd) * basis.tokens / basis.usd : null;
+  const estimated = (value: bigint | null): string => value === null || value > BigInt(Number.MAX_SAFE_INTEGER)
+    ? "数据不足" : `约 ${formatTokenCount(Number(value))}`;
+  const proMonthly = report.plan === "pro" && allowance === 60_000_000_000n;
+  const fx = report.usdCny;
+  const yuanPrice = proMonthly && basis && fx
+    ? decimalRatio(basis.usd * 10_000n * BigInt(Math.round(fx.rate * 1_000_000)), basis.tokens * 3_000_000n) : null;
   const hit = selected.inputTokens === null || selected.cachedInputTokens === null
     ? "未提供" : formatCacheHitRate(selected.inputTokens, selected.cachedInputTokens);
   const total = selected.inputTokens === null || selected.outputTokens === null
     ? "未提供" : formatObservedTotal({ inputTokens: selected.inputTokens, outputTokens: selected.outputTokens });
   const uncached = selected.inputTokens === null || selected.cachedInputTokens === null
     ? null : selected.inputTokens - selected.cachedInputTokens;
+  const plan = report.plan === "pro" ? "Pro" : report.plan === "max" ? "Max" : report.plan === "free" ? "Free" : report.plan ?? "暂不可用";
   return toStructuredMarkdownList([
     `Ollama Cloud · ${report.provider}`,
     "",
+    "### 额度",
+    `套餐额度：${report.allowanceUsd === null ? "未提供" : `$${report.allowanceUsd}`}`,
+    `账户剩余费用：${report.balanceUsd === null ? "暂不可用" : `$${report.balanceUsd}`}${report.balanceStale ? "（刷新失败，上次数据）" : ""}`,
+    `  - 套餐剩余：${report.includedBalanceUsd === null ? "暂不可用" : `$${report.includedBalanceUsd}`}`,
+    `  - 额外购买：${report.purchasedBalanceUsd === null ? "暂不可用" : `$${report.purchasedBalanceUsd}`}`,
+    `套餐：${plan}${report.planStale ? "（刷新失败，上次数据）" : ""}`,
+    "",
     "### 统计范围",
-    `范围：${report.query.range === "24h" ? "近 24 小时" : report.query.range === "7d" ? "近 7 天" : "近 30 天"}`,
-    formatTimezoneLine(),
+    `范围：${report.query.range === "24h" ? "近 24 小时" : report.query.range === "7d" ? "近 7 天" : "近 30 天"}${report.stale ? "（刷新失败，上次数据）" : ""}`,
     `开始：${date(Date.parse(report.from))}`,
     `截至：${date(Date.parse(report.until))}`,
     "",
@@ -53,17 +73,15 @@ export function formatCloudUsage(report: CloudUsageReport): string {
     `  - 输出：${tokens(selected.outputTokens)}`,
     "",
     "### 费用",
-    `已用费用：${selected.usageUsd === null ? "未提供" : `$${selected.usageUsd}`}`,
-    `账户剩余费用：${report.balanceUsd === null ? "暂不可用" : `$${report.balanceUsd}`}`,
-    `折合单价：${price === null ? "不适用／数据不足" : `$${price} / 1 亿 Token`}`,
-    "",
-    "### 数据更新",
-    `用量更新：${date(report.observedAtMs)}${report.stale ? "（刷新失败，上次数据）" : ""}`,
-    ...(report.balanceObservedAtMs === null ? [] : [`余额更新：${date(report.balanceObservedAtMs)}${report.balanceStale ? "（刷新失败，上次数据）" : ""}`]),
+    `区间已用费用：${selected.usageUsd === null ? "未提供" : `$${selected.usageUsd}`}`,
+    `折合单价：${price === null ? "不适用／数据不足" : `$${price} / ${priceDenominator}`}`,
+    ...(allowance === null ? [] : [`套餐额度预计可用 Token：${estimated(estimatedTokens)}`]),
+    `剩余额度预计可用 Token：${estimated(remainingTokens)}`,
+    ...(proMonthly ? [`人民币单价（Pro 月付估算）：${yuanPrice === null ? fx ? "数据不足" : "暂不可用" : `约 ¥${yuanPrice} / ${priceDenominator}`}`] : []),
   ].join("\n"));
 }
 
-function tokenPrice(groups: CloudUsageMetrics[]): string | null {
+function tokenBasis(groups: CloudUsageMetrics[]): { usd: bigint; tokens: bigint } | null {
   if (!groups.length || groups.some(group => group.inputTokens === null || group.outputTokens === null)) return null;
   // Exclude every zero-token group's fees, not just named search services.
   // Unknown token counts above remain unknown rather than being treated as zero.
@@ -72,9 +90,13 @@ function tokenPrice(groups: CloudUsageMetrics[]): string | null {
   const tokens = tokenGroups.reduce((sum, group) => sum + BigInt(group.inputTokens!) + BigInt(group.outputTokens!), 0n);
   const usd = tokenGroups.reduce((sum, group) => sum + units(group.usageUsd!), 0n);
   if (!tokens) return null;
-  if (!usd) return "0.00000";
+  return { usd, tokens };
+}
+
+function decimalRatio(numerator: bigint, denominator: bigint): string {
+  if (!numerator) return "0.00000";
   // Round only the final displayed price to five decimal places.
-  const scaled = (usd * 10_000n + tokens / 2n) / tokens;
+  const scaled = (numerator + denominator / 2n) / denominator;
   if (scaled === 0n) return "<0.00001";
   return `${scaled / 100_000n}.${(scaled % 100_000n).toString().padStart(5, "0")}`;
 }

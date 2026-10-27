@@ -231,6 +231,13 @@ export interface CloudUsageReport {
   groups: Array<CloudUsageMetrics & { model: string }>;
   remainder: CloudUsageMetrics | null;
   balanceUsd: string | null;
+  allowanceUsd: string | null;
+  includedBalanceUsd: string | null;
+  purchasedBalanceUsd: string | null;
+  plan: string | null;
+  planObservedAtMs: number | null;
+  planStale: boolean;
+  usdCny: { rate: number; date: string } | null;
   observedAtMs: number;
   balanceObservedAtMs: number | null;
   stale: boolean;

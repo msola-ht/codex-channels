@@ -28,8 +28,8 @@ export class AccountQuery {
   private authorizationError: unknown;
 
   constructor(private readonly provider: string, private readonly caller?: AbortSignal,
-    private readonly beforeSubmit?: () => void) {
-    this.signal = AbortSignal.any([AbortSignal.timeout(10_000), ...(caller ? [caller] : [])]);
+    private readonly beforeSubmit?: () => void, timeoutMs = 10_000) {
+    this.signal = AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(caller ? [caller] : [])]);
   }
 
   assertCurrent(): void {
@@ -69,14 +69,14 @@ export class AccountQuery {
     }
   }
 
-  async json(fetchImpl: typeof fetch, url: string, apiKey: string, operation: string,
-    options: { allowForbidden?: boolean; redirect?: RequestRedirect; parseJson?: (text: string) => unknown; maximumBytes?: number } = {},
+  async json(fetchImpl: typeof fetch, url: string, apiKey: string | null, operation: string,
+    options: { method?: "GET" | "POST"; allowForbidden?: boolean; redirect?: RequestRedirect; parseJson?: (text: string) => unknown; maximumBytes?: number } = {},
   ): Promise<{ body: unknown; status: number }> {
     this.operation = operation;
     this.stage = "request";
     this.assertCurrent();
     const response = await fetchImpl(url, {
-      method: "GET", headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
+      method: options.method ?? "GET", headers: { accept: "application/json", ...(apiKey === null ? {} : { authorization: `Bearer ${apiKey}` }) },
       signal: this.signal, redirect: options.redirect ?? "error",
     });
     this.signal.throwIfAborted();

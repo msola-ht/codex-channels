@@ -8,6 +8,32 @@ import { OllamaAccountCache, type OllamaAccountRateLimit } from "./ollama-accoun
 
 const unitsPerDollar = 1_000_000_000n;
 const maximumUnits = 999_999_999_999n * unitsPerDollar + unitsPerDollar - 1n;
+// Public rates share a daily process cache across accounts using the same transport.
+const exchangeCaches = new WeakMap<typeof fetch, OllamaAccountCache<NonNullable<CloudUsageReport["usdCny"]>>>();
+
+function exchangeRate(fetchImpl: typeof fetch, signal: AbortSignal, beforeSubmit?: () => void) {
+  let cache = exchangeCaches.get(fetchImpl);
+  if (!cache) { cache = new OllamaAccountCache(undefined, 86_400_000); exchangeCaches.set(fetchImpl, cache); }
+  return cache.read(async (sharedSignal, assertCurrent) => {
+    const query = new AccountQuery("汇率", sharedSignal, assertCurrent, 3_000);
+    return query.run(async () => {
+      const { body } = await query.json(fetchImpl, "https://api.frankfurter.dev/v2/rate/USD/CNY", null, "exchange-rate", { maximumBytes: 4_096 });
+      const value = record(body);
+      const day = typeof value.date === "string" ? Date.parse(value.date) : NaN;
+      if (value.base !== "USD" || value.quote !== "CNY" || typeof value.rate !== "number"
+        || !Number.isFinite(value.rate) || value.rate <= 0 || value.rate > 100
+        || typeof value.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value.date)
+        || !Number.isFinite(day) || new Date(day).toISOString().slice(0, 10) !== value.date
+        || day > Date.now() || Date.now() - day > 7 * 86_400_000) throw new Error("汇率响应无效或过期");
+      return { rate: value.rate, date: value.date };
+    });
+  }, false, signal, beforeSubmit).then(cached => {
+    // Source age changes even while the locally cached observation is valid.
+    const day = Date.parse(cached.value.date);
+    if (day > Date.now() || Date.now() - day > 7 * 86_400_000) throw new Error("汇率来源已过期");
+    return cached;
+  });
+}
 
 // A private wrapper distinguishes numeric JSON tokens from upstream strings/objects.
 class UsdAmount {
@@ -20,7 +46,8 @@ export function createOllamaCloudAccountAdapter(options: {
   fetchImpl?: typeof fetch;
 }): ProviderAccountAdapter {
   if (!isOllamaCloudAccountProvider(options.provider)) throw new Error("Ollama Cloud 账户身份无效");
-  const balanceCache = new OllamaAccountCache<Extract<ProviderAccountUsage, { kind: "balance" }>>();
+  const balanceCache = new OllamaAccountCache<{ usage: Extract<ProviderAccountUsage, { kind: "balance" }>; allowanceUsd: string | null }>();
+  const planCache = new OllamaAccountCache<string | null>();
   const usageCaches = new Map<CloudUsageQuery["range"], OllamaAccountCache<Pick<CloudUsageReport, "from" | "until" | "totals" | "groups" | "remainder">>>();
   const usageRateLimit: OllamaAccountRateLimit = { retryAt: 0 };
   let identity = "";
@@ -30,6 +57,7 @@ export function createOllamaCloudAccountAdapter(options: {
     const current = createHash("sha256").update(key).digest("hex");
     if (identity !== current) {
       balanceCache.clear();
+      planCache.clear();
       for (const cache of usageCaches.values()) cache.clear();
       usageCaches.clear();
       usageRateLimit.retryAt = 0;
@@ -43,7 +71,8 @@ export function createOllamaCloudAccountAdapter(options: {
     const query = new AccountQuery("Ollama Cloud", sharedSignal, assertCurrent);
     return query.run(async () => {
       const { body } = await query.json(options.fetchImpl ?? fetch, "https://ollama.com/api/balance", key, "balance", { parseJson: parseBalanceJson });
-      return balanceUsage(body, options.provider);
+      const allowance = record(record(body).included).allowance_usd;
+      return { usage: balanceUsage(body, options.provider), allowanceUsd: allowance instanceof UsdAmount ? decimal(allowance.units) : null };
     });
   }, refresh, signal, beforeSubmit);
   return {
@@ -75,32 +104,61 @@ export function createOllamaCloudAccountAdapter(options: {
             return usageReport(body, selection.range);
           });
         }, selection.refresh === true, query.signal, beforeSubmit);
-        const [usageResult, balanceResult] = await Promise.allSettled([usage, balance(key, selection.refresh === true, query.signal, beforeSubmit)]);
+        const plan = planCache.read(async (sharedSignal, assertCurrent) => {
+          // Optional account metadata must not consume the entire report deadline.
+          const request = new AccountQuery("Ollama Cloud", sharedSignal, assertCurrent, 3_000);
+          return request.run(async () => {
+            const { body } = await request.json(options.fetchImpl ?? fetch, "https://ollama.com/api/me", key, "plan", { method: "POST" });
+            return accountPlan(body);
+          });
+        }, selection.refresh === true, query.signal, beforeSubmit);
+        const [usageResult, balanceResult, planResult, exchangeResult] = await Promise.allSettled([
+          usage, balance(key, selection.refresh === true, query.signal, beforeSubmit), plan,
+          exchangeRate(options.fetchImpl ?? fetch, query.signal, beforeSubmit),
+        ]);
         query.assertCurrent();
         if (credential() !== key) throw new Error("Ollama 账户凭据已变化");
-        for (const result of [usageResult, balanceResult]) {
+        for (const result of [usageResult, balanceResult, planResult]) {
           if (result.status === "rejected" && result.reason instanceof AccountQueryError && result.reason.diagnostic.reason === "authentication") {
             authenticationFailure = { error: result.reason, until: Date.now() + 30_000 };
             balanceCache.clear();
+            planCache.clear();
             for (const cache of usageCaches.values()) cache.clear();
             throw result.reason;
           }
         }
         if (usageResult.status === "rejected") throw usageResult.reason;
         const currentBalance = balanceResult.status === "fulfilled" ? balanceResult.value : undefined;
+        const currentPlan = planResult.status === "fulfilled" ? planResult.value : undefined;
         return { kind: "cloud-usage", provider: options.provider, query: selection,
           ...usageResult.value.value, observedAtMs: usageResult.value.observedAtMs, stale: usageResult.value.stale,
-          balanceUsd: currentBalance?.value.balances[0]?.totalBalance ?? null,
+          balanceUsd: currentBalance?.value.usage.balances[0]?.totalBalance ?? null,
+          allowanceUsd: currentBalance?.value.allowanceUsd ?? null,
+          includedBalanceUsd: currentBalance?.value.usage.balances[0]?.grantedBalance ?? null,
+          purchasedBalanceUsd: currentBalance?.value.usage.balances[0]?.toppedUpBalance ?? null,
+          plan: currentPlan?.value ?? null, planObservedAtMs: currentPlan?.observedAtMs ?? null, planStale: currentPlan?.stale ?? false,
+          usdCny: exchangeResult.status === "fulfilled" ? exchangeResult.value.value : null,
           balanceObservedAtMs: currentBalance?.observedAtMs ?? null, balanceStale: currentBalance?.stale ?? false };
       });
     },
   };
 }
 
+function accountPlan(value: unknown): string | null {
+  const body = record(value);
+  // Cloud currently returns Plan; the official client's JSON contract uses plan.
+  // Accept these two observed spellings only, and reject contradictory values.
+  if (body.Plan !== undefined && body.plan !== undefined && body.Plan !== body.plan) throw new Error("Ollama 套餐字段不一致");
+  const plan = body.Plan ?? body.plan;
+  if (plan == null || plan === "") return null;
+  if (typeof plan !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9 -]{0,63}$/u.test(plan)) throw new Error("Ollama 套餐字段无效");
+  return plan;
+}
+
 function parseBalanceJson(text: string): unknown {
   return JSON.parse(text, (key: string, value: unknown, context?: { source?: string }): unknown => {
-    if (key !== "balance_usd" && key !== "usage_usd") return value;
-    if (key === "usage_usd" && value === null) return value;
+    if (key !== "balance_usd" && key !== "usage_usd" && key !== "allowance_usd") return value;
+    if ((key === "usage_usd" || key === "allowance_usd") && value === null) return value;
     // Use the source token, never the already rounded IEEE-754 value.
     if (typeof value !== "number" || typeof context?.source !== "string" || context.source.length > 64) {
       throw new Error("Ollama 余额金额缺少精确数字表示");

@@ -91,6 +91,11 @@ TTFT 参考 `internal/runtime/executor/helps/responses_ttft_helpers.go`、`chat_
 
 ## Ollama Cloud 官方来源
 
+- 套餐月付参考价与额度：[Ollama Pricing](https://ollama.com/pricing)；Pro $20/月对应 $60 额度，人民币卡片仅按月付参考价估算，不据此判断账户计费周期。
+- 人民币参考汇率：[Frankfurter v2](https://frankfurter.dev/) 的 `GET /v2/rate/USD/CNY`；匿名日更新汇率，字段 `date/base/quote/rate`，本地缓存 24 小时。该服务独立于 Ollama，不接收 Ollama 凭据。
+
+套餐查询另核对官方 [Whoami 客户端](https://github.com/ollama/ollama/blob/main/api/client.go) 与 [UserResponse 类型](https://github.com/ollama/ollama/blob/main/api/types.go)：`POST /api/me`，类型声明 `plan`；2026-10-26 直接使用已配置 API Key 查询云端返回 HTTP 200、`Plan: "pro"`。两种拼写显式支持，返回不一致时拒绝。该用户类型与实测响应均未提供订阅到期字段；Balance 的周期结束仅代表包含额度重置。
+
 2026-10-26 实施时核对 [OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)、[Cloud](https://docs.ollama.com/cloud)、[List models](https://docs.ollama.com/api/tags)、[Show model details](https://docs.ollama.com/api-reference/show-model-details.md)、[Thinking](https://docs.ollama.com/capabilities/thinking) 与 [Balance](https://docs.ollama.com/api/balance.md)。这些动态官方文档补充上游 HTTP 合同，不替换本地锁定的 Codex 协议基线。
 
 OLC 只使用 `https://ollama.com/v1` 的无状态 Responses，明确关闭 WS。发现使用公开 `/v1/models`、`/api/tags`、`/api/show`，不以公开端点判断 Key 有效或把元数据当作工具往返验收。现行合同见 [Ollama Cloud](ollama-cloud.md)，实际观察和未验收范围见 [接入验收记录](ollama-cloud-probe.md)。

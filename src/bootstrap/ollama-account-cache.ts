@@ -10,7 +10,7 @@ export class OllamaAccountCache<T> {
   private failure?: unknown;
   private pending: { controller: AbortController; promise: Promise<CachedAccountValue<T>>; consumers: Set<() => void> } | undefined;
 
-  constructor(private readonly rateLimit?: OllamaAccountRateLimit) {}
+  constructor(private readonly rateLimit?: OllamaAccountRateLimit, private readonly ttlMs = 30_000) {}
 
   clear(): void {
     this.pending?.controller.abort();
@@ -31,7 +31,7 @@ export class OllamaAccountCache<T> {
       if (this.snapshot && now - this.snapshot.observedAtMs < 300_000) return { ...this.snapshot, stale: true };
       throw blocked.failure;
     }
-    if (this.snapshot && now - this.snapshot.observedAtMs < (refresh ? 3_000 : 30_000)) return this.snapshot;
+    if (this.snapshot && now - this.snapshot.observedAtMs < (refresh ? 3_000 : this.ttlMs)) return this.snapshot;
     if (!this.pending) {
       const controller = new AbortController();
       const consumers = new Set<() => void>();

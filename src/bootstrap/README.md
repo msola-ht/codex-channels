@@ -109,8 +109,8 @@ Surface 明确证明本次结果尚未发送，且原记录与本次均无发送
   有界装配 DeepSeek、OpenCode Go、CCG、CLP 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
   账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。
   Ollama Cloud 通过精确账户适配器提供 USD 余额和渠道官方云用量报告，不提供 limits。
-- `ollama-cloud-account-adapter.ts`：按 `olc-<账户>` 私有凭据读取固定官方 `/api/balance` 和 `/api/usage`。复用 AccountQuery 的期限、提交守卫与有界读取，通过 JSON 数字原文和 bigint 十进制单位精确求和；拒绝无效金额、计数及不一致分组，旧百分比计划不伪造 USD 余额，不泄露原始响应。
-- `ollama-account-cache.ts`：Ollama 渠道报告内余额与各范围用量的有界进程缓存，30 秒有效、合并并发、凭据变更失效、独立取消和限流退避；各等待者独立校验授权，失效调用者不污染其他调用者或账户退避。用量卡可显式展示五分钟内的过期快照，既有完成卡及账户快照不消费该缓存。
+- `ollama-cloud-account-adapter.ts`：按 `olc-<账户>` 私有凭据读取固定官方 `/api/balance`、`/api/usage` 与 `POST /api/me` 的套餐字段。复用 AccountQuery 的期限、提交守卫与有界读取，通过 JSON 数字原文和 bigint 十进制单位精确求和；拒绝无效金额、计数及不一致分组，旧百分比计划不伪造 USD 余额，不泄露原始响应，用户接口仅保留套餐投影。
+- `ollama-account-cache.ts`：Ollama 渠道报告内套餐、余额与各范围用量的有界进程缓存，默认 30 秒有效、合并并发、凭据变更失效、独立取消和限流退避；各等待者独立校验授权，失效调用者不污染其他调用者或账户退避。用量卡可显式展示五分钟内的过期快照，既有完成卡及账户快照不消费该缓存。账户适配器额外匿名读取 Frankfurter USD/CNY，复用缓存的 24 小时有效期；公共汇率跨账户共享，手动刷新不绕过有效期，失败不阻断美元报告、不发送账户凭据。
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   模型请求入口；IPC 只投影约定字段，Provider 归属由组合层确定，不接受入站扩展字段覆盖。
   模型请求统计端口。合法脱敏样本尝试入队；生图请求只保存请求指标，不回填文本模型思考等级，
