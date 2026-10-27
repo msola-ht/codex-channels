@@ -26,7 +26,7 @@ export const conversationCommandDescriptions = {
   mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
   plugin: "列出、查看或调用 Plugin",
   hooks: "查看、审查、信任或启停 Hooks",
-  usage: "查看账号与当前 Session 用量",
+  usage: "查看账号与当前 Session 用量；Ollama 支持时间切换与刷新",
   metrics: "查看会话、聚合或异常请求指标",
   limits: "查看套餐与额度",
   permissions: "查看权限配置",

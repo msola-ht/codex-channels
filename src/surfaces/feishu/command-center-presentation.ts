@@ -6,6 +6,7 @@ import {
   type ConversationCommandResult,
 } from "../../application/index.js";
 import { UserFacingError } from "../../conversation-core/index.js";
+import { cloudUsageChoices, formatCloudUsage } from "../cloud-usage-format.js";
 import { formatConversationModelState, formatConversationResetCredits, formatModelSettingLiteral } from "../conversation-model-account-command-format.js";
 import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import {
@@ -619,6 +620,10 @@ export function renderCommandCenterChoices(
         { label: "审批设置", action: "autoreview", input: "" },
       ],
     };
+  }
+  if (action === "usage" && result.kind === "usage" && result.result.kind === "cloud-usage") {
+    return { title: "Ollama Cloud 用量", description: formatCloudUsage(result.result),
+      choices: cloudUsageChoices(result.result).map(choice => ({ ...choice, action: "usage" as const })) };
   }
   if (action === "autoreview" && result.kind === "auto-review") {
     const { threadId, reviewer } = result.state;

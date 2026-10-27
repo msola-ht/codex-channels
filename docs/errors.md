@@ -155,6 +155,8 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `scheduled-task.state.invalid` | 当前状态不允许该计划任务操作 | 功能未启用、任务阻塞或 Run 不可重试 |
 | `reset-credit.failed` | 按受控 reason 展示用法、授权不足、确认失效、忙碌、结果待确认或暂不可用 | `/limits reset` 参数、身份或上下文复核失败；消费响应丢失时不自动重试 |
 | `metrics.usage` | /metrics 用法提示 | 参数格式错误 |
+| `usage.arguments` | Ollama 用量切换用法提示；其他账户使用 /usage | 时间或刷新参数无效，或账户不支持切换 |
+| `usage.account-changed` | 账户已切换，请重新执行 /usage | 旧按钮绑定账户与当前账户不一致，或查询期间账户变化 |
 
 ### 提供商、协作模式与计划
 

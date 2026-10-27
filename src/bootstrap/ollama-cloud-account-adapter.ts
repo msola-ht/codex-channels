@@ -1,8 +1,10 @@
 import { isOllamaCloudAccountProvider } from "../../runtime/ollama-cloud-accounts.mjs";
+import { createHash } from "node:crypto";
 import { loadConfiguredProviderCredential } from "../../runtime/model-provider-runtime.mjs";
 import type { ManagedModelProviderId } from "../../runtime/model-provider-definitions.mjs";
-import type { ProviderAccountAdapter, ProviderAccountUsage } from "../application/index.js";
-import { AccountQuery } from "./account-query.js";
+import type { ProviderAccountAdapter, ProviderAccountUsage, CloudUsageReport, CloudUsageMetrics, CloudUsageQuery } from "../application/index.js";
+import { AccountQuery, AccountQueryError } from "./account-query.js";
+import { OllamaAccountCache, type OllamaAccountRateLimit } from "./ollama-account-cache.js";
 
 const unitsPerDollar = 1_000_000_000n;
 const maximumUnits = 999_999_999_999n * unitsPerDollar + unitsPerDollar - 1n;
@@ -18,16 +20,78 @@ export function createOllamaCloudAccountAdapter(options: {
   fetchImpl?: typeof fetch;
 }): ProviderAccountAdapter {
   if (!isOllamaCloudAccountProvider(options.provider)) throw new Error("Ollama Cloud 账户身份无效");
+  const balanceCache = new OllamaAccountCache<Extract<ProviderAccountUsage, { kind: "balance" }>>();
+  const usageCaches = new Map<CloudUsageQuery["range"], OllamaAccountCache<Pick<CloudUsageReport, "from" | "until" | "totals" | "groups" | "remainder">>>();
+  const usageRateLimit: OllamaAccountRateLimit = { retryAt: 0 };
+  let identity = "";
+  let authenticationFailure: { error: AccountQueryError; until: number } | undefined;
+  const credential = (): string => {
+    const key = loadConfiguredProviderCredential(options.provider, options.environment ?? process.env).apiKey;
+    const current = createHash("sha256").update(key).digest("hex");
+    if (identity !== current) {
+      balanceCache.clear();
+      for (const cache of usageCaches.values()) cache.clear();
+      usageCaches.clear();
+      usageRateLimit.retryAt = 0;
+      delete usageRateLimit.failure;
+      authenticationFailure = undefined;
+      identity = current;
+    }
+    return key;
+  };
+  const balance = (key: string, refresh: boolean, signal?: AbortSignal, beforeSubmit?: () => void) => balanceCache.read(async (sharedSignal, assertCurrent) => {
+    const query = new AccountQuery("Ollama Cloud", sharedSignal, assertCurrent);
+    return query.run(async () => {
+      const { body } = await query.json(options.fetchImpl ?? fetch, "https://ollama.com/api/balance", key, "balance", { parseJson: parseBalanceJson });
+      return balanceUsage(body, options.provider);
+    });
+  }, refresh, signal, beforeSubmit);
   return {
     provider: options.provider,
     async accountUsage(signal, beforeSubmit) {
       const query = new AccountQuery("Ollama Cloud", signal, beforeSubmit);
       return query.run(async () => {
-        const credential = loadConfiguredProviderCredential(options.provider, options.environment ?? process.env);
-        const { body } = await query.json(options.fetchImpl ?? fetch, "https://ollama.com/api/balance", credential.apiKey, "balance", {
-          parseJson: parseBalanceJson,
-        });
+        const key = credential();
+        const { body } = await query.json(options.fetchImpl ?? fetch, "https://ollama.com/api/balance", key, "balance", { parseJson: parseBalanceJson });
+        if (credential() !== key) throw new Error("Ollama 账户凭据已变化");
         return balanceUsage(body, options.provider);
+      });
+    },
+    async cloudUsage(selection, signal, beforeSubmit) {
+      const query = new AccountQuery("Ollama Cloud", signal, beforeSubmit);
+      return query.run(async () => {
+        if (!["24h", "7d", "30d"].includes(selection.range)) throw new Error("不支持的用量范围");
+        const key = credential();
+        if (authenticationFailure && Date.now() < authenticationFailure.until) throw authenticationFailure.error;
+        let cache = usageCaches.get(selection.range);
+        if (!cache) { cache = new OllamaAccountCache(usageRateLimit); usageCaches.set(selection.range, cache); }
+        const usage = cache.read(async (sharedSignal, assertCurrent) => {
+          const request = new AccountQuery("Ollama Cloud", sharedSignal, assertCurrent);
+          return request.run(async () => {
+            const { body } = await request.json(options.fetchImpl ?? fetch,
+              `https://ollama.com/api/usage?range=${selection.range}&scope=self&group_by=model`, key, "usage", {
+                parseJson: parseBalanceJson, maximumBytes: 262_144,
+              });
+            return usageReport(body, selection.range);
+          });
+        }, selection.refresh === true, query.signal, beforeSubmit);
+        const [usageResult, balanceResult] = await Promise.allSettled([usage, balance(key, selection.refresh === true, query.signal, beforeSubmit)]);
+        query.assertCurrent();
+        if (credential() !== key) throw new Error("Ollama 账户凭据已变化");
+        for (const result of [usageResult, balanceResult]) {
+          if (result.status === "rejected" && result.reason instanceof AccountQueryError && result.reason.diagnostic.reason === "authentication") {
+            authenticationFailure = { error: result.reason, until: Date.now() + 30_000 };
+            balanceCache.clear();
+            for (const cache of usageCaches.values()) cache.clear();
+            throw result.reason;
+          }
+        }
+        if (usageResult.status === "rejected") throw usageResult.reason;
+        const currentBalance = balanceResult.status === "fulfilled" ? balanceResult.value : undefined;
+        return { kind: "cloud-usage", provider: options.provider, query: selection,
+          ...usageResult.value.value, observedAtMs: usageResult.value.observedAtMs, stale: usageResult.value.stale,
+          balanceUsd: currentBalance?.value.balances[0]?.totalBalance ?? null,
+          balanceObservedAtMs: currentBalance?.observedAtMs ?? null, balanceStale: currentBalance?.stale ?? false };
       });
     },
   };
@@ -35,7 +99,8 @@ export function createOllamaCloudAccountAdapter(options: {
 
 function parseBalanceJson(text: string): unknown {
   return JSON.parse(text, (key: string, value: unknown, context?: { source?: string }): unknown => {
-    if (key !== "balance_usd") return value;
+    if (key !== "balance_usd" && key !== "usage_usd") return value;
+    if (key === "usage_usd" && value === null) return value;
     // Use the source token, never the already rounded IEEE-754 value.
     if (typeof value !== "number" || typeof context?.source !== "string" || context.source.length > 64) {
       throw new Error("Ollama 余额金额缺少精确数字表示");
@@ -74,4 +139,47 @@ function decimal(units: bigint): string {
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Ollama 余额响应结构无效");
   return value as Record<string, unknown>;
+}
+
+function usageReport(value: unknown, range: CloudUsageQuery["range"]): Pick<CloudUsageReport, "from" | "until" | "totals" | "groups" | "remainder"> {
+  const body = record(value);
+  if (body.range !== range || body.scope !== "self" || body.group_by !== "model"
+    || body.granularity !== (range === "24h" ? "hour" : "day")
+    || typeof body.from !== "string" || typeof body.until !== "string"
+    || !Number.isFinite(Date.parse(body.from)) || !Number.isFinite(Date.parse(body.until))
+    || Date.parse(body.from) >= Date.parse(body.until)) throw new Error("Ollama 用量范围无效");
+  const totals = record(body.totals);
+  if (!Array.isArray(totals.groups) || totals.groups.length > 10) throw new Error("Ollama 模型分组无效");
+  const seen = new Set<string>();
+  const groups = totals.groups.map(value => {
+    const group = record(value);
+    if (typeof group.model !== "string" || !group.model || group.model.length > 128 || /[\s\p{Cc}\p{Cf}]/u.test(group.model)
+      || seen.has(group.model)) throw new Error("Ollama 模型标识无效");
+    seen.add(group.model);
+    return { ...usageMetrics(group), model: group.model };
+  });
+  const remainder = totals.remainder == null ? null : usageMetrics(record(totals.remainder));
+  const totalMetrics = usageMetrics(totals);
+  const parts = [...groups, ...(remainder ? [remainder] : [])];
+  if (parts.reduce((sum, item) => sum + BigInt(item.requestCount), 0n) !== BigInt(totalMetrics.requestCount)) throw new Error("Ollama 用量分组请求数不一致");
+  for (const key of ["inputTokens", "cachedInputTokens", "outputTokens"] as const) {
+    if (totalMetrics[key] !== null && parts.every(item => item[key] !== null)
+      && parts.reduce((sum, item) => sum + BigInt(item[key]!), 0n) !== BigInt(totalMetrics[key])) throw new Error("Ollama 用量分组计数不一致");
+  }
+  return { from: body.from, until: body.until, totals: totalMetrics, groups, remainder };
+}
+
+function usageMetrics(value: Record<string, unknown>): CloudUsageMetrics {
+  const count = (key: string, required = false): number | null => {
+    const field = value[key];
+    if (field == null && !required) return null;
+    if (typeof field !== "number" || !Number.isSafeInteger(field) || field < 0) throw new Error("Ollama 用量计数无效");
+    return field;
+  };
+  const inputTokens = count("input_tokens");
+  const cachedInputTokens = count("cached_input_tokens");
+  if (inputTokens !== null && cachedInputTokens !== null && cachedInputTokens > inputTokens) throw new Error("Ollama 缓存计数超过输入");
+  if (value.usage_usd != null && !(value.usage_usd instanceof UsdAmount)) throw new Error("Ollama 用量金额无效");
+  return { requestCount: count("request_count", true)!, inputTokens, cachedInputTokens,
+    outputTokens: count("output_tokens"), usageUsd: value.usage_usd instanceof UsdAmount ? decimal(value.usage_usd.units) : null };
 }

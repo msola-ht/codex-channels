@@ -194,14 +194,47 @@ export type ProviderAccountLimits =
 
 export interface ProviderAccountAdapter {
   provider: string;
+  cloudUsage?(query: CloudUsageQuery, signal?: AbortSignal, beforeSubmit?: () => void): Promise<CloudUsageReport>;
   accountUsage(signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountUsage>;
   accountThreadUsage?(threadId: string, beforeSubmit?: () => void): Promise<AccountThreadUsage>;
   accountLimits?(signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountLimits>;
 }
 
 export interface ProviderAccountQueryPort {
+  cloudUsage?(provider: string, query: CloudUsageQuery, signal?: AbortSignal, beforeSubmit?: () => void): Promise<CloudUsageReport | undefined>;
   accountUsage(modelProvider: string, threadId?: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountUsage>;
   accountLimits(modelProvider: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountLimits>;
+}
+
+/** Official cloud aggregates; kept outside persisted account snapshot schemas. */
+export interface CloudUsageQuery {
+  range: "24h" | "7d" | "30d";
+  refresh?: boolean;
+  expectedProvider?: string;
+}
+
+export interface CloudUsageMetrics {
+  requestCount: number;
+  usageUsd: string | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+}
+
+export interface CloudUsageReport {
+  kind: "cloud-usage";
+  provider: string;
+  query: CloudUsageQuery;
+  from: string;
+  until: string;
+  totals: CloudUsageMetrics;
+  groups: Array<CloudUsageMetrics & { model: string }>;
+  remainder: CloudUsageMetrics | null;
+  balanceUsd: string | null;
+  observedAtMs: number;
+  balanceObservedAtMs: number | null;
+  stale: boolean;
+  balanceStale: boolean;
 }
 
 export interface OfficialAccountSnapshotWriter {

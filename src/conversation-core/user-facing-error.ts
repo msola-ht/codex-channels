@@ -140,6 +140,8 @@ export type UserFacingErrorCode =
   | "reset-credit.failed"
   | "command.unsupported"
   | "status.usage"
+  | "usage.arguments"
+  | "usage.account-changed"
   | "command.selection.expired"
   | "review.usage";
 

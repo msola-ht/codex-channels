@@ -3,6 +3,9 @@ export type { HookAction, HookEntry, HookCatalog, HookConfigPort, HookCommandVie
 export { parseMcpOperation, parsePluginOperation } from "./conversation-command-parser.js";
 export {
   type AccountMetric,
+  type CloudUsageQuery,
+  type CloudUsageMetrics,
+  type CloudUsageReport,
   type AccountPlanType,
   type AccountQueryPort,
   type AccountRateLimit,

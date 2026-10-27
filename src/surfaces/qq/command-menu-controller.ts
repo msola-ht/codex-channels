@@ -16,6 +16,7 @@ import { formatConversationCommandOutcome } from "../conversation-command-outcom
 import { formatConversationModelState } from "../conversation-model-account-command-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
+import { cloudUsageChoices } from "../cloud-usage-format.js";
 import { escapeLifecycleLiteral } from "../lifecycle-presentation.js";
 import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListEntry } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
@@ -53,6 +54,7 @@ interface Options {
 
 type ModelView = "model" | "effort" | "fast";
 type MenuAction =
+  | { kind: "cloud-usage"; input: string }
   | { kind: "workspace"; id: string }
   | { kind: "model"; selection: ModelSelectionRequest }
   | { kind: "resume" | "unarchive"; id: string }
@@ -211,6 +213,14 @@ export class QqCommandMenuController {
   }
 
   fromResult(target: ConversationTarget, actorId: string, result: ConversationCommandResult): QqMenuPanel | undefined {
+    if (result.kind === "usage" && result.result.kind === "cloud-usage") {
+      const context = { ...this.context(target, actorId), queryScope: this.options.queryScope(target) };
+      const buttons = cloudUsageChoices(result.result).map(choice => this.button(context, choice.label, { kind: "cloud-usage", input: choice.input }));
+      const detail = renderConversationCommandResult(result)!;
+      return { ...this.panel(context, { content: "", keyboard: { content: { rows: [
+        { buttons: buttons.slice(0, 3) }, { buttons: buttons.slice(3) },
+      ] } } }), detail: formatQqLiteralDetails(detail), markdownDetail: detail };
+    }
     if (result.kind === "status" || result.kind === "limits" && result.result.kind === "rate-limits") {
       const context = { ...this.context(target, actorId), queryScope: this.options.queryScope(target) };
       const buttons = result.kind === "status"
@@ -296,6 +306,13 @@ export class QqCommandMenuController {
     this.selections.delete(token);
     const { action } = selection;
     switch (action.kind) {
+      case "cloud-usage": {
+        const result = await this.options.commands.execute(selection.target, "usage", action.input, selection.actorId, () => this.assertCurrent(selection));
+        this.assertCurrent(selection);
+        const panel = this.fromResult(selection.target, selection.actorId, result);
+        if (!panel) throw unsupported();
+        return panel;
+      }
       case "queue-page": return this.queuePage(selection, action.page);
       case "queue-item": return this.queueItem(selection, action.id);
       case "queue-delete-preview": return this.queueItem(selection, action.id, true);

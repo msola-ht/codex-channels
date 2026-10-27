@@ -10,6 +10,7 @@ import {
 import { UserFacingError, type ConversationTarget } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
+import { DeliveryReceipt } from "../delivery-receipt.js";
 import {
   feishuCardElements,
   type FeishuCardDocument,
@@ -85,6 +86,7 @@ export type FeishuCommandCenterActionResult =
   | "invalid";
 
 export interface FeishuCommandCenterChoices {
+  assertActive?: () => void;
   title: string;
   description?: string;
   descriptionFormat?: "plain_text" | "lark_md" | "markdown";
@@ -134,6 +136,7 @@ interface PendingCommandCenter {
   form?: FeishuCommandCenterForm;
   consumeOnUse: boolean;
   limitsQueryInFlight?: boolean;
+  assertActive?: () => void;
 }
 
 interface FeishuCommandCenterOptions {
@@ -158,6 +161,7 @@ export class FeishuCommandCenter {
   private readonly tasks = new Set<Promise<unknown>>();
   private closePromise: Promise<void> | undefined;
   private closed = false;
+  private readonly cancellation = new AbortController();
 
   constructor(
     private readonly outbox: Pick<FeishuOutbox, "deliverCard">
@@ -169,6 +173,7 @@ export class FeishuCommandCenter {
       actorId: string,
       input: string,
       modelSelection?: FeishuModelSelectionInteraction,
+      assertActive?: () => void,
     ) => Promise<FeishuCommandCenterResponse | void>,
     private readonly logger: Logger,
     options: FeishuCommandCenterOptions = {},
@@ -199,7 +204,10 @@ export class FeishuCommandCenter {
     actorId: string,
     response: FeishuCommandCenterResponse,
     assertActive?: () => void,
+    replaceMessageId?: string,
   ): Promise<void> {
+    const responseGuard = "choices" in response ? response.assertActive : undefined;
+    const guard = assertActive || responseGuard ? (): void => { assertActive?.(); responseGuard?.(); } : undefined;
     return this.openCard(
       target,
       actorId,
@@ -218,7 +226,10 @@ export class FeishuCommandCenter {
       "choices" in response && response.choices.some(choice => choice.action === "thread-autoreview-select")
         ? Math.min(this.tokenTtlMs, 5 * 60_000)
         : this.tokenTtlMs,
-      undefined,
+      replaceMessageId && this.outbox.updateCard ? async card => {
+        await this.outbox.updateCard!(target.conversationId, replaceMessageId, card);
+        return replaceMessageId;
+      } : undefined,
       "choices" in response
         ? new Map(response.choices.slice(0, 18).flatMap(choice => choice.modelSelection
           ? [[selectionKey(choice.action, choice.input), {
@@ -227,7 +238,8 @@ export class FeishuCommandCenter {
             }] as const]
           : []))
         : new Map(),
-      assertActive,
+      guard,
+      responseGuard,
     );
   }
 
@@ -287,6 +299,7 @@ export class FeishuCommandCenter {
       this.outbox.deliverCard(target.conversationId, card),
     modelSelections: ReadonlyMap<string, ModelSelectionRequest> = new Map(),
     assertActive?: () => void,
+    selectionGuard?: () => void,
   ): Promise<void> {
     assertActive?.();
     if (
@@ -298,7 +311,17 @@ export class FeishuCommandCenter {
     this.prune();
     const token = randomBytes(18).toString("base64url");
     const card = render(token);
-    const messageId = await sendCard(card);
+    const receipt = assertActive ? new DeliveryReceipt(async () => {}, this.cancellation.signal, true, () => {
+      assertActive();
+      if (this.closed || !this.access.isAllowed({ target, actorId })) {
+        throw new UserFacingError("command.authorization-changed", "卡片授权已变化");
+      }
+    }) : undefined;
+    let messageId: string;
+    try {
+      messageId = await (receipt ? receipt.run(() => sendCard(card)) : sendCard(card));
+    } finally { receipt?.release(); }
+    await receipt?.done;
     assertActive?.();
     if (this.closed || !this.access.isAllowed({ target, actorId })) {
       return;
@@ -313,6 +336,7 @@ export class FeishuCommandCenter {
       modelSelections,
       ...(form ? { form } : {}),
       consumeOnUse,
+      ...(selectionGuard ? { assertActive: selectionGuard } : {}),
     });
     while (this.pending.size > this.capacity) {
       const first = this.pending.entries().next();
@@ -448,6 +472,12 @@ export class FeishuCommandCenter {
         }
       },
     };
+    const assertUsageActive = resolvedCommand === "usage" ? (): void => {
+      if (this.closed || pending.expiresAt <= this.now() || !this.access.isAllowed({ target: pending.target, actorId: pending.actorId })) {
+        throw new UserFacingError("command.authorization-changed", "用量卡片已失效，请重新执行 /usage");
+      }
+      pending.assertActive?.();
+    } : undefined;
     if (acceptedState && this.outbox.updateCard) {
       void this.track(
         this.outbox.updateCard(
@@ -484,10 +514,12 @@ export class FeishuCommandCenter {
               pending.actorId,
               submittedInput!,
               modelSelection,
+              assertUsageActive,
             );
             modelSelection?.assertActive();
             if (response) {
-              await this.openResponse(pending.target, pending.actorId, response, modelSelection?.assertActive);
+              await this.openResponse(pending.target, pending.actorId, response, modelSelection?.assertActive ?? assertUsageActive,
+                resolvedCommand === "usage" && pending.assertActive ? pending.messageId : undefined);
             }
           }
         } finally {
@@ -518,6 +550,7 @@ export class FeishuCommandCenter {
 
   private async closeOnce(): Promise<void> {
     this.closed = true;
+    this.cancellation.abort();
     this.pending.clear();
     this.expiredActions.clear();
     this.seenMenuEvents.clear();

@@ -6,6 +6,7 @@ import {
   type ConversationCommandExecutor,
   type ConversationCommandResult,
   type ConversationTurnUseCases,
+  type ConversationSessionUseCases,
   type ScheduledTaskConfirmation,
 } from "../../application/index.js";
 import {
@@ -90,7 +91,7 @@ export class FeishuConversationAdapter {
     private readonly conversations: Pick<
       ConversationTurnUseCases,
       "touchActivity" | "submit" | "prepareAttachmentSubmission"
-    >,
+    > & Pick<ConversationSessionUseCases, "status">,
     private readonly outbox:
       & Pick<FeishuOutbox, "notifyMarkdown" | "notifyText">
       & Partial<Pick<
@@ -221,11 +222,13 @@ export class FeishuConversationAdapter {
             "飞书命令不受支持",
           );
         }
+        const usageGuard = command.name === "usage" ? this.usageGuard(message.target, message.actorId) : undefined;
         const result = await this.commands.execute(
           message.target,
           command.name,
           command.argumentsText,
           message.actorId,
+          usageGuard,
         );
         if (result.kind === "outcome" && result.outcome.type === "turn.stop-requested"
           && this.attachmentStops.has(message)) result.outcome.stopped = true;
@@ -243,6 +246,14 @@ export class FeishuConversationAdapter {
           const response = renderCommandCenterChoices(result.kind === "status" ? "status" : "autoreview", result);
           if (response) {
             await this.commandCenter.openResponse(message.target, message.actorId, response);
+            return;
+          }
+        }
+        if (result.kind === "usage" && result.result.kind === "cloud-usage" && this.commandCenter) {
+          const response = renderCommandCenterChoices("usage", result);
+          if (response) {
+            await this.commandCenter.openResponse(message.target, message.actorId,
+              { ...response, ...(usageGuard ? { assertActive: usageGuard } : {}) });
             return;
           }
         }
@@ -373,9 +384,12 @@ export class FeishuConversationAdapter {
     actorId: string,
     input = "",
     modelSelection?: FeishuModelSelectionInteraction,
+    assertActive?: () => void,
   ): Promise<FeishuCommandCenterResponse | void> {
     let receivedStop: ReturnType<AttachmentInputLifecycle["receiveStop"]> | undefined;
     try {
+      assertActive?.();
+      const usageGuard = action === "usage" ? this.usageGuard(target, actorId) : undefined;
       if (action === "stop") {
         if (this.videoCancellation.signal.aborted
           || this.inputOptions.access?.isAllowed({ target, actorId }) !== true) {
@@ -483,10 +497,12 @@ export class FeishuConversationAdapter {
         ? await this.commands.selectModelSetting(target, modelSelection.selection, actorId, modelSelection.assertActive)
         : action === "fast" && input === ""
         ? await this.commands.execute(target, "model", "", actorId)
-        : await this.commands.execute(target, action, input, actorId);
+        : await this.commands.execute(target, action, input, actorId, () => { assertActive?.(); usageGuard?.(); });
       if (result.kind === "outcome" && result.outcome.type === "turn.stop-requested"
         && receivedStop?.cancelled) result.outcome.stopped = true;
       modelSelection?.assertActive();
+      assertActive?.();
+      usageGuard?.();
       if (cancelledInteraction) this.notifyText(target.conversationId, interactionStoppedText);
       const followUpChoices = action === "model"
         && result.kind === "models"
@@ -504,13 +520,14 @@ export class FeishuConversationAdapter {
           || action === "schedule"
           || action === "hooks"
           || action === "status"
+          || action === "usage"
           || (action === "limits" && result.kind === "reset-credit")
         )
           ? renderCommandCenterChoices(action, result)
           : undefined
       );
       if (choices) {
-        return choices;
+        return usageGuard ? { ...choices, assertActive: usageGuard } : choices;
       }
       const rendered = renderFeishuCommandResult(
         result,
@@ -536,6 +553,19 @@ export class FeishuConversationAdapter {
     } finally {
       receivedStop?.();
     }
+  }
+
+  private usageGuard(target: ConversationTarget, actorId: string): () => void {
+    const original = this.conversations.status(target);
+    return () => {
+      const current = this.conversations.status(target);
+      if (this.videoCancellation.signal.aborted || this.inputOptions.access?.isAllowed({ target, actorId }) !== true
+        || current.workspaceId !== original.workspaceId || current.cwd !== original.cwd
+        || current.threadId !== original.threadId || current.selectionScope !== original.selectionScope
+        || current.modelProvider !== original.modelProvider) {
+        throw new UserFacingError("command.authorization-changed", "用量卡片所属会话已变化，请重新执行 /usage");
+      }
+    };
   }
 
   private async handleScheduleCommandCenterAction(

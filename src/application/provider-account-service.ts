@@ -7,10 +7,20 @@ import type {
   ProviderAccountQueryPort,
   ProviderAccountUsage,
   OfficialAccountSnapshotWriter,
+  CloudUsageQuery,
+  CloudUsageReport,
 } from "./account-port.js";
 import { createOfficialAccountSnapshot } from "./account-snapshot.js";
 
 export class ProviderAccountService implements ProviderAccountQueryPort {
+  async cloudUsage(provider: string, query: CloudUsageQuery, signal?: AbortSignal, beforeSubmit?: () => void): Promise<CloudUsageReport | undefined> {
+    signal?.throwIfAborted();
+    beforeSubmit?.();
+    const result = await this.adapters.get(provider)?.cloudUsage?.(query, signal, beforeSubmit);
+    signal?.throwIfAborted();
+    beforeSubmit?.();
+    return result;
+  }
   private readonly pendingUsage = new Map<string, {
     controller: AbortController; promise: Promise<ProviderAccountUsage>; consumers: number;
   }>();

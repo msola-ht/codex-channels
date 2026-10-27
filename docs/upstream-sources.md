@@ -95,6 +95,8 @@ TTFT 参考 `internal/runtime/executor/helps/responses_ttft_helpers.go`、`chat_
 
 OLC 只使用 `https://ollama.com/v1` 的无状态 Responses，明确关闭 WS。发现使用公开 `/v1/models`、`/api/tags`、`/api/show`，不以公开端点判断 Key 有效或把元数据当作工具往返验收。现行合同见 [Ollama Cloud](ollama-cloud.md)，实际观察和未验收范围见 [接入验收记录](ollama-cloud-probe.md)。
 
+2026-10-26 渠道用量查询核对 [Cloud usage](https://docs.ollama.com/api/cloud-usage) 与 [Balance](https://docs.ollama.com/api/balance)：固定范围 `24h`、`7d`、`30d`，仅 `scope=self`，内部 `group_by=model` 最多十组并以 `remainder` 汇总其余；旧计划可能仅提供请求数。用量与余额各限每用户每分钟十次并以 `Retry-After` 指示退避，团队余额共享但 `self` 用量仅含当前用户，不扩大为团队查询。
+
 上述 OpenAI compatibility 官方页的云端示例使用无状态 Responses，普通 function 工具、`max_output_tokens` 及模型定义的 `reasoning.effort` 属于公开合同；不能从字段被接受推断实际思考质量。产品采用完整显式历史的函数及模拟结果续答，不使用 `previous_response_id` 或 `conversation`。元数据完整的远端候选可以直接选择、预览并保存，逐模型收费验证是独立可选诊断；两条路径均不能以本地合成响应代替真实云端验收。
 
 2026-10-26 客户端工具搜索适配复核了锁定 Codex 的 `tools/src/tool_spec.rs`、`protocol/src/models.rs` 及客户端搜索 handler／工具加载实现。`execution=client` 的声明、对象参数、配对搜索输出和检索后的 defer_loading 语义由该基线确定；OLC 使用普通 function 承载，不宣称上游原生支持 tool_search。新模型按公开元数据及本地 Responses 适配策略生成，不自动绑定 DS 模板；保存后显式选择的模板关联仅供提示词和运行设置更新，不能覆盖 OLC 能力或作为云端验证记录。旧关联仍可读，不迁移或补写。

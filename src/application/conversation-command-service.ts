@@ -1,3 +1,4 @@
+import { parseCloudUsageQuery } from "./cloud-usage-query.js";
 import type { ConversationResetCreditService, ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
 import type { HookCommandView } from "./hook-port.js";
 import { SubmissionObservation, type SubmissionObserver } from "./submission-observer.js";
@@ -790,7 +791,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "usage":
         return {
           kind: "usage",
-          result: await this.conversations.providerAccountUsage(target, assertAuthorized),
+          result: await this.conversations.providerAccountUsage(target, assertAuthorized, parseCloudUsageQuery(argumentsText)),
         };
       case "metrics":
         return {

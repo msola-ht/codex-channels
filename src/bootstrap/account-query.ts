@@ -6,13 +6,13 @@ export type AccountQueryReason = AccountRefreshReason;
 type Stage = "configuration" | "request" | "response" | "parse" | "local";
 
 class HttpFailure extends Error {
-  constructor(readonly status: number) { super("Account HTTP failure"); }
+  constructor(readonly status: number, readonly retryAfterMs?: number) { super("Account HTTP failure"); }
 }
 
 export class AccountQueryError extends UserFacingError {
   constructor(provider: string, readonly diagnostic: {
     reason: AccountQueryReason; stage: Stage; operation: string; elapsedMs: number;
-    httpStatus?: number; networkCode?: string;
+    httpStatus?: number; networkCode?: string; retryAfterMs?: number;
   }, cause: unknown) {
     super("provider.account.unavailable", `${provider} 账户查询失败`, { provider, reason: diagnostic.reason }, { cause });
   }
@@ -51,6 +51,7 @@ export class AccountQuery {
     } catch (error) {
       if (this.authorizationFailed) throw this.authorizationError;
       if (this.caller?.aborted) throw this.caller.reason;
+      if (error instanceof AccountQueryError) throw error;
       const networkCode = safeNetworkCode(error);
       const reason: AccountQueryReason = this.signal.aborted ? "timeout"
         : error instanceof HttpFailure ? httpReason(error.status)
@@ -62,13 +63,14 @@ export class AccountQuery {
         reason, stage: this.stage, operation: this.operation,
         elapsedMs: Math.round(performance.now() - this.started),
         ...(error instanceof HttpFailure ? { httpStatus: error.status } : {}),
+        ...(error instanceof HttpFailure && error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
         ...(networkCode ? { networkCode } : {}),
       }, error);
     }
   }
 
   async json(fetchImpl: typeof fetch, url: string, apiKey: string, operation: string,
-    options: { allowForbidden?: boolean; redirect?: RequestRedirect; parseJson?: (text: string) => unknown } = {},
+    options: { allowForbidden?: boolean; redirect?: RequestRedirect; parseJson?: (text: string) => unknown; maximumBytes?: number } = {},
   ): Promise<{ body: unknown; status: number }> {
     this.operation = operation;
     this.stage = "request";
@@ -80,10 +82,13 @@ export class AccountQuery {
     this.signal.throwIfAborted();
     if (!response.ok && !(options.allowForbidden && response.status === 403)) {
       void response.body?.cancel().catch(() => undefined);
-      this.rejectHttp(response.status);
+      const retry = response.headers.get("retry-after");
+      const seconds = retry && /^\d{1,9}$/u.test(retry) ? Number(retry) : undefined;
+      const retryAfterMs = seconds === undefined ? retry ? Math.max(0, Date.parse(retry) - Date.now()) : undefined : seconds * 1_000;
+      this.rejectHttp(response.status, retryAfterMs !== undefined && Number.isFinite(retryAfterMs) ? retryAfterMs : undefined);
     }
     this.stage = "response";
-    const body = await readBoundedFetchBody(response, 65_536, {
+    const body = await readBoundedFetchBody(response, options.maximumBytes ?? 65_536, {
       invalidContentLength: () => new Error("Invalid account response length"),
       tooLarge: () => new Error("Account response too large"),
       missingBody: () => new Error("Missing account response"),
@@ -93,7 +98,7 @@ export class AccountQuery {
     return { body: (options.parseJson ?? JSON.parse)(body.toString("utf8")) as unknown, status: response.status };
   }
 
-  rejectHttp(status: number): never { throw new HttpFailure(status); }
+  rejectHttp(status: number, retryAfterMs?: number): never { throw new HttpFailure(status, retryAfterMs); }
 }
 
 function httpReason(status: number): AccountQueryReason {
