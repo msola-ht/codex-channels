@@ -11,8 +11,9 @@ import { createProxyFetch } from "../runtime/proxy-fetch.mjs";
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
 import { validateOllamaCloudCatalogManifest } from "../runtime/model-template-bindings.mjs";
-import { modelBaseSnapshotPath, readDeepseekModelTemplateCatalog, readModelBaseSnapshot, withModelBaseSnapshotLock } from "../runtime/model-base-snapshot.mjs";
-import { createOllamaCloudCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
+import { modelBaseSnapshotPath, readModelBaseSnapshot, withModelBaseSnapshotLock } from "../runtime/model-base-snapshot.mjs";
+import { loadOllamaCloudModels, createOllamaCloudDiscoveredModel } from "./ollama-cloud-catalog.mjs";
+import { withOllamaCloudFetch } from "./ollama-cloud-model-verification.mjs";
 import { managedProviderDirectory, loadManagedModelProviderSettings, withManagedModelCatalogSettings } from "../runtime/model-provider-runtime.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { applyProviderFileUpdates, assertProviderFileSnapshots, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
@@ -20,6 +21,9 @@ import { withModelProviderManagementTransaction } from "./model-provider-managem
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
 import { assertManagedAccountMode, snapshotManagedAccountFiles, managedAccountRevision, assertManagedAccountRevision, managedAccountConfigurationEdit } from "./managed-provider-account-plan.mjs";
+
+const initialModelDiscoveries = new Map();
+const discoveryLifetimeMs = 10 * 60 * 1000;
 
 export function ollamaCloudSetupPaths(environment, accountId) {
   const definition = ollamaCloudAccountDefinition(accountId);
@@ -42,8 +46,7 @@ export function loadOllamaCloudModelChoices(environment = process.env) {
   const content = snapshots[0].content;
   if (content === undefined) {
     if (snapshots[1].content !== undefined) throw new AccountManagementError("provider-state-unavailable", "model", "共享目录与来源文件不完整");
-    const { catalog } = createOllamaCloudCatalogWithTemplateBindings(readDeepseekModelTemplateCatalog(environment), environment);
-    return { catalogExists: false, models: catalog.models.map(model => ({ id: model.slug, name: model.display_name })) };
+    return { catalogExists: false, models: [] };
   }
   try {
     const catalog = JSON.parse(content.toString("utf8"));
@@ -55,6 +58,61 @@ export function loadOllamaCloudModelChoices(environment = process.env) {
   } catch {
     throw new AccountManagementError("provider-state-unavailable", "model", "Ollama Cloud 共享模型目录无法安全读取");
   }
+}
+
+function initialDiscoveryState(accountId, apiKey, environment) {
+  const definition = ollamaCloudAccountDefinition(accountId);
+  const accounts = loadOllamaCloudAccounts(environment);
+  if (accounts.some(account => account.id === accountId)) throw new AccountManagementError("account-exists", "accountId", "账户已存在，请选择重新配置");
+  validateOllamaCloudAccounts([...accounts, { id: accountId, default: accounts.length === 0 }]);
+  managedAccountConfigurationEdit({ apiKey }, undefined, definition, environment);
+  if (loadOllamaCloudModelChoices(environment).catalogExists) throw new AccountManagementError("stale-preview", "model", "共享模型目录已存在，请从当前目录选择默认模型");
+  const paths = ollamaCloudSetupPaths(environment, accountId);
+  const baseRevision = readModelBaseSnapshot(environment).revision;
+  const snapshots = snapshotManagedAccountFiles([...Object.values(paths), `${paths.catalog}.settings-pending`, modelBaseSnapshotPath(environment)], definition, environment);
+  const revision = managedAccountRevision([...snapshots,
+    { path: "initial-discovery-key", content: Buffer.from(apiKey) },
+    { path: "initial-discovery-base", content: Buffer.from(baseRevision) },
+  ]);
+  return { revision, baseRevision };
+}
+
+function discoveredModelChoice(candidate, model) {
+  return { id: model.slug, name: model.display_name, contextWindow: candidate.proposedContextWindow,
+    upstreamContextWindow: candidate.upstreamContextWindow, reasoningEfforts: [...candidate.reasoningEfforts],
+    defaultReasoningEffort: candidate.defaultReasoningEffort, reasoningMode: candidate.reasoningMode,
+    supportsImages: candidate.imageCandidate };
+}
+
+/** Retain public metadata privately; account callers can select IDs, never supply capabilities. */
+export async function discoverOllamaCloudAccountModels(input, options = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || Object.keys(input).some(key => !["accountId", "apiKey", "refresh"].includes(key))
+    || input.refresh !== undefined && input.refresh !== true) throw new AccountManagementError("invalid-input", "model", "模型发现仅接受账户 ID、Key 与显式强制刷新");
+  const environment = options.environment ?? process.env;
+  const state = initialDiscoveryState(input.accountId, input.apiKey, environment);
+  const deadline = globalThis.AbortSignal.timeout(90_000);
+  const signal = options.signal ? globalThis.AbortSignal.any([options.signal, deadline]) : deadline;
+  let discovery;
+  try {
+    discovery = await withOllamaCloudFetch(environment, signal,
+      fetchImpl => loadOllamaCloudModels({ environment, refresh: input.refresh === true, fetchImpl, signal }), options.fetchImpl);
+    signal.throwIfAborted();
+  } catch {
+    if (options.signal?.aborted) throw new AccountManagementError("operation-cancelled", "model", "模型发现已取消");
+    throw new AccountManagementError("provider-state-unavailable", "model", "Ollama Cloud 公开模型元数据暂不可用，请稍后重新发现");
+  }
+  assertManagedAccountRevision(state.revision, initialDiscoveryState(input.accountId, input.apiKey, environment).revision);
+  const candidates = discovery.candidates.filter(candidate => candidate.status === "candidate");
+  const models = candidates.map(candidate => discoveredModelChoice(candidate, createOllamaCloudDiscoveredModel(candidate, environment)));
+  const now = Date.now();
+  for (const [token, snapshot] of initialModelDiscoveries) if (snapshot.expiresAt <= now) initialModelDiscoveries.delete(token);
+  while (initialModelDiscoveries.size >= 32) initialModelDiscoveries.delete(initialModelDiscoveries.keys().next().value);
+  const discoveryToken = randomUUID();
+  const expiresAt = now + discoveryLifetimeMs;
+  initialModelDiscoveries.set(discoveryToken, { ...state, candidates: structuredClone(candidates), expiresAt });
+  return { catalogExists: false, discoveryToken, revision: state.revision, expiresAt, models, cache: discovery.cache,
+    unavailableModels: discovery.candidates.filter(candidate => candidate.status !== "candidate").map(candidate => ({ id: candidate.id, status: candidate.status, reason: candidate.reason, reasonCode: candidate.reasonCode })) };
 }
 
 export async function previewOllamaCloudConfiguration(input, options = {}) {
@@ -69,7 +127,7 @@ export async function previewOllamaCloudConfiguration(input, options = {}) {
 }
 
 function ollamaCloudConfigurationPlan(input, environment) {
-  const allowed = ["accountId", "apiKey", "reconfigure", "mode", "model", "confirmExclusiveConfigChange", "expectedRevision", "operation"];
+  const allowed = ["accountId", "apiKey", "reconfigure", "mode", "model", "discoveryToken", "confirmExclusiveConfigChange", "expectedRevision", "operation"];
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !allowed.includes(key))) throw new AccountManagementError("invalid-input", "accountId", "账户请求包含不支持的字段");
   const definition = ollamaCloudAccountDefinition(input.accountId);
   const accounts = loadOllamaCloudAccounts(environment);
@@ -91,21 +149,29 @@ function ollamaCloudConfigurationPlan(input, environment) {
   if (!isManagedProviderModelValid(definition, model)) throw new AccountManagementError("invalid-input", "model", "新增账户必须明确选择准确模型 ID");
   let initialCatalog;
   let initialBindings;
+  let initialModel;
   if (choices.catalogExists) {
+    if (input.discoveryToken !== undefined) throw new AccountManagementError("stale-preview", "model", "共享模型目录已存在，请重新选择目录中的模型");
     if (!choices.models.some(entry => entry.id === model)) throw new AccountManagementError("model-not-found", "model", "默认模型不在共享目录中");
   } else {
     if (previous) throw new AccountManagementError("provider-state-unavailable", "model", "已有账户的共享目录缺失，请先恢复目录");
-    ({ catalog: initialCatalog, templateBindings: initialBindings } = createOllamaCloudCatalogWithTemplateBindings(readDeepseekModelTemplateCatalog(environment), environment));
-    if (!initialCatalog.models.some(entry => entry.slug === model)) throw new AccountManagementError("model-not-found", "model", "请选择受管目录中的默认模型");
+    const discovery = typeof input.discoveryToken === "string" ? initialModelDiscoveries.get(input.discoveryToken) : undefined;
+    if (!discovery || discovery.expiresAt <= Date.now()) throw new AccountManagementError("stale-preview", "model", "首次创建目录前请重新发现并选择远端模型");
+    assertManagedAccountRevision(discovery.revision, initialDiscoveryState(input.accountId, input.apiKey, environment).revision);
+    const candidate = discovery.candidates.find(entry => entry.id === model);
+    if (!candidate) throw new AccountManagementError("model-not-found", "model", "请选择本次发现中能力完整的模型");
+    initialCatalog = { models: [createOllamaCloudDiscoveredModel(candidate, environment)] };
+    initialModel = discoveredModelChoice(candidate, initialCatalog.models[0]);
+    initialBindings = {};
     if (readModelBaseSnapshot(environment).revision !== baseRevision) throw new AccountManagementError("stale-preview", "revision", "模型底座已变化，请重新预览");
   }
   const { apiKey, ...edit } = managedAccountConfigurationEdit(input, previous, definition, environment);
   const { mode } = edit;
   const willChange = edit.willChange || model !== previous?.model;
   assertManagedAccountMode(mode, definition, environment);
-  const revision = managedAccountRevision([...snapshots, ...(initialCatalog ? [{ path: "ollama-managed-catalog", content: Buffer.from(JSON.stringify({ baseRevision, initialCatalog, initialBindings })) }] : [])]);
+  const revision = managedAccountRevision([...snapshots, ...(initialCatalog ? [{ path: "ollama-managed-catalog", content: Buffer.from(JSON.stringify({ baseRevision, initialCatalog, initialBindings, discoveryToken: input.discoveryToken })) }] : [])]);
   return { apiKey, initialCatalog, initialBindings, baseRevision, preview: { revision, operation: account ? "reconfigure" : "add", account: { id: input.accountId, provider: definition.id, default: account?.default ?? accounts.length === 0 }, ...edit, model, willChange,
-    ...(initialCatalog ? { initialModels: initialCatalog.models.map(entry => ({ id: entry.slug, name: entry.display_name })) } : {}),
+    ...(initialCatalog ? { initialModels: [initialModel] } : {}),
     effects: { writesMainConfig: willChange && (mode === "exclusive" || previous?.mode === "exclusive"), writesIsolatedProfile: willChange && mode === "switching", writesInitialCatalog: initialCatalog !== undefined, readsAccountAuthentication: edit.credentialAction === "replace" }, activation: willChange ? "restart-all" : "none" } };
 }
 
@@ -168,6 +234,7 @@ export async function applyOllamaCloudConfiguration(input, options = {}) {
     const save = async () => {
       options.signal?.throwIfAborted();
       if (baseRevision !== undefined && readModelBaseSnapshot(environment).revision !== baseRevision) throw new AccountManagementError("stale-preview", "revision", "模型底座已变化，请重新预览");
+      if (writesCatalog) assertManagedAccountRevision(preview.revision, ollamaCloudConfigurationPlan(input, environment).preview.revision);
       await assertProviderFileSnapshots(snapshots);
       options.signal?.throwIfAborted();
       await applyProviderFileUpdates(updates, snapshots);
@@ -178,6 +245,7 @@ export async function applyOllamaCloudConfiguration(input, options = {}) {
       const saved = loadManagedModelProviderSettings(environment).find(entry => entry.provider === definition.id);
       if (!saved || saved.model !== preview.model || saved.mode !== mode) throw new Error("account readback mismatch");
     });
+    if (writesCatalog) initialModelDiscoveries.delete(input.discoveryToken);
     return { ...preview, action: "configured" };
   });
 }

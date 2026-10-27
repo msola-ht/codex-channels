@@ -20,6 +20,7 @@ import {
 import {
   normalizeAccountSettingsMutation,
   redactAccountSettingsResult,
+  discoverAccountSettingsModels,
 } from "./webui-account-settings-management.mjs";
 import { ApiError, readJsonBody, sendJson, sendManagementJson } from "./webui-http.mjs";
 import {
@@ -127,8 +128,9 @@ export async function routeProviderManagement({
     const input = await readJsonBody(request, maximumBodyBytes);
     if (state.snapshotReadsClosed) throw new ApiError(503, "provider_models_unavailable", "管理服务正在关闭，未读取模型候选");
     if (!input || typeof input !== "object" || Array.isArray(input)
-      || Object.keys(input).some(key => !["provider", "manualModel", "discovery"].includes(key))
+      || Object.keys(input).some(key => !["provider", "manualModel", "discovery", "refresh"].includes(key))
       || input.discovery !== undefined && input.discovery !== true
+      || input.refresh !== undefined && input.refresh !== true
       || typeof input.provider !== "string") {
       throw new ApiError(400, "provider_models_invalid_input", "新增模型候选参数无效");
     }
@@ -147,6 +149,7 @@ export async function routeProviderManagement({
         environment, signal: controller.signal,
         ...(Object.hasOwn(input, "manualModel") ? { manualModel: input.manualModel } : {}),
         ...(Object.hasOwn(input, "discovery") ? { discovery: input.discovery } : {}),
+        ...(Object.hasOwn(input, "refresh") ? { refresh: input.refresh } : {}),
       });
       entry = { controller, settled: task.then(() => undefined, () => undefined) };
       state.snapshotReads.add(entry);
@@ -305,6 +308,36 @@ export async function routeProviderManagement({
       resourceRevision: fingerprintManagementValue(resource),
       ...resource,
     });
+    return true;
+  }
+  if (path === "/account-settings/discover-models" && request.method === "POST") {
+    if (new URL(request.url, "http://localhost").searchParams.size !== 0) throw new ApiError(400, "invalid_account_operation", "账户模型发现不接受查询参数");
+    const input = await readJsonBody(request, Math.min(maximumBodyBytes, 16_384));
+    if (activeTemplateOptionsReads.has(state)) throw new ApiError(503, "provider_templates_busy", "已有模型候选读取正在进行，请稍后重试");
+    const controller = new AbortController();
+    const disconnect = () => { if (!response.writableEnded) controller.abort(); };
+    activeTemplateOptionsReads.add(state);
+    request.once("aborted", disconnect);
+    response.once("close", disconnect);
+    if (request.aborted || response.destroyed || state.snapshotReadsClosed) controller.abort();
+    let entry;
+    try {
+      const task = discoverAccountSettingsModels(input, environment, { signal: controller.signal });
+      entry = { controller, settled: task.then(() => undefined, () => undefined) };
+      state.snapshotReads.add(entry);
+      const discovery = await task;
+      controller.signal.throwIfAborted();
+      sendManagementJson(response, 200, discovery);
+    } catch (error) {
+      if (controller.signal.aborted && response.destroyed) return true;
+      throw error;
+    } finally {
+      controller.abort();
+      request.removeListener("aborted", disconnect);
+      response.removeListener("close", disconnect);
+      if (entry) state.snapshotReads.delete(entry);
+      activeTemplateOptionsReads.delete(state);
+    }
     return true;
   }
   if (path === "/account-settings/preview" && request.method === "POST") {

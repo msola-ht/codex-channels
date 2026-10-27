@@ -992,6 +992,7 @@ export type ManagementAccountSettingsMutationInput =
       operation: "olc.configure"
       accountId: string
       model?: string
+      discoveryToken?: string
       reconfigure?: boolean
       mode?: "switching" | "exclusive"
       apiKey?: string
@@ -1023,7 +1024,7 @@ export type ManagementAccountSettingsMutationInput =
   | { operation: "deepseek.default" | "deepseek.remove" | "clp.default" | "clp.remove"; accountId: string }
 
 export interface ManagementAccountSettingsPreview {
-  initialModels?: Array<{ id: string; name: string }>
+  initialModels?: import("./ollama-cloud-account-management.mjs").OllamaCloudDiscoveredModelChoice[]
   operation: string
   revision?: string
   activation?: string

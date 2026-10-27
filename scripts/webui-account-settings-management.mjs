@@ -33,7 +33,16 @@ import { loadManagedModelProviderSettings } from "../runtime/model-provider-runt
 import { ManagementOperationError, managementOperationError } from "./webui-management-operations.mjs";
 import { AccountManagementError } from "./account-management-error.mjs";
 import { loadOllamaCloudAccounts, ollamaCloudProviderId, validateOllamaCloudAccountId } from "../runtime/ollama-cloud-accounts.mjs";
-import { loadOllamaCloudModelChoices, previewOllamaCloudConfiguration, applyOllamaCloudConfiguration, previewOllamaCloudDefaultAccount, setOllamaCloudDefaultAccount, previewOllamaCloudRemoval, removeOllamaCloudConfiguration } from "./ollama-cloud-account-management.mjs";
+import { discoverOllamaCloudAccountModels, loadOllamaCloudModelChoices, previewOllamaCloudConfiguration, applyOllamaCloudConfiguration, previewOllamaCloudDefaultAccount, setOllamaCloudDefaultAccount, previewOllamaCloudRemoval, removeOllamaCloudConfiguration } from "./ollama-cloud-account-management.mjs";
+
+export async function discoverAccountSettingsModels(input, environment, options = {}) {
+  try {
+    if (input && typeof input === "object" && !Array.isArray(input)) managementAccountId(input.accountId, validateOllamaCloudAccountId);
+    return await discoverOllamaCloudAccountModels(input, { ...options, environment });
+  } catch (error) {
+    throw toManagementError(error);
+  }
+}
 
 export async function loadAccountSettingsResource(
   environment,
@@ -115,6 +124,7 @@ function accountSettingsMutation(input) {
         operation: input.operation,
         accountId: managementAccountId(input.accountId, validateOllamaCloudAccountId),
         ...(input.model === undefined ? {} : { model: input.model }),
+        ...(input.discoveryToken === undefined ? {} : { discoveryToken: input.discoveryToken }),
         ...(input.reconfigure === undefined ? {} : { reconfigure: input.reconfigure }),
         ...(input.mode === undefined ? {} : { mode: input.mode }),
         ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),

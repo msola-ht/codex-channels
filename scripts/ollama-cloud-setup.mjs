@@ -14,6 +14,7 @@ import {
   setOllamaCloudDefaultAccount,
   previewOllamaCloudDefaultAccount,
   loadOllamaCloudModelChoices,
+  discoverOllamaCloudAccountModels,
 } from "./ollama-cloud-account-management.mjs";
 
 export async function runOllamaCloudSetup(options = {}) {
@@ -60,15 +61,26 @@ async function runOllamaCloudSetupOperation(options) {
     if (!edit) return { action: "back" };
     const choices = loadOllamaCloudModelChoices(environment);
     let model = current?.model;
+    let discovery;
     if (action === "add") {
-      model = await prompts.select({ message: "账户默认模型", options: choices.models.map(entry => ({ value: entry.id, label: `${entry.name}（${entry.id}）` })) });
+      if (!choices.catalogExists) {
+        output.write("正在读取 Ollama Cloud 公开模型与能力元数据（一小时内复用缓存）；不发送推理请求。\n");
+        discovery = await discoverOllamaCloudAccountModels({ accountId, apiKey: edit.apiKey }, options);
+        output.write(`${discovery.cache.hit ? "使用本地缓存" : "已刷新公开缓存"}；获取 ${discovery.cache.fetchedAt}；有效至 ${discovery.cache.expiresAt}。可用 codexc provider ollama-cloud discover --refresh 强制刷新。\n`);
+        for (const entry of discovery.unavailableModels) output.write(`${JSON.stringify(entry.id)}：${entry.reason}\n`);
+        if (!discovery.models.length) throw new Error("远端没有能力完整的可选模型，请稍后重新发现");
+      }
+      const models = discovery?.models ?? choices.models;
+      model = await prompts.select({ message: "账户默认模型", options: models.map(entry => ({ value: entry.id, label: `${entry.name}（${entry.id}）`,
+        ...(entry.contextWindow === undefined ? {} : { hint: discoveredModelSummary(entry) }),
+      })) });
       if (prompts.isCancel(model)) return { action: "back" };
     }
-    const input = { accountId, ...edit, ...(action === "add" ? { model } : {}), reconfigure: action === "reconfigure" };
+    const input = { accountId, ...edit, ...(action === "add" ? { model } : {}), ...(discovery ? { discoveryToken: discovery.discoveryToken } : {}), reconfigure: action === "reconfigure" };
     output.write("新增或更换 Key 时，预览及保存会读取 Ollama Cloud 认证接口；不发送推理请求。\n");
     const preview = await previewOllamaCloudConfiguration(input, options);
     if (preview.initialModels) {
-      output.write(`将创建所有 OLC 账户共用的受管模型目录：\n${preview.initialModels.map(entry => `  ${entry.name}（${entry.id}）`).join("\n")}\n受管配置不代表真实云端推理已验收。\n`);
+      output.write(`将创建所有 OLC 账户共用的受管模型目录：\n${preview.initialModels.map(entry => `  ${entry.name}（${entry.id}）\n  ${discoveredModelSummary(entry)}`).join("\n")}\n受管配置不代表真实云端推理已验收。\n`);
     }
     if (!await confirmManagedAccountEdit(preview, { prompts, output })) return { action: "back" };
     result = await applyOllamaCloudConfiguration({ ...input, confirmExclusiveConfigChange: preview.effects.writesMainConfig, expectedRevision: preview.revision }, options);
@@ -78,4 +90,11 @@ async function runOllamaCloudSetupOperation(options) {
   }
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
+}
+
+function discoveredModelSummary(model) {
+  const reasoning = model.reasoningMode === "toggle"
+    ? `思考开关 ${model.reasoningEfforts.map(effort => effort === "none" ? "none=关闭" : "high=开启（非强度）").join("/")}`
+    : `思考 ${model.reasoningEfforts.join("/")}`;
+  return `窗口 ${model.contextWindow}（远端 ${model.upstreamContextWindow}）；${reasoning}（默认 ${model.defaultReasoningEffort}）；${model.supportsImages ? "支持图片" : "仅文本"}；freeform 与 tool_search 已启用`;
 }

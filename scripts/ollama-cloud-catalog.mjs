@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
+import { join } from "node:path";
+import { z } from "zod";
+import { connectHomePath } from "../runtime/connect-home.mjs";
+import { ensurePrivateDirectorySync, inspectPrivateDirectoryAccessSync, readPrivateFileSync, writePrivateFileAtomic } from "../runtime/private-file.mjs";
+import { withPrivateFileLock } from "../runtime/private-file-lock.mjs";
 import { ollamaCloudProviderDefinition, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
+import { createIndependentModelDraft, defaultModelDisplayName } from "../runtime/model-catalog.mjs";
+import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { withThirdPartyLocalTools } from "../runtime/third-party-model-catalog.mjs";
 
 const origin = "https://ollama.com";
 const maximumBytes = 2 * 1024 * 1024;
@@ -8,6 +16,86 @@ const maximumModels = 64;
 const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const cacheLifetimeMs = 60 * 60 * 1000;
+const cacheMaximumBytes = 2 * 1024 * 1024;
+const hex = z.string().regex(/^[a-f0-9]{64}$/u);
+const date = z.string().max(40).refine(value => Number.isFinite(Date.parse(value)));
+const effort = z.enum([...efforts]);
+const fingerprintSchema = z.object({ digest: z.string().min(1).max(256).regex(/^[^\p{Cc}]+$/u),
+  size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), modifiedAt: date,
+  capabilities: z.array(z.string().max(64).regex(/^[^\p{Cc}]*$/u)).max(32), }).strict();
+const candidateSchema = z.object({ id: z.string().min(1).max(200).refine(value => isManagedProviderModelValid(ollamaCloudProviderDefinition, value)),
+  status: z.literal("candidate"), requiresResponsesVerification: z.literal(false),
+  upstreamContextWindow: z.number().int().min(1024).max(Number.MAX_SAFE_INTEGER), contextWindowPolicyCap: z.literal(393_216),
+  proposedContextWindow: z.number().int().min(1024).max(393_216), reasoningEfforts: z.array(effort).min(1).max(7),
+  defaultReasoningEffort: effort, reasoningMode: z.enum(["toggle", "levels"]), imageCandidate: z.boolean(),
+  applyPatchToolType: z.literal("freeform"), supportsSearchTool: z.literal(true), supportsWebsockets: z.literal(false),
+  fingerprint: fingerprintSchema, showSha256: hex,
+}).strict().refine(value => value.proposedContextWindow === Math.min(value.upstreamContextWindow, 393_216)
+  && new Set(value.reasoningEfforts).size === value.reasoningEfforts.length && value.reasoningEfforts.includes(value.defaultReasoningEffort)
+  && (value.reasoningMode !== "toggle" || value.reasoningEfforts.every(level => level === "none" || level === "high"))
+  && value.imageCandidate === value.fingerprint.capabilities.includes("vision")
+  && ["completion", "tools"].every(capability => value.fingerprint.capabilities.includes(capability)));
+const unavailableSchema = z.object({ id: z.string().min(1).max(1024), status: z.enum(["unconfirmed", "excluded"]),
+  reason: z.string().min(1).max(256), reasonCode: z.enum(["invalidId", "missingTag", "details", "sourceChanged", "capabilities", "capabilityConflict", "unsupported", "context", "thinking", "defaultThinking"]),
+  fingerprint: fingerprintSchema.optional(), showSha256: hex.optional(), }).strict();
+const discoverySchema = z.object({ source: z.literal("ollama-cloud"), generatorVersion: z.literal(1), fetchedAt: date,
+  sources: z.tuple([z.literal(`${origin}/v1/models`), z.literal(`${origin}/api/tags`), z.literal(`${origin}/api/show`)]),
+  modelsSha256: hex, tagsSha256: hex, stable: z.literal(true), unmatchedTags: z.array(z.string().min(1).max(1024)).max(maximumModels),
+  candidates: z.array(z.union([candidateSchema, unavailableSchema])).min(1).max(maximumModels),
+}).strict().refine(value => new Set(value.candidates.map(candidate => candidate.id)).size === value.candidates.length
+  && !value.candidates.some(candidate => ["details", "sourceChanged"].includes(candidate.reasonCode)));
+const cacheSchema = z.object({ schemaVersion: z.literal(1), discovery: discoverySchema }).strict();
+
+/** Public metadata cache only; confirmation snapshots retain their separate ten-minute lifetime. */
+export async function loadOllamaCloudModels({ environment = process.env, signal, refresh = false, fetchImpl = globalThis.fetch } = {}) {
+  if (typeof refresh !== "boolean") throw new Error("Ollama 缓存刷新选项无效");
+  const operation = globalThis.AbortSignal.any([globalThis.AbortSignal.timeout(90_000), ...(signal ? [signal] : [])]);
+  const home = connectHomePath(environment);
+  const directories = [home, join(home, "providers"), join(home, "providers", "ollama-cloud")];
+  const path = join(directories[2], "discovery-cache.json");
+  const read = () => {
+    operation.throwIfAborted();
+    for (const directory of directories) {
+      try { inspectPrivateDirectoryAccessSync(directory); }
+      catch (error) { if (error.code === "ENOENT") return undefined; throw error; }
+    }
+    let raw;
+    try { raw = readPrivateFileSync(path, cacheMaximumBytes); }
+    catch (error) { if (error.code === "ENOENT") return undefined; throw error; }
+    try { return cacheSchema.parse(JSON.parse(raw)).discovery; }
+    catch { throw new Error("Ollama 模型缓存格式损坏或版本不受支持；未修改缓存，请检查 discovery-cache.json"); }
+  };
+  const fresh = value => value && Date.now() >= Date.parse(value.fetchedAt) && Date.now() - Date.parse(value.fetchedAt) < cacheLifetimeMs;
+  const result = (value, hit) => ({ ...value, cache: { hit, fetchedAt: value.fetchedAt,
+    expiresAt: new Date(Date.parse(value.fetchedAt) + cacheLifetimeMs).toISOString() } });
+  const cached = read();
+  if (!refresh && fresh(cached)) return result(cached, true);
+  for (const directory of directories) {
+    try { inspectPrivateDirectoryAccessSync(directory); }
+    catch (error) { if (error.code !== "ENOENT") throw error; ensurePrivateDirectorySync(directory); }
+  }
+  return withPrivateFileLock(path, async () => {
+    operation.throwIfAborted();
+    const latest = read();
+    if (!refresh && fresh(latest)) return result(latest, true);
+    const discovery = await discoverOllamaCloudModels({ fetchImpl, signal: operation });
+    operation.throwIfAborted();
+    // Failed or unstable lookups must not replace the last complete snapshot.
+    if (!discovery.stable || discovery.candidates.some(candidate => candidate.reasonCode === "details")) {
+      throw new Error("Ollama 模型来源变化或详情读取失败；未更新缓存，请重新读取");
+    }
+    const document = cacheSchema.parse({ schemaVersion: 1, discovery });
+    const content = `${JSON.stringify(document)}\n`;
+    if (Buffer.byteLength(content) > cacheMaximumBytes) throw new Error("Ollama 模型缓存超过 2 MiB，未更新缓存");
+    await writePrivateFileAtomic(path, content, { signal: operation });
+    operation.throwIfAborted();
+    return result(discovery, false);
+  }, { label: "Ollama 模型缓存" }).catch(error => {
+    operation.throwIfAborted();
+    throw error;
+  });
+}
 
 /** Public metadata only: no credentials, persistence or capability acceptance. */
 export async function discoverOllamaCloudModels({ fetchImpl = globalThis.fetch, signal } = {}) {
@@ -152,17 +240,45 @@ function candidate(id, show, tagCapabilities) {
   if (!Number.isSafeInteger(context) || context < 1024) return unconfirmed("上下文窗口缺失、歧义或无效", "context");
   const thinking = show.thinking;
   if (!record(thinking) || !Array.isArray(thinking.values) || !thinking.values.length || thinking.values.length > 16
-    || thinking.values.some(value => value !== false && (typeof value !== "string" || !efforts.has(value)))) {
+    || thinking.values.some(value => typeof value !== "boolean" && (typeof value !== "string" || !efforts.has(value)))) {
     return unconfirmed("思考元数据缺失或含未确认的布尔/等级映射", "thinking");
   }
-  const levels = thinking.values.map(value => value === false ? "none" : value);
-  const defaultLevel = thinking.default === false ? "none" : thinking.default;
+  // Ollama's OpenAI compatibility maps none to false and recognized efforts to
+  // true for boolean-only controls. High is a carrier for "on", not a strength.
+  const toggle = thinking.values.every(value => typeof value === "boolean");
+  if (!toggle && thinking.values.includes(true)) return unconfirmed("混合开关与等级的开启值无法唯一映射", "thinking");
+  const mapEffort = value => value === false ? "none" : value === true ? "high" : value;
+  const levels = thinking.values.map(mapEffort);
+  const defaultLevel = mapEffort(thinking.default);
+  if (!thinking.values.includes(thinking.default)) return unconfirmed("默认思考值不在来源选项中", "defaultThinking");
   if (new Set(levels).size !== levels.length || !levels.includes(defaultLevel)) return unconfirmed("默认思考等级或等级集合无效", "defaultThinking");
-  return { id, status: "candidate", requiresResponsesVerification: true,
+  return { id, status: "candidate", requiresResponsesVerification: false,
     upstreamContextWindow: context, contextWindowPolicyCap: 393_216,
     proposedContextWindow: Math.min(context, 393_216),
     reasoningEfforts: levels, defaultReasoningEffort: defaultLevel,
+    reasoningMode: toggle ? "toggle" : "levels",
     imageCandidate: show.capabilities.includes("vision"),
-    applyPatchToolType: null, supportsWebsockets: false,
+    applyPatchToolType: "freeform", supportsSearchTool: true, supportsWebsockets: false,
   };
+}
+
+/** Metadata supplies model capabilities; Responses adapters are the OLC default policy. */
+export function createOllamaCloudDiscoveredModel(candidate, environment = process.env) {
+  if (candidate?.status !== "candidate") throw new Error("Ollama 模型元数据不完整，不能生成目录");
+  let name = "";
+  for (const character of defaultModelDisplayName(candidate.id) || candidate.id) {
+    if (name.length + character.length > 120) break;
+    name += character;
+  }
+  return withThirdPartyLocalTools(createResponsesModelCatalog([createIndependentModelDraft({
+    id: candidate.id, name,
+    contextWindow: candidate.proposedContextWindow, maxContextWindow: candidate.proposedContextWindow,
+    reasoningEfforts: candidate.reasoningEfforts, defaultReasoningEffort: candidate.defaultReasoningEffort,
+    ...(candidate.reasoningMode === "toggle" ? { reasoningDescriptions: Object.fromEntries(candidate.reasoningEfforts.map(effort =>
+      [effort, effort === "none" ? "关闭思考" : "开启思考（兼容值 high，不代表强度等级）"])) } : {}),
+    supportsImages: candidate.imageCandidate, supportsImageDetailOriginal: false,
+    applyPatchToolType: "freeform", supportsSearchTool: true, supportsWebSearch: false,
+    supportsReasoningSummary: false, defaultReasoningSummary: "none",
+    supportsVerbosity: false, defaultVerbosity: null,
+  })], candidate.id, {}, environment), environment).models[0];
 }

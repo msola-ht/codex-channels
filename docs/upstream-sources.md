@@ -91,15 +91,17 @@ TTFT 参考 `internal/runtime/executor/helps/responses_ttft_helpers.go`、`chat_
 
 ## Ollama Cloud 官方来源
 
-2026-10-26 实施时核对 [OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)、[Cloud](https://docs.ollama.com/cloud)、[List models](https://docs.ollama.com/api/tags)、[Show model details](https://docs.ollama.com/api-reference/show-model-details.md) 与 [Balance](https://docs.ollama.com/api/balance.md)。这些动态官方文档补充上游 HTTP 合同，不替换本地锁定的 Codex 协议基线。
+2026-10-26 实施时核对 [OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)、[Cloud](https://docs.ollama.com/cloud)、[List models](https://docs.ollama.com/api/tags)、[Show model details](https://docs.ollama.com/api-reference/show-model-details.md)、[Thinking](https://docs.ollama.com/capabilities/thinking) 与 [Balance](https://docs.ollama.com/api/balance.md)。这些动态官方文档补充上游 HTTP 合同，不替换本地锁定的 Codex 协议基线。
 
 OLC 只使用 `https://ollama.com/v1` 的无状态 Responses，明确关闭 WS。发现使用公开 `/v1/models`、`/api/tags`、`/api/show`，不以公开端点判断 Key 有效或把元数据当作工具往返验收。现行合同见 [Ollama Cloud](ollama-cloud.md)，实际观察和未验收范围见 [接入验收记录](ollama-cloud-probe.md)。
 
-上述 OpenAI compatibility 官方页的云端示例使用无状态 Responses，普通 function 工具、`max_output_tokens` 及模型定义的 `reasoning.effort` 属于公开合同；不能从字段被接受推断实际思考质量。产品采用完整显式历史的函数及模拟结果续答，不使用 `previous_response_id` 或 `conversation`。固定受管模型可以直接添加，其他公开发现候选须经独立验证后保存；两条路径均不能以本地合成响应代替真实云端验收。
+上述 OpenAI compatibility 官方页的云端示例使用无状态 Responses，普通 function 工具、`max_output_tokens` 及模型定义的 `reasoning.effort` 属于公开合同；不能从字段被接受推断实际思考质量。产品采用完整显式历史的函数及模拟结果续答，不使用 `previous_response_id` 或 `conversation`。元数据完整的远端候选可以直接选择、预览并保存，逐模型收费验证是独立可选诊断；两条路径均不能以本地合成响应代替真实云端验收。
 
-2026-10-26 客户端工具搜索适配复核了锁定 Codex 的 `tools/src/tool_spec.rs`、`protocol/src/models.rs` 及客户端搜索 handler／工具加载实现。`execution=client` 的声明、对象参数、配对搜索输出和检索后的 defer_loading 语义由该基线确定；OLC 使用普通 function 承载，不宣称上游原生支持 tool_search。DS 模板关联记录本地配置来源，后续能力更新使用 Ollama 投影而非 DS 原始端点能力；仍不作为云端验证记录。
+2026-10-26 客户端工具搜索适配复核了锁定 Codex 的 `tools/src/tool_spec.rs`、`protocol/src/models.rs` 及客户端搜索 handler／工具加载实现。`execution=client` 的声明、对象参数、配对搜索输出和检索后的 defer_loading 语义由该基线确定；OLC 使用普通 function 承载，不宣称上游原生支持 tool_search。新模型按公开元数据及本地 Responses 适配策略生成，不自动绑定 DS 模板；保存后显式选择的模板关联仅供提示词和运行设置更新，不能覆盖 OLC 能力或作为云端验证记录。旧关联仍可读，不迁移或补写。
 
-2026-10-26 对公开 [`/v1/models`](https://ollama.com/v1/models) 的只读查询返回 23 个 ID，包含 `deepseek-v4.1-flash`、`deepseek-v4.1-flash:1017`、`deepseek-v4-pro:0813`。逐个读取 `/api/show` 均返回 200：两项 Flash 声明 completion/thinking/tools/vision，Pro 声明 completion/tools/thinking；上下文均为 1048576，思考选项均含 `false/low/high/max`，Flash 默认 `high`，Pro 默认 `low`。本地受管映射只采用精确 ID、图片差异及 `low/high/max` 和默认值，窗口仍受 393216 策略上限约束，不把布尔 `false` 映射为 Responses `none`。生成器以仓库 DS 模板为起点再覆盖 OLC 能力，manifest 不伪造模板能力关联或云端验证记录。这些公开查询不使用 Key、不发送推理请求，不能证明认证、图片、freeform 或真实工具往返已通过。
+历史初始实现观察（2026-10-26）：对公开 [`/v1/models`](https://ollama.com/v1/models) 的只读查询返回 23 个 ID，包含 `deepseek-v4.1-flash`、`deepseek-v4.1-flash:1017`、`deepseek-v4-pro:0813`。这三个 ID 的 `/api/show` 均返回 200：两项 Flash 声明 completion/thinking/tools/vision，Pro 声明 completion/tools/thinking；上下文均为 1048576，思考选项均含 `false/low/high/max`，Flash 默认 `high`，Pro 默认 `low`。当时实现以 DS 模板生成三个固定映射，未映射 `false`；该生成策略已被下述现行规则替换。这次公开查询不使用 Key、不发送推理请求，不能证明认证、图片、freeform 或真实工具往返已通过，也不是现行可添加候选数量的验收。
+
+现行公开选模规则取 `/api/tags` 与 `/v1/models` 的精确 ID 交集，用 `/api/show` 取得窗口、思考和图片能力；未声明 `vision` 时不启用图片，窗口仍受 393216 策略上限约束。[Thinking](https://docs.ollama.com/capabilities/thinking) 说明 `thinking.values` 可含布尔或命名等级，`[false]` 表示无思考，缺失 `thinking` 表示元数据未知。[OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility) 明确 `/v1/responses` 的 `reasoning.effort` 使用兼容别名：布尔开关模型接受已识别等级表示开启，`none` 表示关闭。因此本地将 `false` 映射 `none`，纯布尔 `true` 以 `high` 承载“开启”并明确不代表强度，混合 `false` 与命名等级保留关闭及精确等级；不据模型名称猜测。普通添加不发送推理请求，不伪造 `modelDiscovery`；高级收费诊断成功后仍使用相同能力生成规则，仅另外记录其实际诊断范围。
 
 2026-10-26 核对 [Web search](https://docs.ollama.com/capabilities/web-search)：独立固定 `POST https://ollama.com/api/web_search` 接受 query/max_results（默认五条、最多十条），顶层 results 每条包含 title/url/content 摘要；使用账户 Bearer。网页读取是另一个接口，当前未实现，也未调用真实搜索 API。Responses 工具及搜索生命周期同时核对锁定 Codex `tools/src/tool_spec.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs`；Search action 只保留 query/queries，外部用量缺必需计数时省略 usage，不虚构零。
 

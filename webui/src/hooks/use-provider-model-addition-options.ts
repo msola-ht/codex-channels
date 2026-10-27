@@ -38,7 +38,7 @@ export function useProviderModelAdditionOptions(target: { provider: string; revi
     }
   }, [open, cancel])
 
-  const load = async (manualModel?: ManagedManualModelDefinition, discovery = false) => {
+  const load = async (manualModel?: ManagedManualModelDefinition, discovery = false, refresh = false) => {
     if (active.current !== null || !current.current.open || current.current.stale || current.current.busy || current.current.key !== key) return
     const controller = new AbortController()
     active.current = controller
@@ -47,7 +47,7 @@ export function useProviderModelAdditionOptions(target: { provider: string; revi
     const owns = () => active.current === controller && !controller.signal.aborted
       && current.current.key === key && current.current.open && !current.current.stale
     try {
-      const options = await fetchProviderModelAdditionOptions(target.provider, manualModel, controller.signal, discovery)
+      const options = await fetchProviderModelAdditionOptions(target.provider, manualModel, controller.signal, discovery, refresh)
       if (owns()) setState({ ...initial, options, loading: false, selected: manualModel ? options.candidates.map(entry => entry.model) : [] })
     } catch (cause) {
       if (owns()) setState({ ...initial, loading: false, errorCode: cause instanceof ApiClientError ? cause.code : "network_error" })

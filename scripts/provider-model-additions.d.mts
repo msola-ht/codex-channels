@@ -2,13 +2,16 @@ import type { ModelDefinition } from "../runtime/model-catalog.mjs";
 /** Managed catalogs do not persist custom sampling defaults or inferred bindings.
  * CLP accepts enabled reasoning but rejects original image detail and reasoning-summary controls.
  * OLC requires applyPatchToolType=null or freeform and an explicit supportsSearchTool boolean; native web search is unavailable.
- * OLC discovery requires a separate explicitly confirmed per-model Responses verification before saving. */
+ * OLC normal addition selects server-generated remote metadata; manual definitions are rejected.
+ * Explicit discovery remains an optional, separately confirmed Responses diagnostic. */
 export type ManagedManualModelDefinition = Omit<ModelDefinition, "sampling" | "template">
   | { id: string; name: string; inheritFrom: string };
 export interface ProviderModelAdditionCandidate {
   model: string;
   displayName: string;
   fields: Record<string, unknown>;
+  upstreamContextWindow?: number;
+  reasoningMode?: "toggle" | "levels";
   inheritedFrom?: string;
   ollamaVerification?: import("../runtime/model-template-bindings.mjs").OllamaCloudModelVerification;
   clineRequestProfile?: import("../runtime/chat-reasoning.mjs").ClinePassRequestProfile;
@@ -23,6 +26,7 @@ export interface ProviderModelAdditionOptions {
   providers: string[];
   candidates: ProviderModelAdditionCandidate[];
   discovery?: OllamaCloudDiscoveryCandidate[];
+  discoveryCache?: { hit: boolean; fetchedAt: string; expiresAt: string };
 }
 export interface OllamaCloudDiscoveryCandidate {
   id: string;
@@ -34,6 +38,7 @@ export interface OllamaCloudDiscoveryCandidate {
   reasoningEfforts?: string[];
   defaultReasoningEffort?: string;
   imageCandidate?: boolean;
+  reasoningMode?: "toggle" | "levels";
 }
 export interface ProviderModelAdditionVerificationInput {
   provider: string;
@@ -68,8 +73,9 @@ export interface ProviderModelAdditionLoadOptions {
   environment?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   manualModel?: ManagedManualModelDefinition;
-  /** OLC public candidates and optional paid verification; omitted loads managed models. */
+  /** OLC optional paid diagnostic; omitted loads directly selectable remote models. */
   discovery?: true;
+  refresh?: true;
   downloadCatalog?: typeof import("./deepseek-setup.mjs").downloadDeepseekCatalog;
   fetchImpl?: typeof globalThis.fetch;
 }

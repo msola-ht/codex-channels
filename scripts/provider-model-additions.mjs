@@ -11,16 +11,16 @@ import { withThirdPartyLocalTools } from "../runtime/third-party-model-catalog.m
 import { readDeepseekModelTemplateCatalog, readModelBaseSnapshot, withModelBaseSnapshotLock } from "../runtime/model-base-snapshot.mjs";
 import { resolveClinePassRequestProfile } from "../runtime/chat-reasoning.mjs";
 import { validateClinePassProviderOptions } from "../runtime/cline-provider-options.mjs";
-import { createIndependentModelDraft, defaultModelDisplayName, isValidCustomModelId } from "../runtime/model-catalog.mjs";
+import { createIndependentModelDraft, isValidCustomModelId } from "../runtime/model-catalog.mjs";
 import { readModelTemplateBindings, validateOllamaCloudCatalogManifest } from "../runtime/model-template-bindings.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import { createCcgCatalogWithTemplateBindings, createOpencodeGoCatalogWithTemplateBindings, createClinePassCatalogWithTemplateBindings, createOllamaCloudCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
+import { createCcgCatalogWithTemplateBindings, createOpencodeGoCatalogWithTemplateBindings, createClinePassCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
 import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { loadConfiguredManagedProviderMaterial } from "../runtime/model-provider-managed-runtime.mjs";
-import { discoverOllamaCloudModels } from "./ollama-cloud-catalog.mjs";
+import { discoverOllamaCloudModels, loadOllamaCloudModels, createOllamaCloudDiscoveredModel } from "./ollama-cloud-catalog.mjs";
 import { withOllamaCloudFetch, verifyOllamaCloudResponses } from "./ollama-cloud-model-verification.mjs";
 
 const secret = randomBytes(32);
@@ -37,7 +37,7 @@ const stateError = error => error instanceof ProviderModelManagementError || err
 
 /** The downloaded source is retained privately; callers select exact candidate IDs only. */
 export async function loadProviderModelAdditionOptions(provider, {
-  environment = process.env, signal, manualModel, fetchImpl, discovery,
+  environment = process.env, signal, manualModel, fetchImpl, discovery, refresh,
   downloadCatalog = downloadDeepseekCatalog,
 } = {}) {
   try {
@@ -45,6 +45,12 @@ export async function loadProviderModelAdditionOptions(provider, {
     const operationSignal = signal ? globalThis.AbortSignal.any([signal, deadline]) : deadline;
     operationSignal.throwIfAborted();
     const state = await readState(provider, environment);
+    if (refresh !== undefined && (refresh !== true || manualModel !== undefined || state.family.storageId !== "ollama-cloud")) {
+      throw invalid("invalid-input", "refresh", "强制刷新仅用于 OLC 远端模型列表");
+    }
+    if (state.family.storageId === "ollama-cloud" && manualModel !== undefined) {
+      throw invalid("invalid-input", "manualModel", "Ollama Cloud 请从远端列表选择模型；能力自动读取，保存后可继承提示词及运行设置");
+    }
     if (discovery !== undefined && (discovery !== true || manualModel !== undefined || state.family.storageId !== "ollama-cloud")) {
       throw invalid("invalid-input", "provider", "公开发现仅用于 OLC，不能与手动模型混用");
     }
@@ -110,22 +116,24 @@ export async function loadProviderModelAdditionOptions(provider, {
       models = generated.catalog.models;
       bindings = generated.templateBindings;
       source = { kind: "deepseek" };
-    } else if (state.family.storageId === "ollama-cloud" && discovery !== true) {
-      const generated = createOllamaCloudCatalogWithTemplateBindings(readDeepseekModelTemplateCatalog(environment), environment);
-      models = generated.catalog.models;
-      bindings = generated.templateBindings;
-      source = { kind: "ollama-managed" };
     } else if (state.family.storageId === "ollama-cloud") {
       const material = loadConfiguredManagedProviderMaterial(provider, environment);
-      const discovery = await withOllamaCloudFetch(environment, operationSignal,
-        fetch => discoverOllamaCloudModels({ fetchImpl: fetch, signal: operationSignal }), fetchImpl);
+      const discovered = await withOllamaCloudFetch(environment, operationSignal,
+        fetch => loadOllamaCloudModels({ environment, refresh: discovery === true || refresh === true, fetchImpl: fetch, signal: operationSignal }), fetchImpl);
       operationSignal.throwIfAborted();
       if ((await readState(provider, environment)).revision !== state.revision
         || loadConfiguredManagedProviderMaterial(provider, environment).revision !== material.revision
         || readModelBaseSnapshot(environment).revision !== baseRevision) throw stale();
       const snapshot = { provider, providers: state.providers, scope: state.scope, revision: state.revision,
-        source: { kind: "ollama-discovery", discovery }, materialRevision: material.revision, baseRevision,
-        candidates: [], discovery: discovery.candidates.map(candidate => ({ ...candidate,
+        source: { kind: discovery === true ? "ollama-discovery" : "ollama-metadata", discovery: discovered }, materialRevision: material.revision, baseRevision,
+        discoveryCache: discovered.cache,
+        candidates: discovery === true ? [] : discovered.candidates.filter(candidate => candidate.status === "candidate"
+          && !state.catalog.models.some(model => model.slug === candidate.id)).map(candidate => {
+          const fields = createOllamaCloudDiscoveredModel(candidate, environment);
+          validateModel(fields, state);
+          return { model: candidate.id, displayName: fields.display_name, fields,
+            upstreamContextWindow: candidate.upstreamContextWindow, reasoningMode: candidate.reasoningMode };
+        }), discovery: discovered.candidates.map(candidate => ({ ...candidate,
           alreadySaved: state.catalog.models.some(model => model.slug === candidate.id) })), expiresAt: Date.now() + lifetimeMs };
       return retainSnapshot(snapshot);
     } else if (state.custom) {
@@ -175,8 +183,8 @@ function retainSnapshot(snapshot) {
   }
   const sourceToken = randomBytes(32).toString("hex");
   snapshots.set(sourceToken, { ...structuredClone(snapshot), bytes });
-  const { provider, revision, expiresAt, providers, candidates, discovery } = snapshot;
-  return structuredClone({ provider, sourceToken, revision, expiresAt, providers, candidates, ...(discovery ? { discovery } : {}) });
+  const { provider, revision, expiresAt, providers, candidates, discovery, discoveryCache } = snapshot;
+  return structuredClone({ provider, sourceToken, revision, expiresAt, providers, candidates, ...(discovery ? { discovery } : {}), ...(discoveryCache ? { discoveryCache } : {}) });
 }
 
 /** A paid operation is separate from loading and saving; only server-owned candidates qualify. */
@@ -204,17 +212,8 @@ export async function verifyProviderModelAddition(input, { environment = process
     const material = loadConfiguredManagedProviderMaterial(input.provider, environment);
     if (snapshot.materialRevision !== material.revision || material.baseUrl !== "https://ollama.com/v1") throw stale();
     // Reject a locally invalid draft before sending any paid request.
-    let displayName = "";
-    for (const character of defaultModelDisplayName(candidate.id) || candidate.id) {
-      if (displayName.length + character.length > 120) break;
-      displayName += character;
-    }
-    const generated = withThirdPartyLocalTools(createResponsesModelCatalog([createIndependentModelDraft({
-      id: candidate.id, name: displayName,
-      contextWindow: candidate.proposedContextWindow, maxContextWindow: candidate.proposedContextWindow,
-      reasoningEfforts: input.reasoningEfforts, defaultReasoningEffort: candidate.defaultReasoningEffort,
-      supportsImages: false, supportsImageDetailOriginal: false, applyPatchToolType: null, supportsSearchTool: false,
-    })], candidate.id, {}, environment), environment).models[0];
+    // The diagnostic selection limits paid requests, not metadata-defined capabilities.
+    const generated = createOllamaCloudDiscoveredModel(candidate, environment);
     validateModel(generated, state);
     const proposedCatalog = { ...state.catalog, models: [...state.catalog.models, generated] };
     if (state.catalog.models.length >= 64 || Buffer.byteLength(`${JSON.stringify(proposedCatalog, null, 2)}\n`) > 2 * 1024 * 1024) {
@@ -264,6 +263,7 @@ export async function verifyProviderModelAddition(input, { environment = process
     const options = retainSnapshot({ provider: input.provider, providers: state.providers, scope: state.scope, revision: state.revision,
       source: { kind: "ollama-verified", model: candidate.id, provenance }, materialRevision: material.revision,
       baseRevision: snapshot.baseRevision, candidates: [{ model: candidate.id, displayName: generated.display_name, fields: generated,
+        upstreamContextWindow: candidate.upstreamContextWindow, reasoningMode: candidate.reasoningMode,
         ollamaVerification: provenance.verification }], expiresAt: Date.now() + lifetimeMs });
     return { ...result, options };
   } catch (error) { throw stateError(error); }
@@ -272,6 +272,7 @@ export async function verifyProviderModelAddition(input, { environment = process
 function sourceIdentity(discovery) {
   const identity = { ...discovery };
   delete identity.fetchedAt;
+  delete identity.cache;
   // The public /v1/models data order varies between identical ID sets. Its raw
   // hash is provenance only; sorted exact IDs and all consumed tags/show fields
   // remain bound by candidates, tagsSha256 and the per-model fingerprints.

@@ -531,9 +531,9 @@ export function fetchProviderModelTemplateOptions(provider: string, signal?: Abo
   return getJson(`${API_PREFIX}/management/provider-model-templates?${new URLSearchParams({ provider })}`, signal)
 }
 
-export function fetchProviderModelAdditionOptions(provider: string, manualModel: ManagedManualModelDefinition | undefined, signal: AbortSignal, discovery?: boolean): Promise<ProviderModelAdditionOptions> {
+export function fetchProviderModelAdditionOptions(provider: string, manualModel: ManagedManualModelDefinition | undefined, signal: AbortSignal, discovery?: boolean, refresh?: boolean): Promise<ProviderModelAdditionOptions> {
   return requestJson(`${API_PREFIX}/management/provider-model-additions`, {
-    method: "POST", body: JSON.stringify({ provider, ...(manualModel ? { manualModel } : {}), ...(discovery === true ? { discovery: true } : {}) }),
+    method: "POST", body: JSON.stringify({ provider, ...(manualModel ? { manualModel } : {}), ...(discovery === true ? { discovery: true } : {}), ...(refresh === true ? { refresh: true } : {}) }),
   }, signal, 100_000)
 }
 
@@ -583,6 +583,15 @@ export function applyManagementProviderSettings(
 
 export function fetchManagementAccountSettings(signal?: AbortSignal): Promise<ManagementAccountSettingsResponse> {
   return getJson<ManagementAccountSettingsResponse>(`${API_PREFIX}/management/account-settings`, signal)
+}
+
+export type OllamaCloudAccountModelDiscovery = Awaited<ReturnType<typeof import("../../../scripts/ollama-cloud-account-management.mjs").discoverOllamaCloudAccountModels>>
+
+export function discoverOllamaCloudAccountModels(input: { accountId: string; apiKey: string; refresh?: boolean }, signal: AbortSignal): Promise<OllamaCloudAccountModelDiscovery> {
+  return requestJson<OllamaCloudAccountModelDiscovery>(`${API_PREFIX}/management/account-settings/discover-models`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }, signal, 100_000)
 }
 
 export function previewManagementAccountSettings(

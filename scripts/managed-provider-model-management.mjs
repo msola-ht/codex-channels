@@ -41,9 +41,8 @@ async function runManagedProviderModelOperation(provider, { environment, prompts
   if (!current) throw new Error("请先完成账户配置");
   const action = await prompts.select({ message: `${displayName} 模型目录`, options: [
     { value: "select", label: "查看启用模型", hint: "移除请使用统一模型管理入口" },
-    ...(ollamaCloud ? [{ value: "templates", label: "添加受管模型", hint: "从内置目录选择，无需手填能力或推理验证；已有模型保持不变" }] : []),
-    { value: "add", label: "按 ID 添加模型", hint: "独立填写能力或继承当前目录中的已有模型" },
-    ...(ollamaCloud ? [{ value: "discover", label: "发现并验证新模型", hint: "公开候选只读；另行确认后逐模型验证，可能收费" }] : []),
+    ...(ollamaCloud ? [{ value: "templates", label: "从远端列表添加模型", hint: "自动读取上下文、思考和视觉能力，不发送推理请求" }] : [{ value: "add", label: "按 ID 添加模型", hint: "独立填写能力或继承当前目录中的已有模型" }]),
+    ...(ollamaCloud ? [{ value: "discover", label: "高级 Responses 诊断", hint: "可选；逐模型验证可能收费，普通添加无需诊断" }] : []),
     ...(definition.storageId === "custom" || ollamaCloud ? [] : [{ value: "templates", label: "添加内置 DS 模型", hint: "只添加明确选择的固定 DS 模型，已有模型保持不变" }]),
     { value: "back", label: "返回" },
   ] });
@@ -73,7 +72,7 @@ export async function runProviderModelAdditionSetup(provider, {
 } = {}) {
   definitionFor(provider, environment);
   let options = await loadProviderModelAdditionOptions(provider, { environment, manualModel, downloadCatalog, signal, fetchImpl, discovery });
-  if (options.discovery) {
+  if (discovery === true && options.discovery) {
     output.write("公开元数据候选，尚未验证；已保存模型不会覆盖。\n");
     for (const candidate of options.discovery) output.write(`${JSON.stringify(candidate.id)}：${candidate.alreadySaved ? "已保存" : candidate.status === "candidate" ? "待单模型验证" : candidate.reason}\n`);
     const eligible = options.discovery.filter(candidate => candidate.status === "candidate" && !candidate.alreadySaved);
@@ -88,7 +87,7 @@ export async function runProviderModelAdditionSetup(provider, {
       initialValues: [candidate.defaultReasoningEffort], required: true, options: candidate.reasoningEfforts.map(value => ({ value, label: value })) });
     if (prompts.isCancel(reasoningEfforts)) return { action: "back", activation: "none" };
     if (!Array.isArray(reasoningEfforts) || !reasoningEfforts.includes(candidate.defaultReasoningEffort)) throw new Error("验证等级必须包含来源默认等级");
-    output.write(`目标账户：${provider}；精确模型：${model}；思考等级：${reasoningEfforts.join("/")}。\n每级两轮 SSE，默认等级 ${candidate.defaultReasoningEffort} 另加两轮 JSON，最多 ${reasoningEfforts.length * 2 + 2} 次可能收费的推理请求；每次最多 768 输出 Token，总期限 90 秒（含来源复核），不自动重试。取消不能撤销已发送请求或费用。\n文本及普通函数往返通过后，仍需预览确认才能保存；不验证实际思考质量、长上下文、图片、freeform 或搜索，后三项保持关闭。窗口来自元数据及本地 393216 上限。\n`);
+    output.write(`目标账户：${provider}；精确模型：${model}；思考等级：${reasoningEfforts.join("/")}。\n每级两轮 SSE，默认等级 ${candidate.defaultReasoningEffort} 另加两轮 JSON，最多 ${reasoningEfforts.length * 2 + 2} 次可能收费的推理请求；每次最多 768 输出 Token，总期限 90 秒（含来源复核），不自动重试。取消不能撤销已发送请求或费用。\n文本及普通函数往返通过后，仍需预览确认才能保存；不验证实际思考质量、长上下文、图片、freeform 或搜索。图片能力仍采用远端元数据，freeform 与客户端 tool_search 默认启用。窗口来自元数据及本地 393216 上限。\n`);
     if (await prompts.confirm({ message: "确认使用上述账户发送可能收费的验证请求？", initialValue: false }) !== true) return { action: "back", activation: "none" };
     const result = await verifyProviderModelAddition({ provider, sourceToken: options.sourceToken, revision: options.revision,
       model, reasoningEfforts, confirmPaid: true }, { environment, signal, fetchImpl });
@@ -98,6 +97,17 @@ export async function runProviderModelAdditionSetup(provider, {
     }
     options = result.options;
     output.write(`所选等级的普通函数与文本往返已通过，共 ${result.requests} 次请求；这是该时点的协议证据。\n`);
+  }
+  if (discovery !== true && options.discovery) {
+    output.write("远端 tags/show 元数据自动生成模型能力；不发送推理请求。Responses freeform 与客户端 tool_search 默认启用。\n");
+    if (options.discoveryCache) output.write(`${options.discoveryCache.hit ? "使用本地缓存" : "已刷新公开缓存"}；获取 ${options.discoveryCache.fetchedAt}；有效至 ${options.discoveryCache.expiresAt}。可用 codexc provider ollama-cloud discover --refresh 强制刷新。\n`);
+    for (const candidate of options.discovery.filter(entry => entry.alreadySaved || entry.status !== "candidate")) {
+      output.write(`${JSON.stringify(candidate.id)}：${candidate.alreadySaved ? "已保存，不覆盖" : candidate.reason ?? candidate.status}\n`);
+    }
+    for (const candidate of options.candidates) {
+      output.write(`${JSON.stringify(candidate.model)}：上游窗口 ${candidate.upstreamContextWindow}；本地窗口 ${candidate.fields.context_window}；思考等级 ${candidate.fields.supported_reasoning_levels.map(entry => entry.effort).join("/")}，默认 ${candidate.fields.default_reasoning_level}；视觉 ${candidate.fields.input_modalities.includes("image") ? "支持" : "不支持"}；freeform 与客户端 tool_search 已启用。\n`);
+      if (candidate.reasoningMode === "toggle") output.write("此模型仅支持思考开关：none 为关闭，high 为开启；high 不代表思考强度。\n");
+    }
   }
   let models;
   if (!options.candidates.length) models = [];
@@ -127,15 +137,16 @@ export async function runProviderModelAdditionSetup(provider, {
   signal?.throwIfAborted();
   const result = await applyProviderModelAddition(input, { environment, preview });
   output.write(result.action === "unchanged" ? "模型目录没有变化，无需保存或重启。\n" : `模型目录已保存并回读，现有 ${result.models.length} 个模型。\n`);
-  if (result.action === "catalog-updated") writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  if (result.action === "catalog-updated") {
+    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+    if (provider.startsWith("olc-")) output.write("可在「对比并更新模型模板」中选择提示词与上下文／压缩设置；模板不会覆盖远端模型能力。\n");
+  }
   return result;
 }
 
 async function promptAdditionalModel(prompts, definition, existing) {
-  if (!["ccg", "opencode-go", "clp", "ollama-cloud", "custom"].includes(definition.storageId)) throw new Error("此提供商不支持手动新增模型");
+  if (!["ccg", "opencode-go", "clp", "custom"].includes(definition.storageId)) throw new Error("此提供商不支持手动新增模型");
   const clinePass = definition.storageId === "clp";
-  const ollamaCloud = definition.storageId === "ollama-cloud";
-  if (ollamaCloud) prompts.log?.info("按精确 ID 手动声明能力，不代表真实上游已验收；也可返回选择发现并验证。freeform 和客户端 tool_search 需明确选择；原生 web_search 尚未开放。");
   const confirmed = await prompts.confirm({ message: clinePass || definition.upstreamWireApi === "chat_completions" ? "已确认此提供商以 Chat Completions 接口支持该模型的文本及工具调用？" : "已确认此提供商以 Responses 接口支持该模型及工具调用？", initialValue: false });
   if (confirmed !== true) return undefined;
   const id = await prompts.text({ message: "上游模型 ID（准确名称）", validate: value => (definition.storageId === "custom" ? isValidCustomModelId(value) : isManagedProviderModelValid(definition, value)) && !existing.some(model => model.id === value) ? undefined : "请输入有效且未加入目录的模型 ID" });
