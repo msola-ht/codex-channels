@@ -42,6 +42,8 @@ export interface ModelProviderDefinition {
   /** 自动生成目录的 Provider 默认值；CCG 必须由文件和用户选择提供。 */
   readonly defaultModel?: string;
   readonly defaultReasoningEffort?: string;
+  /** 未显式设置搜索时的 Provider 默认值；缺省则沿用全局行为。 */
+  readonly defaultWebSearch?: "disabled";
   readonly supportsWebsockets?: boolean;
   readonly capabilities: ModelProviderCapabilities;
 }

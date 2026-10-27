@@ -26,7 +26,7 @@ export function ProviderWebSearchSettings({ settings, management, provider }: { 
         return <ManagedSelect fullWidth key={setting.provider} label={t("providerWebSearch.providerLabel", { name: label, provider: setting.provider })}
           value={knownMode && setting.status === "ready" ? setting.mode ?? "global" : ""} placeholder={error}
           description={!knownMode ? error : setting.provider.startsWith("olc-") ? t("providerWebSearch.ollamaHint") : undefined} disabled={locked || !knownMode}
-          options={[["global", t("providerWebSearch.followGlobal")], ["disabled", t("settingsFields.off")], ["cached", t("settingsFields.cached")], ["indexed", t("settingsFields.indexed")], ["live", t("settingsFields.live")]]}
+          options={[["global", providerSearchModeLabel(t, null, setting.provider)], ["disabled", t("settingsFields.off")], ["cached", t("settingsFields.cached")], ["indexed", t("settingsFields.indexed")], ["live", t("settingsFields.live")]]}
           onChange={value => {
             if (locked || setting.status !== "ready" || !knownMode) return
             const mode = value === "global" ? null : value === "disabled" || value === "cached" || value === "indexed" || value === "live" ? value : undefined
@@ -50,10 +50,10 @@ export function ProviderWebSearchConfirmation({ preview, ...props }: {
   onCancel: () => void
 }) {
   const { t } = useTranslation()
-  return <ManagementConfirmationDialog {...props} open title={t("providerWebSearch.confirmTitle")} description={t("providerWebSearch.hint")}>
+  return <ManagementConfirmationDialog {...props} open title={t("providerWebSearch.confirmTitle")} description={t(preview.provider.startsWith("olc-") ? "providerWebSearch.ollamaHint" : "providerWebSearch.hint")}>
     <p>{t("managementUi.providerConfirm", { name: preview.provider })}</p>
-    <p>{t("providerWebSearch.before", { mode: providerSearchModeLabel(t, preview.before.mode) })}</p>
-    <p>{t("providerWebSearch.after", { mode: providerSearchModeLabel(t, preview.mode) })}</p>
+    <p>{t("providerWebSearch.before", { mode: providerSearchModeLabel(t, preview.before.mode, preview.provider) })}</p>
+    <p>{t("providerWebSearch.after", { mode: providerSearchModeLabel(t, preview.mode, preview.provider) })}</p>
     <p className="text-muted-foreground">{t("providerWebSearch.activationHint")}</p>
     {preview.activation === "restart-app-server" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart appserver" })}</p> : null}
   </ManagementConfirmationDialog>

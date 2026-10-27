@@ -118,6 +118,16 @@ export class QqTextSendError extends QqProtocolError {
   }
 }
 
+/** Only locally classified fields; never serialize an upstream response or arbitrary Error. */
+export function qqMessageFailureMetadata(error: unknown) {
+  return {
+    protocolReason: error instanceof QqProtocolError ? error.reason : "unclassified",
+    ...(error instanceof QqProtocolError ? { operation: error.operation, httpStatus: error.httpStatus,
+      businessCode: error.bizCode, traceId: error.traceId } : {}),
+    ...(error instanceof QqTextSendError ? { sendOutcome: error.outcome, rejection: error.rejection } : {}),
+  };
+}
+
 export interface QqProtocolClientOptions {
   appId: string;
   appSecret: string;

@@ -6,7 +6,7 @@ import { writeGatewayConfigActivationNotice } from "./config-activation-notice.m
 import { configActivationResult } from "./config-activation-result.mjs";
 
 const modeLabels = { disabled: "关闭", cached: "缓存", indexed: "索引", live: "实时" };
-const modeLabel = mode => mode === null ? "跟随全局" : modeLabels[mode];
+const modeLabel = (mode, provider = "") => mode === null ? provider.startsWith("olc-") ? "默认关闭" : "跟随全局" : modeLabels[mode];
 
 /** CLI and WebUI share the same provider selection, preview and file transaction. */
 export async function runProviderWebSearchSettingsSetup({
@@ -20,7 +20,7 @@ export async function runProviderWebSearchSettingsSetup({
       options: [...settings.map(entry => ({ value: entry.provider, label: entry.provider,
         hint: entry.status === "error" ? "配置不可读取，不能修改"
           : entry.source === "global" ? "共用全局搜索设置"
-            : `当前：${modeLabel(entry.mode)}` })), { value: "back", label: "返回" }],
+            : `当前：${modeLabel(entry.mode, entry.provider)}` })), { value: "back", label: "返回" }],
     });
     if (prompts.isCancel(provider) || provider === "back") return { action: "back" };
     const selected = settings.find(entry => entry.provider === provider);
@@ -28,7 +28,7 @@ export async function runProviderWebSearchSettingsSetup({
       output.write("所选提供商的搜索配置不可安全读取，请检查配置后重试；未执行写入。\n");
       return { action: "back" };
     }
-    if (provider.startsWith("olc-")) output.write("Ollama Cloud 搜索仅支持实时（live），使用所选账户的搜索额度；缓存和索引不受支持，跟随全局不会自动改为实时。\n");
+    if (provider.startsWith("olc-")) output.write("Ollama Cloud 搜索可能收费，未设置时默认关闭。切换账户不继承全局搜索；固定账户保留主配置的显式值。需搜索时请显式选择实时（live）；缓存和索引不受支持。\n");
     if (selected.source === "global") {
       output.write(`${provider} 共用主 config.toml 的全局搜索设置。\n请进入 codexc config → Codex 新会话与用户偏好 → 联网搜索模式；修改会影响所有跟随全局的提供商。\n`);
       return { action: "back" };
@@ -38,7 +38,7 @@ export async function runProviderWebSearchSettingsSetup({
     const choice = await prompts.select({
       message: `选择 ${provider} 的联网搜索模式`,
       initialValue: selected.mode ?? "inherit",
-      options: [{ value: "inherit", label: "跟随全局", hint: "删除此提供商 config 顶层的 web_search" },
+      options: [{ value: "inherit", label: modeLabel(null, provider), hint: "删除此提供商 config 顶层的 web_search" },
         ...Object.entries(modeLabels).map(([value, label]) => ({ value, label })),
         { value: "back", label: "返回" }],
     });
@@ -50,7 +50,7 @@ export async function runProviderWebSearchSettingsSetup({
     const input = { provider, mode: choice === "inherit" ? null : choice,
       resourceRevision: createHash("sha256").update(JSON.stringify({ state, settings })).digest("hex") };
     const preview = await previewProviderWebSearchChange(input, { environment });
-    output.write(`提供商：${preview.provider}\n搜索模式：${modeLabel(preview.before.mode)} → ${modeLabel(preview.mode)}\n${preview.mode === null ? "删除" : "写入"}该提供商 config 顶层 web_search。\n`);
+    output.write(`提供商：${preview.provider}\n搜索模式：${modeLabel(preview.before.mode, provider)} → ${modeLabel(preview.mode, provider)}\n${preview.mode === null ? "删除" : "写入"}该提供商 config 顶层 web_search。\n`);
     if (!preview.willChange) {
       output.write("当前值未变化，未写入配置，无需重启服务。\n");
       return { ...preview, action: "unchanged" };
@@ -60,7 +60,7 @@ export async function runProviderWebSearchSettingsSetup({
       return { action: "back" };
     }
     const result = await applyProviderWebSearchChange(input, { environment, preview });
-    output.write(`${provider} 联网搜索模式已保存并回读确认：${modeLabel(result.mode)}。\n`);
+    output.write(`${provider} 联网搜索模式已保存并回读确认：${modeLabel(result.mode, provider)}。\n`);
     writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
     return result;
   } catch (error) {

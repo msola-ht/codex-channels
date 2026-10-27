@@ -12,6 +12,7 @@ import { ProviderModelGuard } from "./provider-model-guard.mjs";
 import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 import { DeepseekImageMaterialReader } from "./deepseek-image-material-reader.mjs";
 import { loadConfiguredProviderProfile } from "./model-provider-managed-runtime.mjs";
+import { readProviderWebSearchOverride } from "./provider-web-search.mjs";
 import { closeSingleWorkerReaders, waitForSingleWorkerReadersExit } from "./single-worker-reader.mjs";
 import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "./windows-acl-bridge.mjs";
 import { writeThirdPartyRuntimeModelCatalog } from "./third-party-model-catalog.mjs";
@@ -589,7 +590,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const path = writeThirdPartyRuntimeModelCatalog(sourcePath, runtime.dataDir, customPrimaryProvider && provider === primaryProvider
       ? customPrimaryProvider.id : provider, runtime.environment);
     // Third-party model APIs use hosted search, not OpenAI's separate /alpha/search executor.
-    return withOfficialModelCatalog([...argumentsList, "-c", "features.standalone_web_search=false"], path);
+    const searchDefault = provider === primaryProvider && definition?.defaultWebSearch !== undefined
+      ? ["-c", `web_search=${JSON.stringify(readProviderWebSearchOverride(provider, runtime.environment))}`] : [];
+    return withOfficialModelCatalog([...argumentsList, ...searchDefault, "-c", "features.standalone_web_search=false"], path);
   };
   let desktopAppAttachment;
   const managedByProvider = new Map(managedProviders.map((provider, index) => [

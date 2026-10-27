@@ -19,6 +19,7 @@ import {
   isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceErrorMetadata,
+  withSurfaceOutputDiagnostics,
   type SurfaceAdapter,
   type ChannelFileMediaType,
   channelFilePolicy,
@@ -658,7 +659,9 @@ export class SurfaceManager {
       }
       return;
     }
-    this.deliverOutput(surface, event, order);
+    if (surface.surface === "qq") {
+      withSurfaceOutputDiagnostics(this.logger, event, () => this.deliverOutput(surface, event, order));
+    } else this.deliverOutput(surface, event, order);
   }
 
   /**
@@ -998,7 +1001,12 @@ export class SurfaceManager {
     if (decision.disposition === "ignore") return;
     const runtime = this.requireRuntime(surface);
     const enqueuedAt = performance.now();
-    const coalesceKey = this.outputCoalescer.key(event);
+    const ordinaryCoalesceKey = this.outputCoalescer.key(event);
+    // QQ has already observed every delta synchronously in persistent mode.
+    // These queued calls only wake its bounded stream buffer; replacing a wake
+    // must never discard deltas for adapters/modes that consume them in handle().
+    const coalesceKey = this.persistent && surface.surface === "qq" && event.type === "text.delta"
+      ? JSON.stringify(["qq-body-wake", event.threadId, event.turnId, event.itemId]) : ordinaryCoalesceKey;
     runtime.delivery.enqueue(event.target.conversationId, async (signal) => {
       const started = performance.now();
       if (!this.active.has(surface)) {

@@ -98,6 +98,7 @@ export const ollamaCloudProviderDefinition = Object.freeze({
   managedMarkerFileName: "managed.toml", backupDirectoryName: "backup",
   baseUrl: "https://ollama.com/v1", wireApi: "responses",
   apiKeyEnvironmentKey: "CODEX_CONNECT_OLLAMA_CLOUD_API_KEY",
+  defaultWebSearch: "disabled",
   supportsWebsockets: false,
   capabilities: Object.freeze({ accountAdapter: "ollama-cloud", instanceAdapter: "ollama-cloud-accounts" }),
 });

@@ -74,7 +74,10 @@ export function readProviderWebSearchConfig(provider, environment = process.env)
 export function readProviderWebSearchOverride(provider, environment = process.env) {
   if (!isProviderWebSearchId(provider)) throw invalidDocument("Provider 搜索设置的 Provider ID 无效");
   // Official accounts use native global configuration; no provider override is applied.
-  return provider === "openai" ? null : readProviderWebSearchConfig(provider, environment).mode;
+  if (provider === "openai") return null;
+  const configured = readProviderWebSearchConfig(provider, environment).mode;
+  const family = managedProviderAccountFamilies.find(candidate => candidate.matches(provider));
+  return configured ?? family?.definition.defaultWebSearch ?? null;
 }
 
 /** Only this provider's actual search field participates in its instance identity. */

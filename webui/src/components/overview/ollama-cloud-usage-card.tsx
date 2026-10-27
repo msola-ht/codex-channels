@@ -5,7 +5,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { useCloudUsage } from "@/hooks/use-cloud-usage"
@@ -58,7 +57,6 @@ export function OllamaCloudUsageCard({ provider, title }: { provider: string; ti
       </Alert> : null}
 
       {report && estimates ? <>
-        <Separator />
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
           <dt className="text-muted-foreground">{t("cloudUsage.unitEstimate", { tokens: formatTokens(estimates.priceTokens) })}</dt>
           <dd className="break-words text-right tabular-nums">

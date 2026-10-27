@@ -59,7 +59,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 
 ## 文件
 
-- `provider-web-search.mjs` / `provider-web-search.d.mts`：按精确 Provider ID 解析实际 config，读取其顶层 `web_search` 并生成账户指纹。切换提供商读取各自 Profile，缺项跟随全局；固定提供商和官方账户读取主 `config.toml`，在通用设置中管理。支持 `disabled`／`cached`／`indexed`／`live`，内部聚合标识 `codexc-aggregate`、非法模式与未完成的 `<config>.search-pending` 事务失败关闭。已登记的真实账户 ID `agg`、`sf-agg` 仍合法，CLI 聚合别名入口保持关闭。不再读取、迁移或删除旧 `codexc-provider-search.toml`；没有独立搜索启动参数生成器。文件保护复用 Unix 权限和 Windows ACL 适配器。
+- `provider-web-search.mjs` / `provider-web-search.d.mts`：按精确 Provider ID 解析实际 config，读取其顶层 `web_search` 并生成账户指纹。切换提供商读取各自 Profile，OLC 缺项采用家族定义的 `defaultWebSearch: disabled`，其他提供商缺项跟随全局；固定提供商和官方账户读取主 `config.toml`，在通用设置中管理，固定 OLC 缺项也关闭。管理读取保留原始 null，启动覆盖与指纹使用有效默认值，不写回文件。支持 `disabled`／`cached`／`indexed`／`live`，内部聚合标识 `codexc-aggregate`、非法模式与未完成的 `<config>.search-pending` 事务失败关闭。已登记的真实账户 ID `agg`、`sf-agg` 仍合法，CLI 聚合别名入口保持关闭。不再读取、迁移或删除旧 `codexc-provider-search.toml`。文件保护复用 Unix 权限和 Windows ACL 适配器。
 
 - `codex-request-identity.mjs` / `codex-request-identity.d.mts`：仅在 `follow_cli_version = true` 时从当前锁定 CLI 版本解析官方客户端身份及 UA 的生效版本，保留系统和终端信息；无标记或 false 时保留显式值。Gateway、App Server 服务、CLI 与 WebUI 共用，不改写读取的配置。
 
@@ -200,7 +200,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `model-provider-responses-catalog.mjs` / `model-provider-responses-catalog.d.mts`：复用 `model-catalog` 编译定义，保留 CP v5 包装及大小限制、生成一致性、修订、私有备份与未完成写入标记；`createResponsesModelCatalog` 仅为新增模型补全模板，`compileResponsesModelCatalog` 纯编译已保存快照，编辑、删除及窗口修改保留其余模型原值，旧 `followContext` 只作历史元数据，不保存凭据。全部写入使用 v2 前后摘要 pending，首次创建记录 `previous=false`／`previousDigest=null`；恢复仅接受 v2，历史 v1 记录须保留记录与备份并使用产生它的原版本恢复。CLP 保留既有编译入口与相同大小边界。
 - `model-provider-upstream-metadata.mjs` / `model-provider-upstream-metadata.d.mts`：自定义第三方 Provider 的网关侧元数据（当前只有上游接口 `responses` / `chat_completions`），与模型目录同目录、0600 写入；缺失按 `responses`，版本、字段或枚举不合法时失败关闭。
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
-  为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，包括实际 Profile 中显式保存的 `web_search`，并只把当前 Provider 的 Key 注入目标
+  为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，包括实际 Profile 中显式保存的 `web_search` 或 OLC 未设置时的 disabled 默认值；固定 OLC 由服务启动入口应用同一默认值，并只把当前 Provider 的 Key 注入目标
   子进程环境；读取并校验已有 OpenAI 上游地址，为统计代理替换 Provider 地址，同时统一 DeepSeek、
   OpenCode Go、CCG 的凭据读取。全部第三方 Provider 启动采用锁定 Codex 的
   HTTP 重试 4 次、流重试 5 次，原生网络重连与传输降级不另行覆盖。
