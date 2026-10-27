@@ -32,6 +32,17 @@ import {
 import { loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
 import { ManagementOperationError, managementOperationError } from "./webui-management-operations.mjs";
 import { AccountManagementError } from "./account-management-error.mjs";
+import { loadOllamaCloudAccounts, ollamaCloudProviderId, validateOllamaCloudAccountId } from "../runtime/ollama-cloud-accounts.mjs";
+import { discoverOllamaCloudAccountModels, loadOllamaCloudModelChoices, previewOllamaCloudConfiguration, applyOllamaCloudConfiguration, previewOllamaCloudDefaultAccount, setOllamaCloudDefaultAccount, previewOllamaCloudRemoval, removeOllamaCloudConfiguration } from "./ollama-cloud-account-management.mjs";
+
+export async function discoverAccountSettingsModels(input, environment, options = {}) {
+  try {
+    if (input && typeof input === "object" && !Array.isArray(input)) managementAccountId(input.accountId, validateOllamaCloudAccountId);
+    return await discoverOllamaCloudAccountModels(input, { ...options, environment });
+  } catch (error) {
+    throw toManagementError(error);
+  }
+}
 
 export async function loadAccountSettingsResource(
   environment,
@@ -43,6 +54,7 @@ export async function loadAccountSettingsResource(
     const providers = loadProviders(environment);
     const clineAccounts = loadClinePassAccounts(environment);
     const dsAccounts = loadDeepseekAccounts(environment);
+    const olcAccounts = loadOllamaCloudAccounts(environment);
     return {
       opencodeGo: {
         configured: accounts.length > 0,
@@ -79,6 +91,15 @@ export async function loadAccountSettingsResource(
           return { ...account, provider: providerId, mode: provider?.mode ?? null, model: provider?.model ?? null };
         }),
       },
+      ollamaCloud: {
+        configured: olcAccounts.length > 0,
+        ...loadOllamaCloudModelChoices(environment),
+        accounts: olcAccounts.map(account => {
+          const providerId = ollamaCloudProviderId(account.id);
+          const provider = providers.find(entry => entry.provider === providerId);
+          return { ...account, provider: providerId, mode: provider?.mode ?? null, model: provider?.model ?? null };
+        }),
+      },
     };
   } catch {
     throw new ManagementOperationError("account_state_unavailable", "账户设置暂不可用");
@@ -98,6 +119,20 @@ function accountSettingsMutation(input) {
     throw new ManagementOperationError("invalid_json", "账户设置操作正文必须是对象");
   }
   switch (input.operation) {
+    case "olc.configure":
+      return {
+        operation: input.operation,
+        accountId: managementAccountId(input.accountId, validateOllamaCloudAccountId),
+        ...(input.model === undefined ? {} : { model: input.model }),
+        ...(input.discoveryToken === undefined ? {} : { discoveryToken: input.discoveryToken }),
+        ...(input.reconfigure === undefined ? {} : { reconfigure: input.reconfigure }),
+        ...(input.mode === undefined ? {} : { mode: input.mode }),
+        ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+        ...(input.confirmExclusiveConfigChange === undefined ? {} : { confirmExclusiveConfigChange: input.confirmExclusiveConfigChange }),
+      };
+    case "olc.default":
+    case "olc.remove":
+      return { operation: input.operation, accountId: managementAccountId(input.accountId, validateOllamaCloudAccountId) };
     case "opencode.account.configure":
       return {
         operation: input.operation,
@@ -152,9 +187,15 @@ function managementAccountId(value, validate) {
   }
 }
 
-export async function previewAccountSettingsMutation(input, environment) {
+export async function previewAccountSettingsMutation(input, environment, options = {}) {
   try {
     switch (input.operation) {
+      case "olc.configure":
+        return await previewOllamaCloudConfiguration(input, { ...options, environment });
+      case "olc.default":
+        return previewOllamaCloudDefaultAccount(input.accountId, { environment });
+      case "olc.remove":
+        return await previewOllamaCloudRemoval(input.accountId, { ...options, environment });
       case "opencode.account.configure":
         return await previewOpencodeGoAccountConfiguration(input, { environment });
       case "opencode.account.default":
@@ -184,9 +225,15 @@ export async function previewAccountSettingsMutation(input, environment) {
   }
 }
 
-export async function applyAccountSettingsMutation(input, environment, confirmedPreview) {
+export async function applyAccountSettingsMutation(input, environment, confirmedPreview, options = {}) {
   try {
     switch (input.operation) {
+      case "olc.configure":
+        return await applyOllamaCloudConfiguration(accountSettingsApplyInput(input, confirmedPreview), { ...options, environment });
+      case "olc.default":
+        return await setOllamaCloudDefaultAccount(input.accountId, { environment, signal: options.signal, expectedRevision: confirmedPreview?.revision });
+      case "olc.remove":
+        return await removeOllamaCloudConfiguration(accountSettingsApplyInput(input, confirmedPreview), { ...options, environment });
       case "opencode.account.configure":
         return await applyOpencodeGoAccountProvisioning(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "opencode.account.default":
@@ -217,6 +264,7 @@ export async function applyAccountSettingsMutation(input, environment, confirmed
 
 export function accountSettingsApplyInput(input, confirmedPreview) {
   switch (input.operation) {
+    case "olc.configure":
     case "opencode.account.configure":
     case "clp.configure":
     case "deepseek.configure":
@@ -227,6 +275,7 @@ export function accountSettingsApplyInput(input, confirmedPreview) {
     case "opencode.account.remove":
       return { ...input, confirmHistoryLoss: true, expectedRevision: confirmedPreview?.revision };
     case "clp.remove":
+    case "olc.remove":
     case "deepseek.remove":
       return { ...input, confirmRemove: true, expectedRevision: confirmedPreview?.revision };
     default:
@@ -246,6 +295,7 @@ export function redactAccountSettingsResult(result) {
     ...(["switching", "exclusive"].includes(result.previousMode) ? { previousMode: result.previousMode } : {}),
     ...(["preserve", "replace"].includes(result.credentialAction) ? { credentialAction: result.credentialAction } : {}),
     ...(result.model !== undefined ? { model: result.model } : {}),
+    ...(result.initialModels !== undefined ? { initialModels: result.initialModels } : {}),
     ...(result.status !== undefined ? { status: result.status } : {}),
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),
     ...(result.effects !== undefined ? { effects: result.effects } : {}),
@@ -277,5 +327,9 @@ function redactProvider(provider) {
 }
 
 function toManagementError(error) {
+  if (error instanceof AccountManagementError && ["authentication-rate-limited", "authentication-timeout", "authentication-unavailable"].includes(error.code)) {
+    return new ManagementOperationError(error.code, "Ollama Cloud 账户认证暂不可用，未保存账户", error.field,
+      error.code === "authentication-rate-limited" ? 429 : error.code === "authentication-timeout" ? 504 : 503);
+  }
   return managementOperationError(error, [OpenCodeGoAccountManagementError, OpenCodeGoAccountProvisioningError, AccountManagementError], "account_settings_failed");
 }

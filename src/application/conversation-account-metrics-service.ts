@@ -12,6 +12,8 @@ import type {
   ProviderAccountLimits,
   ProviderAccountQueryPort,
   ProviderAccountUsage,
+  CloudUsageQuery,
+  CloudUsageReport,
 } from "./account-port.js";
 import type { ModelSelectionService } from "./model-selection-service.js";
 import {
@@ -38,13 +40,16 @@ export class ConversationAccountMetricsService {
     return this.accounts.accountRateLimits();
   }
 
-  async providerAccountUsage(target: ConversationTarget, beforeSubmit?: () => void): Promise<ProviderAccountUsage> {
+  async providerAccountUsage(target: ConversationTarget, beforeSubmit?: () => void, query?: CloudUsageQuery): Promise<ProviderAccountUsage | CloudUsageReport> {
     beforeSubmit?.();
     const binding = this.router.current(target);
     const guard = this.accountThreadGuard(target, binding?.threadId, beforeSubmit);
     guard?.();
     const model = this.models.status(target);
     const provider = model.modelProvider ?? "openai";
+    if (query?.expectedProvider && query.expectedProvider !== provider) {
+      throw new UserFacingError("usage.account-changed", "账户已切换，请重新执行 /usage");
+    }
     const threadProvider = binding
       ? this.router.modelSettings(target)?.modelProvider ?? provider
       : undefined;
@@ -54,6 +59,16 @@ export class ConversationAccountMetricsService {
     if (!this.providerAccounts) {
       return { kind: "unsupported", provider };
     }
+    const reportGuard = (): void => {
+      guard?.();
+      if ((this.models.status(target).modelProvider ?? "openai") !== provider) {
+        throw new UserFacingError("usage.account-changed", "账户已切换，请重新执行 /usage");
+      }
+    };
+    const report = await this.providerAccounts.cloudUsage?.(provider, query ?? { range: "24h" }, undefined, reportGuard);
+    reportGuard();
+    if (report) return report;
+    if (query) throw new UserFacingError("usage.arguments", "当前账户不支持用量时间切换或刷新，请使用 /usage");
     const usage = await this.providerAccounts.accountUsage(provider, threadId, undefined, guard);
     guard?.();
     return usage;

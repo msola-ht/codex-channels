@@ -15,7 +15,8 @@ export { pruneModelTrafficDumpSessions, pruneModelTrafficDumpSessionsAsync } fro
 export { ChatCompletionsBridge } from "./chat-bridge.js";
 export { sendDirectChat, type DirectChatTarget } from "./direct-chat.js";
 export { uploadDeepseekImage, type DeepseekImageMediaType } from "./deepseek-file-upload.js";
-export { sendDirectResponses, DirectResponsesObserver } from "./direct-responses.js";
+export { sendDirectResponses, consumeDirectResponses, DirectResponsesObserver } from "./direct-responses.js";
+export { sendOllamaSearchResponses, executeOllamaWebSearch } from "./ollama-web-search.js";
 export { ChatBodyTooLargeError, readChatBody, waitForChatOperation, writeChatData } from "./chat-io.js";
 export { ChatUpstreamError, ModelRequestTimeoutError, chatUpstreamError, chatStreamError } from "./chat-errors.js";
 export type { RelayMetric } from "./relay-metric.js";

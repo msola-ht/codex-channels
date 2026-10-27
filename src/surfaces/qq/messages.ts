@@ -791,7 +791,7 @@ export class QqMessages implements SurfaceOutputPort {
         }
         const taskCommand = isQqTaskCommand(command.name, command.argumentsText);
         if (!["help", "status", "stop", "workspace", "model", "new", "sessions", "resume", "rename", "archived", "archive", "unarchive", "pin", "unpin", "compact", "fork", "revert", "review", "effort", "fast", "plan", "goal", "permissions", "autoreview", "whoami", ...QUERY_COMMANDS, ...EXTENSION_COMMANDS].includes(command.name)
-          || (["stop", "new", "usage", "limits", "diff", "archive", "pin", "unpin", "compact", "fork", "permissions", "whoami"].includes(command.name) && command.argumentsText.trim())
+          || (["stop", "new", "limits", "diff", "archive", "pin", "unpin", "compact", "fork", "permissions", "whoami"].includes(command.name) && command.argumentsText.trim())
           || (command.name === "goal" && !["", "clear"].includes(command.argumentsText.trim()))
           || (EXTENSION_COMMANDS.has(command.name) && command.name !== "hooks" && !taskCommand && !isQqExtensionOperation(command.name, command.argumentsText))) {
           await this.reply(message, "QQ 暂不支持此命令或参数。使用 /help 查看支持范围。", () => this.allowed(target, message.actorId)); return;
@@ -822,7 +822,7 @@ export class QqMessages implements SurfaceOutputPort {
           commandTicket = reservation.ticket;
         }
         const extensionScope = !taskCommand && EXTENSION_COMMANDS.has(command.name) ? this.extensionQueryScope(target) : undefined;
-        const hasSelectionMenu = extensionScope !== undefined || ["status", "limits", "workspace", "model", "sessions", "resume", "archived", "effort", "fast", "autoreview", "goal"].includes(command.name);
+        const hasSelectionMenu = extensionScope !== undefined || ["status", "usage", "limits", "workspace", "model", "sessions", "resume", "archived", "effort", "fast", "autoreview", "goal"].includes(command.name);
         const menuScope = hasSelectionMenu ? this.menuScope(target) : undefined;
         const menuWorkspaceScope = hasSelectionMenu ? this.menuWorkspaceScope(target) : undefined;
         const queryStatus = QUERY_COMMANDS.has(command.name) ? this.options.service.status(target) : undefined;
@@ -902,7 +902,9 @@ export class QqMessages implements SurfaceOutputPort {
             : "查询结果无法在本次 QQ 回复中完整展示，本次仅发送此提示。统计可缩小 /metrics 查询范围，或在本机 WebUI 查看；账户信息也可从其他已接入渠道查询。"
           : undefined, undefined, undefined,
           result.kind === "outcome" && result.outcome.type !== "goal.cleared"
-            ? formatConversationCommandOutcome(result.outcome, escapeLifecycleLiteral) : undefined,
+            ? formatConversationCommandOutcome(result.outcome, escapeLifecycleLiteral)
+            : result.kind === "usage" && result.result.kind === "cloud-usage"
+              ? renderConversationCommandResult(result, undefined, escapeLifecycleLiteral) ?? undefined : undefined,
           undefined, result.kind === "artifacts");
         return;
       }

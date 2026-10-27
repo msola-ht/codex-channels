@@ -69,6 +69,9 @@ const runtimeImporters = new Set([
   "bootstrap", "config", "delivery", "observability", "provider-proxy", "scheduled-tasks", "storage", "surfaces",
 ]);
 const runtimeExceptions = new Map([
+  // Serializable cloud-usage DTOs shared with the private IPC and WebUI; declarations only.
+  ["src/application/account-port.ts", new Set(["runtime/ollama-cloud-usage.mjs"])],
+  ["src/application/cloud-usage-estimates.ts", new Set(["runtime/ollama-cloud-usage.mjs"])],
   // Pure service-tier semantics shared with CLI and WebUI; no runtime lifecycle dependency.
   ["src/application/model-selection-service.ts", new Set(["runtime/service-tier.mjs"])],
   ["src/model-api/chat-request.ts", new Set(["runtime/chat-reasoning.mjs"])],

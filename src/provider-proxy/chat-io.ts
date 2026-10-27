@@ -18,13 +18,13 @@ export function waitForChatOperation<T>(pending: Promise<T>, signal: AbortSignal
 }
 
 /** Pause an unfinished upload on error so the owner can still send a safe HTTP response. */
-export async function readChatBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number): Promise<string> {
-  const body = await readModelBody(request, signal, maximumBytes);
+export async function readChatBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number, observe?: (chunk: Buffer) => void): Promise<string> {
+  const body = await readModelBody(request, signal, maximumBytes, observe);
   try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body); }
   catch { throw new ChatBodyEncodingError("Model request contains invalid UTF-8"); }
 }
 
-export function readModelBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number): Promise<Buffer> {
+export function readModelBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number, observe?: (chunk: Buffer) => void): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -38,6 +38,7 @@ export function readModelBody(request: IncomingMessage, signal: AbortSignal, max
     const abort = (): void => error(signal.reason);
     const end = (): void => { cleanup(); resolve(Buffer.concat(chunks)); };
     const data = (chunk: Buffer): void => {
+      observe?.(chunk);
       size += chunk.length;
       if (size > maximumBytes) error(new ChatBodyTooLargeError("Model request exceeds size limit"));
       else chunks.push(chunk);
@@ -75,6 +76,7 @@ export function writeChatData(response: ServerResponse, data: string, signal: Ab
 }
 
 export interface ChatStreamBounds {
+  observeChunk?(chunk: Buffer): void;
   frameBytes: number;
   bufferBytes: number;
   totalBytes: number;
@@ -105,6 +107,7 @@ export async function* readModelFrames(incoming: IncomingMessage, signal: AbortS
       const receivedAt = performance.now();
       signal.throwIfAborted();
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value as string);
+      bounds.observeChunk?.(chunk);
       total += chunk.length;
       if (total > bounds.totalBytes) throw new ModelConversionError("Chat response exceeds size limit");
       buffer += decode(chunk);

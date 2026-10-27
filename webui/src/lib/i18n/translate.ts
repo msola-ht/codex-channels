@@ -30,6 +30,12 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  cloud_usage_invalid_response: "cloudUsage.invalidResponse",
+  cloud_usage_unavailable: "cloudUsage.unavailable",
+  cloud_usage_invalid_request: "cloudUsage.invalidRequest",
+  cloud_usage_provider_not_found: "cloudUsage.providerNotFound",
+  cloud_usage_refresh_failed: "cloudUsage.refreshFailed",
+  cloud_usage_gateway_unavailable: "cloudUsage.gatewayUnavailable",
   base_models_invalid_input: "baseModel.invalidInput",
   base_models_invalid_catalog: "baseModel.invalidCatalog",
   base_models_unavailable: "baseModel.unavailable",
@@ -50,6 +56,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   provider_models_invalid_input: "modelCatalog.promptsInvalid",
   provider_models_stale_revision: "modelCatalog.detailsStale",
   provider_models_unavailable: "modelCatalog.promptsUnavailable",
+  provider_models_verification_inconclusive: "modelAddition.verificationInconclusive",
   provider_templates_busy: "modelTemplate.busy",
   "template-source-expired": "modelTemplate.expired",
   "template-source-unavailable": "modelTemplate.sourceUnavailable",
@@ -106,6 +113,10 @@ const apiErrorKeys: Record<string, MessageKey> = {
   "config-path-conflict": "settingsUi.stateConflict",
   "invalid-mode": "settingsUi.invalid",
   "invalid-api-key": "settingsUi.invalidCredential",
+  "authentication-rate-limited": "modelManagement.authenticationRateLimited",
+  "authentication-timeout": "modelManagement.authenticationTimeout",
+  "authentication-unavailable": "modelManagement.authenticationUnavailable",
+  "operation-cancelled": "modelManagement.authenticationCancelled",
   "invalid-account-id": "settingsUi.invalid",
   "confirmation-required": "settingsUi.invalid",
   "stale-preview": "relay.stale",

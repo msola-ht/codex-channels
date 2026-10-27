@@ -155,6 +155,7 @@ export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
         warnings: [...new Map([...accountSnapshotData.warnings, ...sourceWarnings].map(warning => [warning.source, warning])).values()],
       }, providers), removedProviders)),
     refreshing, refreshError, refresh, refreshControls, accountRemoved, removalNotice, notificationStatus,
+    notificationRevision: latest.current,
     refetchSnapshots,
   }
 }
@@ -179,6 +180,7 @@ function accountSources(result: Awaited<ReturnType<typeof fetchOfficialAccountSn
     openaiWeeklyQuota: openAiWeeklyQuotaFromSnapshot(result.snapshots.find(snapshot => snapshot.provider === "openai")),
     openai: openAiCreditsFromSnapshot(result.snapshots.find(snapshot => snapshot.provider === "openai")),
     deepseek,
+    ollamaCloud: result.snapshots.filter(snapshot => /^olc-[a-z0-9_-]{1,32}$/.test(snapshot.provider)).map(deepseekAccountFromSnapshot),
     opencodeGo,
     ccg,
     clinePass: clinePass.map(quotaAccountFromSnapshot),

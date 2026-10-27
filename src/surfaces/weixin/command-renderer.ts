@@ -27,6 +27,9 @@ import { renderConversationCommandResult } from "../conversation-command-rendere
 import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
 
 export function renderWeixinCommandResult(result: ConversationCommandResult): string | null {
+  if (result.kind === "usage" && result.result.kind === "cloud-usage") {
+    return `${renderConversationCommandResult(result)}\n\n- 切换：/usage 24h · /usage 7d · /usage 30d\n- 刷新：/usage ${result.result.query.range} refresh`;
+  }
   if (result.kind === "artifacts" && result.artifacts?.diff?.trim()) {
     const diff = result.artifacts.diff;
     let fenceLength = 3;

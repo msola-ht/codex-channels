@@ -17,6 +17,8 @@ import type {
   ProviderAccountLimits,
   ProviderAccountQueryPort,
   ProviderAccountUsage,
+  CloudUsageQuery,
+  CloudUsageReport,
 } from "./account-port.js";
 import type { InstalledSkill } from "./skill-port.js";
 import type {
@@ -382,7 +384,7 @@ export interface ConversationSessionUseCases {
 export interface ConversationAccountMetricsUseCases {
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
-  providerAccountUsage(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountUsage>;
+  providerAccountUsage(target: ConversationTarget, assertAuthorized?: () => void, query?: CloudUsageQuery): Promise<ProviderAccountUsage | CloudUsageReport>;
   providerAccountLimits(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountLimits>;
   requestMetrics(
     target: ConversationTarget,
@@ -1714,8 +1716,8 @@ export class ConversationService implements
     return this.accountMetrics.accountRateLimits();
   }
 
-  providerAccountUsage(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountUsage> {
-    return this.accountMetrics.providerAccountUsage(target, assertAuthorized);
+  providerAccountUsage(target: ConversationTarget, assertAuthorized?: () => void, query?: CloudUsageQuery): Promise<ProviderAccountUsage | CloudUsageReport> {
+    return this.accountMetrics.providerAccountUsage(target, assertAuthorized, query);
   }
 
   providerAccountLimits(target: ConversationTarget, assertAuthorized?: () => void): Promise<ProviderAccountLimits> {

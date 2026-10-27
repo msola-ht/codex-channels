@@ -144,6 +144,7 @@
   `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警；响应附加同账户的 OpenAI 凭证刷新时间，不写入快照） / `webui-management-task-route.mjs` /
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
   服务与上游状态资源；复用主服务传入的共享安全状态，不自行建立认证、限速、事务锁或错误出口。
+  `POST /api/v1/management/accounts/cloud-usage` 严格接受精确 Ollama Cloud Provider、24h/7d/30d 和可选布尔 refresh，经同一账户 IPC 查询报告与共享估算；同路径 GET 仅接受 provider/range 两个查询参数，固定 cacheOnly、不查远端、无缓存返回 null。GET 使用独立的 account-snapshot 配额，POST 保留 account-refresh 配额；均复用管理认证、同源约束及关闭取消，不把查询结果存入指标库。
   Provider 与账户路由通过私有 Gateway IPC 刷新账户，不直接请求官方接口；凭证刷新时间仅通过 runtime 读取器
   获取匹配账户的登录缓存 `last_refresh`，不向浏览器返回凭据。账户
   来源清单独立读取各家账户注册表、OpenAI 鉴权文件存在性和主配置选择，不依赖模型目录或指标库，来源错误分别返回；
@@ -250,14 +251,14 @@
 - `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：Provider 保存前的 Codex 模型目录合同校验；先将自身新建的隔离临时目录设为私有，再写入目录数据，限制运行时间并清理临时文件，不修改系统 TEMP 根目录权限。
 - `responses-model-setup.mjs` / `responses-model-setup.d.mts`：新提供商从共用独立草稿填写准确 ID、名称、窗口及能力，使用通用编程提示词；已有模型按设置组编辑，未选项保留。已配置提供商的新模型由统一添加入口处理，编辑不夹带添加或移除。高级设置保留现有能力、提示词、压缩／截断及采样编辑，工具诊断仍需单独明确触发。
 - `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义提供商共用的 1–64 个模型多选、预览确认与默认模型保护。
-- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：CCG、OCG、CLP 和自定义目录共用按 ID 添加的 CLI 交互、独立填写／继承选择、全字段预览及确认保存。继承只复制当前提供商保存的快照，CLP 附带请求格式及可选请求改写；不关联模板。受管提供商另可明确追加 DS 模板映射，已有模型保持原值，取消返回目录菜单。
+- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：CCG、OCG、CLP 和自定义目录共用按 ID 添加的 CLI 交互、独立填写／继承选择、全字段预览及确认保存。继承只复制当前提供商保存的快照，CLP 附带请求格式及可选请求改写；不关联模板。OLC 的“添加受管模型”从公开远端元数据选择缺失模型，不发送推理请求，不开放手填或继承；高级入口可另选具体验证账户，明确确认费用、逐模型诊断后再预览保存，诊断不是普通添加前置。其他受管提供商另可明确追加 DS 模板映射。已有模型保持原值，取消返回目录菜单。
 - `managed-provider-model-edit.mjs` / `managed-provider-model-edit.d.mts`：CLP 已保存模型的本地读取、按字段差异预览与锁内保存，不依赖远程模板或模型 ID 匹配。保留精确 ID、请求格式、来源关联及未改字段；复用受管目录事务、备份、回读与同族账户等级镜像。
 - `managed-provider-model-edit-setup.mjs` / `managed-provider-model-edit-setup.d.mts`：CLI 本地编辑 CLP 已有模型，按设置组选项修改并确认前后差异；支持思考开关 `enabled`，不新增模型、不下载模板，不提供 CLP 不支持的采样、原图或摘要控制。
 - `cline-pass-request-options-setup.mjs` / `cline-pass-request-options-setup.d.mts`：CLI 编辑 CLP 模型级 `providerOptions` 出站覆盖，只提供 JSON 输入和格式校验，字段原样透传；预览差异并在备份后保存，不发起模型请求。
 - `provider-model-management.mjs` / `provider-model-management.d.mts`：CLI/WebUI 共用的提供商目录能力、本地移除、单模型窗口及显示名称预览和锁内保存；修改绑定 Provider、模型和目录修订，并显示家族共用账户范围。显示名称修改保留模型 ID、默认值及能力参数，无变化不写入；自定义修改仅重编译已保存定义，不重新应用提示词模板；官方共享目录只读。WebUI 从对应保存目录投影完整能力，按目录身份、精确模型 ID 和内容修订读取白名单提示词。列表不携带提示正文。保护账户和 Gateway 显式默认值、非空目录及文件修订；受管修改纳入账户目录／来源持久恢复，自定义写入统一前后摘要 pending 与回读校验。
   列表投影受控移除原因，区分账户默认、目录默认及活动主提供商的 Gateway 显式默认；CLI/WebUI 共用判断，执行仍在锁内复核。
-- `provider-model-template-management.mjs` / `provider-model-template-management.d.mts`：DS、CLP、CCG、OCG 和 CP 的统一模板候选、明确来源、分组差异预览及锁内执行。CLP 使用仓库 DS 模板，不下载 Cline 目录；既有 Cline 关联保留读取，更新时主动选择本地来源。候选绑定目标修订并在十分钟内复用，更新只覆盖所选范围，保留当前上下文、默认等级和未选字段。
-- `provider-model-additions.mjs` / `provider-model-additions.d.mts`：CCG、OCG、CLP 和自定义目录共用的新增候选、全字段预览及执行计划。独立填写使用共用通用提示词草稿；继承同目录保存快照，不复制凭据或模板绑定。候选十分钟失效并绑定环境、账户、连接和目录修订；锁内复核、原生事务保存及回读，旧模型和默认选择保留。CLP 固定候选读取仓库 DS 模板，不访问 Cline 官方目录；Chat 能力受桥转换合同约束。
+- `provider-model-template-management.mjs` / `provider-model-template-management.d.mts`：DS、CLP、CCG、OCG、OLC 和 CP 的统一模板候选、明确来源、分组差异预览及锁内执行。OLC 的所有模板来源仅开放提示词与运行设置，拒绝能力更新；旧来源关联保留读取。CLP 使用仓库 DS 模板，不下载 Cline 目录；既有 Cline 关联保留读取，更新时主动选择本地来源。候选绑定目标修订并在十分钟内复用，更新只覆盖所选范围，保留当前上下文、默认等级和未选字段。
+- `provider-model-additions.mjs` / `provider-model-additions.d.mts`：CCG、OCG、CLP、OLC 和自定义目录共用的新增候选、全字段预览及执行计划。独立填写使用共用通用提示词草稿；继承同目录保存快照，不复制凭据或模板绑定；OLC 后端拒绝这两类输入。OLC 普通候选从公开远端精确 ID 交集和 show 元数据生成，仅追加选中的缺失项，不发推理请求或伪造 `modelDiscovery`；显式 `discovery: true` 才进入可选收费诊断。私有发现令牌单次使用，逐级普通工具往返诊断前后复核公开来源，每次提交及保存前复核精确账户材料。诊断成功后沿用普通添加的能力生成策略，以可选 `modelDiscovery` 记录最小有界来源及验证范围，不把诊断作为图片或适配工具的验收。候选十分钟失效并绑定环境、账户、连接和目录修订；锁内复核、原生事务保存及回读，旧模型和默认选择保留。CLP 固定候选读取仓库 DS 模板，不访问 Cline 官方目录；Chat 能力受桥转换合同约束。
 - `provider-model-setup.mjs` / `provider-model-setup.d.mts`：Setup 的统一模型管理菜单，复用显示名称编辑、移除、自定义模型专用保存、受管默认设置，以及 CCG／OCG／CLP／自定义提供商按 ID 独立填写或继承添加；受管提供商另保留固定 DS 候选入口。名称编辑展示固定模型 ID、旧名称、新名称及共享账户，确认后调用共用保存接口。已有自定义模型可单独选择工具能力探测，明确选择才发请求，采用结果仍走修订检查和预览保存。五类独立目录均可选择来源、对比并更新模板；自定义允许提示词、运行设置及本地工具，受管另有能力参数；默认仅选择提示词。逐字段预览差异，长内容显示 JSON 长度与 SHA-256 摘要并可在确认前展开，确认后保存，无差异不写入；不自动重启服务。
 - `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内先拒绝未完成的目录整理，再校验当前配置，完成未结束的自定义模型目录保存或受管账户设置事务；两种记录仅接受 v2，旧版记录保留并提示使用对应原版本恢复。固定 CP 允许未设置或候选模型支持的独立思考等级，切换 Profile 仍须匹配目录默认等级；受管恢复核对准确目录／Profile 路径及前后值，拒绝覆盖后续修改。
 - `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主
@@ -407,8 +408,13 @@
   覆盖高风险确认、Origin、限速、请求上限、安全响应头和脱敏审计；WebUI 管理路由复用其中的请求约束、
   限速和审计原语，配置了 WebUI 令牌时直接使用 Bearer 令牌认证。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 日志与高级功能选择完整日志等级，不改写显示设置或凭据。
+- `ollama-cloud-catalog.mjs`：从固定官方公开 tags 与 `/v1/models` 的精确 ID 交集及 show 元数据有界发现能力与来源指纹，复核首尾集合与 tags；`loadOllamaCloudModels` 共用一小时私有持久缓存，独立文件锁、版本与大小校验、原子替换，失败保留旧文件并报错，显式 refresh 强制更新，原始发现函数仍供收费诊断前后直接复核；供首次及后续普通选模添加使用，不携带 Key 或写入目录。共用生成器按元数据设置窗口（最高 393216）、思考及图片，未声明 vision 即不启用图片；思考 false 映射 none，布尔 true 用 high 表示开启而非强度，命名等级精确保留。默认启用 Responses freeform／客户端工具搜索适配，关闭 WS、原图、摘要、详细程度和原生网页搜索；托管搜索另行设置。
+- `ollama-cloud-model-verification.mjs`：OLC 单模型普通函数及文本续答验证的固定 HTTPS 出站与代理生命周期；每级两轮 SSE、默认等级另加两轮 JSON，共最多十六次、每次 768 输出 Token/128 KiB，消费上层统一取消期限及逐请求材料复核。Fetch 正文适配 Node Readable 后复用 Provider Proxy 公开 consumer，额外核对 SSE 工具完成项、文本增量与终态，无重试、不执行工具、不保存历史。公开发现复用同一受管代理选择器，资源收尾后才返回。
+- `ollama-cloud-command.mjs`：Ollama Cloud 的 setup/add/list/reconfigure/default/remove 与公开 discover 入口，完整支持 `-h` / `--help`；发现候选不自动启用。
+- `ollama-cloud-account-management.mjs` / `ollama-cloud-account-management.d.mts`：CLI、Setup、WebUI 共用账户计划、首次公开选模、固定认证预检、修订与事务；首次发现令牌十分钟失效，绑定精确账户、Key、目录与公共底座，仅创建所选模型，以 `initialModels` 预览实际生成项，manifest 为 `source: "ollama-cloud"`、空 `modelTemplates`。已有目录只复用，编辑省略模型保留当前默认值，不接受旧 `initialModel` 输入。账户独立默认模型、版本化主配置及私有凭据、无变化和精确移除复用既有管理边界，不接触自定义 cp-ollama。
+- `ollama-cloud-setup.mjs`：账户菜单与定向交互操作；添加选择模式、Key，首次从公开远端候选选一个默认模型，已有目录从本地模型选择；保存前展示实际生成项及共享作用域，编辑账户不要求重选模型；不发送推理请求。
 - `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、默认账户及 `codexc provider ccg remove` 删除入口；账户隔离 Key/Profile/App Server 与统计代理，模型目录由 CCG 账户共用，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
-- `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：原生 DS、CCG、OCG 的模板投影，以及 CLP 固定 DS ID 映射和模板绑定。CLP 从仓库 DS 元数据编译 Chat 能力，明确保存 Flash／标准请求快照，不继承 DS Responses 原图、摘要、服务档位或未支持的协议字段。
+- `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：原生 DS、CCG、OCG 的模板投影，以及 CLP 固定 DS ID 映射和模板绑定；OLC 模型生成由 `ollama-cloud-catalog.mjs` 的远端元数据入口负责，不再维护固定三个 OLC 映射或 DS 模板生成器。CLP 从仓库 DS 元数据编译 Chat 能力，明确保存 Flash／标准请求快照，不继承 DS Responses 原图、摘要、服务档位或未支持的协议字段。
   DS、CCG、OCG 的初建及模板更新共用按目标家族区分的来源投影；仅 DS 官方账户关闭 verbosity 与摘要声明，CCG／OCG 保留源声明，不将 DS 官方端点限制套用到其他平台。
 - `managed-provider-files.mjs` / `managed-provider-files.d.mts`：Provider 文件事务必须提供当前运行环境；统一访问器绑定文件归属，快照携带内存中的读取与写入闭包。主 Codex 配置通过用户层 `config/read` 与带 `expectedVersion` 的 `config/batchWrite` 发布实际变化的字段，禁止全文件替换；回滚只逆转本次字段并再次校验版本。固定模式先纳入不可变私有凭据再发布引用；未知写入先回读，不自动重放，无法确认时保留私有文件、凭据及备份并阻止自动回滚。已确认失败时先恢复已有文件，失败保留新增恢复资料并停止后续删除；未纳入快照的更新明确拒绝，不改变持久化备份格式。
 - `managed-provider-account-plan.mjs` / `managed-provider-account-plan.d.mts`：受管账户固定模式与自定义切换注册表的兼容性检查；DS、CCG、CLP 共用编辑的模式、凭据保留和变化计算，拒绝缺失默认模型，预览不暴露凭据。账户计划快照包含相关配置、注册表及当前固定凭据版本，以私有 HMAC 修订绑定预览，执行时拒绝过期确认，不公开凭据摘要。

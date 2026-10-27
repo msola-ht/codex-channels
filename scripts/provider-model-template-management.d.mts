@@ -10,7 +10,7 @@ export interface ModelTemplateUpdateInput {
   template: ModelTemplateReference;
 }
 export interface ModelTemplateTarget { model: string; displayName: string; template: ModelTemplateReference | null }
-export interface ModelTemplateOption extends ModelTemplateReference { displayName: string }
+export interface ModelTemplateOption extends ModelTemplateReference { displayName: string; availableSections: ModelTemplateSection[] }
 export interface ModelTemplateOptions {
   provider: string;
   availableSections: ModelTemplateSection[];

@@ -1,6 +1,10 @@
 import type { RequestRecord } from "./types"
 
-const clpSearchReasons = {
+const hostedSearchReasons = {
+  olc_search_authentication_error: "olcSearchAuthentication", olc_search_permission_denied: "olcSearchPermission",
+  olc_search_rate_limit: "olcSearchRateLimit", olc_search_timeout: "olcSearchTimeout", olc_search_deadline: "olcSearchDeadline",
+  olc_search_invalid_response: "olcSearchInvalidResponse", olc_search_upstream_error: "olcSearchUpstream", olc_search_failed: "olcSearchFailed",
+  olc_search_result_limit: "olcSearchResultLimit",
   clp_search_authentication_error: "clpSearchAuthentication", clp_search_permission_denied: "clpSearchPermission",
   clp_search_payment_required: "clpSearchPayment", clp_search_rate_limit: "clpSearchRateLimit",
   clp_search_timeout: "clpSearchTimeout", clp_search_invalid_response: "clpSearchInvalidResponse",
@@ -30,9 +34,9 @@ const httpReasons = {
   408: "timeout", 429: "rateLimit", 500: "server", 502: "server", 503: "server", 504: "timeout",
 } as const
 
-function clpSearchFailureReason(codes: readonly unknown[]) {
+function hostedSearchFailureReason(codes: readonly unknown[]) {
   for (const code of codes) {
-    if (typeof code === "string" && Object.hasOwn(clpSearchReasons, code)) return clpSearchReasons[code as keyof typeof clpSearchReasons]
+    if (typeof code === "string" && Object.hasOwn(hostedSearchReasons, code)) return hostedSearchReasons[code as keyof typeof hostedSearchReasons]
   }
   return undefined
 }
@@ -40,7 +44,7 @@ function clpSearchFailureReason(codes: readonly unknown[]) {
 /** Only controlled codes and actual HTTP status are classification evidence; raw upstream text is not. */
 export function requestFailureReason(codes: readonly unknown[], httpStatus?: number | null) {
   if (codes.includes("client_disconnected")) return "disconnected"
-  const searchReason = clpSearchFailureReason(codes)
+  const searchReason = hostedSearchFailureReason(codes)
   if (searchReason) return searchReason
   for (const code of codes) {
     if (code === "web_search_unsupported" && httpStatus != null && httpStatus !== 200 && httpStatus !== 400) continue
@@ -53,6 +57,10 @@ export function requestFailureReason(codes: readonly unknown[], httpStatus?: num
 }
 
 export const failureLabelKeys = {
+  olcSearchAuthentication: "olcSearchAuthentication", olcSearchPermission: "olcSearchPermission",
+  olcSearchRateLimit: "olcSearchRateLimit", olcSearchTimeout: "olcSearchTimeout", olcSearchDeadline: "olcSearchDeadline",
+  olcSearchInvalidResponse: "olcSearchInvalidResponse", olcSearchUpstream: "olcSearchUpstream", olcSearchFailed: "olcSearchFailed",
+  olcSearchResultLimit: "olcSearchResultLimit",
   rateLimit: "rateLimited", authentication: "authentication", permission: "permission", payment: "payment",
   context: "context", content: "filtered", server: "upstreamFailed", upstream: "upstreamFailed", timeout: "timeout",
   invalid: "rejected", notFound: "rejected", invalidResponse: "invalidResponse",
@@ -76,8 +84,8 @@ export function recordedRequestFailure(record: Pick<RequestRecord, "source" | "s
   if (["upload_timeout", "preparation_timeout", "upstream_timeout", "delivery_timeout", "client_delivery_error", "client_disconnected"].includes(record.errorType ?? "")) {
     return requestFailureReason([record.errorType])
   }
-  // Confirmed CLP search failures refine the bridge's outer HTTP result.
-  const searchReason = clpSearchFailureReason([record.errorCode, record.errorType])
+  // Confirmed hosted-search failures refine the outer model HTTP result.
+  const searchReason = hostedSearchFailureReason([record.errorCode, record.errorType])
   if (searchReason) return searchReason
   // A confirmed input-error subtype refines 400, but cannot override auth/rate-limit failures.
   if (record.errorCode === "web_search_unsupported" && (record.httpStatus == null || record.httpStatus === 200 || record.httpStatus === 400)) return "webSearch"

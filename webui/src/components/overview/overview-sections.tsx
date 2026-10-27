@@ -35,6 +35,7 @@ import { TableHint } from "@/components/metrics/data-table"
 import { StatCard } from "@/components/metrics/stat-card"
 import { AccountUpdateDescription, AccountRefreshButton, AccountRefreshFeedback, AccountSnapshotEmpty } from "./account-refresh-feedback"
 import { AccountSubscriptionNotice } from "./account-subscription-notice"
+import { OllamaCloudUsageCard } from "./ollama-cloud-usage-card"
 import type { AccountRefreshControl } from "@/lib/account-refresh-state"
 import { useTranslation } from "@/hooks/use-translation"
 import type { MessageKey, Translate } from "@/lib/i18n/messages"
@@ -307,6 +308,14 @@ export function DeepseekBalanceCards({
   ))}</>
 }
 
+export function OllamaCloudBalanceCards({ accounts }: {
+  accounts: DeepseekAccountBalance[]
+}) {
+  return <>{accounts.map(account => <OllamaCloudUsageCard key={account.provider}
+    provider={account.provider}
+    title={<AccountName providerName="Ollama Cloud" account={account.account} displayName={account.displayName} />} />)}</>
+}
+
 function AccountName({ providerName, account, displayName }: { providerName: string; account: string | null; displayName: string }) {
   const label = account ?? (displayName === providerName ? null : displayName)
   return <>
@@ -320,6 +329,7 @@ function DeepseekBalanceCard({
 }: DeepseekAccountBalance & { refreshControl: AccountRefreshControl | undefined }) {
   const { t } = useTranslation()
   const primary = balances[0]
+  const formatAmount = formatDeepseekAmount
   return (
     <Card size="sm" aria-busy={refreshControl?.refreshing}>
       <CardHeader className="min-w-0">
@@ -333,20 +343,20 @@ function DeepseekBalanceCard({
         <CardContent className="flex flex-col gap-1">
           <div className="flex flex-wrap items-baseline gap-2">
             <span className="text-2xl font-semibold tabular-nums">
-              {formatDeepseekAmount(primary.totalBalance, primary.currency)}
+              {formatAmount(primary.totalBalance, primary.currency)}
             </span>
             <span className="text-xs text-muted-foreground">{t("overview.availableBalance")}</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            {t("overview.grantedBalance", { amount: formatDeepseekAmount(primary.grantedBalance, primary.currency) })}
+            {t("overview.grantedBalance", { amount: formatAmount(primary.grantedBalance, primary.currency) })}
             {" · "}
-            {t("overview.toppedUpBalance", { amount: formatDeepseekAmount(primary.toppedUpBalance, primary.currency) })}
+            {t("overview.toppedUpBalance", { amount: formatAmount(primary.toppedUpBalance, primary.currency) })}
           </p>
           {balances.length > 1 ? (
             <p className="text-xs text-muted-foreground">
               {balances.slice(1)
                 .map((balance) =>
-                  formatDeepseekAmount(balance.totalBalance, balance.currency))
+                  formatAmount(balance.totalBalance, balance.currency))
                 .join(" · ")}
             </p>
           ) : null}

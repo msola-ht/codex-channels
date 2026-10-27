@@ -13,9 +13,12 @@ export async function inspectManagedAccountRuntime(provider, {
   environment = process.env,
   resolvePrimarySocket = managedAccountPrimarySocket,
   inspectSupervisor = inspectAppServerSupervisorState,
+  signal,
 } = {}) {
+  signal?.throwIfAborted();
   const primarySocketPath = resolvePrimarySocket(environment);
   const inspection = await inspectSupervisor(primarySocketPath);
+  signal?.throwIfAborted();
   if (inspection.status === "incompatible") {
     throw new AccountManagementError("supervisor-incompatible", "action", "App Server 监管协议不兼容或响应无效；请先运行 codexc restart appserver");
   }
@@ -31,7 +34,9 @@ export async function inspectManagedAccountRuntime(provider, {
 
 export async function releaseManagedAccountRuntime(plan, {
   releaseProvider = releaseAppServerProvider,
+  signal,
 } = {}) {
+  signal?.throwIfAborted();
   if (!plan.registered) return "not-running";
   const release = await releaseProvider(plan.primarySocketPath, plan.provider);
   return release.reason === "released" ? "stopped"

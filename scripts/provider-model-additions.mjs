@@ -12,13 +12,16 @@ import { readDeepseekModelTemplateCatalog, readModelBaseSnapshot, withModelBaseS
 import { resolveClinePassRequestProfile } from "../runtime/chat-reasoning.mjs";
 import { validateClinePassProviderOptions } from "../runtime/cline-provider-options.mjs";
 import { createIndependentModelDraft, isValidCustomModelId } from "../runtime/model-catalog.mjs";
-import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
+import { readModelTemplateBindings, validateOllamaCloudCatalogManifest } from "../runtime/model-template-bindings.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import { createCcgCatalogWithTemplateBindings, createOpencodeGoCatalogWithTemplateBindings, createClinePassCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
 import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
+import { loadConfiguredManagedProviderMaterial } from "../runtime/model-provider-managed-runtime.mjs";
+import { discoverOllamaCloudModels, loadOllamaCloudModels, createOllamaCloudDiscoveredModel } from "./ollama-cloud-catalog.mjs";
+import { withOllamaCloudFetch, verifyOllamaCloudResponses } from "./ollama-cloud-model-verification.mjs";
 
 const secret = randomBytes(32);
 const snapshots = new Map();
@@ -34,7 +37,7 @@ const stateError = error => error instanceof ProviderModelManagementError || err
 
 /** The downloaded source is retained privately; callers select exact candidate IDs only. */
 export async function loadProviderModelAdditionOptions(provider, {
-  environment = process.env, signal, manualModel,
+  environment = process.env, signal, manualModel, fetchImpl, discovery, refresh,
   downloadCatalog = downloadDeepseekCatalog,
 } = {}) {
   try {
@@ -42,6 +45,15 @@ export async function loadProviderModelAdditionOptions(provider, {
     const operationSignal = signal ? globalThis.AbortSignal.any([signal, deadline]) : deadline;
     operationSignal.throwIfAborted();
     const state = await readState(provider, environment);
+    if (refresh !== undefined && (refresh !== true || manualModel !== undefined || state.family.storageId !== "ollama-cloud")) {
+      throw invalid("invalid-input", "refresh", "强制刷新仅用于 OLC 远端模型列表");
+    }
+    if (state.family.storageId === "ollama-cloud" && manualModel !== undefined) {
+      throw invalid("invalid-input", "manualModel", "Ollama Cloud 请从远端列表选择模型；能力自动读取，保存后可继承提示词及运行设置");
+    }
+    if (discovery !== undefined && (discovery !== true || manualModel !== undefined || state.family.storageId !== "ollama-cloud")) {
+      throw invalid("invalid-input", "provider", "公开发现仅用于 OLC，不能与手动模型混用");
+    }
     const baseRevision = manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "inheritFrom")
       ? undefined : readModelBaseSnapshot(environment).revision;
     let models, bindings = {}, source;
@@ -66,7 +78,7 @@ export async function loadProviderModelAdditionOptions(provider, {
       if (manualModel && typeof manualModel === "object" && Object.hasOwn(manualModel, "sampling")) {
         throw invalid("invalid-input", "manualModel", "受管模型手动新增不支持默认采样参数；sampling 不会保存，请移除此字段");
       }
-      if (!["ccg", "opencode-go", "clp", "custom"].includes(state.family.storageId)
+      if (!["ccg", "opencode-go", "clp", "ollama-cloud", "custom"].includes(state.family.storageId)
         || !manualModel || typeof manualModel !== "object" || Array.isArray(manualModel)
         || !validModelId(state, manualModel.id)
         || manualModel.experimentalSupportedTools !== undefined && !Array.isArray(manualModel.experimentalSupportedTools)
@@ -77,6 +89,9 @@ export async function loadProviderModelAdditionOptions(provider, {
         throw invalid("invalid-input", "manualModel", "须明确声明思考等级、图片、apply_patch 和 tool_search 能力，不自动关联模板");
       }
       const clinePass = state.family.storageId === "clp";
+      if (state.family.storageId === "ollama-cloud" && manualModel.supportsWebSearch !== undefined && manualModel.supportsWebSearch !== false) {
+        throw invalid("invalid-input", "manualModel", "OLC 尚未开放原生 web_search 能力声明");
+      }
       const chat = clinePass || state.upstreamWireApi === "chat_completions";
       if (chat && manualModel.supportsImageDetailOriginal !== undefined && manualModel.supportsImageDetailOriginal !== false) {
         throw invalid("invalid-input", "manualModel", "Chat 桥不支持 original 图片细节");
@@ -101,6 +116,26 @@ export async function loadProviderModelAdditionOptions(provider, {
       models = generated.catalog.models;
       bindings = generated.templateBindings;
       source = { kind: "deepseek" };
+    } else if (state.family.storageId === "ollama-cloud") {
+      const material = loadConfiguredManagedProviderMaterial(provider, environment);
+      const discovered = await withOllamaCloudFetch(environment, operationSignal,
+        fetch => loadOllamaCloudModels({ environment, refresh: discovery === true || refresh === true, fetchImpl: fetch, signal: operationSignal }), fetchImpl);
+      operationSignal.throwIfAborted();
+      if ((await readState(provider, environment)).revision !== state.revision
+        || loadConfiguredManagedProviderMaterial(provider, environment).revision !== material.revision
+        || readModelBaseSnapshot(environment).revision !== baseRevision) throw stale();
+      const snapshot = { provider, providers: state.providers, scope: state.scope, revision: state.revision,
+        source: { kind: discovery === true ? "ollama-discovery" : "ollama-metadata", discovery: discovered }, materialRevision: material.revision, baseRevision,
+        discoveryCache: discovered.cache,
+        candidates: discovery === true ? [] : discovered.candidates.filter(candidate => candidate.status === "candidate"
+          && !state.catalog.models.some(model => model.slug === candidate.id)).map(candidate => {
+          const fields = createOllamaCloudDiscoveredModel(candidate, environment);
+          validateModel(fields, state);
+          return { model: candidate.id, displayName: fields.display_name, fields,
+            upstreamContextWindow: candidate.upstreamContextWindow, reasoningMode: candidate.reasoningMode };
+        }), discovery: discovered.candidates.map(candidate => ({ ...candidate,
+          alreadySaved: state.catalog.models.some(model => model.slug === candidate.id) })), expiresAt: Date.now() + lifetimeMs };
+      return retainSnapshot(snapshot);
     } else if (state.custom) {
       throw invalid("invalid-input", "manualModel", "自定义提供商新增模型必须填写准确 ID 及能力，或选择已有模型继承");
     } else {
@@ -132,19 +167,117 @@ export async function loadProviderModelAdditionOptions(provider, {
     if (baseRevision !== undefined && readModelBaseSnapshot(environment).revision !== baseRevision) throw stale();
     const snapshot = { provider, providers: state.providers, scope: state.scope, revision: state.revision, source, baseRevision,
       candidates, expiresAt: Date.now() + lifetimeMs };
-    const bytes = Buffer.byteLength(JSON.stringify(snapshot));
-    if (bytes > maximumSnapshotBytes) throw invalid("addition-source-too-large", "models", "新增候选超过 4 MiB，请缩小源目录后重试");
-    for (const [token, entry] of snapshots) if (entry.expiresAt <= Date.now()) snapshots.delete(token);
-    let total = [...snapshots.values()].reduce((sum, entry) => sum + entry.bytes, 0);
-    while (snapshots.size >= 16 || total + bytes > maximumCacheBytes) {
-      const first = snapshots.keys().next().value;
-      total -= snapshots.get(first).bytes;
-      snapshots.delete(first);
-    }
-    const sourceToken = randomBytes(32).toString("hex");
-    snapshots.set(sourceToken, { ...structuredClone(snapshot), bytes });
-    return structuredClone({ provider, sourceToken, revision: snapshot.revision, expiresAt: snapshot.expiresAt, providers: snapshot.providers, candidates });
+    return retainSnapshot(snapshot);
   } catch (error) { throw stateError(error); }
+}
+
+function retainSnapshot(snapshot) {
+  const bytes = Buffer.byteLength(JSON.stringify(snapshot));
+  if (bytes > maximumSnapshotBytes) throw invalid("addition-source-too-large", "models", "新增候选超过 4 MiB，请缩小源目录后重试");
+  for (const [token, entry] of snapshots) if (entry.expiresAt <= Date.now()) snapshots.delete(token);
+  let total = [...snapshots.values()].reduce((sum, entry) => sum + entry.bytes, 0);
+  while (snapshots.size >= 16 || total + bytes > maximumCacheBytes) {
+    const first = snapshots.keys().next().value;
+    total -= snapshots.get(first).bytes;
+    snapshots.delete(first);
+  }
+  const sourceToken = randomBytes(32).toString("hex");
+  snapshots.set(sourceToken, { ...structuredClone(snapshot), bytes });
+  const { provider, revision, expiresAt, providers, candidates, discovery, discoveryCache } = snapshot;
+  return structuredClone({ provider, sourceToken, revision, expiresAt, providers, candidates, ...(discovery ? { discovery } : {}), ...(discoveryCache ? { discoveryCache } : {}) });
+}
+
+/** A paid operation is separate from loading and saving; only server-owned candidates qualify. */
+export async function verifyProviderModelAddition(input, { environment = process.env, signal, fetchImpl } = {}) {
+  const operationSignal = globalThis.AbortSignal.any([globalThis.AbortSignal.timeout(90_000), ...(signal ? [signal] : [])]);
+  try {
+    operationSignal.throwIfAborted();
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || Object.keys(input).some(key => !["provider", "sourceToken", "revision", "model", "reasoningEfforts", "confirmPaid"].includes(key))
+      || input.confirmPaid !== true || typeof input.provider !== "string" || typeof input.model !== "string"
+      || !/^[a-f0-9]{64}$/u.test(input.sourceToken ?? "") || !/^[a-f0-9]{64}$/u.test(input.revision ?? "")
+      || !Array.isArray(input.reasoningEfforts) || !input.reasoningEfforts.length || input.reasoningEfforts.length > 7
+      || new Set(input.reasoningEfforts).size !== input.reasoningEfforts.length) throw invalid("invalid-input", "models", "请明确确认可能收费的单模型验证及思考等级");
+    const snapshot = snapshots.get(input.sourceToken);
+    if (!snapshot || snapshot.expiresAt <= Date.now()) throw invalid("addition-source-expired", "sourceToken", "发现候选已过期，请重新发现");
+    const state = await readState(input.provider, environment);
+    if (snapshot.source.kind !== "ollama-discovery" || snapshot.provider !== input.provider
+      || state.family.storageId !== "ollama-cloud" || snapshot.scope !== state.scope
+      || snapshot.revision !== state.revision || input.revision !== state.revision) throw stale();
+    assertSourceBase(snapshot, environment);
+    const candidate = snapshot.source.discovery.candidates.find(entry => entry.id === input.model);
+    if (candidate?.status !== "candidate" || state.catalog.models.some(model => model.slug === input.model)
+      || !input.reasoningEfforts.includes(candidate.defaultReasoningEffort)
+      || input.reasoningEfforts.some(effort => !candidate.reasoningEfforts.includes(effort))) throw invalid("addition-unavailable", "models", "请选择未保存的有效候选，验证等级必须包含来源默认等级");
+    const material = loadConfiguredManagedProviderMaterial(input.provider, environment);
+    if (snapshot.materialRevision !== material.revision || material.baseUrl !== "https://ollama.com/v1") throw stale();
+    // Reject a locally invalid draft before sending any paid request.
+    // The diagnostic selection limits paid requests, not metadata-defined capabilities.
+    const generated = createOllamaCloudDiscoveredModel(candidate, environment);
+    validateModel(generated, state);
+    const proposedCatalog = { ...state.catalog, models: [...state.catalog.models, generated] };
+    if (state.catalog.models.length >= 64 || Buffer.byteLength(`${JSON.stringify(proposedCatalog, null, 2)}\n`) > 2 * 1024 * 1024) {
+      throw invalid("addition-source-too-large", "models", "新增后的目录超过模型数量或 2 MiB 大小限制，未开始收费验证");
+    }
+    const discovery = snapshot.source.discovery;
+    const provenanceSource = { model: candidate.id, generatorVersion: 1, sources: discovery.sources, fetchedAt: discovery.fetchedAt,
+      modelsSha256: discovery.modelsSha256, tagsSha256: discovery.tagsSha256, showSha256: candidate.showSha256,
+      fingerprint: candidate.fingerprint, upstreamContextWindow: candidate.upstreamContextWindow, contextWindowPolicyCap: 393_216 };
+    const verificationFields = { reasoningEfforts: [...input.reasoningEfforts], jsonReasoningEffort: candidate.defaultReasoningEffort,
+      requests: input.reasoningEfforts.length * 2 + 2, scope: "responses-sse-and-json-default-roundtrip" };
+    // Validate prospective format and capacity only; no verification fact is retained
+    // or exposed until the actual round trips below succeed.
+    validateOllamaCloudCatalogManifest({ ...state.manifest, modelDiscovery: { ...state.manifest.modelDiscovery,
+      [candidate.id]: { ...provenanceSource, verification: { ...verificationFields, verifiedAt: discovery.fetchedAt } },
+    } }, [...state.catalog.models.map(model => model.slug), candidate.id]);
+    await validateModelCatalogWithCodex(proposedCatalog, environment);
+    operationSignal.throwIfAborted();
+    // One attempt per discovery token prevents accidental duplicate paid submissions.
+    if (snapshots.get(input.sourceToken) !== snapshot || snapshot.expiresAt <= Date.now()) throw invalid("addition-source-expired", "sourceToken", "发现候选已使用或过期，请重新发现");
+    snapshots.delete(input.sourceToken);
+    const result = await withOllamaCloudFetch(environment, operationSignal, async fetch => {
+      const assertSubmission = async () => {
+        operationSignal.throwIfAborted();
+        if (snapshot.expiresAt <= Date.now() || (await readState(input.provider, environment)).revision !== state.revision
+          || loadConfiguredManagedProviderMaterial(input.provider, environment).revision !== material.revision) throw stale();
+        assertSourceBase(snapshot, environment);
+        operationSignal.throwIfAborted();
+      };
+      const assertCurrent = async () => {
+        operationSignal.throwIfAborted();
+        const refreshed = await discoverOllamaCloudModels({ fetchImpl: fetch, signal: operationSignal });
+        if (!isDeepStrictEqual(sourceIdentity(refreshed), sourceIdentity(snapshot.source.discovery))) throw stale();
+        await assertSubmission();
+      };
+      await assertCurrent();
+      const result = await verifyOllamaCloudResponses({ model: candidate.id, reasoningEfforts: input.reasoningEfforts,
+        defaultReasoningEffort: candidate.defaultReasoningEffort, apiKey: material.apiKey,
+        signal: operationSignal, fetchImpl: fetch, assertCurrent: assertSubmission });
+      if (result.status === "verified") await assertCurrent();
+      return result;
+    }, fetchImpl);
+    if (result.status !== "verified") return result;
+    operationSignal.throwIfAborted();
+    const provenance = { ...provenanceSource, verification: { ...verificationFields, verifiedAt: result.verifiedAt,
+      jsonReasoningEffort: result.jsonReasoningEffort, requests: result.requests } };
+    const options = retainSnapshot({ provider: input.provider, providers: state.providers, scope: state.scope, revision: state.revision,
+      source: { kind: "ollama-verified", model: candidate.id, provenance }, materialRevision: material.revision,
+      baseRevision: snapshot.baseRevision, candidates: [{ model: candidate.id, displayName: generated.display_name, fields: generated,
+        upstreamContextWindow: candidate.upstreamContextWindow, reasoningMode: candidate.reasoningMode,
+        ollamaVerification: provenance.verification }], expiresAt: Date.now() + lifetimeMs });
+    return { ...result, options };
+  } catch (error) { throw stateError(error); }
+}
+
+function sourceIdentity(discovery) {
+  const identity = { ...discovery };
+  delete identity.fetchedAt;
+  delete identity.cache;
+  // The public /v1/models data order varies between identical ID sets. Its raw
+  // hash is provenance only; sorted exact IDs and all consumed tags/show fields
+  // remain bound by candidates, tagsSha256 and the per-model fingerprints.
+  delete identity.modelsSha256;
+  return identity;
 }
 
 export async function previewProviderModelAddition(input, { environment = process.env } = {}) {
@@ -200,10 +333,18 @@ async function buildPlan(input, environment, validate) {
   }
   const snapshot = snapshots.get(input.sourceToken);
   if (!snapshot || snapshot.expiresAt <= Date.now()) throw invalid("addition-source-expired", "sourceToken", "新增候选已过期，请重新读取并预览");
+  if (snapshot.source.kind === "ollama-discovery") throw invalid("addition-unavailable", "models", "公开候选必须先明确确认并通过单模型 Responses 验证");
   const state = await readState(input.provider, environment);
   if (snapshot.provider !== input.provider || snapshot.scope !== state.scope || snapshot.revision !== state.revision
     || input.revision !== snapshot.revision) throw stale();
   assertSourceBase(snapshot, environment);
+  if (snapshot.materialRevision !== undefined) {
+    const material = loadConfiguredManagedProviderMaterial(input.provider, environment);
+    if (material.revision !== snapshot.materialRevision) throw stale();
+    const additional = snapshotProviderFiles(material.paths.filter(path => !state.snapshots.some(file => file.path === path)), environment);
+    if (loadConfiguredManagedProviderMaterial(input.provider, environment).revision !== snapshot.materialRevision) throw stale();
+    state.snapshots.push(...additional);
+  }
   const additions = snapshot.candidates.filter(candidate => input.models.includes(candidate.model));
   if (additions.length !== input.models.length || additions.some(candidate => state.catalog.models.some(model => model.slug === candidate.model))) {
     throw invalid("addition-unavailable", "models", "所选模型不在当前新增候选中，或 ID 已存在");
@@ -223,11 +364,15 @@ async function buildPlan(input, environment, validate) {
   const catalog = { ...state.catalog, models: [...state.catalog.models, ...additions.map(candidate => candidate.fields)] };
   const bindings = { ...state.bindings, ...Object.fromEntries(additions.filter(candidate => candidate.template).map(candidate => [candidate.model, candidate.template])) };
   const manifest = { ...state.manifest,
+    ...(snapshot.source.kind === "ollama-verified" && additions.length ? {
+      modelDiscovery: { ...state.manifest.modelDiscovery, [snapshot.source.model]: snapshot.source.provenance },
+    } : {}),
     ...(state.manifest.modelTemplates !== undefined || Object.keys(bindings).length ? { modelTemplates: bindings } : {}),
     ...(state.family.storageId === "clp" && state.manifest.cline !== undefined && additions.length ? {
       ...(additions.some(model => model.model === state.definition.defaultModel) ? { source: "deepseek", model: "deepseek-flash" } : {}),
     } : {}),
   };
+  if (state.family.storageId === "ollama-cloud") validateOllamaCloudCatalogManifest(manifest, catalog.models.map(model => model.slug));
   if (validate && additions.length) await validateModelCatalogWithCodex(catalog, environment);
   await assertProviderFileSnapshots(state.snapshots);
   if (snapshot.expiresAt <= Date.now() || snapshots.get(input.sourceToken) !== snapshot) throw invalid("addition-source-expired", "sourceToken", "新增候选已过期，请重新读取并预览");
@@ -266,7 +411,7 @@ async function readState(provider, environment) {
   const definitions = loadManagedModelProviderDefinitions(environment);
   const definition = definitions.find(entry => entry.id === provider);
   const family = managedProviderAccountFamilies.find(entry => entry.storageId === definition?.storageId);
-  if (!definition || !family || !["ccg", "opencode-go", "clp"].includes(family.storageId)) throw invalid("addition-unavailable", "provider", "新增仅支持已配置的 CCG、OCG 或 CLP 账户");
+  if (!definition || !family || !["ccg", "opencode-go", "clp", "ollama-cloud"].includes(family.storageId)) throw invalid("addition-unavailable", "provider", "新增仅支持已配置的 CCG、OCG、CLP 或 OLC 账户");
   const { catalogs } = await loadProviderModelCatalogs({ environment });
   const visible = catalogs.find(catalog => catalog.providers.includes(provider));
   if (!visible) throw invalid("provider-not-configured", "provider", "提供商账户不存在或目录不可用");
@@ -288,6 +433,7 @@ async function readState(provider, environment) {
   }
   if (!isDeepStrictEqual(catalog.models.map(model => model.slug).sort(), visible.models.map(model => model.id).sort())) throw stale();
   const bindings = readModelTemplateBindings(manifest, catalog.models.map(model => model.slug));
+  if (family.storageId === "ollama-cloud") validateOllamaCloudCatalogManifest(manifest, catalog.models.map(model => model.slug));
   const scope = JSON.stringify([codexHomePath(environment), connectHomePath(environment), resolve(environment.CODEX_CONNECT_CONFIG_FILE?.trim() || join(connectHomePath(environment), "config.toml"))]);
   return { definition, family, providers: visible.providers, catalogPath, manifestPath, catalog, manifest, bindings, snapshots: files, scope,
     revision: revisionOf([provider, scope, visible, files.map(file => [file.path, file.content?.toString("base64") ?? null])]) };

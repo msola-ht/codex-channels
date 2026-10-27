@@ -494,6 +494,13 @@ export function createTurnCompletedPresentation(
           ? `${contextUsage}（窗口上限未知）` : contextUsage },
         ...(mode !== "brief" && event.durationMs !== undefined
           ? [{ label: "耗时", value: formatElapsedDuration(event.durationMs) }] : []),
+        ...visibleCompletionStatistics([
+          ...responseUsageFields(event.timing),
+          ...(event.taskAggregate ? [{
+            title: "任务合计（含子代理）",
+            fields: responseUsageFields(event.taskAggregate),
+          }] : []),
+        ]),
         ...(event.background ? [{ label: "任务", value: literal(event.threadId), literal: true }] : []),
         ...(event.error ? [{ label: "错误", value: literal(formatTurnErrorMessage(event.error, event.errorCode, event.modelProvider, event.model)), literal: true }] : []),
         ...(!event.error && event.errorCode ? [{ label: "错误码", value: event.errorCode, literal: true }] : []),
@@ -601,6 +608,7 @@ export function createTurnCompletedPresentation(
     label: "本轮耗时",
     value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs),
   });
+  runFields.push(...responseUsageFields(event.timing));
   if (full) runFields.push(...expandedMetricsFields(event.timing));
   if (event.runningSubagentCount !== undefined && event.runningSubagentCount > 0) {
     runFields.push({ label: "后台子代理", value: `${event.runningSubagentCount} 个尚未结束` });
@@ -626,6 +634,7 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
+    taskFields.push(...responseUsageFields(task));
     if (full) taskFields.push(...expandedMetricsFields(task));
     if (full) {
       return {
@@ -682,26 +691,30 @@ function tokenBreakdownFields(usage: {
 function expandedMetricsFields(summary: {
   performance?: TurnTaskMetricsSummary["performance"];
   compact?: TurnTaskMetricsSummary["compact"];
-  responseUsage?: TurnTaskMetricsSummary["responseUsage"];
 } | undefined): LifecyclePresentationField[] {
   if (!summary) return [];
   const performance = summary.performance;
   const firstToken = performance?.averageFirstTokenMs;
   const speed = performance?.generationTokensPerSecond;
-  // Metrics summaries contain Credits only for observed OpenAI requests,
-  // including an OpenAI child within a task whose parent uses another provider.
-  const usage = summary.responseUsage;
   return [
     ...(performance && performance.firstTokenSampleCount > 0 && firstToken != null && Number.isFinite(firstToken) && firstToken > 0
       ? [{ label: "首 Token", value: formatElapsedDuration(firstToken) }] : []),
     ...(performance && performance.requestCount > 0 && speed != null && Number.isFinite(speed) && speed > 0
       ? [{ label: "速度", value: `${speed.toFixed(1)} Token/s` }] : []),
     ...(summary.compact ? [{ label: "压缩请求", value: formatCompactMetricsValue(summary.compact) }] : []),
-    ...(usage?.amount == null ? [] : [{
-      label: "OpenAI Credits",
-      value: usage.amount,
-    }]),
   ];
+}
+
+function responseUsageFields(summary: {
+  responseUsage?: TurnTaskMetricsSummary["responseUsage"];
+} | undefined): LifecyclePresentationField[] {
+  // Includes observed OpenAI children even when the parent uses another provider.
+  const usage = summary?.responseUsage;
+  return usage?.amount == null ? [] : [{
+    label: "OpenAI Credits",
+    value: usage.amount + (usage.missingRequestCount > 0
+      ? `（已采集，${formatRequestCount(usage.missingRequestCount)} 个请求缺失）` : ""),
+  }];
 }
 
 function completionAccountFields(event: Extract<OutputEvent, { type: "turn.completed" }>): LifecyclePresentationField[] {

@@ -31,6 +31,7 @@ import {
 } from "../../runtime/executable.mjs";
 import { codexProcessInvocation } from "../../runtime/owned-process.mjs";
 import {
+  isManagedProviderModelValid,
   loadManagedModelProviderDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
 import {
@@ -59,6 +60,7 @@ import {
   opencodeGoAccountIdFromProvider,
 } from "../../runtime/opencode-go-accounts.mjs";
 import { resolveDefaultManagedProvider } from "../../runtime/managed-provider-account-routing.mjs";
+import { isOllamaCloudAccountProvider, loadOllamaCloudAccounts, ollamaCloudProviderId } from "../../runtime/ollama-cloud-accounts.mjs";
 import {
   aggregateProviderId,
   aggregateProviderMembers,
@@ -105,6 +107,9 @@ import {
   ConversationService,
   ModelSelectionService,
   ProviderAccountService,
+  calculateCloudUsageEstimates,
+  type CloudUsageQuery,
+  type CloudUsageView,
   scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
   OpenAiResetCreditService,
@@ -293,7 +298,12 @@ export abstract class GatewayComponentGraph {
       const definition = providerDefinitions.find((entry) => entry.id === provider);
       if (!definition) throw new Error("Provider 模型目录定义不存在");
       const fingerprint = readAppServerProviderSettingsFingerprint(provider);
-      const models = loadManagedModelOptions(managedProviderDirectory(process.env, definition), true, definition);
+      const models = loadManagedModelOptions(
+        managedProviderDirectory(process.env, definition),
+        true,
+        definition,
+        (model) => isManagedProviderModelValid(definition, model),
+      );
       if (fingerprint !== readAppServerProviderSettingsFingerprint(provider)) throw new Error("Provider 模型目录在读取期间发生变化");
       return { fingerprint, models };
     };
@@ -766,7 +776,10 @@ export abstract class GatewayComponentGraph {
         try { this.accountSnapshotEvents?.changed(); }
         catch (error) { logger.warn({ err: error }, "账户快照已保存，但变化通知失败"); }
       },
-    }, readOpenAiCredentialRefreshTime);
+    }, readOpenAiCredentialRefreshTime, () => {
+      try { this.accountSnapshotEvents?.changed(); }
+      catch (error) { logger.warn({ err: error }, "云用量已更新，但变化通知失败"); }
+    });
     const execution = withOutputExecutionAdmission(this.codex, (threadId) => {
       const target = this.bindings.getByThread(threadId)?.target;
       const reason = target ? this.surfaceManager.executionBlockReason(target) : "unavailable";
@@ -1762,6 +1775,24 @@ export abstract class GatewayComponentGraph {
       case "reset/consume": return this.resetCredits.consume(request.attemptId, signal);
       case "reset/cancel": this.resetCredits.cancel(request.attemptId); return { cancelled: true };
     }
+  }
+
+  async readCloudUsage(provider: string, query: Pick<CloudUsageQuery, "range" | "refresh" | "cacheOnly">, signal: AbortSignal): Promise<CloudUsageView | null | undefined> {
+    this.requireRunning();
+    signal.throwIfAborted();
+    const configured = () => isOllamaCloudAccountProvider(provider)
+      && loadOllamaCloudAccounts(process.env).some(account => ollamaCloudProviderId(account.id) === provider);
+    if (!configured()) return undefined;
+    const beforeSubmit = () => {
+      this.requireRunning();
+      signal.throwIfAborted();
+      if (!configured()) throw new Error("云用量账户配置已变化");
+    };
+    const report = await this.providerAccounts?.cloudUsage(provider, { ...query, expectedProvider: provider }, signal, beforeSubmit);
+    beforeSubmit();
+    if (!report) return query.cacheOnly ? null : undefined;
+    if (report.provider !== provider || report.query.range !== query.range) throw new Error("云用量账户或范围不匹配");
+    return { report, estimates: calculateCloudUsageEstimates(report) };
   }
 
   refreshAccountSnapshot(provider: string, signal?: AbortSignal): Promise<boolean> {

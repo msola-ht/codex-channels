@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ApiClientError, fetchProviderModelAdditionOptions } from "@/lib/api"
+import { ApiClientError, fetchProviderModelAdditionOptions, verifyProviderModelAddition } from "@/lib/api"
 import type { ManagedManualModelDefinition, ProviderModelAdditionOptions } from "../../../scripts/provider-model-additions.mjs"
 
 interface CandidateState {
@@ -8,6 +8,7 @@ interface CandidateState {
   selected: string[]
   loading: boolean
   errorCode: string | null
+  auditDegraded?: boolean
 }
 
 /** Candidates are fetched only on demand; hiding for confirmation preserves the loaded choice. */
@@ -37,7 +38,7 @@ export function useProviderModelAdditionOptions(target: { provider: string; revi
     }
   }, [open, cancel])
 
-  const load = async (manualModel?: ManagedManualModelDefinition) => {
+  const load = async (manualModel?: ManagedManualModelDefinition, discovery = false, refresh = false) => {
     if (active.current !== null || !current.current.open || current.current.stale || current.current.busy || current.current.key !== key) return
     const controller = new AbortController()
     active.current = controller
@@ -46,7 +47,7 @@ export function useProviderModelAdditionOptions(target: { provider: string; revi
     const owns = () => active.current === controller && !controller.signal.aborted
       && current.current.key === key && current.current.open && !current.current.stale
     try {
-      const options = await fetchProviderModelAdditionOptions(target.provider, manualModel, controller.signal)
+      const options = await fetchProviderModelAdditionOptions(target.provider, manualModel, controller.signal, discovery, refresh)
       if (owns()) setState({ ...initial, options, loading: false, selected: manualModel ? options.candidates.map(entry => entry.model) : [] })
     } catch (cause) {
       if (owns()) setState({ ...initial, loading: false, errorCode: cause instanceof ApiClientError ? cause.code : "network_error" })
@@ -55,9 +56,28 @@ export function useProviderModelAdditionOptions(target: { provider: string; revi
     }
   }
   const bound = state?.key === key && !stale ? state : null
+  const verify = async (model: string, reasoningEfforts: string[]) => {
+    const options = bound?.options
+    if (!options?.discovery || active.current || !current.current.open || current.current.stale || current.current.busy || current.current.key !== key) return
+    const controller = new AbortController()
+    active.current = controller
+    setState(previous => previous?.key === key ? { ...previous, loading: true, errorCode: null } : previous)
+    const owns = () => active.current === controller && !controller.signal.aborted && current.current.key === key && current.current.open && !current.current.stale
+    try {
+      const result = await verifyProviderModelAddition({ provider: target.provider, sourceToken: options.sourceToken, revision: options.revision,
+        model, reasoningEfforts, confirmPaid: true }, controller.signal)
+      if (owns()) setState({ key, options: result.options ?? null, selected: result.options?.candidates.map(candidate => candidate.model) ?? [],
+        loading: false, auditDegraded: result.auditStatus === "degraded", errorCode: result.status === "verified" ? null : "provider_models_verification_inconclusive" })
+    } catch (cause) {
+      if (owns()) setState({ key, options: null, selected: [], loading: false, errorCode: cause instanceof ApiClientError ? cause.code : "network_error" })
+    } finally {
+      if (active.current === controller) active.current = null
+    }
+  }
   const setSelected = (update: (previous: string[]) => string[]) => setState(previous => previous?.key === key
     ? { ...previous, selected: update(previous.selected) } : previous)
   const clearError = () => setState(previous => previous?.key === key ? { ...previous, errorCode: null } : previous)
   return { options: bound?.options ?? null, selected: bound?.selected ?? [], loading: bound?.loading === true,
-    errorCode: bound?.errorCode ?? null, load, reset, setSelected, clearError }
+    auditDegraded: bound?.auditDegraded === true,
+    errorCode: bound?.errorCode ?? null, load, verify, reset, setSelected, clearError }
 }

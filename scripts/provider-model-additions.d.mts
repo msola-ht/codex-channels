@@ -1,13 +1,19 @@
 import type { ModelDefinition } from "../runtime/model-catalog.mjs";
 /** Managed catalogs do not persist custom sampling defaults or inferred bindings.
- * CLP accepts enabled reasoning but rejects original image detail and reasoning-summary controls. */
+ * CLP accepts enabled reasoning but rejects original image detail and reasoning-summary controls.
+ * OLC requires applyPatchToolType=null or freeform and an explicit supportsSearchTool boolean; native web search is unavailable.
+ * OLC normal addition selects server-generated remote metadata; manual definitions are rejected.
+ * Explicit discovery remains an optional, separately confirmed Responses diagnostic. */
 export type ManagedManualModelDefinition = Omit<ModelDefinition, "sampling" | "template">
   | { id: string; name: string; inheritFrom: string };
 export interface ProviderModelAdditionCandidate {
   model: string;
   displayName: string;
   fields: Record<string, unknown>;
+  upstreamContextWindow?: number;
+  reasoningMode?: "toggle" | "levels";
   inheritedFrom?: string;
+  ollamaVerification?: import("../runtime/model-template-bindings.mjs").OllamaCloudModelVerification;
   clineRequestProfile?: import("../runtime/chat-reasoning.mjs").ClinePassRequestProfile;
   clineProviderOptions?: import("../runtime/cline-provider-options.mjs").ClineProviderOptions;
   template?: { source: "deepseek" | "cline"; model: string };
@@ -19,6 +25,36 @@ export interface ProviderModelAdditionOptions {
   expiresAt: number;
   providers: string[];
   candidates: ProviderModelAdditionCandidate[];
+  discovery?: OllamaCloudDiscoveryCandidate[];
+  discoveryCache?: { hit: boolean; fetchedAt: string; expiresAt: string };
+}
+export interface OllamaCloudDiscoveryCandidate {
+  id: string;
+  status: "candidate" | "unconfirmed" | "excluded";
+  reason?: string;
+  reasonCode?: "invalidId" | "missingTag" | "details" | "sourceChanged" | "capabilities" | "capabilityConflict" | "unsupported" | "context" | "thinking" | "defaultThinking";
+  alreadySaved: boolean;
+  upstreamContextWindow?: number;
+  proposedContextWindow?: number;
+  reasoningEfforts?: string[];
+  defaultReasoningEffort?: string;
+  imageCandidate?: boolean;
+  reasoningMode?: "toggle" | "levels";
+}
+export interface ProviderModelAdditionVerificationInput {
+  provider: string;
+  sourceToken: string;
+  revision: string;
+  model: string;
+  reasoningEfforts: string[];
+  confirmPaid: true;
+}
+export interface ProviderModelAdditionVerificationResult {
+  status: "verified" | "inconclusive";
+  requests: number;
+  reason?: string;
+  options?: ProviderModelAdditionOptions;
+  auditStatus?: "recorded" | "degraded";
 }
 export interface ProviderModelAdditionInput {
   provider: string;
@@ -38,8 +74,13 @@ export interface ProviderModelAdditionLoadOptions {
   environment?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   manualModel?: ManagedManualModelDefinition;
+  /** OLC optional paid diagnostic; omitted loads directly selectable remote models. */
+  discovery?: true;
+  refresh?: true;
   downloadCatalog?: typeof import("./deepseek-setup.mjs").downloadDeepseekCatalog;
+  fetchImpl?: typeof globalThis.fetch;
 }
+export function verifyProviderModelAddition(input: ProviderModelAdditionVerificationInput, options?: { environment?: NodeJS.ProcessEnv; signal?: AbortSignal; fetchImpl?: typeof globalThis.fetch }): Promise<ProviderModelAdditionVerificationResult>;
 export function loadProviderModelAdditionOptions(provider: string, options?: ProviderModelAdditionLoadOptions): Promise<ProviderModelAdditionOptions>;
 export function previewProviderModelAddition(input: ProviderModelAdditionInput, options?: { environment?: NodeJS.ProcessEnv }): Promise<ProviderModelAdditionPreview>;
 export function applyProviderModelAddition(input: ProviderModelAdditionInput, options?: { environment?: NodeJS.ProcessEnv; preview?: ProviderModelAdditionPreview }): Promise<{ action: "unchanged" | "catalog-updated"; activation: "none" | "restart-all"; models: string[] }>;

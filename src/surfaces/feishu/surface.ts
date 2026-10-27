@@ -8,6 +8,7 @@ import { shouldHideRoutineConfiguration } from "../delivery-policy.js";
 import type {
   ConversationCommandExecutor,
   ConversationTurnUseCases,
+  ConversationSessionUseCases,
   ScheduledTaskConfirmation,
 } from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
@@ -111,7 +112,8 @@ export interface FeishuStartupNotification {
 export interface FeishuSurfaceOptions {
   appId: string;
   appSecret: string;
-  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">;
+  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">
+    & Pick<ConversationSessionUseCases, "status">;
   commands: ConversationCommandExecutor;
   access: SurfaceAccessPolicy;
   logger: Logger;
@@ -344,13 +346,14 @@ export class FeishuSurface implements SurfaceAdapter {
     this.commandCenter = new FeishuCommandCenter(
       this.output,
       options.access,
-      (target, action, actorId, input, modelSelection) =>
+      (target, action, actorId, input, modelSelection, assertActive) =>
         this.adapter.handleCommandCenterAction(
           target,
           action,
           actorId,
           input,
           modelSelection,
+          assertActive,
         ),
       options.logger,
     );

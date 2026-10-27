@@ -3,6 +3,9 @@ export type { HookAction, HookEntry, HookCatalog, HookConfigPort, HookCommandVie
 export { parseMcpOperation, parsePluginOperation } from "./conversation-command-parser.js";
 export {
   type AccountMetric,
+  type CloudUsageQuery,
+  type CloudUsageMetrics,
+  type CloudUsageReport,
   type AccountPlanType,
   type AccountQueryPort,
   type AccountRateLimit,
@@ -246,3 +249,4 @@ export { OpenAiResetCreditService, ResetCreditError, type OpenAiResetCredit, typ
 
 export { ConversationResetCreditService, resetCreditCommandUsage, type ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
 export { ReasoningRepeatGuard, type ReasoningGuardInput } from "./reasoning-repeat-guard.js";
+export { calculateCloudUsageEstimates, type CloudUsageEstimates, type CloudUsageView } from "./cloud-usage-estimates.js";

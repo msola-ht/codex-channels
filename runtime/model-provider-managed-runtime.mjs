@@ -1,13 +1,13 @@
 import { isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
 import { resolveClinePassRequestProfile } from "./chat-reasoning.mjs";
 import { validateClinePassProviderOptions } from "./cline-provider-options.mjs";
-import { readModelTemplateBindings, validateClinePassCatalogManifest } from "./model-template-bindings.mjs";
+import { readModelTemplateBindings, validateClinePassCatalogManifest, validateOllamaCloudCatalogManifest } from "./model-template-bindings.mjs";
 import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
 import { assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { assertProviderCatalogIsolationComplete, providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 
@@ -447,6 +447,7 @@ function validateCatalogManifest(catalogContent, manifestContent, definition) {
   for (const slug of slugs) modelCatalogSetting(catalogContent, definition, slug);
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || typeof manifest.source !== "string" || !manifest.source) throw new Error("模型来源无效");
   readModelTemplateBindings(manifest, [...slugs]);
+  if (definition.storageId === "ollama-cloud") validateOllamaCloudCatalogManifest(manifest, [...slugs]);
   if (isClinePassAccountProvider(definition.id)) validateClinePassCatalogManifest(manifest, [...slugs], definition.defaultModel);
 }
 
@@ -733,6 +734,7 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
   const protocols = definition.upstreamWireApi === "chat_completions" ? ["chat"]
     : definition.storageId === "deepseek" ? ["chat", "responses"] : ["responses"];
   return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs, protocols,
+    ...(definition.storageId === "ollama-cloud" ? { ollamaFreeform: true, ollamaWebSearch: true } : {}),
     ...(definition.storageId === "clp" ? { modelCapabilities: settings.map(model => ({ id: model.model,
       reasoning_efforts: model.reasoningEfforts.map(level => level.effort).filter(effort => effort !== "enabled"),
       cline_request_profile: model.clineRequestProfile,
@@ -897,6 +899,8 @@ function validateModelCatalog(path, definition, model = definition.defaultModel)
 
 function loadModelCatalogSettings(path, definition) {
   const content = readPrivateFile(path, maximumCatalogBytes);
+  if (definition.storageId === "ollama-cloud") validateCatalogManifest(content,
+    readPrivateFile(join(dirname(path), definition.catalogManifestFileName), maximumCatalogBytes), definition);
   const entries = definition.storageId === "clp" ? JSON.parse(content).models : undefined;
   return [...readCatalogSlugSet(content, definition)]
     .map((slug) => {
@@ -939,6 +943,8 @@ export function catalogHasModel(path, definition, model) {
 export function readModelCatalogSetting(path, definition, model) {
   try {
     const content = readPrivateFile(path, maximumCatalogBytes);
+    if (definition.storageId === "ollama-cloud") validateCatalogManifest(content,
+      readPrivateFile(join(dirname(path), definition.catalogManifestFileName), maximumCatalogBytes), definition);
     validateClinePassRequestProfiles(JSON.parse(content), definition);
     return modelCatalogSetting(
       content,

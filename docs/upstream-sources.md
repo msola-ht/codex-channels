@@ -89,6 +89,31 @@ Chat→Chat 转换保留请求字段；长度字段归一化由模型配置显�
 随后 `git -C upstream/CLIProxyAPI checkout a2976eb8a303f11b4ea5177bce9f9ff752634dfc`。
 TTFT 参考 `internal/runtime/executor/helps/responses_ttft_helpers.go`、`chat_ttft_helpers.go` 和 `usage_helpers.go`；本次版本更新的 Chat/Responses 内容事件判定未变。CPA 的终态及首包兜底不等于本项目的严格首内容口径，不能直接作为本地支持合同。
 
+## Ollama Cloud 官方来源
+
+- 套餐月付参考价与额度：[Ollama Pricing](https://ollama.com/pricing)；Pro $20/月对应 $60 额度，人民币卡片仅按月付参考价估算，不据此判断账户计费周期。
+- 人民币参考汇率：[Frankfurter v2](https://frankfurter.dev/) 的 `GET /v2/rate/USD/CNY`；匿名日更新汇率，字段 `date/base/quote/rate`，本地缓存 24 小时。该服务独立于 Ollama，不接收 Ollama 凭据。
+
+套餐查询另核对官方 [Whoami 客户端](https://github.com/ollama/ollama/blob/main/api/client.go) 与 [UserResponse 类型](https://github.com/ollama/ollama/blob/main/api/types.go)：`POST /api/me`，类型声明 `plan`；2026-10-26 直接使用已配置 API Key 查询云端返回 HTTP 200、`Plan: "pro"`。两种拼写显式支持，返回不一致时拒绝。该用户类型与实测响应均未提供订阅到期字段；Balance 的周期结束仅代表包含额度重置。
+
+2026-10-26 实施时核对 [OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)、[Cloud](https://docs.ollama.com/cloud)、[List models](https://docs.ollama.com/api/tags)、[Show model details](https://docs.ollama.com/api-reference/show-model-details.md)、[Thinking](https://docs.ollama.com/capabilities/thinking) 与 [Balance](https://docs.ollama.com/api/balance.md)。这些动态官方文档补充上游 HTTP 合同，不替换本地锁定的 Codex 协议基线。
+
+OLC 只使用 `https://ollama.com/v1` 的无状态 Responses，明确关闭 WS。发现使用公开 `/v1/models`、`/api/tags`、`/api/show`，不以公开端点判断 Key 有效或把元数据当作工具往返验收。现行合同见 [Ollama Cloud](ollama-cloud.md)，实际观察和未验收范围见 [接入验收记录](ollama-cloud-probe.md)。
+
+2026-10-26 渠道用量查询核对 [Cloud usage](https://docs.ollama.com/api/cloud-usage) 与 [Balance](https://docs.ollama.com/api/balance)：固定范围 `24h`、`7d`、`30d`，仅 `scope=self`，内部 `group_by=model` 最多十组并以 `remainder` 汇总其余；旧计划可能仅提供请求数。用量与余额各限每用户每分钟十次并以 `Retry-After` 指示退避，团队余额共享但 `self` 用量仅含当前用户，不扩大为团队查询。
+
+上述 OpenAI compatibility 官方页的云端示例使用无状态 Responses，普通 function 工具、`max_output_tokens` 及模型定义的 `reasoning.effort` 属于公开合同；不能从字段被接受推断实际思考质量。产品采用完整显式历史的函数及模拟结果续答，不使用 `previous_response_id` 或 `conversation`。元数据完整的远端候选可以直接选择、预览并保存，逐模型收费验证是独立可选诊断；两条路径均不能以本地合成响应代替真实云端验收。
+
+2026-10-26 客户端工具搜索适配复核了锁定 Codex 的 `tools/src/tool_spec.rs`、`protocol/src/models.rs` 及客户端搜索 handler／工具加载实现。`execution=client` 的声明、对象参数、配对搜索输出和检索后的 defer_loading 语义由该基线确定；OLC 使用普通 function 承载，不宣称上游原生支持 tool_search。新模型按公开元数据及本地 Responses 适配策略生成，不自动绑定 DS 模板；保存后显式选择的模板关联仅供提示词和运行设置更新，不能覆盖 OLC 能力或作为云端验证记录。旧关联仍可读，不迁移或补写。
+
+历史初始实现观察（2026-10-26）：对公开 [`/v1/models`](https://ollama.com/v1/models) 的只读查询返回 23 个 ID，包含 `deepseek-v4.1-flash`、`deepseek-v4.1-flash:1017`、`deepseek-v4-pro:0813`。这三个 ID 的 `/api/show` 均返回 200：两项 Flash 声明 completion/thinking/tools/vision，Pro 声明 completion/tools/thinking；上下文均为 1048576，思考选项均含 `false/low/high/max`，Flash 默认 `high`，Pro 默认 `low`。当时实现以 DS 模板生成三个固定映射，未映射 `false`；该生成策略已被下述现行规则替换。这次公开查询不使用 Key、不发送推理请求，不能证明认证、图片、freeform 或真实工具往返已通过，也不是现行可添加候选数量的验收。
+
+现行公开选模规则取 `/api/tags` 与 `/v1/models` 的精确 ID 交集，用 `/api/show` 取得窗口、思考和图片能力；未声明 `vision` 时不启用图片，窗口仍受 393216 策略上限约束。[Thinking](https://docs.ollama.com/capabilities/thinking) 说明 `thinking.values` 可含布尔或命名等级，`[false]` 表示无思考，缺失 `thinking` 表示元数据未知。[OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility) 明确 `/v1/responses` 的 `reasoning.effort` 使用兼容别名：布尔开关模型接受已识别等级表示开启，`none` 表示关闭。因此本地将 `false` 映射 `none`，纯布尔 `true` 以 `high` 承载“开启”并明确不代表强度，混合 `false` 与命名等级保留关闭及精确等级；不据模型名称猜测。普通添加不发送推理请求，不伪造 `modelDiscovery`；高级收费诊断成功后仍使用相同能力生成规则，仅另外记录其实际诊断范围。
+
+2026-10-26 核对 [Web search](https://docs.ollama.com/capabilities/web-search)：独立固定 `POST https://ollama.com/api/web_search` 接受 query/max_results（默认五条、最多十条），顶层 results 每条包含 title/url/content 摘要；使用账户 Bearer。网页读取是另一个接口，当前未实现，也未调用真实搜索 API。Responses 工具及搜索生命周期同时核对锁定 Codex `tools/src/tool_spec.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs`；Search action 只保留 query/queries，外部用量缺必需计数时省略 usage，不虚构零。
+
+同日后续故障诊断经用户单次授权调用真实搜索接口：HTTP 200，`Content-Type: text/html; charset=utf-8`、identity 编码，正文为 31810 字节有效 JSON，五条结果的字符串字段、URL 与现有长度限制均通过。先前共用模型 HTTP 校验器因此误拒绝。现行搜索读取器局部接受这一实测类型，但正文仍严格解析为官方 results 结构；不接受 HTML 页面，不改变模型 HTTP reader。该一次观察不能推断所有查询或云端推理均可用。
+
 ## Cline 模型目录来源
 
 CLP 不再使用 Cline 官方生成目录作为模型名单或能力来源。固定 DS 模型由仓库 `runtime/model-catalog-deepseek.json` 和 `provider-model-catalog.json` 的明确映射生成，入口为 `scripts/provider-model-catalog.mjs`；其他模型通过统一的按 ID 添加入口独立声明或继承本地快照。渠道和 Relay 共用受管目录；旧独立 Relay 文件及 Cline 来源记录保留，不自动迁移或删除，见[CLP 配置与恢复](cline-pass.md)。

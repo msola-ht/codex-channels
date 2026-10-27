@@ -162,6 +162,7 @@ export function validateCustomPrimaryModelProviderId(id, environment = process.e
     || id === "deepseek" || id.startsWith("ds-")
     || id === "clp" || id.startsWith("clp-")
     || id === "ccg" || id.startsWith("ccg-")
+    || id === "olc" || id.startsWith("olc-")
     || isOpencodeGoProviderNamespace(id)
     || managedProviderDefinitions(environment).some((definition) => definition.id === id)
   ) {

@@ -94,7 +94,11 @@ export async function runProviderWebSearchSetup({ environment = process.env, pro
   }
 }
 
-function templateDifferenceValue(value, full = false) {
+function templateDifferenceValue(value, full = false, field) {
+  if (["auto_compact_token_limit", "autoCompactTokenLimit"].includes(field)) {
+    if (!value.present) return "跟随默认（不设置独立阈值）";
+    if (value.value === null) return "跟随默认（原目录显式空值）";
+  }
   if (!value.present) return "未设置";
   const json = JSON.stringify(value.value);
   if (full || json.length <= 2048) return json;
@@ -128,17 +132,18 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
     { value: "prompts", label: "提示词" },
     { value: "capabilities", label: provider.startsWith("cp-") ? "本地工具" : "能力参数", hint: provider.startsWith("cp-") ? "同步异步提问与时钟声明，保留其他工具和模型能力" : "含基座异步提问与时钟声明；请确认平台支持模板中的参数" },
     { value: "settings", label: "上下文与压缩设置", hint: "仅有效上下文比例、自动压缩阈值、截断策略；主动勾选才覆盖本地值" },
-  ].filter(entry => options.availableSections.includes(entry.value)), initialValues: ["prompts"], required: true });
+  ].filter(entry => template.availableSections.includes(entry.value)), initialValues: ["prompts"], required: true });
   if (prompts.isCancel(sections)) return { action: "back" };
   const input = { provider, model, sections, revision: options.revision, sourceToken: options.sourceToken, template: { source: template.source, model: template.model } };
   const preview = await previewProviderModelTemplateUpdate(input, { environment });
   output.write(`模板对比：${JSON.stringify(preview.provider)} / ${JSON.stringify(preview.model)}\n来源：${JSON.stringify(preview.source)} / ${JSON.stringify(preview.sourceModel)}\n修订：${JSON.stringify(preview.revision)}\n`);
   output.write(provider.startsWith("cp-")
     ? "自定义模型按勾选范围更新提示词、本地工具或上下文与压缩设置，并记录来源关联；模型自身能力、其他工具声明及采样保留本地值。\n"
-    : "保留本地模型 ID、显示名称、当前上下文、默认思考等级和采样；能力更新可改变最大上下文，并补入基座异步提问与时钟声明，保留其他已有工具声明。\n");
+    : provider.startsWith("olc-") ? "OLC 模板仅更新提示词与上下文／压缩设置；远端上下文上限、思考、视觉和工具能力保持模型自身值。未选字段保持原值。\n"
+      : "保留本地模型 ID、显示名称、当前上下文、默认思考等级和采样；能力更新可改变最大上下文，并补入基座异步提问与时钟声明，保留其他已有工具声明。\n");
   output.write("有效上下文比例、自动压缩阈值和截断策略默认保留本地值；仅主动选择「上下文与压缩设置」并确认差异后覆盖。\n");
   for (const change of preview.changes) {
-    output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before)}\n  更新后：${templateDifferenceValue(change.after)}\n`);
+    output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before, false, change.field)}\n  更新后：${templateDifferenceValue(change.after, false, change.field)}\n`);
   }
   if (!preview.willChange) {
     output.write("所选模板内容与当前模型一致，无需保存。\n");
@@ -148,7 +153,7 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   if (longChanges.length) {
     const expand = await prompts.confirm({ message: "展开长内容的完整前后差异？", initialValue: false });
     if (prompts.isCancel(expand)) return { action: "back" };
-    if (expand) for (const change of longChanges) output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before, true)}\n  更新后：${templateDifferenceValue(change.after, true)}\n`);
+    if (expand) for (const change of longChanges) output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before, true, change.field)}\n  更新后：${templateDifferenceValue(change.after, true, change.field)}\n`);
   }
   output.write("保存前备份原目录，不自动重启服务。\n");
   if (await prompts.confirm({ message: "确认按上述差异更新所选模板内容？", initialValue: false }) !== true) return { action: "back" };
@@ -196,7 +201,7 @@ async function runProviderModelOperation({ environment, prompts, output, provide
     ? "DeepSeek 暂不支持单模型移除。\n"
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
   const action = await prompts.select({ message: "模型操作", options: [
-    ...(["ccg", "ocg", "clp"].includes(family) || custom && catalog.canRemove ? [{ value: "manage", label: "查看／添加新模型", hint: "按 ID 独立填写或继承已有模型；已有模型保持不变" }] : []),
+    ...(["ccg", "ocg", "clp", "olc"].includes(family) || custom && catalog.canRemove ? [{ value: "manage", label: "查看／添加新模型", hint: family === "olc" ? "从远端列表选择，自动获取能力；已有模型保持不变" : "按 ID 独立填写或继承已有模型；已有模型保持不变" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "编辑模型与默认值" }] : []),
     ...(custom || family ? [{ value: "rename", label: "编辑模型显示名称", hint: "模型 ID 保持不变" }] : []),
     ...(family === "clp" ? [{ value: "local-edit", label: "本地编辑已有模型", hint: "无需下载模板；保留模型 ID 和请求格式" }] : []),

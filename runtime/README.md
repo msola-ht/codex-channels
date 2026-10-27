@@ -4,6 +4,10 @@
 
 `model-base-snapshot.mjs` / `model-base-snapshot.d.mts` 读取 Gateway 数据目录中的公共底座快照，缺失时使用项目初始快照，损坏或不支持版本拒绝。快照含原始单模型目录和来源，DS 模板从保留的原始 DS 目录按有效底座补全；显式创建及模板更新消费该底座，已有账户目录读取不注入新提示词。保存与预览由 `scripts/model-base-management.mjs` 负责，恢复流程见[公共底座更新](../docs/deepseek.md#公共底座更新)。
 
+`model-template-bindings.mjs` 的 OLC manifest 校验允许独立于模板关联的可选 `modelDiscovery`，仅高级诊断成功保存时按精确模型记录有界公开来源、摘要、窗口策略及 Responses 验证范围；普通新增不生成验证记录，首次 manifest 为 `source: "ollama-cloud"`、空 `modelTemplates`。旧来源和关联无须补写或迁移。目录新增、读取、模板管理、移除与 runtime writer 共用校验，移除仅裁剪目标记录；运行时不重新发现或发送诊断推理。所有 OLC 模板来源仅允许更新提示词与运行设置，能力保留目录原值。
+
+OLC 公开发现的 `discovery-cache.json` 由 scripts 层管理：用户数据目录内一小时私有持久缓存，不存 Key、不进入 StateStore。Runtime 仍只消费确认保存的 models/manifest，不因缓存刷新改变运行目录；缓存格式校验、独立跨进程锁和原子写入复用本目录的私有文件能力。
+
 `message-display-policy.mjs` 统一定义九个显示字段、渠道支持矩阵及 `concise` / `standard` / `detailed` / `full` 四项预设。预设只供管理入口一次应用现有字段，不是持久化键或运行模式；`identifyMessageDisplayPreset` 按有效值及目标支持字段识别，无法匹配时为只读 `custom`。静默关闭成功完成卡，紧凑隐藏工具操作；独立字段缺省不变，全局默认组合因仍为 compact 工具档而识别为 `custom`，缺省与继承仍逐字段处理。旧组合不自动迁移，重新应用才写入新值；微信仅比较三项支持字段，原紧凑组合仍可匹配。
 
 完整预设采用 `operation_updates = "full"`、`presentation_detail = "full"` 并开启 `reasoning`，展开环境、本轮统计分项及审批详情，过滤重复过程通知。静默、紧凑和详细预设关闭思考状态，详细及完整完成卡仍显示已有推理次数。默认值不变，不自动改写已有配置；旧详细组合需重新应用预设才关闭已保存的思考开关。
@@ -120,6 +124,7 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
   基础定义只描述能力，不包含单账户 Profile；`loadManagedModelProviderWatcherDefinitions`
   为当前账户监听目录、Profile 和管理标记，按 Provider ID 合并并去重路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，账户目录独立。
+- `ollama-cloud-accounts.mjs` / `ollama-cloud-accounts.d.mts`：Ollama Cloud 家族账户身份、默认账户、私有注册表读取与凭据变量冲突校验。`olc-<账户>` 共享 `ollama-cloud` 模型目录，独立 Profile 和账户材料；定义使用 Responses 并关闭 WebSocket，具体模型和思考等级由共享目录提供。首次账户目录由 scripts 公开元数据选模流程仅生成所选模型，初始模板关联为空，已有目录不自动刷新；runtime 账户模块不承担远端模型发现。空注册表时也保留 `olc` / `olc-*` 命名空间；CLI／Setup／WebUI 共用账户事务，新模型默认启用 freeform 与客户端工具搜索适配，不开放手填或继承新增。Runtime 读取允许 official 提示词来源及受管 DS 来源，仍拒绝原生网页搜索声明；模板更新均保留能力。App Server 组合点按可信 storageId、Relay 按可信材料显式开启同一适配，不改变旧目录与其他提供商。
 - `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，模型目录按 CLP 家族共用，Chat 转换代理与凭据按账户独立。
 - `provider-model-guard.mjs` / `provider-model-guard.d.mts`：DS/OCG/CCG、自定义目录提供商代理与 CLP Chat 桥共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。逐条校验可选 `cline_request_profile`，并从同次目录读取向 CLP 桥返回 `clineRequestProfile`；未知值失败关闭。读取上限为 2 MiB；Codex 兼容 Provider 的共享官方只读目录不注入此复核。
   CP 从同次已校验目录的精确模型定义读取默认采样，和启用状态共同交给代理；采样不进入编译后的 Codex 模型字段。
@@ -320,10 +325,12 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `queue-events.mjs` / `queue-events.d.mts`：投递箱、Relay、账户快照与请求指标共用的有界私有变化通知流；独立订阅连接、首次失效通知、100 毫秒合并、心跳、取消与背压清理，只传变化类型。异步端点／ACL 准备和连接共用 20 秒期限，连接后改用独立 35 秒空闲期限；关闭等待准备任务结束，取消后不建立迟到连接。
 - `metrics-events.mjs` / `metrics-events.d.mts`：按配置文件路径派生相互独立的请求指标与账户快照通知端点，供 Gateway 写入器与 WebUI 订阅共用；不携带指标或账户数据。
 - `delivery-control.mjs` / `delivery-control.d.mts`：投递箱私有在线管理与变化通知 IPC（`watchDeliveryChanges`）；Unix 使用系统 `/tmp` 规范目录下的当前用户私有短目录，以投递目录规范路径的 SHA-256 确定端点，连接前校验父目录及 Socket 所有者和权限；Windows 继续使用私有描述文件及认证管道。最多 50 条修订绑定的重试/忽略请求，限制连接数、报文大小和等待时间；只输出受控结果，已发送请求的响应丢失不允许离线回退或自动重试。
-- `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供 v2 私有账户 IPC，支持 Provider 刷新及 OpenAI 重置券列表、预览、取消和消费；
+- `ollama-cloud-usage.d.mts`：账户云用量查询、报告与共享估算的唯一跨进程数据合同；Application 与 WebUI 类型接口复用同一声明，不把业务实现引入浏览器编译。
+- `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供 v3 私有账户 IPC，支持 Provider 刷新、Ollama Cloud 账户云用量读取及 OpenAI 重置券列表、预览、取消和消费；
   WebUI 提交精确 Provider ID、券 ID 或短期操作 ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
   公开错误文案按受控原因生成，不透传内部 message；调用方取消或连接结束时取消该等待，
   关闭主动取消刷新并释放 IPC 任务，不等待不响应取消的回调。
+  云用量仅接受精确 Provider、24h/7d/30d 范围及可选布尔 `refresh`、`cacheOnly`，禁止同时为 true。只读缓存不提交远端请求，缓存缺失返回 null，账户不存在仍报错；非空响应复核账户和范围。报告与共享估算结果只经 IPC 返回，不进入账户快照或数据库。
 - `gateway-thread-state.mjs` / `gateway-thread-state.d.mts`：为本机 WebUI 当前页提供只读 Thread 状态私有 IPC；
   最多 100 个 UUID、4 个连接及有界报文和总期限，返回官方状态与观测时间或受控未知原因；读取预算先于 IPC 硬期限结束，保留已完成项，仅将未完成项标记超时。
   客户端将指标中的非 UUID 标识逐项标记未知，不让一次状态补充阻断历史指标读取；取消与关闭撤销自有查询。

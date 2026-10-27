@@ -18,7 +18,7 @@ Telegram 既有空白 commentary 的明确省略特例保持不变；该设置�
 
 `SurfaceMessageDisplaySettings` 是组合根注入的窄展示解析回调，以原始 `ConversationTarget` 选择工具、计划、思考、完成通知及呈现详情；Telegram、飞书 Outbox 和 QQ 消息准入、任务进度及异步渲染使用同一目标设置。微信消费完成通知和呈现详情，继续不开放这些过程输出。`presentationDetail` 只选择上线会话和完成、子代理的关键明细，不决定消息准入或投递确认，也不读取日志等级；`basic` 使用紧凑摘要，`detailed` 增加本轮统计总计，不展开统计子项；`full` 展开现有环境、统计分项和审批详情，仍不复制正文或会话累计。独立装配未注入回调时保留各渠道原来的过程选项默认值，完成通知默认 `detailed`，呈现详情默认 `basic`。新实时事件按有效设置准入，已保留的终态只选择版式，不重新以 `hidden`/`compact` 过滤。
 
-完成通知 `brief` 呈现实际执行状态、上下文占用、后台身份和必要异常，不因呈现详情 `detailed` 展开统计；它不确认正文送达。`off` 只省略成功且无错误、错误码及权威缺正文标记的新完成通知。`liveCompletionDisplay` 在实时准入时固定模式；`shouldSettleLiveCompletion`、`settleLiveCompletion` 与 `discardLiveCompletion` 分离新事件的隐藏收尾、受原授权的瞬态操作和精确 Turn 的无发送清理。收尾复用原 Conversation 队列及瞬态回执，等待嵌套操作结算，不生成 Journal 记录或持久确认，也不受普通状态快照替换。持久 `deliver` 的可选完成上下文只由本次实时准入传递；恢复或未提供上下文时完成通知固定使用 `detailed`，统计明细按当前目标的呈现详情选择，不查询当前完成偏好而空确认，也不增加持久字段。流式正文失败的独立提示仍复核原授权。
+完成通知 `brief` 呈现实际执行状态、上下文占用、后台身份和必要异常，保留已采集的非零 OpenAI Credits，不因呈现详情 `detailed` 展开其他统计；它不确认正文送达。`off` 只省略成功且无错误、错误码及权威缺正文标记的新完成通知。`liveCompletionDisplay` 在实时准入时固定模式；`shouldSettleLiveCompletion`、`settleLiveCompletion` 与 `discardLiveCompletion` 分离新事件的隐藏收尾、受原授权的瞬态操作和精确 Turn 的无发送清理。收尾复用原 Conversation 队列及瞬态回执，等待嵌套操作结算，不生成 Journal 记录或持久确认，也不受普通状态快照替换。持久 `deliver` 的可选完成上下文只由本次实时准入传递；恢复或未提供上下文时完成通知固定使用 `detailed`，统计明细按当前目标的呈现详情选择，不查询当前完成偏好而空确认，也不增加持久字段。流式正文失败的独立提示仍复核原授权。
 
 `index.ts` 是 Gateway 装配各 Surface 的主公开入口；通过显式异步加载函数提供飞书、微信、Telegram 和 QQ 四个消息渠道，
 纯共享能力与凭据检查不静态加载飞书或 Telegram SDK。
@@ -195,6 +195,7 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 按同一请求口径聚合指标库记录，模型维度最多展示请求量最高的 20 组并说明截断，提供商完整返回；`errors` 用同一
 范围展示异常率及按提供商、模型、状态、HTTP 状态和错误类型形成的前 20 组异常，附带最近发生时间。
 不把请求累计输入误写成上下文占用。当前会话显示完整 ID、已有官方执行耗时及普通请求平均首 Token、加权输出速度；主 Thread 耗时与递归请求性能的范围分别保留，缺失不推算，历史耗时不完整明确标记。压缩摘要只列请求数、Token 和模型/异常，不展开性能、本地价格或费用；完成卡只显示官方整轮耗时，标为“本轮耗时”。
+`cloud-usage-format.ts` 将官方云用量投影为分组 Markdown：额度、统计范围、请求与 Token、费用。额度优先，套餐余额与额外购买分开，Token 明细嵌套在总量下；单价排除搜索、抓取及明确零 Token 分组的费用，缺失数据不补零，不附解释文案。费用中按纯 Token 消费预测套餐及剩余额度可用 Token，Pro $60 额度按月付 $20 和每日缓存汇率估算人民币成本。隐藏套餐到期占位、独立时区行与数据更新分组，保留内部时区转换和缓存逻辑。共享时间与刷新选择，不展示模型分组，不使用本地请求估算。飞书消费 Markdown 卡片，Telegram 转为 HTML，两者更新原卡；QQ 使用受保护的一次性菜单按钮返回新结果，微信保留时间与刷新命令。QQ 通过菜单的正文与 Markdown 字段交付，并校验原用户、查询范围与账户。
 信息类聊天指令（`/status`、`/usage`、
 `/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugin`、`/permissions`、`/goal`、
 `/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`

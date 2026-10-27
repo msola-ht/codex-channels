@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
+import { cloudUsageChoices, formatCloudUsage } from "../cloud-usage-format.js";
+import { formatTelegramPanelChunks } from "./html-format.js";
 import { TextAttachmentStore, textAttachmentBody } from "../text-attachment-store.js";
 import { videoAttachmentBody } from "../video-attachment-store.js";
 import { SurfaceShutdown } from "../surface-shutdown.js";
@@ -199,6 +201,11 @@ export class TelegramSurface {
   private readonly commands: ConversationCommandExecutor;
   private readonly apiExecutor: TelegramApiExecutor;
   private readonly commandReplies = new WeakMap<Context, { signal: AbortSignal; scope: CommandReplyScope }>();
+  private readonly usageEdits = new WeakMap<Context, { messageId: number; assertActive: () => void }>();
+  private readonly usageSelections = new Map<string, {
+    target: ConversationTarget; actorId: string; messageId: number; expiresAt: number;
+    scope: CommandReplyScope; inputs: string[];
+  }>();
   private readonly inputs: SurfaceInputBatcher;
   private readonly attachmentInputs = new AttachmentInputLifecycle();
   private readonly receivedAttachments = new WeakMap<object, ReceivedAttachmentInput>();
@@ -512,6 +519,7 @@ export class TelegramSurface {
     await shutdown.run("audios", () => this.audioStore.close());
     this.pluginTaskPrompts.clear();
     this.autoReviewSelections.clear();
+    this.usageSelections.clear();
     this.idleResumeSelections.clear();
     await shutdown.run("interactions", () => this.interactions.close());
     await shutdown.run("outbox", () => this.outbox.close());
@@ -604,6 +612,40 @@ export class TelegramSurface {
       const command = context.match[1];
       if (command !== "metrics" && command !== "usage" && command !== "limits") return;
       const result = await this.commands.execute(target(context), command, "", String(context.from.id));
+      await this.renderCommandResult(context, result);
+    });
+    this.bot.callbackQuery(/^usage:([A-Za-z0-9_-]{24}):(\d{1,2})$/, async context => {
+      const token = context.match[1]!;
+      const pending = this.usageSelections.get(token);
+      const inputTarget = target(context);
+      const scope = this.commandReplyScope(inputTarget);
+      const input = pending?.inputs[Number(context.match[2])];
+      if (!pending || !input || pending.expiresAt <= this.now()
+        || pending.actorId !== String(context.from.id)
+        || pending.target.conversationId !== inputTarget.conversationId || pending.target.accountId !== inputTarget.accountId
+        || pending.messageId !== context.callbackQuery.message?.message_id
+        || scope.workspaceId !== pending.scope.workspaceId || scope.cwd !== pending.scope.cwd
+        || scope.threadId !== pending.scope.threadId || scope.selectionScope !== pending.scope.selectionScope) {
+        await context.answerCallbackQuery({ text: "用量卡片已失效，请重新执行 /usage" });
+        return;
+      }
+      this.usageSelections.delete(token);
+      const guard = (): void => {
+        const original = this.commandReplies.get(context);
+        original?.signal.throwIfAborted();
+        const current = this.commandReplyScope(inputTarget);
+        if (!original || this.stopping || pending.expiresAt <= this.now()
+          || !this.access.isAllowed({ target: inputTarget, actorId: pending.actorId })
+          || current.workspaceId !== pending.scope.workspaceId || current.cwd !== pending.scope.cwd
+          || current.threadId !== pending.scope.threadId || current.selectionScope !== pending.scope.selectionScope) {
+          throw new UserFacingError("command.authorization-changed", "用量卡片已失效，请重新执行 /usage");
+        }
+      };
+      this.usageEdits.set(context, { messageId: pending.messageId, assertActive: guard });
+      await context.answerCallbackQuery({ text: "正在查询" });
+      guard();
+      const result = await this.commands.execute(inputTarget, "usage", input, pending.actorId, guard);
+      guard();
       await this.renderCommandResult(context, result);
     });
     this.bot.callbackQuery(/^idle:resume:([A-Za-z0-9_-]{24})$/, async (context) => {
@@ -1589,6 +1631,7 @@ export class TelegramSurface {
     }
     const guard = (): void => {
       assertActor();
+      this.usageEdits.get(context)?.assertActive();
       const current = this.commandReplyScope(inputTarget);
       if (current.workspaceId !== scope.workspaceId || current.cwd !== scope.cwd
         || current.selectionScope !== scope.selectionScope || current.threadId !== scope.threadId) {
@@ -1598,6 +1641,33 @@ export class TelegramSurface {
     guard();
     await this.outbox.runOrdered(inputTarget.conversationId, async signal => {
       guard();
+      if (result.kind === "usage" && result.result.kind === "cloud-usage") {
+        const choices = cloudUsageChoices(result.result);
+        const token = randomBytes(18).toString("base64url");
+        const keyboard: InlineKeyboardMarkup = { inline_keyboard: [] };
+        for (let index = 0; index < choices.length; index++) {
+          const button = { text: choices[index]!.label, callback_data: `usage:${token}:${index}` };
+          if (index < 3) (keyboard.inline_keyboard[0] ??= []).push(button);
+          else keyboard.inline_keyboard.push([button]);
+        }
+        const text = formatTelegramPanelChunks(formatCloudUsage(result.result));
+        if (text.length !== 1) throw new Error("Ollama 用量卡片超过消息上限");
+        const messageId = this.usageEdits.get(context)?.messageId;
+        const deliveredId = await this.apiExecutor.call({ chatId: inputTarget.conversationId,
+          operation: messageId === undefined ? "sendMessage" : "editMessageText", critical: false }, async requestSignal => {
+          guard();
+          const options = { parse_mode: "HTML" as const, reply_markup: keyboard };
+          if (messageId === undefined) return (await context.reply(text[0]!, options, telegramAbortSignal(requestSignal))).message_id;
+          await this.bot.api.editMessageText(inputTarget.conversationId, messageId, text[0]!, options, telegramAbortSignal(requestSignal));
+          return messageId;
+        }, signal);
+        guard();
+        for (const [key, value] of this.usageSelections) if (value.expiresAt <= this.now()) this.usageSelections.delete(key);
+        while (this.usageSelections.size >= 100) this.usageSelections.delete(this.usageSelections.keys().next().value!);
+        this.usageSelections.set(token, { target: inputTarget, actorId,
+          messageId: deliveredId, expiresAt: this.now() + 10 * 60_000, scope: { ...scope }, inputs: choices.map(choice => choice.input) });
+        return;
+      }
       await renderTelegramCommandResult(context, result, (text, options) => this.apiExecutor.call({
         chatId: inputTarget.conversationId, operation: "sendMessage", critical: false,
       }, requestSignal => {

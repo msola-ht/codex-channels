@@ -17,6 +17,9 @@ import { loadCcgAccounts, ccgProviderId, ccgApiKeyEnvironmentKey,
 import { loadClinePassAccounts, clinePassProviderId, clinePassApiKeyEnvironmentKey,
   clinePassAccountIdFromProvider, isClinePassAccountProvider, clinePassAccountMarkerPath,
   clinePassAccountsFilePath } from "./cline-pass-accounts.mjs";
+import { loadOllamaCloudAccounts, ollamaCloudProviderId, ollamaCloudApiKeyEnvironmentKey,
+  ollamaCloudAccountIdFromProvider, isOllamaCloudAccountProvider, ollamaCloudAccountMarkerPath,
+  ollamaCloudAccountsFilePath } from "./ollama-cloud-accounts.mjs";
 
 const deepseekProviderCapabilities = Object.freeze({
   accountAdapter: "deepseek",
@@ -89,15 +92,29 @@ export const clinePassProviderDefinition = Object.freeze({
   capabilities: Object.freeze({ accountAdapter: "clp", instanceAdapter: "clp-accounts" }),
 });
 
+export const ollamaCloudProviderDefinition = Object.freeze({
+  id: "olc", storageId: "ollama-cloud", displayName: "Ollama Cloud",
+  catalogFileName: "models.json", catalogManifestFileName: "models.manifest.json",
+  managedMarkerFileName: "managed.toml", backupDirectoryName: "backup",
+  baseUrl: "https://ollama.com/v1", wireApi: "responses",
+  apiKeyEnvironmentKey: "CODEX_CONNECT_OLLAMA_CLOUD_API_KEY",
+  supportsWebsockets: false,
+  capabilities: Object.freeze({ accountAdapter: "ollama-cloud", instanceAdapter: "ollama-cloud-accounts" }),
+});
+
 export function isManagedProviderApiKeyValid(definition, apiKey) {
   return typeof apiKey === "string"
     && apiKey.length <= 4_096
-    && (["ccg", "clp"].includes(definition.storageId ?? definition.id)
+    && (["ccg", "clp", "ollama-cloud"].includes(definition.storageId ?? definition.id)
       ? /^[A-Za-z0-9._~+/-]+=*$/u.test(apiKey)
       : /^sk-[^\s"]+$/u.test(apiKey));
 }
 
 export function isManagedProviderModelValid(definition, model) {
+  if ((definition.storageId ?? definition.id) === "ollama-cloud") {
+    return typeof model === "string" && model.length > 0 && model.length <= 200
+      && model.trim() === model && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(model);
+  }
   if ((definition.storageId ?? definition.id) === "clp") {
     return typeof model === "string"
       && model.length <= 200
@@ -113,6 +130,17 @@ export function isManagedProviderModelValid(definition, model) {
 
 /** 编译期账户家族登记；各账户模块仍拥有注册表读取和路径校验。 */
 export const managedProviderAccountFamilies = Object.freeze([
+  {
+    definition: ollamaCloudProviderDefinition,
+    aggregateMaterialOrder: 4,
+    matches: isOllamaCloudAccountProvider,
+    accountId: ollamaCloudAccountIdFromProvider,
+    providerId: ollamaCloudProviderId,
+    loadAccounts: loadOllamaCloudAccounts,
+    markerPath: ollamaCloudAccountMarkerPath,
+    accountsFilePath: ollamaCloudAccountsFilePath,
+    accountDefinition: (account) => ollamaCloudAccountDefinition(account.id),
+  },
   {
     definition: deepseekProviderDefinition,
     aggregateMaterialOrder: 0,
@@ -204,6 +232,17 @@ export function expandManagedModelProviderDefinitions(
     }
     return family.loadAccounts(environment).map(family.accountDefinition);
   }));
+}
+
+export function ollamaCloudAccountDefinition(accountId) {
+  const id = ollamaCloudProviderId(accountId);
+  const profileName = `sf-${id}`;
+  return Object.freeze({
+    ...ollamaCloudProviderDefinition,
+    id, accountId, displayName: `Ollama Cloud ${accountId}`,
+    profileName, profileFileName: `${profileName}.config.toml`,
+    apiKeyEnvironmentKey: ollamaCloudApiKeyEnvironmentKey(accountId),
+  });
 }
 
 export function deepseekAccountDefinition(accountId) {

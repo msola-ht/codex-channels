@@ -7,10 +7,11 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, type RelayModelCapability, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
-import { applyClinePassProviderOptions, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
+import { sendOllamaSearchResponses, applyClinePassProviderOptions, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 import { ModelRequestTimeoutError } from "../provider-proxy/index.js";
 import type { SamplingParameters } from "../model-api/index.js";
+import { OllamaWebSearch, prepareOllamaFreeform, type OllamaFreeformResponse } from "../model-api/index.js";
 
 export interface RelayQueueEntry {
   requestId: string;
@@ -25,11 +26,15 @@ export interface RelayQueueEntry {
 }
 
 export interface PreparedRelayProvider {
+  readonly ollamaFreeform?: boolean;
+  readonly ollamaWebSearch?: boolean;
   readonly modelSampling?: Readonly<Record<string, SamplingParameters>>;
   readonly modelCapabilities?: readonly RelayModelCapability[];
   readonly target: DirectChatTarget;
   readonly models: readonly string[];
   readonly protocols: readonly ("chat" | "responses")[];
+  /** Refresh underlying material before a hosted search or continuation. */
+  refresh?(signal: AbortSignal): Promise<void>;
   /** Must synchronously check the current published material revision. */
   recheck(): void;
 }
@@ -113,6 +118,7 @@ export class ModelRelayServer {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const requestReceivedAt = performance.now();
     request.socket.setTimeout(0);
     response.setHeader("connection", "close");
     const controller = new AbortController(); this.active.add(controller);
@@ -121,6 +127,9 @@ export class ModelRelayServer {
     response.once("close", disconnected);
     let lease: RelayLease | undefined;
     let capture: DirectChatCapture | undefined;
+    let freeformAdapter: OllamaFreeformResponse | undefined;
+    let ollamaSearch: OllamaWebSearch | undefined;
+    let ollamaTerminalAttempted = false;
     let diagnostics: ModelRequestDiagnostics = {};
     let inbound: unknown;
     let started: number | undefined;
@@ -235,6 +244,17 @@ export class ModelRelayServer {
         const capability = prepared.modelCapabilities?.find(model => model.id === body!.model);
         body = applyClinePassProviderOptions(body, capability?.cline_provider_options);
       }
+      if (protocol === "responses" && prepared.ollamaWebSearch) {
+        const mapped = new OllamaWebSearch(body, randomUUID().replaceAll("-", ""));
+        body = mapped.body as DirectResponsesRequest;
+        if (mapped.active) { prepareOllamaFreeform(body).adapter.close(); ollamaSearch = mapped; generationBlocked = true; }
+      }
+      if (protocol === "responses" && prepared.ollamaFreeform && !ollamaSearch) {
+        const adapted = prepareOllamaFreeform(body);
+        body = adapted.body as DirectResponsesRequest;
+        if (adapted.adapter.active) freeformAdapter = adapted.adapter;
+        else adapted.adapter.close();
+      }
       if (Buffer.byteLength(JSON.stringify(body)) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
       // Preparation includes optional capture initialization and the material/proxy resolver.
       phase = "prepare";
@@ -257,12 +277,13 @@ export class ModelRelayServer {
           userAgent = ua;
           upstreamUrl = address;
           outboundBytes += requestBytes;
-          started = performance.now();
-          submittedAt = Date.now();
+          started ??= performance.now();
+          submittedAt ??= Date.now();
         },
         headers: (status: number) => { httpStatus = status; },
         content: () => { firstTokenMs ??= performance.now() - started!; },
         emit: async (value: Record<string, unknown> | undefined, terminal: boolean, rawFrame?: string) => {
+          if (terminal && ollamaSearch) ollamaTerminalAttempted = true;
           if (value !== undefined) activityObserver.response(value, protocol);
           delivering = true;
           if (terminal) { completedAt = performance.now(); phase = "delivery"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.(); }
@@ -291,7 +312,14 @@ export class ModelRelayServer {
           } finally { clearTimeout(terminalTimer); }
         },
       };
-      if (protocol === "responses") await sendDirectResponses({ ...call, request: body as DirectResponsesRequest, observer: observer as DirectResponsesObserver });
+      if (ollamaSearch) await sendOllamaSearchResponses({ ...call, search: ollamaSearch, refresh: async operationSignal => {
+        lease!.check(requestModel); prepared.recheck();
+        await prepared.refresh?.(operationSignal); operationSignal.throwIfAborted(); lease!.check(requestModel); prepared.recheck();
+      },
+        deadlineAt: requestReceivedAt + 10 * 60_000, cancel: reason => controller.abort(reason),
+        nextCapture: async operationSignal => this.options.capture?.(provider!, operationSignal, protocol), captureChanged: value => { capture = value; },
+        request: body as DirectResponsesRequest, observer: observer as DirectResponsesObserver });
+      else if (protocol === "responses") await sendDirectResponses({ ...call, ...(freeformAdapter ? { adapter: freeformAdapter } : {}), request: body as DirectResponsesRequest, observer: observer as DirectResponsesObserver });
       else await sendDirectChat({ ...call, request: body as DirectChatRequest, observer: observer as DirectChatResponse, unwrapClpEnvelope: provider!.startsWith("clp-") });
       deliveryStatus = "finished";
     } catch (error) {
@@ -307,7 +335,7 @@ export class ModelRelayServer {
         : failure instanceof ChatUpstreamError && failure.upstreamStatus !== undefined
           ? [429, 503, 504].includes(failure.upstreamStatus) ? failure.upstreamStatus : failure.upstreamStatus === 408 ? 504 : 502
         : failure instanceof ChatUpstreamError && failure.code === "rate_limit" ? 429
-          : failure instanceof ChatUpstreamError && failure.code === "upstream_timeout" ? 504
+          : failure instanceof ChatUpstreamError && ["upstream_timeout", "olc_search_timeout", "olc_search_deadline"].includes(failure.code) ? 504
             : phase === "input" ? 400 : phase === "prepare" ? 503 : 502;
       errorCode = failure instanceof RelayAdmissionError || failure instanceof ChatUpstreamError || failure instanceof DirectChatResponseError ? failure.code
         : phase === "input" && failure instanceof ChatBodyTooLargeError ? "request_too_large"
@@ -335,13 +363,19 @@ export class ModelRelayServer {
         if (!request.complete) response.once("finish", () => request.resume());
         // Error delivery has a separate short bound, even if the model request was cancelled.
         try {
-          if (response.headersSent) { capture?.delivered?.(detail, true, response.statusCode, response.getHeaders()); await endResponse(response, `${protocol === "responses" ? "event: error\n" : ""}data: ${JSON.stringify(detail)}\n\n`, new AbortController().signal); }
+          if (response.headersSent && ollamaSearch && !delivering && !ollamaTerminalAttempted) {
+            const failed = ollamaSearch.forDelivery(ollamaSearch.failure(errorCode, failure instanceof ChatUpstreamError ? failure.message : "Ollama Cloud 网页搜索请求失败。"));
+            capture?.delivered?.(failed, true, response.statusCode, response.getHeaders());
+            await endResponse(response, `event: response.failed\ndata: ${JSON.stringify(failed)}\n\n`, new AbortController().signal);
+          } else if (response.headersSent && ollamaSearch) response.destroy();
+          else if (response.headersSent) { capture?.delivered?.(detail, true, response.statusCode, response.getHeaders()); await endResponse(response, `${protocol === "responses" ? "event: error\n" : ""}data: ${JSON.stringify(detail)}\n\n`, new AbortController().signal); }
           else {
             if (failure instanceof ChatUpstreamError && failure.retryAfter !== undefined) response.setHeader("retry-after", failure.retryAfter);
             response.statusCode = status === 499 ? 502 : status; response.setHeader("content-type", "application/json"); capture?.delivered?.(detail, false, response.statusCode, response.getHeaders()); await endResponse(response, JSON.stringify(detail), new AbortController().signal); }
         } catch { response.destroy(); }
       }
     } finally {
+      freeformAdapter?.close();
       if (this.requests.delete(relayRequestId)) this.options.queueChanged?.();
       clearTimeout(preparationTimer); response.off("close", disconnected); controller.abort(); this.active.delete(controller);
       lease?.release();

@@ -1,4 +1,6 @@
 export type ManagedModelProviderId =
+  | "olc"
+  | `olc-${string}`
   | "clp"
   | `clp-${string}`
   | "ccg"
@@ -8,8 +10,8 @@ export type ManagedModelProviderId =
   | "ocg"
   | `ocg-${string}`;
 
-export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg" | "clp";
-export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts" | "clp-accounts";
+export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg" | "clp" | "ollama-cloud";
+export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts" | "clp-accounts" | "ollama-cloud-accounts";
 
 export interface ModelProviderCapabilities {
   readonly accountAdapter: ManagedModelProviderAccountAdapter;
@@ -77,6 +79,8 @@ export function managedProviderAccountFamilyForDefinition(
 ): ManagedProviderAccountFamily | undefined;
 
 export function clinePassAccountDefinition(accountId: string): ModelProviderDefinition;
+export function ollamaCloudAccountDefinition(accountId: string): ModelProviderDefinition;
+export const ollamaCloudProviderDefinition: ModelProviderTemplate;
 export const clinePassProviderDefinition: ModelProviderTemplate;
 export const deepseekProviderDefinition: ModelProviderTemplate;
 export function deepseekAccountDefinition(accountId: string): ModelProviderDefinition;

@@ -108,6 +108,10 @@ Surface 明确证明本次结果尚未发送，且原记录与本次均无发送
 - `managed-provider-capabilities.ts`：按 `runtime/model-provider-definitions.mjs` 的编译期能力元数据
   有界装配 DeepSeek、OpenCode Go、CCG、CLP 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
   账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。
+  Ollama Cloud 通过精确账户适配器提供 USD 余额和渠道官方云用量报告，不提供 limits。
+- `ollama-cloud-account-adapter.ts`：按 `olc-<账户>` 私有凭据读取固定官方 `/api/balance`、`/api/usage` 与 `POST /api/me` 的套餐字段。复用 AccountQuery 的期限、提交守卫与有界读取，通过 JSON 数字原文和 bigint 十进制单位精确求和；拒绝无效金额、计数及不一致分组，旧百分比计划不伪造 USD 余额，不泄露原始响应，用户接口仅保留套餐投影。
+- `ollama-account-cache.ts`：Ollama 渠道报告内套餐、余额与各范围用量的有界进程缓存，默认 30 秒有效、合并并发、凭据变更失效、独立取消和限流退避；各等待者独立校验授权，失效调用者不污染其他调用者或账户退避。用量卡可显式展示五分钟内的过期快照，既有完成卡及账户快照不消费该缓存。账户适配器额外匿名读取 Frankfurter USD/CNY，复用缓存的 24 小时有效期；公共汇率跨账户共享，手动刷新不绕过有效期，失败不阻断美元报告、不发送账户凭据。
+  WebUI 概览经账户私有 IPC 调用同一 `ProviderAccountService.cloudUsage` 与缓存，组合根在查询及返回前复核精确账户仍在当前注册表中，再返回 Application 的共享费用与 Token 估算；不启动第二套适配器或写入完整报告。适配器按三个固定范围保留五分钟内报告供 `cacheOnly` 读取，读取时复核凭据、认证状态及各字段时效；余额、套餐和汇率通过缓存 peek 重组，跨范围刷新也能同步当前账户金额。变化通知不提交上游请求。渠道与 WebUI 查询生成新报告或任一余额／云报告查询确认认证失败时，通过既有账户通知 IPC 使展示失效；失败通知去重，缓存命中及只读同步不重复发通知。
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   模型请求入口；IPC 只投影约定字段，Provider 归属由组合层确定，不接受入站扩展字段覆盖。
   模型请求统计端口。合法脱敏样本尝试入队；生图请求只保存请求指标，不回填文本模型思考等级，

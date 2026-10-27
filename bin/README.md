@@ -49,6 +49,7 @@
 - `cleanup`：统一交互选择会话归档、转储删除、旧指标清理、Provider 指标清理与指标库重置；复用各自执行入口与服务状态检查，完成或取消单项后返回菜单，非交互终端只显示帮助。
 - `provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。受管账户按 `provider deepseek/opencode-go/ccg` 分派，各家只开放实际支持的操作。
 - `provider deepseek remove <id>`、`provider opencode-go remove <id>`、`provider ccg remove <id>`：确认后移除对应账户，保留备份与历史统计；只支持当前多账户格式。
+- `provider ollama-cloud discover [--json]`：只读发现官方公开模型元数据，保留精确 ID，输出待验证候选与未确认原因；不携带 Key、不创建账户、不写入或启用模型，详见[Ollama 接入进度](../docs/ollama-cloud-probe.md#实施进度2026-10-26)。
 - `provider opencode-go`：新增、列出、删除、设置默认或释放 OpenCode Go 账户实例；`release` 不禁用账户，后续请求可重新拉起。新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
   释放对应隔离实例。

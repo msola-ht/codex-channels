@@ -188,6 +188,16 @@ async function startGatewayProcess(): Promise<void> {
         throw new GatewayAccountRefreshError(error instanceof ResetCreditError ? error.code : "reset_unavailable", "重置券操作未完成");
       }
     },
+    async (provider, query, signal) => {
+      const startedAt = performance.now();
+      try { return await application.readCloudUsage(provider, query, signal); }
+      catch (error) {
+        if (signal.aborted) throw signal.reason;
+        const diagnostic = accountQueryFailureMetadata(error, performance.now() - startedAt);
+        logger.warn({ provider, ...diagnostic }, "云用量查询失败");
+        throw new GatewayAccountRefreshError("refresh_failed", "云用量查询失败", { cause: error, reason: diagnostic.reason });
+      }
+    },
   );
   const threadStates = new GatewayThreadStateServer(
     runtime.configPath,

@@ -11,6 +11,10 @@
 
 `clp_search_tool_choice` 表示上游搜索调用违反本轮工具选择限制，联网前已阻止。CLP 永久流内失败对 Codex 返回非重试码 `invalid_prompt`，细分原因保留在 `error.type` 与诊断码中；错误记录同时读取 code/type。可重试流内失败保留分类，并透传经校验的 `Retry-After`，避免永久搜索失败引发整轮自动重试。
 
+OLC 托管搜索的 `olc_search_authentication_error`、`olc_search_permission_denied`、`olc_search_rate_limit`、`olc_search_timeout`、`olc_search_invalid_response` 和 `olc_search_upstream_error` 分别表示搜索接口的认证、权限、限流、超时、格式和连接／服务故障；`olc_search_deadline` 表示整次请求期限已到，`olc_search_failed` 表示工具、预算或材料复核失败。错误列表和详情优先显示这些安全分类，不把最后一次模型 HTTP 200 当作搜索成功。搜索已开始后的失败以同一响应的 `response.failed` 收尾，wire code 为 `invalid_prompt`，具体原因保留在 type 和指标中，防止原生 Codex 把整个搜索请求自动重放。失败搜索不发布完成项；本地期限或撤销停止上游后仅保留既有的 5 秒失败交付预算，客户端已经断开或终态交付本身失败时无法保证送达。
+
+`olc_search_result_limit` 专指本地搜索结果预算超限（单次正文、累计结果、结果数量、标题或 URL 长度），与格式错误分开显示。单条摘要没有独立 32 KiB 限制，合法正文在整体预算内不截断。`olc_search_invalid_response` 的受控消息可包含结果序号和固定字段名，用于区分缺字段、非法 Unicode、URL 或 JSON；不包含搜索正文。收到 HTTP 200 后正文连接中断归为 `olc_search_upstream_error`，不当作格式错误。
+
 渠道输入、输出和生命周期失败统一使用以下字段（能拿到时才出现）：
 
 | 字段 | 含义 | 示例 |
@@ -81,7 +85,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `model.provider.mismatch` | 当前线程运行在 X 账户，不能使用 Y Provider 的模型 | 继续/恢复旧 Thread 时暂存了跨 Provider 模型 |
 | `model.official.not-logged-in` | OpenAI 官方未登录，当前没有可用模型 | 未检测到 Codex 官方鉴权文件 |
 | `model.provider.selection-required` | 请先通过 /model 选择提供商和模型 | 官方未登录且存在多个没有统一默认账户的可选第三方 |
-| `model.provider.default-missing` | 提供商的默认模型未配置 | 自动选择的唯一第三方或 DS/OCG/CCG/CLP 默认账户没有有效默认模型；通过 codexc setup 设置 |
+| `model.provider.default-missing` | 提供商的默认模型未配置 | 自动选择的唯一第三方或 DS/OCG/CCG/CLP/OLC 默认账户没有有效默认模型；通过 codexc setup 设置 |
 | `model.selector.required` | /model 用法提示 | 未提供模型选择参数 |
 | `model.selector.ambiguous` | 模型选择不唯一 | 选择器匹配多个模型 |
 | `model.selector.not-found` | 找不到指定模型 | 选择器无匹配 |
@@ -151,6 +155,8 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `scheduled-task.state.invalid` | 当前状态不允许该计划任务操作 | 功能未启用、任务阻塞或 Run 不可重试 |
 | `reset-credit.failed` | 按受控 reason 展示用法、授权不足、确认失效、忙碌、结果待确认或暂不可用 | `/limits reset` 参数、身份或上下文复核失败；消费响应丢失时不自动重试 |
 | `metrics.usage` | /metrics 用法提示 | 参数格式错误 |
+| `usage.arguments` | Ollama 用量切换用法提示；其他账户使用 /usage | 时间或刷新参数无效，或账户不支持切换 |
+| `usage.account-changed` | 账户已切换，请重新执行 /usage | 旧按钮绑定账户与当前账户不一致，或查询期间账户变化 |
 
 ### 提供商、协作模式与计划
 

@@ -18,9 +18,11 @@ import {
   formatTimeRemaining,
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
+import { formatCloudUsage } from "./cloud-usage-format.js";
 import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTierSetting, modelListEntry } from "./provider-format.js";
 import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { isOllamaCloudAccountProvider } from "../../runtime/ollama-cloud-accounts.mjs";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
 const maximumThreadUsageGroups = 8;
@@ -199,6 +201,7 @@ function formatModelStateLine(
 export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
 ): string {
+  if (result.result.kind === "cloud-usage") return formatCloudUsage(result.result);
   if (result.result.kind === "subscription-required") {
     return `${formatCodexProviderLabel(result.result.provider)} 无有效订阅，可能已到期或尚未开通。请检查订阅状态；续订后可重新执行 /usage 查询。`;
   }
@@ -208,7 +211,7 @@ export function formatConversationUsage(
   if (result.result.kind === "balance") {
     return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户余额：`,
-      formatTimezoneLine(),
+      ...(isOllamaCloudAccountProvider(result.result.provider) ? [] : [formatTimezoneLine()]),
       `API 可用：${result.result.available ? "是" : "否"}`,
       ...(result.result.balances.length === 0
         ? ["暂无余额信息"]
@@ -216,8 +219,8 @@ export function formatConversationUsage(
             "",
             `${balance.currency}：`,
             `总余额：${balance.totalBalance}`,
-            `赠金余额：${balance.grantedBalance}`,
-            `充值余额：${balance.toppedUpBalance}`,
+            `${isOllamaCloudAccountProvider(result.result.provider) ? "包含额度剩余" : "赠金余额"}：${balance.grantedBalance}`,
+            `${isOllamaCloudAccountProvider(result.result.provider) ? "已购额度剩余" : "充值余额"}：${balance.toppedUpBalance}`,
         ])),
     ].join("\n"));
   }

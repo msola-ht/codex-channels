@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { AccountIdField } from "@/components/settings/account-id-field"
+import { OllamaModelChoices } from "@/components/settings/ollama-model-choices"
+import { cn } from "cn"
 import { newManagedAccountIdError, opencodeGoReservedAccountIds } from "../../../../runtime/managed-provider-account-options.mjs"
 import { useTranslation } from "@/hooks/use-translation"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -9,10 +11,12 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ManagedSelect, ManagementConfirmationDialog, SettingsMutationFeedback, modelOperationDialogClassName } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
+import { discoverOllamaCloudAccountModels, ApiClientError, type OllamaCloudAccountModelDiscovery } from "@/lib/api"
+import { translateApiErrorCode } from "@/lib/i18n/translate"
 import type { AccountSettingsController } from "@/lib/settings-management"
 
-export type Platform = "opencodeGo" | "deepseek" | "clinePass"
-const platforms: Record<Platform, string> = { opencodeGo: "OpenCode Go", deepseek: "DeepSeek", clinePass: "Cline Pass" }
+export type Platform = "opencodeGo" | "deepseek" | "clinePass" | "ollamaCloud"
+const platforms: Record<Platform, string> = { opencodeGo: "OpenCode Go", deepseek: "DeepSeek", clinePass: "Cline Pass", ollamaCloud: "Ollama Cloud" }
 type AccountMode = "switching" | "exclusive"
 export type AccountRow = { id: string; provider: string; platform: Platform; name: string; contact: string; model: string; mode: AccountMode | null; default: boolean }
 export type AccountDirectoryActions = { rows: AccountRow[]; fresh: boolean; disabled: boolean; editing: boolean; open: (platform: Platform, row?: AccountRow) => void; action: (row: AccountRow, kind: "default" | "remove") => void; setTrigger: (node: HTMLButtonElement) => void }
@@ -26,28 +30,65 @@ export function AccountSettingsManagement({ management, onChanged, onEditingChan
 }
 
 function AccountSettingsCard({ management, settings, onChanged, onEditingChange, renderAccounts }: AccountSettingsManagementProps & { settings: NonNullable<AccountSettingsController["settings"]> }) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const [editor, setEditor] = useState<Platform | null>(null)
   const [editing, setEditing] = useState(false)
   const [accountId, setAccountId] = useState("")
   const [mode, setMode] = useState<AccountMode | null>("switching")
   const [key, setKey] = useState("")
+  const [model, setModel] = useState("")
+  const [discovery, setDiscovery] = useState<OllamaCloudAccountModelDiscovery | null>(null)
+  const [discovering, setDiscovering] = useState(false)
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+  const discoveryRequest = useRef<AbortController | null>(null)
+  const initialCatalog = editor === "ollamaCloud" && !editing && !settings.ollamaCloud.catalogExists
+  const modelChoices = initialCatalog ? discovery?.models ?? [] : settings.ollamaCloud.models
+  const modelValid = editor !== "ollamaCloud" || editing || modelChoices.some(entry => entry.id === model)
   const pending = management.pendingPreview
-  const disabled = management.busy || management.loading || management.error !== null || management.readbackRequired || pending !== null
+  const disabled = management.busy || management.loading || management.error !== null || management.readbackRequired || pending !== null || discovering
   const rows: AccountRow[] = [
     ...settings.opencodeGo.accounts.map(account => ({ id: account.id, provider: account.provider, platform: "opencodeGo" as const, name: account.displayName, contact: account.email ?? account.phone ?? "", model: account.model ?? "", mode: account.mode ?? null, default: account.default })),
     ...settings.deepseek.accounts.map(account => ({ id: account.id, provider: account.provider, platform: "deepseek" as const, name: account.id, contact: "", model: account.model ?? "", mode: account.mode ?? null, default: account.default })),
     ...settings.clinePass.accounts.map(account => ({ id: account.id, provider: account.provider, platform: "clinePass" as const, name: account.id, contact: "", model: account.model ?? "", mode: account.mode ?? null, default: account.default })),
+    ...settings.ollamaCloud.accounts.map(account => ({ id: account.id, provider: account.provider, platform: "ollamaCloud" as const, name: account.id, contact: "", model: account.model ?? "", mode: account.mode ?? null, default: account.default })),
   ]
   useEffect(() => {
     onEditingChange?.(editor !== null)
     return () => onEditingChange?.(false)
   }, [editor, onEditingChange])
-  const close = () => { setEditor(null); setKey("") }
+  const resetDiscovery = () => {
+    discoveryRequest.current?.abort(); discoveryRequest.current = null
+    setDiscovery(null); setDiscoveryError(null); setDiscovering(false)
+  }
+  useEffect(() => () => discoveryRequest.current?.abort(), [])
+  useEffect(() => {
+    if (settings.ollamaCloud.catalogExists) {
+      discoveryRequest.current?.abort(); discoveryRequest.current = null
+      setDiscovery(null); setDiscovering(false)
+    }
+  }, [settings.ollamaCloud.catalogExists])
+  const close = () => { resetDiscovery(); setEditor(null); setKey("") }
   const open = (platform: Platform, row?: AccountRow) => {
     management.clearError()
+    resetDiscovery()
     setEditor(platform); setEditing(Boolean(row)); setAccountId(row?.id ?? ""); setMode(row ? row.mode : "switching"); setKey("")
+    setModel(row?.model ?? "")
+  }
+  const cacheDates = new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", { dateStyle: "medium", timeStyle: "medium" })
+  const discoverModels = async (refresh = false) => {
+    if (disabled || discoveryRequest.current !== null || !initialCatalog || !key.trim() || newManagedAccountIdError(accountId, settings.ollamaCloud.accounts)) return
+    const controller = new AbortController()
+    discoveryRequest.current = controller
+    setDiscovering(true); setDiscovery(null); setDiscoveryError(null); setModel(""); management.clearError()
+    try {
+      const result = await discoverOllamaCloudAccountModels({ accountId: accountId.trim(), apiKey: key, ...(refresh ? { refresh: true } : {}) }, controller.signal)
+      if (discoveryRequest.current === controller && !controller.signal.aborted) setDiscovery(result)
+    } catch (cause) {
+      if (discoveryRequest.current === controller && !controller.signal.aborted) setDiscoveryError(cause instanceof ApiClientError ? cause.code : "network_error")
+    } finally {
+      if (discoveryRequest.current === controller) { discoveryRequest.current = null; setDiscovering(false) }
+    }
   }
   const save = () => {
     if (editor === null || (mode !== "switching" && mode !== "exclusive")) return
@@ -55,6 +96,7 @@ function AccountSettingsCard({ management, settings, onChanged, onEditingChange,
     if (editor === "opencodeGo") void management.mutate({ ...common, operation: "opencode.account.configure" })
     if (editor === "deepseek") void management.mutate({ operation: "deepseek.configure", ...common })
     if (editor === "clinePass") void management.mutate({ operation: "clp.configure", ...common })
+    if (editor === "ollamaCloud" && modelValid) void management.mutate({ operation: "olc.configure", ...common, ...(!editing ? { model } : {}), ...(initialCatalog && discovery ? { discoveryToken: discovery.discoveryToken } : {}) })
   }
   const confirm = async () => {
     const result = await management.confirm()
@@ -62,24 +104,44 @@ function AccountSettingsCard({ management, settings, onChanged, onEditingChange,
   }
   const cancel = () => { management.cancel() }
   const action = (row: AccountRow, kind: "default" | "remove") => {
-    const prefix = row.platform === "opencodeGo" ? "opencode.account" : row.platform === "deepseek" ? "deepseek" : "clp"
+    const prefix = row.platform === "opencodeGo" ? "opencode.account" : row.platform === "deepseek" ? "deepseek" : row.platform === "ollamaCloud" ? "olc" : "clp"
     void management.mutate({ operation: `${prefix}.${kind}`, accountId: row.id })
   }
   return <>
     <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
     {renderAccounts({ rows, fresh: !management.loading && management.error === null && !management.readbackRequired, disabled, editing: editor !== null || pending !== null, open, action, setTrigger: node => { triggerRef.current = node } })}
     <Dialog open={editor !== null} onOpenChange={value => { if (!value && !management.busy && pending === null) close() }}>
-      <DialogContent finalFocus={triggerRef} closeLabel={t("modelManagement.cancel")} className={modelOperationDialogClassName} showCloseButton={!management.busy && pending === null}>
+      <DialogContent finalFocus={triggerRef} closeLabel={t("modelManagement.cancel")} className={cn(modelOperationDialogClassName, initialCatalog && "max-w-5xl sm:max-w-5xl")} showCloseButton={!management.busy && pending === null}>
         <DialogHeader><DialogTitle>{editor ? platforms[editor] : ""} · {t(editing ? "modelManagement.edit" : "modelManagement.add")}</DialogTitle><DialogDescription>{t("modelManagement.credentialsHint")}</DialogDescription></DialogHeader>
         {management.error !== null && <SettingsError message={management.error} retry={management.refetch} />}
         {management.readbackRequired && <Alert><AlertDescription className="flex flex-col gap-2"><p>{t("settingsUi.readbackUnknown")}</p><Button variant="outline" disabled={management.busy || management.loading} onClick={management.refetch}>{t("common.retry")}</Button></AlertDescription></Alert>}
         {editor && <FieldGroup>
-          <AccountIdField id="model-account-id" value={accountId} accounts={settings[editor].accounts} reservedIds={editor === "opencodeGo" ? opencodeGoReservedAccountIds : undefined} disabled={disabled} editing={editing} onChange={setAccountId} />
+          <AccountIdField id="model-account-id" value={accountId} accounts={settings[editor].accounts} reservedIds={editor === "opencodeGo" ? opencodeGoReservedAccountIds : undefined} disabled={disabled} editing={editing} onChange={value => { resetDiscovery(); setAccountId(value); if (initialCatalog) setModel("") }} />
           <ManagedSelect fullWidth label={t("modelManagement.mode")} value={mode ?? ""} placeholder={t("common.unknown")} description={editing && mode === null ? t("modelManagement.unknownAccountModeHint") : undefined} options={[["switching", t("modelManagement.switching")], ["exclusive", t("modelManagement.exclusive")]]} disabled={disabled} onChange={value => { if (value === "switching" || value === "exclusive") setMode(value) }} />
-          <Field data-disabled={disabled}><FieldLabel htmlFor="model-account-key">API Key</FieldLabel><Input id="model-account-key" type="password" autoComplete="new-password" disabled={disabled} value={key} placeholder={editing ? t("managementUi.preserveCredentials") : undefined} onChange={event => setKey(event.target.value)} /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="model-account-key">API Key</FieldLabel><Input id="model-account-key" type="password" autoComplete="new-password" disabled={disabled} value={key} placeholder={editing ? t("managementUi.preserveCredentials") : undefined} onChange={event => { resetDiscovery(); setKey(event.target.value); if (initialCatalog) setModel("") }} /></Field>
+          {editor === "ollamaCloud" && <>
+            <Alert><AlertDescription>{t("modelManagement.ollamaAuthenticationHint")}</AlertDescription></Alert>
+            {initialCatalog && <>
+              <p>{t("modelManagement.ollamaInitialHint")}</p>
+              <p className="text-sm text-muted-foreground">{t("modelAddition.discoveryCacheHint")}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" disabled={disabled || !key.trim() || Boolean(newManagedAccountIdError(accountId, settings.ollamaCloud.accounts))} onClick={() => void discoverModels()}>{t(discovering ? "common.loading" : "modelManagement.ollamaRefreshModels")}</Button>
+                <Button variant="outline" disabled={disabled || !key.trim() || Boolean(newManagedAccountIdError(accountId, settings.ollamaCloud.accounts))} onClick={() => void discoverModels(true)}>{t("modelAddition.forceRefresh")}</Button>
+              </div>
+              {discovery?.cache ? <p className="text-sm text-muted-foreground">{t("modelAddition.discoveryCacheStatus", {
+                source: t(discovery.cache.hit ? "modelAddition.discoveryCacheHit" : "modelAddition.discoveryCacheFetched"),
+                fetchedAt: cacheDates.format(new Date(discovery.cache.fetchedAt)), expiresAt: cacheDates.format(new Date(discovery.cache.expiresAt)),
+              })}</p> : null}
+              {discoveryError ? <Alert variant="destructive"><AlertDescription>{translateApiErrorCode(t, discoveryError)}</AlertDescription></Alert> : null}
+              {discovery ? <OllamaModelChoices models={[...discovery.models, ...discovery.unavailableModels.map(entry => ({ id: entry.id, upstreamContextWindow: entry.upstreamContextWindow,
+                unavailable: t(`modelAddition.discoveryReasons.${entry.reasonCode}`),
+              }))]} selected={model ? [model] : []} disabled={disabled} onToggle={(id, checked) => setModel(checked ? id : "")} /> : null}
+            </>}
+            {editing ? <Field><FieldLabel>{t("managementUi.defaultModel")}</FieldLabel><p className="break-all">{model || t("common.unknown")}</p></Field> : !initialCatalog ? <ManagedSelect fullWidth label={t("managementUi.defaultModel")} value={model} placeholder={t("modelManagement.selectModel")} options={modelChoices.map(entry => [entry.id, `${entry.name} (${entry.id})`])} disabled={disabled} onChange={setModel} /> : null}
+          </>}
         </FieldGroup>}
         {management.actionError && <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert>}
-        <DialogFooter><Button variant="outline" disabled={management.busy || pending !== null} onClick={close}>{t("modelManagement.cancel")}</Button><Button disabled={disabled || !editor || (mode !== "switching" && mode !== "exclusive") || (!key.trim() && !(editing && key === "")) || (!editing && Boolean(newManagedAccountIdError(accountId, editor ? settings[editor].accounts : [], editor === "opencodeGo" ? opencodeGoReservedAccountIds : undefined)))} onClick={save}>{t("modelManagement.preview")}</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" disabled={management.busy || pending !== null} onClick={close}>{t("modelManagement.cancel")}</Button><Button disabled={disabled || !modelValid || !editor || (mode !== "switching" && mode !== "exclusive") || (!key.trim() && !(editing && key === "")) || (!editing && Boolean(newManagedAccountIdError(accountId, editor ? settings[editor].accounts : [], editor === "opencodeGo" ? opencodeGoReservedAccountIds : undefined)))} onClick={save}>{t("modelManagement.preview")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     {pending && <AccountSettingsConfirmationDialog pending={pending} finalFocus={editor === null ? triggerRef : undefined} saving={management.busy} loading={management.loading || management.error !== null || management.readbackRequired} onConfirm={() => void confirm()} onCancel={cancel} />}
@@ -106,7 +168,7 @@ export function AccountSettingsConfirmationDialog({
   const preview = pending.preview
   const account = preview.account
   const provider = preview.provider
-  const platform = pending.input.operation.startsWith("opencode.") ? platforms.opencodeGo : pending.input.operation.startsWith("deepseek.") ? platforms.deepseek : platforms.clinePass
+  const platform = pending.input.operation.startsWith("opencode.") ? platforms.opencodeGo : pending.input.operation.startsWith("deepseek.") ? platforms.deepseek : pending.input.operation.startsWith("olc.") ? platforms.ollamaCloud : platforms.clinePass
   const lines = [t("accountConfirmation.operation", { value: preview.operation }), t("accountConfirmation.platform", { value: platform })]
   if (account?.id !== undefined) lines.push(t("accountConfirmation.account", { name: account.displayName ?? account.email ?? account.phone ?? account.id, id: account.id }))
   if (account?.provider !== undefined) lines.push(t("accountConfirmation.provider", { name: platform, id: account.provider }))
@@ -115,6 +177,13 @@ export function AccountSettingsConfirmationDialog({
   if (preview.mode !== undefined) lines.push(t("accountConfirmation.mode", { value: preview.previousMode === undefined ? modeLabel(preview.mode) : `${modeLabel(preview.previousMode)} → ${modeLabel(preview.mode)}` }))
   if (preview.credentialAction !== undefined) lines.push(t(preview.credentialAction === "preserve" ? "accountConfirmation.preserveKey" : "accountConfirmation.replaceKey"))
   if (preview.model !== undefined) lines.push(t("accountConfirmation.model", { value: preview.model }))
+  if (preview.initialModels !== undefined) {
+    lines.push(t("modelManagement.ollamaInitialSummary", { models: preview.initialModels.map(model => `${model.name} (${model.id})`).join("\n") }))
+    for (const model of preview.initialModels) {
+      lines.push(t("modelAddition.remoteCapabilities", { upstream: model.upstreamContextWindow, context: model.contextWindow, levels: model.reasoningEfforts.join("/"), effort: model.defaultReasoningEffort, images: t(model.supportsImages ? "managementUi.supported" : "managementUi.unsupported") }))
+      if (model.reasoningMode === "toggle") lines.push(t("modelAddition.reasoningToggleHint"))
+    }
+  }
   if (preview.status !== undefined) lines.push(t("accountConfirmation.status", { value: preview.status }))
   if (preview.effects !== undefined) {
     const effects = Object.entries(preview.effects).filter(([, value]) => value !== false && value !== null && value !== undefined).map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : String(value)}`)
@@ -122,6 +191,7 @@ export function AccountSettingsConfirmationDialog({
   }
   const removing = pending.input.operation === "opencode.account.remove"
     || pending.input.operation === "clp.remove"
+    || pending.input.operation === "olc.remove"
     || pending.input.operation === "deepseek.remove"
   const stopping = pending.input.operation === "opencode.account.stop"
   const destructive = stopping || removing

@@ -12,6 +12,7 @@ import type {
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
   OfficialAccountSourcesResponse,
+  CloudUsageView,
   OverviewResponse,
   MetricsRangeQuery,
   MetricsQuery,
@@ -200,6 +201,20 @@ async function getJson<T>(path: string, signal?: AbortSignal, timeoutMs = 30_000
 // bounded ancillary reads and response delivery. Account refresh adds its 20s IPC.
 const metricsReadTimeoutMs = 60_000
 const accountRefreshTimeoutMs = 90_000
+
+export function fetchCloudUsage(
+  provider: string,
+  range: CloudUsageView["report"]["query"]["range"],
+  refresh: boolean,
+  signal?: AbortSignal,
+  cacheOnly = false,
+): Promise<CloudUsageView | null> {
+  if (cacheOnly) return requestJson(`${API_PREFIX}/management/accounts/cloud-usage?${new URLSearchParams({ provider, range })}`, {}, signal, accountRefreshTimeoutMs)
+  return requestJson(`${API_PREFIX}/management/accounts/cloud-usage`, {
+    method: "POST", body: JSON.stringify({ provider, range, refresh }),
+  }, signal, accountRefreshTimeoutMs)
+}
+
 const getMetricsJson = <T>(path: string, signal?: AbortSignal) => getJson<T>(path, signal, metricsReadTimeoutMs)
 
 export function fetchServerTime(signal?: AbortSignal): Promise<ServerTimeResponse> {
@@ -531,9 +546,15 @@ export function fetchProviderModelTemplateOptions(provider: string, signal?: Abo
   return getJson(`${API_PREFIX}/management/provider-model-templates?${new URLSearchParams({ provider })}`, signal)
 }
 
-export function fetchProviderModelAdditionOptions(provider: string, manualModel: ManagedManualModelDefinition | undefined, signal: AbortSignal): Promise<ProviderModelAdditionOptions> {
+export function fetchProviderModelAdditionOptions(provider: string, manualModel: ManagedManualModelDefinition | undefined, signal: AbortSignal, discovery?: boolean, refresh?: boolean): Promise<ProviderModelAdditionOptions> {
   return requestJson(`${API_PREFIX}/management/provider-model-additions`, {
-    method: "POST", body: JSON.stringify({ provider, ...(manualModel ? { manualModel } : {}) }),
+    method: "POST", body: JSON.stringify({ provider, ...(manualModel ? { manualModel } : {}), ...(discovery === true ? { discovery: true } : {}), ...(refresh === true ? { refresh: true } : {}) }),
+  }, signal, 100_000)
+}
+
+export function verifyProviderModelAddition(input: import("../../../scripts/provider-model-additions.mjs").ProviderModelAdditionVerificationInput, signal: AbortSignal): Promise<import("../../../scripts/provider-model-additions.mjs").ProviderModelAdditionVerificationResult> {
+  return requestJson(`${API_PREFIX}/management/provider-model-additions/verify`, {
+    method: "POST", body: JSON.stringify(input),
   }, signal, 100_000)
 }
 
@@ -577,6 +598,15 @@ export function applyManagementProviderSettings(
 
 export function fetchManagementAccountSettings(signal?: AbortSignal): Promise<ManagementAccountSettingsResponse> {
   return getJson<ManagementAccountSettingsResponse>(`${API_PREFIX}/management/account-settings`, signal)
+}
+
+export type OllamaCloudAccountModelDiscovery = Awaited<ReturnType<typeof import("../../../scripts/ollama-cloud-account-management.mjs").discoverOllamaCloudAccountModels>>
+
+export function discoverOllamaCloudAccountModels(input: { accountId: string; apiKey: string; refresh?: boolean }, signal: AbortSignal): Promise<OllamaCloudAccountModelDiscovery> {
+  return requestJson<OllamaCloudAccountModelDiscovery>(`${API_PREFIX}/management/account-settings/discover-models`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }, signal, 100_000)
 }
 
 export function previewManagementAccountSettings(

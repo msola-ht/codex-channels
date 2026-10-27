@@ -194,15 +194,20 @@ export type ProviderAccountLimits =
 
 export interface ProviderAccountAdapter {
   provider: string;
+  cloudUsage?(query: CloudUsageQuery, signal?: AbortSignal, beforeSubmit?: () => void): Promise<CloudUsageReport | undefined>;
   accountUsage(signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountUsage>;
   accountThreadUsage?(threadId: string, beforeSubmit?: () => void): Promise<AccountThreadUsage>;
   accountLimits?(signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountLimits>;
 }
 
 export interface ProviderAccountQueryPort {
+  cloudUsage?(provider: string, query: CloudUsageQuery, signal?: AbortSignal, beforeSubmit?: () => void): Promise<CloudUsageReport | undefined>;
   accountUsage(modelProvider: string, threadId?: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountUsage>;
   accountLimits(modelProvider: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountLimits>;
 }
+
+import type { CloudUsageQuery, CloudUsageReport } from "../../runtime/ollama-cloud-usage.mjs";
+export type { CloudUsageQuery, CloudUsageMetrics, CloudUsageReport } from "../../runtime/ollama-cloud-usage.mjs";
 
 export interface OfficialAccountSnapshotWriter {
   writeOfficialAccountSnapshot(snapshot: OfficialAccountSnapshot, signal?: AbortSignal): Promise<void>;

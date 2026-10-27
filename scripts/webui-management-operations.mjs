@@ -91,6 +91,7 @@ export function isHighRiskManagementPath(path) {
     || path === "/models/official/refresh"
     || path === "/models/base"
     || path === "/models/base/preview"
+    || path === "/provider-model-additions/verify"
     || path.startsWith("/relay/")
     || path.startsWith("/delivery/")
     || path.startsWith("/provider-settings")

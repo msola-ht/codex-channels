@@ -19,7 +19,7 @@ import {
 
 import type { MessageKey } from "@/lib/i18n/messages"
 
-export const providerPlatformNames = ["OpenAI", "OpenCode Go", "DeepSeek", "Cline Pass", "managed", "custom"] as const
+export const providerPlatformNames = ["OpenAI", "OpenCode Go", "DeepSeek", "Cline Pass", "Ollama Cloud", "managed", "custom"] as const
 export function providerPlatform(value: string | null): string {
   if (value === null) return "all"
   return providerPlatformNames.some(platform => platform === value) ? value! : "invalid"

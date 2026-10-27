@@ -97,6 +97,7 @@ Goal get/set 的非空响应还必须与请求 Thread 身份一致，错配结�
 - `model-provider-catalog.ts`：按 Bootstrap 注入的 Provider 定义读取 Setup 下载到用户
   `CODEX_HOME` 的受管模型目录；目录里声明什么就开放什么，相同模型 ID 仍按 Provider 独立映射；
   已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
+  模型 ID 使用 Bootstrap 注入的 Runtime 家族校验器，与账户保存和运行时材料读取保持一致，保留 OLC 的冒号标签及 CLP 的不透明后缀。
   CCG 使用从 DS 基础内容生成的独立本地目录，保留含命名空间的上游模型 ID。
   `parseAggregateModelOptions` 复用纯目录裁剪并显式校验聚合命名空间，不读取源文件或启动服务。
   聚合保留源模型的不透明 ID 和无思考等级语义，按 API 可用性与 picker 可见性筛选，保持空闲目录与 `model/list` 一致。

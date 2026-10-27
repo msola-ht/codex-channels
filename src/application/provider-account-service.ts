@@ -7,10 +7,44 @@ import type {
   ProviderAccountQueryPort,
   ProviderAccountUsage,
   OfficialAccountSnapshotWriter,
+  CloudUsageQuery,
+  CloudUsageReport,
 } from "./account-port.js";
 import { createOfficialAccountSnapshot } from "./account-snapshot.js";
+import { UserFacingError } from "../conversation-core/index.js";
 
 export class ProviderAccountService implements ProviderAccountQueryPort {
+  async cloudUsage(provider: string, query: CloudUsageQuery, signal?: AbortSignal, beforeSubmit?: () => void): Promise<CloudUsageReport | undefined> {
+    signal?.throwIfAborted();
+    beforeSubmit?.();
+    const result = await this.adapters.get(provider)?.cloudUsage?.(query, signal, beforeSubmit).catch(error => {
+      if (!query.cacheOnly) this.notifyCloudAuthenticationFailure(provider, error);
+      throw error;
+    });
+    signal?.throwIfAborted();
+    beforeSubmit?.();
+    if (result && !query.cacheOnly) {
+      this.cloudAuthenticationFailures.delete(provider);
+      const key = `${provider}:${query.range}`;
+      const revision = JSON.stringify([result.observedAtMs, result.balanceObservedAtMs, result.planObservedAtMs,
+        result.stale, result.balanceStale, result.planStale, result.usdCny]);
+      if (this.cloudRevisions.get(key) !== revision) {
+        this.cloudRevisions.set(key, revision);
+        this.cloudUsageChanged?.();
+      }
+    }
+    return result;
+  }
+  private readonly cloudRevisions = new Map<string, string>();
+  private readonly cloudAuthenticationFailures = new Set<string>();
+
+  private notifyCloudAuthenticationFailure(provider: string, error: unknown): void {
+    if (!this.adapters.get(provider)?.cloudUsage || !(error instanceof UserFacingError)
+      || error.code !== "provider.account.unavailable" || error.details.reason !== "authentication"
+      || this.cloudAuthenticationFailures.has(provider)) return;
+    this.cloudAuthenticationFailures.add(provider);
+    this.cloudUsageChanged?.();
+  }
   private readonly pendingUsage = new Map<string, {
     controller: AbortController; promise: Promise<ProviderAccountUsage>; consumers: number;
   }>();
@@ -28,6 +62,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     adapters: readonly ProviderAccountAdapter[],
     private readonly snapshotWriter?: OfficialAccountSnapshotWriter,
     private readonly readCredentialRefreshTime?: (accountId: string | null) => Promise<number | null>,
+    private readonly cloudUsageChanged?: () => void,
   ) {
     for (const adapter of adapters) {
       if (!adapter.provider || this.adapters.has(adapter.provider)) {
@@ -50,9 +85,12 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
       // 未注册的聚合或自定义 Provider 没有独立账户，不创建占位账户快照。
       return { kind: "unsupported", provider: modelProvider };
     }
-    const accountUsage = adapter.provider === "openai" || beforeSubmit
+    const accountUsage = (adapter.provider === "openai" || beforeSubmit
       ? adapter.accountUsage(signal, beforeSubmit)
-      : this.managedUsage(adapter, signal);
+      : this.managedUsage(adapter, signal)).catch(error => {
+        this.notifyCloudAuthenticationFailure(modelProvider, error);
+        throw error;
+      });
     if (!threadId || adapter.provider !== "openai" || !adapter.accountThreadUsage) {
       const result = await accountUsage;
       signal?.throwIfAborted();

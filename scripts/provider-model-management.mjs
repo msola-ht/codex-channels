@@ -17,7 +17,7 @@ import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { projectModelCatalogEntries, projectModelPrompts } from "../runtime/model-catalog-presentation.mjs";
 import { providerCatalogIsolationPath } from "../runtime/provider-catalog-isolation.mjs";
-import { readModelTemplateBindings, validateClinePassCatalogManifest } from "../runtime/model-template-bindings.mjs";
+import { readModelTemplateBindings, validateClinePassCatalogManifest, validateOllamaCloudCatalogManifest } from "../runtime/model-template-bindings.mjs";
 
 // Revisions cover private profiles too; avoid exposing a reusable credential fingerprint.
 const revisionSecret = randomBytes(32);
@@ -395,6 +395,7 @@ async function buildRemovalPlan(input, environment) {
     }
     validateManagedCatalog(catalog, definition);
     const templateBindings = readModelTemplateBindings(manifest, catalog.models.map(model => model.slug));
+    if (family.storageId === "ollama-cloud") validateOllamaCloudCatalogManifest(manifest, catalog.models.map(model => model.slug));
     if (members.some(member => !catalog.models.some(model => model.slug === member.model
       && model.default_reasoning_level === member.reasoningEffort))) {
       throw invalid("provider-state-unavailable", "provider", "账户默认模型或思考等级与目录不一致，请先修复默认设置");
@@ -420,6 +421,10 @@ async function buildRemovalPlan(input, environment) {
       }
       nextManifest.templateUpdates = { ...manifest.templateUpdates };
       delete nextManifest.templateUpdates[input.model];
+    }
+    if (family.proxyKey === "olc" && Object.hasOwn(manifest, "modelDiscovery")) {
+      nextManifest.modelDiscovery = { ...manifest.modelDiscovery };
+      delete nextManifest.modelDiscovery[input.model];
     }
   } else {
     const provider = [...state.customProviders.fixedCandidates.filter(candidate => candidate.active), ...state.customProviders.switchingProviders]

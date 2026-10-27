@@ -1,4 +1,5 @@
 import type { GenerationTiming } from "../runtime/request-timing.mjs"
+export type { CloudUsageView } from "../runtime/ollama-cloud-usage.mjs"
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 import type { CustomModelCapabilityProbeResult } from "./custom-model-capability-probe.mjs"
 export type { ProviderWebSearchProbeInput as ManagementProviderWebSearchProbeInput, ProviderWebSearchProbeResult as ManagementProviderWebSearchProbeResult } from "./provider-web-search-probe.mjs"
@@ -802,7 +803,7 @@ export interface ProviderModelTemplateOptionsResponse {
   expiresAt: number
   availableSections: ProviderModelTemplateSection[]
   targets: Array<{ model: string; displayName: string; template: { source: ProviderModelTemplateSource; model: string } | null }>
-  templates: Array<{ source: ProviderModelTemplateSource; model: string; displayName: string }>
+  templates: Array<{ source: ProviderModelTemplateSource; model: string; displayName: string; availableSections: ProviderModelTemplateSection[] }>
 }
 export interface ProviderModelTemplateUpdateInput {
   operation: "model.template.update"
@@ -975,6 +976,12 @@ export interface ManagementAccountSettingsResponse {
     configured: boolean
     accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
+  ollamaCloud: {
+    configured: boolean
+    catalogExists: boolean
+    models: Array<{ id: string; name: string }>
+    accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
+  }
   deepseek: {
     configured: boolean
     accounts: Array<{ id: string; provider: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
@@ -982,6 +989,17 @@ export interface ManagementAccountSettingsResponse {
 }
 
 export type ManagementAccountSettingsMutationInput =
+  | {
+      operation: "olc.configure"
+      accountId: string
+      model?: string
+      discoveryToken?: string
+      reconfigure?: boolean
+      mode?: "switching" | "exclusive"
+      apiKey?: string
+      confirmExclusiveConfigChange?: boolean
+    }
+  | { operation: "olc.default" | "olc.remove"; accountId: string }
   | {
       operation: "opencode.account.configure"
       accountId: string
@@ -1007,6 +1025,7 @@ export type ManagementAccountSettingsMutationInput =
   | { operation: "deepseek.default" | "deepseek.remove" | "clp.default" | "clp.remove"; accountId: string }
 
 export interface ManagementAccountSettingsPreview {
+  initialModels?: import("./ollama-cloud-account-management.mjs").OllamaCloudDiscoveredModelChoice[]
   operation: string
   revision?: string
   activation?: string
@@ -1142,7 +1161,7 @@ export interface OfficialAccountSnapshotsResponse {
   observedAtMs: number
   snapshots: OfficialAccountSnapshot[]
   warnings: Array<{
-    source: "openai" | "deepseek" | "opencode-go" | "ccg" | "clp"
+    source: "openai" | "deepseek" | "opencode-go" | "ccg" | "clp" | "ollama-cloud"
     code: "registry_unavailable"
     message: string
   }>

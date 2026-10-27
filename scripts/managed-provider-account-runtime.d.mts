@@ -2,6 +2,7 @@ import type { AppServerProviderReleaseResult, AppServerSupervisorInspection } fr
 
 export interface ManagedAccountRuntimeOptions {
   environment?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
   resolvePrimarySocket?: (environment: NodeJS.ProcessEnv) => string;
   inspectSupervisor?: (socketPath: string) => Promise<AppServerSupervisorInspection>;
   releaseProvider?: (socketPath: string, provider: string) => Promise<AppServerProviderReleaseResult>;

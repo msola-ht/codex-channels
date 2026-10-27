@@ -35,12 +35,13 @@ export function ProviderModelTemplateDialog({ target, open, stale, management, p
   const [sections, setSections] = useState<ProviderModelTemplateSection[]>(["prompts"])
   const options = request.data
   const custom = target.provider.startsWith("cp-")
-  const selectedSections = sections.filter(section => options?.availableSections.includes(section))
   const currentTarget = options?.targets.find(entry => entry.model === target.model)
   const templates = options?.templates.filter(entry => !target.provider.startsWith("ds-") || entry.model === target.model) ?? []
   const initialIndex = currentTarget?.template ? templates.findIndex(entry => entry.source === currentTarget.template?.source && entry.model === currentTarget.template.model) : -1
   const selection = selected ?? (initialIndex < 0 ? "" : String(initialIndex))
   const template = selection === "" ? undefined : templates[Number(selection)]
+  const availableSections = template?.availableSections ?? []
+  const selectedSections = sections.filter(section => availableSections.includes(section))
   const catalogStale = stale
   const busy = management.busy || management.loading || management.error !== null || management.readbackRequired
   const unavailable = !request.loading && request.error === null && (!currentTarget || templates.length === 0)
@@ -51,7 +52,7 @@ export function ProviderModelTemplateDialog({ target, open, stale, management, p
   }
   return <Dialog open={open} disablePointerDismissal onOpenChange={(nextOpen, details) => { if (management.busy) { details.cancel(); return }; if (!nextOpen && open) onClose() }}>
     <DialogContent finalFocus={open ? finalFocus : false} closeLabel={t("common.close")} showCloseButton={!management.busy} className={modelOperationDialogClassName}>
-      <DialogHeader><DialogTitle>{t("modelTemplate.title")}</DialogTitle><DialogDescription>{t(custom ? "modelTemplate.customHint" : "modelTemplate.hint")}</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>{t("modelTemplate.title")}</DialogTitle><DialogDescription>{t(target.provider.startsWith("olc-") ? "modelTemplate.ollamaHint" : custom ? "modelTemplate.customHint" : "modelTemplate.hint")}</DialogDescription></DialogHeader>
       <code className="break-all text-xs text-muted-foreground">{target.provider} · {target.model}</code>
       {request.loading ? <p aria-busy="true">{t("common.loading")}</p> : null}
       {request.error ? <Alert variant="destructive"><AlertDescription>{translateApiError(t, request.error, request.errorCode)}</AlertDescription></Alert> : null}
@@ -59,7 +60,7 @@ export function ProviderModelTemplateDialog({ target, open, stale, management, p
       {options && !request.loading && !request.error && !unavailable ? <FieldGroup>
         <ManagedSelect fullWidth label={t("modelTemplate.source")} value={selection} placeholder={t("modelTemplate.selectSource")} disabled={busy || catalogStale} options={templates.map((entry, index) => [String(index), `${t(`modelTemplate.${entry.source}`)} · ${entry.displayName} (${entry.model})`])} onChange={setSelected} />
         <FieldSet disabled={busy || catalogStale}><FieldLegend>{t("modelTemplate.sections")}</FieldLegend><FieldGroup className="flex-row flex-wrap gap-x-5 gap-y-2">
-          {options.availableSections.map(section => <Field key={section} orientation="horizontal" className="w-auto"><Checkbox id={`template-${section}`} checked={selectedSections.includes(section)} disabled={busy || catalogStale} onCheckedChange={checked => setSections(previous => checked ? [...previous.filter(value => value !== section), section] : previous.filter(value => value !== section))} /><FieldLabel htmlFor={`template-${section}`}>{t(custom && section === "capabilities" ? "modelTemplate.localTools" : `modelTemplate.${section}`)}</FieldLabel></Field>)}
+          {availableSections.map(section => <Field key={section} orientation="horizontal" className="w-auto"><Checkbox id={`template-${section}`} checked={selectedSections.includes(section)} disabled={busy || catalogStale} onCheckedChange={checked => setSections(previous => checked ? [...previous.filter(value => value !== section), section] : previous.filter(value => value !== section))} /><FieldLabel htmlFor={`template-${section}`}>{t(custom && section === "capabilities" ? "modelTemplate.localTools" : `modelTemplate.${section}`)}</FieldLabel></Field>)}
         </FieldGroup></FieldSet>
         <p className="text-sm text-muted-foreground">{t("modelTemplate.settingsHint")}</p>
         {selectedSections.includes("capabilities") ? <p className="text-sm text-muted-foreground">{t(custom ? "modelTemplate.localToolsHint" : "modelTemplate.capabilityHint")}</p> : null}
@@ -86,7 +87,13 @@ export function ProviderModelTemplateConfirmation({ preview, saving, loading, fi
   onCancel: () => void
 }) {
   const { t } = useTranslation()
-  const value = (field: ProviderModelTemplateValue) => field.present ? JSON.stringify(field.value, null, 2) : t("modelTemplate.absent")
+  const value = (name: string, field: ProviderModelTemplateValue) => {
+    if (["auto_compact_token_limit", "autoCompactTokenLimit"].includes(name)) {
+      if (!field.present) return t("modelTemplate.compactFollow")
+      if (field.value === null) return t("modelTemplate.compactLegacyEmpty")
+    }
+    return field.present ? JSON.stringify(field.value, null, 2) : t("modelTemplate.absent")
+  }
   const compact = (field: ProviderModelTemplateValue) => !field.present || field.value === null || typeof field.value === "number" || typeof field.value === "boolean" || typeof field.value === "string" && field.value.length <= 80 && !/[\r\n]/u.test(field.value)
   return <ManagementConfirmationDialog open saving={saving} loading={loading} finalFocus={finalFocus} className={modelOperationDialogClassName} title={t("modelTemplate.confirmTitle")} description={t(preview.provider.startsWith("cp-") ? "modelTemplate.customConfirmHint" : "modelTemplate.confirmHint")} confirmDisabled={!preview.willChange} onConfirm={onConfirm} onCancel={onCancel}>
     <code className="break-all">{preview.provider} · {preview.model}</code>
@@ -97,7 +104,7 @@ export function ProviderModelTemplateConfirmation({ preview, saving, loading, fi
       <h4 className="font-medium break-all">{change.field}</h4>
       <div className={cn("grid min-w-0 gap-3", compact(change.before) && compact(change.after) && "sm:grid-cols-2")}>
         {(["before", "after"] as const).map(side => <div key={side} className="flex min-w-0 flex-col gap-2">
-          <p className="text-muted-foreground">{t(`modelTemplate.${side}`)}</p><pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">{value(change[side])}</pre>
+          <p className="text-muted-foreground">{t(`modelTemplate.${side}`)}</p><pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">{value(change.field, change[side])}</pre>
         </div>)}
       </div>
     </section>)}

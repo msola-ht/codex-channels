@@ -352,7 +352,7 @@ function ProviderSettingsCard({
       reasoning: "reasoningEffort" in custom ? custom.reasoningEffort : settings.defaults.reasoningEffort,
     }] : accounts.map(account => ({ id: account.id, model: account.model, reasoning: account.reasoningEffort }))
     const locked = busy || pending !== null || contextDraft !== null || renameDraft !== null || templateTarget !== null || additionTarget !== null || requestOptionsTarget !== null || webSearchTarget !== null || editorOpen || managedEditorRevision !== null
-    const canAdd = catalog.source === "managed" && /^(ccg|ocg|clp)-/u.test(catalog.provider) || catalog.source === "custom"
+    const canAdd = catalog.source === "managed" && /^(ccg|ocg|clp|olc)-/u.test(catalog.provider) || catalog.source === "custom"
     return {
       id: `provider:${catalog.provider}`,
       header: <div className="flex flex-wrap items-center justify-between gap-3">
@@ -367,7 +367,7 @@ function ProviderSettingsCard({
         {canAdd || custom || accounts.length > 0 ? <DropdownMenu onOpenChange={(open, details) => { if (open && locked) details.cancel() }}>
           <DropdownMenuTrigger render={<Button variant="outline" size="sm" />} aria-disabled={locked} onFocus={event => { currentActionTarget.current = { provider: catalog.provider }; actionTriggerRef.current = event.currentTarget; additionTriggerRef.current = event.currentTarget }} onPointerDown={event => { currentActionTarget.current = { provider: catalog.provider }; actionTriggerRef.current = event.currentTarget; additionTriggerRef.current = event.currentTarget }}>{t("modelManagement.actions")}</DropdownMenuTrigger>
           <DropdownMenuContent align="end" finalFocus={additionTarget !== null || editorOpen || managedEditorRevision !== null ? false : undefined}><DropdownMenuGroup>
-            {canAdd && <DropdownMenuItem disabled={locked} onClick={() => { if (locked) return; management.clearError(); setAdditionTarget({ provider: catalog.provider, revision: settings.resourceRevision, models: catalog.models.map(entry => ({ id: entry.id, displayName: entry.displayName })) }) }}>{t("modelAddition.add")}</DropdownMenuItem>}
+            {canAdd && <DropdownMenuItem disabled={locked} onClick={() => { if (locked) return; management.clearError(); setAdditionTarget({ provider: catalog.provider, providers: catalog.providers, revision: settings.resourceRevision, models: catalog.models.map(entry => ({ id: entry.id, displayName: entry.displayName })) }) }}>{t("modelAddition.add")}</DropdownMenuItem>}
             {custom && <DropdownMenuItem disabled={locked} onClick={() => { if (!locked) edit(custom) }}>{t("modelManagement.edit")}</DropdownMenuItem>}
             {accounts.map(account => <DropdownMenuItem key={account.id} disabled={locked} onClick={() => { if (locked) return; management.clearError(); setManagedProvider(account.id); resetManaged(); setManagedEditorRevision(settings.resourceRevision) }}>{t("modelManagement.edit")}{accounts.length > 1 ? ` · ${account.id}` : ""}</DropdownMenuItem>)}
           </DropdownMenuGroup></DropdownMenuContent>
