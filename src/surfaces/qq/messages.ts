@@ -24,7 +24,7 @@ import { QqTaskSources, type QqTaskScope, type QqTaskTicket } from "./task-sourc
 import { QqQueueSources, type QqQueueTicket } from "./queue-sources.js";
 import { QqTextOutbox, planText } from "./outbox.js";
 import { QqSendBudget } from "./send-budget.js";
-import { QQ_TEXT_PART_BYTES, QqProtocolError, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard } from "./protocol.js";
+import { QQ_TEXT_PART_BYTES, QqProtocolError, qqMessageFailureMetadata, type QqProtocolClient, type QqTextMessage, type QqCommandKeyboard } from "./protocol.js";
 import { isQqLifecycleNotification, QqLifecycleNotifications, renderQqTurnCompleted, renderQqTurnStarted, type QqLifecyclePresentation } from "./lifecycle.js";
 import { QqBodyStreaming } from "./streaming.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
@@ -139,8 +139,11 @@ export class QqMessages implements SurfaceOutputPort {
       },
     });
     this.streaming = new QqBodyStreaming(client, this.sources, this.budget,
-      () => options.logger.warn({ reason: "body-stream-unconfirmed" }, "QQ 正文流未确认；最终正文仍由共享投递核对"),
-      frames => options.logger.info({ frames }, "QQ 正文流结束帧与完整结果已确认"));
+      details => options.logger.warn({ ...surfaceDiagnosticContext(), ...details, reason: "body-stream-unconfirmed" },
+        "QQ 正文流未确认；最终正文仍由共享投递核对"),
+      frames => options.logger.info({ frames }, "QQ 正文流结束帧与完整结果已确认"),
+      details => options.logger.info({ ...surfaceDiagnosticContext(), ...details, reason: "body-stream-progress" },
+        "QQ 正文流交付阶段"));
   }
 
   readonly deliverySource = {
@@ -456,7 +459,9 @@ export class QqMessages implements SurfaceOutputPort {
       }, record);
       this.options.logger.info({ ...diagnostics, representation }, "QQ 可靠正文或轮次通知平台确认");
     } catch (error) {
-      this.options.logger.warn({ ...diagnostics, hadPreview, checkpointFailed }, "QQ 可靠正文或轮次通知投递未确认");
+      const failure = error instanceof SurfaceDeliveryNotSentError ? error.cause : error;
+      this.options.logger.warn({ ...diagnostics, hadPreview, checkpointFailed, ...qqMessageFailureMetadata(failure) },
+        "QQ 可靠正文或轮次通知投递未确认");
       if (event.type === "text.completed" && event.phase !== "commentary" && !checkpointFailed && !signal.aborted && authorized()) {
         try {
           await this.outbox.deliver({ mode: "active", recipient: qqConversationRecipient(event.target.conversationId),

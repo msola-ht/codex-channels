@@ -11,7 +11,7 @@ import {
 import { readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
 import { ProviderWebSearchSettingsError, readProviderWebSearchConfig } from "../runtime/provider-web-search.mjs";
 
-/** Display each exact provider's override; null explicitly means follow global. */
+/** Display stored overrides; null uses the provider default (Ollama: disabled) or global configuration. */
 export function loadProviderWebSearchSettings(state, environment = process.env) {
   return [{ provider: "openai", source: "global", status: "ready", mode: state.defaults.webSearch }, ...configuredWebSearchProviders(state).map(provider => {
     try {

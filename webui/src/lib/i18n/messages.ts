@@ -198,7 +198,9 @@ const zh = {
   },
   providerWebSearch: {
     title: "提供商联网搜索",
-    ollamaHint: "Ollama Cloud 搜索仅支持实时（live），使用所选账户的搜索额度。缓存和索引不受支持；跟随全局不会自动改为实时。",
+    ollamaHint: "Ollama Cloud 搜索可能收费，未设置时默认关闭。切换账户不继承全局搜索；固定账户保留主配置的显式值。需搜索时请显式选择实时（live）；缓存和索引不受支持。",
+    defaultDisabled: "默认关闭",
+    providerDefault: "提供商默认值",
     hint: "搜索设置保存在该提供商的独立配置中。跟随全局会移除当前覆盖；全局值在“全局设置 → 行为与偏好”中修改。",
     globalSource: "只读显示主 config.toml 的 web_search；OpenAI 和使用主配置的固定提供商使用此设置。",
     globalDefault: "跟随默认",
@@ -216,7 +218,7 @@ const zh = {
   openAiModelCatalog: {
     unchanged: "上下文与当前缓存相同，未写入，也未创建备份。",
     builtinSearch: "内置搜索",
-    providerSearchSource: "只读显示 {provider} config 中保存的 web_search；跟随全局表示该文件未设置此字段，不代表当前会话的实际模式。",
+    providerSearchSource: "只读显示 {provider} config 中保存的 web_search；未设置时 Ollama 默认关闭，其他切换提供商跟随全局，不代表当前会话的实际模式。",
     searchDefault: "跟随默认",
     searchReadOnlyHint: "内置搜索列只读显示账户保存的覆盖；可在提供商设置修改。",
     editGlobalSearch: "修改全局搜索设置",
@@ -2252,7 +2254,9 @@ const en: Messages = {
   },
   providerWebSearch: {
     title: "Provider web search",
-    ollamaHint: "Ollama Cloud search supports live mode only and uses the selected account's search quota. Cached and indexed modes are unsupported; following global settings does not automatically select live mode.",
+    ollamaHint: "Ollama Cloud search may incur charges and defaults to off when unset. Switching accounts do not inherit global search; fixed accounts retain explicit values in the main config. Select live explicitly to enable search. Cached and indexed modes are unsupported.",
+    defaultDisabled: "Off by default",
+    providerDefault: "Provider default",
     hint: "Search settings are saved in this provider's config. Follow global removes its override. Edit the global value in Global settings → Behavior and preferences.",
     globalSource: "Read-only web_search from the main config.toml, used by OpenAI and fixed providers using the main configuration.",
     globalDefault: "Follow default",
@@ -2270,7 +2274,7 @@ const en: Messages = {
   openAiModelCatalog: {
     unchanged: "The context matches the current cache. No changes or backup were made.",
     builtinSearch: "Built-in search",
-    providerSearchSource: "Read-only web_search saved in the {provider} config. Follow global means the field is absent and does not indicate the current session's effective mode.",
+    providerSearchSource: "Read-only web_search saved in the {provider} config. When unset, Ollama defaults to off and other switching providers follow global settings. This does not indicate the current session's effective mode.",
     searchDefault: "Follow default",
     searchReadOnlyHint: "Built-in search shows saved account overrides and is read-only here. Edit them in Provider settings.",
     editGlobalSearch: "Edit global search settings",

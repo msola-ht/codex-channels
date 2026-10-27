@@ -65,6 +65,7 @@
 ## 验收与开放补证
 
 - [`docs/ollama-cloud-probe.md`](docs/ollama-cloud-probe.md)：OLC 分批提交、隔离路径与反例摘要，以及真实云端、平台和部署的开放验收。
+- [`docs/qq-delivery-uncertain-review-2026-10-27.md`](docs/qq-delivery-uncertain-review-2026-10-27.md)：QQ 正文投递事故更正、关联修复、用户部署后的真实长文交付与全链路复审；新增低频阶段诊断待部署。
 
 - [`docs/thread-execution-context-acceptance.md`](docs/thread-execution-context-acceptance.md)：Debian 修复审查、冷恢复与监管器补验、`19519cb6` 会话控制及真实 TG 投递证据，以及 macOS 完整 Gateway 恢复证据；记录阶段收尾并区分人工挑战、真实组件链路与开放边界。
 - [`docs/project-closeout-review.md`](docs/project-closeout-review.md)：五轮收尾审查与45项历史问题状态，以及 Thread 执行上下文后续关联收尾；保留各批次关闭条件及运行验证边界。

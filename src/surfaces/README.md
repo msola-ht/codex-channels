@@ -88,6 +88,7 @@ Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录�
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。可选 `output.deliverySource` 提供来源引用的捕获、可取消等待和同步复核；引用不能单独授予发送资格。持久 `deliver` 的第四参数可接收共享同步授权守卫，用于最终网络发送前复核。
 普通输出 `handle` 的可选第三参数传递共享会话队列取消信号；QQ 正文流在该队列内等待单帧完成，并将取消传递到来源等待、节流及 HTTP。
+QQ 持久投递模式在同步观察所有增量后，按同一 Thread/Turn/Item 合并待执行唤醒；其他渠道与非持久模式不丢弃逐事件输入。组合根通过公开的 `withSurfaceOutputDiagnostics` 复用身份上下文，使 QQ 路由队列诊断包含事件类型和 Item，不携带正文。
 可选 capabilities 分别约束自动绑定恢复、交互、计划任务及持久配置事件订阅；QQ 启用绑定恢复、交互和计划任务，`configurationNotifications: false` 排除持久 Workspace 配置事件重放，当次 `configurationChanged` 仍发送受控通知。QQ 交互仍经过 `PersistentInteractionPort` 的前序持久投递屏障，按原用户、工作区和当前请求归属授权，不恢复旧来源或令牌。
 可选 `output.observeUserMessageIdentity` 接收当前已握手连接投影的官方用户消息四项身份，QQ 结合 Queue 提交响应关联精确 Turn；`output.observeQueueChanged` 只清理未用选择。可选 `prepareScheduledTaskSubmission` 为 Executor 提供独立提交观察票据；QQ 将计划运行固定于原任务 Workspace 和后台绑定，经权威响应确认 Turn，前台切换不改变该归属。
 可选 `takeAsyncAnswerSubmission(target, requestId)` 按原目标与请求单次领取异步回答的 `observer/isCurrent/cancel` 及可选 `failed` 通知端口；Bootstrap 将其接入 `ConversationService.submitAsyncAnswer`，提交前及等待后复核，失败取消来源并尝试受控提示。QQ 必须取得该次回答来信的新来源才可提交；确认后保留来源至正常释放，不恢复旧来源，其他渠道未实现此可选端口时沿用原路径。

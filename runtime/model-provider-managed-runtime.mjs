@@ -852,7 +852,7 @@ export function readProviderProfile(
   return {
     provider: descriptor.id,
     model: document.model,
-    webSearch: document.web_search,
+    webSearch: document.web_search ?? descriptor.definition.defaultWebSearch,
     reasoningEffort: reasoningEffortPolicy === "mirror"
       ? document.model_reasoning_effort
       : selectedModel?.reasoningEffort,
