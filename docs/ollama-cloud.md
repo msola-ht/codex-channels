@@ -93,6 +93,8 @@ App Server Provider Proxy 的固定/切换实例与独立 Model Relay 均按可�
 
 ## 余额、指标与 Relay
 
+渠道用量卡复用共享 Token、请求数与缓存命中率格式；统计起止和更新时间跟随 Gateway 时区，并标明时区。显示转换不改变官方 UTC 统计桶边界。公开 `/api/balance` 与 `/api/usage` 合同没有套餐名称或等级字段，不根据余额或包含额度推断 Pro、Max 等套餐。
+
 账户余额按准确账户读取 `/api/balance`，将 `included.balance_usd` 与 `purchased.balance_usd` 精确相加显示 USD 总余额；支持最多九位小数，缺失、负值、格式错误及旧百分比计划返回不可用，不伪造零。认证通过不代表余额字段可显示。不提供 `/limits`。
 
 渠道 `/usage` 默认查询 `24h`，使用官方 `/api/usage?range=24h&scope=self&group_by=model`，支持 `7d`、`30d`。展示请求数、输入、缓存、缓存命中率、输出、已用美元费用、账户剩余费用，以及每 1 亿输入＋输出 Token 的实际平均费用。输入已包含缓存，命中率为缓存输入／输入；折合单价不含 `web_search`、`web_fetch` 及任何明确输入、输出均为零的分组费用，金额与 Token 必须来自同一批有 Token 用量的模型分组。字段缺失不视为零，不使用本地请求或官方价目表推算。金额来自 API，折合单价只在最后一步四舍五入至五位小数，不能视为固定定价或剩余 Token 承诺；卡片仅展示结果，不附单价说明文案。

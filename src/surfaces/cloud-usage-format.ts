@@ -1,12 +1,14 @@
 import type { CloudUsageMetrics, CloudUsageQuery, CloudUsageReport } from "../application/index.js";
+import { formatResetTime, formatTimezoneLine } from "./account-format.js";
+import { formatCacheHitRate, formatRequestCount, formatTokenCount } from "./token-format.js";
 
 const services = new Set(["web_search", "web_fetch"]);
 const units = (value: string): bigint => {
   const [whole, fraction = ""] = value.split(".");
   return BigInt(whole!) * 1_000_000_000n + BigInt(fraction.padEnd(9, "0"));
 };
-const count = (value: number | null): string => value === null ? "未提供" : value.toLocaleString("en-US");
-const date = (value: number): string => new Date(value).toISOString().replace("T", " ").replace(/\.\d{3}Z$/u, " UTC");
+const tokens = (value: number | null): string => value === null ? "未提供" : formatTokenCount(value);
+const date = (value: number): string => formatResetTime(value / 1_000, true);
 
 export function cloudUsageChoices(report: CloudUsageReport): Array<{ label: string; input: string }> {
   const input = (range: CloudUsageQuery["range"], refresh = false): string =>
@@ -25,18 +27,19 @@ export function formatCloudUsage(report: CloudUsageReport): string {
   const selected = report.totals;
   const candidates = report.groups.filter(group => !services.has(group.model));
   const price = report.remainder !== null ? null : tokenPrice(candidates);
-  const hit = selected?.inputTokens && selected.cachedInputTokens !== null
-    ? `${(selected.cachedInputTokens / selected.inputTokens * 100).toFixed(2)}%` : "不适用";
+  const hit = selected.inputTokens === null || selected.cachedInputTokens === null
+    ? "未提供" : formatCacheHitRate(selected.inputTokens, selected.cachedInputTokens);
   return [
     `Ollama Cloud · ${report.provider}`,
     `${report.query.range === "24h" ? "近 24 小时" : report.query.range === "7d" ? "近 7 天" : "近 30 天"} · 账户用量`,
+    formatTimezoneLine(),
     `统计区间：${date(Date.parse(report.from))} 至 ${date(Date.parse(report.until))}`,
     "",
-    `请求数量：${count(selected.requestCount)} 次`,
-    `输入 Token：${count(selected.inputTokens)}`,
-    `缓存 Token：${count(selected.cachedInputTokens)}`,
-    `缓存命中率：${selected.inputTokens === null || selected.cachedInputTokens === null ? "未提供" : hit}`,
-    `输出 Token：${count(selected.outputTokens)}`,
+    `请求数量：${formatRequestCount(selected.requestCount)} 次`,
+    `输入 Token：${tokens(selected.inputTokens)}`,
+    `缓存 Token：${tokens(selected.cachedInputTokens)}`,
+    `缓存命中率：${hit}`,
+    `输出 Token：${tokens(selected.outputTokens)}`,
     "",
     `已用费用：${selected.usageUsd === null ? "未提供" : `$${selected.usageUsd}`}`,
     `账户剩余费用：${report.balanceUsd === null ? "暂不可用" : `$${report.balanceUsd}`}`,
