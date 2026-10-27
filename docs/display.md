@@ -40,7 +40,7 @@ CLI“过程说明”和 WebUI 使用共享 `display.commentary` 管理：显式
 
 `subagents = false` 同时隐藏 `subagent.spawned`、`subagent.contacted`、`subagent.completed` 和 `operation.kind = subagent`，其他工具仍由操作档位控制。它只控制新事件的渠道展示，不限制 Core 子代理执行，不影响正文、图片、审批与父轮完成或失败；既有 Journal pending 子代理结果仍按原义务投递。全局管理读取区分 `subagentsEnabled` 有效值与 `subagentsOverride`（布尔值或缺省 `null`），写入使用显式 `set` / `inherit`。全局有效值只在已启用 Telegram、飞书或 QQ 时变化要求重启 Gateway；仅微信时重新读取即可。范围覆盖数组仍作为整体配置单元判定重启。
 
-完成通知 `off` 只隐藏新的成功且没有错误、没有权威 `missingFinalResponse` 的事件；失败、停止、缺少最终回答仍保留准确回执。`brief` 使用精简结果，不意味着最终正文已送达；`detailed` 保留详细统计。既有 Journal pending 完成记录继续按原投递义务发送。当前代码已部署，四渠道全部显示组合与重启后的平台效果尚未完整验收。
+完成通知 `off` 只隐藏新的成功且没有错误、没有权威 `missingFinalResponse` 的事件；失败、停止、缺少最终回答仍保留准确回执。`brief` 使用精简结果，不意味着最终正文已送达；`detailed` 保留详细统计。基础（紧凑）、详细、完整及 `brief` 完成卡均保留已采集的非零 `OpenAI Credits`，主轮与任务合计（含子代理）分别显示；数值来自上游 `usage_metadata.amount`，缺失不估算；部分已入库请求缺少该字段时标注缺失请求数，也不代表未采集请求没有消耗。既有 Journal pending 完成记录继续按原投递义务发送。Credits 扩展显示尚未部署，四渠道全部显示组合与重启后的平台效果尚未完整验收。
 
 全局完成通知只有有效值改变且存在启用渠道时才要求重启；缺省 `detailed` 与显式 `detailed` 互换只 reload，重复完全相同配置为 none。QQ 隐藏的实时计划、思考及常规状态在共享快照入队前过滤，仍先观察状态变化；不会把主动隐藏误报成原任务来源失效，也不会取消隐藏完成的独立收尾。
 
