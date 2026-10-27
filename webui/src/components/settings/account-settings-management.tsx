@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { AccountIdField } from "@/components/settings/account-id-field"
+import { OllamaModelChoices } from "@/components/settings/ollama-model-choices"
+import { cn } from "cn"
 import { newManagedAccountIdError, opencodeGoReservedAccountIds } from "../../../../runtime/managed-provider-account-options.mjs"
 import { useTranslation } from "@/hooks/use-translation"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -42,7 +44,6 @@ function AccountSettingsCard({ management, settings, onChanged, onEditingChange,
   const discoveryRequest = useRef<AbortController | null>(null)
   const initialCatalog = editor === "ollamaCloud" && !editing && !settings.ollamaCloud.catalogExists
   const modelChoices = initialCatalog ? discovery?.models ?? [] : settings.ollamaCloud.models
-  const selectedRemoteModel = initialCatalog ? discovery?.models.find(entry => entry.id === model) : undefined
   const modelValid = editor !== "ollamaCloud" || editing || modelChoices.some(entry => entry.id === model)
   const pending = management.pendingPreview
   const disabled = management.busy || management.loading || management.error !== null || management.readbackRequired || pending !== null || discovering
@@ -110,7 +111,7 @@ function AccountSettingsCard({ management, settings, onChanged, onEditingChange,
     <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
     {renderAccounts({ rows, fresh: !management.loading && management.error === null && !management.readbackRequired, disabled, editing: editor !== null || pending !== null, open, action, setTrigger: node => { triggerRef.current = node } })}
     <Dialog open={editor !== null} onOpenChange={value => { if (!value && !management.busy && pending === null) close() }}>
-      <DialogContent finalFocus={triggerRef} closeLabel={t("modelManagement.cancel")} className={modelOperationDialogClassName} showCloseButton={!management.busy && pending === null}>
+      <DialogContent finalFocus={triggerRef} closeLabel={t("modelManagement.cancel")} className={cn(modelOperationDialogClassName, initialCatalog && "max-w-5xl sm:max-w-5xl")} showCloseButton={!management.busy && pending === null}>
         <DialogHeader><DialogTitle>{editor ? platforms[editor] : ""} · {t(editing ? "modelManagement.edit" : "modelManagement.add")}</DialogTitle><DialogDescription>{t("modelManagement.credentialsHint")}</DialogDescription></DialogHeader>
         {management.error !== null && <SettingsError message={management.error} retry={management.refetch} />}
         {management.readbackRequired && <Alert><AlertDescription className="flex flex-col gap-2"><p>{t("settingsUi.readbackUnknown")}</p><Button variant="outline" disabled={management.busy || management.loading} onClick={management.refetch}>{t("common.retry")}</Button></AlertDescription></Alert>}
@@ -132,11 +133,11 @@ function AccountSettingsCard({ management, settings, onChanged, onEditingChange,
                 fetchedAt: cacheDates.format(new Date(discovery.cache.fetchedAt)), expiresAt: cacheDates.format(new Date(discovery.cache.expiresAt)),
               })}</p> : null}
               {discoveryError ? <Alert variant="destructive"><AlertDescription>{translateApiErrorCode(t, discoveryError)}</AlertDescription></Alert> : null}
-              {discovery?.unavailableModels.map(entry => <p key={entry.id} className="break-all"><code>{entry.id}</code> · {t(entry.status === "excluded" ? "modelAddition.discoveryExcluded" : "modelAddition.discoveryUnconfirmed")}{entry.reasonCode ? ` · ${t(`modelAddition.discoveryReasons.${entry.reasonCode}`)}` : ""}</p>)}
+              {discovery ? <OllamaModelChoices models={[...discovery.models, ...discovery.unavailableModels.map(entry => ({ id: entry.id, upstreamContextWindow: entry.upstreamContextWindow,
+                unavailable: t(`modelAddition.discoveryReasons.${entry.reasonCode}`),
+              }))]} selected={model ? [model] : []} disabled={disabled} onToggle={(id, checked) => setModel(checked ? id : "")} /> : null}
             </>}
-            {editing ? <Field><FieldLabel>{t("managementUi.defaultModel")}</FieldLabel><p className="break-all">{model || t("common.unknown")}</p></Field> : <ManagedSelect fullWidth label={t("managementUi.defaultModel")} value={model} placeholder={t("modelManagement.selectModel")} options={modelChoices.map(entry => [entry.id, `${entry.name} (${entry.id})`])} disabled={disabled} onChange={setModel} />}
-            {selectedRemoteModel ? <p className="text-sm text-muted-foreground">{t("modelAddition.remoteCapabilities", { upstream: selectedRemoteModel.upstreamContextWindow, context: selectedRemoteModel.contextWindow, levels: selectedRemoteModel.reasoningEfforts.join("/"), effort: selectedRemoteModel.defaultReasoningEffort, images: t(selectedRemoteModel.supportsImages ? "managementUi.supported" : "managementUi.unsupported") })}</p> : null}
-            {selectedRemoteModel?.reasoningMode === "toggle" ? <p className="text-sm text-muted-foreground">{t("modelAddition.reasoningToggleHint")}</p> : null}
+            {editing ? <Field><FieldLabel>{t("managementUi.defaultModel")}</FieldLabel><p className="break-all">{model || t("common.unknown")}</p></Field> : !initialCatalog ? <ManagedSelect fullWidth label={t("managementUi.defaultModel")} value={model} placeholder={t("modelManagement.selectModel")} options={modelChoices.map(entry => [entry.id, `${entry.name} (${entry.id})`])} disabled={disabled} onChange={setModel} /> : null}
           </>}
         </FieldGroup>}
         {management.actionError && <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert>}

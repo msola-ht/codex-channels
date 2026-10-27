@@ -35,7 +35,7 @@ export function discoverOllamaCloudAccountModels(input: { accountId: string; api
   expiresAt: number;
   models: OllamaCloudDiscoveredModelChoice[];
   cache: { hit: boolean; fetchedAt: string; expiresAt: string };
-  unavailableModels: Array<{ id: string; status: "unconfirmed" | "excluded"; reason: string; reasonCode: NonNullable<import("./provider-model-additions.mjs").OllamaCloudDiscoveryCandidate["reasonCode"]> }>;
+  unavailableModels: Array<{ id: string; status: "unconfirmed" | "excluded"; reason: string; reasonCode: NonNullable<import("./provider-model-additions.mjs").OllamaCloudDiscoveryCandidate["reasonCode"]>; upstreamContextWindow?: number }>;
 }>;
 export function authenticateOllamaCloudKey(apiKey: string, options?: OllamaCloudConfigurationOptions): Promise<void>;
 export function previewOllamaCloudConfiguration(input: OllamaCloudConfigurationInput, options?: OllamaCloudConfigurationOptions): Promise<{ revision: string; operation: string; account: { id: string; provider: string; default: boolean }; model: string; initialModels?: OllamaCloudDiscoveredModelChoice[]; mode: "switching" | "exclusive"; previousMode?: "switching" | "exclusive"; credentialAction: "preserve" | "replace"; willChange: boolean; effects: { writesMainConfig: boolean; writesIsolatedProfile: boolean; writesInitialCatalog: boolean; readsAccountAuthentication: boolean }; activation: "none" | "restart-all" }>;

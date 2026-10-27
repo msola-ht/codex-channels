@@ -87,7 +87,13 @@ export function ProviderModelTemplateConfirmation({ preview, saving, loading, fi
   onCancel: () => void
 }) {
   const { t } = useTranslation()
-  const value = (field: ProviderModelTemplateValue) => field.present ? JSON.stringify(field.value, null, 2) : t("modelTemplate.absent")
+  const value = (name: string, field: ProviderModelTemplateValue) => {
+    if (["auto_compact_token_limit", "autoCompactTokenLimit"].includes(name)) {
+      if (!field.present) return t("modelTemplate.compactFollow")
+      if (field.value === null) return t("modelTemplate.compactLegacyEmpty")
+    }
+    return field.present ? JSON.stringify(field.value, null, 2) : t("modelTemplate.absent")
+  }
   const compact = (field: ProviderModelTemplateValue) => !field.present || field.value === null || typeof field.value === "number" || typeof field.value === "boolean" || typeof field.value === "string" && field.value.length <= 80 && !/[\r\n]/u.test(field.value)
   return <ManagementConfirmationDialog open saving={saving} loading={loading} finalFocus={finalFocus} className={modelOperationDialogClassName} title={t("modelTemplate.confirmTitle")} description={t(preview.provider.startsWith("cp-") ? "modelTemplate.customConfirmHint" : "modelTemplate.confirmHint")} confirmDisabled={!preview.willChange} onConfirm={onConfirm} onCancel={onCancel}>
     <code className="break-all">{preview.provider} · {preview.model}</code>
@@ -98,7 +104,7 @@ export function ProviderModelTemplateConfirmation({ preview, saving, loading, fi
       <h4 className="font-medium break-all">{change.field}</h4>
       <div className={cn("grid min-w-0 gap-3", compact(change.before) && compact(change.after) && "sm:grid-cols-2")}>
         {(["before", "after"] as const).map(side => <div key={side} className="flex min-w-0 flex-col gap-2">
-          <p className="text-muted-foreground">{t(`modelTemplate.${side}`)}</p><pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">{value(change[side])}</pre>
+          <p className="text-muted-foreground">{t(`modelTemplate.${side}`)}</p><pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">{value(change.field, change[side])}</pre>
         </div>)}
       </div>
     </section>)}

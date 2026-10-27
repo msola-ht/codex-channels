@@ -9,16 +9,30 @@ import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/componen
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ManagedSelect, ManagementConfirmationDialog, modelOperationDialogClassName, modelOperationFormDialogClassName } from "@/components/settings/settings-controls"
 import { ModelCapabilityFields, ModelIdentityFields } from "@/components/settings/model-definition-fields"
+import { OllamaModelChoices, type OllamaModelChoice } from "@/components/settings/ollama-model-choices"
 import { useTranslation } from "@/hooks/use-translation"
 import { useProviderModelAdditionOptions } from "@/hooks/use-provider-model-addition-options"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { validContextWindow } from "@/lib/model-context-window"
 import type { ProviderSettingsController } from "@/lib/settings-management"
-import type { ManagedManualModelDefinition, ProviderModelAdditionPreview } from "../../../../scripts/provider-model-additions.mjs"
+import type { ManagedManualModelDefinition, ProviderModelAdditionCandidate, ProviderModelAdditionPreview } from "../../../../scripts/provider-model-additions.mjs"
 import { defaultModelDisplayName } from "../../../../runtime/model-catalog.mjs"
 import { cn } from "cn"
 
 export interface ProviderModelAdditionTarget { provider: string; providers: string[]; revision: string; models: Array<{ id: string; displayName: string }> }
+
+function ollamaAdditionChoice(entry: ProviderModelAdditionCandidate): OllamaModelChoice {
+  const fields = entry.fields
+  return {
+    id: entry.model, name: entry.displayName, upstreamContextWindow: entry.upstreamContextWindow,
+    contextWindow: typeof fields.context_window === "number" ? fields.context_window : undefined,
+    reasoningEfforts: Array.isArray(fields.supported_reasoning_levels) ? fields.supported_reasoning_levels.flatMap(level =>
+      level && typeof level === "object" && typeof level.effort === "string" ? [level.effort] : []) : undefined,
+    defaultReasoningEffort: typeof fields.default_reasoning_level === "string" ? fields.default_reasoning_level : undefined,
+    reasoningMode: entry.reasoningMode,
+    supportsImages: Array.isArray(fields.input_modalities) ? fields.input_modalities.includes("image") : undefined,
+  }
+}
 
 export function ProviderModelAdditionDialog({ target, open, stale, management, previewRef, finalFocus, onClose }: {
   target: ProviderModelAdditionTarget
@@ -75,7 +89,7 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
     await candidates.load(manualModel, mode === "discover" && ollamaCloud, refresh)
   }
   return <Dialog open={open} disablePointerDismissal onOpenChange={(next, details) => { if (management.busy) { details.cancel(); return }; if (!next && open) onClose() }}>
-    <DialogContent initialFocus={options && selected.length > 0 && !locked ? previewRef : undefined} finalFocus={open ? finalFocus : false} closeLabel={t("common.close")} showCloseButton={!management.busy} className={cn(modelOperationDialogClassName, modelOperationFormDialogClassName)}>
+    <DialogContent initialFocus={options && selected.length > 0 && !locked ? previewRef : undefined} finalFocus={open ? finalFocus : false} closeLabel={t("common.close")} showCloseButton={!management.busy} className={cn(modelOperationDialogClassName, modelOperationFormDialogClassName, ollamaCloud && "max-w-5xl sm:max-w-5xl")}>
       <DialogHeader className="shrink-0"><DialogTitle>{t("modelAddition.title")}</DialogTitle><DialogDescription>{t("modelAddition.hint")}</DialogDescription></DialogHeader>
       <div className="flex min-h-0 min-w-0 flex-col gap-6 overflow-y-auto">
       <code className="break-all">{additionProvider}</code>
@@ -122,12 +136,14 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
         <p>{t("modelCatalog.scope", { providers: options.providers.join(t("managementUi.listSeparator")) })}</p>
         {ollamaCloud && mode === "managed" ? <>
           <p>{t("modelAddition.remoteMetadataHint")}</p>
-          {options.discovery?.filter(entry => entry.alreadySaved || entry.status !== "candidate").map(entry => <p key={entry.id} className="break-all"><code>{entry.id}</code> — {t(entry.alreadySaved ? "modelAddition.discoverySaved" : entry.status === "excluded" ? "modelAddition.discoveryExcluded" : "modelAddition.discoveryUnconfirmed")}{entry.reasonCode ? ` · ${t(`modelAddition.discoveryReasons.${entry.reasonCode}`)}` : ""}</p>)}
         </> : null}
         {mode === "discover" && ollamaCloud && options.discovery ? <>
           <p>{t("modelAddition.discoveryReadonly")}</p>
-          {options.discovery.map(entry => <p key={entry.id} className="break-all"><code>{entry.id}</code> — {t(entry.alreadySaved ? "modelAddition.discoverySaved" : entry.status === "candidate" ? "modelAddition.discoveryCandidate" : entry.status === "excluded" ? "modelAddition.discoveryExcluded" : "modelAddition.discoveryUnconfirmed")}{entry.reasonCode ? ` · ${t(`modelAddition.discoveryReasons.${entry.reasonCode}`)}` : ""}</p>)}
-          <ManagedSelect fullWidth label={t("modelAddition.discoveryModel")} placeholder={t("modelAddition.discoveryModel")} value={discoveryModel} disabled={locked} options={options.discovery.filter(entry => entry.status === "candidate" && !entry.alreadySaved).map(entry => [entry.id, entry.id])} onChange={value => { setDiscoveryModel(value); setVerificationEfforts([options.discovery?.find(entry => entry.id === value)?.defaultReasoningEffort ?? ""].filter(Boolean)); setPaidConfirmed(false) }} />
+          <OllamaModelChoices models={options.discovery.map(entry => ({ ...entry, contextWindow: entry.proposedContextWindow, supportsImages: entry.imageCandidate,
+            unavailable: entry.alreadySaved ? t("modelAddition.discoverySaved") : entry.status !== "candidate" ? t(entry.reasonCode ? `modelAddition.discoveryReasons.${entry.reasonCode}` : "modelAddition.discoveryUnconfirmed") : undefined,
+          }))} selected={discoveryModel ? [discoveryModel] : []} disabled={locked} onToggle={(value, checked) => {
+            setDiscoveryModel(checked ? value : ""); setVerificationEfforts(checked ? [options.discovery?.find(entry => entry.id === value)?.defaultReasoningEffort ?? ""].filter(Boolean) : []); setPaidConfirmed(false)
+          }} />
           {discovered ? <>
             <p>{t("modelAddition.discoveryWindow", { window: discovered.proposedContextWindow ?? 0, effort: discovered.defaultReasoningEffort ?? "" })}</p>
             {discovered.reasoningMode === "toggle" ? <p>{t("modelAddition.reasoningToggleHint")}</p> : null}
@@ -136,9 +152,13 @@ export function ProviderModelAdditionDialog({ target, open, stale, management, p
             <Field orientation="horizontal"><Checkbox id="olc-paid-verification-confirm" checked={paidConfirmed} disabled={locked} onCheckedChange={value => setPaidConfirmed(value === true)} /><FieldLabel htmlFor="olc-paid-verification-confirm">{t("modelAddition.paidVerificationConfirm")}</FieldLabel></Field>
             <Button disabled={locked || !paidConfirmed || !verificationEfforts.includes(discovered.defaultReasoningEffort ?? "")} onClick={() => { setPaidConfirmed(false); void candidates.verify(discoveryModel, verificationEfforts) }}>{loading ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : null}{t("modelAddition.verify")}</Button>
           </> : null}
-        </> : options.candidates.length === 0 ? <SettingsEmpty>{t("modelAddition.empty")}</SettingsEmpty> : <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.select")}</FieldLegend><FieldGroup>{options.candidates.map((entry, index) => <FieldGroup key={entry.model}>
+        </> : ollamaCloud ? <OllamaModelChoices models={[
+          ...options.candidates.map(ollamaAdditionChoice),
+          ...(options.discovery ?? []).filter(entry => entry.alreadySaved || entry.status !== "candidate").map(entry => ({ ...entry, contextWindow: entry.proposedContextWindow, supportsImages: entry.imageCandidate,
+            unavailable: t(entry.alreadySaved ? "modelAddition.discoverySaved" : entry.reasonCode ? `modelAddition.discoveryReasons.${entry.reasonCode}` : "modelAddition.discoveryUnconfirmed"),
+          })),
+        ]} selected={selected} disabled={locked} onToggle={(model, checked) => setSelected(previous => checked ? [...new Set([...previous, model])] : previous.filter(value => value !== model))} /> : options.candidates.length === 0 ? <SettingsEmpty>{t("modelAddition.empty")}</SettingsEmpty> : <FieldSet disabled={locked}><FieldLegend>{t("modelAddition.select")}</FieldLegend><FieldGroup>{options.candidates.map((entry, index) => <FieldGroup key={entry.model}>
           <Field orientation="horizontal"><Checkbox id={`addition-candidate-${index}`} checked={selected.includes(entry.model)} disabled={locked} onCheckedChange={checked => setSelected(previous => checked ? [...previous, entry.model] : previous.filter(model => model !== entry.model))} /><FieldLabel htmlFor={`addition-candidate-${index}`} className="break-all">{entry.displayName} ({entry.model})</FieldLabel></Field>
-          {ollamaCloud && entry.upstreamContextWindow !== undefined ? <p className="text-sm text-muted-foreground">{t("modelAddition.remoteCapabilities", { upstream: entry.upstreamContextWindow, context: String(entry.fields.context_window ?? ""), levels: Array.isArray(entry.fields.supported_reasoning_levels) ? entry.fields.supported_reasoning_levels.map(level => level.effort).join("/") : "", effort: String(entry.fields.default_reasoning_level ?? ""), images: t(Array.isArray(entry.fields.input_modalities) && entry.fields.input_modalities.includes("image") ? "managementUi.supported" : "managementUi.unsupported") })}</p> : null}
           {entry.reasoningMode === "toggle" ? <p className="text-sm text-muted-foreground">{t("modelAddition.reasoningToggleHint")}</p> : null}
         </FieldGroup>)}</FieldGroup></FieldSet>}
         {options.candidates.some(entry => entry.ollamaVerification) ? <Alert><AlertDescription>{t("modelAddition.verifiedHint")}</AlertDescription></Alert> : null}

@@ -94,7 +94,11 @@ export async function runProviderWebSearchSetup({ environment = process.env, pro
   }
 }
 
-function templateDifferenceValue(value, full = false) {
+function templateDifferenceValue(value, full = false, field) {
+  if (["auto_compact_token_limit", "autoCompactTokenLimit"].includes(field)) {
+    if (!value.present) return "跟随默认（不设置独立阈值）";
+    if (value.value === null) return "跟随默认（原目录显式空值）";
+  }
   if (!value.present) return "未设置";
   const json = JSON.stringify(value.value);
   if (full || json.length <= 2048) return json;
@@ -139,7 +143,7 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
       : "保留本地模型 ID、显示名称、当前上下文、默认思考等级和采样；能力更新可改变最大上下文，并补入基座异步提问与时钟声明，保留其他已有工具声明。\n");
   output.write("有效上下文比例、自动压缩阈值和截断策略默认保留本地值；仅主动选择「上下文与压缩设置」并确认差异后覆盖。\n");
   for (const change of preview.changes) {
-    output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before)}\n  更新后：${templateDifferenceValue(change.after)}\n`);
+    output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before, false, change.field)}\n  更新后：${templateDifferenceValue(change.after, false, change.field)}\n`);
   }
   if (!preview.willChange) {
     output.write("所选模板内容与当前模型一致，无需保存。\n");
@@ -149,7 +153,7 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
   if (longChanges.length) {
     const expand = await prompts.confirm({ message: "展开长内容的完整前后差异？", initialValue: false });
     if (prompts.isCancel(expand)) return { action: "back" };
-    if (expand) for (const change of longChanges) output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before, true)}\n  更新后：${templateDifferenceValue(change.after, true)}\n`);
+    if (expand) for (const change of longChanges) output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before, true, change.field)}\n  更新后：${templateDifferenceValue(change.after, true, change.field)}\n`);
   }
   output.write("保存前备份原目录，不自动重启服务。\n");
   if (await prompts.confirm({ message: "确认按上述差异更新所选模板内容？", initialValue: false }) !== true) return { action: "back" };

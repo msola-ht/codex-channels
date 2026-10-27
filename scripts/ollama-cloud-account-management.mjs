@@ -112,7 +112,8 @@ export async function discoverOllamaCloudAccountModels(input, options = {}) {
   const expiresAt = now + discoveryLifetimeMs;
   initialModelDiscoveries.set(discoveryToken, { ...state, candidates: structuredClone(candidates), expiresAt });
   return { catalogExists: false, discoveryToken, revision: state.revision, expiresAt, models, cache: discovery.cache,
-    unavailableModels: discovery.candidates.filter(candidate => candidate.status !== "candidate").map(candidate => ({ id: candidate.id, status: candidate.status, reason: candidate.reason, reasonCode: candidate.reasonCode })) };
+    unavailableModels: discovery.candidates.filter(candidate => candidate.status !== "candidate").map(candidate => ({ id: candidate.id, status: candidate.status, reason: candidate.reason, reasonCode: candidate.reasonCode,
+      ...(candidate.upstreamContextWindow === undefined ? {} : { upstreamContextWindow: candidate.upstreamContextWindow }) })) };
 }
 
 export async function previewOllamaCloudConfiguration(input, options = {}) {

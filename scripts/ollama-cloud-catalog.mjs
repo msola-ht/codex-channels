@@ -47,6 +47,15 @@ const discoverySchema = z.object({ source: z.literal("ollama-cloud"), generatorV
   && !value.candidates.some(candidate => ["details", "sourceChanged"].includes(candidate.reasonCode)));
 const cacheSchema = z.object({ schemaVersion: z.literal(1), discovery: discoverySchema }).strict();
 
+// Apply the catalog's supported range to both live metadata and existing v1
+// snapshots without rewriting a cache or reducing the upstream capability.
+function supportedCandidates(candidates) {
+  return candidates.map(candidate => candidate.status === "candidate" && candidate.upstreamContextWindow > 100_000_000
+    ? { ...candidate, status: "unconfirmed", reasonCode: "context",
+      reason: `上游最大上下文 ${candidate.upstreamContextWindow} 超过当前目录支持的 100000000 Token，不能生成目录` }
+    : candidate);
+}
+
 /** Public metadata cache only; confirmation snapshots retain their separate ten-minute lifetime. */
 export async function loadOllamaCloudModels({ environment = process.env, signal, refresh = false, fetchImpl = globalThis.fetch } = {}) {
   if (typeof refresh !== "boolean") throw new Error("Ollama 缓存刷新选项无效");
@@ -67,7 +76,7 @@ export async function loadOllamaCloudModels({ environment = process.env, signal,
     catch { throw new Error("Ollama 模型缓存格式损坏或版本不受支持；未修改缓存，请检查 discovery-cache.json"); }
   };
   const fresh = value => value && Date.now() >= Date.parse(value.fetchedAt) && Date.now() - Date.parse(value.fetchedAt) < cacheLifetimeMs;
-  const result = (value, hit) => ({ ...value, cache: { hit, fetchedAt: value.fetchedAt,
+  const result = (value, hit) => ({ ...value, candidates: supportedCandidates(value.candidates), cache: { hit, fetchedAt: value.fetchedAt,
     expiresAt: new Date(Date.parse(value.fetchedAt) + cacheLifetimeMs).toISOString() } });
   const cached = read();
   if (!refresh && fresh(cached)) return result(cached, true);
@@ -79,7 +88,7 @@ export async function loadOllamaCloudModels({ environment = process.env, signal,
     operation.throwIfAborted();
     const latest = read();
     if (!refresh && fresh(latest)) return result(latest, true);
-    const discovery = await discoverOllamaCloudModels({ fetchImpl, signal: operation });
+    const discovery = await discoverOllamaCloudSnapshot({ fetchImpl, signal: operation });
     operation.throwIfAborted();
     // Failed or unstable lookups must not replace the last complete snapshot.
     if (!discovery.stable || discovery.candidates.some(candidate => candidate.reasonCode === "details")) {
@@ -99,6 +108,11 @@ export async function loadOllamaCloudModels({ environment = process.env, signal,
 
 /** Public metadata only: no credentials, persistence or capability acceptance. */
 export async function discoverOllamaCloudModels({ fetchImpl = globalThis.fetch, signal } = {}) {
+  const discovery = await discoverOllamaCloudSnapshot({ fetchImpl, signal });
+  return { ...discovery, candidates: supportedCandidates(discovery.candidates) };
+}
+
+async function discoverOllamaCloudSnapshot({ fetchImpl, signal }) {
   const controller = new AbortController();
   const operation = globalThis.AbortSignal.any([controller.signal, globalThis.AbortSignal.timeout(90_000), ...(signal ? [signal] : [])]);
   let totalBytes = 0;
@@ -272,7 +286,8 @@ export function createOllamaCloudDiscoveredModel(candidate, environment = proces
   }
   return withThirdPartyLocalTools(createResponsesModelCatalog([createIndependentModelDraft({
     id: candidate.id, name,
-    contextWindow: candidate.proposedContextWindow, maxContextWindow: candidate.proposedContextWindow,
+    // The default window policy must not replace the upstream capability limit.
+    contextWindow: candidate.proposedContextWindow, maxContextWindow: candidate.upstreamContextWindow,
     reasoningEfforts: candidate.reasoningEfforts, defaultReasoningEffort: candidate.defaultReasoningEffort,
     ...(candidate.reasoningMode === "toggle" ? { reasoningDescriptions: Object.fromEntries(candidate.reasoningEfforts.map(effort =>
       [effort, effort === "none" ? "关闭思考" : "开启思考（兼容值 high，不代表强度等级）"])) } : {}),

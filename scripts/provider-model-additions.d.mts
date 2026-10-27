@@ -34,6 +34,7 @@ export interface OllamaCloudDiscoveryCandidate {
   reason?: string;
   reasonCode?: "invalidId" | "missingTag" | "details" | "sourceChanged" | "capabilities" | "capabilityConflict" | "unsupported" | "context" | "thinking" | "defaultThinking";
   alreadySaved: boolean;
+  upstreamContextWindow?: number;
   proposedContextWindow?: number;
   reasoningEfforts?: string[];
   defaultReasoningEffort?: string;

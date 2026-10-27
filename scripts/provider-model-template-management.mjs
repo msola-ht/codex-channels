@@ -303,7 +303,10 @@ function staleSource() { return invalid("template-source-expired", "sourceToken"
 function selectedFields(before, template, kind, sections) {
   const after = structuredClone(before);
   for (const field of sections.flatMap(section => fields[kind][section])) {
-    if (Object.hasOwn(template, field)) after[field] = structuredClone(template[field]);
+    // A template's empty compaction threshold means follow the runtime default.
+    // Persist that intent by omitting the override, not by copying a JSON null.
+    if (["auto_compact_token_limit", "autoCompactTokenLimit"].includes(field) && template[field] === null) delete after[field];
+    else if (Object.hasOwn(template, field)) after[field] = structuredClone(template[field]);
     else delete after[field];
   }
   return after;
