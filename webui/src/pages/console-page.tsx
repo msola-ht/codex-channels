@@ -1,5 +1,6 @@
 import { RefreshStatus } from "@/components/metrics/refresh-status"
-import { useCallback, useState } from "react"
+import { useCallback, useContext, useEffect, useState } from "react"
+import { CloudUsageSessionContext } from "@/hooks/use-cloud-usage"
 import { RefreshCwIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -50,13 +51,20 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
   const dashboard = useDashboard(range)
   const refetch = dashboard.refetch
   const officialAccounts = useOfficialAccountSources(refreshAttempts)
+  const cloudUsageSession = useContext(CloudUsageSessionContext)
+  useEffect(() => {
+    if (officialAccounts.notificationRevision > 0) {
+      for (const read of cloudUsageSession?.readers ?? []) read("snapshot")
+    }
+  }, [officialAccounts.notificationRevision, cloudUsageSession])
   const refreshAccounts = officialAccounts.refresh
   const refreshing = dashboard.refreshing || officialAccounts.refreshing
 
   const refreshDashboard = useCallback(() => {
     refetch()
     void refreshAccounts(undefined, true)
-  }, [refetch, refreshAccounts])
+    for (const read of cloudUsageSession?.readers ?? []) read("refresh")
+  }, [refetch, refreshAccounts, cloudUsageSession])
 
   return (
     <div className="flex flex-col gap-6">
@@ -241,7 +249,7 @@ function AccountStatusCards({
           planType={weeklyQuota?.planType ?? null}
         />
         {accountDataLoaded ? <>
-          <OllamaCloudBalanceCards accounts={ollamaCloud} refreshControls={refreshControls} />
+          <OllamaCloudBalanceCards accounts={ollamaCloud} />
           {(deepseek?.accounts.length ?? 0) > 0 || !accountWarnings.some((warning) => warning.source === "deepseek") ? <DeepseekBalanceCards
             accounts={deepseek?.accounts ?? []}
             refreshControls={refreshControls}

@@ -12,6 +12,14 @@ export class OllamaAccountCache<T> {
 
   constructor(private readonly rateLimit?: OllamaAccountRateLimit, private readonly ttlMs = 30_000) {}
 
+  /** Inspect an existing observation without starting work or extending its lifetime. */
+  peek(maximumAgeMs = 300_000): CachedAccountValue<T> | undefined {
+    const snapshot = this.snapshot;
+    if (!snapshot || Date.now() - snapshot.observedAtMs >= maximumAgeMs) return undefined;
+    return { ...snapshot, stale: snapshot.stale || this.failure !== undefined
+      || Date.now() - snapshot.observedAtMs >= this.ttlMs };
+  }
+
   clear(): void {
     this.pending?.controller.abort();
     this.pending = undefined;

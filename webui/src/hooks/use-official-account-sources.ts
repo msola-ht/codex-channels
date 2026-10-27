@@ -155,6 +155,7 @@ export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
         warnings: [...new Map([...accountSnapshotData.warnings, ...sourceWarnings].map(warning => [warning.source, warning])).values()],
       }, providers), removedProviders)),
     refreshing, refreshError, refresh, refreshControls, accountRemoved, removalNotice, notificationStatus,
+    notificationRevision: latest.current,
     refetchSnapshots,
   }
 }

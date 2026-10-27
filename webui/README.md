@@ -19,6 +19,16 @@
 `codexc webui` 的本地指标与低风险设置前端。Vite + React 19 + TypeScript，UI 组件全部来自
 shadcn（`npx shadcn@latest add` 安装），业务层只做组件组合与数据编排。
 
+概览中的 Ollama Cloud 账户由现有账户来源和快照发现，`components/overview/ollama-cloud-usage-card.tsx`
+参考 OpenAI 卡片的紧凑布局，标题旁显示套餐等级，正文仅显示额度和剩余，底部显示 100M 折合单价、套餐估算及剩余估算；`hooks/use-cloud-usage.ts` 固定读取每个精确账户的近 24 小时用量作为估算依据，
+通过 `GET/POST /api/v1/management/accounts/cloud-usage` 分别只读缓存／查询与渠道共用的报告及费用、Token 估算，浏览器不重新计算费用。
+页面会话内保留最多 64 个账户展示结果；返回概览先展示五分钟内的上次结果，经 IPC `cacheOnly` 核对 Gateway 当前缓存，缺失或过期时再查询共享服务。
+复用既有账户变化订阅同步渠道更新，通知只读缓存，不触发远端查询；概览总刷新和卡片刷新／重试统一发送 `refresh=true`，不自动轮询。
+只读快照使用独立服务端限流桶，会话内共享最多 64 个未完成读取的队列，每秒最多启动一次；通知合并，429 统一退避一分钟且最多重试一次，取消与鉴权卸载清理排队和进行中的读取，不消耗手动刷新配额。
+切换账户或离开页面取消旧请求并隔离迟到结果，退出鉴权界面清理会话展示缓存；传输失败保留上次值并明确提示，账户不存在、认证或权威查询失败清理旧展示。
+数字与价格分母复用共享 Token 格式，零值保留，未知值不补零，低于显示精度的价格字符串原样展示；
+WebUI 不展开时间范围、请求数、Token 明细和费用分组；过期数据仍有提示。100M 折合单价在同一行显示美元及适用的人民币金额，套餐／剩余估算显示预计 Token；套餐换算口径保留在业务计算与主题文档。
+
 “消息渠道 → 消息展示”管理全局与五层范围显示。操作详情新增仅失败或拒绝；子代理显示支持显式开启、关闭与恢复缺省（开启），关闭同时隐藏生命周期与子代理工具操作；完成通知支持关闭成功通知、精简、详细及恢复缺省。消息详情支持基础、详细、完整及恢复缺省（基础），控制上线、完成、子代理与自动审批通过的摘要或明细，独立于日志、调用采集、任务、审批及完成通知开关。界面分别展示存储覆盖、有效值及来源，微信范围支持常规通知、完成通知和消息详情。全局 `display.completion`、`display.subagents`、`display.streaming`、`display.presentation-detail` 与范围修改复用确认令牌、配置修订、私有备份及读回事务；取消不写，缺省不物化。消息详情读取区分有效 `presentationDetail` 与本层 `presentationDetailOverride`，中英文摘要覆盖基础、详细、完整、失败档位和布尔值。消息详情全局有效值改变且任一渠道启用时要求重启 Gateway，缺省基础和显式基础互换只 reload，范围数组整体保守判定。回退前按旧版能力显式清除新增 overrides、全局及覆盖 completion/subagents/streaming/commentary/routine_notifications/presentation_detail，将全局及覆盖 detailed/failures 改为旧版支持值，并核对后续修改。源码尚未部署，真实平台显示仍待验收。
 
 流式显示缺省开启，只控制 Telegram、飞书及 QQ 单聊正文增量预览。全局读取返回 `streamingEnabled` 与 `streamingOverride`（布尔值或 null），`display.streaming` 接受显式 set boolean/inherit；微信和 QQ 群范围不显示该选项，QQ 群预览摘要也不宣称继承流式能力。共享 Schema 严拒微信和 QQ 群覆盖中的 true/false，QQ 渠道、账号级配置仅作用其单聊。全局有效值变化且任一 Telegram、飞书或 QQ 启用时要求重启 Gateway，否则 reload；隐式开启与显式开启互换只 reload。不改变上游模型流式、思考、完整正文、附件、授权及原窗口和交付义务。
@@ -216,7 +226,7 @@ CCG、OCG 保留 DS 导入；CLP 的固定 DS 候选和模板更新只读取仓�
 
 `pages/thread-detail-page.tsx` 通过 `ThreadPeriodSummary` 组合当前筛选的输入、输出、合计三张卡和轮次、请求结果摘要；消费同一 `/turns` 响应的会话、后代及整组聚合，不再渲染历史累计折叠区。输入、输出分别复用 `InputTokenTooltip`、`OutputTokenTooltip`，摘要中的轮次与请求通过 `TableHint` 展示会话和子代理分项。精确 Turn 筛选保留后代统计不可用状态，切换查询通过加载态隐藏旧汇总。`/run` 仍用于子代理身份和父会话导航。轮次 DataTable 填充剩余高度，表格区域滚动、分页栏位于底部；最小表格高度为窄视口保留可用空间。轮次 ID 缩写展示并保留完整提示及请求链接；每轮 `directSubagentCount` 链接到带 `parentTurnId` 的关联子代理页，切换父轮次会隔离旧快照并重置分页。每轮表在部分中断用量缺失时直接显示有效的已记录缓存命中率，不附加缺失提示。
 
-`hooks/use-dashboard.ts` 为汇总、趋势和热力图共用一条指标订阅；`hooks/use-official-account-sources.ts` 独立订阅已保存账户快照，仅各账户手动刷新查询上游，进入页面、恢复可见与页头刷新均不触发上游账户查询。
+`hooks/use-dashboard.ts` 为汇总、趋势和热力图共用一条指标订阅；`hooks/use-official-account-sources.ts` 独立订阅已保存账户快照，该持久快照路径仅各账户手动刷新查询上游，进入页面、恢复可见与页头刷新只重读快照。Ollama 云用量卡使用上述独立的按需 IPC 查询：冷缓存／过期进入页面可查上游，页头刷新也显式刷新云用量；变化通知始终只读缓存。
 `components/overview/overview-sections.tsx` 在 OpenCode Go 账户组首次需要无订阅管理时挂载单个配置控制器和确认弹窗，所有提示卡复用读取；配置读取失败可以重试，删除仍受读取成功、忙碌态和预览确认限制。
 `hooks/use-reset-credits.ts` 组合重置券读取、预览、确认、账户刷新和取消，同步操作锁防止重入，卸载取消并阻止迟到结果触发刷新回调；结果不确定时保留既有禁止盲目重试语义。
 

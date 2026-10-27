@@ -7,7 +7,7 @@ import { readCodexConfigFile } from "../runtime/model-provider-managed-runtime.m
 import { routeResetCredits } from "./webui-reset-credit-route.mjs";
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
 import { loadCcgAccounts, ccgProviderId } from "../runtime/ccg-accounts.mjs";
-import { loadOllamaCloudAccounts, ollamaCloudProviderId } from "../runtime/ollama-cloud-accounts.mjs";
+import { isOllamaCloudAccountProvider, loadOllamaCloudAccounts, ollamaCloudProviderId } from "../runtime/ollama-cloud-accounts.mjs";
 import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
 import {
   GatewayAccountRefreshError,
@@ -249,6 +249,44 @@ export async function routeProviderManagement({
       warnings.push({ source: "openai", code: "registry_unavailable", message: "OpenAI 账户来源暂不可用" });
     }
     sendManagementJson(response, 200, { accounts: accountMetadata, warnings });
+    return true;
+  }
+  if (path === "/accounts/cloud-usage" && ["GET", "POST"].includes(request.method)) {
+    const params = new URL(request.url, "http://localhost").searchParams;
+    const cacheOnly = request.method === "GET";
+    if (!cacheOnly && params.size !== 0) {
+      throw new ApiError(400, "invalid_request", "云用量请求不接受查询参数");
+    }
+    if (cacheOnly && (params.size !== 2 || [...params.keys()].some(key => !["provider", "range"].includes(key)))) {
+      throw new ApiError(400, "invalid_request", "缓存读取必须包含唯一账户和范围");
+    }
+    const body = cacheOnly ? { provider: params.get("provider"), range: params.get("range") }
+      : await readJsonBody(request, Math.min(maximumBodyBytes, 4_096));
+    if (!body || typeof body !== "object" || Array.isArray(body)
+      || typeof body.provider !== "string" || !/^[a-z0-9][a-z0-9_-]{0,127}$/u.test(body.provider)
+      || !["24h", "7d", "30d"].includes(body.range)
+      || (Object.hasOwn(body, "refresh") && typeof body.refresh !== "boolean")
+      || Object.keys(body).some(key => !["provider", "range", "refresh"].includes(key))) {
+      throw new ApiError(400, "invalid_request", "云用量请求必须包含有效账户、范围与可选刷新标志");
+    }
+    if (!isOllamaCloudAccountProvider(body.provider)) {
+      throw new ApiError(404, "provider_not_found", "账户来源不存在或不支持云用量");
+    }
+    let result;
+    try {
+      result = await readManagementSnapshot(request, response, state,
+        signal => state.readGatewayCloudUsage(configPath, { ...body, cacheOnly }, signal));
+    } catch (error) {
+      if (response.destroyed) return true;
+      if (error instanceof GatewayAccountRefreshError) {
+        if (error.code === "provider_not_found") throw new ApiError(404, error.code, "账户来源不存在或不支持云用量");
+        if (error.code === "invalid_request") throw new ApiError(400, error.code, "云用量请求无效");
+        if (error.code === "refresh_failed") throw new ApiError(502, error.code, error.message);
+        if (error.code === "invalid_response") throw new ApiError(502, error.code, "Gateway 云用量响应无效");
+      }
+      throw new ApiError(503, "gateway_unavailable", "Gateway 云用量接口不可用");
+    }
+    sendManagementJson(response, 200, result);
     return true;
   }
   if (path === "/accounts/refresh" && request.method === "POST") {

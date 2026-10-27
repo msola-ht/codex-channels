@@ -29,7 +29,7 @@ import {
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import { readPrivateConfigFile } from "../runtime/private-file.mjs";
-import { requestGatewayAccountRefresh, requestGatewayResetCredits } from "../runtime/gateway-account-refresh.mjs";
+import { requestGatewayAccountRefresh, requestGatewayResetCredits, requestGatewayCloudUsage } from "../runtime/gateway-account-refresh.mjs";
 import { requestGatewayThreadStates } from "../runtime/gateway-thread-state.mjs";
 import { modelRelayConfigSchema } from "../runtime/model-relay-config.mjs";
 import {
@@ -157,6 +157,7 @@ export function createWebuiServer({
   applyAccountSettings = applyAccountSettingsMutation,
   loadAccountSettings = loadAccountSettingsResource,
   refreshGatewayAccount = requestGatewayAccountRefresh,
+  readGatewayCloudUsage = requestGatewayCloudUsage,
   resetGatewayCredits = requestGatewayResetCredits,
 } = {}) {
   assertWebuiHost(host);
@@ -187,6 +188,7 @@ export function createWebuiServer({
     applyAccountSettings,
     loadAccountSettings,
     refreshGatewayAccount,
+    readGatewayCloudUsage,
     resetGatewayCredits,
   );
   const readMetrics = (task, response) => readMetricsForResponse(metricsReads, environment, task, response, management.shutdownController.signal);
@@ -343,6 +345,7 @@ function createManagementState(
   applyAccountSettings,
   loadAccountSettings,
   refreshGatewayAccount,
+  readGatewayCloudUsage,
   resetGatewayCredits,
 ) {
   const explicitConfig = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
@@ -383,6 +386,7 @@ function createManagementState(
     applyAccountSettings,
     loadAccountSettings,
     refreshGatewayAccount,
+    readGatewayCloudUsage,
     resetGatewayCredits,
     confirmations: new ManagementConfirmationStore(),
     tasks,
@@ -446,7 +450,8 @@ async function routeManagement(environment, url, request, response, state, token
     );
   }
   if (!managementLockHeld) {
-    state.limiter.consume({ principalId, category: request.method === "POST" && path === "/accounts/refresh"
+    state.limiter.consume({ principalId, category: request.method === "GET" && path === "/accounts/cloud-usage" ? "account-snapshot"
+      : request.method === "POST" && ["/accounts/refresh", "/accounts/cloud-usage"].includes(path)
       ? "account-refresh"
       : request.method === "GET" || (request.method === "POST" && path === "/delivery/content-batch") ? "read" : "write" });
     if (request.method !== "GET" && path !== "/delivery/content-batch" && isHighRiskManagementPath(path)) {

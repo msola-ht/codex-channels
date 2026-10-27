@@ -144,6 +144,7 @@
   `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警；响应附加同账户的 OpenAI 凭证刷新时间，不写入快照） / `webui-management-task-route.mjs` /
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
   服务与上游状态资源；复用主服务传入的共享安全状态，不自行建立认证、限速、事务锁或错误出口。
+  `POST /api/v1/management/accounts/cloud-usage` 严格接受精确 Ollama Cloud Provider、24h/7d/30d 和可选布尔 refresh，经同一账户 IPC 查询报告与共享估算；同路径 GET 仅接受 provider/range 两个查询参数，固定 cacheOnly、不查远端、无缓存返回 null。GET 使用独立的 account-snapshot 配额，POST 保留 account-refresh 配额；均复用管理认证、同源约束及关闭取消，不把查询结果存入指标库。
   Provider 与账户路由通过私有 Gateway IPC 刷新账户，不直接请求官方接口；凭证刷新时间仅通过 runtime 读取器
   获取匹配账户的登录缓存 `last_refresh`，不向浏览器返回凭据。账户
   来源清单独立读取各家账户注册表、OpenAI 鉴权文件存在性和主配置选择，不依赖模型目录或指标库，来源错误分别返回；

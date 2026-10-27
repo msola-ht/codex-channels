@@ -75,6 +75,8 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；新显式待提�
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
   参数校验后映射到 `ScheduledTaskApplicationService`；将工具请求的取消和当前归属复核传到预览、写入及手动调度边界，失效请求不展示预览并撤销未交付确认令牌。创建和删除仍返回待确认预览，不直接改写 Store；已提交的写入不因取消而回滚。
 - `cloud-usage-query.ts`：解析渠道 `/usage` 的固定范围、刷新与按钮账户绑定参数；不提供模型分组选择，不解析上游响应。
+- `cloud-usage-estimates.ts`：渠道与 WebUI 共用的纯用量估算，从已验证报告排除非 Token 费用，计算精确美元／人民币单价和额度可用 Token；保留数据不足，不在展示端重复计算，不查询网络或保存账户报告。
+  `ProviderAccountService.cloudUsage` 将只读缓存模式传给同一适配器；实际报告观测或降级状态改变时通过注入回调通知展示失效，只读缓存不发通知，不修改持久账户快照。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标异步查询；`ConversationService` 作为统一用例入口委托执行。渠道云用量通过独立 `cloudUsage` 端口获取官方报告，在查询前后检查账户归属；报告不进入已持久化账户快照或本地请求统计。`/metrics`、可见会话页的本地 Turn 计数与周额度估算等待数据库 Worker，不在调用线程执行 SQL；账户快照按 Provider 排队，执行前拒绝取消及早于已确认额度序号的结果。只有写入成功才推进序号，较新观测保存失败不阻断旧有效结果；调用方取消等待后，已派发写入仍按实际确认结果更新缓存与序号。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
   OAuth 关联最多保留 128 个、各十分钟；响应前每次请求暂存至多 8 条完成通知，每条错误上限 4,096 字符。

@@ -5,7 +5,7 @@ import {
   PrivateIpcServer,
 } from "./private-ipc.mjs";
 
-const protocolVersion = 2;
+const protocolVersion = 3;
 const maximumMessageBytes = 4_096;
 const maximumResponseBytes = 524_288;
 const requestTimeoutMs = 20_000;
@@ -55,13 +55,13 @@ export class GatewayAccountRefreshServer {
   #sockets = new Set();
   #controllers = new Set();
 
-  constructor(configPath, refreshAccount, resetCredits) {
+  constructor(configPath, refreshAccount, resetCredits, cloudUsage) {
     if (typeof refreshAccount !== "function") {
       throw new Error("Gateway 账户刷新处理器无效");
     }
     this.#server = new PrivateIpcServer(
       gatewayAccountRefreshSocketPath(configPath),
-      (socket) => this.#handleConnection(socket, refreshAccount, resetCredits),
+      (socket) => this.#handleConnection(socket, refreshAccount, resetCredits, cloudUsage),
     );
   }
 
@@ -74,7 +74,7 @@ export class GatewayAccountRefreshServer {
     return this.#closePromise;
   }
 
-  #handleConnection(socket, refreshAccount, resetCredits) {
+  #handleConnection(socket, refreshAccount, resetCredits, cloudUsage) {
     if (this.#closing) {
       socket.destroy();
       return;
@@ -89,6 +89,20 @@ export class GatewayAccountRefreshServer {
     const operation = readJsonLine(socket)
       .then(parseRefreshRequest)
       .then(async (request) => {
+        if (request.method === "account/cloud-usage") {
+          const result = cloudUsage && await cancellableRefresh(() => cloudUsage(request.provider, {
+            range: request.range,
+            ...(request.refresh === undefined ? {} : { refresh: request.refresh }),
+            ...(request.cacheOnly === undefined ? {} : { cacheOnly: request.cacheOnly }),
+          }, controller.signal), controller.signal);
+          if (result === undefined || (result === null && !request.cacheOnly)) {
+            writeJsonLine(socket, { version: protocolVersion, ok: false,
+              error: { code: "provider_not_found", message: "账户来源不存在或不支持云用量" } });
+            return;
+          }
+          writeJsonLine(socket, { version: protocolVersion, ok: true, result });
+          return;
+        }
         if (request.method !== "account/refresh") {
           if (!resetCredits) throw new GatewayAccountRefreshError("provider_not_found", "重置券操作不可用");
           const result = await cancellableRefresh(() => resetCredits(request, controller.signal), controller.signal);
@@ -146,6 +160,14 @@ export function requestGatewayAccountRefresh(configPath, provider, signal) {
 export function requestGatewayResetCredits(configPath, request, signal) {
   if (!["reset/list", "reset/preview", "reset/consume", "reset/cancel"].includes(request?.method)) return Promise.reject(new GatewayAccountRefreshError("invalid_request", "重置券请求无效"));
   return requestGatewayAccountOperation(configPath, request, signal);
+}
+
+export function requestGatewayCloudUsage(configPath, request, signal) {
+  if (!request || typeof request !== "object" || Array.isArray(request)
+    || Object.keys(request).some(key => !["provider", "range", "refresh", "cacheOnly"].includes(key))) {
+    return Promise.reject(new GatewayAccountRefreshError("invalid_request", "云用量请求无效"));
+  }
+  return requestGatewayAccountOperation(configPath, { ...request, method: "account/cloud-usage" }, signal);
 }
 
 function requestGatewayAccountOperation(configPath, request, signal) {
@@ -208,6 +230,17 @@ function requestGatewayAccountOperation(configPath, request, signal) {
         }
         if (!response.ok) {
           finish(new GatewayAccountRefreshError(response.error.code, response.error.message));
+          return;
+        }
+        if (request.method === "account/cloud-usage" && !(request.cacheOnly && response.result === null) && (
+          response.result?.report?.kind !== "cloud-usage"
+          || response.result.report.provider !== request.provider
+          || response.result.report.query?.range !== request.range
+          || response.result.estimates === null
+          || typeof response.result.estimates !== "object"
+          || Array.isArray(response.result.estimates)
+        )) {
+          finish(new GatewayAccountRefreshError("invalid_response", "Gateway 云用量响应与请求不匹配"));
           return;
         }
         finish(undefined, request.method === "account/refresh" ? { provider: response.provider } : response.result);
@@ -277,6 +310,18 @@ function readJsonLine(socket) {
 }
 
 function parseRefreshRequest(value) {
+  if (value?.version === protocolVersion && value.method === "account/cloud-usage") {
+    if (Array.isArray(value)
+      || typeof value.provider !== "string" || !providerPattern.test(value.provider)
+      || !["24h", "7d", "30d"].includes(value.range)
+      || (Object.hasOwn(value, "refresh") && typeof value.refresh !== "boolean")
+      || (Object.hasOwn(value, "cacheOnly") && typeof value.cacheOnly !== "boolean")
+      || (value.cacheOnly === true && value.refresh === true)
+      || Object.keys(value).some(key => !["version", "method", "provider", "range", "refresh", "cacheOnly"].includes(key))) {
+      throw new GatewayAccountRefreshError("invalid_request", "云用量请求无效");
+    }
+    return value;
+  }
   if (value?.version === protocolVersion && ["reset/list", "reset/preview", "reset/consume", "reset/cancel"].includes(value.method)) {
     const field = value.method === "reset/preview" ? "creditId" : ["reset/consume", "reset/cancel"].includes(value.method) ? "attemptId" : null;
     if (Object.keys(value).some(key => !["version", "method", field].includes(key))

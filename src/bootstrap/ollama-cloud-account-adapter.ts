@@ -50,8 +50,18 @@ export function createOllamaCloudAccountAdapter(options: {
   const planCache = new OllamaAccountCache<string | null>();
   const usageCaches = new Map<CloudUsageQuery["range"], OllamaAccountCache<Pick<CloudUsageReport, "from" | "until" | "totals" | "groups" | "remainder">>>();
   const usageRateLimit: OllamaAccountRateLimit = { retryAt: 0 };
+  const reports = new Map<CloudUsageQuery["range"], CloudUsageReport>();
   let identity = "";
   let authenticationFailure: { error: AccountQueryError; until: number } | undefined;
+  const invalidateAuthentication = (error: unknown): void => {
+    if (!(error instanceof AccountQueryError) || error.diagnostic.reason !== "authentication") return;
+    if (authenticationFailure?.error === error) return;
+    authenticationFailure = { error, until: Date.now() + 30_000 };
+    balanceCache.clear();
+    planCache.clear();
+    reports.clear();
+    for (const cache of usageCaches.values()) cache.clear();
+  };
   const credential = (): string => {
     const key = loadConfiguredProviderCredential(options.provider, options.environment ?? process.env).apiKey;
     const current = createHash("sha256").update(key).digest("hex");
@@ -60,6 +70,7 @@ export function createOllamaCloudAccountAdapter(options: {
       planCache.clear();
       for (const cache of usageCaches.values()) cache.clear();
       usageCaches.clear();
+      reports.clear();
       usageRateLimit.retryAt = 0;
       delete usageRateLimit.failure;
       authenticationFailure = undefined;
@@ -79,19 +90,49 @@ export function createOllamaCloudAccountAdapter(options: {
     provider: options.provider,
     async accountUsage(signal, beforeSubmit) {
       const query = new AccountQuery("Ollama Cloud", signal, beforeSubmit);
+      let key: string | undefined;
       return query.run(async () => {
-        const key = credential();
+        key = credential();
+        if (authenticationFailure && Date.now() < authenticationFailure.until) throw authenticationFailure.error;
         const { body } = await query.json(options.fetchImpl ?? fetch, "https://ollama.com/api/balance", key, "balance", { parseJson: parseBalanceJson });
         if (credential() !== key) throw new Error("Ollama 账户凭据已变化");
         return balanceUsage(body, options.provider);
+      }).catch(error => {
+        if (key && createHash("sha256").update(key).digest("hex") === identity) invalidateAuthentication(error);
+        throw error;
       });
     },
     async cloudUsage(selection, signal, beforeSubmit) {
       const query = new AccountQuery("Ollama Cloud", signal, beforeSubmit);
       return query.run(async () => {
         if (!["24h", "7d", "30d"].includes(selection.range)) throw new Error("不支持的用量范围");
+        if (selection.cacheOnly && selection.refresh) throw new Error("缓存读取不能强制刷新");
         const key = credential();
         if (authenticationFailure && Date.now() < authenticationFailure.until) throw authenticationFailure.error;
+        if (selection.cacheOnly) {
+          const previous = reports.get(selection.range);
+          if (!previous || Date.now() - previous.observedAtMs >= 300_000) return undefined;
+          const age = (observed: number | null) => observed === null ? Infinity : Date.now() - observed;
+          // Balance, plan and FX are account-wide: a 7d/30d channel refresh must
+          // also update the 24h WebUI card without re-querying upstream usage.
+          const currentBalance = balanceCache.peek();
+          const currentPlan = planCache.peek();
+          const exchange = exchangeCaches.get(options.fetchImpl ?? fetch)?.peek(86_400_000);
+          const exchangeDay = exchange ? Date.parse(exchange.value.date) : NaN;
+          return { ...previous, query: selection,
+            stale: previous.stale || age(previous.observedAtMs) >= 30_000,
+            balanceUsd: currentBalance?.value.usage.balances[0]?.totalBalance ?? null,
+            allowanceUsd: currentBalance?.value.allowanceUsd ?? null,
+            includedBalanceUsd: currentBalance?.value.usage.balances[0]?.grantedBalance ?? null,
+            purchasedBalanceUsd: currentBalance?.value.usage.balances[0]?.toppedUpBalance ?? null,
+            balanceObservedAtMs: currentBalance?.observedAtMs ?? null,
+            balanceStale: currentBalance?.stale ?? true,
+            plan: currentPlan?.value ?? null,
+            planObservedAtMs: currentPlan?.observedAtMs ?? null,
+            planStale: currentPlan?.stale ?? true,
+            usdCny: exchange && !exchange.stale && exchangeDay <= Date.now()
+              && Date.now() - exchangeDay <= 7 * 86_400_000 ? exchange.value : null };
+        }
         let cache = usageCaches.get(selection.range);
         if (!cache) { cache = new OllamaAccountCache(usageRateLimit); usageCaches.set(selection.range, cache); }
         const usage = cache.read(async (sharedSignal, assertCurrent) => {
@@ -118,19 +159,17 @@ export function createOllamaCloudAccountAdapter(options: {
         ]);
         query.assertCurrent();
         if (credential() !== key) throw new Error("Ollama 账户凭据已变化");
+        if (authenticationFailure && Date.now() < authenticationFailure.until) throw authenticationFailure.error;
         for (const result of [usageResult, balanceResult, planResult]) {
           if (result.status === "rejected" && result.reason instanceof AccountQueryError && result.reason.diagnostic.reason === "authentication") {
-            authenticationFailure = { error: result.reason, until: Date.now() + 30_000 };
-            balanceCache.clear();
-            planCache.clear();
-            for (const cache of usageCaches.values()) cache.clear();
+            invalidateAuthentication(result.reason);
             throw result.reason;
           }
         }
         if (usageResult.status === "rejected") throw usageResult.reason;
         const currentBalance = balanceResult.status === "fulfilled" ? balanceResult.value : undefined;
         const currentPlan = planResult.status === "fulfilled" ? planResult.value : undefined;
-        return { kind: "cloud-usage", provider: options.provider, query: selection,
+        const report: CloudUsageReport = { kind: "cloud-usage", provider: options.provider, query: selection,
           ...usageResult.value.value, observedAtMs: usageResult.value.observedAtMs, stale: usageResult.value.stale,
           balanceUsd: currentBalance?.value.usage.balances[0]?.totalBalance ?? null,
           allowanceUsd: currentBalance?.value.allowanceUsd ?? null,
@@ -139,6 +178,8 @@ export function createOllamaCloudAccountAdapter(options: {
           plan: currentPlan?.value ?? null, planObservedAtMs: currentPlan?.observedAtMs ?? null, planStale: currentPlan?.stale ?? false,
           usdCny: exchangeResult.status === "fulfilled" ? exchangeResult.value.value : null,
           balanceObservedAtMs: currentBalance?.observedAtMs ?? null, balanceStale: currentBalance?.stale ?? false };
+        reports.set(selection.range, report);
+        return report;
       });
     },
   };

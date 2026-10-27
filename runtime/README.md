@@ -325,10 +325,12 @@ Delivery 只有缺失端点或发送前拒绝连接才允许离线回退，取�
 - `queue-events.mjs` / `queue-events.d.mts`：投递箱、Relay、账户快照与请求指标共用的有界私有变化通知流；独立订阅连接、首次失效通知、100 毫秒合并、心跳、取消与背压清理，只传变化类型。异步端点／ACL 准备和连接共用 20 秒期限，连接后改用独立 35 秒空闲期限；关闭等待准备任务结束，取消后不建立迟到连接。
 - `metrics-events.mjs` / `metrics-events.d.mts`：按配置文件路径派生相互独立的请求指标与账户快照通知端点，供 Gateway 写入器与 WebUI 订阅共用；不携带指标或账户数据。
 - `delivery-control.mjs` / `delivery-control.d.mts`：投递箱私有在线管理与变化通知 IPC（`watchDeliveryChanges`）；Unix 使用系统 `/tmp` 规范目录下的当前用户私有短目录，以投递目录规范路径的 SHA-256 确定端点，连接前校验父目录及 Socket 所有者和权限；Windows 继续使用私有描述文件及认证管道。最多 50 条修订绑定的重试/忽略请求，限制连接数、报文大小和等待时间；只输出受控结果，已发送请求的响应丢失不允许离线回退或自动重试。
-- `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供 v2 私有账户 IPC，支持 Provider 刷新及 OpenAI 重置券列表、预览、取消和消费；
+- `ollama-cloud-usage.d.mts`：账户云用量查询、报告与共享估算的唯一跨进程数据合同；Application 与 WebUI 类型接口复用同一声明，不把业务实现引入浏览器编译。
+- `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供 v3 私有账户 IPC，支持 Provider 刷新、Ollama Cloud 账户云用量读取及 OpenAI 重置券列表、预览、取消和消费；
   WebUI 提交精确 Provider ID、券 ID 或短期操作 ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
   公开错误文案按受控原因生成，不透传内部 message；调用方取消或连接结束时取消该等待，
   关闭主动取消刷新并释放 IPC 任务，不等待不响应取消的回调。
+  云用量仅接受精确 Provider、24h/7d/30d 范围及可选布尔 `refresh`、`cacheOnly`，禁止同时为 true。只读缓存不提交远端请求，缓存缺失返回 null，账户不存在仍报错；非空响应复核账户和范围。报告与共享估算结果只经 IPC 返回，不进入账户快照或数据库。
 - `gateway-thread-state.mjs` / `gateway-thread-state.d.mts`：为本机 WebUI 当前页提供只读 Thread 状态私有 IPC；
   最多 100 个 UUID、4 个连接及有界报文和总期限，返回官方状态与观测时间或受控未知原因；读取预算先于 IPC 硬期限结束，保留已完成项，仅将未完成项标记超时。
   客户端将指标中的非 UUID 标识逐项标记未知，不让一次状态补充阻断历史指标读取；取消与关闭撤销自有查询。

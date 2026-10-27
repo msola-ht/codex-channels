@@ -23,6 +23,7 @@ export type {
   DeepseekAccountBalance,
   DeepseekBalance,
   DeepseekBalanceResponse,
+  CloudUsageView,
   DailyUsageResponse,
   DailyUsageRow,
   HourlyUsageRow,

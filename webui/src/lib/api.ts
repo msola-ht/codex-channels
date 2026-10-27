@@ -12,6 +12,7 @@ import type {
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
   OfficialAccountSourcesResponse,
+  CloudUsageView,
   OverviewResponse,
   MetricsRangeQuery,
   MetricsQuery,
@@ -200,6 +201,20 @@ async function getJson<T>(path: string, signal?: AbortSignal, timeoutMs = 30_000
 // bounded ancillary reads and response delivery. Account refresh adds its 20s IPC.
 const metricsReadTimeoutMs = 60_000
 const accountRefreshTimeoutMs = 90_000
+
+export function fetchCloudUsage(
+  provider: string,
+  range: CloudUsageView["report"]["query"]["range"],
+  refresh: boolean,
+  signal?: AbortSignal,
+  cacheOnly = false,
+): Promise<CloudUsageView | null> {
+  if (cacheOnly) return requestJson(`${API_PREFIX}/management/accounts/cloud-usage?${new URLSearchParams({ provider, range })}`, {}, signal, accountRefreshTimeoutMs)
+  return requestJson(`${API_PREFIX}/management/accounts/cloud-usage`, {
+    method: "POST", body: JSON.stringify({ provider, range, refresh }),
+  }, signal, accountRefreshTimeoutMs)
+}
+
 const getMetricsJson = <T>(path: string, signal?: AbortSignal) => getJson<T>(path, signal, metricsReadTimeoutMs)
 
 export function fetchServerTime(signal?: AbortSignal): Promise<ServerTimeResponse> {

@@ -35,6 +35,7 @@ import { TableHint } from "@/components/metrics/data-table"
 import { StatCard } from "@/components/metrics/stat-card"
 import { AccountUpdateDescription, AccountRefreshButton, AccountRefreshFeedback, AccountSnapshotEmpty } from "./account-refresh-feedback"
 import { AccountSubscriptionNotice } from "./account-subscription-notice"
+import { OllamaCloudUsageCard } from "./ollama-cloud-usage-card"
 import type { AccountRefreshControl } from "@/lib/account-refresh-state"
 import { useTranslation } from "@/hooks/use-translation"
 import type { MessageKey, Translate } from "@/lib/i18n/messages"
@@ -307,12 +308,12 @@ export function DeepseekBalanceCards({
   ))}</>
 }
 
-export function OllamaCloudBalanceCards({ accounts, refreshControls }: {
+export function OllamaCloudBalanceCards({ accounts }: {
   accounts: DeepseekAccountBalance[]
-  refreshControls: Record<string, AccountRefreshControl>
 }) {
-  return <>{accounts.map(account => <DeepseekBalanceCard key={account.provider} {...account}
-    ollamaCloud refreshControl={refreshControls[account.provider]} />)}</>
+  return <>{accounts.map(account => <OllamaCloudUsageCard key={account.provider}
+    provider={account.provider}
+    title={<AccountName providerName="Ollama Cloud" account={account.account} displayName={account.displayName} />} />)}</>
 }
 
 function AccountName({ providerName, account, displayName }: { providerName: string; account: string | null; displayName: string }) {
@@ -324,15 +325,15 @@ function AccountName({ providerName, account, displayName }: { providerName: str
 }
 
 function DeepseekBalanceCard({
-  account, displayName, default: isDefault, observedAtMs, balances, refreshControl, ollamaCloud = false,
-}: DeepseekAccountBalance & { refreshControl: AccountRefreshControl | undefined; ollamaCloud?: boolean }) {
+  account, displayName, default: isDefault, observedAtMs, balances, refreshControl,
+}: DeepseekAccountBalance & { refreshControl: AccountRefreshControl | undefined }) {
   const { t } = useTranslation()
   const primary = balances[0]
-  const formatAmount = ollamaCloud ? (value: string, currency: string) => `${currency} ${value}` : formatDeepseekAmount
+  const formatAmount = formatDeepseekAmount
   return (
     <Card size="sm" aria-busy={refreshControl?.refreshing}>
       <CardHeader className="min-w-0">
-        <CardTitle className="flex flex-wrap items-center gap-2"><AccountName providerName={ollamaCloud ? "Ollama Cloud" : "DeepSeek"} account={account} displayName={displayName} /></CardTitle>
+        <CardTitle className="flex flex-wrap items-center gap-2"><AccountName providerName="DeepSeek" account={account} displayName={displayName} /></CardTitle>
         <AccountUpdateDescription observedAtMs={observedAtMs} isDefault={isDefault} refreshFailed={Boolean(refreshControl?.error)} />
         {refreshControl && !refreshControl.error && primary !== undefined
           ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
@@ -347,9 +348,9 @@ function DeepseekBalanceCard({
             <span className="text-xs text-muted-foreground">{t("overview.availableBalance")}</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            {t(ollamaCloud ? "overview.includedBalance" : "overview.grantedBalance", { amount: formatAmount(primary.grantedBalance, primary.currency) })}
+            {t("overview.grantedBalance", { amount: formatAmount(primary.grantedBalance, primary.currency) })}
             {" · "}
-            {t(ollamaCloud ? "overview.purchasedBalance" : "overview.toppedUpBalance", { amount: formatAmount(primary.toppedUpBalance, primary.currency) })}
+            {t("overview.toppedUpBalance", { amount: formatAmount(primary.toppedUpBalance, primary.currency) })}
           </p>
           {balances.length > 1 ? (
             <p className="text-xs text-muted-foreground">

@@ -1,4 +1,5 @@
 import type { GenerationTiming } from "../runtime/request-timing.mjs"
+export type { CloudUsageView } from "../runtime/ollama-cloud-usage.mjs"
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 import type { CustomModelCapabilityProbeResult } from "./custom-model-capability-probe.mjs"
 export type { ProviderWebSearchProbeInput as ManagementProviderWebSearchProbeInput, ProviderWebSearchProbeResult as ManagementProviderWebSearchProbeResult } from "./provider-web-search-probe.mjs"

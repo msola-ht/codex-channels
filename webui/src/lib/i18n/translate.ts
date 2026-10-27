@@ -30,6 +30,12 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  cloud_usage_invalid_response: "cloudUsage.invalidResponse",
+  cloud_usage_unavailable: "cloudUsage.unavailable",
+  cloud_usage_invalid_request: "cloudUsage.invalidRequest",
+  cloud_usage_provider_not_found: "cloudUsage.providerNotFound",
+  cloud_usage_refresh_failed: "cloudUsage.refreshFailed",
+  cloud_usage_gateway_unavailable: "cloudUsage.gatewayUnavailable",
   base_models_invalid_input: "baseModel.invalidInput",
   base_models_invalid_catalog: "baseModel.invalidCatalog",
   base_models_unavailable: "baseModel.unavailable",

@@ -194,7 +194,7 @@ export type ProviderAccountLimits =
 
 export interface ProviderAccountAdapter {
   provider: string;
-  cloudUsage?(query: CloudUsageQuery, signal?: AbortSignal, beforeSubmit?: () => void): Promise<CloudUsageReport>;
+  cloudUsage?(query: CloudUsageQuery, signal?: AbortSignal, beforeSubmit?: () => void): Promise<CloudUsageReport | undefined>;
   accountUsage(signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountUsage>;
   accountThreadUsage?(threadId: string, beforeSubmit?: () => void): Promise<AccountThreadUsage>;
   accountLimits?(signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountLimits>;
@@ -206,43 +206,8 @@ export interface ProviderAccountQueryPort {
   accountLimits(modelProvider: string, signal?: AbortSignal, beforeSubmit?: () => void): Promise<ProviderAccountLimits>;
 }
 
-/** Official cloud aggregates; kept outside persisted account snapshot schemas. */
-export interface CloudUsageQuery {
-  range: "24h" | "7d" | "30d";
-  refresh?: boolean;
-  expectedProvider?: string;
-}
-
-export interface CloudUsageMetrics {
-  requestCount: number;
-  usageUsd: string | null;
-  inputTokens: number | null;
-  cachedInputTokens: number | null;
-  outputTokens: number | null;
-}
-
-export interface CloudUsageReport {
-  kind: "cloud-usage";
-  provider: string;
-  query: CloudUsageQuery;
-  from: string;
-  until: string;
-  totals: CloudUsageMetrics;
-  groups: Array<CloudUsageMetrics & { model: string }>;
-  remainder: CloudUsageMetrics | null;
-  balanceUsd: string | null;
-  allowanceUsd: string | null;
-  includedBalanceUsd: string | null;
-  purchasedBalanceUsd: string | null;
-  plan: string | null;
-  planObservedAtMs: number | null;
-  planStale: boolean;
-  usdCny: { rate: number; date: string } | null;
-  observedAtMs: number;
-  balanceObservedAtMs: number | null;
-  stale: boolean;
-  balanceStale: boolean;
-}
+import type { CloudUsageQuery, CloudUsageReport } from "../../runtime/ollama-cloud-usage.mjs";
+export type { CloudUsageQuery, CloudUsageMetrics, CloudUsageReport } from "../../runtime/ollama-cloud-usage.mjs";
 
 export interface OfficialAccountSnapshotWriter {
   writeOfficialAccountSnapshot(snapshot: OfficialAccountSnapshot, signal?: AbortSignal): Promise<void>;

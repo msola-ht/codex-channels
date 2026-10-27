@@ -27,6 +27,7 @@ import { LanguageProvider } from "@/hooks/language-provider"
 import { useTranslation } from "@/hooks/use-translation"
 import { ServerTimeContext, useServerTime } from "@/hooks/use-server-time"
 import { useApi, useApiPolling } from "@/hooks/use-api"
+import { CloudUsageSessionContext, createCloudUsageSession } from "@/hooks/use-cloud-usage"
 import { ModelTrafficSettingsContext } from "@/hooks/use-model-traffic-settings"
 import { fetchModelTrafficSettings } from "@/lib/api"
 import type { Translate } from "@/lib/i18n/messages"
@@ -147,6 +148,8 @@ function ServerClock({ snapshot, syncFailed }: { snapshot: ServerClockSnapshot; 
 }
 
 function Layout() {
+  const [cloudUsageSession] = useState(createCloudUsageSession)
+  useEffect(() => () => cloudUsageSession.dispose(), [cloudUsageSession])
   const [accountRefreshAttempts] = useState<AccountRefreshAttempts>(() => new Map())
   const { pathname } = useLocation()
   const invalidThreadPath = pathname.startsWith("/threads/") && decodeThreadPath(pathname.split("/")[2] ?? "") === null
@@ -168,6 +171,7 @@ function Layout() {
 
   return (
     <ServerTimeContext.Provider value={time.data}>
+      <CloudUsageSessionContext.Provider value={cloudUsageSession}>
       <ModelTrafficSettingsContext.Provider value={settings}>
       <AppSidebarProvider>
         <AppSidebar />
@@ -229,6 +233,7 @@ function Layout() {
         </SidebarInset>
       </AppSidebarProvider>
       </ModelTrafficSettingsContext.Provider>
+      </CloudUsageSessionContext.Provider>
     </ServerTimeContext.Provider>
   )
 }

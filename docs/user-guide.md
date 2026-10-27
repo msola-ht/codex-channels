@@ -77,7 +77,7 @@ QQ 官方 `send_message` 菜单会把 `/help` 填入输入框，用户发送后�
 QQ 会自动补充菜单图标；新版读取和保存后核对接受该展示字段，重新进入时已有相同 Codex 项不会再次写入。
 另支持只读查询：`/usage`、`/limits`、`/diff`，以及 `/metrics [session]`、
 `/metrics <global|providers|models|errors> [24h|7d|30d|90d|all]`。统计范围与其他渠道一致；不带参数时查询当前会话。
-Ollama 账户的 `/usage [24h|7d|30d] [refresh]` 支持官方账户用量与费用查询；QQ、飞书、Telegram 提供时间切换和刷新按钮，渠道不提供模型分组查询；其他账户保持 `/usage`。字段、单价口径和缓存见 [Ollama Cloud](ollama-cloud.md)。
+Ollama 账户的 `/usage [24h|7d|30d] [refresh]` 支持官方账户用量与费用查询；QQ、飞书、Telegram 提供时间切换和刷新按钮，渠道不提供模型分组查询；其他账户保持 `/usage`。WebUI 概览的 Ollama Cloud 账户卡片使用相同官方数据、缓存与费用估算，紧凑显示额度、剩余、套餐和近 24 小时用量折合的单价／Token 估算，支持独立刷新。字段、单价口径和缓存见 [Ollama Cloud](ollama-cloud.md)。
 QQ 的 `/limits reset` 可查看和选择 OpenAI 重置券，完整账户与券预览送达后才能确认消费；结果未知时先核对账户，不自动重试。`/release` 和手输 `/release force` 均先展示诊断，可靠 PID 与进程启动身份可核对时才提供强制结束确认。它可能中断该进程的全部会话，确认后还会复核原 Thread、工作区和进程身份；身份不明时请在本机处理。Linux 最终检查与 numeric kill 之间没有原子 PID 句柄保证，仍有极窄 PID 复用窗口。两项源码已接线，未进行真实消费或进程终止验收。账户查询在已有会话订阅尚未恢复时明确拒绝，不猜默认 Provider。
 `/diff` 显示 Gateway 当前已取得的 Turn Diff，不扫描磁盘或补读重启前历史。普通手输查询沿原来信被动回复；带按钮的状态面板与 Ollama 用量面板使用主动回复，消息按钮回调查询也使用主动回复。
 超出各自完整分片预算时在发送前改为查看提示，不截断或转文件；普通查询不因超限切换发送模式，查询不会撤销当前任务回传资格。
