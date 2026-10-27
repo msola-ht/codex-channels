@@ -1,6 +1,7 @@
 import type { CloudUsageMetrics, CloudUsageQuery, CloudUsageReport } from "../application/index.js";
 import { formatResetTime, formatTimezoneLine } from "./account-format.js";
-import { formatCacheHitRate, formatRequestCount, formatTokenCount } from "./token-format.js";
+import { formatCacheHitRate, formatObservedTotal, formatRequestCount, formatTokenCount } from "./token-format.js";
+import { toStructuredMarkdownList } from "./markdown-list.js";
 
 const services = new Set(["web_search", "web_fetch"]);
 const units = (value: string): bigint => {
@@ -22,31 +23,44 @@ export function cloudUsageChoices(report: CloudUsageReport): Array<{ label: stri
   ];
 }
 
-/** Plain literal text; each platform escapes it at its presentation boundary. */
+/** Shared Markdown hierarchy; provider IDs use the validated account identifier alphabet. */
 export function formatCloudUsage(report: CloudUsageReport): string {
   const selected = report.totals;
   const candidates = report.groups.filter(group => !services.has(group.model));
   const price = report.remainder !== null ? null : tokenPrice(candidates);
   const hit = selected.inputTokens === null || selected.cachedInputTokens === null
     ? "未提供" : formatCacheHitRate(selected.inputTokens, selected.cachedInputTokens);
-  return [
+  const total = selected.inputTokens === null || selected.outputTokens === null
+    ? "未提供" : formatObservedTotal({ inputTokens: selected.inputTokens, outputTokens: selected.outputTokens });
+  const uncached = selected.inputTokens === null || selected.cachedInputTokens === null
+    ? null : selected.inputTokens - selected.cachedInputTokens;
+  return toStructuredMarkdownList([
     `Ollama Cloud · ${report.provider}`,
-    `${report.query.range === "24h" ? "近 24 小时" : report.query.range === "7d" ? "近 7 天" : "近 30 天"} · 账户用量`,
+    "",
+    "### 统计范围",
+    `范围：${report.query.range === "24h" ? "近 24 小时" : report.query.range === "7d" ? "近 7 天" : "近 30 天"}`,
     formatTimezoneLine(),
-    `统计区间：${date(Date.parse(report.from))} 至 ${date(Date.parse(report.until))}`,
+    `开始：${date(Date.parse(report.from))}`,
+    `截至：${date(Date.parse(report.until))}`,
     "",
+    "### 请求与 Token",
     `请求数量：${formatRequestCount(selected.requestCount)} 次`,
-    `输入 Token：${tokens(selected.inputTokens)}`,
-    `缓存 Token：${tokens(selected.cachedInputTokens)}`,
-    `缓存命中率：${hit}`,
-    `输出 Token：${tokens(selected.outputTokens)}`,
+    `- **Token**：${total}`,
+    ...(selected.cachedInputTokens === null ? [`  - 输入：${tokens(selected.inputTokens)}`] : []),
+    `  - 缓存：${tokens(selected.cachedInputTokens)}`,
+    `  - 无缓存：${tokens(uncached)}`,
+    `  - 缓存命中率：${hit}`,
+    `  - 输出：${tokens(selected.outputTokens)}`,
     "",
+    "### 费用",
     `已用费用：${selected.usageUsd === null ? "未提供" : `$${selected.usageUsd}`}`,
     `账户剩余费用：${report.balanceUsd === null ? "暂不可用" : `$${report.balanceUsd}`}`,
     `折合单价：${price === null ? "不适用／数据不足" : `$${price} / 1 亿 Token`}`,
+    "",
+    "### 数据更新",
     `用量更新：${date(report.observedAtMs)}${report.stale ? "（刷新失败，上次数据）" : ""}`,
     ...(report.balanceObservedAtMs === null ? [] : [`余额更新：${date(report.balanceObservedAtMs)}${report.balanceStale ? "（刷新失败，上次数据）" : ""}`]),
-  ].join("\n");
+  ].join("\n"));
 }
 
 function tokenPrice(groups: CloudUsageMetrics[]): string | null {

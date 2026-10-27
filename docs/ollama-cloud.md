@@ -93,7 +93,9 @@ App Server Provider Proxy 的固定/切换实例与独立 Model Relay 均按可�
 
 ## 余额、指标与 Relay
 
-渠道用量卡复用共享 Token、请求数与缓存命中率格式；统计起止和更新时间跟随 Gateway 时区，并标明时区。显示转换不改变官方 UTC 统计桶边界。公开 `/api/balance` 与 `/api/usage` 合同没有套餐名称或等级字段，不根据余额或包含额度推断 Pro、Max 等套餐。
+用量卡按“统计范围”“请求与 Token”“费用”“数据更新”分组；标题、分组、字段和 Token 子项逐级展示。四渠道复用相同结构，飞书使用 Markdown 卡片，Telegram 转为 HTML 列表，QQ 与微信保留结构化 Markdown。
+
+渠道用量卡复用共享 Token、请求数与缓存命中率格式；以“Token”（输入＋输出）为父项，缓存、无缓存（输入减缓存）、命中率与输出为子项。缓存缺失时保留输入字段，未知值不补零；官方未提供推理输出时不展示该项。统计起止和更新时间跟随 Gateway 时区，并标明时区。显示转换不改变官方 UTC 统计桶边界。公开 `/api/balance` 与 `/api/usage` 合同没有套餐名称或等级字段，不根据余额或包含额度推断 Pro、Max 等套餐。
 
 账户余额按准确账户读取 `/api/balance`，将 `included.balance_usd` 与 `purchased.balance_usd` 精确相加显示 USD 总余额；支持最多九位小数，缺失、负值、格式错误及旧百分比计划返回不可用，不伪造零。认证通过不代表余额字段可显示。不提供 `/limits`。
 

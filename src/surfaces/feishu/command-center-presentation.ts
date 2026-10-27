@@ -622,7 +622,7 @@ export function renderCommandCenterChoices(
     };
   }
   if (action === "usage" && result.kind === "usage" && result.result.kind === "cloud-usage") {
-    return { title: "Ollama Cloud 用量", description: formatCloudUsage(result.result),
+    return { title: "Ollama Cloud 用量", description: formatCloudUsage(result.result), descriptionFormat: "markdown",
       choices: cloudUsageChoices(result.result).map(choice => ({ ...choice, action: "usage" as const })) };
   }
   if (action === "autoreview" && result.kind === "auto-review") {

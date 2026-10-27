@@ -201,7 +201,7 @@ function formatModelStateLine(
 export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
 ): string {
-  if (result.result.kind === "cloud-usage") return toStructuredMarkdownList(formatCloudUsage(result.result));
+  if (result.result.kind === "cloud-usage") return formatCloudUsage(result.result);
   if (result.result.kind === "subscription-required") {
     return `${formatCodexProviderLabel(result.result.provider)} 无有效订阅，可能已到期或尚未开通。请检查订阅状态；续订后可重新执行 /usage 查询。`;
   }

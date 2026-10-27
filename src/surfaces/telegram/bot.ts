@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { cloudUsageChoices, formatCloudUsage } from "../cloud-usage-format.js";
-import { formatTelegramLiteralPanelChunks } from "./html-format.js";
+import { formatTelegramPanelChunks } from "./html-format.js";
 import { TextAttachmentStore, textAttachmentBody } from "../text-attachment-store.js";
 import { videoAttachmentBody } from "../video-attachment-store.js";
 import { SurfaceShutdown } from "../surface-shutdown.js";
@@ -1650,7 +1650,7 @@ export class TelegramSurface {
           if (index < 3) (keyboard.inline_keyboard[0] ??= []).push(button);
           else keyboard.inline_keyboard.push([button]);
         }
-        const text = formatTelegramLiteralPanelChunks("Ollama Cloud 用量", formatCloudUsage(result.result));
+        const text = formatTelegramPanelChunks(formatCloudUsage(result.result));
         if (text.length !== 1) throw new Error("Ollama 用量卡片超过消息上限");
         const messageId = this.usageEdits.get(context)?.messageId;
         const deliveredId = await this.apiExecutor.call({ chatId: inputTarget.conversationId,
