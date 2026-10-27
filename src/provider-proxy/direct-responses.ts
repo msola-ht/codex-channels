@@ -171,7 +171,7 @@ export async function consumeDirectResponses(incoming: IncomingMessage, call: Pi
         const outputs = call.adapter ? call.adapter.event(value) : [value];
         for (const converted of outputs) {
           const output = deliverable(converted, true);
-          await emit(output, terminal, output === value ? frame.raw : undefined);
+          await emit(output, terminal && converted.type === value.type, output === value ? frame.raw : undefined);
         }
         if (terminal) return;
       }

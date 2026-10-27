@@ -1,5 +1,6 @@
 import { ModelConversionError, toolSearchArguments } from "./validation.js";
 import { stripEncryptedMarker } from "./codex-private-items.js";
+import { createHash } from "node:crypto";
 
 type Json = Record<string, unknown>;
 type Identity = { name: string; namespace?: string; kind: "custom" | "function" | "tool_search" };
@@ -241,12 +242,13 @@ export class OllamaFreeformResponse {
   private readonly items = new Map<string, { index: number; signature: string; added: boolean; done: boolean }>();
   private readonly itemIndexes = new Map<number, string>();
   private readonly toolCalls = new Map<string, string>();
+  private readonly completedTools = new Map<string, string>();
   constructor(private readonly identities: ReadonlyMap<string, Identity>, private readonly allowed: ReadonlySet<string>, private readonly historyCalls: ReadonlySet<string>) {
     this.active = [...identities.values()].some(tool => tool.kind !== "function");
   }
 
   close(): void {
-    this.calls.clear(); this.callIds.clear(); this.indexes.clear(); this.items.clear(); this.itemIndexes.clear(); this.toolCalls.clear(); this.ordinaryItems.clear(); this.buffered = 0;
+    this.calls.clear(); this.callIds.clear(); this.indexes.clear(); this.items.clear(); this.itemIndexes.clear(); this.toolCalls.clear(); this.completedTools.clear(); this.ordinaryItems.clear(); this.buffered = 0;
   }
   private track(item: Json, index: unknown, phase: "added" | "done" | "terminal"): boolean {
     const id = text(item.id);
@@ -308,7 +310,7 @@ export class OllamaFreeformResponse {
     if (item.status != null && item.status !== "completed" && (!added || item.status !== "in_progress")) fail();
     const found = this.resolve(item); plain(item);
     if (item.type === "custom_tool_call" && found.kind !== "custom") fail();
-    if (found.kind === "function") return item;
+    if (found.kind === "function") { rawInput(item.arguments); return item; }
     const value = item.type === "function_call" ? item.arguments : item.input;
     const decode = found.kind === "tool_search" ? unpackSearch : item.type === "function_call" ? unpack : rawInput;
     let input: string;
@@ -374,12 +376,17 @@ export class OllamaFreeformResponse {
       const added = value.type === "response.output_item.added";
       const duplicate = this.track(value.item, value.output_index, added ? "added" : "done");
       const converted = this.item(value.item, value.output_index, added, true);
+      const tool = converted.type === "function_call" || converted.type === "custom_tool_call" || converted.type === "tool_search_call";
       if (converted.type === "custom_tool_call" || converted.type === "tool_search_call") {
         const call = this.call(value.item, value.output_index, false);
         if (added && call.done) fail();
-        if (!added) { inputEvents(call); if (call.done) return []; call.done = true; }
+        if (!added) call.done = true;
       }
-      if (!duplicate) events.push({ ...value, item: converted });
+      if (tool && !added) {
+        const id = text(converted.id), signature = this.toolSignature(converted), previous = this.completedTools.get(id);
+        if (previous !== undefined && previous !== signature) fail();
+        this.completedTools.set(id, signature);
+      } else if (!duplicate) events.push({ ...value, item: converted });
     } else if (["response.function_call_arguments.delta", "response.function_call_arguments.done",
       "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done"].includes(value.type)) {
       const custom = value.type.startsWith("response.custom_tool_call_input.");
@@ -398,7 +405,7 @@ export class OllamaFreeformResponse {
           const combined = call.arguments + value.delta, size = bytes(combined);
           this.buffered += size - bytes(call.arguments);
           if (size > argumentLimit || this.buffered > bufferLimit) fail(); call.arguments = combined;
-        } else { this.finish(call, custom ? value.input : value.arguments); inputEvents(call); }
+        } else this.finish(call, custom ? value.input : value.arguments);
       }
     } else if (["response.completed", "response.incomplete", "response.failed"].includes(value.type)) {
       const response = value.response as Json;
@@ -410,6 +417,14 @@ export class OllamaFreeformResponse {
         const id = text(item.id);
         if (seen.has(id)) fail(); seen.add(id);
         const converted = this.item(item, index, false, true);
+        if (converted.type === "function_call" || converted.type === "custom_tool_call" || converted.type === "tool_search_call") {
+          // Native Codex executes output_item.done immediately, before it sees
+          // the response terminal. Publish only after the entire tool set and
+          // terminal arguments agree and the response actually completed.
+          const completed = this.completedTools.get(id);
+          if (value.type !== "response.completed" || response.status !== "completed"
+            || completed === undefined || completed !== this.toolSignature(converted)) fail();
+        }
         if (converted.type === "custom_tool_call" || converted.type === "tool_search_call") {
           const call = this.call(item, index, false);
           if (!call.done) fail();
@@ -417,12 +432,23 @@ export class OllamaFreeformResponse {
         return converted;
       });
       for (const id of this.items.keys()) if (!seen.has(id)) fail();
+      for (const item of output) {
+        const id = text(item.id);
+        if (!this.completedTools.has(id)) continue;
+        const call = this.calls.get(id);
+        if (call) inputEvents(call);
+        events.push({ type: "response.output_item.done", output_index: this.items.get(id)!.index, item });
+      }
       events.push({ ...value, response: { ...response, output } }); this.terminal = true; this.buffered = 0;
     } else events.push(value);
     if (value.type === "response.output_item.added" && record(value.item) && value.item.type === "function_call" && this.resolve(value.item).kind === "function") {
       this.ordinaryItems.add(text(value.item.id)); if (this.ordinaryItems.size > callLimit) fail();
     }
     return events.map(event => ({ ...event, sequence_number: this.sequence++ }));
+  }
+  private toolSignature(item: Json): string {
+    // Retain a fixed-size fingerprint, not a second copy of buffered arguments.
+    return createHash("sha256").update(JSON.stringify([item.type, item.call_id, item.name, item.namespace, item.execution, item.arguments, item.input])).digest("hex");
   }
   private readonly ordinaryItems = new Set<string>();
 }

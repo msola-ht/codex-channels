@@ -83,7 +83,7 @@ export async function runProviderModelAdditionSetup(provider, {
     if (prompts.isCancel(model) || !model) return { action: "back", activation: "none" };
     const candidate = eligible.find(candidate => candidate.id === model);
     if (!candidate) throw new Error("无效的发现模型选择");
-    const reasoningEfforts = await prompts.multiselect({ message: `选择验证并启用的思考等级（必须包含默认 ${candidate.defaultReasoningEffort}）`,
+    const reasoningEfforts = await prompts.multiselect({ message: `选择本次诊断的思考等级（必须包含默认 ${candidate.defaultReasoningEffort}；保存时保留来源全部等级）`,
       initialValues: [candidate.defaultReasoningEffort], required: true, options: candidate.reasoningEfforts.map(value => ({ value, label: value })) });
     if (prompts.isCancel(reasoningEfforts)) return { action: "back", activation: "none" };
     if (!Array.isArray(reasoningEfforts) || !reasoningEfforts.includes(candidate.defaultReasoningEffort)) throw new Error("验证等级必须包含来源默认等级");

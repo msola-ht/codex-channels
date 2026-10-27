@@ -71,7 +71,7 @@ CLI/Setup 和 WebUI 正常添加只需读取列表、选择模型、预览保存
 
 已有目录更新前由现有事务保存目录、manifest 及相关设置备份；失败或回读不确定时保留恢复材料，按[目录恢复](provider-integration-guide.md#存储备份与恢复)处理，不重试未知写入。新增的 DS 绑定与 `supports_search_tool: true` 不被旧版 OLC 读取器接受，回退程序前须保留当前完整私有材料并核对更新前备份，恢复匹配的目录和 manifest；不得用旧备份覆盖更新后其他配置。没有自动迁移、自动回滚或删除旧目录。
 
-App Server Provider Proxy 的固定/切换实例与独立 Model Relay 均按可信 OLC 材料启用请求级适配。custom 声明与选择保留 Responses 形态；上游返回的普通 function 包装按本次声明身份解包为 custom 输入，显式历史重新包装一次。JSON 与 SSE 都验证工具身份、完整性和关联，未完成或冲突的可执行工具不交付。
+App Server Provider Proxy 的固定/切换实例与独立 Model Relay 均按可信 OLC 材料启用请求级适配。custom 声明与选择保留 Responses 形态；上游返回的普通 function 包装按本次声明身份解包为 custom 输入，显式历史重新包装一次。JSON 与 SSE 都验证工具身份、完整性和关联，未完成或冲突的可执行工具不交付。启用适配的 SSE 请求须等整轮 `completed` 与全部工具完成项一致后，才交付可触发客户端执行的完成事件；文本仍流式显示，失败终态、断流或参数冲突不会提前交付其中部分工具。
 
 支持的能力声明是 `apply_patch_tool_type: "freeform"` 或 `null`，客户端工具搜索由布尔 `supports_search_tool` 控制。`execution: "client"` 的 `tool_search` 映射为普通函数，返回还原为客户端搜索调用；Codex 返回的搜索结果中所声明的工具会加入后续请求，已加载工具移除 `defer_loading` 标记。支持 JSON/SSE、命名空间、强制工具选择及完整历史往返；拒绝服务端工具搜索、未加载的延迟工具、孤立或冲突的历史及加密 custom 历史。适配不执行搜索到的工具，权限仍由原生 Codex 控制。旧目录必须显式更新才启用。本地原生 `apply_patch` 与客户端工具搜索的合成上游观察不能保证真实云端每个模型的行为。
 
