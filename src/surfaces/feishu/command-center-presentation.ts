@@ -372,7 +372,12 @@ export function renderCommandCenterChoices(
       title: result.view.confirmation ? "确认 Hook 配置操作" : "Hooks",
       description: formatConversationHooks(result.view),
       descriptionFormat: "plain_text",
-      choices: hookCommandChoices(result.view).map(choice => ({ ...choice, action: "hooks" })),
+      choices: hookCommandChoices(result.view).map(choice => ({
+        ...choice,
+        action: "hooks",
+        ...(result.view.confirmation && choice.input === `confirm ${result.view.confirmation.token}`
+          ? { style: "primary" as const } : {}),
+      })),
     };
   }
   if (action === "limits" && result.kind === "limits" && result.result.kind === "rate-limits") {
@@ -385,13 +390,14 @@ export function renderCommandCenterChoices(
       title: "确认使用重置券", description: stripMarkdownHeading(formatConversationResetCredits(result, "buttons")), descriptionFormat: "markdown",
       choices: (["confirm", "cancel"] as const).map(operation => ({
         label: operation === "confirm" ? "确认使用" : "取消", action: "limits", input: `reset ${operation} ${value.token}`,
+        ...(operation === "confirm" ? { style: "primary" as const } : {}),
         acceptedState: { title: "重置券请求已提交", description: "原按钮已失效，执行结果见后续消息。", template: "grey" },
       })),
     };
     if (value.type === "list") return {
       title: "选择重置券", description: stripMarkdownHeading(formatConversationResetCredits(result, "buttons")), descriptionFormat: "markdown",
       choices: [
-        ...value.credits.map((credit, index) => ({ label: `${index + 1}. ${credit.title ?? "用量重置券"}`.slice(0, 80), action: "limits" as const, input: `reset use ${credit.id}` })),
+        ...value.credits.map((credit, index) => ({ label: choiceButtonLabel(`${index + 1}. ${formatModelSettingLiteral(credit.title ?? "用量重置券")}`), action: "limits" as const, input: `reset use ${credit.id}` })),
         ...(value.page > 1 ? [{ label: "上一页", action: "limits" as const, input: `reset ${value.page - 1}` }] : []),
         ...(value.page < value.pageCount ? [{ label: "下一页", action: "limits" as const, input: `reset ${value.page + 1}` }] : []),
         { label: "刷新", action: "limits", input: `reset ${value.page}` },
@@ -500,6 +506,7 @@ export function renderCommandCenterChoices(
           label: "确认",
           action: "schedule",
           input: `confirm ${result.preview.token}`,
+          style: result.preview.action === "delete" ? "danger" : "primary",
           acceptedState: {
             title: `已确认${actionLabel}计划任务`,
             description: "请求已提交，原按钮已失效；执行结果见后续消息。",
@@ -507,12 +514,12 @@ export function renderCommandCenterChoices(
           },
         },
         {
-          label: "取消",
+          label: "返回列表",
           action: "schedule",
           input: "list 1",
           acceptedState: {
-            title: `已取消${actionLabel}计划任务`,
-            description: `未${actionLabel}计划任务，原按钮已失效。`,
+            title: "已请求返回计划任务列表",
+            description: "未提交创建或删除；此卡片按钮已失效，原确认码在有效期内仍可通过命令使用。",
             template: "grey",
           },
         },

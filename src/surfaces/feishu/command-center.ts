@@ -80,6 +80,7 @@ export interface FeishuCommandCenterChoices {
     label: string;
     action: FeishuCommandCenterAction;
     input: string;
+    style?: "primary" | "danger";
     acceptedState?: FeishuCommandAcceptedState;
     modelSelection?: ModelSelectionRequest;
   }>;
@@ -637,7 +638,7 @@ function renderFeishuCommandChoicesCard(
         row.map((choice) => [
           truncateChoiceLabel(choice.label),
           choice.action,
-          "default",
+          choice.style ?? "default",
           choice.input,
         ]),
       )
@@ -652,11 +653,11 @@ function cardKitChoiceRows(
   token: string,
   choices: ReadonlyArray<FeishuCommandCenterChoices["choices"][number]>,
 ): Array<Record<string, unknown>> {
-  return chunkChoices(choices, 3).map((row, rowIndex) =>
-    feishuCardColumnSetRow(row.map((choice, columnIndex) =>
+  return chunkChoices(choices, 3).map((row) =>
+    feishuCardColumnSetRow(row.map((choice) =>
       feishuCardButton(
         truncateChoiceLabel(choice.label),
-        rowIndex === 0 && columnIndex === 0 ? "primary" : "default",
+        choice.style ?? "default",
         commandValue(token, choice.action, choice.input),
       )
     ))
@@ -835,7 +836,7 @@ function actionRow(
   actions: ReadonlyArray<readonly [
     label: string,
     action: FeishuCommandCenterAction,
-    type: "primary" | "default",
+    type: "primary" | "default" | "danger",
     input?: string,
   ]>,
 ): Record<string, unknown> {
@@ -875,9 +876,13 @@ function chunkChoices<T>(
 
 function truncateChoiceLabel(value: string): string {
   const normalized = value.replace(/\s+/gu, " ").trim();
-  return normalized.length > 32
-    ? `${normalized.slice(0, 31)}…`
-    : normalized;
+  if (normalized.length <= 32) return normalized;
+  let prefix = "";
+  for (const character of normalized) {
+    if (prefix.length + character.length > 31) break;
+    prefix += character;
+  }
+  return `${prefix}…`;
 }
 
 function isCommandCenterAction(

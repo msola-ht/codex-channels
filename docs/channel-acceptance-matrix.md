@@ -99,8 +99,8 @@ Plugin 行沿用既有平台验收记录，不表示移除 Gateway 功能开关�
 5. Telegram `imageGeneration`、限流/断线集中复验及普通超长正文消息顺序确认；长代码和超过 16,000 字符普通正文的文件分支已通过，跨 Turn 后续顺序目前仅在长代码轮次确认。
 6. 渠道图片发送（`codexc channel send-image`）在飞书、微信、Telegram 的实机发送、
    失败归档与微信回复上下文缺失时的失败边界复验。
-7. 飞书命令中心一次性输入表单（Goal、会话搜索/重命名、Review、Plugin 任务等）的“确认”
-   实机复验，覆盖带/不带按钮 value 的 `form_submit` 回调。
+7. 飞书命令中心一次性输入表单（会话搜索/重命名、Review、Plugin 任务等）的“确认”
+   实机复验，覆盖带/不带按钮 value 的 `form_submit` 回调。菜单收尾另验收文字清单、返回导航、模型／工作区分页、当前状态与按钮样式，以及过期／撤权后的点击；Queue／Goal 菜单隐藏，原命令保留。部署与证据范围见[菜单整理记录](channel-menu-consolidation.md)。
 8. Telegram 与微信使用 OpenAI ChatGPT 默认后端实机验证图片自动引用，分别确认首次 `file_id` 和
    后续完整历史引用或 `previous_response_id` 增量接续均不重复 Base64。
 9. 三渠道 Auto-review 设置、审查状态和完成计数，核对当前会话与工作区默认的作用范围、旧按钮失效、

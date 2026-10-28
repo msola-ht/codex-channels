@@ -174,7 +174,7 @@ function renderUserInputCard(
         name: "codexc_user_input",
         elements: formElements,
       },
-      actionButton("取消", "danger", interactionToken, "cancel"),
+      actionButton("取消", "default", interactionToken, "cancel"),
     ],
   );
 }
@@ -196,7 +196,7 @@ function renderFormElicitationCard(
           formSubmitButton("提交表单", interactionToken),
         ],
       },
-      actionButton("取消", "danger", interactionToken, "cancel"),
+      actionButton("取消", "default", interactionToken, "cancel"),
     ],
   );
 }
@@ -260,15 +260,15 @@ function renderUrlElicitationCard(
       ...buttonRows([
           {
             tag: "button",
-            type: "primary",
+            type: "default",
             text: {
               tag: "plain_text",
               content: "打开链接",
             },
             url,
           },
-          actionButton("完成", "default", interactionToken, "complete"),
-          actionButton("取消", "danger", interactionToken, "cancel"),
+          actionButton("完成", "primary", interactionToken, "complete"),
+          actionButton("取消", "default", interactionToken, "cancel"),
       ]),
     ],
   );
